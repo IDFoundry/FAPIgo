@@ -1,0 +1,803 @@
+package server_test
+
+import (
+	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	fapi "github.com/osanderson/go-fapi"
+	"github.com/osanderson/go-fapi/internal/clientassertion"
+	"github.com/osanderson/go-fapi/internal/requestobject"
+	"github.com/osanderson/go-fapi/keys"
+	"github.com/osanderson/go-fapi/server"
+	"github.com/osanderson/go-fapi/storage"
+)
+
+// --- fakes -----------------------------------------------------------
+
+type fakeClientRepository struct {
+	clients map[fapi.ClientID]storage.RegisteredClient
+}
+
+func (f *fakeClientRepository) ResolveClient(_ context.Context, id fapi.ClientID) (storage.RegisteredClient, error) {
+	c, ok := f.clients[id]
+	if !ok {
+		return storage.RegisteredClient{}, fmt.Errorf("no such client %q", id)
+	}
+	return c, nil
+}
+
+type fakeTransactionStore struct {
+	mu             sync.Mutex
+	records        []storage.NewPARRecord
+	byReference    map[string]storage.NewPARRecord
+	referenceUsed  map[string]bool
+	byHandle       map[string]storage.CompletedInteraction
+	handleConsumed map[string]bool
+}
+
+func (f *fakeTransactionStore) CreatePAR(_ context.Context, record storage.NewPARRecord) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.records = append(f.records, record)
+	if f.byReference == nil {
+		f.byReference = make(map[string]storage.NewPARRecord)
+	}
+	f.byReference[record.Reference] = record
+	return nil
+}
+
+func (f *fakeTransactionStore) BeginAuthorization(_ context.Context, txn storage.BeginAuthorizationTransaction) (storage.PushedAuthorizationRequest, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.referenceUsed == nil {
+		f.referenceUsed = make(map[string]bool)
+	}
+	if f.referenceUsed[txn.Reference] {
+		return storage.PushedAuthorizationRequest{}, fmt.Errorf("request_uri already consumed")
+	}
+	record, ok := f.byReference[txn.Reference]
+	if !ok {
+		return storage.PushedAuthorizationRequest{}, fmt.Errorf("no such request_uri")
+	}
+	f.referenceUsed[txn.Reference] = true
+
+	if f.byHandle == nil {
+		f.byHandle = make(map[string]storage.CompletedInteraction)
+	}
+	f.byHandle[txn.Handle] = storage.CompletedInteraction{
+		ClientID:   record.ClientID,
+		Parameters: record.Parameters,
+		ExpiresAt:  txn.HandleExpiresAt,
+	}
+
+	return storage.PushedAuthorizationRequest{
+		ClientID:   record.ClientID,
+		Parameters: record.Parameters,
+		ExpiresAt:  record.ExpiresAt,
+	}, nil
+}
+
+func (f *fakeTransactionStore) CompleteAuthorization(_ context.Context, txn storage.CompleteAuthorizationTransaction) (storage.CompletedInteraction, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.handleConsumed == nil {
+		f.handleConsumed = make(map[string]bool)
+	}
+	if f.handleConsumed[txn.Handle] {
+		return storage.CompletedInteraction{}, fmt.Errorf("interaction handle already consumed")
+	}
+	interaction, ok := f.byHandle[txn.Handle]
+	if !ok {
+		return storage.CompletedInteraction{}, fmt.Errorf("no such interaction handle")
+	}
+	f.handleConsumed[txn.Handle] = true
+	return interaction, nil
+}
+
+type fakeReplayStore struct {
+	mu   sync.Mutex
+	seen map[[32]byte]bool
+}
+
+func (f *fakeReplayStore) UseOnce(_ context.Context, use storage.ReplayUse) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.seen == nil {
+		f.seen = make(map[[32]byte]bool)
+	}
+	key := [32]byte{}
+	copy(key[:], use.Digest[:])
+	if f.seen[key] {
+		return fmt.Errorf("replay detected")
+	}
+	f.seen[key] = true
+	return nil
+}
+
+type fakeClientKeySource struct {
+	keysByClient map[fapi.ClientID][]keys.VerificationKey
+}
+
+func (f *fakeClientKeySource) ResolveVerificationKeys(_ context.Context, req keys.ClientKeyRequest) (keys.VerificationKeySet, error) {
+	return keys.VerificationKeySet{Keys: f.keysByClient[req.ClientID]}, nil
+}
+
+type fakeGrantStore struct {
+	mu              sync.Mutex
+	codes           []storage.NewAuthorizationCode
+	byHash          map[[32]byte]storage.NewAuthorizationCode
+	redeemed        map[[32]byte]bool
+	refreshTokens   []storage.NewRefreshToken
+	refreshByHash   map[[32]byte]storage.NewRefreshToken
+	refreshRedeemed map[[32]byte]bool
+}
+
+func (f *fakeGrantStore) CreateAuthorizationCode(_ context.Context, code storage.NewAuthorizationCode) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.codes = append(f.codes, code)
+	if f.byHash == nil {
+		f.byHash = make(map[[32]byte]storage.NewAuthorizationCode)
+	}
+	f.byHash[code.CodeHash] = code
+	return nil
+}
+
+func (f *fakeGrantStore) RedeemAuthorizationCode(_ context.Context, redemption storage.AuthorizationCodeRedemption) (storage.RedeemedAuthorizationCode, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.redeemed == nil {
+		f.redeemed = make(map[[32]byte]bool)
+	}
+	if f.redeemed[redemption.CodeHash] {
+		return storage.RedeemedAuthorizationCode{}, fmt.Errorf("code already redeemed")
+	}
+	code, ok := f.byHash[redemption.CodeHash]
+	if !ok {
+		return storage.RedeemedAuthorizationCode{}, fmt.Errorf("no such code")
+	}
+	f.redeemed[redemption.CodeHash] = true
+	return storage.RedeemedAuthorizationCode{
+		ClientID:            code.ClientID,
+		RedirectURI:         code.RedirectURI,
+		CodeChallenge:       code.CodeChallenge,
+		CodeChallengeMethod: code.CodeChallengeMethod,
+		Subject:             code.Subject,
+		Scope:               code.Scope,
+		Nonce:               code.Nonce,
+		AuthTime:            code.AuthTime,
+		ACR:                 code.ACR,
+		AMR:                 code.AMR,
+		ExpiresAt:           code.ExpiresAt,
+	}, nil
+}
+
+func (f *fakeGrantStore) all() []storage.NewAuthorizationCode {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]storage.NewAuthorizationCode, len(f.codes))
+	copy(out, f.codes)
+	return out
+}
+
+func (f *fakeGrantStore) CreateRefreshToken(_ context.Context, tok storage.NewRefreshToken) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.refreshTokens = append(f.refreshTokens, tok)
+	if f.refreshByHash == nil {
+		f.refreshByHash = make(map[[32]byte]storage.NewRefreshToken)
+	}
+	f.refreshByHash[tok.TokenHash] = tok
+	return nil
+}
+
+func (f *fakeGrantStore) RedeemRefreshToken(_ context.Context, redemption storage.RefreshTokenRedemption) (storage.RedeemedRefreshToken, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.refreshRedeemed == nil {
+		f.refreshRedeemed = make(map[[32]byte]bool)
+	}
+	if f.refreshRedeemed[redemption.TokenHash] {
+		return storage.RedeemedRefreshToken{}, fmt.Errorf("refresh token already redeemed")
+	}
+	tok, ok := f.refreshByHash[redemption.TokenHash]
+	if !ok {
+		return storage.RedeemedRefreshToken{}, fmt.Errorf("no such refresh token")
+	}
+	f.refreshRedeemed[redemption.TokenHash] = true
+	return storage.RedeemedRefreshToken{
+		ClientID:   tok.ClientID,
+		Subject:    tok.Subject,
+		Scope:      tok.Scope,
+		Thumbprint: tok.Thumbprint,
+		AuthTime:   tok.AuthTime,
+		ACR:        tok.ACR,
+		AMR:        tok.AMR,
+		ExpiresAt:  tok.ExpiresAt,
+	}, nil
+}
+
+func (f *fakeGrantStore) allRefreshTokens() []storage.NewRefreshToken {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]storage.NewRefreshToken, len(f.refreshTokens))
+	copy(out, f.refreshTokens)
+	return out
+}
+
+// fakeKeyManager signs with a fixed ECDSA P-256 key using the same
+// fixed-width R||S encoding internal/jose produces, so a signature it
+// returns verifies correctly against internal/jarm.Verify in tests.
+type fakeKeyManager struct {
+	key   *ecdsa.PrivateKey
+	keyID string
+}
+
+func (f *fakeKeyManager) Sign(_ context.Context, req keys.SigningRequest) (keys.Signature, error) {
+	// keys.Signature.Value must match crypto.Signer's contract for the
+	// key type — ASN.1 DER for ECDSA, exactly what *ecdsa.PrivateKey.Sign
+	// would produce — not the fixed-width R||S JWS uses on the wire.
+	der, err := ecdsa.SignASN1(rand.Reader, f.key, req.Digest)
+	if err != nil {
+		return keys.Signature{}, err
+	}
+	return keys.Signature{KeyID: f.keyID, Value: der}, nil
+}
+
+func (f *fakeKeyManager) PublicKey(_ context.Context, _ keys.SigningPurpose, _ fapi.SignatureAlgorithm) (keys.PublicKeyInfo, error) {
+	return keys.PublicKeyInfo{KeyID: f.keyID, PublicKey: &f.key.PublicKey}, nil
+}
+
+type fakeAuditSink struct {
+	mu     sync.Mutex
+	events []server.AuditEvent
+}
+
+func (f *fakeAuditSink) Record(_ context.Context, event server.AuditEvent) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.events = append(f.events, event)
+	return nil
+}
+
+func (f *fakeAuditSink) all() []server.AuditEvent {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]server.AuditEvent, len(f.events))
+	copy(out, f.events)
+	return out
+}
+
+type fixedClock struct{ now time.Time }
+
+func (c fixedClock) Now() time.Time { return c.now }
+
+// --- test harness ------------------------------------------------------
+
+const testClientID = fapi.ClientID("client-123")
+const testIssuer = "https://as.example"
+const testRedirectURI = "https://rp.example/callback"
+const testTokenEndpoint = "https://as.example/token"
+const testAuthorizationEndpoint = "https://as.example/authorize"
+const testPAREndpoint = "https://as.example/par"
+const testJWKSEndpoint = "https://as.example/jwks"
+
+func testEndpoints(t *testing.T) server.Endpoints {
+	t.Helper()
+	authorization, err := fapi.ParseEndpointURL(testAuthorizationEndpoint)
+	if err != nil {
+		t.Fatalf("ParseEndpointURL: %v", err)
+	}
+	token, err := fapi.ParseEndpointURL(testTokenEndpoint)
+	if err != nil {
+		t.Fatalf("ParseEndpointURL: %v", err)
+	}
+	par, err := fapi.ParseEndpointURL(testPAREndpoint)
+	if err != nil {
+		t.Fatalf("ParseEndpointURL: %v", err)
+	}
+	jwks, err := fapi.ParseEndpointURL(testJWKSEndpoint)
+	if err != nil {
+		t.Fatalf("ParseEndpointURL: %v", err)
+	}
+	return server.Endpoints{
+		Authorization:              authorization,
+		Token:                      token,
+		PushedAuthorizationRequest: par,
+		JWKS:                       jwks,
+	}
+}
+
+func generateKey(t *testing.T) *ecdsa.PrivateKey {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	return key
+}
+
+type harness struct {
+	server       *server.Server
+	key          *ecdsa.PrivateKey
+	serverKey    *ecdsa.PrivateKey
+	transactions *fakeTransactionStore
+	grants       *fakeGrantStore
+	audit        *fakeAuditSink
+	now          time.Time
+}
+
+func newHarness(t *testing.T, profile server.Profile, allowRequestObjects bool) harness {
+	t.Helper()
+	now := time.Now()
+	key := generateKey(t)
+	serverKey := generateKey(t)
+
+	reqObjAlg := fapi.ES256
+	if !allowRequestObjects {
+		reqObjAlg = 0
+	}
+	client, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
+		ID:                       testClientID,
+		RedirectURIs:             []fapi.RegisteredRedirectURI{testRedirectURI},
+		ClientAssertionAlgorithm: fapi.ES256,
+		RequestObjectAlgorithm:   reqObjAlg,
+		AllowedScopes:            []string{"openid", "accounts", "offline_access"},
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+
+	issuer, err := fapi.ParseIssuerURL(testIssuer)
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+
+	transactions := &fakeTransactionStore{}
+	grants := &fakeGrantStore{}
+	audit := &fakeAuditSink{}
+
+	cfg := server.Config{
+		Issuer:    issuer,
+		Endpoints: testEndpoints(t),
+		Profile:   profile,
+		Algorithms: server.AlgorithmPolicy{
+			ClientAssertion: server.AlgorithmSet{fapi.ES256},
+			RequestObject:   server.AlgorithmSet{fapi.ES256},
+			JARM:            fapi.ES256,
+			AccessToken:     fapi.ES256,
+			IDToken:         fapi.ES256,
+		},
+		Limits: server.Limits{
+			PushedRequestLifetime:      90 * time.Second,
+			MaxClientAssertionLifetime: time.Minute,
+			MaxRequestObjectLifetime:   time.Minute,
+			InteractionLifetime:        5 * time.Minute,
+			AuthorizationCodeLifetime:  time.Minute,
+			JARMResponseLifetime:       time.Minute,
+			AccessTokenLifetime:        5 * time.Minute,
+			IDTokenLifetime:            5 * time.Minute,
+			RefreshTokenLifetime:       5 * time.Minute,
+			MaxDPoPProofAge:            time.Minute,
+			MaxClockSkew:               5 * time.Second,
+		},
+		Assurance: server.AssuranceDevelopment,
+	}
+	deps := server.Dependencies{
+		Clients:      &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
+		Transactions: transactions,
+		Grants:       grants,
+		Replay:       &fakeReplayStore{},
+		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
+			testClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
+		}},
+		Keys:   &fakeKeyManager{key: serverKey, keyID: "as-key-1"},
+		Audit:  audit,
+		Clock:  fixedClock{now: now},
+		Random: rand.Reader,
+	}
+
+	srv, err := server.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+	return harness{server: srv, key: key, serverKey: serverKey, transactions: transactions, grants: grants, audit: audit, now: now}
+}
+
+func (h harness) clientAssertion(t *testing.T) string {
+	t.Helper()
+	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
+		Signer: h.key, Algorithm: fapi.ES256,
+		ClientID: testClientID.String(), Audience: testIssuer,
+		Now: h.now, Lifetime: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssertion: %v", err)
+	}
+	return assertion
+}
+
+func jsonRaw(t *testing.T, v any) json.RawMessage {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return b
+}
+
+func standardAuthParams(t *testing.T) map[string]json.RawMessage {
+	t.Helper()
+	return map[string]json.RawMessage{
+		"response_type":         jsonRaw(t, "code"),
+		"redirect_uri":          jsonRaw(t, testRedirectURI),
+		"scope":                 jsonRaw(t, "openid accounts"),
+		"code_challenge":        jsonRaw(t, "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"),
+		"code_challenge_method": jsonRaw(t, "S256"),
+		"state":                 jsonRaw(t, "opaque-state"),
+	}
+}
+
+func (h harness) requestObject(t *testing.T, params map[string]json.RawMessage) string {
+	t.Helper()
+	obj, err := requestobject.Create(requestobject.CreateParams{
+		Signer: h.key, Algorithm: fapi.ES256,
+		ClientID: testClientID.String(), Audience: testIssuer,
+		Now: h.now, Lifetime: 30 * time.Second, Parameters: params,
+	})
+	if err != nil {
+		t.Fatalf("requestobject.Create: %v", err)
+	}
+	return obj
+}
+
+func formParam(name, value string) server.FormParameter {
+	return server.FormParameter{Name: name, Value: value}
+}
+
+func plainFormParameters(t *testing.T, assertion string, extra map[string]string) []server.FormParameter {
+	t.Helper()
+	params := []server.FormParameter{
+		formParam("client_assertion", assertion),
+		formParam("client_assertion_type", clientassertion.AssertionType),
+		formParam("response_type", "code"),
+		formParam("redirect_uri", testRedirectURI),
+		formParam("scope", "openid accounts"),
+		formParam("code_challenge", "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"),
+		formParam("code_challenge_method", "S256"),
+		formParam("state", "opaque-state"),
+	}
+	for k, v := range extra {
+		params = append(params, formParam(k, v))
+	}
+	return params
+}
+
+func serverErrorCode(t *testing.T, err error) server.ErrorCode {
+	t.Helper()
+	var srvErr *server.Error
+	if !errors.As(err, &srvErr) {
+		t.Fatalf("error %v is not a *server.Error", err)
+	}
+	return srvErr.Code()
+}
+
+// --- tests -------------------------------------------------------------
+
+func TestPushAuthorizationRequestJARSuccess(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurityWithMessageSigning, true)
+	requestObj := h.requestObject(t, standardAuthParams(t))
+
+	result, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: []server.FormParameter{
+			formParam("client_assertion", h.clientAssertion(t)),
+			formParam("client_assertion_type", clientassertion.AssertionType),
+			formParam("request", requestObj),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("PushAuthorizationRequest: %v", err)
+	}
+	if !strings.HasPrefix(result.RequestURI.String(), "urn:ietf:params:oauth:request_uri:") {
+		t.Fatalf("RequestURI = %q, want urn:ietf:params:oauth:request_uri: prefix", result.RequestURI.String())
+	}
+	if result.ExpiresIn != 90*time.Second {
+		t.Fatalf("ExpiresIn = %v, want 90s", result.ExpiresIn)
+	}
+
+	records := h.transactions.records
+	if len(records) != 1 {
+		t.Fatalf("len(records) = %d, want 1", len(records))
+	}
+	if records[0].ClientID != testClientID {
+		t.Fatalf("records[0].ClientID = %q, want %q", records[0].ClientID, testClientID)
+	}
+	var scope string
+	if err := json.Unmarshal(records[0].Parameters["scope"], &scope); err != nil || scope != "openid accounts" {
+		t.Fatalf("records[0].Parameters[scope] = %q, want %q", scope, "openid accounts")
+	}
+
+	events := h.audit.all()
+	if len(events) != 1 || events[0].Outcome != server.AuditOutcomeSuccess {
+		t.Fatalf("audit events = %+v, want one success event", events)
+	}
+}
+
+func TestPushAuthorizationRequestPlainSuccessUnderSecurityProfile(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+
+	result, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: plainFormParameters(t, h.clientAssertion(t), nil)},
+	})
+	if err != nil {
+		t.Fatalf("PushAuthorizationRequest: %v", err)
+	}
+	if result.RequestURI.String() == "" {
+		t.Fatalf("RequestURI is empty")
+	}
+	if len(h.transactions.records) != 1 {
+		t.Fatalf("len(records) = %d, want 1", len(h.transactions.records))
+	}
+}
+
+func TestPushAuthorizationRequestPlainRejectedUnderMessageSigningProfile(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurityWithMessageSigning, true)
+
+	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: plainFormParameters(t, h.clientAssertion(t), nil)},
+	})
+	if err == nil {
+		t.Fatalf("PushAuthorizationRequest(plain, message-signing profile) = nil error, want error")
+	}
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequest)
+	}
+}
+
+func TestPushAuthorizationRequestMissingClientAssertion(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	params := plainFormParameters(t, "unused", nil)
+	// Remove client_assertion.
+	filtered := params[:0]
+	for _, p := range params {
+		if p.Name != "client_assertion" {
+			filtered = append(filtered, p)
+		}
+	}
+
+	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: filtered},
+	})
+	if err == nil {
+		t.Fatalf("PushAuthorizationRequest(no client_assertion) = nil error, want error")
+	}
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidClient)
+	}
+}
+
+func TestPushAuthorizationRequestWrongAssertionType(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	params := plainFormParameters(t, h.clientAssertion(t), nil)
+	for i := range params {
+		if params[i].Name == "client_assertion_type" {
+			params[i].Value = "urn:ietf:params:oauth:client-assertion-type:saml2-bearer"
+		}
+	}
+
+	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: params},
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidClient)
+	}
+}
+
+func TestPushAuthorizationRequestUnknownClient(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	otherKey := generateKey(t)
+	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
+		Signer: otherKey, Algorithm: fapi.ES256,
+		ClientID: "unknown-client", Audience: testIssuer, Now: h.now, Lifetime: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssertion: %v", err)
+	}
+
+	_, err = h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: plainFormParameters(t, assertion, nil)},
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidClient)
+	}
+}
+
+func TestPushAuthorizationRequestInvalidRedirectURI(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	params := plainFormParameters(t, h.clientAssertion(t), nil)
+	for i := range params {
+		if params[i].Name == "redirect_uri" {
+			params[i].Value = "https://attacker.example/callback"
+		}
+	}
+
+	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: params},
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequest)
+	}
+}
+
+func TestPushAuthorizationRequestResponseTypeMustBeCode(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	params := plainFormParameters(t, h.clientAssertion(t), nil)
+	for i := range params {
+		if params[i].Name == "response_type" {
+			params[i].Value = "code id_token"
+		}
+	}
+
+	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: params},
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequest)
+	}
+}
+
+func TestPushAuthorizationRequestMissingPKCE(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	params := plainFormParameters(t, h.clientAssertion(t), nil)
+	filtered := params[:0]
+	for _, p := range params {
+		if p.Name != "code_challenge" {
+			filtered = append(filtered, p)
+		}
+	}
+
+	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: filtered},
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequest)
+	}
+}
+
+func TestPushAuthorizationRequestRejectsPlainCodeChallengeMethod(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	params := plainFormParameters(t, h.clientAssertion(t), nil)
+	for i := range params {
+		if params[i].Name == "code_challenge_method" {
+			params[i].Value = "plain"
+		}
+	}
+
+	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: params},
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequest)
+	}
+}
+
+func TestPushAuthorizationRequestScopeNotAllowed(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	params := plainFormParameters(t, h.clientAssertion(t), nil)
+	for i := range params {
+		if params[i].Name == "scope" {
+			params[i].Value = "openid payments"
+		}
+	}
+
+	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: params},
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequest)
+	}
+}
+
+func TestPushAuthorizationRequestRejectsDuplicateParameter(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	params := plainFormParameters(t, h.clientAssertion(t), nil)
+	params = append(params, formParam("state", "second-value"))
+
+	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: params},
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequest)
+	}
+}
+
+func TestPushAuthorizationRequestDetectsClientAssertionReplay(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	assertion := h.clientAssertion(t)
+
+	if _, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: plainFormParameters(t, assertion, nil)},
+	}); err != nil {
+		t.Fatalf("first PushAuthorizationRequest: %v", err)
+	}
+
+	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: plainFormParameters(t, assertion, nil)},
+	})
+	if err == nil {
+		t.Fatalf("second PushAuthorizationRequest (replayed assertion) = nil error, want error")
+	}
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidClient)
+	}
+}
+
+func TestPushAuthorizationRequestDetectsRequestObjectReplay(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurityWithMessageSigning, true)
+	requestObj := h.requestObject(t, standardAuthParams(t))
+
+	buildParams := func() []server.FormParameter {
+		return []server.FormParameter{
+			formParam("client_assertion", h.clientAssertion(t)),
+			formParam("client_assertion_type", clientassertion.AssertionType),
+			formParam("request", requestObj),
+		}
+	}
+
+	if _, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: buildParams()},
+	}); err != nil {
+		t.Fatalf("first PushAuthorizationRequest: %v", err)
+	}
+
+	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: buildParams()},
+	})
+	if err == nil {
+		t.Fatalf("second PushAuthorizationRequest (replayed request object) = nil error, want error")
+	}
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequestObject {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequestObject)
+	}
+}
+
+func TestPushAuthorizationRequestClientNotPermittedRequestObject(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, false) // request objects not permitted for this client
+	requestObj := h.requestObject(t, standardAuthParams(t))
+
+	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: []server.FormParameter{
+			formParam("client_assertion", h.clientAssertion(t)),
+			formParam("client_assertion_type", clientassertion.AssertionType),
+			formParam("request", requestObj),
+		}},
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequestObject {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequestObject)
+	}
+}
+
+func TestPushAuthorizationRequestAuditsFailure(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	filtered := []server.FormParameter{formParam("response_type", "code")} // no client_assertion at all
+
+	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: filtered},
+	})
+	if err == nil {
+		t.Fatalf("PushAuthorizationRequest = nil error, want error")
+	}
+	events := h.audit.all()
+	if len(events) != 1 || events[0].Outcome != server.AuditOutcomeFailure {
+		t.Fatalf("audit events = %+v, want one failure event", events)
+	}
+}

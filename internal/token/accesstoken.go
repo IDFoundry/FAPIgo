@@ -1,0 +1,108 @@
+package token
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"time"
+)
+
+// atJWTType is the required JWS "typ" header value for a JWT access
+// token (RFC 9068 §2.1) — it exists to stop an access token from being
+// confused with, or accepted as, any other kind of JWT.
+const atJWTType = "at+jwt"
+
+// Confirmation is the RFC 7800 "cnf" claim used to record a sender
+// constraint on an access token. Only DPoP key-thumbprint binding
+// (RFC 9449 §6.1) is represented; mutual-TLS certificate binding is out
+// of scope for this package.
+type Confirmation struct {
+	JKT string
+}
+
+// AccessTokenClaims is a parsed JWT access token payload (RFC 9068).
+// Audience is restricted to a single value — see the equivalent
+// restriction and rationale in internal/clientassertion. Everything
+// beyond the claims RFC 9068 defines — most importantly a granted
+// authorization_details (RFC 9396) — is left in Parameters as raw JSON.
+type AccessTokenClaims struct {
+	Issuer       string
+	Subject      string
+	Audience     string
+	ClientID     string
+	Scope        string // space-delimited; "" if absent
+	ExpiresAt    time.Time
+	IssuedAt     time.Time
+	JTI          string
+	Confirmation *Confirmation // nil if the token is not sender-constrained
+	Parameters   map[string]json.RawMessage
+}
+
+type rawConfirmation struct {
+	JKT string `json:"jkt"`
+}
+
+func parseAccessTokenClaims(payload []byte) (AccessTokenClaims, error) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		return AccessTokenClaims{}, fmt.Errorf("%w: %v", ErrMalformedClaims, err)
+	}
+
+	iss, _, err := popString(raw, "iss", true)
+	if err != nil {
+		return AccessTokenClaims{}, err
+	}
+	sub, _, err := popString(raw, "sub", true)
+	if err != nil {
+		return AccessTokenClaims{}, err
+	}
+	aud, _, err := popString(raw, "aud", true)
+	if err != nil {
+		return AccessTokenClaims{}, err
+	}
+	clientID, _, err := popString(raw, "client_id", true)
+	if err != nil {
+		return AccessTokenClaims{}, err
+	}
+	exp, _, err := popInt64(raw, "exp", true)
+	if err != nil {
+		return AccessTokenClaims{}, err
+	}
+	iat, _, err := popInt64(raw, "iat", true)
+	if err != nil {
+		return AccessTokenClaims{}, err
+	}
+	jti, _, err := popString(raw, "jti", true)
+	if err != nil {
+		return AccessTokenClaims{}, err
+	}
+	scope, _, err := popString(raw, "scope", false)
+	if err != nil {
+		return AccessTokenClaims{}, err
+	}
+
+	var confirmation *Confirmation
+	if cnfRaw, ok := raw["cnf"]; ok {
+		delete(raw, "cnf")
+		dec := json.NewDecoder(bytes.NewReader(cnfRaw))
+		dec.DisallowUnknownFields()
+		var c rawConfirmation
+		if err := dec.Decode(&c); err != nil || c.JKT == "" {
+			return AccessTokenClaims{}, fmt.Errorf("%w: cnf must be an object with a non-empty jkt", ErrMalformedClaims)
+		}
+		confirmation = &Confirmation{JKT: c.JKT}
+	}
+
+	return AccessTokenClaims{
+		Issuer:       iss,
+		Subject:      sub,
+		Audience:     aud,
+		ClientID:     clientID,
+		Scope:        scope,
+		ExpiresAt:    time.Unix(exp, 0),
+		IssuedAt:     time.Unix(iat, 0),
+		JTI:          jti,
+		Confirmation: confirmation,
+		Parameters:   raw,
+	}, nil
+}

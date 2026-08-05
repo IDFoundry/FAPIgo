@@ -1,0 +1,425 @@
+# Architecture
+
+go-fapi provides hardened, separately conformant FAPI client,
+authorization-server and resource-server engines built on one rigorously
+tested protocol core.
+
+FAPI 2.0 defines requirements across clients, authorization servers and
+resource servers, and PAR and DPoP each impose role-specific behaviour on
+top of that ([FAPI 2.0 Security Profile][fapi2], [RFC 9126][par],
+[RFC 9449][dpop]). The client and server roles in particular have
+different trust boundaries, state machines and failure modes, so this
+module does not expose one generic API that tries to behave as both.
+
+FAPI is defined for high-value scenarios alongside an explicit attacker
+model ([FAPI 2.0 Attacker Model][attacker]), and RFC 9700 captures
+broader OAuth 2.0 security best current practice ([RFC 9700][bcp]). The
+guiding rule for every public API in this module, not just the protocol
+message formats, is:
+
+> **Expose business decisions, not protocol mechanisms.**
+
+A caller decides who authenticated, what access was approved and which
+durable infrastructure to use. It must never be able to weaken request
+validation, bypass replay prevention, modify a signed output, or
+construct a security-sensitive protocol artefact by hand. See
+"Hardening rules for every role's public API" below.
+
+## The one rule everything else follows
+
+> **Share protocol implementation, not role-level APIs.**
+
+Concretely:
+
+- `client`, `server` and `resource` are separate public packages with
+  separate constructors (`client.New`, `server.New`,
+  `resource.NewVerifier`), not one `fapi.New(role, ...)` behind a role
+  enum. A role enum tends to produce one large config type with fields
+  that only make sense in some modes, and makes it easy to accidentally
+  wire up the wrong role.
+- They may all depend on the same `internal/` protocol core (JOSE parsing,
+  JWK validation, DPoP thumbprints, canonicalization, ...), but `client`
+  must never import `server` or vice versa. Both public packages must
+  stay independently usable.
+- Where client and server both touch the same wire format, the operation
+  is asymmetric: signing lives on one side, verification on the other,
+  as two distinct types even when they share JOSE encoding helpers (e.g.
+  `internal/jarm`: server signs, client verifies; `internal/requestobject`:
+  client signs, server verifies).
+
+## Package layout
+
+```text
+go-fapi/                   // package fapi: shared value types only
+├── client/                // RP public API
+├── server/                // AS public API
+├── resource/              // RS verification API
+├── extension/             // shared custom-parameter & RAR definitions
+├── storage/                // role-specific storage contracts, shared replay primitive,
+│                           // StoreAssurance capability checks + reusable contract test suite
+├── keys/                  // operation-based signing/verification contracts (Sign, never Signer)
+├── fapihttp/               // hardened HTTP transport used by all three roles
+├── fapitest/               // in-process interop harness (test-only)
+├── internal/
+│   ├── oauth/              // OAuth 2.0 protocol core
+│   ├── oidc/                // OIDC protocol core
+│   ├── jose/                 // JWT/JWS/JWK parsing & algorithm policy
+│   ├── dpop/                 // DPoP proof create (client) / verify (server, resource)
+│   ├── pkce/                 // PKCE generate (client) / verify (server)
+│   ├── par/                  // PAR wire format
+│   ├── jarm/                  // JARM sign (server) / verify (client)
+│   ├── requestobject/         // request object sign (client) / verify (server)
+│   ├── clientassertion/       // client assertion create (client) / verify (server)
+│   ├── token/                 // token issue (server) / validate (client, resource)
+│   ├── metadata/               // AS/client metadata parsing
+│   ├── canonical/               // URL/JSON canonicalization
+│   └── validation/               // generic strict-parsing helpers
+└── conformance/
+    ├── client/                  // OIDF RP/client test plan config + scripts
+    ├── server/                  // OIDF AS test plan config + scripts
+    └── resource/                 // RS verification test vectors (not covered by OIDF)
+```
+
+## Design rules
+
+### 1. Separate public constructors per role
+
+```go
+rp, err := client.New(clientConfig, clientDeps)
+as, err := server.New(serverConfig, serverDeps)
+rs, err := resource.NewVerifier(resourceConfig, resourceDeps)
+```
+
+Not `fapi.New(RoleClient, ...)`.
+
+### 2. Shared value types only where semantics match
+
+Identifiers and enums with one wire-level meaning regardless of role
+(`ClientID`, `Scope`, `Issuer`, `SignatureAlgorithm`, `SenderConstraint`)
+live in the root `fapi` package. Anything whose meaning depends on
+trust state does not — `client.AuthorizationRequest` (an instruction to
+construct a request) and `server.ValidatedAuthorizationRequest`
+(something already checked) are deliberately different types, so code
+can never accidentally treat untrusted input as validated protocol
+state.
+
+Two more value types belong here because every role needs them
+identically:
+
+- **`Secret`** — wraps any token, code or credential value that could
+  end up in a log line by accident. `String()`, `GoString()` and
+  `MarshalText()` all redact; `Reveal()` is the only way to get the raw
+  value out. `client.TokenSet`, `server.TokenResult` and any resource
+  claim that carries a raw token value all use it.
+- **`URL`** (constructed via `ParseIssuerURL` / `ParseEndpointURL`, not a
+  bare `string`) — enforces absolute, HTTPS (except an explicitly
+  enabled loopback development mode), no fragment, no embedded
+  credentials, normalized host. Registered redirect URIs are compared
+  under OAuth registration semantics, never generic URL equivalence or
+  automatic normalization — see `RegisteredRedirectURI` in `client` and
+  `server`.
+
+`SignatureAlgorithm` is a closed enum (`ES256`, `PS256`, ...), never a
+bare string accepted from a caller or read directly out of a JWT header
+before the engine has decided which algorithms are even permitted for
+that operation.
+
+### 3. Client: workflow methods, not primitives
+
+`BeginAuthorization` → `AuthorizationSession` (opaque, carries the
+authorization URL and a session handle) → `HandleAuthorizationResponse`
+→ `ExchangeCode`, or the combined `CompleteAuthorization` so a caller
+cannot skip callback validation before exchanging a code. The
+intermediate `ValidatedAuthorizationResponse` is opaque and can only be
+constructed by `HandleAuthorizationResponse`.
+
+`BeginAuthorization` internally: generates `state`/`nonce`/PKCE, builds
+and signs the request object when required, authenticates to and calls
+the PAR endpoint ([RFC 9126][par]), receives `request_uri`, builds the
+browser URL, and persists correlation state.
+
+`HandleAuthorizationResponse` internally validates: correlation state,
+issuer, JARM signature and claims, audience, expiry, response mode,
+authorization-code presence, error-response integrity, and replay.
+
+The response is a closed sum type, not one struct with optional fields —
+a caller cannot assume every callback carries a code, and cannot forget
+to branch on an error case that was silently left zero-valued.
+
+### 4. Client session storage is atomic-consume, not CRUD
+
+`SessionStore.Create` / `SessionStore.Consume` — no `GetSession` /
+`DeleteSession`. `Consume` atomically validates and retires `state`,
+nonce, PKCE verifier, expected issuer, expected redirect URI, expected
+response mode, DPoP key reference and request-object identifier in one
+step, to prevent callback replay and race conditions.
+
+### 5. Keys are handles and operations, never raw private keys
+
+`KeyManager.Sign` / `KeyManager.PublicKey`, keyed by purpose
+(`ClientAuthentication`, `RequestObjectSigning`, `DPoPProofSigning`). A
+session refers to a DPoP key by an opaque `DPoPKeyHandle`, never a
+`crypto.PrivateKey` — DPoP's value depends on the private key never
+leaving its holder ([RFC 9449][dpop]).
+
+`keys.KeyManager` never hands back a `crypto.Signer`, only a `Sign`
+operation and a public JWK — the same model `server` uses to select and
+use its own signing keys (`SelectSigningKey` / `Sign` / `PublicJWKS`),
+so both a client's and a server's key material can be backed by an HSM
+or a remote signing service without the module ever holding private key
+material in process. Resolving a *client's* verification keys (for
+request-object and client-assertion signatures) is a separate concern
+from `KeyManager` — it belongs in `server`'s client-lookup path, prefers
+administratively pre-resolved/registered keys over live JWKS fetches in
+the request-handling path, and where it does fetch JWKS applies the same
+SSRF, size-limit, content-type, bounded-redirect and stale-key rules as
+any other outbound fetch (see rule 6).
+
+### 6. HTTP is a narrow interface, hardened internally
+
+Callers supply a `Do(*http.Request) (*http.Response, error)`;
+`fapihttp` wraps it with strict TLS verification, response-size limits,
+bounded/no redirects, endpoint origin validation, timeouts, body-read
+deadlines, SSRF restrictions on discovery/JWKS fetches, and
+content-type checks. The public API never asks a caller to hand-build
+a PAR body or similar wire-level payload.
+
+### 7. Server: a state machine over client-generated artefacts
+
+`PushAuthorizationRequest` → `BeginAuthorization` → `CompleteAuthorization`
+→ `ExchangeAuthorizationCode` → `RefreshAccessToken`, plus `Metadata` and
+`PublicJWKS`. The server only ever verifies; it must not expose
+`client`'s request-building functionality, and it must not expose a
+generic `HandleRequest(map[string]any)` or bare `ValidateJWT(token
+string)` — which claims, algorithms, audiences, replay checks and key
+sources apply is determined by the protocol context, not left for the
+caller to assemble correctly.
+
+**Raw request boundary.** `PushAuthorizationRequest` and
+`AuthorizationCodeExchangeRequest` carry an `HTTP FormRequest` — an
+ordered list of `FormParameter{Name, Value}` plus method, URL, content
+type, body size, client certificate and DPoP proof — not a pre-parsed
+`url.Values` or `map[string]string`. A map can silently collapse
+duplicate parameters before the engine ever sees them; `server` needs
+the lossless form to detect duplicate/conflicting values, malformed
+names, parameter-count abuse and oversized values itself. `fapihttp`
+(or an equivalent adapter) is responsible for building a `FormRequest`
+faithfully from `*http.Request`.
+
+**Opaque identifiers.** `PushAuthorizationResult.RequestURI` and the
+`InteractionHandle` handed to the embedding application's login UI have
+no public constructor — only `server` can produce one. The interaction
+handle is high-entropy, short-lived, bound to one authorization
+transaction, single-use, and deliberately unsuitable as an authorization
+code; the PAR identifier or any storage primary key must never reach the
+UI.
+
+**Closed sum types for results**, so a caller can't assume a shape that
+isn't there — e.g. an unvalidated `redirect_uri` must produce a
+`LocalErrorResponse`/`AuthorizationLocalError`, never something that
+looks like a normal redirect:
+
+- `AuthorizationAction` — `InteractionRequired` | `RedirectResponse` |
+  `LocalErrorResponse`, returned from `BeginAuthorization`.
+- `AuthorizationResult` — `AuthorizationRedirect` | `AuthorizationLocalError`,
+  returned from `CompleteAuthorization`. Only the engine assembles the
+  final redirect destination — the embedding app cannot replace `state`,
+  edit a JARM response, change the redirect URI, or leak a code into logs.
+- `InteractionResult` — built only via constructor functions
+  (`Authorize(subject, authContext, grant)`, `Deny(reason)`,
+  `AuthenticationFailed(reason)`) passed to `CompleteAuthorization`, so
+  invalid combinations of subject/grant/denial can't be constructed.
+
+Untrusted hints stay untrusted: `AuthenticationHints.LoginHint` is a
+plain string-wrapping type, never a `SubjectID` — only a
+`SubjectProvider` or the application's own authentication result can
+produce a verified `SubjectID`.
+
+**Assurance levels.** `Config.Assurance` is `AssuranceDevelopment` or
+`AssuranceProduction`. `New` fails construction unless every
+security-critical dependency is present and valid — no implicit
+in-memory fallback for clocks, randomness, replay storage, signing keys,
+client lookup or authorization-code storage. Under
+`AssuranceProduction`, `New` additionally rejects non-durable stores,
+stores without atomic consumption, software keys where policy requires
+HSM-backed keys, insecure issuer URLs, wildcard redirect configuration,
+excessive clock skew, a missing audit sink, missing replay protection,
+and unsupported/weak algorithms. A separate, explicitly named
+`NewDevelopmentServer` constructor exists for local/dev convenience so a
+caller can never end up on a weakened profile by omission.
+
+**Policy is a bounded deployment decision, not a bypass.**
+`AuthorizationPolicy.Evaluate` receives only already-validated protocol
+values (`RegisteredClient`, `AuthenticatedSubject`,
+`RequestedAuthorization`, `AuthenticationContext`, validated extensions)
+and may decide allowed scopes, claims, authorization details, consent
+requirements and token lifetime within configured bounds — it cannot
+disable PAR, PKCE, sender constraint, redirect URI validation, client
+authentication, replay protection, required signed request objects, or
+profile algorithm restrictions.
+
+**Audit is a typed dependency**, not a side channel a caller can leave
+disconnected: `Dependencies.Audit` records structured `AuditEvent`s
+(id, time, type, outcome, client/subject/transaction references, typed
+attributes — never a bare `map[string]any`, so a sensitive value can't
+end up in an audit record by accident). Whether audit failure is
+fail-closed for issuance events, buffered through a durable outbox, or
+tolerated for low-value diagnostics is a `server` configuration
+decision, not something left to `AuditSink` implementers to each decide
+differently.
+
+### 8. Resource server verifies in HTTP context, not in isolation
+
+`Verifier.Verify(ctx, VerifyRequest{Method, URL, Authorization, DPoPProof})`
+→ `AuthorizationContext{Subject, ClientID, Scopes, Claims}`. Token
+verification is inseparable from method/URL/DPoP context, so there is no
+bare `VerifyJWT` entry point — and, symmetrically, no bare `VerifyDPoP`
+entry point either, since a DPoP proof can't be judged valid without the
+HTTP method, target URI, access-token hash, expected nonce and JTI
+replay state alongside it. `AuthorizationContext.Claims` uses `Secret`
+for any raw token value it carries, and a verification failure is a
+typed `Error` (see rule 16), not a bare `error` the caller has to
+string-match.
+
+### 9. Internal protocol core is organized around asymmetric operations
+
+See the `internal/` table above — `sign.go`/`verify.go` or
+`create.go`/`verify.go` pairs per concern, each side used by exactly the
+role(s) that need it, sharing JOSE encoding but not signing/verification
+policy.
+
+### 10–11. Extension and RAR parameters are defined once, used by both sides
+
+A `extension.Definition[T]` (or, for Rich Authorization Requests
+[RFC 9396][rar], the RAR-specific variant living alongside it in the
+same package) captures wire name, cardinality, encoding, allowed source,
+max size, sensitivity, validator, whether it's integrity-protected,
+whether it may appear in request objects, and whether it may be returned
+in token claims — once. RAR definitions additionally bound the number of
+detail objects, bytes per object, total bytes, JSON depth, and how
+duplicate/unknown JSON members are handled.
+
+Client sets a value against the definition with `req.Extensions.Set(...)`;
+server registers the same definition (`server.WithAuthorizationExtension`)
+and reads the validated value back out through a typed accessor —
+`extension.Get(validated.Extensions, Definition)` — never a generic
+`map[string]any`, which would allow name collisions and invalid type
+assertions. Any parameter without a registered definition is rejected by
+default; there is no production option to silently preserve unknown
+fields; a caller who genuinely needs that (a compatibility gateway, a
+test server) must opt in explicitly and separately rather than being one
+missed check away from it.
+
+### 12. Configuration is per-role, not one shared struct
+
+`client.Config`, `server.Config` and `resource.Config` are separate
+types. They may reference the same validated value types (`Issuer`,
+algorithm policy types) but are not merged into one struct with
+role-conditional fields.
+
+### 13. Storage contracts are per-role, with one shared replay primitive
+
+`client.SessionStore`, `server.TransactionStore`, `server.GrantStore` are
+distinct, and none of them expose generic CRUD (`GetSession`,
+`GetCode`, `UpdateCode`, `DeleteCode`, ...) — every method is a named
+security operation. `GrantStore.RedeemAuthorizationCode` in particular
+must atomically verify and consume a code hash, client ID, redirect URI,
+PKCE verifier and sender-binding together, in one step. `replay.Store`
+stores only a digest and expiry per use (`ReplayUse{Namespace, Digest,
+ExpiresAt}`) — never a complete client assertion, DPoP proof or other
+sensitive payload — and callers must assign it a namespaced identifier
+per role/subsystem (`client:jarm`, `server:request-object`,
+`server:dpop`, `resource:dpop`, ...) so different subsystems can never
+collide on the same use-once token.
+
+Because a storage backend's atomicity/durability guarantees are
+self-asserted, `storage` also defines a `StoreAssurance.Capabilities`
+interface (durable, atomic-consume, serializable-redemption,
+cross-instance-consistent, encrypted-at-rest) that `server`'s
+`AssuranceProduction` mode checks at construction time, and a reusable
+contract test suite (e.g. a `storage.TestGrantStoreContract(t,
+factory)` helper) that any storage implementation — first-party or
+downstream — runs against concurrent redemption, expiry boundaries,
+cancellation, transaction rollback and cross-connection consistency,
+rather than relying on the capability declaration alone.
+
+### 14. No cross-role dependency cycles
+
+```text
+client ─────┐
+server ─────┼──▶ internal protocol packages
+resource ───┘
+
+extension ──▶ shared value definitions
+storage   ──▶ shared storage primitives
+keys      ──▶ signing contracts
+```
+
+`client` and `server` never import each other.
+
+### 15. fapitest is a real-HTTP interop harness, not a shortcut
+
+`fapitest` wires a `client.Client`, `server.Server` and
+`resource.Verifier` together through `httptest.Server` so tests exercise
+real wire encoding and HTTP semantics — catching parameter
+serialization bugs, duplicate handling, header issues, URI
+canonicalization mismatches, content-type handling and redirect
+behaviour that in-process shortcuts would hide. It is test-only and must
+never be reachable from production code paths.
+
+### 16. Errors carry their own exposure — the caller doesn't decide
+
+`client`, `server` and `resource` all return a typed `Error` (`Code()`,
+`PublicDescription()`, `HTTPStatus()`, `Unwrap()`) tagged with an
+`Exposure` — `ExposureLocal`, `ExposureRedirect`, `ExposureTokenEndpoint`
+for `server`; the equivalent split for `client` and `resource`. The
+engine, not the embedding application, decides whether a failure is safe
+to put in a redirect query string versus a response body versus neither;
+internal diagnostic detail is never copied into a public
+`error_description`-style field. This is what makes rule 7's "an
+unvalidated `redirect_uri` must produce a local error, never a redirect"
+enforceable in the type system rather than by convention.
+
+### Conformance strategy
+
+Certification is tracked separately per role under `conformance/`. The
+server runs the OIDF AS test plan; the client runs the applicable
+RP/client tests; the resource server is verified against test vectors
+maintained in this repo, since OIDF does not cover that role. One role
+passing its suite is not evidence the other role conforms, even where
+both share internal JOSE code — protocol behaviour and negative-test
+expectations differ per role.
+
+## What is and isn't shared
+
+**Shared** (via `internal/`, `extension`, `storage`'s replay primitive
+and contract test suite, `keys`, `fapihttp`, and the root `fapi`
+package's value types): strict parsers, canonicalization rules, JOSE
+implementation, algorithm policy primitives, `Secret`, typed `URL`, key
+representations, extension/RAR definitions, replay machinery, storage
+contract tests, conformance test vectors.
+
+**Not shared**: role-level configuration, workflow APIs, transaction
+types, untrusted vs. validated request types, storage interfaces where
+semantics differ, generic JWT/DPoP verification methods, audit sink
+wiring (each role's `Dependencies` wires its own).
+
+## No public JOSE utility package
+
+None of `client`, `server` or `resource` exposes a general-purpose
+JWT/JWS/JWK helper. If one did, callers would eventually reach for it
+outside the exact protocol context it was validated for and end up with
+a verification path missing an issuer, audience, lifetime or replay
+check. Everything JOSE-shaped stays under `internal/jose` and its
+asymmetric callers (`internal/dpop`, `internal/jarm`,
+`internal/requestobject`, `internal/clientassertion`, `internal/token`);
+the public surface is limited to `keys.KeyManager`, registered public
+key types, the closed `SignatureAlgorithm` enum, and each role's own
+signed protocol outputs.
+
+[fapi2]: https://openid.net/specs/fapi-security-profile-2_0-final.html
+[attacker]: https://openid.net/specs/fapi-attacker-model-2_0-final.html
+[bcp]: https://www.rfc-editor.org/info/rfc9700
+[par]: https://www.rfc-editor.org/info/rfc9126
+[dpop]: https://www.rfc-editor.org/info/rfc9449
+[rar]: https://www.rfc-editor.org/info/rfc9396

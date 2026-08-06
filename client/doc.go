@@ -20,10 +20,14 @@
 // AuthorizationSession and SessionHandle are opaque with no public
 // constructor; HandleAuthorizationResponse returns a closed sum type
 // rather than one struct with optional fields, so a caller can't assume
-// every callback carries a code; DPoPKeyHandle stands in for a DPoP
-// private key so this package never holds one; TokenSet fields that
-// carry raw token values use fapi.Secret so they can't leak into a log
-// line by accident; and a validation failure is a typed Error tagged
-// with where it's safe to expose the description, not a bare error the
-// caller has to string-match.
+// every callback carries a code; every DPoP proof, request-object
+// signature and client assertion is produced through Dependencies.Keys'
+// operation-based Sign, keyed by purpose (ClientAuthentication,
+// RequestObjectSigning, DPoPProofSigning) — this package never
+// constructs, holds or is handed a crypto.PrivateKey, the same model
+// server uses for its own signing keys; TokenSet fields that carry raw
+// token values use fapi.Secret so they can't leak into a log line by
+// accident; and a validation failure is a typed Error tagged with where
+// it's safe to expose the description, not a bare error the caller has
+// to string-match.
 package client

@@ -7,9 +7,12 @@ import (
 	fapi "github.com/osanderson/go-fapi"
 )
 
-// SigningPurpose is a closed set of reasons the server might need to
-// sign something with its own key, so an implementation can select
-// different keys (or apply different rotation/HSM policy) per purpose.
+// SigningPurpose is a closed set of reasons a party might need to sign
+// something with its own key, so an implementation can select different
+// keys (or apply different rotation/HSM policy) per purpose. The first
+// three are server purposes; the last three are client purposes — both
+// roles use the same KeyManager contract (see ARCHITECTURE.md design
+// rule 5), never a crypto.Signer or raw private key.
 type SigningPurpose uint8
 
 const (
@@ -23,6 +26,16 @@ const (
 
 	// IDTokenSigning signs an OIDC ID token.
 	IDTokenSigning
+
+	// ClientAuthentication signs a private_key_jwt client assertion.
+	ClientAuthentication
+
+	// RequestObjectSigning signs a pushed authorization request object
+	// (RFC 9101).
+	RequestObjectSigning
+
+	// DPoPProofSigning signs a DPoP proof (RFC 9449).
+	DPoPProofSigning
 )
 
 // SigningRequest describes one signature to produce. Digest is the

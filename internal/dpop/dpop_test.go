@@ -5,11 +5,15 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"errors"
+	"fmt"
 	"net/url"
 	"testing"
 	"time"
 
 	fapi "github.com/osanderson/go-fapi"
+	"github.com/osanderson/go-fapi/internal/canonical"
+	"github.com/osanderson/go-fapi/internal/jose"
 )
 
 // memoryReplayChecker is a minimal in-memory ReplayChecker for tests.
@@ -266,5 +270,130 @@ func TestVerifyRequiresMaxProofAge(t *testing.T) {
 	_, err = Verify(context.Background(), VerifyRequest{Proof: proof, Method: "POST", URL: target, Now: now})
 	if err == nil {
 		t.Fatalf("Verify with zero MaxProofAge = nil error, want error")
+	}
+}
+
+func TestCreateProofRejectsInvalidInput(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	target := mustURL(t, "https://as.example/token")
+	validReq := func() ProofRequest {
+		return ProofRequest{Signer: key, Algorithm: fapi.ES256, Method: "POST", URL: target, Now: now}
+	}
+	cases := map[string]func(*ProofRequest){
+		"nil signer":        func(r *ProofRequest) { r.Signer = nil },
+		"invalid algorithm": func(r *ProofRequest) { r.Algorithm = 0 },
+		"empty method":      func(r *ProofRequest) { r.Method = "" },
+		"nil url":           func(r *ProofRequest) { r.URL = nil },
+		"zero now":          func(r *ProofRequest) { r.Now = time.Time{} },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			req := validReq()
+			mutate(&req)
+			if _, err := CreateProof(req); err == nil {
+				t.Fatalf("CreateProof(%s) = nil error, want error", name)
+			}
+		})
+	}
+}
+
+func TestVerifyRejectsInvalidRequest(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	target := mustURL(t, "https://as.example/token")
+	proof, err := CreateProof(ProofRequest{Signer: key, Algorithm: fapi.ES256, Method: "POST", URL: target, Now: now})
+	if err != nil {
+		t.Fatalf("CreateProof: %v", err)
+	}
+	validReq := func() VerifyRequest {
+		return VerifyRequest{Proof: proof, Method: "POST", URL: target, Now: now, MaxProofAge: time.Minute}
+	}
+	cases := map[string]func(*VerifyRequest){
+		"empty method": func(r *VerifyRequest) { r.Method = "" },
+		"nil url":      func(r *VerifyRequest) { r.URL = nil },
+		"zero now":     func(r *VerifyRequest) { r.Now = time.Time{} },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			req := validReq()
+			mutate(&req)
+			if _, err := Verify(context.Background(), req); err == nil {
+				t.Fatalf("Verify(%s) = nil error, want error", name)
+			}
+		})
+	}
+}
+
+func TestVerifyRejectsWrongJWSType(t *testing.T) {
+	// A proof-shaped JWS whose "typ" header is not "dpop+jwt" — e.g. a
+	// request object or client assertion accidentally presented as a
+	// DPoP proof — must be rejected by type, not merely by claim shape.
+	key := generateKey(t)
+	now := time.Now()
+	target := mustURL(t, "https://as.example/token")
+
+	otherJWT, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: "not-dpop+jwt"},
+		[]byte(fmt.Sprintf(`{"jti":"x","htm":"POST","htu":%q,"iat":%d}`, canonical.URI(target), now.Unix())))
+	if err != nil {
+		t.Fatalf("jose.Sign: %v", err)
+	}
+
+	_, err = Verify(context.Background(), VerifyRequest{
+		Proof: otherJWT, Method: "POST", URL: target, Now: now, MaxProofAge: time.Minute,
+	})
+	if !errors.Is(err, ErrWrongType) {
+		t.Fatalf("Verify(wrong typ) = %v, want ErrWrongType", err)
+	}
+}
+
+func TestVerifyRejectsMissingEmbeddedJWK(t *testing.T) {
+	// A proof whose header carries no embedded "jwk" at all can't be
+	// verified against anything — RFC 9449 requires it.
+	key := generateKey(t)
+	now := time.Now()
+	target := mustURL(t, "https://as.example/token")
+
+	noJWKProof, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: "dpop+jwt"},
+		[]byte(fmt.Sprintf(`{"jti":"x","htm":"POST","htu":%q,"iat":%d}`, canonical.URI(target), now.Unix())))
+	if err != nil {
+		t.Fatalf("jose.Sign: %v", err)
+	}
+
+	_, err = Verify(context.Background(), VerifyRequest{
+		Proof: noJWKProof, Method: "POST", URL: target, Now: now, MaxProofAge: time.Minute,
+	})
+	if !errors.Is(err, ErrMissingJWK) {
+		t.Fatalf("Verify(no embedded jwk) = %v, want ErrMissingJWK", err)
+	}
+}
+
+func TestParseClaimsRejectsMissingRequiredMembers(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	target := mustURL(t, "https://as.example/token")
+	jwk, err := jose.NewJWK(&key.PublicKey, fapi.ES256)
+	if err != nil {
+		t.Fatalf("NewJWK: %v", err)
+	}
+
+	cases := map[string]string{
+		"missing jti": fmt.Sprintf(`{"htm":"POST","htu":%q,"iat":%d}`, canonical.URI(target), now.Unix()),
+		"missing htm": fmt.Sprintf(`{"jti":"x","htu":%q,"iat":%d}`, canonical.URI(target), now.Unix()),
+		"missing htu": fmt.Sprintf(`{"jti":"x","htm":"POST","iat":%d}`, now.Unix()),
+	}
+	for name, payload := range cases {
+		t.Run(name, func(t *testing.T) {
+			proof, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: "dpop+jwt", JWK: &jwk}, []byte(payload))
+			if err != nil {
+				t.Fatalf("jose.Sign: %v", err)
+			}
+			_, err = Verify(context.Background(), VerifyRequest{
+				Proof: proof, Method: "POST", URL: target, Now: now, MaxProofAge: time.Minute,
+			})
+			if !errors.Is(err, ErrMalformedClaims) {
+				t.Fatalf("Verify(%s) = %v, want ErrMalformedClaims", name, err)
+			}
+		})
 	}
 }

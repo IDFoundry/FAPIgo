@@ -4,6 +4,7 @@ import (
 	"time"
 
 	fapi "github.com/osanderson/go-fapi"
+	"github.com/osanderson/go-fapi/extension"
 )
 
 // Profile selects which FAPI 2.0 security profile this server enforces.
@@ -136,4 +137,22 @@ type Config struct {
 	Algorithms AlgorithmPolicy
 	Limits     Limits
 	Assurance  AssuranceLevel
+
+	// Extensions registers every custom authorization parameter this
+	// server accepts, beyond the standard OAuth/OIDC/PKCE parameters it
+	// already understands (response_type, client_id, redirect_uri,
+	// scope, state, nonce, code_challenge, code_challenge_method). A
+	// parameter with no registered Definition is rejected — there is no
+	// permissive fallback — so nil is equivalent to an empty Registry
+	// (no custom parameters accepted at all), not to "extensions
+	// disabled, accept anything." See ARCHITECTURE.md design rules
+	// 10-11 and extension.Registry.Parse.
+	//
+	// A Definition whose AllowedSources permits SourcePlainParameter
+	// must use a string-shaped T: this server's plain-parameter path
+	// (Profile != ProfileFAPISecurityWithMessageSigning) always
+	// represents a value as a form-encoded string and re-wraps it as a
+	// JSON string claim, so only SourceRequestObject carries a value's
+	// native JSON shape (object, array, number, bool) losslessly.
+	Extensions *extension.Registry
 }

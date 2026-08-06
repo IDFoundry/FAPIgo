@@ -1,6 +1,9 @@
 package fapi
 
-import "testing"
+import (
+	"net/url"
+	"testing"
+)
 
 func TestParseEndpointURLAccepts(t *testing.T) {
 	u, err := ParseEndpointURL("https://as.example/par")
@@ -69,5 +72,39 @@ func TestURLIsZero(t *testing.T) {
 	}
 	if parsed.IsZero() {
 		t.Fatalf("parsed URL.IsZero() = true, want false")
+	}
+}
+
+func TestURLWithQueryPreservesLoopbackHTTP(t *testing.T) {
+	// A caller building on an endpoint URL parsed under AllowLoopbackHTTP
+	// (e.g. a client's own authorization-endpoint URL, appended with
+	// request_uri/client_id) must not have to re-validate the result
+	// through ParseEndpointURL — which would reject it, since that call
+	// site generally has no way to know AllowLoopbackHTTP applied to the
+	// original. See client.BeginAuthorization.
+	base, err := ParseEndpointURL("http://127.0.0.1:8080/authorize", AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseEndpointURL: %v", err)
+	}
+	q := url.Values{}
+	q.Set("client_id", "abc")
+	got := base.WithQuery(q)
+	want := "http://127.0.0.1:8080/authorize?client_id=abc"
+	if got.String() != want {
+		t.Fatalf("WithQuery: String() = %q, want %q", got.String(), want)
+	}
+}
+
+func TestURLWithQueryReplacesExistingQuery(t *testing.T) {
+	base, err := ParseEndpointURL("https://as.example/authorize?old=1")
+	if err != nil {
+		t.Fatalf("ParseEndpointURL: %v", err)
+	}
+	q := url.Values{}
+	q.Set("new", "2")
+	got := base.WithQuery(q)
+	want := "https://as.example/authorize?new=2"
+	if got.String() != want {
+		t.Fatalf("WithQuery: String() = %q, want %q", got.String(), want)
 	}
 }

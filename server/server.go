@@ -1,6 +1,10 @@
 package server
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/osanderson/go-fapi/extension"
+)
 
 // Server is a FAPI 2.0 authorization-server engine. It is entirely
 // unexported — construct one with New.
@@ -19,6 +23,16 @@ func New(cfg Config, deps Dependencies) (*Server, error) {
 	}
 	if err := validateDependencies(cfg, deps); err != nil {
 		return nil, err
+	}
+	if cfg.Extensions == nil {
+		// No implicit permissive fallback: an unconfigured registry
+		// rejects every custom parameter, it does not accept anything —
+		// see Config.Extensions.
+		empty, err := extension.NewRegistry()
+		if err != nil {
+			return nil, fmt.Errorf("server: config: failed to build default empty extension registry: %w", err)
+		}
+		cfg.Extensions = empty
 	}
 	return &Server{cfg: cfg, deps: deps}, nil
 }
@@ -137,8 +151,22 @@ func validateDependencies(cfg Config, deps Dependencies) error {
 	if deps.Random == nil {
 		return fmt.Errorf("server: dependencies: random is required")
 	}
-	if cfg.Assurance == AssuranceProduction && deps.Audit == nil {
-		return fmt.Errorf("server: dependencies: audit is required under AssuranceProduction")
+	if cfg.Assurance == AssuranceProduction {
+		if deps.Audit == nil {
+			return fmt.Errorf("server: dependencies: audit is required under AssuranceProduction")
+		}
+		if err := checkStoreAssurance("clients", deps.Clients, false); err != nil {
+			return err
+		}
+		if err := checkStoreAssurance("transactions", deps.Transactions, true); err != nil {
+			return err
+		}
+		if err := checkStoreAssurance("grants", deps.Grants, true); err != nil {
+			return err
+		}
+		if err := checkStoreAssurance("replay", deps.Replay, true); err != nil {
+			return err
+		}
 	}
 	return nil
 }

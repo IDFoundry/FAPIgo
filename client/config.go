@@ -1,0 +1,124 @@
+package client
+
+import (
+	"time"
+
+	fapi "github.com/osanderson/go-fapi"
+)
+
+// Profile selects which FAPI 2.0 security profile this client targets.
+// It must match the authorization server's own configured profile — see
+// server.Profile.
+type Profile uint8
+
+const (
+	_ Profile = iota
+
+	// ProfileFAPISecurity is the FAPI 2.0 Security Profile baseline: PAR,
+	// PKCE and DPoP are always used; the pushed authorization request
+	// carries plain parameters, and the authorization response is plain
+	// query parameters.
+	ProfileFAPISecurity
+
+	// ProfileFAPISecurityWithMessageSigning additionally signs every
+	// pushed authorization request as a request object, and requires the
+	// authorization response to be a signed JARM response.
+	ProfileFAPISecurityWithMessageSigning
+)
+
+// Algorithms are the single algorithm this client uses for each signing
+// operation it performs, and the single algorithm it expects the
+// authorization server to use for each of its own. A closed
+// fapi.SignatureAlgorithm value, never a caller-suppliable string — see
+// ARCHITECTURE.md design rule 2.
+type Algorithms struct {
+	// ClientAuthentication is the algorithm this client signs its
+	// private_key_jwt client assertions with.
+	ClientAuthentication fapi.SignatureAlgorithm
+
+	// RequestObject is the algorithm this client signs pushed
+	// authorization request objects with. Required only when Profile is
+	// ProfileFAPISecurityWithMessageSigning.
+	RequestObject fapi.SignatureAlgorithm
+
+	// DPoP is the algorithm this client signs DPoP proofs with.
+	DPoP fapi.SignatureAlgorithm
+
+	// JARM is the algorithm the authorization server is registered (or
+	// discovered) to sign authorization responses with. Required only
+	// when Profile is ProfileFAPISecurityWithMessageSigning.
+	JARM fapi.SignatureAlgorithm
+
+	// IDToken is the algorithm the authorization server is registered (or
+	// discovered) to sign ID tokens with.
+	IDToken fapi.SignatureAlgorithm
+}
+
+// Endpoints are the authorization server's endpoint URLs this client
+// calls or redirects the user agent to.
+type Endpoints struct {
+	Authorization              fapi.URL
+	Token                      fapi.URL
+	PushedAuthorizationRequest fapi.URL
+}
+
+// Limits bounds the lifetimes and clock tolerances this client enforces
+// or sets. None of these have an implicit default — New rejects a zero
+// (or, for MaxClockSkew, negative) value.
+type Limits struct {
+	// ClientAssertionLifetime is how long a client assertion this client
+	// signs remains valid for (exp = Now + ClientAssertionLifetime).
+	ClientAssertionLifetime time.Duration
+
+	// RequestObjectLifetime is how long a signed request object this
+	// client produces remains valid for. Required only when Profile is
+	// ProfileFAPISecurityWithMessageSigning.
+	RequestObjectLifetime time.Duration
+
+	// SessionLifetime bounds how long between BeginAuthorization and a
+	// completed HandleAuthorizationResponse a session remains valid.
+	SessionLifetime time.Duration
+
+	// MaxJARMResponseLifetime bounds how far in the future a JARM
+	// response's exp claim may be. Required only when Profile is
+	// ProfileFAPISecurityWithMessageSigning.
+	MaxJARMResponseLifetime time.Duration
+
+	// MaxIDTokenLifetime bounds how far in the future an ID token's exp
+	// claim may be.
+	MaxIDTokenLifetime time.Duration
+
+	// MaxClockSkew bounds how far in the future an iat/nbf claim may be,
+	// and extends how long past exp an artifact is still accepted. Zero
+	// means no tolerance.
+	MaxClockSkew time.Duration
+
+	// HTTPTimeout bounds how long a single PAR or token-endpoint call may
+	// take.
+	HTTPTimeout time.Duration
+
+	// MaxHTTPResponseBytes bounds how much of a PAR or token-endpoint
+	// response body this client reads before failing.
+	MaxHTTPResponseBytes int64
+}
+
+// Config is this client's immutable configuration. It is copied by New;
+// mutating a Config after passing it to New has no effect.
+type Config struct {
+	// Issuer is the authorization server this client talks to — the
+	// audience client assertions and request objects are addressed to,
+	// and the issuer authorization responses and ID tokens must come
+	// from.
+	Issuer fapi.URL
+
+	ClientID fapi.ClientID
+
+	// RedirectURI is this client's registered redirect URI, sent on every
+	// authorization request exactly as registered.
+	RedirectURI string
+
+	Endpoints  Endpoints
+	Profile    Profile
+	Algorithms Algorithms
+	Limits     Limits
+}

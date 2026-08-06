@@ -5,8 +5,10 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -292,5 +294,128 @@ func TestVerifyRequiresMaxLifetime(t *testing.T) {
 	policy.MaxLifetime = 0
 	if _, err := parsed.Verify(context.Background(), &key.PublicKey, policy); err == nil {
 		t.Fatalf("Verify with zero MaxLifetime = nil error, want error")
+	}
+}
+
+func TestCreateAssertionRejectsInvalidInput(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	validReq := func() AssertionRequest {
+		return AssertionRequest{
+			Signer: key, Algorithm: fapi.ES256,
+			ClientID: "client-123", Audience: "https://as.example/token",
+			Now: now, Lifetime: time.Minute,
+		}
+	}
+	cases := map[string]func(*AssertionRequest){
+		"nil signer":        func(r *AssertionRequest) { r.Signer = nil },
+		"invalid algorithm": func(r *AssertionRequest) { r.Algorithm = 0 },
+		"empty client id":   func(r *AssertionRequest) { r.ClientID = "" },
+		"empty audience":    func(r *AssertionRequest) { r.Audience = "" },
+		"zero now":          func(r *AssertionRequest) { r.Now = time.Time{} },
+		"zero lifetime":     func(r *AssertionRequest) { r.Lifetime = 0 },
+		"negative lifetime": func(r *AssertionRequest) { r.Lifetime = -time.Second },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			req := validReq()
+			mutate(&req)
+			if _, err := CreateAssertion(req); err == nil {
+				t.Fatalf("CreateAssertion(%s) = nil error, want error", name)
+			}
+		})
+	}
+}
+
+func TestVerifyRejectsInvalidPolicy(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	assertion := createTestAssertion(t, key, now, time.Minute)
+	parsed, err := Parse(assertion)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	cases := map[string]func(*VerifyPolicy){
+		"empty expected client id": func(p *VerifyPolicy) { p.ExpectedClientID = "" },
+		"empty expected audience":  func(p *VerifyPolicy) { p.ExpectedAudience = "" },
+		"zero now":                 func(p *VerifyPolicy) { p.Now = time.Time{} },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			policy := basePolicy(now)
+			mutate(&policy)
+			if _, err := parsed.Verify(context.Background(), &key.PublicKey, policy); err == nil {
+				t.Fatalf("Verify(%s) = nil error, want error", name)
+			}
+		})
+	}
+}
+
+func TestVerifyRejectsNotYetValidAssertion(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	// Hand-build an assertion with an "nbf" claim in the future — CreateAssertion
+	// never sets nbf itself, so this exercises the check directly rather
+	// than via a fixture CreateAssertion could produce.
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256"}`))
+	nbf := now.Add(time.Hour).Unix()
+	exp := now.Add(2 * time.Hour).Unix()
+	payloadJSON := fmt.Sprintf(
+		`{"iss":"client-123","sub":"client-123","aud":"https://as.example/token","jti":"abc","exp":%d,"nbf":%d}`,
+		exp, nbf,
+	)
+	payload := base64.RawURLEncoding.EncodeToString([]byte(payloadJSON))
+	signingInput := header + "." + payload
+	hash := sha256.Sum256([]byte(signingInput))
+	r, s, err := ecdsa.Sign(rand.Reader, key, hash[:])
+	if err != nil {
+		t.Fatalf("ecdsa.Sign: %v", err)
+	}
+	sig := make([]byte, 64)
+	r.FillBytes(sig[:32])
+	s.FillBytes(sig[32:])
+	token := signingInput + "." + base64.RawURLEncoding.EncodeToString(sig)
+
+	parsed, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	policy := basePolicy(now)
+	policy.MaxLifetime = 3 * time.Hour
+	if _, err := parsed.Verify(context.Background(), &key.PublicKey, policy); !errors.Is(err, ErrNotYetValid) {
+		t.Fatalf("Verify(nbf in future) = %v, want ErrNotYetValid", err)
+	}
+}
+
+func TestClaimedSubject(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	assertion := createTestAssertion(t, key, now, time.Minute)
+	parsed, err := Parse(assertion)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if parsed.ClaimedSubject() != "client-123" {
+		t.Fatalf("ClaimedSubject() = %q, want %q", parsed.ClaimedSubject(), "client-123")
+	}
+}
+
+// failingReader always returns an error, for exercising CreateAssertion's
+// jti-generation failure path.
+type failingReader struct{}
+
+func (failingReader) Read([]byte) (int, error) { return 0, fmt.Errorf("simulated read failure") }
+
+func TestCreateAssertionPropagatesRandomSourceError(t *testing.T) {
+	key := generateKey(t)
+	_, err := CreateAssertion(AssertionRequest{
+		Signer: key, Algorithm: fapi.ES256,
+		ClientID: "client-123", Audience: "https://as.example/token",
+		Now: time.Now(), Lifetime: time.Minute, Random: failingReader{},
+	})
+	if err == nil {
+		t.Fatalf("CreateAssertion(failing random source) = nil error, want error")
 	}
 }

@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"context"
 	"crypto/rand"
 	"testing"
 	"time"
@@ -150,5 +151,71 @@ func TestNewRequiresAuditUnderProduction(t *testing.T) {
 	deps.Audit = &fakeAuditSink{}
 	if _, err := server.New(cfg, deps); err != nil {
 		t.Fatalf("New(production, with audit): %v", err)
+	}
+}
+
+// bareReplayStore implements storage.ReplayStore but not
+// storage.StoreAssurance at all, for testing that AssuranceProduction
+// rejects a store that never declared its capabilities, rather than
+// assuming an undeclared store is adequate.
+type bareReplayStore struct{}
+
+func (bareReplayStore) UseOnce(context.Context, storage.ReplayUse) error { return nil }
+
+// capReplayStore implements storage.StoreAssurance with caller-chosen
+// capabilities, for testing that AssuranceProduction actually inspects
+// the declared values rather than merely requiring the method to exist.
+type capReplayStore struct {
+	bareReplayStore
+	caps storage.Capabilities
+}
+
+func (s capReplayStore) Capabilities() storage.Capabilities { return s.caps }
+
+func TestNewRejectsStoreWithoutStoreAssuranceUnderProduction(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = server.AssuranceProduction
+	deps := validDependencies()
+	deps.Audit = &fakeAuditSink{}
+	deps.Replay = bareReplayStore{}
+
+	if _, err := server.New(cfg, deps); err == nil {
+		t.Fatalf("New(production, replay store without StoreAssurance) = nil error, want error")
+	}
+}
+
+func TestNewRejectsNonDurableStoreUnderProduction(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = server.AssuranceProduction
+	deps := validDependencies()
+	deps.Audit = &fakeAuditSink{}
+	deps.Replay = capReplayStore{caps: storage.Capabilities{Durable: false, AtomicConsume: true}}
+
+	if _, err := server.New(cfg, deps); err == nil {
+		t.Fatalf("New(production, non-durable replay store) = nil error, want error")
+	}
+}
+
+func TestNewRejectsStoreWithoutAtomicConsumeUnderProduction(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = server.AssuranceProduction
+	deps := validDependencies()
+	deps.Audit = &fakeAuditSink{}
+	deps.Replay = capReplayStore{caps: storage.Capabilities{Durable: true, AtomicConsume: false}}
+
+	if _, err := server.New(cfg, deps); err == nil {
+		t.Fatalf("New(production, replay store without AtomicConsume) = nil error, want error")
+	}
+}
+
+func TestNewAcceptsAdequateStoreCapabilitiesUnderProduction(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = server.AssuranceProduction
+	deps := validDependencies()
+	deps.Audit = &fakeAuditSink{}
+	deps.Replay = capReplayStore{caps: storage.Capabilities{Durable: true, AtomicConsume: true}}
+
+	if _, err := server.New(cfg, deps); err != nil {
+		t.Fatalf("New(production, adequate replay store): %v", err)
 	}
 }

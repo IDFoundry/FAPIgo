@@ -122,6 +122,7 @@ func (s *Server) completeAuthorize(ctx context.Context, completed storage.Comple
 		AuthTime:            result.auth.authTime,
 		ACR:                 result.auth.acr,
 		AMR:                 result.auth.amr,
+		TokenClaims:         completed.TokenClaims,
 		ExpiresAt:           now.Add(s.cfg.Limits.AuthorizationCodeLifetime),
 	}); err != nil {
 		return s.completeLocalFail(ctx, completed.ClientID, newError(ErrorServerError, 500, "failed to persist authorization code", err)), nil

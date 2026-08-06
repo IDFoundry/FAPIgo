@@ -36,6 +36,9 @@ func TestNewRegisteredClient(t *testing.T) {
 	if !ok || alg != fapi.ES256 {
 		t.Fatalf("RequestObjectAlgorithm() = (%v, %v), want (ES256, true)", alg, ok)
 	}
+	if c.ClientAssertionAlgorithm() != fapi.ES256 {
+		t.Fatalf("ClientAssertionAlgorithm() = %v, want ES256", c.ClientAssertionAlgorithm())
+	}
 }
 
 func TestNewRegisteredClientRequestObjectAlgorithmOptional(t *testing.T) {

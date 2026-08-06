@@ -9,6 +9,7 @@ import (
 	"time"
 
 	fapi "github.com/osanderson/go-fapi"
+	"github.com/osanderson/go-fapi/extension"
 	"github.com/osanderson/go-fapi/internal/clientassertion"
 	"github.com/osanderson/go-fapi/internal/par"
 	"github.com/osanderson/go-fapi/internal/pkce"
@@ -16,6 +17,16 @@ import (
 	"github.com/osanderson/go-fapi/keys"
 	"github.com/osanderson/go-fapi/storage"
 )
+
+// coreAuthorizationParameters are the standard OAuth/OIDC/PKCE
+// authorization request parameters this package understands natively —
+// excluded from Config.Extensions' unregistered-parameter check, since
+// they are not custom parameters.
+var coreAuthorizationParameters = map[string]struct{}{
+	"response_type": {}, "client_id": {}, "redirect_uri": {}, "scope": {},
+	"state": {}, "nonce": {}, "code_challenge": {}, "code_challenge_method": {},
+	"login_hint": {},
+}
 
 // FormParameter is one name/value pair from a form-encoded request body,
 // in the order it appeared on the wire.
@@ -62,7 +73,7 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 		return s.parFail(ctx, clientID, authErr)
 	}
 
-	authParams, resolveErr := s.resolveAuthorizationParameters(ctx, params, client)
+	authParams, tokenClaims, resolveErr := s.resolveAuthorizationParameters(ctx, params, client)
 	if resolveErr != nil {
 		return s.parFail(ctx, client.ID(), resolveErr)
 	}
@@ -82,10 +93,11 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 	expiresAt := now.Add(s.cfg.Limits.PushedRequestLifetime)
 
 	if err := s.deps.Transactions.CreatePAR(ctx, storage.NewPARRecord{
-		Reference:  reference,
-		ClientID:   client.ID(),
-		Parameters: validated,
-		ExpiresAt:  expiresAt,
+		Reference:   reference,
+		ClientID:    client.ID(),
+		Parameters:  validated,
+		TokenClaims: tokenClaims,
+		ExpiresAt:   expiresAt,
 	}); err != nil {
 		return s.parFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to persist pushed authorization request", err))
 	}
@@ -153,33 +165,40 @@ func (s *Server) authenticateClient(ctx context.Context, params map[string]strin
 // resolveAuthorizationParameters returns the pushed authorization
 // request's parameters, either by verifying a signed request object (the
 // "request" parameter) or, when Config.Profile permits it, by taking
-// them directly from the plain form parameters.
-func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[string]string, client storage.RegisteredClient) (map[string]json.RawMessage, *Error) {
+// them directly from the plain form parameters — plus the subset of
+// those parameters (extension.Definition.ReturnInTokenClaims) that
+// should be copied into any token this authorization eventually issues.
+func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[string]string, client storage.RegisteredClient) (map[string]json.RawMessage, map[string]json.RawMessage, *Error) {
 	requestParam, hasRequestParam := params["request"]
 
 	if !hasRequestParam {
 		if s.cfg.Profile == ProfileFAPISecurityWithMessageSigning {
-			return nil, newError(ErrorInvalidRequest, 400, "a signed request object is required", nil)
+			return nil, nil, newError(ErrorInvalidRequest, 400, "a signed request object is required", nil)
 		}
-		return plainParamsToJSON(params), nil
+		plain := plainParamsToJSON(params)
+		tokenClaims, err := s.checkExtensions(plain, extension.SourcePlainParameter)
+		if err != nil {
+			return nil, nil, err
+		}
+		return plain, tokenClaims, nil
 	}
 
 	alg, permitted := client.RequestObjectAlgorithm()
 	if !permitted {
-		return nil, newError(ErrorInvalidRequestObject, 400, "client is not permitted to submit request objects", nil)
+		return nil, nil, newError(ErrorInvalidRequestObject, 400, "client is not permitted to submit request objects", nil)
 	}
 	if !s.cfg.Algorithms.RequestObject.Contains(alg) {
-		return nil, newError(ErrorInvalidRequestObject, 400, "request object algorithm is not permitted", nil)
+		return nil, nil, newError(ErrorInvalidRequestObject, 400, "request object algorithm is not permitted", nil)
 	}
 
 	obj, err := requestobject.Parse(requestParam)
 	if err != nil {
-		return nil, newError(ErrorInvalidRequestObject, 400, "malformed request object", err)
+		return nil, nil, newError(ErrorInvalidRequestObject, 400, "malformed request object", err)
 	}
 
 	pub, err := s.resolveClientKey(ctx, client.ID(), keys.RequestObjectVerification, alg, obj.KeyID())
 	if err != nil {
-		return nil, newError(ErrorInvalidRequestObject, 400, "no matching client key", err)
+		return nil, nil, newError(ErrorInvalidRequestObject, 400, "no matching client key", err)
 	}
 
 	verified, err := obj.Verify(ctx, pub, requestobject.VerifyPolicy{
@@ -192,9 +211,26 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 		Replay:           s.requestObjectReplayChecker(),
 	})
 	if err != nil {
-		return nil, newError(ErrorInvalidRequestObject, 400, "request object verification failed", err)
+		return nil, nil, newError(ErrorInvalidRequestObject, 400, "request object verification failed", err)
 	}
-	return verified.Parameters, nil
+	tokenClaims, checkErr := s.checkExtensions(verified.Parameters, extension.SourceRequestObject)
+	if checkErr != nil {
+		return nil, nil, checkErr
+	}
+	return verified.Parameters, tokenClaims, nil
+}
+
+// checkExtensions validates every non-core parameter in params against
+// Config.Extensions, rejecting any name without a registered Definition
+// (Config.Extensions is never nil once New has run — see server.New),
+// and returns the claims-eligible subset (ReturnInTokenClaims) ready to
+// copy into a future access/ID token.
+func (s *Server) checkExtensions(params map[string]json.RawMessage, source extension.Source) (map[string]json.RawMessage, *Error) {
+	values, err := s.cfg.Extensions.Parse(params, coreAuthorizationParameters, source)
+	if err != nil {
+		return nil, newError(ErrorInvalidRequest, 400, "request contains an unregistered or invalid parameter", err)
+	}
+	return extension.AsParameters(values, s.cfg.Extensions.Definitions()...), nil
 }
 
 // resolveClientKey picks the verification key matching kid/alg from

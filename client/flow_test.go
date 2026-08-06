@@ -1,0 +1,350 @@
+package client_test
+
+import (
+	"context"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"testing"
+	"time"
+
+	fapi "github.com/osanderson/go-fapi"
+	"github.com/osanderson/go-fapi/client"
+	"github.com/osanderson/go-fapi/internal/jarm"
+	"github.com/osanderson/go-fapi/internal/requestobject"
+	"github.com/osanderson/go-fapi/internal/token"
+	"github.com/osanderson/go-fapi/keys"
+)
+
+// fakeAS simulates just enough of an authorization server's PAR and
+// token endpoints to exercise client's wire format end to end: it does
+// not verify the client's DPoP proof or client assertion signatures
+// (server's own tests already cover that verification logic
+// exhaustively) — it exists to prove client builds a well-formed
+// request and correctly verifies what comes back, particularly JARM and
+// ID token validation.
+type fakeAS struct {
+	t             *testing.T
+	jarmKey       *ecdsa.PrivateKey
+	idTokenKey    *ecdsa.PrivateKey
+	issuer        string
+	messageSigned bool
+
+	lastPARForm   url.Values
+	lastTokenForm url.Values
+	lastNonce     string
+}
+
+func newFakeAS(t *testing.T, issuer string, messageSigned bool) *fakeAS {
+	t.Helper()
+	jarmKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate jarm key: %v", err)
+	}
+	idKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate id token key: %v", err)
+	}
+	return &fakeAS{t: t, jarmKey: jarmKey, idTokenKey: idKey, issuer: issuer, messageSigned: messageSigned}
+}
+
+func (a *fakeAS) handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/par", a.handlePAR)
+	mux.HandleFunc("/token", a.handleToken)
+	return mux
+}
+
+func (a *fakeAS) handlePAR(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		a.t.Fatalf("PAR: parse form: %v", err)
+	}
+	a.lastPARForm = r.PostForm
+	if r.PostForm.Get("client_assertion") == "" {
+		a.t.Errorf("PAR: missing client_assertion")
+	}
+	if a.messageSigned {
+		requestJWT := r.PostForm.Get("request")
+		if requestJWT == "" {
+			a.t.Errorf("PAR: missing signed request object under message-signing profile")
+		} else {
+			obj, err := requestobject.Parse(requestJWT)
+			if err != nil {
+				a.t.Errorf("PAR: parse request object: %v", err)
+			} else if nonceRaw, ok := obj.Parameter("nonce"); ok {
+				json.Unmarshal(nonceRaw, &a.lastNonce)
+			}
+		}
+	} else {
+		if r.PostForm.Get("code_challenge") == "" {
+			a.t.Errorf("PAR: missing code_challenge under baseline profile")
+		}
+		a.lastNonce = r.PostForm.Get("nonce")
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]any{
+		"request_uri": "urn:ietf:params:oauth:request_uri:abc123",
+		"expires_in":  60,
+	})
+}
+
+// callbackFor builds the query string a real authorization server would
+// redirect back with, for the given outcome, using the state captured
+// from session.Handle(). code == "" produces an error response instead
+// of a success one.
+func (a *fakeAS) callbackFor(t *testing.T, state, code, errCode string) string {
+	t.Helper()
+	params := map[string]string{"state": state}
+	if code != "" {
+		params["code"] = code
+	} else {
+		params["error"] = errCode
+		params["error_description"] = "denied by test"
+	}
+
+	if !a.messageSigned {
+		q := url.Values{}
+		for k, v := range params {
+			q.Set(k, v)
+		}
+		q.Set("iss", a.issuer)
+		return q.Encode()
+	}
+
+	jsonParams := make(map[string]json.RawMessage, len(params))
+	for k, v := range params {
+		encoded, _ := json.Marshal(v)
+		jsonParams[k] = encoded
+	}
+	responseJWT, err := jarm.Create(jarm.CreateParams{
+		Signer: a.jarmKey, Algorithm: fapi.ES256, KeyID: "as-jarm-kid",
+		Issuer: a.issuer, Audience: testClientID,
+		Now: time.Now(), Lifetime: time.Minute, Parameters: jsonParams,
+	})
+	if err != nil {
+		t.Fatalf("sign jarm response: %v", err)
+	}
+	q := url.Values{}
+	q.Set("response", responseJWT)
+	return q.Encode()
+}
+
+func (a *fakeAS) handleToken(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		a.t.Fatalf("token: parse form: %v", err)
+	}
+	a.lastTokenForm = r.PostForm
+	if r.Header.Get("DPoP") == "" {
+		a.t.Errorf("token: missing DPoP header")
+	}
+	if r.PostForm.Get("code_verifier") == "" {
+		a.t.Errorf("token: missing code_verifier")
+	}
+
+	idToken, err := token.IssueIDToken(token.IDTokenParams{
+		Signer: a.idTokenKey, Algorithm: fapi.ES256, KeyID: "as-id-kid",
+		Issuer: a.issuer, Subject: "end-user-1", Audience: testClientID,
+		Nonce: a.lastNonce, Now: time.Now(), Lifetime: time.Minute,
+	})
+	if err != nil {
+		a.t.Fatalf("issue id token: %v", err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"access_token":  "opaque-access-token",
+		"token_type":    "DPoP",
+		"expires_in":    300,
+		"scope":         "openid accounts",
+		"id_token":      idToken,
+		"refresh_token": "opaque-refresh-token",
+	})
+}
+
+func newTestClient(t *testing.T, messageSigned bool) (*client.Client, *fakeAS, *httptest.Server) {
+	t.Helper()
+	as := newFakeAS(t, testIssuer, messageSigned)
+	ts := httptest.NewServer(as.handler())
+	t.Cleanup(ts.Close)
+
+	cfg := validConfig(t)
+	parURL, err := fapi.ParseEndpointURL(ts.URL+"/par", fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseEndpointURL(par): %v", err)
+	}
+	tokenURL, err := fapi.ParseEndpointURL(ts.URL+"/token", fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseEndpointURL(token): %v", err)
+	}
+	cfg.Endpoints.PushedAuthorizationRequest = parURL
+	cfg.Endpoints.Token = tokenURL
+
+	deps := validDependencies(t)
+	deps.HTTP = ts.Client()
+	deps.IssuerKeys = &fakeIssuerKeySource{keys: map[keys.IssuerVerificationPurpose]crypto.PublicKey{
+		keys.JARMVerification:    &as.jarmKey.PublicKey,
+		keys.IDTokenVerification: &as.idTokenKey.PublicKey,
+	}}
+
+	if messageSigned {
+		cfg.Profile = client.ProfileFAPISecurityWithMessageSigning
+		cfg.Algorithms.RequestObject = fapi.ES256
+		cfg.Algorithms.JARM = fapi.ES256
+		cfg.Limits.RequestObjectLifetime = time.Minute
+		cfg.Limits.MaxJARMResponseLifetime = time.Minute
+	}
+
+	c, err := client.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	return c, as, ts
+}
+
+func TestCompleteAuthorizationHappyPathBaseline(t *testing.T) {
+	c, as, _ := newTestClient(t, false)
+	ctx := context.Background()
+
+	session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid", "accounts"}})
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+
+	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-123", "")
+	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery})
+	if err != nil {
+		t.Fatalf("CompleteAuthorization: %v", err)
+	}
+	success, ok := result.(client.CompletionSuccess)
+	if !ok {
+		t.Fatalf("result type = %T, want client.CompletionSuccess", result)
+	}
+	if success.Tokens.AccessToken.Reveal() != "opaque-access-token" {
+		t.Errorf("AccessToken = %q", success.Tokens.AccessToken.Reveal())
+	}
+	if !success.Tokens.HasIDToken || success.Tokens.Subject != "end-user-1" {
+		t.Errorf("HasIDToken=%v Subject=%q, want true/end-user-1", success.Tokens.HasIDToken, success.Tokens.Subject)
+	}
+	if !success.Tokens.HasRefreshToken {
+		t.Errorf("HasRefreshToken = false, want true")
+	}
+}
+
+func TestCompleteAuthorizationHappyPathMessageSigning(t *testing.T) {
+	c, as, _ := newTestClient(t, true)
+	ctx := context.Background()
+
+	session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid", "accounts"}})
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+
+	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-456", "")
+	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery})
+	if err != nil {
+		t.Fatalf("CompleteAuthorization: %v", err)
+	}
+	success, ok := result.(client.CompletionSuccess)
+	if !ok {
+		t.Fatalf("result type = %T, want client.CompletionSuccess", result)
+	}
+	if success.Tokens.Subject != "end-user-1" {
+		t.Errorf("Subject = %q, want end-user-1", success.Tokens.Subject)
+	}
+}
+
+func TestCompleteAuthorizationDenied(t *testing.T) {
+	c, as, _ := newTestClient(t, false)
+	ctx := context.Background()
+
+	session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}})
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+
+	rawQuery := as.callbackFor(t, session.Handle().String(), "", "access_denied")
+	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery})
+	if err != nil {
+		t.Fatalf("CompleteAuthorization: %v", err)
+	}
+	denied, ok := result.(client.CompletionDenied)
+	if !ok {
+		t.Fatalf("result type = %T, want client.CompletionDenied", result)
+	}
+	if denied.Code != "access_denied" {
+		t.Errorf("Code = %q, want access_denied", denied.Code)
+	}
+}
+
+func TestHandleAuthorizationResponseRejectsReplayedState(t *testing.T) {
+	c, as, _ := newTestClient(t, false)
+	ctx := context.Background()
+
+	session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}})
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-789", "")
+
+	if _, err := c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: rawQuery}); err != nil {
+		t.Fatalf("first HandleAuthorizationResponse: %v", err)
+	}
+	if _, err := c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: rawQuery}); err == nil {
+		t.Fatalf("second HandleAuthorizationResponse (replay) = nil error, want error")
+	}
+}
+
+func TestHandleAuthorizationResponseRejectsResponseModeDowngrade(t *testing.T) {
+	// Client configured for message signing, but callback arrives as a
+	// plain query response — must be rejected, not silently accepted.
+	c, _, _ := newTestClient(t, true)
+	ctx := context.Background()
+
+	session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}})
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+
+	q := url.Values{}
+	q.Set("state", session.Handle().String())
+	q.Set("code", "downgrade-attempt")
+	q.Set("iss", testIssuer)
+
+	if _, err := c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: q.Encode()}); err == nil {
+		t.Fatalf("HandleAuthorizationResponse(plain callback under message-signing profile) = nil error, want error")
+	}
+}
+
+func TestBeginAuthorizationRejectsPARError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]any{"error": "invalid_client"})
+	}))
+	defer ts.Close()
+
+	cfg := validConfig(t)
+	parURL, err := fapi.ParseEndpointURL(ts.URL+"/par", fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseEndpointURL(par): %v", err)
+	}
+	cfg.Endpoints.PushedAuthorizationRequest = parURL
+
+	deps := validDependencies(t)
+	deps.HTTP = ts.Client()
+
+	c, err := client.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	if _, err := c.BeginAuthorization(context.Background(), client.BeginAuthorizationRequest{Scope: []string{"openid"}}); err == nil {
+		t.Fatalf("BeginAuthorization(PAR error) = nil error, want error")
+	}
+}

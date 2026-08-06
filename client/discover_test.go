@@ -1,0 +1,183 @@
+package client_test
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	fapi "github.com/osanderson/go-fapi"
+	"github.com/osanderson/go-fapi/client"
+	"github.com/osanderson/go-fapi/fapihttp"
+	"github.com/osanderson/go-fapi/internal/metadata"
+)
+
+func newDiscoveryFetcher(t *testing.T, ts *httptest.Server) *fapihttp.Client {
+	t.Helper()
+	c, err := fapihttp.New(ts.Client(), fapihttp.Config{
+		MaxResponseBytes: 1 << 16,
+		RequestTimeout:   5 * time.Second,
+		MaxRedirects:     1,
+	})
+	if err != nil {
+		t.Fatalf("fapihttp.New: %v", err)
+	}
+	return c
+}
+
+type discoveryDoc struct {
+	Issuer                             string   `json:"issuer"`
+	AuthorizationEndpoint              string   `json:"authorization_endpoint"`
+	TokenEndpoint                      string   `json:"token_endpoint"`
+	PushedAuthorizationRequestEndpoint string   `json:"pushed_authorization_request_endpoint"`
+	JWKSURI                            string   `json:"jwks_uri"`
+	IDTokenSigningAlgValuesSupported   []string `json:"id_token_signing_alg_values_supported,omitempty"`
+	RequestObjectSigningAlgValues      []string `json:"request_object_signing_alg_values_supported,omitempty"`
+	AuthorizationSigningAlgValues      []string `json:"authorization_signing_alg_values_supported,omitempty"`
+	RequireSignedRequestObject         bool     `json:"require_signed_request_object,omitempty"`
+}
+
+func TestDiscoverAcceptsValidDocumentAtRoot(t *testing.T) {
+	var gotPath string
+	var ts *httptest.Server
+	ts = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		doc := discoveryDoc{
+			Issuer:                             ts.URL,
+			AuthorizationEndpoint:              ts.URL + "/authorize",
+			TokenEndpoint:                      ts.URL + "/token",
+			PushedAuthorizationRequestEndpoint: ts.URL + "/par",
+			JWKSURI:                            ts.URL + "/jwks",
+			IDTokenSigningAlgValuesSupported:   []string{"ES256", "RS256"},
+			RequestObjectSigningAlgValues:      []string{"ES256"},
+			AuthorizationSigningAlgValues:      []string{"ES256"},
+			RequireSignedRequestObject:         true,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(doc)
+	}))
+	defer ts.Close()
+
+	tsIssuer, err := fapi.ParseIssuerURL(ts.URL, fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseIssuerURL(ts.URL): %v", err)
+	}
+
+	md, err := client.Discover(context.Background(), newDiscoveryFetcher(t, ts), tsIssuer, fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if gotPath != "/.well-known/openid-configuration" {
+		t.Errorf("fetched path = %q, want /.well-known/openid-configuration", gotPath)
+	}
+	if md.Endpoints.Authorization.String() != ts.URL+"/authorize" {
+		t.Errorf("Authorization = %q", md.Endpoints.Authorization.String())
+	}
+	if md.Endpoints.Token.String() != ts.URL+"/token" {
+		t.Errorf("Token = %q", md.Endpoints.Token.String())
+	}
+	if md.Endpoints.PushedAuthorizationRequest.String() != ts.URL+"/par" {
+		t.Errorf("PushedAuthorizationRequest = %q", md.Endpoints.PushedAuthorizationRequest.String())
+	}
+	if md.JWKSURI.String() != ts.URL+"/jwks" {
+		t.Errorf("JWKSURI = %q", md.JWKSURI.String())
+	}
+	if len(md.IDTokenAlgorithms) != 1 || md.IDTokenAlgorithms[0] != fapi.ES256 {
+		t.Errorf("IDTokenAlgorithms = %v, want [ES256] (RS256 is unsupported and must be filtered)", md.IDTokenAlgorithms)
+	}
+	if len(md.RequestObjectAlgorithms) != 1 || md.RequestObjectAlgorithms[0] != fapi.ES256 {
+		t.Errorf("RequestObjectAlgorithms = %v, want [ES256]", md.RequestObjectAlgorithms)
+	}
+	if len(md.JARMAlgorithms) != 1 || md.JARMAlgorithms[0] != fapi.ES256 {
+		t.Errorf("JARMAlgorithms = %v, want [ES256]", md.JARMAlgorithms)
+	}
+	if !md.RequireSignedRequestObject {
+		t.Errorf("RequireSignedRequestObject = false, want true")
+	}
+}
+
+func TestDiscoverInsertsWellKnownPathBeforeIssuerPath(t *testing.T) {
+	var gotPath string
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		// The issuer this test uses has a path component ("/tenant1"),
+		// so the well-known suffix must be inserted before it per RFC
+		// 8414 §3.1 — respond using whatever issuer the request implies
+		// isn't necessary here, only that the path was constructed
+		// correctly; return 404 so Discover fails cleanly either way and
+		// this test only asserts on gotPath.
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer ts.Close()
+
+	issuer, err := fapi.ParseIssuerURL(ts.URL+"/tenant1", fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+	_, _ = client.Discover(context.Background(), newDiscoveryFetcher(t, ts), issuer, fapi.AllowLoopbackHTTP())
+
+	if gotPath != "/.well-known/openid-configuration/tenant1" {
+		t.Fatalf("fetched path = %q, want /.well-known/openid-configuration/tenant1", gotPath)
+	}
+}
+
+func TestDiscoverRejectsIssuerMismatch(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(discoveryDoc{
+			Issuer:                             "https://attacker.example.com",
+			AuthorizationEndpoint:              "https://as.example.com/authorize",
+			TokenEndpoint:                      "https://as.example.com/token",
+			PushedAuthorizationRequestEndpoint: "https://as.example.com/par",
+			JWKSURI:                            "https://as.example.com/jwks",
+		})
+	}))
+	defer ts.Close()
+
+	issuer, err := fapi.ParseIssuerURL(ts.URL, fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+	_, err = client.Discover(context.Background(), newDiscoveryFetcher(t, ts), issuer, fapi.AllowLoopbackHTTP())
+	if !errors.Is(err, metadata.ErrIssuerMismatch) {
+		t.Fatalf("Discover(issuer mismatch) error = %v, want metadata.ErrIssuerMismatch", err)
+	}
+}
+
+func TestDiscoverRejectsMissingPAREndpoint(t *testing.T) {
+	var ts *httptest.Server
+	ts = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(discoveryDoc{
+			Issuer:                ts.URL,
+			AuthorizationEndpoint: ts.URL + "/authorize",
+			TokenEndpoint:         ts.URL + "/token",
+			JWKSURI:               ts.URL + "/jwks",
+			// PushedAuthorizationRequestEndpoint intentionally omitted:
+			// this module only ever drives a PAR-based flow.
+		})
+	}))
+	defer ts.Close()
+
+	issuer, err := fapi.ParseIssuerURL(ts.URL, fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+	_, err = client.Discover(context.Background(), newDiscoveryFetcher(t, ts), issuer, fapi.AllowLoopbackHTTP())
+	if !errors.Is(err, metadata.ErrMissingField) {
+		t.Fatalf("Discover(no PAR endpoint) error = %v, want metadata.ErrMissingField", err)
+	}
+}
+
+func TestDiscoverRejectsNilFetcher(t *testing.T) {
+	issuer, err := fapi.ParseIssuerURL("https://as.example.com")
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+	if _, err := client.Discover(context.Background(), nil, issuer); err == nil {
+		t.Fatalf("Discover(nil fetcher) = nil error, want error")
+	}
+}

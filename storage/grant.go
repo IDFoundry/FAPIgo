@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	fapi "github.com/osanderson/go-fapi"
@@ -27,6 +28,14 @@ type NewAuthorizationCode struct {
 	ACR      string
 	AMR      []string
 
+	// TokenClaims are the validated extension parameter values
+	// (extension.Definition.ReturnInTokenClaims) carried by the
+	// authorization request this code grants — see
+	// storage.NewPARRecord.TokenClaims. RedeemAuthorizationCode must
+	// return them unmodified, so ExchangeAuthorizationCode can copy them
+	// into the access and ID tokens it issues.
+	TokenClaims map[string]json.RawMessage
+
 	ExpiresAt time.Time
 }
 
@@ -46,12 +55,13 @@ type RedeemedAuthorizationCode struct {
 	CodeChallenge       string
 	CodeChallengeMethod string
 
-	Subject  string
-	Scope    []string
-	Nonce    string
-	AuthTime time.Time
-	ACR      string
-	AMR      []string
+	Subject     string
+	Scope       []string
+	Nonce       string
+	AuthTime    time.Time
+	ACR         string
+	AMR         []string
+	TokenClaims map[string]json.RawMessage
 
 	ExpiresAt time.Time
 }
@@ -65,13 +75,14 @@ type RedeemedAuthorizationCode struct {
 type NewRefreshToken struct {
 	TokenHash [32]byte
 
-	ClientID   fapi.ClientID
-	Subject    string
-	Scope      []string
-	Thumbprint string
-	AuthTime   time.Time
-	ACR        string
-	AMR        []string
+	ClientID    fapi.ClientID
+	Subject     string
+	Scope       []string
+	Thumbprint  string
+	AuthTime    time.Time
+	ACR         string
+	AMR         []string
+	TokenClaims map[string]json.RawMessage
 
 	ExpiresAt time.Time
 }
@@ -86,13 +97,14 @@ type RefreshTokenRedemption struct {
 // RedeemedRefreshToken is what RedeemRefreshToken returns for a
 // successfully redeemed token.
 type RedeemedRefreshToken struct {
-	ClientID   fapi.ClientID
-	Subject    string
-	Scope      []string
-	Thumbprint string
-	AuthTime   time.Time
-	ACR        string
-	AMR        []string
+	ClientID    fapi.ClientID
+	Subject     string
+	Scope       []string
+	Thumbprint  string
+	AuthTime    time.Time
+	ACR         string
+	AMR         []string
+	TokenClaims map[string]json.RawMessage
 
 	ExpiresAt time.Time
 }

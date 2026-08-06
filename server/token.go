@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -105,7 +106,7 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorInvalidGrant, 400, "code_verifier does not match code_challenge", err))
 	}
 
-	accessToken, err := s.issueAccessToken(ctx, client.ID(), redeemed.Subject, redeemed.Scope, thumbprint)
+	accessToken, err := s.issueAccessToken(ctx, client.ID(), redeemed.Subject, redeemed.Scope, thumbprint, redeemed.TokenClaims)
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to issue access token", err))
 	}
@@ -118,7 +119,7 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	}
 
 	if containsScope(redeemed.Scope, "openid") {
-		idToken, err := s.issueIDToken(ctx, client.ID(), redeemed.Subject, redeemed.Nonce, redeemed.AuthTime, redeemed.ACR, redeemed.AMR)
+		idToken, err := s.issueIDToken(ctx, client.ID(), redeemed.Subject, redeemed.Nonce, redeemed.AuthTime, redeemed.ACR, redeemed.AMR, redeemed.TokenClaims)
 		if err != nil {
 			return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to issue ID token", err))
 		}
@@ -127,7 +128,7 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	}
 
 	if containsScope(redeemed.Scope, "offline_access") {
-		refreshToken, err := s.issueRefreshToken(ctx, client.ID(), redeemed.Subject, redeemed.Scope, thumbprint, redeemed.AuthTime, redeemed.ACR, redeemed.AMR)
+		refreshToken, err := s.issueRefreshToken(ctx, client.ID(), redeemed.Subject, redeemed.Scope, thumbprint, redeemed.AuthTime, redeemed.ACR, redeemed.AMR, redeemed.TokenClaims)
 		if err != nil {
 			return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to issue refresh token", err))
 		}
@@ -159,7 +160,7 @@ func (s *Server) verifyTokenRequestDPoP(ctx context.Context, proof string) (dpop
 	return verified, nil
 }
 
-func (s *Server) issueAccessToken(ctx context.Context, clientID fapi.ClientID, subject string, scope []string, thumbprint string) (string, error) {
+func (s *Server) issueAccessToken(ctx context.Context, clientID fapi.ClientID, subject string, scope []string, thumbprint string, tokenClaims map[string]json.RawMessage) (string, error) {
 	signer, kid, err := s.newSigner(ctx, keys.AccessTokenSigning, s.cfg.Algorithms.AccessToken)
 	if err != nil {
 		return "", err
@@ -171,11 +172,12 @@ func (s *Server) issueAccessToken(ctx context.Context, clientID fapi.ClientID, s
 		Scope:        strings.Join(scope, " "),
 		Confirmation: &token.Confirmation{JKT: thumbprint},
 		Now:          s.deps.Clock.Now(), Lifetime: s.cfg.Limits.AccessTokenLifetime,
-		Random: s.deps.Random,
+		Random:     s.deps.Random,
+		Parameters: tokenClaims,
 	})
 }
 
-func (s *Server) issueIDToken(ctx context.Context, clientID fapi.ClientID, subject, nonce string, authTime time.Time, acr string, amr []string) (string, error) {
+func (s *Server) issueIDToken(ctx context.Context, clientID fapi.ClientID, subject, nonce string, authTime time.Time, acr string, amr []string, tokenClaims map[string]json.RawMessage) (string, error) {
 	signer, kid, err := s.newSigner(ctx, keys.IDTokenSigning, s.cfg.Algorithms.IDToken)
 	if err != nil {
 		return "", err
@@ -185,27 +187,29 @@ func (s *Server) issueIDToken(ctx context.Context, clientID fapi.ClientID, subje
 		Issuer: s.cfg.Issuer.String(), Subject: subject, Audience: clientID.String(),
 		Nonce: nonce, AuthTime: authTime, ACR: acr, AMR: amr,
 		Now: s.deps.Clock.Now(), Lifetime: s.cfg.Limits.IDTokenLifetime,
+		Parameters: tokenClaims,
 	})
 }
 
 // issueRefreshToken generates and persists a new refresh token, returning
 // its raw value.
-func (s *Server) issueRefreshToken(ctx context.Context, clientID fapi.ClientID, subject string, scope []string, thumbprint string, authTime time.Time, acr string, amr []string) (string, error) {
+func (s *Server) issueRefreshToken(ctx context.Context, clientID fapi.ClientID, subject string, scope []string, thumbprint string, authTime time.Time, acr string, amr []string, tokenClaims map[string]json.RawMessage) (string, error) {
 	raw, err := generateRefreshToken(s.deps.Random)
 	if err != nil {
 		return "", err
 	}
 	now := s.deps.Clock.Now()
 	if err := s.deps.Grants.CreateRefreshToken(ctx, storage.NewRefreshToken{
-		TokenHash:  sha256.Sum256([]byte(raw)),
-		ClientID:   clientID,
-		Subject:    subject,
-		Scope:      scope,
-		Thumbprint: thumbprint,
-		AuthTime:   authTime,
-		ACR:        acr,
-		AMR:        amr,
-		ExpiresAt:  now.Add(s.cfg.Limits.RefreshTokenLifetime),
+		TokenHash:   sha256.Sum256([]byte(raw)),
+		ClientID:    clientID,
+		Subject:     subject,
+		Scope:       scope,
+		Thumbprint:  thumbprint,
+		AuthTime:    authTime,
+		ACR:         acr,
+		AMR:         amr,
+		TokenClaims: tokenClaims,
+		ExpiresAt:   now.Add(s.cfg.Limits.RefreshTokenLifetime),
 	}); err != nil {
 		return "", err
 	}

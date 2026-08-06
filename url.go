@@ -115,3 +115,17 @@ func (u URL) URL() url.URL {
 func (u URL) IsZero() bool {
 	return u.value == url.URL{}
 }
+
+// WithQuery returns a copy of u with its query string replaced by
+// query — for appending caller-supplied parameters (e.g. request_uri,
+// client_id) to an already-validated endpoint URL. It does not
+// re-validate scheme, credentials or fragment, since replacing only the
+// query string cannot reintroduce a problem ParseEndpointURL already
+// ruled out on u; this is what lets a caller build on an endpoint URL
+// parsed under AllowLoopbackHTTP() without having to know that option
+// applied to reconstruct the result.
+func (u URL) WithQuery(query url.Values) URL {
+	out := u.value
+	out.RawQuery = query.Encode()
+	return URL{value: out}
+}

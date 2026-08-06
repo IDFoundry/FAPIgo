@@ -14,6 +14,7 @@ import (
 	"time"
 
 	fapi "github.com/osanderson/go-fapi"
+	"github.com/osanderson/go-fapi/extension"
 	"github.com/osanderson/go-fapi/internal/clientassertion"
 	"github.com/osanderson/go-fapi/internal/requestobject"
 	"github.com/osanderson/go-fapi/keys"
@@ -33,6 +34,13 @@ func (f *fakeClientRepository) ResolveClient(_ context.Context, id fapi.ClientID
 		return storage.RegisteredClient{}, fmt.Errorf("no such client %q", id)
 	}
 	return c, nil
+}
+
+// Capabilities is a test-only assertion so tests can exercise
+// AssuranceProduction's storage.StoreAssurance check — it is not a real
+// durability claim about this in-memory fake.
+func (f *fakeClientRepository) Capabilities() storage.Capabilities {
+	return storage.Capabilities{Durable: true, AtomicConsume: true, SerializableRedemption: true, CrossInstanceConsistent: true, EncryptedAtRest: true}
 }
 
 type fakeTransactionStore struct {
@@ -74,15 +82,17 @@ func (f *fakeTransactionStore) BeginAuthorization(_ context.Context, txn storage
 		f.byHandle = make(map[string]storage.CompletedInteraction)
 	}
 	f.byHandle[txn.Handle] = storage.CompletedInteraction{
-		ClientID:   record.ClientID,
-		Parameters: record.Parameters,
-		ExpiresAt:  txn.HandleExpiresAt,
+		ClientID:    record.ClientID,
+		Parameters:  record.Parameters,
+		TokenClaims: record.TokenClaims,
+		ExpiresAt:   txn.HandleExpiresAt,
 	}
 
 	return storage.PushedAuthorizationRequest{
-		ClientID:   record.ClientID,
-		Parameters: record.Parameters,
-		ExpiresAt:  record.ExpiresAt,
+		ClientID:    record.ClientID,
+		Parameters:  record.Parameters,
+		TokenClaims: record.TokenClaims,
+		ExpiresAt:   record.ExpiresAt,
 	}, nil
 }
 
@@ -103,6 +113,11 @@ func (f *fakeTransactionStore) CompleteAuthorization(_ context.Context, txn stor
 	return interaction, nil
 }
 
+// Capabilities is a test-only assertion — see fakeClientRepository.Capabilities.
+func (f *fakeTransactionStore) Capabilities() storage.Capabilities {
+	return storage.Capabilities{Durable: true, AtomicConsume: true, SerializableRedemption: true, CrossInstanceConsistent: true, EncryptedAtRest: true}
+}
+
 type fakeReplayStore struct {
 	mu   sync.Mutex
 	seen map[[32]byte]bool
@@ -121,6 +136,11 @@ func (f *fakeReplayStore) UseOnce(_ context.Context, use storage.ReplayUse) erro
 	}
 	f.seen[key] = true
 	return nil
+}
+
+// Capabilities is a test-only assertion — see fakeClientRepository.Capabilities.
+func (f *fakeReplayStore) Capabilities() storage.Capabilities {
+	return storage.Capabilities{Durable: true, AtomicConsume: true, SerializableRedemption: true, CrossInstanceConsistent: true, EncryptedAtRest: true}
 }
 
 type fakeClientKeySource struct {
@@ -177,6 +197,7 @@ func (f *fakeGrantStore) RedeemAuthorizationCode(_ context.Context, redemption s
 		AuthTime:            code.AuthTime,
 		ACR:                 code.ACR,
 		AMR:                 code.AMR,
+		TokenClaims:         code.TokenClaims,
 		ExpiresAt:           code.ExpiresAt,
 	}, nil
 }
@@ -215,14 +236,15 @@ func (f *fakeGrantStore) RedeemRefreshToken(_ context.Context, redemption storag
 	}
 	f.refreshRedeemed[redemption.TokenHash] = true
 	return storage.RedeemedRefreshToken{
-		ClientID:   tok.ClientID,
-		Subject:    tok.Subject,
-		Scope:      tok.Scope,
-		Thumbprint: tok.Thumbprint,
-		AuthTime:   tok.AuthTime,
-		ACR:        tok.ACR,
-		AMR:        tok.AMR,
-		ExpiresAt:  tok.ExpiresAt,
+		ClientID:    tok.ClientID,
+		Subject:     tok.Subject,
+		Scope:       tok.Scope,
+		Thumbprint:  tok.Thumbprint,
+		AuthTime:    tok.AuthTime,
+		ACR:         tok.ACR,
+		AMR:         tok.AMR,
+		TokenClaims: tok.TokenClaims,
+		ExpiresAt:   tok.ExpiresAt,
 	}, nil
 }
 
@@ -232,6 +254,11 @@ func (f *fakeGrantStore) allRefreshTokens() []storage.NewRefreshToken {
 	out := make([]storage.NewRefreshToken, len(f.refreshTokens))
 	copy(out, f.refreshTokens)
 	return out
+}
+
+// Capabilities is a test-only assertion — see fakeClientRepository.Capabilities.
+func (f *fakeGrantStore) Capabilities() storage.Capabilities {
+	return storage.Capabilities{Durable: true, AtomicConsume: true, SerializableRedemption: true, CrossInstanceConsistent: true, EncryptedAtRest: true}
 }
 
 // fakeKeyManager signs with a fixed ECDSA P-256 key using the same
@@ -799,5 +826,105 @@ func TestPushAuthorizationRequestAuditsFailure(t *testing.T) {
 	events := h.audit.all()
 	if len(events) != 1 || events[0].Outcome != server.AuditOutcomeFailure {
 		t.Fatalf("audit events = %+v, want one failure event", events)
+	}
+}
+
+// --- extension wiring --------------------------------------------------
+
+func newHarnessWithExtensions(t *testing.T, profile server.Profile, registry *extension.Registry) harness {
+	t.Helper()
+	now := time.Now()
+	key := generateKey(t)
+	serverKey := generateKey(t)
+
+	client, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
+		ID:                       testClientID,
+		RedirectURIs:             []fapi.RegisteredRedirectURI{testRedirectURI},
+		ClientAssertionAlgorithm: fapi.ES256,
+		RequestObjectAlgorithm:   fapi.ES256,
+		AllowedScopes:            []string{"openid", "accounts"},
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+	issuer, err := fapi.ParseIssuerURL(testIssuer)
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+
+	cfg := server.Config{
+		Issuer:    issuer,
+		Endpoints: testEndpoints(t),
+		Profile:   profile,
+		Algorithms: server.AlgorithmPolicy{
+			ClientAssertion: server.AlgorithmSet{fapi.ES256},
+			RequestObject:   server.AlgorithmSet{fapi.ES256},
+			JARM:            fapi.ES256,
+			AccessToken:     fapi.ES256,
+			IDToken:         fapi.ES256,
+		},
+		Limits: server.Limits{
+			PushedRequestLifetime:      90 * time.Second,
+			MaxClientAssertionLifetime: time.Minute,
+			MaxRequestObjectLifetime:   time.Minute,
+			InteractionLifetime:        5 * time.Minute,
+			AuthorizationCodeLifetime:  time.Minute,
+			JARMResponseLifetime:       time.Minute,
+			AccessTokenLifetime:        5 * time.Minute,
+			IDTokenLifetime:            5 * time.Minute,
+			RefreshTokenLifetime:       5 * time.Minute,
+			MaxDPoPProofAge:            time.Minute,
+			MaxClockSkew:               5 * time.Second,
+		},
+		Assurance:  server.AssuranceDevelopment,
+		Extensions: registry,
+	}
+	deps := server.Dependencies{
+		Clients:      &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
+		Transactions: &fakeTransactionStore{},
+		Grants:       &fakeGrantStore{},
+		Replay:       &fakeReplayStore{},
+		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
+			testClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
+		}},
+		Keys:   &fakeKeyManager{key: serverKey, keyID: "as-key-1"},
+		Clock:  fixedClock{now: now},
+		Random: rand.Reader,
+	}
+	srv, err := server.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+	return harness{server: srv, key: key, serverKey: serverKey, now: now}
+}
+
+func TestPushAuthorizationRequestRejectsUnregisteredExtensionParameter(t *testing.T) {
+	h := newHarnessWithExtensions(t, server.ProfileFAPISecurity, nil)
+	params := plainFormParameters(t, h.clientAssertion(t), map[string]string{"x_custom": "hello"})
+
+	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: params},
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequest)
+	}
+}
+
+func TestPushAuthorizationRequestAcceptsRegisteredExtensionParameter(t *testing.T) {
+	def := extension.Definition[string]{
+		Name: "x_custom", Cardinality: extension.Single,
+		AllowedSources: extension.SourcePlainParameter, MaxBytes: 64,
+	}
+	registry, err := extension.NewRegistry(def)
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	h := newHarnessWithExtensions(t, server.ProfileFAPISecurity, registry)
+	params := plainFormParameters(t, h.clientAssertion(t), map[string]string{"x_custom": "hello"})
+
+	if _, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: params},
+	}); err != nil {
+		t.Fatalf("PushAuthorizationRequest: %v", err)
 	}
 }

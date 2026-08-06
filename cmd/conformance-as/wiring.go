@@ -1,0 +1,80 @@
+package main
+
+import (
+	"crypto/rand"
+	"net/http"
+
+	fapi "github.com/osanderson/go-fapi"
+	"github.com/osanderson/go-fapi/fapihttp"
+	"github.com/osanderson/go-fapi/keys"
+	"github.com/osanderson/go-fapi/server"
+)
+
+// newServerMux builds the full server.Server + HTTP router wiring from a
+// resolved config — everything main needs before it can start listening.
+// Factored out so the end-to-end smoke test can stand up the exact same
+// wiring main.go uses, against its own TLS listener, without going
+// through flags or a config file on disk.
+func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool) (*http.ServeMux, error) {
+	endpoints, err := buildEndpoints(resolved.Issuer, allowLoopbackHTTP)
+	if err != nil {
+		return nil, err
+	}
+
+	purposes := map[keys.SigningPurpose]fapi.SignatureAlgorithm{
+		keys.AccessTokenSigning: resolved.Algorithms.AccessToken,
+		keys.IDTokenSigning:     resolved.Algorithms.IDToken,
+	}
+	if resolved.Profile == server.ProfileFAPISecurityWithMessageSigning {
+		purposes[keys.JARMSigning] = resolved.Algorithms.JARM
+	}
+	keyManager, err := newEphemeralKeyManager(purposes)
+	if err != nil {
+		return nil, err
+	}
+
+	fetcher, err := fapihttp.New(&http.Client{Timeout: httpFetchTimeout}, fapihttp.Config{
+		MaxResponseBytes:  1 << 20,
+		RequestTimeout:    httpFetchTimeout,
+		MaxRedirects:      2,
+		AllowLoopbackHTTP: allowLoopbackHTTP,
+	})
+	if err != nil {
+		return nil, err
+	}
+	clientKeys, err := newClientKeySource(fetcher, resolved.Clients)
+	if err != nil {
+		return nil, err
+	}
+
+	srvCfg := server.Config{
+		Issuer:     resolved.Issuer,
+		Endpoints:  endpoints,
+		Profile:    resolved.Profile,
+		Algorithms: resolved.Algorithms,
+		Limits:     resolved.Limits,
+		// These storage implementations are honestly non-durable
+		// in-memory maps. AssuranceProduction would make server.New
+		// reject them via checkStoreAssurance — do not change this to
+		// AssuranceProduction without also implementing
+		// storage.StoreAssurance on every store constructed below.
+		Assurance: server.AssuranceDevelopment,
+	}
+	srvDeps := server.Dependencies{
+		Clients:      newStaticClientRepository(resolved.Clients),
+		Transactions: newInMemoryTransactionStore(),
+		Grants:       newInMemoryGrantStore(),
+		Replay:       newInMemoryReplayStore(),
+		ClientKeys:   clientKeys,
+		Keys:         keyManager,
+		Clock:        server.SystemClock{},
+		Random:       rand.Reader,
+	}
+	srv, err := server.New(srvCfg, srvDeps)
+	if err != nil {
+		return nil, err
+	}
+
+	consent := newConsentHandler(srv, server.SystemClock{}, resolved.DefaultSubject)
+	return newRouter(srv, consent, resolved.AdvertisedScopes), nil
+}

@@ -4,6 +4,9 @@ Hardened, separately conformant FAPI 2.0 client, authorization-server and
 resource-server engines for Go, built on one rigorously tested protocol
 core.
 
+> **⚠ Work in progress.** APIs, package layout and behavior may still
+> change without notice. Not yet recommended for production use.
+
 > **Status:** all three roles (`client`, `server`, `resource`), the shared
 > internal protocol core, `keys`, `storage` (including a reusable storage
 > contract test suite for downstream backends), `extension`, the hardened
@@ -12,8 +15,10 @@ core.
 > harness are all implemented and covered by tests, including end-to-end
 > authorization flows — both hand-configured and fully
 > discovery-driven — under the FAPI 2.0 baseline and message-signing
-> profiles. Neither role has been run against the OpenID Foundation
-> conformance suite yet — see [conformance/](conformance/README.md).
+> profiles. The `server` (authorization server) role has been run
+> against the OpenID Foundation conformance suite's FAPI2 baseline test
+> plan with a clean pass; `client` and `resource` have not yet — see
+> [conformance/](conformance/README.md).
 
 ```go
 import (

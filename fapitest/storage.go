@@ -150,7 +150,7 @@ func (s *memGrantStore) RedeemRefreshToken(_ context.Context, redemption storage
 	return storage.RedeemedRefreshToken{
 		ClientID: token.ClientID, Subject: token.Subject, Scope: token.Scope,
 		Thumbprint: token.Thumbprint, AuthTime: token.AuthTime, ACR: token.ACR, AMR: token.AMR,
-		TokenClaims: token.TokenClaims,
+		TokenClaims:            token.TokenClaims,
 		RequestedIDTokenClaims: token.RequestedIDTokenClaims, RequestedUserinfoClaims: token.RequestedUserinfoClaims,
 		ExpiresAt: token.ExpiresAt,
 	}, nil

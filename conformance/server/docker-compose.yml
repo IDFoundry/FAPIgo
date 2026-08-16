@@ -1,0 +1,75 @@
+# Runs conformance-as against the OpenID Foundation conformance suite
+# entirely locally — no tunnel required. See scripts/README.md for the
+# full procedure.
+#
+# Why no CA/tunnel is needed: the suite's own outbound HTTP client
+# (net.openid.conformance.condition.AbstractCondition.createHttpClient)
+# trusts any certificate and skips hostname verification for every call
+# it makes to the implementation under test. So the only real
+# requirement is that the suite's containers can reach this one, which
+# this file gets by attaching to the suite's own docker-compose network
+# rather than by making the cert trusted.
+#
+# Usage:
+#   1. Start the OIDF conformance suite separately (its own
+#      docker-compose up) and find the network it created:
+#        docker network ls   # usually <suite-checkout-dir>_default
+#   2. export SUITE_NETWORK=<that network name>   (defaults below)
+#   3. ./scripts/generate-server-cert.sh
+#   4. Fill in oidf-config/*.config.json — see oidf-config/README.md
+#   5. docker compose up --build conformance-as-baseline
+#      (or conformance-as-message-signing, or both)
+#
+# The suite sometimes shows a "visit https://conformance-as-baseline:8443/
+# authorize?..." link for you to open in your own browser — that
+# hostname is Docker-internal and won't resolve on your host. Don't
+# fight this with host networking (the suite's own nginx already
+# publishes 0.0.0.0:8443/8444, so no other container can bind that port
+# on any host interface either — a wildcard bind blocks all others).
+# Configure the plan's `browser` automation block instead (see
+# scripts/README.md) so the suite's own in-container browser — which
+# already sits on this same Docker network — drives consent itself. For
+# a one-off manual click-through, substitute this file's published host
+# port for the hostname in the link instead.
+
+services:
+  conformance-as-baseline:
+    build:
+      context: ../..
+      dockerfile: conformance/server/Dockerfile
+    hostname: conformance-as-baseline
+    networks: [suite]
+    ports:
+      - "18443:8443" # optional: only needed to poke it from the host.
+      # Not 8443 -> the suite's own nginx already occupies that port on
+      # every host interface. This container's actual reachability from
+      # the suite is via the docker network + hostname, independent of
+      # this host-side publish — see this file's header comment.
+    volumes:
+      - ./oidf-config/baseline.config.json:/config.json:ro
+      - ./certs:/certs:ro
+    command:
+      - -config=/config.json
+      - -cert=/certs/server.crt
+      - -key=/certs/server.key
+
+  conformance-as-message-signing:
+    build:
+      context: ../..
+      dockerfile: conformance/server/Dockerfile
+    hostname: conformance-as-message-signing
+    networks: [suite]
+    ports:
+      - "18444:8443" # see conformance-as-baseline's port comment above
+    volumes:
+      - ./oidf-config/message-signing.config.json:/config.json:ro
+      - ./certs:/certs:ro
+    command:
+      - -config=/config.json
+      - -cert=/certs/server.crt
+      - -key=/certs/server.key
+
+networks:
+  suite:
+    external: true
+    name: ${SUITE_NETWORK:-conformance-suite_default}

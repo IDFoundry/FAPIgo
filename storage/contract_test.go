@@ -51,9 +51,12 @@ func (s *refGrantStore) RedeemAuthorizationCode(_ context.Context, r storage.Aut
 	return storage.RedeemedAuthorizationCode{
 		ClientID: code.ClientID, RedirectURI: code.RedirectURI,
 		CodeChallenge: code.CodeChallenge, CodeChallengeMethod: code.CodeChallengeMethod,
+		DPoPJKT: code.DPoPJKT,
 		Subject: code.Subject, Scope: code.Scope, Nonce: code.Nonce,
 		AuthTime: code.AuthTime, ACR: code.ACR, AMR: code.AMR,
-		TokenClaims: code.TokenClaims, ExpiresAt: code.ExpiresAt,
+		TokenClaims: code.TokenClaims,
+		RequestedIDTokenClaims: code.RequestedIDTokenClaims, RequestedUserinfoClaims: code.RequestedUserinfoClaims,
+		ExpiresAt: code.ExpiresAt,
 	}, nil
 }
 
@@ -78,7 +81,9 @@ func (s *refGrantStore) RedeemRefreshToken(_ context.Context, r storage.RefreshT
 	return storage.RedeemedRefreshToken{
 		ClientID: tok.ClientID, Subject: tok.Subject, Scope: tok.Scope,
 		Thumbprint: tok.Thumbprint, AuthTime: tok.AuthTime, ACR: tok.ACR, AMR: tok.AMR,
-		TokenClaims: tok.TokenClaims, ExpiresAt: tok.ExpiresAt,
+		TokenClaims: tok.TokenClaims,
+		RequestedIDTokenClaims: tok.RequestedIDTokenClaims, RequestedUserinfoClaims: tok.RequestedUserinfoClaims,
+		ExpiresAt: tok.ExpiresAt,
 	}, nil
 }
 

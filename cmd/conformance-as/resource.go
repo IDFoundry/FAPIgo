@@ -1,0 +1,166 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/url"
+
+	"github.com/osanderson/go-fapi/keys"
+	fapires "github.com/osanderson/go-fapi/resource"
+	"github.com/osanderson/go-fapi/server"
+)
+
+// selfIssuerKeySource resolves this same process's own access-token
+// signing key directly from its in-memory keyManager, rather than
+// looping the resource verifier's key lookup back over HTTP to this
+// binary's own /jwks endpoint. That loopback would hit this binary's
+// self-signed cert with a standard net/http.Client, which — unlike the
+// OIDF suite's own outbound client (see docker-compose.yml's header
+// comment) — does not trust it.
+type selfIssuerKeySource struct {
+	keyManager *ephemeralKeyManager
+}
+
+func (s selfIssuerKeySource) ResolveIssuerKeys(ctx context.Context, req keys.IssuerKeyRequest) (keys.IssuerKeySet, error) {
+	pub, err := s.keyManager.PublicKey(ctx, keys.AccessTokenSigning, req.Algorithm)
+	if err != nil {
+		return keys.IssuerKeySet{}, err
+	}
+	return keys.IssuerKeySet{Keys: []keys.IssuerKey{
+		{KeyID: pub.KeyID, Algorithm: req.Algorithm, PublicKey: pub.PublicKey},
+	}}, nil
+}
+
+// resourceHandler serves this conformance binary's one protected
+// resource endpoint — a stand-in "accounts" API that exists only so the
+// OIDF suite's AS test plan has something to call with the access token
+// it was just issued. AbstractFAPI2SPFinalServerTestModule's happy-flow
+// test does exactly that (CallProtectedResource); the suite plan
+// config's resource.resourceUrl must point here.
+//
+// resourceURL is this endpoint's own fixed, externally-visible URL, used
+// as the DPoP proof's expected "htu" — not read from the incoming
+// request's Host header, matching how this binary's other endpoints
+// (server.Endpoints) are never inferred from it either.
+func resourceHandler(verifier *fapires.Verifier, resourceURL *url.URL) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		dpopProof, ok := singleDPoPHeader(r)
+		if !ok {
+			writeResourceErrorRaw(w, http.StatusBadRequest, "invalid_request", "multiple DPoP headers are not permitted")
+			return
+		}
+		authCtx, err := verifier.Verify(r.Context(), fapires.VerifyRequest{
+			Method:        r.Method,
+			URL:           resourceURL,
+			Authorization: r.Header.Get("Authorization"),
+			DPoPProof:     dpopProof,
+		})
+		if err != nil {
+			writeResourceError(w, err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"subject":   authCtx.Subject,
+			"client_id": authCtx.ClientID,
+			"accounts":  []any{},
+		})
+	}
+}
+
+// userinfoHandler serves the OIDC UserInfo endpoint (OIDC Core §5.3),
+// backed by the same access-token verification as resourceHandler (this
+// binary's tokens are always issued for its own single issuer/audience,
+// so one Verifier config covers every protected endpoint it hosts).
+// Unlike /accounts, UserInfo has a real spec-defined contract: it
+// requires "openid" scope and must always return "sub"
+// (OIDCC-5.3.2), plus whatever identity claims this binary has for the
+// subject (see identity_claims.go — supporting real claim values, not
+// just the plumbing, is what
+// fapi2-security-profile-final-test-claims-parameter-identity-claims
+// actually checks).
+//
+// userinfoURL is this endpoint's own fixed, externally-visible URL —
+// see resourceHandler's doc comment for why it isn't read from the
+// incoming request's Host header.
+func userinfoHandler(verifier *fapires.Verifier, userinfoURL *url.URL, identityClaims staticIdentityClaims) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		dpopProof, ok := singleDPoPHeader(r)
+		if !ok {
+			writeResourceErrorRaw(w, http.StatusBadRequest, "invalid_request", "multiple DPoP headers are not permitted")
+			return
+		}
+		authCtx, err := verifier.Verify(r.Context(), fapires.VerifyRequest{
+			Method:        r.Method,
+			URL:           userinfoURL,
+			Authorization: r.Header.Get("Authorization"),
+			DPoPProof:     dpopProof,
+		})
+		if err != nil {
+			writeResourceError(w, err)
+			return
+		}
+		hasOpenIDScope := false
+		for _, scope := range authCtx.Scopes {
+			if scope == "openid" {
+				hasOpenIDScope = true
+				break
+			}
+		}
+		if !hasOpenIDScope {
+			writeResourceErrorRaw(w, http.StatusForbidden, "insufficient_scope", "access token was not granted the openid scope")
+			return
+		}
+
+		// requested_userinfo_claims (server.RequestedUserinfoClaimsKey) was
+		// embedded in this access token at issuance, carrying forward the
+		// authorization request's "claims" parameter — see that
+		// constant's doc comment for why a UserInfo call, arriving as a
+		// wholly separate later request, has no other way to know what
+		// was originally requested. No entry there means nothing was
+		// requested, and this endpoint must not return any identity claim
+		// in that case (not "return everything this binary happens to
+		// know" — that would leak data the client never asked for).
+		var requestedNames []string
+		if raw, ok := authCtx.Claims[server.RequestedUserinfoClaimsKey]; ok {
+			_ = json.Unmarshal(raw, &requestedNames)
+		}
+		claims, err := identityClaims.ResolveIdentityClaims(r.Context(), authCtx.Subject, requestedNames)
+		if err != nil {
+			writeResourceErrorRaw(w, http.StatusInternalServerError, "server_error", "failed to resolve identity claims")
+			return
+		}
+		body := make(map[string]any, len(claims)+1)
+		for k, v := range claims {
+			body[k] = v
+		}
+		body["sub"] = authCtx.Subject
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(body)
+	}
+}
+
+func writeResourceError(w http.ResponseWriter, err error) {
+	resErr, ok := err.(*fapires.Error)
+	if !ok {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	writeResourceErrorRaw(w, resErr.HTTPStatus(), string(resErr.Code()), resErr.PublicDescription())
+}
+
+// writeResourceErrorRaw writes a resource-endpoint error response
+// directly, for failures detected before a *fapires.Error exists (e.g.
+// multiple DPoP headers, rejected before ever calling into the
+// verifier).
+func writeResourceErrorRaw(w http.ResponseWriter, status int, code, description string) {
+	w.Header().Set("WWW-Authenticate", `DPoP error="`+code+`"`)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"error":             code,
+		"error_description": description,
+	})
+}

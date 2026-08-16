@@ -16,6 +16,22 @@ import (
 // httpFetchTimeout bounds a single outbound client-JWKS fetch.
 const httpFetchTimeout = 10 * time.Second
 
+// bcp195TLS12CipherSuites is the TLS 1.2 cipher suite allow-list FAPI 2.0
+// requires (FAPI2-SP-FINAL-5.2.2, citing BCP195/RFC 7525): ECDHE key
+// exchange (forward secrecy) with an AEAD cipher only — no CBC-mode
+// suites, which Go's zero-value tls.Config still offers by default for
+// broader interop. TLS 1.3 needs no equivalent list: crypto/tls ignores
+// CipherSuites for 1.3 and always offers only its three built-in AEAD
+// suites.
+var bcp195TLS12CipherSuites = []uint16{
+	tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+	tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+	tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+	tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+	tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
+	tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+}
+
 func main() {
 	log.SetFlags(0)
 
@@ -60,7 +76,7 @@ func main() {
 	httpServer := &http.Server{
 		Addr:      resolved.ListenAddr,
 		Handler:   mux,
-		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12, CipherSuites: bcp195TLS12CipherSuites},
 	}
 
 	log.Printf("conformance-as: listening on %s (issuer %s)", resolved.ListenAddr, resolved.Issuer.String())
@@ -107,6 +123,19 @@ func buildEndpoints(issuer fapi.URL, allowLoopbackHTTP bool) (server.Endpoints, 
 		PushedAuthorizationRequest: par,
 		JWKS:                       jwks,
 	}, nil
+}
+
+// buildResourceURL derives one of this binary's stand-in
+// protected-resource endpoint URLs (path is e.g. "/accounts" or
+// "/userinfo") from issuer, the same way buildEndpoints derives the
+// four protocol endpoints. See resource.go's resourceHandler doc
+// comment for why this exists.
+func buildResourceURL(issuer fapi.URL, allowLoopbackHTTP bool, path string) (fapi.URL, error) {
+	var opts []fapi.URLOption
+	if allowLoopbackHTTP {
+		opts = append(opts, fapi.AllowLoopbackHTTP())
+	}
+	return fapi.ParseEndpointURL(issuer.String()+path, opts...)
 }
 
 // isLoopbackAddr reports whether addr's host (net.Listen-style

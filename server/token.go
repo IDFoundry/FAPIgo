@@ -76,7 +76,13 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	}
 	codeVerifier := params["code_verifier"]
 	if codeVerifier == "" {
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorInvalidRequest, 400, "code_verifier is required", nil))
+		// invalid_grant, not invalid_request: RFC 7636 §4.6 treats a
+		// code_verifier problem as a grant-validity failure, not a
+		// malformed-request one — a missing verifier is judged the same
+		// way as a mismatched one (below), covering the case where PKCE
+		// was required for the authorization but the token request omits
+		// the verifier entirely.
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorInvalidGrant, 400, "code_verifier is required", nil))
 	}
 
 	verifiedProof, dpopErr := s.verifyTokenRequestDPoP(ctx, req.DPoPProof)
@@ -102,11 +108,18 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	if !fapi.RegisteredRedirectURI(redeemed.RedirectURI).Equal(redirectURI) {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorInvalidGrant, 400, "redirect_uri does not match the authorization request", nil))
 	}
+	if redeemed.DPoPJKT != "" && redeemed.DPoPJKT != thumbprint {
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorInvalidGrant, 400, "DPoP proof key does not match the dpop_jkt bound to this authorization code", nil))
+	}
 	if err := pkce.Verify(redeemed.CodeChallenge, pkce.S256, codeVerifier); err != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorInvalidGrant, 400, "code_verifier does not match code_challenge", err))
 	}
 
-	accessToken, err := s.issueAccessToken(ctx, client.ID(), redeemed.Subject, redeemed.Scope, thumbprint, redeemed.TokenClaims)
+	accessTokenClaims, err := withRequestedUserinfoClaims(redeemed.RequestedUserinfoClaims, redeemed.TokenClaims)
+	if err != nil {
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to encode requested userinfo claims", err))
+	}
+	accessToken, err := s.issueAccessToken(ctx, client.ID(), redeemed.Subject, redeemed.Scope, thumbprint, accessTokenClaims)
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to issue access token", err))
 	}
@@ -119,7 +132,11 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	}
 
 	if containsScope(redeemed.Scope, "openid") {
-		idToken, err := s.issueIDToken(ctx, client.ID(), redeemed.Subject, redeemed.Nonce, redeemed.AuthTime, redeemed.ACR, redeemed.AMR, redeemed.TokenClaims)
+		idTokenClaims, err := s.withIdentityClaims(ctx, redeemed.Subject, redeemed.RequestedIDTokenClaims, redeemed.TokenClaims)
+		if err != nil {
+			return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to resolve identity claims", err))
+		}
+		idToken, err := s.issueIDToken(ctx, client.ID(), redeemed.Subject, redeemed.Nonce, redeemed.AuthTime, redeemed.ACR, redeemed.AMR, idTokenClaims)
 		if err != nil {
 			return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to issue ID token", err))
 		}
@@ -128,7 +145,7 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	}
 
 	if containsScope(redeemed.Scope, "offline_access") {
-		refreshToken, err := s.issueRefreshToken(ctx, client.ID(), redeemed.Subject, redeemed.Scope, thumbprint, redeemed.AuthTime, redeemed.ACR, redeemed.AMR, redeemed.TokenClaims)
+		refreshToken, err := s.issueRefreshToken(ctx, client.ID(), redeemed.Subject, redeemed.Scope, thumbprint, redeemed.AuthTime, redeemed.ACR, redeemed.AMR, redeemed.TokenClaims, redeemed.RequestedIDTokenClaims, redeemed.RequestedUserinfoClaims)
 		if err != nil {
 			return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to issue refresh token", err))
 		}
@@ -177,6 +194,55 @@ func (s *Server) issueAccessToken(ctx context.Context, clientID fapi.ClientID, s
 	})
 }
 
+// withIdentityClaims merges whatever Dependencies.IdentityClaims
+// resolves for subject on top of base (base's keys win on collision —
+// identity claims are additive, not a replacement for whatever a
+// protocol extension already put there). A nil IdentityClaims is not an
+// error; it just means no identity claims are added.
+func (s *Server) withIdentityClaims(ctx context.Context, subject string, names []string, base map[string]json.RawMessage) (map[string]json.RawMessage, error) {
+	if s.deps.IdentityClaims == nil || len(names) == 0 {
+		return base, nil
+	}
+	identity, err := s.deps.IdentityClaims.ResolveIdentityClaims(ctx, subject, names)
+	if err != nil {
+		return nil, err
+	}
+	if len(identity) == 0 {
+		return base, nil
+	}
+	merged := make(map[string]json.RawMessage, len(base)+len(identity))
+	for k, v := range identity {
+		merged[k] = v
+	}
+	for k, v := range base {
+		merged[k] = v
+	}
+	return merged, nil
+}
+
+// withRequestedUserinfoClaims embeds names under
+// RequestedUserinfoClaimsKey into base, for the access token only — an
+// embedder's own UserInfo endpoint has no other way to learn which
+// claims the original authorization request asked for (see
+// RequestedUserinfoClaimsKey's doc comment). A nil/empty names leaves
+// base untouched: no claims were requested, so there is nothing to
+// record.
+func withRequestedUserinfoClaims(names []string, base map[string]json.RawMessage) (map[string]json.RawMessage, error) {
+	if len(names) == 0 {
+		return base, nil
+	}
+	encoded, err := json.Marshal(names)
+	if err != nil {
+		return nil, err
+	}
+	merged := make(map[string]json.RawMessage, len(base)+1)
+	for k, v := range base {
+		merged[k] = v
+	}
+	merged[RequestedUserinfoClaimsKey] = encoded
+	return merged, nil
+}
+
 func (s *Server) issueIDToken(ctx context.Context, clientID fapi.ClientID, subject, nonce string, authTime time.Time, acr string, amr []string, tokenClaims map[string]json.RawMessage) (string, error) {
 	signer, kid, err := s.newSigner(ctx, keys.IDTokenSigning, s.cfg.Algorithms.IDToken)
 	if err != nil {
@@ -193,23 +259,25 @@ func (s *Server) issueIDToken(ctx context.Context, clientID fapi.ClientID, subje
 
 // issueRefreshToken generates and persists a new refresh token, returning
 // its raw value.
-func (s *Server) issueRefreshToken(ctx context.Context, clientID fapi.ClientID, subject string, scope []string, thumbprint string, authTime time.Time, acr string, amr []string, tokenClaims map[string]json.RawMessage) (string, error) {
+func (s *Server) issueRefreshToken(ctx context.Context, clientID fapi.ClientID, subject string, scope []string, thumbprint string, authTime time.Time, acr string, amr []string, tokenClaims map[string]json.RawMessage, requestedIDTokenClaims, requestedUserinfoClaims []string) (string, error) {
 	raw, err := generateRefreshToken(s.deps.Random)
 	if err != nil {
 		return "", err
 	}
 	now := s.deps.Clock.Now()
 	if err := s.deps.Grants.CreateRefreshToken(ctx, storage.NewRefreshToken{
-		TokenHash:   sha256.Sum256([]byte(raw)),
-		ClientID:    clientID,
-		Subject:     subject,
-		Scope:       scope,
-		Thumbprint:  thumbprint,
-		AuthTime:    authTime,
-		ACR:         acr,
-		AMR:         amr,
-		TokenClaims: tokenClaims,
-		ExpiresAt:   now.Add(s.cfg.Limits.RefreshTokenLifetime),
+		TokenHash:               sha256.Sum256([]byte(raw)),
+		ClientID:                clientID,
+		Subject:                 subject,
+		Scope:                   scope,
+		Thumbprint:              thumbprint,
+		AuthTime:                authTime,
+		ACR:                     acr,
+		AMR:                     amr,
+		TokenClaims:             tokenClaims,
+		RequestedIDTokenClaims:  requestedIDTokenClaims,
+		RequestedUserinfoClaims: requestedUserinfoClaims,
+		ExpiresAt:               now.Add(s.cfg.Limits.RefreshTokenLifetime),
 	}); err != nil {
 		return "", err
 	}

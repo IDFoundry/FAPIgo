@@ -108,22 +108,27 @@ func (s *Server) completeAuthorize(ctx context.Context, completed storage.Comple
 		return s.completeLocalFail(ctx, completed.ClientID, newError(ErrorServerError, 500, "failed to generate authorization code", err)), nil
 	}
 	nonce, _ := jsonString(completed.Parameters, "nonce")
+	dpopJKT, _ := jsonString(completed.Parameters, "dpop_jkt") // optional, RFC 9449 §10
+	idTokenClaims, userinfoClaims := parseRequestedClaimNames(completed.Parameters["claims"])
 
 	now := s.deps.Clock.Now()
 	if err := s.deps.Grants.CreateAuthorizationCode(ctx, storage.NewAuthorizationCode{
-		CodeHash:            sha256.Sum256([]byte(code)),
-		ClientID:            completed.ClientID,
-		RedirectURI:         redirectURI,
-		CodeChallenge:       codeChallenge,
-		CodeChallengeMethod: "S256",
-		Subject:             result.subject.ID().String(),
-		Scope:               result.grant.Scope,
-		Nonce:               nonce,
-		AuthTime:            result.auth.authTime,
-		ACR:                 result.auth.acr,
-		AMR:                 result.auth.amr,
-		TokenClaims:         completed.TokenClaims,
-		ExpiresAt:           now.Add(s.cfg.Limits.AuthorizationCodeLifetime),
+		CodeHash:                sha256.Sum256([]byte(code)),
+		ClientID:                completed.ClientID,
+		RedirectURI:             redirectURI,
+		CodeChallenge:           codeChallenge,
+		CodeChallengeMethod:     "S256",
+		DPoPJKT:                 dpopJKT,
+		Subject:                 result.subject.ID().String(),
+		Scope:                   result.grant.Scope,
+		Nonce:                   nonce,
+		AuthTime:                result.auth.authTime,
+		ACR:                     result.auth.acr,
+		AMR:                     result.auth.amr,
+		TokenClaims:             completed.TokenClaims,
+		RequestedIDTokenClaims:  idTokenClaims,
+		RequestedUserinfoClaims: userinfoClaims,
+		ExpiresAt:               now.Add(s.cfg.Limits.AuthorizationCodeLifetime),
 	}); err != nil {
 		return s.completeLocalFail(ctx, completed.ClientID, newError(ErrorServerError, 500, "failed to persist authorization code", err)), nil
 	}

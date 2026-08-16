@@ -45,4 +45,11 @@ type Dependencies struct {
 	// Random is the source of randomness for request_uri, interaction
 	// handle and authorization code generation.
 	Random io.Reader
+
+	// IdentityClaims resolves identity claim values (e.g. "name",
+	// "email") to embed in an ID token when the granted scope included
+	// "openid". Optional — nil means no identity claims are ever added,
+	// which is a permitted response to the "claims" request parameter
+	// (see IdentityClaimsSource), not an error.
+	IdentityClaims IdentityClaimsSource
 }

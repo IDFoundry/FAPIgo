@@ -16,7 +16,11 @@ func tokenHandler(srv *server.Server) http.HandlerFunc {
 			return
 		}
 		grantType := formValue(form, "grant_type")
-		dpopProof := r.Header.Get("DPoP")
+		dpopProof, ok := singleDPoPHeader(r)
+		if !ok {
+			writeRawOAuthError(w, http.StatusBadRequest, "invalid_request", "multiple DPoP headers are not permitted")
+			return
+		}
 
 		var result server.TokenResult
 		switch grantType {

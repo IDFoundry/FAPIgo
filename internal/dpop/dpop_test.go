@@ -147,6 +147,31 @@ func TestVerifyRejectsURIMismatch(t *testing.T) {
 	}
 }
 
+// RFC 9449 §4.3: "the query and fragment parts of the htu... are
+// ignored", and RFC 3986 makes scheme/host case-insensitive. A proof
+// whose htu differs from the request URL only in those respects must
+// still verify.
+func TestVerifyToleratesHTUQueryFragmentAndCase(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	jwk, err := jose.NewJWK(&key.PublicKey, fapi.ES256)
+	if err != nil {
+		t.Fatalf("NewJWK: %v", err)
+	}
+	payload := fmt.Sprintf(`{"jti":"x","htm":"POST","htu":"HTTPS://AS.EXAMPLE/token?dummy1=lorem#frag","iat":%d}`, now.Unix())
+	proof, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: "dpop+jwt", JWK: &jwk}, []byte(payload))
+	if err != nil {
+		t.Fatalf("jose.Sign: %v", err)
+	}
+
+	if _, err := Verify(context.Background(), VerifyRequest{
+		Proof: proof, Method: "POST", URL: mustURL(t, "https://as.example/token"), Now: now, MaxProofAge: time.Minute,
+		Replay: newMemoryReplayChecker(),
+	}); err != nil {
+		t.Fatalf("Verify(htu differs only in query/fragment/case) = %v, want nil", err)
+	}
+}
+
 func TestVerifyRejectsExpiredProof(t *testing.T) {
 	key := generateKey(t)
 	now := time.Now()
@@ -395,5 +420,60 @@ func TestParseClaimsRejectsMissingRequiredMembers(t *testing.T) {
 				t.Fatalf("Verify(%s) = %v, want ErrMalformedClaims", name, err)
 			}
 		})
+	}
+}
+
+// FAPI2SPFinalCheckDpopProofNbfExp in the OIDF conformance suite sends a
+// DPoP proof carrying "nbf" and "exp" alongside the required claims —
+// RFC 9449 doesn't define them, but doesn't forbid them either (a DPoP
+// proof is a JWT; RFC 7519 §4 permits registered claims generally), so
+// a conformant server must not reject the proof merely for their
+// presence.
+func TestParseClaimsAcceptsNbfAndExp(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	target := mustURL(t, "https://as.example/token")
+	jwk, err := jose.NewJWK(&key.PublicKey, fapi.ES256)
+	if err != nil {
+		t.Fatalf("NewJWK: %v", err)
+	}
+	payload := fmt.Sprintf(`{"jti":"x","htm":"POST","htu":%q,"iat":%d,"nbf":%d,"exp":%d}`,
+		canonical.URI(target), now.Unix(), now.Unix(), now.Add(5*time.Minute).Unix())
+	proof, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: "dpop+jwt", JWK: &jwk}, []byte(payload))
+	if err != nil {
+		t.Fatalf("jose.Sign: %v", err)
+	}
+	if _, err := Verify(context.Background(), VerifyRequest{
+		Proof: proof, Method: "POST", URL: target, Now: now, MaxProofAge: time.Minute,
+		Replay: newMemoryReplayChecker(),
+	}); err != nil {
+		t.Fatalf("Verify(nbf and exp present) = %v, want nil", err)
+	}
+}
+
+// FAPI2SPFinalCheckDpopProofUnknownClaim in the OIDF conformance suite
+// sends a DPoP proof carrying an arbitrary private claim
+// ("tx_id_key") the server has no opinion on — RFC 7519 §4 JWT claim
+// extensibility means a conformant server must tolerate it rather than
+// rejecting the proof outright.
+func TestParseClaimsToleratesArbitraryUnrecognizedMember(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	target := mustURL(t, "https://as.example/token")
+	jwk, err := jose.NewJWK(&key.PublicKey, fapi.ES256)
+	if err != nil {
+		t.Fatalf("NewJWK: %v", err)
+	}
+	payload := fmt.Sprintf(`{"jti":"x","htm":"POST","htu":%q,"iat":%d,"tx_id_key":"x"}`,
+		canonical.URI(target), now.Unix())
+	proof, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: "dpop+jwt", JWK: &jwk}, []byte(payload))
+	if err != nil {
+		t.Fatalf("jose.Sign: %v", err)
+	}
+	if _, err := Verify(context.Background(), VerifyRequest{
+		Proof: proof, Method: "POST", URL: target, Now: now, MaxProofAge: time.Minute,
+		Replay: newMemoryReplayChecker(),
+	}); err != nil {
+		t.Fatalf("Verify(unrecognized private claim) = %v, want nil", err)
 	}
 }

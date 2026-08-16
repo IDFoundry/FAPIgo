@@ -1,0 +1,61 @@
+{
+  "listen_addr": "0.0.0.0:8443",
+  "issuer": "https://conformance-as-message-signing:8443",
+  "profile": "fapi2-security-message-signing",
+  "default_subject": "conformance-test-user",
+
+  "algorithms": {
+    "client_assertion": ["ES256"],
+    "request_object": ["ES256"],
+    "jarm": "ES256",
+    "access_token": "ES256",
+    "id_token": "ES256"
+  },
+
+  "limits": {
+    "pushed_request_lifetime_seconds": 90,
+    "max_client_assertion_lifetime_seconds": 60,
+    "max_request_object_lifetime_seconds": 60,
+    "interaction_lifetime_seconds": 300,
+    "authorization_code_lifetime_seconds": 60,
+    "jarm_response_lifetime_seconds": 60,
+    "access_token_lifetime_seconds": 300,
+    "id_token_lifetime_seconds": 300,
+    "refresh_token_lifetime_seconds": 3600,
+    "max_dpop_proof_age_seconds": 60,
+    "max_clock_skew_seconds": 15
+  },
+
+  "clients": [
+    {
+      "id": "REPLACE_WITH_SUITE_CLIENT_ID",
+      "redirect_uris": [
+        "https://localhost.emobix.co.uk:8443/test/a/REPLACE_WITH_YOUR_ALIAS/callback",
+        "https://localhost.emobix.co.uk:8443/test/a/REPLACE_WITH_YOUR_ALIAS/callback?dummy1=lorem&dummy2=ipsum"
+      ],
+      "client_assertion_algorithm": "ES256",
+      "request_object_algorithm": "ES256",
+      "allowed_scopes": ["openid", "accounts", "offline_access"],
+      "jwks": {
+        "keys": [
+          "REPLACE_WITH_PUBLIC_JWK_FROM_generate-client-key"
+        ]
+      }
+    },
+    {
+      "id": "REPLACE_WITH_SUITE_CLIENT2_ID",
+      "redirect_uris": [
+        "https://localhost.emobix.co.uk:8443/test/a/REPLACE_WITH_YOUR_ALIAS/callback",
+        "https://localhost.emobix.co.uk:8443/test/a/REPLACE_WITH_YOUR_ALIAS/callback?dummy1=lorem&dummy2=ipsum"
+      ],
+      "client_assertion_algorithm": "ES256",
+      "request_object_algorithm": "ES256",
+      "allowed_scopes": ["openid", "accounts", "offline_access"],
+      "jwks": {
+        "keys": [
+          "REPLACE_WITH_PUBLIC_JWK_FROM_generate-client-key_client2"
+        ]
+      }
+    }
+  ]
+}

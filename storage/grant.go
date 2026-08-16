@@ -21,6 +21,12 @@ type NewAuthorizationCode struct {
 	CodeChallenge       string
 	CodeChallengeMethod string
 
+	// DPoPJKT is the "dpop_jkt" authorization request parameter (RFC
+	// 9449 §10), if the client sent one — "" if it didn't.
+	// ExchangeAuthorizationCode must reject a token request whose DPoP
+	// proof key thumbprint doesn't match a non-empty value here.
+	DPoPJKT string
+
 	Subject  string
 	Scope    []string
 	Nonce    string // "" if the authorization request carried none
@@ -35,6 +41,18 @@ type NewAuthorizationCode struct {
 	// return them unmodified, so ExchangeAuthorizationCode can copy them
 	// into the access and ID tokens it issues.
 	TokenClaims map[string]json.RawMessage
+
+	// RequestedIDTokenClaims and RequestedUserinfoClaims are the claim
+	// names the authorization request's "claims" parameter (OIDC Core
+	// §5.5) asked for, split by delivery location — nil if the request
+	// carried no "claims" parameter, or asked for nothing at that
+	// location. ExchangeAuthorizationCode must never embed an identity
+	// claim outside of what's named here: an IdentityClaimsSource
+	// deployment may hold more claims than were actually requested, and
+	// returning them anyway is a data-minimization violation, not a
+	// convenience.
+	RequestedIDTokenClaims  []string
+	RequestedUserinfoClaims []string
 
 	ExpiresAt time.Time
 }
@@ -54,6 +72,7 @@ type RedeemedAuthorizationCode struct {
 	RedirectURI         string
 	CodeChallenge       string
 	CodeChallengeMethod string
+	DPoPJKT             string
 
 	Subject     string
 	Scope       []string
@@ -62,6 +81,11 @@ type RedeemedAuthorizationCode struct {
 	ACR         string
 	AMR         []string
 	TokenClaims map[string]json.RawMessage
+
+	// RequestedIDTokenClaims and RequestedUserinfoClaims mirror
+	// NewAuthorizationCode's fields of the same name.
+	RequestedIDTokenClaims  []string
+	RequestedUserinfoClaims []string
 
 	ExpiresAt time.Time
 }
@@ -84,6 +108,15 @@ type NewRefreshToken struct {
 	AMR         []string
 	TokenClaims map[string]json.RawMessage
 
+	// RequestedIDTokenClaims and RequestedUserinfoClaims carry forward
+	// the original authorization request's "claims" parameter (see
+	// NewAuthorizationCode's fields of the same name) so a refreshed ID
+	// token, and a refreshed access token's embedded
+	// RequestedUserinfoClaimsKey, keep respecting it across rotations —
+	// not just the first token issued.
+	RequestedIDTokenClaims  []string
+	RequestedUserinfoClaims []string
+
 	ExpiresAt time.Time
 }
 
@@ -105,6 +138,11 @@ type RedeemedRefreshToken struct {
 	ACR         string
 	AMR         []string
 	TokenClaims map[string]json.RawMessage
+
+	// RequestedIDTokenClaims and RequestedUserinfoClaims mirror
+	// NewRefreshToken's fields of the same name.
+	RequestedIDTokenClaims  []string
+	RequestedUserinfoClaims []string
 
 	ExpiresAt time.Time
 }

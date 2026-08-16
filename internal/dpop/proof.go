@@ -1,7 +1,6 @@
 package dpop
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -10,9 +9,11 @@ import (
 // (RFC 9449 §4.2).
 const jwtType = "dpop+jwt"
 
-// claims is the DPoP proof payload (RFC 9449 §4.2). Fields beyond the
-// ones defined here are rejected on parse — a proof carrying an
-// unexpected claim is refused rather than silently ignored.
+// claims is the DPoP proof payload (RFC 9449 §4.2). Unrecognized fields
+// are tolerated, not rejected: a DPoP proof is a JWT, and general JWT
+// claim extensibility (RFC 7519 §4) permits a sender to include
+// additional claims (registered, e.g. nbf/exp, or private) that this
+// verifier has no opinion on. Verify relies on Iat for freshness.
 type claims struct {
 	JTI   string `json:"jti"`
 	HTM   string `json:"htm"`
@@ -23,10 +24,8 @@ type claims struct {
 }
 
 func parseClaims(payload []byte) (claims, error) {
-	dec := json.NewDecoder(bytes.NewReader(payload))
-	dec.DisallowUnknownFields()
 	var c claims
-	if err := dec.Decode(&c); err != nil {
+	if err := json.Unmarshal(payload, &c); err != nil {
 		return claims{}, fmt.Errorf("%w: %v", ErrMalformedClaims, err)
 	}
 	if c.JTI == "" || c.HTM == "" || c.HTU == "" {

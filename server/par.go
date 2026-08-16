@@ -11,6 +11,7 @@ import (
 	fapi "github.com/osanderson/go-fapi"
 	"github.com/osanderson/go-fapi/extension"
 	"github.com/osanderson/go-fapi/internal/clientassertion"
+	"github.com/osanderson/go-fapi/internal/dpop"
 	"github.com/osanderson/go-fapi/internal/par"
 	"github.com/osanderson/go-fapi/internal/pkce"
 	"github.com/osanderson/go-fapi/internal/requestobject"
@@ -26,6 +27,23 @@ var coreAuthorizationParameters = map[string]struct{}{
 	"response_type": {}, "client_id": {}, "redirect_uri": {}, "scope": {},
 	"state": {}, "nonce": {}, "code_challenge": {}, "code_challenge_method": {},
 	"login_hint": {},
+
+	// dpop_jkt (RFC 9449 §10) lets a client declare, at authorization
+	// time, which DPoP key it intends to bind the eventual tokens to —
+	// checked against the actual DPoP proof presented at the token
+	// endpoint (server/complete_authorization.go carries it into the
+	// stored authorization code; server/token.go enforces the match).
+	"dpop_jkt": {},
+
+	// claims (OIDC Core §5.5) lets a client request specific identity
+	// claims for the id_token and/or userinfo. This package doesn't
+	// parse its structure or honor the per-location/essential detail —
+	// it only avoids rejecting the parameter as unregistered. Whatever
+	// identity claims a deployment actually returns comes from
+	// Dependencies.IdentityClaimsSource, which is free to ignore this
+	// parameter's specifics entirely (permitted: OIDC Core §5.5 lets a
+	// server return more, or fewer, claims than requested).
+	"claims": {},
 }
 
 // FormParameter is one name/value pair from a form-encoded request body,
@@ -48,6 +66,11 @@ type FormRequest struct {
 // PushAuthorizationRequest is the input to Server.PushAuthorizationRequest.
 type PushAuthorizationRequest struct {
 	HTTP FormRequest
+
+	// DPoPProof is the value of the request's DPoP header, if present.
+	// A DPoP proof at the PAR endpoint is optional (RFC 9449 §10) — ""
+	// means the client didn't send one.
+	DPoPProof string
 }
 
 // PushAuthorizationResult is returned by a successful
@@ -81,6 +104,11 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 	validated, validateErr := s.validateAuthorizationParameters(authParams, client)
 	if validateErr != nil {
 		return s.parFail(ctx, client.ID(), validateErr)
+	}
+
+	validated, dpopErr := s.reconcileParDPoPBinding(ctx, req.DPoPProof, validated)
+	if dpopErr != nil {
+		return s.parFail(ctx, client.ID(), dpopErr)
 	}
 
 	requestURI, err := par.GenerateRequestURI(s.deps.Random)
@@ -298,6 +326,53 @@ func (s *Server) validateAuthorizationParameters(params map[string]json.RawMessa
 	}
 
 	return params, nil
+}
+
+// reconcileParDPoPBinding handles an optional DPoP proof presented
+// alongside the pushed authorization request (RFC 9449 §10). A DPoP
+// proof at the PAR endpoint is not itself required, but if the client
+// sends one, this server:
+//   - verifies it (proof of possession of the key, matching htm/htu),
+//   - rejects the request outright if an explicit dpop_jkt parameter
+//     was also given and doesn't match the proof's key thumbprint, and
+//   - otherwise derives an implicit dpop_jkt from the proof's own key
+//     when the request carried none, so the resulting authorization
+//     code ends up bound to whichever key the client actually
+//     demonstrated possession of at PAR time — not just whichever key
+//     later shows up at the token endpoint.
+func (s *Server) reconcileParDPoPBinding(ctx context.Context, proof string, params map[string]json.RawMessage) (map[string]json.RawMessage, *Error) {
+	if proof == "" {
+		return params, nil
+	}
+	parEndpoint := s.cfg.Endpoints.PushedAuthorizationRequest.URL()
+	verified, err := dpop.Verify(ctx, dpop.VerifyRequest{
+		Proof:        proof,
+		Method:       "POST",
+		URL:          &parEndpoint,
+		Now:          s.deps.Clock.Now(),
+		MaxProofAge:  s.cfg.Limits.MaxDPoPProofAge,
+		MaxClockSkew: s.cfg.Limits.MaxClockSkew,
+		Replay:       s.dpopReplayChecker(),
+	})
+	if err != nil {
+		return nil, newError(ErrorInvalidRequest, 400, "DPoP proof verification failed", err)
+	}
+	thumbprint := verified.Thumbprint.String()
+
+	if declared, jsonErr := jsonString(params, "dpop_jkt"); jsonErr == nil && declared != "" {
+		if declared != thumbprint {
+			return nil, newError(ErrorInvalidRequest, 400, "dpop_jkt does not match the DPoP proof presented to the pushed authorization request endpoint", nil)
+		}
+		return params, nil
+	}
+
+	encoded, _ := json.Marshal(thumbprint) // marshaling a string cannot fail
+	out := make(map[string]json.RawMessage, len(params)+1)
+	for k, v := range params {
+		out[k] = v
+	}
+	out["dpop_jkt"] = encoded
+	return out, nil
 }
 
 func validateScope(scope string, client storage.RegisteredClient) error {

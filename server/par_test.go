@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	fapi "github.com/osanderson/go-fapi"
 	"github.com/osanderson/go-fapi/extension"
 	"github.com/osanderson/go-fapi/internal/clientassertion"
+	"github.com/osanderson/go-fapi/internal/dpop"
 	"github.com/osanderson/go-fapi/internal/requestobject"
 	"github.com/osanderson/go-fapi/keys"
 	"github.com/osanderson/go-fapi/server"
@@ -187,18 +189,21 @@ func (f *fakeGrantStore) RedeemAuthorizationCode(_ context.Context, redemption s
 	}
 	f.redeemed[redemption.CodeHash] = true
 	return storage.RedeemedAuthorizationCode{
-		ClientID:            code.ClientID,
-		RedirectURI:         code.RedirectURI,
-		CodeChallenge:       code.CodeChallenge,
-		CodeChallengeMethod: code.CodeChallengeMethod,
-		Subject:             code.Subject,
-		Scope:               code.Scope,
-		Nonce:               code.Nonce,
-		AuthTime:            code.AuthTime,
-		ACR:                 code.ACR,
-		AMR:                 code.AMR,
-		TokenClaims:         code.TokenClaims,
-		ExpiresAt:           code.ExpiresAt,
+		ClientID:                code.ClientID,
+		RedirectURI:             code.RedirectURI,
+		CodeChallenge:           code.CodeChallenge,
+		CodeChallengeMethod:     code.CodeChallengeMethod,
+		DPoPJKT:                 code.DPoPJKT,
+		Subject:                 code.Subject,
+		Scope:                   code.Scope,
+		Nonce:                   code.Nonce,
+		AuthTime:                code.AuthTime,
+		ACR:                     code.ACR,
+		AMR:                     code.AMR,
+		TokenClaims:             code.TokenClaims,
+		RequestedIDTokenClaims:  code.RequestedIDTokenClaims,
+		RequestedUserinfoClaims: code.RequestedUserinfoClaims,
+		ExpiresAt:               code.ExpiresAt,
 	}, nil
 }
 
@@ -236,15 +241,17 @@ func (f *fakeGrantStore) RedeemRefreshToken(_ context.Context, redemption storag
 	}
 	f.refreshRedeemed[redemption.TokenHash] = true
 	return storage.RedeemedRefreshToken{
-		ClientID:    tok.ClientID,
-		Subject:     tok.Subject,
-		Scope:       tok.Scope,
-		Thumbprint:  tok.Thumbprint,
-		AuthTime:    tok.AuthTime,
-		ACR:         tok.ACR,
-		AMR:         tok.AMR,
-		TokenClaims: tok.TokenClaims,
-		ExpiresAt:   tok.ExpiresAt,
+		ClientID:                tok.ClientID,
+		Subject:                 tok.Subject,
+		Scope:                   tok.Scope,
+		Thumbprint:              tok.Thumbprint,
+		AuthTime:                tok.AuthTime,
+		ACR:                     tok.ACR,
+		AMR:                     tok.AMR,
+		TokenClaims:             tok.TokenClaims,
+		RequestedIDTokenClaims:  tok.RequestedIDTokenClaims,
+		RequestedUserinfoClaims: tok.RequestedUserinfoClaims,
+		ExpiresAt:               tok.ExpiresAt,
 	}, nil
 }
 
@@ -926,5 +933,91 @@ func TestPushAuthorizationRequestAcceptsRegisteredExtensionParameter(t *testing.
 		HTTP: server.FormRequest{Parameters: params},
 	}); err != nil {
 		t.Fatalf("PushAuthorizationRequest: %v", err)
+	}
+}
+
+// --- DPoP proof at the PAR endpoint (RFC 9449 §10) ----------------------
+
+func createDPoPProofForPAR(t *testing.T, key *ecdsa.PrivateKey, now time.Time) string {
+	t.Helper()
+	parURL, err := url.Parse(testPAREndpoint)
+	if err != nil {
+		t.Fatalf("url.Parse: %v", err)
+	}
+	proof, err := dpop.CreateProof(dpop.ProofRequest{
+		Signer: key, Algorithm: fapi.ES256, Method: "POST", URL: parURL, Now: now,
+	})
+	if err != nil {
+		t.Fatalf("dpop.CreateProof: %v", err)
+	}
+	return proof
+}
+
+// A DPoP proof presented to the PAR endpoint with no explicit dpop_jkt
+// parameter implicitly binds the resulting authorization code to that
+// proof's own key — not just whichever key later shows up at the token
+// endpoint.
+func TestPushAuthorizationRequestDerivesImplicitDPoPJKTFromPARProof(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	dpopKey := generateKey(t)
+	thumbprint, err := jwkThumbprintFor(dpopKey)
+	if err != nil {
+		t.Fatalf("thumbprint: %v", err)
+	}
+	params := plainFormParameters(t, h.clientAssertion(t), nil)
+
+	_, err = h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP:      server.FormRequest{Parameters: params},
+		DPoPProof: createDPoPProofForPAR(t, dpopKey, h.now),
+	})
+	if err != nil {
+		t.Fatalf("PushAuthorizationRequest: %v", err)
+	}
+	if len(h.transactions.records) != 1 {
+		t.Fatalf("len(records) = %d, want 1", len(h.transactions.records))
+	}
+	var storedJKT string
+	if err := json.Unmarshal(h.transactions.records[0].Parameters["dpop_jkt"], &storedJKT); err != nil {
+		t.Fatalf("dpop_jkt not stored as a string: %v", err)
+	}
+	if storedJKT != thumbprint.String() {
+		t.Fatalf("stored dpop_jkt = %q, want %q (the PAR-time DPoP proof's own key)", storedJKT, thumbprint.String())
+	}
+}
+
+func TestPushAuthorizationRequestAcceptsMatchingDPoPJKTAtPAR(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	dpopKey := generateKey(t)
+	thumbprint, err := jwkThumbprintFor(dpopKey)
+	if err != nil {
+		t.Fatalf("thumbprint: %v", err)
+	}
+	params := plainFormParameters(t, h.clientAssertion(t), map[string]string{"dpop_jkt": thumbprint.String()})
+
+	_, err = h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP:      server.FormRequest{Parameters: params},
+		DPoPProof: createDPoPProofForPAR(t, dpopKey, h.now),
+	})
+	if err != nil {
+		t.Fatalf("PushAuthorizationRequest: %v", err)
+	}
+}
+
+func TestPushAuthorizationRequestRejectsMismatchedDPoPJKTAtPAR(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	declaredKey := generateKey(t)
+	declaredThumbprint, err := jwkThumbprintFor(declaredKey)
+	if err != nil {
+		t.Fatalf("thumbprint: %v", err)
+	}
+	proofKey := generateKey(t) // a different key than the one declared via dpop_jkt
+	params := plainFormParameters(t, h.clientAssertion(t), map[string]string{"dpop_jkt": declaredThumbprint.String()})
+
+	_, err = h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP:      server.FormRequest{Parameters: params},
+		DPoPProof: createDPoPProofForPAR(t, proofKey, h.now),
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequest)
 	}
 }

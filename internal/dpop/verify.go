@@ -111,7 +111,16 @@ func Verify(ctx context.Context, req VerifyRequest) (VerifiedProof, error) {
 	if c.HTM != strings.ToUpper(req.Method) {
 		return VerifiedProof{}, ErrMethodMismatch
 	}
-	if c.HTU != canonical.URI(req.URL) {
+	// htu is compared canonicalized on both sides (RFC 9449 §4.3: "the
+	// query and fragment parts of the htu... are ignored"), not as a raw
+	// string — a proof's own htu claim may legitimately differ from
+	// req.URL in case or in carrying a query/fragment the sender didn't
+	// bother to strip.
+	htu, err := url.Parse(c.HTU)
+	if err != nil {
+		return VerifiedProof{}, ErrURIMismatch
+	}
+	if canonical.URI(htu) != canonical.URI(req.URL) {
 		return VerifiedProof{}, ErrURIMismatch
 	}
 

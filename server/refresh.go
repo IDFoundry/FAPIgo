@@ -78,7 +78,11 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 		scope = narrowed
 	}
 
-	accessToken, err := s.issueAccessToken(ctx, client.ID(), redeemed.Subject, scope, thumbprint, redeemed.TokenClaims)
+	accessTokenClaims, err := withRequestedUserinfoClaims(redeemed.RequestedUserinfoClaims, redeemed.TokenClaims)
+	if err != nil {
+		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorServerError, 500, "failed to encode requested userinfo claims", err))
+	}
+	accessToken, err := s.issueAccessToken(ctx, client.ID(), redeemed.Subject, scope, thumbprint, accessTokenClaims)
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorServerError, 500, "failed to issue access token", err))
 	}
@@ -94,7 +98,11 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 		// A refreshed ID token omits nonce — it was only ever meant to
 		// bind the *original* ID token to the authorization request that
 		// requested it, not to every subsequent refresh.
-		idToken, err := s.issueIDToken(ctx, client.ID(), redeemed.Subject, "", redeemed.AuthTime, redeemed.ACR, redeemed.AMR, redeemed.TokenClaims)
+		idTokenClaims, err := s.withIdentityClaims(ctx, redeemed.Subject, redeemed.RequestedIDTokenClaims, redeemed.TokenClaims)
+		if err != nil {
+			return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorServerError, 500, "failed to resolve identity claims", err))
+		}
+		idToken, err := s.issueIDToken(ctx, client.ID(), redeemed.Subject, "", redeemed.AuthTime, redeemed.ACR, redeemed.AMR, idTokenClaims)
 		if err != nil {
 			return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorServerError, 500, "failed to issue ID token", err))
 		}
@@ -102,7 +110,7 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 		result.HasIDToken = true
 	}
 
-	refreshToken, err := s.issueRefreshToken(ctx, client.ID(), redeemed.Subject, scope, thumbprint, redeemed.AuthTime, redeemed.ACR, redeemed.AMR, redeemed.TokenClaims)
+	refreshToken, err := s.issueRefreshToken(ctx, client.ID(), redeemed.Subject, scope, thumbprint, redeemed.AuthTime, redeemed.ACR, redeemed.AMR, redeemed.TokenClaims, redeemed.RequestedIDTokenClaims, redeemed.RequestedUserinfoClaims)
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorServerError, 500, "failed to issue refresh token", err))
 	}

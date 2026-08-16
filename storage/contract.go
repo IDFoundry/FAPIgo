@@ -56,9 +56,11 @@ func TestGrantStoreContract(t *testing.T, factory func() GrantStore) {
 		want := NewAuthorizationCode{
 			CodeHash: hash, ClientID: "client-1", RedirectURI: "https://rp.example/cb",
 			CodeChallenge: "challenge", CodeChallengeMethod: "S256",
+			DPoPJKT: "jkt-1",
 			Subject: "user-1", Scope: []string{"openid", "accounts"},
 			Nonce: "nonce-1", AuthTime: time.Now().Truncate(time.Second),
 			ACR: "acr-1", AMR: []string{"pwd"},
+			RequestedIDTokenClaims: []string{"name"}, RequestedUserinfoClaims: []string{"email"},
 			ExpiresAt: time.Now().Add(time.Minute),
 		}
 		if err := store.CreateAuthorizationCode(ctx, want); err != nil {
@@ -70,9 +72,12 @@ func TestGrantStoreContract(t *testing.T, factory func() GrantStore) {
 		}
 		if got.ClientID != want.ClientID || got.RedirectURI != want.RedirectURI ||
 			got.CodeChallenge != want.CodeChallenge || got.CodeChallengeMethod != want.CodeChallengeMethod ||
+			got.DPoPJKT != want.DPoPJKT ||
 			got.Subject != want.Subject || got.Nonce != want.Nonce ||
 			!got.AuthTime.Equal(want.AuthTime) || got.ACR != want.ACR ||
-			!got.ExpiresAt.Equal(want.ExpiresAt) || len(got.Scope) != len(want.Scope) {
+			!got.ExpiresAt.Equal(want.ExpiresAt) || len(got.Scope) != len(want.Scope) ||
+			len(got.RequestedIDTokenClaims) != len(want.RequestedIDTokenClaims) ||
+			len(got.RequestedUserinfoClaims) != len(want.RequestedUserinfoClaims) {
 			t.Fatalf("RedeemAuthorizationCode returned %+v, want fields matching %+v", got, want)
 		}
 	})
@@ -128,6 +133,7 @@ func TestGrantStoreContract(t *testing.T, factory func() GrantStore) {
 			TokenHash: hash, ClientID: "client-1", Subject: "user-1",
 			Scope: []string{"openid", "offline_access"}, Thumbprint: "thumb-1",
 			AuthTime: time.Now().Truncate(time.Second), ACR: "acr-1", AMR: []string{"pwd"},
+			RequestedIDTokenClaims: []string{"name"}, RequestedUserinfoClaims: []string{"email"},
 			ExpiresAt: time.Now().Add(time.Hour),
 		}
 		if err := store.CreateRefreshToken(ctx, want); err != nil {
@@ -139,7 +145,9 @@ func TestGrantStoreContract(t *testing.T, factory func() GrantStore) {
 		}
 		if got.ClientID != want.ClientID || got.Subject != want.Subject ||
 			got.Thumbprint != want.Thumbprint || got.ACR != want.ACR ||
-			!got.AuthTime.Equal(want.AuthTime) || !got.ExpiresAt.Equal(want.ExpiresAt) {
+			!got.AuthTime.Equal(want.AuthTime) || !got.ExpiresAt.Equal(want.ExpiresAt) ||
+			len(got.RequestedIDTokenClaims) != len(want.RequestedIDTokenClaims) ||
+			len(got.RequestedUserinfoClaims) != len(want.RequestedUserinfoClaims) {
 			t.Fatalf("RedeemRefreshToken returned %+v, want fields matching %+v", got, want)
 		}
 	})

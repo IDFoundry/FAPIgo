@@ -7,6 +7,7 @@ import (
 	fapi "github.com/osanderson/go-fapi"
 	"github.com/osanderson/go-fapi/fapihttp"
 	"github.com/osanderson/go-fapi/keys"
+	fapires "github.com/osanderson/go-fapi/resource"
 	"github.com/osanderson/go-fapi/server"
 )
 
@@ -17,6 +18,14 @@ import (
 // through flags or a config file on disk.
 func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool) (*http.ServeMux, error) {
 	endpoints, err := buildEndpoints(resolved.Issuer, allowLoopbackHTTP)
+	if err != nil {
+		return nil, err
+	}
+	resourceURL, err := buildResourceURL(resolved.Issuer, allowLoopbackHTTP, "/accounts")
+	if err != nil {
+		return nil, err
+	}
+	userinfoURL, err := buildResourceURL(resolved.Issuer, allowLoopbackHTTP, "/userinfo")
 	if err != nil {
 		return nil, err
 	}
@@ -60,21 +69,47 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool) (*http.ServeM
 		// storage.StoreAssurance on every store constructed below.
 		Assurance: server.AssuranceDevelopment,
 	}
+	replayStore := newInMemoryReplayStore()
+	identityClaims := newStaticIdentityClaims(resolved.DefaultSubject, server.SystemClock{})
 	srvDeps := server.Dependencies{
-		Clients:      newStaticClientRepository(resolved.Clients),
-		Transactions: newInMemoryTransactionStore(),
-		Grants:       newInMemoryGrantStore(),
-		Replay:       newInMemoryReplayStore(),
-		ClientKeys:   clientKeys,
-		Keys:         keyManager,
-		Clock:        server.SystemClock{},
-		Random:       rand.Reader,
+		Clients:        newStaticClientRepository(resolved.Clients),
+		Transactions:   newInMemoryTransactionStore(),
+		Grants:         newInMemoryGrantStore(),
+		Replay:         replayStore,
+		ClientKeys:     clientKeys,
+		Keys:           keyManager,
+		Clock:          server.SystemClock{},
+		Random:         rand.Reader,
+		IdentityClaims: identityClaims,
 	}
 	srv, err := server.New(srvCfg, srvDeps)
 	if err != nil {
 		return nil, err
 	}
 
+	// Backs GET /accounts — see resource.go's resourceHandler doc
+	// comment for why this conformance binary hosts a stand-in
+	// protected-resource endpoint alongside the AS itself.
+	resourceVerifier, err := fapires.NewVerifier(fapires.Config{
+		Issuer:    resolved.Issuer,
+		Audience:  resolved.Issuer.String(), // matches server/token.go's own access-token aud claim
+		Algorithm: resolved.Algorithms.AccessToken,
+		Limits: fapires.Limits{
+			MaxTokenLifetime: resolved.Limits.AccessTokenLifetime,
+			MaxDPoPProofAge:  resolved.Limits.MaxDPoPProofAge,
+			MaxClockSkew:     resolved.Limits.MaxClockSkew,
+		},
+	}, fapires.Dependencies{
+		IssuerKeys: selfIssuerKeySource{keyManager: keyManager},
+		Replay:     replayStore,
+		Clock:      fapires.SystemClock{},
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	consent := newConsentHandler(srv, server.SystemClock{}, resolved.DefaultSubject)
-	return newRouter(srv, consent, resolved.AdvertisedScopes), nil
+	resourceURLValue := resourceURL.URL()
+	userinfoURLValue := userinfoURL.URL()
+	return newRouter(srv, consent, resolved.AdvertisedScopes, resourceVerifier, &resourceURLValue, &userinfoURLValue, identityClaims), nil
 }

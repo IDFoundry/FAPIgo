@@ -286,12 +286,132 @@ func TestExchangeAuthorizationCodeRejectsWrongCodeVerifier(t *testing.T) {
 	}
 }
 
+// FAPI2SPFinalPAREnsurePKCECodeVerifierRequired in the OIDF conformance
+// suite requires an omitted code_verifier be rejected as invalid_grant,
+// not invalid_request: RFC 7636 §4.6 treats a code_verifier problem as
+// a grant-validity failure, the same as a mismatched one, not a
+// malformed-request one.
+func TestExchangeAuthorizationCodeRejectsMissingCodeVerifier(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
+
+	_, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
+		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, "")},
+		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidGrant {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidGrant)
+	}
+}
+
 func TestExchangeAuthorizationCodeRejectsWrongRedirectURI(t *testing.T) {
 	h := newHarness(t, server.ProfileFAPISecurity, true)
 	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
 
 	_, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
 		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, "https://attacker.example/callback", testCodeVerifier)},
+		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidGrant {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidGrant)
+	}
+}
+
+// completeAuthorizationWithDPoPJKT mirrors completeSuccessfulAuthorization
+// but adds a "dpop_jkt" (RFC 9449 §10) authorization parameter, so tests
+// can exercise ExchangeAuthorizationCode's binding check against it.
+func completeAuthorizationWithDPoPJKT(t *testing.T, h harness, jkt string) string {
+	t.Helper()
+	params := []server.FormParameter{
+		formParam("client_assertion", h.clientAssertion(t)),
+		formParam("client_assertion_type", clientassertion.AssertionType),
+		formParam("response_type", "code"),
+		formParam("redirect_uri", testRedirectURI),
+		formParam("scope", "openid accounts"),
+		formParam("code_challenge", "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"),
+		formParam("code_challenge_method", "S256"),
+		formParam("state", "opaque-state"),
+		formParam("dpop_jkt", jkt),
+	}
+	pushResult, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: params},
+	})
+	if err != nil {
+		t.Fatalf("PushAuthorizationRequest: %v", err)
+	}
+	action, err := h.server.BeginAuthorization(context.Background(), server.BeginAuthorizationRequest{
+		RequestURI: pushResult.RequestURI.String(), ClientID: testClientID,
+	})
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+	required, ok := action.(server.InteractionRequired)
+	if !ok {
+		t.Fatalf("action = %T, want server.InteractionRequired", action)
+	}
+
+	subjectID, err := server.NewSubjectID("user-1")
+	if err != nil {
+		t.Fatalf("NewSubjectID: %v", err)
+	}
+	subject, err := server.NewAuthenticatedSubject(subjectID)
+	if err != nil {
+		t.Fatalf("NewAuthenticatedSubject: %v", err)
+	}
+	authCtx, err := server.NewAuthenticationContext(h.now, "urn:mace:incommon:iap:silver", []string{"pwd"})
+	if err != nil {
+		t.Fatalf("NewAuthenticationContext: %v", err)
+	}
+	result, err := h.server.CompleteAuthorization(context.Background(), server.CompleteAuthorizationRequest{
+		Handle: required.Handle,
+		Result: server.Authorize(subject, authCtx, server.GrantedAuthorization{Scope: []string{"openid", "accounts"}}),
+	})
+	if err != nil {
+		t.Fatalf("CompleteAuthorization: %v", err)
+	}
+	redirect, ok := result.(server.AuthorizationRedirect)
+	if !ok {
+		t.Fatalf("result = %T, want server.AuthorizationRedirect", result)
+	}
+	dest := redirect.Destination().URL()
+	code := dest.Query().Get("code")
+	if code == "" {
+		t.Fatalf("redirect missing code parameter: %q", dest.String())
+	}
+	return code
+}
+
+func TestExchangeAuthorizationCodeAcceptsMatchingDPoPJKT(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	boundKey := generateKey(t)
+	boundThumbprint, err := jwkThumbprintFor(boundKey)
+	if err != nil {
+		t.Fatalf("thumbprint: %v", err)
+	}
+	code := completeAuthorizationWithDPoPJKT(t, h, boundThumbprint.String())
+
+	_, err = h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
+		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProof: createDPoPProof(t, boundKey, h.now),
+	})
+	if err != nil {
+		t.Fatalf("ExchangeAuthorizationCode: %v", err)
+	}
+}
+
+func TestExchangeAuthorizationCodeRejectsMismatchedDPoPJKT(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	boundKey := generateKey(t)
+	boundThumbprint, err := jwkThumbprintFor(boundKey)
+	if err != nil {
+		t.Fatalf("thumbprint: %v", err)
+	}
+	code := completeAuthorizationWithDPoPJKT(t, h, boundThumbprint.String())
+
+	// Present a different DPoP key at the token endpoint than the one
+	// declared via dpop_jkt at authorization time (RFC 9449 §10).
+	_, err = h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
+		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
 		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
 	})
 	if code := serverErrorCode(t, err); code != server.ErrorInvalidGrant {

@@ -20,6 +20,17 @@ profile.cov
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
+# locally-built conformance-as binary, and the throwaway self-signed
+# cert conformance/server/scripts/generate-server-cert.sh produces
+/conformance-as
+/conformance/server/certs/
+
+# suite plan config(s) - unlike oidf-config/*.config.json (this AS's own
+# config, public keys only), these carry the suite-side client private
+# keys (throwaway/ephemeral, but still real key material - don't commit
+# private keys even throwaway ones).
+/conformance/server/oidf-config/*-plan.json
+
 # Go workspace file
 go.work
 go.work.sum

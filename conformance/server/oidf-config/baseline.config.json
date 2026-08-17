@@ -44,7 +44,7 @@
           {
             "alg": "ES256",
             "crv": "P-256",
-            "kid": "gofapi-conformance-client-1",
+            "kid": "gofapi-conformance-client1-key1",
             "kty": "EC",
             "use": "sig",
             "x": "ANJbpeaecoCwyTie3dPhDsoGx-sY7sAHFV5bTpsW1KE",
@@ -71,7 +71,7 @@
           {
             "alg": "ES256",
             "crv": "P-256",
-            "kid": "gofapi-conformance-client2-1",
+            "kid": "gofapi-conformance-client2-key1",
             "kty": "EC",
             "use": "sig",
             "x": "PZOX7X0IqIs7vMqR9g8gSuEGigePAApw-ebBJpFdgQ8",

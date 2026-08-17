@@ -14,9 +14,10 @@
 //
 //	go run ./conformance/server/scripts/generate-client-key [label]
 //
-// label defaults to "client" — pass "client2" when a test plan needs a
+// label defaults to "client1" — pass "client2" when a test plan needs a
 // second registered client (e.g. FAPI2SPFinal's multi-client modules)
 // so the two keys' "kid" values don't collide when pasted side by side.
+// The resulting "kid" is "gofapi-conformance-<label>-key1".
 //
 // Paste the "private JWK (suite config)" output into the OIDF
 // conformance suite's plan config's client.jwks (or client2.jwks)
@@ -37,11 +38,11 @@ import (
 )
 
 func main() {
-	label := "client"
+	label := "client1"
 	if len(os.Args) > 1 {
 		label = os.Args[1]
 	}
-	kid := "gofapi-conformance-" + label + "-1"
+	kid := "gofapi-conformance-" + label + "-key1"
 
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {

@@ -409,6 +409,29 @@ func TestVerifyRejectsLifetimeExceeded(t *testing.T) {
 	}
 }
 
+// FAPI 2.0 Message Signing Final §5.3.1 (FAPI2-MS-ID1-5.3.1-3) requires
+// rejecting a request object whose claimed validity window is
+// unreasonably long — an ancient nbf paired with a normal, unexpired
+// exp must be rejected just as readily as a normal nbf paired with an
+// exp pushed too far into the future (TestVerifyRejectsLifetimeExceeded
+// above) is. Regression test: this object's nbf and exp individually
+// pass every other check (exp is a minute in the future, well under
+// MaxLifetime; nbf isn't in the future so ErrNotYetValid can't fire) —
+// only the nbf-age check this test exists for catches it.
+func TestVerifyRejectsNotBeforeTooOld(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	token := createTestObject(t, key, now.Add(-5*time.Minute), 6*time.Minute)
+
+	obj, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if _, err := obj.Verify(context.Background(), &key.PublicKey, basePolicy(now)); !errors.Is(err, ErrNotBeforeTooOld) {
+		t.Fatalf("Verify(ancient nbf) = %v, want ErrNotBeforeTooOld", err)
+	}
+}
+
 // FAPI 2.0 Message Signing Final §5.3.1 mandates nbf on a request
 // object; the base FAPI 2.0 Security Profile does not. VerifyPolicy
 // models that as RequireNotBefore, set only under the message-signing

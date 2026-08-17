@@ -56,6 +56,15 @@ var coreAuthorizationParameters = map[string]struct{}{
 	// satisfied unconditionally. It only needs to not be rejected as an
 	// unregistered parameter.
 	"prompt": {},
+
+	// response_mode (OAuth Multiple Response Type Encoding Practices;
+	// mandatory as "jwt" for a JARM/message-signing client) is not read
+	// or validated by this package — whether a response is JARM-encoded
+	// is entirely Config.Profile-driven (ProfileFAPISecurityWithMessageSigning
+	// always uses it; ProfileFAPISecurity never does), never decided by
+	// what a request asks for. It only needs to not be rejected as an
+	// unregistered parameter.
+	"response_mode": {},
 }
 
 // FormParameter is one name/value pair from a form-encoded request body,
@@ -223,6 +232,16 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 		return plain, tokenClaims, nil
 	}
 
+	// RFC 9101 §5: a request must not carry both "request" and
+	// "request_uri" — they are mutually exclusive ways of conveying the
+	// same authorization request. PAR generates its own request_uri as
+	// this call's *result*; a client sending one as an *input* parameter
+	// here is never meaningful, whether or not "request" is also
+	// present (PAR-2.1).
+	if _, hasRequestURI := params["request_uri"]; hasRequestURI {
+		return nil, nil, newError(ErrorInvalidRequest, 400, "request and request_uri must not both be present", nil)
+	}
+
 	alg, permitted := client.RequestObjectAlgorithm()
 	if !permitted {
 		return nil, nil, newError(ErrorInvalidRequestObject, 400, "client is not permitted to submit request objects", nil)
@@ -249,6 +268,10 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 		MaxLifetime:      s.cfg.Limits.MaxRequestObjectLifetime,
 		MaxClockSkew:     s.cfg.Limits.MaxClockSkew,
 		Replay:           s.requestObjectReplayChecker(),
+		// FAPI 2.0 Message Signing Final §5.3.1 mandates nbf on a
+		// request object; the base FAPI 2.0 Security Profile does not —
+		// see requestobject.VerifyPolicy.RequireNotBefore's doc comment.
+		RequireNotBefore: s.cfg.Profile == ProfileFAPISecurityWithMessageSigning,
 	})
 	if err != nil {
 		return nil, nil, newError(ErrorInvalidRequestObject, 400, "request object verification failed", err)
@@ -265,10 +288,21 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 // (Config.Extensions is never nil once New has run — see server.New),
 // and returns the claims-eligible subset (ReturnInTokenClaims) ready to
 // copy into a future access/ID token.
+//
+// The rejection uses ErrorInvalidRequestObject, not ErrorInvalidRequest,
+// when source is extension.SourceRequestObject: the offending parameter
+// came from inside a signed request object, not the outer form body, so
+// JAR-6.2 is the applicable error family — matching what a client
+// embedding e.g. a stray "request_uri" claim inside its own request
+// object should see.
 func (s *Server) checkExtensions(params map[string]json.RawMessage, source extension.Source) (map[string]json.RawMessage, *Error) {
 	values, err := s.cfg.Extensions.Parse(params, coreAuthorizationParameters, source)
 	if err != nil {
-		return nil, newError(ErrorInvalidRequest, 400, "request contains an unregistered or invalid parameter", err)
+		code := ErrorInvalidRequest
+		if source == extension.SourceRequestObject {
+			code = ErrorInvalidRequestObject
+		}
+		return nil, newError(code, 400, "request contains an unregistered or invalid parameter", err)
 	}
 	return extension.AsParameters(values, s.cfg.Extensions.Definitions()...), nil
 }

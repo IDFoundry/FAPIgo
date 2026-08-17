@@ -5,6 +5,7 @@ import (
 	"crypto"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	fapi "github.com/osanderson/go-fapi"
@@ -38,7 +39,7 @@ func Parse(token string) (Object, error) {
 	if err != nil {
 		return Object{}, fmt.Errorf("requestobject: %w", err)
 	}
-	if compact.Header.Type != jwtType {
+	if compact.Header.Type != "" && !isRequestObjectType(compact.Header.Type) {
 		return Object{}, ErrWrongType
 	}
 	claims, err := parseClaims(compact.Payload)
@@ -102,12 +103,29 @@ type VerifyPolicy struct {
 	// accepted. Zero means no tolerance.
 	MaxClockSkew time.Duration
 
-	// Replay, if non-nil, is used to detect object replay by jti — the
-	// object must carry one, or Verify fails with ErrMissingJTI. A nil
-	// Replay skips replay detection; when a request object is only ever
-	// accepted via a PAR request_uri that is itself single-use, replay
-	// detection here is defense in depth rather than the primary
-	// control.
+	// RequireNotBefore rejects an object with no nbf claim at all,
+	// rather than simply skipping the not-yet-valid check for it. FAPI
+	// 2.0 Message Signing Final §5.3.1 mandates nbf ("shall require the
+	// request object to contain an nbf claim"); the base FAPI 2.0
+	// Security Profile does not (it relies on request_uri's own short
+	// lifetime instead, per its "Main differences to FAPI 1.0" table) —
+	// so the caller sets this only under
+	// ProfileFAPISecurityWithMessageSigning, not unconditionally.
+	RequireNotBefore bool
+
+	// Replay, if non-nil, is used to detect object replay by jti — but
+	// only when the object actually carries one. Neither RFC 9101 nor
+	// FAPI 2.0 Message Signing Final requires a request object to
+	// include jti (message-signing's own replay defense is its
+	// mandatory, tightly-bounded nbf/exp window, not a jti claim), and
+	// the OIDF conformance suite's own request objects never carry one
+	// under the plain FAPI2 profile — only its Brazil-specific profile
+	// behavior adds one. So a missing jti here is not an error; it just
+	// means this particular object skips replay-by-jti, the same as a
+	// nil Replay would. This is fine architecturally because — when a
+	// request object is only ever accepted via a PAR request_uri that is
+	// itself single-use — replay detection here was always meant as
+	// defense in depth, not the primary control.
 	Replay ReplayChecker
 }
 
@@ -143,7 +161,7 @@ func (o Object) Verify(ctx context.Context, pub crypto.PublicKey, policy VerifyP
 	if c.Issuer != policy.ExpectedClientID {
 		return VerifiedObject{}, ErrIssuerMismatch
 	}
-	if c.Audience != policy.ExpectedAudience {
+	if !slices.Contains(c.Audience, policy.ExpectedAudience) {
 		return VerifiedObject{}, ErrAudienceMismatch
 	}
 
@@ -153,14 +171,15 @@ func (o Object) Verify(ctx context.Context, pub crypto.PublicKey, policy VerifyP
 	if c.ExpiresAt.Sub(policy.Now) > policy.MaxLifetime {
 		return VerifiedObject{}, ErrLifetimeExceeded
 	}
-	if !c.NotBefore.IsZero() && policy.Now.Before(c.NotBefore.Add(-policy.MaxClockSkew)) {
+	if c.NotBefore.IsZero() {
+		if policy.RequireNotBefore {
+			return VerifiedObject{}, ErrMissingNotBefore
+		}
+	} else if policy.Now.Before(c.NotBefore.Add(-policy.MaxClockSkew)) {
 		return VerifiedObject{}, ErrNotYetValid
 	}
 
-	if policy.Replay != nil {
-		if c.JTI == "" {
-			return VerifiedObject{}, ErrMissingJTI
-		}
+	if policy.Replay != nil && c.JTI != "" {
 		if err := policy.Replay.UseOnce(ctx, c.JTI, c.ExpiresAt); err != nil {
 			return VerifiedObject{}, fmt.Errorf("requestobject: replay check: %w", err)
 		}

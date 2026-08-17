@@ -3,8 +3,11 @@ package requestobject
 import "errors"
 
 var (
-	// ErrWrongType indicates the object's "typ" header was not
-	// "oauth-authz-req+jwt" (RFC 9101 §10.8).
+	// ErrWrongType indicates the object's "typ" header was present but
+	// did not identify a request object (RFC 9101 §10.8) even after the
+	// case-insensitive, "application/"-prefix-tolerant comparison
+	// isRequestObjectType applies. An absent "typ" header is not an
+	// error — see jwtType's doc comment.
 	ErrWrongType = errors.New("requestobject: header typ is not oauth-authz-req+jwt")
 
 	// ErrMalformedClaims indicates the payload was not a JSON object, or
@@ -19,7 +22,8 @@ var (
 	// the client ID the caller expected to authenticate.
 	ErrIssuerMismatch = errors.New("requestobject: iss does not match expected client ID")
 
-	// ErrAudienceMismatch indicates the object's aud claim did not equal
+	// ErrAudienceMismatch indicates the object's aud claim (a single
+	// value or, per RFC 7519 §4.1.3, an array of values) did not contain
 	// the audience (authorization server issuer identifier) the caller
 	// expected.
 	ErrAudienceMismatch = errors.New("requestobject: aud does not match expected audience")
@@ -32,11 +36,11 @@ var (
 	// beyond the configured clock-skew tolerance.
 	ErrNotYetValid = errors.New("requestobject: object is not yet valid")
 
+	// ErrMissingNotBefore indicates VerifyPolicy.RequireNotBefore was set
+	// but the object carries no nbf claim at all.
+	ErrMissingNotBefore = errors.New("requestobject: nbf claim is required")
+
 	// ErrLifetimeExceeded indicates the object's exp claim is further in
 	// the future than the configured maximum lifetime allows.
 	ErrLifetimeExceeded = errors.New("requestobject: exp exceeds maximum allowed lifetime")
-
-	// ErrMissingJTI indicates replay detection was requested but the
-	// object carries no jti claim to key it by.
-	ErrMissingJTI = errors.New("requestobject: replay detection requires a jti claim")
 )

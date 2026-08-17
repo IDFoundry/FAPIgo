@@ -24,19 +24,29 @@ func (r *memClientRepository) ResolveClient(_ context.Context, id fapi.ClientID)
 
 // memTransactionStore is an in-memory storage.TransactionStore.
 type memTransactionStore struct {
-	mu             sync.Mutex
-	byReference    map[string]storage.NewPARRecord
-	referenceUsed  map[string]bool
-	byHandle       map[string]storage.CompletedInteraction
-	handleConsumed map[string]bool
+	mu                 sync.Mutex
+	byReference        map[string]storage.NewPARRecord
+	referenceCompleted map[string]bool
+	byHandle           map[string]memPendingInteraction
+	handleConsumed     map[string]bool
+}
+
+// memPendingInteraction is what BeginAuthorization stashes per Handle:
+// the reference it was minted from (needed at completion time to
+// enforce single-use per Reference rather than per Handle — see
+// storage.TransactionStore.BeginAuthorization's doc comment) alongside
+// the data CompleteAuthorization ultimately returns.
+type memPendingInteraction struct {
+	reference   string
+	interaction storage.CompletedInteraction
 }
 
 func newMemTransactionStore() *memTransactionStore {
 	return &memTransactionStore{
-		byReference:    make(map[string]storage.NewPARRecord),
-		referenceUsed:  make(map[string]bool),
-		byHandle:       make(map[string]storage.CompletedInteraction),
-		handleConsumed: make(map[string]bool),
+		byReference:        make(map[string]storage.NewPARRecord),
+		referenceCompleted: make(map[string]bool),
+		byHandle:           make(map[string]memPendingInteraction),
+		handleConsumed:     make(map[string]bool),
 	}
 }
 
@@ -50,17 +60,19 @@ func (s *memTransactionStore) CreatePAR(_ context.Context, record storage.NewPAR
 func (s *memTransactionStore) BeginAuthorization(_ context.Context, txn storage.BeginAuthorizationTransaction) (storage.PushedAuthorizationRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.referenceUsed[txn.Reference] {
+	if s.referenceCompleted[txn.Reference] {
 		return storage.PushedAuthorizationRequest{}, fmt.Errorf("fapitest: request_uri already consumed")
 	}
 	record, ok := s.byReference[txn.Reference]
 	if !ok {
 		return storage.PushedAuthorizationRequest{}, fmt.Errorf("fapitest: no such request_uri")
 	}
-	s.referenceUsed[txn.Reference] = true
-	s.byHandle[txn.Handle] = storage.CompletedInteraction{
-		ClientID: record.ClientID, Parameters: record.Parameters, TokenClaims: record.TokenClaims,
-		ExpiresAt: txn.HandleExpiresAt,
+	s.byHandle[txn.Handle] = memPendingInteraction{
+		reference: txn.Reference,
+		interaction: storage.CompletedInteraction{
+			ClientID: record.ClientID, Parameters: record.Parameters, TokenClaims: record.TokenClaims,
+			ExpiresAt: txn.HandleExpiresAt,
+		},
 	}
 	return storage.PushedAuthorizationRequest{
 		ClientID: record.ClientID, Parameters: record.Parameters, TokenClaims: record.TokenClaims,
@@ -74,12 +86,16 @@ func (s *memTransactionStore) CompleteAuthorization(_ context.Context, txn stora
 	if s.handleConsumed[txn.Handle] {
 		return storage.CompletedInteraction{}, fmt.Errorf("fapitest: interaction handle already consumed")
 	}
-	interaction, ok := s.byHandle[txn.Handle]
+	pending, ok := s.byHandle[txn.Handle]
 	if !ok {
 		return storage.CompletedInteraction{}, fmt.Errorf("fapitest: no such interaction handle")
 	}
+	if s.referenceCompleted[pending.reference] {
+		return storage.CompletedInteraction{}, fmt.Errorf("fapitest: request_uri already consumed")
+	}
 	s.handleConsumed[txn.Handle] = true
-	return interaction, nil
+	s.referenceCompleted[pending.reference] = true
+	return pending.interaction, nil
 }
 
 // memGrantStore is an in-memory storage.GrantStore.

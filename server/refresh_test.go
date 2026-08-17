@@ -4,7 +4,10 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"testing"
+	"time"
 
+	fapi "github.com/osanderson/go-fapi"
+	"github.com/osanderson/go-fapi/internal/token"
 	"github.com/osanderson/go-fapi/server"
 )
 
@@ -85,15 +88,21 @@ func TestRefreshAccessTokenSuccess(t *testing.T) {
 	if !result.HasIDToken || result.IDToken.Reveal() == "" {
 		t.Fatalf("expected an ID token since scope included openid")
 	}
+	// FAPI2-SP-FINAL 5.3.2.1-9: "shall not use refresh token rotation
+	// except in extraordinary circumstances" — the response must echo
+	// back the same refresh token, not mint a new one.
 	if !result.HasRefreshToken || result.RefreshToken.Reveal() == "" {
-		t.Fatalf("expected a rotated refresh token")
+		t.Fatalf("expected a refresh token in the response")
 	}
-	if result.RefreshToken.Reveal() == first.RefreshToken.Reveal() {
-		t.Fatalf("refresh token was not rotated")
+	if result.RefreshToken.Reveal() != first.RefreshToken.Reveal() {
+		t.Fatalf("refresh token was rotated; FAPI2-SP-FINAL 5.3.2.1-9 says it should not be")
 	}
 }
 
-func TestRefreshAccessTokenOldTokenIsSingleUse(t *testing.T) {
+// FAPI2-SP-FINAL 5.3.2.1-9 requires refresh tokens not be rotated by
+// default, which means — unlike an authorization code — the same
+// refresh token must keep working across repeated use, not just once.
+func TestRefreshAccessTokenReusableAcrossMultipleCalls(t *testing.T) {
 	h := newHarness(t, server.ProfileFAPISecurity, true)
 	first, dpopKey := exchangeForTokensWithOfflineAccess(t, h)
 
@@ -104,15 +113,11 @@ func TestRefreshAccessTokenOldTokenIsSingleUse(t *testing.T) {
 		t.Fatalf("first RefreshAccessToken: %v", err)
 	}
 
-	_, err := h.server.RefreshAccessToken(context.Background(), server.RefreshTokenRequest{
+	if _, err := h.server.RefreshAccessToken(context.Background(), server.RefreshTokenRequest{
 		HTTP:      server.FormRequest{Parameters: refreshFormParams(h.clientAssertion(t), first.RefreshToken.Reveal(), "")},
 		DPoPProof: createDPoPProof(t, dpopKey, h.now),
-	})
-	if err == nil {
-		t.Fatalf("second RefreshAccessToken (replayed token) = nil error, want error")
-	}
-	if code := serverErrorCode(t, err); code != server.ErrorInvalidGrant {
-		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidGrant)
+	}); err != nil {
+		t.Fatalf("second RefreshAccessToken (same token again): %v, want success", err)
 	}
 }
 
@@ -151,20 +156,44 @@ func TestRefreshAccessTokenRejectsWideningScope(t *testing.T) {
 	}
 }
 
-func TestRefreshAccessTokenRejectsWrongDPoPKey(t *testing.T) {
+// FAPI2SPFinal's refresh-token conformance module deliberately presents
+// a brand-new DPoP key at refresh time "to check the server handles
+// that correctly" (the suite's own RefreshTokenRequestSteps.java
+// comment) — and RFC 9449 §5 confirms a confidential client's refresh
+// token isn't bound to a specific DPoP key at all ("already
+// sender-constrained with a different existing mechanism" — client
+// authentication). Every client this server accepts is confidential
+// (authenticateClient always requires client_assertion; there is no
+// public-client path), so a rotated DPoP key at refresh time must
+// succeed, and the newly issued access token must be bound to the new
+// key, not the original one.
+func TestRefreshAccessTokenAcceptsRotatedDPoPKey(t *testing.T) {
 	h := newHarness(t, server.ProfileFAPISecurity, true)
 	first, _ := exchangeForTokensWithOfflineAccess(t, h)
 
-	wrongKey := generateKey(t)
-	_, err := h.server.RefreshAccessToken(context.Background(), server.RefreshTokenRequest{
+	rotatedKey := generateKey(t)
+	result, err := h.server.RefreshAccessToken(context.Background(), server.RefreshTokenRequest{
 		HTTP:      server.FormRequest{Parameters: refreshFormParams(h.clientAssertion(t), first.RefreshToken.Reveal(), "")},
-		DPoPProof: createDPoPProof(t, wrongKey, h.now),
+		DPoPProof: createDPoPProof(t, rotatedKey, h.now),
 	})
-	if err == nil {
-		t.Fatalf("RefreshAccessToken(wrong DPoP key) = nil error, want error")
+	if err != nil {
+		t.Fatalf("RefreshAccessToken(rotated DPoP key): %v", err)
 	}
-	if code := serverErrorCode(t, err); code != server.ErrorInvalidGrant {
-		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidGrant)
+
+	rotatedThumbprint, err := jwkThumbprintFor(rotatedKey)
+	if err != nil {
+		t.Fatalf("jwkThumbprintFor: %v", err)
+	}
+	parsed, err := token.ParseAccessToken(result.AccessToken.Reveal())
+	if err != nil {
+		t.Fatalf("ParseAccessToken: %v", err)
+	}
+	if _, err := parsed.Validate(&h.serverKey.PublicKey, token.AccessTokenValidatePolicy{
+		ExpectedIssuer: testIssuer, ExpectedAudience: testIssuer, Algorithm: fapi.ES256,
+		ExpectedThumbprint: &rotatedThumbprint,
+		Now:                h.now, MaxLifetime: 5 * time.Minute, MaxClockSkew: 5 * time.Second,
+	}); err != nil {
+		t.Fatalf("refreshed access token is not bound to the rotated DPoP key: %v", err)
 	}
 }
 

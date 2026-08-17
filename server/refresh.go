@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"crypto/sha256"
-	"crypto/subtle"
 	"strings"
 
 	fapi "github.com/osanderson/go-fapi"
@@ -15,16 +14,30 @@ type RefreshTokenRequest struct {
 	HTTP FormRequest
 
 	// DPoPProof is the value of the request's DPoP header. It is
-	// required, and must be bound to the same key the original refresh
-	// token was issued to.
+	// required and must be a valid, fresh proof, but — since every
+	// client this server accepts is confidential (private_key_jwt
+	// client authentication is always required; there is no
+	// public-client path) — it need not be bound to the same key the
+	// refresh token was originally issued to. RFC 9449 §5: "Refresh
+	// tokens issued to confidential clients... are not bound to the
+	// DPoP proof public key because they are already sender-constrained
+	// with a different existing mechanism [client authentication]." The
+	// newly issued access token is bound to whichever key this request
+	// presents, so a client rotating its DPoP key at refresh time is
+	// expected and correctly handled, not an error.
 	DPoPProof string
 }
 
 // RefreshAccessToken authenticates the client, verifies its DPoP proof,
-// and redeems the refresh token — always rotating it: the presented
-// token is consumed (a second use of the same token fails) and a new
-// one is issued alongside the new access token. A requested scope may
-// narrow, but never widen, the token's original grant.
+// and redeems the refresh token to issue a new access token (and ID
+// token, if the granted scope includes openid). It does not rotate the
+// refresh token: FAPI2-SP-FINAL requirement 5.3.2.1-9 says an
+// authorization server "shall not use refresh token rotation except in
+// extraordinary circumstances", so the presented token is returned
+// unchanged in the response and remains valid for the caller's next
+// refresh too — see storage.GrantStore.RedeemRefreshToken's doc
+// comment. A requested scope may narrow, but never widen, the token's
+// original grant.
 func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest) (TokenResult, error) {
 	params, err := formParametersToMap(req.HTTP.Parameters)
 	if err != nil {
@@ -65,9 +78,12 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 	if redeemed.ClientID != client.ID() {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorInvalidGrant, 400, "refresh_token was not issued to this client", nil))
 	}
-	if subtle.ConstantTimeCompare([]byte(thumbprint), []byte(redeemed.Thumbprint)) != 1 {
-		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorInvalidGrant, 400, "DPoP proof key does not match refresh_token", nil))
-	}
+	// No DPoP-key match check against redeemed.Thumbprint here — see
+	// RefreshTokenRequest.DPoPProof's doc comment. client.ID() above is
+	// only ever reached via successful client_assertion verification
+	// (authenticateClient), so every caller here is confidential; RFC
+	// 9449 §5 does not bind a confidential client's refresh token to a
+	// specific DPoP key at all.
 
 	scope := redeemed.Scope
 	if requestedScope, ok := params["scope"]; ok && requestedScope != "" {
@@ -110,11 +126,10 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 		result.HasIDToken = true
 	}
 
-	refreshToken, err := s.issueRefreshToken(ctx, client.ID(), redeemed.Subject, scope, thumbprint, redeemed.AuthTime, redeemed.ACR, redeemed.AMR, redeemed.TokenClaims, redeemed.RequestedIDTokenClaims, redeemed.RequestedUserinfoClaims)
-	if err != nil {
-		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorServerError, 500, "failed to issue refresh token", err))
-	}
-	result.RefreshToken = fapi.NewSecret(refreshToken)
+	// The refresh token is not rotated — see this function's doc
+	// comment — so the response simply echoes back the same value the
+	// client presented, rather than minting and persisting a new one.
+	result.RefreshToken = fapi.NewSecret(rawToken)
 	result.HasRefreshToken = true
 
 	s.audit(ctx, AuditEventRefreshAccessToken, client.ID(), AuditOutcomeSuccess, "")

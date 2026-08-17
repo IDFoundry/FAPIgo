@@ -88,7 +88,6 @@ type memGrantStore struct {
 	codes        map[[32]byte]storage.NewAuthorizationCode
 	codeRedeemed map[[32]byte]bool
 	refresh      map[[32]byte]storage.NewRefreshToken
-	refreshUsed  map[[32]byte]bool
 }
 
 func newMemGrantStore() *memGrantStore {
@@ -96,7 +95,6 @@ func newMemGrantStore() *memGrantStore {
 		codes:        make(map[[32]byte]storage.NewAuthorizationCode),
 		codeRedeemed: make(map[[32]byte]bool),
 		refresh:      make(map[[32]byte]storage.NewRefreshToken),
-		refreshUsed:  make(map[[32]byte]bool),
 	}
 }
 
@@ -136,17 +134,16 @@ func (s *memGrantStore) CreateRefreshToken(_ context.Context, token storage.NewR
 	return nil
 }
 
+// RedeemRefreshToken is not single-use — see storage.GrantStore's doc
+// comment (FAPI2-SP-FINAL 5.3.2.1-9): a refresh token stays valid for
+// repeated use until it expires.
 func (s *memGrantStore) RedeemRefreshToken(_ context.Context, redemption storage.RefreshTokenRedemption) (storage.RedeemedRefreshToken, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.refreshUsed[redemption.TokenHash] {
-		return storage.RedeemedRefreshToken{}, fmt.Errorf("fapitest: refresh token already used")
-	}
 	token, ok := s.refresh[redemption.TokenHash]
 	if !ok {
 		return storage.RedeemedRefreshToken{}, fmt.Errorf("fapitest: unknown refresh token")
 	}
-	s.refreshUsed[redemption.TokenHash] = true
 	return storage.RedeemedRefreshToken{
 		ClientID: token.ClientID, Subject: token.Subject, Scope: token.Scope,
 		Thumbprint: token.Thumbprint, AuthTime: token.AuthTime, ACR: token.ACR, AMR: token.AMR,

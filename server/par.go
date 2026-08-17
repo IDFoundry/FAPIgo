@@ -44,6 +44,18 @@ var coreAuthorizationParameters = map[string]struct{}{
 	// parameter's specifics entirely (permitted: OIDC Core §5.5 lets a
 	// server return more, or fewer, claims than requested).
 	"claims": {},
+
+	// prompt (OIDC Core §3.1.2.1) lets a client request specific
+	// re-authentication/consent behavior — most commonly "consent", to
+	// force a fresh consent screen when requesting offline_access, so a
+	// refresh token is guaranteed to be (re-)issued rather than silently
+	// reusing an existing grant. This package doesn't need to act on its
+	// value: BeginAuthorization always produces InteractionRequired and
+	// there is no "remembered consent" fast path that ever skips
+	// rendering consent, so prompt's behavioral requirements are already
+	// satisfied unconditionally. It only needs to not be rejected as an
+	// unregistered parameter.
+	"prompt": {},
 }
 
 // FormParameter is one name/value pair from a form-encoded request body,

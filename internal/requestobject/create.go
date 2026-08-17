@@ -104,6 +104,7 @@ func Create(p CreateParams) (string, error) {
 		"iss": p.ClientID,
 		"aud": p.Audience,
 		"exp": p.Now.Add(p.Lifetime).Unix(),
+		"nbf": p.Now.Unix(),
 		"iat": p.Now.Unix(),
 		"jti": jti,
 	}

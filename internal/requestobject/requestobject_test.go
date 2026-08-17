@@ -208,6 +208,52 @@ func TestParseRejectsWrongType(t *testing.T) {
 	}
 }
 
+// RFC 9101 §10.8 frames the "typ" header as something "one would"
+// explicitly include, not a requirement, and warns that mandating it
+// "will break most existing deployments, as existing clients are
+// already commonly using untyped Request Objects" - an absent "typ"
+// must parse successfully, not just a correctly-set one.
+func TestParseAcceptsMissingType(t *testing.T) {
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256"}`))
+	payload := base64.RawURLEncoding.EncodeToString([]byte(
+		`{"iss":"client-123","aud":"https://as.example","exp":9999999999}`,
+	))
+	token := header + "." + payload + "." + base64.RawURLEncoding.EncodeToString(make([]byte, 64))
+
+	if _, err := Parse(token); err != nil {
+		t.Fatalf("Parse(missing typ) = %v, want nil error", err)
+	}
+}
+
+// RFC 7515 §4.1.9/§5.3 single "typ" out as the one JOSE header value
+// compared per RFC 2045 media-type rules, not ordinary case-sensitive
+// JSON string comparison — those rules are explicitly case insensitive,
+// and a value with no "/" is treated as "application/"-prefixed. The
+// OIDF conformance suite deliberately sends a randomized-case "typ" to
+// check exactly this (JAR-4); an "application/"-prefixed value is the
+// same requirement applied to the other RFC 2045 convention.
+func TestParseAcceptsCaseInsensitiveType(t *testing.T) {
+	for _, typ := range []string{
+		"OautH-auThZ-REQ+jWt",
+		"APPLICATION/oauth-authz-req+jwt",
+		"Application/OAuth-Authz-Req+JWT",
+	} {
+		headerJSON, err := json.Marshal(map[string]string{"alg": "ES256", "typ": typ})
+		if err != nil {
+			t.Fatalf("marshal header: %v", err)
+		}
+		header := base64.RawURLEncoding.EncodeToString(headerJSON)
+		payload := base64.RawURLEncoding.EncodeToString([]byte(
+			`{"iss":"client-123","aud":"https://as.example","exp":9999999999}`,
+		))
+		token := header + "." + payload + "." + base64.RawURLEncoding.EncodeToString(make([]byte, 64))
+
+		if _, err := Parse(token); err != nil {
+			t.Fatalf("Parse(typ=%q) = %v, want nil error", typ, err)
+		}
+	}
+}
+
 func TestParseRejectsMissingRequiredClaims(t *testing.T) {
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256","typ":"oauth-authz-req+jwt"}`))
 	cases := []string{
@@ -283,6 +329,41 @@ func TestVerifyRejectsIssuerMismatch(t *testing.T) {
 	}
 }
 
+// RFC 7519 §4.1.3 permits "aud" to be a JSON array as well as a single
+// string, and the OIDF conformance suite deliberately sends an array
+// mixing the AS's own issuer identifier with unrelated values to check
+// this is honored (RFC7519-4.1.3) - a request object must be accepted
+// as long as the expected audience is somewhere in the array, not only
+// when the array holds nothing else.
+func TestVerifyAcceptsAudienceArrayContainingExpected(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256"}`))
+	payloadJSON, err := json.Marshal(map[string]any{
+		"iss": "client-123",
+		"aud": []string{"https://other1.example.com", "https://as.example", "invalid"},
+		"exp": now.Add(time.Minute).Unix(),
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	signingInput := header + "." + base64.RawURLEncoding.EncodeToString(payloadJSON)
+	sig, err := signRaw(key, signingInput)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	token := signingInput + "." + sig
+
+	obj, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if _, err := obj.Verify(context.Background(), &key.PublicKey, basePolicy(now)); err != nil {
+		t.Fatalf("Verify(aud array containing expected) = %v, want nil error", err)
+	}
+}
+
 func TestVerifyRejectsAudienceMismatch(t *testing.T) {
 	key := generateKey(t)
 	now := time.Now()
@@ -328,6 +409,68 @@ func TestVerifyRejectsLifetimeExceeded(t *testing.T) {
 	}
 }
 
+// FAPI 2.0 Message Signing Final §5.3.1 mandates nbf on a request
+// object; the base FAPI 2.0 Security Profile does not. VerifyPolicy
+// models that as RequireNotBefore, set only under the message-signing
+// profile — a missing nbf must be rejected when it's true...
+func TestVerifyRejectsMissingNotBeforeWhenRequired(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256"}`))
+	payloadJSON, err := json.Marshal(map[string]any{
+		"iss": "client-123", "aud": "https://as.example", "exp": now.Add(time.Minute).Unix(),
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	signingInput := header + "." + base64.RawURLEncoding.EncodeToString(payloadJSON)
+	sig, err := signRaw(key, signingInput)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	token := signingInput + "." + sig
+
+	obj, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	policy := basePolicy(now)
+	policy.RequireNotBefore = true
+	if _, err := obj.Verify(context.Background(), &key.PublicKey, policy); !errors.Is(err, ErrMissingNotBefore) {
+		t.Fatalf("Verify(no nbf, required) = %v, want ErrMissingNotBefore", err)
+	}
+}
+
+// ...but accepted, as before, when it's false (the default, and what
+// the base FAPI 2.0 Security Profile uses).
+func TestVerifyAcceptsMissingNotBeforeWhenNotRequired(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256"}`))
+	payloadJSON, err := json.Marshal(map[string]any{
+		"iss": "client-123", "aud": "https://as.example", "exp": now.Add(time.Minute).Unix(),
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	signingInput := header + "." + base64.RawURLEncoding.EncodeToString(payloadJSON)
+	sig, err := signRaw(key, signingInput)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	token := signingInput + "." + sig
+
+	obj, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if _, err := obj.Verify(context.Background(), &key.PublicKey, basePolicy(now)); err != nil {
+		t.Fatalf("Verify(no nbf, not required) = %v, want nil error", err)
+	}
+}
+
 func TestVerifyDetectsReplay(t *testing.T) {
 	key := generateKey(t)
 	now := time.Now()
@@ -354,7 +497,14 @@ func TestVerifyDetectsReplay(t *testing.T) {
 	}
 }
 
-func TestVerifyRequiresJTIWhenReplayConfigured(t *testing.T) {
+// Neither RFC 9101 nor FAPI 2.0 Message Signing Final requires a
+// request object to carry a jti - message-signing's own replay defense
+// is its tightly-bounded nbf/exp window, not a jti claim - and the OIDF
+// conformance suite's own request objects never include one under the
+// plain FAPI2 profile. So a request object missing jti must still
+// verify successfully even with a replay checker configured; it just
+// means that particular object skips replay-by-jti.
+func TestVerifySucceedsWithoutJTIWhenReplayConfigured(t *testing.T) {
 	key := generateKey(t)
 	now := time.Now()
 
@@ -382,7 +532,7 @@ func TestVerifyRequiresJTIWhenReplayConfigured(t *testing.T) {
 	}
 	policy := basePolicy(now)
 	policy.Replay = newMemoryReplayChecker()
-	if _, err := obj.Verify(context.Background(), &key.PublicKey, policy); !errors.Is(err, ErrMissingJTI) {
-		t.Fatalf("Verify(no jti, replay required) = %v, want ErrMissingJTI", err)
+	if _, err := obj.Verify(context.Background(), &key.PublicKey, policy); err != nil {
+		t.Fatalf("Verify(no jti, replay configured) = %v, want nil error", err)
 	}
 }

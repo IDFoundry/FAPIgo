@@ -561,6 +561,58 @@ func TestPushAuthorizationRequestJARSuccess(t *testing.T) {
 	}
 }
 
+// RFC 9101 §5 (PAR-2.1): "request" and "request_uri" are mutually
+// exclusive ways of conveying the same authorization request. PAR
+// generates its own request_uri as this call's *result* — a client
+// sending one as an *input* parameter here, alongside a valid signed
+// "request", is never meaningful and must be rejected.
+func TestPushAuthorizationRequestRejectsRequestUriAlongsideRequest(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurityWithMessageSigning, true)
+	requestObj := h.requestObject(t, standardAuthParams(t))
+
+	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: []server.FormParameter{
+			formParam("client_assertion", h.clientAssertion(t)),
+			formParam("client_assertion_type", clientassertion.AssertionType),
+			formParam("request", requestObj),
+			formParam("request_uri", "urn:ietf:params:oauth:request_uri:bogus"),
+		}},
+	})
+	if err == nil {
+		t.Fatalf("PushAuthorizationRequest(request + request_uri) = nil error, want error")
+	}
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequest)
+	}
+}
+
+// A stray "request_uri" claim embedded inside the signed request object
+// itself (as opposed to a sibling form parameter — see
+// TestPushAuthorizationRequestRejectsRequestUriAlongsideRequest) is an
+// unregistered parameter from inside the request object, so it must be
+// reported as ErrorInvalidRequestObject (JAR-6.2), not the generic
+// ErrorInvalidRequest a plain-form violation gets.
+func TestPushAuthorizationRequestRejectsRequestUriInsideRequestObject(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurityWithMessageSigning, true)
+	params := standardAuthParams(t)
+	params["request_uri"] = jsonRaw(t, "urn:ietf:params:oauth:request_uri:bogus")
+	requestObj := h.requestObject(t, params)
+
+	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: []server.FormParameter{
+			formParam("client_assertion", h.clientAssertion(t)),
+			formParam("client_assertion_type", clientassertion.AssertionType),
+			formParam("request", requestObj),
+		}},
+	})
+	if err == nil {
+		t.Fatalf("PushAuthorizationRequest(request_uri inside request object) = nil error, want error")
+	}
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequestObject {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequestObject)
+	}
+}
+
 func TestPushAuthorizationRequestPlainSuccessUnderSecurityProfile(t *testing.T) {
 	h := newHarness(t, server.ProfileFAPISecurity, true)
 
@@ -922,6 +974,24 @@ func TestPushAuthorizationRequestRejectsUnregisteredExtensionParameter(t *testin
 func TestPushAuthorizationRequestAcceptsPromptParameter(t *testing.T) {
 	h := newHarness(t, server.ProfileFAPISecurity, false)
 	params := plainFormParameters(t, h.clientAssertion(t), map[string]string{"prompt": "consent"})
+
+	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: params},
+	})
+	if err != nil {
+		t.Fatalf("PushAuthorizationRequest: %v", err)
+	}
+}
+
+// response_mode=jwt is mandatory for a JARM/message-signing client
+// (OAuth Multiple Response Type Encoding Practices) but this package
+// never reads it — JARM-or-not is entirely Config.Profile-driven. A
+// conformance-suite regression once had it rejected outright as an
+// unregistered parameter, failing PAR before the authorization flow
+// could even begin under ProfileFAPISecurityWithMessageSigning.
+func TestPushAuthorizationRequestAcceptsResponseModeParameter(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, false)
+	params := plainFormParameters(t, h.clientAssertion(t), map[string]string{"response_mode": "jwt"})
 
 	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
 		HTTP: server.FormRequest{Parameters: params},

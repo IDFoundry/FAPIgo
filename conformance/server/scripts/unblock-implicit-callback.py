@@ -1,12 +1,23 @@
 #!/usr/bin/env python3
-"""Workaround for the suite's own scripted-browser (HtmlUnit) failing to
-execute implicitCallback.html's JS, which normally auto-POSTs an empty
-body to a per-visit "implicit submission" URL to let a stuck module
-continue (see CreateRandomImplicitSubmitUrl.java / implicitCallback.html
-in the conformance-suite source). HtmlUnit throws a syntax error trying
-to parse the page's Bootstrap 5.3.3 bundle before it ever reaches that
-submission script, so the module hangs forever waiting for a POST that
-never arrives.
+"""Workaround for the suite's own scripted-browser (HtmlUnit) usually
+failing to execute implicitCallback.html's JS, which normally auto-POSTs
+an empty body to a per-visit "implicit submission" URL to let a stuck
+module continue (see CreateRandomImplicitSubmitUrl.java /
+implicitCallback.html in the conformance-suite source). HtmlUnit throws
+a syntax error parsing the page's Bootstrap 5.3.3 <script src> bundle -
+but that failure is scoped to that one script tag, not the whole page:
+the SEPARATE inline <script> block holding the real xhr.send() call
+still executes independently, and sometimes wins on its own before this
+poller ever gets there (confirmed live via the module's own log). So
+this isn't "the module always hangs" - it's "the module hangs often
+enough, unpredictably enough, that every AS-side plan run needs this
+running regardless." When the browser's own JS does win the race,
+submitting again anyway isn't just redundant: the suite's own
+module-continuation logic isn't safe against being woken twice
+concurrently, corrupting the flow into two racing token exchanges over
+the same authorization code - see the "Incoming HTTP request to
+{path}" check below, which exists specifically to detect and skip that
+case.
 
 This is not an optional convenience — every suite version that supports
 the fapi2-security-profile-final-test-plan this AS is tested against
@@ -192,8 +203,33 @@ def main():
                     if not full_url or full_url in submitted:
                         continue
                     submitted.add(full_url)
+                    request_path = urlsplit(full_url).path
+                    # HtmlUnit's syntax error is scoped to the one
+                    # <script src=bootstrap.min.js> tag - the SEPARATE
+                    # inline <script> block holding implicitCallback.html's
+                    # real xhr.send() logic still executes on its own,
+                    # and sometimes wins this race before we even look.
+                    # Submitting anyway when it already has is not just
+                    # redundant: confirmed live that the suite's module-
+                    # continuation logic isn't safe against being woken
+                    # twice - it corrupts the flow into two concurrent
+                    # token exchanges racing over the same authorization
+                    # code, surfacing as a confusing "invalid_grant: code
+                    # already used" on an otherwise-clean module. Since
+                    # this same already-fetched `log` is what the browser's
+                    # own request would also appear in, checking costs
+                    # nothing extra and closes the most common case of
+                    # this race (anything landing after this exact
+                    # instant is still an unavoidable, uncoordinated
+                    # race with no client-side fix).
+                    already_submitted_by_browser = any(
+                        e.get("msg") == f"Incoming HTTP request to {request_path}" for e in log
+                    )
+                    if already_submitted_by_browser:
+                        print(f"skipped {instance_id}: browser's own JS already submitted {full_url}", flush=True)
+                        continue
                     try:
-                        status = client.post(urlsplit(full_url).path, b"")
+                        status = client.post(request_path, b"")
                         print(f"unblocked {instance_id}: POST {full_url} -> {status}", flush=True)
                     except Exception as e:
                         print(f"unblock {instance_id} failed (not retrying): POST {full_url}: {e}", flush=True)

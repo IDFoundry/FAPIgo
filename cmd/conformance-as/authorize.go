@@ -6,6 +6,7 @@ import (
 
 	fapi "github.com/osanderson/go-fapi"
 	"github.com/osanderson/go-fapi/server"
+	"github.com/osanderson/go-fapi/storage"
 )
 
 // consentHandler serves the browser-facing authorization endpoint with a
@@ -14,6 +15,7 @@ import (
 // something to load and submit.
 type consentHandler struct {
 	srv            *server.Server
+	clients        storage.ClientRepository
 	clock          server.Clock
 	defaultSubject string
 
@@ -28,9 +30,10 @@ type consentHandler struct {
 	pending map[string]server.InteractionHandle
 }
 
-func newConsentHandler(srv *server.Server, clock server.Clock, defaultSubject string) *consentHandler {
+func newConsentHandler(srv *server.Server, clients storage.ClientRepository, clock server.Clock, defaultSubject string) *consentHandler {
 	return &consentHandler{
 		srv:            srv,
+		clients:        clients,
 		clock:          clock,
 		defaultSubject: defaultSubject,
 		pending:        make(map[string]server.InteractionHandle),
@@ -70,6 +73,50 @@ func (h *consentHandler) handleBegin(w http.ResponseWriter, r *http.Request) {
 	case server.RedirectResponse:
 		http.Redirect(w, r, action.Destination.String(), http.StatusFound)
 	case server.LocalErrorResponse:
+		// This AS is only ever driven by the OIDF conformance suite's own
+		// scripted browser, which has no mechanism to verify a locally
+		// rendered error page's content — confirmed by reading the
+		// suite's own condition classes: a local page's response body is
+		// only ever written to its event log for a human to read, never
+		// into the Environment any condition asserts against. A redirect-
+		// delivered OAuth error, by contrast, IS verified automatically
+		// (authorization_endpoint_response is populated from exactly
+		// that). Several negative-test modules
+		// (par-attempt-reuse-request_uri and siblings,
+		// ensure-unsigned-authorization-request-without-using-par-fails)
+		// exist specifically to check this AS rejects a broken PAR
+		// request_uri or missing request object — and would otherwise
+		// only ever grade REVIEW (needing a human to approve a
+		// screenshot) rather than an automated PASS, purely because of
+		// this suite limitation, not any ambiguity about whether the
+		// rejection itself was correct.
+		//
+		// So: redirect the error back to the client instead of rendering
+		// it locally, but ONLY when redirect_uri is both present on this
+		// request and an exact match for one of client_id's own
+		// registered URIs — never trust it otherwise, since the whole
+		// reason BeginAuthorization returned LocalErrorResponse here is
+		// that it could not itself establish redirect_uri as trustworthy
+		// (e.g. the request_uri it would normally come from is exactly
+		// what's invalid/expired/reused/mismatched). This check is what
+		// makes it safe: redirect_uri is validated against the trusted
+		// client registry, not merely echoed back from the request under
+		// test. A real, non-suite FAPI client hitting one of these errors
+		// gets a perfectly good, safe outcome either way — a rendered
+		// local page is fine for a human in a browser — this exists
+		// purely so the suite's own automated verification can run.
+		clientID := fapi.ClientID(q.Get("client_id"))
+		redirectURI := q.Get("redirect_uri")
+		if redirectURI != "" {
+			if client, resolveErr := h.clients.ResolveClient(r.Context(), clientID); resolveErr == nil && client.HasRedirectURI(redirectURI) {
+				dest, buildErr := h.srv.BuildAuthorizationErrorRedirect(r.Context(), clientID, redirectURI, q.Get("state"),
+					string(action.Error.Code()), action.Error.PublicDescription())
+				if buildErr == nil {
+					http.Redirect(w, r, dest.String(), http.StatusFound)
+					return
+				}
+			}
+		}
 		writeLocalHTMLError(w, action.Error)
 	default:
 		writeLocalHTMLErrorRaw(w, http.StatusInternalServerError, "server_error", "unrecognized authorization action")

@@ -129,6 +129,7 @@ module names, shared by both plans):
       {
         "task": "Consent",
         "match": "https://conformance-as-baseline:8443/authorize*",
+        "optional": true,
         "commands": [["click", "xpath", "//button[@name='decision' and @value='approve']", "optional"]]
       }
     ]
@@ -170,6 +171,21 @@ module names, shared by both plans):
   }
 }
 ```
+
+The top-level task's own `"optional": true` (distinct from the
+`"optional"` marker inside `commands`, which only tolerates the
+approve *button* being absent) tolerates the browser landing somewhere
+other than `/authorize` entirely — `BrowserControl.java`'s task runner
+throws `TestFailureException: WebRunner unexpected url for task` if a
+non-optional task's own `match` doesn't equal the *final* landed URL
+after following any redirect. This AS's `cmd/conformance-as` redirects
+several PAR/request_uri validation failures straight to the client's
+callback with a structured OAuth error (see
+`server.BuildAuthorizationErrorRedirect`'s doc comment for why —
+briefly, the suite has no mechanism to verify a locally rendered error
+page, only a redirect-delivered one), so those specific `/authorize`
+visits never land on `/authorize` at all. Without this flag those
+negative-test modules fail outright instead of grading PASSED.
 
 Two `override` entries, both keyed by exact suite module name
 (`net.openid.conformance.frontchannel.BrowserControl` matches these

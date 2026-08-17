@@ -16,8 +16,9 @@
 #   - CONFORMANCE_SUITE_CHECKOUT set to that suite's own git checkout
 #     (this script runs its scripts/run-test-plan.py from there).
 #   - conformance/server/oidf-config/{baseline,message-signing}-plan.json
-#     already filled in (gitignored — carries private keys; see that
-#     directory's README).
+#     already filled in (gitignored — carries private keys; run
+#     `go run ./conformance/server/scripts/setup-config` to generate
+#     both, or see that directory's README to do it by hand).
 #   - Docker, for the conformance-as-baseline/-message-signing
 #     containers (brought up automatically by this script).
 #
@@ -28,18 +29,13 @@
 #
 # A clean "UNEXPECTED RESULTS" on an AS suite doesn't necessarily mean
 # an AS regression — check the module names in the linked log first.
-# Two categories are already known, understood, and NOT (yet) added to
-# expected-warnings-*.json because they're artifacts of
-# unblock-implicit-callback.py standing in for a real browser, not of
-# the AS: (1) par-ensure-reused-request-uri-prior-to-auth-completion-succeeds
-# needs the same login page visited twice, once unauthenticated and
-# once already authenticated - a generic empty-body POST can't
-# reproduce that; (2) occasional, non-deterministic timing races on
-# multi-client/multi-step modules (a stray token-endpoint 4xx, a
+# One category is already known, understood, and NOT (yet) added to
+# expected-warnings-*.json: occasional, non-deterministic timing races
+# on multi-client/multi-step modules (a stray token-endpoint 4xx, a
 # module receiving another module's stray callback) when the poller
 # happens to move faster than the suite's own internal state machine
-# expects. Neither has ever been traced to a real protocol violation
-# by cmd/conformance-as - see unblock-implicit-callback.py's own doc
+# expects. This has never been traced to a real protocol violation by
+# cmd/conformance-as - see unblock-implicit-callback.py's own doc
 # comment for the full detail.
 set -euo pipefail
 

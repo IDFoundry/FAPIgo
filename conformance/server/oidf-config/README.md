@@ -52,6 +52,31 @@ already set to that service's docker-compose hostname
 (`conformance-as-baseline` / `conformance-as-message-signing`); leave it
 unless you rename the service in `../docker-compose.yml`.
 
+## Quick start
+
+```
+go run ./conformance/server/scripts/setup-config
+```
+
+Generates fresh client keypairs and writes both
+`{baseline,message-signing}-plan.json` (the suite's own plan config,
+gitignored — see below) and updates `{baseline,message-signing}.config.json`
+(this AS's own config, committed) to match, for whichever profile(s)
+don't already have a plan config. Safe to run any time, including
+after `git clean` or on a fresh clone — it never touches a profile
+that already has a plan config, so it can't clobber a working local
+setup or silently rotate keys out from under you. Also see
+`conformance/server/scripts/generate-server-cert.sh` for the TLS
+cert/key pair `conformance-as` serves with under `docker-compose`
+(`conformance/server/certs/`, also gitignored) — that one's simple
+enough to stay a plain shell script.
+
+The rest of this section documents what that tool generates and why,
+for anyone customizing a plan config by hand instead (a different
+`client_id`, non-default scopes, etc.) — read on if you're doing that;
+skip to [`../scripts/README.md`](../scripts/README.md) if you just ran
+the command above.
+
 ## Filling in the placeholders
 
 Both `clients[0]` and `clients[1]` need filling in — the suite's plan

@@ -84,6 +84,28 @@ stuck-waiting-for-a-human events and resolves each automatically:
      look at REVIEW results afterward; the blank placeholder image
      can't confirm the AS actually showed a proper error page.
 
+     Some modules create this placeholder speculatively, before the
+     outcome is known — e.g. ensure-different-nonce-inside-and-outside
+     -request-object logs its placeholder as soon as the redirect is
+     built, even though the module can still go on to complete a fully
+     valid, successful flow via a different path (using the request
+     object's own correct nonce, per spec). AbstractTestModule's own
+     fireTestFinishedInternal() only downgrades an otherwise-successful
+     result to REVIEW if a placeholder was actually filled while the
+     module was still undecided — so filling this unconditionally, the
+     instant it's seen, forces a real PASS down to REVIEW. A one-cycle
+     deferral (mirroring implicit-submit's) is NOT enough here: this
+     log entry appears far earlier in wall-clock time (at redirect-
+     build time) than implicit-submit's own entry (only after the
+     callback), so confirmed live that the placeholder still got filled
+     before implicit-submit's one-cycle deferral had even resolved.
+     Instead this waits a flat PLACEHOLDER_GRACE_SECONDS from when the
+     placeholder was first seen, then fills it only if the module is
+     still active (not finished on its own in the meantime). This is
+     safe to make generous: unlike implicit-submit's shared per-alias
+     route, a placeholder fill is addressed by instance id directly, so
+     there is no cross-module-misrouting risk in waiting longer.
+
 Known residual limitation: a couple of modules with unusually complex
 multi-visit semantics (e.g.
 par-ensure-reused-request-uri-prior-to-auth-completion-succeeds, which
@@ -173,8 +195,26 @@ def main():
     submitted = set()   # implicit_submit fullUrl values already POSTed (one attempt each)
     pending = {}        # fullUrl -> instance_id, seen one cycle ago, not yet acted on
     uploaded = set()    # (instance_id, placeholder) pairs already filled (one attempt each)
+    pending_placeholders = {}  # (instance_id, placeholder) -> monotonic time first seen
     active = set()      # instance ids not yet confirmed terminal
     seen_ever = set()   # instance ids ever added, so we don't re-add a terminal one
+
+    # A placeholder is created (and logged) as soon as the authorization
+    # redirect is built - well before the browser even visits the page,
+    # let alone before the implicit-submit callback (which has its own
+    # one-cycle deferral above) gets a chance to resolve. A one-cycle
+    # deferral here fires far too early: it was observed live filling
+    # the placeholder BEFORE the implicit-submit callback had even been
+    # attempted, which is backwards - the module can never take its
+    # "succeed normally" path if we've already forced it into REVIEW
+    # before that path had a chance to run at all. Placeholders don't
+    # share a route across modules the way implicit-submit does
+    # (they're addressed by instance id, not by a shared alias), so
+    # there's no cross-module-misrouting risk in waiting longer here -
+    # long enough to comfortably cover the implicit-submit deferral
+    # plus the rest of a normal success flow, which every trace seen
+    # completes within tens of milliseconds once actually unblocked.
+    PLACEHOLDER_GRACE_SECONDS = 1.5
 
     print(f"watching plans: {plan_ids} on {HOST}:{PORT}", flush=True)
     while True:
@@ -263,12 +303,30 @@ def main():
                     key = (instance_id, placeholder)
                     if key in uploaded:
                         continue
-                    uploaded.add(key)
-                    try:
-                        status = client.post(f"/api/log/{instance_id}/images/{placeholder}", PLACEHOLDER_PNG.encode())
-                        print(f"filled placeholder {instance_id}/{placeholder} -> {status}", flush=True)
-                    except Exception as e:
-                        print(f"fill placeholder {instance_id}/{placeholder} failed (not retrying): {e}", flush=True)
+                    if key not in pending_placeholders:
+                        pending_placeholders[key] = time.monotonic()
+                        continue
+
+        now = time.monotonic()
+        due = [key for key, first_seen in pending_placeholders.items() if now - first_seen >= PLACEHOLDER_GRACE_SECONDS]
+        for key in due:
+            fill_instance_id, placeholder = key
+            del pending_placeholders[key]
+            if fill_instance_id not in active:
+                # Finished on its own during the grace period - this
+                # placeholder was never actually needed. Leaving it
+                # unfilled is correct: filling it now would still risk
+                # (harmlessly, since the module's result is already
+                # decided) but there's nothing to gain, and every trace
+                # confirms a genuine success path finalizes long before
+                # this grace period elapses.
+                continue
+            uploaded.add(key)
+            try:
+                status = client.post(f"/api/log/{fill_instance_id}/images/{placeholder}", PLACEHOLDER_PNG.encode())
+                print(f"filled placeholder {fill_instance_id}/{placeholder} -> {status}", flush=True)
+            except Exception as e:
+                print(f"fill placeholder {fill_instance_id}/{placeholder} failed (not retrying): {e}", flush=True)
 
         time.sleep(0.2)
 

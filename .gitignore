@@ -20,9 +20,12 @@ profile.cov
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
-# locally-built conformance-as binary, and the throwaway self-signed
-# cert conformance/server/scripts/generate-server-cert.sh produces
+# locally-built conformance-as/setup-config binaries (`go build ./...`
+# from the repo root can leave one at the root), and the throwaway
+# self-signed cert conformance/server/scripts/generate-server-cert.sh
+# produces
 /conformance-as
+/setup-config
 /conformance/server/certs/
 
 # suite plan config(s) - unlike oidf-config/*.config.json (this AS's own

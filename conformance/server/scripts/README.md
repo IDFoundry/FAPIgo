@@ -232,6 +232,17 @@ as `../oidf-config/baseline-plan.json` (message-signing:
 (this AS's own config, public keys only), the plan config carries the
 suite-side client's **private** keys.
 
+Don't hand-assemble those files — this flow's alias, redirect URIs,
+`resource` block and `browser`/`override` automation are all fixed,
+known values (no interactive "pick an alias in the UI" step the way
+the manual flow above has), so
+`go run ./conformance/server/scripts/setup-config` generates both
+`*-plan.json` files (and updates the matching `oidf-config/*.config.json`)
+in one shot — see [../oidf-config/README.md](../oidf-config/README.md)'s
+"Quick start". `conformance/scripts/run-all.sh`, which drives this
+CI-style flow for all four suites at once, expects exactly the files
+that command produces.
+
 ```
 pip install -r <suite-checkout>/scripts/requirements.txt   # one-time: httpx, pyparsing
 cd <suite-checkout>

@@ -71,8 +71,9 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool) (*http.ServeM
 	}
 	replayStore := newInMemoryReplayStore()
 	identityClaims := newStaticIdentityClaims(resolved.DefaultSubject, server.SystemClock{})
+	clientRepo := newStaticClientRepository(resolved.Clients)
 	srvDeps := server.Dependencies{
-		Clients:        newStaticClientRepository(resolved.Clients),
+		Clients:        clientRepo,
 		Transactions:   newInMemoryTransactionStore(),
 		Grants:         newInMemoryGrantStore(),
 		Replay:         replayStore,
@@ -108,7 +109,7 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool) (*http.ServeM
 		return nil, err
 	}
 
-	consent := newConsentHandler(srv, server.SystemClock{}, resolved.DefaultSubject)
+	consent := newConsentHandler(srv, clientRepo, server.SystemClock{}, resolved.DefaultSubject)
 	resourceURLValue := resourceURL.URL()
 	userinfoURLValue := userinfoURL.URL()
 	return newRouter(srv, consent, resolved.AdvertisedScopes, resourceVerifier, &resourceURLValue, &userinfoURLValue, identityClaims), nil

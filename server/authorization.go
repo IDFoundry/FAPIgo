@@ -86,14 +86,14 @@ func (s *Server) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 		HandleExpiresAt: now.Add(s.cfg.Limits.InteractionLifetime),
 	})
 	if err != nil {
-		return s.beginFail(ctx, req.ClientID, newError(ErrorInvalidRequest, 400, "request_uri is invalid, expired, or already used", err)), nil
+		return s.beginFail(ctx, req.ClientID, newError(ErrorInvalidRequestURI, 400, "request_uri is invalid, expired, or already used", err)), nil
 	}
 
 	if pushed.ClientID != req.ClientID {
-		return s.beginFail(ctx, req.ClientID, newError(ErrorInvalidRequest, 400, "client_id does not match the pushed authorization request", nil)), nil
+		return s.beginFail(ctx, req.ClientID, newError(ErrorInvalidRequestURI, 400, "client_id does not match the pushed authorization request", nil)), nil
 	}
 	if !now.Before(pushed.ExpiresAt) {
-		return s.beginFail(ctx, req.ClientID, newError(ErrorInvalidRequest, 400, "request_uri has expired", nil)), nil
+		return s.beginFail(ctx, req.ClientID, newError(ErrorInvalidRequestURI, 400, "request_uri has expired", nil)), nil
 	}
 
 	action := InteractionRequired{
@@ -127,4 +127,40 @@ func interactionRequestFrom(clientID fapi.ClientID, params map[string]json.RawMe
 func (s *Server) beginFail(ctx context.Context, clientID fapi.ClientID, err *Error) AuthorizationAction {
 	s.audit(ctx, AuditEventBeginAuthorization, clientID, AuditOutcomeFailure, string(err.Code()))
 	return LocalErrorResponse{Error: err}
+}
+
+// BuildAuthorizationErrorRedirect builds the standard OAuth/FAPI
+// authorization-error response — query parameters for plain profiles,
+// a signed JARM response under ProfileFAPISecurityWithMessageSigning —
+// for clientID at redirectURI, carrying errorCode, description and
+// state (state may be empty, and is simply omitted from the response
+// when it is).
+//
+// Unlike BeginAuthorization, which never itself returns a redirect
+// destination it hasn't established as trustworthy from the request
+// under validation, this method trusts redirectURI exactly as given:
+// the caller is responsible for having independently verified it
+// belongs to clientID (e.g. via storage.RegisteredClient.HasRedirectURI)
+// before calling this — it is not a substitute for that check, and
+// calling it with an unverified redirectURI reintroduces the open-
+// redirect risk BeginAuthorization's LocalErrorResponse exists to
+// avoid.
+//
+// It exists for callers — such as a conformance test harness — that
+// need to present a validation failure this package can only otherwise
+// express as LocalErrorResponse as a genuine redirect instead, because
+// whatever is consuming the response can only verify a
+// redirect-delivered error, never local page content. Ordinary FAPI
+// clients have no such need — a rendered local error page is a
+// perfectly good, safe outcome for a human in a browser — so
+// BeginAuthorization itself is deliberately unaware this method exists.
+func (s *Server) BuildAuthorizationErrorRedirect(ctx context.Context, clientID fapi.ClientID, redirectURI, state, errorCode, description string) (fapi.URL, error) {
+	dest, buildErr := s.buildAuthorizationResponse(ctx, clientID, redirectURI, map[string]string{
+		"error": errorCode, "state": state, "error_description": description,
+	})
+	if buildErr != nil {
+		return fapi.URL{}, buildErr
+	}
+	s.audit(ctx, AuditEventBeginAuthorization, clientID, AuditOutcomeFailure, errorCode)
+	return dest, nil
 }

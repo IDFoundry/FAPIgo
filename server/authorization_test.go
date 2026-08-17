@@ -142,8 +142,8 @@ func TestBeginAuthorizationRejectsClientIDMismatch(t *testing.T) {
 	if !ok {
 		t.Fatalf("action = %T, want server.LocalErrorResponse", action)
 	}
-	if localErr.Error.Code() != server.ErrorInvalidRequest {
-		t.Fatalf("Error.Code() = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequest)
+	if localErr.Error.Code() != server.ErrorInvalidRequestURI {
+		t.Fatalf("Error.Code() = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequestURI)
 	}
 }
 
@@ -225,8 +225,8 @@ func TestBeginAuthorizationRequestURIFailsAfterAuthorizationCompletes(t *testing
 	if !ok {
 		t.Fatalf("third action = %T, want server.LocalErrorResponse", third)
 	}
-	if localErr.Error.Code() != server.ErrorInvalidRequest {
-		t.Fatalf("Error.Code() = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequest)
+	if localErr.Error.Code() != server.ErrorInvalidRequestURI {
+		t.Fatalf("Error.Code() = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequestURI)
 	}
 }
 
@@ -368,7 +368,57 @@ func TestBeginAuthorizationRejectsExpiredRequestURI(t *testing.T) {
 	if !ok {
 		t.Fatalf("action = %T, want server.LocalErrorResponse", action)
 	}
-	if localErr.Error.Code() != server.ErrorInvalidRequest {
-		t.Fatalf("Error.Code() = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequest)
+	if localErr.Error.Code() != server.ErrorInvalidRequestURI {
+		t.Fatalf("Error.Code() = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequestURI)
+	}
+}
+
+// TestBuildAuthorizationErrorRedirect covers the escape hatch a caller
+// (e.g. a conformance test harness) uses to present a validation
+// failure BeginAuthorization could only otherwise express as
+// LocalErrorResponse as a genuine redirect instead — see its doc
+// comment for why. This only checks the plain-profile query-parameter
+// path; ProfileFAPISecurityWithMessageSigning's JARM-signed path is
+// already covered by buildAuthorizationResponse's other callers
+// (e.g. TestCompleteAuthorizationSuccessMessageSigningProfile).
+func TestBuildAuthorizationErrorRedirect(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+
+	dest, err := h.server.BuildAuthorizationErrorRedirect(context.Background(), testClientID, testRedirectURI, "xyz-state", "invalid_request_uri", "request_uri is invalid, expired, or already used")
+	if err != nil {
+		t.Fatalf("BuildAuthorizationErrorRedirect: %v", err)
+	}
+
+	destURL := dest.URL()
+	q := destURL.Query()
+	if got := q.Get("error"); got != "invalid_request_uri" {
+		t.Fatalf("error = %q, want invalid_request_uri", got)
+	}
+	if got := q.Get("error_description"); got != "request_uri is invalid, expired, or already used" {
+		t.Fatalf("error_description = %q, want the given description", got)
+	}
+	if got := q.Get("state"); got != "xyz-state" {
+		t.Fatalf("state = %q, want xyz-state", got)
+	}
+	if destURL.Scheme != "https" || destURL.Host != "rp.example" || destURL.Path != "/callback" {
+		t.Fatalf("destination = %q, want to start with %q", dest.String(), testRedirectURI)
+	}
+}
+
+// TestBuildAuthorizationErrorRedirectOmitsEmptyState confirms an empty
+// state is simply left out of the response rather than sent as
+// state="" — matching plain redirect behavior elsewhere in this
+// package (see completeErrorRedirect's own params map, which this
+// method delegates to).
+func TestBuildAuthorizationErrorRedirectOmitsEmptyState(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+
+	dest, err := h.server.BuildAuthorizationErrorRedirect(context.Background(), testClientID, testRedirectURI, "", "invalid_request", "missing request_object")
+	if err != nil {
+		t.Fatalf("BuildAuthorizationErrorRedirect: %v", err)
+	}
+	destURL := dest.URL()
+	if _, present := destURL.Query()["state"]; present {
+		t.Fatalf("state parameter present in response, want omitted for empty state")
 	}
 }

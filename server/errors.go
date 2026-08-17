@@ -14,6 +14,15 @@ const (
 	ErrorInvalidScope         ErrorCode = "invalid_scope"
 	ErrorUnsupportedGrantType ErrorCode = "unsupported_grant_type"
 	ErrorServerError          ErrorCode = "server_error"
+
+	// ErrorInvalidRequestURI is RFC 9126 §2.3's dedicated error code for
+	// a request_uri the authorization endpoint cannot use — unknown,
+	// already consumed by a completed interaction, expired, or pushed
+	// by a different client than the one now presenting it — as
+	// distinct from ErrorInvalidRequest, which covers everything else
+	// wrong with an authorization request (missing client_id, a
+	// malformed request_uri reference that doesn't even parse, etc.).
+	ErrorInvalidRequestURI ErrorCode = "invalid_request_uri"
 )
 
 // Error is the error type every public Server method returns. Code and

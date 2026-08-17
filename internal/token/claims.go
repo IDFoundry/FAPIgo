@@ -43,6 +43,38 @@ func popInt64(m map[string]json.RawMessage, key string, required bool) (value in
 	return n, true, nil
 }
 
+// popStringOrStringSlice extracts and deletes key from m, accepting
+// either form RFC 7519 §4.1.3 permits for "aud": a single JSON string,
+// or a JSON array of one or more non-empty strings. Both forms
+// normalize to this slice. It is required — a token missing "aud"
+// entirely is malformed either way.
+func popStringOrStringSlice(m map[string]json.RawMessage, key string) ([]string, error) {
+	raw, ok := m[key]
+	if !ok {
+		return nil, fmt.Errorf("%w: missing %q", ErrMalformedClaims, key)
+	}
+	delete(m, key)
+
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		if s == "" {
+			return nil, fmt.Errorf("%w: %q must be a non-empty string", ErrMalformedClaims, key)
+		}
+		return []string{s}, nil
+	}
+
+	var arr []string
+	if err := json.Unmarshal(raw, &arr); err != nil || len(arr) == 0 {
+		return nil, fmt.Errorf("%w: %q must be a non-empty string or a non-empty array of strings", ErrMalformedClaims, key)
+	}
+	for _, v := range arr {
+		if v == "" {
+			return nil, fmt.Errorf("%w: %q must not contain an empty string", ErrMalformedClaims, key)
+		}
+	}
+	return arr, nil
+}
+
 // popStringSlice extracts and deletes key from m, decoding it as a JSON
 // array of strings.
 func popStringSlice(m map[string]json.RawMessage, key string) (value []string, present bool, err error) {

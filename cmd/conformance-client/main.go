@@ -1,13 +1,13 @@
 // Command conformance-client drives this module's client package
-// through every module of the FAPI2 baseline (non-message-signing)
-// relying-party conformance test plan against a locally running OIDF
-// conformance suite, entirely headlessly: it plays both the RP under
-// test (via the client package) and the "browser" that carries requests
-// between the RP and the suite's mock authorization server, since
-// neither role here needs a human or a real browser — the suite's mock
-// AS doesn't render an interactive consent page for a
-// private_key_jwt+DPoP RP test, and this driver's own HTTP client can
-// intercept the authorization redirect itself.
+// through every module of a FAPI2 relying-party conformance test plan
+// against a locally running OIDF conformance suite, entirely
+// headlessly: it plays both the RP under test (via the client package)
+// and the "browser" that carries requests between the RP and the
+// suite's mock authorization server, since neither role here needs a
+// human or a real browser — the suite's mock AS doesn't render an
+// interactive consent page for a private_key_jwt+DPoP RP test, and this
+// driver's own HTTP client can intercept the authorization redirect
+// itself.
 //
 // Every module gets the exact same driving logic: discover, begin
 // authorization, follow the redirect, complete authorization, then call
@@ -23,11 +23,13 @@
 //
 // Usage:
 //
-//	go run ./cmd/conformance-client
+//	go run ./cmd/conformance-client -profile=baseline
+//	go run ./cmd/conformance-client -profile=message-signing
 //
-// With no flags it talks to the suite's default local dev-mode address,
-// https://localhost.emobix.co.uk:8443/ — the same instance
-// conformance/server's own scripts target.
+// -profile selects which plan to run (see the profiles map below);
+// baseline is the default. With no -suite flag it talks to the suite's
+// default local dev-mode address, https://localhost.emobix.co.uk:8443/
+// — the same instance conformance/server's own scripts target.
 package main
 
 import (
@@ -52,17 +54,57 @@ import (
 )
 
 const (
-	planName     = "fapi2-security-profile-final-client-test-plan"
-	testName     = "fapi2-security-profile-final-client-test-happy-path"
 	fetchTimeout = 15 * time.Second
 	jwksCacheTTL = time.Minute
 )
 
+// driverProfile is everything that differs between the plans this
+// driver knows how to run: which suite plan/variant selects it, and
+// which client.Profile (and supporting key material) it needs.
+type driverProfile struct {
+	planName          string
+	variant           map[string]string
+	clientProfile     client.Profile
+	signRequestObject bool
+}
+
+var profiles = map[string]driverProfile{
+	"baseline": {
+		planName: "fapi2-security-profile-final-client-test-plan",
+		variant: map[string]string{
+			"client_auth_type": "private_key_jwt",
+			"sender_constrain": "dpop",
+			"fapi_profile":     "plain_fapi",
+			"fapi_client_type": "oidc",
+		},
+		clientProfile: client.ProfileFAPISecurity,
+	},
+	"message-signing": {
+		planName: "fapi2-message-signing-final-client-test-plan",
+		variant: map[string]string{
+			"client_auth_type":    "private_key_jwt",
+			"sender_constrain":    "dpop",
+			"fapi_profile":        "plain_fapi",
+			"fapi_client_type":    "oidc",
+			"fapi_request_method": "signed_non_repudiation",
+			"fapi_response_mode":  "jarm",
+		},
+		clientProfile:     client.ProfileFAPISecurityWithMessageSigning,
+		signRequestObject: true,
+	},
+}
+
 func main() {
 	apiBase := flag.String("suite", "https://localhost.emobix.co.uk:8443/", "conformance suite base URL")
+	profileName := flag.String("profile", "baseline", "which client test plan to run: baseline or message-signing")
 	flag.Parse()
 
-	if err := run(*apiBase); err != nil {
+	profile, ok := profiles[*profileName]
+	if !ok {
+		log.Fatalf("conformance-client: unknown -profile %q (want baseline or message-signing)", *profileName)
+	}
+
+	if err := run(*apiBase, profile); err != nil {
 		log.Fatalf("conformance-client: %v", err)
 	}
 }
@@ -78,11 +120,15 @@ func insecureSuiteHTTPClient() *http.Client {
 	}
 }
 
-func run(apiBase string) error {
+func run(apiBase string, profile driverProfile) error {
 	ctx := context.Background()
 	rawHTTP := insecureSuiteHTTPClient()
 
-	keyMgr, err := newEphemeralKeyManager([]keys.SigningPurpose{keys.ClientAuthentication, keys.DPoPProofSigning})
+	purposes := []keys.SigningPurpose{keys.ClientAuthentication, keys.DPoPProofSigning}
+	if profile.signRequestObject {
+		purposes = append(purposes, keys.RequestObjectSigning)
+	}
+	keyMgr, err := newEphemeralKeyManager(purposes)
 	if err != nil {
 		return fmt.Errorf("generate keys: %w", err)
 	}
@@ -93,6 +139,19 @@ func run(apiBase string) error {
 	pubECDSA, ok := pub.PublicKey.(*ecdsa.PublicKey)
 	if !ok {
 		return fmt.Errorf("client authentication public key is not ECDSA")
+	}
+	jwks := []any{jwkFromECDSAPublicKey(pubECDSA, pub.KeyID)}
+
+	if profile.signRequestObject {
+		reqObjPub, err := keyMgr.PublicKey(ctx, keys.RequestObjectSigning, fapi.ES256)
+		if err != nil {
+			return fmt.Errorf("read request object signing public key: %w", err)
+		}
+		reqObjECDSA, ok := reqObjPub.PublicKey.(*ecdsa.PublicKey)
+		if !ok {
+			return fmt.Errorf("request object signing public key is not ECDSA")
+		}
+		jwks = append(jwks, jwkFromECDSAPublicKey(reqObjECDSA, reqObjPub.KeyID))
 	}
 
 	alias := "gofapi-rp-driver-" + randomSuffix()
@@ -106,7 +165,7 @@ func run(apiBase string) error {
 			"scope":        "openid",
 			"redirect_uri": redirectURI,
 			"jwks": map[string]any{
-				"keys": []any{jwkFromECDSAPublicKey(pubECDSA, pub.KeyID)},
+				"keys": jwks,
 			},
 		},
 	})
@@ -114,13 +173,7 @@ func run(apiBase string) error {
 		return fmt.Errorf("marshal plan config: %w", err)
 	}
 
-	variant := map[string]string{
-		"client_auth_type": "private_key_jwt",
-		"sender_constrain": "dpop",
-		"fapi_profile":     "plain_fapi",
-		"fapi_client_type": "oidc",
-	}
-	planID, moduleNames, err := createPlan(rawHTTP, apiBase, planName, variant, planConfig)
+	planID, moduleNames, err := createPlan(rawHTTP, apiBase, profile.planName, profile.variant, planConfig)
 	if err != nil {
 		return fmt.Errorf("create plan: %w", err)
 	}
@@ -130,7 +183,7 @@ func run(apiBase string) error {
 	summary := make(map[string]string, len(moduleNames))
 	for i, name := range moduleNames {
 		log.Printf("--- [%d/%d] %s ---", i+1, len(moduleNames), name)
-		outcome := runModule(ctx, rawHTTP, apiBase, planID, name, clientID, redirectURI, keyMgr)
+		outcome := runModule(ctx, rawHTTP, apiBase, planID, name, clientID, redirectURI, keyMgr, profile)
 		summary[name] = outcome
 		log.Printf("[%d/%d] %s: %s", i+1, len(moduleNames), name, outcome)
 	}
@@ -151,7 +204,7 @@ func run(apiBase string) error {
 // to usefully treat as fatal. The suite's own graded result — fetched
 // separately, after a grace period, back in run — is what actually
 // matters.
-func runModule(ctx context.Context, rawHTTP *http.Client, apiBase, planID, testName, clientID, redirectURI string, keyMgr *ephemeralKeyManager) string {
+func runModule(ctx context.Context, rawHTTP *http.Client, apiBase, planID, testName, clientID, redirectURI string, keyMgr *ephemeralKeyManager, profile driverProfile) string {
 	module, err := createModuleInstance(rawHTTP, apiBase, planID, testName)
 	if err != nil {
 		return "ERROR: create module instance: " + err.Error()
@@ -188,26 +241,52 @@ func runModule(ctx context.Context, rawHTTP *http.Client, apiBase, planID, testN
 		return "ERROR: build issuer key source: " + err.Error()
 	}
 
+	algorithms := client.Algorithms{
+		ClientAuthentication: fapi.ES256,
+		DPoP:                 fapi.ES256,
+		IDToken:              discovered.IDTokenAlgorithms[0],
+	}
+	limits := client.Limits{
+		ClientAssertionLifetime: time.Minute,
+		SessionLifetime:         5 * time.Minute,
+		MaxIDTokenLifetime:      5 * time.Minute,
+		MaxClockSkew:            15 * time.Second,
+		HTTPTimeout:             fetchTimeout,
+		MaxHTTPResponseBytes:    1 << 20,
+	}
+	if profile.signRequestObject {
+		// This driver's key manager only ever generates ES256 keys, so it
+		// must specifically pick ES256 out of the issuer's advertised
+		// algorithm list rather than blindly take index 0 — the suite
+		// lists PS256 first, which this driver has no RSA key to sign
+		// with (confirmed live: taking [0] failed every module with
+		// "PS256 signer must use an RSA key, got *ecdsa.PublicKey").
+		if !containsES256(discovered.RequestObjectAlgorithms) {
+			return awaitVerdict(rawHTTP, apiBase, module.ID, "issuer does not advertise ES256 as a request object signing algorithm")
+		}
+		if len(discovered.JARMAlgorithms) == 0 {
+			return awaitVerdict(rawHTTP, apiBase, module.ID, "issuer advertises no recognized JARM signing algorithm")
+		}
+		algorithms.RequestObject = fapi.ES256
+		algorithms.JARM = discovered.JARMAlgorithms[0]
+		limits.RequestObjectLifetime = time.Minute
+		// The suite's own JARM responses carry a 10-minute exp
+		// (GenerateJARMResponseClaims.java: "Instant.now().plusSeconds(600)"
+		// — confirmed by reading the suite's source directly after a
+		// too-tight 5-minute limit here rejected every legitimate
+		// response with "jarm: exp exceeds maximum allowed lifetime").
+		limits.MaxJARMResponseLifetime = 15 * time.Minute
+	}
+
 	cfg := client.Config{
 		Issuer:                          issuer,
 		ClientID:                        fapi.ClientID(clientID),
 		RedirectURI:                     redirectURI,
 		Endpoints:                       discovered.Endpoints,
-		Profile:                         client.ProfileFAPISecurity,
+		Profile:                         profile.clientProfile,
 		RequireAuthorizationResponseIss: discovered.AuthorizationResponseIssSupported,
-		Algorithms: client.Algorithms{
-			ClientAuthentication: fapi.ES256,
-			DPoP:                 fapi.ES256,
-			IDToken:              discovered.IDTokenAlgorithms[0],
-		},
-		Limits: client.Limits{
-			ClientAssertionLifetime: time.Minute,
-			SessionLifetime:         5 * time.Minute,
-			MaxIDTokenLifetime:      5 * time.Minute,
-			MaxClockSkew:            15 * time.Second,
-			HTTPTimeout:             fetchTimeout,
-			MaxHTTPResponseBytes:    1 << 20,
-		},
+		Algorithms:                      algorithms,
+		Limits:                          limits,
 	}
 	deps := client.Dependencies{
 		Sessions:   newMemSessionStore(),
@@ -336,6 +415,15 @@ func randomSuffix() string {
 		panic(err)
 	}
 	return base64.RawURLEncoding.EncodeToString(buf)
+}
+
+func containsES256(algs []fapi.SignatureAlgorithm) bool {
+	for _, a := range algs {
+		if a == fapi.ES256 {
+			return true
+		}
+	}
+	return false
 }
 
 func jwkFromECDSAPublicKey(pub *ecdsa.PublicKey, kid string) map[string]any {

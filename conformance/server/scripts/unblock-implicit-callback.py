@@ -45,7 +45,10 @@ stuck-waiting-for-a-human events and resolves each automatically:
   1. A "Created random implicit submission URL" entry: POSTs an empty
      body (mirroring implicitCallback.html's own `xhr.send(hash)`,
      where hash is empty for a plain query-param, non-fragment
-     response) to it exactly once, immediately.
+     response) to it exactly once, one poll cycle after first seeing
+     it (a fraction of a second at the default interval) - see the
+     "already_submitted_by_browser" check below for why the delay is
+     that short and no shorter.
 
      IMPORTANT: every module in a plan without dynamic client
      registration shares one alias, and the suite reassigns the
@@ -58,11 +61,14 @@ stuck-waiting-for-a-human events and resolves each automatically:
      starting) gets delivered to a *different*, unrelated, later
      module instead, which correctly rejects it as unexpected and
      gets itself interrupted. Both a delayed submission AND a retried
-     one hit this the same way, so this script (a) never retries a
-     URL and (b) submits as fast as possible: a deliberate fixed delay
-     was tried here (to sidestep a rarer issue below) and measurably
-     made this cross-module misrouting worse, since most modules
-     transition in well under a second once unblocked.
+     one hit this the same way, so this script never retries a URL,
+     and only ever defers by one poll cycle - a flat one-second delay
+     was tried here once and measurably made this cross-module
+     misrouting worse, since most modules transition in well under a
+     second once unblocked; a fraction-of-a-second deferral, scaled to
+     the poll interval rather than a guessed constant, is far below
+     that risk window while still usually being enough to let the
+     browser's own JS (see immediately below) win first.
 
   2. A log entry carrying an "upload" placeholder id (negative-test
      modules that land on a local error page and ask a human to
@@ -165,6 +171,7 @@ def main():
 
     client = KeepAliveClient()
     submitted = set()   # implicit_submit fullUrl values already POSTed (one attempt each)
+    pending = {}        # fullUrl -> instance_id, seen one cycle ago, not yet acted on
     uploaded = set()    # (instance_id, placeholder) pairs already filled (one attempt each)
     active = set()      # instance ids not yet confirmed terminal
     seen_ever = set()   # instance ids ever added, so we don't re-add a terminal one
@@ -202,6 +209,26 @@ def main():
                     full_url = entry.get("implicit_submit", {}).get("fullUrl")
                     if not full_url or full_url in submitted:
                         continue
+                    if full_url not in pending:
+                        # Defer to the next poll cycle instead of acting
+                        # immediately: confirmed live, via a full log
+                        # trace, that the check below still isn't enough
+                        # on its own — the browser's own real xhr.send()
+                        # (observed landing ~40-115ms after this log
+                        # entry appears) can arrive in the gap between
+                        # this poller fetching the log and posting,
+                        # slipping past the check the same cycle it's
+                        # first seen. One extra cycle (a fraction of a
+                        # second here) gives that race a chance to
+                        # resolve on its own before we decide, while
+                        # staying far short of the multi-second lag that
+                        # caused the cross-module alias-misrouting bug a
+                        # deliberate flat delay was tried for once and
+                        # reverted (see git history) — this is scaled to
+                        # the poll interval, not a guessed constant.
+                        pending[full_url] = instance_id
+                        continue
+                    del pending[full_url]
                     submitted.add(full_url)
                     request_path = urlsplit(full_url).path
                     # HtmlUnit's syntax error is scoped to the one
@@ -218,10 +245,7 @@ def main():
                     # already used" on an otherwise-clean module. Since
                     # this same already-fetched `log` is what the browser's
                     # own request would also appear in, checking costs
-                    # nothing extra and closes the most common case of
-                    # this race (anything landing after this exact
-                    # instant is still an unavoidable, uncoordinated
-                    # race with no client-side fix).
+                    # nothing extra.
                     already_submitted_by_browser = any(
                         e.get("msg") == f"Incoming HTTP request to {request_path}" for e in log
                     )

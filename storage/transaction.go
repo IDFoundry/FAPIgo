@@ -31,8 +31,9 @@ type NewPARRecord struct {
 	ExpiresAt time.Time
 }
 
-// PushedAuthorizationRequest is what BeginAuthorization retrieves and
-// consumes for one previously pushed authorization request.
+// PushedAuthorizationRequest is what BeginAuthorization retrieves for
+// one previously pushed authorization request. Retrieving it does not
+// by itself consume the request — see BeginAuthorization's doc comment.
 type PushedAuthorizationRequest struct {
 	ClientID    fapi.ClientID
 	Parameters  map[string]json.RawMessage
@@ -76,19 +77,36 @@ type CompleteAuthorizationTransaction struct {
 type TransactionStore interface {
 	CreatePAR(ctx context.Context, record NewPARRecord) error
 
-	// BeginAuthorization atomically retrieves and consumes the pushed
-	// authorization request identified by Reference — a second call
-	// with the same Reference must fail, the same way an authorization
-	// code's redemption is single-use — and associates it with Handle
-	// for retrieval when the interaction later completes. It returns an
-	// error if Reference is unknown, already consumed, or its own
-	// expiry (NewPARRecord.ExpiresAt) has passed.
+	// BeginAuthorization retrieves the pushed authorization request
+	// identified by Reference and associates it with a fresh Handle for
+	// retrieval when the interaction later completes. It may be called
+	// more than once for the same Reference — e.g. a client's browser
+	// revisiting the authorization endpoint before authenticating — and
+	// each such call mints its own independent Handle for the same
+	// underlying pushed request; this is what lets an authorization
+	// server satisfy FAPI 2.0 Security Profile 5.3.2.2 Note 3, which
+	// requires one-time use of request_uri be enforced at the point of
+	// authorization, not at the point of visiting the authorization
+	// endpoint. What must be single-use is completion, not the view:
+	// once any Handle minted from a given Reference is successfully
+	// consumed by CompleteAuthorization, that Reference itself is
+	// consumed, and every subsequent BeginAuthorization or
+	// CompleteAuthorization call for it — via any Handle, including
+	// ones already minted and still otherwise unexpired — must fail.
+	// It returns an error if Reference is unknown, already consumed by
+	// a completed interaction, or its own expiry
+	// (NewPARRecord.ExpiresAt) has passed.
 	BeginAuthorization(ctx context.Context, txn BeginAuthorizationTransaction) (PushedAuthorizationRequest, error)
 
-	// CompleteAuthorization atomically retrieves and consumes the
-	// interaction identified by Handle — a second call with the same
-	// Handle must fail. It returns an error if Handle is unknown,
-	// already consumed, or its own expiry
+	// CompleteAuthorization atomically retrieves and consumes both the
+	// interaction identified by Handle and the underlying Reference it
+	// was minted from — a second call with the same Handle must fail,
+	// and so must any call for a different Handle minted from the same
+	// Reference, even one still otherwise valid and unexpired: exactly
+	// one Handle for a given Reference may ever complete, the same way
+	// an authorization code's redemption is single-use. It returns an
+	// error if Handle is unknown, its Reference has already been
+	// consumed by another completed interaction, or its own expiry
 	// (BeginAuthorizationTransaction.HandleExpiresAt) has passed.
 	CompleteAuthorization(ctx context.Context, txn CompleteAuthorizationTransaction) (CompletedInteraction, error)
 }

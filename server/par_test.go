@@ -46,12 +46,22 @@ func (f *fakeClientRepository) Capabilities() storage.Capabilities {
 }
 
 type fakeTransactionStore struct {
-	mu             sync.Mutex
-	records        []storage.NewPARRecord
-	byReference    map[string]storage.NewPARRecord
-	referenceUsed  map[string]bool
-	byHandle       map[string]storage.CompletedInteraction
-	handleConsumed map[string]bool
+	mu                 sync.Mutex
+	records            []storage.NewPARRecord
+	byReference        map[string]storage.NewPARRecord
+	referenceCompleted map[string]bool
+	byHandle           map[string]fakePendingInteraction
+	handleConsumed     map[string]bool
+}
+
+// fakePendingInteraction is what BeginAuthorization stashes per Handle:
+// the reference it was minted from (needed at completion time to
+// enforce single-use per Reference rather than per Handle — see
+// storage.TransactionStore.BeginAuthorization's doc comment) alongside
+// the data CompleteAuthorization ultimately returns.
+type fakePendingInteraction struct {
+	reference   string
+	interaction storage.CompletedInteraction
 }
 
 func (f *fakeTransactionStore) CreatePAR(_ context.Context, record storage.NewPARRecord) error {
@@ -68,26 +78,28 @@ func (f *fakeTransactionStore) CreatePAR(_ context.Context, record storage.NewPA
 func (f *fakeTransactionStore) BeginAuthorization(_ context.Context, txn storage.BeginAuthorizationTransaction) (storage.PushedAuthorizationRequest, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.referenceUsed == nil {
-		f.referenceUsed = make(map[string]bool)
+	if f.referenceCompleted == nil {
+		f.referenceCompleted = make(map[string]bool)
 	}
-	if f.referenceUsed[txn.Reference] {
+	if f.referenceCompleted[txn.Reference] {
 		return storage.PushedAuthorizationRequest{}, fmt.Errorf("request_uri already consumed")
 	}
 	record, ok := f.byReference[txn.Reference]
 	if !ok {
 		return storage.PushedAuthorizationRequest{}, fmt.Errorf("no such request_uri")
 	}
-	f.referenceUsed[txn.Reference] = true
 
 	if f.byHandle == nil {
-		f.byHandle = make(map[string]storage.CompletedInteraction)
+		f.byHandle = make(map[string]fakePendingInteraction)
 	}
-	f.byHandle[txn.Handle] = storage.CompletedInteraction{
-		ClientID:    record.ClientID,
-		Parameters:  record.Parameters,
-		TokenClaims: record.TokenClaims,
-		ExpiresAt:   txn.HandleExpiresAt,
+	f.byHandle[txn.Handle] = fakePendingInteraction{
+		reference: txn.Reference,
+		interaction: storage.CompletedInteraction{
+			ClientID:    record.ClientID,
+			Parameters:  record.Parameters,
+			TokenClaims: record.TokenClaims,
+			ExpiresAt:   txn.HandleExpiresAt,
+		},
 	}
 
 	return storage.PushedAuthorizationRequest{
@@ -107,12 +119,16 @@ func (f *fakeTransactionStore) CompleteAuthorization(_ context.Context, txn stor
 	if f.handleConsumed[txn.Handle] {
 		return storage.CompletedInteraction{}, fmt.Errorf("interaction handle already consumed")
 	}
-	interaction, ok := f.byHandle[txn.Handle]
+	pending, ok := f.byHandle[txn.Handle]
 	if !ok {
 		return storage.CompletedInteraction{}, fmt.Errorf("no such interaction handle")
 	}
+	if f.referenceCompleted[pending.reference] {
+		return storage.CompletedInteraction{}, fmt.Errorf("request_uri already consumed")
+	}
 	f.handleConsumed[txn.Handle] = true
-	return interaction, nil
+	f.referenceCompleted[pending.reference] = true
+	return pending.interaction, nil
 }
 
 // Capabilities is a test-only assertion — see fakeClientRepository.Capabilities.

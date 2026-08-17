@@ -232,7 +232,14 @@ func TestTransactionStoreContract(t *testing.T, factory func() TransactionStore)
 		}
 	})
 
-	t.Run("BeginAuthorizationIsSingleUse", func(t *testing.T) {
+	t.Run("BeginAuthorizationRepeatsUntilCompleted", func(t *testing.T) {
+		// FAPI 2.0 Security Profile 5.3.2.2 Note 3: one-time use of
+		// request_uri must be enforced at the point of authorization,
+		// not at the point of visiting the authorization endpoint — so
+		// revisiting the authorization endpoint before ever completing
+		// the interaction (e.g. the browser reloading, or being sent
+		// back before authenticating) must be allowed to mint a fresh
+		// Handle for the same Reference, not fail outright.
 		store := factory()
 		ctx := context.Background()
 		if err := store.CreatePAR(ctx, NewPARRecord{
@@ -247,8 +254,31 @@ func TestTransactionStoreContract(t *testing.T, factory func() TransactionStore)
 		}
 		if _, err := store.BeginAuthorization(ctx, BeginAuthorizationTransaction{
 			Reference: "ref-2", Handle: "handle-2b", HandleExpiresAt: time.Now().Add(time.Minute),
+		}); err != nil {
+			t.Fatalf("second BeginAuthorization (before completion) = %v, want success", err)
+		}
+	})
+
+	t.Run("BeginAuthorizationFailsAfterCompletion", func(t *testing.T) {
+		store := factory()
+		ctx := context.Background()
+		if err := store.CreatePAR(ctx, NewPARRecord{
+			Reference: "ref-2c", ClientID: "client-1", ExpiresAt: time.Now().Add(time.Minute),
+		}); err != nil {
+			t.Fatalf("CreatePAR: %v", err)
+		}
+		if _, err := store.BeginAuthorization(ctx, BeginAuthorizationTransaction{
+			Reference: "ref-2c", Handle: "handle-2c", HandleExpiresAt: time.Now().Add(time.Minute),
+		}); err != nil {
+			t.Fatalf("BeginAuthorization: %v", err)
+		}
+		if _, err := store.CompleteAuthorization(ctx, CompleteAuthorizationTransaction{Handle: "handle-2c"}); err != nil {
+			t.Fatalf("CompleteAuthorization: %v", err)
+		}
+		if _, err := store.BeginAuthorization(ctx, BeginAuthorizationTransaction{
+			Reference: "ref-2c", Handle: "handle-2d", HandleExpiresAt: time.Now().Add(time.Minute),
 		}); err == nil {
-			t.Fatalf("second BeginAuthorization = nil error, want error")
+			t.Fatalf("BeginAuthorization after completion = nil error, want error")
 		}
 	})
 
@@ -261,7 +291,10 @@ func TestTransactionStoreContract(t *testing.T, factory func() TransactionStore)
 		}
 	})
 
-	t.Run("ConcurrentBeginAuthorizationHasExactlyOneWinner", func(t *testing.T) {
+	t.Run("ConcurrentBeginAuthorizationAllSucceedBeforeCompletion", func(t *testing.T) {
+		// Each concurrent Begin mints its own Handle for the same
+		// Reference; none of them has completed anything yet, so none
+		// should be rejected — see BeginAuthorizationRepeatsUntilCompleted.
 		store := factory()
 		ctx := context.Background()
 		if err := store.CreatePAR(ctx, NewPARRecord{
@@ -281,8 +314,8 @@ func TestTransactionStoreContract(t *testing.T, factory func() TransactionStore)
 			})
 			return err == nil
 		})
-		if successes != 1 {
-			t.Fatalf("concurrent BeginAuthorization succeeded %d times, want exactly 1", successes)
+		if successes != contractConcurrentAttempts {
+			t.Fatalf("concurrent BeginAuthorization succeeded %d times, want all %d", successes, contractConcurrentAttempts)
 		}
 	})
 
@@ -337,6 +370,42 @@ func TestTransactionStoreContract(t *testing.T, factory func() TransactionStore)
 		})
 		if successes != 1 {
 			t.Fatalf("concurrent CompleteAuthorization succeeded %d times, want exactly 1", successes)
+		}
+	})
+
+	t.Run("ConcurrentCompleteAuthorizationAcrossHandlesForSameReferenceHasExactlyOneWinner", func(t *testing.T) {
+		// Multiple Handles minted from the same Reference (e.g. several
+		// browser visits before authentication) must still yield exactly
+		// one completed interaction between them — the single-use
+		// guarantee is on the Reference, not any individual Handle.
+		store := factory()
+		ctx := context.Background()
+		if err := store.CreatePAR(ctx, NewPARRecord{
+			Reference: "ref-6", ClientID: "client-1", ExpiresAt: time.Now().Add(time.Minute),
+		}); err != nil {
+			t.Fatalf("CreatePAR: %v", err)
+		}
+		handles := make([]string, contractConcurrentAttempts)
+		for i := range handles {
+			handles[i] = fmt.Sprintf("handle-6-%d", i)
+			if _, err := store.BeginAuthorization(ctx, BeginAuthorizationTransaction{
+				Reference: "ref-6", Handle: handles[i], HandleExpiresAt: time.Now().Add(time.Minute),
+			}); err != nil {
+				t.Fatalf("BeginAuthorization(%s): %v", handles[i], err)
+			}
+		}
+		var indexMu sync.Mutex
+		next := 0
+		successes := runConcurrently(len(handles), func() bool {
+			indexMu.Lock()
+			handle := handles[next]
+			next++
+			indexMu.Unlock()
+			_, err := store.CompleteAuthorization(ctx, CompleteAuthorizationTransaction{Handle: handle})
+			return err == nil
+		})
+		if successes != 1 {
+			t.Fatalf("concurrent CompleteAuthorization across handles for one reference succeeded %d times, want exactly 1", successes)
 		}
 	})
 }

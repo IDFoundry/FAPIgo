@@ -104,18 +104,30 @@ stuck-waiting-for-a-human events and resolves each automatically:
      still active (not finished on its own in the meantime). This is
      safe to make generous: unlike implicit-submit's shared per-alias
      route, a placeholder fill is addressed by instance id directly, so
-     there is no cross-module-misrouting risk in waiting longer.
-
-Known residual limitation: a couple of modules with unusually complex
-multi-visit semantics (e.g.
-par-ensure-reused-request-uri-prior-to-auth-completion-succeeds, which
-requires the SAME login page be visited twice — once unauthenticated,
-once already authenticated) can still fail, since a generic
-empty-body POST doesn't preserve the browser-session continuity those
-specific tests depend on. This is a limitation of automating past the
-suite's own broken browser, not of the AS under test — check the
-failing module's own log for its actual assertion failure (or lack of
-one) before assuming a real regression.
+     there is no cross-module-misrouting risk in waiting longer — the
+     only cost of a larger value is extra polling latency before a
+     genuinely-review-needed module gets flagged, not an incorrect
+     result. 5 seconds comfortably covers every legitimate
+     self-finishing module observed live, including
+     par-ensure-reused-request-uri-prior-to-auth-completion-succeeds,
+     whose createPlaceholder() creates its placeholder unconditionally
+     at test start — well before either of its two authorization-
+     endpoint visits. That module was originally clocked taking
+     anywhere from ~3s to ~31s to self-finish, which looked like
+     inherent multi-visit timing variance and briefly drove this value
+     up as high as 20s — but every one of those slow runs turned out to
+     be masking a real go-fapi bug (the PAR request_uri was being
+     invalidated on the mere GET to the authorization endpoint, not at
+     actual authorization completion, so the module's second visit hit
+     a 400 and the run only ever finished via this placeholder's
+     eventual fill, never via a genuine callback). Once that storage-
+     layer bug was fixed (single-use enforcement moved to
+     CompleteAuthorization, gated on the underlying PAR reference — see
+     storage/transaction.go), this module's real self-finish time
+     dropped to ~130ms, in line with every other module here. 5s leaves
+     ample margin above that for load variance without reintroducing
+     the earlier multi-second-to-30-second latency that was never
+     actually needed.
 
 Usage: unblock-implicit-callback.py <planId> [<planId> ...]
 """
@@ -199,22 +211,27 @@ def main():
     active = set()      # instance ids not yet confirmed terminal
     seen_ever = set()   # instance ids ever added, so we don't re-add a terminal one
 
-    # A placeholder is created (and logged) as soon as the authorization
-    # redirect is built - well before the browser even visits the page,
-    # let alone before the implicit-submit callback (which has its own
-    # one-cycle deferral above) gets a chance to resolve. A one-cycle
-    # deferral here fires far too early: it was observed live filling
-    # the placeholder BEFORE the implicit-submit callback had even been
-    # attempted, which is backwards - the module can never take its
-    # "succeed normally" path if we've already forced it into REVIEW
-    # before that path had a chance to run at all. Placeholders don't
-    # share a route across modules the way implicit-submit does
-    # (they're addressed by instance id, not by a shared alias), so
-    # there's no cross-module-misrouting risk in waiting longer here -
-    # long enough to comfortably cover the implicit-submit deferral
-    # plus the rest of a normal success flow, which every trace seen
-    # completes within tens of milliseconds once actually unblocked.
-    PLACEHOLDER_GRACE_SECONDS = 1.5
+    # A placeholder can be created (and logged) well before the module's
+    # own success path has a chance to run - anywhere from as soon as
+    # the authorization redirect is built (e.g.
+    # ensure-different-nonce-inside-and-outside-request-object) to
+    # unconditionally at test start, before either authorization-
+    # endpoint visit even happens (e.g. par-ensure-reused-request-uri
+    # -prior-to-auth-completion-succeeds). A one-cycle deferral (mirroring
+    # implicit-submit's) fires far too early for either: observed live
+    # filling the placeholder BEFORE the module's own success path had
+    # even been attempted, which is backwards - the module can never
+    # take its "succeed normally" path if we've already forced it into
+    # REVIEW first. Placeholders don't share a route across modules the
+    # way implicit-submit does (they're addressed by instance id, not a
+    # shared alias), so there's no cross-module-misrouting risk in
+    # waiting longer here - long enough to comfortably cover the
+    # slowest legitimate self-finishing module observed live (every one
+    # completes within a few hundred milliseconds once genuinely
+    # unblocked; see the doc comment at the top of this file for how a
+    # much larger value was briefly needed here while a real go-fapi bug
+    # was making one module falsely appear slow).
+    PLACEHOLDER_GRACE_SECONDS = 5.0
 
     print(f"watching plans: {plan_ids} on {HOST}:{PORT}", flush=True)
     while True:

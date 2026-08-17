@@ -107,5 +107,94 @@ public role. Add this to the suite's plan config:
 (swap the hostname for `conformance-as-message-signing` on the
 message-signing run).
 
+## The `browser` and `override` blocks (suite plan config only)
+
+Every module needs the suite's scripted browser to click through this
+AS's consent page — without a `browser` block, every module hangs
+waiting for a human. This AS has no session cookie (every `/authorize`
+visit renders a fresh, identical consent form — see
+`server.BeginAuthorization`), so the suite's browser automation is the
+*only* thing standing in for a login/consent decision; there is no
+server-side state to fall back on. Add this to the suite's plan config
+(swap the hostname for `conformance-as-message-signing` on the
+message-signing run, and the alias in the two `override` module names
+stays the same either way — these are FAPI2-Security-Profile-Final
+module names, shared by both plans):
+
+```json
+"browser": [
+  {
+    "match": "https://conformance-as-baseline:8443/authorize*",
+    "tasks": [
+      {
+        "task": "Consent",
+        "match": "https://conformance-as-baseline:8443/authorize*",
+        "commands": [["click", "xpath", "//button[@name='decision' and @value='approve']", "optional"]]
+      }
+    ]
+  }
+],
+"override": {
+  "fapi2-security-profile-final-user-rejects-authentication": {
+    "browser": [
+      {
+        "match": "https://conformance-as-baseline:8443/authorize*",
+        "tasks": [
+          {
+            "task": "Deny",
+            "match": "https://conformance-as-baseline:8443/authorize*",
+            "commands": [["click", "xpath", "//button[@name='decision' and @value='deny']", "optional"]]
+          }
+        ]
+      }
+    ]
+  },
+  "fapi2-security-profile-final-par-ensure-reused-request-uri-prior-to-auth-completion-succeeds": {
+    "browser": [
+      {
+        "match": "https://conformance-as-baseline:8443/authorize*",
+        "match-limit": 1,
+        "tasks": []
+      },
+      {
+        "match": "https://conformance-as-baseline:8443/authorize*",
+        "tasks": [
+          {
+            "task": "Consent",
+            "match": "https://conformance-as-baseline:8443/authorize*",
+            "commands": [["click", "xpath", "//button[@name='decision' and @value='approve']", "optional"]]
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Two `override` entries, both keyed by exact suite module name
+(`net.openid.conformance.frontchannel.BrowserControl` matches these
+against the running module, not the plan-level default):
+
+- **`user-rejects-authentication`** needs the *deny* button clicked
+  instead of approve — the top-level `browser` block only ever knows
+  how to approve.
+- **`par-ensure-reused-request-uri-prior-to-auth-completion-succeeds`**
+  deliberately visits `/authorize` twice with the same PAR
+  `request_uri`: the first visit must be left completely alone (no
+  click at all — the module asserts the user was *not* authenticated
+  on that visit), and only the second visit should complete consent.
+  Because this AS has no session cookie, the two visits render an
+  identical page, so the plain top-level `browser` block (which just
+  matches the URL, with no notion of "first" vs "second") clicks
+  approve on both, tripping the module's own check. The fix is
+  `"match-limit": 1` (`BrowserControl.goToUrl()`,
+  conformance-suite source) on a block with empty `tasks` placed
+  *before* the normal approve block in the same array: each block is
+  tried in order, `match-limit` decrements per visit and the block
+  stops matching once exhausted, so visit 1 hits the do-nothing block
+  and visit 2 falls through to the approve block. This is
+  undocumented outside `BrowserControl.java` itself — no bundled
+  suite config demonstrates it.
+
 See [../scripts/README.md](../scripts/README.md) for how to run the
 server against a filled-in config.

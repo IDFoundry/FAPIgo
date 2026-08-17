@@ -147,7 +147,15 @@ func TestBeginAuthorizationRejectsClientIDMismatch(t *testing.T) {
 	}
 }
 
-func TestBeginAuthorizationRequestURIIsSingleUse(t *testing.T) {
+// TestBeginAuthorizationRequestURIRepeatsUntilAuthorizationCompletes
+// covers FAPI 2.0 Security Profile 5.3.2.2 Note 3: an authorization
+// server enforcing one-time use of request_uri must do so at the point
+// of authorization, not at the point of visiting the authorization
+// endpoint — so revisiting /authorize with the same request_uri before
+// ever completing the interaction (e.g. the browser reloading, or
+// being sent back before authenticating) must succeed each time, not
+// just once.
+func TestBeginAuthorizationRequestURIRepeatsUntilAuthorizationCompletes(t *testing.T) {
 	h := newHarness(t, server.ProfileFAPISecurity, true)
 	pushResult, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
 		HTTP: server.FormRequest{Parameters: plainFormParameters(t, h.clientAssertion(t), nil)},
@@ -161,7 +169,8 @@ func TestBeginAuthorizationRequestURIIsSingleUse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first BeginAuthorization: %v", err)
 	}
-	if _, ok := first.(server.InteractionRequired); !ok {
+	firstInteraction, ok := first.(server.InteractionRequired)
+	if !ok {
 		t.Fatalf("first action = %T, want InteractionRequired", first)
 	}
 
@@ -169,9 +178,52 @@ func TestBeginAuthorizationRequestURIIsSingleUse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second BeginAuthorization: %v", err)
 	}
-	localErr, ok := second.(server.LocalErrorResponse)
+	secondInteraction, ok := second.(server.InteractionRequired)
 	if !ok {
-		t.Fatalf("second action = %T, want server.LocalErrorResponse", second)
+		t.Fatalf("second action = %T, want InteractionRequired", second)
+	}
+	if firstInteraction.Handle == secondInteraction.Handle {
+		t.Fatalf("first and second BeginAuthorization produced the same handle")
+	}
+}
+
+// TestBeginAuthorizationRequestURIFailsAfterAuthorizationCompletes
+// covers the other half of FAPI 2.0 Security Profile 5.3.2.2 Note 3:
+// once an interaction minted from a request_uri actually completes,
+// that request_uri is consumed — a further visit to /authorize with it
+// must fail, even though earlier visits (before completion) succeeded.
+func TestBeginAuthorizationRequestURIFailsAfterAuthorizationCompletes(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	pushResult, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: plainFormParameters(t, h.clientAssertion(t), nil)},
+	})
+	if err != nil {
+		t.Fatalf("PushAuthorizationRequest: %v", err)
+	}
+
+	beginReq := server.BeginAuthorizationRequest{RequestURI: pushResult.RequestURI.String(), ClientID: testClientID}
+	first, err := h.server.BeginAuthorization(context.Background(), beginReq)
+	if err != nil {
+		t.Fatalf("first BeginAuthorization: %v", err)
+	}
+	interaction, ok := first.(server.InteractionRequired)
+	if !ok {
+		t.Fatalf("first action = %T, want InteractionRequired", first)
+	}
+
+	if _, err := h.server.CompleteAuthorization(context.Background(), server.CompleteAuthorizationRequest{
+		Handle: interaction.Handle, Result: authorizeResult(t),
+	}); err != nil {
+		t.Fatalf("CompleteAuthorization: %v", err)
+	}
+
+	third, err := h.server.BeginAuthorization(context.Background(), beginReq)
+	if err != nil {
+		t.Fatalf("third BeginAuthorization: %v", err)
+	}
+	localErr, ok := third.(server.LocalErrorResponse)
+	if !ok {
+		t.Fatalf("third action = %T, want server.LocalErrorResponse", third)
 	}
 	if localErr.Error.Code() != server.ErrorInvalidRequest {
 		t.Fatalf("Error.Code() = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequest)

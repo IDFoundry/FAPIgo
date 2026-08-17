@@ -43,4 +43,15 @@ var (
 	// ErrLifetimeExceeded indicates the object's exp claim is further in
 	// the future than the configured maximum lifetime allows.
 	ErrLifetimeExceeded = errors.New("requestobject: exp exceeds maximum allowed lifetime")
+
+	// ErrNotBeforeTooOld indicates the object's nbf claim is further in
+	// the past than the configured maximum lifetime allows. Symmetric
+	// with ErrLifetimeExceeded: that bounds how far exp may sit in the
+	// future of Now, this bounds how far nbf may sit in the past of
+	// Now — without it, an object with a normal, unexpired exp but an
+	// ancient nbf would sail through both other checks despite claiming
+	// an unreasonably long validity window, which is exactly what FAPI
+	// 2.0 Message Signing Final §5.3.1 (FAPI2-MS-ID1-5.3.1-3) requires
+	// be rejected.
+	ErrNotBeforeTooOld = errors.New("requestobject: nbf exceeds maximum allowed age")
 )

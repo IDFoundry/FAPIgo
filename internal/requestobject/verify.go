@@ -94,8 +94,11 @@ type VerifyPolicy struct {
 	Now time.Time
 
 	// MaxLifetime bounds how far in the future (relative to Now) the
-	// object's exp claim may be. Required — there is no implicit
-	// default.
+	// object's exp claim may be, and symmetrically how far in the past
+	// its nbf claim may be — an object is meant to represent one short,
+	// coherent validity window around when it was created, not two
+	// independently-bounded claims, so the same limit governs both
+	// directions. Required — there is no implicit default.
 	MaxLifetime time.Duration
 
 	// MaxClockSkew bounds how far in the future (relative to Now) an nbf
@@ -177,6 +180,8 @@ func (o Object) Verify(ctx context.Context, pub crypto.PublicKey, policy VerifyP
 		}
 	} else if policy.Now.Before(c.NotBefore.Add(-policy.MaxClockSkew)) {
 		return VerifiedObject{}, ErrNotYetValid
+	} else if policy.Now.Sub(c.NotBefore) > policy.MaxLifetime {
+		return VerifiedObject{}, ErrNotBeforeTooOld
 	}
 
 	if policy.Replay != nil && c.JTI != "" {

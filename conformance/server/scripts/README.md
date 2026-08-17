@@ -282,6 +282,65 @@ root-cause it first (most of the fixes in this AS's history started
 exactly this way); only add an entry once it's confirmed to be a
 deliberate, understood tradeoff rather than a bug.
 
+The message-signing profile has its own analogous pair,
+`expected-warnings-message-signing.json` and
+`expected-skips-message-signing.json` — same two entries as baseline's,
+plus one extra deterministic skip
+(`ensure-signed-request-object-with-RS256-fails`, only reachable under a
+profile that actually sends signed request objects).
+
+### Running both profiles together
+
+`run-test-plan.py`'s positional arguments accept more than one
+`<test-plan-name> <configuration-file>` pair in a single invocation, and
+since the baseline and message-signing plan configs use different
+`alias` values (`gofapi-baseline` / `gofapi-msgsign`), the script gives
+each its own queue and runs them **concurrently**, not one after the
+other (verified against the script's own queue-per-alias source, not
+assumed). One local suite instance, one poller, both AS containers up —
+same setup as running them separately, just one command:
+
+```
+./scripts/run-test-plan.py \
+  --expected-failures-file /path/to/expected-warnings-combined.json \
+  --expected-skips-file /path/to/expected-skips-combined.json \
+  'fapi2-security-profile-final-test-plan[client_auth_type=private_key_jwt][sender_constrain=dpop][fapi_profile=plain_fapi][openid=openid_connect]' \
+  /path/to/go-fapi/conformance/server/oidf-config/baseline-plan.json \
+  'fapi2-message-signing-final-test-plan[client_auth_type=private_key_jwt][sender_constrain=dpop][fapi_profile=plain_fapi][openid=openid_connect][fapi_request_method=signed_non_repudiation][fapi_response_mode=jarm]' \
+  /path/to/go-fapi/conformance/server/oidf-config/message-signing-plan.json
+```
+
+`--expected-failures-file`/`--expected-skips-file` each take only one
+file, but every entry in both profiles' files is already scoped by
+`configuration-filename`, so concatenating the two JSON arrays into a
+combined file works correctly — each entry still only matches its own
+profile's results. Generate that combined file on the fly rather than
+committing a static copy, so there's one source of truth per profile
+and nothing to keep in sync by hand:
+
+```
+python3 -c "
+import json
+a = json.load(open('expected-warnings-baseline.json'))
+b = json.load(open('expected-warnings-message-signing.json'))
+json.dump(a + b, open('/tmp/expected-warnings-combined.json', 'w'))
+"
+# same pattern for expected-skips-*.json
+```
+
+**When to use which**: reach for separate, single-profile runs while
+debugging or iterating on a fix — a single plan's log is unambiguous
+about which profile broke, and the poller has less concurrent traffic
+to keep up with (a combined run has been observed to trip a suite-side
+timing exception — `runInBackground called after
+runFinalisationTaskInBackground()` — when the poller's unblock POST
+lands just as a test finishes on its own and its alias moves to the
+next test; a plain `--rerun <plan>:<module>` on the same combined
+command re-verifies that one module in isolation). Use the combined run
+as a faster (~2x wall-clock) final sanity check once both profiles are
+already believed clean on their own — e.g. right before merging, or as
+a periodic full-suite gate.
+
 The docker-compose setup is deliberately shaped so a GitHub Actions job
 can reuse this directly — same containers, same network-attach pattern,
 `SUITE_NETWORK` and the client key/config just need to be generated in

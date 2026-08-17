@@ -13,6 +13,10 @@ Foundation conformance suite and collect results.
   self-signed cert is sufficient here — no CA or truststore wiring
   needed, because the suite's own outbound HTTP client trusts any
   certificate for calls to the implementation under test.
+- `unblock-implicit-callback.py` — required alongside any headless
+  `run-test-plan.py` run (see the "CI-style run" section below): works
+  around a suite bug where its own scripted browser can't execute the
+  JS that would otherwise unblock a waiting module.
 
 Everything runs via `../docker-compose.yml`, entirely locally — no
 tunnel (ngrok etc.) required. That also makes this the same shape a
@@ -160,11 +164,15 @@ docker compose up -d --force-recreate <service>
      gets away with it by scoping the `wait` inside a per-test-name
      `"override"` block, where the marker text is guaranteed to appear;
      applied blanket to every `/authorize` visit it isn't safe. Until
-     that's implemented properly (or these modules are resolved
-     manually), use `POST /api/log/{testId}/images/{placeholder}` with a
-     base64 `data:image/png;base64,...` body against the placeholder ID
-     from that test's own log — no auth needed against the suite's local
-     devmode instance — to unblock one of these tests by hand.
+     that's implemented properly, use `POST
+     /api/log/{testId}/images/{placeholder}` with a base64
+     `data:image/png;base64,...` body against the placeholder ID from
+     that test's own log — no auth needed against the suite's local
+     devmode instance — to unblock one of these tests by hand. Running
+     `scripts/unblock-implicit-callback.py` (see the CI-style run
+     section below) does exactly this automatically for every module in
+     a plan, so manual use of this endpoint is mostly only useful when
+     poking at a single stuck module through the UI.
 
    - **`fapi2-security-profile-final-user-rejects-authentication`** is
      the one module that needs the *opposite* click: its own summary
@@ -241,8 +249,31 @@ no extra flags are needed for a local run.
 the suite's own internal HtmlUnit-based scripted browser driving
 consent, so the same `browser`/`override` config from the previous
 section is just as required, and the same implicit-callback stall and
-screenshot-review-placeholder gates still occur — keep
-`unblock-implicit-callback.sh` (scratchpad) running alongside it.
+screenshot-review-placeholder gates still occur. Run
+`scripts/unblock-implicit-callback.py <planId>` (this directory)
+alongside `run-test-plan.py` — it POSTs the empty-body implicit-submit
+callback HtmlUnit's broken JS never sends, and auto-fills any
+screenshot-review placeholder with a blank image, for every module in
+the plan:
+
+```
+./scripts/run-test-plan.py '<plan>[...]' <config.json> &
+/path/to/go-fapi/conformance/server/scripts/unblock-implicit-callback.py <planId>
+```
+
+`<planId>` is printed by `run-test-plan.py` itself ("Created test plan,
+new id: ..."). **This is not optional infrastructure to route around
+if you'd rather avoid it** — every suite version that supports
+`fapi2-security-profile-final-test-plan` also carries the HtmlUnit
+bug: confirmed by bisecting the suite's own git history, the last
+release with the old, working Bootstrap (`release-v5.1.17`) predates
+the FAPI2-Security-Profile-Final test plan's introduction entirely,
+and the very next release (`v5.1.18`) added both the plan and the
+Bootstrap bump that breaks HtmlUnit in the same commit range. There is
+no version to pin to that has both. See the script's own doc comment
+for the full mechanics and a caveat about one residual, non-AS
+limitation (a couple of modules with multi-visit login semantics a
+generic empty-body POST can't fully emulate).
 
 **Known, accepted warnings**: `expected-warnings-baseline.json` and
 `expected-skips-baseline.json` (this directory) tell `run-test-plan.py`
@@ -297,8 +328,10 @@ since the baseline and message-signing plan configs use different
 `alias` values (`gofapi-baseline` / `gofapi-msgsign`), the script gives
 each its own queue and runs them **concurrently**, not one after the
 other (verified against the script's own queue-per-alias source, not
-assumed). One local suite instance, one poller, both AS containers up —
-same setup as running them separately, just one command:
+assumed). One local suite instance, one poller (pass both plan ids to
+`unblock-implicit-callback.py` — it accepts more than one), both AS
+containers up — same setup as running them separately, just one
+command:
 
 ```
 ./scripts/run-test-plan.py \

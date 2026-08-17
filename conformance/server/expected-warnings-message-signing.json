@@ -1,0 +1,20 @@
+[
+    {
+        "test-name": "fapi2-security-profile-final-attempt-reuse-authorization-code-after-one-second",
+        "variant": "*",
+        "configuration-filename": "*message-signing-plan.json",
+        "current-block": "Testing if access token was revoked after authorization code reuse (the AS 'should' have revoked the access token)",
+        "condition": "EnsureHttpStatusCodeIs4xx",
+        "expected-result": "warning",
+        "comment": "This AS issues stateless, self-contained JWT access tokens verified by signature/exp alone (see resource/verify.go) - there is no revocation list a resource endpoint could consult. Detecting authorization-code reuse and additionally revoking the access token it already issued is a SHOULD (RFC 6749 4.1.2), not a MUST, and the suite's own module text confirms failing to do it will not block certification. See go-fapi's conversation history / ARCHITECTURE.md for the tradeoff (stateless verification vs. a shared revocation store)."
+    },
+    {
+        "test-name": "fapi2-security-profile-final-refresh-token",
+        "variant": "*",
+        "configuration-filename": "*message-signing-plan.json",
+        "current-block": "Second client: Check for refresh token",
+        "condition": "FAPIEnsureServerConfigurationDoesNotSupportRefreshToken",
+        "expected-result": "warning",
+        "comment": "The plan config's second client deliberately omits offline_access from its scope (only client 1 requests it), so no refresh token is issued for it - the suite's own message confirms this is acceptable server policy, not a defect. Client 1's own refresh flow runs and succeeds; per FAPI2-SP-FINAL 5.3.2.1-9 this AS does not rotate refresh tokens, so the suite's own module logic (FAPI2SPFinalRefreshToken.java) logs 'Refresh token not rotated. Skipping lost refresh token test.' for client 1 and cleanly continues - see the accompanying expected-skips-message-signing.json entry for why the module's overall result is still SKIPPED rather than PASSED."
+    }
+]

@@ -154,13 +154,12 @@ func (f *fakeClientKeySource) ResolveVerificationKeys(_ context.Context, req key
 }
 
 type fakeGrantStore struct {
-	mu              sync.Mutex
-	codes           []storage.NewAuthorizationCode
-	byHash          map[[32]byte]storage.NewAuthorizationCode
-	redeemed        map[[32]byte]bool
-	refreshTokens   []storage.NewRefreshToken
-	refreshByHash   map[[32]byte]storage.NewRefreshToken
-	refreshRedeemed map[[32]byte]bool
+	mu            sync.Mutex
+	codes         []storage.NewAuthorizationCode
+	byHash        map[[32]byte]storage.NewAuthorizationCode
+	redeemed      map[[32]byte]bool
+	refreshTokens []storage.NewRefreshToken
+	refreshByHash map[[32]byte]storage.NewRefreshToken
 }
 
 func (f *fakeGrantStore) CreateAuthorizationCode(_ context.Context, code storage.NewAuthorizationCode) error {
@@ -226,20 +225,16 @@ func (f *fakeGrantStore) CreateRefreshToken(_ context.Context, tok storage.NewRe
 	return nil
 }
 
+// RedeemRefreshToken is not single-use — see storage.GrantStore's doc
+// comment (FAPI2-SP-FINAL 5.3.2.1-9): a refresh token stays valid for
+// repeated use until it expires.
 func (f *fakeGrantStore) RedeemRefreshToken(_ context.Context, redemption storage.RefreshTokenRedemption) (storage.RedeemedRefreshToken, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.refreshRedeemed == nil {
-		f.refreshRedeemed = make(map[[32]byte]bool)
-	}
-	if f.refreshRedeemed[redemption.TokenHash] {
-		return storage.RedeemedRefreshToken{}, fmt.Errorf("refresh token already redeemed")
-	}
 	tok, ok := f.refreshByHash[redemption.TokenHash]
 	if !ok {
 		return storage.RedeemedRefreshToken{}, fmt.Errorf("no such refresh token")
 	}
-	f.refreshRedeemed[redemption.TokenHash] = true
 	return storage.RedeemedRefreshToken{
 		ClientID:                tok.ClientID,
 		Subject:                 tok.Subject,
@@ -914,6 +909,25 @@ func TestPushAuthorizationRequestRejectsUnregisteredExtensionParameter(t *testin
 	})
 	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
 		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequest)
+	}
+}
+
+// OIDC Core §3.1.2.1's "prompt" parameter must not be rejected as an
+// unregistered extension parameter — it's core, not a
+// deployment-specific extension (see coreAuthorizationParameters). A
+// client requesting offline_access commonly sends prompt=consent to
+// guarantee a fresh consent screen (and hence a refresh token); a
+// conformance-suite regression once had this parameter rejected
+// outright, failing the refresh-token test.
+func TestPushAuthorizationRequestAcceptsPromptParameter(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, false)
+	params := plainFormParameters(t, h.clientAssertion(t), map[string]string{"prompt": "consent"})
+
+	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: params},
+	})
+	if err != nil {
+		t.Fatalf("PushAuthorizationRequest: %v", err)
 	}
 }
 

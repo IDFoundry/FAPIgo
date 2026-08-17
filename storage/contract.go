@@ -152,10 +152,14 @@ func TestGrantStoreContract(t *testing.T, factory func() GrantStore) {
 		}
 	})
 
-	t.Run("RedeemRefreshTokenIsSingleUse", func(t *testing.T) {
+	// Deliberately not single-use — see GrantStore.RedeemRefreshToken's
+	// doc comment (FAPI2-SP-FINAL 5.3.2.1-9): a refresh token stays
+	// valid for repeated use until it expires, unlike an authorization
+	// code. Contrast with RedeemAuthorizationCodeIsSingleUse above.
+	t.Run("RedeemRefreshTokenIsReusable", func(t *testing.T) {
 		store := factory()
 		ctx := context.Background()
-		hash := sha256.Sum256([]byte("single-use-refresh"))
+		hash := sha256.Sum256([]byte("reusable-refresh"))
 		if err := store.CreateRefreshToken(ctx, NewRefreshToken{
 			TokenHash: hash, ClientID: "client-1", ExpiresAt: time.Now().Add(time.Hour),
 		}); err != nil {
@@ -164,8 +168,8 @@ func TestGrantStoreContract(t *testing.T, factory func() GrantStore) {
 		if _, err := store.RedeemRefreshToken(ctx, RefreshTokenRedemption{TokenHash: hash}); err != nil {
 			t.Fatalf("first RedeemRefreshToken: %v", err)
 		}
-		if _, err := store.RedeemRefreshToken(ctx, RefreshTokenRedemption{TokenHash: hash}); err == nil {
-			t.Fatalf("second RedeemRefreshToken = nil error, want error")
+		if _, err := store.RedeemRefreshToken(ctx, RefreshTokenRedemption{TokenHash: hash}); err != nil {
+			t.Fatalf("second RedeemRefreshToken: %v, want success (refresh tokens are not single-use)", err)
 		}
 	})
 
@@ -177,7 +181,7 @@ func TestGrantStoreContract(t *testing.T, factory func() GrantStore) {
 		}
 	})
 
-	t.Run("ConcurrentRedeemRefreshTokenHasExactlyOneWinner", func(t *testing.T) {
+	t.Run("ConcurrentRedeemRefreshTokenAllSucceed", func(t *testing.T) {
 		store := factory()
 		ctx := context.Background()
 		hash := sha256.Sum256([]byte("concurrent-refresh"))
@@ -190,8 +194,8 @@ func TestGrantStoreContract(t *testing.T, factory func() GrantStore) {
 			_, err := store.RedeemRefreshToken(ctx, RefreshTokenRedemption{TokenHash: hash})
 			return err == nil
 		})
-		if successes != 1 {
-			t.Fatalf("concurrent RedeemRefreshToken succeeded %d times, want exactly 1", successes)
+		if successes != contractConcurrentAttempts {
+			t.Fatalf("concurrent RedeemRefreshToken succeeded %d/%d times, want all of them (not single-use)", successes, contractConcurrentAttempts)
 		}
 	})
 }

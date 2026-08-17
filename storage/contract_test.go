@@ -20,13 +20,12 @@ type refGrantStore struct {
 	codes    map[[32]byte]storage.NewAuthorizationCode
 	redeemed map[[32]byte]bool
 	refresh  map[[32]byte]storage.NewRefreshToken
-	used     map[[32]byte]bool
 }
 
 func newRefGrantStore() *refGrantStore {
 	return &refGrantStore{
 		codes: make(map[[32]byte]storage.NewAuthorizationCode), redeemed: make(map[[32]byte]bool),
-		refresh: make(map[[32]byte]storage.NewRefreshToken), used: make(map[[32]byte]bool),
+		refresh: make(map[[32]byte]storage.NewRefreshToken),
 	}
 }
 
@@ -67,17 +66,16 @@ func (s *refGrantStore) CreateRefreshToken(_ context.Context, tok storage.NewRef
 	return nil
 }
 
+// RedeemRefreshToken is not single-use — see storage.GrantStore's doc
+// comment (FAPI2-SP-FINAL 5.3.2.1-9): a refresh token stays valid for
+// repeated use until it expires.
 func (s *refGrantStore) RedeemRefreshToken(_ context.Context, r storage.RefreshTokenRedemption) (storage.RedeemedRefreshToken, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.used[r.TokenHash] {
-		return storage.RedeemedRefreshToken{}, fmt.Errorf("already used")
-	}
 	tok, ok := s.refresh[r.TokenHash]
 	if !ok {
 		return storage.RedeemedRefreshToken{}, fmt.Errorf("unknown token")
 	}
-	s.used[r.TokenHash] = true
 	return storage.RedeemedRefreshToken{
 		ClientID: tok.ClientID, Subject: tok.Subject, Scope: tok.Scope,
 		Thumbprint: tok.Thumbprint, AuthTime: tok.AuthTime, ACR: tok.ACR, AMR: tok.AMR,

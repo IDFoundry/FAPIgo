@@ -94,8 +94,12 @@ type RedeemedAuthorizationCode struct {
 // refresh token. TokenHash is the SHA-256 digest of the raw token value,
 // never the value itself — the same digest-only discipline as
 // NewAuthorizationCode.CodeHash. Thumbprint is the DPoP key thumbprint
-// this token, and every access token minted from it, is bound to;
-// RefreshAccessToken rejects a request whose DPoP proof doesn't match.
+// presented when this token was issued — recorded for reference, but
+// RefreshAccessToken does not require a later refresh request to
+// present the same key: every client this server accepts is
+// confidential (client_assertion is always required), and RFC 9449 §5
+// does not bind a confidential client's refresh token to a specific
+// DPoP key.
 type NewRefreshToken struct {
 	TokenHash [32]byte
 
@@ -161,11 +165,16 @@ type GrantStore interface {
 
 	CreateRefreshToken(ctx context.Context, token NewRefreshToken) error
 
-	// RedeemRefreshToken atomically retrieves and consumes the refresh
-	// token identified by TokenHash — a second call with the same
-	// TokenHash must fail. RefreshAccessToken always rotates: every
-	// successful refresh consumes the presented token and issues a new
-	// one via CreateRefreshToken, so a stolen-and-replayed old token is
-	// detectable (it will already be consumed).
+	// RedeemRefreshToken retrieves the refresh token identified by
+	// TokenHash. Unlike RedeemAuthorizationCode, this is deliberately
+	// NOT single-use: FAPI2-SP-FINAL requirement 5.3.2.1-9 states an
+	// authorization server "shall not use refresh token rotation except
+	// in extraordinary circumstances", so RefreshAccessToken never
+	// consumes or replaces the presented token — it stays valid for
+	// repeated use until it expires (or is otherwise revoked). It
+	// returns an error only if TokenHash is unknown; the caller checks
+	// the returned record's own expiry (ExpiresAt) itself, the same way
+	// BeginAuthorization and CompleteAuthorization do for their own
+	// redemptions.
 	RedeemRefreshToken(ctx context.Context, redemption RefreshTokenRedemption) (RedeemedRefreshToken, error)
 }

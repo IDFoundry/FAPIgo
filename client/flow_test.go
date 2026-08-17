@@ -421,6 +421,65 @@ func TestCompleteAuthorizationHappyPathMessageSigning(t *testing.T) {
 	}
 }
 
+// A JARM response carries no top-level "iss" query parameter — iss
+// lives inside the signed JWT claims instead, verified as part of
+// jarm.Verify — so RequireAuthorizationResponseIss must not reject a
+// legitimate JARM callback as "missing iss" the way it would a plain
+// one. Regression test for the bug where internal/jarm's Claims parsing
+// pops "iss" out of Parameters entirely, making the RFC 9207 plain-mode
+// check in HandleAuthorizationResponse see every JARM response as
+// missing iss regardless of the token's actual, verified claims.
+func TestCompleteAuthorizationMessageSigningSucceedsWithRequireAuthorizationResponseIss(t *testing.T) {
+	as := newFakeAS(t, testIssuer, true)
+	ts := httptest.NewServer(as.handler())
+	t.Cleanup(ts.Close)
+
+	cfg := validConfig(t)
+	cfg.RequireAuthorizationResponseIss = true
+	cfg.Profile = client.ProfileFAPISecurityWithMessageSigning
+	cfg.Algorithms.RequestObject = fapi.ES256
+	cfg.Algorithms.JARM = fapi.ES256
+	cfg.Limits.RequestObjectLifetime = time.Minute
+	cfg.Limits.MaxJARMResponseLifetime = time.Minute
+	parURL, err := fapi.ParseEndpointURL(ts.URL+"/par", fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseEndpointURL(par): %v", err)
+	}
+	tokenURL, err := fapi.ParseEndpointURL(ts.URL+"/token", fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseEndpointURL(token): %v", err)
+	}
+	cfg.Endpoints.PushedAuthorizationRequest = parURL
+	cfg.Endpoints.Token = tokenURL
+
+	deps := validDependencies(t)
+	deps.HTTP = ts.Client()
+	deps.IssuerKeys = &fakeIssuerKeySource{keys: map[keys.IssuerVerificationPurpose]crypto.PublicKey{
+		keys.JARMVerification:    &as.jarmKey.PublicKey,
+		keys.IDTokenVerification: &as.idTokenKey.PublicKey,
+	}}
+
+	c, err := client.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	ctx := context.Background()
+
+	session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}})
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+
+	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-jarm-iss-required", "")
+	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery})
+	if err != nil {
+		t.Fatalf("CompleteAuthorization: %v", err)
+	}
+	if _, ok := result.(client.CompletionSuccess); !ok {
+		t.Fatalf("result type = %T, want client.CompletionSuccess", result)
+	}
+}
+
 func TestCompleteAuthorizationDenied(t *testing.T) {
 	c, as, _ := newTestClient(t, false)
 	ctx := context.Background()

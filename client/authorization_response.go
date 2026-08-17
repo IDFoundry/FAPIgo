@@ -60,31 +60,43 @@ type CallbackDenied struct {
 func (CallbackDenied) callbackResult() {}
 
 // HandleAuthorizationResponse validates an authorization callback: the
-// "iss" parameter (RFC 9207 §2.4) — checked before anything else derived
-// from params is trusted, including an "error" code, since "clients
-// MUST NOT assume that the error originates from the intended
-// authorization server" until iss itself checks out — correlation state
-// (via SessionStore.Consume, which also prevents the same callback being
-// processed twice), issuer, JARM signature and claims when Config.Profile
-// requires one, response-mode consistency with what this session
-// requested, and authorization-code or error-response presence.
+// "iss" parameter (RFC 9207 §2.4) for a plain-mode response — checked
+// before anything else derived from params is trusted, including an
+// "error" code, since "clients MUST NOT assume that the error
+// originates from the intended authorization server" until iss itself
+// checks out — correlation state (via SessionStore.Consume, which also
+// prevents the same callback being processed twice), issuer, JARM
+// signature and claims when Config.Profile requires one, response-mode
+// consistency with what this session requested, and authorization-code
+// or error-response presence.
 func (c *Client) HandleAuthorizationResponse(ctx context.Context, cb AuthorizationCallback) (CallbackResult, error) {
 	params, respMode, err := c.parseCallbackParams(ctx, cb)
 	if err != nil {
 		return nil, err
 	}
 
-	// RFC 9207 §2.4: a present "iss" must equal this client's configured
-	// issuer exactly (simple string comparison, no normalization); an
-	// absent one is only an error when the server is known to support
-	// the parameter — this client can't tell that on its own, so the
-	// caller states it via Config.RequireAuthorizationResponseIss.
-	if iss, ok := paramString(params, "iss"); ok {
-		if iss != c.cfg.Issuer.String() {
-			return nil, newError(ErrorInvalidResponse, "authorization response iss does not match expected issuer", nil)
+	// RFC 9207 §2.4's "iss" parameter is a plain-mode-only mechanism: a
+	// JARM response has no top-level "iss" query parameter to check in
+	// the first place (parseCallbackParams's jarm.Verify call already
+	// cryptographically ties the response to c.cfg.Issuer via its own
+	// signed "iss" claim — a strictly stronger guarantee than this plain
+	// comparison), and internal/jarm's Claims parsing pops "iss" out of
+	// Parameters entirely, so this check would otherwise always see it
+	// as "missing" for a JARM response, regardless of the actual token.
+	if respMode == responseModePlain {
+		// A present "iss" must equal this client's configured issuer
+		// exactly (simple string comparison, no normalization); an
+		// absent one is only an error when the server is known to
+		// support the parameter — this client can't tell that on its
+		// own, so the caller states it via
+		// Config.RequireAuthorizationResponseIss.
+		if iss, ok := paramString(params, "iss"); ok {
+			if iss != c.cfg.Issuer.String() {
+				return nil, newError(ErrorInvalidResponse, "authorization response iss does not match expected issuer", nil)
+			}
+		} else if c.cfg.RequireAuthorizationResponseIss {
+			return nil, newError(ErrorInvalidResponse, "authorization response is missing iss", nil)
 		}
-	} else if c.cfg.RequireAuthorizationResponseIss {
-		return nil, newError(ErrorInvalidResponse, "authorization response is missing iss", nil)
 	}
 
 	state, _ := paramString(params, "state")

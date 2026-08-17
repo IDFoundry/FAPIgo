@@ -251,8 +251,16 @@ func (t IDToken) Validate(pub crypto.PublicKey, policy IDTokenValidatePolicy) (V
 	if c.Issuer != policy.ExpectedIssuer {
 		return ValidatedIDToken{}, ErrIssuerMismatch
 	}
-	if c.Audience != policy.ExpectedAudience {
-		return ValidatedIDToken{}, ErrAudienceMismatch
+	// OIDC Core §3.1.3.7 step 3: "aud... MAY contain an array with more
+	// than one element. The ID Token MUST be rejected... if it contains
+	// additional audiences not trusted by the Client." This package
+	// implements no mechanism for a caller to name any audience as
+	// trusted besides itself, so every element must equal
+	// ExpectedAudience — not merely contain it — until one is added.
+	for _, aud := range c.Audience {
+		if aud != policy.ExpectedAudience {
+			return ValidatedIDToken{}, ErrAudienceMismatch
+		}
 	}
 	if policy.Now.After(c.ExpiresAt.Add(policy.MaxClockSkew)) {
 		return ValidatedIDToken{}, ErrExpired

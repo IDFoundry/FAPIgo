@@ -121,4 +121,16 @@ type Config struct {
 	Profile    Profile
 	Algorithms Algorithms
 	Limits     Limits
+
+	// RequireAuthorizationResponseIss makes HandleAuthorizationResponse
+	// reject a callback with no "iss" parameter at all, rather than only
+	// checking one that's present. RFC 9207 §2.4 mandates both halves
+	// unconditionally regardless of this setting — a present-but-wrong
+	// "iss" is always rejected — but "MUST reject authorization responses
+	// without the iss parameter" applies only "from authorization servers
+	// that do support the parameter", which this client can't determine
+	// on its own; set this from
+	// DiscoveredMetadata.AuthorizationResponseIssSupported (or a
+	// deployment's own out-of-band knowledge of the server).
+	RequireAuthorizationResponseIss bool
 }

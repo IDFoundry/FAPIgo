@@ -177,6 +177,78 @@ func TestIDTokenValidateRejectsIssuerAndAudienceMismatch(t *testing.T) {
 	}
 }
 
+// OIDC Core §2 documents "aud" as possibly array-valued for an ID token
+// ("In the general case, the aud value is an array of case sensitive
+// strings") - a single-element array naming just this client's own ID
+// must validate exactly like a bare string would. Confirmed against the
+// OIDF conformance suite's own
+// fapi2-security-profile-final-client-test-valid-aud-as-array module
+// (which, per its own summary and AddAudValueAsArrayToIdToken source,
+// specifically wraps the single value in an array — not a genuine
+// multi-audience token), not just the spec text.
+func TestIDTokenValidateAcceptsSingleElementAudienceArray(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256"}`))
+	payloadJSON, err := json.Marshal(map[string]any{
+		"iss": "https://as.example",
+		"sub": "user-1",
+		"aud": []string{"client-123"},
+		"exp": now.Add(time.Minute).Unix(),
+		"iat": now.Unix(),
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	signingInput := header + "." + base64.RawURLEncoding.EncodeToString(payloadJSON)
+	tok := signingInput + "." + signRaw(t, key, signingInput)
+
+	parsed, err := ParseIDToken(tok)
+	if err != nil {
+		t.Fatalf("ParseIDToken: %v", err)
+	}
+	if _, err := parsed.Validate(&key.PublicKey, baseIDTokenPolicy(now)); err != nil {
+		t.Fatalf("Validate(single-element aud array) = %v, want nil error", err)
+	}
+}
+
+// OIDC Core §3.1.3.7 step 3: "The ID Token MUST be rejected if the ID
+// Token does not list the Client as a valid audience, or if it contains
+// additional audiences not trusted by the Client." This package has no
+// mechanism for a caller to name any audience as trusted besides
+// itself, so a second, untrusted audience value must be rejected even
+// though the client's own ID is genuinely present too. Confirmed
+// against the OIDF conformance suite's own
+// fapi2-security-profile-final-client-test-invalid-secondary-aud
+// module and its AddUntrustedSecondAudValueToIdToken source.
+func TestIDTokenValidateRejectsUntrustedSecondAudience(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256"}`))
+	payloadJSON, err := json.Marshal(map[string]any{
+		"iss": "https://as.example",
+		"sub": "user-1",
+		"aud": []string{"client-123", "client-1231"},
+		"exp": now.Add(time.Minute).Unix(),
+		"iat": now.Unix(),
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	signingInput := header + "." + base64.RawURLEncoding.EncodeToString(payloadJSON)
+	tok := signingInput + "." + signRaw(t, key, signingInput)
+
+	parsed, err := ParseIDToken(tok)
+	if err != nil {
+		t.Fatalf("ParseIDToken: %v", err)
+	}
+	if _, err := parsed.Validate(&key.PublicKey, baseIDTokenPolicy(now)); !errors.Is(err, ErrAudienceMismatch) {
+		t.Fatalf("Validate(untrusted second aud) = %v, want ErrAudienceMismatch", err)
+	}
+}
+
 func TestIDTokenValidateRejectsExpiredAndExceededLifetime(t *testing.T) {
 	key := generateKey(t)
 	now := time.Now()

@@ -6,14 +6,26 @@ import (
 	"time"
 )
 
-// IDTokenClaims is a parsed ID token payload (OIDC Core §2). Audience is
-// restricted to a single value — see the equivalent restriction and
-// rationale in internal/clientassertion. Everything beyond the claims
-// this struct names is left in Parameters as raw JSON.
+// IDTokenClaims is a parsed ID token payload (OIDC Core §2).
+//
+// Audience is a slice because OIDC Core §2 explicitly documents "aud" as
+// possibly multi-valued for an ID token ("In the general case, the aud
+// value is an array of case sensitive strings" — a single string is
+// just the one-element case) — unlike internal/clientassertion's own
+// Audience, which stays a single string because a client assertion is
+// always addressed to exactly one token endpoint, never several
+// audiences at once. §3.1.3.7 step 9 additionally says a client "SHOULD
+// verify that an azp Claim is present" when there's more than one
+// audience, and step 10 that it "SHOULD verify" azp equals the client's
+// own ID when present; this package doesn't implement either — SHOULD,
+// not MUST, and not yet a concrete gap this module has hit.
+//
+// Everything beyond the claims this struct names is left in Parameters
+// as raw JSON.
 type IDTokenClaims struct {
 	Issuer    string
 	Subject   string
-	Audience  string
+	Audience  []string
 	ExpiresAt time.Time
 	IssuedAt  time.Time
 	Nonce     string    // "" if absent
@@ -38,7 +50,7 @@ func parseIDTokenClaims(payload []byte) (IDTokenClaims, error) {
 	if err != nil {
 		return IDTokenClaims{}, err
 	}
-	aud, _, err := popString(raw, "aud", true)
+	aud, err := popStringOrStringSlice(raw, "aud")
 	if err != nil {
 		return IDTokenClaims{}, err
 	}

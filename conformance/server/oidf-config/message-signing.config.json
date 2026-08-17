@@ -15,7 +15,7 @@
   "limits": {
     "pushed_request_lifetime_seconds": 90,
     "max_client_assertion_lifetime_seconds": 60,
-    "max_request_object_lifetime_seconds": 60,
+    "max_request_object_lifetime_seconds": 600,
     "interaction_lifetime_seconds": 300,
     "authorization_code_lifetime_seconds": 60,
     "jarm_response_lifetime_seconds": 60,
@@ -28,32 +28,48 @@
 
   "clients": [
     {
-      "id": "REPLACE_WITH_SUITE_CLIENT_ID",
+      "id": "gofapi-conformance-client-1",
       "redirect_uris": [
-        "https://localhost.emobix.co.uk:8443/test/a/REPLACE_WITH_YOUR_ALIAS/callback",
-        "https://localhost.emobix.co.uk:8443/test/a/REPLACE_WITH_YOUR_ALIAS/callback?dummy1=lorem&dummy2=ipsum"
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-msgsign/callback",
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-msgsign/callback?dummy1=lorem&dummy2=ipsum"
       ],
       "client_assertion_algorithm": "ES256",
       "request_object_algorithm": "ES256",
       "allowed_scopes": ["openid", "accounts", "offline_access"],
       "jwks": {
         "keys": [
-          "REPLACE_WITH_PUBLIC_JWK_FROM_generate-client-key"
+          {
+            "alg": "ES256",
+            "crv": "P-256",
+            "kid": "gofapi-conformance-msgsign-client1-key1",
+            "kty": "EC",
+            "use": "sig",
+            "x": "rPYEjGXoaI1-JiWaZ-6F1d06Fo_FMbML6dhDFZxAoho",
+            "y": "OcgHqhWB5Slkl0LR4wI91UH2R00EJdz_CYafsrgPc4A"
+          }
         ]
       }
     },
     {
-      "id": "REPLACE_WITH_SUITE_CLIENT2_ID",
+      "id": "gofapi-conformance-client-2",
       "redirect_uris": [
-        "https://localhost.emobix.co.uk:8443/test/a/REPLACE_WITH_YOUR_ALIAS/callback",
-        "https://localhost.emobix.co.uk:8443/test/a/REPLACE_WITH_YOUR_ALIAS/callback?dummy1=lorem&dummy2=ipsum"
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-msgsign/callback",
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-msgsign/callback?dummy1=lorem&dummy2=ipsum"
       ],
       "client_assertion_algorithm": "ES256",
       "request_object_algorithm": "ES256",
       "allowed_scopes": ["openid", "accounts", "offline_access"],
       "jwks": {
         "keys": [
-          "REPLACE_WITH_PUBLIC_JWK_FROM_generate-client-key_client2"
+          {
+            "alg": "ES256",
+            "crv": "P-256",
+            "kid": "gofapi-conformance-msgsign-client2-key1",
+            "kty": "EC",
+            "use": "sig",
+            "x": "rNhZck-Ne38WZUJgH2bvr3z00gMiQmK1R0AakX8A6SA",
+            "y": "oLRM9gDUKrJyG2gc8xI7b6ho-SZlzl-qd2IC1U6jk-A"
+          }
         ]
       }
     }

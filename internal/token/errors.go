@@ -18,7 +18,10 @@ var (
 	ErrIssuerMismatch = errors.New("token: iss does not match expected issuer")
 
 	// ErrAudienceMismatch indicates a token's aud claim did not equal
-	// the audience the caller expected.
+	// the audience the caller expected — for an ID token, whose aud may
+	// per OIDC Core §2 be an array, every element must equal it, not
+	// merely one of them (OIDC Core §3.1.3.7 step 3 requires rejecting
+	// any additional audience this package has no mechanism to trust).
 	ErrAudienceMismatch = errors.New("token: aud does not match expected audience")
 
 	// ErrExpired indicates a token's exp claim is not after the

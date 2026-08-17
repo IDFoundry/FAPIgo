@@ -43,12 +43,27 @@ type DiscoveredMetadata struct {
 	// that server should set Config.Profile to
 	// ProfileFAPISecurityWithMessageSigning accordingly.
 	RequireSignedRequestObject bool
+
+	// AuthorizationResponseIssSupported reflects the server's own
+	// authorization_response_iss_parameter_supported metadata value — a
+	// caller targeting that server should set
+	// Config.RequireAuthorizationResponseIss accordingly (RFC 9207 §2.4:
+	// "Clients MUST reject authorization responses without the iss
+	// parameter from authorization servers that do support the
+	// parameter").
+	AuthorizationResponseIssSupported bool
 }
 
-// Discover fetches and validates issuer's OAuth 2.0 Authorization Server
-// Metadata / OpenID Connect Discovery document
-// (issuer + "/.well-known/openid-configuration", inserted before any
-// path component issuer itself carries — RFC 8414 §3.1) via fetcher, and
+// Discover fetches and validates issuer's OpenID Connect Discovery
+// document (".well-known/openid-configuration" appended after any path
+// component issuer itself carries — OIDC Discovery 1.0 §4.1's own
+// worked example: issuer "https://example.com/issuer1" resolves to
+// "GET /issuer1/.well-known/openid-configuration". This is deliberately
+// not RFC 8414 §3.1's insert-before-path algorithm — RFC 8414 §5 itself
+// acknowledges "openid-configuration... differs from OpenID Connect
+// Discovery 1.0's approach", and real OIDC deployments (this module's
+// own conformance suite included) serve the "openid-configuration"
+// suffix at the §4.1 location, not the RFC 8414 one) via fetcher, and
 // returns the endpoints and algorithm support a caller needs to build a
 // Config. It does not construct a Client itself: the caller still
 // supplies its own ClientID, RedirectURI, chosen algorithms and
@@ -102,22 +117,25 @@ func Discover(ctx context.Context, fetcher *fapihttp.Client, issuer fapi.URL, op
 			Token:                      tok,
 			PushedAuthorizationRequest: par,
 		},
-		JWKSURI:                    jwksURI,
-		IDTokenAlgorithms:          supportedAlgorithms(doc.IDTokenSigningAlgValuesSupported),
-		RequestObjectAlgorithms:    supportedAlgorithms(doc.RequestObjectSigningAlgValuesSupported),
-		JARMAlgorithms:             supportedAlgorithms(doc.AuthorizationSigningAlgValuesSupported),
-		RequireSignedRequestObject: doc.RequireSignedRequestObject,
+		JWKSURI:                           jwksURI,
+		IDTokenAlgorithms:                 supportedAlgorithms(doc.IDTokenSigningAlgValuesSupported),
+		RequestObjectAlgorithms:           supportedAlgorithms(doc.RequestObjectSigningAlgValuesSupported),
+		JARMAlgorithms:                    supportedAlgorithms(doc.AuthorizationSigningAlgValuesSupported),
+		RequireSignedRequestObject:        doc.RequireSignedRequestObject,
+		AuthorizationResponseIssSupported: doc.AuthorizationResponseIssParameterSupported,
 	}, nil
 }
 
 // wellKnownURL builds the OpenID Connect Discovery 1.0 §4.1 well-known
-// URL for issuer: ".well-known/openid-configuration" is inserted
-// immediately after the host, before any path component issuer itself
-// carries — not simply appended to issuer's own path.
+// URL for issuer: ".well-known/openid-configuration" is appended after
+// any path component issuer itself carries (its terminating "/" removed
+// first, per §4.1), not inserted between the host and that path — see
+// Discover's doc comment for why this, and not RFC 8414 §3.1's
+// insert-before-path algorithm, is correct for this specific suffix.
 func wellKnownURL(issuer *url.URL) *url.URL {
 	out := *issuer
 	issuerPath := strings.TrimSuffix(issuer.Path, "/")
-	out.Path = "/.well-known/openid-configuration" + issuerPath
+	out.Path = issuerPath + "/.well-known/openid-configuration"
 	out.RawQuery = ""
 	out.Fragment = ""
 	return &out

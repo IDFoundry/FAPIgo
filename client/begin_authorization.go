@@ -83,7 +83,7 @@ func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 		return AuthorizationSession{}, buildErr
 	}
 
-	body, status, err := c.postForm(ctx, c.cfg.Endpoints.PushedAuthorizationRequest.String(), par.EncodeForm(formParams), nil)
+	body, status, _, err := c.postForm(ctx, c.cfg.Endpoints.PushedAuthorizationRequest.String(), par.EncodeForm(formParams), nil)
 	if err != nil {
 		return AuthorizationSession{}, newError(ErrorInternal, "pushed authorization request failed", err)
 	}

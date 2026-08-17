@@ -99,13 +99,16 @@ func TestDiscoverAcceptsValidDocumentAtRoot(t *testing.T) {
 	}
 }
 
-func TestDiscoverInsertsWellKnownPathBeforeIssuerPath(t *testing.T) {
+func TestDiscoverAppendsWellKnownPathAfterIssuerPath(t *testing.T) {
 	var gotPath string
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		// The issuer this test uses has a path component ("/tenant1"),
-		// so the well-known suffix must be inserted before it per RFC
-		// 8414 §3.1 — respond using whatever issuer the request implies
+		// so the well-known suffix must be appended after it per OIDC
+		// Discovery 1.0 §4.1's own worked example — not inserted between
+		// host and path the way RFC 8414 §3.1 builds its own, differently
+		// named "oauth-authorization-server" suffix (see Discover's doc
+		// comment). Respond using whatever issuer the request implies
 		// isn't necessary here, only that the path was constructed
 		// correctly; return 404 so Discover fails cleanly either way and
 		// this test only asserts on gotPath.
@@ -119,8 +122,8 @@ func TestDiscoverInsertsWellKnownPathBeforeIssuerPath(t *testing.T) {
 	}
 	_, _ = client.Discover(context.Background(), newDiscoveryFetcher(t, ts), issuer, fapi.AllowLoopbackHTTP())
 
-	if gotPath != "/.well-known/openid-configuration/tenant1" {
-		t.Fatalf("fetched path = %q, want /.well-known/openid-configuration/tenant1", gotPath)
+	if gotPath != "/tenant1/.well-known/openid-configuration" {
+		t.Fatalf("fetched path = %q, want /tenant1/.well-known/openid-configuration", gotPath)
 	}
 }
 

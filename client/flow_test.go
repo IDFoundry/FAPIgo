@@ -6,10 +6,12 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -38,6 +40,24 @@ type fakeAS struct {
 	lastPARForm   url.Values
 	lastTokenForm url.Values
 	lastNonce     string
+
+	// challengeDPoPNonce, if non-empty, makes handleToken reject every
+	// token request whose DPoP proof doesn't carry this exact "nonce"
+	// claim with RFC 9449 §8's use_dpop_nonce challenge - the same shape
+	// a real DPoP-nonce-requiring authorization server uses.
+	challengeDPoPNonce   string
+	tokenCallCount       int
+	seenClientAssertions map[string]bool
+
+	// tokenTypeOverride, if non-empty, replaces the token response's
+	// token_type value (e.g. "dpop" lowercase, to test RFC 6749 §7.1's
+	// "Values are case insensitive").
+	tokenTypeOverride string
+
+	// omitExpiresIn drops expires_in from the token response entirely,
+	// to test that a client tolerates its absence (RFC 6749 §5.1:
+	// RECOMMENDED, not REQUIRED).
+	omitExpiresIn bool
 }
 
 func newFakeAS(t *testing.T, issuer string, messageSigned bool) *fakeAS {
@@ -141,11 +161,39 @@ func (a *fakeAS) handleToken(w http.ResponseWriter, r *http.Request) {
 		a.t.Fatalf("token: parse form: %v", err)
 	}
 	a.lastTokenForm = r.PostForm
-	if r.Header.Get("DPoP") == "" {
+	a.tokenCallCount++
+	proof := r.Header.Get("DPoP")
+	if proof == "" {
 		a.t.Errorf("token: missing DPoP header")
+	}
+
+	// A client assertion is exactly as single-use as a DPoP proof: reject
+	// reuse the same way a real jti-tracking authorization server (this
+	// module's own server package included) would, so a retry that
+	// forgets to sign a fresh assertion fails this test the same way it
+	// fails against the real suite.
+	if assertion := r.PostForm.Get("client_assertion"); assertion != "" {
+		if a.seenClientAssertions == nil {
+			a.seenClientAssertions = make(map[string]bool)
+		}
+		if a.seenClientAssertions[assertion] {
+			a.t.Errorf("token: client_assertion reused across requests")
+		}
+		a.seenClientAssertions[assertion] = true
 	}
 	if r.PostForm.Get("code_verifier") == "" {
 		a.t.Errorf("token: missing code_verifier")
+	}
+
+	if a.challengeDPoPNonce != "" && dpopProofNonce(a.t, proof) != a.challengeDPoPNonce {
+		w.Header().Set("DPoP-Nonce", a.challengeDPoPNonce)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]any{
+			"error":             "use_dpop_nonce",
+			"error_description": "resubmit with the DPoP-Nonce value",
+		})
+		return
 	}
 
 	idToken, err := token.IssueIDToken(token.IDTokenParams{
@@ -157,15 +205,23 @@ func (a *fakeAS) handleToken(w http.ResponseWriter, r *http.Request) {
 		a.t.Fatalf("issue id token: %v", err)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	tokenType := "DPoP"
+	if a.tokenTypeOverride != "" {
+		tokenType = a.tokenTypeOverride
+	}
+	resp := map[string]any{
 		"access_token":  "opaque-access-token",
-		"token_type":    "DPoP",
-		"expires_in":    300,
+		"token_type":    tokenType,
 		"scope":         "openid accounts",
 		"id_token":      idToken,
 		"refresh_token": "opaque-refresh-token",
-	})
+	}
+	if !a.omitExpiresIn {
+		resp["expires_in"] = 300
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 func newTestClient(t *testing.T, messageSigned bool) (*client.Client, *fakeAS, *httptest.Server) {
@@ -206,6 +262,111 @@ func newTestClient(t *testing.T, messageSigned bool) (*client.Client, *fakeAS, *
 		t.Fatalf("client.New: %v", err)
 	}
 	return c, as, ts
+}
+
+// dpopProofNonce extracts the "nonce" claim from a DPoP proof's payload
+// without verifying its signature — this test only needs to observe
+// what the client sent, not re-validate cryptography internal/dpop's
+// own tests already cover.
+func dpopProofNonce(t *testing.T, proof string) string {
+	t.Helper()
+	parts := strings.Split(proof, ".")
+	if len(parts) != 3 {
+		t.Fatalf("DPoP proof is not a 3-part JWT: %q", proof)
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatalf("decode DPoP proof payload: %v", err)
+	}
+	var claims struct {
+		Nonce string `json:"nonce"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		t.Fatalf("unmarshal DPoP proof claims: %v", err)
+	}
+	return claims.Nonce
+}
+
+// RFC 9449 §8: an authorization server that requires a DPoP nonce
+// rejects a proof lacking one with use_dpop_nonce and a DPoP-Nonce
+// response header naming the value to use; the client is expected to
+// retry once with a fresh proof carrying it.
+func TestExchangeCodeRetriesOnDPoPNonceChallenge(t *testing.T) {
+	c, as, _ := newTestClient(t, false)
+	as.challengeDPoPNonce = "server-issued-nonce-1"
+	ctx := context.Background()
+
+	session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid", "accounts"}})
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+
+	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-123", "")
+	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery})
+	if err != nil {
+		t.Fatalf("CompleteAuthorization: %v", err)
+	}
+	success, ok := result.(client.CompletionSuccess)
+	if !ok {
+		t.Fatalf("result type = %T, want client.CompletionSuccess", result)
+	}
+	if success.Tokens.AccessToken.Reveal() != "opaque-access-token" {
+		t.Errorf("AccessToken = %q", success.Tokens.AccessToken.Reveal())
+	}
+	if as.tokenCallCount != 2 {
+		t.Errorf("token endpoint called %d times, want 2 (initial + nonce retry)", as.tokenCallCount)
+	}
+}
+
+// RFC 6749 §7.1: "The type of the token issued... Value is case
+// insensitive."
+func TestExchangeCodeAcceptsCaseInsensitiveTokenType(t *testing.T) {
+	c, as, _ := newTestClient(t, false)
+	as.tokenTypeOverride = "dpop"
+	ctx := context.Background()
+
+	session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid", "accounts"}})
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-123", "")
+	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery})
+	if err != nil {
+		t.Fatalf("CompleteAuthorization: %v", err)
+	}
+	success, ok := result.(client.CompletionSuccess)
+	if !ok {
+		t.Fatalf("result type = %T, want client.CompletionSuccess", result)
+	}
+	if success.Tokens.TokenType != "DPoP" {
+		t.Errorf("TokenType = %q, want canonical %q regardless of the server's casing", success.Tokens.TokenType, "DPoP")
+	}
+}
+
+// RFC 6749 §5.1 marks expires_in RECOMMENDED, not REQUIRED, and
+// explicitly permits an authorization server to omit it and document a
+// default lifetime out of band instead.
+func TestExchangeCodeToleratesMissingExpiresIn(t *testing.T) {
+	c, as, _ := newTestClient(t, false)
+	as.omitExpiresIn = true
+	ctx := context.Background()
+
+	session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid", "accounts"}})
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-123", "")
+	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery})
+	if err != nil {
+		t.Fatalf("CompleteAuthorization: %v", err)
+	}
+	success, ok := result.(client.CompletionSuccess)
+	if !ok {
+		t.Fatalf("result type = %T, want client.CompletionSuccess", result)
+	}
+	if success.Tokens.HasExpiresIn {
+		t.Errorf("HasExpiresIn = true, want false when the server omitted expires_in")
+	}
 }
 
 func TestCompleteAuthorizationHappyPathBaseline(t *testing.T) {
@@ -319,6 +480,70 @@ func TestHandleAuthorizationResponseRejectsResponseModeDowngrade(t *testing.T) {
 
 	if _, err := c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: q.Encode()}); err == nil {
 		t.Fatalf("HandleAuthorizationResponse(plain callback under message-signing profile) = nil error, want error")
+	}
+}
+
+// RFC 9207 §2.4: a present "iss" must equal this client's configured
+// issuer exactly; a mismatch must be rejected regardless of
+// RequireAuthorizationResponseIss (that setting only governs what
+// happens when "iss" is absent, not when it's present and wrong).
+func TestHandleAuthorizationResponseRejectsIssMismatch(t *testing.T) {
+	c, _, _ := newTestClient(t, false)
+	ctx := context.Background()
+
+	session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}})
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+
+	q := url.Values{}
+	q.Set("state", session.Handle().String())
+	q.Set("code", "auth-code-iss-mismatch")
+	q.Set("iss", "https://attacker.example")
+
+	if _, err := c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: q.Encode()}); err == nil {
+		t.Fatalf("HandleAuthorizationResponse(wrong iss) = nil error, want error")
+	}
+}
+
+// RFC 9207 §2.4: "Clients MUST reject authorization responses without
+// the iss parameter from authorization servers that do support the
+// parameter" - this client can't know that on its own, so it's gated on
+// Config.RequireAuthorizationResponseIss.
+func TestHandleAuthorizationResponseRejectsMissingIssWhenRequired(t *testing.T) {
+	as := newFakeAS(t, testIssuer, false)
+	ts := httptest.NewServer(as.handler())
+	t.Cleanup(ts.Close)
+
+	cfg := validConfig(t)
+	cfg.RequireAuthorizationResponseIss = true
+	parURL, err := fapi.ParseEndpointURL(ts.URL+"/par", fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseEndpointURL(par): %v", err)
+	}
+	cfg.Endpoints.PushedAuthorizationRequest = parURL
+
+	deps := validDependencies(t)
+	deps.HTTP = ts.Client()
+
+	c, err := client.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+
+	ctx := context.Background()
+	session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}})
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+
+	q := url.Values{}
+	q.Set("state", session.Handle().String())
+	q.Set("code", "auth-code-no-iss")
+	// deliberately no "iss"
+
+	if _, err := c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: q.Encode()}); err == nil {
+		t.Fatalf("HandleAuthorizationResponse(missing iss, required) = nil error, want error")
 	}
 }
 

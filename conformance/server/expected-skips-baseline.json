@@ -1,11 +1,5 @@
 [
     {
-        "test-name": "fapi2-security-profile-final-refresh-token",
-        "variant": "*",
-        "configuration-filename": "*baseline-plan.json",
-        "comment": "Client 1 (which requests offline_access) successfully exercises the refresh flow; per FAPI2-SP-FINAL 5.3.2.1-9 this AS does not rotate refresh tokens, so the suite's own module logic skips its 'retry with the old token' sub-check for client 1 rather than failing it (FAPI2SPFinalRefreshToken.java logs 'Refresh token not rotated. Skipping lost refresh token test.'). The module then repeats against the plan's second client, which deliberately omits offline_access from its scope, so it gets no refresh token at all and the module reports its overall result as SKIPPED ('Refresh tokens cannot be tested. No refresh token was issued.') - matches the accompanying FAPIEnsureServerConfigurationDoesNotSupportRefreshToken warning in expected-warnings-baseline.json."
-    },
-    {
         "test-name": "fapi2-security-profile-final-ensure-signed-client-assertion-with-RS256-fails",
         "variant": "*",
         "configuration-filename": "*baseline-plan.json",

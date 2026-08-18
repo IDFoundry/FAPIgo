@@ -265,7 +265,7 @@ func writePlanConfig(path string, p profile, clientIDs [2]string, priv1, priv2 j
 	cfg := planConfig{Alias: p.alias}
 	cfg.Server.DiscoveryURL = "https://" + p.issuerHost + ":8443/.well-known/openid-configuration"
 	cfg.Client = planClient{ClientID: clientIDs[0], Scope: "openid accounts offline_access", JWKS: priv1, DPoPSigningAlg: "ES256"}
-	cfg.Client2 = planClient{ClientID: clientIDs[1], Scope: "openid accounts", JWKS: priv2, DPoPSigningAlg: "ES256"}
+	cfg.Client2 = planClient{ClientID: clientIDs[1], Scope: "openid accounts offline_access", JWKS: priv2, DPoPSigningAlg: "ES256"}
 	cfg.Resource.ResourceURL = "https://" + p.issuerHost + ":8443/accounts"
 	cfg.Browser = []browserBlock{consentBlock}
 	cfg.Override = map[string]overrideEntry{

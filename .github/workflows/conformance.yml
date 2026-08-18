@@ -6,7 +6,7 @@ name: Conformance
 # — this is a heavy job (bringing up the suite's own Docker stack, ~6-7
 # minutes of test execution locally, likely more on a shared runner) that
 # would otherwise slow down every PR's feedback loop. Scheduled instead,
-# a few times a week rather than daily, plus available on demand.
+# daily, plus available on demand.
 #
 # Informational only: nothing in branch protection depends on this
 # workflow, since it never runs against a PR in the first place. The
@@ -20,7 +20,7 @@ name: Conformance
 
 on:
   schedule:
-    - cron: '0 6 * * 1,3,5' # Mon/Wed/Fri, 6am UTC — a few times a week, not daily
+    - cron: '0 6 * * *' # daily, 6am UTC
   workflow_dispatch: {}
 
 permissions:

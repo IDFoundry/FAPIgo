@@ -1,5 +1,9 @@
 # FAPIgo
 
+[![CI](https://github.com/IDFoundry/FAPIgo/actions/workflows/ci.yml/badge.svg)](https://github.com/IDFoundry/FAPIgo/actions/workflows/ci.yml)
+[![FAPI 2.0 Conformance](https://github.com/IDFoundry/FAPIgo/actions/workflows/conformance.yml/badge.svg)](https://github.com/IDFoundry/FAPIgo/actions/workflows/conformance.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Hardened, separately conformant FAPI 2.0 client, authorization-server and
 resource-server engines for Go, built on one rigorously tested protocol
 core.

@@ -1,5 +1,12 @@
 # Conformance
 
+[![Conformance](https://github.com/osanderson/go-fapi/actions/workflows/conformance.yml/badge.svg)](https://github.com/osanderson/go-fapi/actions/workflows/conformance.yml)
+
+Reflects the latest scheduled/manually-triggered run of
+[`scripts/run-all.sh`](scripts/run-all.sh) in CI (see
+[`../.github/workflows/conformance.yml`](../.github/workflows/conformance.yml))
+— not a per-commit guarantee, since this doesn't run on every push/PR.
+
 Conformance testing is tracked separately per role: passing the
 authorization-server suite says nothing about client conformance, even
 where both sides use the same internal JOSE code, because the protocol

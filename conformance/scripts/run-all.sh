@@ -62,7 +62,8 @@ if [ ! -f "$CONFORMANCE_SUITE_CHECKOUT/scripts/run-test-plan.py" ]; then
 	exit 1
 fi
 
-WORKDIR="$(mktemp -d)"
+WORKDIR="${WORKDIR:-$(mktemp -d)}"
+mkdir -p "$WORKDIR"
 declare -a POLLER_PIDS=()
 RESULTS_FILE="$WORKDIR/results.txt"
 touch "$RESULTS_FILE"
@@ -93,11 +94,24 @@ trap cleanup EXIT
 
 log() { echo "[run-all] $*"; }
 
+# check_suite_reachable — polls rather than checking once: a suite
+# that was *just* started (`docker compose up -d` returns long before
+# Mongo + the Spring Boot app are actually healthy — 30-90s startup is
+# normal) shouldn't be treated the same as one that was never started
+# at all. ~2 minutes of budget, matching wait_as_ready's own pattern
+# below. This matters for CI (where the suite is brought up
+# immediately before this script runs) as much as it helps locally
+# (no more guessing how long to wait after starting the suite by
+# hand).
 check_suite_reachable() {
-	if ! curl -sk --max-time 5 -f -o /dev/null "${CONFORMANCE_SERVER}api/runner/available"; then
-		echo "error: conformance suite not reachable at $CONFORMANCE_SERVER — start it first (see conformance/server/scripts/README.md step 1)" >&2
-		exit 1
-	fi
+	for _ in $(seq 1 120); do
+		if curl -sk --max-time 5 -f -o /dev/null "${CONFORMANCE_SERVER}api/runner/available"; then
+			return 0
+		fi
+		sleep 1
+	done
+	echo "error: conformance suite not reachable at $CONFORMANCE_SERVER after 2 minutes — start it first (see conformance/server/scripts/README.md step 1)" >&2
+	exit 1
 }
 
 # wait_as_ready HOST_PORT — the AS containers take a couple seconds to

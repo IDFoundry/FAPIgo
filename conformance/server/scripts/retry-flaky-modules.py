@@ -34,10 +34,10 @@ the suite itself, never in cmd/conformance-as:
    as the answer to a request that was never a /token call in the
    first place (e.g. a GET to the resource endpoint), immediately
    followed by that same request's genuine, correct response arriving
-   right behind it. go-fapi's own error vocabulary confirms this
-   couldn't be a real go-fapi response to that request:
+   right behind it. FAPIgo's own error vocabulary confirms this
+   couldn't be a real FAPIgo response to that request:
    "invalid_grant" only exists in server/errors.go as a /token grant
-   error, never emitted by the resource endpoint. A full go-fapi code
+   error, never emitted by the resource endpoint. A full FAPIgo code
    review (server/, resource/, storage/ — every package-level and
    struct-level mutable value, plus `go test -race`) found no shared
    response state that could explain one request's bytes landing on a
@@ -170,7 +170,7 @@ def find_unexpected_modules(log_path):
     signature's own doc comments), so a FINISHED module is never retry-
     eligible - but it still needs to come back from this function so
     main() can count it as a genuine, unresolved failure. Filtering it
-    out here made a real go-fapi-baseline failure (a FINISHED module,
+    out here made a real AS-baseline failure (a FINISHED module,
     unrelated to an INTERRUPTED flake that happened to occur in the
     same run and got auto-retried) invisible to this script's own
     verdict entirely, which let RETRY_VERDICT: all_resolved fire even
@@ -219,10 +219,10 @@ def has_token_response_mismatch_signature(log):
     response" entry whose body is a /token grant error
     (error=invalid_grant) delivered as the answer to the immediately
     preceding "HTTP request" entry when that request wasn't a /token
-    call at all. go-fapi never emits invalid_grant from any endpoint
+    call at all. FAPIgo never emits invalid_grant from any endpoint
     but /token (grep server/errors.go), so this pairing is only
     possible if the suite's own HTTP client matched a stale response to
-    the wrong request — never a real go-fapi response to the request it
+    the wrong request — never a real FAPIgo response to the request it
     was actually paired with."""
     pending_request_uri = None
     for entry in log:

@@ -1,4 +1,4 @@
-# go-fapi
+# FAPIgo
 
 Hardened, separately conformant FAPI 2.0 client, authorization-server and
 resource-server engines for Go, built on one rigorously tested protocol

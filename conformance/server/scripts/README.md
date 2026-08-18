@@ -258,7 +258,7 @@ pip install -r <suite-checkout>/scripts/requirements.txt   # one-time: httpx, py
 cd <suite-checkout>
 ./scripts/run-test-plan.py \
   'fapi2-security-profile-final-test-plan[client_auth_type=private_key_jwt][sender_constrain=dpop][fapi_profile=plain_fapi][openid=openid_connect]' \
-  /path/to/go-fapi/conformance/server/oidf-config/baseline-plan.json
+  /path/to/FAPIgo/conformance/server/oidf-config/baseline-plan.json
 ```
 
 With no `CONFORMANCE_SERVER` env var, it defaults to
@@ -279,7 +279,7 @@ the plan:
 
 ```
 ./scripts/run-test-plan.py '<plan>[...]' <config.json> &
-/path/to/go-fapi/conformance/server/scripts/unblock-implicit-callback.py <planId>
+/path/to/FAPIgo/conformance/server/scripts/unblock-implicit-callback.py <planId>
 ```
 
 `<planId>` is printed by `run-test-plan.py` itself ("Created test plan,
@@ -348,10 +348,10 @@ out the simpler approaches first.
 
 ```
 ./scripts/run-test-plan.py \
-  --expected-failures-file /path/to/go-fapi/conformance/server/expected-warnings-baseline.json \
-  --expected-skips-file /path/to/go-fapi/conformance/server/expected-skips-baseline.json \
+  --expected-failures-file /path/to/FAPIgo/conformance/server/expected-warnings-baseline.json \
+  --expected-skips-file /path/to/FAPIgo/conformance/server/expected-skips-baseline.json \
   'fapi2-security-profile-final-test-plan[...]' \
-  /path/to/go-fapi/conformance/server/oidf-config/baseline-plan.json
+  /path/to/FAPIgo/conformance/server/oidf-config/baseline-plan.json
 ```
 
 If a run turns up a *new* warning or failure, don't add it here reflexively —
@@ -384,9 +384,9 @@ command:
   --expected-failures-file /path/to/expected-warnings-combined.json \
   --expected-skips-file /path/to/expected-skips-combined.json \
   'fapi2-security-profile-final-test-plan[client_auth_type=private_key_jwt][sender_constrain=dpop][fapi_profile=plain_fapi][openid=openid_connect]' \
-  /path/to/go-fapi/conformance/server/oidf-config/baseline-plan.json \
+  /path/to/FAPIgo/conformance/server/oidf-config/baseline-plan.json \
   'fapi2-message-signing-final-test-plan[client_auth_type=private_key_jwt][sender_constrain=dpop][fapi_profile=plain_fapi][openid=openid_connect][fapi_request_method=signed_non_repudiation][fapi_response_mode=jarm]' \
-  /path/to/go-fapi/conformance/server/oidf-config/message-signing-plan.json
+  /path/to/FAPIgo/conformance/server/oidf-config/message-signing-plan.json
 ```
 
 `--expected-failures-file`/`--expected-skips-file` each take only one

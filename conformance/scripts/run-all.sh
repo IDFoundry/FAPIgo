@@ -28,21 +28,28 @@
 #   ./conformance/scripts/run-all.sh
 #
 # A clean "UNEXPECTED RESULTS" on an AS suite doesn't necessarily mean
-# an AS regression — check the module names in the linked log first.
-# One category is already known, understood, and NOT (yet) added to
-# expected-warnings-*.json: occasional, non-deterministic timing races
-# on multi-client/multi-step modules (a stray token-endpoint 4xx, a
-# module receiving another module's stray callback) when the poller
-# happens to move faster than the suite's own internal state machine
-# expects. This has never been traced to a real protocol violation by
-# cmd/conformance-as - see unblock-implicit-callback.py's own doc
-# comment for the full detail.
+# an AS regression — check the module names in the linked log first,
+# and check for a "(N module auto-retried — known suite-browser flake"
+# note next to that suite's result. One category of failure is already
+# known, understood, and auto-retried rather than added to
+# expected-warnings-*.json: an abandoned module's page can be left
+# loaded in the suite's own HtmlUnit browser driver, whose JS keeps
+# running in the background and eventually fires a stale implicit-
+# submit callback that lands on whichever module currently owns the
+# shared alias — see retry-flaky-modules.py's own doc comment for the
+# full forensic detail (confirmed via direct MongoDB analysis, not
+# guessed) on why this is entirely a suite-internal race, never traced
+# to a real protocol violation by cmd/conformance-as. Every occurrence
+# gets exactly one automatic, narrowly-targeted retry (see run_as_plan
+# below); a genuine, unrelated failure sitting alongside a flaky one
+# always leaves the run reported as UNEXPECTED RESULTS on purpose.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SERVER_DIR="$REPO_ROOT/conformance/server"
 POLLER="$SERVER_DIR/scripts/unblock-implicit-callback.py"
+RETRY_FLAKY="$SERVER_DIR/scripts/retry-flaky-modules.py"
 CONFORMANCE_SERVER="${CONFORMANCE_SERVER:-https://localhost.emobix.co.uk:8443/}"
 
 : "${CONFORMANCE_SUITE_CHECKOUT:?Set CONFORMANCE_SUITE_CHECKOUT to your local OIDF conformance-suite checkout — see conformance/server/scripts/README.md step 1}"
@@ -150,14 +157,37 @@ run_as_plan() {
 
 	wait "$runner_pid" && exit_code=0 || exit_code=$?
 
-	local totals
+	local totals retry_note=""
 	totals="$(grep 'Overall totals' "$log_file" | tail -1)" || true
+
+	# On a non-clean run, check whether every module run-test-plan.py
+	# flagged is exactly the known suite-internal browser-JS flake (see
+	# retry-flaky-modules.py's own doc comment) before ever touching the
+	# reported verdict — a genuine, unrelated failure sitting alongside
+	# a flaky one always leaves it alone. The poller started above is
+	# still running at this point (it isn't killed until this whole
+	# script exits, not per-suite), which is what lets a freshly
+	# created retry instance get its own browser interaction driven
+	# automatically, the same as every other module in the plan.
+	if [ "$exit_code" -ne 0 ] && [ -n "$plan_id" ]; then
+		local retry_log="$WORKDIR/as-$name-retry.log"
+		python3 "$RETRY_FLAKY" "$plan_id" "$log_file" >"$retry_log" 2>&1 || true
+		if grep -q 'RETRY_VERDICT: all_resolved' "$retry_log"; then
+			exit_code=0
+			local retried_count
+			retried_count="$(grep -oE '[0-9]+ resolved' "$retry_log" | tail -1 | awk '{print $1}')" || true
+			retry_note=" (${retried_count:-1} module auto-retried — known suite-browser flake, see $retry_log)"
+		else
+			retry_note=" (auto-retry did not fully resolve this — see $retry_log)"
+		fi
+	fi
+
 	if [ "$exit_code" -eq 0 ] && [ -n "$totals" ]; then
-		record_result "AS $name" "OK — ${totals#*Overall totals: }"
+		record_result "AS $name" "OK — ${totals#*Overall totals: }${retry_note}"
 	else
 		OVERALL_CLEAN=false
 		if [ -n "$totals" ]; then
-			record_result "AS $name" "UNEXPECTED RESULTS — ${totals#*Overall totals: } (see $log_file)"
+			record_result "AS $name" "UNEXPECTED RESULTS — ${totals#*Overall totals: }${retry_note} (see $log_file)"
 		else
 			record_result "AS $name" "DID NOT COMPLETE (see $log_file)"
 		fi

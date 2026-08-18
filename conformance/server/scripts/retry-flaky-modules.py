@@ -1,0 +1,261 @@
+#!/usr/bin/env python3
+"""Detects and automatically retries the one known, non-deterministic
+flake in AS-side conformance runs, so a transient suite-internal race
+doesn't need a full run-all.sh re-run (or, worse, get mistaken for an
+AS regression) every time it happens.
+
+The flake, confirmed via direct MongoDB forensics against this
+session's own run history (see git log for the investigation): a
+module gets abandoned (times out, or is interrupted for some unrelated
+reason) while its page is still loaded in the suite's own HtmlUnit
+browser driver. That driver isn't torn down instantly, so its JS keeps
+running in the background — and the page's residual implicit-submit
+xhr.send() eventually fires anyway, sometimes hundreds of milliseconds
+to seconds later. Since every module in a plan shares one alias/
+callback route, that stale POST lands on whichever module currently
+owns the alias, however unrelated: "Got an HTTP request ... that
+wasn't expected" interrupts it, and then that module's own legitimate
+(but now-late) implicit-submit arrives right behind it, hitting an
+already-interrupted module: "Illegal test state change". Neither
+event originates in unblock-implicit-callback.py (confirmed: it always
+re-checks an instance's live status before ever touching its log, so
+it structurally cannot submit on behalf of an instance that's already
+gone) or in cmd/conformance-as — this is orphaned browser JS inside
+the suite's own JVM, completely outside what either can reach or
+cancel. Every occurrence across this whole session's history has
+passed cleanly on a full re-run.
+
+This script parses run-test-plan.py's own verbose stdout (the log file
+run-all.sh already captures) for modules it flagged with "Unexpected
+failure:" whose status was INTERRUPTED, confirms each one's own event
+log carries the exact two-part signature above (deliberately narrow —
+this only ever retries a module whose failure looks EXACTLY like this
+known, understood race, never a module that failed for any other
+reason), and for each confirmed match, creates a fresh instance of
+that same module (POST /api/runner, the same call run-test-plan.py
+itself makes) inside the same plan.
+
+Relies entirely on unblock-implicit-callback.py already being alive
+against this plan_id — a newly created instance shows up in the
+plan's own modules[].instances list automatically (confirmed live),
+which is exactly what that poller already watches, so it picks up and
+drives the retry's own browser interaction the same way it does every
+other module. This script only creates the retry and polls its
+outcome; it does no browser-interaction work of its own.
+
+Usage:
+    retry-flaky-modules.py <planId> <run-test-plan.py log file>
+
+Prints one final line — "RETRY_VERDICT: all_resolved", "partial", or
+"none" — plus a human-readable summary. run-all.sh greps that line to
+decide whether to upgrade an "UNEXPECTED RESULTS" verdict to OK.
+"all_resolved" only fires when EVERY module run-test-plan.py flagged
+unexpected was both status=INTERRUPTED and matched the exact flake
+signature, and every one of their retries passed — a genuine, unrelated
+failure sitting alongside a flaky one always leaves the verdict
+unresolved, on purpose.
+"""
+import http.client
+import json
+import os
+import re
+import ssl
+import sys
+import time
+from urllib.parse import quote, urlsplit
+
+CONFORMANCE_SERVER = os.environ.get("CONFORMANCE_SERVER", "https://localhost.emobix.co.uk:8443/")
+_parsed = urlsplit(CONFORMANCE_SERVER)
+HOST = _parsed.hostname
+PORT = _parsed.port or 8443
+CTX = ssl._create_unverified_context()
+
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+TEST_LINE_RE = re.compile(r"^Test \[(\d+):(\d+)\] (\S+) (\S+) (\S+) - result (\S+)\.")
+
+RETRY_POLL_TIMEOUT_SECONDS = 60
+RETRY_POLL_INTERVAL_SECONDS = 1
+
+
+class KeepAliveClient:
+    """Same minimal keep-alive HTTPS client as unblock-implicit-callback.py
+    — small enough, and specific enough to this poll-heavy use, that
+    sharing it via an import felt like more coupling than it's worth
+    between two independently-runnable scripts."""
+
+    def __init__(self):
+        self.conn = None
+
+    def _ensure(self):
+        if self.conn is None:
+            self.conn = http.client.HTTPSConnection(HOST, PORT, context=CTX, timeout=10)
+
+    def get_json(self, path):
+        for attempt in range(2):
+            try:
+                self._ensure()
+                self.conn.request("GET", path)
+                resp = self.conn.getresponse()
+                body = resp.read()
+                if resp.status != 200:
+                    raise RuntimeError(f"GET {path} -> {resp.status}")
+                return json.loads(body)
+            except Exception:
+                self.conn = None
+                if attempt == 1:
+                    raise
+
+    def post(self, path):
+        for attempt in range(2):
+            try:
+                self._ensure()
+                self.conn.request("POST", path)
+                resp = self.conn.getresponse()
+                body = resp.read()
+                return resp.status, body
+            except Exception:
+                self.conn = None
+                if attempt == 1:
+                    raise
+
+
+def strip_ansi(s):
+    return ANSI_RE.sub("", s)
+
+
+def find_unexpected_interrupted_modules(log_path):
+    """Parses run-test-plan.py's own verbose stdout for modules whose
+    printed "Test [...]" line shows status INTERRUPTED and are
+    immediately followed by its own "Unexpected failure:" marker —
+    i.e. exactly the modules run-test-plan.py itself considers
+    responsible for its non-zero exit code, narrowed to the ones whose
+    status alone already looks like this specific flake rather than a
+    normal completed-but-failing module."""
+    candidates = []
+    last = None
+    with open(log_path) as f:
+        for raw in f:
+            line = strip_ansi(raw).rstrip("\n")
+            m = TEST_LINE_RE.match(line)
+            if m:
+                _plan_n, _mod_n, test_name, module_id, status, _result = m.groups()
+                last = (module_id, test_name, status)
+                continue
+            if line.strip() == "Unexpected failure:" and last is not None:
+                candidates.append(last)
+                last = None
+    return [(mid, name) for mid, name, status in candidates if status == "INTERRUPTED"]
+
+
+def has_flake_signature(log):
+    """log is the module's own /api/log/{id} entries. The exact,
+    deliberately narrow fingerprint: an unexpected-HTTP-request
+    interruption followed later by an illegal-state-change failure —
+    see this file's own doc comment for why each half is what it is."""
+    saw_unexpected_request = any(
+        "that wasn't expected" in e.get("msg", "") for e in log
+    )
+    saw_illegal_state_change = any(
+        e.get("msg", "").startswith("Illegal test state change") for e in log
+    )
+    return saw_unexpected_request and saw_illegal_state_change
+
+
+def find_module_variant(plan, module_id):
+    for module in plan.get("modules", []):
+        for inst in module.get("instances", []):
+            inst_id = inst[0] if isinstance(inst, list) else inst
+            if inst_id == module_id:
+                return module.get("testModule"), module.get("variant", {})
+    return None, None
+
+
+def main():
+    if len(sys.argv) != 3:
+        print("usage: retry-flaky-modules.py <planId> <run-test-plan.py log file>", file=sys.stderr)
+        sys.exit(2)
+    plan_id, log_path = sys.argv[1], sys.argv[2]
+
+    candidates = find_unexpected_interrupted_modules(log_path)
+    if not candidates:
+        print("retry-flaky-modules: no INTERRUPTED modules with an unexpected-failure marker found", flush=True)
+        print("RETRY_VERDICT: none", flush=True)
+        return
+
+    client = KeepAliveClient()
+    try:
+        plan = client.get_json(f"/api/plan/{plan_id}")
+    except Exception as e:
+        print(f"retry-flaky-modules: failed to fetch plan {plan_id}: {e}", flush=True)
+        print("RETRY_VERDICT: none", flush=True)
+        return
+
+    retries = []  # (old_module_id, test_name, new_instance_id)
+    non_matching = []
+    for module_id, test_name in candidates:
+        try:
+            log = client.get_json(f"/api/log/{module_id}")
+        except Exception as e:
+            print(f"retry-flaky-modules: {test_name} {module_id}: could not fetch log: {e}", flush=True)
+            non_matching.append((module_id, test_name))
+            continue
+
+        if not has_flake_signature(log):
+            print(f"retry-flaky-modules: {test_name} {module_id} is INTERRUPTED but doesn't match the known flake signature — leaving as a real failure", flush=True)
+            non_matching.append((module_id, test_name))
+            continue
+
+        test_module, variant = find_module_variant(plan, module_id)
+        if test_module is None:
+            print(f"retry-flaky-modules: {test_name} {module_id}: couldn't find its module entry in plan {plan_id}", flush=True)
+            non_matching.append((module_id, test_name))
+            continue
+
+        variant_qs = quote(json.dumps(variant))
+        try:
+            status, body = client.post(f"/api/runner?test={quote(test_module)}&plan={plan_id}&variant={variant_qs}")
+            if status != 201:
+                raise RuntimeError(f"POST /api/runner -> {status}: {body!r}")
+            new_id = json.loads(body)["id"]
+        except Exception as e:
+            print(f"retry-flaky-modules: {test_name} {module_id}: failed to create retry: {e}", flush=True)
+            non_matching.append((module_id, test_name))
+            continue
+
+        print(f"retry-flaky-modules: {test_name} {module_id} matches the known flake signature — retrying as {new_id}", flush=True)
+        retries.append((module_id, test_name, new_id))
+
+    resolved = []
+    unresolved = []
+    for old_id, test_name, new_id in retries:
+        deadline = time.monotonic() + RETRY_POLL_TIMEOUT_SECONDS
+        result = None
+        while time.monotonic() < deadline:
+            try:
+                info = client.get_json(f"/api/info/{new_id}")
+            except Exception:
+                time.sleep(RETRY_POLL_INTERVAL_SECONDS)
+                continue
+            if info.get("status") in ("FINISHED", "INTERRUPTED"):
+                result = info.get("result")
+                break
+            time.sleep(RETRY_POLL_INTERVAL_SECONDS)
+
+        if result == "PASSED":
+            print(f"retry-flaky-modules: {test_name} retry {new_id} -> PASSED", flush=True)
+            resolved.append((old_id, test_name, new_id))
+        else:
+            print(f"retry-flaky-modules: {test_name} retry {new_id} -> {result or 'TIMED OUT waiting for it to finish'}", flush=True)
+            unresolved.append((old_id, test_name, new_id))
+
+    print(flush=True)
+    print(f"retry-flaky-modules: {len(resolved)} resolved, {len(unresolved)} still unresolved, {len(non_matching)} not a flake match", flush=True)
+
+    if non_matching or unresolved:
+        print("RETRY_VERDICT: partial", flush=True)
+    else:
+        print("RETRY_VERDICT: all_resolved", flush=True)
+
+
+if __name__ == "__main__":
+    main()

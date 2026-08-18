@@ -158,15 +158,25 @@ def strip_ansi(s):
     return ANSI_RE.sub("", s)
 
 
-def find_unexpected_interrupted_modules(log_path):
-    """Parses run-test-plan.py's own verbose stdout for modules whose
-    printed "Test [...]" line shows status INTERRUPTED and are
-    immediately followed by its own "Unexpected failure:" marker —
-    i.e. exactly the modules run-test-plan.py itself considers
-    responsible for its non-zero exit code, narrowed to the ones whose
-    status alone already looks like this specific flake rather than a
-    normal completed-but-failing module."""
-    candidates = []
+def find_unexpected_modules(log_path):
+    """Parses run-test-plan.py's own verbose stdout for EVERY module
+    whose printed "Test [...]" line is immediately followed by its own
+    "Unexpected failure:" marker — i.e. every module run-test-plan.py
+    itself considers responsible for its non-zero exit code, regardless
+    of status. Deliberately does not filter to INTERRUPTED here (that
+    used to happen in this function, and was a real bug - see git
+    history): both known flakes are specifically INTERRUPTED-state
+    races (see has_flake_signature / has_token_response_mismatch_
+    signature's own doc comments), so a FINISHED module is never retry-
+    eligible - but it still needs to come back from this function so
+    main() can count it as a genuine, unresolved failure. Filtering it
+    out here made a real go-fapi-baseline failure (a FINISHED module,
+    unrelated to an INTERRUPTED flake that happened to occur in the
+    same run and got auto-retried) invisible to this script's own
+    verdict entirely, which let RETRY_VERDICT: all_resolved fire even
+    though a genuine failure was still sitting right there - confirmed
+    live against a real run."""
+    modules = []
     last = None
     with open(log_path) as f:
         for raw in f:
@@ -184,9 +194,9 @@ def find_unexpected_interrupted_modules(log_path):
                 last = (module_id, test_name, status)
                 continue
             if UNEXPECTED_FAILURE_LINE_RE.match(line) and last is not None:
-                candidates.append(last)
+                modules.append(last)
                 last = None
-    return [(mid, name) for mid, name, status in candidates if status == "INTERRUPTED"]
+    return modules
 
 
 def has_flake_signature(log):
@@ -246,10 +256,27 @@ def main():
         sys.exit(2)
     plan_id, log_path = sys.argv[1], sys.argv[2]
 
-    candidates = find_unexpected_interrupted_modules(log_path)
-    if not candidates:
-        print("retry-flaky-modules: no INTERRUPTED modules with an unexpected-failure marker found", flush=True)
+    modules = find_unexpected_modules(log_path)
+    if not modules:
+        print("retry-flaky-modules: no modules with an unexpected-failure marker found", flush=True)
         print("RETRY_VERDICT: none", flush=True)
+        return
+
+    candidates = [(mid, name) for mid, name, status in modules if status == "INTERRUPTED"]
+    # Never retry-eligible (see find_unexpected_modules' own doc
+    # comment on why this function stopped filtering these out) — each
+    # one goes straight into non_matching so the final verdict can
+    # never claim all_resolved while one of these is still unaccounted
+    # for.
+    non_matching = []
+    for module_id, test_name, status in modules:
+        if status != "INTERRUPTED":
+            print(f"retry-flaky-modules: {test_name} {module_id} is {status} (not INTERRUPTED) — never retry-eligible, leaving as a real failure", flush=True)
+            non_matching.append((module_id, test_name))
+
+    if not candidates:
+        print(f"retry-flaky-modules: 0 resolved, 0 still unresolved, {len(non_matching)} not a flake match", flush=True)
+        print("RETRY_VERDICT: partial" if non_matching else "RETRY_VERDICT: none", flush=True)
         return
 
     client = KeepAliveClient()
@@ -257,11 +284,12 @@ def main():
         plan = client.get_json(f"/api/plan/{plan_id}")
     except Exception as e:
         print(f"retry-flaky-modules: failed to fetch plan {plan_id}: {e}", flush=True)
-        print("RETRY_VERDICT: none", flush=True)
+        non_matching.extend(candidates)
+        print(f"retry-flaky-modules: 0 resolved, 0 still unresolved, {len(non_matching)} not a flake match", flush=True)
+        print("RETRY_VERDICT: partial", flush=True)
         return
 
     retries = []  # (old_module_id, test_name, new_instance_id)
-    non_matching = []
     for module_id, test_name in candidates:
         try:
             log = client.get_json(f"/api/log/{module_id}")

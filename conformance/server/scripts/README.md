@@ -19,12 +19,14 @@ Foundation conformance suite and collect results.
   JS that would otherwise unblock a waiting module.
 - `retry-flaky-modules.py` — `conformance/scripts/run-all.sh` runs this
   automatically after any non-clean AS suite; not something you invoke
-  by hand. Detects and auto-retries the one known, non-deterministic
-  suite-internal race (a stale implicit-submit callback from an
-  already-abandoned module landing on the current alias owner) so it
-  doesn't need a full re-run, or get mistaken for an AS regression,
-  every time it happens — see its own doc comment for the full
-  forensic detail on why this is entirely a suite-internal race.
+  by hand. Detects and auto-retries two known, non-deterministic
+  suite-internal races so neither needs a full re-run, or gets mistaken
+  for an AS regression, every time it happens: a stale implicit-submit
+  callback from an already-abandoned module landing on the current
+  alias owner, and a stale HTTP response (a /token grant error)
+  delivered as the answer to an unrelated request on a GitHub Actions
+  runner — see its own doc comment for the full forensic detail on why
+  each is entirely a suite-internal race, never traced to cmd/conformance-as.
 
 Everything runs via `../docker-compose.yml`, entirely locally — no
 tunnel (ngrok etc.) required. That also makes this the same shape a

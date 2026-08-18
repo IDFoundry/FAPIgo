@@ -1,39 +1,62 @@
 #!/usr/bin/env python3
-"""Detects and automatically retries the one known, non-deterministic
-flake in AS-side conformance runs, so a transient suite-internal race
-doesn't need a full run-all.sh re-run (or, worse, get mistaken for an
-AS regression) every time it happens.
+"""Detects and automatically retries known, non-deterministic flakes in
+AS-side conformance runs, so a transient suite-internal race doesn't
+need a full run-all.sh re-run (or, worse, get mistaken for an AS
+regression) every time it happens.
 
-The flake, confirmed via direct MongoDB forensics against this
-session's own run history (see git log for the investigation): a
-module gets abandoned (times out, or is interrupted for some unrelated
-reason) while its page is still loaded in the suite's own HtmlUnit
-browser driver. That driver isn't torn down instantly, so its JS keeps
-running in the background — and the page's residual implicit-submit
-xhr.send() eventually fires anyway, sometimes hundreds of milliseconds
-to seconds later. Since every module in a plan shares one alias/
-callback route, that stale POST lands on whichever module currently
-owns the alias, however unrelated: "Got an HTTP request ... that
-wasn't expected" interrupts it, and then that module's own legitimate
-(but now-late) implicit-submit arrives right behind it, hitting an
-already-interrupted module: "Illegal test state change". Neither
-event originates in unblock-implicit-callback.py (confirmed: it always
-re-checks an instance's live status before ever touching its log, so
-it structurally cannot submit on behalf of an instance that's already
-gone) or in cmd/conformance-as — this is orphaned browser JS inside
-the suite's own JVM, completely outside what either can reach or
-cancel. Every occurrence across this whole session's history has
+Two distinct flakes are known so far, both confirmed to originate in
+the suite itself, never in cmd/conformance-as:
+
+1. Stale implicit-submit browser JS. Confirmed via direct MongoDB
+   forensics against this session's own run history (see git log for
+   the investigation): a module gets abandoned (times out, or is
+   interrupted for some unrelated reason) while its page is still
+   loaded in the suite's own HtmlUnit browser driver. That driver
+   isn't torn down instantly, so its JS keeps running in the
+   background — and the page's residual implicit-submit xhr.send()
+   eventually fires anyway, sometimes hundreds of milliseconds to
+   seconds later. Since every module in a plan shares one alias/
+   callback route, that stale POST lands on whichever module currently
+   owns the alias, however unrelated: "Got an HTTP request ... that
+   wasn't expected" interrupts it, and then that module's own
+   legitimate (but now-late) implicit-submit arrives right behind it,
+   hitting an already-interrupted module: "Illegal test state change".
+   Neither event originates in unblock-implicit-callback.py (confirmed:
+   it always re-checks an instance's live status before ever touching
+   its log, so it structurally cannot submit on behalf of an instance
+   that's already gone).
+
+2. Stale HTTP response delivered for the wrong request. Confirmed live
+   against a captured as-<name>-<id>-log.json (see run-all.sh's own
+   dump-on-INTERRUPTED diagnostic): a module's HTTP client received a
+   /token-shaped error body — {"error":"invalid_grant",
+   "error_description":"code is invalid, expired, or already used"} —
+   as the answer to a request that was never a /token call in the
+   first place (e.g. a GET to the resource endpoint), immediately
+   followed by that same request's genuine, correct response arriving
+   right behind it. go-fapi's own error vocabulary confirms this
+   couldn't be a real go-fapi response to that request:
+   "invalid_grant" only exists in server/errors.go as a /token grant
+   error, never emitted by the resource endpoint. A full go-fapi code
+   review (server/, resource/, storage/ — every package-level and
+   struct-level mutable value, plus `go test -race`) found no shared
+   response state that could explain one request's bytes landing on a
+   different one; this is a connection-reuse/response-matching
+   artifact in the suite's own HTTP client, only observed so far on a
+   GitHub Actions runner, never locally.
+
+Every occurrence of either flake across this session's history has
 passed cleanly on a full re-run.
 
 This script parses run-test-plan.py's own verbose stdout (the log file
 run-all.sh already captures) for modules it flagged with "Unexpected
 failure:" whose status was INTERRUPTED, confirms each one's own event
-log carries the exact two-part signature above (deliberately narrow —
-this only ever retries a module whose failure looks EXACTLY like this
-known, understood race, never a module that failed for any other
-reason), and for each confirmed match, creates a fresh instance of
-that same module (POST /api/runner, the same call run-test-plan.py
-itself makes) inside the same plan.
+log carries the exact signature of one of the two flakes above
+(deliberately narrow — this only ever retries a module whose failure
+looks EXACTLY like a known, understood race, never a module that
+failed for any other reason), and for each confirmed match, creates a
+fresh instance of that same module (POST /api/runner, the same call
+run-test-plan.py itself makes) inside the same plan.
 
 Relies entirely on unblock-implicit-callback.py already being alive
 against this plan_id — a newly created instance shows up in the
@@ -172,6 +195,34 @@ def has_flake_signature(log):
     return saw_unexpected_request and saw_illegal_state_change
 
 
+def has_token_response_mismatch_signature(log):
+    """log is the module's own /api/log/{id} entries. Fingerprint for
+    the second known flake (see this file's own doc comment): an "HTTP
+    response" entry whose body is a /token grant error
+    (error=invalid_grant) delivered as the answer to the immediately
+    preceding "HTTP request" entry when that request wasn't a /token
+    call at all. go-fapi never emits invalid_grant from any endpoint
+    but /token (grep server/errors.go), so this pairing is only
+    possible if the suite's own HTTP client matched a stale response to
+    the wrong request — never a real go-fapi response to the request it
+    was actually paired with."""
+    pending_request_uri = None
+    for entry in log:
+        msg = entry.get("msg")
+        if msg == "HTTP request":
+            pending_request_uri = entry.get("request_uri", "")
+            continue
+        if msg == "HTTP response" and pending_request_uri is not None:
+            try:
+                body = json.loads(entry.get("response_body") or "")
+            except (TypeError, ValueError):
+                body = {}
+            if not pending_request_uri.rstrip("/").endswith("/token") and body.get("error") == "invalid_grant":
+                return True
+            pending_request_uri = None
+    return False
+
+
 def find_module_variant(plan, module_id):
     for module in plan.get("modules", []):
         for inst in module.get("instances", []):
@@ -211,8 +262,9 @@ def main():
             non_matching.append((module_id, test_name))
             continue
 
-        if not has_flake_signature(log):
-            print(f"retry-flaky-modules: {test_name} {module_id} is INTERRUPTED but doesn't match the known flake signature — leaving as a real failure", flush=True)
+        matched_flake = has_flake_signature(log) or has_token_response_mismatch_signature(log)
+        if not matched_flake:
+            print(f"retry-flaky-modules: {test_name} {module_id} is INTERRUPTED but doesn't match a known flake signature — leaving as a real failure", flush=True)
             non_matching.append((module_id, test_name))
             continue
 
@@ -233,7 +285,7 @@ def main():
             non_matching.append((module_id, test_name))
             continue
 
-        print(f"retry-flaky-modules: {test_name} {module_id} matches the known flake signature — retrying as {new_id}", flush=True)
+        print(f"retry-flaky-modules: {test_name} {module_id} matches a known flake signature — retrying as {new_id}", flush=True)
         retries.append((module_id, test_name, new_id))
 
     resolved = []

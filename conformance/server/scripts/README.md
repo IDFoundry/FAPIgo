@@ -299,9 +299,9 @@ generic empty-body POST can't fully emulate).
 which non-`PASSED` results are expected, so it only exits non-zero for
 genuinely new regressions — the same mechanism OIDF's own CI uses
 (`.gitlab-ci/expected-failures-fapi.json` in the suite checkout; our
-two entries mirror two of theirs almost verbatim — Authlete, OIDF's own
-reference AS, hits the identical warnings for the identical reasons).
-Currently covers:
+`attempt-reuse-authorization-code-after-one-second` entry mirrors one
+of theirs almost verbatim — Authlete, OIDF's own reference AS, hits the
+identical warning for the identical reason). Currently covers:
 - `attempt-reuse-authorization-code-after-one-second`'s
   `EnsureHttpStatusCodeIs4xx` warning — this AS's access tokens are
   stateless, self-verifying JWTs (see `resource/verify.go`), so there's
@@ -309,15 +309,20 @@ Currently covers:
   §4.1.2's "should revoke on detected code reuse" is a `SHOULD`, and the
   suite's own module text confirms not implementing it won't block
   certification.
-- `refresh-token`'s `FAPIEnsureServerConfigurationDoesNotSupportRefreshToken`
-  warning and `SKIPPED` result — this variant's granted scope excludes
-  `offline_access`, so no refresh token is issued; explicitly acceptable
-  server policy per the suite's own message.
 - `ensure-signed-client-assertion-with-RS256-fails`'s `SKIPPED` result —
   deterministic, not a flake: this test needs an RSA client key to sign
   an RS256 assertion, and this AS's clients are ES256-only by design (no
   RSA/PS256 support anywhere in the algorithm policy). The suite's own
   skip message confirms this doesn't block certification.
+
+Both plans' `client2` block requests `offline_access` alongside
+`client`'s — `refresh-token` drives its own cross-client
+refresh-token-binding check (client 1 must be rejected redeeming a
+token issued to client 2) using client 2's own refresh token, which
+only gets issued if client 2 actually has that scope; without it, the
+module can't reach that check at all and reports `SKIPPED` instead of
+running it (this used to be this file's third `expected-skips` entry,
+before `client2`'s scope was corrected to include it).
 
 ```
 ./scripts/run-test-plan.py \

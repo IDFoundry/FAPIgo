@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/osanderson/go-fapi/internal/dpop"
-	"github.com/osanderson/go-fapi/internal/token"
-	"github.com/osanderson/go-fapi/keys"
+	"github.com/idfoundry/fapigo/internal/dpop"
+	"github.com/idfoundry/fapigo/internal/token"
+	"github.com/idfoundry/fapigo/keys"
 )
 
 // VerifyRequest describes one incoming request to verify: the HTTP

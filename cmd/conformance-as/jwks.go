@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/osanderson/go-fapi/server"
+	"github.com/idfoundry/fapigo/server"
 )
 
 // jwksHandler serves this authorization server's own published keys.

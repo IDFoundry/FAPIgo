@@ -10,13 +10,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/osanderson/go-fapi/extension"
-	"github.com/osanderson/go-fapi/internal/clientassertion"
-	"github.com/osanderson/go-fapi/internal/par"
-	"github.com/osanderson/go-fapi/internal/pkce"
-	"github.com/osanderson/go-fapi/internal/requestobject"
-	"github.com/osanderson/go-fapi/keys"
-	"github.com/osanderson/go-fapi/storage"
+	"github.com/idfoundry/fapigo/extension"
+	"github.com/idfoundry/fapigo/internal/clientassertion"
+	"github.com/idfoundry/fapigo/internal/par"
+	"github.com/idfoundry/fapigo/internal/pkce"
+	"github.com/idfoundry/fapigo/internal/requestobject"
+	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // BeginAuthorizationRequest is the input to Client.BeginAuthorization.

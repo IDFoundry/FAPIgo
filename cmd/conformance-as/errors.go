@@ -3,8 +3,8 @@ package main
 import (
 	"net/http"
 
-	"github.com/osanderson/go-fapi/internal/par"
-	"github.com/osanderson/go-fapi/server"
+	"github.com/idfoundry/fapigo/internal/par"
+	"github.com/idfoundry/fapigo/server"
 )
 
 // writeOAuthJSONError translates err into an OAuth JSON error response

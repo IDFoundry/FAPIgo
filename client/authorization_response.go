@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/osanderson/go-fapi/internal/jarm"
-	"github.com/osanderson/go-fapi/internal/par"
-	"github.com/osanderson/go-fapi/keys"
-	"github.com/osanderson/go-fapi/storage"
+	"github.com/idfoundry/fapigo/internal/jarm"
+	"github.com/idfoundry/fapigo/internal/par"
+	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // AuthorizationCallback is the input to Client.HandleAuthorizationResponse

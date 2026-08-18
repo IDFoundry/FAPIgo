@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
-	fapi "github.com/osanderson/go-fapi"
+	fapi "github.com/idfoundry/fapigo"
 )
 
 // NewAuthorizationCode is what CreateAuthorizationCode persists for one

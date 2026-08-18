@@ -5,7 +5,7 @@ import (
 	"crypto/sha256"
 	"time"
 
-	"github.com/osanderson/go-fapi/storage"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // clientAssertionReplayNamespace, requestObjectReplayNamespace and

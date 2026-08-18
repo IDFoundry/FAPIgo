@@ -7,8 +7,8 @@ import (
 	"net/url"
 	"strings"
 
-	fapi "github.com/osanderson/go-fapi"
-	"github.com/osanderson/go-fapi/storage"
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // AuthorizationResult is a closed sum type returned by

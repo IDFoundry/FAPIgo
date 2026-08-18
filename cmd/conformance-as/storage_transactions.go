@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/osanderson/go-fapi/storage"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // inMemoryTransactionStore is an in-memory storage.TransactionStore.

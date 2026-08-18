@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	fapi "github.com/osanderson/go-fapi"
-	"github.com/osanderson/go-fapi/internal/jose"
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/jose"
 )
 
 func baseAccessTokenParams(key crypto.Signer, now time.Time, lifetime time.Duration) AccessTokenParams {

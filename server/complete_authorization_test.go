@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	fapi "github.com/osanderson/go-fapi"
-	"github.com/osanderson/go-fapi/internal/clientassertion"
-	"github.com/osanderson/go-fapi/internal/jarm"
-	"github.com/osanderson/go-fapi/server"
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/clientassertion"
+	"github.com/idfoundry/fapigo/internal/jarm"
+	"github.com/idfoundry/fapigo/server"
 )
 
 func beginInteraction(t *testing.T, h harness) server.InteractionHandle {

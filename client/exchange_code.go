@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
-	fapi "github.com/osanderson/go-fapi"
-	"github.com/osanderson/go-fapi/internal/clientassertion"
-	"github.com/osanderson/go-fapi/internal/dpop"
-	"github.com/osanderson/go-fapi/internal/par"
-	"github.com/osanderson/go-fapi/internal/token"
-	"github.com/osanderson/go-fapi/keys"
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/clientassertion"
+	"github.com/idfoundry/fapigo/internal/dpop"
+	"github.com/idfoundry/fapigo/internal/par"
+	"github.com/idfoundry/fapigo/internal/token"
+	"github.com/idfoundry/fapigo/keys"
 )
 
 // TokenSet is returned by a successful ExchangeCode.

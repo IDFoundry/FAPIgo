@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	fapi "github.com/osanderson/go-fapi"
-	"github.com/osanderson/go-fapi/client"
-	"github.com/osanderson/go-fapi/fapihttp"
-	"github.com/osanderson/go-fapi/internal/metadata"
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/client"
+	"github.com/idfoundry/fapigo/fapihttp"
+	"github.com/idfoundry/fapigo/internal/metadata"
 )
 
 func newDiscoveryFetcher(t *testing.T, ts *httptest.Server) *fapihttp.Client {

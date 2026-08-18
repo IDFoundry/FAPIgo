@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	fapi "github.com/osanderson/go-fapi"
+	fapi "github.com/idfoundry/fapigo"
 )
 
 func TestSignVerifyRoundTripES256(t *testing.T) {

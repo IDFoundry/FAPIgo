@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	fapi "github.com/osanderson/go-fapi"
-	"github.com/osanderson/go-fapi/fapihttp"
-	"github.com/osanderson/go-fapi/internal/jose"
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/fapihttp"
+	"github.com/idfoundry/fapigo/internal/jose"
 )
 
 // jwksContentType is the content type this package requires a JWKS

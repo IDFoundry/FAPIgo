@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/osanderson/go-fapi/internal/metadata"
-	"github.com/osanderson/go-fapi/server"
+	"github.com/idfoundry/fapigo/internal/metadata"
+	"github.com/idfoundry/fapigo/server"
 )
 
 // wireMetadata is server.Metadata converted to internal/metadata.Document's

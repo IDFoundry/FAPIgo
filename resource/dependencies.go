@@ -1,8 +1,8 @@
 package resource
 
 import (
-	"github.com/osanderson/go-fapi/keys"
-	"github.com/osanderson/go-fapi/storage"
+	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // Dependencies are this verifier's injected collaborators. NewVerifier

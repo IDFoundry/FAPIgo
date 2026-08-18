@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"math/big"
 
-	fapi "github.com/osanderson/go-fapi"
+	fapi "github.com/idfoundry/fapigo"
 )
 
 // JWK is a parsed, validated public key together with the

@@ -19,9 +19,9 @@ import (
 	"os"
 	"time"
 
-	fapi "github.com/osanderson/go-fapi"
-	"github.com/osanderson/go-fapi/server"
-	"github.com/osanderson/go-fapi/storage"
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/server"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // Config is this binary's on-disk configuration.

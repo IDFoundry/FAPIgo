@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"time"
 
-	fapi "github.com/osanderson/go-fapi"
-	"github.com/osanderson/go-fapi/server"
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/server"
 )
 
 // httpFetchTimeout bounds a single outbound client-JWKS fetch.

@@ -6,11 +6,11 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/osanderson/go-fapi/client"
-	"github.com/osanderson/go-fapi/extension"
-	"github.com/osanderson/go-fapi/fapitest"
-	"github.com/osanderson/go-fapi/resource"
-	"github.com/osanderson/go-fapi/server"
+	"github.com/idfoundry/fapigo/client"
+	"github.com/idfoundry/fapigo/extension"
+	"github.com/idfoundry/fapigo/fapitest"
+	"github.com/idfoundry/fapigo/resource"
+	"github.com/idfoundry/fapigo/server"
 )
 
 // accountHintDef is a custom authorization parameter flagged

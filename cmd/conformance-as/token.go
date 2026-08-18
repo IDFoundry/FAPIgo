@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/osanderson/go-fapi/server"
+	"github.com/idfoundry/fapigo/server"
 )
 
 func tokenHandler(srv *server.Server) http.HandlerFunc {

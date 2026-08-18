@@ -9,8 +9,8 @@ import (
 	"net/url"
 	"time"
 
-	fapi "github.com/osanderson/go-fapi"
-	"github.com/osanderson/go-fapi/internal/dpop"
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/dpop"
 )
 
 // callProtectedResource presents accessToken to resourceURL with a DPoP

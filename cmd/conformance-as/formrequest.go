@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/osanderson/go-fapi/server"
+	"github.com/idfoundry/fapigo/server"
 )
 
 // maxFormBytes bounds how much of an inbound request body this adapter

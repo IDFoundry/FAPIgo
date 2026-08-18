@@ -4,7 +4,7 @@ import (
 	"context"
 	"crypto"
 
-	fapi "github.com/osanderson/go-fapi"
+	fapi "github.com/idfoundry/fapigo"
 )
 
 // SigningPurpose is a closed set of reasons a party might need to sign

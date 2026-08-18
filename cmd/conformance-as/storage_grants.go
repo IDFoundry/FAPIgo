@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/osanderson/go-fapi/storage"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // inMemoryGrantStore is an in-memory storage.GrantStore, ported from

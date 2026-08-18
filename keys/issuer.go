@@ -4,7 +4,7 @@ import (
 	"context"
 	"crypto"
 
-	fapi "github.com/osanderson/go-fapi"
+	fapi "github.com/idfoundry/fapigo"
 )
 
 // IssuerVerificationPurpose is a closed set of reasons an authorization

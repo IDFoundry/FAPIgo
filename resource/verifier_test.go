@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	fapi "github.com/osanderson/go-fapi"
-	"github.com/osanderson/go-fapi/keys"
-	"github.com/osanderson/go-fapi/resource"
-	"github.com/osanderson/go-fapi/storage"
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/resource"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 const testIssuer = "https://as.example.com"

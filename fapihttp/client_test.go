@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/osanderson/go-fapi/fapihttp"
+	"github.com/idfoundry/fapigo/fapihttp"
 )
 
 func validConfig() fapihttp.Config {

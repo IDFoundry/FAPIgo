@@ -1,6 +1,6 @@
 # Conformance
 
-[![Conformance](https://github.com/osanderson/go-fapi/actions/workflows/conformance.yml/badge.svg)](https://github.com/osanderson/go-fapi/actions/workflows/conformance.yml)
+[![Conformance](https://github.com/idfoundry/fapigo/actions/workflows/conformance.yml/badge.svg)](https://github.com/idfoundry/fapigo/actions/workflows/conformance.yml)
 
 Reflects the latest scheduled/manually-triggered run of
 [`scripts/run-all.sh`](scripts/run-all.sh) in CI (see

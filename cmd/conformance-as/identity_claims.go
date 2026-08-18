@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/osanderson/go-fapi/server"
+	"github.com/idfoundry/fapigo/server"
 )
 
 // staticIdentityClaims resolves a fixed set of identity claim values for

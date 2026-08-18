@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/osanderson/go-fapi/server"
+	"github.com/idfoundry/fapigo/server"
 )
 
 func containsString(list []string, target string) bool {

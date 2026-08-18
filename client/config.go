@@ -3,7 +3,7 @@ package client
 import (
 	"time"
 
-	fapi "github.com/osanderson/go-fapi"
+	fapi "github.com/idfoundry/fapigo"
 )
 
 // Profile selects which FAPI 2.0 security profile this client targets.

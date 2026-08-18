@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	fapi "github.com/osanderson/go-fapi"
+	fapi "github.com/idfoundry/fapigo"
 )
 
 func baseIDTokenParams(key crypto.Signer, now time.Time, lifetime time.Duration) IDTokenParams {

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/osanderson/go-fapi/storage"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // memSessionStore is an in-memory storage.SessionStore — this driver

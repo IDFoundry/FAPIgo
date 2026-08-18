@@ -8,15 +8,15 @@ import (
 	"strings"
 	"time"
 
-	fapi "github.com/osanderson/go-fapi"
-	"github.com/osanderson/go-fapi/extension"
-	"github.com/osanderson/go-fapi/internal/clientassertion"
-	"github.com/osanderson/go-fapi/internal/dpop"
-	"github.com/osanderson/go-fapi/internal/par"
-	"github.com/osanderson/go-fapi/internal/pkce"
-	"github.com/osanderson/go-fapi/internal/requestobject"
-	"github.com/osanderson/go-fapi/keys"
-	"github.com/osanderson/go-fapi/storage"
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/extension"
+	"github.com/idfoundry/fapigo/internal/clientassertion"
+	"github.com/idfoundry/fapigo/internal/dpop"
+	"github.com/idfoundry/fapigo/internal/par"
+	"github.com/idfoundry/fapigo/internal/pkce"
+	"github.com/idfoundry/fapigo/internal/requestobject"
+	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // coreAuthorizationParameters are the standard OAuth/OIDC/PKCE

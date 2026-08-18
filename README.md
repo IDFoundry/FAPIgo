@@ -22,9 +22,9 @@ core.
 
 ```go
 import (
-    "github.com/osanderson/go-fapi/client"
-    "github.com/osanderson/go-fapi/server"
-    "github.com/osanderson/go-fapi/resource"
+    "github.com/idfoundry/fapigo/client"
+    "github.com/idfoundry/fapigo/server"
+    "github.com/idfoundry/fapigo/resource"
 )
 ```
 

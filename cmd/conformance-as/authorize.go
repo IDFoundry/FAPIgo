@@ -4,9 +4,9 @@ import (
 	"net/http"
 	"sync"
 
-	fapi "github.com/osanderson/go-fapi"
-	"github.com/osanderson/go-fapi/server"
-	"github.com/osanderson/go-fapi/storage"
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/server"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // consentHandler serves the browser-facing authorization endpoint with a

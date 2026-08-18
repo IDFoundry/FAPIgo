@@ -5,7 +5,7 @@ import (
 	"encoding/base64"
 	"io"
 
-	fapi "github.com/osanderson/go-fapi"
+	fapi "github.com/idfoundry/fapigo"
 )
 
 // randomTokenSize is the byte length of a generated state, nonce or

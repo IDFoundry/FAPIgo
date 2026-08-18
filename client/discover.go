@@ -6,9 +6,9 @@ import (
 	"net/url"
 	"strings"
 
-	fapi "github.com/osanderson/go-fapi"
-	"github.com/osanderson/go-fapi/fapihttp"
-	"github.com/osanderson/go-fapi/internal/metadata"
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/fapihttp"
+	"github.com/idfoundry/fapigo/internal/metadata"
 )
 
 // discoveryContentType is the content type RFC 8414 §3.2 requires an

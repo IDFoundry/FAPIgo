@@ -115,17 +115,27 @@ check_suite_reachable() {
 }
 
 # wait_as_ready HOST_PORT — the AS containers take a couple seconds to
-# start after `docker compose up`; run-test-plan.py has no reason to
-# retry a connection-refused module 1 request, so wait here instead.
+# start locally after `docker compose up`, but `--build` above can add
+# a cold Go module/image build on top of that (observed on a fresh
+# GitHub Actions runner: no cached layers, so the build alone eats
+# past a 30s budget before the container has even started) —
+# run-test-plan.py has no reason to retry a connection-refused module
+# 1 request, so wait here instead, with the same ~2 minute budget as
+# check_suite_reachable. A container that's genuinely never coming up
+# is a hard failure, not a warning: proceeding anyway just produces
+# three straight INTERRUPTED modules and an aborted run downstream,
+# which is a much more confusing failure to debug than this exiting
+# with a clear message.
 wait_as_ready() {
 	local port="$1"
-	for _ in $(seq 1 30); do
+	for _ in $(seq 1 120); do
 		if curl -sk --max-time 2 -o /dev/null "https://127.0.0.1:$port/"; then
 			return 0
 		fi
 		sleep 1
 	done
-	echo "warning: conformance-as on port $port did not respond within 30s" >&2
+	echo "error: conformance-as on port $port did not respond within 2 minutes" >&2
+	exit 1
 }
 
 # run_as_plan NAME PLAN_VARIANT CONFIG_JSON EXPECTED_WARNINGS EXPECTED_SKIPS

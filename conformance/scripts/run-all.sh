@@ -168,7 +168,7 @@ run_as_plan() {
 	local runner_pid=$!
 
 	local plan_id=""
-	for _ in $(seq 1 30); do
+	for _ in $(seq 1 300); do
 		# `|| true` matters here under `set -eo pipefail`: grep finding
 		# nothing (true on every iteration until run-test-plan.py has
 		# logged its plan id) makes the whole pipeline "fail" even
@@ -179,7 +179,7 @@ run_as_plan() {
 		if [ -n "$plan_id" ]; then
 			break
 		fi
-		sleep 1
+		sleep 0.1
 	done
 
 	if [ -n "$plan_id" ]; then
@@ -191,6 +191,25 @@ run_as_plan() {
 	fi
 
 	wait "$runner_pid" && exit_code=0 || exit_code=$?
+
+	# On a non-clean run, dump every INTERRUPTED module's full condition
+	# log from the suite's own API — run-test-plan.py's own log only
+	# ever records a bare "moved to INTERRUPTED" (see the traceback a
+	# few lines above this loop's own output), never which specific
+	# condition actually failed, and the suite container is gone by the
+	# time anyone looks at a failed CI run (torn down by the workflow's
+	# own cleanup step). Best-effort: the suite is still up at this
+	# point in the script (this plan's own containers aren't touched
+	# until every plan has run), so this is the only place that can
+	# still reach it.
+	if [ "$exit_code" -ne 0 ]; then
+		local module_id
+		for module_id in $(grep -oE 'Created test module, new id: [A-Za-z0-9]+' "$log_file" | awk '{print $NF}'); do
+			if grep -q "module id $module_id status changed to INTERRUPTED" "$log_file"; then
+				curl -sk --max-time 10 "${CONFORMANCE_SERVER}api/log/$module_id" -o "$WORKDIR/as-$name-$module_id-log.json" || true
+			fi
+		done
+	fi
 
 	local totals retry_note=""
 	totals="$(grep 'Overall totals' "$log_file" | tail -1)" || true

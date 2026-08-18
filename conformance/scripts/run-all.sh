@@ -135,6 +135,13 @@ wait_as_ready() {
 		sleep 1
 	done
 	echo "error: conformance-as on port $port did not respond within 2 minutes" >&2
+	# Dump container state/logs here rather than leaving this a bare
+	# timeout: distinguishing "still building/starting" from "crashed
+	# on startup" from "up but unreachable" needs exactly this, and by
+	# the time anyone's looking at a failed CI run the containers are
+	# long gone (torn down by the workflow's own cleanup step).
+	(cd "$SERVER_DIR" && docker compose ps) >&2 || true
+	(cd "$SERVER_DIR" && docker compose logs --tail=100 conformance-as-baseline conformance-as-message-signing) >&2 || true
 	exit 1
 }
 

@@ -116,7 +116,7 @@ stuck-waiting-for-a-human events and resolves each automatically:
      anywhere from ~3s to ~31s to self-finish, which looked like
      inherent multi-visit timing variance and briefly drove this value
      up as high as 20s — but every one of those slow runs turned out to
-     be masking a real go-fapi bug (the PAR request_uri was being
+     be masking a real FAPIgo bug (the PAR request_uri was being
      invalidated on the mere GET to the authorization endpoint, not at
      actual authorization completion, so the module's second visit hit
      a 400 and the run only ever finished via this placeholder's
@@ -229,7 +229,7 @@ def main():
     # slowest legitimate self-finishing module observed live (every one
     # completes within a few hundred milliseconds once genuinely
     # unblocked; see the doc comment at the top of this file for how a
-    # much larger value was briefly needed here while a real go-fapi bug
+    # much larger value was briefly needed here while a real FAPIgo bug
     # was making one module falsely appear slow).
     PLACEHOLDER_GRACE_SECONDS = 5.0
 

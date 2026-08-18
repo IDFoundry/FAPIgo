@@ -189,7 +189,7 @@ func generateKey(label string) (private, public jwks, err error) {
 // confirm only the deliberately-wrong operation gets rejected.
 //
 // This is why a dedicated client is unavoidable, not just a plan
-// -config key swap: go-fapi's server.AlgorithmPolicy requires a
+// -config key swap: FAPIgo's server.AlgorithmPolicy requires a
 // client's *registered* algorithm to be in the server's own globally
 // -permitted set (server/par.go's Algorithms.ClientAssertion.Contains
 // / Algorithms.RequestObject.Contains checks) before anything else is

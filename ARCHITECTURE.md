@@ -1,6 +1,6 @@
 # Architecture
 
-go-fapi provides hardened, separately conformant FAPI client,
+FAPIgo provides hardened, separately conformant FAPI client,
 authorization-server and resource-server engines built on one rigorously
 tested protocol core.
 
@@ -50,7 +50,7 @@ Concretely:
 ## Package layout
 
 ```text
-go-fapi/                   // package fapi: shared value types only
+fapigo/                    // package fapi: shared value types only
 ├── client/                // RP public API
 ├── server/                // AS public API
 ├── resource/              // RS verification API

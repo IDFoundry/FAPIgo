@@ -224,7 +224,7 @@ def main():
     md.append("# Conformance report\n")
     generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     where = f"`{commit}`" + (f" on `{branch}`" if branch else "") if commit else "(commit unknown)"
-    md.append(f"Generated {generated} by `conformance/scripts/run-all.sh`, go-fapi at {where}.\n")
+    md.append(f"Generated {generated} by `conformance/scripts/run-all.sh`, FAPIgo at {where}.\n")
 
     md.append("## Summary\n")
     md.append("| Suite | Result |")

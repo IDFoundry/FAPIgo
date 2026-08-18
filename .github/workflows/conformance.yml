@@ -1,0 +1,99 @@
+name: Conformance
+
+# Runs all four FAPI2 conformance suites this repo has driver support
+# for (see conformance/scripts/run-all.sh) against a freshly-brought-up
+# OIDF conformance suite. Deliberately not triggered on push/pull_request
+# — this is a heavy job (bringing up the suite's own Docker stack, ~6-7
+# minutes of test execution locally, likely more on a shared runner) that
+# would otherwise slow down every PR's feedback loop. Scheduled instead,
+# a few times a week rather than daily, plus available on demand.
+#
+# Informational only: nothing in branch protection depends on this
+# workflow, since it never runs against a PR in the first place. The
+# job's own exit code still reflects run-all.sh's real pass/fail, so the
+# Actions tab shows an accurate result — it just isn't wired into
+# anything that blocks a merge.
+#
+# Tracks the OIDF suite's latest master/prebuilt images on every run (no
+# version pin) — simplest, and consistent with how the suite is used
+# locally today.
+
+on:
+  schedule:
+    - cron: '0 6 * * 1,3,5' # Mon/Wed/Fri, 6am UTC — a few times a week, not daily
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      # Cloned into a directory literally named conformance-suite so
+      # Docker Compose's auto-derived project (and therefore network)
+      # name — conformance-suite_default — matches
+      # conformance/server/docker-compose.yml's own existing default for
+      # SUITE_NETWORK, without needing to set it explicitly.
+      - name: Clone OIDF conformance suite
+        run: git clone --depth 1 https://gitlab.com/openid/conformance-suite.git /tmp/conformance-suite
+
+      - name: Install suite script dependencies
+        run: pip install -r /tmp/conformance-suite/scripts/requirements.txt
+
+      # Prebuilt images — no Java/Maven build needed, mirrors this
+      # repo's own conformance/server/scripts/README.md "Manual test
+      # run" step 1.
+      - name: Bring up OIDF conformance suite
+        working-directory: /tmp/conformance-suite
+        run: docker compose -f docker-compose-prebuilt.yml up -d
+
+      # Generates the gitignored plan configs (private test-client keys)
+      # plus registers matching public keys with this AS — exactly the
+      # "fresh, unconfigured checkout" scenario this tool exists for.
+      - name: Generate throwaway conformance-as config and keys
+        run: go run ./conformance/server/scripts/setup-config
+
+      - name: Generate throwaway TLS cert
+        run: ./conformance/server/scripts/generate-server-cert.sh
+
+      # run-all.sh itself waits for the suite to become reachable, waits
+      # for the AS containers to come up, runs all four suites, retries
+      # the one known suite-internal flake automatically, and writes
+      # report.md — nothing CI-specific needed here beyond pointing it
+      # at the suite checkout and a predictable results directory.
+      - name: Run all four conformance suites
+        env:
+          CONFORMANCE_SUITE_CHECKOUT: /tmp/conformance-suite
+          WORKDIR: ${{ runner.temp }}/conformance-results
+        run: ./conformance/scripts/run-all.sh
+
+      - name: Add report to job summary
+        if: always()
+        run: cat "${{ runner.temp }}/conformance-results/report.md" >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Upload conformance results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-results
+          path: ${{ runner.temp }}/conformance-results
+          retention-days: 14
+
+      - name: Tear down suite containers
+        if: always()
+        run: |
+          (cd /tmp/conformance-suite && docker compose -f docker-compose-prebuilt.yml down -v) || true
+          (cd conformance/server && docker compose down) || true

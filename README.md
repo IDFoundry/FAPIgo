@@ -15,10 +15,12 @@ core.
 > harness are all implemented and covered by tests, including end-to-end
 > authorization flows — both hand-configured and fully
 > discovery-driven — under the FAPI 2.0 baseline and message-signing
-> profiles. The `server` (authorization server) role has been run
-> against the OpenID Foundation conformance suite's FAPI2 baseline test
-> plan with a clean pass; `client` and `resource` have not yet — see
-> [conformance/](conformance/README.md).
+> profiles. Both the `server` (authorization server) and `client`
+> (relying party) roles have been run clean against the OpenID
+> Foundation conformance suite's FAPI2 baseline and message-signing test
+> plans; `resource` has not been run against a dedicated OIDF plan (only
+> indirectly, as a stand-in the AS plan's own happy-flow module calls)
+> — see [conformance/](conformance/README.md).
 
 ```go
 import (

@@ -99,6 +99,14 @@ ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 # adds) - the prefix is optional here only so a caller feeding in a
 # pre-stripped line still matches.
 TEST_LINE_RE = re.compile(r"^(?:\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} )?Test \[(\d+):(\d+)\] (\S+) (\S+) (\S+) - result (\S+)\.")
+# Same optional timestamp prefix as TEST_LINE_RE, same reason - this
+# exact line was still being matched with a bare `== "Unexpected
+# failure:"` string comparison, which never once matched real
+# run-test-plan.py output (every line it prints carries the prefix,
+# with no exception for this one) - confirmed live: this made
+# find_unexpected_interrupted_modules() return zero candidates for
+# every real INTERRUPTED module, silently, since this check was added.
+UNEXPECTED_FAILURE_LINE_RE = re.compile(r"^(?:\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} )?Unexpected failure:\s*$")
 
 RETRY_POLL_TIMEOUT_SECONDS = 60
 RETRY_POLL_INTERVAL_SECONDS = 1
@@ -175,7 +183,7 @@ def find_unexpected_interrupted_modules(log_path):
                 test_name = test_name.split("[", 1)[0]
                 last = (module_id, test_name, status)
                 continue
-            if line.strip() == "Unexpected failure:" and last is not None:
+            if UNEXPECTED_FAILURE_LINE_RE.match(line) and last is not None:
                 candidates.append(last)
                 last = None
     return [(mid, name) for mid, name, status in candidates if status == "INTERRUPTED"]

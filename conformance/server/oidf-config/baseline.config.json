@@ -1,18 +1,99 @@
 {
-  "listen_addr": "0.0.0.0:8443",
-  "issuer": "https://conformance-as-baseline:8443",
-  "profile": "fapi2-security",
-  "default_subject": "conformance-test-user",
   "algorithms": {
+    "access_token": "ES256",
     "client_assertion": [
-      "ES256"
+      "ES256",
+      "PS256"
     ],
+    "id_token": "ES256",
     "request_object": [
       "ES256"
-    ],
-    "access_token": "ES256",
-    "id_token": "ES256"
+    ]
   },
+  "clients": [
+    {
+      "allowed_scopes": [
+        "openid",
+        "accounts",
+        "offline_access"
+      ],
+      "client_assertion_algorithm": "ES256",
+      "id": "gofapi-conformance-client-1",
+      "jwks": {
+        "keys": [
+          {
+            "kty": "EC",
+            "alg": "ES256",
+            "use": "sig",
+            "kid": "gofapi-conformance-client1-key1",
+            "crv": "P-256",
+            "x": "AxiXAB73CqFy8w5ic7FWCGIIgYxQd4hSqcS4vg6qM2k",
+            "y": "N66chyGPxG2YMfHoRgfYZGN2Rv59OXgMtzt7fUioO_w"
+          }
+        ]
+      },
+      "redirect_uris": [
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-baseline/callback",
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-baseline/callback?dummy1=lorem&dummy2=ipsum"
+      ],
+      "request_object_algorithm": "ES256"
+    },
+    {
+      "allowed_scopes": [
+        "openid",
+        "accounts",
+        "offline_access"
+      ],
+      "client_assertion_algorithm": "ES256",
+      "id": "gofapi-conformance-client-2",
+      "jwks": {
+        "keys": [
+          {
+            "kty": "EC",
+            "alg": "ES256",
+            "use": "sig",
+            "kid": "gofapi-conformance-client2-key1",
+            "crv": "P-256",
+            "x": "RIY6i4HaVgNoaF_E-lsAI8mHcPDC_GK77PoqQyafRN4",
+            "y": "eYxqgSo6obXLMgXCMrYXmfFXxaGcvv6M6LbStOjFxZw"
+          }
+        ]
+      },
+      "redirect_uris": [
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-baseline/callback",
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-baseline/callback?dummy1=lorem&dummy2=ipsum"
+      ],
+      "request_object_algorithm": "ES256"
+    },
+    {
+      "allowed_scopes": [
+        "openid",
+        "accounts",
+        "offline_access"
+      ],
+      "client_assertion_algorithm": "PS256",
+      "id": "gofapi-conformance-client1-rs256-client",
+      "jwks": {
+        "keys": [
+          {
+            "kty": "RSA",
+            "alg": "PS256",
+            "use": "sig",
+            "kid": "gofapi-conformance-client1-rs256-key1",
+            "n": "m5F3wJlSMTOdxWXCQYEUsCuFWLlW6ZpPzorso8NGpXYR-Az_G4d8B1DpOWUbRcs_KsvJtnGQ87gERMjSDGwXZfSwK4UX8XLwu1YQdsg_-g3oJUCe7T9UzD2uIfT_30foCxwy5kGoNg6r7W59Pk0zKYn-KT6_Dn_Pdi-vG_wfY_d7AGwuDp9jwc8BKQFlsbSC0l5CXgiDC5k3J8J-jJ_9HVcAgMPdghNOS6nLU_ZM2g089Pxfths-brZX7FqsSSmChxf8S9ZOlGl_m34xLuh3XFqtIaGGyUX4Jm1Zn4-EE9qLJpl3L1ofWDhorQMPCQlSNLAlsuNMYiN6nplP44PAiw",
+            "e": "AQAB"
+          }
+        ]
+      },
+      "redirect_uris": [
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-baseline/callback",
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-baseline/callback?dummy1=lorem&dummy2=ipsum"
+      ],
+      "request_object_algorithm": "PS256"
+    }
+  ],
+  "default_subject": "conformance-test-user",
+  "issuer": "https://conformance-as-baseline:8443",
   "limits": {
     "pushed_request_lifetime_seconds": 90,
     "max_client_assertion_lifetime_seconds": 60,
@@ -25,60 +106,6 @@
     "max_dpop_proof_age_seconds": 60,
     "max_clock_skew_seconds": 15
   },
-  "clients": [
-    {
-      "id": "gofapi-conformance-client-1",
-      "redirect_uris": [
-        "https://localhost.emobix.co.uk:8443/test/a/gofapi-baseline/callback",
-        "https://localhost.emobix.co.uk:8443/test/a/gofapi-baseline/callback?dummy1=lorem&dummy2=ipsum"
-      ],
-      "client_assertion_algorithm": "ES256",
-      "request_object_algorithm": "ES256",
-      "allowed_scopes": [
-        "openid",
-        "accounts",
-        "offline_access"
-      ],
-      "jwks": {
-        "keys": [
-          {
-            "alg": "ES256",
-            "crv": "P-256",
-            "kid": "gofapi-conformance-client1-key1",
-            "kty": "EC",
-            "use": "sig",
-            "x": "ANJbpeaecoCwyTie3dPhDsoGx-sY7sAHFV5bTpsW1KE",
-            "y": "VJ98xsJ4W6S0JYaJ6lTFY03C0igOSMzUiJMKcPsQQJ0"
-          }
-        ]
-      }
-    },
-    {
-      "id": "gofapi-conformance-client-2",
-      "redirect_uris": [
-        "https://localhost.emobix.co.uk:8443/test/a/gofapi-baseline/callback",
-        "https://localhost.emobix.co.uk:8443/test/a/gofapi-baseline/callback?dummy1=lorem&dummy2=ipsum"
-      ],
-      "client_assertion_algorithm": "ES256",
-      "request_object_algorithm": "ES256",
-      "allowed_scopes": [
-        "openid",
-        "accounts",
-        "offline_access"
-      ],
-      "jwks": {
-        "keys": [
-          {
-            "alg": "ES256",
-            "crv": "P-256",
-            "kid": "gofapi-conformance-client2-key1",
-            "kty": "EC",
-            "use": "sig",
-            "x": "PZOX7X0IqIs7vMqR9g8gSuEGigePAApw-ebBJpFdgQ8",
-            "y": "UGddxnX8ib_UQRdXwDWV06BLLRwITEXqQwx5ADFyOPw"
-          }
-        ]
-      }
-    }
-  ]
+  "listen_addr": "0.0.0.0:8443",
+  "profile": "fapi2-security"
 }

@@ -309,12 +309,6 @@ identical warning for the identical reason). Currently covers:
   §4.1.2's "should revoke on detected code reuse" is a `SHOULD`, and the
   suite's own module text confirms not implementing it won't block
   certification.
-- `ensure-signed-client-assertion-with-RS256-fails`'s `SKIPPED` result —
-  deterministic, not a flake: this test needs an RSA client key to sign
-  an RS256 assertion, and this AS's clients are ES256-only by design (no
-  RSA/PS256 support anywhere in the algorithm policy). The suite's own
-  skip message confirms this doesn't block certification.
-
 Both plans' `client2` block requests `offline_access` alongside
 `client`'s — `refresh-token` drives its own cross-client
 refresh-token-binding check (client 1 must be rejected redeeming a
@@ -323,6 +317,32 @@ only gets issued if client 2 actually has that scope; without it, the
 module can't reach that check at all and reports `SKIPPED` instead of
 running it (this used to be this file's third `expected-skips` entry,
 before `client2`'s scope was corrected to include it).
+
+Both plans also register a **third** client, `client_assertion_algorithm`
+and `request_object_algorithm` both `PS256` (this AS's own
+`algorithms.client_assertion`/`algorithms.request_object` policy lists
+now include `PS256` alongside `ES256` to make that registration valid
+at all — see `oidf-config/*.config.json`), used only via a per-module
+`override` for `ensure-signed-client-assertion-with-RS256-fails` and
+(message-signing only) `ensure-signed-request-object-with-RS256-fails`.
+Both used to be permanent `SKIPPED` results: each needs its base
+signing key to already declare a legitimate FAPI algorithm (ES256 or
+PS256) so the *rest* of the flow — PAR, the browser consent step, and
+for the request-object test, the request object's own valid signature
+— succeeds normally, before the module narrowly swaps just the one
+operation under test (the token-endpoint client assertion, or the
+request object) to the disallowed RS256 and confirms the AS rejects
+it. Since `client`/`client2` stay ES256-only exactly as every other
+module needs, this had to be a genuinely separate, PS256-registered
+client — a plan-config-only key swap on the existing client both
+breaks every other module (the suite's own signing conditions reject a
+`client.jwks` with more than one signing-capable key) and can't
+satisfy `server.AlgorithmPolicy`'s per-client algorithm pinning
+without an AS-side registration to match. See
+`conformance/server/scripts/setup-config/main.go`'s own doc comments
+(`generatePS256Key`, `patchConformanceASConfig`) for the full detail,
+and this repo's own PR history for the live investigation that ruled
+out the simpler approaches first.
 
 ```
 ./scripts/run-test-plan.py \

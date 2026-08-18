@@ -1,14 +1,1 @@
-[
-    {
-        "test-name": "fapi2-security-profile-final-ensure-signed-client-assertion-with-RS256-fails",
-        "variant": "*",
-        "configuration-filename": "*message-signing-plan.json",
-        "comment": "Deterministic, permanent skip: this test requires an RSA client key to sign an RS256 client assertion, and this AS's registered clients only ever use ES256 (see oidf-config/message-signing.config.json and cmd/conformance-as's algorithm policy - no RSA support by design). The suite's own skip message confirms this does not prevent certification."
-    },
-    {
-        "test-name": "fapi2-security-profile-final-ensure-signed-request-object-with-RS256-fails",
-        "variant": "*",
-        "configuration-filename": "*message-signing-plan.json",
-        "comment": "Same root cause as ensure-signed-client-assertion-with-RS256-fails, applied to request object signing instead of client assertion signing: this test requires an RSA client key to sign an RS256 request object, and this AS's registered clients only ever use ES256. Only reachable under a profile that actually sends signed request objects (message-signing), which is why it doesn't appear in expected-skips-baseline.json."
-    }
-]
+[]

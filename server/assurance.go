@@ -3,7 +3,7 @@ package server
 import (
 	"fmt"
 
-	"github.com/osanderson/go-fapi/storage"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // AssuranceLevel gates how strict New's validation of Config and

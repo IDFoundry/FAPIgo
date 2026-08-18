@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/osanderson/go-fapi/extension"
+	"github.com/idfoundry/fapigo/extension"
 )
 
 type accountHint struct {

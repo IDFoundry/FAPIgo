@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	fapi "github.com/osanderson/go-fapi"
-	"github.com/osanderson/go-fapi/extension"
-	"github.com/osanderson/go-fapi/internal/token"
-	"github.com/osanderson/go-fapi/server"
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/extension"
+	"github.com/idfoundry/fapigo/internal/token"
+	"github.com/idfoundry/fapigo/server"
 )
 
 // accountHintExtensionDef is a plain-parameter custom authorization

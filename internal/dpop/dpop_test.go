@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	fapi "github.com/osanderson/go-fapi"
-	"github.com/osanderson/go-fapi/internal/canonical"
-	"github.com/osanderson/go-fapi/internal/jose"
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/canonical"
+	"github.com/idfoundry/fapigo/internal/jose"
 )
 
 // memoryReplayChecker is a minimal in-memory ReplayChecker for tests.

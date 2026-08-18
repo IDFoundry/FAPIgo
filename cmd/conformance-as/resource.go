@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/osanderson/go-fapi/keys"
-	fapires "github.com/osanderson/go-fapi/resource"
-	"github.com/osanderson/go-fapi/server"
+	"github.com/idfoundry/fapigo/keys"
+	fapires "github.com/idfoundry/fapigo/resource"
+	"github.com/idfoundry/fapigo/server"
 )
 
 // selfIssuerKeySource resolves this same process's own access-token

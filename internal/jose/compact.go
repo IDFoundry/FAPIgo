@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	fapi "github.com/osanderson/go-fapi"
+	fapi "github.com/idfoundry/fapigo"
 )
 
 // maxCompactBytes bounds how large a compact serialization this package

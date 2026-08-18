@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	fapi "github.com/osanderson/go-fapi"
-	"github.com/osanderson/go-fapi/internal/token"
-	"github.com/osanderson/go-fapi/server"
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/token"
+	"github.com/idfoundry/fapigo/server"
 )
 
 func refreshFormParams(assertion, refreshToken, scope string) []server.FormParameter {

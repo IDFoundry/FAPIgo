@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	fapi "github.com/osanderson/go-fapi"
+	fapi "github.com/idfoundry/fapigo"
 )
 
 // AuditEventType is a closed set of security-significant events the

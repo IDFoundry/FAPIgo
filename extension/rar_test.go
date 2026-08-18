@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/osanderson/go-fapi/extension"
+	"github.com/idfoundry/fapigo/extension"
 )
 
 type paymentDetail struct {

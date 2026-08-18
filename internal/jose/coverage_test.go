@@ -8,7 +8,7 @@ import (
 	"errors"
 	"testing"
 
-	fapi "github.com/osanderson/go-fapi"
+	fapi "github.com/idfoundry/fapigo"
 )
 
 // TestSignEmbedsMatchingHeaderJWK covers the header.JWK-embedding branch

@@ -3,8 +3,8 @@ package server
 import (
 	"time"
 
-	fapi "github.com/osanderson/go-fapi"
-	"github.com/osanderson/go-fapi/extension"
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/extension"
 )
 
 // Profile selects which FAPI 2.0 security profile this server enforces.

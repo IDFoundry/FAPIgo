@@ -3,7 +3,7 @@ package resource
 import (
 	"time"
 
-	fapi "github.com/osanderson/go-fapi"
+	fapi "github.com/idfoundry/fapigo"
 )
 
 // Limits bounds the lifetimes and clock tolerances this verifier

@@ -15,12 +15,12 @@ import (
 	"testing"
 	"time"
 
-	fapi "github.com/osanderson/go-fapi"
-	"github.com/osanderson/go-fapi/client"
-	"github.com/osanderson/go-fapi/internal/jarm"
-	"github.com/osanderson/go-fapi/internal/requestobject"
-	"github.com/osanderson/go-fapi/internal/token"
-	"github.com/osanderson/go-fapi/keys"
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/client"
+	"github.com/idfoundry/fapigo/internal/jarm"
+	"github.com/idfoundry/fapigo/internal/requestobject"
+	"github.com/idfoundry/fapigo/internal/token"
+	"github.com/idfoundry/fapigo/keys"
 )
 
 // fakeAS simulates just enough of an authorization server's PAR and

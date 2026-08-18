@@ -47,10 +47,10 @@ import (
 	"net/url"
 	"time"
 
-	fapi "github.com/osanderson/go-fapi"
-	"github.com/osanderson/go-fapi/client"
-	"github.com/osanderson/go-fapi/fapihttp"
-	"github.com/osanderson/go-fapi/keys"
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/client"
+	"github.com/idfoundry/fapigo/fapihttp"
+	"github.com/idfoundry/fapigo/keys"
 )
 
 const (

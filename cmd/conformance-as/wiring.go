@@ -4,11 +4,11 @@ import (
 	"crypto/rand"
 	"net/http"
 
-	fapi "github.com/osanderson/go-fapi"
-	"github.com/osanderson/go-fapi/fapihttp"
-	"github.com/osanderson/go-fapi/keys"
-	fapires "github.com/osanderson/go-fapi/resource"
-	"github.com/osanderson/go-fapi/server"
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/fapihttp"
+	"github.com/idfoundry/fapigo/keys"
+	fapires "github.com/idfoundry/fapigo/resource"
+	"github.com/idfoundry/fapigo/server"
 )
 
 // newServerMux builds the full server.Server + HTTP router wiring from a

@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"net/url"
 
-	fapires "github.com/osanderson/go-fapi/resource"
-	"github.com/osanderson/go-fapi/server"
+	fapires "github.com/idfoundry/fapigo/resource"
+	"github.com/idfoundry/fapigo/server"
 )
 
 // newRouter wires every endpoint server.Server exposes onto a plain

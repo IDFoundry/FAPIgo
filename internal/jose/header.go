@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	fapi "github.com/osanderson/go-fapi"
+	fapi "github.com/idfoundry/fapigo"
 )
 
 // Header is a JWS protected header. Only the members this module's

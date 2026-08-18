@@ -7,12 +7,12 @@ import (
 	"strings"
 	"time"
 
-	fapi "github.com/osanderson/go-fapi"
-	"github.com/osanderson/go-fapi/internal/dpop"
-	"github.com/osanderson/go-fapi/internal/pkce"
-	"github.com/osanderson/go-fapi/internal/token"
-	"github.com/osanderson/go-fapi/keys"
-	"github.com/osanderson/go-fapi/storage"
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/dpop"
+	"github.com/idfoundry/fapigo/internal/pkce"
+	"github.com/idfoundry/fapigo/internal/token"
+	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // AuthorizationCodeExchangeRequest is the input to

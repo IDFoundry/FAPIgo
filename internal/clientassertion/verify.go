@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	fapi "github.com/osanderson/go-fapi"
-	"github.com/osanderson/go-fapi/internal/jose"
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/jose"
 )
 
 // ReplayChecker records that a client assertion's "jti" has been used,

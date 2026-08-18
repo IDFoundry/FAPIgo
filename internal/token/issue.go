@@ -9,8 +9,8 @@ import (
 	"io"
 	"time"
 
-	fapi "github.com/osanderson/go-fapi"
-	"github.com/osanderson/go-fapi/internal/jose"
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/jose"
 )
 
 // jtiSize is the byte length of the random value used to build an

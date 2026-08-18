@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	fapi "github.com/osanderson/go-fapi"
+	fapi "github.com/idfoundry/fapigo"
 )
 
 // RegisteredClient is the exact, validated configuration of one

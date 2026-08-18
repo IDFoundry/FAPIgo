@@ -10,8 +10,8 @@ import (
 	"fmt"
 	"sync"
 
-	fapi "github.com/osanderson/go-fapi"
-	"github.com/osanderson/go-fapi/keys"
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/keys"
 )
 
 // ephemeralKeyManager is a keys.KeyManager backed by fresh in-memory keys

@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	fapi "github.com/osanderson/go-fapi"
-	"github.com/osanderson/go-fapi/internal/clientassertion"
-	"github.com/osanderson/go-fapi/internal/dpop"
-	"github.com/osanderson/go-fapi/internal/jose"
-	"github.com/osanderson/go-fapi/internal/token"
-	"github.com/osanderson/go-fapi/server"
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/clientassertion"
+	"github.com/idfoundry/fapigo/internal/dpop"
+	"github.com/idfoundry/fapigo/internal/jose"
+	"github.com/idfoundry/fapigo/internal/token"
+	"github.com/idfoundry/fapigo/server"
 )
 
 func jwkThumbprintFor(key *ecdsa.PrivateKey) (jose.Thumbprint, error) {

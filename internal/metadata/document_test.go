@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/osanderson/go-fapi/internal/metadata"
+	"github.com/idfoundry/fapigo/internal/metadata"
 )
 
 func validDocumentJSON(t *testing.T, issuer string) []byte {

@@ -5,8 +5,8 @@ import (
 	"crypto/sha256"
 	"strings"
 
-	fapi "github.com/osanderson/go-fapi"
-	"github.com/osanderson/go-fapi/storage"
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // RefreshTokenRequest is the input to Server.RefreshAccessToken.

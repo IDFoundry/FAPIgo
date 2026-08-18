@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/osanderson/go-fapi/internal/canonical"
-	"github.com/osanderson/go-fapi/internal/jose"
+	"github.com/idfoundry/fapigo/internal/canonical"
+	"github.com/idfoundry/fapigo/internal/jose"
 )
 
 // ReplayChecker records that a DPoP proof's "jti" has been used, failing

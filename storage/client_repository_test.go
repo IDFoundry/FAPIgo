@@ -3,7 +3,7 @@ package storage
 import (
 	"testing"
 
-	fapi "github.com/osanderson/go-fapi"
+	fapi "github.com/idfoundry/fapigo"
 )
 
 func TestNewRegisteredClient(t *testing.T) {

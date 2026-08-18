@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	fapi "github.com/osanderson/go-fapi"
+	fapi "github.com/idfoundry/fapigo"
 )
 
 func generateEC(t *testing.T) *ecdsa.PrivateKey {

@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	fapi "github.com/osanderson/go-fapi"
-	"github.com/osanderson/go-fapi/internal/jose"
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/jose"
 )
 
 // AccessToken is a parsed, but not yet signature-verified, JWT access

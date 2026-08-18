@@ -3,7 +3,7 @@ package server
 import (
 	"fmt"
 
-	"github.com/osanderson/go-fapi/extension"
+	"github.com/idfoundry/fapigo/extension"
 )
 
 // Server is a FAPI 2.0 authorization-server engine. It is entirely

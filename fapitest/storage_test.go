@@ -3,7 +3,7 @@ package fapitest
 import (
 	"testing"
 
-	"github.com/osanderson/go-fapi/storage"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // These run the shared storage contract suite against the harness's own

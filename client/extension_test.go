@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/osanderson/go-fapi/client"
-	"github.com/osanderson/go-fapi/extension"
-	"github.com/osanderson/go-fapi/internal/requestobject"
+	"github.com/idfoundry/fapigo/client"
+	"github.com/idfoundry/fapigo/extension"
+	"github.com/idfoundry/fapigo/internal/requestobject"
 )
 
 var accountHintDef = extension.Definition[string]{

@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	fapi "github.com/osanderson/go-fapi"
-	"github.com/osanderson/go-fapi/internal/metadata"
-	"github.com/osanderson/go-fapi/internal/par"
-	"github.com/osanderson/go-fapi/server"
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/metadata"
+	"github.com/idfoundry/fapigo/internal/par"
+	"github.com/idfoundry/fapigo/server"
 )
 
 // AutoApprove is what the harness's authorization endpoint grants for

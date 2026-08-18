@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	fapi "github.com/osanderson/go-fapi"
+	fapi "github.com/idfoundry/fapigo"
 )
 
 type memoryReplayChecker struct {

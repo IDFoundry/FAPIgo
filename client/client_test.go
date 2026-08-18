@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	fapi "github.com/osanderson/go-fapi"
-	"github.com/osanderson/go-fapi/client"
-	"github.com/osanderson/go-fapi/keys"
-	"github.com/osanderson/go-fapi/storage"
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/client"
+	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 const (

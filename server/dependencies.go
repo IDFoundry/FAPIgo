@@ -3,8 +3,8 @@ package server
 import (
 	"io"
 
-	"github.com/osanderson/go-fapi/keys"
-	"github.com/osanderson/go-fapi/storage"
+	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // Dependencies are this server's injected collaborators. New rejects a

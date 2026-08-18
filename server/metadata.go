@@ -3,7 +3,7 @@ package server
 import (
 	"context"
 
-	fapi "github.com/osanderson/go-fapi"
+	fapi "github.com/idfoundry/fapigo"
 )
 
 // Metadata is this server's OAuth 2.0 Authorization Server Metadata

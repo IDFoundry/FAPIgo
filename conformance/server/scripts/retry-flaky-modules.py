@@ -71,7 +71,11 @@ PORT = _parsed.port or 8443
 CTX = ssl._create_unverified_context()
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
-TEST_LINE_RE = re.compile(r"^Test \[(\d+):(\d+)\] (\S+) (\S+) (\S+) - result (\S+)\.")
+# run-test-plan.py prefixes every line with its own "YYYY-MM-DD
+# HH:MM:SS " timestamp (its own logging setup, not something run-all.sh
+# adds) - the prefix is optional here only so a caller feeding in a
+# pre-stripped line still matches.
+TEST_LINE_RE = re.compile(r"^(?:\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} )?Test \[(\d+):(\d+)\] (\S+) (\S+) (\S+) - result (\S+)\.")
 
 RETRY_POLL_TIMEOUT_SECONDS = 60
 RETRY_POLL_INTERVAL_SECONDS = 1
@@ -139,6 +143,13 @@ def find_unexpected_interrupted_modules(log_path):
             m = TEST_LINE_RE.match(line)
             if m:
                 _plan_n, _mod_n, test_name, module_id, status, _result = m.groups()
+                # The printed name carries the variant inline, e.g.
+                # "...-happy-flow[fapi_request_method=unsigned][...]" -
+                # strip it back to the bare test module name (this is
+                # display-only here; find_module_variant() below looks
+                # module_id up in the plan directly, so this doesn't
+                # affect which module actually gets retried).
+                test_name = test_name.split("[", 1)[0]
                 last = (module_id, test_name, status)
                 continue
             if line.strip() == "Unexpected failure:" and last is not None:

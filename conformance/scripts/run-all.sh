@@ -2,7 +2,11 @@
 # Runs all four FAPI2 conformance suites this repo has driver support
 # for — AS baseline, AS message-signing, RP baseline, RP
 # message-signing — against a locally running OIDF conformance suite,
-# and prints one combined summary at the end.
+# prints one combined summary at the end, and (via
+# generate-report.py) writes a fuller report.md alongside the raw
+# per-suite logs — every non-PASSED module, with the "why this is
+# expected, not a defect" reasoning pulled straight from
+# expected-{warnings,skips}-*.json where one exists.
 #
 # Always runs all four, even if an earlier one comes back unclean —
 # never stops early — so a bad result in one suite never hides results
@@ -243,6 +247,8 @@ run_as_plan "message-signing" \
 run_rp_plan "baseline" "baseline"
 run_rp_plan "message-signing" "message-signing"
 
+python3 "$SCRIPT_DIR/generate-report.py" "$WORKDIR" "$REPO_ROOT" || echo "warning: report generation failed (see above)" >&2
+
 echo
 echo "=== combined summary ==="
 for suite in "AS baseline" "AS message-signing" "RP baseline" "RP message-signing"; do
@@ -251,6 +257,7 @@ for suite in "AS baseline" "AS message-signing" "RP baseline" "RP message-signin
 done
 echo
 echo "full logs: $WORKDIR"
+echo "report: $WORKDIR/report.md"
 
 if [ "$OVERALL_CLEAN" = true ]; then
 	echo

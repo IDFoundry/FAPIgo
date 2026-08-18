@@ -50,7 +50,7 @@ Concretely:
 ## Package layout
 
 ```text
-FAPIgo/                    // package fapi: shared value types only
+fapigo/                    // package fapi: shared value types only
 ├── client/                // RP public API
 ├── server/                // AS public API
 ├── resource/              // RS verification API

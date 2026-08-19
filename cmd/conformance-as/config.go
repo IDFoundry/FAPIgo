@@ -26,33 +26,20 @@ import (
 )
 
 // Config is this binary's on-disk configuration.
+//
+// Deliberately has no algorithms/limits fields: this AS's conformance
+// testing runs on server.RecommendedAlgorithms()/server.RecommendedLimits()
+// unconditionally (see Resolve) — those are the FAPI 2.0-grounded values
+// conformance certification should actually be exercised against, not a
+// hand-tunable knob that can drift from them. See GETTING_STARTED.md if
+// you're building your own AS and want a different starting point;
+// that's a legitimate choice for a real deployment in a way it isn't
+// for this repo's own conformance testing.
 type Config struct {
 	ListenAddr     string `json:"listen_addr"`
 	Issuer         string `json:"issuer"`
 	Profile        string `json:"profile"` // "fapi2-security" | "fapi2-security-message-signing"
 	DefaultSubject string `json:"default_subject"`
-
-	Algorithms struct {
-		ClientAssertion []string `json:"client_assertion"`
-		RequestObject   []string `json:"request_object"`
-		JARM            string   `json:"jarm,omitempty"`
-		AccessToken     string   `json:"access_token"`
-		IDToken         string   `json:"id_token"`
-	} `json:"algorithms"`
-
-	Limits struct {
-		PushedRequestLifetimeSeconds      int `json:"pushed_request_lifetime_seconds"`
-		MaxClientAssertionLifetimeSeconds int `json:"max_client_assertion_lifetime_seconds"`
-		MaxRequestObjectLifetimeSeconds   int `json:"max_request_object_lifetime_seconds"`
-		InteractionLifetimeSeconds        int `json:"interaction_lifetime_seconds"`
-		AuthorizationCodeLifetimeSeconds  int `json:"authorization_code_lifetime_seconds"`
-		JARMResponseLifetimeSeconds       int `json:"jarm_response_lifetime_seconds,omitempty"`
-		AccessTokenLifetimeSeconds        int `json:"access_token_lifetime_seconds"`
-		IDTokenLifetimeSeconds            int `json:"id_token_lifetime_seconds"`
-		RefreshTokenLifetimeSeconds       int `json:"refresh_token_lifetime_seconds"`
-		MaxDPoPProofAgeSeconds            int `json:"max_dpop_proof_age_seconds"`
-		MaxClockSkewSeconds               int `json:"max_clock_skew_seconds"`
-	} `json:"limits"`
 
 	Clients []ClientConfig `json:"clients"`
 
@@ -156,48 +143,27 @@ func (cfg Config) Resolve(allowLoopbackHTTP bool) (ResolvedConfig, error) {
 		return ResolvedConfig{}, fmt.Errorf("profile must be %q or %q, got %q", "fapi2-security", "fapi2-security-message-signing", cfg.Profile)
 	}
 
-	clientAssertionAlgs, err := parseAlgorithmSet(cfg.Algorithms.ClientAssertion)
-	if err != nil {
-		return ResolvedConfig{}, fmt.Errorf("algorithms.client_assertion: %w", err)
-	}
-	requestObjectAlgs, err := parseAlgorithmSet(cfg.Algorithms.RequestObject)
-	if err != nil {
-		return ResolvedConfig{}, fmt.Errorf("algorithms.request_object: %w", err)
-	}
-	accessTokenAlg, err := fapi.ParseSignatureAlgorithm(cfg.Algorithms.AccessToken)
-	if err != nil {
-		return ResolvedConfig{}, fmt.Errorf("algorithms.access_token: %w", err)
-	}
-	idTokenAlg, err := fapi.ParseSignatureAlgorithm(cfg.Algorithms.IDToken)
-	if err != nil {
-		return ResolvedConfig{}, fmt.Errorf("algorithms.id_token: %w", err)
-	}
-	out.Algorithms = server.AlgorithmPolicy{
-		ClientAssertion: clientAssertionAlgs,
-		RequestObject:   requestObjectAlgs,
-		AccessToken:     accessTokenAlg,
-		IDToken:         idTokenAlg,
-	}
+	// Not configurable from the JSON file — see Config's own doc
+	// comment for why. RecommendedAlgorithms already sets JARM
+	// regardless of profile (harmless where it goes unused), so there's
+	// no profile-conditional parsing needed here the way the old
+	// JSON-driven path required.
+	out.Algorithms = server.RecommendedAlgorithms()
+	out.Limits = server.RecommendedLimits()
 	if out.Profile == server.ProfileFAPISecurityWithMessageSigning {
-		jarmAlg, err := fapi.ParseSignatureAlgorithm(cfg.Algorithms.JARM)
-		if err != nil {
-			return ResolvedConfig{}, fmt.Errorf("algorithms.jarm: %w", err)
-		}
-		out.Algorithms.JARM = jarmAlg
-	}
-
-	out.Limits = server.Limits{
-		PushedRequestLifetime:      seconds(cfg.Limits.PushedRequestLifetimeSeconds),
-		MaxClientAssertionLifetime: seconds(cfg.Limits.MaxClientAssertionLifetimeSeconds),
-		MaxRequestObjectLifetime:   seconds(cfg.Limits.MaxRequestObjectLifetimeSeconds),
-		InteractionLifetime:        seconds(cfg.Limits.InteractionLifetimeSeconds),
-		AuthorizationCodeLifetime:  seconds(cfg.Limits.AuthorizationCodeLifetimeSeconds),
-		JARMResponseLifetime:       seconds(cfg.Limits.JARMResponseLifetimeSeconds),
-		AccessTokenLifetime:        seconds(cfg.Limits.AccessTokenLifetimeSeconds),
-		IDTokenLifetime:            seconds(cfg.Limits.IDTokenLifetimeSeconds),
-		RefreshTokenLifetime:       seconds(cfg.Limits.RefreshTokenLifetimeSeconds),
-		MaxDPoPProofAge:            seconds(cfg.Limits.MaxDPoPProofAgeSeconds),
-		MaxClockSkew:               seconds(cfg.Limits.MaxClockSkewSeconds),
+		// The one deliberate, code-level exception to "conformance
+		// runs on the unmodified recommended defaults" — a test-
+		// harness accommodation, not a relaxation of what FAPI2
+		// itself requires. The OIDF suite's own AddExpToRequestObject
+		// condition hardcodes a 300s exp-nbf window on every ordinary
+		// (non-negative-test) module's request object; the
+		// recommended default (60s) is fine under the baseline
+		// profile, where a request object is never actually sent
+		// (fapi_request_method=unsigned), but message-signing
+		// requires one on every request and needs real headroom above
+		// the suite's own window. See oidf-config/README.md for the
+		// full rationale, including why 600s specifically.
+		out.Limits.MaxRequestObjectLifetime = 600 * time.Second
 	}
 
 	if len(cfg.Clients) == 0 {
@@ -271,23 +237,4 @@ func resolveClient(c ClientConfig) (storage.RegisteredClient, ephemeral.ClientKe
 	}
 
 	return registered, ephemeral.ClientKeySpec{ClientID: clientID, JWKS: c.JWKS, JWKSURI: c.JWKSURI}, nil
-}
-
-func parseAlgorithmSet(values []string) (server.AlgorithmSet, error) {
-	if len(values) == 0 {
-		return nil, fmt.Errorf("must not be empty")
-	}
-	out := make(server.AlgorithmSet, len(values))
-	for i, v := range values {
-		alg, err := fapi.ParseSignatureAlgorithm(v)
-		if err != nil {
-			return nil, err
-		}
-		out[i] = alg
-	}
-	return out, nil
-}
-
-func seconds(n int) time.Duration {
-	return time.Duration(n) * time.Second
 }

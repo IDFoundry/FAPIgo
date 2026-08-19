@@ -446,6 +446,96 @@ func TestExchangeAuthorizationCodeIsSingleUse(t *testing.T) {
 	}
 }
 
+// TestExchangeAuthorizationCodeReuseRevokesAccessToken exercises RFC
+// 6749 §4.1.2's "SHOULD revoke (if possible) all tokens previously
+// issued based on that authorization code": a detected code-reuse
+// attempt must call Dependencies.Revocation.Revoke with the jti of the
+// access token the first, legitimate exchange issued.
+func TestExchangeAuthorizationCodeReuseRevokesAccessToken(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
+
+	first, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
+		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+	})
+	if err != nil {
+		t.Fatalf("first ExchangeAuthorizationCode: %v", err)
+	}
+	parsedAT, err := token.ParseAccessToken(first.AccessToken.Reveal())
+	if err != nil {
+		t.Fatalf("ParseAccessToken: %v", err)
+	}
+	validatedAT, err := parsedAT.Validate(&h.serverKey.PublicKey, token.AccessTokenValidatePolicy{
+		ExpectedIssuer: testIssuer, ExpectedAudience: testIssuer,
+		Algorithm: fapi.ES256, Now: h.now, MaxLifetime: 10 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("Validate access token: %v", err)
+	}
+	if validatedAT.JTI == "" {
+		t.Fatalf("issued access token has an empty JTI")
+	}
+
+	if len(h.revocation.all()) != 0 {
+		t.Fatalf("Revoke called before any reuse was detected: %v", h.revocation.all())
+	}
+
+	_, err = h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
+		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+	})
+	if err == nil {
+		t.Fatalf("second ExchangeAuthorizationCode (replayed code) = nil error, want error")
+	}
+
+	revoked := h.revocation.all()
+	if len(revoked) != 1 || revoked[0] != validatedAT.JTI {
+		t.Fatalf("Revoke calls = %v, want exactly [%q]", revoked, validatedAT.JTI)
+	}
+}
+
+// TestExchangeAuthorizationCodeReuseRevokesRefreshToken covers the same
+// RFC 6749 §4.1.2 "all tokens" requirement for the refresh-token half:
+// when the original exchange also granted offline_access, a detected
+// reuse must revoke that refresh token too, not just the access token.
+func TestExchangeAuthorizationCodeReuseRevokesRefreshToken(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts", "offline_access"})
+
+	first, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
+		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+	})
+	if err != nil {
+		t.Fatalf("first ExchangeAuthorizationCode: %v", err)
+	}
+	if !first.HasRefreshToken || first.RefreshToken.Reveal() == "" {
+		t.Fatalf("expected a refresh token since scope included offline_access")
+	}
+
+	if _, err := h.server.RefreshAccessToken(context.Background(), server.RefreshTokenRequest{
+		HTTP:      server.FormRequest{Parameters: refreshFormParams(h.clientAssertion(t), first.RefreshToken.Reveal(), "")},
+		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+	}); err != nil {
+		t.Fatalf("refresh before reuse was detected: %v", err)
+	}
+
+	if _, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
+		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+	}); err == nil {
+		t.Fatalf("second ExchangeAuthorizationCode (replayed code) = nil error, want error")
+	}
+
+	if _, err := h.server.RefreshAccessToken(context.Background(), server.RefreshTokenRequest{
+		HTTP:      server.FormRequest{Parameters: refreshFormParams(h.clientAssertion(t), first.RefreshToken.Reveal(), "")},
+		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+	}); err == nil {
+		t.Fatalf("refresh after code reuse was detected = nil error, want error (refresh token should be revoked)")
+	}
+}
+
 func TestExchangeAuthorizationCodeDetectsDPoPReplay(t *testing.T) {
 	h := newHarness(t, server.ProfileFAPISecurity, true)
 	code1 := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})

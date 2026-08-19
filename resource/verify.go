@@ -35,6 +35,11 @@ type AuthorizationContext struct {
 	Scopes    []string
 	Claims    map[string]json.RawMessage
 	ExpiresAt time.Time
+
+	// JTI is the access token's JWT ID, exposed for a caller's own audit
+	// logging — it's already available at this point (see
+	// Dependencies.Revocation), so surfacing it costs nothing.
+	JTI string
 }
 
 // Verify checks req's Authorization header and DPoP proof together —
@@ -125,6 +130,14 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (Authorization
 		return AuthorizationContext{}, newError(ErrorInvalidToken, 401, "access token is invalid", validErr)
 	}
 
+	revoked, err := v.deps.Revocation.IsRevoked(ctx, validated.JTI)
+	if err != nil {
+		return AuthorizationContext{}, newError(ErrorServerError, 500, "failed to check token revocation", err)
+	}
+	if revoked {
+		return AuthorizationContext{}, newError(ErrorInvalidToken, 401, "access token has been revoked", nil)
+	}
+
 	var scopes []string
 	if validated.Scope != "" {
 		scopes = strings.Fields(validated.Scope)
@@ -136,5 +149,6 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (Authorization
 		Scopes:    scopes,
 		Claims:    validated.Parameters,
 		ExpiresAt: validated.ExpiresAt,
+		JTI:       validated.JTI,
 	}, nil
 }

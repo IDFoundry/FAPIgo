@@ -51,6 +51,7 @@ func TestRecommendedPresetsProduceAWorkingServer(t *testing.T) {
 		Replay:       memstore.NewReplayStore(),
 		ClientKeys:   clientKeys,
 		Keys:         keyManager,
+		Revocation:   memstore.NewRevocationStore(),
 		Clock:        server.SystemClock{},
 		Random:       rand.Reader,
 	}
@@ -105,6 +106,7 @@ func TestRecommendedAlgorithmsWorksUnderMessageSigning(t *testing.T) {
 		Replay:       memstore.NewReplayStore(),
 		ClientKeys:   clientKeys,
 		Keys:         keyManager,
+		Revocation:   memstore.NewRevocationStore(),
 		Clock:        server.SystemClock{},
 		Random:       rand.Reader,
 	}

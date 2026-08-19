@@ -3,6 +3,7 @@ package memstore
 import (
 	"context"
 	"testing"
+	"time"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/storage"
@@ -24,6 +25,42 @@ func TestReplayStoreContract(t *testing.T) {
 	storage.TestReplayStoreContract(t, func() storage.ReplayStore {
 		return NewReplayStore()
 	})
+}
+
+func TestRevocationStoreNotRevokedByDefault(t *testing.T) {
+	s := NewRevocationStore()
+
+	revoked, err := s.IsRevoked(context.Background(), "jti-1")
+	if err != nil {
+		t.Fatalf("IsRevoked: %v", err)
+	}
+	if revoked {
+		t.Fatalf("IsRevoked(never-revoked jti) = true, want false")
+	}
+}
+
+func TestRevocationStoreRevokeThenIsRevoked(t *testing.T) {
+	s := NewRevocationStore()
+
+	if err := s.Revoke(context.Background(), "jti-1", time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+
+	revoked, err := s.IsRevoked(context.Background(), "jti-1")
+	if err != nil {
+		t.Fatalf("IsRevoked: %v", err)
+	}
+	if !revoked {
+		t.Fatalf("IsRevoked(revoked jti) = false, want true")
+	}
+
+	revoked, err = s.IsRevoked(context.Background(), "jti-2")
+	if err != nil {
+		t.Fatalf("IsRevoked: %v", err)
+	}
+	if revoked {
+		t.Fatalf("IsRevoked(different jti) = true, want false")
+	}
 }
 
 func newTestClient(t *testing.T, id fapi.ClientID) storage.RegisteredClient {

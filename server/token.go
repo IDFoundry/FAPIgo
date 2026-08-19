@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -91,10 +92,29 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	}
 	thumbprint := verifiedProof.Thumbprint.String()
 
+	codeHash := sha256.Sum256([]byte(code))
 	redeemed, err := s.deps.Grants.RedeemAuthorizationCode(ctx, storage.AuthorizationCodeRedemption{
-		CodeHash: sha256.Sum256([]byte(code)),
+		CodeHash: codeHash,
 	})
 	if err != nil {
+		// RFC 6749 §4.1.2: "If an authorization code is used more than
+		// once, the authorization server MUST deny the request and
+		// SHOULD revoke (if possible) all tokens previously issued
+		// based on that authorization code." The deny-the-request half
+		// is unconditional (below, same as always); the revoke half
+		// only has something to act on if RecordIssuedAccessToken/
+		// RecordIssuedRefreshToken were actually called for the
+		// original redemption — see AuthorizationCodeAlreadyRedeemedError's
+		// own doc comment for when that's the case.
+		var alreadyRedeemed *storage.AuthorizationCodeAlreadyRedeemedError
+		if errors.As(err, &alreadyRedeemed) {
+			if alreadyRedeemed.IssuedAccessTokenJTI != "" {
+				_ = s.deps.Revocation.Revoke(ctx, alreadyRedeemed.IssuedAccessTokenJTI, s.deps.Clock.Now().Add(s.cfg.Limits.AccessTokenLifetime))
+			}
+			if alreadyRedeemed.IssuedRefreshTokenHash != nil {
+				_ = s.deps.Grants.RevokeRefreshToken(ctx, *alreadyRedeemed.IssuedRefreshTokenHash)
+			}
+		}
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorInvalidGrant, 400, "code is invalid, expired, or already used", err))
 	}
 
@@ -119,10 +139,16 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to encode requested userinfo claims", err))
 	}
-	accessToken, err := s.issueAccessToken(ctx, client.ID(), redeemed.Subject, redeemed.Scope, thumbprint, accessTokenClaims)
+	accessToken, accessJTI, err := s.issueAccessToken(ctx, client.ID(), redeemed.Subject, redeemed.Scope, thumbprint, accessTokenClaims)
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to issue access token", err))
 	}
+	// Best-effort, discarded like every other side-record here (see
+	// s.audit's own "_ = ..." pattern) — Grants is already a mandatory
+	// dependency, so this is called unconditionally the same way
+	// CreateAuthorizationCode is; a no-op implementation is entirely
+	// valid for a deployment that doesn't want revocation support.
+	_ = s.deps.Grants.RecordIssuedAccessToken(ctx, codeHash, accessJTI, now.Add(s.cfg.Limits.AccessTokenLifetime))
 
 	result := TokenResult{
 		AccessToken: fapi.NewSecret(accessToken),
@@ -149,6 +175,13 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		if err != nil {
 			return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to issue refresh token", err))
 		}
+		// Recomputed rather than threaded through issueRefreshToken's
+		// return: the caller already gets the raw value back, and this
+		// is the exact same hash CreateRefreshToken itself used to key
+		// the stored record — see RecordIssuedRefreshToken's own doc
+		// comment for why this association is recorded at all.
+		refreshTokenHash := sha256.Sum256([]byte(refreshToken))
+		_ = s.deps.Grants.RecordIssuedRefreshToken(ctx, codeHash, refreshTokenHash, now.Add(s.cfg.Limits.RefreshTokenLifetime))
 		result.RefreshToken = fapi.NewSecret(refreshToken)
 		result.HasRefreshToken = true
 	}
@@ -177,10 +210,10 @@ func (s *Server) verifyTokenRequestDPoP(ctx context.Context, proof string) (dpop
 	return verified, nil
 }
 
-func (s *Server) issueAccessToken(ctx context.Context, clientID fapi.ClientID, subject string, scope []string, thumbprint string, tokenClaims map[string]json.RawMessage) (string, error) {
+func (s *Server) issueAccessToken(ctx context.Context, clientID fapi.ClientID, subject string, scope []string, thumbprint string, tokenClaims map[string]json.RawMessage) (accessToken string, jti string, err error) {
 	signer, kid, err := s.newSigner(ctx, keys.AccessTokenSigning, s.cfg.Algorithms.AccessToken)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	return token.IssueAccessToken(token.AccessTokenParams{
 		Signer: signer, Algorithm: s.cfg.Algorithms.AccessToken, KeyID: kid,

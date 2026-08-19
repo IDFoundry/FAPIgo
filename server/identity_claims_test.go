@@ -157,6 +157,7 @@ func newHarnessWithIdentityClaims(t *testing.T, identityClaims server.IdentityCl
 			testClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
 		}},
 		Keys:           &fakeKeyManager{key: serverKey, keyID: "as-key-1"},
+		Revocation:     server.NoRevocation{},
 		Clock:          fixedClock{now: now},
 		Random:         rand.Reader,
 		IdentityClaims: identityClaims,

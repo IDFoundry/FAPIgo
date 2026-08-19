@@ -34,9 +34,12 @@ func TestAccessTokenRoundTrip(t *testing.T) {
 	p.Parameters = map[string]json.RawMessage{
 		"authorization_details": jsonRaw(t, []map[string]string{{"type": "payment_initiation"}}),
 	}
-	tok, err := IssueAccessToken(p)
+	tok, jti, err := IssueAccessToken(p)
 	if err != nil {
 		t.Fatalf("IssueAccessToken: %v", err)
+	}
+	if jti == "" {
+		t.Fatal("IssueAccessToken returned an empty jti")
 	}
 
 	parsed, err := ParseAccessToken(tok)
@@ -63,6 +66,9 @@ func TestAccessTokenRoundTrip(t *testing.T) {
 	if _, ok := validated.Parameters["authorization_details"]; !ok {
 		t.Fatalf("Parameters missing authorization_details")
 	}
+	if validated.JTI != jti {
+		t.Fatalf("validated.JTI = %q, want %q (the jti IssueAccessToken returned)", validated.JTI, jti)
+	}
 }
 
 func TestAccessTokenWithKeyID(t *testing.T) {
@@ -70,7 +76,7 @@ func TestAccessTokenWithKeyID(t *testing.T) {
 	now := time.Now()
 	p := baseAccessTokenParams(key, now, time.Minute)
 	p.KeyID = "key-1"
-	tok, err := IssueAccessToken(p)
+	tok, _, err := IssueAccessToken(p)
 	if err != nil {
 		t.Fatalf("IssueAccessToken: %v", err)
 	}
@@ -98,7 +104,7 @@ func TestAccessTokenConfirmationBinding(t *testing.T) {
 	now := time.Now()
 	p := baseAccessTokenParams(key, now, time.Minute)
 	p.Confirmation = &Confirmation{JKT: thumbprint.String()}
-	tok, err := IssueAccessToken(p)
+	tok, _, err := IssueAccessToken(p)
 	if err != nil {
 		t.Fatalf("IssueAccessToken: %v", err)
 	}
@@ -133,7 +139,7 @@ func TestAccessTokenConfirmationBinding(t *testing.T) {
 func TestAccessTokenMissingConfirmationWhenRequired(t *testing.T) {
 	key := generateKey(t)
 	now := time.Now()
-	tok, err := IssueAccessToken(baseAccessTokenParams(key, now, time.Minute))
+	tok, _, err := IssueAccessToken(baseAccessTokenParams(key, now, time.Minute))
 	if err != nil {
 		t.Fatalf("IssueAccessToken: %v", err)
 	}
@@ -162,7 +168,7 @@ func TestIssueAccessTokenRejectsReservedClaimName(t *testing.T) {
 	key := generateKey(t)
 	p := baseAccessTokenParams(key, time.Now(), time.Minute)
 	p.Parameters = map[string]json.RawMessage{"jti": jsonRaw(t, "custom")}
-	if _, err := IssueAccessToken(p); err == nil {
+	if _, _, err := IssueAccessToken(p); err == nil {
 		t.Fatalf("IssueAccessToken with reserved claim = nil error, want error")
 	}
 }
@@ -171,7 +177,7 @@ func TestAccessTokenValidateRejectsWrongKey(t *testing.T) {
 	key := generateKey(t)
 	other := generateKey(t)
 	now := time.Now()
-	tok, err := IssueAccessToken(baseAccessTokenParams(key, now, time.Minute))
+	tok, _, err := IssueAccessToken(baseAccessTokenParams(key, now, time.Minute))
 	if err != nil {
 		t.Fatalf("IssueAccessToken: %v", err)
 	}
@@ -187,7 +193,7 @@ func TestAccessTokenValidateRejectsWrongKey(t *testing.T) {
 func TestAccessTokenValidateRejectsAlgorithmConfusion(t *testing.T) {
 	key := generateKey(t)
 	now := time.Now()
-	tok, err := IssueAccessToken(baseAccessTokenParams(key, now, time.Minute))
+	tok, _, err := IssueAccessToken(baseAccessTokenParams(key, now, time.Minute))
 	if err != nil {
 		t.Fatalf("IssueAccessToken: %v", err)
 	}
@@ -205,7 +211,7 @@ func TestAccessTokenValidateRejectsAlgorithmConfusion(t *testing.T) {
 func TestAccessTokenValidateRejectsIssuerAndAudienceMismatch(t *testing.T) {
 	key := generateKey(t)
 	now := time.Now()
-	tok, err := IssueAccessToken(baseAccessTokenParams(key, now, time.Minute))
+	tok, _, err := IssueAccessToken(baseAccessTokenParams(key, now, time.Minute))
 	if err != nil {
 		t.Fatalf("IssueAccessToken: %v", err)
 	}
@@ -231,7 +237,7 @@ func TestAccessTokenValidateRejectsExpiredAndExceededLifetime(t *testing.T) {
 	key := generateKey(t)
 	now := time.Now()
 
-	expiredTok, err := IssueAccessToken(baseAccessTokenParams(key, now, time.Minute))
+	expiredTok, _, err := IssueAccessToken(baseAccessTokenParams(key, now, time.Minute))
 	if err != nil {
 		t.Fatalf("IssueAccessToken: %v", err)
 	}
@@ -244,7 +250,7 @@ func TestAccessTokenValidateRejectsExpiredAndExceededLifetime(t *testing.T) {
 		t.Fatalf("Validate(expired) = %v, want ErrExpired", err)
 	}
 
-	longTok, err := IssueAccessToken(baseAccessTokenParams(key, now, 10*time.Minute))
+	longTok, _, err := IssueAccessToken(baseAccessTokenParams(key, now, 10*time.Minute))
 	if err != nil {
 		t.Fatalf("IssueAccessToken: %v", err)
 	}

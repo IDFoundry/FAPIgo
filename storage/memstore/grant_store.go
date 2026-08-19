@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -11,18 +12,24 @@ import (
 // GrantStore is an in-memory storage.GrantStore. See the package doc
 // comment for why this is development/testing only.
 type GrantStore struct {
-	mu           sync.Mutex
-	codes        map[[32]byte]storage.NewAuthorizationCode
-	codeRedeemed map[[32]byte]bool
-	refresh      map[[32]byte]storage.NewRefreshToken
+	mu              sync.Mutex
+	codes           map[[32]byte]storage.NewAuthorizationCode
+	codeRedeemed    map[[32]byte]bool
+	codeAccessJTI   map[[32]byte]string
+	codeRefreshHash map[[32]byte][32]byte
+	refresh         map[[32]byte]storage.NewRefreshToken
+	refreshRevoked  map[[32]byte]bool
 }
 
 // NewGrantStore builds an empty GrantStore.
 func NewGrantStore() *GrantStore {
 	return &GrantStore{
-		codes:        make(map[[32]byte]storage.NewAuthorizationCode),
-		codeRedeemed: make(map[[32]byte]bool),
-		refresh:      make(map[[32]byte]storage.NewRefreshToken),
+		codes:           make(map[[32]byte]storage.NewAuthorizationCode),
+		codeRedeemed:    make(map[[32]byte]bool),
+		codeAccessJTI:   make(map[[32]byte]string),
+		codeRefreshHash: make(map[[32]byte][32]byte),
+		refresh:         make(map[[32]byte]storage.NewRefreshToken),
+		refreshRevoked:  make(map[[32]byte]bool),
 	}
 }
 
@@ -39,7 +46,14 @@ func (s *GrantStore) RedeemAuthorizationCode(_ context.Context, redemption stora
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.codeRedeemed[redemption.CodeHash] {
-		return storage.RedeemedAuthorizationCode{}, fmt.Errorf("memstore: code already redeemed")
+		err := &storage.AuthorizationCodeAlreadyRedeemedError{
+			IssuedAccessTokenJTI: s.codeAccessJTI[redemption.CodeHash],
+		}
+		if hash, ok := s.codeRefreshHash[redemption.CodeHash]; ok {
+			h := hash
+			err.IssuedRefreshTokenHash = &h
+		}
+		return storage.RedeemedAuthorizationCode{}, err
 	}
 	code, ok := s.codes[redemption.CodeHash]
 	if !ok {
@@ -57,6 +71,22 @@ func (s *GrantStore) RedeemAuthorizationCode(_ context.Context, redemption stora
 	}, nil
 }
 
+// RecordIssuedAccessToken implements storage.GrantStore.
+func (s *GrantStore) RecordIssuedAccessToken(_ context.Context, codeHash [32]byte, jti string, _ time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.codeAccessJTI[codeHash] = jti
+	return nil
+}
+
+// RecordIssuedRefreshToken implements storage.GrantStore.
+func (s *GrantStore) RecordIssuedRefreshToken(_ context.Context, codeHash [32]byte, refreshTokenHash [32]byte, _ time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.codeRefreshHash[codeHash] = refreshTokenHash
+	return nil
+}
+
 // CreateRefreshToken implements storage.GrantStore.
 func (s *GrantStore) CreateRefreshToken(_ context.Context, token storage.NewRefreshToken) error {
 	s.mu.Lock()
@@ -67,10 +97,14 @@ func (s *GrantStore) CreateRefreshToken(_ context.Context, token storage.NewRefr
 
 // RedeemRefreshToken implements storage.GrantStore. Not single-use — see
 // the interface doc comment (FAPI2-SP-FINAL 5.3.2.1-9): a refresh token
-// stays valid for repeated use until it expires.
+// stays valid for repeated use until it expires (or is revoked — see
+// RevokeRefreshToken).
 func (s *GrantStore) RedeemRefreshToken(_ context.Context, redemption storage.RefreshTokenRedemption) (storage.RedeemedRefreshToken, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.refreshRevoked[redemption.TokenHash] {
+		return storage.RedeemedRefreshToken{}, fmt.Errorf("memstore: refresh token has been revoked")
+	}
 	token, ok := s.refresh[redemption.TokenHash]
 	if !ok {
 		return storage.RedeemedRefreshToken{}, fmt.Errorf("memstore: unknown refresh token")
@@ -82,4 +116,12 @@ func (s *GrantStore) RedeemRefreshToken(_ context.Context, redemption storage.Re
 		RequestedIDTokenClaims: token.RequestedIDTokenClaims, RequestedUserinfoClaims: token.RequestedUserinfoClaims,
 		ExpiresAt: token.ExpiresAt,
 	}, nil
+}
+
+// RevokeRefreshToken implements storage.GrantStore.
+func (s *GrantStore) RevokeRefreshToken(_ context.Context, tokenHash [32]byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.refreshRevoked[tokenHash] = true
+	return nil
 }

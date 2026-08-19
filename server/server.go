@@ -151,6 +151,9 @@ func validateDependencies(cfg Config, deps Dependencies) error {
 	if deps.Random == nil {
 		return fmt.Errorf("server: dependencies: random is required")
 	}
+	if deps.Revocation == nil {
+		return fmt.Errorf("server: dependencies: revocation is required (pass NoRevocation{} to explicitly decline)")
+	}
 	if cfg.Assurance == AssuranceProduction {
 		if deps.Audit == nil {
 			return fmt.Errorf("server: dependencies: audit is required under AssuranceProduction")

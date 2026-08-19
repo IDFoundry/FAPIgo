@@ -300,17 +300,20 @@ generic empty-body POST can't fully emulate).
 `expected-skips-baseline.json` (this directory) tell `run-test-plan.py`
 which non-`PASSED` results are expected, so it only exits non-zero for
 genuinely new regressions — the same mechanism OIDF's own CI uses
-(`.gitlab-ci/expected-failures-fapi.json` in the suite checkout; our
-`attempt-reuse-authorization-code-after-one-second` entry mirrors one
-of theirs almost verbatim — Authlete, OIDF's own reference AS, hits the
-identical warning for the identical reason). Currently covers:
-- `attempt-reuse-authorization-code-after-one-second`'s
-  `EnsureHttpStatusCodeIs4xx` warning — this AS's access tokens are
-  stateless, self-verifying JWTs (see `resource/verify.go`), so there's
-  no revocation list a resource endpoint could consult; RFC 6749
-  §4.1.2's "should revoke on detected code reuse" is a `SHOULD`, and the
-  suite's own module text confirms not implementing it won't block
-  certification.
+(`.gitlab-ci/expected-failures-fapi.json` in the suite checkout).
+`expected-warnings-{baseline,message-signing}.json` are currently both
+empty: `attempt-reuse-authorization-code-after-one-second`'s
+`EnsureHttpStatusCodeIs4xx` sub-check — which used to warn here, since
+this AS's access tokens are stateless, self-verifying JWTs (see
+`resource/verify.go`) with no revocation list a resource endpoint
+could consult — now passes cleanly. `server.Dependencies.Revocation`/
+`resource.Dependencies.Revocation` (see `server/revocation.go`,
+`resource/revocation.go`) let this AS revoke both the access token and
+any refresh token it issued when it detects the authorization code
+that produced them being reused, satisfying RFC 6749 §4.1.2's "SHOULD
+revoke (if possible) all tokens previously issued based on that
+authorization code" — `cmd/conformance-as` wires this to
+`storage/memstore.RevocationStore` (see `wiring.go`).
 Both plans' `client2` block requests `offline_access` alongside
 `client`'s — `refresh-token` drives its own cross-client
 refresh-token-binding check (client 1 must be rejected redeeming a

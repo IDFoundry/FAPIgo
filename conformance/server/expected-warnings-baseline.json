@@ -1,11 +1,1 @@
-[
-    {
-        "test-name": "fapi2-security-profile-final-attempt-reuse-authorization-code-after-one-second",
-        "variant": "*",
-        "configuration-filename": "*baseline-plan.json",
-        "current-block": "Testing if access token was revoked after authorization code reuse (the AS 'should' have revoked the access token)",
-        "condition": "EnsureHttpStatusCodeIs4xx",
-        "expected-result": "warning",
-        "comment": "This AS issues stateless, self-contained JWT access tokens verified by signature/exp alone (see resource/verify.go) - there is no revocation list a resource endpoint could consult. Detecting authorization-code reuse and additionally revoking the access token it already issued is a SHOULD (RFC 6749 4.1.2), not a MUST, and the suite's own module text confirms failing to do it will not block certification. See FAPIgo's conversation history / ARCHITECTURE.md for the tradeoff (stateless verification vs. a shared revocation store)."
-    }
-]
+[]

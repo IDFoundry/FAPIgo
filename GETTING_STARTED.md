@@ -98,8 +98,14 @@ deps := server.Dependencies{
 	Replay:       memstore.NewReplayStore(),
 	ClientKeys:   clientKeys,
 	Keys:         keyManager,
-	Clock:        server.SystemClock{},
-	Random:       rand.Reader,
+	// Lets this server revoke a token it already issued when it later
+	// detects the authorization code that produced it being reused
+	// (RFC 6749 §4.1.2). Pass server.NoRevocation{} instead to
+	// explicitly decline — see its doc comment for why declining must
+	// be a conscious choice, not a silent default.
+	Revocation: memstore.NewRevocationStore(),
+	Clock:      server.SystemClock{},
+	Random:     rand.Reader,
 }
 
 srv, err := server.New(cfg, deps)

@@ -7,6 +7,7 @@ import (
 	"net/url"
 
 	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/keys/ephemeral"
 	fapires "github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/server"
 )
@@ -19,7 +20,7 @@ import (
 // OIDF suite's own outbound client (see docker-compose.yml's header
 // comment) — does not trust it.
 type selfIssuerKeySource struct {
-	keyManager *ephemeralKeyManager
+	keyManager *ephemeral.KeyManager
 }
 
 func (s selfIssuerKeySource) ResolveIssuerKeys(ctx context.Context, req keys.IssuerKeyRequest) (keys.IssuerKeySet, error) {

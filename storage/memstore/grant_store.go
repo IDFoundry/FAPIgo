@@ -1,4 +1,4 @@
-package main
+package memstore
 
 import (
 	"context"
@@ -8,18 +8,18 @@ import (
 	"github.com/idfoundry/fapigo/storage"
 )
 
-// inMemoryGrantStore is an in-memory storage.GrantStore, ported from
-// fapitest/storage.go's memGrantStore — see inMemoryTransactionStore's
-// doc comment for the rationale (same pattern, testing.T dropped).
-type inMemoryGrantStore struct {
+// GrantStore is an in-memory storage.GrantStore. See the package doc
+// comment for why this is development/testing only.
+type GrantStore struct {
 	mu           sync.Mutex
 	codes        map[[32]byte]storage.NewAuthorizationCode
 	codeRedeemed map[[32]byte]bool
 	refresh      map[[32]byte]storage.NewRefreshToken
 }
 
-func newInMemoryGrantStore() *inMemoryGrantStore {
-	return &inMemoryGrantStore{
+// NewGrantStore builds an empty GrantStore.
+func NewGrantStore() *GrantStore {
+	return &GrantStore{
 		codes:        make(map[[32]byte]storage.NewAuthorizationCode),
 		codeRedeemed: make(map[[32]byte]bool),
 		refresh:      make(map[[32]byte]storage.NewRefreshToken),
@@ -27,7 +27,7 @@ func newInMemoryGrantStore() *inMemoryGrantStore {
 }
 
 // CreateAuthorizationCode implements storage.GrantStore.
-func (s *inMemoryGrantStore) CreateAuthorizationCode(_ context.Context, code storage.NewAuthorizationCode) error {
+func (s *GrantStore) CreateAuthorizationCode(_ context.Context, code storage.NewAuthorizationCode) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.codes[code.CodeHash] = code
@@ -35,15 +35,15 @@ func (s *inMemoryGrantStore) CreateAuthorizationCode(_ context.Context, code sto
 }
 
 // RedeemAuthorizationCode implements storage.GrantStore.
-func (s *inMemoryGrantStore) RedeemAuthorizationCode(_ context.Context, redemption storage.AuthorizationCodeRedemption) (storage.RedeemedAuthorizationCode, error) {
+func (s *GrantStore) RedeemAuthorizationCode(_ context.Context, redemption storage.AuthorizationCodeRedemption) (storage.RedeemedAuthorizationCode, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.codeRedeemed[redemption.CodeHash] {
-		return storage.RedeemedAuthorizationCode{}, fmt.Errorf("conformance-as: code already redeemed")
+		return storage.RedeemedAuthorizationCode{}, fmt.Errorf("memstore: code already redeemed")
 	}
 	code, ok := s.codes[redemption.CodeHash]
 	if !ok {
-		return storage.RedeemedAuthorizationCode{}, fmt.Errorf("conformance-as: unknown code")
+		return storage.RedeemedAuthorizationCode{}, fmt.Errorf("memstore: unknown code")
 	}
 	s.codeRedeemed[redemption.CodeHash] = true
 	return storage.RedeemedAuthorizationCode{
@@ -58,7 +58,7 @@ func (s *inMemoryGrantStore) RedeemAuthorizationCode(_ context.Context, redempti
 }
 
 // CreateRefreshToken implements storage.GrantStore.
-func (s *inMemoryGrantStore) CreateRefreshToken(_ context.Context, token storage.NewRefreshToken) error {
+func (s *GrantStore) CreateRefreshToken(_ context.Context, token storage.NewRefreshToken) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.refresh[token.TokenHash] = token
@@ -68,12 +68,12 @@ func (s *inMemoryGrantStore) CreateRefreshToken(_ context.Context, token storage
 // RedeemRefreshToken implements storage.GrantStore. Not single-use — see
 // the interface doc comment (FAPI2-SP-FINAL 5.3.2.1-9): a refresh token
 // stays valid for repeated use until it expires.
-func (s *inMemoryGrantStore) RedeemRefreshToken(_ context.Context, redemption storage.RefreshTokenRedemption) (storage.RedeemedRefreshToken, error) {
+func (s *GrantStore) RedeemRefreshToken(_ context.Context, redemption storage.RefreshTokenRedemption) (storage.RedeemedRefreshToken, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	token, ok := s.refresh[redemption.TokenHash]
 	if !ok {
-		return storage.RedeemedRefreshToken{}, fmt.Errorf("conformance-as: unknown refresh token")
+		return storage.RedeemedRefreshToken{}, fmt.Errorf("memstore: unknown refresh token")
 	}
 	return storage.RedeemedRefreshToken{
 		ClientID: token.ClientID, Subject: token.Subject, Scope: token.Scope,

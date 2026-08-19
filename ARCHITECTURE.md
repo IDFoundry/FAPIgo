@@ -57,7 +57,9 @@ fapigo/                    // package fapi: shared value types only
 ├── extension/             // shared custom-parameter & RAR definitions
 ├── storage/                // role-specific storage contracts, shared replay primitive,
 │                           // StoreAssurance capability checks + reusable contract test suite
+│   └── memstore/           // in-memory reference implementation (dev/test only, never production)
 ├── keys/                  // operation-based signing/verification contracts (Sign, never Signer)
+│   └── ephemeral/          // in-memory reference KeyManager/ClientKeySource (dev/test only, never production)
 ├── fapihttp/               // hardened HTTP transport used by all three roles
 ├── fapitest/               // in-process interop harness (test-only)
 ├── internal/

@@ -24,6 +24,7 @@ import (
 	"github.com/idfoundry/fapigo/fapihttp"
 	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/keys/ephemeral"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -140,7 +141,7 @@ func newSmokeHarness(t *testing.T) *smokeHarness {
 		t.Fatalf("build endpoints: %v", err)
 	}
 
-	clientKeyManager, err := newEphemeralKeyManager(map[keys.SigningPurpose]fapi.SignatureAlgorithm{
+	clientKeyManager, err := ephemeral.NewKeyManager(map[keys.SigningPurpose]fapi.SignatureAlgorithm{
 		keys.ClientAuthentication: fapi.ES256,
 		keys.DPoPProofSigning:     fapi.ES256,
 	})
@@ -197,7 +198,8 @@ func newSmokeHarness(t *testing.T) *smokeHarness {
 			MaxDPoPProofAge:            time.Minute,
 			MaxClockSkew:               5 * time.Second,
 		},
-		Clients:          []ClientKeySpec{{Registered: registered, JWKS: inlineJWKS}},
+		Clients:          []storage.RegisteredClient{registered},
+		ClientKeys:       []ephemeral.ClientKeySpec{{ClientID: testClientID, JWKS: inlineJWKS}},
 		AdvertisedScopes: []string{"openid", "accounts", "offline_access"},
 	}
 

@@ -1,9 +1,7 @@
 package keys
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"sync"
@@ -127,70 +125,19 @@ func (s *JWKSIssuerKeySource) refresh(ctx context.Context) ([]IssuerKey, error) 
 	return parsed, nil
 }
 
-type rawJWKSet struct {
-	Keys []json.RawMessage `json:"keys"`
-}
-
-// jwkAlgHint reads just enough of a JWK Set entry to decide which
-// fapi.SignatureAlgorithm to validate the rest of it against —
-// jose.ParseJWK needs that algorithm as an input, since it's what
-// determines which shape and size the key material must have.
-type jwkAlgHint struct {
-	Kty string `json:"kty"`
-	Crv string `json:"crv,omitempty"`
-	Alg string `json:"alg,omitempty"`
-	Kid string `json:"kid,omitempty"`
-}
-
-// parseJWKSDocument parses a JWK Set (RFC 7517 §5) into this module's
-// closed algorithm set, skipping any entry whose algorithm this module
-// doesn't support (an authorization server may publish keys for
-// algorithms other clients use) or whose shape doesn't parse — one
-// malformed or unsupported entry does not invalidate an otherwise usable
-// key set.
+// parseJWKSDocument parses a JWK Set (RFC 7517 §5) via the shared
+// internal/jose.ParseJWKSet (an authorization server may publish keys
+// for algorithms other clients use; that helper already skips any entry
+// this module doesn't support or that doesn't parse) and maps the
+// result into this package's own IssuerKey type.
 func parseJWKSDocument(body []byte) ([]IssuerKey, error) {
-	dec := json.NewDecoder(bytes.NewReader(body))
-	var set rawJWKSet
-	if err := dec.Decode(&set); err != nil {
-		return nil, fmt.Errorf("malformed jwks: %w", err)
+	parsed, err := jose.ParseJWKSet(body)
+	if err != nil {
+		return nil, err
 	}
-
-	var out []IssuerKey
-	for _, raw := range set.Keys {
-		var hint jwkAlgHint
-		if err := json.Unmarshal(raw, &hint); err != nil {
-			continue
-		}
-		alg, ok := algorithmForHint(hint)
-		if !ok {
-			continue
-		}
-		jwk, err := jose.ParseJWK(raw, alg)
-		if err != nil {
-			continue
-		}
-		out = append(out, IssuerKey{KeyID: hint.Kid, Algorithm: alg, PublicKey: jwk.PublicKey()})
+	out := make([]IssuerKey, len(parsed))
+	for i, k := range parsed {
+		out[i] = IssuerKey{KeyID: k.KeyID, Algorithm: k.Algorithm, PublicKey: k.PublicKey}
 	}
 	return out, nil
-}
-
-func algorithmForHint(h jwkAlgHint) (fapi.SignatureAlgorithm, bool) {
-	if h.Alg != "" {
-		alg, err := fapi.ParseSignatureAlgorithm(h.Alg)
-		if err != nil {
-			return 0, false
-		}
-		return alg, true
-	}
-	switch h.Kty {
-	case "EC":
-		if h.Crv == "P-256" {
-			return fapi.ES256, true
-		}
-		return 0, false
-	case "RSA":
-		return fapi.PS256, true
-	default:
-		return 0, false
-	}
 }

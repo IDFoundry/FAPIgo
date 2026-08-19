@@ -20,6 +20,7 @@ import (
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/keys/ephemeral"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -102,7 +103,15 @@ type ResolvedConfig struct {
 	DefaultSubject string
 	Algorithms     server.AlgorithmPolicy
 	Limits         server.Limits
-	Clients        []ClientKeySpec
+
+	// Clients and ClientKeys are two parallel slices, joined by
+	// ClientID: Clients feeds memstore.NewClientRepository (is this
+	// client registered at all), ClientKeys feeds
+	// ephemeral.NewClientKeySource (what verification keys does it
+	// present) — deliberately separate, since those are two different
+	// interfaces' concerns, not one combined "client config" concept.
+	Clients    []storage.RegisteredClient
+	ClientKeys []ephemeral.ClientKeySpec
 
 	// AdvertisedScopes is the union of every registered client's allowed
 	// scopes, published at the metadata endpoint's scopes_supported.
@@ -110,14 +119,6 @@ type ResolvedConfig struct {
 
 	TLSCertFile string
 	TLSKeyFile  string
-}
-
-// ClientKeySpec is one registered client together with where its
-// verification keys come from.
-type ClientKeySpec struct {
-	Registered storage.RegisteredClient
-	JWKS       json.RawMessage // set if the client's keys are inline
-	JWKSURI    string          // set if the client's keys must be fetched
 }
 
 // Resolve validates cfg and converts it into a ResolvedConfig, or a
@@ -204,11 +205,12 @@ func (cfg Config) Resolve(allowLoopbackHTTP bool) (ResolvedConfig, error) {
 	}
 	seenScope := make(map[string]struct{})
 	for _, c := range cfg.Clients {
-		spec, err := resolveClient(c)
+		registered, keySpec, err := resolveClient(c)
 		if err != nil {
 			return ResolvedConfig{}, fmt.Errorf("clients[%s]: %w", c.ID, err)
 		}
-		out.Clients = append(out.Clients, spec)
+		out.Clients = append(out.Clients, registered)
+		out.ClientKeys = append(out.ClientKeys, keySpec)
 		for _, s := range c.AllowedScopes {
 			if _, ok := seenScope[s]; !ok {
 				seenScope[s] = struct{}{}
@@ -226,29 +228,29 @@ func (cfg Config) Resolve(allowLoopbackHTTP bool) (ResolvedConfig, error) {
 	return out, nil
 }
 
-func resolveClient(c ClientConfig) (ClientKeySpec, error) {
+func resolveClient(c ClientConfig) (storage.RegisteredClient, ephemeral.ClientKeySpec, error) {
 	if c.ID == "" {
-		return ClientKeySpec{}, fmt.Errorf("id is required")
+		return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, fmt.Errorf("id is required")
 	}
 	if len(c.RedirectURIs) == 0 {
-		return ClientKeySpec{}, fmt.Errorf("redirect_uris must not be empty")
+		return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, fmt.Errorf("redirect_uris must not be empty")
 	}
 	assertionAlg, err := fapi.ParseSignatureAlgorithm(c.ClientAssertionAlgorithm)
 	if err != nil {
-		return ClientKeySpec{}, fmt.Errorf("client_assertion_algorithm: %w", err)
+		return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, fmt.Errorf("client_assertion_algorithm: %w", err)
 	}
 	var requestObjectAlg fapi.SignatureAlgorithm
 	if c.RequestObjectAlgorithm != "" {
 		requestObjectAlg, err = fapi.ParseSignatureAlgorithm(c.RequestObjectAlgorithm)
 		if err != nil {
-			return ClientKeySpec{}, fmt.Errorf("request_object_algorithm: %w", err)
+			return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, fmt.Errorf("request_object_algorithm: %w", err)
 		}
 	}
 
 	hasJWKS := len(c.JWKS) > 0
 	hasJWKSURI := c.JWKSURI != ""
 	if hasJWKS == hasJWKSURI {
-		return ClientKeySpec{}, fmt.Errorf("exactly one of jwks or jwks_uri must be set")
+		return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, fmt.Errorf("exactly one of jwks or jwks_uri must be set")
 	}
 
 	redirectURIs := make([]fapi.RegisteredRedirectURI, len(c.RedirectURIs))
@@ -256,18 +258,19 @@ func resolveClient(c ClientConfig) (ClientKeySpec, error) {
 		redirectURIs[i] = fapi.RegisteredRedirectURI(u)
 	}
 
+	clientID := fapi.ClientID(c.ID)
 	registered, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
-		ID:                       fapi.ClientID(c.ID),
+		ID:                       clientID,
 		RedirectURIs:             redirectURIs,
 		ClientAssertionAlgorithm: assertionAlg,
 		RequestObjectAlgorithm:   requestObjectAlg,
 		AllowedScopes:            c.AllowedScopes,
 	})
 	if err != nil {
-		return ClientKeySpec{}, err
+		return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, err
 	}
 
-	return ClientKeySpec{Registered: registered, JWKS: c.JWKS, JWKSURI: c.JWKSURI}, nil
+	return registered, ephemeral.ClientKeySpec{ClientID: clientID, JWKS: c.JWKS, JWKSURI: c.JWKSURI}, nil
 }
 
 func parseAlgorithmSet(values []string) (server.AlgorithmSet, error) {

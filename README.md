@@ -42,6 +42,13 @@ rigorously tested internal protocol core (JOSE, DPoP, PAR, PKCE, JARM,
 request objects, client assertions, canonicalization) without sharing
 role-level types or behaviour.
 
+`storage/memstore` and `keys/ephemeral` provide in-memory, non-durable
+implementations of every interface `server` needs (client repository,
+transaction/grant/replay stores, key manager, client key source) — for
+local development and testing only, never production — so integrating
+`server` doesn't require writing real persistence and key management
+from scratch just to see it run.
+
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design rationale and
 package layout, and [conformance/](conformance/README.md) for how each
 role is tested against the OpenID Foundation conformance suite.

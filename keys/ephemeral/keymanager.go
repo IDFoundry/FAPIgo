@@ -1,4 +1,4 @@
-package main
+package ephemeral
 
 import (
 	"context"
@@ -14,25 +14,20 @@ import (
 	"github.com/idfoundry/fapigo/keys"
 )
 
-// ephemeralKeyManager is a keys.KeyManager backed by fresh in-memory keys
-// generated once at process startup, one per active signing purpose.
-//
-// The OIDF conformance suite fetches jwks_uri live on every test run and
-// never needs to verify a signature across a process restart, so
-// persisting these private keys to disk would be an operational
-// liability (a stray private key file) with no conformance benefit.
-// Revisit only if a specific test module needs key rollover.
-type ephemeralKeyManager struct {
+// KeyManager is a keys.KeyManager backed by fresh in-memory keys
+// generated once at construction, one per active signing purpose. See
+// the package doc comment for why this is development/testing only.
+type KeyManager struct {
 	mu   sync.Mutex
 	keys map[keys.SigningPurpose]crypto.Signer
 	kid  map[keys.SigningPurpose]string
 }
 
-// newEphemeralKeyManager generates one key per purpose in purposes, sized
-// for the paired algorithm (ECDSA P-256 for ES256, RSA-2048 for PS256 —
-// the only two algorithms this module supports).
-func newEphemeralKeyManager(purposes map[keys.SigningPurpose]fapi.SignatureAlgorithm) (*ephemeralKeyManager, error) {
-	m := &ephemeralKeyManager{
+// NewKeyManager generates one key per purpose in purposes, sized for
+// the paired algorithm (ECDSA P-256 for ES256, RSA-2048 for PS256 — the
+// only two algorithms this module supports).
+func NewKeyManager(purposes map[keys.SigningPurpose]fapi.SignatureAlgorithm) (*KeyManager, error) {
+	m := &KeyManager{
 		keys: make(map[keys.SigningPurpose]crypto.Signer, len(purposes)),
 		kid:  make(map[keys.SigningPurpose]string, len(purposes)),
 	}
@@ -42,7 +37,7 @@ func newEphemeralKeyManager(purposes map[keys.SigningPurpose]fapi.SignatureAlgor
 			return nil, fmt.Errorf("generate key for purpose %v: %w", purpose, err)
 		}
 		m.keys[purpose] = signer
-		m.kid[purpose] = fmt.Sprintf("as-%d-%s", purpose, alg.String())
+		m.kid[purpose] = fmt.Sprintf("ephemeral-%d-%s", purpose, alg.String())
 	}
 	return m, nil
 }
@@ -59,13 +54,13 @@ func generateSigner(alg fapi.SignatureAlgorithm) (crypto.Signer, error) {
 }
 
 // Sign implements keys.KeyManager.
-func (m *ephemeralKeyManager) Sign(_ context.Context, req keys.SigningRequest) (keys.Signature, error) {
+func (m *KeyManager) Sign(_ context.Context, req keys.SigningRequest) (keys.Signature, error) {
 	m.mu.Lock()
 	signer, ok := m.keys[req.Purpose]
 	kid := m.kid[req.Purpose]
 	m.mu.Unlock()
 	if !ok {
-		return keys.Signature{}, fmt.Errorf("conformance-as: no key for purpose %v", req.Purpose)
+		return keys.Signature{}, fmt.Errorf("ephemeral: no key for purpose %v", req.Purpose)
 	}
 
 	switch key := signer.(type) {
@@ -84,18 +79,18 @@ func (m *ephemeralKeyManager) Sign(_ context.Context, req keys.SigningRequest) (
 		}
 		return keys.Signature{KeyID: kid, Value: sig}, nil
 	default:
-		return keys.Signature{}, fmt.Errorf("conformance-as: unsupported key type %T", signer)
+		return keys.Signature{}, fmt.Errorf("ephemeral: unsupported key type %T", signer)
 	}
 }
 
 // PublicKey implements keys.KeyManager.
-func (m *ephemeralKeyManager) PublicKey(_ context.Context, purpose keys.SigningPurpose, _ fapi.SignatureAlgorithm) (keys.PublicKeyInfo, error) {
+func (m *KeyManager) PublicKey(_ context.Context, purpose keys.SigningPurpose, _ fapi.SignatureAlgorithm) (keys.PublicKeyInfo, error) {
 	m.mu.Lock()
 	signer, ok := m.keys[purpose]
 	kid := m.kid[purpose]
 	m.mu.Unlock()
 	if !ok {
-		return keys.PublicKeyInfo{}, fmt.Errorf("conformance-as: no key for purpose %v", purpose)
+		return keys.PublicKeyInfo{}, fmt.Errorf("ephemeral: no key for purpose %v", purpose)
 	}
 	return keys.PublicKeyInfo{KeyID: kid, PublicKey: signer.Public()}, nil
 }

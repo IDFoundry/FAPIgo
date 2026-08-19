@@ -7,9 +7,14 @@
 // SigningPurpose values once those endpoints are implemented);
 // verification.go
 // defines the corresponding public-key resolution used to check
-// signatures against a known or discovered JWK. Concrete implementations
-// (in-process, HSM-backed, KMS-backed) live outside this module and only
-// need to satisfy these interfaces.
+// signatures against a known or discovered JWK. Production concrete
+// implementations (HSM-backed, KMS-backed) live outside this module and
+// only need to satisfy these interfaces. The one exception is
+// keys/ephemeral, an in-tree, in-memory KeyManager/ClientKeySource pair
+// for local development and testing only — never production — that
+// exists so integrating server doesn't require writing key management
+// from scratch just to get something running; see its own package doc
+// comment.
 //
 // KeyManager never returns a crypto.Signer — only a Sign operation and a
 // public JWK — so an HSM- or remote-signing-service-backed implementation

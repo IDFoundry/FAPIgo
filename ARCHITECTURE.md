@@ -270,6 +270,44 @@ tolerated for low-value diagnostics is a `server` configuration
 decision, not something left to `AuditSink` implementers to each decide
 differently.
 
+**Dynamic client registration ([RFC 7591][dcr] / [RFC 7592][dcrm]), if
+added, extends this state machine — it doesn't bypass it.** Not
+committed to: FAPI 2.0 Security Profile Final §5.4.2 recommends but
+does not require it, as one of two options for client key distribution
+— the other, a static `jwks_uri` per client, is already fully
+supported, and the OIDF conformance suite's plain FAPI2 Security
+Profile Final test plan (unlike its separate, Brazil-Open-Banking-
+specific DCR plan) has no DCR module at all. If it is added:
+
+- A registration request is validated against `Config.Algorithms` and
+  a fixed FAPI2 grant/response-type set (`authorization_code`
+  [+`refresh_token` for `offline_access`], `response_type=code`,
+  `private_key_jwt` only — RFC 7591 §2's `token_endpoint_auth_method`/
+  `grant_types`/`response_types` are not client-negotiable here) in
+  `server`, before `storage` is ever touched.
+  `storage.NewRegisteredClient` only checks structural validity today
+  (is this a recognized algorithm at all) — it has no visibility into
+  server-wide policy, and shouldn't gain any: `storage` sits below
+  `server` in rule 14's dependency layering, so a policy check that
+  needs `Config.Algorithms` belongs in `server`, the same layer that
+  already runs the equivalent check lazily, per request, in
+  `PushAuthorizationRequest`.
+- `RegisterClient`/`ReadClient`/`UpdateClient`/`DeleteClient` follow
+  the same typed-request → typed-result/typed-error shape every other
+  method here does — no generic `HandleRequest` for this either.
+- Registration access tokens (RFC 7592 §1.1) are a new storage
+  primitive, not a repurposed `GrantStore` refresh token: they
+  authenticate the management endpoint itself, not a resource, and
+  their rotate-on-read/update semantics (RFC 7592 §5, a MAY, never a
+  MUST) don't match this codebase's existing single-use (authorization
+  code) or reuse-until-expiry (refresh token) lifecycles.
+- `keys.ClientKeySource` needs its own write path, independent of
+  `storage.ClientRepository`'s. A client's key material (`jwks`/
+  `jwks_uri`, RFC 7591 §2) is already modeled as a concern separate
+  from its registration metadata (see `keys.ClientKeySource` vs.
+  `storage.ClientRepository`); registration must keep writing to both
+  without merging them into one interface.
+
 ### 8. Resource server verifies in HTTP context, not in isolation
 
 `Verifier.Verify(ctx, VerifyRequest{Method, URL, Authorization, DPoPProof})`
@@ -425,3 +463,5 @@ signed protocol outputs.
 [par]: https://www.rfc-editor.org/info/rfc9126
 [dpop]: https://www.rfc-editor.org/info/rfc9449
 [rar]: https://www.rfc-editor.org/info/rfc9396
+[dcr]: https://www.rfc-editor.org/info/rfc7591
+[dcrm]: https://www.rfc-editor.org/info/rfc7592

@@ -1,4 +1,4 @@
-name: Conformance
+name: FAPI2 Conformance
 
 # Runs all four FAPI2 conformance suites this repo has driver support
 # for (see conformance/scripts/run-all.sh) against a freshly-brought-up

@@ -37,8 +37,16 @@ else in this guide changes.
 
 Every field below is required — `server.New` rejects a zero value for
 any of them, on purpose (see `server/doc.go`: "no implicit defaults, no
-silently-installed in-memory store"). There's no sane default duration
-to guess for you; pick values that match your own security policy.
+silently-installed in-memory store"). `Algorithms` and `Limits` are five
+and nine fields respectively with no sane universal default, so
+`server.RecommendedAlgorithms()` and `server.RecommendedLimits()` exist
+as an explicit, deliberate starting point — each field is documented
+with exactly how it's grounded (a direct FAPI 2.0 Security Profile Final
+or RFC 9449 requirement, versus this module's own conservative
+operational choice, clearly labeled either way — see `server/presets.go`).
+Calling them is as much a choice as writing the values yourself; `New`
+never reaches for them on its own. Override any field your own security
+policy calls for.
 
 ```go
 cfg := server.Config{
@@ -49,25 +57,9 @@ cfg := server.Config{
 		PushedAuthorizationRequest: parURL,
 		JWKS:                       jwksURL,
 	},
-	Profile: server.ProfileFAPISecurity, // or ProfileFAPISecurityWithMessageSigning
-	Algorithms: server.AlgorithmPolicy{
-		ClientAssertion: server.AlgorithmSet{fapi.ES256},
-		RequestObject:   server.AlgorithmSet{fapi.ES256},
-		AccessToken:     fapi.ES256,
-		IDToken:         fapi.ES256,
-	},
-	Limits: server.Limits{
-		PushedRequestLifetime:      90 * time.Second,
-		MaxClientAssertionLifetime: time.Minute,
-		MaxRequestObjectLifetime:   time.Minute,
-		InteractionLifetime:        5 * time.Minute,
-		AuthorizationCodeLifetime:  time.Minute,
-		AccessTokenLifetime:        5 * time.Minute,
-		IDTokenLifetime:            5 * time.Minute,
-		RefreshTokenLifetime:       24 * time.Hour,
-		MaxDPoPProofAge:            time.Minute,
-		MaxClockSkew:               5 * time.Second,
-	},
+	Profile:    server.ProfileFAPISecurity, // or ProfileFAPISecurityWithMessageSigning
+	Algorithms: server.RecommendedAlgorithms(),
+	Limits:     server.RecommendedLimits(),
 	Assurance: server.AssuranceDevelopment, // AssuranceProduction once your real deps are ready
 }
 ```

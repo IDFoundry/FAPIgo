@@ -47,8 +47,12 @@ implementations of every interface `server` needs (client repository,
 transaction/grant/replay stores, key manager, client key source) — for
 local development and testing only, never production — so integrating
 `server` doesn't require writing real persistence and key management
-from scratch just to see it run. See [GETTING_STARTED.md](GETTING_STARTED.md)
-for a walkthrough of standing up an authorization server end to end.
+from scratch just to see it run. `server.RecommendedLimits()` and
+`server.RecommendedAlgorithms()` do the same for `Config`'s algorithm
+and duration fields, each grounded in a specific FAPI 2.0 Security
+Profile Final or RFC 9449 requirement where one exists — see
+[GETTING_STARTED.md](GETTING_STARTED.md) for a walkthrough of standing
+up an authorization server end to end.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design rationale and
 package layout, and [conformance/](conformance/README.md) for how each

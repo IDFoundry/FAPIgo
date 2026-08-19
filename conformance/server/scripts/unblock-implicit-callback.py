@@ -70,6 +70,33 @@ stuck-waiting-for-a-human events and resolves each automatically:
      that risk window while still usually being enough to let the
      browser's own JS (see immediately below) win first.
 
+     One exception, confirmed live by downloading and directly
+     inspecting cmd/conformance-as's own conformance.yml artifacts
+     across a run of consecutive CI executions: the very first
+     implicit-submit URL a run ever sees loses this race to the
+     browser far more often than any later one — in every historical
+     retry of this exact flake, the retried module was always the
+     first (and only the first) one this script ever unblocked in
+     that run, confirmed from the poller's own log. The reason isn't
+     suite-wide flakiness: this script's KeepAliveClient opens its
+     HTTPS connection once, at process start, before the plan even
+     has a first module, so it's already warm the instant it sees the
+     first submission URL — while the suite's own scripted browser is
+     rendering and executing JS on that module's callback page for
+     the first time in the whole session, which is measurably slower
+     (~500ms observed) than every subsequent module, where the same
+     browser session is already warmed up and reliably wins the
+     normal one-cycle deferral on its own (confirmed live: this
+     script's own "browser's own JS already submitted" skip fires
+     reliably from the second module onward, never observed to also
+     be needed for the first). FIRST_IMPLICIT_SUBMIT_EXTRA_CYCLES below
+     gives only that one, per-run first URL extra deferral time to let
+     the browser's one-time cold start finish before this script would
+     otherwise act — every later URL keeps the original one-cycle
+     deferral this section describes, so the cross-module-misrouting
+     risk above is unchanged for every module except the one that was
+     already being retried before this existed.
+
   2. A log entry carrying an "upload" placeholder id (negative-test
      modules that land on a local error page and ask a human to
      "upload a screenshot" — createBrowserInteractionPlaceholder() in
@@ -205,11 +232,29 @@ def main():
 
     client = KeepAliveClient()
     submitted = set()   # implicit_submit fullUrl values already POSTed (one attempt each)
-    pending = {}        # fullUrl -> instance_id, seen one cycle ago, not yet acted on
+    pending = {}        # fullUrl -> [instance_id, cycles_seen since first spotted]
+    first_implicit_url = None  # the very first implicit-submit URL this process ever
+                                # saw, across every plan_id given - see
+                                # FIRST_IMPLICIT_SUBMIT_EXTRA_CYCLES's doc comment
     uploaded = set()    # (instance_id, placeholder) pairs already filled (one attempt each)
     pending_placeholders = {}  # (instance_id, placeholder) -> monotonic time first seen
     active = set()      # instance ids not yet confirmed terminal
     seen_ever = set()   # instance ids ever added, so we don't re-add a terminal one
+
+    # Extra poll cycles (on top of the normal one-cycle deferral every
+    # other implicit-submit URL gets) given only to the very first URL
+    # this process ever sees - see this file's own doc comment for why
+    # only the first one needs it (the browser's one-time cold start
+    # for the first page it ever loads in the session, observed live
+    # to take ~500ms, versus every later module where the same
+    # already-warmed browser session reliably wins the normal one-
+    # cycle deferral on its own). 3 extra cycles at this script's
+    # ~0.2s poll interval is comfortably above the ~500ms observed
+    # cold-start cost with margin, while still being far short of the
+    # flat one-second-for-every-module delay already confirmed live to
+    # regress cross-module alias misrouting - this only ever affects
+    # the one first-of-run URL, never any other module's deferral.
+    FIRST_IMPLICIT_SUBMIT_EXTRA_CYCLES = 3
 
     # A placeholder can be created (and logged) well before the module's
     # own success path has a chance to run - anywhere from as soon as
@@ -283,7 +328,15 @@ def main():
                         # deliberate flat delay was tried for once and
                         # reverted (see git history) — this is scaled to
                         # the poll interval, not a guessed constant.
-                        pending[full_url] = instance_id
+                        pending[full_url] = [instance_id, 0]
+                        if first_implicit_url is None:
+                            first_implicit_url = full_url
+                        continue
+                    pending[full_url][1] += 1
+                    required_cycles = (
+                        1 + FIRST_IMPLICIT_SUBMIT_EXTRA_CYCLES if full_url == first_implicit_url else 1
+                    )
+                    if pending[full_url][1] < required_cycles:
                         continue
                     del pending[full_url]
                     submitted.add(full_url)

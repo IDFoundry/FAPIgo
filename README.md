@@ -8,8 +8,7 @@ Hardened, separately conformant FAPI 2.0 client, authorization-server and
 resource-server engines for Go, built on one rigorously tested protocol
 core.
 
-> **⚠ Work in progress.** APIs, package layout and behavior may still
-> change without notice. Not yet recommended for production use.
+> **⚠ Work in progress.** FAPIgo is under active development. APIs, package structure, and behavior may change without notice. We recommend waiting for the v1.0 release before considering it for production use.
 
 > **Status:** all three roles (`client`, `server`, `resource`), the shared
 > internal protocol core, `keys`, `storage` (including a reusable storage

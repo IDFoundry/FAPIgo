@@ -8,8 +8,6 @@ import (
 	"time"
 
 	"github.com/idfoundry/fapigo/internal/dpop"
-	"github.com/idfoundry/fapigo/internal/token"
-	"github.com/idfoundry/fapigo/keys"
 )
 
 // VerifyRequest describes one incoming request to verify: the HTTP
@@ -36,10 +34,11 @@ type AuthorizationContext struct {
 	Claims    map[string]json.RawMessage
 	ExpiresAt time.Time
 
-	// JTI is the access token's JWT ID, exposed for a caller's own audit
+	// Key is the access token's revocation-lookup identifier (see
+	// ValidatedAccessToken.Key), exposed for a caller's own audit
 	// logging — it's already available at this point (see
 	// Dependencies.Revocation), so surfacing it costs nothing.
-	JTI string
+	Key string
 }
 
 // Verify checks req's Authorization header and DPoP proof together —
@@ -68,11 +67,6 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (Authorization
 		return AuthorizationContext{}, newError(ErrorInvalidRequest, 400, "DPoP header is required", nil)
 	}
 
-	parsed, err := token.ParseAccessToken(raw)
-	if err != nil {
-		return AuthorizationContext{}, newError(ErrorInvalidToken, 401, "access token is malformed", err)
-	}
-
 	now := v.deps.Clock.Now()
 
 	verifiedProof, err := dpop.Verify(ctx, dpop.VerifyRequest{
@@ -89,48 +83,24 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (Authorization
 		return AuthorizationContext{}, newError(ErrorInvalidToken, 401, "DPoP proof verification failed", err)
 	}
 
-	candidates, err := v.deps.IssuerKeys.ResolveIssuerKeys(ctx, keys.IssuerKeyRequest{
-		Issuer:    v.cfg.Issuer.String(),
-		Purpose:   keys.AccessTokenVerification,
-		Algorithm: v.cfg.Algorithm,
-		KeyID:     parsed.KeyID(),
+	validated, err := v.deps.AccessTokens.VerifyAccessToken(ctx, VerifyAccessTokenRequest{
+		Raw: raw, Thumbprint: verifiedProof.Thumbprint.String(),
+		Now: now, MaxClockSkew: v.cfg.Limits.MaxClockSkew,
 	})
 	if err != nil {
-		return AuthorizationContext{}, newError(ErrorServerError, 500, "failed to resolve issuer keys", err)
-	}
-	if len(candidates.Keys) == 0 {
-		return AuthorizationContext{}, newError(ErrorInvalidToken, 401, "no matching issuer key", nil)
-	}
-
-	policy := token.AccessTokenValidatePolicy{
-		ExpectedIssuer:     v.cfg.Issuer.String(),
-		ExpectedAudience:   v.cfg.Audience,
-		Algorithm:          v.cfg.Algorithm,
-		ExpectedThumbprint: &verifiedProof.Thumbprint,
-		Now:                now,
-		MaxLifetime:        v.cfg.Limits.MaxTokenLifetime,
-		MaxClockSkew:       v.cfg.Limits.MaxClockSkew,
-	}
-
-	var (
-		validated token.ValidatedAccessToken
-		validErr  error
-	)
-	// TODO: bound the number of candidates tried here if IssuerKeySource
-	// ever becomes attacker-influenced (e.g. a live JWKS fetch keyed by
-	// untrusted input) — an unbounded key set turns this loop into an
-	// attacker-controlled amount of signature verification work.
-	for _, candidate := range candidates.Keys {
-		validated, validErr = parsed.Validate(candidate.PublicKey, policy)
-		if validErr == nil {
-			break
+		// A *Error carries its own exposure (see AccessTokenVerifier's
+		// own doc comment on why that's the implementation's call, not
+		// this method's) — propagate it unchanged. A bare error (a
+		// third-party AccessTokenVerifier that didn't follow that
+		// convention) falls back to the same invalid_token/401 every
+		// other rejection here defaults to.
+		if rerr, ok := err.(*Error); ok {
+			return AuthorizationContext{}, rerr
 		}
-	}
-	if validErr != nil {
-		return AuthorizationContext{}, newError(ErrorInvalidToken, 401, "access token is invalid", validErr)
+		return AuthorizationContext{}, newError(ErrorInvalidToken, 401, "access token is invalid", err)
 	}
 
-	revoked, err := v.deps.Revocation.IsRevoked(ctx, validated.JTI)
+	revoked, err := v.deps.Revocation.IsRevoked(ctx, validated.Key)
 	if err != nil {
 		return AuthorizationContext{}, newError(ErrorServerError, 500, "failed to check token revocation", err)
 	}
@@ -138,17 +108,12 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (Authorization
 		return AuthorizationContext{}, newError(ErrorInvalidToken, 401, "access token has been revoked", nil)
 	}
 
-	var scopes []string
-	if validated.Scope != "" {
-		scopes = strings.Fields(validated.Scope)
-	}
-
 	return AuthorizationContext{
 		Subject:   validated.Subject,
 		ClientID:  validated.ClientID,
-		Scopes:    scopes,
-		Claims:    validated.Parameters,
+		Scopes:    validated.Scopes,
+		Claims:    validated.Claims,
 		ExpiresAt: validated.ExpiresAt,
-		JTI:       validated.JTI,
+		Key:       validated.Key,
 	}, nil
 }

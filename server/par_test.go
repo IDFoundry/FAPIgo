@@ -174,7 +174,7 @@ type fakeGrantStore struct {
 	codes           []storage.NewAuthorizationCode
 	byHash          map[[32]byte]storage.NewAuthorizationCode
 	redeemed        map[[32]byte]bool
-	codeAccessJTI   map[[32]byte]string
+	codeAccessKey   map[[32]byte]string
 	codeRefreshHash map[[32]byte][32]byte
 	refreshTokens   []storage.NewRefreshToken
 	refreshByHash   map[[32]byte]storage.NewRefreshToken
@@ -200,7 +200,7 @@ func (f *fakeGrantStore) RedeemAuthorizationCode(_ context.Context, redemption s
 	}
 	if f.redeemed[redemption.CodeHash] {
 		err := &storage.AuthorizationCodeAlreadyRedeemedError{
-			IssuedAccessTokenJTI: f.codeAccessJTI[redemption.CodeHash],
+			IssuedAccessTokenKey: f.codeAccessKey[redemption.CodeHash],
 		}
 		if hash, ok := f.codeRefreshHash[redemption.CodeHash]; ok {
 			h := hash
@@ -240,13 +240,13 @@ func (f *fakeGrantStore) all() []storage.NewAuthorizationCode {
 	return out
 }
 
-func (f *fakeGrantStore) RecordIssuedAccessToken(_ context.Context, codeHash [32]byte, jti string, _ time.Time) error {
+func (f *fakeGrantStore) RecordIssuedAccessToken(_ context.Context, codeHash [32]byte, key string, _ time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.codeAccessJTI == nil {
-		f.codeAccessJTI = make(map[[32]byte]string)
+	if f.codeAccessKey == nil {
+		f.codeAccessKey = make(map[[32]byte]string)
 	}
-	f.codeAccessJTI[codeHash] = jti
+	f.codeAccessKey[codeHash] = key
 	return nil
 }
 
@@ -488,7 +488,6 @@ func newHarness(t *testing.T, profile server.Profile, allowRequestObjects bool) 
 			ClientAssertion: server.AlgorithmSet{fapi.ES256},
 			RequestObject:   server.AlgorithmSet{fapi.ES256},
 			JARM:            fapi.ES256,
-			AccessToken:     fapi.ES256,
 			IDToken:         fapi.ES256,
 		},
 		Limits: server.Limits{
@@ -506,6 +505,7 @@ func newHarness(t *testing.T, profile server.Profile, allowRequestObjects bool) 
 		},
 		Assurance: server.AssuranceDevelopment,
 	}
+	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
 	deps := server.Dependencies{
 		Clients:      &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
 		Transactions: transactions,
@@ -514,11 +514,12 @@ func newHarness(t *testing.T, profile server.Profile, allowRequestObjects bool) 
 		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
 			testClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
 		}},
-		Keys:       &fakeKeyManager{key: serverKey, keyID: "as-key-1"},
-		Revocation: revocation,
-		Audit:      audit,
-		Clock:      fixedClock{now: now},
-		Random:     rand.Reader,
+		Keys:         serverKeyManager,
+		AccessTokens: server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:   revocation,
+		Audit:        audit,
+		Clock:        fixedClock{now: now},
+		Random:       rand.Reader,
 	}
 
 	srv, err := server.New(cfg, deps)
@@ -1000,7 +1001,6 @@ func newHarnessWithExtensions(t *testing.T, profile server.Profile, registry *ex
 			ClientAssertion: server.AlgorithmSet{fapi.ES256},
 			RequestObject:   server.AlgorithmSet{fapi.ES256},
 			JARM:            fapi.ES256,
-			AccessToken:     fapi.ES256,
 			IDToken:         fapi.ES256,
 		},
 		Limits: server.Limits{
@@ -1019,6 +1019,7 @@ func newHarnessWithExtensions(t *testing.T, profile server.Profile, registry *ex
 		Assurance:  server.AssuranceDevelopment,
 		Extensions: registry,
 	}
+	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
 	deps := server.Dependencies{
 		Clients:      &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
 		Transactions: &fakeTransactionStore{},
@@ -1027,10 +1028,11 @@ func newHarnessWithExtensions(t *testing.T, profile server.Profile, registry *ex
 		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
 			testClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
 		}},
-		Keys:       &fakeKeyManager{key: serverKey, keyID: "as-key-1"},
-		Revocation: server.NoRevocation{},
-		Clock:      fixedClock{now: now},
-		Random:     rand.Reader,
+		Keys:         serverKeyManager,
+		AccessTokens: server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:   server.NoRevocation{},
+		Clock:        fixedClock{now: now},
+		Random:       rand.Reader,
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {

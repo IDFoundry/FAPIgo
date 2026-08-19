@@ -130,7 +130,6 @@ func newHarnessWithIdentityClaims(t *testing.T, identityClaims server.IdentityCl
 			ClientAssertion: server.AlgorithmSet{fapi.ES256},
 			RequestObject:   server.AlgorithmSet{fapi.ES256},
 			JARM:            fapi.ES256,
-			AccessToken:     fapi.ES256,
 			IDToken:         fapi.ES256,
 		},
 		Limits: server.Limits{
@@ -148,6 +147,7 @@ func newHarnessWithIdentityClaims(t *testing.T, identityClaims server.IdentityCl
 		},
 		Assurance: server.AssuranceDevelopment,
 	}
+	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
 	deps := server.Dependencies{
 		Clients:      &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
 		Transactions: &fakeTransactionStore{},
@@ -156,7 +156,8 @@ func newHarnessWithIdentityClaims(t *testing.T, identityClaims server.IdentityCl
 		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
 			testClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
 		}},
-		Keys:           &fakeKeyManager{key: serverKey, keyID: "as-key-1"},
+		Keys:           serverKeyManager,
+		AccessTokens:   server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
 		Revocation:     server.NoRevocation{},
 		Clock:          fixedClock{now: now},
 		Random:         rand.Reader,

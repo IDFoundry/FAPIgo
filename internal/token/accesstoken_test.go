@@ -114,8 +114,9 @@ func TestAccessTokenConfirmationBinding(t *testing.T) {
 		t.Fatalf("ParseAccessToken: %v", err)
 	}
 
+	thumbprintStr := thumbprint.String()
 	policy := baseAccessTokenPolicy(now)
-	policy.ExpectedThumbprint = &thumbprint
+	policy.ExpectedThumbprint = &thumbprintStr
 	if _, err := parsed.Validate(&key.PublicKey, policy); err != nil {
 		t.Fatalf("Validate(matching thumbprint): %v", err)
 	}
@@ -129,8 +130,9 @@ func TestAccessTokenConfirmationBinding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Thumbprint: %v", err)
 	}
+	otherThumbprintStr := otherThumbprint.String()
 	wrongPolicy := baseAccessTokenPolicy(now)
-	wrongPolicy.ExpectedThumbprint = &otherThumbprint
+	wrongPolicy.ExpectedThumbprint = &otherThumbprintStr
 	if _, err := parsed.Validate(&key.PublicKey, wrongPolicy); !errors.Is(err, ErrConfirmationMismatch) {
 		t.Fatalf("Validate(wrong thumbprint) = %v, want ErrConfirmationMismatch", err)
 	}
@@ -157,8 +159,9 @@ func TestAccessTokenMissingConfirmationWhenRequired(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Thumbprint: %v", err)
 	}
+	thumbprintStr := thumbprint.String()
 	policy := baseAccessTokenPolicy(now)
-	policy.ExpectedThumbprint = &thumbprint
+	policy.ExpectedThumbprint = &thumbprintStr
 	if _, err := parsed.Validate(&key.PublicKey, policy); !errors.Is(err, ErrMissingConfirmation) {
 		t.Fatalf("Validate(no cnf, required) = %v, want ErrMissingConfirmation", err)
 	}

@@ -300,6 +300,7 @@ func TestBeginAuthorizationRejectsExpiredRequestURI(t *testing.T) {
 		t.Fatalf("ParseIssuerURL: %v", err)
 	}
 	clock := &stepClock{now: time.Now()}
+	serverKeyManager := &fakeKeyManager{key: generateKey(t), keyID: "as-key-1"}
 
 	srv, err := server.New(server.Config{
 		Issuer:    issuer,
@@ -308,7 +309,6 @@ func TestBeginAuthorizationRejectsExpiredRequestURI(t *testing.T) {
 		Algorithms: server.AlgorithmPolicy{
 			ClientAssertion: server.AlgorithmSet{fapi.ES256},
 			RequestObject:   server.AlgorithmSet{fapi.ES256},
-			AccessToken:     fapi.ES256,
 			IDToken:         fapi.ES256,
 		},
 		Limits: server.Limits{
@@ -332,10 +332,11 @@ func TestBeginAuthorizationRejectsExpiredRequestURI(t *testing.T) {
 		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
 			testClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
 		}},
-		Keys:       &fakeKeyManager{key: generateKey(t), keyID: "as-key-1"},
-		Revocation: server.NoRevocation{},
-		Clock:      clock,
-		Random:     rand.Reader,
+		Keys:         serverKeyManager,
+		AccessTokens: server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:   server.NoRevocation{},
+		Clock:        clock,
+		Random:       rand.Reader,
 	})
 	if err != nil {
 		t.Fatalf("server.New: %v", err)

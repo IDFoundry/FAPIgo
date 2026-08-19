@@ -110,7 +110,6 @@ func New(t *testing.T, cfg Config) *Harness {
 			ClientAssertion: server.AlgorithmSet{fapi.ES256},
 			RequestObject:   server.AlgorithmSet{fapi.ES256},
 			JARM:            fapi.ES256,
-			AccessToken:     fapi.ES256,
 			IDToken:         fapi.ES256,
 		},
 		Limits: server.Limits{
@@ -130,6 +129,10 @@ func New(t *testing.T, cfg Config) *Harness {
 		Extensions: cfg.Extensions,
 	}
 	revocation := newMemRevocationStore()
+	jwtAccessTokens, err := server.NewJWTAccessTokens(asKeys, fapi.ES256)
+	if err != nil {
+		t.Fatalf("fapitest: server.NewJWTAccessTokens: %v", err)
+	}
 	srvDeps := server.Dependencies{
 		Clients:      &memClientRepository{client: registeredClient},
 		Transactions: newMemTransactionStore(),
@@ -137,6 +140,7 @@ func New(t *testing.T, cfg Config) *Harness {
 		Replay:       replay,
 		ClientKeys:   &memClientKeySource{clientID: ClientID, manager: clientKeys},
 		Keys:         asKeys,
+		AccessTokens: jwtAccessTokens,
 		Revocation:   revocation,
 		Clock:        clock,
 		Random:       rand.Reader,
@@ -193,20 +197,20 @@ func New(t *testing.T, cfg Config) *Harness {
 	}
 
 	resourceCfg := resource.Config{
-		Issuer:    issuer,
-		Audience:  Issuer,
-		Algorithm: fapi.ES256,
 		Limits: resource.Limits{
-			MaxTokenLifetime: 5 * time.Minute,
-			MaxDPoPProofAge:  time.Minute,
-			MaxClockSkew:     5 * time.Second,
+			MaxDPoPProofAge: time.Minute,
+			MaxClockSkew:    5 * time.Second,
 		},
 	}
+	resourceJWT, err := resource.NewJWTAccessTokens(&memIssuerKeySource{issuer: Issuer, manager: asKeys}, issuer, Issuer, fapi.ES256, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("fapitest: resource.NewJWTAccessTokens: %v", err)
+	}
 	resourceDeps := resource.Dependencies{
-		IssuerKeys: &memIssuerKeySource{issuer: Issuer, manager: asKeys},
-		Replay:     replay,
-		Revocation: revocation,
-		Clock:      clock,
+		AccessTokens: resourceJWT,
+		Replay:       replay,
+		Revocation:   revocation,
+		Clock:        clock,
 	}
 	rs, err := resource.NewVerifier(resourceCfg, resourceDeps)
 	if err != nil {

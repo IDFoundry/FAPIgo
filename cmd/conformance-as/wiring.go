@@ -33,7 +33,12 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool) (*http.ServeM
 	}
 
 	purposes := map[keys.SigningPurpose]fapi.SignatureAlgorithm{
-		keys.AccessTokenSigning: resolved.Algorithms.AccessToken,
+		// No Algorithms.AccessToken anymore — access-token signing is
+		// JWTAccessTokens' own concern (see below), not Config's.
+		// Reuses the same recommended value as IDToken (both ES256,
+		// per server.RecommendedAlgorithms()) to keep PR #47's "one
+		// official value, no override" intent intact.
+		keys.AccessTokenSigning: resolved.Algorithms.IDToken,
 		keys.IDTokenSigning:     resolved.Algorithms.IDToken,
 	}
 	if resolved.Profile == server.ProfileFAPISecurityWithMessageSigning {
@@ -75,6 +80,10 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool) (*http.ServeM
 	revocationStore := memstore.NewRevocationStore()
 	identityClaims := newStaticIdentityClaims(resolved.DefaultSubject, server.SystemClock{})
 	clientRepo := memstore.NewClientRepository(resolved.Clients)
+	jwtAccessTokens, err := server.NewJWTAccessTokens(keyManager, resolved.Algorithms.IDToken)
+	if err != nil {
+		return nil, err
+	}
 	srvDeps := server.Dependencies{
 		Clients:        clientRepo,
 		Transactions:   memstore.NewTransactionStore(),
@@ -82,6 +91,7 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool) (*http.ServeM
 		Replay:         replayStore,
 		ClientKeys:     clientKeys,
 		Keys:           keyManager,
+		AccessTokens:   jwtAccessTokens,
 		Revocation:     revocationStore,
 		Clock:          server.SystemClock{},
 		Random:         rand.Reader,
@@ -95,20 +105,24 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool) (*http.ServeM
 	// Backs GET /accounts — see resource.go's resourceHandler doc
 	// comment for why this conformance binary hosts a stand-in
 	// protected-resource endpoint alongside the AS itself.
+	resourceJWT, err := fapires.NewJWTAccessTokens(
+		selfIssuerKeySource{keyManager: keyManager}, resolved.Issuer,
+		resolved.Issuer.String(), // matches server/accesstoken.go's own access-token aud claim
+		resolved.Algorithms.IDToken, resolved.Limits.AccessTokenLifetime,
+	)
+	if err != nil {
+		return nil, err
+	}
 	resourceVerifier, err := fapires.NewVerifier(fapires.Config{
-		Issuer:    resolved.Issuer,
-		Audience:  resolved.Issuer.String(), // matches server/token.go's own access-token aud claim
-		Algorithm: resolved.Algorithms.AccessToken,
 		Limits: fapires.Limits{
-			MaxTokenLifetime: resolved.Limits.AccessTokenLifetime,
-			MaxDPoPProofAge:  resolved.Limits.MaxDPoPProofAge,
-			MaxClockSkew:     resolved.Limits.MaxClockSkew,
+			MaxDPoPProofAge: resolved.Limits.MaxDPoPProofAge,
+			MaxClockSkew:    resolved.Limits.MaxClockSkew,
 		},
 	}, fapires.Dependencies{
-		IssuerKeys: selfIssuerKeySource{keyManager: keyManager},
-		Replay:     replayStore,
-		Revocation: revocationStore,
-		Clock:      fapires.SystemClock{},
+		AccessTokens: resourceJWT,
+		Replay:       replayStore,
+		Revocation:   revocationStore,
+		Clock:        fapires.SystemClock{},
 	})
 	if err != nil {
 		return nil, err

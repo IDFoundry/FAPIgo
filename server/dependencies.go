@@ -31,9 +31,16 @@ type Dependencies struct {
 	ClientKeys keys.ClientKeySource
 
 	// Keys performs this server's own signing operations: JARM response
-	// signing (when Config.Profile requires it), and access/ID token
-	// signing (always).
+	// signing (when Config.Profile requires it), and ID token signing
+	// (always). Access-token signing, when AccessTokens is
+	// JWTAccessTokens, is that type's own concern — see its doc
+	// comment.
 	Keys keys.KeyManager
+
+	// AccessTokens issues this server's access tokens. Required — pass
+	// JWTAccessTokens{...} (the default), OpaqueAccessTokens{...}, or
+	// your own AccessTokenIssuer.
+	AccessTokens AccessTokenIssuer
 
 	// Audit records security-significant events. Required when
 	// Config.Assurance is AssuranceProduction; optional otherwise.

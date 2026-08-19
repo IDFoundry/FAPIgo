@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"net/url"
 	"testing"
 	"time"
@@ -15,6 +16,8 @@ import (
 	"github.com/idfoundry/fapigo/internal/token"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/resource"
+	"github.com/idfoundry/fapigo/storage"
+	"github.com/idfoundry/fapigo/storage/memstore"
 )
 
 // fixture bundles a signed access token and matching DPoP proof for a
@@ -81,15 +84,23 @@ func newFixture(t *testing.T) fixture {
 		t.Fatalf("create dpop proof: %v", err)
 	}
 
+	issuerURL, err := fapi.ParseIssuerURL(testIssuer)
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
 	replay := &fakeReplayStore{}
 	revocation := &fakeRevocationChecker{}
+	jwtAccessTokens, err := resource.NewJWTAccessTokens(&fakeIssuerKeySource{set: keys.IssuerKeySet{Keys: []keys.IssuerKey{
+		{KeyID: "as-kid", Algorithm: fapi.ES256, PublicKey: issuerKey.Public()},
+	}}}, issuerURL, testIssuer, fapi.ES256, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("NewJWTAccessTokens: %v", err)
+	}
 	v, err := resource.NewVerifier(validConfig(t), resource.Dependencies{
-		IssuerKeys: &fakeIssuerKeySource{set: keys.IssuerKeySet{Keys: []keys.IssuerKey{
-			{KeyID: "as-kid", Algorithm: fapi.ES256, PublicKey: issuerKey.Public()},
-		}}},
-		Replay:     replay,
-		Revocation: revocation,
-		Clock:      fixedClock{now: now},
+		AccessTokens: jwtAccessTokens,
+		Replay:       replay,
+		Revocation:   revocation,
+		Clock:        fixedClock{now: now},
 	})
 	if err != nil {
 		t.Fatalf("NewVerifier: %v", err)
@@ -122,8 +133,8 @@ func TestVerifyAcceptsValidRequest(t *testing.T) {
 	if !authz.ExpiresAt.Equal(f.now.Add(5 * time.Minute).Truncate(time.Second)) {
 		t.Errorf("ExpiresAt = %v, want ~%v", authz.ExpiresAt, f.now.Add(5*time.Minute))
 	}
-	if authz.JTI != f.jti {
-		t.Errorf("JTI = %q, want %q", authz.JTI, f.jti)
+	if authz.Key != f.jti {
+		t.Errorf("Key = %q, want %q", authz.Key, f.jti)
 	}
 }
 
@@ -262,5 +273,84 @@ func TestVerifyRejectsMalformedAuthorizationHeader(t *testing.T) {
 		if err == nil {
 			t.Fatalf("Verify(Authorization=%q) = nil error, want error", authz)
 		}
+	}
+}
+
+// TestVerifyAcceptsOpaqueAccessToken exercises Verify() end to end
+// (Authorization header, DPoP proof, revocation check — not just
+// VerifyAccessToken in isolation) with OpaqueAccessTokens instead of
+// the default JWTAccessTokens, confirming the pluggable
+// AccessTokenVerifier boundary actually works through the public
+// entry point, not just when called directly.
+func TestVerifyAcceptsOpaqueAccessToken(t *testing.T) {
+	store := memstore.NewAccessTokenStore()
+
+	dpopKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate dpop key: %v", err)
+	}
+	dpopJWK, err := jose.NewJWK(dpopKey.Public(), fapi.ES256)
+	if err != nil {
+		t.Fatalf("dpop jwk: %v", err)
+	}
+	thumbprint, err := dpopJWK.Thumbprint()
+	if err != nil {
+		t.Fatalf("dpop thumbprint: %v", err)
+	}
+
+	now := time.Now()
+	target, err := url.Parse("https://rs.example.com/accounts")
+	if err != nil {
+		t.Fatalf("parse target url: %v", err)
+	}
+
+	const rawToken = "opaque-access-token-value"
+	hash := sha256.Sum256([]byte(rawToken))
+	if err := store.CreateAccessToken(context.Background(), storage.NewAccessToken{
+		TokenHash: hash, ClientID: "client-1", Subject: "user-1",
+		Scope: []string{"read", "write"}, Thumbprint: thumbprint.String(),
+		ExpiresAt: now.Add(5 * time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateAccessToken: %v", err)
+	}
+
+	dpopProof, err := dpop.CreateProof(dpop.ProofRequest{
+		Signer: dpopKey, Algorithm: fapi.ES256,
+		Method: "GET", URL: target,
+		AccessToken: rawToken,
+		Now:         now,
+		Random:      rand.Reader,
+	})
+	if err != nil {
+		t.Fatalf("create dpop proof: %v", err)
+	}
+
+	v, err := resource.NewVerifier(validConfig(t), resource.Dependencies{
+		AccessTokens: resource.OpaqueAccessTokens{Store: store},
+		Replay:       &fakeReplayStore{},
+		Revocation:   &fakeRevocationChecker{},
+		Clock:        fixedClock{now: now},
+	})
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+
+	authz, err := v.Verify(context.Background(), resource.VerifyRequest{
+		Method:        "GET",
+		URL:           target,
+		Authorization: "DPoP " + rawToken,
+		DPoPProof:     dpopProof,
+	})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if authz.Subject != "user-1" {
+		t.Errorf("Subject = %q, want user-1", authz.Subject)
+	}
+	if authz.ClientID != "client-1" {
+		t.Errorf("ClientID = %q, want client-1", authz.ClientID)
+	}
+	if len(authz.Scopes) != 2 || authz.Scopes[0] != "read" || authz.Scopes[1] != "write" {
+		t.Errorf("Scopes = %v, want [read write]", authz.Scopes)
 	}
 }

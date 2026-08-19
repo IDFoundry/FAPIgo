@@ -108,8 +108,8 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		// own doc comment for when that's the case.
 		var alreadyRedeemed *storage.AuthorizationCodeAlreadyRedeemedError
 		if errors.As(err, &alreadyRedeemed) {
-			if alreadyRedeemed.IssuedAccessTokenJTI != "" {
-				_ = s.deps.Revocation.Revoke(ctx, alreadyRedeemed.IssuedAccessTokenJTI, s.deps.Clock.Now().Add(s.cfg.Limits.AccessTokenLifetime))
+			if alreadyRedeemed.IssuedAccessTokenKey != "" {
+				_ = s.deps.Revocation.Revoke(ctx, alreadyRedeemed.IssuedAccessTokenKey, s.deps.Clock.Now().Add(s.cfg.Limits.AccessTokenLifetime))
 			}
 			if alreadyRedeemed.IssuedRefreshTokenHash != nil {
 				_ = s.deps.Grants.RevokeRefreshToken(ctx, *alreadyRedeemed.IssuedRefreshTokenHash)
@@ -139,7 +139,12 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to encode requested userinfo claims", err))
 	}
-	accessToken, accessJTI, err := s.issueAccessToken(ctx, client.ID(), redeemed.Subject, redeemed.Scope, thumbprint, accessTokenClaims)
+	accessToken, accessKey, err := s.deps.AccessTokens.IssueAccessToken(ctx, AccessTokenParams{
+		ClientID: client.ID(), Subject: redeemed.Subject, Scope: redeemed.Scope,
+		Thumbprint: thumbprint, Claims: accessTokenClaims,
+		Issuer: s.cfg.Issuer.String(), Audience: s.cfg.Issuer.String(),
+		Now: now, Lifetime: s.cfg.Limits.AccessTokenLifetime, Random: s.deps.Random,
+	})
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to issue access token", err))
 	}
@@ -148,7 +153,7 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	// dependency, so this is called unconditionally the same way
 	// CreateAuthorizationCode is; a no-op implementation is entirely
 	// valid for a deployment that doesn't want revocation support.
-	_ = s.deps.Grants.RecordIssuedAccessToken(ctx, codeHash, accessJTI, now.Add(s.cfg.Limits.AccessTokenLifetime))
+	_ = s.deps.Grants.RecordIssuedAccessToken(ctx, codeHash, accessKey, now.Add(s.cfg.Limits.AccessTokenLifetime))
 
 	result := TokenResult{
 		AccessToken: fapi.NewSecret(accessToken),
@@ -208,23 +213,6 @@ func (s *Server) verifyTokenRequestDPoP(ctx context.Context, proof string) (dpop
 		return dpop.VerifiedProof{}, newError(ErrorInvalidRequest, 400, "DPoP proof verification failed", err)
 	}
 	return verified, nil
-}
-
-func (s *Server) issueAccessToken(ctx context.Context, clientID fapi.ClientID, subject string, scope []string, thumbprint string, tokenClaims map[string]json.RawMessage) (accessToken string, jti string, err error) {
-	signer, kid, err := s.newSigner(ctx, keys.AccessTokenSigning, s.cfg.Algorithms.AccessToken)
-	if err != nil {
-		return "", "", err
-	}
-	return token.IssueAccessToken(token.AccessTokenParams{
-		Signer: signer, Algorithm: s.cfg.Algorithms.AccessToken, KeyID: kid,
-		Issuer: s.cfg.Issuer.String(), Subject: subject, Audience: s.cfg.Issuer.String(),
-		ClientID:     clientID.String(),
-		Scope:        strings.Join(scope, " "),
-		Confirmation: &token.Confirmation{JKT: thumbprint},
-		Now:          s.deps.Clock.Now(), Lifetime: s.cfg.Limits.AccessTokenLifetime,
-		Random:     s.deps.Random,
-		Parameters: tokenClaims,
-	})
 }
 
 // withIdentityClaims merges whatever Dependencies.IdentityClaims

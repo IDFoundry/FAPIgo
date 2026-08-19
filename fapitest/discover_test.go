@@ -60,7 +60,6 @@ func TestDiscoverEndToEnd(t *testing.T) {
 		Algorithms: server.AlgorithmPolicy{
 			ClientAssertion: server.AlgorithmSet{fapi.ES256},
 			RequestObject:   server.AlgorithmSet{fapi.ES256},
-			AccessToken:     fapi.ES256,
 			IDToken:         fapi.ES256,
 		},
 		Limits: server.Limits{
@@ -77,6 +76,10 @@ func TestDiscoverEndToEnd(t *testing.T) {
 		},
 		Assurance: server.AssuranceDevelopment,
 	}
+	jwtAccessTokens, err := server.NewJWTAccessTokens(asKeys, fapi.ES256)
+	if err != nil {
+		t.Fatalf("server.NewJWTAccessTokens: %v", err)
+	}
 	srvDeps := server.Dependencies{
 		Clients:      &memClientRepository{client: registeredClient},
 		Transactions: newMemTransactionStore(),
@@ -84,6 +87,7 @@ func TestDiscoverEndToEnd(t *testing.T) {
 		Replay:       newMemReplayStore(),
 		ClientKeys:   &memClientKeySource{clientID: ClientID, manager: clientKeys},
 		Keys:         asKeys,
+		AccessTokens: jwtAccessTokens,
 		Revocation:   server.NoRevocation{},
 		Clock:        clock,
 		Random:       rand.Reader,

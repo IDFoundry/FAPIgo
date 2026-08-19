@@ -24,7 +24,6 @@ func validConfig(t *testing.T) server.Config {
 		Algorithms: server.AlgorithmPolicy{
 			ClientAssertion: server.AlgorithmSet{fapi.ES256},
 			RequestObject:   server.AlgorithmSet{fapi.ES256},
-			AccessToken:     fapi.ES256,
 			IDToken:         fapi.ES256,
 		},
 		Limits: server.Limits{
@@ -51,6 +50,7 @@ func validDependencies() server.Dependencies {
 		Replay:       &fakeReplayStore{},
 		ClientKeys:   &fakeClientKeySource{},
 		Keys:         &fakeKeyManager{},
+		AccessTokens: server.JWTAccessTokens{Keys: &fakeKeyManager{}, Algorithm: fapi.ES256},
 		Revocation:   server.NoRevocation{},
 		Clock:        fixedClock{now: time.Now()},
 		Random:       rand.Reader,
@@ -73,7 +73,6 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 		"invalid profile":                  func(c *server.Config) { c.Profile = 0 },
 		"empty client assertion algs":      func(c *server.Config) { c.Algorithms.ClientAssertion = nil },
 		"empty request object algs":        func(c *server.Config) { c.Algorithms.RequestObject = nil },
-		"invalid access token alg":         func(c *server.Config) { c.Algorithms.AccessToken = 0 },
 		"invalid id token alg":             func(c *server.Config) { c.Algorithms.IDToken = 0 },
 		"zero pushed request lifetime":     func(c *server.Config) { c.Limits.PushedRequestLifetime = 0 },
 		"zero max assertion lifetime":      func(c *server.Config) { c.Limits.MaxClientAssertionLifetime = 0 },
@@ -98,17 +97,31 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 	}
 }
 
+// TestNewJWTAccessTokensRejectsInvalid covers what
+// TestNewRejectsInvalidConfig used to check directly against
+// Config.Algorithms.AccessToken before that field and its validation
+// moved into JWTAccessTokens itself (see server/accesstoken.go).
+func TestNewJWTAccessTokensRejectsInvalid(t *testing.T) {
+	if _, err := server.NewJWTAccessTokens(nil, fapi.ES256); err == nil {
+		t.Fatalf("NewJWTAccessTokens(nil keys) = nil error, want error")
+	}
+	if _, err := server.NewJWTAccessTokens(&fakeKeyManager{}, 0); err == nil {
+		t.Fatalf("NewJWTAccessTokens(invalid algorithm) = nil error, want error")
+	}
+}
+
 func TestNewRejectsMissingDependencies(t *testing.T) {
 	cases := map[string]func(*server.Dependencies){
-		"nil clients":      func(d *server.Dependencies) { d.Clients = nil },
-		"nil transactions": func(d *server.Dependencies) { d.Transactions = nil },
-		"nil grants":       func(d *server.Dependencies) { d.Grants = nil },
-		"nil replay":       func(d *server.Dependencies) { d.Replay = nil },
-		"nil client keys":  func(d *server.Dependencies) { d.ClientKeys = nil },
-		"nil keys":         func(d *server.Dependencies) { d.Keys = nil },
-		"nil revocation":   func(d *server.Dependencies) { d.Revocation = nil },
-		"nil clock":        func(d *server.Dependencies) { d.Clock = nil },
-		"nil random":       func(d *server.Dependencies) { d.Random = nil },
+		"nil clients":       func(d *server.Dependencies) { d.Clients = nil },
+		"nil transactions":  func(d *server.Dependencies) { d.Transactions = nil },
+		"nil grants":        func(d *server.Dependencies) { d.Grants = nil },
+		"nil replay":        func(d *server.Dependencies) { d.Replay = nil },
+		"nil client keys":   func(d *server.Dependencies) { d.ClientKeys = nil },
+		"nil keys":          func(d *server.Dependencies) { d.Keys = nil },
+		"nil access tokens": func(d *server.Dependencies) { d.AccessTokens = nil },
+		"nil revocation":    func(d *server.Dependencies) { d.Revocation = nil },
+		"nil clock":         func(d *server.Dependencies) { d.Clock = nil },
+		"nil random":        func(d *server.Dependencies) { d.Random = nil },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {

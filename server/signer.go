@@ -37,15 +37,23 @@ func (s keyManagerSigner) Sign(_ io.Reader, digest []byte, _ crypto.SignerOpts) 
 
 // newSigner resolves the current public key for purpose/algorithm and
 // returns a crypto.Signer-shaped adapter over Dependencies.Keys, plus
-// its kid, for use with internal/jose-based signing (JARM, access
-// tokens, ID tokens).
+// its kid, for use with internal/jose-based signing (JARM, ID tokens).
 func (s *Server) newSigner(ctx context.Context, purpose keys.SigningPurpose, algorithm fapi.SignatureAlgorithm) (crypto.Signer, string, error) {
-	info, err := s.deps.Keys.PublicKey(ctx, purpose, algorithm)
+	return newSignerFromKeys(ctx, s.deps.Keys, purpose, algorithm)
+}
+
+// newSignerFromKeys resolves the current public key for purpose/algorithm
+// against manager and returns a crypto.Signer-shaped adapter, plus its
+// kid, for use with internal/jose-based signing. Factored out of
+// newSigner so JWTAccessTokens (accesstoken.go) can sign with its own
+// keys.KeyManager, independent of Dependencies.Keys.
+func newSignerFromKeys(ctx context.Context, manager keys.KeyManager, purpose keys.SigningPurpose, algorithm fapi.SignatureAlgorithm) (crypto.Signer, string, error) {
+	info, err := manager.PublicKey(ctx, purpose, algorithm)
 	if err != nil {
 		return nil, "", fmt.Errorf("resolve signing key: %w", err)
 	}
 	signer := keyManagerSigner{
-		ctx: ctx, manager: s.deps.Keys, purpose: purpose,
+		ctx: ctx, manager: manager, purpose: purpose,
 		algorithm: algorithm, publicKey: info.PublicKey,
 	}
 	return signer, info.KeyID, nil

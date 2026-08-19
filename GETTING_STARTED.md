@@ -91,6 +91,14 @@ clientKeys, err := ephemeral.NewClientKeySource(fetcher, []ephemeral.ClientKeySp
 	// or JWKSURI: "https://rp.example.com/.well-known/jwks.json" to fetch live instead
 })
 
+// JWT (RFC 9068) is the default, ship-in-the-box access-token format —
+// self-contained, verified locally by a resource server with no
+// callback to this AS. Pass server.OpaqueAccessTokens{Store: ...}
+// instead for a storage-backed alternative (e.g. if you want
+// revocation without a separate RevocationSink, or a resource server
+// co-located with this AS).
+accessTokens, err := server.NewJWTAccessTokens(keyManager, fapi.ES256)
+
 deps := server.Dependencies{
 	Clients:      memstore.NewClientRepository([]storage.RegisteredClient{client}),
 	Transactions: memstore.NewTransactionStore(),
@@ -98,6 +106,7 @@ deps := server.Dependencies{
 	Replay:       memstore.NewReplayStore(),
 	ClientKeys:   clientKeys,
 	Keys:         keyManager,
+	AccessTokens: accessTokens,
 	// Lets this server revoke a token it already issued when it later
 	// detects the authorization code that produced it being reused
 	// (RFC 6749 §4.1.2). Pass server.NoRevocation{} instead to

@@ -43,15 +43,21 @@ role-level types or behaviour.
 
 `storage/memstore` and `keys/ephemeral` provide in-memory, non-durable
 implementations of every interface `server` needs (client repository,
-transaction/grant/replay stores, key manager, client key source) — for
-local development and testing only, never production — so integrating
-`server` doesn't require writing real persistence and key management
-from scratch just to see it run. `server.RecommendedLimits()` and
-`server.RecommendedAlgorithms()` do the same for `Config`'s algorithm
+transaction/grant/replay/access-token stores, key manager, client key
+source) — for local development and testing only, never production —
+so integrating `server` doesn't require writing real persistence and
+key management from scratch just to see it run. `server.RecommendedLimits()`
+and `server.RecommendedAlgorithms()` do the same for `Config`'s algorithm
 and duration fields, each grounded in a specific FAPI 2.0 Security
 Profile Final or RFC 9449 requirement where one exists — see
 [GETTING_STARTED.md](GETTING_STARTED.md) for a walkthrough of standing
 up an authorization server end to end.
+
+Access tokens can be issued as self-contained JWTs (RFC 9068 — the
+default, `server.JWTAccessTokens`/`resource.JWTAccessTokens`) or as
+opaque, storage-backed values (`server.OpaqueAccessTokens`/
+`resource.OpaqueAccessTokens`) — FAPI 2.0 doesn't mandate a format, so
+this is a deployment's own choice, not something the library imposes.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design rationale and
 package layout, and [conformance/](conformance/README.md) for how each

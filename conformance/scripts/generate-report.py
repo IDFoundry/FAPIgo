@@ -137,7 +137,7 @@ def parse_retry_log(retry_log_path):
         return outcomes
     text = retry_log_path.read_text()
     for line in text.splitlines():
-        m = re.search(r"^retry-flaky-modules: (\S+) (\S+) matches the known flake signature — retrying as (\S+)", line)
+        m = re.search(r"^retry-flaky-modules: (\S+) (\S+) matches a known flake signature — retrying as (\S+)", line)
         if m:
             test_name, module_id, new_id = m.groups()
             outcomes[module_id] = {"test_name": test_name, "new_id": new_id, "result": "pending"}

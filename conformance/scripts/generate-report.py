@@ -19,6 +19,13 @@ part of the suites itself, only reads what's already on disk:
     reasoning is already authoritatively written down, not
     re-explained/duplicated here.
 
+Each suite section leads with a quick table of just its non-PASSED
+modules (empty/omitted when everything passed) so a regression is
+visible without scrolling, followed by a collapsed "All N modules run"
+<details> block listing every module by name with its own status —
+the full, audit-trail-grade record of what actually ran, not just how
+many.
+
 Usage:
     generate-report.py <workdir> <repo_root>
 
@@ -144,20 +151,33 @@ def parse_retry_log(retry_log_path):
     return outcomes
 
 
-def rp_summary(log_path):
+def parse_rp_log(log_path):
+    """Returns a list of dicts: {test_name, result, detail} for every
+    line in a cmd/conformance-client log's "=== summary ===" block —
+    main.go prints one "<outcome> <test-name>" line per module there,
+    where <outcome> is the suite's own graded result optionally
+    followed by "[driver: ...]" context (see main.go's awaitVerdict).
+    test_name never contains whitespace, so it's always the line's
+    last token; everything before it is the outcome/detail field."""
+    modules = []
     if not log_path.exists():
-        return None, None
-    total = passed = 0
+        return modules
     in_summary = False
     for line in log_path.read_text().splitlines():
         if "=== summary ===" in line:
             in_summary = True
             continue
-        if in_summary and line.strip():
-            total += 1
-            if line.split()[2:3] == ["PASSED"]:
-                passed += 1
-    return passed, total
+        if not in_summary or not line.strip():
+            continue
+        # Strip the "YYYY/MM/DD HH:MM:SS " prefix Go's log package adds.
+        parts = line.split(None, 2)
+        if len(parts) < 3:
+            continue
+        detail, _, test_name = parts[2].rpartition(" ")
+        detail = detail.strip()
+        result = detail.split()[0] if detail else ""
+        modules.append({"test_name": test_name, "result": result, "detail": detail})
+    return modules
 
 
 def render_as_suite(md, name, workdir, repo_root, results):
@@ -177,27 +197,37 @@ def render_as_suite(md, name, workdir, repo_root, results):
     expected_warnings = load_expected(repo_root, "warnings", name)
     expected_skips = load_expected(repo_root, "skips", name)
 
+    def why_for(m):
+        if m["module_id"] in retry_outcomes:
+            info = retry_outcomes[m["module_id"]]
+            return f"auto-retried (known suite-browser flake) → {info['result']}"
+        if m["result"] == "WARNING":
+            return find_comment(expected_warnings, m["test_name"]) or "**no expected-warnings entry found**"
+        if m["result"] in ("SKIPPED", "REVIEW"):
+            return find_comment(expected_skips, m["test_name"]) or (
+                "requires human review of an uploaded screenshot" if m["result"] == "REVIEW" else ""
+            )
+        if m["result"] == "FAILED":
+            return "**not in any expected list — check the log**"
+        return ""
+
     not_passed = [m for m in modules if m["result"] != "PASSED"]
     if not_passed:
         md.append("| Module | Status | Result | Why |")
         md.append("|---|---|---|---|")
         for m in not_passed:
-            why = ""
-            if m["module_id"] in retry_outcomes:
-                info = retry_outcomes[m["module_id"]]
-                why = f"auto-retried (known suite-browser flake) → {info['result']}"
-            elif m["result"] == "WARNING":
-                why = find_comment(expected_warnings, m["test_name"]) or "**no expected-warnings entry found**"
-            elif m["result"] in ("SKIPPED", "REVIEW"):
-                why = find_comment(expected_skips, m["test_name"]) or (
-                    "requires human review of an uploaded screenshot" if m["result"] == "REVIEW" else ""
-                )
-            elif m["result"] == "FAILED":
-                why = "**not in any expected list — check the log**"
-            md.append(f"| `{m['test_name']}` | {m['status']} | {m['result']} | {why} |")
+            md.append(f"| `{m['test_name']}` | {m['status']} | {m['result']} | {why_for(m)} |")
         md.append("")
     else:
         md.append("Every module PASSED.\n")
+
+    md.append(f"<details><summary>All {len(modules)} modules run</summary>\n")
+    md.append("| Module | Status | Result | Why |")
+    md.append("|---|---|---|---|")
+    for m in modules:
+        md.append(f"| `{m['test_name']}` | {m['status']} | {m['result']} | {why_for(m)} |")
+    md.append("")
+    md.append("</details>\n")
 
     md.append(f"Full log: [{log_path.name}]({log_path.name})\n")
 
@@ -207,6 +237,30 @@ def render_rp_suite(md, name, workdir, results):
     result_line = results.get(f"RP {name}", "DID NOT RUN")
     md.append(f"## RP {name}\n")
     md.append(f"**{result_line}**\n")
+
+    modules = parse_rp_log(log_path)
+    if not modules:
+        md.append(f"_No module detail available — see [{log_path.name}]({log_path.name})._\n")
+        return
+
+    not_passed = [m for m in modules if m["result"] != "PASSED"]
+    if not_passed:
+        md.append("| Module | Result |")
+        md.append("|---|---|")
+        for m in not_passed:
+            md.append(f"| `{m['test_name']}` | {m['detail']} |")
+        md.append("")
+    else:
+        md.append("Every module PASSED.\n")
+
+    md.append(f"<details><summary>All {len(modules)} modules run</summary>\n")
+    md.append("| Module | Result |")
+    md.append("|---|---|")
+    for m in modules:
+        md.append(f"| `{m['test_name']}` | {m['detail']} |")
+    md.append("")
+    md.append("</details>\n")
+
     md.append(f"Full log: [{log_path.name}]({log_path.name})\n")
 
 

@@ -329,14 +329,12 @@ func patchConformanceASConfig(path string, p profile, pub1, pub2, pubRS256 jwks)
 	}
 	top["clients"] = encodedClients
 
-	if err := ensureAlgorithm(top, "client_assertion", "PS256"); err != nil {
-		return clientIDs, "", err
-	}
-	if p.name == "message-signing" {
-		if err := ensureAlgorithm(top, "request_object", "PS256"); err != nil {
-			return clientIDs, "", err
-		}
-	}
+	// No algorithms patching needed here (unlike before
+	// cmd/conformance-as switched to server.RecommendedAlgorithms()
+	// unconditionally): the recommended default already includes PS256
+	// in both ClientAssertion and RequestObject, so the dedicated
+	// PS256/RS256-negative-test client above is already accepted by the
+	// server-wide algorithm policy without widening anything.
 
 	out, err := marshalIndentNoEscape(top)
 	if err != nil {
@@ -344,36 +342,6 @@ func patchConformanceASConfig(path string, p profile, pub1, pub2, pubRS256 jwks)
 	}
 	out = append(out, '\n')
 	return clientIDs, rs256ClientID, os.WriteFile(path, out, 0o644)
-}
-
-// ensureAlgorithm appends alg to top["algorithms"][field] (a JSON
-// array of strings) if it isn't already present, in place.
-func ensureAlgorithm(top map[string]json.RawMessage, field, alg string) error {
-	var algorithms map[string]json.RawMessage
-	if err := json.Unmarshal(top["algorithms"], &algorithms); err != nil {
-		return fmt.Errorf("parse algorithms: %w", err)
-	}
-	var set []string
-	if err := json.Unmarshal(algorithms[field], &set); err != nil {
-		return fmt.Errorf("parse algorithms.%s: %w", field, err)
-	}
-	for _, a := range set {
-		if a == alg {
-			return nil
-		}
-	}
-	set = append(set, alg)
-	encoded, err := json.Marshal(set)
-	if err != nil {
-		return err
-	}
-	algorithms[field] = encoded
-	encodedAlgorithms, err := json.Marshal(algorithms)
-	if err != nil {
-		return err
-	}
-	top["algorithms"] = encodedAlgorithms
-	return nil
 }
 
 // planConfig mirrors the OIDF conformance suite's own plan config

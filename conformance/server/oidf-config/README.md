@@ -21,20 +21,28 @@ FAPI 2.0 variant gets its own config file here:
   and `fapi_response_mode=jarm` (both required together, matching this
   AS's `ProfileFAPISecurityWithMessageSigning`).
 
-  `limits.max_request_object_lifetime_seconds` needs real headroom here
-  — unlike `baseline.config.json`, where `fapi_request_method=unsigned`
-  means the suite never actually sends a signed request object, so this
-  field is inert. The suite's `AddExpToRequestObject` condition
+  `MaxRequestObjectLifetime` needs real headroom here — unlike
+  `baseline.config.json`, where `fapi_request_method=unsigned` means
+  the suite never actually sends a signed request object, so this field
+  is inert there. The suite's `AddExpToRequestObject` condition
   unconditionally sets a request object's `exp` 5 minutes (300s) past
   `nbf` for every ordinary (non-negative-test) module; only the
   dedicated `...EnsureRequestObjectWithExpOver60Fails` negative test
   pushes it further out (70 minutes, via
   `AddExpValueIs70MinutesInFutureToRequestObject`), specifically to
-  check an AS enforces *some* cap. A value copied from
-  `baseline.config.json` (60s, itself never actually exercised there)
-  rejects the suite's own normal happy-path request objects outright —
-  set this comfortably above 300s and well under 4200s (600 is what
-  this file uses) rather than reusing baseline's number.
+  check an AS enforces *some* cap. `server.RecommendedLimits()`'s
+  general default (60s) rejects the suite's own normal happy-path
+  request objects outright under this profile — set comfortably above
+  300s and well under 4200s (600s is what's used).
+
+  This isn't a JSON config value — algorithms/limits aren't
+  configurable from either file in this directory at all (see
+  `cmd/conformance-as/config.go`'s `Config` doc comment: conformance
+  testing runs on `server.RecommendedAlgorithms()`/
+  `server.RecommendedLimits()` unconditionally, not a hand-tunable
+  value that can drift from them). This one exception is a hardcoded,
+  profile-conditional override in `Config.Resolve()` — a test-harness
+  accommodation, not a relaxation of what FAPI2 itself requires.
 
 Both plans also need variants `client_auth_type=private_key_jwt`,
 `sender_constrain=dpop`, `fapi_profile=plain_fapi`,

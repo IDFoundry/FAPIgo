@@ -176,28 +176,12 @@ func newSmokeHarness(t *testing.T) *smokeHarness {
 	}
 
 	resolved := ResolvedConfig{
-		ListenAddr:     tcpListener.Addr().String(),
-		Issuer:         issuer,
-		Profile:        server.ProfileFAPISecurity,
-		DefaultSubject: smokeSubject,
-		Algorithms: server.AlgorithmPolicy{
-			ClientAssertion: server.AlgorithmSet{fapi.ES256},
-			RequestObject:   server.AlgorithmSet{fapi.ES256},
-			AccessToken:     fapi.ES256,
-			IDToken:         fapi.ES256,
-		},
-		Limits: server.Limits{
-			PushedRequestLifetime:      90 * time.Second,
-			MaxClientAssertionLifetime: time.Minute,
-			MaxRequestObjectLifetime:   time.Minute,
-			InteractionLifetime:        5 * time.Minute,
-			AuthorizationCodeLifetime:  time.Minute,
-			AccessTokenLifetime:        5 * time.Minute,
-			IDTokenLifetime:            5 * time.Minute,
-			RefreshTokenLifetime:       5 * time.Minute,
-			MaxDPoPProofAge:            time.Minute,
-			MaxClockSkew:               5 * time.Second,
-		},
+		ListenAddr:       tcpListener.Addr().String(),
+		Issuer:           issuer,
+		Profile:          server.ProfileFAPISecurity,
+		DefaultSubject:   smokeSubject,
+		Algorithms:       server.RecommendedAlgorithms(),
+		Limits:           server.RecommendedLimits(),
 		Clients:          []storage.RegisteredClient{registered},
 		ClientKeys:       []ephemeral.ClientKeySpec{{ClientID: testClientID, JWKS: inlineJWKS}},
 		AdvertisedScopes: []string{"openid", "accounts", "offline_access"},
@@ -246,11 +230,15 @@ func newSmokeHarness(t *testing.T) *smokeHarness {
 		},
 		Limits: client.Limits{
 			ClientAssertionLifetime: time.Minute,
-			SessionLifetime:         5 * time.Minute,
-			MaxIDTokenLifetime:      5 * time.Minute,
-			MaxClockSkew:            5 * time.Second,
-			HTTPTimeout:             10 * time.Second,
-			MaxHTTPResponseBytes:    1 << 16,
+			SessionLifetime:         10 * time.Minute,
+			// Must be >= server.RecommendedLimits().IDTokenLifetime
+			// (the server config this test's AS actually runs under,
+			// as of switching to it unconditionally) or the client
+			// side rejects its own AS's legitimately-issued token.
+			MaxIDTokenLifetime:   10 * time.Minute,
+			MaxClockSkew:         10 * time.Second,
+			HTTPTimeout:          10 * time.Second,
+			MaxHTTPResponseBytes: 1 << 16,
 		},
 	}
 	clientDeps := client.Dependencies{

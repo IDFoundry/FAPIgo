@@ -12,12 +12,19 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           check-latest: true
+          # No go.sum exists — this module has zero external
+          # dependencies (see go.mod) — so cache-dependency-path must
+          # be set explicitly or setup-go silently skips caching
+          # (with an annoying "supported file pattern: go.sum"
+          # warning) on every run. go.mod still exists and rarely
+          # changes, so it's a fine cache key for the build cache.
+          cache-dependency-path: go.mod
 
       - name: gofmt
         run: |

@@ -27,6 +27,12 @@ func TestReplayStoreContract(t *testing.T) {
 	})
 }
 
+func TestAccessTokenStoreContract(t *testing.T) {
+	storage.TestAccessTokenStoreContract(t, func() storage.AccessTokenStore {
+		return NewAccessTokenStore()
+	})
+}
+
 func TestRevocationStoreNotRevokedByDefault(t *testing.T) {
 	s := NewRevocationStore()
 

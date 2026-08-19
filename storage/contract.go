@@ -133,8 +133,8 @@ func TestGrantStoreContract(t *testing.T, factory func() GrantStore) {
 		if !errors.As(err, &alreadyRedeemed) {
 			t.Fatalf("second RedeemAuthorizationCode error = %v, want errors.As into *AuthorizationCodeAlreadyRedeemedError", err)
 		}
-		if alreadyRedeemed.IssuedAccessTokenJTI != "jti-1" {
-			t.Fatalf("IssuedAccessTokenJTI = %q, want %q", alreadyRedeemed.IssuedAccessTokenJTI, "jti-1")
+		if alreadyRedeemed.IssuedAccessTokenKey != "jti-1" {
+			t.Fatalf("IssuedAccessTokenKey = %q, want %q", alreadyRedeemed.IssuedAccessTokenKey, "jti-1")
 		}
 		if alreadyRedeemed.IssuedRefreshTokenHash == nil || *alreadyRedeemed.IssuedRefreshTokenHash != refreshHash {
 			t.Fatalf("IssuedRefreshTokenHash = %v, want %v", alreadyRedeemed.IssuedRefreshTokenHash, refreshHash)
@@ -164,8 +164,8 @@ func TestGrantStoreContract(t *testing.T, factory func() GrantStore) {
 		}
 		var alreadyRedeemed *AuthorizationCodeAlreadyRedeemedError
 		if errors.As(err, &alreadyRedeemed) {
-			if alreadyRedeemed.IssuedAccessTokenJTI != "" {
-				t.Fatalf("IssuedAccessTokenJTI = %q, want \"\" (never recorded)", alreadyRedeemed.IssuedAccessTokenJTI)
+			if alreadyRedeemed.IssuedAccessTokenKey != "" {
+				t.Fatalf("IssuedAccessTokenKey = %q, want \"\" (never recorded)", alreadyRedeemed.IssuedAccessTokenKey)
 			}
 			if alreadyRedeemed.IssuedRefreshTokenHash != nil {
 				t.Fatalf("IssuedRefreshTokenHash = %v, want nil (never recorded)", alreadyRedeemed.IssuedRefreshTokenHash)
@@ -631,6 +631,89 @@ func TestSessionStoreContract(t *testing.T, factory func() SessionStore) {
 		})
 		if successes != 1 {
 			t.Fatalf("concurrent Consume succeeded %d times, want exactly 1", successes)
+		}
+	})
+}
+
+// TestAccessTokenStoreContract exercises factory()'s behavior against
+// the guarantees AccessTokenStore's documentation promises: a created
+// token's fields round-trip faithfully through LookupAccessToken, and
+// an unknown hash is rejected. factory must return a fresh, empty
+// AccessTokenStore each call.
+func TestAccessTokenStoreContract(t *testing.T, factory func() AccessTokenStore) {
+	t.Helper()
+
+	t.Run("CreateThenLookupRoundTripsFields", func(t *testing.T) {
+		store := factory()
+		ctx := context.Background()
+		hash := sha256.Sum256([]byte("access-token-1"))
+		expiresAt := time.Now().Add(5 * time.Minute).Truncate(time.Second)
+		claims := map[string]json.RawMessage{"custom_claim": json.RawMessage(`"value"`)}
+		if err := store.CreateAccessToken(ctx, NewAccessToken{
+			TokenHash:  hash,
+			ClientID:   "client-1",
+			Subject:    "user-1",
+			Scope:      []string{"openid", "accounts"},
+			Thumbprint: "thumbprint-1",
+			Claims:     claims,
+			ExpiresAt:  expiresAt,
+		}); err != nil {
+			t.Fatalf("CreateAccessToken: %v", err)
+		}
+
+		looked, err := store.LookupAccessToken(ctx, AccessTokenLookup{TokenHash: hash})
+		if err != nil {
+			t.Fatalf("LookupAccessToken: %v", err)
+		}
+		if looked.ClientID != "client-1" {
+			t.Errorf("ClientID = %q, want %q", looked.ClientID, "client-1")
+		}
+		if looked.Subject != "user-1" {
+			t.Errorf("Subject = %q, want %q", looked.Subject, "user-1")
+		}
+		if len(looked.Scope) != 2 || looked.Scope[0] != "openid" || looked.Scope[1] != "accounts" {
+			t.Errorf("Scope = %v, want [openid accounts]", looked.Scope)
+		}
+		if looked.Thumbprint != "thumbprint-1" {
+			t.Errorf("Thumbprint = %q, want %q", looked.Thumbprint, "thumbprint-1")
+		}
+		if string(looked.Claims["custom_claim"]) != `"value"` {
+			t.Errorf("Claims[custom_claim] = %s, want %q", looked.Claims["custom_claim"], "value")
+		}
+		if !looked.ExpiresAt.Equal(expiresAt) {
+			t.Errorf("ExpiresAt = %v, want %v", looked.ExpiresAt, expiresAt)
+		}
+	})
+
+	t.Run("LookupUnknownTokenFails", func(t *testing.T) {
+		store := factory()
+		hash := sha256.Sum256([]byte("never-created"))
+		if _, err := store.LookupAccessToken(context.Background(), AccessTokenLookup{TokenHash: hash}); err == nil {
+			t.Fatalf("LookupAccessToken(unknown) = nil error, want error")
+		}
+	})
+
+	t.Run("LookupExpiredTokenStillReturnsIt", func(t *testing.T) {
+		// AccessTokenStore doesn't self-expire (see its own doc
+		// comment) — the caller checks ExpiresAt itself, the same way
+		// every other *Redeemed/LookedUp* type in this package is
+		// checked by its caller.
+		store := factory()
+		ctx := context.Background()
+		hash := sha256.Sum256([]byte("expired-token"))
+		expiresAt := time.Now().Add(-time.Minute)
+		if err := store.CreateAccessToken(ctx, NewAccessToken{
+			TokenHash: hash, ClientID: "client-1", Subject: "user-1",
+			ExpiresAt: expiresAt,
+		}); err != nil {
+			t.Fatalf("CreateAccessToken: %v", err)
+		}
+		looked, err := store.LookupAccessToken(ctx, AccessTokenLookup{TokenHash: hash})
+		if err != nil {
+			t.Fatalf("LookupAccessToken: %v", err)
+		}
+		if !looked.ExpiresAt.Equal(expiresAt) {
+			t.Errorf("ExpiresAt = %v, want %v", looked.ExpiresAt, expiresAt)
 		}
 	})
 }

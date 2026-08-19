@@ -25,18 +25,6 @@ func NewVerifier(cfg Config, deps Dependencies) (*Verifier, error) {
 }
 
 func validateConfig(cfg Config) error {
-	if cfg.Issuer.IsZero() {
-		return fmt.Errorf("resource: config: issuer is required")
-	}
-	if cfg.Audience == "" {
-		return fmt.Errorf("resource: config: audience is required")
-	}
-	if !cfg.Algorithm.IsValid() {
-		return fmt.Errorf("resource: config: algorithm is required")
-	}
-	if cfg.Limits.MaxTokenLifetime <= 0 {
-		return fmt.Errorf("resource: config: limits.max_token_lifetime must be positive")
-	}
 	if cfg.Limits.MaxDPoPProofAge <= 0 {
 		return fmt.Errorf("resource: config: limits.max_dpop_proof_age must be positive")
 	}
@@ -47,8 +35,8 @@ func validateConfig(cfg Config) error {
 }
 
 func validateDependencies(deps Dependencies) error {
-	if deps.IssuerKeys == nil {
-		return fmt.Errorf("resource: dependencies: issuer keys is required")
+	if deps.AccessTokens == nil {
+		return fmt.Errorf("resource: dependencies: access tokens is required (pass JWTAccessTokens{...} or OpaqueAccessTokens{...})")
 	}
 	if deps.Replay == nil {
 		return fmt.Errorf("resource: dependencies: replay is required")

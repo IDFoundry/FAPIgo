@@ -73,9 +73,6 @@ func validateConfig(cfg Config) error {
 			return fmt.Errorf("server: config: algorithms.request_object contains an invalid algorithm")
 		}
 	}
-	if !cfg.Algorithms.AccessToken.IsValid() {
-		return fmt.Errorf("server: config: algorithms.access_token is required")
-	}
 	if !cfg.Algorithms.IDToken.IsValid() {
 		return fmt.Errorf("server: config: algorithms.id_token is required")
 	}
@@ -153,6 +150,9 @@ func validateDependencies(cfg Config, deps Dependencies) error {
 	}
 	if deps.Revocation == nil {
 		return fmt.Errorf("server: dependencies: revocation is required (pass NoRevocation{} to explicitly decline)")
+	}
+	if deps.AccessTokens == nil {
+		return fmt.Errorf("server: dependencies: access tokens is required (pass JWTAccessTokens{...} or OpaqueAccessTokens{...})")
 	}
 	if cfg.Assurance == AssuranceProduction {
 		if deps.Audit == nil {

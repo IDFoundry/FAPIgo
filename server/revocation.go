@@ -13,17 +13,20 @@ import (
 // or NoRevocation{} to explicitly decline — see NoRevocation's own doc
 // comment for why declining must be a visible choice, not a silent one.
 type RevocationSink interface {
-	// Revoke marks jti as revoked. expiresAt is a conservative upper
+	// Revoke marks key as revoked — a JWT's jti claim when the active
+	// AccessTokenIssuer is JWTAccessTokens, an opaque token's own hash
+	// when it's OpaqueAccessTokens; opaque either way from this
+	// interface's point of view. expiresAt is a conservative upper
 	// bound on the access token's own expiry (the server no longer has
 	// the token's real exp claim at this point in the flow) — a
 	// backend with native per-key TTL support (Redis EXPIRE, a
 	// DynamoDB TTL attribute, a SQL row swept on a schedule) can use it
-	// to self-expire the record: once the token's own exp would make
+	// to self-expire the record: once the token's own expiry would make
 	// it invalid anyway, nothing depends on the revocation record
 	// still existing. A backend without TTL support can ignore it —
 	// storage/memstore.RevocationStore, this module's own reference
 	// implementation, does exactly that; see its doc comment for why.
-	Revoke(ctx context.Context, jti string, expiresAt time.Time) error
+	Revoke(ctx context.Context, key string, expiresAt time.Time) error
 }
 
 // NoRevocation is an explicit no-op RevocationSink for a deployment

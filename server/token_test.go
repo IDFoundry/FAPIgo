@@ -3,6 +3,7 @@ package server_test
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/rand"
 	"net/url"
 	"testing"
 	"time"
@@ -12,7 +13,10 @@ import (
 	"github.com/idfoundry/fapigo/internal/dpop"
 	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/internal/token"
+	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/server"
+	"github.com/idfoundry/fapigo/storage/memstore"
 )
 
 func jwkThumbprintFor(key *ecdsa.PrivateKey) (jose.Thumbprint, error) {
@@ -167,9 +171,10 @@ func TestExchangeAuthorizationCodeSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("thumbprint: %v", err)
 	}
+	dpopJWKStr := dpopJWK.String()
 	validatedAT, err := parsedAT.Validate(&h.serverKey.PublicKey, token.AccessTokenValidatePolicy{
 		ExpectedIssuer: testIssuer, ExpectedAudience: testIssuer,
-		Algorithm: fapi.ES256, ExpectedThumbprint: &dpopJWK,
+		Algorithm: fapi.ES256, ExpectedThumbprint: &dpopJWKStr,
 		Now: h.now, MaxLifetime: 10 * time.Minute,
 	})
 	if err != nil {
@@ -582,5 +587,147 @@ func TestExchangeAuthorizationCodeAuditsOutcomes(t *testing.T) {
 	}
 	if success != 1 {
 		t.Fatalf("success audit events = %d, want 1", success)
+	}
+}
+
+// issuerKeySourceFromManager adapts a keys.KeyManager to
+// keys.IssuerKeySource for tests that need a resource-side verifier —
+// resource.JWTAccessTokens.VerifyAccessToken resolves candidate keys
+// through this, exactly as cmd/conformance-as's own
+// selfIssuerKeySource does for a co-located AS+resource-server
+// deployment.
+type issuerKeySourceFromManager struct {
+	manager keys.KeyManager
+}
+
+func (s issuerKeySourceFromManager) ResolveIssuerKeys(ctx context.Context, req keys.IssuerKeyRequest) (keys.IssuerKeySet, error) {
+	info, err := s.manager.PublicKey(ctx, keys.AccessTokenSigning, req.Algorithm)
+	if err != nil {
+		return keys.IssuerKeySet{}, err
+	}
+	return keys.IssuerKeySet{Keys: []keys.IssuerKey{{KeyID: info.KeyID, Algorithm: req.Algorithm, PublicKey: info.PublicKey}}}, nil
+}
+
+// TestJWTAccessTokensRoundTripsThroughResourceVerifier issues an
+// access token via server.JWTAccessTokens and confirms
+// resource.JWTAccessTokens accepts it and reports the same
+// authorization facts — the two default implementations of this
+// session's newly pluggable AccessTokenIssuer/AccessTokenVerifier
+// boundary must actually interoperate, not just each compile.
+func TestJWTAccessTokensRoundTripsThroughResourceVerifier(t *testing.T) {
+	signerKey := generateKey(t)
+	km := &fakeKeyManager{key: signerKey, keyID: "as-key-1"}
+	issuer := server.JWTAccessTokens{Keys: km, Algorithm: fapi.ES256}
+
+	now := time.Now()
+	dpopKey := generateKey(t)
+	dpopThumbprint, err := jwkThumbprintFor(dpopKey)
+	if err != nil {
+		t.Fatalf("jwkThumbprintFor: %v", err)
+	}
+
+	raw, issueKey, err := issuer.IssueAccessToken(context.Background(), server.AccessTokenParams{
+		ClientID: testClientID, Subject: "user-1", Scope: []string{"openid", "accounts"},
+		Thumbprint: dpopThumbprint.String(),
+		Issuer:     testIssuer, Audience: testIssuer,
+		Now: now, Lifetime: 5 * time.Minute, Random: rand.Reader,
+	})
+	if err != nil {
+		t.Fatalf("IssueAccessToken: %v", err)
+	}
+	if raw == "" || issueKey == "" {
+		t.Fatalf("IssueAccessToken returned empty token or key")
+	}
+
+	issuerURL, err := fapi.ParseIssuerURL(testIssuer)
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+	verifier, err := resource.NewJWTAccessTokens(issuerKeySourceFromManager{manager: km}, issuerURL, testIssuer, fapi.ES256, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("resource.NewJWTAccessTokens: %v", err)
+	}
+
+	validated, err := verifier.VerifyAccessToken(context.Background(), resource.VerifyAccessTokenRequest{
+		Raw: raw, Thumbprint: dpopThumbprint.String(), Now: now, MaxClockSkew: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("VerifyAccessToken: %v", err)
+	}
+	if validated.Subject != "user-1" {
+		t.Fatalf("Subject = %q, want %q", validated.Subject, "user-1")
+	}
+	if validated.ClientID != testClientID.String() {
+		t.Fatalf("ClientID = %q, want %q", validated.ClientID, testClientID)
+	}
+	if validated.Key != issueKey {
+		t.Fatalf("Key = %q, want %q", validated.Key, issueKey)
+	}
+}
+
+// TestOpaqueAccessTokensRoundTripsThroughResourceVerifier is
+// TestJWTAccessTokensRoundTripsThroughResourceVerifier's counterpart
+// for the opaque, storage-backed implementation — issued via
+// server.OpaqueAccessTokens, verified via resource.OpaqueAccessTokens,
+// sharing one storage.AccessTokenStore instance (the co-located
+// AS+resource-server deployment shape cmd/conformance-as itself could
+// use, per the design plan's Tier 1).
+func TestOpaqueAccessTokensRoundTripsThroughResourceVerifier(t *testing.T) {
+	store := memstore.NewAccessTokenStore()
+	issuer := server.OpaqueAccessTokens{Store: store}
+	verifier := resource.OpaqueAccessTokens{Store: store}
+
+	now := time.Now()
+	dpopKey := generateKey(t)
+	dpopThumbprint, err := jwkThumbprintFor(dpopKey)
+	if err != nil {
+		t.Fatalf("jwkThumbprintFor: %v", err)
+	}
+
+	raw, issueKey, err := issuer.IssueAccessToken(context.Background(), server.AccessTokenParams{
+		ClientID: testClientID, Subject: "user-1", Scope: []string{"openid", "accounts"},
+		Thumbprint: dpopThumbprint.String(),
+		Now:        now, Lifetime: 5 * time.Minute, Random: rand.Reader,
+	})
+	if err != nil {
+		t.Fatalf("IssueAccessToken: %v", err)
+	}
+	if raw == "" || issueKey == "" {
+		t.Fatalf("IssueAccessToken returned empty token or key")
+	}
+	// An opaque token has nothing embedded in it — unlike the JWT
+	// case, its own raw value carries no claims to inspect.
+	if _, err := token.ParseAccessToken(raw); err == nil {
+		t.Fatalf("opaque token unexpectedly parsed as a JWT")
+	}
+
+	validated, err := verifier.VerifyAccessToken(context.Background(), resource.VerifyAccessTokenRequest{
+		Raw: raw, Thumbprint: dpopThumbprint.String(), Now: now, MaxClockSkew: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("VerifyAccessToken: %v", err)
+	}
+	if validated.Subject != "user-1" {
+		t.Fatalf("Subject = %q, want %q", validated.Subject, "user-1")
+	}
+	if validated.ClientID != testClientID.String() {
+		t.Fatalf("ClientID = %q, want %q", validated.ClientID, testClientID)
+	}
+	if validated.Key != issueKey {
+		t.Fatalf("Key = %q, want %q", validated.Key, issueKey)
+	}
+
+	// Wrong DPoP key must be rejected.
+	if _, err := verifier.VerifyAccessToken(context.Background(), resource.VerifyAccessTokenRequest{
+		Raw: raw, Thumbprint: "wrong-thumbprint", Now: now, MaxClockSkew: 5 * time.Second,
+	}); err == nil {
+		t.Fatalf("VerifyAccessToken(wrong thumbprint) = nil error, want error")
+	}
+
+	// Unknown token must be rejected.
+	if _, err := verifier.VerifyAccessToken(context.Background(), resource.VerifyAccessTokenRequest{
+		Raw: "never-issued", Thumbprint: dpopThumbprint.String(), Now: now, MaxClockSkew: 5 * time.Second,
+	}); err == nil {
+		t.Fatalf("VerifyAccessToken(unknown token) = nil error, want error")
 	}
 }

@@ -20,7 +20,7 @@ type refGrantStore struct {
 	mu              sync.Mutex
 	codes           map[[32]byte]storage.NewAuthorizationCode
 	redeemed        map[[32]byte]bool
-	codeAccessJTI   map[[32]byte]string
+	codeAccessKey   map[[32]byte]string
 	codeRefreshHash map[[32]byte][32]byte
 	refresh         map[[32]byte]storage.NewRefreshToken
 	refreshRevoked  map[[32]byte]bool
@@ -29,7 +29,7 @@ type refGrantStore struct {
 func newRefGrantStore() *refGrantStore {
 	return &refGrantStore{
 		codes: make(map[[32]byte]storage.NewAuthorizationCode), redeemed: make(map[[32]byte]bool),
-		codeAccessJTI: make(map[[32]byte]string), codeRefreshHash: make(map[[32]byte][32]byte),
+		codeAccessKey: make(map[[32]byte]string), codeRefreshHash: make(map[[32]byte][32]byte),
 		refresh: make(map[[32]byte]storage.NewRefreshToken), refreshRevoked: make(map[[32]byte]bool),
 	}
 }
@@ -45,7 +45,7 @@ func (s *refGrantStore) RedeemAuthorizationCode(_ context.Context, r storage.Aut
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.redeemed[r.CodeHash] {
-		err := &storage.AuthorizationCodeAlreadyRedeemedError{IssuedAccessTokenJTI: s.codeAccessJTI[r.CodeHash]}
+		err := &storage.AuthorizationCodeAlreadyRedeemedError{IssuedAccessTokenKey: s.codeAccessKey[r.CodeHash]}
 		if hash, ok := s.codeRefreshHash[r.CodeHash]; ok {
 			h := hash
 			err.IssuedRefreshTokenHash = &h
@@ -69,10 +69,10 @@ func (s *refGrantStore) RedeemAuthorizationCode(_ context.Context, r storage.Aut
 	}, nil
 }
 
-func (s *refGrantStore) RecordIssuedAccessToken(_ context.Context, codeHash [32]byte, jti string, _ time.Time) error {
+func (s *refGrantStore) RecordIssuedAccessToken(_ context.Context, codeHash [32]byte, key string, _ time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.codeAccessJTI[codeHash] = jti
+	s.codeAccessKey[codeHash] = key
 	return nil
 }
 

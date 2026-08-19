@@ -59,52 +59,54 @@ type fakeRevocationChecker struct {
 	err     error
 }
 
-func (f *fakeRevocationChecker) IsRevoked(_ context.Context, jti string) (bool, error) {
+func (f *fakeRevocationChecker) IsRevoked(_ context.Context, key string) (bool, error) {
 	if f.err != nil {
 		return false, f.err
 	}
-	return f.revoked[jti], nil
+	return f.revoked[key], nil
 }
 
 func validConfig(t *testing.T) resource.Config {
+	t.Helper()
+	return resource.Config{
+		Limits: resource.Limits{
+			MaxDPoPProofAge: time.Minute,
+			MaxClockSkew:    5 * time.Second,
+		},
+	}
+}
+
+func validAccessTokens(t *testing.T) resource.AccessTokenVerifier {
 	t.Helper()
 	issuer, err := fapi.ParseIssuerURL(testIssuer)
 	if err != nil {
 		t.Fatalf("ParseIssuerURL: %v", err)
 	}
-	return resource.Config{
-		Issuer:    issuer,
-		Audience:  testIssuer,
-		Algorithm: fapi.ES256,
-		Limits: resource.Limits{
-			MaxTokenLifetime: 5 * time.Minute,
-			MaxDPoPProofAge:  time.Minute,
-			MaxClockSkew:     5 * time.Second,
-		},
+	jwt, err := resource.NewJWTAccessTokens(&fakeIssuerKeySource{}, issuer, testIssuer, fapi.ES256, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("NewJWTAccessTokens: %v", err)
 	}
+	return jwt
 }
 
-func validDependencies() resource.Dependencies {
+func validDependencies(t *testing.T) resource.Dependencies {
+	t.Helper()
 	return resource.Dependencies{
-		IssuerKeys: &fakeIssuerKeySource{},
-		Replay:     &fakeReplayStore{},
-		Revocation: &fakeRevocationChecker{},
-		Clock:      fixedClock{now: time.Now()},
+		AccessTokens: validAccessTokens(t),
+		Replay:       &fakeReplayStore{},
+		Revocation:   &fakeRevocationChecker{},
+		Clock:        fixedClock{now: time.Now()},
 	}
 }
 
 func TestNewVerifierAcceptsValidConfig(t *testing.T) {
-	if _, err := resource.NewVerifier(validConfig(t), validDependencies()); err != nil {
+	if _, err := resource.NewVerifier(validConfig(t), validDependencies(t)); err != nil {
 		t.Fatalf("NewVerifier: %v", err)
 	}
 }
 
 func TestNewVerifierRejectsInvalidConfig(t *testing.T) {
 	cases := map[string]func(*resource.Config){
-		"zero issuer":             func(c *resource.Config) { c.Issuer = fapi.URL{} },
-		"empty audience":          func(c *resource.Config) { c.Audience = "" },
-		"invalid algorithm":       func(c *resource.Config) { c.Algorithm = 0 },
-		"zero max token lifetime": func(c *resource.Config) { c.Limits.MaxTokenLifetime = 0 },
 		"zero max dpop proof age": func(c *resource.Config) { c.Limits.MaxDPoPProofAge = 0 },
 		"negative clock skew":     func(c *resource.Config) { c.Limits.MaxClockSkew = -time.Second },
 	}
@@ -112,8 +114,46 @@ func TestNewVerifierRejectsInvalidConfig(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			cfg := validConfig(t)
 			mutate(&cfg)
-			if _, err := resource.NewVerifier(cfg, validDependencies()); err == nil {
+			if _, err := resource.NewVerifier(cfg, validDependencies(t)); err == nil {
 				t.Fatalf("NewVerifier(%s) = nil error, want error", name)
+			}
+		})
+	}
+}
+
+// TestNewJWTAccessTokensRejectsInvalid covers what
+// TestNewVerifierRejectsInvalidConfig used to check directly against
+// resource.Config before issuer/audience/algorithm/max-token-lifetime
+// and their validation moved into JWTAccessTokens itself (see
+// resource/accesstoken.go).
+func TestNewJWTAccessTokensRejectsInvalid(t *testing.T) {
+	issuer, err := fapi.ParseIssuerURL(testIssuer)
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+	type params struct {
+		issuerKeys       keys.IssuerKeySource
+		issuer           fapi.URL
+		audience         string
+		algorithm        fapi.SignatureAlgorithm
+		maxTokenLifetime time.Duration
+	}
+	valid := func() params {
+		return params{&fakeIssuerKeySource{}, issuer, testIssuer, fapi.ES256, 5 * time.Minute}
+	}
+	cases := map[string]func(*params){
+		"nil issuer keys":         func(p *params) { p.issuerKeys = nil },
+		"zero issuer":             func(p *params) { p.issuer = fapi.URL{} },
+		"empty audience":          func(p *params) { p.audience = "" },
+		"invalid algorithm":       func(p *params) { p.algorithm = 0 },
+		"zero max token lifetime": func(p *params) { p.maxTokenLifetime = 0 },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			p := valid()
+			mutate(&p)
+			if _, err := resource.NewJWTAccessTokens(p.issuerKeys, p.issuer, p.audience, p.algorithm, p.maxTokenLifetime); err == nil {
+				t.Fatalf("NewJWTAccessTokens(%s) = nil error, want error", name)
 			}
 		})
 	}
@@ -121,14 +161,14 @@ func TestNewVerifierRejectsInvalidConfig(t *testing.T) {
 
 func TestNewVerifierRejectsMissingDependencies(t *testing.T) {
 	cases := map[string]func(*resource.Dependencies){
-		"nil issuer keys": func(d *resource.Dependencies) { d.IssuerKeys = nil },
-		"nil replay":      func(d *resource.Dependencies) { d.Replay = nil },
-		"nil revocation":  func(d *resource.Dependencies) { d.Revocation = nil },
-		"nil clock":       func(d *resource.Dependencies) { d.Clock = nil },
+		"nil access tokens": func(d *resource.Dependencies) { d.AccessTokens = nil },
+		"nil replay":        func(d *resource.Dependencies) { d.Replay = nil },
+		"nil revocation":    func(d *resource.Dependencies) { d.Revocation = nil },
+		"nil clock":         func(d *resource.Dependencies) { d.Clock = nil },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
-			deps := validDependencies()
+			deps := validDependencies(t)
 			mutate(&deps)
 			if _, err := resource.NewVerifier(validConfig(t), deps); err == nil {
 				t.Fatalf("NewVerifier(%s) = nil error, want error", name)

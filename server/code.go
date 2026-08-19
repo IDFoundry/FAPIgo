@@ -6,11 +6,13 @@ import (
 	"io"
 )
 
-// authorizationCodeSize and refreshTokenSize are the byte lengths of a
-// generated authorization code / refresh token — 256 bits each.
+// authorizationCodeSize, refreshTokenSize and opaqueAccessTokenSize are
+// the byte lengths of a generated authorization code / refresh token /
+// opaque access token — 256 bits each.
 const (
 	authorizationCodeSize = 32
 	refreshTokenSize      = 32
+	opaqueAccessTokenSize = 32
 )
 
 func generateAuthorizationCode(random io.Reader) (string, error) {
@@ -19,6 +21,10 @@ func generateAuthorizationCode(random io.Reader) (string, error) {
 
 func generateRefreshToken(random io.Reader) (string, error) {
 	return generateRandomToken(random, refreshTokenSize)
+}
+
+func generateOpaqueAccessToken(random io.Reader) (string, error) {
+	return generateRandomToken(random, opaqueAccessTokenSize)
 }
 
 func generateRandomToken(random io.Reader, size int) (string, error) {

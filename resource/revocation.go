@@ -12,7 +12,10 @@ import "context"
 // NoRevocation's own doc comment for why declining must be a visible
 // choice, not a silent one.
 type RevocationChecker interface {
-	IsRevoked(ctx context.Context, jti string) (bool, error)
+	// IsRevoked reports whether key — a JWT's jti claim when the
+	// active AccessTokenVerifier is JWTAccessTokens, an opaque token's
+	// own hash when it's OpaqueAccessTokens — has been revoked.
+	IsRevoked(ctx context.Context, key string) (bool, error)
 }
 
 // NoRevocation is an explicit no-op RevocationChecker for a verifier

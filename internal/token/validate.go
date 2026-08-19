@@ -77,11 +77,14 @@ type AccessTokenValidatePolicy struct {
 
 	// ExpectedThumbprint, if non-nil, requires the token to be
 	// sender-constrained to this DPoP key: its cnf.jkt claim must equal
-	// ExpectedThumbprint exactly, and a token with no cnf.jkt at all is
+	// *ExpectedThumbprint exactly, and a token with no cnf.jkt at all is
 	// rejected. Leave nil to skip sender-constraint checking (e.g. for a
 	// bearer-token deployment); that policy choice belongs above this
-	// package.
-	ExpectedThumbprint *jose.Thumbprint
+	// package. A plain string (not jose.Thumbprint) because the only
+	// thing this package ever does with it is a string comparison — the
+	// caller already has whatever concrete thumbprint representation it
+	// used to compute the string.
+	ExpectedThumbprint *string
 
 	Now          time.Time
 	MaxLifetime  time.Duration
@@ -143,7 +146,7 @@ func (t AccessToken) Validate(pub crypto.PublicKey, policy AccessTokenValidatePo
 		if c.Confirmation == nil {
 			return ValidatedAccessToken{}, ErrMissingConfirmation
 		}
-		want := policy.ExpectedThumbprint.String()
+		want := *policy.ExpectedThumbprint
 		if subtle.ConstantTimeCompare([]byte(c.Confirmation.JKT), []byte(want)) != 1 {
 			return ValidatedAccessToken{}, ErrConfirmationMismatch
 		}

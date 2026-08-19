@@ -114,12 +114,17 @@ func RecommendedLimits() Limits {
 // it goes unused (New only validates it under
 // ProfileFAPISecurityWithMessageSigning) — harmless to set regardless,
 // and one less thing to remember if you switch profiles later.
+//
+// Has no AccessToken field — that algorithm is now
+// Dependencies.AccessTokens' own concern (see JWTAccessTokens), not
+// Config's. If using JWTAccessTokens, the same ES256 recommendation
+// applies there too; pass fapi.ES256 or reuse this policy's own
+// IDToken value.
 func RecommendedAlgorithms() AlgorithmPolicy {
 	return AlgorithmPolicy{
 		ClientAssertion: RecommendedAlgorithmSet(),
 		RequestObject:   RecommendedAlgorithmSet(),
 		JARM:            fapi.ES256,
-		AccessToken:     fapi.ES256,
 		IDToken:         fapi.ES256,
 	}
 }

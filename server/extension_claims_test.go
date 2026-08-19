@@ -96,9 +96,10 @@ func TestReturnInTokenClaimsPropagatesThroughAuthorizationCodeGrant(t *testing.T
 	if err != nil {
 		t.Fatalf("thumbprint: %v", err)
 	}
+	dpopThumbprintStr := dpopThumbprint.String()
 	validatedAT, err := parsedAT.Validate(&h.serverKey.PublicKey, token.AccessTokenValidatePolicy{
 		ExpectedIssuer: testIssuer, ExpectedAudience: testIssuer,
-		Algorithm: fapi.ES256, ExpectedThumbprint: &dpopThumbprint,
+		Algorithm: fapi.ES256, ExpectedThumbprint: &dpopThumbprintStr,
 		Now: h.now, MaxLifetime: 10 * time.Minute,
 	})
 	if err != nil {

@@ -53,10 +53,6 @@ type AlgorithmPolicy struct {
 	// ProfileFAPISecurityWithMessageSigning.
 	JARM fapi.SignatureAlgorithm
 
-	// AccessToken is the single algorithm this server signs JWT access
-	// tokens with.
-	AccessToken fapi.SignatureAlgorithm
-
 	// IDToken is the single algorithm this server signs ID tokens with.
 	IDToken fapi.SignatureAlgorithm
 }

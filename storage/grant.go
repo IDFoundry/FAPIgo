@@ -18,10 +18,13 @@ import (
 // both halves back to the caller, whichever were actually issued and
 // recorded.
 type AuthorizationCodeAlreadyRedeemedError struct {
-	// IssuedAccessTokenJTI is the jti of the access token issued on the
-	// original (first) redemption — "" if RecordIssuedAccessToken was
-	// never called for this code (e.g. no revocation support wired in).
-	IssuedAccessTokenJTI string
+	// IssuedAccessTokenKey is the revocation-lookup key of the access
+	// token issued on the original (first) redemption (a JWT's jti
+	// claim, or an opaque token's own hash — see
+	// server.AccessTokenIssuer.IssueAccessToken) — "" if
+	// RecordIssuedAccessToken was never called for this code (e.g. no
+	// revocation support wired in).
+	IssuedAccessTokenKey string
 
 	// IssuedRefreshTokenHash is the hash of the refresh token issued on
 	// the original redemption, if one was (the authorization included
@@ -192,16 +195,18 @@ type GrantStore interface {
 	// — see its own doc comment.
 	RedeemAuthorizationCode(ctx context.Context, redemption AuthorizationCodeRedemption) (RedeemedAuthorizationCode, error)
 
-	// RecordIssuedAccessToken associates the access-token jti issued
-	// when codeHash was (successfully) redeemed, purely so a later
-	// reuse of the same code can report which token was issued the
-	// first time (RFC 6749 §4.1.2). Called once, right after a
-	// successful redemption issues its access token. A no-op
-	// implementation (return nil, remember nothing) is entirely valid
-	// for a deployment that doesn't support revocation — costs nothing
-	// to implement, and RedeemAuthorizationCode's reuse error just
-	// always carries an empty IssuedAccessTokenJTI in that case.
-	RecordIssuedAccessToken(ctx context.Context, codeHash [32]byte, jti string, expiresAt time.Time) error
+	// RecordIssuedAccessToken associates the access token's
+	// revocation-lookup key (see AuthorizationCodeAlreadyRedeemedError.
+	// IssuedAccessTokenKey) issued when codeHash was (successfully)
+	// redeemed, purely so a later reuse of the same code can report
+	// which token was issued the first time (RFC 6749 §4.1.2). Called
+	// once, right after a successful redemption issues its access
+	// token. A no-op implementation (return nil, remember nothing) is
+	// entirely valid for a deployment that doesn't support revocation
+	// — costs nothing to implement, and RedeemAuthorizationCode's
+	// reuse error just always carries an empty IssuedAccessTokenKey in
+	// that case.
+	RecordIssuedAccessToken(ctx context.Context, codeHash [32]byte, key string, expiresAt time.Time) error
 
 	// RecordIssuedRefreshToken is RecordIssuedAccessToken's counterpart
 	// for the refresh token issued alongside it, when one is (the

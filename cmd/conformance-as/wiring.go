@@ -7,8 +7,10 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/fapihttp"
 	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/keys/ephemeral"
 	fapires "github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/server"
+	"github.com/idfoundry/fapigo/storage/memstore"
 )
 
 // newServerMux builds the full server.Server + HTTP router wiring from a
@@ -37,7 +39,7 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool) (*http.ServeM
 	if resolved.Profile == server.ProfileFAPISecurityWithMessageSigning {
 		purposes[keys.JARMSigning] = resolved.Algorithms.JARM
 	}
-	keyManager, err := newEphemeralKeyManager(purposes)
+	keyManager, err := ephemeral.NewKeyManager(purposes)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +53,7 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool) (*http.ServeM
 	if err != nil {
 		return nil, err
 	}
-	clientKeys, err := newClientKeySource(fetcher, resolved.Clients)
+	clientKeys, err := ephemeral.NewClientKeySource(fetcher, resolved.ClientKeys)
 	if err != nil {
 		return nil, err
 	}
@@ -69,13 +71,13 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool) (*http.ServeM
 		// storage.StoreAssurance on every store constructed below.
 		Assurance: server.AssuranceDevelopment,
 	}
-	replayStore := newInMemoryReplayStore()
+	replayStore := memstore.NewReplayStore()
 	identityClaims := newStaticIdentityClaims(resolved.DefaultSubject, server.SystemClock{})
-	clientRepo := newStaticClientRepository(resolved.Clients)
+	clientRepo := memstore.NewClientRepository(resolved.Clients)
 	srvDeps := server.Dependencies{
 		Clients:        clientRepo,
-		Transactions:   newInMemoryTransactionStore(),
-		Grants:         newInMemoryGrantStore(),
+		Transactions:   memstore.NewTransactionStore(),
+		Grants:         memstore.NewGrantStore(),
 		Replay:         replayStore,
 		ClientKeys:     clientKeys,
 		Keys:           keyManager,

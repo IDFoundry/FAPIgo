@@ -98,7 +98,12 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorServerError, 500, "failed to encode requested userinfo claims", err))
 	}
-	accessToken, err := s.issueAccessToken(ctx, client.ID(), redeemed.Subject, scope, thumbprint, accessTokenClaims)
+	// jti discarded — refresh-token redemption is deliberately not
+	// single-use (FAPI2-SP-FINAL 5.3.2.1-9), so there's no "reuse"
+	// event on this path to revoke an access token against; that
+	// tracking is specific to authorization-code reuse (see
+	// ExchangeAuthorizationCode).
+	accessToken, _, err := s.issueAccessToken(ctx, client.ID(), redeemed.Subject, scope, thumbprint, accessTokenClaims)
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorServerError, 500, "failed to issue access token", err))
 	}

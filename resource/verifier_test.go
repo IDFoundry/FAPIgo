@@ -54,6 +54,18 @@ type replayError struct{}
 
 func (*replayError) Error() string { return "replay: already used" }
 
+type fakeRevocationChecker struct {
+	revoked map[string]bool
+	err     error
+}
+
+func (f *fakeRevocationChecker) IsRevoked(_ context.Context, jti string) (bool, error) {
+	if f.err != nil {
+		return false, f.err
+	}
+	return f.revoked[jti], nil
+}
+
 func validConfig(t *testing.T) resource.Config {
 	t.Helper()
 	issuer, err := fapi.ParseIssuerURL(testIssuer)
@@ -76,6 +88,7 @@ func validDependencies() resource.Dependencies {
 	return resource.Dependencies{
 		IssuerKeys: &fakeIssuerKeySource{},
 		Replay:     &fakeReplayStore{},
+		Revocation: &fakeRevocationChecker{},
 		Clock:      fixedClock{now: time.Now()},
 	}
 }
@@ -110,6 +123,7 @@ func TestNewVerifierRejectsMissingDependencies(t *testing.T) {
 	cases := map[string]func(*resource.Dependencies){
 		"nil issuer keys": func(d *resource.Dependencies) { d.IssuerKeys = nil },
 		"nil replay":      func(d *resource.Dependencies) { d.Replay = nil },
+		"nil revocation":  func(d *resource.Dependencies) { d.Revocation = nil },
 		"nil clock":       func(d *resource.Dependencies) { d.Clock = nil },
 	}
 	for name, mutate := range cases {

@@ -23,9 +23,11 @@ import (
 type fixture struct {
 	verifier    *resource.Verifier
 	accessToken string
+	jti         string
 	dpopProof   string
 	target      *url.URL
 	replay      *fakeReplayStore
+	revocation  *fakeRevocationChecker
 	now         time.Time
 }
 
@@ -56,7 +58,7 @@ func newFixture(t *testing.T) fixture {
 		t.Fatalf("parse target url: %v", err)
 	}
 
-	accessToken, err := token.IssueAccessToken(token.AccessTokenParams{
+	accessToken, jti, err := token.IssueAccessToken(token.AccessTokenParams{
 		Signer: issuerKey, Algorithm: fapi.ES256, KeyID: "as-kid",
 		Issuer: testIssuer, Subject: "user-1", Audience: testIssuer,
 		ClientID: "client-1", Scope: "read write",
@@ -80,18 +82,20 @@ func newFixture(t *testing.T) fixture {
 	}
 
 	replay := &fakeReplayStore{}
+	revocation := &fakeRevocationChecker{}
 	v, err := resource.NewVerifier(validConfig(t), resource.Dependencies{
 		IssuerKeys: &fakeIssuerKeySource{set: keys.IssuerKeySet{Keys: []keys.IssuerKey{
 			{KeyID: "as-kid", Algorithm: fapi.ES256, PublicKey: issuerKey.Public()},
 		}}},
-		Replay: replay,
-		Clock:  fixedClock{now: now},
+		Replay:     replay,
+		Revocation: revocation,
+		Clock:      fixedClock{now: now},
 	})
 	if err != nil {
 		t.Fatalf("NewVerifier: %v", err)
 	}
 
-	return fixture{verifier: v, accessToken: accessToken, dpopProof: dpopProof, target: target, replay: replay, now: now}
+	return fixture{verifier: v, accessToken: accessToken, jti: jti, dpopProof: dpopProof, target: target, replay: replay, revocation: revocation, now: now}
 }
 
 func TestVerifyAcceptsValidRequest(t *testing.T) {
@@ -117,6 +121,45 @@ func TestVerifyAcceptsValidRequest(t *testing.T) {
 	}
 	if !authz.ExpiresAt.Equal(f.now.Add(5 * time.Minute).Truncate(time.Second)) {
 		t.Errorf("ExpiresAt = %v, want ~%v", authz.ExpiresAt, f.now.Add(5*time.Minute))
+	}
+	if authz.JTI != f.jti {
+		t.Errorf("JTI = %q, want %q", authz.JTI, f.jti)
+	}
+}
+
+func TestVerifyRejectsRevokedToken(t *testing.T) {
+	f := newFixture(t)
+	f.revocation.revoked = map[string]bool{f.jti: true}
+
+	_, err := f.verifier.Verify(context.Background(), resource.VerifyRequest{
+		Method:        "GET",
+		URL:           f.target,
+		Authorization: "DPoP " + f.accessToken,
+		DPoPProof:     f.dpopProof,
+	})
+	if err == nil {
+		t.Fatalf("Verify(revoked token) = nil error, want error")
+	}
+	rerr, ok := err.(*resource.Error)
+	if !ok {
+		t.Fatalf("error type = %T, want *resource.Error", err)
+	}
+	if rerr.Code() != resource.ErrorInvalidToken {
+		t.Errorf("Code() = %v, want %v", rerr.Code(), resource.ErrorInvalidToken)
+	}
+}
+
+func TestVerifyAcceptsNotRevokedToken(t *testing.T) {
+	f := newFixture(t)
+	f.revocation.revoked = map[string]bool{"some-other-jti": true}
+
+	if _, err := f.verifier.Verify(context.Background(), resource.VerifyRequest{
+		Method:        "GET",
+		URL:           f.target,
+		Authorization: "DPoP " + f.accessToken,
+		DPoPProof:     f.dpopProof,
+	}); err != nil {
+		t.Fatalf("Verify: %v", err)
 	}
 }
 

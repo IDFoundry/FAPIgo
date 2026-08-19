@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -16,16 +17,20 @@ import (
 // factory the same way.
 
 type refGrantStore struct {
-	mu       sync.Mutex
-	codes    map[[32]byte]storage.NewAuthorizationCode
-	redeemed map[[32]byte]bool
-	refresh  map[[32]byte]storage.NewRefreshToken
+	mu              sync.Mutex
+	codes           map[[32]byte]storage.NewAuthorizationCode
+	redeemed        map[[32]byte]bool
+	codeAccessJTI   map[[32]byte]string
+	codeRefreshHash map[[32]byte][32]byte
+	refresh         map[[32]byte]storage.NewRefreshToken
+	refreshRevoked  map[[32]byte]bool
 }
 
 func newRefGrantStore() *refGrantStore {
 	return &refGrantStore{
 		codes: make(map[[32]byte]storage.NewAuthorizationCode), redeemed: make(map[[32]byte]bool),
-		refresh: make(map[[32]byte]storage.NewRefreshToken),
+		codeAccessJTI: make(map[[32]byte]string), codeRefreshHash: make(map[[32]byte][32]byte),
+		refresh: make(map[[32]byte]storage.NewRefreshToken), refreshRevoked: make(map[[32]byte]bool),
 	}
 }
 
@@ -40,7 +45,12 @@ func (s *refGrantStore) RedeemAuthorizationCode(_ context.Context, r storage.Aut
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.redeemed[r.CodeHash] {
-		return storage.RedeemedAuthorizationCode{}, fmt.Errorf("already redeemed")
+		err := &storage.AuthorizationCodeAlreadyRedeemedError{IssuedAccessTokenJTI: s.codeAccessJTI[r.CodeHash]}
+		if hash, ok := s.codeRefreshHash[r.CodeHash]; ok {
+			h := hash
+			err.IssuedRefreshTokenHash = &h
+		}
+		return storage.RedeemedAuthorizationCode{}, err
 	}
 	code, ok := s.codes[r.CodeHash]
 	if !ok {
@@ -59,6 +69,20 @@ func (s *refGrantStore) RedeemAuthorizationCode(_ context.Context, r storage.Aut
 	}, nil
 }
 
+func (s *refGrantStore) RecordIssuedAccessToken(_ context.Context, codeHash [32]byte, jti string, _ time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.codeAccessJTI[codeHash] = jti
+	return nil
+}
+
+func (s *refGrantStore) RecordIssuedRefreshToken(_ context.Context, codeHash [32]byte, refreshTokenHash [32]byte, _ time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.codeRefreshHash[codeHash] = refreshTokenHash
+	return nil
+}
+
 func (s *refGrantStore) CreateRefreshToken(_ context.Context, tok storage.NewRefreshToken) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -68,10 +92,13 @@ func (s *refGrantStore) CreateRefreshToken(_ context.Context, tok storage.NewRef
 
 // RedeemRefreshToken is not single-use — see storage.GrantStore's doc
 // comment (FAPI2-SP-FINAL 5.3.2.1-9): a refresh token stays valid for
-// repeated use until it expires.
+// repeated use until it expires (or is revoked — see RevokeRefreshToken).
 func (s *refGrantStore) RedeemRefreshToken(_ context.Context, r storage.RefreshTokenRedemption) (storage.RedeemedRefreshToken, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.refreshRevoked[r.TokenHash] {
+		return storage.RedeemedRefreshToken{}, fmt.Errorf("refresh token has been revoked")
+	}
 	tok, ok := s.refresh[r.TokenHash]
 	if !ok {
 		return storage.RedeemedRefreshToken{}, fmt.Errorf("unknown token")
@@ -83,6 +110,13 @@ func (s *refGrantStore) RedeemRefreshToken(_ context.Context, r storage.RefreshT
 		RequestedIDTokenClaims: tok.RequestedIDTokenClaims, RequestedUserinfoClaims: tok.RequestedUserinfoClaims,
 		ExpiresAt: tok.ExpiresAt,
 	}, nil
+}
+
+func (s *refGrantStore) RevokeRefreshToken(_ context.Context, tokenHash [32]byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.refreshRevoked[tokenHash] = true
+	return nil
 }
 
 func TestGrantStoreContractAgainstReference(t *testing.T) {

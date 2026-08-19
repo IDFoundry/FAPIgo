@@ -51,6 +51,7 @@ func validDependencies() server.Dependencies {
 		Replay:       &fakeReplayStore{},
 		ClientKeys:   &fakeClientKeySource{},
 		Keys:         &fakeKeyManager{},
+		Revocation:   server.NoRevocation{},
 		Clock:        fixedClock{now: time.Now()},
 		Random:       rand.Reader,
 	}
@@ -105,6 +106,7 @@ func TestNewRejectsMissingDependencies(t *testing.T) {
 		"nil replay":       func(d *server.Dependencies) { d.Replay = nil },
 		"nil client keys":  func(d *server.Dependencies) { d.ClientKeys = nil },
 		"nil keys":         func(d *server.Dependencies) { d.Keys = nil },
+		"nil revocation":   func(d *server.Dependencies) { d.Revocation = nil },
 		"nil clock":        func(d *server.Dependencies) { d.Clock = nil },
 		"nil random":       func(d *server.Dependencies) { d.Random = nil },
 	}

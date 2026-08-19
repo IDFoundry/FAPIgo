@@ -69,9 +69,10 @@ func newServerWithKeyManager(t *testing.T, profile server.Profile, km keys.KeyMa
 		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
 			testClientID: {{Algorithm: fapi.ES256, PublicKey: &clientKey.PublicKey}},
 		}},
-		Keys:   km,
-		Clock:  fixedClock{now: time.Now()},
-		Random: rand.Reader,
+		Keys:       km,
+		Revocation: server.NoRevocation{},
+		Clock:      fixedClock{now: time.Now()},
+		Random:     rand.Reader,
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {

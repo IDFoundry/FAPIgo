@@ -53,6 +53,9 @@ func validateDependencies(deps Dependencies) error {
 	if deps.Replay == nil {
 		return fmt.Errorf("resource: dependencies: replay is required")
 	}
+	if deps.Revocation == nil {
+		return fmt.Errorf("resource: dependencies: revocation is required (pass NoRevocation{} to explicitly decline)")
+	}
 	if deps.Clock == nil {
 		return fmt.Errorf("resource: dependencies: clock is required")
 	}

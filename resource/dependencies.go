@@ -15,6 +15,13 @@ type Dependencies struct {
 	// Replay detects reuse of a DPoP proof's jti.
 	Replay storage.ReplayStore
 
+	// Revocation reports whether an access token's jti has been revoked
+	// by the issuing authorization server (RFC 6749 §4.1.2). Required,
+	// like every field above — pass a real RevocationChecker, or
+	// NoRevocation{} to explicitly decline (see NoRevocation's own doc
+	// comment for why).
+	Revocation RevocationChecker
+
 	// Clock supplies the current time.
 	Clock Clock
 }

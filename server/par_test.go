@@ -170,12 +170,15 @@ func (f *fakeClientKeySource) ResolveVerificationKeys(_ context.Context, req key
 }
 
 type fakeGrantStore struct {
-	mu            sync.Mutex
-	codes         []storage.NewAuthorizationCode
-	byHash        map[[32]byte]storage.NewAuthorizationCode
-	redeemed      map[[32]byte]bool
-	refreshTokens []storage.NewRefreshToken
-	refreshByHash map[[32]byte]storage.NewRefreshToken
+	mu              sync.Mutex
+	codes           []storage.NewAuthorizationCode
+	byHash          map[[32]byte]storage.NewAuthorizationCode
+	redeemed        map[[32]byte]bool
+	codeAccessJTI   map[[32]byte]string
+	codeRefreshHash map[[32]byte][32]byte
+	refreshTokens   []storage.NewRefreshToken
+	refreshByHash   map[[32]byte]storage.NewRefreshToken
+	refreshRevoked  map[[32]byte]bool
 }
 
 func (f *fakeGrantStore) CreateAuthorizationCode(_ context.Context, code storage.NewAuthorizationCode) error {
@@ -196,7 +199,14 @@ func (f *fakeGrantStore) RedeemAuthorizationCode(_ context.Context, redemption s
 		f.redeemed = make(map[[32]byte]bool)
 	}
 	if f.redeemed[redemption.CodeHash] {
-		return storage.RedeemedAuthorizationCode{}, fmt.Errorf("code already redeemed")
+		err := &storage.AuthorizationCodeAlreadyRedeemedError{
+			IssuedAccessTokenJTI: f.codeAccessJTI[redemption.CodeHash],
+		}
+		if hash, ok := f.codeRefreshHash[redemption.CodeHash]; ok {
+			h := hash
+			err.IssuedRefreshTokenHash = &h
+		}
+		return storage.RedeemedAuthorizationCode{}, err
 	}
 	code, ok := f.byHash[redemption.CodeHash]
 	if !ok {
@@ -230,6 +240,36 @@ func (f *fakeGrantStore) all() []storage.NewAuthorizationCode {
 	return out
 }
 
+func (f *fakeGrantStore) RecordIssuedAccessToken(_ context.Context, codeHash [32]byte, jti string, _ time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.codeAccessJTI == nil {
+		f.codeAccessJTI = make(map[[32]byte]string)
+	}
+	f.codeAccessJTI[codeHash] = jti
+	return nil
+}
+
+func (f *fakeGrantStore) RecordIssuedRefreshToken(_ context.Context, codeHash [32]byte, refreshTokenHash [32]byte, _ time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.codeRefreshHash == nil {
+		f.codeRefreshHash = make(map[[32]byte][32]byte)
+	}
+	f.codeRefreshHash[codeHash] = refreshTokenHash
+	return nil
+}
+
+func (f *fakeGrantStore) RevokeRefreshToken(_ context.Context, tokenHash [32]byte) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.refreshRevoked == nil {
+		f.refreshRevoked = make(map[[32]byte]bool)
+	}
+	f.refreshRevoked[tokenHash] = true
+	return nil
+}
+
 func (f *fakeGrantStore) CreateRefreshToken(_ context.Context, tok storage.NewRefreshToken) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -247,6 +287,9 @@ func (f *fakeGrantStore) CreateRefreshToken(_ context.Context, tok storage.NewRe
 func (f *fakeGrantStore) RedeemRefreshToken(_ context.Context, redemption storage.RefreshTokenRedemption) (storage.RedeemedRefreshToken, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.refreshRevoked[redemption.TokenHash] {
+		return storage.RedeemedRefreshToken{}, fmt.Errorf("refresh token has been revoked")
+	}
 	tok, ok := f.refreshByHash[redemption.TokenHash]
 	if !ok {
 		return storage.RedeemedRefreshToken{}, fmt.Errorf("no such refresh token")
@@ -322,6 +365,30 @@ func (f *fakeAuditSink) all() []server.AuditEvent {
 	return out
 }
 
+// fakeRevocationSink is a server.RevocationSink test double that
+// records every jti it's asked to revoke, so a test can assert
+// ExchangeAuthorizationCode's reuse-detection path called it with the
+// right value.
+type fakeRevocationSink struct {
+	mu      sync.Mutex
+	revoked []string
+}
+
+func (f *fakeRevocationSink) Revoke(_ context.Context, jti string, _ time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.revoked = append(f.revoked, jti)
+	return nil
+}
+
+func (f *fakeRevocationSink) all() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, len(f.revoked))
+	copy(out, f.revoked)
+	return out
+}
+
 type fixedClock struct{ now time.Time }
 
 func (c fixedClock) Now() time.Time { return c.now }
@@ -378,6 +445,7 @@ type harness struct {
 	transactions *fakeTransactionStore
 	grants       *fakeGrantStore
 	audit        *fakeAuditSink
+	revocation   *fakeRevocationSink
 	now          time.Time
 }
 
@@ -410,6 +478,7 @@ func newHarness(t *testing.T, profile server.Profile, allowRequestObjects bool) 
 	transactions := &fakeTransactionStore{}
 	grants := &fakeGrantStore{}
 	audit := &fakeAuditSink{}
+	revocation := &fakeRevocationSink{}
 
 	cfg := server.Config{
 		Issuer:    issuer,
@@ -445,17 +514,18 @@ func newHarness(t *testing.T, profile server.Profile, allowRequestObjects bool) 
 		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
 			testClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
 		}},
-		Keys:   &fakeKeyManager{key: serverKey, keyID: "as-key-1"},
-		Audit:  audit,
-		Clock:  fixedClock{now: now},
-		Random: rand.Reader,
+		Keys:       &fakeKeyManager{key: serverKey, keyID: "as-key-1"},
+		Revocation: revocation,
+		Audit:      audit,
+		Clock:      fixedClock{now: now},
+		Random:     rand.Reader,
 	}
 
 	srv, err := server.New(cfg, deps)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
-	return harness{server: srv, key: key, serverKey: serverKey, transactions: transactions, grants: grants, audit: audit, now: now}
+	return harness{server: srv, key: key, serverKey: serverKey, transactions: transactions, grants: grants, audit: audit, revocation: revocation, now: now}
 }
 
 func (h harness) clientAssertion(t *testing.T) string {
@@ -957,9 +1027,10 @@ func newHarnessWithExtensions(t *testing.T, profile server.Profile, registry *ex
 		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
 			testClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
 		}},
-		Keys:   &fakeKeyManager{key: serverKey, keyID: "as-key-1"},
-		Clock:  fixedClock{now: now},
-		Random: rand.Reader,
+		Keys:       &fakeKeyManager{key: serverKey, keyID: "as-key-1"},
+		Revocation: server.NoRevocation{},
+		Clock:      fixedClock{now: now},
+		Random:     rand.Reader,
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {

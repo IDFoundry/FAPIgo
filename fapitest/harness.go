@@ -129,6 +129,7 @@ func New(t *testing.T, cfg Config) *Harness {
 		Assurance:  server.AssuranceDevelopment,
 		Extensions: cfg.Extensions,
 	}
+	revocation := newMemRevocationStore()
 	srvDeps := server.Dependencies{
 		Clients:      &memClientRepository{client: registeredClient},
 		Transactions: newMemTransactionStore(),
@@ -136,6 +137,7 @@ func New(t *testing.T, cfg Config) *Harness {
 		Replay:       replay,
 		ClientKeys:   &memClientKeySource{clientID: ClientID, manager: clientKeys},
 		Keys:         asKeys,
+		Revocation:   revocation,
 		Clock:        clock,
 		Random:       rand.Reader,
 	}
@@ -203,6 +205,7 @@ func New(t *testing.T, cfg Config) *Harness {
 	resourceDeps := resource.Dependencies{
 		IssuerKeys: &memIssuerKeySource{issuer: Issuer, manager: asKeys},
 		Replay:     replay,
+		Revocation: revocation,
 		Clock:      clock,
 	}
 	rs, err := resource.NewVerifier(resourceCfg, resourceDeps)

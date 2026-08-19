@@ -72,6 +72,7 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool) (*http.ServeM
 		Assurance: server.AssuranceDevelopment,
 	}
 	replayStore := memstore.NewReplayStore()
+	revocationStore := memstore.NewRevocationStore()
 	identityClaims := newStaticIdentityClaims(resolved.DefaultSubject, server.SystemClock{})
 	clientRepo := memstore.NewClientRepository(resolved.Clients)
 	srvDeps := server.Dependencies{
@@ -81,6 +82,7 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool) (*http.ServeM
 		Replay:         replayStore,
 		ClientKeys:     clientKeys,
 		Keys:           keyManager,
+		Revocation:     revocationStore,
 		Clock:          server.SystemClock{},
 		Random:         rand.Reader,
 		IdentityClaims: identityClaims,
@@ -105,6 +107,7 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool) (*http.ServeM
 	}, fapires.Dependencies{
 		IssuerKeys: selfIssuerKeySource{keyManager: keyManager},
 		Replay:     replayStore,
+		Revocation: revocationStore,
 		Clock:      fapires.SystemClock{},
 	})
 	if err != nil {

@@ -96,6 +96,13 @@ type ValidatedAccessToken struct {
 	Scope      string
 	Parameters map[string]json.RawMessage
 	ExpiresAt  time.Time
+
+	// JTI is the token's "jti" claim, now trusted — the signature has
+	// been verified by this point, unlike AccessToken.KeyID()/
+	// ClaimedIssuer(), which are documented as pre-verification lookup
+	// hints only. A caller can use this to check token-specific
+	// revocation (RFC 6750 §3.1's invalid_token case).
+	JTI string
 }
 
 // Validate checks t's signature against pub and its claims against
@@ -148,6 +155,7 @@ func (t AccessToken) Validate(pub crypto.PublicKey, policy AccessTokenValidatePo
 		Scope:      c.Scope,
 		Parameters: c.Parameters,
 		ExpiresAt:  c.ExpiresAt,
+		JTI:        c.JTI,
 	}, nil
 }
 

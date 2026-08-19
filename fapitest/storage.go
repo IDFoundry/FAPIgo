@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/storage"
@@ -100,17 +101,23 @@ func (s *memTransactionStore) CompleteAuthorization(_ context.Context, txn stora
 
 // memGrantStore is an in-memory storage.GrantStore.
 type memGrantStore struct {
-	mu           sync.Mutex
-	codes        map[[32]byte]storage.NewAuthorizationCode
-	codeRedeemed map[[32]byte]bool
-	refresh      map[[32]byte]storage.NewRefreshToken
+	mu              sync.Mutex
+	codes           map[[32]byte]storage.NewAuthorizationCode
+	codeRedeemed    map[[32]byte]bool
+	codeAccessJTI   map[[32]byte]string
+	codeRefreshHash map[[32]byte][32]byte
+	refresh         map[[32]byte]storage.NewRefreshToken
+	refreshRevoked  map[[32]byte]bool
 }
 
 func newMemGrantStore() *memGrantStore {
 	return &memGrantStore{
-		codes:        make(map[[32]byte]storage.NewAuthorizationCode),
-		codeRedeemed: make(map[[32]byte]bool),
-		refresh:      make(map[[32]byte]storage.NewRefreshToken),
+		codes:           make(map[[32]byte]storage.NewAuthorizationCode),
+		codeRedeemed:    make(map[[32]byte]bool),
+		codeAccessJTI:   make(map[[32]byte]string),
+		codeRefreshHash: make(map[[32]byte][32]byte),
+		refresh:         make(map[[32]byte]storage.NewRefreshToken),
+		refreshRevoked:  make(map[[32]byte]bool),
 	}
 }
 
@@ -125,7 +132,12 @@ func (s *memGrantStore) RedeemAuthorizationCode(_ context.Context, redemption st
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.codeRedeemed[redemption.CodeHash] {
-		return storage.RedeemedAuthorizationCode{}, fmt.Errorf("fapitest: code already redeemed")
+		err := &storage.AuthorizationCodeAlreadyRedeemedError{IssuedAccessTokenJTI: s.codeAccessJTI[redemption.CodeHash]}
+		if hash, ok := s.codeRefreshHash[redemption.CodeHash]; ok {
+			h := hash
+			err.IssuedRefreshTokenHash = &h
+		}
+		return storage.RedeemedAuthorizationCode{}, err
 	}
 	code, ok := s.codes[redemption.CodeHash]
 	if !ok {
@@ -143,6 +155,20 @@ func (s *memGrantStore) RedeemAuthorizationCode(_ context.Context, redemption st
 	}, nil
 }
 
+func (s *memGrantStore) RecordIssuedAccessToken(_ context.Context, codeHash [32]byte, jti string, _ time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.codeAccessJTI[codeHash] = jti
+	return nil
+}
+
+func (s *memGrantStore) RecordIssuedRefreshToken(_ context.Context, codeHash [32]byte, refreshTokenHash [32]byte, _ time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.codeRefreshHash[codeHash] = refreshTokenHash
+	return nil
+}
+
 func (s *memGrantStore) CreateRefreshToken(_ context.Context, token storage.NewRefreshToken) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -152,10 +178,13 @@ func (s *memGrantStore) CreateRefreshToken(_ context.Context, token storage.NewR
 
 // RedeemRefreshToken is not single-use — see storage.GrantStore's doc
 // comment (FAPI2-SP-FINAL 5.3.2.1-9): a refresh token stays valid for
-// repeated use until it expires.
+// repeated use until it expires (or is revoked — see RevokeRefreshToken).
 func (s *memGrantStore) RedeemRefreshToken(_ context.Context, redemption storage.RefreshTokenRedemption) (storage.RedeemedRefreshToken, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.refreshRevoked[redemption.TokenHash] {
+		return storage.RedeemedRefreshToken{}, fmt.Errorf("fapitest: refresh token has been revoked")
+	}
 	token, ok := s.refresh[redemption.TokenHash]
 	if !ok {
 		return storage.RedeemedRefreshToken{}, fmt.Errorf("fapitest: unknown refresh token")
@@ -167,6 +196,13 @@ func (s *memGrantStore) RedeemRefreshToken(_ context.Context, redemption storage
 		RequestedIDTokenClaims: token.RequestedIDTokenClaims, RequestedUserinfoClaims: token.RequestedUserinfoClaims,
 		ExpiresAt: token.ExpiresAt,
 	}, nil
+}
+
+func (s *memGrantStore) RevokeRefreshToken(_ context.Context, tokenHash [32]byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.refreshRevoked[tokenHash] = true
+	return nil
 }
 
 // memReplayStore is an in-memory storage.ReplayStore shared across every
@@ -195,6 +231,32 @@ func (s *memReplayStore) UseOnce(_ context.Context, use storage.ReplayUse) error
 	}
 	byDigest[use.Digest] = true
 	return nil
+}
+
+// memRevocationStore is an in-memory store shared across the harness's
+// server and resource verifier — mirroring memReplayStore's sharing
+// pattern above — implementing both server.RevocationSink and
+// resource.RevocationChecker.
+type memRevocationStore struct {
+	mu      sync.Mutex
+	revoked map[string]bool
+}
+
+func newMemRevocationStore() *memRevocationStore {
+	return &memRevocationStore{revoked: make(map[string]bool)}
+}
+
+func (s *memRevocationStore) Revoke(_ context.Context, jti string, _ time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.revoked[jti] = true
+	return nil
+}
+
+func (s *memRevocationStore) IsRevoked(_ context.Context, jti string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.revoked[jti], nil
 }
 
 // memSessionStore is an in-memory storage.SessionStore.

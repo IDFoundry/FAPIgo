@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -97,6 +98,83 @@ func TestGrantStoreContract(t *testing.T, factory func() GrantStore) {
 		if _, err := store.RedeemAuthorizationCode(ctx, AuthorizationCodeRedemption{CodeHash: hash}); err == nil {
 			t.Fatalf("second RedeemAuthorizationCode = nil error, want error")
 		}
+	})
+
+	// RFC 6749 §4.1.2: on a reuse, the store must report what the
+	// original redemption issued (via errors.As into
+	// *AuthorizationCodeAlreadyRedeemedError) so the caller can revoke
+	// it — see RecordIssuedAccessToken/RecordIssuedRefreshToken's own
+	// doc comments.
+	t.Run("RedeemAuthorizationCodeReuseReportsIssuedTokens", func(t *testing.T) {
+		store := factory()
+		ctx := context.Background()
+		hash := sha256.Sum256([]byte("reuse-reports-code"))
+		if err := store.CreateAuthorizationCode(ctx, NewAuthorizationCode{
+			CodeHash: hash, ClientID: "client-1", ExpiresAt: time.Now().Add(time.Minute),
+		}); err != nil {
+			t.Fatalf("CreateAuthorizationCode: %v", err)
+		}
+		if _, err := store.RedeemAuthorizationCode(ctx, AuthorizationCodeRedemption{CodeHash: hash}); err != nil {
+			t.Fatalf("first RedeemAuthorizationCode: %v", err)
+		}
+		refreshHash := sha256.Sum256([]byte("reuse-reports-refresh"))
+		if err := store.RecordIssuedAccessToken(ctx, hash, "jti-1", time.Now().Add(time.Minute)); err != nil {
+			t.Fatalf("RecordIssuedAccessToken: %v", err)
+		}
+		if err := store.RecordIssuedRefreshToken(ctx, hash, refreshHash, time.Now().Add(time.Hour)); err != nil {
+			t.Fatalf("RecordIssuedRefreshToken: %v", err)
+		}
+
+		_, err := store.RedeemAuthorizationCode(ctx, AuthorizationCodeRedemption{CodeHash: hash})
+		if err == nil {
+			t.Fatal("second RedeemAuthorizationCode = nil error, want error")
+		}
+		var alreadyRedeemed *AuthorizationCodeAlreadyRedeemedError
+		if !errors.As(err, &alreadyRedeemed) {
+			t.Fatalf("second RedeemAuthorizationCode error = %v, want errors.As into *AuthorizationCodeAlreadyRedeemedError", err)
+		}
+		if alreadyRedeemed.IssuedAccessTokenJTI != "jti-1" {
+			t.Fatalf("IssuedAccessTokenJTI = %q, want %q", alreadyRedeemed.IssuedAccessTokenJTI, "jti-1")
+		}
+		if alreadyRedeemed.IssuedRefreshTokenHash == nil || *alreadyRedeemed.IssuedRefreshTokenHash != refreshHash {
+			t.Fatalf("IssuedRefreshTokenHash = %v, want %v", alreadyRedeemed.IssuedRefreshTokenHash, refreshHash)
+		}
+	})
+
+	// Graceful degradation: a deployment that never calls
+	// RecordIssuedAccessToken/RecordIssuedRefreshToken (no-op
+	// implementation, or simply never invoked) still gets a normal
+	// reuse rejection — the error just carries nothing to revoke.
+	t.Run("RedeemAuthorizationCodeReuseWithoutRecordingReportsEmpty", func(t *testing.T) {
+		store := factory()
+		ctx := context.Background()
+		hash := sha256.Sum256([]byte("reuse-no-recording-code"))
+		if err := store.CreateAuthorizationCode(ctx, NewAuthorizationCode{
+			CodeHash: hash, ClientID: "client-1", ExpiresAt: time.Now().Add(time.Minute),
+		}); err != nil {
+			t.Fatalf("CreateAuthorizationCode: %v", err)
+		}
+		if _, err := store.RedeemAuthorizationCode(ctx, AuthorizationCodeRedemption{CodeHash: hash}); err != nil {
+			t.Fatalf("first RedeemAuthorizationCode: %v", err)
+		}
+
+		_, err := store.RedeemAuthorizationCode(ctx, AuthorizationCodeRedemption{CodeHash: hash})
+		if err == nil {
+			t.Fatal("second RedeemAuthorizationCode = nil error, want error")
+		}
+		var alreadyRedeemed *AuthorizationCodeAlreadyRedeemedError
+		if errors.As(err, &alreadyRedeemed) {
+			if alreadyRedeemed.IssuedAccessTokenJTI != "" {
+				t.Fatalf("IssuedAccessTokenJTI = %q, want \"\" (never recorded)", alreadyRedeemed.IssuedAccessTokenJTI)
+			}
+			if alreadyRedeemed.IssuedRefreshTokenHash != nil {
+				t.Fatalf("IssuedRefreshTokenHash = %v, want nil (never recorded)", alreadyRedeemed.IssuedRefreshTokenHash)
+			}
+		}
+		// Not requiring errors.As to succeed here at all: an
+		// implementation is free to return a plain error for this case
+		// too, as long as *if* it returns the typed error, the payload
+		// is empty rather than stale/wrong.
 	})
 
 	t.Run("RedeemUnknownAuthorizationCodeFails", func(t *testing.T) {
@@ -196,6 +274,29 @@ func TestGrantStoreContract(t *testing.T, factory func() GrantStore) {
 		})
 		if successes != contractConcurrentAttempts {
 			t.Fatalf("concurrent RedeemRefreshToken succeeded %d/%d times, want all of them (not single-use)", successes, contractConcurrentAttempts)
+		}
+	})
+
+	// RFC 6749 §4.1.2: a specific refresh token can be revoked (e.g.
+	// because its originating authorization code was reused) even
+	// though refresh tokens aren't single-use in the ordinary case.
+	t.Run("RevokeRefreshTokenPreventsRedemption", func(t *testing.T) {
+		store := factory()
+		ctx := context.Background()
+		hash := sha256.Sum256([]byte("revoked-refresh"))
+		if err := store.CreateRefreshToken(ctx, NewRefreshToken{
+			TokenHash: hash, ClientID: "client-1", ExpiresAt: time.Now().Add(time.Hour),
+		}); err != nil {
+			t.Fatalf("CreateRefreshToken: %v", err)
+		}
+		if _, err := store.RedeemRefreshToken(ctx, RefreshTokenRedemption{TokenHash: hash}); err != nil {
+			t.Fatalf("RedeemRefreshToken before revocation: %v", err)
+		}
+		if err := store.RevokeRefreshToken(ctx, hash); err != nil {
+			t.Fatalf("RevokeRefreshToken: %v", err)
+		}
+		if _, err := store.RedeemRefreshToken(ctx, RefreshTokenRedemption{TokenHash: hash}); err == nil {
+			t.Fatal("RedeemRefreshToken after revocation = nil error, want error")
 		}
 	})
 }

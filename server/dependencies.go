@@ -39,6 +39,13 @@ type Dependencies struct {
 	// Config.Assurance is AssuranceProduction; optional otherwise.
 	Audit AuditSink
 
+	// Revocation lets this server revoke an access token it already
+	// issued, on detected authorization-code reuse (RFC 6749 §4.1.2).
+	// Required, like every field above except Audit/IdentityClaims —
+	// pass a real RevocationSink, or NoRevocation{} to explicitly
+	// decline (see NoRevocation's own doc comment for why).
+	Revocation RevocationSink
+
 	// Clock supplies the current time.
 	Clock Clock
 

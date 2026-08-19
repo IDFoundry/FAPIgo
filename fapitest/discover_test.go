@@ -84,6 +84,7 @@ func TestDiscoverEndToEnd(t *testing.T) {
 		Replay:       newMemReplayStore(),
 		ClientKeys:   &memClientKeySource{clientID: ClientID, manager: clientKeys},
 		Keys:         asKeys,
+		Revocation:   server.NoRevocation{},
 		Clock:        clock,
 		Random:       rand.Reader,
 	}

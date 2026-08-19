@@ -332,9 +332,10 @@ func TestBeginAuthorizationRejectsExpiredRequestURI(t *testing.T) {
 		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
 			testClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
 		}},
-		Keys:   &fakeKeyManager{key: generateKey(t), keyID: "as-key-1"},
-		Clock:  clock,
-		Random: rand.Reader,
+		Keys:       &fakeKeyManager{key: generateKey(t), keyID: "as-key-1"},
+		Revocation: server.NoRevocation{},
+		Clock:      clock,
+		Random:     rand.Reader,
 	})
 	if err != nil {
 		t.Fatalf("server.New: %v", err)

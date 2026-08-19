@@ -31,14 +31,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           check-latest: true
+          # No go.sum exists — this module has zero external
+          # dependencies (see go.mod) — see ci.yml's identical setting
+          # for why this is needed instead.
+          cache-dependency-path: go.mod
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.x'
 
@@ -86,7 +90,7 @@ jobs:
 
       - name: Upload conformance results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: conformance-results
           path: ${{ runner.temp }}/conformance-results

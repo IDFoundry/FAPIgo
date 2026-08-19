@@ -50,11 +50,8 @@ type Config struct {
 }
 
 // ClientConfig registers one OIDF-suite-driven test client. Exactly one
-// of JWKS or JWKSURI must be set.
-//
-// TODO(conformance): the exact OIDF test-plan client JWKS delivery
-// mechanism isn't chosen yet — populate conformance/server/oidf-config/
-// and point this config at it once a specific test plan is selected.
+// of JWKS or JWKSURI must be set — see conformance/server/oidf-config/
+// for how each test plan's client config populates this.
 type ClientConfig struct {
 	ID                       string   `json:"id"`
 	RedirectURIs             []string `json:"redirect_uris"`

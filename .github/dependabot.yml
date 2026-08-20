@@ -1,0 +1,20 @@
+version: 2
+updates:
+  # This module has zero third-party Go dependencies today (see
+  # go.mod) — nothing for this ecosystem to actually find right now.
+  # Kept enabled anyway so a dependency added later is never silently
+  # unwatched from day one.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+
+  # Keeps the pinned actions/checkout, actions/setup-go,
+  # actions/setup-python, actions/upload-artifact, golang/govulncheck-action,
+  # golangci/golangci-lint-action and googleapis/release-please-action
+  # versions across ci.yml, conformance.yml and release-please.yml
+  # current — the one real dependency surface this repo has.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

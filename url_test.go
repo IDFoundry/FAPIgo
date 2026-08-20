@@ -42,6 +42,80 @@ func TestParseEndpointURLRejects(t *testing.T) {
 	}
 }
 
+// TestParseIssuerURLAccepts through TestParseIssuerURLAllowsLoopbackHTTPWhenEnabled
+// mirror ParseEndpointURL's own tests above. Despite sharing the same
+// underlying validator (parseSecureURL), ParseIssuerURL itself had no
+// direct test of its own — every one of the dozens of call sites
+// across this repo that use it (fapitest, cmd/conformance-as, every
+// server/client/resource test's own testIssuer) never exercises this
+// package's own test suite, since per-package coverage only credits a
+// package for what its own tests call directly.
+func TestParseIssuerURLAccepts(t *testing.T) {
+	u, err := ParseIssuerURL("https://as.example")
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+	if u.String() != "https://as.example" {
+		t.Fatalf("String() = %q, want %q", u.String(), "https://as.example")
+	}
+}
+
+func TestParseIssuerURLNormalizesCase(t *testing.T) {
+	u, err := ParseIssuerURL("HTTPS://AS.Example")
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+	if u.String() != "https://as.example" {
+		t.Fatalf("String() = %q, want %q", u.String(), "https://as.example")
+	}
+}
+
+func TestParseIssuerURLRejects(t *testing.T) {
+	cases := []string{
+		"",
+		"not-a-url",
+		"/relative/path",
+		"http://as.example",            // http, not loopback
+		"https://user:pass@as.example", // embedded credentials
+		"https://as.example#fragment",  // fragment
+		"ftp://as.example",             // wrong scheme
+	}
+	for _, c := range cases {
+		if _, err := ParseIssuerURL(c); err == nil {
+			t.Fatalf("ParseIssuerURL(%q) = nil error, want error", c)
+		}
+	}
+}
+
+func TestParseIssuerURLAllowsLoopbackHTTPWhenEnabled(t *testing.T) {
+	cases := []string{
+		"http://localhost:8080",
+		"http://127.0.0.1:8080",
+		"http://[::1]:8080",
+	}
+	for _, c := range cases {
+		if _, err := ParseIssuerURL(c, AllowLoopbackHTTP()); err != nil {
+			t.Fatalf("ParseIssuerURL(%q, AllowLoopbackHTTP()) = %v, want nil", c, err)
+		}
+	}
+}
+
+// TestParseIssuerURLAndParseEndpointURLErrorsAreDistinguishable is the
+// one behavioral difference actually unique to ParseIssuerURL as
+// opposed to its sibling: each wraps a parseSecureURL failure with its
+// own distinct message prefix, so a caller's error log can tell which
+// of the two rejected the value without needing surrounding context.
+func TestParseIssuerURLAndParseEndpointURLErrorsAreDistinguishable(t *testing.T) {
+	_, issuerErr := ParseIssuerURL("not-a-url")
+	_, endpointErr := ParseEndpointURL("not-a-url")
+	if issuerErr == nil || endpointErr == nil {
+		t.Fatalf("ParseIssuerURL/ParseEndpointURL(not-a-url) = nil error, want error from both")
+	}
+	if issuerErr.Error() == endpointErr.Error() {
+		t.Fatalf("ParseIssuerURL and ParseEndpointURL produced identical error text %q, want distinguishable messages", issuerErr.Error())
+	}
+}
+
 func TestParseEndpointURLAllowsLoopbackHTTPWhenEnabled(t *testing.T) {
 	cases := []string{
 		"http://localhost:8080/par",

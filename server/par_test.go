@@ -163,9 +163,13 @@ func (f *fakeReplayStore) Capabilities() storage.Capabilities {
 
 type fakeClientKeySource struct {
 	keysByClient map[fapi.ClientID][]keys.VerificationKey
+	err          error
 }
 
 func (f *fakeClientKeySource) ResolveVerificationKeys(_ context.Context, req keys.ClientKeyRequest) (keys.VerificationKeySet, error) {
+	if f.err != nil {
+		return keys.VerificationKeySet{}, f.err
+	}
 	return keys.VerificationKeySet{Keys: f.keysByClient[req.ClientID]}, nil
 }
 
@@ -519,6 +523,159 @@ func newHarness(t *testing.T, profile server.Profile, allowRequestObjects bool) 
 		t.Fatalf("server.New: %v", err)
 	}
 	return harness{server: srv, key: key, serverKey: serverKey, transactions: transactions, grants: grants, audit: audit, revocation: revocation, now: now}
+}
+
+// newHarnessWithClientKeys mirrors newHarness but lets a test supply
+// its own ClientKeySource — for exercising resolveClientKey's own
+// candidate-matching logic (kid/algorithm skip-and-continue, upstream
+// resolve failure) directly, none of which the default single-
+// candidate-key harness ever needs to exercise.
+func newHarnessWithClientKeys(t *testing.T, clientKeys keys.ClientKeySource) harness {
+	t.Helper()
+	now := time.Now()
+	key := generateKey(t)
+	serverKey := generateKey(t)
+
+	client, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
+		ID:                       testClientID,
+		RedirectURIs:             []fapi.RegisteredRedirectURI{testRedirectURI},
+		ClientAssertionAlgorithm: fapi.ES256,
+		AllowedScopes:            []string{"openid", "accounts", "offline_access"},
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+
+	issuer, err := fapi.ParseIssuerURL(testIssuer)
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+
+	cfg := server.Config{
+		Issuer:    issuer,
+		Endpoints: testEndpoints(t),
+		Profile:   server.ProfileFAPISecurity,
+		Algorithms: server.AlgorithmPolicy{
+			ClientAssertion: server.AlgorithmSet{fapi.ES256},
+			RequestObject:   server.AlgorithmSet{fapi.ES256},
+			JARM:            fapi.ES256,
+			IDToken:         fapi.ES256,
+		},
+		Limits: server.Limits{
+			PushedRequestLifetime:      90 * time.Second,
+			MaxClientAssertionLifetime: time.Minute,
+			MaxRequestObjectLifetime:   time.Minute,
+			InteractionLifetime:        5 * time.Minute,
+			AuthorizationCodeLifetime:  time.Minute,
+			JARMResponseLifetime:       time.Minute,
+			AccessTokenLifetime:        5 * time.Minute,
+			IDTokenLifetime:            5 * time.Minute,
+			RefreshTokenLifetime:       5 * time.Minute,
+			MaxDPoPProofAge:            time.Minute,
+			MaxClockSkew:               5 * time.Second,
+		},
+		Assurance: server.AssuranceDevelopment,
+	}
+	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
+	deps := server.Dependencies{
+		Clients:      &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
+		Transactions: &fakeTransactionStore{},
+		Grants:       &fakeGrantStore{},
+		Replay:       &fakeReplayStore{},
+		ClientKeys:   clientKeys,
+		Keys:         serverKeyManager,
+		AccessTokens: server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:   &fakeRevocationSink{},
+		Audit:        &fakeAuditSink{},
+		Clock:        fixedClock{now: now},
+		Random:       rand.Reader,
+	}
+
+	srv, err := server.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+	return harness{server: srv, key: key, serverKey: serverKey, now: now}
+}
+
+// TestPushAuthorizationRequestClientAssertionSelectsMatchingKeyAmongCandidates
+// proves resolveClientKey's candidate loop actually picks the right
+// key by kid — not just that a lone key gets used, which is all
+// newHarness's single-candidate setup can ever exercise. A decoy
+// candidate (right algorithm, wrong kid) must be skipped in favor of
+// the real one; if the loop instead picked the decoy, verifying a
+// signature made by the real key against the decoy's public key would
+// fail and this request would be rejected.
+func TestPushAuthorizationRequestClientAssertionSelectsMatchingKeyAmongCandidates(t *testing.T) {
+	decoyKey := generateKey(t)
+	realKey := generateKey(t)
+	h := newHarnessWithClientKeys(t, &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
+		testClientID: {
+			{KeyID: "decoy-kid", Algorithm: fapi.ES256, PublicKey: &decoyKey.PublicKey},
+			{KeyID: "real-kid", Algorithm: fapi.ES256, PublicKey: &realKey.PublicKey},
+		},
+	}})
+
+	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
+		Signer: realKey, Algorithm: fapi.ES256, KeyID: "real-kid",
+		ClientID: testClientID.String(), Audience: testIssuer,
+		Now: h.now, Lifetime: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssertion: %v", err)
+	}
+
+	if _, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: plainFormParameters(t, assertion, nil)},
+	}); err != nil {
+		t.Fatalf("PushAuthorizationRequest: %v", err)
+	}
+}
+
+// TestPushAuthorizationRequestRejectsClientKeyResolutionFailures covers
+// resolveClientKey's remaining paths — every one of them collapses to
+// the same ErrorInvalidClient/401 "no matching client key" from
+// PushAuthorizationRequest's own perspective (see par.go), so this
+// only proves each scenario is correctly rejected, not which internal
+// branch fired.
+func TestPushAuthorizationRequestRejectsClientKeyResolutionFailures(t *testing.T) {
+	registeredKey := generateKey(t)
+	cases := map[string]*fakeClientKeySource{
+		"no candidate keys at all": {},
+		"candidate kid does not match the assertion's kid": {
+			keysByClient: map[fapi.ClientID][]keys.VerificationKey{
+				testClientID: {{KeyID: "other-kid", Algorithm: fapi.ES256, PublicKey: &registeredKey.PublicKey}},
+			},
+		},
+		"candidate algorithm does not match the client's registered algorithm": {
+			keysByClient: map[fapi.ClientID][]keys.VerificationKey{
+				testClientID: {{KeyID: "assertion-kid", Algorithm: fapi.PS256, PublicKey: &registeredKey.PublicKey}},
+			},
+		},
+		"ClientKeySource itself errors": {err: fmt.Errorf("boom")},
+	}
+	for name, clientKeys := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := newHarnessWithClientKeys(t, clientKeys)
+			assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
+				Signer: registeredKey, Algorithm: fapi.ES256, KeyID: "assertion-kid",
+				ClientID: testClientID.String(), Audience: testIssuer,
+				Now: h.now, Lifetime: 30 * time.Second,
+			})
+			if err != nil {
+				t.Fatalf("CreateAssertion: %v", err)
+			}
+			_, err = h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+				HTTP: server.FormRequest{Parameters: plainFormParameters(t, assertion, nil)},
+			})
+			if err == nil {
+				t.Fatalf("PushAuthorizationRequest = nil error, want error")
+			}
+			if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
+				t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidClient)
+			}
+		})
+	}
 }
 
 func (h harness) clientAssertion(t *testing.T) string {
@@ -1184,5 +1341,42 @@ func TestPushAuthorizationRequestRejectsMismatchedDPoPJKTAtPAR(t *testing.T) {
 	})
 	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
 		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequest)
+	}
+}
+
+// TestErrorAccessors verifies server.Error's own public contract —
+// Code, PublicDescription, HTTPStatus, Error and Unwrap — which,
+// despite being ARCHITECTURE.md design rule 16 ("errors carry their
+// own exposure"), had no direct test of its own: existing tests only
+// ever check Code(). A malformed client_assertion is the simplest
+// trigger that carries a real underlying cause, exercising Unwrap for
+// real rather than against a nil cause.
+func TestErrorAccessors(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+
+	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: plainFormParameters(t, "not-a-jwt", nil)},
+	})
+	if err == nil {
+		t.Fatalf("PushAuthorizationRequest(malformed client_assertion) = nil error, want error")
+	}
+	serr, ok := err.(*server.Error)
+	if !ok {
+		t.Fatalf("error type = %T, want *server.Error", err)
+	}
+	if serr.Code() != server.ErrorInvalidClient {
+		t.Fatalf("Code() = %q, want %q", serr.Code(), server.ErrorInvalidClient)
+	}
+	if serr.PublicDescription() != "malformed client assertion" {
+		t.Fatalf("PublicDescription() = %q, want %q", serr.PublicDescription(), "malformed client assertion")
+	}
+	if serr.HTTPStatus() != 401 {
+		t.Fatalf("HTTPStatus() = %d, want 401", serr.HTTPStatus())
+	}
+	if !strings.Contains(serr.Error(), serr.PublicDescription()) {
+		t.Fatalf("Error() = %q, want it to include PublicDescription() %q", serr.Error(), serr.PublicDescription())
+	}
+	if serr.Unwrap() == nil {
+		t.Fatalf("Unwrap() = nil, want the underlying client-assertion parse error")
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -254,5 +255,40 @@ func TestNewRejectsMissingDependencies(t *testing.T) {
 				t.Fatalf("New(%s) = nil error, want error", name)
 			}
 		})
+	}
+}
+
+// TestErrorAccessors verifies client.Error's own public contract —
+// Code, PublicDescription, Error and Unwrap (client.Error has no
+// HTTPStatus — it doesn't speak HTTP status codes the way server's and
+// resource's Error types do) — which had no direct test of its own. A
+// malformed callback query is the simplest trigger that carries a real
+// underlying cause, exercising Unwrap for real rather than against a
+// nil cause.
+func TestErrorAccessors(t *testing.T) {
+	c, err := client.New(validConfig(t), validDependencies(t))
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+
+	_, err = c.CompleteAuthorization(context.Background(), client.AuthorizationCallback{RawQuery: "%zz"})
+	if err == nil {
+		t.Fatalf("CompleteAuthorization(malformed query) = nil error, want error")
+	}
+	cerr, ok := err.(*client.Error)
+	if !ok {
+		t.Fatalf("error type = %T, want *client.Error", err)
+	}
+	if cerr.Code() != client.ErrorInvalidRequest {
+		t.Fatalf("Code() = %q, want %q", cerr.Code(), client.ErrorInvalidRequest)
+	}
+	if cerr.PublicDescription() != "callback query is malformed or contains a duplicated parameter" {
+		t.Fatalf("PublicDescription() = %q, want %q", cerr.PublicDescription(), "callback query is malformed or contains a duplicated parameter")
+	}
+	if !strings.Contains(cerr.Error(), cerr.PublicDescription()) {
+		t.Fatalf("Error() = %q, want it to include PublicDescription() %q", cerr.Error(), cerr.PublicDescription())
+	}
+	if cerr.Unwrap() == nil {
+		t.Fatalf("Unwrap() = nil, want the underlying query-parse error")
 	}
 }

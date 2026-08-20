@@ -52,6 +52,18 @@ jobs:
       - name: coverage summary
         run: go tool cover -func=coverage.out | tail -1
 
+      # A second run, in Go's own -json event format rather than
+      # coverage.out, purely for SonarQube's test-execution reporting
+      # (pass/fail/skip counts and duration — see
+      # sonar.go.tests.reportPaths in sonar-project.properties) — a
+      # distinct signal from coverage, which the step above already
+      # covers. Not folded into one invocation: `go test -json` encodes
+      # the ordinary human-readable output (including the per-package
+      # coverage summary above) as JSON events instead, which would
+      # make this job's own log far harder to skim.
+      - name: go test (json, for SonarQube test reporting)
+        run: go test -race ./... -json > report.json
+
       # Config lives in sonar-project.properties (organization,
       # projectKey, sonar.go.coverage.reportPaths=coverage.out — the
       # file the step above just produced). CI-based analysis, not

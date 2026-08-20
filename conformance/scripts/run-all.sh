@@ -73,7 +73,7 @@ RETRY_FLAKY="$SERVER_DIR/scripts/retry-flaky-modules.py"
 CONFORMANCE_SERVER="${CONFORMANCE_SERVER:-https://localhost.emobix.co.uk:8443/}"
 
 : "${CONFORMANCE_SUITE_CHECKOUT:?Set CONFORMANCE_SUITE_CHECKOUT to your local OIDF conformance-suite checkout — see conformance/server/scripts/README.md step 1}"
-if [ ! -f "$CONFORMANCE_SUITE_CHECKOUT/scripts/run-test-plan.py" ]; then
+if [[ ! -f "$CONFORMANCE_SUITE_CHECKOUT/scripts/run-test-plan.py" ]]; then
 	echo "error: $CONFORMANCE_SUITE_CHECKOUT/scripts/run-test-plan.py not found — is CONFORMANCE_SUITE_CHECKOUT correct?" >&2
 	exit 1
 fi
@@ -166,7 +166,7 @@ run_as_plan() {
 	local name="$1" variant="$2" config="$3" warnings="$4" skips="$5"
 	local log_file="$WORKDIR/as-$name.log"
 
-	if [ ! -f "$config" ]; then
+	if [[ ! -f "$config" ]]; then
 		log "AS $name: SKIPPED — $config not found (see conformance/server/oidf-config/README.md)"
 		record_result "AS $name" "SKIPPED (no plan config)"
 		return
@@ -192,13 +192,13 @@ run_as_plan() {
 		# this one kills the script outright, silently, with no error
 		# message — this exact bug was found live, not theorized.
 		plan_id="$(grep -oE 'Created test plan, new id: [A-Za-z0-9]+' "$log_file" 2>/dev/null | head -1 | awk '{print $NF}')" || true
-		if [ -n "$plan_id" ]; then
+		if [[ -n "$plan_id" ]]; then
 			break
 		fi
 		sleep 0.1
 	done
 
-	if [ -n "$plan_id" ]; then
+	if [[ -n "$plan_id" ]]; then
 		log "AS $name: plan $plan_id — starting unblock poller"
 		CONFORMANCE_SERVER="$CONFORMANCE_SERVER" python3 "$POLLER" "$plan_id" >"$WORKDIR/as-$name-poller.log" 2>&1 &
 		POLLER_PIDS+=("$!")
@@ -218,7 +218,7 @@ run_as_plan() {
 	# point in the script (this plan's own containers aren't touched
 	# until every plan has run), so this is the only place that can
 	# still reach it.
-	if [ "$exit_code" -ne 0 ]; then
+	if [[ "$exit_code" -ne 0 ]]; then
 		local module_id
 		for module_id in $(grep -oE 'Created test module, new id: [A-Za-z0-9]+' "$log_file" | awk '{print $NF}'); do
 			if grep -q "module id $module_id status changed to INTERRUPTED" "$log_file"; then
@@ -239,7 +239,7 @@ run_as_plan() {
 	# script exits, not per-suite), which is what lets a freshly
 	# created retry instance get its own browser interaction driven
 	# automatically, the same as every other module in the plan.
-	if [ "$exit_code" -ne 0 ] && [ -n "$plan_id" ]; then
+	if [[ "$exit_code" -ne 0 && -n "$plan_id" ]]; then
 		local retry_log="$WORKDIR/as-$name-retry.log"
 		python3 "$RETRY_FLAKY" "$plan_id" "$log_file" >"$retry_log" 2>&1 || true
 		if grep -q 'RETRY_VERDICT: all_resolved' "$retry_log"; then
@@ -252,11 +252,11 @@ run_as_plan() {
 		fi
 	fi
 
-	if [ "$exit_code" -eq 0 ] && [ -n "$totals" ]; then
+	if [[ "$exit_code" -eq 0 && -n "$totals" ]]; then
 		record_result "AS $name" "OK — ${totals#*Overall totals: }${retry_note}"
 	else
 		OVERALL_CLEAN=false
-		if [ -n "$totals" ]; then
+		if [[ -n "$totals" ]]; then
 			record_result "AS $name" "UNEXPECTED RESULTS — ${totals#*Overall totals: }${retry_note} (see $log_file)"
 		else
 			record_result "AS $name" "DID NOT COMPLETE (see $log_file)"
@@ -276,7 +276,7 @@ run_rp_plan() {
 	total="$(awk '/=== summary ===/{f=1;next} f && NF{c++} END{print c+0}' "$log_file")"
 	passed="$(awk '/=== summary ===/{f=1;next} f && $3=="PASSED"{c++} END{print c+0}' "$log_file")"
 
-	if [ -n "$total" ] && [ "$total" != "0" ] && [ "$passed" = "$total" ]; then
+	if [[ -n "$total" && "$total" != "0" && "$passed" = "$total" ]]; then
 		record_result "RP $name" "OK — $passed/$total PASSED"
 	else
 		OVERALL_CLEAN=false
@@ -325,7 +325,7 @@ echo
 echo "full logs: $WORKDIR"
 echo "report: $WORKDIR/report.md"
 
-if [ "$OVERALL_CLEAN" = true ]; then
+if [[ "$OVERALL_CLEAN" = true ]]; then
 	echo
 	echo "All four suites completed with no unexpected results."
 	exit 0

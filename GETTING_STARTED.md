@@ -10,15 +10,18 @@ directly and treat this as the map.
 
 ## 1. Dependencies: use the reference implementations to start
 
-`server.New` requires nine dependencies — a client repository,
-transaction/grant/replay stores, a key manager, a client key source, a
-clock, a randomness source — with no implicit defaults for any of them.
+`server.New` requires ten dependencies — a client repository,
+transaction/grant/replay stores, a key manager, a client key source, an
+access-token issuer, a revocation sink, a clock, a randomness source —
+with no implicit defaults for any of them (plus an audit sink, required
+only under `AssuranceProduction` — see step 2's `Assurance` field).
 Writing real, production-shaped persistence and key management for all
 of that is real work, and not the place to start. Two packages exist
 specifically so you don't have to do it before you can run anything:
 
 - **`storage/memstore`** — in-memory `ClientRepository`, `TransactionStore`,
-  `GrantStore`, `ReplayStore`.
+  `GrantStore`, `ReplayStore`, `RevocationStore`, and `AccessTokenStore`
+  (only needed for opaque access tokens — see step 4).
 - **`keys/ephemeral`** — in-memory `KeyManager` and `ClientKeySource`.
 
 **Both are development/testing only. Never production** — see each
@@ -92,11 +95,13 @@ clientKeys, err := ephemeral.NewClientKeySource(fetcher, []ephemeral.ClientKeySp
 })
 
 // JWT (RFC 9068) is the default, ship-in-the-box access-token format —
-// self-contained, verified locally by a resource server with no
-// callback to this AS. Pass server.OpaqueAccessTokens{Store: ...}
-// instead for a storage-backed alternative (e.g. if you want
-// revocation without a separate RevocationSink, or a resource server
-// co-located with this AS).
+// self-contained, verified locally by a resource server against this
+// AS's published JWKS, with no callback to this AS at verify time.
+// server.NewOpaqueAccessTokens(store) is the storage-backed
+// alternative — e.g. a resource server co-located with this AS, or one
+// with live access to the same storage backend. This is not a
+// revocation-related choice: Dependencies.Revocation below is required
+// and wired identically either way.
 accessTokens, err := server.NewJWTAccessTokens(keyManager, fapi.ES256)
 
 deps := server.Dependencies{
@@ -123,6 +128,19 @@ srv, err := server.New(cfg, deps)
 (`fetcher` is a `*fapihttp.Client` — only needed if any client's keys
 are fetched live via `JWKSURI` rather than supplied inline; pass `nil`
 if every client uses inline `JWKS`.)
+
+**Whichever access-token format you pick here, the resource server that
+verifies these tokens must be wired to match** — `resource.JWTAccessTokens`
+for `server.JWTAccessTokens`, `resource.OpaqueAccessTokens{Store: ...}`
+(the same `Store` instance, if co-located) for
+`server.OpaqueAccessTokens`. This guide doesn't cover the `resource`
+package's own setup (out of scope — this is the AS side only), but the
+two sides agreeing on format isn't checked for you: nothing stops you
+from constructing an AS that issues opaque tokens and a resource server
+that only knows how to verify JWTs, and every verification will fail
+with no compile-time signal that they were ever mismatched.
+`cmd/conformance-as/wiring.go` shows both sides wired consistently,
+switched on one runtime flag.
 
 ## 5. The one piece that's genuinely yours: the login flow
 

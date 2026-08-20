@@ -106,9 +106,13 @@
 //     for the configured profile.
 //   - PublicJWKS returns the union, deduplicated by kid, of
 //     Dependencies.Keys' current public key for every signing purpose
-//     Config declares active — never a private key, and never a key for
-//     a purpose (e.g. JARM under ProfileFAPISecurity) this server isn't
-//     actually configured to use. PublicJWK exposes only KeyID and
-//     MarshalJSON; there is no way to extract anything from it this
-//     package didn't already treat as public.
+//     Config declares active, plus an access-token signing key from
+//     Dependencies.AccessTokens if it has one to publish (JWTAccessTokens
+//     does, on its own KeyManager, independent of Dependencies.Keys;
+//     OpaqueAccessTokens doesn't — nothing to verify a signature
+//     against) — never a private key, and never a key for a purpose
+//     (e.g. JARM under ProfileFAPISecurity) this server isn't actually
+//     configured to use. PublicJWK exposes only KeyID and MarshalJSON;
+//     there is no way to extract anything from it this package didn't
+//     already treat as public.
 package server

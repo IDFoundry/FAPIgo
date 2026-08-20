@@ -321,6 +321,26 @@ for any raw token value it carries, and a verification failure is a
 typed `Error` (see rule 16), not a bare `error` the caller has to
 string-match.
 
+**Access-token format is pluggable, verification is not.**
+`server.AccessTokenIssuer` and `resource.AccessTokenResolver` let an
+integrator choose a self-contained JWT (RFC 9068 — `JWTAccessTokens`,
+the default) or an opaque, storage-backed token (`OpaqueAccessTokens`)
+— FAPI 2.0 doesn't mandate a format, so this isn't the library's own
+opinion to impose. But `AccessTokenResolver` only resolves a token's
+claims and its own claimed DPoP-binding thumbprint — it cannot check
+sender-constraint binding, ordinary expiry, or revocation, and
+`ResolveAccessTokenRequest` carries no expected thumbprint for it to
+compare against even if it tried. `Verify()` enforces all three
+itself, once, uniformly, regardless of which format is wired in, so
+the two formats can't disagree on FAPI2/RFC 9449-mandated behavior by
+construction — an earlier design let each implementation check binding
+and expiry itself, which meant CI had to run the full live conformance
+suite once per format to catch divergence; the current shape makes
+that unnecessary (see `conformance/README.md`'s "Access-token format
+coverage"). A returned error is a typed `*Error` per rule 16 either
+way, so `Verify()` propagates the right exposure without the resolver
+needing to anticipate how it'll be used.
+
 ### 9. Internal protocol core is organized around asymmetric operations
 
 See the `internal/` table above — `sign.go`/`verify.go` or

@@ -13,6 +13,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Full history, not the default shallow clone — SonarQube's own
+          # recommendation, for accurate blame/new-code-period data on
+          # the scan step below.
+          fetch-depth: 0
 
       - uses: actions/setup-go@v7
         with:
@@ -46,6 +51,17 @@ jobs:
 
       - name: coverage summary
         run: go tool cover -func=coverage.out | tail -1
+
+      # Config lives in sonar-project.properties (organization,
+      # projectKey, sonar.go.coverage.reportPaths=coverage.out — the
+      # file the step above just produced). CI-based analysis, not
+      # SonarCloud's own Automatic Analysis — the latter never runs
+      # this repo's tests, so it can't see coverage at all; that's the
+      # whole reason this step exists.
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v8
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
   lint:
     runs-on: ubuntu-latest

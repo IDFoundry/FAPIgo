@@ -20,6 +20,11 @@
 #   5. docker compose up --build conformance-as-baseline
 #      (or conformance-as-message-signing, or both)
 #
+# ACCESS_TOKEN_FORMAT=jwt|opaque (defaults to jwt) selects which
+# cmd/conformance-as -access-token-format both containers start with —
+# see conformance/scripts/run-all.sh, which loops the AS suites over
+# both.
+#
 # The suite sometimes shows a "visit https://conformance-as-baseline:8443/
 # authorize?..." link for you to open in your own browser — that
 # hostname is Docker-internal and won't resolve on your host. Don't
@@ -52,6 +57,7 @@ services:
       - -config=/config.json
       - -cert=/certs/server.crt
       - -key=/certs/server.key
+      - -access-token-format=${ACCESS_TOKEN_FORMAT:-jwt}
 
   conformance-as-message-signing:
     build:
@@ -68,6 +74,7 @@ services:
       - -config=/config.json
       - -cert=/certs/server.crt
       - -key=/certs/server.key
+      - -access-token-format=${ACCESS_TOKEN_FORMAT:-jwt}
 
 networks:
   suite:

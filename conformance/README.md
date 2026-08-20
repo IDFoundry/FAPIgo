@@ -20,8 +20,12 @@ behaviour and negative-test expectations differ. See
 - `scripts/run-all.sh` — runs all four suites this repo has driver
   support for (AS baseline, AS message-signing, RP baseline, RP
   message-signing) against a locally running suite and prints one
-  combined summary. See the script's own header comment for
-  prerequisites and env vars.
+  combined summary. The two AS suites each run twice, under
+  `cmd/conformance-as -access-token-format=jwt` and `=opaque` (see
+  `server/docker-compose.yml`), so both
+  `server.AccessTokenIssuer`/`resource.AccessTokenVerifier`
+  implementations get exercised, not just the default. See the
+  script's own header comment for prerequisites and env vars.
 - `resource/` — resource-server verification test vectors (DPoP proof
   validation, access-token binding checks) used outside the OIDF suite.
   The suite doesn't run its own dedicated resource-server conformance

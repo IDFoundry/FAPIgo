@@ -21,9 +21,10 @@ core.
 > profiles. Both the `server` (authorization server) and `client`
 > (relying party) roles have been run clean against the OpenID
 > Foundation conformance suite's FAPI2 baseline and message-signing test
-> plans; `resource` has not been run against a dedicated OIDF plan (only
-> indirectly, as a stand-in the AS plan's own happy-flow module calls)
-> — see [conformance/](conformance/README.md).
+> plans, and the AS suites run under both access-token formats `server`
+> supports (JWT and opaque); `resource` has not been run against a
+> dedicated OIDF plan (only indirectly, as a stand-in the AS plan's own
+> happy-flow module calls) — see [conformance/](conformance/README.md).
 
 ```go
 import (

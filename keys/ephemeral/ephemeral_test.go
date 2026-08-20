@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -136,6 +137,115 @@ func TestClientKeySourceFetchedJWKS(t *testing.T) {
 	}
 	if len(set.Keys) != 1 || set.Keys[0].KeyID != "kid-2" {
 		t.Fatalf("Keys = %+v, want one key with kid-2", set.Keys)
+	}
+}
+
+// TestClientKeySourceCachesWithinTTL covers currentFetchedKeys' fresh-
+// cache-hit path, which had no direct test: TestClientKeySourceFetchedJWKS
+// only ever exercises the cold-cache first fetch.
+func TestClientKeySourceCachesWithinTTL(t *testing.T) {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	var fetches int
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fetches++
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"keys":[%s]}`, p256JWKJSON(t, &priv.PublicKey, "kid-1", "ES256"))
+	}))
+	defer ts.Close()
+
+	fetcher, err := fapihttp.New(ts.Client(), fapihttp.Config{
+		MaxResponseBytes: 1 << 16,
+		RequestTimeout:   5 * time.Second,
+		MaxRedirects:     1,
+	})
+	if err != nil {
+		t.Fatalf("fapihttp.New: %v", err)
+	}
+
+	src, err := NewClientKeySource(fetcher, []ClientKeySpec{{ClientID: "client-1", JWKSURI: ts.URL + "/jwks"}}, WithCacheTTL(time.Minute))
+	if err != nil {
+		t.Fatalf("NewClientKeySource: %v", err)
+	}
+
+	for i := 0; i < 2; i++ {
+		if _, err := src.ResolveVerificationKeys(context.Background(), keys.ClientKeyRequest{
+			ClientID: "client-1", Algorithm: fapi.ES256, KeyID: "kid-1",
+		}); err != nil {
+			t.Fatalf("ResolveVerificationKeys[%d]: %v", i, err)
+		}
+	}
+	if fetches != 1 {
+		t.Fatalf("fetches = %d, want 1 (second resolve should be served from cache)", fetches)
+	}
+}
+
+// TestClientKeySourceRefetchesOnUnknownKeyIDEvenWhenCacheFresh covers
+// currentFetchedKeys' stale-key handling: a client that has rotated
+// keys since the last fetch must not be stuck with a cached set that
+// never contains the newly requested kid until the TTL expires.
+func TestClientKeySourceRefetchesOnUnknownKeyIDEvenWhenCacheFresh(t *testing.T) {
+	priv1, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	priv2, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	var fetches int
+	var mu sync.Mutex
+	rotated := false
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		fetches++
+		w.Header().Set("Content-Type", "application/json")
+		if rotated {
+			fmt.Fprintf(w, `{"keys":[%s]}`, p256JWKJSON(t, &priv2.PublicKey, "kid-2", "ES256"))
+		} else {
+			fmt.Fprintf(w, `{"keys":[%s]}`, p256JWKJSON(t, &priv1.PublicKey, "kid-1", "ES256"))
+		}
+	}))
+	defer ts.Close()
+
+	fetcher, err := fapihttp.New(ts.Client(), fapihttp.Config{
+		MaxResponseBytes: 1 << 16,
+		RequestTimeout:   5 * time.Second,
+		MaxRedirects:     1,
+	})
+	if err != nil {
+		t.Fatalf("fapihttp.New: %v", err)
+	}
+
+	src, err := NewClientKeySource(fetcher, []ClientKeySpec{{ClientID: "client-1", JWKSURI: ts.URL + "/jwks"}}, WithCacheTTL(time.Minute))
+	if err != nil {
+		t.Fatalf("NewClientKeySource: %v", err)
+	}
+
+	if _, err := src.ResolveVerificationKeys(context.Background(), keys.ClientKeyRequest{
+		ClientID: "client-1", Algorithm: fapi.ES256, KeyID: "kid-1",
+	}); err != nil {
+		t.Fatalf("ResolveVerificationKeys(kid-1): %v", err)
+	}
+
+	mu.Lock()
+	rotated = true
+	mu.Unlock()
+
+	set, err := src.ResolveVerificationKeys(context.Background(), keys.ClientKeyRequest{
+		ClientID: "client-1", Algorithm: fapi.ES256, KeyID: "kid-2",
+	})
+	if err != nil {
+		t.Fatalf("ResolveVerificationKeys(kid-2): %v", err)
+	}
+	if len(set.Keys) != 1 || set.Keys[0].KeyID != "kid-2" {
+		t.Fatalf("Keys = %+v, want one key with kid-2 (rotation should force a refetch)", set.Keys)
+	}
+	if fetches != 2 {
+		t.Fatalf("fetches = %d, want 2 (requesting an unknown kid must force a refetch even within TTL)", fetches)
 	}
 }
 

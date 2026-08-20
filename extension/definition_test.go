@@ -207,3 +207,65 @@ func TestAsParametersFiltersByReturnInTokenClaims(t *testing.T) {
 		t.Errorf("params unexpectedly contains x_not_in_claims")
 	}
 }
+
+// TestSnapshotReturnsRawValuesByWireName covers Snapshot, which is used
+// by client.BeginAuthorization to enumerate a caller-populated Values
+// without knowing each entry's Definition ahead of time, but had no
+// direct test of its own in this package.
+func TestSnapshotReturnsRawValuesByWireName(t *testing.T) {
+	other := extension.Definition[string]{
+		Name: "x_other", Cardinality: extension.Single,
+		AllowedSources: extension.SourcePlainParameter, MaxBytes: 64,
+	}
+	var values extension.Values
+	if err := extension.Set(&values, accountHintDef, accountHint{AccountID: "acc-6"}); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if err := extension.Set(&values, other, "hello"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	snapshot := extension.Snapshot(values)
+	if len(snapshot) != 2 {
+		t.Fatalf("Snapshot returned %d entries, want 2", len(snapshot))
+	}
+	if string(snapshot["x_account_hint"]) != `{"account_id":"acc-6"}` {
+		t.Errorf("Snapshot[x_account_hint] = %s, want {\"account_id\":\"acc-6\"}", snapshot["x_account_hint"])
+	}
+	if string(snapshot["x_other"]) != `"hello"` {
+		t.Errorf("Snapshot[x_other] = %s, want \"hello\"", snapshot["x_other"])
+	}
+}
+
+// TestRegistryDefinitionsReturnsAllRegistered covers Definitions, which
+// server.PushAuthorizationRequest uses (via AsParameters) to enumerate
+// every registered Definition, but had no direct test of its own.
+func TestRegistryDefinitionsReturnsAllRegistered(t *testing.T) {
+	other := extension.Definition[string]{
+		Name: "x_other", Cardinality: extension.Single,
+		AllowedSources: extension.SourcePlainParameter, MaxBytes: 64,
+	}
+	reg, err := extension.NewRegistry(accountHintDef, other)
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+
+	defs := reg.Definitions()
+	if len(defs) != 2 {
+		t.Fatalf("Definitions() returned %d entries, want 2", len(defs))
+	}
+	names := map[string]bool{}
+	for _, d := range defs {
+		switch typed := d.(type) {
+		case extension.Definition[accountHint]:
+			names[typed.Name] = true
+		case extension.Definition[string]:
+			names[typed.Name] = true
+		default:
+			t.Fatalf("Definitions() entry has unexpected type %T", d)
+		}
+	}
+	if !names["x_account_hint"] || !names["x_other"] {
+		t.Errorf("Definitions() = %+v, want both x_account_hint and x_other", defs)
+	}
+}

@@ -473,3 +473,29 @@ func TestErrorAccessors(t *testing.T) {
 		t.Fatalf("Unwrap() = nil, want the underlying DPoP verification error")
 	}
 }
+
+// TestErrorAccessorsWithoutCause covers Error()'s other format branch —
+// TestErrorAccessors above only ever exercises the with-cause branch.
+// An empty Method is the simplest trigger for a resource.Error that
+// carries no underlying cause at all.
+func TestErrorAccessorsWithoutCause(t *testing.T) {
+	f := newFixture(t)
+
+	_, err := f.verifier.Verify(context.Background(), resource.VerifyRequest{
+		Method: "",
+		URL:    f.target,
+	})
+	if err == nil {
+		t.Fatalf("Verify(empty method) = nil error, want error")
+	}
+	rerr, ok := err.(*resource.Error)
+	if !ok {
+		t.Fatalf("error type = %T, want *resource.Error", err)
+	}
+	if rerr.Unwrap() != nil {
+		t.Fatalf("Unwrap() = %v, want nil", rerr.Unwrap())
+	}
+	if rerr.Error() != "resource: invalid_request: method is required" {
+		t.Fatalf("Error() = %q, want %q", rerr.Error(), "resource: invalid_request: method is required")
+	}
+}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/url"
 	"testing"
 	"time"
@@ -16,6 +18,7 @@ import (
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/server"
+	"github.com/idfoundry/fapigo/storage"
 	"github.com/idfoundry/fapigo/storage/memstore"
 )
 
@@ -538,6 +541,212 @@ func TestExchangeAuthorizationCodeReuseRevokesRefreshToken(t *testing.T) {
 		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
 	}); err == nil {
 		t.Fatalf("refresh after code reuse was detected = nil error, want error (refresh token should be revoked)")
+	}
+}
+
+// newHarnessWithOpaqueAccessTokens is newHarness's counterpart wired
+// to server.OpaqueAccessTokens instead of the default JWTAccessTokens,
+// for tests confirming the revocation-on-reuse feature and the
+// pluggable access-token format actually work together — the two were
+// each tested independently when they were built, never against each
+// other. Returns the shared storage.AccessTokenStore too, so a test
+// can also build a matching resource.OpaqueAccessTokens verifier.
+func newHarnessWithOpaqueAccessTokens(t *testing.T, profile server.Profile, allowRequestObjects bool) (harness, *memstore.AccessTokenStore) {
+	t.Helper()
+	now := time.Now()
+	key := generateKey(t)
+	serverKey := generateKey(t)
+
+	reqObjAlg := fapi.ES256
+	if !allowRequestObjects {
+		reqObjAlg = 0
+	}
+	client, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
+		ID:                       testClientID,
+		RedirectURIs:             []fapi.RegisteredRedirectURI{testRedirectURI},
+		ClientAssertionAlgorithm: fapi.ES256,
+		RequestObjectAlgorithm:   reqObjAlg,
+		AllowedScopes:            []string{"openid", "accounts", "offline_access"},
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+	issuer, err := fapi.ParseIssuerURL(testIssuer)
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+
+	transactions := &fakeTransactionStore{}
+	grants := &fakeGrantStore{}
+	audit := &fakeAuditSink{}
+	revocation := &fakeRevocationSink{}
+	store := memstore.NewAccessTokenStore()
+
+	cfg := server.Config{
+		Issuer:    issuer,
+		Endpoints: testEndpoints(t),
+		Profile:   profile,
+		Algorithms: server.AlgorithmPolicy{
+			ClientAssertion: server.AlgorithmSet{fapi.ES256},
+			RequestObject:   server.AlgorithmSet{fapi.ES256},
+			JARM:            fapi.ES256,
+			IDToken:         fapi.ES256,
+		},
+		Limits: server.Limits{
+			PushedRequestLifetime:      90 * time.Second,
+			MaxClientAssertionLifetime: time.Minute,
+			MaxRequestObjectLifetime:   time.Minute,
+			InteractionLifetime:        5 * time.Minute,
+			AuthorizationCodeLifetime:  time.Minute,
+			JARMResponseLifetime:       time.Minute,
+			AccessTokenLifetime:        5 * time.Minute,
+			IDTokenLifetime:            5 * time.Minute,
+			RefreshTokenLifetime:       5 * time.Minute,
+			MaxDPoPProofAge:            time.Minute,
+			MaxClockSkew:               5 * time.Second,
+		},
+		Assurance: server.AssuranceDevelopment,
+	}
+	deps := server.Dependencies{
+		Clients:      &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
+		Transactions: transactions,
+		Grants:       grants,
+		Replay:       &fakeReplayStore{},
+		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
+			testClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
+		}},
+		Keys:         &fakeKeyManager{key: serverKey, keyID: "as-key-1"},
+		AccessTokens: server.OpaqueAccessTokens{Store: store},
+		Revocation:   revocation,
+		Audit:        audit,
+		Clock:        fixedClock{now: now},
+		Random:       rand.Reader,
+	}
+
+	srv, err := server.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+	return harness{server: srv, key: key, serverKey: serverKey, transactions: transactions, grants: grants, audit: audit, revocation: revocation, now: now}, store
+}
+
+// revocationCheckerFromSink adapts a *fakeRevocationSink
+// (server.RevocationSink, an append-only log of Revoke calls) into a
+// resource.RevocationChecker, so a test can confirm resource.Verify()
+// actually rejects a token this same sink recorded as revoked, without
+// needing a second, separately-wired revocation store.
+type revocationCheckerFromSink struct {
+	sink *fakeRevocationSink
+}
+
+func (r revocationCheckerFromSink) IsRevoked(_ context.Context, key string) (bool, error) {
+	for _, k := range r.sink.all() {
+		if k == key {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// TestExchangeAuthorizationCodeReuseRevokesOpaqueAccessToken is
+// TestExchangeAuthorizationCodeReuseRevokesAccessToken's counterpart
+// under OpaqueAccessTokens: the revocation-on-reuse feature (RFC 6749
+// §4.1.2, added in an earlier PR) and the pluggable access-token
+// format (added in a later PR) were each tested independently when
+// built, but never against each other — this confirms the opaque
+// token's own hash is what gets recorded and revoked, and that a real
+// resource.Verifier, backed by the same storage.AccessTokenStore, is
+// actually rejected end to end afterward — not just that Revoke got
+// called with the right-looking string.
+func TestExchangeAuthorizationCodeReuseRevokesOpaqueAccessToken(t *testing.T) {
+	h, store := newHarnessWithOpaqueAccessTokens(t, server.ProfileFAPISecurity, true)
+	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
+
+	dpopKey := generateKey(t)
+	first, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
+		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProof: createDPoPProof(t, dpopKey, h.now),
+	})
+	if err != nil {
+		t.Fatalf("first ExchangeAuthorizationCode: %v", err)
+	}
+	rawAccessToken := first.AccessToken.Reveal()
+	if rawAccessToken == "" {
+		t.Fatalf("issued access token is empty")
+	}
+	if _, err := token.ParseAccessToken(rawAccessToken); err == nil {
+		t.Fatalf("opaque access token unexpectedly parsed as a JWT")
+	}
+	tokenHash := sha256.Sum256([]byte(rawAccessToken))
+	if _, err := store.LookupAccessToken(context.Background(), storage.AccessTokenLookup{TokenHash: tokenHash}); err != nil {
+		t.Fatalf("LookupAccessToken(issued token): %v", err)
+	}
+
+	if len(h.revocation.all()) != 0 {
+		t.Fatalf("Revoke called before any reuse was detected: %v", h.revocation.all())
+	}
+
+	// A real resource.Verifier, backed by the same
+	// storage.AccessTokenStore and a RevocationChecker that sees what
+	// a later reuse records, must accept the token now (proving any
+	// later rejection is actually caused by revocation, not some
+	// unrelated setup mistake) ...
+	target, err := url.Parse("https://rs.example.com/accounts")
+	if err != nil {
+		t.Fatalf("parse target url: %v", err)
+	}
+	verifier, err := resource.NewVerifier(resource.Config{
+		Limits: resource.Limits{MaxDPoPProofAge: time.Minute, MaxClockSkew: 5 * time.Second},
+	}, resource.Dependencies{
+		AccessTokens: resource.OpaqueAccessTokens{Store: store},
+		Replay:       memstore.NewReplayStore(),
+		Revocation:   revocationCheckerFromSink{sink: h.revocation},
+		Clock:        fixedClock{now: h.now},
+	})
+	if err != nil {
+		t.Fatalf("resource.NewVerifier: %v", err)
+	}
+	verifyOpaqueToken := func(t *testing.T) error {
+		t.Helper()
+		proof, err := dpop.CreateProof(dpop.ProofRequest{
+			Signer: dpopKey, Algorithm: fapi.ES256,
+			Method: "GET", URL: target,
+			AccessToken: rawAccessToken,
+			Now:         h.now,
+			Random:      rand.Reader,
+		})
+		if err != nil {
+			t.Fatalf("create dpop proof: %v", err)
+		}
+		_, err = verifier.Verify(context.Background(), resource.VerifyRequest{
+			Method: "GET", URL: target,
+			Authorization: "DPoP " + rawAccessToken,
+			DPoPProof:     proof,
+		})
+		return err
+	}
+	if err := verifyOpaqueToken(t); err != nil {
+		t.Fatalf("Verify(not-yet-revoked opaque token): %v", err)
+	}
+
+	// ... then trigger the code reuse ...
+	if _, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
+		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+	}); err == nil {
+		t.Fatalf("second ExchangeAuthorizationCode (replayed code) = nil error, want error")
+	}
+
+	wantKey := hex.EncodeToString(tokenHash[:])
+	revoked := h.revocation.all()
+	if len(revoked) != 1 || revoked[0] != wantKey {
+		t.Fatalf("Revoke calls = %v, want exactly [%q]", revoked, wantKey)
+	}
+
+	// ... and confirm the exact same verifier now rejects it (a fresh
+	// DPoP proof each call — proofs are single-use).
+	if err := verifyOpaqueToken(t); err == nil {
+		t.Fatalf("Verify(revoked opaque token) = nil error, want error")
 	}
 }
 

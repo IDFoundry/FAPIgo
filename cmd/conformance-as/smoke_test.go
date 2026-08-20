@@ -119,7 +119,7 @@ type smokeHarness struct {
 	authorize  string // base authorize endpoint URL, for building decision requests
 }
 
-func newSmokeHarness(t *testing.T) *smokeHarness {
+func newSmokeHarness(t *testing.T, format AccessTokenFormat) *smokeHarness {
 	t.Helper()
 
 	cert, pool := selfSignedCert(t)
@@ -176,15 +176,16 @@ func newSmokeHarness(t *testing.T) *smokeHarness {
 	}
 
 	resolved := ResolvedConfig{
-		ListenAddr:       tcpListener.Addr().String(),
-		Issuer:           issuer,
-		Profile:          server.ProfileFAPISecurity,
-		DefaultSubject:   smokeSubject,
-		Algorithms:       server.RecommendedAlgorithms(),
-		Limits:           server.RecommendedLimits(),
-		Clients:          []storage.RegisteredClient{registered},
-		ClientKeys:       []ephemeral.ClientKeySpec{{ClientID: testClientID, JWKS: inlineJWKS}},
-		AdvertisedScopes: []string{"openid", "accounts", "offline_access"},
+		ListenAddr:        tcpListener.Addr().String(),
+		Issuer:            issuer,
+		Profile:           server.ProfileFAPISecurity,
+		DefaultSubject:    smokeSubject,
+		Algorithms:        server.RecommendedAlgorithms(),
+		Limits:            server.RecommendedLimits(),
+		AccessTokenFormat: format,
+		Clients:           []storage.RegisteredClient{registered},
+		ClientKeys:        []ephemeral.ClientKeySpec{{ClientID: testClientID, JWKS: inlineJWKS}},
+		AdvertisedScopes:  []string{"openid", "accounts", "offline_access"},
 	}
 
 	mux, err := newServerMux(resolved, false)
@@ -319,7 +320,15 @@ func (h *smokeHarness) submitDecision(ctx context.Context, handle, decision stri
 }
 
 func TestSmokeAuthorizationCodeFlow(t *testing.T) {
-	h := newSmokeHarness(t)
+	for _, format := range []AccessTokenFormat{AccessTokenFormatJWT, AccessTokenFormatOpaque} {
+		t.Run(string(format), func(t *testing.T) {
+			testSmokeAuthorizationCodeFlow(t, format)
+		})
+	}
+}
+
+func testSmokeAuthorizationCodeFlow(t *testing.T, format AccessTokenFormat) {
+	h := newSmokeHarness(t, format)
 	ctx := context.Background()
 	scope := []string{"openid", "accounts", "offline_access"}
 
@@ -373,7 +382,7 @@ func TestSmokeAuthorizationCodeFlow(t *testing.T) {
 }
 
 func TestSmokeAuthorizationDenied(t *testing.T) {
-	h := newSmokeHarness(t)
+	h := newSmokeHarness(t, AccessTokenFormatJWT)
 	ctx := context.Background()
 	scope := []string{"accounts"}
 

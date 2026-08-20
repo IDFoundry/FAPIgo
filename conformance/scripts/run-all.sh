@@ -8,9 +8,18 @@
 # expected, not a defect" reasoning pulled straight from
 # expected-{warnings,skips}-*.json where one exists.
 #
-# Always runs all four, even if an earlier one comes back unclean —
+# The two AS suites each run twice — once with cmd/conformance-as
+# started under -access-token-format=jwt, once under =opaque (see
+# conformance/server/docker-compose.yml's ACCESS_TOKEN_FORMAT) — so a
+# regression specific to either server.AccessTokenIssuer/
+# resource.AccessTokenVerifier implementation shows up here rather
+# than only in the JWT default. The RP suites don't vary by this
+# dimension (cmd/conformance-client never chooses an AS's own
+# access-token format) and run once each, as before.
+#
+# Always runs every suite, even if an earlier one comes back unclean —
 # never stops early — so a bad result in one suite never hides results
-# from the other three.
+# from the others.
 #
 # Prerequisites (see conformance/server/scripts/README.md and
 # conformance/client/scripts/README.md for the one-time setup each of
@@ -270,29 +279,37 @@ run_rp_plan() {
 
 check_suite_reachable
 
-log "bringing up conformance-as containers"
+log "building conformance-as containers"
 # If cmd/conformance-as (or anything it imports) changed since the last
 # build and results here look stale/wrong, rebuild manually first with
 # `docker compose build --no-cache` — see this directory's README for
 # why plain --build has been observed to reuse a stale cached `go
 # build` layer even when the source changed. Not the default here
 # since it'd make every routine run take minutes even when nothing
-# changed.
-(cd "$SERVER_DIR" && docker compose up -d --build conformance-as-baseline conformance-as-message-signing) >"$WORKDIR/docker-compose.log" 2>&1
-wait_as_ready 18443
-wait_as_ready 18444
+# changed. Built once, up front — ACCESS_TOKEN_FORMAT below only
+# changes the containers' command-line args, not their image, so it
+# doesn't need a rebuild between formats.
+(cd "$SERVER_DIR" && docker compose build conformance-as-baseline conformance-as-message-signing) >"$WORKDIR/docker-compose.log" 2>&1
 
-run_as_plan "baseline" \
-	'fapi2-security-profile-final-test-plan[client_auth_type=private_key_jwt][sender_constrain=dpop][fapi_profile=plain_fapi][openid=openid_connect]' \
-	"$SERVER_DIR/oidf-config/baseline-plan.json" \
-	"$SERVER_DIR/expected-warnings-baseline.json" \
-	"$SERVER_DIR/expected-skips-baseline.json"
+for ACCESS_TOKEN_FORMAT in jwt opaque; do
+	export ACCESS_TOKEN_FORMAT
+	log "access-token-format=$ACCESS_TOKEN_FORMAT: starting conformance-as containers"
+	(cd "$SERVER_DIR" && docker compose up -d --force-recreate conformance-as-baseline conformance-as-message-signing) >>"$WORKDIR/docker-compose.log" 2>&1
+	wait_as_ready 18443
+	wait_as_ready 18444
 
-run_as_plan "message-signing" \
-	'fapi2-message-signing-final-test-plan[client_auth_type=private_key_jwt][sender_constrain=dpop][fapi_profile=plain_fapi][openid=openid_connect][fapi_request_method=signed_non_repudiation][fapi_response_mode=jarm]' \
-	"$SERVER_DIR/oidf-config/message-signing-plan.json" \
-	"$SERVER_DIR/expected-warnings-message-signing.json" \
-	"$SERVER_DIR/expected-skips-message-signing.json"
+	run_as_plan "baseline-$ACCESS_TOKEN_FORMAT" \
+		'fapi2-security-profile-final-test-plan[client_auth_type=private_key_jwt][sender_constrain=dpop][fapi_profile=plain_fapi][openid=openid_connect]' \
+		"$SERVER_DIR/oidf-config/baseline-plan.json" \
+		"$SERVER_DIR/expected-warnings-baseline.json" \
+		"$SERVER_DIR/expected-skips-baseline.json"
+
+	run_as_plan "message-signing-$ACCESS_TOKEN_FORMAT" \
+		'fapi2-message-signing-final-test-plan[client_auth_type=private_key_jwt][sender_constrain=dpop][fapi_profile=plain_fapi][openid=openid_connect][fapi_request_method=signed_non_repudiation][fapi_response_mode=jarm]' \
+		"$SERVER_DIR/oidf-config/message-signing-plan.json" \
+		"$SERVER_DIR/expected-warnings-message-signing.json" \
+		"$SERVER_DIR/expected-skips-message-signing.json"
+done
 
 run_rp_plan "baseline" "baseline"
 run_rp_plan "message-signing" "message-signing"
@@ -301,9 +318,9 @@ python3 "$SCRIPT_DIR/generate-report.py" "$WORKDIR" "$REPO_ROOT" || echo "warnin
 
 echo
 echo "=== combined summary ==="
-for suite in "AS baseline" "AS message-signing" "RP baseline" "RP message-signing"; do
+for suite in "AS baseline-jwt" "AS baseline-opaque" "AS message-signing-jwt" "AS message-signing-opaque" "RP baseline" "RP message-signing"; do
 	result="$(lookup_result "$suite")"
-	printf '%-20s %s\n' "$suite" "${result:-DID NOT RUN}"
+	printf '%-26s %s\n' "$suite" "${result:-DID NOT RUN}"
 done
 echo
 echo "full logs: $WORKDIR"

@@ -49,6 +49,21 @@ type Config struct {
 	} `json:"tls"`
 }
 
+// AccessTokenFormat selects which server.AccessTokenIssuer/
+// resource.AccessTokenVerifier pair newServerMux wires up — see
+// main.go's -access-token-format flag. Deliberately not a Config field
+// (same reasoning as Config's own doc comment: this binary's
+// conformance testing shouldn't grow a JSON-file knob for something
+// that's a test-run dimension, not a deployment setting) — threaded
+// through Resolve as an explicit parameter instead, the same way
+// allowLoopbackHTTP already is.
+type AccessTokenFormat string
+
+const (
+	AccessTokenFormatJWT    AccessTokenFormat = "jwt"
+	AccessTokenFormatOpaque AccessTokenFormat = "opaque"
+)
+
 // ClientConfig registers one OIDF-suite-driven test client. Exactly one
 // of JWKS or JWKSURI must be set — see conformance/server/oidf-config/
 // for how each test plan's client config populates this.
@@ -81,12 +96,13 @@ func LoadConfig(path string) (Config, error) {
 // ResolvedConfig is Config translated into the typed values server.Config,
 // the storage/key implementations, and main's own listener setup need.
 type ResolvedConfig struct {
-	ListenAddr     string
-	Issuer         fapi.URL
-	Profile        server.Profile
-	DefaultSubject string
-	Algorithms     server.AlgorithmPolicy
-	Limits         server.Limits
+	ListenAddr        string
+	Issuer            fapi.URL
+	Profile           server.Profile
+	DefaultSubject    string
+	Algorithms        server.AlgorithmPolicy
+	Limits            server.Limits
+	AccessTokenFormat AccessTokenFormat
 
 	// Clients and ClientKeys are two parallel slices, joined by
 	// ClientID: Clients feeds memstore.NewClientRepository (is this
@@ -107,12 +123,19 @@ type ResolvedConfig struct {
 
 // Resolve validates cfg and converts it into a ResolvedConfig, or a
 // descriptive error identifying the first problem found.
-func (cfg Config) Resolve(allowLoopbackHTTP bool) (ResolvedConfig, error) {
+func (cfg Config) Resolve(allowLoopbackHTTP bool, accessTokenFormat AccessTokenFormat) (ResolvedConfig, error) {
 	var out ResolvedConfig
 	out.ListenAddr = cfg.ListenAddr
 	out.DefaultSubject = cfg.DefaultSubject
 	out.TLSCertFile = cfg.TLS.CertFile
 	out.TLSKeyFile = cfg.TLS.KeyFile
+
+	switch accessTokenFormat {
+	case AccessTokenFormatJWT, AccessTokenFormatOpaque:
+		out.AccessTokenFormat = accessTokenFormat
+	default:
+		return ResolvedConfig{}, fmt.Errorf("access token format must be %q or %q, got %q", AccessTokenFormatJWT, AccessTokenFormatOpaque, accessTokenFormat)
+	}
 
 	if out.ListenAddr == "" {
 		return ResolvedConfig{}, fmt.Errorf("listen_addr is required")

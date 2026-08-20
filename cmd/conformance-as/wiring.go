@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/rand"
+	"fmt"
 	"net/http"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -80,10 +81,53 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool) (*http.ServeM
 	revocationStore := memstore.NewRevocationStore()
 	identityClaims := newStaticIdentityClaims(resolved.DefaultSubject, server.SystemClock{})
 	clientRepo := memstore.NewClientRepository(resolved.Clients)
-	jwtAccessTokens, err := server.NewJWTAccessTokens(keyManager, resolved.Algorithms.IDToken)
-	if err != nil {
-		return nil, err
+
+	// Which server.AccessTokenIssuer/resource.AccessTokenVerifier pair
+	// this run uses — see main.go's -access-token-format flag. Under
+	// AccessTokenFormatOpaque, both sides share one
+	// memstore.AccessTokenStore (issuance and verification against the
+	// same in-memory table, mirroring how revocationStore is already
+	// shared above); under AccessTokenFormatJWT, verification instead
+	// resolves the AS's own signing key via selfIssuerKeySource — see
+	// resource.go's resourceHandler doc comment for why this
+	// conformance binary hosts a stand-in protected-resource endpoint
+	// alongside the AS itself.
+	var (
+		srvAccessTokens      server.AccessTokenIssuer
+		resourceAccessTokens fapires.AccessTokenVerifier
+	)
+	switch resolved.AccessTokenFormat {
+	case AccessTokenFormatJWT:
+		jwtIssuer, err := server.NewJWTAccessTokens(keyManager, resolved.Algorithms.IDToken)
+		if err != nil {
+			return nil, err
+		}
+		srvAccessTokens = jwtIssuer
+		jwtVerifier, err := fapires.NewJWTAccessTokens(
+			selfIssuerKeySource{keyManager: keyManager}, resolved.Issuer,
+			resolved.Issuer.String(), // matches server/accesstoken.go's own access-token aud claim
+			resolved.Algorithms.IDToken, resolved.Limits.AccessTokenLifetime,
+		)
+		if err != nil {
+			return nil, err
+		}
+		resourceAccessTokens = jwtVerifier
+	case AccessTokenFormatOpaque:
+		accessTokenStore := memstore.NewAccessTokenStore()
+		opaqueIssuer, err := server.NewOpaqueAccessTokens(accessTokenStore)
+		if err != nil {
+			return nil, err
+		}
+		srvAccessTokens = opaqueIssuer
+		opaqueVerifier, err := fapires.NewOpaqueAccessTokens(accessTokenStore)
+		if err != nil {
+			return nil, err
+		}
+		resourceAccessTokens = opaqueVerifier
+	default:
+		return nil, fmt.Errorf("conformance-as: unknown access token format %q", resolved.AccessTokenFormat)
 	}
+
 	srvDeps := server.Dependencies{
 		Clients:        clientRepo,
 		Transactions:   memstore.NewTransactionStore(),
@@ -91,7 +135,7 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool) (*http.ServeM
 		Replay:         replayStore,
 		ClientKeys:     clientKeys,
 		Keys:           keyManager,
-		AccessTokens:   jwtAccessTokens,
+		AccessTokens:   srvAccessTokens,
 		Revocation:     revocationStore,
 		Clock:          server.SystemClock{},
 		Random:         rand.Reader,
@@ -102,24 +146,13 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool) (*http.ServeM
 		return nil, err
 	}
 
-	// Backs GET /accounts — see resource.go's resourceHandler doc
-	// comment for why this conformance binary hosts a stand-in
-	// protected-resource endpoint alongside the AS itself.
-	resourceJWT, err := fapires.NewJWTAccessTokens(
-		selfIssuerKeySource{keyManager: keyManager}, resolved.Issuer,
-		resolved.Issuer.String(), // matches server/accesstoken.go's own access-token aud claim
-		resolved.Algorithms.IDToken, resolved.Limits.AccessTokenLifetime,
-	)
-	if err != nil {
-		return nil, err
-	}
 	resourceVerifier, err := fapires.NewVerifier(fapires.Config{
 		Limits: fapires.Limits{
 			MaxDPoPProofAge: resolved.Limits.MaxDPoPProofAge,
 			MaxClockSkew:    resolved.Limits.MaxClockSkew,
 		},
 	}, fapires.Dependencies{
-		AccessTokens: resourceJWT,
+		AccessTokens: resourceAccessTokens,
 		Replay:       replayStore,
 		Revocation:   revocationStore,
 		Clock:        fapires.SystemClock{},

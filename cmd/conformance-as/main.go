@@ -40,6 +40,7 @@ func main() {
 	certOverride := flag.String("cert", "", "override tls.cert_file from the config file")
 	keyOverride := flag.String("key", "", "override tls.key_file from the config file")
 	insecureHTTP := flag.Bool("insecure-http", false, "serve plaintext HTTP instead of TLS (loopback listen_addr only)")
+	accessTokenFormat := flag.String("access-token-format", string(AccessTokenFormatJWT), "access token format to issue/verify: jwt or opaque")
 	flag.Parse()
 
 	if *configPath == "" {
@@ -60,7 +61,7 @@ func main() {
 		rawCfg.TLS.KeyFile = *keyOverride
 	}
 
-	resolved, err := rawCfg.Resolve(*insecureHTTP)
+	resolved, err := rawCfg.Resolve(*insecureHTTP, AccessTokenFormat(*accessTokenFormat))
 	if err != nil {
 		log.Fatalf("conformance-as: config: %v", err)
 	}

@@ -13,7 +13,7 @@ import "context"
 // choice, not a silent one.
 type RevocationChecker interface {
 	// IsRevoked reports whether key — a JWT's jti claim when the
-	// active AccessTokenVerifier is JWTAccessTokens, an opaque token's
+	// active AccessTokenResolver is JWTAccessTokens, an opaque token's
 	// own hash when it's OpaqueAccessTokens — has been revoked.
 	IsRevoked(ctx context.Context, key string) (bool, error)
 }

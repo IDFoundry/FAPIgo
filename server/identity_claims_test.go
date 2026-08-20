@@ -324,7 +324,7 @@ func TestExchangeAuthorizationCodeSplitsIDTokenAndUserinfoRequestedClaims(t *tes
 	}
 	validatedAccessToken, err := parsedAccessToken.Validate(&h.serverKey.PublicKey, token.AccessTokenValidatePolicy{
 		ExpectedIssuer: testIssuer, ExpectedAudience: testIssuer, Algorithm: fapi.ES256,
-		Now: h.now, MaxLifetime: 5 * time.Minute, MaxClockSkew: 5 * time.Second,
+		Now: h.now, MaxLifetime: 5 * time.Minute,
 	})
 	if err != nil {
 		t.Fatalf("Validate access_token: %v", err)

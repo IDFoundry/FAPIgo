@@ -76,7 +76,7 @@ func validConfig(t *testing.T) resource.Config {
 	}
 }
 
-func validAccessTokens(t *testing.T) resource.AccessTokenVerifier {
+func validAccessTokens(t *testing.T) resource.AccessTokenResolver {
 	t.Helper()
 	issuer, err := fapi.ParseIssuerURL(testIssuer)
 	if err != nil {

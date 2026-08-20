@@ -8,10 +8,10 @@ import (
 // rejects a nil value for any field — there is no implicit fallback (no
 // default clock, no silently-installed in-memory replay store).
 type Dependencies struct {
-	// AccessTokens verifies a presented access token. Required — pass
-	// JWTAccessTokens{...} (the default), OpaqueAccessTokens{...}, or
-	// your own AccessTokenVerifier.
-	AccessTokens AccessTokenVerifier
+	// AccessTokens resolves a presented access token's claims — see
+	// AccessTokenResolver. Required — pass JWTAccessTokens{...} (the
+	// default), OpaqueAccessTokens{...}, or your own AccessTokenResolver.
+	AccessTokens AccessTokenResolver
 
 	// Replay detects reuse of a DPoP proof's jti.
 	Replay storage.ReplayStore

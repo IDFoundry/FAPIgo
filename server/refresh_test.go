@@ -189,12 +189,15 @@ func TestRefreshAccessTokenAcceptsRotatedDPoPKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseAccessToken: %v", err)
 	}
-	if _, err := parsed.Validate(&h.serverKey.PublicKey, token.AccessTokenValidatePolicy{
+	validated, err := parsed.Validate(&h.serverKey.PublicKey, token.AccessTokenValidatePolicy{
 		ExpectedIssuer: testIssuer, ExpectedAudience: testIssuer, Algorithm: fapi.ES256,
-		ExpectedThumbprint: &rotatedThumbprintStr,
-		Now:                h.now, MaxLifetime: 5 * time.Minute, MaxClockSkew: 5 * time.Second,
-	}); err != nil {
-		t.Fatalf("refreshed access token is not bound to the rotated DPoP key: %v", err)
+		Now: h.now, MaxLifetime: 5 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("Validate refreshed access token: %v", err)
+	}
+	if validated.JKT != rotatedThumbprintStr {
+		t.Fatalf("refreshed access token JKT = %q, want %q (not bound to the rotated DPoP key)", validated.JKT, rotatedThumbprintStr)
 	}
 }
 

@@ -99,11 +99,14 @@ func TestReturnInTokenClaimsPropagatesThroughAuthorizationCodeGrant(t *testing.T
 	dpopThumbprintStr := dpopThumbprint.String()
 	validatedAT, err := parsedAT.Validate(&h.serverKey.PublicKey, token.AccessTokenValidatePolicy{
 		ExpectedIssuer: testIssuer, ExpectedAudience: testIssuer,
-		Algorithm: fapi.ES256, ExpectedThumbprint: &dpopThumbprintStr,
-		Now: h.now, MaxLifetime: 10 * time.Minute,
+		Algorithm: fapi.ES256,
+		Now:       h.now, MaxLifetime: 10 * time.Minute,
 	})
 	if err != nil {
 		t.Fatalf("Validate access token: %v", err)
+	}
+	if validatedAT.JKT != dpopThumbprintStr {
+		t.Fatalf("access token JKT = %q, want %q", validatedAT.JKT, dpopThumbprintStr)
 	}
 
 	raw, ok := validatedAT.Parameters["x_account_hint"]

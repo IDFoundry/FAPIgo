@@ -69,6 +69,9 @@ func TestAccessTokenRoundTrip(t *testing.T) {
 	if validated.JTI != jti {
 		t.Fatalf("validated.JTI = %q, want %q (the jti IssueAccessToken returned)", validated.JTI, jti)
 	}
+	if validated.JKT != "" {
+		t.Fatalf("validated.JKT = %q, want \"\" (no Confirmation was set)", validated.JKT)
+	}
 }
 
 func TestAccessTokenWithKeyID(t *testing.T) {
@@ -89,6 +92,10 @@ func TestAccessTokenWithKeyID(t *testing.T) {
 	}
 }
 
+// TestAccessTokenConfirmationBinding confirms Validate exposes a
+// token's cnf.jkt claim, trusted, via ValidatedAccessToken.JKT — it no
+// longer checks that claim against an expected value itself (that
+// moved to resource.Verify(), see JKT's own doc comment).
 func TestAccessTokenConfirmationBinding(t *testing.T) {
 	key := generateKey(t)
 	dpopKey := generateKey(t)
@@ -100,10 +107,11 @@ func TestAccessTokenConfirmationBinding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Thumbprint: %v", err)
 	}
+	thumbprintStr := thumbprint.String()
 
 	now := time.Now()
 	p := baseAccessTokenParams(key, now, time.Minute)
-	p.Confirmation = &Confirmation{JKT: thumbprint.String()}
+	p.Confirmation = &Confirmation{JKT: thumbprintStr}
 	tok, _, err := IssueAccessToken(p)
 	if err != nil {
 		t.Fatalf("IssueAccessToken: %v", err)
@@ -114,56 +122,12 @@ func TestAccessTokenConfirmationBinding(t *testing.T) {
 		t.Fatalf("ParseAccessToken: %v", err)
 	}
 
-	thumbprintStr := thumbprint.String()
-	policy := baseAccessTokenPolicy(now)
-	policy.ExpectedThumbprint = &thumbprintStr
-	if _, err := parsed.Validate(&key.PublicKey, policy); err != nil {
-		t.Fatalf("Validate(matching thumbprint): %v", err)
-	}
-
-	otherKey := generateKey(t)
-	otherJWK, err := jose.NewJWK(&otherKey.PublicKey, fapi.ES256)
+	validated, err := parsed.Validate(&key.PublicKey, baseAccessTokenPolicy(now))
 	if err != nil {
-		t.Fatalf("NewJWK: %v", err)
+		t.Fatalf("Validate: %v", err)
 	}
-	otherThumbprint, err := otherJWK.Thumbprint()
-	if err != nil {
-		t.Fatalf("Thumbprint: %v", err)
-	}
-	otherThumbprintStr := otherThumbprint.String()
-	wrongPolicy := baseAccessTokenPolicy(now)
-	wrongPolicy.ExpectedThumbprint = &otherThumbprintStr
-	if _, err := parsed.Validate(&key.PublicKey, wrongPolicy); !errors.Is(err, ErrConfirmationMismatch) {
-		t.Fatalf("Validate(wrong thumbprint) = %v, want ErrConfirmationMismatch", err)
-	}
-}
-
-func TestAccessTokenMissingConfirmationWhenRequired(t *testing.T) {
-	key := generateKey(t)
-	now := time.Now()
-	tok, _, err := IssueAccessToken(baseAccessTokenParams(key, now, time.Minute))
-	if err != nil {
-		t.Fatalf("IssueAccessToken: %v", err)
-	}
-	parsed, err := ParseAccessToken(tok)
-	if err != nil {
-		t.Fatalf("ParseAccessToken: %v", err)
-	}
-
-	dpopKey := generateKey(t)
-	dpopJWK, err := jose.NewJWK(&dpopKey.PublicKey, fapi.ES256)
-	if err != nil {
-		t.Fatalf("NewJWK: %v", err)
-	}
-	thumbprint, err := dpopJWK.Thumbprint()
-	if err != nil {
-		t.Fatalf("Thumbprint: %v", err)
-	}
-	thumbprintStr := thumbprint.String()
-	policy := baseAccessTokenPolicy(now)
-	policy.ExpectedThumbprint = &thumbprintStr
-	if _, err := parsed.Validate(&key.PublicKey, policy); !errors.Is(err, ErrMissingConfirmation) {
-		t.Fatalf("Validate(no cnf, required) = %v, want ErrMissingConfirmation", err)
+	if validated.JKT != thumbprintStr {
+		t.Fatalf("validated.JKT = %q, want %q", validated.JKT, thumbprintStr)
 	}
 }
 
@@ -236,22 +200,18 @@ func TestAccessTokenValidateRejectsIssuerAndAudienceMismatch(t *testing.T) {
 	}
 }
 
-func TestAccessTokenValidateRejectsExpiredAndExceededLifetime(t *testing.T) {
+// TestAccessTokenValidateRejectsExceededLifetime covers the one
+// expiry-adjacent check that stays in this package: a defense against
+// a forged/over-long exp claim, independent of whether the token has
+// actually expired yet as of now. Ordinary "is it expired as of now"
+// is no longer checked here at all — see AccessToken.Validate's own
+// comment — so there is no equivalent "expired" half of this test
+// anymore; that coverage lives in resource/verify_test.go instead,
+// exercised through Verify() the same way every caller actually hits
+// it.
+func TestAccessTokenValidateRejectsExceededLifetime(t *testing.T) {
 	key := generateKey(t)
 	now := time.Now()
-
-	expiredTok, _, err := IssueAccessToken(baseAccessTokenParams(key, now, time.Minute))
-	if err != nil {
-		t.Fatalf("IssueAccessToken: %v", err)
-	}
-	expiredParsed, err := ParseAccessToken(expiredTok)
-	if err != nil {
-		t.Fatalf("ParseAccessToken: %v", err)
-	}
-	expiredPolicy := baseAccessTokenPolicy(now.Add(2 * time.Minute))
-	if _, err := expiredParsed.Validate(&key.PublicKey, expiredPolicy); !errors.Is(err, ErrExpired) {
-		t.Fatalf("Validate(expired) = %v, want ErrExpired", err)
-	}
 
 	longTok, _, err := IssueAccessToken(baseAccessTokenParams(key, now, 10*time.Minute))
 	if err != nil {

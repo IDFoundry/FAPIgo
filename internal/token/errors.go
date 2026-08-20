@@ -35,13 +35,4 @@ var (
 	// ErrNonceMismatch indicates an ID token's nonce claim did not match
 	// the nonce the caller's authorization request carried.
 	ErrNonceMismatch = errors.New("token: nonce does not match expected value")
-
-	// ErrMissingConfirmation indicates the caller required a
-	// sender-constrained access token (via ExpectedThumbprint) but the
-	// token carried no cnf.jkt claim at all.
-	ErrMissingConfirmation = errors.New("token: access token has no cnf.jkt confirmation")
-
-	// ErrConfirmationMismatch indicates an access token's cnf.jkt did
-	// not match the DPoP key thumbprint the caller expected.
-	ErrConfirmationMismatch = errors.New("token: cnf.jkt does not match expected key thumbprint")
 )

@@ -276,15 +276,24 @@ func TestVerifyRejectsMalformedAuthorizationHeader(t *testing.T) {
 	}
 }
 
-// TestVerifyAcceptsOpaqueAccessToken exercises Verify() end to end
-// (Authorization header, DPoP proof, revocation check — not just
-// VerifyAccessToken in isolation) with OpaqueAccessTokens instead of
-// the default JWTAccessTokens, confirming the pluggable
-// AccessTokenVerifier boundary actually works through the public
-// entry point, not just when called directly.
-func TestVerifyAcceptsOpaqueAccessToken(t *testing.T) {
-	store := memstore.NewAccessTokenStore()
+// opaqueFixture bundles a stored opaque access token and matching
+// dpopKey for one simulated request, the opaque counterpart of
+// newFixture. lifetime is added to now to compute the stored token's
+// ExpiresAt — pass a negative value to build an already-expired token.
+type opaqueFixture struct {
+	verifier   *resource.Verifier
+	store      *memstore.AccessTokenStore
+	dpopKey    *ecdsa.PrivateKey
+	rawToken   string
+	thumbprint jose.Thumbprint
+	target     *url.URL
+	now        time.Time
+}
 
+func newOpaqueFixture(t *testing.T, lifetime time.Duration) opaqueFixture {
+	t.Helper()
+
+	store := memstore.NewAccessTokenStore()
 	dpopKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatalf("generate dpop key: %v", err)
@@ -309,20 +318,9 @@ func TestVerifyAcceptsOpaqueAccessToken(t *testing.T) {
 	if err := store.CreateAccessToken(context.Background(), storage.NewAccessToken{
 		TokenHash: hash, ClientID: "client-1", Subject: "user-1",
 		Scope: []string{"read", "write"}, Thumbprint: thumbprint.String(),
-		ExpiresAt: now.Add(5 * time.Minute),
+		ExpiresAt: now.Add(lifetime),
 	}); err != nil {
 		t.Fatalf("CreateAccessToken: %v", err)
-	}
-
-	dpopProof, err := dpop.CreateProof(dpop.ProofRequest{
-		Signer: dpopKey, Algorithm: fapi.ES256,
-		Method: "GET", URL: target,
-		AccessToken: rawToken,
-		Now:         now,
-		Random:      rand.Reader,
-	})
-	if err != nil {
-		t.Fatalf("create dpop proof: %v", err)
 	}
 
 	v, err := resource.NewVerifier(validConfig(t), resource.Dependencies{
@@ -335,11 +333,44 @@ func TestVerifyAcceptsOpaqueAccessToken(t *testing.T) {
 		t.Fatalf("NewVerifier: %v", err)
 	}
 
-	authz, err := v.Verify(context.Background(), resource.VerifyRequest{
+	return opaqueFixture{
+		verifier: v, store: store, dpopKey: dpopKey, rawToken: rawToken,
+		thumbprint: thumbprint, target: target, now: now,
+	}
+}
+
+// proof builds a DPoP proof over f's token, signed by signer (normally
+// f.dpopKey; a test can pass a different key to simulate a proof
+// presented alongside a token it isn't bound to).
+func (f opaqueFixture) proof(t *testing.T, signer *ecdsa.PrivateKey) string {
+	t.Helper()
+	proof, err := dpop.CreateProof(dpop.ProofRequest{
+		Signer: signer, Algorithm: fapi.ES256,
+		Method: "GET", URL: f.target,
+		AccessToken: f.rawToken,
+		Now:         f.now,
+		Random:      rand.Reader,
+	})
+	if err != nil {
+		t.Fatalf("create dpop proof: %v", err)
+	}
+	return proof
+}
+
+// TestVerifyAcceptsOpaqueAccessToken exercises Verify() end to end
+// (Authorization header, DPoP proof, revocation check — not just
+// ResolveAccessToken in isolation) with OpaqueAccessTokens instead of
+// the default JWTAccessTokens, confirming the pluggable
+// AccessTokenResolver boundary actually works through the public
+// entry point, not just when called directly.
+func TestVerifyAcceptsOpaqueAccessToken(t *testing.T) {
+	f := newOpaqueFixture(t, 5*time.Minute)
+
+	authz, err := f.verifier.Verify(context.Background(), resource.VerifyRequest{
 		Method:        "GET",
-		URL:           target,
-		Authorization: "DPoP " + rawToken,
-		DPoPProof:     dpopProof,
+		URL:           f.target,
+		Authorization: "DPoP " + f.rawToken,
+		DPoPProof:     f.proof(t, f.dpopKey),
 	})
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
@@ -352,5 +383,52 @@ func TestVerifyAcceptsOpaqueAccessToken(t *testing.T) {
 	}
 	if len(authz.Scopes) != 2 || authz.Scopes[0] != "read" || authz.Scopes[1] != "write" {
 		t.Errorf("Scopes = %v, want [read write]", authz.Scopes)
+	}
+}
+
+// TestVerifyRejectsOpaqueTokenWrongDPoPKey is
+// TestVerifyRejectsWrongDPoPKey's opaque-mode counterpart — before
+// this refactor, OpaqueAccessTokens checked DPoP binding itself, so
+// this path was only exercised via a direct ResolveAccessToken call in
+// server/token_test.go, never through the public Verify() entry point.
+// Now that binding is checked once, uniformly, by Verify() for every
+// AccessTokenResolver, this proves the singular check actually applies
+// to the opaque path too, not just JWT.
+func TestVerifyRejectsOpaqueTokenWrongDPoPKey(t *testing.T) {
+	f := newOpaqueFixture(t, 5*time.Minute)
+
+	otherKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate other key: %v", err)
+	}
+
+	_, err = f.verifier.Verify(context.Background(), resource.VerifyRequest{
+		Method:        "GET",
+		URL:           f.target,
+		Authorization: "DPoP " + f.rawToken,
+		DPoPProof:     f.proof(t, otherKey),
+	})
+	if err == nil {
+		t.Fatalf("Verify(wrong DPoP key) = nil error, want error")
+	}
+}
+
+// TestVerifyRejectsExpiredOpaqueToken proves ordinary expiry is
+// actually enforced through the public Verify() entry point. Before
+// this refactor, no test anywhere exercised "expired token rejected"
+// at this level for either access-token format — only deep inside
+// internal/token's own now-removed unit test, which never proved
+// Verify() itself applied the check.
+func TestVerifyRejectsExpiredOpaqueToken(t *testing.T) {
+	f := newOpaqueFixture(t, -10*time.Second)
+
+	_, err := f.verifier.Verify(context.Background(), resource.VerifyRequest{
+		Method:        "GET",
+		URL:           f.target,
+		Authorization: "DPoP " + f.rawToken,
+		DPoPProof:     f.proof(t, f.dpopKey),
+	})
+	if err == nil {
+		t.Fatalf("Verify(expired token) = nil error, want error")
 	}
 }

@@ -177,11 +177,14 @@ func TestExchangeAuthorizationCodeSuccess(t *testing.T) {
 	dpopJWKStr := dpopJWK.String()
 	validatedAT, err := parsedAT.Validate(&h.serverKey.PublicKey, token.AccessTokenValidatePolicy{
 		ExpectedIssuer: testIssuer, ExpectedAudience: testIssuer,
-		Algorithm: fapi.ES256, ExpectedThumbprint: &dpopJWKStr,
-		Now: h.now, MaxLifetime: 10 * time.Minute,
+		Algorithm: fapi.ES256,
+		Now:       h.now, MaxLifetime: 10 * time.Minute,
 	})
 	if err != nil {
 		t.Fatalf("Validate access token: %v", err)
+	}
+	if validatedAT.JKT != dpopJWKStr {
+		t.Fatalf("access token JKT = %q, want %q (not DPoP-bound)", validatedAT.JKT, dpopJWKStr)
 	}
 	if validatedAT.Subject != "user-1" {
 		t.Fatalf("access token Subject = %q, want %q", validatedAT.Subject, "user-1")
@@ -800,8 +803,8 @@ func TestExchangeAuthorizationCodeAuditsOutcomes(t *testing.T) {
 }
 
 // issuerKeySourceFromManager adapts a keys.KeyManager to
-// keys.IssuerKeySource for tests that need a resource-side verifier —
-// resource.JWTAccessTokens.VerifyAccessToken resolves candidate keys
+// keys.IssuerKeySource for tests that need a resource-side resolver —
+// resource.JWTAccessTokens.ResolveAccessToken resolves candidate keys
 // through this, exactly as cmd/conformance-as's own
 // selfIssuerKeySource does for a co-located AS+resource-server
 // deployment.
@@ -819,10 +822,14 @@ func (s issuerKeySourceFromManager) ResolveIssuerKeys(ctx context.Context, req k
 
 // TestJWTAccessTokensRoundTripsThroughResourceVerifier issues an
 // access token via server.JWTAccessTokens and confirms
-// resource.JWTAccessTokens accepts it and reports the same
-// authorization facts — the two default implementations of this
-// session's newly pluggable AccessTokenIssuer/AccessTokenVerifier
-// boundary must actually interoperate, not just each compile.
+// resource.JWTAccessTokens resolves it and reports the same
+// authorization facts — the default implementations of the pluggable
+// AccessTokenIssuer/AccessTokenResolver boundary must actually
+// interoperate, not just each compile. Binding/expiry/revocation
+// enforcement itself is exercised through resource.Verify(), not here
+// — see resource/verify_test.go — since ResolveAccessToken deliberately
+// doesn't check any of those (see AccessTokenResolver's own doc
+// comment).
 func TestJWTAccessTokensRoundTripsThroughResourceVerifier(t *testing.T) {
 	signerKey := generateKey(t)
 	km := &fakeKeyManager{key: signerKey, keyID: "as-key-1"}
@@ -857,27 +864,30 @@ func TestJWTAccessTokensRoundTripsThroughResourceVerifier(t *testing.T) {
 		t.Fatalf("resource.NewJWTAccessTokens: %v", err)
 	}
 
-	validated, err := verifier.VerifyAccessToken(context.Background(), resource.VerifyAccessTokenRequest{
-		Raw: raw, Thumbprint: dpopThumbprint.String(), Now: now, MaxClockSkew: 5 * time.Second,
+	resolved, err := verifier.ResolveAccessToken(context.Background(), resource.ResolveAccessTokenRequest{
+		Raw: raw, Now: now,
 	})
 	if err != nil {
-		t.Fatalf("VerifyAccessToken: %v", err)
+		t.Fatalf("ResolveAccessToken: %v", err)
 	}
-	if validated.Subject != "user-1" {
-		t.Fatalf("Subject = %q, want %q", validated.Subject, "user-1")
+	if resolved.Subject != "user-1" {
+		t.Fatalf("Subject = %q, want %q", resolved.Subject, "user-1")
 	}
-	if validated.ClientID != testClientID.String() {
-		t.Fatalf("ClientID = %q, want %q", validated.ClientID, testClientID)
+	if resolved.ClientID != testClientID.String() {
+		t.Fatalf("ClientID = %q, want %q", resolved.ClientID, testClientID)
 	}
-	if validated.Key != issueKey {
-		t.Fatalf("Key = %q, want %q", validated.Key, issueKey)
+	if resolved.Thumbprint != dpopThumbprint.String() {
+		t.Fatalf("Thumbprint = %q, want %q", resolved.Thumbprint, dpopThumbprint.String())
+	}
+	if resolved.Key != issueKey {
+		t.Fatalf("Key = %q, want %q", resolved.Key, issueKey)
 	}
 }
 
 // TestOpaqueAccessTokensRoundTripsThroughResourceVerifier is
 // TestJWTAccessTokensRoundTripsThroughResourceVerifier's counterpart
 // for the opaque, storage-backed implementation — issued via
-// server.OpaqueAccessTokens, verified via resource.OpaqueAccessTokens,
+// server.OpaqueAccessTokens, resolved via resource.OpaqueAccessTokens,
 // sharing one storage.AccessTokenStore instance (the co-located
 // AS+resource-server deployment shape cmd/conformance-as itself could
 // use, per the design plan's Tier 1).
@@ -910,33 +920,32 @@ func TestOpaqueAccessTokensRoundTripsThroughResourceVerifier(t *testing.T) {
 		t.Fatalf("opaque token unexpectedly parsed as a JWT")
 	}
 
-	validated, err := verifier.VerifyAccessToken(context.Background(), resource.VerifyAccessTokenRequest{
-		Raw: raw, Thumbprint: dpopThumbprint.String(), Now: now, MaxClockSkew: 5 * time.Second,
+	resolved, err := verifier.ResolveAccessToken(context.Background(), resource.ResolveAccessTokenRequest{
+		Raw: raw, Now: now,
 	})
 	if err != nil {
-		t.Fatalf("VerifyAccessToken: %v", err)
+		t.Fatalf("ResolveAccessToken: %v", err)
 	}
-	if validated.Subject != "user-1" {
-		t.Fatalf("Subject = %q, want %q", validated.Subject, "user-1")
+	if resolved.Subject != "user-1" {
+		t.Fatalf("Subject = %q, want %q", resolved.Subject, "user-1")
 	}
-	if validated.ClientID != testClientID.String() {
-		t.Fatalf("ClientID = %q, want %q", validated.ClientID, testClientID)
+	if resolved.ClientID != testClientID.String() {
+		t.Fatalf("ClientID = %q, want %q", resolved.ClientID, testClientID)
 	}
-	if validated.Key != issueKey {
-		t.Fatalf("Key = %q, want %q", validated.Key, issueKey)
+	if resolved.Thumbprint != dpopThumbprint.String() {
+		t.Fatalf("Thumbprint = %q, want %q", resolved.Thumbprint, dpopThumbprint.String())
 	}
-
-	// Wrong DPoP key must be rejected.
-	if _, err := verifier.VerifyAccessToken(context.Background(), resource.VerifyAccessTokenRequest{
-		Raw: raw, Thumbprint: "wrong-thumbprint", Now: now, MaxClockSkew: 5 * time.Second,
-	}); err == nil {
-		t.Fatalf("VerifyAccessToken(wrong thumbprint) = nil error, want error")
+	if resolved.Key != issueKey {
+		t.Fatalf("Key = %q, want %q", resolved.Key, issueKey)
 	}
 
-	// Unknown token must be rejected.
-	if _, err := verifier.VerifyAccessToken(context.Background(), resource.VerifyAccessTokenRequest{
-		Raw: "never-issued", Thumbprint: dpopThumbprint.String(), Now: now, MaxClockSkew: 5 * time.Second,
+	// Unknown token must be rejected. (Binding/expiry rejection is no
+	// longer ResolveAccessToken's job — see resource/verify_test.go's
+	// TestVerifyRejectsOpaqueTokenWrongDPoPKey/TestVerifyRejectsExpiredOpaqueToken
+	// for that coverage, exercised through Verify() instead.)
+	if _, err := verifier.ResolveAccessToken(context.Background(), resource.ResolveAccessTokenRequest{
+		Raw: "never-issued", Now: now,
 	}); err == nil {
-		t.Fatalf("VerifyAccessToken(unknown token) = nil error, want error")
+		t.Fatalf("ResolveAccessToken(unknown token) = nil error, want error")
 	}
 }

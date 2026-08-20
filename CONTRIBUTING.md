@@ -34,8 +34,12 @@ the fact.
 ## Before you open a PR
 
 - `gofmt -l .`, `go vet ./...`, `go build ./...`, `go test -race ./...`,
-  and `golangci-lint run ./...` (config in `.golangci.yml`) all need to
-  be clean — this is what `ci.yml` enforces on every PR.
+  `golangci-lint run ./...` (config in `.golangci.yml`), and
+  `govulncheck ./...` all need to be clean — this is what `ci.yml`
+  enforces on every PR. This module has no third-party dependencies, so
+  a `govulncheck` finding is almost always a standard-library CVE fixed
+  in a newer Go patch release, not something to fix in this repo's own
+  code — bump the toolchain instead.
 - Include tests for the behavior you're changing, not just the happy
   path — this codebase leans on tests as part of the actual
   specification (see e.g. `storage/contract.go`'s reusable contract

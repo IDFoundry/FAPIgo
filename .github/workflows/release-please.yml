@@ -1,0 +1,31 @@
+# Maintains an up-to-date "release PR" (version bump + CHANGELOG.md,
+# computed from Conventional Commits messages on main since the last
+# release — see CONTRIBUTING.md) on every push to main, and tags +
+# publishes a GitHub Release the moment that PR is merged. See
+# release-please-config.json / .release-please-manifest.json for the
+# actual version/tag configuration.
+#
+# Uses a personal-access-token secret (RELEASE_PLEASE_TOKEN), not the
+# default GITHUB_TOKEN — required so the release PR this action opens
+# actually triggers ci.yml on itself; GitHub blocks GITHUB_TOKEN-
+# authored events from triggering other workflows, to prevent
+# recursion. See CONTRIBUTING.md for what the token needs.
+name: release-please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

@@ -46,3 +46,22 @@ jobs:
 
       - name: coverage summary
         run: go tool cover -func=coverage.out | tail -1
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache-dependency-path: go.mod
+
+      # Config lives in .golangci.yml — gosec (security), bodyclose,
+      # plus golangci-lint's own "standard" set (errcheck, staticcheck,
+      # govet, ineffassign, unused, gosimple). gofmt is enforced
+      # separately above, not duplicated here.
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12

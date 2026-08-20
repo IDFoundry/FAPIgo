@@ -80,7 +80,7 @@ type ClientConfig struct {
 
 // LoadConfig reads and parses the JSON config file at path.
 func LoadConfig(path string) (Config, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path is the operator's own -config flag value, not untrusted input
 	if err != nil {
 		return Config{}, fmt.Errorf("read config: %w", err)
 	}

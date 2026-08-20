@@ -34,6 +34,6 @@ func parHandler(srv *server.Server) http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		w.Write(body)
+		_, _ = w.Write(body)
 	}
 }

@@ -389,7 +389,7 @@ func followAuthorizationRedirect(baseClient *http.Client, authorizationURL strin
 	if err != nil {
 		return "", err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 
 	if res.StatusCode < 300 || res.StatusCode >= 400 {
 		body, _ := io.ReadAll(res.Body)

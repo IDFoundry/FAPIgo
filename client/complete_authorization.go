@@ -34,7 +34,7 @@ func (c *Client) CompleteAuthorization(ctx context.Context, cb AuthorizationCall
 	}
 	switch r := result.(type) {
 	case CallbackDenied:
-		return CompletionDenied{Code: r.Code, Description: r.Description}, nil
+		return CompletionDenied(r), nil
 	case CallbackSuccess:
 		tokens, err := c.ExchangeCode(ctx, r.Response)
 		if err != nil {

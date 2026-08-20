@@ -86,7 +86,9 @@ func (a *authServer) handleMetadata(w http.ResponseWriter, r *http.Request) {
 		AuthorizationResponseIssParameterSupported: md.AuthorizationResponseIssParameterSupported,
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(doc)
+	if err := json.NewEncoder(w).Encode(doc); err != nil {
+		a.t.Fatalf("fapitest: encode metadata: %v", err)
+	}
 }
 
 // handleJWKS serves this authorization server's own published keys.
@@ -96,7 +98,9 @@ func (a *authServer) handleJWKS(w http.ResponseWriter, r *http.Request) {
 		a.t.Fatalf("fapitest: PublicJWKS: %v", err)
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(set)
+	if err := json.NewEncoder(w).Encode(set); err != nil {
+		a.t.Fatalf("fapitest: encode JWKS: %v", err)
+	}
 }
 
 func (a *authServer) handlePAR(w http.ResponseWriter, r *http.Request) {
@@ -116,7 +120,9 @@ func (a *authServer) handlePAR(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	w.Write(body)
+	if _, err := w.Write(body); err != nil {
+		a.t.Fatalf("fapitest: write PAR result: %v", err)
+	}
 }
 
 func (a *authServer) handleAuthorize(w http.ResponseWriter, r *http.Request) {
@@ -204,7 +210,9 @@ func (a *authServer) handleToken(w http.ResponseWriter, r *http.Request) {
 		resp["refresh_token"] = result.RefreshToken.Reveal()
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		a.t.Fatalf("fapitest: encode token response: %v", err)
+	}
 }
 
 func (a *authServer) writeAuthorizationAction(w http.ResponseWriter, action server.AuthorizationAction) {
@@ -247,7 +255,9 @@ func (a *authServer) writeOAuthError(w http.ResponseWriter, status int, code, de
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	w.Write(body)
+	if _, err := w.Write(body); err != nil {
+		a.t.Fatalf("fapitest: write error response: %v", err)
+	}
 }
 
 func asServerError(err error) (*server.Error, bool) {

@@ -16,6 +16,12 @@ import (
 // httpFetchTimeout bounds a single outbound client-JWKS fetch.
 const httpFetchTimeout = 10 * time.Second
 
+// readHeaderTimeout bounds how long the server waits to receive a
+// request's headers — without it, a client that trickles headers one
+// byte at a time can hold a connection (and its goroutine) open
+// indefinitely (a Slowloris-style DoS).
+const readHeaderTimeout = 10 * time.Second
+
 // bcp195TLS12CipherSuites is the TLS 1.2 cipher suite allow-list FAPI 2.0
 // requires (FAPI2-SP-FINAL-5.2.2, citing BCP195/RFC 7525): ECDHE key
 // exchange (forward secrecy) with an AEAD cipher only — no CBC-mode
@@ -75,9 +81,10 @@ func main() {
 	}
 
 	httpServer := &http.Server{
-		Addr:      resolved.ListenAddr,
-		Handler:   mux,
-		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12, CipherSuites: bcp195TLS12CipherSuites},
+		Addr:              resolved.ListenAddr,
+		Handler:           mux,
+		TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS12, CipherSuites: bcp195TLS12CipherSuites},
+		ReadHeaderTimeout: readHeaderTimeout,
 	}
 
 	log.Printf("conformance-as: listening on %s (issuer %s)", resolved.ListenAddr, resolved.Issuer.String())

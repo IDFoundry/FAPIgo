@@ -128,7 +128,7 @@ func (c *Client) Fetch(ctx context.Context, req FetchRequest) (FetchResponse, er
 
 		if isRedirect(res.StatusCode) {
 			location := res.Header.Get("Location")
-			res.Body.Close()
+			_ = res.Body.Close()
 			if hop >= c.cfg.MaxRedirects {
 				return FetchResponse{}, ErrTooManyRedirects
 			}
@@ -141,7 +141,7 @@ func (c *Client) Fetch(ctx context.Context, req FetchRequest) (FetchResponse, er
 		}
 
 		body, readErr := readBounded(res.Body, c.cfg.MaxResponseBytes)
-		res.Body.Close()
+		_ = res.Body.Close()
 		if readErr != nil {
 			return FetchResponse{}, readErr
 		}
@@ -165,7 +165,7 @@ func (c *Client) roundTrip(ctx context.Context, target *url.URL) (*http.Response
 		return nil, fmt.Errorf("fapihttp: %w", err)
 	}
 	if target.Scheme == "https" && res.TLS == nil {
-		res.Body.Close()
+		_ = res.Body.Close()
 		return nil, ErrMissingTLS
 	}
 	return res, nil

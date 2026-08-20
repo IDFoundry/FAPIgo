@@ -33,9 +33,9 @@ the fact.
 
 ## Before you open a PR
 
-- `gofmt -l .`, `go vet ./...`, `go build ./...`, and
-  `go test -race ./...` all need to be clean — this is what `ci.yml`
-  enforces on every PR.
+- `gofmt -l .`, `go vet ./...`, `go build ./...`, `go test -race ./...`,
+  and `golangci-lint run ./...` (config in `.golangci.yml`) all need to
+  be clean — this is what `ci.yml` enforces on every PR.
 - Include tests for the behavior you're changing, not just the happy
   path — this codebase leans on tests as part of the actual
   specification (see e.g. `storage/contract.go`'s reusable contract

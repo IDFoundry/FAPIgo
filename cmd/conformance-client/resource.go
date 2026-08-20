@@ -59,7 +59,7 @@ func doProtectedResourceRequest(ctx context.Context, httpClient *http.Client, dp
 	if err != nil {
 		return nil, 0, nil, err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
 		return nil, 0, nil, fmt.Errorf("read response body: %w", err)

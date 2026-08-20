@@ -35,7 +35,7 @@ func (c *Client) postForm(ctx context.Context, url string, body []byte, extraHea
 	if err != nil {
 		return nil, 0, nil, fmt.Errorf("client: %w", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 
 	data, err := io.ReadAll(io.LimitReader(res.Body, c.cfg.Limits.MaxHTTPResponseBytes+1))
 	if err != nil {

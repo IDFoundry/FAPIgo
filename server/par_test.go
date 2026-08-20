@@ -309,14 +309,6 @@ func (f *fakeGrantStore) RedeemRefreshToken(_ context.Context, redemption storag
 	}, nil
 }
 
-func (f *fakeGrantStore) allRefreshTokens() []storage.NewRefreshToken {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	out := make([]storage.NewRefreshToken, len(f.refreshTokens))
-	copy(out, f.refreshTokens)
-	return out
-}
-
 // Capabilities is a test-only assertion — see fakeClientRepository.Capabilities.
 func (f *fakeGrantStore) Capabilities() storage.Capabilities {
 	return storage.Capabilities{Durable: true, AtomicConsume: true, SerializableRedemption: true, CrossInstanceConsistent: true, EncryptedAtRest: true}

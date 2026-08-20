@@ -6,22 +6,18 @@ results.txt/the per-suite log files already exist — it doesn't run any
 part of the suites itself, only reads what's already on disk:
 
   - results.txt (run-all.sh's own "NAME|LINE" record_result output)
-  - as-{baseline,message-signing}-{jwt,opaque}.log (run-test-plan.py's
-    own verbose stdout, already captured by run-all.sh — one AS suite
-    run per cmd/conformance-as -access-token-format value)
-  - as-{baseline,message-signing}-{jwt,opaque}-retry.log, if
-    retry-flaky-modules.py ran (only exists when that run came back
-    non-clean)
+  - as-{baseline,message-signing}.log (run-test-plan.py's own verbose
+    stdout, already captured by run-all.sh)
+  - as-{baseline,message-signing}-retry.log, if retry-flaky-modules.py
+    ran (only exists when that suite came back non-clean)
   - rp-{baseline,message-signing}.log (cmd/conformance-client's own
-    stdout — doesn't vary by access-token format, see run-all.sh)
+    stdout)
   - conformance/server/expected-{warnings,skips}-{baseline,message
     -signing}.json — the same files run-test-plan.py itself reads, so
     every WARNING/SKIPPED module's "why this is expected, not a
     defect" reasoning in the report is pulled from the one place that
     reasoning is already authoritatively written down, not
-    re-explained/duplicated here. Shared by both access-token-format
-    runs of a suite (see base_suite_name) — not access-token-format
-    specific.
+    re-explained/duplicated here.
 
 Each suite section leads with a quick table of just its non-PASSED
 modules (empty/omitted when everything passed) so a regression is
@@ -49,24 +45,8 @@ ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 # for the same reason.
 TEST_LINE_RE = re.compile(r"^(?:\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} )?Test \[(\d+):(\d+)\] (\S+) (\S+) (\S+) - result (\S+)\.")
 
-# run-all.sh runs each AS suite twice, once per cmd/conformance-as
-# -access-token-format value, and names its logs/results.txt entries
-# accordingly (e.g. "baseline-jwt", "baseline-opaque"). The
-# expected-{warnings,skips}-*.json files aren't duplicated per format
-# (see base_suite_name below) — a WARNING/SKIPPED module's cause is
-# suite-internal, not access-token-format-specific.
-AS_SUITES = ["baseline-jwt", "baseline-opaque", "message-signing-jwt", "message-signing-opaque"]
+AS_SUITES = ["baseline", "message-signing"]
 RP_SUITES = ["baseline", "message-signing"]
-
-
-def base_suite_name(name):
-    """Strips run-all.sh's "-jwt"/"-opaque" AS suite suffix, if any, so
-    expected-{warnings,skips}-*.json lookups hit the one file shared by
-    both access-token-format runs of a suite."""
-    for suffix in ("-jwt", "-opaque"):
-        if name.endswith(suffix):
-            return name[: -len(suffix)]
-    return name
 
 
 def strip_ansi(s):
@@ -214,8 +194,8 @@ def render_as_suite(md, name, workdir, repo_root, results):
         return
 
     retry_outcomes = parse_retry_log(retry_log_path)
-    expected_warnings = load_expected(repo_root, "warnings", base_suite_name(name))
-    expected_skips = load_expected(repo_root, "skips", base_suite_name(name))
+    expected_warnings = load_expected(repo_root, "warnings", name)
+    expected_skips = load_expected(repo_root, "skips", name)
 
     def why_for(m):
         if m["module_id"] in retry_outcomes:
@@ -303,7 +283,7 @@ def main():
     md.append("## Summary\n")
     md.append("| Suite | Result |")
     md.append("|---|---|")
-    for label in ["AS baseline-jwt", "AS baseline-opaque", "AS message-signing-jwt", "AS message-signing-opaque", "RP baseline", "RP message-signing"]:
+    for label in ["AS baseline", "AS message-signing", "RP baseline", "RP message-signing"]:
         md.append(f"| {label} | {results.get(label, 'DID NOT RUN')} |")
     md.append("")
 

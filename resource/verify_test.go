@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -430,5 +431,45 @@ func TestVerifyRejectsExpiredOpaqueToken(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatalf("Verify(expired token) = nil error, want error")
+	}
+}
+
+// TestErrorAccessors verifies resource.Error's own public contract —
+// Code, PublicDescription, HTTPStatus, Error and Unwrap — which,
+// despite being ARCHITECTURE.md design rule 16 ("errors carry their
+// own exposure"), had no direct test of its own: existing tests only
+// ever check Code(). A malformed DPoP proof is the simplest trigger
+// that carries a real underlying cause, exercising Unwrap for real
+// rather than against a nil cause.
+func TestErrorAccessors(t *testing.T) {
+	f := newFixture(t)
+
+	_, err := f.verifier.Verify(context.Background(), resource.VerifyRequest{
+		Method:        "GET",
+		URL:           f.target,
+		Authorization: "DPoP " + f.accessToken,
+		DPoPProof:     "not-a-valid-dpop-proof",
+	})
+	if err == nil {
+		t.Fatalf("Verify(malformed DPoP proof) = nil error, want error")
+	}
+	rerr, ok := err.(*resource.Error)
+	if !ok {
+		t.Fatalf("error type = %T, want *resource.Error", err)
+	}
+	if rerr.Code() != resource.ErrorInvalidToken {
+		t.Fatalf("Code() = %q, want %q", rerr.Code(), resource.ErrorInvalidToken)
+	}
+	if rerr.PublicDescription() != "DPoP proof verification failed" {
+		t.Fatalf("PublicDescription() = %q, want %q", rerr.PublicDescription(), "DPoP proof verification failed")
+	}
+	if rerr.HTTPStatus() != 401 {
+		t.Fatalf("HTTPStatus() = %d, want 401", rerr.HTTPStatus())
+	}
+	if !strings.Contains(rerr.Error(), rerr.PublicDescription()) {
+		t.Fatalf("Error() = %q, want it to include PublicDescription() %q", rerr.Error(), rerr.PublicDescription())
+	}
+	if rerr.Unwrap() == nil {
+		t.Fatalf("Unwrap() = nil, want the underlying DPoP verification error")
 	}
 }

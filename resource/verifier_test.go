@@ -159,6 +159,17 @@ func TestNewJWTAccessTokensRejectsInvalid(t *testing.T) {
 	}
 }
 
+// TestNewOpaqueAccessTokensRejectsInvalid — every existing test that
+// uses OpaqueAccessTokens builds it as a bare struct literal
+// (OpaqueAccessTokens{Store: store}), bypassing this validating
+// constructor entirely, so its one check (reject a nil store) had
+// never actually run.
+func TestNewOpaqueAccessTokensRejectsInvalid(t *testing.T) {
+	if _, err := resource.NewOpaqueAccessTokens(nil); err == nil {
+		t.Fatalf("NewOpaqueAccessTokens(nil store) = nil error, want error")
+	}
+}
+
 func TestNewVerifierRejectsMissingDependencies(t *testing.T) {
 	cases := map[string]func(*resource.Dependencies){
 		"nil access tokens": func(d *resource.Dependencies) { d.AccessTokens = nil },

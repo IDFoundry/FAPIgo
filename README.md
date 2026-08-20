@@ -55,7 +55,7 @@ and `server.RecommendedAlgorithms()` do the same for `Config`'s algorithm
 and duration fields, each grounded in a specific FAPI 2.0 Security
 Profile Final or RFC 9449 requirement where one exists — see
 [GETTING_STARTED.md](GETTING_STARTED.md) for a walkthrough of standing
-up an authorization server end to end.
+up an authorization server and resource server end to end.
 
 Access tokens can be issued as self-contained JWTs (RFC 9068 — the
 default, `server.JWTAccessTokens`/`resource.JWTAccessTokens`) or as

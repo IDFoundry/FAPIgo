@@ -12,7 +12,7 @@ import (
 // opaque access token. TokenHash is the SHA-256 digest of the raw
 // token value, never the value itself — the same digest-only
 // discipline as NewAuthorizationCode.CodeHash/NewRefreshToken.TokenHash.
-// Only relevant to an opaque AccessTokenIssuer/AccessTokenVerifier
+// Only relevant to an opaque AccessTokenIssuer/AccessTokenResolver
 // (see server.OpaqueAccessTokens/resource.OpaqueAccessTokens) — a
 // deployment issuing JWT access tokens never calls this.
 type NewAccessToken struct {
@@ -49,7 +49,7 @@ type LookedUpAccessToken struct {
 // AccessTokenStore persists opaque access tokens — the storage-backed
 // alternative to a self-contained JWT (see server.JWTAccessTokens vs.
 // server.OpaqueAccessTokens, and resource's matching pair). Only
-// relevant when an opaque AccessTokenIssuer/AccessTokenVerifier is in
+// relevant when an opaque AccessTokenIssuer/AccessTokenResolver is in
 // use; a deployment issuing JWT access tokens never needs this
 // dependency at all.
 //

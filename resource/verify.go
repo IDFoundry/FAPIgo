@@ -2,6 +2,7 @@ package resource
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"net/url"
 	"strings"
@@ -35,7 +36,7 @@ type AuthorizationContext struct {
 	ExpiresAt time.Time
 
 	// Key is the access token's revocation-lookup identifier (see
-	// ValidatedAccessToken.Key), exposed for a caller's own audit
+	// ResolvedAccessToken.Key), exposed for a caller's own audit
 	// logging — it's already available at this point (see
 	// Dependencies.Revocation), so surfacing it costs nothing.
 	Key string
@@ -83,15 +84,12 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (Authorization
 		return AuthorizationContext{}, newError(ErrorInvalidToken, 401, "DPoP proof verification failed", err)
 	}
 
-	validated, err := v.deps.AccessTokens.VerifyAccessToken(ctx, VerifyAccessTokenRequest{
-		Raw: raw, Thumbprint: verifiedProof.Thumbprint.String(),
-		Now: now, MaxClockSkew: v.cfg.Limits.MaxClockSkew,
-	})
+	resolved, err := v.deps.AccessTokens.ResolveAccessToken(ctx, ResolveAccessTokenRequest{Raw: raw, Now: now})
 	if err != nil {
-		// A *Error carries its own exposure (see AccessTokenVerifier's
+		// A *Error carries its own exposure (see AccessTokenResolver's
 		// own doc comment on why that's the implementation's call, not
 		// this method's) — propagate it unchanged. A bare error (a
-		// third-party AccessTokenVerifier that didn't follow that
+		// third-party AccessTokenResolver that didn't follow that
 		// convention) falls back to the same invalid_token/401 every
 		// other rejection here defaults to.
 		if rerr, ok := err.(*Error); ok {
@@ -100,7 +98,21 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (Authorization
 		return AuthorizationContext{}, newError(ErrorInvalidToken, 401, "access token is invalid", err)
 	}
 
-	revoked, err := v.deps.Revocation.IsRevoked(ctx, validated.Key)
+	// DPoP sender-constraint binding and ordinary expiry are enforced
+	// here, once, uniformly for every AccessTokenResolver implementation
+	// — see that interface's own doc comment for why this moved out of
+	// each implementation. Constant-time: resolved.Thumbprint (from an
+	// implementation that never set it) is "", which always
+	// length-mismatches verifiedProof.Thumbprint.String() (always a
+	// non-empty jose.Thumbprint encoding) and so always fails closed.
+	if subtle.ConstantTimeCompare([]byte(resolved.Thumbprint), []byte(verifiedProof.Thumbprint.String())) != 1 {
+		return AuthorizationContext{}, newError(ErrorInvalidToken, 401, "access token is not bound to the presented DPoP key", nil)
+	}
+	if now.After(resolved.ExpiresAt.Add(v.cfg.Limits.MaxClockSkew)) {
+		return AuthorizationContext{}, newError(ErrorInvalidToken, 401, "access token has expired", nil)
+	}
+
+	revoked, err := v.deps.Revocation.IsRevoked(ctx, resolved.Key)
 	if err != nil {
 		return AuthorizationContext{}, newError(ErrorServerError, 500, "failed to check token revocation", err)
 	}
@@ -109,11 +121,11 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (Authorization
 	}
 
 	return AuthorizationContext{
-		Subject:   validated.Subject,
-		ClientID:  validated.ClientID,
-		Scopes:    validated.Scopes,
-		Claims:    validated.Claims,
-		ExpiresAt: validated.ExpiresAt,
-		Key:       validated.Key,
+		Subject:   resolved.Subject,
+		ClientID:  resolved.ClientID,
+		Scopes:    resolved.Scopes,
+		Claims:    resolved.Claims,
+		ExpiresAt: resolved.ExpiresAt,
+		Key:       resolved.Key,
 	}, nil
 }

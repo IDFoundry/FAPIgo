@@ -50,7 +50,7 @@ type Config struct {
 }
 
 // AccessTokenFormat selects which server.AccessTokenIssuer/
-// resource.AccessTokenVerifier pair newServerMux wires up — see
+// resource.AccessTokenResolver pair newServerMux wires up — see
 // main.go's -access-token-format flag. Deliberately not a Config field
 // (same reasoning as Config's own doc comment: this binary's
 // conformance testing shouldn't grow a JSON-file knob for something

@@ -75,20 +75,8 @@ type AccessTokenValidatePolicy struct {
 	// metadata, never from the token itself.
 	Algorithm fapi.SignatureAlgorithm
 
-	// ExpectedThumbprint, if non-nil, requires the token to be
-	// sender-constrained to this DPoP key: its cnf.jkt claim must equal
-	// *ExpectedThumbprint exactly, and a token with no cnf.jkt at all is
-	// rejected. Leave nil to skip sender-constraint checking (e.g. for a
-	// bearer-token deployment); that policy choice belongs above this
-	// package. A plain string (not jose.Thumbprint) because the only
-	// thing this package ever does with it is a string comparison — the
-	// caller already has whatever concrete thumbprint representation it
-	// used to compute the string.
-	ExpectedThumbprint *string
-
-	Now          time.Time
-	MaxLifetime  time.Duration
-	MaxClockSkew time.Duration
+	Now         time.Time
+	MaxLifetime time.Duration
 }
 
 // ValidatedAccessToken is what remains once an access token has been
@@ -106,6 +94,16 @@ type ValidatedAccessToken struct {
 	// hints only. A caller can use this to check token-specific
 	// revocation (RFC 6750 §3.1's invalid_token case).
 	JTI string
+
+	// JKT is the token's "cnf.jkt" claim, now trusted, or "" if the
+	// token carried no confirmation claim at all. This package no
+	// longer checks it against an expected value itself (see this
+	// struct's — and AccessTokenValidatePolicy's — history: that check
+	// moved to the resource package's Verify(), which enforces DPoP
+	// binding once, uniformly, regardless of access-token format).
+	// Callers that need sender-constraint enforcement must compare this
+	// themselves.
+	JKT string
 }
 
 // Validate checks t's signature against pub and its claims against
@@ -135,21 +133,20 @@ func (t AccessToken) Validate(pub crypto.PublicKey, policy AccessTokenValidatePo
 	if c.Audience != policy.ExpectedAudience {
 		return ValidatedAccessToken{}, ErrAudienceMismatch
 	}
-	if policy.Now.After(c.ExpiresAt.Add(policy.MaxClockSkew)) {
-		return ValidatedAccessToken{}, ErrExpired
-	}
+	// Ordinary "is it expired as of now" is deliberately NOT checked
+	// here — that's resource.Verify()'s job, applied once, uniformly,
+	// regardless of access-token format (see ValidatedAccessToken.JKT's
+	// doc comment for the same reasoning, applied to sender-constraint
+	// binding). MaxLifetime is a different, JWT-specific defense — an
+	// opaque token has no signed exp claim an attacker could forge, so
+	// it has no equivalent here.
 	if c.ExpiresAt.Sub(policy.Now) > policy.MaxLifetime {
 		return ValidatedAccessToken{}, ErrLifetimeExceeded
 	}
 
-	if policy.ExpectedThumbprint != nil {
-		if c.Confirmation == nil {
-			return ValidatedAccessToken{}, ErrMissingConfirmation
-		}
-		want := *policy.ExpectedThumbprint
-		if subtle.ConstantTimeCompare([]byte(c.Confirmation.JKT), []byte(want)) != 1 {
-			return ValidatedAccessToken{}, ErrConfirmationMismatch
-		}
+	var jkt string
+	if c.Confirmation != nil {
+		jkt = c.Confirmation.JKT
 	}
 
 	return ValidatedAccessToken{
@@ -159,6 +156,7 @@ func (t AccessToken) Validate(pub crypto.PublicKey, policy AccessTokenValidatePo
 		Parameters: c.Parameters,
 		ExpiresAt:  c.ExpiresAt,
 		JTI:        c.JTI,
+		JKT:        jkt,
 	}, nil
 }
 

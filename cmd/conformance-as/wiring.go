@@ -82,7 +82,7 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool) (*http.ServeM
 	identityClaims := newStaticIdentityClaims(resolved.DefaultSubject, server.SystemClock{})
 	clientRepo := memstore.NewClientRepository(resolved.Clients)
 
-	// Which server.AccessTokenIssuer/resource.AccessTokenVerifier pair
+	// Which server.AccessTokenIssuer/resource.AccessTokenResolver pair
 	// this run uses — see main.go's -access-token-format flag. Under
 	// AccessTokenFormatOpaque, both sides share one
 	// memstore.AccessTokenStore (issuance and verification against the
@@ -94,7 +94,7 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool) (*http.ServeM
 	// alongside the AS itself.
 	var (
 		srvAccessTokens      server.AccessTokenIssuer
-		resourceAccessTokens fapires.AccessTokenVerifier
+		resourceAccessTokens fapires.AccessTokenResolver
 	)
 	switch resolved.AccessTokenFormat {
 	case AccessTokenFormatJWT:

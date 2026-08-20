@@ -20,12 +20,8 @@ behaviour and negative-test expectations differ. See
 - `scripts/run-all.sh` — runs all four suites this repo has driver
   support for (AS baseline, AS message-signing, RP baseline, RP
   message-signing) against a locally running suite and prints one
-  combined summary. The two AS suites each run twice, under
-  `cmd/conformance-as -access-token-format=jwt` and `=opaque` (see
-  `server/docker-compose.yml`), so both
-  `server.AccessTokenIssuer`/`resource.AccessTokenVerifier`
-  implementations get exercised, not just the default. See the
-  script's own header comment for prerequisites and env vars.
+  combined summary. See the script's own header comment for
+  prerequisites and env vars.
 - `resource/` — resource-server verification test vectors (DPoP proof
   validation, access-token binding checks) used outside the OIDF suite.
   The suite doesn't run its own dedicated resource-server conformance
@@ -34,3 +30,23 @@ behaviour and negative-test expectations differ. See
   issued — `cmd/conformance-as` serves a stand-in one
   (`resource.go`, backed by the `resource` package) purely to satisfy
   that AS-plan requirement, not as resource-role certification.
+
+## Access-token format coverage
+
+`cmd/conformance-as` supports both of `server`'s access-token formats
+via a runtime `-access-token-format=jwt|opaque` flag (see
+`server/docker-compose.yml`'s `ACCESS_TOKEN_FORMAT` env var for a
+manual one-off run against either), but `scripts/run-all.sh` only runs
+the live suite under the default, `jwt`. An earlier version of this
+script looped the AS suites over both formats on every run; that was
+dropped once `resource.AccessTokenResolver`'s contract was tightened
+(see PR #62) so DPoP binding, ordinary expiry, and revocation are
+enforced exactly once, uniformly, in `resource.Verify()` itself rather
+than by each format's own implementation — the two formats can no
+longer disagree on those checks by construction, so duplicating the
+full live suite per format stopped pulling its weight against the
+doubled runtime. `OpaqueAccessTokens`' own format-specific behavior
+(issuance, storage lookup) is still covered continuously by
+`server`/`resource`'s own unit and integration tests and by
+`cmd/conformance-as`'s smoke test (`smoke_test.go`), which runs its
+authorization-code-flow case under both formats on every `go test`.

@@ -119,3 +119,10 @@ func TestDecodeErrorResponseRejectsMissingCode(t *testing.T) {
 		t.Fatalf("DecodeErrorResponse(no code) = %v, want ErrMissingErrorCode", err)
 	}
 }
+
+func TestDecodeErrorResponseRejectsOversized(t *testing.T) {
+	huge := []byte(`{"error":"` + strings.Repeat("a", maxResponseBytes+1) + `"}`)
+	if _, err := DecodeErrorResponse(huge); !errors.Is(err, ErrResponseTooLarge) {
+		t.Fatalf("DecodeErrorResponse(oversized) = %v, want ErrResponseTooLarge", err)
+	}
+}

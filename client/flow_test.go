@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -630,5 +631,55 @@ func TestBeginAuthorizationRejectsPARError(t *testing.T) {
 	}
 	if _, err := c.BeginAuthorization(context.Background(), client.BeginAuthorizationRequest{Scope: []string{"openid"}}); err == nil {
 		t.Fatalf("BeginAuthorization(PAR error) = nil error, want error")
+	}
+}
+
+// failingReader always fails, simulating an exhausted or broken entropy
+// source.
+type failingReader struct{}
+
+func (failingReader) Read([]byte) (int, error) {
+	return 0, fmt.Errorf("failingReader: entropy source unavailable")
+}
+
+// trackingHTTPClient records whether Do was ever called, without
+// performing any real I/O.
+type trackingHTTPClient struct{ called bool }
+
+func (c *trackingHTTPClient) Do(*http.Request) (*http.Response, error) {
+	c.called = true
+	return nil, fmt.Errorf("trackingHTTPClient: unexpectedly called")
+}
+
+// TestBeginAuthorizationPropagatesRandomFailure proves BeginAuthorization
+// fails closed — returning a client.Error rather than proceeding with
+// weak or partial randomness, or reaching the network at all — when
+// Dependencies.Random is broken. Asserting the HTTP client was never
+// called (rather than just that some error came back) is what makes
+// this pinned to the state/nonce/PKCE-verifier generation failing, not
+// some later, incidental failure.
+func TestBeginAuthorizationPropagatesRandomFailure(t *testing.T) {
+	deps := validDependencies(t)
+	deps.Random = failingReader{}
+	tracker := &trackingHTTPClient{}
+	deps.HTTP = tracker
+
+	c, err := client.New(validConfig(t), deps)
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	_, err = c.BeginAuthorization(context.Background(), client.BeginAuthorizationRequest{Scope: []string{"openid"}})
+	if err == nil {
+		t.Fatalf("BeginAuthorization(failing random) = nil error, want error")
+	}
+	cerr, ok := err.(*client.Error)
+	if !ok {
+		t.Fatalf("error type = %T, want *client.Error", err)
+	}
+	if cerr.Code() != client.ErrorInternal {
+		t.Fatalf("Code() = %q, want %q", cerr.Code(), client.ErrorInternal)
+	}
+	if tracker.called {
+		t.Fatalf("BeginAuthorization(failing random) made an HTTP call, want fail-closed before any I/O")
 	}
 }

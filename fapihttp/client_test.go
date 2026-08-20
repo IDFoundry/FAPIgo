@@ -114,6 +114,29 @@ func TestFetchRejectsContentTypeMismatch(t *testing.T) {
 	}
 }
 
+// TestFetchRejectsMissingContentType covers checkContentType's other
+// rejection branch — TestFetchRejectsContentTypeMismatch only ever
+// exercises a present-but-wrong Content-Type; a response with no
+// Content-Type header at all had no test of its own.
+func TestFetchRejectsMissingContentType(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{}`))
+	}))
+	defer ts.Close()
+
+	c, err := fapihttp.New(ts.Client(), validConfig())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = c.Fetch(context.Background(), fapihttp.FetchRequest{
+		URL:                 mustParseURL(t, ts.URL),
+		ExpectedContentType: "application/json",
+	})
+	if !errors.Is(err, fapihttp.ErrUnexpectedContentType) {
+		t.Fatalf("Fetch error = %v, want ErrUnexpectedContentType", err)
+	}
+}
+
 func TestFetchRejectsOversizedBody(t *testing.T) {
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -243,6 +266,39 @@ func TestFetchRejectsInsecureURLByDefault(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatalf("Fetch(plain http) = nil error, want error")
+	}
+}
+
+// TestFetchRejectsEmbeddedCredentials covers validateFetchURL's
+// embedded-credentials rejection, which had no test of its own. The
+// target server is real and reachable — if the check were bypassed,
+// the request would actually succeed and hit it — so this proves
+// validateFetchURL itself is what rejects the URL, not an incidental
+// network failure.
+func TestFetchRejectsEmbeddedCredentials(t *testing.T) {
+	var hit bool
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{}`))
+	}))
+	defer ts.Close()
+
+	c, err := fapihttp.New(ts.Client(), validConfig())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	u := mustParseURL(t, ts.URL)
+	u.User = url.UserPassword("user", "pass")
+	_, err = c.Fetch(context.Background(), fapihttp.FetchRequest{
+		URL:                 u,
+		ExpectedContentType: "application/json",
+	})
+	if err == nil {
+		t.Fatalf("Fetch(embedded credentials) = nil error, want error")
+	}
+	if hit {
+		t.Fatalf("Fetch(embedded credentials) reached the server, want rejected before any request")
 	}
 }
 

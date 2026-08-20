@@ -1,12 +1,14 @@
-# Getting started: standing up an authorization server
+# Getting started: standing up an authorization server and resource server
 
 This walks through wiring `server.Server` end to end — configuration,
 dependencies, client registration, and the one piece every integration
-has to build itself: the login/consent flow. `cmd/conformance-as` is a
-complete, working reference implementing every piece described here
-(plus the full HTTP surface — PAR, token, JWKS, metadata — which this
-guide doesn't reproduce); read it alongside this doc, or just study it
-directly and treat this as the map.
+has to build itself: the login/consent flow — then through wiring
+`resource.Verifier`, the separate role that actually verifies a
+presented access token against a protected API (step 7). `cmd/conformance-as`
+is a complete, working reference implementing every piece described
+here (plus the full HTTP surface — PAR, token, JWKS, metadata — which
+this guide doesn't reproduce); read it alongside this doc, or just
+study it directly and treat this as the map.
 
 ## 1. Dependencies: use the reference implementations to start
 
@@ -133,14 +135,12 @@ if every client uses inline `JWKS`.)
 verifies these tokens must be wired to match** — `resource.JWTAccessTokens`
 for `server.JWTAccessTokens`, `resource.OpaqueAccessTokens{Store: ...}`
 (the same `Store` instance, if co-located) for
-`server.OpaqueAccessTokens`. This guide doesn't cover the `resource`
-package's own setup (out of scope — this is the AS side only), but the
-two sides agreeing on format isn't checked for you: nothing stops you
-from constructing an AS that issues opaque tokens and a resource server
-that only knows how to verify JWTs, and every verification will fail
-with no compile-time signal that they were ever mismatched.
-`cmd/conformance-as/wiring.go` shows both sides wired consistently,
-switched on one runtime flag.
+`server.OpaqueAccessTokens` — see step 7. The two sides agreeing on
+format isn't checked for you: nothing stops you from constructing an AS
+that issues opaque tokens and a resource server that only knows how to
+verify JWTs, and every verification will fail with no compile-time
+signal that they were ever mismatched. `cmd/conformance-as/wiring.go`
+shows both sides wired consistently, switched on one runtime flag.
 
 ## 5. The one piece that's genuinely yours: the login flow
 
@@ -219,7 +219,130 @@ one. `cmd/conformance-as/token.go`, `par.go`, `metadata.go` and
 `jwks.go` are the corresponding handler implementations to read
 alongside `authorize.go`.
 
-## 7. Run it
+## 7. Wire the resource server: verifying access tokens
+
+`resource.Verifier` is FAPI 2.0's third role, a deliberately separate
+package from `server` rather than a mode of it — verifying a presented
+access token is inseparable from the HTTP request it arrived on, so
+`Verify(ctx, VerifyRequest{Method, URL, Authorization, DPoPProof})` is
+the only entry point, never a bare `VerifyJWT`. In a real deployment
+this is usually a wholly separate service protecting its own API;
+`cmd/conformance-as` only co-locates it in the same binary because the
+OIDF suite's AS test plan needs a protected-resource endpoint to call
+(`resource.go`) — read that file alongside this section either way.
+
+### Build a `Config`
+
+```go
+cfg := resource.Config{
+	Limits: resource.Limits{
+		MaxDPoPProofAge: time.Minute,     // how old a DPoP proof's iat may be
+		MaxClockSkew:    5 * time.Second, // tolerance either direction
+	},
+}
+```
+
+Both fields are required — `NewVerifier` rejects a zero `MaxDPoPProofAge`
+or negative `MaxClockSkew`, the same "no implicit default" discipline
+`server.Config` follows.
+
+### Wire `Dependencies`
+
+**The access-token format must match whatever the authorization server
+actually issues** — this is exactly the coupling step 4 flagged, and
+the reason this section exists at all. Pick the side matching your AS:
+
+```go
+// If the AS issues JWTAccessTokens: resolve its verification key(s),
+// typically by fetching its published JWKS live (or, for a co-located
+// deployment, an IssuerKeySource reading the key manager directly, the
+// way cmd/conformance-as's own selfIssuerKeySource does).
+issuerKeys, err := keys.NewJWKSIssuerKeySource(fetcher, asJWKSURL, 10*time.Minute)
+accessTokens, err := resource.NewJWTAccessTokens(
+	issuerKeys, asIssuer, asIssuer.String(), // audience: matches server/accesstoken.go's own self-addressed aud claim
+	fapi.ES256, 5*time.Minute, // must be >= the AS's own Limits.AccessTokenLifetime
+)
+
+// If the AS issues OpaqueAccessTokens instead: the *same*
+// storage.AccessTokenStore instance the AS writes to — only realistic
+// if this resource server shares that storage backend with the AS
+// (co-located, or a real shared database).
+// accessTokens, err := resource.NewOpaqueAccessTokens(sameAccessTokenStore)
+```
+
+`asIssuer`/`asJWKSURL` are the authorization server's own issuer/JWKS
+`fapi.URL` values — the same `issuer`/`Endpoints.JWKS` step 2 built, if
+this resource server is co-located with that AS; otherwise wherever
+that AS's own metadata publishes them.
+
+`Dependencies.Revocation` needs the same care as the access-token
+format: if the AS revokes a token on detected authorization-code reuse
+(RFC 6749 §4.1.2 — step 4's `Revocation` field), this resource server
+must see that revocation too, or it will keep accepting a token the AS
+has already disowned. Wire it to the *same* `RevocationSink`/
+`RevocationChecker` pair the AS uses — `memstore.NewRevocationStore()`
+already implements both, if co-located — or `resource.NoRevocation{}`
+to explicitly decline (matching `server.NoRevocation{}`'s own
+reasoning for why declining must be a conscious choice).
+
+```go
+deps := resource.Dependencies{
+	AccessTokens: accessTokens,
+	Replay:       memstore.NewReplayStore(), // DPoP proof jti reuse — its own instance; may differ from the AS's
+	Revocation:   revocationStore,           // the same instance the AS writes to
+	Clock:        resource.SystemClock{},
+}
+
+verifier, err := resource.NewVerifier(cfg, deps)
+```
+
+### Verify a request
+
+```go
+authCtx, err := verifier.Verify(ctx, resource.VerifyRequest{
+	Method:        r.Method,
+	URL:           protectedResourceURL, // this endpoint's own fixed external URL — see below, never r.URL
+	Authorization: r.Header.Get("Authorization"),
+	DPoPProof:     dpopProof,             // see below — not simply r.Header.Get("DPoP")
+})
+```
+
+On success, `authCtx.Subject`/`ClientID`/`Scopes`/`Claims` are what your
+API handler needs to authorize the call. On failure, `err` is always a
+`*resource.Error` — `Code()`/`PublicDescription()`/`HTTPStatus()` are
+safe to put directly into an RFC 6750 `WWW-Authenticate` challenge and
+response body; `Unwrap()` is for logs only, never the response:
+
+```go
+func writeResourceError(w http.ResponseWriter, err error) {
+	resErr, ok := err.(*resource.Error)
+	if !ok {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("WWW-Authenticate", `DPoP error="`+string(resErr.Code())+`"`)
+	http.Error(w, resErr.PublicDescription(), resErr.HTTPStatus())
+}
+```
+
+Two easy-to-miss details `cmd/conformance-as/resource.go` gets right
+that are worth copying: `URL` must be this endpoint's own fixed,
+externally-visible URL (it's the DPoP proof's expected `htu`) — never
+inferred from the incoming request's `Host` header, the same reasoning
+`server.Endpoints` is never inferred from a request either. And
+`DPoPProof` expects exactly one string, but `http.Header.Get("DPoP")`
+silently returns only the first of several duplicate headers — a
+smuggled second header would slip past unnoticed. Check
+`r.Header.Values("DPoP")` yourself and reject the request before ever
+calling `Verify` if there's more than one, exactly like that file's own
+`singleDPoPHeader` helper.
+
+That's the whole surface: `resource.Verifier` has no other public entry
+point. Everything above `Verify` — routing, `WWW-Authenticate` framing,
+what the protected API actually returns — is your own handler, same as
+step 5's login flow was yours to build for `server`.
+
+## 8. Run it
 
 `cmd/conformance-as` is the complete version of all of the above,
 runnable directly:

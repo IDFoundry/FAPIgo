@@ -32,7 +32,7 @@ func writeRawOAuthError(w http.ResponseWriter, status int, code, description str
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	w.Write(body)
+	_, _ = w.Write(body)
 }
 
 // writeLocalHTMLError renders err as a browser-facing HTML page, never a

@@ -19,13 +19,6 @@ var accountHintDef = extension.Definition[accountHint]{
 	MaxBytes:       256,
 }
 
-var tagsDef = extension.Definition[[]string]{
-	Name:           "x_tags",
-	Cardinality:    extension.Multiple,
-	AllowedSources: extension.SourcePlainParameter,
-	MaxBytes:       256,
-}
-
 func TestSetGetRoundTrip(t *testing.T) {
 	var values extension.Values
 	if err := extension.Set(&values, accountHintDef, accountHint{AccountID: "acc-1"}); err != nil {

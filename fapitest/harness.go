@@ -266,7 +266,7 @@ func (h *Harness) RunAuthorizationCodeFlowWithRequest(ctx context.Context, req c
 	if err != nil {
 		return client.TokenSet{}, fmt.Errorf("fapitest: GET authorize: %w", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusFound {
 		return client.TokenSet{}, fmt.Errorf("fapitest: authorize endpoint returned status %d, want %d", res.StatusCode, http.StatusFound)
 	}

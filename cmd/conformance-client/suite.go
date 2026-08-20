@@ -211,7 +211,7 @@ func do(httpClient *http.Client, req *http.Request) (body []byte, status int, er
 	if err != nil {
 		return nil, 0, err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	body, err = io.ReadAll(res.Body)
 	if err != nil {
 		return nil, 0, fmt.Errorf("read response body: %w", err)

@@ -261,7 +261,7 @@ func marshalIndentNoEscape(v any) ([]byte, error) {
 // sends a signed request object at all). See generatePS256Key's doc
 // comment for why this dedicated client is unavoidable.
 func patchConformanceASConfig(path string, p profile, pub1, pub2, pubRS256 jwks) (clientIDs [2]string, rs256ClientID string, err error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path is this dev-only script's own fixed CLI argument, not untrusted input
 	if err != nil {
 		return clientIDs, "", err
 	}
@@ -341,7 +341,7 @@ func patchConformanceASConfig(path string, p profile, pub1, pub2, pubRS256 jwks)
 		return clientIDs, "", err
 	}
 	out = append(out, '\n')
-	return clientIDs, rs256ClientID, os.WriteFile(path, out, 0o644)
+	return clientIDs, rs256ClientID, os.WriteFile(path, out, 0o644) // #nosec G306 -- this AS's own config.json carries only public keys (oidf-config/README.md), meant to be world-readable
 }
 
 // planConfig mirrors the OIDF conformance suite's own plan config
@@ -463,5 +463,9 @@ func writePlanConfig(path string, p profile, clientIDs [2]string, rs256ClientID 
 		return err
 	}
 	out = append(out, '\n')
-	return os.WriteFile(path, out, 0o644)
+	// Unlike patchConformanceASConfig's config.json, this plan.json
+	// embeds the suite-side test clients' own private keys (priv1/
+	// priv2/privRS256 above) - throwaway/ephemeral, but still real key
+	// material, so it's written owner-only rather than world-readable.
+	return os.WriteFile(path, out, 0o600)
 }

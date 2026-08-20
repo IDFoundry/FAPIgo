@@ -1,0 +1,44 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - gosec
+    - bodyclose
+  settings:
+    staticcheck:
+      # SA1019 currently flags crypto/ecdsa's Go 1.26 deprecation of
+      # raw X/Y/D field access (internal/jose and a couple of
+      # conformance-only CLI tools) in favor of PublicKey.Bytes()/
+      # crypto/ecdh. Real, worth doing, but a JWK-encoding behavior
+      # change across the whole crypto stack belongs in its own
+      # careful PR with conformance-suite re-verification, not as a
+      # side effect of turning linting on. Tracked, not ignored --
+      # re-enable once that migration lands.
+      checks:
+        - all
+        - "-SA1019"
+  exclusions:
+    generated: strict
+    rules:
+      # Not real findings: gosec's G101 flags test-fixture strings that
+      # merely look like credentials, and G403 flags RSA keys tests
+      # deliberately generate small to exercise the "reject weak keys"
+      # path; errcheck flags every unchecked httptest.Server response
+      # Write/Close, which this codebase (like most Go code) doesn't
+      # treat as a real error path in tests; bodyclose can't always
+      # prove http.Client.Do leaves res nil on error, and flags the
+      # resulting "err != nil, so nothing to close" branch of a
+      # negative test as an unclosed body.
+      - path: _test\.go
+        linters:
+          - gosec
+          - errcheck
+          - bodyclose
+
+formatters:
+  enable:
+    - gofmt
+
+run:
+  timeout: 5m

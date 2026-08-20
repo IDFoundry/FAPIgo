@@ -89,7 +89,7 @@ func safeDialContext(base *net.Dialer, allowLoopback bool) func(context.Context,
 			}
 		}
 
-		var lastErr error = ErrSSRFBlocked
+		var lastErr = ErrSSRFBlocked
 		for _, ip := range candidates {
 			if disallowedIP(ip, allowLoopback) {
 				continue

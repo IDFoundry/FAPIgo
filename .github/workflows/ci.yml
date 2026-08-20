@@ -71,15 +71,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Manages its own Go toolchain internally — check-latest: true
-      # matters here specifically: this module has zero third-party
-      # dependencies (see go.mod), so every finding this can plausibly
-      # report is a standard-library CVE fixed in a newer Go patch
-      # release, not something a code change here can fix. Always
-      # scanning under the latest available patch is what keeps this
-      # signal meaningful instead of permanently red for a fix that
-      # already shipped upstream.
+      # Manages its own Go toolchain internally and defaults to the
+      # latest available Go — which matters here specifically: this
+      # module has zero third-party dependencies (see go.mod), so
+      # every finding this can plausibly report is a standard-library
+      # CVE fixed in a newer Go patch release, not something a code
+      # change here can fix. Always scanning under the latest patch is
+      # what keeps this signal meaningful instead of permanently red
+      # for a fix that already shipped upstream — deliberately not
+      # pinned to go.mod's own minimum via go-version-file, which
+      # would work against that.
       - uses: golang/govulncheck-action@v1
-        with:
-          go-version-file: go.mod
-          check-latest: true

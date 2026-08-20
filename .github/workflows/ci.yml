@@ -90,7 +90,7 @@ jobs:
       # plus golangci-lint's own "standard" set (errcheck, staticcheck,
       # govet, ineffassign, unused, gosimple). gofmt is enforced
       # separately above, not duplicated here.
-      - uses: golangci/golangci-lint-action@v9
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.12
 
@@ -109,4 +109,4 @@ jobs:
       # for a fix that already shipped upstream — deliberately not
       # pinned to go.mod's own minimum via go-version-file, which
       # would work against that.
-      - uses: golang/govulncheck-action@v1
+      - uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0

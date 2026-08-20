@@ -262,3 +262,36 @@ func (s *refSessionStore) Consume(_ context.Context, c storage.SessionConsumptio
 func TestSessionStoreContractAgainstReference(t *testing.T) {
 	storage.TestSessionStoreContract(t, func() storage.SessionStore { return newRefSessionStore() })
 }
+
+type refAccessTokenStore struct {
+	mu     sync.Mutex
+	tokens map[[32]byte]storage.NewAccessToken
+}
+
+func newRefAccessTokenStore() *refAccessTokenStore {
+	return &refAccessTokenStore{tokens: make(map[[32]byte]storage.NewAccessToken)}
+}
+
+func (s *refAccessTokenStore) CreateAccessToken(_ context.Context, tok storage.NewAccessToken) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tokens[tok.TokenHash] = tok
+	return nil
+}
+
+func (s *refAccessTokenStore) LookupAccessToken(_ context.Context, lookup storage.AccessTokenLookup) (storage.LookedUpAccessToken, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tok, ok := s.tokens[lookup.TokenHash]
+	if !ok {
+		return storage.LookedUpAccessToken{}, fmt.Errorf("unknown token")
+	}
+	return storage.LookedUpAccessToken{
+		ClientID: tok.ClientID, Subject: tok.Subject, Scope: tok.Scope,
+		Thumbprint: tok.Thumbprint, Claims: tok.Claims, ExpiresAt: tok.ExpiresAt,
+	}, nil
+}
+
+func TestAccessTokenStoreContractAgainstReference(t *testing.T) {
+	storage.TestAccessTokenStoreContract(t, func() storage.AccessTokenStore { return newRefAccessTokenStore() })
+}

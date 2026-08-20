@@ -1380,3 +1380,28 @@ func TestErrorAccessors(t *testing.T) {
 		t.Fatalf("Unwrap() = nil, want the underlying client-assertion parse error")
 	}
 }
+
+// TestErrorAccessorsWithoutCause covers Error()'s other format branch —
+// TestErrorAccessors above only ever exercises the with-cause branch.
+// A request with no client_assertion at all is the simplest trigger
+// for a server.Error that carries no underlying cause.
+func TestErrorAccessorsWithoutCause(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+
+	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: []server.FormParameter{formParam("response_type", "code")}},
+	})
+	if err == nil {
+		t.Fatalf("PushAuthorizationRequest(no client_assertion) = nil error, want error")
+	}
+	serr, ok := err.(*server.Error)
+	if !ok {
+		t.Fatalf("error type = %T, want *server.Error", err)
+	}
+	if serr.Unwrap() != nil {
+		t.Fatalf("Unwrap() = %v, want nil", serr.Unwrap())
+	}
+	if serr.Error() != "server: invalid_client: client authentication is required" {
+		t.Fatalf("Error() = %q, want %q", serr.Error(), "server: invalid_client: client authentication is required")
+	}
+}

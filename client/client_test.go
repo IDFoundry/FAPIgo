@@ -292,3 +292,29 @@ func TestErrorAccessors(t *testing.T) {
 		t.Fatalf("Unwrap() = nil, want the underlying query-parse error")
 	}
 }
+
+// TestErrorAccessorsWithoutCause covers Error()'s other format branch —
+// TestErrorAccessors above only ever exercises the with-cause branch.
+// A callback missing "state" entirely is the simplest trigger for a
+// client.Error that carries no underlying cause.
+func TestErrorAccessorsWithoutCause(t *testing.T) {
+	c, err := client.New(validConfig(t), validDependencies(t))
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+
+	_, err = c.CompleteAuthorization(context.Background(), client.AuthorizationCallback{RawQuery: "code=abc"})
+	if err == nil {
+		t.Fatalf("CompleteAuthorization(missing state) = nil error, want error")
+	}
+	cerr, ok := err.(*client.Error)
+	if !ok {
+		t.Fatalf("error type = %T, want *client.Error", err)
+	}
+	if cerr.Unwrap() != nil {
+		t.Fatalf("Unwrap() = %v, want nil", cerr.Unwrap())
+	}
+	if cerr.Error() != "client: invalid_request: callback is missing state" {
+		t.Fatalf("Error() = %q, want %q", cerr.Error(), "client: invalid_request: callback is missing state")
+	}
+}

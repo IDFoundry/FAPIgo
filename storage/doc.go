@@ -12,13 +12,16 @@
 // refresh-token store — CreateAuthorizationCode/CreateRefreshToken each
 // persist one, RedeemAuthorizationCode/RedeemRefreshToken each
 // atomically retrieve and consume one (refresh tokens rotate: every
-// redemption is paired with a new CreateRefreshToken call) — and
-// replay.go defines a single-use ReplayStore keyed by a namespaced
-// identifier (e.g. "client:jarm", "server:dpop") so that different roles
-// and subsystems can never collide on the same use-once token. The
-// client's own session store will follow the same per-role-type pattern
-// once the endpoint that needs it exists. No interface here exposes
-// GetX/UpdateX/DeleteX-style CRUD —
+// redemption is paired with a new CreateRefreshToken call) — access_token.go
+// defines AccessTokenStore, the storage-backed alternative to a
+// self-contained JWT access token (CreateAccessToken/LookupAccessToken
+// only — existence and expiry, never revocation, see that file's own
+// doc comment for why) — and replay.go defines a single-use ReplayStore
+// keyed by a namespaced identifier (e.g. "client:jarm", "server:dpop")
+// so that different roles and subsystems can never collide on the same
+// use-once token. The client's own session store will follow the same
+// per-role-type pattern once the endpoint that needs it exists. No
+// interface here exposes GetX/UpdateX/DeleteX-style CRUD —
 // every method is a named security operation (Create, Consume, Redeem,
 // UseOnce), and redemption-style operations verify and consume state
 // atomically in one call rather than as separate check-then-act steps.

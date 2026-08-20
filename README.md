@@ -1,5 +1,6 @@
 # FAPIgo
 
+[![Release](https://img.shields.io/github/v/release/IDFoundry/FAPIgo)](https://github.com/IDFoundry/FAPIgo/releases/latest)
 [![CI](https://github.com/IDFoundry/FAPIgo/actions/workflows/ci.yml/badge.svg)](https://github.com/IDFoundry/FAPIgo/actions/workflows/ci.yml)
 [![FAPI2 Conformance](https://github.com/IDFoundry/FAPIgo/actions/workflows/conformance.yml/badge.svg)](https://github.com/IDFoundry/FAPIgo/actions/workflows/conformance.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)

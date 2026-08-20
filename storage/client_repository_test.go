@@ -65,6 +65,10 @@ func TestNewRegisteredClientRejectsInvalid(t *testing.T) {
 			ID: "client-123", RedirectURIs: []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
 			ClientAssertionAlgorithm: fapi.ES256, AllowedScopes: []string{""},
 		},
+		{
+			ID: "client-123", RedirectURIs: []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+			ClientAssertionAlgorithm: fapi.ES256, RequestObjectAlgorithm: fapi.SignatureAlgorithm(99),
+		},
 	}
 	for i, c := range cases {
 		if _, err := NewRegisteredClient(c); err == nil {

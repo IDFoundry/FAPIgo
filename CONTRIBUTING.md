@@ -31,6 +31,23 @@ the fact.
   [GETTING_STARTED.md](GETTING_STARTED.md). "It passes the Go test
   suite" isn't the same claim as "it's still FAPI 2.0 conformant."
 
+## Commit messages
+
+This repo merges PRs as regular merge commits, not squash — every
+commit lands in history exactly as written, so **every commit message,
+not just the PR title,** must follow
+[Conventional Commits](https://www.conventionalcommits.org/):
+`fix: …`, `feat: …`, `feat!: …`/`fix!: …` for a breaking change, or
+another standard type (`docs:`, `chore:`, `test:`, `refactor:`, `ci:`)
+for anything that shouldn't bump the version at all.
+[release-please](https://github.com/googleapis/release-please) reads
+these to compute the next version and `CHANGELOG.md` entry
+automatically — see `release-please-config.json` and
+`.github/workflows/release-please.yml`. FAPIgo is pre-1.0
+(`bump-minor-pre-major`), so a breaking `feat!:`/`fix!:` bumps
+`0.x.0`, not straight to `1.0.0` — that jump is a deliberate, manual
+decision, not something a commit message alone should trigger.
+
 ## Before you open a PR
 
 - `gofmt -l .`, `go vet ./...`, `go build ./...`, `go test -race ./...`,
@@ -49,3 +66,13 @@ the fact.
 
 Don't open a public issue or PR for a vulnerability — see
 [SECURITY.md](SECURITY.md) for private disclosure.
+
+## Maintainers: the release-please token
+
+`.github/workflows/release-please.yml` needs a `RELEASE_PLEASE_TOKEN`
+repo secret — a personal access token, not the default `GITHUB_TOKEN`,
+so the release PR it opens actually triggers `ci.yml` on itself (see
+that workflow's own comment for why). A fine-grained PAT scoped to
+this repo only, with **Contents: Read and write** and **Pull requests:
+Read and write**, is enough. Regenerate and update the secret if it
+expires or is revoked; nothing else in this repo depends on it.

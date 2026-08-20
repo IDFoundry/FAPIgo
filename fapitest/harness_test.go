@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/idfoundry/fapigo/client"
 	"github.com/idfoundry/fapigo/fapitest"
@@ -75,6 +76,41 @@ func TestAuthorizationCodeFlowDeniedInteraction(t *testing.T) {
 	_, err := h.RunAuthorizationCodeFlowWithCallback(context.Background(), "state=does-not-exist&code=bogus")
 	if err == nil {
 		t.Fatalf("RunAuthorizationCodeFlowWithCallback(unknown state) = nil error, want error")
+	}
+}
+
+// TestAuthorizationCodeFlowAccessTokenExpires proves Harness.Clock —
+// shared across the harness's client, server and resource dependencies
+// — genuinely drives token-expiry enforcement end to end, not just that
+// each role's static configuration is wired up. Clock.Advance itself
+// had no test of its own anywhere in this package.
+func TestAuthorizationCodeFlowAccessTokenExpires(t *testing.T) {
+	h := fapitest.New(t, fapitest.Config{Profile: server.ProfileFAPISecurity})
+	ctx := context.Background()
+
+	tokens, err := h.RunAuthorizationCodeFlow(ctx, []string{"openid", "accounts"})
+	if err != nil {
+		t.Fatalf("RunAuthorizationCodeFlow: %v", err)
+	}
+	verifyAccessToken(t, h, tokens)
+
+	h.Clock.Advance(6 * time.Minute) // past the harness's 5-minute access token lifetime
+
+	target, err := url.Parse("https://rs.fapitest.internal/accounts")
+	if err != nil {
+		t.Fatalf("parse target url: %v", err)
+	}
+	proof, err := h.NewResourceRequestDPoPProof(ctx, "GET", target, tokens.AccessToken.Reveal())
+	if err != nil {
+		t.Fatalf("NewResourceRequestDPoPProof: %v", err)
+	}
+	if _, err := h.Resource.Verify(ctx, resource.VerifyRequest{
+		Method:        "GET",
+		URL:           target,
+		Authorization: "DPoP " + tokens.AccessToken.Reveal(),
+		DPoPProof:     proof,
+	}); err == nil {
+		t.Fatalf("resource.Verify(expired access token) = nil error, want error")
 	}
 }
 

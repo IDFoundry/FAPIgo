@@ -481,6 +481,72 @@ func TestCompleteAuthorizationMessageSigningSucceedsWithRequireAuthorizationResp
 	}
 }
 
+// keys.JWKSIssuerKeySource's rate-limited unknown-kid path can return
+// zero keys with no error (see keys/jwksissuer.go's
+// ResolveIssuerKeys). Unlike the ID-token path (exchange_code.go),
+// which rejects this explicitly, the JARM path used to have no
+// equivalent guard: the verification loop over zero candidates never
+// ran, verifyErr stayed nil, and parseCallbackParams returned a nil
+// Parameters map — fail-closed only because a distant downstream check
+// (HandleAuthorizationResponse reading "state" from nil params) happened
+// to reject it as "callback is missing state". This test pins the fix:
+// an explicit, correctly-typed ErrorInvalidResponse naming the actual
+// problem, not a misleading error about a missing parameter.
+func TestHandleAuthorizationResponseRejectsEmptyIssuerKeySetForJARM(t *testing.T) {
+	as := newFakeAS(t, testIssuer, true)
+	ts := httptest.NewServer(as.handler())
+	t.Cleanup(ts.Close)
+
+	cfg := validConfig(t)
+	cfg.Profile = client.ProfileFAPISecurityWithMessageSigning
+	cfg.Algorithms.RequestObject = fapi.ES256
+	cfg.Algorithms.JARM = fapi.ES256
+	cfg.Limits.RequestObjectLifetime = time.Minute
+	cfg.Limits.MaxJARMResponseLifetime = time.Minute
+	parURL, err := fapi.ParseEndpointURL(ts.URL+"/par", fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseEndpointURL(par): %v", err)
+	}
+	tokenURL, err := fapi.ParseEndpointURL(ts.URL+"/token", fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseEndpointURL(token): %v", err)
+	}
+	cfg.Endpoints.PushedAuthorizationRequest = parURL
+	cfg.Endpoints.Token = tokenURL
+
+	deps := validDependencies(t)
+	deps.HTTP = ts.Client()
+	deps.IssuerKeys = emptyIssuerKeySource{}
+
+	c, err := client.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	ctx := context.Background()
+
+	session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}})
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+
+	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-empty-keyset", "")
+	_, err = c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: rawQuery})
+	if err == nil {
+		t.Fatalf("HandleAuthorizationResponse(empty issuer keyset) = nil error, want error")
+	}
+	cerr, ok := err.(*client.Error)
+	if !ok {
+		t.Fatalf("error type = %T, want *client.Error", err)
+	}
+	if cerr.Code() != client.ErrorInvalidResponse {
+		t.Fatalf("Code() = %q, want %q", cerr.Code(), client.ErrorInvalidResponse)
+	}
+	const want = "no matching issuer key for authorization response"
+	if cerr.PublicDescription() != want {
+		t.Fatalf("PublicDescription() = %q, want %q", cerr.PublicDescription(), want)
+	}
+}
+
 func TestCompleteAuthorizationDenied(t *testing.T) {
 	c, as, _ := newTestClient(t, false)
 	ctx := context.Background()

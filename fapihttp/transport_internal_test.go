@@ -51,6 +51,19 @@ func TestDisallowedIP(t *testing.T) {
 		{"Teredo -> link-local (cloud metadata)", "2001:0:0:0:0:0:5601:5601", false, true},
 		{"IPv4-compatible -> link-local (cloud metadata)", "::a9fe:a9fe", false, true},
 		{"ordinary global-unicast IPv6, unaffected", "2606:4700:4700::1111", false, false},
+
+		// ISATAP (RFC 5214): identified by the 0000:5efe/0200:5efe
+		// interface-ID marker, not by prefix.
+		{"ISATAP 0000:5efe -> private", "2001:db8::5efe:c0a8:101", false, true},
+		{"ISATAP already blocked via link-local, unaffected by the marker", "fe80::5efe:c0a8:101", false, true},
+		{"ISATAP 0200:5efe -> loopback", "2001:db8::200:5efe:7f00:1", false, true},
+		{"5efe present but not at the ISATAP interface-ID position, unaffected", "2001:db8:aaaa:bbbb:cccc:dddd:5efe:c0a8", false, false},
+
+		// Non-routable IPv4 ranges the plain checks don't cover.
+		{"0.0.0.0/8 non-zero (\"this network\")", "0.1.2.3", false, true},
+		{"TEST-NET-1 documentation", "192.0.2.1", false, true},
+		{"TEST-NET-2 documentation", "198.51.100.1", false, true},
+		{"TEST-NET-3 documentation", "203.0.113.1", false, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -86,6 +99,9 @@ func TestEmbeddedIPv4(t *testing.T) {
 		{"loopback low bits", "::1", "0.0.0.1"},
 		{"unspecified low bits", "::", "0.0.0.0"},
 		{"ordinary global-unicast IPv6", "2606:4700:4700::1111", ""},
+		{"ISATAP 0000:5efe", "2001:db8::5efe:c0a8:101", "192.168.1.1"},
+		{"ISATAP 0200:5efe", "2001:db8::200:5efe:7f00:1", "127.0.0.1"},
+		{"5efe present but not at the ISATAP interface-ID position", "2001:db8:aaaa:bbbb:cccc:dddd:5efe:c0a8", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

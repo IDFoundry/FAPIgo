@@ -107,15 +107,19 @@ func safeDialContext(base *net.Dialer, allowLoopback bool) func(context.Context,
 // extraBlockedCIDRs are address ranges net.IP's own IsPrivate/
 // IsLinkLocal*/IsUnspecified/IsMulticast checks don't cover, but which
 // are still not appropriate targets for a server-initiated fetch:
-// carrier-grade NAT, IETF protocol assignments, benchmarking space, and
-// the reserved/broadcast range. Parsed once at init from literals that
-// cannot fail to parse.
+// carrier-grade NAT, IETF protocol assignments, benchmarking space, the
+// reserved/broadcast range, "this network", and documentation ranges.
+// Parsed once at init from literals that cannot fail to parse.
 var extraBlockedCIDRs = func() []*net.IPNet {
 	cidrs := []string{
-		"100.64.0.0/10", // RFC 6598 CGNAT
-		"192.0.0.0/24",  // RFC 6890 IETF protocol assignments
-		"198.18.0.0/15", // RFC 2544 benchmarking
-		"240.0.0.0/4",   // RFC 1112 reserved (includes 255.255.255.255)
+		"0.0.0.0/8",       // RFC 1122 "this network" (IsUnspecified only catches the exact 0.0.0.0)
+		"100.64.0.0/10",   // RFC 6598 CGNAT
+		"192.0.0.0/24",    // RFC 6890 IETF protocol assignments
+		"192.0.2.0/24",    // RFC 5737 TEST-NET-1 documentation
+		"198.18.0.0/15",   // RFC 2544 benchmarking
+		"198.51.100.0/24", // RFC 5737 TEST-NET-2 documentation
+		"203.0.113.0/24",  // RFC 5737 TEST-NET-3 documentation
+		"240.0.0.0/4",     // RFC 1112 reserved (includes 255.255.255.255)
 	}
 	out := make([]*net.IPNet, 0, len(cidrs))
 	for _, c := range cidrs {
@@ -164,14 +168,15 @@ func disallowedIP(ip net.IP, allowLoopback bool) bool {
 
 // embeddedIPv4 returns the IPv4 address carried inside an IPv6
 // transition address (NAT64 64:ff9b::/96, 6to4 2002::/16, Teredo
-// 2001:0000::/32, or the deprecated IPv4-compatible ::a.b.c.d), or nil
-// if ip is not one of those forms. These formats tunnel an IPv4
-// destination inside a global-unicast-looking IPv6 address, so on a
-// host with NAT64/6to4/Teredo routing they can reach an internal IPv4
-// target that the plain IPv6 checks (IsPrivate/IsLinkLocal*/...) never
-// flag. The result is only ever used to add a block, so an imperfect
-// decode is fail-safe: the worst case is over-blocking an address that
-// happens to decode to a private-looking v4.
+// 2001:0000::/32, ISATAP's 0000:5efe/0200:5efe interface identifier, or
+// the deprecated IPv4-compatible ::a.b.c.d), or nil if ip is not one of
+// those forms. These formats tunnel an IPv4 destination inside a
+// global-unicast-looking IPv6 address, so on a host with the matching
+// tunnel routing configured they can reach an internal IPv4 target that
+// the plain IPv6 checks (IsPrivate/IsLinkLocal*/...) never flag. The
+// result is only ever used to add a block, so an imperfect decode is
+// fail-safe: the worst case is over-blocking an address that happens to
+// decode to a private-looking v4.
 func embeddedIPv4(ip net.IP) net.IP {
 	b := ip.To16()
 	if b == nil || ip.To4() != nil { // already IPv4 / IPv4-mapped, handled by the caller
@@ -185,6 +190,13 @@ func embeddedIPv4(ip net.IP) net.IP {
 		return net.IPv4(b[2], b[3], b[4], b[5])
 	case b[0] == 0x20 && b[1] == 0x01 && b[2] == 0x00 && b[3] == 0x00: // Teredo 2001:0000::/32 — client v4 in bytes 12-15, bit-inverted (RFC 4380)
 		return net.IPv4(b[12]^0xff, b[13]^0xff, b[14]^0xff, b[15]^0xff)
+	case (b[8] == 0x00 || b[8] == 0x02) && b[9] == 0x00 && b[10] == 0x5e && b[11] == 0xfe:
+		// ISATAP (RFC 5214) — identified by its 0000:5efe or 0200:5efe
+		// interface-identifier marker in bytes 8-11, not by prefix: an
+		// ISATAP address can carry any unicast prefix (bytes 0-7, the
+		// existing checks above already ran against it), only the
+		// interface ID is fixed. Embeds the tunneled v4 in bytes 12-15.
+		return net.IPv4(b[12], b[13], b[14], b[15])
 	case isZero(b[0:12]): // deprecated IPv4-compatible ::a.b.c.d (::/96); ::  and ::1 are already handled by the caller
 		return net.IPv4(b[12], b[13], b[14], b[15])
 	}

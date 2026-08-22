@@ -386,7 +386,7 @@ func TestBeginAuthorizationRejectsExpiredRequestURI(t *testing.T) {
 func TestBuildAuthorizationErrorRedirect(t *testing.T) {
 	h := newHarness(t, server.ProfileFAPISecurity, true)
 
-	dest, err := h.server.BuildAuthorizationErrorRedirect(context.Background(), testClientID, testRedirectURI, "xyz-state", "invalid_request_uri", "request_uri is invalid, expired, or already used")
+	dest, err := h.server.BuildAuthorizationErrorRedirect(context.Background(), testRegisteredClient(t), testRedirectURI, "xyz-state", "invalid_request_uri", "request_uri is invalid, expired, or already used")
 	if err != nil {
 		t.Fatalf("BuildAuthorizationErrorRedirect: %v", err)
 	}
@@ -415,12 +415,58 @@ func TestBuildAuthorizationErrorRedirect(t *testing.T) {
 func TestBuildAuthorizationErrorRedirectOmitsEmptyState(t *testing.T) {
 	h := newHarness(t, server.ProfileFAPISecurity, true)
 
-	dest, err := h.server.BuildAuthorizationErrorRedirect(context.Background(), testClientID, testRedirectURI, "", "invalid_request", "missing request_object")
+	dest, err := h.server.BuildAuthorizationErrorRedirect(context.Background(), testRegisteredClient(t), testRedirectURI, "", "invalid_request", "missing request_object")
 	if err != nil {
 		t.Fatalf("BuildAuthorizationErrorRedirect: %v", err)
 	}
 	destURL := dest.URL()
 	if _, present := destURL.Query()["state"]; present {
 		t.Fatalf("state parameter present in response, want omitted for empty state")
+	}
+}
+
+// TestBuildAuthorizationErrorRedirectRejectsUnregisteredRedirectURI
+// covers L-3: unlike BuildAuthorizationErrorRedirect's old contract
+// (trust redirectURI exactly as given, caller responsible for
+// pre-verifying it), the method now checks it against client itself and
+// must refuse to build a destination for anywhere not in client's own
+// registered set — otherwise this escape hatch would be an open
+// redirect.
+func TestBuildAuthorizationErrorRedirectRejectsUnregisteredRedirectURI(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+
+	_, err := h.server.BuildAuthorizationErrorRedirect(context.Background(), testRegisteredClient(t), "https://attacker.example/collect", "xyz-state", "invalid_request_uri", "request_uri is invalid, expired, or already used")
+	if err == nil {
+		t.Fatalf("BuildAuthorizationErrorRedirect(unregistered redirect_uri) = nil error, want error")
+	}
+}
+
+// TestBuildAuthorizationErrorRedirectAcceptsAnyOfMultipleRegisteredURIs
+// confirms a client with more than one registered redirect URI can use
+// any of them, not just the first — storage.RegisteredClient.HasRedirectURI
+// (which this method now calls) already scans the whole set.
+func TestBuildAuthorizationErrorRedirectAcceptsAnyOfMultipleRegisteredURIs(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+
+	const secondRedirectURI = "https://rp.example/other-callback"
+	client, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
+		ID: testClientID,
+		RedirectURIs: []fapi.RegisteredRedirectURI{
+			testRedirectURI, secondRedirectURI,
+		},
+		ClientAssertionAlgorithm: fapi.ES256,
+		AllowedScopes:            []string{"openid", "accounts", "offline_access"},
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+
+	dest, err := h.server.BuildAuthorizationErrorRedirect(context.Background(), client, secondRedirectURI, "xyz-state", "invalid_request_uri", "request_uri is invalid, expired, or already used")
+	if err != nil {
+		t.Fatalf("BuildAuthorizationErrorRedirect(second registered redirect_uri): %v", err)
+	}
+	destURL := dest.URL()
+	if destURL.Host != "rp.example" || destURL.Path != "/other-callback" {
+		t.Fatalf("destination = %q, want to start with %q", dest.String(), secondRedirectURI)
 	}
 }

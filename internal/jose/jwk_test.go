@@ -5,7 +5,9 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -166,6 +168,31 @@ func TestJWKRejectsSmallRSAKey(t *testing.T) {
 	}
 	if _, err := NewJWK(&small.PublicKey, fapi.PS256); err == nil {
 		t.Fatalf("NewJWK(1024-bit rsa key, PS256) = nil error, want error")
+	}
+}
+
+func TestParseJWKRejectsDegenerateRSAExponent(t *testing.T) {
+	rsaKey := generateRSA(t)
+	n := base64.RawURLEncoding.EncodeToString(rsaKey.PublicKey.N.Bytes())
+
+	cases := map[string]string{
+		"e = 1 (AQ)": "AQ",
+		"e = 2 (Ag)": "Ag",
+	}
+	for name, e := range cases {
+		t.Run(name, func(t *testing.T) {
+			raw := fmt.Sprintf(`{"kty":"RSA","n":%q,"e":%q}`, n, e)
+			if _, err := ParseJWK([]byte(raw), fapi.PS256); err == nil {
+				t.Fatalf("ParseJWK(e=%s) = nil error, want error", e)
+			}
+		})
+	}
+
+	// e = 65537 (0x10001), the typical RSA public exponent, must still
+	// be accepted.
+	raw := fmt.Sprintf(`{"kty":"RSA","n":%q,"e":"AQAB"}`, n)
+	if _, err := ParseJWK([]byte(raw), fapi.PS256); err != nil {
+		t.Fatalf("ParseJWK(e=65537): %v", err)
 	}
 }
 

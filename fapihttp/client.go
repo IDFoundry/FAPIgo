@@ -17,6 +17,16 @@ import (
 // *http.Client (ideally one built by NewClient) or a purpose-built
 // implementation, e.g. one that adds mTLS client certificates or routes
 // through a corporate proxy.
+//
+// Strongly prefer an *http.Client built by NewClient. Its transport
+// resolves each host itself, validates every candidate address before
+// dialing, and pins the dial to an address it already validated — the
+// only defense here that holds under DNS rebinding (see NewClient's doc
+// comment). Fetch's own IP check (see FetchRequest.URL) is best-effort
+// pre-dial validation, not a substitute: passing any other HTTPClient,
+// including http.DefaultClient, means an actual round trip is made with
+// whatever address that client's own transport resolves at connect
+// time, which Fetch cannot see or control.
 type HTTPClient interface {
 	Do(*http.Request) (*http.Response, error)
 }
@@ -52,8 +62,9 @@ type Config struct {
 // client's own AS-discovery path. See ARCHITECTURE.md design rule 6. It
 // is entirely unexported — construct one with New.
 type Client struct {
-	http HTTPClient
-	cfg  Config
+	http       HTTPClient
+	cfg        Config
+	resolveIPs func(ctx context.Context, host string) ([]net.IP, error)
 }
 
 // New validates cfg and returns a Client wrapping http.
@@ -70,7 +81,20 @@ func New(http HTTPClient, cfg Config) (*Client, error) {
 	if cfg.MaxRedirects < 0 {
 		return nil, fmt.Errorf("fapihttp: config: max redirects must not be negative")
 	}
-	return &Client{http: http, cfg: cfg}, nil
+	return &Client{http: http, cfg: cfg, resolveIPs: defaultResolveIPs}, nil
+}
+
+// defaultResolveIPs resolves host via the system resolver.
+func defaultResolveIPs(ctx context.Context, host string) ([]net.IP, error) {
+	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	ips := make([]net.IP, len(addrs))
+	for i, a := range addrs {
+		ips[i] = a.IP
+	}
+	return ips, nil
 }
 
 // FetchRequest describes one outbound GET fetch. Fetch exists for
@@ -82,8 +106,16 @@ type FetchRequest struct {
 	// already chosen it validly (e.g. a fapi.URL, or a JWKS URI resolved
 	// from a discovery document under the same rules) — Fetch re-checks
 	// scheme and host shape itself, on the initial request and on every
-	// redirect hop, as the authoritative check, not merely as a
-	// defense-in-depth backstop.
+	// redirect hop, and additionally makes a best-effort check that the
+	// host's resolved addresses aren't loopback/private/link-local/etc.
+	// That best-effort check is pre-dial validation only: it does not by
+	// itself defeat DNS rebinding, and it is not authoritative — full
+	// IP-level SSRF protection, including under DNS rebinding, is
+	// provided only by the transport NewClient builds (see HTTPClient
+	// and NewClient's doc comments). Passing any other HTTPClient —
+	// including http.DefaultClient — disables that protection and, if it
+	// follows redirects itself, also bypasses Fetch's bounded
+	// same-origin redirect handling.
 	URL *url.URL
 
 	// ExpectedContentType is the exact media type (ignoring parameters
@@ -110,12 +142,13 @@ func (c *Client) Fetch(ctx context.Context, req FetchRequest) (FetchResponse, er
 	if req.ExpectedContentType == "" {
 		return FetchResponse{}, fmt.Errorf("fapihttp: expected content type is required")
 	}
-	if err := validateFetchURL(req.URL, c.cfg.AllowLoopbackHTTP); err != nil {
-		return FetchResponse{}, err
-	}
 
 	ctx, cancel := context.WithTimeout(ctx, c.cfg.RequestTimeout)
 	defer cancel()
+
+	if err := c.validateFetchURL(ctx, req.URL); err != nil {
+		return FetchResponse{}, err
+	}
 
 	origin := requestOrigin(req.URL)
 	target := req.URL
@@ -132,7 +165,7 @@ func (c *Client) Fetch(ctx context.Context, req FetchRequest) (FetchResponse, er
 			if hop >= c.cfg.MaxRedirects {
 				return FetchResponse{}, ErrTooManyRedirects
 			}
-			next, err := resolveRedirect(target, location, origin, c.cfg.AllowLoopbackHTTP)
+			next, err := c.resolveRedirect(ctx, target, location, origin)
 			if err != nil {
 				return FetchResponse{}, err
 			}
@@ -185,7 +218,7 @@ func requestOrigin(u *url.URL) string {
 	return strings.ToLower(u.Scheme) + "://" + strings.ToLower(u.Host)
 }
 
-func resolveRedirect(current *url.URL, location, origin string, allowLoopbackHTTP bool) (*url.URL, error) {
+func (c *Client) resolveRedirect(ctx context.Context, current *url.URL, location, origin string) (*url.URL, error) {
 	if location == "" {
 		return nil, fmt.Errorf("fapihttp: redirect response has no Location header")
 	}
@@ -197,30 +230,67 @@ func resolveRedirect(current *url.URL, location, origin string, allowLoopbackHTT
 	if requestOrigin(next) != origin {
 		return nil, ErrRedirectOriginMismatch
 	}
-	if err := validateFetchURL(next, allowLoopbackHTTP); err != nil {
+	if err := c.validateFetchURL(ctx, next); err != nil {
 		return nil, err
 	}
 	return next, nil
 }
 
-func validateFetchURL(u *url.URL, allowLoopbackHTTP bool) error {
+// validateFetchURL checks u's scheme/host shape and, for an https URL
+// not exempted by AllowLoopbackHTTP, makes a best-effort check that
+// every address the host resolves to is allowed — see FetchRequest.URL
+// and HTTPClient's doc comments for what this does and does not
+// guarantee.
+func (c *Client) validateFetchURL(ctx context.Context, u *url.URL) error {
 	if !u.IsAbs() || u.Host == "" {
 		return fmt.Errorf("fapihttp: url must be absolute")
 	}
 	if u.User != nil {
 		return fmt.Errorf("fapihttp: url must not contain embedded credentials")
 	}
+	loopbackExempt := c.cfg.AllowLoopbackHTTP && isLoopbackHost(u.Host)
 	switch strings.ToLower(u.Scheme) {
 	case "https":
-		return nil
+		if loopbackExempt {
+			return nil
+		}
+		return c.checkHostIPs(ctx, u.Hostname())
 	case "http":
-		if allowLoopbackHTTP && isLoopbackHost(u.Host) {
+		if loopbackExempt {
 			return nil
 		}
 		return ErrInsecureURL
 	default:
 		return ErrInsecureURL
 	}
+}
+
+// checkHostIPs resolves host (via c.resolveIPs, or directly if host is
+// already an IP literal) and returns ErrSSRFBlocked if any resulting
+// address is disallowed per disallowedIP. This is pre-dial validation
+// only: it does not defeat DNS rebinding, since the caller's own
+// HTTPClient may re-resolve the host at connect time — see
+// FetchRequest.URL's doc comment.
+func (c *Client) checkHostIPs(ctx context.Context, host string) error {
+	if ip := net.ParseIP(host); ip != nil {
+		if disallowedIP(ip, c.cfg.AllowLoopbackHTTP) {
+			return ErrSSRFBlocked
+		}
+		return nil
+	}
+	ips, err := c.resolveIPs(ctx, host)
+	if err != nil {
+		return fmt.Errorf("fapihttp: resolve host: %w", err)
+	}
+	if len(ips) == 0 {
+		return ErrSSRFBlocked
+	}
+	for _, ip := range ips {
+		if disallowedIP(ip, c.cfg.AllowLoopbackHTTP) {
+			return ErrSSRFBlocked
+		}
+	}
+	return nil
 }
 
 func isLoopbackHost(host string) bool {

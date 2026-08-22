@@ -80,6 +80,10 @@ func newTestFetcherTLS(t *testing.T, ts *httptest.Server) *fapihttp.Client {
 		MaxResponseBytes: 1 << 16,
 		RequestTimeout:   5 * time.Second,
 		MaxRedirects:     1,
+		// ts is a local httptest server on loopback; fapihttp's SSRF
+		// pre-check blocks loopback by default, so tests hitting it
+		// need to opt in, the same as a real deployment would.
+		AllowLoopbackHTTP: true,
 	})
 	if err != nil {
 		t.Fatalf("fapihttp.New: %v", err)
@@ -146,8 +150,12 @@ func TestJWKSIssuerKeySourceRefreshesOnUnknownKeyID(t *testing.T) {
 		t.Fatalf("ParseEndpointURL: %v", err)
 	}
 	// Long TTL: without stale-key-triggered refresh, the second lookup
-	// would never see the rotated key within this test's lifetime.
-	src, err := keys.NewJWKSIssuerKeySource(newTestFetcherTLS(t, ts), jwksURI, time.Hour)
+	// would never see the rotated key within this test's lifetime. A
+	// minimal WithMinRefreshInterval keeps H-1's rate limit from
+	// suppressing that second forced refresh — this test's two lookups
+	// are sequential real calls (each doing a real fetch), so any
+	// interval shorter than that gap still lets the second one through.
+	src, err := keys.NewJWKSIssuerKeySource(newTestFetcherTLS(t, ts), jwksURI, time.Hour, keys.WithMinRefreshInterval(time.Nanosecond))
 	if err != nil {
 		t.Fatalf("NewJWKSIssuerKeySource: %v", err)
 	}

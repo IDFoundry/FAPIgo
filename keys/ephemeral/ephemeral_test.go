@@ -119,6 +119,10 @@ func TestClientKeySourceFetchedJWKS(t *testing.T) {
 		MaxResponseBytes: 1 << 16,
 		RequestTimeout:   5 * time.Second,
 		MaxRedirects:     1,
+		// ts is a local httptest server on loopback; opt in to
+		// fapihttp's SSRF pre-check allowing it, same as a real
+		// deployment pointing at a loopback issuer would.
+		AllowLoopbackHTTP: true,
 	})
 	if err != nil {
 		t.Fatalf("fapihttp.New: %v", err)
@@ -160,6 +164,10 @@ func TestClientKeySourceCachesWithinTTL(t *testing.T) {
 		MaxResponseBytes: 1 << 16,
 		RequestTimeout:   5 * time.Second,
 		MaxRedirects:     1,
+		// ts is a local httptest server on loopback; opt in to
+		// fapihttp's SSRF pre-check allowing it, same as a real
+		// deployment pointing at a loopback issuer would.
+		AllowLoopbackHTTP: true,
 	})
 	if err != nil {
 		t.Fatalf("fapihttp.New: %v", err)
@@ -215,6 +223,10 @@ func TestClientKeySourceRefetchesOnUnknownKeyIDEvenWhenCacheFresh(t *testing.T) 
 		MaxResponseBytes: 1 << 16,
 		RequestTimeout:   5 * time.Second,
 		MaxRedirects:     1,
+		// ts is a local httptest server on loopback; opt in to
+		// fapihttp's SSRF pre-check allowing it, same as a real
+		// deployment pointing at a loopback issuer would.
+		AllowLoopbackHTTP: true,
 	})
 	if err != nil {
 		t.Fatalf("fapihttp.New: %v", err)

@@ -205,6 +205,10 @@ func newSmokeHarness(t *testing.T, format AccessTokenFormat) *smokeHarness {
 		MaxResponseBytes: 1 << 16,
 		RequestTimeout:   10 * time.Second,
 		MaxRedirects:     0,
+		// tlsListener is bound to 127.0.0.1; opt in to fapihttp's SSRF
+		// pre-check allowing loopback, same as a real deployment
+		// pointing at a loopback issuer would.
+		AllowLoopbackHTTP: true,
 	})
 	if err != nil {
 		t.Fatalf("build fetcher: %v", err)

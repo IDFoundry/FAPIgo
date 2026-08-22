@@ -22,6 +22,17 @@ func validConfig() fapihttp.Config {
 	}
 }
 
+// validLoopbackConfig is validConfig with AllowLoopbackHTTP set, for
+// tests that legitimately target a local httptest server: since H-2's
+// pre-dial IP check blocks loopback addresses by default (the same as
+// NewClient's dial-time protection), a test hitting 127.0.0.1 needs to
+// opt in, just as a real deployment pointing at a loopback issuer would.
+func validLoopbackConfig() fapihttp.Config {
+	cfg := validConfig()
+	cfg.AllowLoopbackHTTP = true
+	return cfg
+}
+
 func mustParseURL(t *testing.T, raw string) *url.URL {
 	t.Helper()
 	u, err := url.Parse(raw)
@@ -75,7 +86,7 @@ func TestFetchAcceptsValidResponse(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	c, err := fapihttp.New(ts.Client(), validConfig())
+	c, err := fapihttp.New(ts.Client(), validLoopbackConfig())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -101,7 +112,7 @@ func TestFetchRejectsContentTypeMismatch(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	c, err := fapihttp.New(ts.Client(), validConfig())
+	c, err := fapihttp.New(ts.Client(), validLoopbackConfig())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -124,7 +135,7 @@ func TestFetchRejectsMissingContentType(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	c, err := fapihttp.New(ts.Client(), validConfig())
+	c, err := fapihttp.New(ts.Client(), validLoopbackConfig())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -144,7 +155,7 @@ func TestFetchRejectsOversizedBody(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	cfg := validConfig()
+	cfg := validLoopbackConfig()
 	cfg.MaxResponseBytes = 16
 	c, err := fapihttp.New(ts.Client(), cfg)
 	if err != nil {
@@ -167,7 +178,7 @@ func TestFetchRejectsNonOKStatus(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	c, err := fapihttp.New(ts.Client(), validConfig())
+	c, err := fapihttp.New(ts.Client(), validLoopbackConfig())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -192,7 +203,7 @@ func TestFetchFollowsSameOriginRedirectWithinBound(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	c, err := fapihttp.New(noRedirectClient(ts), validConfig())
+	c, err := fapihttp.New(noRedirectClient(ts), validLoopbackConfig())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -215,7 +226,7 @@ func TestFetchRejectsRedirectBeyondBound(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	cfg := validConfig()
+	cfg := validLoopbackConfig()
 	cfg.MaxRedirects = 0
 	c, err := fapihttp.New(noRedirectClient(ts), cfg)
 	if err != nil {
@@ -236,7 +247,7 @@ func TestFetchRejectsCrossOriginRedirect(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	c, err := fapihttp.New(noRedirectClient(ts), validConfig())
+	c, err := fapihttp.New(noRedirectClient(ts), validLoopbackConfig())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -302,6 +313,25 @@ func TestFetchRejectsEmbeddedCredentials(t *testing.T) {
 	}
 }
 
+// TestFetchStdlibClientDoesNotReachLoopback documents H-2: even a
+// caller that ignores the HTTPClient doc comment's recommendation and
+// passes a stock http.DefaultClient (with no SSRF-hardened transport)
+// still gets loopback blocked, because Fetch's own best-effort pre-dial
+// check runs regardless of which HTTPClient the caller supplied.
+func TestFetchStdlibClientDoesNotReachLoopback(t *testing.T) {
+	c, err := fapihttp.New(http.DefaultClient, validConfig())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = c.Fetch(context.Background(), fapihttp.FetchRequest{
+		URL:                 mustParseURL(t, "https://127.0.0.1:1/jwks"),
+		ExpectedContentType: "application/json",
+	})
+	if !errors.Is(err, fapihttp.ErrSSRFBlocked) {
+		t.Fatalf("Fetch(http.DefaultClient, loopback IP literal) error = %v, want ErrSSRFBlocked", err)
+	}
+}
+
 func TestFetchAllowsLoopbackHTTPWhenConfigured(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -309,9 +339,7 @@ func TestFetchAllowsLoopbackHTTPWhenConfigured(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	cfg := validConfig()
-	cfg.AllowLoopbackHTTP = true
-	c, err := fapihttp.New(ts.Client(), cfg)
+	c, err := fapihttp.New(ts.Client(), validLoopbackConfig())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -346,8 +374,13 @@ func TestFetchRejectsMissingTLSState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	// An IP literal (rather than a hostname fapihttp would otherwise have
+	// to resolve) so this test's SSRF pre-check needs no real DNS lookup
+	// and stays hermetic; 1.1.1.1 is a stable public address, so the
+	// check passes and the fake client's TLS-less response is what's
+	// actually under test.
 	_, err = c.Fetch(context.Background(), fapihttp.FetchRequest{
-		URL:                 mustParseURL(t, "https://as.example.com/jwks"),
+		URL:                 mustParseURL(t, "https://1.1.1.1/jwks"),
 		ExpectedContentType: "application/json",
 	})
 	if err == nil {

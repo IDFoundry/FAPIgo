@@ -21,6 +21,10 @@ func newDiscoveryFetcher(t *testing.T, ts *httptest.Server) *fapihttp.Client {
 		MaxResponseBytes: 1 << 16,
 		RequestTimeout:   5 * time.Second,
 		MaxRedirects:     1,
+		// ts is a local httptest server on loopback; opt in to
+		// fapihttp's SSRF pre-check allowing it, same as a real
+		// deployment pointing at a loopback issuer would.
+		AllowLoopbackHTTP: true,
 	})
 	if err != nil {
 		t.Fatalf("fapihttp.New: %v", err)

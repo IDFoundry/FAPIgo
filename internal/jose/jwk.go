@@ -257,8 +257,8 @@ func decodeExponent(s string) (int, error) {
 		return 0, fmt.Errorf("exponent out of range")
 	}
 	v := n.Int64()
-	if v <= 0 || v > 1<<31-1 {
-		return 0, fmt.Errorf("exponent out of range")
+	if v < 3 || v > 1<<31-1 || v%2 == 0 {
+		return 0, fmt.Errorf("exponent out of range or not a valid RSA public exponent")
 	}
 	return int(v), nil
 }

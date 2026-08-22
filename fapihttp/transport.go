@@ -104,10 +104,48 @@ func safeDialContext(base *net.Dialer, allowLoopback bool) func(context.Context,
 	}
 }
 
+// extraBlockedCIDRs are address ranges net.IP's own IsPrivate/
+// IsLinkLocal*/IsUnspecified/IsMulticast checks don't cover, but which
+// are still not appropriate targets for a server-initiated fetch:
+// carrier-grade NAT, IETF protocol assignments, benchmarking space, and
+// the reserved/broadcast range. Parsed once at init from literals that
+// cannot fail to parse.
+var extraBlockedCIDRs = func() []*net.IPNet {
+	cidrs := []string{
+		"100.64.0.0/10", // RFC 6598 CGNAT
+		"192.0.0.0/24",  // RFC 6890 IETF protocol assignments
+		"198.18.0.0/15", // RFC 2544 benchmarking
+		"240.0.0.0/4",   // RFC 1112 reserved (includes 255.255.255.255)
+	}
+	out := make([]*net.IPNet, 0, len(cidrs))
+	for _, c := range cidrs {
+		_, n, err := net.ParseCIDR(c)
+		if err != nil {
+			panic("fapihttp: invalid literal CIDR " + c + ": " + err.Error())
+		}
+		out = append(out, n)
+	}
+	return out
+}()
+
+// disallowedIP reports whether ip is not an acceptable target for a
+// server-initiated fetch: loopback (unless allowLoopback), private,
+// link-local, unspecified, multicast, or one of extraBlockedCIDRs.
 func disallowedIP(ip net.IP, allowLoopback bool) bool {
+	if v4 := ip.To4(); v4 != nil {
+		ip = v4
+	}
 	if ip.IsLoopback() {
 		return !allowLoopback
 	}
-	return ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
-		ip.IsUnspecified() || ip.IsMulticast()
+	if ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsUnspecified() || ip.IsMulticast() {
+		return true
+	}
+	for _, n := range extraBlockedCIDRs {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }

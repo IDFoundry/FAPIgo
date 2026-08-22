@@ -399,6 +399,26 @@ const testAuthorizationEndpoint = "https://as.example/authorize"
 const testPAREndpoint = "https://as.example/par"
 const testJWKSEndpoint = "https://as.example/jwks"
 
+// testRegisteredClient returns a storage.RegisteredClient matching the
+// client every newHarness variant registers (ID testClientID, redirect
+// URI testRedirectURI) — for tests that need to pass a
+// storage.RegisteredClient directly (e.g.
+// Server.BuildAuthorizationErrorRedirect) rather than going through a
+// ClientRepository lookup.
+func testRegisteredClient(t *testing.T) storage.RegisteredClient {
+	t.Helper()
+	client, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
+		ID:                       testClientID,
+		RedirectURIs:             []fapi.RegisteredRedirectURI{testRedirectURI},
+		ClientAssertionAlgorithm: fapi.ES256,
+		AllowedScopes:            []string{"openid", "accounts", "offline_access"},
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+	return client
+}
+
 func testEndpoints(t *testing.T) server.Endpoints {
 	t.Helper()
 	authorization, err := fapi.ParseEndpointURL(testAuthorizationEndpoint)

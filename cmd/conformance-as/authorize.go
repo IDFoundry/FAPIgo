@@ -109,7 +109,7 @@ func (h *consentHandler) handleBegin(w http.ResponseWriter, r *http.Request) {
 		redirectURI := q.Get("redirect_uri")
 		if redirectURI != "" {
 			if client, resolveErr := h.clients.ResolveClient(r.Context(), clientID); resolveErr == nil && client.HasRedirectURI(redirectURI) {
-				dest, buildErr := h.srv.BuildAuthorizationErrorRedirect(r.Context(), clientID, redirectURI, q.Get("state"),
+				dest, buildErr := h.srv.BuildAuthorizationErrorRedirect(r.Context(), client, redirectURI, q.Get("state"),
 					string(action.Error.Code()), action.Error.PublicDescription())
 				if buildErr == nil {
 					http.Redirect(w, r, dest.String(), http.StatusFound) // #nosec G710 -- dest is built from redirectURI only after client.HasRedirectURI matched it against the registry above, not raw user input

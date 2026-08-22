@@ -132,19 +132,26 @@ func (s *Server) beginFail(ctx context.Context, clientID fapi.ClientID, err *Err
 // BuildAuthorizationErrorRedirect builds the standard OAuth/FAPI
 // authorization-error response — query parameters for plain profiles,
 // a signed JARM response under ProfileFAPISecurityWithMessageSigning —
-// for clientID at redirectURI, carrying errorCode, description and
-// state (state may be empty, and is simply omitted from the response
-// when it is).
+// for client at redirectURI, carrying errorCode, description and state
+// (state may be empty, and is simply omitted from the response when it
+// is).
 //
 // Unlike BeginAuthorization, which never itself returns a redirect
 // destination it hasn't established as trustworthy from the request
-// under validation, this method trusts redirectURI exactly as given:
-// the caller is responsible for having independently verified it
-// belongs to clientID (e.g. via storage.RegisteredClient.HasRedirectURI)
-// before calling this — it is not a substitute for that check, and
-// calling it with an unverified redirectURI reintroduces the open-
-// redirect risk BeginAuthorization's LocalErrorResponse exists to
-// avoid.
+// under validation, this method's whole purpose is to build one from a
+// redirectURI the caller obtained some other way — so it checks
+// redirectURI against client.HasRedirectURI itself (a client may have
+// more than one registered redirect URI; any exact match is accepted)
+// and returns ErrRedirectURINotRegistered rather than building a
+// destination if it isn't one of client's own — returning *Error with
+// ErrorInvalidRequest, the same code an OAuth redirect_uri validation
+// failure earlier in the flow would carry, even though this error never
+// itself reaches the client (the caller renders a local error page
+// instead; see below). That check is what makes this method safe to
+// call at all: without it, it would hand back a signed or
+// query-parameter redirect to anywhere the caller named, reintroducing
+// the open-redirect risk BeginAuthorization's LocalErrorResponse exists
+// to avoid.
 //
 // It exists for callers — such as a conformance test harness — that
 // need to present a validation failure this package can only otherwise
@@ -154,13 +161,16 @@ func (s *Server) beginFail(ctx context.Context, clientID fapi.ClientID, err *Err
 // clients have no such need — a rendered local error page is a
 // perfectly good, safe outcome for a human in a browser — so
 // BeginAuthorization itself is deliberately unaware this method exists.
-func (s *Server) BuildAuthorizationErrorRedirect(ctx context.Context, clientID fapi.ClientID, redirectURI, state, errorCode, description string) (fapi.URL, error) {
-	dest, buildErr := s.buildAuthorizationResponse(ctx, clientID, redirectURI, map[string]string{
+func (s *Server) BuildAuthorizationErrorRedirect(ctx context.Context, client storage.RegisteredClient, redirectURI, state, errorCode, description string) (fapi.URL, error) {
+	if !client.HasRedirectURI(redirectURI) {
+		return fapi.URL{}, newError(ErrorInvalidRequest, 400, "redirect_uri is not registered for this client", nil)
+	}
+	dest, buildErr := s.buildAuthorizationResponse(ctx, client.ID(), redirectURI, map[string]string{
 		"error": errorCode, "state": state, "error_description": description,
 	})
 	if buildErr != nil {
 		return fapi.URL{}, buildErr
 	}
-	s.audit(ctx, AuditEventBeginAuthorization, clientID, AuditOutcomeFailure, errorCode)
+	s.audit(ctx, AuditEventBeginAuthorization, client.ID(), AuditOutcomeFailure, errorCode)
 	return dest, nil
 }

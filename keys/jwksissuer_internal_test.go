@@ -26,8 +26,8 @@ func testP256JWK(t *testing.T, kid string) string {
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}
-	x := base64.RawURLEncoding.EncodeToString(priv.PublicKey.X.FillBytes(make([]byte, 32)))
-	y := base64.RawURLEncoding.EncodeToString(priv.PublicKey.Y.FillBytes(make([]byte, 32)))
+	x := base64.RawURLEncoding.EncodeToString(priv.X.FillBytes(make([]byte, 32)))
+	y := base64.RawURLEncoding.EncodeToString(priv.Y.FillBytes(make([]byte, 32)))
 	return fmt.Sprintf(`{"keys":[{"kty":"EC","crv":"P-256","x":%q,"y":%q,"kid":%q,"alg":"ES256","use":"sig"}]}`, x, y, kid)
 }
 

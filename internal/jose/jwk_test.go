@@ -173,7 +173,7 @@ func TestJWKRejectsSmallRSAKey(t *testing.T) {
 
 func TestParseJWKRejectsDegenerateRSAExponent(t *testing.T) {
 	rsaKey := generateRSA(t)
-	n := base64.RawURLEncoding.EncodeToString(rsaKey.PublicKey.N.Bytes())
+	n := base64.RawURLEncoding.EncodeToString(rsaKey.N.Bytes())
 
 	cases := map[string]string{
 		"e = 1 (AQ)": "AQ",

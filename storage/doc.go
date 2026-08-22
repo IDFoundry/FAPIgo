@@ -34,8 +34,15 @@
 // cross-instance-consistent, encrypted-at-rest) that server checks at
 // construction time under its production assurance level, plus a
 // reusable contract test suite (e.g. TestGrantStoreContract(t, factory))
-// that exercises concurrent redemption, expiry boundaries, cancellation,
-// transaction rollback and cross-connection consistency against any
-// implementation — first-party or downstream — rather than trusting the
-// capability declaration alone.
+// that exercises single-use redemption and its exactly-one-winner
+// behavior under in-process concurrency, field round-tripping,
+// unknown-key handling, and revocation, against any implementation —
+// first-party or downstream. The suite runs one store instance in one
+// process against context.Background(); it deliberately does not
+// verify cross-instance/cross-connection atomicity, ExpiresAt-driven
+// eviction, context-cancellation, or that the store deep-copies
+// caller-supplied slices/maps. A production backend must establish
+// those separately — see StoreAssurance.Capabilities for the
+// atomicity/durability properties server requires under its production
+// assurance level.
 package storage

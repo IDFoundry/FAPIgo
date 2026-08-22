@@ -16,8 +16,8 @@
             "use": "sig",
             "kid": "gofapi-conformance-msgsign-client1-key1",
             "crv": "P-256",
-            "x": "W2WwjjfN5U-e6dw1wOChfWG1ovt-JfdfPZsEJz6qcI8",
-            "y": "d92PjcyIwjfF27WZndr4f4axlCzArsRD96h7t3oTTBk"
+            "x": "0ZDTyPh4l_Hi9hvUQbjPZLiF0dmNtu1D3l-zmdpnK0c",
+            "y": "dOfX9HyEZsgXY4Rdf-7re1htwmEu8R3AOml8rpkhmq8"
           }
         ]
       },
@@ -43,8 +43,8 @@
             "use": "sig",
             "kid": "gofapi-conformance-msgsign-client2-key1",
             "crv": "P-256",
-            "x": "EbUgbCtuDNqtdcqQm7wKgbhE5it_Z1t9EFcFdhkEC6o",
-            "y": "oLwMgahQsnUJdPdLUEgn3yU6InqCDUEvegPFw-7aS3s"
+            "x": "fGV8SgICfqem47XgQk_galrkQpWf-O29xkTyYBLCxZ0",
+            "y": "ZRstFN185cT6h5s2ESijyew7U0_IAFx2VwxosW2UGPM"
           }
         ]
       },
@@ -69,7 +69,7 @@
             "alg": "PS256",
             "use": "sig",
             "kid": "gofapi-conformance-msgsign-client1-rs256-key1",
-            "n": "0qhVXY7bnZOr88pcxUJq5baarHyVD39wuWIHpc9FzQr0vRBKGhJh7QHxCdZRPRyRethVHRQVylSUZCa0P8H2zCu0uq67-UZknMmKCFe6kb59HvbqhXWEQBN0RJicobwFggygRxKqyAp80-NiEGn8u-xGsR5ouwJQhWP_XMbSHbh4aMQMM8uoz7IhuBlS01jo3Mkc-o_gIs06Smb_jL1nPMJqdHV3A9Yu-4RS3b-z7n83UJvgoHJHBWv-yQPRrnGpI07eqZAJE0oZP1lqxpGIQ_AJm8PlgUL4oJurz6JCIfoobeVaivbbhOwl-VaAYk6XJMGtSxbbHaEvYsxdqOaZjw",
+            "n": "-FdadBFQP3EAkmQh4fsOQIvoNIhI6YX86ctPFGFJv9oYsmnB9F8bOlgv5iDUtX_APUpG-I95XngenrSFq4jrAsk5T286OeiahFuRVa1t7JS9ooFZDsmvw8w2ACQckgws7u21-uOGYVkyGkFy3TPQUurk8X1ciloeX4UocPKkZ0s_pOcWqbLEE3a90lMdVDdhy6L113UZmulI2JzgWqu4cx9eTLgu6y7z1iBhfxHzWSu8ocjhwa3AS2n7r4a67YxXPZZRNGS82YfAhWrEil65_6jiA_pfQcNWAyNcG5UUOb6GnaodLscDWcAhKTgcuk8wmaQweCtjizr7F-p2NUs-7Q",
             "e": "AQAB"
           }
         ]

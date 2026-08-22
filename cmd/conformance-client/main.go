@@ -223,6 +223,12 @@ func runModule(ctx context.Context, rawHTTP *http.Client, apiBase, planID, testN
 		MaxResponseBytes: 1 << 20,
 		RequestTimeout:   fetchTimeout,
 		MaxRedirects:     5,
+		// This driver only ever talks to a locally running OIDF
+		// conformance suite (see the package doc comment) — its
+		// discovery/JWKS fetches always target a loopback-resolving
+		// host (localhost.emobix.co.uk by default), so fapihttp's
+		// pre-dial SSRF check needs this to permit it.
+		AllowLoopbackHTTP: true,
 	})
 	if err != nil {
 		return "ERROR: build fetcher: " + err.Error()

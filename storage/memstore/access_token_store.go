@@ -22,6 +22,8 @@ func NewAccessTokenStore() *AccessTokenStore {
 
 // CreateAccessToken implements storage.AccessTokenStore.
 func (s *AccessTokenStore) CreateAccessToken(_ context.Context, tok storage.NewAccessToken) error {
+	tok.Scope = cloneStrings(tok.Scope)
+	tok.Claims = cloneRawMessageMap(tok.Claims)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.tokens[tok.TokenHash] = tok
@@ -37,7 +39,7 @@ func (s *AccessTokenStore) LookupAccessToken(_ context.Context, lookup storage.A
 		return storage.LookedUpAccessToken{}, fmt.Errorf("memstore: unknown access token")
 	}
 	return storage.LookedUpAccessToken{
-		ClientID: tok.ClientID, Subject: tok.Subject, Scope: tok.Scope,
-		Thumbprint: tok.Thumbprint, Claims: tok.Claims, ExpiresAt: tok.ExpiresAt,
+		ClientID: tok.ClientID, Subject: tok.Subject, Scope: cloneStrings(tok.Scope),
+		Thumbprint: tok.Thumbprint, Claims: cloneRawMessageMap(tok.Claims), ExpiresAt: tok.ExpiresAt,
 	}, nil
 }

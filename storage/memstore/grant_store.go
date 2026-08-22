@@ -35,6 +35,11 @@ func NewGrantStore() *GrantStore {
 
 // CreateAuthorizationCode implements storage.GrantStore.
 func (s *GrantStore) CreateAuthorizationCode(_ context.Context, code storage.NewAuthorizationCode) error {
+	code.Scope = cloneStrings(code.Scope)
+	code.AMR = cloneStrings(code.AMR)
+	code.TokenClaims = cloneRawMessageMap(code.TokenClaims)
+	code.RequestedIDTokenClaims = cloneStrings(code.RequestedIDTokenClaims)
+	code.RequestedUserinfoClaims = cloneStrings(code.RequestedUserinfoClaims)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.codes[code.CodeHash] = code
@@ -64,9 +69,9 @@ func (s *GrantStore) RedeemAuthorizationCode(_ context.Context, redemption stora
 		ClientID: code.ClientID, RedirectURI: code.RedirectURI,
 		CodeChallenge: code.CodeChallenge, CodeChallengeMethod: code.CodeChallengeMethod,
 		DPoPJKT: code.DPoPJKT,
-		Subject: code.Subject, Scope: code.Scope, Nonce: code.Nonce,
-		AuthTime: code.AuthTime, ACR: code.ACR, AMR: code.AMR, TokenClaims: code.TokenClaims,
-		RequestedIDTokenClaims: code.RequestedIDTokenClaims, RequestedUserinfoClaims: code.RequestedUserinfoClaims,
+		Subject: code.Subject, Scope: cloneStrings(code.Scope), Nonce: code.Nonce,
+		AuthTime: code.AuthTime, ACR: code.ACR, AMR: cloneStrings(code.AMR), TokenClaims: cloneRawMessageMap(code.TokenClaims),
+		RequestedIDTokenClaims: cloneStrings(code.RequestedIDTokenClaims), RequestedUserinfoClaims: cloneStrings(code.RequestedUserinfoClaims),
 		ExpiresAt: code.ExpiresAt,
 	}, nil
 }
@@ -89,6 +94,11 @@ func (s *GrantStore) RecordIssuedRefreshToken(_ context.Context, codeHash [32]by
 
 // CreateRefreshToken implements storage.GrantStore.
 func (s *GrantStore) CreateRefreshToken(_ context.Context, token storage.NewRefreshToken) error {
+	token.Scope = cloneStrings(token.Scope)
+	token.AMR = cloneStrings(token.AMR)
+	token.TokenClaims = cloneRawMessageMap(token.TokenClaims)
+	token.RequestedIDTokenClaims = cloneStrings(token.RequestedIDTokenClaims)
+	token.RequestedUserinfoClaims = cloneStrings(token.RequestedUserinfoClaims)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.refresh[token.TokenHash] = token
@@ -110,10 +120,10 @@ func (s *GrantStore) RedeemRefreshToken(_ context.Context, redemption storage.Re
 		return storage.RedeemedRefreshToken{}, fmt.Errorf("memstore: unknown refresh token")
 	}
 	return storage.RedeemedRefreshToken{
-		ClientID: token.ClientID, Subject: token.Subject, Scope: token.Scope,
-		Thumbprint: token.Thumbprint, AuthTime: token.AuthTime, ACR: token.ACR, AMR: token.AMR,
-		TokenClaims:            token.TokenClaims,
-		RequestedIDTokenClaims: token.RequestedIDTokenClaims, RequestedUserinfoClaims: token.RequestedUserinfoClaims,
+		ClientID: token.ClientID, Subject: token.Subject, Scope: cloneStrings(token.Scope),
+		Thumbprint: token.Thumbprint, AuthTime: token.AuthTime, ACR: token.ACR, AMR: cloneStrings(token.AMR),
+		TokenClaims:            cloneRawMessageMap(token.TokenClaims),
+		RequestedIDTokenClaims: cloneStrings(token.RequestedIDTokenClaims), RequestedUserinfoClaims: cloneStrings(token.RequestedUserinfoClaims),
 		ExpiresAt: token.ExpiresAt,
 	}, nil
 }

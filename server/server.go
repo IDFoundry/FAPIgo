@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 
+	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/extension"
 )
 
@@ -111,6 +112,23 @@ func validateConfig(cfg Config) error {
 	if cfg.Assurance != AssuranceDevelopment && cfg.Assurance != AssuranceProduction {
 		return fmt.Errorf("server: config: assurance level is invalid")
 	}
+	if cfg.Assurance == AssuranceProduction {
+		if err := rejectLoopbackURL("issuer", cfg.Issuer); err != nil {
+			return err
+		}
+		if err := rejectLoopbackURL("endpoints.authorization", cfg.Endpoints.Authorization); err != nil {
+			return err
+		}
+		if err := rejectLoopbackURL("endpoints.token", cfg.Endpoints.Token); err != nil {
+			return err
+		}
+		if err := rejectLoopbackURL("endpoints.pushed_authorization_request", cfg.Endpoints.PushedAuthorizationRequest); err != nil {
+			return err
+		}
+		if err := rejectLoopbackURL("endpoints.jwks", cfg.Endpoints.JWKS); err != nil {
+			return err
+		}
+	}
 
 	if cfg.Profile == ProfileFAPISecurityWithMessageSigning {
 		if !cfg.Algorithms.JARM.IsValid() {
@@ -119,6 +137,19 @@ func validateConfig(cfg Config) error {
 		if cfg.Limits.JARMResponseLifetime <= 0 {
 			return fmt.Errorf("server: config: limits.jarm_response_lifetime must be positive under ProfileFAPISecurityWithMessageSigning")
 		}
+	}
+	return nil
+}
+
+// rejectLoopbackURL returns an error if u has an http scheme — which,
+// per fapi.ParseIssuerURL/ParseEndpointURL, can only happen if
+// fapi.AllowLoopbackHTTP() was passed when parsing it. That option
+// exists for local development only (see its own doc comment); under
+// AssuranceProduction it must not have been carried into a
+// configuration that could reach a real deployment.
+func rejectLoopbackURL(name string, u fapi.URL) error {
+	if u.URL().Scheme == "http" {
+		return fmt.Errorf("server: config: %s was parsed with fapi.AllowLoopbackHTTP, which is not permitted under AssuranceProduction", name)
 	}
 	return nil
 }

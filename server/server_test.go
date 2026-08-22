@@ -180,6 +180,49 @@ func TestNewRequiresAuditUnderProduction(t *testing.T) {
 	}
 }
 
+// TestNewRejectsLoopbackHTTPURLsUnderProduction covers L-2:
+// fapi.AllowLoopbackHTTP exists for local development only, and its
+// http:// scheme exception must not silently carry into a
+// configuration built for AssuranceProduction.
+func TestNewRejectsLoopbackHTTPURLsUnderProduction(t *testing.T) {
+	loopbackIssuer, err := fapi.ParseIssuerURL("http://localhost:9999", fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+	loopbackEndpoint, err := fapi.ParseEndpointURL("http://localhost:9999/token", fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseEndpointURL: %v", err)
+	}
+
+	cases := map[string]func(*server.Config){
+		"loopback issuer":           func(c *server.Config) { c.Issuer = loopbackIssuer },
+		"loopback authorization ep": func(c *server.Config) { c.Endpoints.Authorization = loopbackEndpoint },
+		"loopback token ep":         func(c *server.Config) { c.Endpoints.Token = loopbackEndpoint },
+		"loopback par ep":           func(c *server.Config) { c.Endpoints.PushedAuthorizationRequest = loopbackEndpoint },
+		"loopback jwks ep":          func(c *server.Config) { c.Endpoints.JWKS = loopbackEndpoint },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg := validConfig(t)
+			cfg.Assurance = server.AssuranceProduction
+			mutate(&cfg)
+			deps := validDependencies()
+			deps.Audit = &fakeAuditSink{}
+			if _, err := server.New(cfg, deps); err == nil {
+				t.Fatalf("New(production, %s) = nil error, want error", name)
+			}
+		})
+	}
+
+	// The same loopback issuer under AssuranceDevelopment is fine — this
+	// option exists precisely for that case.
+	cfg := validConfig(t)
+	cfg.Issuer = loopbackIssuer
+	if _, err := server.New(cfg, validDependencies()); err != nil {
+		t.Fatalf("New(development, loopback issuer): %v", err)
+	}
+}
+
 // bareReplayStore implements storage.ReplayStore but not
 // storage.StoreAssurance at all, for testing that AssuranceProduction
 // rejects a store that never declared its capabilities, rather than

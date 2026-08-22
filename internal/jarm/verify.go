@@ -138,5 +138,17 @@ func (r Response) Verify(pub crypto.PublicKey, policy VerifyPolicy) (VerifiedRes
 		return VerifiedResponse{}, ErrNotYetValid
 	}
 
+	// A validly signed, correctly-audienced JWT from the expected issuer
+	// isn't necessarily a JARM response — an AS-signed ID token for the
+	// same client would also pass every check above. Requiring at least
+	// one recognised authorization-response parameter distinguishes a
+	// genuine JARM response without depending on "typ", which the spec
+	// doesn't mandate.
+	if _, hasCode := c.Parameters["code"]; !hasCode {
+		if _, hasErr := c.Parameters["error"]; !hasErr {
+			return VerifiedResponse{}, ErrNotAuthorizationResponse
+		}
+	}
+
 	return VerifiedResponse{Issuer: c.Issuer, Parameters: c.Parameters, ExpiresAt: c.ExpiresAt}, nil
 }

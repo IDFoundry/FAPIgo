@@ -28,4 +28,15 @@ var (
 	// ErrLifetimeExceeded indicates the response's exp claim is further
 	// in the future than the configured maximum lifetime allows.
 	ErrLifetimeExceeded = errors.New("jarm: exp exceeds maximum allowed lifetime")
+
+	// ErrNotAuthorizationResponse indicates a token that otherwise
+	// verifies (signature, iss, aud, exp/nbf all check out) carries
+	// neither a "code" nor an "error" parameter — so it isn't an
+	// authorization response at all, even though it may be a validly
+	// signed JWT from the same issuer for the same audience, such as an
+	// ID token. The OpenID JARM spec defines no mandatory "typ" for the
+	// response JWT, so this checks for the substance of an authorization
+	// response instead of relying on a media type third-party
+	// authorization servers aren't required to set.
+	ErrNotAuthorizationResponse = errors.New("jarm: response carries neither a code nor an error parameter")
 )

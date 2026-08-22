@@ -224,6 +224,28 @@ func TestVerifyRejectsAudienceMismatch(t *testing.T) {
 	}
 }
 
+// TestVerifyRejectsResponseWithoutCodeOrError covers M-2: a token that
+// otherwise verifies cleanly (same signer, iss, aud) but carries
+// neither "code" nor "error" — the shape an AS-signed ID token for the
+// same client would have — must not be accepted as a JARM response.
+func TestVerifyRejectsResponseWithoutCodeOrError(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	idTokenLikeParams := map[string]json.RawMessage{
+		"sub":   jsonRaw(t, "user-123"),
+		"state": jsonRaw(t, "opaque-state"),
+	}
+	token := createTestResponse(t, key, now, time.Minute, idTokenLikeParams)
+
+	resp, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if _, err := resp.Verify(&key.PublicKey, basePolicy(now)); !errors.Is(err, ErrNotAuthorizationResponse) {
+		t.Fatalf("Verify(no code or error) = %v, want ErrNotAuthorizationResponse", err)
+	}
+}
+
 func TestVerifyRejectsExpiredResponse(t *testing.T) {
 	key := generateKey(t)
 	now := time.Now()

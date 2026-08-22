@@ -37,6 +37,20 @@ func (e fakeErr) Error() string { return string(e) }
 
 const errReplayed = fakeErr("jti already used")
 
+// spyReplayChecker records the (jti, expiresAt) it was last called with,
+// for asserting on the TTL Verify passes to UseOnce rather than on
+// eviction behavior a real store may not even implement.
+type spyReplayChecker struct {
+	jti       string
+	expiresAt time.Time
+}
+
+func (s *spyReplayChecker) UseOnce(_ context.Context, jti string, expiresAt time.Time) error {
+	s.jti = jti
+	s.expiresAt = expiresAt
+	return nil
+}
+
 func generateKey(t *testing.T) *ecdsa.PrivateKey {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -233,6 +247,59 @@ func TestVerifyDetectsReplay(t *testing.T) {
 	}
 	if _, err := parsed2.Verify(context.Background(), &key.PublicKey, policy); err == nil {
 		t.Fatalf("second Verify (replay) = nil error, want error")
+	}
+}
+
+// The replay TTL must cover the same MaxClockSkew the expiry check
+// grants (line 138), or an assertion could still be accepted in
+// (exp, exp+skew] after its jti's replay record has already expired.
+func TestVerifyReplayTTLCoversClockSkew(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	assertion := createTestAssertion(t, key, now, time.Minute)
+
+	spy := &spyReplayChecker{}
+	policy := basePolicy(now)
+	policy.MaxClockSkew = 30 * time.Second
+	policy.Replay = spy
+
+	parsed, err := Parse(assertion)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	verified, err := parsed.Verify(context.Background(), &key.PublicKey, policy)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	want := verified.ExpiresAt.Add(policy.MaxClockSkew)
+	if !spy.expiresAt.Equal(want) {
+		t.Fatalf("replay TTL = %v, want %v (exp + MaxClockSkew)", spy.expiresAt, want)
+	}
+}
+
+// Regression guard: with no clock skew configured, the replay TTL must
+// equal exp exactly — proving the TTL tracks MaxClockSkew rather than
+// being unconditionally padded.
+func TestVerifyReplayTTLEqualsExpiryWhenNoSkew(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	assertion := createTestAssertion(t, key, now, time.Minute)
+
+	spy := &spyReplayChecker{}
+	policy := basePolicy(now)
+	policy.MaxClockSkew = 0
+	policy.Replay = spy
+
+	parsed, err := Parse(assertion)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	verified, err := parsed.Verify(context.Background(), &key.PublicKey, policy)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if !spy.expiresAt.Equal(verified.ExpiresAt) {
+		t.Fatalf("replay TTL = %v, want %v (exp, since MaxClockSkew is zero)", spy.expiresAt, verified.ExpiresAt)
 	}
 }
 

@@ -130,7 +130,8 @@ var extraBlockedCIDRs = func() []*net.IPNet {
 
 // disallowedIP reports whether ip is not an acceptable target for a
 // server-initiated fetch: loopback (unless allowLoopback), private,
-// link-local, unspecified, multicast, or one of extraBlockedCIDRs.
+// link-local, unspecified, multicast, one of extraBlockedCIDRs, or an
+// IPv6 transition address that tunnels one of the above.
 func disallowedIP(ip net.IP, allowLoopback bool) bool {
 	if v4 := ip.To4(); v4 != nil {
 		ip = v4
@@ -147,5 +148,55 @@ func disallowedIP(ip net.IP, allowLoopback bool) bool {
 			return true
 		}
 	}
+	// A NAT64/6to4/Teredo/IPv4-compatible address looks like ordinary
+	// global-unicast IPv6 to every check above, but on a host with the
+	// matching transition mechanism configured it dials straight
+	// through to the IPv4 address it tunnels — which may itself be
+	// loopback/private/link-local. Recursing here can only add a
+	// block: a recursed 4-byte address never matches
+	// embeddedIPv4's own prefix checks, so this can recurse at most
+	// once.
+	if embedded := embeddedIPv4(ip); embedded != nil {
+		return disallowedIP(embedded, allowLoopback)
+	}
 	return false
+}
+
+// embeddedIPv4 returns the IPv4 address carried inside an IPv6
+// transition address (NAT64 64:ff9b::/96, 6to4 2002::/16, Teredo
+// 2001:0000::/32, or the deprecated IPv4-compatible ::a.b.c.d), or nil
+// if ip is not one of those forms. These formats tunnel an IPv4
+// destination inside a global-unicast-looking IPv6 address, so on a
+// host with NAT64/6to4/Teredo routing they can reach an internal IPv4
+// target that the plain IPv6 checks (IsPrivate/IsLinkLocal*/...) never
+// flag. The result is only ever used to add a block, so an imperfect
+// decode is fail-safe: the worst case is over-blocking an address that
+// happens to decode to a private-looking v4.
+func embeddedIPv4(ip net.IP) net.IP {
+	b := ip.To16()
+	if b == nil || ip.To4() != nil { // already IPv4 / IPv4-mapped, handled by the caller
+		return nil
+	}
+	switch {
+	case b[0] == 0x00 && b[1] == 0x64 && b[2] == 0xff && b[3] == 0x9b &&
+		isZero(b[4:12]): // NAT64 well-known prefix 64:ff9b::/96
+		return net.IPv4(b[12], b[13], b[14], b[15])
+	case b[0] == 0x20 && b[1] == 0x02: // 6to4 2002::/16 — gateway v4 in bytes 2-5 (RFC 3056)
+		return net.IPv4(b[2], b[3], b[4], b[5])
+	case b[0] == 0x20 && b[1] == 0x01 && b[2] == 0x00 && b[3] == 0x00: // Teredo 2001:0000::/32 — client v4 in bytes 12-15, bit-inverted (RFC 4380)
+		return net.IPv4(b[12]^0xff, b[13]^0xff, b[14]^0xff, b[15]^0xff)
+	case isZero(b[0:12]): // deprecated IPv4-compatible ::a.b.c.d (::/96); ::  and ::1 are already handled by the caller
+		return net.IPv4(b[12], b[13], b[14], b[15])
+	}
+	return nil
+}
+
+// isZero reports whether every byte in b is zero.
+func isZero(b []byte) bool {
+	for _, c := range b {
+		if c != 0 {
+			return false
+		}
+	}
+	return true
 }

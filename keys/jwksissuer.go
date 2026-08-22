@@ -36,14 +36,17 @@ type JWKSIssuerKeySource struct {
 	jwksURI            *url.URL
 	cacheTTL           time.Duration
 	minRefreshInterval time.Duration
+	refreshBackoff     time.Duration
 	now                func() time.Time
 
-	mu           sync.Mutex
-	cached       []IssuerKey
-	cachedAt     time.Time
-	lastAttempt  time.Time
-	inflight     *refreshCall
-	negativeKIDs map[string]time.Time
+	mu               sync.Mutex
+	cached           []IssuerKey
+	cachedAt         time.Time
+	lastAttempt      time.Time
+	lastRefreshErr   error
+	lastRefreshErrAt time.Time
+	inflight         *refreshCall
+	negativeKIDs     map[string]time.Time
 }
 
 // refreshCall is an in-flight refresh shared by every caller that
@@ -76,6 +79,18 @@ func WithMinRefreshInterval(d time.Duration) JWKSOption {
 	return func(s *JWKSIssuerKeySource) { s.minRefreshInterval = d }
 }
 
+// WithRefreshBackoff bounds how soon the base TTL-refresh path
+// (currentKeys) will re-attempt a fetch after one fails, so a
+// sequential request stream against a failing upstream doesn't issue
+// one outbound fetch per request. Defaults to min(cacheTTL, 5s) —
+// short relative to a long cacheTTL, but never longer than it — so a
+// cold-start recovery isn't blocked for a full TTL window. This is
+// distinct from minRefreshInterval, which rate-limits only the
+// unknown-kid forced-refresh path.
+func WithRefreshBackoff(d time.Duration) JWKSOption {
+	return func(s *JWKSIssuerKeySource) { s.refreshBackoff = d }
+}
+
 // NewJWKSIssuerKeySource returns a JWKSIssuerKeySource fetching from
 // jwksURI via fetcher, caching the result for cacheTTL.
 func NewJWKSIssuerKeySource(fetcher *fapihttp.Client, jwksURI fapi.URL, cacheTTL time.Duration, opts ...JWKSOption) (*JWKSIssuerKeySource, error) {
@@ -101,6 +116,9 @@ func NewJWKSIssuerKeySource(fetcher *fapihttp.Client, jwksURI fapi.URL, cacheTTL
 	}
 	if s.minRefreshInterval <= 0 {
 		s.minRefreshInterval = cacheTTL
+	}
+	if s.refreshBackoff <= 0 {
+		s.refreshBackoff = min(cacheTTL, 5*time.Second)
 	}
 	return s, nil
 }
@@ -197,13 +215,24 @@ func (s *JWKSIssuerKeySource) refreshSingleflight(ctx context.Context) ([]Issuer
 	s.lastAttempt = s.now()
 	s.mu.Unlock()
 
-	call.keys, call.err = s.refresh(ctx)
+	go func() {
+		// Detached: fapihttp.Client.Fetch applies its own RequestTimeout,
+		// so the fetch still cannot hang forever; WithoutCancel only
+		// stops one caller's cancellation from aborting a fetch shared
+		// by others.
+		call.keys, call.err = s.refresh(context.WithoutCancel(ctx))
+		s.mu.Lock()
+		s.inflight = nil
+		s.mu.Unlock()
+		close(call.done)
+	}()
 
-	s.mu.Lock()
-	s.inflight = nil
-	s.mu.Unlock()
-	close(call.done)
-	return call.keys, call.err
+	select {
+	case <-call.done:
+		return call.keys, call.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 func matchIssuerKeys(keys []IssuerKey, req IssuerKeyRequest) []IssuerKey {
@@ -222,16 +251,43 @@ func matchIssuerKeys(keys []IssuerKey, req IssuerKeyRequest) []IssuerKey {
 
 func (s *JWKSIssuerKeySource) currentKeys(ctx context.Context) ([]IssuerKey, error) {
 	s.mu.Lock()
-	fresh := s.cached != nil && s.now().Sub(s.cachedAt) < s.cacheTTL
+	now := s.now()
+	fresh := s.cached != nil && now.Sub(s.cachedAt) < s.cacheTTL
 	cached := s.cached
+	inBackoff := s.lastRefreshErr != nil && now.Sub(s.lastRefreshErrAt) < s.refreshBackoff
+	backoffErr := s.lastRefreshErr
 	s.mu.Unlock()
 	if fresh {
 		return cached, nil
+	}
+	if inBackoff {
+		// Serve the remembered failure rather than issuing another
+		// outbound fetch — a sequential request stream against a down
+		// JWKS endpoint would otherwise produce one fetch per request.
+		// The caller (ResolveIssuerKeys) discards these keys whenever
+		// err is non-nil, so this stays fail-closed, not stale-serving.
+		return cached, fmt.Errorf("keys: jwks refresh in backoff after recent failure: %w", backoffErr)
 	}
 	return s.refreshSingleflight(ctx)
 }
 
 func (s *JWKSIssuerKeySource) refresh(ctx context.Context) ([]IssuerKey, error) {
+	parsed, err := s.doFetch(ctx)
+
+	s.mu.Lock()
+	if err != nil {
+		s.lastRefreshErr = err
+		s.lastRefreshErrAt = s.now()
+	} else {
+		s.cached = parsed
+		s.cachedAt = s.now()
+		s.lastRefreshErr = nil
+	}
+	s.mu.Unlock()
+	return parsed, err
+}
+
+func (s *JWKSIssuerKeySource) doFetch(ctx context.Context) ([]IssuerKey, error) {
 	res, err := s.fetcher.Fetch(ctx, fapihttp.FetchRequest{URL: s.jwksURI, ExpectedContentType: jwksContentType})
 	if err != nil {
 		return nil, fmt.Errorf("keys: fetch jwks: %w", err)
@@ -243,11 +299,6 @@ func (s *JWKSIssuerKeySource) refresh(ctx context.Context) ([]IssuerKey, error) 
 	if len(parsed) == 0 {
 		return nil, fmt.Errorf("keys: jwks document contains no usable keys")
 	}
-
-	s.mu.Lock()
-	s.cached = parsed
-	s.cachedAt = s.now()
-	s.mu.Unlock()
 	return parsed, nil
 }
 

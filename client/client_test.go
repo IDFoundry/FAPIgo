@@ -93,6 +93,18 @@ func (f *fakeIssuerKeySource) ResolveIssuerKeys(ctx context.Context, req keys.Is
 	return keys.IssuerKeySet{Keys: []keys.IssuerKey{{KeyID: "as-kid", Algorithm: fapi.ES256, PublicKey: pub}}}, nil
 }
 
+// emptyIssuerKeySource simulates keys.IssuerKeySource.ResolveIssuerKeys
+// returning zero keys with a nil error — reachable in practice through
+// keys.JWKSIssuerKeySource's rate-limited unknown-kid path — so a
+// verification path's own explicit empty-keyset guard can be exercised
+// directly, rather than relying on some downstream check to catch the
+// resulting empty candidate set.
+type emptyIssuerKeySource struct{}
+
+func (emptyIssuerKeySource) ResolveIssuerKeys(context.Context, keys.IssuerKeyRequest) (keys.IssuerKeySet, error) {
+	return keys.IssuerKeySet{}, nil
+}
+
 // fakeSessionStore is an in-memory storage.SessionStore.
 type fakeSessionStore struct {
 	mu       sync.Mutex

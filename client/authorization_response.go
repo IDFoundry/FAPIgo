@@ -171,6 +171,9 @@ func (c *Client) parseCallbackParams(ctx context.Context, cb AuthorizationCallba
 	if err != nil {
 		return nil, "", newError(ErrorInternal, "failed to resolve issuer keys", err)
 	}
+	if len(candidates.Keys) == 0 {
+		return nil, "", newError(ErrorInvalidResponse, "no matching issuer key for authorization response", nil)
+	}
 
 	var (
 		verified  jarm.VerifiedResponse

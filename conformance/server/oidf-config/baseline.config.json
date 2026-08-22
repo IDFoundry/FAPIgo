@@ -16,8 +16,8 @@
             "use": "sig",
             "kid": "gofapi-conformance-client1-key1",
             "crv": "P-256",
-            "x": "AxiXAB73CqFy8w5ic7FWCGIIgYxQd4hSqcS4vg6qM2k",
-            "y": "N66chyGPxG2YMfHoRgfYZGN2Rv59OXgMtzt7fUioO_w"
+            "x": "sykeXEKb0d9czriN2Bd5waXxx5ftpWj9VfebK-j2Jfk",
+            "y": "_IDOs2uxgAk0161utX3Ozky20A8GT22L4emKAegkOUA"
           }
         ]
       },
@@ -43,8 +43,8 @@
             "use": "sig",
             "kid": "gofapi-conformance-client2-key1",
             "crv": "P-256",
-            "x": "RIY6i4HaVgNoaF_E-lsAI8mHcPDC_GK77PoqQyafRN4",
-            "y": "eYxqgSo6obXLMgXCMrYXmfFXxaGcvv6M6LbStOjFxZw"
+            "x": "zzJmYGXLC-nDMizO4kQ8sTeUxfXy2wq02E-goEx9NRg",
+            "y": "8lwr8Jft5zHZ7p5cH3tO_XOwjPEUbTPj36wioECqnqM"
           }
         ]
       },
@@ -69,7 +69,7 @@
             "alg": "PS256",
             "use": "sig",
             "kid": "gofapi-conformance-client1-rs256-key1",
-            "n": "m5F3wJlSMTOdxWXCQYEUsCuFWLlW6ZpPzorso8NGpXYR-Az_G4d8B1DpOWUbRcs_KsvJtnGQ87gERMjSDGwXZfSwK4UX8XLwu1YQdsg_-g3oJUCe7T9UzD2uIfT_30foCxwy5kGoNg6r7W59Pk0zKYn-KT6_Dn_Pdi-vG_wfY_d7AGwuDp9jwc8BKQFlsbSC0l5CXgiDC5k3J8J-jJ_9HVcAgMPdghNOS6nLU_ZM2g089Pxfths-brZX7FqsSSmChxf8S9ZOlGl_m34xLuh3XFqtIaGGyUX4Jm1Zn4-EE9qLJpl3L1ofWDhorQMPCQlSNLAlsuNMYiN6nplP44PAiw",
+            "n": "ySkQyRv0BG0gvz7n5FfU6uunI_Fhe8jaJ89cb7OmOT8m8ZiV4vvSDu17toACmUVUIZa_JztadIFvdQGwHQtP9TNLxUr15aq77IdRTmFyZFo6SINdSXCPuSvE6w7V6rCFKXtrrxU4HxcEW8b5QJqHhDH22_vHydbJGhYTOLuV5T0eKTvWGWcPnZFJ_QM77xX5sv7SLGg9CsujukPL1o4v1pWDrzvcpVKSVY6m6mbxwlMwrVCQZLT9P1A0EIjTmdH4Vmp1GcEMRdv_qn2Vr0rHQVysfcncHPXSWN-boaK0Pc5_cefa0mlJhVzwUqdN7A3WQdMRuRp87D59Hj0lLNEI2w",
             "e": "AQAB"
           }
         ]

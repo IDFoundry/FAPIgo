@@ -31,6 +31,9 @@ func verifyRSAPSS(pubKey crypto.PublicKey, hash, sig []byte) error {
 	if !ok {
 		return fmt.Errorf("%w: PS256 requires an RSA public key, got %T", ErrInvalidSignature, pubKey)
 	}
+	if pub.N == nil || pub.N.BitLen() < 2048 {
+		return fmt.Errorf("%w: PS256 requires an RSA key of at least 2048 bits", ErrInvalidSignature)
+	}
 	if err := rsa.VerifyPSS(pub, crypto.SHA256, hash, sig, pssOptions()); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidSignature, err)
 	}

@@ -182,6 +182,22 @@ func TestVerifyECDSARejectsNonECDSAKey(t *testing.T) {
 	}
 }
 
+// verifyECDSA must reject an off-spec curve on its own — not rely on
+// the sign path's own P-256 guard, ParseJWK/validateKeyForAlgorithm
+// upstream, or ecdsa.Verify happening to fail closed on a mismatched
+// curve — so the two paths can't drift out of sync. The signature here
+// is syntactically valid (right length) but meaningless, since the
+// curve check must fire before ecdsa.Verify is ever reached.
+func TestVerifyECDSARejectsWrongCurve(t *testing.T) {
+	priv, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate p384 key: %v", err)
+	}
+	if err := verifyECDSA(&priv.PublicKey, make([]byte, 32), make([]byte, 64)); !errors.Is(err, ErrInvalidSignature) {
+		t.Fatalf("verifyECDSA(P-384 key) = %v, want ErrInvalidSignature", err)
+	}
+}
+
 func TestVerifyECDSARejectsWrongSignatureLength(t *testing.T) {
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -219,6 +235,28 @@ func TestVerifyRSAPSSRejectsNonRSAKey(t *testing.T) {
 	}
 	if err := verifyRSAPSS(&priv.PublicKey, make([]byte, 32), make([]byte, 32)); !errors.Is(err, ErrInvalidSignature) {
 		t.Fatalf("verifyRSAPSS(ecdsa public key) = %v, want ErrInvalidSignature", err)
+	}
+}
+
+// verifyRSAPSS must reject an under-sized key on its own, for the same
+// drift-prevention reason TestVerifyECDSARejectsWrongCurve exists.
+func TestVerifyRSAPSSRejectsSmallKey(t *testing.T) {
+	small, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatalf("generate small rsa key: %v", err)
+	}
+	if err := verifyRSAPSS(&small.PublicKey, make([]byte, 32), make([]byte, 128)); !errors.Is(err, ErrInvalidSignature) {
+		t.Fatalf("verifyRSAPSS(1024-bit key) = %v, want ErrInvalidSignature", err)
+	}
+}
+
+// A malformed custom IssuerKeySource/ClientKeySource could hand back an
+// *rsa.PublicKey with a nil modulus — BitLen() panics on a nil
+// *big.Int, so this guard must be checked explicitly rather than
+// assumed unreachable.
+func TestVerifyRSAPSSRejectsNilModulusWithoutPanic(t *testing.T) {
+	if err := verifyRSAPSS(&rsa.PublicKey{}, make([]byte, 32), make([]byte, 256)); !errors.Is(err, ErrInvalidSignature) {
+		t.Fatalf("verifyRSAPSS(nil modulus) = %v, want ErrInvalidSignature", err)
 	}
 }
 

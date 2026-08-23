@@ -216,10 +216,11 @@ func (s *Server) verifyTokenRequestDPoP(ctx context.Context, proof string) (dpop
 }
 
 // withIdentityClaims merges whatever Dependencies.IdentityClaims
-// resolves for subject on top of base (base's keys win on collision —
-// identity claims are additive, not a replacement for whatever a
-// protocol extension already put there). A nil IdentityClaims is not an
-// error; it just means no identity claims are added.
+// resolves for subject on top of base (identity claims win on collision
+// — they are authoritative, server-resolved values, and must not be
+// overridable by a client-influenced protocol-extension claim of the
+// same name in base). A nil IdentityClaims is not an error; it just
+// means no identity claims are added.
 func (s *Server) withIdentityClaims(ctx context.Context, subject string, names []string, base map[string]json.RawMessage) (map[string]json.RawMessage, error) {
 	if s.deps.IdentityClaims == nil || len(names) == 0 {
 		return base, nil
@@ -232,10 +233,10 @@ func (s *Server) withIdentityClaims(ctx context.Context, subject string, names [
 		return base, nil
 	}
 	merged := make(map[string]json.RawMessage, len(base)+len(identity))
-	for k, v := range identity {
+	for k, v := range base {
 		merged[k] = v
 	}
-	for k, v := range base {
+	for k, v := range identity {
 		merged[k] = v
 	}
 	return merged, nil

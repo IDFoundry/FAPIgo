@@ -128,7 +128,7 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 		if err != nil {
 			return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorServerError, 500, "failed to resolve identity claims", err))
 		}
-		idToken, err := s.issueIDToken(ctx, client.ID(), redeemed.Subject, "", redeemed.AuthTime, redeemed.ACR, redeemed.AMR, idTokenClaims)
+		idToken, err := s.issueIDToken(ctx, client, redeemed.Subject, "", redeemed.AuthTime, redeemed.ACR, redeemed.AMR, idTokenClaims)
 		if err != nil {
 			return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorServerError, 500, "failed to issue ID token", err))
 		}

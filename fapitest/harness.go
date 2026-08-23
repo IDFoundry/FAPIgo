@@ -16,6 +16,7 @@ import (
 	"github.com/idfoundry/fapigo/extension"
 	"github.com/idfoundry/fapigo/internal/dpop"
 	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/keys/ephemeral"
 	"github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
@@ -40,6 +41,16 @@ type Config struct {
 	// client.BeginAuthorizationRequest.Extensions) and observe whether a
 	// ReturnInTokenClaims value round-trips into the issued tokens.
 	Extensions *extension.Registry
+
+	// EncryptIDTokens, if set, registers the harness's client for
+	// encrypted ID tokens (OIDC Core §2) on both sides — the client's
+	// own Algorithms.IDTokenKeyManagement/ContentEncryption, the
+	// server's per-client RegisteredClient fields, and the server-wide
+	// AlgorithmPolicy allow-list all agree, exactly like a real
+	// deployment's client and AS configuration must — using
+	// RSA-OAEP-256/A256GCM, the same way every other algorithm choice
+	// in this harness is a fixed one (ES256), not configurable per test.
+	EncryptIDTokens bool
 }
 
 // Harness wires a real client.Client, server.Server and resource.Verifier
@@ -75,18 +86,39 @@ func New(t *testing.T, cfg Config) *Harness {
 	asKeys := newMemKeyManager(t, "as", keys.JARMSigning, keys.AccessTokenSigning, keys.IDTokenSigning)
 	clientKeys := newMemKeyManager(t, "rp", keys.ClientAuthentication, keys.RequestObjectSigning, keys.DPoPProofSigning)
 
+	// clientDecryption is only generated (and only wired into the
+	// client/server configs below) when EncryptIDTokens is set — a
+	// separate keys.Decrypter from clientKeys (an RSA key, not the
+	// ECDSA ones clientKeys holds), the same way client.Dependencies
+	// itself keeps Decryption separate from Keys.
+	var clientDecryption *ephemeral.KeyManager
+	if cfg.EncryptIDTokens {
+		var err error
+		clientDecryption, err = ephemeral.NewKeyManagerWithDecryption(nil, map[keys.DecryptionPurpose]fapi.KeyManagementAlgorithm{
+			keys.IDTokenDecryption: fapi.RSAOAEP256,
+		})
+		if err != nil {
+			t.Fatalf("fapitest: ephemeral.NewKeyManagerWithDecryption: %v", err)
+		}
+	}
+
 	issuer, err := fapi.ParseIssuerURL(Issuer)
 	if err != nil {
 		t.Fatalf("fapitest: ParseIssuerURL: %v", err)
 	}
 
-	registeredClient, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
+	registeredClientCfg := storage.RegisteredClientConfig{
 		ID:                       ClientID,
 		RedirectURIs:             []fapi.RegisteredRedirectURI{RedirectURI},
 		ClientAssertionAlgorithm: fapi.ES256,
 		RequestObjectAlgorithm:   fapi.ES256,
 		AllowedScopes:            []string{"openid", "accounts", "offline_access"},
-	})
+	}
+	if cfg.EncryptIDTokens {
+		registeredClientCfg.IDTokenEncryptionKeyManagement = fapi.RSAOAEP256
+		registeredClientCfg.IDTokenEncryptionContentEncryption = fapi.A256GCM
+	}
+	registeredClient, err := storage.NewRegisteredClient(registeredClientCfg)
 	if err != nil {
 		t.Fatalf("fapitest: NewRegisteredClient: %v", err)
 	}
@@ -128,6 +160,10 @@ func New(t *testing.T, cfg Config) *Harness {
 		Assurance:  server.AssuranceDevelopment,
 		Extensions: cfg.Extensions,
 	}
+	if cfg.EncryptIDTokens {
+		srvCfg.Algorithms.IDTokenEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.RSAOAEP256}
+		srvCfg.Algorithms.IDTokenEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{fapi.A256GCM}
+	}
 	revocation := newMemRevocationStore()
 	jwtAccessTokens, err := server.NewJWTAccessTokens(asKeys, fapi.ES256)
 	if err != nil {
@@ -144,6 +180,9 @@ func New(t *testing.T, cfg Config) *Harness {
 		Revocation:   revocation,
 		Clock:        clock,
 		Random:       rand.Reader,
+	}
+	if cfg.EncryptIDTokens {
+		srvDeps.ClientEncryptionKeys = &memClientEncryptionKeySource{clientID: ClientID, decrypter: clientDecryption}
 	}
 	srv, err := server.New(srvCfg, srvDeps)
 	if err != nil {
@@ -183,6 +222,10 @@ func New(t *testing.T, cfg Config) *Harness {
 			MaxHTTPResponseBytes:    1 << 16,
 		},
 	}
+	if cfg.EncryptIDTokens {
+		clientCfg.Algorithms.IDTokenKeyManagement = fapi.RSAOAEP256
+		clientCfg.Algorithms.IDTokenContentEncryption = fapi.A256GCM
+	}
 	clientDeps := client.Dependencies{
 		Sessions:   newMemSessionStore(),
 		Keys:       clientKeys,
@@ -190,6 +233,9 @@ func New(t *testing.T, cfg Config) *Harness {
 		HTTP:       httpClient,
 		Clock:      clock,
 		Random:     rand.Reader,
+	}
+	if cfg.EncryptIDTokens {
+		clientDeps.Decryption = clientDecryption
 	}
 	c, err := client.New(clientCfg, clientDeps)
 	if err != nil {

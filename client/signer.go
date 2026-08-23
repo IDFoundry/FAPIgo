@@ -25,10 +25,8 @@ type keyManagerSigner struct {
 
 func (s keyManagerSigner) Public() crypto.PublicKey { return s.publicKey }
 
-func (s keyManagerSigner) Sign(_ io.Reader, digest []byte, _ crypto.SignerOpts) ([]byte, error) {
-	sig, err := s.manager.Sign(s.ctx, keys.SigningRequest{
-		Purpose: s.purpose, Algorithm: s.algorithm, Digest: digest,
-	})
+func (s keyManagerSigner) Sign(_ io.Reader, digestOrMessage []byte, _ crypto.SignerOpts) ([]byte, error) {
+	sig, err := s.manager.Sign(s.ctx, keys.NewSigningRequest(s.purpose, s.algorithm, digestOrMessage))
 	if err != nil {
 		return nil, err
 	}

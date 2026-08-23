@@ -2,79 +2,44 @@ package fapitest
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"fmt"
-	"sync"
 	"testing"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/keys/ephemeral"
 )
 
-// memKeyManager is an in-memory keys.KeyManager backed by real ECDSA
-// keys, one per SigningPurpose — used for both the simulated
-// authorization server's own signing keys and the simulated client's.
-// Signatures it produces are genuine ASN.1 DER ECDSA signatures, so
-// internal/jose's Sign/Verify pair works against it exactly as it would
-// against a real crypto.Signer.
-type memKeyManager struct {
-	mu   sync.Mutex
-	keys map[keys.SigningPurpose]*ecdsa.PrivateKey
-	kid  map[keys.SigningPurpose]string
-}
-
-// newMemKeyManager generates one P-256 key per purpose in purposes.
-func newMemKeyManager(t *testing.T, prefix string, purposes ...keys.SigningPurpose) *memKeyManager {
+// newAlgorithmKeyManager generates one key per purpose in purposes,
+// each sized for algorithm — a thin t.Fatalf-on-error wrapper around
+// ephemeral.NewKeyManager, used for both the simulated authorization
+// server's own signing keys and the simulated client's. Reusing
+// keys/ephemeral here (rather than fapitest keeping its own duplicate
+// key-generation code) is what makes every SignatureAlgorithm this
+// module supports, EdDSA included, available to a fapitest-based test
+// without fapitest tracking algorithm support of its own.
+func newAlgorithmKeyManager(t *testing.T, algorithm fapi.SignatureAlgorithm, purposes ...keys.SigningPurpose) *ephemeral.KeyManager {
 	t.Helper()
-	m := &memKeyManager{
-		keys: make(map[keys.SigningPurpose]*ecdsa.PrivateKey, len(purposes)),
-		kid:  make(map[keys.SigningPurpose]string, len(purposes)),
-	}
+	m := make(map[keys.SigningPurpose]fapi.SignatureAlgorithm, len(purposes))
 	for _, p := range purposes {
-		priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-		if err != nil {
-			t.Fatalf("fapitest: generate key for purpose %v: %v", p, err)
-		}
-		m.keys[p] = priv
-		m.kid[p] = fmt.Sprintf("%s-%d", prefix, p)
+		m[p] = algorithm
 	}
-	return m
-}
-
-func (m *memKeyManager) Sign(ctx context.Context, req keys.SigningRequest) (keys.Signature, error) {
-	m.mu.Lock()
-	priv, ok := m.keys[req.Purpose]
-	m.mu.Unlock()
-	if !ok {
-		return keys.Signature{}, fmt.Errorf("fapitest: no key for purpose %v", req.Purpose)
-	}
-	sig, err := ecdsa.SignASN1(rand.Reader, priv, req.Digest)
+	manager, err := ephemeral.NewKeyManager(m)
 	if err != nil {
-		return keys.Signature{}, err
+		t.Fatalf("fapitest: build key manager: %v", err)
 	}
-	return keys.Signature{KeyID: m.kid[req.Purpose], Value: sig}, nil
+	return manager
 }
 
-func (m *memKeyManager) PublicKey(ctx context.Context, purpose keys.SigningPurpose, algorithm fapi.SignatureAlgorithm) (keys.PublicKeyInfo, error) {
-	m.mu.Lock()
-	priv, ok := m.keys[purpose]
-	kid := m.kid[purpose]
-	m.mu.Unlock()
-	if !ok {
-		return keys.PublicKeyInfo{}, fmt.Errorf("fapitest: no key for purpose %v", purpose)
-	}
-	return keys.PublicKeyInfo{KeyID: kid, PublicKey: &priv.PublicKey}, nil
-}
-
-// memClientKeySource adapts a client's memKeyManager to keys.ClientKeySource
-// — the server-side contract for resolving a registered client's
-// verification keys — by mapping each VerificationPurpose to the
-// matching SigningPurpose the client actually signed with.
+// memClientKeySource adapts a client's keys.KeyManager (an
+// *ephemeral.KeyManager in practice — see newAlgorithmKeyManager) to
+// keys.ClientKeySource — the server-side contract for resolving a
+// registered client's verification keys — by mapping each
+// VerificationPurpose to the matching SigningPurpose the client
+// actually signed with.
 type memClientKeySource struct {
 	clientID fapi.ClientID
-	manager  *memKeyManager
+	manager  keys.KeyManager
 }
 
 func (s *memClientKeySource) ResolveVerificationKeys(ctx context.Context, req keys.ClientKeyRequest) (keys.VerificationKeySet, error) {
@@ -105,12 +70,12 @@ func signingPurposeFor(p keys.VerificationPurpose) (keys.SigningPurpose, error) 
 	}
 }
 
-// memIssuerKeySource adapts an authorization server's memKeyManager to
+// memIssuerKeySource adapts an authorization server's keys.KeyManager to
 // keys.IssuerKeySource — used by client to verify a JARM response or ID
 // token, and by resource to verify an access token.
 type memIssuerKeySource struct {
 	issuer  string
-	manager *memKeyManager
+	manager keys.KeyManager
 }
 
 func (s *memIssuerKeySource) ResolveIssuerKeys(ctx context.Context, req keys.IssuerKeyRequest) (keys.IssuerKeySet, error) {

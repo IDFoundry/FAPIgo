@@ -17,8 +17,21 @@ var accountHintDef = extension.Definition[string]{
 	MaxBytes:       64,
 }
 
-func TestBeginAuthorizationRejectsExtensionsUnderBaselineProfile(t *testing.T) {
-	c, _, _ := newTestClient(t, false) // baseline, plain-parameter profile
+// accountBalanceDef is Cardinality: Single but not string-typed — used
+// to exercise the baseline (plain-parameter) profile's rejection of a
+// value shape a bare form parameter can't represent.
+var accountBalanceDef = extension.Definition[int]{
+	Name:        "x_account_balance",
+	Cardinality: extension.Single,
+	MaxBytes:    16,
+}
+
+// A string-valued extension has an unambiguous plain-parameter
+// representation — the request object's JSON string and a bare form
+// value round-trip identically — so it no longer requires the
+// message-signing profile.
+func TestBeginAuthorizationSendsStringExtensionAsPlainParameterUnderBaselineProfile(t *testing.T) {
+	c, as, _ := newTestClient(t, false) // baseline, plain-parameter profile
 	ctx := context.Background()
 
 	var req client.BeginAuthorizationRequest
@@ -27,8 +40,51 @@ func TestBeginAuthorizationRejectsExtensionsUnderBaselineProfile(t *testing.T) {
 		t.Fatalf("extension.Set: %v", err)
 	}
 
+	if _, err := c.BeginAuthorization(ctx, req); err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+	if got := as.lastPARForm.Get("x_account_hint"); got != "acc-1" {
+		t.Errorf("PAR form x_account_hint = %q, want acc-1", got)
+	}
+}
+
+// A non-string value (here, an int) has no lossless bare-string
+// representation — a plain form parameter can't distinguish "42" the
+// number from "42" the string the way the request object's native JSON
+// can — so it must still be rejected under the baseline profile rather
+// than silently flattened.
+func TestBeginAuthorizationRejectsNonStringExtensionsUnderBaselineProfile(t *testing.T) {
+	c, _, _ := newTestClient(t, false) // baseline, plain-parameter profile
+	ctx := context.Background()
+
+	var req client.BeginAuthorizationRequest
+	req.Scope = []string{"openid"}
+	if err := extension.Set(&req.Extensions, accountBalanceDef, 42); err != nil {
+		t.Fatalf("extension.Set: %v", err)
+	}
+
 	if _, err := c.BeginAuthorization(ctx, req); err == nil {
-		t.Fatalf("BeginAuthorization(extensions under baseline profile) = nil error, want error")
+		t.Fatalf("BeginAuthorization(non-string extension under baseline profile) = nil error, want error")
+	}
+}
+
+// An extension whose wire name collides with a core authorization
+// parameter must be rejected on the plain path exactly as it already is
+// on the signing path, not silently let the extension value overwrite
+// (or lose to) the core parameter of the same name.
+func TestBeginAuthorizationRejectsExtensionCollidingWithCoreParameterUnderBaselineProfile(t *testing.T) {
+	c, _, _ := newTestClient(t, false) // baseline, plain-parameter profile
+	ctx := context.Background()
+
+	stateDef := extension.Definition[string]{Name: "state", Cardinality: extension.Single, MaxBytes: 64}
+	var req client.BeginAuthorizationRequest
+	req.Scope = []string{"openid"}
+	if err := extension.Set(&req.Extensions, stateDef, "attacker-controlled"); err != nil {
+		t.Fatalf("extension.Set: %v", err)
+	}
+
+	if _, err := c.BeginAuthorization(ctx, req); err == nil {
+		t.Fatalf("BeginAuthorization(extension colliding with core parameter) = nil error, want error")
 	}
 }
 

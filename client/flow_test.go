@@ -19,6 +19,7 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/client"
 	"github.com/idfoundry/fapigo/internal/jarm"
+	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/internal/requestobject"
 	"github.com/idfoundry/fapigo/internal/token"
 	"github.com/idfoundry/fapigo/keys"
@@ -38,9 +39,10 @@ type fakeAS struct {
 	issuer        string
 	messageSigned bool
 
-	lastPARForm   url.Values
-	lastTokenForm url.Values
-	lastNonce     string
+	lastPARForm        url.Values
+	lastTokenForm      url.Values
+	lastTokenDPoPProof string
+	lastNonce          string
 
 	// challengeDPoPNonce, if non-empty, makes handleToken reject every
 	// token request whose DPoP proof doesn't carry this exact "nonce"
@@ -167,6 +169,7 @@ func (a *fakeAS) handleToken(w http.ResponseWriter, r *http.Request) {
 	if proof == "" {
 		a.t.Errorf("token: missing DPoP header")
 	}
+	a.lastTokenDPoPProof = proof
 
 	// A client assertion is exactly as single-use as a DPoP proof: reject
 	// reuse the same way a real jti-tracking authorization server (this
@@ -286,6 +289,38 @@ func dpopProofNonce(t *testing.T, proof string) string {
 		t.Fatalf("unmarshal DPoP proof claims: %v", err)
 	}
 	return claims.Nonce
+}
+
+// dpopProofJKT extracts the embedded "jwk" from a DPoP proof's header
+// and returns its RFC 7638 thumbprint — the same value a server would
+// compare against an authorization request's "dpop_jkt" parameter
+// (RFC 9449 §10) — without verifying the proof's signature, for the
+// same reason dpopProofNonce doesn't.
+func dpopProofJKT(t *testing.T, proof string) string {
+	t.Helper()
+	parts := strings.Split(proof, ".")
+	if len(parts) != 3 {
+		t.Fatalf("DPoP proof is not a 3-part JWT: %q", proof)
+	}
+	header, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		t.Fatalf("decode DPoP proof header: %v", err)
+	}
+	var parsed struct {
+		JWK json.RawMessage `json:"jwk"`
+	}
+	if err := json.Unmarshal(header, &parsed); err != nil {
+		t.Fatalf("unmarshal DPoP proof header: %v", err)
+	}
+	jwk, err := jose.ParseJWK(parsed.JWK, fapi.ES256)
+	if err != nil {
+		t.Fatalf("parse DPoP proof jwk: %v", err)
+	}
+	thumbprint, err := jwk.Thumbprint()
+	if err != nil {
+		t.Fatalf("compute DPoP proof jwk thumbprint: %v", err)
+	}
+	return thumbprint.String()
 }
 
 // RFC 9449 §8: an authorization server that requires a DPoP nonce
@@ -419,6 +454,92 @@ func TestCompleteAuthorizationHappyPathMessageSigning(t *testing.T) {
 	}
 	if success.Tokens.Subject != "end-user-1" {
 		t.Errorf("Subject = %q, want end-user-1", success.Tokens.Subject)
+	}
+}
+
+// ACRValues is opt-in and off by default (many authorization servers
+// reject acr_values outright for a client not specifically provisioned
+// for it) — sent as the standard OIDC Core §3.1.2.1 space-separated
+// list only when the caller actually sets it.
+func TestBeginAuthorizationOmitsACRValuesByDefault(t *testing.T) {
+	c, as, _ := newTestClient(t, false)
+	if _, err := c.BeginAuthorization(context.Background(), client.BeginAuthorizationRequest{Scope: []string{"openid"}}); err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+	if _, present := as.lastPARForm["acr_values"]; present {
+		t.Errorf("PAR form contains acr_values %q, want it omitted when not requested", as.lastPARForm.Get("acr_values"))
+	}
+}
+
+func TestBeginAuthorizationSendsRequestedACRValues(t *testing.T) {
+	c, as, _ := newTestClient(t, false)
+	req := client.BeginAuthorizationRequest{Scope: []string{"openid"}, ACRValues: []string{"urn:mace:incommon:iap:silver", "urn:mace:incommon:iap:bronze"}}
+	if _, err := c.BeginAuthorization(context.Background(), req); err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+	want := "urn:mace:incommon:iap:silver urn:mace:incommon:iap:bronze"
+	if got := as.lastPARForm.Get("acr_values"); got != want {
+		t.Errorf("PAR form acr_values = %q, want %q", got, want)
+	}
+}
+
+// RFC 9126 §2 requires client_id on a pushed authorization request even
+// though this client also authenticates via client_assertion — a strict
+// authorization server may reject a PAR body that omits it.
+func TestBeginAuthorizationSendsClientIDOnPlainPath(t *testing.T) {
+	c, as, _ := newTestClient(t, false)
+	if _, err := c.BeginAuthorization(context.Background(), client.BeginAuthorizationRequest{Scope: []string{"openid"}}); err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+	if got := as.lastPARForm.Get("client_id"); got != testClientID {
+		t.Errorf("PAR form client_id = %q, want %q", got, testClientID)
+	}
+}
+
+// client_id belongs in the request object on the signing path (it
+// already did before this change); this pins that it still does now
+// that both paths build client_id from the same shared params map.
+func TestBeginAuthorizationSendsClientIDInSignedRequestObject(t *testing.T) {
+	c, as, _ := newTestClient(t, true)
+	if _, err := c.BeginAuthorization(context.Background(), client.BeginAuthorizationRequest{Scope: []string{"openid"}}); err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+	obj, err := requestobject.Parse(as.lastPARForm.Get("request"))
+	if err != nil {
+		t.Fatalf("parse request object: %v", err)
+	}
+	if obj.ClaimedIssuer() != testClientID {
+		t.Errorf("request object client_id (iss) = %q, want %q", obj.ClaimedIssuer(), testClientID)
+	}
+}
+
+// RFC 9449 §10: committing the DPoP key binding at PAR time (rather
+// than leaving it to whichever key first shows up at the token
+// endpoint) closes an authorization-code-injection window. This is the
+// full round trip: the "dpop_jkt" sent at PAR must be the thumbprint of
+// the exact key this client later presents a DPoP proof with at the
+// token endpoint for the same authorization.
+func TestBeginAuthorizationCommitsDPoPKeyAtPARMatchingTokenEndpointProof(t *testing.T) {
+	c, as, _ := newTestClient(t, false)
+	ctx := context.Background()
+
+	session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}})
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+	parJKT := as.lastPARForm.Get("dpop_jkt")
+	if parJKT == "" {
+		t.Fatalf("PAR form is missing dpop_jkt")
+	}
+
+	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-dpop-jkt", "")
+	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery}); err != nil {
+		t.Fatalf("CompleteAuthorization: %v", err)
+	}
+
+	tokenJKT := dpopProofJKT(t, as.lastTokenDPoPProof)
+	if tokenJKT != parJKT {
+		t.Errorf("token endpoint DPoP proof key thumbprint = %q, want it to match PAR's dpop_jkt %q", tokenJKT, parJKT)
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/idfoundry/fapigo/extension"
 	"github.com/idfoundry/fapigo/internal/clientassertion"
+	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/internal/par"
 	"github.com/idfoundry/fapigo/internal/pkce"
 	"github.com/idfoundry/fapigo/internal/requestobject"
@@ -23,15 +24,25 @@ import (
 type BeginAuthorizationRequest struct {
 	Scope []string
 
+	// ACRValues optionally requests specific Authentication Context
+	// Class Reference values (OIDC Core §3.1.2.1), most-preferred first.
+	// Sent as the space-separated "acr_values" parameter only when
+	// non-empty — many authorization servers reject it outright for a
+	// client that hasn't been specifically provisioned for it, so this
+	// is opt-in, never sent by default.
+	ACRValues []string
+
 	// Extensions carries any custom authorization parameters to attach
 	// to this request — set via extension.Set(&req.Extensions,
-	// Definition, value). It requires
+	// Definition, value). A value whose encoded JSON shape is a bare
+	// string is sent as a plain top-level authorization/PAR parameter
+	// regardless of Config.Profile. Any other shape (object, array,
+	// number, bool) requires
 	// Config.Profile == ProfileFAPISecurityWithMessageSigning: a signed
 	// request object carries a value's native JSON shape losslessly,
-	// while this client's plain-parameter path would have to flatten
-	// every value to a bare string, silently losing structure. A
-	// non-empty Extensions under the baseline profile is rejected rather
-	// than mis-encoded.
+	// while a plain top-level parameter has no way to represent anything
+	// but a bare string. A non-string value under the baseline profile
+	// is rejected rather than mis-encoded.
 	Extensions extension.Values
 }
 
@@ -67,8 +78,19 @@ func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 		return AuthorizationSession{}, newError(ErrorInternal, "failed to derive PKCE challenge", err)
 	}
 
+	dpopThumbprint, err := c.dpopKeyThumbprint(ctx)
+	if err != nil {
+		return AuthorizationSession{}, newError(ErrorInternal, "failed to compute DPoP key thumbprint", err)
+	}
+
 	now := c.deps.Clock.Now()
 	params := map[string]string{
+		// client_id (RFC 6749 §4.1.1) is a required authorization-request
+		// parameter — carried here even though this client also
+		// authenticates via client_assertion, since a pushed
+		// authorization request (RFC 9126 §2) conveys the full
+		// authorization request, not just a bare authentication call.
+		"client_id":             c.cfg.ClientID.String(),
 		"response_type":         "code",
 		"redirect_uri":          c.cfg.RedirectURI,
 		"scope":                 strings.Join(req.Scope, " "),
@@ -76,6 +98,16 @@ func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 		"nonce":                 nonce,
 		"code_challenge":        challenge,
 		"code_challenge_method": "S256",
+		// dpop_jkt (RFC 9449 §10) commits the authorization code to this
+		// client's DPoP key at PAR time, rather than leaving that
+		// binding to whichever key first shows up at the token endpoint
+		// — closing an authorization-code-injection window and matching
+		// the key this client will actually present with in
+		// ExchangeCode.
+		"dpop_jkt": dpopThumbprint,
+	}
+	if len(req.ACRValues) > 0 {
+		params["acr_values"] = strings.Join(req.ACRValues, " ")
 	}
 
 	formParams, buildErr := c.buildPushedRequestForm(ctx, now, params, req.Extensions)
@@ -120,6 +152,28 @@ func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 	return AuthorizationSession{url: browserURL, handle: SessionHandle{value: state}}, nil
 }
 
+// dpopKeyThumbprint returns the JWK SHA-256 thumbprint (RFC 7638) of
+// this client's DPoP signing key, for the "dpop_jkt" authorization
+// request parameter (RFC 9449 §10). Dependencies.Keys returns a stable
+// key per SigningPurpose (see keys.KeyManager's own contract), so this
+// is guaranteed to match whichever key ExchangeCode later presents a
+// DPoP proof with for the same client instance.
+func (c *Client) dpopKeyThumbprint(ctx context.Context) (string, error) {
+	info, err := c.deps.Keys.PublicKey(ctx, keys.DPoPProofSigning, c.cfg.Algorithms.DPoP)
+	if err != nil {
+		return "", fmt.Errorf("resolve DPoP key: %w", err)
+	}
+	jwk, err := jose.NewJWK(info.PublicKey, c.cfg.Algorithms.DPoP)
+	if err != nil {
+		return "", fmt.Errorf("build DPoP JWK: %w", err)
+	}
+	thumbprint, err := jwk.Thumbprint()
+	if err != nil {
+		return "", fmt.Errorf("compute DPoP key thumbprint: %w", err)
+	}
+	return thumbprint.String(), nil
+}
+
 // buildPushedRequestForm builds the PAR endpoint's form body: a client
 // assertion for authentication, plus either a signed request object
 // (ProfileFAPISecurityWithMessageSigning) or the plain authorization
@@ -146,8 +200,23 @@ func (c *Client) buildPushedRequestForm(ctx context.Context, now time.Time, para
 	snapshot := extension.Snapshot(extensions)
 
 	if c.cfg.Profile != ProfileFAPISecurityWithMessageSigning {
-		if len(snapshot) > 0 {
-			return nil, newError(ErrorInvalidRequest, "extension parameters require ProfileFAPISecurityWithMessageSigning", nil)
+		for name, raw := range snapshot {
+			if _, reserved := params[name]; reserved {
+				return nil, newError(ErrorInvalidRequest, fmt.Sprintf("extension parameter %q collides with a core parameter name", name), nil)
+			}
+			// A plain top-level parameter has no way to represent
+			// anything but a bare string — unlike the signing path
+			// below, which embeds raw straight into the request
+			// object's JSON and so preserves any shape. Only a value
+			// that is itself a bare JSON string round-trips here
+			// without loss; anything else must go through the signing
+			// profile instead of being silently flattened.
+			var value string
+			if err := json.Unmarshal(raw, &value); err != nil {
+				return nil, newError(ErrorInvalidRequest,
+					fmt.Sprintf("extension parameter %q is not a plain string; non-string extension values require ProfileFAPISecurityWithMessageSigning", name), nil)
+			}
+			params[name] = value
 		}
 		for k, v := range params {
 			form[k] = v
@@ -155,13 +224,11 @@ func (c *Client) buildPushedRequestForm(ctx context.Context, now time.Time, para
 		return form, nil
 	}
 
-	objectParams := make(map[string]json.RawMessage, len(params)+1+len(snapshot))
+	objectParams := make(map[string]json.RawMessage, len(params)+len(snapshot))
 	for k, v := range params {
 		encoded, _ := json.Marshal(v) // marshaling a string cannot fail
 		objectParams[k] = encoded
 	}
-	clientIDJSON, _ := json.Marshal(c.cfg.ClientID.String())
-	objectParams["client_id"] = clientIDJSON
 
 	for name, raw := range snapshot {
 		if _, reserved := objectParams[name]; reserved {

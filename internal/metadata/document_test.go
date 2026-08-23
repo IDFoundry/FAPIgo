@@ -67,6 +67,44 @@ func TestParseAndValidateAcceptsIDTokenEncryptionFields(t *testing.T) {
 	}
 }
 
+func TestParseAndValidateAcceptsUserinfoEndpoint(t *testing.T) {
+	issuer := "https://as.example.com"
+	doc := metadata.Document{
+		Issuer:                             issuer,
+		AuthorizationEndpoint:              issuer + "/authorize",
+		TokenEndpoint:                      issuer + "/token",
+		PushedAuthorizationRequestEndpoint: issuer + "/par",
+		JWKSURI:                            issuer + "/jwks",
+		UserinfoEndpoint:                   issuer + "/userinfo",
+	}
+	body, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	parsed, err := metadata.ParseAndValidate(body, issuer)
+	if err != nil {
+		t.Fatalf("ParseAndValidate: %v", err)
+	}
+	if parsed.UserinfoEndpoint != issuer+"/userinfo" {
+		t.Errorf("UserinfoEndpoint = %q", parsed.UserinfoEndpoint)
+	}
+}
+
+// A document that never mentions userinfo_endpoint at all — a server
+// with no UserInfo Endpoint, or one that just doesn't advertise it —
+// must parse with the field empty, not fail; it's OPTIONAL per OpenID
+// Connect Discovery 1.0 §3.
+func TestParseAndValidateOmitsUserinfoEndpointWhenAbsent(t *testing.T) {
+	body := validDocumentJSON(t, "https://as.example.com")
+	doc, err := metadata.ParseAndValidate(body, "https://as.example.com")
+	if err != nil {
+		t.Fatalf("ParseAndValidate: %v", err)
+	}
+	if doc.UserinfoEndpoint != "" {
+		t.Errorf("UserinfoEndpoint = %q, want empty", doc.UserinfoEndpoint)
+	}
+}
+
 // A document that never mentions encryption at all — the common case —
 // must parse with both fields empty, not fail or default to something
 // non-empty.

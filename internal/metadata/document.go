@@ -52,6 +52,15 @@ type Document struct {
 	RequirePushedAuthorizationRequests         bool `json:"require_pushed_authorization_requests,omitempty"`
 	RequireSignedRequestObject                 bool `json:"require_signed_request_object,omitempty"`
 	AuthorizationResponseIssParameterSupported bool `json:"authorization_response_iss_parameter_supported,omitempty"`
+
+	// UserinfoEndpoint is OPTIONAL per OpenID Connect Discovery 1.0 §3.
+	// This module's own client never calls it — client's public API
+	// ends at token issuance, the same way any other protected-resource
+	// call is the embedding application's job — but an embedding
+	// application that does call it needs the URL, and there's no
+	// reason to make it hand-fetch discovery a second time just for
+	// this one field.
+	UserinfoEndpoint string `json:"userinfo_endpoint,omitempty"`
 }
 
 // ParseAndValidate parses body as a Document and checks it against

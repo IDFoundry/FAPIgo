@@ -60,6 +60,8 @@ func metadataHandler(srv *server.Server, advertisedScopes []string, userinfoURL 
 				RequestObjectSigningAlgValuesSupported:     md.RequestObjectSigningAlgValuesSupported,
 				IDTokenSigningAlgValuesSupported:           md.IDTokenSigningAlgValuesSupported,
 				AuthorizationSigningAlgValuesSupported:     md.AuthorizationSigningAlgValuesSupported,
+				IDTokenEncryptionAlgValuesSupported:        md.IDTokenEncryptionAlgValuesSupported,
+				IDTokenEncryptionEncValuesSupported:        md.IDTokenEncryptionEncValuesSupported,
 				RequirePushedAuthorizationRequests:         md.RequirePushedAuthorizationRequests,
 				RequireSignedRequestObject:                 md.RequireSignedRequestObject,
 				AuthorizationResponseIssParameterSupported: md.AuthorizationResponseIssParameterSupported,

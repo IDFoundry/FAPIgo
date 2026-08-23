@@ -77,6 +77,21 @@ func validateConfig(cfg Config) error {
 	if !cfg.Algorithms.IDToken.IsValid() {
 		return fmt.Errorf("server: config: algorithms.id_token is required")
 	}
+	idTokenEncKeyMgmtSet := len(cfg.Algorithms.IDTokenEncryptionKeyManagement) > 0
+	idTokenEncContentEncSet := len(cfg.Algorithms.IDTokenEncryptionContentEncryption) > 0
+	if idTokenEncKeyMgmtSet != idTokenEncContentEncSet {
+		return fmt.Errorf("server: config: algorithms.id_token_encryption_key_management and algorithms.id_token_encryption_content_encryption must both be set, or neither")
+	}
+	for _, a := range cfg.Algorithms.IDTokenEncryptionKeyManagement {
+		if !a.IsValid() {
+			return fmt.Errorf("server: config: algorithms.id_token_encryption_key_management contains an invalid algorithm")
+		}
+	}
+	for _, a := range cfg.Algorithms.IDTokenEncryptionContentEncryption {
+		if !a.IsValid() {
+			return fmt.Errorf("server: config: algorithms.id_token_encryption_content_encryption contains an invalid algorithm")
+		}
+	}
 
 	if cfg.Limits.PushedRequestLifetime <= 0 {
 		return fmt.Errorf("server: config: limits.pushed_request_lifetime must be positive")
@@ -184,6 +199,10 @@ func validateDependencies(cfg Config, deps Dependencies) error {
 	}
 	if deps.AccessTokens == nil {
 		return fmt.Errorf("server: dependencies: access tokens is required (pass JWTAccessTokens{...} or OpaqueAccessTokens{...})")
+	}
+	idTokenEncEnabled := len(cfg.Algorithms.IDTokenEncryptionKeyManagement) > 0 || len(cfg.Algorithms.IDTokenEncryptionContentEncryption) > 0
+	if idTokenEncEnabled && deps.ClientEncryptionKeys == nil {
+		return fmt.Errorf("server: dependencies: client encryption keys is required when algorithms.id_token_encryption_key_management/content_encryption are configured")
 	}
 	if cfg.Assurance == AssuranceProduction {
 		if deps.Audit == nil {

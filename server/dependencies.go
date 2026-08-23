@@ -30,6 +30,15 @@ type Dependencies struct {
 	// ClientKeys resolves a registered client's verification keys.
 	ClientKeys keys.ClientKeySource
 
+	// ClientEncryptionKeys resolves a registered client's encryption
+	// keys, for issuing it an encrypted ID token (OIDC Core §2).
+	// Required exactly when Config.Algorithms.IDTokenEncryptionKeyManagement/
+	// IDTokenEncryptionContentEncryption are non-empty; nil otherwise —
+	// most deployments never enable this, so it stays an opt-in
+	// dependency rather than a mandatory one every embedder has to wire
+	// up.
+	ClientEncryptionKeys keys.ClientEncryptionKeySource
+
 	// Keys performs this server's own signing operations: JARM response
 	// signing (when Config.Profile requires it), and ID token signing
 	// (always). Access-token signing, when AccessTokens is

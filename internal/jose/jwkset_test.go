@@ -2,6 +2,7 @@ package jose
 
 import (
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/rsa"
 	"encoding/json"
 	"testing"
@@ -70,12 +71,19 @@ func TestParseJWKSetInfersAlgorithmFromKtyAndCrv(t *testing.T) {
 	}
 	rsaEntry := rawKeySetEntry(t, rsaJWK.WithKeyID("rsa-kid"), nil)
 
-	parsed, err := ParseJWKSet(jwkSetBody(t, ecEntry, rsaEntry))
+	edPub, _ := generateEd25519Key(t)
+	edJWK, err := NewJWK(edPub, fapi.EdDSA)
+	if err != nil {
+		t.Fatalf("NewJWK (OKP): %v", err)
+	}
+	edEntry := rawKeySetEntry(t, edJWK.WithKeyID("ed-kid"), nil)
+
+	parsed, err := ParseJWKSet(jwkSetBody(t, ecEntry, rsaEntry, edEntry))
 	if err != nil {
 		t.Fatalf("ParseJWKSet: %v", err)
 	}
-	if len(parsed) != 2 {
-		t.Fatalf("len(parsed) = %d, want 2", len(parsed))
+	if len(parsed) != 3 {
+		t.Fatalf("len(parsed) = %d, want 3", len(parsed))
 	}
 	if parsed[0].KeyID != "ec-kid" || parsed[0].Algorithm != fapi.ES256 {
 		t.Fatalf("parsed[0] = %+v, want kid=ec-kid alg=ES256", parsed[0])
@@ -88,6 +96,12 @@ func TestParseJWKSetInfersAlgorithmFromKtyAndCrv(t *testing.T) {
 	}
 	if _, ok := parsed[1].PublicKey.(*rsa.PublicKey); !ok {
 		t.Fatalf("parsed[1].PublicKey type = %T, want *rsa.PublicKey", parsed[1].PublicKey)
+	}
+	if parsed[2].KeyID != "ed-kid" || parsed[2].Algorithm != fapi.EdDSA {
+		t.Fatalf("parsed[2] = %+v, want kid=ed-kid alg=EdDSA", parsed[2])
+	}
+	if _, ok := parsed[2].PublicKey.(ed25519.PublicKey); !ok {
+		t.Fatalf("parsed[2].PublicKey type = %T, want ed25519.PublicKey", parsed[2].PublicKey)
 	}
 }
 

@@ -83,6 +83,11 @@ func algorithmForJWKSetHint(h jwkSetAlgHint) (fapi.SignatureAlgorithm, bool) {
 		return 0, false
 	case "RSA":
 		return fapi.PS256, true
+	case "OKP":
+		if h.Crv == "Ed25519" {
+			return fapi.EdDSA, true
+		}
+		return 0, false
 	default:
 		return 0, false
 	}

@@ -2,6 +2,7 @@ package jose
 
 import (
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
@@ -149,6 +150,83 @@ func TestJWKRoundTripRSA(t *testing.T) {
 	}
 }
 
+// TestJWKRoundTripOKP checks the exact wire shape RFC 8037 §2 requires
+// for an Ed25519 public key — kty="OKP", crv="Ed25519", "x" only, no
+// "y"/"n"/"e" the way EC/RSA JWKs carry — not just that MarshalJSON and
+// ParseJWK happen to agree with each other, which a bug in both
+// wouldn't catch.
+func TestJWKRoundTripOKP(t *testing.T) {
+	pub, _ := generateEd25519Key(t)
+	jwk, err := NewJWK(pub, fapi.EdDSA)
+	if err != nil {
+		t.Fatalf("NewJWK: %v", err)
+	}
+	data, err := jwk.MarshalJSON()
+	if err != nil {
+		t.Fatalf("MarshalJSON: %v", err)
+	}
+
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if m["kty"] != "OKP" {
+		t.Fatalf(`m["kty"] = %v, want "OKP"`, m["kty"])
+	}
+	if m["crv"] != "Ed25519" {
+		t.Fatalf(`m["crv"] = %v, want "Ed25519"`, m["crv"])
+	}
+	if m["x"] != base64.RawURLEncoding.EncodeToString(pub) {
+		t.Fatalf(`m["x"] = %v, want %q`, m["x"], base64.RawURLEncoding.EncodeToString(pub))
+	}
+	for _, member := range []string{"y", "n", "e"} {
+		if _, ok := m[member]; ok {
+			t.Fatalf("MarshalJSON output unexpectedly contains %q: %s", member, data)
+		}
+	}
+
+	parsed, err := ParseJWK(data, fapi.EdDSA)
+	if err != nil {
+		t.Fatalf("ParseJWK: %v", err)
+	}
+	parsedPub, ok := parsed.PublicKey().(ed25519.PublicKey)
+	if !ok {
+		t.Fatalf("PublicKey() type = %T, want ed25519.PublicKey", parsed.PublicKey())
+	}
+	if !parsedPub.Equal(pub) {
+		t.Fatalf("round-tripped key does not equal original")
+	}
+
+	tp1, err := jwk.Thumbprint()
+	if err != nil {
+		t.Fatalf("Thumbprint: %v", err)
+	}
+	tp2, err := parsed.Thumbprint()
+	if err != nil {
+		t.Fatalf("Thumbprint (parsed): %v", err)
+	}
+	if !tp1.Equal(tp2) {
+		t.Fatalf("thumbprints differ before/after round trip: %s vs %s", tp1, tp2)
+	}
+}
+
+func TestParseJWKRejectsMalformedOKPCoordinates(t *testing.T) {
+	cases := map[string]string{
+		"wrong curve": `{"kty":"OKP","crv":"X25519","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"}`,
+		"missing x":   `{"kty":"OKP","crv":"Ed25519"}`,
+		"empty x":     `{"kty":"OKP","crv":"Ed25519","x":""}`,
+		"short x":     `{"kty":"OKP","crv":"Ed25519","x":"AAAA"}`,
+		"invalid b64": `{"kty":"OKP","crv":"Ed25519","x":"not-valid-base64url!!"}`,
+	}
+	for name, raw := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParseJWK([]byte(raw), fapi.EdDSA); err == nil {
+				t.Fatalf("ParseJWK(%s) = nil error, want error", name)
+			}
+		})
+	}
+}
+
 func TestJWKRejectsWrongAlgorithm(t *testing.T) {
 	ecKey := generateEC(t)
 	if _, err := NewJWK(&ecKey.PublicKey, fapi.PS256); err == nil {
@@ -158,6 +236,14 @@ func TestJWKRejectsWrongAlgorithm(t *testing.T) {
 	rsaKey := generateRSA(t)
 	if _, err := NewJWK(&rsaKey.PublicKey, fapi.ES256); err == nil {
 		t.Fatalf("NewJWK(rsa key, ES256) = nil error, want error")
+	}
+
+	edPub, _ := generateEd25519Key(t)
+	if _, err := NewJWK(edPub, fapi.ES256); err == nil {
+		t.Fatalf("NewJWK(ed25519 key, ES256) = nil error, want error")
+	}
+	if _, err := NewJWK(&ecKey.PublicKey, fapi.EdDSA); err == nil {
+		t.Fatalf("NewJWK(ec key, EdDSA) = nil error, want error")
 	}
 }
 

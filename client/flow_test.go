@@ -20,9 +20,11 @@ import (
 	"github.com/idfoundry/fapigo/client"
 	"github.com/idfoundry/fapigo/internal/jarm"
 	"github.com/idfoundry/fapigo/internal/jose"
+	"github.com/idfoundry/fapigo/internal/jwe"
 	"github.com/idfoundry/fapigo/internal/requestobject"
 	"github.com/idfoundry/fapigo/internal/token"
 	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/keys/ephemeral"
 )
 
 // fakeAS simulates just enough of an authorization server's PAR and
@@ -61,6 +63,14 @@ type fakeAS struct {
 	// to test that a client tolerates its absence (RFC 6749 §5.1:
 	// RECOMMENDED, not REQUIRED).
 	omitExpiresIn bool
+
+	// encryptIDTokenTo, if non-nil, wraps the issued ID token as a
+	// signed-then-encrypted Nested JWT (OIDC Core §2) to this public
+	// key under encryptIDTokenAlg before putting it in the token
+	// response — exercising the real client.ExchangeCode -> decrypt ->
+	// verify path end to end, not just validateIDToken in isolation.
+	encryptIDTokenTo  crypto.PublicKey
+	encryptIDTokenAlg fapi.KeyManagementAlgorithm
 }
 
 func newFakeAS(t *testing.T, issuer string, messageSigned bool) *fakeAS {
@@ -208,6 +218,15 @@ func (a *fakeAS) handleToken(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.t.Fatalf("issue id token: %v", err)
 	}
+	if a.encryptIDTokenTo != nil {
+		idToken, err = jwe.Encrypt(jwe.EncryptRequest{
+			Algorithm: a.encryptIDTokenAlg, Encryption: fapi.A256GCM,
+			RecipientKey: a.encryptIDTokenTo, ContentType: "JWT", Plaintext: []byte(idToken),
+		})
+		if err != nil {
+			a.t.Fatalf("encrypt id token: %v", err)
+		}
+	}
 
 	tokenType := "DPoP"
 	if a.tokenTypeOverride != "" {
@@ -266,6 +285,59 @@ func newTestClient(t *testing.T, messageSigned bool) (*client.Client, *fakeAS, *
 		t.Fatalf("client.New: %v", err)
 	}
 	return c, as, ts
+}
+
+// newTestClientWithEncryptedIDToken is newTestClient (baseline profile
+// only) plus a configured Decryption dependency and a fakeAS that
+// encrypts every ID token it issues to that same key under alg — for
+// proving the full ExchangeCode -> decrypt -> verify path end to end,
+// not just validateIDToken in isolation.
+func newTestClientWithEncryptedIDToken(t *testing.T, alg fapi.KeyManagementAlgorithm) (*client.Client, *fakeAS, *ephemeral.KeyManager) {
+	t.Helper()
+	as := newFakeAS(t, testIssuer, false)
+	ts := httptest.NewServer(as.handler())
+	t.Cleanup(ts.Close)
+
+	decrypter, err := ephemeral.NewKeyManagerWithDecryption(nil, map[keys.DecryptionPurpose]fapi.KeyManagementAlgorithm{
+		keys.IDTokenDecryption: alg,
+	})
+	if err != nil {
+		t.Fatalf("NewKeyManagerWithDecryption: %v", err)
+	}
+	info, err := decrypter.EncryptionPublicKey(context.Background(), keys.IDTokenDecryption, alg)
+	if err != nil {
+		t.Fatalf("EncryptionPublicKey: %v", err)
+	}
+	as.encryptIDTokenTo = info.PublicKey
+	as.encryptIDTokenAlg = alg
+
+	cfg := validConfig(t)
+	cfg.Algorithms.IDTokenKeyManagement = alg
+	cfg.Algorithms.IDTokenContentEncryption = fapi.A256GCM
+	parURL, err := fapi.ParseEndpointURL(ts.URL+"/par", fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseEndpointURL(par): %v", err)
+	}
+	tokenURL, err := fapi.ParseEndpointURL(ts.URL+"/token", fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseEndpointURL(token): %v", err)
+	}
+	cfg.Endpoints.PushedAuthorizationRequest = parURL
+	cfg.Endpoints.Token = tokenURL
+
+	deps := validDependencies(t)
+	deps.HTTP = ts.Client()
+	deps.IssuerKeys = &fakeIssuerKeySource{keys: map[keys.IssuerVerificationPurpose]crypto.PublicKey{
+		keys.JARMVerification:    &as.jarmKey.PublicKey,
+		keys.IDTokenVerification: &as.idTokenKey.PublicKey,
+	}}
+	deps.Decryption = decrypter
+
+	c, err := client.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	return c, as, decrypter
 }
 
 // dpopProofNonce extracts the "nonce" claim from a DPoP proof's payload
@@ -454,6 +526,45 @@ func TestCompleteAuthorizationHappyPathMessageSigning(t *testing.T) {
 	}
 	if success.Tokens.Subject != "end-user-1" {
 		t.Errorf("Subject = %q, want end-user-1", success.Tokens.Subject)
+	}
+}
+
+// End-to-end proof (not just validateIDToken in isolation) that
+// ExchangeCode correctly decrypts a signed-then-encrypted Nested JWT ID
+// token (OIDC Core §2) the authorization server actually returns over
+// the wire, for both key-management algorithms this module supports.
+func TestCompleteAuthorizationDecryptsEncryptedIDToken(t *testing.T) {
+	for _, alg := range []fapi.KeyManagementAlgorithm{fapi.RSAOAEP256, fapi.ECDHESA256KW} {
+		t.Run(alg.String(), func(t *testing.T) {
+			c, as, _ := newTestClientWithEncryptedIDToken(t, alg)
+			ctx := context.Background()
+
+			session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid", "accounts"}})
+			if err != nil {
+				t.Fatalf("BeginAuthorization: %v", err)
+			}
+
+			rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-encrypted", "")
+			result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery})
+			if err != nil {
+				t.Fatalf("CompleteAuthorization: %v", err)
+			}
+			success, ok := result.(client.CompletionSuccess)
+			if !ok {
+				t.Fatalf("result type = %T, want client.CompletionSuccess", result)
+			}
+			if !success.Tokens.HasIDToken || success.Tokens.Subject != "end-user-1" {
+				t.Errorf("HasIDToken=%v Subject=%q, want true/end-user-1", success.Tokens.HasIDToken, success.Tokens.Subject)
+			}
+			// The id_token actually carried over the wire must be the
+			// encrypted (5-segment) form — this is what proves the
+			// server's response really was encrypted, not that the
+			// test accidentally sent a plain token through a path that
+			// happens to still work.
+			if segments := strings.Count(success.Tokens.IDToken.Reveal(), ".") + 1; segments != 5 {
+				t.Errorf("wire id_token has %d segments, want 5 (encrypted)", segments)
+			}
+		})
 	}
 }
 

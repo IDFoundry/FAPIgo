@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -84,17 +85,112 @@ func buildTestSignedIDToken(t *testing.T, idKey *ecdsa.PrivateKey, now time.Time
 	return tok
 }
 
+// buildTestSignedIDTokenWithClaims mirrors buildTestSignedIDToken but
+// also embeds ACR/AMR/AuthTime and a custom Parameters claim, for
+// confirming validateIDToken actually propagates all of
+// token.ValidatedIDToken rather than collapsing it to just Subject.
+func buildTestSignedIDTokenWithClaims(t *testing.T, idKey *ecdsa.PrivateKey, now time.Time) string {
+	t.Helper()
+	tok, err := token.IssueIDToken(token.IDTokenParams{
+		Signer: idKey, Algorithm: fapi.ES256, KeyID: "as-kid",
+		Issuer: idTokenTestIssuer, Subject: idTokenTestSubject, Audience: idTokenTestClientID,
+		Nonce: idTokenTestNonce, AuthTime: now, ACR: "urn:mace:incommon:iap:silver", AMR: []string{"pwd"},
+		Now: now, Lifetime: time.Minute,
+		Parameters: map[string]json.RawMessage{"email": json.RawMessage(`"end-user@example.com"`)},
+	})
+	if err != nil {
+		t.Fatalf("IssueIDToken: %v", err)
+	}
+	return tok
+}
+
+// assertFullIDTokenClaims checks every field validateIDToken's caller
+// should be able to reach beyond Subject — ACR/AMR/AuthTime/Parameters
+// — using the exact values buildTestSignedIDTokenWithClaims embedded.
+func assertFullIDTokenClaims(t *testing.T, validated token.ValidatedIDToken, now time.Time) {
+	t.Helper()
+	if validated.Subject != idTokenTestSubject {
+		t.Errorf("Subject = %q, want %q", validated.Subject, idTokenTestSubject)
+	}
+	// auth_time is a JWT NumericDate (whole seconds), so sub-second
+	// precision doesn't survive the round trip.
+	if !validated.AuthTime.Equal(now.Truncate(time.Second)) {
+		t.Errorf("AuthTime = %v, want %v", validated.AuthTime, now.Truncate(time.Second))
+	}
+	if validated.ACR != "urn:mace:incommon:iap:silver" {
+		t.Errorf("ACR = %q, want %q", validated.ACR, "urn:mace:incommon:iap:silver")
+	}
+	if len(validated.AMR) != 1 || validated.AMR[0] != "pwd" {
+		t.Errorf("AMR = %v, want [pwd]", validated.AMR)
+	}
+	email, ok := validated.Parameters["email"]
+	if !ok || string(email) != `"end-user@example.com"` {
+		t.Errorf(`Parameters["email"] = %s, ok=%v, want "end-user@example.com", true`, email, ok)
+	}
+}
+
+// TestValidateIDTokenReturnsFullClaims confirms validateIDToken
+// propagates the entire validated ID token, not just Subject, for an
+// ordinary signed (unencrypted) token.
+func TestValidateIDTokenReturnsFullClaims(t *testing.T) {
+	now := time.Now()
+	c, idKey := idTokenTestClient(t, now, Algorithms{IDToken: fapi.ES256}, nil)
+	raw := buildTestSignedIDTokenWithClaims(t, idKey, now)
+
+	validated, err := c.validateIDToken(context.Background(), raw, idTokenTestNonce)
+	if err != nil {
+		t.Fatalf("validateIDToken: %v", err)
+	}
+	assertFullIDTokenClaims(t, validated, now)
+}
+
+// TestValidateIDTokenReturnsFullClaimsWhenEncrypted is the case that
+// actually matters: for an encrypted ID token, decryption happens
+// entirely inside client, so this is the only way any claim besides
+// Subject can ever reach a caller at all.
+func TestValidateIDTokenReturnsFullClaimsWhenEncrypted(t *testing.T) {
+	now := time.Now()
+	decrypter, err := ephemeral.NewKeyManagerWithDecryption(nil, map[keys.DecryptionPurpose]fapi.KeyManagementAlgorithm{
+		keys.IDTokenDecryption: fapi.RSAOAEP256,
+	})
+	if err != nil {
+		t.Fatalf("NewKeyManagerWithDecryption: %v", err)
+	}
+	c, idKey := idTokenTestClient(t, now, Algorithms{
+		IDToken: fapi.ES256, IDTokenKeyManagement: fapi.RSAOAEP256, IDTokenContentEncryption: fapi.A256GCM,
+	}, decrypter)
+
+	signed := buildTestSignedIDTokenWithClaims(t, idKey, now)
+	info, err := decrypter.EncryptionPublicKey(context.Background(), keys.IDTokenDecryption, fapi.RSAOAEP256)
+	if err != nil {
+		t.Fatalf("EncryptionPublicKey: %v", err)
+	}
+	encrypted, err := jwe.Encrypt(jwe.EncryptRequest{
+		Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM, RecipientKey: info.PublicKey,
+		ContentType: "JWT", Plaintext: []byte(signed),
+	})
+	if err != nil {
+		t.Fatalf("jwe.Encrypt: %v", err)
+	}
+
+	validated, verr := c.validateIDToken(context.Background(), encrypted, idTokenTestNonce)
+	if verr != nil {
+		t.Fatalf("validateIDToken: %v", verr)
+	}
+	assertFullIDTokenClaims(t, validated, now)
+}
+
 func TestValidateIDTokenAcceptsPlainSignedToken(t *testing.T) {
 	now := time.Now()
 	c, idKey := idTokenTestClient(t, now, Algorithms{IDToken: fapi.ES256}, nil)
 	raw := buildTestSignedIDToken(t, idKey, now)
 
-	subject, err := c.validateIDToken(context.Background(), raw, idTokenTestNonce)
+	validated, err := c.validateIDToken(context.Background(), raw, idTokenTestNonce)
 	if err != nil {
 		t.Fatalf("validateIDToken: %v", err)
 	}
-	if subject != idTokenTestSubject {
-		t.Fatalf("subject = %q, want %q", subject, idTokenTestSubject)
+	if validated.Subject != idTokenTestSubject {
+		t.Fatalf("subject = %q, want %q", validated.Subject, idTokenTestSubject)
 	}
 }
 
@@ -123,12 +219,12 @@ func TestValidateIDTokenAcceptsEncryptedTokenRSAOAEP256(t *testing.T) {
 		t.Fatalf("jwe.Encrypt: %v", err)
 	}
 
-	subject, verr := c.validateIDToken(context.Background(), encrypted, idTokenTestNonce)
+	validated, verr := c.validateIDToken(context.Background(), encrypted, idTokenTestNonce)
 	if verr != nil {
 		t.Fatalf("validateIDToken: %v", verr)
 	}
-	if subject != idTokenTestSubject {
-		t.Fatalf("subject = %q, want %q", subject, idTokenTestSubject)
+	if validated.Subject != idTokenTestSubject {
+		t.Fatalf("subject = %q, want %q", validated.Subject, idTokenTestSubject)
 	}
 }
 
@@ -157,12 +253,12 @@ func TestValidateIDTokenAcceptsEncryptedTokenECDHESA256KW(t *testing.T) {
 		t.Fatalf("jwe.Encrypt: %v", err)
 	}
 
-	subject, verr := c.validateIDToken(context.Background(), encrypted, idTokenTestNonce)
+	validated, verr := c.validateIDToken(context.Background(), encrypted, idTokenTestNonce)
 	if verr != nil {
 		t.Fatalf("validateIDToken: %v", verr)
 	}
-	if subject != idTokenTestSubject {
-		t.Fatalf("subject = %q, want %q", subject, idTokenTestSubject)
+	if validated.Subject != idTokenTestSubject {
+		t.Fatalf("subject = %q, want %q", validated.Subject, idTokenTestSubject)
 	}
 }
 

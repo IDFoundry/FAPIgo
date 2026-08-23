@@ -34,16 +34,44 @@ type TokenSet struct {
 	ExpiresIn    time.Duration
 	HasExpiresIn bool
 
-	// IDToken and Subject are set only when the granted scope included
-	// "openid". Subject comes from the validated ID token, never from an
-	// unverified claim.
-	IDToken    fapi.Secret
-	HasIDToken bool
-	Subject    string
+	// IDToken, Subject and IDTokenClaims are set only when the granted
+	// scope included "openid". Both Subject and IDTokenClaims come from
+	// the same validated ID token, never from an unverified claim.
+	// Subject is kept as its own field for backward compatibility;
+	// IDTokenClaims.Subject carries the identical value.
+	IDToken       fapi.Secret
+	HasIDToken    bool
+	Subject       string
+	IDTokenClaims IDTokenClaims
 
 	// RefreshToken is set only when the authorization server issued one.
 	RefreshToken    fapi.Secret
 	HasRefreshToken bool
+}
+
+// IDTokenClaims is the validated set of standard ID token claims beyond
+// the bare Subject — every value here has already been checked against
+// Config's issuer, audience, algorithm, nonce and clock-skew policy,
+// exactly like Subject. Parameters holds every other claim the token
+// carried (custom identity claims, extension claims, etc.) — anything
+// not already surfaced as one of the named fields or implicitly
+// verified (iss, aud, exp, iat, nonce).
+//
+// For an encrypted ID token, this is the only way to reach anything
+// beyond Subject at all: decryption happens entirely inside client, so
+// an embedding application has no way to recover the plaintext (and
+// therefore no other claim) on its own — Dependencies.Decryption may
+// be backed by an HSM or remote service that never exposes decrypted
+// bytes outside this call.
+type IDTokenClaims struct {
+	Subject string
+
+	// AuthTime is the zero time if the token carried no auth_time claim.
+	AuthTime   time.Time
+	ACR        string
+	AMR        []string
+	Parameters map[string]json.RawMessage
+	ExpiresAt  time.Time
 }
 
 // ExchangeCode authenticates to the token endpoint, presents a DPoP
@@ -137,13 +165,18 @@ func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationRe
 	}
 
 	if raw.IDToken != "" {
-		subject, idErr := c.validateIDToken(ctx, raw.IDToken, resp.nonce)
+		validated, idErr := c.validateIDToken(ctx, raw.IDToken, resp.nonce)
 		if idErr != nil {
 			return TokenSet{}, idErr
 		}
 		result.IDToken = fapi.NewSecret(raw.IDToken)
 		result.HasIDToken = true
-		result.Subject = subject
+		result.Subject = validated.Subject
+		result.IDTokenClaims = IDTokenClaims{
+			Subject: validated.Subject, AuthTime: validated.AuthTime,
+			ACR: validated.ACR, AMR: validated.AMR,
+			Parameters: validated.Parameters, ExpiresAt: validated.ExpiresAt,
+		}
 	}
 	if raw.RefreshToken != "" {
 		result.RefreshToken = fapi.NewSecret(raw.RefreshToken)
@@ -198,25 +231,25 @@ func isDPoPNonceError(body []byte) bool {
 // with, and trusting whatever the token's own header claims would be
 // exactly the "never treat an untrusted alg header as policy" mistake
 // this module avoids everywhere else.
-func (c *Client) validateIDToken(ctx context.Context, raw, nonce string) (string, *Error) {
+func (c *Client) validateIDToken(ctx context.Context, raw, nonce string) (token.ValidatedIDToken, *Error) {
 	expectEncrypted := c.cfg.Algorithms.IDTokenKeyManagement != 0
 	switch strings.Count(raw, ".") + 1 {
 	case 3:
 		if expectEncrypted {
-			return "", newError(ErrorInvalidResponse, "ID token is not encrypted, but this client is configured to require an encrypted ID token", nil)
+			return token.ValidatedIDToken{}, newError(ErrorInvalidResponse, "ID token is not encrypted, but this client is configured to require an encrypted ID token", nil)
 		}
 		return c.validateSignedIDToken(ctx, raw, nonce)
 	case 5:
 		if !expectEncrypted {
-			return "", newError(ErrorInvalidResponse, "ID token is encrypted, but this client is not configured to expect an encrypted ID token", nil)
+			return token.ValidatedIDToken{}, newError(ErrorInvalidResponse, "ID token is encrypted, but this client is not configured to expect an encrypted ID token", nil)
 		}
 		innerJWT, decErr := c.decryptIDToken(ctx, raw)
 		if decErr != nil {
-			return "", decErr
+			return token.ValidatedIDToken{}, decErr
 		}
 		return c.validateSignedIDToken(ctx, innerJWT, nonce)
 	default:
-		return "", newError(ErrorInvalidResponse, "malformed ID token", nil)
+		return token.ValidatedIDToken{}, newError(ErrorInvalidResponse, "malformed ID token", nil)
 	}
 }
 
@@ -260,10 +293,10 @@ func isNestedJWTContentType(cty string) bool {
 // validateSignedIDToken verifies an ordinary signed-only ID token —
 // either one that arrived that way directly, or the inner JWT
 // decryptIDToken recovered from an encrypted one.
-func (c *Client) validateSignedIDToken(ctx context.Context, raw, nonce string) (string, *Error) {
+func (c *Client) validateSignedIDToken(ctx context.Context, raw, nonce string) (token.ValidatedIDToken, *Error) {
 	parsed, err := token.ParseIDToken(raw)
 	if err != nil {
-		return "", newError(ErrorInvalidResponse, "malformed ID token", err)
+		return token.ValidatedIDToken{}, newError(ErrorInvalidResponse, "malformed ID token", err)
 	}
 
 	candidates, err := c.deps.IssuerKeys.ResolveIssuerKeys(ctx, keys.IssuerKeyRequest{
@@ -271,10 +304,10 @@ func (c *Client) validateSignedIDToken(ctx context.Context, raw, nonce string) (
 		Algorithm: c.cfg.Algorithms.IDToken, KeyID: parsed.KeyID(),
 	})
 	if err != nil {
-		return "", newError(ErrorInternal, "failed to resolve issuer keys", err)
+		return token.ValidatedIDToken{}, newError(ErrorInternal, "failed to resolve issuer keys", err)
 	}
 	if len(candidates.Keys) == 0 {
-		return "", newError(ErrorInvalidResponse, "no matching issuer key for ID token", nil)
+		return token.ValidatedIDToken{}, newError(ErrorInvalidResponse, "no matching issuer key for ID token", nil)
 	}
 
 	var (
@@ -292,9 +325,9 @@ func (c *Client) validateSignedIDToken(ctx context.Context, raw, nonce string) (
 		}
 	}
 	if verifyErr != nil {
-		return "", newError(ErrorInvalidResponse, "ID token verification failed", verifyErr)
+		return token.ValidatedIDToken{}, newError(ErrorInvalidResponse, "ID token verification failed", verifyErr)
 	}
-	return validated.Subject, nil
+	return validated, nil
 }
 
 type rawTokenResponse struct {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/extension"
 	"github.com/idfoundry/fapigo/internal/clientassertion"
 	"github.com/idfoundry/fapigo/internal/token"
 	"github.com/idfoundry/fapigo/keys"
@@ -168,6 +169,190 @@ func newHarnessWithIdentityClaims(t *testing.T, identityClaims server.IdentityCl
 		t.Fatalf("server.New: %v", err)
 	}
 	return harness{server: srv, key: key, serverKey: serverKey, now: now}
+}
+
+// newHarnessWithIdentityClaimsAndExtensions is newHarnessWithIdentityClaims
+// plus a registered extension.Registry, for tests exercising precedence
+// between Dependencies.IdentityClaims and a ReturnInTokenClaims
+// protocol-extension claim sharing the same wire name.
+func newHarnessWithIdentityClaimsAndExtensions(t *testing.T, identityClaims server.IdentityClaimsSource, registry *extension.Registry) harness {
+	t.Helper()
+	now := time.Now()
+	key := generateKey(t)
+	serverKey := generateKey(t)
+
+	client, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
+		ID:                       testClientID,
+		RedirectURIs:             []fapi.RegisteredRedirectURI{testRedirectURI},
+		ClientAssertionAlgorithm: fapi.ES256,
+		AllowedScopes:            []string{"openid", "accounts", "offline_access"},
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+	issuer, err := fapi.ParseIssuerURL(testIssuer)
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+
+	cfg := server.Config{
+		Issuer:    issuer,
+		Endpoints: testEndpoints(t),
+		Profile:   server.ProfileFAPISecurity,
+		Algorithms: server.AlgorithmPolicy{
+			ClientAssertion: server.AlgorithmSet{fapi.ES256},
+			RequestObject:   server.AlgorithmSet{fapi.ES256},
+			JARM:            fapi.ES256,
+			IDToken:         fapi.ES256,
+		},
+		Limits: server.Limits{
+			PushedRequestLifetime:      90 * time.Second,
+			MaxClientAssertionLifetime: time.Minute,
+			MaxRequestObjectLifetime:   time.Minute,
+			InteractionLifetime:        5 * time.Minute,
+			AuthorizationCodeLifetime:  time.Minute,
+			JARMResponseLifetime:       time.Minute,
+			AccessTokenLifetime:        5 * time.Minute,
+			IDTokenLifetime:            5 * time.Minute,
+			RefreshTokenLifetime:       5 * time.Minute,
+			MaxDPoPProofAge:            time.Minute,
+			MaxClockSkew:               5 * time.Second,
+		},
+		Assurance:  server.AssuranceDevelopment,
+		Extensions: registry,
+	}
+	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
+	deps := server.Dependencies{
+		Clients:      &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
+		Transactions: &fakeTransactionStore{},
+		Grants:       &fakeGrantStore{},
+		Replay:       &fakeReplayStore{},
+		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
+			testClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
+		}},
+		Keys:           serverKeyManager,
+		AccessTokens:   server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:     server.NoRevocation{},
+		Clock:          fixedClock{now: now},
+		Random:         rand.Reader,
+		IdentityClaims: identityClaims,
+	}
+	srv, err := server.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+	return harness{server: srv, key: key, serverKey: serverKey, now: now}
+}
+
+// Change 2 regression: a server-authoritative identity claim must win
+// over a client-registered protocol-extension claim of the same wire
+// name — see withIdentityClaims's own doc comment. Before the fix, base
+// (which carries the ReturnInTokenClaims extension claim) was merged
+// last and so silently overrode the identity source's value; a
+// deployment's own IdentityClaimsSource is meant to be authoritative,
+// not something a client can shadow just by declaring an extension
+// parameter with a matching name.
+func TestExchangeAuthorizationCodeIdentityClaimWinsOverExtensionClaimCollision(t *testing.T) {
+	emailExtensionDef := extension.Definition[string]{
+		Name: "email", Cardinality: extension.Single,
+		AllowedSources: extension.SourcePlainParameter, MaxBytes: 64,
+		ReturnInTokenClaims: true,
+	}
+	registry, err := extension.NewRegistry(emailExtensionDef)
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	identityClaims := fakeIdentityClaims{
+		subject: "user-1",
+		claims: map[string]json.RawMessage{
+			"email": json.RawMessage(`"identity-source@example.com"`),
+		},
+	}
+	h := newHarnessWithIdentityClaimsAndExtensions(t, identityClaims, registry)
+
+	pushResult, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: plainFormParameters(t, h.clientAssertion(t), map[string]string{
+			"email":  "client-supplied@example.com",
+			"claims": `{"id_token":{"email":null}}`,
+		})},
+	})
+	if err != nil {
+		t.Fatalf("PushAuthorizationRequest: %v", err)
+	}
+	action, err := h.server.BeginAuthorization(context.Background(), server.BeginAuthorizationRequest{
+		RequestURI: pushResult.RequestURI.String(), ClientID: testClientID,
+	})
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+	interaction, ok := action.(server.InteractionRequired)
+	if !ok {
+		t.Fatalf("action = %T, want server.InteractionRequired", action)
+	}
+
+	subjectID, err := server.NewSubjectID("user-1")
+	if err != nil {
+		t.Fatalf("NewSubjectID: %v", err)
+	}
+	subject, err := server.NewAuthenticatedSubject(subjectID)
+	if err != nil {
+		t.Fatalf("NewAuthenticatedSubject: %v", err)
+	}
+	authCtx, err := server.NewAuthenticationContext(h.now, "urn:mace:incommon:iap:silver", []string{"pwd"})
+	if err != nil {
+		t.Fatalf("NewAuthenticationContext: %v", err)
+	}
+	result, err := h.server.CompleteAuthorization(context.Background(), server.CompleteAuthorizationRequest{
+		Handle: interaction.Handle,
+		Result: server.Authorize(subject, authCtx, server.GrantedAuthorization{Scope: []string{"openid", "accounts"}}),
+	})
+	if err != nil {
+		t.Fatalf("CompleteAuthorization: %v", err)
+	}
+	redirect, ok := result.(server.AuthorizationRedirect)
+	if !ok {
+		t.Fatalf("result = %T, want server.AuthorizationRedirect", result)
+	}
+	dest := redirect.Destination().URL()
+	code := dest.Query().Get("code")
+	if code == "" {
+		t.Fatalf("redirect missing code parameter")
+	}
+
+	exchangeResult, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
+		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+	})
+	if err != nil {
+		t.Fatalf("ExchangeAuthorizationCode: %v", err)
+	}
+	if !exchangeResult.HasIDToken {
+		t.Fatalf("HasIDToken = false, want true")
+	}
+
+	parsed, err := token.ParseIDToken(exchangeResult.IDToken.Reveal())
+	if err != nil {
+		t.Fatalf("ParseIDToken: %v", err)
+	}
+	validated, err := parsed.Validate(&h.serverKey.PublicKey, token.IDTokenValidatePolicy{
+		ExpectedIssuer:   testIssuer,
+		ExpectedAudience: testClientID.String(),
+		Algorithm:        fapi.ES256,
+		Now:              h.now,
+		MaxLifetime:      5 * time.Minute,
+		MaxClockSkew:     5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+
+	email, err := jsonStringParam(validated.Parameters, "email")
+	if err != nil {
+		t.Fatalf("unmarshal email claim: %v", err)
+	}
+	if email != "identity-source@example.com" {
+		t.Fatalf("id_token email claim = %q, want the identity source's value %q, not the client-supplied extension value", email, "identity-source@example.com")
+	}
 }
 
 // FAPI2SPFinalTestClaimsParameterIdentityClaims in the OIDF conformance

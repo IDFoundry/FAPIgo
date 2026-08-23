@@ -44,6 +44,9 @@ func verifyECDSA(pubKey crypto.PublicKey, hash, sig []byte) error {
 	if !ok {
 		return fmt.Errorf("%w: ES256 requires an ECDSA public key, got %T", ErrInvalidSignature, pubKey)
 	}
+	if pub.Curve != elliptic.P256() {
+		return fmt.Errorf("%w: ES256 requires curve P-256", ErrInvalidSignature)
+	}
 	if len(sig) != 2*p256CoordinateSize {
 		return fmt.Errorf("%w: malformed ES256 signature length %d", ErrInvalidSignature, len(sig))
 	}

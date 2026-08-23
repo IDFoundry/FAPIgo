@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0](https://github.com/IDFoundry/FAPIgo/compare/v0.2.4...v0.3.0) (2026-08-23)
+
+
+### Features
+
+* send client_id and dpop_jkt on PAR, allow string extensions on the plain path ([0a386e7](https://github.com/IDFoundry/FAPIgo/commit/0a386e75f84305b802a2d69b703ca11808b5e084))
+* send client_id and dpop_jkt on PAR, allow string extensions on the plain path ([34fbb0e](https://github.com/IDFoundry/FAPIgo/commit/34fbb0e49c1f7af9ccfa4aec0439e6cdef50c4e3))
+
 ## [0.2.4](https://github.com/IDFoundry/FAPIgo/compare/v0.2.3...v0.2.4) (2026-08-23)
 
 

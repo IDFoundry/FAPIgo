@@ -1,0 +1,302 @@
+package jwe
+
+import (
+	"bytes"
+	"crypto/ecdh"
+	"crypto/rand"
+	"crypto/rsa"
+	"encoding/base64"
+	"errors"
+	"strings"
+	"testing"
+
+	fapi "github.com/idfoundry/fapigo"
+)
+
+func generateRSAKey(t *testing.T) *rsa.PrivateKey {
+	t.Helper()
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate rsa key: %v", err)
+	}
+	return priv
+}
+
+func generateECDHKey(t *testing.T) *ecdh.PrivateKey {
+	t.Helper()
+	priv, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate ecdh key: %v", err)
+	}
+	return priv
+}
+
+func TestEncryptDecryptRoundTripRSAOAEP256(t *testing.T) {
+	priv := generateRSAKey(t)
+	plaintext := []byte("the quick brown fox jumps over the lazy dog")
+
+	compact, err := Encrypt(EncryptRequest{
+		Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM,
+		RecipientKey: &priv.PublicKey, KeyID: "kid-1", ContentType: "JWT",
+		Plaintext: plaintext,
+	})
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+
+	result, err := Decrypt(DecryptRequest{
+		Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM,
+		RecipientKey: priv, Compact: compact,
+	})
+	if err != nil {
+		t.Fatalf("Decrypt: %v", err)
+	}
+	if !bytes.Equal(result.Plaintext, plaintext) {
+		t.Fatalf("Plaintext = %q, want %q", result.Plaintext, plaintext)
+	}
+	if result.Header.KeyID != "kid-1" || result.Header.ContentType != "JWT" {
+		t.Fatalf("Header = %+v, want KeyID=kid-1 ContentType=JWT", result.Header)
+	}
+	if result.Header.EphemeralPublicKey != nil {
+		t.Fatalf("Header.EphemeralPublicKey = %v, want nil for RSAOAEP256", result.Header.EphemeralPublicKey)
+	}
+}
+
+func TestEncryptDecryptRoundTripECDHESA256KW(t *testing.T) {
+	priv := generateECDHKey(t)
+	plaintext := []byte("the quick brown fox jumps over the lazy dog")
+
+	compact, err := Encrypt(EncryptRequest{
+		Algorithm: fapi.ECDHESA256KW, Encryption: fapi.A256GCM,
+		RecipientKey: priv.PublicKey(), KeyID: "kid-2",
+		Plaintext: plaintext,
+	})
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+
+	result, err := Decrypt(DecryptRequest{
+		Algorithm: fapi.ECDHESA256KW, Encryption: fapi.A256GCM,
+		RecipientKey: priv, Compact: compact,
+	})
+	if err != nil {
+		t.Fatalf("Decrypt: %v", err)
+	}
+	if !bytes.Equal(result.Plaintext, plaintext) {
+		t.Fatalf("Plaintext = %q, want %q", result.Plaintext, plaintext)
+	}
+	if result.Header.KeyID != "kid-2" {
+		t.Fatalf("Header.KeyID = %q, want kid-2", result.Header.KeyID)
+	}
+}
+
+func TestEncryptGeneratesFreshEphemeralKeyEachCall(t *testing.T) {
+	priv := generateECDHKey(t)
+	a, err := Encrypt(EncryptRequest{Algorithm: fapi.ECDHESA256KW, Encryption: fapi.A256GCM, RecipientKey: priv.PublicKey(), Plaintext: []byte("x")})
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	b, err := Encrypt(EncryptRequest{Algorithm: fapi.ECDHESA256KW, Encryption: fapi.A256GCM, RecipientKey: priv.PublicKey(), Plaintext: []byte("x")})
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	if a == b {
+		t.Fatalf("two Encrypt calls with the same plaintext produced identical output — ephemeral key and/or IV are not being freshly randomized")
+	}
+}
+
+func TestDecryptRejectsWrongRSAKey(t *testing.T) {
+	priv := generateRSAKey(t)
+	other := generateRSAKey(t)
+	compact, err := Encrypt(EncryptRequest{Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM, RecipientKey: &priv.PublicKey, Plaintext: []byte("secret")})
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	if _, err := Decrypt(DecryptRequest{Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM, RecipientKey: other, Compact: compact}); err == nil {
+		t.Fatalf("Decrypt(wrong rsa key) = nil error, want error")
+	}
+}
+
+func TestDecryptRejectsWrongECDHKey(t *testing.T) {
+	priv := generateECDHKey(t)
+	other := generateECDHKey(t)
+	compact, err := Encrypt(EncryptRequest{Algorithm: fapi.ECDHESA256KW, Encryption: fapi.A256GCM, RecipientKey: priv.PublicKey(), Plaintext: []byte("secret")})
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	if _, err := Decrypt(DecryptRequest{Algorithm: fapi.ECDHESA256KW, Encryption: fapi.A256GCM, RecipientKey: other, Compact: compact}); err == nil {
+		t.Fatalf("Decrypt(wrong ecdh key) = nil error, want error")
+	}
+}
+
+func TestDecryptRejectsAlgorithmMismatch(t *testing.T) {
+	priv := generateRSAKey(t)
+	compact, err := Encrypt(EncryptRequest{Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM, RecipientKey: &priv.PublicKey, Plaintext: []byte("secret")})
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	// Caller expects ECDHESA256KW; the token actually says RSA-OAEP-256
+	// — this must be rejected, never silently dispatched off the
+	// header's own claim.
+	ecdhPriv := generateECDHKey(t)
+	if _, err := Decrypt(DecryptRequest{Algorithm: fapi.ECDHESA256KW, Encryption: fapi.A256GCM, RecipientKey: ecdhPriv, Compact: compact}); !errors.Is(err, ErrAlgorithmMismatch) {
+		t.Fatalf("Decrypt(algorithm mismatch) = %v, want ErrAlgorithmMismatch", err)
+	}
+}
+
+func TestDecryptRejectsTamperedCiphertext(t *testing.T) {
+	priv := generateRSAKey(t)
+	compact, err := Encrypt(EncryptRequest{Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM, RecipientKey: &priv.PublicKey, Plaintext: []byte("secret")})
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	parts := strings.Split(compact, ".")
+	ciphertext, err := base64.RawURLEncoding.DecodeString(parts[3])
+	if err != nil {
+		t.Fatalf("decode ciphertext: %v", err)
+	}
+	ciphertext[0] ^= 0xFF
+	parts[3] = base64.RawURLEncoding.EncodeToString(ciphertext)
+	tampered := strings.Join(parts, ".")
+
+	if _, err := Decrypt(DecryptRequest{Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM, RecipientKey: priv, Compact: tampered}); !errors.Is(err, ErrDecryptionFailed) {
+		t.Fatalf("Decrypt(tampered ciphertext) = %v, want ErrDecryptionFailed", err)
+	}
+}
+
+func TestDecryptRejectsTamperedTag(t *testing.T) {
+	priv := generateRSAKey(t)
+	compact, err := Encrypt(EncryptRequest{Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM, RecipientKey: &priv.PublicKey, Plaintext: []byte("secret")})
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	parts := strings.Split(compact, ".")
+	tag, err := base64.RawURLEncoding.DecodeString(parts[4])
+	if err != nil {
+		t.Fatalf("decode tag: %v", err)
+	}
+	tag[0] ^= 0xFF
+	parts[4] = base64.RawURLEncoding.EncodeToString(tag)
+	tampered := strings.Join(parts, ".")
+
+	if _, err := Decrypt(DecryptRequest{Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM, RecipientKey: priv, Compact: tampered}); !errors.Is(err, ErrDecryptionFailed) {
+		t.Fatalf("Decrypt(tampered tag) = %v, want ErrDecryptionFailed", err)
+	}
+}
+
+func TestDecryptRejectsTamperedHeader(t *testing.T) {
+	// The protected header is the AAD; changing it (even to something
+	// that still parses) must invalidate the GCM tag, since the
+	// original AAD is exactly the header bytes as transmitted.
+	priv := generateRSAKey(t)
+	compact, err := Encrypt(EncryptRequest{
+		Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM, RecipientKey: &priv.PublicKey,
+		ContentType: "JWT", Plaintext: []byte("secret"),
+	})
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	parts := strings.Split(compact, ".")
+	headerJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		t.Fatalf("decode header: %v", err)
+	}
+	tampered := strings.Replace(string(headerJSON), `"cty":"JWT"`, `"cty":"XXX"`, 1)
+	if tampered == string(headerJSON) {
+		t.Fatalf("test setup error: replacement did not change header")
+	}
+	parts[0] = base64.RawURLEncoding.EncodeToString([]byte(tampered))
+	tamperedCompact := strings.Join(parts, ".")
+
+	if _, err := Decrypt(DecryptRequest{Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM, RecipientKey: priv, Compact: tamperedCompact}); !errors.Is(err, ErrDecryptionFailed) {
+		t.Fatalf("Decrypt(tampered header) = %v, want ErrDecryptionFailed", err)
+	}
+}
+
+func TestDecryptRejectsMalformedCompactSerialization(t *testing.T) {
+	priv := generateRSAKey(t)
+	cases := map[string]string{
+		"too few segments":  "a.b.c.d",
+		"too many segments": "a.b.c.d.e.f",
+		"empty segment":     "a..c.d.e",
+		"invalid base64":    "!!!.b.c.d.e",
+	}
+	for name, compact := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Decrypt(DecryptRequest{Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM, RecipientKey: priv, Compact: compact}); !errors.Is(err, ErrMalformed) {
+				t.Fatalf("Decrypt(%s) = %v, want ErrMalformed", name, err)
+			}
+		})
+	}
+}
+
+// RSA-OAEP-256 must enforce the same minimum modulus size
+// internal/jose's PS256 support already does — a small RSA key wrapping
+// the CEK can be factored, defeating the encryption entirely.
+func TestEncryptRejectsSmallRSAKey(t *testing.T) {
+	small, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatalf("generate small rsa key: %v", err)
+	}
+	if _, err := Encrypt(EncryptRequest{Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM, RecipientKey: &small.PublicKey, Plaintext: []byte("x")}); err == nil {
+		t.Fatalf("Encrypt(1024-bit rsa key) = nil error, want error")
+	}
+}
+
+func TestDecryptRejectsSmallRSAKey(t *testing.T) {
+	small, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatalf("generate small rsa key: %v", err)
+	}
+	// Encrypted to a properly-sized key, then decrypted with a small
+	// one of the right shape — this must fail on the key-size check,
+	// not attempt DecryptOAEP with an undersized modulus.
+	priv := generateRSAKey(t)
+	compact, err := Encrypt(EncryptRequest{Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM, RecipientKey: &priv.PublicKey, Plaintext: []byte("x")})
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	if _, err := Decrypt(DecryptRequest{Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM, RecipientKey: small, Compact: compact}); err == nil {
+		t.Fatalf("Decrypt(1024-bit rsa key) = nil error, want error")
+	}
+}
+
+func TestEncryptRejectsWrongKeyType(t *testing.T) {
+	rsaPriv := generateRSAKey(t)
+	if _, err := Encrypt(EncryptRequest{Algorithm: fapi.ECDHESA256KW, Encryption: fapi.A256GCM, RecipientKey: &rsaPriv.PublicKey, Plaintext: []byte("x")}); err == nil {
+		t.Fatalf("Encrypt(ECDHESA256KW, rsa key) = nil error, want error")
+	}
+	ecdhPriv := generateECDHKey(t)
+	if _, err := Encrypt(EncryptRequest{Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM, RecipientKey: ecdhPriv.PublicKey(), Plaintext: []byte("x")}); err == nil {
+		t.Fatalf("Encrypt(RSAOAEP256, ecdh key) = nil error, want error")
+	}
+}
+
+func TestEncryptRejectsInvalidAlgorithm(t *testing.T) {
+	priv := generateRSAKey(t)
+	if _, err := Encrypt(EncryptRequest{Encryption: fapi.A256GCM, RecipientKey: &priv.PublicKey, Plaintext: []byte("x")}); err == nil {
+		t.Fatalf("Encrypt(zero Algorithm) = nil error, want error")
+	}
+}
+
+func TestEncryptRejectsInvalidEncryption(t *testing.T) {
+	priv := generateRSAKey(t)
+	if _, err := Encrypt(EncryptRequest{Algorithm: fapi.RSAOAEP256, RecipientKey: &priv.PublicKey, Plaintext: []byte("x")}); err == nil {
+		t.Fatalf("Encrypt(zero Encryption) = nil error, want error")
+	}
+}
+
+func TestEncryptDecryptRoundTripEmptyPlaintext(t *testing.T) {
+	priv := generateRSAKey(t)
+	compact, err := Encrypt(EncryptRequest{Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM, RecipientKey: &priv.PublicKey, Plaintext: []byte{}})
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	result, err := Decrypt(DecryptRequest{Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM, RecipientKey: priv, Compact: compact})
+	if err != nil {
+		t.Fatalf("Decrypt: %v", err)
+	}
+	if len(result.Plaintext) != 0 {
+		t.Fatalf("Plaintext = %q, want empty", result.Plaintext)
+	}
+}

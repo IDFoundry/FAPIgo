@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.8.0](https://github.com/IDFoundry/FAPIgo/compare/v0.7.0...v0.8.0) (2026-08-23)
+
+
+### Features
+
+* expose the full validated ID token, not just Subject ([2ae6511](https://github.com/IDFoundry/FAPIgo/commit/2ae6511551c7197a5e74e31fc403f3ce9b6d0e40))
+* expose the full validated ID token, not just Subject ([da163a1](https://github.com/IDFoundry/FAPIgo/commit/da163a17736842c4edaa40ed8983bae09e3edecd))
+
+
+### Bug Fixes
+
+* extract populateIDToken helper and add missing ID token error-path coverage ([dae4480](https://github.com/IDFoundry/FAPIgo/commit/dae4480201462672f6dbc16e5665195369cd85a2))
+
 ## [0.7.0](https://github.com/IDFoundry/FAPIgo/compare/v0.6.0...v0.7.0) (2026-08-23)
 
 

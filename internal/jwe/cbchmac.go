@@ -37,7 +37,14 @@ func sealCBCHMAC(cek, iv, plaintext, aad []byte) (ciphertext, tag []byte, err er
 		return nil, nil, err
 	}
 	ciphertext = make([]byte, len(padded))
-	cipher.NewCBCEncrypter(block, iv).CryptBlocks(ciphertext, padded)
+	// RFC 7518 §5.2.2.1 defines AES_CBC_HMAC_SHA2 directly in terms of
+	// plain CBC for confidentiality plus a separate HMAC for integrity
+	// (encrypt-then-MAC) — this is not bare CBC standing in as the
+	// entire construction's authentication, the way a naive CBC-only
+	// scheme would be. cbcHMACTag below is that separate MAC; there is
+	// no "secure mode" substitute that would still implement this
+	// standard's own composition.
+	cipher.NewCBCEncrypter(block, iv).CryptBlocks(ciphertext, padded) // NOSONAR: go:S5542 — CBC + separate HMAC is what RFC 7518 §5.2.2.1 requires, see comment above
 
 	return ciphertext, cbcHMACTag(macKey, aad, iv, ciphertext), nil
 }
@@ -72,7 +79,11 @@ func openCBCHMAC(cek, iv, ciphertext, tag, aad []byte) ([]byte, error) {
 	}
 
 	padded := make([]byte, len(ciphertext))
-	cipher.NewCBCDecrypter(block, iv).CryptBlocks(padded, ciphertext)
+	// See the matching comment in sealCBCHMAC: this CBC decrypt only
+	// ever runs after the HMAC tag above has already been verified, so
+	// it's the same encrypt-then-MAC construction in reverse, not bare
+	// CBC providing authentication on its own.
+	cipher.NewCBCDecrypter(block, iv).CryptBlocks(padded, ciphertext) // NOSONAR: go:S5542 — CBC + separate HMAC is what RFC 7518 §5.2.2.1 requires, see sealCBCHMAC's comment
 
 	plaintext, err := pkcs7Unpad(padded, block.BlockSize())
 	if err != nil {

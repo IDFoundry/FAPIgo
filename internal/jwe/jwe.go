@@ -16,13 +16,83 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 )
 
-// cekSize is the content-encryption key size in bytes for A256GCM — the
-// only ContentEncryptionAlgorithm this package supports.
-const cekSize = 32
+// cekSizeA256GCM is the content-encryption key size in bytes for
+// A256GCM.
+const cekSizeA256GCM = 32
+
+// cekSizeA256CBCHS512 is the content-encryption key size in bytes for
+// A256CBC-HS512 (RFC 7518 §5.2.5): a 64-octet K, split into a 32-octet
+// MAC_KEY (the initial half) and a 32-octet ENC_KEY (the final half) —
+// see §5.2.2.1's "MAC_KEY consists of the initial MAC_KEY_LEN octets of
+// K...ENC_KEY consists of the final ENC_KEY_LEN octets of K".
+const cekSizeA256CBCHS512 = 64
 
 // gcmNonceSize is the IV size RFC 7518 §5.3 requires for the AES-GCM
 // content-encryption family: 96 bits.
 const gcmNonceSize = 12
+
+// cbcIVSize is the IV size RFC 7518 §5.2.2.1 requires for the
+// CBC-HMAC content-encryption family: 128 bits.
+const cbcIVSize = 16
+
+// cbcHMACTagSize is T_LEN for AES_256_CBC_HMAC_SHA_512 (RFC 7518
+// §5.2.5): the authentication tag is the leftmost 32 octets (256 bits)
+// of the full HMAC-SHA-512 output, not the full 64-octet output.
+const cbcHMACTagSize = 32
+
+// cekSizeFor returns the content-encryption key size in bytes for enc.
+// Only called after enc.IsValid() — the default case can't be reached
+// in practice, but is kept for the same defensive-symmetry reason
+// wrapCEK/UnwrapCEK keep their own "unsupported algorithm" default arm
+// despite an earlier IsValid() check.
+func cekSizeFor(enc fapi.ContentEncryptionAlgorithm) (int, error) {
+	switch enc {
+	case fapi.A256GCM:
+		return cekSizeA256GCM, nil
+	case fapi.A256CBCHS512:
+		return cekSizeA256CBCHS512, nil
+	default:
+		return 0, fmt.Errorf("jwe: unsupported content encryption algorithm %v", enc)
+	}
+}
+
+// ivSizeFor returns the IV size in bytes for enc.
+func ivSizeFor(enc fapi.ContentEncryptionAlgorithm) (int, error) {
+	switch enc {
+	case fapi.A256GCM:
+		return gcmNonceSize, nil
+	case fapi.A256CBCHS512:
+		return cbcIVSize, nil
+	default:
+		return 0, fmt.Errorf("jwe: unsupported content encryption algorithm %v", enc)
+	}
+}
+
+// sealContent encrypts plaintext under cek and iv with enc, returning
+// ciphertext and its authentication tag as separate values.
+func sealContent(enc fapi.ContentEncryptionAlgorithm, cek, iv, plaintext, aad []byte) (ciphertext, tag []byte, err error) {
+	switch enc {
+	case fapi.A256GCM:
+		return seal(cek, iv, plaintext, aad)
+	case fapi.A256CBCHS512:
+		return sealCBCHMAC(cek, iv, plaintext, aad)
+	default:
+		return nil, nil, fmt.Errorf("jwe: unsupported content encryption algorithm %v", enc)
+	}
+}
+
+// openContent decrypts and authenticates ciphertext/tag under cek and
+// iv with enc.
+func openContent(enc fapi.ContentEncryptionAlgorithm, cek, iv, ciphertext, tag, aad []byte) ([]byte, error) {
+	switch enc {
+	case fapi.A256GCM:
+		return open(cek, iv, ciphertext, tag, aad)
+	case fapi.A256CBCHS512:
+		return openCBCHMAC(cek, iv, ciphertext, tag, aad)
+	default:
+		return nil, fmt.Errorf("jwe: unsupported content encryption algorithm %v", enc)
+	}
+}
 
 // minRSAModulusBits is the minimum RSA key size RSAOAEP256 accepts,
 // matching internal/jose's own floor for PS256 — a caller-supplied RSA
@@ -38,8 +108,7 @@ type EncryptRequest struct {
 	Algorithm fapi.KeyManagementAlgorithm
 
 	// Encryption selects the content-encryption algorithm (the "enc"
-	// header). Currently always A256GCM — the field exists so a future
-	// second value doesn't change this function's signature.
+	// header): A256GCM or A256CBC-HS512.
 	Encryption fapi.ContentEncryptionAlgorithm
 
 	RecipientKey any
@@ -66,15 +135,16 @@ func Encrypt(req EncryptRequest) (string, error) {
 	if !req.Algorithm.IsValid() {
 		return "", fmt.Errorf("jwe: invalid key management algorithm %v", req.Algorithm)
 	}
-	if req.Encryption != fapi.A256GCM {
-		return "", fmt.Errorf("jwe: invalid content encryption algorithm %v", req.Encryption)
+	cekLen, err := cekSizeFor(req.Encryption)
+	if err != nil {
+		return "", err
 	}
 	random := req.Random
 	if random == nil {
 		random = rand.Reader
 	}
 
-	cek := make([]byte, cekSize)
+	cek := make([]byte, cekLen)
 	if _, err := io.ReadFull(random, cek); err != nil {
 		return "", fmt.Errorf("jwe: generate cek: %w", err)
 	}
@@ -93,11 +163,15 @@ func Encrypt(req EncryptRequest) (string, error) {
 	}
 	protected := base64.RawURLEncoding.EncodeToString(headerJSON)
 
-	iv := make([]byte, gcmNonceSize)
+	ivLen, err := ivSizeFor(req.Encryption)
+	if err != nil {
+		return "", err
+	}
+	iv := make([]byte, ivLen)
 	if _, err := io.ReadFull(random, iv); err != nil {
 		return "", fmt.Errorf("jwe: generate iv: %w", err)
 	}
-	ciphertext, tag, err := seal(cek, iv, req.Plaintext, []byte(protected))
+	ciphertext, tag, err := sealContent(req.Encryption, cek, iv, req.Plaintext, []byte(protected))
 	if err != nil {
 		return "", err
 	}
@@ -232,7 +306,7 @@ func Decrypt(ctx context.Context, req DecryptRequest) (DecryptResult, error) {
 	if !req.Algorithm.IsValid() {
 		return DecryptResult{}, fmt.Errorf("jwe: invalid key management algorithm %v", req.Algorithm)
 	}
-	if req.Encryption != fapi.A256GCM {
+	if !req.Encryption.IsValid() {
 		return DecryptResult{}, fmt.Errorf("jwe: invalid content encryption algorithm %v", req.Encryption)
 	}
 
@@ -241,11 +315,15 @@ func Decrypt(ctx context.Context, req DecryptRequest) (DecryptResult, error) {
 		return DecryptResult{}, fmt.Errorf("%w: expected 5 segments, got %d", ErrMalformed, len(parts))
 	}
 	// Every segment except the ciphertext must be non-empty: the header,
-	// encrypted key, IV and tag are always present for both algorithms
+	// encrypted key, IV and tag are always present for every algorithm
 	// this package supports. The ciphertext, though, is legitimately
-	// empty when the plaintext itself was empty (RFC 7516 §5.1: AES-GCM
-	// produces zero ciphertext bytes for zero plaintext bytes — only the
-	// tag is non-empty).
+	// empty for A256GCM when the plaintext itself was empty (RFC 7516
+	// §5.1: AES-GCM produces zero ciphertext bytes for zero plaintext
+	// bytes — only the tag is non-empty); the header isn't parsed yet
+	// at this point, so this check can't be conditioned on which
+	// algorithm is in play. A256CBC-HS512's ciphertext is never
+	// actually empty (PKCS#7 padding always emits at least one block),
+	// but that's enforced by openCBCHMAC itself, not here.
 	for i, p := range parts {
 		if i == 3 {
 			continue
@@ -297,7 +375,7 @@ func Decrypt(ctx context.Context, req DecryptRequest) (DecryptResult, error) {
 		}
 	}
 
-	plaintext, err := open(cek, iv, ciphertext, tag, []byte(parts[0]))
+	plaintext, err := openContent(req.Encryption, cek, iv, ciphertext, tag, []byte(parts[0]))
 	if err != nil {
 		return DecryptResult{}, err
 	}

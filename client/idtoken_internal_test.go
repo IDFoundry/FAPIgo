@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -35,12 +36,25 @@ func (c idTokenFixedClock) Now() time.Time { return c.now }
 // validateIDToken's dispatch and decryption logic, not exercise key
 // rotation, which internal/token and keys/jwksissuer already cover.
 type fakeIDTokenIssuerKeys struct {
+	// pub is the key to resolve for keys.IDTokenVerification. Leaving it
+	// nil (with err also nil) resolves to zero keys — a genuinely empty
+	// key set, distinct from a resolution error.
 	pub *ecdsa.PublicKey
+	// err, if set, is returned instead of a key set — a resolution
+	// failure (e.g. a transient fetch error), distinct from succeeding
+	// with no matching key.
+	err error
 }
 
 func (f fakeIDTokenIssuerKeys) ResolveIssuerKeys(_ context.Context, req keys.IssuerKeyRequest) (keys.IssuerKeySet, error) {
+	if f.err != nil {
+		return keys.IssuerKeySet{}, f.err
+	}
 	if req.Purpose != keys.IDTokenVerification {
 		return keys.IssuerKeySet{}, fmt.Errorf("fakeIDTokenIssuerKeys: unexpected purpose %v", req.Purpose)
+	}
+	if f.pub == nil {
+		return keys.IssuerKeySet{}, nil
 	}
 	return keys.IssuerKeySet{Keys: []keys.IssuerKey{{KeyID: "as-kid", Algorithm: fapi.ES256, PublicKey: f.pub}}}, nil
 }
@@ -71,6 +85,30 @@ func idTokenTestClient(t *testing.T, now time.Time, algorithms Algorithms, decry
 	return c, idKey
 }
 
+// idTokenTestClientWithIssuerKeys mirrors idTokenTestClient but lets a
+// test supply its own keys.IssuerKeySource directly — for exercising
+// validateSignedIDToken's own issuer-key-resolution error paths, which
+// idTokenTestClient's fixed single-key setup never reaches.
+func idTokenTestClientWithIssuerKeys(t *testing.T, now time.Time, algorithms Algorithms, issuerKeys keys.IssuerKeySource) *Client {
+	t.Helper()
+	issuer, err := fapi.ParseIssuerURL(idTokenTestIssuer)
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+	return &Client{
+		cfg: Config{
+			Issuer:     issuer,
+			ClientID:   fapi.ClientID(idTokenTestClientID),
+			Algorithms: algorithms,
+			Limits:     Limits{MaxIDTokenLifetime: 5 * time.Minute, MaxClockSkew: 5 * time.Second},
+		},
+		deps: Dependencies{
+			IssuerKeys: issuerKeys,
+			Clock:      idTokenFixedClock{now: now},
+		},
+	}
+}
+
 func buildTestSignedIDToken(t *testing.T, idKey *ecdsa.PrivateKey, now time.Time) string {
 	t.Helper()
 	tok, err := token.IssueIDToken(token.IDTokenParams{
@@ -84,17 +122,112 @@ func buildTestSignedIDToken(t *testing.T, idKey *ecdsa.PrivateKey, now time.Time
 	return tok
 }
 
+// buildTestSignedIDTokenWithClaims mirrors buildTestSignedIDToken but
+// also embeds ACR/AMR/AuthTime and a custom Parameters claim, for
+// confirming validateIDToken actually propagates all of
+// token.ValidatedIDToken rather than collapsing it to just Subject.
+func buildTestSignedIDTokenWithClaims(t *testing.T, idKey *ecdsa.PrivateKey, now time.Time) string {
+	t.Helper()
+	tok, err := token.IssueIDToken(token.IDTokenParams{
+		Signer: idKey, Algorithm: fapi.ES256, KeyID: "as-kid",
+		Issuer: idTokenTestIssuer, Subject: idTokenTestSubject, Audience: idTokenTestClientID,
+		Nonce: idTokenTestNonce, AuthTime: now, ACR: "urn:mace:incommon:iap:silver", AMR: []string{"pwd"},
+		Now: now, Lifetime: time.Minute,
+		Parameters: map[string]json.RawMessage{"email": json.RawMessage(`"end-user@example.com"`)},
+	})
+	if err != nil {
+		t.Fatalf("IssueIDToken: %v", err)
+	}
+	return tok
+}
+
+// assertFullIDTokenClaims checks every field validateIDToken's caller
+// should be able to reach beyond Subject — ACR/AMR/AuthTime/Parameters
+// — using the exact values buildTestSignedIDTokenWithClaims embedded.
+func assertFullIDTokenClaims(t *testing.T, validated token.ValidatedIDToken, now time.Time) {
+	t.Helper()
+	if validated.Subject != idTokenTestSubject {
+		t.Errorf("Subject = %q, want %q", validated.Subject, idTokenTestSubject)
+	}
+	// auth_time is a JWT NumericDate (whole seconds), so sub-second
+	// precision doesn't survive the round trip.
+	if !validated.AuthTime.Equal(now.Truncate(time.Second)) {
+		t.Errorf("AuthTime = %v, want %v", validated.AuthTime, now.Truncate(time.Second))
+	}
+	if validated.ACR != "urn:mace:incommon:iap:silver" {
+		t.Errorf("ACR = %q, want %q", validated.ACR, "urn:mace:incommon:iap:silver")
+	}
+	if len(validated.AMR) != 1 || validated.AMR[0] != "pwd" {
+		t.Errorf("AMR = %v, want [pwd]", validated.AMR)
+	}
+	email, ok := validated.Parameters["email"]
+	if !ok || string(email) != `"end-user@example.com"` {
+		t.Errorf(`Parameters["email"] = %s, ok=%v, want "end-user@example.com", true`, email, ok)
+	}
+}
+
+// TestValidateIDTokenReturnsFullClaims confirms validateIDToken
+// propagates the entire validated ID token, not just Subject, for an
+// ordinary signed (unencrypted) token.
+func TestValidateIDTokenReturnsFullClaims(t *testing.T) {
+	now := time.Now()
+	c, idKey := idTokenTestClient(t, now, Algorithms{IDToken: fapi.ES256}, nil)
+	raw := buildTestSignedIDTokenWithClaims(t, idKey, now)
+
+	validated, err := c.validateIDToken(context.Background(), raw, idTokenTestNonce)
+	if err != nil {
+		t.Fatalf("validateIDToken: %v", err)
+	}
+	assertFullIDTokenClaims(t, validated, now)
+}
+
+// TestValidateIDTokenReturnsFullClaimsWhenEncrypted is the case that
+// actually matters: for an encrypted ID token, decryption happens
+// entirely inside client, so this is the only way any claim besides
+// Subject can ever reach a caller at all.
+func TestValidateIDTokenReturnsFullClaimsWhenEncrypted(t *testing.T) {
+	now := time.Now()
+	decrypter, err := ephemeral.NewKeyManagerWithDecryption(nil, map[keys.DecryptionPurpose]fapi.KeyManagementAlgorithm{
+		keys.IDTokenDecryption: fapi.RSAOAEP256,
+	})
+	if err != nil {
+		t.Fatalf("NewKeyManagerWithDecryption: %v", err)
+	}
+	c, idKey := idTokenTestClient(t, now, Algorithms{
+		IDToken: fapi.ES256, IDTokenKeyManagement: fapi.RSAOAEP256, IDTokenContentEncryption: fapi.A256GCM,
+	}, decrypter)
+
+	signed := buildTestSignedIDTokenWithClaims(t, idKey, now)
+	info, err := decrypter.EncryptionPublicKey(context.Background(), keys.IDTokenDecryption, fapi.RSAOAEP256)
+	if err != nil {
+		t.Fatalf("EncryptionPublicKey: %v", err)
+	}
+	encrypted, err := jwe.Encrypt(jwe.EncryptRequest{
+		Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM, RecipientKey: info.PublicKey,
+		ContentType: "JWT", Plaintext: []byte(signed),
+	})
+	if err != nil {
+		t.Fatalf("jwe.Encrypt: %v", err)
+	}
+
+	validated, verr := c.validateIDToken(context.Background(), encrypted, idTokenTestNonce)
+	if verr != nil {
+		t.Fatalf("validateIDToken: %v", verr)
+	}
+	assertFullIDTokenClaims(t, validated, now)
+}
+
 func TestValidateIDTokenAcceptsPlainSignedToken(t *testing.T) {
 	now := time.Now()
 	c, idKey := idTokenTestClient(t, now, Algorithms{IDToken: fapi.ES256}, nil)
 	raw := buildTestSignedIDToken(t, idKey, now)
 
-	subject, err := c.validateIDToken(context.Background(), raw, idTokenTestNonce)
+	validated, err := c.validateIDToken(context.Background(), raw, idTokenTestNonce)
 	if err != nil {
 		t.Fatalf("validateIDToken: %v", err)
 	}
-	if subject != idTokenTestSubject {
-		t.Fatalf("subject = %q, want %q", subject, idTokenTestSubject)
+	if validated.Subject != idTokenTestSubject {
+		t.Fatalf("subject = %q, want %q", validated.Subject, idTokenTestSubject)
 	}
 }
 
@@ -123,12 +256,12 @@ func TestValidateIDTokenAcceptsEncryptedTokenRSAOAEP256(t *testing.T) {
 		t.Fatalf("jwe.Encrypt: %v", err)
 	}
 
-	subject, verr := c.validateIDToken(context.Background(), encrypted, idTokenTestNonce)
+	validated, verr := c.validateIDToken(context.Background(), encrypted, idTokenTestNonce)
 	if verr != nil {
 		t.Fatalf("validateIDToken: %v", verr)
 	}
-	if subject != idTokenTestSubject {
-		t.Fatalf("subject = %q, want %q", subject, idTokenTestSubject)
+	if validated.Subject != idTokenTestSubject {
+		t.Fatalf("subject = %q, want %q", validated.Subject, idTokenTestSubject)
 	}
 }
 
@@ -157,12 +290,12 @@ func TestValidateIDTokenAcceptsEncryptedTokenECDHESA256KW(t *testing.T) {
 		t.Fatalf("jwe.Encrypt: %v", err)
 	}
 
-	subject, verr := c.validateIDToken(context.Background(), encrypted, idTokenTestNonce)
+	validated, verr := c.validateIDToken(context.Background(), encrypted, idTokenTestNonce)
 	if verr != nil {
 		t.Fatalf("validateIDToken: %v", verr)
 	}
-	if subject != idTokenTestSubject {
-		t.Fatalf("subject = %q, want %q", subject, idTokenTestSubject)
+	if validated.Subject != idTokenTestSubject {
+		t.Fatalf("subject = %q, want %q", validated.Subject, idTokenTestSubject)
 	}
 }
 
@@ -339,5 +472,73 @@ func TestValidateIDTokenRejectsDecryptionWithWrongKey(t *testing.T) {
 
 	if _, err := c.validateIDToken(context.Background(), encrypted, idTokenTestNonce); err == nil {
 		t.Fatalf("validateIDToken(wrong decryption key) = nil error, want error")
+	}
+}
+
+// TestValidateSignedIDTokenRejectsMalformedToken covers
+// token.ParseIDToken itself failing on a syntactically-3-segment
+// string whose header/payload aren't valid base64url JSON — distinct
+// from TestValidateIDTokenRejectsMalformedSegmentCount, which only
+// covers the wrong *number* of segments.
+func TestValidateSignedIDTokenRejectsMalformedToken(t *testing.T) {
+	now := time.Now()
+	c, _ := idTokenTestClient(t, now, Algorithms{IDToken: fapi.ES256}, nil)
+	malformed := "not-base64url.not-base64url.not-base64url"
+	if _, err := c.validateIDToken(context.Background(), malformed, idTokenTestNonce); err == nil {
+		t.Fatalf("validateIDToken(malformed token) = nil error, want error")
+	}
+}
+
+// TestValidateSignedIDTokenRejectsIssuerKeyResolutionError covers
+// Dependencies.IssuerKeys itself failing (e.g. a transient fetch
+// error) — distinct from succeeding with no matching key.
+func TestValidateSignedIDTokenRejectsIssuerKeyResolutionError(t *testing.T) {
+	now := time.Now()
+	idKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate id token key: %v", err)
+	}
+	c := idTokenTestClientWithIssuerKeys(t, now, Algorithms{IDToken: fapi.ES256},
+		fakeIDTokenIssuerKeys{err: fmt.Errorf("resolve failed")})
+	raw := buildTestSignedIDToken(t, idKey, now)
+	if _, err := c.validateIDToken(context.Background(), raw, idTokenTestNonce); err == nil {
+		t.Fatalf("validateIDToken(issuer key resolution error) = nil error, want error")
+	}
+}
+
+// TestValidateSignedIDTokenRejectsNoMatchingIssuerKey covers
+// Dependencies.IssuerKeys succeeding but resolving zero keys — distinct
+// from a resolution error.
+func TestValidateSignedIDTokenRejectsNoMatchingIssuerKey(t *testing.T) {
+	now := time.Now()
+	idKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate id token key: %v", err)
+	}
+	c := idTokenTestClientWithIssuerKeys(t, now, Algorithms{IDToken: fapi.ES256}, fakeIDTokenIssuerKeys{})
+	raw := buildTestSignedIDToken(t, idKey, now)
+	if _, err := c.validateIDToken(context.Background(), raw, idTokenTestNonce); err == nil {
+		t.Fatalf("validateIDToken(no matching issuer key) = nil error, want error")
+	}
+}
+
+// TestValidateSignedIDTokenRejectsSignatureVerificationFailure covers
+// the ID token's signature itself failing to verify against the
+// issuer's advertised key — as opposed to any structural or
+// key-resolution failure earlier in the pipeline.
+func TestValidateSignedIDTokenRejectsSignatureVerificationFailure(t *testing.T) {
+	now := time.Now()
+	signingKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate signing key: %v", err)
+	}
+	wrongKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate wrong key: %v", err)
+	}
+	c := idTokenTestClientWithIssuerKeys(t, now, Algorithms{IDToken: fapi.ES256}, fakeIDTokenIssuerKeys{pub: &wrongKey.PublicKey})
+	raw := buildTestSignedIDToken(t, signingKey, now)
+	if _, err := c.validateIDToken(context.Background(), raw, idTokenTestNonce); err == nil {
+		t.Fatalf("validateIDToken(signature verification failure) = nil error, want error")
 	}
 }

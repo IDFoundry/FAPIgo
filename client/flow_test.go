@@ -504,6 +504,16 @@ func TestCompleteAuthorizationHappyPathBaseline(t *testing.T) {
 	if !success.Tokens.HasRefreshToken {
 		t.Errorf("HasRefreshToken = false, want true")
 	}
+	// IDTokenClaims must be populated from the same validated ID token
+	// as Subject, not left at its zero value — confirms ExchangeCode
+	// actually wires validateIDToken's full result into TokenSet, not
+	// just the Subject string.
+	if success.Tokens.IDTokenClaims.Subject != "end-user-1" {
+		t.Errorf("IDTokenClaims.Subject = %q, want end-user-1", success.Tokens.IDTokenClaims.Subject)
+	}
+	if success.Tokens.IDTokenClaims.ExpiresAt.IsZero() {
+		t.Errorf("IDTokenClaims.ExpiresAt is zero, want the ID token's actual exp claim")
+	}
 }
 
 func TestCompleteAuthorizationHappyPathMessageSigning(t *testing.T) {

@@ -41,6 +41,14 @@ type Document struct {
 	// the server signs JARM authorization responses with.
 	AuthorizationSigningAlgValuesSupported []string `json:"authorization_signing_alg_values_supported,omitempty"`
 
+	// IDTokenEncryptionAlgValuesSupported/IDTokenEncryptionEncValuesSupported
+	// advertise which key-management ("alg") and content-encryption
+	// ("enc") algorithms the server can encrypt an ID token with (OIDC
+	// Core §10.2). Both empty means the server never encrypts ID
+	// tokens — the common case, and this module's own default.
+	IDTokenEncryptionAlgValuesSupported []string `json:"id_token_encryption_alg_values_supported,omitempty"`
+	IDTokenEncryptionEncValuesSupported []string `json:"id_token_encryption_enc_values_supported,omitempty"`
+
 	RequirePushedAuthorizationRequests         bool `json:"require_pushed_authorization_requests,omitempty"`
 	RequireSignedRequestObject                 bool `json:"require_signed_request_object,omitempty"`
 	AuthorizationResponseIssParameterSupported bool `json:"authorization_response_iss_parameter_supported,omitempty"`

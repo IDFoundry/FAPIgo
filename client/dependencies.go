@@ -34,4 +34,12 @@ type Dependencies struct {
 	// Random is the source of randomness for state, nonce and PKCE
 	// verifier generation.
 	Random io.Reader
+
+	// Decryption recovers the content-encryption key of an encrypted ID
+	// token, using the keys.IDTokenDecryption purpose. Required exactly
+	// when Config.Algorithms.IDTokenKeyManagement is set; nil otherwise
+	// — most deployments never register for encrypted ID tokens, so
+	// this stays an opt-in dependency rather than a mandatory one every
+	// embedder has to wire up.
+	Decryption keys.Decrypter
 }

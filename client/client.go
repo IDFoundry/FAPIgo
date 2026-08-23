@@ -16,7 +16,7 @@ func New(cfg Config, deps Dependencies) (*Client, error) {
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
 	}
-	if err := validateDependencies(deps); err != nil {
+	if err := validateDependencies(cfg, deps); err != nil {
 		return nil, err
 	}
 	return &Client{cfg: cfg, deps: deps}, nil
@@ -53,6 +53,23 @@ func validateConfig(cfg Config) error {
 	}
 	if !cfg.Algorithms.IDToken.IsValid() {
 		return fmt.Errorf("client: config: algorithms.id_token is required")
+	}
+	// IDTokenKeyManagement/IDTokenContentEncryption declare encrypted
+	// ID token support as one coherent capability — required together,
+	// not independently optional, so a config can't end up in a state
+	// that only half-describes what to expect.
+	keyManagementSet := cfg.Algorithms.IDTokenKeyManagement != 0
+	contentEncryptionSet := cfg.Algorithms.IDTokenContentEncryption != 0
+	if keyManagementSet != contentEncryptionSet {
+		return fmt.Errorf("client: config: algorithms.id_token_key_management and algorithms.id_token_content_encryption must both be set, or both left zero")
+	}
+	if keyManagementSet {
+		if !cfg.Algorithms.IDTokenKeyManagement.IsValid() {
+			return fmt.Errorf("client: config: algorithms.id_token_key_management is invalid")
+		}
+		if !cfg.Algorithms.IDTokenContentEncryption.IsValid() {
+			return fmt.Errorf("client: config: algorithms.id_token_content_encryption is invalid")
+		}
 	}
 
 	if cfg.Limits.ClientAssertionLifetime <= 0 {
@@ -91,7 +108,7 @@ func validateConfig(cfg Config) error {
 	return nil
 }
 
-func validateDependencies(deps Dependencies) error {
+func validateDependencies(cfg Config, deps Dependencies) error {
 	if deps.Sessions == nil {
 		return fmt.Errorf("client: dependencies: sessions is required")
 	}
@@ -109,6 +126,9 @@ func validateDependencies(deps Dependencies) error {
 	}
 	if deps.Random == nil {
 		return fmt.Errorf("client: dependencies: random is required")
+	}
+	if cfg.Algorithms.IDTokenKeyManagement != 0 && deps.Decryption == nil {
+		return fmt.Errorf("client: dependencies: decryption is required when algorithms.id_token_key_management is set")
 	}
 	return nil
 }

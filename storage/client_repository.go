@@ -17,6 +17,9 @@ type RegisteredClient struct {
 	clientAssertionAlgorithm fapi.SignatureAlgorithm
 	requestObjectAlgorithm   fapi.SignatureAlgorithm
 	allowedScopes            map[string]struct{}
+
+	idTokenEncryptionKeyManagement     fapi.KeyManagementAlgorithm
+	idTokenEncryptionContentEncryption fapi.ContentEncryptionAlgorithm
 }
 
 // RegisteredClientConfig is the input to NewRegisteredClient.
@@ -33,6 +36,20 @@ type RegisteredClientConfig struct {
 	// request objects are accepted under. Leave zero if the client is
 	// not permitted to submit request objects at all.
 	RequestObjectAlgorithm fapi.SignatureAlgorithm
+
+	// IDTokenEncryptionKeyManagement/IDTokenEncryptionContentEncryption,
+	// if set (together — both zero, or both set), mean every ID token
+	// issued to this client is encrypted (OIDC Core §2) using these
+	// algorithms — the local record of this client's own
+	// id_token_encrypted_response_alg/enc registration. Leave both zero
+	// if the client did not register for encrypted ID tokens. Checked
+	// against server.Config.Algorithms' own allow-list at issuance time,
+	// not here: this type validates internal consistency only, not
+	// server-wide policy, the same way ClientAssertionAlgorithm/
+	// RequestObjectAlgorithm are validated for shape here and checked
+	// against server-wide policy elsewhere.
+	IDTokenEncryptionKeyManagement     fapi.KeyManagementAlgorithm
+	IDTokenEncryptionContentEncryption fapi.ContentEncryptionAlgorithm
 
 	AllowedScopes []string
 }
@@ -52,6 +69,19 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 	if cfg.RequestObjectAlgorithm != 0 && !cfg.RequestObjectAlgorithm.IsValid() {
 		return RegisteredClient{}, fmt.Errorf("storage: client %q has an invalid request object algorithm", cfg.ID)
 	}
+	idTokenEncKeyMgmtSet := cfg.IDTokenEncryptionKeyManagement != 0
+	idTokenEncContentEncSet := cfg.IDTokenEncryptionContentEncryption != 0
+	if idTokenEncKeyMgmtSet != idTokenEncContentEncSet {
+		return RegisteredClient{}, fmt.Errorf("storage: client %q must set both IDTokenEncryptionKeyManagement and IDTokenEncryptionContentEncryption, or neither", cfg.ID)
+	}
+	if idTokenEncKeyMgmtSet {
+		if !cfg.IDTokenEncryptionKeyManagement.IsValid() {
+			return RegisteredClient{}, fmt.Errorf("storage: client %q has an invalid ID token encryption key management algorithm", cfg.ID)
+		}
+		if !cfg.IDTokenEncryptionContentEncryption.IsValid() {
+			return RegisteredClient{}, fmt.Errorf("storage: client %q has an invalid ID token encryption content encryption algorithm", cfg.ID)
+		}
+	}
 
 	scopes := make(map[string]struct{}, len(cfg.AllowedScopes))
 	for _, s := range cfg.AllowedScopes {
@@ -65,11 +95,13 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 	copy(redirectURIs, cfg.RedirectURIs)
 
 	return RegisteredClient{
-		id:                       cfg.ID,
-		redirectURIs:             redirectURIs,
-		clientAssertionAlgorithm: cfg.ClientAssertionAlgorithm,
-		requestObjectAlgorithm:   cfg.RequestObjectAlgorithm,
-		allowedScopes:            scopes,
+		id:                                 cfg.ID,
+		redirectURIs:                       redirectURIs,
+		clientAssertionAlgorithm:           cfg.ClientAssertionAlgorithm,
+		requestObjectAlgorithm:             cfg.RequestObjectAlgorithm,
+		allowedScopes:                      scopes,
+		idTokenEncryptionKeyManagement:     cfg.IDTokenEncryptionKeyManagement,
+		idTokenEncryptionContentEncryption: cfg.IDTokenEncryptionContentEncryption,
 	}, nil
 }
 
@@ -99,6 +131,13 @@ func (c RegisteredClient) ClientAssertionAlgorithm() fapi.SignatureAlgorithm {
 // submit request objects at all.
 func (c RegisteredClient) RequestObjectAlgorithm() (algorithm fapi.SignatureAlgorithm, permitted bool) {
 	return c.requestObjectAlgorithm, c.requestObjectAlgorithm != 0
+}
+
+// IDTokenEncryption returns the algorithms this client's ID tokens must
+// be encrypted with, and whether the client registered for encrypted ID
+// tokens at all.
+func (c RegisteredClient) IDTokenEncryption() (keyManagement fapi.KeyManagementAlgorithm, contentEncryption fapi.ContentEncryptionAlgorithm, enabled bool) {
+	return c.idTokenEncryptionKeyManagement, c.idTokenEncryptionContentEncryption, c.idTokenEncryptionKeyManagement != 0
 }
 
 // AllowsScope reports whether scope is in this client's registered set

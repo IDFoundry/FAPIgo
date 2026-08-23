@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/server"
 )
 
@@ -92,5 +93,46 @@ func TestMetadataMessageSigningProfile(t *testing.T) {
 	}
 	if !containsString(md.ResponseModesSupported, "jwt") {
 		t.Fatalf("ResponseModesSupported = %v, want to contain jwt", md.ResponseModesSupported)
+	}
+}
+
+// TestMetadataOmitsIDTokenEncryptionWhenNotConfigured confirms a server
+// that never enabled encrypted ID tokens (the default, and the common
+// case) doesn't advertise either *_values_supported field — OIDC
+// Discovery 1.0 §3 leaves both optional/absent in that case.
+func TestMetadataOmitsIDTokenEncryptionWhenNotConfigured(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	md := h.server.Metadata(context.Background())
+
+	if len(md.IDTokenEncryptionAlgValuesSupported) != 0 {
+		t.Fatalf("IDTokenEncryptionAlgValuesSupported = %v, want empty", md.IDTokenEncryptionAlgValuesSupported)
+	}
+	if len(md.IDTokenEncryptionEncValuesSupported) != 0 {
+		t.Fatalf("IDTokenEncryptionEncValuesSupported = %v, want empty", md.IDTokenEncryptionEncValuesSupported)
+	}
+}
+
+// TestMetadataAdvertisesIDTokenEncryptionWhenConfigured confirms the
+// server-wide allow-lists in Config.Algorithms are what's advertised —
+// not any per-client RegisteredClient setting, which is a separate,
+// narrower concern (see storage.RegisteredClient.IDTokenEncryption).
+func TestMetadataAdvertisesIDTokenEncryptionWhenConfigured(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Algorithms.IDTokenEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.RSAOAEP256, fapi.ECDHESA256KW}
+	cfg.Algorithms.IDTokenEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{fapi.A256GCM}
+	deps := validDependencies()
+	deps.ClientEncryptionKeys = fakeClientEncryptionKeySource{}
+
+	srv, err := server.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	md := srv.Metadata(context.Background())
+
+	if !containsString(md.IDTokenEncryptionAlgValuesSupported, "RSA-OAEP-256") || !containsString(md.IDTokenEncryptionAlgValuesSupported, "ECDH-ES+A256KW") {
+		t.Fatalf("IDTokenEncryptionAlgValuesSupported = %v, want to contain RSA-OAEP-256 and ECDH-ES+A256KW", md.IDTokenEncryptionAlgValuesSupported)
+	}
+	if !containsString(md.IDTokenEncryptionEncValuesSupported, "A256GCM") {
+		t.Fatalf("IDTokenEncryptionEncValuesSupported = %v, want to contain A256GCM", md.IDTokenEncryptionEncValuesSupported)
 	}
 }

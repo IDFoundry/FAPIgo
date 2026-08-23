@@ -7,9 +7,20 @@ import (
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
 )
+
+// fakeClientEncryptionKeySource is the encryption-side counterpart of
+// fakeClientKeySource (par_test.go), used only to exercise New's
+// dependency cross-check — no test in this file resolves an actual key
+// through it.
+type fakeClientEncryptionKeySource struct{}
+
+func (fakeClientEncryptionKeySource) ResolveEncryptionKeys(context.Context, keys.ClientEncryptionKeyRequest) (keys.ClientEncryptionKeySet, error) {
+	return keys.ClientEncryptionKeySet{}, nil
+}
 
 func validConfig(t *testing.T) server.Config {
 	t.Helper()
@@ -162,6 +173,79 @@ func TestNewRequiresJARMConfigUnderMessageSigning(t *testing.T) {
 	cfg.Limits.JARMResponseLifetime = time.Minute
 	if _, err := server.New(cfg, deps); err != nil {
 		t.Fatalf("New(message signing, fully configured): %v", err)
+	}
+}
+
+// TestNewRejectsInvalidIDTokenEncryptionConfig exercises validateConfig's
+// id_token_encryption_key_management/content_encryption checks in
+// isolation: deps.ClientEncryptionKeys is always present here, so a
+// rejection can only come from the config-level check under test, not
+// from validateDependencies's separate cross-check (see
+// TestNewRequiresClientEncryptionKeysWhenIDTokenEncryptionConfigured for
+// that one).
+func TestNewRejectsInvalidIDTokenEncryptionConfig(t *testing.T) {
+	cases := map[string]func(*server.Config){
+		"key mgmt without content enc": func(c *server.Config) {
+			c.Algorithms.IDTokenEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.RSAOAEP256}
+		},
+		"content enc without key mgmt": func(c *server.Config) {
+			c.Algorithms.IDTokenEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{fapi.A256GCM}
+		},
+		"invalid key mgmt alg": func(c *server.Config) {
+			c.Algorithms.IDTokenEncryptionKeyManagement = server.KeyManagementAlgorithmSet{0}
+			c.Algorithms.IDTokenEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{fapi.A256GCM}
+		},
+		"invalid content enc alg": func(c *server.Config) {
+			c.Algorithms.IDTokenEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.RSAOAEP256}
+			c.Algorithms.IDTokenEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{0}
+		},
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg := validConfig(t)
+			mutate(&cfg)
+			deps := validDependencies()
+			deps.ClientEncryptionKeys = fakeClientEncryptionKeySource{}
+			if _, err := server.New(cfg, deps); err == nil {
+				t.Fatalf("New(%s) = nil error, want error", name)
+			}
+		})
+	}
+}
+
+// TestNewAcceptsValidIDTokenEncryptionConfig confirms both algorithm sets
+// set together, with a matching dependency, is accepted — the positive
+// counterpart of TestNewRejectsInvalidIDTokenEncryptionConfig.
+func TestNewAcceptsValidIDTokenEncryptionConfig(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Algorithms.IDTokenEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.RSAOAEP256}
+	cfg.Algorithms.IDTokenEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{fapi.A256GCM}
+	deps := validDependencies()
+	deps.ClientEncryptionKeys = fakeClientEncryptionKeySource{}
+
+	if _, err := server.New(cfg, deps); err != nil {
+		t.Fatalf("New(valid id token encryption config): %v", err)
+	}
+}
+
+// TestNewRequiresClientEncryptionKeysWhenIDTokenEncryptionConfigured covers
+// Phase 5's cross-check: enabling ID token encryption server-wide is
+// meaningless without something that can resolve a client's encryption
+// key, so New must reject that combination the same way it already
+// rejects, e.g., a nil ClientKeys with any configuration.
+func TestNewRequiresClientEncryptionKeysWhenIDTokenEncryptionConfigured(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Algorithms.IDTokenEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.RSAOAEP256}
+	cfg.Algorithms.IDTokenEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{fapi.A256GCM}
+	deps := validDependencies()
+
+	if _, err := server.New(cfg, deps); err == nil {
+		t.Fatalf("New(id token encryption configured, no client encryption keys) = nil error, want error")
+	}
+
+	deps.ClientEncryptionKeys = fakeClientEncryptionKeySource{}
+	if _, err := server.New(cfg, deps); err != nil {
+		t.Fatalf("New(id token encryption configured, with client encryption keys): %v", err)
 	}
 }
 

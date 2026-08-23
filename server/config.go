@@ -38,6 +38,34 @@ func (s AlgorithmSet) Contains(alg fapi.SignatureAlgorithm) bool {
 	return false
 }
 
+// KeyManagementAlgorithmSet is a closed, ordered allow-list of JWE
+// key-management algorithms.
+type KeyManagementAlgorithmSet []fapi.KeyManagementAlgorithm
+
+// Contains reports whether alg is in the set.
+func (s KeyManagementAlgorithmSet) Contains(alg fapi.KeyManagementAlgorithm) bool {
+	for _, a := range s {
+		if a == alg {
+			return true
+		}
+	}
+	return false
+}
+
+// ContentEncryptionAlgorithmSet is a closed, ordered allow-list of JWE
+// content-encryption algorithms.
+type ContentEncryptionAlgorithmSet []fapi.ContentEncryptionAlgorithm
+
+// Contains reports whether alg is in the set.
+func (s ContentEncryptionAlgorithmSet) Contains(alg fapi.ContentEncryptionAlgorithm) bool {
+	for _, a := range s {
+		if a == alg {
+			return true
+		}
+	}
+	return false
+}
+
 // AlgorithmPolicy is the server-wide allow-list of algorithms clients
 // may use, independent of and in addition to each RegisteredClient's own
 // configured algorithm. A client registered with an algorithm outside
@@ -55,6 +83,16 @@ type AlgorithmPolicy struct {
 
 	// IDToken is the single algorithm this server signs ID tokens with.
 	IDToken fapi.SignatureAlgorithm
+
+	// IDTokenEncryptionKeyManagement/IDTokenEncryptionContentEncryption
+	// are the server-wide allow-lists for encrypted ID tokens (OIDC Core
+	// §2) — like ClientAssertion/RequestObject, a per-client choice
+	// checked against this operator-controlled set, not a single
+	// server-wide algorithm the way JARM/IDToken are. Both empty (the
+	// default) means this server never encrypts ID tokens, regardless
+	// of what any individual RegisteredClient's own fields say.
+	IDTokenEncryptionKeyManagement     KeyManagementAlgorithmSet
+	IDTokenEncryptionContentEncryption ContentEncryptionAlgorithmSet
 }
 
 // Endpoints are this server's own endpoint URLs: the expected

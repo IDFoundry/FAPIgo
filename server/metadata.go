@@ -35,6 +35,14 @@ type Metadata struct {
 	// this server signs authorization responses (JARM) at all.
 	AuthorizationSigningAlgValuesSupported []string
 
+	// IDTokenEncryptionAlgValuesSupported/IDTokenEncryptionEncValuesSupported
+	// are set only when Config.Algorithms.IDTokenEncryptionKeyManagement/
+	// IDTokenEncryptionContentEncryption are non-empty — most servers
+	// never encrypt ID tokens, and OIDC Discovery 1.0 §3 leaves both
+	// fields optional/absent in that case.
+	IDTokenEncryptionAlgValuesSupported []string
+	IDTokenEncryptionEncValuesSupported []string
+
 	// RequirePushedAuthorizationRequests is always true: BeginAuthorization
 	// only ever accepts a request_uri, never raw authorization parameters.
 	RequirePushedAuthorizationRequests bool
@@ -82,10 +90,23 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 		md.ResponseModesSupported = []string{"query"}
 	}
 
+	if len(s.cfg.Algorithms.IDTokenEncryptionKeyManagement) > 0 {
+		md.IDTokenEncryptionAlgValuesSupported = algorithmSetStrings(s.cfg.Algorithms.IDTokenEncryptionKeyManagement)
+	}
+	if len(s.cfg.Algorithms.IDTokenEncryptionContentEncryption) > 0 {
+		md.IDTokenEncryptionEncValuesSupported = algorithmSetStrings(s.cfg.Algorithms.IDTokenEncryptionContentEncryption)
+	}
+
 	return md
 }
 
-func algorithmSetStrings(set AlgorithmSet) []string {
+// algorithmString is satisfied by any of this package's closed algorithm
+// set element types.
+type algorithmString interface {
+	String() string
+}
+
+func algorithmSetStrings[T algorithmString, S ~[]T](set S) []string {
 	out := make([]string, len(set))
 	for i, a := range set {
 		out[i] = a.String()

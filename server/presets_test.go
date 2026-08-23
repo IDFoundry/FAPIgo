@@ -120,8 +120,8 @@ func TestRecommendedAlgorithmsWorksUnderMessageSigning(t *testing.T) {
 
 func TestRecommendedAlgorithmSetIsExactlyWhatThisModuleSupports(t *testing.T) {
 	set := server.RecommendedAlgorithmSet()
-	if len(set) != 2 || !set.Contains(fapi.ES256) || !set.Contains(fapi.PS256) {
-		t.Fatalf("RecommendedAlgorithmSet() = %v, want exactly {ES256, PS256}", set)
+	if len(set) != 3 || !set.Contains(fapi.ES256) || !set.Contains(fapi.PS256) || !set.Contains(fapi.EdDSA) {
+		t.Fatalf("RecommendedAlgorithmSet() = %v, want exactly {ES256, PS256, EdDSA}", set)
 	}
 }
 

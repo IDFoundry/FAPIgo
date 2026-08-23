@@ -36,12 +36,25 @@ func (c idTokenFixedClock) Now() time.Time { return c.now }
 // validateIDToken's dispatch and decryption logic, not exercise key
 // rotation, which internal/token and keys/jwksissuer already cover.
 type fakeIDTokenIssuerKeys struct {
+	// pub is the key to resolve for keys.IDTokenVerification. Leaving it
+	// nil (with err also nil) resolves to zero keys — a genuinely empty
+	// key set, distinct from a resolution error.
 	pub *ecdsa.PublicKey
+	// err, if set, is returned instead of a key set — a resolution
+	// failure (e.g. a transient fetch error), distinct from succeeding
+	// with no matching key.
+	err error
 }
 
 func (f fakeIDTokenIssuerKeys) ResolveIssuerKeys(_ context.Context, req keys.IssuerKeyRequest) (keys.IssuerKeySet, error) {
+	if f.err != nil {
+		return keys.IssuerKeySet{}, f.err
+	}
 	if req.Purpose != keys.IDTokenVerification {
 		return keys.IssuerKeySet{}, fmt.Errorf("fakeIDTokenIssuerKeys: unexpected purpose %v", req.Purpose)
+	}
+	if f.pub == nil {
+		return keys.IssuerKeySet{}, nil
 	}
 	return keys.IssuerKeySet{Keys: []keys.IssuerKey{{KeyID: "as-kid", Algorithm: fapi.ES256, PublicKey: f.pub}}}, nil
 }
@@ -70,6 +83,30 @@ func idTokenTestClient(t *testing.T, now time.Time, algorithms Algorithms, decry
 		},
 	}
 	return c, idKey
+}
+
+// idTokenTestClientWithIssuerKeys mirrors idTokenTestClient but lets a
+// test supply its own keys.IssuerKeySource directly — for exercising
+// validateSignedIDToken's own issuer-key-resolution error paths, which
+// idTokenTestClient's fixed single-key setup never reaches.
+func idTokenTestClientWithIssuerKeys(t *testing.T, now time.Time, algorithms Algorithms, issuerKeys keys.IssuerKeySource) *Client {
+	t.Helper()
+	issuer, err := fapi.ParseIssuerURL(idTokenTestIssuer)
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+	return &Client{
+		cfg: Config{
+			Issuer:     issuer,
+			ClientID:   fapi.ClientID(idTokenTestClientID),
+			Algorithms: algorithms,
+			Limits:     Limits{MaxIDTokenLifetime: 5 * time.Minute, MaxClockSkew: 5 * time.Second},
+		},
+		deps: Dependencies{
+			IssuerKeys: issuerKeys,
+			Clock:      idTokenFixedClock{now: now},
+		},
+	}
 }
 
 func buildTestSignedIDToken(t *testing.T, idKey *ecdsa.PrivateKey, now time.Time) string {
@@ -435,5 +472,73 @@ func TestValidateIDTokenRejectsDecryptionWithWrongKey(t *testing.T) {
 
 	if _, err := c.validateIDToken(context.Background(), encrypted, idTokenTestNonce); err == nil {
 		t.Fatalf("validateIDToken(wrong decryption key) = nil error, want error")
+	}
+}
+
+// TestValidateSignedIDTokenRejectsMalformedToken covers
+// token.ParseIDToken itself failing on a syntactically-3-segment
+// string whose header/payload aren't valid base64url JSON — distinct
+// from TestValidateIDTokenRejectsMalformedSegmentCount, which only
+// covers the wrong *number* of segments.
+func TestValidateSignedIDTokenRejectsMalformedToken(t *testing.T) {
+	now := time.Now()
+	c, _ := idTokenTestClient(t, now, Algorithms{IDToken: fapi.ES256}, nil)
+	malformed := "not-base64url.not-base64url.not-base64url"
+	if _, err := c.validateIDToken(context.Background(), malformed, idTokenTestNonce); err == nil {
+		t.Fatalf("validateIDToken(malformed token) = nil error, want error")
+	}
+}
+
+// TestValidateSignedIDTokenRejectsIssuerKeyResolutionError covers
+// Dependencies.IssuerKeys itself failing (e.g. a transient fetch
+// error) — distinct from succeeding with no matching key.
+func TestValidateSignedIDTokenRejectsIssuerKeyResolutionError(t *testing.T) {
+	now := time.Now()
+	idKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate id token key: %v", err)
+	}
+	c := idTokenTestClientWithIssuerKeys(t, now, Algorithms{IDToken: fapi.ES256},
+		fakeIDTokenIssuerKeys{err: fmt.Errorf("resolve failed")})
+	raw := buildTestSignedIDToken(t, idKey, now)
+	if _, err := c.validateIDToken(context.Background(), raw, idTokenTestNonce); err == nil {
+		t.Fatalf("validateIDToken(issuer key resolution error) = nil error, want error")
+	}
+}
+
+// TestValidateSignedIDTokenRejectsNoMatchingIssuerKey covers
+// Dependencies.IssuerKeys succeeding but resolving zero keys — distinct
+// from a resolution error.
+func TestValidateSignedIDTokenRejectsNoMatchingIssuerKey(t *testing.T) {
+	now := time.Now()
+	idKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate id token key: %v", err)
+	}
+	c := idTokenTestClientWithIssuerKeys(t, now, Algorithms{IDToken: fapi.ES256}, fakeIDTokenIssuerKeys{})
+	raw := buildTestSignedIDToken(t, idKey, now)
+	if _, err := c.validateIDToken(context.Background(), raw, idTokenTestNonce); err == nil {
+		t.Fatalf("validateIDToken(no matching issuer key) = nil error, want error")
+	}
+}
+
+// TestValidateSignedIDTokenRejectsSignatureVerificationFailure covers
+// the ID token's signature itself failing to verify against the
+// issuer's advertised key — as opposed to any structural or
+// key-resolution failure earlier in the pipeline.
+func TestValidateSignedIDTokenRejectsSignatureVerificationFailure(t *testing.T) {
+	now := time.Now()
+	signingKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate signing key: %v", err)
+	}
+	wrongKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate wrong key: %v", err)
+	}
+	c := idTokenTestClientWithIssuerKeys(t, now, Algorithms{IDToken: fapi.ES256}, fakeIDTokenIssuerKeys{pub: &wrongKey.PublicKey})
+	raw := buildTestSignedIDToken(t, signingKey, now)
+	if _, err := c.validateIDToken(context.Background(), raw, idTokenTestNonce); err == nil {
+		t.Fatalf("validateIDToken(signature verification failure) = nil error, want error")
 	}
 }

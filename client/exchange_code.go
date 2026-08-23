@@ -164,19 +164,8 @@ func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationRe
 		result.HasExpiresIn = true
 	}
 
-	if raw.IDToken != "" {
-		validated, idErr := c.validateIDToken(ctx, raw.IDToken, resp.nonce)
-		if idErr != nil {
-			return TokenSet{}, idErr
-		}
-		result.IDToken = fapi.NewSecret(raw.IDToken)
-		result.HasIDToken = true
-		result.Subject = validated.Subject
-		result.IDTokenClaims = IDTokenClaims{
-			Subject: validated.Subject, AuthTime: validated.AuthTime,
-			ACR: validated.ACR, AMR: validated.AMR,
-			Parameters: validated.Parameters, ExpiresAt: validated.ExpiresAt,
-		}
+	if idErr := c.populateIDToken(ctx, &result, raw, resp.nonce); idErr != nil {
+		return TokenSet{}, idErr
 	}
 	if raw.RefreshToken != "" {
 		result.RefreshToken = fapi.NewSecret(raw.RefreshToken)
@@ -184,6 +173,29 @@ func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationRe
 	}
 
 	return result, nil
+}
+
+// populateIDToken validates raw.IDToken, if present, and fills in
+// result's IDToken/HasIDToken/Subject/IDTokenClaims fields — factored
+// out of ExchangeCode purely to keep that function's own branching
+// manageable, not because this logic is reused elsewhere.
+func (c *Client) populateIDToken(ctx context.Context, result *TokenSet, raw rawTokenResponse, nonce string) *Error {
+	if raw.IDToken == "" {
+		return nil
+	}
+	validated, idErr := c.validateIDToken(ctx, raw.IDToken, nonce)
+	if idErr != nil {
+		return idErr
+	}
+	result.IDToken = fapi.NewSecret(raw.IDToken)
+	result.HasIDToken = true
+	result.Subject = validated.Subject
+	result.IDTokenClaims = IDTokenClaims{
+		Subject: validated.Subject, AuthTime: validated.AuthTime,
+		ACR: validated.ACR, AMR: validated.AMR,
+		Parameters: validated.Parameters, ExpiresAt: validated.ExpiresAt,
+	}
+	return nil
 }
 
 // postTokenRequestWithDPoP signs a fresh DPoP proof for the token

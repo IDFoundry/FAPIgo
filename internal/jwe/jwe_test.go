@@ -92,6 +92,145 @@ func TestEncryptDecryptRoundTripECDHESA256KW(t *testing.T) {
 	}
 }
 
+func TestEncryptDecryptRoundTripA256CBCHS512(t *testing.T) {
+	priv := generateRSAKey(t)
+	plaintext := []byte("the quick brown fox jumps over the lazy dog")
+
+	compact, err := Encrypt(EncryptRequest{
+		Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256CBCHS512,
+		RecipientKey: &priv.PublicKey, KeyID: "kid-1", ContentType: "JWT",
+		Plaintext: plaintext,
+	})
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+
+	result, err := Decrypt(context.Background(), DecryptRequest{
+		Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256CBCHS512,
+		RecipientKey: priv, Compact: compact,
+	})
+	if err != nil {
+		t.Fatalf("Decrypt: %v", err)
+	}
+	if !bytes.Equal(result.Plaintext, plaintext) {
+		t.Fatalf("Plaintext = %q, want %q", result.Plaintext, plaintext)
+	}
+	if result.Header.Encryption != fapi.A256CBCHS512 {
+		t.Fatalf("Header.Encryption = %v, want A256CBCHS512", result.Header.Encryption)
+	}
+}
+
+// TestEncryptDecryptRoundTripA256CBCHS512ECDHESA256KW confirms
+// A256CBC-HS512 composes with either key-management algorithm, not
+// just RSA-OAEP-256 — the two algorithm choices are orthogonal.
+func TestEncryptDecryptRoundTripA256CBCHS512ECDHESA256KW(t *testing.T) {
+	priv := generateECDHKey(t)
+	plaintext := []byte("the quick brown fox jumps over the lazy dog")
+
+	compact, err := Encrypt(EncryptRequest{
+		Algorithm: fapi.ECDHESA256KW, Encryption: fapi.A256CBCHS512,
+		RecipientKey: priv.PublicKey(), Plaintext: plaintext,
+	})
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+
+	result, err := Decrypt(context.Background(), DecryptRequest{
+		Algorithm: fapi.ECDHESA256KW, Encryption: fapi.A256CBCHS512,
+		RecipientKey: priv, Compact: compact,
+	})
+	if err != nil {
+		t.Fatalf("Decrypt: %v", err)
+	}
+	if !bytes.Equal(result.Plaintext, plaintext) {
+		t.Fatalf("Plaintext = %q, want %q", result.Plaintext, plaintext)
+	}
+}
+
+// TestEncryptDecryptRoundTripA256CBCHS512EmptyPlaintext exercises the
+// case where A256CBC-HS512's ciphertext is never actually empty (PKCS#7
+// padding always emits at least one full block), unlike A256GCM's —
+// see TestEncryptDecryptRoundTripEmptyPlaintext for that comparison
+// case, and the segment-emptiness comment in Decrypt for why the parser
+// stays permissive about it regardless of algorithm.
+func TestEncryptDecryptRoundTripA256CBCHS512EmptyPlaintext(t *testing.T) {
+	priv := generateRSAKey(t)
+	compact, err := Encrypt(EncryptRequest{
+		Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256CBCHS512,
+		RecipientKey: &priv.PublicKey, Plaintext: []byte{},
+	})
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	parts := strings.Split(compact, ".")
+	if parts[3] == "" {
+		t.Fatalf("ciphertext segment is empty, want non-empty (PKCS#7 padding always adds a block)")
+	}
+
+	result, err := Decrypt(context.Background(), DecryptRequest{
+		Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256CBCHS512,
+		RecipientKey: priv, Compact: compact,
+	})
+	if err != nil {
+		t.Fatalf("Decrypt: %v", err)
+	}
+	if len(result.Plaintext) != 0 {
+		t.Fatalf("Plaintext = %q, want empty", result.Plaintext)
+	}
+}
+
+// TestDecryptRejectsContentEncryptionMismatch confirms a JWE produced
+// with one content-encryption algorithm is rejected when the caller
+// requires the other — the "enc" analogue of
+// TestDecryptRejectsAlgorithmMismatch, only exercisable now that a
+// second ContentEncryptionAlgorithm actually exists.
+func TestDecryptRejectsContentEncryptionMismatch(t *testing.T) {
+	priv := generateRSAKey(t)
+	compact, err := Encrypt(EncryptRequest{
+		Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256CBCHS512,
+		RecipientKey: &priv.PublicKey, Plaintext: []byte("secret"),
+	})
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	if _, err := Decrypt(context.Background(), DecryptRequest{
+		Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM,
+		RecipientKey: priv, Compact: compact,
+	}); !errors.Is(err, ErrAlgorithmMismatch) {
+		t.Fatalf("Decrypt(content encryption mismatch) = %v, want ErrAlgorithmMismatch", err)
+	}
+}
+
+// TestDecryptRejectsTamperedTagA256CBCHS512 mirrors
+// TestDecryptRejectsTamperedTag for the CBC-HMAC family, where tag
+// verification is this package's own code (cbcHMACTag/hmac.Equal), not
+// a stdlib AEAD call — the two paths are worth testing independently.
+func TestDecryptRejectsTamperedTagA256CBCHS512(t *testing.T) {
+	priv := generateRSAKey(t)
+	compact, err := Encrypt(EncryptRequest{
+		Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256CBCHS512,
+		RecipientKey: &priv.PublicKey, Plaintext: []byte("secret"),
+	})
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	parts := strings.Split(compact, ".")
+	tag, err := base64.RawURLEncoding.DecodeString(parts[4])
+	if err != nil {
+		t.Fatalf("decode tag: %v", err)
+	}
+	tag[0] ^= 0xFF
+	parts[4] = base64.RawURLEncoding.EncodeToString(tag)
+	tampered := strings.Join(parts, ".")
+
+	if _, err := Decrypt(context.Background(), DecryptRequest{
+		Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256CBCHS512,
+		RecipientKey: priv, Compact: tampered,
+	}); !errors.Is(err, ErrDecryptionFailed) {
+		t.Fatalf("Decrypt(tampered tag) = %v, want ErrDecryptionFailed", err)
+	}
+}
+
 func TestEncryptGeneratesFreshEphemeralKeyEachCall(t *testing.T) {
 	priv := generateECDHKey(t)
 	a, err := Encrypt(EncryptRequest{Algorithm: fapi.ECDHESA256KW, Encryption: fapi.A256GCM, RecipientKey: priv.PublicKey(), Plaintext: []byte("x")})

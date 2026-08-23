@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/IDFoundry/FAPIgo/compare/v0.6.0...v0.7.0) (2026-08-23)
+
+
+### Features
+
+* parse userinfo_endpoint from OIDC discovery ([d54a5e6](https://github.com/IDFoundry/FAPIgo/commit/d54a5e60c88c040eda31e64bbda4a12e973bd3e3))
+
 ## [0.6.0](https://github.com/IDFoundry/FAPIgo/compare/v0.5.0...v0.6.0) (2026-08-23)
 
 

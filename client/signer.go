@@ -25,10 +25,19 @@ type keyManagerSigner struct {
 
 func (s keyManagerSigner) Public() crypto.PublicKey { return s.publicKey }
 
-func (s keyManagerSigner) Sign(_ io.Reader, digest []byte, _ crypto.SignerOpts) ([]byte, error) {
-	sig, err := s.manager.Sign(s.ctx, keys.SigningRequest{
-		Purpose: s.purpose, Algorithm: s.algorithm, Digest: digest,
-	})
+func (s keyManagerSigner) Sign(_ io.Reader, digestOrMessage []byte, _ crypto.SignerOpts) ([]byte, error) {
+	req := keys.SigningRequest{Purpose: s.purpose, Algorithm: s.algorithm}
+	// EdDSA's crypto.Signer contract passes the raw signing input here,
+	// never a digest (internal/jose's signEdDSA calls Sign with
+	// crypto.Hash(0) precisely to request that) — see
+	// keys.SigningRequest's own doc comment for why that has to land in
+	// a different field than every other algorithm's Digest.
+	if s.algorithm == fapi.EdDSA {
+		req.SigningInput = digestOrMessage
+	} else {
+		req.Digest = digestOrMessage
+	}
+	sig, err := s.manager.Sign(s.ctx, req)
 	if err != nil {
 		return nil, err
 	}

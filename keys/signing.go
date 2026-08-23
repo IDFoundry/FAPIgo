@@ -38,14 +38,29 @@ const (
 	DPoPProofSigning
 )
 
-// SigningRequest describes one signature to produce. Digest is the
-// pre-hashed signing input — this module always hashes before calling
-// Sign, so an HSM- or remote-signing-service-backed implementation never
-// receives more of the plaintext than it needs.
+// SigningRequest describes one signature to produce. Exactly one of
+// Digest or SigningInput is populated, chosen by Algorithm — never
+// both, and an implementation should treat the other as absent rather
+// than guess:
+//
+//   - Digest, for ES256/PS256: the pre-hashed signing input. This
+//     module always hashes before calling Sign for these algorithms,
+//     so an HSM- or remote-signing-service-backed implementation never
+//     receives more of the plaintext than it needs.
+//   - SigningInput, for EdDSA: the raw, unhashed JWS Signing Input.
+//     RFC 8037 §3.1 requires pure EdDSA over the actual message, not a
+//     digest of it — there is no equivalent "pre-hash so the
+//     implementation sees less" option for this algorithm, so an
+//     EdDSA-capable implementation necessarily receives the full
+//     plaintext being signed. An implementation that hasn't been
+//     updated to handle EdDSA sees an empty Digest for such a request
+//     (not a wrong or insecure signature over the wrong bytes) and
+//     should fail closed.
 type SigningRequest struct {
-	Purpose   SigningPurpose
-	Algorithm fapi.SignatureAlgorithm
-	Digest    []byte
+	Purpose      SigningPurpose
+	Algorithm    fapi.SignatureAlgorithm
+	Digest       []byte
+	SigningInput []byte
 }
 
 // Signature is the result of a Sign call. Value must be in the format
@@ -55,7 +70,10 @@ type SigningRequest struct {
 // performs that conversion itself; an implementation of KeyManager
 // should produce exactly what a stdlib *ecdsa.PrivateKey or *rsa.PrivateKey
 // would from Sign, since that is the contract this module's internal
-// crypto.Signer adapter relies on.
+// crypto.Signer adapter relies on. For EdDSA, Value is simpler: an
+// ed25519.PrivateKey's Sign output is already the 64-byte wire format
+// RFC 8037 wants, with no equivalent DER-to-fixed-width conversion
+// needed.
 type Signature struct {
 	KeyID string
 	Value []byte
@@ -74,8 +92,10 @@ type PublicKeyInfo struct {
 // backed implementation never has to hand private key material into
 // this process.
 type KeyManager interface {
-	// Sign produces a signature over req.Digest using the key currently
-	// designated for req.Purpose and req.Algorithm.
+	// Sign produces a signature over req.Digest or req.SigningInput
+	// (see SigningRequest's own doc comment for which one, and why)
+	// using the key currently designated for req.Purpose and
+	// req.Algorithm.
 	Sign(ctx context.Context, req SigningRequest) (Signature, error)
 
 	// PublicKey returns the public key (and its kid) currently

@@ -3,6 +3,7 @@ package ephemeral
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
@@ -52,6 +53,76 @@ func TestKeyManagerSignAndVerifyRoundTrip(t *testing.T) {
 	}
 	if !ecdsa.VerifyASN1(pub, digest[:], sig.Value) {
 		t.Fatal("signature does not verify against PublicKey's own reported key")
+	}
+}
+
+// TestKeyManagerSignAndVerifyRoundTripEdDSA mirrors
+// TestKeyManagerSignAndVerifyRoundTrip for EdDSA, whose SigningRequest
+// carries SigningInput (the raw message) rather than Digest — see
+// keys.SigningRequest's own doc comment for why the two algorithm
+// families can't share a field.
+func TestKeyManagerSignAndVerifyRoundTripEdDSA(t *testing.T) {
+	m, err := NewKeyManager(map[keys.SigningPurpose]fapi.SignatureAlgorithm{
+		keys.RequestObjectSigning: fapi.EdDSA,
+	})
+	if err != nil {
+		t.Fatalf("NewKeyManager: %v", err)
+	}
+
+	message := []byte("hello")
+	sig, err := m.Sign(context.Background(), keys.SigningRequest{
+		Purpose: keys.RequestObjectSigning, Algorithm: fapi.EdDSA, SigningInput: message,
+	})
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	if sig.KeyID == "" {
+		t.Fatal("Sign returned an empty KeyID")
+	}
+
+	info, err := m.PublicKey(context.Background(), keys.RequestObjectSigning, fapi.EdDSA)
+	if err != nil {
+		t.Fatalf("PublicKey: %v", err)
+	}
+	if info.KeyID != sig.KeyID {
+		t.Fatalf("PublicKey KeyID = %q, want %q (must match Sign's)", info.KeyID, sig.KeyID)
+	}
+	pub, ok := info.PublicKey.(ed25519.PublicKey)
+	if !ok {
+		t.Fatalf("PublicKey type = %T, want ed25519.PublicKey", info.PublicKey)
+	}
+	if !ed25519.Verify(pub, message, sig.Value) {
+		t.Fatal("signature does not verify against PublicKey's own reported key")
+	}
+}
+
+// TestKeyManagerEdDSAIgnoresDigestField confirms Sign actually uses
+// SigningInput for EdDSA, not whatever might be left in Digest — a
+// caller that populated both (or the wrong one) should get a signature
+// over the message it meant to sign, not a silent fallback.
+func TestKeyManagerEdDSAIgnoresDigestField(t *testing.T) {
+	m, err := NewKeyManager(map[keys.SigningPurpose]fapi.SignatureAlgorithm{
+		keys.RequestObjectSigning: fapi.EdDSA,
+	})
+	if err != nil {
+		t.Fatalf("NewKeyManager: %v", err)
+	}
+
+	message := []byte("the real message")
+	sig, err := m.Sign(context.Background(), keys.SigningRequest{
+		Purpose: keys.RequestObjectSigning, Algorithm: fapi.EdDSA,
+		SigningInput: message, Digest: []byte("stale digest that must be ignored"),
+	})
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	info, err := m.PublicKey(context.Background(), keys.RequestObjectSigning, fapi.EdDSA)
+	if err != nil {
+		t.Fatalf("PublicKey: %v", err)
+	}
+	pub := info.PublicKey.(ed25519.PublicKey)
+	if !ed25519.Verify(pub, message, sig.Value) {
+		t.Fatal("signature does not verify against SigningInput — Digest was used instead")
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
@@ -31,8 +32,8 @@ type KeyManager struct {
 }
 
 // NewKeyManager generates one key per purpose in purposes, sized for
-// the paired algorithm (ECDSA P-256 for ES256, RSA-2048 for PS256 — the
-// only two algorithms this module supports).
+// the paired algorithm (ECDSA P-256 for ES256, RSA-2048 for PS256,
+// Ed25519 for EdDSA — the three algorithms this module supports).
 func NewKeyManager(purposes map[keys.SigningPurpose]fapi.SignatureAlgorithm) (*KeyManager, error) {
 	m := &KeyManager{
 		keys: make(map[keys.SigningPurpose]crypto.Signer, len(purposes)),
@@ -55,6 +56,9 @@ func generateSigner(alg fapi.SignatureAlgorithm) (crypto.Signer, error) {
 		return ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	case fapi.PS256:
 		return rsa.GenerateKey(rand.Reader, 2048)
+	case fapi.EdDSA:
+		_, priv, err := ed25519.GenerateKey(rand.Reader)
+		return priv, err
 	default:
 		return nil, fmt.Errorf("unsupported algorithm %v", alg)
 	}
@@ -84,6 +88,12 @@ func (m *KeyManager) Sign(_ context.Context, req keys.SigningRequest) (keys.Sign
 		if err != nil {
 			return keys.Signature{}, err
 		}
+		return keys.Signature{KeyID: kid, Value: sig}, nil
+	case ed25519.PrivateKey:
+		// req.SigningInput, not req.Digest: EdDSA signs the raw message
+		// (RFC 8037 §3.1), never a pre-hashed digest — see
+		// keys.SigningRequest's own doc comment.
+		sig := ed25519.Sign(key, req.SigningInput)
 		return keys.Signature{KeyID: kid, Value: sig}, nil
 	default:
 		return keys.Signature{}, fmt.Errorf("ephemeral: unsupported key type %T", signer)

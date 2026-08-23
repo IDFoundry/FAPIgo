@@ -38,6 +38,7 @@ type discoveryDoc struct {
 	TokenEndpoint                       string   `json:"token_endpoint"`
 	PushedAuthorizationRequestEndpoint  string   `json:"pushed_authorization_request_endpoint"`
 	JWKSURI                             string   `json:"jwks_uri"`
+	UserinfoEndpoint                    string   `json:"userinfo_endpoint,omitempty"`
 	IDTokenSigningAlgValuesSupported    []string `json:"id_token_signing_alg_values_supported,omitempty"`
 	RequestObjectSigningAlgValues       []string `json:"request_object_signing_alg_values_supported,omitempty"`
 	AuthorizationSigningAlgValues       []string `json:"authorization_signing_alg_values_supported,omitempty"`
@@ -57,6 +58,7 @@ func TestDiscoverAcceptsValidDocumentAtRoot(t *testing.T) {
 			TokenEndpoint:                       ts.URL + "/token",
 			PushedAuthorizationRequestEndpoint:  ts.URL + "/par",
 			JWKSURI:                             ts.URL + "/jwks",
+			UserinfoEndpoint:                    ts.URL + "/userinfo",
 			IDTokenSigningAlgValuesSupported:    []string{"ES256", "RS256"},
 			RequestObjectSigningAlgValues:       []string{"ES256"},
 			AuthorizationSigningAlgValues:       []string{"ES256"},
@@ -92,6 +94,9 @@ func TestDiscoverAcceptsValidDocumentAtRoot(t *testing.T) {
 	}
 	if md.JWKSURI.String() != ts.URL+"/jwks" {
 		t.Errorf("JWKSURI = %q", md.JWKSURI.String())
+	}
+	if md.UserinfoEndpoint.String() != ts.URL+"/userinfo" {
+		t.Errorf("UserinfoEndpoint = %q", md.UserinfoEndpoint.String())
 	}
 	if len(md.IDTokenAlgorithms) != 1 || md.IDTokenAlgorithms[0] != fapi.ES256 {
 		t.Errorf("IDTokenAlgorithms = %v, want [ES256] (RS256 is unsupported and must be filtered)", md.IDTokenAlgorithms)
@@ -138,6 +143,67 @@ func TestDiscoverAppendsWellKnownPathAfterIssuerPath(t *testing.T) {
 
 	if gotPath != "/tenant1/.well-known/openid-configuration" {
 		t.Fatalf("fetched path = %q, want /tenant1/.well-known/openid-configuration", gotPath)
+	}
+}
+
+// TestDiscoverOmitsUserinfoEndpointWhenAbsent covers the common case —
+// a server with no UserInfo Endpoint, or one that just doesn't
+// advertise it — Discover must succeed with a zero UserinfoEndpoint,
+// not fail; it's OPTIONAL per OpenID Connect Discovery 1.0 §3.
+func TestDiscoverOmitsUserinfoEndpointWhenAbsent(t *testing.T) {
+	var ts *httptest.Server
+	ts = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(discoveryDoc{
+			Issuer:                             ts.URL,
+			AuthorizationEndpoint:              ts.URL + "/authorize",
+			TokenEndpoint:                      ts.URL + "/token",
+			PushedAuthorizationRequestEndpoint: ts.URL + "/par",
+			JWKSURI:                            ts.URL + "/jwks",
+			// UserinfoEndpoint intentionally omitted.
+		})
+	}))
+	defer ts.Close()
+
+	issuer, err := fapi.ParseIssuerURL(ts.URL, fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+	md, err := client.Discover(context.Background(), newDiscoveryFetcher(t, ts), issuer, fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if !md.UserinfoEndpoint.IsZero() {
+		t.Fatalf("UserinfoEndpoint = %q, want zero", md.UserinfoEndpoint.String())
+	}
+}
+
+// TestDiscoverRejectsMalformedUserinfoEndpoint covers the other side:
+// present but unparsable must still fail Discover, the same as any
+// other advertised endpoint — silently dropping a malformed URL would
+// leave a caller who does read UserinfoEndpoint none the wiser that
+// the server's own metadata was broken.
+func TestDiscoverRejectsMalformedUserinfoEndpoint(t *testing.T) {
+	var ts *httptest.Server
+	ts = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(discoveryDoc{
+			Issuer:                             ts.URL,
+			AuthorizationEndpoint:              ts.URL + "/authorize",
+			TokenEndpoint:                      ts.URL + "/token",
+			PushedAuthorizationRequestEndpoint: ts.URL + "/par",
+			JWKSURI:                            ts.URL + "/jwks",
+			UserinfoEndpoint:                   "not-a-url://%zz",
+		})
+	}))
+	defer ts.Close()
+
+	issuer, err := fapi.ParseIssuerURL(ts.URL, fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+	if _, err := client.Discover(context.Background(), newDiscoveryFetcher(t, ts), issuer, fapi.AllowLoopbackHTTP()); err == nil {
+		t.Fatalf("Discover(malformed userinfo_endpoint) = nil error, want error")
 	}
 }
 

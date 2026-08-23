@@ -34,6 +34,14 @@ type DiscoveredMetadata struct {
 	Endpoints Endpoints
 	JWKSURI   fapi.URL
 
+	// UserinfoEndpoint is the server's advertised UserInfo Endpoint
+	// (OpenID Connect Discovery 1.0 §3), if any — OPTIONAL, so a zero
+	// fapi.URL means the server didn't advertise one. client itself
+	// never calls this endpoint (its own API ends at token issuance);
+	// this field exists only so a caller that does want to call it
+	// doesn't have to fetch and parse discovery a second time.
+	UserinfoEndpoint fapi.URL
+
 	IDTokenAlgorithms       []fapi.SignatureAlgorithm
 	RequestObjectAlgorithms []fapi.SignatureAlgorithm
 	JARMAlgorithms          []fapi.SignatureAlgorithm
@@ -122,6 +130,13 @@ func Discover(ctx context.Context, fetcher *fapihttp.Client, issuer fapi.URL, op
 	if err != nil {
 		return DiscoveredMetadata{}, fmt.Errorf("client: discover: jwks_uri: %w", err)
 	}
+	var userinfo fapi.URL
+	if doc.UserinfoEndpoint != "" {
+		userinfo, err = fapi.ParseEndpointURL(doc.UserinfoEndpoint, opts...)
+		if err != nil {
+			return DiscoveredMetadata{}, fmt.Errorf("client: discover: userinfo_endpoint: %w", err)
+		}
+	}
 
 	return DiscoveredMetadata{
 		Endpoints: Endpoints{
@@ -130,6 +145,7 @@ func Discover(ctx context.Context, fetcher *fapihttp.Client, issuer fapi.URL, op
 			PushedAuthorizationRequest: par,
 		},
 		JWKSURI:                           jwksURI,
+		UserinfoEndpoint:                  userinfo,
 		IDTokenAlgorithms:                 supportedAlgorithms(doc.IDTokenSigningAlgValuesSupported),
 		RequestObjectAlgorithms:           supportedAlgorithms(doc.RequestObjectSigningAlgValuesSupported),
 		JARMAlgorithms:                    supportedAlgorithms(doc.AuthorizationSigningAlgValuesSupported),

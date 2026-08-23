@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.6.0](https://github.com/IDFoundry/FAPIgo/compare/v0.5.0...v0.6.0) (2026-08-23)
+
+
+### Features
+
+* add EdDSA (Ed25519) signature algorithm support ([c71e121](https://github.com/IDFoundry/FAPIgo/commit/c71e12156cbe6eeaba7bdfec4f13f0b1875fad4c))
+* include EdDSA in recommended client algorithms and DPoP discovery ([b90907d](https://github.com/IDFoundry/FAPIgo/commit/b90907d7a243fa044a3b986daa1f354232fa5f79))
+* wire EdDSA into keys.KeyManager and its signer adapters ([ea4bde8](https://github.com/IDFoundry/FAPIgo/commit/ea4bde8121253b6bfbf6f2fa3d0deec1a7210b53))
+
+
+### Bug Fixes
+
+* de-duplicate signer routing tests to satisfy SonarCloud gate ([5e4457c](https://github.com/IDFoundry/FAPIgo/commit/5e4457c9e9fc7504488eeaf0c811af22165fc6d8))
+
 ## [0.5.0](https://github.com/IDFoundry/FAPIgo/compare/v0.4.0...v0.5.0) (2026-08-23)
 
 

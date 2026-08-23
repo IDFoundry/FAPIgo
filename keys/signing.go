@@ -63,6 +63,23 @@ type SigningRequest struct {
 	SigningInput []byte
 }
 
+// NewSigningRequest builds a SigningRequest for purpose/algorithm,
+// routing digestOrMessage into Digest or SigningInput as
+// SigningRequest's own doc comment requires. It exists so every
+// crypto.Signer-over-KeyManager adapter (client and server each keep
+// their own private one) shares this one dispatch rather than
+// reimplementing it — the routing decision belongs with the type it
+// populates, not with each adapter that happens to call Sign.
+func NewSigningRequest(purpose SigningPurpose, algorithm fapi.SignatureAlgorithm, digestOrMessage []byte) SigningRequest {
+	req := SigningRequest{Purpose: purpose, Algorithm: algorithm}
+	if algorithm == fapi.EdDSA {
+		req.SigningInput = digestOrMessage
+	} else {
+		req.Digest = digestOrMessage
+	}
+	return req
+}
+
 // Signature is the result of a Sign call. Value must be in the format
 // Go's crypto.Signer contract specifies for the algorithm's key type —
 // in particular, ASN.1 DER for an ECDSA signature, not the fixed-width

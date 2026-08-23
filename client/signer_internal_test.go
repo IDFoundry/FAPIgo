@@ -10,13 +10,10 @@ import (
 	"github.com/idfoundry/fapigo/keys"
 )
 
-// recordingKeyManager captures the SigningRequest it last received,
-// without actually signing anything — for asserting keyManagerSigner
-// routes crypto.Signer.Sign's incoming bytes into the right
-// SigningRequest field for the algorithm in play.
-type recordingKeyManager struct {
-	lastReq keys.SigningRequest
-}
+// recordingKeyManager captures the last SigningRequest it received,
+// without signing anything, so a test can assert which field
+// keyManagerSigner.Sign routed its input into.
+type recordingKeyManager struct{ lastReq keys.SigningRequest }
 
 func (m *recordingKeyManager) Sign(_ context.Context, req keys.SigningRequest) (keys.Signature, error) {
 	m.lastReq = req
@@ -27,49 +24,40 @@ func (m *recordingKeyManager) PublicKey(context.Context, keys.SigningPurpose, fa
 	return keys.PublicKeyInfo{}, nil
 }
 
-// TestKeyManagerSignerRoutesEdDSAToSigningInput confirms
-// keyManagerSigner.Sign puts crypto.Signer.Sign's incoming bytes into
-// SigningRequest.SigningInput for EdDSA, not Digest — internal/jose's
-// signEdDSA calls Sign with crypto.Hash(0) precisely to signal "this is
-// the raw message, not a digest" (RFC 8037 §3.1), so this adapter must
-// not treat it like ES256/PS256's pre-hashed case.
-func TestKeyManagerSignerRoutesEdDSAToSigningInput(t *testing.T) {
-	manager := &recordingKeyManager{}
-	signer := keyManagerSigner{
-		ctx: context.Background(), manager: manager,
-		purpose: keys.ClientAuthentication, algorithm: fapi.EdDSA,
+// TestKeyManagerSignerRoutesByAlgorithm confirms keyManagerSigner.Sign
+// puts crypto.Signer.Sign's incoming bytes into SigningInput for EdDSA
+// (RFC 8037 §3.1: pure EdDSA over the raw message, signaled by
+// crypto.Hash(0)) and into Digest for ES256 — never the other field.
+func TestKeyManagerSignerRoutesByAlgorithm(t *testing.T) {
+	cases := []struct {
+		name       string
+		algorithm  fapi.SignatureAlgorithm
+		opts       crypto.SignerOpts
+		wantDigest bool
+	}{
+		{"EdDSA uses SigningInput", fapi.EdDSA, crypto.Hash(0), false},
+		{"ES256 uses Digest", fapi.ES256, crypto.SHA256, true},
 	}
-	message := []byte("the raw jws signing input")
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			manager := &recordingKeyManager{}
+			signer := keyManagerSigner{
+				ctx: context.Background(), manager: manager,
+				purpose: keys.ClientAuthentication, algorithm: c.algorithm,
+			}
+			input := []byte("input bytes")
 
-	if _, err := signer.Sign(nil, message, crypto.Hash(0)); err != nil {
-		t.Fatalf("Sign: %v", err)
-	}
-	if !bytes.Equal(manager.lastReq.SigningInput, message) {
-		t.Fatalf("SigningInput = %q, want %q", manager.lastReq.SigningInput, message)
-	}
-	if manager.lastReq.Digest != nil {
-		t.Fatalf("Digest = %q, want nil (EdDSA must not populate Digest)", manager.lastReq.Digest)
-	}
-}
-
-// TestKeyManagerSignerRoutesES256ToDigest is the counterpart check: a
-// hash-based algorithm must still land in Digest, not SigningInput —
-// confirming the EdDSA branch didn't regress the existing path.
-func TestKeyManagerSignerRoutesES256ToDigest(t *testing.T) {
-	manager := &recordingKeyManager{}
-	signer := keyManagerSigner{
-		ctx: context.Background(), manager: manager,
-		purpose: keys.ClientAuthentication, algorithm: fapi.ES256,
-	}
-	digest := []byte("a sha-256 digest, 32 bytes long")
-
-	if _, err := signer.Sign(nil, digest, crypto.SHA256); err != nil {
-		t.Fatalf("Sign: %v", err)
-	}
-	if !bytes.Equal(manager.lastReq.Digest, digest) {
-		t.Fatalf("Digest = %q, want %q", manager.lastReq.Digest, digest)
-	}
-	if manager.lastReq.SigningInput != nil {
-		t.Fatalf("SigningInput = %q, want nil (ES256 must not populate SigningInput)", manager.lastReq.SigningInput)
+			if _, err := signer.Sign(nil, input, c.opts); err != nil {
+				t.Fatalf("Sign: %v", err)
+			}
+			gotDigest := bytes.Equal(manager.lastReq.Digest, input)
+			gotSigningInput := bytes.Equal(manager.lastReq.SigningInput, input)
+			if c.wantDigest && (!gotDigest || gotSigningInput) {
+				t.Fatalf("%s: Digest=%q SigningInput=%q, want input in Digest only", c.name, manager.lastReq.Digest, manager.lastReq.SigningInput)
+			}
+			if !c.wantDigest && (gotDigest || !gotSigningInput) {
+				t.Fatalf("%s: Digest=%q SigningInput=%q, want input in SigningInput only", c.name, manager.lastReq.Digest, manager.lastReq.SigningInput)
+			}
+		})
 	}
 }

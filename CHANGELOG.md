@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.4.0](https://github.com/IDFoundry/FAPIgo/compare/v0.3.0...v0.4.0) (2026-08-23)
+
+
+### Features
+
+* add client config and discovery surface for encrypted ID tokens ([c66394b](https://github.com/IDFoundry/FAPIgo/commit/c66394b769e9813260f78d6ad1f1c10508365924))
+* add closed KeyManagementAlgorithm/ContentEncryptionAlgorithm types ([fc3f2b7](https://github.com/IDFoundry/FAPIgo/commit/fc3f2b7693e60a5f7cb016c3d72f8acce76c9482))
+* add closed KeyManagementAlgorithm/ContentEncryptionAlgorithm types ([f16b8a0](https://github.com/IDFoundry/FAPIgo/commit/f16b8a03a9e1c0cfc80db4b98e2907a9f757b42d))
+* add internal/jwe package for JWE encrypt/decrypt ([8d945a8](https://github.com/IDFoundry/FAPIgo/commit/8d945a8df55e189ab1568ce15466764c412fa2f1))
+* add keys.Decrypter for opaque ID-token decryption key management ([e3fc80c](https://github.com/IDFoundry/FAPIgo/commit/e3fc80c28d7cbc047ee068f8052ede69e4194878))
+* add server-side config, storage and key-resolution for encrypted ID tokens ([cd0443f](https://github.com/IDFoundry/FAPIgo/commit/cd0443f693bf658439f9c1a86e00d7db0242de39))
+* decrypt encrypted ID tokens in validateIDToken ([12ab883](https://github.com/IDFoundry/FAPIgo/commit/12ab883d7c3152b8ecf5a96235d1e1bcd24265a3))
+* encrypt ID tokens at issuance when client and server agree ([#108](https://github.com/IDFoundry/FAPIgo/issues/108)) ([36de247](https://github.com/IDFoundry/FAPIgo/commit/36de2477b963a962b663450690d5f365f2eb6bb8))
+* support both RSA-OAEP-256 and ECDH-ES+A256KW for JWE key management ([e3dc3d9](https://github.com/IDFoundry/FAPIgo/commit/e3dc3d92c8d99d0e627516561b25ff4b0aebd3eb))
+
+
+### Bug Fixes
+
+* satisfy CI lint/Sonar findings in internal/jwe ([1c07120](https://github.com/IDFoundry/FAPIgo/commit/1c0712032f7af81b0636aa834027389c13074976))
+
 ## [0.3.0](https://github.com/IDFoundry/FAPIgo/compare/v0.2.4...v0.3.0) (2026-08-23)
 
 

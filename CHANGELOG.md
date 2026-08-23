@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.4](https://github.com/IDFoundry/FAPIgo/compare/v0.2.3...v0.2.4) (2026-08-23)
+
+
+### Bug Fixes
+
+* re-assert key parameters in JOSE verify; make identity claims win over extension-claim collisions ([9644d64](https://github.com/IDFoundry/FAPIgo/commit/9644d6494a8d9a08519c689867a7143a3029c06d))
+
 ## [0.2.3](https://github.com/IDFoundry/FAPIgo/compare/v0.2.2...v0.2.3) (2026-08-22)
 
 

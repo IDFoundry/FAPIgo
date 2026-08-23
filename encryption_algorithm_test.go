@@ -40,7 +40,7 @@ func TestKeyManagementAlgorithmZeroValueInvalid(t *testing.T) {
 }
 
 func TestContentEncryptionAlgorithmStringRoundTrip(t *testing.T) {
-	for _, alg := range []ContentEncryptionAlgorithm{A256GCM} {
+	for _, alg := range []ContentEncryptionAlgorithm{A256GCM, A256CBCHS512} {
 		s := alg.String()
 		if s == "" {
 			t.Fatalf("%v.String() = %q, want non-empty", alg, s)

@@ -83,6 +83,19 @@ const (
 	// cipher — no separate integrity algorithm is layered on top the way
 	// the CBC-HMAC family requires.
 	A256GCM
+
+	// A256CBCHS512 is AES_256_CBC_HMAC_SHA_512 (RFC 7518 §5.2.3): a
+	// 64-octet CEK split into a 32-octet HMAC-SHA-512 key and a
+	// 32-octet AES-256 key, PKCS #7-padded CBC encryption under a
+	// 128-bit IV, and an authentication tag computed as HMAC-SHA-512
+	// over AAD || IV || ciphertext || AL (AL being the AAD's bit length
+	// as a 64-bit big-endian integer), truncated to the first 32
+	// octets. Unlike A256GCM, this is encrypt-then-MAC rather than a
+	// single AEAD primitive, so the tag must be verified before the
+	// ciphertext is ever decrypted or unpadded — see internal/jwe's own
+	// implementation notes for why that ordering is load-bearing, not
+	// stylistic.
+	A256CBCHS512
 )
 
 // String returns the JOSE "enc" header value for a, or "" if a is not a
@@ -91,6 +104,8 @@ func (a ContentEncryptionAlgorithm) String() string {
 	switch a {
 	case A256GCM:
 		return "A256GCM"
+	case A256CBCHS512:
+		return "A256CBC-HS512"
 	default:
 		return ""
 	}
@@ -100,7 +115,7 @@ func (a ContentEncryptionAlgorithm) String() string {
 // supports.
 func (a ContentEncryptionAlgorithm) IsValid() bool {
 	switch a {
-	case A256GCM:
+	case A256GCM, A256CBCHS512:
 		return true
 	default:
 		return false
@@ -115,6 +130,8 @@ func ParseContentEncryptionAlgorithm(enc string) (ContentEncryptionAlgorithm, er
 	switch enc {
 	case "A256GCM":
 		return A256GCM, nil
+	case "A256CBC-HS512":
+		return A256CBCHS512, nil
 	default:
 		return 0, fmt.Errorf("fapi: unsupported content encryption algorithm %q", enc)
 	}

@@ -144,7 +144,11 @@ func wrapCEK(alg fapi.KeyManagementAlgorithm, recipientKey any, cek []byte, rand
 			return nil, nil, fmt.Errorf("jwe: ecdh: %w", err)
 		}
 		const kekSizeBits = 256 // AES-256 Key Wrap's own key size
-		kek := concatKDF(z, kekSizeBits, otherInfo(alg.String(), nil, nil, kekSizeBits))
+		info, err := otherInfo(alg.String(), nil, nil, kekSizeBits)
+		if err != nil {
+			return nil, nil, fmt.Errorf("jwe: %w", err)
+		}
+		kek := concatKDF(z, kekSizeBits, info)
 		encryptedKey, err := aesKeyWrap(kek, cek)
 		if err != nil {
 			return nil, nil, fmt.Errorf("jwe: ecdh-es+a256kw wrap: %w", err)
@@ -304,7 +308,11 @@ func unwrapCEK(alg fapi.KeyManagementAlgorithm, recipientKey any, encryptedKey [
 			return nil, fmt.Errorf("%w: ecdh: %v", ErrDecryptionFailed, err)
 		}
 		const kekSizeBits = 256
-		kek := concatKDF(z, kekSizeBits, otherInfo(alg.String(), nil, nil, kekSizeBits))
+		info, err := otherInfo(alg.String(), nil, nil, kekSizeBits)
+		if err != nil {
+			return nil, fmt.Errorf("jwe: %w", err)
+		}
+		kek := concatKDF(z, kekSizeBits, info)
 		cek, err := aesKeyUnwrap(kek, encryptedKey)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrDecryptionFailed, err)

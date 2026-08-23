@@ -5,9 +5,18 @@ import (
 	"testing"
 )
 
+func mustOtherInfo(t *testing.T, algorithmID string, apu, apv []byte, keyDataLenBits int) []byte {
+	t.Helper()
+	out, err := otherInfo(algorithmID, apu, apv, keyDataLenBits)
+	if err != nil {
+		t.Fatalf("otherInfo: %v", err)
+	}
+	return out
+}
+
 func TestConcatKDFDeterministic(t *testing.T) {
 	z := []byte("shared-secret-material")
-	info := otherInfo("ECDH-ES+A256KW", nil, nil, 256)
+	info := mustOtherInfo(t, "ECDH-ES+A256KW", nil, nil, 256)
 	a := concatKDF(z, 256, info)
 	b := concatKDF(z, 256, info)
 	if !bytes.Equal(a, b) {
@@ -18,7 +27,7 @@ func TestConcatKDFDeterministic(t *testing.T) {
 func TestConcatKDFOutputLength(t *testing.T) {
 	z := []byte("shared-secret-material")
 	for _, bits := range []int{128, 192, 256, 384, 512} {
-		out := concatKDF(z, bits, otherInfo("A256GCM", nil, nil, bits))
+		out := concatKDF(z, bits, mustOtherInfo(t, "A256GCM", nil, nil, bits))
 		if len(out) != bits/8 {
 			t.Fatalf("concatKDF(bits=%d) len = %d, want %d", bits, len(out), bits/8)
 		}
@@ -30,7 +39,7 @@ func TestConcatKDFOutputLength(t *testing.T) {
 // multi-repetition path, not just the single-hash-block common case.
 func TestConcatKDFMultipleRepetitions(t *testing.T) {
 	z := []byte("shared-secret-material")
-	info := otherInfo("A256GCM", nil, nil, 512)
+	info := mustOtherInfo(t, "A256GCM", nil, nil, 512)
 	out := concatKDF(z, 512, info)
 	if len(out) != 64 {
 		t.Fatalf("len(out) = %d, want 64", len(out))
@@ -49,14 +58,14 @@ func TestConcatKDFMultipleRepetitions(t *testing.T) {
 // output, or the KDF would be leaking key material across contexts that
 // should be cryptographically distinct.
 func TestConcatKDFSensitiveToEveryInput(t *testing.T) {
-	baseline := concatKDF([]byte("z"), 256, otherInfo("ECDH-ES+A256KW", []byte("apu"), []byte("apv"), 256))
+	baseline := concatKDF([]byte("z"), 256, mustOtherInfo(t, "ECDH-ES+A256KW", []byte("apu"), []byte("apv"), 256))
 
 	cases := map[string][]byte{
-		"different z":           concatKDF([]byte("different-z"), 256, otherInfo("ECDH-ES+A256KW", []byte("apu"), []byte("apv"), 256)),
-		"different algorithmID": concatKDF([]byte("z"), 256, otherInfo("A256GCM", []byte("apu"), []byte("apv"), 256)),
-		"different apu":         concatKDF([]byte("z"), 256, otherInfo("ECDH-ES+A256KW", []byte("different-apu"), []byte("apv"), 256)),
-		"different apv":         concatKDF([]byte("z"), 256, otherInfo("ECDH-ES+A256KW", []byte("apu"), []byte("different-apv"), 256)),
-		"different keyDataLen":  concatKDF([]byte("z"), 128, otherInfo("ECDH-ES+A256KW", []byte("apu"), []byte("apv"), 128)),
+		"different z":           concatKDF([]byte("different-z"), 256, mustOtherInfo(t, "ECDH-ES+A256KW", []byte("apu"), []byte("apv"), 256)),
+		"different algorithmID": concatKDF([]byte("z"), 256, mustOtherInfo(t, "A256GCM", []byte("apu"), []byte("apv"), 256)),
+		"different apu":         concatKDF([]byte("z"), 256, mustOtherInfo(t, "ECDH-ES+A256KW", []byte("different-apu"), []byte("apv"), 256)),
+		"different apv":         concatKDF([]byte("z"), 256, mustOtherInfo(t, "ECDH-ES+A256KW", []byte("apu"), []byte("different-apv"), 256)),
+		"different keyDataLen":  concatKDF([]byte("z"), 128, mustOtherInfo(t, "ECDH-ES+A256KW", []byte("apu"), []byte("apv"), 128)),
 	}
 	for name, got := range cases {
 		if bytes.Equal(got, baseline[:len(got)]) {
@@ -69,7 +78,7 @@ func TestOtherInfoLengthPrefixing(t *testing.T) {
 	// AlgorithmID "AB" (2 bytes), apu "C" (1 byte), apv nil (0 bytes),
 	// keyDataLenBits 256 — hand-verify the exact byte layout against
 	// RFC 7518 §4.6.2's Datalen || Data construction for each field.
-	got := otherInfo("AB", []byte("C"), nil, 256)
+	got := mustOtherInfo(t, "AB", []byte("C"), nil, 256)
 	want := []byte{
 		0, 0, 0, 2, 'A', 'B', // AlgorithmID: length 2, "AB"
 		0, 0, 0, 1, 'C', // PartyUInfo: length 1, "C"
@@ -78,5 +87,11 @@ func TestOtherInfoLengthPrefixing(t *testing.T) {
 	}
 	if !bytes.Equal(got, want) {
 		t.Fatalf("otherInfo(...) = %x, want %x", got, want)
+	}
+}
+
+func TestOtherInfoRejectsNegativeKeyDataLen(t *testing.T) {
+	if _, err := otherInfo("AB", nil, nil, -1); err == nil {
+		t.Fatalf("otherInfo(keyDataLenBits=-1) = nil error, want error")
 	}
 }

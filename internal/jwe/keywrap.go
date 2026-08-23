@@ -39,10 +39,26 @@ func aesKeyWrap(kek, plaintext []byte) ([]byte, error) {
 		for i := 1; i <= n; i++ {
 			copy(buf[:8], a[:])
 			copy(buf[8:], r[i-1][:])
-			block.Encrypt(buf[:], buf[:])
+			// RFC 3394 §2.2.1 defines AES Key Wrap directly in terms of
+			// single raw AES block operations, not a standard mode —
+			// each round re-encrypts A (which changes every round via
+			// the round-counter XOR below) concatenated with a
+			// different R[i], so this is not ECB-equivalent encryption
+			// of static data. There is no "secure mode" substitute that
+			// would still implement this standard.
+			block.Encrypt(buf[:], buf[:]) // NOSONAR: go:S5542 — raw block op is what RFC 3394 AES Key Wrap requires, see comment above
 
+			// n and j are bounded (j <= 5, n is a handful of 8-byte
+			// blocks for the key sizes this package uses), so this
+			// product cannot realistically overflow — checked
+			// explicitly rather than assumed before the narrowing
+			// conversion below.
+			round := n*j + i
+			if round < 0 {
+				return nil, fmt.Errorf("jwe: key wrap round counter overflow")
+			}
 			var t [8]byte
-			binary.BigEndian.PutUint64(t[:], uint64(n*j+i))
+			binary.BigEndian.PutUint64(t[:], uint64(round))
 			for k := range a {
 				a[k] = buf[k] ^ t[k]
 			}
@@ -82,15 +98,22 @@ func aesKeyUnwrap(kek, ciphertext []byte) ([]byte, error) {
 	var buf [16]byte
 	for j := 5; j >= 0; j-- {
 		for i := n; i >= 1; i-- {
+			round := n*j + i
+			if round < 0 {
+				return nil, fmt.Errorf("jwe: key unwrap round counter overflow")
+			}
 			var t [8]byte
-			binary.BigEndian.PutUint64(t[:], uint64(n*j+i))
+			binary.BigEndian.PutUint64(t[:], uint64(round))
 			var axort [8]byte
 			for k := range a {
 				axort[k] = a[k] ^ t[k]
 			}
 			copy(buf[:8], axort[:])
 			copy(buf[8:], r[i-1][:])
-			block.Decrypt(buf[:], buf[:])
+			// See the matching comment in aesKeyWrap: RFC 3394's
+			// unwrap is the same construction in reverse, not
+			// ECB-equivalent decryption of static data.
+			block.Decrypt(buf[:], buf[:]) // NOSONAR: go:S5542 — raw block op is what RFC 3394 AES Key Wrap requires, see aesKeyWrap's comment
 
 			copy(a[:], buf[:8])
 			copy(r[i-1][:], buf[8:])

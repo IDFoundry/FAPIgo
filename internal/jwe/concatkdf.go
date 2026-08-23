@@ -3,6 +3,8 @@ package jwe
 import (
 	"crypto/sha256"
 	"encoding/binary"
+	"fmt"
+	"math"
 )
 
 // concatKDF derives keyDataLenBits bits from the shared secret z using
@@ -41,24 +43,45 @@ func concatKDF(z []byte, keyDataLenBits int, otherInfo []byte) []byte {
 // empty octet string, not an error — RFC 7518 §4.6.1.1). keyDataLenBits
 // is the length, in bits, of the key material being derived — the same
 // value passed to concatKDF.
-func otherInfo(algorithmID string, apu, apv []byte, keyDataLenBits int) []byte {
-	out := lengthPrefixed([]byte(algorithmID))
-	out = append(out, lengthPrefixed(apu)...)
-	out = append(out, lengthPrefixed(apv)...)
+func otherInfo(algorithmID string, apu, apv []byte, keyDataLenBits int) ([]byte, error) {
+	if keyDataLenBits < 0 || keyDataLenBits > math.MaxUint32 {
+		return nil, fmt.Errorf("jwe: key data length %d bits out of range", keyDataLenBits)
+	}
+	algID, err := lengthPrefixed([]byte(algorithmID))
+	if err != nil {
+		return nil, err
+	}
+	u, err := lengthPrefixed(apu)
+	if err != nil {
+		return nil, err
+	}
+	v, err := lengthPrefixed(apv)
+	if err != nil {
+		return nil, err
+	}
+	out := append(algID, u...)
+	out = append(out, v...)
 	var suppPubInfo [4]byte
 	binary.BigEndian.PutUint32(suppPubInfo[:], uint32(keyDataLenBits))
 	out = append(out, suppPubInfo[:]...)
 	// SuppPrivInfo is optional and RFC 7518's own OtherInfo construction
 	// never sets it — omitted entirely, not even as a zero-length field.
-	return out
+	return out, nil
 }
 
 // lengthPrefixed returns b prefixed with its own length as a 32-bit
 // big-endian integer, the "Datalen || Data" encoding RFC 7518 §4.6.2
-// uses for each OtherInfo component.
-func lengthPrefixed(b []byte) []byte {
-	out := make([]byte, 4+len(b))
-	binary.BigEndian.PutUint32(out, uint32(len(b)))
+// uses for each OtherInfo component. b is always a short, fixed program
+// value in this package (an algorithm identifier or an apu/apv header
+// value this package itself never sets), never attacker-controlled
+// length, but the bound is checked explicitly rather than assumed.
+func lengthPrefixed(b []byte) ([]byte, error) {
+	n := len(b)
+	if n < 0 || n > math.MaxUint32 {
+		return nil, fmt.Errorf("jwe: value of length %d exceeds maximum encodable length", n)
+	}
+	out := make([]byte, 4+n)
+	binary.BigEndian.PutUint32(out, uint32(n))
 	copy(out[4:], b)
-	return out
+	return out, nil
 }

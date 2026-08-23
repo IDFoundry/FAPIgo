@@ -3,7 +3,7 @@ package fapi
 import "testing"
 
 func TestKeyManagementAlgorithmStringRoundTrip(t *testing.T) {
-	for _, alg := range []KeyManagementAlgorithm{ECDHESA256KW} {
+	for _, alg := range []KeyManagementAlgorithm{RSAOAEP256, ECDHESA256KW} {
 		s := alg.String()
 		if s == "" {
 			t.Fatalf("%v.String() = %q, want non-empty", alg, s)
@@ -22,7 +22,7 @@ func TestKeyManagementAlgorithmStringRoundTrip(t *testing.T) {
 }
 
 func TestParseKeyManagementAlgorithmRejectsUnsupported(t *testing.T) {
-	for _, s := range []string{"RSA-OAEP", "RSA-OAEP-256", "dir", "ECDH-ES", "", "ecdh-es+a256kw"} {
+	for _, s := range []string{"RSA-OAEP", "ECDH-ES", "ECDH-ES+A128KW", "dir", "", "rsa-oaep-256"} {
 		if _, err := ParseKeyManagementAlgorithm(s); err == nil {
 			t.Fatalf("ParseKeyManagementAlgorithm(%q) = nil error, want error", s)
 		}

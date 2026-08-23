@@ -13,8 +13,19 @@ type KeyManagementAlgorithm uint8
 const (
 	_ KeyManagementAlgorithm = iota
 
-	// ECDHESA256KW is ECDH-ES using Concat KDF, with the agreed key
-	// used to wrap the CEK with AES-256 Key Wrap (RFC 7518 §4.6-4.7).
+	// RSAOAEP256 is RSAES OAEP using SHA-256 and MGF1 with SHA-256
+	// (RFC 7518 §4.3), with a minimum 2048-bit modulus — the same
+	// modulus floor PS256 already requires. Go's standard library
+	// implements OAEP directly (crypto/rsa.EncryptOAEP/DecryptOAEP), so
+	// this algorithm needs no hand-rolled cryptographic primitives.
+	RSAOAEP256
+
+	// ECDHESA256KW is ECDH-ES using Concat KDF to derive a key-wrapping
+	// key, which then wraps the CEK with AES-256 Key Wrap (RFC 7518
+	// §4.6-4.7, RFC 3394). Unlike RSAOAEP256, this module implements
+	// both the Concat KDF and AES Key Wrap itself — neither is provided
+	// by Go's standard library — so an EC-only deployment (no RSA key
+	// management infrastructure) has a supported option.
 	ECDHESA256KW
 )
 
@@ -22,6 +33,8 @@ const (
 // recognized algorithm.
 func (a KeyManagementAlgorithm) String() string {
 	switch a {
+	case RSAOAEP256:
+		return "RSA-OAEP-256"
 	case ECDHESA256KW:
 		return "ECDH-ES+A256KW"
 	default:
@@ -33,7 +46,7 @@ func (a KeyManagementAlgorithm) String() string {
 // supports.
 func (a KeyManagementAlgorithm) IsValid() bool {
 	switch a {
-	case ECDHESA256KW:
+	case RSAOAEP256, ECDHESA256KW:
 		return true
 	default:
 		return false
@@ -43,12 +56,14 @@ func (a KeyManagementAlgorithm) IsValid() bool {
 // ParseKeyManagementAlgorithm maps a JOSE "alg" header value to a
 // KeyManagementAlgorithm. It rejects every value outside the closed set
 // this module supports, including algorithms that are valid JOSE
-// algorithms in general (e.g. "RSA-OAEP-256", "dir"), for the same
-// reason ParseSignatureAlgorithm does: accepting one outside this
+// algorithms in general (e.g. "RSA-OAEP", "ECDH-ES", "dir"), for the
+// same reason ParseSignatureAlgorithm does: accepting one outside this
 // module's own closed set would silently downgrade the guarantees the
 // rest of this module assumes.
 func ParseKeyManagementAlgorithm(alg string) (KeyManagementAlgorithm, error) {
 	switch alg {
+	case "RSA-OAEP-256":
+		return RSAOAEP256, nil
 	case "ECDH-ES+A256KW":
 		return ECDHESA256KW, nil
 	default:

@@ -3,7 +3,7 @@ package fapi
 import "testing"
 
 func TestSignatureAlgorithmStringRoundTrip(t *testing.T) {
-	for _, alg := range []SignatureAlgorithm{ES256, PS256} {
+	for _, alg := range []SignatureAlgorithm{ES256, PS256, EdDSA} {
 		s := alg.String()
 		if s == "" {
 			t.Fatalf("%v.String() = %q, want non-empty", alg, s)

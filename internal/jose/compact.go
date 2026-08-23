@@ -41,14 +41,19 @@ func Sign(signer crypto.Signer, header Header, payload []byte) (string, error) {
 	}
 	signingInput := base64.RawURLEncoding.EncodeToString(headerJSON) + "." +
 		base64.RawURLEncoding.EncodeToString(payload)
-	hash := sha256.Sum256([]byte(signingInput))
 
 	var sig []byte
 	switch header.Algorithm {
 	case fapi.ES256:
+		hash := sha256.Sum256([]byte(signingInput))
 		sig, err = signECDSA(signer, hash[:])
 	case fapi.PS256:
+		hash := sha256.Sum256([]byte(signingInput))
 		sig, err = signRSAPSS(signer, hash[:])
+	case fapi.EdDSA:
+		// No pre-hashing: RFC 8037 §3.1 requires pure EdDSA over the
+		// signing input itself, unlike ES256/PS256's digest-then-sign.
+		sig, err = signEdDSA(signer, []byte(signingInput))
 	default:
 		return "", fmt.Errorf("jose: unsupported algorithm %v", header.Algorithm)
 	}
@@ -117,12 +122,15 @@ func (c Compact) Verify(pub crypto.PublicKey, alg fapi.SignatureAlgorithm) error
 	if c.Header.Algorithm != alg {
 		return fmt.Errorf("%w: header has %s, expected %s", ErrAlgorithmMismatch, c.Header.Algorithm, alg)
 	}
-	hash := sha256.Sum256(c.signingInput)
 	switch alg {
 	case fapi.ES256:
+		hash := sha256.Sum256(c.signingInput)
 		return verifyECDSA(pub, hash[:], c.signature)
 	case fapi.PS256:
+		hash := sha256.Sum256(c.signingInput)
 		return verifyRSAPSS(pub, hash[:], c.signature)
+	case fapi.EdDSA:
+		return verifyEdDSA(pub, c.signingInput, c.signature)
 	default:
 		return fmt.Errorf("jose: unsupported algorithm %v", alg)
 	}

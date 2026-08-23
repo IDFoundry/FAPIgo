@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -67,6 +68,12 @@ func (k JWK) Thumbprint() (Thumbprint, error) {
 		n := base64.RawURLEncoding.EncodeToString(pub.N.Bytes())
 		e := base64.RawURLEncoding.EncodeToString(big.NewInt(int64(pub.E)).Bytes())
 		canonical = fmt.Sprintf(`{"e":%q,"kty":"RSA","n":%q}`, e, n)
+	case ed25519.PublicKey:
+		// RFC 8037 §2's required OKP members, in the RFC 7638 §3.2
+		// lexicographic order this thumbprint format requires: crv,
+		// kty, x.
+		x := base64.RawURLEncoding.EncodeToString(pub)
+		canonical = fmt.Sprintf(`{"crv":%q,"kty":"OKP","x":%q}`, "Ed25519", x)
 	default:
 		return Thumbprint{}, fmt.Errorf("jose: cannot compute thumbprint for key type %T", pub)
 	}
@@ -92,6 +99,14 @@ func (k JWK) MarshalJSON() ([]byte, error) {
 			Kty: "RSA",
 			N:   base64.RawURLEncoding.EncodeToString(pub.N.Bytes()),
 			E:   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(pub.E)).Bytes()),
+			Kid: k.kid,
+		}
+		return json.Marshal(raw)
+	case ed25519.PublicKey:
+		raw := rawJWK{
+			Kty: "OKP",
+			Crv: "Ed25519",
+			X:   base64.RawURLEncoding.EncodeToString(pub),
 			Kid: k.kid,
 		}
 		return json.Marshal(raw)
@@ -152,6 +167,21 @@ func ParseJWK(data []byte, alg fapi.SignatureAlgorithm) (JWK, error) {
 			return JWK{}, fmt.Errorf("jose: decode jwk e: %w", err)
 		}
 		pub = &rsa.PublicKey{N: n, E: e}
+	case "OKP":
+		if raw.Crv != "Ed25519" {
+			return JWK{}, fmt.Errorf("jose: unsupported OKP curve %q", raw.Crv)
+		}
+		if raw.X == "" {
+			return JWK{}, fmt.Errorf("jose: jwk x is required")
+		}
+		x, err := base64.RawURLEncoding.DecodeString(raw.X)
+		if err != nil {
+			return JWK{}, fmt.Errorf("jose: decode jwk x: %w", err)
+		}
+		if len(x) != ed25519.PublicKeySize {
+			return JWK{}, fmt.Errorf("jose: jwk x must be %d bytes for Ed25519, got %d", ed25519.PublicKeySize, len(x))
+		}
+		pub = ed25519.PublicKey(x)
 	default:
 		return JWK{}, fmt.Errorf("jose: unsupported key type %q", raw.Kty)
 	}
@@ -226,6 +256,14 @@ func validateKeyForAlgorithm(pub crypto.PublicKey, alg fapi.SignatureAlgorithm) 
 		}
 		if key.N.BitLen() < 2048 {
 			return fmt.Errorf("jose: PS256 requires an RSA key of at least 2048 bits, got %d", key.N.BitLen())
+		}
+	case fapi.EdDSA:
+		key, ok := pub.(ed25519.PublicKey)
+		if !ok {
+			return fmt.Errorf("jose: EdDSA requires an Ed25519 public key, got %T", pub)
+		}
+		if len(key) != ed25519.PublicKeySize {
+			return fmt.Errorf("jose: EdDSA requires a %d-byte Ed25519 public key, got %d", ed25519.PublicKeySize, len(key))
 		}
 	default:
 		return fmt.Errorf("jose: unsupported algorithm %v", alg)

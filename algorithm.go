@@ -18,6 +18,17 @@ const (
 	// PS256 is RSASSA-PSS using SHA-256 and MGF1 with SHA-256
 	// (RFC 7518 §3.5), with a minimum 2048-bit modulus.
 	PS256
+
+	// EdDSA is pure EdDSA using the Ed25519 variant (RFC 8037 §3.1) —
+	// the third algorithm FAPI 2.0 Security Profile Final §5.4.1 item
+	// 1.b permits, alongside ES256 and PS256. Unlike those two, EdDSA
+	// signs the JWS Signing Input directly rather than a digest of it
+	// (RFC 8037 §3.1: "the JWS Signing Input (as message)") — this
+	// module's own SignatureAlgorithm doesn't encode that difference
+	// itself, but every caller that produces or checks a signature
+	// (internal/jose, keys.KeyManager) must not pre-hash for this
+	// algorithm the way it does for ES256/PS256.
+	EdDSA
 )
 
 // String returns the JOSE "alg" header value for a, or "" if a is not a
@@ -28,6 +39,8 @@ func (a SignatureAlgorithm) String() string {
 		return "ES256"
 	case PS256:
 		return "PS256"
+	case EdDSA:
+		return "EdDSA"
 	default:
 		return ""
 	}
@@ -37,7 +50,7 @@ func (a SignatureAlgorithm) String() string {
 // supports.
 func (a SignatureAlgorithm) IsValid() bool {
 	switch a {
-	case ES256, PS256:
+	case ES256, PS256, EdDSA:
 		return true
 	default:
 		return false
@@ -56,6 +69,8 @@ func ParseSignatureAlgorithm(alg string) (SignatureAlgorithm, error) {
 		return ES256, nil
 	case "PS256":
 		return PS256, nil
+	case "EdDSA":
+		return EdDSA, nil
 	default:
 		return 0, fmt.Errorf("fapi: unsupported signature algorithm %q", alg)
 	}

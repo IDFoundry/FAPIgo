@@ -58,6 +58,14 @@ type Config struct {
 	// fapi.A256GCM — set explicitly to exercise fapi.A256CBCHS512
 	// instead. Ignored unless EncryptIDTokens is set.
 	IDTokenContentEncryption fapi.ContentEncryptionAlgorithm
+
+	// SignatureAlgorithm selects which fapi.SignatureAlgorithm every
+	// signing purpose in the harness uses — the client's own client
+	// assertions/request objects/DPoP proofs, and the server's own
+	// JARM/ID token/access token signing. Zero (the default) means
+	// fapi.ES256; set explicitly (e.g. fapi.EdDSA) to exercise a full
+	// authorization_code flow under a different algorithm end to end.
+	SignatureAlgorithm fapi.SignatureAlgorithm
 }
 
 // Harness wires a real client.Client, server.Server and resource.Verifier
@@ -70,9 +78,10 @@ type Harness struct {
 	Resource *resource.Verifier
 	Clock    *manualClock
 
-	authServer *authServer
-	httpClient *http.Client
-	clientKeys *memKeyManager
+	authServer         *authServer
+	httpClient         *http.Client
+	clientKeys         keys.KeyManager
+	signatureAlgorithm fapi.SignatureAlgorithm
 }
 
 // New builds a Harness: an in-memory-backed server.Server exposed over a
@@ -90,8 +99,16 @@ func New(t *testing.T, cfg Config) *Harness {
 
 	clock := &manualClock{now: time.Now()}
 
-	asKeys := newMemKeyManager(t, "as", keys.JARMSigning, keys.AccessTokenSigning, keys.IDTokenSigning)
-	clientKeys := newMemKeyManager(t, "rp", keys.ClientAuthentication, keys.RequestObjectSigning, keys.DPoPProofSigning)
+	// sigAlg resolves Config.SignatureAlgorithm's zero-means-ES256
+	// default; every signing purpose below uses this one algorithm, so
+	// the client and server always agree, exactly like Config.Profile.
+	sigAlg := cfg.SignatureAlgorithm
+	if sigAlg == 0 {
+		sigAlg = fapi.ES256
+	}
+
+	asKeys := newAlgorithmKeyManager(t, sigAlg, keys.JARMSigning, keys.AccessTokenSigning, keys.IDTokenSigning)
+	clientKeys := newAlgorithmKeyManager(t, sigAlg, keys.ClientAuthentication, keys.RequestObjectSigning, keys.DPoPProofSigning)
 
 	// contentEncryption resolves Config.IDTokenContentEncryption's
 	// zero-means-A256GCM default; only meaningful when EncryptIDTokens
@@ -103,9 +120,9 @@ func New(t *testing.T, cfg Config) *Harness {
 
 	// clientDecryption is only generated (and only wired into the
 	// client/server configs below) when EncryptIDTokens is set — a
-	// separate keys.Decrypter from clientKeys (an RSA key, not the
-	// ECDSA ones clientKeys holds), the same way client.Dependencies
-	// itself keeps Decryption separate from Keys.
+	// separate keys.Decrypter from clientKeys (an RSA key, unrelated to
+	// clientKeys' own sigAlg-keyed signing keys), the same way
+	// client.Dependencies itself keeps Decryption separate from Keys.
 	var clientDecryption *ephemeral.KeyManager
 	if cfg.EncryptIDTokens {
 		var err error
@@ -125,8 +142,8 @@ func New(t *testing.T, cfg Config) *Harness {
 	registeredClientCfg := storage.RegisteredClientConfig{
 		ID:                       ClientID,
 		RedirectURIs:             []fapi.RegisteredRedirectURI{RedirectURI},
-		ClientAssertionAlgorithm: fapi.ES256,
-		RequestObjectAlgorithm:   fapi.ES256,
+		ClientAssertionAlgorithm: sigAlg,
+		RequestObjectAlgorithm:   sigAlg,
 		AllowedScopes:            []string{"openid", "accounts", "offline_access"},
 	}
 	if cfg.EncryptIDTokens {
@@ -154,10 +171,10 @@ func New(t *testing.T, cfg Config) *Harness {
 		Endpoints: loopbackEndpoints(as.ts.URL),
 		Profile:   cfg.Profile,
 		Algorithms: server.AlgorithmPolicy{
-			ClientAssertion: server.AlgorithmSet{fapi.ES256},
-			RequestObject:   server.AlgorithmSet{fapi.ES256},
-			JARM:            fapi.ES256,
-			IDToken:         fapi.ES256,
+			ClientAssertion: server.AlgorithmSet{sigAlg},
+			RequestObject:   server.AlgorithmSet{sigAlg},
+			JARM:            sigAlg,
+			IDToken:         sigAlg,
 		},
 		Limits: server.Limits{
 			PushedRequestLifetime:      90 * time.Second,
@@ -180,7 +197,7 @@ func New(t *testing.T, cfg Config) *Harness {
 		srvCfg.Algorithms.IDTokenEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{contentEncryption}
 	}
 	revocation := newMemRevocationStore()
-	jwtAccessTokens, err := server.NewJWTAccessTokens(asKeys, fapi.ES256)
+	jwtAccessTokens, err := server.NewJWTAccessTokens(asKeys, sigAlg)
 	if err != nil {
 		t.Fatalf("fapitest: server.NewJWTAccessTokens: %v", err)
 	}
@@ -220,11 +237,11 @@ func New(t *testing.T, cfg Config) *Harness {
 		},
 		Profile: clientProfile,
 		Algorithms: client.Algorithms{
-			ClientAuthentication: fapi.ES256,
-			RequestObject:        fapi.ES256,
-			DPoP:                 fapi.ES256,
-			JARM:                 fapi.ES256,
-			IDToken:              fapi.ES256,
+			ClientAuthentication: sigAlg,
+			RequestObject:        sigAlg,
+			DPoP:                 sigAlg,
+			JARM:                 sigAlg,
+			IDToken:              sigAlg,
 		},
 		Limits: client.Limits{
 			ClientAssertionLifetime: time.Minute,
@@ -263,7 +280,7 @@ func New(t *testing.T, cfg Config) *Harness {
 			MaxClockSkew:    5 * time.Second,
 		},
 	}
-	resourceJWT, err := resource.NewJWTAccessTokens(&memIssuerKeySource{issuer: Issuer, manager: asKeys}, issuer, Issuer, fapi.ES256, 5*time.Minute)
+	resourceJWT, err := resource.NewJWTAccessTokens(&memIssuerKeySource{issuer: Issuer, manager: asKeys}, issuer, Issuer, sigAlg, 5*time.Minute)
 	if err != nil {
 		t.Fatalf("fapitest: resource.NewJWTAccessTokens: %v", err)
 	}
@@ -278,7 +295,10 @@ func New(t *testing.T, cfg Config) *Harness {
 		t.Fatalf("fapitest: resource.NewVerifier: %v", err)
 	}
 
-	return &Harness{t: t, Client: c, Resource: rs, Clock: clock, authServer: as, httpClient: httpClient, clientKeys: clientKeys}
+	return &Harness{
+		t: t, Client: c, Resource: rs, Clock: clock, authServer: as, httpClient: httpClient,
+		clientKeys: clientKeys, signatureAlgorithm: sigAlg,
+	}
 }
 
 func loopbackEndpoints(base string) server.Endpoints {
@@ -364,12 +384,15 @@ func (h *Harness) RunAuthorizationCodeFlowWithCallback(ctx context.Context, rawQ
 	}
 }
 
-// harnessSigner adapts a memKeyManager to crypto.Signer, the same
-// pattern client and server each use internally over keys.KeyManager —
-// see client/signer.go.
+// harnessSigner adapts a keys.KeyManager to crypto.Signer, the same
+// pattern client and server each use internally — see
+// client/signer.go. Like that adapter, it routes crypto.Signer.Sign's
+// incoming bytes through keys.NewSigningRequest rather than always
+// assuming a pre-hashed digest, since EdDSA needs the raw message
+// instead (see keys.SigningRequest's own doc comment).
 type harnessSigner struct {
 	ctx       context.Context
-	manager   *memKeyManager
+	manager   keys.KeyManager
 	purpose   keys.SigningPurpose
 	algorithm fapi.SignatureAlgorithm
 	publicKey crypto.PublicKey
@@ -377,8 +400,8 @@ type harnessSigner struct {
 
 func (s harnessSigner) Public() crypto.PublicKey { return s.publicKey }
 
-func (s harnessSigner) Sign(_ io.Reader, digest []byte, _ crypto.SignerOpts) ([]byte, error) {
-	sig, err := s.manager.Sign(s.ctx, keys.SigningRequest{Purpose: s.purpose, Algorithm: s.algorithm, Digest: digest})
+func (s harnessSigner) Sign(_ io.Reader, digestOrMessage []byte, _ crypto.SignerOpts) ([]byte, error) {
+	sig, err := s.manager.Sign(s.ctx, keys.NewSigningRequest(s.purpose, s.algorithm, digestOrMessage))
 	if err != nil {
 		return nil, err
 	}
@@ -395,16 +418,16 @@ func (s harnessSigner) Sign(_ io.Reader, digest []byte, _ crypto.SignerOpts) ([]
 // exactly as that application code would.
 func (h *Harness) NewResourceRequestDPoPProof(ctx context.Context, method string, target *url.URL, accessToken string) (string, error) {
 	h.t.Helper()
-	info, err := h.clientKeys.PublicKey(ctx, keys.DPoPProofSigning, fapi.ES256)
+	info, err := h.clientKeys.PublicKey(ctx, keys.DPoPProofSigning, h.signatureAlgorithm)
 	if err != nil {
 		return "", fmt.Errorf("fapitest: resolve dpop key: %w", err)
 	}
 	signer := harnessSigner{
 		ctx: ctx, manager: h.clientKeys, purpose: keys.DPoPProofSigning,
-		algorithm: fapi.ES256, publicKey: info.PublicKey,
+		algorithm: h.signatureAlgorithm, publicKey: info.PublicKey,
 	}
 	proof, err := dpop.CreateProof(dpop.ProofRequest{
-		Signer: signer, Algorithm: fapi.ES256,
+		Signer: signer, Algorithm: h.signatureAlgorithm,
 		Method: method, URL: target, AccessToken: accessToken,
 		Now: h.Clock.Now(), Random: rand.Reader,
 	})

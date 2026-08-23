@@ -32,8 +32,8 @@ import (
 // httptest.Server's own real, dynamically assigned URL instead.
 func TestDiscoverEndToEnd(t *testing.T) {
 	clock := &manualClock{now: time.Now()}
-	asKeys := newMemKeyManager(t, "as", keys.JARMSigning, keys.AccessTokenSigning, keys.IDTokenSigning)
-	clientKeys := newMemKeyManager(t, "rp", keys.ClientAuthentication, keys.RequestObjectSigning, keys.DPoPProofSigning)
+	asKeys := newAlgorithmKeyManager(t, fapi.ES256, keys.JARMSigning, keys.AccessTokenSigning, keys.IDTokenSigning)
+	clientKeys := newAlgorithmKeyManager(t, fapi.ES256, keys.ClientAuthentication, keys.RequestObjectSigning, keys.DPoPProofSigning)
 
 	as := newAuthServer(t, clock, AutoApprove{Subject: Subject, ACR: "urn:mace:incommon:iap:silver", AMR: []string{"pwd"}})
 

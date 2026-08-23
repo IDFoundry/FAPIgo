@@ -48,9 +48,16 @@ type Config struct {
 	// server's per-client RegisteredClient fields, and the server-wide
 	// AlgorithmPolicy allow-list all agree, exactly like a real
 	// deployment's client and AS configuration must — using
-	// RSA-OAEP-256/A256GCM, the same way every other algorithm choice
-	// in this harness is a fixed one (ES256), not configurable per test.
+	// RSA-OAEP-256 as the key-management algorithm, the same way every
+	// other algorithm choice in this harness is a fixed one (ES256),
+	// not configurable per test.
 	EncryptIDTokens bool
+
+	// IDTokenContentEncryption selects which content-encryption
+	// algorithm EncryptIDTokens uses. Zero (the default) means
+	// fapi.A256GCM — set explicitly to exercise fapi.A256CBCHS512
+	// instead. Ignored unless EncryptIDTokens is set.
+	IDTokenContentEncryption fapi.ContentEncryptionAlgorithm
 }
 
 // Harness wires a real client.Client, server.Server and resource.Verifier
@@ -86,6 +93,14 @@ func New(t *testing.T, cfg Config) *Harness {
 	asKeys := newMemKeyManager(t, "as", keys.JARMSigning, keys.AccessTokenSigning, keys.IDTokenSigning)
 	clientKeys := newMemKeyManager(t, "rp", keys.ClientAuthentication, keys.RequestObjectSigning, keys.DPoPProofSigning)
 
+	// contentEncryption resolves Config.IDTokenContentEncryption's
+	// zero-means-A256GCM default; only meaningful when EncryptIDTokens
+	// is set.
+	contentEncryption := cfg.IDTokenContentEncryption
+	if contentEncryption == 0 {
+		contentEncryption = fapi.A256GCM
+	}
+
 	// clientDecryption is only generated (and only wired into the
 	// client/server configs below) when EncryptIDTokens is set — a
 	// separate keys.Decrypter from clientKeys (an RSA key, not the
@@ -116,7 +131,7 @@ func New(t *testing.T, cfg Config) *Harness {
 	}
 	if cfg.EncryptIDTokens {
 		registeredClientCfg.IDTokenEncryptionKeyManagement = fapi.RSAOAEP256
-		registeredClientCfg.IDTokenEncryptionContentEncryption = fapi.A256GCM
+		registeredClientCfg.IDTokenEncryptionContentEncryption = contentEncryption
 	}
 	registeredClient, err := storage.NewRegisteredClient(registeredClientCfg)
 	if err != nil {
@@ -162,7 +177,7 @@ func New(t *testing.T, cfg Config) *Harness {
 	}
 	if cfg.EncryptIDTokens {
 		srvCfg.Algorithms.IDTokenEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.RSAOAEP256}
-		srvCfg.Algorithms.IDTokenEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{fapi.A256GCM}
+		srvCfg.Algorithms.IDTokenEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{contentEncryption}
 	}
 	revocation := newMemRevocationStore()
 	jwtAccessTokens, err := server.NewJWTAccessTokens(asKeys, fapi.ES256)
@@ -224,7 +239,7 @@ func New(t *testing.T, cfg Config) *Harness {
 	}
 	if cfg.EncryptIDTokens {
 		clientCfg.Algorithms.IDTokenKeyManagement = fapi.RSAOAEP256
-		clientCfg.Algorithms.IDTokenContentEncryption = fapi.A256GCM
+		clientCfg.Algorithms.IDTokenContentEncryption = contentEncryption
 	}
 	clientDeps := client.Dependencies{
 		Sessions:   newMemSessionStore(),

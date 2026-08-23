@@ -1,6 +1,7 @@
 package jwe
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/ecdh"
@@ -194,11 +195,26 @@ type DecryptRequest struct {
 	Algorithm  fapi.KeyManagementAlgorithm
 	Encryption fapi.ContentEncryptionAlgorithm
 
-	// RecipientKey must be *rsa.PrivateKey for RSAOAEP256 or
-	// *ecdh.PrivateKey for ECDHESA256KW.
+	// RecipientKey is either a concrete private key this package unwraps
+	// with directly (*rsa.PrivateKey for RSAOAEP256, *ecdh.PrivateKey for
+	// ECDHESA256KW), or a value implementing Unwrapper — for a caller
+	// that never holds the raw private key itself (e.g. an HSM- or
+	// remote-signing-service-backed key manager), and so cannot hand one
+	// to this package at all.
 	RecipientKey any
 
 	Compact string
+}
+
+// Unwrapper delivers the content-encryption key for one JWE without
+// this package (or its caller) ever holding the recipient's private
+// key — the decryption-side equivalent of how this module's signing
+// path never hands a crypto.Signer or raw private key across a
+// KeyManager boundary. ctx is threaded through unchanged, so an
+// implementation backed by a remote call can honor cancellation the
+// same way keys.KeyManager.Sign does.
+type Unwrapper interface {
+	UnwrapCEK(ctx context.Context, alg fapi.KeyManagementAlgorithm, encryptedKey []byte, ephemeralPublicKey *ecdh.PublicKey) ([]byte, error)
 }
 
 // DecryptResult is a successfully decrypted and authenticated JWE.
@@ -210,8 +226,9 @@ type DecryptResult struct {
 // Decrypt opens req.Compact, returning an error if it is malformed, its
 // header doesn't match what the caller required, or authentication
 // fails for any reason (wrong key, tampered ciphertext or tag, or a
-// failed ECDH-ES+A256KW key-unwrap integrity check).
-func Decrypt(req DecryptRequest) (DecryptResult, error) {
+// failed ECDH-ES+A256KW key-unwrap integrity check). ctx is only used
+// when req.RecipientKey is an Unwrapper.
+func Decrypt(ctx context.Context, req DecryptRequest) (DecryptResult, error) {
 	if !req.Algorithm.IsValid() {
 		return DecryptResult{}, fmt.Errorf("jwe: invalid key management algorithm %v", req.Algorithm)
 	}
@@ -267,9 +284,17 @@ func Decrypt(req DecryptRequest) (DecryptResult, error) {
 		return DecryptResult{}, fmt.Errorf("%w: tag: %v", ErrMalformed, err)
 	}
 
-	cek, err := unwrapCEK(req.Algorithm, req.RecipientKey, encryptedKey, header.EphemeralPublicKey)
-	if err != nil {
-		return DecryptResult{}, err
+	var cek []byte
+	if unwrapper, ok := req.RecipientKey.(Unwrapper); ok {
+		cek, err = unwrapper.UnwrapCEK(ctx, req.Algorithm, encryptedKey, header.EphemeralPublicKey)
+		if err != nil {
+			return DecryptResult{}, fmt.Errorf("%w: %v", ErrDecryptionFailed, err)
+		}
+	} else {
+		cek, err = UnwrapCEK(req.Algorithm, req.RecipientKey, encryptedKey, header.EphemeralPublicKey)
+		if err != nil {
+			return DecryptResult{}, err
+		}
 	}
 
 	plaintext, err := open(cek, iv, ciphertext, tag, []byte(parts[0]))
@@ -279,7 +304,15 @@ func Decrypt(req DecryptRequest) (DecryptResult, error) {
 	return DecryptResult{Plaintext: plaintext, Header: header}, nil
 }
 
-func unwrapCEK(alg fapi.KeyManagementAlgorithm, recipientKey any, encryptedKey []byte, epk *ecdh.PublicKey) ([]byte, error) {
+// UnwrapCEK recovers the content-encryption key encryptedKey carries,
+// using recipientKey directly (*rsa.PrivateKey for RSAOAEP256,
+// *ecdh.PrivateKey for ECDHESA256KW — epk is required for the latter,
+// ignored for the former). Exported so a KeyManager-backed Unwrapper
+// implementation that does hold a concrete private key in memory (e.g.
+// keys/ephemeral, for tests) can reuse this package's own
+// already-verified ECDH-ES+A256KW unwrap logic rather than
+// reimplementing the Concat KDF and AES Key Wrap itself.
+func UnwrapCEK(alg fapi.KeyManagementAlgorithm, recipientKey any, encryptedKey []byte, epk *ecdh.PublicKey) ([]byte, error) {
 	switch alg {
 	case fapi.RSAOAEP256:
 		priv, ok := recipientKey.(*rsa.PrivateKey)

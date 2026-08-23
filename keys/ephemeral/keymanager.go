@@ -17,10 +17,17 @@ import (
 // KeyManager is a keys.KeyManager backed by fresh in-memory keys
 // generated once at construction, one per active signing purpose. See
 // the package doc comment for why this is development/testing only.
+//
+// It also implements keys.Decrypter when constructed via
+// NewKeyManagerWithDecryption (see decrypter.go) — decryption is opt-in
+// since most callers never need it, and decryption is not merely an
+// addition to keys.KeyManager (the underlying key types and use cases
+// differ), so plain NewKeyManager leaves the decryption field nil.
 type KeyManager struct {
-	mu   sync.Mutex
-	keys map[keys.SigningPurpose]crypto.Signer
-	kid  map[keys.SigningPurpose]string
+	mu         sync.Mutex
+	keys       map[keys.SigningPurpose]crypto.Signer
+	kid        map[keys.SigningPurpose]string
+	decryption *decryptionKeys
 }
 
 // NewKeyManager generates one key per purpose in purposes, sized for

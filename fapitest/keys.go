@@ -142,3 +142,28 @@ func issuerSigningPurposeFor(p keys.IssuerVerificationPurpose) (keys.SigningPurp
 		return 0, fmt.Errorf("fapitest: unsupported issuer verification purpose %v", p)
 	}
 }
+
+// memClientEncryptionKeySource adapts a client's keys.Decrypter to
+// keys.ClientEncryptionKeySource — the server-side contract for
+// resolving a registered client's encryption key when issuing it an
+// encrypted ID token — by delegating to EncryptionPublicKey, the
+// client-side method that hands back the public half of the same key
+// UnwrapContentEncryptionKey will later use to decrypt. Only used when
+// Config.EncryptIDTokens is set.
+type memClientEncryptionKeySource struct {
+	clientID  fapi.ClientID
+	decrypter keys.Decrypter
+}
+
+func (s *memClientEncryptionKeySource) ResolveEncryptionKeys(ctx context.Context, req keys.ClientEncryptionKeyRequest) (keys.ClientEncryptionKeySet, error) {
+	if req.ClientID != s.clientID {
+		return keys.ClientEncryptionKeySet{}, fmt.Errorf("fapitest: unknown client %q", req.ClientID)
+	}
+	info, err := s.decrypter.EncryptionPublicKey(ctx, keys.IDTokenDecryption, req.Algorithm)
+	if err != nil {
+		return keys.ClientEncryptionKeySet{}, err
+	}
+	return keys.ClientEncryptionKeySet{Keys: []keys.ClientEncryptionKey{
+		{KeyID: info.KeyID, Algorithm: req.Algorithm, PublicKey: info.PublicKey},
+	}}, nil
+}

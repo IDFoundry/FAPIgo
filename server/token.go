@@ -167,7 +167,7 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		if err != nil {
 			return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to resolve identity claims", err))
 		}
-		idToken, err := s.issueIDToken(ctx, client.ID(), redeemed.Subject, redeemed.Nonce, redeemed.AuthTime, redeemed.ACR, redeemed.AMR, idTokenClaims)
+		idToken, err := s.issueIDToken(ctx, client, redeemed.Subject, redeemed.Nonce, redeemed.AuthTime, redeemed.ACR, redeemed.AMR, idTokenClaims)
 		if err != nil {
 			return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to issue ID token", err))
 		}
@@ -265,18 +265,27 @@ func withRequestedUserinfoClaims(names []string, base map[string]json.RawMessage
 	return merged, nil
 }
 
-func (s *Server) issueIDToken(ctx context.Context, clientID fapi.ClientID, subject, nonce string, authTime time.Time, acr string, amr []string, tokenClaims map[string]json.RawMessage) (string, error) {
+func (s *Server) issueIDToken(ctx context.Context, client storage.RegisteredClient, subject, nonce string, authTime time.Time, acr string, amr []string, tokenClaims map[string]json.RawMessage) (string, error) {
 	signer, kid, err := s.newSigner(ctx, keys.IDTokenSigning, s.cfg.Algorithms.IDToken)
 	if err != nil {
 		return "", err
 	}
-	return token.IssueIDToken(token.IDTokenParams{
+	signedJWT, err := token.IssueIDToken(token.IDTokenParams{
 		Signer: signer, Algorithm: s.cfg.Algorithms.IDToken, KeyID: kid,
-		Issuer: s.cfg.Issuer.String(), Subject: subject, Audience: clientID.String(),
+		Issuer: s.cfg.Issuer.String(), Subject: subject, Audience: client.ID().String(),
 		Nonce: nonce, AuthTime: authTime, ACR: acr, AMR: amr,
 		Now: s.deps.Clock.Now(), Lifetime: s.cfg.Limits.IDTokenLifetime,
 		Parameters: tokenClaims,
 	})
+	if err != nil {
+		return "", err
+	}
+
+	keyManagement, contentEncryption, encrypted := client.IDTokenEncryption()
+	if !encrypted {
+		return signedJWT, nil
+	}
+	return s.encryptIDToken(ctx, client.ID(), keyManagement, contentEncryption, signedJWT)
 }
 
 // issueRefreshToken generates and persists a new refresh token, returning

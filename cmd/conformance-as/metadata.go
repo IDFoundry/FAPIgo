@@ -38,7 +38,7 @@ var claimsSupported = append(
 	identityClaimNames...,
 )
 
-var dpopSigningAlgValuesSupported = []string{"ES256", "PS256"}
+var dpopSigningAlgValuesSupported = []string{"ES256", "PS256", "EdDSA"}
 
 func metadataHandler(srv *server.Server, advertisedScopes []string, userinfoURL *url.URL) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

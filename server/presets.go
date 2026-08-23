@@ -102,12 +102,12 @@ func RecommendedLimits() Limits {
 	}
 }
 
-// RecommendedAlgorithms returns an AlgorithmPolicy using only ES256 —
-// the narrower of the two algorithms this module implements (see
-// RecommendedAlgorithmSet's own doc comment for why only two, not the
-// three FAPI 2.0 permits) — for every signing purpose, and accepting
-// both ES256 and PS256 from clients. As with RecommendedLimits, this is
-// a starting point to call and override, not something New applies on
+// RecommendedAlgorithms returns an AlgorithmPolicy using ES256 — a
+// mature, widely-interoperable choice, not a narrower one than this
+// module can offer — for every signing purpose this server does
+// itself, while accepting any of ES256, PS256 or EdDSA from clients
+// (RecommendedAlgorithmSet). As with RecommendedLimits, this is a
+// starting point to call and override, not something New applies on
 // its own.
 //
 // JARM is set even under Config.Profile == ProfileFAPISecurity, where
@@ -129,14 +129,14 @@ func RecommendedAlgorithms() AlgorithmPolicy {
 	}
 }
 
-// RecommendedAlgorithmSet returns {ES256, PS256} — both algorithms this
-// module implements, and both explicitly permitted by FAPI 2.0 Security
-// Profile Final §5.4.1 item 1.b ("use PS256, ES256, or EdDSA (using the
-// Ed25519 variant) algorithms"). The spec also permits EdDSA/Ed25519;
-// this module doesn't implement it (fapi.SignatureAlgorithm's closed
-// set is ES256 and PS256 only, see algorithm.go), so accepting exactly
-// these two is a fully spec-compliant subset, not a narrowing this
-// module imposes beyond what it can actually verify.
+// RecommendedAlgorithmSet returns every algorithm this module
+// implements — {ES256, PS256, EdDSA} — which is also exactly the set
+// FAPI 2.0 Security Profile Final §5.4.1 item 1.b permits ("use PS256,
+// ES256, or EdDSA (using the Ed25519 variant) algorithms"). This is a
+// client-verification allow-list (ClientAssertion/RequestObject, not
+// this server's own signing choice — see RecommendedAlgorithms), so
+// including all three only widens what a client may present; it never
+// weakens anything this server itself signs with.
 func RecommendedAlgorithmSet() AlgorithmSet {
-	return AlgorithmSet{fapi.ES256, fapi.PS256}
+	return AlgorithmSet{fapi.ES256, fapi.PS256, fapi.EdDSA}
 }

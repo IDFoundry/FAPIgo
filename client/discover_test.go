@@ -33,15 +33,17 @@ func newDiscoveryFetcher(t *testing.T, ts *httptest.Server) *fapihttp.Client {
 }
 
 type discoveryDoc struct {
-	Issuer                             string   `json:"issuer"`
-	AuthorizationEndpoint              string   `json:"authorization_endpoint"`
-	TokenEndpoint                      string   `json:"token_endpoint"`
-	PushedAuthorizationRequestEndpoint string   `json:"pushed_authorization_request_endpoint"`
-	JWKSURI                            string   `json:"jwks_uri"`
-	IDTokenSigningAlgValuesSupported   []string `json:"id_token_signing_alg_values_supported,omitempty"`
-	RequestObjectSigningAlgValues      []string `json:"request_object_signing_alg_values_supported,omitempty"`
-	AuthorizationSigningAlgValues      []string `json:"authorization_signing_alg_values_supported,omitempty"`
-	RequireSignedRequestObject         bool     `json:"require_signed_request_object,omitempty"`
+	Issuer                              string   `json:"issuer"`
+	AuthorizationEndpoint               string   `json:"authorization_endpoint"`
+	TokenEndpoint                       string   `json:"token_endpoint"`
+	PushedAuthorizationRequestEndpoint  string   `json:"pushed_authorization_request_endpoint"`
+	JWKSURI                             string   `json:"jwks_uri"`
+	IDTokenSigningAlgValuesSupported    []string `json:"id_token_signing_alg_values_supported,omitempty"`
+	RequestObjectSigningAlgValues       []string `json:"request_object_signing_alg_values_supported,omitempty"`
+	AuthorizationSigningAlgValues       []string `json:"authorization_signing_alg_values_supported,omitempty"`
+	IDTokenEncryptionAlgValuesSupported []string `json:"id_token_encryption_alg_values_supported,omitempty"`
+	IDTokenEncryptionEncValuesSupported []string `json:"id_token_encryption_enc_values_supported,omitempty"`
+	RequireSignedRequestObject          bool     `json:"require_signed_request_object,omitempty"`
 }
 
 func TestDiscoverAcceptsValidDocumentAtRoot(t *testing.T) {
@@ -50,15 +52,17 @@ func TestDiscoverAcceptsValidDocumentAtRoot(t *testing.T) {
 	ts = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		doc := discoveryDoc{
-			Issuer:                             ts.URL,
-			AuthorizationEndpoint:              ts.URL + "/authorize",
-			TokenEndpoint:                      ts.URL + "/token",
-			PushedAuthorizationRequestEndpoint: ts.URL + "/par",
-			JWKSURI:                            ts.URL + "/jwks",
-			IDTokenSigningAlgValuesSupported:   []string{"ES256", "RS256"},
-			RequestObjectSigningAlgValues:      []string{"ES256"},
-			AuthorizationSigningAlgValues:      []string{"ES256"},
-			RequireSignedRequestObject:         true,
+			Issuer:                              ts.URL,
+			AuthorizationEndpoint:               ts.URL + "/authorize",
+			TokenEndpoint:                       ts.URL + "/token",
+			PushedAuthorizationRequestEndpoint:  ts.URL + "/par",
+			JWKSURI:                             ts.URL + "/jwks",
+			IDTokenSigningAlgValuesSupported:    []string{"ES256", "RS256"},
+			RequestObjectSigningAlgValues:       []string{"ES256"},
+			AuthorizationSigningAlgValues:       []string{"ES256"},
+			IDTokenEncryptionAlgValuesSupported: []string{"RSA-OAEP-256", "RSA-OAEP"},
+			IDTokenEncryptionEncValuesSupported: []string{"A256GCM", "A128GCM"},
+			RequireSignedRequestObject:          true,
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(doc)
@@ -97,6 +101,12 @@ func TestDiscoverAcceptsValidDocumentAtRoot(t *testing.T) {
 	}
 	if len(md.JARMAlgorithms) != 1 || md.JARMAlgorithms[0] != fapi.ES256 {
 		t.Errorf("JARMAlgorithms = %v, want [ES256]", md.JARMAlgorithms)
+	}
+	if len(md.IDTokenEncryptionAlgorithms) != 1 || md.IDTokenEncryptionAlgorithms[0] != fapi.RSAOAEP256 {
+		t.Errorf("IDTokenEncryptionAlgorithms = %v, want [RSAOAEP256] (RSA-OAEP is unsupported and must be filtered)", md.IDTokenEncryptionAlgorithms)
+	}
+	if len(md.IDTokenEncryptionEncValues) != 1 || md.IDTokenEncryptionEncValues[0] != fapi.A256GCM {
+		t.Errorf("IDTokenEncryptionEncValues = %v, want [A256GCM] (A128GCM is unsupported and must be filtered)", md.IDTokenEncryptionEncValues)
 	}
 	if !md.RequireSignedRequestObject {
 		t.Errorf("RequireSignedRequestObject = false, want true")

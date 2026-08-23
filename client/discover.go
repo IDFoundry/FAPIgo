@@ -38,6 +38,18 @@ type DiscoveredMetadata struct {
 	RequestObjectAlgorithms []fapi.SignatureAlgorithm
 	JARMAlgorithms          []fapi.SignatureAlgorithm
 
+	// IDTokenEncryptionAlgorithms/IDTokenEncryptionEncValues are every
+	// key-management/content-encryption algorithm this module
+	// recognizes among what the server advertised for encrypted ID
+	// tokens (OIDC Core §10.2). Both empty means the server never
+	// advertised encryption support at all — most servers. Populating
+	// Config.Algorithms.IDTokenKeyManagement/IDTokenContentEncryption
+	// from a value not present here would mean registering for
+	// encryption the server never said it could do; this module leaves
+	// that check to the caller; it does not enforce it here.
+	IDTokenEncryptionAlgorithms []fapi.KeyManagementAlgorithm
+	IDTokenEncryptionEncValues  []fapi.ContentEncryptionAlgorithm
+
 	// RequireSignedRequestObject reflects the server's own
 	// require_signed_request_object metadata value — a caller targeting
 	// that server should set Config.Profile to
@@ -121,6 +133,8 @@ func Discover(ctx context.Context, fetcher *fapihttp.Client, issuer fapi.URL, op
 		IDTokenAlgorithms:                 supportedAlgorithms(doc.IDTokenSigningAlgValuesSupported),
 		RequestObjectAlgorithms:           supportedAlgorithms(doc.RequestObjectSigningAlgValuesSupported),
 		JARMAlgorithms:                    supportedAlgorithms(doc.AuthorizationSigningAlgValuesSupported),
+		IDTokenEncryptionAlgorithms:       supportedKeyManagementAlgorithms(doc.IDTokenEncryptionAlgValuesSupported),
+		IDTokenEncryptionEncValues:        supportedContentEncryptionAlgorithms(doc.IDTokenEncryptionEncValuesSupported),
 		RequireSignedRequestObject:        doc.RequireSignedRequestObject,
 		AuthorizationResponseIssSupported: doc.AuthorizationResponseIssParameterSupported,
 	}, nil
@@ -145,6 +159,30 @@ func supportedAlgorithms(values []string) []fapi.SignatureAlgorithm {
 	var out []fapi.SignatureAlgorithm
 	for _, v := range values {
 		alg, err := fapi.ParseSignatureAlgorithm(v)
+		if err != nil {
+			continue
+		}
+		out = append(out, alg)
+	}
+	return out
+}
+
+func supportedKeyManagementAlgorithms(values []string) []fapi.KeyManagementAlgorithm {
+	var out []fapi.KeyManagementAlgorithm
+	for _, v := range values {
+		alg, err := fapi.ParseKeyManagementAlgorithm(v)
+		if err != nil {
+			continue
+		}
+		out = append(out, alg)
+	}
+	return out
+}
+
+func supportedContentEncryptionAlgorithms(values []string) []fapi.ContentEncryptionAlgorithm {
+	var out []fapi.ContentEncryptionAlgorithm
+	for _, v := range values {
+		alg, err := fapi.ParseContentEncryptionAlgorithm(v)
 		if err != nil {
 			continue
 		}

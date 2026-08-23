@@ -52,6 +52,29 @@ type Algorithms struct {
 	// IDToken is the algorithm the authorization server is registered (or
 	// discovered) to sign ID tokens with.
 	IDToken fapi.SignatureAlgorithm
+
+	// IDTokenKeyManagement, if set, declares that this client expects
+	// (and can decrypt) an encrypted — or encrypted-then-signed nested
+	// JWT (OIDC Core §10.2) — ID token, using this key-management
+	// algorithm. Zero (the default) means this client expects an
+	// ordinary signed-only ID token; a plain signed ID token arriving
+	// when this is set is rejected outright, not silently accepted,
+	// since the whole point of registering for encryption is that a
+	// downgrade to plaintext must not go unnoticed. Whatever value is
+	// set here reflects a registration this client made with the
+	// authorization server out of band — this module has no dynamic
+	// client registration flow of its own — and Dependencies must
+	// supply a matching keys.Decrypter when it is non-zero.
+	IDTokenKeyManagement fapi.KeyManagementAlgorithm
+
+	// IDTokenContentEncryption is the content-encryption algorithm
+	// paired with IDTokenKeyManagement. Required together: both zero, or
+	// both set. Kept as its own field — separate from
+	// IDTokenKeyManagement — so a future second
+	// fapi.ContentEncryptionAlgorithm value doesn't change this field's
+	// meaning or Config's shape, the same reasoning
+	// jwe.EncryptRequest/DecryptRequest already apply.
+	IDTokenContentEncryption fapi.ContentEncryptionAlgorithm
 }
 
 // Endpoints are the authorization server's endpoint URLs this client

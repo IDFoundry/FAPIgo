@@ -220,6 +220,12 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 		"negative clock skew":     func(c *client.Config) { c.Limits.MaxClockSkew = -time.Second },
 		"zero http timeout":       func(c *client.Config) { c.Limits.HTTPTimeout = 0 },
 		"zero max response bytes": func(c *client.Config) { c.Limits.MaxHTTPResponseBytes = 0 },
+		"id_token key management set without content encryption": func(c *client.Config) {
+			c.Algorithms.IDTokenKeyManagement = fapi.RSAOAEP256
+		},
+		"id_token content encryption set without key management": func(c *client.Config) {
+			c.Algorithms.IDTokenContentEncryption = fapi.A256GCM
+		},
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -247,6 +253,35 @@ func TestNewRequiresMessageSigningConfigUnderThatProfile(t *testing.T) {
 	cfg.Limits.MaxJARMResponseLifetime = time.Minute
 	if _, err := client.New(cfg, deps); err != nil {
 		t.Fatalf("New(message signing, fully configured): %v", err)
+	}
+}
+
+// fakeDecrypter is a minimal keys.Decrypter — TestNewRequiresDecryptionDependencyWhenIDTokenEncryptionConfigured
+// only needs Dependencies.Decryption to be non-nil to satisfy New's
+// cross-field check; it never actually decrypts anything.
+type fakeDecrypter struct{}
+
+func (fakeDecrypter) UnwrapContentEncryptionKey(context.Context, keys.UnwrapRequest) ([]byte, error) {
+	return nil, fmt.Errorf("fakeDecrypter: not implemented")
+}
+
+func (fakeDecrypter) EncryptionPublicKey(context.Context, keys.DecryptionPurpose, fapi.KeyManagementAlgorithm) (keys.PublicKeyInfo, error) {
+	return keys.PublicKeyInfo{}, fmt.Errorf("fakeDecrypter: not implemented")
+}
+
+func TestNewRequiresDecryptionDependencyWhenIDTokenEncryptionConfigured(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Algorithms.IDTokenKeyManagement = fapi.RSAOAEP256
+	cfg.Algorithms.IDTokenContentEncryption = fapi.A256GCM
+
+	deps := validDependencies(t)
+	if _, err := client.New(cfg, deps); err == nil {
+		t.Fatalf("New(id_token encryption configured, no Decryption dependency) = nil error, want error")
+	}
+
+	deps.Decryption = fakeDecrypter{}
+	if _, err := client.New(cfg, deps); err != nil {
+		t.Fatalf("New(id_token encryption fully configured): %v", err)
 	}
 }
 

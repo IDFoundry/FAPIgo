@@ -40,6 +40,50 @@ func TestParseAndValidateAcceptsValidDocument(t *testing.T) {
 	}
 }
 
+func TestParseAndValidateAcceptsIDTokenEncryptionFields(t *testing.T) {
+	issuer := "https://as.example.com"
+	doc := metadata.Document{
+		Issuer:                              issuer,
+		AuthorizationEndpoint:               issuer + "/authorize",
+		TokenEndpoint:                       issuer + "/token",
+		PushedAuthorizationRequestEndpoint:  issuer + "/par",
+		JWKSURI:                             issuer + "/jwks",
+		IDTokenEncryptionAlgValuesSupported: []string{"RSA-OAEP-256"},
+		IDTokenEncryptionEncValuesSupported: []string{"A256GCM"},
+	}
+	body, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	parsed, err := metadata.ParseAndValidate(body, issuer)
+	if err != nil {
+		t.Fatalf("ParseAndValidate: %v", err)
+	}
+	if len(parsed.IDTokenEncryptionAlgValuesSupported) != 1 || parsed.IDTokenEncryptionAlgValuesSupported[0] != "RSA-OAEP-256" {
+		t.Errorf("IDTokenEncryptionAlgValuesSupported = %v", parsed.IDTokenEncryptionAlgValuesSupported)
+	}
+	if len(parsed.IDTokenEncryptionEncValuesSupported) != 1 || parsed.IDTokenEncryptionEncValuesSupported[0] != "A256GCM" {
+		t.Errorf("IDTokenEncryptionEncValuesSupported = %v", parsed.IDTokenEncryptionEncValuesSupported)
+	}
+}
+
+// A document that never mentions encryption at all — the common case —
+// must parse with both fields empty, not fail or default to something
+// non-empty.
+func TestParseAndValidateOmitsIDTokenEncryptionFieldsWhenAbsent(t *testing.T) {
+	body := validDocumentJSON(t, "https://as.example.com")
+	doc, err := metadata.ParseAndValidate(body, "https://as.example.com")
+	if err != nil {
+		t.Fatalf("ParseAndValidate: %v", err)
+	}
+	if len(doc.IDTokenEncryptionAlgValuesSupported) != 0 {
+		t.Errorf("IDTokenEncryptionAlgValuesSupported = %v, want empty", doc.IDTokenEncryptionAlgValuesSupported)
+	}
+	if len(doc.IDTokenEncryptionEncValuesSupported) != 0 {
+		t.Errorf("IDTokenEncryptionEncValuesSupported = %v, want empty", doc.IDTokenEncryptionEncValuesSupported)
+	}
+}
+
 func TestParseAndValidateRejectsIssuerMismatch(t *testing.T) {
 	body := validDocumentJSON(t, "https://as.example.com")
 	_, err := metadata.ParseAndValidate(body, "https://attacker.example.com")

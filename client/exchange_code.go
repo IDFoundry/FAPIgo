@@ -14,6 +14,7 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/clientassertion"
 	"github.com/idfoundry/fapigo/internal/dpop"
+	"github.com/idfoundry/fapigo/internal/jwe"
 	"github.com/idfoundry/fapigo/internal/par"
 	"github.com/idfoundry/fapigo/internal/token"
 	"github.com/idfoundry/fapigo/keys"
@@ -181,7 +182,85 @@ func isDPoPNonceError(body []byte) bool {
 	return err == nil && errResp.Code == "use_dpop_nonce"
 }
 
+// validateIDToken accepts either an ordinary signed-only ID token (3
+// compact-serialization segments) or an encrypted one — always
+// signed-then-encrypted (OIDC Core §2), producing a Nested JWT (RFC
+// 7519 §5.2) — which has 5 segments, dispatched purely on segment
+// count. Which shape is acceptable is a caller policy decision, never
+// inferred from what a given token happens to look like:
+// Config.Algorithms.IDTokenKeyManagement being set means an encrypted
+// ID token is the only acceptable shape, and a plain one arriving
+// instead is rejected outright rather than silently accepted — the
+// downgrade this check exists to close. Symmetrically, an encrypted ID
+// token arriving when encryption was never configured is also
+// rejected: this client has no configured algorithm (and, per
+// client.New's own validation, no Decryption dependency) to process it
+// with, and trusting whatever the token's own header claims would be
+// exactly the "never treat an untrusted alg header as policy" mistake
+// this module avoids everywhere else.
 func (c *Client) validateIDToken(ctx context.Context, raw, nonce string) (string, *Error) {
+	expectEncrypted := c.cfg.Algorithms.IDTokenKeyManagement != 0
+	switch strings.Count(raw, ".") + 1 {
+	case 3:
+		if expectEncrypted {
+			return "", newError(ErrorInvalidResponse, "ID token is not encrypted, but this client is configured to require an encrypted ID token", nil)
+		}
+		return c.validateSignedIDToken(ctx, raw, nonce)
+	case 5:
+		if !expectEncrypted {
+			return "", newError(ErrorInvalidResponse, "ID token is encrypted, but this client is not configured to expect an encrypted ID token", nil)
+		}
+		innerJWT, decErr := c.decryptIDToken(ctx, raw)
+		if decErr != nil {
+			return "", decErr
+		}
+		return c.validateSignedIDToken(ctx, innerJWT, nonce)
+	default:
+		return "", newError(ErrorInvalidResponse, "malformed ID token", nil)
+	}
+}
+
+// decryptIDToken opens an encrypted ID token and returns the inner
+// signed JWT for validateSignedIDToken to verify exactly as it would an
+// ordinary signed-only one — decrypting removes a confidentiality
+// wrapper, it never substitutes for signature/claims verification, all
+// of which still happens on the recovered JWT afterward.
+func (c *Client) decryptIDToken(ctx context.Context, raw string) (string, *Error) {
+	unwrapper := decrypterUnwrapper{decrypter: c.deps.Decryption, purpose: keys.IDTokenDecryption}
+	result, err := jwe.Decrypt(ctx, jwe.DecryptRequest{
+		Algorithm:    c.cfg.Algorithms.IDTokenKeyManagement,
+		Encryption:   c.cfg.Algorithms.IDTokenContentEncryption,
+		RecipientKey: unwrapper,
+		Compact:      raw,
+	})
+	if err != nil {
+		return "", newError(ErrorInvalidResponse, "ID token decryption failed", err)
+	}
+	// RFC 7519 §5.2: "In the case that nested signing or encryption is
+	// employed, this Header Parameter MUST be present; in this case,
+	// the value MUST be 'JWT'" — verified directly against the RFC, not
+	// assumed. Compared per RFC 7515 §4.1.10's media-type rules (case
+	// insensitive, an "application/"-prefixed form is equivalent),
+	// exactly the rule this module's own request-object "typ" check
+	// already applies for the same reason.
+	if !isNestedJWTContentType(result.Header.ContentType) {
+		return "", newError(ErrorInvalidResponse, `decrypted ID token is not a nested JWT (cty must be "JWT")`, nil)
+	}
+	return string(result.Plaintext), nil
+}
+
+// isNestedJWTContentType reports whether cty, a JWE header's "cty"
+// value, identifies a nested JWT payload — see decryptIDToken's own doc
+// comment for the RFC basis of the case-insensitive, "application/"-
+// prefix-tolerant comparison.
+func isNestedJWTContentType(cty string) bool {
+	return strings.TrimPrefix(strings.ToLower(cty), "application/") == "jwt"
+}
+
+// validateSignedIDToken verifies an ordinary signed-only ID token —
+// either one that arrived that way directly, or the inner JWT
+// decryptIDToken recovered from an encrypted one.
+func (c *Client) validateSignedIDToken(ctx context.Context, raw, nonce string) (string, *Error) {
 	parsed, err := token.ParseIDToken(raw)
 	if err != nil {
 		return "", newError(ErrorInvalidResponse, "malformed ID token", err)

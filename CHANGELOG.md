@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.0](https://github.com/IDFoundry/FAPIgo/compare/v0.4.0...v0.5.0) (2026-08-23)
+
+
+### Features
+
+* add A256CBC-HS512 content encryption algorithm type ([a0fc943](https://github.com/IDFoundry/FAPIgo/commit/a0fc94304cf9864cec3b90cfedead8b1dbce4ba6))
+* implement AES_256_CBC_HMAC_SHA_512 content encryption ([1c8884c](https://github.com/IDFoundry/FAPIgo/commit/1c8884cd8ca6e6666948f04c9ef37b9bc1c90d75))
+
+
+### Bug Fixes
+
+* suppress SonarCloud false positive on CBC-HMAC's raw CBC mode ([4e1a75b](https://github.com/IDFoundry/FAPIgo/commit/4e1a75b108da3b691106051b09d017de7a335e65))
+
 ## [0.4.0](https://github.com/IDFoundry/FAPIgo/compare/v0.3.0...v0.4.0) (2026-08-23)
 
 

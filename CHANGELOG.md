@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.9.0](https://github.com/IDFoundry/FAPIgo/compare/v0.8.0...v0.9.0) (2026-08-24)
+
+
+### Features
+
+* add FetchUserInfo for validated OIDC UserInfo claims ([f2b0177](https://github.com/IDFoundry/FAPIgo/commit/f2b0177352f6d5ad22a374bda028e20d64985f87))
+* add ProtectedResource for DPoP-bound protected-resource calls ([d0b5569](https://github.com/IDFoundry/FAPIgo/commit/d0b556926617177b792197bb86e4d3432b0838ec))
+* add VerifyIssuerJWS for issuer-signed artifacts beyond the ID token ([#123](https://github.com/IDFoundry/FAPIgo/issues/123)) ([fcd1ae1](https://github.com/IDFoundry/FAPIgo/commit/fcd1ae169224839836df98228fecbe724c279846))
+
 ## [0.8.0](https://github.com/IDFoundry/FAPIgo/compare/v0.7.0...v0.8.0) (2026-08-23)
 
 

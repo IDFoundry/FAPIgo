@@ -10,9 +10,10 @@
 // objects and PAR submissions; verifying them is the server package's
 // responsibility.
 //
-// VerifyIssuerJWS and ProtectedResource (via ResourceClient.Do) are the
-// deliberate exceptions: a caller that reaches a protected resource
-// beyond token issuance (the UserInfo endpoint, most commonly) needs
+// FetchUserInfo, VerifyIssuerJWS and ProtectedResource (via
+// ResourceClient.Do) are the deliberate exceptions: a caller that
+// reaches a protected resource beyond token issuance (the UserInfo
+// endpoint, most commonly, which FetchUserInfo covers directly) needs
 // both to sign a DPoP proof bound to that request and to check
 // something else the authorization server signed, and the alternative —
 // forcing that caller to hand-roll its own DPoP proof construction and

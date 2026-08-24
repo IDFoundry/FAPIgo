@@ -38,11 +38,11 @@ def _context(verify):
     if verify:
         ctx = ssl.create_default_context()
     else:
-        # NOSONAR: python:S5527 — only reached for a target that
-        # local_only_ssl_context's own caller-side check already
-        # confirmed resolves entirely to loopback; see that function's
-        # own doc comment for why this is a deliberate local-testing
-        # accommodation, not a blanket bypass.
-        ctx = ssl._create_unverified_context()
+        # Only reached for a target that local_only_ssl_context's own
+        # caller-side check already confirmed resolves entirely to
+        # loopback; see that function's own doc comment for why this is
+        # a deliberate local-testing accommodation, not a blanket
+        # bypass.
+        ctx = ssl._create_unverified_context()  # NOSONAR(S4830, S5527)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
     return ctx

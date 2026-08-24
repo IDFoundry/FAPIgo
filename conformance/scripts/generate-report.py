@@ -268,8 +268,21 @@ def main():
     if len(sys.argv) != 3:
         print("usage: generate-report.py <workdir> <repo_root>", file=sys.stderr)
         sys.exit(2)
-    workdir = Path(sys.argv[1])
-    repo_root = Path(sys.argv[2])
+    # Resolved to an absolute, canonical path and checked up front —
+    # every read/write this script does (results.txt, the per-suite
+    # logs, expected-{warnings,skips}-*.json, report.md itself) derives
+    # from one of these two arguments, so this is the one place that
+    # needs to fail clearly on a malformed one (e.g. a hallucinated or
+    # mistyped path from an automated caller) instead of silently
+    # reading or writing wherever it happens to resolve to.
+    workdir = Path(sys.argv[1]).resolve()
+    repo_root = Path(sys.argv[2]).resolve()
+    if not workdir.is_dir():
+        print(f"error: workdir {workdir} is not a directory", file=sys.stderr)
+        sys.exit(2)
+    if not (repo_root / "conformance" / "server").is_dir():
+        print(f"error: repo_root {repo_root} does not look like a FAPIgo checkout (no conformance/server directory)", file=sys.stderr)
+        sys.exit(2)
 
     commit, branch = git_info(repo_root)
     results = load_results(workdir)

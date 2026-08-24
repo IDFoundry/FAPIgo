@@ -82,16 +82,18 @@ import http.client
 import json
 import os
 import re
-import ssl
 import sys
 import time
+from pathlib import Path
 from urllib.parse import quote, urlsplit
+
+from _sslutil import local_only_ssl_context
 
 CONFORMANCE_SERVER = os.environ.get("CONFORMANCE_SERVER", "https://localhost.emobix.co.uk:8443/")
 _parsed = urlsplit(CONFORMANCE_SERVER)
 HOST = _parsed.hostname
 PORT = _parsed.port or 8443
-CTX = ssl._create_unverified_context()
+CTX = local_only_ssl_context(HOST)
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 # run-test-plan.py prefixes every line with its own "YYYY-MM-DD
@@ -254,7 +256,18 @@ def main():
     if len(sys.argv) != 3:
         print("usage: retry-flaky-modules.py <planId> <run-test-plan.py log file>", file=sys.stderr)
         sys.exit(2)
-    plan_id, log_path = sys.argv[1], sys.argv[2]
+    plan_id = sys.argv[1]
+    # Resolved to an absolute, canonical path and checked up front,
+    # rather than letting a bad argument surface as a bare
+    # FileNotFoundError from deep inside find_unexpected_modules — this
+    # is the only place a caller-supplied path enters this script, so
+    # it's the one place that needs to fail clearly on a malformed
+    # argument (e.g. a hallucinated or mistyped path from an automated
+    # caller) instead of reading whatever it happens to resolve to.
+    log_path = Path(sys.argv[2]).resolve()
+    if not log_path.is_file():
+        print(f"error: log file {log_path} does not exist", file=sys.stderr)
+        sys.exit(2)
 
     modules = find_unexpected_modules(log_path)
     if not modules:

@@ -163,14 +163,15 @@ import sys
 import time
 import http.client
 import json
-import ssl
 from urllib.parse import urlsplit
+
+from _sslutil import local_only_ssl_context
 
 CONFORMANCE_SERVER = os.environ.get("CONFORMANCE_SERVER", "https://localhost.emobix.co.uk:8443/")
 _parsed = urlsplit(CONFORMANCE_SERVER)
 HOST = _parsed.hostname
 PORT = _parsed.port or 8443
-CTX = ssl._create_unverified_context()
+CTX = local_only_ssl_context(HOST)
 
 # A minimal valid 1x1 transparent PNG - content doesn't matter, the
 # suite only validates it's a well-formed image under its size limit.

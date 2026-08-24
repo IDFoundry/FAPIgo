@@ -15,8 +15,7 @@ type authorizeResult struct {
 	grant   GrantedAuthorization
 }
 
-func (authorizeResult) interactionResult() { /* marker method — see InteractionResult's own doc comment. */
-}
+func (authorizeResult) interactionResult() {} // NOSONAR: go:S1186 — marker method, see InteractionResult's own doc comment
 
 // Authorize records that subject authenticated (per auth) and the
 // application approved grant.
@@ -28,8 +27,7 @@ type denyResult struct {
 	reason string
 }
 
-func (denyResult) interactionResult() { /* marker method — see InteractionResult's own doc comment. */
-}
+func (denyResult) interactionResult() {} // NOSONAR: go:S1186 — marker method, see InteractionResult's own doc comment
 
 // Deny records that the resource owner (or the application, on their
 // behalf) declined to authorize the request. reason is an optional,
@@ -43,8 +41,7 @@ type authenticationFailedResult struct {
 	reason string
 }
 
-func (authenticationFailedResult) interactionResult() { /* marker method — see InteractionResult's own doc comment. */
-}
+func (authenticationFailedResult) interactionResult() {} // NOSONAR: go:S1186 — marker method, see InteractionResult's own doc comment
 
 // AuthenticationFailed records that the resource owner could not be
 // authenticated at all (as distinct from authenticating and then

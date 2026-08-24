@@ -27,8 +27,7 @@ type InteractionRequired struct {
 	Interaction InteractionRequest
 }
 
-func (InteractionRequired) authorizationAction() { /* marker method — see AuthorizationAction's own doc comment. */
-}
+func (InteractionRequired) authorizationAction() {} // NOSONAR: go:S1186 — marker method, see AuthorizationAction's own doc comment
 
 // RedirectResponse means the caller should redirect the browser to
 // Destination directly, with no further interaction — e.g. a
@@ -41,8 +40,7 @@ type RedirectResponse struct {
 	Destination fapi.URL
 }
 
-func (RedirectResponse) authorizationAction() { /* marker method — see AuthorizationAction's own doc comment. */
-}
+func (RedirectResponse) authorizationAction() {} // NOSONAR: go:S1186 — marker method, see AuthorizationAction's own doc comment
 
 // LocalErrorResponse means the caller must render a local error rather
 // than redirect anywhere — the request could not be validated well
@@ -51,8 +49,7 @@ type LocalErrorResponse struct {
 	Error *Error
 }
 
-func (LocalErrorResponse) authorizationAction() { /* marker method — see AuthorizationAction's own doc comment. */
-}
+func (LocalErrorResponse) authorizationAction() {} // NOSONAR: go:S1186 — marker method, see AuthorizationAction's own doc comment
 
 // BeginAuthorizationRequest is the input to Server.BeginAuthorization —
 // the request_uri and client_id query parameters presented at the

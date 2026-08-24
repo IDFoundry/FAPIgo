@@ -72,6 +72,23 @@ func validateConfig(cfg Config) error {
 		}
 	}
 
+	// UserInfoKeyManagement/UserInfoContentEncryption mirror
+	// IDTokenKeyManagement/IDTokenContentEncryption's own coherent-pair
+	// requirement, for the same reason.
+	userInfoKeyManagementSet := cfg.Algorithms.UserInfoKeyManagement != 0
+	userInfoContentEncryptionSet := cfg.Algorithms.UserInfoContentEncryption != 0
+	if userInfoKeyManagementSet != userInfoContentEncryptionSet {
+		return fmt.Errorf("client: config: algorithms.userinfo_key_management and algorithms.userinfo_content_encryption must both be set, or both left zero")
+	}
+	if userInfoKeyManagementSet {
+		if !cfg.Algorithms.UserInfoKeyManagement.IsValid() {
+			return fmt.Errorf("client: config: algorithms.userinfo_key_management is invalid")
+		}
+		if !cfg.Algorithms.UserInfoContentEncryption.IsValid() {
+			return fmt.Errorf("client: config: algorithms.userinfo_content_encryption is invalid")
+		}
+	}
+
 	if cfg.Limits.ClientAssertionLifetime <= 0 {
 		return fmt.Errorf("client: config: limits.client_assertion_lifetime must be positive")
 	}
@@ -129,6 +146,9 @@ func validateDependencies(cfg Config, deps Dependencies) error {
 	}
 	if cfg.Algorithms.IDTokenKeyManagement != 0 && deps.Decryption == nil {
 		return fmt.Errorf("client: dependencies: decryption is required when algorithms.id_token_key_management is set")
+	}
+	if cfg.Algorithms.UserInfoKeyManagement != 0 && deps.Decryption == nil {
+		return fmt.Errorf("client: dependencies: decryption is required when algorithms.userinfo_key_management is set")
 	}
 	return nil
 }

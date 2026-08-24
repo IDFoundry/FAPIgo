@@ -36,10 +36,10 @@ type DiscoveredMetadata struct {
 
 	// UserinfoEndpoint is the server's advertised UserInfo Endpoint
 	// (OpenID Connect Discovery 1.0 §3), if any — OPTIONAL, so a zero
-	// fapi.URL means the server didn't advertise one. client itself
-	// never calls this endpoint (its own API ends at token issuance);
-	// this field exists only so a caller that does want to call it
-	// doesn't have to fetch and parse discovery a second time.
+	// fapi.URL means the server didn't advertise one. Copy it into
+	// Config.Endpoints.UserInfo to enable FetchUserInfo; Discover itself
+	// only parses it here so a caller doesn't have to fetch and parse
+	// discovery a second time just for this one field.
 	UserinfoEndpoint fapi.URL
 
 	IDTokenAlgorithms       []fapi.SignatureAlgorithm

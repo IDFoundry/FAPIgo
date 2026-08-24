@@ -226,6 +226,12 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 		"id_token content encryption set without key management": func(c *client.Config) {
 			c.Algorithms.IDTokenContentEncryption = fapi.A256GCM
 		},
+		"userinfo key management set without content encryption": func(c *client.Config) {
+			c.Algorithms.UserInfoKeyManagement = fapi.RSAOAEP256
+		},
+		"userinfo content encryption set without key management": func(c *client.Config) {
+			c.Algorithms.UserInfoContentEncryption = fapi.A256GCM
+		},
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -282,6 +288,22 @@ func TestNewRequiresDecryptionDependencyWhenIDTokenEncryptionConfigured(t *testi
 	deps.Decryption = fakeDecrypter{}
 	if _, err := client.New(cfg, deps); err != nil {
 		t.Fatalf("New(id_token encryption fully configured): %v", err)
+	}
+}
+
+func TestNewRequiresDecryptionDependencyWhenUserInfoEncryptionConfigured(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Algorithms.UserInfoKeyManagement = fapi.RSAOAEP256
+	cfg.Algorithms.UserInfoContentEncryption = fapi.A256GCM
+
+	deps := validDependencies(t)
+	if _, err := client.New(cfg, deps); err == nil {
+		t.Fatalf("New(userinfo encryption configured, no Decryption dependency) = nil error, want error")
+	}
+
+	deps.Decryption = fakeDecrypter{}
+	if _, err := client.New(cfg, deps); err != nil {
+		t.Fatalf("New(userinfo encryption fully configured): %v", err)
 	}
 }
 

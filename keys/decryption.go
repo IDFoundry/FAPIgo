@@ -22,6 +22,10 @@ const (
 	// IDTokenDecryption unwraps the content-encryption key of an
 	// encrypted ID token (OIDC Core §10.2).
 	IDTokenDecryption
+
+	// UserInfoDecryption unwraps the content-encryption key of a
+	// signed-then-encrypted UserInfo response (OIDC Core §5.3.2).
+	UserInfoDecryption
 )
 
 // UnwrapRequest describes one content-encryption key to recover.

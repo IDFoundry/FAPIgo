@@ -80,9 +80,26 @@ type Algorithms struct {
 	// (or discovered) to sign an issuer-verified JWS with, for
 	// VerifyIssuerJWS — most commonly the inner JWS of a signed (or
 	// signed-then-encrypted) UserInfo response (OIDC Core §5.3.2).
-	// Required only to call VerifyIssuerJWS; a client that never
-	// verifies such an artifact can leave this zero.
+	// Required to call VerifyIssuerJWS or FetchUserInfo; a client that
+	// never verifies such an artifact can leave this zero.
 	UserInfo fapi.SignatureAlgorithm
+
+	// UserInfoKeyManagement, if set, declares that FetchUserInfo expects
+	// (and can decrypt) a signed-then-encrypted nested JWT UserInfo
+	// response (OIDC Core §5.3.2), using this key-management algorithm.
+	// Zero (the default) means FetchUserInfo expects a plain JSON or
+	// signed-only response; a response arriving encrypted when this is
+	// zero — or unencrypted when this is set — is rejected outright, the
+	// same downgrade protection Algorithms.IDTokenKeyManagement applies.
+	// Whatever value is set here reflects a registration this client
+	// made with the authorization server out of band, and Dependencies
+	// must supply a matching keys.Decrypter when it is non-zero.
+	UserInfoKeyManagement fapi.KeyManagementAlgorithm
+
+	// UserInfoContentEncryption is the content-encryption algorithm
+	// paired with UserInfoKeyManagement. Required together: both zero,
+	// or both set.
+	UserInfoContentEncryption fapi.ContentEncryptionAlgorithm
 }
 
 // Endpoints are the authorization server's endpoint URLs this client
@@ -91,6 +108,14 @@ type Endpoints struct {
 	Authorization              fapi.URL
 	Token                      fapi.URL
 	PushedAuthorizationRequest fapi.URL
+
+	// UserInfo is the server's UserInfo Endpoint (OpenID Connect
+	// Discovery 1.0 §3), if this client calls FetchUserInfo. OPTIONAL —
+	// zero means FetchUserInfo is unavailable (it returns an error
+	// rather than assuming any particular URL). Populate it from
+	// DiscoveredMetadata.UserinfoEndpoint, or a deployment's own
+	// out-of-band knowledge of the server.
+	UserInfo fapi.URL
 }
 
 // Limits bounds the lifetimes and clock tolerances this client enforces

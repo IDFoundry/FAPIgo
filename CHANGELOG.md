@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.9.2](https://github.com/IDFoundry/FAPIgo/compare/v0.9.1...v0.9.2) (2026-08-24)
+
+
+### Bug Fixes
+
+* resolve remaining SonarCloud findings (empty-function comments, param grouping, duplicate literals) ([61a0ad3](https://github.com/IDFoundry/FAPIgo/commit/61a0ad3b7130b1d5cbcc839a394d1d4d0e202e3e))
+* resolve the new_coverage regression from the S1186/S107/S1192 fixes ([85139c1](https://github.com/IDFoundry/FAPIgo/commit/85139c1ec45c6c3d7fc8bb9bfc17985e73e1e72e))
+* revert the go:S1186 marker-method changes entirely ([b90c7c1](https://github.com/IDFoundry/FAPIgo/commit/b90c7c1b73e8b855d45eaae9e87f60d9e3903454))
+* switch the go:S1186 marker-method fix to NOSONAR, resolving the coverage gate for good ([92f7149](https://github.com/IDFoundry/FAPIgo/commit/92f7149fd318956bcfe4749956c97331416f0bd0))
+
 ## [0.9.1](https://github.com/IDFoundry/FAPIgo/compare/v0.9.0...v0.9.1) (2026-08-24)
 
 

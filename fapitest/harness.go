@@ -226,6 +226,10 @@ func New(t *testing.T, cfg Config) *Harness {
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 
+	userInfoURL, err := fapi.ParseEndpointURL(as.ts.URL+"/userinfo", fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("fapitest: ParseEndpointURL(userinfo): %v", err)
+	}
 	clientCfg := client.Config{
 		Issuer:      issuer,
 		ClientID:    ClientID,
@@ -234,6 +238,7 @@ func New(t *testing.T, cfg Config) *Harness {
 			Authorization:              srvCfg.Endpoints.Authorization,
 			Token:                      srvCfg.Endpoints.Token,
 			PushedAuthorizationRequest: srvCfg.Endpoints.PushedAuthorizationRequest,
+			UserInfo:                   userInfoURL,
 		},
 		Profile: clientProfile,
 		Algorithms: client.Algorithms{
@@ -294,6 +299,7 @@ func New(t *testing.T, cfg Config) *Harness {
 	if err != nil {
 		t.Fatalf("fapitest: resource.NewVerifier: %v", err)
 	}
+	as.resource = rs
 
 	return &Harness{
 		t: t, Client: c, Resource: rs, Clock: clock, authServer: as, httpClient: httpClient,

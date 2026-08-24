@@ -113,13 +113,13 @@ func safeDialContext(base *net.Dialer, allowLoopback bool) func(context.Context,
 var extraBlockedCIDRs = func() []*net.IPNet {
 	cidrs := []string{
 		"0.0.0.0/8",       // RFC 1122 "this network" (IsUnspecified only catches the exact 0.0.0.0)
-		"100.64.0.0/10",   // RFC 6598 CGNAT // NOSONAR: go:S1313 — this is the SSRF blocklist itself: hardcoding the range is what blocks it, not a fetch target
-		"192.0.0.0/24",    // RFC 6890 IETF protocol assignments // NOSONAR: go:S1313 — see 100.64.0.0/10 above
+		"100.64.0.0/10",   // NOSONAR: go:S1313 — this is the SSRF blocklist itself: hardcoding the range is what blocks it, not a fetch target. RFC 6598 CGNAT.
+		"192.0.0.0/24",    // NOSONAR: go:S1313 — see 100.64.0.0/10 above. RFC 6890 IETF protocol assignments.
 		"192.0.2.0/24",    // RFC 5737 TEST-NET-1 documentation
-		"198.18.0.0/15",   // RFC 2544 benchmarking // NOSONAR: go:S1313 — see 100.64.0.0/10 above
+		"198.18.0.0/15",   // NOSONAR: go:S1313 — see 100.64.0.0/10 above. RFC 2544 benchmarking.
 		"198.51.100.0/24", // RFC 5737 TEST-NET-2 documentation
 		"203.0.113.0/24",  // RFC 5737 TEST-NET-3 documentation
-		"240.0.0.0/4",     // RFC 1112 reserved (includes 255.255.255.255) // NOSONAR: go:S1313 — see 100.64.0.0/10 above
+		"240.0.0.0/4",     // NOSONAR: go:S1313 — see 100.64.0.0/10 above. RFC 1112 reserved (includes 255.255.255.255).
 	}
 	out := make([]*net.IPNet, 0, len(cidrs))
 	for _, c := range cidrs {

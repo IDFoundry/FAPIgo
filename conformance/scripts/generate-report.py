@@ -48,6 +48,9 @@ TEST_LINE_RE = re.compile(r"^(?:\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} )?Test \[(\d
 AS_SUITES = ["baseline", "message-signing"]
 RP_SUITES = ["baseline", "message-signing"]
 
+# Markdown separator row for a 2-column table (Module/Result).
+TABLE_SEPARATOR_2COL = "|---|---|"
+
 
 def strip_ansi(s):
     return ANSI_RE.sub("", s)
@@ -90,7 +93,7 @@ def parse_as_log(log_path):
         m = TEST_LINE_RE.match(line)
         if not m:
             continue
-        plan_n, mod_n, test_name, module_id, status, result = m.groups()
+        _, _, test_name, module_id, status, result = m.groups()
         # The printed name carries the variant inline, e.g.
         # "...-happy-flow[fapi_request_method=unsigned][...]" - strip
         # it back to the bare test module name so it matches
@@ -246,7 +249,7 @@ def render_rp_suite(md, name, workdir, results):
     not_passed = [m for m in modules if m["result"] != "PASSED"]
     if not_passed:
         md.append("| Module | Result |")
-        md.append("|---|---|")
+        md.append(TABLE_SEPARATOR_2COL)
         for m in not_passed:
             md.append(f"| `{m['test_name']}` | {m['detail']} |")
         md.append("")
@@ -255,7 +258,7 @@ def render_rp_suite(md, name, workdir, results):
 
     md.append(f"<details><summary>All {len(modules)} modules run</summary>\n")
     md.append("| Module | Result |")
-    md.append("|---|---|")
+    md.append(TABLE_SEPARATOR_2COL)
     for m in modules:
         md.append(f"| `{m['test_name']}` | {m['detail']} |")
     md.append("")
@@ -290,12 +293,15 @@ def main():
     md = []
     md.append("# Conformance report\n")
     generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    where = f"`{commit}`" + (f" on `{branch}`" if branch else "") if commit else "(commit unknown)"
+    if commit:
+        where = f"`{commit}`" + (f" on `{branch}`" if branch else "")
+    else:
+        where = "(commit unknown)"
     md.append(f"Generated {generated} by `conformance/scripts/run-all.sh`, FAPIgo at {where}.\n")
 
     md.append("## Summary\n")
     md.append("| Suite | Result |")
-    md.append("|---|---|")
+    md.append(TABLE_SEPARATOR_2COL)
     for label in ["AS baseline", "AS message-signing", "RP baseline", "RP message-signing"]:
         md.append(f"| {label} | {results.get(label, 'DID NOT RUN')} |")
     md.append("")

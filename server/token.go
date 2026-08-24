@@ -167,7 +167,9 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		if err != nil {
 			return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to resolve identity claims", err))
 		}
-		idToken, err := s.issueIDToken(ctx, client, redeemed.Subject, redeemed.Nonce, redeemed.AuthTime, redeemed.ACR, redeemed.AMR, idTokenClaims)
+		idToken, err := s.issueIDToken(ctx, client, identityAssertion{
+			Subject: redeemed.Subject, AuthTime: redeemed.AuthTime, ACR: redeemed.ACR, AMR: redeemed.AMR, TokenClaims: idTokenClaims,
+		}, redeemed.Nonce)
 		if err != nil {
 			return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to issue ID token", err))
 		}
@@ -176,7 +178,9 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	}
 
 	if containsScope(redeemed.Scope, "offline_access") {
-		refreshToken, err := s.issueRefreshToken(ctx, client.ID(), redeemed.Subject, redeemed.Scope, thumbprint, redeemed.AuthTime, redeemed.ACR, redeemed.AMR, redeemed.TokenClaims, redeemed.RequestedIDTokenClaims, redeemed.RequestedUserinfoClaims)
+		refreshToken, err := s.issueRefreshToken(ctx, client.ID(), identityAssertion{
+			Subject: redeemed.Subject, AuthTime: redeemed.AuthTime, ACR: redeemed.ACR, AMR: redeemed.AMR, TokenClaims: redeemed.TokenClaims,
+		}, redeemed.Scope, thumbprint, redeemed.RequestedIDTokenClaims, redeemed.RequestedUserinfoClaims)
 		if err != nil {
 			return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to issue refresh token", err))
 		}
@@ -265,17 +269,32 @@ func withRequestedUserinfoClaims(names []string, base map[string]json.RawMessage
 	return merged, nil
 }
 
-func (s *Server) issueIDToken(ctx context.Context, client storage.RegisteredClient, subject, nonce string, authTime time.Time, acr string, amr []string, tokenClaims map[string]json.RawMessage) (string, error) {
+// identityAssertion is the subset of a redeemed authorization code or
+// refresh token — subject, authentication context and resolved token
+// claims — that issueIDToken and issueRefreshToken both need. Grouped
+// into one struct so neither function's own parameter list is
+// positional soup mixing several same-typed values (two string fields,
+// a []string) where a caller could transpose ACR and a scope element
+// without the compiler ever catching it.
+type identityAssertion struct {
+	Subject     string
+	AuthTime    time.Time
+	ACR         string
+	AMR         []string
+	TokenClaims map[string]json.RawMessage
+}
+
+func (s *Server) issueIDToken(ctx context.Context, client storage.RegisteredClient, id identityAssertion, nonce string) (string, error) {
 	signer, kid, err := s.newSigner(ctx, keys.IDTokenSigning, s.cfg.Algorithms.IDToken)
 	if err != nil {
 		return "", err
 	}
 	signedJWT, err := token.IssueIDToken(token.IDTokenParams{
 		Signer: signer, Algorithm: s.cfg.Algorithms.IDToken, KeyID: kid,
-		Issuer: s.cfg.Issuer.String(), Subject: subject, Audience: client.ID().String(),
-		Nonce: nonce, AuthTime: authTime, ACR: acr, AMR: amr,
+		Issuer: s.cfg.Issuer.String(), Subject: id.Subject, Audience: client.ID().String(),
+		Nonce: nonce, AuthTime: id.AuthTime, ACR: id.ACR, AMR: id.AMR,
 		Now: s.deps.Clock.Now(), Lifetime: s.cfg.Limits.IDTokenLifetime,
-		Parameters: tokenClaims,
+		Parameters: id.TokenClaims,
 	})
 	if err != nil {
 		return "", err
@@ -290,7 +309,7 @@ func (s *Server) issueIDToken(ctx context.Context, client storage.RegisteredClie
 
 // issueRefreshToken generates and persists a new refresh token, returning
 // its raw value.
-func (s *Server) issueRefreshToken(ctx context.Context, clientID fapi.ClientID, subject string, scope []string, thumbprint string, authTime time.Time, acr string, amr []string, tokenClaims map[string]json.RawMessage, requestedIDTokenClaims, requestedUserinfoClaims []string) (string, error) {
+func (s *Server) issueRefreshToken(ctx context.Context, clientID fapi.ClientID, id identityAssertion, scope []string, thumbprint string, requestedIDTokenClaims, requestedUserinfoClaims []string) (string, error) {
 	raw, err := generateRefreshToken(s.deps.Random)
 	if err != nil {
 		return "", err
@@ -299,13 +318,13 @@ func (s *Server) issueRefreshToken(ctx context.Context, clientID fapi.ClientID, 
 	if err := s.deps.Grants.CreateRefreshToken(ctx, storage.NewRefreshToken{
 		TokenHash:               sha256.Sum256([]byte(raw)),
 		ClientID:                clientID,
-		Subject:                 subject,
+		Subject:                 id.Subject,
 		Scope:                   scope,
 		Thumbprint:              thumbprint,
-		AuthTime:                authTime,
-		ACR:                     acr,
-		AMR:                     amr,
-		TokenClaims:             tokenClaims,
+		AuthTime:                id.AuthTime,
+		ACR:                     id.ACR,
+		AMR:                     id.AMR,
+		TokenClaims:             id.TokenClaims,
 		RequestedIDTokenClaims:  requestedIDTokenClaims,
 		RequestedUserinfoClaims: requestedUserinfoClaims,
 		ExpiresAt:               now.Add(s.cfg.Limits.RefreshTokenLifetime),

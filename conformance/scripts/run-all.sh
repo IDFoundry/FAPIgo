@@ -89,11 +89,13 @@ OVERALL_CLEAN=true
 # associative array (declare -A needs bash 4+; the stock /bin/bash on
 # macOS is 3.2), so results are looked up by grepping this file instead.
 record_result() {
-	printf '%s|%s\n' "$1" "$2" >>"$RESULTS_FILE"
+	local name="$1" line="$2"
+	printf '%s|%s\n' "$name" "$line" >>"$RESULTS_FILE"
 }
 
 lookup_result() {
-	grep -F "$1|" "$RESULTS_FILE" 2>/dev/null | tail -1 | cut -d'|' -f2- || true
+	local name="$1"
+	grep -F "$name|" "$RESULTS_FILE" 2>/dev/null | tail -1 | cut -d'|' -f2- || true
 }
 
 cleanup() {

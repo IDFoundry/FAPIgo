@@ -293,7 +293,7 @@ def main():
                         seen_ever.add(instance_id)
                         active.add(instance_id)
 
-        for instance_id in list(active):
+        for instance_id in list(active):  # NOSONAR(S7504) — active.discard() below mutates this set mid-loop; iterating the set directly raises RuntimeError
             try:
                 info = client.get_json(f"/api/info/{instance_id}")
             except Exception:
@@ -376,7 +376,6 @@ def main():
                         continue
                     if key not in pending_placeholders:
                         pending_placeholders[key] = time.monotonic()
-                        continue
 
         now = time.monotonic()
         due = [key for key, first_seen in pending_placeholders.items() if now - first_seen >= PLACEHOLDER_GRACE_SECONDS]

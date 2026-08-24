@@ -62,6 +62,23 @@ var profiles = []profile{
 	{name: "message-signing", alias: "gofapi-msgsign", issuerHost: "conformance-as-message-signing", keyLabel1: "msgsign-client1", keyLabel2: "msgsign-client2"},
 }
 
+// conformanceKeyLabelPrefix prefixes every kid/key-label this tool
+// generates, distinguishing them from any other key a shared suite
+// instance or AS deployment might hold.
+const conformanceKeyLabelPrefix = "gofapi-conformance-"
+
+// fullScope is every scope this tool's clients register for — the
+// suite plan needs it for client, client2 and the PS256-only override
+// client alike.
+const fullScope = "openid accounts offline_access"
+
+// issuerURL builds one of this profile's AS URLs — every plan/config
+// field that names one shares the same host:8443 base, just a
+// different path.
+func issuerURL(host, path string) string {
+	return "https://" + host + ":8443" + path
+}
+
 func main() {
 	dir, err := oidfConfigDir()
 	if err != nil {
@@ -83,7 +100,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("%s: generate client2 key: %v", p.name, err)
 		}
-		privRS256, pubRS256, err := generatePS256Key("gofapi-conformance-" + p.keyLabel1 + "-rs256-key1")
+		privRS256, pubRS256, err := generatePS256Key(conformanceKeyLabelPrefix + p.keyLabel1 + "-rs256-key1")
 		if err != nil {
 			log.Fatalf("%s: generate RS256 test-client key: %v", p.name, err)
 		}
@@ -160,7 +177,7 @@ func generateKey(label string) (private, public jwks, err error) {
 	if err != nil {
 		return jwks{}, jwks{}, err
 	}
-	kid := "gofapi-conformance-" + label + "-key1"
+	kid := conformanceKeyLabelPrefix + label + "-key1"
 	x := b64(priv.X.FillBytes(make([]byte, 32)))
 	y := b64(priv.Y.FillBytes(make([]byte, 32)))
 	d := b64(priv.D.FillBytes(make([]byte, 32)))
@@ -302,7 +319,7 @@ func patchConformanceASConfig(path string, p profile, pub1, pub2, pubRS256 jwks)
 		}
 		clients[2]["jwks"] = encoded
 	} else {
-		rs256ClientID = "gofapi-conformance-" + p.keyLabel1 + "-rs256-client"
+		rs256ClientID = conformanceKeyLabelPrefix + p.keyLabel1 + "-rs256-client"
 		callback := "https://localhost.emobix.co.uk:8443/test/a/" + p.alias + "/callback"
 		newClient := map[string]any{
 			"id":                         rs256ClientID,
@@ -398,7 +415,7 @@ type overrideEntry struct {
 }
 
 func writePlanConfig(path string, p profile, clientIDs [2]string, rs256ClientID string, priv1, priv2, privRS256 jwks) error {
-	authorizeURL := "https://" + p.issuerHost + ":8443/authorize*"
+	authorizeURL := issuerURL(p.issuerHost, "/authorize*")
 	trueVal := true
 	one := 1
 
@@ -422,14 +439,14 @@ func writePlanConfig(path string, p profile, clientIDs [2]string, rs256ClientID 
 	// client1/client2 exactly as before; nothing else ever sees this
 	// third client or its key.
 	rs256Client := &planClient{
-		ClientID: rs256ClientID, Scope: "openid accounts offline_access", JWKS: privRS256, DPoPSigningAlg: "ES256",
+		ClientID: rs256ClientID, Scope: fullScope, JWKS: privRS256, DPoPSigningAlg: "ES256",
 	}
 
 	cfg := planConfig{Alias: p.alias}
-	cfg.Server.DiscoveryURL = "https://" + p.issuerHost + ":8443/.well-known/openid-configuration"
-	cfg.Client = planClient{ClientID: clientIDs[0], Scope: "openid accounts offline_access", JWKS: priv1, DPoPSigningAlg: "ES256"}
-	cfg.Client2 = planClient{ClientID: clientIDs[1], Scope: "openid accounts offline_access", JWKS: priv2, DPoPSigningAlg: "ES256"}
-	cfg.Resource.ResourceURL = "https://" + p.issuerHost + ":8443/accounts"
+	cfg.Server.DiscoveryURL = issuerURL(p.issuerHost, "/.well-known/openid-configuration")
+	cfg.Client = planClient{ClientID: clientIDs[0], Scope: fullScope, JWKS: priv1, DPoPSigningAlg: "ES256"}
+	cfg.Client2 = planClient{ClientID: clientIDs[1], Scope: fullScope, JWKS: priv2, DPoPSigningAlg: "ES256"}
+	cfg.Resource.ResourceURL = issuerURL(p.issuerHost, "/accounts")
 	cfg.Browser = []browserBlock{consentBlock}
 	cfg.Override = map[string]overrideEntry{
 		"fapi2-security-profile-final-user-rejects-authentication": {

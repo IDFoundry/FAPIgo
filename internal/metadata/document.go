@@ -54,8 +54,8 @@ type Document struct {
 	AuthorizationResponseIssParameterSupported bool `json:"authorization_response_iss_parameter_supported,omitempty"`
 
 	// UserinfoEndpoint is OPTIONAL per OpenID Connect Discovery 1.0 §3 —
-	// client.Discover surfaces it as DiscoveredMetadata.UserinfoEndpoint
-	// so a caller can wire it into Config.Endpoints.UserInfo for
+	// client.Discover surfaces it as
+	// DiscoveredMetadata.Endpoints.UserInfo, ready to use with
 	// client.FetchUserInfo, rather than hand-fetching discovery a second
 	// time just for this one field.
 	UserinfoEndpoint string `json:"userinfo_endpoint,omitempty"`

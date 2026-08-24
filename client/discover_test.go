@@ -95,8 +95,8 @@ func TestDiscoverAcceptsValidDocumentAtRoot(t *testing.T) {
 	if md.JWKSURI.String() != ts.URL+"/jwks" {
 		t.Errorf("JWKSURI = %q", md.JWKSURI.String())
 	}
-	if md.UserinfoEndpoint.String() != ts.URL+"/userinfo" {
-		t.Errorf("UserinfoEndpoint = %q", md.UserinfoEndpoint.String())
+	if md.Endpoints.UserInfo.String() != ts.URL+"/userinfo" {
+		t.Errorf("Endpoints.UserInfo = %q", md.Endpoints.UserInfo.String())
 	}
 	if len(md.IDTokenAlgorithms) != 1 || md.IDTokenAlgorithms[0] != fapi.ES256 {
 		t.Errorf("IDTokenAlgorithms = %v, want [ES256] (RS256 is unsupported and must be filtered)", md.IDTokenAlgorithms)
@@ -148,8 +148,9 @@ func TestDiscoverAppendsWellKnownPathAfterIssuerPath(t *testing.T) {
 
 // TestDiscoverOmitsUserinfoEndpointWhenAbsent covers the common case —
 // a server with no UserInfo Endpoint, or one that just doesn't
-// advertise it — Discover must succeed with a zero UserinfoEndpoint,
-// not fail; it's OPTIONAL per OpenID Connect Discovery 1.0 §3.
+// advertise it — Discover must succeed with a zero
+// Endpoints.UserInfo, not fail; it's OPTIONAL per OpenID Connect
+// Discovery 1.0 §3.
 func TestDiscoverOmitsUserinfoEndpointWhenAbsent(t *testing.T) {
 	var ts *httptest.Server
 	ts = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -173,15 +174,15 @@ func TestDiscoverOmitsUserinfoEndpointWhenAbsent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
-	if !md.UserinfoEndpoint.IsZero() {
-		t.Fatalf("UserinfoEndpoint = %q, want zero", md.UserinfoEndpoint.String())
+	if !md.Endpoints.UserInfo.IsZero() {
+		t.Fatalf("Endpoints.UserInfo = %q, want zero", md.Endpoints.UserInfo.String())
 	}
 }
 
 // TestDiscoverRejectsMalformedUserinfoEndpoint covers the other side:
 // present but unparsable must still fail Discover, the same as any
 // other advertised endpoint — silently dropping a malformed URL would
-// leave a caller who does read UserinfoEndpoint none the wiser that
+// leave a caller who does read Endpoints.UserInfo none the wiser that
 // the server's own metadata was broken.
 func TestDiscoverRejectsMalformedUserinfoEndpoint(t *testing.T) {
 	var ts *httptest.Server

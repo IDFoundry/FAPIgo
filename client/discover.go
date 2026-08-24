@@ -31,16 +31,18 @@ const discoveryContentType = "application/json"
 // treated as an error). Choosing which one to actually use for Config is
 // a caller decision.
 type DiscoveredMetadata struct {
+	// Endpoints.UserInfo is the server's advertised UserInfo Endpoint
+	// (OpenID Connect Discovery 1.0 §3), if any — OPTIONAL, so a zero
+	// fapi.URL means the server didn't advertise one; FetchUserInfo is
+	// then unavailable until a caller sets it from its own out-of-band
+	// knowledge of the server. Populated here, alongside every other
+	// endpoint, precisely so assigning this whole struct to Config's own
+	// Endpoints field (the pattern every other endpoint already expects)
+	// is enough on its own — a caller doesn't need to separately notice
+	// and hand-copy a UserInfo-specific field the way an earlier version
+	// of this struct required.
 	Endpoints Endpoints
 	JWKSURI   fapi.URL
-
-	// UserinfoEndpoint is the server's advertised UserInfo Endpoint
-	// (OpenID Connect Discovery 1.0 §3), if any — OPTIONAL, so a zero
-	// fapi.URL means the server didn't advertise one. Copy it into
-	// Config.Endpoints.UserInfo to enable FetchUserInfo; Discover itself
-	// only parses it here so a caller doesn't have to fetch and parse
-	// discovery a second time just for this one field.
-	UserinfoEndpoint fapi.URL
 
 	IDTokenAlgorithms       []fapi.SignatureAlgorithm
 	RequestObjectAlgorithms []fapi.SignatureAlgorithm
@@ -143,9 +145,9 @@ func Discover(ctx context.Context, fetcher *fapihttp.Client, issuer fapi.URL, op
 			Authorization:              authz,
 			Token:                      tok,
 			PushedAuthorizationRequest: par,
+			UserInfo:                   userinfo,
 		},
 		JWKSURI:                           jwksURI,
-		UserinfoEndpoint:                  userinfo,
 		IDTokenAlgorithms:                 supportedAlgorithms(doc.IDTokenSigningAlgValuesSupported),
 		RequestObjectAlgorithms:           supportedAlgorithms(doc.RequestObjectSigningAlgValuesSupported),
 		JARMAlgorithms:                    supportedAlgorithms(doc.AuthorizationSigningAlgValuesSupported),

@@ -12,8 +12,7 @@ type CompletionSuccess struct {
 	Tokens TokenSet
 }
 
-func (CompletionSuccess) completionResult() {
-	// marker method — see CompletionResult's own doc comment.
+func (CompletionSuccess) completionResult() { /* marker method — see CompletionResult's own doc comment. */
 }
 
 // CompletionDenied means the authorization server (or the resource
@@ -23,8 +22,7 @@ type CompletionDenied struct {
 	Description string
 }
 
-func (CompletionDenied) completionResult() {
-	// marker method — see CompletionResult's own doc comment.
+func (CompletionDenied) completionResult() { /* marker method — see CompletionResult's own doc comment. */
 }
 
 // CompleteAuthorization validates cb via HandleAuthorizationResponse and,

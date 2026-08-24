@@ -30,8 +30,7 @@ type AuthorizationRedirect struct {
 	destination fapi.URL
 }
 
-func (AuthorizationRedirect) authorizationResult() {
-	// marker method — see AuthorizationResult's own doc comment.
+func (AuthorizationRedirect) authorizationResult() { /* marker method — see AuthorizationResult's own doc comment. */
 }
 
 // Destination returns the complete, engine-assembled redirect target.
@@ -44,8 +43,7 @@ type AuthorizationLocalError struct {
 	Error *Error
 }
 
-func (AuthorizationLocalError) authorizationResult() {
-	// marker method — see AuthorizationResult's own doc comment.
+func (AuthorizationLocalError) authorizationResult() { /* marker method — see AuthorizationResult's own doc comment. */
 }
 
 // CompleteAuthorizationRequest is the input to Server.CompleteAuthorization.

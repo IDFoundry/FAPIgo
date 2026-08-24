@@ -12,8 +12,6 @@ import (
 	"github.com/idfoundry/fapigo/server"
 )
 
-const contentTypeJSON = "application/json"
-
 // selfIssuerKeySource resolves this same process's own access-token
 // signing key directly from its in-memory keyManager, rather than
 // looping the resource verifier's key lookup back over HTTP to this
@@ -63,7 +61,7 @@ func resourceHandler(verifier *fapires.Verifier, resourceURL *url.URL) http.Hand
 			writeResourceError(w, err)
 			return
 		}
-		w.Header().Set("Content-Type", contentTypeJSON)
+		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"subject":   authCtx.Subject,
 			"client_id": authCtx.ClientID,
@@ -140,7 +138,7 @@ func userinfoHandler(verifier *fapires.Verifier, userinfoURL *url.URL, identityC
 		}
 		body["sub"] = authCtx.Subject
 
-		w.Header().Set("Content-Type", contentTypeJSON)
+		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(body)
 	}
 }
@@ -160,7 +158,7 @@ func writeResourceError(w http.ResponseWriter, err error) {
 // verifier).
 func writeResourceErrorRaw(w http.ResponseWriter, status int, code, description string) {
 	w.Header().Set("WWW-Authenticate", `DPoP error="`+code+`"`)
-	w.Header().Set("Content-Type", contentTypeJSON)
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"error":             code,

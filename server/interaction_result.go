@@ -15,8 +15,7 @@ type authorizeResult struct {
 	grant   GrantedAuthorization
 }
 
-func (authorizeResult) interactionResult() {
-	// marker method — see InteractionResult's own doc comment.
+func (authorizeResult) interactionResult() { /* marker method — see InteractionResult's own doc comment. */
 }
 
 // Authorize records that subject authenticated (per auth) and the
@@ -29,8 +28,7 @@ type denyResult struct {
 	reason string
 }
 
-func (denyResult) interactionResult() {
-	// marker method — see InteractionResult's own doc comment.
+func (denyResult) interactionResult() { /* marker method — see InteractionResult's own doc comment. */
 }
 
 // Deny records that the resource owner (or the application, on their
@@ -45,8 +43,7 @@ type authenticationFailedResult struct {
 	reason string
 }
 
-func (authenticationFailedResult) interactionResult() {
-	// marker method — see InteractionResult's own doc comment.
+func (authenticationFailedResult) interactionResult() { /* marker method — see InteractionResult's own doc comment. */
 }
 
 // AuthenticationFailed records that the resource owner could not be

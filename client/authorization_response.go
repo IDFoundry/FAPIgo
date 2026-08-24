@@ -46,8 +46,7 @@ type CallbackSuccess struct {
 	Response ValidatedAuthorizationResponse
 }
 
-func (CallbackSuccess) callbackResult() {
-	// marker method — see CallbackResult's own doc comment.
+func (CallbackSuccess) callbackResult() { /* marker method — see CallbackResult's own doc comment. */
 }
 
 // CallbackDenied means the authorization server (or the resource owner,
@@ -59,9 +58,7 @@ type CallbackDenied struct {
 	Description string
 }
 
-func (CallbackDenied) callbackResult() {
-	// marker method — see CallbackResult's own doc comment.
-}
+func (CallbackDenied) callbackResult() { /* marker method — see CallbackResult's own doc comment. */ }
 
 // HandleAuthorizationResponse validates an authorization callback: the
 // "iss" parameter (RFC 9207 §2.4) for a plain-mode response — checked

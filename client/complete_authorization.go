@@ -12,7 +12,7 @@ type CompletionSuccess struct {
 	Tokens TokenSet
 }
 
-func (CompletionSuccess) completionResult() {} // NOSONAR: go:S1186 — marker method, see CompletionResult's own doc comment
+func (CompletionSuccess) completionResult() {}
 
 // CompletionDenied means the authorization server (or the resource
 // owner, via the authorization server) declined the request.
@@ -21,7 +21,7 @@ type CompletionDenied struct {
 	Description string
 }
 
-func (CompletionDenied) completionResult() {} // NOSONAR: go:S1186 — marker method, see CompletionResult's own doc comment
+func (CompletionDenied) completionResult() {}
 
 // CompleteAuthorization validates cb via HandleAuthorizationResponse and,
 // on success, immediately exchanges the resulting code via ExchangeCode

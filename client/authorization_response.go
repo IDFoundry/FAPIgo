@@ -46,7 +46,7 @@ type CallbackSuccess struct {
 	Response ValidatedAuthorizationResponse
 }
 
-func (CallbackSuccess) callbackResult() {} // NOSONAR: go:S1186 — marker method, see CallbackResult's own doc comment
+func (CallbackSuccess) callbackResult() {}
 
 // CallbackDenied means the authorization server (or the resource owner,
 // via the authorization server) declined the request. Code and
@@ -57,7 +57,7 @@ type CallbackDenied struct {
 	Description string
 }
 
-func (CallbackDenied) callbackResult() {} // NOSONAR: go:S1186 — marker method, see CallbackResult's own doc comment
+func (CallbackDenied) callbackResult() {}
 
 // HandleAuthorizationResponse validates an authorization callback: the
 // "iss" parameter (RFC 9207 §2.4) for a plain-mode response — checked

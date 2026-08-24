@@ -30,7 +30,7 @@ type AuthorizationRedirect struct {
 	destination fapi.URL
 }
 
-func (AuthorizationRedirect) authorizationResult() {} // NOSONAR: go:S1186 — marker method, see AuthorizationResult's own doc comment
+func (AuthorizationRedirect) authorizationResult() {}
 
 // Destination returns the complete, engine-assembled redirect target.
 func (r AuthorizationRedirect) Destination() fapi.URL { return r.destination }
@@ -42,7 +42,7 @@ type AuthorizationLocalError struct {
 	Error *Error
 }
 
-func (AuthorizationLocalError) authorizationResult() {} // NOSONAR: go:S1186 — marker method, see AuthorizationResult's own doc comment
+func (AuthorizationLocalError) authorizationResult() {}
 
 // CompleteAuthorizationRequest is the input to Server.CompleteAuthorization.
 type CompleteAuthorizationRequest struct {

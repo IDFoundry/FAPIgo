@@ -112,9 +112,9 @@ type Endpoints struct {
 	// UserInfo is the server's UserInfo Endpoint (OpenID Connect
 	// Discovery 1.0 §3), if this client calls FetchUserInfo. OPTIONAL —
 	// zero means FetchUserInfo is unavailable (it returns an error
-	// rather than assuming any particular URL). Populate it from
-	// DiscoveredMetadata.UserinfoEndpoint, or a deployment's own
-	// out-of-band knowledge of the server.
+	// rather than assuming any particular URL). Discover populates this
+	// automatically when the server advertises one; otherwise, set it
+	// from a deployment's own out-of-band knowledge of the server.
 	UserInfo fapi.URL
 }
 

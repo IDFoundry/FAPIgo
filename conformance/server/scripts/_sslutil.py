@@ -35,6 +35,14 @@ def local_only_ssl_context(host):
 
 
 def _context(verify):
-    ctx = ssl.create_default_context() if verify else ssl._create_unverified_context()
+    if verify:
+        ctx = ssl.create_default_context()
+    else:
+        # NOSONAR: python:S5527 — only reached for a target that
+        # local_only_ssl_context's own caller-side check already
+        # confirmed resolves entirely to loopback; see that function's
+        # own doc comment for why this is a deliberate local-testing
+        # accommodation, not a blanket bypass.
+        ctx = ssl._create_unverified_context()
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
     return ctx

@@ -28,6 +28,11 @@ const (
 	// IDTokenVerification resolves a key to verify an OIDC ID token —
 	// used by client.
 	IDTokenVerification
+
+	// UserInfoVerification resolves a key to verify an issuer-signed
+	// artifact via client.VerifyIssuerJWS — most commonly a signed (or
+	// signed-then-encrypted) UserInfo response (OIDC Core §5.3.2).
+	UserInfoVerification
 )
 
 // IssuerKeyRequest describes which of an authorization server's signing

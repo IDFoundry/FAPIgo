@@ -311,22 +311,16 @@ func (c *Client) validateSignedIDToken(ctx context.Context, raw, nonce string) (
 		return token.ValidatedIDToken{}, newError(ErrorInvalidResponse, "malformed ID token", err)
 	}
 
-	candidates, err := c.deps.IssuerKeys.ResolveIssuerKeys(ctx, keys.IssuerKeyRequest{
-		Issuer: c.cfg.Issuer.String(), Purpose: keys.IDTokenVerification,
-		Algorithm: c.cfg.Algorithms.IDToken, KeyID: parsed.KeyID(),
-	})
-	if err != nil {
-		return token.ValidatedIDToken{}, newError(ErrorInternal, "failed to resolve issuer keys", err)
-	}
-	if len(candidates.Keys) == 0 {
-		return token.ValidatedIDToken{}, newError(ErrorInvalidResponse, "no matching issuer key for ID token", nil)
+	candidates, idErr := c.resolveIssuerKeyCandidates(ctx, keys.IDTokenVerification, c.cfg.Algorithms.IDToken, parsed.KeyID())
+	if idErr != nil {
+		return token.ValidatedIDToken{}, idErr
 	}
 
 	var (
 		validated token.ValidatedIDToken
 		verifyErr error
 	)
-	for _, candidate := range candidates.Keys {
+	for _, candidate := range candidates {
 		validated, verifyErr = parsed.Validate(candidate.PublicKey, token.IDTokenValidatePolicy{
 			ExpectedIssuer: c.cfg.Issuer.String(), ExpectedAudience: c.cfg.ClientID.String(),
 			Algorithm: c.cfg.Algorithms.IDToken, ExpectedNonce: nonce,
@@ -340,6 +334,26 @@ func (c *Client) validateSignedIDToken(ctx context.Context, raw, nonce string) (
 		return token.ValidatedIDToken{}, newError(ErrorInvalidResponse, "ID token verification failed", verifyErr)
 	}
 	return validated, nil
+}
+
+// resolveIssuerKeyCandidates resolves the authorization server's
+// candidate verification keys for purpose/algorithm/keyID — shared by
+// every check that verifies something the issuer signed (an ID token,
+// and, via VerifyIssuerJWS, any other issuer-signed artifact a caller
+// asks about), so "resolution failed" and "no matching key" error
+// handling lives in exactly one place rather than being re-derived per
+// caller.
+func (c *Client) resolveIssuerKeyCandidates(ctx context.Context, purpose keys.IssuerVerificationPurpose, algorithm fapi.SignatureAlgorithm, keyID string) ([]keys.IssuerKey, *Error) {
+	candidates, err := c.deps.IssuerKeys.ResolveIssuerKeys(ctx, keys.IssuerKeyRequest{
+		Issuer: c.cfg.Issuer.String(), Purpose: purpose, Algorithm: algorithm, KeyID: keyID,
+	})
+	if err != nil {
+		return nil, newError(ErrorInternal, "failed to resolve issuer keys", err)
+	}
+	if len(candidates.Keys) == 0 {
+		return nil, newError(ErrorInvalidResponse, "no matching issuer key", nil)
+	}
+	return candidates.Keys, nil
 }
 
 type rawTokenResponse struct {

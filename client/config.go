@@ -75,6 +75,14 @@ type Algorithms struct {
 	// meaning or Config's shape, the same reasoning
 	// jwe.EncryptRequest/DecryptRequest already apply.
 	IDTokenContentEncryption fapi.ContentEncryptionAlgorithm
+
+	// UserInfo is the algorithm the authorization server is registered
+	// (or discovered) to sign an issuer-verified JWS with, for
+	// VerifyIssuerJWS — most commonly the inner JWS of a signed (or
+	// signed-then-encrypted) UserInfo response (OIDC Core §5.3.2).
+	// Required only to call VerifyIssuerJWS; a client that never
+	// verifies such an artifact can leave this zero.
+	UserInfo fapi.SignatureAlgorithm
 }
 
 // Endpoints are the authorization server's endpoint URLs this client

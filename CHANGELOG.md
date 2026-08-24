@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.9.1](https://github.com/IDFoundry/FAPIgo/compare/v0.9.0...v0.9.1) (2026-08-24)
+
+
+### Bug Fixes
+
+* correct NOSONAR comment syntax for python:S4830/S5527 ([14f8643](https://github.com/IDFoundry/FAPIgo/commit/14f86434262fa0d9843a2f5a22785f63f517e42f))
+* pin TLS 1.2 minimum, deduplicate the SSL-context helper, exclude conformance/ Python from coverage gate ([229d8e5](https://github.com/IDFoundry/FAPIgo/commit/229d8e5c916bf730f678bb8b08e97c083861e5c1))
+* populate Endpoints.UserInfo from Discover, remove the redundant field ([589b1c1](https://github.com/IDFoundry/FAPIgo/commit/589b1c163ca236c1277d5dd3e671219c2a43295c))
+* resolve SonarCloud's 14 security-impact findings ([c1b0518](https://github.com/IDFoundry/FAPIgo/commit/c1b05188a0996f09a0c9671ccef94b78699d4dff))
+* suppress python:S5527 on the loopback-only unverified context ([f8a38fe](https://github.com/IDFoundry/FAPIgo/commit/f8a38fe7abbaa8b9986a94a9ae6214616cb7dbb7))
+
 ## [0.9.0](https://github.com/IDFoundry/FAPIgo/compare/v0.8.0...v0.9.0) (2026-08-24)
 
 

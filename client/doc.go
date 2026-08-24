@@ -10,13 +10,15 @@
 // objects and PAR submissions; verifying them is the server package's
 // responsibility.
 //
-// VerifyIssuerJWS is the one deliberate exception: a caller that reaches
-// a protected resource beyond token issuance (the UserInfo endpoint,
-// most commonly) inevitably needs to check something else the
-// authorization server signed, and the alternative — forcing that
-// caller to re-fetch and re-parse the issuer's JWKS on its own — is
-// exactly the unhardened, uncoordinated-cache duplication this package
-// exists to avoid.
+// VerifyIssuerJWS and ProtectedResource (via ResourceClient.Do) are the
+// deliberate exceptions: a caller that reaches a protected resource
+// beyond token issuance (the UserInfo endpoint, most commonly) needs
+// both to sign a DPoP proof bound to that request and to check
+// something else the authorization server signed, and the alternative —
+// forcing that caller to hand-roll its own DPoP proof construction and
+// to re-fetch and re-parse the issuer's JWKS on its own — is exactly
+// the unhardened, uncoordinated-cache duplication this package exists
+// to avoid.
 //
 // client must not import server. Where both roles need the same wire
 // format or cryptographic operation, that logic belongs in internal/ and

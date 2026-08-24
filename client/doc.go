@@ -10,6 +10,14 @@
 // objects and PAR submissions; verifying them is the server package's
 // responsibility.
 //
+// VerifyIssuerJWS is the one deliberate exception: a caller that reaches
+// a protected resource beyond token issuance (the UserInfo endpoint,
+// most commonly) inevitably needs to check something else the
+// authorization server signed, and the alternative — forcing that
+// caller to re-fetch and re-parse the issuer's JWKS on its own — is
+// exactly the unhardened, uncoordinated-cache duplication this package
+// exists to avoid.
+//
 // client must not import server. Where both roles need the same wire
 // format or cryptographic operation, that logic belongs in internal/ and
 // is used asymmetrically (e.g. internal/jarm verifies here, but signs in

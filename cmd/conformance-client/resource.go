@@ -13,19 +13,32 @@ import (
 	"github.com/idfoundry/fapigo/internal/dpop"
 )
 
+// dpopResourceClient bundles the fixed DPoP-signing configuration a
+// protected-resource call needs — everything but the request's own
+// target and access token — so callProtectedResource's and
+// doProtectedResourceRequest's own parameter lists aren't several
+// same-shaped values passed positionally (go:S107).
+type dpopResourceClient struct {
+	HTTP   *http.Client
+	Signer *ecdsa.PrivateKey
+	Alg    fapi.SignatureAlgorithm
+	Random io.Reader
+	Now    func() time.Time
+}
+
 // callProtectedResource presents accessToken to resourceURL with a DPoP
 // proof bound to it (RFC 9449 §7), retrying once with a fresh proof if
 // the resource server challenges for a nonce (RFC 9449 §8) — a resource
 // server's nonce is a separate value from the authorization server's
 // own, even though both use the same challenge/retry shape.
-func callProtectedResource(ctx context.Context, httpClient *http.Client, dpopSigner *ecdsa.PrivateKey, alg fapi.SignatureAlgorithm, random io.Reader, now func() time.Time, resourceURL, accessToken string) ([]byte, int, error) {
-	body, status, header, err := doProtectedResourceRequest(ctx, httpClient, dpopSigner, alg, random, now, resourceURL, accessToken, "")
+func (c dpopResourceClient) callProtectedResource(ctx context.Context, resourceURL, accessToken string) ([]byte, int, error) {
+	body, status, header, err := c.doProtectedResourceRequest(ctx, resourceURL, accessToken, "")
 	if err != nil {
 		return nil, 0, err
 	}
 	if status == http.StatusUnauthorized {
 		if nonce := header.Get("DPoP-Nonce"); nonce != "" {
-			body, status, _, err = doProtectedResourceRequest(ctx, httpClient, dpopSigner, alg, random, now, resourceURL, accessToken, nonce)
+			body, status, _, err = c.doProtectedResourceRequest(ctx, resourceURL, accessToken, nonce)
 			if err != nil {
 				return nil, 0, err
 			}
@@ -34,15 +47,15 @@ func callProtectedResource(ctx context.Context, httpClient *http.Client, dpopSig
 	return body, status, nil
 }
 
-func doProtectedResourceRequest(ctx context.Context, httpClient *http.Client, dpopSigner *ecdsa.PrivateKey, alg fapi.SignatureAlgorithm, random io.Reader, now func() time.Time, resourceURL, accessToken, nonce string) ([]byte, int, http.Header, error) {
+func (c dpopResourceClient) doProtectedResourceRequest(ctx context.Context, resourceURL, accessToken, nonce string) ([]byte, int, http.Header, error) {
 	target, err := url.Parse(resourceURL)
 	if err != nil {
 		return nil, 0, nil, fmt.Errorf("parse resource URL: %w", err)
 	}
 	proof, err := dpop.CreateProof(dpop.ProofRequest{
-		Signer: dpopSigner, Algorithm: alg,
+		Signer: c.Signer, Algorithm: c.Alg,
 		Method: http.MethodGet, URL: target, AccessToken: accessToken,
-		Nonce: nonce, Now: now(), Random: random,
+		Nonce: nonce, Now: c.Now(), Random: c.Random,
 	})
 	if err != nil {
 		return nil, 0, nil, fmt.Errorf("build DPoP proof: %w", err)
@@ -55,7 +68,7 @@ func doProtectedResourceRequest(ctx context.Context, httpClient *http.Client, dp
 	req.Header.Set("Authorization", "DPoP "+accessToken)
 	req.Header.Set("DPoP", proof)
 
-	res, err := httpClient.Do(req)
+	res, err := c.HTTP.Do(req)
 	if err != nil {
 		return nil, 0, nil, err
 	}

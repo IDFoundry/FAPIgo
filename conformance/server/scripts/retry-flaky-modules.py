@@ -95,6 +95,12 @@ HOST = _parsed.hostname
 PORT = _parsed.port or 8443
 CTX = local_only_ssl_context(HOST)
 
+# The three final-line verdicts run-all.sh's own grep matches against —
+# see this module's own doc comment for what each means.
+VERDICT_ALL_RESOLVED = "RETRY_VERDICT: all_resolved"
+VERDICT_PARTIAL = "RETRY_VERDICT: partial"
+VERDICT_NONE = "RETRY_VERDICT: none"
+
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 # run-test-plan.py prefixes every line with its own "YYYY-MM-DD
 # HH:MM:SS " timestamp (its own logging setup, not something run-all.sh
@@ -272,7 +278,7 @@ def main():
     modules = find_unexpected_modules(log_path)
     if not modules:
         print("retry-flaky-modules: no modules with an unexpected-failure marker found", flush=True)
-        print("RETRY_VERDICT: none", flush=True)
+        print(VERDICT_NONE, flush=True)
         return
 
     candidates = [(mid, name) for mid, name, status in modules if status == "INTERRUPTED"]
@@ -289,7 +295,7 @@ def main():
 
     if not candidates:
         print(f"retry-flaky-modules: 0 resolved, 0 still unresolved, {len(non_matching)} not a flake match", flush=True)
-        print("RETRY_VERDICT: partial" if non_matching else "RETRY_VERDICT: none", flush=True)
+        print(VERDICT_PARTIAL if non_matching else VERDICT_NONE, flush=True)
         return
 
     client = KeepAliveClient()
@@ -299,7 +305,7 @@ def main():
         print(f"retry-flaky-modules: failed to fetch plan {plan_id}: {e}", flush=True)
         non_matching.extend(candidates)
         print(f"retry-flaky-modules: 0 resolved, 0 still unresolved, {len(non_matching)} not a flake match", flush=True)
-        print("RETRY_VERDICT: partial", flush=True)
+        print(VERDICT_PARTIAL, flush=True)
         return
 
     retries = []  # (old_module_id, test_name, new_instance_id)
@@ -364,9 +370,9 @@ def main():
     print(f"retry-flaky-modules: {len(resolved)} resolved, {len(unresolved)} still unresolved, {len(non_matching)} not a flake match", flush=True)
 
     if non_matching or unresolved:
-        print("RETRY_VERDICT: partial", flush=True)
+        print(VERDICT_PARTIAL, flush=True)
     else:
-        print("RETRY_VERDICT: all_resolved", flush=True)
+        print(VERDICT_ALL_RESOLVED, flush=True)
 
 
 if __name__ == "__main__":

@@ -16,6 +16,8 @@ import (
 	"github.com/idfoundry/fapigo/server"
 )
 
+const contentTypeJSON = "application/json"
+
 // AutoApprove is what the harness's authorization endpoint grants for
 // every interaction, standing in for the real login/consent UI a
 // production embedding application would render — fapitest exists to
@@ -90,7 +92,7 @@ func (a *authServer) handleMetadata(w http.ResponseWriter, r *http.Request) {
 		RequireSignedRequestObject:                 md.RequireSignedRequestObject,
 		AuthorizationResponseIssParameterSupported: md.AuthorizationResponseIssParameterSupported,
 	}
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", contentTypeJSON)
 	if err := json.NewEncoder(w).Encode(doc); err != nil {
 		a.t.Fatalf("fapitest: encode metadata: %v", err)
 	}
@@ -102,7 +104,7 @@ func (a *authServer) handleJWKS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.t.Fatalf("fapitest: PublicJWKS: %v", err)
 	}
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", contentTypeJSON)
 	if err := json.NewEncoder(w).Encode(set); err != nil {
 		a.t.Fatalf("fapitest: encode JWKS: %v", err)
 	}
@@ -123,7 +125,7 @@ func (a *authServer) handlePAR(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.t.Fatalf("fapitest: encode PAR result: %v", err)
 	}
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", contentTypeJSON)
 	w.WriteHeader(http.StatusCreated)
 	if _, err := w.Write(body); err != nil {
 		a.t.Fatalf("fapitest: write PAR result: %v", err)
@@ -214,7 +216,7 @@ func (a *authServer) handleToken(w http.ResponseWriter, r *http.Request) {
 	if result.HasRefreshToken {
 		resp["refresh_token"] = result.RefreshToken.Reveal()
 	}
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", contentTypeJSON)
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		a.t.Fatalf("fapitest: encode token response: %v", err)
 	}
@@ -244,7 +246,7 @@ func (a *authServer) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 		a.writeResourceError(w, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", contentTypeJSON)
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(map[string]any{"sub": authz.Subject}); err != nil {
 		a.t.Fatalf("fapitest: encode userinfo response: %v", err)
@@ -314,7 +316,7 @@ func (a *authServer) writeOAuthError(w http.ResponseWriter, status int, code, de
 	if err != nil {
 		a.t.Fatalf("fapitest: encode error response: %v", err)
 	}
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", contentTypeJSON)
 	w.WriteHeader(status)
 	if _, err := w.Write(body); err != nil {
 		a.t.Fatalf("fapitest: write error response: %v", err)

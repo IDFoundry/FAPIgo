@@ -180,10 +180,14 @@ func run(apiBase string, profile driverProfile) error {
 	log.Printf("created plan %s (alias %s), %d modules", planID, alias, len(moduleNames))
 	log.Printf("plan detail: %splan-detail.html?plan=%s", apiBase, planID)
 
+	driver := moduleDriver{
+		HTTP: rawHTTP, APIBase: apiBase, PlanID: planID,
+		ClientID: clientID, RedirectURI: redirectURI, Keys: keyMgr, Profile: profile,
+	}
 	summary := make(map[string]string, len(moduleNames))
 	for i, name := range moduleNames {
 		log.Printf("--- [%d/%d] %s ---", i+1, len(moduleNames), name)
-		outcome := runModule(ctx, rawHTTP, apiBase, planID, name, clientID, redirectURI, keyMgr, profile)
+		outcome := runModule(ctx, driver, name)
 		summary[name] = outcome
 		log.Printf("[%d/%d] %s: %s", i+1, len(moduleNames), name, outcome)
 	}
@@ -195,6 +199,20 @@ func run(apiBase string, profile driverProfile) error {
 	return nil
 }
 
+// moduleDriver holds everything runModule needs that stays fixed across
+// every module in a single plan run — run's own loop builds one of
+// these once, before iterating moduleNames, since only the module's own
+// test name varies per call.
+type moduleDriver struct {
+	HTTP        *http.Client
+	APIBase     string
+	PlanID      string
+	ClientID    string
+	RedirectURI string
+	Keys        *ephemeralKeyManager
+	Profile     driverProfile
+}
+
 // runModule drives testName through the same discover/authorize/token/
 // resource sequence every module in this plan needs, and returns a
 // short human-readable outcome string rather than an error: for most of
@@ -204,7 +222,8 @@ func run(apiBase string, profile driverProfile) error {
 // to usefully treat as fatal. The suite's own graded result — fetched
 // separately, after a grace period, back in run — is what actually
 // matters.
-func runModule(ctx context.Context, rawHTTP *http.Client, apiBase, planID, testName, clientID, redirectURI string, keyMgr *ephemeralKeyManager, profile driverProfile) string {
+func runModule(ctx context.Context, d moduleDriver, testName string) string {
+	rawHTTP, apiBase, planID, clientID, redirectURI, keyMgr, profile := d.HTTP, d.APIBase, d.PlanID, d.ClientID, d.RedirectURI, d.Keys, d.Profile
 	module, err := createModuleInstance(rawHTTP, apiBase, planID, testName)
 	if err != nil {
 		return "ERROR: create module instance: " + err.Error()
@@ -341,8 +360,11 @@ func runModule(ctx context.Context, rawHTTP *http.Client, apiBase, planID, testN
 			return "ERROR: fetch exposed values: " + err.Error()
 		}
 		if accountsEndpoint := exposed["accounts_endpoint"]; accountsEndpoint != "" {
-			if _, _, err := callProtectedResource(ctx, rawHTTP, keyMgr.keys[keys.DPoPProofSigning], fapi.ES256,
-				rand.Reader, time.Now, accountsEndpoint, r.Tokens.AccessToken.Reveal()); err != nil {
+			resourceClient := dpopResourceClient{
+				HTTP: rawHTTP, Signer: keyMgr.keys[keys.DPoPProofSigning], Alg: fapi.ES256,
+				Random: rand.Reader, Now: time.Now,
+			}
+			if _, _, err := resourceClient.callProtectedResource(ctx, accountsEndpoint, r.Tokens.AccessToken.Reveal()); err != nil {
 				return "ERROR: call accounts endpoint: " + err.Error()
 			}
 		}

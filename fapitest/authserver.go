@@ -2,6 +2,7 @@ package fapitest
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -11,6 +12,7 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/metadata"
 	"github.com/idfoundry/fapigo/internal/par"
+	"github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/server"
 )
 
@@ -31,18 +33,20 @@ type AutoApprove struct {
 // (formRequestFromHTTP) and the interaction-auto-approval authorization
 // endpoint AutoApprove describes.
 type authServer struct {
-	t       *testing.T
-	srv     *server.Server
-	clock   *manualClock
-	approve AutoApprove
-	ts      *httptest.Server
+	t        *testing.T
+	srv      *server.Server
+	resource *resource.Verifier
+	clock    *manualClock
+	approve  AutoApprove
+	ts       *httptest.Server
 }
 
 // newAuthServer starts the HTTP listener before srv exists — its
 // endpoint URLs (needed to construct srv) aren't known until the
-// listener is bound to a real port. The handlers only dereference srv at
-// request time, so it's safe to attach it afterward, before any test
-// code makes a request; see Harness.attachServer.
+// listener is bound to a real port. The handlers only dereference srv
+// (and resource, once attached — see Harness.New) at request time, so
+// it's safe to attach both afterward, before any test code makes a
+// request; see Harness.attachServer.
 func newAuthServer(t *testing.T, clock *manualClock, approve AutoApprove) *authServer {
 	t.Helper()
 	a := &authServer{t: t, clock: clock, approve: approve}
@@ -52,6 +56,7 @@ func newAuthServer(t *testing.T, clock *manualClock, approve AutoApprove) *authS
 	mux.HandleFunc("/token", a.handleToken)
 	mux.HandleFunc("/.well-known/openid-configuration", a.handleMetadata)
 	mux.HandleFunc("/jwks", a.handleJWKS)
+	mux.HandleFunc("/userinfo", a.handleUserInfo)
 	a.ts = httptest.NewServer(mux)
 	t.Cleanup(a.ts.Close)
 	return a
@@ -213,6 +218,62 @@ func (a *authServer) handleToken(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		a.t.Fatalf("fapitest: encode token response: %v", err)
 	}
+}
+
+// handleUserInfo serves a real, over-the-wire UserInfo endpoint backed
+// by resource.Verifier — the same DPoP-proof and access-token
+// verification a genuine resource server would apply, not a stand-in
+// that trusts whatever client presents. It exists so a fapitest-based
+// test can exercise client.FetchUserInfo's produced DPoP proof and
+// Authorization header against real, independent verification, the way
+// harness_test.go's own verifyAccessToken already does for a
+// hand-built request — catching a wire-format bug FetchUserInfo's own
+// unit tests (which never verify the proof at all) cannot see. The
+// response is always plain, unsigned JSON: signed and encrypted
+// UserInfo responses are already covered at the unit level in
+// client/userinfo_test.go, and this handler's job is the transport, not
+// re-proving that.
+func (a *authServer) handleUserInfo(w http.ResponseWriter, r *http.Request) {
+	authz, err := a.resource.Verify(r.Context(), resource.VerifyRequest{
+		Method:        r.Method,
+		URL:           requestURL(r, a.ts.URL),
+		Authorization: r.Header.Get("Authorization"),
+		DPoPProof:     r.Header.Get("DPoP"),
+	})
+	if err != nil {
+		a.writeResourceError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(map[string]any{"sub": authz.Subject}); err != nil {
+		a.t.Fatalf("fapitest: encode userinfo response: %v", err)
+	}
+}
+
+// requestURL reconstructs the absolute URL r was made against —
+// resource.VerifyRequest.URL must be absolute (it's compared against
+// the DPoP proof's own "htu" claim, itself always absolute), but an
+// http.Request's own r.URL is request-target-relative for a real server
+// listener.
+func requestURL(r *http.Request, base string) *url.URL {
+	u, err := url.Parse(base)
+	if err != nil {
+		panic(fmt.Sprintf("fapitest: parse base url: %v", err))
+	}
+	u.Path = r.URL.Path
+	u.RawQuery = r.URL.RawQuery
+	return u
+}
+
+func (a *authServer) writeResourceError(w http.ResponseWriter, err error) {
+	rerr, ok := err.(*resource.Error)
+	if !ok {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("WWW-Authenticate", fmt.Sprintf(`DPoP error=%q`, rerr.Code()))
+	a.writeOAuthError(w, rerr.HTTPStatus(), string(rerr.Code()), rerr.PublicDescription())
 }
 
 func (a *authServer) writeAuthorizationAction(w http.ResponseWriter, action server.AuthorizationAction) {

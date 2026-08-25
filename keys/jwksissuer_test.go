@@ -74,6 +74,41 @@ func TestJWKSIssuerKeySourceResolvesKeyByAlgorithm(t *testing.T) {
 	}
 }
 
+// TestJWKSIssuerKeySourceAcceptsRegisteredMediaType covers a JWKS
+// server that serves RFC 7517 §8.5.1's registered
+// "application/jwk-set+json" instead of the plain "application/json"
+// most deployments actually use — both are accepted.
+func TestJWKSIssuerKeySourceAcceptsRegisteredMediaType(t *testing.T) {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/jwk-set+json")
+		fmt.Fprintf(w, `{"keys":[%s]}`, p256JWKJSON(t, &priv.PublicKey, "kid-1", "ES256"))
+	}))
+	defer ts.Close()
+
+	jwksURI, err := fapi.ParseEndpointURL(ts.URL + "/jwks")
+	if err != nil {
+		t.Fatalf("ParseEndpointURL: %v", err)
+	}
+	src, err := keys.NewJWKSIssuerKeySource(newTestFetcherTLS(t, ts), jwksURI, time.Minute)
+	if err != nil {
+		t.Fatalf("NewJWKSIssuerKeySource: %v", err)
+	}
+
+	set, err := src.ResolveIssuerKeys(context.Background(), keys.IssuerKeyRequest{
+		Issuer: "https://as.example.com", Purpose: keys.AccessTokenVerification, Algorithm: fapi.ES256,
+	})
+	if err != nil {
+		t.Fatalf("ResolveIssuerKeys: %v", err)
+	}
+	if len(set.Keys) != 1 || set.Keys[0].KeyID != "kid-1" {
+		t.Fatalf("Keys = %+v, want one key with kid-1", set.Keys)
+	}
+}
+
 func newTestFetcherTLS(t *testing.T, ts *httptest.Server) *fapihttp.Client {
 	t.Helper()
 	c, err := fapihttp.New(ts.Client(), fapihttp.Config{

@@ -153,7 +153,11 @@ func (s *ClientKeySource) currentFetchedKeys(ctx context.Context, entry *clientK
 }
 
 func (s *ClientKeySource) refetch(ctx context.Context, entry *clientKeyEntry) ([]keys.VerificationKey, error) {
-	res, err := s.fetcher.Fetch(ctx, fapihttp.FetchRequest{URL: entry.jwksURL, ExpectedContentType: "application/json"})
+	res, err := s.fetcher.Fetch(ctx, fapihttp.FetchRequest{
+		URL:                   entry.jwksURL,
+		ExpectedContentType:   "application/json",
+		AlternateContentTypes: []string{"application/jwk-set+json"},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("ephemeral: fetch client jwks: %w", err)
 	}

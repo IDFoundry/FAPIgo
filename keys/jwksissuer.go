@@ -12,13 +12,17 @@ import (
 	"github.com/idfoundry/fapigo/internal/jose"
 )
 
-// jwksContentType is the content type this package requires a JWKS
-// fetch to declare. RFC 7517 §5 registers "application/jwk-set+json",
-// but the large majority of real-world authorization servers serve
-// their jwks_uri as plain "application/json" — this package follows
-// that practice rather than the registered value, to interoperate with
-// what deployments actually do.
+// jwksContentType is the content type this package primarily expects a
+// JWKS fetch to declare. The large majority of real-world authorization
+// servers serve their jwks_uri as plain "application/json", so that is
+// the default here — but jwksAlternateContentType is also accepted, for
+// the servers that instead use RFC 7517 §8.5.1's registered
+// "application/jwk-set+json".
 const jwksContentType = "application/json"
+
+// jwksAlternateContentType is RFC 7517 §8.5.1's registered media type
+// for a JWK Set document, accepted alongside jwksContentType.
+const jwksAlternateContentType = "application/jwk-set+json"
 
 // JWKSIssuerKeySource resolves an authorization server's verification
 // keys by fetching its published JWKS document live over fapihttp — the
@@ -288,7 +292,11 @@ func (s *JWKSIssuerKeySource) refresh(ctx context.Context) ([]IssuerKey, error) 
 }
 
 func (s *JWKSIssuerKeySource) doFetch(ctx context.Context) ([]IssuerKey, error) {
-	res, err := s.fetcher.Fetch(ctx, fapihttp.FetchRequest{URL: s.jwksURI, ExpectedContentType: jwksContentType})
+	res, err := s.fetcher.Fetch(ctx, fapihttp.FetchRequest{
+		URL:                   s.jwksURI,
+		ExpectedContentType:   jwksContentType,
+		AlternateContentTypes: []string{jwksAlternateContentType},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("keys: fetch jwks: %w", err)
 	}

@@ -308,7 +308,11 @@ func TestJWKRejectsPrivateKeyMaterial(t *testing.T) {
 	}
 }
 
-func TestJWKRejectsCertificateChain(t *testing.T) {
+// TestJWKIgnoresCertificateChain covers RFC 7517 §4: a JWK carrying an
+// x5c alongside otherwise-valid direct key material (kty/crv/x/y) must
+// still parse — this package never resolves a key via its certificate
+// chain, so x5c's presence changes nothing about which key is used.
+func TestJWKIgnoresCertificateChain(t *testing.T) {
 	priv := generateEC(t)
 	jwk, err := NewJWK(&priv.PublicKey, fapi.ES256)
 	if err != nil {
@@ -329,12 +333,19 @@ func TestJWKRejectsCertificateChain(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	if _, err := ParseJWK(tampered, fapi.ES256); err == nil {
-		t.Fatalf("ParseJWK with injected \"x5c\" member = nil error, want ErrCertificateChain")
+	got, err := ParseJWK(tampered, fapi.ES256)
+	if err != nil {
+		t.Fatalf("ParseJWK with injected \"x5c\" member = %v, want nil error", err)
+	}
+	if !got.PublicKey().(*ecdsa.PublicKey).Equal(&priv.PublicKey) {
+		t.Fatalf("ParseJWK with injected \"x5c\" member returned a different key than the direct kty/crv/x/y material")
 	}
 }
 
-func TestJWKRejectsUnknownMember(t *testing.T) {
+// TestJWKIgnoresUnknownMember covers RFC 7517 §4's general rule for
+// any member this package doesn't act on, not just the certificate-
+// chain-specific case above.
+func TestJWKIgnoresUnknownMember(t *testing.T) {
 	priv := generateEC(t)
 	jwk, err := NewJWK(&priv.PublicKey, fapi.ES256)
 	if err != nil {
@@ -355,8 +366,12 @@ func TestJWKRejectsUnknownMember(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	if _, err := ParseJWK(tampered, fapi.ES256); err == nil {
-		t.Fatalf("ParseJWK with unknown member = nil error, want error")
+	got, err := ParseJWK(tampered, fapi.ES256)
+	if err != nil {
+		t.Fatalf("ParseJWK with unknown member = %v, want nil error", err)
+	}
+	if !got.PublicKey().(*ecdsa.PublicKey).Equal(&priv.PublicKey) {
+		t.Fatalf("ParseJWK with unknown member returned a different key than the direct kty/crv/x/y material")
 	}
 }
 

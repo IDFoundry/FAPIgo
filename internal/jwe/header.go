@@ -9,6 +9,7 @@ import (
 	"math/big"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/critical"
 )
 
 // p256CoordinateSize is the fixed byte width of an EC public key
@@ -87,10 +88,8 @@ func parseHeader(data []byte) (Header, error) {
 	if err := dec.Decode(&raw); err != nil {
 		return Header{}, fmt.Errorf("jwe: parse header: %w", err)
 	}
-	for _, name := range raw.Crit {
-		if !understoodHeaderParams[name] {
-			return Header{}, fmt.Errorf("jwe: parse header: critical header parameter %q is not understood", name)
-		}
+	if err := critical.Check(raw.Crit, understoodHeaderParams); err != nil {
+		return Header{}, fmt.Errorf("jwe: parse header: %w", err)
 	}
 	alg, err := fapi.ParseKeyManagementAlgorithm(raw.Alg)
 	if err != nil {

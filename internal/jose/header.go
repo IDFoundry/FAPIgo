@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/critical"
 )
 
 // Header is a JWS protected header. Only the members this module's
@@ -65,10 +66,8 @@ func parseHeader(data []byte) (Header, error) {
 	if err := dec.Decode(&raw); err != nil {
 		return Header{}, fmt.Errorf("jose: parse header: %w", err)
 	}
-	for _, name := range raw.Crit {
-		if !understoodHeaderParams[name] {
-			return Header{}, fmt.Errorf("jose: parse header: critical header parameter %q is not understood", name)
-		}
+	if err := critical.Check(raw.Crit, understoodHeaderParams); err != nil {
+		return Header{}, fmt.Errorf("jose: parse header: %w", err)
 	}
 	alg, err := fapi.ParseSignatureAlgorithm(raw.Alg)
 	if err != nil {

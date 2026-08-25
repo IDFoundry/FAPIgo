@@ -25,10 +25,6 @@ const (
 	testRedirect = "https://rp.example.com/callback"
 )
 
-type fixedClock struct{ now time.Time }
-
-func (c fixedClock) Now() time.Time { return c.now }
-
 // fakeKeyManager backs client's own signing purposes with real ECDSA
 // keys, so signatures it produces can be verified with ordinary
 // crypto/ecdsa — matching internal/jose's ASN.1 DER expectation for
@@ -185,8 +181,19 @@ func validDependencies(t *testing.T) client.Dependencies {
 			keys.ClientAuthentication, keys.RequestObjectSigning, keys.DPoPProofSigning),
 		IssuerKeys: &fakeIssuerKeySource{keys: map[keys.IssuerVerificationPurpose]crypto.PublicKey{}},
 		HTTP:       noopHTTPClient{},
-		Clock:      fixedClock{now: time.Now()},
-		Random:     rand.Reader,
+		// A live clock, not a value frozen at this call's return time:
+		// newTestClient's fake AS builds JARM/ID token responses using
+		// real time.Now() later, once the test flow actually reaches it
+		// — always strictly after this function returns. A clock frozen
+		// here would then validate those responses' exp against a "now"
+		// from before they were even issued, leaving the JARM check in
+		// particular (whose margin — MaxJARMResponseLifetime, typically
+		// exactly the response's own Lifetime — is razor-thin) to fail
+		// intermittently depending on how much real time elapsed in
+		// between. See TestCompleteAuthorizationHappyPathMessageSigning's
+		// prior flakiness.
+		Clock:  client.SystemClock{},
+		Random: rand.Reader,
 	}
 }
 

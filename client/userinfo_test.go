@@ -266,6 +266,72 @@ func TestFetchUserInfoRejectsSubjectMismatch(t *testing.T) {
 	}
 }
 
+// TestFetchUserInfoRejectsSubjectEqualsClientIDByDefault confirms the
+// exact-match check from TestFetchUserInfoRejectsSubjectMismatch still
+// rejects a UserInfo response whose sub is the client's own client_id
+// — the specific defect Config.TolerateUserInfoSubjectEqualsClientID
+// exists to work around — when that opt-in isn't set.
+func TestFetchUserInfoRejectsSubjectEqualsClientIDByDefault(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{"sub": testClientID})
+	}))
+	defer ts.Close()
+
+	c := newUserInfoTestClient(t, ts, nil, nil, nil)
+	if _, err := c.FetchUserInfo(context.Background(), userInfoTestTokens()); err == nil {
+		t.Fatalf("FetchUserInfo(sub == client_id, tolerance off) = nil error, want error")
+	}
+}
+
+// TestFetchUserInfoToleratesSubjectEqualsClientID covers the opt-in
+// itself: with TolerateUserInfoSubjectEqualsClientID set, a UserInfo
+// response whose sub is the client's own client_id (the known defect
+// shape) is accepted rather than rejected — but the returned UserInfo
+// still reports the ID token's actual, verified subject, never the
+// client_id, since surfacing the client_id as the end-user's identity
+// would be actively wrong.
+func TestFetchUserInfoToleratesSubjectEqualsClientID(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{"sub": testClientID, "name": "Ada"})
+	}))
+	defer ts.Close()
+
+	c := newUserInfoTestClient(t, ts, nil, func(cfg *client.Config) {
+		cfg.TolerateUserInfoSubjectEqualsClientID = true
+	}, nil)
+	got, err := c.FetchUserInfo(context.Background(), userInfoTestTokens())
+	if err != nil {
+		t.Fatalf("FetchUserInfo(sub == client_id, tolerance on) = %v, want nil error", err)
+	}
+	if got.Subject != userInfoTestSubject {
+		t.Fatalf("Subject = %q, want %q (the ID token's subject, not the client_id)", got.Subject, userInfoTestSubject)
+	}
+}
+
+// TestFetchUserInfoToleranceDoesNotAcceptArbitraryMismatch confirms the
+// opt-in is scoped to exactly the client_id case — an unrelated,
+// genuinely wrong sub must still be rejected even with the tolerance
+// enabled.
+func TestFetchUserInfoToleranceDoesNotAcceptArbitraryMismatch(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{"sub": "someone-else"})
+	}))
+	defer ts.Close()
+
+	c := newUserInfoTestClient(t, ts, nil, func(cfg *client.Config) {
+		cfg.TolerateUserInfoSubjectEqualsClientID = true
+	}, nil)
+	if _, err := c.FetchUserInfo(context.Background(), userInfoTestTokens()); err == nil {
+		t.Fatalf("FetchUserInfo(unrelated sub mismatch, tolerance on) = nil error, want error")
+	}
+}
+
 func TestFetchUserInfoRejectsMissingSubClaim(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

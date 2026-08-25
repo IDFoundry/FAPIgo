@@ -201,4 +201,26 @@ type Config struct {
 	// see internal/token.IDTokenValidatePolicy.TrustedAudiences, which
 	// this configures.
 	TrustedIDTokenAudiences []string
+
+	// TolerateUserInfoSubjectEqualsClientID works around a defect some
+	// authorization servers have been observed to have: returning the
+	// client's own client_id as the UserInfo response's "sub" claim,
+	// instead of the authenticated end-user's actual subject identifier.
+	// OIDC Core §5.3.2 requires this client to reject a UserInfo
+	// response whose "sub" doesn't exactly match the ID token's "sub" —
+	// the defense against a resource server (or a network attacker in
+	// front of it) substituting another user's claims into a response
+	// this flow would otherwise trust. Setting this to true additionally
+	// accepts "sub" equal to this client's own ClientID as a fallback
+	// when it doesn't match the ID token's subject.
+	//
+	// Enable this only against a specific authorization server you've
+	// confirmed has this defect, and only until it's fixed server-side:
+	// every one of that server's UserInfo responses now carries the same
+	// "sub" value (the client_id) regardless of which end-user actually
+	// authenticated, so this check can no longer distinguish one user's
+	// claims from another's for that server — the exact substitution
+	// OIDC Core §5.3.2 exists to catch. Defaults to false, which
+	// preserves the exact-match behavior this package has always had.
+	TolerateUserInfoSubjectEqualsClientID bool
 }

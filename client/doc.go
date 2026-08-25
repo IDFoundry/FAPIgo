@@ -19,7 +19,12 @@
 // forcing that caller to hand-roll its own DPoP proof construction and
 // to re-fetch and re-parse the issuer's JWKS on its own — is exactly
 // the unhardened, uncoordinated-cache duplication this package exists
-// to avoid.
+// to avoid. PublicJWKS is the same idea applied to publishing this
+// client's own keys — the mirror image of server.PublicJWKS — so an
+// embedder registering with an authorization server (out of band; this
+// package has no dynamic client registration flow) doesn't have to
+// hand-roll RFC 7517 JWK encoding for whatever it configured
+// Dependencies.Keys/Dependencies.Decryption with.
 //
 // client must not import server. Where both roles need the same wire
 // format or cryptographic operation, that logic belongs in internal/ and

@@ -1,6 +1,7 @@
 package jose
 
 import (
+	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -9,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"testing"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -28,6 +30,15 @@ func generateRSA(t *testing.T) *rsa.PrivateKey {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("generate rsa key: %v", err)
+	}
+	return key
+}
+
+func generateECDH(t *testing.T) *ecdh.PrivateKey {
+	t.Helper()
+	key, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate ecdh key: %v", err)
 	}
 	return key
 }
@@ -391,5 +402,168 @@ func TestJWKThumbprintRSAKnownAnswer(t *testing.T) {
 	}
 	if got := tp.String(); got != wantThumbprint {
 		t.Fatalf("Thumbprint = %q, want %q", got, wantThumbprint)
+	}
+}
+
+// TestJWKMarshalIncludesUseAndAlgForSigningKey confirms NewJWK's output
+// now carries "use":"sig" and "alg" alongside the members it already
+// produced — additive, so an existing verifier (which RFC 7517 §4
+// requires to ignore members it doesn't understand) isn't affected.
+func TestJWKMarshalIncludesUseAndAlgForSigningKey(t *testing.T) {
+	priv := generateEC(t)
+	jwk, err := NewJWK(&priv.PublicKey, fapi.ES256)
+	if err != nil {
+		t.Fatalf("NewJWK: %v", err)
+	}
+	data, err := jwk.MarshalJSON()
+	if err != nil {
+		t.Fatalf("MarshalJSON: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if m["use"] != "sig" {
+		t.Fatalf("use = %v, want %q", m["use"], "sig")
+	}
+	if m["alg"] != "ES256" {
+		t.Fatalf("alg = %v, want %q", m["alg"], "ES256")
+	}
+}
+
+// TestJWKRoundTripEncryptionRSA mirrors TestJWKRoundTripRSA for
+// NewEncryptionJWK: confirms the marshaled JWK carries "use":"enc",
+// the right "alg", no private key material, and round-trips the same
+// public key an independent decode of the wire JSON would recover.
+func TestJWKRoundTripEncryptionRSA(t *testing.T) {
+	priv := generateRSA(t)
+	jwk, err := NewEncryptionJWK(&priv.PublicKey, fapi.RSAOAEP256)
+	if err != nil {
+		t.Fatalf("NewEncryptionJWK: %v", err)
+	}
+	data, err := jwk.MarshalJSON()
+	if err != nil {
+		t.Fatalf("MarshalJSON: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if m["use"] != "enc" {
+		t.Fatalf("use = %v, want %q", m["use"], "enc")
+	}
+	if m["alg"] != "RSA-OAEP-256" {
+		t.Fatalf("alg = %v, want %q", m["alg"], "RSA-OAEP-256")
+	}
+	if m["kty"] != "RSA" {
+		t.Fatalf("kty = %v, want RSA", m["kty"])
+	}
+	if _, ok := m["d"]; ok {
+		t.Fatalf("marshaled JWK contains private key material: %s", data)
+	}
+
+	n, err := base64.RawURLEncoding.DecodeString(m["n"].(string))
+	if err != nil {
+		t.Fatalf("decode n: %v", err)
+	}
+	eBytes, err := base64.RawURLEncoding.DecodeString(m["e"].(string))
+	if err != nil {
+		t.Fatalf("decode e: %v", err)
+	}
+	got := &rsa.PublicKey{N: new(big.Int).SetBytes(n), E: int(new(big.Int).SetBytes(eBytes).Int64())}
+	if !got.Equal(&priv.PublicKey) {
+		t.Fatalf("round-tripped key does not equal original")
+	}
+}
+
+// TestJWKRoundTripEncryptionECDH mirrors TestJWKRoundTripEncryptionRSA
+// for ECDHESA256KW — the first test in this package to exercise
+// *ecdh.PublicKey marshaling at all.
+func TestJWKRoundTripEncryptionECDH(t *testing.T) {
+	priv := generateECDH(t)
+	jwk, err := NewEncryptionJWK(priv.PublicKey(), fapi.ECDHESA256KW)
+	if err != nil {
+		t.Fatalf("NewEncryptionJWK: %v", err)
+	}
+	data, err := jwk.MarshalJSON()
+	if err != nil {
+		t.Fatalf("MarshalJSON: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if m["use"] != "enc" {
+		t.Fatalf("use = %v, want %q", m["use"], "enc")
+	}
+	if m["alg"] != "ECDH-ES+A256KW" {
+		t.Fatalf("alg = %v, want %q", m["alg"], "ECDH-ES+A256KW")
+	}
+	if m["kty"] != "EC" || m["crv"] != "P-256" {
+		t.Fatalf("kty/crv = %v/%v, want EC/P-256", m["kty"], m["crv"])
+	}
+	if _, ok := m["d"]; ok {
+		t.Fatalf("marshaled JWK contains private key material: %s", data)
+	}
+
+	x, err := base64.RawURLEncoding.DecodeString(m["x"].(string))
+	if err != nil {
+		t.Fatalf("decode x: %v", err)
+	}
+	y, err := base64.RawURLEncoding.DecodeString(m["y"].(string))
+	if err != nil {
+		t.Fatalf("decode y: %v", err)
+	}
+	uncompressed := append([]byte{0x04}, append(x, y...)...)
+	got, err := ecdh.P256().NewPublicKey(uncompressed)
+	if err != nil {
+		t.Fatalf("reconstruct ecdh public key: %v", err)
+	}
+	if !got.Equal(priv.PublicKey()) {
+		t.Fatalf("round-tripped key does not equal original")
+	}
+
+	// The thumbprint path must also handle *ecdh.PublicKey without
+	// error — it shares MarshalJSON's ecdhP256Coordinates helper.
+	if _, err := jwk.Thumbprint(); err != nil {
+		t.Fatalf("Thumbprint: %v", err)
+	}
+}
+
+func TestNewEncryptionJWKRejectsWrongKeyType(t *testing.T) {
+	priv := generateEC(t)
+	if _, err := NewEncryptionJWK(&priv.PublicKey, fapi.RSAOAEP256); err == nil {
+		t.Fatal("NewEncryptionJWK(ecdsa key, RSAOAEP256) = nil error, want error")
+	}
+	rsaPriv := generateRSA(t)
+	if _, err := NewEncryptionJWK(&rsaPriv.PublicKey, fapi.ECDHESA256KW); err == nil {
+		t.Fatal("NewEncryptionJWK(rsa key, ECDHESA256KW) = nil error, want error")
+	}
+}
+
+func TestNewEncryptionJWKRejectsSmallRSAKey(t *testing.T) {
+	priv, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatalf("generate 1024-bit rsa key: %v", err)
+	}
+	if _, err := NewEncryptionJWK(&priv.PublicKey, fapi.RSAOAEP256); err == nil {
+		t.Fatal("NewEncryptionJWK(1024-bit rsa key) = nil error, want error")
+	}
+}
+
+func TestNewEncryptionJWKRejectsNonP256Curve(t *testing.T) {
+	priv, err := ecdh.P384().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate p-384 key: %v", err)
+	}
+	if _, err := NewEncryptionJWK(priv.PublicKey(), fapi.ECDHESA256KW); err == nil {
+		t.Fatal("NewEncryptionJWK(P-384 key) = nil error, want error")
+	}
+}
+
+func TestNewEncryptionJWKRejectsUnsupportedAlgorithm(t *testing.T) {
+	priv := generateRSA(t)
+	if _, err := NewEncryptionJWK(&priv.PublicKey, fapi.KeyManagementAlgorithm(0)); err == nil {
+		t.Fatal("NewEncryptionJWK(unsupported algorithm) = nil error, want error")
 	}
 }

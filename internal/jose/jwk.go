@@ -3,6 +3,7 @@ package jose
 import (
 	"bytes"
 	"crypto"
+	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -16,24 +17,52 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 )
 
-// JWK is a parsed, validated public key together with the
-// SignatureAlgorithm it is to be used with. There is no exported way to
-// construct one from raw coordinates — only NewJWK (from a
-// crypto.PublicKey the caller already trusts) or ParseJWK (which
-// validates untrusted wire input) can produce one.
+// JWK is a parsed, validated public key together with the algorithm it
+// is to be used with, and which RFC 7517 §4.2 "use" it was built for.
+// There is no exported way to construct one from raw coordinates — only
+// NewJWK/NewEncryptionJWK (from a crypto.PublicKey the caller already
+// trusts) or ParseJWK (which validates untrusted wire input) can
+// produce one. Exactly one of sigAlg/encAlg is meaningful, chosen by
+// use — the same "exactly one of these is populated, selected by a
+// discriminator" shape keys.SigningRequest's own Digest/SigningInput
+// split uses, for the same reason: a signing-use JWK and an
+// encryption-use JWK are never interchangeable, so nothing here should
+// let a caller read the wrong one by accident.
 type JWK struct {
-	pub crypto.PublicKey
-	alg fapi.SignatureAlgorithm
-	kid string
+	pub    crypto.PublicKey
+	use    jwkUse
+	sigAlg fapi.SignatureAlgorithm
+	encAlg fapi.KeyManagementAlgorithm
+	kid    string
 }
 
-// NewJWK wraps pub for use with alg. It fails if pub's type or size does
-// not match what alg requires.
+// jwkUse is RFC 7517 §4.2's "use" member, restricted to the two values
+// this package ever produces.
+type jwkUse string
+
+const (
+	jwkUseSignature  jwkUse = "sig"
+	jwkUseEncryption jwkUse = "enc"
+)
+
+// NewJWK wraps pub for use with alg (a "use":"sig" JWK). It fails if
+// pub's type or size does not match what alg requires.
 func NewJWK(pub crypto.PublicKey, alg fapi.SignatureAlgorithm) (JWK, error) {
 	if err := validateKeyForAlgorithm(pub, alg); err != nil {
 		return JWK{}, err
 	}
-	return JWK{pub: pub, alg: alg}, nil
+	return JWK{pub: pub, use: jwkUseSignature, sigAlg: alg}, nil
+}
+
+// NewEncryptionJWK wraps pub for use with alg (a "use":"enc" JWK) —
+// RSAOAEP256 (an *rsa.PublicKey) or ECDHESA256KW (an *ecdh.PublicKey on
+// curve P-256). It fails if pub's type, curve, or size does not match
+// what alg requires.
+func NewEncryptionJWK(pub crypto.PublicKey, alg fapi.KeyManagementAlgorithm) (JWK, error) {
+	if err := validateKeyForKeyManagementAlgorithm(pub, alg); err != nil {
+		return JWK{}, err
+	}
+	return JWK{pub: pub, use: jwkUseEncryption, encAlg: alg}, nil
 }
 
 // WithKeyID returns a copy of k with its "kid" member set to kid, so it
@@ -50,8 +79,19 @@ func (k JWK) WithKeyID(kid string) JWK {
 // PublicKey returns the wrapped public key.
 func (k JWK) PublicKey() crypto.PublicKey { return k.pub }
 
-// Algorithm returns the algorithm this key is to be used with.
-func (k JWK) Algorithm() fapi.SignatureAlgorithm { return k.alg }
+// Algorithm returns the algorithm this key is to be used with. Only
+// meaningful for a JWK built by NewJWK/ParseJWK — the zero
+// SignatureAlgorithm for one built by NewEncryptionJWK.
+func (k JWK) Algorithm() fapi.SignatureAlgorithm { return k.sigAlg }
+
+// algString returns the JOSE "alg" header value to marshal, drawn from
+// whichever of sigAlg/encAlg use actually selects.
+func (k JWK) algString() string {
+	if k.use == jwkUseEncryption {
+		return k.encAlg.String()
+	}
+	return k.sigAlg.String()
+}
 
 // Thumbprint computes the RFC 7638 JWK thumbprint: the SHA-256 digest of
 // the key's required members, serialized with no whitespace and in
@@ -74,6 +114,13 @@ func (k JWK) Thumbprint() (Thumbprint, error) {
 		// kty, x.
 		x := base64.RawURLEncoding.EncodeToString(pub)
 		canonical = fmt.Sprintf(`{"crv":%q,"kty":"OKP","x":%q}`, "Ed25519", x)
+	case *ecdh.PublicKey:
+		x, y, err := ecdhP256Coordinates(pub)
+		if err != nil {
+			return Thumbprint{}, fmt.Errorf("jose: %w", err)
+		}
+		canonical = fmt.Sprintf(`{"crv":%q,"kty":"EC","x":%q,"y":%q}`, "P-256",
+			base64.RawURLEncoding.EncodeToString(x), base64.RawURLEncoding.EncodeToString(y))
 	default:
 		return Thumbprint{}, fmt.Errorf("jose: cannot compute thumbprint for key type %T", pub)
 	}
@@ -81,8 +128,10 @@ func (k JWK) Thumbprint() (Thumbprint, error) {
 }
 
 // MarshalJSON encodes k as a public-only JWK containing exactly the
-// members required for its key type, plus "kid" if WithKeyID was used.
+// members required for its key type, plus "use" and "alg" (see
+// algString), plus "kid" if WithKeyID was used.
 func (k JWK) MarshalJSON() ([]byte, error) {
+	use, alg := string(k.use), k.algString()
 	switch pub := k.pub.(type) {
 	case *ecdsa.PublicKey:
 		size := coordinateSize(pub.Curve)
@@ -91,7 +140,7 @@ func (k JWK) MarshalJSON() ([]byte, error) {
 			Crv: "P-256",
 			X:   base64.RawURLEncoding.EncodeToString(pub.X.FillBytes(make([]byte, size))),
 			Y:   base64.RawURLEncoding.EncodeToString(pub.Y.FillBytes(make([]byte, size))),
-			Kid: k.kid,
+			Use: use, Alg: alg, Kid: k.kid,
 		}
 		return json.Marshal(raw)
 	case *rsa.PublicKey:
@@ -99,7 +148,7 @@ func (k JWK) MarshalJSON() ([]byte, error) {
 			Kty: "RSA",
 			N:   base64.RawURLEncoding.EncodeToString(pub.N.Bytes()),
 			E:   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(pub.E)).Bytes()),
-			Kid: k.kid,
+			Use: use, Alg: alg, Kid: k.kid,
 		}
 		return json.Marshal(raw)
 	case ed25519.PublicKey:
@@ -107,12 +156,46 @@ func (k JWK) MarshalJSON() ([]byte, error) {
 			Kty: "OKP",
 			Crv: "Ed25519",
 			X:   base64.RawURLEncoding.EncodeToString(pub),
-			Kid: k.kid,
+			Use: use, Alg: alg, Kid: k.kid,
+		}
+		return json.Marshal(raw)
+	case *ecdh.PublicKey:
+		x, y, err := ecdhP256Coordinates(pub)
+		if err != nil {
+			return nil, fmt.Errorf("jose: %w", err)
+		}
+		raw := rawJWK{
+			Kty: "EC",
+			Crv: "P-256",
+			X:   base64.RawURLEncoding.EncodeToString(x),
+			Y:   base64.RawURLEncoding.EncodeToString(y),
+			Use: use, Alg: alg, Kid: k.kid,
 		}
 		return json.Marshal(raw)
 	default:
 		return nil, fmt.Errorf("jose: cannot marshal key type %T", pub)
 	}
+}
+
+// ecdhP256Coordinates extracts the X and Y coordinates from pub, which
+// must be on curve P-256 — the only curve ECDHESA256KW supports.
+// crypto/ecdh has no coordinate accessor of its own (deliberately: it
+// keeps point representation curve-specific), so this decodes
+// PublicKey.Bytes()'s uncompressed SEC1 point encoding (0x04 || X || Y,
+// each a fixed 32 bytes for P-256) directly.
+func ecdhP256Coordinates(pub *ecdh.PublicKey) (x, y []byte, err error) {
+	if pub.Curve() != ecdh.P256() {
+		return nil, nil, fmt.Errorf("cannot encode ecdh key on curve %v as a JWK: only P-256 is supported", pub.Curve())
+	}
+	raw := pub.Bytes()
+	const uncompressedP256Len = 1 + 32 + 32
+	if len(raw) != uncompressedP256Len {
+		return nil, nil, fmt.Errorf("unexpected P-256 public key encoding length %d, want %d", len(raw), uncompressedP256Len)
+	}
+	if raw[0] != 0x04 {
+		return nil, nil, fmt.Errorf("unexpected P-256 public key encoding: leading byte 0x%02x, want 0x04 (uncompressed)", raw[0])
+	}
+	return raw[1:33], raw[33:65], nil
 }
 
 // ParseJWK parses and validates a public JWK from untrusted wire data,
@@ -192,7 +275,7 @@ func ParseJWK(data []byte, alg fapi.SignatureAlgorithm) (JWK, error) {
 	if err := validateKeyForAlgorithm(pub, alg); err != nil {
 		return JWK{}, err
 	}
-	return JWK{pub: pub, alg: alg}, nil
+	return JWK{pub: pub, use: jwkUseSignature, sigAlg: alg}, nil
 }
 
 // Thumbprint is an RFC 7638 JWK thumbprint.
@@ -211,10 +294,14 @@ func (t Thumbprint) Equal(other Thumbprint) bool {
 // rawJWK is the wire representation of a JWK (RFC 7517). Only the
 // public-key members this package acts on, plus the private-key
 // members it explicitly checks for and rejects, are listed here —
-// every other member (certificate-chain hints, "use", "key_ops", ...)
-// is left for encoding/json's own default behavior (silently ignored)
-// rather than modeled, per RFC 7517 §4's own ignore-unknown-members
-// rule; see ParseJWK's doc comment.
+// every other member (certificate-chain hints, "key_ops", ...) is left
+// for encoding/json's own default behavior (silently ignored) rather
+// than modeled, per RFC 7517 §4's own ignore-unknown-members rule; see
+// ParseJWK's doc comment. "use" is marshaled (MarshalJSON sets it from
+// JWK.use) but still not read back on parse — ParseJWK's caller already
+// states which alg/purpose it expects a JWK to satisfy, the same way
+// every other role-declared expectation in this module isn't
+// re-derived from untrusted input.
 type rawJWK struct {
 	Kty string `json:"kty"`
 	Crv string `json:"crv,omitempty"`
@@ -223,6 +310,7 @@ type rawJWK struct {
 	N   string `json:"n,omitempty"`
 	E   string `json:"e,omitempty"`
 
+	Use string `json:"use,omitempty"`
 	Alg string `json:"alg,omitempty"`
 	Kid string `json:"kid,omitempty"`
 
@@ -266,6 +354,38 @@ func validateKeyForAlgorithm(pub crypto.PublicKey, alg fapi.SignatureAlgorithm) 
 		}
 	default:
 		return fmt.Errorf("jose: unsupported algorithm %v", alg)
+	}
+	return nil
+}
+
+// validateKeyForKeyManagementAlgorithm is validateKeyForAlgorithm's
+// counterpart for the two fapi.KeyManagementAlgorithm values this
+// module supports (RSAOAEP256, ECDHESA256KW) rather than the three
+// fapi.SignatureAlgorithm ones — a different closed set, since a
+// signing key and a key-management key are never interchangeable even
+// when they happen to share a Go type (RSA does; EC/ECDH don't, since
+// *ecdsa.PublicKey and *ecdh.PublicKey are distinct types for the same
+// curve).
+func validateKeyForKeyManagementAlgorithm(pub crypto.PublicKey, alg fapi.KeyManagementAlgorithm) error {
+	switch alg {
+	case fapi.RSAOAEP256:
+		key, ok := pub.(*rsa.PublicKey)
+		if !ok {
+			return fmt.Errorf("jose: RSAOAEP256 requires an RSA public key, got %T", pub)
+		}
+		if key.N.BitLen() < 2048 {
+			return fmt.Errorf("jose: RSAOAEP256 requires an RSA key of at least 2048 bits, got %d", key.N.BitLen())
+		}
+	case fapi.ECDHESA256KW:
+		key, ok := pub.(*ecdh.PublicKey)
+		if !ok {
+			return fmt.Errorf("jose: ECDHESA256KW requires an ECDH public key, got %T", pub)
+		}
+		if key.Curve() != ecdh.P256() {
+			return fmt.Errorf("jose: ECDHESA256KW requires curve P-256")
+		}
+	default:
+		return fmt.Errorf("jose: unsupported key management algorithm %v", alg)
 	}
 	return nil
 }

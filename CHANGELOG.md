@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.10.0](https://github.com/IDFoundry/FAPIgo/compare/v0.9.2...v0.10.0) (2026-08-25)
+
+
+### Features
+
+* accept the registered JWK Set media type alongside application/json ([#136](https://github.com/IDFoundry/FAPIgo/issues/136)) ([9213afc](https://github.com/IDFoundry/FAPIgo/commit/9213afc741b80274d52a98452d0b9f93ab17c45d))
+* add opt-in tolerance for a UserInfo sub-equals-client_id defect ([#139](https://github.com/IDFoundry/FAPIgo/issues/139)) ([1cdcdc3](https://github.com/IDFoundry/FAPIgo/commit/1cdcdc3ec43b6ab127de23260be5230f000d8704))
+* allow multi-valued access-token aud, trusted ID-token audiences, and azp checks ([e6612a5](https://github.com/IDFoundry/FAPIgo/commit/e6612a59e35645731cbde1f65bcfe3b1c32156a2))
+* implement crit-based ignore-unknown for JWS/JWE header parsing ([f7bd537](https://github.com/IDFoundry/FAPIgo/commit/f7bd5373097f37b9123c39ecb0d939521a96b3ac))
+* tolerate unrecognized members in AS-originated JSON documents ([ce16852](https://github.com/IDFoundry/FAPIgo/commit/ce168524c3b90d94bad310ebe4735ba99bd90842))
+
+
+### Bug Fixes
+
+* accept a nested JWT payload with a missing (not just correct) cty ([#137](https://github.com/IDFoundry/FAPIgo/issues/137)) ([f506385](https://github.com/IDFoundry/FAPIgo/commit/f506385b19ba95317ebbd1608ef32a4df017927d))
+* exclude internal/jose|jwe header.go from copy-paste detection ([a8d41b2](https://github.com/IDFoundry/FAPIgo/commit/a8d41b247d8ca9213ac7e6b9e5ca1ced40555a90))
+* extract the shared crit-check loop into internal/critical ([1a9fdfa](https://github.com/IDFoundry/FAPIgo/commit/1a9fdfa96cf96507bb83340ca105db8c4bf1a565))
+* use a live clock in client test setup, not one frozen before token issuance ([299f81b](https://github.com/IDFoundry/FAPIgo/commit/299f81bce7066115c6692b19d046b3e99cd944c4))
+
 ## [0.9.2](https://github.com/IDFoundry/FAPIgo/compare/v0.9.1...v0.9.2) (2026-08-24)
 
 

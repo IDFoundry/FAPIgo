@@ -42,6 +42,22 @@
 // server or client doesn't require writing key management from scratch
 // just to get something running; see its own package doc comment.
 //
+// Key rotation: KeyManager/Decrypter say nothing about how an
+// implementation manages its own key lifecycle — that's deliberately
+// left to the embedder — but two places needed real support, not just
+// permission, for a rotation to be safe. signing.go's
+// RotatingKeyManager is KeyManager's optional extension for publishing
+// more than one currently-valid key per purpose (the outgoing key
+// alongside the incoming one) during a rotation's overlap window, so a
+// signature made just before the cutover stays verifiable; server's
+// PublicJWKS uses it automatically when a configured KeyManager
+// implements it. decryption.go's UnwrapRequest carries the JWE's own
+// "kid" through to Decrypter (and, in turn, to ECDHAgreer/KeyDecrypter)
+// for exactly the matching reason: a backend holding more than one
+// registered decryption key needs the kid to know which one a given
+// ciphertext was actually wrapped to, rather than always guessing "the
+// current one."
+//
 // Resolving a remote party's verification keys (e.g. a registered
 // client's JWKS, for request-object and client-assertion verification)
 // or encryption key (for issuing an encrypted ID token) is a distinct

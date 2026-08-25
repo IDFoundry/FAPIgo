@@ -286,9 +286,14 @@ type DecryptRequest struct {
 // path never hands a crypto.Signer or raw private key across a
 // KeyManager boundary. ctx is threaded through unchanged, so an
 // implementation backed by a remote call can honor cancellation the
-// same way keys.KeyManager.Sign does.
+// same way keys.KeyManager.Sign does. keyID is the header's own "kid",
+// forwarded so an implementation holding more than one registered key
+// (e.g. mid-rotation) can select the right one; like every other header
+// value, it's a routing hint only — an implementation still must
+// perform the actual unwrap/decrypt to confirm it, never trust keyID by
+// itself as proof of which key was really used.
 type Unwrapper interface {
-	UnwrapCEK(ctx context.Context, alg fapi.KeyManagementAlgorithm, encryptedKey []byte, ephemeralPublicKey *ecdh.PublicKey) ([]byte, error)
+	UnwrapCEK(ctx context.Context, alg fapi.KeyManagementAlgorithm, keyID string, encryptedKey []byte, ephemeralPublicKey *ecdh.PublicKey) ([]byte, error)
 }
 
 // DecryptResult is a successfully decrypted and authenticated JWE.
@@ -364,7 +369,7 @@ func Decrypt(ctx context.Context, req DecryptRequest) (DecryptResult, error) {
 
 	var cek []byte
 	if unwrapper, ok := req.RecipientKey.(Unwrapper); ok {
-		cek, err = unwrapper.UnwrapCEK(ctx, req.Algorithm, encryptedKey, header.EphemeralPublicKey)
+		cek, err = unwrapper.UnwrapCEK(ctx, req.Algorithm, header.KeyID, encryptedKey, header.EphemeralPublicKey)
 		if err != nil {
 			return DecryptResult{}, fmt.Errorf("%w: %v", ErrDecryptionFailed, err)
 		}

@@ -70,6 +70,13 @@ func (j JWTAccessTokens) accessTokenSigningKeyUse() signingKeyUse {
 // Config.Endpoints.JWKS is what lets clients verify a JARM response or
 // ID token, and what lets a JWT-verifying resource server verify an
 // access token.
+//
+// A manager implementing keys.RotatingKeyManager can publish more than
+// one key for a purpose — normally still one, but two during a
+// rotation's overlap window, so a signature made just before the
+// rotation stays verifiable until it expires (see
+// keys.RotatingKeyManager's own doc comment). A plain keys.KeyManager
+// publishes exactly the one key PublicKey returns, as before.
 func (s *Server) PublicJWKS(ctx context.Context) (PublicKeySet, error) {
 	active := []signingKeyUse{
 		{manager: s.deps.Keys, purpose: keys.IDTokenSigning, algorithm: s.cfg.Algorithms.IDToken},
@@ -84,23 +91,43 @@ func (s *Server) PublicJWKS(ctx context.Context) (PublicKeySet, error) {
 	seen := make(map[string]bool, len(active))
 	var result PublicKeySet
 	for _, use := range active {
-		info, err := use.manager.PublicKey(ctx, use.purpose, use.algorithm)
+		infos, err := resolvePublicKeys(ctx, use)
 		if err != nil {
 			return PublicKeySet{}, fmt.Errorf("server: resolve public key: %w", err)
 		}
-		if info.KeyID == "" {
-			return PublicKeySet{}, fmt.Errorf("server: key manager returned an empty kid")
-		}
-		if seen[info.KeyID] {
-			continue
-		}
-		seen[info.KeyID] = true
+		for _, info := range infos {
+			if info.KeyID == "" {
+				return PublicKeySet{}, fmt.Errorf("server: key manager returned an empty kid")
+			}
+			if seen[info.KeyID] {
+				continue
+			}
+			seen[info.KeyID] = true
 
-		jwk, err := jose.NewJWK(info.PublicKey, use.algorithm)
-		if err != nil {
-			return PublicKeySet{}, fmt.Errorf("server: build jwk: %w", err)
+			jwk, err := jose.NewJWK(info.PublicKey, use.algorithm)
+			if err != nil {
+				return PublicKeySet{}, fmt.Errorf("server: build jwk: %w", err)
+			}
+			result.Keys = append(result.Keys, PublicJWK{jwk: jwk.WithKeyID(info.KeyID), keyID: info.KeyID})
 		}
-		result.Keys = append(result.Keys, PublicJWK{jwk: jwk.WithKeyID(info.KeyID), keyID: info.KeyID})
 	}
 	return result, nil
+}
+
+// resolvePublicKeys returns every key currently valid for use: the
+// single key PublicKey returns, or, when use.manager implements
+// keys.RotatingKeyManager, every key PublicKeys returns instead.
+func resolvePublicKeys(ctx context.Context, use signingKeyUse) ([]keys.PublicKeyInfo, error) {
+	if rotating, ok := use.manager.(keys.RotatingKeyManager); ok {
+		set, err := rotating.PublicKeys(ctx, use.purpose, use.algorithm)
+		if err != nil {
+			return nil, err
+		}
+		return set.Keys, nil
+	}
+	info, err := use.manager.PublicKey(ctx, use.purpose, use.algorithm)
+	if err != nil {
+		return nil, err
+	}
+	return []keys.PublicKeyInfo{info}, nil
 }

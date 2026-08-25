@@ -121,3 +121,36 @@ type KeyManager interface {
 	// without ever holding the private key itself.
 	PublicKey(ctx context.Context, purpose SigningPurpose, algorithm fapi.SignatureAlgorithm) (PublicKeyInfo, error)
 }
+
+// SigningKeySet is the set of keys currently valid for a signing
+// purpose and algorithm — ordinarily exactly one, but more than one
+// during a rotation's overlap window. Mirrors VerificationKeySet's (and
+// IssuerKeySet's, and ClientEncryptionKeySet's) own "may return more
+// than one when mid-rotation" contract, applied to this party's own
+// keys rather than a remote party's.
+type SigningKeySet struct {
+	Keys []PublicKeyInfo
+}
+
+// RotatingKeyManager is KeyManager's optional extension for a backend
+// that can publish more than one currently-valid key per purpose during
+// a rotation's overlap window — e.g. a KMS alias briefly holding both
+// an outgoing and incoming key version, or an embedder-managed grace
+// period after cutting to a new key. Sign is unaffected by this: it
+// always signs with whatever single key the implementation currently
+// considers active; only publication needs the wider set, so this is
+// additive to KeyManager, never a replacement for anything KeyManager
+// itself declares. A KeyManager that only ever has one key per purpose
+// (keys/ephemeral, NewKeyManagerFromSigners) has no reason to implement
+// this — server.PublicJWKS falls back to PublicKey when it isn't
+// implemented.
+type RotatingKeyManager interface {
+	KeyManager
+
+	// PublicKeys returns every key currently valid for purpose and
+	// algorithm — normally the single key PublicKey would also return,
+	// but more than one while a rotation is in its overlap window, so a
+	// verifier can still validate a signature made under the outgoing
+	// key until every such signature has expired.
+	PublicKeys(ctx context.Context, purpose SigningPurpose, algorithm fapi.SignatureAlgorithm) (SigningKeySet, error)
+}

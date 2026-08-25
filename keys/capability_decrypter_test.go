@@ -6,6 +6,8 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
+	"fmt"
 	"testing"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -22,9 +24,9 @@ type testUnwrapper struct {
 	purpose keys.DecryptionPurpose
 }
 
-func (u testUnwrapper) UnwrapCEK(ctx context.Context, alg fapi.KeyManagementAlgorithm, encryptedKey []byte, epk *ecdh.PublicKey) ([]byte, error) {
+func (u testUnwrapper) UnwrapCEK(ctx context.Context, alg fapi.KeyManagementAlgorithm, keyID string, encryptedKey []byte, epk *ecdh.PublicKey) ([]byte, error) {
 	return u.d.UnwrapContentEncryptionKey(ctx, keys.UnwrapRequest{
-		Purpose: u.purpose, Algorithm: alg, EncryptedKey: encryptedKey, EphemeralPublicKey: epk,
+		Purpose: u.purpose, Algorithm: alg, KeyID: keyID, EncryptedKey: encryptedKey, EphemeralPublicKey: epk,
 	})
 }
 
@@ -292,5 +294,86 @@ func TestNewDecrypterUnwrapRejectsMissingEphemeralPublicKey(t *testing.T) {
 		Purpose: keys.IDTokenDecryption, Algorithm: fapi.ECDHESA256KW, EncryptedKey: []byte("wrapped"),
 	}); err == nil {
 		t.Fatal("UnwrapContentEncryptionKey(missing epk) = nil error, want error")
+	}
+}
+
+// multiKeyRSA is a KeyDecrypter fake holding more than one RSA key,
+// selecting among them by the keyID DecryptKey receives — the shape a
+// real backend would take to service decryption through a key
+// rotation's overlap window, proving the kid threaded through
+// UnwrapRequest/Unwrapper (see internal/jwe's own
+// TestDecryptForwardsHeaderKeyIDToUnwrapper) actually reaches the point
+// where it matters: selecting which of several registered keys to use.
+type multiKeyRSA struct {
+	keys      map[string]*rsa.PrivateKey
+	activeKID string
+}
+
+func (m *multiKeyRSA) PublicKey(context.Context) (keys.PublicKeyInfo, error) {
+	return keys.PublicKeyInfo{KeyID: m.activeKID, PublicKey: &m.keys[m.activeKID].PublicKey}, nil
+}
+
+func (m *multiKeyRSA) DecryptKey(_ context.Context, keyID string, alg fapi.KeyManagementAlgorithm, wrapped []byte) ([]byte, error) {
+	if alg != fapi.RSAOAEP256 {
+		return nil, fmt.Errorf("multiKeyRSA: unsupported algorithm %v", alg)
+	}
+	priv, ok := m.keys[keyID]
+	if !ok {
+		return nil, fmt.Errorf("multiKeyRSA: no key registered for kid %q", keyID)
+	}
+	return rsa.DecryptOAEP(sha256.New(), rand.Reader, priv, wrapped, nil)
+}
+
+// TestNewDecrypterServicesOutgoingKeyDuringRotation proves the actual
+// rotation scenario Part B exists for: a JWE encrypted under a key that
+// has since been rotated out (the AS was still using a cached JWKS
+// entry, or simply hadn't caught up yet) still decrypts correctly,
+// because the JWE's own "kid" reaches the backend and it still holds
+// that key alongside the new one.
+func TestNewDecrypterServicesOutgoingKeyDuringRotation(t *testing.T) {
+	outgoing, newest := generateRSAKey(t), generateRSAKey(t)
+	backend := &multiKeyRSA{
+		keys:      map[string]*rsa.PrivateKey{"outgoing-kid": outgoing, "newest-kid": newest},
+		activeKID: "newest-kid",
+	}
+	dec, err := keys.NewSingleKeyDecrypter(backend)
+	if err != nil {
+		t.Fatalf("NewSingleKeyDecrypter: %v", err)
+	}
+	unwrapper := testUnwrapper{d: dec, purpose: keys.IDTokenDecryption}
+
+	// A JWE encrypted to the outgoing key, carrying its kid — as if it
+	// were encrypted before, or during, the rotation.
+	plaintext := []byte("issued just before rotation completed")
+	compact, err := jwe.Encrypt(jwe.EncryptRequest{
+		Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM,
+		RecipientKey: &outgoing.PublicKey, KeyID: "outgoing-kid", Plaintext: plaintext,
+	})
+	if err != nil {
+		t.Fatalf("jwe.Encrypt: %v", err)
+	}
+	result, err := jwe.Decrypt(context.Background(), jwe.DecryptRequest{
+		Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM, RecipientKey: unwrapper, Compact: compact,
+	})
+	if err != nil {
+		t.Fatalf("jwe.Decrypt(outgoing key JWE): %v", err)
+	}
+	if !bytes.Equal(result.Plaintext, plaintext) {
+		t.Fatalf("Plaintext = %q, want %q", result.Plaintext, plaintext)
+	}
+
+	// The newest key must still work too — rotation doesn't drop the
+	// forward path.
+	compact2, err := jwe.Encrypt(jwe.EncryptRequest{
+		Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM,
+		RecipientKey: &newest.PublicKey, KeyID: "newest-kid", Plaintext: plaintext,
+	})
+	if err != nil {
+		t.Fatalf("jwe.Encrypt: %v", err)
+	}
+	if _, err := jwe.Decrypt(context.Background(), jwe.DecryptRequest{
+		Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM, RecipientKey: unwrapper, Compact: compact2,
+	}); err != nil {
+		t.Fatalf("jwe.Decrypt(newest key JWE): %v", err)
 	}
 }

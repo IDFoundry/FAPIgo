@@ -29,12 +29,22 @@ const (
 )
 
 // UnwrapRequest describes one content-encryption key to recover.
-// EncryptedKey and EphemeralPublicKey come from the unverified header of
-// the JWE being opened — safe to use only as inputs to the unwrap
-// operation itself, never as something to trust ahead of it.
+// EncryptedKey, EphemeralPublicKey, and KeyID come from the unverified
+// header of the JWE being opened — safe to use only as inputs to the
+// unwrap operation itself, never as something to trust ahead of it.
 type UnwrapRequest struct {
 	Purpose   DecryptionPurpose
 	Algorithm fapi.KeyManagementAlgorithm
+
+	// KeyID is the JWE header's "kid", or "" if the header didn't carry
+	// one. An implementation holding more than one registered key for
+	// Purpose — e.g. mid-rotation, an outgoing key kept alongside an
+	// incoming one — uses it to select which key to attempt; an
+	// implementation with exactly one key can ignore it. Like every
+	// other header value it's a routing hint only, never proof by
+	// itself of which key produced this ciphertext — only a successful
+	// unwrap confirms that.
+	KeyID string
 
 	// EncryptedKey is the JWE's "encrypted_key" — the wire-format
 	// wrapped content-encryption key.

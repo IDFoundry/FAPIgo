@@ -196,6 +196,62 @@ func TestFetchUserInfoDecryptsSignedThenEncryptedResponse(t *testing.T) {
 	}
 }
 
+// TestFetchUserInfoDecryptsResponseWithMissingContentType covers the
+// same tolerance decryptIDToken applies: RFC 7519 §5.2's "cty MUST be
+// JWT for a nested JWT" is an obligation on whoever built the JWE, not
+// a gate this module enforces on decrypt, and real-world encrypters
+// routinely omit cty — an absent cty must not by itself fail an
+// otherwise-valid encrypted UserInfo response.
+func TestFetchUserInfoDecryptsResponseWithMissingContentType(t *testing.T) {
+	userInfoKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate userinfo key: %v", err)
+	}
+	decrypter, err := ephemeral.NewKeyManagerWithDecryption(nil, map[keys.DecryptionPurpose]fapi.KeyManagementAlgorithm{
+		keys.UserInfoDecryption: fapi.ECDHESA256KW,
+	})
+	if err != nil {
+		t.Fatalf("NewKeyManagerWithDecryption: %v", err)
+	}
+	info, err := decrypter.EncryptionPublicKey(context.Background(), keys.UserInfoDecryption, fapi.ECDHESA256KW)
+	if err != nil {
+		t.Fatalf("EncryptionPublicKey: %v", err)
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		signed := signUserInfoJWS(t, userInfoKey, map[string]any{"sub": userInfoTestSubject, "name": "Ada"})
+		// ContentType deliberately omitted, unlike
+		// TestFetchUserInfoDecryptsSignedThenEncryptedResponse above
+		// which always sets it to "JWT".
+		encrypted, err := jwe.Encrypt(jwe.EncryptRequest{
+			Algorithm: fapi.ECDHESA256KW, Encryption: fapi.A256GCM,
+			RecipientKey: info.PublicKey, Plaintext: []byte(signed),
+		})
+		if err != nil {
+			t.Fatalf("jwe.Encrypt: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/jwt")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(encrypted))
+	}))
+	defer ts.Close()
+
+	c := newUserInfoTestClient(t, ts, &userInfoKey.PublicKey, func(cfg *client.Config) {
+		cfg.Algorithms.UserInfoKeyManagement = fapi.ECDHESA256KW
+		cfg.Algorithms.UserInfoContentEncryption = fapi.A256GCM
+	}, func(deps *client.Dependencies) {
+		deps.Decryption = decrypter
+	})
+
+	got, err := c.FetchUserInfo(context.Background(), userInfoTestTokens())
+	if err != nil {
+		t.Fatalf("FetchUserInfo(missing cty): %v", err)
+	}
+	if got.Subject != userInfoTestSubject {
+		t.Errorf("Subject = %q, want %q", got.Subject, userInfoTestSubject)
+	}
+}
+
 func TestFetchUserInfoRejectsSubjectMismatch(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

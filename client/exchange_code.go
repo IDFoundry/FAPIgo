@@ -281,24 +281,33 @@ func (c *Client) decryptIDToken(ctx context.Context, raw string) (string, *Error
 	if err != nil {
 		return "", newError(ErrorInvalidResponse, "ID token decryption failed", err)
 	}
-	// RFC 7519 §5.2: "In the case that nested signing or encryption is
-	// employed, this Header Parameter MUST be present; in this case,
-	// the value MUST be 'JWT'" — verified directly against the RFC, not
-	// assumed. Compared per RFC 7515 §4.1.10's media-type rules (case
+	// RFC 7519 §5.2 requires a producer of a nested JWT to set cty to
+	// "JWT", but that obligation falls on the party that built the JWE,
+	// not on this module as its consumer — and real-world encrypters
+	// routinely omit cty in practice. Since this call site only ever
+	// asks for a JWE it already expects to hold an ID token, an absent
+	// cty doesn't itself mean the payload isn't one; only a
+	// present-but-different cty does. When cty is present, it's
+	// compared per RFC 7515 §4.1.10's media-type rules (case
 	// insensitive, an "application/"-prefixed form is equivalent),
 	// exactly the rule this module's own request-object "typ" check
 	// already applies for the same reason.
-	if !isNestedJWTContentType(result.Header.ContentType) {
-		return "", newError(ErrorInvalidResponse, `decrypted ID token is not a nested JWT (cty must be "JWT")`, nil)
+	if !isAcceptableNestedJWTContentType(result.Header.ContentType) {
+		return "", newError(ErrorInvalidResponse, `decrypted ID token is not a nested JWT (cty, if present, must be "JWT")`, nil)
 	}
 	return string(result.Plaintext), nil
 }
 
-// isNestedJWTContentType reports whether cty, a JWE header's "cty"
-// value, identifies a nested JWT payload — see decryptIDToken's own doc
-// comment for the RFC basis of the case-insensitive, "application/"-
-// prefix-tolerant comparison.
-func isNestedJWTContentType(cty string) bool {
+// isAcceptableNestedJWTContentType reports whether cty, a JWE header's
+// optional "cty" value, is consistent with identifying a nested JWT
+// payload — see decryptIDToken's own doc comment for why an empty cty
+// is accepted rather than rejected, and for the RFC basis of the
+// case-insensitive, "application/"-prefix-tolerant comparison applied
+// when cty is present.
+func isAcceptableNestedJWTContentType(cty string) bool {
+	if cty == "" {
+		return true
+	}
 	return strings.TrimPrefix(strings.ToLower(cty), "application/") == "jwt"
 }
 

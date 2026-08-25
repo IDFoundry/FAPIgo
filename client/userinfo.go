@@ -154,8 +154,8 @@ func (c *Client) decryptUserInfoJWE(ctx context.Context, raw string) (string, *E
 	if err != nil {
 		return "", newError(ErrorInvalidResponse, "UserInfo response decryption failed", err)
 	}
-	if !isNestedJWTContentType(result.Header.ContentType) {
-		return "", newError(ErrorInvalidResponse, `decrypted UserInfo response is not a nested JWT (cty must be "JWT")`, nil)
+	if !isAcceptableNestedJWTContentType(result.Header.ContentType) {
+		return "", newError(ErrorInvalidResponse, `decrypted UserInfo response is not a nested JWT (cty, if present, must be "JWT")`, nil)
 	}
 	return string(result.Plaintext), nil
 }

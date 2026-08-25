@@ -23,9 +23,4 @@ var (
 	// ErrPrivateKeyMaterial indicates a JWK contained a private-key
 	// component (e.g. "d", "k") where only a public key is acceptable.
 	ErrPrivateKeyMaterial = errors.New("jose: jwk contains private key material")
-
-	// ErrCertificateChain indicates a JWK contained an x5c/x5u/x5t
-	// member. This module never trusts a certificate chain embedded in
-	// a caller-supplied JWK.
-	ErrCertificateChain = errors.New("jose: jwk certificate chain not permitted")
 )

@@ -116,13 +116,19 @@ func (k JWK) MarshalJSON() ([]byte, error) {
 }
 
 // ParseJWK parses and validates a public JWK from untrusted wire data,
-// checking it against alg. It rejects any member indicating private key
-// material (e.g. "d", "k") or an embedded certificate chain ("x5c",
-// "x5u", "x5t", "x5t#S256"), and rejects any member it does not
-// recognize.
+// checking it against alg. It rejects any member indicating private
+// key material (e.g. "d", "k") — a "public" JWK unexpectedly carrying
+// that is either a server bug leaking private keys or actively
+// malicious, not something to tolerate. Every other member this
+// package doesn't act on (e.g. "x5c", "x5u", "x5t", "x5t#S256", "use")
+// is ignored, not rejected: RFC 7517 §4 requires exactly this —
+// "Additional members can be present in the JWK; if not understood by
+// implementations encountering them, they MUST be ignored" — and this
+// package never resolves a key via its certificate chain, so an x5c
+// present alongside otherwise-valid key material changes nothing about
+// which key gets used.
 func ParseJWK(data []byte, alg fapi.SignatureAlgorithm) (JWK, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
 	var raw rawJWK
 	if err := dec.Decode(&raw); err != nil {
 		return JWK{}, fmt.Errorf("jose: parse jwk: %w", err)
@@ -130,9 +136,6 @@ func ParseJWK(data []byte, alg fapi.SignatureAlgorithm) (JWK, error) {
 	if raw.D != nil || raw.K != nil || raw.P != nil || raw.Q != nil ||
 		raw.Dp != nil || raw.Dq != nil || raw.Qi != nil {
 		return JWK{}, ErrPrivateKeyMaterial
-	}
-	if raw.X5c != nil || raw.X5u != nil || raw.X5t != nil || raw.X5tS256 != nil {
-		return JWK{}, ErrCertificateChain
 	}
 
 	var pub crypto.PublicKey
@@ -205,10 +208,13 @@ func (t Thumbprint) Equal(other Thumbprint) bool {
 	return t == other
 }
 
-// rawJWK is the wire representation of a JWK (RFC 7517). Fields beyond
-// the public-key members are listed explicitly so ParseJWK can detect
-// and reject private-key or certificate-chain material by name, while
-// DisallowUnknownFields rejects anything not listed here at all.
+// rawJWK is the wire representation of a JWK (RFC 7517). Only the
+// public-key members this package acts on, plus the private-key
+// members it explicitly checks for and rejects, are listed here —
+// every other member (certificate-chain hints, "use", "key_ops", ...)
+// is left for encoding/json's own default behavior (silently ignored)
+// rather than modeled, per RFC 7517 §4's own ignore-unknown-members
+// rule; see ParseJWK's doc comment.
 type rawJWK struct {
 	Kty string `json:"kty"`
 	Crv string `json:"crv,omitempty"`
@@ -217,14 +223,12 @@ type rawJWK struct {
 	N   string `json:"n,omitempty"`
 	E   string `json:"e,omitempty"`
 
-	Use    string          `json:"use,omitempty"`
-	KeyOps json.RawMessage `json:"key_ops,omitempty"`
-	Alg    string          `json:"alg,omitempty"`
-	Kid    string          `json:"kid,omitempty"`
+	Alg string `json:"alg,omitempty"`
+	Kid string `json:"kid,omitempty"`
 
-	// Presence of any of the following indicates private key material
-	// or an embedded certificate chain, neither of which is acceptable
-	// in a public JWK used for DPoP or request-object verification.
+	// Presence of any of the following indicates private key material,
+	// not acceptable in a public JWK used for DPoP or request-object
+	// verification.
 	D  json.RawMessage `json:"d,omitempty"`
 	K  json.RawMessage `json:"k,omitempty"`
 	P  json.RawMessage `json:"p,omitempty"`
@@ -232,11 +236,6 @@ type rawJWK struct {
 	Dp json.RawMessage `json:"dp,omitempty"`
 	Dq json.RawMessage `json:"dq,omitempty"`
 	Qi json.RawMessage `json:"qi,omitempty"`
-
-	X5c     json.RawMessage `json:"x5c,omitempty"`
-	X5u     json.RawMessage `json:"x5u,omitempty"`
-	X5t     json.RawMessage `json:"x5t,omitempty"`
-	X5tS256 json.RawMessage `json:"x5t#S256,omitempty"`
 }
 
 func validateKeyForAlgorithm(pub crypto.PublicKey, alg fapi.SignatureAlgorithm) error {

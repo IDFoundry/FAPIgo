@@ -171,7 +171,12 @@ func TestSignRejectsMismatchedHeaderJWK(t *testing.T) {
 	}
 }
 
-func TestParseCompactRejectsUnknownHeaderField(t *testing.T) {
+// TestParseCompactRejectsUnknownCriticalHeaderField covers RFC 7515
+// §4.1.11: "crit" naming a Header Parameter this package doesn't
+// understand and process makes the whole JWS invalid — an issuer
+// marking something critical that this package would otherwise
+// silently ignore is exactly the case "crit" exists to catch.
+func TestParseCompactRejectsUnknownCriticalHeaderField(t *testing.T) {
 	// {"alg":"ES256","crit":["foo"]}
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256","crit":["foo"]}`))
 	payload := base64.RawURLEncoding.EncodeToString([]byte(`{}`))
@@ -179,7 +184,50 @@ func TestParseCompactRejectsUnknownHeaderField(t *testing.T) {
 	token := header + "." + payload + "." + sig
 
 	if _, err := ParseCompact(token); err == nil {
-		t.Fatalf("ParseCompact with unknown header field = nil error, want error")
+		t.Fatalf("ParseCompact with unknown critical header field = nil error, want error")
+	}
+}
+
+// TestParseCompactIgnoresUnknownNonCriticalHeaderField covers RFC 7515
+// §4.2/§4.3: a Public or Private Header Parameter Name this package
+// doesn't act on (here, a made-up "x5t" — a real issuer's own
+// certificate-thumbprint member) must be ignored, not rejected, as
+// long as it isn't named in "crit". The header is entirely
+// signature-covered, so this can't weaken what Verify checks.
+func TestParseCompactIgnoresUnknownNonCriticalHeaderField(t *testing.T) {
+	// {"alg":"ES256","x5t":"unused-thumbprint"}
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256","x5t":"unused-thumbprint"}`))
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{}`))
+	sig := base64.RawURLEncoding.EncodeToString(make([]byte, 64))
+	token := header + "." + payload + "." + sig
+
+	compact, err := ParseCompact(token)
+	if err != nil {
+		t.Fatalf("ParseCompact with unknown non-critical header field = %v, want nil error", err)
+	}
+	if compact.Header.Algorithm != fapi.ES256 {
+		t.Fatalf("Header.Algorithm = %v, want ES256", compact.Header.Algorithm)
+	}
+}
+
+// TestParseCompactAcceptsUnderstoodCriticalHeaderField confirms a
+// "crit" list naming only parameters this package does understand
+// doesn't reject — crit's job is to catch what would otherwise be
+// silently ignored, not to reject a header for expressing normal
+// requirements.
+func TestParseCompactAcceptsUnderstoodCriticalHeaderField(t *testing.T) {
+	// {"alg":"ES256","kid":"key-1","crit":["kid"]}
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256","kid":"key-1","crit":["kid"]}`))
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{}`))
+	sig := base64.RawURLEncoding.EncodeToString(make([]byte, 64))
+	token := header + "." + payload + "." + sig
+
+	compact, err := ParseCompact(token)
+	if err != nil {
+		t.Fatalf("ParseCompact with understood critical header field = %v, want nil error", err)
+	}
+	if compact.Header.KeyID != "key-1" {
+		t.Fatalf("Header.KeyID = %q, want %q", compact.Header.KeyID, "key-1")
 	}
 }
 

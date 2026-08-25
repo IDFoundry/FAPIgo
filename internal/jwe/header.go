@@ -9,6 +9,7 @@ import (
 	"math/big"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/critical"
 )
 
 // p256CoordinateSize is the fixed byte width of an EC public key
@@ -17,10 +18,16 @@ import (
 const p256CoordinateSize = 32
 
 // Header is a JWE protected header. Only the members this package's
-// supported operations need are represented. Parsing rejects any header
-// member not listed here — the protected header is authenticated
-// (it's the JWE AAD), so an unrecognized member is refused rather than
-// silently ignored.
+// supported operations need are represented, but that does not make
+// this a closed allow-list: RFC 7516 §4.2/§4.3 requires any Public or
+// Private Header Parameter Name a recipient doesn't act on (e.g. an
+// issuer's own "iss"/"aud") to be ignored, not rejected — the header
+// is authenticated as JWE AAD either way, so an unrecognized
+// informational member can't weaken what Decrypt checks. The one
+// member enforced beyond what's modeled here is "crit" (RFC 7516
+// §4.1.13, which inherits RFC 7515 §4.1.11's rule): every name it
+// lists must be one this parser actually understands and processes,
+// or parsing fails outright.
 type Header struct {
 	Algorithm   fapi.KeyManagementAlgorithm
 	Encryption  fapi.ContentEncryptionAlgorithm
@@ -35,11 +42,19 @@ type Header struct {
 }
 
 type rawHeader struct {
-	Alg string  `json:"alg"`
-	Enc string  `json:"enc"`
-	Cty string  `json:"cty,omitempty"`
-	Kid string  `json:"kid,omitempty"`
-	Epk *rawEPK `json:"epk,omitempty"`
+	Alg  string   `json:"alg"`
+	Enc  string   `json:"enc"`
+	Cty  string   `json:"cty,omitempty"`
+	Kid  string   `json:"kid,omitempty"`
+	Epk  *rawEPK  `json:"epk,omitempty"`
+	Crit []string `json:"crit,omitempty"`
+}
+
+// understoodHeaderParams is every JWE Header Parameter name this
+// package's Header type models and processes — the set a "crit" list
+// (RFC 7516 §4.1.13) is checked against.
+var understoodHeaderParams = map[string]bool{
+	"alg": true, "enc": true, "cty": true, "kid": true, "epk": true, "crit": true,
 }
 
 // rawEPK is the wire representation of an ephemeral EC public key (RFC
@@ -69,9 +84,11 @@ func marshalHeader(h Header) ([]byte, error) {
 
 func parseHeader(data []byte) (Header, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
 	var raw rawHeader
 	if err := dec.Decode(&raw); err != nil {
+		return Header{}, fmt.Errorf("jwe: parse header: %w", err)
+	}
+	if err := critical.Check(raw.Crit, understoodHeaderParams); err != nil {
 		return Header{}, fmt.Errorf("jwe: parse header: %w", err)
 	}
 	alg, err := fapi.ParseKeyManagementAlgorithm(raw.Alg)

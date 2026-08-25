@@ -19,8 +19,8 @@ type decrypterUnwrapper struct {
 }
 
 // UnwrapCEK implements internal/jwe.Unwrapper.
-func (u decrypterUnwrapper) UnwrapCEK(ctx context.Context, alg fapi.KeyManagementAlgorithm, encryptedKey []byte, ephemeralPublicKey *ecdh.PublicKey) ([]byte, error) {
+func (u decrypterUnwrapper) UnwrapCEK(ctx context.Context, alg fapi.KeyManagementAlgorithm, keyID string, encryptedKey []byte, ephemeralPublicKey *ecdh.PublicKey) ([]byte, error) {
 	return u.decrypter.UnwrapContentEncryptionKey(ctx, keys.UnwrapRequest{
-		Purpose: u.purpose, Algorithm: alg, EncryptedKey: encryptedKey, EphemeralPublicKey: ephemeralPublicKey,
+		Purpose: u.purpose, Algorithm: alg, KeyID: keyID, EncryptedKey: encryptedKey, EphemeralPublicKey: ephemeralPublicKey,
 	})
 }

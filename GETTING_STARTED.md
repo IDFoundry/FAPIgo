@@ -359,3 +359,61 @@ go run ./cmd/conformance-as -config <path> -cert <path> -key <path>
 See `conformance/server/scripts/README.md` for the full local setup
 procedure (it's written for conformance-suite testing, but the binary
 it runs is the same one this guide has been describing).
+
+## 9. Rotating a signing key
+
+`keys.KeyManager` never dictates a key's lifecycle — that's your
+`Dependencies.Keys` implementation's own concern — but doing it without
+a verification gap needs your implementation to also satisfy
+`keys.RotatingKeyManager` (see `keys/doc.go`), and needs the steps done
+in the right order:
+
+1. Provision the new key wherever your `KeyManager` sources keys from
+   (a new KMS key version, a new HSM slot, …). Don't touch `Sign` or
+   `PublicKey` yet — both should still resolve to the outgoing key.
+2. Implement `keys.RotatingKeyManager` on your `KeyManager` (if it
+   doesn't already) so `PublicKeys` returns **both** the outgoing and
+   the new key. Deploy this alone first: `PublicJWKS()` now advertises
+   both kids, but `Sign` still uses the outgoing one, so nothing a
+   verifier does today changes yet — this step is purely "let every
+   consumer's JWKS cache catch up before it matters."
+3. Wait out whatever cache TTL the parties verifying your tokens use
+   for your JWKS — this module's own `keys.NewJWKSIssuerKeySource` (a
+   client resolving your keys) refetches promptly on an unrecognized
+   kid, but you may have consumers you don't control caching longer.
+   When in doubt, wait longer than you think you need to; this step
+   costs nothing but time.
+4. Cut `Sign`/`PublicKey` over to the new key. New ID tokens, JWT
+   access tokens, and (under `ProfileFAPISecurityWithMessageSigning`)
+   JARM responses are now signed with it. Keep `PublicKeys` returning
+   both keys — this is the step every already-issued-but-not-yet-
+   expired token depends on.
+5. Keep publishing the outgoing key from `PublicKeys` for at least as
+   long as the longest-lived artifact signed under it can still be
+   presented for verification, counted from the moment you cut over in
+   step 4, not from when you started: `Limits.IDTokenLifetime`, and
+   `Limits.AccessTokenLifetime` too if `Dependencies.AccessTokens` is
+   `JWTAccessTokens` (opaque access tokens aren't signed, so they don't
+   count). `Limits.JARMResponseLifetime` bounds the same thing for JARM,
+   though in practice a JARM response is verified once at the redirect
+   callback and essentially never again later in its nominal lifetime,
+   so it's the lowest-risk of the three. Drop the outgoing key from
+   `PublicKeys` any sooner than this and you'll reject a token that's
+   still legitimately valid.
+6. Only after that window has fully elapsed, stop returning the
+   outgoing key from `PublicKey`/`PublicKeys`, and only then destroy or
+   retire it in your KMS/HSM — never the other way around.
+
+The mirror case — a **client** rotating its own ID-token/UserInfo
+decryption key (`keys.Decrypter`, `keys.ECDHAgreer`/`KeyDecrypter` — see
+`keys/doc.go`) — isn't covered by this guide (it's `client`'s
+dependency, not `server`'s), but the direction of control is reversed
+in a way worth knowing about: there's no `Limits` field to bound the
+overlap by, because it isn't this server's own artifact aging out —
+it's whichever authorization server(s) the client talks to, and how
+long *they* cache the client's registered encryption key before
+picking up its new one. A rotating client should keep decrypting under
+its outgoing key (a backend that selects by the `keyID`
+`UnwrapRequest` carries) for as long as it's willing to assume some AS
+might still hold a stale cached copy of its JWKS — inherently a guess,
+not a number this module can compute for you.

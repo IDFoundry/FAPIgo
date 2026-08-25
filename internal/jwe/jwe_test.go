@@ -519,10 +519,15 @@ type fakeUnwrapper struct {
 	// test can confirm Decrypt threads its own ctx through rather than
 	// silently substituting context.Background().
 	ctxSeen context.Context
+	// keyIDSeen records the keyID UnwrapCEK was actually called with, so
+	// a test can confirm Decrypt forwards the header's own "kid" rather
+	// than dropping it.
+	keyIDSeen string
 }
 
-func (f *fakeUnwrapper) UnwrapCEK(ctx context.Context, alg fapi.KeyManagementAlgorithm, encryptedKey []byte, epk *ecdh.PublicKey) ([]byte, error) {
+func (f *fakeUnwrapper) UnwrapCEK(ctx context.Context, alg fapi.KeyManagementAlgorithm, keyID string, encryptedKey []byte, epk *ecdh.PublicKey) ([]byte, error) {
 	f.ctxSeen = ctx
+	f.keyIDSeen = keyID
 	if alg != f.alg {
 		return nil, fmt.Errorf("fakeUnwrapper: alg = %v, want %v", alg, f.alg)
 	}
@@ -549,6 +554,30 @@ func TestDecryptDispatchesToUnwrapper(t *testing.T) {
 	}
 	if unwrapper.ctxSeen == nil || unwrapper.ctxSeen.Value(ctxKey{}) != "marker" {
 		t.Fatalf("Unwrapper did not receive Decrypt's own ctx")
+	}
+}
+
+// TestDecryptForwardsHeaderKeyIDToUnwrapper confirms Decrypt passes the
+// JWE header's own "kid" through to Unwrapper rather than discarding
+// it — the wiring an Unwrapper backed by more than one registered key
+// (e.g. mid-rotation) needs to select the right one.
+func TestDecryptForwardsHeaderKeyIDToUnwrapper(t *testing.T) {
+	priv := generateRSAKey(t)
+	plaintext := []byte("secret")
+	compact, err := Encrypt(EncryptRequest{
+		Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM, RecipientKey: &priv.PublicKey,
+		KeyID: "rotation-kid-2", Plaintext: plaintext,
+	})
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+
+	unwrapper := &fakeUnwrapper{alg: fapi.RSAOAEP256, key: priv}
+	if _, err := Decrypt(context.Background(), DecryptRequest{Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM, RecipientKey: unwrapper, Compact: compact}); err != nil {
+		t.Fatalf("Decrypt: %v", err)
+	}
+	if unwrapper.keyIDSeen != "rotation-kid-2" {
+		t.Fatalf("keyIDSeen = %q, want %q", unwrapper.keyIDSeen, "rotation-kid-2")
 	}
 }
 

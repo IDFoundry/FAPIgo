@@ -25,10 +25,13 @@ type RecipientKey interface {
 // live in one place rather than being reimplemented by every backend.
 // This is the primitive an HSM's CKM_ECDH1_DERIVE or AWS KMS's
 // DeriveSharedSecret exposes; a backend implements it without ever
-// handing its private key to this process.
+// handing its private key to this process. keyID is the JWE header's
+// "kid" (see UnwrapRequest.KeyID) — a backend that only ever holds one
+// key can ignore it; one holding more than one (e.g. mid-rotation) uses
+// it to select which private key to agree with.
 type ECDHAgreer interface {
 	RecipientKey
-	AgreeSharedSecret(ctx context.Context, epk *ecdh.PublicKey) (z []byte, err error)
+	AgreeSharedSecret(ctx context.Context, keyID string, epk *ecdh.PublicKey) (z []byte, err error)
 }
 
 // KeyDecrypter delegates the RSAOAEP256 asymmetric key-transport
@@ -37,10 +40,11 @@ type ECDHAgreer interface {
 // since RSA-OAEP's decrypt output is the CEK directly. This is the
 // primitive a PKCS#11 CKM_RSA_PKCS_OAEP call or a managed KMS's
 // asymmetric decrypt operation (AWS, GCP, Azure all support RSA-OAEP
-// non-exportably) exposes.
+// non-exportably) exposes. keyID is the JWE header's "kid" — see
+// ECDHAgreer.AgreeSharedSecret's doc comment for the same contract.
 type KeyDecrypter interface {
 	RecipientKey
-	DecryptKey(ctx context.Context, alg fapi.KeyManagementAlgorithm, wrapped []byte) (cek []byte, err error)
+	DecryptKey(ctx context.Context, keyID string, alg fapi.KeyManagementAlgorithm, wrapped []byte) (cek []byte, err error)
 }
 
 // capabilityDecrypter implements Decrypter over one RecipientKey per
@@ -100,7 +104,7 @@ func (d *capabilityDecrypter) UnwrapContentEncryptionKey(ctx context.Context, re
 		if req.EphemeralPublicKey == nil {
 			return nil, fmt.Errorf("keys: %v requires an ephemeral public key", req.Algorithm)
 		}
-		z, err := agreer.AgreeSharedSecret(ctx, req.EphemeralPublicKey)
+		z, err := agreer.AgreeSharedSecret(ctx, req.KeyID, req.EphemeralPublicKey)
 		if err != nil {
 			return nil, fmt.Errorf("keys: ecdh agreement: %w", err)
 		}
@@ -111,7 +115,7 @@ func (d *capabilityDecrypter) UnwrapContentEncryptionKey(ctx context.Context, re
 		if !ok {
 			return nil, fmt.Errorf("keys: backend for decryption purpose %v does not support %v", req.Purpose, req.Algorithm)
 		}
-		return decrypter.DecryptKey(ctx, req.Algorithm, req.EncryptedKey)
+		return decrypter.DecryptKey(ctx, req.KeyID, req.Algorithm, req.EncryptedKey)
 
 	default:
 		return nil, fmt.Errorf("keys: unsupported key management algorithm %v", req.Algorithm)

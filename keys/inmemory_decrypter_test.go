@@ -1,11 +1,13 @@
 package keys_test
 
 import (
+	"context"
 	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/rsa"
 	"testing"
 
+	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/keys"
 )
 
@@ -38,5 +40,48 @@ func TestNewInMemoryRSARejectsSmallKey(t *testing.T) {
 	}
 	if _, err := keys.NewInMemoryRSA(priv, "kid"); err == nil {
 		t.Fatal("NewInMemoryRSA(1024-bit key) = nil error, want error")
+	}
+}
+
+// TestInMemoryECDHAgreeSharedSecretRejectsMismatchedKeyID confirms this
+// single-key backend fails closed on a keyID that doesn't match its
+// own, rather than silently agreeing under the wrong key anyway.
+func TestInMemoryECDHAgreeSharedSecretRejectsMismatchedKeyID(t *testing.T) {
+	priv, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate ecdh key: %v", err)
+	}
+	backend, err := keys.NewInMemoryECDH(priv, "the-real-kid")
+	if err != nil {
+		t.Fatalf("NewInMemoryECDH: %v", err)
+	}
+	epk, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate epk: %v", err)
+	}
+	if _, err := backend.AgreeSharedSecret(context.Background(), "some-other-kid", epk.PublicKey()); err == nil {
+		t.Fatal("AgreeSharedSecret(mismatched kid) = nil error, want error")
+	}
+	// An empty keyID (caller didn't specify one) must still work — the
+	// check only fires on an actual mismatch.
+	if _, err := backend.AgreeSharedSecret(context.Background(), "", epk.PublicKey()); err != nil {
+		t.Fatalf("AgreeSharedSecret(empty kid) = %v, want success", err)
+	}
+	if _, err := backend.AgreeSharedSecret(context.Background(), "the-real-kid", epk.PublicKey()); err != nil {
+		t.Fatalf("AgreeSharedSecret(matching kid) = %v, want success", err)
+	}
+}
+
+// TestInMemoryRSADecryptKeyRejectsMismatchedKeyID mirrors
+// TestInMemoryECDHAgreeSharedSecretRejectsMismatchedKeyID for the RSA
+// backend.
+func TestInMemoryRSADecryptKeyRejectsMismatchedKeyID(t *testing.T) {
+	priv := generateRSAKey(t)
+	backend, err := keys.NewInMemoryRSA(priv, "the-real-kid")
+	if err != nil {
+		t.Fatalf("NewInMemoryRSA: %v", err)
+	}
+	if _, err := backend.DecryptKey(context.Background(), "some-other-kid", fapi.RSAOAEP256, []byte("wrapped")); err == nil {
+		t.Fatal("DecryptKey(mismatched kid) = nil error, want error")
 	}
 }

@@ -49,10 +49,16 @@ func (k *inMemoryECDH) PublicKey(_ context.Context) (PublicKeyInfo, error) {
 	return PublicKeyInfo{KeyID: k.kid, PublicKey: k.priv.PublicKey()}, nil
 }
 
-// AgreeSharedSecret implements ECDHAgreer.
-func (k *inMemoryECDH) AgreeSharedSecret(_ context.Context, epk *ecdh.PublicKey) ([]byte, error) {
+// AgreeSharedSecret implements ECDHAgreer. This backend holds exactly
+// one key, so keyID is only ever checked, never used to select among
+// several — a non-empty keyID that doesn't match k.kid fails closed
+// rather than silently agreeing under the wrong key.
+func (k *inMemoryECDH) AgreeSharedSecret(_ context.Context, keyID string, epk *ecdh.PublicKey) ([]byte, error) {
 	if epk == nil {
 		return nil, fmt.Errorf("keys: AgreeSharedSecret requires a non-nil ephemeral public key")
+	}
+	if keyID != "" && keyID != k.kid {
+		return nil, fmt.Errorf("keys: AgreeSharedSecret: requested kid %q, this backend holds %q", keyID, k.kid)
 	}
 	return k.priv.ECDH(epk)
 }
@@ -84,10 +90,15 @@ func (k *inMemoryRSA) PublicKey(_ context.Context) (PublicKeyInfo, error) {
 	return PublicKeyInfo{KeyID: k.kid, PublicKey: &k.priv.PublicKey}, nil
 }
 
-// DecryptKey implements KeyDecrypter.
-func (k *inMemoryRSA) DecryptKey(_ context.Context, alg fapi.KeyManagementAlgorithm, wrapped []byte) ([]byte, error) {
+// DecryptKey implements KeyDecrypter. This backend holds exactly one
+// key, so keyID is only ever checked, never used to select among
+// several — see AgreeSharedSecret's own doc comment.
+func (k *inMemoryRSA) DecryptKey(_ context.Context, keyID string, alg fapi.KeyManagementAlgorithm, wrapped []byte) ([]byte, error) {
 	if alg != fapi.RSAOAEP256 {
 		return nil, fmt.Errorf("keys: inMemoryRSA only supports RSAOAEP256, got %v", alg)
+	}
+	if keyID != "" && keyID != k.kid {
+		return nil, fmt.Errorf("keys: DecryptKey: requested kid %q, this backend holds %q", keyID, k.kid)
 	}
 	cek, err := rsa.DecryptOAEP(sha256.New(), rand.Reader, k.priv, wrapped, nil)
 	if err != nil {

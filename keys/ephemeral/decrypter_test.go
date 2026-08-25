@@ -22,9 +22,9 @@ type testUnwrapper struct {
 	purpose keys.DecryptionPurpose
 }
 
-func (u testUnwrapper) UnwrapCEK(ctx context.Context, alg fapi.KeyManagementAlgorithm, encryptedKey []byte, epk *ecdh.PublicKey) ([]byte, error) {
+func (u testUnwrapper) UnwrapCEK(ctx context.Context, alg fapi.KeyManagementAlgorithm, keyID string, encryptedKey []byte, epk *ecdh.PublicKey) ([]byte, error) {
 	return u.d.UnwrapContentEncryptionKey(ctx, keys.UnwrapRequest{
-		Purpose: u.purpose, Algorithm: alg, EncryptedKey: encryptedKey, EphemeralPublicKey: epk,
+		Purpose: u.purpose, Algorithm: alg, KeyID: keyID, EncryptedKey: encryptedKey, EphemeralPublicKey: epk,
 	})
 }
 

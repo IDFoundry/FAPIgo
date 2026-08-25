@@ -201,6 +201,83 @@ func TestPublicJWKSRejectsEmptyKeyID(t *testing.T) {
 	}
 }
 
+// rotatingKeyManager is a keys.RotatingKeyManager fake: Sign/PublicKey
+// always use the newest key (as a real rotation would — new signatures
+// never use an outgoing key), but PublicKeys publishes both, proving
+// PublicJWKS takes the wider set rather than falling back to the
+// single-key path when it's available.
+type rotatingKeyManager struct {
+	outgoing, newest *fakeKeyManager
+}
+
+func (m *rotatingKeyManager) Sign(ctx context.Context, req keys.SigningRequest) (keys.Signature, error) {
+	return m.newest.Sign(ctx, req)
+}
+
+func (m *rotatingKeyManager) PublicKey(ctx context.Context, purpose keys.SigningPurpose, algorithm fapi.SignatureAlgorithm) (keys.PublicKeyInfo, error) {
+	return m.newest.PublicKey(ctx, purpose, algorithm)
+}
+
+func (m *rotatingKeyManager) PublicKeys(ctx context.Context, purpose keys.SigningPurpose, algorithm fapi.SignatureAlgorithm) (keys.SigningKeySet, error) {
+	outgoing, err := m.outgoing.PublicKey(ctx, purpose, algorithm)
+	if err != nil {
+		return keys.SigningKeySet{}, err
+	}
+	newest, err := m.newest.PublicKey(ctx, purpose, algorithm)
+	if err != nil {
+		return keys.SigningKeySet{}, err
+	}
+	return keys.SigningKeySet{Keys: []keys.PublicKeyInfo{outgoing, newest}}, nil
+}
+
+// TestPublicJWKSPublishesRotatingKeySet confirms PublicJWKS prefers
+// RotatingKeyManager.PublicKeys over the single-key PublicKey path when
+// the configured manager implements it, so both the outgoing and the
+// newest key stay published during a rotation's overlap window.
+func TestPublicJWKSPublishesRotatingKeySet(t *testing.T) {
+	km := &rotatingKeyManager{
+		outgoing: &fakeKeyManager{key: generateKey(t), keyID: "outgoing-key"},
+		newest:   &fakeKeyManager{key: generateKey(t), keyID: "newest-key"},
+	}
+	srv := newServerWithKeyManager(t, server.ProfileFAPISecurity, km)
+
+	set, err := srv.PublicJWKS(context.Background())
+	if err != nil {
+		t.Fatalf("PublicJWKS: %v", err)
+	}
+	if len(set.Keys) != 2 {
+		t.Fatalf("len(Keys) = %d, want 2 (outgoing + newest)", len(set.Keys))
+	}
+	seen := map[string]bool{}
+	for _, k := range set.Keys {
+		seen[k.KeyID()] = true
+	}
+	for _, want := range []string{"outgoing-key", "newest-key"} {
+		if !seen[want] {
+			t.Fatalf("Keys missing kid %q; got %v", want, seen)
+		}
+	}
+}
+
+// TestPublicJWKSRotatingKeySetStillDedupes confirms the existing
+// dedup-by-kid behavior still applies when a RotatingKeyManager's
+// PublicKeys happens to return the same kid across purposes (or the
+// outgoing/newest keys happen to collide, though that would be an
+// unusual rotation).
+func TestPublicJWKSRotatingKeySetStillDedupes(t *testing.T) {
+	shared := &fakeKeyManager{key: generateKey(t), keyID: "shared-key"}
+	km := &rotatingKeyManager{outgoing: shared, newest: shared}
+	srv := newServerWithKeyManager(t, server.ProfileFAPISecurity, km)
+
+	set, err := srv.PublicJWKS(context.Background())
+	if err != nil {
+		t.Fatalf("PublicJWKS: %v", err)
+	}
+	if len(set.Keys) != 1 {
+		t.Fatalf("len(Keys) = %d, want 1 (outgoing == newest, plus cross-purpose dedup)", len(set.Keys))
+	}
+}
+
 type erroringKeyManager struct{}
 
 func (erroringKeyManager) Sign(context.Context, keys.SigningRequest) (keys.Signature, error) {

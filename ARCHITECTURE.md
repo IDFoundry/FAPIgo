@@ -193,6 +193,19 @@ already implement) into a `KeyManager`; the others assemble a
 production HSM/KMS integration often needs zero custom glue code,
 not just an interface it's free to satisfy. See `keys/doc.go`.
 
+Rotation is the seam these interfaces leave open on purpose — this
+module never prescribes a key's lifecycle — but two places needed
+explicit support, not just permission: `keys.RotatingKeyManager` is
+`KeyManager`'s optional extension for publishing more than one
+currently-valid key per purpose (an outgoing key alongside an incoming
+one) during a rotation's overlap window, which `server.PublicJWKS` uses
+automatically when a configured `KeyManager` implements it; and
+`Decrypter`'s `UnwrapRequest` carries the JWE's own "kid" through to
+`ECDHAgreer`/`KeyDecrypter` so a backend holding more than one
+registered decryption key can tell which one a given ciphertext was
+actually wrapped to, instead of only ever being able to guess "the
+current one."
+
 ### 6. HTTP is a narrow interface, hardened internally
 
 Callers supply a `Do(*http.Request) (*http.Response, error)`;

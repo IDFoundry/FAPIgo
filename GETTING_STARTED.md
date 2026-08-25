@@ -36,7 +36,10 @@ production by accident. When you're ready for a real deployment, this
 is the seam: implement the same interfaces (`storage.ClientRepository`
 and friends, `keys.KeyManager`, `keys.ClientKeySource`) against real
 persistence and a real key store (KMS/HSM), and swap them in — nothing
-else in this guide changes.
+else in this guide changes. For `keys.KeyManager` specifically, you may
+not need to implement anything at all: `keys.NewKeyManagerFromSigners`
+adapts any `crypto.Signer` — what most HSM/KMS Go client wrappers
+already implement — directly into a `KeyManager`; see `keys/doc.go`.
 
 ## 2. Build a `Config`
 

@@ -177,6 +177,22 @@ the request-handling path, and where it does fetch JWKS applies the same
 SSRF, size-limit, content-type, bounded-redirect and stale-key rules as
 any other outbound fetch (see rule 6).
 
+`keys.Decrypter` (`UnwrapContentEncryptionKey` / `EncryptionPublicKey`)
+is the same rule applied to recovering an encrypted ID token's or
+UserInfo response's content-encryption key: never a raw private key,
+only an operation and a public JWK. `keys.ECDHAgreer` / `KeyDecrypter`
+go one step further, splitting that operation into the one private-key
+primitive a real HSM/KMS actually exposes (raw ECDH agreement, or an
+RSA-OAEP-256 decrypt) so an embedder implements only that primitive,
+never the JOSE Concat-KDF/AES-unwrap machinery this module already
+owns. `keys.NewKeyManagerFromSigners` and `keys.NewDecrypter` /
+`NewSingleKeyDecrypter` are this package's own on-ramps for either rule
+— the first adapts any `crypto.Signer` (what most HSM/KMS Go wrappers
+already implement) into a `KeyManager`; the others assemble a
+`Decrypter` from an `ECDHAgreer`/`KeyDecrypter` backend — so a
+production HSM/KMS integration often needs zero custom glue code,
+not just an interface it's free to satisfy. See `keys/doc.go`.
+
 ### 6. HTTP is a narrow interface, hardened internally
 
 Callers supply a `Do(*http.Request) (*http.Response, error)`;

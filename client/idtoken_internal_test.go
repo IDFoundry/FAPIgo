@@ -371,10 +371,13 @@ func TestValidateIDTokenRejectsEncryptedTokenWhenNotConfigured(t *testing.T) {
 	}
 }
 
-// RFC 7519 §5.2 requires a nested JWT's outer "cty" to be "JWT" — a
-// decrypted payload missing (or misdeclaring) that must be rejected,
-// not passed through to signature verification regardless.
-func TestValidateIDTokenRejectsWrongContentType(t *testing.T) {
+// RFC 7519 §5.2 requires a producer of a nested JWT to set the outer
+// "cty" to "JWT", but that's an obligation on the encrypter, not a gate
+// this module enforces on decrypt — real-world encrypters routinely
+// omit it, and this call site only ever expects a JWE to hold an ID
+// token regardless. A decrypted payload with cty absent must still be
+// accepted; only a present-but-different cty must be rejected.
+func TestValidateIDTokenAcceptsMissingContentType(t *testing.T) {
 	now := time.Now()
 	decrypter, err := ephemeral.NewKeyManagerWithDecryption(nil, map[keys.DecryptionPurpose]fapi.KeyManagementAlgorithm{
 		keys.IDTokenDecryption: fapi.RSAOAEP256,
@@ -401,24 +404,58 @@ func TestValidateIDTokenRejectsWrongContentType(t *testing.T) {
 		t.Fatalf("jwe.Encrypt: %v", err)
 	}
 
-	if _, err := c.validateIDToken(context.Background(), encrypted, idTokenTestNonce); err == nil {
-		t.Fatalf("validateIDToken(missing cty) = nil error, want error")
+	if _, err := c.validateIDToken(context.Background(), encrypted, idTokenTestNonce); err != nil {
+		t.Fatalf("validateIDToken(missing cty) = %v, want nil error", err)
 	}
 }
 
-func TestIsNestedJWTContentType(t *testing.T) {
+// TestValidateIDTokenRejectsWrongContentType covers the case
+// TestValidateIDTokenAcceptsMissingContentType doesn't: a cty that is
+// present but declares something other than a nested JWT must still be
+// rejected — an absent cty is tolerated, but not a misdeclared one.
+func TestValidateIDTokenRejectsWrongContentType(t *testing.T) {
+	now := time.Now()
+	decrypter, err := ephemeral.NewKeyManagerWithDecryption(nil, map[keys.DecryptionPurpose]fapi.KeyManagementAlgorithm{
+		keys.IDTokenDecryption: fapi.RSAOAEP256,
+	})
+	if err != nil {
+		t.Fatalf("NewKeyManagerWithDecryption: %v", err)
+	}
+	c, idKey := idTokenTestClient(t, now, Algorithms{
+		IDToken: fapi.ES256, IDTokenKeyManagement: fapi.RSAOAEP256, IDTokenContentEncryption: fapi.A256GCM,
+	}, decrypter)
+
+	signed := buildTestSignedIDToken(t, idKey, now)
+	info, err := decrypter.EncryptionPublicKey(context.Background(), keys.IDTokenDecryption, fapi.RSAOAEP256)
+	if err != nil {
+		t.Fatalf("EncryptionPublicKey: %v", err)
+	}
+	encrypted, err := jwe.Encrypt(jwe.EncryptRequest{
+		Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM, RecipientKey: info.PublicKey,
+		ContentType: "json", Plaintext: []byte(signed),
+	})
+	if err != nil {
+		t.Fatalf("jwe.Encrypt: %v", err)
+	}
+
+	if _, err := c.validateIDToken(context.Background(), encrypted, idTokenTestNonce); err == nil {
+		t.Fatalf("validateIDToken(wrong cty) = nil error, want error")
+	}
+}
+
+func TestIsAcceptableNestedJWTContentType(t *testing.T) {
 	cases := map[string]bool{
 		"JWT":              true,
 		"jwt":              true,
 		"application/JWT":  true,
 		"application/jwt":  true,
-		"":                 false,
+		"":                 true,
 		"json":             false,
 		"application/jose": false,
 	}
 	for cty, want := range cases {
-		if got := isNestedJWTContentType(cty); got != want {
-			t.Errorf("isNestedJWTContentType(%q) = %v, want %v", cty, got, want)
+		if got := isAcceptableNestedJWTContentType(cty); got != want {
+			t.Errorf("isAcceptableNestedJWTContentType(%q) = %v, want %v", cty, got, want)
 		}
 	}
 }

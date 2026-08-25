@@ -21,14 +21,18 @@ type Confirmation struct {
 }
 
 // AccessTokenClaims is a parsed JWT access token payload (RFC 9068).
-// Audience is restricted to a single value — see the equivalent
-// restriction and rationale in internal/clientassertion. Everything
-// beyond the claims RFC 9068 defines — most importantly a granted
-// authorization_details (RFC 9396) — is left in Parameters as raw JSON.
+// Audience is a slice because RFC 9068 §3 does not narrow RFC 7519
+// §4.1.3's general "aud" definition, which permits either a single
+// string or an array — unlike internal/clientassertion's own Audience,
+// which stays a single string because a client assertion is always
+// addressed to exactly one token endpoint, never several audiences at
+// once. Everything beyond the claims RFC 9068 defines — most
+// importantly a granted authorization_details (RFC 9396) — is left in
+// Parameters as raw JSON.
 type AccessTokenClaims struct {
 	Issuer       string
 	Subject      string
-	Audience     string
+	Audience     []string
 	ClientID     string
 	Scope        string // space-delimited; "" if absent
 	ExpiresAt    time.Time
@@ -56,7 +60,7 @@ func parseAccessTokenClaims(payload []byte) (AccessTokenClaims, error) {
 	if err != nil {
 		return AccessTokenClaims{}, err
 	}
-	aud, _, err := popString(raw, "aud", true)
+	aud, err := popStringOrStringSlice(raw, "aud")
 	if err != nil {
 		return AccessTokenClaims{}, err
 	}

@@ -189,4 +189,16 @@ type Config struct {
 	// DiscoveredMetadata.AuthorizationResponseIssSupported (or a
 	// deployment's own out-of-band knowledge of the server).
 	RequireAuthorizationResponseIss bool
+
+	// TrustedIDTokenAudiences lists any other party this client trusts
+	// to also be named alongside its own ClientID in a multi-valued
+	// "aud" claim on a received ID token. OIDC Core §3.1.3.7 step 3
+	// requires rejecting an ID token "if it contains additional
+	// audiences not trusted by the Client" — by default (nil/empty)
+	// this client trusts none, so any audience besides its own ClientID
+	// causes rejection, exactly as before this field existed. Set only
+	// to entries this client has an actual, specific reason to trust;
+	// see internal/token.IDTokenValidatePolicy.TrustedAudiences, which
+	// this configures.
+	TrustedIDTokenAudiences []string
 }

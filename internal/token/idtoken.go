@@ -17,8 +17,7 @@ import (
 // audiences at once. §3.1.3.7 step 9 additionally says a client "SHOULD
 // verify that an azp Claim is present" when there's more than one
 // audience, and step 10 that it "SHOULD verify" azp equals the client's
-// own ID when present; this package doesn't implement either — SHOULD,
-// not MUST, and not yet a concrete gap this module has hit.
+// own ID when present — IDTokenValidatePolicy.Validate enforces both.
 //
 // Everything beyond the claims this struct names is left in Parameters
 // as raw JSON.
@@ -32,6 +31,7 @@ type IDTokenClaims struct {
 	AuthTime  time.Time // zero if absent
 	ACR       string    // "" if absent
 	AMR       []string  // nil if absent
+	AZP       string    // "" if absent
 
 	Parameters map[string]json.RawMessage
 }
@@ -78,6 +78,10 @@ func parseIDTokenClaims(payload []byte) (IDTokenClaims, error) {
 	if err != nil {
 		return IDTokenClaims{}, err
 	}
+	azp, _, err := popString(raw, "azp", false)
+	if err != nil {
+		return IDTokenClaims{}, err
+	}
 
 	c := IDTokenClaims{
 		Issuer:     iss,
@@ -88,6 +92,7 @@ func parseIDTokenClaims(payload []byte) (IDTokenClaims, error) {
 		Nonce:      nonce,
 		ACR:        acr,
 		AMR:        amr,
+		AZP:        azp,
 		Parameters: raw,
 	}
 	if hasAuthTime {

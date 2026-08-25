@@ -75,6 +75,16 @@ func popStringOrStringSlice(m map[string]json.RawMessage, key string) ([]string,
 	return arr, nil
 }
 
+// containsString reports whether want is present in have.
+func containsString(have []string, want string) bool {
+	for _, v := range have {
+		if v == want {
+			return true
+		}
+	}
+	return false
+}
+
 // popStringSlice extracts and deletes key from m, decoding it as a JSON
 // array of strings.
 func popStringSlice(m map[string]json.RawMessage, key string) (value []string, present bool, err error) {

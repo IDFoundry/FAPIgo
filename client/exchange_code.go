@@ -332,7 +332,8 @@ func (c *Client) validateSignedIDToken(ctx context.Context, raw, nonce string) (
 	for _, candidate := range candidates {
 		validated, verifyErr = parsed.Validate(candidate.PublicKey, token.IDTokenValidatePolicy{
 			ExpectedIssuer: c.cfg.Issuer.String(), ExpectedAudience: c.cfg.ClientID.String(),
-			Algorithm: c.cfg.Algorithms.IDToken, ExpectedNonce: nonce,
+			TrustedAudiences: c.cfg.TrustedIDTokenAudiences,
+			Algorithm:        c.cfg.Algorithms.IDToken, ExpectedNonce: nonce,
 			Now: c.deps.Clock.Now(), MaxLifetime: c.cfg.Limits.MaxIDTokenLifetime, MaxClockSkew: c.cfg.Limits.MaxClockSkew,
 		})
 		if verifyErr == nil {

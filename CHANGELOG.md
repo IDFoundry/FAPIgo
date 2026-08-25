@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.11.0](https://github.com/IDFoundry/FAPIgo/compare/v0.10.0...v0.11.0) (2026-08-25)
+
+
+### ⚠ BREAKING CHANGES
+
+* keys.ECDHAgreer.AgreeSharedSecret and keys.KeyDecrypter.DecryptKey (added in #141, unreleased) each gain a keyID string parameter as their second argument. An existing implementation that doesn't need multi-key support can add the parameter and ignore it.
+
+### Features
+
+* adapt any crypto.Signer into a keys.KeyManager ([3c4f30c](https://github.com/IDFoundry/FAPIgo/commit/3c4f30cd1fedac1a71495726cf4fd4d783b1a0ff))
+* add a capability-based, KMS/HSM-friendly keys.Decrypter ([#141](https://github.com/IDFoundry/FAPIgo/issues/141)) ([c2dc847](https://github.com/IDFoundry/FAPIgo/commit/c2dc84736bae12fe03d403687966f06235128d4f))
+* support graceful key rotation — multi-key JWKS publishing, kid-aware decryption ([14d44e7](https://github.com/IDFoundry/FAPIgo/commit/14d44e7c91d269a263f514fb4f58ff738b8da2d8))
+
 ## [0.10.0](https://github.com/IDFoundry/FAPIgo/compare/v0.9.2...v0.10.0) (2026-08-25)
 
 

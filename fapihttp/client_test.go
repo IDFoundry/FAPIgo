@@ -125,6 +125,59 @@ func TestFetchRejectsContentTypeMismatch(t *testing.T) {
 	}
 }
 
+// TestFetchAcceptsAlternateContentType covers a response whose
+// Content-Type matches one of AlternateContentTypes rather than
+// ExpectedContentType — e.g. a JWKS document served as
+// "application/jwk-set+json" instead of "application/json".
+func TestFetchAcceptsAlternateContentType(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/jwk-set+json")
+		w.Write([]byte(`{"keys":[]}`))
+	}))
+	defer ts.Close()
+
+	c, err := fapihttp.New(ts.Client(), validLoopbackConfig())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	res, err := c.Fetch(context.Background(), fapihttp.FetchRequest{
+		URL:                   mustParseURL(t, ts.URL),
+		ExpectedContentType:   "application/json",
+		AlternateContentTypes: []string{"application/jwk-set+json"},
+	})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if string(res.Body) != `{"keys":[]}` {
+		t.Errorf("Body = %q, want %q", res.Body, `{"keys":[]}`)
+	}
+}
+
+// TestFetchRejectsUnlistedAlternateContentType confirms
+// AlternateContentTypes doesn't loosen the check into accepting
+// anything — only a listed alternate is accepted, everything else still
+// fails exactly as before.
+func TestFetchRejectsUnlistedAlternateContentType(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte(`not json`))
+	}))
+	defer ts.Close()
+
+	c, err := fapihttp.New(ts.Client(), validLoopbackConfig())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = c.Fetch(context.Background(), fapihttp.FetchRequest{
+		URL:                   mustParseURL(t, ts.URL),
+		ExpectedContentType:   "application/json",
+		AlternateContentTypes: []string{"application/jwk-set+json"},
+	})
+	if !errors.Is(err, fapihttp.ErrUnexpectedContentType) {
+		t.Fatalf("Fetch error = %v, want ErrUnexpectedContentType", err)
+	}
+}
+
 // TestFetchRejectsMissingContentType covers checkContentType's other
 // rejection branch — TestFetchRejectsContentTypeMismatch only ever
 // exercises a present-but-wrong Content-Type; a response with no

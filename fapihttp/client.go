@@ -118,11 +118,20 @@ type FetchRequest struct {
 	// same-origin redirect handling.
 	URL *url.URL
 
-	// ExpectedContentType is the exact media type (ignoring parameters
-	// such as charset) the response's Content-Type header must declare.
-	// Required, so a caller can never accidentally accept an arbitrary
-	// content type for a security-sensitive fetch.
+	// ExpectedContentType is the media type (ignoring parameters such as
+	// charset, compared case-insensitively per RFC 7231 §3.1.1.1) the
+	// response's Content-Type header must declare. Required, so a
+	// caller can never accidentally accept an arbitrary content type
+	// for a security-sensitive fetch.
 	ExpectedContentType string
+
+	// AlternateContentTypes are additional media types accepted the
+	// same way as ExpectedContentType — for a resource whose own
+	// registered media type (e.g. RFC 7517 §8.5.1's
+	// "application/jwk-set+json" for a JWKS document) differs from
+	// what most real deployments actually serve. Optional; most callers
+	// leave this empty and rely on ExpectedContentType alone.
+	AlternateContentTypes []string
 }
 
 // FetchResponse is a successfully fetched, size- and content-type-
@@ -181,7 +190,7 @@ func (c *Client) Fetch(ctx context.Context, req FetchRequest) (FetchResponse, er
 		if res.StatusCode != http.StatusOK {
 			return FetchResponse{}, fmt.Errorf("%w: %d", ErrUnexpectedStatus, res.StatusCode)
 		}
-		if err := checkContentType(res.Header.Get("Content-Type"), req.ExpectedContentType); err != nil {
+		if err := checkContentType(res.Header.Get("Content-Type"), req.ExpectedContentType, req.AlternateContentTypes); err != nil {
 			return FetchResponse{}, err
 		}
 		return FetchResponse{Body: body, StatusCode: res.StatusCode}, nil
@@ -316,7 +325,7 @@ func readBounded(r io.Reader, max int64) ([]byte, error) {
 	return data, nil
 }
 
-func checkContentType(got, want string) error {
+func checkContentType(got, want string, alternates []string) error {
 	if got == "" {
 		return fmt.Errorf("%w: response has no Content-Type", ErrUnexpectedContentType)
 	}
@@ -324,8 +333,13 @@ func checkContentType(got, want string) error {
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrUnexpectedContentType, err)
 	}
-	if !strings.EqualFold(mediaType, want) {
-		return fmt.Errorf("%w: got %q, want %q", ErrUnexpectedContentType, mediaType, want)
+	if strings.EqualFold(mediaType, want) {
+		return nil
 	}
-	return nil
+	for _, alt := range alternates {
+		if strings.EqualFold(mediaType, alt) {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: got %q, want %q", ErrUnexpectedContentType, mediaType, want)
 }

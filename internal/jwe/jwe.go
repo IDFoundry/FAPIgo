@@ -418,6 +418,25 @@ func UnwrapCEK(alg fapi.KeyManagementAlgorithm, recipientKey any, encryptedKey [
 		if err != nil {
 			return nil, fmt.Errorf("%w: ecdh: %v", ErrDecryptionFailed, err)
 		}
+		return UnwrapCEKFromSharedSecret(alg, z, encryptedKey)
+
+	default:
+		return nil, fmt.Errorf("jwe: unsupported key management algorithm %v", alg)
+	}
+}
+
+// UnwrapCEKFromSharedSecret recovers the content-encryption key
+// encryptedKey carries given z, an ECDH shared secret already agreed
+// with the epk embedded in the JWE header — the Concat-KDF (RFC 7518
+// Appendix B) and RFC-3394 AES-Unwrap steps of ECDHESA256KW, factored
+// out of UnwrapCEK so a caller that only performs the ECDH agreement
+// step itself (an HSM or KMS's raw key-agreement primitive, never
+// handing this package a private key at all) can still recover the CEK
+// through this package's own audited KDF/unwrap logic rather than
+// reimplementing it.
+func UnwrapCEKFromSharedSecret(alg fapi.KeyManagementAlgorithm, z, encryptedKey []byte) ([]byte, error) {
+	switch alg {
+	case fapi.ECDHESA256KW:
 		const kekSizeBits = 256
 		info, err := otherInfo(alg.String(), nil, nil, kekSizeBits)
 		if err != nil {
@@ -431,7 +450,7 @@ func UnwrapCEK(alg fapi.KeyManagementAlgorithm, recipientKey any, encryptedKey [
 		return cek, nil
 
 	default:
-		return nil, fmt.Errorf("jwe: unsupported key management algorithm %v", alg)
+		return nil, fmt.Errorf("jwe: unsupported key management algorithm %v for shared-secret unwrap", alg)
 	}
 }
 

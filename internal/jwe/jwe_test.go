@@ -270,6 +270,86 @@ func TestDecryptRejectsWrongECDHKey(t *testing.T) {
 	}
 }
 
+// TestUnwrapCEKFromSharedSecretMatchesUnwrapCEK confirms the factored-out
+// shared-secret path recovers exactly the CEK UnwrapCEK does when given
+// the same private key — the two must never diverge, since a
+// keys.Decrypter built over a backend that only performs ECDH agreement
+// relies on this function alone to reach the same result an in-memory
+// *ecdh.PrivateKey would via UnwrapCEK.
+func TestUnwrapCEKFromSharedSecretMatchesUnwrapCEK(t *testing.T) {
+	priv := generateECDHKey(t)
+	compact, err := Encrypt(EncryptRequest{Algorithm: fapi.ECDHESA256KW, Encryption: fapi.A256GCM, RecipientKey: priv.PublicKey(), Plaintext: []byte("secret")})
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	parts := strings.Split(compact, ".")
+	headerJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		t.Fatalf("decode header: %v", err)
+	}
+	header, err := parseHeader(headerJSON)
+	if err != nil {
+		t.Fatalf("parseHeader: %v", err)
+	}
+	encryptedKey, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatalf("decode encrypted key: %v", err)
+	}
+
+	want, err := UnwrapCEK(fapi.ECDHESA256KW, priv, encryptedKey, header.EphemeralPublicKey)
+	if err != nil {
+		t.Fatalf("UnwrapCEK: %v", err)
+	}
+
+	z, err := priv.ECDH(header.EphemeralPublicKey)
+	if err != nil {
+		t.Fatalf("ecdh: %v", err)
+	}
+	got, err := UnwrapCEKFromSharedSecret(fapi.ECDHESA256KW, z, encryptedKey)
+	if err != nil {
+		t.Fatalf("UnwrapCEKFromSharedSecret: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("UnwrapCEKFromSharedSecret = %x, want %x", got, want)
+	}
+}
+
+func TestUnwrapCEKFromSharedSecretRejectsTamperedEncryptedKey(t *testing.T) {
+	priv := generateECDHKey(t)
+	compact, err := Encrypt(EncryptRequest{Algorithm: fapi.ECDHESA256KW, Encryption: fapi.A256GCM, RecipientKey: priv.PublicKey(), Plaintext: []byte("secret")})
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	parts := strings.Split(compact, ".")
+	headerJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		t.Fatalf("decode header: %v", err)
+	}
+	header, err := parseHeader(headerJSON)
+	if err != nil {
+		t.Fatalf("parseHeader: %v", err)
+	}
+	encryptedKey, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatalf("decode encrypted key: %v", err)
+	}
+	encryptedKey[0] ^= 0xFF
+
+	z, err := priv.ECDH(header.EphemeralPublicKey)
+	if err != nil {
+		t.Fatalf("ecdh: %v", err)
+	}
+	if _, err := UnwrapCEKFromSharedSecret(fapi.ECDHESA256KW, z, encryptedKey); err == nil {
+		t.Fatal("UnwrapCEKFromSharedSecret(tampered encrypted key) = nil error, want error")
+	}
+}
+
+func TestUnwrapCEKFromSharedSecretRejectsUnsupportedAlgorithm(t *testing.T) {
+	if _, err := UnwrapCEKFromSharedSecret(fapi.RSAOAEP256, []byte("z"), []byte("wrapped")); err == nil {
+		t.Fatal("UnwrapCEKFromSharedSecret(RSAOAEP256) = nil error, want error")
+	}
+}
+
 func TestDecryptRejectsAlgorithmMismatch(t *testing.T) {
 	priv := generateRSAKey(t)
 	compact, err := Encrypt(EncryptRequest{Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM, RecipientKey: &priv.PublicKey, Plaintext: []byte("secret")})

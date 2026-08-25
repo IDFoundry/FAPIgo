@@ -49,10 +49,47 @@ func TestHeaderRoundTripECDHES(t *testing.T) {
 	}
 }
 
-func TestParseHeaderRejectsUnknownField(t *testing.T) {
+// TestParseHeaderIgnoresUnknownField covers RFC 7516 §4.2/§4.3: a
+// Public or Private Header Parameter Name this package doesn't act on
+// (here, a made-up "unexpected" member — the same shape as a real
+// issuer's "x5c" or "iss") must be ignored, not rejected. The header
+// is JWE AAD either way, so this can't weaken what Decrypt checks.
+func TestParseHeaderIgnoresUnknownField(t *testing.T) {
 	data := []byte(`{"alg":"RSA-OAEP-256","enc":"A256GCM","unexpected":"value"}`)
+	h, err := parseHeader(data)
+	if err != nil {
+		t.Fatalf("parseHeader(unknown field) = %v, want nil error", err)
+	}
+	if h.Algorithm != fapi.RSAOAEP256 || h.Encryption != fapi.A256GCM {
+		t.Fatalf("parseHeader(unknown field) = %+v, want alg/enc still parsed", h)
+	}
+}
+
+// TestParseHeaderRejectsUnknownCriticalField covers the flip side: RFC
+// 7516 §4.1.13 (inheriting RFC 7515 §4.1.11) requires rejecting the
+// whole header if "crit" names anything this package doesn't
+// understand and process — an issuer marking something critical that
+// this package silently ignores is exactly the case "crit" exists to
+// catch.
+func TestParseHeaderRejectsUnknownCriticalField(t *testing.T) {
+	data := []byte(`{"alg":"RSA-OAEP-256","enc":"A256GCM","crit":["unexpected"]}`)
 	if _, err := parseHeader(data); err == nil {
-		t.Fatalf("parseHeader(unknown field) = nil error, want error")
+		t.Fatalf("parseHeader(unknown crit field) = nil error, want error")
+	}
+}
+
+// TestParseHeaderAcceptsUnderstoodCriticalField confirms a "crit" list
+// naming only parameters this package does understand doesn't reject —
+// crit's job is to catch what would otherwise be silently ignored, not
+// to reject a header for expressing normal requirements.
+func TestParseHeaderAcceptsUnderstoodCriticalField(t *testing.T) {
+	data := []byte(`{"alg":"RSA-OAEP-256","enc":"A256GCM","kid":"key-1","crit":["kid"]}`)
+	h, err := parseHeader(data)
+	if err != nil {
+		t.Fatalf("parseHeader(understood crit field) = %v, want nil error", err)
+	}
+	if h.KeyID != "key-1" {
+		t.Fatalf("KeyID = %q, want %q", h.KeyID, "key-1")
 	}
 }
 

@@ -67,10 +67,17 @@ func TestDecodeResultRejectsNonPositiveExpiresIn(t *testing.T) {
 	}
 }
 
-func TestDecodeResultRejectsUnknownField(t *testing.T) {
+// TestDecodeResultIgnoresUnknownField covers RFC 6749 §5.1's "MUST
+// ignore unrecognized value names and extra parameters" — a member
+// beyond request_uri/expires_in must not fail parsing.
+func TestDecodeResultIgnoresUnknownField(t *testing.T) {
 	body := []byte(`{"request_uri":"urn:x","expires_in":60,"unexpected":"value"}`)
-	if _, err := DecodeResult(body); !errors.Is(err, ErrMalformedResponse) {
-		t.Fatalf("DecodeResult(unknown field) = %v, want ErrMalformedResponse", err)
+	got, err := DecodeResult(body)
+	if err != nil {
+		t.Fatalf("DecodeResult(unknown field) = %v, want nil error", err)
+	}
+	if got.RequestURI != "urn:x" || got.ExpiresIn != 60*time.Second {
+		t.Fatalf("DecodeResult(unknown field) = %+v, want request_uri/expires_in still parsed", got)
 	}
 }
 
@@ -124,5 +131,19 @@ func TestDecodeErrorResponseRejectsOversized(t *testing.T) {
 	huge := []byte(`{"error":"` + strings.Repeat("a", maxResponseBytes+1) + `"}`)
 	if _, err := DecodeErrorResponse(huge); !errors.Is(err, ErrResponseTooLarge) {
 		t.Fatalf("DecodeErrorResponse(oversized) = %v, want ErrResponseTooLarge", err)
+	}
+}
+
+// TestDecodeErrorResponseIgnoresUnknownField covers RFC 6749 §5.2 the
+// same way TestDecodeResultIgnoresUnknownField covers §5.1 — a member
+// beyond error/error_description/error_uri must not fail parsing.
+func TestDecodeErrorResponseIgnoresUnknownField(t *testing.T) {
+	body := []byte(`{"error":"invalid_request","unexpected":"value"}`)
+	got, err := DecodeErrorResponse(body)
+	if err != nil {
+		t.Fatalf("DecodeErrorResponse(unknown field) = %v, want nil error", err)
+	}
+	if got.Code != "invalid_request" {
+		t.Fatalf("DecodeErrorResponse(unknown field) = %+v, want error still parsed", got)
 	}
 }

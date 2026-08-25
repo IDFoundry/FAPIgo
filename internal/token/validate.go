@@ -130,7 +130,15 @@ func (t AccessToken) Validate(pub crypto.PublicKey, policy AccessTokenValidatePo
 	if c.Issuer != policy.ExpectedIssuer {
 		return ValidatedAccessToken{}, ErrIssuerMismatch
 	}
-	if c.Audience != policy.ExpectedAudience {
+	// RFC 9068 §3 doesn't narrow RFC 7519 §4.1.3's general "aud", so an
+	// access token's audience may legitimately be a multi-element array
+	// (e.g. one token scoped to a small set of resource servers) — this
+	// resource need only be named among them, not be the sole entry.
+	// Unlike an ID token's aud (see IDTokenValidatePolicy's own
+	// ExpectedAudience/TrustedAudiences), RFC 9068 states no equivalent
+	// "reject if it names an audience you don't trust" rule, so no
+	// trust-list is needed here.
+	if !containsString(c.Audience, policy.ExpectedAudience) {
 		return ValidatedAccessToken{}, ErrAudienceMismatch
 	}
 	// Ordinary "is it expired as of now" is deliberately NOT checked
@@ -204,8 +212,19 @@ type IDTokenValidatePolicy struct {
 	ExpectedIssuer string
 
 	// ExpectedAudience is the caller's own client ID. The token's aud
-	// claim must equal it exactly.
+	// claim — a single string or, per OIDC Core §2, an array — must
+	// contain it.
 	ExpectedAudience string
+
+	// TrustedAudiences lists any other party the caller trusts to also
+	// be named alongside ExpectedAudience in a multi-valued aud. OIDC
+	// Core §3.1.3.7 step 3 requires rejecting an ID token "if it
+	// contains additional audiences not trusted by the Client" — by
+	// default (nil/empty) this package trusts none, so every element of
+	// aud besides ExpectedAudience causes rejection, preserving the
+	// exact-match behavior this package has always had. Set only to
+	// entries the caller has an actual, specific reason to trust.
+	TrustedAudiences []string
 
 	// Algorithm is the algorithm this authorization server is
 	// registered (or discovered) to sign ID tokens with. The token
@@ -260,16 +279,39 @@ func (t IDToken) Validate(pub crypto.PublicKey, policy IDTokenValidatePolicy) (V
 	if c.Issuer != policy.ExpectedIssuer {
 		return ValidatedIDToken{}, ErrIssuerMismatch
 	}
-	// OIDC Core §3.1.3.7 step 3: "aud... MAY contain an array with more
-	// than one element. The ID Token MUST be rejected... if it contains
-	// additional audiences not trusted by the Client." This package
-	// implements no mechanism for a caller to name any audience as
-	// trusted besides itself, so every element must equal
-	// ExpectedAudience — not merely contain it — until one is added.
+	// OIDC Core §3.1.3.7 step 3: aud "MUST contain" the Client's own
+	// client_id "as an audience value", and "MAY contain an array with
+	// more than one element. The ID Token MUST be rejected... if it
+	// contains additional audiences not trusted by the Client" — every
+	// element must be either ExpectedAudience itself or one of
+	// policy.TrustedAudiences, and ExpectedAudience must actually be
+	// present (not merely permitted).
+	sawExpectedAudience := false
 	for _, aud := range c.Audience {
-		if aud != policy.ExpectedAudience {
+		if aud == policy.ExpectedAudience {
+			sawExpectedAudience = true
+			continue
+		}
+		if !containsString(policy.TrustedAudiences, aud) {
 			return ValidatedIDToken{}, ErrAudienceMismatch
 		}
+	}
+	if !sawExpectedAudience {
+		return ValidatedIDToken{}, ErrAudienceMismatch
+	}
+	// OIDC Core §3.1.3.7 steps 9-10: when aud has multiple entries, the
+	// Client SHOULD verify azp is present; when azp is present
+	// (regardless of aud's length), the Client SHOULD verify it equals
+	// the Client's own client_id. This package treats both as enforced,
+	// not merely advisory: azp exists specifically to disambiguate which
+	// party a multi-audience ID token was authorized for, and silently
+	// ignoring it would defeat that purpose exactly where it matters —
+	// when the token also names a trusted third-party audience.
+	if len(c.Audience) > 1 && c.AZP == "" {
+		return ValidatedIDToken{}, ErrMissingAuthorizedParty
+	}
+	if c.AZP != "" && c.AZP != policy.ExpectedAudience {
+		return ValidatedIDToken{}, ErrAuthorizedPartyMismatch
 	}
 	if policy.Now.After(c.ExpiresAt.Add(policy.MaxClockSkew)) {
 		return ValidatedIDToken{}, ErrExpired

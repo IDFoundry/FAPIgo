@@ -2,6 +2,7 @@ package token
 
 import (
 	"crypto"
+	"crypto/ecdsa"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -197,6 +198,79 @@ func TestAccessTokenValidateRejectsIssuerAndAudienceMismatch(t *testing.T) {
 	audPolicy.ExpectedAudience = "https://other-rs.example"
 	if _, err := parsed.Validate(&key.PublicKey, audPolicy); !errors.Is(err, ErrAudienceMismatch) {
 		t.Fatalf("Validate(wrong audience) = %v, want ErrAudienceMismatch", err)
+	}
+}
+
+// buildRawAccessTokenWithClaims hand-crafts a validly signed, "at+jwt"
+// typed ES256 access token from claims, for tests that need shapes
+// IssueAccessToken's public API can't produce (a multi-element "aud"
+// array — AccessTokenParams.Audience always sends a single string, but
+// RFC 9068 §3 doesn't narrow RFC 7519 §4.1.3's general "aud").
+func buildRawAccessTokenWithClaims(t *testing.T, key crypto.Signer, claims map[string]any) string {
+	t.Helper()
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256","typ":"at+jwt"}`))
+	payloadJSON, err := json.Marshal(claims)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	signingInput := header + "." + base64.RawURLEncoding.EncodeToString(payloadJSON)
+	ecKey, ok := key.(*ecdsa.PrivateKey)
+	if !ok {
+		t.Fatalf("buildRawAccessTokenWithClaims: key is %T, want *ecdsa.PrivateKey", key)
+	}
+	return signingInput + "." + signRaw(t, ecKey, signingInput)
+}
+
+// RFC 9068 §3 doesn't narrow RFC 7519 §4.1.3's general "aud" definition
+// — an access token scoped to more than one resource server must
+// validate as long as ExpectedAudience is among them, not only when it
+// is the sole entry.
+func TestAccessTokenValidateAcceptsMultiValuedAudience(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	tok := buildRawAccessTokenWithClaims(t, key, map[string]any{
+		"iss":       "https://as.example",
+		"sub":       "user-1",
+		"aud":       []string{"https://rs.example", "https://other-rs.example"},
+		"client_id": "client-123",
+		"exp":       now.Add(time.Minute).Unix(),
+		"iat":       now.Unix(),
+		"jti":       "jti-1",
+	})
+
+	parsed, err := ParseAccessToken(tok)
+	if err != nil {
+		t.Fatalf("ParseAccessToken: %v", err)
+	}
+	if _, err := parsed.Validate(&key.PublicKey, baseAccessTokenPolicy(now)); err != nil {
+		t.Fatalf("Validate(multi-valued aud) = %v, want nil error", err)
+	}
+}
+
+// The containment relaxation in TestAccessTokenValidateAcceptsMultiValuedAudience
+// must not become "any element matches" — ExpectedAudience must
+// actually be named among the entries.
+func TestAccessTokenValidateRejectsMultiValuedAudienceWithoutExpected(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	tok := buildRawAccessTokenWithClaims(t, key, map[string]any{
+		"iss":       "https://as.example",
+		"sub":       "user-1",
+		"aud":       []string{"https://other-rs.example", "https://yet-another-rs.example"},
+		"client_id": "client-123",
+		"exp":       now.Add(time.Minute).Unix(),
+		"iat":       now.Unix(),
+		"jti":       "jti-1",
+	})
+
+	parsed, err := ParseAccessToken(tok)
+	if err != nil {
+		t.Fatalf("ParseAccessToken: %v", err)
+	}
+	if _, err := parsed.Validate(&key.PublicKey, baseAccessTokenPolicy(now)); !errors.Is(err, ErrAudienceMismatch) {
+		t.Fatalf("Validate(multi-valued aud, expected absent) = %v, want ErrAudienceMismatch", err)
 	}
 }
 

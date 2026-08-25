@@ -2,6 +2,7 @@ package token
 
 import (
 	"crypto"
+	"crypto/ecdsa"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -246,6 +247,103 @@ func TestIDTokenValidateRejectsUntrustedSecondAudience(t *testing.T) {
 	}
 	if _, err := parsed.Validate(&key.PublicKey, baseIDTokenPolicy(now)); !errors.Is(err, ErrAudienceMismatch) {
 		t.Fatalf("Validate(untrusted second aud) = %v, want ErrAudienceMismatch", err)
+	}
+}
+
+// buildRawIDTokenWithClaims hand-crafts a validly signed ES256 ID token
+// from claims, for tests that need shapes IssueIDToken's public API
+// can't produce (a multi-element "aud" array, an "azp" claim).
+func buildRawIDTokenWithClaims(t *testing.T, key *ecdsa.PrivateKey, claims map[string]any) string {
+	t.Helper()
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256"}`))
+	payloadJSON, err := json.Marshal(claims)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	signingInput := header + "." + base64.RawURLEncoding.EncodeToString(payloadJSON)
+	return signingInput + "." + signRaw(t, key, signingInput)
+}
+
+// OIDC Core §3.1.3.7 step 3's "additional audiences not trusted by the
+// Client" is exactly what IDTokenValidatePolicy.TrustedAudiences exists
+// to permit — an aud entry that isn't the client's own ExpectedAudience
+// but is listed in TrustedAudiences must not, on its own, cause
+// rejection (see TestIDTokenValidateRejectsUntrustedSecondAudience for
+// the same shape without a trust-list entry, which must still reject).
+func TestIDTokenValidateAcceptsTrustedSecondAudience(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	tok := buildRawIDTokenWithClaims(t, key, map[string]any{
+		"iss": "https://as.example",
+		"sub": "user-1",
+		"aud": []string{"client-123", "trusted-party"},
+		"azp": "client-123",
+		"exp": now.Add(time.Minute).Unix(),
+		"iat": now.Unix(),
+	})
+
+	parsed, err := ParseIDToken(tok)
+	if err != nil {
+		t.Fatalf("ParseIDToken: %v", err)
+	}
+	policy := baseIDTokenPolicy(now)
+	policy.TrustedAudiences = []string{"trusted-party"}
+	if _, err := parsed.Validate(&key.PublicKey, policy); err != nil {
+		t.Fatalf("Validate(trusted second aud) = %v, want nil error", err)
+	}
+}
+
+// OIDC Core §3.1.3.7 step 9: when aud names more than one audience, the
+// Client SHOULD verify azp is present — enforced here even though every
+// audience is individually trusted, since azp is what disambiguates
+// which of them the token was actually authorized for.
+func TestIDTokenValidateRejectsMissingAzpWithMultipleAudiences(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	tok := buildRawIDTokenWithClaims(t, key, map[string]any{
+		"iss": "https://as.example",
+		"sub": "user-1",
+		"aud": []string{"client-123", "trusted-party"},
+		"exp": now.Add(time.Minute).Unix(),
+		"iat": now.Unix(),
+	})
+
+	parsed, err := ParseIDToken(tok)
+	if err != nil {
+		t.Fatalf("ParseIDToken: %v", err)
+	}
+	policy := baseIDTokenPolicy(now)
+	policy.TrustedAudiences = []string{"trusted-party"}
+	if _, err := parsed.Validate(&key.PublicKey, policy); !errors.Is(err, ErrMissingAuthorizedParty) {
+		t.Fatalf("Validate(multi-aud, no azp) = %v, want ErrMissingAuthorizedParty", err)
+	}
+}
+
+// OIDC Core §3.1.3.7 step 10: when azp is present, the Client SHOULD
+// verify it equals the Client's own client_id — checked even for a
+// single-audience token, since azp being present at all is itself a
+// signal worth acting on.
+func TestIDTokenValidateRejectsAzpMismatch(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	tok := buildRawIDTokenWithClaims(t, key, map[string]any{
+		"iss": "https://as.example",
+		"sub": "user-1",
+		"aud": "client-123",
+		"azp": "someone-else",
+		"exp": now.Add(time.Minute).Unix(),
+		"iat": now.Unix(),
+	})
+
+	parsed, err := ParseIDToken(tok)
+	if err != nil {
+		t.Fatalf("ParseIDToken: %v", err)
+	}
+	if _, err := parsed.Validate(&key.PublicKey, baseIDTokenPolicy(now)); !errors.Is(err, ErrAuthorizedPartyMismatch) {
+		t.Fatalf("Validate(azp mismatch) = %v, want ErrAuthorizedPartyMismatch", err)
 	}
 }
 

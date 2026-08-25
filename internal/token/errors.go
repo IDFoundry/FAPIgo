@@ -17,11 +17,10 @@ var (
 	// issuer the caller expected.
 	ErrIssuerMismatch = errors.New("token: iss does not match expected issuer")
 
-	// ErrAudienceMismatch indicates a token's aud claim did not equal
-	// the audience the caller expected — for an ID token, whose aud may
-	// per OIDC Core §2 be an array, every element must equal it, not
-	// merely one of them (OIDC Core §3.1.3.7 step 3 requires rejecting
-	// any additional audience this package has no mechanism to trust).
+	// ErrAudienceMismatch indicates a token's aud claim did not contain
+	// the audience the caller expected, or — for an ID token — named an
+	// additional audience the caller's IDTokenValidatePolicy.
+	// TrustedAudiences doesn't list (OIDC Core §3.1.3.7 step 3).
 	ErrAudienceMismatch = errors.New("token: aud does not match expected audience")
 
 	// ErrExpired indicates a token's exp claim is not after the
@@ -35,4 +34,14 @@ var (
 	// ErrNonceMismatch indicates an ID token's nonce claim did not match
 	// the nonce the caller's authorization request carried.
 	ErrNonceMismatch = errors.New("token: nonce does not match expected value")
+
+	// ErrMissingAuthorizedParty indicates an ID token's aud claim named
+	// more than one audience but carried no azp claim (OIDC Core
+	// §3.1.3.7 step 9) — needed to disambiguate which of those
+	// audiences the token was actually authorized for.
+	ErrMissingAuthorizedParty = errors.New("token: aud has multiple audiences but azp is missing")
+
+	// ErrAuthorizedPartyMismatch indicates an ID token's azp claim did
+	// not equal the caller's own client ID (OIDC Core §3.1.3.7 step 10).
+	ErrAuthorizedPartyMismatch = errors.New("token: azp does not match expected audience")
 )

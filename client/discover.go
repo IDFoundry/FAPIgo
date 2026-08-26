@@ -6,10 +6,12 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"time"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/fapihttp"
 	"github.com/idfoundry/fapigo/internal/metadata"
+	"github.com/idfoundry/fapigo/keys"
 )
 
 // discoveryContentType is the content type RFC 8414 §3.2 requires an
@@ -131,6 +133,17 @@ func (d DiscoveredMetadata) SupportsAlgorithms(algs Algorithms) error {
 		}
 	}
 	return nil
+}
+
+// IssuerKeySource builds a keys.JWKSIssuerKeySource from this metadata's
+// own JWKSURI, using fetcher — typically the same *fapihttp.Client
+// already passed to Discover. A thin convenience over
+// keys.NewJWKSIssuerKeySource: there's no other JWKS URI a caller would
+// sensibly use for this issuer's own verification keys, so this removes
+// a line every caller of Discover otherwise writes identically, not a
+// new decision the caller has to make.
+func (d DiscoveredMetadata) IssuerKeySource(fetcher *fapihttp.Client, cacheTTL time.Duration, opts ...keys.JWKSOption) (*keys.JWKSIssuerKeySource, error) {
+	return keys.NewJWKSIssuerKeySource(fetcher, d.JWKSURI, cacheTTL, opts...)
 }
 
 // Discover fetches and validates issuer's OpenID Connect Discovery

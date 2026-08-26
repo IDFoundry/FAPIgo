@@ -4,6 +4,7 @@ import (
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/jose"
 )
 
 // RecommendedLimits returns a Limits value grounded the same way
@@ -62,6 +63,16 @@ func RecommendedLimits() Limits {
 		// small JSON documents; 1 MiB is generous headroom without
 		// being an effectively unbounded read.
 		MaxHTTPResponseBytes: 1 << 20,
+
+		// Not spec-mandated — the same 16 KiB this module's own JOSE
+		// package uses as its default ceiling for a fixed-shape
+		// artifact (jose.DefaultMaxCompactBytes), carried over here as
+		// a starting point for an ID token or UserInfo response too. A
+		// deployment whose issuer is configured to return many claims
+		// (verified/assured identity claims, in particular, can run
+		// well past this) should raise it explicitly rather than rely
+		// on this default.
+		MaxJOSECompactBytes: jose.DefaultMaxCompactBytes,
 	}
 }
 

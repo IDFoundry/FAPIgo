@@ -201,6 +201,35 @@ func TestDecryptRejectsContentEncryptionMismatch(t *testing.T) {
 	}
 }
 
+// TestDecryptRejectsOversizedCompact confirms MaxCompactBytes is
+// enforced before any parsing or decryption work happens, and that a
+// zero MaxCompactBytes (the field's default) leaves Decrypt unbounded,
+// for a caller that already bounds Compact's size some other way.
+func TestDecryptRejectsOversizedCompact(t *testing.T) {
+	priv := generateRSAKey(t)
+	compact, err := Encrypt(EncryptRequest{
+		Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM,
+		RecipientKey: &priv.PublicKey, Plaintext: []byte("secret"),
+	})
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+
+	if _, err := Decrypt(context.Background(), DecryptRequest{
+		Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM,
+		RecipientKey: priv, Compact: compact, MaxCompactBytes: len(compact) - 1,
+	}); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("Decrypt(over limit) = %v, want ErrTooLarge", err)
+	}
+
+	if _, err := Decrypt(context.Background(), DecryptRequest{
+		Algorithm: fapi.RSAOAEP256, Encryption: fapi.A256GCM,
+		RecipientKey: priv, Compact: compact, MaxCompactBytes: 0,
+	}); err != nil {
+		t.Fatalf("Decrypt(zero MaxCompactBytes) = %v, want no error", err)
+	}
+}
+
 // TestDecryptRejectsTamperedTagA256CBCHS512 mirrors
 // TestDecryptRejectsTamperedTag for the CBC-HMAC family, where tag
 // verification is this package's own code (cbcHMACTag/hmac.Equal), not

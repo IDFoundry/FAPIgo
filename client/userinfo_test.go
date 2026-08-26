@@ -7,6 +7,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -123,6 +124,36 @@ func TestFetchUserInfoVerifiesSignedJWTResponse(t *testing.T) {
 	}
 	if info.Subject != userInfoTestSubject {
 		t.Errorf("Subject = %q, want %q", info.Subject, userInfoTestSubject)
+	}
+}
+
+func TestFetchUserInfoRejectsSignedJWTOverConfiguredSizeLimit(t *testing.T) {
+	userInfoKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate userinfo key: %v", err)
+	}
+	// A large claim value stands in for a claims-heavy response (many
+	// granted scopes/claims) that legitimately exceeds a small
+	// configured MaxJOSECompactBytes, distinct from a malformed one.
+	bigValue := make([]byte, 4096)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		compact := signUserInfoJWS(t, userInfoKey, map[string]any{"sub": userInfoTestSubject, "big": string(bigValue)})
+		w.Header().Set("Content-Type", "application/jwt")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(compact))
+	}))
+	defer ts.Close()
+
+	c := newUserInfoTestClient(t, ts, &userInfoKey.PublicKey, func(cfg *client.Config) {
+		cfg.Limits.MaxJOSECompactBytes = 1024
+	}, nil)
+	_, err = c.FetchUserInfo(context.Background(), userInfoTestTokens())
+	var cerr *client.Error
+	if !errors.As(err, &cerr) {
+		t.Fatalf("FetchUserInfo error = %v, want *client.Error", err)
+	}
+	if cerr.Code() != client.ErrorResponseTooLarge {
+		t.Fatalf("FetchUserInfo error code = %q, want %q", cerr.Code(), client.ErrorResponseTooLarge)
 	}
 }
 

@@ -18,4 +18,8 @@ var (
 	// undifferentiated: which specific step failed is not safe to expose
 	// to a caller processing untrusted input.
 	ErrDecryptionFailed = errors.New("jwe: decryption failed")
+
+	// ErrTooLarge indicates a compact serialization larger than
+	// DecryptRequest.MaxCompactBytes.
+	ErrTooLarge = errors.New("jwe: compact serialization exceeds maximum size")
 )

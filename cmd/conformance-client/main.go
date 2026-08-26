@@ -285,6 +285,7 @@ func runModule(ctx context.Context, d moduleDriver, testName string) string {
 		MaxClockSkew:            15 * time.Second,
 		HTTPTimeout:             fetchTimeout,
 		MaxHTTPResponseBytes:    1 << 20,
+		MaxJOSECompactBytes:     16 * 1024,
 	}
 	if profile.signRequestObject {
 		// This driver's key manager only ever generates ES256 keys, so it

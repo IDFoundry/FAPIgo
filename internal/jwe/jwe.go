@@ -278,6 +278,14 @@ type DecryptRequest struct {
 	RecipientKey any
 
 	Compact string
+
+	// MaxCompactBytes bounds how large Compact may be before Decrypt
+	// rejects it with ErrTooLarge, checked before any parsing or
+	// decryption work. Zero (or negative) means no limit is enforced
+	// here — a caller relying on that must already bound Compact's size
+	// some other way (e.g. a capped HTTP response read) before it
+	// reaches Decrypt.
+	MaxCompactBytes int
 }
 
 // Unwrapper delivers the content-encryption key for one JWE without
@@ -313,6 +321,9 @@ func Decrypt(ctx context.Context, req DecryptRequest) (DecryptResult, error) {
 	}
 	if !req.Encryption.IsValid() {
 		return DecryptResult{}, fmt.Errorf("jwe: invalid content encryption algorithm %v", req.Encryption)
+	}
+	if req.MaxCompactBytes > 0 && len(req.Compact) > req.MaxCompactBytes {
+		return DecryptResult{}, fmt.Errorf("%w: %d bytes exceeds the %d byte limit", ErrTooLarge, len(req.Compact), req.MaxCompactBytes)
 	}
 
 	parts := strings.Split(req.Compact, ".")

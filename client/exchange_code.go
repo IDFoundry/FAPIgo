@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -14,6 +15,7 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/clientassertion"
 	"github.com/idfoundry/fapigo/internal/dpop"
+	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/internal/jwe"
 	"github.com/idfoundry/fapigo/internal/par"
 	"github.com/idfoundry/fapigo/internal/token"
@@ -298,12 +300,16 @@ func (c *Client) validateIDToken(ctx context.Context, raw, nonce string) (token.
 func (c *Client) decryptIDToken(ctx context.Context, raw string) (string, *Error) {
 	unwrapper := decrypterUnwrapper{decrypter: c.deps.Decryption, purpose: keys.IDTokenDecryption}
 	result, err := jwe.Decrypt(ctx, jwe.DecryptRequest{
-		Algorithm:    c.cfg.Algorithms.IDTokenKeyManagement,
-		Encryption:   c.cfg.Algorithms.IDTokenContentEncryption,
-		RecipientKey: unwrapper,
-		Compact:      raw,
+		Algorithm:       c.cfg.Algorithms.IDTokenKeyManagement,
+		Encryption:      c.cfg.Algorithms.IDTokenContentEncryption,
+		RecipientKey:    unwrapper,
+		Compact:         raw,
+		MaxCompactBytes: c.cfg.Limits.MaxJOSECompactBytes,
 	})
 	if err != nil {
+		if errors.Is(err, jwe.ErrTooLarge) {
+			return "", newError(ErrorResponseTooLarge, "ID token exceeds the configured size limit", err)
+		}
 		return "", newError(ErrorInvalidResponse, "ID token decryption failed", err)
 	}
 	// RFC 7519 §5.2 requires a producer of a nested JWT to set cty to
@@ -340,8 +346,11 @@ func isAcceptableNestedJWTContentType(cty string) bool {
 // either one that arrived that way directly, or the inner JWT
 // decryptIDToken recovered from an encrypted one.
 func (c *Client) validateSignedIDToken(ctx context.Context, raw, nonce string) (token.ValidatedIDToken, *Error) {
-	parsed, err := token.ParseIDToken(raw)
+	parsed, err := token.ParseIDTokenMax(raw, c.cfg.Limits.MaxJOSECompactBytes)
 	if err != nil {
+		if errors.Is(err, jose.ErrTooLarge) {
+			return token.ValidatedIDToken{}, newError(ErrorResponseTooLarge, "ID token exceeds the configured size limit", err)
+		}
 		return token.ValidatedIDToken{}, newError(ErrorInvalidResponse, "malformed ID token", err)
 	}
 

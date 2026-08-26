@@ -63,6 +63,15 @@ type DiscoveredMetadata struct {
 	IDTokenEncryptionAlgorithms []fapi.KeyManagementAlgorithm
 	IDTokenEncryptionEncValues  []fapi.ContentEncryptionAlgorithm
 
+	// UserInfoAlgorithms/UserInfoEncryptionAlgorithms/UserInfoEncryptionEncValues
+	// mirror the ID-token triple above, for a UserInfo response instead.
+	// All three empty means the server never advertised JWT UserInfo
+	// support at all — most servers, and consistent with plain-JSON
+	// UserInfo needing none of this.
+	UserInfoAlgorithms           []fapi.SignatureAlgorithm
+	UserInfoEncryptionAlgorithms []fapi.KeyManagementAlgorithm
+	UserInfoEncryptionEncValues  []fapi.ContentEncryptionAlgorithm
+
 	// RequireSignedRequestObject reflects the server's own
 	// require_signed_request_object metadata value — a caller targeting
 	// that server should set Config.Profile to
@@ -105,15 +114,20 @@ type DiscoveredMetadata struct {
 //     support is opt-in, and Config already requires the pair set
 //     together, so checking one non-zero value is enough to trigger
 //     checking both.
+//   - UserInfo, against UserInfoAlgorithms, only if algs.UserInfo is
+//     non-zero — a caller expecting only a plain-JSON UserInfo response
+//     leaves this zero, and has nothing to check here at all, exactly
+//     like RequestObject/JARM above.
+//   - UserInfoKeyManagement/UserInfoContentEncryption, against
+//     UserInfoEncryptionAlgorithms/UserInfoEncryptionEncValues, only if
+//     algs.UserInfoKeyManagement is non-zero, for the same reason
+//     IDTokenKeyManagement is conditional above.
 //
 // ClientAuthentication and DPoP are never checked: those are this
 // client's own signing choice, verified by the server against a
 // registered key it resolves itself, not something a server advertises
 // as "supported" the way it does for what it produces or accepts as an
-// encryption target. UserInfo is also never checked, for a narrower
-// reason — this type has no UserInfoAlgorithms field at all, because
-// Discover doesn't currently parse a discovered UserInfo signing
-// algorithm list to check against.
+// encryption target.
 func (d DiscoveredMetadata) SupportsAlgorithms(algs Algorithms) error {
 	if !slices.Contains(d.IDTokenAlgorithms, algs.IDToken) {
 		return fmt.Errorf("client: issuer does not support %v for id_token; advertises: %v", algs.IDToken, d.IDTokenAlgorithms)
@@ -130,6 +144,17 @@ func (d DiscoveredMetadata) SupportsAlgorithms(algs Algorithms) error {
 		}
 		if !slices.Contains(d.IDTokenEncryptionEncValues, algs.IDTokenContentEncryption) {
 			return fmt.Errorf("client: issuer does not support %v content encryption for id_token; advertises: %v", algs.IDTokenContentEncryption, d.IDTokenEncryptionEncValues)
+		}
+	}
+	if algs.UserInfo != 0 && !slices.Contains(d.UserInfoAlgorithms, algs.UserInfo) {
+		return fmt.Errorf("client: issuer does not support %v for userinfo; advertises: %v", algs.UserInfo, d.UserInfoAlgorithms)
+	}
+	if algs.UserInfoKeyManagement != 0 {
+		if !slices.Contains(d.UserInfoEncryptionAlgorithms, algs.UserInfoKeyManagement) {
+			return fmt.Errorf("client: issuer does not support %v for userinfo encryption; advertises: %v", algs.UserInfoKeyManagement, d.UserInfoEncryptionAlgorithms)
+		}
+		if !slices.Contains(d.UserInfoEncryptionEncValues, algs.UserInfoContentEncryption) {
+			return fmt.Errorf("client: issuer does not support %v content encryption for userinfo; advertises: %v", algs.UserInfoContentEncryption, d.UserInfoEncryptionEncValues)
 		}
 	}
 	return nil
@@ -223,6 +248,9 @@ func Discover(ctx context.Context, fetcher *fapihttp.Client, issuer fapi.URL, op
 		JARMAlgorithms:                    supportedAlgorithms(doc.AuthorizationSigningAlgValuesSupported),
 		IDTokenEncryptionAlgorithms:       supportedKeyManagementAlgorithms(doc.IDTokenEncryptionAlgValuesSupported),
 		IDTokenEncryptionEncValues:        supportedContentEncryptionAlgorithms(doc.IDTokenEncryptionEncValuesSupported),
+		UserInfoAlgorithms:                supportedAlgorithms(doc.UserinfoSigningAlgValuesSupported),
+		UserInfoEncryptionAlgorithms:      supportedKeyManagementAlgorithms(doc.UserinfoEncryptionAlgValuesSupported),
+		UserInfoEncryptionEncValues:       supportedContentEncryptionAlgorithms(doc.UserinfoEncryptionEncValuesSupported),
 		RequireSignedRequestObject:        doc.RequireSignedRequestObject,
 		AuthorizationResponseIssSupported: doc.AuthorizationResponseIssParameterSupported,
 	}, nil

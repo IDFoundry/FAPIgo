@@ -59,6 +59,15 @@ type Document struct {
 	// client.FetchUserInfo, rather than hand-fetching discovery a second
 	// time just for this one field.
 	UserinfoEndpoint string `json:"userinfo_endpoint,omitempty"`
+
+	// UserinfoSigningAlgValuesSupported/UserinfoEncryptionAlgValuesSupported/
+	// UserinfoEncryptionEncValuesSupported mirror the ID-token triple
+	// above, for the UserInfo response instead (OIDC Discovery 1.0 §3).
+	// All three are OPTIONAL — a server that only ever returns plain
+	// JSON UserInfo responses advertises none of them.
+	UserinfoSigningAlgValuesSupported    []string `json:"userinfo_signing_alg_values_supported,omitempty"`
+	UserinfoEncryptionAlgValuesSupported []string `json:"userinfo_encryption_alg_values_supported,omitempty"`
+	UserinfoEncryptionEncValuesSupported []string `json:"userinfo_encryption_enc_values_supported,omitempty"`
 }
 
 // ParseAndValidate parses body as a Document and checks it against

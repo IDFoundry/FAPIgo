@@ -45,6 +45,10 @@ type discoveryDoc struct {
 	IDTokenEncryptionAlgValuesSupported []string `json:"id_token_encryption_alg_values_supported,omitempty"`
 	IDTokenEncryptionEncValuesSupported []string `json:"id_token_encryption_enc_values_supported,omitempty"`
 	RequireSignedRequestObject          bool     `json:"require_signed_request_object,omitempty"`
+
+	UserinfoSigningAlgValuesSupported    []string `json:"userinfo_signing_alg_values_supported,omitempty"`
+	UserinfoEncryptionAlgValuesSupported []string `json:"userinfo_encryption_alg_values_supported,omitempty"`
+	UserinfoEncryptionEncValuesSupported []string `json:"userinfo_encryption_enc_values_supported,omitempty"`
 }
 
 func TestDiscoverAcceptsValidDocumentAtRoot(t *testing.T) {
@@ -65,6 +69,10 @@ func TestDiscoverAcceptsValidDocumentAtRoot(t *testing.T) {
 			IDTokenEncryptionAlgValuesSupported: []string{"RSA-OAEP-256", "RSA-OAEP"},
 			IDTokenEncryptionEncValuesSupported: []string{"A256GCM", "A128GCM"},
 			RequireSignedRequestObject:          true,
+
+			UserinfoSigningAlgValuesSupported:    []string{"ES256", "RS256"},
+			UserinfoEncryptionAlgValuesSupported: []string{"RSA-OAEP-256", "RSA-OAEP"},
+			UserinfoEncryptionEncValuesSupported: []string{"A256GCM", "A128GCM"},
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(doc)
@@ -115,6 +123,15 @@ func TestDiscoverAcceptsValidDocumentAtRoot(t *testing.T) {
 	}
 	if !md.RequireSignedRequestObject {
 		t.Errorf("RequireSignedRequestObject = false, want true")
+	}
+	if len(md.UserInfoAlgorithms) != 1 || md.UserInfoAlgorithms[0] != fapi.ES256 {
+		t.Errorf("UserInfoAlgorithms = %v, want [ES256] (RS256 is unsupported and must be filtered)", md.UserInfoAlgorithms)
+	}
+	if len(md.UserInfoEncryptionAlgorithms) != 1 || md.UserInfoEncryptionAlgorithms[0] != fapi.RSAOAEP256 {
+		t.Errorf("UserInfoEncryptionAlgorithms = %v, want [RSAOAEP256] (RSA-OAEP is unsupported and must be filtered)", md.UserInfoEncryptionAlgorithms)
+	}
+	if len(md.UserInfoEncryptionEncValues) != 1 || md.UserInfoEncryptionEncValues[0] != fapi.A256GCM {
+		t.Errorf("UserInfoEncryptionEncValues = %v, want [A256GCM] (A128GCM is unsupported and must be filtered)", md.UserInfoEncryptionEncValues)
 	}
 }
 

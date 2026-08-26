@@ -55,7 +55,7 @@ type TokenSet struct {
 // exactly like Subject. Parameters holds every other claim the token
 // carried (custom identity claims, extension claims, etc.) — anything
 // not already surfaced as one of the named fields or implicitly
-// verified (iss, aud, exp, iat, nonce).
+// verified (iss, aud, nonce).
 //
 // For an encrypted ID token, this is the only way to reach anything
 // beyond Subject at all: decryption happens entirely inside client, so
@@ -72,6 +72,13 @@ type IDTokenClaims struct {
 	AMR        []string
 	Parameters map[string]json.RawMessage
 	ExpiresAt  time.Time
+
+	// IssuedAt is the token's "iat" — required to be present and
+	// well-formed for validation to succeed at all, but not itself
+	// checked against any policy here (unlike ExpiresAt). Exposed for a
+	// caller's own telemetry or cross-checks, not something this
+	// package enforces a bound on.
+	IssuedAt time.Time
 }
 
 // ExchangeCode authenticates to the token endpoint, presents a DPoP
@@ -120,30 +127,9 @@ func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationRe
 	if err != nil {
 		return TokenSet{}, newError(ErrorInternal, "failed to build client assertion", err)
 	}
-	body, status, header, err := c.postTokenRequestWithDPoP(ctx, dpopSigner, &tokenURL, form, "")
-	if err != nil {
-		return TokenSet{}, newError(ErrorInternal, "token request failed", err)
-	}
-	if status != http.StatusOK {
-		// RFC 9449 §8: an authorization server that requires a
-		// server-provided DPoP nonce rejects a proof lacking one (or
-		// carrying a stale one) with use_dpop_nonce and a DPoP-Nonce
-		// response header naming the value to use — the client is
-		// expected to retry once with a fresh proof carrying it, not
-		// treat this as a terminal failure.
-		if nonce := header.Get("DPoP-Nonce"); nonce != "" && isDPoPNonceError(body) {
-			retryForm, buildErr := buildTokenForm()
-			if buildErr != nil {
-				return TokenSet{}, newError(ErrorInternal, "failed to build client assertion", buildErr)
-			}
-			body, status, _, err = c.postTokenRequestWithDPoP(ctx, dpopSigner, &tokenURL, retryForm, nonce)
-			if err != nil {
-				return TokenSet{}, newError(ErrorInternal, "token request failed", err)
-			}
-		}
-		if status != http.StatusOK {
-			return TokenSet{}, parErrorFromResponse(body)
-		}
+	body, tokenErr := c.sendTokenRequest(ctx, dpopSigner, &tokenURL, buildTokenForm, form)
+	if tokenErr != nil {
+		return TokenSet{}, tokenErr
 	}
 
 	raw, err := decodeTokenResponse(body)
@@ -175,6 +161,44 @@ func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationRe
 	return result, nil
 }
 
+// sendTokenRequest posts form to the token endpoint via a DPoP-proofed
+// request, retrying once with a freshly-built form if the server
+// challenges for a DPoP nonce (RFC 9449 §8: a server requiring one
+// rejects a proof lacking it — or carrying a stale one — with
+// use_dpop_nonce and a DPoP-Nonce response header naming the value to
+// use; the client is expected to retry once with a fresh proof
+// carrying it, not treat this as a terminal failure) — factored out of
+// ExchangeCode purely to keep that function's own branching manageable.
+// buildTokenForm is called again for the retry, not reused, since a
+// client assertion is exactly as single-use as a DPoP proof is (see
+// ExchangeCode's own comment on buildTokenForm).
+func (c *Client) sendTokenRequest(ctx context.Context, dpopSigner crypto.Signer, tokenURL *url.URL, buildTokenForm func() ([]byte, error), form []byte) ([]byte, *Error) {
+	body, status, header, err := c.postTokenRequestWithDPoP(ctx, dpopSigner, tokenURL, form, "")
+	if err != nil {
+		return nil, newError(ErrorInternal, "token request failed", err)
+	}
+	if status == http.StatusOK {
+		return body, nil
+	}
+
+	nonce := header.Get("DPoP-Nonce")
+	if nonce == "" || !isDPoPNonceError(body) {
+		return nil, parErrorFromResponse(body)
+	}
+	retryForm, buildErr := buildTokenForm()
+	if buildErr != nil {
+		return nil, newError(ErrorInternal, "failed to build client assertion", buildErr)
+	}
+	body, status, _, err = c.postTokenRequestWithDPoP(ctx, dpopSigner, tokenURL, retryForm, nonce)
+	if err != nil {
+		return nil, newError(ErrorInternal, "token request failed", err)
+	}
+	if status != http.StatusOK {
+		return nil, parErrorFromResponse(body)
+	}
+	return body, nil
+}
+
 // populateIDToken validates raw.IDToken, if present, and fills in
 // result's IDToken/HasIDToken/Subject/IDTokenClaims fields — factored
 // out of ExchangeCode purely to keep that function's own branching
@@ -194,6 +218,7 @@ func (c *Client) populateIDToken(ctx context.Context, result *TokenSet, raw rawT
 		Subject: validated.Subject, AuthTime: validated.AuthTime,
 		ACR: validated.ACR, AMR: validated.AMR,
 		Parameters: validated.Parameters, ExpiresAt: validated.ExpiresAt,
+		IssuedAt: validated.IssuedAt,
 	}
 	return nil
 }

@@ -64,6 +64,19 @@ type fakeAS struct {
 	// RECOMMENDED, not REQUIRED).
 	omitExpiresIn bool
 
+	// rejectTokenRequestPlain, if true, makes handleToken respond to
+	// every token request with an ordinary (non-DPoP-nonce) error —
+	// exercising ExchangeCode's non-retryable error path, as opposed to
+	// the use_dpop_nonce challenge/retry path challengeDPoPNonce covers.
+	rejectTokenRequestPlain bool
+
+	// alwaysChallengeDPoPNonce, if true, makes handleToken challenge for
+	// a DPoP nonce on every token request, including a retry that
+	// already carries one — exercising the path where the retry itself
+	// still fails, as opposed to challengeDPoPNonce's "succeeds once
+	// resubmitted with the right nonce" case.
+	alwaysChallengeDPoPNonce bool
+
 	// encryptIDTokenTo, if non-nil, wraps the issued ID token as a
 	// signed-then-encrypted Nested JWT (OIDC Core §2) to this public
 	// key under encryptIDTokenAlg before putting it in the token
@@ -199,8 +212,24 @@ func (a *fakeAS) handleToken(w http.ResponseWriter, r *http.Request) {
 		a.t.Errorf("token: missing code_verifier")
 	}
 
-	if a.challengeDPoPNonce != "" && dpopProofNonce(a.t, proof) != a.challengeDPoPNonce {
-		w.Header().Set("DPoP-Nonce", a.challengeDPoPNonce)
+	if a.rejectTokenRequestPlain {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]any{
+			"error":             "invalid_grant",
+			"error_description": "test: rejected without a DPoP-nonce challenge",
+		})
+		return
+	}
+
+	mustChallenge := a.alwaysChallengeDPoPNonce ||
+		(a.challengeDPoPNonce != "" && dpopProofNonce(a.t, proof) != a.challengeDPoPNonce)
+	if mustChallenge {
+		nonce := a.challengeDPoPNonce
+		if nonce == "" {
+			nonce = "test-dpop-nonce"
+		}
+		w.Header().Set("DPoP-Nonce", nonce)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]any{
@@ -513,6 +542,12 @@ func TestCompleteAuthorizationHappyPathBaseline(t *testing.T) {
 	}
 	if success.Tokens.IDTokenClaims.ExpiresAt.IsZero() {
 		t.Errorf("IDTokenClaims.ExpiresAt is zero, want the ID token's actual exp claim")
+	}
+	if success.Tokens.IDTokenClaims.IssuedAt.IsZero() {
+		t.Errorf("IDTokenClaims.IssuedAt is zero, want the ID token's actual iat claim")
+	}
+	if !success.Tokens.IDTokenClaims.IssuedAt.Before(success.Tokens.IDTokenClaims.ExpiresAt) {
+		t.Errorf("IssuedAt (%v) is not before ExpiresAt (%v)", success.Tokens.IDTokenClaims.IssuedAt, success.Tokens.IDTokenClaims.ExpiresAt)
 	}
 }
 

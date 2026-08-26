@@ -253,6 +253,13 @@ type ValidatedIDToken struct {
 	AMR        []string
 	Parameters map[string]json.RawMessage
 	ExpiresAt  time.Time
+
+	// IssuedAt is the token's "iat" — required to be present and
+	// well-formed for parsing to succeed at all, but not itself checked
+	// against any policy here (unlike ExpiresAt, which is bounded by
+	// MaxLifetime/MaxClockSkew). Exposed for a caller's own telemetry or
+	// cross-checks, not something this package enforces a bound on.
+	IssuedAt time.Time
 }
 
 // Validate checks t's signature against pub and its claims against
@@ -332,5 +339,6 @@ func (t IDToken) Validate(pub crypto.PublicKey, policy IDTokenValidatePolicy) (V
 		AMR:        c.AMR,
 		Parameters: c.Parameters,
 		ExpiresAt:  c.ExpiresAt,
+		IssuedAt:   c.IssuedAt,
 	}, nil
 }

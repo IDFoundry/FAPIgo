@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -74,6 +75,62 @@ type DiscoveredMetadata struct {
 	// parameter from authorization servers that do support the
 	// parameter").
 	AuthorizationResponseIssSupported bool
+}
+
+// SupportsAlgorithms reports whether every algorithm algs actually
+// requires is among what this server advertised, returning a
+// descriptive error naming the first unsupported one it finds rather
+// than a bare bool — Discover itself never picks an algorithm or
+// enforces this on a caller's behalf (see this type's own doc
+// comment), so a caller wanting a clear, specific startup failure
+// instead of discovering a mismatch downstream — at whatever point a
+// signature or JWE actually fails to verify — checks it explicitly
+// with this method before building Config.
+//
+// Only the fields this type actually has discovered data for are
+// checked:
+//
+//   - IDToken, against IDTokenAlgorithms, unconditionally — an ID
+//     token is always expected, regardless of Profile.
+//   - RequestObject, against RequestObjectAlgorithms, only if algs.RequestObject
+//     is non-zero (Config only requires it under
+//     ProfileFAPISecurityWithMessageSigning).
+//   - JARM, against JARMAlgorithms, only if algs.JARM is non-zero (same
+//     reasoning).
+//   - IDTokenKeyManagement/IDTokenContentEncryption, against
+//     IDTokenEncryptionAlgorithms/IDTokenEncryptionEncValues, only if
+//     algs.IDTokenKeyManagement is non-zero — encrypted ID token
+//     support is opt-in, and Config already requires the pair set
+//     together, so checking one non-zero value is enough to trigger
+//     checking both.
+//
+// ClientAuthentication and DPoP are never checked: those are this
+// client's own signing choice, verified by the server against a
+// registered key it resolves itself, not something a server advertises
+// as "supported" the way it does for what it produces or accepts as an
+// encryption target. UserInfo is also never checked, for a narrower
+// reason — this type has no UserInfoAlgorithms field at all, because
+// Discover doesn't currently parse a discovered UserInfo signing
+// algorithm list to check against.
+func (d DiscoveredMetadata) SupportsAlgorithms(algs Algorithms) error {
+	if !slices.Contains(d.IDTokenAlgorithms, algs.IDToken) {
+		return fmt.Errorf("client: issuer does not support %v for id_token; advertises: %v", algs.IDToken, d.IDTokenAlgorithms)
+	}
+	if algs.RequestObject != 0 && !slices.Contains(d.RequestObjectAlgorithms, algs.RequestObject) {
+		return fmt.Errorf("client: issuer does not support %v for request objects; advertises: %v", algs.RequestObject, d.RequestObjectAlgorithms)
+	}
+	if algs.JARM != 0 && !slices.Contains(d.JARMAlgorithms, algs.JARM) {
+		return fmt.Errorf("client: issuer does not support %v for JARM; advertises: %v", algs.JARM, d.JARMAlgorithms)
+	}
+	if algs.IDTokenKeyManagement != 0 {
+		if !slices.Contains(d.IDTokenEncryptionAlgorithms, algs.IDTokenKeyManagement) {
+			return fmt.Errorf("client: issuer does not support %v for id_token encryption; advertises: %v", algs.IDTokenKeyManagement, d.IDTokenEncryptionAlgorithms)
+		}
+		if !slices.Contains(d.IDTokenEncryptionEncValues, algs.IDTokenContentEncryption) {
+			return fmt.Errorf("client: issuer does not support %v content encryption for id_token; advertises: %v", algs.IDTokenContentEncryption, d.IDTokenEncryptionEncValues)
+		}
+	}
+	return nil
 }
 
 // Discover fetches and validates issuer's OpenID Connect Discovery

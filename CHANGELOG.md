@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/IDFoundry/FAPIgo/compare/v0.11.0...v0.12.0) (2026-08-26)
+
+
+### Features
+
+* publish this client's own JWKS ([cecc67e](https://github.com/IDFoundry/FAPIgo/commit/cecc67eae60c54e18fe11b47b30de3b5455f6356))
+
 ## [0.11.0](https://github.com/IDFoundry/FAPIgo/compare/v0.10.0...v0.11.0) (2026-08-25)
 
 

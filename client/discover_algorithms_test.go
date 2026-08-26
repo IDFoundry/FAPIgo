@@ -31,6 +31,10 @@ func discoverForAlgorithmTests(t *testing.T) client.DiscoveredMetadata {
 			AuthorizationSigningAlgValues:       []string{"ES256"},
 			IDTokenEncryptionAlgValuesSupported: []string{"RSA-OAEP-256"},
 			IDTokenEncryptionEncValuesSupported: []string{"A256GCM"},
+
+			UserinfoSigningAlgValuesSupported:    []string{"ES256"},
+			UserinfoEncryptionAlgValuesSupported: []string{"RSA-OAEP-256"},
+			UserinfoEncryptionEncValuesSupported: []string{"A256GCM"},
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(doc) //nolint:errcheck
@@ -124,6 +128,70 @@ func TestSupportsAlgorithmsSkipsEncryptionWhenNotConfigured(t *testing.T) {
 	err := md.SupportsAlgorithms(client.Algorithms{IDToken: fapi.ES256})
 	if err != nil {
 		t.Fatalf("SupportsAlgorithms(encryption not configured): %v", err)
+	}
+}
+
+func TestSupportsAlgorithmsSkipsUserInfoWhenZero(t *testing.T) {
+	md := discoverForAlgorithmTests(t)
+	// UserInfo left zero — a caller expecting only a plain-JSON UserInfo
+	// response — must not be checked even though the issuer advertises
+	// JWT UserInfo support this caller never asked for.
+	if err := md.SupportsAlgorithms(client.Algorithms{IDToken: fapi.ES256}); err != nil {
+		t.Fatalf("SupportsAlgorithms(UserInfo unset): %v", err)
+	}
+}
+
+func TestSupportsAlgorithmsAcceptsMatchingUserInfo(t *testing.T) {
+	md := discoverForAlgorithmTests(t)
+	err := md.SupportsAlgorithms(client.Algorithms{IDToken: fapi.ES256, UserInfo: fapi.ES256})
+	if err != nil {
+		t.Fatalf("SupportsAlgorithms(matching userinfo): %v", err)
+	}
+}
+
+func TestSupportsAlgorithmsRejectsUnsupportedUserInfo(t *testing.T) {
+	md := discoverForAlgorithmTests(t)
+	err := md.SupportsAlgorithms(client.Algorithms{IDToken: fapi.ES256, UserInfo: fapi.PS256})
+	if err == nil {
+		t.Fatal("SupportsAlgorithms(unsupported userinfo alg) = nil error, want error")
+	}
+}
+
+func TestSupportsAlgorithmsAcceptsMatchingUserInfoEncryption(t *testing.T) {
+	md := discoverForAlgorithmTests(t)
+	err := md.SupportsAlgorithms(client.Algorithms{
+		IDToken: fapi.ES256, UserInfoKeyManagement: fapi.RSAOAEP256, UserInfoContentEncryption: fapi.A256GCM,
+	})
+	if err != nil {
+		t.Fatalf("SupportsAlgorithms(matching userinfo encryption): %v", err)
+	}
+}
+
+func TestSupportsAlgorithmsRejectsUnsupportedUserInfoEncryptionKeyManagement(t *testing.T) {
+	md := discoverForAlgorithmTests(t)
+	err := md.SupportsAlgorithms(client.Algorithms{
+		IDToken: fapi.ES256, UserInfoKeyManagement: fapi.ECDHESA256KW, UserInfoContentEncryption: fapi.A256GCM,
+	})
+	if err == nil {
+		t.Fatal("SupportsAlgorithms(unsupported userinfo key management) = nil error, want error")
+	}
+}
+
+func TestSupportsAlgorithmsRejectsUnsupportedUserInfoContentEncryption(t *testing.T) {
+	md := discoverForAlgorithmTests(t)
+	err := md.SupportsAlgorithms(client.Algorithms{
+		IDToken: fapi.ES256, UserInfoKeyManagement: fapi.RSAOAEP256, UserInfoContentEncryption: fapi.A256CBCHS512,
+	})
+	if err == nil {
+		t.Fatal("SupportsAlgorithms(unsupported userinfo content encryption) = nil error, want error")
+	}
+}
+
+func TestSupportsAlgorithmsSkipsUserInfoEncryptionWhenNotConfigured(t *testing.T) {
+	md := discoverForAlgorithmTests(t) // advertises userinfo encryption support
+	err := md.SupportsAlgorithms(client.Algorithms{IDToken: fapi.ES256, UserInfo: fapi.ES256})
+	if err != nil {
+		t.Fatalf("SupportsAlgorithms(userinfo encryption not configured): %v", err)
 	}
 }
 

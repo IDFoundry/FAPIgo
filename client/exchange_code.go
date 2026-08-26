@@ -83,6 +83,47 @@ type IDTokenClaims struct {
 	IssuedAt time.Time
 }
 
+// AsMap returns c's claims as a single map keyed by their JSON claim
+// names — Subject/ExpiresAt/IssuedAt/AuthTime/ACR/AMR merged into a
+// copy of Parameters — for a caller that wants the full validated
+// claim set as one document (display, logging, forwarding) instead of
+// re-deriving this merge by hand, which risks silently dropping one of
+// the typed fields (there is nothing about Parameters that reminds a
+// caller iat, say, needs to be re-added).
+//
+// exp, iat and auth_time come back as Unix seconds, matching how OIDC
+// Core §2 actually defines these claims on the wire — not time.Time's
+// own JSON encoding, which would silently produce the wrong shape.
+// auth_time, acr and amr are omitted entirely when absent (AuthTime
+// zero, ACR "", AMR nil) rather than included as an empty value, the
+// same convention internal/token's own issuing side already uses when
+// producing these claims (see internal/token/issue.go).
+//
+// AsMap cannot fail: every Parameters value already round-tripped
+// through json.Unmarshal once when the token was first parsed, so
+// re-decoding it here into any is guaranteed to succeed.
+func (c IDTokenClaims) AsMap() map[string]any {
+	out := make(map[string]any, len(c.Parameters)+6)
+	for k, v := range c.Parameters {
+		var val any
+		_ = json.Unmarshal(v, &val)
+		out[k] = val
+	}
+	out["sub"] = c.Subject
+	out["exp"] = c.ExpiresAt.Unix()
+	out["iat"] = c.IssuedAt.Unix()
+	if !c.AuthTime.IsZero() {
+		out["auth_time"] = c.AuthTime.Unix()
+	}
+	if c.ACR != "" {
+		out["acr"] = c.ACR
+	}
+	if len(c.AMR) > 0 {
+		out["amr"] = c.AMR
+	}
+	return out
+}
+
 // ExchangeCode authenticates to the token endpoint, presents a DPoP
 // proof bound to this request, and redeems resp's authorization code for
 // an access token — validating any returned ID token before trusting its

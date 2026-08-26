@@ -29,6 +29,25 @@ type UserInfo struct {
 	Parameters map[string]json.RawMessage
 }
 
+// AsMap returns u's claims as a single map keyed by their JSON claim
+// names — Subject merged into a copy of Parameters — the UserInfo
+// equivalent of IDTokenClaims.AsMap (see its doc comment for the
+// rationale). UserInfo has only the one typed field, so there's none
+// of that method's numeric-date or omit-if-absent handling to
+// reconstruct here. Like IDTokenClaims.AsMap, this cannot fail: every
+// Parameters value already round-tripped through json.Unmarshal once
+// when the response was first parsed.
+func (u UserInfo) AsMap() map[string]any {
+	out := make(map[string]any, len(u.Parameters)+1)
+	for k, v := range u.Parameters {
+		var val any
+		_ = json.Unmarshal(v, &val)
+		out[k] = val
+	}
+	out["sub"] = u.Subject
+	return out
+}
+
 // FetchUserInfo calls Config.Endpoints.UserInfo with tokens' DPoP-bound
 // access token (via ProtectedResource) and returns the validated
 // claims. The response may be plain JSON, a signed-only JWT, or a

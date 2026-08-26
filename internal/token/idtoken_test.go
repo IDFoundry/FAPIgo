@@ -68,6 +68,9 @@ func TestIDTokenRoundTrip(t *testing.T) {
 	if validated.AuthTime.Unix() != now.Add(-30*time.Second).Unix() {
 		t.Fatalf("AuthTime = %v, want %v", validated.AuthTime, now.Add(-30*time.Second))
 	}
+	if validated.IssuedAt.Unix() != now.Unix() {
+		t.Fatalf("IssuedAt = %v, want %v", validated.IssuedAt, now)
+	}
 	if _, ok := validated.Parameters["custom_claim"]; !ok {
 		t.Fatalf("Parameters missing custom_claim")
 	}

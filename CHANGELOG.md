@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.15.0](https://github.com/IDFoundry/FAPIgo/compare/v0.14.0...v0.15.0) (2026-08-26)
+
+
+### Features
+
+* add IDTokenClaims.AsMap and UserInfo.AsMap ([cd9a000](https://github.com/IDFoundry/FAPIgo/commit/cd9a0001561829cf1cfff82b09a2e348b7633cbc))
+* discover and validate UserInfo signing/encryption algorithms ([66202c4](https://github.com/IDFoundry/FAPIgo/commit/66202c417f6c6b2e57c8c7249f8a217e87cf3d0c))
+
 ## [0.14.0](https://github.com/IDFoundry/FAPIgo/compare/v0.13.0...v0.14.0) (2026-08-26)
 
 

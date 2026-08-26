@@ -514,6 +514,12 @@ func TestCompleteAuthorizationHappyPathBaseline(t *testing.T) {
 	if success.Tokens.IDTokenClaims.ExpiresAt.IsZero() {
 		t.Errorf("IDTokenClaims.ExpiresAt is zero, want the ID token's actual exp claim")
 	}
+	if success.Tokens.IDTokenClaims.IssuedAt.IsZero() {
+		t.Errorf("IDTokenClaims.IssuedAt is zero, want the ID token's actual iat claim")
+	}
+	if !success.Tokens.IDTokenClaims.IssuedAt.Before(success.Tokens.IDTokenClaims.ExpiresAt) {
+		t.Errorf("IssuedAt (%v) is not before ExpiresAt (%v)", success.Tokens.IDTokenClaims.IssuedAt, success.Tokens.IDTokenClaims.ExpiresAt)
+	}
 }
 
 func TestCompleteAuthorizationHappyPathMessageSigning(t *testing.T) {

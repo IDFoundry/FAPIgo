@@ -55,7 +55,7 @@ type TokenSet struct {
 // exactly like Subject. Parameters holds every other claim the token
 // carried (custom identity claims, extension claims, etc.) — anything
 // not already surfaced as one of the named fields or implicitly
-// verified (iss, aud, exp, iat, nonce).
+// verified (iss, aud, nonce).
 //
 // For an encrypted ID token, this is the only way to reach anything
 // beyond Subject at all: decryption happens entirely inside client, so
@@ -72,6 +72,13 @@ type IDTokenClaims struct {
 	AMR        []string
 	Parameters map[string]json.RawMessage
 	ExpiresAt  time.Time
+
+	// IssuedAt is the token's "iat" — required to be present and
+	// well-formed for validation to succeed at all, but not itself
+	// checked against any policy here (unlike ExpiresAt). Exposed for a
+	// caller's own telemetry or cross-checks, not something this
+	// package enforces a bound on.
+	IssuedAt time.Time
 }
 
 // ExchangeCode authenticates to the token endpoint, presents a DPoP
@@ -194,6 +201,7 @@ func (c *Client) populateIDToken(ctx context.Context, result *TokenSet, raw rawT
 		Subject: validated.Subject, AuthTime: validated.AuthTime,
 		ACR: validated.ACR, AMR: validated.AMR,
 		Parameters: validated.Parameters, ExpiresAt: validated.ExpiresAt,
+		IssuedAt: validated.IssuedAt,
 	}
 	return nil
 }

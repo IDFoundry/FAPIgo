@@ -34,7 +34,6 @@ package main
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/tls"
 	"encoding/base64"
@@ -50,6 +49,7 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/client"
 	"github.com/idfoundry/fapigo/fapihttp"
+	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/keys"
 )
 
@@ -132,26 +132,33 @@ func run(apiBase string, profile driverProfile) error {
 	if err != nil {
 		return fmt.Errorf("generate keys: %w", err)
 	}
-	pub, err := keyMgr.PublicKey(ctx, keys.ClientAuthentication, fapi.ES256)
+	// This driver's own client.Client instances aren't constructed here —
+	// each module discovers its own mock-AS URL and only then builds one,
+	// deep inside runModule — so there's no single client.Client yet to
+	// call PublicJWKS on for the plan config the suite needs up front.
+	// jose.NewJWK is the same underlying encoding PublicJWKS itself uses;
+	// this package is inside the module, so it can reach it directly
+	// rather than hand-rolling JWK encoding a second time.
+	clientAuthPub, err := keyMgr.PublicKey(ctx, keys.ClientAuthentication, fapi.ES256)
 	if err != nil {
 		return fmt.Errorf("read client authentication public key: %w", err)
 	}
-	pubECDSA, ok := pub.PublicKey.(*ecdsa.PublicKey)
-	if !ok {
-		return fmt.Errorf("client authentication public key is not ECDSA")
+	clientAuthJWK, err := jose.NewJWK(clientAuthPub.PublicKey, fapi.ES256)
+	if err != nil {
+		return fmt.Errorf("build client authentication jwk: %w", err)
 	}
-	jwks := []any{jwkFromECDSAPublicKey(pubECDSA, pub.KeyID)}
+	jwks := []any{clientAuthJWK.WithKeyID(clientAuthPub.KeyID)}
 
 	if profile.signRequestObject {
 		reqObjPub, err := keyMgr.PublicKey(ctx, keys.RequestObjectSigning, fapi.ES256)
 		if err != nil {
 			return fmt.Errorf("read request object signing public key: %w", err)
 		}
-		reqObjECDSA, ok := reqObjPub.PublicKey.(*ecdsa.PublicKey)
-		if !ok {
-			return fmt.Errorf("request object signing public key is not ECDSA")
+		reqObjJWK, err := jose.NewJWK(reqObjPub.PublicKey, fapi.ES256)
+		if err != nil {
+			return fmt.Errorf("build request object signing jwk: %w", err)
 		}
-		jwks = append(jwks, jwkFromECDSAPublicKey(reqObjECDSA, reqObjPub.KeyID))
+		jwks = append(jwks, reqObjJWK.WithKeyID(reqObjPub.KeyID))
 	}
 
 	alias := "gofapi-rp-driver-" + randomSuffix()
@@ -452,12 +459,4 @@ func containsES256(algs []fapi.SignatureAlgorithm) bool {
 		}
 	}
 	return false
-}
-
-func jwkFromECDSAPublicKey(pub *ecdsa.PublicKey, kid string) map[string]any {
-	return map[string]any{
-		"kty": "EC", "crv": "P-256", "alg": "ES256", "use": "sig", "kid": kid,
-		"x": base64.RawURLEncoding.EncodeToString(pub.X.FillBytes(make([]byte, 32))),
-		"y": base64.RawURLEncoding.EncodeToString(pub.Y.FillBytes(make([]byte, 32))),
-	}
 }

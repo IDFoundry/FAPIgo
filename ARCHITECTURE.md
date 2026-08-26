@@ -169,13 +169,19 @@ operation and a public JWK — the same model `server` uses to select and
 use its own signing keys (`SelectSigningKey` / `Sign` / `PublicJWKS`),
 so both a client's and a server's key material can be backed by an HSM
 or a remote signing service without the module ever holding private key
-material in process. Resolving a *client's* verification keys (for
-request-object and client-assertion signatures) is a separate concern
-from `KeyManager` — it belongs in `server`'s client-lookup path, prefers
-administratively pre-resolved/registered keys over live JWKS fetches in
-the request-handling path, and where it does fetch JWKS applies the same
-SSRF, size-limit, content-type, bounded-redirect and stale-key rules as
-any other outbound fetch (see rule 6).
+material in process. `client.PublicJWKS` is this same publication
+surface on the RP side — its `ClientAuthentication` key always, its
+`RequestObjectSigning` key under message-signing, and its
+`IDTokenDecryption`/`UserInfoDecryption` encryption key when configured,
+never its `DPoPProofSigning` key (RFC 9449 embeds that one directly in
+each proof, not via a discoverable JWKS). Resolving a *client's*
+verification keys (for request-object and client-assertion signatures)
+is a separate concern from `KeyManager` — it belongs in `server`'s
+client-lookup path, prefers administratively pre-resolved/registered
+keys over live JWKS fetches in the request-handling path, and where it
+does fetch JWKS applies the same SSRF, size-limit, content-type,
+bounded-redirect and stale-key rules as any other outbound fetch (see
+rule 6).
 
 `keys.Decrypter` (`UnwrapContentEncryptionKey` / `EncryptionPublicKey`)
 is the same rule applied to recovering an encrypted ID token's or

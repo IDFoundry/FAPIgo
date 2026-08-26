@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/IDFoundry/FAPIgo/compare/v0.13.0...v0.14.0) (2026-08-26)
+
+
+### Features
+
+* add client.Limits.MaxJOSECompactBytes for ID token/UserInfo size caps ([26228b6](https://github.com/IDFoundry/FAPIgo/commit/26228b6f3ae7f0208c05af9794481e9ee582c580))
+
 ## [0.13.0](https://github.com/IDFoundry/FAPIgo/compare/v0.12.0...v0.13.0) (2026-08-26)
 
 

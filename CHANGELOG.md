@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.13.0](https://github.com/IDFoundry/FAPIgo/compare/v0.12.0...v0.13.0) (2026-08-26)
+
+
+### Features
+
+* add client.RecommendedLimits/RecommendedAlgorithms ([839a95d](https://github.com/IDFoundry/FAPIgo/commit/839a95d76927637b5fffcd3e26482fa4b355390a))
+* add DiscoveredMetadata.IssuerKeySource ([43afb73](https://github.com/IDFoundry/FAPIgo/commit/43afb731415f1c4f9bac87614b4f936b3e964588))
+* add DiscoveredMetadata.SupportsAlgorithms ([abccccf](https://github.com/IDFoundry/FAPIgo/commit/abccccf595f263568e3b4af068154cd2574c1fc6))
+* add keys.PublicJWKS, a shared core for client/server.PublicJWKS ([7d04816](https://github.com/IDFoundry/FAPIgo/commit/7d04816541184033601a79c569176a319c1ff6fe))
+* expose IssuedAt on client.IDTokenClaims ([2058520](https://github.com/IDFoundry/FAPIgo/commit/2058520d4c0a6dac7463518b0b73468bb2410f57))
+
 ## [0.12.0](https://github.com/IDFoundry/FAPIgo/compare/v0.11.0...v0.12.0) (2026-08-26)
 
 

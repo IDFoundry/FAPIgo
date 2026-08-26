@@ -177,9 +177,18 @@ type IDToken struct {
 	claims  IDTokenClaims
 }
 
-// ParseIDToken parses an ID token without verifying its signature.
+// ParseIDToken parses an ID token without verifying its signature,
+// rejecting one longer than jose.DefaultMaxCompactBytes.
 func ParseIDToken(tok string) (IDToken, error) {
-	compact, err := jose.ParseCompact(tok)
+	return ParseIDTokenMax(tok, jose.DefaultMaxCompactBytes)
+}
+
+// ParseIDTokenMax is ParseIDToken with an explicit size ceiling, in
+// bytes, instead of jose.DefaultMaxCompactBytes — for a caller whose
+// issuer may legitimately return an ID token shaped by however many
+// scopes/claims it granted, rather than a fixed handful.
+func ParseIDTokenMax(tok string, maxBytes int) (IDToken, error) {
+	compact, err := jose.ParseCompactMax(tok, maxBytes)
 	if err != nil {
 		return IDToken{}, fmt.Errorf("token: %w", err)
 	}

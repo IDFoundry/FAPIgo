@@ -169,6 +169,7 @@ func validConfig(t *testing.T) client.Config {
 			MaxClockSkew:            5 * time.Second,
 			HTTPTimeout:             5 * time.Second,
 			MaxHTTPResponseBytes:    1 << 16,
+			MaxJOSECompactBytes:     16 * 1024,
 		},
 	}
 }
@@ -211,22 +212,23 @@ func TestNewAcceptsValidConfig(t *testing.T) {
 
 func TestNewRejectsInvalidConfig(t *testing.T) {
 	cases := map[string]func(*client.Config){
-		"zero issuer":             func(c *client.Config) { c.Issuer = fapi.URL{} },
-		"empty client id":         func(c *client.Config) { c.ClientID = "" },
-		"empty redirect uri":      func(c *client.Config) { c.RedirectURI = "" },
-		"zero authorization ep":   func(c *client.Config) { c.Endpoints.Authorization = fapi.URL{} },
-		"zero token ep":           func(c *client.Config) { c.Endpoints.Token = fapi.URL{} },
-		"zero par ep":             func(c *client.Config) { c.Endpoints.PushedAuthorizationRequest = fapi.URL{} },
-		"invalid profile":         func(c *client.Config) { c.Profile = 0 },
-		"invalid client auth alg": func(c *client.Config) { c.Algorithms.ClientAuthentication = 0 },
-		"invalid dpop alg":        func(c *client.Config) { c.Algorithms.DPoP = 0 },
-		"invalid id token alg":    func(c *client.Config) { c.Algorithms.IDToken = 0 },
-		"zero assertion lifetime": func(c *client.Config) { c.Limits.ClientAssertionLifetime = 0 },
-		"zero session lifetime":   func(c *client.Config) { c.Limits.SessionLifetime = 0 },
-		"zero max id token life":  func(c *client.Config) { c.Limits.MaxIDTokenLifetime = 0 },
-		"negative clock skew":     func(c *client.Config) { c.Limits.MaxClockSkew = -time.Second },
-		"zero http timeout":       func(c *client.Config) { c.Limits.HTTPTimeout = 0 },
-		"zero max response bytes": func(c *client.Config) { c.Limits.MaxHTTPResponseBytes = 0 },
+		"zero issuer":                 func(c *client.Config) { c.Issuer = fapi.URL{} },
+		"empty client id":             func(c *client.Config) { c.ClientID = "" },
+		"empty redirect uri":          func(c *client.Config) { c.RedirectURI = "" },
+		"zero authorization ep":       func(c *client.Config) { c.Endpoints.Authorization = fapi.URL{} },
+		"zero token ep":               func(c *client.Config) { c.Endpoints.Token = fapi.URL{} },
+		"zero par ep":                 func(c *client.Config) { c.Endpoints.PushedAuthorizationRequest = fapi.URL{} },
+		"invalid profile":             func(c *client.Config) { c.Profile = 0 },
+		"invalid client auth alg":     func(c *client.Config) { c.Algorithms.ClientAuthentication = 0 },
+		"invalid dpop alg":            func(c *client.Config) { c.Algorithms.DPoP = 0 },
+		"invalid id token alg":        func(c *client.Config) { c.Algorithms.IDToken = 0 },
+		"zero assertion lifetime":     func(c *client.Config) { c.Limits.ClientAssertionLifetime = 0 },
+		"zero session lifetime":       func(c *client.Config) { c.Limits.SessionLifetime = 0 },
+		"zero max id token life":      func(c *client.Config) { c.Limits.MaxIDTokenLifetime = 0 },
+		"negative clock skew":         func(c *client.Config) { c.Limits.MaxClockSkew = -time.Second },
+		"zero http timeout":           func(c *client.Config) { c.Limits.HTTPTimeout = 0 },
+		"zero max response bytes":     func(c *client.Config) { c.Limits.MaxHTTPResponseBytes = 0 },
+		"zero max jose compact bytes": func(c *client.Config) { c.Limits.MaxJOSECompactBytes = 0 },
 		"id_token key management set without content encryption": func(c *client.Config) {
 			c.Algorithms.IDTokenKeyManagement = fapi.RSAOAEP256
 		},

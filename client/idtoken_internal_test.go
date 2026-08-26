@@ -74,7 +74,7 @@ func idTokenTestClient(t *testing.T, now time.Time, algorithms Algorithms, decry
 			Issuer:     issuer,
 			ClientID:   fapi.ClientID(idTokenTestClientID),
 			Algorithms: algorithms,
-			Limits:     Limits{MaxIDTokenLifetime: 5 * time.Minute, MaxClockSkew: 5 * time.Second},
+			Limits:     Limits{MaxIDTokenLifetime: 5 * time.Minute, MaxClockSkew: 5 * time.Second, MaxJOSECompactBytes: 16 * 1024},
 		},
 		deps: Dependencies{
 			IssuerKeys: fakeIDTokenIssuerKeys{pub: &idKey.PublicKey},
@@ -100,7 +100,7 @@ func idTokenTestClientWithIssuerKeys(t *testing.T, now time.Time, algorithms Alg
 			Issuer:     issuer,
 			ClientID:   fapi.ClientID(idTokenTestClientID),
 			Algorithms: algorithms,
-			Limits:     Limits{MaxIDTokenLifetime: 5 * time.Minute, MaxClockSkew: 5 * time.Second},
+			Limits:     Limits{MaxIDTokenLifetime: 5 * time.Minute, MaxClockSkew: 5 * time.Second, MaxJOSECompactBytes: 16 * 1024},
 		},
 		deps: Dependencies{
 			IssuerKeys: issuerKeys,

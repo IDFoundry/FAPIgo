@@ -257,6 +257,7 @@ func New(t *testing.T, cfg Config) *Harness {
 			MaxClockSkew:            5 * time.Second,
 			HTTPTimeout:             5 * time.Second,
 			MaxHTTPResponseBytes:    1 << 16,
+			MaxJOSECompactBytes:     16 * 1024,
 		},
 	}
 	if cfg.EncryptIDTokens {

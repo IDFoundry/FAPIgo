@@ -156,6 +156,17 @@ type Limits struct {
 	// MaxHTTPResponseBytes bounds how much of a PAR or token-endpoint
 	// response body this client reads before failing.
 	MaxHTTPResponseBytes int64
+
+	// MaxJOSECompactBytes bounds how large a JOSE compact serialization
+	// (JWS or JWE) this client will parse for an ID token or a UserInfo
+	// response — the two artifacts whose size scales with however many
+	// scopes/claims this deployment's issuer was asked to grant, so a
+	// fixed size can fit one user's response and not another's. This is
+	// deliberately narrower than MaxHTTPResponseBytes, which still
+	// bounds the outer HTTP read first: a DPoP proof, client assertion
+	// or request object has no such variability and is not affected by
+	// this field at all — those stay on jose.DefaultMaxCompactBytes.
+	MaxJOSECompactBytes int
 }
 
 // Config is this client's immutable configuration. It is copied by New;

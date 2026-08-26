@@ -244,6 +244,7 @@ func newSmokeHarness(t *testing.T, format AccessTokenFormat) *smokeHarness {
 			MaxClockSkew:         10 * time.Second,
 			HTTPTimeout:          10 * time.Second,
 			MaxHTTPResponseBytes: 1 << 16,
+			MaxJOSECompactBytes:  16 * 1024,
 		},
 	}
 	clientDeps := client.Dependencies{

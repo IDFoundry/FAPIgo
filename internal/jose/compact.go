@@ -10,10 +10,15 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 )
 
-// maxCompactBytes bounds how large a compact serialization this package
-// will attempt to parse, to avoid doing unbounded work on attacker-
-// supplied input before any signature has been checked.
-const maxCompactBytes = 16 * 1024
+// DefaultMaxCompactBytes bounds how large a compact serialization
+// ParseCompact will attempt to parse, to avoid doing unbounded work on
+// attacker-supplied input before any signature has been checked. It's
+// sized for a JWS whose claims are fixed in shape and count (a DPoP
+// proof, a client assertion, a request object) — a caller whose
+// accepted input can legitimately scale beyond that (an issuer
+// response shaped by however many scopes/claims a deployment grants)
+// should call ParseCompactMax with its own configured ceiling instead.
+const DefaultMaxCompactBytes = 16 * 1024
 
 // Sign produces a JWS compact serialization:
 // BASE64URL(header) || "." || BASE64URL(payload) || "." || BASE64URL(signature).
@@ -75,10 +80,16 @@ type Compact struct {
 }
 
 // ParseCompact splits and decodes a compact JWS without verifying its
-// signature.
+// signature, rejecting one longer than DefaultMaxCompactBytes.
 func ParseCompact(s string) (Compact, error) {
-	if len(s) > maxCompactBytes {
-		return Compact{}, ErrTooLarge
+	return ParseCompactMax(s, DefaultMaxCompactBytes)
+}
+
+// ParseCompactMax is ParseCompact with an explicit size ceiling, in
+// bytes, instead of DefaultMaxCompactBytes.
+func ParseCompactMax(s string, maxBytes int) (Compact, error) {
+	if len(s) > maxBytes {
+		return Compact{}, fmt.Errorf("%w: %d bytes exceeds the %d byte limit", ErrTooLarge, len(s), maxBytes)
 	}
 	parts := strings.Split(s, ".")
 	if len(parts) != 3 {

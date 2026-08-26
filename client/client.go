@@ -107,6 +107,9 @@ func validateConfig(cfg Config) error {
 	if cfg.Limits.MaxHTTPResponseBytes <= 0 {
 		return fmt.Errorf("client: config: limits.max_http_response_bytes must be positive")
 	}
+	if cfg.Limits.MaxJOSECompactBytes <= 0 {
+		return fmt.Errorf("client: config: limits.max_jose_compact_bytes must be positive")
+	}
 
 	if cfg.Profile == ProfileFAPISecurityWithMessageSigning {
 		if !cfg.Algorithms.RequestObject.IsValid() {

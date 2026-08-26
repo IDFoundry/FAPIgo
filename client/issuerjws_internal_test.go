@@ -49,6 +49,7 @@ func issuerJWSTestClient(t *testing.T, issuerKeys keys.IssuerKeySource) *Client 
 			Issuer:     issuer,
 			ClientID:   fapi.ClientID(idTokenTestClientID),
 			Algorithms: Algorithms{UserInfo: fapi.ES256},
+			Limits:     Limits{MaxJOSECompactBytes: 16 * 1024},
 		},
 		deps: Dependencies{IssuerKeys: issuerKeys},
 	}

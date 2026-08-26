@@ -135,6 +135,7 @@ func TestDiscoverEndToEnd(t *testing.T) {
 			ClientAssertionLifetime: time.Minute, SessionLifetime: 5 * time.Minute,
 			MaxIDTokenLifetime: 5 * time.Minute, MaxClockSkew: 5 * time.Second,
 			HTTPTimeout: 5 * time.Second, MaxHTTPResponseBytes: 1 << 16,
+			MaxJOSECompactBytes: 16 * 1024,
 		},
 	}
 	clientDeps := client.Dependencies{

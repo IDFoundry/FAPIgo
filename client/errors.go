@@ -11,6 +11,14 @@ const (
 	ErrorInvalidResponse     ErrorCode = "invalid_response"
 	ErrorAuthorizationDenied ErrorCode = "authorization_denied"
 	ErrorInternal            ErrorCode = "internal"
+
+	// ErrorResponseTooLarge indicates an ID token or UserInfo response
+	// exceeded Config.Limits.MaxJOSECompactBytes — distinct from
+	// ErrorInvalidResponse because the artifact wasn't malformed, it was
+	// simply larger than configured; PublicDescription names which
+	// artifact, and the wrapped cause (Unwrap) carries the observed and
+	// allowed byte counts for logs.
+	ErrorResponseTooLarge ErrorCode = "response_too_large"
 )
 
 // Error is the error type every public Client method returns. Code and

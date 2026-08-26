@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/base64"
+	"errors"
 	"strings"
 	"testing"
 
@@ -247,8 +248,18 @@ func TestParseCompactRejectsMalformed(t *testing.T) {
 }
 
 func TestParseCompactRejectsOversized(t *testing.T) {
-	huge := strings.Repeat("a", maxCompactBytes+1)
+	huge := strings.Repeat("a", DefaultMaxCompactBytes+1)
 	if _, err := ParseCompact(huge); err == nil {
 		t.Fatalf("ParseCompact(oversized) = nil error, want error")
+	}
+	if _, err := ParseCompact(huge); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("ParseCompact(oversized) error = %v, want ErrTooLarge", err)
+	}
+}
+
+func TestParseCompactMaxRespectsExplicitLimit(t *testing.T) {
+	tooLarge := strings.Repeat("a", 101)
+	if _, err := ParseCompactMax(tooLarge, 100); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("ParseCompactMax(101 bytes, max 100) error = %v, want ErrTooLarge", err)
 	}
 }

@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -149,12 +150,16 @@ func (c *Client) decodeUserInfoJWT(ctx context.Context, raw string, expectEncryp
 func (c *Client) decryptUserInfoJWE(ctx context.Context, raw string) (string, *Error) {
 	unwrapper := decrypterUnwrapper{decrypter: c.deps.Decryption, purpose: keys.UserInfoDecryption}
 	result, err := jwe.Decrypt(ctx, jwe.DecryptRequest{
-		Algorithm:    c.cfg.Algorithms.UserInfoKeyManagement,
-		Encryption:   c.cfg.Algorithms.UserInfoContentEncryption,
-		RecipientKey: unwrapper,
-		Compact:      raw,
+		Algorithm:       c.cfg.Algorithms.UserInfoKeyManagement,
+		Encryption:      c.cfg.Algorithms.UserInfoContentEncryption,
+		RecipientKey:    unwrapper,
+		Compact:         raw,
+		MaxCompactBytes: c.cfg.Limits.MaxJOSECompactBytes,
 	})
 	if err != nil {
+		if errors.Is(err, jwe.ErrTooLarge) {
+			return "", newError(ErrorResponseTooLarge, "UserInfo response exceeds the configured size limit", err)
+		}
 		return "", newError(ErrorInvalidResponse, "UserInfo response decryption failed", err)
 	}
 	if !isAcceptableNestedJWTContentType(result.Header.ContentType) {

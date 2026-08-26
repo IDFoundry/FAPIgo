@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 
 	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/keys"
@@ -21,8 +22,11 @@ import (
 // caller still owns checking whatever claims that payload carries (iss,
 // aud, sub, expiry, ...) against its own policy.
 func (c *Client) VerifyIssuerJWS(ctx context.Context, compactJWS string) ([]byte, error) {
-	parsed, err := jose.ParseCompact(compactJWS)
+	parsed, err := jose.ParseCompactMax(compactJWS, c.cfg.Limits.MaxJOSECompactBytes)
 	if err != nil {
+		if errors.Is(err, jose.ErrTooLarge) {
+			return nil, newError(ErrorResponseTooLarge, "JWS exceeds the configured size limit", err)
+		}
 		return nil, newError(ErrorInvalidResponse, "malformed JWS", err)
 	}
 

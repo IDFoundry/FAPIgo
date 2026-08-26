@@ -67,4 +67,17 @@
 // go through the same SSRF, response-size, content-type,
 // bounded-redirect and stale-key/duplicate-kid protections as any other
 // outbound fetch (see fapihttp).
+//
+// Publishing this party's own keys as a JWK Set (RFC 7517 §5) is
+// publicjwks.go's PublicJWKS: resolve every SigningKeyUse (honoring
+// RotatingKeyManager) and EncryptionKeyUse it's given, deduplicated by
+// kid. It has no profile or role logic of its own — the caller decides
+// which purposes belong in the set — which is what lets
+// client.PublicJWKS and server.PublicJWKS both be thin callers over it,
+// and lets anyone else assemble a real, publishable JWKS from key
+// material and a declared algorithm alone, with no role engine
+// constructed at all. PublicKeySet/PublicJWK are, deliberately, the one
+// pair of types client and server both alias rather than redefine — a
+// JWK Set's wire shape doesn't differ by which role publishes it, the
+// way most of what this module keeps separate per role actually does.
 package keys

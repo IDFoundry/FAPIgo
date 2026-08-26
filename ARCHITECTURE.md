@@ -212,6 +212,29 @@ registered decryption key can tell which one a given ciphertext was
 actually wrapped to, instead of only ever being able to guess "the
 current one."
 
+Publishing a JWK Set is where this module makes one deliberate,
+narrow exception to "no shared role-level types" (rule 1, and the
+package-layout note above): `client.PublicJWKS`/`server.PublicJWKS`
+are both thin callers over `keys.PublicJWKS`, and `client.PublicKeySet`/
+`server.PublicKeySet` (and their `PublicJWK`) are type aliases of
+`keys.PublicKeySet`/`keys.PublicJWK`, not each role's own redefinition.
+A JWK Set's wire shape (RFC 7517) genuinely doesn't differ by who's
+publishing it, unlike a session handle or a verification request — so
+sharing the type here removes real duplication (`keys.PublicJWKS`
+resolves every `keys.SigningKeyUse`/`keys.EncryptionKeyUse` it's given,
+honoring `RotatingKeyManager`, deduplicated by kid — logic `client` and
+`server` had each independently written once already) without
+reintroducing a generic cross-role API: the caller still decides which
+purposes belong in the set, so all the role-specific business logic
+(DPoP's key excluded, `RequestObjectSigning` only under
+message-signing, and so on) stays exactly where it was. The same
+function is what lets an integrator publish a real JWKS from key
+material and a declared algorithm alone, with no `client.Client` or
+`server.Server` constructed at all — the seam a from-scratch onboarding
+flow needs and neither role's own `PublicJWKS` method can offer by
+itself, since both require a fully validated `Config`/`Dependencies`
+first.
+
 ### 6. HTTP is a narrow interface, hardened internally
 
 Callers supply a `Do(*http.Request) (*http.Response, error)`;

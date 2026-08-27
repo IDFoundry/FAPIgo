@@ -40,6 +40,14 @@ type AuthorizationContext struct {
 	// logging — it's already available at this point (see
 	// Dependencies.Revocation), so surfacing it costs nothing.
 	Key string
+
+	// NextDPoPNonce is a freshly issued DPoP nonce the caller should set
+	// as this response's own DPoP-Nonce header, so its next call already
+	// carries a valid one instead of needing its own challenge/retry
+	// round trip (RFC 9449 §8's own proactive-refresh recommendation).
+	// Always "" when Dependencies.Nonces is nil (nonce-challenge support
+	// disabled); otherwise always populated on a successful Verify.
+	NextDPoPNonce string
 }
 
 // Verify checks req's Authorization header and DPoP proof together —
@@ -84,6 +92,15 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (Authorization
 		return AuthorizationContext{}, newError(ErrorInvalidToken, 401, "DPoP proof verification failed", err)
 	}
 
+	// Nonce freshness is checked before spending the cost of resolving
+	// the access token — a request that fails this cheap, early gate
+	// shouldn't get as far as touching Dependencies.AccessTokens at all.
+	if v.deps.Nonces != nil {
+		if challenge := v.checkDPoPNonce(ctx, verifiedProof.Nonce, now); challenge != nil {
+			return AuthorizationContext{}, challenge
+		}
+	}
+
 	resolved, err := v.deps.AccessTokens.ResolveAccessToken(ctx, ResolveAccessTokenRequest{Raw: raw, Now: now})
 	if err != nil {
 		// A *Error carries its own exposure (see AccessTokenResolver's
@@ -120,12 +137,21 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (Authorization
 		return AuthorizationContext{}, newError(ErrorInvalidToken, 401, "access token has been revoked", nil)
 	}
 
+	var nextNonce string
+	if v.deps.Nonces != nil {
+		nextNonce, err = v.issueDPoPNonce(ctx, now)
+		if err != nil {
+			return AuthorizationContext{}, newError(ErrorServerError, 500, "failed to issue dpop nonce", err)
+		}
+	}
+
 	return AuthorizationContext{
-		Subject:   resolved.Subject,
-		ClientID:  resolved.ClientID,
-		Scopes:    resolved.Scopes,
-		Claims:    resolved.Claims,
-		ExpiresAt: resolved.ExpiresAt,
-		Key:       resolved.Key,
+		Subject:       resolved.Subject,
+		ClientID:      resolved.ClientID,
+		Scopes:        resolved.Scopes,
+		Claims:        resolved.Claims,
+		ExpiresAt:     resolved.ExpiresAt,
+		Key:           resolved.Key,
+		NextDPoPNonce: nextNonce,
 	}, nil
 }

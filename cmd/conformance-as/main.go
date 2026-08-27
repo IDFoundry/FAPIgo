@@ -51,7 +51,7 @@ func main() {
 	keyOverride := flag.String("key", "", "override tls.key_file from the config file")
 	insecureHTTP := flag.Bool("insecure-http", false, "serve plaintext HTTP instead of TLS (loopback listen_addr only)")
 	accessTokenFormat := flag.String("access-token-format", string(AccessTokenFormatJWT), "access token format to issue/verify: jwt or opaque")
-	dpopNonceChallenge := flag.Bool("dpop-nonce-challenge", false, "require and rotate a DPoP nonce on /accounts and /userinfo (RFC 9449 §8/§9) — off by default, since the OIDF suite's own protected-resource caller may not retry on the challenge")
+	dpopNonceChallenge := flag.Bool("dpop-nonce-challenge", false, "require and rotate a DPoP nonce on /par, /token, /accounts and /userinfo (RFC 9449 §8/§9) — off by default, since the OIDF suite's own driver may not retry on the challenge")
 	flag.Parse()
 
 	if *configPath == "" {

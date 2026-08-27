@@ -397,11 +397,17 @@ func testSmokeAuthorizationCodeFlow(t *testing.T, format AccessTokenFormat) {
 
 // TestSmokeUserInfoWithDPoPNonceChallenge confirms this binary's
 // -dpop-nonce-challenge wiring actually interoperates with the client
-// package's own nonce-retry logic (client/resource.go's
-// ResourceClient.Do), not just each side's own unit tests in isolation:
-// FetchUserInfo must succeed transparently even though the very first
-// call is challenged and retried entirely inside the client, with no
-// special handling from this test.
+// package's own nonce-retry logic, not just each side's own unit tests
+// in isolation. The flag now gates nonce-challenge on every DPoP proof
+// this binary verifies — PAR and the token endpoint (server package,
+// RFC 9449 §8) as well as /accounts and /userinfo (resource package,
+// §9) — so CompleteAuthorization's own internal PAR/token exchange
+// already exercises client.ExchangeCode's token-endpoint nonce retry
+// (client/exchange_code.go's sendTokenRequest) before FetchUserInfo
+// separately exercises ResourceClient.Do's. FetchUserInfo must succeed
+// transparently even though the very first call is challenged and
+// retried entirely inside the client, with no special handling from
+// this test.
 func TestSmokeUserInfoWithDPoPNonceChallenge(t *testing.T) {
 	h := newSmokeHarnessWithNonceChallenge(t, AccessTokenFormatJWT, true)
 	ctx := context.Background()

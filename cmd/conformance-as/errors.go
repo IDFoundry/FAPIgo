@@ -18,6 +18,13 @@ func writeOAuthJSONError(w http.ResponseWriter, err error) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	// Set before writeRawOAuthError's own WriteHeader call — a header
+	// can't be added after that. Only ErrorUseDPoPNonce ever carries a
+	// nonce (Error.Nonce's own doc comment), so this is a no-op for
+	// every other rejection.
+	if srvErr.Nonce() != "" {
+		w.Header().Set("DPoP-Nonce", srvErr.Nonce())
+	}
 	writeRawOAuthError(w, srvErr.HTTPStatus(), string(srvErr.Code()), srvErr.PublicDescription())
 }
 

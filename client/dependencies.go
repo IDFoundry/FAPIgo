@@ -42,4 +42,12 @@ type Dependencies struct {
 	// this stays an opt-in dependency rather than a mandatory one every
 	// embedder has to wire up.
 	Decryption keys.Decrypter
+
+	// DPoPNonceCache lets this client proactively reuse a DPoP nonce a
+	// server already handed it, instead of always paying the challenge
+	// round trip RFC 9449 §8/§9 otherwise requires on every call — see
+	// its own doc comment. Nil (the zero value) disables the
+	// optimization entirely; pass NewInMemoryDPoPNonceCache() to enable
+	// it, the same deliberate opt-in Clock: SystemClock{} already is.
+	DPoPNonceCache DPoPNonceCache
 }

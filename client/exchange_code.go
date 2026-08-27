@@ -216,26 +216,28 @@ func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationRe
 // client assertion is exactly as single-use as a DPoP proof is (see
 // ExchangeCode's own comment on buildTokenForm).
 func (c *Client) sendTokenRequest(ctx context.Context, dpopSigner crypto.Signer, tokenURL *url.URL, buildTokenForm func() ([]byte, error), form []byte) ([]byte, *Error) {
-	body, status, header, err := c.postTokenRequestWithDPoP(ctx, dpopSigner, tokenURL, form, "")
+	body, status, header, err := c.postTokenRequestWithDPoP(ctx, dpopSigner, tokenURL, form, c.cachedDPoPNonce(ctx, asNonceScope))
 	if err != nil {
 		return nil, newError(ErrorInternal, "token request failed", err)
 	}
+	nextNonce := header.Get("DPoP-Nonce")
+	c.cacheDPoPNonce(ctx, asNonceScope, nextNonce)
 	if status == http.StatusOK {
 		return body, nil
 	}
 
-	nonce := header.Get("DPoP-Nonce")
-	if nonce == "" || !isDPoPNonceError(body) {
+	if nextNonce == "" || !isDPoPNonceError(body) {
 		return nil, parErrorFromResponse(body)
 	}
 	retryForm, buildErr := buildTokenForm()
 	if buildErr != nil {
 		return nil, newError(ErrorInternal, "failed to build client assertion", buildErr)
 	}
-	body, status, _, err = c.postTokenRequestWithDPoP(ctx, dpopSigner, tokenURL, retryForm, nonce)
+	body, status, header, err = c.postTokenRequestWithDPoP(ctx, dpopSigner, tokenURL, retryForm, nextNonce)
 	if err != nil {
 		return nil, newError(ErrorInternal, "token request failed", err)
 	}
+	c.cacheDPoPNonce(ctx, asNonceScope, header.Get("DPoP-Nonce"))
 	if status != http.StatusOK {
 		return nil, parErrorFromResponse(body)
 	}

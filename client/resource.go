@@ -81,7 +81,8 @@ func (rc *ResourceClient) Do(ctx context.Context, req *http.Request) (*http.Resp
 	ctx, cancel := context.WithTimeout(ctx, c.cfg.Limits.HTTPTimeout)
 	defer cancel()
 
-	res, err := rc.send(ctx, dpopSigner, req, "")
+	scope := resourceNonceScope(req.URL)
+	res, err := rc.send(ctx, dpopSigner, req, c.cachedDPoPNonce(ctx, scope))
 	if err != nil {
 		return nil, newError(ErrorInternal, "protected resource request failed", err)
 	}
@@ -97,6 +98,7 @@ func (rc *ResourceClient) Do(ctx context.Context, req *http.Request) (*http.Resp
 			return nil, newError(ErrorInternal, "protected resource request failed", err)
 		}
 	}
+	c.cacheDPoPNonce(ctx, scope, res.Header.Get("DPoP-Nonce"))
 
 	bounded, err := boundResponseBody(res, c.cfg.Limits.MaxHTTPResponseBytes)
 	if err != nil {

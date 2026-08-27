@@ -160,6 +160,77 @@ func TestProtectedResourceDoRetriesOnNonceChallenge(t *testing.T) {
 	}
 }
 
+// RFC 9449 §9's own proactive-refresh recommendation only helps a
+// client that tracks and reuses the nonce a response handed it. With a
+// DPoPNonceCache configured, a second, independent Do call to the same
+// resource origin must need no challenge/retry round trip, since the
+// first call's own successful response caches a nonce
+// (resourceNonceScope, keyed by scheme+host).
+func TestProtectedResourceDoReusesCachedNonceOnSecondCall(t *testing.T) {
+	const serverNonce = "server-nonce-1"
+	var mu sync.Mutex
+	var calls int
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls++
+		call := calls
+		mu.Unlock()
+		claims := dpopProofClaims(t, r.Header.Get("DPoP"))
+		nonce, _ := claims["nonce"].(string)
+		if call == 1 && nonce != serverNonce {
+			w.Header().Set("WWW-Authenticate", `DPoP error="use_dpop_nonce", error_description="nonce required"`)
+			w.Header().Set("DPoP-Nonce", serverNonce)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("DPoP-Nonce", serverNonce)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer ts.Close()
+
+	cfg := validConfig(t)
+	deps := validDependencies(t)
+	deps.HTTP = ts.Client()
+	deps.DPoPNonceCache = client.NewInMemoryDPoPNonceCache()
+	c, err := client.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+
+	doOnce := func() {
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, ts.URL+"/resource", nil)
+		if err != nil {
+			t.Fatalf("NewRequestWithContext: %v", err)
+		}
+		res, err := c.ProtectedResource(client.TokenSet{AccessToken: fapi.NewSecret("test-access-token")}).Do(context.Background(), req)
+		if err != nil {
+			t.Fatalf("Do: %v", err)
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want 200", res.StatusCode)
+		}
+	}
+
+	doOnce()
+	mu.Lock()
+	callsAfterFirst := calls
+	mu.Unlock()
+	if callsAfterFirst != 2 {
+		t.Fatalf("calls after first Do = %d, want 2 (challenge + retry)", callsAfterFirst)
+	}
+
+	doOnce()
+	mu.Lock()
+	callsAfterSecond := calls
+	mu.Unlock()
+	if callsAfterSecond != 3 {
+		t.Fatalf("calls after second Do = %d, want 3 (no retry needed)", callsAfterSecond)
+	}
+}
+
 // TestProtectedResourceDoDoesNotRetryOnBareNonceHeader confirms Do
 // requires the WWW-Authenticate challenge itself, not just a DPoP-Nonce
 // header — mirroring the token endpoint's own isDPoPNonceError

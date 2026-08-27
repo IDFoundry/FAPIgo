@@ -62,6 +62,13 @@ type fakeAS struct {
 	challengeParDPoPNonce string
 	parCallCount          int
 
+	// nextDPoPNonce, if non-empty, makes both handlePAR and handleToken
+	// set a "DPoP-Nonce" response header on every successful response —
+	// the proactive-refresh behavior RFC 9449 §8 recommends and
+	// server's own NextDPoPNonce implements — so a test can check that
+	// client actually reuses it on its next, independent call.
+	nextDPoPNonce string
+
 	// tokenTypeOverride, if non-empty, replaces the token response's
 	// token_type value (e.g. "dpop" lowercase, to test RFC 6749 §7.1's
 	// "Values are case insensitive").
@@ -155,6 +162,9 @@ func (a *fakeAS) handlePAR(w http.ResponseWriter, r *http.Request) {
 		a.lastNonce = r.PostForm.Get("nonce")
 	}
 
+	if a.nextDPoPNonce != "" {
+		w.Header().Set("DPoP-Nonce", a.nextDPoPNonce)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]any{
@@ -294,6 +304,9 @@ func (a *fakeAS) handleToken(w http.ResponseWriter, r *http.Request) {
 		resp["expires_in"] = 300
 	}
 
+	if a.nextDPoPNonce != "" {
+		w.Header().Set("DPoP-Nonce", a.nextDPoPNonce)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 }
@@ -362,6 +375,45 @@ func newTestClientWithPARBinding(t *testing.T, binding client.PARDPoPBinding) (*
 
 	deps := validDependencies(t)
 	deps.HTTP = ts.Client()
+	deps.IssuerKeys = &fakeIssuerKeySource{keys: map[keys.IssuerVerificationPurpose]crypto.PublicKey{
+		keys.JARMVerification:    &as.jarmKey.PublicKey,
+		keys.IDTokenVerification: &as.idTokenKey.PublicKey,
+	}}
+
+	c, err := client.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	return c, as, ts
+}
+
+// newTestClientWithNonceCache is newTestClientWithPARBinding
+// (PARDPoPBindingProof, so PAR presents a DPoP proof and is
+// nonce-challengeable) plus a wired-in DPoPNonceCache, for tests
+// checking that a cached nonce is proactively reused across
+// independent calls.
+func newTestClientWithNonceCache(t *testing.T) (*client.Client, *fakeAS, *httptest.Server) {
+	t.Helper()
+	as := newFakeAS(t, testIssuer, false)
+	ts := httptest.NewServer(as.handler())
+	t.Cleanup(ts.Close)
+
+	cfg := validConfig(t)
+	cfg.PARDPoPBinding = client.PARDPoPBindingProof
+	parURL, err := fapi.ParseEndpointURL(ts.URL+"/par", fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseEndpointURL(par): %v", err)
+	}
+	tokenURL, err := fapi.ParseEndpointURL(ts.URL+"/token", fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseEndpointURL(token): %v", err)
+	}
+	cfg.Endpoints.PushedAuthorizationRequest = parURL
+	cfg.Endpoints.Token = tokenURL
+
+	deps := validDependencies(t)
+	deps.HTTP = ts.Client()
+	deps.DPoPNonceCache = client.NewInMemoryDPoPNonceCache()
 	deps.IssuerKeys = &fakeIssuerKeySource{keys: map[keys.IssuerVerificationPurpose]crypto.PublicKey{
 		keys.JARMVerification:    &as.jarmKey.PublicKey,
 		keys.IDTokenVerification: &as.idTokenKey.PublicKey,
@@ -796,6 +848,90 @@ func TestBeginAuthorizationCommitsDPoPKeyAtPARMatchingTokenEndpointProofDefault(
 // PARDPoPBindingProof means PAR now presents one for the first time, so
 // it needs the same retry BeginAuthorization already gets from
 // ExchangeCode at the token endpoint.
+// RFC 9449 §8's own proactive-refresh recommendation only helps a
+// client that actually tracks and reuses the nonce a response handed
+// it. With a DPoPNonceCache configured, a second, independent
+// authorization flow through the same Client must need no
+// challenge/retry round trip at either PAR or the token endpoint,
+// since both share one cached nonce (Dependencies.DPoPNonceCache,
+// asNonceScope) seeded by the first flow's own successful responses.
+func TestBeginAuthorizationAndExchangeCodeReuseCachedNonceOnSecondFlow(t *testing.T) {
+	c, as, _ := newTestClientWithNonceCache(t)
+	as.challengeParDPoPNonce = "server-nonce-1"
+	as.challengeDPoPNonce = "server-nonce-1"
+	as.nextDPoPNonce = "server-nonce-1"
+	ctx := context.Background()
+
+	// First flow: PAR has no cached nonce yet, so it must be challenged
+	// once — but that challenge's own successful retry response caches
+	// a nonce into the *shared* "as" scope before ExchangeCode ever
+	// calls the token endpoint, so the token endpoint's very first
+	// attempt already succeeds. PAR priming the token call this way is
+	// exactly the point of sharing one scope between them.
+	session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid", "accounts"}})
+	if err != nil {
+		t.Fatalf("BeginAuthorization (first): %v", err)
+	}
+	if as.parCallCount != 2 {
+		t.Fatalf("first flow PAR call count = %d, want 2 (challenge + retry)", as.parCallCount)
+	}
+	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-1", "")
+	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery}); err != nil {
+		t.Fatalf("CompleteAuthorization (first): %v", err)
+	}
+	if as.tokenCallCount != 1 {
+		t.Fatalf("first flow token call count = %d, want 1 (already primed by PAR's own cached nonce)", as.tokenCallCount)
+	}
+
+	// Second, independent flow: both must succeed on the very first
+	// attempt, since the client proactively sends the nonce it cached
+	// from the first flow's own successful responses.
+	session, err = c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid", "accounts"}})
+	if err != nil {
+		t.Fatalf("BeginAuthorization (second): %v", err)
+	}
+	if as.parCallCount != 3 {
+		t.Fatalf("PAR call count after second BeginAuthorization = %d, want 3 (no retry needed)", as.parCallCount)
+	}
+	rawQuery = as.callbackFor(t, session.Handle().String(), "auth-code-2", "")
+	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery}); err != nil {
+		t.Fatalf("CompleteAuthorization (second): %v", err)
+	}
+	if as.tokenCallCount != 2 {
+		t.Fatalf("token call count after second exchange = %d, want 2 (no retry needed)", as.tokenCallCount)
+	}
+}
+
+// A cached nonce that turns out to be stale must still recover via the
+// existing challenge/retry logic — caching only ever removes a round
+// trip, it never introduces a new failure mode.
+func TestBeginAuthorizationRecoversFromStaleCachedNonce(t *testing.T) {
+	c, as, _ := newTestClientWithNonceCache(t)
+	ctx := context.Background()
+
+	// Seed the cache with "first-nonce" via one real flow.
+	as.challengeParDPoPNonce = "first-nonce"
+	as.nextDPoPNonce = "first-nonce"
+	if _, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}}); err != nil {
+		t.Fatalf("BeginAuthorization (seed): %v", err)
+	}
+	if as.parCallCount != 2 {
+		t.Fatalf("PAR call count after seed flow = %d, want 2 (challenge + retry)", as.parCallCount)
+	}
+
+	// The server has since rotated its nonce — the client's cached
+	// value ("first-nonce") is now stale, but the flow must still
+	// succeed via its own challenge/retry.
+	as.challengeParDPoPNonce = "rotated-nonce"
+	as.nextDPoPNonce = "rotated-nonce"
+	if _, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}}); err != nil {
+		t.Fatalf("BeginAuthorization (stale cache): %v", err)
+	}
+	if as.parCallCount != 4 {
+		t.Fatalf("PAR call count = %d, want 4 (2 from the seed flow + 2 more: the second flow still needed its own challenge/retry)", as.parCallCount)
+	}
+}
+
 func TestBeginAuthorizationRetriesOnPARDPoPNonceChallenge(t *testing.T) {
 	c, as, _ := newTestClientWithPARBinding(t, client.PARDPoPBindingProof)
 	as.challengeParDPoPNonce = "server-issued-par-nonce-1"

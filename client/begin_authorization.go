@@ -221,26 +221,28 @@ func (c *Client) pushAuthorizationRequestWithDPoPProof(ctx context.Context, para
 		return nil, newError(ErrorInternal, "failed to build pushed authorization request", buildErr)
 	}
 
-	body, status, header, err := c.postParRequestWithDPoP(ctx, dpopSigner, &parURL, form, "")
+	body, status, header, err := c.postParRequestWithDPoP(ctx, dpopSigner, &parURL, form, c.cachedDPoPNonce(ctx, asNonceScope))
 	if err != nil {
 		return nil, newError(ErrorInternal, "pushed authorization request failed", err)
 	}
+	nextNonce := header.Get("DPoP-Nonce")
+	c.cacheDPoPNonce(ctx, asNonceScope, nextNonce)
 	if status == http.StatusCreated || status == http.StatusOK {
 		return body, nil
 	}
 
-	nonce := header.Get("DPoP-Nonce")
-	if nonce == "" || !isDPoPNonceError(body) {
+	if nextNonce == "" || !isDPoPNonceError(body) {
 		return nil, parErrorFromResponse(body)
 	}
 	retryForm, buildErr := buildParForm()
 	if buildErr != nil {
 		return nil, newError(ErrorInternal, "failed to build pushed authorization request", buildErr)
 	}
-	body, status, _, err = c.postParRequestWithDPoP(ctx, dpopSigner, &parURL, retryForm, nonce)
+	body, status, header, err = c.postParRequestWithDPoP(ctx, dpopSigner, &parURL, retryForm, nextNonce)
 	if err != nil {
 		return nil, newError(ErrorInternal, "pushed authorization request failed", err)
 	}
+	c.cacheDPoPNonce(ctx, asNonceScope, header.Get("DPoP-Nonce"))
 	if status != http.StatusCreated && status != http.StatusOK {
 		return nil, parErrorFromResponse(body)
 	}

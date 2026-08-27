@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.16.0](https://github.com/IDFoundry/FAPIgo/compare/v0.15.0...v0.16.0) (2026-08-27)
+
+
+### Features
+
+* DPoP nonce-challenge support for PAR and the token endpoint ([#168](https://github.com/IDFoundry/FAPIgo/issues/168)) ([88b45df](https://github.com/IDFoundry/FAPIgo/commit/88b45df5789d6fbc0b57097005035af0e32991ac))
+* DPoP nonce-challenge support for the resource server ([#166](https://github.com/IDFoundry/FAPIgo/issues/166)) ([b2c3bf8](https://github.com/IDFoundry/FAPIgo/commit/b2c3bf8f9257e4b7265e99e355f9e562887d6723))
+* reuse a cached DPoP nonce across calls instead of always challenging ([#170](https://github.com/IDFoundry/FAPIgo/issues/170)) ([5c37f06](https://github.com/IDFoundry/FAPIgo/commit/5c37f0658d6c09ceb6f9f8d6f662a484d7cc1e55))
+* send a DPoP proof at PAR by default, per RFC 9449 §10.1 ([a3a052a](https://github.com/IDFoundry/FAPIgo/commit/a3a052a0773beabd0f08220ced3637e216d4b5ed))
+
 ## [0.15.0](https://github.com/IDFoundry/FAPIgo/compare/v0.14.0...v0.15.0) (2026-08-26)
 
 

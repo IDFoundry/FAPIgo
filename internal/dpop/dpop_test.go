@@ -283,6 +283,47 @@ func TestVerifyNonceBinding(t *testing.T) {
 	}
 }
 
+// TestVerifyReturnsProofNonce confirms VerifiedProof.Nonce surfaces the
+// proof's own "nonce" claim unconditionally — even with no RequiredNonce
+// set — since a caller implementing single-use, issued-per-challenge
+// nonces (unlike RequiredNonce's compare-to-one-known-value check) needs
+// the presented value itself to look up, not just a pass/fail verdict.
+func TestVerifyReturnsProofNonce(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	target := mustURL(t, "https://as.example/token")
+
+	withNonce, err := CreateProof(ProofRequest{
+		Signer: key, Algorithm: fapi.ES256, Method: "POST", URL: target, Now: now, Nonce: "presented-nonce",
+	})
+	if err != nil {
+		t.Fatalf("CreateProof: %v", err)
+	}
+	verified, err := Verify(context.Background(), VerifyRequest{
+		Proof: withNonce, Method: "POST", URL: target, Now: now, MaxProofAge: time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("Verify(with nonce): %v", err)
+	}
+	if verified.Nonce != "presented-nonce" {
+		t.Fatalf("VerifiedProof.Nonce = %q, want %q", verified.Nonce, "presented-nonce")
+	}
+
+	withoutNonce, err := CreateProof(ProofRequest{Signer: key, Algorithm: fapi.ES256, Method: "POST", URL: target, Now: now})
+	if err != nil {
+		t.Fatalf("CreateProof: %v", err)
+	}
+	verified, err = Verify(context.Background(), VerifyRequest{
+		Proof: withoutNonce, Method: "POST", URL: target, Now: now, MaxProofAge: time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("Verify(without nonce): %v", err)
+	}
+	if verified.Nonce != "" {
+		t.Fatalf("VerifiedProof.Nonce = %q, want empty", verified.Nonce)
+	}
+}
+
 func TestVerifyRequiresMaxProofAge(t *testing.T) {
 	key := generateKey(t)
 	now := time.Now()

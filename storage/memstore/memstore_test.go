@@ -33,6 +33,12 @@ func TestAccessTokenStoreContract(t *testing.T) {
 	})
 }
 
+func TestNonceStoreContract(t *testing.T) {
+	storage.TestNonceStoreContract(t, func() storage.NonceStore {
+		return NewNonceStore()
+	})
+}
+
 func TestRevocationStoreNotRevokedByDefault(t *testing.T) {
 	s := NewRevocationStore()
 

@@ -61,6 +61,9 @@ func resourceHandler(verifier *fapires.Verifier, resourceURL *url.URL) http.Hand
 			writeResourceError(w, err)
 			return
 		}
+		if authCtx.NextDPoPNonce != "" {
+			w.Header().Set("DPoP-Nonce", authCtx.NextDPoPNonce)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"subject":   authCtx.Subject,
@@ -138,6 +141,9 @@ func userinfoHandler(verifier *fapires.Verifier, userinfoURL *url.URL, identityC
 		}
 		body["sub"] = authCtx.Subject
 
+		if authCtx.NextDPoPNonce != "" {
+			w.Header().Set("DPoP-Nonce", authCtx.NextDPoPNonce)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(body)
 	}
@@ -148,6 +154,13 @@ func writeResourceError(w http.ResponseWriter, err error) {
 	if !ok {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
+	}
+	// Set before writeResourceErrorRaw's own WriteHeader call — a
+	// header can't be added after that. Only ErrorUseDPoPNonce ever
+	// carries a nonce (Error.Nonce's own doc comment), so this is a
+	// no-op for every other rejection.
+	if resErr.Nonce() != "" {
+		w.Header().Set("DPoP-Nonce", resErr.Nonce())
 	}
 	writeResourceErrorRaw(w, resErr.HTTPStatus(), string(resErr.Code()), resErr.PublicDescription())
 }

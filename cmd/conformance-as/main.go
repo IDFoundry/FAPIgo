@@ -16,6 +16,10 @@ import (
 // httpFetchTimeout bounds a single outbound client-JWKS fetch.
 const httpFetchTimeout = 10 * time.Second
 
+// dpopNonceLifetime bounds how long a DPoP nonce issued under
+// -dpop-nonce-challenge remains valid.
+const dpopNonceLifetime = time.Minute
+
 // readHeaderTimeout bounds how long the server waits to receive a
 // request's headers — without it, a client that trickles headers one
 // byte at a time can hold a connection (and its goroutine) open
@@ -47,6 +51,7 @@ func main() {
 	keyOverride := flag.String("key", "", "override tls.key_file from the config file")
 	insecureHTTP := flag.Bool("insecure-http", false, "serve plaintext HTTP instead of TLS (loopback listen_addr only)")
 	accessTokenFormat := flag.String("access-token-format", string(AccessTokenFormatJWT), "access token format to issue/verify: jwt or opaque")
+	dpopNonceChallenge := flag.Bool("dpop-nonce-challenge", false, "require and rotate a DPoP nonce on /accounts and /userinfo (RFC 9449 §8/§9) — off by default, since the OIDF suite's own protected-resource caller may not retry on the challenge")
 	flag.Parse()
 
 	if *configPath == "" {
@@ -75,7 +80,7 @@ func main() {
 		log.Fatal("conformance-as: -insecure-http requires a loopback listen_addr (e.g. 127.0.0.1:8443)")
 	}
 
-	mux, err := newServerMux(resolved, *insecureHTTP)
+	mux, err := newServerMux(resolved, *insecureHTTP, *dpopNonceChallenge)
 	if err != nil {
 		log.Fatalf("conformance-as: %v", err)
 	}

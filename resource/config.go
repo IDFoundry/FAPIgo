@@ -19,6 +19,13 @@ type Limits struct {
 	// extends how long past a token's own expiry it's still accepted.
 	// Zero means no tolerance.
 	MaxClockSkew time.Duration
+
+	// DPoPNonceLifetime bounds how long an issued DPoP nonce remains
+	// valid. Required only when Dependencies.Nonces is non-nil — see
+	// its own doc comment; NewVerifier rejects a zero value in that
+	// case, exactly like MaxDPoPProofAge above, but leaves it
+	// unvalidated when nonce-challenge support is disabled.
+	DPoPNonceLifetime time.Duration
 }
 
 // Config is this verifier's immutable configuration. It is copied by

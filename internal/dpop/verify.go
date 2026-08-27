@@ -63,10 +63,19 @@ type VerifyRequest struct {
 
 // VerifiedProof is everything about a DPoP proof worth retaining once it
 // has been verified: the thumbprint of the key it was signed with (for
-// binding against a token's cnf.jkt) and when it was issued.
+// binding against a token's cnf.jkt), when it was issued, and the
+// proof's own "nonce" claim (empty if absent).
+//
+// Nonce is handed back unconditionally, regardless of RequiredNonce —
+// unlike RequiredNonce's own compare-to-one-known-value check, a caller
+// implementing single-use, issued-per-challenge nonces (RFC 9449 §8,
+// §9) doesn't know the expected value in advance; it has to look up
+// whether the presented value was one it actually issued, which only it
+// (not this package) can do.
 type VerifiedProof struct {
 	Thumbprint jose.Thumbprint
 	IssuedAt   time.Time
+	Nonce      string
 }
 
 // Verify checks a DPoP proof against req. On success, the returned
@@ -157,5 +166,5 @@ func Verify(ctx context.Context, req VerifyRequest) (VerifiedProof, error) {
 	if err != nil {
 		return VerifiedProof{}, fmt.Errorf("dpop: %w", err)
 	}
-	return VerifiedProof{Thumbprint: thumbprint, IssuedAt: iat}, nil
+	return VerifiedProof{Thumbprint: thumbprint, IssuedAt: iat, Nonce: c.Nonce}, nil
 }

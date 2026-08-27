@@ -19,7 +19,7 @@ import (
 // Factored out so the end-to-end smoke test can stand up the exact same
 // wiring main.go uses, against its own TLS listener, without going
 // through flags or a config file on disk.
-func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool) (*http.ServeMux, error) {
+func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChallenge bool) (*http.ServeMux, error) {
 	endpoints, err := buildEndpoints(resolved.Issuer, allowLoopbackHTTP)
 	if err != nil {
 		return nil, err
@@ -146,17 +146,29 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool) (*http.ServeM
 		return nil, err
 	}
 
-	resourceVerifier, err := fapires.NewVerifier(fapires.Config{
+	resourceCfg := fapires.Config{
 		Limits: fapires.Limits{
 			MaxDPoPProofAge: resolved.Limits.MaxDPoPProofAge,
 			MaxClockSkew:    resolved.Limits.MaxClockSkew,
 		},
-	}, fapires.Dependencies{
+	}
+	resourceDeps := fapires.Dependencies{
 		AccessTokens: resourceAccessTokens,
 		Replay:       replayStore,
 		Revocation:   revocationStore,
 		Clock:        fapires.SystemClock{},
-	})
+	}
+	// Off by default (main.go's -dpop-nonce-challenge flag): the OIDF
+	// suite's own AS-plan protected-resource caller isn't guaranteed to
+	// implement the client-side nonce-challenge retry the way this
+	// module's own client package does, so turning this on
+	// unconditionally would risk breaking unrelated AS conformance.
+	if dpopNonceChallenge {
+		resourceCfg.Limits.DPoPNonceLifetime = dpopNonceLifetime
+		resourceDeps.Nonces = memstore.NewNonceStore()
+		resourceDeps.Random = rand.Reader
+	}
+	resourceVerifier, err := fapires.NewVerifier(resourceCfg, resourceDeps)
 	if err != nil {
 		return nil, err
 	}

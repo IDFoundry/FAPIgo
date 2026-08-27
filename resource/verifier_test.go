@@ -2,6 +2,7 @@ package resource_test
 
 import (
 	"context"
+	"crypto/rand"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/storage"
+	"github.com/idfoundry/fapigo/storage/memstore"
 )
 
 const testIssuer = "https://as.example.com"
@@ -119,6 +121,54 @@ func TestNewVerifierRejectsInvalidConfig(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestNewVerifierAcceptsZeroNonceLifetimeWhenNoncesUnset confirms
+// DPoPNonceLifetime is only validated when Dependencies.Nonces is
+// actually set — a verifier that never opts into nonce-challenge
+// support shouldn't be forced to set an otherwise-unused limit.
+func TestNewVerifierAcceptsZeroNonceLifetimeWhenNoncesUnset(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Limits.DPoPNonceLifetime = 0
+	if _, err := resource.NewVerifier(cfg, validDependencies(t)); err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+}
+
+func TestNewVerifierRejectsInvalidNonceConfig(t *testing.T) {
+	nonces := memstore.NewNonceStore()
+
+	t.Run("zero nonce lifetime with nonces set", func(t *testing.T) {
+		cfg := validConfig(t)
+		cfg.Limits.DPoPNonceLifetime = 0
+		deps := validDependencies(t)
+		deps.Nonces = nonces
+		deps.Random = rand.Reader
+		if _, err := resource.NewVerifier(cfg, deps); err == nil {
+			t.Fatalf("NewVerifier(zero nonce lifetime, nonces set) = nil error, want error")
+		}
+	})
+
+	t.Run("nil random with nonces set", func(t *testing.T) {
+		cfg := validConfig(t)
+		cfg.Limits.DPoPNonceLifetime = time.Minute
+		deps := validDependencies(t)
+		deps.Nonces = nonces
+		if _, err := resource.NewVerifier(cfg, deps); err == nil {
+			t.Fatalf("NewVerifier(nil random, nonces set) = nil error, want error")
+		}
+	})
+
+	t.Run("nonces and random both set", func(t *testing.T) {
+		cfg := validConfig(t)
+		cfg.Limits.DPoPNonceLifetime = time.Minute
+		deps := validDependencies(t)
+		deps.Nonces = nonces
+		deps.Random = rand.Reader
+		if _, err := resource.NewVerifier(cfg, deps); err != nil {
+			t.Fatalf("NewVerifier: %v", err)
+		}
+	})
 }
 
 // TestNewJWTAccessTokensRejectsInvalid covers what

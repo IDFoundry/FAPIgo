@@ -635,6 +635,67 @@ func TestSessionStoreContract(t *testing.T, factory func() SessionStore) {
 	})
 }
 
+// TestNonceStoreContract exercises factory()'s behavior against the
+// guarantees NonceStore's documentation promises: an issued nonce is
+// atomically single-use, an unknown nonce is rejected, and concurrent
+// consumption of the same nonce has exactly one winner. factory must
+// return a fresh, empty NonceStore each call.
+func TestNonceStoreContract(t *testing.T, factory func() NonceStore) {
+	t.Helper()
+
+	t.Run("IssueThenConsumeRoundTripsExpiry", func(t *testing.T) {
+		store := factory()
+		ctx := context.Background()
+		expiresAt := time.Now().Add(time.Minute).Truncate(time.Second)
+		if err := store.Issue(ctx, NonceIssuance{Nonce: "nonce-1", ExpiresAt: expiresAt}); err != nil {
+			t.Fatalf("Issue: %v", err)
+		}
+		got, err := store.Consume(ctx, NonceConsumption{Nonce: "nonce-1"})
+		if err != nil {
+			t.Fatalf("Consume: %v", err)
+		}
+		if !got.ExpiresAt.Equal(expiresAt) {
+			t.Fatalf("Consume returned ExpiresAt %v, want %v", got.ExpiresAt, expiresAt)
+		}
+	})
+
+	t.Run("ConsumeIsSingleUse", func(t *testing.T) {
+		store := factory()
+		ctx := context.Background()
+		if err := store.Issue(ctx, NonceIssuance{Nonce: "nonce-2", ExpiresAt: time.Now().Add(time.Minute)}); err != nil {
+			t.Fatalf("Issue: %v", err)
+		}
+		if _, err := store.Consume(ctx, NonceConsumption{Nonce: "nonce-2"}); err != nil {
+			t.Fatalf("first Consume: %v", err)
+		}
+		if _, err := store.Consume(ctx, NonceConsumption{Nonce: "nonce-2"}); err == nil {
+			t.Fatalf("second Consume = nil error, want error")
+		}
+	})
+
+	t.Run("ConsumeUnknownNonceFails", func(t *testing.T) {
+		store := factory()
+		if _, err := store.Consume(context.Background(), NonceConsumption{Nonce: "never-issued"}); err == nil {
+			t.Fatalf("Consume(unknown nonce) = nil error, want error")
+		}
+	})
+
+	t.Run("ConcurrentConsumeHasExactlyOneWinner", func(t *testing.T) {
+		store := factory()
+		ctx := context.Background()
+		if err := store.Issue(ctx, NonceIssuance{Nonce: "nonce-3", ExpiresAt: time.Now().Add(time.Minute)}); err != nil {
+			t.Fatalf("Issue: %v", err)
+		}
+		successes := runConcurrently(contractConcurrentAttempts, func() bool {
+			_, err := store.Consume(ctx, NonceConsumption{Nonce: "nonce-3"})
+			return err == nil
+		})
+		if successes != 1 {
+			t.Fatalf("concurrent Consume succeeded %d times, want exactly 1", successes)
+		}
+	})
+}
+
 // TestAccessTokenStoreContract exercises factory()'s behavior against
 // the guarantees AccessTokenStore's documentation promises: a created
 // token's fields round-trip faithfully through LookupAccessToken, and

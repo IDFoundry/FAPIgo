@@ -15,7 +15,7 @@ type Verifier struct {
 // present and valid — see Config, Limits and Dependencies for what "no
 // implicit fallback" means for each field.
 func NewVerifier(cfg Config, deps Dependencies) (*Verifier, error) {
-	if err := validateConfig(cfg); err != nil {
+	if err := validateConfig(cfg, deps); err != nil {
 		return nil, err
 	}
 	if err := validateDependencies(deps); err != nil {
@@ -24,12 +24,15 @@ func NewVerifier(cfg Config, deps Dependencies) (*Verifier, error) {
 	return &Verifier{cfg: cfg, deps: deps}, nil
 }
 
-func validateConfig(cfg Config) error {
+func validateConfig(cfg Config, deps Dependencies) error {
 	if cfg.Limits.MaxDPoPProofAge <= 0 {
 		return fmt.Errorf("resource: config: limits.max_dpop_proof_age must be positive")
 	}
 	if cfg.Limits.MaxClockSkew < 0 {
 		return fmt.Errorf("resource: config: limits.max_clock_skew must not be negative")
+	}
+	if deps.Nonces != nil && cfg.Limits.DPoPNonceLifetime <= 0 {
+		return fmt.Errorf("resource: config: limits.dpop_nonce_lifetime must be positive when dependencies.nonces is set")
 	}
 	return nil
 }
@@ -46,6 +49,9 @@ func validateDependencies(deps Dependencies) error {
 	}
 	if deps.Clock == nil {
 		return fmt.Errorf("resource: dependencies: clock is required")
+	}
+	if deps.Nonces != nil && deps.Random == nil {
+		return fmt.Errorf("resource: dependencies: random is required when nonces is set")
 	}
 	return nil
 }

@@ -24,11 +24,7 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 	if err != nil {
 		return nil, err
 	}
-	resourceURL, err := buildResourceURL(resolved.Issuer, allowLoopbackHTTP, "/accounts")
-	if err != nil {
-		return nil, err
-	}
-	userinfoURL, err := buildResourceURL(resolved.Issuer, allowLoopbackHTTP, "/userinfo")
+	userinfoURL, err := buildUserinfoURL(resolved.Issuer, allowLoopbackHTTP)
 	if err != nil {
 		return nil, err
 	}
@@ -89,8 +85,8 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 	// same in-memory table, mirroring how revocationStore is already
 	// shared above); under AccessTokenFormatJWT, verification instead
 	// resolves the AS's own signing key via selfIssuerKeySource — see
-	// resource.go's resourceHandler doc comment for why this
-	// conformance binary hosts a stand-in protected-resource endpoint
+	// resource.go's userinfoHandler doc comment for why this
+	// conformance binary hosts its own protected-resource verification
 	// alongside the AS itself.
 	var (
 		srvAccessTokens      server.AccessTokenIssuer
@@ -146,9 +142,9 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 	// already retries a use_dpop_nonce challenge, but the OIDF suite's
 	// own driver isn't guaranteed to, so this stays opt-in. A separate
 	// nonce store from the resource side's: PAR/token (this server's
-	// own role, RFC 9449 §8) and /accounts, /userinfo (the resource
-	// role, §9) are logically distinct nonce spaces, even though this
-	// one demo binary happens to host both.
+	// own role, RFC 9449 §8) and /userinfo (the resource role, §9) are
+	// logically distinct nonce spaces, even though this one demo binary
+	// happens to host both.
 	if dpopNonceChallenge {
 		srvCfg.Limits.DPoPNonceLifetime = dpopNonceLifetime
 		srvDeps.Nonces = memstore.NewNonceStore()
@@ -186,7 +182,6 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 	}
 
 	consent := newConsentHandler(srv, clientRepo, server.SystemClock{}, resolved.DefaultSubject)
-	resourceURLValue := resourceURL.URL()
 	userinfoURLValue := userinfoURL.URL()
-	return newRouter(srv, consent, resolved.AdvertisedScopes, resourceVerifier, &resourceURLValue, &userinfoURLValue, identityClaims), nil
+	return newRouter(srv, consent, resolved.AdvertisedScopes, resourceVerifier, &userinfoURLValue, identityClaims), nil
 }

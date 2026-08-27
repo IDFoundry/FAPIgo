@@ -446,7 +446,7 @@ func writePlanConfig(path string, p profile, clientIDs [2]string, rs256ClientID 
 	cfg.Server.DiscoveryURL = issuerURL(p.issuerHost, "/.well-known/openid-configuration")
 	cfg.Client = planClient{ClientID: clientIDs[0], Scope: fullScope, JWKS: priv1, DPoPSigningAlg: "ES256"}
 	cfg.Client2 = planClient{ClientID: clientIDs[1], Scope: fullScope, JWKS: priv2, DPoPSigningAlg: "ES256"}
-	cfg.Resource.ResourceURL = issuerURL(p.issuerHost, "/accounts")
+	cfg.Resource.ResourceURL = issuerURL(p.issuerHost, "/userinfo")
 	cfg.Browser = []browserBlock{consentBlock}
 	cfg.Override = map[string]overrideEntry{
 		"fapi2-security-profile-final-user-rejects-authentication": {

@@ -33,61 +33,28 @@ func (s selfIssuerKeySource) ResolveIssuerKeys(ctx context.Context, req keys.Iss
 	}}, nil
 }
 
-// resourceHandler serves this conformance binary's one protected
-// resource endpoint — a stand-in "accounts" API that exists only so the
-// OIDF suite's AS test plan has something to call with the access token
-// it was just issued. AbstractFAPI2SPFinalServerTestModule's happy-flow
-// test does exactly that (CallProtectedResource); the suite plan
-// config's resource.resourceUrl must point here.
-//
-// resourceURL is this endpoint's own fixed, externally-visible URL, used
-// as the DPoP proof's expected "htu" — not read from the incoming
-// request's Host header, matching how this binary's other endpoints
-// (server.Endpoints) are never inferred from it either.
-func resourceHandler(verifier *fapires.Verifier, resourceURL *url.URL) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		dpopProof, ok := singleDPoPHeader(r)
-		if !ok {
-			writeResourceErrorRaw(w, http.StatusBadRequest, "invalid_request", "multiple DPoP headers are not permitted")
-			return
-		}
-		authCtx, err := verifier.Verify(r.Context(), fapires.VerifyRequest{
-			Method:        r.Method,
-			URL:           resourceURL,
-			Authorization: r.Header.Get("Authorization"),
-			DPoPProof:     dpopProof,
-		})
-		if err != nil {
-			writeResourceError(w, err)
-			return
-		}
-		if authCtx.NextDPoPNonce != "" {
-			w.Header().Set("DPoP-Nonce", authCtx.NextDPoPNonce)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"subject":   authCtx.Subject,
-			"client_id": authCtx.ClientID,
-			"accounts":  []any{},
-		})
-	}
-}
-
-// userinfoHandler serves the OIDC UserInfo endpoint (OIDC Core §5.3),
-// backed by the same access-token verification as resourceHandler (this
-// binary's tokens are always issued for its own single issuer/audience,
-// so one Verifier config covers every protected endpoint it hosts).
-// Unlike /accounts, UserInfo has a real spec-defined contract: it
-// requires "openid" scope and must always return "sub"
-// (OIDCC-5.3.2), plus whatever identity claims this binary has for the
-// subject (see identity_claims.go — supporting real claim values, not
-// just the plumbing, is what
+// userinfoHandler serves the OIDC UserInfo endpoint (OIDC Core §5.3) —
+// this conformance binary's one protected resource endpoint, using the
+// same access-token verification any protected endpoint this binary
+// might host would (this binary's tokens are always issued for its own
+// single issuer/audience, so one Verifier config would cover any
+// number of them). It also doubles as the generic protected resource
+// AbstractFAPI2SPFinalServerTestModule's happy-flow test calls
+// (CallProtectedResource) — the suite plan config's
+// resource.resourceUrl points here — since UserInfo already has a real
+// spec-defined contract to verify against (requires "openid" scope,
+// must always return "sub" per OIDCC-5.3.2) rather than needing a
+// separate stand-in endpoint with no contract of its own. It also
+// returns whatever identity claims this binary has for the subject
+// (see identity_claims.go — supporting real claim values, not just the
+// plumbing, is what
 // fapi2-security-profile-final-test-claims-parameter-identity-claims
 // actually checks).
 //
-// userinfoURL is this endpoint's own fixed, externally-visible URL —
-// see resourceHandler's doc comment for why it isn't read from the
-// incoming request's Host header.
+// userinfoURL is this endpoint's own fixed, externally-visible URL,
+// used as the DPoP proof's expected "htu" — not read from the incoming
+// request's Host header, matching how this binary's other endpoints
+// (server.Endpoints) are never inferred from it either.
 func userinfoHandler(verifier *fapires.Verifier, userinfoURL *url.URL, identityClaims staticIdentityClaims) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		dpopProof, ok := singleDPoPHeader(r)

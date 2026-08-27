@@ -125,15 +125,17 @@ resource endpoint with the access token your AS just issued
 (`AbstractFAPI2SPFinalServerTestModule`'s `CallProtectedResource` step)
 — this isn't optional or skippable by omission; the first module,
 `GetResourceEndpointConfiguration`, hard-fails immediately if the plan
-config has no `resource` object. `conformance-as` now serves a stand-in
-`GET /accounts` endpoint for exactly this (see
-`cmd/conformance-as/resource.go`) — it verifies the token and its DPoP
-proof for real, using the same `resource` package this repo ships as a
-public role. Add this to the suite's plan config:
+config has no `resource` object. Point it at `conformance-as`'s own
+`/userinfo` endpoint (see `cmd/conformance-as/resource.go`'s
+`userinfoHandler`) — it verifies the token and its DPoP proof for real,
+using the same `resource` package this repo ships as a public role, and
+has a real spec-defined contract of its own (OIDC Core §5.3) rather
+than needing a separate stand-in endpoint invented just to satisfy this
+one suite requirement. Add this to the suite's plan config:
 
 ```json
 "resource": {
-  "resourceUrl": "https://conformance-as-baseline:8443/accounts"
+  "resourceUrl": "https://conformance-as-baseline:8443/userinfo"
 }
 ```
 

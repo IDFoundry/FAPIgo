@@ -27,9 +27,11 @@ behaviour and negative-test expectations differ. See
   The suite doesn't run its own dedicated resource-server conformance
   plan against this role, but the AS test plan's happy-flow module does
   call a real protected-resource endpoint with the token it just
-  issued — `cmd/conformance-as` serves a stand-in one
-  (`resource.go`, backed by the `resource` package) purely to satisfy
-  that AS-plan requirement, not as resource-role certification.
+  issued — `cmd/conformance-as` points it at its own `/userinfo`
+  endpoint (`resource.go`, backed by the `resource` package), which
+  satisfies that AS-plan requirement as a side effect of already
+  needing to exist for real, not as resource-role certification in its
+  own right.
 
 ## Access-token format coverage
 

@@ -144,6 +144,14 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 	result.RefreshToken = fapi.NewSecret(rawToken)
 	result.HasRefreshToken = true
 
+	if s.deps.Nonces != nil {
+		nextNonce, err := s.issueDPoPNonce(ctx, now)
+		if err != nil {
+			return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorServerError, 500, "failed to issue dpop nonce", err))
+		}
+		result.NextDPoPNonce = nextNonce
+	}
+
 	s.audit(ctx, AuditEventRefreshAccessToken, client.ID(), AuditOutcomeSuccess, "")
 	return result, nil
 }

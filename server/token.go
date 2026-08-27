@@ -44,6 +44,15 @@ type TokenResult struct {
 	// successful RefreshAccessToken call, which always rotates it.
 	RefreshToken    fapi.Secret
 	HasRefreshToken bool
+
+	// NextDPoPNonce is a freshly issued DPoP nonce the caller should set
+	// as this response's own DPoP-Nonce header, so its next PAR or
+	// token request already carries a valid one instead of needing its
+	// own challenge/retry round trip (RFC 9449 §8's own
+	// proactive-refresh recommendation). Always "" when
+	// Dependencies.Nonces is nil (nonce-challenge support disabled);
+	// otherwise always populated on success.
+	NextDPoPNonce string
 }
 
 // ExchangeAuthorizationCode authenticates the client, verifies its DPoP
@@ -195,6 +204,14 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		result.HasRefreshToken = true
 	}
 
+	if s.deps.Nonces != nil {
+		nextNonce, err := s.issueDPoPNonce(ctx, now)
+		if err != nil {
+			return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to issue dpop nonce", err))
+		}
+		result.NextDPoPNonce = nextNonce
+	}
+
 	s.audit(ctx, AuditEventExchangeAuthorizationCode, client.ID(), AuditOutcomeSuccess, "")
 	return result, nil
 }
@@ -215,6 +232,11 @@ func (s *Server) verifyTokenRequestDPoP(ctx context.Context, proof string) (dpop
 	})
 	if err != nil {
 		return dpop.VerifiedProof{}, newError(ErrorInvalidRequest, 400, "DPoP proof verification failed", err)
+	}
+	if s.deps.Nonces != nil {
+		if challenge := s.checkDPoPNonce(ctx, verified.Nonce, s.deps.Clock.Now()); challenge != nil {
+			return dpop.VerifiedProof{}, challenge
+		}
 	}
 	return verified, nil
 }

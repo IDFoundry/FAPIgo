@@ -42,6 +42,7 @@ type fakeAS struct {
 	messageSigned bool
 
 	lastPARForm        url.Values
+	lastPARDPoPProof   string
 	lastTokenForm      url.Values
 	lastTokenDPoPProof string
 	lastNonce          string
@@ -53,6 +54,13 @@ type fakeAS struct {
 	challengeDPoPNonce   string
 	tokenCallCount       int
 	seenClientAssertions map[string]bool
+
+	// challengeParDPoPNonce mirrors challengeDPoPNonce, but for
+	// handlePAR — RFC 9449 §8's nonce challenge applies to any DPoP
+	// proof the authorization server verifies, not just the token
+	// endpoint's, and PARDPoPBindingProof means PAR now presents one.
+	challengeParDPoPNonce string
+	parCallCount          int
 
 	// tokenTypeOverride, if non-empty, replaces the token response's
 	// token_type value (e.g. "dpop" lowercase, to test RFC 6749 §7.1's
@@ -111,8 +119,22 @@ func (a *fakeAS) handlePAR(w http.ResponseWriter, r *http.Request) {
 		a.t.Fatalf("PAR: parse form: %v", err)
 	}
 	a.lastPARForm = r.PostForm
+	a.parCallCount++
+	proof := r.Header.Get("DPoP")
+	a.lastPARDPoPProof = proof
 	if r.PostForm.Get("client_assertion") == "" {
 		a.t.Errorf("PAR: missing client_assertion")
+	}
+
+	if a.challengeParDPoPNonce != "" && dpopProofNonce(a.t, proof) != a.challengeParDPoPNonce {
+		w.Header().Set("DPoP-Nonce", a.challengeParDPoPNonce)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]any{
+			"error":             "use_dpop_nonce",
+			"error_description": "resubmit with the DPoP-Nonce value",
+		})
+		return
 	}
 	if a.messageSigned {
 		requestJWT := r.PostForm.Get("request")
@@ -308,6 +330,42 @@ func newTestClient(t *testing.T, messageSigned bool) (*client.Client, *fakeAS, *
 		cfg.Limits.RequestObjectLifetime = time.Minute
 		cfg.Limits.MaxJARMResponseLifetime = time.Minute
 	}
+
+	c, err := client.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	return c, as, ts
+}
+
+// newTestClientWithPARBinding is newTestClient (baseline profile only)
+// with an explicit Config.PARDPoPBinding, for tests that care which of
+// the two RFC 9449 §10.1 mechanisms BeginAuthorization uses at PAR.
+func newTestClientWithPARBinding(t *testing.T, binding client.PARDPoPBinding) (*client.Client, *fakeAS, *httptest.Server) {
+	t.Helper()
+	as := newFakeAS(t, testIssuer, false)
+	ts := httptest.NewServer(as.handler())
+	t.Cleanup(ts.Close)
+
+	cfg := validConfig(t)
+	cfg.PARDPoPBinding = binding
+	parURL, err := fapi.ParseEndpointURL(ts.URL+"/par", fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseEndpointURL(par): %v", err)
+	}
+	tokenURL, err := fapi.ParseEndpointURL(ts.URL+"/token", fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseEndpointURL(token): %v", err)
+	}
+	cfg.Endpoints.PushedAuthorizationRequest = parURL
+	cfg.Endpoints.Token = tokenURL
+
+	deps := validDependencies(t)
+	deps.HTTP = ts.Client()
+	deps.IssuerKeys = &fakeIssuerKeySource{keys: map[keys.IssuerVerificationPurpose]crypto.PublicKey{
+		keys.JARMVerification:    &as.jarmKey.PublicKey,
+		keys.IDTokenVerification: &as.idTokenKey.PublicKey,
+	}}
 
 	c, err := client.New(cfg, deps)
 	if err != nil {
@@ -672,11 +730,11 @@ func TestBeginAuthorizationSendsClientIDInSignedRequestObject(t *testing.T) {
 // RFC 9449 §10: committing the DPoP key binding at PAR time (rather
 // than leaving it to whichever key first shows up at the token
 // endpoint) closes an authorization-code-injection window. This is the
-// full round trip: the "dpop_jkt" sent at PAR must be the thumbprint of
-// the exact key this client later presents a DPoP proof with at the
-// token endpoint for the same authorization.
-func TestBeginAuthorizationCommitsDPoPKeyAtPARMatchingTokenEndpointProof(t *testing.T) {
-	c, as, _ := newTestClient(t, false)
+// full round trip under PARDPoPBindingJKT: the "dpop_jkt" sent at PAR
+// must be the thumbprint of the exact key this client later presents a
+// DPoP proof with at the token endpoint for the same authorization.
+func TestBeginAuthorizationCommitsDPoPKeyAtPARMatchingTokenEndpointProofJKT(t *testing.T) {
+	c, as, _ := newTestClientWithPARBinding(t, client.PARDPoPBindingJKT)
 	ctx := context.Background()
 
 	session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}})
@@ -687,6 +745,9 @@ func TestBeginAuthorizationCommitsDPoPKeyAtPARMatchingTokenEndpointProof(t *test
 	if parJKT == "" {
 		t.Fatalf("PAR form is missing dpop_jkt")
 	}
+	if as.lastPARDPoPProof != "" {
+		t.Errorf("PAR request carried a DPoP header %q, want none under PARDPoPBindingJKT", as.lastPARDPoPProof)
+	}
 
 	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-dpop-jkt", "")
 	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery}); err != nil {
@@ -696,6 +757,55 @@ func TestBeginAuthorizationCommitsDPoPKeyAtPARMatchingTokenEndpointProof(t *test
 	tokenJKT := dpopProofJKT(t, as.lastTokenDPoPProof)
 	if tokenJKT != parJKT {
 		t.Errorf("token endpoint DPoP proof key thumbprint = %q, want it to match PAR's dpop_jkt %q", tokenJKT, parJKT)
+	}
+}
+
+// The same commitment property as above, but for PARDPoPBindingProof
+// (the default, RFC 9449 §10.1's recommended mechanism): PAR presents
+// an actual DPoP proof instead of dpop_jkt, and that proof's own key
+// must match the one later presented at the token endpoint.
+func TestBeginAuthorizationCommitsDPoPKeyAtPARMatchingTokenEndpointProofDefault(t *testing.T) {
+	c, as, _ := newTestClientWithPARBinding(t, client.PARDPoPBindingProof)
+	ctx := context.Background()
+
+	session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}})
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+	if as.lastPARForm.Get("dpop_jkt") != "" {
+		t.Errorf("PAR form carried dpop_jkt %q, want none under the default PARDPoPBindingProof", as.lastPARForm.Get("dpop_jkt"))
+	}
+	if as.lastPARDPoPProof == "" {
+		t.Fatalf("PAR request is missing a DPoP header")
+	}
+	parJKT := dpopProofJKT(t, as.lastPARDPoPProof)
+
+	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-dpop-proof", "")
+	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery}); err != nil {
+		t.Fatalf("CompleteAuthorization: %v", err)
+	}
+
+	tokenJKT := dpopProofJKT(t, as.lastTokenDPoPProof)
+	if tokenJKT != parJKT {
+		t.Errorf("token endpoint DPoP proof key thumbprint = %q, want it to match PAR proof's key %q", tokenJKT, parJKT)
+	}
+}
+
+// RFC 9449 §8: an authorization server that requires a DPoP nonce can
+// challenge any DPoP proof it verifies, not just the token endpoint's —
+// PARDPoPBindingProof means PAR now presents one for the first time, so
+// it needs the same retry BeginAuthorization already gets from
+// ExchangeCode at the token endpoint.
+func TestBeginAuthorizationRetriesOnPARDPoPNonceChallenge(t *testing.T) {
+	c, as, _ := newTestClientWithPARBinding(t, client.PARDPoPBindingProof)
+	as.challengeParDPoPNonce = "server-issued-par-nonce-1"
+	ctx := context.Background()
+
+	if _, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}}); err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+	if as.parCallCount != 2 {
+		t.Errorf("PAR endpoint called %d times, want 2 (initial + nonce retry)", as.parCallCount)
 	}
 }
 

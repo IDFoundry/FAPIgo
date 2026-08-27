@@ -26,6 +26,39 @@ const (
 	ProfileFAPISecurityWithMessageSigning
 )
 
+// PARDPoPBinding selects how BeginAuthorization commits the eventual
+// authorization code to this client's DPoP key at PAR time (RFC 9449
+// §10.1 recognizes two mechanisms; an authorization server supporting
+// both PAR and DPoP must accept either). Unlike Profile/Algorithms/
+// Limits, whose zero value is deliberately invalid because there's no
+// universally-preferable choice, this type's zero value is a real,
+// meaningful default: RFC 9449 §10.1 itself recommends
+// PARDPoPBindingProof over PARDPoPBindingJKT, so a Config that never
+// mentions this field gets the recommended behavior for free rather
+// than a validation error.
+type PARDPoPBinding uint8
+
+const (
+	// PARDPoPBindingProof (the default, zero value) sends an actual DPoP
+	// proof — not just its key's thumbprint — as this pushed
+	// authorization request's own "DPoP" header, binding the eventual
+	// authorization code to whichever key demonstrated possession here.
+	// RFC 9449 §10.1 recommends this over PARDPoPBindingJKT: it reuses
+	// the same proof-building this client already does at the token and
+	// resource endpoints (no separate thumbprint computation or
+	// parameter), and unlike a bare dpop_jkt claim, it's actual proof of
+	// possession at PAR time, not just a key identifier.
+	PARDPoPBindingProof PARDPoPBinding = iota
+
+	// PARDPoPBindingJKT instead declares the key via the plain
+	// "dpop_jkt" request parameter (RFC 9449 §10), without proving
+	// possession of it until the token endpoint. Every authorization
+	// server supporting DPoP at PAR must accept this mechanism too (RFC
+	// 9449 §10.1's own MUST) — kept for interop with a deployment that
+	// has a specific reason to prefer it.
+	PARDPoPBindingJKT
+)
+
 // Algorithms are the single algorithm this client uses for each signing
 // operation it performs, and the single algorithm it expects the
 // authorization server to use for each of its own. A closed
@@ -234,4 +267,10 @@ type Config struct {
 	// OIDC Core §5.3.2 exists to catch. Defaults to false, which
 	// preserves the exact-match behavior this package has always had.
 	TolerateUserInfoSubjectEqualsClientID bool
+
+	// PARDPoPBinding selects how BeginAuthorization commits this
+	// client's DPoP key at PAR time — see PARDPoPBinding's own doc
+	// comment. Defaults to PARDPoPBindingProof, RFC 9449 §10.1's own
+	// recommended mechanism.
+	PARDPoPBinding PARDPoPBinding
 }

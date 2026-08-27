@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"crypto"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/idfoundry/fapigo/extension"
 	"github.com/idfoundry/fapigo/internal/clientassertion"
+	"github.com/idfoundry/fapigo/internal/dpop"
 	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/internal/par"
 	"github.com/idfoundry/fapigo/internal/pkce"
@@ -78,11 +80,6 @@ func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 		return AuthorizationSession{}, newError(ErrorInternal, "failed to derive PKCE challenge", err)
 	}
 
-	dpopThumbprint, err := c.dpopKeyThumbprint(ctx)
-	if err != nil {
-		return AuthorizationSession{}, newError(ErrorInternal, "failed to compute DPoP key thumbprint", err)
-	}
-
 	now := c.deps.Clock.Now()
 	params := map[string]string{
 		// client_id (RFC 6749 §4.1.1) is a required authorization-request
@@ -98,29 +95,22 @@ func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 		"nonce":                 nonce,
 		"code_challenge":        challenge,
 		"code_challenge_method": "S256",
-		// dpop_jkt (RFC 9449 §10) commits the authorization code to this
-		// client's DPoP key at PAR time, rather than leaving that
-		// binding to whichever key first shows up at the token endpoint
-		// — closing an authorization-code-injection window and matching
-		// the key this client will actually present with in
-		// ExchangeCode.
-		"dpop_jkt": dpopThumbprint,
 	}
 	if len(req.ACRValues) > 0 {
 		params["acr_values"] = strings.Join(req.ACRValues, " ")
 	}
 
-	formParams, buildErr := c.buildPushedRequestForm(ctx, now, params, req.Extensions)
-	if buildErr != nil {
-		return AuthorizationSession{}, buildErr
+	var (
+		body   []byte
+		parErr *Error
+	)
+	if c.cfg.PARDPoPBinding == PARDPoPBindingJKT {
+		body, parErr = c.pushAuthorizationRequestWithJKT(ctx, params, req.Extensions)
+	} else {
+		body, parErr = c.pushAuthorizationRequestWithDPoPProof(ctx, params, req.Extensions)
 	}
-
-	body, status, _, err := c.postForm(ctx, c.cfg.Endpoints.PushedAuthorizationRequest.String(), par.EncodeForm(formParams), nil)
-	if err != nil {
-		return AuthorizationSession{}, newError(ErrorInternal, "pushed authorization request failed", err)
-	}
-	if status != http.StatusCreated && status != http.StatusOK {
-		return AuthorizationSession{}, parErrorFromResponse(body)
+	if parErr != nil {
+		return AuthorizationSession{}, parErr
 	}
 
 	result, err := par.DecodeResult(body)
@@ -172,6 +162,105 @@ func (c *Client) dpopKeyThumbprint(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("compute DPoP key thumbprint: %w", err)
 	}
 	return thumbprint.String(), nil
+}
+
+// pushAuthorizationRequestWithJKT implements PARDPoPBindingJKT: declares
+// this client's DPoP key via the plain "dpop_jkt" parameter (RFC 9449
+// §10) — committing the authorization code to it, rather than leaving
+// that binding to whichever key first shows up at the token endpoint —
+// without proving possession of it until ExchangeCode presents a proof
+// with the matching key.
+func (c *Client) pushAuthorizationRequestWithJKT(ctx context.Context, params map[string]string, extensions extension.Values) ([]byte, *Error) {
+	dpopThumbprint, err := c.dpopKeyThumbprint(ctx)
+	if err != nil {
+		return nil, newError(ErrorInternal, "failed to compute DPoP key thumbprint", err)
+	}
+	params["dpop_jkt"] = dpopThumbprint
+
+	formParams, buildErr := c.buildPushedRequestForm(ctx, c.deps.Clock.Now(), params, extensions)
+	if buildErr != nil {
+		return nil, buildErr
+	}
+	body, status, _, err := c.postForm(ctx, c.cfg.Endpoints.PushedAuthorizationRequest.String(), par.EncodeForm(formParams), nil)
+	if err != nil {
+		return nil, newError(ErrorInternal, "pushed authorization request failed", err)
+	}
+	if status != http.StatusCreated && status != http.StatusOK {
+		return nil, parErrorFromResponse(body)
+	}
+	return body, nil
+}
+
+// pushAuthorizationRequestWithDPoPProof implements PARDPoPBindingProof
+// (the default): binds the authorization code to this client's DPoP key
+// by presenting an actual proof at PAR — RFC 9449 §10.1's recommended
+// mechanism — instead of the plain dpop_jkt parameter, retrying once on
+// a use_dpop_nonce challenge. This mirrors sendTokenRequest's identical
+// mechanic for the token endpoint: an authorization server that
+// nonce-challenges DPoP proofs it verifies can now challenge this one
+// too, since PAR is presenting one for the first time. A client
+// assertion is exactly as single-use as a DPoP proof, so the retry
+// rebuilds the whole form, not just the proof — same reasoning
+// sendTokenRequest's own doc comment gives for the token endpoint.
+func (c *Client) pushAuthorizationRequestWithDPoPProof(ctx context.Context, params map[string]string, extensions extension.Values) ([]byte, *Error) {
+	dpopSigner, _, err := c.newSigner(ctx, keys.DPoPProofSigning, c.cfg.Algorithms.DPoP)
+	if err != nil {
+		return nil, newError(ErrorInternal, "failed to resolve DPoP signing key", err)
+	}
+	parURL := c.cfg.Endpoints.PushedAuthorizationRequest.URL()
+
+	buildParForm := func() ([]byte, error) {
+		formParams, buildErr := c.buildPushedRequestForm(ctx, c.deps.Clock.Now(), params, extensions)
+		if buildErr != nil {
+			return nil, buildErr
+		}
+		return par.EncodeForm(formParams), nil
+	}
+	form, buildErr := buildParForm()
+	if buildErr != nil {
+		return nil, newError(ErrorInternal, "failed to build pushed authorization request", buildErr)
+	}
+
+	body, status, header, err := c.postParRequestWithDPoP(ctx, dpopSigner, &parURL, form, "")
+	if err != nil {
+		return nil, newError(ErrorInternal, "pushed authorization request failed", err)
+	}
+	if status == http.StatusCreated || status == http.StatusOK {
+		return body, nil
+	}
+
+	nonce := header.Get("DPoP-Nonce")
+	if nonce == "" || !isDPoPNonceError(body) {
+		return nil, parErrorFromResponse(body)
+	}
+	retryForm, buildErr := buildParForm()
+	if buildErr != nil {
+		return nil, newError(ErrorInternal, "failed to build pushed authorization request", buildErr)
+	}
+	body, status, _, err = c.postParRequestWithDPoP(ctx, dpopSigner, &parURL, retryForm, nonce)
+	if err != nil {
+		return nil, newError(ErrorInternal, "pushed authorization request failed", err)
+	}
+	if status != http.StatusCreated && status != http.StatusOK {
+		return nil, parErrorFromResponse(body)
+	}
+	return body, nil
+}
+
+// postParRequestWithDPoP signs a fresh DPoP proof (new iat and jti) for
+// the pushed authorization request — no AccessToken/ath, since none
+// exists yet at PAR time, matching how server/par.go's own dpop.Verify
+// call never expects one either — and posts form to it.
+func (c *Client) postParRequestWithDPoP(ctx context.Context, dpopSigner crypto.Signer, parURL *url.URL, form []byte, nonce string) ([]byte, int, http.Header, error) {
+	proof, err := dpop.CreateProof(dpop.ProofRequest{
+		Signer: dpopSigner, Algorithm: c.cfg.Algorithms.DPoP,
+		Method: http.MethodPost, URL: parURL, Now: c.deps.Clock.Now(),
+		Random: c.deps.Random, Nonce: nonce,
+	})
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("build DPoP proof: %w", err)
+	}
+	return c.postForm(ctx, parURL.String(), form, map[string]string{"DPoP": proof})
 }
 
 // buildPushedRequestForm builds the PAR endpoint's form body: a client

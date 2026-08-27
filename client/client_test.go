@@ -210,6 +210,20 @@ func TestNewAcceptsValidConfig(t *testing.T) {
 	}
 }
 
+// A Config that never mentions PARDPoPBinding at all must build
+// successfully and behave as PARDPoPBindingProof — RFC 9449 §10.1's
+// recommended mechanism is the zero-value default, not a validation
+// error, unlike Profile/Algorithms/Limits.
+func TestNewAcceptsZeroValuePARDPoPBinding(t *testing.T) {
+	cfg := validConfig(t)
+	if cfg.PARDPoPBinding != client.PARDPoPBindingProof {
+		t.Fatalf("validConfig's zero-value PARDPoPBinding = %v, want PARDPoPBindingProof", cfg.PARDPoPBinding)
+	}
+	if _, err := client.New(cfg, validDependencies(t)); err != nil {
+		t.Fatalf("New: %v", err)
+	}
+}
+
 func TestNewRejectsInvalidConfig(t *testing.T) {
 	cases := map[string]func(*client.Config){
 		"zero issuer":                 func(c *client.Config) { c.Issuer = fapi.URL{} },
@@ -229,6 +243,7 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 		"zero http timeout":           func(c *client.Config) { c.Limits.HTTPTimeout = 0 },
 		"zero max response bytes":     func(c *client.Config) { c.Limits.MaxHTTPResponseBytes = 0 },
 		"zero max jose compact bytes": func(c *client.Config) { c.Limits.MaxJOSECompactBytes = 0 },
+		"invalid par dpop binding":    func(c *client.Config) { c.PARDPoPBinding = client.PARDPoPBinding(99) },
 		"id_token key management set without content encryption": func(c *client.Config) {
 			c.Algorithms.IDTokenKeyManagement = fapi.RSAOAEP256
 		},

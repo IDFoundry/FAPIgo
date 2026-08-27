@@ -144,7 +144,7 @@ func newSmokeHarnessWithNonceChallenge(t *testing.T, format AccessTokenFormat, d
 	if err != nil {
 		t.Fatalf("build endpoints: %v", err)
 	}
-	userinfoURL, err := buildResourceURL(issuer, false, "/userinfo")
+	userinfoURL, err := buildUserinfoURL(issuer, false)
 	if err != nil {
 		t.Fatalf("build userinfo url: %v", err)
 	}

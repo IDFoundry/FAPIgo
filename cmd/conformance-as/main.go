@@ -51,7 +51,7 @@ func main() {
 	keyOverride := flag.String("key", "", "override tls.key_file from the config file")
 	insecureHTTP := flag.Bool("insecure-http", false, "serve plaintext HTTP instead of TLS (loopback listen_addr only)")
 	accessTokenFormat := flag.String("access-token-format", string(AccessTokenFormatJWT), "access token format to issue/verify: jwt or opaque")
-	dpopNonceChallenge := flag.Bool("dpop-nonce-challenge", false, "require and rotate a DPoP nonce on /par, /token, /accounts and /userinfo (RFC 9449 §8/§9) — off by default, since the OIDF suite's own driver may not retry on the challenge")
+	dpopNonceChallenge := flag.Bool("dpop-nonce-challenge", false, "require and rotate a DPoP nonce on /par, /token and /userinfo (RFC 9449 §8/§9) — off by default, since the OIDF suite's own driver may not retry on the challenge")
 	flag.Parse()
 
 	if *configPath == "" {
@@ -138,17 +138,16 @@ func buildEndpoints(issuer fapi.URL, allowLoopbackHTTP bool) (server.Endpoints, 
 	}, nil
 }
 
-// buildResourceURL derives one of this binary's stand-in
-// protected-resource endpoint URLs (path is e.g. "/accounts" or
-// "/userinfo") from issuer, the same way buildEndpoints derives the
-// four protocol endpoints. See resource.go's resourceHandler doc
+// buildUserinfoURL derives this binary's protected-resource endpoint
+// URL ("/userinfo") from issuer, the same way buildEndpoints derives
+// the four protocol endpoints. See resource.go's userinfoHandler doc
 // comment for why this exists.
-func buildResourceURL(issuer fapi.URL, allowLoopbackHTTP bool, path string) (fapi.URL, error) {
+func buildUserinfoURL(issuer fapi.URL, allowLoopbackHTTP bool) (fapi.URL, error) {
 	var opts []fapi.URLOption
 	if allowLoopbackHTTP {
 		opts = append(opts, fapi.AllowLoopbackHTTP())
 	}
-	return fapi.ParseEndpointURL(issuer.String()+path, opts...)
+	return fapi.ParseEndpointURL(issuer.String()+"/userinfo", opts...)
 }
 
 // isLoopbackAddr reports whether addr's host (net.Listen-style

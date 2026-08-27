@@ -44,6 +44,9 @@ func validateConfig(cfg Config) error {
 	if cfg.Profile != ProfileFAPISecurity && cfg.Profile != ProfileFAPISecurityWithMessageSigning {
 		return fmt.Errorf("client: config: profile is invalid")
 	}
+	if cfg.PARDPoPBinding != PARDPoPBindingProof && cfg.PARDPoPBinding != PARDPoPBindingJKT {
+		return fmt.Errorf("client: config: par_dpop_binding is invalid")
+	}
 
 	if !cfg.Algorithms.ClientAuthentication.IsValid() {
 		return fmt.Errorf("client: config: algorithms.client_authentication is required")

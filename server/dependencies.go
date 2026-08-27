@@ -66,7 +66,7 @@ type Dependencies struct {
 	Clock Clock
 
 	// Random is the source of randomness for request_uri, interaction
-	// handle and authorization code generation.
+	// handle, authorization code and DPoP nonce generation.
 	Random io.Reader
 
 	// IdentityClaims resolves identity claim values (e.g. "name",
@@ -75,4 +75,19 @@ type Dependencies struct {
 	// which is a permitted response to the "claims" request parameter
 	// (see IdentityClaimsSource), not an error.
 	IdentityClaims IdentityClaimsSource
+
+	// Nonces persists DPoP nonces this server issues and consumes for
+	// requests to the PAR and token endpoints. Nil disables DPoP
+	// nonce-challenge support entirely (RFC 9449 §8) — like
+	// IdentityClaims, this is a genuinely optional field, not a
+	// security check this module treats as non-negotiable the way
+	// Revocation is: declining it is the normal, fully spec-compliant
+	// default. One shared store covers both endpoints — a nonce issued
+	// from a PAR response is valid at the token endpoint and vice
+	// versa, the same way resource.Dependencies.Nonces covers every
+	// protected-resource endpoint uniformly rather than one store per
+	// endpoint. Set it (and Config.Limits.DPoPNonceLifetime) to have
+	// this server challenge a DPoP proof carrying no valid nonce, and
+	// proactively reissue a fresh one on every successful call.
+	Nonces storage.NonceStore
 }

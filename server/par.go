@@ -99,6 +99,15 @@ type PushAuthorizationRequest struct {
 type PushAuthorizationResult struct {
 	RequestURI RequestURI
 	ExpiresIn  time.Duration
+
+	// NextDPoPNonce is a freshly issued DPoP nonce the caller should set
+	// as this response's own DPoP-Nonce header, so a subsequent PAR or
+	// token request already carries a valid one — issued unconditionally
+	// once Dependencies.Nonces is configured, regardless of whether this
+	// particular PAR call itself presented a DPoP proof, so a client can
+	// pick one up as early as PAR. Always "" when Dependencies.Nonces is
+	// nil.
+	NextDPoPNonce string
 }
 
 // PushAuthorizationRequest authenticates the client, verifies either its
@@ -151,10 +160,19 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 		return s.parFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to persist pushed authorization request", err))
 	}
 
+	var nextNonce string
+	if s.deps.Nonces != nil {
+		nextNonce, err = s.issueDPoPNonce(ctx, now)
+		if err != nil {
+			return s.parFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to issue dpop nonce", err))
+		}
+	}
+
 	s.audit(ctx, AuditEventPushAuthorizationRequest, client.ID(), AuditOutcomeSuccess, "")
 	return PushAuthorizationResult{
-		RequestURI: RequestURI{value: requestURI},
-		ExpiresIn:  s.cfg.Limits.PushedRequestLifetime,
+		RequestURI:    RequestURI{value: requestURI},
+		ExpiresIn:     s.cfg.Limits.PushedRequestLifetime,
+		NextDPoPNonce: nextNonce,
 	}, nil
 }
 
@@ -402,6 +420,11 @@ func (s *Server) reconcileParDPoPBinding(ctx context.Context, proof string, para
 	})
 	if err != nil {
 		return nil, newError(ErrorInvalidRequest, 400, "DPoP proof verification failed", err)
+	}
+	if s.deps.Nonces != nil {
+		if challenge := s.checkDPoPNonce(ctx, verified.Nonce, s.deps.Clock.Now()); challenge != nil {
+			return nil, challenge
+		}
 	}
 	thumbprint := verified.Thumbprint.String()
 

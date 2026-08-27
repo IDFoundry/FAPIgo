@@ -141,6 +141,18 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 		Random:         rand.Reader,
 		IdentityClaims: identityClaims,
 	}
+	// Off by default (main.go's -dpop-nonce-challenge flag) — same
+	// reasoning as the resource-side block below: client.ExchangeCode
+	// already retries a use_dpop_nonce challenge, but the OIDF suite's
+	// own driver isn't guaranteed to, so this stays opt-in. A separate
+	// nonce store from the resource side's: PAR/token (this server's
+	// own role, RFC 9449 §8) and /accounts, /userinfo (the resource
+	// role, §9) are logically distinct nonce spaces, even though this
+	// one demo binary happens to host both.
+	if dpopNonceChallenge {
+		srvCfg.Limits.DPoPNonceLifetime = dpopNonceLifetime
+		srvDeps.Nonces = memstore.NewNonceStore()
+	}
 	srv, err := server.New(srvCfg, srvDeps)
 	if err != nil {
 		return nil, err

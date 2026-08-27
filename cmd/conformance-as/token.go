@@ -50,6 +50,9 @@ func tokenHandler(srv *server.Server) http.HandlerFunc {
 			resp["refresh_token"] = result.RefreshToken.Reveal()
 		}
 
+		if result.NextDPoPNonce != "" {
+			w.Header().Set("DPoP-Nonce", result.NextDPoPNonce)
+		}
 		// RFC 6749 §5.1 requires this on every token response — checked by
 		// conformance suites, and worth doing correctly here even though
 		// fapitest's own blueprint (which tests wire content, not header

@@ -23,6 +23,16 @@ const (
 	// wrong with an authorization request (missing client_id, a
 	// malformed request_uri reference that doesn't even parse, etc.).
 	ErrorInvalidRequestURI ErrorCode = "invalid_request_uri"
+
+	// ErrorUseDPoPNonce indicates a DPoP proof presented to the PAR or
+	// token endpoint was otherwise valid but carried no nonce, or one
+	// this server didn't just issue (unknown, already consumed, or
+	// expired) — RFC 9449 §8's own error value, distinct from
+	// ErrorInvalidGrant/ErrorInvalidRequest (the request itself is
+	// fine; the caller just needs to retry with the nonce this error's
+	// own Nonce method returns). Only ever returned when
+	// Dependencies.Nonces is configured.
+	ErrorUseDPoPNonce ErrorCode = "use_dpop_nonce"
 )
 
 // Error is the error type every public Server method returns. Code and
@@ -35,6 +45,7 @@ type Error struct {
 	httpStatus  int
 	description string
 	cause       error
+	nonce       string
 }
 
 func newError(code ErrorCode, httpStatus int, description string, cause error) *Error {
@@ -46,6 +57,12 @@ func (e *Error) Code() ErrorCode { return e.code }
 
 // PublicDescription returns a short, safe-to-expose description.
 func (e *Error) PublicDescription() string { return e.description }
+
+// Nonce returns the nonce a caller should present on retry, alongside
+// this error's own DPoP challenge — non-empty only when Code is
+// ErrorUseDPoPNonce, in which case it belongs in the response's own
+// DPoP-Nonce header (RFC 9449 §8).
+func (e *Error) Nonce() string { return e.nonce }
 
 // HTTPStatus returns the HTTP status code an adapter should respond
 // with.

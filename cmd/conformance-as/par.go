@@ -32,6 +32,9 @@ func parHandler(srv *server.Server) http.HandlerFunc {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
+		if result.NextDPoPNonce != "" {
+			w.Header().Set("DPoP-Nonce", result.NextDPoPNonce)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write(body)

@@ -204,6 +204,9 @@ func validateDependencies(cfg Config, deps Dependencies) error {
 	if idTokenEncEnabled && deps.ClientEncryptionKeys == nil {
 		return fmt.Errorf("server: dependencies: client encryption keys is required when algorithms.id_token_encryption_key_management/content_encryption are configured")
 	}
+	if deps.Nonces != nil && cfg.Limits.DPoPNonceLifetime <= 0 {
+		return fmt.Errorf("server: config: limits.dpop_nonce_lifetime must be positive when dependencies.nonces is set")
+	}
 	if cfg.Assurance == AssuranceProduction {
 		if deps.Audit == nil {
 			return fmt.Errorf("server: dependencies: audit is required under AssuranceProduction")

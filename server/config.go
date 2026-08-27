@@ -155,6 +155,12 @@ type Limits struct {
 	// and extends how long past exp an artifact is still accepted. Zero
 	// means no tolerance.
 	MaxClockSkew time.Duration
+
+	// DPoPNonceLifetime bounds how long an issued DPoP nonce remains
+	// valid. Required only when Dependencies.Nonces is non-nil — see
+	// its own doc comment; New rejects a zero value in that case, but
+	// leaves it unvalidated when nonce-challenge support is disabled.
+	DPoPNonceLifetime time.Duration
 }
 
 // Config is this server's immutable configuration. It is copied by New;

@@ -120,6 +120,10 @@ type smokeHarness struct {
 }
 
 func newSmokeHarness(t *testing.T, format AccessTokenFormat) *smokeHarness {
+	return newSmokeHarnessWithNonceChallenge(t, format, false)
+}
+
+func newSmokeHarnessWithNonceChallenge(t *testing.T, format AccessTokenFormat, dpopNonceChallenge bool) *smokeHarness {
 	t.Helper()
 
 	cert, pool := selfSignedCert(t)
@@ -139,6 +143,10 @@ func newSmokeHarness(t *testing.T, format AccessTokenFormat) *smokeHarness {
 	endpoints, err := buildEndpoints(issuer, false)
 	if err != nil {
 		t.Fatalf("build endpoints: %v", err)
+	}
+	userinfoURL, err := buildResourceURL(issuer, false, "/userinfo")
+	if err != nil {
+		t.Fatalf("build userinfo url: %v", err)
 	}
 
 	clientKeyManager, err := ephemeral.NewKeyManager(map[keys.SigningPurpose]fapi.SignatureAlgorithm{
@@ -188,7 +196,7 @@ func newSmokeHarness(t *testing.T, format AccessTokenFormat) *smokeHarness {
 		AdvertisedScopes:  []string{"openid", "accounts", "offline_access"},
 	}
 
-	mux, err := newServerMux(resolved, false)
+	mux, err := newServerMux(resolved, false, dpopNonceChallenge)
 	if err != nil {
 		t.Fatalf("build server mux: %v", err)
 	}
@@ -226,6 +234,7 @@ func newSmokeHarness(t *testing.T, format AccessTokenFormat) *smokeHarness {
 			Authorization:              endpoints.Authorization,
 			Token:                      endpoints.Token,
 			PushedAuthorizationRequest: endpoints.PushedAuthorizationRequest,
+			UserInfo:                   userinfoURL,
 		},
 		Profile: client.ProfileFAPISecurity,
 		Algorithms: client.Algorithms{
@@ -383,6 +392,52 @@ func testSmokeAuthorizationCodeFlow(t *testing.T, format AccessTokenFormat) {
 	// storage.TestGrantStoreContract/RedeemAuthorizationCodeIsSingleUse).
 	if _, err := h.client.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery}); err == nil {
 		t.Fatalf("replayed CompleteAuthorization succeeded, want an error")
+	}
+}
+
+// TestSmokeUserInfoWithDPoPNonceChallenge confirms this binary's
+// -dpop-nonce-challenge wiring actually interoperates with the client
+// package's own nonce-retry logic (client/resource.go's
+// ResourceClient.Do), not just each side's own unit tests in isolation:
+// FetchUserInfo must succeed transparently even though the very first
+// call is challenged and retried entirely inside the client, with no
+// special handling from this test.
+func TestSmokeUserInfoWithDPoPNonceChallenge(t *testing.T) {
+	h := newSmokeHarnessWithNonceChallenge(t, AccessTokenFormatJWT, true)
+	ctx := context.Background()
+	scope := []string{"openid", "accounts"}
+
+	handle := h.runToConsent(ctx, scope)
+	rawQuery := h.submitDecision(ctx, handle, "approve", scope)
+
+	result, err := h.client.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery})
+	if err != nil {
+		t.Fatalf("CompleteAuthorization: %v", err)
+	}
+	success, ok := result.(client.CompletionSuccess)
+	if !ok {
+		t.Fatalf("CompleteAuthorization result = %T, want client.CompletionSuccess", result)
+	}
+
+	info, err := h.client.FetchUserInfo(ctx, success.Tokens)
+	if err != nil {
+		t.Fatalf("FetchUserInfo (should retry the nonce challenge transparently): %v", err)
+	}
+	if info.Subject != smokeSubject {
+		t.Fatalf("UserInfo.Subject = %q, want %q", info.Subject, smokeSubject)
+	}
+
+	// A second, independent call must succeed too — confirming the
+	// server's single-use nonce store doesn't end up in some broken
+	// state after one full challenge/consume/reissue cycle. (client
+	// itself has no cross-call nonce cache — ResourceClient.Do only
+	// reacts to a challenge within the one call it's already making —
+	// so this still exercises its own full challenge/retry round trip,
+	// same as the first call above; the server's proactive
+	// NextDPoPNonce only benefits a caller that tracks and reuses it
+	// itself, which this client doesn't do.)
+	if _, err := h.client.FetchUserInfo(ctx, success.Tokens); err != nil {
+		t.Fatalf("FetchUserInfo (second call): %v", err)
 	}
 }
 

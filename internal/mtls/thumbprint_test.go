@@ -56,8 +56,10 @@ func TestThumbprintMatchesManualComputation(t *testing.T) {
 
 func TestThumbprintIsDeterministic(t *testing.T) {
 	cert := selfSignedTestCert(t, "test-client")
-	if mtls.Thumbprint(cert) != mtls.Thumbprint(cert) {
-		t.Errorf("Thumbprint() is not deterministic for the same certificate")
+	first := mtls.Thumbprint(cert)
+	second := mtls.Thumbprint(cert)
+	if first != second {
+		t.Errorf("Thumbprint() is not deterministic for the same certificate: %q != %q", first, second)
 	}
 }
 

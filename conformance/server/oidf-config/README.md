@@ -301,9 +301,8 @@ since neither is documented in any bundled sample config) for the
 suite's own outbound TLS client to present.
 
 **Result of a live run: every module now reaches `FINISHED` (zero
-`INTERRUPTED`) — 9 PASS, 3 SKIPPED, 23 FAIL.** Getting this far
-surfaced two real, since-fixed library gaps, plus one still-open,
-narrower cause behind most of the 23:
+`INTERRUPTED`) — 10 PASS, 3 SKIPPED, 22 FAIL.** Getting this far
+surfaced three real, since-fixed library/harness gaps:
 
 - **Fixed: `tls_client_certificate_bound_access_tokens` (RFC 8705
   §3.3) was entirely missing from `server.Metadata`.** The suite's
@@ -327,29 +326,51 @@ narrower cause behind most of the 23:
   BackchannelAuthentication), plus their mTLS aliases for an
   mTLS-bound client. This is not mTLS-specific — a DPoP-bound client
   gets the same widened set now too (`TestPushAuthorizationRequestAcceptsTokenEndpointURLAsClientAssertionAudience`).
-- **Open, not fixed (out of scope for this pass): FAPI-RW-8.5-1/8.5-2
-  ("Server accepted a cipher that is not on the list of permitted
-  ciphers")**, `ECDHE-ECDSA-CHACHA20-POLY1305-SHA256`. This module's
-  TLS cipher-suite check enforces the older, narrower FAPI-RW §8.5
-  list (AES-128-GCM only, both ECDSA and RSA), stricter than the
-  BCP195/RFC 7525 set `cmd/conformance-as/main.go`'s own
-  `bcp195TLS12CipherSuites` already offers (which — correctly, per
-  FAPI2-SP-FINAL-5.2.2's own broader citation — also includes AES-256-GCM
-  and ChaCha20-Poly1305). Confirmed live with `openssl s_client`: Go's
-  server honors *client* cipher preference order among these mutually
-  acceptable suites, so a probe that offers ChaCha20 first gets it
-  selected, tripping this narrower check. Narrowing the shared cipher
-  list to satisfy this one legacy requirement risks nothing for the
-  now-passing baseline/message-signing plans, but wasn't attempted
-  here — a deliberate policy choice about which TLS profile this
-  binary should target, not a defect this session's mTLS work
-  introduced.
-- Also newly visible, unrelated to mTLS or the two fixes above:
-  `x-fapi-interaction-id not found in resource endpoint response
-  headers` (FAPI-R-6.2.1-11) — this module reaches the protected
-  resource step, further than any CIBA run before it, and finds this
-  header genuinely unimplemented anywhere in `resource`/`cmd/conformance-as`.
-  A real, separate gap; not addressed here.
+- **Fixed: FAPI-RW-8.5-1/8.5-2 ("Server accepted a cipher that is not
+  on the list of permitted ciphers") — two distinct causes, both
+  resolved.** First cause: `cmd/conformance-as/main.go`'s own cipher
+  list (was `bcp195TLS12CipherSuites`, now `fapiRWTLS12CipherSuites`)
+  included ChaCha20-Poly1305 and AES-256-GCM, correct per
+  FAPI2-SP-FINAL-5.2.2's own BCP195/RFC 7525 citation but broader than
+  this specific check's own narrower, legacy FAPI-RW §8.5 list —
+  narrowed to just the two AES-128-GCM suites. Second, deeper cause,
+  found by disassembling the suite's own
+  `net.openid.conformance.util.FAPITLSClient.FAPI_TLS_1_2_CIPHERS`
+  constant directly (not documented anywhere in a bundled sample
+  config): its permitted set is **RSA-keyed cipher suites only**
+  (`DHE_RSA`/`ECDHE_RSA` AES-GCM) — no `ECDHE_ECDSA` variant exists in
+  it at all. `conformance/server/scripts/generate-server-cert.sh`
+  generated an ECDSA server certificate, which structurally can never
+  negotiate any cipher this check accepts, regardless of which
+  `CipherSuites` this binary offers — the certificate's own key type
+  was the real blocker, not the cipher list. Switched to RSA
+  (`-newkey rsa:2048`); confirmed live, both `FAPI-RW-8.5-1` and
+  `FAPI-RW-8.5-2` failures are gone entirely. This cert is shared
+  across every `conformance-as-*` profile (`../docker-compose.yml`),
+  so baseline/message-signing needed a look too — attempted live via
+  an ad-hoc REST-API driver (this repo's own `run-test-plan.py`-based
+  tooling needs a real suite checkout this session didn't have), which
+  hit a *different*, pre-existing gap of its own: those plans' browser
+  automation modules stall waiting for `unblock-implicit-callback.py`'s
+  companion nudge (documented in `../scripts/README.md`'s own
+  "CI-style run" section), which an ad-hoc driver doesn't provide —
+  unrelated to this cert change (the exact same stall reproduces
+  against the original ECDSA cert too). Treated as low-risk and left
+  for `run-all.sh`'s own next real CI run to confirm: this change is
+  TLS-layer only (Go's `crypto/tls`, no application code touched), and
+  the suite's own outbound HTTP client already trusts any certificate
+  regardless of key type (see `../docker-compose.yml`'s own header
+  comment).
+- Also newly visible, unrelated to the fixes above: `x-fapi-interaction-id
+  not found in resource endpoint response headers` (FAPI-R-6.2.1-11) —
+  this module reaches the protected resource step, further than any
+  CIBA run before it, and finds this header genuinely unimplemented
+  anywhere in `resource`/`cmd/conformance-as`. A real, separate gap;
+  not addressed here. Also: several `ensure-request-object-*` negative
+  tests now fail on `CIBA-13` ("'error' field has unexpected value") —
+  this server rejects each malformed request object correctly, just
+  not always with the exact `error` code the module's own check
+  expects; not investigated further this pass.
 
 Three consecutive module non-completions also trip the suite runner's
 own circuit breaker (`ServerUnhealthyError`) and abort the whole run —

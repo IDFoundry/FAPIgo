@@ -43,18 +43,20 @@ MTLS-bound access tokens unconditionally. Now that this module supports
 mTLS sender-constraining (RFC 8705 §3, `-mtls`), this was genuinely
 re-attempted live against `ciba-mtls.config.json` — every module now
 reaches `FINISHED` (up from an immediate suite-side config error for
-every module but discovery), with 9 PASS / 3 SKIPPED / 23 FAIL. Two
-real library gaps the attempt surfaced were fixed along the way
-(`tls_client_certificate_bound_access_tokens` metadata, and
-client-assertion `aud` acceptance being far too narrow); most of the
-remaining FAILs share one root cause — a stricter, legacy FAPI-RW §8.5
-cipher-suite requirement this binary's own (correctly BCP195-broader)
-cipher list doesn't satisfy — deliberately left open rather than
-narrowing the cipher list for one plan's sake. Full breakdown, live
-findings and reproduction steps in
+every module but discovery), with 10 PASS / 3 SKIPPED / 22 FAIL. Three
+real library/harness gaps the attempt surfaced were all fixed along
+the way: `tls_client_certificate_bound_access_tokens` metadata,
+client-assertion `aud` acceptance being far too narrow, and a stricter
+legacy FAPI-RW §8.5 TLS check that turned out to require both a
+narrower cipher list *and* an RSA (not ECDSA) server certificate — the
+conformance cert/key this binary serves TLS with is now RSA. Full
+breakdown, live findings and reproduction steps in
 [`server/oidf-config/README.md`](server/oidf-config/README.md#ciba-manual-only--not-part-of-automated-conformance).
 Still not part of `scripts/run-all.sh` given the majority-FAILED
-result.
+result — most remaining FAILs are `CIBA-13` error-code-detail
+mismatches on negative tests this server already rejects correctly,
+plus one genuinely separate gap (`x-fapi-interaction-id` unimplemented
+on the resource endpoint).
 
 `client`'s own CIBA support
 (`BeginBackchannelAuthentication`/`PollBackchannelAuthentication`) was

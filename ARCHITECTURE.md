@@ -530,17 +530,25 @@ DPoP — client *authentication* is still private_key_jwt only;
 worth a genuine live re-attempt rather than a permanent limitation:
 against `conformance/server/oidf-config/ciba-mtls.config.json`, every
 module now reaches `FINISHED` (up from an immediate suite-side config
-error for every module past discovery) — 9 PASS, 3 SKIPPED, 23 FAIL.
-The attempt surfaced and fixed two real library gaps
-(`server.Metadata` was missing `tls_client_certificate_bound_access_tokens`,
-RFC 8705 §3.3; `authenticateClient`'s client-assertion `aud`
-acceptance was far narrower than RFC 7523 §3 actually requires — see
+error for every module past discovery) — 10 PASS, 3 SKIPPED, 22 FAIL.
+The attempt surfaced and fixed three real library/harness gaps:
+`server.Metadata` was missing `tls_client_certificate_bound_access_tokens`
+(RFC 8705 §3.3); `authenticateClient`'s client-assertion `aud`
+acceptance was far narrower than RFC 7523 §3 actually requires (see
 `server/par.go`'s `acceptableClientAssertionAudiences`, not
-mTLS-specific despite being found here). Most remaining FAILs share
-one deliberately-left-open root cause — this plan's TLS check enforces
-the older, narrower FAPI-RW §8.5 cipher-suite list, stricter than the
-BCP195/RFC 7525 set `cmd/conformance-as` already offers per
-FAPI2-SP-FINAL-5.2.2's own broader citation. Full breakdown in
+mTLS-specific despite being found here); and this plan's own TLS check
+turned out to need both a narrower cipher list *and* an RSA (not
+ECDSA) server certificate — `cmd/conformance-as`'s conformance cert is
+now RSA (`conformance/server/scripts/generate-server-cert.sh`). This
+cert is shared across every profile in `docker-compose.yml`
+(baseline/message-signing included); the change is TLS-layer only
+(Go's `crypto/tls`, no application code touched, the suite's own
+outbound client already trusts any certificate regardless of key
+type) and so treated as low-risk to those already-passing plans —
+not independently re-confirmed live end-to-end here, since doing so
+needs the official `run-test-plan.py`/`unblock-implicit-callback.py`
+tooling (a real suite checkout) that an ad-hoc REST-API driver can't
+substitute for on a browser-driven flow. Full breakdown in
 `conformance/server/oidf-config/README.md`'s own CIBA section, which
 also covers the DPoP-only config's manual (non-automated) setup.
 

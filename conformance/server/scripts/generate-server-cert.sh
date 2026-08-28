@@ -13,14 +13,26 @@
 # across the setups documented in that README (docker-compose service
 # names, plus localhost/host.docker.internal for running conformance-as
 # directly on the host).
+#
+# RSA, not ECDSA: confirmed live against fapi-ciba-id1-test-plan's own
+# FAPI-RW-8.5-1 cipher check (net.openid.conformance.condition.common
+# .DisallowInsecureCipher, useBCP195Ciphers=false) — its permitted set
+# (net.openid.conformance.util.FAPITLSClient.FAPI_TLS_1_2_CIPHERS) is
+# RSA-keyed suites only (DHE_RSA/ECDHE_RSA AES-GCM), no ECDHE_ECDSA
+# variant at all, so an ECDSA server certificate fails this specific
+# check no matter which cipher list cmd/conformance-as itself offers —
+# it can never negotiate anything that check accepts. This binary's own
+# fapiRWTLS12CipherSuites (cmd/conformance-as/main.go) already includes
+# the two ECDHE_RSA suites this list wants; only the certificate's own
+# key type was the blocker.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 mkdir -p certs
 
-openssl req -x509 -nodes -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
+openssl req -x509 -nodes -newkey rsa:2048 \
   -keyout certs/server.key -out certs/server.crt -days 3650 \
   -subj "/CN=conformance-as" \
-  -addext "subjectAltName=DNS:conformance-as-baseline,DNS:conformance-as-message-signing,DNS:localhost,DNS:host.docker.internal,IP:127.0.0.1"
+  -addext "subjectAltName=DNS:conformance-as-baseline,DNS:conformance-as-message-signing,DNS:conformance-as-ciba,DNS:conformance-as-ciba-mtls,DNS:localhost,DNS:host.docker.internal,IP:127.0.0.1"
 
 # openssl's default 0600 on the key is only readable by the host user
 # that ran this script — but the container reads it as the distroless

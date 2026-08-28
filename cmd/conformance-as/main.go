@@ -100,15 +100,9 @@ func main() {
 		log.Fatal("conformance-as: -insecure-http requires a loopback listen_addr (e.g. 127.0.0.1:8443)")
 	}
 	if *mtls {
-		if *insecureHTTP {
-			log.Fatal("conformance-as: -mtls cannot be combined with -insecure-http (a client certificate requires a real TLS connection)")
-		}
-		if resolved.MTLSListenAddr == "" {
-			log.Fatal("conformance-as: -mtls requires mtls_listen_addr in the config file, or -mtls-listen")
-		}
-		resolved.MTLSEndpoints, err = buildMTLSEndpoints(resolved.Issuer, resolved.MTLSListenAddr, *ciba)
+		resolved.MTLSEndpoints, err = resolveMTLSEndpoints(*insecureHTTP, resolved, *ciba)
 		if err != nil {
-			log.Fatalf("conformance-as: mtls: %v", err)
+			log.Fatalf("conformance-as: %v", err)
 		}
 	}
 
@@ -125,26 +119,9 @@ func main() {
 	}
 
 	if *mtls {
-		mtlsCert, err := tls.LoadX509KeyPair(resolved.TLSCertFile, resolved.TLSKeyFile)
+		mtlsServer, err := newMTLSServer(resolved, mux)
 		if err != nil {
-			log.Fatalf("conformance-as: mtls: load cert: %v", err)
-		}
-		mtlsServer := &http.Server{
-			Addr:    resolved.MTLSListenAddr,
-			Handler: mux,
-			TLSConfig: &tls.Config{
-				MinVersion:   tls.VersionTLS12,
-				CipherSuites: bcp195TLS12CipherSuites,
-				Certificates: []tls.Certificate{mtlsCert},
-				// Requested, not required: this listener still serves
-				// non-mTLS clients too (same mux, same server.Server) —
-				// only a client actually registered
-				// storage.SenderConstrainMTLS is rejected for presenting
-				// none, and that check happens inside server/resource,
-				// not here.
-				ClientAuth: tls.RequestClientCert,
-			},
-			ReadHeaderTimeout: readHeaderTimeout,
+			log.Fatalf("conformance-as: mtls: %v", err)
 		}
 		go func() {
 			log.Printf("conformance-as: mtls listener on %s", resolved.MTLSListenAddr)
@@ -163,6 +140,48 @@ func main() {
 	if err != nil && err != http.ErrServerClosed {
 		log.Fatalf("conformance-as: %v", err)
 	}
+}
+
+// resolveMTLSEndpoints validates the -mtls/-insecure-http/mtls_listen_addr
+// combination and, if valid, derives the mtls_endpoint_aliases this
+// run should advertise — split out from main so this validation is
+// testable without invoking main itself (which calls log.Fatal/blocks
+// on a real listener).
+func resolveMTLSEndpoints(insecureHTTP bool, resolved ResolvedConfig, ciba bool) (server.MTLSEndpoints, error) {
+	if insecureHTTP {
+		return server.MTLSEndpoints{}, fmt.Errorf("-mtls cannot be combined with -insecure-http (a client certificate requires a real TLS connection)")
+	}
+	if resolved.MTLSListenAddr == "" {
+		return server.MTLSEndpoints{}, fmt.Errorf("-mtls requires mtls_listen_addr in the config file, or -mtls-listen")
+	}
+	return buildMTLSEndpoints(resolved.Issuer, resolved.MTLSListenAddr, ciba)
+}
+
+// newMTLSServer builds the -mtls listener's *http.Server — same mux as
+// the primary listener, same BCP195 cipher list, but requesting
+// (RequestClientCert, not RequireAndVerifyClientCert) a client
+// certificate: this listener still serves non-mTLS clients too (same
+// mux, same server.Server) — only a client actually registered
+// storage.SenderConstrainMTLS is rejected for presenting none, and
+// that check happens inside server/resource, not here. Split out from
+// main so the TLS/cert-loading wiring is testable without actually
+// serving.
+func newMTLSServer(resolved ResolvedConfig, mux http.Handler) (*http.Server, error) {
+	mtlsCert, err := tls.LoadX509KeyPair(resolved.TLSCertFile, resolved.TLSKeyFile)
+	if err != nil {
+		return nil, fmt.Errorf("load cert: %w", err)
+	}
+	return &http.Server{
+		Addr:    resolved.MTLSListenAddr,
+		Handler: mux,
+		TLSConfig: &tls.Config{
+			MinVersion:   tls.VersionTLS12,
+			CipherSuites: bcp195TLS12CipherSuites,
+			Certificates: []tls.Certificate{mtlsCert},
+			ClientAuth:   tls.RequestClientCert,
+		},
+		ReadHeaderTimeout: readHeaderTimeout,
+	}, nil
 }
 
 // buildMTLSEndpoints derives the RFC 8705 §5 mtls_endpoint_aliases URLs

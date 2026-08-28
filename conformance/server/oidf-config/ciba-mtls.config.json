@@ -6,20 +6,19 @@
         "accounts",
         "offline_access"
       ],
-      "backchannel_authentication_request_algorithm": "ES256",
-      "client_assertion_algorithm": "ES256",
+      "backchannel_authentication_request_algorithm": "PS256",
+      "client_assertion_algorithm": "PS256",
       "id": "gofapi-conformance-ciba-mtls-client-1",
       "sender_constrain": "mtls",
       "jwks": {
         "keys": [
           {
-            "kty": "EC",
-            "alg": "ES256",
+            "kty": "RSA",
+            "alg": "PS256",
             "use": "sig",
-            "kid": "gofapi-conformance-ciba-mtls-client1-key1",
-            "crv": "P-256",
-            "x": "_LDKqzSgRpR6jz9v7jaNHFuFCnJONPvTB1JLq4p6nGY",
-            "y": "QiezTqe-sGhXJM56qbUs7iCYOIqP_M1XKAlsogI4zUE"
+            "kid": "gofapi-conformance-ciba-mtls-client1-rsa-key1",
+            "n": "3NQFMf6NPnlp-_mjOT-BN4jpWKEYc9Ux5bT8BVlRf4ELgWMaBZuRpTo3EfQ77AZ5CSJeM3xxvKH5v_mSsWXFLtor1FUN69zLIRzdXrA9CcxHDHD-NtpNAGMBH0KD57Vf3R4ehZagLmoH3aMWUi92amhiJcH_W1XCX1u1TIiurwp99ENHnGS3P7prf7xrc6mUX2PKpT8Re-9e0XhELADUvg1LhYZoNUkrv52aPhJ2cn5yvrxn-0j3W_CBZn4iiQf29IXcxfx1RM0ot0QpW6MkP81a72l6rI-3LL7uI08ACHDQqxSkW72_sdmzK4VRLwkQi18gr4K8Wu6bE0B09GN3MQ",
+            "e": "AQAB"
           }
         ]
       },

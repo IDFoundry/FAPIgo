@@ -300,16 +300,16 @@ one **per client** — confirmed by disassembling
 since neither is documented in any bundled sample config) for the
 suite's own outbound TLS client to present.
 
-**Result of a live run: 31 PASS, 3 SKIPPED, 1 FAIL** (up from an
-immediate suite-side config error for every module past discovery).
-The one remaining FAIL isn't a defect: `fapi-ciba-id1-ensure-authorization-request-with-potentially-bad-binding-message`
+**Result of a live run: 33 PASS, 1 FAIL** (up from an immediate
+suite-side config error for every module past discovery). The one
+remaining FAIL isn't a defect: `fapi-ciba-id1-ensure-authorization-request-with-potentially-bad-binding-message`
 fails on `CIBA-7.1` with "Automated approval url has been provided in
 the configuration json. It is assumed this is an automated run and the
 display of the binding message cannot be verified" — the module itself
 declining to grade a check that's inherently about what a human saw on
 a real device, something `automated_ciba_approval_url` (see below)
 structurally can't produce evidence of either way. Getting this far
-surfaced five real, since-fixed library/harness gaps:
+surfaced six real, since-fixed library/harness gaps:
 
 - **Fixed: `tls_client_certificate_bound_access_tokens` (RFC 8705
   §3.3) was entirely missing from `server.Metadata`.** The suite's
@@ -402,6 +402,23 @@ surfaced five real, since-fixed library/harness gaps:
   `requestobject.VerifyPolicy.RequireIssuedAt`, mirroring
   `RequireNotBefore`/`RequireJTI`'s own established pattern, set `true`
   only for CIBA's own request object (PAR's stays `false`, unaffected).
+- **Fixed: the 3 `...-signature-algorithm-is-RS256-fails` modules
+  self-skipped rather than ran.** Not a code gap — a plan-config one.
+  Disassembling `FAPICIBAID1EnsureRequestObjectSignatureAlgorithmIsRS256Fails.onConfigure`
+  (and its two client-assertion counterparts, both identical) shows
+  each checks `JWKUtil.getAlgFromClientJwks(env)` — the plan's own
+  first registered client's key `alg` — equals `"PS256"`; if not, it
+  fires `fireTestSkipped` outright rather than running at all. It
+  isn't asking for a *separate* RSA client: `performAuthorizationRequest`
+  copies that same client's JWK, flips its `alg` to `"RS256"` via
+  `ChangeClientJwksAlgToRS256`, signs the one probe with it, then
+  restores the original for the rest of the flow. `ciba-mtls.config.json`/`ciba-mtls-plan.json`
+  originally registered client 1 with an ES256/EC key (mirroring
+  `ciba.config.json`'s own DPoP client) — switched to a PS256/RSA
+  keypair instead (PS256 was already an allowed algorithm here; no
+  code change). Confirmed live: all three modules flip from SKIPPED to
+  PASSED, with zero regressions across the other 31 — final tally 33
+  PASS, 1 FAIL.
 
 Three consecutive module non-completions also trip the suite runner's
 own circuit breaker (`ServerUnhealthyError`) and abort the whole run —
@@ -410,7 +427,7 @@ silently truncate the rest of the plan rather than reporting a normal
 per-module FAIL.
 
 Neither CIBA config is wired into `../scripts/run-all.sh` yet. Now that
-`ciba-mtls.config.json` genuinely passes (31/3/1, the one FAIL being
+`ciba-mtls.config.json` genuinely passes (33/1, the one FAIL being
 the structural automation limitation above, not a defect), wiring it
 into the automated gate — an `expected-skips`/`expected-warnings`
 entry for that one module, a CI cert-generation step, a

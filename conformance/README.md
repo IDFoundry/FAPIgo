@@ -41,20 +41,22 @@ poll mode only) is verified by unit/integration tests, not the live
 OIDF suite as its primary gate: `fapi-ciba-id1-test-plan` requires
 MTLS-bound access tokens unconditionally. Now that this module supports
 mTLS sender-constraining (RFC 8705 §3, `-mtls`), this was genuinely
-re-attempted live against `ciba-mtls.config.json` — **31 PASS / 3
-SKIPPED / 1 FAIL**, up from an immediate suite-side config error for
-every module past discovery. The one remaining FAIL isn't a defect —
-the module itself declines to grade a check that's inherently about
-what a human saw on a real device, something automated CIBA approval
-can't produce evidence of either way. Five real library/harness gaps
-the attempt surfaced were all fixed along the way:
+re-attempted live against `ciba-mtls.config.json` — **33 PASS / 1
+FAIL**, up from an immediate suite-side config error for every module
+past discovery. The one remaining FAIL isn't a defect — the module
+itself declines to grade a check that's inherently about what a human
+saw on a real device, something automated CIBA approval can't produce
+evidence of either way. Six real library/harness gaps the attempt
+surfaced were all fixed along the way:
 `tls_client_certificate_bound_access_tokens` metadata, client-assertion
 `aud` acceptance being far too narrow, a stricter legacy FAPI-RW §8.5
 TLS check that needed both a narrower cipher list *and* an RSA (not
 ECDSA) server certificate, a CIBA-specific error code that had
-incorrectly borrowed PAR's `invalid_request_object` convention, and a
-missing `iat` requirement on CIBA's own request object. Full breakdown,
-live findings and reproduction steps in
+incorrectly borrowed PAR's `invalid_request_object` convention, a
+missing `iat` requirement on CIBA's own request object, and 3 modules
+that self-skip without an RSA/PS256-registered client (switching the
+plan's own client 1 from ES256 turned all three from SKIPPED to
+PASSED). Full breakdown, live findings and reproduction steps in
 [`server/oidf-config/README.md`](server/oidf-config/README.md#ciba-manual-only--not-part-of-automated-conformance).
 Not yet wired into `scripts/run-all.sh`, though at this pass rate it's
 now a real, worthwhile candidate.

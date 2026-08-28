@@ -528,12 +528,20 @@ DPoP — client *authentication* is still private_key_jwt only;
 `tls_client_auth`/dynamic client registration remain out of scope (see
 `cmd/conformance-as`'s own doc comment). This made the CIBA wall above
 worth a genuine live re-attempt rather than a permanent limitation:
-against `conformance/server/oidf-config/ciba-mtls.config.json`: **31
-PASS, 3 SKIPPED, 1 FAIL.** The one remaining FAIL isn't a defect — the
-module itself declines to grade a check that's inherently about what a
-human saw on a real device, something `automated_ciba_approval_url`
-structurally can't produce evidence of either way. Getting here fixed
-five real library/harness gaps: `server.Metadata` was missing
+against `conformance/server/oidf-config/ciba-mtls.config.json`: **33
+PASS, 1 FAIL.** The one remaining FAIL isn't a defect — the module
+itself declines to grade a check that's inherently about what a human
+saw on a real device, something `automated_ciba_approval_url`
+structurally can't produce evidence of either way. (The 3 modules
+requiring an RS256-signed probe — `...-signature-algorithm-is-RS256-fails`
+and its two client-assertion counterparts — self-skip unless the
+plan's own client is registered with an RSA/PS256 key, since the
+suite reuses that same registered key, just forcing its JWS header to
+RS256, rather than provisioning a separate one; switching client 1
+from ES256 to PS256/RSA — already an allowed algorithm here — turned
+all three from SKIPPED to PASSED with zero regressions elsewhere.)
+Getting here fixed five real library/harness gaps: `server.Metadata`
+was missing
 `tls_client_certificate_bound_access_tokens` (RFC 8705 §3.3);
 `authenticateClient`'s client-assertion `aud` acceptance was far
 narrower than RFC 7523 §3 actually requires (see `server/par.go`'s

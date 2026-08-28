@@ -19,7 +19,7 @@ import (
 // Factored out so the end-to-end smoke test can stand up the exact same
 // wiring main.go uses, against its own TLS listener, without going
 // through flags or a config file on disk.
-func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChallenge bool) (*http.ServeMux, error) {
+func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChallenge bool, userinfoSigning bool) (*http.ServeMux, error) {
 	endpoints, err := buildEndpoints(resolved.Issuer, allowLoopbackHTTP)
 	if err != nil {
 		return nil, err
@@ -41,6 +41,9 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 	if resolved.Profile == server.ProfileFAPISecurityWithMessageSigning {
 		purposes[keys.JARMSigning] = resolved.Algorithms.JARM
 	}
+	if userinfoSigning {
+		purposes[keys.UserInfoSigning] = resolved.Algorithms.IDToken
+	}
 	keyManager, err := ephemeral.NewKeyManager(purposes)
 	if err != nil {
 		return nil, err
@@ -60,11 +63,21 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 		return nil, err
 	}
 
+	algorithms := resolved.Algorithms
+	// Off by default (main.go's -userinfo-signing flag): the FAPI 2.0
+	// Security Profile doesn't require signed UserInfo responses, so
+	// this stays a worked-example opt-in rather than part of
+	// RecommendedAlgorithms — reuses the same algorithm as ID tokens,
+	// the same "one official value, no override" precedent as
+	// AccessTokenSigning above.
+	if userinfoSigning {
+		algorithms.UserInfo = resolved.Algorithms.IDToken
+	}
 	srvCfg := server.Config{
 		Issuer:     resolved.Issuer,
 		Endpoints:  endpoints,
 		Profile:    resolved.Profile,
-		Algorithms: resolved.Algorithms,
+		Algorithms: algorithms,
 		Limits:     resolved.Limits,
 		// These storage implementations are honestly non-durable
 		// in-memory maps. AssuranceProduction would make server.New
@@ -183,5 +196,5 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 
 	consent := newConsentHandler(srv, clientRepo, server.SystemClock{}, resolved.DefaultSubject)
 	userinfoURLValue := userinfoURL.URL()
-	return newRouter(srv, consent, resolved.AdvertisedScopes, resourceVerifier, &userinfoURLValue, identityClaims), nil
+	return newRouter(srv, consent, resolved.AdvertisedScopes, resourceVerifier, &userinfoURLValue, identityClaims, clientRepo, userinfoSigning), nil
 }

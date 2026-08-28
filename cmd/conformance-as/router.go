@@ -6,6 +6,7 @@ import (
 
 	fapires "github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/server"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // newRouter wires every endpoint server.Server exposes onto a plain
@@ -21,7 +22,7 @@ import (
 // POST, and an OIDF suite plan config's resource.resourceMethod is a
 // free-form per-run choice for the generic-resource role this endpoint
 // also plays — nothing here depends on which method the suite picks.
-func newRouter(srv *server.Server, consent *consentHandler, advertisedScopes []string, resourceVerifier *fapires.Verifier, userinfoURL *url.URL, identityClaims staticIdentityClaims) *http.ServeMux {
+func newRouter(srv *server.Server, consent *consentHandler, advertisedScopes []string, resourceVerifier *fapires.Verifier, userinfoURL *url.URL, identityClaims staticIdentityClaims, clients storage.ClientRepository, userinfoSigning bool) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /.well-known/openid-configuration", metadataHandler(srv, advertisedScopes, userinfoURL))
 	mux.HandleFunc("GET /jwks", jwksHandler(srv))
@@ -29,6 +30,6 @@ func newRouter(srv *server.Server, consent *consentHandler, advertisedScopes []s
 	mux.HandleFunc("GET /authorize", consent.handleBegin)
 	mux.HandleFunc("POST /authorize/decision", consent.handleDecision)
 	mux.HandleFunc("POST /token", tokenHandler(srv))
-	mux.HandleFunc("/userinfo", userinfoHandler(resourceVerifier, userinfoURL, identityClaims))
+	mux.HandleFunc("/userinfo", userinfoHandler(srv, resourceVerifier, userinfoURL, identityClaims, clients, userinfoSigning))
 	return mux
 }

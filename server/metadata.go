@@ -52,6 +52,19 @@ type Metadata struct {
 	IDTokenEncryptionAlgValuesSupported []string `json:"id_token_encryption_alg_values_supported,omitempty"`
 	IDTokenEncryptionEncValuesSupported []string `json:"id_token_encryption_enc_values_supported,omitempty"`
 
+	// UserinfoSigningAlgValuesSupported/UserinfoEncryptionAlgValuesSupported/
+	// UserinfoEncryptionEncValuesSupported mirror the ID-token triple
+	// above, for the UserInfo response instead (OIDC Discovery 1.0 §3).
+	// Set only when the corresponding Config.Algorithms.UserInfo* field
+	// is configured — most servers never sign or encrypt UserInfo
+	// responses, and OIDC Discovery leaves all three optional/absent in
+	// that case. Unlike the URL of the UserInfo endpoint itself, these
+	// are this server's own algorithm capabilities, so Metadata does
+	// carry them even though it doesn't implement the endpoint.
+	UserinfoSigningAlgValuesSupported    []string `json:"userinfo_signing_alg_values_supported,omitempty"`
+	UserinfoEncryptionAlgValuesSupported []string `json:"userinfo_encryption_alg_values_supported,omitempty"`
+	UserinfoEncryptionEncValuesSupported []string `json:"userinfo_encryption_enc_values_supported,omitempty"`
+
 	// RequirePushedAuthorizationRequests is always true: BeginAuthorization
 	// only ever accepts a request_uri, never raw authorization parameters.
 	RequirePushedAuthorizationRequests bool `json:"require_pushed_authorization_requests,omitempty"`
@@ -104,6 +117,15 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 	}
 	if len(s.cfg.Algorithms.IDTokenEncryptionContentEncryption) > 0 {
 		md.IDTokenEncryptionEncValuesSupported = algorithmSetStrings(s.cfg.Algorithms.IDTokenEncryptionContentEncryption)
+	}
+	if s.cfg.Algorithms.UserInfo != 0 {
+		md.UserinfoSigningAlgValuesSupported = []string{s.cfg.Algorithms.UserInfo.String()}
+	}
+	if len(s.cfg.Algorithms.UserInfoEncryptionKeyManagement) > 0 {
+		md.UserinfoEncryptionAlgValuesSupported = algorithmSetStrings(s.cfg.Algorithms.UserInfoEncryptionKeyManagement)
+	}
+	if len(s.cfg.Algorithms.UserInfoEncryptionContentEncryption) > 0 {
+		md.UserinfoEncryptionEncValuesSupported = algorithmSetStrings(s.cfg.Algorithms.UserInfoEncryptionContentEncryption)
 	}
 
 	return md

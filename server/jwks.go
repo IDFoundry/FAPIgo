@@ -34,14 +34,15 @@ func (j JWTAccessTokens) accessTokenSigningKeyUse() keys.SigningKeyUse {
 
 // PublicJWKS returns this server's current public keys: the union,
 // deduplicated by kid, of whatever key manager(s) are active for every
-// signing purpose Config/Dependencies declares in use — ID token and
-// (under ProfileFAPISecurityWithMessageSigning) JARM from
+// signing purpose Config/Dependencies declares in use — ID token,
+// (under ProfileFAPISecurityWithMessageSigning) JARM, and (when
+// Config.Algorithms.UserInfo is set) UserInfo signing, all from
 // Dependencies.Keys, plus an access-token signing key from
 // Dependencies.AccessTokens if it has one to publish (see
 // accessTokenKeyPublisher). Publishing the result at
-// Config.Endpoints.JWKS is what lets clients verify a JARM response or
-// ID token, and what lets a JWT-verifying resource server verify an
-// access token.
+// Config.Endpoints.JWKS is what lets clients verify a JARM response,
+// ID token or signed UserInfo response, and what lets a JWT-verifying
+// resource server verify an access token.
 //
 // A manager implementing keys.RotatingKeyManager can publish more than
 // one key for a purpose — normally still one, but two during a
@@ -56,6 +57,9 @@ func (s *Server) PublicJWKS(ctx context.Context) (PublicKeySet, error) {
 	}
 	if s.cfg.Profile == ProfileFAPISecurityWithMessageSigning {
 		active = append(active, keys.SigningKeyUse{Manager: s.deps.Keys, Purpose: keys.JARMSigning, Algorithm: s.cfg.Algorithms.JARM})
+	}
+	if s.cfg.Algorithms.UserInfo != 0 {
+		active = append(active, keys.SigningKeyUse{Manager: s.deps.Keys, Purpose: keys.UserInfoSigning, Algorithm: s.cfg.Algorithms.UserInfo})
 	}
 	if publisher, ok := s.deps.AccessTokens.(accessTokenKeyPublisher); ok {
 		active = append(active, publisher.accessTokenSigningKeyUse())

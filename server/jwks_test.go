@@ -193,6 +193,125 @@ func TestPublicJWKSReturnsDistinctKeysPerPurpose(t *testing.T) {
 	}
 }
 
+// TestPublicJWKSIncludesUserInfoSigningKeyWhenConfigured confirms
+// PublicJWKS resolves and publishes a UserInfoSigning key once
+// Config.Algorithms.UserInfo is set — using multiKeyManager (distinct
+// kid per purpose) so a missing/wrong-purpose lookup would show up as a
+// missing kid, not silently dedupe away.
+func TestPublicJWKSIncludesUserInfoSigningKeyWhenConfigured(t *testing.T) {
+	km := &multiKeyManager{byPurpose: map[keys.SigningPurpose]*fakeKeyManager{
+		keys.AccessTokenSigning: {key: generateKey(t), keyID: "access-key"},
+		keys.IDTokenSigning:     {key: generateKey(t), keyID: "id-key"},
+		keys.UserInfoSigning:    {key: generateKey(t), keyID: "userinfo-key"},
+	}}
+	srv := newServerWithKeyManagerAndUserInfo(t, server.ProfileFAPISecurity, km, fapi.ES256)
+
+	set, err := srv.PublicJWKS(context.Background())
+	if err != nil {
+		t.Fatalf("PublicJWKS: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, k := range set.Keys {
+		seen[k.KeyID()] = true
+	}
+	if !seen["userinfo-key"] {
+		t.Fatalf("Keys missing kid %q; got %v", "userinfo-key", seen)
+	}
+	if !seen["id-key"] {
+		t.Fatalf("Keys missing kid %q; got %v", "id-key", seen)
+	}
+}
+
+// TestPublicJWKSOmitsUserInfoSigningKeyWhenNotConfigured is the negative
+// counterpart of TestPublicJWKSIncludesUserInfoSigningKeyWhenConfigured:
+// with Algorithms.UserInfo left zero, PublicJWKS must never resolve (or
+// publish) a UserInfoSigning key at all.
+func TestPublicJWKSOmitsUserInfoSigningKeyWhenNotConfigured(t *testing.T) {
+	km := &multiKeyManager{byPurpose: map[keys.SigningPurpose]*fakeKeyManager{
+		keys.AccessTokenSigning: {key: generateKey(t), keyID: "access-key"},
+		keys.IDTokenSigning:     {key: generateKey(t), keyID: "id-key"},
+	}}
+	srv := newServerWithKeyManagerAndUserInfo(t, server.ProfileFAPISecurity, km, 0)
+
+	set, err := srv.PublicJWKS(context.Background())
+	if err != nil {
+		t.Fatalf("PublicJWKS: %v", err)
+	}
+	for _, k := range set.Keys {
+		if k.KeyID() == "userinfo-key" {
+			t.Fatalf("PublicJWKS published a userinfo-key with UserInfo signing unconfigured")
+		}
+	}
+}
+
+// newServerWithKeyManagerAndUserInfo mirrors newServerWithKeyManager but
+// additionally sets Algorithms.UserInfo, for tests that need
+// PublicJWKS's UserInfoSigning branch active.
+func newServerWithKeyManagerAndUserInfo(t *testing.T, profile server.Profile, km keys.KeyManager, userInfo fapi.SignatureAlgorithm) *server.Server {
+	t.Helper()
+	clientKey := generateKey(t)
+	client, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
+		ID:                       testClientID,
+		RedirectURIs:             []fapi.RegisteredRedirectURI{testRedirectURI},
+		ClientAssertionAlgorithm: fapi.ES256,
+		RequestObjectAlgorithm:   fapi.ES256,
+		AllowedScopes:            []string{"openid", "accounts", "offline_access"},
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+	issuer, err := fapi.ParseIssuerURL(testIssuer)
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+
+	cfg := server.Config{
+		Issuer:    issuer,
+		Endpoints: testEndpoints(t),
+		Profile:   profile,
+		Algorithms: server.AlgorithmPolicy{
+			ClientAssertion: server.AlgorithmSet{fapi.ES256},
+			RequestObject:   server.AlgorithmSet{fapi.ES256},
+			JARM:            fapi.ES256,
+			IDToken:         fapi.ES256,
+			UserInfo:        userInfo,
+		},
+		Limits: server.Limits{
+			PushedRequestLifetime:      90 * time.Second,
+			MaxClientAssertionLifetime: time.Minute,
+			MaxRequestObjectLifetime:   time.Minute,
+			InteractionLifetime:        5 * time.Minute,
+			AuthorizationCodeLifetime:  time.Minute,
+			JARMResponseLifetime:       time.Minute,
+			AccessTokenLifetime:        5 * time.Minute,
+			IDTokenLifetime:            5 * time.Minute,
+			RefreshTokenLifetime:       5 * time.Minute,
+			MaxDPoPProofAge:            time.Minute,
+			MaxClockSkew:               5 * time.Second,
+		},
+		Assurance: server.AssuranceDevelopment,
+	}
+	deps := server.Dependencies{
+		Clients:      &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
+		Transactions: &fakeTransactionStore{},
+		Grants:       &fakeGrantStore{},
+		Replay:       &fakeReplayStore{},
+		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
+			testClientID: {{Algorithm: fapi.ES256, PublicKey: &clientKey.PublicKey}},
+		}},
+		Keys:         km,
+		AccessTokens: server.JWTAccessTokens{Keys: km, Algorithm: fapi.ES256},
+		Revocation:   server.NoRevocation{},
+		Clock:        fixedClock{now: time.Now()},
+		Random:       rand.Reader,
+	}
+	srv, err := server.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+	return srv
+}
+
 func TestPublicJWKSRejectsEmptyKeyID(t *testing.T) {
 	srv := newServerWithKeyManager(t, server.ProfileFAPISecurity, &fakeKeyManager{key: generateKey(t), keyID: ""})
 

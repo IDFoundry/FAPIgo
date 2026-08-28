@@ -120,10 +120,17 @@ type smokeHarness struct {
 }
 
 func newSmokeHarness(t *testing.T, format AccessTokenFormat) *smokeHarness {
-	return newSmokeHarnessWithNonceChallenge(t, format, false)
+	return newSmokeHarnessWithOptions(t, format, false, false)
 }
 
+// newSmokeHarnessWithNonceChallenge is newSmokeHarnessWithOptions with
+// userinfoSigning left off, for the (much more common) nonce-challenge-only
+// callers below.
 func newSmokeHarnessWithNonceChallenge(t *testing.T, format AccessTokenFormat, dpopNonceChallenge bool) *smokeHarness {
+	return newSmokeHarnessWithOptions(t, format, dpopNonceChallenge, false)
+}
+
+func newSmokeHarnessWithOptions(t *testing.T, format AccessTokenFormat, dpopNonceChallenge bool, userinfoSigning bool) *smokeHarness {
 	t.Helper()
 
 	cert, pool := selfSignedCert(t)
@@ -170,6 +177,15 @@ func newSmokeHarnessWithNonceChallenge(t *testing.T, format AccessTokenFormat, d
 	}
 	inlineJWKS := json.RawMessage(fmt.Sprintf(`{"keys":[%s]}`, jwkJSON))
 
+	// clientUserInfoAlg mirrors wiring.go's own reuse of Algorithms.IDToken
+	// for UserInfo signing when -userinfo-signing is on — zero (unset)
+	// otherwise, matching client.Algorithms.UserInfo's own "required to
+	// call FetchUserInfo" contract.
+	var clientUserInfoAlg fapi.SignatureAlgorithm
+	if userinfoSigning {
+		clientUserInfoAlg = fapi.ES256
+	}
+
 	const testClientID = fapi.ClientID("smoke-test-client")
 	const testRedirectURI = "https://rp.smoketest.internal/callback"
 
@@ -196,7 +212,7 @@ func newSmokeHarnessWithNonceChallenge(t *testing.T, format AccessTokenFormat, d
 		AdvertisedScopes:  []string{"openid", "accounts", "offline_access"},
 	}
 
-	mux, err := newServerMux(resolved, false, dpopNonceChallenge)
+	mux, err := newServerMux(resolved, false, dpopNonceChallenge, userinfoSigning)
 	if err != nil {
 		t.Fatalf("build server mux: %v", err)
 	}
@@ -241,6 +257,7 @@ func newSmokeHarnessWithNonceChallenge(t *testing.T, format AccessTokenFormat, d
 			ClientAuthentication: fapi.ES256,
 			DPoP:                 fapi.ES256,
 			IDToken:              fapi.ES256,
+			UserInfo:             clientUserInfoAlg,
 		},
 		Limits: client.Limits{
 			ClientAssertionLifetime: time.Minute,
@@ -444,6 +461,38 @@ func TestSmokeUserInfoWithDPoPNonceChallenge(t *testing.T) {
 	// itself, which this client doesn't do.)
 	if _, err := h.client.FetchUserInfo(ctx, success.Tokens); err != nil {
 		t.Fatalf("FetchUserInfo (second call): %v", err)
+	}
+}
+
+// TestSmokeSignedUserInfo confirms this binary's -userinfo-signing
+// wiring (resource.go's userinfoHandler calling server.SignUserInfoResponse)
+// actually interoperates with client.FetchUserInfo's own JWS
+// verification (client.Algorithms.UserInfo) — the "prove both sides
+// actually interoperate" shape TestSmokeUserInfoWithDPoPNonceChallenge
+// already uses for the nonce-challenge wiring above.
+func TestSmokeSignedUserInfo(t *testing.T) {
+	h := newSmokeHarnessWithOptions(t, AccessTokenFormatJWT, false, true)
+	ctx := context.Background()
+	scope := []string{"openid", "accounts"}
+
+	handle := h.runToConsent(ctx, scope)
+	rawQuery := h.submitDecision(ctx, handle, "approve", scope)
+
+	result, err := h.client.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery})
+	if err != nil {
+		t.Fatalf("CompleteAuthorization: %v", err)
+	}
+	success, ok := result.(client.CompletionSuccess)
+	if !ok {
+		t.Fatalf("CompleteAuthorization result = %T, want client.CompletionSuccess", result)
+	}
+
+	info, err := h.client.FetchUserInfo(ctx, success.Tokens)
+	if err != nil {
+		t.Fatalf("FetchUserInfo (server signs, client must verify the JWS): %v", err)
+	}
+	if info.Subject != smokeSubject {
+		t.Fatalf("UserInfo.Subject = %q, want %q", info.Subject, smokeSubject)
 	}
 }
 

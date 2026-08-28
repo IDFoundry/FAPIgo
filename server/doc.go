@@ -5,13 +5,19 @@
 //
 // The package exposes workflow methods — PushAuthorizationRequest,
 // BeginAuthorization, CompleteAuthorization, ExchangeAuthorizationCode,
-// RefreshAccessToken, Metadata and PublicJWKS — that only ever consume
-// client-generated artefacts and validate them against server-held
-// state and policy. Metadata and PublicJWKS are the exceptions: Metadata
-// describes the server itself rather than processing a request, and is
-// derived entirely from Config with no dependency I/O; PublicJWKS
-// reports this server's own current public keys rather than validating
-// anything a caller supplied. The package must never expose the client
+// RefreshAccessToken, SignUserInfoResponse, Metadata and PublicJWKS —
+// that only ever consume client-generated artefacts and validate them
+// against server-held state and policy. Metadata and PublicJWKS are the
+// exceptions: Metadata describes the server itself rather than
+// processing a request, and is derived entirely from Config with no
+// dependency I/O; PublicJWKS reports this server's own current public
+// keys rather than validating anything a caller supplied.
+// SignUserInfoResponse is likewise not itself a protocol endpoint — it
+// gives an embedder's own UserInfo HTTP handler (this package never
+// implements one — see identity_claims.go) a ready-made signed, and
+// optionally encrypted, artifact to serve, the same relationship
+// issueIDToken already has with the token endpoint. The package must
+// never expose the client
 // package's request-building functionality, a generic
 // HandleRequest(map[string]any), or a bare ValidateJWT(token string) —
 // and must not import client. The two roles are independently usable

@@ -21,6 +21,13 @@ const (
 	// IDTokenEncryption resolves a key to encrypt an ID token to the
 	// client (OIDC Core §2).
 	IDTokenEncryption
+
+	// UserInfoEncryption resolves a key to encrypt a UserInfo response to
+	// the client (OIDC Core §5.3.2). Independent of IDTokenEncryption: a
+	// client's userinfo_encrypted_response_alg/enc registration is
+	// separate from its id_token_encrypted_response_alg/enc one, and a
+	// client may register for one without the other.
+	UserInfoEncryption
 )
 
 // ClientEncryptionKeyRequest describes which of a client's encryption

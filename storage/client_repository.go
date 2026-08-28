@@ -20,6 +20,9 @@ type RegisteredClient struct {
 
 	idTokenEncryptionKeyManagement     fapi.KeyManagementAlgorithm
 	idTokenEncryptionContentEncryption fapi.ContentEncryptionAlgorithm
+
+	userInfoEncryptionKeyManagement     fapi.KeyManagementAlgorithm
+	userInfoEncryptionContentEncryption fapi.ContentEncryptionAlgorithm
 }
 
 // RegisteredClientConfig is the input to NewRegisteredClient.
@@ -50,6 +53,16 @@ type RegisteredClientConfig struct {
 	// against server-wide policy elsewhere.
 	IDTokenEncryptionKeyManagement     fapi.KeyManagementAlgorithm
 	IDTokenEncryptionContentEncryption fapi.ContentEncryptionAlgorithm
+
+	// UserInfoEncryptionKeyManagement/UserInfoEncryptionContentEncryption
+	// mirror IDTokenEncryptionKeyManagement/ContentEncryption exactly,
+	// but for this client's own, independent
+	// userinfo_encrypted_response_alg/enc registration (OIDC Core
+	// §5.3.2) — a client may register for one without the other. Leave
+	// both zero if the client did not register for encrypted UserInfo
+	// responses.
+	UserInfoEncryptionKeyManagement     fapi.KeyManagementAlgorithm
+	UserInfoEncryptionContentEncryption fapi.ContentEncryptionAlgorithm
 
 	AllowedScopes []string
 }
@@ -82,6 +95,19 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 			return RegisteredClient{}, fmt.Errorf("storage: client %q has an invalid ID token encryption content encryption algorithm", cfg.ID)
 		}
 	}
+	userInfoEncKeyMgmtSet := cfg.UserInfoEncryptionKeyManagement != 0
+	userInfoEncContentEncSet := cfg.UserInfoEncryptionContentEncryption != 0
+	if userInfoEncKeyMgmtSet != userInfoEncContentEncSet {
+		return RegisteredClient{}, fmt.Errorf("storage: client %q must set both UserInfoEncryptionKeyManagement and UserInfoEncryptionContentEncryption, or neither", cfg.ID)
+	}
+	if userInfoEncKeyMgmtSet {
+		if !cfg.UserInfoEncryptionKeyManagement.IsValid() {
+			return RegisteredClient{}, fmt.Errorf("storage: client %q has an invalid UserInfo encryption key management algorithm", cfg.ID)
+		}
+		if !cfg.UserInfoEncryptionContentEncryption.IsValid() {
+			return RegisteredClient{}, fmt.Errorf("storage: client %q has an invalid UserInfo encryption content encryption algorithm", cfg.ID)
+		}
+	}
 
 	scopes := make(map[string]struct{}, len(cfg.AllowedScopes))
 	for _, s := range cfg.AllowedScopes {
@@ -95,13 +121,15 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 	copy(redirectURIs, cfg.RedirectURIs)
 
 	return RegisteredClient{
-		id:                                 cfg.ID,
-		redirectURIs:                       redirectURIs,
-		clientAssertionAlgorithm:           cfg.ClientAssertionAlgorithm,
-		requestObjectAlgorithm:             cfg.RequestObjectAlgorithm,
-		allowedScopes:                      scopes,
-		idTokenEncryptionKeyManagement:     cfg.IDTokenEncryptionKeyManagement,
-		idTokenEncryptionContentEncryption: cfg.IDTokenEncryptionContentEncryption,
+		id:                                  cfg.ID,
+		redirectURIs:                        redirectURIs,
+		clientAssertionAlgorithm:            cfg.ClientAssertionAlgorithm,
+		requestObjectAlgorithm:              cfg.RequestObjectAlgorithm,
+		allowedScopes:                       scopes,
+		idTokenEncryptionKeyManagement:      cfg.IDTokenEncryptionKeyManagement,
+		idTokenEncryptionContentEncryption:  cfg.IDTokenEncryptionContentEncryption,
+		userInfoEncryptionKeyManagement:     cfg.UserInfoEncryptionKeyManagement,
+		userInfoEncryptionContentEncryption: cfg.UserInfoEncryptionContentEncryption,
 	}, nil
 }
 
@@ -138,6 +166,13 @@ func (c RegisteredClient) RequestObjectAlgorithm() (algorithm fapi.SignatureAlgo
 // tokens at all.
 func (c RegisteredClient) IDTokenEncryption() (keyManagement fapi.KeyManagementAlgorithm, contentEncryption fapi.ContentEncryptionAlgorithm, enabled bool) {
 	return c.idTokenEncryptionKeyManagement, c.idTokenEncryptionContentEncryption, c.idTokenEncryptionKeyManagement != 0
+}
+
+// UserInfoEncryption returns the algorithms this client's UserInfo
+// responses must be encrypted with, and whether the client registered
+// for encrypted UserInfo responses at all.
+func (c RegisteredClient) UserInfoEncryption() (keyManagement fapi.KeyManagementAlgorithm, contentEncryption fapi.ContentEncryptionAlgorithm, enabled bool) {
+	return c.userInfoEncryptionKeyManagement, c.userInfoEncryptionContentEncryption, c.userInfoEncryptionKeyManagement != 0
 }
 
 // AllowsScope reports whether scope is in this client's registered set

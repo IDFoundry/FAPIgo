@@ -89,6 +89,26 @@ func TestNewRegisteredClientRejectsInvalid(t *testing.T) {
 			IDTokenEncryptionKeyManagement:     fapi.RSAOAEP256,
 			IDTokenEncryptionContentEncryption: fapi.ContentEncryptionAlgorithm(99),
 		},
+		{
+			ID: "client-123", RedirectURIs: []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+			ClientAssertionAlgorithm: fapi.ES256, UserInfoEncryptionKeyManagement: fapi.RSAOAEP256,
+		},
+		{
+			ID: "client-123", RedirectURIs: []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+			ClientAssertionAlgorithm: fapi.ES256, UserInfoEncryptionContentEncryption: fapi.A256GCM,
+		},
+		{
+			ID: "client-123", RedirectURIs: []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+			ClientAssertionAlgorithm:            fapi.ES256,
+			UserInfoEncryptionKeyManagement:     fapi.KeyManagementAlgorithm(99),
+			UserInfoEncryptionContentEncryption: fapi.A256GCM,
+		},
+		{
+			ID: "client-123", RedirectURIs: []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+			ClientAssertionAlgorithm:            fapi.ES256,
+			UserInfoEncryptionKeyManagement:     fapi.RSAOAEP256,
+			UserInfoEncryptionContentEncryption: fapi.ContentEncryptionAlgorithm(99),
+		},
 	}
 	for i, c := range cases {
 		if _, err := NewRegisteredClient(c); err == nil {
@@ -132,5 +152,53 @@ func TestNewRegisteredClientIDTokenEncryptionConfigured(t *testing.T) {
 	}
 	if keyMgmt != fapi.RSAOAEP256 || contentEnc != fapi.A256GCM {
 		t.Fatalf("IDTokenEncryption() = (%v, %v), want (RSAOAEP256, A256GCM)", keyMgmt, contentEnc)
+	}
+}
+
+// TestNewRegisteredClientUserInfoEncryptionOptional and
+// TestNewRegisteredClientUserInfoEncryptionConfigured mirror the
+// IDTokenEncryption pair above, confirming UserInfoEncryption is a real,
+// independent field pair — not a reuse of the ID token one.
+func TestNewRegisteredClientUserInfoEncryptionOptional(t *testing.T) {
+	c, err := NewRegisteredClient(RegisteredClientConfig{
+		ID:                       "client-123",
+		RedirectURIs:             []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+		ClientAssertionAlgorithm: fapi.ES256,
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+	keyMgmt, contentEnc, enabled := c.UserInfoEncryption()
+	if enabled {
+		t.Fatalf("UserInfoEncryption() enabled = true, want false")
+	}
+	if keyMgmt != 0 || contentEnc != 0 {
+		t.Fatalf("UserInfoEncryption() = (%v, %v), want (0, 0)", keyMgmt, contentEnc)
+	}
+}
+
+func TestNewRegisteredClientUserInfoEncryptionConfigured(t *testing.T) {
+	c, err := NewRegisteredClient(RegisteredClientConfig{
+		ID:                                  "client-123",
+		RedirectURIs:                        []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+		ClientAssertionAlgorithm:            fapi.ES256,
+		UserInfoEncryptionKeyManagement:     fapi.RSAOAEP256,
+		UserInfoEncryptionContentEncryption: fapi.A256GCM,
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+	keyMgmt, contentEnc, enabled := c.UserInfoEncryption()
+	if !enabled {
+		t.Fatalf("UserInfoEncryption() enabled = false, want true")
+	}
+	if keyMgmt != fapi.RSAOAEP256 || contentEnc != fapi.A256GCM {
+		t.Fatalf("UserInfoEncryption() = (%v, %v), want (RSAOAEP256, A256GCM)", keyMgmt, contentEnc)
+	}
+	// IDTokenEncryption is unaffected — the two field pairs are
+	// independent.
+	idKeyMgmt, idContentEnc, idEnabled := c.IDTokenEncryption()
+	if idEnabled || idKeyMgmt != 0 || idContentEnc != 0 {
+		t.Fatalf("IDTokenEncryption() = (%v, %v, %v), want (0, 0, false)", idKeyMgmt, idContentEnc, idEnabled)
 	}
 }

@@ -52,12 +52,17 @@ type authServer struct {
 // it's safe to attach both afterward, before any test code makes a
 // request; see Harness.attachServer.
 //
-// mtls selects a real TLS listener requesting (not requiring — every
-// non-mTLS test still uses this same server, just never presents a
-// certificate) a client certificate, instead of the plain-HTTP
-// httptest.Server every other Config uses — see peerCertificate's own
-// doc comment for why handleToken needs this at all.
-func newAuthServer(t *testing.T, clock *manualClock, approve AutoApprove, mtls bool) *authServer {
+// tlsClientCert selects a real TLS listener requesting (not requiring —
+// every test that doesn't need one still uses this same server, just
+// never presents a certificate) a client certificate, instead of the
+// plain-HTTP httptest.Server every other Config uses. Needed whenever a
+// certificate plays any role over the wire — sender-constraining
+// (Config.SenderConstrain storage.SenderConstrainMTLS, checked only at
+// token-issuance time — see peerCertificate's own doc comment) or
+// certificate-based client authentication (Config.ClientAuthMethod's two
+// RFC 8705 §2 values, checked at every endpoint that authenticates a
+// client, including PAR).
+func newAuthServer(t *testing.T, clock *manualClock, approve AutoApprove, tlsClientCert bool) *authServer {
 	t.Helper()
 	a := &authServer{t: t, clock: clock, approve: approve}
 	mux := http.NewServeMux()
@@ -67,7 +72,7 @@ func newAuthServer(t *testing.T, clock *manualClock, approve AutoApprove, mtls b
 	mux.HandleFunc("/.well-known/openid-configuration", a.handleMetadata)
 	mux.HandleFunc("/jwks", a.handleJWKS)
 	mux.HandleFunc("/userinfo", a.handleUserInfo)
-	if mtls {
+	if tlsClientCert {
 		a.ts = httptest.NewUnstartedServer(mux)
 		a.ts.TLS = &tls.Config{ClientAuth: tls.RequestClientCert}
 		a.ts.StartTLS()
@@ -80,10 +85,15 @@ func newAuthServer(t *testing.T, clock *manualClock, approve AutoApprove, mtls b
 
 // peerCertificate returns the first TLS client certificate presented
 // on r's own connection, or nil if none was (including when the
-// listener isn't TLS-capable at all — every non-mTLS Config). Threaded
-// into handleToken only: sender-constraining binds at token-issuance
-// time exclusively (RFC 8705 §3 has no PAR-time pre-commitment concept
-// the way DPoP's optional dpop_jkt does), so no other handler needs it.
+// listener isn't TLS-capable at all — every Config that needs neither
+// mTLS sender-constraining nor certificate-based client authentication).
+// Threaded into handleToken (both grant branches) and handlePAR:
+// sender-constraining binds at token-issuance time exclusively (RFC 8705
+// §3 has no PAR-time pre-commitment concept the way DPoP's optional
+// dpop_jkt does), but certificate-based client authentication (RFC 8705
+// §2) is checked at every endpoint that authenticates a client, PAR
+// included — a nil PeerCertificate is harmless when the registered
+// client's ClientAuthMethod doesn't need one.
 func peerCertificate(r *http.Request) *x509.Certificate {
 	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
 		return nil
@@ -143,7 +153,7 @@ func (a *authServer) handlePAR(w http.ResponseWriter, r *http.Request) {
 		a.writeOAuthError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
-	result, pushErr := a.srv.PushAuthorizationRequest(r.Context(), server.PushAuthorizationRequest{HTTP: form})
+	result, pushErr := a.srv.PushAuthorizationRequest(r.Context(), server.PushAuthorizationRequest{HTTP: form, PeerCertificate: peerCertificate(r)})
 	if pushErr != nil {
 		a.writeServerError(w, pushErr)
 		return

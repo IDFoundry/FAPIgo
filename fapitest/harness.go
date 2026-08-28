@@ -17,6 +17,7 @@ import (
 	"github.com/idfoundry/fapigo/client"
 	"github.com/idfoundry/fapigo/extension"
 	"github.com/idfoundry/fapigo/internal/dpop"
+	"github.com/idfoundry/fapigo/internal/mtls"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/keys/ephemeral"
 	"github.com/idfoundry/fapigo/resource"
@@ -81,6 +82,22 @@ type Config struct {
 	// faked (server/mtls_test.go, client/mtls_test.go) or via the live
 	// OIDF suite.
 	SenderConstrain storage.SenderConstrain
+
+	// ClientAuthMethod selects how the harness's client authenticates
+	// itself — storage.ClientAuthMethodPrivateKeyJWT (the default, zero
+	// value) or one of the two RFC 8705 §2 mTLS methods,
+	// storage.ClientAuthMethodSelfSignedTLSClientAuth or
+	// storage.ClientAuthMethodTLSClientAuth. Under either mTLS method,
+	// the harness's own httptest.Server switches to a real TLS listener
+	// requesting a client certificate (the same listener SenderConstrain
+	// storage.SenderConstrainMTLS would switch on — one certificate
+	// serves both purposes if a test sets both), and the client presents
+	// a fresh throwaway one (Harness.MTLSCertificate) on every
+	// connection — proving a real client.Client and real server.Server
+	// authenticate each other over an actual TLS connection, rather than
+	// with one side faked (server/client_auth_mtls_test.go) or via the
+	// live OIDF suite.
+	ClientAuthMethod storage.ClientAuthMethod
 }
 
 // Harness wires a real client.Client, server.Server and resource.Verifier
@@ -95,9 +112,10 @@ type Harness struct {
 
 	// MTLSCertificate is the client certificate the harness's own
 	// client.Client presents on every connection, when
-	// Config.SenderConstrain is storage.SenderConstrainMTLS — nil
-	// otherwise. Exposed so a test can pass it straight into
-	// resource.VerifyRequest.PeerCertificate to confirm an issued
+	// Config.SenderConstrain is storage.SenderConstrainMTLS or
+	// Config.ClientAuthMethod is one of the two RFC 8705 §2 mTLS
+	// methods — nil otherwise. Exposed so a test can pass it straight
+	// into resource.VerifyRequest.PeerCertificate to confirm an issued
 	// access token is genuinely bound to it.
 	MTLSCertificate *x509.Certificate
 
@@ -162,18 +180,31 @@ func New(t *testing.T, cfg Config) *Harness {
 		t.Fatalf("fapitest: ParseIssuerURL: %v", err)
 	}
 
-	mtls := cfg.SenderConstrain == storage.SenderConstrainMTLS
 	if cfg.SenderConstrain != storage.SenderConstrainDPoP && cfg.SenderConstrain != storage.SenderConstrainMTLS {
 		t.Fatalf("fapitest: Config.SenderConstrain is invalid")
 	}
-	// Generated once, up front, when mtls: the same certificate is
-	// presented on every connection the harness's httpClient makes
+	if cfg.ClientAuthMethod != storage.ClientAuthMethodPrivateKeyJWT &&
+		cfg.ClientAuthMethod != storage.ClientAuthMethodSelfSignedTLSClientAuth &&
+		cfg.ClientAuthMethod != storage.ClientAuthMethodTLSClientAuth {
+		t.Fatalf("fapitest: Config.ClientAuthMethod is invalid")
+	}
+	// tlsClientCert is true whenever a client certificate plays any role
+	// over the wire — sender-constraining, certificate-based client
+	// authentication, or (in principle) both at once, one certificate
+	// serving both purposes, the same as a real deployment presenting
+	// one connection-level client certificate regardless of how many
+	// things it's used to prove.
+	tlsClientCert := cfg.SenderConstrain == storage.SenderConstrainMTLS ||
+		cfg.ClientAuthMethod == storage.ClientAuthMethodSelfSignedTLSClientAuth ||
+		cfg.ClientAuthMethod == storage.ClientAuthMethodTLSClientAuth
+	// Generated once, up front, when tlsClientCert: the same certificate
+	// is presented on every connection the harness's httpClient makes
 	// (below) and registered here as this client's expected identity —
 	// exactly one real client certificate for the lifetime of the
 	// harness, the same as a real deployment's own client would use.
 	var mtlsCert *x509.Certificate
 	var mtlsTLSCert tls.Certificate
-	if mtls {
+	if tlsClientCert {
 		mtlsTLSCert, err = selfSignedClientCert("fapitest-mtls-client")
 		if err != nil {
 			t.Fatalf("fapitest: generate mtls client certificate: %v", err)
@@ -190,7 +221,14 @@ func New(t *testing.T, cfg Config) *Harness {
 		ClientAssertionAlgorithm: sigAlg,
 		RequestObjectAlgorithm:   sigAlg,
 		SenderConstrain:          cfg.SenderConstrain,
+		ClientAuthMethod:         cfg.ClientAuthMethod,
 		AllowedScopes:            []string{"openid", "accounts", "offline_access"},
+	}
+	switch cfg.ClientAuthMethod {
+	case storage.ClientAuthMethodSelfSignedTLSClientAuth:
+		registeredClientCfg.ExpectedCertificateThumbprint = mtls.Thumbprint(mtlsCert)
+	case storage.ClientAuthMethodTLSClientAuth:
+		registeredClientCfg.ExpectedSubjectDN = mtlsCert.Subject.String()
 	}
 	if cfg.EncryptIDTokens {
 		registeredClientCfg.IDTokenEncryptionKeyManagement = fapi.RSAOAEP256
@@ -210,7 +248,7 @@ func New(t *testing.T, cfg Config) *Harness {
 	// handlers only dereference the *server.Server at request time, so
 	// attaching it afterward — before any test code makes a request — is
 	// safe; see newAuthServer.
-	as := newAuthServer(t, clock, AutoApprove{Subject: Subject, ACR: "urn:mace:incommon:iap:silver", AMR: []string{"pwd"}}, mtls)
+	as := newAuthServer(t, clock, AutoApprove{Subject: Subject, ACR: "urn:mace:incommon:iap:silver", AMR: []string{"pwd"}}, tlsClientCert)
 
 	srvCfg := server.Config{
 		Issuer:    issuer,
@@ -268,15 +306,15 @@ func New(t *testing.T, cfg Config) *Harness {
 	}
 	as.srv = srv
 
-	// Under mtls, as.ts.Client() (not a bare &http.Client{}) is the
-	// starting point — it already trusts the httptest.Server's own
+	// Under tlsClientCert, as.ts.Client() (not a bare &http.Client{}) is
+	// the starting point — it already trusts the httptest.Server's own
 	// self-signed TLS certificate; mutating its own Transport to also
 	// present mtlsTLSCert keeps exactly one InsecureSkipVerify site in
 	// the whole codebase (httptest's own), rather than constructing a
 	// second one here, mirroring cmd/conformance-client/mtls.go's own
 	// mtlsSuiteHTTPClient.
 	var httpClient *http.Client
-	if mtls {
+	if tlsClientCert {
 		httpClient = as.ts.Client()
 		httpClient.Transport.(*http.Transport).TLSClientConfig.Certificates = []tls.Certificate{mtlsTLSCert}
 	} else {
@@ -317,7 +355,8 @@ func New(t *testing.T, cfg Config) *Harness {
 			MaxHTTPResponseBytes:    1 << 16,
 			MaxJOSECompactBytes:     16 * 1024,
 		},
-		SenderConstrain: cfg.SenderConstrain,
+		SenderConstrain:  cfg.SenderConstrain,
+		ClientAuthMethod: cfg.ClientAuthMethod,
 	}
 	if cfg.EncryptIDTokens {
 		clientCfg.Algorithms.IDTokenKeyManagement = fapi.RSAOAEP256

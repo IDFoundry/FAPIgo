@@ -1,7 +1,8 @@
 // Package fapitest is an in-process interoperability harness that wires a
 // client.Client, server.Server and resource.Verifier together over real
 // HTTP (via httptest.Server — real TLS with a real client certificate
-// too, under Config.SenderConstrain storage.SenderConstrainMTLS) to run
+// too, under Config.SenderConstrain storage.SenderConstrainMTLS or
+// Config.ClientAuthMethod's two RFC 8705 §2 mTLS values) to run
 // end-to-end flows in tests.
 //
 // It exists purely to catch cross-role bugs — parameter serialization,

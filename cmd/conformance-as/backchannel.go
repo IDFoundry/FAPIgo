@@ -59,7 +59,7 @@ func (h *backchannelHandler) handleAuthenticate(w http.ResponseWriter, r *http.R
 	}
 
 	action, err := h.srv.BeginBackchannelAuthentication(r.Context(), server.BeginBackchannelAuthenticationRequest{
-		HTTP: form, DPoPProof: dpopProof,
+		HTTP: form, DPoPProof: dpopProof, PeerCertificate: peerCertificate(r),
 	})
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)

@@ -136,9 +136,19 @@ func (c IDTokenClaims) AsMap() map[string]any {
 // an access token — validating any returned ID token before trusting its
 // subject claim.
 func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationResponse) (TokenSet, error) {
-	assertionSigner, assertionKID, err := c.newSigner(ctx, keys.ClientAuthentication, c.cfg.Algorithms.ClientAuthentication)
-	if err != nil {
-		return TokenSet{}, newError(ErrorInternal, "failed to resolve client authentication key", err)
+	// assertionSigner stays nil (and assertionKID "") when ClientAuthMethod
+	// isn't ClientAuthMethodPrivateKeyJWT — buildTokenForm never uses
+	// them in that case, since no client_assertion is ever built.
+	var (
+		assertionSigner crypto.Signer
+		assertionKID    string
+		err             error
+	)
+	if c.cfg.ClientAuthMethod == storage.ClientAuthMethodPrivateKeyJWT {
+		assertionSigner, assertionKID, err = c.newSigner(ctx, keys.ClientAuthentication, c.cfg.Algorithms.ClientAuthentication)
+		if err != nil {
+			return TokenSet{}, newError(ErrorInternal, "failed to resolve client authentication key", err)
+		}
 	}
 	// dpopSigner stays nil under SenderConstrainMTLS — sendTokenRequest
 	// never uses it in that case, since no DPoP proof is ever built.
@@ -158,24 +168,32 @@ func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationRe
 	// requests gets the retry rejected as jti replay even though the
 	// first request never actually succeeded — confirmed live against
 	// the OIDF conformance suite's own DPoP-nonce-requiring RP test,
-	// which reports it as CheckForClientAssertionJtiReuse.
+	// which reports it as CheckForClientAssertionJtiReuse. Under either
+	// RFC 8705 mTLS client authentication method, no assertion is built
+	// at all — client_id is sent instead, and the TLS certificate
+	// Dependencies.HTTP's own transport presents is the credential.
 	buildTokenForm := func() ([]byte, error) {
-		assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
-			Signer: assertionSigner, Algorithm: c.cfg.Algorithms.ClientAuthentication, KeyID: assertionKID,
-			ClientID: c.cfg.ClientID.String(), Audience: c.cfg.Issuer.String(),
-			Now: c.deps.Clock.Now(), Lifetime: c.cfg.Limits.ClientAssertionLifetime, Random: c.deps.Random,
-		})
-		if err != nil {
-			return nil, err
+		form := map[string]string{
+			"grant_type":    "authorization_code",
+			"code":          resp.code,
+			"redirect_uri":  resp.redirectURI,
+			"code_verifier": resp.pkceVerifier,
 		}
-		return par.EncodeForm(map[string]string{
-			"grant_type":            "authorization_code",
-			"code":                  resp.code,
-			"redirect_uri":          resp.redirectURI,
-			"code_verifier":         resp.pkceVerifier,
-			"client_assertion":      assertion,
-			"client_assertion_type": clientassertion.AssertionType,
-		}), nil
+		if c.cfg.ClientAuthMethod == storage.ClientAuthMethodPrivateKeyJWT {
+			assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
+				Signer: assertionSigner, Algorithm: c.cfg.Algorithms.ClientAuthentication, KeyID: assertionKID,
+				ClientID: c.cfg.ClientID.String(), Audience: c.cfg.Issuer.String(),
+				Now: c.deps.Clock.Now(), Lifetime: c.cfg.Limits.ClientAssertionLifetime, Random: c.deps.Random,
+			})
+			if err != nil {
+				return nil, err
+			}
+			form["client_assertion"] = assertion
+			form["client_assertion_type"] = clientassertion.AssertionType
+		} else {
+			form["client_id"] = c.cfg.ClientID.String()
+		}
+		return par.EncodeForm(form), nil
 	}
 
 	form, err := buildTokenForm()

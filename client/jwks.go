@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // PublicJWK is one of this client's public keys, in JWK format (RFC
@@ -21,9 +22,11 @@ type PublicJWK = keys.PublicJWK
 type PublicKeySet = keys.PublicKeySet
 
 // PublicJWKS returns this client's current public keys: its
-// ClientAuthentication signing key (always — every profile this module
-// supports authenticates via private_key_jwt), its RequestObjectSigning
-// key (only under ProfileFAPISecurityWithMessageSigning), and its
+// ClientAuthentication signing key (only under
+// storage.ClientAuthMethodPrivateKeyJWT — the two RFC 8705 mTLS client
+// authentication methods have no assertion-signing key to publish at
+// all), its RequestObjectSigning key (only under
+// ProfileFAPISecurityWithMessageSigning), and its
 // IDTokenDecryption/UserInfoDecryption encryption key(s) — whichever of
 // Config.Algorithms.IDTokenKeyManagement/UserInfoKeyManagement are set
 // — deduplicated by kid. DPoPProofSigning is deliberately excluded: RFC
@@ -38,8 +41,9 @@ type PublicKeySet = keys.PublicKeySet
 // overlap window, the same as server.PublicJWKS already does. See
 // keys.PublicJWKS for the shared implementation.
 func (c *Client) PublicJWKS(ctx context.Context) (PublicKeySet, error) {
-	signing := []keys.SigningKeyUse{
-		{Manager: c.deps.Keys, Purpose: keys.ClientAuthentication, Algorithm: c.cfg.Algorithms.ClientAuthentication},
+	var signing []keys.SigningKeyUse
+	if c.cfg.ClientAuthMethod == storage.ClientAuthMethodPrivateKeyJWT {
+		signing = append(signing, keys.SigningKeyUse{Manager: c.deps.Keys, Purpose: keys.ClientAuthentication, Algorithm: c.cfg.Algorithms.ClientAuthentication})
 	}
 	if c.cfg.Profile == ProfileFAPISecurityWithMessageSigning {
 		signing = append(signing, keys.SigningKeyUse{Manager: c.deps.Keys, Purpose: keys.RequestObjectSigning, Algorithm: c.cfg.Algorithms.RequestObject})

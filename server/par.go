@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -92,6 +93,15 @@ type PushAuthorizationRequest struct {
 	// A DPoP proof at the PAR endpoint is optional (RFC 9449 §10) — ""
 	// means the client didn't send one.
 	DPoPProof string
+
+	// PeerCertificate is the TLS client certificate presented on the
+	// connection this request arrived on, if any — required when the
+	// client authenticates via ClientAuthMethodSelfSignedTLSClientAuth
+	// or ClientAuthMethodTLSClientAuth (RFC 8705 §2). An HTTP adapter
+	// reads this straight from the connection's own TLS state (e.g.
+	// Go's *http.Request.TLS.PeerCertificates[0]); this package never
+	// terminates TLS itself.
+	PeerCertificate *x509.Certificate
 }
 
 // PushAuthorizationResult is returned by a successful
@@ -120,7 +130,7 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 		return s.parFail(ctx, "", newError(ErrorInvalidRequest, 400, "the request contains a duplicated parameter", err))
 	}
 
-	client, _, authErr := s.authenticateClient(ctx, params)
+	client, _, authErr := s.authenticateClient(ctx, params, req.PeerCertificate)
 	if authErr != nil {
 		var clientID fapi.ClientID
 		return s.parFail(ctx, clientID, authErr)
@@ -176,14 +186,27 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 	}, nil
 }
 
-// authenticateClient verifies the request's client_assertion and
+// authenticateClient authenticates the request's client — via a signed
+// client_assertion (RFC 7523) or, for a client registered under
+// ClientAuthMethodSelfSignedTLSClientAuth/ClientAuthMethodTLSClientAuth,
+// via a plain client_id form parameter plus peerCert (RFC 8705 §2) — and
 // resolves the registered client it identifies.
-func (s *Server) authenticateClient(ctx context.Context, params map[string]string) (storage.RegisteredClient, clientassertion.VerifiedAssertion, *Error) {
-	assertionRaw, ok := params["client_assertion"]
-	if !ok || assertionRaw == "" {
+func (s *Server) authenticateClient(ctx context.Context, params map[string]string, peerCert *x509.Certificate) (storage.RegisteredClient, clientassertion.VerifiedAssertion, *Error) {
+	switch {
+	case params["client_assertion"] != "":
+		return s.authenticateClientViaAssertion(ctx, params)
+	case params["client_id"] != "":
+		return s.authenticateClientViaCertificate(ctx, fapi.ClientID(params["client_id"]), peerCert)
+	default:
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
 			newError(ErrorInvalidClient, 401, "client authentication is required", nil)
 	}
+}
+
+// authenticateClientViaAssertion verifies the request's client_assertion
+// and resolves the registered client it identifies.
+func (s *Server) authenticateClientViaAssertion(ctx context.Context, params map[string]string) (storage.RegisteredClient, clientassertion.VerifiedAssertion, *Error) {
+	assertionRaw := params["client_assertion"]
 	if params["client_assertion_type"] != clientassertion.AssertionType {
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
 			newError(ErrorInvalidClient, 401, "unsupported client_assertion_type", nil)
@@ -199,6 +222,16 @@ func (s *Server) authenticateClient(ctx context.Context, params map[string]strin
 	if err != nil {
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
 			newError(ErrorInvalidClient, 401, "unknown client", err)
+	}
+
+	// A client registered for certificate-based authentication must not
+	// also be authenticatable via a signed assertion — a client's
+	// registered method is the sole credential shape that proves its
+	// identity, in either direction (see
+	// authenticateClientViaCertificate's own symmetric check).
+	if client.ClientAuthMethod() != storage.ClientAuthMethodPrivateKeyJWT {
+		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
+			newError(ErrorInvalidClient, 401, "client is not registered for private_key_jwt client authentication", nil)
 	}
 
 	if !s.cfg.Algorithms.ClientAssertion.Contains(client.ClientAssertionAlgorithm()) {

@@ -324,4 +324,18 @@ type Config struct {
 	// the same principle that keeps JWS signing keys behind
 	// Dependencies.Keys instead of here.
 	SenderConstrain storage.SenderConstrain
+
+	// ClientAuthMethod selects how this client authenticates itself to
+	// the authorization server — storage.ClientAuthMethodPrivateKeyJWT
+	// (the default, zero value) signs and sends a client_assertion on
+	// every client-authenticated call, exactly as this package has
+	// always done. storage.ClientAuthMethodSelfSignedTLSClientAuth and
+	// storage.ClientAuthMethodTLSClientAuth (RFC 8705 §2) instead send a
+	// plain client_id form parameter and no assertion at all — the TLS
+	// client certificate Dependencies.HTTP's own transport presents on
+	// the connection (see SenderConstrain's own doc comment for how that
+	// certificate gets there) is the credential. Reuses storage's enum
+	// type directly rather than duplicating it, the same precedent
+	// SenderConstrain itself establishes.
+	ClientAuthMethod storage.ClientAuthMethod
 }

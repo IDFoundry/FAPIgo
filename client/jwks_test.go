@@ -12,6 +12,7 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/client"
 	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // fakePublicKeyDecrypter is a keys.Decrypter fake that returns a real
@@ -69,6 +70,31 @@ func TestPublicJWKSBaselineProfileIncludesOnlyClientAuthentication(t *testing.T)
 	}
 	if set.Keys[0].KeyID() != km.keyID(keys.ClientAuthentication) {
 		t.Fatalf("KeyID() = %q, want %q", set.Keys[0].KeyID(), km.keyID(keys.ClientAuthentication))
+	}
+}
+
+// TestPublicJWKSOmitsClientAuthenticationKeyUnderCertBasedAuth confirms
+// PublicJWKS publishes no ClientAuthentication key at all once
+// ClientAuthMethod isn't ClientAuthMethodPrivateKeyJWT — a cert-based
+// client never signs a client_assertion, so it has no such key to
+// publish (see PublicJWKS's own doc comment).
+func TestPublicJWKSOmitsClientAuthenticationKeyUnderCertBasedAuth(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.ClientAuthMethod = storage.ClientAuthMethodSelfSignedTLSClientAuth
+	cfg.Algorithms.ClientAuthentication = 0
+	cfg.Limits.ClientAssertionLifetime = 0
+	deps := validDependencies(t)
+
+	c, err := client.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	set, err := c.PublicJWKS(context.Background())
+	if err != nil {
+		t.Fatalf("PublicJWKS: %v", err)
+	}
+	if len(set.Keys) != 0 {
+		t.Fatalf("len(Keys) = %d, want 0", len(set.Keys))
 	}
 }
 

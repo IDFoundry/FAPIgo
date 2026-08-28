@@ -20,8 +20,9 @@ func parHandler(srv *server.Server) http.HandlerFunc {
 			return
 		}
 		result, err := srv.PushAuthorizationRequest(r.Context(), server.PushAuthorizationRequest{
-			HTTP:      form,
-			DPoPProof: dpopProof,
+			HTTP:            form,
+			DPoPProof:       dpopProof,
+			PeerCertificate: peerCertificate(r),
 		})
 		if err != nil {
 			writeOAuthJSONError(w, err)

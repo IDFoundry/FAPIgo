@@ -26,17 +26,49 @@ const (
 	SenderConstrainMTLS
 )
 
+// ClientAuthMethod is the closed set of mechanisms a registered client
+// authenticates itself to this server with.
+type ClientAuthMethod uint8
+
+const (
+	// ClientAuthMethodPrivateKeyJWT authenticates via a signed client
+	// assertion (RFC 7523) — the zero value, so every registered client
+	// that predates this field keeps behaving exactly as it did before.
+	ClientAuthMethodPrivateKeyJWT ClientAuthMethod = iota
+
+	// ClientAuthMethodSelfSignedTLSClientAuth authenticates by exact
+	// match of the presented TLS client certificate's RFC 8705 §3.1
+	// x5t#S256 thumbprint against ExpectedCertificateThumbprint (RFC
+	// 8705 §2.2) — no CA trust required; the certificate need only be
+	// the one previously registered out of band.
+	ClientAuthMethodSelfSignedTLSClientAuth
+
+	// ClientAuthMethodTLSClientAuth authenticates by exact string match
+	// of the presented certificate's subject DN against ExpectedSubjectDN
+	// — RFC 8705 §2.1's "tls_client_auth_subject_dn", the one subject-
+	// matching rule this package implements of the four §2.1 defines
+	// (san_dns/san_uri/san_ip/san_email are not implemented). This
+	// package does not itself validate the certificate against a CA
+	// trust store — that's a deployment/adapter concern
+	// (tls.Config.ClientCAs), the same posture SenderConstrainMTLS
+	// already documents for sender-constraining.
+	ClientAuthMethodTLSClientAuth
+)
+
 // RegisteredClient is the exact, validated configuration of one
 // registered OAuth client. It is immutable and can only be constructed
 // through NewRegisteredClient — a caller cannot return arbitrary
 // discovery or registration JSON in its place.
 type RegisteredClient struct {
-	id                       fapi.ClientID
-	redirectURIs             []fapi.RegisteredRedirectURI
-	clientAssertionAlgorithm fapi.SignatureAlgorithm
-	requestObjectAlgorithm   fapi.SignatureAlgorithm
-	senderConstrain          SenderConstrain
-	allowedScopes            map[string]struct{}
+	id                            fapi.ClientID
+	redirectURIs                  []fapi.RegisteredRedirectURI
+	clientAssertionAlgorithm      fapi.SignatureAlgorithm
+	requestObjectAlgorithm        fapi.SignatureAlgorithm
+	senderConstrain               SenderConstrain
+	clientAuthMethod              ClientAuthMethod
+	expectedCertificateThumbprint string
+	expectedSubjectDN             string
+	allowedScopes                 map[string]struct{}
 
 	idTokenEncryptionKeyManagement     fapi.KeyManagementAlgorithm
 	idTokenEncryptionContentEncryption fapi.ContentEncryptionAlgorithm
@@ -52,10 +84,32 @@ type RegisteredClientConfig struct {
 	ID           fapi.ClientID
 	RedirectURIs []fapi.RegisteredRedirectURI
 
+	// ClientAuthMethod selects how this client authenticates —
+	// ClientAuthMethodPrivateKeyJWT (the zero value/default),
+	// ClientAuthMethodSelfSignedTLSClientAuth, or
+	// ClientAuthMethodTLSClientAuth.
+	ClientAuthMethod ClientAuthMethod
+
 	// ClientAssertionAlgorithm is the only algorithm this client's
 	// private_key_jwt client assertions are accepted under. It is never
-	// inferred from an assertion's own header.
+	// inferred from an assertion's own header. Required only when
+	// ClientAuthMethod is ClientAuthMethodPrivateKeyJWT.
 	ClientAssertionAlgorithm fapi.SignatureAlgorithm
+
+	// ExpectedCertificateThumbprint is the RFC 8705 §3.1 x5t#S256 value
+	// (base64url, no padding — the same shape internal/mtls.Thumbprint
+	// produces) this client's TLS certificate must match. Required only
+	// when ClientAuthMethod is ClientAuthMethodSelfSignedTLSClientAuth.
+	ExpectedCertificateThumbprint string
+
+	// ExpectedSubjectDN is the exact string this client's certificate's
+	// subject must match, via Go's own pkix.Name.String() serialization
+	// (crypto/x509.Certificate.Subject.String()) — not full RFC 4514
+	// canonicalization, so this comparison is case-sensitive and
+	// attribute-order-sensitive; register the DN exactly as Go
+	// serializes the client's actual certificate. Required only when
+	// ClientAuthMethod is ClientAuthMethodTLSClientAuth.
+	ExpectedSubjectDN string
 
 	// RequestObjectAlgorithm is the only algorithm this client's signed
 	// request objects are accepted under. Leave zero if the client is
@@ -113,8 +167,21 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 	if len(cfg.RedirectURIs) == 0 {
 		return RegisteredClient{}, fmt.Errorf("storage: client %q has no registered redirect URIs", cfg.ID)
 	}
-	if !cfg.ClientAssertionAlgorithm.IsValid() {
-		return RegisteredClient{}, fmt.Errorf("storage: client %q has no valid client assertion algorithm", cfg.ID)
+	switch cfg.ClientAuthMethod {
+	case ClientAuthMethodPrivateKeyJWT:
+		if !cfg.ClientAssertionAlgorithm.IsValid() {
+			return RegisteredClient{}, fmt.Errorf("storage: client %q has no valid client assertion algorithm", cfg.ID)
+		}
+	case ClientAuthMethodSelfSignedTLSClientAuth:
+		if cfg.ExpectedCertificateThumbprint == "" {
+			return RegisteredClient{}, fmt.Errorf("storage: client %q must set ExpectedCertificateThumbprint for self_signed_tls_client_auth", cfg.ID)
+		}
+	case ClientAuthMethodTLSClientAuth:
+		if cfg.ExpectedSubjectDN == "" {
+			return RegisteredClient{}, fmt.Errorf("storage: client %q must set ExpectedSubjectDN for tls_client_auth", cfg.ID)
+		}
+	default:
+		return RegisteredClient{}, fmt.Errorf("storage: client %q has an invalid client auth method", cfg.ID)
 	}
 	if cfg.RequestObjectAlgorithm != 0 && !cfg.RequestObjectAlgorithm.IsValid() {
 		return RegisteredClient{}, fmt.Errorf("storage: client %q has an invalid request object algorithm", cfg.ID)
@@ -169,6 +236,9 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 		clientAssertionAlgorithm:                  cfg.ClientAssertionAlgorithm,
 		requestObjectAlgorithm:                    cfg.RequestObjectAlgorithm,
 		senderConstrain:                           cfg.SenderConstrain,
+		clientAuthMethod:                          cfg.ClientAuthMethod,
+		expectedCertificateThumbprint:             cfg.ExpectedCertificateThumbprint,
+		expectedSubjectDN:                         cfg.ExpectedSubjectDN,
 		allowedScopes:                             scopes,
 		idTokenEncryptionKeyManagement:            cfg.IDTokenEncryptionKeyManagement,
 		idTokenEncryptionContentEncryption:        cfg.IDTokenEncryptionContentEncryption,
@@ -210,6 +280,24 @@ func (c RegisteredClient) RequestObjectAlgorithm() (algorithm fapi.SignatureAlgo
 // sender-constrained.
 func (c RegisteredClient) SenderConstrain() SenderConstrain {
 	return c.senderConstrain
+}
+
+// ClientAuthMethod returns how this client authenticates itself.
+func (c RegisteredClient) ClientAuthMethod() ClientAuthMethod {
+	return c.clientAuthMethod
+}
+
+// ExpectedCertificateThumbprint returns the RFC 8705 §3.1 x5t#S256
+// value this client's TLS certificate must match under
+// ClientAuthMethodSelfSignedTLSClientAuth.
+func (c RegisteredClient) ExpectedCertificateThumbprint() string {
+	return c.expectedCertificateThumbprint
+}
+
+// ExpectedSubjectDN returns the subject DN this client's TLS
+// certificate must match under ClientAuthMethodTLSClientAuth.
+func (c RegisteredClient) ExpectedSubjectDN() string {
+	return c.expectedSubjectDN
 }
 
 // IDTokenEncryption returns the algorithms this client's ID tokens must

@@ -119,6 +119,59 @@ func TestNewRegisteredClientSenderConstrainMTLS(t *testing.T) {
 	}
 }
 
+// TestNewRegisteredClientAuthMethodDefaultsToPrivateKeyJWT confirms the
+// zero value keeps every client config that predates this field
+// behaving exactly as before.
+func TestNewRegisteredClientAuthMethodDefaultsToPrivateKeyJWT(t *testing.T) {
+	c, err := NewRegisteredClient(RegisteredClientConfig{
+		ID:                       "client-123",
+		RedirectURIs:             []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+		ClientAssertionAlgorithm: fapi.ES256,
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+	if c.ClientAuthMethod() != ClientAuthMethodPrivateKeyJWT {
+		t.Fatalf("ClientAuthMethod() = %v, want ClientAuthMethodPrivateKeyJWT", c.ClientAuthMethod())
+	}
+}
+
+func TestNewRegisteredClientAuthMethodSelfSignedTLSClientAuth(t *testing.T) {
+	c, err := NewRegisteredClient(RegisteredClientConfig{
+		ID:                            "client-123",
+		RedirectURIs:                  []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+		ClientAuthMethod:              ClientAuthMethodSelfSignedTLSClientAuth,
+		ExpectedCertificateThumbprint: "thumbprint-value",
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+	if c.ClientAuthMethod() != ClientAuthMethodSelfSignedTLSClientAuth {
+		t.Fatalf("ClientAuthMethod() = %v, want ClientAuthMethodSelfSignedTLSClientAuth", c.ClientAuthMethod())
+	}
+	if c.ExpectedCertificateThumbprint() != "thumbprint-value" {
+		t.Fatalf("ExpectedCertificateThumbprint() = %q, want %q", c.ExpectedCertificateThumbprint(), "thumbprint-value")
+	}
+}
+
+func TestNewRegisteredClientAuthMethodTLSClientAuth(t *testing.T) {
+	c, err := NewRegisteredClient(RegisteredClientConfig{
+		ID:                "client-123",
+		RedirectURIs:      []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+		ClientAuthMethod:  ClientAuthMethodTLSClientAuth,
+		ExpectedSubjectDN: "CN=client-123",
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+	if c.ClientAuthMethod() != ClientAuthMethodTLSClientAuth {
+		t.Fatalf("ClientAuthMethod() = %v, want ClientAuthMethodTLSClientAuth", c.ClientAuthMethod())
+	}
+	if c.ExpectedSubjectDN() != "CN=client-123" {
+		t.Fatalf("ExpectedSubjectDN() = %q, want %q", c.ExpectedSubjectDN(), "CN=client-123")
+	}
+}
+
 func TestNewRegisteredClientRejectsInvalid(t *testing.T) {
 	cases := []RegisteredClientConfig{
 		{RedirectURIs: []fapi.RegisteredRedirectURI{"https://rp.example/callback"}, ClientAssertionAlgorithm: fapi.ES256},
@@ -179,6 +232,20 @@ func TestNewRegisteredClientRejectsInvalid(t *testing.T) {
 		{
 			ID: "client-123", RedirectURIs: []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
 			ClientAssertionAlgorithm: fapi.ES256, SenderConstrain: SenderConstrain(99),
+		},
+		{
+			ID: "client-123", RedirectURIs: []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+			ClientAuthMethod: ClientAuthMethod(99),
+		},
+		{
+			// ClientAuthMethodSelfSignedTLSClientAuth without ExpectedCertificateThumbprint.
+			ID: "client-123", RedirectURIs: []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+			ClientAuthMethod: ClientAuthMethodSelfSignedTLSClientAuth,
+		},
+		{
+			// ClientAuthMethodTLSClientAuth without ExpectedSubjectDN.
+			ID: "client-123", RedirectURIs: []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+			ClientAuthMethod: ClientAuthMethodTLSClientAuth,
 		},
 	}
 	for i, c := range cases {

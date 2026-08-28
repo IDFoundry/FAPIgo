@@ -524,10 +524,13 @@ private_key_jwt client authentication."
 
 This module now supports mTLS sender-constrained access tokens (RFC
 8705 §3, `storage.SenderConstrainMTLS`, `-mtls`) as an alternative to
-DPoP — client *authentication* is still private_key_jwt only;
-`tls_client_auth`/dynamic client registration remain out of scope (see
-`cmd/conformance-as`'s own doc comment). This made the CIBA wall above
-worth a genuine live re-attempt rather than a permanent limitation:
+DPoP, and — as a separate, orthogonal capability —
+`tls_client_auth`/`self_signed_tls_client_auth` (RFC 8705 §2,
+`storage.ClientAuthMethod`) as client *authentication* methods
+alongside `private_key_jwt`; dynamic client registration remains out of
+scope (see `cmd/conformance-as`'s own doc comment). This made the CIBA
+wall above worth a genuine live re-attempt rather than a permanent
+limitation:
 against `conformance/server/oidf-config/ciba-mtls.config.json`: **33
 PASS, 1 FAIL.** The one remaining FAIL is unfixable by construction —
 confirmed by disassembling `ExpectBindingMessageCorrectDisplay.evaluate()`

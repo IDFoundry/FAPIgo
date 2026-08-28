@@ -299,22 +299,24 @@ func (c *Client) postParRequestWithDPoP(ctx context.Context, dpopSigner crypto.S
 // (ProfileFAPISecurityWithMessageSigning) or the plain authorization
 // parameters directly.
 func (c *Client) buildPushedRequestForm(ctx context.Context, now time.Time, params map[string]string, extensions extension.Values) (map[string]string, *Error) {
-	assertionSigner, assertionKID, err := c.newSigner(ctx, keys.ClientAuthentication, c.cfg.Algorithms.ClientAuthentication)
-	if err != nil {
-		return nil, newError(ErrorInternal, "failed to resolve client authentication key", err)
-	}
-	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
-		Signer: assertionSigner, Algorithm: c.cfg.Algorithms.ClientAuthentication, KeyID: assertionKID,
-		ClientID: c.cfg.ClientID.String(), Audience: c.cfg.Issuer.String(),
-		Now: now, Lifetime: c.cfg.Limits.ClientAssertionLifetime, Random: c.deps.Random,
-	})
-	if err != nil {
-		return nil, newError(ErrorInternal, "failed to build client assertion", err)
-	}
-
-	form := map[string]string{
-		"client_assertion":      assertion,
-		"client_assertion_type": clientassertion.AssertionType,
+	form := map[string]string{}
+	if c.cfg.ClientAuthMethod == storage.ClientAuthMethodPrivateKeyJWT {
+		assertionSigner, assertionKID, err := c.newSigner(ctx, keys.ClientAuthentication, c.cfg.Algorithms.ClientAuthentication)
+		if err != nil {
+			return nil, newError(ErrorInternal, "failed to resolve client authentication key", err)
+		}
+		assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
+			Signer: assertionSigner, Algorithm: c.cfg.Algorithms.ClientAuthentication, KeyID: assertionKID,
+			ClientID: c.cfg.ClientID.String(), Audience: c.cfg.Issuer.String(),
+			Now: now, Lifetime: c.cfg.Limits.ClientAssertionLifetime, Random: c.deps.Random,
+		})
+		if err != nil {
+			return nil, newError(ErrorInternal, "failed to build client assertion", err)
+		}
+		form["client_assertion"] = assertion
+		form["client_assertion_type"] = clientassertion.AssertionType
+	} else {
+		form["client_id"] = c.cfg.ClientID.String()
 	}
 
 	snapshot := extension.Snapshot(extensions)

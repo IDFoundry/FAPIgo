@@ -246,6 +246,32 @@ func TestNewAcceptsSenderConstrainMTLSWithoutDPoPAlgorithm(t *testing.T) {
 	}
 }
 
+// TestNewAcceptsClientAuthMethodSelfSignedTLSClientAuthWithoutClientAuthenticationAlgorithm
+// confirms Algorithms.ClientAuthentication and
+// Limits.ClientAssertionLifetime both become optional under
+// ClientAuthMethodSelfSignedTLSClientAuth — this client never builds a
+// client_assertion at all, so it has no reason to configure a signing
+// algorithm or an assertion lifetime.
+func TestNewAcceptsClientAuthMethodSelfSignedTLSClientAuthWithoutClientAuthenticationAlgorithm(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.ClientAuthMethod = storage.ClientAuthMethodSelfSignedTLSClientAuth
+	cfg.Algorithms.ClientAuthentication = 0
+	cfg.Limits.ClientAssertionLifetime = 0
+	if _, err := client.New(cfg, validDependencies(t)); err != nil {
+		t.Fatalf("New(ClientAuthMethodSelfSignedTLSClientAuth, no client authentication algorithm): %v", err)
+	}
+}
+
+func TestNewAcceptsClientAuthMethodTLSClientAuthWithoutClientAuthenticationAlgorithm(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.ClientAuthMethod = storage.ClientAuthMethodTLSClientAuth
+	cfg.Algorithms.ClientAuthentication = 0
+	cfg.Limits.ClientAssertionLifetime = 0
+	if _, err := client.New(cfg, validDependencies(t)); err != nil {
+		t.Fatalf("New(ClientAuthMethodTLSClientAuth, no client authentication algorithm): %v", err)
+	}
+}
+
 func TestNewRejectsInvalidConfig(t *testing.T) {
 	cases := map[string]func(*client.Config){
 		"zero issuer":                 func(c *client.Config) { c.Issuer = fapi.URL{} },
@@ -267,6 +293,7 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 		"zero max jose compact bytes": func(c *client.Config) { c.Limits.MaxJOSECompactBytes = 0 },
 		"invalid par dpop binding":    func(c *client.Config) { c.PARDPoPBinding = client.PARDPoPBinding(99) },
 		"invalid sender constrain":    func(c *client.Config) { c.SenderConstrain = storage.SenderConstrain(99) },
+		"invalid client auth method":  func(c *client.Config) { c.ClientAuthMethod = storage.ClientAuthMethod(99) },
 		"id_token key management set without content encryption": func(c *client.Config) {
 			c.Algorithms.IDTokenKeyManagement = fapi.RSAOAEP256
 		},

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -77,6 +78,13 @@ type BeginBackchannelAuthenticationRequest struct {
 	// Optional, mirroring PushAuthorizationRequest.DPoPProof — see
 	// reconcileBackchannelDPoPBinding.
 	DPoPProof string
+
+	// PeerCertificate is the TLS client certificate presented on the
+	// connection this request arrived on, if any — required when the
+	// client authenticates via ClientAuthMethodSelfSignedTLSClientAuth
+	// or ClientAuthMethodTLSClientAuth (RFC 8705 §2), mirroring
+	// PushAuthorizationRequest.PeerCertificate.
+	PeerCertificate *x509.Certificate
 }
 
 // BeginBackchannelAuthentication authenticates the client, verifies its
@@ -95,7 +103,7 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		return s.backchannelBeginFail(ctx, "", newError(ErrorInvalidRequest, 400, "the request contains a duplicated parameter", err)), nil
 	}
 
-	client, _, authErr := s.authenticateClient(ctx, params)
+	client, _, authErr := s.authenticateClient(ctx, params, req.PeerCertificate)
 	if authErr != nil {
 		return s.backchannelBeginFail(ctx, "", authErr), nil
 	}

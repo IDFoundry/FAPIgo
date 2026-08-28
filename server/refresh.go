@@ -60,7 +60,7 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, "", newError(ErrorUnsupportedGrantType, 400, "grant_type must be refresh_token", nil))
 	}
 
-	client, _, authErr := s.authenticateClient(ctx, params)
+	client, _, authErr := s.authenticateClient(ctx, params, req.PeerCertificate)
 	if authErr != nil {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, "", authErr)
 	}

@@ -2,14 +2,17 @@ package server_test
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/x509"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/clientassertion"
+	"github.com/idfoundry/fapigo/internal/dpop"
 	"github.com/idfoundry/fapigo/internal/mtls"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
@@ -527,5 +530,158 @@ func TestBeginBackchannelAuthenticationCertClientAuthReachesPeerCertificate(t *t
 	}
 	if localErr.Error.Code() != server.ErrorInvalidClient {
 		t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorInvalidClient)
+	}
+}
+
+// newHarnessWithClientAuthMTLSAndDPoP is unlike every other harness in
+// this file: SenderConstrain stays at its default (DPoP), while
+// ClientAuthMethod is still SelfSignedTLSClientAuth — the combination
+// that was never exercised until this test, and the one the live OIDF
+// conformance suite hit first (a client_auth_type=mtls,
+// sender_constrain=dpop plan): a client authenticating via certificate
+// must reach the mTLS-alias URL to present it at all, so its DPoP
+// proof's own "htu" legitimately names that alias rather than the plain
+// endpoint. Config.MTLSEndpoints uses deliberately different URLs from
+// testEndpoints(t)'s plain ones, so a test here genuinely exercises
+// verifyDPoPAtEitherEndpoint's fallback rather than happening to match
+// by coincidence.
+func newHarnessWithClientAuthMTLSAndDPoP(t *testing.T) (harness, *x509.Certificate, string, string) {
+	t.Helper()
+	now := time.Now()
+	serverKey := generateKey(t)
+	cert := selfSignedTestClientCert(t)
+
+	client, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
+		ID:                            testClientID,
+		RedirectURIs:                  []fapi.RegisteredRedirectURI{testRedirectURI},
+		ClientAuthMethod:              storage.ClientAuthMethodSelfSignedTLSClientAuth,
+		ExpectedCertificateThumbprint: mtls.Thumbprint(cert),
+		AllowedScopes:                 []string{"openid", "accounts", "offline_access"},
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+
+	issuer, err := fapi.ParseIssuerURL(testIssuer)
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+	mtlsToken, err := fapi.ParseEndpointURL("https://mtls.as.example/token")
+	if err != nil {
+		t.Fatalf("ParseEndpointURL: %v", err)
+	}
+	mtlsPAR, err := fapi.ParseEndpointURL("https://mtls.as.example/par")
+	if err != nil {
+		t.Fatalf("ParseEndpointURL: %v", err)
+	}
+
+	cfg := server.Config{
+		Issuer:        issuer,
+		Endpoints:     testEndpoints(t),
+		MTLSEndpoints: server.MTLSEndpoints{Token: mtlsToken, PushedAuthorizationRequest: mtlsPAR},
+		Profile:       server.ProfileFAPISecurity,
+		Algorithms: server.AlgorithmPolicy{
+			ClientAssertion: server.AlgorithmSet{fapi.ES256},
+			RequestObject:   server.AlgorithmSet{fapi.ES256},
+			JARM:            fapi.ES256,
+			IDToken:         fapi.ES256,
+		},
+		Limits: server.Limits{
+			PushedRequestLifetime:      90 * time.Second,
+			MaxClientAssertionLifetime: time.Minute,
+			MaxRequestObjectLifetime:   time.Minute,
+			InteractionLifetime:        5 * time.Minute,
+			AuthorizationCodeLifetime:  time.Minute,
+			JARMResponseLifetime:       time.Minute,
+			AccessTokenLifetime:        5 * time.Minute,
+			IDTokenLifetime:            5 * time.Minute,
+			RefreshTokenLifetime:       5 * time.Minute,
+			MaxDPoPProofAge:            time.Minute,
+			MaxClockSkew:               5 * time.Second,
+		},
+		Assurance: server.AssuranceDevelopment,
+	}
+	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
+	deps := server.Dependencies{
+		Clients:      &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
+		Transactions: &fakeTransactionStore{},
+		Grants:       &fakeGrantStore{},
+		Replay:       &fakeReplayStore{},
+		ClientKeys:   &fakeClientKeySource{},
+		Keys:         serverKeyManager,
+		AccessTokens: server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:   &fakeRevocationSink{},
+		Clock:        fixedClock{now: now},
+		Random:       rand.Reader,
+	}
+
+	srv, err := server.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+	return harness{server: srv, serverKey: serverKey, now: now}, cert, mtlsToken.String(), mtlsPAR.String()
+}
+
+func dpopProofForURL(t *testing.T, key *ecdsa.PrivateKey, rawURL string, now time.Time) string {
+	t.Helper()
+	target, err := url.Parse(rawURL)
+	if err != nil {
+		t.Fatalf("url.Parse: %v", err)
+	}
+	proof, err := dpop.CreateProof(dpop.ProofRequest{
+		Signer: key, Algorithm: fapi.ES256, Method: "POST", URL: target, Now: now,
+	})
+	if err != nil {
+		t.Fatalf("dpop.CreateProof: %v", err)
+	}
+	return proof
+}
+
+// TestPushAuthorizationRequestCertClientAuthAcceptsDPoPProofAtMTLSAlias
+// and TestExchangeAuthorizationCodeCertClientAuthAcceptsDPoPProofAtMTLSAlias
+// cover the gap the live OIDF conformance suite found: a client
+// registered for certificate-based authentication but plain DPoP
+// sender-constraining must call the mTLS-alias URL to present its
+// certificate at all, so its DPoP proof's own "htu" legitimately names
+// that alias rather than this server's plain endpoint. Before
+// verifyDPoPAtEitherEndpoint, this server rejected such a proof
+// outright with ErrURIMismatch, wrapped as "DPoP proof verification
+// failed" — confirmed live, not just reasoned about (see
+// ARCHITECTURE.md's conformance strategy section for the exact
+// suite-side failure this reproduces).
+func TestPushAuthorizationRequestCertClientAuthAcceptsDPoPProofAtMTLSAlias(t *testing.T) {
+	h, cert, _, mtlsPAR := newHarnessWithClientAuthMTLSAndDPoP(t)
+	dpopKey := generateKey(t)
+
+	if _, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP:            server.FormRequest{Parameters: certFormParameters(nil)},
+		DPoPProof:       dpopProofForURL(t, dpopKey, mtlsPAR, h.now),
+		PeerCertificate: cert,
+	}); err != nil {
+		t.Fatalf("PushAuthorizationRequest: %v", err)
+	}
+}
+
+func TestExchangeAuthorizationCodeCertClientAuthAcceptsDPoPProofAtMTLSAlias(t *testing.T) {
+	h, cert, mtlsToken, _ := newHarnessWithClientAuthMTLSAndDPoP(t)
+	code := completeSuccessfulCertAuthorization(t, h, cert, []string{"openid", "accounts"})
+	dpopKey := generateKey(t)
+
+	result, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
+		HTTP: server.FormRequest{Parameters: []server.FormParameter{
+			formParam("client_id", testClientID.String()),
+			formParam("grant_type", "authorization_code"),
+			formParam("code", code),
+			formParam("redirect_uri", testRedirectURI),
+			formParam("code_verifier", testCodeVerifier),
+		}},
+		DPoPProof:       dpopProofForURL(t, dpopKey, mtlsToken, h.now),
+		PeerCertificate: cert,
+	})
+	if err != nil {
+		t.Fatalf("ExchangeAuthorizationCode: %v", err)
+	}
+	if result.TokenType != "DPoP" {
+		t.Fatalf("TokenType = %q, want %q", result.TokenType, "DPoP")
 	}
 }

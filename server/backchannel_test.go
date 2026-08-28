@@ -320,6 +320,106 @@ func TestBeginBackchannelAuthenticationRejectsClientNotPermitted(t *testing.T) {
 	}
 }
 
+func TestBeginBackchannelAuthenticationRejectsMalformedRequestObject(t *testing.T) {
+	h, _ := newHarnessWithBackchannel(t)
+
+	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+		HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), "not-a-valid-jwt")},
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+	localErr, ok := action.(server.BackchannelAuthenticationLocalError)
+	if !ok {
+		t.Fatalf("action = %T, want server.BackchannelAuthenticationLocalError", action)
+	}
+	if localErr.Error.Code() != server.ErrorInvalidRequest {
+		t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequest)
+	}
+}
+
+func TestBeginBackchannelAuthenticationRejectsNoMatchingClientKey(t *testing.T) {
+	h, _ := newHarnessWithBackchannel(t)
+	decoyKey := generateKey(t)
+	requestObj, err := requestobject.Create(requestobject.CreateParams{
+		Signer: decoyKey, Algorithm: fapi.ES256,
+		ClientID: testClientID.String(), Audience: testIssuer,
+		Now: h.now, Lifetime: 30 * time.Second, Parameters: standardBackchannelParams(t),
+	})
+	if err != nil {
+		t.Fatalf("requestobject.Create: %v", err)
+	}
+
+	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+		HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), requestObj)},
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+	localErr, ok := action.(server.BackchannelAuthenticationLocalError)
+	if !ok {
+		t.Fatalf("action = %T, want server.BackchannelAuthenticationLocalError", action)
+	}
+	if localErr.Error.Code() != server.ErrorInvalidRequest {
+		t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequest)
+	}
+}
+
+func TestBeginBackchannelAuthenticationRejectsInvalidScope(t *testing.T) {
+	cases := map[string]map[string]json.RawMessage{
+		"missing scope": {
+			"login_hint": jsonRaw(t, "user-1"),
+		},
+		"scope is not a string": {
+			"scope": jsonRaw(t, 123), "login_hint": jsonRaw(t, "user-1"),
+		},
+		"scope not allowed for this client": {
+			"scope": jsonRaw(t, "openid unregistered_scope"), "login_hint": jsonRaw(t, "user-1"),
+		},
+	}
+	for name, params := range cases {
+		t.Run(name, func(t *testing.T) {
+			h, _ := newHarnessWithBackchannel(t)
+			requestObj := h.backchannelRequestObject(t, params)
+
+			action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+				HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), requestObj)},
+			})
+			if err != nil {
+				t.Fatalf("BeginBackchannelAuthentication: %v", err)
+			}
+			localErr, ok := action.(server.BackchannelAuthenticationLocalError)
+			if !ok {
+				t.Fatalf("action = %T, want server.BackchannelAuthenticationLocalError", action)
+			}
+			if localErr.Error.Code() != server.ErrorInvalidRequest {
+				t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequest)
+			}
+		})
+	}
+}
+
+func TestBeginBackchannelAuthenticationRejectsUnregisteredExtensionParameter(t *testing.T) {
+	h, _ := newHarnessWithBackchannel(t)
+	params := standardBackchannelParams(t)
+	params["bogus_extension_parameter"] = jsonRaw(t, "value")
+	requestObj := h.backchannelRequestObject(t, params)
+
+	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+		HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), requestObj)},
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+	localErr, ok := action.(server.BackchannelAuthenticationLocalError)
+	if !ok {
+		t.Fatalf("action = %T, want server.BackchannelAuthenticationLocalError", action)
+	}
+	if localErr.Error.Code() != server.ErrorInvalidRequest {
+		t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequest)
+	}
+}
+
 func TestBeginBackchannelAuthenticationRejectsMultipleHints(t *testing.T) {
 	h, _ := newHarnessWithBackchannel(t)
 	params := standardBackchannelParams(t)

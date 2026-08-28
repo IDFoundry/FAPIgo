@@ -2,11 +2,17 @@ package resource_test
 
 import (
 	"crypto/rand"
+	"errors"
 	"regexp"
 	"testing"
 
 	"github.com/idfoundry/fapigo/resource"
 )
+
+// failingReader always errors, standing in for a broken random source.
+type failingReader struct{}
+
+func (failingReader) Read([]byte) (int, error) { return 0, errors.New("boom") }
 
 var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
@@ -17,6 +23,22 @@ func TestNewInteractionIDIsAWellFormedUUIDv4(t *testing.T) {
 	}
 	if !uuidPattern.MatchString(id) {
 		t.Fatalf("NewInteractionID() = %q, want an RFC 4122 v4 UUID", id)
+	}
+}
+
+func TestNewInteractionIDDefaultsToCryptoRandReader(t *testing.T) {
+	id, err := resource.NewInteractionID(nil)
+	if err != nil {
+		t.Fatalf("NewInteractionID(nil): %v", err)
+	}
+	if !uuidPattern.MatchString(id) {
+		t.Fatalf("NewInteractionID(nil) = %q, want an RFC 4122 v4 UUID", id)
+	}
+}
+
+func TestNewInteractionIDPropagatesRandomReadFailure(t *testing.T) {
+	if _, err := resource.NewInteractionID(failingReader{}); err == nil {
+		t.Fatalf("NewInteractionID(failing reader) = nil error, want error")
 	}
 }
 

@@ -255,7 +255,15 @@ against the running module, not the plan-level default):
 See [../scripts/README.md](../scripts/README.md) for how to run the
 server against a filled-in config.
 
-## CIBA (manual only — not part of automated conformance)
+## CIBA
+
+Two separate configs, two separate outcomes: `ciba.config.json` (DPoP)
+cannot pass this plan by construction — manual/exploratory only, not
+wired into `run-all.sh` — while `ciba-mtls.config.json` genuinely
+passes 34/34 and is wired into `run-all.sh` as its own "AS ciba-mtls"
+leg (see below).
+
+### `ciba.config.json` — DPoP, cannot pass (manual/exploratory only)
 
 `ciba.config.json` enables CIBA (`-ciba`, `cmd/conformance-as`'s own
 flag) against the suite's **`fapi-ciba-id1-test-plan`**
@@ -285,7 +293,7 @@ and `sender_constrain=mtls` are alternative variants, FAPI-CIBA-ID1 has
 no DPoP-only variant at all — every module inherits this requirement
 from the same abstract base class.
 
-### `ciba-mtls.config.json` — the genuine mTLS re-attempt
+### `ciba-mtls.config.json` — the genuine mTLS re-attempt (automated)
 
 Once this module gained `storage.SenderConstrainMTLS` support (RFC
 8705 §3), the wall above was worth a real re-attempt rather than
@@ -457,21 +465,20 @@ worth knowing if reproducing this, since a config mistake early on can
 silently truncate the rest of the plan rather than reporting a normal
 per-module FAIL.
 
-Neither CIBA config is wired into `../scripts/run-all.sh` yet. Now that
-`ciba-mtls.config.json` genuinely passes (33/1, the one FAIL being
-the structural automation limitation above, not a defect), wiring it
-into the automated gate — an `expected-skips`/`expected-warnings`
-entry for that one module, a CI cert-generation step, a
-`conformance-as-ciba-mtls` service in the CI workflow — is a real,
-worthwhile follow-up, just not done in this pass. Bring the container
-up with `docker compose up --build conformance-as-ciba-mtls` and drive
-`fapi-ciba-id1-test-plan` the same way as the other plans if you want
-to reproduce this yourself. `ciba.config.json`/`conformance-as-ciba`
-(DPoP) remain for exploratory/manual use as before — e.g. confirming
-the `/backchannel-authenticate`/`/backchannel-approve` HTTP surface by
-hand without standing up the mTLS listener too; that config still
-cannot pass `fapi-ciba-id1-test-plan` at all, for the unconditional
-MTLS mandate documented above.
+`ciba-mtls.config.json` is now wired into `../scripts/run-all.sh` as
+its own "AS ciba-mtls" leg — a third `conformance-as` container
+(`conformance-as-ciba-mtls`, `../docker-compose.yml`, ports 18446/18447)
+brought up alongside baseline/message-signing, driven against
+`fapi-ciba-id1-test-plan` the same way as the other two plans, with its
+own empty `expected-warnings-ciba-mtls.json`/`expected-skips-ciba-mtls.json`
+(nothing to explain away at 34/34). `go run
+./conformance/server/scripts/setup-config` generates
+`ciba-mtls-plan.json` (and patches this file's own key material) the
+same idempotent way it already does for the other profiles — see that
+tool's own `setupCIBAMTLS`. `ciba.config.json`/`conformance-as-ciba`
+(DPoP) remain for exploratory/manual use only, not wired into
+`run-all.sh` — that config still cannot pass `fapi-ciba-id1-test-plan`
+at all, for the unconditional MTLS mandate documented above.
 
 `automated_ciba_approval_url` in `ciba-plan.json` points at this
 binary's own `/backchannel-approve?auth_req_id={auth_req_id}&action={action}`

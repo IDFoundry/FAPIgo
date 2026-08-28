@@ -278,10 +278,11 @@ this driver's code in isolation:
   fully explained (and resolved) by the `awaitVerdict` timeout fix
   above, not a protocol defect of its own.
 
-Wired into the same rigor as the AS side now that it's a clean pass —
-still not part of any automated pass/fail gate (this driver has no CI
-job of its own), but a real candidate now that the result is 22/22
-rather than "mostly FAILED for a documented reason."
+Now wired into `../scripts/run-all.sh` as its own "RP ciba-mtls" leg
+(`cmd/conformance-client -profile=ciba -mtls`), the same clean-pass gate
+the AS side gets — `run_rp_plan`'s own PASSED-count check requires
+every module PASSED, no partial credit, so this only stayed wired in
+because the result is a genuine 22/22.
 
 Two gotchas specific to this plan, beyond the ones listed above for the
 baseline/message-signing profiles:

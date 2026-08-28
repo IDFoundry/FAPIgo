@@ -1,12 +1,14 @@
 name: FAPI2 Conformance
 
-# Runs all four FAPI2 conformance suites this repo has driver support
-# for (see conformance/scripts/run-all.sh) against a freshly-brought-up
-# OIDF conformance suite. Deliberately not triggered on push/pull_request
-# — this is a heavy job (bringing up the suite's own Docker stack, ~6-7
-# minutes of test execution locally, likely more on a shared runner) that
-# would otherwise slow down every PR's feedback loop. Scheduled instead,
-# daily, plus available on demand.
+# Runs all six FAPI2 conformance suites this repo has driver support
+# for — including the CIBA/mTLS pair (AS ciba-mtls, RP ciba-mtls),
+# which need their own extra conformance-as container and mTLS driver
+# flag — see conformance/scripts/run-all.sh, against a
+# freshly-brought-up OIDF conformance suite. Deliberately not triggered
+# on push/pull_request — this is a heavy job (bringing up the suite's
+# own Docker stack, ~6-7 minutes of test execution locally, likely more
+# on a shared runner) that would otherwise slow down every PR's
+# feedback loop. Scheduled instead, daily, plus available on demand.
 #
 # Informational only: nothing in branch protection depends on this
 # workflow, since it never runs against a PR in the first place. The
@@ -81,11 +83,11 @@ jobs:
         run: ./conformance/server/scripts/generate-server-cert.sh
 
       # run-all.sh itself waits for the suite to become reachable, waits
-      # for the AS containers to come up, runs all four suites, retries
+      # for the AS containers to come up, runs all six suites, retries
       # the one known suite-internal flake automatically, and writes
       # report.md — nothing CI-specific needed here beyond pointing it
       # at the suite checkout and a predictable results directory.
-      - name: Run all four conformance suites
+      - name: Run all six conformance suites
         env:
           CONFORMANCE_SUITE_CHECKOUT: /tmp/conformance-suite
           WORKDIR: ${{ runner.temp }}/conformance-results

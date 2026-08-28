@@ -651,9 +651,11 @@ staleness at all (OIDC Core §3.1.3.7 step 10), fixed with a new
 governs `exp`, applied symmetrically to the past. Full breakdown in
 `conformance/client/scripts/README.md`'s own CIBA section, which also
 covers running this driver (with or without `-mtls`) for exploratory
-use; still not wired into any automated pass/fail gate (this driver has
-no CI job of its own), but a real candidate now that both CIBA
-directions — AS (34/34) and client (22/22) — are clean.
+use. Both CIBA directions — AS (34/34) and client (22/22) — are now
+wired into `conformance/scripts/run-all.sh`'s own automated gate
+("AS ciba-mtls"/"RP ciba-mtls" legs) and the daily
+`.github/workflows/conformance.yml` run, alongside baseline and
+message-signing on both sides.
 
 ## What is and isn't shared
 

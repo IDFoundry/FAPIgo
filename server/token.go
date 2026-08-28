@@ -258,7 +258,7 @@ func (s *Server) withIdentityClaims(ctx context.Context, subject string, names [
 	if len(identity) == 0 {
 		return base, nil
 	}
-	merged := make(map[string]json.RawMessage, len(base)+len(identity))
+	merged := make(map[string]json.RawMessage, len(base))
 	for k, v := range base {
 		merged[k] = v
 	}

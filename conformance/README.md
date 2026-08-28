@@ -41,22 +41,23 @@ poll mode only) is verified by unit/integration tests, not the live
 OIDF suite as its primary gate: `fapi-ciba-id1-test-plan` requires
 MTLS-bound access tokens unconditionally. Now that this module supports
 mTLS sender-constraining (RFC 8705 §3, `-mtls`), this was genuinely
-re-attempted live against `ciba-mtls.config.json` — every module now
-reaches `FINISHED` (up from an immediate suite-side config error for
-every module but discovery), with 10 PASS / 3 SKIPPED / 22 FAIL. Three
-real library/harness gaps the attempt surfaced were all fixed along
-the way: `tls_client_certificate_bound_access_tokens` metadata,
-client-assertion `aud` acceptance being far too narrow, and a stricter
-legacy FAPI-RW §8.5 TLS check that turned out to require both a
-narrower cipher list *and* an RSA (not ECDSA) server certificate — the
-conformance cert/key this binary serves TLS with is now RSA. Full
-breakdown, live findings and reproduction steps in
+re-attempted live against `ciba-mtls.config.json` — **31 PASS / 3
+SKIPPED / 1 FAIL**, up from an immediate suite-side config error for
+every module past discovery. The one remaining FAIL isn't a defect —
+the module itself declines to grade a check that's inherently about
+what a human saw on a real device, something automated CIBA approval
+can't produce evidence of either way. Five real library/harness gaps
+the attempt surfaced were all fixed along the way:
+`tls_client_certificate_bound_access_tokens` metadata, client-assertion
+`aud` acceptance being far too narrow, a stricter legacy FAPI-RW §8.5
+TLS check that needed both a narrower cipher list *and* an RSA (not
+ECDSA) server certificate, a CIBA-specific error code that had
+incorrectly borrowed PAR's `invalid_request_object` convention, and a
+missing `iat` requirement on CIBA's own request object. Full breakdown,
+live findings and reproduction steps in
 [`server/oidf-config/README.md`](server/oidf-config/README.md#ciba-manual-only--not-part-of-automated-conformance).
-Still not part of `scripts/run-all.sh` given the majority-FAILED
-result — most remaining FAILs are `CIBA-13` error-code-detail
-mismatches on negative tests this server already rejects correctly,
-plus one genuinely separate gap (`x-fapi-interaction-id` unimplemented
-on the resource endpoint).
+Not yet wired into `scripts/run-all.sh`, though at this pass rate it's
+now a real, worthwhile candidate.
 
 `client`'s own CIBA support
 (`BeginBackchannelAuthentication`/`PollBackchannelAuthentication`) was

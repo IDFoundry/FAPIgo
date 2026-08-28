@@ -300,9 +300,16 @@ one **per client** — confirmed by disassembling
 since neither is documented in any bundled sample config) for the
 suite's own outbound TLS client to present.
 
-**Result of a live run: every module now reaches `FINISHED` (zero
-`INTERRUPTED`) — 10 PASS, 3 SKIPPED, 22 FAIL.** Getting this far
-surfaced three real, since-fixed library/harness gaps:
+**Result of a live run: 31 PASS, 3 SKIPPED, 1 FAIL** (up from an
+immediate suite-side config error for every module past discovery).
+The one remaining FAIL isn't a defect: `fapi-ciba-id1-ensure-authorization-request-with-potentially-bad-binding-message`
+fails on `CIBA-7.1` with "Automated approval url has been provided in
+the configuration json. It is assumed this is an automated run and the
+display of the binding message cannot be verified" — the module itself
+declining to grade a check that's inherently about what a human saw on
+a real device, something `automated_ciba_approval_url` (see below)
+structurally can't produce evidence of either way. Getting this far
+surfaced five real, since-fixed library/harness gaps:
 
 - **Fixed: `tls_client_certificate_bound_access_tokens` (RFC 8705
   §3.3) was entirely missing from `server.Metadata`.** The suite's
@@ -361,16 +368,40 @@ surfaced three real, since-fixed library/harness gaps:
   the suite's own outbound HTTP client already trusts any certificate
   regardless of key type (see `../docker-compose.yml`'s own header
   comment).
-- Also newly visible, unrelated to the fixes above: `x-fapi-interaction-id
-  not found in resource endpoint response headers` (FAPI-R-6.2.1-11) —
-  this module reaches the protected resource step, further than any
-  CIBA run before it, and finds this header genuinely unimplemented
-  anywhere in `resource`/`cmd/conformance-as`. A real, separate gap;
-  not addressed here. Also: several `ensure-request-object-*` negative
-  tests now fail on `CIBA-13` ("'error' field has unexpected value") —
-  this server rejects each malformed request object correctly, just
-  not always with the exact `error` code the module's own check
-  expects; not investigated further this pass.
+- **Fixed: `x-fapi-interaction-id` (FAPI-R-6.2.1-11) was entirely
+  unimplemented.** FAPI 1.0 Part 1 §6.2.1 requires a protected resource
+  echo the incoming `x-fapi-interaction-id` request header on every
+  response — success or error — or generate a fresh RFC 4122 UUID when
+  none was presented; the suite's own check
+  (`CheckForFAPIInteractionIdInResourceResponse`) additionally
+  round-trips the value through `java.util.UUID.fromString`, rejecting
+  anything not in canonical 8-4-4-4-12 form. New
+  `resource.ResolveInteractionID`/`resource.NewInteractionID`
+  (`resource/interactionid.go`) implement this — deliberately outside
+  `Verify` itself, since the value depends on nothing `Verify`
+  computes, only the raw incoming request — wired into
+  `cmd/conformance-as/resource.go`'s `userinfoHandler` as the very
+  first thing the handler does, before any response is written on any
+  path.
+- **Fixed: `CIBA-13` ("'error' field has unexpected value") on every
+  `ensure-request-object-*-fails` negative test.** This server rejected
+  every one of these malformed backchannel authentication requests
+  correctly — the actual bug was the *error code*: CIBA Core 1.0 §13
+  defines no `invalid_request_object` error at all (unlike PAR/authorize,
+  where RFC 9101's own JAR-6.2 vocabulary applies), so every one of
+  these negative tests uniformly expects plain `invalid_request` —
+  confirmed by disassembling
+  `AbstractFAPICIBAID1EnsureSendingInvalidBackchannelAuthorizationRequest.checkErrorFromBackchannelAuthorizationRequestResponse`.
+  `server/backchannel_authentication.go` had borrowed PAR's
+  `ErrorInvalidRequestObject` convention without checking CIBA's own,
+  narrower error vocabulary — switched to `ErrorInvalidRequest`
+  throughout. One case in this family
+  (`ensure-request-object-missing-iat-fails`) failed differently ("No
+  error parameter found") because this server never required `iat` on
+  a CIBA backchannel authentication request at all — new
+  `requestobject.VerifyPolicy.RequireIssuedAt`, mirroring
+  `RequireNotBefore`/`RequireJTI`'s own established pattern, set `true`
+  only for CIBA's own request object (PAR's stays `false`, unaffected).
 
 Three consecutive module non-completions also trip the suite runner's
 own circuit breaker (`ServerUnhealthyError`) and abort the whole run —
@@ -378,15 +409,21 @@ worth knowing if reproducing this, since a config mistake early on can
 silently truncate the rest of the plan rather than reporting a normal
 per-module FAIL.
 
-Neither CIBA config is wired into `../scripts/run-all.sh` — a majority-
-FAILED run isn't a useful CI gate. Bring the container up with `docker
-compose up --build conformance-as-ciba-mtls` and drive
+Neither CIBA config is wired into `../scripts/run-all.sh` yet. Now that
+`ciba-mtls.config.json` genuinely passes (31/3/1, the one FAIL being
+the structural automation limitation above, not a defect), wiring it
+into the automated gate — an `expected-skips`/`expected-warnings`
+entry for that one module, a CI cert-generation step, a
+`conformance-as-ciba-mtls` service in the CI workflow — is a real,
+worthwhile follow-up, just not done in this pass. Bring the container
+up with `docker compose up --build conformance-as-ciba-mtls` and drive
 `fapi-ciba-id1-test-plan` the same way as the other plans if you want
-to reproduce this yourself.
-`ciba.config.json`/`conformance-as-ciba` (DPoP) remain for
-exploratory/manual use as before — e.g. confirming the
-`/backchannel-authenticate`/`/backchannel-approve` HTTP surface by
-hand without standing up the mTLS listener too.
+to reproduce this yourself. `ciba.config.json`/`conformance-as-ciba`
+(DPoP) remain for exploratory/manual use as before — e.g. confirming
+the `/backchannel-authenticate`/`/backchannel-approve` HTTP surface by
+hand without standing up the mTLS listener too; that config still
+cannot pass `fapi-ciba-id1-test-plan` at all, for the unconditional
+MTLS mandate documented above.
 
 `automated_ciba_approval_url` in `ciba-plan.json` points at this
 binary's own `/backchannel-approve?auth_req_id={auth_req_id}&action={action}`

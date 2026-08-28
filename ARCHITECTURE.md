@@ -528,27 +528,34 @@ DPoP — client *authentication* is still private_key_jwt only;
 `tls_client_auth`/dynamic client registration remain out of scope (see
 `cmd/conformance-as`'s own doc comment). This made the CIBA wall above
 worth a genuine live re-attempt rather than a permanent limitation:
-against `conformance/server/oidf-config/ciba-mtls.config.json`, every
-module now reaches `FINISHED` (up from an immediate suite-side config
-error for every module past discovery) — 10 PASS, 3 SKIPPED, 22 FAIL.
-The attempt surfaced and fixed three real library/harness gaps:
-`server.Metadata` was missing `tls_client_certificate_bound_access_tokens`
-(RFC 8705 §3.3); `authenticateClient`'s client-assertion `aud`
-acceptance was far narrower than RFC 7523 §3 actually requires (see
-`server/par.go`'s `acceptableClientAssertionAudiences`, not
-mTLS-specific despite being found here); and this plan's own TLS check
-turned out to need both a narrower cipher list *and* an RSA (not
-ECDSA) server certificate — `cmd/conformance-as`'s conformance cert is
-now RSA (`conformance/server/scripts/generate-server-cert.sh`). This
-cert is shared across every profile in `docker-compose.yml`
-(baseline/message-signing included); the change is TLS-layer only
-(Go's `crypto/tls`, no application code touched, the suite's own
-outbound client already trusts any certificate regardless of key
-type) and so treated as low-risk to those already-passing plans —
-not independently re-confirmed live end-to-end here, since doing so
-needs the official `run-test-plan.py`/`unblock-implicit-callback.py`
-tooling (a real suite checkout) that an ad-hoc REST-API driver can't
-substitute for on a browser-driven flow. Full breakdown in
+against `conformance/server/oidf-config/ciba-mtls.config.json`: **31
+PASS, 3 SKIPPED, 1 FAIL.** The one remaining FAIL isn't a defect — the
+module itself declines to grade a check that's inherently about what a
+human saw on a real device, something `automated_ciba_approval_url`
+structurally can't produce evidence of either way. Getting here fixed
+five real library/harness gaps: `server.Metadata` was missing
+`tls_client_certificate_bound_access_tokens` (RFC 8705 §3.3);
+`authenticateClient`'s client-assertion `aud` acceptance was far
+narrower than RFC 7523 §3 actually requires (see `server/par.go`'s
+`acceptableClientAssertionAudiences`, not mTLS-specific despite being
+found here); this plan's own TLS check needed both a narrower cipher
+list *and* an RSA (not ECDSA) server certificate — `cmd/conformance-as`'s
+conformance cert is now RSA
+(`conformance/server/scripts/generate-server-cert.sh`), shared across
+every profile in `docker-compose.yml` (the change is TLS-layer only,
+no application code touched, treated as low-risk to already-passing
+baseline/message-signing but not independently re-confirmed live
+end-to-end — that needs the official `run-test-plan.py`/`unblock-implicit-callback.py`
+tooling, a real suite checkout, that an ad-hoc REST-API driver can't
+substitute for on a browser-driven flow); CIBA's own error vocabulary
+had incorrectly borrowed PAR's `invalid_request_object` convention
+(CIBA Core 1.0 §13 defines no such code — every request-object
+negative test uniformly expects plain `invalid_request`, confirmed by
+disassembling the suite's own check); and a CIBA backchannel
+authentication request's `iat` claim was never required at all — new
+`requestobject.VerifyPolicy.RequireIssuedAt`, mirroring
+`RequireNotBefore`/`RequireJTI`'s own pattern, set `true` only for
+CIBA (PAR's stays `false`). Full breakdown in
 `conformance/server/oidf-config/README.md`'s own CIBA section, which
 also covers the DPoP-only config's manual (non-automated) setup.
 

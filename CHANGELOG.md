@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.17.0](https://github.com/IDFoundry/FAPIgo/compare/v0.16.0...v0.17.0) (2026-08-28)
+
+
+### Features
+
+* make server.Metadata directly JSON-marshalable ([#172](https://github.com/IDFoundry/FAPIgo/issues/172)) ([e99bf74](https://github.com/IDFoundry/FAPIgo/commit/e99bf74b6774087e738c32749628ba98d86726ff))
+* server-side signed and encrypted UserInfo response production ([#174](https://github.com/IDFoundry/FAPIgo/issues/174)) ([2486974](https://github.com/IDFoundry/FAPIgo/commit/2486974024a98cd9af9399d6049cac521604a275))
+
+
+### Bug Fixes
+
+* avoid arithmetic in withIdentityClaims map size hint ([#175](https://github.com/IDFoundry/FAPIgo/issues/175)) ([11ff67a](https://github.com/IDFoundry/FAPIgo/commit/11ff67a4ed42bbf80f02d93b97ca8e65d63cc7d3))
+
 ## [0.16.0](https://github.com/IDFoundry/FAPIgo/compare/v0.15.0...v0.16.0) (2026-08-27)
 
 

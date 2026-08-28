@@ -40,6 +40,10 @@ var (
 	// but the object carries no nbf claim at all.
 	ErrMissingNotBefore = errors.New("requestobject: nbf claim is required")
 
+	// ErrMissingIssuedAt indicates VerifyPolicy.RequireIssuedAt was set
+	// but the object carries no iat claim at all.
+	ErrMissingIssuedAt = errors.New("requestobject: iat claim is required")
+
 	// ErrMissingJTI indicates VerifyPolicy.RequireJTI was set but the
 	// object carries no jti claim at all.
 	ErrMissingJTI = errors.New("requestobject: jti claim is required")

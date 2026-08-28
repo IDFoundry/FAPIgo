@@ -173,6 +173,17 @@ type verifiedBackchannelRequest struct {
 // requires one (confirmed by the OIDF FAPI-CIBA-ID1 conformance suite's
 // own EnsureBackchannelAuthorizationRequestWithoutRequestFails negative
 // test), unlike PAR's request object, whose signing is profile-dependent.
+//
+// Every rejection below uses ErrorInvalidRequest, never
+// ErrorInvalidRequestObject: unlike PAR/authorize, where a malformed
+// request object gets RFC 9101's own JAR-6.2 error family (see
+// checkExtensions' own doc comment), CIBA Core 1.0 §13 defines no
+// separate "invalid_request_object" error at all — every one of its
+// request-object-related negative tests
+// (AbstractFAPICIBAID1EnsureSendingInvalidBackchannelAuthorizationRequest,
+// confirmed by disassembling its own checkErrorFromBackchannelAuthorizationRequestResponse)
+// uniformly expects plain invalid_request, regardless of which claim
+// is missing or malformed.
 func (s *Server) resolveBackchannelAuthenticationParameters(ctx context.Context, params map[string]string, client storage.RegisteredClient) (verifiedBackchannelRequest, *Error) {
 	requestParam, ok := params["request"]
 	if !ok || requestParam == "" {
@@ -189,12 +200,12 @@ func (s *Server) resolveBackchannelAuthenticationParameters(ctx context.Context,
 
 	obj, err := requestobject.Parse(requestParam)
 	if err != nil {
-		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequestObject, 400, "malformed backchannel authentication request", err)
+		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "malformed backchannel authentication request", err)
 	}
 
 	pub, err := s.resolveClientKey(ctx, client.ID(), keys.BackchannelAuthenticationRequestVerification, alg, obj.KeyID())
 	if err != nil {
-		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequestObject, 400, "no matching client key", err)
+		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "no matching client key", err)
 	}
 
 	verified, err := obj.Verify(ctx, pub, requestobject.VerifyPolicy{
@@ -209,13 +220,15 @@ func (s *Server) resolveBackchannelAuthenticationParameters(ctx context.Context,
 		// request_uri wrapper — see requestobject.VerifyPolicy.Replay's
 		// own doc comment for why nbf/jti are optional there), a CIBA
 		// backchannel authentication request has no such wrapper of its
-		// own, so the OIDF FAPI-CIBA-ID1 conformance suite mandates both
-		// unconditionally.
+		// own, so the OIDF FAPI-CIBA-ID1 conformance suite mandates all
+		// three unconditionally (nbf/jti already; iat confirmed by its
+		// own EnsureRequestObjectMissingIatFails negative test).
 		RequireNotBefore: true,
 		RequireJTI:       true,
+		RequireIssuedAt:  true,
 	})
 	if err != nil {
-		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequestObject, 400, "backchannel authentication request verification failed", err)
+		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "backchannel authentication request verification failed", err)
 	}
 	tokenClaims, checkErr := s.checkBackchannelExtensions(verified.Parameters)
 	if checkErr != nil {
@@ -229,7 +242,7 @@ func (s *Server) resolveBackchannelAuthenticationParameters(ctx context.Context,
 func (s *Server) checkBackchannelExtensions(params map[string]json.RawMessage) (map[string]json.RawMessage, *Error) {
 	values, err := s.cfg.Extensions.Parse(params, coreBackchannelAuthenticationParameters, extension.SourceRequestObject)
 	if err != nil {
-		return nil, newError(ErrorInvalidRequestObject, 400, "request contains an unregistered or invalid parameter", err)
+		return nil, newError(ErrorInvalidRequest, 400, "request contains an unregistered or invalid parameter", err)
 	}
 	return extension.AsParameters(values, s.cfg.Extensions.Definitions()...), nil
 }
@@ -244,14 +257,14 @@ func (s *Server) validateBackchannelAuthenticationParameters(verified verifiedBa
 
 	scopeRaw, ok := params["scope"]
 	if !ok {
-		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequestObject, 400, "scope is required", nil)
+		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "scope is required", nil)
 	}
 	scope, err := jsonStringValue(scopeRaw)
 	if err != nil {
-		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequestObject, 400, "scope must be a string", err)
+		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "scope must be a string", err)
 	}
 	if err := validateScope(scope, client); err != nil {
-		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequestObject, 400, "scope is not valid for this client", err)
+		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "scope is not valid for this client", err)
 	}
 
 	hints := 0
@@ -261,7 +274,7 @@ func (s *Server) validateBackchannelAuthenticationParameters(verified verifiedBa
 		}
 	}
 	if hints != 1 {
-		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequestObject, 400, "exactly one of login_hint, login_hint_token, or id_token_hint is required", nil)
+		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "exactly one of login_hint, login_hint_token, or id_token_hint is required", nil)
 	}
 
 	if _, ok := params["client_notification_token"]; ok {

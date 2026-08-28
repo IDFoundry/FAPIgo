@@ -336,8 +336,8 @@ func TestBeginBackchannelAuthenticationRejectsMultipleHints(t *testing.T) {
 	if !ok {
 		t.Fatalf("action = %T, want server.BackchannelAuthenticationLocalError", action)
 	}
-	if localErr.Error.Code() != server.ErrorInvalidRequestObject {
-		t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequestObject)
+	if localErr.Error.Code() != server.ErrorInvalidRequest {
+		t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequest)
 	}
 }
 
@@ -357,8 +357,8 @@ func TestBeginBackchannelAuthenticationRejectsNoHints(t *testing.T) {
 	if !ok {
 		t.Fatalf("action = %T, want server.BackchannelAuthenticationLocalError", action)
 	}
-	if localErr.Error.Code() != server.ErrorInvalidRequestObject {
-		t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequestObject)
+	if localErr.Error.Code() != server.ErrorInvalidRequest {
+		t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequest)
 	}
 }
 

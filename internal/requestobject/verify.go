@@ -116,6 +116,15 @@ type VerifyPolicy struct {
 	// ProfileFAPISecurityWithMessageSigning, not unconditionally.
 	RequireNotBefore bool
 
+	// RequireIssuedAt rejects an object with no iat claim at all.
+	// Neither RFC 9101 nor FAPI 2.0 Message Signing Final requires one
+	// (this package otherwise treats iat as informational only, unused
+	// by any check below), but the OIDF FAPI-CIBA-ID1 conformance suite
+	// mandates it for a backchannel authentication request (confirmed
+	// by its EnsureRequestObjectMissingIatFails negative test) — the
+	// caller sets this only for that request kind, not for PAR's.
+	RequireIssuedAt bool
+
 	// Replay, if non-nil, is used to detect object replay by jti — but
 	// only when the object actually carries one. Neither RFC 9101 nor
 	// FAPI 2.0 Message Signing Final requires a request object to
@@ -178,6 +187,9 @@ func (o Object) Verify(ctx context.Context, pub crypto.PublicKey, policy VerifyP
 	}
 	if !slices.Contains(c.Audience, policy.ExpectedAudience) {
 		return VerifiedObject{}, ErrAudienceMismatch
+	}
+	if c.IssuedAt.IsZero() && policy.RequireIssuedAt {
+		return VerifiedObject{}, ErrMissingIssuedAt
 	}
 
 	if policy.Now.After(c.ExpiresAt.Add(policy.MaxClockSkew)) {

@@ -63,15 +63,16 @@ func selfSignedClientCert(commonName string) (tls.Certificate, error) {
 // every outbound connection — the transport-level half of
 // SenderConstrainMTLS; client itself never handles certificate
 // material directly (see client.Config.SenderConstrain's own doc
-// comment), only Dependencies.HTTP does.
+// comment), only Dependencies.HTTP does. Built by mutating
+// insecureSuiteHTTPClient's own Transport rather than constructing a
+// second InsecureSkipVerify: true site — the suite's self-signed dev
+// cert is untrusted for the same one documented reason either way (see
+// insecureSuiteHTTPClient's own doc comment), and CodeQL's
+// go/disabled-certificate-check only needs to see that reasoning once.
 func mtlsSuiteHTTPClient(cert tls.Certificate) *http.Client {
-	return &http.Client{
-		Timeout: 30 * time.Second,
-		Transport: &http.Transport{TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true, //nolint:gosec
-			Certificates:       []tls.Certificate{cert},
-		}},
-	}
+	client := insecureSuiteHTTPClient()
+	client.Transport.(*http.Transport).TLSClientConfig.Certificates = []tls.Certificate{cert}
+	return client
 }
 
 // applyMTLSEndpointAliases overrides cfg's Token/BackchannelAuthentication

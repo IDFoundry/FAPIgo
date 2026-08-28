@@ -401,6 +401,9 @@ func TestServerMetadataOmitsMTLSEndpointAliasesWhenUnconfigured(t *testing.T) {
 	if md.TLSClientCertificateBoundAccessTokens {
 		t.Fatalf("TLSClientCertificateBoundAccessTokens = true, want false (Config.MTLSEndpoints was never set)")
 	}
+	if containsString(md.TokenEndpointAuthMethodsSupported, "self_signed_tls_client_auth") || containsString(md.TokenEndpointAuthMethodsSupported, "tls_client_auth") {
+		t.Fatalf("TokenEndpointAuthMethodsSupported = %v, want neither mTLS method (Config.MTLSEndpoints was never set)", md.TokenEndpointAuthMethodsSupported)
+	}
 }
 
 func TestServerMetadataAdvertisesMTLSEndpointAliasesWhenConfigured(t *testing.T) {
@@ -480,5 +483,19 @@ func TestServerMetadataAdvertisesMTLSEndpointAliasesWhenConfigured(t *testing.T)
 	}
 	if !md.TLSClientCertificateBoundAccessTokens {
 		t.Errorf("TLSClientCertificateBoundAccessTokens = false, want true (RFC 8705 §3.3)")
+	}
+	// RFC 8705 §2: a client can only ever present a certificate for
+	// authentication once an mTLS-requesting listener exists at all —
+	// the same precondition TLSClientCertificateBoundAccessTokens is
+	// gated on above — so both auth methods appear here alongside
+	// private_key_jwt, not in place of it.
+	if !containsString(md.TokenEndpointAuthMethodsSupported, "private_key_jwt") {
+		t.Errorf("TokenEndpointAuthMethodsSupported = %v, want to still contain private_key_jwt", md.TokenEndpointAuthMethodsSupported)
+	}
+	if !containsString(md.TokenEndpointAuthMethodsSupported, "self_signed_tls_client_auth") {
+		t.Errorf("TokenEndpointAuthMethodsSupported = %v, want to contain self_signed_tls_client_auth", md.TokenEndpointAuthMethodsSupported)
+	}
+	if !containsString(md.TokenEndpointAuthMethodsSupported, "tls_client_auth") {
+		t.Errorf("TokenEndpointAuthMethodsSupported = %v, want to contain tls_client_auth", md.TokenEndpointAuthMethodsSupported)
 	}
 }

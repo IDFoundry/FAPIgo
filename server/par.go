@@ -472,20 +472,23 @@ func (s *Server) validateAuthorizationParameters(params map[string]json.RawMessa
 //     code ends up bound to whichever key the client actually
 //     demonstrated possession of at PAR time — not just whichever key
 //     later shows up at the token endpoint.
+//
+// The proof's htu is checked against either this endpoint's plain URL
+// or its mTLS alias (RFC 8705 §5) — see verifyDPoPAtEitherEndpoint's own
+// doc comment for why a DPoP-sender-constrained client may legitimately
+// call the alias here too.
 func (s *Server) reconcileParDPoPBinding(ctx context.Context, proof string, params map[string]json.RawMessage) (map[string]json.RawMessage, *Error) {
 	if proof == "" {
 		return params, nil
 	}
-	parEndpoint := s.cfg.Endpoints.PushedAuthorizationRequest.URL()
-	verified, err := dpop.Verify(ctx, dpop.VerifyRequest{
+	verified, err := verifyDPoPAtEitherEndpoint(ctx, dpop.VerifyRequest{
 		Proof:        proof,
 		Method:       "POST",
-		URL:          &parEndpoint,
 		Now:          s.deps.Clock.Now(),
 		MaxProofAge:  s.cfg.Limits.MaxDPoPProofAge,
 		MaxClockSkew: s.cfg.Limits.MaxClockSkew,
 		Replay:       s.dpopReplayChecker(),
-	})
+	}, s.cfg.Endpoints.PushedAuthorizationRequest, s.cfg.MTLSEndpoints.PushedAuthorizationRequest)
 	if err != nil {
 		return nil, newError(ErrorInvalidRequest, 400, "DPoP proof verification failed", err)
 	}

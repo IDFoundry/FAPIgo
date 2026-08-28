@@ -269,16 +269,14 @@ func (s *Server) verifyTokenRequestDPoP(ctx context.Context, proof string) (dpop
 	if proof == "" {
 		return dpop.VerifiedProof{}, newError(ErrorInvalidRequest, 400, "DPoP proof is required", nil)
 	}
-	tokenEndpoint := s.cfg.Endpoints.Token.URL()
-	verified, err := dpop.Verify(ctx, dpop.VerifyRequest{
+	verified, err := verifyDPoPAtEitherEndpoint(ctx, dpop.VerifyRequest{
 		Proof:        proof,
 		Method:       "POST",
-		URL:          &tokenEndpoint,
 		Now:          s.deps.Clock.Now(),
 		MaxProofAge:  s.cfg.Limits.MaxDPoPProofAge,
 		MaxClockSkew: s.cfg.Limits.MaxClockSkew,
 		Replay:       s.dpopReplayChecker(),
-	})
+	}, s.cfg.Endpoints.Token, s.cfg.MTLSEndpoints.Token)
 	if err != nil {
 		return dpop.VerifiedProof{}, newError(ErrorInvalidRequest, 400, "DPoP proof verification failed", err)
 	}
@@ -288,6 +286,40 @@ func (s *Server) verifyTokenRequestDPoP(ctx context.Context, proof string) (dpop
 		}
 	}
 	return verified, nil
+}
+
+// verifyDPoPAtEitherEndpoint verifies a DPoP proof's "htm"/"htu" against
+// primary, retrying once against mtlsAlias (RFC 8705 §5) on a pure htu
+// mismatch — never on any other failure, and never once req.Replay has
+// actually been consulted (dpop.Verify's own htu check runs strictly
+// before its replay check, confirmed by reading its source — so a
+// mismatched first attempt never touches replay state, making the
+// retry safe rather than a second, distinct use of the same jti).
+//
+// This is not sender-constraining-specific: a DPoP-sender-constrained
+// client that is *also* registered for RFC 8705 §2 certificate-based
+// authentication (storage.ClientAuthMethodSelfSignedTLSClientAuth/
+// TLSClientAuth) must call this endpoint's mTLS-alias URL to present
+// its certificate at all — its DPoP proof's own htu then legitimately
+// names that alias, not the plain endpoint. Confirmed live: the OIDF
+// conformance suite's own FAPI2SPFinal driver does exactly this once it
+// discovers mtls_endpoint_aliases, for a client_auth_type=mtls client
+// that is otherwise plain sender_constrain=dpop. Both URLs
+// unambiguously identify this same authorization server (the same
+// reasoning acceptableClientAssertionAudiences documents for the
+// analogous "aud" case), so accepting either is interoperability, not a
+// security relaxation — and unconditional on which client, unlike that
+// aud-widening: any client may legitimately reach either URL.
+func verifyDPoPAtEitherEndpoint(ctx context.Context, req dpop.VerifyRequest, primary, mtlsAlias fapi.URL) (dpop.VerifiedProof, error) {
+	primaryURL := primary.URL()
+	req.URL = &primaryURL
+	verified, err := dpop.Verify(ctx, req)
+	if err == nil || !errors.Is(err, dpop.ErrURIMismatch) || mtlsAlias.IsZero() {
+		return verified, err
+	}
+	aliasURL := mtlsAlias.URL()
+	req.URL = &aliasURL
+	return dpop.Verify(ctx, req)
 }
 
 // withIdentityClaims merges whatever Dependencies.IdentityClaims

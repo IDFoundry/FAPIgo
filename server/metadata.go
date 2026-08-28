@@ -172,6 +172,16 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 			BackchannelAuthenticationEndpoint:  s.cfg.MTLSEndpoints.BackchannelAuthentication,
 		}
 		md.TLSClientCertificateBoundAccessTokens = true
+		// The two RFC 8705 §2 client-authentication methods
+		// (storage.ClientAuthMethodSelfSignedTLSClientAuth/TLSClientAuth)
+		// both require a client certificate to be presented on the
+		// connection — impossible without an mTLS-requesting listener,
+		// the same precondition MTLSEndpointAliases itself is gated on
+		// above. Advertised alongside "private_key_jwt", not in place of
+		// it: a client can be registered for either mechanism, and this
+		// server never requires every client use the same one.
+		md.TokenEndpointAuthMethodsSupported = append(md.TokenEndpointAuthMethodsSupported,
+			"self_signed_tls_client_auth", "tls_client_auth")
 	}
 
 	if !s.cfg.Endpoints.BackchannelAuthentication.IsZero() {

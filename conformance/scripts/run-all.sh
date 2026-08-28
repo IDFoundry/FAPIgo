@@ -1,12 +1,22 @@
 #!/usr/bin/env bash
-# Runs all six FAPI2 conformance suites this repo has driver support
-# for — AS baseline, AS message-signing, AS ciba-mtls, RP baseline, RP
-# message-signing, RP ciba-mtls — against a locally running OIDF
-# conformance suite, prints one combined summary at the end, and (via
-# generate-report.py) writes a fuller report.md alongside the raw
-# per-suite logs — every non-PASSED module, with the "why this is
-# expected, not a defect" reasoning pulled straight from
-# expected-{warnings,skips}-*.json where one exists.
+# Runs all seven FAPI2 conformance suites this repo has driver support
+# for — AS baseline, AS message-signing, AS ciba-mtls, AS
+# client-auth-mtls, RP baseline, RP message-signing, RP ciba-mtls —
+# against a locally running OIDF conformance suite, prints one combined
+# summary at the end, and (via generate-report.py) writes a fuller
+# report.md alongside the raw per-suite logs — every non-PASSED module,
+# with the "why this is expected, not a defect" reasoning pulled
+# straight from expected-{warnings,skips}-*.json where one exists.
+#
+# AS client-auth-mtls covers RFC 8705 §2 client authentication
+# (client_auth_type=mtls) — orthogonal to AS ciba-mtls's §3
+# sender-constraining coverage below: this profile keeps
+# sender_constrain=dpop, so it's the first plan to exercise a DPoP
+# proof presented at an mTLS-alias URL at all (see ARCHITECTURE.md's
+# conformance strategy section for the real server/token.go and
+# server/par.go gap this surfaced and fixed). Has no RP-side
+# counterpart: client-side certificate-based authentication has no
+# separate OIDF RP test plan of its own to run against.
 #
 # AS ciba-mtls and RP ciba-mtls both need RFC 8705 mTLS sender-
 # constraining (see ARCHITECTURE.md's Conformance strategy section for
@@ -43,11 +53,11 @@
 #     (https://localhost.emobix.co.uk:8443 by default).
 #   - CONFORMANCE_SUITE_CHECKOUT set to that suite's own git checkout
 #     (this script runs its scripts/run-test-plan.py from there).
-#   - conformance/server/oidf-config/{baseline,message-signing,ciba-mtls}-plan.json
+#   - conformance/server/oidf-config/{baseline,message-signing,ciba-mtls,client-auth-mtls}-plan.json
 #     already filled in (gitignored — carries private keys; run
 #     `go run ./conformance/server/scripts/setup-config` to generate
-#     all three, or see that directory's README to do it by hand).
-#   - Docker, for the conformance-as-baseline/-message-signing/-ciba-mtls
+#     all four, or see that directory's README to do it by hand).
+#   - Docker, for the conformance-as-baseline/-message-signing/-ciba-mtls/-client-auth-mtls
 #     containers (brought up automatically by this script).
 #
 # Usage:
@@ -167,7 +177,7 @@ wait_as_ready() {
 	# the time anyone's looking at a failed CI run the containers are
 	# long gone (torn down by the workflow's own cleanup step).
 	(cd "$SERVER_DIR" && docker compose ps) >&2 || true
-	(cd "$SERVER_DIR" && docker compose logs --tail=100 conformance-as-baseline conformance-as-message-signing conformance-as-ciba-mtls) >&2 || true
+	(cd "$SERVER_DIR" && docker compose logs --tail=100 conformance-as-baseline conformance-as-message-signing conformance-as-ciba-mtls conformance-as-client-auth-mtls) >&2 || true
 	exit 1
 }
 
@@ -306,11 +316,13 @@ log "bringing up conformance-as containers"
 # build` layer even when the source changed. Not the default here
 # since it'd make every routine run take minutes even when nothing
 # changed.
-(cd "$SERVER_DIR" && docker compose up -d --build conformance-as-baseline conformance-as-message-signing conformance-as-ciba-mtls) >"$WORKDIR/docker-compose.log" 2>&1
+(cd "$SERVER_DIR" && docker compose up -d --build conformance-as-baseline conformance-as-message-signing conformance-as-ciba-mtls conformance-as-client-auth-mtls) >"$WORKDIR/docker-compose.log" 2>&1
 wait_as_ready 18443
 wait_as_ready 18444
 wait_as_ready 18446
 wait_as_ready 18447
+wait_as_ready 18448
+wait_as_ready 18449
 
 run_as_plan "baseline" \
 	'fapi2-security-profile-final-test-plan[client_auth_type=private_key_jwt][sender_constrain=dpop][fapi_profile=plain_fapi][openid=openid_connect]' \
@@ -336,6 +348,17 @@ run_as_plan "ciba-mtls" \
 	"$SERVER_DIR/expected-warnings-ciba-mtls.json" \
 	"$SERVER_DIR/expected-skips-ciba-mtls.json"
 
+# AS client-auth-mtls needs its own AS too (conformance-as-client-auth-mtls,
+# ../server/docker-compose.yml) — same -mtls second listener
+# infrastructure ciba-mtls uses, but sender_constrain stays "dpop" here:
+# this plan is RFC 8705 §2 client authentication, not §3 sender-
+# constraining, and the two are orthogonal (see ARCHITECTURE.md).
+run_as_plan "client-auth-mtls" \
+	'fapi2-security-profile-final-test-plan[client_auth_type=mtls][sender_constrain=dpop][fapi_profile=plain_fapi][openid=openid_connect]' \
+	"$SERVER_DIR/oidf-config/client-auth-mtls-plan.json" \
+	"$SERVER_DIR/expected-warnings-client-auth-mtls.json" \
+	"$SERVER_DIR/expected-skips-client-auth-mtls.json"
+
 run_rp_plan "baseline" "baseline"
 run_rp_plan "message-signing" "message-signing"
 
@@ -351,7 +374,7 @@ python3 "$SCRIPT_DIR/generate-report.py" "$WORKDIR" "$REPO_ROOT" || echo "warnin
 
 echo
 echo "=== combined summary ==="
-for suite in "AS baseline" "AS message-signing" "AS ciba-mtls" "RP baseline" "RP message-signing" "RP ciba-mtls"; do
+for suite in "AS baseline" "AS message-signing" "AS ciba-mtls" "AS client-auth-mtls" "RP baseline" "RP message-signing" "RP ciba-mtls"; do
 	result="$(lookup_result "$suite")"
 	printf '%-20s %s\n' "$suite" "${result:-DID NOT RUN}"
 done
@@ -361,7 +384,7 @@ echo "report: $WORKDIR/report.md"
 
 if [[ "$OVERALL_CLEAN" = true ]]; then
 	echo
-	echo "All six suites completed with no unexpected results."
+	echo "All seven suites completed with no unexpected results."
 	exit 0
 else
 	echo

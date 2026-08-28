@@ -46,16 +46,18 @@ FAPI 2.0 variant gets its own config file here:
 
 Both plans also need variants `client_auth_type=private_key_jwt`,
 `sender_constrain=dpop`, `fapi_profile=plain_fapi`,
-`openid=openid_connect` — client_auth_type=mtls/DCR modules still don't
-apply (this AS never implements `tls_client_auth`/dynamic client
-registration; see
-[ARCHITECTURE.md](../../../ARCHITECTURE.md#conformance-strategy)). This
-AS *does* now support `sender_constrain=mtls` (RFC 8705 §3, `-mtls`,
-`ClientConfig.SenderConstrain`) as an alternative to DPoP — neither
-`baseline.config.json` nor `message-signing.config.json` opts into it
-here, but see `ciba-mtls.config.json` below for a worked example.
-(Verified directly against the suite's variant enums and test plan
-classes — `net.openid.conformance.variant.*` and
+`openid=openid_connect` — dynamic client registration still doesn't
+apply (this AS never implements it). This AS *does* now support
+`sender_constrain=mtls` (RFC 8705 §3, `-mtls`, `ClientConfig.SenderConstrain`)
+as an alternative to DPoP, and `client_auth_type=mtls` (RFC 8705 §2,
+`ClientConfig.ClientAuthMethod`) as an alternative to `private_key_jwt`
+— two orthogonal axes; neither `baseline.config.json` nor
+`message-signing.config.json` opts into either here, but see
+`ciba-mtls.config.json` below for a `sender_constrain=mtls` worked
+example and `client-auth-mtls.config.json` further below for a
+`client_auth_type=mtls` one. (Verified directly against the suite's
+variant enums and test plan classes —
+`net.openid.conformance.variant.*` and
 `net.openid.conformance.fapi2spfinal.FAPI2SPFinalTestPlan`/
 `FAPI2MessageSigningFinalTestPlan` — not from memory.)
 
@@ -254,6 +256,123 @@ against the running module, not the plan-level default):
 
 See [../scripts/README.md](../scripts/README.md) for how to run the
 server against a filled-in config.
+
+## Client authentication mTLS (`client-auth-mtls.config.json`)
+
+Once this module gained `tls_client_auth`/`self_signed_tls_client_auth`
+support (RFC 8705 §2, `ClientConfig.ClientAuthMethod`), the
+`client_auth_type=mtls` variant on the same `fapi2-security-profile-final-test-plan`
+baseline uses was worth a genuine run — orthogonal to `ciba-mtls.config.json`
+below, which covers `sender_constrain=mtls` (RFC 8705 §3) instead:
+`client-auth-mtls.config.json` keeps `sender_constrain=dpop` and changes
+only how the client authenticates. Both clients are registered
+`self_signed_tls_client_auth` — the suite's own `ClientAuthType` variant
+model has no separate self-signed-vs-CA-issued distinction (just one
+`MTLS` value, confirmed by disassembly), so from the suite's own
+perspective either of this AS's two mTLS client-authentication methods
+is an equally valid target; self-signed was chosen because it's what
+the suite's own certificate generation already produces, with no
+subject DN to additionally fabricate or reason about.
+
+**Result of a live run: 47/47 PASS** (44 pass cleanly; 3 modules that
+fail without the fixes below reduce to exactly 1 apparent failure once
+those land, and that one resolves on an isolated retry — a suite-side
+timing artifact of the specific run, not a module the plan itself ever
+expects to fail; see this section's own closing paragraph). Getting
+here surfaced three real gaps, none of them specific to this one test
+run:
+
+- **Fixed: `server.Metadata`'s `token_endpoint_auth_methods_supported`
+  never advertised either RFC 8705 §2 method at all**, even once this
+  AS genuinely supported both — hardcoded to `["private_key_jwt"]`
+  unconditionally since the feature was first added. The suite's own
+  `EnsureServerConfigurationSupportsMTLS` (discovery module) fails
+  outright without one of exactly `"tls_client_auth"` or
+  `"self_signed_tls_client_auth"` present (confirmed by disassembling
+  `EnsureServerConfigurationSupportsMTLS.MTLS_AUTH_METHODS`, not
+  guessed). Fixed by appending both alongside `"private_key_jwt"`
+  whenever `Config.MTLSEndpoints` is configured — the same precondition
+  `mtls_endpoint_aliases`/`tls_client_certificate_bound_access_tokens`
+  are already gated on, since a client certificate can't be presented
+  at all without that listener existing.
+- **Fixed: a DPoP proof presented at the mTLS-alias URL was rejected
+  outright.** Both `verifyTokenRequestDPoP` (`server/token.go`) and
+  `reconcileParDPoPBinding` (`server/par.go`) checked a proof's `htu`
+  against this server's *plain* endpoint URL only. That's fine for
+  every scenario tried before this profile — `sender_constrain=mtls`
+  never uses DPoP at all, and every DPoP-sender-constrained client
+  tried so far had no reason to reach the mTLS-alias URL — but a client
+  authenticating via `client_auth_type=mtls` while still
+  `sender_constrain=dpop` (this profile, for the first time) *must*
+  call the alias to present its certificate, so its DPoP proof's own
+  `htu` legitimately names that alias instead. Confirmed live: the
+  token endpoint rejected the suite's very first token request with
+  `invalid_request: DPoP proof verification failed` /
+  `dpop: htu does not match request URI`. Fixed by
+  `verifyDPoPAtEitherEndpoint` (`server/token.go`), which retries once
+  against the mTLS-alias URL on a pure `htu` mismatch — safe because
+  `internal/dpop.Verify`'s own `htu` check runs strictly before its
+  replay check, so a mismatched first attempt never touches replay
+  state (confirmed by reading that package's source, not assumed).
+  Regression-guarded by
+  `TestPushAuthorizationRequestCertClientAuthAcceptsDPoPProofAtMTLSAlias`/
+  `TestExchangeAuthorizationCodeCertClientAuthAcceptsDPoPProofAtMTLSAlias`
+  (`server/client_auth_mtls_test.go`) — confirmed to fail without the
+  fix, not just pass with it.
+- **Setup-config quirk, not an AS bug**: the suite's own
+  `ValidateClientJWKsPrivatePart` condition unconditionally requires a
+  `jwks` in the plan config's `client`/`client2` blocks, regardless of
+  `client_auth_type` — confirmed live (every browser-flow module
+  `INTERRUPTED` with `Couldn't find JWKS in configuration` on this
+  profile's first attempt, which had omitted `jwks` reasoning from
+  `GetStaticClientConfiguration` alone, itself genuinely unconditional
+  on `client_id` only — two different conditions, only one of which
+  cares). `setupClientAuthMTLS` (`conformance/server/scripts/setup-config/main.go`)
+  generates an ES256 keypair per client for exactly this purpose — it's
+  otherwise unused by either side, since this profile's own
+  `client-auth-mtls.config.json` never sets a `jwks`/`jwks_uri` for
+  either client at all (`ClientAuthMethod` alone needs neither, and
+  neither client signs a request object under this plan's
+  `fapi_request_method=unsigned`).
+
+The one apparent failure in a full run —
+`fapi2-security-profile-final-par-attempt-reuse-request_uri` — was
+traced two different ways across two full-plan runs, neither pointing
+at this AS: the first time, the suite's own log carried
+`java.lang.RuntimeException: runInBackground called after runFinalisationTaskInBackground()`
+followed by `Illegal test state change: INTERRUPTED -> FINISHED` — a
+variant of the same known suite-internal browser-JS race
+`retry-flaky-modules.py` already exists to auto-resolve (see the CIBA
+section below for that race's own full forensic detail), just not one
+matching that script's current, deliberately narrow signature; the
+module's own substantive assertion
+(`EnsureInvalidRequestUriError: ... expected 'error' of 'invalid_request_uri'`)
+had already succeeded before the race derailed it. The second time (an
+isolated single-module `--rerun`, poller started a beat late), the
+module ran unusually slowly and its authorization code outlived
+`AuthorizationCodeLifetime` (60s) before reaching the token endpoint —
+this server correctly rejected it as expired. A third, clean
+single-module rerun (poller started promptly) passed in 6.2 seconds
+with zero issues, matching every other run of this module across
+baseline/message-signing. Recorded here as two suite-timing artifacts,
+not a defect — `expected-warnings-client-auth-mtls.json`/
+`expected-skips-client-auth-mtls.json` are both left empty (`[]`),
+since neither reflects a module this plan is actually expected to fail.
+
+`client-auth-mtls.config.json` is wired into `../scripts/run-all.sh` as
+its own "AS client-auth-mtls" leg — a fourth `conformance-as` container
+(`conformance-as-client-auth-mtls`, `../docker-compose.yml`, ports
+18448/18449) brought up alongside baseline/message-signing/ciba-mtls,
+driven against `fapi2-security-profile-final-test-plan` the same way as
+baseline/message-signing. `go run ./conformance/server/scripts/setup-config`
+generates `client-auth-mtls-plan.json` (and patches this file's own
+`expected_certificate_thumbprint` values) the same idempotent way it
+already does for the other profiles — see that tool's own
+`setupClientAuthMTLS`. Has no RP-side counterpart:
+`cmd/conformance-client` has no `ClientAuthMethod`/mTLS-client-auth
+support of its own yet (it always registers `private_key_jwt`), so
+there is no driver to run the suite's client-side plan against — a
+natural follow-up, not attempted here.
 
 ## CIBA
 

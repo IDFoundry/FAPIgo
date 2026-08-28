@@ -300,22 +300,34 @@ one **per client** — confirmed by disassembling
 since neither is documented in any bundled sample config) for the
 suite's own outbound TLS client to present.
 
-**Result of a live run: 33 PASS, 1 FAIL** (up from an immediate
-suite-side config error for every module past discovery). The one
-remaining FAIL is unfixable by construction, confirmed by disassembling
-`ExpectBindingMessageCorrectDisplay.evaluate()` down to the bytecode,
-not inferred: when `config.automated_ciba_approval_url` is set, this
-condition unconditionally throws — there is no branch, no placeholder,
-no alternate path. Its *only* passing route (reached solely when
-`automated_ciba_approval_url` is absent) is
+**Result of a live run: 34/34 PASS** (up from an immediate suite-side
+config error for every module past discovery). The last holdout,
+`fapi-ciba-id1-ensure-authorization-request-with-potentially-bad-binding-message`,
+was initially misdiagnosed as unfixable by construction: disassembling
+`ExpectBindingMessageCorrectDisplay.evaluate()` in isolation showed
+that when `config.automated_ciba_approval_url` is set, this condition
+unconditionally throws — no branch, no placeholder, no alternate path
+— and its only passing route otherwise is
 `createBrowserInteractionPlaceholder("...upload a screenshot/photo of
-the binding message")` — a genuinely manual run where a human sees the
-message on a real out-of-band device and uploads evidence through the
-suite's UI. That's precisely the scenario `automated_ciba_approval_url`
-exists to replace for every other module, so this one check and an
-automated run are mutually exclusive by the suite's own design — not a
-gap in this AS, this driver, or this config. Getting this far surfaced
-six real, since-fixed library/harness gaps:
+the binding message")`, a genuinely manual run where a human sees the
+message on a real device and uploads evidence. Concluding from that
+alone that this check and an automated run were mutually exclusive was
+wrong — it only proved that check has no automated-passing route,
+not that the *test module* has none. Disassembling the module itself
+(`FAPICIBAID1EnsureAuthorizationRequestWithPotentiallyBadBindingMessage.performAuthorizationFlow`)
+shows `ExpectBindingMessageCorrectDisplay` is reached only along the
+*accept* path: if the backchannel authentication endpoint's response
+instead carries an `error` field, the module runs
+`CheckErrorFromBackchannelAuthenticationEndpointErrorInvalidBindingMessage`
+(asserts `error == "invalid_binding_message"`) and finishes there,
+`ExpectBindingMessageCorrectDisplay` never invoked at all. CIBA Core
+1.0 §13 gives an AS exactly this option — reject a `binding_message` it
+can't safely or faithfully display, rather than accept it and hope its
+own UI renders it correctly. The probe's actual value (from the live
+log, not assumed) is 456 Unicode code points: `"1234 👍🏿 品川"` followed
+by a full Lorem Ipsum paragraph — disqualified on length/renderability
+grounds alone, nothing content-specific about it. Getting this far
+surfaced seven real, since-fixed library/harness gaps:
 
 - **Fixed: `tls_client_certificate_bound_access_tokens` (RFC 8705
   §3.3) was entirely missing from `server.Metadata`.** The suite's
@@ -423,8 +435,21 @@ six real, since-fixed library/harness gaps:
   `ciba.config.json`'s own DPoP client) — switched to a PS256/RSA
   keypair instead (PS256 was already an allowed algorithm here; no
   code change). Confirmed live: all three modules flip from SKIPPED to
-  PASSED, with zero regressions across the other 31 — final tally 33
-  PASS, 1 FAIL.
+  PASSED, with zero regressions across the others.
+- **Fixed: `fapi-ciba-id1-ensure-authorization-request-with-potentially-bad-binding-message`
+  had no acceptability check to reject with at all.** See this
+  section's own opening paragraph for the full disassembly and the
+  actual probe value. New `server/backchannel_authentication.go`'s
+  `isAcceptableBindingMessage` rejects a `binding_message` over 100
+  Unicode code points or containing a control/line-separator character,
+  returning the new `ErrorInvalidBindingMessage`
+  (`"invalid_binding_message"`, CIBA §13) — a length/renderability
+  policy only, not a content-shape one: ordinary punctuation, emoji,
+  and non-Latin scripts remain fully accepted (confirmed by a dedicated
+  unit test using the same emoji/CJK content the failing probe sends,
+  just under the length bound). Confirmed live: this module flips from
+  FAILED to PASSED via exactly the predicted rejection branch, with
+  zero regressions across the other 33 — final tally 34/34 PASS.
 
 Three consecutive module non-completions also trip the suite runner's
 own circuit breaker (`ServerUnhealthyError`) and abort the whole run —

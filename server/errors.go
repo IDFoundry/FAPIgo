@@ -58,6 +58,15 @@ const (
 	// AuthorizationResult), CIBA's token endpoint has no redirect to
 	// carry it in, so this is a real ErrorCode.
 	ErrorAccessDenied ErrorCode = "access_denied"
+
+	// ErrorInvalidBindingMessage indicates a CIBA backchannel
+	// authentication request's binding_message (CIBA §7.1) is not one
+	// this server can display to an end user as the short,
+	// human-scannable transaction-interlocking identifier the protocol
+	// intends — see isAcceptableBindingMessage's own doc comment. CIBA
+	// §13 lists invalid_binding_message as exactly this rejection's own
+	// error code.
+	ErrorInvalidBindingMessage ErrorCode = "invalid_binding_message"
 )
 
 // Error is the error type every public Server method returns. Code and

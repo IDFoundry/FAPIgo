@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -480,6 +481,92 @@ func TestBeginBackchannelAuthenticationRejectsPingMode(t *testing.T) {
 	}
 	if localErr.Error.Code() != server.ErrorInvalidRequest {
 		t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequest)
+	}
+}
+
+func TestBeginBackchannelAuthenticationAcceptsOrdinaryBindingMessage(t *testing.T) {
+	h, _ := newHarnessWithBackchannel(t)
+	params := standardBackchannelParams(t)
+	params["binding_message"] = jsonRaw(t, "1234")
+	requestObj := h.backchannelRequestObject(t, params)
+
+	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+		HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), requestObj)},
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+	if _, ok := action.(server.BackchannelInteractionRequired); !ok {
+		t.Fatalf("action = %T, want server.BackchannelInteractionRequired", action)
+	}
+}
+
+// TestBeginBackchannelAuthenticationAcceptsNonLatinAndEmojiBindingMessage
+// confirms the acceptability check is about length and
+// control/line-separator characters only — ordinary punctuation, emoji,
+// and non-Latin scripts are all legitimate human-readable content and
+// must not be rejected just because they aren't ASCII.
+func TestBeginBackchannelAuthenticationAcceptsNonLatinAndEmojiBindingMessage(t *testing.T) {
+	h, _ := newHarnessWithBackchannel(t)
+	params := standardBackchannelParams(t)
+	params["binding_message"] = jsonRaw(t, "1234 \U0001F44D\U0001F3FF 品川")
+	requestObj := h.backchannelRequestObject(t, params)
+
+	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+		HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), requestObj)},
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+	if _, ok := action.(server.BackchannelInteractionRequired); !ok {
+		t.Fatalf("action = %T, want server.BackchannelInteractionRequired", action)
+	}
+}
+
+// TestBeginBackchannelAuthenticationRejectsOverlongBindingMessage covers
+// CIBA §13's invalid_binding_message: a binding_message far longer than
+// any real display surface can show at a glance is rejected outright,
+// rather than accepted and handed to an out-of-band consent UI that may
+// not be able to render it faithfully.
+func TestBeginBackchannelAuthenticationRejectsOverlongBindingMessage(t *testing.T) {
+	h, _ := newHarnessWithBackchannel(t)
+	params := standardBackchannelParams(t)
+	params["binding_message"] = jsonRaw(t, strings.Repeat("a", 101))
+	requestObj := h.backchannelRequestObject(t, params)
+
+	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+		HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), requestObj)},
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+	localErr, ok := action.(server.BackchannelAuthenticationLocalError)
+	if !ok {
+		t.Fatalf("action = %T, want server.BackchannelAuthenticationLocalError", action)
+	}
+	if localErr.Error.Code() != server.ErrorInvalidBindingMessage {
+		t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorInvalidBindingMessage)
+	}
+}
+
+func TestBeginBackchannelAuthenticationRejectsBindingMessageWithControlCharacter(t *testing.T) {
+	h, _ := newHarnessWithBackchannel(t)
+	params := standardBackchannelParams(t)
+	params["binding_message"] = jsonRaw(t, "1234\n5678")
+	requestObj := h.backchannelRequestObject(t, params)
+
+	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+		HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), requestObj)},
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+	localErr, ok := action.(server.BackchannelAuthenticationLocalError)
+	if !ok {
+		t.Fatalf("action = %T, want server.BackchannelAuthenticationLocalError", action)
+	}
+	if localErr.Error.Code() != server.ErrorInvalidBindingMessage {
+		t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorInvalidBindingMessage)
 	}
 }
 

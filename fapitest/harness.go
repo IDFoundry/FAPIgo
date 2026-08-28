@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto"
 	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"net/http"
@@ -66,6 +68,19 @@ type Config struct {
 	// fapi.ES256; set explicitly (e.g. fapi.EdDSA) to exercise a full
 	// authorization_code flow under a different algorithm end to end.
 	SignatureAlgorithm fapi.SignatureAlgorithm
+
+	// SenderConstrain selects how the harness's client's tokens are
+	// sender-constrained — storage.SenderConstrainDPoP (the default,
+	// zero value) or storage.SenderConstrainMTLS. Under MTLS, the
+	// harness's own httptest.Server switches to a real TLS listener
+	// requesting a client certificate, and the client presents a fresh
+	// throwaway one (Harness.MTLSCertificate) on every connection — the
+	// only place in this repo a real client.Client and real
+	// server.Server prove mTLS sender-constraining works against each
+	// other over an actual TLS connection, rather than with one side
+	// faked (server/mtls_test.go, client/mtls_test.go) or via the live
+	// OIDF suite.
+	SenderConstrain storage.SenderConstrain
 }
 
 // Harness wires a real client.Client, server.Server and resource.Verifier
@@ -77,6 +92,14 @@ type Harness struct {
 	Client   *client.Client
 	Resource *resource.Verifier
 	Clock    *manualClock
+
+	// MTLSCertificate is the client certificate the harness's own
+	// client.Client presents on every connection, when
+	// Config.SenderConstrain is storage.SenderConstrainMTLS — nil
+	// otherwise. Exposed so a test can pass it straight into
+	// resource.VerifyRequest.PeerCertificate to confirm an issued
+	// access token is genuinely bound to it.
+	MTLSCertificate *x509.Certificate
 
 	authServer         *authServer
 	httpClient         *http.Client
@@ -139,11 +162,34 @@ func New(t *testing.T, cfg Config) *Harness {
 		t.Fatalf("fapitest: ParseIssuerURL: %v", err)
 	}
 
+	mtls := cfg.SenderConstrain == storage.SenderConstrainMTLS
+	if cfg.SenderConstrain != storage.SenderConstrainDPoP && cfg.SenderConstrain != storage.SenderConstrainMTLS {
+		t.Fatalf("fapitest: Config.SenderConstrain is invalid")
+	}
+	// Generated once, up front, when mtls: the same certificate is
+	// presented on every connection the harness's httpClient makes
+	// (below) and registered here as this client's expected identity —
+	// exactly one real client certificate for the lifetime of the
+	// harness, the same as a real deployment's own client would use.
+	var mtlsCert *x509.Certificate
+	var mtlsTLSCert tls.Certificate
+	if mtls {
+		mtlsTLSCert, err = selfSignedClientCert("fapitest-mtls-client")
+		if err != nil {
+			t.Fatalf("fapitest: generate mtls client certificate: %v", err)
+		}
+		mtlsCert, err = x509.ParseCertificate(mtlsTLSCert.Certificate[0])
+		if err != nil {
+			t.Fatalf("fapitest: parse mtls client certificate: %v", err)
+		}
+	}
+
 	registeredClientCfg := storage.RegisteredClientConfig{
 		ID:                       ClientID,
 		RedirectURIs:             []fapi.RegisteredRedirectURI{RedirectURI},
 		ClientAssertionAlgorithm: sigAlg,
 		RequestObjectAlgorithm:   sigAlg,
+		SenderConstrain:          cfg.SenderConstrain,
 		AllowedScopes:            []string{"openid", "accounts", "offline_access"},
 	}
 	if cfg.EncryptIDTokens {
@@ -164,7 +210,7 @@ func New(t *testing.T, cfg Config) *Harness {
 	// handlers only dereference the *server.Server at request time, so
 	// attaching it afterward — before any test code makes a request — is
 	// safe; see newAuthServer.
-	as := newAuthServer(t, clock, AutoApprove{Subject: Subject, ACR: "urn:mace:incommon:iap:silver", AMR: []string{"pwd"}})
+	as := newAuthServer(t, clock, AutoApprove{Subject: Subject, ACR: "urn:mace:incommon:iap:silver", AMR: []string{"pwd"}}, mtls)
 
 	srvCfg := server.Config{
 		Issuer:    issuer,
@@ -222,9 +268,21 @@ func New(t *testing.T, cfg Config) *Harness {
 	}
 	as.srv = srv
 
-	httpClient := &http.Client{
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	// Under mtls, as.ts.Client() (not a bare &http.Client{}) is the
+	// starting point — it already trusts the httptest.Server's own
+	// self-signed TLS certificate; mutating its own Transport to also
+	// present mtlsTLSCert keeps exactly one InsecureSkipVerify site in
+	// the whole codebase (httptest's own), rather than constructing a
+	// second one here, mirroring cmd/conformance-client/mtls.go's own
+	// mtlsSuiteHTTPClient.
+	var httpClient *http.Client
+	if mtls {
+		httpClient = as.ts.Client()
+		httpClient.Transport.(*http.Transport).TLSClientConfig.Certificates = []tls.Certificate{mtlsTLSCert}
+	} else {
+		httpClient = &http.Client{}
 	}
+	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
 	userInfoURL, err := fapi.ParseEndpointURL(as.ts.URL+"/userinfo", fapi.AllowLoopbackHTTP())
 	if err != nil {
@@ -259,6 +317,7 @@ func New(t *testing.T, cfg Config) *Harness {
 			MaxHTTPResponseBytes:    1 << 16,
 			MaxJOSECompactBytes:     16 * 1024,
 		},
+		SenderConstrain: cfg.SenderConstrain,
 	}
 	if cfg.EncryptIDTokens {
 		clientCfg.Algorithms.IDTokenKeyManagement = fapi.RSAOAEP256
@@ -304,7 +363,7 @@ func New(t *testing.T, cfg Config) *Harness {
 
 	return &Harness{
 		t: t, Client: c, Resource: rs, Clock: clock, authServer: as, httpClient: httpClient,
-		clientKeys: clientKeys, signatureAlgorithm: sigAlg,
+		clientKeys: clientKeys, signatureAlgorithm: sigAlg, MTLSCertificate: mtlsCert,
 	}
 }
 

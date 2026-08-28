@@ -35,7 +35,7 @@ func TestDiscoverEndToEnd(t *testing.T) {
 	asKeys := newAlgorithmKeyManager(t, fapi.ES256, keys.JARMSigning, keys.AccessTokenSigning, keys.IDTokenSigning)
 	clientKeys := newAlgorithmKeyManager(t, fapi.ES256, keys.ClientAuthentication, keys.RequestObjectSigning, keys.DPoPProofSigning)
 
-	as := newAuthServer(t, clock, AutoApprove{Subject: Subject, ACR: "urn:mace:incommon:iap:silver", AMR: []string{"pwd"}})
+	as := newAuthServer(t, clock, AutoApprove{Subject: Subject, ACR: "urn:mace:incommon:iap:silver", AMR: []string{"pwd"}}, false)
 
 	issuer, err := fapi.ParseIssuerURL(as.ts.URL, fapi.AllowLoopbackHTTP())
 	if err != nil {

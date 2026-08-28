@@ -38,14 +38,23 @@ behaviour and negative-test expectations differ. See
 `server`'s CIBA support (`BeginBackchannelAuthentication`/
 `CompleteBackchannelAuthentication`/`ExchangeBackchannelAuthentication`,
 poll mode only) is verified by unit/integration tests, not the live
-OIDF suite: `fapi-ciba-id1-test-plan` requires MTLS-bound access
-tokens unconditionally, a requirement this module doesn't meet
-anywhere (mTLS is out of scope entirely — see
-[ARCHITECTURE.md](../ARCHITECTURE.md#conformance-strategy)). A manual,
-non-automated setup for this plan exists in
-[`server/oidf-config/README.md`](server/oidf-config/README.md#ciba-manual-only--not-part-of-automated-conformance)
-for exploratory use, but it isn't expected to pass and isn't part of
-`scripts/run-all.sh`.
+OIDF suite as its primary gate: `fapi-ciba-id1-test-plan` requires
+MTLS-bound access tokens unconditionally. Now that this module supports
+mTLS sender-constraining (RFC 8705 §3, `-mtls`), this was genuinely
+re-attempted live against `ciba-mtls.config.json` — every module now
+reaches `FINISHED` (up from an immediate suite-side config error for
+every module but discovery), with 9 PASS / 3 SKIPPED / 23 FAIL. Two
+real library gaps the attempt surfaced were fixed along the way
+(`tls_client_certificate_bound_access_tokens` metadata, and
+client-assertion `aud` acceptance being far too narrow); most of the
+remaining FAILs share one root cause — a stricter, legacy FAPI-RW §8.5
+cipher-suite requirement this binary's own (correctly BCP195-broader)
+cipher list doesn't satisfy — deliberately left open rather than
+narrowing the cipher list for one plan's sake. Full breakdown, live
+findings and reproduction steps in
+[`server/oidf-config/README.md`](server/oidf-config/README.md#ciba-manual-only--not-part-of-automated-conformance).
+Still not part of `scripts/run-all.sh` given the majority-FAILED
+result.
 
 `client`'s own CIBA support
 (`BeginBackchannelAuthentication`/`PollBackchannelAuthentication`) was
@@ -53,12 +62,19 @@ genuinely attempted, live, against the RP-side
 `fapi-ciba-id1-client-test-plan` (`cmd/conformance-client -profile=ciba`) —
 unlike the AS side, its backchannel-authentication step doesn't share
 the unconditional MTLS mandate, but its *token* endpoint does, for a
-separately confirmed reason. Result: 3 of 22 modules genuinely PASS
+separately confirmed reason. Under DPoP: 3 of 22 modules genuinely PASS
 (the ones that never reach token exchange); the rest FAIL for that one
-uniform, documented reason. See
+uniform reason. Re-attempted live with `-mtls`
+(`storage.SenderConstrainMTLS`) once `client` gained that support: the
+token-endpoint MTLS wall is now fully resolved — every module reaches
+real token exchange and correctly performs this client's own ID-token
+validation against each negative-test perturbation (bad iss/aud/signature/alg,
+expired, missing claims). The suite's own per-module grade for most of
+these is still FAIL — full credit appears to need more of the flow than
+this driver currently completes — so this is still not part of
+`scripts/run-all.sh`. See
 [`client/scripts/README.md`](client/scripts/README.md#ciba--profileciba)
-for the full breakdown; also not part of `scripts/run-all.sh` given
-the majority-FAILED result.
+for the full breakdown either way.
 
 ## Access-token format coverage
 

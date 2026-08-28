@@ -62,11 +62,11 @@ func generateKey(t *testing.T) *ecdsa.PrivateKey {
 
 func basePolicy(now time.Time) VerifyPolicy {
 	return VerifyPolicy{
-		ExpectedClientID: "client-123",
-		ExpectedAudience: "https://as.example/token",
-		Algorithm:        fapi.ES256,
-		Now:              now,
-		MaxLifetime:      2 * time.Minute,
+		ExpectedClientID:  "client-123",
+		ExpectedAudiences: []string{"https://as.example/token"},
+		Algorithm:         fapi.ES256,
+		Now:               now,
+		MaxLifetime:       2 * time.Minute,
 	}
 }
 
@@ -188,7 +188,7 @@ func TestVerifyRejectsAudienceMismatch(t *testing.T) {
 		t.Fatalf("Parse: %v", err)
 	}
 	policy := basePolicy(now)
-	policy.ExpectedAudience = "https://as.example/par"
+	policy.ExpectedAudiences = []string{"https://as.example/par"}
 	if _, err := parsed.Verify(context.Background(), &key.PublicKey, policy); !errors.Is(err, ErrAudienceMismatch) {
 		t.Fatalf("Verify(wrong audience) = %v, want ErrAudienceMismatch", err)
 	}
@@ -405,7 +405,7 @@ func TestVerifyRejectsInvalidPolicy(t *testing.T) {
 
 	cases := map[string]func(*VerifyPolicy){
 		"empty expected client id": func(p *VerifyPolicy) { p.ExpectedClientID = "" },
-		"empty expected audience":  func(p *VerifyPolicy) { p.ExpectedAudience = "" },
+		"empty expected audience":  func(p *VerifyPolicy) { p.ExpectedAudiences = nil },
 		"zero now":                 func(p *VerifyPolicy) { p.Now = time.Time{} },
 	}
 	for name, mutate := range cases {

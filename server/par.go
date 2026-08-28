@@ -213,13 +213,13 @@ func (s *Server) authenticateClient(ctx context.Context, params map[string]strin
 	}
 
 	verified, err := assertion.Verify(ctx, pub, clientassertion.VerifyPolicy{
-		ExpectedClientID: client.ID().String(),
-		ExpectedAudience: s.cfg.Issuer.String(),
-		Algorithm:        client.ClientAssertionAlgorithm(),
-		Now:              s.deps.Clock.Now(),
-		MaxLifetime:      s.cfg.Limits.MaxClientAssertionLifetime,
-		MaxClockSkew:     s.cfg.Limits.MaxClockSkew,
-		Replay:           s.clientAssertionReplayChecker(),
+		ExpectedClientID:  client.ID().String(),
+		ExpectedAudiences: s.acceptableClientAssertionAudiences(client),
+		Algorithm:         client.ClientAssertionAlgorithm(),
+		Now:               s.deps.Clock.Now(),
+		MaxLifetime:       s.cfg.Limits.MaxClientAssertionLifetime,
+		MaxClockSkew:      s.cfg.Limits.MaxClockSkew,
+		Replay:            s.clientAssertionReplayChecker(),
 	})
 	if err != nil {
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
@@ -227,6 +227,41 @@ func (s *Server) authenticateClient(ctx context.Context, params map[string]strin
 	}
 
 	return client, verified, nil
+}
+
+// acceptableClientAssertionAudiences returns the "aud" values this
+// server accepts on client's client assertion: the issuer identifier,
+// plus every client-authenticated endpoint URL this server exposes
+// (Token, PushedAuthorizationRequest, BackchannelAuthentication — the
+// same three that receive a client_assertion at all) — and, for a
+// client actually registered SenderConstrainMTLS once
+// Config.MTLSEndpoints is configured, each of those endpoints' mTLS
+// alias URL (RFC 8705 §5) too. Every one of these values unambiguously
+// identifies this same authorization server, so accepting any of them
+// is not a security relaxation, just interoperability: RFC 7523 §3
+// sanctions "the token endpoint URL" as "aud" alongside the issuer
+// identifier, and confirmed live (the OIDF conformance suite's own
+// CIBA client signs "aud" as whichever endpoint URL it is actually
+// calling — its token endpoint for one request, its
+// backchannel-authenticate endpoint for another, the plain URL or the
+// mTLS alias depending on which it last discovered) that a real client
+// takes that literally, per endpoint, not just for the token endpoint.
+func (s *Server) acceptableClientAssertionAudiences(client storage.RegisteredClient) []string {
+	auds := []string{s.cfg.Issuer.String()}
+	for _, u := range []fapi.URL{s.cfg.Endpoints.Token, s.cfg.Endpoints.PushedAuthorizationRequest, s.cfg.Endpoints.BackchannelAuthentication} {
+		if !u.IsZero() {
+			auds = append(auds, u.String())
+		}
+	}
+	if client.SenderConstrain() != storage.SenderConstrainMTLS || s.cfg.MTLSEndpoints.IsZero() {
+		return auds
+	}
+	for _, u := range []fapi.URL{s.cfg.MTLSEndpoints.Token, s.cfg.MTLSEndpoints.PushedAuthorizationRequest, s.cfg.MTLSEndpoints.BackchannelAuthentication} {
+		if !u.IsZero() {
+			auds = append(auds, u.String())
+		}
+	}
+	return auds
 }
 
 // resolveAuthorizationParameters returns the pushed authorization

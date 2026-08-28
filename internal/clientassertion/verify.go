@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto"
 	"fmt"
+	"slices"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -70,9 +71,13 @@ type VerifyPolicy struct {
 	// it exactly.
 	ExpectedClientID string
 
-	// ExpectedAudience is the endpoint URL (or issuer identifier) the
-	// assertion's aud claim must equal exactly.
-	ExpectedAudience string
+	// ExpectedAudiences is the set of endpoint URLs (or issuer
+	// identifiers) the assertion's aud claim may equal — one match is
+	// enough. Almost always a single value; a caller that also accepts
+	// requests via an RFC 8705 §5 mtls_endpoint_aliases URL passes both
+	// that alias and the issuer, since a legitimate client's assertion
+	// may target either depending on which endpoint it called.
+	ExpectedAudiences []string
 
 	// Algorithm is the algorithm this client is registered to sign
 	// assertions with. The assertion header's algorithm must equal it
@@ -112,8 +117,8 @@ func (a Assertion) Verify(ctx context.Context, pub crypto.PublicKey, policy Veri
 	if policy.ExpectedClientID == "" {
 		return VerifiedAssertion{}, fmt.Errorf("clientassertion: ExpectedClientID is empty")
 	}
-	if policy.ExpectedAudience == "" {
-		return VerifiedAssertion{}, fmt.Errorf("clientassertion: ExpectedAudience is empty")
+	if len(policy.ExpectedAudiences) == 0 {
+		return VerifiedAssertion{}, fmt.Errorf("clientassertion: ExpectedAudiences is empty")
 	}
 	if policy.Now.IsZero() {
 		return VerifiedAssertion{}, fmt.Errorf("clientassertion: Now is zero")
@@ -130,7 +135,7 @@ func (a Assertion) Verify(ctx context.Context, pub crypto.PublicKey, policy Veri
 	if c.Issuer != policy.ExpectedClientID || c.Subject != policy.ExpectedClientID {
 		return VerifiedAssertion{}, ErrIssuerSubjectMismatch
 	}
-	if c.Audience != policy.ExpectedAudience {
+	if !slices.Contains(policy.ExpectedAudiences, c.Audience) {
 		return VerifiedAssertion{}, ErrAudienceMismatch
 	}
 

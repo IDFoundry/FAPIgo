@@ -46,9 +46,14 @@ FAPI 2.0 variant gets its own config file here:
 
 Both plans also need variants `client_auth_type=private_key_jwt`,
 `sender_constrain=dpop`, `fapi_profile=plain_fapi`,
-`openid=openid_connect` — this AS never implements mTLS or DCR, so
-`client_auth_type=mtls`/`sender_constrain=mtls`/DCR modules don't apply
-(see [ARCHITECTURE.md](../../../ARCHITECTURE.md#conformance-strategy)).
+`openid=openid_connect` — client_auth_type=mtls/DCR modules still don't
+apply (this AS never implements `tls_client_auth`/dynamic client
+registration; see
+[ARCHITECTURE.md](../../../ARCHITECTURE.md#conformance-strategy)). This
+AS *does* now support `sender_constrain=mtls` (RFC 8705 §3, `-mtls`,
+`ClientConfig.SenderConstrain`) as an alternative to DPoP — neither
+`baseline.config.json` nor `message-signing.config.json` opts into it
+here, but see `ciba-mtls.config.json` below for a worked example.
 (Verified directly against the suite's variant enums and test plan
 classes — `net.openid.conformance.variant.*` and
 `net.openid.conformance.fapi2spfinal.FAPI2SPFinalTestPlan`/
@@ -261,14 +266,13 @@ flag) against the suite's **`fapi-ciba-id1-test-plan`**
 `ciba-plan.json` alongside the other two profiles' plan configs
 (idempotent the same way).
 
-**This plan cannot pass against this AS, and isn't wired into
-`../scripts/run-all.sh`.** Confirmed by an actual live run, not
-assumed: the discovery-endpoint-verification module passes cleanly
-(metadata, JWKS and algorithm advertisement are all correct), but
-every other module fails immediately — `ExtractMTLSCertificatesFromConfiguration:
-Couldn't find TLS client certificate or key for MTLS` — because the
-suite's own `AbstractFAPICIBAID1.setupPrivateKeyJwt` hardcodes an MTLS
-requirement regardless of `client_auth_type`:
+**This plan cannot pass against `ciba.config.json` (DPoP), confirmed
+live**: the discovery-endpoint-verification module passes cleanly, but
+every other module fails immediately —
+`ExtractMTLSCertificatesFromConfiguration: Couldn't find TLS client
+certificate or key for MTLS` — because the suite's own
+`AbstractFAPICIBAID1.setupPrivateKeyJwt` hardcodes an MTLS requirement
+regardless of `client_auth_type`:
 
 ```java
 // FAPI requires the use of MTLS sender constrained access tokens, so we must use
@@ -276,28 +280,92 @@ requirement regardless of `client_auth_type`:
 supportMTLSEndpointAliases = SupportMTLSEndpointAliases.class;
 ```
 
-Unlike the base FAPI2SPFinal plans above (where `sender_constrain=dpop`
-and `sender_constrain=mtls` are alternative variants — this AS only
-ever selects the DPoP one), FAPI-CIBA-ID1 has no DPoP-only variant at
-all; every module inherits this from the same abstract base class.
-Since this module never implements mTLS anywhere (see
-[ARCHITECTURE.md](../../../ARCHITECTURE.md#conformance-strategy)),
-full FAPI-CIBA-ID1 certification isn't reachable without adding it —
-a large, separate undertaking, unrelated to this AS's own CIBA
-correctness (covered instead by `server`'s unit/integration tests).
-Three consecutive module non-completions also trip the suite runner's
-own circuit breaker (`ServerUnhealthyError`) and abort the whole run,
-so this can't be worked around with `expected-warnings`/`expected-skips`
-entries either — those only apply to a module that still reaches
-`FINISHED`.
+Unlike the base FAPI2SPFinal plans above, where `sender_constrain=dpop`
+and `sender_constrain=mtls` are alternative variants, FAPI-CIBA-ID1 has
+no DPoP-only variant at all — every module inherits this requirement
+from the same abstract base class.
 
-This config exists for exploratory/manual use only — e.g. confirming
-the discovery document and the `/backchannel-authenticate` /
-`/backchannel-approve` HTTP surface behave as expected by hand, or as
-a starting point if mTLS support is ever added. Bring the container up
-with `docker compose up --build conformance-as-ciba` and drive
-`fapi-ciba-id1-test-plan` the same way as the other two plans if you
-want to reproduce this yourself; don't expect it to pass.
+### `ciba-mtls.config.json` — the genuine mTLS re-attempt
+
+Once this module gained `storage.SenderConstrainMTLS` support (RFC
+8705 §3), the wall above was worth a real re-attempt rather than
+leaving as a permanent limitation. `ciba-mtls.config.json` registers
+both clients `sender_constrain: "mtls"` and sets `mtls_listen_addr`;
+`conformance-as-ciba-mtls` in `../docker-compose.yml` runs
+`cmd/conformance-as -ciba -mtls`, exposing a second TLS listener
+(`tls.RequestClientCert`) alongside the primary one. The suite plan
+config needs its own top-level `mtls`/`mtls2` blocks (PEM cert+key,
+one **per client** — confirmed by disassembling
+`ExtractMTLSCertificatesFromConfiguration`/`ExtractMTLSCertificates2FromConfiguration`,
+since neither is documented in any bundled sample config) for the
+suite's own outbound TLS client to present.
+
+**Result of a live run: every module now reaches `FINISHED` (zero
+`INTERRUPTED`) — 9 PASS, 3 SKIPPED, 23 FAIL.** Getting this far
+surfaced two real, since-fixed library gaps, plus one still-open,
+narrower cause behind most of the 23:
+
+- **Fixed: `tls_client_certificate_bound_access_tokens` (RFC 8705
+  §3.3) was entirely missing from `server.Metadata`.** The suite's
+  very first module (`fapi-ciba-id1-discovery-end-point-verification`)
+  failed immediately on this — `mtls_endpoint_aliases` alone isn't
+  enough; a server offering cert-bound tokens must also advertise this
+  boolean. Now set alongside `MTLSEndpointAliases`, same
+  `!Config.MTLSEndpoints.IsZero()` gate (`server/metadata.go`).
+- **Fixed: client-assertion `aud` acceptance was far too narrow.**
+  `authenticateClient` only ever accepted `aud == Issuer`. Confirmed
+  live that a real client's convention varies per call and can be any
+  of: the issuer, the plain token endpoint URL, the plain
+  backchannel-authenticate endpoint URL, or (once an mTLS-bound client
+  has discovered `mtls_endpoint_aliases`) that alias URL instead of the
+  plain one — all legitimate under RFC 7523 §3 ("aud"... MAY be the
+  token endpoint URL; it only needs to identify the AS). Every module
+  past discovery failed with `invalid_client: client assertion
+  verification failed` until `acceptableClientAssertionAudiences`
+  (`server/par.go`) widened the accepted set to the issuer plus every
+  client-authenticated endpoint URL this server exposes (Token, PAR,
+  BackchannelAuthentication), plus their mTLS aliases for an
+  mTLS-bound client. This is not mTLS-specific — a DPoP-bound client
+  gets the same widened set now too (`TestPushAuthorizationRequestAcceptsTokenEndpointURLAsClientAssertionAudience`).
+- **Open, not fixed (out of scope for this pass): FAPI-RW-8.5-1/8.5-2
+  ("Server accepted a cipher that is not on the list of permitted
+  ciphers")**, `ECDHE-ECDSA-CHACHA20-POLY1305-SHA256`. This module's
+  TLS cipher-suite check enforces the older, narrower FAPI-RW §8.5
+  list (AES-128-GCM only, both ECDSA and RSA), stricter than the
+  BCP195/RFC 7525 set `cmd/conformance-as/main.go`'s own
+  `bcp195TLS12CipherSuites` already offers (which — correctly, per
+  FAPI2-SP-FINAL-5.2.2's own broader citation — also includes AES-256-GCM
+  and ChaCha20-Poly1305). Confirmed live with `openssl s_client`: Go's
+  server honors *client* cipher preference order among these mutually
+  acceptable suites, so a probe that offers ChaCha20 first gets it
+  selected, tripping this narrower check. Narrowing the shared cipher
+  list to satisfy this one legacy requirement risks nothing for the
+  now-passing baseline/message-signing plans, but wasn't attempted
+  here — a deliberate policy choice about which TLS profile this
+  binary should target, not a defect this session's mTLS work
+  introduced.
+- Also newly visible, unrelated to mTLS or the two fixes above:
+  `x-fapi-interaction-id not found in resource endpoint response
+  headers` (FAPI-R-6.2.1-11) — this module reaches the protected
+  resource step, further than any CIBA run before it, and finds this
+  header genuinely unimplemented anywhere in `resource`/`cmd/conformance-as`.
+  A real, separate gap; not addressed here.
+
+Three consecutive module non-completions also trip the suite runner's
+own circuit breaker (`ServerUnhealthyError`) and abort the whole run —
+worth knowing if reproducing this, since a config mistake early on can
+silently truncate the rest of the plan rather than reporting a normal
+per-module FAIL.
+
+Neither CIBA config is wired into `../scripts/run-all.sh` — a majority-
+FAILED run isn't a useful CI gate. Bring the container up with `docker
+compose up --build conformance-as-ciba-mtls` and drive
+`fapi-ciba-id1-test-plan` the same way as the other plans if you want
+to reproduce this yourself.
+`ciba.config.json`/`conformance-as-ciba` (DPoP) remain for
+exploratory/manual use as before — e.g. confirming the
+`/backchannel-authenticate`/`/backchannel-approve` HTTP surface by
+hand without standing up the mTLS listener too.
 
 `automated_ciba_approval_url` in `ciba-plan.json` points at this
 binary's own `/backchannel-approve?auth_req_id={auth_req_id}&action={action}`

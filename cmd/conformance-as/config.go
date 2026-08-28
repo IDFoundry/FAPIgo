@@ -5,11 +5,10 @@
 // traffic, not Go function calls — has something to test against. See
 // ARCHITECTURE.md's conformance strategy section.
 //
-// mTLS (tls_client_auth / self_signed_tls_client_auth / cnf.x5t#S256) is
-// out of scope: nothing in this module implements it, and this binary
-// only targets the profile the library actually supports —
-// private_key_jwt client authentication, under either the FAPI2 Security
-// Profile baseline or its message-signing variant.
+// Client authentication is private_key_jwt only — tls_client_auth /
+// self_signed_tls_client_auth is out of scope. mTLS sender-constrained
+// access tokens (RFC 8705 §3, cnf.x5t#S256) are supported as an
+// alternative to DPoP: see -mtls and ClientConfig.SenderConstrain.
 package main
 
 import (
@@ -36,7 +35,15 @@ import (
 // that's a legitimate choice for a real deployment in a way it isn't
 // for this repo's own conformance testing.
 type Config struct {
-	ListenAddr     string `json:"listen_addr"`
+	ListenAddr string `json:"listen_addr"`
+	// MTLSListenAddr is the second listener's bind address, required
+	// only when -mtls is passed — see main.go's own flag doc comment.
+	// It reuses the same TLS.CertFile/KeyFile as the primary listener
+	// (this server's own identity certificate doesn't change; only
+	// whether a client certificate is requested does) and is advertised
+	// via mtls_endpoint_aliases (RFC 8705 §5) at the same host as Issuer,
+	// with this listener's own port.
+	MTLSListenAddr string `json:"mtls_listen_addr,omitempty"`
 	Issuer         string `json:"issuer"`
 	Profile        string `json:"profile"` // "fapi2-security" | "fapi2-security-message-signing"
 	DefaultSubject string `json:"default_subject"`
@@ -75,6 +82,13 @@ type ClientConfig struct {
 	BackchannelAuthenticationRequestAlgorithm string   `json:"backchannel_authentication_request_algorithm,omitempty"`
 	AllowedScopes                             []string `json:"allowed_scopes"`
 
+	// SenderConstrain selects how this client's access tokens are
+	// sender-constrained: "dpop" (the default, applied when empty) or
+	// "mtls" (RFC 8705 §3 — requires this binary to be running with
+	// -mtls). Client *authentication* is unaffected either way — still
+	// always private_key_jwt.
+	SenderConstrain string `json:"sender_constrain,omitempty"`
+
 	JWKS    json.RawMessage `json:"jwks,omitempty"`
 	JWKSURI string          `json:"jwks_uri,omitempty"`
 }
@@ -98,12 +112,20 @@ func LoadConfig(path string) (Config, error) {
 // the storage/key implementations, and main's own listener setup need.
 type ResolvedConfig struct {
 	ListenAddr        string
+	MTLSListenAddr    string
 	Issuer            fapi.URL
 	Profile           server.Profile
 	DefaultSubject    string
 	Algorithms        server.AlgorithmPolicy
 	Limits            server.Limits
 	AccessTokenFormat AccessTokenFormat
+
+	// MTLSEndpoints is not populated by Resolve — it depends on
+	// -mtls/-mtls-listen, runtime flags Resolve never sees (the same
+	// reason AccessTokenFormat is threaded as an explicit Resolve
+	// parameter rather than a Config field). main.go fills it in after
+	// Resolve returns, once it knows whether -mtls was passed.
+	MTLSEndpoints server.MTLSEndpoints
 
 	// Clients and ClientKeys are two parallel slices, joined by
 	// ClientID: Clients feeds memstore.NewClientRepository (is this
@@ -127,6 +149,7 @@ type ResolvedConfig struct {
 func (cfg Config) Resolve(allowLoopbackHTTP bool, accessTokenFormat AccessTokenFormat) (ResolvedConfig, error) {
 	var out ResolvedConfig
 	out.ListenAddr = cfg.ListenAddr
+	out.MTLSListenAddr = cfg.MTLSListenAddr
 	out.DefaultSubject = cfg.DefaultSubject
 	out.TLSCertFile = cfg.TLS.CertFile
 	out.TLSKeyFile = cfg.TLS.KeyFile
@@ -247,6 +270,18 @@ func resolveClient(c ClientConfig) (storage.RegisteredClient, ephemeral.ClientKe
 		return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, fmt.Errorf("exactly one of jwks or jwks_uri must be set")
 	}
 
+	senderConstrain := storage.SenderConstrainDPoP
+	if c.SenderConstrain != "" {
+		switch c.SenderConstrain {
+		case "dpop":
+			senderConstrain = storage.SenderConstrainDPoP
+		case "mtls":
+			senderConstrain = storage.SenderConstrainMTLS
+		default:
+			return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, fmt.Errorf("sender_constrain must be %q or %q, got %q", "dpop", "mtls", c.SenderConstrain)
+		}
+	}
+
 	redirectURIs := make([]fapi.RegisteredRedirectURI, len(c.RedirectURIs))
 	for i, u := range c.RedirectURIs {
 		redirectURIs[i] = fapi.RegisteredRedirectURI(u)
@@ -259,7 +294,8 @@ func resolveClient(c ClientConfig) (storage.RegisteredClient, ephemeral.ClientKe
 		ClientAssertionAlgorithm: assertionAlg,
 		RequestObjectAlgorithm:   requestObjectAlg,
 		BackchannelAuthenticationRequestAlgorithm: backchannelAuthenticationRequestAlg,
-		AllowedScopes: c.AllowedScopes,
+		AllowedScopes:   c.AllowedScopes,
+		SenderConstrain: senderConstrain,
 	})
 	if err != nil {
 		return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, err

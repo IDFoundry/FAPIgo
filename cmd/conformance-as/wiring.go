@@ -97,11 +97,12 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 		limits.BackchannelAuthenticationPollInterval = backchannelAuthenticationPollInterval
 	}
 	srvCfg := server.Config{
-		Issuer:     resolved.Issuer,
-		Endpoints:  endpoints,
-		Profile:    resolved.Profile,
-		Algorithms: algorithms,
-		Limits:     limits,
+		Issuer:        resolved.Issuer,
+		Endpoints:     endpoints,
+		MTLSEndpoints: resolved.MTLSEndpoints,
+		Profile:       resolved.Profile,
+		Algorithms:    algorithms,
+		Limits:        limits,
 		// These storage implementations are honestly non-durable
 		// in-memory maps. AssuranceProduction would make server.New
 		// reject them via checkStoreAssurance — do not change this to

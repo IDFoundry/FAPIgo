@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -66,6 +67,8 @@ func main() {
 	dpopNonceChallenge := flag.Bool("dpop-nonce-challenge", false, "require and rotate a DPoP nonce on /par, /token and /userinfo (RFC 9449 §8/§9) — off by default, since the OIDF suite's own driver may not retry on the challenge")
 	userinfoSigning := flag.Bool("userinfo-signing", false, "sign /userinfo responses as a JWS (OIDC Core §5.3.2), using the same algorithm as ID tokens — off by default; the FAPI 2.0 Security Profile doesn't require this")
 	ciba := flag.Bool("ciba", false, "enable the CIBA backchannel authentication endpoint (poll mode only) — off by default; not part of the FAPI 2.0 Security Profile itself")
+	mtls := flag.Bool("mtls", false, "enable a second TLS listener (mtls_listen_addr in the config file, or -mtls-listen) that requests but does not require a client certificate, advertised via mtls_endpoint_aliases (RFC 8705 §5) for a client registered sender_constrain=mtls — off by default; requires real TLS, incompatible with -insecure-http")
+	mtlsListenOverride := flag.String("mtls-listen", "", "override mtls_listen_addr from the config file")
 	flag.Parse()
 
 	if *configPath == "" {
@@ -85,6 +88,9 @@ func main() {
 	if *keyOverride != "" {
 		rawCfg.TLS.KeyFile = *keyOverride
 	}
+	if *mtlsListenOverride != "" {
+		rawCfg.MTLSListenAddr = *mtlsListenOverride
+	}
 
 	resolved, err := rawCfg.Resolve(*insecureHTTP, AccessTokenFormat(*accessTokenFormat))
 	if err != nil {
@@ -92,6 +98,18 @@ func main() {
 	}
 	if *insecureHTTP && !isLoopbackAddr(resolved.ListenAddr) {
 		log.Fatal("conformance-as: -insecure-http requires a loopback listen_addr (e.g. 127.0.0.1:8443)")
+	}
+	if *mtls {
+		if *insecureHTTP {
+			log.Fatal("conformance-as: -mtls cannot be combined with -insecure-http (a client certificate requires a real TLS connection)")
+		}
+		if resolved.MTLSListenAddr == "" {
+			log.Fatal("conformance-as: -mtls requires mtls_listen_addr in the config file, or -mtls-listen")
+		}
+		resolved.MTLSEndpoints, err = buildMTLSEndpoints(resolved.Issuer, resolved.MTLSListenAddr, *ciba)
+		if err != nil {
+			log.Fatalf("conformance-as: mtls: %v", err)
+		}
 	}
 
 	mux, err := newServerMux(resolved, *insecureHTTP, *dpopNonceChallenge, *userinfoSigning, *ciba)
@@ -106,6 +124,36 @@ func main() {
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 
+	if *mtls {
+		mtlsCert, err := tls.LoadX509KeyPair(resolved.TLSCertFile, resolved.TLSKeyFile)
+		if err != nil {
+			log.Fatalf("conformance-as: mtls: load cert: %v", err)
+		}
+		mtlsServer := &http.Server{
+			Addr:    resolved.MTLSListenAddr,
+			Handler: mux,
+			TLSConfig: &tls.Config{
+				MinVersion:   tls.VersionTLS12,
+				CipherSuites: bcp195TLS12CipherSuites,
+				Certificates: []tls.Certificate{mtlsCert},
+				// Requested, not required: this listener still serves
+				// non-mTLS clients too (same mux, same server.Server) —
+				// only a client actually registered
+				// storage.SenderConstrainMTLS is rejected for presenting
+				// none, and that check happens inside server/resource,
+				// not here.
+				ClientAuth: tls.RequestClientCert,
+			},
+			ReadHeaderTimeout: readHeaderTimeout,
+		}
+		go func() {
+			log.Printf("conformance-as: mtls listener on %s", resolved.MTLSListenAddr)
+			if err := mtlsServer.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("conformance-as: mtls: %v", err)
+			}
+		}()
+	}
+
 	log.Printf("conformance-as: listening on %s (issuer %s)", resolved.ListenAddr, resolved.Issuer.String())
 	if *insecureHTTP {
 		err = httpServer.ListenAndServe()
@@ -115,6 +163,44 @@ func main() {
 	if err != nil && err != http.ErrServerClosed {
 		log.Fatalf("conformance-as: %v", err)
 	}
+}
+
+// buildMTLSEndpoints derives the RFC 8705 §5 mtls_endpoint_aliases URLs
+// from issuer and mtlsListenAddr: same host as issuer, mtlsListenAddr's
+// own port. ciba gates whether a backchannel-authentication alias is
+// included, mirroring buildEndpoints/newServerMux's own -ciba gating.
+func buildMTLSEndpoints(issuer fapi.URL, mtlsListenAddr string, ciba bool) (server.MTLSEndpoints, error) {
+	_, mtlsPort, err := net.SplitHostPort(mtlsListenAddr)
+	if err != nil {
+		return server.MTLSEndpoints{}, fmt.Errorf("mtls_listen_addr: %w", err)
+	}
+	parsedIssuer, err := url.Parse(issuer.String())
+	if err != nil {
+		return server.MTLSEndpoints{}, fmt.Errorf("issuer: %w", err)
+	}
+	base := *parsedIssuer
+	base.Host = net.JoinHostPort(parsedIssuer.Hostname(), mtlsPort)
+
+	build := func(path string) (fapi.URL, error) {
+		return fapi.ParseEndpointURL(base.String() + path)
+	}
+	token, err := build("/token")
+	if err != nil {
+		return server.MTLSEndpoints{}, fmt.Errorf("mtls token endpoint: %w", err)
+	}
+	par, err := build("/par")
+	if err != nil {
+		return server.MTLSEndpoints{}, fmt.Errorf("mtls par endpoint: %w", err)
+	}
+	out := server.MTLSEndpoints{Token: token, PushedAuthorizationRequest: par}
+	if ciba {
+		backchannel, err := build("/backchannel-authenticate")
+		if err != nil {
+			return server.MTLSEndpoints{}, fmt.Errorf("mtls backchannel authentication endpoint: %w", err)
+		}
+		out.BackchannelAuthentication = backchannel
+	}
+	return out, nil
 }
 
 // buildEndpoints derives this server's four endpoint URLs from issuer by

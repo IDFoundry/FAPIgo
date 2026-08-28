@@ -512,21 +512,37 @@ CIBA (`server.BeginBackchannelAuthentication`/`CompleteBackchannelAuthentication
 `ExchangeBackchannelAuthentication`) is deliberately not part of this
 automated certification loop. It implements base OIDC CIBA and
 FAPI-CIBA's other requirements (a mandatory signed authentication
-request with `jti`/`nbf`, poll-mode-only delivery, DPoP-bound tokens),
-verified by unit/integration tests instead — but the OIDF suite's own
-`fapi-ciba-id1-test-plan` requires MTLS-bound access tokens
-unconditionally, even under `client_auth_type=private_key_jwt`
-(confirmed directly from the suite's own
-`AbstractFAPICIBAID1.setupPrivateKeyJwt`, not inferred): "FAPI requires
-the use of MTLS sender constrained access tokens, so we must use the
-MTLS version of the token endpoint even when using private_key_jwt
-client authentication." mTLS is out of scope for this module
-everywhere else already (see `cmd/conformance-as`'s own doc comment),
-so this isn't a gap specific to CIBA — it's the same boundary applied
-consistently, just the first place a suite plan makes it a hard
-prerequisite rather than an alternative variant. `conformance/server/oidf-config/README.md`'s
-own CIBA section covers the manual (non-automated) setup available for
-exploratory use.
+request with `jti`/`nbf`, poll-mode-only delivery, DPoP- or
+mTLS-bound tokens), verified by unit/integration tests instead — but
+the OIDF suite's own `fapi-ciba-id1-test-plan` requires MTLS-bound
+access tokens unconditionally, even under
+`client_auth_type=private_key_jwt` (confirmed directly from the
+suite's own `AbstractFAPICIBAID1.setupPrivateKeyJwt`, not inferred):
+"FAPI requires the use of MTLS sender constrained access tokens, so we
+must use the MTLS version of the token endpoint even when using
+private_key_jwt client authentication."
+
+This module now supports mTLS sender-constrained access tokens (RFC
+8705 §3, `storage.SenderConstrainMTLS`, `-mtls`) as an alternative to
+DPoP — client *authentication* is still private_key_jwt only;
+`tls_client_auth`/dynamic client registration remain out of scope (see
+`cmd/conformance-as`'s own doc comment). This made the CIBA wall above
+worth a genuine live re-attempt rather than a permanent limitation:
+against `conformance/server/oidf-config/ciba-mtls.config.json`, every
+module now reaches `FINISHED` (up from an immediate suite-side config
+error for every module past discovery) — 9 PASS, 3 SKIPPED, 23 FAIL.
+The attempt surfaced and fixed two real library gaps
+(`server.Metadata` was missing `tls_client_certificate_bound_access_tokens`,
+RFC 8705 §3.3; `authenticateClient`'s client-assertion `aud`
+acceptance was far narrower than RFC 7523 §3 actually requires — see
+`server/par.go`'s `acceptableClientAssertionAudiences`, not
+mTLS-specific despite being found here). Most remaining FAILs share
+one deliberately-left-open root cause — this plan's TLS check enforces
+the older, narrower FAPI-RW §8.5 cipher-suite list, stricter than the
+BCP195/RFC 7525 set `cmd/conformance-as` already offers per
+FAPI2-SP-FINAL-5.2.2's own broader citation. Full breakdown in
+`conformance/server/oidf-config/README.md`'s own CIBA section, which
+also covers the DPoP-only config's manual (non-automated) setup.
 
 `client`'s own CIBA support
 (`BeginBackchannelAuthentication`/`PollBackchannelAuthentication`) was
@@ -560,9 +576,24 @@ deployment shape) impossible to construct at all. Fixed by making the
 pair conditionally required — mirroring
 `Endpoints.BackchannelAuthentication`'s own optionality — with
 `client.New` now requiring at least one of the two flows to be
-configured. `conformance/client/scripts/README.md`'s own CIBA section
-covers running this driver for exploratory use; it isn't wired into
-any automated pass/fail gate given the majority-FAILED result.
+configured.
+
+Once `client.Config` gained `storage.SenderConstrainMTLS` support, the
+token-endpoint MTLS wall above was worth a genuine re-attempt too
+(`cmd/conformance-client -profile=ciba -mtls`, a throwaway self-signed
+client certificate in place of a DPoP proof). **Confirmed live: fully
+resolved — never hit again.** Every module now reaches real token
+exchange and this client's own `ValidateIDToken` correctly rejects
+every negative-test perturbation the suite sends (bad `iss`/`aud`/
+signature/`alg`, expired, missing claims) — genuine, correct client
+behavior, the same as against any other AS. The suite's own per-module
+grade for most of these is still FAIL; full credit for a negative
+ID-token test in this plan appears to need more of the flow than this
+driver currently completes, not chased further here.
+`conformance/client/scripts/README.md`'s own CIBA section covers
+running this driver (with or without `-mtls`) for exploratory use; it
+isn't wired into any automated pass/fail gate given the still-majority-FAILED
+result.
 
 ## What is and isn't shared
 

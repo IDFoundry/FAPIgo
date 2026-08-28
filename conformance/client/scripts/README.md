@@ -37,6 +37,7 @@ generated in-process, once per run, and never persisted.
 go run ./cmd/conformance-client -profile=baseline
 go run ./cmd/conformance-client -profile=message-signing
 go run ./cmd/conformance-client -profile=ciba
+go run ./cmd/conformance-client -profile=ciba -mtls
 ```
 
 - `-profile` selects which plan to run — `baseline`
@@ -47,6 +48,9 @@ go run ./cmd/conformance-client -profile=ciba
   its own section below; unlike the other two, most of its modules are
   expected to FAIL, for a confirmed, documented reason, not a driver
   bug). Defaults to `baseline`.
+- `-mtls`, with `-profile=ciba` only: use `storage.SenderConstrainMTLS`
+  (a throwaway self-signed client certificate) instead of DPoP — see
+  this profile's own section below. Ignored for `baseline`/`message-signing`.
 - `-suite` overrides the suite's base URL. Defaults to
   `https://localhost.emobix.co.uk:8443/`, the same dev-mode instance
   `conformance/server`'s own scripts target.
@@ -173,8 +177,9 @@ which is entirely unreachable without MTLS support this module doesn't
 have — the backchannel authentication step itself is genuinely
 attemptable under `client_auth_type=private_key_jwt`.
 
-**Result of a live run: 3 of 22 modules PASS, 19 FAIL** — for one
-single, confirmed, uniform reason, not a grab-bag of unrelated issues:
+**Result of a DPoP-only (`sender_constrain=dpop`) live run: 3 of 22
+modules PASS, 19 FAIL** — for one single, confirmed, uniform reason,
+not a grab-bag of unrelated issues:
 
 - **PASS** (3): `fapi-ciba-id1-client-invalid-missing-authreqid-test`,
   `-invalid-missing-expiresin-test`, `-invalid-unknown-user-id-test` —
@@ -192,10 +197,46 @@ single, confirmed, uniform reason, not a grab-bag of unrelated issues:
   the variant. So the token endpoint carries the same MTLS wall the
   AS-side plan has everywhere, even though the backchannel endpoint
   doesn't; every module that calls `PollBackchannelAuthentication` at
-  least once hits it. mTLS is out of scope for this module everywhere
-  else already (see ARCHITECTURE.md's own Conformance strategy
-  section) — this isn't worked around, and this profile is not part of
-  any automated pass/fail gate given the majority-FAILED result.
+  least once hits it.
+
+### `-mtls`: the genuine re-attempt
+
+Once `client.Config.SenderConstrain` gained `storage.SenderConstrainMTLS`
+support (RFC 8705 §3), the token-endpoint wall above was worth a real
+re-attempt. `-profile=ciba -mtls` presents a throwaway self-signed
+client certificate (`mtls.go`'s `selfSignedClientCert`) instead of a
+DPoP proof, and redirects to `discovered.MTLSEndpointAliases` for the
+token/backchannel calls once discovery advertises them.
+
+**Confirmed live: the token-endpoint MTLS wall is fully resolved —
+never hit again in a full run.** Every module that used to fail with
+"Token endpoint must be called over an mTLS secured connection" now
+genuinely reaches token exchange and performs this client's own real
+ID-token validation duties: `fapi-ciba-id1-client-invalid-iss-test`
+correctly rejects a bad `iss`, `-invalid-aud-test`/`-invalid-secondary-aud-test`
+a bad `aud`, `-invalid-signature-test` a bad signature,
+`-invalid-null-alg-test`/`-invalid-alternate-alg-test` a malformed or
+disallowed `alg`, `-invalid-expired-exp-test` an expired token,
+`-invalid-missing-aud-test`/`-invalid-missing-exp-test`/`-invalid-missing-iss-test`
+a missing required claim — each one this client's own `ValidateIDToken`
+catching exactly the fault the module name says, the same way it
+already does against every other AS this module talks to.
+
+The suite's own per-module grade for most of these is still FAIL, not
+PASS — full credit for a negative ID-token test in this plan appears to
+require more of the flow than this driver currently completes (e.g.
+still calling the resource endpoint and reporting the client-side
+rejection there), which wasn't chased further this pass. The 3
+pre-token-exchange PASSes are unchanged. One run also caught a stale
+"alias conflict" interruption on a module whose token exchange
+succeeded slower than this driver's own `cibaMaxPolls` budget, purely a
+same-process back-to-back-runs artifact of this driver (see other
+gotchas already documented for this suite elsewhere in this repo), not
+a protocol defect.
+
+Not part of any automated pass/fail gate given the still-majority-FAILED
+result either way — this section documents what a genuine attempt found,
+the same rigor whether or not it fully passes.
 
 Two gotchas specific to this plan, beyond the ones listed above for the
 baseline/message-signing profiles:

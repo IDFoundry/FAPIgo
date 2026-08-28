@@ -26,7 +26,7 @@ func (s *Server) encryptIDToken(ctx context.Context, clientID fapi.ClientID, key
 		return "", fmt.Errorf("server: id token encryption content encryption algorithm %v is not permitted", contentEncryption)
 	}
 
-	key, err := s.resolveClientEncryptionKey(ctx, clientID, keyManagement)
+	key, err := s.resolveClientEncryptionKey(ctx, clientID, keys.IDTokenEncryption, keyManagement)
 	if err != nil {
 		return "", fmt.Errorf("resolve client encryption key: %w", err)
 	}
@@ -45,15 +45,15 @@ func (s *Server) encryptIDToken(ctx context.Context, clientID fapi.ClientID, key
 	return compact, nil
 }
 
-// resolveClientEncryptionKey resolves clientID's encryption key for alg
-// — the encryption-side counterpart of resolveClientKey (par.go). The
-// server never pins a specific kid of its own accord (unlike verifying
-// a client-presented assertion/proof, there is no incoming header to
-// read one from), so it accepts the first key ResolveEncryptionKeys
-// returns for the requested algorithm.
-func (s *Server) resolveClientEncryptionKey(ctx context.Context, clientID fapi.ClientID, alg fapi.KeyManagementAlgorithm) (keys.ClientEncryptionKey, error) {
+// resolveClientEncryptionKey resolves clientID's encryption key for
+// purpose/alg — the encryption-side counterpart of resolveClientKey
+// (par.go). The server never pins a specific kid of its own accord
+// (unlike verifying a client-presented assertion/proof, there is no
+// incoming header to read one from), so it accepts the first key
+// ResolveEncryptionKeys returns for the requested algorithm.
+func (s *Server) resolveClientEncryptionKey(ctx context.Context, clientID fapi.ClientID, purpose keys.ClientEncryptionPurpose, alg fapi.KeyManagementAlgorithm) (keys.ClientEncryptionKey, error) {
 	set, err := s.deps.ClientEncryptionKeys.ResolveEncryptionKeys(ctx, keys.ClientEncryptionKeyRequest{
-		ClientID: clientID, Purpose: keys.IDTokenEncryption, Algorithm: alg,
+		ClientID: clientID, Purpose: purpose, Algorithm: alg,
 	})
 	if err != nil {
 		return keys.ClientEncryptionKey{}, err

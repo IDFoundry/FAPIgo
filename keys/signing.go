@@ -10,7 +10,7 @@ import (
 // SigningPurpose is a closed set of reasons a party might need to sign
 // something with its own key, so an implementation can select different
 // keys (or apply different rotation/HSM policy) per purpose. The first
-// three are server purposes; the last three are client purposes — both
+// four are server purposes; the last three are client purposes — both
 // roles use the same KeyManager contract (see ARCHITECTURE.md design
 // rule 5), never a crypto.Signer or raw private key.
 type SigningPurpose uint8
@@ -26,6 +26,9 @@ const (
 
 	// IDTokenSigning signs an OIDC ID token.
 	IDTokenSigning
+
+	// UserInfoSigning signs a UserInfo response (OIDC Core §5.3.2).
+	UserInfoSigning
 
 	// ClientAuthentication signs a private_key_jwt client assertion.
 	ClientAuthentication

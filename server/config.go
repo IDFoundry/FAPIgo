@@ -93,6 +93,25 @@ type AlgorithmPolicy struct {
 	// of what any individual RegisteredClient's own fields say.
 	IDTokenEncryptionKeyManagement     KeyManagementAlgorithmSet
 	IDTokenEncryptionContentEncryption ContentEncryptionAlgorithmSet
+
+	// UserInfo is the single algorithm this server signs UserInfo
+	// responses with (OIDC Core §5.3.2), for an embedder's own UserInfo
+	// handler to request via SignUserInfoResponse. Zero (the default)
+	// means this server never signs UserInfo responses — most
+	// deployments return plain JSON instead, the same "opt-in, no
+	// implicit default" precedent already used for ID token encryption.
+	UserInfo fapi.SignatureAlgorithm
+
+	// UserInfoEncryptionKeyManagement/UserInfoEncryptionContentEncryption
+	// are the server-wide allow-lists for encrypted UserInfo responses,
+	// mirroring IDTokenEncryptionKeyManagement/ContentEncryption exactly
+	// but independent of them — a client's UserInfo encryption
+	// preference is its own separate OIDC registration
+	// (userinfo_encrypted_response_alg/enc), not a reuse of its ID token
+	// one. Both empty (the default) means this server never encrypts
+	// UserInfo responses.
+	UserInfoEncryptionKeyManagement     KeyManagementAlgorithmSet
+	UserInfoEncryptionContentEncryption ContentEncryptionAlgorithmSet
 }
 
 // Endpoints are this server's own endpoint URLs: the expected

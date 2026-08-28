@@ -138,6 +138,53 @@ func TestMetadataAdvertisesIDTokenEncryptionWhenConfigured(t *testing.T) {
 	}
 }
 
+// TestMetadataOmitsUserInfoAlgorithmsWhenNotConfigured confirms a server
+// that never enabled UserInfo signing/encryption (the default, and the
+// common case) doesn't advertise any of the three fields — OIDC
+// Discovery 1.0 §3 leaves them all optional/absent in that case.
+func TestMetadataOmitsUserInfoAlgorithmsWhenNotConfigured(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	md := h.server.Metadata(context.Background())
+
+	if len(md.UserinfoSigningAlgValuesSupported) != 0 {
+		t.Fatalf("UserinfoSigningAlgValuesSupported = %v, want empty", md.UserinfoSigningAlgValuesSupported)
+	}
+	if len(md.UserinfoEncryptionAlgValuesSupported) != 0 {
+		t.Fatalf("UserinfoEncryptionAlgValuesSupported = %v, want empty", md.UserinfoEncryptionAlgValuesSupported)
+	}
+	if len(md.UserinfoEncryptionEncValuesSupported) != 0 {
+		t.Fatalf("UserinfoEncryptionEncValuesSupported = %v, want empty", md.UserinfoEncryptionEncValuesSupported)
+	}
+}
+
+// TestMetadataAdvertisesUserInfoAlgorithmsWhenConfigured confirms the
+// server-wide Config.Algorithms.UserInfo* values are what's advertised —
+// the same conditional-field shape already used for ID token encryption.
+func TestMetadataAdvertisesUserInfoAlgorithmsWhenConfigured(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Algorithms.UserInfo = fapi.ES256
+	cfg.Algorithms.UserInfoEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.RSAOAEP256, fapi.ECDHESA256KW}
+	cfg.Algorithms.UserInfoEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{fapi.A256GCM}
+	deps := validDependencies()
+	deps.ClientEncryptionKeys = fakeClientEncryptionKeySource{}
+
+	srv, err := server.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	md := srv.Metadata(context.Background())
+
+	if !containsString(md.UserinfoSigningAlgValuesSupported, "ES256") || len(md.UserinfoSigningAlgValuesSupported) != 1 {
+		t.Fatalf("UserinfoSigningAlgValuesSupported = %v, want [ES256]", md.UserinfoSigningAlgValuesSupported)
+	}
+	if !containsString(md.UserinfoEncryptionAlgValuesSupported, "RSA-OAEP-256") || !containsString(md.UserinfoEncryptionAlgValuesSupported, "ECDH-ES+A256KW") {
+		t.Fatalf("UserinfoEncryptionAlgValuesSupported = %v, want to contain RSA-OAEP-256 and ECDH-ES+A256KW", md.UserinfoEncryptionAlgValuesSupported)
+	}
+	if !containsString(md.UserinfoEncryptionEncValuesSupported, "A256GCM") {
+		t.Fatalf("UserinfoEncryptionEncValuesSupported = %v, want to contain A256GCM", md.UserinfoEncryptionEncValuesSupported)
+	}
+}
+
 // TestMetadataMarshalJSONUsesDiscoveryFieldNames confirms server.Metadata
 // is directly JSON-marshalable using RFC 8414/OIDC Discovery's own
 // snake_case field names, guarding against a renamed/added field silently

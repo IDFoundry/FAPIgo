@@ -249,6 +249,77 @@ func TestNewRequiresClientEncryptionKeysWhenIDTokenEncryptionConfigured(t *testi
 	}
 }
 
+// TestNewRejectsInvalidUserInfoConfig mirrors
+// TestNewRejectsInvalidIDTokenEncryptionConfig for Algorithms.UserInfo/
+// UserInfoEncryptionKeyManagement/UserInfoEncryptionContentEncryption —
+// a separate, independent field trio, not a reuse of the ID token one.
+func TestNewRejectsInvalidUserInfoConfig(t *testing.T) {
+	cases := map[string]func(*server.Config){
+		"invalid userinfo signing alg": func(c *server.Config) {
+			c.Algorithms.UserInfo = fapi.SignatureAlgorithm(99)
+		},
+		"key mgmt without content enc": func(c *server.Config) {
+			c.Algorithms.UserInfoEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.RSAOAEP256}
+		},
+		"content enc without key mgmt": func(c *server.Config) {
+			c.Algorithms.UserInfoEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{fapi.A256GCM}
+		},
+		"invalid key mgmt alg": func(c *server.Config) {
+			c.Algorithms.UserInfoEncryptionKeyManagement = server.KeyManagementAlgorithmSet{0}
+			c.Algorithms.UserInfoEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{fapi.A256GCM}
+		},
+		"invalid content enc alg": func(c *server.Config) {
+			c.Algorithms.UserInfoEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.RSAOAEP256}
+			c.Algorithms.UserInfoEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{0}
+		},
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg := validConfig(t)
+			mutate(&cfg)
+			deps := validDependencies()
+			deps.ClientEncryptionKeys = fakeClientEncryptionKeySource{}
+			if _, err := server.New(cfg, deps); err == nil {
+				t.Fatalf("New(%s) = nil error, want error", name)
+			}
+		})
+	}
+}
+
+// TestNewAcceptsValidUserInfoConfig is the positive counterpart of
+// TestNewRejectsInvalidUserInfoConfig.
+func TestNewAcceptsValidUserInfoConfig(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Algorithms.UserInfo = fapi.ES256
+	cfg.Algorithms.UserInfoEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.RSAOAEP256}
+	cfg.Algorithms.UserInfoEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{fapi.A256GCM}
+	deps := validDependencies()
+	deps.ClientEncryptionKeys = fakeClientEncryptionKeySource{}
+
+	if _, err := server.New(cfg, deps); err != nil {
+		t.Fatalf("New(valid userinfo config): %v", err)
+	}
+}
+
+// TestNewRequiresClientEncryptionKeysWhenUserInfoEncryptionConfigured
+// mirrors TestNewRequiresClientEncryptionKeysWhenIDTokenEncryptionConfigured
+// for the UserInfo encryption allow-list.
+func TestNewRequiresClientEncryptionKeysWhenUserInfoEncryptionConfigured(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Algorithms.UserInfoEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.RSAOAEP256}
+	cfg.Algorithms.UserInfoEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{fapi.A256GCM}
+	deps := validDependencies()
+
+	if _, err := server.New(cfg, deps); err == nil {
+		t.Fatalf("New(userinfo encryption configured, no client encryption keys) = nil error, want error")
+	}
+
+	deps.ClientEncryptionKeys = fakeClientEncryptionKeySource{}
+	if _, err := server.New(cfg, deps); err != nil {
+		t.Fatalf("New(userinfo encryption configured, with client encryption keys): %v", err)
+	}
+}
+
 func TestNewRequiresAuditUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = server.AssuranceProduction

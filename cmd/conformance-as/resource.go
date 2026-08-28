@@ -6,10 +6,12 @@ import (
 	"net/http"
 	"net/url"
 
+	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/keys/ephemeral"
 	fapires "github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/server"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // selfIssuerKeySource resolves this same process's own access-token
@@ -55,7 +57,13 @@ func (s selfIssuerKeySource) ResolveIssuerKeys(ctx context.Context, req keys.Iss
 // used as the DPoP proof's expected "htu" — not read from the incoming
 // request's Host header, matching how this binary's other endpoints
 // (server.Endpoints) are never inferred from it either.
-func userinfoHandler(verifier *fapires.Verifier, userinfoURL *url.URL, identityClaims staticIdentityClaims) http.HandlerFunc {
+//
+// userinfoSigning, when true (main.go's -userinfo-signing flag), signs
+// the response as a JWS via srv.SignUserInfoResponse instead of
+// returning plain JSON, serving Content-Type: application/jwt per OIDC
+// Core §5.3.2 — the worked example proving server.Config.Algorithms.UserInfo
+// actually interoperates with client.FetchUserInfo end to end.
+func userinfoHandler(srv *server.Server, verifier *fapires.Verifier, userinfoURL *url.URL, identityClaims staticIdentityClaims, clients storage.ClientRepository, userinfoSigning bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		dpopProof, ok := singleDPoPHeader(r)
 		if !ok {
@@ -102,14 +110,35 @@ func userinfoHandler(verifier *fapires.Verifier, userinfoURL *url.URL, identityC
 			writeResourceErrorRaw(w, http.StatusInternalServerError, "server_error", "failed to resolve identity claims")
 			return
 		}
-		body := make(map[string]any, len(claims)+1)
+		subJSON, err := json.Marshal(authCtx.Subject)
+		if err != nil {
+			writeResourceErrorRaw(w, http.StatusInternalServerError, "server_error", "failed to encode subject")
+			return
+		}
+		body := make(map[string]json.RawMessage, len(claims))
 		for k, v := range claims {
 			body[k] = v
 		}
-		body["sub"] = authCtx.Subject
+		body["sub"] = subJSON
 
 		if authCtx.NextDPoPNonce != "" {
 			w.Header().Set("DPoP-Nonce", authCtx.NextDPoPNonce)
+		}
+
+		if userinfoSigning {
+			client, err := clients.ResolveClient(r.Context(), fapi.ClientID(authCtx.ClientID))
+			if err != nil {
+				writeResourceErrorRaw(w, http.StatusInternalServerError, "server_error", "failed to resolve client")
+				return
+			}
+			signed, srvErr := srv.SignUserInfoResponse(r.Context(), client, body)
+			if srvErr != nil {
+				writeResourceErrorRaw(w, http.StatusInternalServerError, "server_error", "failed to sign userinfo response")
+				return
+			}
+			w.Header().Set("Content-Type", "application/jwt")
+			_, _ = w.Write([]byte(signed))
+			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(body)

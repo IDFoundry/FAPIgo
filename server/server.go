@@ -92,6 +92,24 @@ func validateConfig(cfg Config) error {
 			return fmt.Errorf("server: config: algorithms.id_token_encryption_content_encryption contains an invalid algorithm")
 		}
 	}
+	if cfg.Algorithms.UserInfo != 0 && !cfg.Algorithms.UserInfo.IsValid() {
+		return fmt.Errorf("server: config: algorithms.user_info contains an invalid algorithm")
+	}
+	userInfoEncKeyMgmtSet := len(cfg.Algorithms.UserInfoEncryptionKeyManagement) > 0
+	userInfoEncContentEncSet := len(cfg.Algorithms.UserInfoEncryptionContentEncryption) > 0
+	if userInfoEncKeyMgmtSet != userInfoEncContentEncSet {
+		return fmt.Errorf("server: config: algorithms.user_info_encryption_key_management and algorithms.user_info_encryption_content_encryption must both be set, or neither")
+	}
+	for _, a := range cfg.Algorithms.UserInfoEncryptionKeyManagement {
+		if !a.IsValid() {
+			return fmt.Errorf("server: config: algorithms.user_info_encryption_key_management contains an invalid algorithm")
+		}
+	}
+	for _, a := range cfg.Algorithms.UserInfoEncryptionContentEncryption {
+		if !a.IsValid() {
+			return fmt.Errorf("server: config: algorithms.user_info_encryption_content_encryption contains an invalid algorithm")
+		}
+	}
 
 	if cfg.Limits.PushedRequestLifetime <= 0 {
 		return fmt.Errorf("server: config: limits.pushed_request_lifetime must be positive")
@@ -203,6 +221,10 @@ func validateDependencies(cfg Config, deps Dependencies) error {
 	idTokenEncEnabled := len(cfg.Algorithms.IDTokenEncryptionKeyManagement) > 0 || len(cfg.Algorithms.IDTokenEncryptionContentEncryption) > 0
 	if idTokenEncEnabled && deps.ClientEncryptionKeys == nil {
 		return fmt.Errorf("server: dependencies: client encryption keys is required when algorithms.id_token_encryption_key_management/content_encryption are configured")
+	}
+	userInfoEncEnabled := len(cfg.Algorithms.UserInfoEncryptionKeyManagement) > 0 || len(cfg.Algorithms.UserInfoEncryptionContentEncryption) > 0
+	if userInfoEncEnabled && deps.ClientEncryptionKeys == nil {
+		return fmt.Errorf("server: dependencies: client encryption keys is required when algorithms.user_info_encryption_key_management/content_encryption are configured")
 	}
 	if deps.Nonces != nil && cfg.Limits.DPoPNonceLifetime <= 0 {
 		return fmt.Errorf("server: config: limits.dpop_nonce_lifetime must be positive when dependencies.nonces is set")

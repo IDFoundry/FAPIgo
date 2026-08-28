@@ -191,15 +191,43 @@ func TestVerifyRejectsReplayedDPoPProof(t *testing.T) {
 	}
 }
 
-func TestVerifyRejectsBearerScheme(t *testing.T) {
+// TestVerifyRejectsBearerSchemeWithoutCertificate covers the "Bearer"
+// scheme's own required credential being absent — Bearer is a real,
+// accepted scheme now (RFC 8705 §3.4, for mTLS-bound tokens; see
+// TestVerifyAcceptsMTLSBoundToken below), so this presents no
+// PeerCertificate rather than testing that the scheme itself is
+// rejected outright. f's own token is DPoP-bound anyway, so even a
+// presented certificate wouldn't help here — see
+// TestVerifyRejectsMTLSBoundTokenPresentedAsDPoP for that mismatch case.
+func TestVerifyRejectsBearerSchemeWithoutCertificate(t *testing.T) {
 	f := newFixture(t)
 	_, err := f.verifier.Verify(context.Background(), resource.VerifyRequest{
 		Method: "GET", URL: f.target,
 		Authorization: "Bearer " + f.accessToken,
-		DPoPProof:     f.dpopProof,
 	})
 	if err == nil {
-		t.Fatalf("Verify(Bearer scheme) = nil error, want error")
+		t.Fatalf("Verify(Bearer scheme, no certificate) = nil error, want error")
+	}
+	rerr, ok := err.(*resource.Error)
+	if !ok {
+		t.Fatalf("error type = %T, want *resource.Error", err)
+	}
+	if rerr.Code() != resource.ErrorInvalidRequest {
+		t.Errorf("Code() = %v, want %v", rerr.Code(), resource.ErrorInvalidRequest)
+	}
+}
+
+// TestVerifyRejectsUnrecognizedScheme covers a scheme that's neither
+// DPoP nor Bearer — the one case truly rejected outright, regardless of
+// what credential accompanies it.
+func TestVerifyRejectsUnrecognizedScheme(t *testing.T) {
+	f := newFixture(t)
+	_, err := f.verifier.Verify(context.Background(), resource.VerifyRequest{
+		Method: "GET", URL: f.target,
+		Authorization: "Basic " + f.accessToken,
+	})
+	if err == nil {
+		t.Fatalf("Verify(unrecognized scheme) = nil error, want error")
 	}
 	rerr, ok := err.(*resource.Error)
 	if !ok {

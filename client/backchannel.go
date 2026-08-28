@@ -17,6 +17,7 @@ import (
 	"github.com/idfoundry/fapigo/internal/par"
 	"github.com/idfoundry/fapigo/internal/requestobject"
 	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // cibaGrantType is the grant_type value CIBA's token-endpoint polling
@@ -144,9 +145,14 @@ func (c *Client) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	if err != nil {
 		return BackchannelAuthenticationSession{}, newError(ErrorInternal, "failed to resolve client authentication key", err)
 	}
-	dpopSigner, _, err := c.newSigner(ctx, keys.DPoPProofSigning, c.cfg.Algorithms.DPoP)
-	if err != nil {
-		return BackchannelAuthenticationSession{}, newError(ErrorInternal, "failed to resolve DPoP signing key", err)
+	// dpopSigner stays nil under SenderConstrainMTLS — never used in
+	// that case, since no DPoP proof is ever built.
+	var dpopSigner crypto.Signer
+	if c.cfg.SenderConstrain == storage.SenderConstrainDPoP {
+		dpopSigner, _, err = c.newSigner(ctx, keys.DPoPProofSigning, c.cfg.Algorithms.DPoP)
+		if err != nil {
+			return BackchannelAuthenticationSession{}, newError(ErrorInternal, "failed to resolve DPoP signing key", err)
+		}
 	}
 
 	// buildForm signs a fresh request object and client assertion (new
@@ -186,28 +192,9 @@ func (c *Client) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	}
 
 	endpointURL := c.cfg.Endpoints.BackchannelAuthentication.URL()
-	body, status, header, err := c.postBackchannelAuthenticationRequestWithDPoP(ctx, dpopSigner, &endpointURL, form, c.cachedDPoPNonce(ctx, asNonceScope))
-	if err != nil {
-		return BackchannelAuthenticationSession{}, newError(ErrorInternal, "backchannel authentication request failed", err)
-	}
-	nextNonce := header.Get("DPoP-Nonce")
-	c.cacheDPoPNonce(ctx, asNonceScope, nextNonce)
-	if status != http.StatusOK {
-		if nextNonce == "" || !isDPoPNonceError(body) {
-			return BackchannelAuthenticationSession{}, parErrorFromResponse(body)
-		}
-		retryForm, buildErr := buildForm()
-		if buildErr != nil {
-			return BackchannelAuthenticationSession{}, newError(ErrorInternal, "failed to build backchannel authentication request", buildErr)
-		}
-		body, status, header, err = c.postBackchannelAuthenticationRequestWithDPoP(ctx, dpopSigner, &endpointURL, retryForm, nextNonce)
-		if err != nil {
-			return BackchannelAuthenticationSession{}, newError(ErrorInternal, "backchannel authentication request failed", err)
-		}
-		c.cacheDPoPNonce(ctx, asNonceScope, header.Get("DPoP-Nonce"))
-		if status != http.StatusOK {
-			return BackchannelAuthenticationSession{}, parErrorFromResponse(body)
-		}
+	body, sendErr := c.sendBackchannelAuthenticationRequest(ctx, dpopSigner, &endpointURL, buildForm, form)
+	if sendErr != nil {
+		return BackchannelAuthenticationSession{}, sendErr
 	}
 
 	raw, err := decodeBackchannelAuthenticationResponse(body)
@@ -240,6 +227,51 @@ func (c *Client) postBackchannelAuthenticationRequestWithDPoP(ctx context.Contex
 		return nil, 0, nil, fmt.Errorf("build DPoP proof: %w", err)
 	}
 	return c.postForm(ctx, endpointURL.String(), form, map[string]string{"DPoP": proof})
+}
+
+// sendBackchannelAuthenticationRequest posts form to the backchannel
+// authentication endpoint. Under SenderConstrainDPoP (the default), it
+// presents a DPoP-proofed request, retrying once on a use_dpop_nonce
+// challenge exactly like pushAuthorizationRequestWithDPoPProof does for
+// PAR. Under SenderConstrainMTLS, dpopSigner is unused (pass nil) — a
+// single plain call, no proof, no nonce retry, mirroring
+// pushAuthorizationRequestPlain's own reasoning.
+func (c *Client) sendBackchannelAuthenticationRequest(ctx context.Context, dpopSigner crypto.Signer, endpointURL *url.URL, buildForm func() ([]byte, error), form []byte) ([]byte, *Error) {
+	if c.cfg.SenderConstrain == storage.SenderConstrainMTLS {
+		body, status, _, err := c.postForm(ctx, endpointURL.String(), form, nil)
+		if err != nil {
+			return nil, newError(ErrorInternal, "backchannel authentication request failed", err)
+		}
+		if status != http.StatusOK {
+			return nil, parErrorFromResponse(body)
+		}
+		return body, nil
+	}
+	body, status, header, err := c.postBackchannelAuthenticationRequestWithDPoP(ctx, dpopSigner, endpointURL, form, c.cachedDPoPNonce(ctx, asNonceScope))
+	if err != nil {
+		return nil, newError(ErrorInternal, "backchannel authentication request failed", err)
+	}
+	nextNonce := header.Get("DPoP-Nonce")
+	c.cacheDPoPNonce(ctx, asNonceScope, nextNonce)
+	if status == http.StatusOK {
+		return body, nil
+	}
+	if nextNonce == "" || !isDPoPNonceError(body) {
+		return nil, parErrorFromResponse(body)
+	}
+	retryForm, buildErr := buildForm()
+	if buildErr != nil {
+		return nil, newError(ErrorInternal, "failed to build backchannel authentication request", buildErr)
+	}
+	body, status, header, err = c.postBackchannelAuthenticationRequestWithDPoP(ctx, dpopSigner, endpointURL, retryForm, nextNonce)
+	if err != nil {
+		return nil, newError(ErrorInternal, "backchannel authentication request failed", err)
+	}
+	c.cacheDPoPNonce(ctx, asNonceScope, header.Get("DPoP-Nonce"))
+	if status != http.StatusOK {
+		return nil, parErrorFromResponse(body)
+	}
+	return body, nil
 }
 
 type rawBackchannelAuthenticationResponse struct {
@@ -317,9 +349,14 @@ func (c *Client) PollBackchannelAuthentication(ctx context.Context, session Back
 	if err != nil {
 		return nil, newError(ErrorInternal, "failed to resolve client authentication key", err)
 	}
-	dpopSigner, _, err := c.newSigner(ctx, keys.DPoPProofSigning, c.cfg.Algorithms.DPoP)
-	if err != nil {
-		return nil, newError(ErrorInternal, "failed to resolve DPoP signing key", err)
+	// dpopSigner stays nil under SenderConstrainMTLS — never used in
+	// that case, since no DPoP proof is ever built.
+	var dpopSigner crypto.Signer
+	if c.cfg.SenderConstrain == storage.SenderConstrainDPoP {
+		dpopSigner, _, err = c.newSigner(ctx, keys.DPoPProofSigning, c.cfg.Algorithms.DPoP)
+		if err != nil {
+			return nil, newError(ErrorInternal, "failed to resolve DPoP signing key", err)
+		}
 	}
 	tokenURL := c.cfg.Endpoints.Token.URL()
 
@@ -354,12 +391,13 @@ func (c *Client) PollBackchannelAuthentication(ctx context.Context, session Back
 		if err != nil {
 			return nil, newError(ErrorInvalidResponse, "malformed token response", err)
 		}
-		if !strings.EqualFold(raw.TokenType, "DPoP") {
-			return nil, newError(ErrorInvalidResponse, "token response token_type is not DPoP", nil)
+		wantTokenType := tokenTypeFor(c.cfg.SenderConstrain)
+		if !strings.EqualFold(raw.TokenType, wantTokenType) {
+			return nil, newError(ErrorInvalidResponse, fmt.Sprintf("token response token_type is not %s", wantTokenType), nil)
 		}
 		result := TokenSet{
 			AccessToken: fapi.NewSecret(raw.AccessToken),
-			TokenType:   "DPoP",
+			TokenType:   wantTokenType,
 			Scope:       raw.Scope,
 		}
 		if raw.ExpiresIn > 0 {
@@ -398,16 +436,25 @@ func (c *Client) PollBackchannelAuthentication(ctx context.Context, session Back
 	}
 }
 
-// pollBackchannelAuthenticationOnce sends one CIBA token-endpoint poll,
-// retrying once on a use_dpop_nonce challenge exactly like
-// sendTokenRequest does for the authorization-code flow (RFC 9449
-// §8). Unlike sendTokenRequest, a non-200 response is returned to the
-// caller for inspection rather than immediately converted to a
-// terminal *Error: PollBackchannelAuthentication's own non-200 branch
-// needs the raw OAuth error code (authorization_pending, slow_down,
-// access_denied, expired_token are expected polling outcomes, not
-// failures), which parErrorFromResponse's translation discards.
+// pollBackchannelAuthenticationOnce sends one CIBA token-endpoint poll.
+// Under SenderConstrainDPoP (the default), it retries once on a
+// use_dpop_nonce challenge exactly like sendTokenRequest does for the
+// authorization-code flow (RFC 9449 §8); a non-200 response is
+// returned to the caller for inspection rather than immediately
+// converted to a terminal *Error: PollBackchannelAuthentication's own
+// non-200 branch needs the raw OAuth error code (authorization_pending,
+// slow_down, access_denied, expired_token are expected polling
+// outcomes, not failures), which parErrorFromResponse's translation
+// discards. Under SenderConstrainMTLS, dpopSigner is unused (pass
+// nil) — a single plain call, no proof, no nonce retry.
 func (c *Client) pollBackchannelAuthenticationOnce(ctx context.Context, dpopSigner crypto.Signer, tokenURL *url.URL, buildForm func() ([]byte, error), form []byte) ([]byte, int, *Error) {
+	if c.cfg.SenderConstrain == storage.SenderConstrainMTLS {
+		body, status, _, err := c.postForm(ctx, tokenURL.String(), form, nil)
+		if err != nil {
+			return nil, 0, newError(ErrorInternal, "token request failed", err)
+		}
+		return body, status, nil
+	}
 	body, status, header, err := c.postTokenRequestWithDPoP(ctx, dpopSigner, tokenURL, form, c.cachedDPoPNonce(ctx, asNonceScope))
 	if err != nil {
 		return nil, 0, newError(ErrorInternal, "token request failed", err)

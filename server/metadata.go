@@ -77,6 +77,11 @@ type Metadata struct {
 	BackchannelTokenDeliveryModesSupported                    []string `json:"backchannel_token_delivery_modes_supported,omitempty"`
 	BackchannelAuthenticationRequestSigningAlgValuesSupported []string `json:"backchannel_authentication_request_signing_alg_values_supported,omitempty"`
 
+	// MTLSEndpointAliases (RFC 8705 §5) is set only when
+	// Config.MTLSEndpoints is non-zero — most deployments never offer
+	// an mTLS-requiring alternate listener at all.
+	MTLSEndpointAliases *MTLSEndpointAliases `json:"mtls_endpoint_aliases,omitempty"`
+
 	// RequirePushedAuthorizationRequests is always true: BeginAuthorization
 	// only ever accepts a request_uri, never raw authorization parameters.
 	RequirePushedAuthorizationRequests bool `json:"require_pushed_authorization_requests,omitempty"`
@@ -91,6 +96,19 @@ type Metadata struct {
 	// "iss" parameter (RFC 9207); a JARM response's own "iss" claim
 	// serves the same purpose instead.
 	AuthorizationResponseIssParameterSupported bool `json:"authorization_response_iss_parameter_supported,omitempty"`
+}
+
+// MTLSEndpointAliases is the RFC 8705 §5 "mtls_endpoint_aliases"
+// metadata value: the subset of this server's own endpoints that also
+// have an mTLS-requiring alternate URL. Only the endpoints this
+// package actually implements a plain counterpart for appear here —
+// mirroring Metadata's own field set, not RFC 8705's full example list
+// (which also names introspection/revocation/userinfo endpoints this
+// package doesn't implement at all).
+type MTLSEndpointAliases struct {
+	TokenEndpoint                      fapi.URL `json:"token_endpoint,omitempty"`
+	PushedAuthorizationRequestEndpoint fapi.URL `json:"pushed_authorization_request_endpoint,omitempty"`
+	BackchannelAuthenticationEndpoint  fapi.URL `json:"backchannel_authentication_endpoint,omitempty"`
 }
 
 // Metadata returns this server's metadata document.
@@ -139,6 +157,14 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 	if len(s.cfg.Algorithms.UserInfoEncryptionContentEncryption) > 0 {
 		md.UserinfoEncryptionEncValuesSupported = algorithmSetStrings(s.cfg.Algorithms.UserInfoEncryptionContentEncryption)
 	}
+	if !s.cfg.MTLSEndpoints.IsZero() {
+		md.MTLSEndpointAliases = &MTLSEndpointAliases{
+			TokenEndpoint:                      s.cfg.MTLSEndpoints.Token,
+			PushedAuthorizationRequestEndpoint: s.cfg.MTLSEndpoints.PushedAuthorizationRequest,
+			BackchannelAuthenticationEndpoint:  s.cfg.MTLSEndpoints.BackchannelAuthentication,
+		}
+	}
+
 	if !s.cfg.Endpoints.BackchannelAuthentication.IsZero() {
 		md.BackchannelAuthenticationEndpoint = s.cfg.Endpoints.BackchannelAuthentication
 		// Poll only — ping mode's notification dispatch is a separate,

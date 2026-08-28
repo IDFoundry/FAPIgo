@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/x509"
 	"errors"
 	"strings"
 
@@ -22,11 +23,17 @@ const CIBAGrantType = "urn:openid:params:grant-type:ciba"
 type BackchannelTokenExchangeRequest struct {
 	HTTP FormRequest
 
-	// DPoPProof is the value of the request's DPoP header. Required —
-	// every access token this server issues is DPoP-sender-constrained,
-	// the same requirement ExchangeAuthorizationCode/RefreshAccessToken
-	// already have.
+	// DPoPProof is the value of the request's DPoP header — required
+	// when the authenticated client's SenderConstrain() is
+	// SenderConstrainDPoP (the default), the same requirement
+	// ExchangeAuthorizationCode/RefreshAccessToken already have.
 	DPoPProof string
+
+	// PeerCertificate is the TLS client certificate presented on the
+	// connection this request arrived on, if any — required instead of
+	// DPoPProof when the authenticated client's SenderConstrain() is
+	// SenderConstrainMTLS.
+	PeerCertificate *x509.Certificate
 }
 
 // ExchangeBackchannelAuthentication authenticates the client, verifies
@@ -58,11 +65,10 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorInvalidRequest, 400, "auth_req_id is required", nil))
 	}
 
-	verifiedProof, dpopErr := s.verifyTokenRequestDPoP(ctx, req.DPoPProof)
-	if dpopErr != nil {
-		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), dpopErr)
+	thumbprint, bindingErr := s.verifyTokenRequestBinding(ctx, client, req.DPoPProof, req.PeerCertificate)
+	if bindingErr != nil {
+		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), bindingErr)
 	}
-	thumbprint := verifiedProof.Thumbprint.String()
 
 	now := s.deps.Clock.Now()
 	polled, err := s.deps.Backchannel.PollBackchannelAuthentication(ctx, storage.PollBackchannelAuthentication{
@@ -109,7 +115,7 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 	}
 	accessToken, _, err := s.deps.AccessTokens.IssueAccessToken(ctx, AccessTokenParams{
 		ClientID: client.ID(), Subject: polled.Subject, Scope: polled.Scope,
-		Thumbprint: thumbprint, Claims: accessTokenClaims,
+		Thumbprint: thumbprint, SenderConstrain: client.SenderConstrain(), Claims: accessTokenClaims,
 		Issuer: s.cfg.Issuer.String(), Audience: s.cfg.Issuer.String(),
 		Now: now, Lifetime: s.cfg.Limits.AccessTokenLifetime, Random: s.deps.Random,
 	})
@@ -119,7 +125,7 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 
 	result := TokenResult{
 		AccessToken: fapi.NewSecret(accessToken),
-		TokenType:   "DPoP",
+		TokenType:   tokenTypeFor(client.SenderConstrain()),
 		ExpiresIn:   s.cfg.Limits.AccessTokenLifetime,
 		Scope:       strings.Join(polled.Scope, " "),
 	}
@@ -150,7 +156,7 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 		result.HasRefreshToken = true
 	}
 
-	if s.deps.Nonces != nil {
+	if s.deps.Nonces != nil && client.SenderConstrain() == storage.SenderConstrainDPoP {
 		nextNonce, err := s.issueDPoPNonce(ctx, now)
 		if err != nil {
 			return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorServerError, 500, "failed to issue dpop nonce", err))

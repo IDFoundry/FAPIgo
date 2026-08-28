@@ -104,9 +104,17 @@ func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 		body   []byte
 		parErr *Error
 	)
-	if c.cfg.PARDPoPBinding == PARDPoPBindingJKT {
+	switch {
+	case c.cfg.SenderConstrain == storage.SenderConstrainMTLS:
+		// No PAR-time pre-commitment concept exists for mTLS (unlike
+		// DPoP's optional dpop_jkt) — binding is derived purely from
+		// whichever certificate authenticates the eventual token-endpoint
+		// connection, so PAR here is a plain call: no DPoP proof, no
+		// dpop_jkt, no nonce retry.
+		body, parErr = c.pushAuthorizationRequestPlain(ctx, params, req.Extensions)
+	case c.cfg.PARDPoPBinding == PARDPoPBindingJKT:
 		body, parErr = c.pushAuthorizationRequestWithJKT(ctx, params, req.Extensions)
-	} else {
+	default:
 		body, parErr = c.pushAuthorizationRequestWithDPoPProof(ctx, params, req.Extensions)
 	}
 	if parErr != nil {
@@ -162,6 +170,27 @@ func (c *Client) dpopKeyThumbprint(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("compute DPoP key thumbprint: %w", err)
 	}
 	return thumbprint.String(), nil
+}
+
+// pushAuthorizationRequestPlain implements PAR for a
+// SenderConstrainMTLS client: no DPoP proof or dpop_jkt parameter at
+// all, and no use_dpop_nonce retry — mTLS has no equivalent nonce
+// challenge concept, since binding is derived purely from the TLS
+// connection Dependencies.HTTP's own configured transport establishes,
+// not from a signed application-layer proof.
+func (c *Client) pushAuthorizationRequestPlain(ctx context.Context, params map[string]string, extensions extension.Values) ([]byte, *Error) {
+	formParams, buildErr := c.buildPushedRequestForm(ctx, c.deps.Clock.Now(), params, extensions)
+	if buildErr != nil {
+		return nil, buildErr
+	}
+	body, status, _, err := c.postForm(ctx, c.cfg.Endpoints.PushedAuthorizationRequest.String(), par.EncodeForm(formParams), nil)
+	if err != nil {
+		return nil, newError(ErrorInternal, "pushed authorization request failed", err)
+	}
+	if status != http.StatusCreated && status != http.StatusOK {
+		return nil, parErrorFromResponse(body)
+	}
+	return body, nil
 }
 
 // pushAuthorizationRequestWithJKT implements PARDPoPBindingJKT: declares

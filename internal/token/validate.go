@@ -96,14 +96,22 @@ type ValidatedAccessToken struct {
 	JTI string
 
 	// JKT is the token's "cnf.jkt" claim, now trusted, or "" if the
-	// token carried no confirmation claim at all. This package no
-	// longer checks it against an expected value itself (see this
-	// struct's — and AccessTokenValidatePolicy's — history: that check
-	// moved to the resource package's Verify(), which enforces DPoP
+	// token carried no confirmation claim at all (or was bound via
+	// X5TS256 instead — the two are mutually exclusive, see
+	// Confirmation's own doc comment). This package no longer checks it
+	// against an expected value itself (see this struct's — and
+	// AccessTokenValidatePolicy's — history: that check moved to the
+	// resource package's Verify(), which enforces sender-constraint
 	// binding once, uniformly, regardless of access-token format).
 	// Callers that need sender-constraint enforcement must compare this
 	// themselves.
 	JKT string
+
+	// X5TS256 is the token's "cnf.x5t#S256" claim (RFC 8705 §3.1), now
+	// trusted, or "" if the token was bound via JKT instead (or not
+	// bound at all). Mirrors JKT's own contract exactly, for mTLS
+	// binding instead of DPoP.
+	X5TS256 string
 }
 
 // Validate checks t's signature against pub and its claims against
@@ -152,9 +160,10 @@ func (t AccessToken) Validate(pub crypto.PublicKey, policy AccessTokenValidatePo
 		return ValidatedAccessToken{}, ErrLifetimeExceeded
 	}
 
-	var jkt string
+	var jkt, x5ts256 string
 	if c.Confirmation != nil {
 		jkt = c.Confirmation.JKT
+		x5ts256 = c.Confirmation.X5TS256
 	}
 
 	return ValidatedAccessToken{
@@ -165,6 +174,7 @@ func (t AccessToken) Validate(pub crypto.PublicKey, policy AccessTokenValidatePo
 		ExpiresAt:  c.ExpiresAt,
 		JTI:        c.JTI,
 		JKT:        jkt,
+		X5TS256:    x5ts256,
 	}, nil
 }
 

@@ -20,13 +20,20 @@ import (
 	"github.com/idfoundry/fapigo/internal/par"
 	"github.com/idfoundry/fapigo/internal/token"
 	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // TokenSet is returned by a successful ExchangeCode.
 type TokenSet struct {
 	AccessToken fapi.Secret
-	TokenType   string // always "DPoP", regardless of the casing the server responded with (RFC 6749 §7.1: token_type is case insensitive)
-	Scope       string
+
+	// TokenType is "DPoP" under SenderConstrainDPoP (the default) or
+	// "Bearer" under SenderConstrainMTLS (RFC 8705 §3.4) — see
+	// tokenTypeFor's own doc comment. Always this canonical casing,
+	// regardless of the casing the server responded with (RFC 6749
+	// §7.1: token_type is case insensitive).
+	TokenType string
+	Scope     string
 
 	// ExpiresIn is set only when the token response actually carried
 	// expires_in — RFC 6749 §5.1 marks it RECOMMENDED, not REQUIRED, and
@@ -133,9 +140,14 @@ func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationRe
 	if err != nil {
 		return TokenSet{}, newError(ErrorInternal, "failed to resolve client authentication key", err)
 	}
-	dpopSigner, _, err := c.newSigner(ctx, keys.DPoPProofSigning, c.cfg.Algorithms.DPoP)
-	if err != nil {
-		return TokenSet{}, newError(ErrorInternal, "failed to resolve DPoP signing key", err)
+	// dpopSigner stays nil under SenderConstrainMTLS — sendTokenRequest
+	// never uses it in that case, since no DPoP proof is ever built.
+	var dpopSigner crypto.Signer
+	if c.cfg.SenderConstrain == storage.SenderConstrainDPoP {
+		dpopSigner, _, err = c.newSigner(ctx, keys.DPoPProofSigning, c.cfg.Algorithms.DPoP)
+		if err != nil {
+			return TokenSet{}, newError(ErrorInternal, "failed to resolve DPoP signing key", err)
+		}
 	}
 	tokenURL := c.cfg.Endpoints.Token.URL()
 
@@ -179,13 +191,14 @@ func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationRe
 	if err != nil {
 		return TokenSet{}, newError(ErrorInvalidResponse, "malformed token response", err)
 	}
-	if !strings.EqualFold(raw.TokenType, "DPoP") {
-		return TokenSet{}, newError(ErrorInvalidResponse, "token response token_type is not DPoP", nil)
+	wantTokenType := tokenTypeFor(c.cfg.SenderConstrain)
+	if !strings.EqualFold(raw.TokenType, wantTokenType) {
+		return TokenSet{}, newError(ErrorInvalidResponse, fmt.Sprintf("token response token_type is not %s", wantTokenType), nil)
 	}
 
 	result := TokenSet{
 		AccessToken: fapi.NewSecret(raw.AccessToken),
-		TokenType:   "DPoP",
+		TokenType:   wantTokenType,
 		Scope:       raw.Scope,
 	}
 	if raw.ExpiresIn > 0 {
@@ -204,7 +217,8 @@ func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationRe
 	return result, nil
 }
 
-// sendTokenRequest posts form to the token endpoint via a DPoP-proofed
+// sendTokenRequest posts form to the token endpoint. Under
+// SenderConstrainDPoP (the default), it presents a DPoP-proofed
 // request, retrying once with a freshly-built form if the server
 // challenges for a DPoP nonce (RFC 9449 §8: a server requiring one
 // rejects a proof lacking it — or carrying a stale one — with
@@ -214,8 +228,22 @@ func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationRe
 // ExchangeCode purely to keep that function's own branching manageable.
 // buildTokenForm is called again for the retry, not reused, since a
 // client assertion is exactly as single-use as a DPoP proof is (see
-// ExchangeCode's own comment on buildTokenForm).
+// ExchangeCode's own comment on buildTokenForm). Under
+// SenderConstrainMTLS, dpopSigner is unused (pass nil) — this is a
+// single plain call relying entirely on Dependencies.HTTP's own
+// configured transport to present this client's certificate; mTLS has
+// no equivalent nonce-challenge/retry concept.
 func (c *Client) sendTokenRequest(ctx context.Context, dpopSigner crypto.Signer, tokenURL *url.URL, buildTokenForm func() ([]byte, error), form []byte) ([]byte, *Error) {
+	if c.cfg.SenderConstrain == storage.SenderConstrainMTLS {
+		body, status, _, err := c.postForm(ctx, tokenURL.String(), form, nil)
+		if err != nil {
+			return nil, newError(ErrorInternal, "token request failed", err)
+		}
+		if status != http.StatusOK {
+			return nil, parErrorFromResponse(body)
+		}
+		return body, nil
+	}
 	body, status, header, err := c.postTokenRequestWithDPoP(ctx, dpopSigner, tokenURL, form, c.cachedDPoPNonce(ctx, asNonceScope))
 	if err != nil {
 		return nil, newError(ErrorInternal, "token request failed", err)
@@ -266,6 +294,18 @@ func (c *Client) populateIDToken(ctx context.Context, result *TokenSet, raw rawT
 		IssuedAt: validated.IssuedAt,
 	}
 	return nil
+}
+
+// tokenTypeFor returns the token_type value (RFC 6749 §7.1) this
+// client expects a token response to declare — "DPoP" under
+// SenderConstrainDPoP, or "Bearer" under SenderConstrainMTLS (RFC 8705
+// §3.4), mirroring server.tokenTypeFor's identical contract on the
+// issuing side.
+func tokenTypeFor(senderConstrain storage.SenderConstrain) string {
+	if senderConstrain == storage.SenderConstrainMTLS {
+		return "Bearer"
+	}
+	return "DPoP"
 }
 
 // postTokenRequestWithDPoP signs a fresh DPoP proof for the token

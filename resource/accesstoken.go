@@ -37,11 +37,20 @@ type ResolvedAccessToken struct {
 	Claims    map[string]json.RawMessage
 	ExpiresAt time.Time
 
-	// Thumbprint is this token's own claimed/stored DPoP-binding
-	// thumbprint (e.g. a JWT's signature-verified cnf.jkt claim, or an
-	// opaque token's stored thumbprint) — Verify() compares it against
-	// the caller's already-verified DPoP proof; this method does not.
+	// Thumbprint is this token's own claimed/stored sender-constraint
+	// thumbprint (e.g. a JWT's signature-verified cnf.jkt/cnf.x5t#S256
+	// claim, or an opaque token's stored thumbprint) — Verify() compares
+	// it against the caller's already-verified DPoP proof or presented
+	// TLS client certificate (per SenderConstrain, below); this method
+	// does not.
 	Thumbprint string
+
+	// SenderConstrain says which mechanism Thumbprint represents — a
+	// DPoP proof key thumbprint (SenderConstrainDPoP, the zero value)
+	// or an mTLS client certificate thumbprint (SenderConstrainMTLS) —
+	// so Verify() knows whether to compare it against a DPoP proof or a
+	// peer certificate.
+	SenderConstrain storage.SenderConstrain
 
 	// Key is this token's revocation-lookup identifier — a JWT's jti
 	// claim for JWTAccessTokens, an opaque token's own hash for
@@ -175,13 +184,22 @@ func (j JWTAccessTokens) ResolveAccessToken(ctx context.Context, req ResolveAcce
 	if validated.Scope != "" {
 		scopes = strings.Fields(validated.Scope)
 	}
+	// The token's own "cnf" claim is self-describing — whichever of
+	// JKT/X5TS256 validated.Validate populated (see
+	// internal/token.Confirmation's own doc comment: exactly one, never
+	// both) says which mechanism this token is bound with.
+	thumbprint, senderConstrain := validated.JKT, storage.SenderConstrainDPoP
+	if validated.X5TS256 != "" {
+		thumbprint, senderConstrain = validated.X5TS256, storage.SenderConstrainMTLS
+	}
 	return ResolvedAccessToken{
-		Subject:    validated.Subject,
-		ClientID:   validated.ClientID,
-		Scopes:     scopes,
-		Claims:     validated.Parameters,
-		ExpiresAt:  validated.ExpiresAt,
-		Thumbprint: validated.JKT,
+		Subject:         validated.Subject,
+		ClientID:        validated.ClientID,
+		Scopes:          scopes,
+		Claims:          validated.Parameters,
+		ExpiresAt:       validated.ExpiresAt,
+		Thumbprint:      thumbprint,
+		SenderConstrain: senderConstrain,
 		// internal/token.ValidatedAccessToken.JTI is NOT renamed — it's
 		// internal, JWT-only by construction (internal/token never
 		// handles opaque tokens, see internal/token/doc.go). Only this
@@ -216,12 +234,13 @@ func (o OpaqueAccessTokens) ResolveAccessToken(ctx context.Context, req ResolveA
 		return ResolvedAccessToken{}, newError(ErrorInvalidToken, 401, "access token is invalid", err)
 	}
 	return ResolvedAccessToken{
-		Subject:    looked.Subject,
-		ClientID:   looked.ClientID.String(),
-		Scopes:     looked.Scope,
-		Claims:     looked.Claims,
-		ExpiresAt:  looked.ExpiresAt,
-		Thumbprint: looked.Thumbprint,
-		Key:        hex.EncodeToString(hash[:]),
+		Subject:         looked.Subject,
+		ClientID:        looked.ClientID.String(),
+		Scopes:          looked.Scope,
+		Claims:          looked.Claims,
+		ExpiresAt:       looked.ExpiresAt,
+		Thumbprint:      looked.Thumbprint,
+		SenderConstrain: looked.SenderConstrain,
+		Key:             hex.EncodeToString(hash[:]),
 	}, nil
 }

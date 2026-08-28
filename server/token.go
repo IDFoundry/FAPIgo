@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/dpop"
+	"github.com/idfoundry/fapigo/internal/mtls"
 	"github.com/idfoundry/fapigo/internal/pkce"
 	"github.com/idfoundry/fapigo/internal/token"
 	"github.com/idfoundry/fapigo/keys"
@@ -21,19 +23,33 @@ import (
 type AuthorizationCodeExchangeRequest struct {
 	HTTP FormRequest
 
-	// DPoPProof is the value of the request's DPoP header. It is
-	// required — every access token this server issues is
-	// DPoP-sender-constrained.
+	// DPoPProof is the value of the request's DPoP header — required
+	// when the authenticated client's storage.RegisteredClient.SenderConstrain()
+	// is SenderConstrainDPoP (the default).
 	DPoPProof string
+
+	// PeerCertificate is the TLS client certificate presented on the
+	// connection this request arrived on, if any — required instead of
+	// DPoPProof when the authenticated client's SenderConstrain() is
+	// SenderConstrainMTLS (RFC 8705 §3). An HTTP adapter reads this
+	// straight from the connection's own TLS state (e.g. Go's
+	// *http.Request.TLS.PeerCertificates[0]); this package never
+	// terminates TLS itself.
+	PeerCertificate *x509.Certificate
 }
 
 // TokenResult is returned by a successful ExchangeAuthorizationCode or
 // RefreshAccessToken.
 type TokenResult struct {
 	AccessToken fapi.Secret
-	TokenType   string // always "DPoP"
-	ExpiresIn   time.Duration
-	Scope       string
+
+	// TokenType is "DPoP" for a DPoP-sender-constrained client
+	// (storage.SenderConstrainDPoP, the default) or "Bearer" for an
+	// mTLS-bound one (storage.SenderConstrainMTLS) — see tokenTypeFor's
+	// own doc comment.
+	TokenType string
+	ExpiresIn time.Duration
+	Scope     string
 
 	// IDToken is set only when the granted scope included "openid".
 	IDToken    fapi.Secret
@@ -95,11 +111,10 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorInvalidGrant, 400, "code_verifier is required", nil))
 	}
 
-	verifiedProof, dpopErr := s.verifyTokenRequestDPoP(ctx, req.DPoPProof)
-	if dpopErr != nil {
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), dpopErr)
+	thumbprint, bindingErr := s.verifyTokenRequestBinding(ctx, client, req.DPoPProof, req.PeerCertificate)
+	if bindingErr != nil {
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), bindingErr)
 	}
-	thumbprint := verifiedProof.Thumbprint.String()
 
 	codeHash := sha256.Sum256([]byte(code))
 	redeemed, err := s.deps.Grants.RedeemAuthorizationCode(ctx, storage.AuthorizationCodeRedemption{
@@ -150,7 +165,7 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	}
 	accessToken, accessKey, err := s.deps.AccessTokens.IssueAccessToken(ctx, AccessTokenParams{
 		ClientID: client.ID(), Subject: redeemed.Subject, Scope: redeemed.Scope,
-		Thumbprint: thumbprint, Claims: accessTokenClaims,
+		Thumbprint: thumbprint, SenderConstrain: client.SenderConstrain(), Claims: accessTokenClaims,
 		Issuer: s.cfg.Issuer.String(), Audience: s.cfg.Issuer.String(),
 		Now: now, Lifetime: s.cfg.Limits.AccessTokenLifetime, Random: s.deps.Random,
 	})
@@ -166,7 +181,7 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 
 	result := TokenResult{
 		AccessToken: fapi.NewSecret(accessToken),
-		TokenType:   "DPoP",
+		TokenType:   tokenTypeFor(client.SenderConstrain()),
 		ExpiresIn:   s.cfg.Limits.AccessTokenLifetime,
 		Scope:       strings.Join(redeemed.Scope, " "),
 	}
@@ -204,7 +219,7 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		result.HasRefreshToken = true
 	}
 
-	if s.deps.Nonces != nil {
+	if s.deps.Nonces != nil && client.SenderConstrain() == storage.SenderConstrainDPoP {
 		nextNonce, err := s.issueDPoPNonce(ctx, now)
 		if err != nil {
 			return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to issue dpop nonce", err))
@@ -214,6 +229,40 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 
 	s.audit(ctx, AuditEventExchangeAuthorizationCode, client.ID(), AuditOutcomeSuccess, "")
 	return result, nil
+}
+
+// verifyTokenRequestBinding verifies whichever sender-constraining
+// credential client.SenderConstrain() expects the token endpoint to
+// see — a DPoP proof, or the connection's own peer certificate — and
+// returns the resulting thumbprint, ready to feed into
+// AccessTokenParams.Thumbprint (and, for a DPoP-bound client, the same
+// value stored authorization-code/backchannel-request bindings are
+// checked against).
+func (s *Server) verifyTokenRequestBinding(ctx context.Context, client storage.RegisteredClient, dpopProof string, peerCert *x509.Certificate) (string, *Error) {
+	if client.SenderConstrain() == storage.SenderConstrainMTLS {
+		if peerCert == nil {
+			return "", newError(ErrorInvalidRequest, 400, "a client certificate is required", nil)
+		}
+		return mtls.Thumbprint(peerCert), nil
+	}
+	verified, err := s.verifyTokenRequestDPoP(ctx, dpopProof)
+	if err != nil {
+		return "", err
+	}
+	return verified.Thumbprint.String(), nil
+}
+
+// tokenTypeFor returns the token_type value (RFC 6749 §7.1) this
+// server's own issued tokens declare — "DPoP" for a
+// DPoP-sender-constrained client, or "Bearer" for an mTLS-bound one
+// (RFC 8705 §3.4: "the authorization server MUST include the
+// token_type value of Bearer... in the token response" for mTLS-bound
+// tokens, even though the token is still sender-constrained).
+func tokenTypeFor(senderConstrain storage.SenderConstrain) string {
+	if senderConstrain == storage.SenderConstrainMTLS {
+		return "Bearer"
+	}
+	return "DPoP"
 }
 
 func (s *Server) verifyTokenRequestDPoP(ctx context.Context, proof string) (dpop.VerifiedProof, *Error) {

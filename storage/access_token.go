@@ -22,7 +22,18 @@ type NewAccessToken struct {
 	Subject    string
 	Scope      []string
 	Thumbprint string
-	Claims     map[string]json.RawMessage
+
+	// SenderConstrain records which mechanism Thumbprint represents (a
+	// DPoP proof key thumbprint or an mTLS client certificate
+	// thumbprint) — an opaque token has no self-describing wire format
+	// the way a JWT's "cnf.jkt"/"cnf.x5t#S256" claim name does, so this
+	// is how resource.OpaqueAccessTokens.ResolveAccessToken tells
+	// Verify() which credential to expect. Zero value
+	// (SenderConstrainDPoP) matches every access token issued before
+	// this field existed.
+	SenderConstrain SenderConstrain
+
+	Claims map[string]json.RawMessage
 
 	ExpiresAt time.Time
 }
@@ -37,11 +48,12 @@ type AccessTokenLookup struct {
 // LookedUpAccessToken is what LookupAccessToken returns for a known
 // token.
 type LookedUpAccessToken struct {
-	ClientID   fapi.ClientID
-	Subject    string
-	Scope      []string
-	Thumbprint string
-	Claims     map[string]json.RawMessage
+	ClientID        fapi.ClientID
+	Subject         string
+	Scope           []string
+	Thumbprint      string
+	SenderConstrain SenderConstrain
+	Claims          map[string]json.RawMessage
 
 	ExpiresAt time.Time
 }

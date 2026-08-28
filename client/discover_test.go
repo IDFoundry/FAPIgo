@@ -53,6 +53,14 @@ type discoveryDoc struct {
 	BackchannelAuthenticationEndpoint                         string   `json:"backchannel_authentication_endpoint,omitempty"`
 	BackchannelTokenDeliveryModesSupported                    []string `json:"backchannel_token_delivery_modes_supported,omitempty"`
 	BackchannelAuthenticationRequestSigningAlgValuesSupported []string `json:"backchannel_authentication_request_signing_alg_values_supported,omitempty"`
+
+	MTLSEndpointAliases *discoveryMTLSEndpointAliases `json:"mtls_endpoint_aliases,omitempty"`
+}
+
+type discoveryMTLSEndpointAliases struct {
+	TokenEndpoint                      string `json:"token_endpoint,omitempty"`
+	PushedAuthorizationRequestEndpoint string `json:"pushed_authorization_request_endpoint,omitempty"`
+	BackchannelAuthenticationEndpoint  string `json:"backchannel_authentication_endpoint,omitempty"`
 }
 
 func TestDiscoverAcceptsValidDocumentAtRoot(t *testing.T) {
@@ -358,6 +366,80 @@ func TestDiscoverOmitsBackchannelAuthenticationEndpointWhenAbsent(t *testing.T) 
 	}
 	if len(md.BackchannelAuthenticationRequestAlgorithms) != 0 {
 		t.Fatalf("BackchannelAuthenticationRequestAlgorithms = %v, want empty", md.BackchannelAuthenticationRequestAlgorithms)
+	}
+}
+
+// TestDiscoverPopulatesMTLSEndpointAliases covers the RFC 8705 §5
+// discovery shape a SenderConstrainMTLS caller needs to prefer over
+// the plain Endpoints URLs.
+func TestDiscoverPopulatesMTLSEndpointAliases(t *testing.T) {
+	var ts *httptest.Server
+	ts = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(discoveryDoc{
+			Issuer:                             ts.URL,
+			AuthorizationEndpoint:              ts.URL + "/authorize",
+			TokenEndpoint:                      ts.URL + "/token",
+			PushedAuthorizationRequestEndpoint: ts.URL + "/par",
+			JWKSURI:                            ts.URL + "/jwks",
+			MTLSEndpointAliases: &discoveryMTLSEndpointAliases{
+				TokenEndpoint:                      ts.URL + "/mtls/token",
+				PushedAuthorizationRequestEndpoint: ts.URL + "/mtls/par",
+				BackchannelAuthenticationEndpoint:  ts.URL + "/mtls/backchannel-authenticate",
+			},
+		})
+	}))
+	defer ts.Close()
+
+	issuer, err := fapi.ParseIssuerURL(ts.URL, fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+	md, err := client.Discover(context.Background(), newDiscoveryFetcher(t, ts), issuer, fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if md.MTLSEndpointAliases == nil {
+		t.Fatalf("MTLSEndpointAliases = nil, want non-nil")
+	}
+	if md.MTLSEndpointAliases.Token.String() != ts.URL+"/mtls/token" {
+		t.Errorf("MTLSEndpointAliases.Token = %q", md.MTLSEndpointAliases.Token.String())
+	}
+	if md.MTLSEndpointAliases.PushedAuthorizationRequest.String() != ts.URL+"/mtls/par" {
+		t.Errorf("MTLSEndpointAliases.PushedAuthorizationRequest = %q", md.MTLSEndpointAliases.PushedAuthorizationRequest.String())
+	}
+	if md.MTLSEndpointAliases.BackchannelAuthentication.String() != ts.URL+"/mtls/backchannel-authenticate" {
+		t.Errorf("MTLSEndpointAliases.BackchannelAuthentication = %q", md.MTLSEndpointAliases.BackchannelAuthentication.String())
+	}
+}
+
+// TestDiscoverOmitsMTLSEndpointAliasesWhenAbsent covers the common
+// case — a server that never advertises mtls_endpoint_aliases at all.
+func TestDiscoverOmitsMTLSEndpointAliasesWhenAbsent(t *testing.T) {
+	var ts *httptest.Server
+	ts = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(discoveryDoc{
+			Issuer:                             ts.URL,
+			AuthorizationEndpoint:              ts.URL + "/authorize",
+			TokenEndpoint:                      ts.URL + "/token",
+			PushedAuthorizationRequestEndpoint: ts.URL + "/par",
+			JWKSURI:                            ts.URL + "/jwks",
+			// MTLSEndpointAliases intentionally omitted.
+		})
+	}))
+	defer ts.Close()
+
+	issuer, err := fapi.ParseIssuerURL(ts.URL, fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+	md, err := client.Discover(context.Background(), newDiscoveryFetcher(t, ts), issuer, fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if md.MTLSEndpointAliases != nil {
+		t.Fatalf("MTLSEndpointAliases = %+v, want nil", md.MTLSEndpointAliases)
 	}
 }
 

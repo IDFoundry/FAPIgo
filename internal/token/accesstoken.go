@@ -13,11 +13,13 @@ import (
 const atJWTType = "at+jwt"
 
 // Confirmation is the RFC 7800 "cnf" claim used to record a sender
-// constraint on an access token. Only DPoP key-thumbprint binding
-// (RFC 9449 §6.1) is represented; mutual-TLS certificate binding is out
-// of scope for this package.
+// constraint on an access token — exactly one of JKT (DPoP key
+// thumbprint, RFC 9449 §6.1) or X5TS256 (mTLS certificate thumbprint,
+// RFC 8705 §3.1) is ever set on a given token, never both: a token is
+// bound exactly one way.
 type Confirmation struct {
-	JKT string
+	JKT     string
+	X5TS256 string
 }
 
 // AccessTokenClaims is a parsed JWT access token payload (RFC 9068).
@@ -43,7 +45,8 @@ type AccessTokenClaims struct {
 }
 
 type rawConfirmation struct {
-	JKT string `json:"jkt"`
+	JKT     string `json:"jkt,omitempty"`
+	X5TS256 string `json:"x5t#S256,omitempty"`
 }
 
 func parseAccessTokenClaims(payload []byte) (AccessTokenClaims, error) {
@@ -91,10 +94,12 @@ func parseAccessTokenClaims(payload []byte) (AccessTokenClaims, error) {
 		dec := json.NewDecoder(bytes.NewReader(cnfRaw))
 		dec.DisallowUnknownFields()
 		var c rawConfirmation
-		if err := dec.Decode(&c); err != nil || c.JKT == "" {
-			return AccessTokenClaims{}, fmt.Errorf("%w: cnf must be an object with a non-empty jkt", ErrMalformedClaims)
+		// Exactly one of jkt/x5t#S256 — a token is bound exactly one
+		// way, never both and never neither.
+		if err := dec.Decode(&c); err != nil || (c.JKT == "") == (c.X5TS256 == "") {
+			return AccessTokenClaims{}, fmt.Errorf("%w: cnf must be an object with exactly one of a non-empty jkt or x5t#S256", ErrMalformedClaims)
 		}
-		confirmation = &Confirmation{JKT: c.JKT}
+		confirmation = &Confirmation{JKT: c.JKT, X5TS256: c.X5TS256}
 	}
 
 	return AccessTokenClaims{

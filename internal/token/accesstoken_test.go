@@ -132,6 +132,72 @@ func TestAccessTokenConfirmationBinding(t *testing.T) {
 	}
 }
 
+// TestAccessTokenX5TS256ConfirmationBinding mirrors
+// TestAccessTokenConfirmationBinding exactly, for the mTLS confirmation
+// claim (RFC 8705 §3.1) instead of DPoP's.
+func TestAccessTokenX5TS256ConfirmationBinding(t *testing.T) {
+	key := generateKey(t)
+	const certThumbprint = "cert-thumbprint-value"
+
+	now := time.Now()
+	p := baseAccessTokenParams(key, now, time.Minute)
+	p.Confirmation = &Confirmation{X5TS256: certThumbprint}
+	tok, _, err := IssueAccessToken(p)
+	if err != nil {
+		t.Fatalf("IssueAccessToken: %v", err)
+	}
+
+	parsed, err := ParseAccessToken(tok)
+	if err != nil {
+		t.Fatalf("ParseAccessToken: %v", err)
+	}
+
+	validated, err := parsed.Validate(&key.PublicKey, baseAccessTokenPolicy(now))
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if validated.X5TS256 != certThumbprint {
+		t.Fatalf("validated.X5TS256 = %q, want %q", validated.X5TS256, certThumbprint)
+	}
+	if validated.JKT != "" {
+		t.Fatalf("validated.JKT = %q, want \"\" (bound via X5TS256, not JKT)", validated.JKT)
+	}
+}
+
+func TestIssueAccessTokenRejectsConfirmationWithBothJKTAndX5TS256(t *testing.T) {
+	key := generateKey(t)
+	p := baseAccessTokenParams(key, time.Now(), time.Minute)
+	p.Confirmation = &Confirmation{JKT: "jkt-value", X5TS256: "cert-value"}
+	if _, _, err := IssueAccessToken(p); err == nil {
+		t.Fatalf("IssueAccessToken(both jkt and x5t#S256 set) = nil error, want error")
+	}
+}
+
+func TestIssueAccessTokenRejectsEmptyConfirmation(t *testing.T) {
+	key := generateKey(t)
+	p := baseAccessTokenParams(key, time.Now(), time.Minute)
+	p.Confirmation = &Confirmation{}
+	if _, _, err := IssueAccessToken(p); err == nil {
+		t.Fatalf("IssueAccessToken(empty confirmation) = nil error, want error")
+	}
+}
+
+// TestParseAccessTokenRejectsConfirmationWithBothJKTAndX5TS256 covers
+// the wire-parsing side of the same "bound exactly one way" rule — a
+// hand-crafted token can't be trusted to only ever set one.
+func TestParseAccessTokenRejectsConfirmationWithBothJKTAndX5TS256(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	tok := buildRawAccessTokenWithClaims(t, key, map[string]any{
+		"iss": "https://as.example", "sub": "user-1", "aud": "https://rs.example",
+		"client_id": "client-123", "exp": now.Add(time.Minute).Unix(), "iat": now.Unix(), "jti": "jti-1",
+		"cnf": map[string]string{"jkt": "jkt-value", "x5t#S256": "cert-value"},
+	})
+	if _, err := ParseAccessToken(tok); !errors.Is(err, ErrMalformedClaims) {
+		t.Fatalf("ParseAccessToken(cnf with both jkt and x5t#S256) = %v, want ErrMalformedClaims", err)
+	}
+}
+
 func TestIssueAccessTokenRejectsReservedClaimName(t *testing.T) {
 	key := generateKey(t)
 	p := baseAccessTokenParams(key, time.Now(), time.Minute)

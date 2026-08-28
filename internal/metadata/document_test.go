@@ -189,6 +189,57 @@ func TestParseAndValidateAcceptsMissingAuthorizationAndPAREndpoints(t *testing.T
 	}
 }
 
+func TestParseAndValidateAcceptsMTLSEndpointAliases(t *testing.T) {
+	issuer := "https://as.example.com"
+	doc := metadata.Document{
+		Issuer:                             issuer,
+		AuthorizationEndpoint:              issuer + "/authorize",
+		TokenEndpoint:                      issuer + "/token",
+		PushedAuthorizationRequestEndpoint: issuer + "/par",
+		JWKSURI:                            issuer + "/jwks",
+		MTLSEndpointAliases: &metadata.MTLSEndpointAliases{
+			TokenEndpoint:                      "https://mtls.as.example.com/token",
+			PushedAuthorizationRequestEndpoint: "https://mtls.as.example.com/par",
+			BackchannelAuthenticationEndpoint:  "https://mtls.as.example.com/backchannel-authenticate",
+		},
+	}
+	body, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	parsed, err := metadata.ParseAndValidate(body, issuer)
+	if err != nil {
+		t.Fatalf("ParseAndValidate: %v", err)
+	}
+	if parsed.MTLSEndpointAliases == nil {
+		t.Fatalf("MTLSEndpointAliases = nil, want non-nil")
+	}
+	if parsed.MTLSEndpointAliases.TokenEndpoint != "https://mtls.as.example.com/token" {
+		t.Errorf("MTLSEndpointAliases.TokenEndpoint = %q", parsed.MTLSEndpointAliases.TokenEndpoint)
+	}
+	if parsed.MTLSEndpointAliases.PushedAuthorizationRequestEndpoint != "https://mtls.as.example.com/par" {
+		t.Errorf("MTLSEndpointAliases.PushedAuthorizationRequestEndpoint = %q", parsed.MTLSEndpointAliases.PushedAuthorizationRequestEndpoint)
+	}
+	if parsed.MTLSEndpointAliases.BackchannelAuthenticationEndpoint != "https://mtls.as.example.com/backchannel-authenticate" {
+		t.Errorf("MTLSEndpointAliases.BackchannelAuthenticationEndpoint = %q", parsed.MTLSEndpointAliases.BackchannelAuthenticationEndpoint)
+	}
+}
+
+// TestParseAndValidateOmitsMTLSEndpointAliasesWhenAbsent covers the
+// common case — a server that never advertises
+// mtls_endpoint_aliases at all — must parse with the field nil, not
+// fail.
+func TestParseAndValidateOmitsMTLSEndpointAliasesWhenAbsent(t *testing.T) {
+	body := validDocumentJSON(t, "https://as.example.com")
+	doc, err := metadata.ParseAndValidate(body, "https://as.example.com")
+	if err != nil {
+		t.Fatalf("ParseAndValidate: %v", err)
+	}
+	if doc.MTLSEndpointAliases != nil {
+		t.Errorf("MTLSEndpointAliases = %+v, want nil", doc.MTLSEndpointAliases)
+	}
+}
+
 func TestParseAndValidateToleratesUnknownFields(t *testing.T) {
 	raw := strings.Replace(string(validDocumentJSON(t, "https://as.example.com")), "{", `{"some_vendor_extension":"value",`, 1)
 	if _, err := metadata.ParseAndValidate([]byte(raw), "https://as.example.com"); err != nil {

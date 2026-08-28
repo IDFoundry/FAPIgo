@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/x509"
 	"strings"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -13,19 +14,30 @@ import (
 type RefreshTokenRequest struct {
 	HTTP FormRequest
 
-	// DPoPProof is the value of the request's DPoP header. It is
-	// required and must be a valid, fresh proof, but — since every
-	// client this server accepts is confidential (private_key_jwt
-	// client authentication is always required; there is no
-	// public-client path) — it need not be bound to the same key the
-	// refresh token was originally issued to. RFC 9449 §5: "Refresh
-	// tokens issued to confidential clients... are not bound to the
-	// DPoP proof public key because they are already sender-constrained
-	// with a different existing mechanism [client authentication]." The
-	// newly issued access token is bound to whichever key this request
-	// presents, so a client rotating its DPoP key at refresh time is
-	// expected and correctly handled, not an error.
+	// DPoPProof is the value of the request's DPoP header — required
+	// when the authenticated client's SenderConstrain() is
+	// SenderConstrainDPoP (the default). It must be a valid, fresh
+	// proof, but — since every client this server accepts is
+	// confidential (private_key_jwt client authentication is always
+	// required; there is no public-client path) — it need not be bound
+	// to the same key the refresh token was originally issued to. RFC
+	// 9449 §5: "Refresh tokens issued to confidential clients... are
+	// not bound to the DPoP proof public key because they are already
+	// sender-constrained with a different existing mechanism [client
+	// authentication]." The newly issued access token is bound to
+	// whichever key this request presents, so a client rotating its
+	// DPoP key at refresh time is expected and correctly handled, not
+	// an error.
 	DPoPProof string
+
+	// PeerCertificate is the TLS client certificate presented on the
+	// connection this request arrived on, if any — required instead of
+	// DPoPProof when the authenticated client's SenderConstrain() is
+	// SenderConstrainMTLS. Mirrors DPoPProof's own "whichever credential
+	// shows up wins" reasoning: an mTLS-bound client rotating its
+	// certificate at refresh time is expected and correctly handled the
+	// same way.
+	PeerCertificate *x509.Certificate
 }
 
 // RefreshAccessToken authenticates the client, verifies its DPoP proof,
@@ -58,11 +70,10 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorInvalidRequest, 400, "refresh_token is required", nil))
 	}
 
-	verifiedProof, dpopErr := s.verifyTokenRequestDPoP(ctx, req.DPoPProof)
-	if dpopErr != nil {
-		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), dpopErr)
+	thumbprint, bindingErr := s.verifyTokenRequestBinding(ctx, client, req.DPoPProof, req.PeerCertificate)
+	if bindingErr != nil {
+		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), bindingErr)
 	}
-	thumbprint := verifiedProof.Thumbprint.String()
 
 	redeemed, err := s.deps.Grants.RedeemRefreshToken(ctx, storage.RefreshTokenRedemption{
 		TokenHash: sha256.Sum256([]byte(rawToken)),
@@ -105,7 +116,7 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 	// (see ExchangeAuthorizationCode).
 	accessToken, _, err := s.deps.AccessTokens.IssueAccessToken(ctx, AccessTokenParams{
 		ClientID: client.ID(), Subject: redeemed.Subject, Scope: scope,
-		Thumbprint: thumbprint, Claims: accessTokenClaims,
+		Thumbprint: thumbprint, SenderConstrain: client.SenderConstrain(), Claims: accessTokenClaims,
 		Issuer: s.cfg.Issuer.String(), Audience: s.cfg.Issuer.String(),
 		Now: now, Lifetime: s.cfg.Limits.AccessTokenLifetime, Random: s.deps.Random,
 	})
@@ -115,7 +126,7 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 
 	result := TokenResult{
 		AccessToken: fapi.NewSecret(accessToken),
-		TokenType:   "DPoP",
+		TokenType:   tokenTypeFor(client.SenderConstrain()),
 		ExpiresIn:   s.cfg.Limits.AccessTokenLifetime,
 		Scope:       strings.Join(scope, " "),
 	}
@@ -144,7 +155,7 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 	result.RefreshToken = fapi.NewSecret(rawToken)
 	result.HasRefreshToken = true
 
-	if s.deps.Nonces != nil {
+	if s.deps.Nonces != nil && client.SenderConstrain() == storage.SenderConstrainDPoP {
 		nextNonce, err := s.issueDPoPNonce(ctx, now)
 		if err != nil {
 			return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorServerError, 500, "failed to issue dpop nonce", err))

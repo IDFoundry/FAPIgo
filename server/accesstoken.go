@@ -22,7 +22,14 @@ type AccessTokenParams struct {
 	Subject    string
 	Scope      []string
 	Thumbprint string
-	Claims     map[string]json.RawMessage
+
+	// SenderConstrain says which mechanism Thumbprint represents — a
+	// DPoP proof key thumbprint (SenderConstrainDPoP, the zero value)
+	// or an mTLS client certificate thumbprint (SenderConstrainMTLS).
+	// Always the issuing client's own storage.RegisteredClient.SenderConstrain().
+	SenderConstrain storage.SenderConstrain
+
+	Claims map[string]json.RawMessage
 
 	// Issuer and Audience are only meaningful to a self-contained
 	// format (JWTAccessTokens uses them as the iss/aud claims) — an
@@ -86,11 +93,23 @@ func (j JWTAccessTokens) IssueAccessToken(ctx context.Context, p AccessTokenPara
 		Issuer: p.Issuer, Subject: p.Subject, Audience: p.Audience,
 		ClientID:     p.ClientID.String(),
 		Scope:        strings.Join(p.Scope, " "),
-		Confirmation: &token.Confirmation{JKT: p.Thumbprint},
+		Confirmation: confirmationFor(p.SenderConstrain, p.Thumbprint),
 		Now:          p.Now, Lifetime: p.Lifetime,
 		Random:     p.Random,
 		Parameters: p.Claims,
 	})
+}
+
+// confirmationFor builds the "cnf" claim for thumbprint under
+// senderConstrain — the one place a bare thumbprint string is turned
+// into the correctly-shaped RFC 7800 confirmation (JKT vs X5TS256);
+// see internal/token.Confirmation's own doc comment for why exactly
+// one is ever set.
+func confirmationFor(senderConstrain storage.SenderConstrain, thumbprint string) *token.Confirmation {
+	if senderConstrain == storage.SenderConstrainMTLS {
+		return &token.Confirmation{X5TS256: thumbprint}
+	}
+	return &token.Confirmation{JKT: thumbprint}
 }
 
 // OpaqueAccessTokens issues opaque, storage-backed access tokens: a
@@ -119,13 +138,14 @@ func (o OpaqueAccessTokens) IssueAccessToken(ctx context.Context, p AccessTokenP
 	}
 	hash := sha256.Sum256([]byte(raw))
 	if err := o.Store.CreateAccessToken(ctx, storage.NewAccessToken{
-		TokenHash:  hash,
-		ClientID:   p.ClientID,
-		Subject:    p.Subject,
-		Scope:      p.Scope,
-		Thumbprint: p.Thumbprint,
-		Claims:     p.Claims,
-		ExpiresAt:  p.Now.Add(p.Lifetime),
+		TokenHash:       hash,
+		ClientID:        p.ClientID,
+		Subject:         p.Subject,
+		Scope:           p.Scope,
+		Thumbprint:      p.Thumbprint,
+		SenderConstrain: p.SenderConstrain,
+		Claims:          p.Claims,
+		ExpiresAt:       p.Now.Add(p.Lifetime),
 	}); err != nil {
 		return "", "", err
 	}

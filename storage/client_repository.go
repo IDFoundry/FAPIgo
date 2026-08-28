@@ -7,6 +7,25 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 )
 
+// SenderConstrain is the closed set of mechanisms a registered
+// client's access (and refresh) tokens are sender-constrained with.
+type SenderConstrain uint8
+
+const (
+	// SenderConstrainDPoP binds a client's tokens to a DPoP proof key
+	// (RFC 9449) — the zero value, so every registered client that
+	// predates this field keeps behaving exactly as it did before.
+	SenderConstrainDPoP SenderConstrain = iota
+
+	// SenderConstrainMTLS binds a client's tokens to the TLS client
+	// certificate presented on the connection that requested them
+	// (RFC 8705 §3's "cnf.x5t#S256"), instead of a DPoP proof. Like
+	// DPoP, this needs no client registration or CA trust store of its
+	// own — sender-constraining only compares thumbprints, it never
+	// authenticates the client by its certificate.
+	SenderConstrainMTLS
+)
+
 // RegisteredClient is the exact, validated configuration of one
 // registered OAuth client. It is immutable and can only be constructed
 // through NewRegisteredClient — a caller cannot return arbitrary
@@ -16,6 +35,7 @@ type RegisteredClient struct {
 	redirectURIs             []fapi.RegisteredRedirectURI
 	clientAssertionAlgorithm fapi.SignatureAlgorithm
 	requestObjectAlgorithm   fapi.SignatureAlgorithm
+	senderConstrain          SenderConstrain
 	allowedScopes            map[string]struct{}
 
 	idTokenEncryptionKeyManagement     fapi.KeyManagementAlgorithm
@@ -41,6 +61,12 @@ type RegisteredClientConfig struct {
 	// request objects are accepted under. Leave zero if the client is
 	// not permitted to submit request objects at all.
 	RequestObjectAlgorithm fapi.SignatureAlgorithm
+
+	// SenderConstrain selects how this client's tokens are
+	// sender-constrained — SenderConstrainDPoP (the zero value) or
+	// SenderConstrainMTLS. Every existing client config that never sets
+	// this field keeps using DPoP, unchanged.
+	SenderConstrain SenderConstrain
 
 	// IDTokenEncryptionKeyManagement/IDTokenEncryptionContentEncryption,
 	// if set (together — both zero, or both set), mean every ID token
@@ -93,6 +119,9 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 	if cfg.RequestObjectAlgorithm != 0 && !cfg.RequestObjectAlgorithm.IsValid() {
 		return RegisteredClient{}, fmt.Errorf("storage: client %q has an invalid request object algorithm", cfg.ID)
 	}
+	if cfg.SenderConstrain != SenderConstrainDPoP && cfg.SenderConstrain != SenderConstrainMTLS {
+		return RegisteredClient{}, fmt.Errorf("storage: client %q has an invalid sender_constrain value", cfg.ID)
+	}
 	if cfg.BackchannelAuthenticationRequestAlgorithm != 0 && !cfg.BackchannelAuthenticationRequestAlgorithm.IsValid() {
 		return RegisteredClient{}, fmt.Errorf("storage: client %q has an invalid backchannel authentication request algorithm", cfg.ID)
 	}
@@ -139,6 +168,7 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 		redirectURIs:                              redirectURIs,
 		clientAssertionAlgorithm:                  cfg.ClientAssertionAlgorithm,
 		requestObjectAlgorithm:                    cfg.RequestObjectAlgorithm,
+		senderConstrain:                           cfg.SenderConstrain,
 		allowedScopes:                             scopes,
 		idTokenEncryptionKeyManagement:            cfg.IDTokenEncryptionKeyManagement,
 		idTokenEncryptionContentEncryption:        cfg.IDTokenEncryptionContentEncryption,
@@ -174,6 +204,12 @@ func (c RegisteredClient) ClientAssertionAlgorithm() fapi.SignatureAlgorithm {
 // submit request objects at all.
 func (c RegisteredClient) RequestObjectAlgorithm() (algorithm fapi.SignatureAlgorithm, permitted bool) {
 	return c.requestObjectAlgorithm, c.requestObjectAlgorithm != 0
+}
+
+// SenderConstrain returns how this client's tokens are
+// sender-constrained.
+func (c RegisteredClient) SenderConstrain() SenderConstrain {
+	return c.senderConstrain
 }
 
 // IDTokenEncryption returns the algorithms this client's ID tokens must

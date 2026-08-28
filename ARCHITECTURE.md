@@ -529,10 +529,15 @@ DPoP — client *authentication* is still private_key_jwt only;
 `cmd/conformance-as`'s own doc comment). This made the CIBA wall above
 worth a genuine live re-attempt rather than a permanent limitation:
 against `conformance/server/oidf-config/ciba-mtls.config.json`: **33
-PASS, 1 FAIL.** The one remaining FAIL isn't a defect — the module
-itself declines to grade a check that's inherently about what a human
-saw on a real device, something `automated_ciba_approval_url`
-structurally can't produce evidence of either way. (The 3 modules
+PASS, 1 FAIL.** The one remaining FAIL is unfixable by construction —
+confirmed by disassembling `ExpectBindingMessageCorrectDisplay.evaluate()`
+itself: it unconditionally throws whenever `automated_ciba_approval_url`
+is set, no branch or placeholder exists for that case, and its only
+passing route needs a human physically watching a real device and
+uploading a screenshot as evidence — exactly the scenario
+`automated_ciba_approval_url` exists to replace everywhere else, so
+this one check and an automated run are mutually exclusive by the
+suite's own design. (The 3 modules
 requiring an RS256-signed probe — `...-signature-algorithm-is-RS256-fails`
 and its two client-assertion counterparts — self-skip unless the
 plan's own client is registered with an RSA/PS256 key, since the

@@ -43,10 +43,11 @@ MTLS-bound access tokens unconditionally. Now that this module supports
 mTLS sender-constraining (RFC 8705 §3, `-mtls`), this was genuinely
 re-attempted live against `ciba-mtls.config.json` — **33 PASS / 1
 FAIL**, up from an immediate suite-side config error for every module
-past discovery. The one remaining FAIL isn't a defect — the module
-itself declines to grade a check that's inherently about what a human
-saw on a real device, something automated CIBA approval can't produce
-evidence of either way. Six real library/harness gaps the attempt
+past discovery. The one remaining FAIL is unfixable by construction —
+confirmed by disassembly, not inferred: the suite's own check
+unconditionally throws whenever automated CIBA approval is configured,
+with no alternate path — its only passing route needs a human
+physically watching a real device. Six real library/harness gaps the attempt
 surfaced were all fixed along the way:
 `tls_client_certificate_bound_access_tokens` metadata, client-assertion
 `aud` acceptance being far too narrow, a stricter legacy FAPI-RW §8.5

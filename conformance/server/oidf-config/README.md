@@ -302,14 +302,20 @@ suite's own outbound TLS client to present.
 
 **Result of a live run: 33 PASS, 1 FAIL** (up from an immediate
 suite-side config error for every module past discovery). The one
-remaining FAIL isn't a defect: `fapi-ciba-id1-ensure-authorization-request-with-potentially-bad-binding-message`
-fails on `CIBA-7.1` with "Automated approval url has been provided in
-the configuration json. It is assumed this is an automated run and the
-display of the binding message cannot be verified" — the module itself
-declining to grade a check that's inherently about what a human saw on
-a real device, something `automated_ciba_approval_url` (see below)
-structurally can't produce evidence of either way. Getting this far
-surfaced six real, since-fixed library/harness gaps:
+remaining FAIL is unfixable by construction, confirmed by disassembling
+`ExpectBindingMessageCorrectDisplay.evaluate()` down to the bytecode,
+not inferred: when `config.automated_ciba_approval_url` is set, this
+condition unconditionally throws — there is no branch, no placeholder,
+no alternate path. Its *only* passing route (reached solely when
+`automated_ciba_approval_url` is absent) is
+`createBrowserInteractionPlaceholder("...upload a screenshot/photo of
+the binding message")` — a genuinely manual run where a human sees the
+message on a real out-of-band device and uploads evidence through the
+suite's UI. That's precisely the scenario `automated_ciba_approval_url`
+exists to replace for every other module, so this one check and an
+automated run are mutually exclusive by the suite's own design — not a
+gap in this AS, this driver, or this config. Getting this far surfaced
+six real, since-fixed library/harness gaps:
 
 - **Fixed: `tls_client_certificate_bound_access_tokens` (RFC 8705
   §3.3) was entirely missing from `server.Metadata`.** The suite's

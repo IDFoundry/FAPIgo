@@ -1,6 +1,7 @@
 package fapi
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/url"
@@ -104,6 +105,14 @@ func isLoopbackHost(host string) bool {
 // String returns the URL's string form.
 func (u URL) String() string {
 	return u.value.String()
+}
+
+// MarshalJSON encodes u as its string form, per String(). It has no
+// UnmarshalJSON counterpart: parsing a URL back out needs one of
+// ParseIssuerURL/ParseEndpointURL's validation modes, a choice a generic
+// decoder can't make on the caller's behalf.
+func (u URL) MarshalJSON() ([]byte, error) {
+	return json.Marshal(u.String())
 }
 
 // URL returns a copy of the underlying net/url.URL.

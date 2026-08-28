@@ -1,6 +1,7 @@
 package fapi
 
 import (
+	"encoding/json"
 	"net/url"
 	"testing"
 )
@@ -166,6 +167,31 @@ func TestURLWithQueryPreservesLoopbackHTTP(t *testing.T) {
 	want := "http://127.0.0.1:8080/authorize?client_id=abc"
 	if got.String() != want {
 		t.Fatalf("WithQuery: String() = %q, want %q", got.String(), want)
+	}
+}
+
+func TestURLMarshalJSON(t *testing.T) {
+	parsed, err := ParseEndpointURL("https://as.example/par")
+	if err != nil {
+		t.Fatalf("ParseEndpointURL: %v", err)
+	}
+	b, err := json.Marshal(parsed)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if got, want := string(b), `"https://as.example/par"`; got != want {
+		t.Fatalf("Marshal(parsed) = %s, want %s", got, want)
+	}
+}
+
+func TestURLMarshalJSONZeroValue(t *testing.T) {
+	var u URL
+	b, err := json.Marshal(u)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if got, want := string(b), `""`; got != want {
+		t.Fatalf("Marshal(zero value) = %s, want %s", got, want)
 	}
 }
 

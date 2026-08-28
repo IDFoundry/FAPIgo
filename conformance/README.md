@@ -47,6 +47,19 @@ non-automated setup for this plan exists in
 for exploratory use, but it isn't expected to pass and isn't part of
 `scripts/run-all.sh`.
 
+`client`'s own CIBA support
+(`BeginBackchannelAuthentication`/`PollBackchannelAuthentication`) was
+genuinely attempted, live, against the RP-side
+`fapi-ciba-id1-client-test-plan` (`cmd/conformance-client -profile=ciba`) —
+unlike the AS side, its backchannel-authentication step doesn't share
+the unconditional MTLS mandate, but its *token* endpoint does, for a
+separately confirmed reason. Result: 3 of 22 modules genuinely PASS
+(the ones that never reach token exchange); the rest FAIL for that one
+uniform, documented reason. See
+[`client/scripts/README.md`](client/scripts/README.md#ciba--profileciba)
+for the full breakdown; also not part of `scripts/run-all.sh` given
+the majority-FAILED result.
+
 ## Access-token format coverage
 
 `cmd/conformance-as` supports both of `server`'s access-token formats

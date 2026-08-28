@@ -35,6 +35,8 @@ func discoverForAlgorithmTests(t *testing.T) client.DiscoveredMetadata {
 			UserinfoSigningAlgValuesSupported:    []string{"ES256"},
 			UserinfoEncryptionAlgValuesSupported: []string{"RSA-OAEP-256"},
 			UserinfoEncryptionEncValuesSupported: []string{"A256GCM"},
+
+			BackchannelAuthenticationRequestSigningAlgValuesSupported: []string{"ES256"},
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(doc) //nolint:errcheck
@@ -192,6 +194,32 @@ func TestSupportsAlgorithmsSkipsUserInfoEncryptionWhenNotConfigured(t *testing.T
 	err := md.SupportsAlgorithms(client.Algorithms{IDToken: fapi.ES256, UserInfo: fapi.ES256})
 	if err != nil {
 		t.Fatalf("SupportsAlgorithms(userinfo encryption not configured): %v", err)
+	}
+}
+
+func TestSupportsAlgorithmsSkipsBackchannelAuthenticationRequestWhenZero(t *testing.T) {
+	md := discoverForAlgorithmTests(t)
+	// A caller not using CIBA leaves this zero — must not be checked
+	// even though the issuer advertises CIBA support this caller never
+	// asked for.
+	if err := md.SupportsAlgorithms(client.Algorithms{IDToken: fapi.ES256}); err != nil {
+		t.Fatalf("SupportsAlgorithms(BackchannelAuthenticationRequest unset): %v", err)
+	}
+}
+
+func TestSupportsAlgorithmsAcceptsMatchingBackchannelAuthenticationRequest(t *testing.T) {
+	md := discoverForAlgorithmTests(t)
+	err := md.SupportsAlgorithms(client.Algorithms{IDToken: fapi.ES256, BackchannelAuthenticationRequest: fapi.ES256})
+	if err != nil {
+		t.Fatalf("SupportsAlgorithms(matching backchannel authentication request alg): %v", err)
+	}
+}
+
+func TestSupportsAlgorithmsRejectsUnsupportedBackchannelAuthenticationRequest(t *testing.T) {
+	md := discoverForAlgorithmTests(t)
+	err := md.SupportsAlgorithms(client.Algorithms{IDToken: fapi.ES256, BackchannelAuthenticationRequest: fapi.PS256})
+	if err == nil {
+		t.Fatal("SupportsAlgorithms(unsupported backchannel authentication request alg) = nil error, want error")
 	}
 }
 

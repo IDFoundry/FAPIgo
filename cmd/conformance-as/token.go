@@ -28,8 +28,10 @@ func tokenHandler(srv *server.Server) http.HandlerFunc {
 			result, err = srv.ExchangeAuthorizationCode(r.Context(), server.AuthorizationCodeExchangeRequest{HTTP: form, DPoPProof: dpopProof})
 		case "refresh_token":
 			result, err = srv.RefreshAccessToken(r.Context(), server.RefreshTokenRequest{HTTP: form, DPoPProof: dpopProof})
+		case server.CIBAGrantType:
+			result, err = srv.ExchangeBackchannelAuthentication(r.Context(), server.BackchannelTokenExchangeRequest{HTTP: form, DPoPProof: dpopProof})
 		default:
-			writeRawOAuthError(w, http.StatusBadRequest, "unsupported_grant_type", "grant_type must be authorization_code or refresh_token")
+			writeRawOAuthError(w, http.StatusBadRequest, "unsupported_grant_type", "grant_type must be authorization_code, refresh_token, or "+server.CIBAGrantType)
 			return
 		}
 		if err != nil {

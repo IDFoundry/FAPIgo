@@ -49,6 +49,10 @@ type discoveryDoc struct {
 	UserinfoSigningAlgValuesSupported    []string `json:"userinfo_signing_alg_values_supported,omitempty"`
 	UserinfoEncryptionAlgValuesSupported []string `json:"userinfo_encryption_alg_values_supported,omitempty"`
 	UserinfoEncryptionEncValuesSupported []string `json:"userinfo_encryption_enc_values_supported,omitempty"`
+
+	BackchannelAuthenticationEndpoint                         string   `json:"backchannel_authentication_endpoint,omitempty"`
+	BackchannelTokenDeliveryModesSupported                    []string `json:"backchannel_token_delivery_modes_supported,omitempty"`
+	BackchannelAuthenticationRequestSigningAlgValuesSupported []string `json:"backchannel_authentication_request_signing_alg_values_supported,omitempty"`
 }
 
 func TestDiscoverAcceptsValidDocumentAtRoot(t *testing.T) {
@@ -248,17 +252,25 @@ func TestDiscoverRejectsIssuerMismatch(t *testing.T) {
 	}
 }
 
-func TestDiscoverRejectsMissingPAREndpoint(t *testing.T) {
+// TestDiscoverAcceptsMissingAuthorizationAndPAREndpoints covers a
+// CIBA-only authorization server's own discovery document: no browser
+// flow at all, so neither authorization_endpoint nor
+// pushed_authorization_request_endpoint is advertised. Discover itself
+// must succeed with both left zero — it's client.New's own
+// "Authorization/PushedAuthorizationRequest must both be set, or both
+// left zero, and at least one flow must be configured" pairing rule
+// that enforces consistency for a caller intending the browser flow,
+// not Discover.
+func TestDiscoverAcceptsMissingAuthorizationAndPAREndpoints(t *testing.T) {
 	var ts *httptest.Server
 	ts = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(discoveryDoc{
-			Issuer:                ts.URL,
-			AuthorizationEndpoint: ts.URL + "/authorize",
-			TokenEndpoint:         ts.URL + "/token",
-			JWKSURI:               ts.URL + "/jwks",
-			// PushedAuthorizationRequestEndpoint intentionally omitted:
-			// this module only ever drives a PAR-based flow.
+			Issuer:        ts.URL,
+			TokenEndpoint: ts.URL + "/token",
+			JWKSURI:       ts.URL + "/jwks",
+			// AuthorizationEndpoint/PushedAuthorizationRequestEndpoint
+			// intentionally omitted.
 		})
 	}))
 	defer ts.Close()
@@ -267,9 +279,85 @@ func TestDiscoverRejectsMissingPAREndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseIssuerURL: %v", err)
 	}
-	_, err = client.Discover(context.Background(), newDiscoveryFetcher(t, ts), issuer, fapi.AllowLoopbackHTTP())
-	if !errors.Is(err, metadata.ErrMissingField) {
-		t.Fatalf("Discover(no PAR endpoint) error = %v, want metadata.ErrMissingField", err)
+	md, err := client.Discover(context.Background(), newDiscoveryFetcher(t, ts), issuer, fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if !md.Endpoints.Authorization.IsZero() {
+		t.Fatalf("Endpoints.Authorization = %q, want zero", md.Endpoints.Authorization.String())
+	}
+	if !md.Endpoints.PushedAuthorizationRequest.IsZero() {
+		t.Fatalf("Endpoints.PushedAuthorizationRequest = %q, want zero", md.Endpoints.PushedAuthorizationRequest.String())
+	}
+}
+
+// TestDiscoverPopulatesBackchannelAuthenticationFields covers the CIBA
+// discovery triple, mirroring TestDiscoverAcceptsValidDocumentAtRoot's
+// own checks for the UserInfo triple.
+func TestDiscoverPopulatesBackchannelAuthenticationFields(t *testing.T) {
+	var ts *httptest.Server
+	ts = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(discoveryDoc{
+			Issuer:                                 ts.URL,
+			AuthorizationEndpoint:                  ts.URL + "/authorize",
+			TokenEndpoint:                          ts.URL + "/token",
+			PushedAuthorizationRequestEndpoint:     ts.URL + "/par",
+			JWKSURI:                                ts.URL + "/jwks",
+			BackchannelAuthenticationEndpoint:      ts.URL + "/backchannel-authenticate",
+			BackchannelTokenDeliveryModesSupported: []string{"poll"},
+			BackchannelAuthenticationRequestSigningAlgValuesSupported: []string{"ES256", "RS256"},
+		})
+	}))
+	defer ts.Close()
+
+	issuer, err := fapi.ParseIssuerURL(ts.URL, fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+	md, err := client.Discover(context.Background(), newDiscoveryFetcher(t, ts), issuer, fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if md.Endpoints.BackchannelAuthentication.String() != ts.URL+"/backchannel-authenticate" {
+		t.Errorf("Endpoints.BackchannelAuthentication = %q", md.Endpoints.BackchannelAuthentication.String())
+	}
+	if len(md.BackchannelAuthenticationRequestAlgorithms) != 1 || md.BackchannelAuthenticationRequestAlgorithms[0] != fapi.ES256 {
+		t.Errorf("BackchannelAuthenticationRequestAlgorithms = %v, want [ES256] (RS256 is unsupported and must be filtered)", md.BackchannelAuthenticationRequestAlgorithms)
+	}
+}
+
+// TestDiscoverOmitsBackchannelAuthenticationEndpointWhenAbsent covers
+// the common case — a server with no CIBA support at all — mirroring
+// TestDiscoverOmitsUserinfoEndpointWhenAbsent.
+func TestDiscoverOmitsBackchannelAuthenticationEndpointWhenAbsent(t *testing.T) {
+	var ts *httptest.Server
+	ts = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(discoveryDoc{
+			Issuer:                             ts.URL,
+			AuthorizationEndpoint:              ts.URL + "/authorize",
+			TokenEndpoint:                      ts.URL + "/token",
+			PushedAuthorizationRequestEndpoint: ts.URL + "/par",
+			JWKSURI:                            ts.URL + "/jwks",
+			// BackchannelAuthenticationEndpoint intentionally omitted.
+		})
+	}))
+	defer ts.Close()
+
+	issuer, err := fapi.ParseIssuerURL(ts.URL, fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+	md, err := client.Discover(context.Background(), newDiscoveryFetcher(t, ts), issuer, fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if !md.Endpoints.BackchannelAuthentication.IsZero() {
+		t.Fatalf("Endpoints.BackchannelAuthentication = %q, want zero", md.Endpoints.BackchannelAuthentication.String())
+	}
+	if len(md.BackchannelAuthenticationRequestAlgorithms) != 0 {
+		t.Fatalf("BackchannelAuthenticationRequestAlgorithms = %v, want empty", md.BackchannelAuthenticationRequestAlgorithms)
 	}
 }
 

@@ -68,14 +68,33 @@ type Document struct {
 	UserinfoSigningAlgValuesSupported    []string `json:"userinfo_signing_alg_values_supported,omitempty"`
 	UserinfoEncryptionAlgValuesSupported []string `json:"userinfo_encryption_alg_values_supported,omitempty"`
 	UserinfoEncryptionEncValuesSupported []string `json:"userinfo_encryption_enc_values_supported,omitempty"`
+
+	// BackchannelAuthenticationEndpoint, BackchannelTokenDeliveryModesSupported
+	// and BackchannelAuthenticationRequestSigningAlgValuesSupported
+	// mirror UserinfoEndpoint's own optionality — OPTIONAL per CIBA §5,
+	// absent entirely from a server that doesn't support it (most
+	// servers). client.Discover surfaces the endpoint as
+	// DiscoveredMetadata.Endpoints.BackchannelAuthentication and the
+	// algorithm list as DiscoveredMetadata.BackchannelAuthenticationRequestAlgorithms.
+	BackchannelAuthenticationEndpoint                         string   `json:"backchannel_authentication_endpoint,omitempty"`
+	BackchannelTokenDeliveryModesSupported                    []string `json:"backchannel_token_delivery_modes_supported,omitempty"`
+	BackchannelAuthenticationRequestSigningAlgValuesSupported []string `json:"backchannel_authentication_request_signing_alg_values_supported,omitempty"`
 }
 
 // ParseAndValidate parses body as a Document and checks it against
-// expectedIssuer: every field this module requires (issuer,
-// authorization_endpoint, token_endpoint, pushed_authorization_request_endpoint,
-// jwks_uri — this module only ever drives a PAR-based flow, so a
-// document missing a PAR endpoint is not usable regardless of what RFC
-// 8414 itself requires) is present and non-empty, and — the check that
+// expectedIssuer: every field every flow this module supports needs
+// (issuer, token_endpoint, jwks_uri) is present and non-empty.
+// authorization_endpoint and pushed_authorization_request_endpoint are
+// checked for presence together, not individually required: a
+// CIBA-only authorization server (client.Config's own
+// Endpoints.BackchannelAuthentication-only shape) has no browser
+// endpoint to advertise at all, so requiring one unconditionally would
+// make such a server's own, otherwise-valid document unusable. A
+// document advertising only one of the pair is accepted here — client
+// itself is where a caller's actual intended flow gets validated
+// against what was configured (see client.Config's own
+// "Authorization and PushedAuthorizationRequest must both be set, or
+// both left zero" pairing rule). And — the check that
 // stops a redirected, cached or otherwise substituted discovery response
 // from being silently accepted for the wrong authorization server (RFC
 // 8414 §3.3, OpenID Connect Discovery 1.0 §4.3) — the document's own
@@ -100,14 +119,8 @@ func ParseAndValidate(body []byte, expectedIssuer string) (Document, error) {
 	if doc.Issuer != expectedIssuer {
 		return Document{}, ErrIssuerMismatch
 	}
-	if doc.AuthorizationEndpoint == "" {
-		return Document{}, fmt.Errorf("%w: authorization_endpoint", ErrMissingField)
-	}
 	if doc.TokenEndpoint == "" {
 		return Document{}, fmt.Errorf("%w: token_endpoint", ErrMissingField)
-	}
-	if doc.PushedAuthorizationRequestEndpoint == "" {
-		return Document{}, fmt.Errorf("%w: pushed_authorization_request_endpoint", ErrMissingField)
 	}
 	if doc.JWKSURI == "" {
 		return Document{}, fmt.Errorf("%w: jwks_uri", ErrMissingField)

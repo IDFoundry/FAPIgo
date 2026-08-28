@@ -72,6 +72,13 @@ type DiscoveredMetadata struct {
 	UserInfoEncryptionAlgorithms []fapi.KeyManagementAlgorithm
 	UserInfoEncryptionEncValues  []fapi.ContentEncryptionAlgorithm
 
+	// BackchannelAuthenticationRequestAlgorithms is every algorithm this
+	// module recognizes among what the server advertised for signed CIBA
+	// backchannel authentication requests. Empty means the server never
+	// advertised CIBA support at all — most servers, consistent with
+	// Endpoints.BackchannelAuthentication being zero in that case too.
+	BackchannelAuthenticationRequestAlgorithms []fapi.SignatureAlgorithm
+
 	// RequireSignedRequestObject reflects the server's own
 	// require_signed_request_object metadata value — a caller targeting
 	// that server should set Config.Profile to
@@ -122,6 +129,11 @@ type DiscoveredMetadata struct {
 //     UserInfoEncryptionAlgorithms/UserInfoEncryptionEncValues, only if
 //     algs.UserInfoKeyManagement is non-zero, for the same reason
 //     IDTokenKeyManagement is conditional above.
+//   - BackchannelAuthenticationRequest, against
+//     BackchannelAuthenticationRequestAlgorithms, only if
+//     algs.BackchannelAuthenticationRequest is non-zero — a caller not
+//     using CIBA leaves this zero, exactly like RequestObject/JARM
+//     above.
 //
 // ClientAuthentication and DPoP are never checked: those are this
 // client's own signing choice, verified by the server against a
@@ -156,6 +168,9 @@ func (d DiscoveredMetadata) SupportsAlgorithms(algs Algorithms) error {
 		if !slices.Contains(d.UserInfoEncryptionEncValues, algs.UserInfoContentEncryption) {
 			return fmt.Errorf("client: issuer does not support %v content encryption for userinfo; advertises: %v", algs.UserInfoContentEncryption, d.UserInfoEncryptionEncValues)
 		}
+	}
+	if algs.BackchannelAuthenticationRequest != 0 && !slices.Contains(d.BackchannelAuthenticationRequestAlgorithms, algs.BackchannelAuthenticationRequest) {
+		return fmt.Errorf("client: issuer does not support %v for backchannel authentication requests; advertises: %v", algs.BackchannelAuthenticationRequest, d.BackchannelAuthenticationRequestAlgorithms)
 	}
 	return nil
 }
@@ -211,17 +226,29 @@ func Discover(ctx context.Context, fetcher *fapihttp.Client, issuer fapi.URL, op
 		return DiscoveredMetadata{}, fmt.Errorf("client: discover: %w", err)
 	}
 
-	authz, err := fapi.ParseEndpointURL(doc.AuthorizationEndpoint, opts...)
-	if err != nil {
-		return DiscoveredMetadata{}, fmt.Errorf("client: discover: authorization_endpoint: %w", err)
-	}
 	tok, err := fapi.ParseEndpointURL(doc.TokenEndpoint, opts...)
 	if err != nil {
 		return DiscoveredMetadata{}, fmt.Errorf("client: discover: token_endpoint: %w", err)
 	}
-	par, err := fapi.ParseEndpointURL(doc.PushedAuthorizationRequestEndpoint, opts...)
-	if err != nil {
-		return DiscoveredMetadata{}, fmt.Errorf("client: discover: pushed_authorization_request_endpoint: %w", err)
+	// authorization_endpoint and pushed_authorization_request_endpoint
+	// are both OPTIONAL — see metadata.ParseAndValidate's own doc
+	// comment on why a CIBA-only server advertises neither — so an
+	// absent one leaves the corresponding Endpoints field zero rather
+	// than failing; a present-but-malformed one still fails, matching
+	// UserInfo/BackchannelAuthentication's own "absent is fine, broken
+	// is not" convention below.
+	var authz, par fapi.URL
+	if doc.AuthorizationEndpoint != "" {
+		authz, err = fapi.ParseEndpointURL(doc.AuthorizationEndpoint, opts...)
+		if err != nil {
+			return DiscoveredMetadata{}, fmt.Errorf("client: discover: authorization_endpoint: %w", err)
+		}
+	}
+	if doc.PushedAuthorizationRequestEndpoint != "" {
+		par, err = fapi.ParseEndpointURL(doc.PushedAuthorizationRequestEndpoint, opts...)
+		if err != nil {
+			return DiscoveredMetadata{}, fmt.Errorf("client: discover: pushed_authorization_request_endpoint: %w", err)
+		}
 	}
 	jwksURI, err := fapi.ParseEndpointURL(doc.JWKSURI, opts...)
 	if err != nil {
@@ -234,6 +261,13 @@ func Discover(ctx context.Context, fetcher *fapihttp.Client, issuer fapi.URL, op
 			return DiscoveredMetadata{}, fmt.Errorf("client: discover: userinfo_endpoint: %w", err)
 		}
 	}
+	var backchannelAuth fapi.URL
+	if doc.BackchannelAuthenticationEndpoint != "" {
+		backchannelAuth, err = fapi.ParseEndpointURL(doc.BackchannelAuthenticationEndpoint, opts...)
+		if err != nil {
+			return DiscoveredMetadata{}, fmt.Errorf("client: discover: backchannel_authentication_endpoint: %w", err)
+		}
+	}
 
 	return DiscoveredMetadata{
 		Endpoints: Endpoints{
@@ -241,18 +275,20 @@ func Discover(ctx context.Context, fetcher *fapihttp.Client, issuer fapi.URL, op
 			Token:                      tok,
 			PushedAuthorizationRequest: par,
 			UserInfo:                   userinfo,
+			BackchannelAuthentication:  backchannelAuth,
 		},
-		JWKSURI:                           jwksURI,
-		IDTokenAlgorithms:                 supportedAlgorithms(doc.IDTokenSigningAlgValuesSupported),
-		RequestObjectAlgorithms:           supportedAlgorithms(doc.RequestObjectSigningAlgValuesSupported),
-		JARMAlgorithms:                    supportedAlgorithms(doc.AuthorizationSigningAlgValuesSupported),
-		IDTokenEncryptionAlgorithms:       supportedKeyManagementAlgorithms(doc.IDTokenEncryptionAlgValuesSupported),
-		IDTokenEncryptionEncValues:        supportedContentEncryptionAlgorithms(doc.IDTokenEncryptionEncValuesSupported),
-		UserInfoAlgorithms:                supportedAlgorithms(doc.UserinfoSigningAlgValuesSupported),
-		UserInfoEncryptionAlgorithms:      supportedKeyManagementAlgorithms(doc.UserinfoEncryptionAlgValuesSupported),
-		UserInfoEncryptionEncValues:       supportedContentEncryptionAlgorithms(doc.UserinfoEncryptionEncValuesSupported),
-		RequireSignedRequestObject:        doc.RequireSignedRequestObject,
-		AuthorizationResponseIssSupported: doc.AuthorizationResponseIssParameterSupported,
+		JWKSURI:                                    jwksURI,
+		IDTokenAlgorithms:                          supportedAlgorithms(doc.IDTokenSigningAlgValuesSupported),
+		RequestObjectAlgorithms:                    supportedAlgorithms(doc.RequestObjectSigningAlgValuesSupported),
+		JARMAlgorithms:                             supportedAlgorithms(doc.AuthorizationSigningAlgValuesSupported),
+		IDTokenEncryptionAlgorithms:                supportedKeyManagementAlgorithms(doc.IDTokenEncryptionAlgValuesSupported),
+		IDTokenEncryptionEncValues:                 supportedContentEncryptionAlgorithms(doc.IDTokenEncryptionEncValuesSupported),
+		UserInfoAlgorithms:                         supportedAlgorithms(doc.UserinfoSigningAlgValuesSupported),
+		UserInfoEncryptionAlgorithms:               supportedKeyManagementAlgorithms(doc.UserinfoEncryptionAlgValuesSupported),
+		UserInfoEncryptionEncValues:                supportedContentEncryptionAlgorithms(doc.UserinfoEncryptionEncValuesSupported),
+		BackchannelAuthenticationRequestAlgorithms: supportedAlgorithms(doc.BackchannelAuthenticationRequestSigningAlgValuesSupported),
+		RequireSignedRequestObject:                 doc.RequireSignedRequestObject,
+		AuthorizationResponseIssSupported:          doc.AuthorizationResponseIssParameterSupported,
 	}, nil
 }
 

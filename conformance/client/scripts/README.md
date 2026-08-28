@@ -36,13 +36,17 @@ generated in-process, once per run, and never persisted.
 ```
 go run ./cmd/conformance-client -profile=baseline
 go run ./cmd/conformance-client -profile=message-signing
+go run ./cmd/conformance-client -profile=ciba
 ```
 
 - `-profile` selects which plan to run — `baseline`
   (`fapi2-security-profile-final-client-test-plan`, plain query-param
-  authorization responses) or `message-signing`
+  authorization responses), `message-signing`
   (`fapi2-message-signing-final-client-test-plan`, signed request
-  objects and JARM). Defaults to `baseline`.
+  objects and JARM), or `ciba` (`fapi-ciba-id1-client-test-plan` — see
+  its own section below; unlike the other two, most of its modules are
+  expected to FAIL, for a confirmed, documented reason, not a driver
+  bug). Defaults to `baseline`.
 - `-suite` overrides the suite's base URL. Defaults to
   `https://localhost.emobix.co.uk:8443/`, the same dev-mode instance
   `conformance/server`'s own scripts target.
@@ -154,6 +158,70 @@ changing this driver or `client` itself:
   `Config.RequireAuthorizationResponseIss=true` rejected *every*
   legitimate JARM response as "missing iss". Fixed in `client` by
   scoping that check to plain-mode responses only.
+
+## CIBA (`-profile=ciba`)
+
+Drives `client.BeginBackchannelAuthentication`/
+`PollBackchannelAuthentication` against the OIDF suite's
+`fapi-ciba-id1-client-test-plan` (`ciba.go`, not `main.go`'s own
+`runModule` — CIBA has no browser hop for that shape to apply to, so
+`runCIBA`/`runCIBAModule` drive their own discover → begin → poll
+sequence per module). Confirmed live, not assumed:
+`FAPICIBARPProfileBehavior.requiresMtlsForBackchannelEndpoint()` is
+`false` for `plain_fapi`, so — unlike the AS-side `fapi-ciba-id1-test-plan`,
+which is entirely unreachable without MTLS support this module doesn't
+have — the backchannel authentication step itself is genuinely
+attemptable under `client_auth_type=private_key_jwt`.
+
+**Result of a live run: 3 of 22 modules PASS, 19 FAIL** — for one
+single, confirmed, uniform reason, not a grab-bag of unrelated issues:
+
+- **PASS** (3): `fapi-ciba-id1-client-invalid-missing-authreqid-test`,
+  `-invalid-missing-expiresin-test`, `-invalid-unknown-user-id-test` —
+  each is a negative test for the *backchannel response itself*
+  (`AbstractFAPICIBAClientTest.backchannelEndpointCallComplete()`
+  fires the module's completion right after that one call), so none of
+  them ever reach token exchange.
+- **FAIL** (19, everything else — happy path, refresh token, polling-
+  interval/slow-down, every id_token/token-endpoint negative test):
+  `AbstractFAPICIBAClientTest.handleHttp`'s own routing hardcodes
+  `case "token":` to throw "Token endpoint must be called over an mTLS
+  secured connection using the token_endpoint found in
+  mtls_endpoint_aliases" unconditionally — there is no non-MTLS branch
+  for this case at all, unlike `case "backchannel":`, which is gated on
+  the variant. So the token endpoint carries the same MTLS wall the
+  AS-side plan has everywhere, even though the backchannel endpoint
+  doesn't; every module that calls `PollBackchannelAuthentication` at
+  least once hits it. mTLS is out of scope for this module everywhere
+  else already (see ARCHITECTURE.md's own Conformance strategy
+  section) — this isn't worked around, and this profile is not part of
+  any automated pass/fail gate given the majority-FAILED result.
+
+Two gotchas specific to this plan, beyond the ones listed above for the
+baseline/message-signing profiles:
+
+- **`server.jwks` must be supplied explicitly in the plan config.**
+  Unlike the baseline/message-signing plans' own
+  `GenerateServerConfiguration`, this plan's `LoadServerJWKs` condition
+  does not auto-generate the mock AS's own signing key — an omitted
+  `server.jwks` fails every module immediately with "LoadServerJWKs:
+  Couldn't find a JWK set in configuration", before the module ever
+  reaches `WAITING` (confirmed live via `GET /api/log/{id}`, not
+  guessed from the suite's Java source). `runCIBA` generates a fresh
+  ES256 key for this role and encodes it as a full private JWK
+  (`ecdsaPrivateJWK` in `ciba.go`) — this key belongs to the suite's
+  mock AS, never to this driver, and plays no role beyond satisfying
+  this one requirement. See the suite repo's own sample config,
+  `scripts/test-configs-rp-against-op/fapi-ciba-rp-test-config.json`,
+  for the same shape.
+- **A CIBA-only client needed a real `client`/`internal/metadata`
+  package fix, not just driver plumbing.** The suite's own CIBA mock AS advertises no
+  `authorization_endpoint`/`pushed_authorization_request_endpoint` at
+  all (it's CIBA-only), which `client.Discover`/`client.Config` didn't
+  support before this was found live — see ARCHITECTURE.md's
+  Conformance strategy section for the fix (Authorization/
+  PushedAuthorizationRequest became a conditionally-required pair,
+  mirroring `Endpoints.BackchannelAuthentication`'s own optionality).
 
 ## Extending this driver
 

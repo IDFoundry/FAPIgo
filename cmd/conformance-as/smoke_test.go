@@ -117,6 +117,13 @@ type smokeHarness struct {
 	client     *client.Client
 	httpClient *http.Client
 	authorize  string // base authorize endpoint URL, for building decision requests
+
+	// backchannelApprove is the base "/backchannel-approve" URL —
+	// populated only when newSmokeHarnessWithOptions was built with
+	// ciba true — for driving backchannelHandler.handleApprove
+	// directly, standing in for the OIDF suite's own
+	// CallAutomatedCibaApprovalEndpoint condition.
+	backchannelApprove string
 }
 
 func newSmokeHarness(t *testing.T, format AccessTokenFormat) *smokeHarness {
@@ -156,10 +163,14 @@ func newSmokeHarnessWithOptions(t *testing.T, format AccessTokenFormat, dpopNonc
 		t.Fatalf("build userinfo url: %v", err)
 	}
 
-	clientKeyManager, err := ephemeral.NewKeyManager(map[keys.SigningPurpose]fapi.SignatureAlgorithm{
+	clientKeyPurposes := map[keys.SigningPurpose]fapi.SignatureAlgorithm{
 		keys.ClientAuthentication: fapi.ES256,
 		keys.DPoPProofSigning:     fapi.ES256,
-	})
+	}
+	if ciba {
+		clientKeyPurposes[keys.BackchannelAuthenticationRequestSigning] = fapi.ES256
+	}
+	clientKeyManager, err := ephemeral.NewKeyManager(clientKeyPurposes)
 	if err != nil {
 		t.Fatalf("build client key manager: %v", err)
 	}
@@ -175,7 +186,29 @@ func newSmokeHarnessWithOptions(t *testing.T, format AccessTokenFormat, dpopNonc
 	if err != nil {
 		t.Fatalf("marshal client jwk: %v", err)
 	}
-	inlineJWKS := json.RawMessage(fmt.Sprintf(`{"keys":[%s]}`, jwkJSON))
+	jwksKeys := jwkJSON
+	if ciba {
+		// The server verifies a CIBA backchannel authentication request
+		// against BackchannelAuthenticationRequestVerification, a
+		// distinct purpose from ClientAuthentication — see
+		// keys.SigningPurpose's own doc comment for why — so this
+		// client's second key must be published to the server's known
+		// JWKS too, or resolveClientKey finds no matching kid.
+		cibaKey, err := clientKeyManager.PublicKey(context.Background(), keys.BackchannelAuthenticationRequestSigning, fapi.ES256)
+		if err != nil {
+			t.Fatalf("resolve client backchannel authentication public key: %v", err)
+		}
+		cibaJWK, err := jose.NewJWK(cibaKey.PublicKey, fapi.ES256)
+		if err != nil {
+			t.Fatalf("build client backchannel authentication jwk: %v", err)
+		}
+		cibaJWKJSON, err := cibaJWK.WithKeyID(cibaKey.KeyID).MarshalJSON()
+		if err != nil {
+			t.Fatalf("marshal client backchannel authentication jwk: %v", err)
+		}
+		jwksKeys = append(append(jwksKeys[:len(jwksKeys):len(jwksKeys)], ','), cibaJWKJSON...)
+	}
+	inlineJWKS := json.RawMessage(fmt.Sprintf(`{"keys":[%s]}`, jwksKeys))
 
 	// clientUserInfoAlg mirrors wiring.go's own reuse of Algorithms.IDToken
 	// for UserInfo signing when -userinfo-signing is on — zero (unset)
@@ -280,6 +313,17 @@ func newSmokeHarnessWithOptions(t *testing.T, format AccessTokenFormat, dpopNonc
 			MaxJOSECompactBytes:  16 * 1024,
 		},
 	}
+	var backchannelApprove string
+	if ciba {
+		backchannelAuthenticationURL, err := buildBackchannelAuthenticationURL(issuer, false)
+		if err != nil {
+			t.Fatalf("build backchannel authentication url: %v", err)
+		}
+		clientCfg.Endpoints.BackchannelAuthentication = backchannelAuthenticationURL
+		clientCfg.Algorithms.BackchannelAuthenticationRequest = clientCIBAAlg
+		clientCfg.Limits.BackchannelAuthenticationRequestLifetime = time.Minute
+		backchannelApprove = issuer.String() + "/backchannel-approve"
+	}
 	clientDeps := client.Dependencies{
 		Sessions:   newMemSessionStore(),
 		Keys:       clientKeyManager,
@@ -293,7 +337,11 @@ func newSmokeHarnessWithOptions(t *testing.T, format AccessTokenFormat, dpopNonc
 		t.Fatalf("client.New: %v", err)
 	}
 
-	return &smokeHarness{t: t, client: c, httpClient: httpClient, authorize: endpoints.Authorization.String()}
+	return &smokeHarness{
+		t: t, client: c, httpClient: httpClient,
+		authorize:          endpoints.Authorization.String(),
+		backchannelApprove: backchannelApprove,
+	}
 }
 
 // runToConsent begins an authorization attempt and GETs the resulting
@@ -518,6 +566,127 @@ func TestSmokeAuthorizationDenied(t *testing.T) {
 	denied, ok := result.(client.CompletionDenied)
 	if !ok {
 		t.Fatalf("CompleteAuthorization result = %T, want client.CompletionDenied", result)
+	}
+	if denied.Code != "access_denied" {
+		t.Fatalf("denied.Code = %q, want %q", denied.Code, "access_denied")
+	}
+}
+
+// callBackchannelApprove drives h.backchannelApprove exactly like the
+// OIDF suite's own CallAutomatedCibaApprovalEndpoint condition would
+// (see backchannel.go's own doc comment) — standing in for the human on
+// the out-of-band device an automated conformance run has no way to
+// model.
+func (h *smokeHarness) callBackchannelApprove(ctx context.Context, authReqID, action string) {
+	h.t.Helper()
+	if h.backchannelApprove == "" {
+		h.t.Fatalf("callBackchannelApprove: harness was not built with ciba=true")
+	}
+	q := url.Values{"auth_req_id": {authReqID}, "action": {action}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.backchannelApprove+"?"+q.Encode(), nil)
+	if err != nil {
+		h.t.Fatalf("build backchannel-approve request: %v", err)
+	}
+	res, err := h.httpClient.Do(req)
+	if err != nil {
+		h.t.Fatalf("POST backchannel-approve: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		h.t.Fatalf("POST backchannel-approve returned status %d, want %d", res.StatusCode, http.StatusOK)
+	}
+}
+
+// TestSmokeCIBAFlow drives client.BeginBackchannelAuthentication and
+// client.PollBackchannelAuthentication (Phase 2, the client/RP side)
+// against a real -ciba-enabled server (Phase 1), proving the two
+// independently-implemented sides actually agree on the wire — the
+// same "prove interop, not just each side's own unit tests in
+// isolation" pattern TestSmokeUserInfoWithDPoPNonceChallenge already
+// applies to UserInfo.
+func TestSmokeCIBAFlow(t *testing.T) {
+	h := newSmokeHarnessWithOptions(t, AccessTokenFormatJWT, false, false, true)
+	ctx := context.Background()
+	scope := []string{"openid", "accounts", "offline_access"}
+
+	session, err := h.client.BeginBackchannelAuthentication(ctx, client.BeginBackchannelAuthenticationRequest{
+		Scope: scope, LoginHint: smokeSubject,
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+	if session.AuthReqID() == "" {
+		t.Fatalf("AuthReqID() is empty")
+	}
+
+	// Before the embedder's own out-of-band authentication component has
+	// decided, polling must report Pending, not an error.
+	result, err := h.client.PollBackchannelAuthentication(ctx, session)
+	if err != nil {
+		t.Fatalf("PollBackchannelAuthentication (before approval): %v", err)
+	}
+	if _, ok := result.(client.BackchannelAuthenticationPending); !ok {
+		t.Fatalf("PollBackchannelAuthentication (before approval) = %T, want client.BackchannelAuthenticationPending", result)
+	}
+
+	h.callBackchannelApprove(ctx, session.AuthReqID(), "allow")
+
+	// The server enforces its own poll interval (CIBA §10.3's
+	// "interval") between polls for the same auth_req_id, even across
+	// a status change — wait it out so this second poll isn't itself
+	// rejected as slow_down.
+	time.Sleep(session.Interval())
+
+	result, err = h.client.PollBackchannelAuthentication(ctx, session)
+	if err != nil {
+		t.Fatalf("PollBackchannelAuthentication (after approval): %v", err)
+	}
+	approved, ok := result.(client.BackchannelAuthenticationApproved)
+	if !ok {
+		t.Fatalf("PollBackchannelAuthentication (after approval) = %T, want client.BackchannelAuthenticationApproved", result)
+	}
+	if approved.Tokens.AccessToken.Reveal() == "" {
+		t.Fatalf("access token is empty")
+	}
+	if !approved.Tokens.HasIDToken {
+		t.Fatalf("HasIDToken = false, want true (openid was granted)")
+	}
+	if approved.Tokens.Subject != smokeSubject {
+		t.Fatalf("Subject = %q, want %q", approved.Tokens.Subject, smokeSubject)
+	}
+	if !approved.Tokens.HasRefreshToken {
+		t.Fatalf("HasRefreshToken = false, want true (offline_access was granted)")
+	}
+
+	// auth_req_id is single-use end to end, mirroring
+	// TestSmokeAuthorizationCodeFlow's own authorization-code
+	// single-use check: polling again after a successful exchange must
+	// fail.
+	if _, err := h.client.PollBackchannelAuthentication(ctx, session); err == nil {
+		t.Fatalf("PollBackchannelAuthentication (replay after approval) = nil error, want error")
+	}
+}
+
+func TestSmokeCIBADenied(t *testing.T) {
+	h := newSmokeHarnessWithOptions(t, AccessTokenFormatJWT, false, false, true)
+	ctx := context.Background()
+
+	session, err := h.client.BeginBackchannelAuthentication(ctx, client.BeginBackchannelAuthenticationRequest{
+		Scope: []string{"openid", "accounts"}, LoginHint: smokeSubject,
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+
+	h.callBackchannelApprove(ctx, session.AuthReqID(), "deny")
+
+	result, err := h.client.PollBackchannelAuthentication(ctx, session)
+	if err != nil {
+		t.Fatalf("PollBackchannelAuthentication: %v", err)
+	}
+	denied, ok := result.(client.BackchannelAuthenticationDenied)
+	if !ok {
+		t.Fatalf("PollBackchannelAuthentication result = %T, want client.BackchannelAuthenticationDenied", result)
 	}
 	if denied.Code != "access_denied" {
 		t.Fatalf("denied.Code = %q, want %q", denied.Code, "access_denied")

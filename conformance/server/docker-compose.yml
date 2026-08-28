@@ -76,6 +76,24 @@ services:
       - -key=/certs/server.key
       - -access-token-format=${ACCESS_TOKEN_FORMAT:-jwt}
 
+  conformance-as-ciba:
+    build:
+      context: ../..
+      dockerfile: conformance/server/Dockerfile
+    hostname: conformance-as-ciba
+    networks: [suite]
+    ports:
+      - "18445:8443" # see conformance-as-baseline's port comment above
+    volumes:
+      - ./oidf-config/ciba.config.json:/config.json:ro
+      - ./certs:/certs:ro
+    command:
+      - -config=/config.json
+      - -cert=/certs/server.crt
+      - -key=/certs/server.key
+      - -access-token-format=${ACCESS_TOKEN_FORMAT:-jwt}
+      - -ciba
+
 networks:
   suite:
     external: true

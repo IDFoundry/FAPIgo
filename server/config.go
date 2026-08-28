@@ -112,6 +112,14 @@ type AlgorithmPolicy struct {
 	// UserInfo responses.
 	UserInfoEncryptionKeyManagement     KeyManagementAlgorithmSet
 	UserInfoEncryptionContentEncryption ContentEncryptionAlgorithmSet
+
+	// BackchannelAuthenticationRequest is the server-wide allow-list for
+	// CIBA's client-signed backchannel authentication request — kept
+	// distinct from RequestObject even though both verify through the
+	// same internal/requestobject machinery, since a client could
+	// reasonably want a different algorithm for each. Required (and
+	// validated) only when Endpoints.BackchannelAuthentication is set.
+	BackchannelAuthenticationRequest AlgorithmSet
 }
 
 // Endpoints are this server's own endpoint URLs: the expected
@@ -124,6 +132,14 @@ type Endpoints struct {
 	Token                      fapi.URL
 	PushedAuthorizationRequest fapi.URL
 	JWKS                       fapi.URL
+
+	// BackchannelAuthentication is this server's CIBA backchannel
+	// authentication endpoint (OIDC CIBA §7). Optional — zero disables
+	// CIBA entirely: BeginBackchannelAuthentication then always fails,
+	// and Metadata omits every CIBA-related field, the same "zero
+	// disables the feature" precedent client.Config.Endpoints.UserInfo
+	// already uses.
+	BackchannelAuthentication fapi.URL
 }
 
 // Limits bounds the lifetimes and clock tolerances this server enforces.
@@ -180,6 +196,26 @@ type Limits struct {
 	// its own doc comment; New rejects a zero value in that case, but
 	// leaves it unvalidated when nonce-challenge support is disabled.
 	DPoPNonceLifetime time.Duration
+
+	// BackchannelAuthenticationRequestLifetime bounds how long a
+	// pending CIBA request remains pollable — reported to the client as
+	// expires_in, mirroring PushedRequestLifetime's role for PAR.
+	// Required only when Endpoints.BackchannelAuthentication is set.
+	BackchannelAuthenticationRequestLifetime time.Duration
+
+	// MaxBackchannelAuthenticationRequestLifetime bounds how far in the
+	// future a signed backchannel authentication request's own exp claim
+	// may be — mirrors MaxRequestObjectLifetime's role for PAR's request
+	// object. Required only when Endpoints.BackchannelAuthentication is
+	// set.
+	MaxBackchannelAuthenticationRequestLifetime time.Duration
+
+	// BackchannelAuthenticationPollInterval is the minimum time a client
+	// must wait between two polls of the same auth_req_id — reported to
+	// the client as "interval", and enforced server-side (a poll sooner
+	// than this fails with ErrorSlowDown). Required only when
+	// Endpoints.BackchannelAuthentication is set.
+	BackchannelAuthenticationPollInterval time.Duration
 }
 
 // Config is this server's immutable configuration. It is copied by New;

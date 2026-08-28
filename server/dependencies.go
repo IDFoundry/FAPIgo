@@ -90,4 +90,10 @@ type Dependencies struct {
 	// this server challenge a DPoP proof carrying no valid nonce, and
 	// proactively reissue a fresh one on every successful call.
 	Nonces storage.NonceStore
+
+	// Backchannel persists CIBA backchannel authentication requests.
+	// Required exactly when Config.Endpoints.BackchannelAuthentication
+	// is set; nil otherwise — CIBA is an entirely optional capability,
+	// like ID token encryption's ClientEncryptionKeys.
+	Backchannel storage.BackchannelAuthenticationStore
 }

@@ -120,17 +120,17 @@ type smokeHarness struct {
 }
 
 func newSmokeHarness(t *testing.T, format AccessTokenFormat) *smokeHarness {
-	return newSmokeHarnessWithOptions(t, format, false, false)
+	return newSmokeHarnessWithOptions(t, format, false, false, false)
 }
 
 // newSmokeHarnessWithNonceChallenge is newSmokeHarnessWithOptions with
-// userinfoSigning left off, for the (much more common) nonce-challenge-only
-// callers below.
+// userinfoSigning/ciba left off, for the (much more common)
+// nonce-challenge-only callers below.
 func newSmokeHarnessWithNonceChallenge(t *testing.T, format AccessTokenFormat, dpopNonceChallenge bool) *smokeHarness {
-	return newSmokeHarnessWithOptions(t, format, dpopNonceChallenge, false)
+	return newSmokeHarnessWithOptions(t, format, dpopNonceChallenge, false, false)
 }
 
-func newSmokeHarnessWithOptions(t *testing.T, format AccessTokenFormat, dpopNonceChallenge bool, userinfoSigning bool) *smokeHarness {
+func newSmokeHarnessWithOptions(t *testing.T, format AccessTokenFormat, dpopNonceChallenge bool, userinfoSigning bool, ciba bool) *smokeHarness {
 	t.Helper()
 
 	cert, pool := selfSignedCert(t)
@@ -189,11 +189,18 @@ func newSmokeHarnessWithOptions(t *testing.T, format AccessTokenFormat, dpopNonc
 	const testClientID = fapi.ClientID("smoke-test-client")
 	const testRedirectURI = "https://rp.smoketest.internal/callback"
 
+	// clientCIBAAlg mirrors clientUserInfoAlg above, for -ciba.
+	var clientCIBAAlg fapi.SignatureAlgorithm
+	if ciba {
+		clientCIBAAlg = fapi.ES256
+	}
+
 	registered, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
 		ID:                       testClientID,
 		RedirectURIs:             []fapi.RegisteredRedirectURI{testRedirectURI},
 		ClientAssertionAlgorithm: fapi.ES256,
 		AllowedScopes:            []string{"openid", "accounts", "offline_access"},
+		BackchannelAuthenticationRequestAlgorithm: clientCIBAAlg,
 	})
 	if err != nil {
 		t.Fatalf("build registered client: %v", err)
@@ -212,7 +219,7 @@ func newSmokeHarnessWithOptions(t *testing.T, format AccessTokenFormat, dpopNonc
 		AdvertisedScopes:  []string{"openid", "accounts", "offline_access"},
 	}
 
-	mux, err := newServerMux(resolved, false, dpopNonceChallenge, userinfoSigning)
+	mux, err := newServerMux(resolved, false, dpopNonceChallenge, userinfoSigning, ciba)
 	if err != nil {
 		t.Fatalf("build server mux: %v", err)
 	}
@@ -471,7 +478,7 @@ func TestSmokeUserInfoWithDPoPNonceChallenge(t *testing.T) {
 // actually interoperate" shape TestSmokeUserInfoWithDPoPNonceChallenge
 // already uses for the nonce-challenge wiring above.
 func TestSmokeSignedUserInfo(t *testing.T) {
-	h := newSmokeHarnessWithOptions(t, AccessTokenFormatJWT, false, true)
+	h := newSmokeHarnessWithOptions(t, AccessTokenFormatJWT, false, true, false)
 	ctx := context.Background()
 	scope := []string{"openid", "accounts"}
 

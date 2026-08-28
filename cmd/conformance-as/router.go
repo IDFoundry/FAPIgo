@@ -22,7 +22,7 @@ import (
 // POST, and an OIDF suite plan config's resource.resourceMethod is a
 // free-form per-run choice for the generic-resource role this endpoint
 // also plays — nothing here depends on which method the suite picks.
-func newRouter(srv *server.Server, consent *consentHandler, advertisedScopes []string, resourceVerifier *fapires.Verifier, userinfoURL *url.URL, identityClaims staticIdentityClaims, clients storage.ClientRepository, userinfoSigning bool) *http.ServeMux {
+func newRouter(srv *server.Server, consent *consentHandler, backchannel *backchannelHandler, advertisedScopes []string, resourceVerifier *fapires.Verifier, userinfoURL *url.URL, identityClaims staticIdentityClaims, clients storage.ClientRepository, userinfoSigning bool) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /.well-known/openid-configuration", metadataHandler(srv, advertisedScopes, userinfoURL))
 	mux.HandleFunc("GET /jwks", jwksHandler(srv))
@@ -31,5 +31,12 @@ func newRouter(srv *server.Server, consent *consentHandler, advertisedScopes []s
 	mux.HandleFunc("POST /authorize/decision", consent.handleDecision)
 	mux.HandleFunc("POST /token", tokenHandler(srv))
 	mux.HandleFunc("/userinfo", userinfoHandler(srv, resourceVerifier, userinfoURL, identityClaims, clients, userinfoSigning))
+	// Both registered unconditionally, matching /userinfo's own
+	// always-registered-even-when-the-feature-is-off precedent —
+	// handleAuthenticate itself fails cleanly (server_error) when -ciba
+	// wasn't passed, since BeginBackchannelAuthentication checks
+	// Config.Endpoints.BackchannelAuthentication is set.
+	mux.HandleFunc("POST /backchannel-authenticate", backchannel.handleAuthenticate)
+	mux.HandleFunc("POST /backchannel-approve", backchannel.handleApprove)
 	return mux
 }

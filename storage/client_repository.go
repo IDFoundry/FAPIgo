@@ -23,6 +23,8 @@ type RegisteredClient struct {
 
 	userInfoEncryptionKeyManagement     fapi.KeyManagementAlgorithm
 	userInfoEncryptionContentEncryption fapi.ContentEncryptionAlgorithm
+
+	backchannelAuthenticationRequestAlgorithm fapi.SignatureAlgorithm
 }
 
 // RegisteredClientConfig is the input to NewRegisteredClient.
@@ -64,6 +66,15 @@ type RegisteredClientConfig struct {
 	UserInfoEncryptionKeyManagement     fapi.KeyManagementAlgorithm
 	UserInfoEncryptionContentEncryption fapi.ContentEncryptionAlgorithm
 
+	// BackchannelAuthenticationRequestAlgorithm is the only algorithm
+	// this client's signed CIBA backchannel authentication requests are
+	// accepted under. Leave zero if the client is not permitted to use
+	// CIBA at all — since FAPI-CIBA always requires a signed request
+	// (unlike RequestObjectAlgorithm, whose signing is profile-dependent
+	// for PAR), this single field doubles as this client's CIBA opt-in
+	// flag.
+	BackchannelAuthenticationRequestAlgorithm fapi.SignatureAlgorithm
+
 	AllowedScopes []string
 }
 
@@ -81,6 +92,9 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 	}
 	if cfg.RequestObjectAlgorithm != 0 && !cfg.RequestObjectAlgorithm.IsValid() {
 		return RegisteredClient{}, fmt.Errorf("storage: client %q has an invalid request object algorithm", cfg.ID)
+	}
+	if cfg.BackchannelAuthenticationRequestAlgorithm != 0 && !cfg.BackchannelAuthenticationRequestAlgorithm.IsValid() {
+		return RegisteredClient{}, fmt.Errorf("storage: client %q has an invalid backchannel authentication request algorithm", cfg.ID)
 	}
 	idTokenEncKeyMgmtSet := cfg.IDTokenEncryptionKeyManagement != 0
 	idTokenEncContentEncSet := cfg.IDTokenEncryptionContentEncryption != 0
@@ -121,15 +135,16 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 	copy(redirectURIs, cfg.RedirectURIs)
 
 	return RegisteredClient{
-		id:                                  cfg.ID,
-		redirectURIs:                        redirectURIs,
-		clientAssertionAlgorithm:            cfg.ClientAssertionAlgorithm,
-		requestObjectAlgorithm:              cfg.RequestObjectAlgorithm,
-		allowedScopes:                       scopes,
-		idTokenEncryptionKeyManagement:      cfg.IDTokenEncryptionKeyManagement,
-		idTokenEncryptionContentEncryption:  cfg.IDTokenEncryptionContentEncryption,
-		userInfoEncryptionKeyManagement:     cfg.UserInfoEncryptionKeyManagement,
-		userInfoEncryptionContentEncryption: cfg.UserInfoEncryptionContentEncryption,
+		id:                                        cfg.ID,
+		redirectURIs:                              redirectURIs,
+		clientAssertionAlgorithm:                  cfg.ClientAssertionAlgorithm,
+		requestObjectAlgorithm:                    cfg.RequestObjectAlgorithm,
+		allowedScopes:                             scopes,
+		idTokenEncryptionKeyManagement:            cfg.IDTokenEncryptionKeyManagement,
+		idTokenEncryptionContentEncryption:        cfg.IDTokenEncryptionContentEncryption,
+		userInfoEncryptionKeyManagement:           cfg.UserInfoEncryptionKeyManagement,
+		userInfoEncryptionContentEncryption:       cfg.UserInfoEncryptionContentEncryption,
+		backchannelAuthenticationRequestAlgorithm: cfg.BackchannelAuthenticationRequestAlgorithm,
 	}, nil
 }
 
@@ -173,6 +188,13 @@ func (c RegisteredClient) IDTokenEncryption() (keyManagement fapi.KeyManagementA
 // for encrypted UserInfo responses at all.
 func (c RegisteredClient) UserInfoEncryption() (keyManagement fapi.KeyManagementAlgorithm, contentEncryption fapi.ContentEncryptionAlgorithm, enabled bool) {
 	return c.userInfoEncryptionKeyManagement, c.userInfoEncryptionContentEncryption, c.userInfoEncryptionKeyManagement != 0
+}
+
+// BackchannelAuthenticationRequestAlgorithm returns the algorithm this
+// client's signed CIBA backchannel authentication requests must be
+// signed with, and whether the client is permitted to use CIBA at all.
+func (c RegisteredClient) BackchannelAuthenticationRequestAlgorithm() (algorithm fapi.SignatureAlgorithm, permitted bool) {
+	return c.backchannelAuthenticationRequestAlgorithm, c.backchannelAuthenticationRequestAlgorithm != 0
 }
 
 // AllowsScope reports whether scope is in this client's registered set

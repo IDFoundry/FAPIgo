@@ -111,6 +111,18 @@ func validateConfig(cfg Config) error {
 		}
 	}
 
+	cibaEnabled := !cfg.Endpoints.BackchannelAuthentication.IsZero()
+	if cibaEnabled {
+		if len(cfg.Algorithms.BackchannelAuthenticationRequest) == 0 {
+			return fmt.Errorf("server: config: algorithms.backchannel_authentication_request must not be empty when endpoints.backchannel_authentication is set")
+		}
+		for _, a := range cfg.Algorithms.BackchannelAuthenticationRequest {
+			if !a.IsValid() {
+				return fmt.Errorf("server: config: algorithms.backchannel_authentication_request contains an invalid algorithm")
+			}
+		}
+	}
+
 	if cfg.Limits.PushedRequestLifetime <= 0 {
 		return fmt.Errorf("server: config: limits.pushed_request_lifetime must be positive")
 	}
@@ -141,6 +153,17 @@ func validateConfig(cfg Config) error {
 	if cfg.Limits.MaxClockSkew < 0 {
 		return fmt.Errorf("server: config: limits.max_clock_skew must not be negative")
 	}
+	if cibaEnabled {
+		if cfg.Limits.BackchannelAuthenticationRequestLifetime <= 0 {
+			return fmt.Errorf("server: config: limits.backchannel_authentication_request_lifetime must be positive when endpoints.backchannel_authentication is set")
+		}
+		if cfg.Limits.MaxBackchannelAuthenticationRequestLifetime <= 0 {
+			return fmt.Errorf("server: config: limits.max_backchannel_authentication_request_lifetime must be positive when endpoints.backchannel_authentication is set")
+		}
+		if cfg.Limits.BackchannelAuthenticationPollInterval <= 0 {
+			return fmt.Errorf("server: config: limits.backchannel_authentication_poll_interval must be positive when endpoints.backchannel_authentication is set")
+		}
+	}
 
 	if cfg.Assurance != AssuranceDevelopment && cfg.Assurance != AssuranceProduction {
 		return fmt.Errorf("server: config: assurance level is invalid")
@@ -160,6 +183,11 @@ func validateConfig(cfg Config) error {
 		}
 		if err := rejectLoopbackURL("endpoints.jwks", cfg.Endpoints.JWKS); err != nil {
 			return err
+		}
+		if cibaEnabled {
+			if err := rejectLoopbackURL("endpoints.backchannel_authentication", cfg.Endpoints.BackchannelAuthentication); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -229,6 +257,10 @@ func validateDependencies(cfg Config, deps Dependencies) error {
 	if deps.Nonces != nil && cfg.Limits.DPoPNonceLifetime <= 0 {
 		return fmt.Errorf("server: config: limits.dpop_nonce_lifetime must be positive when dependencies.nonces is set")
 	}
+	cibaEnabled := !cfg.Endpoints.BackchannelAuthentication.IsZero()
+	if cibaEnabled && deps.Backchannel == nil {
+		return fmt.Errorf("server: dependencies: backchannel is required when endpoints.backchannel_authentication is set")
+	}
 	if cfg.Assurance == AssuranceProduction {
 		if deps.Audit == nil {
 			return fmt.Errorf("server: dependencies: audit is required under AssuranceProduction")
@@ -244,6 +276,11 @@ func validateDependencies(cfg Config, deps Dependencies) error {
 		}
 		if err := checkStoreAssurance("replay", deps.Replay, true); err != nil {
 			return err
+		}
+		if cibaEnabled {
+			if err := checkStoreAssurance("backchannel", deps.Backchannel, true); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

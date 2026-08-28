@@ -20,6 +20,18 @@ const httpFetchTimeout = 10 * time.Second
 // -dpop-nonce-challenge remains valid.
 const dpopNonceLifetime = time.Minute
 
+// backchannelAuthenticationRequestLifetime, maxBackchannelAuthenticationRequestLifetime
+// and backchannelAuthenticationPollInterval configure CIBA under
+// -ciba. The max must stay comfortably above 300s: the OIDF
+// FAPI-CIBA-ID1 suite's own AddRequestedExp300SToAuthorizationEndpointRequest
+// condition sends requested_expiry=300 on one of its modules, to check
+// the server doesn't reject a fairly standard value.
+const (
+	backchannelAuthenticationRequestLifetime    = 5 * time.Minute
+	maxBackchannelAuthenticationRequestLifetime = 10 * time.Minute
+	backchannelAuthenticationPollInterval       = 2 * time.Second
+)
+
 // readHeaderTimeout bounds how long the server waits to receive a
 // request's headers — without it, a client that trickles headers one
 // byte at a time can hold a connection (and its goroutine) open
@@ -53,6 +65,7 @@ func main() {
 	accessTokenFormat := flag.String("access-token-format", string(AccessTokenFormatJWT), "access token format to issue/verify: jwt or opaque")
 	dpopNonceChallenge := flag.Bool("dpop-nonce-challenge", false, "require and rotate a DPoP nonce on /par, /token and /userinfo (RFC 9449 §8/§9) — off by default, since the OIDF suite's own driver may not retry on the challenge")
 	userinfoSigning := flag.Bool("userinfo-signing", false, "sign /userinfo responses as a JWS (OIDC Core §5.3.2), using the same algorithm as ID tokens — off by default; the FAPI 2.0 Security Profile doesn't require this")
+	ciba := flag.Bool("ciba", false, "enable the CIBA backchannel authentication endpoint (poll mode only) — off by default; not part of the FAPI 2.0 Security Profile itself")
 	flag.Parse()
 
 	if *configPath == "" {
@@ -81,7 +94,7 @@ func main() {
 		log.Fatal("conformance-as: -insecure-http requires a loopback listen_addr (e.g. 127.0.0.1:8443)")
 	}
 
-	mux, err := newServerMux(resolved, *insecureHTTP, *dpopNonceChallenge, *userinfoSigning)
+	mux, err := newServerMux(resolved, *insecureHTTP, *dpopNonceChallenge, *userinfoSigning, *ciba)
 	if err != nil {
 		log.Fatalf("conformance-as: %v", err)
 	}
@@ -149,6 +162,17 @@ func buildUserinfoURL(issuer fapi.URL, allowLoopbackHTTP bool) (fapi.URL, error)
 		opts = append(opts, fapi.AllowLoopbackHTTP())
 	}
 	return fapi.ParseEndpointURL(issuer.String()+"/userinfo", opts...)
+}
+
+// buildBackchannelAuthenticationURL derives this binary's CIBA
+// backchannel authentication endpoint URL ("/backchannel-authenticate")
+// from issuer, the same way buildUserinfoURL derives "/userinfo".
+func buildBackchannelAuthenticationURL(issuer fapi.URL, allowLoopbackHTTP bool) (fapi.URL, error) {
+	var opts []fapi.URLOption
+	if allowLoopbackHTTP {
+		opts = append(opts, fapi.AllowLoopbackHTTP())
+	}
+	return fapi.ParseEndpointURL(issuer.String()+"/backchannel-authenticate", opts...)
 }
 
 // isLoopbackAddr reports whether addr's host (net.Listen-style

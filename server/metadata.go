@@ -65,6 +65,18 @@ type Metadata struct {
 	UserinfoEncryptionAlgValuesSupported []string `json:"userinfo_encryption_alg_values_supported,omitempty"`
 	UserinfoEncryptionEncValuesSupported []string `json:"userinfo_encryption_enc_values_supported,omitempty"`
 
+	// BackchannelAuthenticationEndpoint, BackchannelTokenDeliveryModesSupported
+	// and BackchannelAuthenticationRequestSigningAlgValuesSupported are
+	// set only when Config.Endpoints.BackchannelAuthentication is
+	// configured — CIBA is an entirely optional capability. Unlike
+	// userinfo_endpoint (omitted because this package never implements a
+	// UserInfo handler), BackchannelAuthenticationEndpoint is a real
+	// field here because this package does implement the backchannel
+	// authentication endpoint itself (BeginBackchannelAuthentication).
+	BackchannelAuthenticationEndpoint                         fapi.URL `json:"backchannel_authentication_endpoint,omitempty"`
+	BackchannelTokenDeliveryModesSupported                    []string `json:"backchannel_token_delivery_modes_supported,omitempty"`
+	BackchannelAuthenticationRequestSigningAlgValuesSupported []string `json:"backchannel_authentication_request_signing_alg_values_supported,omitempty"`
+
 	// RequirePushedAuthorizationRequests is always true: BeginAuthorization
 	// only ever accepts a request_uri, never raw authorization parameters.
 	RequirePushedAuthorizationRequests bool `json:"require_pushed_authorization_requests,omitempty"`
@@ -126,6 +138,14 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 	}
 	if len(s.cfg.Algorithms.UserInfoEncryptionContentEncryption) > 0 {
 		md.UserinfoEncryptionEncValuesSupported = algorithmSetStrings(s.cfg.Algorithms.UserInfoEncryptionContentEncryption)
+	}
+	if !s.cfg.Endpoints.BackchannelAuthentication.IsZero() {
+		md.BackchannelAuthenticationEndpoint = s.cfg.Endpoints.BackchannelAuthentication
+		// Poll only — ping mode's notification dispatch is a separate,
+		// not-yet-implemented capability (see Dependencies doc comment).
+		md.BackchannelTokenDeliveryModesSupported = []string{"poll"}
+		md.BackchannelAuthenticationRequestSigningAlgValuesSupported = algorithmSetStrings(s.cfg.Algorithms.BackchannelAuthenticationRequest)
+		md.GrantTypesSupported = append(md.GrantTypesSupported, CIBAGrantType)
 	}
 
 	return md

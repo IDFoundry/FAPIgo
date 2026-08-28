@@ -33,6 +33,20 @@ behaviour and negative-test expectations differ. See
   needing to exist for real, not as resource-role certification in its
   own right.
 
+## CIBA
+
+`server`'s CIBA support (`BeginBackchannelAuthentication`/
+`CompleteBackchannelAuthentication`/`ExchangeBackchannelAuthentication`,
+poll mode only) is verified by unit/integration tests, not the live
+OIDF suite: `fapi-ciba-id1-test-plan` requires MTLS-bound access
+tokens unconditionally, a requirement this module doesn't meet
+anywhere (mTLS is out of scope entirely — see
+[ARCHITECTURE.md](../ARCHITECTURE.md#conformance-strategy)). A manual,
+non-automated setup for this plan exists in
+[`server/oidf-config/README.md`](server/oidf-config/README.md#ciba-manual-only--not-part-of-automated-conformance)
+for exploratory use, but it isn't expected to pass and isn't part of
+`scripts/run-all.sh`.
+
 ## Access-token format coverage
 
 `cmd/conformance-as` supports both of `server`'s access-token formats

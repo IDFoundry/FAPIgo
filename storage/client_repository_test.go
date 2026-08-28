@@ -56,6 +56,37 @@ func TestNewRegisteredClientRequestObjectAlgorithmOptional(t *testing.T) {
 	}
 }
 
+func TestNewRegisteredClientBackchannelAuthenticationRequestAlgorithmOptional(t *testing.T) {
+	c, err := NewRegisteredClient(RegisteredClientConfig{
+		ID:                       "client-123",
+		RedirectURIs:             []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+		ClientAssertionAlgorithm: fapi.ES256,
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+	_, ok := c.BackchannelAuthenticationRequestAlgorithm()
+	if ok {
+		t.Fatalf("BackchannelAuthenticationRequestAlgorithm() permitted = true, want false")
+	}
+}
+
+func TestNewRegisteredClientBackchannelAuthenticationRequestAlgorithmConfigured(t *testing.T) {
+	c, err := NewRegisteredClient(RegisteredClientConfig{
+		ID:                       "client-123",
+		RedirectURIs:             []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+		ClientAssertionAlgorithm: fapi.ES256,
+		BackchannelAuthenticationRequestAlgorithm: fapi.ES256,
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+	alg, ok := c.BackchannelAuthenticationRequestAlgorithm()
+	if !ok || alg != fapi.ES256 {
+		t.Fatalf("BackchannelAuthenticationRequestAlgorithm() = (%v, %v), want (ES256, true)", alg, ok)
+	}
+}
+
 func TestNewRegisteredClientRejectsInvalid(t *testing.T) {
 	cases := []RegisteredClientConfig{
 		{RedirectURIs: []fapi.RegisteredRedirectURI{"https://rp.example/callback"}, ClientAssertionAlgorithm: fapi.ES256},
@@ -108,6 +139,10 @@ func TestNewRegisteredClientRejectsInvalid(t *testing.T) {
 			ClientAssertionAlgorithm:            fapi.ES256,
 			UserInfoEncryptionKeyManagement:     fapi.RSAOAEP256,
 			UserInfoEncryptionContentEncryption: fapi.ContentEncryptionAlgorithm(99),
+		},
+		{
+			ID: "client-123", RedirectURIs: []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+			ClientAssertionAlgorithm: fapi.ES256, BackchannelAuthenticationRequestAlgorithm: fapi.SignatureAlgorithm(99),
 		},
 	}
 	for i, c := range cases {

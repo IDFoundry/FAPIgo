@@ -12,9 +12,10 @@ import (
 // dpopReplayNamespace keep replayed jtis from different subsystems from
 // ever colliding on the same digest.
 const (
-	clientAssertionReplayNamespace storage.ReplayNamespace = "server:client-assertion"
-	requestObjectReplayNamespace   storage.ReplayNamespace = "server:request-object"
-	dpopReplayNamespace            storage.ReplayNamespace = "server:dpop"
+	clientAssertionReplayNamespace                  storage.ReplayNamespace = "server:client-assertion"
+	requestObjectReplayNamespace                    storage.ReplayNamespace = "server:request-object"
+	dpopReplayNamespace                             storage.ReplayNamespace = "server:dpop"
+	backchannelAuthenticationRequestReplayNamespace storage.ReplayNamespace = "server:backchannel-authentication-request"
 )
 
 // replayChecker adapts storage.ReplayStore — which is keyed by a
@@ -45,4 +46,8 @@ func (s *Server) requestObjectReplayChecker() replayChecker {
 
 func (s *Server) dpopReplayChecker() replayChecker {
 	return replayChecker{store: s.deps.Replay, namespace: dpopReplayNamespace}
+}
+
+func (s *Server) backchannelAuthenticationRequestReplayChecker() replayChecker {
+	return replayChecker{store: s.deps.Replay, namespace: backchannelAuthenticationRequestReplayNamespace}
 }

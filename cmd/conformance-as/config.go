@@ -68,11 +68,12 @@ const (
 // of JWKS or JWKSURI must be set — see conformance/server/oidf-config/
 // for how each test plan's client config populates this.
 type ClientConfig struct {
-	ID                       string   `json:"id"`
-	RedirectURIs             []string `json:"redirect_uris"`
-	ClientAssertionAlgorithm string   `json:"client_assertion_algorithm"`
-	RequestObjectAlgorithm   string   `json:"request_object_algorithm,omitempty"`
-	AllowedScopes            []string `json:"allowed_scopes"`
+	ID                                        string   `json:"id"`
+	RedirectURIs                              []string `json:"redirect_uris"`
+	ClientAssertionAlgorithm                  string   `json:"client_assertion_algorithm"`
+	RequestObjectAlgorithm                    string   `json:"request_object_algorithm,omitempty"`
+	BackchannelAuthenticationRequestAlgorithm string   `json:"backchannel_authentication_request_algorithm,omitempty"`
+	AllowedScopes                             []string `json:"allowed_scopes"`
 
 	JWKS    json.RawMessage `json:"jwks,omitempty"`
 	JWKSURI string          `json:"jwks_uri,omitempty"`
@@ -232,6 +233,13 @@ func resolveClient(c ClientConfig) (storage.RegisteredClient, ephemeral.ClientKe
 			return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, fmt.Errorf("request_object_algorithm: %w", err)
 		}
 	}
+	var backchannelAuthenticationRequestAlg fapi.SignatureAlgorithm
+	if c.BackchannelAuthenticationRequestAlgorithm != "" {
+		backchannelAuthenticationRequestAlg, err = fapi.ParseSignatureAlgorithm(c.BackchannelAuthenticationRequestAlgorithm)
+		if err != nil {
+			return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, fmt.Errorf("backchannel_authentication_request_algorithm: %w", err)
+		}
+	}
 
 	hasJWKS := len(c.JWKS) > 0
 	hasJWKSURI := c.JWKSURI != ""
@@ -250,7 +258,8 @@ func resolveClient(c ClientConfig) (storage.RegisteredClient, ephemeral.ClientKe
 		RedirectURIs:             redirectURIs,
 		ClientAssertionAlgorithm: assertionAlg,
 		RequestObjectAlgorithm:   requestObjectAlg,
-		AllowedScopes:            c.AllowedScopes,
+		BackchannelAuthenticationRequestAlgorithm: backchannelAuthenticationRequestAlg,
+		AllowedScopes: c.AllowedScopes,
 	})
 	if err != nil {
 		return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, err

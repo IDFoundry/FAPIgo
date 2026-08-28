@@ -33,6 +33,31 @@ const (
 	// own Nonce method returns). Only ever returned when
 	// Dependencies.Nonces is configured.
 	ErrorUseDPoPNonce ErrorCode = "use_dpop_nonce"
+
+	// ErrorAuthorizationPending indicates a CIBA token-endpoint poll for
+	// an auth_req_id that has not yet been decided (CIBA §10.3) — the
+	// request itself is fine; the caller should simply poll again after
+	// waiting the configured interval.
+	ErrorAuthorizationPending ErrorCode = "authorization_pending"
+
+	// ErrorSlowDown indicates a CIBA token-endpoint poll arrived sooner
+	// than the configured interval since the previous poll for the same
+	// auth_req_id (CIBA §10.3) — RFC 8628's own error value for this
+	// condition, reused by CIBA.
+	ErrorSlowDown ErrorCode = "slow_down"
+
+	// ErrorExpiredToken indicates a CIBA token-endpoint poll for an
+	// auth_req_id whose own expiry has passed, regardless of whether a
+	// decision was ever recorded (CIBA §10.3).
+	ErrorExpiredToken ErrorCode = "expired_token"
+
+	// ErrorAccessDenied indicates the end user (or the application, on
+	// their behalf) declined to authorize a CIBA request. Unlike the
+	// browser-based flow, where a denial is always delivered as a
+	// redirect query parameter and never as a *Error (see
+	// AuthorizationResult), CIBA's token endpoint has no redirect to
+	// carry it in, so this is a real ErrorCode.
+	ErrorAccessDenied ErrorCode = "access_denied"
 )
 
 // Error is the error type every public Server method returns. Code and

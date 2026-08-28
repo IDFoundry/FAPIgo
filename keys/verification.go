@@ -23,6 +23,12 @@ const (
 	// RequestObjectVerification resolves a key to verify a signed
 	// request object.
 	RequestObjectVerification
+
+	// BackchannelAuthenticationRequestVerification resolves a key to
+	// verify a client's signed CIBA backchannel authentication request
+	// (FAPI-CIBA mandates this always be signed, unlike PAR's request
+	// object, which is signed only under some profiles).
+	BackchannelAuthenticationRequestVerification
 )
 
 // ClientKeyRequest describes which of a client's verification keys is

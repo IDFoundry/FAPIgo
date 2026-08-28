@@ -40,6 +40,7 @@ func (s *AccessTokenStore) LookupAccessToken(_ context.Context, lookup storage.A
 	}
 	return storage.LookedUpAccessToken{
 		ClientID: tok.ClientID, Subject: tok.Subject, Scope: cloneStrings(tok.Scope),
-		Thumbprint: tok.Thumbprint, Claims: cloneRawMessageMap(tok.Claims), ExpiresAt: tok.ExpiresAt,
+		Thumbprint: tok.Thumbprint, SenderConstrain: tok.SenderConstrain,
+		Claims: cloneRawMessageMap(tok.Claims), ExpiresAt: tok.ExpiresAt,
 	}, nil
 }

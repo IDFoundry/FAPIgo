@@ -47,6 +47,18 @@ type DiscoveredMetadata struct {
 	Endpoints Endpoints
 	JWKSURI   fapi.URL
 
+	// MTLSEndpointAliases is the server's advertised RFC 8705 §5
+	// "mtls_endpoint_aliases", if any — nil means the server never
+	// advertised one, the common case (most servers never offer an
+	// mTLS-requiring alternate listener at all). A caller building a
+	// Config.SenderConstrain == SenderConstrainMTLS client should
+	// prefer these URLs over the corresponding Endpoints ones when
+	// building Config.Endpoints — Discover itself never makes that
+	// substitution automatically, consistent with never picking
+	// anything on the caller's behalf (see this type's own doc
+	// comment).
+	MTLSEndpointAliases *MTLSEndpoints
+
 	IDTokenAlgorithms       []fapi.SignatureAlgorithm
 	RequestObjectAlgorithms []fapi.SignatureAlgorithm
 	JARMAlgorithms          []fapi.SignatureAlgorithm
@@ -269,6 +281,11 @@ func Discover(ctx context.Context, fetcher *fapihttp.Client, issuer fapi.URL, op
 		}
 	}
 
+	mtlsAliases, err := parseMTLSEndpointAliases(doc.MTLSEndpointAliases, opts...)
+	if err != nil {
+		return DiscoveredMetadata{}, err
+	}
+
 	return DiscoveredMetadata{
 		Endpoints: Endpoints{
 			Authorization:              authz,
@@ -277,6 +294,7 @@ func Discover(ctx context.Context, fetcher *fapihttp.Client, issuer fapi.URL, op
 			UserInfo:                   userinfo,
 			BackchannelAuthentication:  backchannelAuth,
 		},
+		MTLSEndpointAliases:                        mtlsAliases,
 		JWKSURI:                                    jwksURI,
 		IDTokenAlgorithms:                          supportedAlgorithms(doc.IDTokenSigningAlgValuesSupported),
 		RequestObjectAlgorithms:                    supportedAlgorithms(doc.RequestObjectSigningAlgValuesSupported),
@@ -290,6 +308,38 @@ func Discover(ctx context.Context, fetcher *fapihttp.Client, issuer fapi.URL, op
 		RequireSignedRequestObject:                 doc.RequireSignedRequestObject,
 		AuthorizationResponseIssSupported:          doc.AuthorizationResponseIssParameterSupported,
 	}, nil
+}
+
+// parseMTLSEndpointAliases parses raw (nil if the document never
+// advertised mtls_endpoint_aliases at all — the common case) into an
+// *MTLSEndpoints, applying the same "absent field leaves the
+// corresponding URL zero, present-but-malformed still fails" rule
+// Discover's own plain endpoints already follow.
+func parseMTLSEndpointAliases(raw *metadata.MTLSEndpointAliases, opts ...fapi.URLOption) (*MTLSEndpoints, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	var out MTLSEndpoints
+	var err error
+	if raw.TokenEndpoint != "" {
+		out.Token, err = fapi.ParseEndpointURL(raw.TokenEndpoint, opts...)
+		if err != nil {
+			return nil, fmt.Errorf("client: discover: mtls_endpoint_aliases.token_endpoint: %w", err)
+		}
+	}
+	if raw.PushedAuthorizationRequestEndpoint != "" {
+		out.PushedAuthorizationRequest, err = fapi.ParseEndpointURL(raw.PushedAuthorizationRequestEndpoint, opts...)
+		if err != nil {
+			return nil, fmt.Errorf("client: discover: mtls_endpoint_aliases.pushed_authorization_request_endpoint: %w", err)
+		}
+	}
+	if raw.BackchannelAuthenticationEndpoint != "" {
+		out.BackchannelAuthentication, err = fapi.ParseEndpointURL(raw.BackchannelAuthenticationEndpoint, opts...)
+		if err != nil {
+			return nil, fmt.Errorf("client: discover: mtls_endpoint_aliases.backchannel_authentication_endpoint: %w", err)
+		}
+	}
+	return &out, nil
 }
 
 // wellKnownURL builds the OpenID Connect Discovery 1.0 §4.1 well-known

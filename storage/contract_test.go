@@ -288,7 +288,8 @@ func (s *refAccessTokenStore) LookupAccessToken(_ context.Context, lookup storag
 	}
 	return storage.LookedUpAccessToken{
 		ClientID: tok.ClientID, Subject: tok.Subject, Scope: tok.Scope,
-		Thumbprint: tok.Thumbprint, Claims: tok.Claims, ExpiresAt: tok.ExpiresAt,
+		Thumbprint: tok.Thumbprint, SenderConstrain: tok.SenderConstrain,
+		Claims: tok.Claims, ExpiresAt: tok.ExpiresAt,
 	}, nil
 }
 

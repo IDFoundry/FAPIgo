@@ -142,6 +142,33 @@ type Endpoints struct {
 	BackchannelAuthentication fapi.URL
 }
 
+// MTLSEndpoints are the mTLS-requiring alternate URLs (RFC 8705 §5's
+// "mtls_endpoint_aliases") this server advertises for whichever of its
+// own endpoints actually need one — only relevant to a client whose
+// storage.RegisteredClient.SenderConstrain() is SenderConstrainMTLS;
+// a DPoP-bound client keeps using Config.Endpoints' own plain URLs.
+// Purely advertisement: this package has no opinion on listener
+// topology (a second TLS listener requiring a client certificate, or a
+// single listener that merely requests one — that's the HTTP adapter's
+// own concern, the same way it alone owns TLS termination for
+// Config.Endpoints too), and does not itself enforce that a request to
+// one of these URLs actually arrived over a connection that presented
+// a certificate — every SenderConstrainMTLS check already happens
+// per-request via PeerCertificate on the relevant request struct,
+// regardless of which URL it arrived at. Zero value (every field
+// zero) omits mtls_endpoint_aliases from Metadata entirely.
+type MTLSEndpoints struct {
+	Token                      fapi.URL
+	PushedAuthorizationRequest fapi.URL
+	BackchannelAuthentication  fapi.URL
+}
+
+// IsZero reports whether every field of e is zero — Metadata uses this
+// to decide whether to advertise mtls_endpoint_aliases at all.
+func (e MTLSEndpoints) IsZero() bool {
+	return e.Token.IsZero() && e.PushedAuthorizationRequest.IsZero() && e.BackchannelAuthentication.IsZero()
+}
+
 // Limits bounds the lifetimes and clock tolerances this server enforces.
 // None of these have an implicit default — New rejects a zero (or, for
 // MaxClockSkew, negative) value.
@@ -232,6 +259,11 @@ type Config struct {
 	Algorithms AlgorithmPolicy
 	Limits     Limits
 	Assurance  AssuranceLevel
+
+	// MTLSEndpoints are this server's mTLS-requiring alternate URLs, if
+	// any — see MTLSEndpoints' own doc comment. Optional; zero value
+	// omits mtls_endpoint_aliases from Metadata.
+	MTLSEndpoints MTLSEndpoints
 
 	// Extensions registers every custom authorization parameter this
 	// server accepts, beyond the standard OAuth/OIDC/PKCE parameters it

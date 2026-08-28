@@ -4,6 +4,7 @@ import (
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // Profile selects which FAPI 2.0 security profile this client targets.
@@ -164,6 +165,17 @@ type Endpoints struct {
 	BackchannelAuthentication fapi.URL
 }
 
+// MTLSEndpoints are the mTLS-requiring alternate URLs (RFC 8705 §5's
+// "mtls_endpoint_aliases") a server may advertise for whichever of its
+// own endpoints need one — only relevant to a
+// Config.SenderConstrain == SenderConstrainMTLS client;
+// DiscoveredMetadata.MTLSEndpointAliases surfaces this from discovery.
+type MTLSEndpoints struct {
+	Token                      fapi.URL
+	PushedAuthorizationRequest fapi.URL
+	BackchannelAuthentication  fapi.URL
+}
+
 // Limits bounds the lifetimes and clock tolerances this client enforces
 // or sets. None of these have an implicit default — New rejects a zero
 // (or, for MaxClockSkew, negative) value.
@@ -291,6 +303,25 @@ type Config struct {
 	// PARDPoPBinding selects how BeginAuthorization commits this
 	// client's DPoP key at PAR time — see PARDPoPBinding's own doc
 	// comment. Defaults to PARDPoPBindingProof, RFC 9449 §10.1's own
-	// recommended mechanism.
+	// recommended mechanism. Only meaningful when SenderConstrain is
+	// SenderConstrainDPoP; ignored entirely under SenderConstrainMTLS,
+	// which has no PAR-time pre-commitment concept of its own (RFC 8705
+	// binding is derived purely from whichever certificate authenticates
+	// the eventual token-endpoint connection).
 	PARDPoPBinding PARDPoPBinding
+
+	// SenderConstrain selects how this client's access tokens are
+	// sender-constrained — storage.SenderConstrainDPoP (the default,
+	// zero value) builds and presents a DPoP proof on every PAR/token/
+	// backchannel call, exactly as this package has always done;
+	// storage.SenderConstrainMTLS instead presents no DPoP proof at
+	// all, relying entirely on Dependencies.HTTP's own configured
+	// transport (an *http.Client whose Transport.TLSClientConfig.Certificates
+	// is set) to present this client's certificate on the underlying
+	// TLS connection. This package never holds or manages that
+	// certificate itself — consistent with keeping raw credential
+	// material behind an injected dependency rather than inside Config,
+	// the same principle that keeps JWS signing keys behind
+	// Dependencies.Keys instead of here.
+	SenderConstrain storage.SenderConstrain
 }

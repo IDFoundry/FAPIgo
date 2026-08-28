@@ -711,13 +711,14 @@ func TestAccessTokenStoreContract(t *testing.T, factory func() AccessTokenStore)
 		expiresAt := time.Now().Add(5 * time.Minute).Truncate(time.Second)
 		claims := map[string]json.RawMessage{"custom_claim": json.RawMessage(`"value"`)}
 		if err := store.CreateAccessToken(ctx, NewAccessToken{
-			TokenHash:  hash,
-			ClientID:   "client-1",
-			Subject:    "user-1",
-			Scope:      []string{"openid", "accounts"},
-			Thumbprint: "thumbprint-1",
-			Claims:     claims,
-			ExpiresAt:  expiresAt,
+			TokenHash:       hash,
+			ClientID:        "client-1",
+			Subject:         "user-1",
+			Scope:           []string{"openid", "accounts"},
+			Thumbprint:      "thumbprint-1",
+			SenderConstrain: SenderConstrainMTLS,
+			Claims:          claims,
+			ExpiresAt:       expiresAt,
 		}); err != nil {
 			t.Fatalf("CreateAccessToken: %v", err)
 		}
@@ -738,11 +739,43 @@ func TestAccessTokenStoreContract(t *testing.T, factory func() AccessTokenStore)
 		if looked.Thumbprint != "thumbprint-1" {
 			t.Errorf("Thumbprint = %q, want %q", looked.Thumbprint, "thumbprint-1")
 		}
+		// SenderConstrain round-trips as a real, independent value —
+		// not just whatever the zero value happens to be — proving a
+		// store that special-cased or ignored it (e.g. only persisting
+		// SenderConstrainDPoP) would be caught here.
+		if looked.SenderConstrain != SenderConstrainMTLS {
+			t.Errorf("SenderConstrain = %v, want SenderConstrainMTLS", looked.SenderConstrain)
+		}
 		if string(looked.Claims["custom_claim"]) != `"value"` {
 			t.Errorf("Claims[custom_claim] = %s, want %q", looked.Claims["custom_claim"], "value")
 		}
 		if !looked.ExpiresAt.Equal(expiresAt) {
 			t.Errorf("ExpiresAt = %v, want %v", looked.ExpiresAt, expiresAt)
+		}
+	})
+
+	// TestAccessTokenStoreContract's own round-trip case above sets
+	// SenderConstrainMTLS explicitly (a non-zero value) so a store that
+	// silently ignored the field would still be caught; this case
+	// separately confirms the zero value (SenderConstrainDPoP) itself
+	// round-trips too, rather than being conflated with "field absent".
+	t.Run("SenderConstrainDPoPZeroValueRoundTrips", func(t *testing.T) {
+		store := factory()
+		ctx := context.Background()
+		hash := sha256.Sum256([]byte("access-token-dpop"))
+		if err := store.CreateAccessToken(ctx, NewAccessToken{
+			TokenHash: hash, ClientID: "client-1", Subject: "user-1",
+			Thumbprint: "thumbprint-1", SenderConstrain: SenderConstrainDPoP,
+			ExpiresAt: time.Now().Add(5 * time.Minute),
+		}); err != nil {
+			t.Fatalf("CreateAccessToken: %v", err)
+		}
+		looked, err := store.LookupAccessToken(ctx, AccessTokenLookup{TokenHash: hash})
+		if err != nil {
+			t.Fatalf("LookupAccessToken: %v", err)
+		}
+		if looked.SenderConstrain != SenderConstrainDPoP {
+			t.Errorf("SenderConstrain = %v, want SenderConstrainDPoP", looked.SenderConstrain)
 		}
 	})
 

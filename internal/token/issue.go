@@ -31,9 +31,11 @@ type AccessTokenParams struct {
 	ClientID string
 	Scope    string // "" to omit
 
-	// Confirmation binds the token to a DPoP key by thumbprint. Leave
-	// nil to issue a bearer (non-sender-constrained) token — whether
-	// that's acceptable is a policy decision made above this package.
+	// Confirmation binds the token to a DPoP key or an mTLS client
+	// certificate by thumbprint (exactly one of Confirmation.JKT/X5TS256
+	// set, never both). Leave nil to issue a bearer (non-sender-constrained)
+	// token — whether that's acceptable is a policy decision made above
+	// this package.
 	Confirmation *Confirmation
 
 	Now      time.Time
@@ -85,8 +87,8 @@ func IssueAccessToken(p AccessTokenParams) (token string, jti string, err error)
 			return "", "", fmt.Errorf("token: parameters must not set reserved claim %q", reserved)
 		}
 	}
-	if p.Confirmation != nil && p.Confirmation.JKT == "" {
-		return "", "", fmt.Errorf("token: confirmation jkt is empty")
+	if p.Confirmation != nil && (p.Confirmation.JKT == "") == (p.Confirmation.X5TS256 == "") {
+		return "", "", fmt.Errorf("token: confirmation must set exactly one of jkt or x5t#S256")
 	}
 
 	jti, err = randomJTI(p.Random)
@@ -111,7 +113,7 @@ func IssueAccessToken(p AccessTokenParams) (token string, jti string, err error)
 		standard["scope"] = p.Scope
 	}
 	if p.Confirmation != nil {
-		standard["cnf"] = rawConfirmation{JKT: p.Confirmation.JKT}
+		standard["cnf"] = rawConfirmation{JKT: p.Confirmation.JKT, X5TS256: p.Confirmation.X5TS256}
 	}
 	for k, v := range standard {
 		encoded, err := json.Marshal(v)

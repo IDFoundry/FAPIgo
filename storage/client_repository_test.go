@@ -87,6 +87,38 @@ func TestNewRegisteredClientBackchannelAuthenticationRequestAlgorithmConfigured(
 	}
 }
 
+// TestNewRegisteredClientSenderConstrainDefaultsToDPoP confirms the
+// zero value keeps every client config that predates this field
+// behaving exactly as before.
+func TestNewRegisteredClientSenderConstrainDefaultsToDPoP(t *testing.T) {
+	c, err := NewRegisteredClient(RegisteredClientConfig{
+		ID:                       "client-123",
+		RedirectURIs:             []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+		ClientAssertionAlgorithm: fapi.ES256,
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+	if c.SenderConstrain() != SenderConstrainDPoP {
+		t.Fatalf("SenderConstrain() = %v, want SenderConstrainDPoP", c.SenderConstrain())
+	}
+}
+
+func TestNewRegisteredClientSenderConstrainMTLS(t *testing.T) {
+	c, err := NewRegisteredClient(RegisteredClientConfig{
+		ID:                       "client-123",
+		RedirectURIs:             []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+		ClientAssertionAlgorithm: fapi.ES256,
+		SenderConstrain:          SenderConstrainMTLS,
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+	if c.SenderConstrain() != SenderConstrainMTLS {
+		t.Fatalf("SenderConstrain() = %v, want SenderConstrainMTLS", c.SenderConstrain())
+	}
+}
+
 func TestNewRegisteredClientRejectsInvalid(t *testing.T) {
 	cases := []RegisteredClientConfig{
 		{RedirectURIs: []fapi.RegisteredRedirectURI{"https://rp.example/callback"}, ClientAssertionAlgorithm: fapi.ES256},
@@ -143,6 +175,10 @@ func TestNewRegisteredClientRejectsInvalid(t *testing.T) {
 		{
 			ID: "client-123", RedirectURIs: []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
 			ClientAssertionAlgorithm: fapi.ES256, BackchannelAuthenticationRequestAlgorithm: fapi.SignatureAlgorithm(99),
+		},
+		{
+			ID: "client-123", RedirectURIs: []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+			ClientAssertionAlgorithm: fapi.ES256, SenderConstrain: SenderConstrain(99),
 		},
 	}
 	for i, c := range cases {

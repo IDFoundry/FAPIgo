@@ -233,6 +233,19 @@ func TestNewAcceptsZeroValuePARDPoPBinding(t *testing.T) {
 	}
 }
 
+// TestNewAcceptsSenderConstrainMTLSWithoutDPoPAlgorithm confirms
+// Algorithms.DPoP becomes optional under SenderConstrainMTLS — an
+// mTLS-sender-constrained client never builds a DPoP proof at all, so
+// it has no reason to configure a DPoP signing algorithm.
+func TestNewAcceptsSenderConstrainMTLSWithoutDPoPAlgorithm(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.SenderConstrain = storage.SenderConstrainMTLS
+	cfg.Algorithms.DPoP = 0
+	if _, err := client.New(cfg, validDependencies(t)); err != nil {
+		t.Fatalf("New(SenderConstrainMTLS, no DPoP algorithm): %v", err)
+	}
+}
+
 func TestNewRejectsInvalidConfig(t *testing.T) {
 	cases := map[string]func(*client.Config){
 		"zero issuer":                 func(c *client.Config) { c.Issuer = fapi.URL{} },
@@ -253,6 +266,7 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 		"zero max response bytes":     func(c *client.Config) { c.Limits.MaxHTTPResponseBytes = 0 },
 		"zero max jose compact bytes": func(c *client.Config) { c.Limits.MaxJOSECompactBytes = 0 },
 		"invalid par dpop binding":    func(c *client.Config) { c.PARDPoPBinding = client.PARDPoPBinding(99) },
+		"invalid sender constrain":    func(c *client.Config) { c.SenderConstrain = storage.SenderConstrain(99) },
 		"id_token key management set without content encryption": func(c *client.Config) {
 			c.Algorithms.IDTokenKeyManagement = fapi.RSAOAEP256
 		},

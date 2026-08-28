@@ -79,6 +79,23 @@ type Document struct {
 	BackchannelAuthenticationEndpoint                         string   `json:"backchannel_authentication_endpoint,omitempty"`
 	BackchannelTokenDeliveryModesSupported                    []string `json:"backchannel_token_delivery_modes_supported,omitempty"`
 	BackchannelAuthenticationRequestSigningAlgValuesSupported []string `json:"backchannel_authentication_request_signing_alg_values_supported,omitempty"`
+
+	// MTLSEndpointAliases (RFC 8705 §5) is OPTIONAL — absent entirely
+	// from a server that never offers an mTLS-requiring alternate
+	// listener, the common case. client.Discover surfaces it as
+	// DiscoveredMetadata.MTLSEndpointAliases, for a caller building a
+	// Config.SenderConstrain == SenderConstrainMTLS client to prefer
+	// over the plain Endpoints URLs.
+	MTLSEndpointAliases *MTLSEndpointAliases `json:"mtls_endpoint_aliases,omitempty"`
+}
+
+// MTLSEndpointAliases is the RFC 8705 §5 "mtls_endpoint_aliases"
+// metadata value — the subset of it this module's own flows ever need
+// to redirect to an mTLS-requiring alternate URL.
+type MTLSEndpointAliases struct {
+	TokenEndpoint                      string `json:"token_endpoint,omitempty"`
+	PushedAuthorizationRequestEndpoint string `json:"pushed_authorization_request_endpoint,omitempty"`
+	BackchannelAuthenticationEndpoint  string `json:"backchannel_authentication_endpoint,omitempty"`
 }
 
 // ParseAndValidate parses body as a Document and checks it against

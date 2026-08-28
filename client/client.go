@@ -1,6 +1,10 @@
 package client
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/idfoundry/fapigo/storage"
+)
 
 // Client is a FAPI 2.0 relying-party engine. It is entirely unexported —
 // construct one with New.
@@ -59,12 +63,18 @@ func validateConfig(cfg Config) error {
 	if cfg.PARDPoPBinding != PARDPoPBindingProof && cfg.PARDPoPBinding != PARDPoPBindingJKT {
 		return fmt.Errorf("client: config: par_dpop_binding is invalid")
 	}
+	if cfg.SenderConstrain != storage.SenderConstrainDPoP && cfg.SenderConstrain != storage.SenderConstrainMTLS {
+		return fmt.Errorf("client: config: sender_constrain is invalid")
+	}
 
 	if !cfg.Algorithms.ClientAuthentication.IsValid() {
 		return fmt.Errorf("client: config: algorithms.client_authentication is required")
 	}
-	if !cfg.Algorithms.DPoP.IsValid() {
-		return fmt.Errorf("client: config: algorithms.dpop is required")
+	// Algorithms.DPoP is required only under SenderConstrainDPoP (the
+	// default) — an mTLS-sender-constrained client never builds a DPoP
+	// proof at all, so it never needs a DPoP signing algorithm.
+	if cfg.SenderConstrain == storage.SenderConstrainDPoP && !cfg.Algorithms.DPoP.IsValid() {
+		return fmt.Errorf("client: config: algorithms.dpop is required when sender_constrain is SenderConstrainDPoP")
 	}
 	if !cfg.Algorithms.IDToken.IsValid() {
 		return fmt.Errorf("client: config: algorithms.id_token is required")

@@ -11,6 +11,7 @@ import (
 
 	"github.com/idfoundry/fapigo/internal/dpop"
 	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 var (
@@ -24,87 +25,115 @@ var (
 	errResponseBodyTooLarge = errors.New("client: response body exceeds the configured size limit")
 )
 
-// ResourceClient performs DPoP-bound requests to a protected resource
-// with one already-issued access token — most commonly the OIDC
-// UserInfo endpoint, but any FAPI 2.0 protected resource sender-
-// constrained to the same token follows the identical shape (RFC 9449
-// §4-§9): attach the token, prove possession of the DPoP key it's bound
-// to, and retry once if the resource server challenges for a fresh
-// nonce. It has no public constructor — only Client.ProtectedResource
-// produces one, always scoped to a specific TokenSet, so a caller can't
-// assemble one detached from an actual access token.
+// ResourceClient performs sender-constrained requests to a protected
+// resource with one already-issued access token — most commonly the
+// OIDC UserInfo endpoint, but any FAPI 2.0 protected resource
+// sender-constrained to the same token follows the identical shape. It
+// has no public constructor — only Client.ProtectedResource produces
+// one, always scoped to a specific TokenSet, so a caller can't assemble
+// one detached from an actual access token.
 type ResourceClient struct {
 	client *Client
 	token  string
 }
 
 // ProtectedResource returns a ResourceClient bound to tokens' access
-// token, ready to make DPoP-bound requests to a protected resource with
-// it — reusing the same DPoP key ExchangeCode originally bound the
-// token to, so every proof's JWK thumbprint keeps matching the token's
-// own cnf.jkt automatically, without this package ever exposing that
-// key to the caller.
+// token, ready to make sender-constrained requests to a protected
+// resource with it. Under SenderConstrainDPoP (the default), it reuses
+// the same DPoP key ExchangeCode originally bound the token to, so
+// every proof's JWK thumbprint keeps matching the token's own cnf.jkt
+// automatically, without this package ever exposing that key to the
+// caller. Under SenderConstrainMTLS, no key is involved at all — the
+// resource server derives binding purely from Dependencies.HTTP's own
+// configured TLS transport.
 func (c *Client) ProtectedResource(tokens TokenSet) *ResourceClient {
 	return &ResourceClient{client: c, token: tokens.AccessToken.Reveal()}
 }
 
-// Do performs req as a DPoP-bound request: it sets "Authorization: DPoP
-// <token>" and a fresh signed DPoP proof (RFC 9449 §4, with "ath" bound
-// to the access token per §4.3), bounded by Config.Limits.HTTPTimeout
-// and Config.Limits.MaxHTTPResponseBytes — the same protections this
-// client applies to its own PAR and token-endpoint calls. If the
-// resource server challenges with a fresh nonce (RFC 9449 §9: HTTP 401,
-// a WWW-Authenticate: DPoP challenge naming use_dpop_nonce, and a
-// DPoP-Nonce header), Do retries exactly once with that nonce echoed
-// into a fresh proof; any other response — including a second nonce
-// challenge — is returned as-is for the caller to interpret. As with
-// the token endpoint's own nonce retry, the DPoP-Nonce header alone is
-// not sufficient grounds to retry: a resource server may send it
-// unprompted to pre-seed a caller's next request, so the retry is
-// gated on the WWW-Authenticate challenge itself too.
+// Do performs req as a sender-constrained request, bounded by
+// Config.Limits.HTTPTimeout and Config.Limits.MaxHTTPResponseBytes —
+// the same protections this client applies to its own PAR and
+// token-endpoint calls.
 //
-// req's body, if any, must be replayable — Do may send it twice — so
-// req.GetBody must be set; http.NewRequestWithContext sets it
-// automatically for the body types it accepts (e.g. *bytes.Reader,
-// *strings.Reader). req's own context is replaced with one bounded by
-// Config.Limits.HTTPTimeout.
+// Under SenderConstrainDPoP (the default), it sets "Authorization: DPoP
+// <token>" and a fresh signed DPoP proof (RFC 9449 §4, with "ath" bound
+// to the access token per §4.3). If the resource server challenges with
+// a fresh nonce (RFC 9449 §9: HTTP 401, a WWW-Authenticate: DPoP
+// challenge naming use_dpop_nonce, and a DPoP-Nonce header), Do retries
+// exactly once with that nonce echoed into a fresh proof; any other
+// response — including a second nonce challenge — is returned as-is
+// for the caller to interpret. As with the token endpoint's own nonce
+// retry, the DPoP-Nonce header alone is not sufficient grounds to
+// retry: a resource server may send it unprompted to pre-seed a
+// caller's next request, so the retry is gated on the
+// WWW-Authenticate challenge itself too.
+//
+// Under SenderConstrainMTLS, it sets "Authorization: Bearer <token>"
+// and nothing else — no proof, no nonce challenge/retry (RFC 8705
+// defines no such mechanism at the resource server); binding is
+// derived purely from Dependencies.HTTP's own configured TLS
+// transport.
+//
+// req's body, if any, must be replayable — Do may send it twice under
+// SenderConstrainDPoP's own nonce retry — so req.GetBody must be set;
+// http.NewRequestWithContext sets it automatically for the body types
+// it accepts (e.g. *bytes.Reader, *strings.Reader). req's own context
+// is replaced with one bounded by Config.Limits.HTTPTimeout.
 func (rc *ResourceClient) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
 	if req == nil {
 		return nil, newError(ErrorInvalidRequest, "request is nil", nil)
 	}
 	c := rc.client
-	dpopSigner, _, err := c.newSigner(ctx, keys.DPoPProofSigning, c.cfg.Algorithms.DPoP)
-	if err != nil {
-		return nil, newError(ErrorInternal, "failed to resolve DPoP signing key", err)
-	}
 
 	ctx, cancel := context.WithTimeout(ctx, c.cfg.Limits.HTTPTimeout)
 	defer cancel()
 
-	scope := resourceNonceScope(req.URL)
-	res, err := rc.send(ctx, dpopSigner, req, c.cachedDPoPNonce(ctx, scope))
-	if err != nil {
-		return nil, newError(ErrorInternal, "protected resource request failed", err)
-	}
-	if isResourceDPoPNonceChallenge(res.StatusCode, res.Header) {
-		nonce := res.Header.Get("DPoP-Nonce")
-		_ = res.Body.Close()
-		retryReq, retryErr := rebuildRequestBody(req)
-		if retryErr != nil {
-			return nil, newError(ErrorInvalidRequest, "request body is not replayable for a DPoP nonce retry", retryErr)
-		}
-		res, err = rc.send(ctx, dpopSigner, retryReq, nonce)
+	var res *http.Response
+	if c.cfg.SenderConstrain == storage.SenderConstrainMTLS {
+		var err error
+		res, err = rc.sendBearer(ctx, req)
 		if err != nil {
 			return nil, newError(ErrorInternal, "protected resource request failed", err)
 		}
+	} else {
+		dpopSigner, _, err := c.newSigner(ctx, keys.DPoPProofSigning, c.cfg.Algorithms.DPoP)
+		if err != nil {
+			return nil, newError(ErrorInternal, "failed to resolve DPoP signing key", err)
+		}
+		scope := resourceNonceScope(req.URL)
+		res, err = rc.send(ctx, dpopSigner, req, c.cachedDPoPNonce(ctx, scope))
+		if err != nil {
+			return nil, newError(ErrorInternal, "protected resource request failed", err)
+		}
+		if isResourceDPoPNonceChallenge(res.StatusCode, res.Header) {
+			nonce := res.Header.Get("DPoP-Nonce")
+			_ = res.Body.Close()
+			retryReq, retryErr := rebuildRequestBody(req)
+			if retryErr != nil {
+				return nil, newError(ErrorInvalidRequest, "request body is not replayable for a DPoP nonce retry", retryErr)
+			}
+			res, err = rc.send(ctx, dpopSigner, retryReq, nonce)
+			if err != nil {
+				return nil, newError(ErrorInternal, "protected resource request failed", err)
+			}
+		}
+		c.cacheDPoPNonce(ctx, scope, res.Header.Get("DPoP-Nonce"))
 	}
-	c.cacheDPoPNonce(ctx, scope, res.Header.Get("DPoP-Nonce"))
 
 	bounded, err := boundResponseBody(res, c.cfg.Limits.MaxHTTPResponseBytes)
 	if err != nil {
 		return nil, newError(ErrorInvalidResponse, "protected resource response too large", err)
 	}
 	return bounded, nil
+}
+
+// sendBearer performs req as a plain Bearer-scheme request under
+// SenderConstrainMTLS — see Do's own doc comment for why no proof or
+// nonce handling applies here.
+func (rc *ResourceClient) sendBearer(ctx context.Context, req *http.Request) (*http.Response, error) {
+	req = req.WithContext(ctx)
+	req.Header.Set("Authorization", "Bearer "+rc.token)
+	return rc.client.deps.HTTP.Do(req)
 }
 
 // send signs a fresh DPoP proof (new iat and jti — reusing one across

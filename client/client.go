@@ -66,9 +66,21 @@ func validateConfig(cfg Config) error {
 	if cfg.SenderConstrain != storage.SenderConstrainDPoP && cfg.SenderConstrain != storage.SenderConstrainMTLS {
 		return fmt.Errorf("client: config: sender_constrain is invalid")
 	}
+	if cfg.ClientAuthMethod != storage.ClientAuthMethodPrivateKeyJWT &&
+		cfg.ClientAuthMethod != storage.ClientAuthMethodSelfSignedTLSClientAuth &&
+		cfg.ClientAuthMethod != storage.ClientAuthMethodTLSClientAuth {
+		return fmt.Errorf("client: config: client_auth_method is invalid")
+	}
 
-	if !cfg.Algorithms.ClientAuthentication.IsValid() {
-		return fmt.Errorf("client: config: algorithms.client_authentication is required")
+	// Algorithms.ClientAuthentication and Limits.ClientAssertionLifetime
+	// are required only under ClientAuthMethodPrivateKeyJWT — the two
+	// RFC 8705 mTLS methods send no client_assertion at all, so neither
+	// a signing algorithm nor an assertion lifetime means anything for
+	// them.
+	if cfg.ClientAuthMethod == storage.ClientAuthMethodPrivateKeyJWT {
+		if !cfg.Algorithms.ClientAuthentication.IsValid() {
+			return fmt.Errorf("client: config: algorithms.client_authentication is required when client_auth_method is ClientAuthMethodPrivateKeyJWT")
+		}
 	}
 	// Algorithms.DPoP is required only under SenderConstrainDPoP (the
 	// default) — an mTLS-sender-constrained client never builds a DPoP
@@ -114,8 +126,8 @@ func validateConfig(cfg Config) error {
 		}
 	}
 
-	if cfg.Limits.ClientAssertionLifetime <= 0 {
-		return fmt.Errorf("client: config: limits.client_assertion_lifetime must be positive")
+	if cfg.ClientAuthMethod == storage.ClientAuthMethodPrivateKeyJWT && cfg.Limits.ClientAssertionLifetime <= 0 {
+		return fmt.Errorf("client: config: limits.client_assertion_lifetime must be positive when client_auth_method is ClientAuthMethodPrivateKeyJWT")
 	}
 	if cfg.Limits.SessionLifetime <= 0 {
 		return fmt.Errorf("client: config: limits.session_lifetime must be positive")

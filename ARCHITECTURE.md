@@ -524,20 +524,41 @@ private_key_jwt client authentication."
 
 This module now supports mTLS sender-constrained access tokens (RFC
 8705 §3, `storage.SenderConstrainMTLS`, `-mtls`) as an alternative to
-DPoP — client *authentication* is still private_key_jwt only;
-`tls_client_auth`/dynamic client registration remain out of scope (see
-`cmd/conformance-as`'s own doc comment). This made the CIBA wall above
-worth a genuine live re-attempt rather than a permanent limitation:
-against `conformance/server/oidf-config/ciba-mtls.config.json`: **33
-PASS, 1 FAIL.** The one remaining FAIL is unfixable by construction —
-confirmed by disassembling `ExpectBindingMessageCorrectDisplay.evaluate()`
-itself: it unconditionally throws whenever `automated_ciba_approval_url`
-is set, no branch or placeholder exists for that case, and its only
-passing route needs a human physically watching a real device and
-uploading a screenshot as evidence — exactly the scenario
-`automated_ciba_approval_url` exists to replace everywhere else, so
-this one check and an automated run are mutually exclusive by the
-suite's own design. (The 3 modules
+DPoP, and — as a separate, orthogonal capability —
+`tls_client_auth`/`self_signed_tls_client_auth` (RFC 8705 §2,
+`storage.ClientAuthMethod`) as client *authentication* methods
+alongside `private_key_jwt`; dynamic client registration remains out of
+scope (see `cmd/conformance-as`'s own doc comment). This made the CIBA
+wall above worth a genuine live re-attempt rather than a permanent
+limitation:
+against `conformance/server/oidf-config/ciba-mtls.config.json`: **34/34
+PASS.** The last holdout,
+`fapi-ciba-id1-ensure-authorization-request-with-potentially-bad-binding-message`,
+was initially misdiagnosed as unfixable by construction — disassembling
+`ExpectBindingMessageCorrectDisplay.evaluate()` in isolation showed it
+unconditionally throws whenever `automated_ciba_approval_url` is set,
+with no branch for that case, and concluding from that alone that this
+one check and an automated run were mutually exclusive. That was wrong:
+disassembling the test *module* itself
+(`FAPICIBAID1EnsureAuthorizationRequestWithPotentiallyBadBindingMessage.performAuthorizationFlow`)
+shows `ExpectBindingMessageCorrectDisplay` is only reached along the
+*accept* path — if the backchannel authentication endpoint's response
+carries an `error` field, the module instead runs
+`CheckErrorFromBackchannelAuthenticationEndpointErrorInvalidBindingMessage`
+(asserting `error == "invalid_binding_message"`) and finishes right
+there. CIBA Core 1.0 §13 gives an AS exactly this option — reject a
+`binding_message` it can't safely or faithfully display, rather than
+accept it and hope. The test's actual value (confirmed from the live
+log, not assumed) is 456 Unicode code points of emoji, CJK text, and a
+Lorem Ipsum paragraph — clearly disqualified on length/renderability
+grounds alone, nothing content-specific. `server/backchannel_authentication.go`'s
+`isAcceptableBindingMessage` now rejects a `binding_message` over 100
+Unicode code points or containing a control/line-separator character,
+returning the new `ErrorInvalidBindingMessage` (`"invalid_binding_message"`)
+— length and renderability only; ordinary punctuation, emoji, and
+non-Latin scripts remain fully accepted, confirmed by a dedicated unit
+test using the exact same emoji/CJK content the failing probe sends,
+just under the length bound. (The 3 modules
 requiring an RS256-signed probe — `...-signature-algorithm-is-RS256-fails`
 and its two client-assertion counterparts — self-skip unless the
 plan's own client is registered with an RSA/PS256 key, since the
@@ -545,7 +566,7 @@ suite reuses that same registered key, just forcing its JWS header to
 RS256, rather than provisioning a separate one; switching client 1
 from ES256 to PS256/RSA — already an allowed algorithm here — turned
 all three from SKIPPED to PASSED with zero regressions elsewhere.)
-Getting here fixed five real library/harness gaps: `server.Metadata`
+Getting here fixed six real library/harness gaps: `server.Metadata`
 was missing
 `tls_client_certificate_bound_access_tokens` (RFC 8705 §3.3);
 `authenticateClient`'s client-assertion `aud` acceptance was far
@@ -564,11 +585,13 @@ substitute for on a browser-driven flow); CIBA's own error vocabulary
 had incorrectly borrowed PAR's `invalid_request_object` convention
 (CIBA Core 1.0 §13 defines no such code — every request-object
 negative test uniformly expects plain `invalid_request`, confirmed by
-disassembling the suite's own check); and a CIBA backchannel
+disassembling the suite's own check); a CIBA backchannel
 authentication request's `iat` claim was never required at all — new
 `requestobject.VerifyPolicy.RequireIssuedAt`, mirroring
 `RequireNotBefore`/`RequireJTI`'s own pattern, set `true` only for
-CIBA (PAR's stays `false`). Full breakdown in
+CIBA (PAR's stays `false`); and, as detailed above, `binding_message`
+had no acceptability check at all, so an AS-side rejection option CIBA
+§13 explicitly provides for was simply never exercised. Full breakdown in
 `conformance/server/oidf-config/README.md`'s own CIBA section, which
 also covers the DPoP-only config's manual (non-automated) setup.
 

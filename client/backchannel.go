@@ -141,9 +141,19 @@ func (c *Client) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	if err != nil {
 		return BackchannelAuthenticationSession{}, newError(ErrorInternal, "failed to resolve backchannel authentication request signing key", err)
 	}
-	assertionSigner, assertionKID, err := c.newSigner(ctx, keys.ClientAuthentication, c.cfg.Algorithms.ClientAuthentication)
-	if err != nil {
-		return BackchannelAuthenticationSession{}, newError(ErrorInternal, "failed to resolve client authentication key", err)
+	// assertionSigner stays nil (and assertionKID "") when
+	// ClientAuthMethod isn't ClientAuthMethodPrivateKeyJWT — buildForm
+	// never uses them in that case, since no client_assertion is ever
+	// built.
+	var (
+		assertionSigner crypto.Signer
+		assertionKID    string
+	)
+	if c.cfg.ClientAuthMethod == storage.ClientAuthMethodPrivateKeyJWT {
+		assertionSigner, assertionKID, err = c.newSigner(ctx, keys.ClientAuthentication, c.cfg.Algorithms.ClientAuthentication)
+		if err != nil {
+			return BackchannelAuthenticationSession{}, newError(ErrorInternal, "failed to resolve client authentication key", err)
+		}
 	}
 	// dpopSigner stays nil under SenderConstrainMTLS — never used in
 	// that case, since no DPoP proof is ever built.
@@ -171,19 +181,22 @@ func (c *Client) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		if err != nil {
 			return nil, fmt.Errorf("build backchannel authentication request object: %w", err)
 		}
-		assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
-			Signer: assertionSigner, Algorithm: c.cfg.Algorithms.ClientAuthentication, KeyID: assertionKID,
-			ClientID: c.cfg.ClientID.String(), Audience: c.cfg.Issuer.String(),
-			Now: now, Lifetime: c.cfg.Limits.ClientAssertionLifetime, Random: c.deps.Random,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("build client assertion: %w", err)
+		form := map[string]string{"request": object}
+		if c.cfg.ClientAuthMethod == storage.ClientAuthMethodPrivateKeyJWT {
+			assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
+				Signer: assertionSigner, Algorithm: c.cfg.Algorithms.ClientAuthentication, KeyID: assertionKID,
+				ClientID: c.cfg.ClientID.String(), Audience: c.cfg.Issuer.String(),
+				Now: now, Lifetime: c.cfg.Limits.ClientAssertionLifetime, Random: c.deps.Random,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("build client assertion: %w", err)
+			}
+			form["client_assertion"] = assertion
+			form["client_assertion_type"] = clientassertion.AssertionType
+		} else {
+			form["client_id"] = c.cfg.ClientID.String()
 		}
-		return par.EncodeForm(map[string]string{
-			"request":               object,
-			"client_assertion":      assertion,
-			"client_assertion_type": clientassertion.AssertionType,
-		}), nil
+		return par.EncodeForm(form), nil
 	}
 
 	form, buildErr := buildForm()
@@ -345,9 +358,20 @@ func (BackchannelAuthenticationApproved) backchannelAuthenticationResult() {}
 // than having the calling goroutine block for however long a human
 // takes to approve an out-of-band request.
 func (c *Client) PollBackchannelAuthentication(ctx context.Context, session BackchannelAuthenticationSession) (BackchannelAuthenticationResult, error) {
-	assertionSigner, assertionKID, err := c.newSigner(ctx, keys.ClientAuthentication, c.cfg.Algorithms.ClientAuthentication)
-	if err != nil {
-		return nil, newError(ErrorInternal, "failed to resolve client authentication key", err)
+	// assertionSigner stays nil (and assertionKID "") when
+	// ClientAuthMethod isn't ClientAuthMethodPrivateKeyJWT — buildPollForm
+	// never uses them in that case, since no client_assertion is ever
+	// built.
+	var (
+		assertionSigner crypto.Signer
+		assertionKID    string
+		err             error
+	)
+	if c.cfg.ClientAuthMethod == storage.ClientAuthMethodPrivateKeyJWT {
+		assertionSigner, assertionKID, err = c.newSigner(ctx, keys.ClientAuthentication, c.cfg.Algorithms.ClientAuthentication)
+		if err != nil {
+			return nil, newError(ErrorInternal, "failed to resolve client authentication key", err)
+		}
 	}
 	// dpopSigner stays nil under SenderConstrainMTLS — never used in
 	// that case, since no DPoP proof is ever built.
@@ -361,20 +385,25 @@ func (c *Client) PollBackchannelAuthentication(ctx context.Context, session Back
 	tokenURL := c.cfg.Endpoints.Token.URL()
 
 	buildPollForm := func() ([]byte, error) {
-		assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
-			Signer: assertionSigner, Algorithm: c.cfg.Algorithms.ClientAuthentication, KeyID: assertionKID,
-			ClientID: c.cfg.ClientID.String(), Audience: c.cfg.Issuer.String(),
-			Now: c.deps.Clock.Now(), Lifetime: c.cfg.Limits.ClientAssertionLifetime, Random: c.deps.Random,
-		})
-		if err != nil {
-			return nil, err
+		form := map[string]string{
+			"grant_type":  cibaGrantType,
+			"auth_req_id": session.authReqID,
 		}
-		return par.EncodeForm(map[string]string{
-			"grant_type":            cibaGrantType,
-			"auth_req_id":           session.authReqID,
-			"client_assertion":      assertion,
-			"client_assertion_type": clientassertion.AssertionType,
-		}), nil
+		if c.cfg.ClientAuthMethod == storage.ClientAuthMethodPrivateKeyJWT {
+			assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
+				Signer: assertionSigner, Algorithm: c.cfg.Algorithms.ClientAuthentication, KeyID: assertionKID,
+				ClientID: c.cfg.ClientID.String(), Audience: c.cfg.Issuer.String(),
+				Now: c.deps.Clock.Now(), Lifetime: c.cfg.Limits.ClientAssertionLifetime, Random: c.deps.Random,
+			})
+			if err != nil {
+				return nil, err
+			}
+			form["client_assertion"] = assertion
+			form["client_assertion_type"] = clientassertion.AssertionType
+		} else {
+			form["client_id"] = c.cfg.ClientID.String()
+		}
+		return par.EncodeForm(form), nil
 	}
 
 	form, buildErr := buildPollForm()

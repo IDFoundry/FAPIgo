@@ -41,26 +41,31 @@ poll mode only) is verified by unit/integration tests, not the live
 OIDF suite as its primary gate: `fapi-ciba-id1-test-plan` requires
 MTLS-bound access tokens unconditionally. Now that this module supports
 mTLS sender-constraining (RFC 8705 §3, `-mtls`), this was genuinely
-re-attempted live against `ciba-mtls.config.json` — **33 PASS / 1
-FAIL**, up from an immediate suite-side config error for every module
-past discovery. The one remaining FAIL is unfixable by construction —
-confirmed by disassembly, not inferred: the suite's own check
-unconditionally throws whenever automated CIBA approval is configured,
-with no alternate path — its only passing route needs a human
-physically watching a real device. Six real library/harness gaps the attempt
-surfaced were all fixed along the way:
-`tls_client_certificate_bound_access_tokens` metadata, client-assertion
-`aud` acceptance being far too narrow, a stricter legacy FAPI-RW §8.5
-TLS check that needed both a narrower cipher list *and* an RSA (not
-ECDSA) server certificate, a CIBA-specific error code that had
-incorrectly borrowed PAR's `invalid_request_object` convention, a
-missing `iat` requirement on CIBA's own request object, and 3 modules
-that self-skip without an RSA/PS256-registered client (switching the
-plan's own client 1 from ES256 turned all three from SKIPPED to
-PASSED). Full breakdown, live findings and reproduction steps in
+re-attempted live against `ciba-mtls.config.json` — **34/34 PASS.**
+Seven real library/harness gaps the attempt surfaced were all fixed
+along the way: `tls_client_certificate_bound_access_tokens` metadata,
+client-assertion `aud` acceptance being far too narrow, a stricter
+legacy FAPI-RW §8.5 TLS check that needed both a narrower cipher list
+*and* an RSA (not ECDSA) server certificate, a CIBA-specific error code
+that had incorrectly borrowed PAR's `invalid_request_object`
+convention, a missing `iat` requirement on CIBA's own request object, 3
+modules that self-skip without an RSA/PS256-registered client
+(switching the plan's own client 1 from ES256 turned all three from
+SKIPPED to PASSED), and a `binding_message` acceptability check (CIBA
+§13's `invalid_binding_message`) this module didn't have at all — the
+last one was initially misdiagnosed as an unfixable gap in the suite's
+own automated-approval design (the check the suite runs after
+*accepting* an overlong/unusual binding message unconditionally fails
+under automated approval, since it requires demonstrating the value was
+actually displayed to a human); disassembling the actual test module's
+bytecode showed the suite has a dedicated, fully-supported *rejection*
+branch instead — reject a binding message the AS can't safely/faithfully
+display with `invalid_binding_message`, and the display-verification
+check is never reached. Full breakdown, live findings and reproduction
+steps in
 [`server/oidf-config/README.md`](server/oidf-config/README.md#ciba-manual-only--not-part-of-automated-conformance).
-Not yet wired into `scripts/run-all.sh`, though at this pass rate it's
-now a real, worthwhile candidate.
+Not yet wired into `scripts/run-all.sh`, though at 34/34 it's now a
+real, worthwhile candidate.
 
 `client`'s own CIBA support
 (`BeginBackchannelAuthentication`/`PollBackchannelAuthentication`) was

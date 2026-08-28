@@ -55,7 +55,7 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, "", newError(ErrorUnsupportedGrantType, 400, "grant_type must be "+CIBAGrantType, nil))
 	}
 
-	client, _, authErr := s.authenticateClient(ctx, params)
+	client, _, authErr := s.authenticateClient(ctx, params, req.PeerCertificate)
 	if authErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, "", authErr)
 	}

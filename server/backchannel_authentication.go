@@ -3,10 +3,13 @@ package server
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/json"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/extension"
@@ -77,6 +80,13 @@ type BeginBackchannelAuthenticationRequest struct {
 	// Optional, mirroring PushAuthorizationRequest.DPoPProof — see
 	// reconcileBackchannelDPoPBinding.
 	DPoPProof string
+
+	// PeerCertificate is the TLS client certificate presented on the
+	// connection this request arrived on, if any — required when the
+	// client authenticates via ClientAuthMethodSelfSignedTLSClientAuth
+	// or ClientAuthMethodTLSClientAuth (RFC 8705 §2), mirroring
+	// PushAuthorizationRequest.PeerCertificate.
+	PeerCertificate *x509.Certificate
 }
 
 // BeginBackchannelAuthentication authenticates the client, verifies its
@@ -95,7 +105,7 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		return s.backchannelBeginFail(ctx, "", newError(ErrorInvalidRequest, 400, "the request contains a duplicated parameter", err)), nil
 	}
 
-	client, _, authErr := s.authenticateClient(ctx, params)
+	client, _, authErr := s.authenticateClient(ctx, params, req.PeerCertificate)
 	if authErr != nil {
 		return s.backchannelBeginFail(ctx, "", authErr), nil
 	}
@@ -281,7 +291,48 @@ func (s *Server) validateBackchannelAuthenticationParameters(verified verifiedBa
 		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "ping and push delivery modes are not supported; only poll mode is available", nil)
 	}
 
+	if raw, ok := params["binding_message"]; ok {
+		bindingMessage, err := jsonStringValue(raw)
+		if err != nil {
+			return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "binding_message must be a string", err)
+		}
+		if !isAcceptableBindingMessage(bindingMessage) {
+			return verifiedBackchannelRequest{}, newError(ErrorInvalidBindingMessage, 400, "binding_message is not acceptable", nil)
+		}
+	}
+
 	return verified, nil
+}
+
+// maxBindingMessageLength bounds a binding_message to something a real
+// display surface (a push notification, an SMS, a small screen) can
+// show in full at a glance — CIBA §7.1's own examples are short codes
+// like "W4SCT"; nothing about the protocol calls for a message that
+// can't be read in one look. Chosen generously above ordinary usage,
+// not tuned to any specific test input.
+const maxBindingMessageLength = 100
+
+// isAcceptableBindingMessage reports whether msg is a binding_message
+// (CIBA §7.1) this server can display to an end user faithfully and in
+// full — the short, human-scannable identifier CIBA's transaction-
+// interlocking model depends on, not an arbitrary string. CIBA §13
+// explicitly gives an AS invalid_binding_message to reject one it
+// considers unacceptable, rather than accepting whatever a client sends
+// and hoping its own display surface can render it. Only length and
+// control/line-separator characters are checked — a display surface
+// can't safely render a value spanning multiple lines or embedding
+// control codes, but ordinary punctuation, emoji, and non-Latin scripts
+// are all fine and remain accepted.
+func isAcceptableBindingMessage(msg string) bool {
+	if utf8.RuneCountInString(msg) > maxBindingMessageLength {
+		return false
+	}
+	for _, r := range msg {
+		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' {
+			return false
+		}
+	}
+	return true
 }
 
 // reconcileBackchannelDPoPBinding is reconcileParDPoPBinding's CIBA

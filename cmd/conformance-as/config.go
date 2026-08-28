@@ -5,10 +5,16 @@
 // traffic, not Go function calls — has something to test against. See
 // ARCHITECTURE.md's conformance strategy section.
 //
-// Client authentication is private_key_jwt only — tls_client_auth /
-// self_signed_tls_client_auth is out of scope. mTLS sender-constrained
-// access tokens (RFC 8705 §3, cnf.x5t#S256) are supported as an
-// alternative to DPoP: see -mtls and ClientConfig.SenderConstrain.
+// Client authentication supports private_key_jwt (the default),
+// self_signed_tls_client_auth, and tls_client_auth (subject_dn variant
+// only — see storage.ClientAuthMethodTLSClientAuth's own doc comment);
+// see ClientConfig.ClientAuthMethod. This binary does not stand up a CA
+// trust store, so tls_client_auth here is DN-matching only, with no
+// certificate-chain trust enforcement — a real tls_client_auth
+// deployment would configure tls.Config.ClientCAs in its own adapter.
+// mTLS sender-constrained access tokens (RFC 8705 §3, cnf.x5t#S256) are
+// a separate, orthogonal capability, supported as an alternative to
+// DPoP: see -mtls and ClientConfig.SenderConstrain.
 package main
 
 import (
@@ -85,9 +91,24 @@ type ClientConfig struct {
 	// SenderConstrain selects how this client's access tokens are
 	// sender-constrained: "dpop" (the default, applied when empty) or
 	// "mtls" (RFC 8705 §3 — requires this binary to be running with
-	// -mtls). Client *authentication* is unaffected either way — still
-	// always private_key_jwt.
+	// -mtls). Independent of ClientAuthMethod — a client can be
+	// sender-constrained either way regardless of how it authenticates.
 	SenderConstrain string `json:"sender_constrain,omitempty"`
+
+	// ClientAuthMethod selects how this client authenticates:
+	// "private_key_jwt" (the default, applied when empty),
+	// "self_signed_tls_client_auth", or "tls_client_auth" (requires this
+	// binary to be running with -mtls, same as SenderConstrain "mtls" —
+	// either requires a client certificate to be presented, so both need
+	// the mTLS listener).
+	ClientAuthMethod string `json:"client_auth_method,omitempty"`
+
+	// ExpectedCertificateThumbprint / ExpectedSubjectDN are required
+	// exactly when ClientAuthMethod is self_signed_tls_client_auth /
+	// tls_client_auth respectively — see
+	// storage.RegisteredClientConfig's identically-named fields.
+	ExpectedCertificateThumbprint string `json:"expected_certificate_thumbprint,omitempty"`
+	ExpectedSubjectDN             string `json:"expected_subject_dn,omitempty"`
 
 	JWKS    json.RawMessage `json:"jwks,omitempty"`
 	JWKSURI string          `json:"jwks_uri,omitempty"`
@@ -245,10 +266,35 @@ func resolveClient(c ClientConfig) (storage.RegisteredClient, ephemeral.ClientKe
 	if len(c.RedirectURIs) == 0 {
 		return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, fmt.Errorf("redirect_uris must not be empty")
 	}
-	assertionAlg, err := fapi.ParseSignatureAlgorithm(c.ClientAssertionAlgorithm)
-	if err != nil {
-		return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, fmt.Errorf("client_assertion_algorithm: %w", err)
+	clientAuthMethod := storage.ClientAuthMethodPrivateKeyJWT
+	if c.ClientAuthMethod != "" {
+		switch c.ClientAuthMethod {
+		case "private_key_jwt":
+			clientAuthMethod = storage.ClientAuthMethodPrivateKeyJWT
+		case "self_signed_tls_client_auth":
+			clientAuthMethod = storage.ClientAuthMethodSelfSignedTLSClientAuth
+		case "tls_client_auth":
+			clientAuthMethod = storage.ClientAuthMethodTLSClientAuth
+		default:
+			return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, fmt.Errorf("client_auth_method must be %q, %q, or %q, got %q", "private_key_jwt", "self_signed_tls_client_auth", "tls_client_auth", c.ClientAuthMethod)
+		}
 	}
+
+	var assertionAlg fapi.SignatureAlgorithm
+	var err error
+	if clientAuthMethod == storage.ClientAuthMethodPrivateKeyJWT {
+		assertionAlg, err = fapi.ParseSignatureAlgorithm(c.ClientAssertionAlgorithm)
+		if err != nil {
+			return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, fmt.Errorf("client_assertion_algorithm: %w", err)
+		}
+	}
+	if clientAuthMethod == storage.ClientAuthMethodSelfSignedTLSClientAuth && c.ExpectedCertificateThumbprint == "" {
+		return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, fmt.Errorf("expected_certificate_thumbprint is required when client_auth_method is self_signed_tls_client_auth")
+	}
+	if clientAuthMethod == storage.ClientAuthMethodTLSClientAuth && c.ExpectedSubjectDN == "" {
+		return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, fmt.Errorf("expected_subject_dn is required when client_auth_method is tls_client_auth")
+	}
+
 	var requestObjectAlg fapi.SignatureAlgorithm
 	if c.RequestObjectAlgorithm != "" {
 		requestObjectAlg, err = fapi.ParseSignatureAlgorithm(c.RequestObjectAlgorithm)
@@ -264,10 +310,19 @@ func resolveClient(c ClientConfig) (storage.RegisteredClient, ephemeral.ClientKe
 		}
 	}
 
+	// A client needs a discoverable JWKS iff it does any JWS signing at
+	// all: private_key_jwt client assertions, signed request objects, or
+	// signed CIBA backchannel authentication requests. A client
+	// registered for certificate-based authentication that does neither
+	// of the latter two has no key material to publish.
+	needsJWKS := clientAuthMethod == storage.ClientAuthMethodPrivateKeyJWT || requestObjectAlg != 0 || backchannelAuthenticationRequestAlg != 0
 	hasJWKS := len(c.JWKS) > 0
 	hasJWKSURI := c.JWKSURI != ""
-	if hasJWKS == hasJWKSURI {
+	switch {
+	case needsJWKS && hasJWKS == hasJWKSURI:
 		return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, fmt.Errorf("exactly one of jwks or jwks_uri must be set")
+	case !needsJWKS && (hasJWKS || hasJWKSURI):
+		return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, fmt.Errorf("jwks/jwks_uri must not be set: this client does no JWS signing (client_auth_method is not private_key_jwt, and neither request_object_algorithm nor backchannel_authentication_request_algorithm is set)")
 	}
 
 	senderConstrain := storage.SenderConstrainDPoP
@@ -289,10 +344,13 @@ func resolveClient(c ClientConfig) (storage.RegisteredClient, ephemeral.ClientKe
 
 	clientID := fapi.ClientID(c.ID)
 	registered, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
-		ID:                       clientID,
-		RedirectURIs:             redirectURIs,
-		ClientAssertionAlgorithm: assertionAlg,
-		RequestObjectAlgorithm:   requestObjectAlg,
+		ID:                            clientID,
+		RedirectURIs:                  redirectURIs,
+		ClientAuthMethod:              clientAuthMethod,
+		ClientAssertionAlgorithm:      assertionAlg,
+		ExpectedCertificateThumbprint: c.ExpectedCertificateThumbprint,
+		ExpectedSubjectDN:             c.ExpectedSubjectDN,
+		RequestObjectAlgorithm:        requestObjectAlg,
 		BackchannelAuthenticationRequestAlgorithm: backchannelAuthenticationRequestAlg,
 		AllowedScopes:   c.AllowedScopes,
 		SenderConstrain: senderConstrain,

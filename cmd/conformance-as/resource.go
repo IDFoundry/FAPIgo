@@ -65,6 +65,17 @@ func (s selfIssuerKeySource) ResolveIssuerKeys(ctx context.Context, req keys.Iss
 // actually interoperates with client.FetchUserInfo end to end.
 func userinfoHandler(srv *server.Server, verifier *fapires.Verifier, userinfoURL *url.URL, identityClaims staticIdentityClaims, clients storage.ClientRepository, userinfoSigning bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Set before anything else, and unconditionally, on every
+		// response this request produces — success or error alike
+		// (FAPI 1.0 Part 1 §6.2.1). Must come before any WriteHeader
+		// call below, including every writeResourceError(Raw) path.
+		interactionID, err := fapires.ResolveInteractionID(r.Header.Get(fapires.InteractionIDHeader), nil)
+		if err != nil {
+			writeResourceErrorRaw(w, http.StatusInternalServerError, "server_error", "failed to resolve x-fapi-interaction-id")
+			return
+		}
+		w.Header().Set(fapires.InteractionIDHeader, interactionID)
+
 		dpopProof, ok := singleDPoPHeader(r)
 		if !ok {
 			writeResourceErrorRaw(w, http.StatusBadRequest, "invalid_request", "multiple DPoP headers are not permitted")

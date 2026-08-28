@@ -1,12 +1,20 @@
 #!/usr/bin/env bash
-# Runs all four FAPI2 conformance suites this repo has driver support
-# for — AS baseline, AS message-signing, RP baseline, RP
-# message-signing — against a locally running OIDF conformance suite,
-# prints one combined summary at the end, and (via
+# Runs all six FAPI2 conformance suites this repo has driver support
+# for — AS baseline, AS message-signing, AS ciba-mtls, RP baseline, RP
+# message-signing, RP ciba-mtls — against a locally running OIDF
+# conformance suite, prints one combined summary at the end, and (via
 # generate-report.py) writes a fuller report.md alongside the raw
 # per-suite logs — every non-PASSED module, with the "why this is
 # expected, not a defect" reasoning pulled straight from
 # expected-{warnings,skips}-*.json where one exists.
+#
+# AS ciba-mtls and RP ciba-mtls both need RFC 8705 mTLS sender-
+# constraining (see ARCHITECTURE.md's Conformance strategy section for
+# why FAPI-CIBA-ID1 requires it unconditionally on both sides) —
+# AS ciba-mtls runs against a third conformance-as container
+# (conformance-as-ciba-mtls, ../server/docker-compose.yml) on its own
+# ports; RP ciba-mtls is cmd/conformance-client -profile=ciba -mtls,
+# not a separate container at all.
 #
 # Runs cmd/conformance-as under its default -access-token-format=jwt
 # only. An earlier version of this script looped the AS suites over
@@ -35,11 +43,11 @@
 #     (https://localhost.emobix.co.uk:8443 by default).
 #   - CONFORMANCE_SUITE_CHECKOUT set to that suite's own git checkout
 #     (this script runs its scripts/run-test-plan.py from there).
-#   - conformance/server/oidf-config/{baseline,message-signing}-plan.json
+#   - conformance/server/oidf-config/{baseline,message-signing,ciba-mtls}-plan.json
 #     already filled in (gitignored — carries private keys; run
 #     `go run ./conformance/server/scripts/setup-config` to generate
-#     both, or see that directory's README to do it by hand).
-#   - Docker, for the conformance-as-baseline/-message-signing
+#     all three, or see that directory's README to do it by hand).
+#   - Docker, for the conformance-as-baseline/-message-signing/-ciba-mtls
 #     containers (brought up automatically by this script).
 #
 # Usage:
@@ -159,7 +167,7 @@ wait_as_ready() {
 	# the time anyone's looking at a failed CI run the containers are
 	# long gone (torn down by the workflow's own cleanup step).
 	(cd "$SERVER_DIR" && docker compose ps) >&2 || true
-	(cd "$SERVER_DIR" && docker compose logs --tail=100 conformance-as-baseline conformance-as-message-signing) >&2 || true
+	(cd "$SERVER_DIR" && docker compose logs --tail=100 conformance-as-baseline conformance-as-message-signing conformance-as-ciba-mtls) >&2 || true
 	exit 1
 }
 
@@ -266,13 +274,15 @@ run_as_plan() {
 	fi
 }
 
-# run_rp_plan NAME PROFILE_FLAG
+# run_rp_plan NAME PROFILE_FLAG [EXTRA_ARGS...] — EXTRA_ARGS is for
+# -mtls (RP ciba-mtls); the two pre-existing callers pass none.
 run_rp_plan() {
 	local name="$1" profile="$2"
+	shift 2
 	local log_file="$WORKDIR/rp-$name.log"
 
 	log "RP $name: starting cmd/conformance-client"
-	(cd "$REPO_ROOT" && go run ./cmd/conformance-client -suite="$CONFORMANCE_SERVER" -profile="$profile") >"$log_file" 2>&1 || true
+	(cd "$REPO_ROOT" && go run ./cmd/conformance-client -suite="$CONFORMANCE_SERVER" -profile="$profile" "$@") >"$log_file" 2>&1 || true
 
 	local total passed
 	total="$(awk '/=== summary ===/{f=1;next} f && NF{c++} END{print c+0}' "$log_file")"
@@ -296,9 +306,11 @@ log "bringing up conformance-as containers"
 # build` layer even when the source changed. Not the default here
 # since it'd make every routine run take minutes even when nothing
 # changed.
-(cd "$SERVER_DIR" && docker compose up -d --build conformance-as-baseline conformance-as-message-signing) >"$WORKDIR/docker-compose.log" 2>&1
+(cd "$SERVER_DIR" && docker compose up -d --build conformance-as-baseline conformance-as-message-signing conformance-as-ciba-mtls) >"$WORKDIR/docker-compose.log" 2>&1
 wait_as_ready 18443
 wait_as_ready 18444
+wait_as_ready 18446
+wait_as_ready 18447
 
 run_as_plan "baseline" \
 	'fapi2-security-profile-final-test-plan[client_auth_type=private_key_jwt][sender_constrain=dpop][fapi_profile=plain_fapi][openid=openid_connect]' \
@@ -312,14 +324,34 @@ run_as_plan "message-signing" \
 	"$SERVER_DIR/expected-warnings-message-signing.json" \
 	"$SERVER_DIR/expected-skips-message-signing.json"
 
+# CIBA needs its own AS: cmd/conformance-as -ciba -mtls, a second
+# process/container from conformance-as-baseline/-message-signing (see
+# ../server/docker-compose.yml's own conformance-as-ciba-mtls service),
+# since fapi-ciba-id1-test-plan requires MTLS-bound access tokens
+# unconditionally (see ARCHITECTURE.md's Conformance strategy section
+# for why) — the baseline/message-signing containers run DPoP-only.
+run_as_plan "ciba-mtls" \
+	'fapi-ciba-id1-test-plan[client_auth_type=private_key_jwt][ciba_mode=poll][fapi_ciba_profile=plain_fapi][client_registration=static_client]' \
+	"$SERVER_DIR/oidf-config/ciba-mtls-plan.json" \
+	"$SERVER_DIR/expected-warnings-ciba-mtls.json" \
+	"$SERVER_DIR/expected-skips-ciba-mtls.json"
+
 run_rp_plan "baseline" "baseline"
 run_rp_plan "message-signing" "message-signing"
+
+# RP ciba-mtls: cmd/conformance-client -profile=ciba -mtls against the
+# suite's own fapi-ciba-id1-client-test-plan — see
+# ../client/scripts/README.md's own CIBA section for why -mtls (not
+# DPoP) is what this driver runs here: the suite's own
+# AbstractFAPICIBAClientTest.handleHttp hardcodes the token endpoint to
+# require mTLS unconditionally, regardless of client_auth_type variant.
+run_rp_plan "ciba-mtls" "ciba" -mtls
 
 python3 "$SCRIPT_DIR/generate-report.py" "$WORKDIR" "$REPO_ROOT" || echo "warning: report generation failed (see above)" >&2
 
 echo
 echo "=== combined summary ==="
-for suite in "AS baseline" "AS message-signing" "RP baseline" "RP message-signing"; do
+for suite in "AS baseline" "AS message-signing" "AS ciba-mtls" "RP baseline" "RP message-signing" "RP ciba-mtls"; do
 	result="$(lookup_result "$suite")"
 	printf '%-20s %s\n' "$suite" "${result:-DID NOT RUN}"
 done
@@ -329,7 +361,7 @@ echo "report: $WORKDIR/report.md"
 
 if [[ "$OVERALL_CLEAN" = true ]]; then
 	echo
-	echo "All four suites completed with no unexpected results."
+	echo "All six suites completed with no unexpected results."
 	exit 0
 else
 	echo

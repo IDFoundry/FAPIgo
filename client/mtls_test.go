@@ -290,6 +290,138 @@ func TestBeginBackchannelAuthenticationAndPollMTLSSendNoDPoPHeader(t *testing.T)
 	}
 }
 
+// fakeCIBAMTLSAS is fakeCIBAAS's (backchannel_test.go) minimal
+// mTLS-bound counterpart — a deliberately separate, small fixture for
+// the same reason TestBeginBackchannelAuthenticationAndPollMTLSSendNoDPoPHeader's
+// own inline one is: fakeCIBAAS's handleToken hard-asserts a DPoP
+// header is present, which an mTLS-bound client never sends, so it
+// can't be reused unchanged. Only what the two negative poll tests
+// below need: a queued /token response (mirroring cibaTokenResponse)
+// and a fixed, always-succeeding /backchannel-authenticate response —
+// neither test exercises the begin step's own failure modes.
+type fakeCIBAMTLSAS struct {
+	t              *testing.T
+	tokenResponses []cibaTokenResponse
+}
+
+func (a *fakeCIBAMTLSAS) handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/backchannel-authenticate", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"auth_req_id": "test-auth-req-id",
+			"expires_in":  120,
+			"interval":    5,
+		})
+	})
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		if len(a.tokenResponses) == 0 {
+			a.t.Fatalf("token: no canned response queued")
+		}
+		resp := a.tokenResponses[0]
+		a.tokenResponses = a.tokenResponses[1:]
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(resp.status)
+		_ = json.NewEncoder(w).Encode(resp.body)
+	})
+	return mux
+}
+
+// newTestClientWithCIBAMTLS mirrors newTestClientWithCIBA
+// (backchannel_test.go) but against fakeCIBAMTLSAS, with
+// SenderConstrainMTLS instead of the default DPoP.
+func newTestClientWithCIBAMTLS(t *testing.T) (*client.Client, *fakeCIBAMTLSAS) {
+	t.Helper()
+	as := &fakeCIBAMTLSAS{t: t}
+	ts := httptest.NewServer(as.handler())
+	t.Cleanup(ts.Close)
+
+	cfg := validConfig(t)
+	cfg.SenderConstrain = storage.SenderConstrainMTLS
+	cfg.Algorithms.DPoP = 0
+	bcURL, err := fapi.ParseEndpointURL(ts.URL+"/backchannel-authenticate", fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseEndpointURL(backchannel-authenticate): %v", err)
+	}
+	tokenURL, err := fapi.ParseEndpointURL(ts.URL+"/token", fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseEndpointURL(token): %v", err)
+	}
+	cfg.Endpoints.Token = tokenURL
+	cfg.Endpoints.BackchannelAuthentication = bcURL
+	cfg.Algorithms.BackchannelAuthenticationRequest = fapi.ES256
+	cfg.Limits.BackchannelAuthenticationRequestLifetime = time.Minute
+
+	deps := validDependencies(t)
+	deps.HTTP = ts.Client()
+	deps.Keys = newFakeKeyManager(t, keys.ClientAuthentication, keys.BackchannelAuthenticationRequestSigning)
+
+	c, err := client.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	return c, as
+}
+
+func beginTestBackchannelSessionMTLS(t *testing.T, c *client.Client) client.BackchannelAuthenticationSession {
+	t.Helper()
+	session, err := c.BeginBackchannelAuthentication(context.Background(), client.BeginBackchannelAuthenticationRequest{
+		Scope: []string{"openid", "accounts"}, LoginHint: "user@example.com",
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+	return session
+}
+
+// TestPollBackchannelAuthenticationDeniedMTLS is
+// TestPollBackchannelAuthenticationDenied's (backchannel_test.go)
+// SenderConstrainMTLS counterpart — closing the gap where the only
+// mTLS CIBA client-side coverage was a single happy-path test, with no
+// negative case re-exercised under mTLS at all.
+func TestPollBackchannelAuthenticationDeniedMTLS(t *testing.T) {
+	c, as := newTestClientWithCIBAMTLS(t)
+	session := beginTestBackchannelSessionMTLS(t, c)
+
+	as.tokenResponses = []cibaTokenResponse{{
+		status: http.StatusBadRequest,
+		body:   map[string]any{"error": "access_denied", "error_description": "the end user denied the request"},
+	}}
+
+	result, err := c.PollBackchannelAuthentication(context.Background(), session)
+	if err != nil {
+		t.Fatalf("PollBackchannelAuthentication: %v", err)
+	}
+	denied, ok := result.(client.BackchannelAuthenticationDenied)
+	if !ok {
+		t.Fatalf("result type = %T, want client.BackchannelAuthenticationDenied", result)
+	}
+	if denied.Code != "access_denied" {
+		t.Errorf("Code = %q, want %q", denied.Code, "access_denied")
+	}
+}
+
+// TestPollBackchannelAuthenticationExpiredMTLS is
+// TestPollBackchannelAuthenticationExpired's (backchannel_test.go)
+// SenderConstrainMTLS counterpart.
+func TestPollBackchannelAuthenticationExpiredMTLS(t *testing.T) {
+	c, as := newTestClientWithCIBAMTLS(t)
+	session := beginTestBackchannelSessionMTLS(t, c)
+
+	as.tokenResponses = []cibaTokenResponse{{
+		status: http.StatusBadRequest,
+		body:   map[string]any{"error": "expired_token"},
+	}}
+
+	result, err := c.PollBackchannelAuthentication(context.Background(), session)
+	if err != nil {
+		t.Fatalf("PollBackchannelAuthentication: %v", err)
+	}
+	if _, ok := result.(client.BackchannelAuthenticationExpired); !ok {
+		t.Fatalf("result type = %T, want client.BackchannelAuthenticationExpired", result)
+	}
+}
+
 // TestProtectedResourceDoMTLSSendsBearerNoDPoPProof mirrors
 // TestProtectedResourceDoAttachesAuthorizationAndDPoPProof
 // (resource_test.go) for SenderConstrainMTLS: "Authorization: Bearer

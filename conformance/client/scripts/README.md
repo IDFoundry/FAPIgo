@@ -208,35 +208,81 @@ client certificate (`mtls.go`'s `selfSignedClientCert`) instead of a
 DPoP proof, and redirects to `discovered.MTLSEndpointAliases` for the
 token/backchannel calls once discovery advertises them.
 
-**Confirmed live: the token-endpoint MTLS wall is fully resolved —
-never hit again in a full run.** Every module that used to fail with
-"Token endpoint must be called over an mTLS secured connection" now
-genuinely reaches token exchange and performs this client's own real
-ID-token validation duties: `fapi-ciba-id1-client-invalid-iss-test`
-correctly rejects a bad `iss`, `-invalid-aud-test`/`-invalid-secondary-aud-test`
-a bad `aud`, `-invalid-signature-test` a bad signature,
+**Confirmed live: 22/22 PASS.** The token-endpoint MTLS wall is fully
+resolved — never hit again in a full run — and every negative ID-token
+module now gets full suite-graded credit, not just a correct driver-side
+detection: `fapi-ciba-id1-client-invalid-iss-test` correctly rejects a
+bad `iss`, `-invalid-aud-test`/`-invalid-secondary-aud-test` a bad
+`aud`, `-invalid-signature-test` a bad signature,
 `-invalid-null-alg-test`/`-invalid-alternate-alg-test` a malformed or
 disallowed `alg`, `-invalid-expired-exp-test` an expired token,
+`-invalid-iat-is-week-in-past-test` a stale `iat`,
 `-invalid-missing-aud-test`/`-invalid-missing-exp-test`/`-invalid-missing-iss-test`
 a missing required claim — each one this client's own `ValidateIDToken`
-catching exactly the fault the module name says, the same way it
-already does against every other AS this module talks to.
+catching exactly the fault the module name says.
 
-The suite's own per-module grade for most of these is still FAIL, not
-PASS — full credit for a negative ID-token test in this plan appears to
-require more of the flow than this driver currently completes (e.g.
-still calling the resource endpoint and reporting the client-side
-rejection there), which wasn't chased further this pass. The 3
-pre-token-exchange PASSes are unchanged. One run also caught a stale
-"alias conflict" interruption on a module whose token exchange
-succeeded slower than this driver's own `cibaMaxPolls` budget, purely a
-same-process back-to-back-runs artifact of this driver (see other
-gotchas already documented for this suite elsewhere in this repo), not
-a protocol defect.
+Getting here took four fixes, three in this driver and one genuine
+`client`/`internal/token` gap — found by re-running this plan live and
+tracing each non-PASS module's own suite-side log, not by inspecting
+this driver's code in isolation:
 
-Not part of any automated pass/fail gate given the still-majority-FAILED
-result either way — this section documents what a genuine attempt found,
-the same rigor whether or not it fully passes.
+- **This driver discarded the issued tokens outright
+  (`case client.BackchannelAuthenticationApproved: _ = r.Tokens`) and
+  never called the plan's own "accounts" resource endpoint.** Every
+  module that reaches a successful token exchange — the happy path,
+  `-valid-aud-as-array-test`, `-no-scope-in-token-endpoint-response-test`,
+  `-respects-interval-test`, `-slow-down-test` — needs that call before
+  the suite will ever mark it FINISHED (the same
+  `accounts_endpoint`-as-an-"exported-value" mechanism `runModule`
+  already uses for the baseline/message-signing profiles — see that
+  gotcha above — CIBA just never had it wired in). Without it these
+  modules sat in `WAITING` forever, confirmed live: still waiting after
+  a 45-second driver timeout with a fully successful token exchange
+  already logged. New `callAccountsEndpoint` (`ciba.go`) fetches the
+  exported `accounts_endpoint` value and calls it — as a plain Bearer
+  credential under `-mtls` (new `callProtectedResourceBearer`,
+  `resource.go`), or DPoP-proofed otherwise, reusing the existing
+  `dpopResourceClient`.
+- **The plan config never registered this driver's own mTLS client
+  certificate.** `EnsureClientCertificateMatches`
+  (`net.openid.conformance.condition.as`) compares the certificate
+  actually presented on the connection against a `client.certificate`
+  value read straight out of the plan's own static config
+  (`GetStaticClientConfiguration`/`configureClient` — confirmed by
+  disassembling both, not assumed) — there is no other registration
+  mechanism. Every `-mtls` request failed this check with "Couldn't
+  find registered client certificate" until `runCIBA` PEM-encoded
+  `selfSignedClientCert`'s own generated certificate and added it as
+  `client.certificate` in the plan config JSON.
+- **`clientID` was a fixed constant, unlike the already-randomized
+  `alias`.** Under `-mtls`, per-module certificate registration is
+  keyed by `client_id`, not `alias` — a fixed value let an orphaned
+  module instance from an earlier, killed-mid-run driver process
+  corrupt a fresh run's own registration under the same `client_id`,
+  surfacing as the same `EnsureClientCertificateMatches` failures above
+  even with the certificate now correctly registered. Both `client_id`
+  and `alias` now share one random per-run suffix (`ciba.go` and, for
+  the same reason even though not proven to bite it, `main.go`'s own
+  browser-flow driver).
+- **A genuine `client` gap, not a driver issue:**
+  `internal/token.IDToken.Validate` never checked `iat` staleness at
+  all — OIDC Core §3.1.3.7 step 10 explicitly permits an RP to reject a
+  token whose `iat` is implausibly old. New `ErrIssuedAtTooOld`, bounded
+  by the same `MaxLifetime` that already governs how far `exp` may sit
+  in the future, applied symmetrically to how far `iat` may sit in the
+  past — mirroring `internal/requestobject.VerifyPolicy`'s own
+  nbf-vs-exp symmetry under one shared window.
+- One run also caught a stale "alias conflict" interruption on a module
+  whose token exchange succeeded slower than this driver's own
+  `cibaMaxPolls` budget — a same-process back-to-back-runs artifact
+  fully explained (and resolved) by the `awaitVerdict` timeout fix
+  above, not a protocol defect of its own.
+
+Now wired into `../scripts/run-all.sh` as its own "RP ciba-mtls" leg
+(`cmd/conformance-client -profile=ciba -mtls`), the same clean-pass gate
+the AS side gets — `run_rp_plan`'s own PASSED-count check requires
+every module PASSED, no partial credit, so this only stayed wired in
+because the result is a genuine 22/22.
 
 Two gotchas specific to this plan, beyond the ones listed above for the
 baseline/message-signing profiles:

@@ -1,17 +1,19 @@
 // Command setup-config bootstraps everything a fresh clone needs to run
 // the AS-side conformance suites (conformance/scripts/run-all.sh's "AS
-// baseline" and "AS message-signing" legs) that isn't already committed
-// to this repo.
+// baseline", "AS message-signing", and "AS ciba-mtls" legs) that isn't
+// already committed to this repo.
 //
 // Two files per profile can't be committed at all:
-// conformance/server/oidf-config/{baseline,message-signing}-plan.json
+// conformance/server/oidf-config/{baseline,message-signing,ciba,ciba-mtls}-plan.json
 // (the OIDF conformance suite's own plan config) are gitignored because
 // they carry the test client's *private* JWKS keys — see this repo's
 // conformance/server/oidf-config/README.md and .gitignore's own
 // comment. This tool generates a fresh ES256 keypair per client per
-// profile, writes the private half into the (gitignored) plan config
-// alongside everything else that config needs — alias, discovery URL,
-// resource block, and the browser/override automation this repo's own
+// profile (RSA/PS256 for ciba-mtls's client1, plus a throwaway
+// self-signed mTLS certificate per client — see setupCIBAMTLS), writes
+// the private half into the (gitignored) plan config alongside
+// everything else that config needs — alias, discovery URL, resource
+// block, and the browser/override automation this repo's own
 // conformance work has already worked out and documented — and writes
 // the matching public half into this repo's own (committed)
 // conformance-as config file for that profile, so the two stay in sync.
@@ -38,13 +40,17 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"log"
 	"math/big"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // profile is everything that differs between the baseline and
@@ -119,6 +125,10 @@ func main() {
 
 	if err := setupCIBA(dir); err != nil {
 		log.Fatalf("ciba: %v", err)
+	}
+
+	if err := setupCIBAMTLS(dir); err != nil {
+		log.Fatalf("ciba-mtls: %v", err)
 	}
 }
 
@@ -600,5 +610,219 @@ func setupCIBA(dir string) error {
 		return err
 	}
 	fmt.Printf("ciba: generated fresh client keys, wrote %s and updated %s\n", planPath, configPath)
+	return nil
+}
+
+// mtlsBlock is one PEM cert+key pair — the suite plan config's own
+// "mtls"/"mtls2" top-level shape (net.openid.conformance.fapiciba's own
+// ExtractMTLSCertificatesFromConfiguration/ExtractMTLSCertificates2FromConfiguration,
+// confirmed by disassembly during this profile's original live
+// investigation — one block per client, not documented in any bundled
+// sample config) for the suite's own outbound TLS client to present.
+type mtlsBlock struct {
+	Cert string `json:"cert"`
+	Key  string `json:"key"`
+}
+
+// cibaMTLSClient/cibaMTLSClient2 mirror cibaClient/cibaClient2 exactly,
+// minus DPoPSigningAlg — an mTLS-sender-constrained client never builds
+// a DPoP proof at all, so this plan carries no such field for either
+// client.
+type cibaMTLSClient struct {
+	ClientID  string `json:"client_id"`
+	Scope     string `json:"scope"`
+	JWKS      jwks   `json:"jwks"`
+	HintType  string `json:"hint_type"`
+	HintValue string `json:"hint_value"`
+}
+
+type cibaMTLSClient2 struct {
+	ClientID string `json:"client_id"`
+	Scope    string `json:"scope"`
+	JWKS     jwks   `json:"jwks"`
+	ACRValue string `json:"acr_value"`
+}
+
+type cibaMTLSPlan struct {
+	Alias  string `json:"alias"`
+	Server struct {
+		DiscoveryURL string `json:"discoveryUrl"`
+	} `json:"server"`
+	MTLS     mtlsBlock       `json:"mtls"`
+	MTLS2    mtlsBlock       `json:"mtls2"`
+	Client   cibaMTLSClient  `json:"client"`
+	Client2  cibaMTLSClient2 `json:"client2"`
+	Resource struct {
+		ResourceURL string `json:"resourceUrl"`
+	} `json:"resource"`
+	AutomatedCibaApprovalURL string `json:"automated_ciba_approval_url"`
+}
+
+// generateMTLSCertKeyPEM generates a throwaway, self-signed ECDSA P-256
+// client certificate — the suite-side counterpart of
+// cmd/conformance-client/mtls.go's own selfSignedClientCert, except
+// this one needs a long validity window (a plan config committed to a
+// developer's own local setup and reused across many runs, unlike that
+// driver's fresh-per-process throwaway) rather than a one-hour one.
+func generateMTLSCertKeyPEM(commonName string) (certPEM, keyPEM string, err error) {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return "", "", fmt.Errorf("generate key: %w", err)
+	}
+	serial, err := rand.Int(rand.Reader, big.NewInt(1<<62))
+	if err != nil {
+		return "", "", fmt.Errorf("generate serial: %w", err)
+	}
+	template := &x509.Certificate{
+		SerialNumber: serial,
+		Subject:      pkix.Name{CommonName: commonName},
+		NotBefore:    time.Now().Add(-time.Minute),
+		NotAfter:     time.Now().AddDate(10, 0, 0),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &priv.PublicKey, priv)
+	if err != nil {
+		return "", "", fmt.Errorf("create certificate: %w", err)
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(priv)
+	if err != nil {
+		return "", "", fmt.Errorf("marshal private key: %w", err)
+	}
+	certPEM = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+	keyPEM = string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}))
+	return certPEM, keyPEM, nil
+}
+
+// patchCIBAMTLSConfig replaces clients[0].jwks and clients[1].jwks in
+// the committed ciba-mtls.config.json with pubRSA/pubEC, leaving every
+// other field — including sender_constrain, client_assertion_algorithm,
+// redirect_uris — exactly as it already was, the same
+// preserve-what-this-tool-doesn't-own approach
+// patchConformanceASConfig uses. Simpler than that function: this
+// profile's two clients need no third PS256-only client of their own
+// (client1 is already RSA/PS256 — see oidf-config/README.md's own
+// account of why that alone was enough to un-SKIP the RS256 modules
+// here), and always has exactly 2 clients, never 3.
+func patchCIBAMTLSConfig(path string, pubRSA, pubEC jwks) (clientIDs [2]string, err error) {
+	data, err := os.ReadFile(path) // #nosec G304 -- path is this dev-only script's own fixed CLI argument, not untrusted input
+	if err != nil {
+		return clientIDs, err
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(data, &top); err != nil {
+		return clientIDs, fmt.Errorf("parse: %w", err)
+	}
+	var clients []map[string]json.RawMessage
+	if err := json.Unmarshal(top["clients"], &clients); err != nil {
+		return clientIDs, fmt.Errorf("parse clients: %w", err)
+	}
+	if len(clients) != 2 {
+		return clientIDs, fmt.Errorf("expected 2 clients, found %d", len(clients))
+	}
+
+	newJWKS := [2]jwks{pubRSA, pubEC}
+	for i := range 2 {
+		var id string
+		if err := json.Unmarshal(clients[i]["id"], &id); err != nil {
+			return clientIDs, fmt.Errorf("parse clients[%d].id: %w", i, err)
+		}
+		clientIDs[i] = id
+
+		encoded, err := json.Marshal(newJWKS[i])
+		if err != nil {
+			return clientIDs, err
+		}
+		clients[i]["jwks"] = encoded
+	}
+
+	encodedClients, err := marshalIndentNoEscape(clients)
+	if err != nil {
+		return clientIDs, err
+	}
+	top["clients"] = encodedClients
+
+	out, err := marshalIndentNoEscape(top)
+	if err != nil {
+		return clientIDs, err
+	}
+	out = append(out, '\n')
+	return clientIDs, os.WriteFile(path, out, 0o644) // #nosec G306 -- this AS's own config.json carries only public keys (oidf-config/README.md), meant to be world-readable
+}
+
+// setupCIBAMTLS is setupCIBA's mTLS-sender-constrained counterpart —
+// factored out separately rather than folded into setupCIBA itself,
+// since the two profiles' plan shapes and client key types genuinely
+// differ (RSA/PS256 client1 + EC/ES256 client2 here, vs ES256-only
+// there; mtls/mtls2 cert blocks here, dpop_signing_alg there), not just
+// a parameter away from each other. Idempotent the same way: leaves an
+// existing ciba-mtls-plan.json alone entirely.
+func setupCIBAMTLS(dir string) error {
+	planPath := filepath.Join(dir, "ciba-mtls-plan.json")
+	if _, err := os.Stat(planPath); err == nil {
+		fmt.Printf("ciba-mtls: %s already exists, leaving this profile alone\n", planPath)
+		return nil
+	}
+
+	const alias = "gofapi-ciba-mtls"
+	const issuerHost = "conformance-as-ciba-mtls"
+
+	// client1 is registered PS256/RSA directly (not ES256 plus a
+	// separate third client, unlike baseline/message-signing/ciba) —
+	// the suite's own ...-signature-algorithm-is-RS256-fails modules
+	// only need the plan's first client already PS256-registered to
+	// stop self-skipping; see oidf-config/README.md's own account of
+	// switching this client from ES256 for exactly that reason.
+	priv1, pub1, err := generatePS256Key(conformanceKeyLabelPrefix + "ciba-mtls-client1-rsa-key1")
+	if err != nil {
+		return fmt.Errorf("generate client1 key: %w", err)
+	}
+	priv2, pub2, err := generateKey("ciba-mtls-client2")
+	if err != nil {
+		return fmt.Errorf("generate client2 key: %w", err)
+	}
+	mtlsCert, mtlsKey, err := generateMTLSCertKeyPEM(alias + "-suite-client")
+	if err != nil {
+		return fmt.Errorf("generate client1 mtls certificate: %w", err)
+	}
+	mtls2Cert, mtls2Key, err := generateMTLSCertKeyPEM(alias + "-suite-client2")
+	if err != nil {
+		return fmt.Errorf("generate client2 mtls certificate: %w", err)
+	}
+
+	configPath := filepath.Join(dir, "ciba-mtls.config.json")
+	clientIDs, err := patchCIBAMTLSConfig(configPath, pub1, pub2)
+	if err != nil {
+		return fmt.Errorf("update %s: %w", configPath, err)
+	}
+
+	cfg := cibaMTLSPlan{Alias: alias}
+	cfg.Server.DiscoveryURL = issuerURL(issuerHost, "/.well-known/openid-configuration")
+	cfg.MTLS = mtlsBlock{Cert: mtlsCert, Key: mtlsKey}
+	cfg.MTLS2 = mtlsBlock{Cert: mtls2Cert, Key: mtls2Key}
+	cfg.Client = cibaMTLSClient{
+		ClientID: clientIDs[0], Scope: fullScope, JWKS: priv1,
+		HintType: "login_hint", HintValue: "conformance-test-user",
+	}
+	cfg.Client2 = cibaMTLSClient2{
+		ClientID: clientIDs[1], Scope: fullScope, JWKS: priv2,
+		ACRValue: "urn:mace:incommon:iap:silver",
+	}
+	// Port 8444, not 8443: RFC 8705 sender-constraining means this
+	// resource call must go over the mTLS listener itself — the plain
+	// listener has no way to bind the access token to this connection's
+	// certificate at all.
+	cfg.Resource.ResourceURL = "https://" + issuerHost + ":8444/userinfo"
+	cfg.AutomatedCibaApprovalURL = issuerURL(issuerHost, "/backchannel-approve") + "?auth_req_id={auth_req_id}&action={action}"
+
+	out, err := marshalIndentNoEscape(cfg)
+	if err != nil {
+		return err
+	}
+	out = append(out, '\n')
+	if err := os.WriteFile(planPath, out, 0o600); err != nil { // #nosec G306 -- mirrors writePlanConfig's own owner-only rationale (embeds priv1/priv2/mtlsKey/mtls2Key)
+		return err
+	}
+	fmt.Printf("ciba-mtls: generated fresh client keys and certificates, wrote %s and updated %s\n", planPath, configPath)
 	return nil
 }

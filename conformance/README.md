@@ -17,11 +17,11 @@ behaviour and negative-test expectations differ. See
   run scripts.
 - `server/` — OpenID Foundation FAPI 2.0 AS conformance configuration and
   run scripts.
-- `scripts/run-all.sh` — runs all four suites this repo has driver
-  support for (AS baseline, AS message-signing, RP baseline, RP
-  message-signing) against a locally running suite and prints one
-  combined summary. See the script's own header comment for
-  prerequisites and env vars.
+- `scripts/run-all.sh` — runs all six suites this repo has driver
+  support for (AS baseline, AS message-signing, AS ciba-mtls, RP
+  baseline, RP message-signing, RP ciba-mtls) against a locally running
+  suite and prints one combined summary. See the script's own header
+  comment for prerequisites and env vars.
 - `resource/` — resource-server verification test vectors (DPoP proof
   validation, access-token binding checks) used outside the OIDF suite.
   The suite doesn't run its own dedicated resource-server conformance
@@ -63,9 +63,9 @@ branch instead — reject a binding message the AS can't safely/faithfully
 display with `invalid_binding_message`, and the display-verification
 check is never reached. Full breakdown, live findings and reproduction
 steps in
-[`server/oidf-config/README.md`](server/oidf-config/README.md#ciba-manual-only--not-part-of-automated-conformance).
-Not yet wired into `scripts/run-all.sh`, though at 34/34 it's now a
-real, worthwhile candidate.
+[`server/oidf-config/README.md`](server/oidf-config/README.md#ciba-mtlsconfigjson--the-genuine-mtls-re-attempt-automated).
+Wired into `scripts/run-all.sh` as its own "AS ciba-mtls" leg now that
+it's a clean 34/34.
 
 `client`'s own CIBA support
 (`BeginBackchannelAuthentication`/`PollBackchannelAuthentication`) was

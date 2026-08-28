@@ -172,8 +172,14 @@ func run(apiBase string, profile driverProfile) error {
 		jwks = append(jwks, reqObjJWK.WithKeyID(reqObjPub.KeyID))
 	}
 
-	alias := "gofapi-rp-driver-" + randomSuffix()
-	clientID := "gofapi-rp-driver-client"
+	suffix := randomSuffix()
+	alias := "gofapi-rp-driver-" + suffix
+	// clientID varies per run exactly like alias does — see ciba.go's
+	// own runCIBA for why a fixed client_id risks cross-run
+	// certificate-registration collisions under -mtls; not proven to
+	// bite this non-mTLS path the same way, but there's no reason for
+	// it to stay fixed here either.
+	clientID := "gofapi-rp-driver-client-" + suffix
 	redirectURI := apiBase + "test/a/" + alias + "/callback"
 
 	planConfig, err := json.Marshal(map[string]any{
@@ -400,8 +406,27 @@ func runModule(ctx context.Context, d moduleDriver, testName string) string {
 // own driverErr (if any) is included for context but never overrides
 // it, since for most of this plan's modules a driverErr midway through
 // is exactly what the suite wants to see happen.
+//
+// The timeout here matters beyond just this one module's own verdict:
+// every module in a plan shares one alias (see runCIBA), and this
+// driver moves on to create the *next* module instance as soon as this
+// call returns — whether or not the suite itself has actually finished
+// tearing down the current one. Giving up too early here doesn't just
+// misreport this module's own result; it fires the next module's
+// createModuleInstance while the suite may still be finalizing the
+// current one's alias registration (confirmed live under -mtls,
+// where per-module client-certificate registration/cleanup can take
+// longer than a short window allows for): the next module then fails
+// its own EnsureClientCertificateMatches checks against a
+// not-yet-settled registration, gets its alias reclaimed out from
+// under it, and every module after that inherits the same fate —
+// one slow module cascades into the entire rest of the run reporting
+// bogus results, not just its own. 45s comfortably covers the
+// suite's own post-completion grace period (AbstractFAPI2SPFinalClientTest's
+// waitTimeoutSeconds, default 5s) plus real round-trip latency to an
+// external suite instance and this driver's own polling cadence.
 func awaitVerdict(rawHTTP *http.Client, apiBase, moduleID, driverErr string) string {
-	status, result, err := waitUntilFinished(rawHTTP, apiBase, moduleID, 10*time.Second)
+	status, result, err := waitUntilFinished(rawHTTP, apiBase, moduleID, 45*time.Second)
 	verdict := result
 	if err != nil {
 		verdict = fmt.Sprintf("status=%s (did not reach a final result: %v)", status, err)

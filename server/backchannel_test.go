@@ -10,7 +10,9 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/clientassertion"
+	"github.com/idfoundry/fapigo/internal/mtls"
 	"github.com/idfoundry/fapigo/internal/requestobject"
+	"github.com/idfoundry/fapigo/internal/token"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
@@ -119,6 +121,97 @@ func newHarnessWithBackchannel(t *testing.T) (harness, *memstore.BackchannelAuth
 		t.Fatalf("server.New: %v", err)
 	}
 	return harness{server: srv, key: key, serverKey: serverKey, now: now}, backchannel
+}
+
+// newHarnessWithBackchannelMTLS mirrors newHarnessWithBackchannel
+// exactly, except testClientID is registered with SenderConstrain:
+// storage.SenderConstrainMTLS instead of the default DPoP. Client
+// *authentication* (client_assertion, via h.clientAssertion) is
+// unaffected either way — SenderConstrain only governs how the
+// eventual access token is bound, not how the client authenticates —
+// so beginBackchannel is reused unchanged; only
+// ExchangeBackchannelAuthentication needs a peer certificate instead
+// of a DPoP proof, mirroring newHarnessWithSenderConstrainMTLS's own
+// PAR/token-flow precedent (mtls_test.go).
+func newHarnessWithBackchannelMTLS(t *testing.T) harness {
+	t.Helper()
+	now := time.Now()
+	key := generateKey(t)
+	serverKey := generateKey(t)
+
+	client, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
+		ID:                       testClientID,
+		RedirectURIs:             []fapi.RegisteredRedirectURI{testRedirectURI},
+		ClientAssertionAlgorithm: fapi.ES256,
+		SenderConstrain:          storage.SenderConstrainMTLS,
+		AllowedScopes:            []string{"openid", "accounts", "offline_access"},
+		BackchannelAuthenticationRequestAlgorithm: fapi.ES256,
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+	issuer, err := fapi.ParseIssuerURL(testIssuer)
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+	backchannelEndpoint, err := fapi.ParseEndpointURL(testBackchannelAuthenticationEndpoint)
+	if err != nil {
+		t.Fatalf("ParseEndpointURL: %v", err)
+	}
+
+	endpoints := testEndpoints(t)
+	endpoints.BackchannelAuthentication = backchannelEndpoint
+
+	cfg := server.Config{
+		Issuer:    issuer,
+		Endpoints: endpoints,
+		Profile:   server.ProfileFAPISecurity,
+		Algorithms: server.AlgorithmPolicy{
+			ClientAssertion:                  server.AlgorithmSet{fapi.ES256},
+			RequestObject:                    server.AlgorithmSet{fapi.ES256},
+			JARM:                             fapi.ES256,
+			IDToken:                          fapi.ES256,
+			BackchannelAuthenticationRequest: server.AlgorithmSet{fapi.ES256},
+		},
+		Limits: server.Limits{
+			PushedRequestLifetime:                       90 * time.Second,
+			MaxClientAssertionLifetime:                  time.Minute,
+			MaxRequestObjectLifetime:                    time.Minute,
+			InteractionLifetime:                         5 * time.Minute,
+			AuthorizationCodeLifetime:                   time.Minute,
+			JARMResponseLifetime:                        time.Minute,
+			AccessTokenLifetime:                         5 * time.Minute,
+			IDTokenLifetime:                             5 * time.Minute,
+			RefreshTokenLifetime:                        5 * time.Minute,
+			MaxDPoPProofAge:                             time.Minute,
+			MaxClockSkew:                                5 * time.Second,
+			BackchannelAuthenticationRequestLifetime:    2 * time.Minute,
+			MaxBackchannelAuthenticationRequestLifetime: time.Minute,
+			BackchannelAuthenticationPollInterval:       time.Millisecond,
+		},
+		Assurance: server.AssuranceDevelopment,
+	}
+	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
+	deps := server.Dependencies{
+		Clients:      &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
+		Transactions: &fakeTransactionStore{},
+		Grants:       &fakeGrantStore{},
+		Replay:       &fakeReplayStore{},
+		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
+			testClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
+		}},
+		Keys:         serverKeyManager,
+		AccessTokens: server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:   server.NoRevocation{},
+		Clock:        fixedClock{now: now},
+		Random:       rand.Reader,
+		Backchannel:  memstore.NewBackchannelAuthenticationStore(),
+	}
+	srv, err := server.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+	return harness{server: srv, key: key, serverKey: serverKey, now: now}
 }
 
 // backchannelRequestObject builds a signed CIBA backchannel
@@ -691,6 +784,115 @@ func TestCIBAFullFlowDenied(t *testing.T) {
 	}
 	if code := serverErrorCode(t, err); code != server.ErrorAccessDenied {
 		t.Fatalf("error code = %q, want %q", code, server.ErrorAccessDenied)
+	}
+}
+
+// TestCIBAFullFlowApprovedWithMTLSBinding is TestCIBAFullFlowApproved's
+// SenderConstrainMTLS counterpart — the AS-side gap this test was
+// specifically added to close: nothing previously exercised a CIBA
+// token issued under mTLS sender-constraining at all (confirmed absent
+// by grepping every server/*_test.go for SenderConstrainMTLS alongside
+// Backchannel before adding this). Client *authentication* still uses
+// h.clientAssertion(t) unchanged — only the token-exchange step's
+// binding mechanism differs (PeerCertificate instead of DPoPProof).
+func TestCIBAFullFlowApprovedWithMTLSBinding(t *testing.T) {
+	h := newHarnessWithBackchannelMTLS(t)
+	required := beginBackchannel(t, h, standardBackchannelParams(t))
+	cert := selfSignedTestClientCert(t)
+
+	subject, err := server.NewSubjectID("user-1")
+	if err != nil {
+		t.Fatalf("NewSubjectID: %v", err)
+	}
+	authenticated, err := server.NewAuthenticatedSubject(subject)
+	if err != nil {
+		t.Fatalf("NewAuthenticatedSubject: %v", err)
+	}
+	authCtx, err := server.NewAuthenticationContext(h.now, "acr-1", []string{"pwd"})
+	if err != nil {
+		t.Fatalf("NewAuthenticationContext: %v", err)
+	}
+	if err := h.server.CompleteBackchannelAuthentication(context.Background(), server.CompleteBackchannelAuthenticationRequest{
+		Handle: required.Handle,
+		Result: server.Authorize(authenticated, authCtx, server.GrantedAuthorization{Scope: []string{"openid", "accounts"}}),
+	}); err != nil {
+		t.Fatalf("CompleteBackchannelAuthentication: %v", err)
+	}
+
+	result, err := h.server.ExchangeBackchannelAuthentication(context.Background(), server.BackchannelTokenExchangeRequest{
+		HTTP: server.FormRequest{Parameters: []server.FormParameter{
+			formParam("client_assertion", h.clientAssertion(t)),
+			formParam("client_assertion_type", clientassertion.AssertionType),
+			formParam("grant_type", server.CIBAGrantType),
+			formParam("auth_req_id", required.AuthReqID.String()),
+		}},
+		PeerCertificate: cert,
+	})
+	if err != nil {
+		t.Fatalf("ExchangeBackchannelAuthentication: %v", err)
+	}
+	if result.TokenType != "Bearer" {
+		t.Fatalf("TokenType = %q, want %q (RFC 8705 §3.4)", result.TokenType, "Bearer")
+	}
+
+	parsedAT, err := token.ParseAccessToken(result.AccessToken.Reveal())
+	if err != nil {
+		t.Fatalf("ParseAccessToken: %v", err)
+	}
+	validatedAT, err := parsedAT.Validate(&h.serverKey.PublicKey, token.AccessTokenValidatePolicy{
+		ExpectedIssuer: testIssuer, ExpectedAudience: testIssuer,
+		Algorithm: fapi.ES256, Now: h.now, MaxLifetime: 10 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("Validate access token: %v", err)
+	}
+	if validatedAT.X5TS256 != mtls.Thumbprint(cert) {
+		t.Fatalf("access token X5TS256 = %q, want %q", validatedAT.X5TS256, mtls.Thumbprint(cert))
+	}
+	if validatedAT.JKT != "" {
+		t.Fatalf("access token JKT = %q, want empty (mTLS-bound, not DPoP-bound)", validatedAT.JKT)
+	}
+}
+
+// TestExchangeBackchannelAuthenticationMTLSRequiresPeerCertificate
+// covers the negative counterpart: an mTLS-sender-constrained client
+// polling the token endpoint with no client certificate presented must
+// be rejected, mirroring TestExchangeAuthorizationCodeMTLSRequiresPeerCertificate
+// (mtls_test.go) for the authorization-code flow.
+func TestExchangeBackchannelAuthenticationMTLSRequiresPeerCertificate(t *testing.T) {
+	h := newHarnessWithBackchannelMTLS(t)
+	required := beginBackchannel(t, h, standardBackchannelParams(t))
+
+	subject, err := server.NewSubjectID("user-1")
+	if err != nil {
+		t.Fatalf("NewSubjectID: %v", err)
+	}
+	authenticated, err := server.NewAuthenticatedSubject(subject)
+	if err != nil {
+		t.Fatalf("NewAuthenticatedSubject: %v", err)
+	}
+	authCtx, err := server.NewAuthenticationContext(h.now, "acr-1", []string{"pwd"})
+	if err != nil {
+		t.Fatalf("NewAuthenticationContext: %v", err)
+	}
+	if err := h.server.CompleteBackchannelAuthentication(context.Background(), server.CompleteBackchannelAuthenticationRequest{
+		Handle: required.Handle,
+		Result: server.Authorize(authenticated, authCtx, server.GrantedAuthorization{Scope: []string{"openid", "accounts"}}),
+	}); err != nil {
+		t.Fatalf("CompleteBackchannelAuthentication: %v", err)
+	}
+
+	_, err = h.server.ExchangeBackchannelAuthentication(context.Background(), server.BackchannelTokenExchangeRequest{
+		HTTP: server.FormRequest{Parameters: []server.FormParameter{
+			formParam("client_assertion", h.clientAssertion(t)),
+			formParam("client_assertion_type", clientassertion.AssertionType),
+			formParam("grant_type", server.CIBAGrantType),
+			formParam("auth_req_id", required.AuthReqID.String()),
+		}},
+		// PeerCertificate intentionally omitted.
+	})
+	if err == nil {
+		t.Fatalf("ExchangeBackchannelAuthentication(no peer certificate) = nil error, want error")
 	}
 }
 

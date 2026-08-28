@@ -274,10 +274,10 @@ type ValidatedIDToken struct {
 	ExpiresAt  time.Time
 
 	// IssuedAt is the token's "iat" — required to be present and
-	// well-formed for parsing to succeed at all, but not itself checked
-	// against any policy here (unlike ExpiresAt, which is bounded by
-	// MaxLifetime/MaxClockSkew). Exposed for a caller's own telemetry or
-	// cross-checks, not something this package enforces a bound on.
+	// well-formed for parsing to succeed at all, and bounded by
+	// MaxLifetime the same way ExpiresAt is (see Validate's own iat
+	// check). Exposed for a caller's own telemetry or cross-checks
+	// beyond that one bound.
 	IssuedAt time.Time
 }
 
@@ -344,6 +344,15 @@ func (t IDToken) Validate(pub crypto.PublicKey, policy IDTokenValidatePolicy) (V
 	}
 	if c.ExpiresAt.Sub(policy.Now) > policy.MaxLifetime {
 		return ValidatedIDToken{}, ErrLifetimeExceeded
+	}
+	// OIDC Core §3.1.3.7 step 10: iat "can be used to reject tokens that
+	// were issued too far away from the current time" — the same
+	// MaxLifetime bound already governing how far exp may sit in the
+	// future, applied symmetrically to how far iat may sit in the past,
+	// mirroring requestobject.VerifyPolicy's own nbf-vs-exp symmetry
+	// under one shared window.
+	if policy.Now.Sub(c.IssuedAt) > policy.MaxLifetime {
+		return ValidatedIDToken{}, ErrIssuedAtTooOld
 	}
 	if policy.ExpectedNonce != "" {
 		if subtle.ConstantTimeCompare([]byte(c.Nonce), []byte(policy.ExpectedNonce)) != 1 {

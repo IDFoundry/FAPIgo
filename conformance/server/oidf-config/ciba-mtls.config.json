@@ -9,7 +9,6 @@
       "backchannel_authentication_request_algorithm": "PS256",
       "client_assertion_algorithm": "PS256",
       "id": "gofapi-conformance-ciba-mtls-client-1",
-      "sender_constrain": "mtls",
       "jwks": {
         "keys": [
           {
@@ -17,7 +16,7 @@
             "alg": "PS256",
             "use": "sig",
             "kid": "gofapi-conformance-ciba-mtls-client1-rsa-key1",
-            "n": "3NQFMf6NPnlp-_mjOT-BN4jpWKEYc9Ux5bT8BVlRf4ELgWMaBZuRpTo3EfQ77AZ5CSJeM3xxvKH5v_mSsWXFLtor1FUN69zLIRzdXrA9CcxHDHD-NtpNAGMBH0KD57Vf3R4ehZagLmoH3aMWUi92amhiJcH_W1XCX1u1TIiurwp99ENHnGS3P7prf7xrc6mUX2PKpT8Re-9e0XhELADUvg1LhYZoNUkrv52aPhJ2cn5yvrxn-0j3W_CBZn4iiQf29IXcxfx1RM0ot0QpW6MkP81a72l6rI-3LL7uI08ACHDQqxSkW72_sdmzK4VRLwkQi18gr4K8Wu6bE0B09GN3MQ",
+            "n": "oq1lr05JV_pkTC8jLu2cpCQlYAOycJzjlyXbGDV_igH_nVVzZCy-MizwKot_HyylsOkO2iUILu0XQ24a7sJIqimeLh97Vdmk4C_2uCFpm0c1RuAgOuVeHilDaNBGxiJkY2aRS2cthgaSHZEvXNXYTJCySE-WejROi3dUDAUkMuMpPuJw8-JLqQk-P6Fq_GH-sn1WYrN7MDZ7-qgpKLk6qriJSmR97PAXwcW4MveVJRqE_qNc6AwYF1w6o1bSBh0JGO8hanTEPTs7nGYjEgan1ZSI5mZpWLgOoQV7LtFW2S-5iN8gKW3JRvyKjqB77IVSgH947bMivEVWkaH-WiZ0ow",
             "e": "AQAB"
           }
         ]
@@ -25,7 +24,8 @@
       "redirect_uris": [
         "https://localhost.emobix.co.uk:8443/test/a/gofapi-ciba-mtls/callback",
         "https://localhost.emobix.co.uk:8443/test/a/gofapi-ciba-mtls/callback?dummy1=lorem&dummy2=ipsum"
-      ]
+      ],
+      "sender_constrain": "mtls"
     },
     {
       "allowed_scopes": [
@@ -36,7 +36,6 @@
       "backchannel_authentication_request_algorithm": "ES256",
       "client_assertion_algorithm": "ES256",
       "id": "gofapi-conformance-ciba-mtls-client-2",
-      "sender_constrain": "mtls",
       "jwks": {
         "keys": [
           {
@@ -45,15 +44,16 @@
             "use": "sig",
             "kid": "gofapi-conformance-ciba-mtls-client2-key1",
             "crv": "P-256",
-            "x": "XaVoOe6pQnAnQFV56WD0R25spjyFtDpjzgZKd4bigIo",
-            "y": "sK4oM7985H9wc3KhWcSo6USMgvP9pTxgLPEO3NIiB1w"
+            "x": "HOFcxC4neNrlxMLW3ugG6XALlwHlKCjxQ5TlQBYuO48",
+            "y": "LbQx1H6WMeTEqaS5ds8d_fKtrYtvHgBmUsbD7nYjkBQ"
           }
         ]
       },
       "redirect_uris": [
         "https://localhost.emobix.co.uk:8443/test/a/gofapi-ciba-mtls/callback",
         "https://localhost.emobix.co.uk:8443/test/a/gofapi-ciba-mtls/callback?dummy1=lorem&dummy2=ipsum"
-      ]
+      ],
+      "sender_constrain": "mtls"
     }
   ],
   "default_subject": "conformance-test-user",

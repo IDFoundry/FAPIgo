@@ -528,6 +528,42 @@ prerequisite rather than an alternative variant. `conformance/server/oidf-config
 own CIBA section covers the manual (non-automated) setup available for
 exploratory use.
 
+`client`'s own CIBA support
+(`BeginBackchannelAuthentication`/`PollBackchannelAuthentication`) was
+genuinely attempted against the OIDF suite's RP-side plan
+(`fapi-ciba-id1-client-test-plan`, `cmd/conformance-client -profile=ciba`),
+unlike the AS side's plan being ruled out ahead of time — the suite's
+own `FAPICIBARPProfileBehavior.requiresMtlsForBackchannelEndpoint()`
+returns `false` for `plain_fapi`, so the backchannel authentication
+step itself doesn't share the AS-side plan's unconditional MTLS
+mandate. A live run confirmed this: 3 of 22 modules genuinely PASS
+(`fapi-ciba-id1-client-invalid-missing-authreqid-test`,
+`-invalid-missing-expiresin-test`, `-invalid-unknown-user-id-test` —
+each one a negative test for the backchannel response itself, which
+never reaches token exchange). Every other module FAILs for one
+uniform, confirmed reason: `AbstractFAPICIBAClientTest.handleHttp`'s
+own routing hardcodes `case "token":` to throw "Token endpoint must be
+called over an mTLS secured connection" unconditionally — regardless
+of `client_auth_type` variant, unlike `setupPrivateKeyJwt` on the
+methods that actually vary per-variant. So the *token* endpoint carries
+the AS-side plan's same MTLS wall even though the *backchannel*
+endpoint doesn't; once `PollBackchannelAuthentication` reaches token
+exchange (every happy-path and most negative-test modules do), it hits
+this the same way. This live attempt also surfaced and fixed a real,
+separate bug along the way: `client.Discover`/`client.Config` assumed
+every client also drives the browser PAR+authorize flow
+(`authorization_endpoint`/`pushed_authorization_request_endpoint` were
+unconditionally required both in `internal/metadata.ParseAndValidate`
+and in `client.validateConfig`), which made a CIBA-only client
+(exactly this suite's own CIBA-only mock AS, and a legitimate real
+deployment shape) impossible to construct at all. Fixed by making the
+pair conditionally required — mirroring
+`Endpoints.BackchannelAuthentication`'s own optionality — with
+`client.New` now requiring at least one of the two flows to be
+configured. `conformance/client/scripts/README.md`'s own CIBA section
+covers running this driver for exploratory use; it isn't wired into
+any automated pass/fail gate given the majority-FAILED result.
+
 ## What is and isn't shared
 
 **Shared** (via `internal/`, `extension`, `storage`'s replay primitive

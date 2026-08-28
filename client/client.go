@@ -29,17 +29,29 @@ func validateConfig(cfg Config) error {
 	if cfg.ClientID == "" {
 		return fmt.Errorf("client: config: client ID is required")
 	}
-	if cfg.RedirectURI == "" {
-		return fmt.Errorf("client: config: redirect URI is required")
-	}
-	if cfg.Endpoints.Authorization.IsZero() {
-		return fmt.Errorf("client: config: endpoints.authorization is required")
-	}
 	if cfg.Endpoints.Token.IsZero() {
 		return fmt.Errorf("client: config: endpoints.token is required")
 	}
-	if cfg.Endpoints.PushedAuthorizationRequest.IsZero() {
-		return fmt.Errorf("client: config: endpoints.pushed_authorization_request is required")
+	// Authorization and PushedAuthorizationRequest declare browser-flow
+	// support as one coherent capability — required together, not
+	// independently optional, mirroring the
+	// IDTokenKeyManagement/IDTokenContentEncryption pairing below. A
+	// CIBA-only client (Endpoints.BackchannelAuthentication set
+	// instead) has no browser flow at all, so leaving both zero is
+	// valid — but a client must configure at least one flow, checked
+	// just below.
+	authorizationFlowConfigured := !cfg.Endpoints.Authorization.IsZero()
+	parConfigured := !cfg.Endpoints.PushedAuthorizationRequest.IsZero()
+	if authorizationFlowConfigured != parConfigured {
+		return fmt.Errorf("client: config: endpoints.authorization and endpoints.pushed_authorization_request must both be set, or both left zero")
+	}
+	if !authorizationFlowConfigured && cfg.Endpoints.BackchannelAuthentication.IsZero() {
+		return fmt.Errorf("client: config: at least one flow must be configured: endpoints.authorization (with endpoints.pushed_authorization_request), or endpoints.backchannel_authentication")
+	}
+	// RedirectURI only means anything to the browser flow — BeginAuthorization
+	// is the only place this module ever sends it.
+	if authorizationFlowConfigured && cfg.RedirectURI == "" {
+		return fmt.Errorf("client: config: redirect_uri is required when endpoints.authorization is set")
 	}
 	if cfg.Profile != ProfileFAPISecurity && cfg.Profile != ProfileFAPISecurityWithMessageSigning {
 		return fmt.Errorf("client: config: profile is invalid")
@@ -126,6 +138,15 @@ func validateConfig(cfg Config) error {
 		}
 		if cfg.Limits.MaxJARMResponseLifetime <= 0 {
 			return fmt.Errorf("client: config: limits.max_jarm_response_lifetime must be positive under ProfileFAPISecurityWithMessageSigning")
+		}
+	}
+
+	if !cfg.Endpoints.BackchannelAuthentication.IsZero() {
+		if !cfg.Algorithms.BackchannelAuthenticationRequest.IsValid() {
+			return fmt.Errorf("client: config: algorithms.backchannel_authentication_request is required when endpoints.backchannel_authentication is set")
+		}
+		if cfg.Limits.BackchannelAuthenticationRequestLifetime <= 0 {
+			return fmt.Errorf("client: config: limits.backchannel_authentication_request_lifetime must be positive when endpoints.backchannel_authentication is set")
 		}
 	}
 	return nil

@@ -10,7 +10,7 @@ import (
 // SigningPurpose is a closed set of reasons a party might need to sign
 // something with its own key, so an implementation can select different
 // keys (or apply different rotation/HSM policy) per purpose. The first
-// four are server purposes; the last three are client purposes — both
+// four are server purposes; the last four are client purposes — both
 // roles use the same KeyManager contract (see ARCHITECTURE.md design
 // rule 5), never a crypto.Signer or raw private key.
 type SigningPurpose uint8
@@ -39,6 +39,15 @@ const (
 
 	// DPoPProofSigning signs a DPoP proof (RFC 9449).
 	DPoPProofSigning
+
+	// BackchannelAuthenticationRequestSigning signs a client's CIBA
+	// backchannel authentication request (CIBA §7.1) — kept distinct
+	// from RequestObjectSigning even though both produce a
+	// structurally similar signed JWT, since a deployment may
+	// reasonably want a different key/HSM policy for a
+	// backend-initiated CIBA flow than for a browser-adjacent PAR
+	// request object.
+	BackchannelAuthenticationRequestSigning
 )
 
 // SigningRequest describes one signature to produce. Exactly one of

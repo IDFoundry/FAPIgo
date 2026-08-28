@@ -133,6 +133,11 @@ type Algorithms struct {
 	// paired with UserInfoKeyManagement. Required together: both zero,
 	// or both set.
 	UserInfoContentEncryption fapi.ContentEncryptionAlgorithm
+
+	// BackchannelAuthenticationRequest is the algorithm this client
+	// signs its CIBA backchannel authentication requests with.
+	// Required only when Endpoints.BackchannelAuthentication is set.
+	BackchannelAuthenticationRequest fapi.SignatureAlgorithm
 }
 
 // Endpoints are the authorization server's endpoint URLs this client
@@ -149,6 +154,14 @@ type Endpoints struct {
 	// automatically when the server advertises one; otherwise, set it
 	// from a deployment's own out-of-band knowledge of the server.
 	UserInfo fapi.URL
+
+	// BackchannelAuthentication is the server's CIBA backchannel
+	// authentication endpoint (OpenID Connect CIBA Core 1.0 §7), if
+	// this client calls BeginBackchannelAuthentication. OPTIONAL —
+	// zero means CIBA is unavailable. Discover populates this
+	// automatically when the server advertises one; otherwise, set it
+	// from a deployment's own out-of-band knowledge of the server.
+	BackchannelAuthentication fapi.URL
 }
 
 // Limits bounds the lifetimes and clock tolerances this client enforces
@@ -172,6 +185,13 @@ type Limits struct {
 	// response's exp claim may be. Required only when Profile is
 	// ProfileFAPISecurityWithMessageSigning.
 	MaxJARMResponseLifetime time.Duration
+
+	// BackchannelAuthenticationRequestLifetime is how long this
+	// client's own signed CIBA backchannel authentication request
+	// remains valid for (exp = Now + BackchannelAuthenticationRequestLifetime),
+	// mirroring RequestObjectLifetime's role for PAR. Required only
+	// when Endpoints.BackchannelAuthentication is set.
+	BackchannelAuthenticationRequestLifetime time.Duration
 
 	// MaxIDTokenLifetime bounds how far in the future an ID token's exp
 	// claim may be.

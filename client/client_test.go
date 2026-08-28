@@ -133,6 +133,15 @@ func (f *fakeSessionStore) Consume(ctx context.Context, c storage.SessionConsump
 	}, nil
 }
 
+func mustParseEndpointURL(t *testing.T, raw string) fapi.URL {
+	t.Helper()
+	u, err := fapi.ParseEndpointURL(raw)
+	if err != nil {
+		t.Fatalf("ParseEndpointURL(%q): %v", raw, err)
+	}
+	return u
+}
+
 func validConfig(t *testing.T) client.Config {
 	t.Helper()
 	issuer, err := fapi.ParseIssuerURL(testIssuer)
@@ -256,6 +265,14 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 		"userinfo content encryption set without key management": func(c *client.Config) {
 			c.Algorithms.UserInfoContentEncryption = fapi.A256GCM
 		},
+		"backchannel authentication endpoint set without algorithm": func(c *client.Config) {
+			c.Endpoints.BackchannelAuthentication = mustParseEndpointURL(t, testIssuer+"/backchannel-authenticate")
+			c.Limits.BackchannelAuthenticationRequestLifetime = time.Minute
+		},
+		"backchannel authentication endpoint set without lifetime": func(c *client.Config) {
+			c.Endpoints.BackchannelAuthentication = mustParseEndpointURL(t, testIssuer+"/backchannel-authenticate")
+			c.Algorithms.BackchannelAuthenticationRequest = fapi.ES256
+		},
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -283,6 +300,58 @@ func TestNewRequiresMessageSigningConfigUnderThatProfile(t *testing.T) {
 	cfg.Limits.MaxJARMResponseLifetime = time.Minute
 	if _, err := client.New(cfg, deps); err != nil {
 		t.Fatalf("New(message signing, fully configured): %v", err)
+	}
+}
+
+// TestNewAcceptsCIBAOnlyConfig covers a client that only ever uses CIBA
+// — no browser flow at all, mirroring a CIBA-only authorization
+// server's own discovery document (see
+// TestDiscoverAcceptsMissingAuthorizationAndPAREndpoints). Leaving
+// Endpoints.Authorization/PushedAuthorizationRequest/RedirectURI all
+// zero must be accepted, not rejected, as long as
+// Endpoints.BackchannelAuthentication (and its own required algorithm/
+// lifetime) is configured instead.
+func TestNewAcceptsCIBAOnlyConfig(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Endpoints.Authorization = fapi.URL{}
+	cfg.Endpoints.PushedAuthorizationRequest = fapi.URL{}
+	cfg.RedirectURI = ""
+	cfg.Endpoints.BackchannelAuthentication = mustParseEndpointURL(t, testIssuer+"/backchannel-authenticate")
+	cfg.Algorithms.BackchannelAuthenticationRequest = fapi.ES256
+	cfg.Limits.BackchannelAuthenticationRequestLifetime = time.Minute
+
+	if _, err := client.New(cfg, validDependencies(t)); err != nil {
+		t.Fatalf("New(CIBA-only config): %v", err)
+	}
+}
+
+// TestNewRejectsConfigWithNoFlowConfigured covers the case neither
+// TestNewAcceptsCIBAOnlyConfig nor validConfig's own browser-flow shape
+// represents: a client that configures no flow at all.
+func TestNewRejectsConfigWithNoFlowConfigured(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Endpoints.Authorization = fapi.URL{}
+	cfg.Endpoints.PushedAuthorizationRequest = fapi.URL{}
+	cfg.RedirectURI = ""
+
+	if _, err := client.New(cfg, validDependencies(t)); err == nil {
+		t.Fatalf("New(no flow configured) = nil error, want error")
+	}
+}
+
+func TestNewRequiresCIBAConfigWhenEndpointSet(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Endpoints.BackchannelAuthentication = mustParseEndpointURL(t, testIssuer+"/backchannel-authenticate")
+	deps := validDependencies(t)
+
+	if _, err := client.New(cfg, deps); err == nil {
+		t.Fatalf("New(backchannel endpoint set, unconfigured) = nil error, want error")
+	}
+
+	cfg.Algorithms.BackchannelAuthenticationRequest = fapi.ES256
+	cfg.Limits.BackchannelAuthenticationRequestLifetime = time.Minute
+	if _, err := client.New(cfg, deps); err != nil {
+		t.Fatalf("New(backchannel endpoint fully configured): %v", err)
 	}
 }
 

@@ -141,11 +141,9 @@ func TestParseAndValidateRejectsMissingRequiredFields(t *testing.T) {
 		}
 	}
 	cases := map[string]func(*metadata.Document){
-		"missing issuer":                 func(d *metadata.Document) { d.Issuer = "" },
-		"missing authorization_endpoint": func(d *metadata.Document) { d.AuthorizationEndpoint = "" },
-		"missing token_endpoint":         func(d *metadata.Document) { d.TokenEndpoint = "" },
-		"missing par_endpoint":           func(d *metadata.Document) { d.PushedAuthorizationRequestEndpoint = "" },
-		"missing jwks_uri":               func(d *metadata.Document) { d.JWKSURI = "" },
+		"missing issuer":         func(d *metadata.Document) { d.Issuer = "" },
+		"missing token_endpoint": func(d *metadata.Document) { d.TokenEndpoint = "" },
+		"missing jwks_uri":       func(d *metadata.Document) { d.JWKSURI = "" },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -159,6 +157,35 @@ func TestParseAndValidateRejectsMissingRequiredFields(t *testing.T) {
 				t.Fatalf("ParseAndValidate(%s) error = %v, want ErrMissingField", name, err)
 			}
 		})
+	}
+}
+
+// TestParseAndValidateAcceptsMissingAuthorizationAndPAREndpoints covers
+// a CIBA-only authorization server's own discovery document — no
+// browser flow at all, so neither authorization_endpoint nor
+// pushed_authorization_request_endpoint is advertised. This must
+// parse successfully with both fields empty, not fail — see
+// ParseAndValidate's own doc comment for why these two are no longer
+// unconditionally required.
+func TestParseAndValidateAcceptsMissingAuthorizationAndPAREndpoints(t *testing.T) {
+	doc := metadata.Document{
+		Issuer:        "https://as.example.com",
+		TokenEndpoint: "https://as.example.com/token",
+		JWKSURI:       "https://as.example.com/jwks",
+	}
+	body, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	parsed, err := metadata.ParseAndValidate(body, "https://as.example.com")
+	if err != nil {
+		t.Fatalf("ParseAndValidate: %v", err)
+	}
+	if parsed.AuthorizationEndpoint != "" {
+		t.Errorf("AuthorizationEndpoint = %q, want empty", parsed.AuthorizationEndpoint)
+	}
+	if parsed.PushedAuthorizationRequestEndpoint != "" {
+		t.Errorf("PushedAuthorizationRequestEndpoint = %q, want empty", parsed.PushedAuthorizationRequestEndpoint)
 	}
 }
 

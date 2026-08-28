@@ -82,6 +82,14 @@ type Metadata struct {
 	// an mTLS-requiring alternate listener at all.
 	MTLSEndpointAliases *MTLSEndpointAliases `json:"mtls_endpoint_aliases,omitempty"`
 
+	// TLSClientCertificateBoundAccessTokens (RFC 8705 §3.3) is true
+	// under the same condition as MTLSEndpointAliases: this server can
+	// only ever issue a cnf.x5t#S256-bound token for a client actually
+	// registered SenderConstrainMTLS, which in turn only makes sense
+	// once an mTLS-requiring listener exists at all (Config.MTLSEndpoints
+	// non-zero) for that client's tokens to be redeemed against.
+	TLSClientCertificateBoundAccessTokens bool `json:"tls_client_certificate_bound_access_tokens,omitempty"`
+
 	// RequirePushedAuthorizationRequests is always true: BeginAuthorization
 	// only ever accepts a request_uri, never raw authorization parameters.
 	RequirePushedAuthorizationRequests bool `json:"require_pushed_authorization_requests,omitempty"`
@@ -163,6 +171,7 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 			PushedAuthorizationRequestEndpoint: s.cfg.MTLSEndpoints.PushedAuthorizationRequest,
 			BackchannelAuthenticationEndpoint:  s.cfg.MTLSEndpoints.BackchannelAuthentication,
 		}
+		md.TLSClientCertificateBoundAccessTokens = true
 	}
 
 	if !s.cfg.Endpoints.BackchannelAuthentication.IsZero() {

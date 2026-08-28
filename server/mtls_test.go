@@ -137,6 +137,134 @@ func newHarnessWithSenderConstrainMTLS(t *testing.T) harness {
 	return harness{server: srv, key: key, serverKey: serverKey, transactions: transactions, grants: grants, audit: audit, revocation: revocation, now: now}
 }
 
+// newHarnessWithSenderConstrainMTLSAndAliases is
+// newHarnessWithSenderConstrainMTLS plus Config.MTLSEndpoints
+// configured, so an mTLS-bound client's client assertion may name
+// either the issuer or one of these alias URLs as "aud" — see
+// acceptableClientAssertionAudiences' own doc comment (server/par.go).
+// Returns the alias token endpoint URL for a test to build an
+// assertion against.
+func newHarnessWithSenderConstrainMTLSAndAliases(t *testing.T) (harness, string) {
+	t.Helper()
+	now := time.Now()
+	key := generateKey(t)
+	serverKey := generateKey(t)
+
+	client, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
+		ID:                       testClientID,
+		RedirectURIs:             []fapi.RegisteredRedirectURI{testRedirectURI},
+		ClientAssertionAlgorithm: fapi.ES256,
+		SenderConstrain:          storage.SenderConstrainMTLS,
+		AllowedScopes:            []string{"openid", "accounts", "offline_access"},
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+
+	issuer, err := fapi.ParseIssuerURL(testIssuer)
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+	mtlsToken, err := fapi.ParseEndpointURL("https://mtls.as.example/token")
+	if err != nil {
+		t.Fatalf("ParseEndpointURL: %v", err)
+	}
+
+	cfg := server.Config{
+		Issuer:        issuer,
+		Endpoints:     testEndpoints(t),
+		MTLSEndpoints: server.MTLSEndpoints{Token: mtlsToken},
+		Profile:       server.ProfileFAPISecurity,
+		Algorithms: server.AlgorithmPolicy{
+			ClientAssertion: server.AlgorithmSet{fapi.ES256},
+			RequestObject:   server.AlgorithmSet{fapi.ES256},
+			IDToken:         fapi.ES256,
+		},
+		Limits: server.Limits{
+			PushedRequestLifetime:      90 * time.Second,
+			MaxClientAssertionLifetime: time.Minute,
+			MaxRequestObjectLifetime:   time.Minute,
+			InteractionLifetime:        5 * time.Minute,
+			AuthorizationCodeLifetime:  time.Minute,
+			AccessTokenLifetime:        5 * time.Minute,
+			IDTokenLifetime:            5 * time.Minute,
+			RefreshTokenLifetime:       5 * time.Minute,
+			MaxDPoPProofAge:            time.Minute,
+			MaxClockSkew:               5 * time.Second,
+		},
+		Assurance: server.AssuranceDevelopment,
+	}
+	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
+	deps := server.Dependencies{
+		Clients:      &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
+		Transactions: &fakeTransactionStore{},
+		Grants:       &fakeGrantStore{},
+		Replay:       &fakeReplayStore{},
+		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
+			testClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
+		}},
+		Keys:         serverKeyManager,
+		AccessTokens: server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:   &fakeRevocationSink{},
+		Clock:        fixedClock{now: now},
+		Random:       rand.Reader,
+	}
+	srv, err := server.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+	return harness{server: srv, key: key, serverKey: serverKey, now: now}, mtlsToken.String()
+}
+
+// TestPushAuthorizationRequestAcceptsMTLSAliasAsClientAssertionAudience
+// covers RFC 7523 §3's own looseness ("aud"... identifies the AS,
+// not necessarily one fixed URL): an mTLS-bound client may call any
+// endpoint via its RFC 8705 §5 alias and sign its client assertion's
+// "aud" against that alias URL rather than the issuer, since both
+// identify the same authorization server.
+func TestPushAuthorizationRequestAcceptsMTLSAliasAsClientAssertionAudience(t *testing.T) {
+	h, mtlsToken := newHarnessWithSenderConstrainMTLSAndAliases(t)
+	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
+		Signer: h.key, Algorithm: fapi.ES256,
+		ClientID: testClientID.String(), Audience: mtlsToken,
+		Now: h.now, Lifetime: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssertion: %v", err)
+	}
+	if _, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: plainFormParameters(t, assertion, nil)},
+	}); err != nil {
+		t.Fatalf("PushAuthorizationRequest: %v", err)
+	}
+}
+
+// TestPushAuthorizationRequestRejectsMTLSAliasForDPoPClient confirms
+// the widened audience set above is scoped to a SenderConstrainMTLS
+// client only — a DPoP-bound client's assertion must still name the
+// issuer exactly, even when Config.MTLSEndpoints happens to be
+// configured for some other client.
+func TestPushAuthorizationRequestRejectsMTLSAliasForDPoPClient(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
+		Signer: h.key, Algorithm: fapi.ES256,
+		ClientID: testClientID.String(), Audience: "https://mtls.as.example/token",
+		Now: h.now, Lifetime: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssertion: %v", err)
+	}
+	_, err = h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: plainFormParameters(t, assertion, nil)},
+	})
+	if err == nil {
+		t.Fatalf("PushAuthorizationRequest = nil error, want error")
+	}
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidClient)
+	}
+}
+
 func TestExchangeAuthorizationCodeWithMTLSBinding(t *testing.T) {
 	h := newHarnessWithSenderConstrainMTLS(t)
 	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
@@ -267,6 +395,12 @@ func TestServerMetadataOmitsMTLSEndpointAliasesWhenUnconfigured(t *testing.T) {
 	if md.MTLSEndpointAliases != nil {
 		t.Fatalf("MTLSEndpointAliases = %+v, want nil (Config.MTLSEndpoints was never set)", md.MTLSEndpointAliases)
 	}
+	// RFC 8705 §3.3: this boolean advertises the same capability
+	// MTLSEndpointAliases does — must track it exactly, never be true
+	// on its own.
+	if md.TLSClientCertificateBoundAccessTokens {
+		t.Fatalf("TLSClientCertificateBoundAccessTokens = true, want false (Config.MTLSEndpoints was never set)")
+	}
 }
 
 func TestServerMetadataAdvertisesMTLSEndpointAliasesWhenConfigured(t *testing.T) {
@@ -343,5 +477,8 @@ func TestServerMetadataAdvertisesMTLSEndpointAliasesWhenConfigured(t *testing.T)
 	}
 	if !md.MTLSEndpointAliases.BackchannelAuthenticationEndpoint.IsZero() {
 		t.Errorf("MTLSEndpointAliases.BackchannelAuthenticationEndpoint = %q, want zero", md.MTLSEndpointAliases.BackchannelAuthenticationEndpoint.String())
+	}
+	if !md.TLSClientCertificateBoundAccessTokens {
+		t.Errorf("TLSClientCertificateBoundAccessTokens = false, want true (RFC 8705 §3.3)")
 	}
 }

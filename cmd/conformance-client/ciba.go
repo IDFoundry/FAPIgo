@@ -26,6 +26,7 @@ import (
 	"github.com/idfoundry/fapigo/client"
 	"github.com/idfoundry/fapigo/fapihttp"
 	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 const (
@@ -88,13 +89,25 @@ var cibaVariant = map[string]string{
 
 // runCIBA drives every module of the FAPI-CIBA-ID1 RP test plan through
 // client.BeginBackchannelAuthentication/PollBackchannelAuthentication.
-func runCIBA(apiBase string) error {
+// mtls selects storage.SenderConstrainMTLS instead of the default DPoP
+// binding — see mtls.go's own package doc comment for why this exists.
+func runCIBA(apiBase string, mtls bool) error {
 	ctx := context.Background()
-	rawHTTP := insecureSuiteHTTPClient()
 
-	keyMgr, err := newEphemeralKeyManager([]keys.SigningPurpose{
-		keys.ClientAuthentication, keys.DPoPProofSigning, keys.BackchannelAuthenticationRequestSigning,
-	})
+	purposes := []keys.SigningPurpose{keys.ClientAuthentication, keys.BackchannelAuthenticationRequestSigning}
+	var rawHTTP *http.Client
+	if mtls {
+		clientCert, err := selfSignedClientCert("gofapi-ciba-mtls-driver")
+		if err != nil {
+			return fmt.Errorf("generate client certificate: %w", err)
+		}
+		rawHTTP = mtlsSuiteHTTPClient(clientCert)
+	} else {
+		purposes = append(purposes, keys.DPoPProofSigning)
+		rawHTTP = insecureSuiteHTTPClient()
+	}
+
+	keyMgr, err := newEphemeralKeyManager(purposes)
 	if err != nil {
 		return fmt.Errorf("generate keys: %w", err)
 	}
@@ -153,7 +166,7 @@ func runCIBA(apiBase string) error {
 	summary := make(map[string]string, len(moduleNames))
 	for i, name := range moduleNames {
 		log.Printf("--- [%d/%d] %s ---", i+1, len(moduleNames), name)
-		outcome := runCIBAModule(ctx, rawHTTP, apiBase, planID, clientID, keyMgr, name)
+		outcome := runCIBAModule(ctx, rawHTTP, apiBase, planID, clientID, keyMgr, name, mtls)
 		summary[name] = outcome
 		log.Printf("[%d/%d] %s: %s", i+1, len(moduleNames), name, outcome)
 	}
@@ -168,7 +181,7 @@ func runCIBA(apiBase string) error {
 // runCIBAModule drives testName through discover -> begin backchannel
 // authentication -> poll (bounded by cibaMaxPolls, spaced by whatever
 // interval the module's own response carried) -> awaitVerdict.
-func runCIBAModule(ctx context.Context, rawHTTP *http.Client, apiBase, planID, clientID string, keyMgr *ephemeralKeyManager, testName string) string {
+func runCIBAModule(ctx context.Context, rawHTTP *http.Client, apiBase, planID, clientID string, keyMgr *ephemeralKeyManager, testName string, mtls bool) string {
 	module, err := createModuleInstance(rawHTTP, apiBase, planID, testName)
 	if err != nil {
 		return "ERROR: create module instance: " + err.Error()
@@ -223,6 +236,7 @@ func runCIBAModule(ctx context.Context, rawHTTP *http.Client, apiBase, planID, c
 			IDToken:                          discovered.IDTokenAlgorithms[0],
 			BackchannelAuthenticationRequest: fapi.ES256,
 		},
+		SenderConstrain: storage.SenderConstrainDPoP,
 		Limits: client.Limits{
 			ClientAssertionLifetime:                  time.Minute,
 			SessionLifetime:                          5 * time.Minute,
@@ -233,6 +247,12 @@ func runCIBAModule(ctx context.Context, rawHTTP *http.Client, apiBase, planID, c
 			MaxJOSECompactBytes:                      16 * 1024,
 			BackchannelAuthenticationRequestLifetime: time.Minute,
 		},
+	}
+	if mtls {
+		cfg.SenderConstrain = storage.SenderConstrainMTLS
+		if err := applyMTLSEndpointAliases(&cfg, discovered); err != nil {
+			return awaitVerdict(rawHTTP, apiBase, module.ID, err.Error())
+		}
 	}
 	deps := client.Dependencies{
 		Sessions:   newMemSessionStore(),

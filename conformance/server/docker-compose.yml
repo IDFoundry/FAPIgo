@@ -94,6 +94,26 @@ services:
       - -access-token-format=${ACCESS_TOKEN_FORMAT:-jwt}
       - -ciba
 
+  conformance-as-ciba-mtls:
+    build:
+      context: ../..
+      dockerfile: conformance/server/Dockerfile
+    hostname: conformance-as-ciba-mtls
+    networks: [suite]
+    ports:
+      - "18446:8443" # see conformance-as-baseline's port comment above
+      - "18447:8444" # the -mtls listener (mtls_listen_addr in the config)
+    volumes:
+      - ./oidf-config/ciba-mtls.config.json:/config.json:ro
+      - ./certs:/certs:ro
+    command:
+      - -config=/config.json
+      - -cert=/certs/server.crt
+      - -key=/certs/server.key
+      - -access-token-format=${ACCESS_TOKEN_FORMAT:-jwt}
+      - -ciba
+      - -mtls
+
 networks:
   suite:
     external: true

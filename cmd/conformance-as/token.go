@@ -21,15 +21,16 @@ func tokenHandler(srv *server.Server) http.HandlerFunc {
 			writeRawOAuthError(w, http.StatusBadRequest, "invalid_request", "multiple DPoP headers are not permitted")
 			return
 		}
+		peerCert := peerCertificate(r)
 
 		var result server.TokenResult
 		switch grantType {
 		case "authorization_code":
-			result, err = srv.ExchangeAuthorizationCode(r.Context(), server.AuthorizationCodeExchangeRequest{HTTP: form, DPoPProof: dpopProof})
+			result, err = srv.ExchangeAuthorizationCode(r.Context(), server.AuthorizationCodeExchangeRequest{HTTP: form, DPoPProof: dpopProof, PeerCertificate: peerCert})
 		case "refresh_token":
-			result, err = srv.RefreshAccessToken(r.Context(), server.RefreshTokenRequest{HTTP: form, DPoPProof: dpopProof})
+			result, err = srv.RefreshAccessToken(r.Context(), server.RefreshTokenRequest{HTTP: form, DPoPProof: dpopProof, PeerCertificate: peerCert})
 		case server.CIBAGrantType:
-			result, err = srv.ExchangeBackchannelAuthentication(r.Context(), server.BackchannelTokenExchangeRequest{HTTP: form, DPoPProof: dpopProof})
+			result, err = srv.ExchangeBackchannelAuthentication(r.Context(), server.BackchannelTokenExchangeRequest{HTTP: form, DPoPProof: dpopProof, PeerCertificate: peerCert})
 		default:
 			writeRawOAuthError(w, http.StatusBadRequest, "unsupported_grant_type", "grant_type must be authorization_code, refresh_token, or "+server.CIBAGrantType)
 			return

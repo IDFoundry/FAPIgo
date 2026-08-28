@@ -71,10 +71,11 @@ func userinfoHandler(srv *server.Server, verifier *fapires.Verifier, userinfoURL
 			return
 		}
 		authCtx, err := verifier.Verify(r.Context(), fapires.VerifyRequest{
-			Method:        r.Method,
-			URL:           userinfoURL,
-			Authorization: r.Header.Get("Authorization"),
-			DPoPProof:     dpopProof,
+			Method:          r.Method,
+			URL:             userinfoURL,
+			Authorization:   r.Header.Get("Authorization"),
+			DPoPProof:       dpopProof,
+			PeerCertificate: peerCertificate(r),
 		})
 		if err != nil {
 			writeResourceError(w, err)

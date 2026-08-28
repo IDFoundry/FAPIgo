@@ -97,13 +97,14 @@ var profiles = map[string]driverProfile{
 func main() {
 	apiBase := flag.String("suite", "https://localhost.emobix.co.uk:8443/", "conformance suite base URL")
 	profileName := flag.String("profile", "baseline", "which client test plan to run: baseline, message-signing, or ciba")
+	mtls := flag.Bool("mtls", false, "with -profile=ciba, present a client certificate and use storage.SenderConstrainMTLS instead of DPoP (RFC 8705 §3) — see mtls.go; ignored for baseline/message-signing")
 	flag.Parse()
 
 	if *profileName == "ciba" {
 		// CIBA has no browser hop for runModule's shape to drive — see
 		// ciba.go's own package doc comment — so it's dispatched
 		// separately rather than living in the profiles map below.
-		if err := runCIBA(*apiBase); err != nil {
+		if err := runCIBA(*apiBase, *mtls); err != nil {
 			log.Fatalf("conformance-client: %v", err)
 		}
 		return

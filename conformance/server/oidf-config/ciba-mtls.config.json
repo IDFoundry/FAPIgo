@@ -1,0 +1,65 @@
+{
+  "clients": [
+    {
+      "allowed_scopes": [
+        "openid",
+        "accounts",
+        "offline_access"
+      ],
+      "backchannel_authentication_request_algorithm": "ES256",
+      "client_assertion_algorithm": "ES256",
+      "id": "gofapi-conformance-ciba-mtls-client-1",
+      "sender_constrain": "mtls",
+      "jwks": {
+        "keys": [
+          {
+            "kty": "EC",
+            "alg": "ES256",
+            "use": "sig",
+            "kid": "gofapi-conformance-ciba-mtls-client1-key1",
+            "crv": "P-256",
+            "x": "_LDKqzSgRpR6jz9v7jaNHFuFCnJONPvTB1JLq4p6nGY",
+            "y": "QiezTqe-sGhXJM56qbUs7iCYOIqP_M1XKAlsogI4zUE"
+          }
+        ]
+      },
+      "redirect_uris": [
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-ciba-mtls/callback",
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-ciba-mtls/callback?dummy1=lorem&dummy2=ipsum"
+      ]
+    },
+    {
+      "allowed_scopes": [
+        "openid",
+        "accounts",
+        "offline_access"
+      ],
+      "backchannel_authentication_request_algorithm": "ES256",
+      "client_assertion_algorithm": "ES256",
+      "id": "gofapi-conformance-ciba-mtls-client-2",
+      "sender_constrain": "mtls",
+      "jwks": {
+        "keys": [
+          {
+            "kty": "EC",
+            "alg": "ES256",
+            "use": "sig",
+            "kid": "gofapi-conformance-ciba-mtls-client2-key1",
+            "crv": "P-256",
+            "x": "XaVoOe6pQnAnQFV56WD0R25spjyFtDpjzgZKd4bigIo",
+            "y": "sK4oM7985H9wc3KhWcSo6USMgvP9pTxgLPEO3NIiB1w"
+          }
+        ]
+      },
+      "redirect_uris": [
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-ciba-mtls/callback",
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-ciba-mtls/callback?dummy1=lorem&dummy2=ipsum"
+      ]
+    }
+  ],
+  "default_subject": "conformance-test-user",
+  "issuer": "https://conformance-as-ciba-mtls:8443",
+  "listen_addr": "0.0.0.0:8443",
+  "mtls_listen_addr": "0.0.0.0:8444",
+  "profile": "fapi2-security"
+}

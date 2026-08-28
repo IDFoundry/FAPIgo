@@ -618,6 +618,30 @@ func newHarnessWithClientKeys(t *testing.T, clientKeys keys.ClientKeySource) har
 	return harness{server: srv, key: key, serverKey: serverKey, now: now}
 }
 
+// TestPushAuthorizationRequestAcceptsTokenEndpointURLAsClientAssertionAudience
+// covers RFC 7523 §3's own sanctioned alternative to the issuer
+// identifier: "The token endpoint URL of the authorization server MAY
+// be used as a value for an 'aud' element" — confirmed live against
+// the OIDF conformance suite's own CIBA client, which signs "aud" this
+// way rather than as the bare issuer. Any client may use either value,
+// not just an mTLS-bound one (see acceptableClientAssertionAudiences).
+func TestPushAuthorizationRequestAcceptsTokenEndpointURLAsClientAssertionAudience(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
+		Signer: h.key, Algorithm: fapi.ES256,
+		ClientID: testClientID.String(), Audience: testTokenEndpoint,
+		Now: h.now, Lifetime: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssertion: %v", err)
+	}
+	if _, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: plainFormParameters(t, assertion, nil)},
+	}); err != nil {
+		t.Fatalf("PushAuthorizationRequest: %v", err)
+	}
+}
+
 // TestPushAuthorizationRequestClientAssertionSelectsMatchingKeyAmongCandidates
 // proves resolveClientKey's candidate loop actually picks the right
 // key by kid — not just that a lone key gets used, which is all

@@ -5,20 +5,19 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/idfoundry/fapigo/internal/metadata"
 	"github.com/idfoundry/fapigo/server"
 )
 
-// wireMetadata is server.Metadata converted to internal/metadata.Document's
-// wire shape (the same tested encoder fapitest relies on), extended with
-// the fields server.Metadata doesn't produce: scopes_supported,
+// wireMetadata is server.Metadata (itself directly JSON-marshalable,
+// using RFC 8414/OIDC Discovery's own field names) extended with the
+// fields server.Metadata doesn't produce: scopes_supported,
 // claims_supported, claims_parameter_supported, userinfo_endpoint, and
 // dpop_signing_alg_values_supported. DPoP proof verification
 // (internal/dpop) checks a proof's own JWS header algorithm against this
 // module's whole closed algorithm set, not a configured subset, so that
 // one is a fixed list, not sourced from Config.
 type wireMetadata struct {
-	metadata.Document
+	server.Metadata
 	ScopesSupported               []string `json:"scopes_supported,omitempty"`
 	ClaimsSupported               []string `json:"claims_supported,omitempty"`
 	ClaimsParameterSupported      bool     `json:"claims_parameter_supported,omitempty"`
@@ -42,30 +41,8 @@ var dpopSigningAlgValuesSupported = []string{"ES256", "PS256", "EdDSA"}
 
 func metadataHandler(srv *server.Server, advertisedScopes []string, userinfoURL *url.URL) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		md := srv.Metadata(r.Context())
 		doc := wireMetadata{
-			Document: metadata.Document{
-				Issuer:                                     md.Issuer.String(),
-				AuthorizationEndpoint:                      md.AuthorizationEndpoint.String(),
-				TokenEndpoint:                              md.TokenEndpoint.String(),
-				PushedAuthorizationRequestEndpoint:         md.PushedAuthorizationRequestEndpoint.String(),
-				JWKSURI:                                    md.JWKSURI.String(),
-				ResponseTypesSupported:                     md.ResponseTypesSupported,
-				ResponseModesSupported:                     md.ResponseModesSupported,
-				GrantTypesSupported:                        md.GrantTypesSupported,
-				SubjectTypesSupported:                      md.SubjectTypesSupported,
-				CodeChallengeMethodsSupported:              md.CodeChallengeMethodsSupported,
-				TokenEndpointAuthMethodsSupported:          md.TokenEndpointAuthMethodsSupported,
-				TokenEndpointAuthSigningAlgValuesSupported: md.TokenEndpointAuthSigningAlgValuesSupported,
-				RequestObjectSigningAlgValuesSupported:     md.RequestObjectSigningAlgValuesSupported,
-				IDTokenSigningAlgValuesSupported:           md.IDTokenSigningAlgValuesSupported,
-				AuthorizationSigningAlgValuesSupported:     md.AuthorizationSigningAlgValuesSupported,
-				IDTokenEncryptionAlgValuesSupported:        md.IDTokenEncryptionAlgValuesSupported,
-				IDTokenEncryptionEncValuesSupported:        md.IDTokenEncryptionEncValuesSupported,
-				RequirePushedAuthorizationRequests:         md.RequirePushedAuthorizationRequests,
-				RequireSignedRequestObject:                 md.RequireSignedRequestObject,
-				AuthorizationResponseIssParameterSupported: md.AuthorizationResponseIssParameterSupported,
-			},
+			Metadata:                      srv.Metadata(r.Context()),
 			ScopesSupported:               advertisedScopes,
 			ClaimsSupported:               claimsSupported,
 			ClaimsParameterSupported:      true,

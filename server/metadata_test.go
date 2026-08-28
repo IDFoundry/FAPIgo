@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -134,5 +135,64 @@ func TestMetadataAdvertisesIDTokenEncryptionWhenConfigured(t *testing.T) {
 	}
 	if !containsString(md.IDTokenEncryptionEncValuesSupported, "A256GCM") {
 		t.Fatalf("IDTokenEncryptionEncValuesSupported = %v, want to contain A256GCM", md.IDTokenEncryptionEncValuesSupported)
+	}
+}
+
+// TestMetadataMarshalJSONUsesDiscoveryFieldNames confirms server.Metadata
+// is directly JSON-marshalable using RFC 8414/OIDC Discovery's own
+// snake_case field names, guarding against a renamed/added field silently
+// losing its wire name (the risk the old cmd/conformance-as manual-copy
+// approach had no protection against at all).
+func TestMetadataMarshalJSONUsesDiscoveryFieldNames(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurityWithMessageSigning, true)
+	md := h.server.Metadata(context.Background())
+
+	b, err := json.Marshal(md)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(b, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	for _, key := range []string{
+		"issuer",
+		"authorization_endpoint",
+		"token_endpoint",
+		"pushed_authorization_request_endpoint",
+		"jwks_uri",
+		"response_types_supported",
+		"response_modes_supported",
+		"grant_types_supported",
+		"subject_types_supported",
+		"code_challenge_methods_supported",
+		"token_endpoint_auth_methods_supported",
+		"token_endpoint_auth_signing_alg_values_supported",
+		"request_object_signing_alg_values_supported",
+		"id_token_signing_alg_values_supported",
+		"authorization_signing_alg_values_supported",
+		"require_pushed_authorization_requests",
+		"require_signed_request_object",
+		"authorization_response_iss_parameter_supported",
+	} {
+		if _, ok := decoded[key]; !ok {
+			t.Fatalf("Marshal(md) missing key %q, got %s", key, b)
+		}
+	}
+
+	if got, want := decoded["issuer"], testIssuer; got != want {
+		t.Fatalf("issuer = %v, want %q", got, want)
+	}
+
+	// Fields left unset by this profile (no ID token encryption
+	// configured) must be entirely absent, not present as null/empty.
+	for _, key := range []string{
+		"id_token_encryption_alg_values_supported",
+		"id_token_encryption_enc_values_supported",
+	} {
+		if _, ok := decoded[key]; ok {
+			t.Fatalf("Marshal(md) unexpectedly contains key %q, got %s", key, b)
+		}
 	}
 }

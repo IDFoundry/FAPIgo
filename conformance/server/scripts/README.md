@@ -250,7 +250,7 @@ the manual flow above has), so
 `*-plan.json` files (and updates the matching `oidf-config/*.config.json`)
 in one shot — see [../oidf-config/README.md](../oidf-config/README.md)'s
 "Quick start". `conformance/scripts/run-all.sh`, which drives this
-CI-style flow for all four suites at once, expects exactly the files
+CI-style flow for all six suites at once, expects exactly the files
 that command produces.
 
 ```

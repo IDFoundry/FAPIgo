@@ -17,6 +17,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"log"
 	"net/http"
@@ -96,12 +97,24 @@ func runCIBA(apiBase string, mtls bool) error {
 
 	purposes := []keys.SigningPurpose{keys.ClientAuthentication, keys.BackchannelAuthenticationRequestSigning}
 	var rawHTTP *http.Client
+	var clientCertPEM string
 	if mtls {
 		clientCert, err := selfSignedClientCert("gofapi-ciba-mtls-driver")
 		if err != nil {
 			return fmt.Errorf("generate client certificate: %w", err)
 		}
 		rawHTTP = mtlsSuiteHTTPClient(clientCert)
+		// EnsureClientCertificateMatches (net/openid/conformance/condition/as)
+		// compares the certificate actually presented on the connection
+		// against a "client.certificate" value read straight out of this
+		// plan's own static config (GetStaticClientConfiguration/
+		// configureClient) — there is no other mechanism that registers
+		// it (confirmed by disassembling both, not assumed): an omitted
+		// "client.certificate" fails every mTLS-authenticated request
+		// with "Couldn't find registered client certificate", and a
+		// module that never gets past that check never reaches a
+		// terminal state at all, no matter how long this driver waits.
+		clientCertPEM = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: clientCert.Certificate[0]}))
 	} else {
 		purposes = append(purposes, keys.DPoPProofSigning)
 		rawHTTP = insecureSuiteHTTPClient()
@@ -118,8 +131,19 @@ func runCIBA(apiBase string, mtls bool) error {
 		return fmt.Errorf("build client jwks: %w", err)
 	}
 
-	alias := "gofapi-ciba-driver-" + randomSuffix()
-	clientID := "gofapi-ciba-driver-client"
+	suffix := randomSuffix()
+	alias := "gofapi-ciba-driver-" + suffix
+	// clientID must vary per run exactly like alias does: an mTLS run's
+	// per-module client-certificate registration is keyed by client_id,
+	// not by alias — a fixed client_id here left an orphaned module
+	// instance from a killed/still-finishing earlier run (its own
+	// certificate registration not yet torn down) able to corrupt a
+	// fresh run's own registration under the same client_id, surfacing
+	// as spurious EnsureClientCertificateMatches failures and alias
+	// conflicts unrelated to anything this run's own driver code did
+	// (confirmed live, not assumed — traced via the suite's own module
+	// log after two back-to-back -mtls runs).
+	clientID := "gofapi-ciba-driver-client-" + suffix
 
 	// Unlike the browser-redirect plans (main.go), whose own
 	// GenerateServerConfiguration auto-generates the mock AS's signing
@@ -137,6 +161,16 @@ func runCIBA(apiBase string, mtls bool) error {
 		return fmt.Errorf("generate mock AS server key: %w", err)
 	}
 
+	clientConfig := map[string]any{
+		"client_id": clientID,
+		"scope":     cibaScope,
+		"jwks": map[string]any{
+			"keys": jwks,
+		},
+	}
+	if clientCertPEM != "" {
+		clientConfig["certificate"] = clientCertPEM
+	}
 	planConfig, err := json.Marshal(map[string]any{
 		"alias": alias,
 		"server": map[string]any{
@@ -144,13 +178,7 @@ func runCIBA(apiBase string, mtls bool) error {
 				"keys": []any{ecdsaPrivateJWK(serverKey, "gofapi-ciba-driver-server-key")},
 			},
 		},
-		"client": map[string]any{
-			"client_id": clientID,
-			"scope":     cibaScope,
-			"jwks": map[string]any{
-				"keys": jwks,
-			},
-		},
+		"client": clientConfig,
 	})
 	if err != nil {
 		return fmt.Errorf("marshal plan config: %w", err)
@@ -293,9 +321,55 @@ func runCIBAModule(ctx context.Context, rawHTTP *http.Client, apiBase, planID, c
 		case client.BackchannelAuthenticationExpired:
 			return awaitVerdict(rawHTTP, apiBase, module.ID, "")
 		case client.BackchannelAuthenticationApproved:
-			_ = r.Tokens
+			// Mirrors runModule's own accounts-endpoint call
+			// (main.go): FAPICIBARPProfileBehavior's own
+			// getAccountsEndpointResponseSteps requires the RP to
+			// call the "accounts" resource endpoint with the
+			// issued access token before this module reaches a
+			// terminal state at all — a module that gets its
+			// tokens but never places this call sits in WAITING
+			// indefinitely (confirmed live: still WAITING after
+			// 45s with a fully successful token exchange already
+			// logged). Discovered exactly the same way as
+			// runModule's own version: the URL isn't part of OIDC
+			// discovery, only this "exported value" mechanism.
+			if err := callAccountsEndpoint(ctx, rawHTTP, apiBase, module.ID, keyMgr, mtls, r.Tokens); err != nil {
+				return "ERROR: call accounts endpoint: " + err.Error()
+			}
 			return awaitVerdict(rawHTTP, apiBase, module.ID, "")
 		}
 	}
 	return awaitVerdict(rawHTTP, apiBase, module.ID, "gave up polling after "+fmt.Sprint(cibaMaxPolls)+" attempts")
+}
+
+// callAccountsEndpoint fetches moduleID's exported "accounts_endpoint"
+// value (the same mechanism runModule's own version in main.go uses —
+// see that call site's doc comment for why this URL isn't discoverable
+// any other way) and, when present, presents tokens.AccessToken to it —
+// with a DPoP proof under the default sender-constraining, or as a
+// plain Bearer credential under mtls (RFC 8705 §3.4), matching whichever
+// binding this module's own client.Config used.
+func callAccountsEndpoint(ctx context.Context, rawHTTP *http.Client, apiBase, moduleID string, keyMgr *ephemeralKeyManager, mtls bool, tokens client.TokenSet) error {
+	exposed, err := fetchExposedValues(rawHTTP, apiBase, moduleID)
+	if err != nil {
+		return fmt.Errorf("fetch exposed values: %w", err)
+	}
+	accountsEndpoint := exposed["accounts_endpoint"]
+	if accountsEndpoint == "" {
+		return nil
+	}
+	if mtls {
+		if _, _, err := callProtectedResourceBearer(ctx, rawHTTP, accountsEndpoint, tokens.AccessToken.Reveal()); err != nil {
+			return fmt.Errorf("call accounts endpoint: %w", err)
+		}
+		return nil
+	}
+	resourceClient := dpopResourceClient{
+		HTTP: rawHTTP, Signer: keyMgr.keys[keys.DPoPProofSigning], Alg: fapi.ES256,
+		Random: rand.Reader, Now: time.Now,
+	}
+	if _, _, err := resourceClient.callProtectedResource(ctx, accountsEndpoint, tokens.AccessToken.Reveal()); err != nil {
+		return fmt.Errorf("call accounts endpoint: %w", err)
+	}
+	return nil
 }

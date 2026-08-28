@@ -380,6 +380,33 @@ func TestIDTokenValidateRejectsExpiredAndExceededLifetime(t *testing.T) {
 	}
 }
 
+// TestIDTokenValidateRejectsIssuedAtTooOld covers OIDC Core §3.1.3.7
+// step 10: an iat further in the past than MaxLifetime allows is
+// rejected, even though the token's own exp is still both valid and
+// within MaxLifetime of the validation time — isolating this check from
+// ErrExpired/ErrLifetimeExceeded, which a naively-chosen exp would trip
+// first.
+func TestIDTokenValidateRejectsIssuedAtTooOld(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	// baseIDTokenPolicy's MaxLifetime is 2 minutes. Issued at now with a
+	// 4-minute lifetime (exp = now+4m); validated at now+3m: exp is
+	// still 1 minute out (within MaxLifetime, not expired), but iat is
+	// already 3 minutes old (exceeds MaxLifetime).
+	tok, err := IssueIDToken(baseIDTokenParams(key, now, 4*time.Minute))
+	if err != nil {
+		t.Fatalf("IssueIDToken: %v", err)
+	}
+	parsed, err := ParseIDToken(tok)
+	if err != nil {
+		t.Fatalf("ParseIDToken: %v", err)
+	}
+	if _, err := parsed.Validate(&key.PublicKey, baseIDTokenPolicy(now.Add(3*time.Minute))); !errors.Is(err, ErrIssuedAtTooOld) {
+		t.Fatalf("Validate(iat too old) = %v, want ErrIssuedAtTooOld", err)
+	}
+}
+
 func TestParseIDTokenRejectsMissingRequiredClaims(t *testing.T) {
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256"}`))
 	cases := []string{

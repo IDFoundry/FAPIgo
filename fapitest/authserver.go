@@ -1,6 +1,8 @@
 package fapitest
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -49,7 +51,13 @@ type authServer struct {
 // (and resource, once attached — see Harness.New) at request time, so
 // it's safe to attach both afterward, before any test code makes a
 // request; see Harness.attachServer.
-func newAuthServer(t *testing.T, clock *manualClock, approve AutoApprove) *authServer {
+//
+// mtls selects a real TLS listener requesting (not requiring — every
+// non-mTLS test still uses this same server, just never presents a
+// certificate) a client certificate, instead of the plain-HTTP
+// httptest.Server every other Config uses — see peerCertificate's own
+// doc comment for why handleToken needs this at all.
+func newAuthServer(t *testing.T, clock *manualClock, approve AutoApprove, mtls bool) *authServer {
 	t.Helper()
 	a := &authServer{t: t, clock: clock, approve: approve}
 	mux := http.NewServeMux()
@@ -59,9 +67,28 @@ func newAuthServer(t *testing.T, clock *manualClock, approve AutoApprove) *authS
 	mux.HandleFunc("/.well-known/openid-configuration", a.handleMetadata)
 	mux.HandleFunc("/jwks", a.handleJWKS)
 	mux.HandleFunc("/userinfo", a.handleUserInfo)
-	a.ts = httptest.NewServer(mux)
+	if mtls {
+		a.ts = httptest.NewUnstartedServer(mux)
+		a.ts.TLS = &tls.Config{ClientAuth: tls.RequestClientCert}
+		a.ts.StartTLS()
+	} else {
+		a.ts = httptest.NewServer(mux)
+	}
 	t.Cleanup(a.ts.Close)
 	return a
+}
+
+// peerCertificate returns the first TLS client certificate presented
+// on r's own connection, or nil if none was (including when the
+// listener isn't TLS-capable at all — every non-mTLS Config). Threaded
+// into handleToken only: sender-constraining binds at token-issuance
+// time exclusively (RFC 8705 §3 has no PAR-time pre-commitment concept
+// the way DPoP's optional dpop_jkt does), so no other handler needs it.
+func peerCertificate(r *http.Request) *x509.Certificate {
+	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
+		return nil
+	}
+	return r.TLS.PeerCertificates[0]
 }
 
 // handleMetadata serves this authorization server's own metadata
@@ -185,6 +212,7 @@ func (a *authServer) handleToken(w http.ResponseWriter, r *http.Request) {
 	}
 	grantType := formValue(form, "grant_type")
 	dpopProof := r.Header.Get("DPoP")
+	peerCert := peerCertificate(r)
 
 	var (
 		result   server.TokenResult
@@ -192,9 +220,9 @@ func (a *authServer) handleToken(w http.ResponseWriter, r *http.Request) {
 	)
 	switch grantType {
 	case "authorization_code":
-		result, tokenErr = a.srv.ExchangeAuthorizationCode(r.Context(), server.AuthorizationCodeExchangeRequest{HTTP: form, DPoPProof: dpopProof})
+		result, tokenErr = a.srv.ExchangeAuthorizationCode(r.Context(), server.AuthorizationCodeExchangeRequest{HTTP: form, DPoPProof: dpopProof, PeerCertificate: peerCert})
 	case "refresh_token":
-		result, tokenErr = a.srv.RefreshAccessToken(r.Context(), server.RefreshTokenRequest{HTTP: form, DPoPProof: dpopProof})
+		result, tokenErr = a.srv.RefreshAccessToken(r.Context(), server.RefreshTokenRequest{HTTP: form, DPoPProof: dpopProof, PeerCertificate: peerCert})
 	default:
 		a.writeOAuthError(w, http.StatusBadRequest, "unsupported_grant_type", "grant_type must be authorization_code or refresh_token")
 		return

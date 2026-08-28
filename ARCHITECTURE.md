@@ -528,19 +528,47 @@ DPoP — client *authentication* is still private_key_jwt only;
 `tls_client_auth`/dynamic client registration remain out of scope (see
 `cmd/conformance-as`'s own doc comment). This made the CIBA wall above
 worth a genuine live re-attempt rather than a permanent limitation:
-against `conformance/server/oidf-config/ciba-mtls.config.json`, every
-module now reaches `FINISHED` (up from an immediate suite-side config
-error for every module past discovery) — 9 PASS, 3 SKIPPED, 23 FAIL.
-The attempt surfaced and fixed two real library gaps
-(`server.Metadata` was missing `tls_client_certificate_bound_access_tokens`,
-RFC 8705 §3.3; `authenticateClient`'s client-assertion `aud`
-acceptance was far narrower than RFC 7523 §3 actually requires — see
-`server/par.go`'s `acceptableClientAssertionAudiences`, not
-mTLS-specific despite being found here). Most remaining FAILs share
-one deliberately-left-open root cause — this plan's TLS check enforces
-the older, narrower FAPI-RW §8.5 cipher-suite list, stricter than the
-BCP195/RFC 7525 set `cmd/conformance-as` already offers per
-FAPI2-SP-FINAL-5.2.2's own broader citation. Full breakdown in
+against `conformance/server/oidf-config/ciba-mtls.config.json`: **33
+PASS, 1 FAIL.** The one remaining FAIL is unfixable by construction —
+confirmed by disassembling `ExpectBindingMessageCorrectDisplay.evaluate()`
+itself: it unconditionally throws whenever `automated_ciba_approval_url`
+is set, no branch or placeholder exists for that case, and its only
+passing route needs a human physically watching a real device and
+uploading a screenshot as evidence — exactly the scenario
+`automated_ciba_approval_url` exists to replace everywhere else, so
+this one check and an automated run are mutually exclusive by the
+suite's own design. (The 3 modules
+requiring an RS256-signed probe — `...-signature-algorithm-is-RS256-fails`
+and its two client-assertion counterparts — self-skip unless the
+plan's own client is registered with an RSA/PS256 key, since the
+suite reuses that same registered key, just forcing its JWS header to
+RS256, rather than provisioning a separate one; switching client 1
+from ES256 to PS256/RSA — already an allowed algorithm here — turned
+all three from SKIPPED to PASSED with zero regressions elsewhere.)
+Getting here fixed five real library/harness gaps: `server.Metadata`
+was missing
+`tls_client_certificate_bound_access_tokens` (RFC 8705 §3.3);
+`authenticateClient`'s client-assertion `aud` acceptance was far
+narrower than RFC 7523 §3 actually requires (see `server/par.go`'s
+`acceptableClientAssertionAudiences`, not mTLS-specific despite being
+found here); this plan's own TLS check needed both a narrower cipher
+list *and* an RSA (not ECDSA) server certificate — `cmd/conformance-as`'s
+conformance cert is now RSA
+(`conformance/server/scripts/generate-server-cert.sh`), shared across
+every profile in `docker-compose.yml` (the change is TLS-layer only,
+no application code touched, treated as low-risk to already-passing
+baseline/message-signing but not independently re-confirmed live
+end-to-end — that needs the official `run-test-plan.py`/`unblock-implicit-callback.py`
+tooling, a real suite checkout, that an ad-hoc REST-API driver can't
+substitute for on a browser-driven flow); CIBA's own error vocabulary
+had incorrectly borrowed PAR's `invalid_request_object` convention
+(CIBA Core 1.0 §13 defines no such code — every request-object
+negative test uniformly expects plain `invalid_request`, confirmed by
+disassembling the suite's own check); and a CIBA backchannel
+authentication request's `iat` claim was never required at all — new
+`requestobject.VerifyPolicy.RequireIssuedAt`, mirroring
+`RequireNotBefore`/`RequireJTI`'s own pattern, set `true` only for
+CIBA (PAR's stays `false`). Full breakdown in
 `conformance/server/oidf-config/README.md`'s own CIBA section, which
 also covers the DPoP-only config's manual (non-automated) setup.
 

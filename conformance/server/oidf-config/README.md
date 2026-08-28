@@ -300,10 +300,22 @@ one **per client** — confirmed by disassembling
 since neither is documented in any bundled sample config) for the
 suite's own outbound TLS client to present.
 
-**Result of a live run: every module now reaches `FINISHED` (zero
-`INTERRUPTED`) — 9 PASS, 3 SKIPPED, 23 FAIL.** Getting this far
-surfaced two real, since-fixed library gaps, plus one still-open,
-narrower cause behind most of the 23:
+**Result of a live run: 33 PASS, 1 FAIL** (up from an immediate
+suite-side config error for every module past discovery). The one
+remaining FAIL is unfixable by construction, confirmed by disassembling
+`ExpectBindingMessageCorrectDisplay.evaluate()` down to the bytecode,
+not inferred: when `config.automated_ciba_approval_url` is set, this
+condition unconditionally throws — there is no branch, no placeholder,
+no alternate path. Its *only* passing route (reached solely when
+`automated_ciba_approval_url` is absent) is
+`createBrowserInteractionPlaceholder("...upload a screenshot/photo of
+the binding message")` — a genuinely manual run where a human sees the
+message on a real out-of-band device and uploads evidence through the
+suite's UI. That's precisely the scenario `automated_ciba_approval_url`
+exists to replace for every other module, so this one check and an
+automated run are mutually exclusive by the suite's own design — not a
+gap in this AS, this driver, or this config. Getting this far surfaced
+six real, since-fixed library/harness gaps:
 
 - **Fixed: `tls_client_certificate_bound_access_tokens` (RFC 8705
   §3.3) was entirely missing from `server.Metadata`.** The suite's
@@ -327,29 +339,92 @@ narrower cause behind most of the 23:
   BackchannelAuthentication), plus their mTLS aliases for an
   mTLS-bound client. This is not mTLS-specific — a DPoP-bound client
   gets the same widened set now too (`TestPushAuthorizationRequestAcceptsTokenEndpointURLAsClientAssertionAudience`).
-- **Open, not fixed (out of scope for this pass): FAPI-RW-8.5-1/8.5-2
-  ("Server accepted a cipher that is not on the list of permitted
-  ciphers")**, `ECDHE-ECDSA-CHACHA20-POLY1305-SHA256`. This module's
-  TLS cipher-suite check enforces the older, narrower FAPI-RW §8.5
-  list (AES-128-GCM only, both ECDSA and RSA), stricter than the
-  BCP195/RFC 7525 set `cmd/conformance-as/main.go`'s own
-  `bcp195TLS12CipherSuites` already offers (which — correctly, per
-  FAPI2-SP-FINAL-5.2.2's own broader citation — also includes AES-256-GCM
-  and ChaCha20-Poly1305). Confirmed live with `openssl s_client`: Go's
-  server honors *client* cipher preference order among these mutually
-  acceptable suites, so a probe that offers ChaCha20 first gets it
-  selected, tripping this narrower check. Narrowing the shared cipher
-  list to satisfy this one legacy requirement risks nothing for the
-  now-passing baseline/message-signing plans, but wasn't attempted
-  here — a deliberate policy choice about which TLS profile this
-  binary should target, not a defect this session's mTLS work
-  introduced.
-- Also newly visible, unrelated to mTLS or the two fixes above:
-  `x-fapi-interaction-id not found in resource endpoint response
-  headers` (FAPI-R-6.2.1-11) — this module reaches the protected
-  resource step, further than any CIBA run before it, and finds this
-  header genuinely unimplemented anywhere in `resource`/`cmd/conformance-as`.
-  A real, separate gap; not addressed here.
+- **Fixed: FAPI-RW-8.5-1/8.5-2 ("Server accepted a cipher that is not
+  on the list of permitted ciphers") — two distinct causes, both
+  resolved.** First cause: `cmd/conformance-as/main.go`'s own cipher
+  list (was `bcp195TLS12CipherSuites`, now `fapiRWTLS12CipherSuites`)
+  included ChaCha20-Poly1305 and AES-256-GCM, correct per
+  FAPI2-SP-FINAL-5.2.2's own BCP195/RFC 7525 citation but broader than
+  this specific check's own narrower, legacy FAPI-RW §8.5 list —
+  narrowed to just the two AES-128-GCM suites. Second, deeper cause,
+  found by disassembling the suite's own
+  `net.openid.conformance.util.FAPITLSClient.FAPI_TLS_1_2_CIPHERS`
+  constant directly (not documented anywhere in a bundled sample
+  config): its permitted set is **RSA-keyed cipher suites only**
+  (`DHE_RSA`/`ECDHE_RSA` AES-GCM) — no `ECDHE_ECDSA` variant exists in
+  it at all. `conformance/server/scripts/generate-server-cert.sh`
+  generated an ECDSA server certificate, which structurally can never
+  negotiate any cipher this check accepts, regardless of which
+  `CipherSuites` this binary offers — the certificate's own key type
+  was the real blocker, not the cipher list. Switched to RSA
+  (`-newkey rsa:2048`); confirmed live, both `FAPI-RW-8.5-1` and
+  `FAPI-RW-8.5-2` failures are gone entirely. This cert is shared
+  across every `conformance-as-*` profile (`../docker-compose.yml`),
+  so baseline/message-signing needed a look too — attempted live via
+  an ad-hoc REST-API driver (this repo's own `run-test-plan.py`-based
+  tooling needs a real suite checkout this session didn't have), which
+  hit a *different*, pre-existing gap of its own: those plans' browser
+  automation modules stall waiting for `unblock-implicit-callback.py`'s
+  companion nudge (documented in `../scripts/README.md`'s own
+  "CI-style run" section), which an ad-hoc driver doesn't provide —
+  unrelated to this cert change (the exact same stall reproduces
+  against the original ECDSA cert too). Treated as low-risk and left
+  for `run-all.sh`'s own next real CI run to confirm: this change is
+  TLS-layer only (Go's `crypto/tls`, no application code touched), and
+  the suite's own outbound HTTP client already trusts any certificate
+  regardless of key type (see `../docker-compose.yml`'s own header
+  comment).
+- **Fixed: `x-fapi-interaction-id` (FAPI-R-6.2.1-11) was entirely
+  unimplemented.** FAPI 1.0 Part 1 §6.2.1 requires a protected resource
+  echo the incoming `x-fapi-interaction-id` request header on every
+  response — success or error — or generate a fresh RFC 4122 UUID when
+  none was presented; the suite's own check
+  (`CheckForFAPIInteractionIdInResourceResponse`) additionally
+  round-trips the value through `java.util.UUID.fromString`, rejecting
+  anything not in canonical 8-4-4-4-12 form. New
+  `resource.ResolveInteractionID`/`resource.NewInteractionID`
+  (`resource/interactionid.go`) implement this — deliberately outside
+  `Verify` itself, since the value depends on nothing `Verify`
+  computes, only the raw incoming request — wired into
+  `cmd/conformance-as/resource.go`'s `userinfoHandler` as the very
+  first thing the handler does, before any response is written on any
+  path.
+- **Fixed: `CIBA-13` ("'error' field has unexpected value") on every
+  `ensure-request-object-*-fails` negative test.** This server rejected
+  every one of these malformed backchannel authentication requests
+  correctly — the actual bug was the *error code*: CIBA Core 1.0 §13
+  defines no `invalid_request_object` error at all (unlike PAR/authorize,
+  where RFC 9101's own JAR-6.2 vocabulary applies), so every one of
+  these negative tests uniformly expects plain `invalid_request` —
+  confirmed by disassembling
+  `AbstractFAPICIBAID1EnsureSendingInvalidBackchannelAuthorizationRequest.checkErrorFromBackchannelAuthorizationRequestResponse`.
+  `server/backchannel_authentication.go` had borrowed PAR's
+  `ErrorInvalidRequestObject` convention without checking CIBA's own,
+  narrower error vocabulary — switched to `ErrorInvalidRequest`
+  throughout. One case in this family
+  (`ensure-request-object-missing-iat-fails`) failed differently ("No
+  error parameter found") because this server never required `iat` on
+  a CIBA backchannel authentication request at all — new
+  `requestobject.VerifyPolicy.RequireIssuedAt`, mirroring
+  `RequireNotBefore`/`RequireJTI`'s own established pattern, set `true`
+  only for CIBA's own request object (PAR's stays `false`, unaffected).
+- **Fixed: the 3 `...-signature-algorithm-is-RS256-fails` modules
+  self-skipped rather than ran.** Not a code gap — a plan-config one.
+  Disassembling `FAPICIBAID1EnsureRequestObjectSignatureAlgorithmIsRS256Fails.onConfigure`
+  (and its two client-assertion counterparts, both identical) shows
+  each checks `JWKUtil.getAlgFromClientJwks(env)` — the plan's own
+  first registered client's key `alg` — equals `"PS256"`; if not, it
+  fires `fireTestSkipped` outright rather than running at all. It
+  isn't asking for a *separate* RSA client: `performAuthorizationRequest`
+  copies that same client's JWK, flips its `alg` to `"RS256"` via
+  `ChangeClientJwksAlgToRS256`, signs the one probe with it, then
+  restores the original for the rest of the flow. `ciba-mtls.config.json`/`ciba-mtls-plan.json`
+  originally registered client 1 with an ES256/EC key (mirroring
+  `ciba.config.json`'s own DPoP client) — switched to a PS256/RSA
+  keypair instead (PS256 was already an allowed algorithm here; no
+  code change). Confirmed live: all three modules flip from SKIPPED to
+  PASSED, with zero regressions across the other 31 — final tally 33
+  PASS, 1 FAIL.
 
 Three consecutive module non-completions also trip the suite runner's
 own circuit breaker (`ServerUnhealthyError`) and abort the whole run —
@@ -357,15 +432,21 @@ worth knowing if reproducing this, since a config mistake early on can
 silently truncate the rest of the plan rather than reporting a normal
 per-module FAIL.
 
-Neither CIBA config is wired into `../scripts/run-all.sh` — a majority-
-FAILED run isn't a useful CI gate. Bring the container up with `docker
-compose up --build conformance-as-ciba-mtls` and drive
+Neither CIBA config is wired into `../scripts/run-all.sh` yet. Now that
+`ciba-mtls.config.json` genuinely passes (33/1, the one FAIL being
+the structural automation limitation above, not a defect), wiring it
+into the automated gate — an `expected-skips`/`expected-warnings`
+entry for that one module, a CI cert-generation step, a
+`conformance-as-ciba-mtls` service in the CI workflow — is a real,
+worthwhile follow-up, just not done in this pass. Bring the container
+up with `docker compose up --build conformance-as-ciba-mtls` and drive
 `fapi-ciba-id1-test-plan` the same way as the other plans if you want
-to reproduce this yourself.
-`ciba.config.json`/`conformance-as-ciba` (DPoP) remain for
-exploratory/manual use as before — e.g. confirming the
-`/backchannel-authenticate`/`/backchannel-approve` HTTP surface by
-hand without standing up the mTLS listener too.
+to reproduce this yourself. `ciba.config.json`/`conformance-as-ciba`
+(DPoP) remain for exploratory/manual use as before — e.g. confirming
+the `/backchannel-authenticate`/`/backchannel-approve` HTTP surface by
+hand without standing up the mTLS listener too; that config still
+cannot pass `fapi-ciba-id1-test-plan` at all, for the unconditional
+MTLS mandate documented above.
 
 `automated_ciba_approval_url` in `ciba-plan.json` points at this
 binary's own `/backchannel-approve?auth_req_id={auth_req_id}&action={action}`

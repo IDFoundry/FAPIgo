@@ -571,6 +571,70 @@ func TestVerifyAcceptsMissingJTIWhenNotRequired(t *testing.T) {
 	}
 }
 
+// The OIDF FAPI-CIBA-ID1 conformance suite mandates iat on a CIBA
+// backchannel authentication request unconditionally (confirmed by its
+// own EnsureRequestObjectMissingIatFails negative test), unlike PAR's
+// request object. VerifyPolicy models that as RequireIssuedAt, set
+// only by that caller — a missing iat must be rejected when it's
+// true...
+func TestVerifyRejectsMissingIssuedAtWhenRequired(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256"}`))
+	payloadJSON, err := json.Marshal(map[string]any{
+		"iss": "client-123", "aud": "https://as.example", "exp": now.Add(time.Minute).Unix(),
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	signingInput := header + "." + base64.RawURLEncoding.EncodeToString(payloadJSON)
+	sig, err := signRaw(key, signingInput)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	token := signingInput + "." + sig
+
+	obj, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	policy := basePolicy(now)
+	policy.RequireIssuedAt = true
+	if _, err := obj.Verify(context.Background(), &key.PublicKey, policy); !errors.Is(err, ErrMissingIssuedAt) {
+		t.Fatalf("Verify(no iat, required) = %v, want ErrMissingIssuedAt", err)
+	}
+}
+
+// ...but accepted, as before, when it's false (the default, and what
+// PAR's own request object uses).
+func TestVerifyAcceptsMissingIssuedAtWhenNotRequired(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256"}`))
+	payloadJSON, err := json.Marshal(map[string]any{
+		"iss": "client-123", "aud": "https://as.example", "exp": now.Add(time.Minute).Unix(),
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	signingInput := header + "." + base64.RawURLEncoding.EncodeToString(payloadJSON)
+	sig, err := signRaw(key, signingInput)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	token := signingInput + "." + sig
+
+	obj, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if _, err := obj.Verify(context.Background(), &key.PublicKey, basePolicy(now)); err != nil {
+		t.Fatalf("Verify(no iat, not required) = %v, want nil error", err)
+	}
+}
+
 func TestVerifyDetectsReplay(t *testing.T) {
 	key := generateKey(t)
 	now := time.Now()

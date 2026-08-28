@@ -41,20 +41,26 @@ poll mode only) is verified by unit/integration tests, not the live
 OIDF suite as its primary gate: `fapi-ciba-id1-test-plan` requires
 MTLS-bound access tokens unconditionally. Now that this module supports
 mTLS sender-constraining (RFC 8705 §3, `-mtls`), this was genuinely
-re-attempted live against `ciba-mtls.config.json` — every module now
-reaches `FINISHED` (up from an immediate suite-side config error for
-every module but discovery), with 9 PASS / 3 SKIPPED / 23 FAIL. Two
-real library gaps the attempt surfaced were fixed along the way
-(`tls_client_certificate_bound_access_tokens` metadata, and
-client-assertion `aud` acceptance being far too narrow); most of the
-remaining FAILs share one root cause — a stricter, legacy FAPI-RW §8.5
-cipher-suite requirement this binary's own (correctly BCP195-broader)
-cipher list doesn't satisfy — deliberately left open rather than
-narrowing the cipher list for one plan's sake. Full breakdown, live
-findings and reproduction steps in
+re-attempted live against `ciba-mtls.config.json` — **33 PASS / 1
+FAIL**, up from an immediate suite-side config error for every module
+past discovery. The one remaining FAIL is unfixable by construction —
+confirmed by disassembly, not inferred: the suite's own check
+unconditionally throws whenever automated CIBA approval is configured,
+with no alternate path — its only passing route needs a human
+physically watching a real device. Six real library/harness gaps the attempt
+surfaced were all fixed along the way:
+`tls_client_certificate_bound_access_tokens` metadata, client-assertion
+`aud` acceptance being far too narrow, a stricter legacy FAPI-RW §8.5
+TLS check that needed both a narrower cipher list *and* an RSA (not
+ECDSA) server certificate, a CIBA-specific error code that had
+incorrectly borrowed PAR's `invalid_request_object` convention, a
+missing `iat` requirement on CIBA's own request object, and 3 modules
+that self-skip without an RSA/PS256-registered client (switching the
+plan's own client 1 from ES256 turned all three from SKIPPED to
+PASSED). Full breakdown, live findings and reproduction steps in
 [`server/oidf-config/README.md`](server/oidf-config/README.md#ciba-manual-only--not-part-of-automated-conformance).
-Still not part of `scripts/run-all.sh` given the majority-FAILED
-result.
+Not yet wired into `scripts/run-all.sh`, though at this pass rate it's
+now a real, worthwhile candidate.
 
 `client`'s own CIBA support
 (`BeginBackchannelAuthentication`/`PollBackchannelAuthentication`) was

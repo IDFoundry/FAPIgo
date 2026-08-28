@@ -115,7 +115,7 @@ func userinfoHandler(srv *server.Server, verifier *fapires.Verifier, userinfoURL
 			writeResourceErrorRaw(w, http.StatusInternalServerError, "server_error", "failed to encode subject")
 			return
 		}
-		body := make(map[string]json.RawMessage, len(claims)+1)
+		body := make(map[string]json.RawMessage, len(claims))
 		for k, v := range claims {
 			body[k] = v
 		}

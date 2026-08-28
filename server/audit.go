@@ -33,6 +33,18 @@ const (
 	// AuditEventRefreshAccessToken records the outcome of a
 	// RefreshAccessToken call.
 	AuditEventRefreshAccessToken
+
+	// AuditEventBeginBackchannelAuthentication records the outcome of a
+	// BeginBackchannelAuthentication call.
+	AuditEventBeginBackchannelAuthentication
+
+	// AuditEventCompleteBackchannelAuthentication records the outcome of
+	// a CompleteBackchannelAuthentication call.
+	AuditEventCompleteBackchannelAuthentication
+
+	// AuditEventExchangeBackchannelAuthentication records the outcome of
+	// an ExchangeBackchannelAuthentication call.
+	AuditEventExchangeBackchannelAuthentication
 )
 
 // AuditOutcome is a closed set of outcomes for an AuditEvent.

@@ -508,6 +508,26 @@ passing its suite is not evidence the other role conforms, even where
 both share internal JOSE code — protocol behaviour and negative-test
 expectations differ per role.
 
+CIBA (`server.BeginBackchannelAuthentication`/`CompleteBackchannelAuthentication`/
+`ExchangeBackchannelAuthentication`) is deliberately not part of this
+automated certification loop. It implements base OIDC CIBA and
+FAPI-CIBA's other requirements (a mandatory signed authentication
+request with `jti`/`nbf`, poll-mode-only delivery, DPoP-bound tokens),
+verified by unit/integration tests instead — but the OIDF suite's own
+`fapi-ciba-id1-test-plan` requires MTLS-bound access tokens
+unconditionally, even under `client_auth_type=private_key_jwt`
+(confirmed directly from the suite's own
+`AbstractFAPICIBAID1.setupPrivateKeyJwt`, not inferred): "FAPI requires
+the use of MTLS sender constrained access tokens, so we must use the
+MTLS version of the token endpoint even when using private_key_jwt
+client authentication." mTLS is out of scope for this module
+everywhere else already (see `cmd/conformance-as`'s own doc comment),
+so this isn't a gap specific to CIBA — it's the same boundary applied
+consistently, just the first place a suite plan makes it a hard
+prerequisite rather than an alternative variant. `conformance/server/oidf-config/README.md`'s
+own CIBA section covers the manual (non-automated) setup available for
+exploratory use.
+
 ## What is and isn't shared
 
 **Shared** (via `internal/`, `extension`, `storage`'s replay primitive

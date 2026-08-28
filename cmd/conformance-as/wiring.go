@@ -19,12 +19,16 @@ import (
 // Factored out so the end-to-end smoke test can stand up the exact same
 // wiring main.go uses, against its own TLS listener, without going
 // through flags or a config file on disk.
-func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChallenge bool, userinfoSigning bool) (*http.ServeMux, error) {
+func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChallenge bool, userinfoSigning bool, ciba bool) (*http.ServeMux, error) {
 	endpoints, err := buildEndpoints(resolved.Issuer, allowLoopbackHTTP)
 	if err != nil {
 		return nil, err
 	}
 	userinfoURL, err := buildUserinfoURL(resolved.Issuer, allowLoopbackHTTP)
+	if err != nil {
+		return nil, err
+	}
+	backchannelAuthenticationURL, err := buildBackchannelAuthenticationURL(resolved.Issuer, allowLoopbackHTTP)
 	if err != nil {
 		return nil, err
 	}
@@ -73,12 +77,31 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 	if userinfoSigning {
 		algorithms.UserInfo = resolved.Algorithms.IDToken
 	}
+	limits := resolved.Limits
+	// Off by default (main.go's -ciba flag): CIBA isn't part of the
+	// FAPI 2.0 Security Profile itself, so this stays a worked-example
+	// opt-in like -userinfo-signing above — reuses the same algorithm
+	// as ID tokens for the same "one official value, no override"
+	// reason.
+	if ciba {
+		endpoints.BackchannelAuthentication = backchannelAuthenticationURL
+		// The full recommended set (ES256/PS256/EdDSA), not just
+		// IDToken's single value: unlike UserInfo signing (this
+		// server's own choice), this is a client-verification
+		// allow-list — the same role ClientAssertion/RequestObject's
+		// own algorithm sets play, including a PS256-registered test
+		// client's own backchannel authentication requests.
+		algorithms.BackchannelAuthenticationRequest = server.RecommendedAlgorithmSet()
+		limits.BackchannelAuthenticationRequestLifetime = backchannelAuthenticationRequestLifetime
+		limits.MaxBackchannelAuthenticationRequestLifetime = maxBackchannelAuthenticationRequestLifetime
+		limits.BackchannelAuthenticationPollInterval = backchannelAuthenticationPollInterval
+	}
 	srvCfg := server.Config{
 		Issuer:     resolved.Issuer,
 		Endpoints:  endpoints,
 		Profile:    resolved.Profile,
 		Algorithms: algorithms,
-		Limits:     resolved.Limits,
+		Limits:     limits,
 		// These storage implementations are honestly non-durable
 		// in-memory maps. AssuranceProduction would make server.New
 		// reject them via checkStoreAssurance — do not change this to
@@ -162,6 +185,9 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 		srvCfg.Limits.DPoPNonceLifetime = dpopNonceLifetime
 		srvDeps.Nonces = memstore.NewNonceStore()
 	}
+	if ciba {
+		srvDeps.Backchannel = memstore.NewBackchannelAuthenticationStore()
+	}
 	srv, err := server.New(srvCfg, srvDeps)
 	if err != nil {
 		return nil, err
@@ -195,6 +221,7 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 	}
 
 	consent := newConsentHandler(srv, clientRepo, server.SystemClock{}, resolved.DefaultSubject)
+	backchannel := newBackchannelHandler(srv, server.SystemClock{}, resolved.DefaultSubject)
 	userinfoURLValue := userinfoURL.URL()
-	return newRouter(srv, consent, resolved.AdvertisedScopes, resourceVerifier, &userinfoURLValue, identityClaims, clientRepo, userinfoSigning), nil
+	return newRouter(srv, consent, backchannel, resolved.AdvertisedScopes, resourceVerifier, &userinfoURLValue, identityClaims, clientRepo, userinfoSigning), nil
 }

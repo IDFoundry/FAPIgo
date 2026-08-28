@@ -249,3 +249,64 @@ against the running module, not the plan-level default):
 
 See [../scripts/README.md](../scripts/README.md) for how to run the
 server against a filled-in config.
+
+## CIBA (manual only — not part of automated conformance)
+
+`ciba.config.json` enables CIBA (`-ciba`, `cmd/conformance-as`'s own
+flag) against the suite's **`fapi-ciba-id1-test-plan`**
+("FAPI-CIBA-ID1: Two client test"), variants
+`client_auth_type=private_key_jwt`, `fapi_ciba_profile=plain_fapi`,
+`ciba_mode=poll`, `client_registration=static_client` — the same
+`go run ./conformance/server/scripts/setup-config` command generates
+`ciba-plan.json` alongside the other two profiles' plan configs
+(idempotent the same way).
+
+**This plan cannot pass against this AS, and isn't wired into
+`../scripts/run-all.sh`.** Confirmed by an actual live run, not
+assumed: the discovery-endpoint-verification module passes cleanly
+(metadata, JWKS and algorithm advertisement are all correct), but
+every other module fails immediately — `ExtractMTLSCertificatesFromConfiguration:
+Couldn't find TLS client certificate or key for MTLS` — because the
+suite's own `AbstractFAPICIBAID1.setupPrivateKeyJwt` hardcodes an MTLS
+requirement regardless of `client_auth_type`:
+
+```java
+// FAPI requires the use of MTLS sender constrained access tokens, so we must use
+// the MTLS version of the token endpoint even when using private_key_jwt client authentication
+supportMTLSEndpointAliases = SupportMTLSEndpointAliases.class;
+```
+
+Unlike the base FAPI2SPFinal plans above (where `sender_constrain=dpop`
+and `sender_constrain=mtls` are alternative variants — this AS only
+ever selects the DPoP one), FAPI-CIBA-ID1 has no DPoP-only variant at
+all; every module inherits this from the same abstract base class.
+Since this module never implements mTLS anywhere (see
+[ARCHITECTURE.md](../../../ARCHITECTURE.md#conformance-strategy)),
+full FAPI-CIBA-ID1 certification isn't reachable without adding it —
+a large, separate undertaking, unrelated to this AS's own CIBA
+correctness (covered instead by `server`'s unit/integration tests).
+Three consecutive module non-completions also trip the suite runner's
+own circuit breaker (`ServerUnhealthyError`) and abort the whole run,
+so this can't be worked around with `expected-warnings`/`expected-skips`
+entries either — those only apply to a module that still reaches
+`FINISHED`.
+
+This config exists for exploratory/manual use only — e.g. confirming
+the discovery document and the `/backchannel-authenticate` /
+`/backchannel-approve` HTTP surface behave as expected by hand, or as
+a starting point if mTLS support is ever added. Bring the container up
+with `docker compose up --build conformance-as-ciba` and drive
+`fapi-ciba-id1-test-plan` the same way as the other two plans if you
+want to reproduce this yourself; don't expect it to pass.
+
+`automated_ciba_approval_url` in `ciba-plan.json` points at this
+binary's own `/backchannel-approve?auth_req_id={auth_req_id}&action={action}`
+— the suite's documented mechanism
+(`net.openid.conformance.condition.client.CallAutomatedCibaApprovalEndpoint`)
+for driving an approve/deny decision when there's no real out-of-band
+device for an automated test run to click through; see
+`cmd/conformance-as/backchannel.go`'s own doc comment for what that
+endpoint does. `client.hint_type`/`client.hint_value` (`"login_hint"`/
+the AS's own `default_subject`) are CIBA's equivalent of `login_hint`
+under the `plain_fapi` profile — `client.login_hint` itself is a
+Brazil/ConnectID-specific field the suite hides for this profile.

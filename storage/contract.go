@@ -778,3 +778,291 @@ func TestAccessTokenStoreContract(t *testing.T, factory func() AccessTokenStore)
 		}
 	})
 }
+
+// TestBackchannelAuthenticationStoreContract exercises factory()'s
+// behavior against the guarantees BackchannelAuthenticationStore's
+// documentation promises: DecideBackchannelAuthentication is single-use;
+// PollBackchannelAuthentication is reusable for Pending/Denied/AuthenticationFailed
+// but single-use for the first Approved observation (mirroring
+// RedeemRefreshToken's and RedeemAuthorizationCode's contracts
+// respectively, layered on one interface); expiry and slow-down are
+// enforced. factory must return a fresh, empty
+// BackchannelAuthenticationStore each call.
+func TestBackchannelAuthenticationStoreContract(t *testing.T, factory func() BackchannelAuthenticationStore) {
+	t.Helper()
+
+	newRecord := func(authReqID, handle string) NewBackchannelAuthentication {
+		return NewBackchannelAuthentication{
+			AuthReqIDHash: sha256.Sum256([]byte(authReqID)),
+			HandleHash:    sha256.Sum256([]byte(handle)),
+			ClientID:      "client-1",
+			Parameters:    map[string]json.RawMessage{"scope": json.RawMessage(`"openid"`)},
+			TokenClaims:   map[string]json.RawMessage{"custom_claim": json.RawMessage(`"value"`)},
+			DeliveryMode:  "poll",
+			DPoPJKT:       "jkt-1",
+			PollInterval:  time.Millisecond,
+			ExpiresAt:     time.Now().Add(time.Minute),
+		}
+	}
+
+	t.Run("CreateThenPollReturnsPending", func(t *testing.T) {
+		store := factory()
+		ctx := context.Background()
+		want := newRecord("auth-req-1", "handle-1")
+		if err := store.CreateBackchannelAuthentication(ctx, want); err != nil {
+			t.Fatalf("CreateBackchannelAuthentication: %v", err)
+		}
+		got, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
+			AuthReqIDHash: want.AuthReqIDHash, Now: time.Now(),
+		})
+		if err != nil {
+			t.Fatalf("PollBackchannelAuthentication: %v", err)
+		}
+		if got.Status != BackchannelAuthenticationPending {
+			t.Fatalf("Status = %v, want Pending", got.Status)
+		}
+		if got.ClientID != want.ClientID {
+			t.Fatalf("ClientID = %q, want %q", got.ClientID, want.ClientID)
+		}
+	})
+
+	t.Run("DecideThenPollReturnsApprovedFieldsRoundTripped", func(t *testing.T) {
+		store := factory()
+		ctx := context.Background()
+		record := newRecord("auth-req-2", "handle-2")
+		if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
+			t.Fatalf("CreateBackchannelAuthentication: %v", err)
+		}
+		authTime := time.Now().Truncate(time.Second)
+		if _, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
+			HandleHash: record.HandleHash, Status: BackchannelAuthenticationApproved,
+			Subject: "user-1", Scope: []string{"openid", "accounts"},
+			AuthTime: authTime, ACR: "acr-1", AMR: []string{"pwd"},
+		}); err != nil {
+			t.Fatalf("DecideBackchannelAuthentication: %v", err)
+		}
+		got, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
+			AuthReqIDHash: record.AuthReqIDHash, Now: time.Now(),
+		})
+		if err != nil {
+			t.Fatalf("PollBackchannelAuthentication: %v", err)
+		}
+		if got.Status != BackchannelAuthenticationApproved || got.Subject != "user-1" ||
+			len(got.Scope) != 2 || got.ACR != "acr-1" || !got.AuthTime.Equal(authTime) ||
+			got.DPoPJKT != record.DPoPJKT || string(got.TokenClaims["custom_claim"]) != `"value"` {
+			t.Fatalf("PollBackchannelAuthentication returned %+v, want fields matching decision+record", got)
+		}
+	})
+
+	t.Run("DecideBackchannelAuthenticationIsSingleUse", func(t *testing.T) {
+		store := factory()
+		ctx := context.Background()
+		record := newRecord("auth-req-3", "handle-3")
+		if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
+			t.Fatalf("CreateBackchannelAuthentication: %v", err)
+		}
+		if _, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
+			HandleHash: record.HandleHash, Status: BackchannelAuthenticationDenied,
+		}); err != nil {
+			t.Fatalf("first DecideBackchannelAuthentication: %v", err)
+		}
+		if _, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
+			HandleHash: record.HandleHash, Status: BackchannelAuthenticationApproved, Subject: "user-1",
+		}); err == nil {
+			t.Fatalf("second DecideBackchannelAuthentication = nil error, want error")
+		}
+	})
+
+	t.Run("ConcurrentDecideBackchannelAuthenticationHasExactlyOneWinner", func(t *testing.T) {
+		store := factory()
+		ctx := context.Background()
+		record := newRecord("auth-req-4", "handle-4")
+		if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
+			t.Fatalf("CreateBackchannelAuthentication: %v", err)
+		}
+		successes := runConcurrently(contractConcurrentAttempts, func() bool {
+			_, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
+				HandleHash: record.HandleHash, Status: BackchannelAuthenticationDenied,
+			})
+			return err == nil
+		})
+		if successes != 1 {
+			t.Fatalf("concurrent DecideBackchannelAuthentication succeeded %d times, want exactly 1", successes)
+		}
+	})
+
+	// Denied/AuthenticationFailed polls are freely repeatable — the
+	// client keeps polling and must keep observing the same terminal
+	// outcome, mirroring RedeemRefreshToken's reusable contract rather
+	// than RedeemAuthorizationCode's single-use one.
+	t.Run("PollAfterDeniedIsRepeatable", func(t *testing.T) {
+		store := factory()
+		ctx := context.Background()
+		record := newRecord("auth-req-5", "handle-5")
+		if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
+			t.Fatalf("CreateBackchannelAuthentication: %v", err)
+		}
+		if _, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
+			HandleHash: record.HandleHash, Status: BackchannelAuthenticationDenied, Reason: "user declined",
+		}); err != nil {
+			t.Fatalf("DecideBackchannelAuthentication: %v", err)
+		}
+		for i := 0; i < 2; i++ {
+			got, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
+				AuthReqIDHash: record.AuthReqIDHash, Now: time.Now().Add(time.Duration(i) * time.Second),
+			})
+			if err != nil {
+				t.Fatalf("poll %d: %v", i, err)
+			}
+			if got.Status != BackchannelAuthenticationDenied || got.Reason != "user declined" {
+				t.Fatalf("poll %d returned %+v, want Denied/%q", i, got, "user declined")
+			}
+		}
+	})
+
+	// The first poll to observe Approved consumes it — a second poll for
+	// the same auth_req_id must report
+	// *BackchannelAuthenticationAlreadyRedeemedError, the
+	// RedeemAuthorizationCode-style single-use guarantee.
+	t.Run("PollAfterApprovedIsSingleUse", func(t *testing.T) {
+		store := factory()
+		ctx := context.Background()
+		record := newRecord("auth-req-6", "handle-6")
+		if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
+			t.Fatalf("CreateBackchannelAuthentication: %v", err)
+		}
+		if _, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
+			HandleHash: record.HandleHash, Status: BackchannelAuthenticationApproved, Subject: "user-1",
+		}); err != nil {
+			t.Fatalf("DecideBackchannelAuthentication: %v", err)
+		}
+		if _, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
+			AuthReqIDHash: record.AuthReqIDHash, Now: time.Now(),
+		}); err != nil {
+			t.Fatalf("first poll: %v", err)
+		}
+		_, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
+			AuthReqIDHash: record.AuthReqIDHash, Now: time.Now().Add(time.Second),
+		})
+		if err == nil {
+			t.Fatalf("second poll after Approved = nil error, want error")
+		}
+		var alreadyRedeemed *BackchannelAuthenticationAlreadyRedeemedError
+		if !errors.As(err, &alreadyRedeemed) {
+			t.Fatalf("second poll error = %v, want errors.As into *BackchannelAuthenticationAlreadyRedeemedError", err)
+		}
+	})
+
+	t.Run("ConcurrentPollAfterApprovedHasExactlyOneWinner", func(t *testing.T) {
+		store := factory()
+		ctx := context.Background()
+		record := newRecord("auth-req-7", "handle-7")
+		if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
+			t.Fatalf("CreateBackchannelAuthentication: %v", err)
+		}
+		if _, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
+			HandleHash: record.HandleHash, Status: BackchannelAuthenticationApproved, Subject: "user-1",
+		}); err != nil {
+			t.Fatalf("DecideBackchannelAuthentication: %v", err)
+		}
+		now := time.Now()
+		successes := runConcurrently(contractConcurrentAttempts, func() bool {
+			_, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
+				AuthReqIDHash: record.AuthReqIDHash, Now: now,
+			})
+			return err == nil
+		})
+		if successes != 1 {
+			t.Fatalf("concurrent poll-after-Approved succeeded %d times, want exactly 1", successes)
+		}
+	})
+
+	t.Run("PollUnknownAuthReqIDFails", func(t *testing.T) {
+		store := factory()
+		hash := sha256.Sum256([]byte("never-created"))
+		if _, err := store.PollBackchannelAuthentication(context.Background(), PollBackchannelAuthentication{
+			AuthReqIDHash: hash, Now: time.Now(),
+		}); err == nil {
+			t.Fatalf("PollBackchannelAuthentication(unknown) = nil error, want error")
+		}
+	})
+
+	// A poll after ExpiresAt must report expiry regardless of decision
+	// status — even one that would otherwise report Approved.
+	t.Run("PollAfterExpiryFailsEvenWhenApproved", func(t *testing.T) {
+		store := factory()
+		ctx := context.Background()
+		record := newRecord("auth-req-8", "handle-8")
+		record.ExpiresAt = time.Now().Add(time.Millisecond)
+		if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
+			t.Fatalf("CreateBackchannelAuthentication: %v", err)
+		}
+		if _, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
+			HandleHash: record.HandleHash, Status: BackchannelAuthenticationApproved, Subject: "user-1",
+		}); err != nil {
+			t.Fatalf("DecideBackchannelAuthentication: %v", err)
+		}
+		_, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
+			AuthReqIDHash: record.AuthReqIDHash, Now: record.ExpiresAt.Add(time.Second),
+		})
+		if err == nil {
+			t.Fatalf("poll after expiry = nil error, want error")
+		}
+		var expired *BackchannelAuthenticationExpiredError
+		if !errors.As(err, &expired) {
+			t.Fatalf("poll after expiry error = %v, want errors.As into *BackchannelAuthenticationExpiredError", err)
+		}
+	})
+
+	// Two polls closer together than PollInterval: the second must be
+	// rejected with *BackchannelAuthenticationSlowDownError, driven by
+	// injected Now rather than a real sleep.
+	t.Run("PollFasterThanIntervalFails", func(t *testing.T) {
+		store := factory()
+		ctx := context.Background()
+		record := newRecord("auth-req-9", "handle-9")
+		record.PollInterval = 5 * time.Second
+		if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
+			t.Fatalf("CreateBackchannelAuthentication: %v", err)
+		}
+		now := time.Now()
+		if _, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
+			AuthReqIDHash: record.AuthReqIDHash, Now: now,
+		}); err != nil {
+			t.Fatalf("first poll: %v", err)
+		}
+		_, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
+			AuthReqIDHash: record.AuthReqIDHash, Now: now.Add(time.Second),
+		})
+		if err == nil {
+			t.Fatalf("poll faster than interval = nil error, want error")
+		}
+		var slowDown *BackchannelAuthenticationSlowDownError
+		if !errors.As(err, &slowDown) {
+			t.Fatalf("poll faster than interval error = %v, want errors.As into *BackchannelAuthenticationSlowDownError", err)
+		}
+	})
+
+	// ...but a poll spaced at least PollInterval apart from the previous
+	// one succeeds.
+	t.Run("PollSpacedByAtLeastIntervalSucceeds", func(t *testing.T) {
+		store := factory()
+		ctx := context.Background()
+		record := newRecord("auth-req-10", "handle-10")
+		record.PollInterval = 5 * time.Second
+		if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
+			t.Fatalf("CreateBackchannelAuthentication: %v", err)
+		}
+		now := time.Now()
+		if _, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
+			AuthReqIDHash: record.AuthReqIDHash, Now: now,
+		}); err != nil {
+			t.Fatalf("first poll: %v", err)
+		}
+		if _, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
+			AuthReqIDHash: record.AuthReqIDHash, Now: now.Add(record.PollInterval),
+		}); err != nil {
+			t.Fatalf("second poll (spaced by interval): %v, want success", err)
+		}
+	})
+}

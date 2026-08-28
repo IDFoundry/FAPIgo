@@ -40,6 +40,10 @@ var (
 	// but the object carries no nbf claim at all.
 	ErrMissingNotBefore = errors.New("requestobject: nbf claim is required")
 
+	// ErrMissingJTI indicates VerifyPolicy.RequireJTI was set but the
+	// object carries no jti claim at all.
+	ErrMissingJTI = errors.New("requestobject: jti claim is required")
+
 	// ErrLifetimeExceeded indicates the object's exp claim is further in
 	// the future than the configured maximum lifetime allows.
 	ErrLifetimeExceeded = errors.New("requestobject: exp exceeds maximum allowed lifetime")

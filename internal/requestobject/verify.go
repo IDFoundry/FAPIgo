@@ -123,13 +123,25 @@ type VerifyPolicy struct {
 	// mandatory, tightly-bounded nbf/exp window, not a jti claim), and
 	// the OIDF conformance suite's own request objects never carry one
 	// under the plain FAPI2 profile — only its Brazil-specific profile
-	// behavior adds one. So a missing jti here is not an error; it just
-	// means this particular object skips replay-by-jti, the same as a
-	// nil Replay would. This is fine architecturally because — when a
-	// request object is only ever accepted via a PAR request_uri that is
-	// itself single-use — replay detection here was always meant as
-	// defense in depth, not the primary control.
+	// behavior adds one. So a missing jti here is not an error unless
+	// RequireJTI is set; it just means this particular object skips
+	// replay-by-jti, the same as a nil Replay would. This is fine
+	// architecturally because — when a request object is only ever
+	// accepted via a PAR request_uri that is itself single-use —
+	// replay detection here was always meant as defense in depth, not
+	// the primary control.
 	Replay ReplayChecker
+
+	// RequireJTI rejects an object with no jti claim at all, rather than
+	// simply skipping replay-by-jti for it. Unlike PAR's request object
+	// (accepted only via a single-use request_uri, where jti is genuine
+	// defense in depth — see Replay's own doc comment), FAPI-CIBA's
+	// backchannel authentication request has no such single-use wrapper
+	// of its own, so the OIDF FAPI-CIBA-ID1 conformance suite mandates
+	// jti unconditionally (confirmed by its
+	// EnsureRequestObjectMissingJtiFails negative test) — the caller
+	// sets this only for that request kind, not for PAR's.
+	RequireJTI bool
 }
 
 // VerifiedObject is what remains once a request object has been
@@ -184,6 +196,9 @@ func (o Object) Verify(ctx context.Context, pub crypto.PublicKey, policy VerifyP
 		return VerifiedObject{}, ErrNotBeforeTooOld
 	}
 
+	if c.JTI == "" && policy.RequireJTI {
+		return VerifiedObject{}, ErrMissingJTI
+	}
 	if policy.Replay != nil && c.JTI != "" {
 		// The TTL must cover the same skew the acceptance check above
 		// grants (line 171), or a replay in (ExpiresAt, ExpiresAt+skew]

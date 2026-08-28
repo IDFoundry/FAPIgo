@@ -116,6 +116,10 @@ func main() {
 		}
 		fmt.Printf("%s: generated fresh client keys, wrote %s and updated %s\n", p.name, planPath, configPath)
 	}
+
+	if err := setupCIBA(dir); err != nil {
+		log.Fatalf("ciba: %v", err)
+	}
 }
 
 func oidfConfigDir() (string, error) {
@@ -485,4 +489,116 @@ func writePlanConfig(path string, p profile, clientIDs [2]string, rs256ClientID 
 	// priv2/privRS256 above) - throwaway/ephemeral, but still real key
 	// material, so it's written owner-only rather than world-readable.
 	return os.WriteFile(path, out, 0o600)
+}
+
+// cibaClient/cibaClient2/cibaPlan mirror the OIDF conformance suite's
+// own plan config shape for the FAPI-CIBA-ID1 plan
+// (net.openid.conformance.fapiciba.AbstractFAPICIBAID1's own
+// @ConfigurationFields) — a genuinely different shape from
+// planConfig/planClient above, since CIBA has no browser step at all
+// (no authorize/consent redirect to automate) and needs its own
+// fields (hint_type/hint_value identify who's authenticating;
+// automated_ciba_approval_url is the suite's own documented mechanism
+// for driving an approve/deny decision with no real out-of-band device
+// to click through — see cmd/conformance-as/backchannel.go's
+// handleApprove).
+type cibaClient struct {
+	ClientID       string `json:"client_id"`
+	Scope          string `json:"scope"`
+	JWKS           jwks   `json:"jwks"`
+	DPoPSigningAlg string `json:"dpop_signing_alg"`
+	HintType       string `json:"hint_type"`
+	HintValue      string `json:"hint_value"`
+}
+
+type cibaClient2 struct {
+	ClientID       string `json:"client_id"`
+	Scope          string `json:"scope"`
+	JWKS           jwks   `json:"jwks"`
+	DPoPSigningAlg string `json:"dpop_signing_alg"`
+	ACRValue       string `json:"acr_value"`
+}
+
+type cibaPlan struct {
+	Alias  string `json:"alias"`
+	Server struct {
+		DiscoveryURL string `json:"discoveryUrl"`
+	} `json:"server"`
+	Client   cibaClient  `json:"client"`
+	Client2  cibaClient2 `json:"client2"`
+	Resource struct {
+		ResourceURL string `json:"resourceUrl"`
+	} `json:"resource"`
+	AutomatedCibaApprovalURL string `json:"automated_ciba_approval_url"`
+}
+
+// setupCIBA is the CIBA-plan counterpart of the profiles loop in main —
+// factored out separately (rather than added as a third profiles[]
+// entry) because writeCIBAPlanConfig's output shape is unrelated to
+// writePlanConfig's, not just a variation of it. Idempotent the same
+// way: leaves an existing ciba-plan.json alone entirely.
+//
+// Reuses patchConformanceASConfig as-is against ciba.config.json's own
+// three clients (client1/client2/a PS256-registered third client) —
+// that function's own contract (exactly 2 or 3 clients, patch the
+// first two, add-or-refresh a third PS256 one) applies unchanged here.
+// The PS256 client's key is generated but not referenced by this
+// plan's own JSON: unlike the base FAPI2SPFinal plan, FAPI-CIBA-ID1's
+// two RS256-client-assertion negative tests
+// (fapi-ciba-id1-ensure-client-assertion-signature-algorithm-in-
+// {backchannel-authorization-request,token-endpoint-request}-is-RS256-fails)
+// each check the plan's own client.jwks.keys[0].alg and SKIP outright
+// (not fail) when it isn't already "PS256" — a legitimate, honest
+// outcome this first pass accepts rather than adding a client-override
+// block to force them to run.
+func setupCIBA(dir string) error {
+	planPath := filepath.Join(dir, "ciba-plan.json")
+	if _, err := os.Stat(planPath); err == nil {
+		fmt.Printf("ciba: %s already exists, leaving this profile alone\n", planPath)
+		return nil
+	}
+
+	p := profile{name: "ciba", alias: "gofapi-ciba", issuerHost: "conformance-as-ciba", keyLabel1: "ciba-client1", keyLabel2: "ciba-client2"}
+	priv1, pub1, err := generateKey(p.keyLabel1)
+	if err != nil {
+		return fmt.Errorf("generate client1 key: %w", err)
+	}
+	priv2, pub2, err := generateKey(p.keyLabel2)
+	if err != nil {
+		return fmt.Errorf("generate client2 key: %w", err)
+	}
+	_, pubRS256, err := generatePS256Key(conformanceKeyLabelPrefix + p.keyLabel1 + "-rs256-key1")
+	if err != nil {
+		return fmt.Errorf("generate RS256 test-client key: %w", err)
+	}
+
+	configPath := filepath.Join(dir, "ciba.config.json")
+	clientIDs, _, err := patchConformanceASConfig(configPath, p, pub1, pub2, pubRS256)
+	if err != nil {
+		return fmt.Errorf("update %s: %w", configPath, err)
+	}
+
+	cfg := cibaPlan{Alias: p.alias}
+	cfg.Server.DiscoveryURL = issuerURL(p.issuerHost, "/.well-known/openid-configuration")
+	cfg.Client = cibaClient{
+		ClientID: clientIDs[0], Scope: fullScope, JWKS: priv1, DPoPSigningAlg: "ES256",
+		HintType: "login_hint", HintValue: "conformance-test-user",
+	}
+	cfg.Client2 = cibaClient2{
+		ClientID: clientIDs[1], Scope: fullScope, JWKS: priv2, DPoPSigningAlg: "ES256",
+		ACRValue: "urn:mace:incommon:iap:silver",
+	}
+	cfg.Resource.ResourceURL = issuerURL(p.issuerHost, "/userinfo")
+	cfg.AutomatedCibaApprovalURL = issuerURL(p.issuerHost, "/backchannel-approve") + "?auth_req_id={auth_req_id}&action={action}"
+
+	out, err := marshalIndentNoEscape(cfg)
+	if err != nil {
+		return err
+	}
+	out = append(out, '\n')
+	if err := os.WriteFile(planPath, out, 0o600); err != nil { // #nosec G306 -- mirrors writePlanConfig's own owner-only rationale (embeds priv1/priv2)
+		return err
+	}
+	fmt.Printf("ciba: generated fresh client keys, wrote %s and updated %s\n", planPath, configPath)
+	return nil
 }

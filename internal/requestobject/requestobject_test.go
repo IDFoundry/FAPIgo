@@ -508,6 +508,69 @@ func TestVerifyAcceptsMissingNotBeforeWhenNotRequired(t *testing.T) {
 	}
 }
 
+// FAPI-CIBA's backchannel authentication request has no PAR-style
+// single-use request_uri wrapper of its own, so unlike PAR's request
+// object, jti is mandatory there. VerifyPolicy models that as
+// RequireJTI, set only by that caller — a missing jti must be rejected
+// when it's true...
+func TestVerifyRejectsMissingJTIWhenRequired(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256"}`))
+	payloadJSON, err := json.Marshal(map[string]any{
+		"iss": "client-123", "aud": "https://as.example", "exp": now.Add(time.Minute).Unix(),
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	signingInput := header + "." + base64.RawURLEncoding.EncodeToString(payloadJSON)
+	sig, err := signRaw(key, signingInput)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	token := signingInput + "." + sig
+
+	obj, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	policy := basePolicy(now)
+	policy.RequireJTI = true
+	if _, err := obj.Verify(context.Background(), &key.PublicKey, policy); !errors.Is(err, ErrMissingJTI) {
+		t.Fatalf("Verify(no jti, required) = %v, want ErrMissingJTI", err)
+	}
+}
+
+// ...but accepted, as before, when it's false (the default, and what
+// PAR's own request object verification uses).
+func TestVerifyAcceptsMissingJTIWhenNotRequired(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256"}`))
+	payloadJSON, err := json.Marshal(map[string]any{
+		"iss": "client-123", "aud": "https://as.example", "exp": now.Add(time.Minute).Unix(),
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	signingInput := header + "." + base64.RawURLEncoding.EncodeToString(payloadJSON)
+	sig, err := signRaw(key, signingInput)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	token := signingInput + "." + sig
+
+	obj, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if _, err := obj.Verify(context.Background(), &key.PublicKey, basePolicy(now)); err != nil {
+		t.Fatalf("Verify(no jti, not required) = %v, want nil error", err)
+	}
+}
+
 func TestVerifyDetectsReplay(t *testing.T) {
 	key := generateKey(t)
 	now := time.Now()

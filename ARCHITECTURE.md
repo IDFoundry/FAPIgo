@@ -632,19 +632,28 @@ configured.
 Once `client.Config` gained `storage.SenderConstrainMTLS` support, the
 token-endpoint MTLS wall above was worth a genuine re-attempt too
 (`cmd/conformance-client -profile=ciba -mtls`, a throwaway self-signed
-client certificate in place of a DPoP proof). **Confirmed live: fully
-resolved — never hit again.** Every module now reaches real token
-exchange and this client's own `ValidateIDToken` correctly rejects
-every negative-test perturbation the suite sends (bad `iss`/`aud`/
-signature/`alg`, expired, missing claims) — genuine, correct client
-behavior, the same as against any other AS. The suite's own per-module
-grade for most of these is still FAIL; full credit for a negative
-ID-token test in this plan appears to need more of the flow than this
-driver currently completes, not chased further here.
-`conformance/client/scripts/README.md`'s own CIBA section covers
-running this driver (with or without `-mtls`) for exploratory use; it
-isn't wired into any automated pass/fail gate given the still-majority-FAILED
-result.
+client certificate in place of a DPoP proof). **Confirmed live: 22/22
+PASS.** Getting there past the initial re-attempt's own partial result
+took four more fixes, found by tracing each non-PASS module's own
+suite-side log rather than reasoning about this driver's code in
+isolation: this driver discarded the issued tokens outright and never
+called the plan's required "accounts" resource endpoint (so several
+modules sat in `WAITING` forever, no matter how long the driver waited);
+the plan config never registered this driver's own mTLS client
+certificate with the suite (`EnsureClientCertificateMatches` had
+nothing to compare the presented one against); `clientID` was a fixed
+constant, unlike the already-randomized `alias`, letting an orphaned
+instance from an earlier killed run corrupt a fresh run's own
+certificate registration; and one genuine `client`/`internal/token`
+gap, not a driver issue — `IDToken.Validate` never checked `iat`
+staleness at all (OIDC Core §3.1.3.7 step 10), fixed with a new
+`ErrIssuedAtTooOld` reusing the same `MaxLifetime` bound that already
+governs `exp`, applied symmetrically to the past. Full breakdown in
+`conformance/client/scripts/README.md`'s own CIBA section, which also
+covers running this driver (with or without `-mtls`) for exploratory
+use; still not wired into any automated pass/fail gate (this driver has
+no CI job of its own), but a real candidate now that both CIBA
+directions — AS (34/34) and client (22/22) — are clean.
 
 ## What is and isn't shared
 

@@ -47,6 +47,30 @@ func (c dpopResourceClient) callProtectedResource(ctx context.Context, resourceU
 	return body, status, nil
 }
 
+// callProtectedResourceBearer presents accessToken to resourceURL as a
+// plain Bearer credential (RFC 8705 §3.4: an mTLS-bound token needs no
+// proof-of-possession header of its own — the connection's own client
+// certificate, already configured on httpClient's transport, is the
+// sender-constraint) — the mTLS counterpart to
+// dpopResourceClient.callProtectedResource.
+func callProtectedResourceBearer(ctx context.Context, httpClient *http.Client, resourceURL, accessToken string) ([]byte, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, resourceURL, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	res, err := httpClient.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer func() { _ = res.Body.Close() }()
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return nil, 0, fmt.Errorf("read response body: %w", err)
+	}
+	return body, res.StatusCode, nil
+}
+
 func (c dpopResourceClient) doProtectedResourceRequest(ctx context.Context, resourceURL, accessToken, nonce string) ([]byte, int, http.Header, error) {
 	target, err := url.Parse(resourceURL)
 	if err != nil {

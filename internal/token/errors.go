@@ -44,4 +44,12 @@ var (
 	// ErrAuthorizedPartyMismatch indicates an ID token's azp claim did
 	// not equal the caller's own client ID (OIDC Core §3.1.3.7 step 10).
 	ErrAuthorizedPartyMismatch = errors.New("token: azp does not match expected audience")
+
+	// ErrIssuedAtTooOld indicates an ID token's iat claim is further in
+	// the past than the configured maximum lifetime allows — OIDC Core
+	// §3.1.3.7 step 10: "iat... can be used to reject tokens that were
+	// issued too far away from the current time." Mirrors
+	// ErrLifetimeExceeded's own bound on exp, applied to the opposite
+	// direction around Now.
+	ErrIssuedAtTooOld = errors.New("token: iat exceeds maximum allowed age")
 )

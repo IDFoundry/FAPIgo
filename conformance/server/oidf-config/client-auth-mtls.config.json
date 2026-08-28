@@ -1,0 +1,37 @@
+{
+  "clients": [
+    {
+      "allowed_scopes": [
+        "openid",
+        "accounts",
+        "offline_access"
+      ],
+      "client_auth_method": "self_signed_tls_client_auth",
+      "expected_certificate_thumbprint": "9AuCv27qPfw3jmXL-2Jy5_1ISCe9uUWYhtAGwXvMXvU",
+      "id": "gofapi-conformance-client-auth-mtls-client-1",
+      "redirect_uris": [
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-client-auth-mtls/callback",
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-client-auth-mtls/callback?dummy1=lorem&dummy2=ipsum"
+      ]
+    },
+    {
+      "allowed_scopes": [
+        "openid",
+        "accounts",
+        "offline_access"
+      ],
+      "client_auth_method": "self_signed_tls_client_auth",
+      "expected_certificate_thumbprint": "3WW3O7J8ElBwg2OjD-agX4AjHcWks9vAJIEXvd51sWw",
+      "id": "gofapi-conformance-client-auth-mtls-client-2",
+      "redirect_uris": [
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-client-auth-mtls/callback",
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-client-auth-mtls/callback?dummy1=lorem&dummy2=ipsum"
+      ]
+    }
+  ],
+  "default_subject": "conformance-test-user",
+  "issuer": "https://conformance-as-client-auth-mtls:8443",
+  "listen_addr": "0.0.0.0:8443",
+  "mtls_listen_addr": "0.0.0.0:8444",
+  "profile": "fapi2-security"
+}

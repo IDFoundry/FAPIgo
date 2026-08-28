@@ -1,24 +1,26 @@
 #!/usr/bin/env python3
 """Builds report.md from a completed conformance/scripts/run-all.sh run.
 
-run-all.sh calls this once, after all six suites have finished and
+run-all.sh calls this once, after all seven suites have finished and
 results.txt/the per-suite log files already exist — it doesn't run any
 part of the suites itself, only reads what's already on disk:
 
   - results.txt (run-all.sh's own "NAME|LINE" record_result output)
-  - as-{baseline,message-signing,ciba-mtls}.log (run-test-plan.py's own
-    verbose stdout, already captured by run-all.sh)
-  - as-{baseline,message-signing,ciba-mtls}-retry.log, if
-    retry-flaky-modules.py ran (only exists when that suite came back
-    non-clean)
+  - as-{baseline,message-signing,ciba-mtls,client-auth-mtls}.log
+    (run-test-plan.py's own verbose stdout, already captured by
+    run-all.sh)
+  - as-{baseline,message-signing,ciba-mtls,client-auth-mtls}-retry.log,
+    if retry-flaky-modules.py ran (only exists when that suite came
+    back non-clean)
   - rp-{baseline,message-signing,ciba-mtls}.log (cmd/conformance-client's
-    own stdout)
+    own stdout) — client-auth-mtls has no RP-side counterpart (see
+    run-all.sh's own comment on that leg)
   - conformance/server/expected-{warnings,skips}-{baseline,message
-    -signing,ciba-mtls}.json — the same files run-test-plan.py itself
-    reads, so every WARNING/SKIPPED module's "why this is expected, not
-    a defect" reasoning in the report is pulled from the one place that
-    reasoning is already authoritatively written down, not
-    re-explained/duplicated here.
+    -signing,ciba-mtls,client-auth-mtls}.json — the same files
+    run-test-plan.py itself reads, so every WARNING/SKIPPED module's
+    "why this is expected, not a defect" reasoning in the report is
+    pulled from the one place that reasoning is already authoritatively
+    written down, not re-explained/duplicated here.
 
 Each suite section leads with a quick table of just its non-PASSED
 modules (empty/omitted when everything passed) so a regression is
@@ -46,7 +48,7 @@ ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 # for the same reason.
 TEST_LINE_RE = re.compile(r"^(?:\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} )?Test \[(\d+):(\d+)\] (\S+) (\S+) (\S+) - result (\S+)\.")
 
-AS_SUITES = ["baseline", "message-signing", "ciba-mtls"]
+AS_SUITES = ["baseline", "message-signing", "ciba-mtls", "client-auth-mtls"]
 RP_SUITES = ["baseline", "message-signing", "ciba-mtls"]
 
 # Markdown separator row for a 2-column table (Module/Result).
@@ -303,7 +305,7 @@ def main():
     md.append("## Summary\n")
     md.append("| Suite | Result |")
     md.append(TABLE_SEPARATOR_2COL)
-    for label in ["AS baseline", "AS message-signing", "AS ciba-mtls", "RP baseline", "RP message-signing", "RP ciba-mtls"]:
+    for label in ["AS baseline", "AS message-signing", "AS ciba-mtls", "AS client-auth-mtls", "RP baseline", "RP message-signing", "RP ciba-mtls"]:
         md.append(f"| {label} | {results.get(label, 'DID NOT RUN')} |")
     md.append("")
 

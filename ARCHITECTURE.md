@@ -657,6 +657,38 @@ wired into `conformance/scripts/run-all.sh`'s own automated gate
 `.github/workflows/conformance.yml` run, alongside baseline and
 message-signing on both sides.
 
+The RFC 8705 §2 client-authentication methods themselves (as opposed to
+§3 sender-constraining, covered by CIBA above) got their own genuine
+live re-attempt too, against `conformance/server/oidf-config/client-auth-mtls.config.json`
+— `client_auth_type=mtls` on the same `fapi2-security-profile-final-test-plan`
+baseline/message-signing already use, with `sender_constrain` left at
+`dpop` to keep the two axes isolated. **Confirmed live: 47/47 PASS.**
+This was the first plan to combine a DPoP-sender-constrained client with
+an mTLS-requesting listener at all, and it surfaced two real gaps: (1)
+`server.Metadata`'s `token_endpoint_auth_methods_supported` never
+advertised either RFC 8705 §2 method, hardcoded to `private_key_jwt`
+alone since the feature was first added — fixed by appending both
+whenever `Config.MTLSEndpoints` is configured, the suite's own
+`EnsureServerConfigurationSupportsMTLS` accepting either value
+(confirmed by disassembly); (2) a DPoP proof's `htu` claim was checked
+against this server's plain endpoint URL only, in both
+`verifyTokenRequestDPoP` (`server/token.go`) and
+`reconcileParDPoPBinding` (`server/par.go`) — but a client
+authenticating via certificate must call the mTLS-alias URL to present
+it at all, so its DPoP proof legitimately names that alias instead;
+confirmed live via the token endpoint's `dpop: htu does not match
+request URI` rejection. Fixed by `verifyDPoPAtEitherEndpoint`, which
+retries once against the alias on a pure `htu` mismatch — safe since
+`internal/dpop.Verify` checks `htu` strictly before consuming replay
+state. Full breakdown, including a genuine suite-config quirk this
+surfaced (unrelated to either fix) and the one apparent failure traced
+to a suite-side timing artifact rather than this server, in
+`conformance/server/oidf-config/README.md`'s own client-authentication
+mTLS section. Wired into `run-all.sh` as its own "AS client-auth-mtls"
+leg (a fourth `conformance-as` container, no RP-side counterpart:
+`cmd/conformance-client` has no certificate-based client-authentication
+support of its own yet).
+
 ## What is and isn't shared
 
 **Shared** (via `internal/`, `extension`, `storage`'s replay primitive

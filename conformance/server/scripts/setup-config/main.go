@@ -1,18 +1,20 @@
 // Command setup-config bootstraps everything a fresh clone needs to run
 // the AS-side conformance suites (conformance/scripts/run-all.sh's "AS
-// baseline", "AS message-signing", "AS ciba-mtls", "AS ciba-ping", and
-// "AS client-auth-mtls" legs) that isn't already committed to this repo.
+// baseline", "AS message-signing", "AS ciba-mtls", "AS ciba-ping", "AS
+// mtls", "AS message-signing-mtls", and "AS client-auth-mtls" legs)
+// that isn't already committed to this repo.
 //
 // Two files per profile can't be committed at all:
-// conformance/server/oidf-config/{baseline,message-signing,ciba,ciba-mtls,ciba-ping,client-auth-mtls}-plan.json
+// conformance/server/oidf-config/{baseline,message-signing,ciba,ciba-mtls,ciba-ping,mtls,message-signing-mtls,client-auth-mtls}-plan.json
 // (the OIDF conformance suite's own plan config) are gitignored because
 // they carry the test client's *private* JWKS keys or mTLS certificate
 // keys — see this repo's conformance/server/oidf-config/README.md and
 // .gitignore's own comment. This tool generates a fresh ES256 keypair
 // per client per profile (RSA/PS256 for ciba-mtls's client1; a
 // throwaway self-signed mTLS certificate per client for ciba-mtls,
-// ciba-ping and client-auth-mtls alike — see
-// setupCIBAMTLS/setupCIBAPing/setupClientAuthMTLS),
+// ciba-ping, mtls, message-signing-mtls, and client-auth-mtls alike —
+// see setupCIBAMTLS/setupCIBAPing/writePlanConfig's own
+// senderConstrainMTLS branch/setupClientAuthMTLS),
 // writes the private half into the (gitignored) plan config alongside
 // everything else that config needs — alias, discovery URL, resource
 // block, and the browser/override automation this repo's own
@@ -58,19 +60,37 @@ import (
 	"github.com/idfoundry/fapigo/internal/mtls"
 )
 
-// profile is everything that differs between the baseline and
-// message-signing conformance-suite plans.
+// profile is everything that differs between the baseline,
+// message-signing, and mTLS-sender-constrained conformance-suite plans.
 type profile struct {
 	name       string // matches the *-plan.json / *.config.json filename prefix
 	alias      string // suite plan "alias" — also the callback path segment
 	issuerHost string // docker-compose service name this profile's AS listens as
 	keyLabel1  string // generate-client-key-style label for client 1
 	keyLabel2  string // generate-client-key-style label for client 2
+
+	// senderConstrainMTLS marks a profile whose clients are registered
+	// storage.SenderConstrainMTLS (RFC 8705 §3) instead of the default
+	// DPoP — writePlanConfig additionally generates and embeds a
+	// suite-side mTLS client certificate pair (mtls/mtls2) for these,
+	// mirroring setupCIBAMTLS's own identical need. "mtls" and
+	// "message-signing-mtls" close a real coverage gap: AS ciba-mtls
+	// exercises mTLS-bound tokens but never PAR/authorize (CIBA has no
+	// browser hop at all), while AS client-auth-mtls exercises the full
+	// PAR/authorize/token flow under mTLS but only for RFC 8705 §2
+	// *client authentication* — sender-constraining stays DPoP there.
+	// Neither combination — the ordinary PAR/authorize/token flow with
+	// mTLS-bound *access tokens* — had ever been live-conformance-tested
+	// until these two profiles, confirmed live: fapi2-security-profile-final-test-plan
+	// genuinely accepts sender_constrain=mtls as a variant.
+	senderConstrainMTLS bool
 }
 
 var profiles = []profile{
 	{name: "baseline", alias: "gofapi-baseline", issuerHost: "conformance-as-baseline", keyLabel1: "client1", keyLabel2: "client2"},
 	{name: "message-signing", alias: "gofapi-msgsign", issuerHost: "conformance-as-message-signing", keyLabel1: "msgsign-client1", keyLabel2: "msgsign-client2"},
+	{name: "mtls", alias: "gofapi-mtls", issuerHost: "conformance-as-mtls", keyLabel1: "mtls-client1", keyLabel2: "mtls-client2", senderConstrainMTLS: true},
+	{name: "message-signing-mtls", alias: "gofapi-msgsign-mtls", issuerHost: "conformance-as-message-signing-mtls", keyLabel1: "msgsign-mtls-client1", keyLabel2: "msgsign-mtls-client2", senderConstrainMTLS: true},
 }
 
 // conformanceKeyLabelPrefix prefixes every kid/key-label this tool
@@ -402,6 +422,12 @@ type planConfig struct {
 	Server struct {
 		DiscoveryURL string `json:"discoveryUrl"`
 	} `json:"server"`
+	// MTLS/MTLS2 are only ever set for a profile with
+	// senderConstrainMTLS true — pointers with omitempty so
+	// baseline/message-signing's own plan.json output stays exactly as
+	// it already was, byte for byte, when unset.
+	MTLS     *mtlsBlock `json:"mtls,omitempty"`
+	MTLS2    *mtlsBlock `json:"mtls2,omitempty"`
 	Client   planClient `json:"client"`
 	Client2  planClient `json:"client2"`
 	Resource struct {
@@ -475,9 +501,31 @@ func writePlanConfig(path string, p profile, clientIDs [2]string, rs256ClientID 
 
 	cfg := planConfig{Alias: p.alias}
 	cfg.Server.DiscoveryURL = issuerURL(p.issuerHost, "/.well-known/openid-configuration")
+	if p.senderConstrainMTLS {
+		mtlsCert, mtlsKey, err := generateMTLSCertKeyPEM(p.alias + "-suite-client")
+		if err != nil {
+			return fmt.Errorf("generate client1 mtls certificate: %w", err)
+		}
+		mtls2Cert, mtls2Key, err := generateMTLSCertKeyPEM(p.alias + "-suite-client2")
+		if err != nil {
+			return fmt.Errorf("generate client2 mtls certificate: %w", err)
+		}
+		cfg.MTLS = &mtlsBlock{Cert: mtlsCert, Key: mtlsKey}
+		cfg.MTLS2 = &mtlsBlock{Cert: mtls2Cert, Key: mtls2Key}
+	}
 	cfg.Client = planClient{ClientID: clientIDs[0], Scope: fullScope, JWKS: priv1, DPoPSigningAlg: "ES256"}
 	cfg.Client2 = planClient{ClientID: clientIDs[1], Scope: fullScope, JWKS: priv2, DPoPSigningAlg: "ES256"}
-	cfg.Resource.ResourceURL = issuerURL(p.issuerHost, "/userinfo")
+	if p.senderConstrainMTLS {
+		// Port 8444, not 8443: RFC 8705 sender-constraining means this
+		// resource call must go over the mTLS listener itself — mirrors
+		// setupCIBAMTLS's own identical reasoning. Confirmed live: the
+		// resource endpoint otherwise rejects the mTLS-bound access
+		// token's certificate binding check with 400, since the
+		// connection carries no client certificate at all on :8443.
+		cfg.Resource.ResourceURL = "https://" + p.issuerHost + ":8444/userinfo"
+	} else {
+		cfg.Resource.ResourceURL = issuerURL(p.issuerHost, "/userinfo")
+	}
 	cfg.Browser = []browserBlock{consentBlock}
 	cfg.Override = map[string]overrideEntry{
 		"fapi2-security-profile-final-user-rejects-authentication": {
@@ -497,7 +545,7 @@ func writePlanConfig(path string, p profile, clientIDs [2]string, rs256ClientID 
 		},
 		"fapi2-security-profile-final-ensure-signed-client-assertion-with-RS256-fails": {Client: rs256Client},
 	}
-	if p.name == "message-signing" {
+	if p.name == "message-signing" || p.name == "message-signing-mtls" {
 		// Only reachable under a profile that actually sends signed
 		// request objects — see expected-skips-message-signing.json's
 		// own comment for why this doesn't appear in the baseline

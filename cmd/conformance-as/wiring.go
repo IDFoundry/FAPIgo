@@ -32,6 +32,18 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 	if err != nil {
 		return nil, err
 	}
+	// Populated only under -mtls (resolved.MTLSEndpoints is the zero
+	// value otherwise) — see buildMTLSUserinfoURL's own doc comment for
+	// why this is computed here rather than folded into
+	// server.MTLSEndpoints.
+	var mtlsUserinfoURL *fapi.URL
+	if !resolved.MTLSEndpoints.IsZero() {
+		u, err := buildMTLSUserinfoURL(resolved.Issuer, resolved.MTLSListenAddr)
+		if err != nil {
+			return nil, err
+		}
+		mtlsUserinfoURL = &u
+	}
 
 	purposes := map[keys.SigningPurpose]fapi.SignatureAlgorithm{
 		// No Algorithms.AccessToken anymore — access-token signing is
@@ -230,5 +242,5 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 	consent := newConsentHandler(srv, clientRepo, server.SystemClock{}, resolved.DefaultSubject)
 	backchannel := newBackchannelHandler(srv, server.SystemClock{}, resolved.DefaultSubject)
 	userinfoURLValue := userinfoURL.URL()
-	return newRouter(srv, consent, backchannel, resolved.AdvertisedScopes, resourceVerifier, &userinfoURLValue, identityClaims, clientRepo, userinfoSigning), nil
+	return newRouter(srv, consent, backchannel, resolved.AdvertisedScopes, resourceVerifier, &userinfoURLValue, mtlsUserinfoURL, identityClaims, clientRepo, userinfoSigning), nil
 }

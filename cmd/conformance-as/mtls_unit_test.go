@@ -57,6 +57,29 @@ func TestBuildMTLSEndpoints(t *testing.T) {
 	})
 }
 
+func TestBuildMTLSUserinfoURL(t *testing.T) {
+	issuer, err := fapi.ParseIssuerURL("https://as.example:8443")
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+
+	t.Run("success", func(t *testing.T) {
+		got, err := buildMTLSUserinfoURL(issuer, "0.0.0.0:8444")
+		if err != nil {
+			t.Fatalf("buildMTLSUserinfoURL: %v", err)
+		}
+		if got.String() != "https://as.example:8444/userinfo" {
+			t.Errorf("buildMTLSUserinfoURL = %q, want %q", got.String(), "https://as.example:8444/userinfo")
+		}
+	})
+
+	t.Run("rejects a malformed mtls listen addr", func(t *testing.T) {
+		if _, err := buildMTLSUserinfoURL(issuer, "not-a-host-port"); err == nil {
+			t.Fatalf("buildMTLSUserinfoURL(malformed addr) = nil error, want error")
+		}
+	})
+}
+
 func TestResolveClientSenderConstrain(t *testing.T) {
 	base := ClientConfig{
 		ID:                       "client-1",

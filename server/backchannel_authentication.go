@@ -105,7 +105,15 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		return s.backchannelBeginFail(ctx, "", newError(ErrorInvalidRequest, 400, "the request contains a duplicated parameter", err)), nil
 	}
 
-	client, _, authErr := s.authenticateClient(ctx, params, req.PeerCertificate)
+	// CIBA Core 1.0 §7.1 explicitly widens the backchannel authentication
+	// endpoint's own accepted audiences beyond just its own URL: "the OP
+	// MUST accept its Issuer Identifier, Token Endpoint URL, or
+	// Backchannel Authentication Endpoint URL" — confirmed live via the
+	// OIDF conformance suite's own fapi-ciba-id1/-refresh-token modules,
+	// which deliberately sign "aud" as the token endpoint's URL here.
+	client, _, authErr := s.authenticateClient(ctx, params, req.PeerCertificate,
+		[]fapi.URL{s.cfg.Endpoints.BackchannelAuthentication, s.cfg.Endpoints.Token},
+		[]fapi.URL{s.cfg.MTLSEndpoints.BackchannelAuthentication, s.cfg.MTLSEndpoints.Token})
 	if authErr != nil {
 		return s.backchannelBeginFail(ctx, "", authErr), nil
 	}

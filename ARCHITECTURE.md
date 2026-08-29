@@ -595,6 +595,25 @@ had no acceptability check at all, so an AS-side rejection option CIBA
 `conformance/server/oidf-config/README.md`'s own CIBA section, which
 also covers the DPoP-only config's manual (non-automated) setup.
 
+The `aud` widening above was itself corrected later, caught by the
+daily `conformance.yml` run rather than anything CIBA-specific:
+`acceptableClientAssertionAudiences` had widened to accept *any* of
+this server's own endpoint URLs (Token, PAR, BackchannelAuthentication)
+at *every* endpoint, but FAPI2 Security Profile Final's own
+`par-test-{par,token}-endpoint-url-as-audience-fails` modules require
+PAR to reject both — PAR was never granted a URL-audience carve-out by
+RFC 7523 in the first place, unlike Token's own explicit sanction.
+Fixed by scoping `authenticateClient`'s accepted audiences to the
+specific physical endpoint authenticating each request rather than a
+blanket set, which in turn surfaced that CIBA Core 1.0 §7.1 separately,
+explicitly widens the backchannel authentication endpoint specifically
+("the OP MUST accept its Issuer Identifier, Token Endpoint URL, or
+Backchannel Authentication Endpoint URL") — an initial overly-narrow
+first pass at the endpoint-scoped fix (BackchannelAuthentication's own
+URL only) briefly regressed the already-passing AS ciba-mtls/ciba-ping
+suites before this was caught by a second full local conformance run
+and corrected. Confirmed live: all nine suites clean after both fixes.
+
 `client`'s own CIBA support
 (`BeginBackchannelAuthentication`/`PollBackchannelAuthentication`) was
 genuinely attempted against the OIDF suite's RP-side plan

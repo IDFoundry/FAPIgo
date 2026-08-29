@@ -493,6 +493,103 @@ func TestBeginBackchannelAuthenticationSuccess(t *testing.T) {
 	}
 }
 
+// TestBeginBackchannelAuthenticationAcceptsBackchannelAuthenticationEndpointURLAsClientAssertionAudience
+// covers RFC 7523 §3's URL-audience carve-out as scoped to the
+// backchannel authentication endpoint specifically — confirmed live
+// against the OIDF conformance suite's own CIBA client, which signs
+// "aud" as whichever endpoint URL it is actually calling. See
+// acceptableClientAssertionAudiences's own doc comment for why this
+// scoping is per endpoint, not a blanket accept-any-of-our-own-endpoints
+// policy (that blanket approach broke
+// fapi2-security-profile-final-par-test-{par,token}-endpoint-url-as-audience-fails
+// at the PAR endpoint).
+func TestBeginBackchannelAuthenticationAcceptsBackchannelAuthenticationEndpointURLAsClientAssertionAudience(t *testing.T) {
+	h, _ := newHarnessWithBackchannel(t)
+	requestObj := h.backchannelRequestObject(t, standardBackchannelParams(t))
+	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
+		Signer: h.key, Algorithm: fapi.ES256,
+		ClientID: testClientID.String(), Audience: testBackchannelAuthenticationEndpoint,
+		Now: h.now, Lifetime: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssertion: %v", err)
+	}
+
+	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+		HTTP: server.FormRequest{Parameters: backchannelFormParams(assertion, requestObj)},
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+	if _, ok := action.(server.BackchannelInteractionRequired); !ok {
+		t.Fatalf("action = %T, want server.BackchannelInteractionRequired", action)
+	}
+}
+
+// TestBeginBackchannelAuthenticationAcceptsTokenEndpointURLAsClientAssertionAudience
+// covers CIBA Core 1.0 §7.1's own explicit widening of the backchannel
+// authentication endpoint's accepted audiences: "the OP MUST accept its
+// Issuer Identifier, Token Endpoint URL, or Backchannel Authentication
+// Endpoint URL as values that identify it as an intended audience" —
+// confirmed live via the OIDF conformance suite's own
+// fapi-ciba-id1/-refresh-token modules, which deliberately sign "aud"
+// as the token endpoint's URL on a request sent to the backchannel
+// authentication endpoint and require it to succeed.
+func TestBeginBackchannelAuthenticationAcceptsTokenEndpointURLAsClientAssertionAudience(t *testing.T) {
+	h, _ := newHarnessWithBackchannel(t)
+	requestObj := h.backchannelRequestObject(t, standardBackchannelParams(t))
+	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
+		Signer: h.key, Algorithm: fapi.ES256,
+		ClientID: testClientID.String(), Audience: testTokenEndpoint,
+		Now: h.now, Lifetime: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssertion: %v", err)
+	}
+
+	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+		HTTP: server.FormRequest{Parameters: backchannelFormParams(assertion, requestObj)},
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+	if _, ok := action.(server.BackchannelInteractionRequired); !ok {
+		t.Fatalf("action = %T, want server.BackchannelInteractionRequired", action)
+	}
+}
+
+// TestBeginBackchannelAuthenticationRejectsPAREndpointURLAsClientAssertionAudience
+// proves the audience scoping actually excludes an unrelated endpoint,
+// not just that BackchannelAuthentication's own widened set (its own
+// URL plus Token's, per CIBA §7.1) still works — PAR is never named by
+// either RFC 7523 or CIBA Core 1.0 §7.1's own carve-out.
+func TestBeginBackchannelAuthenticationRejectsPAREndpointURLAsClientAssertionAudience(t *testing.T) {
+	h, _ := newHarnessWithBackchannel(t)
+	requestObj := h.backchannelRequestObject(t, standardBackchannelParams(t))
+	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
+		Signer: h.key, Algorithm: fapi.ES256,
+		ClientID: testClientID.String(), Audience: testPAREndpoint,
+		Now: h.now, Lifetime: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssertion: %v", err)
+	}
+
+	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+		HTTP: server.FormRequest{Parameters: backchannelFormParams(assertion, requestObj)},
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+	localErr, ok := action.(server.BackchannelAuthenticationLocalError)
+	if !ok {
+		t.Fatalf("action = %T, want server.BackchannelAuthenticationLocalError", action)
+	}
+	if localErr.Error.Code() != server.ErrorInvalidClient {
+		t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorInvalidClient)
+	}
+}
+
 func TestBeginBackchannelAuthenticationRejectsMissingRequest(t *testing.T) {
 	h, _ := newHarnessWithBackchannel(t)
 

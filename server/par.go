@@ -130,7 +130,10 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 		return s.parFail(ctx, "", newError(ErrorInvalidRequest, 400, "the request contains a duplicated parameter", err))
 	}
 
-	client, _, authErr := s.authenticateClient(ctx, params, req.PeerCertificate)
+	// PAR accepts no endpoint-URL audience at all — only the issuer
+	// identifier — see acceptableClientAssertionAudiences's own doc
+	// comment for why.
+	client, _, authErr := s.authenticateClient(ctx, params, req.PeerCertificate, nil, nil)
 	if authErr != nil {
 		var clientID fapi.ClientID
 		return s.parFail(ctx, clientID, authErr)
@@ -191,10 +194,20 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 // ClientAuthMethodSelfSignedTLSClientAuth/ClientAuthMethodTLSClientAuth,
 // via a plain client_id form parameter plus peerCert (RFC 8705 §2) — and
 // resolves the registered client it identifies.
-func (s *Server) authenticateClient(ctx context.Context, params map[string]string, peerCert *x509.Certificate) (storage.RegisteredClient, clientassertion.VerifiedAssertion, *Error) {
+//
+// endpoints/mtlsEndpoints list every endpoint URL (and its RFC 8705 §5
+// mTLS alias, if any) a client_assertion's "aud" may name, in addition
+// to the issuer identifier itself, for the specific physical endpoint
+// this call is authenticating a request for; see
+// acceptableClientAssertionAudiences's own doc comment for why this
+// must be scoped per endpoint rather than accepted for any of them
+// interchangeably. Pass nil for both when the calling endpoint accepts
+// no endpoint-URL audience at all (PAR — see
+// PushAuthorizationRequest's own call site).
+func (s *Server) authenticateClient(ctx context.Context, params map[string]string, peerCert *x509.Certificate, endpoints, mtlsEndpoints []fapi.URL) (storage.RegisteredClient, clientassertion.VerifiedAssertion, *Error) {
 	switch {
 	case params["client_assertion"] != "":
-		return s.authenticateClientViaAssertion(ctx, params)
+		return s.authenticateClientViaAssertion(ctx, params, endpoints, mtlsEndpoints)
 	case params["client_id"] != "":
 		return s.authenticateClientViaCertificate(ctx, fapi.ClientID(params["client_id"]), peerCert)
 	default:
@@ -204,8 +217,9 @@ func (s *Server) authenticateClient(ctx context.Context, params map[string]strin
 }
 
 // authenticateClientViaAssertion verifies the request's client_assertion
-// and resolves the registered client it identifies.
-func (s *Server) authenticateClientViaAssertion(ctx context.Context, params map[string]string) (storage.RegisteredClient, clientassertion.VerifiedAssertion, *Error) {
+// and resolves the registered client it identifies. endpoints/mtlsEndpoints
+// are authenticateClient's own — see its doc comment.
+func (s *Server) authenticateClientViaAssertion(ctx context.Context, params map[string]string, endpoints, mtlsEndpoints []fapi.URL) (storage.RegisteredClient, clientassertion.VerifiedAssertion, *Error) {
 	assertionRaw := params["client_assertion"]
 	if params["client_assertion_type"] != clientassertion.AssertionType {
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
@@ -247,7 +261,7 @@ func (s *Server) authenticateClientViaAssertion(ctx context.Context, params map[
 
 	verified, err := assertion.Verify(ctx, pub, clientassertion.VerifyPolicy{
 		ExpectedClientID:  client.ID().String(),
-		ExpectedAudiences: s.acceptableClientAssertionAudiences(client),
+		ExpectedAudiences: s.acceptableClientAssertionAudiences(client, endpoints, mtlsEndpoints),
 		Algorithm:         client.ClientAssertionAlgorithm(),
 		Now:               s.deps.Clock.Now(),
 		MaxLifetime:       s.cfg.Limits.MaxClientAssertionLifetime,
@@ -263,33 +277,41 @@ func (s *Server) authenticateClientViaAssertion(ctx context.Context, params map[
 }
 
 // acceptableClientAssertionAudiences returns the "aud" values this
-// server accepts on client's client assertion: the issuer identifier,
-// plus every client-authenticated endpoint URL this server exposes
-// (Token, PushedAuthorizationRequest, BackchannelAuthentication — the
-// same three that receive a client_assertion at all) — and, for a
-// client actually registered SenderConstrainMTLS once
-// Config.MTLSEndpoints is configured, each of those endpoints' mTLS
-// alias URL (RFC 8705 §5) too. Every one of these values unambiguously
-// identifies this same authorization server, so accepting any of them
-// is not a security relaxation, just interoperability: RFC 7523 §3
+// server accepts on a client assertion presented to one specific
+// endpoint: always the issuer identifier, plus — only the endpoint URLs
+// actually named in endpoints, appropriate for the endpoint actually
+// authenticating this request — those URLs, and, for a client actually
+// registered SenderConstrainMTLS, their RFC 8705 §5 mTLS aliases
+// (mtlsEndpoints, matched by position to endpoints). RFC 7523 §3
 // sanctions "the token endpoint URL" as "aud" alongside the issuer
-// identifier, and confirmed live (the OIDF conformance suite's own
-// CIBA client signs "aud" as whichever endpoint URL it is actually
-// calling — its token endpoint for one request, its
-// backchannel-authenticate endpoint for another, the plain URL or the
-// mTLS alias depending on which it last discovered) that a real client
-// takes that literally, per endpoint, not just for the token endpoint.
-func (s *Server) acceptableClientAssertionAudiences(client storage.RegisteredClient) []string {
+// identifier; CIBA Core 1.0 §7.1 separately, explicitly widens this for
+// its own backchannel authentication endpoint: "the OP MUST accept its
+// Issuer Identifier, Token Endpoint URL, or Backchannel Authentication
+// Endpoint URL as values that identify it as an intended audience" —
+// confirmed live via the OIDF conformance suite's own
+// fapi-ciba-id1/-refresh-token modules, each of which deliberately
+// signs "aud" as the token endpoint's URL on a request sent to the
+// backchannel authentication endpoint and requires it to succeed.
+//
+// Deliberately NOT a blanket "any of this server's own endpoint URLs,
+// from any endpoint" — confirmed live via
+// fapi2-security-profile-final-par-test-{par,token}-endpoint-url-as-audience-fails
+// that PAR must reject a client assertion whose "aud" is the PAR
+// endpoint's own URL, or the token endpoint's URL: unlike Token and
+// BackchannelAuthentication, PAR was never granted a URL-audience
+// carve-out by RFC 7523 or CIBA, so PushAuthorizationRequest passes nil
+// for both parameters, accepting only the issuer identifier.
+func (s *Server) acceptableClientAssertionAudiences(client storage.RegisteredClient, endpoints, mtlsEndpoints []fapi.URL) []string {
 	auds := []string{s.cfg.Issuer.String()}
-	for _, u := range []fapi.URL{s.cfg.Endpoints.Token, s.cfg.Endpoints.PushedAuthorizationRequest, s.cfg.Endpoints.BackchannelAuthentication} {
+	for _, u := range endpoints {
 		if !u.IsZero() {
 			auds = append(auds, u.String())
 		}
 	}
-	if client.SenderConstrain() != storage.SenderConstrainMTLS || s.cfg.MTLSEndpoints.IsZero() {
+	if client.SenderConstrain() != storage.SenderConstrainMTLS {
 		return auds
 	}
-	for _, u := range []fapi.URL{s.cfg.MTLSEndpoints.Token, s.cfg.MTLSEndpoints.PushedAuthorizationRequest, s.cfg.MTLSEndpoints.BackchannelAuthentication} {
+	for _, u := range mtlsEndpoints {
 		if !u.IsZero() {
 			auds = append(auds, u.String())
 		}

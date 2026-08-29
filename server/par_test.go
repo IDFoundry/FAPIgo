@@ -618,14 +618,43 @@ func newHarnessWithClientKeys(t *testing.T, clientKeys keys.ClientKeySource) har
 	return harness{server: srv, key: key, serverKey: serverKey, now: now}
 }
 
-// TestPushAuthorizationRequestAcceptsTokenEndpointURLAsClientAssertionAudience
+// TestExchangeAuthorizationCodeAcceptsTokenEndpointURLAsClientAssertionAudience
 // covers RFC 7523 §3's own sanctioned alternative to the issuer
 // identifier: "The token endpoint URL of the authorization server MAY
-// be used as a value for an 'aud' element" — confirmed live against
-// the OIDF conformance suite's own CIBA client, which signs "aud" this
-// way rather than as the bare issuer. Any client may use either value,
-// not just an mTLS-bound one (see acceptableClientAssertionAudiences).
-func TestPushAuthorizationRequestAcceptsTokenEndpointURLAsClientAssertionAudience(t *testing.T) {
+// be used as a value for an 'aud' element". This carve-out is scoped to
+// the token endpoint specifically — see
+// TestPushAuthorizationRequestRejectsTokenEndpointURLAsClientAssertionAudience
+// for why PAR must reject this exact same value.
+func TestExchangeAuthorizationCodeAcceptsTokenEndpointURLAsClientAssertionAudience(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
+	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
+		Signer: h.key, Algorithm: fapi.ES256,
+		ClientID: testClientID.String(), Audience: testTokenEndpoint,
+		Now: h.now, Lifetime: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssertion: %v", err)
+	}
+	dpopKey := generateKey(t)
+	if _, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
+		HTTP:      server.FormRequest{Parameters: exchangeFormParams(assertion, code, testRedirectURI, testCodeVerifier)},
+		DPoPProof: createDPoPProof(t, dpopKey, h.now),
+	}); err != nil {
+		t.Fatalf("ExchangeAuthorizationCode: %v", err)
+	}
+}
+
+// TestPushAuthorizationRequestRejectsTokenEndpointURLAsClientAssertionAudience
+// and TestPushAuthorizationRequestRejectsPAREndpointURLAsClientAssertionAudience
+// cover PAR's own, narrower audience acceptance — confirmed live against
+// the OIDF conformance suite's own
+// fapi2-security-profile-final-par-test-{token,par}-endpoint-url-as-audience-fails
+// modules: unlike Token and BackchannelAuthentication, PAR was never
+// granted a URL-audience carve-out by RFC 7523 in the first place (see
+// acceptableClientAssertionAudiences's own doc comment), so PAR accepts
+// only the issuer identifier — not even its own endpoint URL.
+func TestPushAuthorizationRequestRejectsTokenEndpointURLAsClientAssertionAudience(t *testing.T) {
 	h := newHarness(t, server.ProfileFAPISecurity, true)
 	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
 		Signer: h.key, Algorithm: fapi.ES256,
@@ -635,10 +664,35 @@ func TestPushAuthorizationRequestAcceptsTokenEndpointURLAsClientAssertionAudienc
 	if err != nil {
 		t.Fatalf("CreateAssertion: %v", err)
 	}
-	if _, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+	_, err = h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
 		HTTP: server.FormRequest{Parameters: plainFormParameters(t, assertion, nil)},
-	}); err != nil {
-		t.Fatalf("PushAuthorizationRequest: %v", err)
+	})
+	if err == nil {
+		t.Fatalf("PushAuthorizationRequest = nil error, want error")
+	}
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidClient)
+	}
+}
+
+func TestPushAuthorizationRequestRejectsPAREndpointURLAsClientAssertionAudience(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
+		Signer: h.key, Algorithm: fapi.ES256,
+		ClientID: testClientID.String(), Audience: testPAREndpoint,
+		Now: h.now, Lifetime: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssertion: %v", err)
+	}
+	_, err = h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: plainFormParameters(t, assertion, nil)},
+	})
+	if err == nil {
+		t.Fatalf("PushAuthorizationRequest = nil error, want error")
+	}
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidClient)
 	}
 }
 

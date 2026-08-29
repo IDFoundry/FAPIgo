@@ -38,7 +38,7 @@ func newHTTPBackchannelNotifier() *httpBackchannelNotifier {
 	return &httpBackchannelNotifier{
 		client: &http.Client{
 			Timeout:   backchannelNotificationTimeout,
-			Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}, //nolint:gosec
+			Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}, //nolint:gosec // codeql[go/disabled-certificate-check] -- dev-only, talks only to a local OIDF conformance suite's self-signed cert; see this type's own doc comment
 			// Confirmed live against the OIDF suite's own
 			// fapi-ciba-id1-ping-backchannel-notification-endpoint-return-redirect-request
 			// module: a redirect response from the notification

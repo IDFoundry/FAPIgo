@@ -31,6 +31,12 @@ const cibaGrantType = "urn:openid:params:grant-type:ciba"
 // it should assume a default of 5 seconds").
 const defaultBackchannelAuthenticationPollInterval = 5 * time.Second
 
+// errBackchannelAuthenticationRequestFailed is the shared newError
+// description sendBackchannelAuthenticationRequest's own retry sequence
+// uses at every call site — the same transport-level failure
+// regardless of which attempt hit it.
+const errBackchannelAuthenticationRequestFailed = "backchannel authentication request failed"
+
 // BeginBackchannelAuthenticationRequest is the input to
 // Client.BeginBackchannelAuthentication. Exactly one of LoginHint,
 // LoginHintToken or IDTokenHint must be set — validated locally before
@@ -263,7 +269,7 @@ func (c *Client) sendBackchannelAuthenticationRequest(ctx context.Context, dpopS
 	if c.cfg.SenderConstrain == storage.SenderConstrainMTLS {
 		body, status, _, err := c.postForm(ctx, endpointURL.String(), form, nil)
 		if err != nil {
-			return nil, newError(ErrorInternal, "backchannel authentication request failed", err)
+			return nil, newError(ErrorInternal, errBackchannelAuthenticationRequestFailed, err)
 		}
 		if status != http.StatusOK {
 			return nil, parErrorFromResponse(body)
@@ -272,9 +278,9 @@ func (c *Client) sendBackchannelAuthenticationRequest(ctx context.Context, dpopS
 	}
 	body, status, header, err := c.postBackchannelAuthenticationRequestWithDPoP(ctx, dpopSigner, endpointURL, form, c.cachedDPoPNonce(ctx, asNonceScope))
 	if err != nil {
-		return nil, newError(ErrorInternal, "backchannel authentication request failed", err)
+		return nil, newError(ErrorInternal, errBackchannelAuthenticationRequestFailed, err)
 	}
-	nextNonce := header.Get("DPoP-Nonce")
+	nextNonce := header.Get(dpopNonceHeader)
 	c.cacheDPoPNonce(ctx, asNonceScope, nextNonce)
 	if status == http.StatusOK {
 		return body, nil
@@ -288,9 +294,9 @@ func (c *Client) sendBackchannelAuthenticationRequest(ctx context.Context, dpopS
 	}
 	body, status, header, err = c.postBackchannelAuthenticationRequestWithDPoP(ctx, dpopSigner, endpointURL, retryForm, nextNonce)
 	if err != nil {
-		return nil, newError(ErrorInternal, "backchannel authentication request failed", err)
+		return nil, newError(ErrorInternal, errBackchannelAuthenticationRequestFailed, err)
 	}
-	c.cacheDPoPNonce(ctx, asNonceScope, header.Get("DPoP-Nonce"))
+	c.cacheDPoPNonce(ctx, asNonceScope, header.Get(dpopNonceHeader))
 	if status != http.StatusOK {
 		return nil, parErrorFromResponse(body)
 	}
@@ -470,15 +476,15 @@ func (c *Client) pollBackchannelAuthenticationOnce(ctx context.Context, dpopSign
 	if c.cfg.SenderConstrain == storage.SenderConstrainMTLS {
 		body, status, _, err := c.postForm(ctx, tokenURL.String(), form, nil)
 		if err != nil {
-			return nil, 0, newError(ErrorInternal, "token request failed", err)
+			return nil, 0, newError(ErrorInternal, errTokenRequestFailed, err)
 		}
 		return body, status, nil
 	}
 	body, status, header, err := c.postTokenRequestWithDPoP(ctx, dpopSigner, tokenURL, form, c.cachedDPoPNonce(ctx, asNonceScope))
 	if err != nil {
-		return nil, 0, newError(ErrorInternal, "token request failed", err)
+		return nil, 0, newError(ErrorInternal, errTokenRequestFailed, err)
 	}
-	nextNonce := header.Get("DPoP-Nonce")
+	nextNonce := header.Get(dpopNonceHeader)
 	c.cacheDPoPNonce(ctx, asNonceScope, nextNonce)
 	if status == http.StatusOK || nextNonce == "" || !isDPoPNonceError(body) {
 		return body, status, nil
@@ -489,9 +495,9 @@ func (c *Client) pollBackchannelAuthenticationOnce(ctx context.Context, dpopSign
 	}
 	body, status, header, err = c.postTokenRequestWithDPoP(ctx, dpopSigner, tokenURL, retryForm, nextNonce)
 	if err != nil {
-		return nil, 0, newError(ErrorInternal, "token request failed", err)
+		return nil, 0, newError(ErrorInternal, errTokenRequestFailed, err)
 	}
-	c.cacheDPoPNonce(ctx, asNonceScope, header.Get("DPoP-Nonce"))
+	c.cacheDPoPNonce(ctx, asNonceScope, header.Get(dpopNonceHeader))
 	return body, status, nil
 }
 

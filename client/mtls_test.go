@@ -202,6 +202,52 @@ func TestExchangeCodeMTLSBindingHappyPath(t *testing.T) {
 	}
 }
 
+// TestExchangeCodePropagatesTransportFailureMTLS covers sendTokenRequest's
+// SenderConstrainMTLS branch: a transport-level failure at the token
+// endpoint (as opposed to an HTTP-level error response) surfaces as an
+// error — the MTLS counterpart of TestExchangeCodePropagatesTransportErrorOnFirstAttempt
+// (exchange_code_error_test.go), which only ever exercises the default
+// DPoP-bound path.
+func TestExchangeCodePropagatesTransportFailureMTLS(t *testing.T) {
+	as := newFakeMTLSAS(t, testIssuer)
+	ts := httptest.NewServer(as.handler())
+	t.Cleanup(ts.Close)
+
+	cfg := validConfig(t)
+	cfg.SenderConstrain = storage.SenderConstrainMTLS
+	cfg.Algorithms.DPoP = 0
+	parURL, err := fapi.ParseEndpointURL(ts.URL+"/par", fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseEndpointURL(par): %v", err)
+	}
+	tokenURL, err := fapi.ParseEndpointURL(ts.URL+"/token", fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseEndpointURL(token): %v", err)
+	}
+	cfg.Endpoints.PushedAuthorizationRequest = parURL
+	cfg.Endpoints.Token = tokenURL
+
+	deps := validDependencies(t)
+	deps.HTTP = &failNthRequestHTTPClient{real: ts.Client(), pathSuffix: "/token", failOn: 1}
+	deps.IssuerKeys = &fakeIssuerKeySource{keys: map[keys.IssuerVerificationPurpose]crypto.PublicKey{
+		keys.IDTokenVerification: &as.idTokenKey.PublicKey,
+	}}
+
+	c, err := client.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	ctx := context.Background()
+	session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid", "accounts"}})
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+	rawQuery := mtlsCallbackFor(testIssuer, session.Handle().String(), "auth-code-123")
+	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery}); err == nil {
+		t.Fatalf("CompleteAuthorization(MTLS transport failure) = nil error, want error")
+	}
+}
+
 // TestBeginBackchannelAuthenticationAndPollMTLSSendNoDPoPHeader is a
 // compact, purpose-built check that CIBA's own two entry points
 // (BeginBackchannelAuthentication, PollBackchannelAuthentication) skip
@@ -372,6 +418,90 @@ func beginTestBackchannelSessionMTLS(t *testing.T, c *client.Client) client.Back
 		t.Fatalf("BeginBackchannelAuthentication: %v", err)
 	}
 	return session
+}
+
+// TestBeginBackchannelAuthenticationPropagatesTransportFailureMTLS covers
+// sendBackchannelAuthenticationRequest's SenderConstrainMTLS branch: a
+// transport-level failure (as opposed to an HTTP-level error response,
+// which TestBeginBackchannelAuthenticationRejectsHTTPError already
+// covers under the default DPoP binding) surfaces as an error.
+func TestBeginBackchannelAuthenticationPropagatesTransportFailureMTLS(t *testing.T) {
+	as := &fakeCIBAMTLSAS{t: t}
+	ts := httptest.NewServer(as.handler())
+	t.Cleanup(ts.Close)
+
+	cfg := validConfig(t)
+	cfg.SenderConstrain = storage.SenderConstrainMTLS
+	cfg.Algorithms.DPoP = 0
+	bcURL, err := fapi.ParseEndpointURL(ts.URL+"/backchannel-authenticate", fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseEndpointURL(backchannel-authenticate): %v", err)
+	}
+	tokenURL, err := fapi.ParseEndpointURL(ts.URL+"/token", fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseEndpointURL(token): %v", err)
+	}
+	cfg.Endpoints.Token = tokenURL
+	cfg.Endpoints.BackchannelAuthentication = bcURL
+	cfg.Algorithms.BackchannelAuthenticationRequest = fapi.ES256
+	cfg.Limits.BackchannelAuthenticationRequestLifetime = time.Minute
+
+	deps := validDependencies(t)
+	deps.HTTP = &failNthRequestHTTPClient{real: ts.Client(), pathSuffix: "/backchannel-authenticate", failOn: 1}
+	deps.Keys = newFakeKeyManager(t, keys.ClientAuthentication, keys.BackchannelAuthenticationRequestSigning)
+
+	c, err := client.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	if _, err := c.BeginBackchannelAuthentication(context.Background(), client.BeginBackchannelAuthenticationRequest{
+		Scope: []string{"openid", "accounts"}, LoginHint: "user@example.com",
+	}); err == nil {
+		t.Fatalf("BeginBackchannelAuthentication(MTLS transport failure) = nil error, want error")
+	}
+}
+
+// TestPollBackchannelAuthenticationPropagatesTransportFailureMTLS covers
+// pollBackchannelAuthenticationOnce's SenderConstrainMTLS branch: a
+// transport-level failure at the token endpoint surfaces as an error.
+func TestPollBackchannelAuthenticationPropagatesTransportFailureMTLS(t *testing.T) {
+	as := &fakeCIBAMTLSAS{t: t}
+	ts := httptest.NewServer(as.handler())
+	t.Cleanup(ts.Close)
+
+	cfg := validConfig(t)
+	cfg.SenderConstrain = storage.SenderConstrainMTLS
+	cfg.Algorithms.DPoP = 0
+	bcURL, err := fapi.ParseEndpointURL(ts.URL+"/backchannel-authenticate", fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseEndpointURL(backchannel-authenticate): %v", err)
+	}
+	tokenURL, err := fapi.ParseEndpointURL(ts.URL+"/token", fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseEndpointURL(token): %v", err)
+	}
+	cfg.Endpoints.Token = tokenURL
+	cfg.Endpoints.BackchannelAuthentication = bcURL
+	cfg.Algorithms.BackchannelAuthenticationRequest = fapi.ES256
+	cfg.Limits.BackchannelAuthenticationRequestLifetime = time.Minute
+
+	deps := validDependencies(t)
+	deps.HTTP = &failNthRequestHTTPClient{real: ts.Client(), pathSuffix: "/token", failOn: 1}
+	deps.Keys = newFakeKeyManager(t, keys.ClientAuthentication, keys.BackchannelAuthenticationRequestSigning)
+
+	c, err := client.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	session, err := c.BeginBackchannelAuthentication(context.Background(), client.BeginBackchannelAuthenticationRequest{
+		Scope: []string{"openid", "accounts"}, LoginHint: "user@example.com",
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+	if _, err := c.PollBackchannelAuthentication(context.Background(), session); err == nil {
+		t.Fatalf("PollBackchannelAuthentication(MTLS transport failure) = nil error, want error")
+	}
 }
 
 // TestPollBackchannelAuthenticationDeniedMTLS is

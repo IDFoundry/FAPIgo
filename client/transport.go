@@ -8,6 +8,12 @@ import (
 	"strings"
 )
 
+// errTokenRequestFailed is the shared newError description both
+// exchange_code.go's and backchannel.go's own token-endpoint retry
+// helpers use — the same transport-level failure at every call site
+// within either retry sequence.
+const errTokenRequestFailed = "token request failed"
+
 // postFormResponse is a hardened application/x-www-form-urlencoded POST:
 // bounded by c.cfg.Limits.HTTPTimeout and c.cfg.Limits.MaxHTTPResponseBytes,
 // with every extra header added by extraHeaders. fapihttp.Client.Fetch

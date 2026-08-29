@@ -25,6 +25,11 @@ var (
 	errResponseBodyTooLarge = errors.New("client: response body exceeds the configured size limit")
 )
 
+// errProtectedResourceRequestFailed is the shared newError description
+// Do's own retry sequence uses at every call site — the same
+// transport-level failure regardless of which attempt hit it.
+const errProtectedResourceRequestFailed = "protected resource request failed"
+
 // ResourceClient performs sender-constrained requests to a protected
 // resource with one already-issued access token — most commonly the
 // OIDC UserInfo endpoint, but any FAPI 2.0 protected resource
@@ -93,7 +98,7 @@ func (rc *ResourceClient) Do(ctx context.Context, req *http.Request) (*http.Resp
 		var err error
 		res, err = rc.sendBearer(ctx, req)
 		if err != nil {
-			return nil, newError(ErrorInternal, "protected resource request failed", err)
+			return nil, newError(ErrorInternal, errProtectedResourceRequestFailed, err)
 		}
 	} else {
 		dpopSigner, _, err := c.newSigner(ctx, keys.DPoPProofSigning, c.cfg.Algorithms.DPoP)
@@ -103,10 +108,10 @@ func (rc *ResourceClient) Do(ctx context.Context, req *http.Request) (*http.Resp
 		scope := resourceNonceScope(req.URL)
 		res, err = rc.send(ctx, dpopSigner, req, c.cachedDPoPNonce(ctx, scope))
 		if err != nil {
-			return nil, newError(ErrorInternal, "protected resource request failed", err)
+			return nil, newError(ErrorInternal, errProtectedResourceRequestFailed, err)
 		}
 		if isResourceDPoPNonceChallenge(res.StatusCode, res.Header) {
-			nonce := res.Header.Get("DPoP-Nonce")
+			nonce := res.Header.Get(dpopNonceHeader)
 			_ = res.Body.Close()
 			retryReq, retryErr := rebuildRequestBody(req)
 			if retryErr != nil {
@@ -114,10 +119,10 @@ func (rc *ResourceClient) Do(ctx context.Context, req *http.Request) (*http.Resp
 			}
 			res, err = rc.send(ctx, dpopSigner, retryReq, nonce)
 			if err != nil {
-				return nil, newError(ErrorInternal, "protected resource request failed", err)
+				return nil, newError(ErrorInternal, errProtectedResourceRequestFailed, err)
 			}
 		}
-		c.cacheDPoPNonce(ctx, scope, res.Header.Get("DPoP-Nonce"))
+		c.cacheDPoPNonce(ctx, scope, res.Header.Get(dpopNonceHeader))
 	}
 
 	bounded, err := boundResponseBody(res, c.cfg.Limits.MaxHTTPResponseBytes)
@@ -158,7 +163,7 @@ func (rc *ResourceClient) send(ctx context.Context, signer crypto.Signer, req *h
 // isResourceDPoPNonceChallenge reports whether status/header is a
 // protected resource's RFC 9449 §9 nonce challenge.
 func isResourceDPoPNonceChallenge(status int, header http.Header) bool {
-	if status != http.StatusUnauthorized || header.Get("DPoP-Nonce") == "" {
+	if status != http.StatusUnauthorized || header.Get(dpopNonceHeader) == "" {
 		return false
 	}
 	challenge := header.Get("WWW-Authenticate")

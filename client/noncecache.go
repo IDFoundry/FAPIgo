@@ -13,6 +13,11 @@ import (
 // is valid to present to either.
 const asNonceScope = "as"
 
+// dpopNonceHeader is RFC 9449 §8's "DPoP-Nonce" response header —
+// shared by every call site that reads or writes it (a typo here would
+// silently break nonce caching, not fail loudly).
+const dpopNonceHeader = "DPoP-Nonce"
+
 // resourceNonceScope is a ResourceClient.Do call's DPoPNonceCache key:
 // per resource-server origin, since RFC 9449 §9 nonces are scoped to
 // the resource server that issued them and Do can be pointed at any

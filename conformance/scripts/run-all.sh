@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Runs all eight FAPI2 conformance suites this repo has driver support
-# for — AS baseline, AS message-signing, AS ciba-mtls, AS
+# Runs all nine FAPI2 conformance suites this repo has driver support
+# for — AS baseline, AS message-signing, AS ciba-mtls, AS ciba-ping, AS
 # client-auth-mtls, RP baseline, RP message-signing, RP ciba-mtls, RP
 # client-auth-mtls — against a locally running OIDF conformance suite,
 # prints one combined summary at the end, and (via generate-report.py)
@@ -26,6 +26,15 @@
 # (conformance-as-ciba-mtls, ../server/docker-compose.yml) on its own
 # ports; RP ciba-mtls is cmd/conformance-client -profile=ciba -mtls,
 # not a separate container at all.
+#
+# AS ciba-ping covers CIBA §10.2 ping delivery mode — the exact same
+# conformance-as-ciba-mtls container and config file as AS ciba-mtls
+# above (two extra clients registered
+# storage.BackchannelTokenDeliveryModePing, see
+# ../server/scripts/setup-config/main.go's setupCIBAPing), just a
+# different suite plan alias/variant against it. No RP-side counterpart:
+# cmd/conformance-client only ever plays a poll-mode CIBA client (see
+# ../client/scripts/README.md).
 #
 # Runs cmd/conformance-as under its default -access-token-format=jwt
 # only. An earlier version of this script looped the AS suites over
@@ -350,6 +359,21 @@ run_as_plan "ciba-mtls" \
 	"$SERVER_DIR/expected-warnings-ciba-mtls.json" \
 	"$SERVER_DIR/expected-skips-ciba-mtls.json"
 
+# AS ciba-ping: same conformance-as-ciba-mtls container as the ciba-mtls
+# leg above (see ../server/scripts/setup-config/main.go's setupCIBAPing
+# and ../server/oidf-config/README.md) — two extra clients registered
+# storage.BackchannelTokenDeliveryModePing on that same running AS, under
+# their own suite plan alias ("gofapi-ciba-ping") so this plan's
+# notification endpoint doesn't collide with the poll-mode plan's own.
+# ciba_mode=ping is the only variant difference from the ciba-mtls leg
+# above; no separate docker-compose service or `docker compose up`/
+# wait_as_ready entry is needed since it's the exact same container.
+run_as_plan "ciba-ping" \
+	'fapi-ciba-id1-test-plan[client_auth_type=private_key_jwt][ciba_mode=ping][fapi_ciba_profile=plain_fapi][client_registration=static_client]' \
+	"$SERVER_DIR/oidf-config/ciba-ping-plan.json" \
+	"$SERVER_DIR/expected-warnings-ciba-ping.json" \
+	"$SERVER_DIR/expected-skips-ciba-ping.json"
+
 # AS client-auth-mtls needs its own AS too (conformance-as-client-auth-mtls,
 # ../server/docker-compose.yml) — same -mtls second listener
 # infrastructure ciba-mtls uses, but sender_constrain stays "dpop" here:
@@ -384,7 +408,7 @@ python3 "$SCRIPT_DIR/generate-report.py" "$WORKDIR" "$REPO_ROOT" || echo "warnin
 
 echo
 echo "=== combined summary ==="
-for suite in "AS baseline" "AS message-signing" "AS ciba-mtls" "AS client-auth-mtls" "RP baseline" "RP message-signing" "RP ciba-mtls" "RP client-auth-mtls"; do
+for suite in "AS baseline" "AS message-signing" "AS ciba-mtls" "AS ciba-ping" "AS client-auth-mtls" "RP baseline" "RP message-signing" "RP ciba-mtls" "RP client-auth-mtls"; do
 	result="$(lookup_result "$suite")"
 	printf '%-20s %s\n' "$suite" "${result:-DID NOT RUN}"
 done
@@ -394,7 +418,7 @@ echo "report: $WORKDIR/report.md"
 
 if [[ "$OVERALL_CLEAN" = true ]]; then
 	echo
-	echo "All eight suites completed with no unexpected results."
+	echo "All nine suites completed with no unexpected results."
 	exit 0
 else
 	echo

@@ -54,6 +54,64 @@
         "https://localhost.emobix.co.uk:8443/test/a/gofapi-ciba-mtls/callback?dummy1=lorem&dummy2=ipsum"
       ],
       "sender_constrain": "mtls"
+    },
+    {
+      "allowed_scopes": [
+        "openid",
+        "accounts",
+        "offline_access"
+      ],
+      "backchannel_authentication_request_algorithm": "ES256",
+      "backchannel_client_notification_endpoint": "https://localhost.emobix.co.uk:8443/test/a/gofapi-ciba-ping/ciba-notification-endpoint",
+      "backchannel_token_delivery_mode": "ping",
+      "client_assertion_algorithm": "ES256",
+      "id": "gofapi-conformance-ciba-ping-client-1",
+      "jwks": {
+        "keys": [
+          {
+            "kty": "EC",
+            "alg": "ES256",
+            "use": "sig",
+            "kid": "gofapi-conformance-ciba-ping-client1-key1",
+            "crv": "P-256",
+            "x": "tKJ2RkCwMSHmiGXtuGRPR3yo2WgJO4F9rPPHsVqbuKs",
+            "y": "dmSxVizox1d1ARFi0EesFlrONLcaa9NikAxdlegZeGc"
+          }
+        ]
+      },
+      "redirect_uris": [
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-ciba-ping/callback"
+      ],
+      "sender_constrain": "mtls"
+    },
+    {
+      "allowed_scopes": [
+        "openid",
+        "accounts",
+        "offline_access"
+      ],
+      "backchannel_authentication_request_algorithm": "ES256",
+      "backchannel_client_notification_endpoint": "https://localhost.emobix.co.uk:8443/test/a/gofapi-ciba-ping/ciba-notification-endpoint",
+      "backchannel_token_delivery_mode": "ping",
+      "client_assertion_algorithm": "ES256",
+      "id": "gofapi-conformance-ciba-ping-client-2",
+      "jwks": {
+        "keys": [
+          {
+            "kty": "EC",
+            "alg": "ES256",
+            "use": "sig",
+            "kid": "gofapi-conformance-ciba-ping-client2-key1",
+            "crv": "P-256",
+            "x": "lYoCLClIcW4caLES9bUrdixU_Pyal0T5qNAPzhM42nQ",
+            "y": "_oesz4bpTXk-49tr6mTQtI7Oe9svRb9YAZqjbcbtvgU"
+          }
+        ]
+      },
+      "redirect_uris": [
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-ciba-ping/callback"
+      ],
+      "sender_constrain": "mtls"
     }
   ],
   "default_subject": "conformance-test-user",

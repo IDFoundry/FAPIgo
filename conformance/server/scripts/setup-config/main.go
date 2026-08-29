@@ -1,17 +1,18 @@
 // Command setup-config bootstraps everything a fresh clone needs to run
 // the AS-side conformance suites (conformance/scripts/run-all.sh's "AS
-// baseline", "AS message-signing", "AS ciba-mtls", and "AS
-// client-auth-mtls" legs) that isn't already committed to this repo.
+// baseline", "AS message-signing", "AS ciba-mtls", "AS ciba-ping", and
+// "AS client-auth-mtls" legs) that isn't already committed to this repo.
 //
 // Two files per profile can't be committed at all:
-// conformance/server/oidf-config/{baseline,message-signing,ciba,ciba-mtls,client-auth-mtls}-plan.json
+// conformance/server/oidf-config/{baseline,message-signing,ciba,ciba-mtls,ciba-ping,client-auth-mtls}-plan.json
 // (the OIDF conformance suite's own plan config) are gitignored because
 // they carry the test client's *private* JWKS keys or mTLS certificate
 // keys — see this repo's conformance/server/oidf-config/README.md and
 // .gitignore's own comment. This tool generates a fresh ES256 keypair
 // per client per profile (RSA/PS256 for ciba-mtls's client1; a
-// throwaway self-signed mTLS certificate per client for ciba-mtls and
-// client-auth-mtls alike — see setupCIBAMTLS/setupClientAuthMTLS),
+// throwaway self-signed mTLS certificate per client for ciba-mtls,
+// ciba-ping and client-auth-mtls alike — see
+// setupCIBAMTLS/setupCIBAPing/setupClientAuthMTLS),
 // writes the private half into the (gitignored) plan config alongside
 // everything else that config needs — alias, discovery URL, resource
 // block, and the browser/override automation this repo's own
@@ -133,6 +134,14 @@ func main() {
 
 	if err := setupCIBAMTLS(dir); err != nil {
 		log.Fatalf("ciba-mtls: %v", err)
+	}
+
+	// Must run after setupCIBAMTLS: appendCIBAPingClients reads
+	// ciba-mtls.config.json's existing "clients" array and appends to
+	// it, so the two poll-mode clients setupCIBAMTLS manages there must
+	// already exist.
+	if err := setupCIBAPing(dir); err != nil {
+		log.Fatalf("ciba-ping: %v", err)
 	}
 
 	if err := setupClientAuthMTLS(dir); err != nil {
@@ -1050,5 +1059,211 @@ func setupClientAuthMTLS(dir string) error {
 		return err
 	}
 	fmt.Printf("client-auth-mtls: generated fresh certificates, wrote %s and updated %s\n", planPath, configPath)
+	return nil
+}
+
+// cibaPingClient/cibaPingClient2 mirror cibaMTLSClient/cibaMTLSClient2
+// exactly (client authentication stays private_key_jwt, unaffected by
+// delivery mode) — hint_type/hint_value are not optional, confirmed
+// live: omitting them entirely (this profile's first version) fails
+// fapi-ciba-id1's own AddHintToAuthorizationEndpointRequest outright
+// ("the 'hint_type' provided in the configuration must be one of
+// 'login_hint_token', 'id_token_hint' or 'login_hint'"), the same
+// requirement poll's own ciba-mtls profile already satisfies.
+type cibaPingClient struct {
+	ClientID  string `json:"client_id"`
+	Scope     string `json:"scope"`
+	JWKS      jwks   `json:"jwks"`
+	HintType  string `json:"hint_type"`
+	HintValue string `json:"hint_value"`
+}
+
+type cibaPingClient2 struct {
+	ClientID string `json:"client_id"`
+	Scope    string `json:"scope"`
+	JWKS     jwks   `json:"jwks"`
+	ACRValue string `json:"acr_value"`
+}
+
+type cibaPingPlan struct {
+	Alias  string `json:"alias"`
+	Server struct {
+		DiscoveryURL string `json:"discoveryUrl"`
+	} `json:"server"`
+	MTLS     mtlsBlock       `json:"mtls"`
+	MTLS2    mtlsBlock       `json:"mtls2"`
+	Client   cibaPingClient  `json:"client"`
+	Client2  cibaPingClient2 `json:"client2"`
+	Resource struct {
+		ResourceURL string `json:"resourceUrl"`
+	} `json:"resource"`
+	AutomatedCibaApprovalURL string `json:"automated_ciba_approval_url"`
+}
+
+// appendCIBAPingClients adds two new client entries to the committed
+// ciba-mtls.config.json — alongside (not replacing) the two poll-mode
+// clients setupCIBAMTLS already manages there — registered
+// storage.BackchannelTokenDeliveryModePing, each with its own
+// notification endpoint under a *different* suite plan alias
+// ("gofapi-ciba-ping") than the poll-mode plan uses
+// ("gofapi-ciba-mtls"): the notification endpoint URL a static,
+// non-DCR client registers is fixed for the client's whole lifetime,
+// so it can't be shared with a plan run using a different alias.
+// Idempotent the same way patchConformanceASConfig's own third-client
+// append is: does nothing if a client with either new ID already
+// exists.
+func appendCIBAPingClients(path string, pub1, pub2 jwks, notificationEndpoint1, notificationEndpoint2 string) (clientIDs [2]string, err error) {
+	const clientID1 = conformanceKeyLabelPrefix + "ciba-ping-client-1"
+	const clientID2 = conformanceKeyLabelPrefix + "ciba-ping-client-2"
+	clientIDs = [2]string{clientID1, clientID2}
+
+	data, err := os.ReadFile(path) // #nosec G304 -- path is this dev-only script's own fixed CLI argument, not untrusted input
+	if err != nil {
+		return clientIDs, err
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(data, &top); err != nil {
+		return clientIDs, fmt.Errorf("parse: %w", err)
+	}
+	var clients []map[string]json.RawMessage
+	if err := json.Unmarshal(top["clients"], &clients); err != nil {
+		return clientIDs, fmt.Errorf("parse clients: %w", err)
+	}
+
+	for _, c := range clients {
+		var id string
+		if err := json.Unmarshal(c["id"], &id); err != nil {
+			return clientIDs, fmt.Errorf("parse clients[].id: %w", err)
+		}
+		if id == clientID1 {
+			fmt.Printf("ciba-ping: client %q already present in %s, leaving clients alone\n", clientID1, path)
+			return clientIDs, nil
+		}
+	}
+
+	callback := "https://localhost.emobix.co.uk:8443/test/a/gofapi-ciba-ping/callback"
+	newClients := []map[string]any{
+		{
+			"id": clientID1, "redirect_uris": []string{callback},
+			"client_assertion_algorithm":                   "ES256",
+			"backchannel_authentication_request_algorithm": "ES256",
+			"allowed_scopes":                               []string{"openid", "accounts", "offline_access"},
+			"jwks":                                         pub1,
+			"sender_constrain":                             "mtls",
+			"backchannel_token_delivery_mode":              "ping",
+			"backchannel_client_notification_endpoint":     notificationEndpoint1,
+		},
+		{
+			"id": clientID2, "redirect_uris": []string{callback},
+			"client_assertion_algorithm":                   "ES256",
+			"backchannel_authentication_request_algorithm": "ES256",
+			"allowed_scopes":                               []string{"openid", "accounts", "offline_access"},
+			"jwks":                                         pub2,
+			"sender_constrain":                             "mtls",
+			"backchannel_token_delivery_mode":              "ping",
+			"backchannel_client_notification_endpoint":     notificationEndpoint2,
+		},
+	}
+	for _, nc := range newClients {
+		encoded, err := marshalIndentNoEscape(nc)
+		if err != nil {
+			return clientIDs, err
+		}
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(encoded, &raw); err != nil {
+			return clientIDs, err
+		}
+		clients = append(clients, raw)
+	}
+
+	encodedClients, err := marshalIndentNoEscape(clients)
+	if err != nil {
+		return clientIDs, err
+	}
+	top["clients"] = encodedClients
+
+	out, err := marshalIndentNoEscape(top)
+	if err != nil {
+		return clientIDs, err
+	}
+	out = append(out, '\n')
+	return clientIDs, os.WriteFile(path, out, 0o644) // #nosec G306 -- this AS's own config.json carries only public keys, meant to be world-readable
+}
+
+// setupCIBAPing covers the CIBA §10.2 ping delivery mode, orthogonal to
+// setupCIBAMTLS's own §3 sender-constraining coverage above: it adds two
+// *additional* clients to the same committed ciba-mtls.config.json and
+// the same running conformance-as-ciba-mtls container setupCIBAMTLS
+// already configures — sender_constrain stays "mtls" (CIBA's own
+// mTLS-bound-access-token requirement applies unconditionally,
+// regardless of delivery mode; see oidf-config/README.md), only
+// backchannel_token_delivery_mode changes. Runs under its own suite
+// plan alias ("gofapi-ciba-ping") so this plan's notification endpoint
+// doesn't collide with the poll-mode plan's — see
+// appendCIBAPingClients's own doc comment. Idempotent the same way
+// every other setup* function here is: leaves an existing
+// ciba-ping-plan.json alone entirely.
+func setupCIBAPing(dir string) error {
+	planPath := filepath.Join(dir, "ciba-ping-plan.json")
+	if _, err := os.Stat(planPath); err == nil {
+		fmt.Printf("ciba-ping: %s already exists, leaving this profile alone\n", planPath)
+		return nil
+	}
+
+	const alias = "gofapi-ciba-ping"
+	const issuerHost = "conformance-as-ciba-mtls" // same running container as setupCIBAMTLS
+
+	priv1JWKS, pub1, err := generateKey("ciba-ping-client1")
+	if err != nil {
+		return fmt.Errorf("generate client1 key: %w", err)
+	}
+	priv2JWKS, pub2, err := generateKey("ciba-ping-client2")
+	if err != nil {
+		return fmt.Errorf("generate client2 key: %w", err)
+	}
+	mtlsCert, mtlsKey, err := generateMTLSCertKeyPEM(alias + "-suite-client")
+	if err != nil {
+		return fmt.Errorf("generate client1 mtls certificate: %w", err)
+	}
+	mtls2Cert, mtls2Key, err := generateMTLSCertKeyPEM(alias + "-suite-client2")
+	if err != nil {
+		return fmt.Errorf("generate client2 mtls certificate: %w", err)
+	}
+
+	notificationEndpoint := "https://localhost.emobix.co.uk:8443/test/a/" + alias + "/ciba-notification-endpoint"
+
+	configPath := filepath.Join(dir, "ciba-mtls.config.json")
+	clientIDs, err := appendCIBAPingClients(configPath, pub1, pub2, notificationEndpoint, notificationEndpoint)
+	if err != nil {
+		return fmt.Errorf("update %s: %w", configPath, err)
+	}
+
+	cfg := cibaPingPlan{Alias: alias}
+	cfg.Server.DiscoveryURL = issuerURL(issuerHost, "/.well-known/openid-configuration")
+	cfg.MTLS = mtlsBlock{Cert: mtlsCert, Key: mtlsKey}
+	cfg.MTLS2 = mtlsBlock{Cert: mtls2Cert, Key: mtls2Key}
+	cfg.Client = cibaPingClient{
+		ClientID: clientIDs[0], Scope: fullScope, JWKS: priv1JWKS,
+		HintType: "login_hint", HintValue: "conformance-test-user",
+	}
+	cfg.Client2 = cibaPingClient2{
+		ClientID: clientIDs[1], Scope: fullScope, JWKS: priv2JWKS,
+		ACRValue: "urn:mace:incommon:iap:silver",
+	}
+	// Port 8444, not 8443: RFC 8705 sender-constraining means this
+	// resource call must go over the mTLS listener itself — mirrors
+	// setupCIBAMTLS's own identical reasoning.
+	cfg.Resource.ResourceURL = "https://" + issuerHost + ":8444/userinfo"
+	cfg.AutomatedCibaApprovalURL = issuerURL(issuerHost, "/backchannel-approve") + "?auth_req_id={auth_req_id}&action={action}"
+
+	out, err := marshalIndentNoEscape(cfg)
+	if err != nil {
+		return err
+	}
+	out = append(out, '\n')
+	if err := os.WriteFile(planPath, out, 0o600); err != nil { // #nosec G306 -- mirrors setupCIBAMTLS's own owner-only rationale (embeds client private keys and mtls certificate keys)
+		return err
+	}
+	fmt.Printf("ciba-ping: generated fresh client keys and certificates, wrote %s and updated %s\n", planPath, configPath)
 	return nil
 }

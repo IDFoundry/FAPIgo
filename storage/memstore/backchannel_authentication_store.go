@@ -101,6 +101,19 @@ func (s *BackchannelAuthenticationStore) DecideBackchannelAuthentication(_ conte
 	rec.acr = decision.ACR
 	rec.amr = cloneStrings(decision.AMR)
 	rec.reason = decision.Reason
+	if rec.deliveryMode == "ping" {
+		// CIBA Core 1.0 §10.2: ping delivery's whole point is letting the
+		// client skip the usual PollInterval wait once notified — the
+		// notification itself is the "go ahead", not another metered
+		// poll attempt. Resetting polledBefore exempts exactly the next
+		// PollBackchannelAuthentication call from the interval check
+		// below, the same as a genuinely first poll — confirmed
+		// necessary live against the OIDF suite's own
+		// fapi-ciba-id1-ping-* modules, which call the token endpoint
+		// immediately on receiving the ping and require success, not
+		// slow_down.
+		rec.polledBefore = false
+	}
 	return storage.DecidedBackchannelAuthentication{
 		ClientID:                rec.clientID,
 		DeliveryMode:            rec.deliveryMode,

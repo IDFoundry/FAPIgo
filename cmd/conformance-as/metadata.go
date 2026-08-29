@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 
+	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/server"
 )
 
@@ -18,11 +19,26 @@ import (
 // one is a fixed list, not sourced from Config.
 type wireMetadata struct {
 	server.Metadata
-	ScopesSupported               []string `json:"scopes_supported,omitempty"`
-	ClaimsSupported               []string `json:"claims_supported,omitempty"`
-	ClaimsParameterSupported      bool     `json:"claims_parameter_supported,omitempty"`
-	UserinfoEndpoint              string   `json:"userinfo_endpoint,omitempty"`
-	DPoPSigningAlgValuesSupported []string `json:"dpop_signing_alg_values_supported,omitempty"`
+	// MTLSEndpointAliases, when set, shadows server.Metadata's own
+	// embedded field of the same JSON name — encoding/json resolves a
+	// same-named field at shallower struct-nesting depth in favor of a
+	// promoted one at greater depth, so this only ever needs setting
+	// when there's a userinfo alias to add (see buildMTLSUserinfoURL's
+	// own doc comment for why userinfo_endpoint can't just live on
+	// server.MTLSEndpoints itself).
+	MTLSEndpointAliases           *wireMTLSEndpointAliases `json:"mtls_endpoint_aliases,omitempty"`
+	ScopesSupported               []string                 `json:"scopes_supported,omitempty"`
+	ClaimsSupported               []string                 `json:"claims_supported,omitempty"`
+	ClaimsParameterSupported      bool                     `json:"claims_parameter_supported,omitempty"`
+	UserinfoEndpoint              string                   `json:"userinfo_endpoint,omitempty"`
+	DPoPSigningAlgValuesSupported []string                 `json:"dpop_signing_alg_values_supported,omitempty"`
+}
+
+// wireMTLSEndpointAliases is server.MTLSEndpoints's own advertised
+// shape plus the one endpoint alias that package doesn't know about.
+type wireMTLSEndpointAliases struct {
+	server.MTLSEndpointAliases
+	UserinfoEndpoint fapi.URL `json:"userinfo_endpoint,omitempty"`
 }
 
 // claimsSupported is the protocol claims every ID token carries
@@ -39,15 +55,22 @@ var claimsSupported = append(
 
 var dpopSigningAlgValuesSupported = []string{"ES256", "PS256", "EdDSA"}
 
-func metadataHandler(srv *server.Server, advertisedScopes []string, userinfoURL *url.URL) http.HandlerFunc {
+func metadataHandler(srv *server.Server, advertisedScopes []string, userinfoURL *url.URL, mtlsUserinfoURL *fapi.URL) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		md := srv.Metadata(r.Context())
 		doc := wireMetadata{
-			Metadata:                      srv.Metadata(r.Context()),
+			Metadata:                      md,
 			ScopesSupported:               advertisedScopes,
 			ClaimsSupported:               claimsSupported,
 			ClaimsParameterSupported:      true,
 			UserinfoEndpoint:              userinfoURL.String(),
 			DPoPSigningAlgValuesSupported: dpopSigningAlgValuesSupported,
+		}
+		if md.MTLSEndpointAliases != nil && mtlsUserinfoURL != nil {
+			doc.MTLSEndpointAliases = &wireMTLSEndpointAliases{
+				MTLSEndpointAliases: *md.MTLSEndpointAliases,
+				UserinfoEndpoint:    *mtlsUserinfoURL,
+			}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(doc)

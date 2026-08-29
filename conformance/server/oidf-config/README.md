@@ -374,6 +374,74 @@ support of its own yet (it always registers `private_key_jwt`), so
 there is no driver to run the suite's client-side plan against — a
 natural follow-up, not attempted here.
 
+## Sender-constrain mTLS for baseline and message-signing (`mtls.config.json`, `message-signing-mtls.config.json`)
+
+`sender_constrain=mtls` (RFC 8705 §3) had only ever been exercised via
+`ciba-mtls.config.json` below — but CIBA's own backchannel
+authentication has no browser hop at all, so that never touched
+PAR/authorize/token. `client-auth-mtls.config.json` above does exercise
+the full PAR/authorize/callback/token flow under mTLS, but only for RFC
+8705 §2 client *authentication* — `sender_constrain` stays `dpop`
+there. So the combination that matters most in practice — a plain
+`private_key_jwt` client receiving and using mTLS-bound (not
+DPoP-bound) access tokens through the ordinary flow — had never been
+live-conformance-tested at all, even though it's exactly the same
+`server/token.go` binding logic `ciba-mtls.config.json` already
+exercises. Confirmed live before building anything: `POST /api/plan`
+against `fapi2-security-profile-final-test-plan` genuinely accepts
+`sender_constrain=mtls` as a variant value, pulling in
+`fapi2-security-profile-final-ensure-holder-of-key-required` and the
+PAR/token audience modules under mTLS instead of DPoP.
+
+Structurally, both configs are just `baseline.config.json`/
+`message-signing.config.json` with `"sender_constrain": "mtls"` added
+to every client and a `mtls_listen_addr` added at the top level —
+`conformance/server/scripts/setup-config/main.go`'s existing `profile`
+struct/`profiles` slice/`writePlanConfig` (already shared between
+baseline and message-signing) gained one `senderConstrainMTLS bool`
+field rather than two more standalone `setupXxx` functions, since the
+plan shape is otherwise identical (same browser/consent/override
+blocks) — the only real addition is generating and embedding an
+`mtls`/`mtls2` suite-side client certificate pair, mirroring
+`setupCIBAMTLS`'s own identical need.
+
+One real bug found getting the core happy-flow module to pass:
+**the resource endpoint call must go over the mTLS listener
+(`:8444`), not the plain one (`:8443`)** — `writePlanConfig`'s shared
+`Resource.ResourceURL` construction defaulted to the plain
+`issuerURL(...)` helper unconditionally; a client presenting its mTLS
+certificate to `:8443` (which never asks for one) gets a token the
+resource endpoint's own certificate-binding check then rejects with
+`400`, since that connection carries no client certificate to match
+against. Fixed by branching to `https://{issuerHost}:8444/userinfo`
+when `senderConstrainMTLS` is set — the exact same reasoning
+`ciba-mtls.config.json`'s own resource URL already uses.
+
+Confirmed live: the core `fapi2-security-profile-final-happy-flow`
+module, `-ensure-holder-of-key-required`, both PAR audience negative
+tests, `-ensure-signed-client-assertion-with-RS256-fails`, and
+`-refresh-token` all PASS for `mtls.config.json`; the message-signing
+counterpart's own happy-flow, holder-of-key,
+`-ensure-signed-request-object-with-RS256-fails`, and PAR audience
+modules all PASS too, confirming mTLS sender-constraining composes
+correctly with signed request objects/JARM. (Driving these modules
+directly via the suite's REST API, rather than through
+`run-test-plan.py`, needs
+`../scripts/unblock-implicit-callback.py <planId>` running alongside —
+without it, `fapi2-security-profile-final-happy-flow`'s own browser
+callback hangs in `WAITING` on the suite's own documented
+`CreateRandomImplicitSubmitUrl` HtmlUnit/Bootstrap quirk; see that
+script's own doc comment. `../scripts/run-all.sh` already starts this
+poller automatically for every AS-side plan.)
+
+Wired into `../scripts/run-all.sh` as "AS mtls"/"AS message-signing-mtls"
+— two more `conformance-as` containers (`conformance-as-mtls`,
+`conformance-as-message-signing-mtls`, `../docker-compose.yml`, ports
+18450/18451 and 18452/18453). No RP-side counterpart yet:
+`cmd/conformance-client`'s own `-mtls` flag is currently hardcoded to
+`-profile=ciba` only (see its own flag help text) — extending it to
+`-profile=baseline` is a natural, separate follow-up.
+
 ## CIBA
 
 Two separate configs, two separate outcomes: `ciba.config.json` (DPoP)

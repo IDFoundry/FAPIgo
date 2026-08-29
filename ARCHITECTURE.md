@@ -748,6 +748,41 @@ checked at PAR as well. Full breakdown in
 section. Wired into `run-all.sh` as "RP client-auth-mtls" (no separate
 container — a driver flag, like RP ciba-mtls).
 
+That left one real combination never tested at all: §3 sender
+-constraining (mTLS-bound access tokens) through the *ordinary*
+PAR/authorize/token flow, as opposed to CIBA's backend-to-backend one.
+AS ciba-mtls exercises mTLS-bound tokens but never touches PAR/authorize
+(CIBA has no browser hop); AS client-auth-mtls exercises the full
+PAR/authorize/token flow under mTLS but only for §2 client
+authentication, keeping `sender_constrain=dpop`. Confirmed live before
+building anything: `fapi2-security-profile-final-test-plan` genuinely
+accepts `sender_constrain=mtls` as its own variant value. Closed via two
+more AS-side profiles, `mtls.config.json` and its message-signing
+counterpart `message-signing-mtls.config.json` — generalizing the
+existing baseline/message-signing `profile`/`writePlanConfig` machinery
+in `conformance/server/scripts/setup-config/main.go` with one
+`senderConstrainMTLS bool` flag rather than duplicating
+`setupCIBAMTLS`-shaped standalone functions, since the plan shape
+(browser/consent/override) is otherwise identical to baseline's own —
+only an `mtls`/`mtls2` suite-side certificate pair needed adding.
+Surfaced one real bug: the shared `Resource.ResourceURL` construction
+defaulted to the plain (`:8443`) endpoint unconditionally, but an
+mTLS-bound access token's resource call must go over the mTLS listener
+(`:8444`) — a client presenting its certificate to the plain listener
+(which never asks for one) gets a token the resource endpoint's own
+binding check then rejects with 400, exactly the same reasoning
+ciba-mtls's own resource URL already accounts for. **Confirmed live:**
+the core happy-flow, holder-of-key, PAR-audience, and RS256-negative
+modules PASS for both profiles, including the message-signing variant's
+own signed-request-object override, confirming mTLS sender-constraining
+composes correctly with JARM/signed request objects too. Full breakdown
+in `conformance/server/oidf-config/README.md`'s own section. Wired into
+`run-all.sh` as "AS mtls"/"AS message-signing-mtls" (two more
+`conformance-as` containers). No RP-side counterpart yet:
+`cmd/conformance-client`'s own `-mtls` flag is hardcoded to
+`-profile=ciba` only — extending it to `-profile=baseline` is a
+natural, separate follow-up.
+
 ## What is and isn't shared
 
 **Shared** (via `internal/`, `extension`, `storage`'s replay primitive

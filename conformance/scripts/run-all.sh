@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Runs all nine FAPI2 conformance suites this repo has driver support
+# Runs all eleven FAPI2 conformance suites this repo has driver support
 # for — AS baseline, AS message-signing, AS ciba-mtls, AS ciba-ping, AS
-# client-auth-mtls, RP baseline, RP message-signing, RP ciba-mtls, RP
-# client-auth-mtls — against a locally running OIDF conformance suite,
+# mtls, AS message-signing-mtls, AS client-auth-mtls, RP baseline, RP
+# message-signing, RP ciba-mtls, RP client-auth-mtls — against a
+# locally running OIDF conformance suite,
 # prints one combined summary at the end, and (via generate-report.py)
 # writes a fuller report.md alongside the raw per-suite logs — every
 # non-PASSED module, with the "why this is expected, not a defect"
@@ -35,6 +36,24 @@
 # different suite plan alias/variant against it. No RP-side counterpart:
 # cmd/conformance-client only ever plays a poll-mode CIBA client (see
 # ../client/scripts/README.md).
+#
+# AS mtls/AS message-signing-mtls close the remaining §3 sender
+# -constraining gap: unlike AS ciba-mtls (no PAR/authorize hop at all)
+# and AS client-auth-mtls (mTLS is client *authentication* there, not
+# token binding — sender_constrain stays dpop), these run the ordinary
+# fapi2-security-profile-final/fapi2-message-signing-final plans with
+# sender_constrain=mtls, so a plain client authenticating with
+# private_key_jwt as usual receives and uses mTLS-bound access tokens
+# through the real PAR/authorize/callback/token flow — the same
+# server/token.go binding logic AS ciba-mtls exercises, but never
+# through this code path before. Two more conformance-as containers
+# (conformance-as-mtls, conformance-as-message-signing-mtls,
+# ../server/docker-compose.yml), generated via
+# ../server/scripts/setup-config/main.go's senderConstrainMTLS profile
+# flag. No RP-side counterpart yet:
+# cmd/conformance-client's own -mtls flag is currently hardcoded to
+# -profile=ciba only (see its own flag help text) — extending it to
+# -profile=baseline is a natural, separate follow-up.
 #
 # Runs cmd/conformance-as under its default -access-token-format=jwt
 # only. An earlier version of this script looped the AS suites over
@@ -187,7 +206,7 @@ wait_as_ready() {
 	# the time anyone's looking at a failed CI run the containers are
 	# long gone (torn down by the workflow's own cleanup step).
 	(cd "$SERVER_DIR" && docker compose ps) >&2 || true
-	(cd "$SERVER_DIR" && docker compose logs --tail=100 conformance-as-baseline conformance-as-message-signing conformance-as-ciba-mtls conformance-as-client-auth-mtls) >&2 || true
+	(cd "$SERVER_DIR" && docker compose logs --tail=100 conformance-as-baseline conformance-as-message-signing conformance-as-ciba-mtls conformance-as-mtls conformance-as-message-signing-mtls conformance-as-client-auth-mtls) >&2 || true
 	exit 1
 }
 
@@ -327,11 +346,15 @@ log "bringing up conformance-as containers"
 # build` layer even when the source changed. Not the default here
 # since it'd make every routine run take minutes even when nothing
 # changed.
-(cd "$SERVER_DIR" && docker compose up -d --build conformance-as-baseline conformance-as-message-signing conformance-as-ciba-mtls conformance-as-client-auth-mtls) >"$WORKDIR/docker-compose.log" 2>&1
+(cd "$SERVER_DIR" && docker compose up -d --build conformance-as-baseline conformance-as-message-signing conformance-as-ciba-mtls conformance-as-mtls conformance-as-message-signing-mtls conformance-as-client-auth-mtls) >"$WORKDIR/docker-compose.log" 2>&1
 wait_as_ready 18443
 wait_as_ready 18444
 wait_as_ready 18446
 wait_as_ready 18447
+wait_as_ready 18450
+wait_as_ready 18451
+wait_as_ready 18452
+wait_as_ready 18453
 wait_as_ready 18448
 wait_as_ready 18449
 
@@ -374,6 +397,25 @@ run_as_plan "ciba-ping" \
 	"$SERVER_DIR/expected-warnings-ciba-ping.json" \
 	"$SERVER_DIR/expected-skips-ciba-ping.json"
 
+# AS mtls: sender_constrain=mtls under the ordinary PAR/authorize/token
+# flow (see this file's own header comment for why this is a real,
+# previously-untested combination) — its own conformance-as-mtls
+# container.
+run_as_plan "mtls" \
+	'fapi2-security-profile-final-test-plan[client_auth_type=private_key_jwt][sender_constrain=mtls][fapi_profile=plain_fapi][openid=openid_connect]' \
+	"$SERVER_DIR/oidf-config/mtls-plan.json" \
+	"$SERVER_DIR/expected-warnings-mtls.json" \
+	"$SERVER_DIR/expected-skips-mtls.json"
+
+# AS message-signing-mtls: AS mtls's own message-signing counterpart —
+# confirms sender_constrain=mtls composes correctly with signed request
+# objects/JARM too.
+run_as_plan "message-signing-mtls" \
+	'fapi2-message-signing-final-test-plan[client_auth_type=private_key_jwt][sender_constrain=mtls][fapi_profile=plain_fapi][openid=openid_connect][fapi_request_method=signed_non_repudiation][fapi_response_mode=jarm]' \
+	"$SERVER_DIR/oidf-config/message-signing-mtls-plan.json" \
+	"$SERVER_DIR/expected-warnings-message-signing-mtls.json" \
+	"$SERVER_DIR/expected-skips-message-signing-mtls.json"
+
 # AS client-auth-mtls needs its own AS too (conformance-as-client-auth-mtls,
 # ../server/docker-compose.yml) — same -mtls second listener
 # infrastructure ciba-mtls uses, but sender_constrain stays "dpop" here:
@@ -408,7 +450,7 @@ python3 "$SCRIPT_DIR/generate-report.py" "$WORKDIR" "$REPO_ROOT" || echo "warnin
 
 echo
 echo "=== combined summary ==="
-for suite in "AS baseline" "AS message-signing" "AS ciba-mtls" "AS ciba-ping" "AS client-auth-mtls" "RP baseline" "RP message-signing" "RP ciba-mtls" "RP client-auth-mtls"; do
+for suite in "AS baseline" "AS message-signing" "AS ciba-mtls" "AS ciba-ping" "AS mtls" "AS message-signing-mtls" "AS client-auth-mtls" "RP baseline" "RP message-signing" "RP ciba-mtls" "RP client-auth-mtls"; do
 	result="$(lookup_result "$suite")"
 	printf '%-20s %s\n' "$suite" "${result:-DID NOT RUN}"
 done
@@ -418,7 +460,7 @@ echo "report: $WORKDIR/report.md"
 
 if [[ "$OVERALL_CLEAN" = true ]]; then
 	echo
-	echo "All nine suites completed with no unexpected results."
+	echo "All eleven suites completed with no unexpected results."
 	exit 0
 else
 	echo

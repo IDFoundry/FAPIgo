@@ -1,0 +1,92 @@
+{
+  "clients": [
+    {
+      "allowed_scopes": [
+        "openid",
+        "accounts",
+        "offline_access"
+      ],
+      "client_assertion_algorithm": "ES256",
+      "id": "gofapi-conformance-msgsign-mtls-client-1",
+      "jwks": {
+        "keys": [
+          {
+            "kty": "EC",
+            "alg": "ES256",
+            "use": "sig",
+            "kid": "gofapi-conformance-msgsign-mtls-client1-key1",
+            "crv": "P-256",
+            "x": "tw77xW79M51pcWWUD_2nPJ3zvH8gtPb7P2NBVkYLdYA",
+            "y": "xCHAQPIochUq-ifFBw7bsBAjmJhhEj0Fkdk_ufNvTmY"
+          }
+        ]
+      },
+      "redirect_uris": [
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-msgsign-mtls/callback",
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-msgsign-mtls/callback?dummy1=lorem&dummy2=ipsum"
+      ],
+      "request_object_algorithm": "ES256",
+      "sender_constrain": "mtls"
+    },
+    {
+      "allowed_scopes": [
+        "openid",
+        "accounts",
+        "offline_access"
+      ],
+      "client_assertion_algorithm": "ES256",
+      "id": "gofapi-conformance-msgsign-mtls-client-2",
+      "jwks": {
+        "keys": [
+          {
+            "kty": "EC",
+            "alg": "ES256",
+            "use": "sig",
+            "kid": "gofapi-conformance-msgsign-mtls-client2-key1",
+            "crv": "P-256",
+            "x": "xEKg_5TfYolpHJe-lLVnVek6bwTfveDOAmrdjWdr7ek",
+            "y": "FpclrRBs1jTVwvmWuLmygk-kqI4oFLR5jsdqpErK6gY"
+          }
+        ]
+      },
+      "redirect_uris": [
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-msgsign-mtls/callback",
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-msgsign-mtls/callback?dummy1=lorem&dummy2=ipsum"
+      ],
+      "request_object_algorithm": "ES256",
+      "sender_constrain": "mtls"
+    },
+    {
+      "allowed_scopes": [
+        "openid",
+        "accounts",
+        "offline_access"
+      ],
+      "client_assertion_algorithm": "PS256",
+      "id": "gofapi-conformance-msgsign-mtls-client1-rs256-client",
+      "jwks": {
+        "keys": [
+          {
+            "kty": "RSA",
+            "alg": "PS256",
+            "use": "sig",
+            "kid": "gofapi-conformance-msgsign-mtls-client1-rs256-key1",
+            "n": "uxbpu8SGw0_N4SyJ-mJKyGCVfG4ddoEQsK2VPeuHgBdosZ7eWyojDuy1V5kwZ9fQLaXDo5gPdoMx-npt7bB_vKfiNcuUGqW3Zw_-OtkjhIsygz31q9BaDK4iqvQUNlyC4k5PZTHdMH9FzHols1eRKsmpttHWSk1NjpzGNMBmRg0g7RHpxSpUg6aaFLd3VTBVfRI9LC0j6v2CoMGsGFbMZnazScbG_VUhGcmT71uBIpdtmOorIf1OIsgmhWxJCMp--97C16TrB5ZVPJr50JhiNuAM7A-3N7WrpRDaDooh3y_OUDwDNqTwEc5tYFo53PgFBYP0GqO_rkh6oarOBbsKQQ",
+            "e": "AQAB"
+          }
+        ]
+      },
+      "redirect_uris": [
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-msgsign-mtls/callback",
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-msgsign-mtls/callback?dummy1=lorem&dummy2=ipsum"
+      ],
+      "request_object_algorithm": "PS256",
+      "sender_constrain": "mtls"
+    }
+  ],
+  "default_subject": "conformance-test-user",
+  "issuer": "https://conformance-as-message-signing-mtls:8443",
+  "listen_addr": "0.0.0.0:8443",
+  "mtls_listen_addr": "0.0.0.0:8444",
+  "profile": "fapi2-security-message-signing"
+}

@@ -229,6 +229,34 @@ func buildMTLSEndpoints(issuer fapi.URL, mtlsListenAddr string, ciba bool) (serv
 	return out, nil
 }
 
+// buildMTLSUserinfoURL derives this binary's own "/userinfo" endpoint's
+// RFC 8705 §5 mTLS alias — same host/port-substitution construction as
+// buildMTLSEndpoints, just for the one path server.MTLSEndpoints
+// doesn't carry (userinfo is a resource-role, not server-role, concern
+// — see server/metadata.go's own doc comment for why the server
+// package itself never advertises this). Confirmed live: without this,
+// a resource call following the bare (non-alias) discovered
+// userinfo_endpoint with an mTLS-bound access token's certificate
+// still presented gets rejected — the plain listener never asks for
+// one, so the certificate binding check has nothing to compare against
+// and returns 400 "a client certificate is required"
+// (fapi2-security-profile-final-test-claims-parameter-identity-claims
+// is the module that actually resolves userinfo_endpoint this way,
+// rather than using the plan's own resource.resourceUrl override).
+func buildMTLSUserinfoURL(issuer fapi.URL, mtlsListenAddr string) (fapi.URL, error) {
+	_, mtlsPort, err := net.SplitHostPort(mtlsListenAddr)
+	if err != nil {
+		return fapi.URL{}, fmt.Errorf("mtls_listen_addr: %w", err)
+	}
+	parsedIssuer, err := url.Parse(issuer.String())
+	if err != nil {
+		return fapi.URL{}, fmt.Errorf("issuer: %w", err)
+	}
+	base := *parsedIssuer
+	base.Host = net.JoinHostPort(parsedIssuer.Hostname(), mtlsPort)
+	return fapi.ParseEndpointURL(base.String() + "/userinfo")
+}
+
 // buildEndpoints derives this server's four endpoint URLs from issuer by
 // appending fixed paths — the common convention of treating the issuer
 // identifier as the deployment's own origin.

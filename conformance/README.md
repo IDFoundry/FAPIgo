@@ -17,12 +17,12 @@ behaviour and negative-test expectations differ. See
   run scripts.
 - `server/` — OpenID Foundation FAPI 2.0 AS conformance configuration and
   run scripts.
-- `scripts/run-all.sh` — runs all nine suites this repo has driver
+- `scripts/run-all.sh` — runs all eleven suites this repo has driver
   support for (AS baseline, AS message-signing, AS ciba-mtls, AS
-  ciba-ping, AS client-auth-mtls, RP baseline, RP message-signing, RP
-  ciba-mtls, RP client-auth-mtls) against a locally running suite and
-  prints one combined summary. See the script's own header comment for
-  prerequisites and env vars.
+  ciba-ping, AS mtls, AS message-signing-mtls, AS client-auth-mtls, RP
+  baseline, RP message-signing, RP ciba-mtls, RP client-auth-mtls)
+  against a locally running suite and prints one combined summary. See
+  the script's own header comment for prerequisites and env vars.
 - `resource/` — resource-server verification test vectors (DPoP proof
   validation, access-token binding checks) used outside the OIDF suite.
   The suite doesn't run its own dedicated resource-server conformance

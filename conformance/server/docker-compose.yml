@@ -133,6 +133,53 @@ services:
       - -access-token-format=${ACCESS_TOKEN_FORMAT:-jwt}
       - -mtls
 
+  # sender_constrain=mtls (RFC 8705 §3) under the ordinary
+  # PAR/authorize/token flow — orthogonal to both conformance-as-ciba-mtls
+  # (mTLS-bound tokens, but CIBA has no PAR/authorize hop at all) and
+  # conformance-as-client-auth-mtls (full PAR/authorize/token flow under
+  # mTLS, but only for RFC 8705 §2 client *authentication* — sender
+  # -constraining stays DPoP there).
+  conformance-as-mtls:
+    build:
+      context: ../..
+      dockerfile: conformance/server/Dockerfile
+    hostname: conformance-as-mtls
+    networks: [suite]
+    ports:
+      - "18450:8443" # see conformance-as-baseline's port comment above
+      - "18451:8444" # the -mtls listener (mtls_listen_addr in the config)
+    volumes:
+      - ./oidf-config/mtls.config.json:/config.json:ro
+      - ./certs:/certs:ro
+    command:
+      - -config=/config.json
+      - -cert=/certs/server.crt
+      - -key=/certs/server.key
+      - -access-token-format=${ACCESS_TOKEN_FORMAT:-jwt}
+      - -mtls
+
+  # conformance-as-mtls's own message-signing counterpart — confirms
+  # mTLS sender-constraining composes correctly with signed request
+  # objects/JARM too.
+  conformance-as-message-signing-mtls:
+    build:
+      context: ../..
+      dockerfile: conformance/server/Dockerfile
+    hostname: conformance-as-message-signing-mtls
+    networks: [suite]
+    ports:
+      - "18452:8443" # see conformance-as-baseline's port comment above
+      - "18453:8444" # the -mtls listener (mtls_listen_addr in the config)
+    volumes:
+      - ./oidf-config/message-signing-mtls.config.json:/config.json:ro
+      - ./certs:/certs:ro
+    command:
+      - -config=/config.json
+      - -cert=/certs/server.crt
+      - -key=/certs/server.key
+      - -access-token-format=${ACCESS_TOKEN_FORMAT:-jwt}
+      - -mtls
+
 networks:
   suite:
     external: true

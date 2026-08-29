@@ -52,255 +52,277 @@ func runConcurrently(attempts int, fn func() bool) int {
 func TestGrantStoreContract(t *testing.T, factory func() GrantStore) {
 	t.Helper()
 
-	t.Run("CreateAndRedeemAuthorizationCode", func(t *testing.T) {
-		store := factory()
-		ctx := context.Background()
-		hash := sha256.Sum256([]byte("test-code"))
-		want := NewAuthorizationCode{
-			CodeHash: hash, ClientID: "client-1", RedirectURI: "https://rp.example/cb",
-			CodeChallenge: "challenge", CodeChallengeMethod: "S256",
-			DPoPJKT: "jkt-1",
-			Subject: "user-1", Scope: []string{"openid", "accounts"},
-			Nonce: "nonce-1", AuthTime: time.Now().Truncate(time.Second),
-			ACR: "acr-1", AMR: []string{"pwd"},
-			RequestedIDTokenClaims: []string{"name"}, RequestedUserinfoClaims: []string{"email"},
-			ExpiresAt: time.Now().Add(time.Minute),
-		}
-		if err := store.CreateAuthorizationCode(ctx, want); err != nil {
-			t.Fatalf("CreateAuthorizationCode: %v", err)
-		}
-		got, err := store.RedeemAuthorizationCode(ctx, AuthorizationCodeRedemption{CodeHash: hash})
-		if err != nil {
-			t.Fatalf("RedeemAuthorizationCode: %v", err)
-		}
-		if got.ClientID != want.ClientID || got.RedirectURI != want.RedirectURI ||
-			got.CodeChallenge != want.CodeChallenge || got.CodeChallengeMethod != want.CodeChallengeMethod ||
-			got.DPoPJKT != want.DPoPJKT ||
-			got.Subject != want.Subject || got.Nonce != want.Nonce ||
-			!got.AuthTime.Equal(want.AuthTime) || got.ACR != want.ACR ||
-			!got.ExpiresAt.Equal(want.ExpiresAt) || len(got.Scope) != len(want.Scope) ||
-			len(got.RequestedIDTokenClaims) != len(want.RequestedIDTokenClaims) ||
-			len(got.RequestedUserinfoClaims) != len(want.RequestedUserinfoClaims) {
-			t.Fatalf("RedeemAuthorizationCode returned %+v, want fields matching %+v", got, want)
-		}
-	})
-
-	t.Run("RedeemAuthorizationCodeIsSingleUse", func(t *testing.T) {
-		store := factory()
-		ctx := context.Background()
-		hash := sha256.Sum256([]byte("single-use-code"))
-		if err := store.CreateAuthorizationCode(ctx, NewAuthorizationCode{
-			CodeHash: hash, ClientID: "client-1", ExpiresAt: time.Now().Add(time.Minute),
-		}); err != nil {
-			t.Fatalf("CreateAuthorizationCode: %v", err)
-		}
-		if _, err := store.RedeemAuthorizationCode(ctx, AuthorizationCodeRedemption{CodeHash: hash}); err != nil {
-			t.Fatalf("first RedeemAuthorizationCode: %v", err)
-		}
-		if _, err := store.RedeemAuthorizationCode(ctx, AuthorizationCodeRedemption{CodeHash: hash}); err == nil {
-			t.Fatalf("second RedeemAuthorizationCode = nil error, want error")
-		}
-	})
-
-	// RFC 6749 §4.1.2: on a reuse, the store must report what the
-	// original redemption issued (via errors.As into
-	// *AuthorizationCodeAlreadyRedeemedError) so the caller can revoke
-	// it — see RecordIssuedAccessToken/RecordIssuedRefreshToken's own
-	// doc comments.
+	t.Run("CreateAndRedeemAuthorizationCode", func(t *testing.T) { testGrantStoreCreateAndRedeemAuthorizationCode(t, factory) })
+	t.Run("RedeemAuthorizationCodeIsSingleUse", func(t *testing.T) { testGrantStoreRedeemAuthorizationCodeIsSingleUse(t, factory) })
 	t.Run("RedeemAuthorizationCodeReuseReportsIssuedTokens", func(t *testing.T) {
-		store := factory()
-		ctx := context.Background()
-		hash := sha256.Sum256([]byte("reuse-reports-code"))
-		if err := store.CreateAuthorizationCode(ctx, NewAuthorizationCode{
-			CodeHash: hash, ClientID: "client-1", ExpiresAt: time.Now().Add(time.Minute),
-		}); err != nil {
-			t.Fatalf("CreateAuthorizationCode: %v", err)
-		}
-		if _, err := store.RedeemAuthorizationCode(ctx, AuthorizationCodeRedemption{CodeHash: hash}); err != nil {
-			t.Fatalf("first RedeemAuthorizationCode: %v", err)
-		}
-		refreshHash := sha256.Sum256([]byte("reuse-reports-refresh"))
-		if err := store.RecordIssuedAccessToken(ctx, hash, "jti-1", time.Now().Add(time.Minute)); err != nil {
-			t.Fatalf("RecordIssuedAccessToken: %v", err)
-		}
-		if err := store.RecordIssuedRefreshToken(ctx, hash, refreshHash, time.Now().Add(time.Hour)); err != nil {
-			t.Fatalf("RecordIssuedRefreshToken: %v", err)
-		}
-
-		_, err := store.RedeemAuthorizationCode(ctx, AuthorizationCodeRedemption{CodeHash: hash})
-		if err == nil {
-			t.Fatal("second RedeemAuthorizationCode = nil error, want error")
-		}
-		var alreadyRedeemed *AuthorizationCodeAlreadyRedeemedError
-		if !errors.As(err, &alreadyRedeemed) {
-			t.Fatalf("second RedeemAuthorizationCode error = %v, want errors.As into *AuthorizationCodeAlreadyRedeemedError", err)
-		}
-		if alreadyRedeemed.IssuedAccessTokenKey != "jti-1" {
-			t.Fatalf("IssuedAccessTokenKey = %q, want %q", alreadyRedeemed.IssuedAccessTokenKey, "jti-1")
-		}
-		if alreadyRedeemed.IssuedRefreshTokenHash == nil || *alreadyRedeemed.IssuedRefreshTokenHash != refreshHash {
-			t.Fatalf("IssuedRefreshTokenHash = %v, want %v", alreadyRedeemed.IssuedRefreshTokenHash, refreshHash)
-		}
+		testGrantStoreRedeemAuthorizationCodeReuseReportsIssuedTokens(t, factory)
 	})
-
-	// Graceful degradation: a deployment that never calls
-	// RecordIssuedAccessToken/RecordIssuedRefreshToken (no-op
-	// implementation, or simply never invoked) still gets a normal
-	// reuse rejection — the error just carries nothing to revoke.
 	t.Run("RedeemAuthorizationCodeReuseWithoutRecordingReportsEmpty", func(t *testing.T) {
-		store := factory()
-		ctx := context.Background()
-		hash := sha256.Sum256([]byte("reuse-no-recording-code"))
-		if err := store.CreateAuthorizationCode(ctx, NewAuthorizationCode{
-			CodeHash: hash, ClientID: "client-1", ExpiresAt: time.Now().Add(time.Minute),
-		}); err != nil {
-			t.Fatalf("CreateAuthorizationCode: %v", err)
-		}
-		if _, err := store.RedeemAuthorizationCode(ctx, AuthorizationCodeRedemption{CodeHash: hash}); err != nil {
-			t.Fatalf("first RedeemAuthorizationCode: %v", err)
-		}
-
-		_, err := store.RedeemAuthorizationCode(ctx, AuthorizationCodeRedemption{CodeHash: hash})
-		if err == nil {
-			t.Fatal("second RedeemAuthorizationCode = nil error, want error")
-		}
-		var alreadyRedeemed *AuthorizationCodeAlreadyRedeemedError
-		if errors.As(err, &alreadyRedeemed) {
-			if alreadyRedeemed.IssuedAccessTokenKey != "" {
-				t.Fatalf("IssuedAccessTokenKey = %q, want \"\" (never recorded)", alreadyRedeemed.IssuedAccessTokenKey)
-			}
-			if alreadyRedeemed.IssuedRefreshTokenHash != nil {
-				t.Fatalf("IssuedRefreshTokenHash = %v, want nil (never recorded)", alreadyRedeemed.IssuedRefreshTokenHash)
-			}
-		}
-		// Not requiring errors.As to succeed here at all: an
-		// implementation is free to return a plain error for this case
-		// too, as long as *if* it returns the typed error, the payload
-		// is empty rather than stale/wrong.
+		testGrantStoreRedeemAuthorizationCodeReuseWithoutRecordingReportsEmpty(t, factory)
 	})
-
-	t.Run("RedeemUnknownAuthorizationCodeFails", func(t *testing.T) {
-		store := factory()
-		hash := sha256.Sum256([]byte("never-created"))
-		if _, err := store.RedeemAuthorizationCode(context.Background(), AuthorizationCodeRedemption{CodeHash: hash}); err == nil {
-			t.Fatalf("RedeemAuthorizationCode(unknown) = nil error, want error")
-		}
-	})
-
+	t.Run("RedeemUnknownAuthorizationCodeFails", func(t *testing.T) { testGrantStoreRedeemUnknownAuthorizationCodeFails(t, factory) })
 	t.Run("ConcurrentRedeemAuthorizationCodeHasExactlyOneWinner", func(t *testing.T) {
-		store := factory()
-		ctx := context.Background()
-		hash := sha256.Sum256([]byte("concurrent-code"))
-		if err := store.CreateAuthorizationCode(ctx, NewAuthorizationCode{
-			CodeHash: hash, ClientID: "client-1", ExpiresAt: time.Now().Add(time.Minute),
-		}); err != nil {
-			t.Fatalf("CreateAuthorizationCode: %v", err)
-		}
-		successes := runConcurrently(contractConcurrentAttempts, func() bool {
-			_, err := store.RedeemAuthorizationCode(ctx, AuthorizationCodeRedemption{CodeHash: hash})
-			return err == nil
-		})
-		if successes != 1 {
-			t.Fatalf("concurrent RedeemAuthorizationCode succeeded %d times, want exactly 1", successes)
-		}
+		testGrantStoreConcurrentRedeemAuthorizationCodeHasExactlyOneWinner(t, factory)
 	})
+	t.Run("CreateAndRedeemRefreshToken", func(t *testing.T) { testGrantStoreCreateAndRedeemRefreshToken(t, factory) })
+	t.Run("RedeemRefreshTokenIsReusable", func(t *testing.T) { testGrantStoreRedeemRefreshTokenIsReusable(t, factory) })
+	t.Run("RedeemUnknownRefreshTokenFails", func(t *testing.T) { testGrantStoreRedeemUnknownRefreshTokenFails(t, factory) })
+	t.Run("ConcurrentRedeemRefreshTokenAllSucceed", func(t *testing.T) { testGrantStoreConcurrentRedeemRefreshTokenAllSucceed(t, factory) })
+	t.Run("RevokeRefreshTokenPreventsRedemption", func(t *testing.T) { testGrantStoreRevokeRefreshTokenPreventsRedemption(t, factory) })
+}
 
-	t.Run("CreateAndRedeemRefreshToken", func(t *testing.T) {
-		store := factory()
-		ctx := context.Background()
-		hash := sha256.Sum256([]byte("test-refresh"))
-		want := NewRefreshToken{
-			TokenHash: hash, ClientID: "client-1", Subject: "user-1",
-			Scope: []string{"openid", "offline_access"}, Thumbprint: "thumb-1",
-			AuthTime: time.Now().Truncate(time.Second), ACR: "acr-1", AMR: []string{"pwd"},
-			RequestedIDTokenClaims: []string{"name"}, RequestedUserinfoClaims: []string{"email"},
-			ExpiresAt: time.Now().Add(time.Hour),
-		}
-		if err := store.CreateRefreshToken(ctx, want); err != nil {
-			t.Fatalf("CreateRefreshToken: %v", err)
-		}
-		got, err := store.RedeemRefreshToken(ctx, RefreshTokenRedemption{TokenHash: hash})
-		if err != nil {
-			t.Fatalf("RedeemRefreshToken: %v", err)
-		}
-		if got.ClientID != want.ClientID || got.Subject != want.Subject ||
-			got.Thumbprint != want.Thumbprint || got.ACR != want.ACR ||
-			!got.AuthTime.Equal(want.AuthTime) || !got.ExpiresAt.Equal(want.ExpiresAt) ||
-			len(got.RequestedIDTokenClaims) != len(want.RequestedIDTokenClaims) ||
-			len(got.RequestedUserinfoClaims) != len(want.RequestedUserinfoClaims) {
-			t.Fatalf("RedeemRefreshToken returned %+v, want fields matching %+v", got, want)
-		}
-	})
+func testGrantStoreCreateAndRedeemAuthorizationCode(t *testing.T, factory func() GrantStore) {
+	store := factory()
+	ctx := context.Background()
+	hash := sha256.Sum256([]byte("test-code"))
+	want := NewAuthorizationCode{
+		CodeHash: hash, ClientID: "client-1", RedirectURI: "https://rp.example/cb",
+		CodeChallenge: "challenge", CodeChallengeMethod: "S256",
+		DPoPJKT: "jkt-1",
+		Subject: "user-1", Scope: []string{"openid", "accounts"},
+		Nonce: "nonce-1", AuthTime: time.Now().Truncate(time.Second),
+		ACR: "acr-1", AMR: []string{"pwd"},
+		RequestedIDTokenClaims: []string{"name"}, RequestedUserinfoClaims: []string{"email"},
+		ExpiresAt: time.Now().Add(time.Minute),
+	}
+	if err := store.CreateAuthorizationCode(ctx, want); err != nil {
+		t.Fatalf("CreateAuthorizationCode: %v", err)
+	}
+	got, err := store.RedeemAuthorizationCode(ctx, AuthorizationCodeRedemption{CodeHash: hash})
+	if err != nil {
+		t.Fatalf("RedeemAuthorizationCode: %v", err)
+	}
+	if got.ClientID != want.ClientID || got.RedirectURI != want.RedirectURI ||
+		got.CodeChallenge != want.CodeChallenge || got.CodeChallengeMethod != want.CodeChallengeMethod ||
+		got.DPoPJKT != want.DPoPJKT ||
+		got.Subject != want.Subject || got.Nonce != want.Nonce ||
+		!got.AuthTime.Equal(want.AuthTime) || got.ACR != want.ACR ||
+		!got.ExpiresAt.Equal(want.ExpiresAt) || len(got.Scope) != len(want.Scope) ||
+		len(got.RequestedIDTokenClaims) != len(want.RequestedIDTokenClaims) ||
+		len(got.RequestedUserinfoClaims) != len(want.RequestedUserinfoClaims) {
+		t.Fatalf("RedeemAuthorizationCode returned %+v, want fields matching %+v", got, want)
+	}
+}
 
-	// Deliberately not single-use — see GrantStore.RedeemRefreshToken's
-	// doc comment (FAPI2-SP-FINAL 5.3.2.1-9): a refresh token stays
-	// valid for repeated use until it expires, unlike an authorization
-	// code. Contrast with RedeemAuthorizationCodeIsSingleUse above.
-	t.Run("RedeemRefreshTokenIsReusable", func(t *testing.T) {
-		store := factory()
-		ctx := context.Background()
-		hash := sha256.Sum256([]byte("reusable-refresh"))
-		if err := store.CreateRefreshToken(ctx, NewRefreshToken{
-			TokenHash: hash, ClientID: "client-1", ExpiresAt: time.Now().Add(time.Hour),
-		}); err != nil {
-			t.Fatalf("CreateRefreshToken: %v", err)
-		}
-		if _, err := store.RedeemRefreshToken(ctx, RefreshTokenRedemption{TokenHash: hash}); err != nil {
-			t.Fatalf("first RedeemRefreshToken: %v", err)
-		}
-		if _, err := store.RedeemRefreshToken(ctx, RefreshTokenRedemption{TokenHash: hash}); err != nil {
-			t.Fatalf("second RedeemRefreshToken: %v, want success (refresh tokens are not single-use)", err)
-		}
-	})
+func testGrantStoreRedeemAuthorizationCodeIsSingleUse(t *testing.T, factory func() GrantStore) {
+	store := factory()
+	ctx := context.Background()
+	hash := sha256.Sum256([]byte("single-use-code"))
+	if err := store.CreateAuthorizationCode(ctx, NewAuthorizationCode{
+		CodeHash: hash, ClientID: "client-1", ExpiresAt: time.Now().Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateAuthorizationCode: %v", err)
+	}
+	if _, err := store.RedeemAuthorizationCode(ctx, AuthorizationCodeRedemption{CodeHash: hash}); err != nil {
+		t.Fatalf("first RedeemAuthorizationCode: %v", err)
+	}
+	if _, err := store.RedeemAuthorizationCode(ctx, AuthorizationCodeRedemption{CodeHash: hash}); err == nil {
+		t.Fatalf("second RedeemAuthorizationCode = nil error, want error")
+	}
+}
 
-	t.Run("RedeemUnknownRefreshTokenFails", func(t *testing.T) {
-		store := factory()
-		hash := sha256.Sum256([]byte("never-created-refresh"))
-		if _, err := store.RedeemRefreshToken(context.Background(), RefreshTokenRedemption{TokenHash: hash}); err == nil {
-			t.Fatalf("RedeemRefreshToken(unknown) = nil error, want error")
-		}
-	})
+// testGrantStoreRedeemAuthorizationCodeReuseReportsIssuedTokens covers
+// RFC 6749 §4.1.2: on a reuse, the store must report what the original
+// redemption issued (via errors.As into
+// *AuthorizationCodeAlreadyRedeemedError) so the caller can revoke it —
+// see RecordIssuedAccessToken/RecordIssuedRefreshToken's own doc
+// comments.
+func testGrantStoreRedeemAuthorizationCodeReuseReportsIssuedTokens(t *testing.T, factory func() GrantStore) {
+	store := factory()
+	ctx := context.Background()
+	hash := sha256.Sum256([]byte("reuse-reports-code"))
+	if err := store.CreateAuthorizationCode(ctx, NewAuthorizationCode{
+		CodeHash: hash, ClientID: "client-1", ExpiresAt: time.Now().Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateAuthorizationCode: %v", err)
+	}
+	if _, err := store.RedeemAuthorizationCode(ctx, AuthorizationCodeRedemption{CodeHash: hash}); err != nil {
+		t.Fatalf("first RedeemAuthorizationCode: %v", err)
+	}
+	refreshHash := sha256.Sum256([]byte("reuse-reports-refresh"))
+	if err := store.RecordIssuedAccessToken(ctx, hash, "jti-1", time.Now().Add(time.Minute)); err != nil {
+		t.Fatalf("RecordIssuedAccessToken: %v", err)
+	}
+	if err := store.RecordIssuedRefreshToken(ctx, hash, refreshHash, time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("RecordIssuedRefreshToken: %v", err)
+	}
 
-	t.Run("ConcurrentRedeemRefreshTokenAllSucceed", func(t *testing.T) {
-		store := factory()
-		ctx := context.Background()
-		hash := sha256.Sum256([]byte("concurrent-refresh"))
-		if err := store.CreateRefreshToken(ctx, NewRefreshToken{
-			TokenHash: hash, ClientID: "client-1", ExpiresAt: time.Now().Add(time.Hour),
-		}); err != nil {
-			t.Fatalf("CreateRefreshToken: %v", err)
-		}
-		successes := runConcurrently(contractConcurrentAttempts, func() bool {
-			_, err := store.RedeemRefreshToken(ctx, RefreshTokenRedemption{TokenHash: hash})
-			return err == nil
-		})
-		if successes != contractConcurrentAttempts {
-			t.Fatalf("concurrent RedeemRefreshToken succeeded %d/%d times, want all of them (not single-use)", successes, contractConcurrentAttempts)
-		}
-	})
+	_, err := store.RedeemAuthorizationCode(ctx, AuthorizationCodeRedemption{CodeHash: hash})
+	if err == nil {
+		t.Fatal("second RedeemAuthorizationCode = nil error, want error")
+	}
+	var alreadyRedeemed *AuthorizationCodeAlreadyRedeemedError
+	if !errors.As(err, &alreadyRedeemed) {
+		t.Fatalf("second RedeemAuthorizationCode error = %v, want errors.As into *AuthorizationCodeAlreadyRedeemedError", err)
+	}
+	if alreadyRedeemed.IssuedAccessTokenKey != "jti-1" {
+		t.Fatalf("IssuedAccessTokenKey = %q, want %q", alreadyRedeemed.IssuedAccessTokenKey, "jti-1")
+	}
+	if alreadyRedeemed.IssuedRefreshTokenHash == nil || *alreadyRedeemed.IssuedRefreshTokenHash != refreshHash {
+		t.Fatalf("IssuedRefreshTokenHash = %v, want %v", alreadyRedeemed.IssuedRefreshTokenHash, refreshHash)
+	}
+}
 
-	// RFC 6749 §4.1.2: a specific refresh token can be revoked (e.g.
-	// because its originating authorization code was reused) even
-	// though refresh tokens aren't single-use in the ordinary case.
-	t.Run("RevokeRefreshTokenPreventsRedemption", func(t *testing.T) {
-		store := factory()
-		ctx := context.Background()
-		hash := sha256.Sum256([]byte("revoked-refresh"))
-		if err := store.CreateRefreshToken(ctx, NewRefreshToken{
-			TokenHash: hash, ClientID: "client-1", ExpiresAt: time.Now().Add(time.Hour),
-		}); err != nil {
-			t.Fatalf("CreateRefreshToken: %v", err)
+// testGrantStoreRedeemAuthorizationCodeReuseWithoutRecordingReportsEmpty
+// covers graceful degradation: a deployment that never calls
+// RecordIssuedAccessToken/RecordIssuedRefreshToken (no-op
+// implementation, or simply never invoked) still gets a normal reuse
+// rejection — the error just carries nothing to revoke.
+func testGrantStoreRedeemAuthorizationCodeReuseWithoutRecordingReportsEmpty(t *testing.T, factory func() GrantStore) {
+	store := factory()
+	ctx := context.Background()
+	hash := sha256.Sum256([]byte("reuse-no-recording-code"))
+	if err := store.CreateAuthorizationCode(ctx, NewAuthorizationCode{
+		CodeHash: hash, ClientID: "client-1", ExpiresAt: time.Now().Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateAuthorizationCode: %v", err)
+	}
+	if _, err := store.RedeemAuthorizationCode(ctx, AuthorizationCodeRedemption{CodeHash: hash}); err != nil {
+		t.Fatalf("first RedeemAuthorizationCode: %v", err)
+	}
+
+	_, err := store.RedeemAuthorizationCode(ctx, AuthorizationCodeRedemption{CodeHash: hash})
+	if err == nil {
+		t.Fatal("second RedeemAuthorizationCode = nil error, want error")
+	}
+	var alreadyRedeemed *AuthorizationCodeAlreadyRedeemedError
+	if errors.As(err, &alreadyRedeemed) {
+		if alreadyRedeemed.IssuedAccessTokenKey != "" {
+			t.Fatalf("IssuedAccessTokenKey = %q, want \"\" (never recorded)", alreadyRedeemed.IssuedAccessTokenKey)
 		}
-		if _, err := store.RedeemRefreshToken(ctx, RefreshTokenRedemption{TokenHash: hash}); err != nil {
-			t.Fatalf("RedeemRefreshToken before revocation: %v", err)
+		if alreadyRedeemed.IssuedRefreshTokenHash != nil {
+			t.Fatalf("IssuedRefreshTokenHash = %v, want nil (never recorded)", alreadyRedeemed.IssuedRefreshTokenHash)
 		}
-		if err := store.RevokeRefreshToken(ctx, hash); err != nil {
-			t.Fatalf("RevokeRefreshToken: %v", err)
-		}
-		if _, err := store.RedeemRefreshToken(ctx, RefreshTokenRedemption{TokenHash: hash}); err == nil {
-			t.Fatal("RedeemRefreshToken after revocation = nil error, want error")
-		}
+	}
+	// Not requiring errors.As to succeed here at all: an implementation
+	// is free to return a plain error for this case too, as long as
+	// *if* it returns the typed error, the payload is empty rather than
+	// stale/wrong.
+}
+
+func testGrantStoreRedeemUnknownAuthorizationCodeFails(t *testing.T, factory func() GrantStore) {
+	store := factory()
+	hash := sha256.Sum256([]byte("never-created"))
+	if _, err := store.RedeemAuthorizationCode(context.Background(), AuthorizationCodeRedemption{CodeHash: hash}); err == nil {
+		t.Fatalf("RedeemAuthorizationCode(unknown) = nil error, want error")
+	}
+}
+
+func testGrantStoreConcurrentRedeemAuthorizationCodeHasExactlyOneWinner(t *testing.T, factory func() GrantStore) {
+	store := factory()
+	ctx := context.Background()
+	hash := sha256.Sum256([]byte("concurrent-code"))
+	if err := store.CreateAuthorizationCode(ctx, NewAuthorizationCode{
+		CodeHash: hash, ClientID: "client-1", ExpiresAt: time.Now().Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateAuthorizationCode: %v", err)
+	}
+	successes := runConcurrently(contractConcurrentAttempts, func() bool {
+		_, err := store.RedeemAuthorizationCode(ctx, AuthorizationCodeRedemption{CodeHash: hash})
+		return err == nil
 	})
+	if successes != 1 {
+		t.Fatalf("concurrent RedeemAuthorizationCode succeeded %d times, want exactly 1", successes)
+	}
+}
+
+func testGrantStoreCreateAndRedeemRefreshToken(t *testing.T, factory func() GrantStore) {
+	store := factory()
+	ctx := context.Background()
+	hash := sha256.Sum256([]byte("test-refresh"))
+	want := NewRefreshToken{
+		TokenHash: hash, ClientID: "client-1", Subject: "user-1",
+		Scope: []string{"openid", "offline_access"}, Thumbprint: "thumb-1",
+		AuthTime: time.Now().Truncate(time.Second), ACR: "acr-1", AMR: []string{"pwd"},
+		RequestedIDTokenClaims: []string{"name"}, RequestedUserinfoClaims: []string{"email"},
+		ExpiresAt: time.Now().Add(time.Hour),
+	}
+	if err := store.CreateRefreshToken(ctx, want); err != nil {
+		t.Fatalf("CreateRefreshToken: %v", err)
+	}
+	got, err := store.RedeemRefreshToken(ctx, RefreshTokenRedemption{TokenHash: hash})
+	if err != nil {
+		t.Fatalf("RedeemRefreshToken: %v", err)
+	}
+	if got.ClientID != want.ClientID || got.Subject != want.Subject ||
+		got.Thumbprint != want.Thumbprint || got.ACR != want.ACR ||
+		!got.AuthTime.Equal(want.AuthTime) || !got.ExpiresAt.Equal(want.ExpiresAt) ||
+		len(got.RequestedIDTokenClaims) != len(want.RequestedIDTokenClaims) ||
+		len(got.RequestedUserinfoClaims) != len(want.RequestedUserinfoClaims) {
+		t.Fatalf("RedeemRefreshToken returned %+v, want fields matching %+v", got, want)
+	}
+}
+
+// testGrantStoreRedeemRefreshTokenIsReusable covers
+// GrantStore.RedeemRefreshToken's own doc comment (FAPI2-SP-FINAL
+// 5.3.2.1-9): a refresh token stays valid for repeated use until it
+// expires, unlike an authorization code — deliberately not single-use.
+// Contrast with testGrantStoreRedeemAuthorizationCodeIsSingleUse above.
+func testGrantStoreRedeemRefreshTokenIsReusable(t *testing.T, factory func() GrantStore) {
+	store := factory()
+	ctx := context.Background()
+	hash := sha256.Sum256([]byte("reusable-refresh"))
+	if err := store.CreateRefreshToken(ctx, NewRefreshToken{
+		TokenHash: hash, ClientID: "client-1", ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("CreateRefreshToken: %v", err)
+	}
+	if _, err := store.RedeemRefreshToken(ctx, RefreshTokenRedemption{TokenHash: hash}); err != nil {
+		t.Fatalf("first RedeemRefreshToken: %v", err)
+	}
+	if _, err := store.RedeemRefreshToken(ctx, RefreshTokenRedemption{TokenHash: hash}); err != nil {
+		t.Fatalf("second RedeemRefreshToken: %v, want success (refresh tokens are not single-use)", err)
+	}
+}
+
+func testGrantStoreRedeemUnknownRefreshTokenFails(t *testing.T, factory func() GrantStore) {
+	store := factory()
+	hash := sha256.Sum256([]byte("never-created-refresh"))
+	if _, err := store.RedeemRefreshToken(context.Background(), RefreshTokenRedemption{TokenHash: hash}); err == nil {
+		t.Fatalf("RedeemRefreshToken(unknown) = nil error, want error")
+	}
+}
+
+func testGrantStoreConcurrentRedeemRefreshTokenAllSucceed(t *testing.T, factory func() GrantStore) {
+	store := factory()
+	ctx := context.Background()
+	hash := sha256.Sum256([]byte("concurrent-refresh"))
+	if err := store.CreateRefreshToken(ctx, NewRefreshToken{
+		TokenHash: hash, ClientID: "client-1", ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("CreateRefreshToken: %v", err)
+	}
+	successes := runConcurrently(contractConcurrentAttempts, func() bool {
+		_, err := store.RedeemRefreshToken(ctx, RefreshTokenRedemption{TokenHash: hash})
+		return err == nil
+	})
+	if successes != contractConcurrentAttempts {
+		t.Fatalf("concurrent RedeemRefreshToken succeeded %d/%d times, want all of them (not single-use)", successes, contractConcurrentAttempts)
+	}
+}
+
+// testGrantStoreRevokeRefreshTokenPreventsRedemption covers RFC 6749
+// §4.1.2: a specific refresh token can be revoked (e.g. because its
+// originating authorization code was reused) even though refresh
+// tokens aren't single-use in the ordinary case.
+func testGrantStoreRevokeRefreshTokenPreventsRedemption(t *testing.T, factory func() GrantStore) {
+	store := factory()
+	ctx := context.Background()
+	hash := sha256.Sum256([]byte("revoked-refresh"))
+	if err := store.CreateRefreshToken(ctx, NewRefreshToken{
+		TokenHash: hash, ClientID: "client-1", ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("CreateRefreshToken: %v", err)
+	}
+	if _, err := store.RedeemRefreshToken(ctx, RefreshTokenRedemption{TokenHash: hash}); err != nil {
+		t.Fatalf("RedeemRefreshToken before revocation: %v", err)
+	}
+	if err := store.RevokeRefreshToken(ctx, hash); err != nil {
+		t.Fatalf("RevokeRefreshToken: %v", err)
+	}
+	if _, err := store.RedeemRefreshToken(ctx, RefreshTokenRedemption{TokenHash: hash}); err == nil {
+		t.Fatal("RedeemRefreshToken after revocation = nil error, want error")
+	}
 }
 
 // TestTransactionStoreContract exercises factory()'s behavior against
@@ -734,112 +756,118 @@ func testNonceStoreConcurrentConsumeHasExactlyOneWinner(t *testing.T, factory fu
 func TestAccessTokenStoreContract(t *testing.T, factory func() AccessTokenStore) {
 	t.Helper()
 
-	t.Run("CreateThenLookupRoundTripsFields", func(t *testing.T) {
-		store := factory()
-		ctx := context.Background()
-		hash := sha256.Sum256([]byte("access-token-1"))
-		expiresAt := time.Now().Add(5 * time.Minute).Truncate(time.Second)
-		claims := map[string]json.RawMessage{"custom_claim": json.RawMessage(`"value"`)}
-		if err := store.CreateAccessToken(ctx, NewAccessToken{
-			TokenHash:       hash,
-			ClientID:        "client-1",
-			Subject:         "user-1",
-			Scope:           []string{"openid", "accounts"},
-			Thumbprint:      "thumbprint-1",
-			SenderConstrain: SenderConstrainMTLS,
-			Claims:          claims,
-			ExpiresAt:       expiresAt,
-		}); err != nil {
-			t.Fatalf("CreateAccessToken: %v", err)
-		}
+	t.Run("CreateThenLookupRoundTripsFields", func(t *testing.T) { testAccessTokenStoreCreateThenLookupRoundTripsFields(t, factory) })
+	t.Run("SenderConstrainDPoPZeroValueRoundTrips", func(t *testing.T) { testAccessTokenStoreSenderConstrainDPoPZeroValueRoundTrips(t, factory) })
+	t.Run("LookupUnknownTokenFails", func(t *testing.T) { testAccessTokenStoreLookupUnknownTokenFails(t, factory) })
+	t.Run("LookupExpiredTokenStillReturnsIt", func(t *testing.T) { testAccessTokenStoreLookupExpiredTokenStillReturnsIt(t, factory) })
+}
 
-		looked, err := store.LookupAccessToken(ctx, AccessTokenLookup{TokenHash: hash})
-		if err != nil {
-			t.Fatalf("LookupAccessToken: %v", err)
-		}
-		if looked.ClientID != "client-1" {
-			t.Errorf("ClientID = %q, want %q", looked.ClientID, "client-1")
-		}
-		if looked.Subject != "user-1" {
-			t.Errorf("Subject = %q, want %q", looked.Subject, "user-1")
-		}
-		if len(looked.Scope) != 2 || looked.Scope[0] != "openid" || looked.Scope[1] != "accounts" {
-			t.Errorf("Scope = %v, want [openid accounts]", looked.Scope)
-		}
-		if looked.Thumbprint != "thumbprint-1" {
-			t.Errorf("Thumbprint = %q, want %q", looked.Thumbprint, "thumbprint-1")
-		}
-		// SenderConstrain round-trips as a real, independent value —
-		// not just whatever the zero value happens to be — proving a
-		// store that special-cased or ignored it (e.g. only persisting
-		// SenderConstrainDPoP) would be caught here.
-		if looked.SenderConstrain != SenderConstrainMTLS {
-			t.Errorf("SenderConstrain = %v, want SenderConstrainMTLS", looked.SenderConstrain)
-		}
-		if string(looked.Claims["custom_claim"]) != `"value"` {
-			t.Errorf("Claims[custom_claim] = %s, want %q", looked.Claims["custom_claim"], "value")
-		}
-		if !looked.ExpiresAt.Equal(expiresAt) {
-			t.Errorf("ExpiresAt = %v, want %v", looked.ExpiresAt, expiresAt)
-		}
-	})
+func testAccessTokenStoreCreateThenLookupRoundTripsFields(t *testing.T, factory func() AccessTokenStore) {
+	store := factory()
+	ctx := context.Background()
+	hash := sha256.Sum256([]byte("access-token-1"))
+	expiresAt := time.Now().Add(5 * time.Minute).Truncate(time.Second)
+	claims := map[string]json.RawMessage{"custom_claim": json.RawMessage(`"value"`)}
+	if err := store.CreateAccessToken(ctx, NewAccessToken{
+		TokenHash:       hash,
+		ClientID:        "client-1",
+		Subject:         "user-1",
+		Scope:           []string{"openid", "accounts"},
+		Thumbprint:      "thumbprint-1",
+		SenderConstrain: SenderConstrainMTLS,
+		Claims:          claims,
+		ExpiresAt:       expiresAt,
+	}); err != nil {
+		t.Fatalf("CreateAccessToken: %v", err)
+	}
 
-	// TestAccessTokenStoreContract's own round-trip case above sets
-	// SenderConstrainMTLS explicitly (a non-zero value) so a store that
-	// silently ignored the field would still be caught; this case
-	// separately confirms the zero value (SenderConstrainDPoP) itself
-	// round-trips too, rather than being conflated with "field absent".
-	t.Run("SenderConstrainDPoPZeroValueRoundTrips", func(t *testing.T) {
-		store := factory()
-		ctx := context.Background()
-		hash := sha256.Sum256([]byte("access-token-dpop"))
-		if err := store.CreateAccessToken(ctx, NewAccessToken{
-			TokenHash: hash, ClientID: "client-1", Subject: "user-1",
-			Thumbprint: "thumbprint-1", SenderConstrain: SenderConstrainDPoP,
-			ExpiresAt: time.Now().Add(5 * time.Minute),
-		}); err != nil {
-			t.Fatalf("CreateAccessToken: %v", err)
-		}
-		looked, err := store.LookupAccessToken(ctx, AccessTokenLookup{TokenHash: hash})
-		if err != nil {
-			t.Fatalf("LookupAccessToken: %v", err)
-		}
-		if looked.SenderConstrain != SenderConstrainDPoP {
-			t.Errorf("SenderConstrain = %v, want SenderConstrainDPoP", looked.SenderConstrain)
-		}
-	})
+	looked, err := store.LookupAccessToken(ctx, AccessTokenLookup{TokenHash: hash})
+	if err != nil {
+		t.Fatalf("LookupAccessToken: %v", err)
+	}
+	if looked.ClientID != "client-1" {
+		t.Errorf("ClientID = %q, want %q", looked.ClientID, "client-1")
+	}
+	if looked.Subject != "user-1" {
+		t.Errorf("Subject = %q, want %q", looked.Subject, "user-1")
+	}
+	if len(looked.Scope) != 2 || looked.Scope[0] != "openid" || looked.Scope[1] != "accounts" {
+		t.Errorf("Scope = %v, want [openid accounts]", looked.Scope)
+	}
+	if looked.Thumbprint != "thumbprint-1" {
+		t.Errorf("Thumbprint = %q, want %q", looked.Thumbprint, "thumbprint-1")
+	}
+	// SenderConstrain round-trips as a real, independent value — not
+	// just whatever the zero value happens to be — proving a store that
+	// special-cased or ignored it (e.g. only persisting
+	// SenderConstrainDPoP) would be caught here.
+	if looked.SenderConstrain != SenderConstrainMTLS {
+		t.Errorf("SenderConstrain = %v, want SenderConstrainMTLS", looked.SenderConstrain)
+	}
+	if string(looked.Claims["custom_claim"]) != `"value"` {
+		t.Errorf("Claims[custom_claim] = %s, want %q", looked.Claims["custom_claim"], "value")
+	}
+	if !looked.ExpiresAt.Equal(expiresAt) {
+		t.Errorf("ExpiresAt = %v, want %v", looked.ExpiresAt, expiresAt)
+	}
+}
 
-	t.Run("LookupUnknownTokenFails", func(t *testing.T) {
-		store := factory()
-		hash := sha256.Sum256([]byte("never-created"))
-		if _, err := store.LookupAccessToken(context.Background(), AccessTokenLookup{TokenHash: hash}); err == nil {
-			t.Fatalf("LookupAccessToken(unknown) = nil error, want error")
-		}
-	})
+// testAccessTokenStoreSenderConstrainDPoPZeroValueRoundTrips: the
+// round-trip case above sets SenderConstrainMTLS explicitly (a non-zero
+// value) so a store that silently ignored the field would still be
+// caught; this case separately confirms the zero value
+// (SenderConstrainDPoP) itself round-trips too, rather than being
+// conflated with "field absent".
+func testAccessTokenStoreSenderConstrainDPoPZeroValueRoundTrips(t *testing.T, factory func() AccessTokenStore) {
+	store := factory()
+	ctx := context.Background()
+	hash := sha256.Sum256([]byte("access-token-dpop"))
+	if err := store.CreateAccessToken(ctx, NewAccessToken{
+		TokenHash: hash, ClientID: "client-1", Subject: "user-1",
+		Thumbprint: "thumbprint-1", SenderConstrain: SenderConstrainDPoP,
+		ExpiresAt: time.Now().Add(5 * time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateAccessToken: %v", err)
+	}
+	looked, err := store.LookupAccessToken(ctx, AccessTokenLookup{TokenHash: hash})
+	if err != nil {
+		t.Fatalf("LookupAccessToken: %v", err)
+	}
+	if looked.SenderConstrain != SenderConstrainDPoP {
+		t.Errorf("SenderConstrain = %v, want SenderConstrainDPoP", looked.SenderConstrain)
+	}
+}
 
-	t.Run("LookupExpiredTokenStillReturnsIt", func(t *testing.T) {
-		// AccessTokenStore doesn't self-expire (see its own doc
-		// comment) — the caller checks ExpiresAt itself, the same way
-		// every other *Redeemed/LookedUp* type in this package is
-		// checked by its caller.
-		store := factory()
-		ctx := context.Background()
-		hash := sha256.Sum256([]byte("expired-token"))
-		expiresAt := time.Now().Add(-time.Minute)
-		if err := store.CreateAccessToken(ctx, NewAccessToken{
-			TokenHash: hash, ClientID: "client-1", Subject: "user-1",
-			ExpiresAt: expiresAt,
-		}); err != nil {
-			t.Fatalf("CreateAccessToken: %v", err)
-		}
-		looked, err := store.LookupAccessToken(ctx, AccessTokenLookup{TokenHash: hash})
-		if err != nil {
-			t.Fatalf("LookupAccessToken: %v", err)
-		}
-		if !looked.ExpiresAt.Equal(expiresAt) {
-			t.Errorf("ExpiresAt = %v, want %v", looked.ExpiresAt, expiresAt)
-		}
-	})
+func testAccessTokenStoreLookupUnknownTokenFails(t *testing.T, factory func() AccessTokenStore) {
+	store := factory()
+	hash := sha256.Sum256([]byte("never-created"))
+	if _, err := store.LookupAccessToken(context.Background(), AccessTokenLookup{TokenHash: hash}); err == nil {
+		t.Fatalf("LookupAccessToken(unknown) = nil error, want error")
+	}
+}
+
+// testAccessTokenStoreLookupExpiredTokenStillReturnsIt: AccessTokenStore
+// doesn't self-expire (see its own doc comment) — the caller checks
+// ExpiresAt itself, the same way every other *Redeemed/LookedUp* type
+// in this package is checked by its caller.
+func testAccessTokenStoreLookupExpiredTokenStillReturnsIt(t *testing.T, factory func() AccessTokenStore) {
+	store := factory()
+	ctx := context.Background()
+	hash := sha256.Sum256([]byte("expired-token"))
+	expiresAt := time.Now().Add(-time.Minute)
+	if err := store.CreateAccessToken(ctx, NewAccessToken{
+		TokenHash: hash, ClientID: "client-1", Subject: "user-1",
+		ExpiresAt: expiresAt,
+	}); err != nil {
+		t.Fatalf("CreateAccessToken: %v", err)
+	}
+	looked, err := store.LookupAccessToken(ctx, AccessTokenLookup{TokenHash: hash})
+	if err != nil {
+		t.Fatalf("LookupAccessToken: %v", err)
+	}
+	if !looked.ExpiresAt.Equal(expiresAt) {
+		t.Errorf("ExpiresAt = %v, want %v", looked.ExpiresAt, expiresAt)
+	}
 }
 
 // TestBackchannelAuthenticationStoreContract exercises factory()'s
@@ -854,381 +882,427 @@ func TestAccessTokenStoreContract(t *testing.T, factory func() AccessTokenStore)
 func TestBackchannelAuthenticationStoreContract(t *testing.T, factory func() BackchannelAuthenticationStore) {
 	t.Helper()
 
-	newRecord := func(authReqID, handle string) NewBackchannelAuthentication {
-		return NewBackchannelAuthentication{
-			AuthReqIDHash: sha256.Sum256([]byte(authReqID)),
-			HandleHash:    sha256.Sum256([]byte(handle)),
-			ClientID:      "client-1",
-			Parameters:    map[string]json.RawMessage{"scope": json.RawMessage(`"openid"`)},
-			TokenClaims:   map[string]json.RawMessage{"custom_claim": json.RawMessage(`"value"`)},
-			DeliveryMode:  "poll",
-			DPoPJKT:       "jkt-1",
-			PollInterval:  time.Millisecond,
-			ExpiresAt:     time.Now().Add(time.Minute),
+	t.Run("CreateThenPollReturnsPending", func(t *testing.T) { testBackchannelAuthenticationStoreCreateThenPollReturnsPending(t, factory) })
+	t.Run("DecideThenPollReturnsApprovedFieldsRoundTripped", func(t *testing.T) {
+		testBackchannelAuthenticationStoreDecideThenPollReturnsApprovedFieldsRoundTripped(t, factory)
+	})
+	t.Run("DecideReturnsPingDeliveryModeAndNotificationTokenFromRecord", func(t *testing.T) {
+		testBackchannelAuthenticationStoreDecideReturnsPingDeliveryModeAndNotificationTokenFromRecord(t, factory)
+	})
+	t.Run("DecideReturnsPollDeliveryModeAndEmptyNotificationTokenFromRecord", func(t *testing.T) {
+		testBackchannelAuthenticationStoreDecideReturnsPollDeliveryModeAndEmptyNotificationTokenFromRecord(t, factory)
+	})
+	t.Run("DecideBackchannelAuthenticationIsSingleUse", func(t *testing.T) {
+		testBackchannelAuthenticationStoreDecideBackchannelAuthenticationIsSingleUse(t, factory)
+	})
+	t.Run("ConcurrentDecideBackchannelAuthenticationHasExactlyOneWinner", func(t *testing.T) {
+		testBackchannelAuthenticationStoreConcurrentDecideBackchannelAuthenticationHasExactlyOneWinner(t, factory)
+	})
+	t.Run("PollAfterDeniedIsRepeatable", func(t *testing.T) { testBackchannelAuthenticationStorePollAfterDeniedIsRepeatable(t, factory) })
+	t.Run("PollAfterApprovedIsSingleUse", func(t *testing.T) { testBackchannelAuthenticationStorePollAfterApprovedIsSingleUse(t, factory) })
+	t.Run("ConcurrentPollAfterApprovedHasExactlyOneWinner", func(t *testing.T) {
+		testBackchannelAuthenticationStoreConcurrentPollAfterApprovedHasExactlyOneWinner(t, factory)
+	})
+	t.Run("PollUnknownAuthReqIDFails", func(t *testing.T) { testBackchannelAuthenticationStorePollUnknownAuthReqIDFails(t, factory) })
+	t.Run("PollAfterExpiryFailsEvenWhenApproved", func(t *testing.T) {
+		testBackchannelAuthenticationStorePollAfterExpiryFailsEvenWhenApproved(t, factory)
+	})
+	t.Run("PollFasterThanIntervalFails", func(t *testing.T) { testBackchannelAuthenticationStorePollFasterThanIntervalFails(t, factory) })
+	t.Run("PollSpacedByAtLeastIntervalSucceeds", func(t *testing.T) {
+		testBackchannelAuthenticationStorePollSpacedByAtLeastIntervalSucceeds(t, factory)
+	})
+	t.Run("PollImmediatelyAfterPingDecisionSkipsIntervalCheck", func(t *testing.T) {
+		testBackchannelAuthenticationStorePollImmediatelyAfterPingDecisionSkipsIntervalCheck(t, factory)
+	})
+}
+
+// newBackchannelAuthenticationRecord is TestBackchannelAuthenticationStoreContract's
+// shared subtest fixture: a fresh, minimal poll-mode record keyed by
+// authReqID/handle so each subtest can use its own without colliding.
+func newBackchannelAuthenticationRecord(authReqID, handle string) NewBackchannelAuthentication {
+	return NewBackchannelAuthentication{
+		AuthReqIDHash: sha256.Sum256([]byte(authReqID)),
+		HandleHash:    sha256.Sum256([]byte(handle)),
+		ClientID:      "client-1",
+		Parameters:    map[string]json.RawMessage{"scope": json.RawMessage(`"openid"`)},
+		TokenClaims:   map[string]json.RawMessage{"custom_claim": json.RawMessage(`"value"`)},
+		DeliveryMode:  "poll",
+		DPoPJKT:       "jkt-1",
+		PollInterval:  time.Millisecond,
+		ExpiresAt:     time.Now().Add(time.Minute),
+	}
+}
+
+func testBackchannelAuthenticationStoreCreateThenPollReturnsPending(t *testing.T, factory func() BackchannelAuthenticationStore) {
+	store := factory()
+	ctx := context.Background()
+	want := newBackchannelAuthenticationRecord("auth-req-1", "handle-1")
+	if err := store.CreateBackchannelAuthentication(ctx, want); err != nil {
+		t.Fatalf("CreateBackchannelAuthentication: %v", err)
+	}
+	got, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
+		AuthReqIDHash: want.AuthReqIDHash, Now: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("PollBackchannelAuthentication: %v", err)
+	}
+	if got.Status != BackchannelAuthenticationPending {
+		t.Fatalf("Status = %v, want Pending", got.Status)
+	}
+	if got.ClientID != want.ClientID {
+		t.Fatalf("ClientID = %q, want %q", got.ClientID, want.ClientID)
+	}
+}
+
+func testBackchannelAuthenticationStoreDecideThenPollReturnsApprovedFieldsRoundTripped(t *testing.T, factory func() BackchannelAuthenticationStore) {
+	store := factory()
+	ctx := context.Background()
+	record := newBackchannelAuthenticationRecord("auth-req-2", "handle-2")
+	if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
+		t.Fatalf("CreateBackchannelAuthentication: %v", err)
+	}
+	authTime := time.Now().Truncate(time.Second)
+	if _, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
+		HandleHash: record.HandleHash, Status: BackchannelAuthenticationApproved,
+		Subject: "user-1", Scope: []string{"openid", "accounts"},
+		AuthTime: authTime, ACR: "acr-1", AMR: []string{"pwd"},
+	}); err != nil {
+		t.Fatalf("DecideBackchannelAuthentication: %v", err)
+	}
+	got, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
+		AuthReqIDHash: record.AuthReqIDHash, Now: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("PollBackchannelAuthentication: %v", err)
+	}
+	if got.Status != BackchannelAuthenticationApproved || got.Subject != "user-1" ||
+		len(got.Scope) != 2 || got.ACR != "acr-1" || !got.AuthTime.Equal(authTime) ||
+		got.DPoPJKT != record.DPoPJKT || string(got.TokenClaims["custom_claim"]) != `"value"` {
+		t.Fatalf("PollBackchannelAuthentication returned %+v, want fields matching decision+record", got)
+	}
+}
+
+// testBackchannelAuthenticationStoreDecideReturnsPingDeliveryModeAndNotificationTokenFromRecord
+// covers DecideBackchannelAuthentication's own return value round
+// -tripping DeliveryMode/ClientNotificationToken straight from the
+// record CreateBackchannelAuthentication persisted — the caller needs
+// both to dispatch a CIBA §10.2 ping notification without a second
+// round trip to this store.
+func testBackchannelAuthenticationStoreDecideReturnsPingDeliveryModeAndNotificationTokenFromRecord(t *testing.T, factory func() BackchannelAuthenticationStore) {
+	const wantAuthReqID = "auth-req-ping-1"
+	store := factory()
+	ctx := context.Background()
+	record := newBackchannelAuthenticationRecord(wantAuthReqID, "handle-ping-1")
+	record.DeliveryMode = "ping"
+	record.ClientNotificationToken = fapi.NewSecret("notification-token-1")
+	record.AuthReqID = wantAuthReqID
+	if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
+		t.Fatalf("CreateBackchannelAuthentication: %v", err)
+	}
+	decided, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
+		HandleHash: record.HandleHash, Status: BackchannelAuthenticationDenied,
+	})
+	if err != nil {
+		t.Fatalf("DecideBackchannelAuthentication: %v", err)
+	}
+	if decided.ClientID != record.ClientID {
+		t.Fatalf("ClientID = %q, want %q", decided.ClientID, record.ClientID)
+	}
+	if decided.DeliveryMode != "ping" {
+		t.Fatalf("DeliveryMode = %q, want %q", decided.DeliveryMode, "ping")
+	}
+	if decided.ClientNotificationToken.Reveal() != "notification-token-1" {
+		t.Fatalf("ClientNotificationToken = %q, want %q", decided.ClientNotificationToken.Reveal(), "notification-token-1")
+	}
+	if decided.AuthReqID != wantAuthReqID {
+		t.Fatalf("AuthReqID = %q, want %q", decided.AuthReqID, wantAuthReqID)
+	}
+}
+
+// testBackchannelAuthenticationStoreDecideReturnsPollDeliveryModeAndEmptyNotificationTokenFromRecord
+// covers the poll-mode default (newBackchannelAuthenticationRecord's
+// own shape) round-tripping too — an empty ClientNotificationToken, not
+// just a non-empty one.
+func testBackchannelAuthenticationStoreDecideReturnsPollDeliveryModeAndEmptyNotificationTokenFromRecord(t *testing.T, factory func() BackchannelAuthenticationStore) {
+	store := factory()
+	ctx := context.Background()
+	record := newBackchannelAuthenticationRecord("auth-req-poll-1", "handle-poll-1")
+	if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
+		t.Fatalf("CreateBackchannelAuthentication: %v", err)
+	}
+	decided, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
+		HandleHash: record.HandleHash, Status: BackchannelAuthenticationDenied,
+	})
+	if err != nil {
+		t.Fatalf("DecideBackchannelAuthentication: %v", err)
+	}
+	if decided.DeliveryMode != "poll" {
+		t.Fatalf("DeliveryMode = %q, want %q", decided.DeliveryMode, "poll")
+	}
+	if decided.ClientNotificationToken.Reveal() != "" {
+		t.Fatalf("ClientNotificationToken = %q, want empty", decided.ClientNotificationToken.Reveal())
+	}
+	if decided.AuthReqID != "" {
+		t.Fatalf("AuthReqID = %q, want empty", decided.AuthReqID)
+	}
+}
+
+func testBackchannelAuthenticationStoreDecideBackchannelAuthenticationIsSingleUse(t *testing.T, factory func() BackchannelAuthenticationStore) {
+	store := factory()
+	ctx := context.Background()
+	record := newBackchannelAuthenticationRecord("auth-req-3", "handle-3")
+	if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
+		t.Fatalf("CreateBackchannelAuthentication: %v", err)
+	}
+	if _, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
+		HandleHash: record.HandleHash, Status: BackchannelAuthenticationDenied,
+	}); err != nil {
+		t.Fatalf("first DecideBackchannelAuthentication: %v", err)
+	}
+	if _, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
+		HandleHash: record.HandleHash, Status: BackchannelAuthenticationApproved, Subject: "user-1",
+	}); err == nil {
+		t.Fatalf("second DecideBackchannelAuthentication = nil error, want error")
+	}
+}
+
+func testBackchannelAuthenticationStoreConcurrentDecideBackchannelAuthenticationHasExactlyOneWinner(t *testing.T, factory func() BackchannelAuthenticationStore) {
+	store := factory()
+	ctx := context.Background()
+	record := newBackchannelAuthenticationRecord("auth-req-4", "handle-4")
+	if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
+		t.Fatalf("CreateBackchannelAuthentication: %v", err)
+	}
+	successes := runConcurrently(contractConcurrentAttempts, func() bool {
+		_, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
+			HandleHash: record.HandleHash, Status: BackchannelAuthenticationDenied,
+		})
+		return err == nil
+	})
+	if successes != 1 {
+		t.Fatalf("concurrent DecideBackchannelAuthentication succeeded %d times, want exactly 1", successes)
+	}
+}
+
+// testBackchannelAuthenticationStorePollAfterDeniedIsRepeatable:
+// Denied/AuthenticationFailed polls are freely repeatable — the client
+// keeps polling and must keep observing the same terminal outcome,
+// mirroring RedeemRefreshToken's reusable contract rather than
+// RedeemAuthorizationCode's single-use one.
+func testBackchannelAuthenticationStorePollAfterDeniedIsRepeatable(t *testing.T, factory func() BackchannelAuthenticationStore) {
+	store := factory()
+	ctx := context.Background()
+	record := newBackchannelAuthenticationRecord("auth-req-5", "handle-5")
+	if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
+		t.Fatalf("CreateBackchannelAuthentication: %v", err)
+	}
+	if _, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
+		HandleHash: record.HandleHash, Status: BackchannelAuthenticationDenied, Reason: "user declined",
+	}); err != nil {
+		t.Fatalf("DecideBackchannelAuthentication: %v", err)
+	}
+	for i := 0; i < 2; i++ {
+		got, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
+			AuthReqIDHash: record.AuthReqIDHash, Now: time.Now().Add(time.Duration(i) * time.Second),
+		})
+		if err != nil {
+			t.Fatalf("poll %d: %v", i, err)
+		}
+		if got.Status != BackchannelAuthenticationDenied || got.Reason != "user declined" {
+			t.Fatalf("poll %d returned %+v, want Denied/%q", i, got, "user declined")
 		}
 	}
+}
 
-	t.Run("CreateThenPollReturnsPending", func(t *testing.T) {
-		store := factory()
-		ctx := context.Background()
-		want := newRecord("auth-req-1", "handle-1")
-		if err := store.CreateBackchannelAuthentication(ctx, want); err != nil {
-			t.Fatalf("CreateBackchannelAuthentication: %v", err)
-		}
-		got, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
-			AuthReqIDHash: want.AuthReqIDHash, Now: time.Now(),
-		})
-		if err != nil {
-			t.Fatalf("PollBackchannelAuthentication: %v", err)
-		}
-		if got.Status != BackchannelAuthenticationPending {
-			t.Fatalf("Status = %v, want Pending", got.Status)
-		}
-		if got.ClientID != want.ClientID {
-			t.Fatalf("ClientID = %q, want %q", got.ClientID, want.ClientID)
-		}
+// testBackchannelAuthenticationStorePollAfterApprovedIsSingleUse: the
+// first poll to observe Approved consumes it — a second poll for the
+// same auth_req_id must report
+// *BackchannelAuthenticationAlreadyRedeemedError, the
+// RedeemAuthorizationCode-style single-use guarantee.
+func testBackchannelAuthenticationStorePollAfterApprovedIsSingleUse(t *testing.T, factory func() BackchannelAuthenticationStore) {
+	store := factory()
+	ctx := context.Background()
+	record := newBackchannelAuthenticationRecord("auth-req-6", "handle-6")
+	if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
+		t.Fatalf("CreateBackchannelAuthentication: %v", err)
+	}
+	if _, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
+		HandleHash: record.HandleHash, Status: BackchannelAuthenticationApproved, Subject: "user-1",
+	}); err != nil {
+		t.Fatalf("DecideBackchannelAuthentication: %v", err)
+	}
+	if _, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
+		AuthReqIDHash: record.AuthReqIDHash, Now: time.Now(),
+	}); err != nil {
+		t.Fatalf("first poll: %v", err)
+	}
+	_, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
+		AuthReqIDHash: record.AuthReqIDHash, Now: time.Now().Add(time.Second),
 	})
+	if err == nil {
+		t.Fatalf("second poll after Approved = nil error, want error")
+	}
+	var alreadyRedeemed *BackchannelAuthenticationAlreadyRedeemedError
+	if !errors.As(err, &alreadyRedeemed) {
+		t.Fatalf("second poll error = %v, want errors.As into *BackchannelAuthenticationAlreadyRedeemedError", err)
+	}
+}
 
-	t.Run("DecideThenPollReturnsApprovedFieldsRoundTripped", func(t *testing.T) {
-		store := factory()
-		ctx := context.Background()
-		record := newRecord("auth-req-2", "handle-2")
-		if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
-			t.Fatalf("CreateBackchannelAuthentication: %v", err)
-		}
-		authTime := time.Now().Truncate(time.Second)
-		if _, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
-			HandleHash: record.HandleHash, Status: BackchannelAuthenticationApproved,
-			Subject: "user-1", Scope: []string{"openid", "accounts"},
-			AuthTime: authTime, ACR: "acr-1", AMR: []string{"pwd"},
-		}); err != nil {
-			t.Fatalf("DecideBackchannelAuthentication: %v", err)
-		}
-		got, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
-			AuthReqIDHash: record.AuthReqIDHash, Now: time.Now(),
-		})
-		if err != nil {
-			t.Fatalf("PollBackchannelAuthentication: %v", err)
-		}
-		if got.Status != BackchannelAuthenticationApproved || got.Subject != "user-1" ||
-			len(got.Scope) != 2 || got.ACR != "acr-1" || !got.AuthTime.Equal(authTime) ||
-			got.DPoPJKT != record.DPoPJKT || string(got.TokenClaims["custom_claim"]) != `"value"` {
-			t.Fatalf("PollBackchannelAuthentication returned %+v, want fields matching decision+record", got)
-		}
-	})
-
-	// DecideBackchannelAuthentication's own return value must round-trip
-	// DeliveryMode/ClientNotificationToken straight from the record
-	// CreateBackchannelAuthentication persisted — the caller needs both
-	// to dispatch a CIBA §10.2 ping notification without a second round
-	// trip to this store.
-	t.Run("DecideReturnsPingDeliveryModeAndNotificationTokenFromRecord", func(t *testing.T) {
-		const wantAuthReqID = "auth-req-ping-1"
-		store := factory()
-		ctx := context.Background()
-		record := newRecord(wantAuthReqID, "handle-ping-1")
-		record.DeliveryMode = "ping"
-		record.ClientNotificationToken = fapi.NewSecret("notification-token-1")
-		record.AuthReqID = wantAuthReqID
-		if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
-			t.Fatalf("CreateBackchannelAuthentication: %v", err)
-		}
-		decided, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
-			HandleHash: record.HandleHash, Status: BackchannelAuthenticationDenied,
-		})
-		if err != nil {
-			t.Fatalf("DecideBackchannelAuthentication: %v", err)
-		}
-		if decided.ClientID != record.ClientID {
-			t.Fatalf("ClientID = %q, want %q", decided.ClientID, record.ClientID)
-		}
-		if decided.DeliveryMode != "ping" {
-			t.Fatalf("DeliveryMode = %q, want %q", decided.DeliveryMode, "ping")
-		}
-		if decided.ClientNotificationToken.Reveal() != "notification-token-1" {
-			t.Fatalf("ClientNotificationToken = %q, want %q", decided.ClientNotificationToken.Reveal(), "notification-token-1")
-		}
-		if decided.AuthReqID != wantAuthReqID {
-			t.Fatalf("AuthReqID = %q, want %q", decided.AuthReqID, wantAuthReqID)
-		}
-	})
-
-	// The poll-mode default (newRecord's own shape) round-trips too —
-	// an empty ClientNotificationToken, not just a non-empty one.
-	t.Run("DecideReturnsPollDeliveryModeAndEmptyNotificationTokenFromRecord", func(t *testing.T) {
-		store := factory()
-		ctx := context.Background()
-		record := newRecord("auth-req-poll-1", "handle-poll-1")
-		if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
-			t.Fatalf("CreateBackchannelAuthentication: %v", err)
-		}
-		decided, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
-			HandleHash: record.HandleHash, Status: BackchannelAuthenticationDenied,
-		})
-		if err != nil {
-			t.Fatalf("DecideBackchannelAuthentication: %v", err)
-		}
-		if decided.DeliveryMode != "poll" {
-			t.Fatalf("DeliveryMode = %q, want %q", decided.DeliveryMode, "poll")
-		}
-		if decided.ClientNotificationToken.Reveal() != "" {
-			t.Fatalf("ClientNotificationToken = %q, want empty", decided.ClientNotificationToken.Reveal())
-		}
-		if decided.AuthReqID != "" {
-			t.Fatalf("AuthReqID = %q, want empty", decided.AuthReqID)
-		}
-	})
-
-	t.Run("DecideBackchannelAuthenticationIsSingleUse", func(t *testing.T) {
-		store := factory()
-		ctx := context.Background()
-		record := newRecord("auth-req-3", "handle-3")
-		if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
-			t.Fatalf("CreateBackchannelAuthentication: %v", err)
-		}
-		if _, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
-			HandleHash: record.HandleHash, Status: BackchannelAuthenticationDenied,
-		}); err != nil {
-			t.Fatalf("first DecideBackchannelAuthentication: %v", err)
-		}
-		if _, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
-			HandleHash: record.HandleHash, Status: BackchannelAuthenticationApproved, Subject: "user-1",
-		}); err == nil {
-			t.Fatalf("second DecideBackchannelAuthentication = nil error, want error")
-		}
-	})
-
-	t.Run("ConcurrentDecideBackchannelAuthenticationHasExactlyOneWinner", func(t *testing.T) {
-		store := factory()
-		ctx := context.Background()
-		record := newRecord("auth-req-4", "handle-4")
-		if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
-			t.Fatalf("CreateBackchannelAuthentication: %v", err)
-		}
-		successes := runConcurrently(contractConcurrentAttempts, func() bool {
-			_, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
-				HandleHash: record.HandleHash, Status: BackchannelAuthenticationDenied,
-			})
-			return err == nil
-		})
-		if successes != 1 {
-			t.Fatalf("concurrent DecideBackchannelAuthentication succeeded %d times, want exactly 1", successes)
-		}
-	})
-
-	// Denied/AuthenticationFailed polls are freely repeatable — the
-	// client keeps polling and must keep observing the same terminal
-	// outcome, mirroring RedeemRefreshToken's reusable contract rather
-	// than RedeemAuthorizationCode's single-use one.
-	t.Run("PollAfterDeniedIsRepeatable", func(t *testing.T) {
-		store := factory()
-		ctx := context.Background()
-		record := newRecord("auth-req-5", "handle-5")
-		if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
-			t.Fatalf("CreateBackchannelAuthentication: %v", err)
-		}
-		if _, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
-			HandleHash: record.HandleHash, Status: BackchannelAuthenticationDenied, Reason: "user declined",
-		}); err != nil {
-			t.Fatalf("DecideBackchannelAuthentication: %v", err)
-		}
-		for i := 0; i < 2; i++ {
-			got, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
-				AuthReqIDHash: record.AuthReqIDHash, Now: time.Now().Add(time.Duration(i) * time.Second),
-			})
-			if err != nil {
-				t.Fatalf("poll %d: %v", i, err)
-			}
-			if got.Status != BackchannelAuthenticationDenied || got.Reason != "user declined" {
-				t.Fatalf("poll %d returned %+v, want Denied/%q", i, got, "user declined")
-			}
-		}
-	})
-
-	// The first poll to observe Approved consumes it — a second poll for
-	// the same auth_req_id must report
-	// *BackchannelAuthenticationAlreadyRedeemedError, the
-	// RedeemAuthorizationCode-style single-use guarantee.
-	t.Run("PollAfterApprovedIsSingleUse", func(t *testing.T) {
-		store := factory()
-		ctx := context.Background()
-		record := newRecord("auth-req-6", "handle-6")
-		if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
-			t.Fatalf("CreateBackchannelAuthentication: %v", err)
-		}
-		if _, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
-			HandleHash: record.HandleHash, Status: BackchannelAuthenticationApproved, Subject: "user-1",
-		}); err != nil {
-			t.Fatalf("DecideBackchannelAuthentication: %v", err)
-		}
-		if _, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
-			AuthReqIDHash: record.AuthReqIDHash, Now: time.Now(),
-		}); err != nil {
-			t.Fatalf("first poll: %v", err)
-		}
+func testBackchannelAuthenticationStoreConcurrentPollAfterApprovedHasExactlyOneWinner(t *testing.T, factory func() BackchannelAuthenticationStore) {
+	store := factory()
+	ctx := context.Background()
+	record := newBackchannelAuthenticationRecord("auth-req-7", "handle-7")
+	if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
+		t.Fatalf("CreateBackchannelAuthentication: %v", err)
+	}
+	if _, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
+		HandleHash: record.HandleHash, Status: BackchannelAuthenticationApproved, Subject: "user-1",
+	}); err != nil {
+		t.Fatalf("DecideBackchannelAuthentication: %v", err)
+	}
+	now := time.Now()
+	successes := runConcurrently(contractConcurrentAttempts, func() bool {
 		_, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
-			AuthReqIDHash: record.AuthReqIDHash, Now: time.Now().Add(time.Second),
-		})
-		if err == nil {
-			t.Fatalf("second poll after Approved = nil error, want error")
-		}
-		var alreadyRedeemed *BackchannelAuthenticationAlreadyRedeemedError
-		if !errors.As(err, &alreadyRedeemed) {
-			t.Fatalf("second poll error = %v, want errors.As into *BackchannelAuthenticationAlreadyRedeemedError", err)
-		}
-	})
-
-	t.Run("ConcurrentPollAfterApprovedHasExactlyOneWinner", func(t *testing.T) {
-		store := factory()
-		ctx := context.Background()
-		record := newRecord("auth-req-7", "handle-7")
-		if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
-			t.Fatalf("CreateBackchannelAuthentication: %v", err)
-		}
-		if _, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
-			HandleHash: record.HandleHash, Status: BackchannelAuthenticationApproved, Subject: "user-1",
-		}); err != nil {
-			t.Fatalf("DecideBackchannelAuthentication: %v", err)
-		}
-		now := time.Now()
-		successes := runConcurrently(contractConcurrentAttempts, func() bool {
-			_, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
-				AuthReqIDHash: record.AuthReqIDHash, Now: now,
-			})
-			return err == nil
-		})
-		if successes != 1 {
-			t.Fatalf("concurrent poll-after-Approved succeeded %d times, want exactly 1", successes)
-		}
-	})
-
-	t.Run("PollUnknownAuthReqIDFails", func(t *testing.T) {
-		store := factory()
-		hash := sha256.Sum256([]byte("never-created"))
-		if _, err := store.PollBackchannelAuthentication(context.Background(), PollBackchannelAuthentication{
-			AuthReqIDHash: hash, Now: time.Now(),
-		}); err == nil {
-			t.Fatalf("PollBackchannelAuthentication(unknown) = nil error, want error")
-		}
-	})
-
-	// A poll after ExpiresAt must report expiry regardless of decision
-	// status — even one that would otherwise report Approved.
-	t.Run("PollAfterExpiryFailsEvenWhenApproved", func(t *testing.T) {
-		store := factory()
-		ctx := context.Background()
-		record := newRecord("auth-req-8", "handle-8")
-		record.ExpiresAt = time.Now().Add(time.Millisecond)
-		if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
-			t.Fatalf("CreateBackchannelAuthentication: %v", err)
-		}
-		if _, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
-			HandleHash: record.HandleHash, Status: BackchannelAuthenticationApproved, Subject: "user-1",
-		}); err != nil {
-			t.Fatalf("DecideBackchannelAuthentication: %v", err)
-		}
-		_, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
-			AuthReqIDHash: record.AuthReqIDHash, Now: record.ExpiresAt.Add(time.Second),
-		})
-		if err == nil {
-			t.Fatalf("poll after expiry = nil error, want error")
-		}
-		var expired *BackchannelAuthenticationExpiredError
-		if !errors.As(err, &expired) {
-			t.Fatalf("poll after expiry error = %v, want errors.As into *BackchannelAuthenticationExpiredError", err)
-		}
-	})
-
-	// Two polls closer together than PollInterval: the second must be
-	// rejected with *BackchannelAuthenticationSlowDownError, driven by
-	// injected Now rather than a real sleep.
-	t.Run("PollFasterThanIntervalFails", func(t *testing.T) {
-		store := factory()
-		ctx := context.Background()
-		record := newRecord("auth-req-9", "handle-9")
-		record.PollInterval = 5 * time.Second
-		if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
-			t.Fatalf("CreateBackchannelAuthentication: %v", err)
-		}
-		now := time.Now()
-		if _, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
 			AuthReqIDHash: record.AuthReqIDHash, Now: now,
-		}); err != nil {
-			t.Fatalf("first poll: %v", err)
-		}
-		_, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
-			AuthReqIDHash: record.AuthReqIDHash, Now: now.Add(time.Second),
 		})
-		if err == nil {
-			t.Fatalf("poll faster than interval = nil error, want error")
-		}
-		var slowDown *BackchannelAuthenticationSlowDownError
-		if !errors.As(err, &slowDown) {
-			t.Fatalf("poll faster than interval error = %v, want errors.As into *BackchannelAuthenticationSlowDownError", err)
-		}
+		return err == nil
 	})
+	if successes != 1 {
+		t.Fatalf("concurrent poll-after-Approved succeeded %d times, want exactly 1", successes)
+	}
+}
 
-	// ...but a poll spaced at least PollInterval apart from the previous
-	// one succeeds.
-	t.Run("PollSpacedByAtLeastIntervalSucceeds", func(t *testing.T) {
-		store := factory()
-		ctx := context.Background()
-		record := newRecord("auth-req-10", "handle-10")
-		record.PollInterval = 5 * time.Second
-		if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
-			t.Fatalf("CreateBackchannelAuthentication: %v", err)
-		}
-		now := time.Now()
-		if _, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
-			AuthReqIDHash: record.AuthReqIDHash, Now: now,
-		}); err != nil {
-			t.Fatalf("first poll: %v", err)
-		}
-		if _, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
-			AuthReqIDHash: record.AuthReqIDHash, Now: now.Add(record.PollInterval),
-		}); err != nil {
-			t.Fatalf("second poll (spaced by interval): %v, want success", err)
-		}
-	})
+func testBackchannelAuthenticationStorePollUnknownAuthReqIDFails(t *testing.T, factory func() BackchannelAuthenticationStore) {
+	store := factory()
+	hash := sha256.Sum256([]byte("never-created"))
+	if _, err := store.PollBackchannelAuthentication(context.Background(), PollBackchannelAuthentication{
+		AuthReqIDHash: hash, Now: time.Now(),
+	}); err == nil {
+		t.Fatalf("PollBackchannelAuthentication(unknown) = nil error, want error")
+	}
+}
 
-	// CIBA Core 1.0 §10.2: a ping notification is the client's
-	// permission to poll immediately, regardless of PollInterval —
-	// confirmed live against the OIDF suite's own fapi-ciba-id1-ping-*
-	// modules, which call the token endpoint the instant they receive
-	// the notification and require success, not slow_down.
-	// DecideBackchannelAuthentication must therefore exempt the very
-	// next poll from the interval check under ping delivery, even
-	// though an earlier poll happened well within the interval.
-	t.Run("PollImmediatelyAfterPingDecisionSkipsIntervalCheck", func(t *testing.T) {
-		store := factory()
-		ctx := context.Background()
-		record := newRecord("auth-req-ping-interval-1", "handle-ping-interval-1")
-		record.DeliveryMode = "ping"
-		record.ClientNotificationToken = fapi.NewSecret("notification-token-1")
-		record.AuthReqID = "auth-req-ping-interval-1"
-		record.PollInterval = 5 * time.Second
-		if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
-			t.Fatalf("CreateBackchannelAuthentication: %v", err)
-		}
-		now := time.Now()
-		if _, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
-			AuthReqIDHash: record.AuthReqIDHash, Now: now,
-		}); err != nil {
-			t.Fatalf("first poll (pending): %v", err)
-		}
-		if _, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
-			HandleHash: record.HandleHash, Status: BackchannelAuthenticationApproved, Subject: "user-1",
-		}); err != nil {
-			t.Fatalf("DecideBackchannelAuthentication: %v", err)
-		}
-		// Well within PollInterval of the first poll above — would fail
-		// with *BackchannelAuthenticationSlowDownError under poll
-		// delivery (see PollFasterThanIntervalFails), but must succeed
-		// here since a ping notification was just dispatched.
-		if _, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
-			AuthReqIDHash: record.AuthReqIDHash, Now: now.Add(time.Second),
-		}); err != nil {
-			t.Fatalf("poll immediately after ping decision: %v, want success", err)
-		}
+// testBackchannelAuthenticationStorePollAfterExpiryFailsEvenWhenApproved:
+// a poll after ExpiresAt must report expiry regardless of decision
+// status — even one that would otherwise report Approved.
+func testBackchannelAuthenticationStorePollAfterExpiryFailsEvenWhenApproved(t *testing.T, factory func() BackchannelAuthenticationStore) {
+	store := factory()
+	ctx := context.Background()
+	record := newBackchannelAuthenticationRecord("auth-req-8", "handle-8")
+	record.ExpiresAt = time.Now().Add(time.Millisecond)
+	if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
+		t.Fatalf("CreateBackchannelAuthentication: %v", err)
+	}
+	if _, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
+		HandleHash: record.HandleHash, Status: BackchannelAuthenticationApproved, Subject: "user-1",
+	}); err != nil {
+		t.Fatalf("DecideBackchannelAuthentication: %v", err)
+	}
+	_, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
+		AuthReqIDHash: record.AuthReqIDHash, Now: record.ExpiresAt.Add(time.Second),
 	})
+	if err == nil {
+		t.Fatalf("poll after expiry = nil error, want error")
+	}
+	var expired *BackchannelAuthenticationExpiredError
+	if !errors.As(err, &expired) {
+		t.Fatalf("poll after expiry error = %v, want errors.As into *BackchannelAuthenticationExpiredError", err)
+	}
+}
+
+// testBackchannelAuthenticationStorePollFasterThanIntervalFails: two
+// polls closer together than PollInterval — the second must be
+// rejected with *BackchannelAuthenticationSlowDownError, driven by
+// injected Now rather than a real sleep.
+func testBackchannelAuthenticationStorePollFasterThanIntervalFails(t *testing.T, factory func() BackchannelAuthenticationStore) {
+	store := factory()
+	ctx := context.Background()
+	record := newBackchannelAuthenticationRecord("auth-req-9", "handle-9")
+	record.PollInterval = 5 * time.Second
+	if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
+		t.Fatalf("CreateBackchannelAuthentication: %v", err)
+	}
+	now := time.Now()
+	if _, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
+		AuthReqIDHash: record.AuthReqIDHash, Now: now,
+	}); err != nil {
+		t.Fatalf("first poll: %v", err)
+	}
+	_, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
+		AuthReqIDHash: record.AuthReqIDHash, Now: now.Add(time.Second),
+	})
+	if err == nil {
+		t.Fatalf("poll faster than interval = nil error, want error")
+	}
+	var slowDown *BackchannelAuthenticationSlowDownError
+	if !errors.As(err, &slowDown) {
+		t.Fatalf("poll faster than interval error = %v, want errors.As into *BackchannelAuthenticationSlowDownError", err)
+	}
+}
+
+// testBackchannelAuthenticationStorePollSpacedByAtLeastIntervalSucceeds:
+// a poll spaced at least PollInterval apart from the previous one
+// succeeds, unlike testBackchannelAuthenticationStorePollFasterThanIntervalFails.
+func testBackchannelAuthenticationStorePollSpacedByAtLeastIntervalSucceeds(t *testing.T, factory func() BackchannelAuthenticationStore) {
+	store := factory()
+	ctx := context.Background()
+	record := newBackchannelAuthenticationRecord("auth-req-10", "handle-10")
+	record.PollInterval = 5 * time.Second
+	if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
+		t.Fatalf("CreateBackchannelAuthentication: %v", err)
+	}
+	now := time.Now()
+	if _, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
+		AuthReqIDHash: record.AuthReqIDHash, Now: now,
+	}); err != nil {
+		t.Fatalf("first poll: %v", err)
+	}
+	if _, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
+		AuthReqIDHash: record.AuthReqIDHash, Now: now.Add(record.PollInterval),
+	}); err != nil {
+		t.Fatalf("second poll (spaced by interval): %v, want success", err)
+	}
+}
+
+// testBackchannelAuthenticationStorePollImmediatelyAfterPingDecisionSkipsIntervalCheck
+// covers CIBA Core 1.0 §10.2: a ping notification is the client's
+// permission to poll immediately, regardless of PollInterval —
+// confirmed live against the OIDF suite's own fapi-ciba-id1-ping-*
+// modules, which call the token endpoint the instant they receive the
+// notification and require success, not slow_down.
+// DecideBackchannelAuthentication must therefore exempt the very next
+// poll from the interval check under ping delivery, even though an
+// earlier poll happened well within the interval.
+func testBackchannelAuthenticationStorePollImmediatelyAfterPingDecisionSkipsIntervalCheck(t *testing.T, factory func() BackchannelAuthenticationStore) {
+	store := factory()
+	ctx := context.Background()
+	record := newBackchannelAuthenticationRecord("auth-req-ping-interval-1", "handle-ping-interval-1")
+	record.DeliveryMode = "ping"
+	record.ClientNotificationToken = fapi.NewSecret("notification-token-1")
+	record.AuthReqID = "auth-req-ping-interval-1"
+	record.PollInterval = 5 * time.Second
+	if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
+		t.Fatalf("CreateBackchannelAuthentication: %v", err)
+	}
+	now := time.Now()
+	if _, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
+		AuthReqIDHash: record.AuthReqIDHash, Now: now,
+	}); err != nil {
+		t.Fatalf("first poll (pending): %v", err)
+	}
+	if _, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
+		HandleHash: record.HandleHash, Status: BackchannelAuthenticationApproved, Subject: "user-1",
+	}); err != nil {
+		t.Fatalf("DecideBackchannelAuthentication: %v", err)
+	}
+	// Well within PollInterval of the first poll above — would fail
+	// with *BackchannelAuthenticationSlowDownError under poll delivery
+	// (see testBackchannelAuthenticationStorePollFasterThanIntervalFails),
+	// but must succeed here since a ping notification was just
+	// dispatched.
+	if _, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
+		AuthReqIDHash: record.AuthReqIDHash, Now: now.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("poll immediately after ping decision: %v, want success", err)
+	}
 }

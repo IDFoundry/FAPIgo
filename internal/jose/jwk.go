@@ -222,60 +222,76 @@ func ParseJWK(data []byte, alg fapi.SignatureAlgorithm) (JWK, error) {
 	}
 
 	var pub crypto.PublicKey
+	var err error
 	switch raw.Kty {
 	case "EC":
-		if raw.Crv != "P-256" {
-			return JWK{}, fmt.Errorf("jose: unsupported EC curve %q", raw.Crv)
-		}
-		x, err := decodeCoordinate(raw.X)
-		if err != nil {
-			return JWK{}, fmt.Errorf("jose: decode jwk x: %w", err)
-		}
-		y, err := decodeCoordinate(raw.Y)
-		if err != nil {
-			return JWK{}, fmt.Errorf("jose: decode jwk y: %w", err)
-		}
-		curve := elliptic.P256()
-		if x.Sign() == 0 && y.Sign() == 0 {
-			return JWK{}, fmt.Errorf("jose: jwk ec point is the point at infinity")
-		}
-		if !curve.IsOnCurve(x, y) {
-			return JWK{}, fmt.Errorf("jose: jwk ec point is not on curve P-256")
-		}
-		pub = &ecdsa.PublicKey{Curve: curve, X: x, Y: y}
+		pub, err = parseECPublicKey(raw)
 	case "RSA":
-		n, err := decodeCoordinate(raw.N)
-		if err != nil {
-			return JWK{}, fmt.Errorf("jose: decode jwk n: %w", err)
-		}
-		e, err := decodeExponent(raw.E)
-		if err != nil {
-			return JWK{}, fmt.Errorf("jose: decode jwk e: %w", err)
-		}
-		pub = &rsa.PublicKey{N: n, E: e}
+		pub, err = parseRSAPublicKey(raw)
 	case "OKP":
-		if raw.Crv != "Ed25519" {
-			return JWK{}, fmt.Errorf("jose: unsupported OKP curve %q", raw.Crv)
-		}
-		if raw.X == "" {
-			return JWK{}, fmt.Errorf("jose: jwk x is required")
-		}
-		x, err := base64.RawURLEncoding.DecodeString(raw.X)
-		if err != nil {
-			return JWK{}, fmt.Errorf("jose: decode jwk x: %w", err)
-		}
-		if len(x) != ed25519.PublicKeySize {
-			return JWK{}, fmt.Errorf("jose: jwk x must be %d bytes for Ed25519, got %d", ed25519.PublicKeySize, len(x))
-		}
-		pub = ed25519.PublicKey(x)
+		pub, err = parseOKPPublicKey(raw)
 	default:
-		return JWK{}, fmt.Errorf("jose: unsupported key type %q", raw.Kty)
+		err = fmt.Errorf("jose: unsupported key type %q", raw.Kty)
+	}
+	if err != nil {
+		return JWK{}, err
 	}
 
 	if err := validateKeyForAlgorithm(pub, alg); err != nil {
 		return JWK{}, err
 	}
 	return JWK{pub: pub, use: jwkUseSignature, sigAlg: alg}, nil
+}
+
+func parseECPublicKey(raw rawJWK) (crypto.PublicKey, error) {
+	if raw.Crv != "P-256" {
+		return nil, fmt.Errorf("jose: unsupported EC curve %q", raw.Crv)
+	}
+	x, err := decodeCoordinate(raw.X)
+	if err != nil {
+		return nil, fmt.Errorf("jose: decode jwk x: %w", err)
+	}
+	y, err := decodeCoordinate(raw.Y)
+	if err != nil {
+		return nil, fmt.Errorf("jose: decode jwk y: %w", err)
+	}
+	curve := elliptic.P256()
+	if x.Sign() == 0 && y.Sign() == 0 {
+		return nil, fmt.Errorf("jose: jwk ec point is the point at infinity")
+	}
+	if !curve.IsOnCurve(x, y) {
+		return nil, fmt.Errorf("jose: jwk ec point is not on curve P-256")
+	}
+	return &ecdsa.PublicKey{Curve: curve, X: x, Y: y}, nil
+}
+
+func parseRSAPublicKey(raw rawJWK) (crypto.PublicKey, error) {
+	n, err := decodeCoordinate(raw.N)
+	if err != nil {
+		return nil, fmt.Errorf("jose: decode jwk n: %w", err)
+	}
+	e, err := decodeExponent(raw.E)
+	if err != nil {
+		return nil, fmt.Errorf("jose: decode jwk e: %w", err)
+	}
+	return &rsa.PublicKey{N: n, E: e}, nil
+}
+
+func parseOKPPublicKey(raw rawJWK) (crypto.PublicKey, error) {
+	if raw.Crv != "Ed25519" {
+		return nil, fmt.Errorf("jose: unsupported OKP curve %q", raw.Crv)
+	}
+	if raw.X == "" {
+		return nil, fmt.Errorf("jose: jwk x is required")
+	}
+	x, err := base64.RawURLEncoding.DecodeString(raw.X)
+	if err != nil {
+		return nil, fmt.Errorf("jose: decode jwk x: %w", err)
+	}
+	if len(x) != ed25519.PublicKeySize {
+		return nil, fmt.Errorf("jose: jwk x must be %d bytes for Ed25519, got %d", ed25519.PublicKeySize, len(x))
+	}
+	return ed25519.PublicKey(x), nil
 }
 
 // Thumbprint is an RFC 7638 JWK thumbprint.

@@ -96,48 +96,9 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (Authorization
 
 	now := v.deps.Clock.Now()
 
-	var (
-		senderConstrain storage.SenderConstrain
-		verifiedProof   dpop.VerifiedProof
-		certThumbprint  string
-	)
-	switch {
-	case strings.EqualFold(scheme, "DPoP"):
-		if req.DPoPProof == "" {
-			return AuthorizationContext{}, newError(ErrorInvalidRequest, 400, "DPoP header is required", nil)
-		}
-		var err error
-		verifiedProof, err = dpop.Verify(ctx, dpop.VerifyRequest{
-			Proof:        req.DPoPProof,
-			Method:       req.Method,
-			URL:          req.URL,
-			AccessToken:  raw,
-			Now:          now,
-			MaxProofAge:  v.cfg.Limits.MaxDPoPProofAge,
-			MaxClockSkew: v.cfg.Limits.MaxClockSkew,
-			Replay:       v.dpopReplayChecker(),
-		})
-		if err != nil {
-			return AuthorizationContext{}, newError(ErrorInvalidToken, 401, "DPoP proof verification failed", err)
-		}
-		// Nonce freshness is checked before spending the cost of
-		// resolving the access token — a request that fails this
-		// cheap, early gate shouldn't get as far as touching
-		// Dependencies.AccessTokens at all.
-		if v.deps.Nonces != nil {
-			if challenge := v.checkDPoPNonce(ctx, verifiedProof.Nonce, now); challenge != nil {
-				return AuthorizationContext{}, challenge
-			}
-		}
-		senderConstrain = storage.SenderConstrainDPoP
-	case strings.EqualFold(scheme, "Bearer"):
-		if req.PeerCertificate == nil {
-			return AuthorizationContext{}, newError(ErrorInvalidRequest, 400, "a client certificate is required", nil)
-		}
-		certThumbprint = mtls.Thumbprint(req.PeerCertificate)
-		senderConstrain = storage.SenderConstrainMTLS
-	default:
-		return AuthorizationContext{}, newError(ErrorInvalidRequest, 400, "authorization scheme must be DPoP or Bearer", nil)
+	senderConstrain, verifiedProof, certThumbprint, verr := v.resolveCredential(ctx, req, raw, scheme, now)
+	if verr != nil {
+		return AuthorizationContext{}, verr
 	}
 
 	resolved, err := v.deps.AccessTokens.ResolveAccessToken(ctx, ResolveAccessTokenRequest{Raw: raw, Now: now})
@@ -208,4 +169,50 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (Authorization
 		Key:           resolved.Key,
 		NextDPoPNonce: nextNonce,
 	}, nil
+}
+
+// resolveCredential verifies whichever sender-constraining credential
+// scheme (the Authorization header's own DPoP/Bearer distinction —
+// RFC 8705 §3.4's convention for mTLS-bound tokens) demands, and
+// reports back which SenderConstrain the caller must now cross-check
+// the resolved access token against. Split out of Verify purely to keep
+// that method's own token-resolution/binding/revocation pipeline
+// readable — this is the one genuinely separable sub-task within it.
+func (v *Verifier) resolveCredential(ctx context.Context, req VerifyRequest, raw, scheme string, now time.Time) (storage.SenderConstrain, dpop.VerifiedProof, string, *Error) {
+	switch {
+	case strings.EqualFold(scheme, "DPoP"):
+		if req.DPoPProof == "" {
+			return 0, dpop.VerifiedProof{}, "", newError(ErrorInvalidRequest, 400, "DPoP header is required", nil)
+		}
+		verifiedProof, err := dpop.Verify(ctx, dpop.VerifyRequest{
+			Proof:        req.DPoPProof,
+			Method:       req.Method,
+			URL:          req.URL,
+			AccessToken:  raw,
+			Now:          now,
+			MaxProofAge:  v.cfg.Limits.MaxDPoPProofAge,
+			MaxClockSkew: v.cfg.Limits.MaxClockSkew,
+			Replay:       v.dpopReplayChecker(),
+		})
+		if err != nil {
+			return 0, dpop.VerifiedProof{}, "", newError(ErrorInvalidToken, 401, "DPoP proof verification failed", err)
+		}
+		// Nonce freshness is checked before spending the cost of
+		// resolving the access token — a request that fails this cheap,
+		// early gate shouldn't get as far as touching
+		// Dependencies.AccessTokens at all.
+		if v.deps.Nonces != nil {
+			if challenge := v.checkDPoPNonce(ctx, verifiedProof.Nonce, now); challenge != nil {
+				return 0, dpop.VerifiedProof{}, "", challenge
+			}
+		}
+		return storage.SenderConstrainDPoP, verifiedProof, "", nil
+	case strings.EqualFold(scheme, "Bearer"):
+		if req.PeerCertificate == nil {
+			return 0, dpop.VerifiedProof{}, "", newError(ErrorInvalidRequest, 400, "a client certificate is required", nil)
+		}
+		return storage.SenderConstrainMTLS, dpop.VerifiedProof{}, mtls.Thumbprint(req.PeerCertificate), nil
+	default:
+		return 0, dpop.VerifiedProof{}, "", newError(ErrorInvalidRequest, 400, "authorization scheme must be DPoP or Bearer", nil)
+	}
 }

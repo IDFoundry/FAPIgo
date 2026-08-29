@@ -272,6 +272,49 @@ func (cfg Config) Resolve(allowLoopbackHTTP bool, accessTokenFormat AccessTokenF
 	return out, nil
 }
 
+// parseClientAuthMethod maps a config-file client_auth_method string to
+// its storage.ClientAuthMethod, defaulting to private_key_jwt when
+// unset.
+func parseClientAuthMethod(raw string) (storage.ClientAuthMethod, error) {
+	switch raw {
+	case "", "private_key_jwt":
+		return storage.ClientAuthMethodPrivateKeyJWT, nil
+	case "self_signed_tls_client_auth":
+		return storage.ClientAuthMethodSelfSignedTLSClientAuth, nil
+	case "tls_client_auth":
+		return storage.ClientAuthMethodTLSClientAuth, nil
+	default:
+		return 0, fmt.Errorf("client_auth_method must be %q, %q, or %q, got %q", "private_key_jwt", "self_signed_tls_client_auth", "tls_client_auth", raw)
+	}
+}
+
+// parseSenderConstrain maps a config-file sender_constrain string to
+// its storage.SenderConstrain, defaulting to dpop when unset.
+func parseSenderConstrain(raw string) (storage.SenderConstrain, error) {
+	switch raw {
+	case "", "dpop":
+		return storage.SenderConstrainDPoP, nil
+	case "mtls":
+		return storage.SenderConstrainMTLS, nil
+	default:
+		return 0, fmt.Errorf("sender_constrain must be %q or %q, got %q", "dpop", "mtls", raw)
+	}
+}
+
+// parseBackchannelTokenDeliveryMode maps a config-file
+// backchannel_token_delivery_mode string to its
+// storage.BackchannelTokenDeliveryMode, defaulting to poll when unset.
+func parseBackchannelTokenDeliveryMode(raw string) (storage.BackchannelTokenDeliveryMode, error) {
+	switch raw {
+	case "", "poll":
+		return storage.BackchannelTokenDeliveryModePoll, nil
+	case "ping":
+		return storage.BackchannelTokenDeliveryModePing, nil
+	default:
+		return 0, fmt.Errorf("backchannel_token_delivery_mode must be %q or %q, got %q", "poll", "ping", raw)
+	}
+}
+
 func resolveClient(c ClientConfig) (storage.RegisteredClient, ephemeral.ClientKeySpec, error) {
 	if c.ID == "" {
 		return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, fmt.Errorf("id is required")
@@ -279,22 +322,12 @@ func resolveClient(c ClientConfig) (storage.RegisteredClient, ephemeral.ClientKe
 	if len(c.RedirectURIs) == 0 {
 		return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, fmt.Errorf("redirect_uris must not be empty")
 	}
-	clientAuthMethod := storage.ClientAuthMethodPrivateKeyJWT
-	if c.ClientAuthMethod != "" {
-		switch c.ClientAuthMethod {
-		case "private_key_jwt":
-			clientAuthMethod = storage.ClientAuthMethodPrivateKeyJWT
-		case "self_signed_tls_client_auth":
-			clientAuthMethod = storage.ClientAuthMethodSelfSignedTLSClientAuth
-		case "tls_client_auth":
-			clientAuthMethod = storage.ClientAuthMethodTLSClientAuth
-		default:
-			return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, fmt.Errorf("client_auth_method must be %q, %q, or %q, got %q", "private_key_jwt", "self_signed_tls_client_auth", "tls_client_auth", c.ClientAuthMethod)
-		}
+	clientAuthMethod, err := parseClientAuthMethod(c.ClientAuthMethod)
+	if err != nil {
+		return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, err
 	}
 
 	var assertionAlg fapi.SignatureAlgorithm
-	var err error
 	if clientAuthMethod == storage.ClientAuthMethodPrivateKeyJWT {
 		assertionAlg, err = fapi.ParseSignatureAlgorithm(c.ClientAssertionAlgorithm)
 		if err != nil {
@@ -338,28 +371,14 @@ func resolveClient(c ClientConfig) (storage.RegisteredClient, ephemeral.ClientKe
 		return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, fmt.Errorf("jwks/jwks_uri must not be set: this client does no JWS signing (client_auth_method is not private_key_jwt, and neither request_object_algorithm nor backchannel_authentication_request_algorithm is set)")
 	}
 
-	senderConstrain := storage.SenderConstrainDPoP
-	if c.SenderConstrain != "" {
-		switch c.SenderConstrain {
-		case "dpop":
-			senderConstrain = storage.SenderConstrainDPoP
-		case "mtls":
-			senderConstrain = storage.SenderConstrainMTLS
-		default:
-			return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, fmt.Errorf("sender_constrain must be %q or %q, got %q", "dpop", "mtls", c.SenderConstrain)
-		}
+	senderConstrain, err := parseSenderConstrain(c.SenderConstrain)
+	if err != nil {
+		return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, err
 	}
 
-	backchannelTokenDeliveryMode := storage.BackchannelTokenDeliveryModePoll
-	if c.BackchannelTokenDeliveryMode != "" {
-		switch c.BackchannelTokenDeliveryMode {
-		case "poll":
-			backchannelTokenDeliveryMode = storage.BackchannelTokenDeliveryModePoll
-		case "ping":
-			backchannelTokenDeliveryMode = storage.BackchannelTokenDeliveryModePing
-		default:
-			return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, fmt.Errorf("backchannel_token_delivery_mode must be %q or %q, got %q", "poll", "ping", c.BackchannelTokenDeliveryMode)
-		}
+	backchannelTokenDeliveryMode, err := parseBackchannelTokenDeliveryMode(c.BackchannelTokenDeliveryMode)
+	if err != nil {
+		return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, err
 	}
 	var backchannelClientNotificationEndpoint fapi.URL
 	if c.BackchannelClientNotificationEndpoint != "" {

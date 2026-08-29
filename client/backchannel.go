@@ -169,28 +169,9 @@ func (c *Client) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	if err != nil {
 		return BackchannelAuthenticationSession{}, newError(ErrorInternal, "failed to resolve backchannel authentication request signing key", err)
 	}
-	// assertionSigner stays nil (and assertionKID "") when
-	// ClientAuthMethod isn't ClientAuthMethodPrivateKeyJWT — buildForm
-	// never uses them in that case, since no client_assertion is ever
-	// built.
-	var (
-		assertionSigner crypto.Signer
-		assertionKID    string
-	)
-	if c.cfg.ClientAuthMethod == storage.ClientAuthMethodPrivateKeyJWT {
-		assertionSigner, assertionKID, err = c.newSigner(ctx, keys.ClientAuthentication, c.cfg.Algorithms.ClientAuthentication)
-		if err != nil {
-			return BackchannelAuthenticationSession{}, newError(ErrorInternal, "failed to resolve client authentication key", err)
-		}
-	}
-	// dpopSigner stays nil under SenderConstrainMTLS — never used in
-	// that case, since no DPoP proof is ever built.
-	var dpopSigner crypto.Signer
-	if c.cfg.SenderConstrain == storage.SenderConstrainDPoP {
-		dpopSigner, _, err = c.newSigner(ctx, keys.DPoPProofSigning, c.cfg.Algorithms.DPoP)
-		if err != nil {
-			return BackchannelAuthenticationSession{}, newError(ErrorInternal, "failed to resolve DPoP signing key", err)
-		}
+	assertionSigner, assertionKID, dpopSigner, err := c.resolveClientAuthAndDPoPSigners(ctx)
+	if err != nil {
+		return BackchannelAuthenticationSession{}, newError(ErrorInternal, "failed to resolve signing keys", err)
 	}
 
 	// buildForm signs a fresh request object and client assertion (new
@@ -387,29 +368,9 @@ func (BackchannelAuthenticationApproved) backchannelAuthenticationResult() {}
 // than having the calling goroutine block for however long a human
 // takes to approve an out-of-band request.
 func (c *Client) PollBackchannelAuthentication(ctx context.Context, session BackchannelAuthenticationSession) (BackchannelAuthenticationResult, error) {
-	// assertionSigner stays nil (and assertionKID "") when
-	// ClientAuthMethod isn't ClientAuthMethodPrivateKeyJWT — buildPollForm
-	// never uses them in that case, since no client_assertion is ever
-	// built.
-	var (
-		assertionSigner crypto.Signer
-		assertionKID    string
-		err             error
-	)
-	if c.cfg.ClientAuthMethod == storage.ClientAuthMethodPrivateKeyJWT {
-		assertionSigner, assertionKID, err = c.newSigner(ctx, keys.ClientAuthentication, c.cfg.Algorithms.ClientAuthentication)
-		if err != nil {
-			return nil, newError(ErrorInternal, "failed to resolve client authentication key", err)
-		}
-	}
-	// dpopSigner stays nil under SenderConstrainMTLS — never used in
-	// that case, since no DPoP proof is ever built.
-	var dpopSigner crypto.Signer
-	if c.cfg.SenderConstrain == storage.SenderConstrainDPoP {
-		dpopSigner, _, err = c.newSigner(ctx, keys.DPoPProofSigning, c.cfg.Algorithms.DPoP)
-		if err != nil {
-			return nil, newError(ErrorInternal, "failed to resolve DPoP signing key", err)
-		}
+	assertionSigner, assertionKID, dpopSigner, err := c.resolveClientAuthAndDPoPSigners(ctx)
+	if err != nil {
+		return nil, newError(ErrorInternal, "failed to resolve signing keys", err)
 	}
 	tokenURL := c.cfg.Endpoints.Token.URL()
 
@@ -532,4 +493,26 @@ func (c *Client) pollBackchannelAuthenticationOnce(ctx context.Context, dpopSign
 	}
 	c.cacheDPoPNonce(ctx, asNonceScope, header.Get("DPoP-Nonce"))
 	return body, status, nil
+}
+
+// resolveClientAuthAndDPoPSigners resolves the pair of signers both
+// BeginBackchannelAuthentication and PollBackchannelAuthentication need
+// before building their own request form: assertionSigner/assertionKID
+// stay nil/"" when ClientAuthMethod isn't ClientAuthMethodPrivateKeyJWT
+// (no client_assertion is ever built in that case), and dpopSigner
+// stays nil under SenderConstrainMTLS (no DPoP proof is ever built).
+func (c *Client) resolveClientAuthAndDPoPSigners(ctx context.Context) (assertionSigner crypto.Signer, assertionKID string, dpopSigner crypto.Signer, err error) {
+	if c.cfg.ClientAuthMethod == storage.ClientAuthMethodPrivateKeyJWT {
+		assertionSigner, assertionKID, err = c.newSigner(ctx, keys.ClientAuthentication, c.cfg.Algorithms.ClientAuthentication)
+		if err != nil {
+			return nil, "", nil, fmt.Errorf("resolve client authentication key: %w", err)
+		}
+	}
+	if c.cfg.SenderConstrain == storage.SenderConstrainDPoP {
+		dpopSigner, _, err = c.newSigner(ctx, keys.DPoPProofSigning, c.cfg.Algorithms.DPoP)
+		if err != nil {
+			return nil, "", nil, fmt.Errorf("resolve DPoP signing key: %w", err)
+		}
+	}
+	return assertionSigner, assertionKID, dpopSigner, nil
 }

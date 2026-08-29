@@ -85,18 +85,11 @@ func PublicJWKS(ctx context.Context, signing []SigningKeyUse, encryption []Encry
 			return PublicKeySet{}, fmt.Errorf("keys: resolve signing public key: %w", err)
 		}
 		for _, info := range infos {
-			if info.KeyID == "" {
-				return PublicKeySet{}, fmt.Errorf("keys: key manager returned an empty kid")
+			if err := appendPublicJWK(&result, seen, info.KeyID, "key manager returned an empty kid", func() (jose.JWK, error) {
+				return jose.NewJWK(info.PublicKey, use.Algorithm)
+			}); err != nil {
+				return PublicKeySet{}, err
 			}
-			if seen[info.KeyID] {
-				continue
-			}
-			seen[info.KeyID] = true
-			jwk, err := jose.NewJWK(info.PublicKey, use.Algorithm)
-			if err != nil {
-				return PublicKeySet{}, fmt.Errorf("keys: build jwk: %w", err)
-			}
-			result.Keys = append(result.Keys, PublicJWK{jwk: jwk.WithKeyID(info.KeyID), keyID: info.KeyID})
 		}
 	}
 
@@ -108,21 +101,35 @@ func PublicJWKS(ctx context.Context, signing []SigningKeyUse, encryption []Encry
 		if err != nil {
 			return PublicKeySet{}, fmt.Errorf("keys: resolve encryption public key: %w", err)
 		}
-		if info.KeyID == "" {
-			return PublicKeySet{}, fmt.Errorf("keys: decrypter returned an empty kid")
+		if err := appendPublicJWK(&result, seen, info.KeyID, "decrypter returned an empty kid", func() (jose.JWK, error) {
+			return jose.NewEncryptionJWK(info.PublicKey, use.Algorithm)
+		}); err != nil {
+			return PublicKeySet{}, err
 		}
-		if seen[info.KeyID] {
-			continue
-		}
-		seen[info.KeyID] = true
-		jwk, err := jose.NewEncryptionJWK(info.PublicKey, use.Algorithm)
-		if err != nil {
-			return PublicKeySet{}, fmt.Errorf("keys: build jwk: %w", err)
-		}
-		result.Keys = append(result.Keys, PublicJWK{jwk: jwk.WithKeyID(info.KeyID), keyID: info.KeyID})
 	}
 
 	return result, nil
+}
+
+// appendPublicJWK dedupes by keyID (a no-op, not an error, if already
+// seen) then builds and appends the JWK via build — the shared
+// "validate kid, dedup, build, append" tail PublicJWKS's signing and
+// encryption loops both need, identically apart from which jose
+// constructor builds the JWK.
+func appendPublicJWK(result *PublicKeySet, seen map[string]bool, keyID string, emptyKidMsg string, build func() (jose.JWK, error)) error {
+	if keyID == "" {
+		return fmt.Errorf("keys: %s", emptyKidMsg)
+	}
+	if seen[keyID] {
+		return nil
+	}
+	seen[keyID] = true
+	jwk, err := build()
+	if err != nil {
+		return fmt.Errorf("keys: build jwk: %w", err)
+	}
+	result.Keys = append(result.Keys, PublicJWK{jwk: jwk.WithKeyID(keyID), keyID: keyID})
+	return nil
 }
 
 // resolveSigningKeys returns every key currently valid for use: the

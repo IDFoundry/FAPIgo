@@ -225,52 +225,69 @@ func (a *fakeAS) handleToken(w http.ResponseWriter, r *http.Request) {
 		a.t.Errorf("token: missing DPoP header")
 	}
 	a.lastTokenDPoPProof = proof
-
-	// A client assertion is exactly as single-use as a DPoP proof: reject
-	// reuse the same way a real jti-tracking authorization server (this
-	// module's own server package included) would, so a retry that
-	// forgets to sign a fresh assertion fails this test the same way it
-	// fails against the real suite.
-	if assertion := r.PostForm.Get("client_assertion"); assertion != "" {
-		if a.seenClientAssertions == nil {
-			a.seenClientAssertions = make(map[string]bool)
-		}
-		if a.seenClientAssertions[assertion] {
-			a.t.Errorf("token: client_assertion reused across requests")
-		}
-		a.seenClientAssertions[assertion] = true
-	}
+	a.checkClientAssertionNotReused(r)
 	if r.PostForm.Get("code_verifier") == "" {
 		a.t.Errorf("token: missing code_verifier")
 	}
 
-	if a.rejectTokenRequestPlain {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]any{
-			"error":             "invalid_grant",
-			"error_description": "test: rejected without a DPoP-nonce challenge",
-		})
+	switch {
+	case a.rejectTokenRequestPlain:
+		a.writeTokenRejectedPlain(w)
+	case a.mustChallengeDPoPNonce(proof):
+		a.writeTokenDPoPNonceChallenge(w)
+	default:
+		a.writeTokenIssued(w)
+	}
+}
+
+// checkClientAssertionNotReused: a client assertion is exactly as
+// single-use as a DPoP proof — reject reuse the same way a real
+// jti-tracking authorization server (this module's own server package
+// included) would, so a retry that forgets to sign a fresh assertion
+// fails this test the same way it fails against the real suite.
+func (a *fakeAS) checkClientAssertionNotReused(r *http.Request) {
+	assertion := r.PostForm.Get("client_assertion")
+	if assertion == "" {
 		return
 	}
+	if a.seenClientAssertions == nil {
+		a.seenClientAssertions = make(map[string]bool)
+	}
+	if a.seenClientAssertions[assertion] {
+		a.t.Errorf("token: client_assertion reused across requests")
+	}
+	a.seenClientAssertions[assertion] = true
+}
 
-	mustChallenge := a.alwaysChallengeDPoPNonce ||
+func (a *fakeAS) writeTokenRejectedPlain(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusBadRequest)
+	json.NewEncoder(w).Encode(map[string]any{
+		"error":             "invalid_grant",
+		"error_description": "test: rejected without a DPoP-nonce challenge",
+	})
+}
+
+func (a *fakeAS) mustChallengeDPoPNonce(proof string) bool {
+	return a.alwaysChallengeDPoPNonce ||
 		(a.challengeDPoPNonce != "" && dpopProofNonce(a.t, proof) != a.challengeDPoPNonce)
-	if mustChallenge {
-		nonce := a.challengeDPoPNonce
-		if nonce == "" {
-			nonce = "test-dpop-nonce"
-		}
-		w.Header().Set("DPoP-Nonce", nonce)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]any{
-			"error":             "use_dpop_nonce",
-			"error_description": "resubmit with the DPoP-Nonce value",
-		})
-		return
-	}
+}
 
+func (a *fakeAS) writeTokenDPoPNonceChallenge(w http.ResponseWriter) {
+	nonce := a.challengeDPoPNonce
+	if nonce == "" {
+		nonce = "test-dpop-nonce"
+	}
+	w.Header().Set("DPoP-Nonce", nonce)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusBadRequest)
+	json.NewEncoder(w).Encode(map[string]any{
+		"error":             "use_dpop_nonce",
+		"error_description": "resubmit with the DPoP-Nonce value",
+	})
+}
+
+func (a *fakeAS) writeTokenIssued(w http.ResponseWriter) {
 	idToken, err := token.IssueIDToken(token.IDTokenParams{
 		Signer: a.idTokenKey, Algorithm: fapi.ES256, KeyID: "as-id-kid",
 		Issuer: a.issuer, Subject: "end-user-1", Audience: testClientID,

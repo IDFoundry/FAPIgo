@@ -1,0 +1,32 @@
+# Mirrors sonar.coverage.exclusions in sonar-project.properties — same
+# reasoning applies to Codecov, which consumes the identical
+# coverage.out (ci.yml's `test` job produces one file, uploaded to
+# both). Since Go 1.20, `go test ./... -coverprofile=...` emits a
+# synthetic all-0-count entry for every statement in a package with no
+# test files at all (confirmed: cmd/conformance-client/*.go — 330
+# lines, all count 0), not just the packages actually under test. Left
+# unexcluded, that inflates the coverage denominator with lines that
+# structurally can never be covered by a unit test, exactly the same
+# "metric that can't reflect reality" problem sonar-project.properties
+# already documents.
+#
+# conformance/** (both the .py scripts and the setup-config/
+# generate-client-key Go tools under conformance/server/scripts) and
+# cmd/conformance-client/** are local dev/CI tooling that drives the
+# OIDF conformance suite (see conformance/README.md) — verified by
+# actually running it against a live suite
+# (conformance/scripts/run-all.sh), not by unit tests; none of these
+# have a _test.go/pytest counterpart, deliberately. (Codecov's ignore
+# globs are file-extension-agnostic and don't need the separate
+# **/*.py / **/*.go split sonar.coverage.exclusions uses — one
+# directory-wide pattern covers both here.)
+#
+# cmd/conformance-as/main.go specifically (not the rest of that
+# package, which keeps real unit coverage): func main() itself calls
+# flag.Parse(), log.Fatal (os.Exit) on every validation failure, and
+# blocks forever on ListenAndServeTLS — see sonar-project.properties'
+# own longer account of this one.
+ignore:
+  - "conformance/**"
+  - "cmd/conformance-client/**"
+  - "cmd/conformance-as/main.go"

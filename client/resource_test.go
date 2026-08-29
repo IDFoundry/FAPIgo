@@ -16,6 +16,7 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/client"
 	"github.com/idfoundry/fapigo/internal/jose"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // newResourceTestClient builds a client wired to ts, with everything
@@ -404,5 +405,57 @@ func TestProtectedResourceDoPropagatesHTTPFailure(t *testing.T) {
 	}
 	if _, err := c.ProtectedResource(client.TokenSet{AccessToken: fapi.NewSecret("test-access-token")}).Do(context.Background(), req); err == nil {
 		t.Fatalf("Do(unreachable server) = nil error, want error")
+	}
+}
+
+// TestProtectedResourceDoMTLSPropagatesHTTPFailure is
+// TestProtectedResourceDoPropagatesHTTPFailure's SenderConstrainMTLS
+// counterpart: Do's other transport-failure branch (sendBearer, not
+// send) surfaces a transport-level failure as an error too.
+func TestProtectedResourceDoMTLSPropagatesHTTPFailure(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	ts.Close() // closed before use: every request now fails to connect
+
+	c := newResourceTestClient(t, ts, func(cfg *client.Config) {
+		cfg.SenderConstrain = storage.SenderConstrainMTLS
+		cfg.Algorithms.DPoP = 0
+	})
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, ts.URL+"/resource", nil)
+	if err != nil {
+		t.Fatalf("NewRequestWithContext: %v", err)
+	}
+	if _, err := c.ProtectedResource(client.TokenSet{AccessToken: fapi.NewSecret("test-access-token")}).Do(context.Background(), req); err == nil {
+		t.Fatalf("Do(MTLS, unreachable server) = nil error, want error")
+	}
+}
+
+// TestProtectedResourceDoPropagatesHTTPFailureOnRetry covers Do's other
+// DPoP transport-failure branch: a nonce challenge on the first request
+// succeeds, but the replay carrying the fresh nonce fails at the
+// transport level (distinct from TestProtectedResourceDoPropagatesHTTPFailure,
+// which fails on the very first request and never reaches a retry).
+func TestProtectedResourceDoPropagatesHTTPFailureOnRetry(t *testing.T) {
+	const serverNonce = "server-nonce-1"
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("WWW-Authenticate", `DPoP error="use_dpop_nonce", error_description="nonce required"`)
+		w.Header().Set("DPoP-Nonce", serverNonce)
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer ts.Close()
+
+	deps := validDependencies(t)
+	deps.HTTP = &failNthRequestHTTPClient{real: ts.Client(), pathSuffix: "/resource", failOn: 2}
+	c, err := client.New(validConfig(t), deps)
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, ts.URL+"/resource", nil)
+	if err != nil {
+		t.Fatalf("NewRequestWithContext: %v", err)
+	}
+	if _, err := c.ProtectedResource(client.TokenSet{AccessToken: fapi.NewSecret("test-access-token")}).Do(context.Background(), req); err == nil {
+		t.Fatalf("Do(transport failure on retry) = nil error, want error")
 	}
 }

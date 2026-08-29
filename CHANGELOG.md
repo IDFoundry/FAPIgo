@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.2](https://github.com/IDFoundry/FAPIgo/compare/v0.18.1...v0.18.2) (2026-08-29)
+
+
+### Bug Fixes
+
+* keep ciba-ping client jwks in sync with freshly generated plan ([74b4c60](https://github.com/IDFoundry/FAPIgo/commit/74b4c6013cd5d5898c124fdd8d5ef7422218e087))
+
 ## [0.18.1](https://github.com/IDFoundry/FAPIgo/compare/v0.18.0...v0.18.1) (2026-08-29)
 
 

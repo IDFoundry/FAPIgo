@@ -52,6 +52,19 @@ jobs:
       - name: coverage summary
         run: go tool cover -func=coverage.out | tail -1
 
+      # Uploads the same coverage.out the step above already produced —
+      # a second, independent coverage view (trend graphs, per-PR diff
+      # comments, the README badge) alongside SonarQube's own gate
+      # below, not a replacement for it. CODECOV_TOKEN is a repo secret
+      # from codecov.io's own repo settings (Settings > General >
+      # Repository Upload Token), after enabling this repo there.
+      - name: Codecov upload
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.out
+          fail_ci_if_error: false
+
       # A second run, in Go's own -json event format rather than
       # coverage.out, purely for SonarQube's test-execution reporting
       # (pass/fail/skip counts and duration — see

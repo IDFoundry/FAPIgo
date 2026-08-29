@@ -1,22 +1,23 @@
 #!/usr/bin/env bash
-# Runs all seven FAPI2 conformance suites this repo has driver support
+# Runs all eight FAPI2 conformance suites this repo has driver support
 # for — AS baseline, AS message-signing, AS ciba-mtls, AS
-# client-auth-mtls, RP baseline, RP message-signing, RP ciba-mtls —
-# against a locally running OIDF conformance suite, prints one combined
-# summary at the end, and (via generate-report.py) writes a fuller
-# report.md alongside the raw per-suite logs — every non-PASSED module,
-# with the "why this is expected, not a defect" reasoning pulled
-# straight from expected-{warnings,skips}-*.json where one exists.
+# client-auth-mtls, RP baseline, RP message-signing, RP ciba-mtls, RP
+# client-auth-mtls — against a locally running OIDF conformance suite,
+# prints one combined summary at the end, and (via generate-report.py)
+# writes a fuller report.md alongside the raw per-suite logs — every
+# non-PASSED module, with the "why this is expected, not a defect"
+# reasoning pulled straight from expected-{warnings,skips}-*.json where
+# one exists.
 #
-# AS client-auth-mtls covers RFC 8705 §2 client authentication
-# (client_auth_type=mtls) — orthogonal to AS ciba-mtls's §3
-# sender-constraining coverage below: this profile keeps
-# sender_constrain=dpop, so it's the first plan to exercise a DPoP
-# proof presented at an mTLS-alias URL at all (see ARCHITECTURE.md's
+# AS/RP client-auth-mtls cover RFC 8705 §2 client authentication
+# (client_auth_type=mtls) — orthogonal to AS/RP ciba-mtls's §3
+# sender-constraining coverage below: both keep sender_constrain=dpop,
+# so AS client-auth-mtls is the first plan to exercise a DPoP proof
+# presented at an mTLS-alias URL at all (see ARCHITECTURE.md's
 # conformance strategy section for the real server/token.go and
-# server/par.go gap this surfaced and fixed). Has no RP-side
-# counterpart: client-side certificate-based authentication has no
-# separate OIDF RP test plan of its own to run against.
+# server/par.go gap this surfaced and fixed). RP client-auth-mtls is
+# cmd/conformance-client -profile=baseline -client-auth-mtls, not a
+# separate container.
 #
 # AS ciba-mtls and RP ciba-mtls both need RFC 8705 mTLS sender-
 # constraining (see ARCHITECTURE.md's Conformance strategy section for
@@ -285,7 +286,8 @@ run_as_plan() {
 }
 
 # run_rp_plan NAME PROFILE_FLAG [EXTRA_ARGS...] — EXTRA_ARGS is for
-# -mtls (RP ciba-mtls); the two pre-existing callers pass none.
+# -mtls (RP ciba-mtls) or -client-auth-mtls (RP client-auth-mtls); the
+# two baseline/message-signing callers pass none.
 run_rp_plan() {
 	local name="$1" profile="$2"
 	shift 2
@@ -370,11 +372,19 @@ run_rp_plan "message-signing" "message-signing"
 # require mTLS unconditionally, regardless of client_auth_type variant.
 run_rp_plan "ciba-mtls" "ciba" -mtls
 
+# RP client-auth-mtls: cmd/conformance-client -profile=baseline
+# -client-auth-mtls, the RFC 8705 §2 counterpart to AS client-auth-mtls
+# above — sender-constraining stays DPoP; only how this driver
+# authenticates itself (client_id + certificate, no client_assertion)
+# changes. See ../client/scripts/README.md's own client-authentication
+# mTLS section.
+run_rp_plan "client-auth-mtls" "baseline" -client-auth-mtls
+
 python3 "$SCRIPT_DIR/generate-report.py" "$WORKDIR" "$REPO_ROOT" || echo "warning: report generation failed (see above)" >&2
 
 echo
 echo "=== combined summary ==="
-for suite in "AS baseline" "AS message-signing" "AS ciba-mtls" "AS client-auth-mtls" "RP baseline" "RP message-signing" "RP ciba-mtls"; do
+for suite in "AS baseline" "AS message-signing" "AS ciba-mtls" "AS client-auth-mtls" "RP baseline" "RP message-signing" "RP ciba-mtls" "RP client-auth-mtls"; do
 	result="$(lookup_result "$suite")"
 	printf '%-20s %s\n' "$suite" "${result:-DID NOT RUN}"
 done
@@ -384,7 +394,7 @@ echo "report: $WORKDIR/report.md"
 
 if [[ "$OVERALL_CLEAN" = true ]]; then
 	echo
-	echo "All seven suites completed with no unexpected results."
+	echo "All eight suites completed with no unexpected results."
 	exit 0
 else
 	echo

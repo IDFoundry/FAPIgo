@@ -38,6 +38,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"flag"
 	"fmt"
 	"io"
@@ -51,6 +52,7 @@ import (
 	"github.com/idfoundry/fapigo/fapihttp"
 	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 const (
@@ -98,9 +100,13 @@ func main() {
 	apiBase := flag.String("suite", "https://localhost.emobix.co.uk:8443/", "conformance suite base URL")
 	profileName := flag.String("profile", "baseline", "which client test plan to run: baseline, message-signing, or ciba")
 	mtls := flag.Bool("mtls", false, "with -profile=ciba, present a client certificate and use storage.SenderConstrainMTLS instead of DPoP (RFC 8705 §3) — see mtls.go; ignored for baseline/message-signing")
+	clientAuthMTLS := flag.Bool("client-auth-mtls", false, "with -profile=baseline, register via storage.ClientAuthMethodSelfSignedTLSClientAuth (RFC 8705 §2) instead of private_key_jwt — presents a client certificate instead of a signed client assertion at PAR/token; sender-constraining stays DPoP either way. Orthogonal to -mtls, which is §3 sender-constraining for -profile=ciba only. Ignored/invalid for message-signing/ciba.")
 	flag.Parse()
 
 	if *profileName == "ciba" {
+		if *clientAuthMTLS {
+			log.Fatal("conformance-client: -client-auth-mtls is not supported with -profile=ciba")
+		}
 		// CIBA has no browser hop for runModule's shape to drive — see
 		// ciba.go's own package doc comment — so it's dispatched
 		// separately rather than living in the profiles map below.
@@ -114,8 +120,11 @@ func main() {
 	if !ok {
 		log.Fatalf("conformance-client: unknown -profile %q (want baseline, message-signing, or ciba)", *profileName)
 	}
+	if *clientAuthMTLS && *profileName != "baseline" {
+		log.Fatalf("conformance-client: -client-auth-mtls is only supported with -profile=baseline, got %q", *profileName)
+	}
 
-	if err := run(*apiBase, profile); err != nil {
+	if err := run(*apiBase, profile, *clientAuthMTLS); err != nil {
 		log.Fatalf("conformance-client: %v", err)
 	}
 }
@@ -131,11 +140,19 @@ func insecureSuiteHTTPClient() *http.Client {
 	}
 }
 
-func run(apiBase string, profile driverProfile) error {
+func run(apiBase string, profile driverProfile, clientAuthMTLS bool) error {
 	ctx := context.Background()
 	rawHTTP := insecureSuiteHTTPClient()
 
-	purposes := []keys.SigningPurpose{keys.ClientAuthentication, keys.DPoPProofSigning}
+	// Under clientAuthMTLS, no client_assertion is ever built (RFC 8705
+	// §2 — the certificate itself is the credential), so this driver
+	// needs no ClientAuthentication-purpose key or jwks entry for it at
+	// all — mirroring server.jwks.ClientAuthMethod's own conditional
+	// PublicJWKS omission on the AS side (client/jwks.go).
+	purposes := []keys.SigningPurpose{keys.DPoPProofSigning}
+	if !clientAuthMTLS {
+		purposes = append(purposes, keys.ClientAuthentication)
+	}
 	if profile.signRequestObject {
 		purposes = append(purposes, keys.RequestObjectSigning)
 	}
@@ -143,22 +160,26 @@ func run(apiBase string, profile driverProfile) error {
 	if err != nil {
 		return fmt.Errorf("generate keys: %w", err)
 	}
-	// This driver's own client.Client instances aren't constructed here —
-	// each module discovers its own mock-AS URL and only then builds one,
-	// deep inside runModule — so there's no single client.Client yet to
-	// call PublicJWKS on for the plan config the suite needs up front.
-	// jose.NewJWK is the same underlying encoding PublicJWKS itself uses;
-	// this package is inside the module, so it can reach it directly
-	// rather than hand-rolling JWK encoding a second time.
-	clientAuthPub, err := keyMgr.PublicKey(ctx, keys.ClientAuthentication, fapi.ES256)
-	if err != nil {
-		return fmt.Errorf("read client authentication public key: %w", err)
+
+	var jwks []any
+	if !clientAuthMTLS {
+		// This driver's own client.Client instances aren't constructed here —
+		// each module discovers its own mock-AS URL and only then builds one,
+		// deep inside runModule — so there's no single client.Client yet to
+		// call PublicJWKS on for the plan config the suite needs up front.
+		// jose.NewJWK is the same underlying encoding PublicJWKS itself uses;
+		// this package is inside the module, so it can reach it directly
+		// rather than hand-rolling JWK encoding a second time.
+		clientAuthPub, err := keyMgr.PublicKey(ctx, keys.ClientAuthentication, fapi.ES256)
+		if err != nil {
+			return fmt.Errorf("read client authentication public key: %w", err)
+		}
+		clientAuthJWK, err := jose.NewJWK(clientAuthPub.PublicKey, fapi.ES256)
+		if err != nil {
+			return fmt.Errorf("build client authentication jwk: %w", err)
+		}
+		jwks = append(jwks, clientAuthJWK.WithKeyID(clientAuthPub.KeyID))
 	}
-	clientAuthJWK, err := jose.NewJWK(clientAuthPub.PublicKey, fapi.ES256)
-	if err != nil {
-		return fmt.Errorf("build client authentication jwk: %w", err)
-	}
-	jwks := []any{clientAuthJWK.WithKeyID(clientAuthPub.KeyID)}
 
 	if profile.signRequestObject {
 		reqObjPub, err := keyMgr.PublicKey(ctx, keys.RequestObjectSigning, fapi.ES256)
@@ -182,22 +203,52 @@ func run(apiBase string, profile driverProfile) error {
 	clientID := "gofapi-rp-driver-client-" + suffix
 	redirectURI := apiBase + "test/a/" + alias + "/callback"
 
+	variant := profile.variant
+	var clientCertPEM string
+	if clientAuthMTLS {
+		// Copied, not mutated in place: profile.variant is the shared
+		// map literal in the profiles table above, reused across runs
+		// within the same process (there aren't any today, but nothing
+		// stops a future caller from doing so).
+		variant = make(map[string]string, len(profile.variant))
+		for k, v := range profile.variant {
+			variant[k] = v
+		}
+		variant["client_auth_type"] = "mtls"
+
+		cert, err := selfSignedClientCert("gofapi-client-auth-mtls-driver")
+		if err != nil {
+			return fmt.Errorf("generate client certificate: %w", err)
+		}
+		rawHTTP = mtlsSuiteHTTPClient(cert)
+		// See ciba.go's own runCIBA for why this "client.certificate"
+		// plan-config value is required, not optional, under any mTLS
+		// client credential — EnsureClientCertificateMatches has no
+		// other source for what to compare the presented certificate
+		// against.
+		clientCertPEM = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Certificate[0]}))
+	}
+
+	clientBlock := map[string]any{
+		"client_id":    clientID,
+		"scope":        "openid",
+		"redirect_uri": redirectURI,
+	}
+	if len(jwks) > 0 {
+		clientBlock["jwks"] = map[string]any{"keys": jwks}
+	}
+	if clientCertPEM != "" {
+		clientBlock["certificate"] = clientCertPEM
+	}
 	planConfig, err := json.Marshal(map[string]any{
-		"alias": alias,
-		"client": map[string]any{
-			"client_id":    clientID,
-			"scope":        "openid",
-			"redirect_uri": redirectURI,
-			"jwks": map[string]any{
-				"keys": jwks,
-			},
-		},
+		"alias":  alias,
+		"client": clientBlock,
 	})
 	if err != nil {
 		return fmt.Errorf("marshal plan config: %w", err)
 	}
 
-	planID, moduleNames, err := createPlan(rawHTTP, apiBase, profile.planName, profile.variant, planConfig)
+	planID, moduleNames, err := createPlan(rawHTTP, apiBase, profile.planName, variant, planConfig)
 	if err != nil {
 		return fmt.Errorf("create plan: %w", err)
 	}
@@ -207,6 +258,7 @@ func run(apiBase string, profile driverProfile) error {
 	driver := moduleDriver{
 		HTTP: rawHTTP, APIBase: apiBase, PlanID: planID,
 		ClientID: clientID, RedirectURI: redirectURI, Keys: keyMgr, Profile: profile,
+		ClientAuthMTLS: clientAuthMTLS,
 	}
 	summary := make(map[string]string, len(moduleNames))
 	for i, name := range moduleNames {
@@ -235,6 +287,11 @@ type moduleDriver struct {
 	RedirectURI string
 	Keys        *ephemeralKeyManager
 	Profile     driverProfile
+
+	// ClientAuthMTLS selects storage.ClientAuthMethodSelfSignedTLSClientAuth
+	// (RFC 8705 §2) instead of the default private_key_jwt — see run's
+	// own doc comment on -client-auth-mtls.
+	ClientAuthMTLS bool
 }
 
 // runModule drives testName through the same discover/authorize/token/
@@ -291,9 +348,11 @@ func runModule(ctx context.Context, d moduleDriver, testName string) string {
 	}
 
 	algorithms := client.Algorithms{
-		ClientAuthentication: fapi.ES256,
-		DPoP:                 fapi.ES256,
-		IDToken:              discovered.IDTokenAlgorithms[0],
+		DPoP:    fapi.ES256,
+		IDToken: discovered.IDTokenAlgorithms[0],
+	}
+	if !d.ClientAuthMTLS {
+		algorithms.ClientAuthentication = fapi.ES256
 	}
 	limits := client.Limits{
 		ClientAssertionLifetime: time.Minute,
@@ -337,6 +396,12 @@ func runModule(ctx context.Context, d moduleDriver, testName string) string {
 		RequireAuthorizationResponseIss: discovered.AuthorizationResponseIssSupported,
 		Algorithms:                      algorithms,
 		Limits:                          limits,
+	}
+	if d.ClientAuthMTLS {
+		cfg.ClientAuthMethod = storage.ClientAuthMethodSelfSignedTLSClientAuth
+		if err := applyMTLSEndpointAliasesForClientAuth(&cfg, discovered); err != nil {
+			return awaitVerdict(rawHTTP, apiBase, module.ID, err.Error())
+		}
 	}
 	deps := client.Dependencies{
 		Sessions:   newMemSessionStore(),

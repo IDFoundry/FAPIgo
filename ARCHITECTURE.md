@@ -685,9 +685,28 @@ surfaced (unrelated to either fix) and the one apparent failure traced
 to a suite-side timing artifact rather than this server, in
 `conformance/server/oidf-config/README.md`'s own client-authentication
 mTLS section. Wired into `run-all.sh` as its own "AS client-auth-mtls"
-leg (a fourth `conformance-as` container, no RP-side counterpart:
-`cmd/conformance-client` has no certificate-based client-authentication
-support of its own yet).
+leg (a fourth `conformance-as` container).
+
+The RP side got the same treatment immediately after, via
+`cmd/conformance-client -profile=baseline -client-auth-mtls` against
+the suite's own `fapi2-security-profile-final-client-test-plan`, same
+`client_auth_type=mtls`/`sender_constrain=dpop` split. **Confirmed
+live: 22/22 PASS, on the first attempt** — the only mTLS re-attempt in
+this repo's conformance history that needed no fix at all, since both
+sides' library groundwork (`client.Config.ClientAuthMethod` from PR
+#182, and `verifyDPoPAtEitherEndpoint` from the AS side's own re-attempt
+just above) were already in place before this driver flag existed.
+Reuses `cmd/conformance-client/mtls.go`'s existing `-mtls` machinery
+(`selfSignedClientCert`, `mtlsSuiteHTTPClient`, registering the
+certificate as the plan config's `client.certificate` value) almost
+unchanged, plus one addition —
+`applyMTLSEndpointAliasesForClientAuth` overrides the
+`PushedAuthorizationRequest` alias too, not just `Token`, since
+certificate-based client authentication (unlike sender-constraining) is
+checked at PAR as well. Full breakdown in
+`conformance/client/scripts/README.md`'s own client-authentication mTLS
+section. Wired into `run-all.sh` as "RP client-auth-mtls" (no separate
+container — a driver flag, like RP ciba-mtls).
 
 ## What is and isn't shared
 

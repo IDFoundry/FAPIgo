@@ -7,9 +7,11 @@ name: FAPI2 Conformance
 # conformance/scripts/run-all.sh, against a freshly-brought-up OIDF
 # conformance suite. Deliberately not triggered
 # on push/pull_request — this is a heavy job (bringing up the suite's
-# own Docker stack, ~6-7 minutes of test execution locally, likely more
-# on a shared runner) that would otherwise slow down every PR's
-# feedback loop. Scheduled instead, daily, plus available on demand.
+# own Docker stack, ~6-7 minutes of test execution locally) that would
+# otherwise slow down every PR's feedback loop. Scheduled instead,
+# daily, plus available on demand. A shared runner is markedly slower
+# than that local baseline — a real run exceeded the previous 30-minute
+# timeout and was cancelled, hence timeout-minutes: 60 below.
 #
 # Informational only: nothing in branch protection depends on this
 # workflow, since it never runs against a PR in the first place. The
@@ -32,7 +34,7 @@ permissions:
 jobs:
   conformance:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
 

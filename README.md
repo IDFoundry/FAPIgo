@@ -5,6 +5,16 @@
 [![FAPI2 Conformance](https://github.com/IDFoundry/FAPIgo/actions/workflows/conformance.yml/badge.svg)](https://github.com/IDFoundry/FAPIgo/actions/workflows/conformance.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+[![Quality Gate](https://sonarcloud.io/api/project_badges/quality_gate?project=IDFoundry_FAPIgo)](https://sonarcloud.io/summary/new_code?id=IDFoundry_FAPIgo)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=IDFoundry_FAPIgo&metric=coverage)](https://sonarcloud.io/summary/new_code?id=IDFoundry_FAPIgo)
+[![Lines of Code](https://sonarcloud.io/api/project_badges/measure?project=IDFoundry_FAPIgo&metric=ncloc)](https://sonarcloud.io/summary/new_code?id=IDFoundry_FAPIgo)
+[![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=IDFoundry_FAPIgo&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=IDFoundry_FAPIgo)
+[![Maintainability Rating](https://sonarcloud.io/api/project_badges/measure?project=IDFoundry_FAPIgo&metric=sqale_rating)](https://sonarcloud.io/summary/new_code?id=IDFoundry_FAPIgo)
+[![Reliability Rating](https://sonarcloud.io/api/project_badges/measure?project=IDFoundry_FAPIgo&metric=reliability_rating)](https://sonarcloud.io/summary/new_code?id=IDFoundry_FAPIgo)
+[![Vulnerabilities](https://sonarcloud.io/api/project_badges/measure?project=IDFoundry_FAPIgo&metric=vulnerabilities)](https://sonarcloud.io/summary/new_code?id=IDFoundry_FAPIgo)
+[![Code Smells](https://sonarcloud.io/api/project_badges/measure?project=IDFoundry_FAPIgo&metric=code_smells)](https://sonarcloud.io/summary/new_code?id=IDFoundry_FAPIgo)
+[![Technical Debt](https://sonarcloud.io/api/project_badges/measure?project=IDFoundry_FAPIgo&metric=sqale_index)](https://sonarcloud.io/summary/new_code?id=IDFoundry_FAPIgo)
+
 Hardened, separately conformant FAPI 2.0 client, authorization-server and
 resource-server engines for Go, built on one rigorously tested protocol
 core.

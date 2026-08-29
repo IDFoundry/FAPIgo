@@ -37,7 +37,7 @@ behaviour and negative-test expectations differ. See
 
 `server`'s CIBA support (`BeginBackchannelAuthentication`/
 `CompleteBackchannelAuthentication`/`ExchangeBackchannelAuthentication`,
-poll mode only) is verified by unit/integration tests, not the live
+poll and ping delivery) is verified by unit/integration tests, not the live
 OIDF suite as its primary gate: `fapi-ciba-id1-test-plan` requires
 MTLS-bound access tokens unconditionally. Now that this module supports
 mTLS sender-constraining (RFC 8705 §3, `-mtls`), this was genuinely
@@ -66,6 +66,22 @@ steps in
 [`server/oidf-config/README.md`](server/oidf-config/README.md#ciba-mtlsconfigjson--the-genuine-mtls-re-attempt-automated).
 Wired into `scripts/run-all.sh` as its own "AS ciba-mtls" leg now that
 it's a clean 34/34.
+
+CIBA §10.2 ping delivery mode got its own AS-side re-attempt too, once
+`server.BackchannelNotifier`/`storage.BackchannelTokenDeliveryModePing`
+existed — two extra clients on the same `conformance-as-ciba-mtls`
+container, driven under `ciba-ping-plan.json`. Surfaced two more real
+bugs: the interval throttle rejected a client's poll made immediately
+after receiving a ping notification with `slow_down` (fixed by exempting
+exactly that one poll per notification), and the outbound notifier
+followed an HTTP redirect from the notification endpoint instead of
+treating it as the final response. Confirmed live: the core
+`fapi-ciba-id1` module plus all five ping-specific modules PASS. Full
+breakdown in
+[`server/oidf-config/README.md`](server/oidf-config/README.md#ciba-ping-planjson--ciba-102-ping-delivery-mode-automated).
+Wired into `scripts/run-all.sh` as its own "AS ciba-ping" leg — no
+RP-side counterpart, since `cmd/conformance-client` only ever plays a
+poll-mode CIBA client.
 
 `client`'s own CIBA support
 (`BeginBackchannelAuthentication`/`PollBackchannelAuthentication`) was

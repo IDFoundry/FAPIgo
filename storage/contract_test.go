@@ -350,6 +350,12 @@ func (s *refBackchannelAuthenticationStore) DecideBackchannelAuthentication(_ co
 	rec.acr = decision.ACR
 	rec.amr = decision.AMR
 	rec.reason = decision.Reason
+	if rec.record.DeliveryMode == "ping" {
+		// See memstore's identical reset for why — CIBA Core 1.0 §10.2's
+		// ping notification exempts the client's next poll from the
+		// interval check.
+		rec.polledBefore = false
+	}
 	return storage.DecidedBackchannelAuthentication{
 		ClientID:                rec.record.ClientID,
 		DeliveryMode:            rec.record.DeliveryMode,

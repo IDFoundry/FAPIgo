@@ -610,3 +610,82 @@ endpoint does. `client.hint_type`/`client.hint_value` (`"login_hint"`/
 the AS's own `default_subject`) are CIBA's equivalent of `login_hint`
 under the `plain_fapi` profile — `client.login_hint` itself is a
 Brazil/ConnectID-specific field the suite hides for this profile.
+
+### `ciba-ping-plan.json` — CIBA §10.2 ping delivery mode (automated)
+
+Two extra clients (`gofapi-conformance-ciba-ping-client-{1,2}`) appended
+to the same `ciba-mtls.config.json` and running against the same
+`conformance-as-ciba-mtls` container as the poll-mode plan above (see
+`setupCIBAPing` in
+`../scripts/setup-config/main.go`) — `backchannel_token_delivery_mode:
+"ping"` plus a `backchannel_client_notification_endpoint` are the only
+registration differences from the poll-mode clients; `sender_constrain`
+stays `"mtls"` unconditionally, same reasoning as `ciba-mtls.config.json`
+itself. Runs under its own suite plan alias (`gofapi-ciba-ping`, not
+`gofapi-ciba-mtls`) so this plan's notification endpoint doesn't collide
+with the poll-mode plan's own — a static, non-DCR client's notification
+endpoint is fixed for its whole lifetime, tied to one alias.
+
+Two real, previously-undetected bugs were found and fixed getting this
+plan to pass — both only observable by actually driving a live ping
+exchange, not from reading the CIBA spec text alone:
+
+- **Missing `auth_req_id` in the ping notification body** — a
+  correctness gap in the CIBA ping-mode library support itself (fixed
+  separately, before this plan existed at all; see
+  `server/backchannel_notify.go`'s doc comment and
+  `storage.NewBackchannelAuthentication.AuthReqID`).
+- **The client's poll immediately after receiving a ping notification
+  was rejected with `slow_down`.** `storage/memstore`'s
+  `PollBackchannelAuthentication` throttles two polls closer together
+  than the registered `PollInterval` — correct for poll mode, but CIBA
+  §10.2's entire point is that a ping notification is the client's
+  permission to poll *immediately*, regardless of how recently it last
+  polled. Confirmed live: `fapi-ciba-id1`'s own module deliberately
+  polls twice while pending (to exercise `authorization_pending`/
+  `slow_down` under normal interval rules), then triggers approval and
+  expects the ping-triggered poll milliseconds later to succeed, not
+  `slow_down`. Fixed by having
+  `BackchannelAuthenticationStore.DecideBackchannelAuthentication`
+  reset the interval-tracking state for `ping`-delivery records only
+  (poll-mode records are untouched) — see
+  `storage/memstore/backchannel_authentication_store.go`'s doc comment
+  and `storage/contract.go`'s
+  `PollImmediatelyAfterPingDecisionSkipsIntervalCheck`.
+- **`cmd/conformance-as`'s outbound notifier followed a redirect from
+  the notification endpoint.** `fapi-ciba-id1-ping-backchannel
+  -notification-endpoint-return-redirect-request` has the suite
+  respond to the ping POST with a 301 to a second, "invalid" endpoint
+  and fails outright if that second endpoint is ever called. Go's
+  `http.Client` follows redirects by default; fixed by setting
+  `CheckRedirect` to `http.ErrUseLastResponse` on the client
+  `httpBackchannelNotifier` uses (`cmd/conformance-as/backchannel_notify.go`)
+  — a redirect response is now treated as the (non-2xx, best-effort-
+  failed) final response, never followed.
+
+Also required `client.hint_type`/`client.hint_value` on both plan
+clients (initially omitted, reasoning — wrongly — that ping-mode
+clients need no approval-flow fields ping-mode itself doesn't touch):
+`fapi-ciba-id1`'s own `AddHintToAuthorizationEndpointRequest` step fails
+outright without one, exactly as `ciba-mtls-plan.json`'s clients already
+need.
+
+Confirmed live: the core `fapi-ciba-id1` module plus all five
+ping-specific modules (`fapi-ciba-id1-ping-backchannel-notification
+-endpoint-response-{has-body,401,403}`,
+`fapi-ciba-id1-ping-with-mtls-ciba-notification-endpoint-response-401
+-and-require-server-does-not-retry`,
+`fapi-ciba-id1-ping-backchannel-notification-endpoint-return-redirect
+-request`) PASS individually, run sequentially against the same plan
+(the suite rejects concurrent module instances sharing one alias with
+an `INTERRUPTED`/alias-conflict result — an artifact of how they were
+driven directly via the suite's REST API in this environment, not a
+defect). This environment had no local OIDF suite checkout
+(`run-test-plan.py`) available to drive the *entire* plan end to end
+the way `../scripts/run-all.sh` does for `ciba-mtls-plan.json` — only
+these six modules were exercised directly. `expected-warnings
+-ciba-ping.json`/`expected-skips-ciba-ping.json` start empty, matching
+`ciba-mtls`'s own baseline; a first full `run-all.sh` pass may still
+surface warnings/skips on the plan's other, ping-unrelated modules
+(shared unchanged with `ciba-mtls-plan.json`) that these files don't
+yet account for.

@@ -512,7 +512,7 @@ CIBA (`server.BeginBackchannelAuthentication`/`CompleteBackchannelAuthentication
 `ExchangeBackchannelAuthentication`) is deliberately not part of this
 automated certification loop. It implements base OIDC CIBA and
 FAPI-CIBA's other requirements (a mandatory signed authentication
-request with `jti`/`nbf`, poll-mode-only delivery, DPoP- or
+request with `jti`/`nbf`, poll and ping delivery, DPoP- or
 mTLS-bound tokens), verified by unit/integration tests instead — but
 the OIDF suite's own `fapi-ciba-id1-test-plan` requires MTLS-bound
 access tokens unconditionally, even under
@@ -656,6 +656,27 @@ wired into `conformance/scripts/run-all.sh`'s own automated gate
 ("AS ciba-mtls"/"RP ciba-mtls" legs) and the daily
 `.github/workflows/conformance.yml` run, alongside baseline and
 message-signing on both sides.
+
+CIBA §10.2 ping delivery mode (`storage.BackchannelTokenDeliveryModePing`,
+`server.BackchannelNotifier`) followed the same library-then-conformance
+pattern: implemented and unit-tested first, then given its own AS-side
+conformance re-attempt (`conformance/server/oidf-config/ciba-ping-plan.json`,
+two extra clients on the same `conformance-as-ciba-mtls` container as
+AS ciba-mtls). This surfaced two more real bugs no amount of
+unit-testing against this module's own mocked notifier would have
+caught: a client's poll immediately following a ping notification was
+being rejected with `slow_down` (the interval throttle has no concept
+of "a notification just told you to poll now"), and
+`cmd/conformance-as`'s outbound notifier followed an HTTP redirect from
+the notification endpoint when CIBA requires treating it as the final,
+non-2xx response instead. Confirmed live: the core `fapi-ciba-id1`
+module plus all five ping-specific modules PASS. Full breakdown,
+including why `client.hint_type`/`client.hint_value` turned out to be
+required despite ping mode not touching the approval flow, in
+`conformance/server/oidf-config/README.md`'s own ping-mode section.
+Wired into `run-all.sh` as its own "AS ciba-ping" leg — no RP-side
+counterpart, since `cmd/conformance-client` only ever plays a poll-mode
+CIBA client.
 
 The RFC 8705 §2 client-authentication methods themselves (as opposed to
 §3 sender-constraining, covered by CIBA above) got their own genuine

@@ -73,7 +73,7 @@ func main() {
 	accessTokenFormat := flag.String("access-token-format", string(AccessTokenFormatJWT), "access token format to issue/verify: jwt or opaque")
 	dpopNonceChallenge := flag.Bool("dpop-nonce-challenge", false, "require and rotate a DPoP nonce on /par, /token and /userinfo (RFC 9449 §8/§9) — off by default, since the OIDF suite's own driver may not retry on the challenge")
 	userinfoSigning := flag.Bool("userinfo-signing", false, "sign /userinfo responses as a JWS (OIDC Core §5.3.2), using the same algorithm as ID tokens — off by default; the FAPI 2.0 Security Profile doesn't require this")
-	ciba := flag.Bool("ciba", false, "enable the CIBA backchannel authentication endpoint (poll mode only) — off by default; not part of the FAPI 2.0 Security Profile itself")
+	ciba := flag.Bool("ciba", false, "enable the CIBA backchannel authentication endpoint (poll and ping delivery) — off by default; not part of the FAPI 2.0 Security Profile itself")
 	mtls := flag.Bool("mtls", false, "enable a second TLS listener (mtls_listen_addr in the config file, or -mtls-listen) that requests but does not require a client certificate, advertised via mtls_endpoint_aliases (RFC 8705 §5) for a client registered sender_constrain=mtls — off by default; requires real TLS, incompatible with -insecure-http")
 	mtlsListenOverride := flag.String("mtls-listen", "", "override mtls_listen_addr from the config file")
 	flag.Parse()

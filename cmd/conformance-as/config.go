@@ -95,6 +95,19 @@ type ClientConfig struct {
 	// sender-constrained either way regardless of how it authenticates.
 	SenderConstrain string `json:"sender_constrain,omitempty"`
 
+	// BackchannelTokenDeliveryMode selects how this server tells this
+	// client a CIBA decision was reached: "poll" (the default, applied
+	// when empty) or "ping" (CIBA §10.2 — requires
+	// BackchannelClientNotificationEndpoint and this binary running with
+	// -ciba). Independent of SenderConstrain and ClientAuthMethod.
+	BackchannelTokenDeliveryMode string `json:"backchannel_token_delivery_mode,omitempty"`
+
+	// BackchannelClientNotificationEndpoint is where this server POSTs
+	// a bearer-authenticated ping notification once a CIBA decision is
+	// reached. Required exactly when BackchannelTokenDeliveryMode is
+	// "ping"; must be left unset for "poll".
+	BackchannelClientNotificationEndpoint string `json:"backchannel_client_notification_endpoint,omitempty"`
+
 	// ClientAuthMethod selects how this client authenticates:
 	// "private_key_jwt" (the default, applied when empty),
 	// "self_signed_tls_client_auth", or "tls_client_auth" (requires this
@@ -337,6 +350,25 @@ func resolveClient(c ClientConfig) (storage.RegisteredClient, ephemeral.ClientKe
 		}
 	}
 
+	backchannelTokenDeliveryMode := storage.BackchannelTokenDeliveryModePoll
+	if c.BackchannelTokenDeliveryMode != "" {
+		switch c.BackchannelTokenDeliveryMode {
+		case "poll":
+			backchannelTokenDeliveryMode = storage.BackchannelTokenDeliveryModePoll
+		case "ping":
+			backchannelTokenDeliveryMode = storage.BackchannelTokenDeliveryModePing
+		default:
+			return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, fmt.Errorf("backchannel_token_delivery_mode must be %q or %q, got %q", "poll", "ping", c.BackchannelTokenDeliveryMode)
+		}
+	}
+	var backchannelClientNotificationEndpoint fapi.URL
+	if c.BackchannelClientNotificationEndpoint != "" {
+		backchannelClientNotificationEndpoint, err = fapi.ParseEndpointURL(c.BackchannelClientNotificationEndpoint)
+		if err != nil {
+			return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, fmt.Errorf("backchannel_client_notification_endpoint: %w", err)
+		}
+	}
+
 	redirectURIs := make([]fapi.RegisteredRedirectURI, len(c.RedirectURIs))
 	for i, u := range c.RedirectURIs {
 		redirectURIs[i] = fapi.RegisteredRedirectURI(u)
@@ -352,8 +384,10 @@ func resolveClient(c ClientConfig) (storage.RegisteredClient, ephemeral.ClientKe
 		ExpectedSubjectDN:             c.ExpectedSubjectDN,
 		RequestObjectAlgorithm:        requestObjectAlg,
 		BackchannelAuthenticationRequestAlgorithm: backchannelAuthenticationRequestAlg,
-		AllowedScopes:   c.AllowedScopes,
-		SenderConstrain: senderConstrain,
+		AllowedScopes:                         c.AllowedScopes,
+		SenderConstrain:                       senderConstrain,
+		BackchannelTokenDeliveryMode:          backchannelTokenDeliveryMode,
+		BackchannelClientNotificationEndpoint: backchannelClientNotificationEndpoint,
 	})
 	if err != nil {
 		return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, err

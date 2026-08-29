@@ -136,3 +136,47 @@ func TestResolveClientAllowsJWKSWhenRequestObjectSigningConfiguredUnderCertAuth(
 		t.Fatalf("resolveClient: %v", err)
 	}
 }
+
+func TestResolveClientBackchannelTokenDeliveryModeDefaultsToPoll(t *testing.T) {
+	registered, _, err := resolveClient(validClientConfig())
+	if err != nil {
+		t.Fatalf("resolveClient: %v", err)
+	}
+	if registered.BackchannelTokenDeliveryMode() != storage.BackchannelTokenDeliveryModePoll {
+		t.Fatalf("BackchannelTokenDeliveryMode() = %v, want BackchannelTokenDeliveryModePoll", registered.BackchannelTokenDeliveryMode())
+	}
+}
+
+func TestResolveClientBackchannelTokenDeliveryModePing(t *testing.T) {
+	c := validClientConfig()
+	c.BackchannelAuthenticationRequestAlgorithm = "ES256"
+	c.BackchannelTokenDeliveryMode = "ping"
+	c.BackchannelClientNotificationEndpoint = "https://rp.example/ciba/notify"
+	registered, _, err := resolveClient(c)
+	if err != nil {
+		t.Fatalf("resolveClient: %v", err)
+	}
+	if registered.BackchannelTokenDeliveryMode() != storage.BackchannelTokenDeliveryModePing {
+		t.Fatalf("BackchannelTokenDeliveryMode() = %v, want BackchannelTokenDeliveryModePing", registered.BackchannelTokenDeliveryMode())
+	}
+	if registered.BackchannelClientNotificationEndpoint().String() != "https://rp.example/ciba/notify" {
+		t.Fatalf("BackchannelClientNotificationEndpoint() = %v, want %q", registered.BackchannelClientNotificationEndpoint(), "https://rp.example/ciba/notify")
+	}
+}
+
+func TestResolveClientRejectsInvalidBackchannelTokenDeliveryMode(t *testing.T) {
+	c := validClientConfig()
+	c.BackchannelTokenDeliveryMode = "push"
+	if _, _, err := resolveClient(c); err == nil {
+		t.Fatalf("resolveClient(invalid backchannel_token_delivery_mode) = nil error, want error")
+	}
+}
+
+func TestResolveClientRejectsPingWithoutNotificationEndpoint(t *testing.T) {
+	c := validClientConfig()
+	c.BackchannelAuthenticationRequestAlgorithm = "ES256"
+	c.BackchannelTokenDeliveryMode = "ping"
+	if _, _, err := resolveClient(c); err == nil {
+		t.Fatalf("resolveClient(ping, no notification endpoint) = nil error, want error")
+	}
+}

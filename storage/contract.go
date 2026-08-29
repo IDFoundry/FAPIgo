@@ -1190,4 +1190,45 @@ func TestBackchannelAuthenticationStoreContract(t *testing.T, factory func() Bac
 			t.Fatalf("second poll (spaced by interval): %v, want success", err)
 		}
 	})
+
+	// CIBA Core 1.0 §10.2: a ping notification is the client's
+	// permission to poll immediately, regardless of PollInterval —
+	// confirmed live against the OIDF suite's own fapi-ciba-id1-ping-*
+	// modules, which call the token endpoint the instant they receive
+	// the notification and require success, not slow_down.
+	// DecideBackchannelAuthentication must therefore exempt the very
+	// next poll from the interval check under ping delivery, even
+	// though an earlier poll happened well within the interval.
+	t.Run("PollImmediatelyAfterPingDecisionSkipsIntervalCheck", func(t *testing.T) {
+		store := factory()
+		ctx := context.Background()
+		record := newRecord("auth-req-ping-interval-1", "handle-ping-interval-1")
+		record.DeliveryMode = "ping"
+		record.ClientNotificationToken = fapi.NewSecret("notification-token-1")
+		record.AuthReqID = "auth-req-ping-interval-1"
+		record.PollInterval = 5 * time.Second
+		if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
+			t.Fatalf("CreateBackchannelAuthentication: %v", err)
+		}
+		now := time.Now()
+		if _, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
+			AuthReqIDHash: record.AuthReqIDHash, Now: now,
+		}); err != nil {
+			t.Fatalf("first poll (pending): %v", err)
+		}
+		if _, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
+			HandleHash: record.HandleHash, Status: BackchannelAuthenticationApproved, Subject: "user-1",
+		}); err != nil {
+			t.Fatalf("DecideBackchannelAuthentication: %v", err)
+		}
+		// Well within PollInterval of the first poll above — would fail
+		// with *BackchannelAuthenticationSlowDownError under poll
+		// delivery (see PollFasterThanIntervalFails), but must succeed
+		// here since a ping notification was just dispatched.
+		if _, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
+			AuthReqIDHash: record.AuthReqIDHash, Now: now.Add(time.Second),
+		}); err != nil {
+			t.Fatalf("poll immediately after ping decision: %v, want success", err)
+		}
+	})
 }

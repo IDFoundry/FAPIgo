@@ -1115,9 +1115,21 @@ type cibaPingPlan struct {
 // ("gofapi-ciba-mtls"): the notification endpoint URL a static,
 // non-DCR client registers is fixed for the client's whole lifetime,
 // so it can't be shared with a plan run using a different alias.
-// Idempotent the same way patchConformanceASConfig's own third-client
-// append is: does nothing if a client with either new ID already
-// exists.
+//
+// setupCIBAPing's own idempotency gate (ciba-ping-plan.json already
+// exists) is the only thing that can ever skip regenerating pub1/pub2
+// in the first place — and that plan file is gitignored, so on a fresh
+// clone it's always missing and this function always runs with a
+// brand-new keypair. So when these two client IDs are already present
+// here (from a previous run's commit of this same, non-gitignored
+// config file), this must refresh their "jwks" in place to match —
+// mirroring patchCIBAMTLSConfig's own always-overwrite approach —
+// rather than leave the file alone: skipping would leave the server
+// still registered with the *old* public key while the freshly
+// generated plan signs with a brand-new private key, so every request
+// this client makes fails client assertion verification (confirmed
+// live: "invalid_client: client assertion verification failed" on the
+// very first backchannel authentication request).
 func appendCIBAPingClients(path string, pub1, pub2 jwks, notificationEndpoint1, notificationEndpoint2 string) (clientIDs [2]string, err error) {
 	const clientID1 = conformanceKeyLabelPrefix + "ciba-ping-client-1"
 	const clientID2 = conformanceKeyLabelPrefix + "ciba-ping-client-2"
@@ -1136,15 +1148,31 @@ func appendCIBAPingClients(path string, pub1, pub2 jwks, notificationEndpoint1, 
 		return clientIDs, fmt.Errorf("parse clients: %w", err)
 	}
 
-	for _, c := range clients {
+	newJWKS := map[string]jwks{clientID1: pub1, clientID2: pub2}
+	found := map[string]bool{}
+	for i := range clients {
 		var id string
-		if err := json.Unmarshal(c["id"], &id); err != nil {
+		if err := json.Unmarshal(clients[i]["id"], &id); err != nil {
 			return clientIDs, fmt.Errorf("parse clients[].id: %w", err)
 		}
-		if id == clientID1 {
-			fmt.Printf("ciba-ping: client %q already present in %s, leaving clients alone\n", clientID1, path)
-			return clientIDs, nil
+		pub, ok := newJWKS[id]
+		if !ok {
+			continue
 		}
+		encoded, err := json.Marshal(pub)
+		if err != nil {
+			return clientIDs, err
+		}
+		clients[i]["jwks"] = encoded
+		found[id] = true
+	}
+
+	switch {
+	case found[clientID1] && found[clientID2]:
+		fmt.Printf("ciba-ping: clients already present in %s, refreshed jwks to match the freshly generated plan\n", path)
+		return clientIDs, writeCIBAConfigClients(path, top, clients)
+	case found[clientID1] || found[clientID2]:
+		return clientIDs, fmt.Errorf("found only one of %q/%q in %s", clientID1, clientID2, path)
 	}
 
 	callback := "https://localhost.emobix.co.uk:8443/test/a/gofapi-ciba-ping/callback"
@@ -1189,18 +1217,26 @@ func appendCIBAPingClients(path string, pub1, pub2 jwks, notificationEndpoint1, 
 		clients = append(clients, raw)
 	}
 
+	return clientIDs, writeCIBAConfigClients(path, top, clients)
+}
+
+// writeCIBAConfigClients re-serializes top's "clients" array from
+// clients and writes the result back to path — the common tail shared
+// by appendCIBAPingClients' refresh-in-place and append-new-clients
+// branches.
+func writeCIBAConfigClients(path string, top map[string]json.RawMessage, clients []map[string]json.RawMessage) error {
 	encodedClients, err := marshalIndentNoEscape(clients)
 	if err != nil {
-		return clientIDs, err
+		return err
 	}
 	top["clients"] = encodedClients
 
 	out, err := marshalIndentNoEscape(top)
 	if err != nil {
-		return clientIDs, err
+		return err
 	}
 	out = append(out, '\n')
-	return clientIDs, os.WriteFile(path, out, 0o644) // #nosec G306 -- this AS's own config.json carries only public keys, meant to be world-readable
+	return os.WriteFile(path, out, 0o644) // #nosec G306 -- this AS's own config.json carries only public keys, meant to be world-readable
 }
 
 // setupCIBAPing covers the CIBA §10.2 ping delivery mode, orthogonal to

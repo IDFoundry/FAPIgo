@@ -57,6 +57,12 @@ const (
 	responseModeJARM  = "jarm"
 )
 
+// errPushedAuthorizationRequestFailed is the shared newError
+// description sendPushedAuthorizationRequest's own retry sequence uses
+// at every call site — the same transport-level failure regardless of
+// which attempt hit it.
+const errPushedAuthorizationRequestFailed = "pushed authorization request failed"
+
 // BeginAuthorization starts a new authorization attempt: it generates
 // state, nonce and a PKCE verifier, builds and signs a request object
 // when Config.Profile requires one, authenticates to and calls the
@@ -185,7 +191,7 @@ func (c *Client) pushAuthorizationRequestPlain(ctx context.Context, params map[s
 	}
 	body, status, _, err := c.postForm(ctx, c.cfg.Endpoints.PushedAuthorizationRequest.String(), par.EncodeForm(formParams), nil)
 	if err != nil {
-		return nil, newError(ErrorInternal, "pushed authorization request failed", err)
+		return nil, newError(ErrorInternal, errPushedAuthorizationRequestFailed, err)
 	}
 	if status != http.StatusCreated && status != http.StatusOK {
 		return nil, parErrorFromResponse(body)
@@ -212,7 +218,7 @@ func (c *Client) pushAuthorizationRequestWithJKT(ctx context.Context, params map
 	}
 	body, status, _, err := c.postForm(ctx, c.cfg.Endpoints.PushedAuthorizationRequest.String(), par.EncodeForm(formParams), nil)
 	if err != nil {
-		return nil, newError(ErrorInternal, "pushed authorization request failed", err)
+		return nil, newError(ErrorInternal, errPushedAuthorizationRequestFailed, err)
 	}
 	if status != http.StatusCreated && status != http.StatusOK {
 		return nil, parErrorFromResponse(body)
@@ -252,9 +258,9 @@ func (c *Client) pushAuthorizationRequestWithDPoPProof(ctx context.Context, para
 
 	body, status, header, err := c.postParRequestWithDPoP(ctx, dpopSigner, &parURL, form, c.cachedDPoPNonce(ctx, asNonceScope))
 	if err != nil {
-		return nil, newError(ErrorInternal, "pushed authorization request failed", err)
+		return nil, newError(ErrorInternal, errPushedAuthorizationRequestFailed, err)
 	}
-	nextNonce := header.Get("DPoP-Nonce")
+	nextNonce := header.Get(dpopNonceHeader)
 	c.cacheDPoPNonce(ctx, asNonceScope, nextNonce)
 	if status == http.StatusCreated || status == http.StatusOK {
 		return body, nil
@@ -269,9 +275,9 @@ func (c *Client) pushAuthorizationRequestWithDPoPProof(ctx context.Context, para
 	}
 	body, status, header, err = c.postParRequestWithDPoP(ctx, dpopSigner, &parURL, retryForm, nextNonce)
 	if err != nil {
-		return nil, newError(ErrorInternal, "pushed authorization request failed", err)
+		return nil, newError(ErrorInternal, errPushedAuthorizationRequestFailed, err)
 	}
-	c.cacheDPoPNonce(ctx, asNonceScope, header.Get("DPoP-Nonce"))
+	c.cacheDPoPNonce(ctx, asNonceScope, header.Get(dpopNonceHeader))
 	if status != http.StatusCreated && status != http.StatusOK {
 		return nil, parErrorFromResponse(body)
 	}

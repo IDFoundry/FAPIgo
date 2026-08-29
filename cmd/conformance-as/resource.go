@@ -14,6 +14,10 @@ import (
 	"github.com/idfoundry/fapigo/storage"
 )
 
+// contentTypeHeader is the HTTP header name every JSON/JWT response
+// this file writes sets.
+const contentTypeHeader = "Content-Type"
+
 // selfIssuerKeySource resolves this same process's own access-token
 // signing key directly from its in-memory keyManager, rather than
 // looping the resource verifier's key lookup back over HTTP to this
@@ -148,11 +152,11 @@ func userinfoHandler(srv *server.Server, verifier *fapires.Verifier, userinfoURL
 				writeResourceErrorRaw(w, http.StatusInternalServerError, "server_error", "failed to sign userinfo response")
 				return
 			}
-			w.Header().Set("Content-Type", "application/jwt")
+			w.Header().Set(contentTypeHeader, "application/jwt")
 			_, _ = w.Write([]byte(signed))
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set(contentTypeHeader, "application/json")
 		_ = json.NewEncoder(w).Encode(body)
 	}
 }
@@ -179,7 +183,7 @@ func writeResourceError(w http.ResponseWriter, err error) {
 // verifier).
 func writeResourceErrorRaw(w http.ResponseWriter, status int, code, description string) {
 	w.Header().Set("WWW-Authenticate", `DPoP error="`+code+`"`)
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(contentTypeHeader, "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"error":             code,

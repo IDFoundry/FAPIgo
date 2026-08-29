@@ -255,7 +255,7 @@ func (c *Client) sendTokenRequest(ctx context.Context, dpopSigner crypto.Signer,
 	if c.cfg.SenderConstrain == storage.SenderConstrainMTLS {
 		body, status, _, err := c.postForm(ctx, tokenURL.String(), form, nil)
 		if err != nil {
-			return nil, newError(ErrorInternal, "token request failed", err)
+			return nil, newError(ErrorInternal, errTokenRequestFailed, err)
 		}
 		if status != http.StatusOK {
 			return nil, parErrorFromResponse(body)
@@ -264,9 +264,9 @@ func (c *Client) sendTokenRequest(ctx context.Context, dpopSigner crypto.Signer,
 	}
 	body, status, header, err := c.postTokenRequestWithDPoP(ctx, dpopSigner, tokenURL, form, c.cachedDPoPNonce(ctx, asNonceScope))
 	if err != nil {
-		return nil, newError(ErrorInternal, "token request failed", err)
+		return nil, newError(ErrorInternal, errTokenRequestFailed, err)
 	}
-	nextNonce := header.Get("DPoP-Nonce")
+	nextNonce := header.Get(dpopNonceHeader)
 	c.cacheDPoPNonce(ctx, asNonceScope, nextNonce)
 	if status == http.StatusOK {
 		return body, nil
@@ -281,9 +281,9 @@ func (c *Client) sendTokenRequest(ctx context.Context, dpopSigner crypto.Signer,
 	}
 	body, status, header, err = c.postTokenRequestWithDPoP(ctx, dpopSigner, tokenURL, retryForm, nextNonce)
 	if err != nil {
-		return nil, newError(ErrorInternal, "token request failed", err)
+		return nil, newError(ErrorInternal, errTokenRequestFailed, err)
 	}
-	c.cacheDPoPNonce(ctx, asNonceScope, header.Get("DPoP-Nonce"))
+	c.cacheDPoPNonce(ctx, asNonceScope, header.Get(dpopNonceHeader))
 	if status != http.StatusOK {
 		return nil, parErrorFromResponse(body)
 	}

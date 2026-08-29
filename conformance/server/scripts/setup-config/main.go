@@ -103,11 +103,52 @@ const conformanceKeyLabelPrefix = "gofapi-conformance-"
 // client alike.
 const fullScope = "openid accounts offline_access"
 
+// wellKnownConfigPath, userinfoPath, backchannelApprovalPath, and
+// cibaApprovalQuery are path/query fragments every profile's own
+// setupXxx function builds a URL from — shared here rather than
+// repeated per profile to avoid a typo diverging one profile's URL
+// shape from the others'.
+const (
+	wellKnownConfigPath     = "/.well-known/openid-configuration"
+	userinfoPath            = "/userinfo"
+	backchannelApprovalPath = "/backchannel-approve"
+	cibaApprovalQuery       = "?auth_req_id={auth_req_id}&action={action}"
+)
+
+// conformanceTestSubject and silverACR are the fixed subject/ACR value
+// every CIBA-capable profile's plan uses to drive its own automated
+// approval — see setupCIBA/setupCIBAMTLS/setupCIBAPing.
+const (
+	conformanceTestSubject = "conformance-test-user"
+	silverACR              = "urn:mace:incommon:iap:silver"
+)
+
+// mtlsSuiteClientCNSuffix/mtlsSuiteClient2CNSuffix name the suite's own
+// throwaway mTLS client certificates (generateMTLSCertKeyPEM's
+// commonName argument) — shared across every senderConstrainMTLS-ish
+// profile (ciba-mtls, ciba-ping, client-auth-mtls, mtls,
+// message-signing-mtls) rather than repeated per profile.
+const (
+	mtlsSuiteClientCNSuffix  = "-suite-client"
+	mtlsSuiteClient2CNSuffix = "-suite-client2"
+)
+
 // issuerURL builds one of this profile's AS URLs — every plan/config
 // field that names one shares the same host:8443 base, just a
 // different path.
 func issuerURL(host, path string) string {
 	return "https://" + host + ":8443" + path
+}
+
+// mtlsURL is issuerURL's RFC 8705 §3 counterpart: the same host, but
+// the mTLS listener's own port (8444) — every senderConstrainMTLS
+// profile's own resource URL needs this, not issuerURL's plain :8443
+// (a client presenting its certificate to the plain listener, which
+// never asks for one, gets a token the resource endpoint's own binding
+// check then rejects — see ARCHITECTURE.md's mtls/message-signing-mtls
+// account).
+func mtlsURL(host, path string) string {
+	return "https://" + host + ":8444" + path
 }
 
 func main() {
@@ -500,13 +541,13 @@ func writePlanConfig(path string, p profile, clientIDs [2]string, rs256ClientID 
 	}
 
 	cfg := planConfig{Alias: p.alias}
-	cfg.Server.DiscoveryURL = issuerURL(p.issuerHost, "/.well-known/openid-configuration")
+	cfg.Server.DiscoveryURL = issuerURL(p.issuerHost, wellKnownConfigPath)
 	if p.senderConstrainMTLS {
-		mtlsCert, mtlsKey, err := generateMTLSCertKeyPEM(p.alias + "-suite-client")
+		mtlsCert, mtlsKey, err := generateMTLSCertKeyPEM(p.alias + mtlsSuiteClientCNSuffix)
 		if err != nil {
 			return fmt.Errorf("generate client1 mtls certificate: %w", err)
 		}
-		mtls2Cert, mtls2Key, err := generateMTLSCertKeyPEM(p.alias + "-suite-client2")
+		mtls2Cert, mtls2Key, err := generateMTLSCertKeyPEM(p.alias + mtlsSuiteClient2CNSuffix)
 		if err != nil {
 			return fmt.Errorf("generate client2 mtls certificate: %w", err)
 		}
@@ -522,9 +563,9 @@ func writePlanConfig(path string, p profile, clientIDs [2]string, rs256ClientID 
 		// resource endpoint otherwise rejects the mTLS-bound access
 		// token's certificate binding check with 400, since the
 		// connection carries no client certificate at all on :8443.
-		cfg.Resource.ResourceURL = "https://" + p.issuerHost + ":8444/userinfo"
+		cfg.Resource.ResourceURL = mtlsURL(p.issuerHost, userinfoPath)
 	} else {
-		cfg.Resource.ResourceURL = issuerURL(p.issuerHost, "/userinfo")
+		cfg.Resource.ResourceURL = issuerURL(p.issuerHost, userinfoPath)
 	}
 	cfg.Browser = []browserBlock{consentBlock}
 	cfg.Override = map[string]overrideEntry{
@@ -654,17 +695,17 @@ func setupCIBA(dir string) error {
 	}
 
 	cfg := cibaPlan{Alias: p.alias}
-	cfg.Server.DiscoveryURL = issuerURL(p.issuerHost, "/.well-known/openid-configuration")
+	cfg.Server.DiscoveryURL = issuerURL(p.issuerHost, wellKnownConfigPath)
 	cfg.Client = cibaClient{
 		ClientID: clientIDs[0], Scope: fullScope, JWKS: priv1, DPoPSigningAlg: "ES256",
-		HintType: "login_hint", HintValue: "conformance-test-user",
+		HintType: "login_hint", HintValue: conformanceTestSubject,
 	}
 	cfg.Client2 = cibaClient2{
 		ClientID: clientIDs[1], Scope: fullScope, JWKS: priv2, DPoPSigningAlg: "ES256",
-		ACRValue: "urn:mace:incommon:iap:silver",
+		ACRValue: silverACR,
 	}
-	cfg.Resource.ResourceURL = issuerURL(p.issuerHost, "/userinfo")
-	cfg.AutomatedCibaApprovalURL = issuerURL(p.issuerHost, "/backchannel-approve") + "?auth_req_id={auth_req_id}&action={action}"
+	cfg.Resource.ResourceURL = issuerURL(p.issuerHost, userinfoPath)
+	cfg.AutomatedCibaApprovalURL = issuerURL(p.issuerHost, backchannelApprovalPath) + cibaApprovalQuery
 
 	out, err := marshalIndentNoEscape(cfg)
 	if err != nil {
@@ -852,11 +893,11 @@ func setupCIBAMTLS(dir string) error {
 	if err != nil {
 		return fmt.Errorf("generate client2 key: %w", err)
 	}
-	mtlsCert, mtlsKey, err := generateMTLSCertKeyPEM(alias + "-suite-client")
+	mtlsCert, mtlsKey, err := generateMTLSCertKeyPEM(alias + mtlsSuiteClientCNSuffix)
 	if err != nil {
 		return fmt.Errorf("generate client1 mtls certificate: %w", err)
 	}
-	mtls2Cert, mtls2Key, err := generateMTLSCertKeyPEM(alias + "-suite-client2")
+	mtls2Cert, mtls2Key, err := generateMTLSCertKeyPEM(alias + mtlsSuiteClient2CNSuffix)
 	if err != nil {
 		return fmt.Errorf("generate client2 mtls certificate: %w", err)
 	}
@@ -868,23 +909,23 @@ func setupCIBAMTLS(dir string) error {
 	}
 
 	cfg := cibaMTLSPlan{Alias: alias}
-	cfg.Server.DiscoveryURL = issuerURL(issuerHost, "/.well-known/openid-configuration")
+	cfg.Server.DiscoveryURL = issuerURL(issuerHost, wellKnownConfigPath)
 	cfg.MTLS = mtlsBlock{Cert: mtlsCert, Key: mtlsKey}
 	cfg.MTLS2 = mtlsBlock{Cert: mtls2Cert, Key: mtls2Key}
 	cfg.Client = cibaMTLSClient{
 		ClientID: clientIDs[0], Scope: fullScope, JWKS: priv1,
-		HintType: "login_hint", HintValue: "conformance-test-user",
+		HintType: "login_hint", HintValue: conformanceTestSubject,
 	}
 	cfg.Client2 = cibaMTLSClient2{
 		ClientID: clientIDs[1], Scope: fullScope, JWKS: priv2,
-		ACRValue: "urn:mace:incommon:iap:silver",
+		ACRValue: silverACR,
 	}
 	// Port 8444, not 8443: RFC 8705 sender-constraining means this
 	// resource call must go over the mTLS listener itself — the plain
 	// listener has no way to bind the access token to this connection's
 	// certificate at all.
-	cfg.Resource.ResourceURL = "https://" + issuerHost + ":8444/userinfo"
-	cfg.AutomatedCibaApprovalURL = issuerURL(issuerHost, "/backchannel-approve") + "?auth_req_id={auth_req_id}&action={action}"
+	cfg.Resource.ResourceURL = mtlsURL(issuerHost, userinfoPath)
+	cfg.AutomatedCibaApprovalURL = issuerURL(issuerHost, backchannelApprovalPath) + cibaApprovalQuery
 
 	out, err := marshalIndentNoEscape(cfg)
 	if err != nil {
@@ -1036,11 +1077,11 @@ func setupClientAuthMTLS(dir string) error {
 	const alias = "gofapi-client-auth-mtls"
 	const issuerHost = "conformance-as-client-auth-mtls"
 
-	cert1PEM, key1PEM, err := generateMTLSCertKeyPEM(alias + "-suite-client")
+	cert1PEM, key1PEM, err := generateMTLSCertKeyPEM(alias + mtlsSuiteClientCNSuffix)
 	if err != nil {
 		return fmt.Errorf("generate client1 mtls certificate: %w", err)
 	}
-	cert2PEM, key2PEM, err := generateMTLSCertKeyPEM(alias + "-suite-client2")
+	cert2PEM, key2PEM, err := generateMTLSCertKeyPEM(alias + mtlsSuiteClient2CNSuffix)
 	if err != nil {
 		return fmt.Errorf("generate client2 mtls certificate: %w", err)
 	}
@@ -1078,12 +1119,12 @@ func setupClientAuthMTLS(dir string) error {
 	consentBlock := browserBlock{Match: authorizeURL, Tasks: []browserTask{consentTask}}
 
 	cfg := clientAuthMTLSPlan{Alias: alias}
-	cfg.Server.DiscoveryURL = issuerURL(issuerHost, "/.well-known/openid-configuration")
+	cfg.Server.DiscoveryURL = issuerURL(issuerHost, wellKnownConfigPath)
 	cfg.MTLS = mtlsBlock{Cert: cert1PEM, Key: key1PEM}
 	cfg.MTLS2 = mtlsBlock{Cert: cert2PEM, Key: key2PEM}
 	cfg.Client = clientAuthMTLSClient{ClientID: clientIDs[0], Scope: fullScope, JWKS: priv1, DPoPSigningAlg: "ES256"}
 	cfg.Client2 = clientAuthMTLSClient{ClientID: clientIDs[1], Scope: fullScope, JWKS: priv2, DPoPSigningAlg: "ES256"}
-	cfg.Resource.ResourceURL = issuerURL(issuerHost, "/userinfo")
+	cfg.Resource.ResourceURL = issuerURL(issuerHost, userinfoPath)
 	cfg.Browser = []browserBlock{consentBlock}
 	cfg.Override = map[string]overrideEntry{
 		"fapi2-security-profile-final-user-rejects-authentication": {
@@ -1318,11 +1359,11 @@ func setupCIBAPing(dir string) error {
 	if err != nil {
 		return fmt.Errorf("generate client2 key: %w", err)
 	}
-	mtlsCert, mtlsKey, err := generateMTLSCertKeyPEM(alias + "-suite-client")
+	mtlsCert, mtlsKey, err := generateMTLSCertKeyPEM(alias + mtlsSuiteClientCNSuffix)
 	if err != nil {
 		return fmt.Errorf("generate client1 mtls certificate: %w", err)
 	}
-	mtls2Cert, mtls2Key, err := generateMTLSCertKeyPEM(alias + "-suite-client2")
+	mtls2Cert, mtls2Key, err := generateMTLSCertKeyPEM(alias + mtlsSuiteClient2CNSuffix)
 	if err != nil {
 		return fmt.Errorf("generate client2 mtls certificate: %w", err)
 	}
@@ -1336,22 +1377,22 @@ func setupCIBAPing(dir string) error {
 	}
 
 	cfg := cibaPingPlan{Alias: alias}
-	cfg.Server.DiscoveryURL = issuerURL(issuerHost, "/.well-known/openid-configuration")
+	cfg.Server.DiscoveryURL = issuerURL(issuerHost, wellKnownConfigPath)
 	cfg.MTLS = mtlsBlock{Cert: mtlsCert, Key: mtlsKey}
 	cfg.MTLS2 = mtlsBlock{Cert: mtls2Cert, Key: mtls2Key}
 	cfg.Client = cibaPingClient{
 		ClientID: clientIDs[0], Scope: fullScope, JWKS: priv1JWKS,
-		HintType: "login_hint", HintValue: "conformance-test-user",
+		HintType: "login_hint", HintValue: conformanceTestSubject,
 	}
 	cfg.Client2 = cibaPingClient2{
 		ClientID: clientIDs[1], Scope: fullScope, JWKS: priv2JWKS,
-		ACRValue: "urn:mace:incommon:iap:silver",
+		ACRValue: silverACR,
 	}
 	// Port 8444, not 8443: RFC 8705 sender-constraining means this
 	// resource call must go over the mTLS listener itself — mirrors
 	// setupCIBAMTLS's own identical reasoning.
-	cfg.Resource.ResourceURL = "https://" + issuerHost + ":8444/userinfo"
-	cfg.AutomatedCibaApprovalURL = issuerURL(issuerHost, "/backchannel-approve") + "?auth_req_id={auth_req_id}&action={action}"
+	cfg.Resource.ResourceURL = mtlsURL(issuerHost, userinfoPath)
+	cfg.AutomatedCibaApprovalURL = issuerURL(issuerHost, backchannelApprovalPath) + cibaApprovalQuery
 
 	out, err := marshalIndentNoEscape(cfg)
 	if err != nil {

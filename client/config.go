@@ -338,4 +338,19 @@ type Config struct {
 	// type directly rather than duplicating it, the same precedent
 	// SenderConstrain itself establishes.
 	ClientAuthMethod storage.ClientAuthMethod
+
+	// BackchannelTokenDeliveryMode selects how this client expects to
+	// learn a CIBA backchannel authentication request's decision —
+	// storage.BackchannelTokenDeliveryModePoll (the default, zero
+	// value) means this client polls the token endpoint itself
+	// (PollBackchannelAuthentication), exactly as this package has
+	// always done. storage.BackchannelTokenDeliveryModePing additionally
+	// makes BeginBackchannelAuthentication generate and send a
+	// client_notification_token, exposed on the returned
+	// BackchannelAuthenticationSession for the caller to correlate an
+	// incoming ping callback (CIBA §10.2) back to the right session —
+	// this package never receives that callback itself, since it has no
+	// HTTP server of its own. Reuses storage's enum type directly, the
+	// same precedent SenderConstrain/ClientAuthMethod establish.
+	BackchannelTokenDeliveryMode storage.BackchannelTokenDeliveryMode
 }

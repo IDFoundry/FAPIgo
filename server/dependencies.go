@@ -96,4 +96,12 @@ type Dependencies struct {
 	// is set; nil otherwise — CIBA is an entirely optional capability,
 	// like ID token encryption's ClientEncryptionKeys.
 	Backchannel storage.BackchannelAuthenticationStore
+
+	// BackchannelNotifier dispatches a CIBA §10.2 ping notification once
+	// a backchannel authentication request reaches a decision. Required
+	// exactly when Config.Endpoints.BackchannelAuthentication is set —
+	// the same condition Backchannel itself is required under — pass a
+	// real implementation, or NoBackchannelNotifications{} to explicitly
+	// decline (see that type's own doc comment for why).
+	BackchannelNotifier BackchannelNotifier
 }

@@ -491,17 +491,18 @@ func TestBeginBackchannelAuthenticationCertClientAuthReachesPeerCertificate(t *t
 	}
 	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
 	deps := server.Dependencies{
-		Clients:      &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
-		Transactions: &fakeTransactionStore{},
-		Grants:       &fakeGrantStore{},
-		Replay:       &fakeReplayStore{},
-		ClientKeys:   &fakeClientKeySource{},
-		Keys:         serverKeyManager,
-		AccessTokens: server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
-		Revocation:   server.NoRevocation{},
-		Clock:        fixedClock{now: now},
-		Random:       rand.Reader,
-		Backchannel:  memstore.NewBackchannelAuthenticationStore(),
+		Clients:             &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
+		Transactions:        &fakeTransactionStore{},
+		Grants:              &fakeGrantStore{},
+		Replay:              &fakeReplayStore{},
+		ClientKeys:          &fakeClientKeySource{},
+		Keys:                serverKeyManager,
+		AccessTokens:        server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:          server.NoRevocation{},
+		Clock:               fixedClock{now: now},
+		Random:              rand.Reader,
+		Backchannel:         memstore.NewBackchannelAuthenticationStore(),
+		BackchannelNotifier: server.NoBackchannelNotifications{},
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {

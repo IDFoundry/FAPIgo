@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	fapi "github.com/idfoundry/fapigo"
 )
 
 // This file is a reusable contract test suite, not a _test.go file,
@@ -884,6 +886,60 @@ func TestBackchannelAuthenticationStoreContract(t *testing.T, factory func() Bac
 			len(got.Scope) != 2 || got.ACR != "acr-1" || !got.AuthTime.Equal(authTime) ||
 			got.DPoPJKT != record.DPoPJKT || string(got.TokenClaims["custom_claim"]) != `"value"` {
 			t.Fatalf("PollBackchannelAuthentication returned %+v, want fields matching decision+record", got)
+		}
+	})
+
+	// DecideBackchannelAuthentication's own return value must round-trip
+	// DeliveryMode/ClientNotificationToken straight from the record
+	// CreateBackchannelAuthentication persisted — the caller needs both
+	// to dispatch a CIBA §10.2 ping notification without a second round
+	// trip to this store.
+	t.Run("DecideReturnsPingDeliveryModeAndNotificationTokenFromRecord", func(t *testing.T) {
+		store := factory()
+		ctx := context.Background()
+		record := newRecord("auth-req-ping-1", "handle-ping-1")
+		record.DeliveryMode = "ping"
+		record.ClientNotificationToken = fapi.NewSecret("notification-token-1")
+		if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
+			t.Fatalf("CreateBackchannelAuthentication: %v", err)
+		}
+		decided, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
+			HandleHash: record.HandleHash, Status: BackchannelAuthenticationDenied,
+		})
+		if err != nil {
+			t.Fatalf("DecideBackchannelAuthentication: %v", err)
+		}
+		if decided.ClientID != record.ClientID {
+			t.Fatalf("ClientID = %q, want %q", decided.ClientID, record.ClientID)
+		}
+		if decided.DeliveryMode != "ping" {
+			t.Fatalf("DeliveryMode = %q, want %q", decided.DeliveryMode, "ping")
+		}
+		if decided.ClientNotificationToken.Reveal() != "notification-token-1" {
+			t.Fatalf("ClientNotificationToken = %q, want %q", decided.ClientNotificationToken.Reveal(), "notification-token-1")
+		}
+	})
+
+	// The poll-mode default (newRecord's own shape) round-trips too —
+	// an empty ClientNotificationToken, not just a non-empty one.
+	t.Run("DecideReturnsPollDeliveryModeAndEmptyNotificationTokenFromRecord", func(t *testing.T) {
+		store := factory()
+		ctx := context.Background()
+		record := newRecord("auth-req-poll-1", "handle-poll-1")
+		if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
+			t.Fatalf("CreateBackchannelAuthentication: %v", err)
+		}
+		decided, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
+			HandleHash: record.HandleHash, Status: BackchannelAuthenticationDenied,
+		})
+		if err != nil {
+			t.Fatalf("DecideBackchannelAuthentication: %v", err)
+		}
+		if decided.DeliveryMode != "poll" {
+			t.Fatalf("DeliveryMode = %q, want %q", decided.DeliveryMode, "poll")
+		}
+		if decided.ClientNotificationToken.Reveal() != "" {
+			t.Fatalf("ClientNotificationToken = %q, want empty", decided.ClientNotificationToken.Reveal())
 		}
 	})
 

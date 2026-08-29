@@ -111,6 +111,26 @@ type DecideBackchannelAuthentication struct {
 	Reason string
 }
 
+// DecidedBackchannelAuthentication is returned by a successful
+// DecideBackchannelAuthentication: ClientID for the caller's own audit
+// logging (mirroring CompleteAuthorization's CompletedInteraction.ClientID),
+// plus DeliveryMode and ClientNotificationToken — copied straight from
+// the record NewBackchannelAuthentication originally created — so the
+// caller can dispatch a CIBA §10.2 ping notification without a second
+// round trip to this store.
+type DecidedBackchannelAuthentication struct {
+	ClientID fapi.ClientID
+
+	// DeliveryMode is "poll" or "ping", mirroring
+	// NewBackchannelAuthentication.DeliveryMode exactly.
+	DeliveryMode string
+
+	// ClientNotificationToken is "" for a "poll" DeliveryMode; for
+	// "ping", it's the bearer token the caller must present to the
+	// client's own notification endpoint.
+	ClientNotificationToken fapi.Secret
+}
+
 // PollBackchannelAuthentication is the input to
 // BackchannelAuthenticationStore.PollBackchannelAuthentication.
 type PollBackchannelAuthentication struct {
@@ -177,12 +197,11 @@ type BackchannelAuthenticationStore interface {
 
 	// DecideBackchannelAuthentication atomically records the terminal
 	// outcome of a pending request identified by decision.HandleHash,
-	// returning that request's ClientID for the caller's own audit
-	// logging (mirroring CompleteAuthorization's CompletedInteraction.ClientID).
-	// A second call for the same HandleHash must fail — exactly one
-	// decision may ever be recorded, the same way CompleteAuthorization's
-	// interaction handle is single-use.
-	DecideBackchannelAuthentication(ctx context.Context, decision DecideBackchannelAuthentication) (fapi.ClientID, error)
+	// returning DecidedBackchannelAuthentication (see its own doc
+	// comment). A second call for the same HandleHash must fail —
+	// exactly one decision may ever be recorded, the same way
+	// CompleteAuthorization's interaction handle is single-use.
+	DecideBackchannelAuthentication(ctx context.Context, decision DecideBackchannelAuthentication) (DecidedBackchannelAuthentication, error)
 
 	// PollBackchannelAuthentication atomically:
 	//   - returns *BackchannelAuthenticationExpiredError once ExpiresAt

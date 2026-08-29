@@ -340,3 +340,105 @@ func TestNewRegisteredClientUserInfoEncryptionConfigured(t *testing.T) {
 		t.Fatalf("IDTokenEncryption() = (%v, %v, %v), want (0, 0, false)", idKeyMgmt, idContentEnc, idEnabled)
 	}
 }
+
+// TestNewRegisteredClientBackchannelTokenDeliveryModeDefaultsToPoll
+// confirms the zero value keeps every client config that predates this
+// field behaving exactly as before.
+func TestNewRegisteredClientBackchannelTokenDeliveryModeDefaultsToPoll(t *testing.T) {
+	c, err := NewRegisteredClient(RegisteredClientConfig{
+		ID:                       "client-123",
+		RedirectURIs:             []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+		ClientAssertionAlgorithm: fapi.ES256,
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+	if c.BackchannelTokenDeliveryMode() != BackchannelTokenDeliveryModePoll {
+		t.Fatalf("BackchannelTokenDeliveryMode() = %v, want BackchannelTokenDeliveryModePoll", c.BackchannelTokenDeliveryMode())
+	}
+	if !c.BackchannelClientNotificationEndpoint().IsZero() {
+		t.Fatalf("BackchannelClientNotificationEndpoint() = %v, want zero", c.BackchannelClientNotificationEndpoint())
+	}
+}
+
+func TestNewRegisteredClientBackchannelTokenDeliveryModePollRejectsNotificationEndpoint(t *testing.T) {
+	endpoint, err := fapi.ParseEndpointURL("https://rp.example/ciba/notify")
+	if err != nil {
+		t.Fatalf("ParseEndpointURL: %v", err)
+	}
+	_, err = NewRegisteredClient(RegisteredClientConfig{
+		ID:                                    "client-123",
+		RedirectURIs:                          []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+		ClientAssertionAlgorithm:              fapi.ES256,
+		BackchannelClientNotificationEndpoint: endpoint,
+	})
+	if err == nil {
+		t.Fatalf("NewRegisteredClient(poll mode with notification endpoint) = nil error, want error")
+	}
+}
+
+func TestNewRegisteredClientBackchannelTokenDeliveryModePingConfigured(t *testing.T) {
+	endpoint, err := fapi.ParseEndpointURL("https://rp.example/ciba/notify")
+	if err != nil {
+		t.Fatalf("ParseEndpointURL: %v", err)
+	}
+	c, err := NewRegisteredClient(RegisteredClientConfig{
+		ID:                       "client-123",
+		RedirectURIs:             []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+		ClientAssertionAlgorithm: fapi.ES256,
+		BackchannelAuthenticationRequestAlgorithm: fapi.ES256,
+		BackchannelTokenDeliveryMode:              BackchannelTokenDeliveryModePing,
+		BackchannelClientNotificationEndpoint:     endpoint,
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+	if c.BackchannelTokenDeliveryMode() != BackchannelTokenDeliveryModePing {
+		t.Fatalf("BackchannelTokenDeliveryMode() = %v, want BackchannelTokenDeliveryModePing", c.BackchannelTokenDeliveryMode())
+	}
+	if c.BackchannelClientNotificationEndpoint().String() != endpoint.String() {
+		t.Fatalf("BackchannelClientNotificationEndpoint() = %v, want %v", c.BackchannelClientNotificationEndpoint(), endpoint)
+	}
+}
+
+func TestNewRegisteredClientBackchannelTokenDeliveryModePingRequiresNotificationEndpoint(t *testing.T) {
+	_, err := NewRegisteredClient(RegisteredClientConfig{
+		ID:                       "client-123",
+		RedirectURIs:             []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+		ClientAssertionAlgorithm: fapi.ES256,
+		BackchannelAuthenticationRequestAlgorithm: fapi.ES256,
+		BackchannelTokenDeliveryMode:              BackchannelTokenDeliveryModePing,
+	})
+	if err == nil {
+		t.Fatalf("NewRegisteredClient(ping mode with no notification endpoint) = nil error, want error")
+	}
+}
+
+func TestNewRegisteredClientBackchannelTokenDeliveryModePingRequiresCIBAPermitted(t *testing.T) {
+	endpoint, err := fapi.ParseEndpointURL("https://rp.example/ciba/notify")
+	if err != nil {
+		t.Fatalf("ParseEndpointURL: %v", err)
+	}
+	_, err = NewRegisteredClient(RegisteredClientConfig{
+		ID:                                    "client-123",
+		RedirectURIs:                          []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+		ClientAssertionAlgorithm:              fapi.ES256,
+		BackchannelTokenDeliveryMode:          BackchannelTokenDeliveryModePing,
+		BackchannelClientNotificationEndpoint: endpoint,
+	})
+	if err == nil {
+		t.Fatalf("NewRegisteredClient(ping mode, no CIBA opt-in) = nil error, want error")
+	}
+}
+
+func TestNewRegisteredClientRejectsInvalidBackchannelTokenDeliveryMode(t *testing.T) {
+	_, err := NewRegisteredClient(RegisteredClientConfig{
+		ID:                           "client-123",
+		RedirectURIs:                 []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+		ClientAssertionAlgorithm:     fapi.ES256,
+		BackchannelTokenDeliveryMode: BackchannelTokenDeliveryMode(99),
+	})
+	if err == nil {
+		t.Fatalf("NewRegisteredClient(invalid backchannel token delivery mode) = nil error, want error")
+	}
+}

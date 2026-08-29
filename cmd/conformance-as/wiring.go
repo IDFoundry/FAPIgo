@@ -188,6 +188,13 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 	}
 	if ciba {
 		srvDeps.Backchannel = memstore.NewBackchannelAuthenticationStore()
+		// This binary registers every CIBA client
+		// storage.BackchannelTokenDeliveryModePoll (the default) — see
+		// resolveClient in config.go — so there is nothing for a real
+		// BackchannelNotifier to ever dispatch; declining explicitly
+		// satisfies server.New's requirement without pretending to
+		// support ping mode this binary doesn't exercise.
+		srvDeps.BackchannelNotifier = server.NoBackchannelNotifications{}
 	}
 	srv, err := server.New(srvCfg, srvDeps)
 	if err != nil {

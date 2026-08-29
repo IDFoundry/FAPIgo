@@ -66,13 +66,32 @@ func (s *Server) CompleteBackchannelAuthentication(ctx context.Context, req Comp
 		return err
 	}
 
-	clientID, err := s.deps.Backchannel.DecideBackchannelAuthentication(ctx, decision)
+	decided, err := s.deps.Backchannel.DecideBackchannelAuthentication(ctx, decision)
 	if err != nil {
 		wrapped := newError(ErrorInvalidRequest, 400, "backchannel authentication handle is invalid, expired, or already decided", err)
 		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, "", AuditOutcomeFailure, string(wrapped.Code()))
 		return wrapped
 	}
 
-	s.audit(ctx, AuditEventCompleteBackchannelAuthentication, clientID, AuditOutcomeSuccess, "")
+	// Ping notification dispatch is unconditional on Status — a client
+	// registered for ping delivery needs to know "go poll now"
+	// regardless of whether the decision was Approved, Denied or
+	// AuthenticationFailed, and best-effort: CIBA §10.3's backup-polling
+	// guarantee means a missed or failed notification never leaves the
+	// client stuck, so its error is never allowed to fail this call
+	// (mirrors the existing _ = s.deps.Revocation.Revoke(...) precedent
+	// in server/token.go).
+	if decided.DeliveryMode == "ping" {
+		if regClient, resolveErr := s.deps.Clients.ResolveClient(ctx, decided.ClientID); resolveErr == nil {
+			if endpoint := regClient.BackchannelClientNotificationEndpoint(); !endpoint.IsZero() {
+				_ = s.deps.BackchannelNotifier.Notify(ctx, BackchannelNotification{
+					Endpoint:                endpoint,
+					ClientNotificationToken: decided.ClientNotificationToken,
+				})
+			}
+		}
+	}
+
+	s.audit(ctx, AuditEventCompleteBackchannelAuthentication, decided.ClientID, AuditOutcomeSuccess, "")
 	return nil
 }

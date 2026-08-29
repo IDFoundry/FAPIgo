@@ -82,15 +82,15 @@ func (s *BackchannelAuthenticationStore) CreateBackchannelAuthentication(_ conte
 
 // DecideBackchannelAuthentication implements
 // storage.BackchannelAuthenticationStore.
-func (s *BackchannelAuthenticationStore) DecideBackchannelAuthentication(_ context.Context, decision storage.DecideBackchannelAuthentication) (fapi.ClientID, error) {
+func (s *BackchannelAuthenticationStore) DecideBackchannelAuthentication(_ context.Context, decision storage.DecideBackchannelAuthentication) (storage.DecidedBackchannelAuthentication, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rec, ok := s.byHandleHash[decision.HandleHash]
 	if !ok {
-		return "", fmt.Errorf("memstore: no such backchannel authentication handle")
+		return storage.DecidedBackchannelAuthentication{}, fmt.Errorf("memstore: no such backchannel authentication handle")
 	}
 	if rec.status != storage.BackchannelAuthenticationPending {
-		return "", fmt.Errorf("memstore: backchannel authentication request already decided")
+		return storage.DecidedBackchannelAuthentication{}, fmt.Errorf("memstore: backchannel authentication request already decided")
 	}
 	rec.status = decision.Status
 	rec.subject = decision.Subject
@@ -99,7 +99,11 @@ func (s *BackchannelAuthenticationStore) DecideBackchannelAuthentication(_ conte
 	rec.acr = decision.ACR
 	rec.amr = cloneStrings(decision.AMR)
 	rec.reason = decision.Reason
-	return rec.clientID, nil
+	return storage.DecidedBackchannelAuthentication{
+		ClientID:                rec.clientID,
+		DeliveryMode:            rec.deliveryMode,
+		ClientNotificationToken: rec.clientNotificationToken,
+	}, nil
 }
 
 // PollBackchannelAuthentication implements

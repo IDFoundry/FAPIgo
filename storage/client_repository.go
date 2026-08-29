@@ -55,6 +55,28 @@ const (
 	ClientAuthMethodTLSClientAuth
 )
 
+// BackchannelTokenDeliveryMode is the closed set of mechanisms this
+// server uses to tell a registered client that a CIBA backchannel
+// authentication request has reached a decision (CIBA Core 1.0 §7–§10).
+// FAPI-CIBA permits only poll and ping — push is not implemented.
+type BackchannelTokenDeliveryMode uint8
+
+const (
+	// BackchannelTokenDeliveryModePoll means the client itself polls
+	// the token endpoint on a schedule (CIBA §10.3) — the zero value,
+	// so every registered client that predates this field keeps
+	// behaving exactly as it did before.
+	BackchannelTokenDeliveryModePoll BackchannelTokenDeliveryMode = iota
+
+	// BackchannelTokenDeliveryModePing means this server proactively
+	// notifies the client's own BackchannelClientNotificationEndpoint
+	// once a decision is reached (CIBA §10.2), so the client can poll
+	// immediately instead of on a fixed schedule. The client's backup
+	// polling (CIBA §10.3) remains valid regardless — a missed or
+	// failed notification is never itself an error condition.
+	BackchannelTokenDeliveryModePing
+)
+
 // RegisteredClient is the exact, validated configuration of one
 // registered OAuth client. It is immutable and can only be constructed
 // through NewRegisteredClient — a caller cannot return arbitrary
@@ -77,6 +99,8 @@ type RegisteredClient struct {
 	userInfoEncryptionContentEncryption fapi.ContentEncryptionAlgorithm
 
 	backchannelAuthenticationRequestAlgorithm fapi.SignatureAlgorithm
+	backchannelTokenDeliveryMode              BackchannelTokenDeliveryMode
+	backchannelClientNotificationEndpoint     fapi.URL
 }
 
 // RegisteredClientConfig is the input to NewRegisteredClient.
@@ -155,6 +179,21 @@ type RegisteredClientConfig struct {
 	// flag.
 	BackchannelAuthenticationRequestAlgorithm fapi.SignatureAlgorithm
 
+	// BackchannelTokenDeliveryMode selects how this server tells this
+	// client a CIBA decision was reached — BackchannelTokenDeliveryModePoll
+	// (the zero value/default) or BackchannelTokenDeliveryModePing.
+	// Meaningless (and must stay the zero value) for a client not
+	// permitted to use CIBA at all — see
+	// BackchannelAuthenticationRequestAlgorithm's own doc comment.
+	BackchannelTokenDeliveryMode BackchannelTokenDeliveryMode
+
+	// BackchannelClientNotificationEndpoint is where this server POSTs
+	// a bearer-authenticated notification once a CIBA decision is
+	// reached (CIBA §10.2). Required exactly when
+	// BackchannelTokenDeliveryMode is BackchannelTokenDeliveryModePing;
+	// must be left unset for poll mode, since nothing would ever use it.
+	BackchannelClientNotificationEndpoint fapi.URL
+
 	AllowedScopes []string
 }
 
@@ -191,6 +230,21 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 	}
 	if cfg.BackchannelAuthenticationRequestAlgorithm != 0 && !cfg.BackchannelAuthenticationRequestAlgorithm.IsValid() {
 		return RegisteredClient{}, fmt.Errorf("storage: client %q has an invalid backchannel authentication request algorithm", cfg.ID)
+	}
+	switch cfg.BackchannelTokenDeliveryMode {
+	case BackchannelTokenDeliveryModePoll:
+		if !cfg.BackchannelClientNotificationEndpoint.IsZero() {
+			return RegisteredClient{}, fmt.Errorf("storage: client %q must not set BackchannelClientNotificationEndpoint for poll delivery", cfg.ID)
+		}
+	case BackchannelTokenDeliveryModePing:
+		if cfg.BackchannelAuthenticationRequestAlgorithm == 0 {
+			return RegisteredClient{}, fmt.Errorf("storage: client %q must be permitted to use CIBA (set BackchannelAuthenticationRequestAlgorithm) to use ping delivery", cfg.ID)
+		}
+		if cfg.BackchannelClientNotificationEndpoint.IsZero() {
+			return RegisteredClient{}, fmt.Errorf("storage: client %q must set BackchannelClientNotificationEndpoint for ping delivery", cfg.ID)
+		}
+	default:
+		return RegisteredClient{}, fmt.Errorf("storage: client %q has an invalid backchannel token delivery mode", cfg.ID)
 	}
 	idTokenEncKeyMgmtSet := cfg.IDTokenEncryptionKeyManagement != 0
 	idTokenEncContentEncSet := cfg.IDTokenEncryptionContentEncryption != 0
@@ -245,6 +299,8 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 		userInfoEncryptionKeyManagement:           cfg.UserInfoEncryptionKeyManagement,
 		userInfoEncryptionContentEncryption:       cfg.UserInfoEncryptionContentEncryption,
 		backchannelAuthenticationRequestAlgorithm: cfg.BackchannelAuthenticationRequestAlgorithm,
+		backchannelTokenDeliveryMode:              cfg.BackchannelTokenDeliveryMode,
+		backchannelClientNotificationEndpoint:     cfg.BackchannelClientNotificationEndpoint,
 	}, nil
 }
 
@@ -319,6 +375,19 @@ func (c RegisteredClient) UserInfoEncryption() (keyManagement fapi.KeyManagement
 // signed with, and whether the client is permitted to use CIBA at all.
 func (c RegisteredClient) BackchannelAuthenticationRequestAlgorithm() (algorithm fapi.SignatureAlgorithm, permitted bool) {
 	return c.backchannelAuthenticationRequestAlgorithm, c.backchannelAuthenticationRequestAlgorithm != 0
+}
+
+// BackchannelTokenDeliveryMode returns how this server tells this
+// client a CIBA decision was reached.
+func (c RegisteredClient) BackchannelTokenDeliveryMode() BackchannelTokenDeliveryMode {
+	return c.backchannelTokenDeliveryMode
+}
+
+// BackchannelClientNotificationEndpoint returns where this server POSTs
+// a bearer-authenticated notification once a CIBA decision is reached,
+// under BackchannelTokenDeliveryModePing.
+func (c RegisteredClient) BackchannelClientNotificationEndpoint() fapi.URL {
+	return c.backchannelClientNotificationEndpoint
 }
 
 // AllowsScope reports whether scope is in this client's registered set

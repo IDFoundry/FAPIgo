@@ -22,6 +22,7 @@ type backchannelRecord struct {
 	requestedUserinfoClaims []string
 	deliveryMode            string
 	clientNotificationToken fapi.Secret
+	authReqID               string
 	dpopJKT                 string
 	pollInterval            time.Duration
 	expiresAt               time.Time
@@ -68,6 +69,7 @@ func (s *BackchannelAuthenticationStore) CreateBackchannelAuthentication(_ conte
 		requestedUserinfoClaims: cloneStrings(record.RequestedUserinfoClaims),
 		deliveryMode:            record.DeliveryMode,
 		clientNotificationToken: record.ClientNotificationToken,
+		authReqID:               record.AuthReqID,
 		dpopJKT:                 record.DPoPJKT,
 		pollInterval:            record.PollInterval,
 		expiresAt:               record.ExpiresAt,
@@ -103,6 +105,7 @@ func (s *BackchannelAuthenticationStore) DecideBackchannelAuthentication(_ conte
 		ClientID:                rec.clientID,
 		DeliveryMode:            rec.deliveryMode,
 		ClientNotificationToken: rec.clientNotificationToken,
+		AuthReqID:               rec.authReqID,
 	}, nil
 }
 

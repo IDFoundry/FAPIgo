@@ -87,6 +87,7 @@ func (s *Server) CompleteBackchannelAuthentication(ctx context.Context, req Comp
 				_ = s.deps.BackchannelNotifier.Notify(ctx, BackchannelNotification{
 					Endpoint:                endpoint,
 					ClientNotificationToken: decided.ClientNotificationToken,
+					AuthReqID:               decided.AuthReqID,
 				})
 			}
 		}

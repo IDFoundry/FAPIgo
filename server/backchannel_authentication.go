@@ -147,14 +147,21 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	// persist.
 	deliveryMode := "poll"
 	var notificationToken fapi.Secret
+	var authReqIDForNotification string
 	if client.BackchannelTokenDeliveryMode() == storage.BackchannelTokenDeliveryModePing {
 		deliveryMode = "ping"
 		tokenValue, _ := jsonStringValue(validated.params["client_notification_token"])
 		notificationToken = fapi.NewSecret(tokenValue)
+		// Retained in the clear (unlike AuthReqIDHash) only under ping —
+		// CIBA §10.2 requires the notification body to carry this value
+		// back later, so it can't be digest-only here, the same
+		// exception ClientNotificationToken's own doc comment explains.
+		authReqIDForNotification = authReqIDRaw
 	}
 
 	if err := s.deps.Backchannel.CreateBackchannelAuthentication(ctx, storage.NewBackchannelAuthentication{
 		AuthReqIDHash:           sha256.Sum256([]byte(authReqIDRaw)),
+		AuthReqID:               authReqIDForNotification,
 		HandleHash:              sha256.Sum256([]byte(handleRaw)),
 		ClientID:                client.ID(),
 		Parameters:              validated.params,
@@ -270,12 +277,9 @@ func (s *Server) checkBackchannelExtensions(params map[string]json.RawMessage) (
 }
 
 // validateBackchannelAuthenticationParameters checks the CIBA-mandated
-// parameters (scope, exactly one identity hint) against client, and
-// checks client_notification_token's presence against exactly what
-// client's own registered BackchannelTokenDeliveryMode requires (CIBA
-// §7.1: required for ping/push, meaningless for poll) — push itself is
-// never supported, since storage.BackchannelTokenDeliveryMode has no
-// value for it.
+// parameters (scope, exactly one identity hint) against client, plus
+// client_notification_token (see validateClientNotificationToken) and
+// binding_message.
 func (s *Server) validateBackchannelAuthenticationParameters(verified verifiedBackchannelRequest, client storage.RegisteredClient) (verifiedBackchannelRequest, *Error) {
 	params := verified.params
 
@@ -301,19 +305,8 @@ func (s *Server) validateBackchannelAuthenticationParameters(verified verifiedBa
 		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "exactly one of login_hint, login_hint_token, or id_token_hint is required", nil)
 	}
 
-	notificationTokenRaw, hasNotificationToken := params["client_notification_token"]
-	switch client.BackchannelTokenDeliveryMode() {
-	case storage.BackchannelTokenDeliveryModePoll:
-		if hasNotificationToken {
-			return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "client_notification_token is not permitted for a client registered for poll delivery", nil)
-		}
-	case storage.BackchannelTokenDeliveryModePing:
-		if !hasNotificationToken {
-			return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "client_notification_token is required for a client registered for ping delivery", nil)
-		}
-		if _, err := jsonStringValue(notificationTokenRaw); err != nil {
-			return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "client_notification_token must be a string", err)
-		}
+	if validateErr := validateClientNotificationToken(params, client); validateErr != nil {
+		return verifiedBackchannelRequest{}, validateErr
 	}
 
 	if raw, ok := params["binding_message"]; ok {
@@ -327,6 +320,29 @@ func (s *Server) validateBackchannelAuthenticationParameters(verified verifiedBa
 	}
 
 	return verified, nil
+}
+
+// validateClientNotificationToken checks client_notification_token's
+// presence against exactly what client's own registered
+// BackchannelTokenDeliveryMode requires (CIBA §7.1: required for
+// ping/push, meaningless for poll) — push itself is never supported,
+// since storage.BackchannelTokenDeliveryMode has no value for it.
+func validateClientNotificationToken(params map[string]json.RawMessage, client storage.RegisteredClient) *Error {
+	notificationTokenRaw, hasNotificationToken := params["client_notification_token"]
+	switch client.BackchannelTokenDeliveryMode() {
+	case storage.BackchannelTokenDeliveryModePoll:
+		if hasNotificationToken {
+			return newError(ErrorInvalidRequest, 400, "client_notification_token is not permitted for a client registered for poll delivery", nil)
+		}
+	case storage.BackchannelTokenDeliveryModePing:
+		if !hasNotificationToken {
+			return newError(ErrorInvalidRequest, 400, "client_notification_token is required for a client registered for ping delivery", nil)
+		}
+		if _, err := jsonStringValue(notificationTokenRaw); err != nil {
+			return newError(ErrorInvalidRequest, 400, "client_notification_token must be a string", err)
+		}
+	}
+	return nil
 }
 
 // maxBindingMessageLength bounds a binding_message to something a real

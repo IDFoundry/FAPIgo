@@ -807,6 +807,9 @@ func TestCompleteBackchannelAuthenticationDispatchesPingNotification(t *testing.
 	if call.ClientNotificationToken.Reveal() != "notify-me-123" {
 		t.Fatalf("ClientNotificationToken = %q, want %q", call.ClientNotificationToken.Reveal(), "notify-me-123")
 	}
+	if call.AuthReqID != required.AuthReqID.String() {
+		t.Fatalf("AuthReqID = %q, want %q (CIBA §10.2 requires the notification body carry it)", call.AuthReqID, required.AuthReqID.String())
+	}
 }
 
 // TestCompleteBackchannelAuthenticationDispatchesPingNotificationOnDenied

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.0](https://github.com/IDFoundry/FAPIgo/compare/v0.18.2...v0.19.0) (2026-08-29)
+
+
+### Features
+
+* add mTLS sender-constrain conformance for baseline and message-signing ([a542f8a](https://github.com/IDFoundry/FAPIgo/commit/a542f8a1042a068ca4f74aba1e60d33ea821392e))
+* add mTLS sender-constrain conformance for baseline and message-signing ([135f2e5](https://github.com/IDFoundry/FAPIgo/commit/135f2e51a596aaf49b265016dca5e39864bc13ee))
+
 ## [0.18.2](https://github.com/IDFoundry/FAPIgo/compare/v0.18.1...v0.18.2) (2026-08-29)
 
 

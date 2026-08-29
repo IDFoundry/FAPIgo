@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.1](https://github.com/IDFoundry/FAPIgo/compare/v0.18.0...v0.18.1) (2026-08-29)
+
+
+### Bug Fixes
+
+* allow ciba-mtls setup-config to tolerate appended ciba-ping clients ([#193](https://github.com/IDFoundry/FAPIgo/issues/193)) ([cd7a1b1](https://github.com/IDFoundry/FAPIgo/commit/cd7a1b10a6fc3abb85331854afc097ac6d2e831e))
+
 ## [0.18.0](https://github.com/IDFoundry/FAPIgo/compare/v0.17.0...v0.18.0) (2026-08-29)
 
 

@@ -895,12 +895,13 @@ func TestBackchannelAuthenticationStoreContract(t *testing.T, factory func() Bac
 	// to dispatch a CIBA §10.2 ping notification without a second round
 	// trip to this store.
 	t.Run("DecideReturnsPingDeliveryModeAndNotificationTokenFromRecord", func(t *testing.T) {
+		const wantAuthReqID = "auth-req-ping-1"
 		store := factory()
 		ctx := context.Background()
-		record := newRecord("auth-req-ping-1", "handle-ping-1")
+		record := newRecord(wantAuthReqID, "handle-ping-1")
 		record.DeliveryMode = "ping"
 		record.ClientNotificationToken = fapi.NewSecret("notification-token-1")
-		record.AuthReqID = "auth-req-ping-1"
+		record.AuthReqID = wantAuthReqID
 		if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
 			t.Fatalf("CreateBackchannelAuthentication: %v", err)
 		}
@@ -919,8 +920,8 @@ func TestBackchannelAuthenticationStoreContract(t *testing.T, factory func() Bac
 		if decided.ClientNotificationToken.Reveal() != "notification-token-1" {
 			t.Fatalf("ClientNotificationToken = %q, want %q", decided.ClientNotificationToken.Reveal(), "notification-token-1")
 		}
-		if decided.AuthReqID != "auth-req-ping-1" {
-			t.Fatalf("AuthReqID = %q, want %q", decided.AuthReqID, "auth-req-ping-1")
+		if decided.AuthReqID != wantAuthReqID {
+			t.Fatalf("AuthReqID = %q, want %q", decided.AuthReqID, wantAuthReqID)
 		}
 	})
 

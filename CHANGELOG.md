@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.18.0](https://github.com/IDFoundry/FAPIgo/compare/v0.17.0...v0.18.0) (2026-08-29)
+
+
+### Features
+
+* add CIBA backchannel authentication (poll mode) ([bb6b447](https://github.com/IDFoundry/FAPIgo/commit/bb6b447afe5779f23fa7f0f33745c1e67200b6e6))
+* add CIBA client-side support (BeginBackchannelAuthentication/PollBackchannelAuthentication) ([929dd7d](https://github.com/IDFoundry/FAPIgo/commit/929dd7d4479f4556a86e7406f51f7d620376ab45))
+* add CIBA ping-mode delivery (OIDC CIBA Core 1.0 §7-§10) ([8885be0](https://github.com/IDFoundry/FAPIgo/commit/8885be05da3577690156c39dbec1bf718f4762fc))
+* add live conformance coverage for RFC 8705 client-auth mTLS ([#186](https://github.com/IDFoundry/FAPIgo/issues/186)) ([1d66ea2](https://github.com/IDFoundry/FAPIgo/commit/1d66ea23325675286e5267d0e44cc0a8de82e99c))
+* add mTLS-bound access tokens (RFC 8705 §3) as an alternative to DPoP ([77b0cd9](https://github.com/IDFoundry/FAPIgo/commit/77b0cd9557eb473aa374bf71ea50af125efd8504))
+* add RP-side conformance coverage for RFC 8705 client-auth mTLS ([01aaaf6](https://github.com/IDFoundry/FAPIgo/commit/01aaaf6e93095310710eb6da2ddd5e2a1bc09b56))
+* add tls_client_auth and self_signed_tls_client_auth client authentication ([edd7c6c](https://github.com/IDFoundry/FAPIgo/commit/edd7c6cc58c917decf4547009fb233be4854b65d))
+* wire CIBA ping delivery mode into AS conformance suite ([96759e4](https://github.com/IDFoundry/FAPIgo/commit/96759e4b281ae204280d674d29060fa64a0d1a6a))
+* wire CIBA-mTLS conformance into run-all.sh and the daily CI job ([e102805](https://github.com/IDFoundry/FAPIgo/commit/e1028050319a7c75f1d259722ff9458bfa2f5f0d))
+* wire mTLS into the conformance binaries and re-attempt CIBA live ([8e8b473](https://github.com/IDFoundry/FAPIgo/commit/8e8b4730dc7c2feb9150db5f8d5dfcddc5214918))
+
+
+### Bug Fixes
+
+* avoid comparing identical expressions in mTLS thumbprint determinism test ([28529fa](https://github.com/IDFoundry/FAPIgo/commit/28529fad7790dfe3643cdd9434b18ee1f65fcefe))
+* dedupe InsecureSkipVerify site and add unit coverage for mTLS AS config/endpoints ([998c4f1](https://github.com/IDFoundry/FAPIgo/commit/998c4f1cf646310f64c16d9749e5c989946b4b26))
+* include auth_req_id in CIBA ping notifications (CIBA Core 1.0 §10.2) ([#189](https://github.com/IDFoundry/FAPIgo/issues/189)) ([dcd24e7](https://github.com/IDFoundry/FAPIgo/commit/dcd24e715d0ec09aabbf88a5f25fd4365364c82c))
+* reject unacceptable binding_message with invalid_binding_message ([9b51d9e](https://github.com/IDFoundry/FAPIgo/commit/9b51d9e9d9f2e76ce5e393bf53f1b872f33508f9))
+* resolve CIBA client conformance driver bugs and iat validation gap ([f12999d](https://github.com/IDFoundry/FAPIgo/commit/f12999db59ca10e311d4b603cd3718a93afefa68))
+* resolve CIBA mTLS conformance findings (cipher/cert, interaction-id, error codes) ([#181](https://github.com/IDFoundry/FAPIgo/issues/181)) ([deaaa81](https://github.com/IDFoundry/FAPIgo/commit/deaaa818bd9ce2eb59c4311ff4ca3b1234bfe828))
+* scope client-assertion audience acceptance per endpoint ([d30c46c](https://github.com/IDFoundry/FAPIgo/commit/d30c46ccad06c4d4303675db83e700f2f058ce98))
+* suppress CodeQL disabled-certificate-check on the ping notifier ([6eaf402](https://github.com/IDFoundry/FAPIgo/commit/6eaf402c51d7ec05114db04a10754c33a1c5b92a))
+
 ## [0.17.0](https://github.com/IDFoundry/FAPIgo/compare/v0.16.0...v0.17.0) (2026-08-28)
 
 

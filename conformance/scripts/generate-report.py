@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Builds report.md from a completed conformance/scripts/run-all.sh run.
 
-run-all.sh calls this once, after all seven suites have finished and
+run-all.sh calls this once, after all eight suites have finished and
 results.txt/the per-suite log files already exist — it doesn't run any
 part of the suites itself, only reads what's already on disk:
 
@@ -49,7 +49,7 @@ ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 TEST_LINE_RE = re.compile(r"^(?:\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} )?Test \[(\d+):(\d+)\] (\S+) (\S+) (\S+) - result (\S+)\.")
 
 AS_SUITES = ["baseline", "message-signing", "ciba-mtls", "client-auth-mtls"]
-RP_SUITES = ["baseline", "message-signing", "ciba-mtls"]
+RP_SUITES = ["baseline", "message-signing", "ciba-mtls", "client-auth-mtls"]
 
 # Markdown separator row for a 2-column table (Module/Result).
 TABLE_SEPARATOR_2COL = "|---|---|"
@@ -305,7 +305,7 @@ def main():
     md.append("## Summary\n")
     md.append("| Suite | Result |")
     md.append(TABLE_SEPARATOR_2COL)
-    for label in ["AS baseline", "AS message-signing", "AS ciba-mtls", "AS client-auth-mtls", "RP baseline", "RP message-signing", "RP ciba-mtls"]:
+    for label in ["AS baseline", "AS message-signing", "AS ciba-mtls", "AS client-auth-mtls", "RP baseline", "RP message-signing", "RP ciba-mtls", "RP client-auth-mtls"]:
         md.append(f"| {label} | {results.get(label, 'DID NOT RUN')} |")
     md.append("")
 

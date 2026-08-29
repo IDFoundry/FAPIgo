@@ -95,3 +95,23 @@ func applyMTLSEndpointAliases(cfg *client.Config, discovered client.DiscoveredMe
 	}
 	return nil
 }
+
+// applyMTLSEndpointAliasesForClientAuth is applyMTLSEndpointAliases' own
+// counterpart for RFC 8705 §2 client authentication (main.go's
+// -client-auth-mtls): covers PushedAuthorizationRequest instead of
+// BackchannelAuthentication, since a certificate-authenticated client
+// (unlike an mTLS-sender-constrained one) must present its certificate
+// at PAR too, not just at the token endpoint — the same asymmetry
+// server/par.go's own authenticateClient enforces on the AS side.
+func applyMTLSEndpointAliasesForClientAuth(cfg *client.Config, discovered client.DiscoveredMetadata) error {
+	if discovered.MTLSEndpointAliases == nil {
+		return fmt.Errorf("issuer does not advertise mtls_endpoint_aliases")
+	}
+	if !discovered.MTLSEndpointAliases.Token.IsZero() {
+		cfg.Endpoints.Token = discovered.MTLSEndpointAliases.Token
+	}
+	if !discovered.MTLSEndpointAliases.PushedAuthorizationRequest.IsZero() {
+		cfg.Endpoints.PushedAuthorizationRequest = discovered.MTLSEndpointAliases.PushedAuthorizationRequest
+	}
+	return nil
+}

@@ -36,6 +36,7 @@ generated in-process, once per run, and never persisted.
 ```
 go run ./cmd/conformance-client -profile=baseline
 go run ./cmd/conformance-client -profile=message-signing
+go run ./cmd/conformance-client -profile=baseline -client-auth-mtls
 go run ./cmd/conformance-client -profile=ciba
 go run ./cmd/conformance-client -profile=ciba -mtls
 ```
@@ -49,8 +50,16 @@ go run ./cmd/conformance-client -profile=ciba -mtls
   expected to FAIL, for a confirmed, documented reason, not a driver
   bug). Defaults to `baseline`.
 - `-mtls`, with `-profile=ciba` only: use `storage.SenderConstrainMTLS`
-  (a throwaway self-signed client certificate) instead of DPoP — see
-  this profile's own section below. Ignored for `baseline`/`message-signing`.
+  (RFC 8705 §3, a throwaway self-signed client certificate) instead of
+  DPoP for sender-constraining — see this profile's own section below.
+  Ignored for `baseline`/`message-signing`.
+- `-client-auth-mtls`, with `-profile=baseline` only: register via
+  `storage.ClientAuthMethodSelfSignedTLSClientAuth` (RFC 8705 §2)
+  instead of `private_key_jwt` — this driver presents a certificate
+  (`client_id` + certificate, no `client_assertion`) at PAR and token
+  instead of a signed assertion; sender-constraining stays DPoP either
+  way, since the two axes are orthogonal — see this profile's own
+  section below. Not supported with `-profile=message-signing`/`ciba`.
 - `-suite` overrides the suite's base URL. Defaults to
   `https://localhost.emobix.co.uk:8443/`, the same dev-mode instance
   `conformance/server`'s own scripts target.
@@ -309,6 +318,65 @@ baseline/message-signing profiles:
   Conformance strategy section for the fix (Authorization/
   PushedAuthorizationRequest became a conditionally-required pair,
   mirroring `Endpoints.BackchannelAuthentication`'s own optionality).
+
+## Client authentication mTLS (`-client-auth-mtls`)
+
+The RP-side counterpart to `conformance/server`'s own AS
+client-auth-mtls profile — RFC 8705 §2 certificate-based client
+authentication, this time with this driver playing the RP under test
+against the suite's own mock AS. Reuses `-profile=baseline`'s plan
+(`fapi2-security-profile-final-client-test-plan`), just with
+`client_auth_type=mtls` instead of `private_key_jwt`; `sender_constrain`
+stays `dpop`, the same orthogonality the AS side established.
+
+**Confirmed live: 22/22 PASS, on the first attempt** — no driver fixes
+needed, unlike every other mTLS re-attempt in this repo's conformance
+history. The library groundwork was already complete on both sides
+before this driver flag existed at all: `client.Config.ClientAuthMethod`
+(RFC 8705 §2, PR #182) already builds a plain `client_id` form
+parameter instead of a signed assertion at PAR and token, and the AS
+side's own `verifyDPoPAtEitherEndpoint` fix (found chasing the AS-side
+client-auth-mtls profile, see `../server/oidf-config/README.md`'s own
+section) already covers a DPoP proof presented at an mTLS-alias URL —
+exactly what this driver's own token/PAR calls need once they switch to
+the alias.
+
+Mechanically, this reuses `mtls.go`'s existing `-profile=ciba -mtls`
+machinery almost entirely unchanged: `selfSignedClientCert` generates
+the throwaway certificate, `mtlsSuiteHTTPClient` presents it on every
+outbound connection (including this driver's own calls to the suite's
+control API — already proven safe by the CIBA `-mtls` precedent), and
+the certificate's PEM encoding is registered as the plan config's
+`client.certificate` value, the same field
+`EnsureClientCertificateMatches` (`net.openid.conformance.condition.as`)
+reads to validate whatever certificate is actually presented on the
+connection — confirmed by disassembly to be the same generic condition
+FAPI2's own `checkMtlsCertificate` calls for `client_auth_type=mtls`,
+regardless of whether the variant conceptually means
+"self-signed" or "CA-issued" from this repo's own more precise
+`storage.ClientAuthMethod` split; the suite draws no such distinction
+on the RP-test side either (confirmed by disassembling
+`net.openid.conformance.variant.ClientAuthType` — a single generic
+`MTLS` value, matching the equivalent finding on the AS side).
+
+One addition beyond the CIBA `-mtls` precedent:
+`applyMTLSEndpointAliasesForClientAuth` (`mtls.go`) overrides both
+`Endpoints.Token` *and* `Endpoints.PushedAuthorizationRequest` with
+their discovered `mtls_endpoint_aliases` values — CIBA's own
+`applyMTLSEndpointAliases` only ever needed Token/BackchannelAuthentication,
+since sender-constraining binds only at token-issuance time (RFC 8705
+§3 has no PAR-time pre-commitment concept), but certificate-based
+client *authentication* is checked at every endpoint that authenticates
+a client, PAR included — the same asymmetry `server/par.go`'s own
+`authenticateClient` enforces on the AS side.
+
+No `client.Config.Algorithms.ClientAuthentication`/plan-config
+`client.jwks` entry is built under this flag at all: RFC 8705 §2 client
+authentication carries no signed assertion, so there is nothing for
+either side to sign or verify there — mirroring
+`client/jwks.go`'s own conditional omission of the
+`ClientAuthentication`-purpose key from `PublicJWKS` under a
+non-`private_key_jwt` `ClientAuthMethod`.
 
 ## Extending this driver
 

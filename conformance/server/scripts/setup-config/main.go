@@ -720,7 +720,13 @@ func generateMTLSCertKeyPEM(commonName string) (certPEM, keyPEM string, err erro
 // profile's two clients need no third PS256-only client of their own
 // (client1 is already RSA/PS256 — see oidf-config/README.md's own
 // account of why that alone was enough to un-SKIP the RS256 modules
-// here), and always has exactly 2 clients, never 3.
+// here). Only requires *at least* 2 clients, not exactly 2: on a fresh
+// clone this runs (ciba-mtls-plan.json is gitignored, so its
+// already-exists guard never fires) against the already-committed
+// ciba-mtls.config.json, which setupCIBAPing's appendCIBAPingClients
+// has since grown to 4 entries — this function only ever reads/writes
+// index 0 and 1, so those trailing ciba-ping clients are safe to leave
+// untouched.
 func patchCIBAMTLSConfig(path string, pubRSA, pubEC jwks) (clientIDs [2]string, err error) {
 	data, err := os.ReadFile(path) // #nosec G304 -- path is this dev-only script's own fixed CLI argument, not untrusted input
 	if err != nil {
@@ -734,8 +740,8 @@ func patchCIBAMTLSConfig(path string, pubRSA, pubEC jwks) (clientIDs [2]string, 
 	if err := json.Unmarshal(top["clients"], &clients); err != nil {
 		return clientIDs, fmt.Errorf("parse clients: %w", err)
 	}
-	if len(clients) != 2 {
-		return clientIDs, fmt.Errorf("expected 2 clients, found %d", len(clients))
+	if len(clients) < 2 {
+		return clientIDs, fmt.Errorf("expected at least 2 clients, found %d", len(clients))
 	}
 
 	newJWKS := [2]jwks{pubRSA, pubEC}

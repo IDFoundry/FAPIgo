@@ -216,13 +216,45 @@ func newHarnessWithSenderConstrainMTLSAndAliases(t *testing.T) (harness, string)
 	return harness{server: srv, key: key, serverKey: serverKey, now: now}, mtlsToken.String()
 }
 
-// TestPushAuthorizationRequestAcceptsMTLSAliasAsClientAssertionAudience
+// TestExchangeAuthorizationCodeAcceptsMTLSAliasAsClientAssertionAudience
 // covers RFC 7523 §3's own looseness ("aud"... identifies the AS,
-// not necessarily one fixed URL): an mTLS-bound client may call any
-// endpoint via its RFC 8705 §5 alias and sign its client assertion's
-// "aud" against that alias URL rather than the issuer, since both
-// identify the same authorization server.
-func TestPushAuthorizationRequestAcceptsMTLSAliasAsClientAssertionAudience(t *testing.T) {
+// not necessarily one fixed URL): an mTLS-bound client may call the
+// token endpoint via its RFC 8705 §5 alias and sign its client
+// assertion's "aud" against that alias URL rather than the issuer,
+// since both identify the same authorization server. Scoped to the
+// token endpoint specifically — see
+// TestPushAuthorizationRequestRejectsMTLSAliasAsClientAssertionAudience
+// for why PAR must reject this exact same value.
+func TestExchangeAuthorizationCodeAcceptsMTLSAliasAsClientAssertionAudience(t *testing.T) {
+	h, mtlsToken := newHarnessWithSenderConstrainMTLSAndAliases(t)
+	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
+	cert := selfSignedTestClientCert(t)
+	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
+		Signer: h.key, Algorithm: fapi.ES256,
+		ClientID: testClientID.String(), Audience: mtlsToken,
+		Now: h.now, Lifetime: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssertion: %v", err)
+	}
+	if _, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
+		HTTP:            server.FormRequest{Parameters: exchangeFormParams(assertion, code, testRedirectURI, testCodeVerifier)},
+		PeerCertificate: cert,
+	}); err != nil {
+		t.Fatalf("ExchangeAuthorizationCode: %v", err)
+	}
+}
+
+// TestPushAuthorizationRequestRejectsMTLSAliasAsClientAssertionAudience
+// confirms PAR rejects the token endpoint's own mTLS alias as a client
+// assertion audience — confirmed live against the OIDF conformance
+// suite's own
+// fapi2-security-profile-final-par-test-token-endpoint-url-as-audience-fails
+// module (which probes with the plain URL; the same
+// acceptableClientAssertionAudiences scoping applies identically to its
+// mTLS alias). See that function's own doc comment for why PAR accepts
+// no endpoint-URL audience at all, aliased or not.
+func TestPushAuthorizationRequestRejectsMTLSAliasAsClientAssertionAudience(t *testing.T) {
 	h, mtlsToken := newHarnessWithSenderConstrainMTLSAndAliases(t)
 	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
 		Signer: h.key, Algorithm: fapi.ES256,
@@ -232,10 +264,14 @@ func TestPushAuthorizationRequestAcceptsMTLSAliasAsClientAssertionAudience(t *te
 	if err != nil {
 		t.Fatalf("CreateAssertion: %v", err)
 	}
-	if _, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+	_, err = h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
 		HTTP: server.FormRequest{Parameters: plainFormParameters(t, assertion, nil)},
-	}); err != nil {
-		t.Fatalf("PushAuthorizationRequest: %v", err)
+	})
+	if err == nil {
+		t.Fatalf("PushAuthorizationRequest = nil error, want error")
+	}
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidClient)
 	}
 }
 

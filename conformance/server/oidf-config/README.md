@@ -670,22 +670,33 @@ clients need no approval-flow fields ping-mode itself doesn't touch):
 outright without one, exactly as `ciba-mtls-plan.json`'s clients already
 need.
 
-Confirmed live: the core `fapi-ciba-id1` module plus all five
-ping-specific modules (`fapi-ciba-id1-ping-backchannel-notification
--endpoint-response-{has-body,401,403}`,
-`fapi-ciba-id1-ping-with-mtls-ciba-notification-endpoint-response-401
--and-require-server-does-not-retry`,
-`fapi-ciba-id1-ping-backchannel-notification-endpoint-return-redirect
--request`) PASS individually, run sequentially against the same plan
-(the suite rejects concurrent module instances sharing one alias with
-an `INTERRUPTED`/alias-conflict result — an artifact of how they were
-driven directly via the suite's REST API in this environment, not a
-defect). This environment had no local OIDF suite checkout
-(`run-test-plan.py`) available to drive the *entire* plan end to end
-the way `../scripts/run-all.sh` does for `ciba-mtls-plan.json` — only
-these six modules were exercised directly. `expected-warnings
--ciba-ping.json`/`expected-skips-ciba-ping.json` start empty, matching
-`ciba-mtls`'s own baseline; a first full `run-all.sh` pass may still
-surface warnings/skips on the plan's other, ping-unrelated modules
-(shared unchanged with `ciba-mtls-plan.json`) that these files don't
-yet account for.
+A first full `run-all.sh` pass (once a local OIDF suite checkout became
+available) found two more real gaps beyond the six modules exercised
+directly above:
+
+- **3 modules unexpectedly SKIPPED**
+  (`...-signature-algorithm-{in-backchannel-authorization-request,in
+  -token-endpoint-request}-is-RS256-fails`,
+  `-ensure-request-object-signature-algorithm-is-RS256-fails`) —
+  the exact same self-skip cause `ciba-mtls-plan.json` already hit and
+  fixed (see that plan's own account above): these need the plan's
+  first client already PS256-registered, and both ciba-ping clients
+  were ES256. Fixed the same way: `setupCIBAPing` now registers client1
+  PS256/RSA via `generatePS256Key`, matching `setupCIBAMTLS`.
+- **The core `fapi-ciba-id1`/`-refresh-token` modules FAILED once run
+  as part of the full plan** (not exercised by the earlier six
+  ping-specific modules alone): each deliberately signs a client
+  assertion's `aud` as the *token* endpoint's URL on a request sent to
+  the *backchannel authentication* endpoint, and requires it to
+  succeed — CIBA Core 1.0 §7.1's own explicit audience widening (see
+  `server/par.go`'s `acceptableClientAssertionAudiences` and
+  ARCHITECTURE.md's own account of this fix, which also covers a
+  related, more consequential bug this same investigation found at the
+  PAR endpoint on the baseline/message-signing profiles).
+
+Confirmed live with both fixes: all nine `run-all.sh` suites (AS
+baseline/message-signing/ciba-mtls/ciba-ping/client-auth-mtls, RP
+baseline/message-signing/ciba-mtls/client-auth-mtls) clean.
+`expected-warnings-ciba-ping.json`/`expected-skips-ciba-ping.json`
+stay empty, matching `ciba-mtls`'s own baseline — nothing left to
+explain away.

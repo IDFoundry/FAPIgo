@@ -55,7 +55,12 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, "", newError(ErrorUnsupportedGrantType, 400, "grant_type must be "+CIBAGrantType, nil))
 	}
 
-	client, _, authErr := s.authenticateClient(ctx, params, req.PeerCertificate)
+	// CIBA's own token-polling step (CIBA §10.1) is a grant_type on the
+	// physical token endpoint, not a separate endpoint of its own — see
+	// CIBAGrantType's own doc comment — so this authenticates against
+	// the Token endpoint's own audience carve-out, the same as
+	// ExchangeAuthorizationCode/RefreshAccessToken.
+	client, _, authErr := s.authenticateClient(ctx, params, req.PeerCertificate, []fapi.URL{s.cfg.Endpoints.Token}, []fapi.URL{s.cfg.MTLSEndpoints.Token})
 	if authErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, "", authErr)
 	}

@@ -1144,9 +1144,16 @@ func appendCIBAPingClients(path string, pub1, pub2 jwks, notificationEndpoint1, 
 	callback := "https://localhost.emobix.co.uk:8443/test/a/gofapi-ciba-ping/callback"
 	newClients := []map[string]any{
 		{
+			// client1 is registered PS256/RSA, not ES256 — mirrors
+			// setupCIBAMTLS's own identical fix: the suite's
+			// ...-signature-algorithm-is-RS256-fails modules only start
+			// running (rather than self-skipping) when the plan's first
+			// client is already PS256-registered. Confirmed live: this
+			// took AS ciba-ping from 3 unexpectedly-SKIPPED modules to a
+			// clean run.
 			"id": clientID1, "redirect_uris": []string{callback},
-			"client_assertion_algorithm":                   "ES256",
-			"backchannel_authentication_request_algorithm": "ES256",
+			"client_assertion_algorithm":                   "PS256",
+			"backchannel_authentication_request_algorithm": "PS256",
 			"allowed_scopes":                               []string{"openid", "accounts", "offline_access"},
 			"jwks":                                         pub1,
 			"sender_constrain":                             "mtls",
@@ -1213,7 +1220,7 @@ func setupCIBAPing(dir string) error {
 	const alias = "gofapi-ciba-ping"
 	const issuerHost = "conformance-as-ciba-mtls" // same running container as setupCIBAMTLS
 
-	priv1JWKS, pub1, err := generateKey("ciba-ping-client1")
+	priv1JWKS, pub1, err := generatePS256Key(conformanceKeyLabelPrefix + "ciba-ping-client1-rsa-key1")
 	if err != nil {
 		return fmt.Errorf("generate client1 key: %w", err)
 	}

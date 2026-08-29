@@ -38,8 +38,19 @@ const (
 type NewBackchannelAuthentication struct {
 	// AuthReqIDHash is the SHA-256 digest of the raw auth_req_id value
 	// handed to the client — matching NewAuthorizationCode.CodeHash's
-	// digest-only discipline, never the value itself.
+	// digest-only discipline, used to look this record up by the value a
+	// client presents back. Required unconditionally, regardless of
+	// DeliveryMode.
 	AuthReqIDHash [32]byte
+
+	// AuthReqID is the same auth_req_id value in the clear. Unlike
+	// AuthReqIDHash, this is required only for DeliveryMode "ping": CIBA
+	// §10.2 requires the ping notification body itself carry the literal
+	// auth_req_id, so the server must be able to produce it again later
+	// — the same reasoning ClientNotificationToken's own doc comment
+	// gives for why that field can't be digest-only either. Leave "" for
+	// DeliveryMode "poll", where nothing ever needs it back.
+	AuthReqID string
 
 	// HandleHash is the SHA-256 digest of the raw, embedder-facing
 	// handle value — a distinct identifier from AuthReqIDHash, never
@@ -129,6 +140,11 @@ type DecidedBackchannelAuthentication struct {
 	// "ping", it's the bearer token the caller must present to the
 	// client's own notification endpoint.
 	ClientNotificationToken fapi.Secret
+
+	// AuthReqID mirrors NewBackchannelAuthentication.AuthReqID — "" for
+	// a "poll" DeliveryMode; for "ping", the literal auth_req_id value
+	// CIBA §10.2 requires the notification body to carry.
+	AuthReqID string
 }
 
 // PollBackchannelAuthentication is the input to

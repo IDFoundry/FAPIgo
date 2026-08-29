@@ -354,6 +354,7 @@ func (s *refBackchannelAuthenticationStore) DecideBackchannelAuthentication(_ co
 		ClientID:                rec.record.ClientID,
 		DeliveryMode:            rec.record.DeliveryMode,
 		ClientNotificationToken: rec.record.ClientNotificationToken,
+		AuthReqID:               rec.record.AuthReqID,
 	}, nil
 }
 

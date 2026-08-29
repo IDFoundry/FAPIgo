@@ -900,6 +900,7 @@ func TestBackchannelAuthenticationStoreContract(t *testing.T, factory func() Bac
 		record := newRecord("auth-req-ping-1", "handle-ping-1")
 		record.DeliveryMode = "ping"
 		record.ClientNotificationToken = fapi.NewSecret("notification-token-1")
+		record.AuthReqID = "auth-req-ping-1"
 		if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
 			t.Fatalf("CreateBackchannelAuthentication: %v", err)
 		}
@@ -917,6 +918,9 @@ func TestBackchannelAuthenticationStoreContract(t *testing.T, factory func() Bac
 		}
 		if decided.ClientNotificationToken.Reveal() != "notification-token-1" {
 			t.Fatalf("ClientNotificationToken = %q, want %q", decided.ClientNotificationToken.Reveal(), "notification-token-1")
+		}
+		if decided.AuthReqID != "auth-req-ping-1" {
+			t.Fatalf("AuthReqID = %q, want %q", decided.AuthReqID, "auth-req-ping-1")
 		}
 	})
 
@@ -940,6 +944,9 @@ func TestBackchannelAuthenticationStoreContract(t *testing.T, factory func() Bac
 		}
 		if decided.ClientNotificationToken.Reveal() != "" {
 			t.Fatalf("ClientNotificationToken = %q, want empty", decided.ClientNotificationToken.Reveal())
+		}
+		if decided.AuthReqID != "" {
+			t.Fatalf("AuthReqID = %q, want empty", decided.AuthReqID)
 		}
 	})
 

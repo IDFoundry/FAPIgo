@@ -19,6 +19,13 @@ type BackchannelNotification struct {
 	// this value itself and sent it in the original backchannel
 	// authentication request; this server never invents one.
 	ClientNotificationToken fapi.Secret
+
+	// AuthReqID is the auth_req_id CIBA §10.2 requires the notification
+	// body itself to carry — the suite's own conformance check
+	// (CheckAuthReqIdInCallback/CheckNotificationCallbackOnlyAuthReqId)
+	// confirms the body must be exactly {"auth_req_id": "..."}, nothing
+	// more, with Content-Type: application/json.
+	AuthReqID string
 }
 
 // BackchannelNotifier lets this server tell a CIBA client, out of band,
@@ -32,12 +39,17 @@ type BackchannelNotification struct {
 // silent one, mirroring RevocationSink/NoRevocation's identical
 // precedent.
 type BackchannelNotifier interface {
-	// Notify POSTs notification.ClientNotificationToken as a bearer
-	// credential to notification.Endpoint. A CIBA client is required to
-	// keep polling regardless of whether — or how — this call actually
-	// lands (CIBA §10.3's backup-polling guarantee), so this server
-	// treats any error Notify returns as best-effort informational
-	// only: it is never allowed to fail the decision that triggered it.
+	// Notify POSTs to notification.Endpoint with
+	// Authorization: Bearer {notification.ClientNotificationToken} and
+	// Content-Type: application/json, a body of exactly
+	// {"auth_req_id": "{notification.AuthReqID}"} — CIBA §10.2's own
+	// required shape, confirmed against the OIDF conformance suite's own
+	// verification (it rejects any other field being present). A CIBA
+	// client is required to keep polling regardless of whether — or how
+	// — this call actually lands (CIBA §10.3's backup-polling
+	// guarantee), so this server treats any error Notify returns as
+	// best-effort informational only: it is never allowed to fail the
+	// decision that triggered it.
 	Notify(ctx context.Context, notification BackchannelNotification) error
 }
 

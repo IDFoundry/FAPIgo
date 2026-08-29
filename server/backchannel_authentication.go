@@ -147,14 +147,21 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	// persist.
 	deliveryMode := "poll"
 	var notificationToken fapi.Secret
+	var authReqIDForNotification string
 	if client.BackchannelTokenDeliveryMode() == storage.BackchannelTokenDeliveryModePing {
 		deliveryMode = "ping"
 		tokenValue, _ := jsonStringValue(validated.params["client_notification_token"])
 		notificationToken = fapi.NewSecret(tokenValue)
+		// Retained in the clear (unlike AuthReqIDHash) only under ping —
+		// CIBA §10.2 requires the notification body to carry this value
+		// back later, so it can't be digest-only here, the same
+		// exception ClientNotificationToken's own doc comment explains.
+		authReqIDForNotification = authReqIDRaw
 	}
 
 	if err := s.deps.Backchannel.CreateBackchannelAuthentication(ctx, storage.NewBackchannelAuthentication{
 		AuthReqIDHash:           sha256.Sum256([]byte(authReqIDRaw)),
+		AuthReqID:               authReqIDForNotification,
 		HandleHash:              sha256.Sum256([]byte(handleRaw)),
 		ClientID:                client.ID(),
 		Parameters:              validated.params,

@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -109,12 +111,13 @@ func newHarnessWithBackchannel(t *testing.T) (harness, *memstore.BackchannelAuth
 			testClientID:             {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
 			testNotPermittedClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
 		}},
-		Keys:         serverKeyManager,
-		AccessTokens: server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
-		Revocation:   server.NoRevocation{},
-		Clock:        fixedClock{now: now},
-		Random:       rand.Reader,
-		Backchannel:  backchannel,
+		Keys:                serverKeyManager,
+		AccessTokens:        server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:          server.NoRevocation{},
+		Clock:               fixedClock{now: now},
+		Random:              rand.Reader,
+		Backchannel:         backchannel,
+		BackchannelNotifier: server.NoBackchannelNotifications{},
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {
@@ -200,18 +203,145 @@ func newHarnessWithBackchannelMTLS(t *testing.T) harness {
 		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
 			testClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
 		}},
-		Keys:         serverKeyManager,
-		AccessTokens: server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
-		Revocation:   server.NoRevocation{},
-		Clock:        fixedClock{now: now},
-		Random:       rand.Reader,
-		Backchannel:  memstore.NewBackchannelAuthenticationStore(),
+		Keys:                serverKeyManager,
+		AccessTokens:        server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:          server.NoRevocation{},
+		Clock:               fixedClock{now: now},
+		Random:              rand.Reader,
+		Backchannel:         memstore.NewBackchannelAuthenticationStore(),
+		BackchannelNotifier: server.NoBackchannelNotifications{},
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
 	return harness{server: srv, key: key, serverKey: serverKey, now: now}
+}
+
+const testBackchannelClientNotificationEndpoint = "https://rp.example/ciba/notify"
+
+// fakeBackchannelNotifier records every Notify call it receives — used
+// to confirm CompleteBackchannelAuthentication dispatches exactly one
+// ping notification, with the right endpoint/token, and to inject a
+// failure to confirm it never fails the decision itself.
+type fakeBackchannelNotifier struct {
+	mu    sync.Mutex
+	calls []server.BackchannelNotification
+	err   error
+}
+
+func (f *fakeBackchannelNotifier) Notify(_ context.Context, notification server.BackchannelNotification) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, notification)
+	return f.err
+}
+
+func (f *fakeBackchannelNotifier) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.calls)
+}
+
+func (f *fakeBackchannelNotifier) lastCall() server.BackchannelNotification {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls[len(f.calls)-1]
+}
+
+// newHarnessWithBackchannelPing mirrors newHarnessWithBackchannel
+// exactly, except testClientID is registered
+// storage.BackchannelTokenDeliveryModePing (with a notification
+// endpoint) instead of the default Poll, and Dependencies.BackchannelNotifier
+// is a *fakeBackchannelNotifier a test can inspect directly, rather
+// than the usual NoBackchannelNotifications{} no-op.
+func newHarnessWithBackchannelPing(t *testing.T) (harness, *memstore.BackchannelAuthenticationStore, *fakeBackchannelNotifier) {
+	t.Helper()
+	now := time.Now()
+	key := generateKey(t)
+	serverKey := generateKey(t)
+
+	notificationEndpoint, err := fapi.ParseEndpointURL(testBackchannelClientNotificationEndpoint)
+	if err != nil {
+		t.Fatalf("ParseEndpointURL: %v", err)
+	}
+	client, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
+		ID:                       testClientID,
+		RedirectURIs:             []fapi.RegisteredRedirectURI{testRedirectURI},
+		ClientAssertionAlgorithm: fapi.ES256,
+		AllowedScopes:            []string{"openid", "accounts", "offline_access"},
+		BackchannelAuthenticationRequestAlgorithm: fapi.ES256,
+		BackchannelTokenDeliveryMode:              storage.BackchannelTokenDeliveryModePing,
+		BackchannelClientNotificationEndpoint:     notificationEndpoint,
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+	issuer, err := fapi.ParseIssuerURL(testIssuer)
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+	backchannelEndpoint, err := fapi.ParseEndpointURL(testBackchannelAuthenticationEndpoint)
+	if err != nil {
+		t.Fatalf("ParseEndpointURL: %v", err)
+	}
+
+	endpoints := testEndpoints(t)
+	endpoints.BackchannelAuthentication = backchannelEndpoint
+
+	cfg := server.Config{
+		Issuer:    issuer,
+		Endpoints: endpoints,
+		Profile:   server.ProfileFAPISecurity,
+		Algorithms: server.AlgorithmPolicy{
+			ClientAssertion:                  server.AlgorithmSet{fapi.ES256},
+			RequestObject:                    server.AlgorithmSet{fapi.ES256},
+			JARM:                             fapi.ES256,
+			IDToken:                          fapi.ES256,
+			BackchannelAuthenticationRequest: server.AlgorithmSet{fapi.ES256},
+		},
+		Limits: server.Limits{
+			PushedRequestLifetime:                       90 * time.Second,
+			MaxClientAssertionLifetime:                  time.Minute,
+			MaxRequestObjectLifetime:                    time.Minute,
+			InteractionLifetime:                         5 * time.Minute,
+			AuthorizationCodeLifetime:                   time.Minute,
+			JARMResponseLifetime:                        time.Minute,
+			AccessTokenLifetime:                         5 * time.Minute,
+			IDTokenLifetime:                             5 * time.Minute,
+			RefreshTokenLifetime:                        5 * time.Minute,
+			MaxDPoPProofAge:                             time.Minute,
+			MaxClockSkew:                                5 * time.Second,
+			BackchannelAuthenticationRequestLifetime:    2 * time.Minute,
+			MaxBackchannelAuthenticationRequestLifetime: time.Minute,
+			BackchannelAuthenticationPollInterval:       time.Millisecond,
+		},
+		Assurance: server.AssuranceDevelopment,
+	}
+	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
+	backchannel := memstore.NewBackchannelAuthenticationStore()
+	notifier := &fakeBackchannelNotifier{}
+	deps := server.Dependencies{
+		Clients:      &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
+		Transactions: &fakeTransactionStore{},
+		Grants:       &fakeGrantStore{},
+		Replay:       &fakeReplayStore{},
+		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
+			testClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
+		}},
+		Keys:                serverKeyManager,
+		AccessTokens:        server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:          server.NoRevocation{},
+		Clock:               fixedClock{now: now},
+		Random:              rand.Reader,
+		Backchannel:         backchannel,
+		BackchannelNotifier: notifier,
+	}
+	srv, err := server.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+	return harness{server: srv, key: key, serverKey: serverKey, now: now}, backchannel, notifier
 }
 
 // backchannelRequestObject builds a signed CIBA backchannel
@@ -322,8 +452,13 @@ func TestNewRequiresBackchannelDependencyWhenConfigured(t *testing.T) {
 	}
 
 	deps.Backchannel = memstore.NewBackchannelAuthenticationStore()
+	if _, err := server.New(cfg, deps); err == nil {
+		t.Fatalf("New(backchannel authentication configured, no BackchannelNotifier dependency) = nil error, want error")
+	}
+
+	deps.BackchannelNotifier = server.NoBackchannelNotifications{}
 	if _, err := server.New(cfg, deps); err != nil {
-		t.Fatalf("New(backchannel authentication configured, with Backchannel dependency): %v", err)
+		t.Fatalf("New(backchannel authentication configured, with Backchannel/BackchannelNotifier dependencies): %v", err)
 	}
 }
 
@@ -556,7 +691,11 @@ func TestBeginBackchannelAuthenticationRejectsNoHints(t *testing.T) {
 	}
 }
 
-func TestBeginBackchannelAuthenticationRejectsPingMode(t *testing.T) {
+// TestBeginBackchannelAuthenticationRejectsNotificationTokenForPollClient
+// covers a poll-mode client (newHarnessWithBackchannel's own default
+// registration) sending client_notification_token anyway — CIBA §7.1
+// only makes the parameter meaningful for ping/push.
+func TestBeginBackchannelAuthenticationRejectsNotificationTokenForPollClient(t *testing.T) {
 	h, _ := newHarnessWithBackchannel(t)
 	params := standardBackchannelParams(t)
 	params["client_notification_token"] = jsonRaw(t, "notify-me")
@@ -574,6 +713,178 @@ func TestBeginBackchannelAuthenticationRejectsPingMode(t *testing.T) {
 	}
 	if localErr.Error.Code() != server.ErrorInvalidRequest {
 		t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequest)
+	}
+}
+
+// TestBeginBackchannelAuthenticationRejectsMissingNotificationTokenForPingClient
+// covers the opposite shape mismatch: a client registered for ping
+// delivery (newHarnessWithBackchannelPing) omitting
+// client_notification_token entirely.
+func TestBeginBackchannelAuthenticationRejectsMissingNotificationTokenForPingClient(t *testing.T) {
+	h, _, _ := newHarnessWithBackchannelPing(t)
+	requestObj := h.backchannelRequestObject(t, standardBackchannelParams(t))
+
+	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+		HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), requestObj)},
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+	localErr, ok := action.(server.BackchannelAuthenticationLocalError)
+	if !ok {
+		t.Fatalf("action = %T, want server.BackchannelAuthenticationLocalError", action)
+	}
+	if localErr.Error.Code() != server.ErrorInvalidRequest {
+		t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequest)
+	}
+}
+
+func TestBeginBackchannelAuthenticationAcceptsNotificationTokenForPingClient(t *testing.T) {
+	h, _, _ := newHarnessWithBackchannelPing(t)
+	params := standardBackchannelParams(t)
+	params["client_notification_token"] = jsonRaw(t, "notify-me")
+	requestObj := h.backchannelRequestObject(t, params)
+
+	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+		HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), requestObj)},
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+	if _, ok := action.(server.BackchannelInteractionRequired); !ok {
+		t.Fatalf("action = %T, want server.BackchannelInteractionRequired", action)
+	}
+}
+
+// TestCompleteBackchannelAuthenticationDispatchesPingNotification covers
+// the actual dispatch: a ping-registered client's decision, regardless
+// of outcome (Approved here; TestCompleteBackchannelAuthenticationDispatchesPingNotificationOnDenied
+// covers Denied), fires exactly one Notify call carrying the client's
+// own registered endpoint and the token it sent with its original
+// request.
+func TestCompleteBackchannelAuthenticationDispatchesPingNotification(t *testing.T) {
+	h, _, notifier := newHarnessWithBackchannelPing(t)
+	params := standardBackchannelParams(t)
+	params["client_notification_token"] = jsonRaw(t, "notify-me-123")
+	requestObj := h.backchannelRequestObject(t, params)
+	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+		HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), requestObj)},
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+	required, ok := action.(server.BackchannelInteractionRequired)
+	if !ok {
+		t.Fatalf("action = %T, want server.BackchannelInteractionRequired", action)
+	}
+
+	subject, err := server.NewSubjectID("user-1")
+	if err != nil {
+		t.Fatalf("NewSubjectID: %v", err)
+	}
+	authenticated, err := server.NewAuthenticatedSubject(subject)
+	if err != nil {
+		t.Fatalf("NewAuthenticatedSubject: %v", err)
+	}
+	authCtx, err := server.NewAuthenticationContext(h.now, "acr-1", []string{"pwd"})
+	if err != nil {
+		t.Fatalf("NewAuthenticationContext: %v", err)
+	}
+	if err := h.server.CompleteBackchannelAuthentication(context.Background(), server.CompleteBackchannelAuthenticationRequest{
+		Handle: required.Handle,
+		Result: server.Authorize(authenticated, authCtx, server.GrantedAuthorization{Scope: []string{"openid", "accounts"}}),
+	}); err != nil {
+		t.Fatalf("CompleteBackchannelAuthentication: %v", err)
+	}
+
+	if notifier.callCount() != 1 {
+		t.Fatalf("Notify call count = %d, want 1", notifier.callCount())
+	}
+	call := notifier.lastCall()
+	if call.Endpoint.String() != testBackchannelClientNotificationEndpoint {
+		t.Fatalf("Endpoint = %v, want %q", call.Endpoint, testBackchannelClientNotificationEndpoint)
+	}
+	if call.ClientNotificationToken.Reveal() != "notify-me-123" {
+		t.Fatalf("ClientNotificationToken = %q, want %q", call.ClientNotificationToken.Reveal(), "notify-me-123")
+	}
+}
+
+// TestCompleteBackchannelAuthenticationDispatchesPingNotificationOnDenied
+// confirms dispatch is unconditional on decision outcome — a client
+// registered for ping delivery needs to know "go poll now" whether the
+// end user approved or denied the request.
+func TestCompleteBackchannelAuthenticationDispatchesPingNotificationOnDenied(t *testing.T) {
+	h, _, notifier := newHarnessWithBackchannelPing(t)
+	params := standardBackchannelParams(t)
+	params["client_notification_token"] = jsonRaw(t, "notify-me-456")
+	requestObj := h.backchannelRequestObject(t, params)
+	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+		HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), requestObj)},
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+	required, ok := action.(server.BackchannelInteractionRequired)
+	if !ok {
+		t.Fatalf("action = %T, want server.BackchannelInteractionRequired", action)
+	}
+
+	if err := h.server.CompleteBackchannelAuthentication(context.Background(), server.CompleteBackchannelAuthenticationRequest{
+		Handle: required.Handle,
+		Result: server.Deny("user declined"),
+	}); err != nil {
+		t.Fatalf("CompleteBackchannelAuthentication: %v", err)
+	}
+
+	if notifier.callCount() != 1 {
+		t.Fatalf("Notify call count = %d, want 1", notifier.callCount())
+	}
+	if notifier.lastCall().ClientNotificationToken.Reveal() != "notify-me-456" {
+		t.Fatalf("ClientNotificationToken = %q, want %q", notifier.lastCall().ClientNotificationToken.Reveal(), "notify-me-456")
+	}
+}
+
+// TestCompleteBackchannelAuthenticationIgnoresNotifierError confirms a
+// failed ping dispatch never fails the decision itself — CIBA §10.3's
+// backup-polling guarantee means the client is never left stuck even
+// when this call fails outright.
+func TestCompleteBackchannelAuthenticationIgnoresNotifierError(t *testing.T) {
+	h, _, notifier := newHarnessWithBackchannelPing(t)
+	notifier.err = fmt.Errorf("simulated network failure")
+	params := standardBackchannelParams(t)
+	params["client_notification_token"] = jsonRaw(t, "notify-me-789")
+	requestObj := h.backchannelRequestObject(t, params)
+	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+		HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), requestObj)},
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+	required, ok := action.(server.BackchannelInteractionRequired)
+	if !ok {
+		t.Fatalf("action = %T, want server.BackchannelInteractionRequired", action)
+	}
+
+	subject, err := server.NewSubjectID("user-1")
+	if err != nil {
+		t.Fatalf("NewSubjectID: %v", err)
+	}
+	authenticated, err := server.NewAuthenticatedSubject(subject)
+	if err != nil {
+		t.Fatalf("NewAuthenticatedSubject: %v", err)
+	}
+	authCtx, err := server.NewAuthenticationContext(h.now, "acr-1", []string{"pwd"})
+	if err != nil {
+		t.Fatalf("NewAuthenticationContext: %v", err)
+	}
+	if err := h.server.CompleteBackchannelAuthentication(context.Background(), server.CompleteBackchannelAuthenticationRequest{
+		Handle: required.Handle,
+		Result: server.Authorize(authenticated, authCtx, server.GrantedAuthorization{Scope: []string{"openid", "accounts"}}),
+	}); err != nil {
+		t.Fatalf("CompleteBackchannelAuthentication returned an error even though only the notifier failed: %v", err)
+	}
+	if notifier.callCount() != 1 {
+		t.Fatalf("Notify call count = %d, want 1", notifier.callCount())
 	}
 }
 
@@ -1001,6 +1312,9 @@ func TestMetadataAdvertisesBackchannelAuthenticationWhenConfigured(t *testing.T)
 	}
 	if !containsString(md.BackchannelTokenDeliveryModesSupported, "poll") {
 		t.Fatalf("BackchannelTokenDeliveryModesSupported = %v, want to contain poll", md.BackchannelTokenDeliveryModesSupported)
+	}
+	if !containsString(md.BackchannelTokenDeliveryModesSupported, "ping") {
+		t.Fatalf("BackchannelTokenDeliveryModesSupported = %v, want to contain ping", md.BackchannelTokenDeliveryModesSupported)
 	}
 	if !containsString(md.BackchannelAuthenticationRequestSigningAlgValuesSupported, "ES256") {
 		t.Fatalf("BackchannelAuthenticationRequestSigningAlgValuesSupported = %v, want to contain ES256", md.BackchannelAuthenticationRequestSigningAlgValuesSupported)

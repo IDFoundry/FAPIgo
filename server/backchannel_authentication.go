@@ -139,6 +139,20 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	expiresAt := now.Add(lifetime)
 	idTokenClaims, userinfoClaims := parseRequestedClaimNames(validated.params["claims"])
 
+	// deliveryMode/notificationToken mirror client's own registered
+	// BackchannelTokenDeliveryMode exactly — validateBackchannelAuthenticationParameters
+	// already enforced that a "ping" client's request carries
+	// client_notification_token and a "poll" client's doesn't, so
+	// there's nothing left to branch on here beyond which value to
+	// persist.
+	deliveryMode := "poll"
+	var notificationToken fapi.Secret
+	if client.BackchannelTokenDeliveryMode() == storage.BackchannelTokenDeliveryModePing {
+		deliveryMode = "ping"
+		tokenValue, _ := jsonStringValue(validated.params["client_notification_token"])
+		notificationToken = fapi.NewSecret(tokenValue)
+	}
+
 	if err := s.deps.Backchannel.CreateBackchannelAuthentication(ctx, storage.NewBackchannelAuthentication{
 		AuthReqIDHash:           sha256.Sum256([]byte(authReqIDRaw)),
 		HandleHash:              sha256.Sum256([]byte(handleRaw)),
@@ -147,13 +161,11 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		TokenClaims:             validated.tokenClaims,
 		RequestedIDTokenClaims:  idTokenClaims,
 		RequestedUserinfoClaims: userinfoClaims,
-		// Poll only — ping mode is rejected earlier in
-		// validateBackchannelAuthenticationParameters until its
-		// notification-dispatch dependency exists.
-		DeliveryMode: "poll",
-		DPoPJKT:      dpopJKT,
-		PollInterval: s.cfg.Limits.BackchannelAuthenticationPollInterval,
-		ExpiresAt:    expiresAt,
+		DeliveryMode:            deliveryMode,
+		ClientNotificationToken: notificationToken,
+		DPoPJKT:                 dpopJKT,
+		PollInterval:            s.cfg.Limits.BackchannelAuthenticationPollInterval,
+		ExpiresAt:               expiresAt,
 	}); err != nil {
 		return s.backchannelBeginFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to persist backchannel authentication request", err)), nil
 	}
@@ -259,9 +271,11 @@ func (s *Server) checkBackchannelExtensions(params map[string]json.RawMessage) (
 
 // validateBackchannelAuthenticationParameters checks the CIBA-mandated
 // parameters (scope, exactly one identity hint) against client, and
-// rejects a request declaring a delivery mode this package doesn't yet
-// support (ping/push — see BeginBackchannelAuthentication's own doc
-// comment).
+// checks client_notification_token's presence against exactly what
+// client's own registered BackchannelTokenDeliveryMode requires (CIBA
+// §7.1: required for ping/push, meaningless for poll) — push itself is
+// never supported, since storage.BackchannelTokenDeliveryMode has no
+// value for it.
 func (s *Server) validateBackchannelAuthenticationParameters(verified verifiedBackchannelRequest, client storage.RegisteredClient) (verifiedBackchannelRequest, *Error) {
 	params := verified.params
 
@@ -287,8 +301,19 @@ func (s *Server) validateBackchannelAuthenticationParameters(verified verifiedBa
 		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "exactly one of login_hint, login_hint_token, or id_token_hint is required", nil)
 	}
 
-	if _, ok := params["client_notification_token"]; ok {
-		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "ping and push delivery modes are not supported; only poll mode is available", nil)
+	notificationTokenRaw, hasNotificationToken := params["client_notification_token"]
+	switch client.BackchannelTokenDeliveryMode() {
+	case storage.BackchannelTokenDeliveryModePoll:
+		if hasNotificationToken {
+			return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "client_notification_token is not permitted for a client registered for poll delivery", nil)
+		}
+	case storage.BackchannelTokenDeliveryModePing:
+		if !hasNotificationToken {
+			return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "client_notification_token is required for a client registered for ping delivery", nil)
+		}
+		if _, err := jsonStringValue(notificationTokenRaw); err != nil {
+			return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "client_notification_token must be a string", err)
+		}
 	}
 
 	if raw, ok := params["binding_message"]; ok {

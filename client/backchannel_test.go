@@ -18,6 +18,7 @@ import (
 	"github.com/idfoundry/fapigo/internal/requestobject"
 	"github.com/idfoundry/fapigo/internal/token"
 	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // fakeCIBAAS simulates just enough of an authorization server's
@@ -288,6 +289,98 @@ func TestBeginBackchannelAuthenticationHappyPath(t *testing.T) {
 	}
 	if requestedExpiry != 90 {
 		t.Errorf("requested_expiry = %d, want 90", requestedExpiry)
+	}
+
+	// Regression guard: the default (Poll) delivery mode sends no
+	// client_notification_token at all, and the returned session's own
+	// NotificationToken() stays empty — see
+	// TestBeginBackchannelAuthenticationPingModeSendsNotificationToken
+	// for the Ping-mode counterpart.
+	if session.NotificationToken() != "" {
+		t.Errorf("NotificationToken() = %q, want empty under the default Poll delivery mode", session.NotificationToken())
+	}
+	if _, ok := obj.Parameter("client_notification_token"); ok {
+		t.Errorf("request object carries a client_notification_token claim under the default Poll delivery mode, want none")
+	}
+}
+
+// newTestClientWithCIBAPing mirrors newTestClientWithCIBA exactly,
+// except the client is configured
+// storage.BackchannelTokenDeliveryModePing instead of the default Poll.
+func newTestClientWithCIBAPing(t *testing.T) (*client.Client, *fakeCIBAAS, *httptest.Server) {
+	t.Helper()
+	as := newFakeCIBAAS(t)
+	ts := httptest.NewServer(as.handler())
+	t.Cleanup(ts.Close)
+
+	cfg := validConfig(t)
+	bcURL, err := fapi.ParseEndpointURL(ts.URL+"/backchannel-authenticate", fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseEndpointURL(backchannel-authenticate): %v", err)
+	}
+	tokenURL, err := fapi.ParseEndpointURL(ts.URL+"/token", fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseEndpointURL(token): %v", err)
+	}
+	cfg.Endpoints.Token = tokenURL
+	cfg.Endpoints.BackchannelAuthentication = bcURL
+	cfg.Algorithms.BackchannelAuthenticationRequest = fapi.ES256
+	cfg.Limits.BackchannelAuthenticationRequestLifetime = time.Minute
+	cfg.BackchannelTokenDeliveryMode = storage.BackchannelTokenDeliveryModePing
+
+	deps := validDependencies(t)
+	deps.HTTP = ts.Client()
+	deps.Keys = newFakeKeyManager(t,
+		keys.ClientAuthentication, keys.DPoPProofSigning, keys.BackchannelAuthenticationRequestSigning)
+	deps.IssuerKeys = &fakeIssuerKeySource{keys: map[keys.IssuerVerificationPurpose]crypto.PublicKey{
+		keys.IDTokenVerification: &as.idTokenKey.PublicKey,
+	}}
+
+	c, err := client.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	return c, as, ts
+}
+
+// TestBeginBackchannelAuthenticationPingModeSendsNotificationToken
+// covers Config.BackchannelTokenDeliveryMode == BackchannelTokenDeliveryModePing:
+// a client_notification_token claim is generated and sent, and the
+// returned session's own NotificationToken() exposes the exact same
+// value — the caller needs it to correlate an incoming ping callback
+// (CIBA §10.2) back to this session.
+func TestBeginBackchannelAuthenticationPingModeSendsNotificationToken(t *testing.T) {
+	c, as, _ := newTestClientWithCIBAPing(t)
+
+	session, err := c.BeginBackchannelAuthentication(context.Background(), client.BeginBackchannelAuthenticationRequest{
+		Scope:     []string{"openid"},
+		LoginHint: "user@example.com",
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+	if session.NotificationToken() == "" {
+		t.Fatalf("NotificationToken() is empty, want a generated value under BackchannelTokenDeliveryModePing")
+	}
+
+	requestJWT := as.lastBCForm.Get("request")
+	if requestJWT == "" {
+		t.Fatalf("request (signed request object) missing")
+	}
+	obj, err := requestobject.Parse(requestJWT)
+	if err != nil {
+		t.Fatalf("parse request object: %v", err)
+	}
+	raw, ok := obj.Parameter("client_notification_token")
+	if !ok {
+		t.Fatalf("request object missing client_notification_token claim")
+	}
+	var sentToken string
+	if err := json.Unmarshal(raw, &sentToken); err != nil {
+		t.Fatalf("client_notification_token claim is not a string: %v", err)
+	}
+	if sentToken != session.NotificationToken() {
+		t.Fatalf("sent client_notification_token = %q, want it to match session.NotificationToken() = %q", sentToken, session.NotificationToken())
 	}
 }
 

@@ -294,6 +294,9 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 		"invalid par dpop binding":    func(c *client.Config) { c.PARDPoPBinding = client.PARDPoPBinding(99) },
 		"invalid sender constrain":    func(c *client.Config) { c.SenderConstrain = storage.SenderConstrain(99) },
 		"invalid client auth method":  func(c *client.Config) { c.ClientAuthMethod = storage.ClientAuthMethod(99) },
+		"invalid backchannel token delivery mode": func(c *client.Config) {
+			c.BackchannelTokenDeliveryMode = storage.BackchannelTokenDeliveryMode(99)
+		},
 		"id_token key management set without content encryption": func(c *client.Config) {
 			c.Algorithms.IDTokenKeyManagement = fapi.RSAOAEP256
 		},

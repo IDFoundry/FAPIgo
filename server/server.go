@@ -261,6 +261,9 @@ func validateDependencies(cfg Config, deps Dependencies) error {
 	if cibaEnabled && deps.Backchannel == nil {
 		return fmt.Errorf("server: dependencies: backchannel is required when endpoints.backchannel_authentication is set")
 	}
+	if cibaEnabled && deps.BackchannelNotifier == nil {
+		return fmt.Errorf("server: dependencies: backchannel notifier is required when endpoints.backchannel_authentication is set")
+	}
 	if cfg.Assurance == AssuranceProduction {
 		if deps.Audit == nil {
 			return fmt.Errorf("server: dependencies: audit is required under AssuranceProduction")

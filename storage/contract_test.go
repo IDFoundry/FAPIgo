@@ -296,3 +296,100 @@ func (s *refAccessTokenStore) LookupAccessToken(_ context.Context, lookup storag
 func TestAccessTokenStoreContractAgainstReference(t *testing.T) {
 	storage.TestAccessTokenStoreContract(t, func() storage.AccessTokenStore { return newRefAccessTokenStore() })
 }
+
+type refBackchannelAuthenticationRecord struct {
+	record       storage.NewBackchannelAuthentication
+	status       storage.BackchannelAuthenticationStatus
+	subject      string
+	scope        []string
+	authTime     time.Time
+	acr          string
+	amr          []string
+	reason       string
+	redeemed     bool
+	polledBefore bool
+	lastPolledAt time.Time
+}
+
+type refBackchannelAuthenticationStore struct {
+	mu              sync.Mutex
+	byAuthReqIDHash map[[32]byte]*refBackchannelAuthenticationRecord
+	byHandleHash    map[[32]byte]*refBackchannelAuthenticationRecord
+}
+
+func newRefBackchannelAuthenticationStore() *refBackchannelAuthenticationStore {
+	return &refBackchannelAuthenticationStore{
+		byAuthReqIDHash: make(map[[32]byte]*refBackchannelAuthenticationRecord),
+		byHandleHash:    make(map[[32]byte]*refBackchannelAuthenticationRecord),
+	}
+}
+
+func (s *refBackchannelAuthenticationStore) CreateBackchannelAuthentication(_ context.Context, record storage.NewBackchannelAuthentication) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec := &refBackchannelAuthenticationRecord{record: record, status: storage.BackchannelAuthenticationPending}
+	s.byAuthReqIDHash[record.AuthReqIDHash] = rec
+	s.byHandleHash[record.HandleHash] = rec
+	return nil
+}
+
+func (s *refBackchannelAuthenticationStore) DecideBackchannelAuthentication(_ context.Context, decision storage.DecideBackchannelAuthentication) (storage.DecidedBackchannelAuthentication, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, ok := s.byHandleHash[decision.HandleHash]
+	if !ok {
+		return storage.DecidedBackchannelAuthentication{}, fmt.Errorf("unknown backchannel authentication handle")
+	}
+	if rec.status != storage.BackchannelAuthenticationPending {
+		return storage.DecidedBackchannelAuthentication{}, fmt.Errorf("backchannel authentication request already decided")
+	}
+	rec.status = decision.Status
+	rec.subject = decision.Subject
+	rec.scope = decision.Scope
+	rec.authTime = decision.AuthTime
+	rec.acr = decision.ACR
+	rec.amr = decision.AMR
+	rec.reason = decision.Reason
+	return storage.DecidedBackchannelAuthentication{
+		ClientID:                rec.record.ClientID,
+		DeliveryMode:            rec.record.DeliveryMode,
+		ClientNotificationToken: rec.record.ClientNotificationToken,
+	}, nil
+}
+
+func (s *refBackchannelAuthenticationStore) PollBackchannelAuthentication(_ context.Context, poll storage.PollBackchannelAuthentication) (storage.PolledBackchannelAuthentication, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, ok := s.byAuthReqIDHash[poll.AuthReqIDHash]
+	if !ok {
+		return storage.PolledBackchannelAuthentication{}, fmt.Errorf("unknown auth_req_id")
+	}
+	if rec.redeemed {
+		return storage.PolledBackchannelAuthentication{}, &storage.BackchannelAuthenticationAlreadyRedeemedError{}
+	}
+	if !poll.Now.Before(rec.record.ExpiresAt) {
+		return storage.PolledBackchannelAuthentication{}, &storage.BackchannelAuthenticationExpiredError{}
+	}
+	if rec.polledBefore && poll.Now.Sub(rec.lastPolledAt) < rec.record.PollInterval {
+		rec.lastPolledAt = poll.Now
+		return storage.PolledBackchannelAuthentication{}, &storage.BackchannelAuthenticationSlowDownError{}
+	}
+	rec.polledBefore = true
+	rec.lastPolledAt = poll.Now
+	if rec.status == storage.BackchannelAuthenticationApproved {
+		rec.redeemed = true
+	}
+	return storage.PolledBackchannelAuthentication{
+		Status: rec.status, ClientID: rec.record.ClientID,
+		Subject: rec.subject, Scope: rec.scope, AuthTime: rec.authTime, ACR: rec.acr, AMR: rec.amr,
+		TokenClaims: rec.record.TokenClaims, DPoPJKT: rec.record.DPoPJKT, Reason: rec.reason,
+		RequestedIDTokenClaims:  rec.record.RequestedIDTokenClaims,
+		RequestedUserinfoClaims: rec.record.RequestedUserinfoClaims,
+	}, nil
+}
+
+func TestBackchannelAuthenticationStoreContractAgainstReference(t *testing.T) {
+	storage.TestBackchannelAuthenticationStoreContract(t, func() storage.BackchannelAuthenticationStore {
+		return newRefBackchannelAuthenticationStore()
+	})
+}

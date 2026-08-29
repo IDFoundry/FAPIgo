@@ -71,6 +71,10 @@ func validateConfig(cfg Config) error {
 		cfg.ClientAuthMethod != storage.ClientAuthMethodTLSClientAuth {
 		return fmt.Errorf("client: config: client_auth_method is invalid")
 	}
+	if cfg.BackchannelTokenDeliveryMode != storage.BackchannelTokenDeliveryModePoll &&
+		cfg.BackchannelTokenDeliveryMode != storage.BackchannelTokenDeliveryModePing {
+		return fmt.Errorf("client: config: backchannel_token_delivery_mode is invalid")
+	}
 
 	// Algorithms.ClientAuthentication and Limits.ClientAssertionLifetime
 	// are required only under ClientAuthMethodPrivateKeyJWT — the two

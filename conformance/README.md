@@ -17,11 +17,12 @@ behaviour and negative-test expectations differ. See
   run scripts.
 - `server/` — OpenID Foundation FAPI 2.0 AS conformance configuration and
   run scripts.
-- `scripts/run-all.sh` — runs all six suites this repo has driver
-  support for (AS baseline, AS message-signing, AS ciba-mtls, RP
-  baseline, RP message-signing, RP ciba-mtls) against a locally running
-  suite and prints one combined summary. See the script's own header
-  comment for prerequisites and env vars.
+- `scripts/run-all.sh` — runs all nine suites this repo has driver
+  support for (AS baseline, AS message-signing, AS ciba-mtls, AS
+  ciba-ping, AS client-auth-mtls, RP baseline, RP message-signing, RP
+  ciba-mtls, RP client-auth-mtls) against a locally running suite and
+  prints one combined summary. See the script's own header comment for
+  prerequisites and env vars.
 - `resource/` — resource-server verification test vectors (DPoP proof
   validation, access-token binding checks) used outside the OIDF suite.
   The suite doesn't run its own dedicated resource-server conformance
@@ -96,12 +97,13 @@ uniform reason. Re-attempted live with `-mtls`
 token-endpoint MTLS wall is now fully resolved — every module reaches
 real token exchange and correctly performs this client's own ID-token
 validation against each negative-test perturbation (bad iss/aud/signature/alg,
-expired, missing claims). The suite's own per-module grade for most of
-these is still FAIL — full credit appears to need more of the flow than
-this driver currently completes — so this is still not part of
-`scripts/run-all.sh`. See
+expired, missing claims), with full suite-graded credit, not just a
+correct driver-side detection. **Confirmed live: 22/22 PASS.** Wired
+into `scripts/run-all.sh` as its own "RP ciba-mtls" leg. See
 [`client/scripts/README.md`](client/scripts/README.md#ciba--profileciba)
-for the full breakdown either way.
+for the full breakdown, including the four fixes (three driver-side,
+one genuine `client`/`internal/token` gap) that took the `-mtls`
+re-attempt from its first partial result to a clean 22/22.
 
 ## Access-token format coverage
 

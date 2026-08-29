@@ -180,6 +180,31 @@ func TestSmokeMTLSFlow(t *testing.T) {
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 
+	// metadataHandler's own mtls_endpoint_aliases.userinfo_endpoint
+	// merge branch: fapi2-security-profile-final-test-claims-parameter-identity-claims
+	// resolves userinfo_endpoint straight from discovery rather than a
+	// suite plan's own resource.resourceUrl override, so this alias is
+	// what makes that lookup land on the mTLS listener instead of the
+	// plain one (confirmed live against the OIDF suite; see
+	// buildMTLSUserinfoURL's own doc comment).
+	metadataRes, err := httpClient.Get(issuer.String() + "/.well-known/openid-configuration")
+	if err != nil {
+		t.Fatalf("GET metadata: %v", err)
+	}
+	var metadataDoc struct {
+		MTLSEndpointAliases struct {
+			UserinfoEndpoint string `json:"userinfo_endpoint"`
+		} `json:"mtls_endpoint_aliases"`
+	}
+	decodeErr := json.NewDecoder(metadataRes.Body).Decode(&metadataDoc)
+	metadataRes.Body.Close()
+	if decodeErr != nil {
+		t.Fatalf("decode metadata: %v", decodeErr)
+	}
+	if metadataDoc.MTLSEndpointAliases.UserinfoEndpoint != mtlsUserinfoURL.String() {
+		t.Errorf("mtls_endpoint_aliases.userinfo_endpoint = %q, want %q", metadataDoc.MTLSEndpointAliases.UserinfoEndpoint, mtlsUserinfoURL.String())
+	}
+
 	fetcher, err := fapihttp.New(httpClient, fapihttp.Config{
 		MaxResponseBytes: 1 << 20, RequestTimeout: 10 * time.Second, MaxRedirects: 0,
 		AllowLoopbackHTTP: true,

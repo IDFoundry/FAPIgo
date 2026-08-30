@@ -27,6 +27,16 @@ import (
 // selfSignedCert helper uses for the server-cert side.
 func selfSignedTestClientCert(t *testing.T) *x509.Certificate {
 	t.Helper()
+	return selfSignedTestClientCertWithSAN(t, func(*x509.Certificate) {})
+}
+
+// selfSignedTestClientCertWithSAN mirrors selfSignedTestClientCert
+// exactly, but lets a caller populate the certificate's own
+// subjectAltName entries (DNSNames/URIs/IPAddresses/EmailAddresses)
+// before it's signed — for exercising the four SAN-based
+// ClientAuthMethodTLSClientAuthSAN* variants (see client_auth_mtls_test.go).
+func selfSignedTestClientCertWithSAN(t *testing.T, mutate func(*x509.Certificate)) *x509.Certificate {
+	t.Helper()
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
@@ -43,6 +53,7 @@ func selfSignedTestClientCert(t *testing.T) *x509.Certificate {
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 	}
+	mutate(template)
 	der, err := x509.CreateCertificate(rand.Reader, template, template, &priv.PublicKey, priv)
 	if err != nil {
 		t.Fatalf("create certificate: %v", err)

@@ -172,6 +172,54 @@ func TestNewRegisteredClientAuthMethodTLSClientAuth(t *testing.T) {
 	}
 }
 
+func TestNewRegisteredClientAuthMethodTLSClientAuthSAN(t *testing.T) {
+	cases := []struct {
+		name     string
+		method   ClientAuthMethod
+		cfg      RegisteredClientConfig
+		accessor func(RegisteredClient) string
+	}{
+		{
+			name: "SANDNS", method: ClientAuthMethodTLSClientAuthSANDNS,
+			cfg:      RegisteredClientConfig{ExpectedSANDNS: "client.example.com"},
+			accessor: RegisteredClient.ExpectedSANDNS,
+		},
+		{
+			name: "SANURI", method: ClientAuthMethodTLSClientAuthSANURI,
+			cfg:      RegisteredClientConfig{ExpectedSANURI: "https://client.example.com/id"},
+			accessor: RegisteredClient.ExpectedSANURI,
+		},
+		{
+			name: "SANIP", method: ClientAuthMethodTLSClientAuthSANIP,
+			cfg:      RegisteredClientConfig{ExpectedSANIP: "203.0.113.5"},
+			accessor: RegisteredClient.ExpectedSANIP,
+		},
+		{
+			name: "SANEmail", method: ClientAuthMethodTLSClientAuthSANEmail,
+			cfg:      RegisteredClientConfig{ExpectedSANEmail: "client@example.com"},
+			accessor: RegisteredClient.ExpectedSANEmail,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := tc.cfg
+			cfg.ID = "client-123"
+			cfg.RedirectURIs = []fapi.RegisteredRedirectURI{"https://rp.example/callback"}
+			cfg.ClientAuthMethod = tc.method
+			c, err := NewRegisteredClient(cfg)
+			if err != nil {
+				t.Fatalf("NewRegisteredClient: %v", err)
+			}
+			if c.ClientAuthMethod() != tc.method {
+				t.Fatalf("ClientAuthMethod() = %v, want %v", c.ClientAuthMethod(), tc.method)
+			}
+			if got := tc.accessor(c); got == "" {
+				t.Fatalf("accessor returned empty string")
+			}
+		})
+	}
+}
+
 func TestNewRegisteredClientRejectsInvalid(t *testing.T) {
 	cases := []RegisteredClientConfig{
 		{RedirectURIs: []fapi.RegisteredRedirectURI{"https://rp.example/callback"}, ClientAssertionAlgorithm: fapi.ES256},
@@ -246,6 +294,31 @@ func TestNewRegisteredClientRejectsInvalid(t *testing.T) {
 			// ClientAuthMethodTLSClientAuth without ExpectedSubjectDN.
 			ID: "client-123", RedirectURIs: []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
 			ClientAuthMethod: ClientAuthMethodTLSClientAuth,
+		},
+		{
+			// ClientAuthMethodTLSClientAuthSANDNS without ExpectedSANDNS.
+			ID: "client-123", RedirectURIs: []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+			ClientAuthMethod: ClientAuthMethodTLSClientAuthSANDNS,
+		},
+		{
+			// ClientAuthMethodTLSClientAuthSANURI without ExpectedSANURI.
+			ID: "client-123", RedirectURIs: []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+			ClientAuthMethod: ClientAuthMethodTLSClientAuthSANURI,
+		},
+		{
+			// ClientAuthMethodTLSClientAuthSANIP without ExpectedSANIP.
+			ID: "client-123", RedirectURIs: []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+			ClientAuthMethod: ClientAuthMethodTLSClientAuthSANIP,
+		},
+		{
+			// ClientAuthMethodTLSClientAuthSANIP with an unparseable ExpectedSANIP.
+			ID: "client-123", RedirectURIs: []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+			ClientAuthMethod: ClientAuthMethodTLSClientAuthSANIP, ExpectedSANIP: "not-an-ip",
+		},
+		{
+			// ClientAuthMethodTLSClientAuthSANEmail without ExpectedSANEmail.
+			ID: "client-123", RedirectURIs: []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+			ClientAuthMethod: ClientAuthMethodTLSClientAuthSANEmail,
 		},
 	}
 	for i, c := range cases {

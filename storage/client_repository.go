@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"net"
 
 	fapi "github.com/idfoundry/fapigo"
 )
@@ -45,14 +46,44 @@ const (
 
 	// ClientAuthMethodTLSClientAuth authenticates by exact string match
 	// of the presented certificate's subject DN against ExpectedSubjectDN
-	// — RFC 8705 §2.1's "tls_client_auth_subject_dn", the one subject-
-	// matching rule this package implements of the four §2.1 defines
-	// (san_dns/san_uri/san_ip/san_email are not implemented). This
-	// package does not itself validate the certificate against a CA
+	// — RFC 8705 §2.1's "tls_client_auth_subject_dn", one of the five
+	// subject-matching rules §2.1 defines (see the four
+	// ClientAuthMethodTLSClientAuthSAN* values below for the others).
+	// This package does not itself validate the certificate against a CA
 	// trust store — that's a deployment/adapter concern
 	// (tls.Config.ClientCAs), the same posture SenderConstrainMTLS
 	// already documents for sender-constraining.
 	ClientAuthMethodTLSClientAuth
+
+	// ClientAuthMethodTLSClientAuthSANDNS authenticates by exact match
+	// of ExpectedSANDNS against one of the presented certificate's
+	// subjectAltName dNSName entries — RFC 8705 §2.1's
+	// "tls_client_auth_san_dns". Same no-CA-validation posture as
+	// ClientAuthMethodTLSClientAuth.
+	ClientAuthMethodTLSClientAuthSANDNS
+
+	// ClientAuthMethodTLSClientAuthSANURI authenticates by exact match
+	// of ExpectedSANURI against one of the presented certificate's
+	// subjectAltName uniformResourceIdentifier entries — RFC 8705
+	// §2.1's "tls_client_auth_san_uri". Same no-CA-validation posture as
+	// ClientAuthMethodTLSClientAuth.
+	ClientAuthMethodTLSClientAuthSANURI
+
+	// ClientAuthMethodTLSClientAuthSANIP authenticates by match of
+	// ExpectedSANIP against one of the presented certificate's
+	// subjectAltName iPAddress entries — RFC 8705 §2.1's
+	// "tls_client_auth_san_ip". Compared as parsed net.IP values (not a
+	// bare string), so equivalent representations of the same address
+	// (e.g. an IPv4 address written in its IPv4-in-IPv6 form) still
+	// match. Same no-CA-validation posture as ClientAuthMethodTLSClientAuth.
+	ClientAuthMethodTLSClientAuthSANIP
+
+	// ClientAuthMethodTLSClientAuthSANEmail authenticates by exact
+	// match of ExpectedSANEmail against one of the presented
+	// certificate's subjectAltName rfc822Name entries — RFC 8705 §2.1's
+	// "tls_client_auth_san_email". Same no-CA-validation posture as
+	// ClientAuthMethodTLSClientAuth.
+	ClientAuthMethodTLSClientAuthSANEmail
 )
 
 // BackchannelTokenDeliveryMode is the closed set of mechanisms this
@@ -90,6 +121,10 @@ type RegisteredClient struct {
 	clientAuthMethod              ClientAuthMethod
 	expectedCertificateThumbprint string
 	expectedSubjectDN             string
+	expectedSANDNS                string
+	expectedSANURI                string
+	expectedSANIP                 string
+	expectedSANEmail              string
 	allowedScopes                 map[string]struct{}
 
 	idTokenEncryptionKeyManagement     fapi.KeyManagementAlgorithm
@@ -134,6 +169,26 @@ type RegisteredClientConfig struct {
 	// serializes the client's actual certificate. Required only when
 	// ClientAuthMethod is ClientAuthMethodTLSClientAuth.
 	ExpectedSubjectDN string
+
+	// ExpectedSANDNS/ExpectedSANURI/ExpectedSANEmail are exact-string
+	// matches against one of the client's certificate's subjectAltName
+	// dNSName/uniformResourceIdentifier/rfc822Name entries (RFC 8705
+	// §2.1's "tls_client_auth_san_dns"/"_san_uri"/"_san_email") —
+	// required only when ClientAuthMethod is the corresponding
+	// ClientAuthMethodTLSClientAuthSANDNS/SANURI/SANEmail. Compared via
+	// Go's own crypto/x509.Certificate.URIs[i].String() for the URI
+	// case, no further normalization for DNS/email.
+	ExpectedSANDNS   string
+	ExpectedSANURI   string
+	ExpectedSANEmail string
+
+	// ExpectedSANIP is this client's certificate's expected
+	// subjectAltName iPAddress entry (RFC 8705 §2.1's
+	// "tls_client_auth_san_ip") — any string net.ParseIP accepts.
+	// Compared as a parsed net.IP, not a bare string, so equivalent
+	// representations of the same address still match. Required only
+	// when ClientAuthMethod is ClientAuthMethodTLSClientAuthSANIP.
+	ExpectedSANIP string
 
 	// RequestObjectAlgorithm is the only algorithm this client's signed
 	// request objects are accepted under. Leave zero if the client is
@@ -219,6 +274,25 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 		if cfg.ExpectedSubjectDN == "" {
 			return RegisteredClient{}, fmt.Errorf("storage: client %q must set ExpectedSubjectDN for tls_client_auth", cfg.ID)
 		}
+	case ClientAuthMethodTLSClientAuthSANDNS:
+		if cfg.ExpectedSANDNS == "" {
+			return RegisteredClient{}, fmt.Errorf("storage: client %q must set ExpectedSANDNS for tls_client_auth_san_dns", cfg.ID)
+		}
+	case ClientAuthMethodTLSClientAuthSANURI:
+		if cfg.ExpectedSANURI == "" {
+			return RegisteredClient{}, fmt.Errorf("storage: client %q must set ExpectedSANURI for tls_client_auth_san_uri", cfg.ID)
+		}
+	case ClientAuthMethodTLSClientAuthSANIP:
+		if cfg.ExpectedSANIP == "" {
+			return RegisteredClient{}, fmt.Errorf("storage: client %q must set ExpectedSANIP for tls_client_auth_san_ip", cfg.ID)
+		}
+		if net.ParseIP(cfg.ExpectedSANIP) == nil {
+			return RegisteredClient{}, fmt.Errorf("storage: client %q has an invalid ExpectedSANIP %q", cfg.ID, cfg.ExpectedSANIP)
+		}
+	case ClientAuthMethodTLSClientAuthSANEmail:
+		if cfg.ExpectedSANEmail == "" {
+			return RegisteredClient{}, fmt.Errorf("storage: client %q must set ExpectedSANEmail for tls_client_auth_san_email", cfg.ID)
+		}
 	default:
 		return RegisteredClient{}, fmt.Errorf("storage: client %q has an invalid client auth method", cfg.ID)
 	}
@@ -293,6 +367,10 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 		clientAuthMethod:                          cfg.ClientAuthMethod,
 		expectedCertificateThumbprint:             cfg.ExpectedCertificateThumbprint,
 		expectedSubjectDN:                         cfg.ExpectedSubjectDN,
+		expectedSANDNS:                            cfg.ExpectedSANDNS,
+		expectedSANURI:                            cfg.ExpectedSANURI,
+		expectedSANIP:                             cfg.ExpectedSANIP,
+		expectedSANEmail:                          cfg.ExpectedSANEmail,
 		allowedScopes:                             scopes,
 		idTokenEncryptionKeyManagement:            cfg.IDTokenEncryptionKeyManagement,
 		idTokenEncryptionContentEncryption:        cfg.IDTokenEncryptionContentEncryption,
@@ -354,6 +432,33 @@ func (c RegisteredClient) ExpectedCertificateThumbprint() string {
 // certificate must match under ClientAuthMethodTLSClientAuth.
 func (c RegisteredClient) ExpectedSubjectDN() string {
 	return c.expectedSubjectDN
+}
+
+// ExpectedSANDNS returns the subjectAltName dNSName entry this client's
+// TLS certificate must carry under ClientAuthMethodTLSClientAuthSANDNS.
+func (c RegisteredClient) ExpectedSANDNS() string {
+	return c.expectedSANDNS
+}
+
+// ExpectedSANURI returns the subjectAltName uniformResourceIdentifier
+// entry this client's TLS certificate must carry under
+// ClientAuthMethodTLSClientAuthSANURI.
+func (c RegisteredClient) ExpectedSANURI() string {
+	return c.expectedSANURI
+}
+
+// ExpectedSANIP returns the subjectAltName iPAddress entry this
+// client's TLS certificate must carry under
+// ClientAuthMethodTLSClientAuthSANIP.
+func (c RegisteredClient) ExpectedSANIP() string {
+	return c.expectedSANIP
+}
+
+// ExpectedSANEmail returns the subjectAltName rfc822Name entry this
+// client's TLS certificate must carry under
+// ClientAuthMethodTLSClientAuthSANEmail.
+func (c RegisteredClient) ExpectedSANEmail() string {
+	return c.expectedSANEmail
 }
 
 // IDTokenEncryption returns the algorithms this client's ID tokens must

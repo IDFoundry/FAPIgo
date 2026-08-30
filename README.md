@@ -53,13 +53,6 @@ core.
 > `resource` has not been run against a dedicated OIDF plan (only
 > indirectly, as a stand-in the AS plan's own happy-flow module calls).
 
-## Known limitations
-
-- mTLS client authentication (RFC 8705 §2) binds a client by
-  Distinguished Name (DN) only — the alternative subject-alternative-name
-  bindings (`san_dns`, `san_uri`, `san_ip`, `san_email`) are not
-  implemented (`storage/client_repository.go`).
-
 ```go
 import (
     "github.com/idfoundry/fapigo/client"

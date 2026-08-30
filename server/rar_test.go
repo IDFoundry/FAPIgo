@@ -311,6 +311,174 @@ func TestPushAuthorizationRequestRejectsAuthorizationDetailsWithoutRARConfigured
 	}
 }
 
+func TestPushAuthorizationRequestRejectsMalformedAuthorizationDetails(t *testing.T) {
+	h := newHarnessWithRAR(t, server.ProfileFAPISecurity, newTestRARRegistry(t))
+
+	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: plainFormParameters(t, h.clientAssertion(t), map[string]string{
+			// A JSON object, not an array — RFC 9396 §5 requires an array
+			// of detail objects.
+			"authorization_details": `{"type":"payment","actions":["approve"]}`,
+		})},
+	})
+	if err == nil {
+		t.Fatalf("PushAuthorizationRequest = nil error, want error (authorization_details must be a JSON array)")
+	}
+	if serverErrorCode(t, err) != server.ErrorInvalidRequest {
+		t.Fatalf("error code = %v, want %v", serverErrorCode(t, err), server.ErrorInvalidRequest)
+	}
+}
+
+func TestBeginAuthorizationAuthorizationDetailsAbsentWhenNotRequested(t *testing.T) {
+	h := newHarnessWithRAR(t, server.ProfileFAPISecurity, newTestRARRegistry(t))
+	action := pushAndBegin(t, h, nil)
+	interaction, ok := action.(server.InteractionRequired)
+	if !ok {
+		t.Fatalf("action = %T, want server.InteractionRequired", action)
+	}
+	details, err := extension.RARGet(interaction.Interaction.AuthorizationDetails, paymentRARDef)
+	if err != nil {
+		t.Fatalf("RARGet: %v", err)
+	}
+	if len(details) != 0 {
+		t.Fatalf("RARGet returned %d objects, want 0 (request carried no authorization_details)", len(details))
+	}
+}
+
+func TestCompleteAuthorizationRejectsAuthorizationDetailsGrantedButNeverRequested(t *testing.T) {
+	h := newHarnessWithRAR(t, server.ProfileFAPISecurity, newTestRARRegistry(t))
+	// The pushed request carries no authorization_details at all.
+	action := pushAndBegin(t, h, nil)
+	interaction := action.(server.InteractionRequired)
+
+	subject, authCtx := rarSubjectAndAuthCtx(t, h.now)
+	result, err := h.server.CompleteAuthorization(context.Background(), server.CompleteAuthorizationRequest{
+		Handle: interaction.Handle,
+		Result: server.Authorize(subject, authCtx, server.GrantedAuthorization{
+			Scope: []string{"openid", "accounts"},
+			AuthorizationDetails: []json.RawMessage{
+				json.RawMessage(`{"type":"payment","actions":["approve"],"amount":"SGD 1.00"}`),
+			},
+		}),
+	})
+	if err != nil {
+		t.Fatalf("CompleteAuthorization: %v", err)
+	}
+	localErr, ok := result.(server.AuthorizationLocalError)
+	if !ok {
+		t.Fatalf("result = %T, want server.AuthorizationLocalError", result)
+	}
+	if localErr.Error.Code() != server.ErrorInvalidRequest {
+		t.Fatalf("Error.Code() = %v, want %v", localErr.Error.Code(), server.ErrorInvalidRequest)
+	}
+}
+
+func TestCompleteAuthorizationRejectsGrantedUnregisteredType(t *testing.T) {
+	h := newHarnessWithRAR(t, server.ProfileFAPISecurity, newTestRARRegistry(t))
+
+	pushResult, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: plainFormParameters(t, h.clientAssertion(t), map[string]string{
+			"authorization_details": `[{"type":"payment","actions":["approve"]}]`,
+		})},
+	})
+	if err != nil {
+		t.Fatalf("PushAuthorizationRequest: %v", err)
+	}
+	action, err := h.server.BeginAuthorization(context.Background(), server.BeginAuthorizationRequest{
+		RequestURI: pushResult.RequestURI.String(), ClientID: testClientID,
+	})
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+	interaction := action.(server.InteractionRequired)
+
+	// Granting an object of a type this RARRegistry never registered at
+	// all (not merely one absent from this particular request) must be
+	// rejected the same way an unrequested object of a known type is.
+	subject, authCtx := rarSubjectAndAuthCtx(t, h.now)
+	result, err := h.server.CompleteAuthorization(context.Background(), server.CompleteAuthorizationRequest{
+		Handle: interaction.Handle,
+		Result: server.Authorize(subject, authCtx, server.GrantedAuthorization{
+			Scope: []string{"openid", "accounts"},
+			AuthorizationDetails: []json.RawMessage{
+				json.RawMessage(`{"type":"account_information","permissions":["ReadAccountsDetail"]}`),
+			},
+		}),
+	})
+	if err != nil {
+		t.Fatalf("CompleteAuthorization: %v", err)
+	}
+	localErr, ok := result.(server.AuthorizationLocalError)
+	if !ok {
+		t.Fatalf("result = %T, want server.AuthorizationLocalError", result)
+	}
+	if localErr.Error.Code() != server.ErrorInvalidRequest {
+		t.Fatalf("Error.Code() = %v, want %v", localErr.Error.Code(), server.ErrorInvalidRequest)
+	}
+}
+
+// TestExchangeAuthorizationCodeMergesAuthorizationDetailsWithExistingTokenClaims
+// covers withAuthorizationDetails merging into an already-non-empty
+// claims map — the request here also asks for a userinfo claim via the
+// standard "claims" parameter (OIDC Core §5.5), so
+// withRequestedUserinfoClaims has already populated the access token's
+// claims map by the time withAuthorizationDetails runs.
+func TestExchangeAuthorizationCodeMergesAuthorizationDetailsWithExistingTokenClaims(t *testing.T) {
+	h := newHarnessWithRAR(t, server.ProfileFAPISecurity, newTestRARRegistry(t))
+
+	pushResult, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: plainFormParameters(t, h.clientAssertion(t), map[string]string{
+			"authorization_details": `[{"type":"payment","actions":["approve"],"amount":"SGD 10.00"}]`,
+			"claims":                `{"userinfo":{"email":null}}`,
+		})},
+	})
+	if err != nil {
+		t.Fatalf("PushAuthorizationRequest: %v", err)
+	}
+	action, err := h.server.BeginAuthorization(context.Background(), server.BeginAuthorizationRequest{
+		RequestURI: pushResult.RequestURI.String(), ClientID: testClientID,
+	})
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+	interaction := action.(server.InteractionRequired)
+	details, err := extension.RARGet(interaction.Interaction.AuthorizationDetails, paymentRARDef)
+	if err != nil {
+		t.Fatalf("RARGet: %v", err)
+	}
+
+	subject, authCtx := rarSubjectAndAuthCtx(t, h.now)
+	result, err := h.server.CompleteAuthorization(context.Background(), server.CompleteAuthorizationRequest{
+		Handle: interaction.Handle,
+		Result: server.Authorize(subject, authCtx, server.GrantedAuthorization{
+			Scope:                []string{"openid", "accounts"},
+			AuthorizationDetails: []json.RawMessage{mustMarshal(t, details[0].Fields)},
+		}),
+	})
+	if err != nil {
+		t.Fatalf("CompleteAuthorization: %v", err)
+	}
+	redirect := result.(server.AuthorizationRedirect)
+	dest := redirect.Destination().URL()
+	code := dest.Query().Get("code")
+
+	dpopKey := generateKey(t)
+	exchangeResult, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
+		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProof: createDPoPProof(t, dpopKey, h.now),
+	})
+	if err != nil {
+		t.Fatalf("ExchangeAuthorizationCode: %v", err)
+	}
+	if len(exchangeResult.AuthorizationDetails) == 0 {
+		t.Fatalf("TokenResult.AuthorizationDetails is empty")
+	}
+	claim := authorizationDetailsAccessTokenClaim(t, exchangeResult.AccessToken.Reveal(), &h.serverKey.PublicKey)
+	if len(claim) == 0 {
+		t.Fatalf("access token authorization_details claim is empty")
+	}
+}
+
 // --- PAR (signed request object path) ------------------------------------
 
 func TestPushAuthorizationRequestJARAuthorizationDetailsAccepted(t *testing.T) {

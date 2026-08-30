@@ -65,11 +65,7 @@ func (h *consentHandler) handleBegin(w http.ResponseWriter, r *http.Request) {
 
 	switch action := action.(type) {
 	case server.InteractionRequired:
-		approved, err := approvedAuthorizationDetails(action.Interaction.AuthorizationDetails)
-		if err != nil {
-			writeLocalHTMLErrorRaw(w, http.StatusInternalServerError, "server_error", "failed to process authorization_details")
-			return
-		}
+		approved := approvedAuthorizationDetails(action.Interaction.AuthorizationDetails)
 		h.mu.Lock()
 		h.pending[action.Handle.String()] = pendingAuthorization{handle: action.Handle, authorizationDetails: approved}
 		h.mu.Unlock()

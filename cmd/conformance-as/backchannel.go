@@ -71,11 +71,7 @@ func (h *backchannelHandler) handleAuthenticate(w http.ResponseWriter, r *http.R
 
 	switch action := action.(type) {
 	case server.BackchannelInteractionRequired:
-		approved, approveErr := approvedAuthorizationDetails(action.Interaction.AuthorizationDetails)
-		if approveErr != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
+		approved := approvedAuthorizationDetails(action.Interaction.AuthorizationDetails)
 		h.mu.Lock()
 		h.pending[action.AuthReqID.String()] = pendingBackchannelAuthentication{
 			handle: action.Handle, scope: action.Interaction.Scope, authorizationDetails: approved,

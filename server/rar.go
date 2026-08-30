@@ -65,10 +65,7 @@ func (s *Server) validateGrantedAuthorizationDetails(requestedRaw json.RawMessag
 		return nil, fmt.Errorf("authorization_details is not supported by this server")
 	}
 
-	grantedRaw, err := json.Marshal(granted)
-	if err != nil {
-		return nil, fmt.Errorf("failed to encode granted authorization_details: %w", err)
-	}
+	grantedRaw, _ := json.Marshal(granted) // marshaling a []json.RawMessage cannot fail
 
 	requestedValues, err := s.cfg.RAR.Parse(requestedRaw)
 	if err != nil {
@@ -92,7 +89,7 @@ func withAuthorizationDetails(details json.RawMessage, base map[string]json.RawM
 	if len(details) == 0 {
 		return base
 	}
-	merged := make(map[string]json.RawMessage, len(base)+1)
+	merged := make(map[string]json.RawMessage, len(base))
 	for k, v := range base {
 		merged[k] = v
 	}

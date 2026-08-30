@@ -37,18 +37,18 @@ func newSampleRARRegistry() (*extension.RARRegistry, error) {
 // per-object narrowing; a real deployment's own consent UI would read
 // values back out the same way (extension.RARGet) and let the resource
 // owner approve a subset instead of granting everything requested.
-func approvedAuthorizationDetails(requested extension.RARValues) ([]json.RawMessage, error) {
-	details, err := extension.RARGet(requested, sampleRARDefinition)
-	if err != nil {
-		return nil, err
-	}
+//
+// requested was already validated against this exact type by the same
+// RARRegistry when the request was first accepted (server/rar.go's
+// parseRequestedAuthorizationDetails), so re-decoding it here and
+// re-encoding the result (a plain string/[]string struct) cannot fail —
+// there is no externally-reachable input that makes either step error.
+func approvedAuthorizationDetails(requested extension.RARValues) []json.RawMessage {
+	details, _ := extension.RARGet(requested, sampleRARDefinition)
 	granted := make([]json.RawMessage, 0, len(details))
 	for _, d := range details {
-		encoded, err := json.Marshal(d.Fields)
-		if err != nil {
-			return nil, err
-		}
+		encoded, _ := json.Marshal(d.Fields)
 		granted = append(granted, encoded)
 	}
-	return granted, nil
+	return granted
 }

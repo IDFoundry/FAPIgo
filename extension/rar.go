@@ -128,6 +128,45 @@ func RARGet[T any](values RARValues, def RARDefinition[T]) ([]RARDetail[T], erro
 	return out, nil
 }
 
+// RARSet encodes v as one authorization_details detail object, ready to
+// append to an outgoing array (e.g.
+// client.BeginAuthorizationRequest.AuthorizationDetails) — RARGet's
+// write-side counterpart. def.Type is always stamped into the result's
+// "type" member, overriding whatever T's own JSON encoding produced for
+// it (or adding it, if T has no such field at all) — the one thing a
+// bare json.Marshal(v) can't do on its own, so a caller's struct never
+// has to declare and keep in sync its own redundant Type string field.
+//
+// Unlike Set, there is no MaxBytes/Validate check here: those bound and
+// validate data an authorization server doesn't trust from a client:
+// RARSet runs on the sending side, encoding data the caller just
+// constructed itself, so there is nothing to validate against.
+func RARSet[T any](def RARDefinition[T], v T) (json.RawMessage, error) {
+	encoded, err := json.Marshal(v)
+	if err != nil {
+		return nil, fmt.Errorf("extension: authorization_details type %q: %w", def.Type, err)
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &obj); err != nil {
+		return nil, fmt.Errorf("extension: authorization_details type %q: value must encode as a JSON object: %w", def.Type, err)
+	}
+	if obj == nil {
+		// encoded was the literal "null" (e.g. T is a nil pointer type) —
+		// valid JSON, so Unmarshal above didn't error, but not a JSON
+		// object either.
+		return nil, fmt.Errorf("extension: authorization_details type %q: value must encode as a JSON object", def.Type)
+	}
+	typeValue, _ := json.Marshal(def.Type) // marshaling a string cannot fail
+	obj["type"] = typeValue
+	// Every value in obj is already valid JSON — either captured verbatim
+	// by the Unmarshal above (each json.RawMessage decode target only
+	// ever holds one already-well-formed sub-value) or typeValue,
+	// freshly marshaled just above — so re-marshaling the map cannot
+	// fail.
+	out, _ := json.Marshal(obj)
+	return out, nil
+}
+
 // RARRegistry is an immutable set of registered RARDefinitions, plus the
 // bounds that apply to the authorization_details array as a whole.
 type RARRegistry struct {

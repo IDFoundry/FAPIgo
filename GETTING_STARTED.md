@@ -86,6 +86,15 @@ client, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
 })
 ```
 
+`"openid"` isn't required by this library at all: an ID token is only
+ever issued alongside the access token when the *granted* scope happens
+to include `"openid"` (see `server`'s own package doc comment) — this
+walkthrough includes it, and wires `keys.IDTokenSigning` in step 4,
+purely because that's the more complete example to show. A deployment
+that only needs access tokens — no identity layer — can drop `"openid"`
+from `AllowedScopes` entirely and run as plain OAuth 2.0 + FAPI 2.0;
+nothing else here changes.
+
 ## 4. Wire `Dependencies` and construct the server
 
 ```go

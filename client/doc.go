@@ -10,6 +10,20 @@
 // objects and PAR submissions; verifying them is the server package's
 // responsibility.
 //
+// OpenID Connect identity (an ID token, Subject, IDTokenClaims) is
+// entirely optional and driven purely by what the authorization server
+// actually granted, never assumed by this package: ExchangeCode and
+// PollBackchannelAuthentication populate TokenSet.IDToken/Subject/
+// IDTokenClaims only when the token response actually carried an
+// id_token (which, per the FAPI 2.0 authorization server this package
+// targets, happens exactly when "openid" was included in the granted
+// scope — see server's own package doc comment for that side of the
+// contract) and leave TokenSet.HasIDToken false otherwise, which is a
+// normal outcome, not an error. A caller that only needs access
+// tokens — no identity layer at all — can omit "openid" from
+// BeginAuthorizationRequest.Scope entirely and use this package as a
+// plain OAuth 2.0 + FAPI 2.0 client.
+//
 // FetchUserInfo, VerifyIssuerJWS and ProtectedResource (via
 // ResourceClient.Do) are the deliberate exceptions: a caller that
 // reaches a protected resource beyond token issuance (the UserInfo

@@ -96,6 +96,15 @@ opaque, storage-backed values (`server.OpaqueAccessTokens`/
 `resource.OpaqueAccessTokens`) — FAPI 2.0 doesn't mandate a format, so
 this is a deployment's own choice, not something the library imposes.
 
+OpenID Connect identity (an ID token) is likewise optional, not
+assumed: `server` issues one alongside the access token exactly when
+the granted scope includes `"openid"`, and `client` populates
+`TokenSet.IDToken`/`Subject`/`IDTokenClaims` exactly when the token
+response actually carried one — leaving `TokenSet.HasIDToken` false is
+a normal outcome, not an error. A deployment that only needs access
+tokens can drop `"openid"` from a client's `AllowedScopes` entirely and
+run this library as plain OAuth 2.0 + FAPI 2.0.
+
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design rationale and
 package layout, and [conformance/](conformance/README.md) for how each
 role is tested against the OpenID Foundation conformance suite.

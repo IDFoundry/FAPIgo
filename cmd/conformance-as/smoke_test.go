@@ -21,6 +21,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/client"
+	"github.com/idfoundry/fapigo/extension"
 	"github.com/idfoundry/fapigo/fapihttp"
 	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/keys"
@@ -511,9 +512,11 @@ func TestSmokeAuthorizationCodeFlowWithAuthorizationDetails(t *testing.T) {
 	h := newSmokeHarness(t, AccessTokenFormatJWT)
 	ctx := context.Background()
 	scope := []string{"openid", "accounts"}
-	authorizationDetails := []json.RawMessage{
-		json.RawMessage(`{"type":"transaction_approval","actions":["approve"],"amount":"SGD 500.00"}`),
+	detail, err := extension.RARSet(sampleRARDefinition, sampleTransactionApprovalDetail{Actions: []string{"approve"}, Amount: "SGD 500.00"})
+	if err != nil {
+		t.Fatalf("RARSet: %v", err)
 	}
+	authorizationDetails := []json.RawMessage{detail}
 
 	handle := h.runToConsentWithAuthorizationDetails(ctx, scope, authorizationDetails)
 	rawQuery := h.submitDecision(ctx, handle, "approve", scope)
@@ -753,11 +756,13 @@ func TestSmokeCIBAFlowWithAuthorizationDetails(t *testing.T) {
 	h := newSmokeHarnessWithOptions(t, AccessTokenFormatJWT, false, false, true)
 	ctx := context.Background()
 
+	detail, err := extension.RARSet(sampleRARDefinition, sampleTransactionApprovalDetail{Actions: []string{"approve"}, Amount: "SGD 500.00"})
+	if err != nil {
+		t.Fatalf("RARSet: %v", err)
+	}
 	session, err := h.client.BeginBackchannelAuthentication(ctx, client.BeginBackchannelAuthenticationRequest{
 		Scope: []string{"openid", "accounts"}, LoginHint: smokeSubject,
-		AuthorizationDetails: []json.RawMessage{
-			json.RawMessage(`{"type":"transaction_approval","actions":["approve"],"amount":"SGD 500.00"}`),
-		},
+		AuthorizationDetails: []json.RawMessage{detail},
 	})
 	if err != nil {
 		t.Fatalf("BeginBackchannelAuthentication: %v", err)

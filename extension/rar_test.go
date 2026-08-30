@@ -3,6 +3,7 @@ package extension_test
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"strings"
 	"testing"
 
@@ -333,5 +334,102 @@ func TestRARRegistryValidateGrantRejectsTypeNeverRequested(t *testing.T) {
 	}
 	if err := reg.ValidateGrant(requested, granted); err == nil {
 		t.Fatalf("ValidateGrant(type never requested) = nil error, want error")
+	}
+}
+
+// --- RARSet ---------------------------------------------------------------
+
+// bareInstructedAmount deliberately has no "type" field at all, to prove
+// RARSet adds the discriminator itself rather than requiring the
+// caller's struct to declare and keep it in sync.
+type bareInstructedAmount struct {
+	InstructedAmt string `json:"instructed_amount"`
+}
+
+func TestRARSetStampsTypeOnStructWithoutOwnTypeField(t *testing.T) {
+	def := extension.RARDefinition[bareInstructedAmount]{
+		Type: "payment_initiation", MaxObjects: 5, MaxBytesPerObject: 512,
+	}
+	raw, err := extension.RARSet(def, bareInstructedAmount{InstructedAmt: "100.00"})
+	if err != nil {
+		t.Fatalf("RARSet: %v", err)
+	}
+	var got struct {
+		Type          string `json:"type"`
+		InstructedAmt string `json:"instructed_amount"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal RARSet output: %v", err)
+	}
+	if got.Type != "payment_initiation" || got.InstructedAmt != "100.00" {
+		t.Fatalf("RARSet output = %+v, want type=payment_initiation instructed_amount=100.00", got)
+	}
+}
+
+func TestRARSetOverridesMismatchedTypeField(t *testing.T) {
+	// paymentDef.Type is "payment_initiation" — construct a value that
+	// disagrees with it and confirm RARSet's own def.Type wins.
+	raw, err := extension.RARSet(paymentDef, paymentDetail{Type: "wrong_type", InstructedAmt: "50.00"})
+	if err != nil {
+		t.Fatalf("RARSet: %v", err)
+	}
+	var got paymentDetail
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal RARSet output: %v", err)
+	}
+	if got.Type != "payment_initiation" {
+		t.Fatalf("Type = %q, want %q (RARSet must override the value's own mismatched type)", got.Type, "payment_initiation")
+	}
+}
+
+func TestRARSetRoundTripsThroughRegistryParseAndRARGet(t *testing.T) {
+	reg, err := extension.NewRARRegistry(4096, 4, paymentDef)
+	if err != nil {
+		t.Fatalf("NewRARRegistry: %v", err)
+	}
+	raw, err := extension.RARSet(paymentDef, paymentDetail{InstructedAmt: "250.00"})
+	if err != nil {
+		t.Fatalf("RARSet: %v", err)
+	}
+	array, err := json.Marshal([]json.RawMessage{raw})
+	if err != nil {
+		t.Fatalf("marshal array: %v", err)
+	}
+	values, err := reg.Parse(array)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	details, err := extension.RARGet(values, paymentDef)
+	if err != nil {
+		t.Fatalf("RARGet: %v", err)
+	}
+	if len(details) != 1 || details[0].Fields.InstructedAmt != "250.00" {
+		t.Fatalf("RARGet = %+v, want one object with instructed_amount=250.00", details)
+	}
+}
+
+func TestRARSetRejectsNonObjectValue(t *testing.T) {
+	def := extension.RARDefinition[string]{Type: "payment_initiation", MaxObjects: 1, MaxBytesPerObject: 128}
+	if _, err := extension.RARSet(def, "not an object"); err == nil {
+		t.Fatalf("RARSet(string) = nil error, want error (a bare string is not a JSON object)")
+	}
+}
+
+func TestRARSetRejectsValueThatCannotMarshal(t *testing.T) {
+	type withNaN struct {
+		Amount float64 `json:"amount"`
+	}
+	def := extension.RARDefinition[withNaN]{Type: "payment_initiation", MaxObjects: 1, MaxBytesPerObject: 128}
+	// encoding/json cannot represent NaN/Inf float values at all — the
+	// most realistic way a caller's own value fails to marshal.
+	if _, err := extension.RARSet(def, withNaN{Amount: math.NaN()}); err == nil {
+		t.Fatalf("RARSet(NaN) = nil error, want error")
+	}
+}
+
+func TestRARSetRejectsNilPointerValue(t *testing.T) {
+	def := extension.RARDefinition[*paymentDetail]{Type: "payment_initiation", MaxObjects: 1, MaxBytesPerObject: 128}
+	if _, err := extension.RARSet(def, nil); err == nil {
+		t.Fatalf("RARSet(nil *paymentDetail) = nil error, want error (encodes as JSON null, not an object)")
 	}
 }

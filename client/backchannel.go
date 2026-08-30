@@ -67,11 +67,11 @@ type BeginBackchannelAuthenticationRequest struct {
 	RequestedExpiry time.Duration
 
 	// AuthorizationDetails carries Rich Authorization Requests (RFC 9396)
-	// detail objects for this request, one entry per object, already
-	// encoded as JSON — mirrors BeginAuthorizationRequest.AuthorizationDetails.
-	// Unlike PAR, CIBA always signs a request object, so this is embedded
-	// as native JSON unconditionally, with no plain-parameter path to
-	// consider.
+	// detail objects for this request, one entry per object — build each
+	// with extension.RARSet, mirroring
+	// BeginAuthorizationRequest.AuthorizationDetails. Unlike PAR, CIBA
+	// always signs a request object, so this is embedded as native JSON
+	// unconditionally, with no plain-parameter path to consider.
 	AuthorizationDetails []json.RawMessage
 }
 

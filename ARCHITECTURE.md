@@ -440,7 +440,12 @@ Whether a narrower grant is acceptable is, per type, decided by
 `RARDefinition.ValidateGrant(requested, granted T) error` — nil requires
 byte-for-byte (canonically re-encoded) equality; set, it can permit real
 field-level narrowing (e.g. a lower payment amount). `RARRegistry.ValidateGrant`
-does the per-type matching this drives.
+does the per-type matching this drives. `RARGet`/`RARSet` are the RAR
+counterparts of `Get`/`Set` — a client builds one detail object with
+`extension.RARSet(Definition, value)`, which also stamps the
+definition's own `Type` into the result, so a caller's value type never
+needs its own redundant `Type` field; a server (or a consent UI) reads
+validated objects back out, typed, with `extension.RARGet`.
 
 ### 12. Configuration is per-role, not one shared struct
 

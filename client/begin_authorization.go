@@ -48,12 +48,15 @@ type BeginAuthorizationRequest struct {
 	Extensions extension.Values
 
 	// AuthorizationDetails carries Rich Authorization Requests (RFC 9396)
-	// detail objects for this request, one entry per object, already
-	// encoded as JSON — unlike Extensions, this is always sent as native
-	// JSON array text under every profile (RFC 9396 §5's own
-	// form-encoding: a plain "authorization_details" parameter's value is
-	// itself JSON array text, not a bare string), so it works under the
-	// baseline profile too, not just ProfileFAPISecurityWithMessageSigning.
+	// detail objects for this request, one entry per object — build each
+	// with extension.RARSet(Definition, value), which also stamps the
+	// definition's own "type" discriminator into the result, so a
+	// caller's value type never needs its own redundant Type field.
+	// Unlike Extensions, this is always sent as native JSON array text
+	// under every profile (RFC 9396 §5's own form-encoding: a plain
+	// "authorization_details" parameter's value is itself JSON array
+	// text, not a bare string), so it works under the baseline profile
+	// too, not just ProfileFAPISecurityWithMessageSigning.
 	AuthorizationDetails []json.RawMessage
 }
 

@@ -105,6 +105,19 @@ type JWTAccessTokens struct {
 	Audience         string
 	Algorithm        fapi.SignatureAlgorithm
 	MaxTokenLifetime time.Duration
+
+	// MaxKeyCandidates bounds how many of IssuerKeys' returned candidate
+	// keys ResolveAccessToken will actually attempt a signature
+	// verification against for one presented token. Required — an
+	// integrator's own choice, not a library default, because only the
+	// integrator knows how many keys their own IssuerKeySource may
+	// legitimately return at once (e.g. how much key-rotation overlap
+	// they run): IssuerKeys can be a live remote JWKS fetch
+	// (keys.NewJWKSIssuerKeySource) with no upstream cap on key *count*
+	// (only on response byte size), so without this bound, a JWKS
+	// response packed with many keys turns one token verification into
+	// unbounded signature-verification work.
+	MaxKeyCandidates int
 }
 
 // NewJWTAccessTokens validates every field and returns a
@@ -112,7 +125,7 @@ type JWTAccessTokens struct {
 // already correct may use the JWTAccessTokens{...} literal directly —
 // but mirrors this module's other validate-at-construction
 // constructors for callers who want it.
-func NewJWTAccessTokens(issuerKeys keys.IssuerKeySource, issuer fapi.URL, audience string, algorithm fapi.SignatureAlgorithm, maxTokenLifetime time.Duration) (JWTAccessTokens, error) {
+func NewJWTAccessTokens(issuerKeys keys.IssuerKeySource, issuer fapi.URL, audience string, algorithm fapi.SignatureAlgorithm, maxTokenLifetime time.Duration, maxKeyCandidates int) (JWTAccessTokens, error) {
 	if issuerKeys == nil {
 		return JWTAccessTokens{}, fmt.Errorf("resource: JWTAccessTokens: issuer keys is required")
 	}
@@ -128,9 +141,13 @@ func NewJWTAccessTokens(issuerKeys keys.IssuerKeySource, issuer fapi.URL, audien
 	if maxTokenLifetime <= 0 {
 		return JWTAccessTokens{}, fmt.Errorf("resource: JWTAccessTokens: max token lifetime must be positive")
 	}
+	if maxKeyCandidates <= 0 {
+		return JWTAccessTokens{}, fmt.Errorf("resource: JWTAccessTokens: max key candidates must be positive")
+	}
 	return JWTAccessTokens{
 		IssuerKeys: issuerKeys, Issuer: issuer, Audience: audience,
 		Algorithm: algorithm, MaxTokenLifetime: maxTokenLifetime,
+		MaxKeyCandidates: maxKeyCandidates,
 	}, nil
 }
 
@@ -164,13 +181,19 @@ func (j JWTAccessTokens) ResolveAccessToken(ctx context.Context, req ResolveAcce
 
 	var (
 		validated token.ValidatedAccessToken
-		validErr  error
+		// validErr starts non-nil so that trying zero candidates — for
+		// any reason, whether len(candidates.Keys) is legitimately
+		// smaller than MaxKeyCandidates or MaxKeyCandidates is itself
+		// misconfigured to <= 0 (only reachable via a bare struct
+		// literal bypassing NewJWTAccessTokens' own validation) — falls
+		// through to rejection below rather than treating an
+		// unvalidated, zero-value validated as a successful match.
+		validErr error = fmt.Errorf("no candidate key attempted (MaxKeyCandidates exhausted or misconfigured)")
 	)
-	// TODO: bound the number of candidates tried here if IssuerKeySource
-	// ever becomes attacker-influenced (e.g. a live JWKS fetch keyed by
-	// untrusted input) — an unbounded key set turns this loop into an
-	// attacker-controlled amount of signature verification work.
-	for _, candidate := range candidates.Keys {
+	for i, candidate := range candidates.Keys {
+		if i >= j.MaxKeyCandidates {
+			break
+		}
 		validated, validErr = parsed.Validate(candidate.PublicKey, policy)
 		if validErr == nil {
 			break

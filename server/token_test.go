@@ -859,7 +859,7 @@ func TestJWTAccessTokensRoundTripsThroughResourceVerifier(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseIssuerURL: %v", err)
 	}
-	verifier, err := resource.NewJWTAccessTokens(issuerKeySourceFromManager{manager: km}, issuerURL, testIssuer, fapi.ES256, 5*time.Minute)
+	verifier, err := resource.NewJWTAccessTokens(issuerKeySourceFromManager{manager: km}, issuerURL, testIssuer, fapi.ES256, 5*time.Minute, 8)
 	if err != nil {
 		t.Fatalf("resource.NewJWTAccessTokens: %v", err)
 	}

@@ -273,6 +273,7 @@ issuerKeys, err := keys.NewJWKSIssuerKeySource(fetcher, asJWKSURL, 10*time.Minut
 accessTokens, err := resource.NewJWTAccessTokens(
 	issuerKeys, asIssuer, asIssuer.String(), // audience: matches server/accesstoken.go's own self-addressed aud claim
 	fapi.ES256, 5*time.Minute, // must be >= the AS's own Limits.AccessTokenLifetime
+	8, // max candidate keys tried per token — size to your AS's own key-rotation overlap, not a library default
 )
 
 // If the AS issues OpaqueAccessTokens instead: the *same*

@@ -1,6 +1,6 @@
 # Conformance
 
-[![FAPI2 Conformance](https://github.com/IDFoundry/FAPIgo/actions/workflows/conformance.yml/badge.svg)](https://github.com/IDFoundry/FAPIgo/actions/workflows/conformance.yml)
+[![FAPI Conformance](https://github.com/IDFoundry/FAPIgo/actions/workflows/conformance.yml/badge.svg)](https://github.com/IDFoundry/FAPIgo/actions/workflows/conformance.yml)
 
 Reflects the latest scheduled/manually-triggered run of
 [`scripts/run-all.sh`](scripts/run-all.sh) in CI (see

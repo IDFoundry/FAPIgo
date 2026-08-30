@@ -35,6 +35,15 @@ type TokenSet struct {
 	TokenType string
 	Scope     string
 
+	// AuthorizationDetails is the resource owner's granted Rich
+	// Authorization Requests (RFC 9396) detail array, echoed back on the
+	// token response (RFC 9396 §5) — nil if the authorization carried no
+	// authorization_details, or the server granted none of it. Parse it
+	// with your own extension.RARRegistry.Parse (the same one the
+	// authorization request was built against) and read a specific type
+	// back out with extension.RARGet.
+	AuthorizationDetails json.RawMessage
+
 	// ExpiresIn is set only when the token response actually carried
 	// expires_in — RFC 6749 §5.1 marks it RECOMMENDED, not REQUIRED, and
 	// explicitly permits an authorization server to omit it and
@@ -215,9 +224,10 @@ func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationRe
 	}
 
 	result := TokenSet{
-		AccessToken: fapi.NewSecret(raw.AccessToken),
-		TokenType:   wantTokenType,
-		Scope:       raw.Scope,
+		AccessToken:          fapi.NewSecret(raw.AccessToken),
+		TokenType:            wantTokenType,
+		Scope:                raw.Scope,
+		AuthorizationDetails: raw.AuthorizationDetails,
 	}
 	if raw.ExpiresIn > 0 {
 		result.ExpiresIn = time.Duration(raw.ExpiresIn) * time.Second
@@ -502,12 +512,13 @@ func (c *Client) resolveIssuerKeyCandidates(ctx context.Context, purpose keys.Is
 }
 
 type rawTokenResponse struct {
-	AccessToken  string `json:"access_token"`
-	TokenType    string `json:"token_type"`
-	ExpiresIn    int64  `json:"expires_in"`
-	Scope        string `json:"scope,omitempty"`
-	IDToken      string `json:"id_token,omitempty"`
-	RefreshToken string `json:"refresh_token,omitempty"`
+	AccessToken          string          `json:"access_token"`
+	TokenType            string          `json:"token_type"`
+	ExpiresIn            int64           `json:"expires_in"`
+	Scope                string          `json:"scope,omitempty"`
+	IDToken              string          `json:"id_token,omitempty"`
+	RefreshToken         string          `json:"refresh_token,omitempty"`
+	AuthorizationDetails json.RawMessage `json:"authorization_details,omitempty"`
 }
 
 // decodeTokenResponse parses body, tolerating any member beyond
@@ -515,7 +526,7 @@ type rawTokenResponse struct {
 // client MUST ignore unrecognized value names and extra parameters
 // received in the response" — since a real authorization server
 // routinely adds parameters this module has no reason to model (e.g.
-// refresh_token_expires_in, authorization_details).
+// refresh_token_expires_in).
 func decodeTokenResponse(body []byte) (rawTokenResponse, error) {
 	dec := json.NewDecoder(bytes.NewReader(body))
 	var raw rawTokenResponse

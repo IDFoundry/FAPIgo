@@ -1170,6 +1170,76 @@ func TestCIBAFullFlowApproved(t *testing.T) {
 	}
 }
 
+// TestCompleteBackchannelAuthenticationRejectsGrantedScopeExceedingRequested
+// mirrors TestCompleteAuthorizationRejectsGrantedScopeExceedingRequested
+// for the CIBA flow — the request only ever asks for "openid accounts"
+// (standardBackchannelParams), so granting "offline_access" alongside
+// them must be rejected the same way PAR already rejects it.
+func TestCompleteBackchannelAuthenticationRejectsGrantedScopeExceedingRequested(t *testing.T) {
+	h, _ := newHarnessWithBackchannel(t)
+	required := beginBackchannel(t, h, standardBackchannelParams(t))
+
+	subject, err := server.NewSubjectID("user-1")
+	if err != nil {
+		t.Fatalf("NewSubjectID: %v", err)
+	}
+	authenticated, err := server.NewAuthenticatedSubject(subject)
+	if err != nil {
+		t.Fatalf("NewAuthenticatedSubject: %v", err)
+	}
+	authCtx, err := server.NewAuthenticationContext(h.now, "acr-1", []string{"pwd"})
+	if err != nil {
+		t.Fatalf("NewAuthenticationContext: %v", err)
+	}
+
+	err = h.server.CompleteBackchannelAuthentication(context.Background(), server.CompleteBackchannelAuthenticationRequest{
+		Handle: required.Handle,
+		Result: server.Authorize(authenticated, authCtx, server.GrantedAuthorization{Scope: []string{"openid", "accounts", "offline_access"}}),
+	})
+	if err == nil {
+		t.Fatalf("CompleteBackchannelAuthentication = nil error, want error")
+	}
+	if serverErrorCode(t, err) != server.ErrorInvalidRequest {
+		t.Fatalf("error code = %v, want %v", serverErrorCode(t, err), server.ErrorInvalidRequest)
+	}
+}
+
+// TestCompleteBackchannelAuthenticationRejectsUnknownHandle covers the
+// LookupBackchannelAuthentication failure path CompleteBackchannelAuthentication
+// now consults unconditionally (for scope validation) before ever
+// deciding anything — triggered here with a handle from an entirely
+// different harness's own Backchannel store, standing in for a stale or
+// otherwise-nonexistent handle a caller might present in production.
+func TestCompleteBackchannelAuthenticationRejectsUnknownHandle(t *testing.T) {
+	h1, _ := newHarnessWithBackchannel(t)
+	h2, _ := newHarnessWithBackchannel(t)
+	required := beginBackchannel(t, h1, standardBackchannelParams(t))
+
+	subject, err := server.NewSubjectID("user-1")
+	if err != nil {
+		t.Fatalf("NewSubjectID: %v", err)
+	}
+	authenticated, err := server.NewAuthenticatedSubject(subject)
+	if err != nil {
+		t.Fatalf("NewAuthenticatedSubject: %v", err)
+	}
+	authCtx, err := server.NewAuthenticationContext(h2.now, "acr-1", []string{"pwd"})
+	if err != nil {
+		t.Fatalf("NewAuthenticationContext: %v", err)
+	}
+
+	err = h2.server.CompleteBackchannelAuthentication(context.Background(), server.CompleteBackchannelAuthenticationRequest{
+		Handle: required.Handle,
+		Result: server.Authorize(authenticated, authCtx, server.GrantedAuthorization{Scope: []string{"openid", "accounts"}}),
+	})
+	if err == nil {
+		t.Fatalf("CompleteBackchannelAuthentication = nil error, want error (handle is unknown to this server's own Backchannel store)")
+	}
+	if serverErrorCode(t, err) != server.ErrorInvalidRequest {
+		t.Fatalf("error code = %v, want %v", serverErrorCode(t, err), server.ErrorInvalidRequest)
+	}
+}
+
 func TestCIBAFullFlowDenied(t *testing.T) {
 	h, _ := newHarnessWithBackchannel(t)
 	required := beginBackchannel(t, h, standardBackchannelParams(t))

@@ -157,6 +157,7 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 			selfIssuerKeySource{keyManager: keyManager}, resolved.Issuer,
 			resolved.Issuer.String(), // matches server/accesstoken.go's own access-token aud claim
 			resolved.Algorithms.IDToken, resolved.Limits.AccessTokenLifetime,
+			8, // selfIssuerKeySource reads keyManager directly — never more than a handful of keys
 		)
 		if err != nil {
 			return nil, err

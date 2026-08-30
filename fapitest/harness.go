@@ -384,7 +384,7 @@ func New(t *testing.T, cfg Config) *Harness {
 			MaxClockSkew:    5 * time.Second,
 		},
 	}
-	resourceJWT, err := resource.NewJWTAccessTokens(&memIssuerKeySource{issuer: Issuer, manager: asKeys}, issuer, Issuer, sigAlg, 5*time.Minute)
+	resourceJWT, err := resource.NewJWTAccessTokens(&memIssuerKeySource{issuer: Issuer, manager: asKeys}, issuer, Issuer, sigAlg, 5*time.Minute, 8)
 	if err != nil {
 		t.Fatalf("fapitest: resource.NewJWTAccessTokens: %v", err)
 	}

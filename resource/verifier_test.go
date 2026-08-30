@@ -2,11 +2,15 @@ package resource_test
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
+	"fmt"
 	"testing"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/token"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/storage"
@@ -84,7 +88,7 @@ func validAccessTokens(t *testing.T) resource.AccessTokenResolver {
 	if err != nil {
 		t.Fatalf("ParseIssuerURL: %v", err)
 	}
-	jwt, err := resource.NewJWTAccessTokens(&fakeIssuerKeySource{}, issuer, testIssuer, fapi.ES256, 5*time.Minute)
+	jwt, err := resource.NewJWTAccessTokens(&fakeIssuerKeySource{}, issuer, testIssuer, fapi.ES256, 5*time.Minute, 8)
 	if err != nil {
 		t.Fatalf("NewJWTAccessTokens: %v", err)
 	}
@@ -187,9 +191,10 @@ func TestNewJWTAccessTokensRejectsInvalid(t *testing.T) {
 		audience         string
 		algorithm        fapi.SignatureAlgorithm
 		maxTokenLifetime time.Duration
+		maxKeyCandidates int
 	}
 	valid := func() params {
-		return params{&fakeIssuerKeySource{}, issuer, testIssuer, fapi.ES256, 5 * time.Minute}
+		return params{&fakeIssuerKeySource{}, issuer, testIssuer, fapi.ES256, 5 * time.Minute, 8}
 	}
 	cases := map[string]func(*params){
 		"nil issuer keys":         func(p *params) { p.issuerKeys = nil },
@@ -197,15 +202,97 @@ func TestNewJWTAccessTokensRejectsInvalid(t *testing.T) {
 		"empty audience":          func(p *params) { p.audience = "" },
 		"invalid algorithm":       func(p *params) { p.algorithm = 0 },
 		"zero max token lifetime": func(p *params) { p.maxTokenLifetime = 0 },
+		"zero max key candidates": func(p *params) { p.maxKeyCandidates = 0 },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
 			p := valid()
 			mutate(&p)
-			if _, err := resource.NewJWTAccessTokens(p.issuerKeys, p.issuer, p.audience, p.algorithm, p.maxTokenLifetime); err == nil {
+			if _, err := resource.NewJWTAccessTokens(p.issuerKeys, p.issuer, p.audience, p.algorithm, p.maxTokenLifetime, p.maxKeyCandidates); err == nil {
 				t.Fatalf("NewJWTAccessTokens(%s) = nil error, want error", name)
 			}
 		})
+	}
+}
+
+// jwtAccessTokensWithCandidateKeys builds a JWTAccessTokens whose
+// IssuerKeySource always returns count freshly-generated ES256 keys (in
+// a fixed order) plus one real signing key, and issues a token signed
+// with that real key — for exercising MaxKeyCandidates directly, not
+// through the full Verifier/DPoP flow.
+func jwtAccessTokensWithCandidateKeys(t *testing.T, decoyCount, maxKeyCandidates int, signingKeyIndex int) (resource.JWTAccessTokens, string) {
+	t.Helper()
+	issuerURL, err := fapi.ParseIssuerURL(testIssuer)
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+
+	var signingKey *ecdsa.PrivateKey
+	issuerKeys := make([]keys.IssuerKey, decoyCount+1)
+	for i := range issuerKeys {
+		k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			t.Fatalf("generate key %d: %v", i, err)
+		}
+		issuerKeys[i] = keys.IssuerKey{KeyID: fmt.Sprintf("kid-%d", i), Algorithm: fapi.ES256, PublicKey: k.Public()}
+		if i == signingKeyIndex {
+			signingKey = k
+		}
+	}
+	if signingKey == nil {
+		t.Fatalf("signingKeyIndex %d out of range for %d keys", signingKeyIndex, len(issuerKeys))
+	}
+
+	accessToken, _, err := token.IssueAccessToken(token.AccessTokenParams{
+		// No "kid" header — ResolveAccessToken tries every candidate in
+		// order regardless, the same as a real request where the
+		// server's own kid isn't guaranteed to disambiguate (see
+		// ResolveIssuerKeys' own KeyID hint, which this fake ignores by
+		// always returning the same fixed set).
+		Signer: signingKey, Algorithm: fapi.ES256,
+		Issuer: testIssuer, Subject: "user-1", Audience: testIssuer,
+		ClientID: "client-1", Now: time.Now(), Lifetime: 5 * time.Minute,
+		Random: rand.Reader,
+	})
+	if err != nil {
+		t.Fatalf("IssueAccessToken: %v", err)
+	}
+
+	jwt, err := resource.NewJWTAccessTokens(
+		&fakeIssuerKeySource{set: keys.IssuerKeySet{Keys: issuerKeys}},
+		issuerURL, testIssuer, fapi.ES256, 5*time.Minute, maxKeyCandidates,
+	)
+	if err != nil {
+		t.Fatalf("NewJWTAccessTokens: %v", err)
+	}
+	return jwt, accessToken
+}
+
+// TestResolveAccessTokenRejectsKeyBeyondMaxCandidates covers the fix for
+// the DoS-shaped TODO this MaxKeyCandidates field replaced: an
+// IssuerKeySource returning more candidates than MaxKeyCandidates must
+// not let ResolveAccessToken try one beyond the configured bound, even
+// though it would otherwise validate successfully.
+func TestResolveAccessTokenRejectsKeyBeyondMaxCandidates(t *testing.T) {
+	jwt, accessToken := jwtAccessTokensWithCandidateKeys(t, 3, 3, 3) // signing key is the 4th (index 3), bound only allows the first 3
+	if _, err := jwt.ResolveAccessToken(context.Background(), resource.ResolveAccessTokenRequest{Raw: accessToken, Now: time.Now()}); err == nil {
+		t.Fatalf("ResolveAccessToken = nil error, want error (signing key sits beyond MaxKeyCandidates)")
+	}
+}
+
+// TestResolveAccessTokenAcceptsKeyWithinMaxCandidates is the mirror
+// case: the exact same signing key, positioned within the bound,
+// verifies successfully — a regression guard against a fail-open bug
+// (a loop that runs zero or too-few iterations must reject, never
+// silently succeed with an unvalidated token).
+func TestResolveAccessTokenAcceptsKeyWithinMaxCandidates(t *testing.T) {
+	jwt, accessToken := jwtAccessTokensWithCandidateKeys(t, 3, 4, 3) // same shape, bound now covers all 4
+	resolved, err := jwt.ResolveAccessToken(context.Background(), resource.ResolveAccessTokenRequest{Raw: accessToken, Now: time.Now()})
+	if err != nil {
+		t.Fatalf("ResolveAccessToken: %v", err)
+	}
+	if resolved.Subject != "user-1" {
+		t.Fatalf("Subject = %q, want %q", resolved.Subject, "user-1")
 	}
 }
 

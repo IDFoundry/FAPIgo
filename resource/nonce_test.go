@@ -90,7 +90,7 @@ func newNonceFixture(t *testing.T, proofNonce string, nonces *memstore.NonceStor
 	}
 	jwtAccessTokens, err := resource.NewJWTAccessTokens(&fakeIssuerKeySource{set: keys.IssuerKeySet{Keys: []keys.IssuerKey{
 		{KeyID: "as-kid", Algorithm: fapi.ES256, PublicKey: issuerKey.Public()},
-	}}}, issuerURL, testIssuer, fapi.ES256, 5*time.Minute)
+	}}}, issuerURL, testIssuer, fapi.ES256, 5*time.Minute, 8)
 	if err != nil {
 		t.Fatalf("NewJWTAccessTokens: %v", err)
 	}

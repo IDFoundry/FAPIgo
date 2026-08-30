@@ -127,6 +127,22 @@ of ungranted/over-scoped `authorization_details`), and
 (`TestSmokeAuthorizationCodeFlowWithAuthorizationDetails`,
 `TestSmokeCIBAFlowWithAuthorizationDetails`).
 
+## OpenID Connect register profiles
+
+The OIDF register's "...OpenID Connect" AS/RP profiles aren't a
+separate plan this repo needs to add a leg for — they're earned as a
+byproduct of every leg above except the client_credentials ones. The
+AS side selects `openid=openid_connect` and the RP side selects
+`fapi_client_type=oidc` on every `run-all.sh` leg already (see
+`main.go`'s `profiles` map for RP, the plan variant strings in
+`run-all.sh` for AS); confirmed live via `GET /api/plan/{id}`'s own
+`certificationProfileName` field against the baseline AS and RP plans:
+`["FAPI2SP OP OpenID Connect", "FAPI2SP OP private key + DPoP"]` and
+`["FAPI2SP RP OpenID Connect", "FAPI2SP RP private key + DPoP"]`
+respectively. The one deliberate exception is `openid=plain_oauth`,
+required by the client_credentials grant below — see its own section
+for why an ID token is never possible there.
+
 ## Client Credentials Grant
 
 `server.RequestClientCredentialsToken` (RFC 6749 §4.4) — opt-in via

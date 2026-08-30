@@ -98,6 +98,11 @@ func (s *Server) completeAuthorize(ctx context.Context, completed storage.Comple
 		return s.completeLocalFail(ctx, completed.ClientID, newError(ErrorInvalidRequest, 400, "granted scope exceeds requested scope", err)), nil
 	}
 
+	grantedAuthorizationDetails, err := s.validateGrantedAuthorizationDetails(completed.Parameters[authorizationDetailsParameter], result.grant.AuthorizationDetails)
+	if err != nil {
+		return s.completeLocalFail(ctx, completed.ClientID, newError(ErrorInvalidRequest, 400, "granted authorization_details exceeds what was requested", err)), nil
+	}
+
 	codeChallenge, err := jsonString(completed.Parameters, "code_challenge")
 	if err != nil {
 		return s.completeLocalFail(ctx, completed.ClientID, newError(ErrorServerError, 500, "pushed authorization request is missing code_challenge", err)), nil
@@ -125,6 +130,7 @@ func (s *Server) completeAuthorize(ctx context.Context, completed storage.Comple
 		AuthTime:                result.auth.authTime,
 		ACR:                     result.auth.acr,
 		AMR:                     result.auth.amr,
+		AuthorizationDetails:    grantedAuthorizationDetails,
 		TokenClaims:             completed.TokenClaims,
 		RequestedIDTokenClaims:  idTokenClaims,
 		RequestedUserinfoClaims: userinfoClaims,

@@ -37,6 +37,7 @@ func NewGrantStore() *GrantStore {
 func (s *GrantStore) CreateAuthorizationCode(_ context.Context, code storage.NewAuthorizationCode) error {
 	code.Scope = cloneStrings(code.Scope)
 	code.AMR = cloneStrings(code.AMR)
+	code.AuthorizationDetails = cloneRawMessage(code.AuthorizationDetails)
 	code.TokenClaims = cloneRawMessageMap(code.TokenClaims)
 	code.RequestedIDTokenClaims = cloneStrings(code.RequestedIDTokenClaims)
 	code.RequestedUserinfoClaims = cloneStrings(code.RequestedUserinfoClaims)
@@ -70,7 +71,8 @@ func (s *GrantStore) RedeemAuthorizationCode(_ context.Context, redemption stora
 		CodeChallenge: code.CodeChallenge, CodeChallengeMethod: code.CodeChallengeMethod,
 		DPoPJKT: code.DPoPJKT,
 		Subject: code.Subject, Scope: cloneStrings(code.Scope), Nonce: code.Nonce,
-		AuthTime: code.AuthTime, ACR: code.ACR, AMR: cloneStrings(code.AMR), TokenClaims: cloneRawMessageMap(code.TokenClaims),
+		AuthTime: code.AuthTime, ACR: code.ACR, AMR: cloneStrings(code.AMR),
+		AuthorizationDetails: cloneRawMessage(code.AuthorizationDetails), TokenClaims: cloneRawMessageMap(code.TokenClaims),
 		RequestedIDTokenClaims: cloneStrings(code.RequestedIDTokenClaims), RequestedUserinfoClaims: cloneStrings(code.RequestedUserinfoClaims),
 		ExpiresAt: code.ExpiresAt,
 	}, nil
@@ -96,6 +98,7 @@ func (s *GrantStore) RecordIssuedRefreshToken(_ context.Context, codeHash [32]by
 func (s *GrantStore) CreateRefreshToken(_ context.Context, token storage.NewRefreshToken) error {
 	token.Scope = cloneStrings(token.Scope)
 	token.AMR = cloneStrings(token.AMR)
+	token.AuthorizationDetails = cloneRawMessage(token.AuthorizationDetails)
 	token.TokenClaims = cloneRawMessageMap(token.TokenClaims)
 	token.RequestedIDTokenClaims = cloneStrings(token.RequestedIDTokenClaims)
 	token.RequestedUserinfoClaims = cloneStrings(token.RequestedUserinfoClaims)
@@ -122,6 +125,7 @@ func (s *GrantStore) RedeemRefreshToken(_ context.Context, redemption storage.Re
 	return storage.RedeemedRefreshToken{
 		ClientID: token.ClientID, Subject: token.Subject, Scope: cloneStrings(token.Scope),
 		Thumbprint: token.Thumbprint, AuthTime: token.AuthTime, ACR: token.ACR, AMR: cloneStrings(token.AMR),
+		AuthorizationDetails:   cloneRawMessage(token.AuthorizationDetails),
 		TokenClaims:            cloneRawMessageMap(token.TokenClaims),
 		RequestedIDTokenClaims: cloneStrings(token.RequestedIDTokenClaims), RequestedUserinfoClaims: cloneStrings(token.RequestedUserinfoClaims),
 		ExpiresAt: token.ExpiresAt,

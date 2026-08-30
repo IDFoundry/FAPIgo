@@ -33,6 +33,11 @@ var coreBackchannelAuthenticationParameters = map[string]struct{}{
 	// handling of the same parameter for PAR — see
 	// BeginBackchannelAuthentication's own use of parseRequestedClaimNames.
 	"claims": {},
+
+	// authorization_details (RFC 9396 §5) mirrors coreAuthorizationParameters'
+	// handling of the same parameter for PAR — see checkBackchannelExtensions'
+	// own use of parseRequestedAuthorizationDetails.
+	"authorization_details": {},
 }
 
 // BackchannelAuthenticationAction is a closed sum type returned by
@@ -190,7 +195,7 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		AuthReqID:   AuthReqID{value: authReqIDRaw},
 		ExpiresIn:   lifetime,
 		Interval:    s.cfg.Limits.BackchannelAuthenticationPollInterval,
-		Interaction: backchannelInteractionRequestFrom(client.ID(), validated.params),
+		Interaction: s.backchannelInteractionRequestFrom(client.ID(), validated.params),
 	}
 	s.audit(ctx, AuditEventBeginBackchannelAuthentication, client.ID(), AuditOutcomeSuccess, "")
 	return action, nil
@@ -280,6 +285,9 @@ func (s *Server) checkBackchannelExtensions(params map[string]json.RawMessage) (
 	values, err := s.cfg.Extensions.Parse(params, coreBackchannelAuthenticationParameters, extension.SourceRequestObject)
 	if err != nil {
 		return nil, newError(ErrorInvalidRequest, 400, "request contains an unregistered or invalid parameter", err)
+	}
+	if _, err := s.parseRequestedAuthorizationDetails(params); err != nil {
+		return nil, newError(ErrorInvalidRequest, 400, "authorization_details is invalid", err)
 	}
 	return extension.AsParameters(values, s.cfg.Extensions.Definitions()...), nil
 }
@@ -453,7 +461,7 @@ func parseRequestedExpiry(raw json.RawMessage) (int64, bool) {
 	return 0, false
 }
 
-func backchannelInteractionRequestFrom(clientID fapi.ClientID, params map[string]json.RawMessage) BackchannelInteractionRequest {
+func (s *Server) backchannelInteractionRequestFrom(clientID fapi.ClientID, params map[string]json.RawMessage) BackchannelInteractionRequest {
 	var scopes []string
 	if scope, err := jsonString(params, "scope"); err == nil && scope != "" {
 		scopes = strings.Fields(scope)
@@ -485,6 +493,7 @@ func backchannelInteractionRequestFrom(clientID fapi.ClientID, params map[string
 	return BackchannelInteractionRequest{
 		ClientID: clientID, Scope: scopes, Hints: hints,
 		ACRValues: acrValues, BindingMessage: bindingMessage,
+		AuthorizationDetails: rarValuesFromStoredParameters(s.cfg.RAR, params),
 	}
 }
 

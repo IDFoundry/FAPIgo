@@ -102,7 +102,7 @@ func withAuthorizationDetails(details json.RawMessage, base map[string]json.RawM
 }
 
 // RARPolicy decides which of a set of Rich Authorization Requests (RFC
-// 9396) detail objects a client is entitled to receive — used in two
+// 9396) detail objects a client is entitled to receive — used in three
 // distinct roles, one per Dependencies field it may be assigned to:
 //
 //   - Dependencies.ClientCredentialsRARPolicy: RFC 9396 §6's "client's
@@ -110,18 +110,22 @@ func withAuthorizationDetails(details json.RawMessage, base map[string]json.RawM
 //     token-issuance time (RequestClientCredentialsToken). This grant
 //     has no resource owner at all, so this is the *only* entitlement
 //     check it ever gets.
-//   - Dependencies.RARRequestPolicy: a defense-in-depth, request-time
-//     gate for PAR and CIBA — consulted before a request's own
+//   - Dependencies.PARRARPolicy / Dependencies.CIBARARPolicy: a
+//     defense-in-depth, request-time gate for PAR and CIBA
+//     respectively — two independent fields (not one shared between
+//     them, since neither checkExtensions nor
+//     checkBackchannelExtensions tells a RARPolicy which flow it's
+//     being consulted for) — consulted before a request's own
 //     authorization_details is ever stored or shown to a resource
-//     owner (checkExtensions/checkBackchannelExtensions), so an
-//     unentitled client can't even *ask* for a detail type, regardless
-//     of what a resource owner might otherwise approve. PAR/CIBA's own
-//     resource-owner grant step (validateGrantedAuthorizationDetails,
-//     driven by GrantedAuthorization.AuthorizationDetails) remains the
-//     primary entitlement check for those two flows either way — this
-//     is additional narrowing on top of it, not a replacement for it.
+//     owner, so an unentitled client can't even *ask* for a detail
+//     type on that flow, regardless of what a resource owner might
+//     otherwise approve. PAR/CIBA's own resource-owner grant step
+//     (validateGrantedAuthorizationDetails, driven by
+//     GrantedAuthorization.AuthorizationDetails) remains the primary
+//     entitlement check for those two flows either way — this is
+//     additional narrowing on top of it, not a replacement for it.
 //
-// Both fields are optional, but neither's absence is permissive: a
+// All three fields are optional, but none's absence is permissive: a
 // request naming authorization_details with no policy configured for
 // the applicable field is refused (applyRARPolicy), the same
 // "unconfigured is not the same as an empty registry accepting nothing
@@ -152,14 +156,14 @@ type RARPolicy interface {
 // applyRARPolicy narrows requested (already structurally validated by
 // parseRequestedAuthorizationDetails — a registered type, correct
 // shape, within bounds) against policy — the shared implementation
-// behind both RequestClientCredentialsToken's own
-// Dependencies.ClientCredentialsRARPolicy check and PAR/CIBA's
-// request-time Dependencies.RARRequestPolicy check. requested empty (no
-// authorization_details in the request at all) returns (nil, nil)
-// unconditionally, even with policy == nil — a request that never asked
-// for anything has nothing for a policy to decide. Every caller wraps a
-// non-nil error in ErrorInvalidAuthorizationDetails (RFC 9396 §6's own
-// dedicated code for exactly this decision).
+// behind RequestClientCredentialsToken's own
+// Dependencies.ClientCredentialsRARPolicy check and PAR/CIBA's own
+// request-time Dependencies.PARRARPolicy/CIBARARPolicy checks. requested
+// empty (no authorization_details in the request at all) returns (nil,
+// nil) unconditionally, even with policy == nil — a request that never
+// asked for anything has nothing for a policy to decide. Every caller
+// wraps a non-nil error in ErrorInvalidAuthorizationDetails (RFC 9396
+// §6's own dedicated code for exactly this decision).
 func (s *Server) applyRARPolicy(ctx context.Context, clientID fapi.ClientID, policy RARPolicy, requested json.RawMessage) (json.RawMessage, error) {
 	if len(requested) == 0 {
 		return nil, nil

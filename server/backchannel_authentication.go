@@ -281,7 +281,7 @@ func (s *Server) resolveBackchannelAuthenticationParameters(ctx context.Context,
 
 // checkBackchannelExtensions is checkExtensions' CIBA counterpart —
 // same Config.Extensions registry, its own core-parameter allow-list,
-// and the same Dependencies.RARRequestPolicy narrowing (see
+// and the same Dependencies.CIBARARPolicy narrowing (see
 // checkExtensions' own doc comment for the shared mechanism — params is
 // mutated in place the same way).
 func (s *Server) checkBackchannelExtensions(ctx context.Context, clientID fapi.ClientID, params map[string]json.RawMessage) (map[string]json.RawMessage, *Error) {
@@ -294,7 +294,7 @@ func (s *Server) checkBackchannelExtensions(ctx context.Context, clientID fapi.C
 		return nil, newError(ErrorInvalidRequest, 400, "authorization_details is invalid", err)
 	}
 	if len(requestedAuthorizationDetails) > 0 {
-		granted, policyErr := s.applyRARPolicy(ctx, clientID, s.deps.RARRequestPolicy, requestedAuthorizationDetails)
+		granted, policyErr := s.applyRARPolicy(ctx, clientID, s.deps.CIBARARPolicy, requestedAuthorizationDetails)
 		if policyErr != nil {
 			return nil, newError(ErrorInvalidAuthorizationDetails, 400, "authorization_details is not permitted for this client", policyErr)
 		}

@@ -114,17 +114,27 @@ type Dependencies struct {
 	// silently granted everything Config.RAR happens to have registered.
 	ClientCredentialsRARPolicy RARPolicy
 
-	// RARRequestPolicy is PAR/CIBA's own request-time counterpart of
-	// ClientCredentialsRARPolicy — a defense-in-depth gate on which Rich
-	// Authorization Requests (RFC 9396) detail types a client may even
-	// *request*, consulted before the request is ever stored or shown to
-	// a resource owner. See RARPolicy's own doc comment for the full
-	// contract, including why an unconfigured policy refuses rather than
-	// falling back to "anything Config.RAR has registered is
+	// PARRARPolicy and CIBARARPolicy are PAR's and CIBA's own
+	// request-time counterparts of ClientCredentialsRARPolicy — a
+	// defense-in-depth gate on which Rich Authorization Requests (RFC
+	// 9396) detail types a client may even *request* on each flow,
+	// consulted before the request is ever stored or shown to a
+	// resource owner. See RARPolicy's own doc comment for the full
+	// contract, including why an unconfigured policy refuses rather
+	// than falling back to "anything Config.RAR has registered is
 	// requestable" — the resource owner's own approval
 	// (GrantedAuthorization.AuthorizationDetails) remains the primary
-	// entitlement check for these two flows regardless of whether this
-	// field is set; this only narrows what a client may put in front of
-	// that resource owner in the first place.
-	RARRequestPolicy RARPolicy
+	// entitlement check for these two flows regardless of whether
+	// either field is set; this only narrows what a client may put in
+	// front of that resource owner in the first place.
+	//
+	// Deliberately two independent fields, not one shared between PAR
+	// and CIBA: neither checkExtensions (PAR) nor
+	// checkBackchannelExtensions (CIBA) tells a RARPolicy which flow
+	// it's being consulted for, so a single shared field would give an
+	// integrator no way to permit authorization_details on one flow
+	// while refusing it on the other. Pass the same value to both when
+	// symmetric behavior is actually what's wanted.
+	PARRARPolicy  RARPolicy
+	CIBARARPolicy RARPolicy
 }

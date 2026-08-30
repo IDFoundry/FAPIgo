@@ -65,11 +65,12 @@ func approvedAuthorizationDetails(requested extension.RARValues) []json.RawMessa
 // a real deployment would consult its own client-authorization records
 // instead of always returning requested unchanged.
 //
-// Used for both Dependencies.ClientCredentialsRARPolicy (the
-// client_credentials grant's own entitlement check) and
-// Dependencies.RARRequestPolicy (PAR/CIBA's request-time gate) — see
-// wiring.go. Both roles get the same "approve everything" stand-in
-// here, matching approvedAuthorizationDetails' own scope.
+// Used for all three RARPolicy roles — Dependencies.ClientCredentialsRARPolicy
+// (the client_credentials grant's own entitlement check),
+// Dependencies.PARRARPolicy, and Dependencies.CIBARARPolicy (PAR's and
+// CIBA's own independent request-time gates) — see wiring.go. Every
+// role gets the same "approve everything" stand-in here, matching
+// approvedAuthorizationDetails' own scope.
 type sampleRARPolicy struct{}
 
 func (sampleRARPolicy) Authorize(_ context.Context, _ fapi.ClientID, requested []json.RawMessage) ([]json.RawMessage, error) {

@@ -457,35 +457,41 @@ the PAR-fed authorization-code flow, the CIBA backchannel flow, and the
 RFC 6749 §4.4 client_credentials grant (RFC 9396 §6) — the same
 `RARDefinition`s, the same `parseRequestedAuthorizationDetails` helper
 (`server/rar.go`) — but the *entitlement* decision on top of that
-structural validation takes one of two shapes, both implementing the
-same `server.RARPolicy` interface:
+structural validation takes one of three shapes, all implementing the
+same `server.RARPolicy` interface, one per `Dependencies` field:
 
-- **PAR/CIBA** (`Dependencies.RARRequestPolicy`, consulted by
-  `checkExtensions`/`checkBackchannelExtensions` before a request is
-  ever stored or shown to anyone): a defense-in-depth, request-time gate
-  on what a client may even *ask* for. The primary entitlement check for
-  these two flows remains the resource owner's own interactive decision
-  at `CompleteAuthorization`/`CompleteBackchannelAuthentication`
+- **PAR** (`Dependencies.PARRARPolicy`, consulted by `checkExtensions`
+  before a request is ever stored or shown to anyone) and **CIBA**
+  (`Dependencies.CIBARARPolicy`, `checkBackchannelExtensions`'s own
+  equivalent): two independent defense-in-depth, request-time gates on
+  what a client may even *ask* for on each flow — deliberately not one
+  field shared between them, since neither `checkExtensions` nor
+  `checkBackchannelExtensions` tells a `RARPolicy` which flow it's being
+  consulted for, so a shared field would give an integrator no way to
+  permit `authorization_details` on one flow while refusing it on the
+  other. The primary entitlement check for both flows remains the
+  resource owner's own interactive decision at
+  `CompleteAuthorization`/`CompleteBackchannelAuthentication`
   (`GrantedAuthorization.AuthorizationDetails`, checked by
   `validateGrantedAuthorizationDetails` — mirroring `scope`'s own
   request → interaction → `GrantedAuthorization` → storage →
   token-claim lifecycle, so a resource owner may grant a narrower array
   than was requested exactly the way a granted scope may narrow a
-  requested one); `RARRequestPolicy` narrows what's ever put in front of
-  that resource owner in the first place.
+  requested one); the two request-time policies narrow what's ever put
+  in front of that resource owner in the first place.
 - **client_credentials** (`Dependencies.ClientCredentialsRARPolicy`,
   consulted by `RequestClientCredentialsToken` at token-issuance time):
   this grant has no resource owner at all, so this policy is the *only*
   entitlement check it ever gets.
 
-Both fields are optional, but neither's absence is permissive: a request
-naming `authorization_details` with no policy configured for the
-applicable field is refused with `ErrorInvalidAuthorizationDetails`
+All three fields are optional, but none's absence is permissive: a
+request naming `authorization_details` with no policy configured for
+the applicable field is refused with `ErrorInvalidAuthorizationDetails`
 (RFC 9396 §6's own dedicated error code) — `RARRegistry.Parse` only
 confirms a request is well-formed and registered, it is deliberately
 *not* treated as the entitlement decision itself, the same
 "unconfigured is not permissive" stance `Config.RAR` itself takes.
-Both roles funnel through one shared helper, `applyRARPolicy`
+All three roles funnel through one shared helper, `applyRARPolicy`
 (`server/rar.go`): call the configured `RARPolicy.Authorize`, then run
 its result back through `validateGrantedAuthorizationDetails` — the
 same "is this an acceptable subset of what was requested" check a

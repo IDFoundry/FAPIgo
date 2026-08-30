@@ -46,15 +46,6 @@ type BeginAuthorizationRequest struct {
 	// but a bare string. A non-string value under the baseline profile
 	// is rejected rather than mis-encoded.
 	Extensions extension.Values
-
-	// AuthorizationDetails carries Rich Authorization Requests (RFC 9396)
-	// detail objects for this request, one entry per object, already
-	// encoded as JSON — unlike Extensions, this is always sent as native
-	// JSON array text under every profile (RFC 9396 §5's own
-	// form-encoding: a plain "authorization_details" parameter's value is
-	// itself JSON array text, not a bare string), so it works under the
-	// baseline profile too, not just ProfileFAPISecurityWithMessageSigning.
-	AuthorizationDetails []json.RawMessage
 }
 
 // responseModePlain and responseModeJARM record how this session expects
@@ -65,11 +56,6 @@ const (
 	responseModePlain = "plain"
 	responseModeJARM  = "jarm"
 )
-
-// authorizationDetailsParameter is the RFC 9396 §5 wire name — mirrors
-// server.authorizationDetailsParameter (an unexported constant in a
-// different package, so not literally shared, just the same string).
-const authorizationDetailsParameter = "authorization_details"
 
 // errPushedAuthorizationRequestFailed is the shared newError
 // description sendPushedAuthorizationRequest's own retry sequence uses
@@ -131,11 +117,11 @@ func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 		// whichever certificate authenticates the eventual token-endpoint
 		// connection, so PAR here is a plain call: no DPoP proof, no
 		// dpop_jkt, no nonce retry.
-		body, parErr = c.pushAuthorizationRequestPlain(ctx, params, req.Extensions, req.AuthorizationDetails)
+		body, parErr = c.pushAuthorizationRequestPlain(ctx, params, req.Extensions)
 	case c.cfg.PARDPoPBinding == PARDPoPBindingJKT:
-		body, parErr = c.pushAuthorizationRequestWithJKT(ctx, params, req.Extensions, req.AuthorizationDetails)
+		body, parErr = c.pushAuthorizationRequestWithJKT(ctx, params, req.Extensions)
 	default:
-		body, parErr = c.pushAuthorizationRequestWithDPoPProof(ctx, params, req.Extensions, req.AuthorizationDetails)
+		body, parErr = c.pushAuthorizationRequestWithDPoPProof(ctx, params, req.Extensions)
 	}
 	if parErr != nil {
 		return AuthorizationSession{}, parErr
@@ -198,8 +184,8 @@ func (c *Client) dpopKeyThumbprint(ctx context.Context) (string, error) {
 // challenge concept, since binding is derived purely from the TLS
 // connection Dependencies.HTTP's own configured transport establishes,
 // not from a signed application-layer proof.
-func (c *Client) pushAuthorizationRequestPlain(ctx context.Context, params map[string]string, extensions extension.Values, authorizationDetails []json.RawMessage) ([]byte, *Error) {
-	formParams, buildErr := c.buildPushedRequestForm(ctx, c.deps.Clock.Now(), params, extensions, authorizationDetails)
+func (c *Client) pushAuthorizationRequestPlain(ctx context.Context, params map[string]string, extensions extension.Values) ([]byte, *Error) {
+	formParams, buildErr := c.buildPushedRequestForm(ctx, c.deps.Clock.Now(), params, extensions)
 	if buildErr != nil {
 		return nil, buildErr
 	}
@@ -219,14 +205,14 @@ func (c *Client) pushAuthorizationRequestPlain(ctx context.Context, params map[s
 // that binding to whichever key first shows up at the token endpoint —
 // without proving possession of it until ExchangeCode presents a proof
 // with the matching key.
-func (c *Client) pushAuthorizationRequestWithJKT(ctx context.Context, params map[string]string, extensions extension.Values, authorizationDetails []json.RawMessage) ([]byte, *Error) {
+func (c *Client) pushAuthorizationRequestWithJKT(ctx context.Context, params map[string]string, extensions extension.Values) ([]byte, *Error) {
 	dpopThumbprint, err := c.dpopKeyThumbprint(ctx)
 	if err != nil {
 		return nil, newError(ErrorInternal, "failed to compute DPoP key thumbprint", err)
 	}
 	params["dpop_jkt"] = dpopThumbprint
 
-	formParams, buildErr := c.buildPushedRequestForm(ctx, c.deps.Clock.Now(), params, extensions, authorizationDetails)
+	formParams, buildErr := c.buildPushedRequestForm(ctx, c.deps.Clock.Now(), params, extensions)
 	if buildErr != nil {
 		return nil, buildErr
 	}
@@ -251,7 +237,7 @@ func (c *Client) pushAuthorizationRequestWithJKT(ctx context.Context, params map
 // assertion is exactly as single-use as a DPoP proof, so the retry
 // rebuilds the whole form, not just the proof — same reasoning
 // sendTokenRequest's own doc comment gives for the token endpoint.
-func (c *Client) pushAuthorizationRequestWithDPoPProof(ctx context.Context, params map[string]string, extensions extension.Values, authorizationDetails []json.RawMessage) ([]byte, *Error) {
+func (c *Client) pushAuthorizationRequestWithDPoPProof(ctx context.Context, params map[string]string, extensions extension.Values) ([]byte, *Error) {
 	dpopSigner, _, err := c.newSigner(ctx, keys.DPoPProofSigning, c.cfg.Algorithms.DPoP)
 	if err != nil {
 		return nil, newError(ErrorInternal, "failed to resolve DPoP signing key", err)
@@ -259,7 +245,7 @@ func (c *Client) pushAuthorizationRequestWithDPoPProof(ctx context.Context, para
 	parURL := c.cfg.Endpoints.PushedAuthorizationRequest.URL()
 
 	buildParForm := func() ([]byte, error) {
-		formParams, buildErr := c.buildPushedRequestForm(ctx, c.deps.Clock.Now(), params, extensions, authorizationDetails)
+		formParams, buildErr := c.buildPushedRequestForm(ctx, c.deps.Clock.Now(), params, extensions)
 		if buildErr != nil {
 			return nil, buildErr
 		}
@@ -318,7 +304,7 @@ func (c *Client) postParRequestWithDPoP(ctx context.Context, dpopSigner crypto.S
 // assertion for authentication, plus either a signed request object
 // (ProfileFAPISecurityWithMessageSigning) or the plain authorization
 // parameters directly.
-func (c *Client) buildPushedRequestForm(ctx context.Context, now time.Time, params map[string]string, extensions extension.Values, authorizationDetails []json.RawMessage) (map[string]string, *Error) {
+func (c *Client) buildPushedRequestForm(ctx context.Context, now time.Time, params map[string]string, extensions extension.Values) (map[string]string, *Error) {
 	form := map[string]string{}
 	if c.cfg.ClientAuthMethod == storage.ClientAuthMethodPrivateKeyJWT {
 		assertionSigner, assertionKID, err := c.newSigner(ctx, keys.ClientAuthentication, c.cfg.Algorithms.ClientAuthentication)
@@ -340,15 +326,6 @@ func (c *Client) buildPushedRequestForm(ctx context.Context, now time.Time, para
 	}
 
 	snapshot := extension.Snapshot(extensions)
-
-	var authorizationDetailsRaw json.RawMessage
-	if len(authorizationDetails) > 0 {
-		encoded, err := json.Marshal(authorizationDetails)
-		if err != nil {
-			return nil, newError(ErrorInternal, "failed to encode authorization_details", err)
-		}
-		authorizationDetailsRaw = encoded
-	}
 
 	if c.cfg.Profile != ProfileFAPISecurityWithMessageSigning {
 		for name, raw := range snapshot {
@@ -372,19 +349,10 @@ func (c *Client) buildPushedRequestForm(ctx context.Context, now time.Time, para
 		for k, v := range params {
 			form[k] = v
 		}
-		if authorizationDetailsRaw != nil {
-			// RFC 9396 §5: unlike an extension.Definition value, a plain
-			// "authorization_details" parameter's value is itself JSON
-			// array text — this is the one plain parameter this package
-			// sends un-stringified, so it round-trips through
-			// checkRAR/RARRegistry.Parse identically to the signed-object
-			// path below, regardless of Config.Profile.
-			form[authorizationDetailsParameter] = string(authorizationDetailsRaw)
-		}
 		return form, nil
 	}
 
-	objectParams := make(map[string]json.RawMessage, len(params)+len(snapshot)+1)
+	objectParams := make(map[string]json.RawMessage, len(params)+len(snapshot))
 	for k, v := range params {
 		encoded, _ := json.Marshal(v) // marshaling a string cannot fail
 		objectParams[k] = encoded
@@ -395,10 +363,6 @@ func (c *Client) buildPushedRequestForm(ctx context.Context, now time.Time, para
 			return nil, newError(ErrorInvalidRequest, fmt.Sprintf("extension parameter %q collides with a core parameter name", name), nil)
 		}
 		objectParams[name] = raw
-	}
-
-	if authorizationDetailsRaw != nil {
-		objectParams[authorizationDetailsParameter] = authorizationDetailsRaw
 	}
 
 	objectSigner, objectKID, err := c.newSigner(ctx, keys.RequestObjectSigning, c.cfg.Algorithms.RequestObject)

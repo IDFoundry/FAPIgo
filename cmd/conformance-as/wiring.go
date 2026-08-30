@@ -108,10 +108,6 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 		limits.MaxBackchannelAuthenticationRequestLifetime = maxBackchannelAuthenticationRequestLifetime
 		limits.BackchannelAuthenticationPollInterval = backchannelAuthenticationPollInterval
 	}
-	rarRegistry, err := newSampleRARRegistry()
-	if err != nil {
-		return nil, err
-	}
 	srvCfg := server.Config{
 		Issuer:        resolved.Issuer,
 		Endpoints:     endpoints,
@@ -125,7 +121,6 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 		// AssuranceProduction without also implementing
 		// storage.StoreAssurance on every store constructed below.
 		Assurance: server.AssuranceDevelopment,
-		RAR:       rarRegistry,
 	}
 	replayStore := memstore.NewReplayStore()
 	revocationStore := memstore.NewRevocationStore()

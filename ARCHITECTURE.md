@@ -408,39 +408,25 @@ policy.
 
 ### 10–11. Extension and RAR parameters are defined once, used by both sides
 
-A `extension.Definition[T]` captures wire name, cardinality, encoding,
-allowed source, max size, sensitivity, validator, whether it's
-integrity-protected, whether it may appear in request objects, and
-whether it may be returned in token claims — once. Client sets a value
-against the definition with `extension.Set(&req.Extensions, Definition,
-value)`; server registers the same definition in `server.Config.Extensions`
-(an `*extension.Registry`) and reads the validated value back out through
-a typed accessor — `extension.Get(validated.Extensions, Definition)` —
-never a generic `map[string]any`, which would allow name collisions and
-invalid type assertions. Any parameter without a registered definition is
-rejected by default; there is no production option to silently preserve
-unknown fields; a caller who genuinely needs that (a compatibility
-gateway, a test server) must opt in explicitly and separately rather than
-being one missed check away from it.
+A `extension.Definition[T]` (or, for Rich Authorization Requests
+[RFC 9396][rar], the RAR-specific variant living alongside it in the
+same package) captures wire name, cardinality, encoding, allowed source,
+max size, sensitivity, validator, whether it's integrity-protected,
+whether it may appear in request objects, and whether it may be returned
+in token claims — once. RAR definitions additionally bound the number of
+detail objects, bytes per object, total bytes, JSON depth, and how
+duplicate/unknown JSON members are handled.
 
-Rich Authorization Requests ([RFC 9396][rar]) uses a structurally
-distinct sibling in the same package — `extension.RARDefinition[T]`,
-registered into a `server.Config.RAR` (`*extension.RARRegistry`), separate
-from `Config.Extensions` because `authorization_details` is validated as
-a whole bounded array of typed detail objects (total size, nesting depth,
-per-type object count and size, duplicate/unknown JSON members), not
-parameter-by-parameter. It is wired identically into both the PAR-fed
-authorization-code flow and the CIBA backchannel flow — the same
-`RARDefinition`s, the same `checkRAR`/`validateGrantedAuthorizationDetails`
-helpers (`server/rar.go`) — mirroring `scope`'s own request → interaction
-→ `GrantedAuthorization` → storage → token-claim lifecycle, so a resource
-owner may grant a narrower `authorization_details` array than was
-requested exactly the way a granted scope may narrow a requested one.
-Whether a narrower grant is acceptable is, per type, decided by
-`RARDefinition.ValidateGrant(requested, granted T) error` — nil requires
-byte-for-byte (canonically re-encoded) equality; set, it can permit real
-field-level narrowing (e.g. a lower payment amount). `RARRegistry.ValidateGrant`
-does the per-type matching this drives.
+Client sets a value against the definition with `req.Extensions.Set(...)`;
+server registers the same definition (`server.WithAuthorizationExtension`)
+and reads the validated value back out through a typed accessor —
+`extension.Get(validated.Extensions, Definition)` — never a generic
+`map[string]any`, which would allow name collisions and invalid type
+assertions. Any parameter without a registered definition is rejected by
+default; there is no production option to silently preserve unknown
+fields; a caller who genuinely needs that (a compatibility gateway, a
+test server) must opt in explicitly and separately rather than being one
+missed check away from it.
 
 ### 12. Configuration is per-role, not one shared struct
 

@@ -13,13 +13,10 @@ import (
 // per auth_req_id: the opaque handle handleApprove needs to complete
 // the request, plus the scope that request asked for (needed to build
 // GrantedAuthorization on approval — there is no browser-submitted
-// form here to read it back from, unlike consentHandler.handleDecision),
-// and any requested authorization_details, pre-approved in full — see
-// approvedAuthorizationDetails' own doc comment.
+// form here to read it back from, unlike consentHandler.handleDecision).
 type pendingBackchannelAuthentication struct {
-	handle               server.BackchannelAuthenticationHandle
-	scope                []string
-	authorizationDetails []json.RawMessage
+	handle server.BackchannelAuthenticationHandle
+	scope  []string
 }
 
 // backchannelHandler serves this binary's CIBA backchannel
@@ -71,14 +68,9 @@ func (h *backchannelHandler) handleAuthenticate(w http.ResponseWriter, r *http.R
 
 	switch action := action.(type) {
 	case server.BackchannelInteractionRequired:
-		approved, approveErr := approvedAuthorizationDetails(action.Interaction.AuthorizationDetails)
-		if approveErr != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
 		h.mu.Lock()
 		h.pending[action.AuthReqID.String()] = pendingBackchannelAuthentication{
-			handle: action.Handle, scope: action.Interaction.Scope, authorizationDetails: approved,
+			handle: action.Handle, scope: action.Interaction.Scope,
 		}
 		h.mu.Unlock()
 
@@ -137,9 +129,7 @@ func (h *backchannelHandler) handleApprove(w http.ResponseWriter, r *http.Reques
 			http.Error(w, "server_error", http.StatusInternalServerError)
 			return
 		}
-		result = server.Authorize(subject, authCtx, server.GrantedAuthorization{
-			Scope: pending.scope, AuthorizationDetails: pending.authorizationDetails,
-		})
+		result = server.Authorize(subject, authCtx, server.GrantedAuthorization{Scope: pending.scope})
 	case "deny":
 		result = server.Deny("user rejected authentication")
 	default:

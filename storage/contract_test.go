@@ -2,7 +2,6 @@ package storage_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync"
 	"testing"
@@ -64,7 +63,6 @@ func (s *refGrantStore) RedeemAuthorizationCode(_ context.Context, r storage.Aut
 		DPoPJKT: code.DPoPJKT,
 		Subject: code.Subject, Scope: code.Scope, Nonce: code.Nonce,
 		AuthTime: code.AuthTime, ACR: code.ACR, AMR: code.AMR,
-		AuthorizationDetails:   code.AuthorizationDetails,
 		TokenClaims:            code.TokenClaims,
 		RequestedIDTokenClaims: code.RequestedIDTokenClaims, RequestedUserinfoClaims: code.RequestedUserinfoClaims,
 		ExpiresAt: code.ExpiresAt,
@@ -108,7 +106,6 @@ func (s *refGrantStore) RedeemRefreshToken(_ context.Context, r storage.RefreshT
 	return storage.RedeemedRefreshToken{
 		ClientID: tok.ClientID, Subject: tok.Subject, Scope: tok.Scope,
 		Thumbprint: tok.Thumbprint, AuthTime: tok.AuthTime, ACR: tok.ACR, AMR: tok.AMR,
-		AuthorizationDetails:   tok.AuthorizationDetails,
 		TokenClaims:            tok.TokenClaims,
 		RequestedIDTokenClaims: tok.RequestedIDTokenClaims, RequestedUserinfoClaims: tok.RequestedUserinfoClaims,
 		ExpiresAt: tok.ExpiresAt,
@@ -301,18 +298,17 @@ func TestAccessTokenStoreContractAgainstReference(t *testing.T) {
 }
 
 type refBackchannelAuthenticationRecord struct {
-	record               storage.NewBackchannelAuthentication
-	status               storage.BackchannelAuthenticationStatus
-	subject              string
-	scope                []string
-	authorizationDetails json.RawMessage
-	authTime             time.Time
-	acr                  string
-	amr                  []string
-	reason               string
-	redeemed             bool
-	polledBefore         bool
-	lastPolledAt         time.Time
+	record       storage.NewBackchannelAuthentication
+	status       storage.BackchannelAuthenticationStatus
+	subject      string
+	scope        []string
+	authTime     time.Time
+	acr          string
+	amr          []string
+	reason       string
+	redeemed     bool
+	polledBefore bool
+	lastPolledAt time.Time
 }
 
 type refBackchannelAuthenticationStore struct {
@@ -337,19 +333,6 @@ func (s *refBackchannelAuthenticationStore) CreateBackchannelAuthentication(_ co
 	return nil
 }
 
-func (s *refBackchannelAuthenticationStore) LookupBackchannelAuthentication(_ context.Context, handleHash [32]byte) (storage.LookedUpBackchannelAuthentication, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rec, ok := s.byHandleHash[handleHash]
-	if !ok {
-		return storage.LookedUpBackchannelAuthentication{}, fmt.Errorf("unknown backchannel authentication handle")
-	}
-	return storage.LookedUpBackchannelAuthentication{
-		ClientID:   rec.record.ClientID,
-		Parameters: rec.record.Parameters,
-	}, nil
-}
-
 func (s *refBackchannelAuthenticationStore) DecideBackchannelAuthentication(_ context.Context, decision storage.DecideBackchannelAuthentication) (storage.DecidedBackchannelAuthentication, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -363,7 +346,6 @@ func (s *refBackchannelAuthenticationStore) DecideBackchannelAuthentication(_ co
 	rec.status = decision.Status
 	rec.subject = decision.Subject
 	rec.scope = decision.Scope
-	rec.authorizationDetails = decision.AuthorizationDetails
 	rec.authTime = decision.AuthTime
 	rec.acr = decision.ACR
 	rec.amr = decision.AMR
@@ -406,8 +388,7 @@ func (s *refBackchannelAuthenticationStore) PollBackchannelAuthentication(_ cont
 	}
 	return storage.PolledBackchannelAuthentication{
 		Status: rec.status, ClientID: rec.record.ClientID,
-		Subject: rec.subject, Scope: rec.scope, AuthorizationDetails: rec.authorizationDetails,
-		AuthTime: rec.authTime, ACR: rec.acr, AMR: rec.amr,
+		Subject: rec.subject, Scope: rec.scope, AuthTime: rec.authTime, ACR: rec.acr, AMR: rec.amr,
 		TokenClaims: rec.record.TokenClaims, DPoPJKT: rec.record.DPoPJKT, Reason: rec.reason,
 		RequestedIDTokenClaims:  rec.record.RequestedIDTokenClaims,
 		RequestedUserinfoClaims: rec.record.RequestedUserinfoClaims,

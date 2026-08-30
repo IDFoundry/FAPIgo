@@ -6,7 +6,6 @@ import (
 	"io"
 
 	fapi "github.com/idfoundry/fapigo"
-	"github.com/idfoundry/fapigo/extension"
 )
 
 // interactionHandleSize is the byte length of a generated
@@ -62,13 +61,4 @@ type InteractionRequest struct {
 	ClientID fapi.ClientID
 	Scope    []string
 	Hints    AuthenticationHints
-
-	// AuthorizationDetails holds the request's own validated Rich
-	// Authorization Requests (RFC 9396) detail objects, if any were
-	// requested and Config.RAR is configured — zero value otherwise. A
-	// consent UI reads a specific type back out with
-	// extension.RARGet(interaction.AuthorizationDetails, YourRARDefinition)
-	// to render exactly what's being authorized (e.g. "Approve submission
-	// of Tax Return TX-12345") instead of a bare scope string.
-	AuthorizationDetails extension.RARValues
 }

@@ -258,9 +258,6 @@ func (a *authServer) handleToken(w http.ResponseWriter, r *http.Request) {
 	if result.HasRefreshToken {
 		resp["refresh_token"] = result.RefreshToken.Reveal()
 	}
-	if len(result.AuthorizationDetails) > 0 {
-		resp["authorization_details"] = result.AuthorizationDetails
-	}
 	w.Header().Set(contentTypeHeader, contentTypeJSON)
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		a.t.Fatalf("fapitest: encode token response: %v", err)

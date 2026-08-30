@@ -282,16 +282,4 @@ type Config struct {
 	// JSON string claim, so only SourceRequestObject carries a value's
 	// native JSON shape (object, array, number, bool) losslessly.
 	Extensions *extension.Registry
-
-	// RAR registers every Rich Authorization Requests (RFC 9396) detail
-	// type this server accepts in an "authorization_details" parameter,
-	// on both PAR and CIBA backchannel authentication requests. Unlike
-	// Extensions, nil is not equivalent to an empty registry accepting
-	// nothing extra — it means "authorization_details" itself is
-	// rejected outright as an unregistered parameter, the same
-	// default-reject stance Extensions takes for any parameter without a
-	// matching Definition. A registered RARRegistry's own bounds (total
-	// size, nesting depth, per-type object count and size) apply
-	// identically to both flows.
-	RAR *extension.RARRegistry
 }

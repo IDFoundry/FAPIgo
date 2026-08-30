@@ -149,8 +149,7 @@ func (s *memGrantStore) RedeemAuthorizationCode(_ context.Context, redemption st
 		CodeChallenge: code.CodeChallenge, CodeChallengeMethod: code.CodeChallengeMethod,
 		DPoPJKT: code.DPoPJKT,
 		Subject: code.Subject, Scope: code.Scope, Nonce: code.Nonce,
-		AuthTime: code.AuthTime, ACR: code.ACR, AMR: code.AMR,
-		AuthorizationDetails: code.AuthorizationDetails, TokenClaims: code.TokenClaims,
+		AuthTime: code.AuthTime, ACR: code.ACR, AMR: code.AMR, TokenClaims: code.TokenClaims,
 		RequestedIDTokenClaims: code.RequestedIDTokenClaims, RequestedUserinfoClaims: code.RequestedUserinfoClaims,
 		ExpiresAt: code.ExpiresAt,
 	}, nil
@@ -193,7 +192,6 @@ func (s *memGrantStore) RedeemRefreshToken(_ context.Context, redemption storage
 	return storage.RedeemedRefreshToken{
 		ClientID: token.ClientID, Subject: token.Subject, Scope: token.Scope,
 		Thumbprint: token.Thumbprint, AuthTime: token.AuthTime, ACR: token.ACR, AMR: token.AMR,
-		AuthorizationDetails:   token.AuthorizationDetails,
 		TokenClaims:            token.TokenClaims,
 		RequestedIDTokenClaims: token.RequestedIDTokenClaims, RequestedUserinfoClaims: token.RequestedUserinfoClaims,
 		ExpiresAt: token.ExpiresAt,

@@ -49,12 +49,4 @@ var (
 	// ErrRARObjectTooLarge indicates one detail object exceeded its
 	// RARDefinition.MaxBytesPerObject.
 	ErrRARObjectTooLarge = errors.New("extension: authorization_details object exceeds the configured size limit")
-
-	// ErrRARGrantExceedsRequest indicates a granted authorization_details
-	// object (RARRegistry.ValidateGrant) does not correspond to any
-	// requested object of the same type — either the type wasn't
-	// requested at all, more objects of that type were granted than were
-	// requested, or the granted object isn't an acceptable narrowing
-	// (RARDefinition.ValidateGrant) of any still-unmatched requested one.
-	ErrRARGrantExceedsRequest = errors.New("extension: granted authorization_details exceeds what was requested")
 )

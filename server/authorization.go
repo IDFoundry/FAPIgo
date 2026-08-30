@@ -98,13 +98,13 @@ func (s *Server) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 
 	action := InteractionRequired{
 		Handle:      InteractionHandle{value: handle},
-		Interaction: s.interactionRequestFrom(req.ClientID, pushed.Parameters),
+		Interaction: interactionRequestFrom(req.ClientID, pushed.Parameters),
 	}
 	s.audit(ctx, AuditEventBeginAuthorization, req.ClientID, AuditOutcomeSuccess, "")
 	return action, nil
 }
 
-func (s *Server) interactionRequestFrom(clientID fapi.ClientID, params map[string]json.RawMessage) InteractionRequest {
+func interactionRequestFrom(clientID fapi.ClientID, params map[string]json.RawMessage) InteractionRequest {
 	var scopes []string
 	if scope, err := jsonString(params, "scope"); err == nil && scope != "" {
 		scopes = strings.Fields(scope)
@@ -118,10 +118,9 @@ func (s *Server) interactionRequestFrom(clientID fapi.ClientID, params map[strin
 	}
 
 	return InteractionRequest{
-		ClientID:             clientID,
-		Scope:                scopes,
-		Hints:                AuthenticationHints{LoginHint: hint},
-		AuthorizationDetails: rarValuesFromStoredParameters(s.cfg.RAR, params),
+		ClientID: clientID,
+		Scope:    scopes,
+		Hints:    AuthenticationHints{LoginHint: hint},
 	}
 }
 

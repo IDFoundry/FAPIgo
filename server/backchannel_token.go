@@ -118,7 +118,6 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorServerError, 500, "failed to encode requested userinfo claims", err))
 	}
-	accessTokenClaims = withAuthorizationDetails(polled.AuthorizationDetails, accessTokenClaims)
 	accessToken, _, err := s.deps.AccessTokens.IssueAccessToken(ctx, AccessTokenParams{
 		ClientID: client.ID(), Subject: polled.Subject, Scope: polled.Scope,
 		Thumbprint: thumbprint, SenderConstrain: client.SenderConstrain(), Claims: accessTokenClaims,
@@ -130,11 +129,10 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 	}
 
 	result := TokenResult{
-		AccessToken:          fapi.NewSecret(accessToken),
-		TokenType:            tokenTypeFor(client.SenderConstrain()),
-		ExpiresIn:            s.cfg.Limits.AccessTokenLifetime,
-		Scope:                strings.Join(polled.Scope, " "),
-		AuthorizationDetails: polled.AuthorizationDetails,
+		AccessToken: fapi.NewSecret(accessToken),
+		TokenType:   tokenTypeFor(client.SenderConstrain()),
+		ExpiresIn:   s.cfg.Limits.AccessTokenLifetime,
+		Scope:       strings.Join(polled.Scope, " "),
 	}
 
 	if containsScope(polled.Scope, "openid") {
@@ -155,7 +153,7 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 	if containsScope(polled.Scope, "offline_access") {
 		refreshToken, err := s.issueRefreshToken(ctx, client.ID(), identityAssertion{
 			Subject: polled.Subject, AuthTime: polled.AuthTime, ACR: polled.ACR, AMR: polled.AMR, TokenClaims: polled.TokenClaims,
-		}, polled.Scope, polled.AuthorizationDetails, thumbprint, polled.RequestedIDTokenClaims, polled.RequestedUserinfoClaims)
+		}, polled.Scope, thumbprint, polled.RequestedIDTokenClaims, polled.RequestedUserinfoClaims)
 		if err != nil {
 			return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorServerError, 500, "failed to issue refresh token", err))
 		}

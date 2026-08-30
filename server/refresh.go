@@ -109,7 +109,6 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorServerError, 500, "failed to encode requested userinfo claims", err))
 	}
-	accessTokenClaims = withAuthorizationDetails(redeemed.AuthorizationDetails, accessTokenClaims)
 	// Revocation-lookup key discarded — refresh-token redemption is
 	// deliberately not single-use (FAPI2-SP-FINAL 5.3.2.1-9), so
 	// there's no "reuse" event on this path to revoke an access token
@@ -126,11 +125,10 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 	}
 
 	result := TokenResult{
-		AccessToken:          fapi.NewSecret(accessToken),
-		TokenType:            tokenTypeFor(client.SenderConstrain()),
-		ExpiresIn:            s.cfg.Limits.AccessTokenLifetime,
-		Scope:                strings.Join(scope, " "),
-		AuthorizationDetails: redeemed.AuthorizationDetails,
+		AccessToken: fapi.NewSecret(accessToken),
+		TokenType:   tokenTypeFor(client.SenderConstrain()),
+		ExpiresIn:   s.cfg.Limits.AccessTokenLifetime,
+		Scope:       strings.Join(scope, " "),
 	}
 
 	if containsScope(scope, "openid") {

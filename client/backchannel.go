@@ -65,14 +65,6 @@ type BeginBackchannelAuthenticationRequest struct {
 	// Zero means "don't send requested_expiry" — the server applies
 	// its own default.
 	RequestedExpiry time.Duration
-
-	// AuthorizationDetails carries Rich Authorization Requests (RFC 9396)
-	// detail objects for this request, one entry per object, already
-	// encoded as JSON — mirrors BeginAuthorizationRequest.AuthorizationDetails.
-	// Unlike PAR, CIBA always signs a request object, so this is embedded
-	// as native JSON unconditionally, with no plain-parameter path to
-	// consider.
-	AuthorizationDetails []json.RawMessage
 }
 
 // BackchannelAuthenticationSession is returned by a successful
@@ -162,13 +154,6 @@ func (c *Client) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	if req.RequestedExpiry > 0 {
 		encoded, _ := json.Marshal(int64(req.RequestedExpiry / time.Second))
 		objectParams["requested_expiry"] = encoded
-	}
-	if len(req.AuthorizationDetails) > 0 {
-		encoded, err := json.Marshal(req.AuthorizationDetails)
-		if err != nil {
-			return BackchannelAuthenticationSession{}, newError(ErrorInternal, "failed to encode authorization_details", err)
-		}
-		objectParams[authorizationDetailsParameter] = encoded
 	}
 
 	// notificationToken is exposed on the returned session (see
@@ -436,10 +421,9 @@ func (c *Client) PollBackchannelAuthentication(ctx context.Context, session Back
 			return nil, newError(ErrorInvalidResponse, fmt.Sprintf("token response token_type is not %s", wantTokenType), nil)
 		}
 		result := TokenSet{
-			AccessToken:          fapi.NewSecret(raw.AccessToken),
-			TokenType:            wantTokenType,
-			Scope:                raw.Scope,
-			AuthorizationDetails: raw.AuthorizationDetails,
+			AccessToken: fapi.NewSecret(raw.AccessToken),
+			TokenType:   wantTokenType,
+			Scope:       raw.Scope,
 		}
 		if raw.ExpiresIn > 0 {
 			result.ExpiresIn = time.Duration(raw.ExpiresIn) * time.Second

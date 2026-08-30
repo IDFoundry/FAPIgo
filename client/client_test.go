@@ -272,6 +272,26 @@ func TestNewAcceptsClientAuthMethodTLSClientAuthWithoutClientAuthenticationAlgor
 	}
 }
 
+func TestNewAcceptsClientAuthMethodTLSClientAuthSANVariantsWithoutClientAuthenticationAlgorithm(t *testing.T) {
+	methods := map[string]storage.ClientAuthMethod{
+		"SANDNS":   storage.ClientAuthMethodTLSClientAuthSANDNS,
+		"SANURI":   storage.ClientAuthMethodTLSClientAuthSANURI,
+		"SANIP":    storage.ClientAuthMethodTLSClientAuthSANIP,
+		"SANEmail": storage.ClientAuthMethodTLSClientAuthSANEmail,
+	}
+	for name, method := range methods {
+		t.Run(name, func(t *testing.T) {
+			cfg := validConfig(t)
+			cfg.ClientAuthMethod = method
+			cfg.Algorithms.ClientAuthentication = 0
+			cfg.Limits.ClientAssertionLifetime = 0
+			if _, err := client.New(cfg, validDependencies(t)); err != nil {
+				t.Fatalf("New(%v, no client authentication algorithm): %v", method, err)
+			}
+		})
+	}
+}
+
 func TestNewRejectsInvalidConfig(t *testing.T) {
 	cases := map[string]func(*client.Config){
 		"zero issuer":                 func(c *client.Config) { c.Issuer = fapi.URL{} },

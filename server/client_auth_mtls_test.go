@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/x509"
+	"net"
 	"net/url"
 	"strings"
 	"testing"
@@ -178,6 +179,91 @@ func newHarnessWithClientAuthTLSSubjectDNValue(t *testing.T, cert *x509.Certific
 		t.Fatalf("server.New: %v", err)
 	}
 	return harness{server: srv, serverKey: serverKey, now: now}
+}
+
+// newHarnessWithClientAuthTLSSAN generalizes
+// newHarnessWithClientAuthTLSSubjectDNValue across all four SAN-based
+// ClientAuthMethodTLSClientAuthSAN* variants: registers testClientID
+// under method with registeredValue as the matching Expected* field,
+// and builds a certificate whose own subjectAltName entries are
+// populated by certSAN (selfSignedTestClientCertWithSAN, mtls_test.go).
+func newHarnessWithClientAuthTLSSAN(t *testing.T, method storage.ClientAuthMethod, registeredValue string, certSAN func(*x509.Certificate)) (harness, *x509.Certificate) {
+	t.Helper()
+	now := time.Now()
+	serverKey := generateKey(t)
+	cert := selfSignedTestClientCertWithSAN(t, certSAN)
+
+	cfg := storage.RegisteredClientConfig{
+		ID:               testClientID,
+		RedirectURIs:     []fapi.RegisteredRedirectURI{testRedirectURI},
+		ClientAuthMethod: method,
+		SenderConstrain:  storage.SenderConstrainMTLS,
+		AllowedScopes:    []string{"openid", "accounts", "offline_access"},
+	}
+	switch method {
+	case storage.ClientAuthMethodTLSClientAuthSANDNS:
+		cfg.ExpectedSANDNS = registeredValue
+	case storage.ClientAuthMethodTLSClientAuthSANURI:
+		cfg.ExpectedSANURI = registeredValue
+	case storage.ClientAuthMethodTLSClientAuthSANIP:
+		cfg.ExpectedSANIP = registeredValue
+	case storage.ClientAuthMethodTLSClientAuthSANEmail:
+		cfg.ExpectedSANEmail = registeredValue
+	}
+	client, err := storage.NewRegisteredClient(cfg)
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+
+	issuer, err := fapi.ParseIssuerURL(testIssuer)
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+
+	srvCfg := server.Config{
+		Issuer:    issuer,
+		Endpoints: testEndpoints(t),
+		Profile:   server.ProfileFAPISecurity,
+		Algorithms: server.AlgorithmPolicy{
+			ClientAssertion: server.AlgorithmSet{fapi.ES256},
+			RequestObject:   server.AlgorithmSet{fapi.ES256},
+			JARM:            fapi.ES256,
+			IDToken:         fapi.ES256,
+		},
+		Limits: server.Limits{
+			PushedRequestLifetime:      90 * time.Second,
+			MaxClientAssertionLifetime: time.Minute,
+			MaxRequestObjectLifetime:   time.Minute,
+			InteractionLifetime:        5 * time.Minute,
+			AuthorizationCodeLifetime:  time.Minute,
+			JARMResponseLifetime:       time.Minute,
+			AccessTokenLifetime:        5 * time.Minute,
+			IDTokenLifetime:            5 * time.Minute,
+			RefreshTokenLifetime:       5 * time.Minute,
+			MaxDPoPProofAge:            time.Minute,
+			MaxClockSkew:               5 * time.Second,
+		},
+		Assurance: server.AssuranceDevelopment,
+	}
+	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
+	deps := server.Dependencies{
+		Clients:      &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
+		Transactions: &fakeTransactionStore{},
+		Grants:       &fakeGrantStore{},
+		Replay:       &fakeReplayStore{},
+		ClientKeys:   &fakeClientKeySource{},
+		Keys:         serverKeyManager,
+		AccessTokens: server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:   &fakeRevocationSink{},
+		Clock:        fixedClock{now: now},
+		Random:       rand.Reader,
+	}
+
+	srv, err := server.New(srvCfg, deps)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+	return harness{server: srv, serverKey: serverKey, now: now}, cert
 }
 
 // certFormParameters builds a standard authorization request's form
@@ -424,6 +510,72 @@ func TestPushAuthorizationRequestTLSClientAuthCaseSensitiveSubjectDN(t *testing.
 	}
 	if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
 		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidClient)
+	}
+}
+
+// TestPushAuthorizationRequestTLSClientAuthSAN covers all four
+// SAN-based ClientAuthMethodTLSClientAuthSAN* variants (RFC 8705 §2.1's
+// tls_client_auth_san_dns/_san_uri/_san_ip/_san_email) — for each, a
+// certificate whose relevant SAN entry matches the registration
+// succeeds, and one whose entry differs is rejected.
+func TestPushAuthorizationRequestTLSClientAuthSAN(t *testing.T) {
+	cases := []struct {
+		name   string
+		method storage.ClientAuthMethod
+		value  string
+		wrong  string
+		mutate func(cert *x509.Certificate, value string)
+	}{
+		{
+			name: "DNS", method: storage.ClientAuthMethodTLSClientAuthSANDNS,
+			value: "client.example.com", wrong: "someone-else.example.com",
+			mutate: func(cert *x509.Certificate, value string) { cert.DNSNames = []string{value} },
+		},
+		{
+			name: "URI", method: storage.ClientAuthMethodTLSClientAuthSANURI,
+			value: "https://client.example.com/id", wrong: "https://someone-else.example.com/id",
+			mutate: func(cert *x509.Certificate, value string) {
+				u, err := url.Parse(value)
+				if err != nil {
+					t.Fatalf("url.Parse(%q): %v", value, err)
+				}
+				cert.URIs = []*url.URL{u}
+			},
+		},
+		{
+			name: "IP", method: storage.ClientAuthMethodTLSClientAuthSANIP,
+			value: "203.0.113.5", wrong: "203.0.113.6",
+			mutate: func(cert *x509.Certificate, value string) { cert.IPAddresses = []net.IP{net.ParseIP(value)} },
+		},
+		{
+			name: "Email", method: storage.ClientAuthMethodTLSClientAuthSANEmail,
+			value: "client@example.com", wrong: "someone-else@example.com",
+			mutate: func(cert *x509.Certificate, value string) { cert.EmailAddresses = []string{value} },
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name+"/Success", func(t *testing.T) {
+			h, cert := newHarnessWithClientAuthTLSSAN(t, tc.method, tc.value, func(c *x509.Certificate) { tc.mutate(c, tc.value) })
+			if _, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+				HTTP:            server.FormRequest{Parameters: certFormParameters(nil)},
+				PeerCertificate: cert,
+			}); err != nil {
+				t.Fatalf("PushAuthorizationRequest: %v", err)
+			}
+		})
+		t.Run(tc.name+"/RejectsMismatch", func(t *testing.T) {
+			h, cert := newHarnessWithClientAuthTLSSAN(t, tc.method, tc.value, func(c *x509.Certificate) { tc.mutate(c, tc.wrong) })
+			_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+				HTTP:            server.FormRequest{Parameters: certFormParameters(nil)},
+				PeerCertificate: cert,
+			})
+			if err == nil {
+				t.Fatalf("PushAuthorizationRequest(mismatched %s) = nil error, want error", tc.name)
+			}
+			if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
+				t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidClient)
+			}
+		})
 	}
 }
 

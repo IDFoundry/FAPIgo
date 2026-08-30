@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 
+	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/extension"
 )
 
@@ -51,4 +53,20 @@ func approvedAuthorizationDetails(requested extension.RARValues) []json.RawMessa
 		granted = append(granted, encoded)
 	}
 	return granted
+}
+
+// sampleClientCredentialsRARPolicy is this reference server's own
+// server.ClientCredentialsRARPolicy (RFC 9396 §6) — a stand-in for a
+// real deployment's client-entitlement policy, the same way
+// approvedAuthorizationDetails above stands in for a real consent UI:
+// it grants every requested detail object verbatim, with no actual
+// per-client check. requested has already passed RARRegistry.Parse (a
+// registered type, correct shape, within bounds) by the time this is
+// called, so there's nothing left to reject here — a real deployment
+// would consult its own client-authorization records instead of always
+// returning requested unchanged.
+type sampleClientCredentialsRARPolicy struct{}
+
+func (sampleClientCredentialsRARPolicy) Authorize(_ context.Context, _ fapi.ClientID, requested []json.RawMessage) ([]json.RawMessage, error) {
+	return requested, nil
 }

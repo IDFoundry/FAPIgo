@@ -77,6 +77,22 @@ const (
 	// §13 lists invalid_binding_message as exactly this rejection's own
 	// error code.
 	ErrorInvalidBindingMessage ErrorCode = "invalid_binding_message"
+
+	// ErrorInvalidAuthorizationDetails is RFC 9396 §6's dedicated error
+	// code for a client_credentials token request's own
+	// "authorization_details" — both when it's structurally invalid
+	// (unregistered type, wrong shape) and when Dependencies.ClientCredentialsRARPolicy
+	// refuses to grant it ("the AS refuses the request with the error
+	// code invalid_authorization_details (similar to invalid_scope)").
+	// PAR and CIBA's own equivalent checks reuse ErrorInvalidRequest/
+	// ErrorInvalidRequestObject instead — an existing, shipped choice
+	// this doesn't revisit — since RFC 9396 §14.6 only registers this
+	// code for the token and authorization endpoints, and
+	// RequestClientCredentialsToken is the only one of the three that
+	// ever rejects an authorization_details decision at the token
+	// endpoint itself (PAR/CIBA's own decision is a resource owner's,
+	// made later, at CompleteAuthorization/CompleteBackchannelAuthentication).
+	ErrorInvalidAuthorizationDetails ErrorCode = "invalid_authorization_details"
 )
 
 // Error is the error type every public Server method returns. Code and

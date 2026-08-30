@@ -104,4 +104,13 @@ type Dependencies struct {
 	// real implementation, or NoBackchannelNotifications{} to explicitly
 	// decline (see that type's own doc comment for why).
 	BackchannelNotifier BackchannelNotifier
+
+	// ClientCredentialsRARPolicy decides which Rich Authorization
+	// Requests (RFC 9396) detail objects a client_credentials token
+	// request is entitled to receive — see that type's own doc comment.
+	// Optional, like IdentityClaims, but unlike IdentityClaims its
+	// absence is not permissive: a client_credentials request naming
+	// authorization_details with no policy configured is refused, not
+	// silently granted everything Config.RAR happens to have registered.
+	ClientCredentialsRARPolicy ClientCredentialsRARPolicy
 }

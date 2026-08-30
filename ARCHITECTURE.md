@@ -831,15 +831,17 @@ backchannel authentication endpoint — every CIBA client this repo had
 registered before this used `private_key_jwt`; "AS ciba-mtls"/"AS
 ciba-ping" are actually the register's "...+ Private Key" profiles
 despite their names, which describe §3 token binding, not client
-authentication). Both closed the same way as everything above:
-`setupClientAuthMTLSAndMTLS` mirrors `setupClientAuthMTLS` almost
-verbatim (one shared certificate satisfies both axes at once, since
-`storage.RegisteredClientConfig`'s `ClientAuthMethod` and
-`SenderConstrain` fields are already fully orthogonal — nothing
-library-side stops registering both on one client), its own new
-`conformance-as-client-auth-mtls-and-mtls` container; the two CIBA
-profiles extend the same running `conformance-as-ciba-mtls` container
-`appendCIBAClientAuthMTLSClients` adds `client_auth_method`/
+authentication). Both closed the same way as everything above: one
+shared `setupClientAuthMTLSVariant` function (a `senderConstrainMTLS
+bool` parameter, same shape as `writePlanConfig`'s own) now covers both
+AS client-auth-mtls and this new profile — one shared certificate
+satisfies both axes at once, since `storage.RegisteredClientConfig`'s
+`ClientAuthMethod` and `SenderConstrain` fields are already fully
+orthogonal, nothing library-side stops registering both on one client
+— its own new `conformance-as-client-auth-mtls-and-mtls` container; the
+two CIBA profiles extend the same running `conformance-as-ciba-mtls`
+container via one shared `setupCIBAClientAuthMTLSVariant`, whose
+`appendCIBAClientAuthMTLSClients` helper adds `client_auth_method`/
 `expected_certificate_thumbprint` clients alongside the existing
 private_key_jwt ones — `jwks`/`backchannel_authentication_request_algorithm`
 stay regardless of client authentication method, since FAPI-CIBA always

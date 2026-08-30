@@ -327,7 +327,7 @@ run:
   profile's first attempt, which had omitted `jwks` reasoning from
   `GetStaticClientConfiguration` alone, itself genuinely unconditional
   on `client_id` only — two different conditions, only one of which
-  cares). `setupClientAuthMTLS` (`conformance/server/scripts/setup-config/main.go`)
+  cares). `setupClientAuthMTLSVariant` (`conformance/server/scripts/setup-config/main.go`)
   generates an ES256 keypair per client for exactly this purpose — it's
   otherwise unused by either side, since this profile's own
   `client-auth-mtls.config.json` never sets a `jwks`/`jwks_uri` for
@@ -368,7 +368,7 @@ baseline/message-signing. `go run ./conformance/server/scripts/setup-config`
 generates `client-auth-mtls-plan.json` (and patches this file's own
 `expected_certificate_thumbprint` values) the same idempotent way it
 already does for the other profiles — see that tool's own
-`setupClientAuthMTLS`. RP-side counterpart:
+`setupClientAuthMTLSVariant`. RP-side counterpart:
 `cmd/conformance-client -profile=baseline -client-auth-mtls` — see
 `../client/scripts/README.md`'s own "Client authentication mTLS"
 section.
@@ -794,10 +794,14 @@ independent of the certificate that authenticates them.
 `ciba-client-auth-mtls-plan.json` (`ciba_mode` implicitly poll, same as
 `ciba-mtls-plan.json`) and `ciba-ping-client-auth-mtls-plan.json`
 (`ciba_mode=ping`, its own alias/notification endpoint, same reasoning
-as `ciba-ping-plan.json` above) reuse `cibaMTLSPlan`/`cibaPingPlan`'s
-existing shape entirely unchanged — the suite-side plan config's own
-`mtls`/`mtls2` blocks already carry the certificate the suite presents
-on every connection; nothing about which axis (§2 auth vs. §3 binding)
+as `ciba-ping-plan.json` above) both reuse `cibaMTLSPlan`'s existing
+shape entirely unchanged — `cibaPingClient`/`cibaPingClient2` mirror
+`cibaMTLSClient`/`cibaMTLSClient2` exactly field-for-field anyway (see
+that pair's own doc comment), so one shared `setupCIBAClientAuthMTLSVariant`
+function covers both delivery modes rather than duplicating a
+ping-specific one. The suite-side plan config's own `mtls`/`mtls2`
+blocks already carry the certificate the suite presents on every
+connection; nothing about which axis (§2 auth vs. §3 binding)
 consumes that presentation is the plan config's concern, only this
 AS's own registration is.
 
@@ -822,22 +826,22 @@ alone (`sender_constrain` stays `dpop`); `mtls.config.json` covers §3
 sender-constraining alone (`client_auth_type` stays `private_key_jwt`).
 Nothing combined both on one client before this profile.
 
-`setupClientAuthMTLSAndMTLS` (`../scripts/setup-config/main.go`) is
-almost a verbatim copy of `setupClientAuthMTLS` — same certificate
-generation, same `clientAuthMTLSClient`/`clientAuthMTLSPlan` shapes
-(reused, not duplicated), same `patchClientAuthMTLSConfig` helper. One
-certificate satisfies both axes at once: RFC 8705 doesn't require
-separate certificates for §2 auth vs. §3 binding, and the suite's own
-`EnsureClientCertificateMatches` condition reads the same
-`client.certificate`-shaped `mtls`/`mtls2` plan config regardless of
-which axis triggered the check — the same precedent
+`setupClientAuthMTLSVariant` (`../scripts/setup-config/main.go`) covers
+this profile and `client-auth-mtls.config.json` above from one shared
+function — same certificate generation, same
+`clientAuthMTLSClient`/`clientAuthMTLSPlan` shapes, same
+`patchClientAuthMTLSConfig` helper, a `senderConstrainMTLS bool`
+parameter switching only `Resource.ResourceURL` between `issuerURL` and
+`mtlsURL`. One certificate satisfies both axes at once: RFC 8705
+doesn't require separate certificates for §2 auth vs. §3 binding, and
+the suite's own `EnsureClientCertificateMatches` condition reads the
+same `client.certificate`-shaped `mtls`/`mtls2` plan config regardless
+of which axis triggered the check — the same precedent
 `cmd/conformance-client`'s own `-mtls -client-auth-mtls` combination
-already established on the RP side. The only real difference from
-`setupClientAuthMTLS`: `Resource.ResourceURL` uses `mtlsURL`, not
-`issuerURL` — mirrors `writePlanConfig`'s own `senderConstrainMTLS`
-branch, since this profile's mTLS-bound access tokens' resource call
-must go over the mTLS listener, same reasoning as `mtls.config.json`
-itself.
+already established on the RP side. `mtlsURL`, not `issuerURL`, mirrors
+`writePlanConfig`'s own `senderConstrainMTLS` branch, since this
+profile's mTLS-bound access tokens' resource call must go over the
+mTLS listener, same reasoning as `mtls.config.json` itself.
 
 **Confirmed live: 38/38 PASS**, 0 failures/0 warnings. The one real
 snag getting there wasn't in this AS at all: manually driving

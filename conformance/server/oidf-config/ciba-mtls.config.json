@@ -111,6 +111,120 @@
         "https://localhost.emobix.co.uk:8443/test/a/gofapi-ciba-ping/callback"
       ],
       "sender_constrain": "mtls"
+    },
+    {
+      "allowed_scopes": [
+        "openid",
+        "accounts",
+        "offline_access"
+      ],
+      "backchannel_authentication_request_algorithm": "PS256",
+      "client_auth_method": "self_signed_tls_client_auth",
+      "expected_certificate_thumbprint": "4Unj7Uc8ssINjwnpUXsBxCV9f3oOPLB3qtl2VZ5d1NE",
+      "id": "gofapi-conformance-ciba-client-auth-mtls-client-1",
+      "jwks": {
+        "keys": [
+          {
+            "kty": "RSA",
+            "alg": "PS256",
+            "use": "sig",
+            "kid": "gofapi-conformance-ciba-client-auth-mtls-client1-rsa-key1",
+            "n": "0ZIFicUwIXu3V7gtliE1PEZT_sbvLBQlHsmpQ0kSWKm_RF5E_Lhji_Jv2YqWoT5a1mw9BMWn9Grm9m_MSIEw4Y-gLkAFy90ogyVj3SzgQ70sgXKEKkk5rtEHkIWJKWYoWPnIlUKt-3qmK-sOGlDT84x-nD4dPb1vBxuk-tMqef8M1GLMX348Xw8AhJ5LHOrhgv2EMQHNULu7xweDESyOan9oci27VAumhrG4sKRcXmlRrR_OasOxcg9Gxen7aPdnQaU541wecylNZzcshA1Ob9XlB-bzArJ5cltabwZiQgc5emRweu2_X0ZjaJyro2kaqpNh4WQEGhrdwEG51-0xCw",
+            "e": "AQAB"
+          }
+        ]
+      },
+      "redirect_uris": [
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-ciba-client-auth-mtls/callback"
+      ],
+      "sender_constrain": "mtls"
+    },
+    {
+      "allowed_scopes": [
+        "openid",
+        "accounts",
+        "offline_access"
+      ],
+      "backchannel_authentication_request_algorithm": "ES256",
+      "client_auth_method": "self_signed_tls_client_auth",
+      "expected_certificate_thumbprint": "APeQUK2cRPWUdWM9pZ8xNjcQziXuNyb_L3F07XC6Ka4",
+      "id": "gofapi-conformance-ciba-client-auth-mtls-client-2",
+      "jwks": {
+        "keys": [
+          {
+            "kty": "EC",
+            "alg": "ES256",
+            "use": "sig",
+            "kid": "gofapi-conformance-ciba-client-auth-mtls-client2-key1",
+            "crv": "P-256",
+            "x": "a9tmW_RwzXfIk4C_u6G2tGQs31IppGxGy05MgzcjSKM",
+            "y": "C7Q13obVgQx81YJdDF7XngxON7DlvladOe4WMS9TZjI"
+          }
+        ]
+      },
+      "redirect_uris": [
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-ciba-client-auth-mtls/callback"
+      ],
+      "sender_constrain": "mtls"
+    },
+    {
+      "allowed_scopes": [
+        "openid",
+        "accounts",
+        "offline_access"
+      ],
+      "backchannel_authentication_request_algorithm": "PS256",
+      "backchannel_client_notification_endpoint": "https://localhost.emobix.co.uk:8443/test/a/gofapi-ciba-ping-client-auth-mtls/ciba-notification-endpoint",
+      "backchannel_token_delivery_mode": "ping",
+      "client_auth_method": "self_signed_tls_client_auth",
+      "expected_certificate_thumbprint": "WfDMe5kqYA2Eznwg7DvJsHGxdyvhO3pWC_jNR4AZLIo",
+      "id": "gofapi-conformance-ciba-ping-client-auth-mtls-client-1",
+      "jwks": {
+        "keys": [
+          {
+            "kty": "RSA",
+            "alg": "PS256",
+            "use": "sig",
+            "kid": "gofapi-conformance-ciba-ping-client-auth-mtls-client1-rsa-key1",
+            "n": "spc6qkUNxE1m6ZeJFHD0liYcLGoT0nO3lOSj5D-hKVE8UWDWUWOjtaskXQy1RnDWYcwftzVAVnQMXqGAeOPmcjcYKjXAU_NBWFDYM-StQ8e8H_ggJTx_bw5EY6-2F5ibrZSUEwkNCOvjhYrDZj2GjTm6jefHstnJGNv_QcBcV-FF6X8tJ2LPBbyGeN2xOs9q0MsvVTYQNlFsBXzwY5tsxTlGpEZBF55QWcWZO72zeCb2Z6rDXDVcUDJZX_2rfWnpzOYUrRJLWzvGD0l_Q-iBhjhylenFTwawZkehTkWNZVMZ4134hY71UUjZJzlQmajgM0CzGgLGjYAqQeX6XHwPvw",
+            "e": "AQAB"
+          }
+        ]
+      },
+      "redirect_uris": [
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-ciba-ping-client-auth-mtls/callback"
+      ],
+      "sender_constrain": "mtls"
+    },
+    {
+      "allowed_scopes": [
+        "openid",
+        "accounts",
+        "offline_access"
+      ],
+      "backchannel_authentication_request_algorithm": "ES256",
+      "backchannel_client_notification_endpoint": "https://localhost.emobix.co.uk:8443/test/a/gofapi-ciba-ping-client-auth-mtls/ciba-notification-endpoint",
+      "backchannel_token_delivery_mode": "ping",
+      "client_auth_method": "self_signed_tls_client_auth",
+      "expected_certificate_thumbprint": "IIwt9QFXXixLnTYc9NR08ZXTrml6rpU2mId-NQgOO28",
+      "id": "gofapi-conformance-ciba-ping-client-auth-mtls-client-2",
+      "jwks": {
+        "keys": [
+          {
+            "kty": "EC",
+            "alg": "ES256",
+            "use": "sig",
+            "kid": "gofapi-conformance-ciba-ping-client-auth-mtls-client2-key1",
+            "crv": "P-256",
+            "x": "kE_vi-HNX3noG64zzo1ZcsrifdnU8GNYjtEf7e3DJjQ",
+            "y": "wM0vke5A1r4FPyJOsaa6w5q2ZMXAkAUYKn8gZYupfLM"
+          }
+        ]
+      },
+      "redirect_uris": [
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-ciba-ping-client-auth-mtls/callback"
+      ],
+      "sender_constrain": "mtls"
     }
   ],
   "default_subject": "conformance-test-user",

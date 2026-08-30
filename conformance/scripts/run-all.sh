@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Runs all thirteen FAPI2 conformance suites this repo has driver
-# support for — AS baseline, AS message-signing, AS ciba-mtls, AS
-# ciba-ping, AS mtls, AS message-signing-mtls, AS client-auth-mtls, RP
-# baseline, RP message-signing, RP ciba-mtls, RP client-auth-mtls, RP
-# mtls, RP client-auth-mtls-and-mtls — against a locally running OIDF
-# conformance suite,
+# Runs all sixteen FAPI2/FAPI-CIBA conformance suites this repo has
+# driver support for — AS baseline, AS message-signing, AS ciba-mtls, AS
+# ciba-ping, AS mtls, AS message-signing-mtls, AS client-auth-mtls, AS
+# client-auth-mtls-and-mtls, AS ciba-client-auth-mtls, AS
+# ciba-ping-client-auth-mtls, RP baseline, RP message-signing, RP
+# ciba-mtls, RP client-auth-mtls, RP mtls, RP client-auth-mtls-and-mtls
+# — against a locally running OIDF conformance suite,
 # prints one combined summary at the end, and (via generate-report.py)
 # writes a fuller report.md alongside the raw per-suite logs — every
 # non-PASSED module, with the "why this is expected, not a defect"
@@ -350,7 +351,7 @@ log "bringing up conformance-as containers"
 # build` layer even when the source changed. Not the default here
 # since it'd make every routine run take minutes even when nothing
 # changed.
-(cd "$SERVER_DIR" && docker compose up -d --build conformance-as-baseline conformance-as-message-signing conformance-as-ciba-mtls conformance-as-mtls conformance-as-message-signing-mtls conformance-as-client-auth-mtls) >"$WORKDIR/docker-compose.log" 2>&1
+(cd "$SERVER_DIR" && docker compose up -d --build conformance-as-baseline conformance-as-message-signing conformance-as-ciba-mtls conformance-as-mtls conformance-as-message-signing-mtls conformance-as-client-auth-mtls conformance-as-client-auth-mtls-and-mtls) >"$WORKDIR/docker-compose.log" 2>&1
 wait_as_ready 18443
 wait_as_ready 18444
 wait_as_ready 18446
@@ -361,6 +362,8 @@ wait_as_ready 18452
 wait_as_ready 18453
 wait_as_ready 18448
 wait_as_ready 18449
+wait_as_ready 18454
+wait_as_ready 18455
 
 run_as_plan "baseline" \
 	'fapi2-security-profile-final-test-plan[client_auth_type=private_key_jwt][sender_constrain=dpop][fapi_profile=plain_fapi][openid=openid_connect]' \
@@ -430,6 +433,39 @@ run_as_plan "client-auth-mtls" \
 	"$SERVER_DIR/oidf-config/client-auth-mtls-plan.json" \
 	"$SERVER_DIR/expected-warnings-client-auth-mtls.json" \
 	"$SERVER_DIR/expected-skips-client-auth-mtls.json"
+
+# AS client-auth-mtls-and-mtls: FAPI2SP "MTLS + MTLS" — RFC 8705 §2
+# client authentication *and* §3 sender-constraining together on the
+# same client, its own conformance-as-client-auth-mtls-and-mtls
+# container. Closes the one FAPI2SP register combination neither AS
+# client-auth-mtls (§2 only) nor AS mtls (§3 only) covers alone.
+run_as_plan "client-auth-mtls-and-mtls" \
+	'fapi2-security-profile-final-test-plan[client_auth_type=mtls][sender_constrain=mtls][fapi_profile=plain_fapi][openid=openid_connect]' \
+	"$SERVER_DIR/oidf-config/client-auth-mtls-and-mtls-plan.json" \
+	"$SERVER_DIR/expected-warnings-client-auth-mtls-and-mtls.json" \
+	"$SERVER_DIR/expected-skips-client-auth-mtls-and-mtls.json"
+
+# AS ciba-client-auth-mtls / AS ciba-ping-client-auth-mtls: FAPI-CIBA OP
+# register profiles "Poll w/ MTLS" / "Ping w/ MTLS" — RFC 8705 §2 client
+# authentication for the backchannel authentication endpoint, on the
+# same already-running conformance-as-ciba-mtls container "ciba-mtls"/
+# "ciba-ping" above use (no new wait_as_ready needed). Every CIBA client
+# this repo registered before this pair used private_key_jwt only —
+# "ciba-mtls"/"ciba-ping" are actually FAPI-CIBA register profiles
+# "...+ Private Key", not "...+ MTLS", despite the container name (which
+# describes §3 token binding, mandatory unconditionally for FAPI-CIBA —
+# not client authentication).
+run_as_plan "ciba-client-auth-mtls" \
+	'fapi-ciba-id1-test-plan[client_auth_type=mtls][ciba_mode=poll][fapi_ciba_profile=plain_fapi][client_registration=static_client]' \
+	"$SERVER_DIR/oidf-config/ciba-client-auth-mtls-plan.json" \
+	"$SERVER_DIR/expected-warnings-ciba-client-auth-mtls.json" \
+	"$SERVER_DIR/expected-skips-ciba-client-auth-mtls.json"
+
+run_as_plan "ciba-ping-client-auth-mtls" \
+	'fapi-ciba-id1-test-plan[client_auth_type=mtls][ciba_mode=ping][fapi_ciba_profile=plain_fapi][client_registration=static_client]' \
+	"$SERVER_DIR/oidf-config/ciba-ping-client-auth-mtls-plan.json" \
+	"$SERVER_DIR/expected-warnings-ciba-ping-client-auth-mtls.json" \
+	"$SERVER_DIR/expected-skips-ciba-ping-client-auth-mtls.json"
 
 run_rp_plan "baseline" "baseline"
 run_rp_plan "message-signing" "message-signing"

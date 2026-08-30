@@ -39,6 +39,12 @@ type ClientCredentialsTokenRequest struct {
 // authenticated client's own AllowsClientCredentialsGrant() is true —
 // see both fields' own doc comments for why this needs two separate
 // opt-ins, not one.
+//
+// Also accepts an "authorization_details" (RFC 9396 §6) token request
+// parameter when Config.RAR is configured — validated and issued
+// verbatim into the access token's own claim, since RFC 9396 §6 makes
+// the AS's own RARRegistry check *be* the "client's policy" decision
+// this grant has no resource owner to narrow it against.
 func (s *Server) RequestClientCredentialsToken(ctx context.Context, req ClientCredentialsTokenRequest) (TokenResult, error) {
 	if !s.cfg.ClientCredentialsGrant {
 		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, "", newError(ErrorUnsupportedGrantType, 400, "the client_credentials grant is not enabled on this server", nil))
@@ -71,6 +77,18 @@ func (s *Server) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 		}
 	}
 
+	// RFC 9396 §6: for client_credentials, "the AS checks whether ...
+	// the client's policy ... allows the issuance of an access token
+	// with the requested authorization details" — there is no resource
+	// owner to grant a narrowed subset (unlike PAR/CIBA's own
+	// validateGrantedAuthorizationDetails step), so RARRegistry.Parse's
+	// own type/bounds check *is* the entire policy decision here: the
+	// requested set, once validated, is issued verbatim.
+	authorizationDetails, err := s.parseRequestedAuthorizationDetails(plainParamsToJSON(params))
+	if err != nil {
+		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), newError(ErrorInvalidRequest, 400, "authorization_details is invalid", err))
+	}
+
 	thumbprint, bindingErr := s.verifyTokenRequestBinding(ctx, client, req.DPoPProof, req.PeerCertificate)
 	if bindingErr != nil {
 		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), bindingErr)
@@ -89,9 +107,10 @@ func (s *Server) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 	// so a *second* redemption of that same code can revoke the first
 	// issuance (RFC 6749 §4.1.2). There is no code (or any other
 	// redeemable grant) here to ever be replayed against.
+	accessTokenClaims := withAuthorizationDetails(authorizationDetails, nil)
 	accessToken, _, err := s.deps.AccessTokens.IssueAccessToken(ctx, AccessTokenParams{
 		ClientID: client.ID(), Subject: client.ID().String(), Scope: scopeTokens,
-		Thumbprint: thumbprint, SenderConstrain: client.SenderConstrain(),
+		Thumbprint: thumbprint, SenderConstrain: client.SenderConstrain(), Claims: accessTokenClaims,
 		Issuer: s.cfg.Issuer.String(), Audience: s.cfg.Issuer.String(),
 		Now: now, Lifetime: s.cfg.Limits.AccessTokenLifetime, Random: s.deps.Random,
 	})
@@ -100,10 +119,11 @@ func (s *Server) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 	}
 
 	result := TokenResult{
-		AccessToken: fapi.NewSecret(accessToken),
-		TokenType:   tokenTypeFor(client.SenderConstrain()),
-		ExpiresIn:   s.cfg.Limits.AccessTokenLifetime,
-		Scope:       strings.Join(scopeTokens, " "),
+		AccessToken:          fapi.NewSecret(accessToken),
+		TokenType:            tokenTypeFor(client.SenderConstrain()),
+		ExpiresIn:            s.cfg.Limits.AccessTokenLifetime,
+		Scope:                strings.Join(scopeTokens, " "),
+		AuthorizationDetails: authorizationDetails,
 	}
 
 	if s.deps.Nonces != nil && client.SenderConstrain() == storage.SenderConstrainDPoP {

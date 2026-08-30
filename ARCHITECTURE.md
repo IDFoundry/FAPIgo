@@ -452,13 +452,20 @@ registered into a `server.Config.RAR` (`*extension.RARRegistry`), separate
 from `Config.Extensions` because `authorization_details` is validated as
 a whole bounded array of typed detail objects (total size, nesting depth,
 per-type object count and size, duplicate/unknown JSON members), not
-parameter-by-parameter. It is wired identically into both the PAR-fed
+parameter-by-parameter. It is wired identically into the PAR-fed
 authorization-code flow and the CIBA backchannel flow — the same
 `RARDefinition`s, the same `checkRAR`/`validateGrantedAuthorizationDetails`
 helpers (`server/rar.go`) — mirroring `scope`'s own request → interaction
 → `GrantedAuthorization` → storage → token-claim lifecycle, so a resource
 owner may grant a narrower `authorization_details` array than was
 requested exactly the way a granted scope may narrow a requested one.
+The RFC 6749 §4.4 client_credentials grant supports it too (RFC 9396
+§6), but structurally differently: there is no resource owner to narrow
+anything against, so `parseRequestedAuthorizationDetails`'s own
+`RARRegistry.Parse` — type/bounds validation — *is* the entire "client's
+policy" decision RFC 9396 §6 describes, and the validated request is
+issued verbatim, with no `validateGrantedAuthorizationDetails`/narrowing
+step at all (`server/client_credentials.go`).
 Whether a narrower grant is acceptable is, per type, decided by
 `RARDefinition.ValidateGrant(requested, granted T) error` — nil requires
 byte-for-byte (canonically re-encoded) equality; set, it can permit real
@@ -939,7 +946,10 @@ claim; there's no end user for this grant to name instead). No PAR, no
 `storage.GrantStore` redemption call (there's no grant to redeem — a
 structural difference from every other token-issuing path), no ID
 token, no refresh token (RFC 6749 §4.4.3 says a refresh token "SHOULD
-NOT" be issued). Two new opt-ins gate it, deliberately kept separate:
+NOT" be issued). It does support Rich Authorization Requests (RFC 9396
+§6) when `Config.RAR` is configured — see the RAR section above for how
+this differs structurally from PAR/CIBA's own narrowing-grant shape.
+Two new opt-ins gate the grant itself, deliberately kept separate:
 `Config.ClientCredentialsGrant` (server-wide — false by default,
 mirroring the "zero value disables the feature" idiom
 `Endpoints.BackchannelAuthentication`/`Config.RAR` already use, since

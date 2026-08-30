@@ -40,11 +40,12 @@ core.
 > CIBA Core 1.0, poll and ping delivery, mTLS-bound tokens, the OIDF
 > `fapi-ciba-id1` plan) — see [conformance/](conformance/README.md) for
 > the full breakdown and pass counts per plan. Rich Authorization
-> Requests (RFC 9396) are implemented end-to-end across both the PAR-fed
-> authorization-code flow and CIBA, including a per-type narrowing hook
-> so a resource owner can grant less than what a client requested — the
-> OIDF suite has no dedicated RAR conformance plan, so this is validated
-> by this repo's own unit, integration and end-to-end tests instead — see
+> Requests (RFC 9396) are implemented end-to-end across the PAR-fed
+> authorization-code flow, CIBA, and the client_credentials grant (RFC
+> 9396 §6), including a per-type narrowing hook so a resource owner can
+> grant less than what a client requested on the first two — the OIDF
+> suite has no dedicated RAR conformance plan, so this is validated by
+> this repo's own unit, integration and end-to-end tests instead — see
 > [conformance/](conformance/README.md#rar). The opaque access-token
 > alternative is covered by unit/integration tests and
 > `cmd/conformance-as`'s own smoke test under both formats, not by a

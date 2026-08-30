@@ -7,6 +7,7 @@ import (
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/extension"
 	"github.com/idfoundry/fapigo/internal/clientassertion"
 	"github.com/idfoundry/fapigo/internal/mtls"
 	"github.com/idfoundry/fapigo/internal/token"
@@ -107,6 +108,158 @@ func clientCredentialsFormParams(assertion, scope string) []server.FormParameter
 		formParam("client_assertion_type", clientassertion.AssertionType),
 		formParam("grant_type", "client_credentials"),
 		formParam("scope", scope),
+	}
+}
+
+// newHarnessWithClientCredentialsGrantAndRAR mirrors
+// newHarnessWithClientCredentialsGrant (client_credentials always
+// enabled, testClientID always opted in) with Config.RAR also set to
+// registry — RFC 9396 §6's client_credentials authorization_details
+// support has no resource-owner grant step of its own, so it doesn't
+// need newHarnessWithRAR's heavier PAR/CIBA-shaped wiring (backchannel
+// store, request-object algorithms, etc.).
+func newHarnessWithClientCredentialsGrantAndRAR(t *testing.T, registry *extension.RARRegistry) harness {
+	t.Helper()
+	now := time.Now()
+	key := generateKey(t)
+	serverKey := generateKey(t)
+
+	client, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
+		ID:                           testClientID,
+		RedirectURIs:                 []fapi.RegisteredRedirectURI{testRedirectURI},
+		ClientAssertionAlgorithm:     fapi.ES256,
+		SenderConstrain:              storage.SenderConstrainDPoP,
+		AllowedScopes:                []string{"accounts"},
+		AllowsClientCredentialsGrant: true,
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+
+	issuer, err := fapi.ParseIssuerURL(testIssuer)
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+
+	cfg := server.Config{
+		Issuer:    issuer,
+		Endpoints: testEndpoints(t),
+		Profile:   server.ProfileFAPISecurity,
+		Algorithms: server.AlgorithmPolicy{
+			ClientAssertion: server.AlgorithmSet{fapi.ES256},
+			RequestObject:   server.AlgorithmSet{fapi.ES256},
+			JARM:            fapi.ES256,
+			IDToken:         fapi.ES256,
+		},
+		Limits: server.Limits{
+			PushedRequestLifetime:      90 * time.Second,
+			MaxClientAssertionLifetime: time.Minute,
+			MaxRequestObjectLifetime:   time.Minute,
+			InteractionLifetime:        5 * time.Minute,
+			AuthorizationCodeLifetime:  time.Minute,
+			JARMResponseLifetime:       time.Minute,
+			AccessTokenLifetime:        5 * time.Minute,
+			IDTokenLifetime:            5 * time.Minute,
+			RefreshTokenLifetime:       5 * time.Minute,
+			MaxDPoPProofAge:            time.Minute,
+			MaxClockSkew:               5 * time.Second,
+		},
+		Assurance:              server.AssuranceDevelopment,
+		ClientCredentialsGrant: true,
+		RAR:                    registry,
+	}
+	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
+	deps := server.Dependencies{
+		Clients:      &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
+		Transactions: &fakeTransactionStore{},
+		Grants:       &fakeGrantStore{},
+		Replay:       &fakeReplayStore{},
+		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
+			testClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
+		}},
+		Keys:         serverKeyManager,
+		AccessTokens: server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:   server.NoRevocation{},
+		Clock:        fixedClock{now: now},
+		Random:       rand.Reader,
+	}
+	srv, err := server.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+	return harness{server: srv, key: key, serverKey: serverKey, now: now}
+}
+
+// TestRequestClientCredentialsTokenAuthorizationDetailsFlow covers RFC
+// 9396 §6: an authorization_details token request parameter, issued
+// verbatim into the access token's own claim since this grant has no
+// resource owner to narrow it against (unlike
+// TestExchangeAuthorizationCodeMergesAuthorizationDetailsWithExistingTokenClaims's
+// PAR/consent-shaped flow).
+func TestRequestClientCredentialsTokenAuthorizationDetailsFlow(t *testing.T) {
+	registry := newTestRARRegistry(t)
+	h := newHarnessWithClientCredentialsGrantAndRAR(t, registry)
+	params := clientCredentialsFormParams(h.clientAssertion(t), "accounts")
+	params = append(params, formParam("authorization_details", `[{"type":"payment","actions":["approve"],"amount":"SGD 10.00"}]`))
+
+	result, err := h.server.RequestClientCredentialsToken(context.Background(), server.ClientCredentialsTokenRequest{
+		HTTP:      server.FormRequest{Parameters: params},
+		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+	})
+	if err != nil {
+		t.Fatalf("RequestClientCredentialsToken: %v", err)
+	}
+	if len(result.AuthorizationDetails) == 0 {
+		t.Fatalf("TokenResult.AuthorizationDetails is empty")
+	}
+	values, err := registry.Parse(result.AuthorizationDetails)
+	if err != nil {
+		t.Fatalf("Parse granted authorization_details: %v", err)
+	}
+	details, err := extension.RARGet(values, paymentRARDef)
+	if err != nil {
+		t.Fatalf("RARGet: %v", err)
+	}
+	if len(details) != 1 || details[0].Fields.Amount != "SGD 10.00" {
+		t.Fatalf("granted details = %+v, want one payment detail for SGD 10.00", details)
+	}
+	claim := authorizationDetailsAccessTokenClaim(t, result.AccessToken.Reveal(), &h.serverKey.PublicKey)
+	if len(claim) == 0 {
+		t.Fatalf("access token authorization_details claim is empty")
+	}
+}
+
+func TestRequestClientCredentialsTokenRejectsMalformedAuthorizationDetails(t *testing.T) {
+	h := newHarnessWithClientCredentialsGrantAndRAR(t, newTestRARRegistry(t))
+	params := clientCredentialsFormParams(h.clientAssertion(t), "accounts")
+	params = append(params, formParam("authorization_details", `[{"type":"unregistered-type"}]`))
+
+	_, err := h.server.RequestClientCredentialsToken(context.Background(), server.ClientCredentialsTokenRequest{
+		HTTP:      server.FormRequest{Parameters: params},
+		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+	})
+	if err == nil {
+		t.Fatalf("RequestClientCredentialsToken = nil error, want error")
+	}
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequest)
+	}
+}
+
+func TestRequestClientCredentialsTokenRejectsAuthorizationDetailsWithoutRARConfigured(t *testing.T) {
+	h := newHarnessWithClientCredentialsGrant(t, storage.SenderConstrainDPoP, true) // Config.RAR left nil
+	params := clientCredentialsFormParams(h.clientAssertion(t), "accounts")
+	params = append(params, formParam("authorization_details", `[{"type":"payment","actions":["approve"]}]`))
+
+	_, err := h.server.RequestClientCredentialsToken(context.Background(), server.ClientCredentialsTokenRequest{
+		HTTP:      server.FormRequest{Parameters: params},
+		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+	})
+	if err == nil {
+		t.Fatalf("RequestClientCredentialsToken = nil error, want error")
+	}
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequest)
 	}
 }
 

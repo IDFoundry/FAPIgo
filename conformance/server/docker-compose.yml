@@ -180,6 +180,30 @@ services:
       - -access-token-format=${ACCESS_TOKEN_FORMAT:-jwt}
       - -mtls
 
+  # FAPI2SP "MTLS + MTLS": RFC 8705 §2 client authentication *and* §3
+  # sender-constraining together on the same client — the one FAPI2SP
+  # combination neither conformance-as-client-auth-mtls (§2 only,
+  # sender_constrain stays dpop) nor conformance-as-mtls (§3 only,
+  # client_auth_type stays private_key_jwt) covers alone.
+  conformance-as-client-auth-mtls-and-mtls:
+    build:
+      context: ../..
+      dockerfile: conformance/server/Dockerfile
+    hostname: conformance-as-client-auth-mtls-and-mtls
+    networks: [suite]
+    ports:
+      - "18454:8443" # see conformance-as-baseline's port comment above
+      - "18455:8444" # the -mtls listener (mtls_listen_addr in the config)
+    volumes:
+      - ./oidf-config/client-auth-mtls-and-mtls.config.json:/config.json:ro
+      - ./certs:/certs:ro
+    command:
+      - -config=/config.json
+      - -cert=/certs/server.crt
+      - -key=/certs/server.key
+      - -access-token-format=${ACCESS_TOKEN_FORMAT:-jwt}
+      - -mtls
+
 networks:
   suite:
     external: true

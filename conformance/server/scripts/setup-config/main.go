@@ -208,6 +208,20 @@ func main() {
 	if err := setupClientAuthMTLS(dir); err != nil {
 		log.Fatalf("client-auth-mtls: %v", err)
 	}
+
+	if err := setupClientAuthMTLSAndMTLS(dir); err != nil {
+		log.Fatalf("client-auth-mtls-and-mtls: %v", err)
+	}
+
+	// Must run after setupCIBAMTLS: both add clients to the same
+	// committed ciba-mtls.config.json, the same ordering constraint
+	// setupCIBAPing already has above.
+	if err := setupCIBAClientAuthMTLS(dir); err != nil {
+		log.Fatalf("ciba-client-auth-mtls: %v", err)
+	}
+	if err := setupCIBAPingClientAuthMTLS(dir); err != nil {
+		log.Fatalf("ciba-ping-client-auth-mtls: %v", err)
+	}
 }
 
 func oidfConfigDir() (string, error) {
@@ -1157,6 +1171,121 @@ func setupClientAuthMTLS(dir string) error {
 	return nil
 }
 
+// setupClientAuthMTLSAndMTLS is setupClientAuthMTLS's own FAPI2SP
+// "MTLS + MTLS" counterpart: RFC 8705 §2 client authentication *and*
+// §3 sender-constraining together on the same client, closing the one
+// FAPI2SP register combination neither setupClientAuthMTLS
+// (client_auth_type=mtls, sender_constrain=dpop) nor the generic
+// profile/writePlanConfig "mtls" entry (client_auth_type=private_key_jwt,
+// sender_constrain=mtls) covers alone.
+// storage.RegisteredClientConfig's ClientAuthMethod and SenderConstrain
+// fields are already fully orthogonal (nothing library-side stops
+// registering both on one client), so this is almost entirely a copy of
+// setupClientAuthMTLS: same certificate generation, same
+// clientAuthMTLSClient/clientAuthMTLSPlan shapes (reused, not
+// duplicated), same patchClientAuthMTLSConfig helper (generic over
+// path, so it works unchanged against this profile's own committed
+// config file too — sender_constrain itself lives as a static field in
+// that committed config.json, alongside client_auth_method, neither of
+// which this patch function touches). The only real difference:
+// Resource.ResourceURL uses mtlsURL, not issuerURL — mirrors
+// writePlanConfig's own senderConstrainMTLS branch (this profile's
+// mTLS-bound access token's resource call must go over the mTLS
+// listener, the same reasoning documented there).
+func setupClientAuthMTLSAndMTLS(dir string) error {
+	planPath := filepath.Join(dir, "client-auth-mtls-and-mtls-plan.json")
+	if _, err := os.Stat(planPath); err == nil {
+		fmt.Printf("client-auth-mtls-and-mtls: %s already exists, leaving this profile alone\n", planPath)
+		return nil
+	}
+
+	const alias = "gofapi-client-auth-mtls-and-mtls"
+	const issuerHost = "conformance-as-client-auth-mtls-and-mtls"
+
+	cert1PEM, key1PEM, err := generateMTLSCertKeyPEM(alias + mtlsSuiteClientCNSuffix)
+	if err != nil {
+		return fmt.Errorf("generate client1 mtls certificate: %w", err)
+	}
+	cert2PEM, key2PEM, err := generateMTLSCertKeyPEM(alias + mtlsSuiteClient2CNSuffix)
+	if err != nil {
+		return fmt.Errorf("generate client2 mtls certificate: %w", err)
+	}
+	thumb1, err := certPEMThumbprint(cert1PEM)
+	if err != nil {
+		return fmt.Errorf("thumbprint client1 certificate: %w", err)
+	}
+	thumb2, err := certPEMThumbprint(cert2PEM)
+	if err != nil {
+		return fmt.Errorf("thumbprint client2 certificate: %w", err)
+	}
+
+	priv1, _, err := generateKey("client-auth-mtls-and-mtls-client1")
+	if err != nil {
+		return fmt.Errorf("generate client1 key: %w", err)
+	}
+	priv2, _, err := generateKey("client-auth-mtls-and-mtls-client2")
+	if err != nil {
+		return fmt.Errorf("generate client2 key: %w", err)
+	}
+
+	configPath := filepath.Join(dir, "client-auth-mtls-and-mtls.config.json")
+	clientIDs, err := patchClientAuthMTLSConfig(configPath, thumb1, thumb2)
+	if err != nil {
+		return fmt.Errorf("update %s: %w", configPath, err)
+	}
+
+	authorizeURL := issuerURL(issuerHost, "/authorize*")
+	trueVal := true
+	one := 1
+	consentTask := browserTask{
+		Task: "Consent", Match: authorizeURL, Optional: &trueVal,
+		Commands: [][]string{{"click", "xpath", "//button[@name='decision' and @value='approve']", "optional"}},
+	}
+	consentBlock := browserBlock{Match: authorizeURL, Tasks: []browserTask{consentTask}}
+
+	cfg := clientAuthMTLSPlan{Alias: alias}
+	cfg.Server.DiscoveryURL = issuerURL(issuerHost, wellKnownConfigPath)
+	cfg.MTLS = mtlsBlock{Cert: cert1PEM, Key: key1PEM}
+	cfg.MTLS2 = mtlsBlock{Cert: cert2PEM, Key: key2PEM}
+	cfg.Client = clientAuthMTLSClient{ClientID: clientIDs[0], Scope: fullScope, JWKS: priv1, DPoPSigningAlg: "ES256"}
+	cfg.Client2 = clientAuthMTLSClient{ClientID: clientIDs[1], Scope: fullScope, JWKS: priv2, DPoPSigningAlg: "ES256"}
+	// mtlsURL, not issuerURL: this profile's access tokens are
+	// mTLS-bound (sender_constrain=mtls), so the resource call must go
+	// over the mTLS listener — see writePlanConfig's own identical
+	// senderConstrainMTLS branch for the confirmed-live reasoning.
+	cfg.Resource.ResourceURL = mtlsURL(issuerHost, userinfoPath)
+	cfg.Browser = []browserBlock{consentBlock}
+	cfg.Override = map[string]overrideEntry{
+		"fapi2-security-profile-final-user-rejects-authentication": {
+			Browser: []browserBlock{{
+				Match: authorizeURL,
+				Tasks: []browserTask{{
+					Task: "Deny", Match: authorizeURL,
+					Commands: [][]string{{"click", "xpath", "//button[@name='decision' and @value='deny']", "optional"}},
+				}},
+			}},
+		},
+		"fapi2-security-profile-final-par-ensure-reused-request-uri-prior-to-auth-completion-succeeds": {
+			Browser: []browserBlock{
+				{Match: authorizeURL, MatchLimit: &one, Tasks: []browserTask{}},
+				consentBlock,
+			},
+		},
+	}
+	cfg.Options.BrowsercontrolCSSEnable = false
+
+	out, err := marshalIndentNoEscape(cfg)
+	if err != nil {
+		return err
+	}
+	out = append(out, '\n')
+	if err := os.WriteFile(planPath, out, 0o600); err != nil { // #nosec G306 -- mirrors writePlanConfig's own owner-only rationale (embeds the mtls certificate private keys)
+		return err
+	}
+	fmt.Printf("client-auth-mtls-and-mtls: generated fresh certificates, wrote %s and updated %s\n", planPath, configPath)
+	return nil
+}
+
 // cibaPingClient/cibaPingClient2 mirror cibaMTLSClient/cibaMTLSClient2
 // exactly (client authentication stays private_key_jwt, unaffected by
 // delivery mode) — hint_type/hint_value are not optional, confirmed
@@ -1403,5 +1532,272 @@ func setupCIBAPing(dir string) error {
 		return err
 	}
 	fmt.Printf("ciba-ping: generated fresh client keys and certificates, wrote %s and updated %s\n", planPath, configPath)
+	return nil
+}
+
+// appendCIBAClientAuthMTLSClients adds two more client entries to the
+// same committed ciba-mtls.config.json setupCIBAMTLS/appendCIBAPingClients
+// already manage — the RFC 8705 §2 client-authentication counterpart to
+// both: client_auth_method/expected_certificate_thumbprint replace
+// jwks-based client_assertion_algorithm entirely (certificate-based
+// client authentication carries no signed assertion to register an
+// algorithm for), but jwks and backchannel_authentication_request_algorithm
+// stay — FAPI-CIBA always requires a signed backchannel authentication
+// *request* regardless of how the client authenticates itself (see
+// server/backchannel_authentication.go's own doc comment), so these
+// clients still need a request-object signing key of their own,
+// entirely independent of the certificate that authenticates them.
+// sender_constrain stays "mtls" (CIBA's own mTLS-bound-access-token
+// requirement is unconditional, same as every other client already in
+// this file). deliveryMode/notificationEndpoint1/notificationEndpoint2
+// mirror appendCIBAPingClients' own optional ping-mode fields — pass ""
+// for poll mode (the implicit default, matching clients[0]/[1]'s own
+// shape in this same file), "ping" plus real endpoints otherwise.
+func appendCIBAClientAuthMTLSClients(path, idSuffix string, pub1, pub2 jwks, thumb1, thumb2, deliveryMode, notificationEndpoint1, notificationEndpoint2 string) (clientIDs [2]string, err error) {
+	clientID1 := conformanceKeyLabelPrefix + "ciba-" + idSuffix + "-client-1"
+	clientID2 := conformanceKeyLabelPrefix + "ciba-" + idSuffix + "-client-2"
+	clientIDs = [2]string{clientID1, clientID2}
+
+	data, err := os.ReadFile(path) // #nosec G304 -- path is this dev-only script's own fixed CLI argument, not untrusted input
+	if err != nil {
+		return clientIDs, err
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(data, &top); err != nil {
+		return clientIDs, fmt.Errorf("parse: %w", err)
+	}
+	var clients []map[string]json.RawMessage
+	if err := json.Unmarshal(top["clients"], &clients); err != nil {
+		return clientIDs, fmt.Errorf("parse clients: %w", err)
+	}
+
+	newEntries := map[string]jwks{clientID1: pub1, clientID2: pub2}
+	newThumbs := map[string]string{clientID1: thumb1, clientID2: thumb2}
+	found := map[string]bool{}
+	for i := range clients {
+		var id string
+		if err := json.Unmarshal(clients[i]["id"], &id); err != nil {
+			return clientIDs, fmt.Errorf("parse clients[].id: %w", err)
+		}
+		pub, ok := newEntries[id]
+		if !ok {
+			continue
+		}
+		encodedJWKS, err := json.Marshal(pub)
+		if err != nil {
+			return clientIDs, err
+		}
+		encodedThumb, err := json.Marshal(newThumbs[id])
+		if err != nil {
+			return clientIDs, err
+		}
+		clients[i]["jwks"] = encodedJWKS
+		clients[i]["expected_certificate_thumbprint"] = encodedThumb
+		found[id] = true
+	}
+
+	switch {
+	case found[clientID1] && found[clientID2]:
+		fmt.Printf("ciba-%s: clients already present in %s, refreshed jwks/thumbprint to match the freshly generated plan\n", idSuffix, path)
+		return clientIDs, writeCIBAConfigClients(path, top, clients)
+	case found[clientID1] || found[clientID2]:
+		return clientIDs, fmt.Errorf("found only one of %q/%q in %s", clientID1, clientID2, path)
+	}
+
+	callback := "https://localhost.emobix.co.uk:8443/test/a/gofapi-ciba-" + idSuffix + "/callback"
+	newClients := []map[string]any{
+		{
+			// client1 stays PS256/RSA for backchannel_authentication_request_algorithm
+			// — mirrors setupCIBAMTLS/appendCIBAPingClients' own identical
+			// reasoning for why an RS256-signed-request negative test module
+			// needs the plan's first client already PS256-registered to run
+			// at all rather than self-skip.
+			"id": clientID1, "redirect_uris": []string{callback},
+			"backchannel_authentication_request_algorithm": "PS256",
+			"allowed_scopes":                  []string{"openid", "accounts", "offline_access"},
+			"jwks":                            pub1,
+			"client_auth_method":              "self_signed_tls_client_auth",
+			"expected_certificate_thumbprint": thumb1,
+			"sender_constrain":                "mtls",
+		},
+		{
+			"id": clientID2, "redirect_uris": []string{callback},
+			"backchannel_authentication_request_algorithm": "ES256",
+			"allowed_scopes":                  []string{"openid", "accounts", "offline_access"},
+			"jwks":                            pub2,
+			"client_auth_method":              "self_signed_tls_client_auth",
+			"expected_certificate_thumbprint": thumb2,
+			"sender_constrain":                "mtls",
+		},
+	}
+	if deliveryMode != "" {
+		newClients[0]["backchannel_token_delivery_mode"] = deliveryMode
+		newClients[0]["backchannel_client_notification_endpoint"] = notificationEndpoint1
+		newClients[1]["backchannel_token_delivery_mode"] = deliveryMode
+		newClients[1]["backchannel_client_notification_endpoint"] = notificationEndpoint2
+	}
+	for _, nc := range newClients {
+		encoded, err := marshalIndentNoEscape(nc)
+		if err != nil {
+			return clientIDs, err
+		}
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(encoded, &raw); err != nil {
+			return clientIDs, err
+		}
+		clients = append(clients, raw)
+	}
+
+	return clientIDs, writeCIBAConfigClients(path, top, clients)
+}
+
+// setupCIBAClientAuthMTLS covers FAPI-CIBA OP register profile "Poll w/
+// MTLS" — RFC 8705 §2 client authentication for the backchannel
+// authentication endpoint, orthogonal to every existing CIBA profile
+// here (all private_key_jwt so far). Adds two more clients to the same
+// committed ciba-mtls.config.json and the same running
+// conformance-as-ciba-mtls container setupCIBAMTLS already configures —
+// its own suite plan alias so this plan's client registrations don't
+// collide with the poll-mode private_key_jwt plan's. Idempotent the
+// same way every other setup* function here is.
+func setupCIBAClientAuthMTLS(dir string) error {
+	planPath := filepath.Join(dir, "ciba-client-auth-mtls-plan.json")
+	if _, err := os.Stat(planPath); err == nil {
+		fmt.Printf("ciba-client-auth-mtls: %s already exists, leaving this profile alone\n", planPath)
+		return nil
+	}
+
+	const alias = "gofapi-ciba-client-auth-mtls"
+	const issuerHost = "conformance-as-ciba-mtls" // same running container as setupCIBAMTLS
+
+	priv1JWKS, pub1, err := generatePS256Key(conformanceKeyLabelPrefix + "ciba-client-auth-mtls-client1-rsa-key1")
+	if err != nil {
+		return fmt.Errorf("generate client1 key: %w", err)
+	}
+	priv2JWKS, pub2, err := generateKey("ciba-client-auth-mtls-client2")
+	if err != nil {
+		return fmt.Errorf("generate client2 key: %w", err)
+	}
+	mtlsCert, mtlsKey, err := generateMTLSCertKeyPEM(alias + mtlsSuiteClientCNSuffix)
+	if err != nil {
+		return fmt.Errorf("generate client1 mtls certificate: %w", err)
+	}
+	mtls2Cert, mtls2Key, err := generateMTLSCertKeyPEM(alias + mtlsSuiteClient2CNSuffix)
+	if err != nil {
+		return fmt.Errorf("generate client2 mtls certificate: %w", err)
+	}
+	thumb1, err := certPEMThumbprint(mtlsCert)
+	if err != nil {
+		return fmt.Errorf("thumbprint client1 certificate: %w", err)
+	}
+	thumb2, err := certPEMThumbprint(mtls2Cert)
+	if err != nil {
+		return fmt.Errorf("thumbprint client2 certificate: %w", err)
+	}
+
+	configPath := filepath.Join(dir, "ciba-mtls.config.json")
+	clientIDs, err := appendCIBAClientAuthMTLSClients(configPath, "client-auth-mtls", pub1, pub2, thumb1, thumb2, "", "", "")
+	if err != nil {
+		return fmt.Errorf("update %s: %w", configPath, err)
+	}
+
+	cfg := cibaMTLSPlan{Alias: alias}
+	cfg.Server.DiscoveryURL = issuerURL(issuerHost, wellKnownConfigPath)
+	cfg.MTLS = mtlsBlock{Cert: mtlsCert, Key: mtlsKey}
+	cfg.MTLS2 = mtlsBlock{Cert: mtls2Cert, Key: mtls2Key}
+	cfg.Client = cibaMTLSClient{
+		ClientID: clientIDs[0], Scope: fullScope, JWKS: priv1JWKS,
+		HintType: "login_hint", HintValue: conformanceTestSubject,
+	}
+	cfg.Client2 = cibaMTLSClient2{
+		ClientID: clientIDs[1], Scope: fullScope, JWKS: priv2JWKS,
+		ACRValue: silverACR,
+	}
+	cfg.Resource.ResourceURL = mtlsURL(issuerHost, userinfoPath)
+	cfg.AutomatedCibaApprovalURL = issuerURL(issuerHost, backchannelApprovalPath) + cibaApprovalQuery
+
+	out, err := marshalIndentNoEscape(cfg)
+	if err != nil {
+		return err
+	}
+	out = append(out, '\n')
+	if err := os.WriteFile(planPath, out, 0o600); err != nil { // #nosec G306 -- mirrors setupCIBAMTLS's own owner-only rationale (embeds client private keys and mtls certificate keys)
+		return err
+	}
+	fmt.Printf("ciba-client-auth-mtls: generated fresh client keys and certificates, wrote %s and updated %s\n", planPath, configPath)
+	return nil
+}
+
+// setupCIBAPingClientAuthMTLS is setupCIBAClientAuthMTLS's own ping-mode
+// counterpart — FAPI-CIBA OP register profile "Ping w/ MTLS". Same
+// shape as setupCIBAPing vs. setupCIBAMTLS: only backchannel_token_delivery_mode
+// and the notification endpoint differ.
+func setupCIBAPingClientAuthMTLS(dir string) error {
+	planPath := filepath.Join(dir, "ciba-ping-client-auth-mtls-plan.json")
+	if _, err := os.Stat(planPath); err == nil {
+		fmt.Printf("ciba-ping-client-auth-mtls: %s already exists, leaving this profile alone\n", planPath)
+		return nil
+	}
+
+	const alias = "gofapi-ciba-ping-client-auth-mtls"
+	const issuerHost = "conformance-as-ciba-mtls" // same running container as setupCIBAMTLS
+
+	priv1JWKS, pub1, err := generatePS256Key(conformanceKeyLabelPrefix + "ciba-ping-client-auth-mtls-client1-rsa-key1")
+	if err != nil {
+		return fmt.Errorf("generate client1 key: %w", err)
+	}
+	priv2JWKS, pub2, err := generateKey("ciba-ping-client-auth-mtls-client2")
+	if err != nil {
+		return fmt.Errorf("generate client2 key: %w", err)
+	}
+	mtlsCert, mtlsKey, err := generateMTLSCertKeyPEM(alias + mtlsSuiteClientCNSuffix)
+	if err != nil {
+		return fmt.Errorf("generate client1 mtls certificate: %w", err)
+	}
+	mtls2Cert, mtls2Key, err := generateMTLSCertKeyPEM(alias + mtlsSuiteClient2CNSuffix)
+	if err != nil {
+		return fmt.Errorf("generate client2 mtls certificate: %w", err)
+	}
+	thumb1, err := certPEMThumbprint(mtlsCert)
+	if err != nil {
+		return fmt.Errorf("thumbprint client1 certificate: %w", err)
+	}
+	thumb2, err := certPEMThumbprint(mtls2Cert)
+	if err != nil {
+		return fmt.Errorf("thumbprint client2 certificate: %w", err)
+	}
+
+	notificationEndpoint := "https://localhost.emobix.co.uk:8443/test/a/" + alias + "/ciba-notification-endpoint"
+
+	configPath := filepath.Join(dir, "ciba-mtls.config.json")
+	clientIDs, err := appendCIBAClientAuthMTLSClients(configPath, "ping-client-auth-mtls", pub1, pub2, thumb1, thumb2, "ping", notificationEndpoint, notificationEndpoint)
+	if err != nil {
+		return fmt.Errorf("update %s: %w", configPath, err)
+	}
+
+	cfg := cibaPingPlan{Alias: alias}
+	cfg.Server.DiscoveryURL = issuerURL(issuerHost, wellKnownConfigPath)
+	cfg.MTLS = mtlsBlock{Cert: mtlsCert, Key: mtlsKey}
+	cfg.MTLS2 = mtlsBlock{Cert: mtls2Cert, Key: mtls2Key}
+	cfg.Client = cibaPingClient{
+		ClientID: clientIDs[0], Scope: fullScope, JWKS: priv1JWKS,
+		HintType: "login_hint", HintValue: conformanceTestSubject,
+	}
+	cfg.Client2 = cibaPingClient2{
+		ClientID: clientIDs[1], Scope: fullScope, JWKS: priv2JWKS,
+		ACRValue: silverACR,
+	}
+	cfg.Resource.ResourceURL = mtlsURL(issuerHost, userinfoPath)
+	cfg.AutomatedCibaApprovalURL = issuerURL(issuerHost, backchannelApprovalPath) + cibaApprovalQuery
+
+	out, err := marshalIndentNoEscape(cfg)
+	if err != nil {
+		return err
+	}
+	out = append(out, '\n')
+	if err := os.WriteFile(planPath, out, 0o600); err != nil { // #nosec G306 -- mirrors setupCIBAPing's own owner-only rationale (embeds client private keys and mtls certificate keys)
+		return err
+	}
+	fmt.Printf("ciba-ping-client-auth-mtls: generated fresh client keys and certificates, wrote %s and updated %s\n", planPath, configPath)
 	return nil
 }

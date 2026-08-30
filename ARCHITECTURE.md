@@ -822,6 +822,50 @@ in `conformance/server/oidf-config/README.md`'s own section. Wired into
 `run-all.sh` as "AS mtls"/"AS message-signing-mtls" (two more
 `conformance-as` containers).
 
+That still left two FAPI2/FAPI-CIBA AS register profiles genuinely
+untested: **FAPI2SP OP MTLS + MTLS** (§2 client authentication *and* §3
+sender-constraining together on the same client — AS client-auth-mtls
+covers §2 alone, AS mtls covers §3 alone, nothing combined them) and
+**FAPI-CIBA OP Poll/Ping w/ MTLS** (§2 client authentication for the
+backchannel authentication endpoint — every CIBA client this repo had
+registered before this used `private_key_jwt`; "AS ciba-mtls"/"AS
+ciba-ping" are actually the register's "...+ Private Key" profiles
+despite their names, which describe §3 token binding, not client
+authentication). Both closed the same way as everything above:
+`setupClientAuthMTLSAndMTLS` mirrors `setupClientAuthMTLS` almost
+verbatim (one shared certificate satisfies both axes at once, since
+`storage.RegisteredClientConfig`'s `ClientAuthMethod` and
+`SenderConstrain` fields are already fully orthogonal — nothing
+library-side stops registering both on one client), its own new
+`conformance-as-client-auth-mtls-and-mtls` container; the two CIBA
+profiles extend the same running `conformance-as-ciba-mtls` container
+`appendCIBAClientAuthMTLSClients` adds `client_auth_method`/
+`expected_certificate_thumbprint` clients alongside the existing
+private_key_jwt ones — `jwks`/`backchannel_authentication_request_algorithm`
+stay regardless of client authentication method, since FAPI-CIBA always
+requires a signed backchannel authentication *request* independent of
+how the client authenticates itself (`server/backchannel_authentication.go`'s
+own doc comment).
+
+Confirmed live, all three on the first attempt after one real process
+fix: **AS client-auth-mtls-and-mtls 38/38 PASS, AS ciba-client-auth-mtls
+34/34 PASS, AS ciba-ping-client-auth-mtls 39/39 PASS**, all 0
+failures/0 warnings. The one real snag wasn't in this AS at all —
+manually running `run-test-plan.py` for an AS-side browser-flow plan
+without also running its own required companion,
+`unblock-implicit-callback.py`, alongside it produces exactly the
+suite's own long-documented HtmlUnit/Bootstrap-JS implicit-callback bug
+(`unblock-implicit-callback.py`'s own doc comment: "not optional
+convenience — every suite version that supports
+fapi2-security-profile-final-test-plan also carries this bug"),
+non-deterministically stalling whichever module currently owns the
+plan's shared alias — every one of this repo's other AS legs already
+runs both together via `run_as_plan`'s own two-process shape
+(`run-all.sh`); a one-off manual verification run has to do the same.
+Wired into `run-all.sh` as "AS client-auth-mtls-and-mtls", "AS
+ciba-client-auth-mtls", "AS ciba-ping-client-auth-mtls". Full breakdown
+in `conformance/server/oidf-config/README.md`'s own sections.
+
 The RP side got the same generalization: `cmd/conformance-client`'s
 `-mtls` flag, previously hardcoded to `-profile=ciba` only, now also
 works with `-profile=baseline`, and combines with `-client-auth-mtls`

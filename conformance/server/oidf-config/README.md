@@ -368,11 +368,10 @@ baseline/message-signing. `go run ./conformance/server/scripts/setup-config`
 generates `client-auth-mtls-plan.json` (and patches this file's own
 `expected_certificate_thumbprint` values) the same idempotent way it
 already does for the other profiles — see that tool's own
-`setupClientAuthMTLS`. Has no RP-side counterpart:
-`cmd/conformance-client` has no `ClientAuthMethod`/mTLS-client-auth
-support of its own yet (it always registers `private_key_jwt`), so
-there is no driver to run the suite's client-side plan against — a
-natural follow-up, not attempted here.
+`setupClientAuthMTLS`. RP-side counterpart:
+`cmd/conformance-client -profile=baseline -client-auth-mtls` — see
+`../client/scripts/README.md`'s own "Client authentication mTLS"
+section.
 
 ## Sender-constrain mTLS for baseline and message-signing (`mtls.config.json`, `message-signing-mtls.config.json`)
 
@@ -437,10 +436,10 @@ poller automatically for every AS-side plan.)
 Wired into `../scripts/run-all.sh` as "AS mtls"/"AS message-signing-mtls"
 — two more `conformance-as` containers (`conformance-as-mtls`,
 `conformance-as-message-signing-mtls`, `../docker-compose.yml`, ports
-18450/18451 and 18452/18453). No RP-side counterpart yet:
-`cmd/conformance-client`'s own `-mtls` flag is currently hardcoded to
-`-profile=ciba` only (see its own flag help text) — extending it to
-`-profile=baseline` is a natural, separate follow-up.
+18450/18451 and 18452/18453). RP-side counterpart (for `mtls.config.json`
+only — message-signing has none yet): `cmd/conformance-client
+-profile=baseline -mtls` — see `../client/scripts/README.md`'s own
+"Sender-constrain mTLS" section.
 
 ## CIBA
 
@@ -768,3 +767,98 @@ baseline/message-signing/ciba-mtls/client-auth-mtls) clean.
 `expected-warnings-ciba-ping.json`/`expected-skips-ciba-ping.json`
 stay empty, matching `ciba-mtls`'s own baseline — nothing left to
 explain away.
+
+### `ciba-client-auth-mtls-plan.json` / `ciba-ping-client-auth-mtls-plan.json` — RFC 8705 §2 client authentication for CIBA (automated)
+
+Every CIBA client registered above — `ciba-mtls`/`ciba-ping` alike —
+authenticates via `private_key_jwt`; `sender_constrain: "mtls"` is
+about §3 *token binding*, mandatory unconditionally for FAPI-CIBA, not
+about how the client proves its identity. That leaves the FAPI-CIBA OP
+register's own "Poll w/ MTLS"/"Ping w/ MTLS" profiles — RFC 8705 §2
+certificate-based client authentication at the backchannel
+authentication endpoint — genuinely untested, despite the container
+name's own "-mtls" suffix suggesting otherwise.
+
+`appendCIBAClientAuthMTLSClients` (`../scripts/setup-config/main.go`)
+adds two more clients to the same `ciba-mtls.config.json` and the same
+running `conformance-as-ciba-mtls` container — `client_auth_method:
+"self_signed_tls_client_auth"` and `expected_certificate_thumbprint`
+replace `client_assertion_algorithm` entirely (no signed assertion
+under certificate-based auth), but `jwks`/
+`backchannel_authentication_request_algorithm` stay: FAPI-CIBA always
+requires a signed backchannel authentication *request* regardless of
+how the client authenticates itself
+(`server/backchannel_authentication.go`'s own doc comment), so these
+clients still need a request-object signing key of their own, entirely
+independent of the certificate that authenticates them.
+`ciba-client-auth-mtls-plan.json` (`ciba_mode` implicitly poll, same as
+`ciba-mtls-plan.json`) and `ciba-ping-client-auth-mtls-plan.json`
+(`ciba_mode=ping`, its own alias/notification endpoint, same reasoning
+as `ciba-ping-plan.json` above) reuse `cibaMTLSPlan`/`cibaPingPlan`'s
+existing shape entirely unchanged — the suite-side plan config's own
+`mtls`/`mtls2` blocks already carry the certificate the suite presents
+on every connection; nothing about which axis (§2 auth vs. §3 binding)
+consumes that presentation is the plan config's concern, only this
+AS's own registration is.
+
+**Confirmed live: `ciba-client-auth-mtls` 34/34 PASS,
+`ciba-ping-client-auth-mtls` 39/39 PASS**, both on the first attempt,
+0 failures/0 warnings either way — no code changes needed beyond the
+setup-config wiring, since `server/backchannel_authentication.go`'s
+`authenticateClient` dispatcher already handled certificate-based
+client authentication generically before this work started.
+
+Wired into `../scripts/run-all.sh` as "AS ciba-client-auth-mtls"/"AS
+ciba-ping-client-auth-mtls" — no new `conformance-as` container, no new
+`wait_as_ready`, reusing the already-running `conformance-as-ciba-mtls`
+one. `expected-warnings-*.json`/`expected-skips-*.json` for both stay
+empty, matching every other clean CIBA profile above.
+
+## FAPI2SP OP MTLS + MTLS (`client-auth-mtls-and-mtls.config.json`)
+
+The last untested FAPI2SP auth×sender-constrain combination:
+`client-auth-mtls.config.json` above covers §2 client authentication
+alone (`sender_constrain` stays `dpop`); `mtls.config.json` covers §3
+sender-constraining alone (`client_auth_type` stays `private_key_jwt`).
+Nothing combined both on one client before this profile.
+
+`setupClientAuthMTLSAndMTLS` (`../scripts/setup-config/main.go`) is
+almost a verbatim copy of `setupClientAuthMTLS` — same certificate
+generation, same `clientAuthMTLSClient`/`clientAuthMTLSPlan` shapes
+(reused, not duplicated), same `patchClientAuthMTLSConfig` helper. One
+certificate satisfies both axes at once: RFC 8705 doesn't require
+separate certificates for §2 auth vs. §3 binding, and the suite's own
+`EnsureClientCertificateMatches` condition reads the same
+`client.certificate`-shaped `mtls`/`mtls2` plan config regardless of
+which axis triggered the check — the same precedent
+`cmd/conformance-client`'s own `-mtls -client-auth-mtls` combination
+already established on the RP side. The only real difference from
+`setupClientAuthMTLS`: `Resource.ResourceURL` uses `mtlsURL`, not
+`issuerURL` — mirrors `writePlanConfig`'s own `senderConstrainMTLS`
+branch, since this profile's mTLS-bound access tokens' resource call
+must go over the mTLS listener, same reasoning as `mtls.config.json`
+itself.
+
+**Confirmed live: 38/38 PASS**, 0 failures/0 warnings. The one real
+snag getting there wasn't in this AS at all: manually driving
+`run-test-plan.py` for this profile without also running
+`../scripts/unblock-implicit-callback.py` alongside it (as documented,
+and as `run_as_plan` in `../scripts/run-all.sh` already does
+automatically for every AS-side plan) hits exactly the suite's own
+long-documented HtmlUnit/Bootstrap-JS implicit-callback bug — see that
+script's own doc comment ("not optional convenience — every suite
+version that supports `fapi2-security-profile-final-test-plan` also
+carries this bug") and the `mtls.config.json` section above, which
+already flags the same requirement. Once run correctly (both processes
+together), the plan passed cleanly with no code changes needed at all
+— every underlying piece (`ClientAuthMethod`, `SenderConstrain`,
+`mtls_endpoint_aliases` for both `Token` and
+`PushedAuthorizationRequest`) already existed from
+`client-auth-mtls.config.json`/`mtls.config.json` individually.
+
+Wired into `../scripts/run-all.sh` as "AS client-auth-mtls-and-mtls" —
+its own `conformance-as-client-auth-mtls-and-mtls` container
+(`../docker-compose.yml`, ports 18454/18455).
+`expected-warnings-client-auth-mtls-and-mtls.json`/
+`expected-skips-client-auth-mtls-and-mtls.json` stay empty, matching
+every other clean profile above.

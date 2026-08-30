@@ -27,6 +27,30 @@
         "https://localhost.emobix.co.uk:8443/test/a/gofapi-client-auth-mtls/callback",
         "https://localhost.emobix.co.uk:8443/test/a/gofapi-client-auth-mtls/callback?dummy1=lorem&dummy2=ipsum"
       ]
+    },
+    {
+      "allowed_scopes": [
+        "accounts"
+      ],
+      "allows_client_credentials_grant": true,
+      "client_auth_method": "self_signed_tls_client_auth",
+      "expected_certificate_thumbprint": "8A2Dph6TWtj0Xvpx3rOKqw6QjEnNZZ2GNDBMYAuS8k0",
+      "id": "gofapi-conformance-client-auth-mtls-client-credentials-client-1",
+      "redirect_uris": [
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-conformance-client-auth-mtls-client-credentials-client-1/callback"
+      ]
+    },
+    {
+      "allowed_scopes": [
+        "accounts"
+      ],
+      "allows_client_credentials_grant": true,
+      "client_auth_method": "self_signed_tls_client_auth",
+      "expected_certificate_thumbprint": "L-pX7yqo35C6Lk8-X9idacyTm-tOGevTZ8VT66kyS9s",
+      "id": "gofapi-conformance-client-auth-mtls-client-credentials-client-2",
+      "redirect_uris": [
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-conformance-client-auth-mtls-client-credentials-client-2/callback"
+      ]
     }
   ],
   "default_subject": "conformance-test-user",

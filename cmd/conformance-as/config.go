@@ -125,6 +125,15 @@ type ClientConfig struct {
 
 	JWKS    json.RawMessage `json:"jwks,omitempty"`
 	JWKSURI string          `json:"jwks_uri,omitempty"`
+
+	// AllowsClientCredentialsGrant permits this client to use the RFC
+	// 6749 §4.4 client_credentials grant — false (the default, applied
+	// when omitted) means it cannot, even when this binary is running
+	// with -client-credentials-grant. See
+	// storage.RegisteredClientConfig.AllowsClientCredentialsGrant's own
+	// doc comment for why both this and -client-credentials-grant must
+	// be set.
+	AllowsClientCredentialsGrant bool `json:"allows_client_credentials_grant,omitempty"`
 }
 
 // LoadConfig reads and parses the JSON config file at path.
@@ -407,6 +416,7 @@ func resolveClient(c ClientConfig) (storage.RegisteredClient, ephemeral.ClientKe
 		SenderConstrain:                       senderConstrain,
 		BackchannelTokenDeliveryMode:          backchannelTokenDeliveryMode,
 		BackchannelClientNotificationEndpoint: backchannelClientNotificationEndpoint,
+		AllowsClientCredentialsGrant:          c.AllowsClientCredentialsGrant,
 	})
 	if err != nil {
 		return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, err

@@ -45,6 +45,10 @@ const (
 	// AuditEventExchangeBackchannelAuthentication records the outcome of
 	// an ExchangeBackchannelAuthentication call.
 	AuditEventExchangeBackchannelAuthentication
+
+	// AuditEventRequestClientCredentialsToken records the outcome of a
+	// RequestClientCredentialsToken call.
+	AuditEventRequestClientCredentialsToken
 )
 
 // AuditOutcome is a closed set of outcomes for an AuditEvent.

@@ -79,6 +79,53 @@
         "https://localhost.emobix.co.uk:8443/test/a/gofapi-baseline/callback?dummy1=lorem&dummy2=ipsum"
       ],
       "request_object_algorithm": "PS256"
+    },
+    {
+      "allowed_scopes": [
+        "accounts"
+      ],
+      "allows_client_credentials_grant": true,
+      "client_assertion_algorithm": "PS256",
+      "id": "gofapi-conformance-baseline-client-credentials-client-1",
+      "jwks": {
+        "keys": [
+          {
+            "kty": "RSA",
+            "alg": "PS256",
+            "use": "sig",
+            "kid": "baseline-client-credentials-client1-rsa-key1",
+            "n": "qsF2Pd-FGbB5t0QcM7-ml94aV0kJmxjL0VKhv9gkdTy3D0EkytGMjcfALncpjOSdkuYsoKlNVEZW1gE6Kj96l1LyZ7IcAvs99aEzRNNlHWZBd2OoJ4Pg3Vijta98os1HGNtCWCzQm-CauFuGutocJjobARP4ERo2-TGbwgVD4xqB2ugo6VMzqRymURU_DZ8t2-1zdivDKEhdLmeACkNsgcWIyZRPYktw9jDcayQlUjNat9ZdodSR3Wn2ReciONYypi7i6xPhofftnWrj1Xh1qpPMthZxAXGFBIk2woYyBZhyMbLXcStKZmjdNq71n5-sreXN7KB0HEHzooBVXsoIZQ",
+            "e": "AQAB"
+          }
+        ]
+      },
+      "redirect_uris": [
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-conformance-baseline-client-credentials-client-1/callback"
+      ]
+    },
+    {
+      "allowed_scopes": [
+        "accounts"
+      ],
+      "allows_client_credentials_grant": true,
+      "client_assertion_algorithm": "ES256",
+      "id": "gofapi-conformance-baseline-client-credentials-client-2",
+      "jwks": {
+        "keys": [
+          {
+            "kty": "EC",
+            "alg": "ES256",
+            "use": "sig",
+            "kid": "gofapi-conformance-baseline-client-credentials-client2-key1",
+            "crv": "P-256",
+            "x": "nPF3LmQxVC94O-ouEgJ5N9Gn8rHyy7tNUSYsKlaor9Y",
+            "y": "D-YojUHNl3Yb14b2ApGNfYeWcQ_mCCzPQbxLCbZvS4s"
+          }
+        ]
+      },
+      "redirect_uris": [
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-conformance-baseline-client-credentials-client-2/callback"
+      ]
     }
   ],
   "default_subject": "conformance-test-user",

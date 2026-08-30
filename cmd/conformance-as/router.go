@@ -23,7 +23,7 @@ import (
 // POST, and an OIDF suite plan config's resource.resourceMethod is a
 // free-form per-run choice for the generic-resource role this endpoint
 // also plays — nothing here depends on which method the suite picks.
-func newRouter(srv *server.Server, consent *consentHandler, backchannel *backchannelHandler, advertisedScopes []string, resourceVerifier *fapires.Verifier, userinfoURL *url.URL, mtlsUserinfoURL *fapi.URL, identityClaims staticIdentityClaims, clients storage.ClientRepository, userinfoSigning bool) *http.ServeMux {
+func newRouter(srv *server.Server, consent *consentHandler, backchannel *backchannelHandler, advertisedScopes []string, resourceVerifier *fapires.Verifier, userinfoURL *url.URL, mtlsUserinfoURL *fapi.URL, accountsURL *url.URL, identityClaims staticIdentityClaims, clients storage.ClientRepository, userinfoSigning bool) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /.well-known/openid-configuration", metadataHandler(srv, advertisedScopes, userinfoURL, mtlsUserinfoURL))
 	mux.HandleFunc("GET /jwks", jwksHandler(srv))
@@ -32,6 +32,9 @@ func newRouter(srv *server.Server, consent *consentHandler, backchannel *backcha
 	mux.HandleFunc("POST /authorize/decision", consent.handleDecision)
 	mux.HandleFunc("POST /token", tokenHandler(srv))
 	mux.HandleFunc("/userinfo", userinfoHandler(srv, resourceVerifier, userinfoURL, identityClaims, clients, userinfoSigning))
+	// See accountsHandler's own doc comment (resource.go) for why this
+	// binary needs a second protected-resource endpoint.
+	mux.HandleFunc("/accounts", accountsHandler(resourceVerifier, accountsURL))
 	// Both registered unconditionally, matching /userinfo's own
 	// always-registered-even-when-the-feature-is-off precedent —
 	// handleAuthenticate itself fails cleanly (server_error) when -ciba

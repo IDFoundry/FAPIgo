@@ -866,3 +866,80 @@ its own `conformance-as-client-auth-mtls-and-mtls` container
 `expected-warnings-client-auth-mtls-and-mtls.json`/
 `expected-skips-client-auth-mtls-and-mtls.json` stay empty, matching
 every other clean profile above.
+
+## Client Credentials Grant (`{baseline,mtls,client-auth-mtls,client-auth-mtls-and-mtls}-client-credentials.config.json`)
+
+`server.RequestClientCredentialsToken` (RFC 6749 §4.4) has no
+PAR/authorize/redirect_uri/browser hop at all — a direct
+client-to-token-endpoint exchange, no end user — so the four FAPI2SP OP
+"Client Credentials Grant" register profiles (MTLS+MTLS, MTLS+DPoP,
+private key+MTLS, private key+DPoP) reuse the same four already-running
+containers above rather than needing new ones:
+`setupClientCredentialsGrantVariant` (`../scripts/setup-config/main.go`)
+adds one more pair of clients to each of `baseline.config.json`,
+`mtls.config.json`, `client-auth-mtls.config.json`, and
+`client-auth-mtls-and-mtls.config.json`, and generates
+`{name}-client-credentials-plan.json` against that same container.
+
+Two real, previously-undocumented findings getting a clean run, neither
+specific to this one plan variant:
+
+- **The suite requires `openid=plain_oauth`, not `openid_connect`, for
+  `fapi_profile=fapi_client_credentials_grant`.** Confirmed live both
+  ways: under `openid_connect`, `fapi2-security-profile-final-happy-flow`
+  fails outright with `ExtractIdTokenFromTokenResponse: Couldn't find
+  id_token in token_endpoint_response` — no client_credentials grant can
+  ever produce one, since there's no end user for an ID token to
+  represent. Switching to `openid=plain_oauth` fixes that, but then
+  forbids requesting the `openid` scope at all
+  (`GetStaticClientConfiguration`-adjacent condition fails outright:
+  "openid scope cannot be used with PLAIN_OAUTH") — which collided with
+  this binary's existing `/userinfo` endpoint, whose own real OIDC
+  contract requires the `openid` scope (`userinfoHandler`,
+  `../resource.go`). Every client-credentials client here is registered
+  `allowed_scopes: ["accounts"]` only, so every resource-calling module
+  got `403 insufficient_scope` until `cmd/conformance-as` gained a
+  second, genuinely non-OIDC protected-resource endpoint —
+  `accountsHandler` (`../resource.go`), routed at `/accounts`
+  (`../router.go`) — that only the client-credentials plans'
+  `resource.resourceUrl` points at; every other profile above still uses
+  `/userinfo` unchanged.
+- **Every plan still needs a `client2`, confirmed live the same way
+  `client-auth-mtls-and-mtls` above did**: `GetStaticClient2Configuration`
+  interrupts every module outright ("Definition for client2 not present
+  in supplied configuration") regardless of `fapi_profile` — this is a
+  structural requirement of `fapi2-security-profile-final-test-plan`
+  itself, not something specific to any one variant. Only client1 is
+  ever actually exercised by any module in this profile's own live
+  -confirmed module list (5–14 modules per combo, far fewer than
+  authorization_code's 20–38 — no PAR/PKCE/redirect_uri/consent/ID
+  -token/refresh-token module appears in any of them); client2 is
+  structural-only, PS256/RSA under the `private_key_jwt` combos
+  (mirroring `ciba-mtls.config.json`'s own client1 — the same
+  RS256-negative-test-un-skip reasoning applies, since
+  `ensure-signed-client-assertion-with-RS256-fails` is one of the
+  modules those two combos' own module lists include) and plain
+  ES256/cert-based otherwise.
+
+**Confirmed live, all four clean, 0 failures/0 warnings each:**
+`baseline-client-credentials` 15/15, `mtls-client-credentials` 11/11,
+`client-auth-mtls-client-credentials` 10/10,
+`client-auth-mtls-and-mtls-client-credentials` 6/6 — the smaller module
+counts as sender-constrain/client-auth shift to mTLS track exactly the
+same pattern the other profiles above already show (fewer DPoP-specific
+and/or client-assertion-specific negative tests apply).
+`certificationProfileName` confirmed live for all four (`GET
+/api/plan/{id}`, the same mechanism used to resolve the "OpenID
+Connect" register-profile question elsewhere in this repo's own
+history): `["FAPI2SP OP Client Credentials Grant private key +
+DPoP"]`/`"...private key + MTLS"`/`"...MTLS + DPoP"`/`"...MTLS +
+MTLS"` respectively — no incidental `"FAPI2SP OP OpenID Connect"` tag,
+matching `openid=plain_oauth`'s own semantics.
+
+Wired into `../scripts/run-all.sh` as its own four "AS
+{baseline,mtls,client-auth-mtls,client-auth-mtls-and-mtls}
+-client-credentials" legs — no new `conformance-as` container, no new
+`wait_as_ready`, reusing the four already-running ones.
+`expected-warnings-*-client-credentials.json`/
+`expected-skips-*-client-credentials.json` all stay empty, matching
+every other clean profile above.

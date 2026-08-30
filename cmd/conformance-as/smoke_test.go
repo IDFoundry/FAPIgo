@@ -253,7 +253,7 @@ func newSmokeHarnessWithOptions(t *testing.T, format AccessTokenFormat, dpopNonc
 		AdvertisedScopes:  []string{"openid", "accounts", "offline_access"},
 	}
 
-	mux, err := newServerMux(resolved, false, dpopNonceChallenge, userinfoSigning, ciba)
+	mux, err := newServerMux(resolved, false, dpopNonceChallenge, userinfoSigning, ciba, false)
 	if err != nil {
 		t.Fatalf("build server mux: %v", err)
 	}

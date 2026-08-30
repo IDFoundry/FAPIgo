@@ -907,6 +907,52 @@ loop entirely, not a temporary gap, and is instead validated by
 `extension/rar_test.go`, `server/rar_test.go` and `cmd/conformance-as`'s
 own end-to-end smoke tests (`conformance/README.md#rar`).
 
+The RFC 6749 §4.4 client_credentials grant closed the last real AS-side
+conformance gap this repo's own 15-profile OIDF matrix review surfaced
+— a genuinely missing grant type, not a conformance-setup gap like
+everything above. `server.RequestClientCredentialsToken`
+(`server/client_credentials.go`) reuses nearly everything already
+built: client authentication (every `ClientAuthMethod`), sender
+-constrain binding (`verifyTokenRequestBinding`, unchanged), scope
+authorization (`RegisteredClient.AllowsScope`, the same check PAR
+already runs), and `AccessTokenIssuer.IssueAccessToken` — with
+`Subject` set to the client's own ID (RFC 9068 §2.2 requires a `sub`
+claim; there's no end user for this grant to name instead). No PAR, no
+`storage.GrantStore` redemption call (there's no grant to redeem — a
+structural difference from every other token-issuing path), no ID
+token, no refresh token (RFC 6749 §4.4.3 says a refresh token "SHOULD
+NOT" be issued). Two new opt-ins gate it, deliberately kept separate:
+`Config.ClientCredentialsGrant` (server-wide — false by default,
+mirroring the "zero value disables the feature" idiom
+`Endpoints.BackchannelAuthentication`/`Config.RAR` already use, since
+this grant arrives at the *existing* token endpoint via a `grant_type`
+value rather than a new endpoint to gate on) and
+`storage.RegisteredClientConfig.AllowsClientCredentialsGrant`
+(per-client, mirroring `BackchannelAuthenticationRequestAlgorithm`'s
+own "explicit capability, not inferred" precedent) — enabling the
+grant server-wide does not implicitly permit any specific client to use
+it.
+
+**Confirmed live against all four FAPI2SP OP "Client Credentials
+Grant" register profiles (MTLS+MTLS, MTLS+DPoP, private key+MTLS,
+private key+DPoP): 15/15, 11/11, 10/10, 6/6 modules, 0 failures/0
+warnings each** — reusing the same four already-running
+`conformance-as-{baseline,mtls,client-auth-mtls,client-auth-mtls-and-mtls}`
+containers (no PAR/authorize/browser hop at all, so no new container
+topology was needed), with one small addition to `cmd/conformance-as`
+itself: a second, non-OIDC protected-resource endpoint (`/accounts`,
+`accountsHandler` in `cmd/conformance-as/resource.go`) alongside the
+existing `/userinfo` — confirmed live that the suite's own
+`openid=plain_oauth` variant (the only legal value for
+`fapi_profile=fapi_client_credentials_grant`; `openid_connect` demands
+an ID token this grant can never produce) forbids requesting the
+`openid` scope at all, which collided with `/userinfo`'s own real OIDC
+contract requiring exactly that scope. Full breakdown, including the
+`client2`-is-structurally-required finding this surfaced (not specific
+to this profile — a `fapi2-security-profile-final-test-plan`-wide
+requirement, confirmed live), in
+`conformance/server/oidf-config/README.md#client-credentials-grant`.
+
 ## What is and isn't shared
 
 **Shared** (via `internal/`, `extension`, `storage`'s replay primitive

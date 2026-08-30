@@ -29,6 +29,32 @@
         "https://localhost.emobix.co.uk:8443/test/a/gofapi-client-auth-mtls-and-mtls/callback?dummy1=lorem&dummy2=ipsum"
       ],
       "sender_constrain": "mtls"
+    },
+    {
+      "allowed_scopes": [
+        "accounts"
+      ],
+      "allows_client_credentials_grant": true,
+      "client_auth_method": "self_signed_tls_client_auth",
+      "expected_certificate_thumbprint": "XCdGrK9SIGrAElX7zHF4Eee7rXetiKLoESSemehztSg",
+      "id": "gofapi-conformance-client-auth-mtls-and-mtls-client-credentials-client-1",
+      "redirect_uris": [
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-conformance-client-auth-mtls-and-mtls-client-credentials-client-1/callback"
+      ],
+      "sender_constrain": "mtls"
+    },
+    {
+      "allowed_scopes": [
+        "accounts"
+      ],
+      "allows_client_credentials_grant": true,
+      "client_auth_method": "self_signed_tls_client_auth",
+      "expected_certificate_thumbprint": "5cV-PPuV4y7qMNuWgDDXa1KMjvg-xGGcs2tZ0p2I8SA",
+      "id": "gofapi-conformance-client-auth-mtls-and-mtls-client-credentials-client-2",
+      "redirect_uris": [
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-conformance-client-auth-mtls-and-mtls-client-credentials-client-2/callback"
+      ],
+      "sender_constrain": "mtls"
     }
   ],
   "default_subject": "conformance-test-user",

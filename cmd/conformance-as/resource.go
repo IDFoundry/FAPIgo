@@ -46,11 +46,13 @@ func (s selfIssuerKeySource) ResolveIssuerKeys(ctx context.Context, req keys.Iss
 // single issuer/audience, so one Verifier config would cover any
 // number of them). It also doubles as the generic protected resource
 // AbstractFAPI2SPFinalServerTestModule's happy-flow test calls
-// (CallProtectedResource) — the suite plan config's
-// resource.resourceUrl points here — since UserInfo already has a real
-// spec-defined contract to verify against (requires "openid" scope,
-// must always return "sub" per OIDCC-5.3.2) rather than needing a
-// separate stand-in endpoint with no contract of its own. It also
+// (CallProtectedResource) — every suite plan config's
+// resource.resourceUrl points here except the client_credentials
+// profiles', which point at accountsHandler instead (see that
+// function's own doc comment for why: a client_credentials-issued
+// token can validly carry no "openid" scope at all, which this
+// endpoint requires per its real OIDC UserInfo contract — requires
+// "openid" scope, must always return "sub" per OIDCC-5.3.2). It also
 // returns whatever identity claims this binary has for the subject
 // (see identity_claims.go — supporting real claim values, not just the
 // plumbing, is what
@@ -158,6 +160,54 @@ func userinfoHandler(srv *server.Server, verifier *fapires.Verifier, userinfoURL
 		}
 		w.Header().Set(contentTypeHeader, "application/json")
 		_ = json.NewEncoder(w).Encode(body)
+	}
+}
+
+// accountsHandler serves a minimal, non-OIDC protected resource — the
+// FAPI2 profile's own generic "accounts" endpoint, distinct from
+// /userinfo's OIDC-specific contract (requires the openid scope, must
+// always return "sub"). Exists specifically for the client_credentials
+// grant (RFC 6749 §4.4): a client_credentials-issued token can validly
+// carry no "openid" scope at all — the OIDF suite's own
+// fapi_client_type=plain_oauth variant explicitly forbids requesting
+// it (confirmed live: "openid scope cannot be used with PLAIN_OAUTH")
+// — so this grant's own happy-flow/holder-of-key/etc. modules need a
+// resource endpoint with no OIDC-specific requirement to call instead
+// of /userinfo. Every other profile's resource.resourceUrl still
+// points at /userinfo unchanged; only the client-credentials plans use
+// this one.
+func accountsHandler(verifier *fapires.Verifier, accountsURL *url.URL) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Same FAPI 1.0 Part 1 §6.2.1 requirement userinfoHandler's own
+		// opening comment explains — set before any WriteHeader call.
+		interactionID, err := fapires.ResolveInteractionID(r.Header.Get(fapires.InteractionIDHeader), nil)
+		if err != nil {
+			writeResourceErrorRaw(w, http.StatusInternalServerError, "server_error", "failed to resolve x-fapi-interaction-id")
+			return
+		}
+		w.Header().Set(fapires.InteractionIDHeader, interactionID)
+
+		dpopProof, ok := singleDPoPHeader(r)
+		if !ok {
+			writeResourceErrorRaw(w, http.StatusBadRequest, "invalid_request", "multiple DPoP headers are not permitted")
+			return
+		}
+		authCtx, err := verifier.Verify(r.Context(), fapires.VerifyRequest{
+			Method:          r.Method,
+			URL:             accountsURL,
+			Authorization:   r.Header.Get("Authorization"),
+			DPoPProof:       dpopProof,
+			PeerCertificate: peerCertificate(r),
+		})
+		if err != nil {
+			writeResourceError(w, err)
+			return
+		}
+		if authCtx.NextDPoPNonce != "" {
+			w.Header().Set("DPoP-Nonce", authCtx.NextDPoPNonce)
+		}
+		w.Header().Set(contentTypeHeader, "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"accounts": []string{}})
 	}
 }
 

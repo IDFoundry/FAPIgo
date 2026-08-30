@@ -294,4 +294,21 @@ type Config struct {
 	// size, nesting depth, per-type object count and size) apply
 	// identically to both flows.
 	RAR *extension.RARRegistry
+
+	// ClientCredentialsGrant enables the RFC 6749 §4.4 client_credentials
+	// grant at the token endpoint — false (the zero value/default)
+	// disables it entirely: RequestClientCredentialsToken always fails,
+	// and Metadata omits "client_credentials" from
+	// grant_types_supported, the same "zero value disables the feature"
+	// stance Endpoints.BackchannelAuthentication/MTLSEndpoints/RAR
+	// already take. Unlike those, there's no new endpoint or parameter
+	// to gate on here — client_credentials arrives at the same token
+	// endpoint authorization_code already uses, distinguished only by
+	// its own grant_type value — so this is a bare deployment-wide
+	// switch. Which individual clients may actually use the grant is a
+	// separate, per-client decision
+	// (storage.RegisteredClientConfig.AllowsClientCredentialsGrant);
+	// enabling it here does not implicitly permit every registered
+	// client to use it.
+	ClientCredentialsGrant bool
 }

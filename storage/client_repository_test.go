@@ -39,6 +39,25 @@ func TestNewRegisteredClient(t *testing.T) {
 	if c.ClientAssertionAlgorithm() != fapi.ES256 {
 		t.Fatalf("ClientAssertionAlgorithm() = %v, want ES256", c.ClientAssertionAlgorithm())
 	}
+	if c.AllowsClientCredentialsGrant() {
+		t.Fatalf("AllowsClientCredentialsGrant() = true, want false (not set)")
+	}
+}
+
+func TestNewRegisteredClientAllowsClientCredentialsGrant(t *testing.T) {
+	c, err := NewRegisteredClient(RegisteredClientConfig{
+		ID:                           "client-123",
+		RedirectURIs:                 []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+		ClientAssertionAlgorithm:     fapi.ES256,
+		AllowedScopes:                []string{"accounts"},
+		AllowsClientCredentialsGrant: true,
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+	if !c.AllowsClientCredentialsGrant() {
+		t.Fatalf("AllowsClientCredentialsGrant() = false, want true")
+	}
 }
 
 func TestNewRegisteredClientRequestObjectAlgorithmOptional(t *testing.T) {

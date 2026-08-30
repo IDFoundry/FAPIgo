@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# Runs all sixteen FAPI2/FAPI-CIBA conformance suites this repo has
+# Runs all twenty FAPI2/FAPI-CIBA conformance suites this repo has
 # driver support for — AS baseline, AS message-signing, AS ciba-mtls, AS
 # ciba-ping, AS mtls, AS message-signing-mtls, AS client-auth-mtls, AS
 # client-auth-mtls-and-mtls, AS ciba-client-auth-mtls, AS
-# ciba-ping-client-auth-mtls, RP baseline, RP message-signing, RP
-# ciba-mtls, RP client-auth-mtls, RP mtls, RP client-auth-mtls-and-mtls
-# — against a locally running OIDF conformance suite,
+# ciba-ping-client-auth-mtls, AS baseline-client-credentials, AS
+# mtls-client-credentials, AS client-auth-mtls-client-credentials, AS
+# client-auth-mtls-and-mtls-client-credentials, RP baseline, RP
+# message-signing, RP ciba-mtls, RP client-auth-mtls, RP mtls, RP
+# client-auth-mtls-and-mtls — against a locally running OIDF conformance
+# suite,
 # prints one combined summary at the end, and (via generate-report.py)
 # writes a fuller report.md alongside the raw per-suite logs — every
 # non-PASSED module, with the "why this is expected, not a defect"
@@ -466,6 +469,35 @@ run_as_plan "ciba-ping-client-auth-mtls" \
 	"$SERVER_DIR/oidf-config/ciba-ping-client-auth-mtls-plan.json" \
 	"$SERVER_DIR/expected-warnings-ciba-ping-client-auth-mtls.json" \
 	"$SERVER_DIR/expected-skips-ciba-ping-client-auth-mtls.json"
+
+# AS {baseline,mtls,client-auth-mtls,client-auth-mtls-and-mtls}-client-credentials:
+# the four FAPI2SP OP "Client Credentials Grant" register profiles
+# (private key+DPoP, private key+MTLS, MTLS+DPoP, MTLS+MTLS) — RFC 6749
+# §4.4, no PAR/authorize/redirect_uri/browser step at all, reusing each
+# combo's already-running container (no new wait_as_ready needed).
+run_as_plan "baseline-client-credentials" \
+	'fapi2-security-profile-final-test-plan[client_auth_type=private_key_jwt][sender_constrain=dpop][fapi_profile=fapi_client_credentials_grant][openid=plain_oauth]' \
+	"$SERVER_DIR/oidf-config/baseline-client-credentials-plan.json" \
+	"$SERVER_DIR/expected-warnings-baseline-client-credentials.json" \
+	"$SERVER_DIR/expected-skips-baseline-client-credentials.json"
+
+run_as_plan "mtls-client-credentials" \
+	'fapi2-security-profile-final-test-plan[client_auth_type=private_key_jwt][sender_constrain=mtls][fapi_profile=fapi_client_credentials_grant][openid=plain_oauth]' \
+	"$SERVER_DIR/oidf-config/mtls-client-credentials-plan.json" \
+	"$SERVER_DIR/expected-warnings-mtls-client-credentials.json" \
+	"$SERVER_DIR/expected-skips-mtls-client-credentials.json"
+
+run_as_plan "client-auth-mtls-client-credentials" \
+	'fapi2-security-profile-final-test-plan[client_auth_type=mtls][sender_constrain=dpop][fapi_profile=fapi_client_credentials_grant][openid=plain_oauth]' \
+	"$SERVER_DIR/oidf-config/client-auth-mtls-client-credentials-plan.json" \
+	"$SERVER_DIR/expected-warnings-client-auth-mtls-client-credentials.json" \
+	"$SERVER_DIR/expected-skips-client-auth-mtls-client-credentials.json"
+
+run_as_plan "client-auth-mtls-and-mtls-client-credentials" \
+	'fapi2-security-profile-final-test-plan[client_auth_type=mtls][sender_constrain=mtls][fapi_profile=fapi_client_credentials_grant][openid=plain_oauth]' \
+	"$SERVER_DIR/oidf-config/client-auth-mtls-and-mtls-client-credentials-plan.json" \
+	"$SERVER_DIR/expected-warnings-client-auth-mtls-and-mtls-client-credentials.json" \
+	"$SERVER_DIR/expected-skips-client-auth-mtls-and-mtls-client-credentials.json"
 
 run_rp_plan "baseline" "baseline"
 run_rp_plan "message-signing" "message-signing"

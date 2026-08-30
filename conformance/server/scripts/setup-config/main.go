@@ -113,8 +113,17 @@ const fullScope = "openid accounts offline_access"
 // repeated per profile to avoid a typo diverging one profile's URL
 // shape from the others'.
 const (
-	wellKnownConfigPath     = "/.well-known/openid-configuration"
-	userinfoPath            = "/userinfo"
+	wellKnownConfigPath = "/.well-known/openid-configuration"
+	userinfoPath        = "/userinfo"
+	// accountsPath is cmd/conformance-as's own non-OIDC protected
+	// -resource endpoint (accountsHandler) — only the
+	// client-credentials profiles' Resource.ResourceURL uses this
+	// instead of userinfoPath, since a client_credentials-issued token
+	// can validly carry no "openid" scope at all (confirmed live: the
+	// suite forbids requesting "openid" under openid=plain_oauth, the
+	// only legal variant value for fapi_profile=fapi_client_credentials_grant),
+	// but /userinfo requires it. See accountsHandler's own doc comment.
+	accountsPath            = "/accounts"
 	backchannelApprovalPath = "/backchannel-approve"
 	cibaApprovalQuery       = "?auth_req_id={auth_req_id}&action={action}"
 )
@@ -225,6 +234,15 @@ func main() {
 	}
 	if err := setupCIBAClientAuthMTLSVariant(dir, "ping-client-auth-mtls", "ping"); err != nil {
 		log.Fatalf("ciba-ping-client-auth-mtls: %v", err)
+	}
+
+	// Must run after the profiles/setupClientAuthMTLSVariant loops
+	// above: each of these appends one more client to a config.json one
+	// of those already wrote.
+	for _, c := range clientCredentialsGrantContainers {
+		if err := setupClientCredentialsGrantVariant(dir, c.baseName, c.clientAuthMTLS, c.senderConstrainMTLS); err != nil {
+			log.Fatalf("%s-client-credentials: %v", c.baseName, err)
+		}
 	}
 }
 
@@ -1621,5 +1639,222 @@ func setupCIBAClientAuthMTLSVariant(dir, suffix, deliveryMode string) error {
 		return err
 	}
 	fmt.Printf("%s: generated fresh client keys and certificates, wrote %s and updated %s\n", name, planPath, configPath)
+	return nil
+}
+
+// clientCredentialsGrantContainers is every already-running AS
+// container the four FAPI2 Client Credentials Grant register profiles
+// (MTLS+MTLS, MTLS+DPoP, private key+MTLS, private key+DPoP) reuse — no
+// new docker-compose service needed, since RFC 6749 §4.4 has no browser
+// hop at all and arrives at the same token endpoint every other grant
+// already uses. baseName matches the existing *.config.json/container
+// name exactly.
+var clientCredentialsGrantContainers = []struct {
+	baseName            string
+	clientAuthMTLS      bool
+	senderConstrainMTLS bool
+}{
+	{baseName: "baseline"},
+	{baseName: "mtls", senderConstrainMTLS: true},
+	{baseName: "client-auth-mtls", clientAuthMTLS: true},
+	{baseName: "client-auth-mtls-and-mtls", clientAuthMTLS: true, senderConstrainMTLS: true},
+}
+
+// setupClientCredentialsGrantVariant adds one more client to the
+// already-committed {baseName}.config.json and generates
+// {baseName}-client-credentials-plan.json against the same already
+// -running conformance-as-{baseName} container — no PAR, no
+// authorize/redirect_uri/browser step, no ID token, no refresh token:
+// RFC 6749 §4.4 is a direct client-to-token-endpoint exchange, the same
+// reasoning RequestClientCredentialsToken's own doc comment
+// (server/client_credentials.go) gives for why this needs none of the
+// authorization_code-shaped plumbing every other profile here does.
+// Reuses whichever axis this container already established
+// (clientAuthMTLS mirrors setupClientAuthMTLSVariant's own certificate
+// generation; !clientAuthMTLS mirrors the generic profile/writePlanConfig
+// machinery's own jwks generation) rather than introducing a third
+// client-shape convention.
+// clientCredentialsGrantClient builds one client's config.json entry
+// and plan "client"/"client2" entry — client1 PS256/RSA under
+// !clientAuthMTLS (mirrors setupCIBAMTLS/appendCIBAPingClients' own
+// identical reasoning: the plan's fapi2-security-profile-final-ensure
+// -signed-client-assertion-with-RS256-fails module, present in every
+// private_key_jwt combo's own module list, only starts running rather
+// than self-skipping once the plan's first client is already
+// PS256-registered), client2 (and both clients under clientAuthMTLS,
+// which has no client_assertion/algorithm concept at all) plain ES256.
+// Returns the mtls certificate/key PEM too (empty under !clientAuthMTLS
+// && !senderConstrainMTLS) for the caller to fold into the plan's own
+// mtls/mtls2 blocks.
+func clientCredentialsGrantClient(clientID, keyLabel, certCNSuffix string, clientAuthMTLS, senderConstrainMTLS, forceRSA bool) (configEntry, planEntry map[string]any, certPEM, keyPEM string, err error) {
+	configEntry = map[string]any{
+		"id": clientID,
+		// Structurally required by storage.NewRegisteredClient (every
+		// client needs at least one redirect URI) even though this
+		// grant never redirects anywhere — see that constructor's own
+		// unconditional check.
+		"redirect_uris":                   []string{"https://localhost.emobix.co.uk:8443/test/a/" + clientID + "/callback"},
+		"allowed_scopes":                  []string{"accounts"},
+		"allows_client_credentials_grant": true,
+	}
+	planEntry = map[string]any{
+		"client_id": clientID,
+		"scope":     "accounts",
+	}
+	if senderConstrainMTLS {
+		configEntry["sender_constrain"] = "mtls"
+	}
+
+	// One certificate covers both axes when combined (clientAuthMTLS
+	// needs it for §2 client authentication; senderConstrainMTLS needs
+	// it for §3 token-binding presentation) — the same one-certificate
+	// precedent setupClientAuthMTLSVariant's own "MTLS + MTLS" case
+	// already established.
+	if clientAuthMTLS || senderConstrainMTLS {
+		certPEM, keyPEM, err = generateMTLSCertKeyPEM(certCNSuffix)
+		if err != nil {
+			return nil, nil, "", "", fmt.Errorf("generate client mtls certificate: %w", err)
+		}
+		if clientAuthMTLS {
+			thumb, err := certPEMThumbprint(certPEM)
+			if err != nil {
+				return nil, nil, "", "", fmt.Errorf("thumbprint client certificate: %w", err)
+			}
+			configEntry["client_auth_method"] = "self_signed_tls_client_auth"
+			configEntry["expected_certificate_thumbprint"] = thumb
+		}
+	}
+	var priv, pub jwks
+	if forceRSA {
+		priv, pub, err = generatePS256Key(keyLabel + "-rsa-key1")
+	} else {
+		priv, pub, err = generateKey(keyLabel)
+	}
+	if err != nil {
+		return nil, nil, "", "", fmt.Errorf("generate client key: %w", err)
+	}
+	// The suite's own plan config needs a "jwks" entry regardless of
+	// client_auth_type — ValidateClientJWKsPrivatePart runs
+	// unconditionally (confirmed live: every clientAuthMTLS module
+	// otherwise INTERRUPTED with "Couldn't find JWKS in configuration"),
+	// the same quirk setupClientAuthMTLSVariant's own doc comment
+	// already documents. This AS's own registration only needs the
+	// public half when it's actually the client's authentication
+	// mechanism (!clientAuthMTLS) — under clientAuthMTLS the
+	// certificate alone authenticates the client, so the config-side
+	// jwks/client_assertion_algorithm fields would go unused.
+	planEntry["jwks"] = priv
+	if !clientAuthMTLS {
+		if forceRSA {
+			configEntry["client_assertion_algorithm"] = "PS256"
+		} else {
+			configEntry["client_assertion_algorithm"] = "ES256"
+		}
+		configEntry["jwks"] = pub
+	}
+	return configEntry, planEntry, certPEM, keyPEM, nil
+}
+
+// setupClientCredentialsGrantVariant adds two more clients (client1,
+// client2 — every fapi2-security-profile-final-test-plan variant
+// structurally requires both, confirmed live: GetStaticClient2Configuration
+// interrupts every module outright with "Definition for client2 not
+// present in supplied configuration" otherwise, regardless of
+// fapi_profile) to the already-committed {baseName}.config.json and
+// generates {baseName}-client-credentials-plan.json against the same
+// already-running conformance-as-{baseName} container — no PAR, no
+// authorize/redirect_uri/browser step, no ID token, no refresh token:
+// RFC 6749 §4.4 is a direct client-to-token-endpoint exchange, the same
+// reasoning RequestClientCredentialsToken's own doc comment
+// (server/client_credentials.go) gives for why this needs none of the
+// authorization_code-shaped plumbing every other profile here does —
+// only client1 is ever actually used to request a token; client2 is a
+// structural-only registration, present but never exercised by any
+// module in this profile's own live-confirmed module list.
+func setupClientCredentialsGrantVariant(dir, baseName string, clientAuthMTLS, senderConstrainMTLS bool) error {
+	name := baseName + "-client-credentials"
+	planPath := filepath.Join(dir, name+"-plan.json")
+	if _, err := os.Stat(planPath); err == nil {
+		fmt.Printf("%s: %s already exists, leaving this profile alone\n", name, planPath)
+		return nil
+	}
+
+	alias := "gofapi-" + name
+	issuerHost := "conformance-as-" + baseName
+	clientID1 := conformanceKeyLabelPrefix + name + "-client-1"
+	clientID2 := conformanceKeyLabelPrefix + name + "-client-2"
+
+	configEntry1, planEntry1, cert1, key1, err := clientCredentialsGrantClient(clientID1, name+"-client1", alias+mtlsSuiteClientCNSuffix, clientAuthMTLS, senderConstrainMTLS, true)
+	if err != nil {
+		return err
+	}
+	configEntry2, planEntry2, cert2, key2, err := clientCredentialsGrantClient(clientID2, name+"-client2", alias+mtlsSuiteClient2CNSuffix, clientAuthMTLS, senderConstrainMTLS, false)
+	if err != nil {
+		return err
+	}
+
+	configPath := filepath.Join(dir, baseName+".config.json")
+	top, clients, err := readConfigClients(configPath)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", configPath, err)
+	}
+	for _, c := range clients {
+		var id string
+		if err := json.Unmarshal(c["id"], &id); err != nil {
+			return fmt.Errorf("parse clients[].id: %w", err)
+		}
+		if id == clientID1 {
+			fmt.Printf("%s: clients already present in %s, leaving this profile alone\n", name, configPath)
+			return nil
+		}
+	}
+	for _, entry := range []map[string]any{configEntry1, configEntry2} {
+		encoded, err := marshalIndentNoEscape(entry)
+		if err != nil {
+			return err
+		}
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(encoded, &raw); err != nil {
+			return err
+		}
+		clients = append(clients, raw)
+	}
+	if err := writeCIBAConfigClients(configPath, top, clients); err != nil {
+		return fmt.Errorf("update %s: %w", configPath, err)
+	}
+
+	// accountsPath, not userinfoPath: see that constant's own doc
+	// comment for why this profile alone needs the non-OIDC resource
+	// endpoint.
+	resourceURL := issuerURL(issuerHost, accountsPath)
+	if senderConstrainMTLS {
+		// mTLS-bound access tokens' resource call must go over the mTLS
+		// listener — see writePlanConfig's own identical
+		// senderConstrainMTLS branch for the confirmed-live reasoning.
+		resourceURL = mtlsURL(issuerHost, accountsPath)
+	}
+	plan := map[string]any{
+		"alias": alias,
+		"server": map[string]any{
+			"discoveryUrl": issuerURL(issuerHost, wellKnownConfigPath),
+		},
+		"client":   planEntry1,
+		"client2":  planEntry2,
+		"resource": map[string]any{"resourceUrl": resourceURL},
+	}
+	if cert1 != "" {
+		plan["mtls"] = mtlsBlock{Cert: cert1, Key: key1}
+		plan["mtls2"] = mtlsBlock{Cert: cert2, Key: key2}
+	}
+
+	out, err := marshalIndentNoEscape(plan)
+	if err != nil {
+		return err
+	}
+	out = append(out, '\n')
+	if err := os.WriteFile(planPath, out, 0o600); err != nil { // #nosec G306 -- embeds each client's own private key/mtls certificate key
+		return err
+	}
+	fmt.Printf("%s: generated fresh client credentials, wrote %s and updated %s\n", name, planPath, configPath)
 	return nil
 }

@@ -15,6 +15,16 @@ const (
 	ErrorUnsupportedGrantType ErrorCode = "unsupported_grant_type"
 	ErrorServerError          ErrorCode = "server_error"
 
+	// ErrorUnauthorizedClient is RFC 6749 §5.2's own error code for a
+	// client that authenticated successfully but is not permitted to
+	// use the grant type it requested — as distinct from
+	// ErrorInvalidClient (authentication itself failed) and
+	// ErrorUnsupportedGrantType (this server doesn't support the grant
+	// type at all, for any client). Used by
+	// RequestClientCredentialsToken when the authenticated client's own
+	// storage.RegisteredClient.AllowsClientCredentialsGrant() is false.
+	ErrorUnauthorizedClient ErrorCode = "unauthorized_client"
+
 	// ErrorInvalidRequestURI is RFC 9126 §2.3's dedicated error code for
 	// a request_uri the authorization endpoint cannot use — unknown,
 	// already consumed by a completed interaction, expired, or pushed

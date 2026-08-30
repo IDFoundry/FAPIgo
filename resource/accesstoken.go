@@ -188,7 +188,7 @@ func (j JWTAccessTokens) ResolveAccessToken(ctx context.Context, req ResolveAcce
 		// literal bypassing NewJWTAccessTokens' own validation) — falls
 		// through to rejection below rather than treating an
 		// unvalidated, zero-value validated as a successful match.
-		validErr error = fmt.Errorf("no candidate key attempted (MaxKeyCandidates exhausted or misconfigured)")
+		validErr = fmt.Errorf("no candidate key attempted (MaxKeyCandidates exhausted or misconfigured)")
 	)
 	for i, candidate := range candidates.Keys {
 		if i >= j.MaxKeyCandidates {

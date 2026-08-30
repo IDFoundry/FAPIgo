@@ -236,16 +236,16 @@ func runCIBAModule(ctx context.Context, rawHTTP *http.Client, apiBase, planID, c
 
 	discovered, err := client.Discover(ctx, fetcher, issuer)
 	if err != nil {
-		return awaitVerdict(rawHTTP, apiBase, module.ID, "discover issuer metadata: "+err.Error())
+		return awaitVerdict(rawHTTP, apiBase, module.ID, "discover issuer metadata: "+err.Error()).String()
 	}
 	if len(discovered.IDTokenAlgorithms) == 0 {
-		return awaitVerdict(rawHTTP, apiBase, module.ID, "issuer advertises no recognized ID token signing algorithm")
+		return awaitVerdict(rawHTTP, apiBase, module.ID, "issuer advertises no recognized ID token signing algorithm").String()
 	}
 	if discovered.Endpoints.BackchannelAuthentication.IsZero() {
-		return awaitVerdict(rawHTTP, apiBase, module.ID, "issuer does not advertise a backchannel_authentication_endpoint")
+		return awaitVerdict(rawHTTP, apiBase, module.ID, "issuer does not advertise a backchannel_authentication_endpoint").String()
 	}
 	if !containsES256(discovered.BackchannelAuthenticationRequestAlgorithms) {
-		return awaitVerdict(rawHTTP, apiBase, module.ID, "issuer does not advertise ES256 as a backchannel authentication request signing algorithm")
+		return awaitVerdict(rawHTTP, apiBase, module.ID, "issuer does not advertise ES256 as a backchannel authentication request signing algorithm").String()
 	}
 
 	issuerKeys, err := keys.NewJWKSIssuerKeySource(fetcher, discovered.JWKSURI, jwksCacheTTL)
@@ -279,7 +279,7 @@ func runCIBAModule(ctx context.Context, rawHTTP *http.Client, apiBase, planID, c
 	if mtls {
 		cfg.SenderConstrain = storage.SenderConstrainMTLS
 		if err := applyMTLSEndpointAliases(&cfg, discovered); err != nil {
-			return awaitVerdict(rawHTTP, apiBase, module.ID, err.Error())
+			return awaitVerdict(rawHTTP, apiBase, module.ID, err.Error()).String()
 		}
 	}
 	deps := client.Dependencies{
@@ -300,7 +300,7 @@ func runCIBAModule(ctx context.Context, rawHTTP *http.Client, apiBase, planID, c
 		Scope: []string{cibaScope}, LoginHint: cibaLoginHint,
 	})
 	if err != nil {
-		return awaitVerdict(rawHTTP, apiBase, module.ID, "begin backchannel authentication: "+err.Error())
+		return awaitVerdict(rawHTTP, apiBase, module.ID, "begin backchannel authentication: "+err.Error()).String()
 	}
 
 	interval := session.Interval()
@@ -308,7 +308,7 @@ func runCIBAModule(ctx context.Context, rawHTTP *http.Client, apiBase, planID, c
 		time.Sleep(interval)
 		result, err := cl.PollBackchannelAuthentication(ctx, session)
 		if err != nil {
-			return awaitVerdict(rawHTTP, apiBase, module.ID, "poll backchannel authentication: "+err.Error())
+			return awaitVerdict(rawHTTP, apiBase, module.ID, "poll backchannel authentication: "+err.Error()).String()
 		}
 		switch r := result.(type) {
 		case client.BackchannelAuthenticationPending:
@@ -317,9 +317,9 @@ func runCIBAModule(ctx context.Context, rawHTTP *http.Client, apiBase, planID, c
 			}
 			continue
 		case client.BackchannelAuthenticationDenied:
-			return awaitVerdict(rawHTTP, apiBase, module.ID, "")
+			return awaitVerdict(rawHTTP, apiBase, module.ID, "").String()
 		case client.BackchannelAuthenticationExpired:
-			return awaitVerdict(rawHTTP, apiBase, module.ID, "")
+			return awaitVerdict(rawHTTP, apiBase, module.ID, "").String()
 		case client.BackchannelAuthenticationApproved:
 			// Mirrors runModule's own accounts-endpoint call
 			// (main.go): FAPICIBARPProfileBehavior's own
@@ -336,10 +336,10 @@ func runCIBAModule(ctx context.Context, rawHTTP *http.Client, apiBase, planID, c
 			if err := callAccountsEndpoint(ctx, rawHTTP, apiBase, module.ID, keyMgr, mtls, r.Tokens); err != nil {
 				return "ERROR: call accounts endpoint: " + err.Error()
 			}
-			return awaitVerdict(rawHTTP, apiBase, module.ID, "")
+			return awaitVerdict(rawHTTP, apiBase, module.ID, "").String()
 		}
 	}
-	return awaitVerdict(rawHTTP, apiBase, module.ID, "gave up polling after "+fmt.Sprint(cibaMaxPolls)+" attempts")
+	return awaitVerdict(rawHTTP, apiBase, module.ID, "gave up polling after "+fmt.Sprint(cibaMaxPolls)+" attempts").String()
 }
 
 // callAccountsEndpoint fetches moduleID's exported "accounts_endpoint"

@@ -25,6 +25,9 @@
 //
 //	go run ./cmd/conformance-client -profile=baseline
 //	go run ./cmd/conformance-client -profile=message-signing
+//	go run ./cmd/conformance-client -profile=baseline -mtls
+//	go run ./cmd/conformance-client -profile=baseline -client-auth-mtls
+//	go run ./cmd/conformance-client -profile=baseline -mtls -client-auth-mtls
 //
 // -profile selects which plan to run (see the profiles map below);
 // baseline is the default. With no -suite flag it talks to the suite's
@@ -99,8 +102,9 @@ var profiles = map[string]driverProfile{
 func main() {
 	apiBase := flag.String("suite", "https://localhost.emobix.co.uk:8443/", "conformance suite base URL")
 	profileName := flag.String("profile", "baseline", "which client test plan to run: baseline, message-signing, or ciba")
-	mtls := flag.Bool("mtls", false, "with -profile=ciba, present a client certificate and use storage.SenderConstrainMTLS instead of DPoP (RFC 8705 §3) — see mtls.go; ignored for baseline/message-signing")
-	clientAuthMTLS := flag.Bool("client-auth-mtls", false, "with -profile=baseline, register via storage.ClientAuthMethodSelfSignedTLSClientAuth (RFC 8705 §2) instead of private_key_jwt — presents a client certificate instead of a signed client assertion at PAR/token; sender-constraining stays DPoP either way. Orthogonal to -mtls, which is §3 sender-constraining for -profile=ciba only. Ignored/invalid for message-signing/ciba.")
+	mtls := flag.Bool("mtls", false, "with -profile=ciba or -profile=baseline, present a client certificate and use storage.SenderConstrainMTLS instead of DPoP (RFC 8705 §3) — see mtls.go. Orthogonal to -client-auth-mtls (RFC 8705 §2); combine both for the MTLS+MTLS profile. Ignored/invalid for message-signing.")
+	clientAuthMTLS := flag.Bool("client-auth-mtls", false, "with -profile=baseline, register via storage.ClientAuthMethodSelfSignedTLSClientAuth (RFC 8705 §2) instead of private_key_jwt — presents a client certificate instead of a signed client assertion at PAR/token. Orthogonal to -mtls, which is §3 sender-constraining. Ignored/invalid for message-signing/ciba.")
+	evidenceDir := flag.String("evidence-dir", "", "if set, write one named log file per test module here in OIDF RP-certification evidence format, alongside the usual combined stdout log — see conformance/client/scripts/README.md's Certification evidence section. Unused by daily CI. Ignored for -profile=ciba.")
 	flag.Parse()
 
 	if *profileName == "ciba" {
@@ -123,8 +127,11 @@ func main() {
 	if *clientAuthMTLS && *profileName != "baseline" {
 		log.Fatalf("conformance-client: -client-auth-mtls is only supported with -profile=baseline, got %q", *profileName)
 	}
+	if *mtls && *profileName != "baseline" {
+		log.Fatalf("conformance-client: -mtls is only supported with -profile=ciba or -profile=baseline, got %q", *profileName)
+	}
 
-	if err := run(*apiBase, profile, *clientAuthMTLS); err != nil {
+	if err := run(*apiBase, profile, *clientAuthMTLS, *mtls, *evidenceDir); err != nil {
 		log.Fatalf("conformance-client: %v", err)
 	}
 }
@@ -140,7 +147,7 @@ func insecureSuiteHTTPClient() *http.Client {
 	}
 }
 
-func run(apiBase string, profile driverProfile, clientAuthMTLS bool) error {
+func run(apiBase string, profile driverProfile, clientAuthMTLS, senderConstrainMTLS bool, evidenceDir string) error {
 	ctx := context.Background()
 	rawHTTP := insecureSuiteHTTPClient()
 
@@ -205,7 +212,7 @@ func run(apiBase string, profile driverProfile, clientAuthMTLS bool) error {
 
 	variant := profile.variant
 	var clientCertPEM string
-	if clientAuthMTLS {
+	if clientAuthMTLS || senderConstrainMTLS {
 		// Copied, not mutated in place: profile.variant is the shared
 		// map literal in the profiles table above, reused across runs
 		// within the same process (there aren't any today, but nothing
@@ -214,9 +221,20 @@ func run(apiBase string, profile driverProfile, clientAuthMTLS bool) error {
 		for k, v := range profile.variant {
 			variant[k] = v
 		}
-		variant["client_auth_type"] = "mtls"
+		if clientAuthMTLS {
+			variant["client_auth_type"] = "mtls"
+		}
+		if senderConstrainMTLS {
+			variant["sender_constrain"] = "mtls"
+		}
 
-		cert, err := selfSignedClientCert("gofapi-client-auth-mtls-driver")
+		// One certificate covers both axes when combined — RFC 8705
+		// doesn't require separate certificates for §2 client auth vs.
+		// §3 sender-constraining, and the suite's own
+		// EnsureClientCertificateMatches condition reads the same
+		// "client.certificate" plan-config value regardless of which
+		// axis triggered the check.
+		cert, err := selfSignedClientCert("gofapi-mtls-driver")
 		if err != nil {
 			return fmt.Errorf("generate client certificate: %w", err)
 		}
@@ -258,14 +276,20 @@ func run(apiBase string, profile driverProfile, clientAuthMTLS bool) error {
 	driver := moduleDriver{
 		HTTP: rawHTTP, APIBase: apiBase, PlanID: planID,
 		ClientID: clientID, RedirectURI: redirectURI, Keys: keyMgr, Profile: profile,
-		ClientAuthMTLS: clientAuthMTLS,
+		ClientAuthMTLS: clientAuthMTLS, SenderConstrainMTLS: senderConstrainMTLS,
 	}
 	summary := make(map[string]string, len(moduleNames))
 	for i, name := range moduleNames {
 		log.Printf("--- [%d/%d] %s ---", i+1, len(moduleNames), name)
-		outcome := runModule(ctx, driver, name)
+		result := runModule(ctx, driver, name)
+		outcome := result.String()
 		summary[name] = outcome
 		log.Printf("[%d/%d] %s: %s", i+1, len(moduleNames), name, outcome)
+		if evidenceDir != "" {
+			if err := writeEvidence(evidenceDir, name, result, apiBase); err != nil {
+				log.Printf("[%d/%d] %s: WARNING: write evidence file: %v", i+1, len(moduleNames), name, err)
+			}
+		}
 	}
 
 	log.Printf("=== summary ===")
@@ -292,31 +316,61 @@ type moduleDriver struct {
 	// (RFC 8705 §2) instead of the default private_key_jwt — see run's
 	// own doc comment on -client-auth-mtls.
 	ClientAuthMTLS bool
+
+	// SenderConstrainMTLS selects storage.SenderConstrainMTLS (RFC 8705
+	// §3) instead of the default DPoP — see run's own doc comment on
+	// -mtls. Orthogonal to ClientAuthMTLS; both may be set together for
+	// the MTLS+MTLS profile.
+	SenderConstrainMTLS bool
+}
+
+// moduleResult is runModule's return value: the suite's own graded
+// Verdict (the only thing that actually determines PASS/FAIL) plus
+// this driver's own DriverErr, if it hit one, and the suite-assigned
+// ModuleID (empty only when createModuleInstance itself failed, before
+// the suite ever assigned one). Kept as separate fields rather than one
+// pre-formatted string so both run's stdout summary line and
+// writeEvidence's per-test evidence file can be built from the same
+// data without one parsing the other's output.
+type moduleResult struct {
+	Verdict   string
+	DriverErr string
+	ModuleID  string
+}
+
+// String reproduces the exact "<verdict> [driver: <err>]" / "<verdict>"
+// shape this driver has always printed — generate-report.py's
+// parse_rp_log regex-parses the "=== summary ===" block by this exact
+// format, so it must stay byte-for-byte stable.
+func (r moduleResult) String() string {
+	if r.DriverErr != "" {
+		return fmt.Sprintf("%s [driver: %s]", r.Verdict, r.DriverErr)
+	}
+	return r.Verdict
 }
 
 // runModule drives testName through the same discover/authorize/token/
 // resource sequence every module in this plan needs, and returns a
-// short human-readable outcome string rather than an error: for most of
-// this plan's modules, this driver's own step failing partway through
-// (a rejected ID token, a denied callback, ...) is the module's whole
-// point, not a bug in the driver, so there is nothing here for a caller
-// to usefully treat as fatal. The suite's own graded result — fetched
-// separately, after a grace period, back in run — is what actually
-// matters.
-func runModule(ctx context.Context, d moduleDriver, testName string) string {
+// moduleResult rather than an error: for most of this plan's modules,
+// this driver's own step failing partway through (a rejected ID token,
+// a denied callback, ...) is the module's whole point, not a bug in the
+// driver, so there is nothing here for a caller to usefully treat as
+// fatal. The suite's own graded result — fetched separately, after a
+// grace period, back in run — is what actually matters.
+func runModule(ctx context.Context, d moduleDriver, testName string) moduleResult {
 	rawHTTP, apiBase, planID, clientID, redirectURI, keyMgr, profile := d.HTTP, d.APIBase, d.PlanID, d.ClientID, d.RedirectURI, d.Keys, d.Profile
 	module, err := createModuleInstance(rawHTTP, apiBase, planID, testName)
 	if err != nil {
-		return "ERROR: create module instance: " + err.Error()
+		return moduleResult{Verdict: "ERROR", DriverErr: "create module instance: " + err.Error()}
 	}
 
 	if err := waitUntilWaiting(rawHTTP, apiBase, module.ID, 10*time.Second); err != nil {
-		return "ERROR: wait for module ready: " + err.Error()
+		return moduleResult{Verdict: "ERROR", DriverErr: "wait for module ready: " + err.Error(), ModuleID: module.ID}
 	}
 
 	issuer, err := fapi.ParseIssuerURL(module.URL + "/")
 	if err != nil {
-		return "ERROR: parse issuer URL: " + err.Error()
+		return moduleResult{Verdict: "ERROR", DriverErr: "parse issuer URL: " + err.Error(), ModuleID: module.ID}
 	}
 
 	fetcher, err := fapihttp.New(rawHTTP, fapihttp.Config{
@@ -331,7 +385,7 @@ func runModule(ctx context.Context, d moduleDriver, testName string) string {
 		AllowLoopbackHTTP: true,
 	})
 	if err != nil {
-		return "ERROR: build fetcher: " + err.Error()
+		return moduleResult{Verdict: "ERROR", DriverErr: "build fetcher: " + err.Error(), ModuleID: module.ID}
 	}
 
 	discovered, err := client.Discover(ctx, fetcher, issuer)
@@ -344,7 +398,7 @@ func runModule(ctx context.Context, d moduleDriver, testName string) string {
 
 	issuerKeys, err := keys.NewJWKSIssuerKeySource(fetcher, discovered.JWKSURI, jwksCacheTTL)
 	if err != nil {
-		return "ERROR: build issuer key source: " + err.Error()
+		return moduleResult{Verdict: "ERROR", DriverErr: "build issuer key source: " + err.Error(), ModuleID: module.ID}
 	}
 
 	algorithms := client.Algorithms{
@@ -397,9 +451,20 @@ func runModule(ctx context.Context, d moduleDriver, testName string) string {
 		Algorithms:                      algorithms,
 		Limits:                          limits,
 	}
+	if d.SenderConstrainMTLS {
+		cfg.SenderConstrain = storage.SenderConstrainMTLS
+	}
 	if d.ClientAuthMTLS {
 		cfg.ClientAuthMethod = storage.ClientAuthMethodSelfSignedTLSClientAuth
+		// Covers Token+PAR — a superset of what sender-constrain-only
+		// needs (Token only; RFC 8705 §3 has no PAR-time
+		// pre-commitment concept), so the MTLS+MTLS combo is correctly
+		// handled by this branch alone.
 		if err := applyMTLSEndpointAliasesForClientAuth(&cfg, discovered); err != nil {
+			return awaitVerdict(rawHTTP, apiBase, module.ID, err.Error())
+		}
+	} else if d.SenderConstrainMTLS {
+		if err := applyMTLSEndpointAliases(&cfg, discovered); err != nil {
 			return awaitVerdict(rawHTTP, apiBase, module.ID, err.Error())
 		}
 	}
@@ -414,7 +479,7 @@ func runModule(ctx context.Context, d moduleDriver, testName string) string {
 
 	cl, err := client.New(cfg, deps)
 	if err != nil {
-		return "ERROR: construct client: " + err.Error()
+		return moduleResult{Verdict: "ERROR", DriverErr: "construct client: " + err.Error(), ModuleID: module.ID}
 	}
 
 	session, err := cl.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}})
@@ -447,15 +512,21 @@ func runModule(ctx context.Context, d moduleDriver, testName string) string {
 		// not assumed from the Java source alone.
 		exposed, err := fetchExposedValues(rawHTTP, apiBase, module.ID)
 		if err != nil {
-			return "ERROR: fetch exposed values: " + err.Error()
+			return moduleResult{Verdict: "ERROR", DriverErr: "fetch exposed values: " + err.Error(), ModuleID: module.ID}
 		}
 		if accountsEndpoint := exposed["accounts_endpoint"]; accountsEndpoint != "" {
-			resourceClient := dpopResourceClient{
-				HTTP: rawHTTP, Signer: keyMgr.keys[keys.DPoPProofSigning], Alg: fapi.ES256,
-				Random: rand.Reader, Now: time.Now,
-			}
-			if _, _, err := resourceClient.callProtectedResource(ctx, accountsEndpoint, r.Tokens.AccessToken.Reveal()); err != nil {
-				return "ERROR: call accounts endpoint: " + err.Error()
+			if d.SenderConstrainMTLS {
+				if _, _, err := callProtectedResourceBearer(ctx, rawHTTP, accountsEndpoint, r.Tokens.AccessToken.Reveal()); err != nil {
+					return moduleResult{Verdict: "ERROR", DriverErr: "call accounts endpoint: " + err.Error(), ModuleID: module.ID}
+				}
+			} else {
+				resourceClient := dpopResourceClient{
+					HTTP: rawHTTP, Signer: keyMgr.keys[keys.DPoPProofSigning], Alg: fapi.ES256,
+					Random: rand.Reader, Now: time.Now,
+				}
+				if _, _, err := resourceClient.callProtectedResource(ctx, accountsEndpoint, r.Tokens.AccessToken.Reveal()); err != nil {
+					return moduleResult{Verdict: "ERROR", DriverErr: "call accounts endpoint: " + err.Error(), ModuleID: module.ID}
+				}
 			}
 		}
 	case client.CompletionDenied:
@@ -490,16 +561,13 @@ func runModule(ctx context.Context, d moduleDriver, testName string) string {
 // suite's own post-completion grace period (AbstractFAPI2SPFinalClientTest's
 // waitTimeoutSeconds, default 5s) plus real round-trip latency to an
 // external suite instance and this driver's own polling cadence.
-func awaitVerdict(rawHTTP *http.Client, apiBase, moduleID, driverErr string) string {
+func awaitVerdict(rawHTTP *http.Client, apiBase, moduleID, driverErr string) moduleResult {
 	status, result, err := waitUntilFinished(rawHTTP, apiBase, moduleID, 45*time.Second)
 	verdict := result
 	if err != nil {
 		verdict = fmt.Sprintf("status=%s (did not reach a final result: %v)", status, err)
 	}
-	if driverErr != "" {
-		return fmt.Sprintf("%s [driver: %s]", verdict, driverErr)
-	}
-	return verdict
+	return moduleResult{Verdict: verdict, DriverErr: driverErr, ModuleID: moduleID}
 }
 
 // followAuthorizationRedirect GETs authorizationURL and reads the

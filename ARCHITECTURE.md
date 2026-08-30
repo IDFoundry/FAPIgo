@@ -461,11 +461,18 @@ owner may grant a narrower `authorization_details` array than was
 requested exactly the way a granted scope may narrow a requested one.
 The RFC 6749 §4.4 client_credentials grant supports it too (RFC 9396
 §6), but structurally differently: there is no resource owner to narrow
-anything against, so `parseRequestedAuthorizationDetails`'s own
-`RARRegistry.Parse` — type/bounds validation — *is* the entire "client's
-policy" decision RFC 9396 §6 describes, and the validated request is
-issued verbatim, with no `validateGrantedAuthorizationDetails`/narrowing
-step at all (`server/client_credentials.go`).
+anything against interactively, so a deployment-supplied
+`Dependencies.ClientCredentialsRARPolicy` makes that decision instead —
+`RARRegistry.Parse` only confirms the request is well-formed and
+registered, it is deliberately *not* treated as the entitlement decision
+itself (an unconfigured policy refuses any authorization_details, the
+same "unconfigured is not permissive" stance `Config.RAR` itself takes,
+rather than silently allowing anything structurally valid). The policy's
+own granted result is still checked through the existing
+`validateGrantedAuthorizationDetails` narrowing logic — it's the same
+"is this an acceptable subset of what was requested" check a resource
+owner's decision gets, just fed a programmatic decision instead of an
+interactive one (`server/client_credentials.go`).
 Whether a narrower grant is acceptable is, per type, decided by
 `RARDefinition.ValidateGrant(requested, granted T) error` — nil requires
 byte-for-byte (canonically re-encoded) equality; set, it can permit real

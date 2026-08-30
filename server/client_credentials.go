@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/x509"
+	"encoding/json"
 	"strings"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -28,6 +29,44 @@ type ClientCredentialsTokenRequest struct {
 	PeerCertificate *x509.Certificate
 }
 
+// ClientCredentialsRARPolicy decides which of a client_credentials
+// request's own Rich Authorization Requests (RFC 9396) detail objects an
+// authenticated client is entitled to receive — the client_credentials
+// analogue of a resource owner's GrantedAuthorization.AuthorizationDetails
+// decision on PAR/CIBA, which this grant has no interactive consent step
+// to produce on its own. RFC 9396 §6 frames this as "the client's
+// policy," as distinct from PAR/CIBA's own "the underlying grant" check.
+//
+// Dependencies.ClientCredentialsRARPolicy is optional, but its absence
+// is not permissive: a client_credentials request that names
+// authorization_details with no policy configured is refused with
+// ErrorInvalidAuthorizationDetails, the same "unconfigured is not the
+// same as an empty registry accepting nothing extra" stance Config.RAR's
+// own doc comment already takes for the server as a whole — every
+// registered RAR type is available to be *requested* once Config.RAR is
+// set, but nothing is ever *entitled* to be granted on this grant
+// without an explicit policy decision saying so.
+type ClientCredentialsRARPolicy interface {
+	// Authorize returns the subset of requested (each entry one of its
+	// already-validated — RARRegistry.Parse has run — detail objects)
+	// that clientID's own policy permits, narrowed or reordered however
+	// the implementation decides; RequestClientCredentialsToken checks
+	// the result is an acceptable narrowing of requested the same way
+	// validateGrantedAuthorizationDetails already checks a resource
+	// owner's own decision (RARDefinition.ValidateGrant, or exact-match
+	// if that hook is nil for a given type). Returning an empty granted
+	// (no error) is a legitimate "deny everything requested" decision —
+	// RequestClientCredentialsToken surfaces that as
+	// ErrorInvalidAuthorizationDetails itself, per RFC 9396 §6's own
+	// "the AS refuses the request" framing, so an implementation doesn't
+	// need to return an error just to express a full denial. Returning
+	// an error instead signals a policy-evaluation failure (a lookup
+	// error, an unreachable policy engine) — also surfaced as
+	// ErrorInvalidAuthorizationDetails, since the caller cannot tell the
+	// two apart from the client-visible response.
+	Authorize(ctx context.Context, clientID fapi.ClientID, requested []json.RawMessage) ([]json.RawMessage, error)
+}
+
 // RequestClientCredentialsToken implements the RFC 6749 §4.4
 // client_credentials grant: authenticates the client, verifies its
 // sender-constraining binding, and issues an access token scoped to
@@ -41,10 +80,12 @@ type ClientCredentialsTokenRequest struct {
 // opt-ins, not one.
 //
 // Also accepts an "authorization_details" (RFC 9396 §6) token request
-// parameter when Config.RAR is configured — validated and issued
-// verbatim into the access token's own claim, since RFC 9396 §6 makes
-// the AS's own RARRegistry check *be* the "client's policy" decision
-// this grant has no resource owner to narrow it against.
+// parameter when Config.RAR is configured — structurally validated
+// against Config.RAR, then checked against Dependencies.ClientCredentialsRARPolicy
+// (RFC 9396 §6's "client's policy"), since this grant has no resource
+// owner of its own to make that decision interactively the way PAR/CIBA
+// do. See ClientCredentialsRARPolicy's own doc comment for the exact
+// contract, including what an unconfigured policy means.
 func (s *Server) RequestClientCredentialsToken(ctx context.Context, req ClientCredentialsTokenRequest) (TokenResult, error) {
 	if !s.cfg.ClientCredentialsGrant {
 		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, "", newError(ErrorUnsupportedGrantType, 400, "the client_credentials grant is not enabled on this server", nil))
@@ -79,14 +120,38 @@ func (s *Server) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 
 	// RFC 9396 §6: for client_credentials, "the AS checks whether ...
 	// the client's policy ... allows the issuance of an access token
-	// with the requested authorization details" — there is no resource
-	// owner to grant a narrowed subset (unlike PAR/CIBA's own
-	// validateGrantedAuthorizationDetails step), so RARRegistry.Parse's
-	// own type/bounds check *is* the entire policy decision here: the
-	// requested set, once validated, is issued verbatim.
-	authorizationDetails, err := s.parseRequestedAuthorizationDetails(plainParamsToJSON(params))
+	// with the requested authorization details." Structural validation
+	// (registered type, bounds, shape) happens first, exactly like
+	// PAR/CIBA's own parseRequestedAuthorizationDetails call; the actual
+	// entitlement decision then comes from
+	// Dependencies.ClientCredentialsRARPolicy, since this grant has no
+	// resource owner to make it interactively the way PAR/CIBA's own
+	// validateGrantedAuthorizationDetails step does.
+	authorizationDetailsRequested, err := s.parseRequestedAuthorizationDetails(plainParamsToJSON(params))
 	if err != nil {
-		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), newError(ErrorInvalidRequest, 400, "authorization_details is invalid", err))
+		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), newError(ErrorInvalidAuthorizationDetails, 400, "authorization_details is invalid", err))
+	}
+	var authorizationDetails json.RawMessage
+	if len(authorizationDetailsRequested) > 0 {
+		if s.deps.ClientCredentialsRARPolicy == nil {
+			return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), newError(ErrorInvalidAuthorizationDetails, 400, "this server has no client_credentials authorization_details policy configured", nil))
+		}
+		var requestedObjects []json.RawMessage
+		if unmarshalErr := json.Unmarshal(authorizationDetailsRequested, &requestedObjects); unmarshalErr != nil {
+			return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), newError(ErrorServerError, 500, "failed to decode validated authorization_details", unmarshalErr))
+		}
+		granted, policyErr := s.deps.ClientCredentialsRARPolicy.Authorize(ctx, client.ID(), requestedObjects)
+		if policyErr != nil {
+			return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), newError(ErrorInvalidAuthorizationDetails, 400, "authorization_details is not permitted by this client's policy", policyErr))
+		}
+		if len(granted) == 0 {
+			return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), newError(ErrorInvalidAuthorizationDetails, 400, "this client's policy does not permit any of the requested authorization_details", nil))
+		}
+		validated, validateErr := s.validateGrantedAuthorizationDetails(authorizationDetailsRequested, granted)
+		if validateErr != nil {
+			return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), newError(ErrorInvalidAuthorizationDetails, 400, "authorization_details policy decision is not an acceptable narrowing of the request", validateErr))
+		}
+		authorizationDetails = validated
 	}
 
 	thumbprint, bindingErr := s.verifyTokenRequestBinding(ctx, client, req.DPoPProof, req.PeerCertificate)

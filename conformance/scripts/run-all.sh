@@ -136,6 +136,11 @@ fi
 WORKDIR="${WORKDIR:-$(mktemp -d)}"
 mkdir -p "$WORKDIR"
 declare -a POLLER_PIDS=()
+# Populated by run_as_plan/run_rp_plan themselves, in call order — the
+# single source of truth the final "combined summary" loop below reads
+# from, so that loop can never drift out of sync with which legs this
+# script actually invokes (see its own comment for the bug this fixes).
+declare -a ALL_SUITES=()
 RESULTS_FILE="$WORKDIR/results.txt"
 touch "$RESULTS_FILE"
 OVERALL_CLEAN=true
@@ -222,6 +227,7 @@ wait_as_ready() {
 run_as_plan() {
 	local name="$1" variant="$2" config="$3" warnings="$4" skips="$5"
 	local log_file="$WORKDIR/as-$name.log"
+	ALL_SUITES+=("AS $name")
 
 	if [[ ! -f "$config" ]]; then
 		log "AS $name: SKIPPED — $config not found (see conformance/server/oidf-config/README.md)"
@@ -328,6 +334,7 @@ run_rp_plan() {
 	local name="$1" profile="$2"
 	shift 2
 	local log_file="$WORKDIR/rp-$name.log"
+	ALL_SUITES+=("RP $name")
 
 	log "RP $name: starting cmd/conformance-client"
 	(cd "$REPO_ROOT" && go run ./cmd/conformance-client -suite="$CONFORMANCE_SERVER" -profile="$profile" "$@") >"$log_file" 2>&1 || true
@@ -536,7 +543,12 @@ python3 "$SCRIPT_DIR/generate-report.py" "$WORKDIR" "$REPO_ROOT" || echo "warnin
 
 echo
 echo "=== combined summary ==="
-for suite in "AS baseline" "AS message-signing" "AS ciba-mtls" "AS ciba-ping" "AS mtls" "AS message-signing-mtls" "AS client-auth-mtls" "RP baseline" "RP message-signing" "RP ciba-mtls" "RP client-auth-mtls"; do
+# Deliberately not a separate hardcoded list — that previously drifted
+# out of sync with the run_as_plan/run_rp_plan calls above (nine legs,
+# added across later PRs, ran and recorded results but never appeared
+# here). ALL_SUITES is built right where each leg is actually invoked,
+# so it can't silently fall behind again.
+for suite in "${ALL_SUITES[@]}"; do
 	result="$(lookup_result "$suite")"
 	printf '%-20s %s\n' "$suite" "${result:-DID NOT RUN}"
 done
@@ -546,7 +558,7 @@ echo "report: $WORKDIR/report.md"
 
 if [[ "$OVERALL_CLEAN" = true ]]; then
 	echo
-	echo "All eleven suites completed with no unexpected results."
+	echo "All ${#ALL_SUITES[@]} suites completed with no unexpected results."
 	exit 0
 else
 	echo

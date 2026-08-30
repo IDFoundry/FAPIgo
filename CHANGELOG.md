@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.21.0](https://github.com/IDFoundry/FAPIgo/compare/v0.20.0...v0.21.0) (2026-08-30)
+
+
+### Features
+
+* add SAN-based mTLS client authentication bindings (RFC 8705 §2.1) ([#216](https://github.com/IDFoundry/FAPIgo/issues/216)) ([7655ed2](https://github.com/IDFoundry/FAPIgo/commit/7655ed22a4c98bfe39b7baa858889c03eafb97c0))
+
+
+### Bug Fixes
+
+* address staticcheck ST1023 lint failure ([2eecffa](https://github.com/IDFoundry/FAPIgo/commit/2eecffa5883101231327c196f871ccf18523e1bc))
+* bound resource.JWTAccessTokens' key-candidate loop ([a2c98be](https://github.com/IDFoundry/FAPIgo/commit/a2c98be0ee5f04a684891b7921455c16659fa9f5))
+
 ## [0.20.0](https://github.com/IDFoundry/FAPIgo/compare/v0.19.0...v0.20.0) (2026-08-30)
 
 

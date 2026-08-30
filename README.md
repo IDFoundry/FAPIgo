@@ -33,13 +33,34 @@ core.
 > profiles. Both the `server` (authorization server) and `client`
 > (relying party) roles have been run clean against the OpenID
 > Foundation conformance suite's FAPI2 baseline and message-signing test
-> plans, run under `server`'s default JWT access-token format; the
-> opaque alternative is covered by unit/integration tests and
+> plans, run under `server`'s default JWT access-token format and again
+> under mTLS-bound access tokens (RFC 8705 §3); both roles have also been
+> run clean against `tls_client_auth`/`self_signed_tls_client_auth`
+> client authentication (RFC 8705 §2) and against CIBA (OpenID Connect
+> CIBA Core 1.0, poll and ping delivery, mTLS-bound tokens, the OIDF
+> `fapi-ciba-id1` plan) — see [conformance/](conformance/README.md) for
+> the full breakdown and pass counts per plan. Rich Authorization
+> Requests (RFC 9396) are implemented end-to-end across both the PAR-fed
+> authorization-code flow and CIBA, including a per-type narrowing hook
+> so a resource owner can grant less than what a client requested — the
+> OIDF suite has no dedicated RAR conformance plan, so this is validated
+> by this repo's own unit, integration and end-to-end tests instead — see
+> [conformance/](conformance/README.md#rar). The opaque access-token
+> alternative is covered by unit/integration tests and
 > `cmd/conformance-as`'s own smoke test under both formats, not by a
 > continuous live-suite run — see
 > [conformance/](conformance/README.md#access-token-format-coverage).
 > `resource` has not been run against a dedicated OIDF plan (only
 > indirectly, as a stand-in the AS plan's own happy-flow module calls).
+
+## Known limitations
+
+- mTLS client authentication (RFC 8705 §2) binds a client by
+  Distinguished Name (DN) only — the alternative subject-alternative-name
+  bindings (`san_dns`, `san_uri`, `san_ip`, `san_email`) are not
+  implemented (`storage/client_repository.go`).
+- CIBA push delivery mode is not implemented — only poll and ping
+  (OpenID Connect CIBA Core 1.0 §7–§10; `storage/client_repository.go`).
 
 ```go
 import (
@@ -85,12 +106,16 @@ role is tested against the OpenID Foundation conformance suite.
 - [FAPI 2.0 Message Signing][fapi2-sign]
 - [RFC 9126 — Pushed Authorization Requests][par]
 - [RFC 9449 — Demonstrating Proof of Possession (DPoP)][dpop]
+- [RFC 8705 — Mutual TLS Client Authentication and Certificate-Bound Access Tokens][mtls]
+- [OpenID Connect Client-Initiated Backchannel Authentication (CIBA) Core 1.0][ciba]
 - [RFC 9396 — Rich Authorization Requests][rar]
 
 [fapi2]: https://openid.net/specs/fapi-security-profile-2_0-final.html
 [fapi2-sign]: https://openid.net/specs/fapi-2_0-message-signing.html
 [par]: https://www.rfc-editor.org/info/rfc9126
 [dpop]: https://www.rfc-editor.org/info/rfc9449
+[mtls]: https://www.rfc-editor.org/info/rfc8705
+[ciba]: https://openid.net/specs/openid-client-initiated-backchannel-authentication-core-1_0.html
 [rar]: https://www.rfc-editor.org/info/rfc9396
 
 ## License

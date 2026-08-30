@@ -802,6 +802,13 @@ in `conformance/server/oidf-config/README.md`'s own section. Wired into
 `-profile=ciba` only — extending it to `-profile=baseline` is a
 natural, separate follow-up.
 
+Rich Authorization Requests (RFC 9396) has no OIDF conformance plan at
+all, unlike CIBA (which at least has `fapi-ciba-id1` to eventually
+re-attempt) — so it's deliberately outside this automated live-suite
+loop entirely, not a temporary gap, and is instead validated by
+`extension/rar_test.go`, `server/rar_test.go` and `cmd/conformance-as`'s
+own end-to-end smoke tests (`conformance/README.md#rar`).
+
 ## What is and isn't shared
 
 **Shared** (via `internal/`, `extension`, `storage`'s replay primitive

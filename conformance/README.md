@@ -114,34 +114,37 @@ re-attempt from its first partial result to a clean 22/22.
 ## RAR
 
 Rich Authorization Requests (RFC 9396, `authorization_details`) is
-implemented end-to-end across the PAR-fed authorization-code flow,
-CIBA, and the client_credentials grant (RFC 9396 §6) — the same
+implemented end-to-end across FAPIgo's three AS token-acquisition
+grants — Authorization Code (browser-based; PAR is mandatory for it
+under FAPI 2, not a distinct grant of its own), CIBA (backchannel,
+also user-involved), and client_credentials (RFC 9396 §6,
+machine-to-machine, no end user) — the same
 `extension.RARDefinition`/`RARRegistry` types validated identically
 across all three. The *entitlement* decision on top of that structural
 validation is a `server.RARPolicy` in three independent roles:
-`Dependencies.PARRARPolicy` and `Dependencies.CIBARARPolicy` each gate
-what a client may even request on their own flow, before it's ever
+`Dependencies.AuthorizationCodeRARPolicy` and `Dependencies.CIBARARPolicy` each gate
+what a client may even request on their own grant, before it's ever
 stored or shown to a resource owner (the resource owner's own approval
-remains the primary check for both flows either way, and the two
+remains the primary check for both grants either way, and the two
 fields are genuinely separate — an integrator can permit
-`authorization_details` on PAR while refusing it on CIBA, or vice
-versa); `Dependencies.ClientCredentialsRARPolicy` is the *only*
-entitlement check client_credentials ever gets, since that grant has no
-resource owner at all (RFC 9396 §6's own "client's policy" framing).
-None of the three fields' absence is permissive — an unconfigured
-policy refuses any `authorization_details`, the same stance an
-unconfigured `Config.RAR` itself takes (see ARCHITECTURE.md's own RAR
-section for the full detail, including why this is a `server.RARPolicy`
-rename from an earlier client_credentials-only
+`authorization_details` on Authorization Code while refusing it on
+CIBA, or vice versa); `Dependencies.ClientCredentialsRARPolicy` is the
+*only* entitlement check client_credentials ever gets, since that grant
+has no resource owner at all (RFC 9396 §6's own "client's policy"
+framing). None of the three fields' absence is permissive — an
+unconfigured policy refuses any `authorization_details`, the same
+stance an unconfigured `Config.RAR` itself takes (see ARCHITECTURE.md's
+own RAR section for the full detail, including why this is a
+`server.RARPolicy` rename from an earlier client_credentials-only
 `ClientCredentialsRARPolicy` type). Unlike CIBA,
 the OIDF suite has no dedicated RAR conformance plan at all, so this is
 deliberately outside the automated live-suite loop entirely, verified
 instead by `extension/rar_test.go`, `server/rar_test.go`
-(narrowing-grant validation, full PAR/CIBA/client_credentials
+(narrowing-grant validation, full Authorization Code/CIBA/client_credentials
 end-to-end flows, rejection of ungranted/over-scoped
 `authorization_details`, every `RARPolicy` field's own rejection and
-narrowing paths, and PAR/CIBA's policies acting independently of each
-other), and `cmd/conformance-as`'s own real-HTTP smoke tests
+narrowing paths, and the Authorization Code and CIBA policies acting
+independently of each other), and `cmd/conformance-as`'s own real-HTTP smoke tests
 (`TestSmokeAuthorizationCodeFlowWithAuthorizationDetails`,
 `TestSmokeCIBAFlowWithAuthorizationDetails`,
 `TestSmokeClientCredentialsGrantFlowWithAuthorizationDetails`).
@@ -179,11 +182,12 @@ clean — 15/15, 11/11, 10/10, 6/6 modules, 0 failures/0 warnings.** Also
 supports Rich Authorization Requests (RFC 9396 §6) when both
 `Config.RAR` and `Dependencies.ClientCredentialsRARPolicy` are
 configured — see the [RAR](#rar) section above. `cmd/conformance-as`'s
-own policy (`sampleRARPolicy`, `rar.go` — also reused for PAR's/CIBA's
-own `Dependencies.PARRARPolicy`/`CIBARARPolicy`) grants everything
-requested, the same stand-in-for-a-real-consent-UI role
-`approvedAuthorizationDetails` already plays for PAR/CIBA. Since the
-suite has no plan variant that
+own policy (`sampleRARPolicy`, `rar.go` — also reused for the
+Authorization Code and CIBA grants' own
+`Dependencies.AuthorizationCodeRARPolicy`/`CIBARARPolicy`) grants
+everything requested, the same stand-in-for-a-real-consent-UI role
+`approvedAuthorizationDetails` already plays for those two grants.
+Since the suite has no plan variant that
 exercises `authorization_details` at all, this is verified by
 `server/client_credentials_test.go` and
 `TestSmokeClientCredentialsGrantFlowWithAuthorizationDetails`, not the

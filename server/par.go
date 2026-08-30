@@ -415,7 +415,7 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 // embedding e.g. a stray "request_uri" claim inside its own request
 // object should see.
 //
-// Also runs Dependencies.PARRARPolicy over any "authorization_details"
+// Also runs Dependencies.AuthorizationCodeRARPolicy over any "authorization_details"
 // the request carries, once it's passed structural validation — see
 // RARPolicy's own doc comment for why this exists on top of the
 // resource-owner grant step CompleteAuthorization already enforces. On
@@ -442,7 +442,7 @@ func (s *Server) checkExtensions(ctx context.Context, clientID fapi.ClientID, pa
 		return nil, newError(code, 400, "authorization_details is invalid", err)
 	}
 	if len(requestedAuthorizationDetails) > 0 {
-		granted, policyErr := s.applyRARPolicy(ctx, clientID, s.deps.PARRARPolicy, requestedAuthorizationDetails)
+		granted, policyErr := s.applyRARPolicy(ctx, clientID, s.deps.AuthorizationCodeRARPolicy, requestedAuthorizationDetails)
 		if policyErr != nil {
 			return nil, newError(ErrorInvalidAuthorizationDetails, 400, "authorization_details is not permitted for this client", policyErr)
 		}

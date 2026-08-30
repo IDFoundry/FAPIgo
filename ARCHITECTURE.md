@@ -452,26 +452,32 @@ registered into a `server.Config.RAR` (`*extension.RARRegistry`), separate
 from `Config.Extensions` because `authorization_details` is validated as
 a whole bounded array of typed detail objects (total size, nesting depth,
 per-type object count and size, duplicate/unknown JSON members), not
-parameter-by-parameter. It is structurally validated identically across
-the PAR-fed authorization-code flow, the CIBA backchannel flow, and the
-RFC 6749 §4.4 client_credentials grant (RFC 9396 §6) — the same
+parameter-by-parameter. FAPIgo's AS has three primary token-acquisition
+grants — Authorization Code (browser-based; PAR is mandatory for it
+under FAPI 2, not a distinct grant of its own — see the FAPI 2 Security
+Profile's own authorization-endpoint requirements), CIBA (backchannel,
+also user-involved), and client_credentials (RFC 6749 §4.4,
+machine-to-machine, no end user) — and `authorization_details` is
+structurally validated identically across all three: the same
 `RARDefinition`s, the same `parseRequestedAuthorizationDetails` helper
-(`server/rar.go`) — but the *entitlement* decision on top of that
-structural validation takes one of three shapes, all implementing the
-same `server.RARPolicy` interface, one per `Dependencies` field:
+(`server/rar.go`). The *entitlement* decision on top of that structural
+validation takes one of three shapes, all implementing the same
+`server.RARPolicy` interface, one per `Dependencies` field:
 
-- **PAR** (`Dependencies.PARRARPolicy`, consulted by `checkExtensions`
-  before a request is ever stored or shown to anyone) and **CIBA**
-  (`Dependencies.CIBARARPolicy`, `checkBackchannelExtensions`'s own
-  equivalent): two independent defense-in-depth, request-time gates on
-  what a client may even *ask* for on each flow — deliberately not one
-  field shared between them, since neither `checkExtensions` nor
-  `checkBackchannelExtensions` tells a `RARPolicy` which flow it's being
-  consulted for, so a shared field would give an integrator no way to
-  permit `authorization_details` on one flow while refusing it on the
-  other. The primary entitlement check for both flows remains the
-  resource owner's own interactive decision at
-  `CompleteAuthorization`/`CompleteBackchannelAuthentication`
+- **Authorization Code** (`Dependencies.AuthorizationCodeRARPolicy`,
+  consulted by `checkExtensions` at PAR submission time — the only
+  place this grant's own request ever arrives, since FAPI 2 makes PAR
+  mandatory for it) and **CIBA** (`Dependencies.CIBARARPolicy`,
+  `checkBackchannelExtensions`'s own equivalent, at backchannel
+  authentication request time): two independent defense-in-depth,
+  request-time gates on what a client may even *ask* for on each grant
+  — deliberately not one field shared between them, since neither
+  `checkExtensions` nor `checkBackchannelExtensions` tells a
+  `RARPolicy` which grant it's being consulted for, so a shared field
+  would give an integrator no way to permit `authorization_details` on
+  one grant while refusing it on the other. The primary entitlement
+  check for both grants remains the resource owner's own interactive
+  decision at `CompleteAuthorization`/`CompleteBackchannelAuthentication`
   (`GrantedAuthorization.AuthorizationDetails`, checked by
   `validateGrantedAuthorizationDetails` — mirroring `scope`'s own
   request → interaction → `GrantedAuthorization` → storage →

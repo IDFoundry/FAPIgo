@@ -204,13 +204,14 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 		// same as RAR itself (srvCfg.RAR above) — see sampleRARPolicy's
 		// own doc comment for why this reference binary always grants
 		// everything requested rather than modeling a real per-client
-		// policy. PARRARPolicy/CIBARARPolicy are PAR's and CIBA's own
-		// independent request-time gates; without them, every PAR/CIBA
-		// request naming authorization_details would now be refused
+		// policy. AuthorizationCodeRARPolicy/CIBARARPolicy are the
+		// Authorization Code and CIBA grants' own independent
+		// request-time gates; without them, every request naming
+		// authorization_details on either grant would now be refused
 		// outright (RARPolicy's own "unconfigured is not permissive"
 		// stance).
 		ClientCredentialsRARPolicy: sampleRARPolicy{},
-		PARRARPolicy:               sampleRARPolicy{},
+		AuthorizationCodeRARPolicy: sampleRARPolicy{},
 		CIBARARPolicy:              sampleRARPolicy{},
 	}
 	// Off by default (main.go's -dpop-nonce-challenge flag) — same

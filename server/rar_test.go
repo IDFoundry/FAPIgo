@@ -40,19 +40,21 @@ func newTestRARRegistry(t *testing.T) *extension.RARRegistry {
 }
 
 // newHarnessWithRAR mirrors newHarnessWithExtensions/newHarnessWithBackchannel,
-// combined: a harness with Config.RAR set, Dependencies.PARRARPolicy set
-// to parPolicy, Dependencies.CIBARARPolicy set to cibaPolicy, and CIBA
-// fully wired (a real memstore.BackchannelAuthenticationStore, matching
-// endpoint/algorithm/limits), so the same harness can exercise both PAR
-// and CIBA RAR flows — most callers pass the same value for both
-// (symmetric behavior is the common case), but they're independent
-// parameters specifically so a test can exercise one flow's policy
-// without the other's, proving the two fields are genuinely
-// independent. Either may be nil —
+// combined: a harness with Config.RAR set,
+// Dependencies.AuthorizationCodeRARPolicy set to authCodePolicy,
+// Dependencies.CIBARARPolicy set to cibaPolicy, and CIBA fully wired (a
+// real memstore.BackchannelAuthenticationStore, matching
+// endpoint/algorithm/limits), so the same harness can exercise both the
+// Authorization Code (submitted via PAR) and CIBA grants' own RAR
+// flows — most callers pass the same value for both (symmetric
+// behavior is the common case), but they're independent parameters
+// specifically so a test can exercise one grant's policy without the
+// other's, proving the two fields are genuinely independent. Either
+// may be nil —
 // TestPushAuthorizationRequestRejectsAuthorizationDetailsWithoutPolicyConfigured
 // and its CIBA counterpart deliberately pass nil to exercise that
 // rejection.
-func newHarnessWithRAR(t *testing.T, profile server.Profile, registry *extension.RARRegistry, parPolicy, cibaPolicy server.RARPolicy) harness {
+func newHarnessWithRAR(t *testing.T, profile server.Profile, registry *extension.RARRegistry, authCodePolicy, cibaPolicy server.RARPolicy) harness {
 	t.Helper()
 	now := time.Now()
 	key := generateKey(t)
@@ -119,15 +121,15 @@ func newHarnessWithRAR(t *testing.T, profile server.Profile, registry *extension
 		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
 			testClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
 		}},
-		Keys:                serverKeyManager,
-		AccessTokens:        server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
-		Revocation:          server.NoRevocation{},
-		Clock:               fixedClock{now: now},
-		Random:              rand.Reader,
-		Backchannel:         memstore.NewBackchannelAuthenticationStore(),
-		BackchannelNotifier: server.NoBackchannelNotifications{},
-		PARRARPolicy:        parPolicy,
-		CIBARARPolicy:       cibaPolicy,
+		Keys:                       serverKeyManager,
+		AccessTokens:               server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:                 server.NoRevocation{},
+		Clock:                      fixedClock{now: now},
+		Random:                     rand.Reader,
+		Backchannel:                memstore.NewBackchannelAuthenticationStore(),
+		BackchannelNotifier:        server.NoBackchannelNotifications{},
+		AuthorizationCodeRARPolicy: authCodePolicy,
+		CIBARARPolicy:              cibaPolicy,
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {
@@ -324,7 +326,7 @@ func TestPushAuthorizationRequestRejectsAuthorizationDetailsWithoutRARConfigured
 
 // TestPushAuthorizationRequestRejectsAuthorizationDetailsWithoutPolicyConfigured
 // covers Config.RAR being set (so authorization_details is structurally
-// accepted) but Dependencies.PARRARPolicy left nil — the
+// accepted) but Dependencies.AuthorizationCodeRARPolicy left nil — the
 // "unconfigured is not permissive" case RARPolicy's own doc comment
 // describes, distinct from
 // TestPushAuthorizationRequestRejectsAuthorizationDetailsWithoutRARConfigured
@@ -339,20 +341,20 @@ func TestPushAuthorizationRequestRejectsAuthorizationDetailsWithoutPolicyConfigu
 		})},
 	})
 	if err == nil {
-		t.Fatalf("PushAuthorizationRequest = nil error, want error (PARRARPolicy is not configured)")
+		t.Fatalf("PushAuthorizationRequest = nil error, want error (AuthorizationCodeRARPolicy is not configured)")
 	}
 	if code := serverErrorCode(t, err); code != server.ErrorInvalidAuthorizationDetails {
 		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidAuthorizationDetails)
 	}
 }
 
-// TestPushAuthorizationRequestPARRARPolicyNarrowsWhatResourceOwnerSees
-// covers Dependencies.PARRARPolicy trimming a multi-object request down
+// TestPushAuthorizationRequestAuthorizationCodeRARPolicyNarrowsWhatResourceOwnerSees
+// covers Dependencies.AuthorizationCodeRARPolicy trimming a multi-object request down
 // to a subset before it's ever stored or shown to a resource owner —
 // the request-time counterpart of
 // TestPushAuthorizationRequestPlainAuthorizationDetailsFlow's own
 // resource-owner-time narrowing (CompleteAuthorization).
-func TestPushAuthorizationRequestPARRARPolicyNarrowsWhatResourceOwnerSees(t *testing.T) {
+func TestPushAuthorizationRequestAuthorizationCodeRARPolicyNarrowsWhatResourceOwnerSees(t *testing.T) {
 	policy := fakeRARPolicy{allow: map[string]bool{"payment": true}, maxGranted: 1}
 	h := newHarnessWithRAR(t, server.ProfileFAPISecurity, newTestRARRegistry(t), policy, policy)
 
@@ -619,15 +621,15 @@ func TestBeginBackchannelAuthenticationRejectsAuthorizationDetailsWithoutPolicyC
 	}
 }
 
-// TestRARPolicyIsIndependentPerFlow proves Dependencies.PARRARPolicy and
+// TestRARPolicyIsIndependentPerFlow proves Dependencies.AuthorizationCodeRARPolicy and
 // Dependencies.CIBARARPolicy are genuinely separate gates, not one
-// shared between the two flows: with only PARRARPolicy configured, a
-// PAR request carrying authorization_details succeeds while a CIBA
-// request carrying the exact same authorization_details on the same
-// harness is refused.
+// shared between the two grants: with only AuthorizationCodeRARPolicy
+// configured, a PAR-submitted Authorization Code request carrying
+// authorization_details succeeds while a CIBA request carrying the
+// exact same authorization_details on the same harness is refused.
 func TestRARPolicyIsIndependentPerFlow(t *testing.T) {
-	parOnly := fakeRARPolicy{allow: map[string]bool{"payment": true}}
-	h := newHarnessWithRAR(t, server.ProfileFAPISecurity, newTestRARRegistry(t), parOnly, nil) // CIBARARPolicy left nil
+	authCodeOnly := fakeRARPolicy{allow: map[string]bool{"payment": true}}
+	h := newHarnessWithRAR(t, server.ProfileFAPISecurity, newTestRARRegistry(t), authCodeOnly, nil) // CIBARARPolicy left nil
 
 	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
 		HTTP: server.FormRequest{Parameters: plainFormParameters(t, h.clientAssertion(t), map[string]string{
@@ -635,7 +637,7 @@ func TestRARPolicyIsIndependentPerFlow(t *testing.T) {
 		})},
 	})
 	if err != nil {
-		t.Fatalf("PushAuthorizationRequest: %v, want success (PARRARPolicy is configured)", err)
+		t.Fatalf("PushAuthorizationRequest: %v, want success (AuthorizationCodeRARPolicy is configured)", err)
 	}
 
 	params := standardBackchannelParams(t)
@@ -649,7 +651,7 @@ func TestRARPolicyIsIndependentPerFlow(t *testing.T) {
 	}
 	localErr, ok := action.(server.BackchannelAuthenticationLocalError)
 	if !ok {
-		t.Fatalf("action = %T, want server.BackchannelAuthenticationLocalError (CIBARARPolicy is not configured, even though PARRARPolicy is)", action)
+		t.Fatalf("action = %T, want server.BackchannelAuthenticationLocalError (CIBARARPolicy is not configured, even though AuthorizationCodeRARPolicy is)", action)
 	}
 	if localErr.Error.Code() != server.ErrorInvalidAuthorizationDetails {
 		t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorInvalidAuthorizationDetails)

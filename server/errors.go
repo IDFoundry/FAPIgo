@@ -88,9 +88,9 @@ const (
 	// Dependencies.ClientCredentialsRARPolicy check (RFC 9396 §6's "the
 	// AS refuses the request with the error code
 	// invalid_authorization_details (similar to invalid_scope)"), and
-	// PAR's and CIBA's own request-time Dependencies.PARRARPolicy/
-	// CIBARARPolicy checks (checkExtensions/checkBackchannelExtensions)
-	// — RFC 9396 §14.6
+	// the Authorization Code and CIBA grants' own request-time
+	// Dependencies.AuthorizationCodeRARPolicy/CIBARARPolicy checks
+	// (checkExtensions/checkBackchannelExtensions) — RFC 9396 §14.6
 	// registers this code for both the token and the authorization
 	// endpoint, and PAR is this server's own pushed variant of the
 	// latter.

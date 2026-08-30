@@ -74,6 +74,7 @@ func main() {
 	dpopNonceChallenge := flag.Bool("dpop-nonce-challenge", false, "require and rotate a DPoP nonce on /par, /token and /userinfo (RFC 9449 §8/§9) — off by default, since the OIDF suite's own driver may not retry on the challenge")
 	userinfoSigning := flag.Bool("userinfo-signing", false, "sign /userinfo responses as a JWS (OIDC Core §5.3.2), using the same algorithm as ID tokens — off by default; the FAPI 2.0 Security Profile doesn't require this")
 	ciba := flag.Bool("ciba", false, "enable the CIBA backchannel authentication endpoint (poll and ping delivery) — off by default; not part of the FAPI 2.0 Security Profile itself")
+	clientCredentialsGrant := flag.Bool("client-credentials-grant", false, "enable the RFC 6749 §4.4 client_credentials grant at the token endpoint — off by default; not part of the FAPI 2.0 Security Profile itself. Only clients registered allows_client_credentials_grant may use it.")
 	mtls := flag.Bool("mtls", false, "enable a second TLS listener (mtls_listen_addr in the config file, or -mtls-listen) that requests but does not require a client certificate, advertised via mtls_endpoint_aliases (RFC 8705 §5) for a client registered sender_constrain=mtls — off by default; requires real TLS, incompatible with -insecure-http")
 	mtlsListenOverride := flag.String("mtls-listen", "", "override mtls_listen_addr from the config file")
 	flag.Parse()
@@ -113,7 +114,7 @@ func main() {
 		}
 	}
 
-	mux, err := newServerMux(resolved, *insecureHTTP, *dpopNonceChallenge, *userinfoSigning, *ciba)
+	mux, err := newServerMux(resolved, *insecureHTTP, *dpopNonceChallenge, *userinfoSigning, *ciba, *clientCredentialsGrant)
 	if err != nil {
 		log.Fatalf("conformance-as: %v", err)
 	}
@@ -302,6 +303,19 @@ func buildUserinfoURL(issuer fapi.URL, allowLoopbackHTTP bool) (fapi.URL, error)
 		opts = append(opts, fapi.AllowLoopbackHTTP())
 	}
 	return fapi.ParseEndpointURL(issuer.String()+"/userinfo", opts...)
+}
+
+// buildAccountsURL derives this binary's non-OIDC protected-resource
+// endpoint URL ("/accounts") from issuer, the same way buildUserinfoURL
+// derives "/userinfo" — see accountsHandler's own doc comment
+// (resource.go) for why this binary needs a second resource endpoint
+// at all.
+func buildAccountsURL(issuer fapi.URL, allowLoopbackHTTP bool) (fapi.URL, error) {
+	var opts []fapi.URLOption
+	if allowLoopbackHTTP {
+		opts = append(opts, fapi.AllowLoopbackHTTP())
+	}
+	return fapi.ParseEndpointURL(issuer.String()+"/accounts", opts...)
 }
 
 // buildBackchannelAuthenticationURL derives this binary's CIBA

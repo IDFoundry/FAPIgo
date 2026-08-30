@@ -19,12 +19,16 @@ import (
 // Factored out so the end-to-end smoke test can stand up the exact same
 // wiring main.go uses, against its own TLS listener, without going
 // through flags or a config file on disk.
-func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChallenge bool, userinfoSigning bool, ciba bool) (*http.ServeMux, error) {
+func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChallenge bool, userinfoSigning bool, ciba bool, clientCredentialsGrant bool) (*http.ServeMux, error) {
 	endpoints, err := buildEndpoints(resolved.Issuer, allowLoopbackHTTP)
 	if err != nil {
 		return nil, err
 	}
 	userinfoURL, err := buildUserinfoURL(resolved.Issuer, allowLoopbackHTTP)
+	if err != nil {
+		return nil, err
+	}
+	accountsURL, err := buildAccountsURL(resolved.Issuer, allowLoopbackHTTP)
 	if err != nil {
 		return nil, err
 	}
@@ -126,6 +130,11 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 		// storage.StoreAssurance on every store constructed below.
 		Assurance: server.AssuranceDevelopment,
 		RAR:       rarRegistry,
+		// Off by default (main.go's -client-credentials-grant flag) — RFC
+		// 6749 §4.4 isn't part of the FAPI 2.0 Security Profile itself,
+		// so this stays a worked-example opt-in like -ciba/-userinfo-signing
+		// above.
+		ClientCredentialsGrant: clientCredentialsGrant,
 	}
 	replayStore := memstore.NewReplayStore()
 	revocationStore := memstore.NewRevocationStore()
@@ -248,5 +257,6 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 	consent := newConsentHandler(srv, clientRepo, server.SystemClock{}, resolved.DefaultSubject)
 	backchannel := newBackchannelHandler(srv, server.SystemClock{}, resolved.DefaultSubject)
 	userinfoURLValue := userinfoURL.URL()
-	return newRouter(srv, consent, backchannel, resolved.AdvertisedScopes, resourceVerifier, &userinfoURLValue, mtlsUserinfoURL, identityClaims, clientRepo, userinfoSigning), nil
+	accountsURLValue := accountsURL.URL()
+	return newRouter(srv, consent, backchannel, resolved.AdvertisedScopes, resourceVerifier, &userinfoURLValue, mtlsUserinfoURL, &accountsURLValue, identityClaims, clientRepo, userinfoSigning), nil
 }

@@ -1,22 +1,21 @@
 #!/usr/bin/env python3
 """Builds report.md from a completed conformance/scripts/run-all.sh run.
 
-run-all.sh calls this once, after all sixteen suites have finished and
+run-all.sh calls this once, after all twenty suites have finished and
 results.txt/the per-suite log files already exist — it doesn't run any
 part of the suites itself, only reads what's already on disk:
 
   - results.txt (run-all.sh's own "NAME|LINE" record_result output)
-  - as-{baseline,message-signing,ciba-mtls,ciba-ping,mtls,message
-    -signing-mtls,client-auth-mtls,client-auth-mtls-and-mtls,ciba-client
-    -auth-mtls,ciba-ping-client-auth-mtls}.log (run-test-plan.py's own
-    verbose stdout, already captured by run-all.sh)
+  - as-{...AS_SUITES...}.log (run-test-plan.py's own verbose stdout,
+    already captured by run-all.sh)
   - as-{...same set...}-retry.log, if retry-flaky-modules.py ran (only
     exists when that suite came back non-clean)
   - rp-{baseline,message-signing,ciba-mtls,client-auth-mtls,mtls,client
     -auth-mtls-and-mtls}.log (cmd/conformance-client's own stdout) —
-    ciba-ping, message-signing-mtls, and the three newest AS-only legs
-    have no RP-side counterpart (see run-all.sh's own comment on those
-    legs)
+    ciba-ping, message-signing-mtls, and every AS-only leg (client
+    -auth-mtls-and-mtls, both ciba-client-auth-mtls legs, all four
+    client-credentials legs) have no RP-side counterpart (see
+    run-all.sh's own comment on those legs)
   - conformance/server/expected-{warnings,skips}-{...same AS set...}.json
     — the same files run-test-plan.py itself reads, so every
     WARNING/SKIPPED module's "why this is expected, not a defect"
@@ -50,7 +49,12 @@ ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 # for the same reason.
 TEST_LINE_RE = re.compile(r"^(?:\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} )?Test \[(\d+):(\d+)\] (\S+) (\S+) (\S+) - result (\S+)\.")
 
-AS_SUITES = ["baseline", "message-signing", "ciba-mtls", "ciba-ping", "mtls", "message-signing-mtls", "client-auth-mtls", "client-auth-mtls-and-mtls", "ciba-client-auth-mtls", "ciba-ping-client-auth-mtls"]
+AS_SUITES = [
+    "baseline", "message-signing", "ciba-mtls", "ciba-ping", "mtls", "message-signing-mtls",
+    "client-auth-mtls", "client-auth-mtls-and-mtls", "ciba-client-auth-mtls", "ciba-ping-client-auth-mtls",
+    "baseline-client-credentials", "mtls-client-credentials",
+    "client-auth-mtls-client-credentials", "client-auth-mtls-and-mtls-client-credentials",
+]
 RP_SUITES = ["baseline", "message-signing", "ciba-mtls", "client-auth-mtls", "mtls", "client-auth-mtls-and-mtls"]
 
 # Markdown separator row for a 2-column table (Module/Result).

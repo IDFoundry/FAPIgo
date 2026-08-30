@@ -17,22 +17,28 @@ behaviour and negative-test expectations differ. See
   run scripts.
 - `server/` — OpenID Foundation FAPI 2.0 AS conformance configuration and
   run scripts.
-- `scripts/run-all.sh` — runs all eleven suites this repo has driver
+- `scripts/run-all.sh` — runs all twenty suites this repo has driver
   support for (AS baseline, AS message-signing, AS ciba-mtls, AS
-  ciba-ping, AS mtls, AS message-signing-mtls, AS client-auth-mtls, RP
-  baseline, RP message-signing, RP ciba-mtls, RP client-auth-mtls)
-  against a locally running suite and prints one combined summary. See
-  the script's own header comment for prerequisites and env vars.
+  ciba-ping, AS mtls, AS message-signing-mtls, AS client-auth-mtls, AS
+  client-auth-mtls-and-mtls, AS ciba-client-auth-mtls, AS
+  ciba-ping-client-auth-mtls, AS baseline/mtls/client-auth-mtls/
+  client-auth-mtls-and-mtls-client-credentials, RP baseline, RP
+  message-signing, RP ciba-mtls, RP client-auth-mtls, RP mtls, RP
+  client-auth-mtls-and-mtls) against a locally running suite and prints
+  one combined summary. See the script's own header comment for
+  prerequisites and env vars.
 - `resource/` — resource-server verification test vectors (DPoP proof
   validation, access-token binding checks) used outside the OIDF suite.
   The suite doesn't run its own dedicated resource-server conformance
   plan against this role, but the AS test plan's happy-flow module does
   call a real protected-resource endpoint with the token it just
   issued — `cmd/conformance-as` points it at its own `/userinfo`
-  endpoint (`resource.go`, backed by the `resource` package), which
-  satisfies that AS-plan requirement as a side effect of already
-  needing to exist for real, not as resource-role certification in its
-  own right.
+  endpoint (`resource.go`, backed by the `resource` package) for every
+  profile except client_credentials, which points at a second, non-OIDC
+  `/accounts` endpoint instead (see [Client Credentials
+  Grant](#client-credentials-grant) below) — both satisfy that AS-plan
+  requirement as a side effect of already needing to exist for real,
+  not as resource-role certification in their own right.
 
 ## CIBA
 
@@ -120,6 +126,53 @@ of ungranted/over-scoped `authorization_details`), and
 `cmd/conformance-as`'s own real-HTTP smoke tests
 (`TestSmokeAuthorizationCodeFlowWithAuthorizationDetails`,
 `TestSmokeCIBAFlowWithAuthorizationDetails`).
+
+## Client Credentials Grant
+
+`server.RequestClientCredentialsToken` (RFC 6749 §4.4) — opt-in via
+`Config.ClientCredentialsGrant` plus a per-client
+`storage.RegisteredClientConfig.AllowsClientCredentialsGrant`, matching
+the same two-layer gate CIBA already established — was run live against
+all four FAPI2SP OP "Client Credentials Grant" register profiles
+(MTLS+MTLS, MTLS+DPoP, private key+MTLS, private key+DPoP), reusing the
+same four already-running `conformance-as-{baseline,mtls,client-auth-mtls,
+client-auth-mtls-and-mtls}` containers rather than standing up new ones
+— this grant has no PAR/authorize/redirect_uri/browser hop at all, so
+nothing about container topology needed to change, only the token
+endpoint's own `grant_type` dispatch. **Confirmed live: all four
+clean — 15/15, 11/11, 10/10, 6/6 modules, 0 failures/0 warnings.**
+
+One real, previously-undocumented finding: the OIDF suite's
+`fapi2-security-profile-final-test-plan` requires the `openid` variant
+to be set to `plain_oauth`, not `openid_connect`, for
+`fapi_profile=fapi_client_credentials_grant` — under `openid_connect`,
+`happy-flow` fails outright expecting an `id_token` no grant with no end
+user can ever produce; under `plain_oauth`, requesting the `openid`
+*scope* is itself forbidden ("openid scope cannot be used with
+PLAIN_OAUTH"). That collided with this binary's existing `/userinfo`
+endpoint, which requires the `openid` scope per its own real OIDC
+contract — client_credentials tokens here are registered for `accounts`
+scope only, so every resource-calling module got `403
+insufficient_scope`. Fixed by giving `cmd/conformance-as` a second,
+genuinely non-OIDC protected-resource endpoint, `/accounts`
+(`accountsHandler`, `resource.go`) — only the client_credentials plans'
+`resource.resourceUrl` points there; every other profile still uses
+`/userinfo` unchanged.
+
+Also required each combo's plan to register two clients, not one:
+`GetStaticClient2Configuration` interrupts every module outright
+("Definition for client2 not present in supplied configuration")
+regardless of `fapi_profile` — client1 alone is ever actually used to
+request a token; client2 (PS256/RSA for the `private_key_jwt` combos,
+matching the same RS256-negative-test-un-skip reasoning `ciba-mtls`
+already established) is structural-only. Full breakdown in
+[`server/oidf-config/README.md`](server/oidf-config/README.md#client-credentials-grant).
+Wired into `scripts/run-all.sh` as its own four
+"AS {baseline,mtls,client-auth-mtls,client-auth-mtls-and-mtls}
+-client-credentials" legs. No RP-side counterpart: this grant has no
+authorization request for `client` to drive at all — a client_credentials
+caller is, structurally, closer to `cmd/conformance-as`'s own role in
+this exchange than to `client`'s.
 
 ## Access-token format coverage
 

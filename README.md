@@ -52,6 +52,12 @@ core.
 > [conformance/](conformance/README.md#access-token-format-coverage).
 > `resource` has not been run against a dedicated OIDF plan (only
 > indirectly, as a stand-in the AS plan's own happy-flow module calls).
+> `server` also implements the RFC 6749 §4.4 client_credentials grant
+> (opt-in via `Config.ClientCredentialsGrant` and a per-client
+> `AllowsClientCredentialsGrant`), run clean against all four FAPI2SP OP
+> "Client Credentials Grant" register profiles (MTLS+MTLS, MTLS+DPoP,
+> private key+MTLS, private key+DPoP) — see
+> [conformance/](conformance/README.md#client-credentials-grant).
 
 ```go
 import (

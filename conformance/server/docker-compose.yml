@@ -58,6 +58,7 @@ services:
       - -cert=/certs/server.crt
       - -key=/certs/server.key
       - -access-token-format=${ACCESS_TOKEN_FORMAT:-jwt}
+      - -client-credentials-grant
 
   conformance-as-message-signing:
     build:
@@ -132,6 +133,7 @@ services:
       - -key=/certs/server.key
       - -access-token-format=${ACCESS_TOKEN_FORMAT:-jwt}
       - -mtls
+      - -client-credentials-grant
 
   # sender_constrain=mtls (RFC 8705 §3) under the ordinary
   # PAR/authorize/token flow — orthogonal to both conformance-as-ciba-mtls
@@ -157,6 +159,7 @@ services:
       - -key=/certs/server.key
       - -access-token-format=${ACCESS_TOKEN_FORMAT:-jwt}
       - -mtls
+      - -client-credentials-grant
 
   # conformance-as-mtls's own message-signing counterpart — confirms
   # mTLS sender-constraining composes correctly with signed request
@@ -203,6 +206,7 @@ services:
       - -key=/certs/server.key
       - -access-token-format=${ACCESS_TOKEN_FORMAT:-jwt}
       - -mtls
+      - -client-credentials-grant
 
 networks:
   suite:

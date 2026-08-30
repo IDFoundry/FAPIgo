@@ -198,6 +198,10 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 		md.GrantTypesSupported = append(md.GrantTypesSupported, CIBAGrantType)
 	}
 
+	if s.cfg.ClientCredentialsGrant {
+		md.GrantTypesSupported = append(md.GrantTypesSupported, "client_credentials")
+	}
+
 	return md
 }
 

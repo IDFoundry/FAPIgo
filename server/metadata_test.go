@@ -7,6 +7,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/server"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 func containsString(list []string, target string) bool {
@@ -241,5 +242,27 @@ func TestMetadataMarshalJSONUsesDiscoveryFieldNames(t *testing.T) {
 		if _, ok := decoded[key]; ok {
 			t.Fatalf("Marshal(md) unexpectedly contains key %q, got %s", key, b)
 		}
+	}
+}
+
+func TestMetadataOmitsClientCredentialsGrantWhenDisabled(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true) // ClientCredentialsGrant left false
+	md := h.server.Metadata(context.Background())
+
+	if containsString(md.GrantTypesSupported, "client_credentials") {
+		t.Fatalf("GrantTypesSupported = %v, want it to omit client_credentials", md.GrantTypesSupported)
+	}
+}
+
+func TestMetadataIncludesClientCredentialsGrantWhenEnabled(t *testing.T) {
+	h := newHarnessWithClientCredentialsGrant(t, storage.SenderConstrainDPoP, true)
+	md := h.server.Metadata(context.Background())
+
+	if !containsString(md.GrantTypesSupported, "client_credentials") {
+		t.Fatalf("GrantTypesSupported = %v, want it to contain client_credentials", md.GrantTypesSupported)
+	}
+	// Every other grant type stays advertised alongside it, not replaced.
+	if !containsString(md.GrantTypesSupported, "authorization_code") || !containsString(md.GrantTypesSupported, "refresh_token") {
+		t.Fatalf("GrantTypesSupported = %v, want to still contain authorization_code and refresh_token", md.GrantTypesSupported)
 	}
 }

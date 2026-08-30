@@ -136,6 +136,8 @@ type RegisteredClient struct {
 	backchannelAuthenticationRequestAlgorithm fapi.SignatureAlgorithm
 	backchannelTokenDeliveryMode              BackchannelTokenDeliveryMode
 	backchannelClientNotificationEndpoint     fapi.URL
+
+	allowsClientCredentialsGrant bool
 }
 
 // RegisteredClientConfig is the input to NewRegisteredClient.
@@ -250,6 +252,18 @@ type RegisteredClientConfig struct {
 	BackchannelClientNotificationEndpoint fapi.URL
 
 	AllowedScopes []string
+
+	// AllowsClientCredentialsGrant permits this client to use the RFC
+	// 6749 §4.4 client_credentials grant at the token endpoint —
+	// false (the zero value/default) means it cannot, the same
+	// explicit-per-client-capability stance
+	// BackchannelAuthenticationRequestAlgorithm takes for CIBA. Having
+	// AllowedScopes configured does not implicitly permit
+	// client_credentials use; this is a separate opt-in. Also requires
+	// server.Config.ClientCredentialsGrant to be enabled server-wide —
+	// this field alone does not activate the grant if that deployment
+	// -wide switch is off.
+	AllowsClientCredentialsGrant bool
 }
 
 // NewRegisteredClient validates cfg and returns an immutable
@@ -379,6 +393,7 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 		backchannelAuthenticationRequestAlgorithm: cfg.BackchannelAuthenticationRequestAlgorithm,
 		backchannelTokenDeliveryMode:              cfg.BackchannelTokenDeliveryMode,
 		backchannelClientNotificationEndpoint:     cfg.BackchannelClientNotificationEndpoint,
+		allowsClientCredentialsGrant:              cfg.AllowsClientCredentialsGrant,
 	}, nil
 }
 
@@ -493,6 +508,12 @@ func (c RegisteredClient) BackchannelTokenDeliveryMode() BackchannelTokenDeliver
 // under BackchannelTokenDeliveryModePing.
 func (c RegisteredClient) BackchannelClientNotificationEndpoint() fapi.URL {
 	return c.backchannelClientNotificationEndpoint
+}
+
+// AllowsClientCredentialsGrant reports whether this client may use the
+// RFC 6749 §4.4 client_credentials grant.
+func (c RegisteredClient) AllowsClientCredentialsGrant() bool {
+	return c.allowsClientCredentialsGrant
 }
 
 // AllowsScope reports whether scope is in this client's registered set

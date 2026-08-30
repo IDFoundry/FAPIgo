@@ -161,7 +161,7 @@ func TestSmokeMTLSFlow(t *testing.T) {
 		MTLSEndpoints:     mtlsEndpoints,
 	}
 
-	mux, err := newServerMux(resolved, false, false, false, false)
+	mux, err := newServerMux(resolved, false, false, false, false, false)
 	if err != nil {
 		t.Fatalf("build server mux: %v", err)
 	}

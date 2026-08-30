@@ -82,6 +82,55 @@
       ],
       "request_object_algorithm": "PS256",
       "sender_constrain": "mtls"
+    },
+    {
+      "allowed_scopes": [
+        "accounts"
+      ],
+      "allows_client_credentials_grant": true,
+      "client_assertion_algorithm": "PS256",
+      "id": "gofapi-conformance-mtls-client-credentials-client-1",
+      "jwks": {
+        "keys": [
+          {
+            "kty": "RSA",
+            "alg": "PS256",
+            "use": "sig",
+            "kid": "mtls-client-credentials-client1-rsa-key1",
+            "n": "tIybY0ar8Y60gOk2DdD0T9r5CHVWdEc7EmXHgHo3uqxDj3F0CtPJdVpR5XFdEB1wZEx6rxWx1mtywrMM24QF3NOHb3VVubXXxX4dndJekmRywBrRHkhoQbjjhQPpKDfQFSTiq3pZeaL9qa9WOGCPNOf55PYSERK1oVIoVMxIoBnMzebOvVKIy-Lc0Fhqav91FQmx3vYtgvf0HcgIKFk4LAUr5oWrTke0c4iUTfz9d0uGeo7O94mInbkmK5vF_LWiZvOiD5ihCxdgaKY8WGu-dDSro2XTDEpcgHWJiPXSXjY1pucPrieZA7eIpB_Q1ZEtLTWA3n_2DzmtQAJaM78qiw",
+            "e": "AQAB"
+          }
+        ]
+      },
+      "redirect_uris": [
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-conformance-mtls-client-credentials-client-1/callback"
+      ],
+      "sender_constrain": "mtls"
+    },
+    {
+      "allowed_scopes": [
+        "accounts"
+      ],
+      "allows_client_credentials_grant": true,
+      "client_assertion_algorithm": "ES256",
+      "id": "gofapi-conformance-mtls-client-credentials-client-2",
+      "jwks": {
+        "keys": [
+          {
+            "kty": "EC",
+            "alg": "ES256",
+            "use": "sig",
+            "kid": "gofapi-conformance-mtls-client-credentials-client2-key1",
+            "crv": "P-256",
+            "x": "3x_F1tSFyVzLU0m6CAsLpgztPrUB55UH9uPlHEEdyaA",
+            "y": "sxxHcQAZjx4CXGo9-ugiioLsjh3xV9dqdfBRP6psQcg"
+          }
+        ]
+      },
+      "redirect_uris": [
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-conformance-mtls-client-credentials-client-2/callback"
+      ],
+      "sender_constrain": "mtls"
     }
   ],
   "default_subject": "conformance-test-user",

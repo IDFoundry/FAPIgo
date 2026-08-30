@@ -266,6 +266,29 @@ names, parameter-count abuse and oversized values itself. `fapihttp`
 (or an equivalent adapter) is responsible for building a `FormRequest`
 faithfully from `*http.Request`.
 
+**mTLS trusts the TLS-terminating adapter, not a CA store of its own.**
+`PeerCertificate` — on `PushAuthorizationRequest` and its siblings, and
+on `resource.VerifyRequest` — carries whatever `*x509.Certificate` the
+connection's TLS handshake already produced.
+`server`/`resource` compare it — thumbprint for
+`ClientAuthMethodSelfSignedTLSClientAuth` and `SenderConstrainMTLS`
+(RFC 8705 §3), subject DN or a SAN field for
+`ClientAuthMethodTLSClientAuth`/`...SANDNS`/`...SANURI`/`...SANIP`/
+`...SANEmail` (RFC 8705 §2.1) — against the client's registration in
+`storage.RegisteredClientConfig`, but never re-verify the certificate's
+chain to a trusted CA; neither package holds a CA trust store. This
+follows directly from `PeerCertificate`'s own doc comment ("this
+package never terminates TLS itself"): since no role here owns a TLS
+listener, chain trust can only come from whichever
+`tls.Config.ClientCAs`/`ClientAuth` mode the embedding HTTP server
+configures before a request ever reaches this library — a
+`RegisteredClientConfig` entry authenticates a client's identity claim,
+not its certificate's trustworthiness. `cmd/conformance-as` makes the
+gap concrete: its listener sets `tls.RequestClientCert` with no
+`ClientCAs`, so even that reference binary performs zero chain
+verification — a production deployment must configure its own trust
+store in its own adapter.
+
 **Opaque identifiers.** `PushAuthorizationResult.RequestURI` and the
 `InteractionHandle` handed to the embedding application's login UI have
 no public constructor — only `server` can produce one. The interaction

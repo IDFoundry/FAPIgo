@@ -1,4 +1,4 @@
-name: FAPI2 Conformance
+name: FAPI Conformance
 
 # Runs all eleven FAPI2 conformance suites this repo has driver support
 # for — including the CIBA/mTLS pair (AS ciba-mtls, RP ciba-mtls), AS

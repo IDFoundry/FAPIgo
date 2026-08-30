@@ -52,6 +52,9 @@ func tokenHandler(srv *server.Server) http.HandlerFunc {
 		if result.HasRefreshToken {
 			resp["refresh_token"] = result.RefreshToken.Reveal()
 		}
+		if len(result.AuthorizationDetails) > 0 {
+			resp["authorization_details"] = result.AuthorizationDetails
+		}
 
 		if result.NextDPoPNonce != "" {
 			w.Header().Set("DPoP-Nonce", result.NextDPoPNonce)

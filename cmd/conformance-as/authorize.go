@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"sync"
 
@@ -27,7 +28,17 @@ type consentHandler struct {
 	// guarantee still comes from TransactionStore.CompleteAuthorization;
 	// deleting the entry here is defense in depth on top of that.
 	mu      sync.Mutex
-	pending map[string]server.InteractionHandle
+	pending map[string]pendingAuthorization
+}
+
+// pendingAuthorization is what handleBegin stashes per interaction
+// handle: the handle itself, plus the requested authorization_details
+// (if any), pre-approved in full — see approvedAuthorizationDetails' own
+// doc comment for why there's no per-object narrowing here, mirroring
+// pendingBackchannelAuthentication's identical role for CIBA.
+type pendingAuthorization struct {
+	handle               server.InteractionHandle
+	authorizationDetails []json.RawMessage
 }
 
 func newConsentHandler(srv *server.Server, clients storage.ClientRepository, clock server.Clock, defaultSubject string) *consentHandler {
@@ -36,7 +47,7 @@ func newConsentHandler(srv *server.Server, clients storage.ClientRepository, clo
 		clients:        clients,
 		clock:          clock,
 		defaultSubject: defaultSubject,
-		pending:        make(map[string]server.InteractionHandle),
+		pending:        make(map[string]pendingAuthorization),
 	}
 }
 
@@ -54,8 +65,9 @@ func (h *consentHandler) handleBegin(w http.ResponseWriter, r *http.Request) {
 
 	switch action := action.(type) {
 	case server.InteractionRequired:
+		approved := approvedAuthorizationDetails(action.Interaction.AuthorizationDetails)
 		h.mu.Lock()
-		h.pending[action.Handle.String()] = action.Handle
+		h.pending[action.Handle.String()] = pendingAuthorization{handle: action.Handle, authorizationDetails: approved}
 		h.mu.Unlock()
 
 		// Debug/test-support only, not security-relevant: lets the smoke
@@ -166,7 +178,9 @@ func (h *consentHandler) handleDecision(w http.ResponseWriter, r *http.Request) 
 	var result server.InteractionResult
 	switch r.FormValue("decision") {
 	case "approve":
-		result = server.Authorize(subject, authCtx, server.GrantedAuthorization{Scope: r.Form["scope"]})
+		result = server.Authorize(subject, authCtx, server.GrantedAuthorization{
+			Scope: r.Form["scope"], AuthorizationDetails: handle.authorizationDetails,
+		})
 	case "deny":
 		result = server.Deny("user denied the request")
 	default:
@@ -174,7 +188,7 @@ func (h *consentHandler) handleDecision(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	authResult, err := h.srv.CompleteAuthorization(r.Context(), server.CompleteAuthorizationRequest{Handle: handle, Result: result})
+	authResult, err := h.srv.CompleteAuthorization(r.Context(), server.CompleteAuthorizationRequest{Handle: handle.handle, Result: result})
 	if err != nil {
 		writeLocalHTMLErrorRaw(w, http.StatusInternalServerError, "server_error", "failed to complete authorization")
 		return

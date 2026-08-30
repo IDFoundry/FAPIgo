@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -82,6 +83,7 @@ func testGrantStoreCreateAndRedeemAuthorizationCode(t *testing.T, factory func()
 		Subject: "user-1", Scope: []string{"openid", "accounts"},
 		Nonce: "nonce-1", AuthTime: time.Now().Truncate(time.Second),
 		ACR: "acr-1", AMR: []string{"pwd"},
+		AuthorizationDetails:   json.RawMessage(`[{"type":"payment","actions":["approve"]}]`),
 		RequestedIDTokenClaims: []string{"name"}, RequestedUserinfoClaims: []string{"email"},
 		ExpiresAt: time.Now().Add(time.Minute),
 	}
@@ -98,6 +100,7 @@ func testGrantStoreCreateAndRedeemAuthorizationCode(t *testing.T, factory func()
 		got.Subject != want.Subject || got.Nonce != want.Nonce ||
 		!got.AuthTime.Equal(want.AuthTime) || got.ACR != want.ACR ||
 		!got.ExpiresAt.Equal(want.ExpiresAt) || len(got.Scope) != len(want.Scope) ||
+		!bytes.Equal(got.AuthorizationDetails, want.AuthorizationDetails) ||
 		len(got.RequestedIDTokenClaims) != len(want.RequestedIDTokenClaims) ||
 		len(got.RequestedUserinfoClaims) != len(want.RequestedUserinfoClaims) {
 		t.Fatalf("RedeemAuthorizationCode returned %+v, want fields matching %+v", got, want)
@@ -234,6 +237,7 @@ func testGrantStoreCreateAndRedeemRefreshToken(t *testing.T, factory func() Gran
 		TokenHash: hash, ClientID: "client-1", Subject: "user-1",
 		Scope: []string{"openid", "offline_access"}, Thumbprint: "thumb-1",
 		AuthTime: time.Now().Truncate(time.Second), ACR: "acr-1", AMR: []string{"pwd"},
+		AuthorizationDetails:   json.RawMessage(`[{"type":"payment","actions":["approve"]}]`),
 		RequestedIDTokenClaims: []string{"name"}, RequestedUserinfoClaims: []string{"email"},
 		ExpiresAt: time.Now().Add(time.Hour),
 	}
@@ -247,6 +251,7 @@ func testGrantStoreCreateAndRedeemRefreshToken(t *testing.T, factory func() Gran
 	if got.ClientID != want.ClientID || got.Subject != want.Subject ||
 		got.Thumbprint != want.Thumbprint || got.ACR != want.ACR ||
 		!got.AuthTime.Equal(want.AuthTime) || !got.ExpiresAt.Equal(want.ExpiresAt) ||
+		!bytes.Equal(got.AuthorizationDetails, want.AuthorizationDetails) ||
 		len(got.RequestedIDTokenClaims) != len(want.RequestedIDTokenClaims) ||
 		len(got.RequestedUserinfoClaims) != len(want.RequestedUserinfoClaims) {
 		t.Fatalf("RedeemRefreshToken returned %+v, want fields matching %+v", got, want)
@@ -883,6 +888,10 @@ func TestBackchannelAuthenticationStoreContract(t *testing.T, factory func() Bac
 	t.Helper()
 
 	t.Run("CreateThenPollReturnsPending", func(t *testing.T) { testBackchannelAuthenticationStoreCreateThenPollReturnsPending(t, factory) })
+	t.Run("LookupReturnsClientIDAndParametersWithoutConsuming", func(t *testing.T) {
+		testBackchannelAuthenticationStoreLookupReturnsClientIDAndParametersWithoutConsuming(t, factory)
+	})
+	t.Run("LookupUnknownHandleFails", func(t *testing.T) { testBackchannelAuthenticationStoreLookupUnknownHandleFails(t, factory) })
 	t.Run("DecideThenPollReturnsApprovedFieldsRoundTripped", func(t *testing.T) {
 		testBackchannelAuthenticationStoreDecideThenPollReturnsApprovedFieldsRoundTripped(t, factory)
 	})
@@ -933,6 +942,46 @@ func newBackchannelAuthenticationRecord(authReqID, handle string) NewBackchannel
 	}
 }
 
+// testBackchannelAuthenticationStoreLookupReturnsClientIDAndParametersWithoutConsuming
+// covers LookupBackchannelAuthentication's own doc comment: it must
+// return the pending request's ClientID/Parameters without deciding or
+// otherwise consuming it — confirmed here by polling afterward and still
+// observing Status Pending, and by calling Lookup itself a second time.
+func testBackchannelAuthenticationStoreLookupReturnsClientIDAndParametersWithoutConsuming(t *testing.T, factory func() BackchannelAuthenticationStore) {
+	store := factory()
+	ctx := context.Background()
+	want := newBackchannelAuthenticationRecord("auth-req-lookup", "handle-lookup")
+	if err := store.CreateBackchannelAuthentication(ctx, want); err != nil {
+		t.Fatalf("CreateBackchannelAuthentication: %v", err)
+	}
+	for i := 0; i < 2; i++ {
+		got, err := store.LookupBackchannelAuthentication(ctx, want.HandleHash)
+		if err != nil {
+			t.Fatalf("LookupBackchannelAuthentication (call %d): %v", i, err)
+		}
+		if got.ClientID != want.ClientID || string(got.Parameters["scope"]) != string(want.Parameters["scope"]) {
+			t.Fatalf("LookupBackchannelAuthentication (call %d) returned %+v, want fields matching %+v", i, got, want)
+		}
+	}
+	polled, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
+		AuthReqIDHash: want.AuthReqIDHash, Now: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("PollBackchannelAuthentication: %v", err)
+	}
+	if polled.Status != BackchannelAuthenticationPending {
+		t.Fatalf("Status after Lookup = %v, want Pending — Lookup must not consume or decide the request", polled.Status)
+	}
+}
+
+func testBackchannelAuthenticationStoreLookupUnknownHandleFails(t *testing.T, factory func() BackchannelAuthenticationStore) {
+	store := factory()
+	ctx := context.Background()
+	if _, err := store.LookupBackchannelAuthentication(ctx, sha256.Sum256([]byte("no-such-handle"))); err == nil {
+		t.Fatal("LookupBackchannelAuthentication for unknown handle = nil error, want error")
+	}
+}
+
 func testBackchannelAuthenticationStoreCreateThenPollReturnsPending(t *testing.T, factory func() BackchannelAuthenticationStore) {
 	store := factory()
 	ctx := context.Background()
@@ -962,10 +1011,12 @@ func testBackchannelAuthenticationStoreDecideThenPollReturnsApprovedFieldsRoundT
 		t.Fatalf("CreateBackchannelAuthentication: %v", err)
 	}
 	authTime := time.Now().Truncate(time.Second)
+	wantAuthorizationDetails := json.RawMessage(`[{"type":"payment","actions":["approve"]}]`)
 	if _, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
 		HandleHash: record.HandleHash, Status: BackchannelAuthenticationApproved,
 		Subject: "user-1", Scope: []string{"openid", "accounts"},
-		AuthTime: authTime, ACR: "acr-1", AMR: []string{"pwd"},
+		AuthorizationDetails: wantAuthorizationDetails,
+		AuthTime:             authTime, ACR: "acr-1", AMR: []string{"pwd"},
 	}); err != nil {
 		t.Fatalf("DecideBackchannelAuthentication: %v", err)
 	}
@@ -977,7 +1028,8 @@ func testBackchannelAuthenticationStoreDecideThenPollReturnsApprovedFieldsRoundT
 	}
 	if got.Status != BackchannelAuthenticationApproved || got.Subject != "user-1" ||
 		len(got.Scope) != 2 || got.ACR != "acr-1" || !got.AuthTime.Equal(authTime) ||
-		got.DPoPJKT != record.DPoPJKT || string(got.TokenClaims["custom_claim"]) != `"value"` {
+		got.DPoPJKT != record.DPoPJKT || string(got.TokenClaims["custom_claim"]) != `"value"` ||
+		!bytes.Equal(got.AuthorizationDetails, wantAuthorizationDetails) {
 		t.Fatalf("PollBackchannelAuthentication returned %+v, want fields matching decision+record", got)
 	}
 }

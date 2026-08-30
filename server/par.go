@@ -58,6 +58,17 @@ var coreAuthorizationParameters = map[string]struct{}{
 	// unregistered parameter.
 	"prompt": {},
 
+	// authorization_details (Rich Authorization Requests, RFC 9396 §5) is
+	// excluded here for the same reason as "claims": this package doesn't
+	// treat it as an ordinary extension.Definition-backed parameter — it's
+	// validated against Config.RAR, a structurally distinct registry for
+	// bounded, typed detail-object arrays (see checkExtensions' own use of
+	// parseRequestedAuthorizationDetails). Excluding it from
+	// Config.Extensions' unregistered-parameter check just keeps that
+	// registry from rejecting it outright before RAR-specific validation
+	// ever runs.
+	"authorization_details": {},
+
 	// response_mode (OAuth Multiple Response Type Encoding Practices;
 	// mandatory as "jwt" for a JARM/message-signing client) is not read
 	// or validated by this package — whether a response is JARM-encoded
@@ -412,6 +423,13 @@ func (s *Server) checkExtensions(params map[string]json.RawMessage, source exten
 		}
 		return nil, newError(code, 400, "request contains an unregistered or invalid parameter", err)
 	}
+	if _, err := s.parseRequestedAuthorizationDetails(params); err != nil {
+		code := ErrorInvalidRequest
+		if source == extension.SourceRequestObject {
+			code = ErrorInvalidRequestObject
+		}
+		return nil, newError(code, 400, "authorization_details is invalid", err)
+	}
 	return extension.AsParameters(values, s.cfg.Extensions.Definitions()...), nil
 }
 
@@ -565,6 +583,19 @@ func plainParamsToJSON(params map[string]string) map[string]json.RawMessage {
 	out := make(map[string]json.RawMessage, len(params))
 	for k, v := range params {
 		if k == "client_assertion" || k == "client_assertion_type" || k == "request" {
+			continue
+		}
+		if k == authorizationDetailsParameter {
+			// RFC 9396 §5: a plain "authorization_details" parameter's
+			// value is itself JSON array text, unlike every other plain
+			// parameter here, which is a bare string re-wrapped as a JSON
+			// string claim below. Storing it as a raw message keeps its
+			// shape identical to what a signed request object's own
+			// "authorization_details" claim decodes to, so
+			// parseRequestedAuthorizationDetails/RARRegistry.Parse never
+			// need to know which path a request arrived by. Malformed
+			// JSON here is caught by RARRegistry.Parse, not here.
+			out[k] = json.RawMessage(v)
 			continue
 		}
 		encoded, _ := json.Marshal(v) // marshaling a string cannot fail

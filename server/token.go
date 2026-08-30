@@ -51,6 +51,13 @@ type TokenResult struct {
 	ExpiresIn time.Duration
 	Scope     string
 
+	// AuthorizationDetails is the resource owner's granted Rich
+	// Authorization Requests (RFC 9396) detail array — RFC 9396 §5's own
+	// response echo, reflecting exactly what the issued access token's
+	// own "authorization_details" claim carries. Nil if the authorization
+	// carried no authorization_details, or none of it was granted.
+	AuthorizationDetails json.RawMessage
+
 	// IDToken is set only when the granted scope included "openid".
 	IDToken    fapi.Secret
 	HasIDToken bool
@@ -163,6 +170,7 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to encode requested userinfo claims", err))
 	}
+	accessTokenClaims = withAuthorizationDetails(redeemed.AuthorizationDetails, accessTokenClaims)
 	accessToken, accessKey, err := s.deps.AccessTokens.IssueAccessToken(ctx, AccessTokenParams{
 		ClientID: client.ID(), Subject: redeemed.Subject, Scope: redeemed.Scope,
 		Thumbprint: thumbprint, SenderConstrain: client.SenderConstrain(), Claims: accessTokenClaims,
@@ -180,10 +188,11 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	_ = s.deps.Grants.RecordIssuedAccessToken(ctx, codeHash, accessKey, now.Add(s.cfg.Limits.AccessTokenLifetime))
 
 	result := TokenResult{
-		AccessToken: fapi.NewSecret(accessToken),
-		TokenType:   tokenTypeFor(client.SenderConstrain()),
-		ExpiresIn:   s.cfg.Limits.AccessTokenLifetime,
-		Scope:       strings.Join(redeemed.Scope, " "),
+		AccessToken:          fapi.NewSecret(accessToken),
+		TokenType:            tokenTypeFor(client.SenderConstrain()),
+		ExpiresIn:            s.cfg.Limits.AccessTokenLifetime,
+		Scope:                strings.Join(redeemed.Scope, " "),
+		AuthorizationDetails: redeemed.AuthorizationDetails,
 	}
 
 	if containsScope(redeemed.Scope, "openid") {
@@ -204,7 +213,7 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	if containsScope(redeemed.Scope, "offline_access") {
 		refreshToken, err := s.issueRefreshToken(ctx, client.ID(), identityAssertion{
 			Subject: redeemed.Subject, AuthTime: redeemed.AuthTime, ACR: redeemed.ACR, AMR: redeemed.AMR, TokenClaims: redeemed.TokenClaims,
-		}, redeemed.Scope, thumbprint, redeemed.RequestedIDTokenClaims, redeemed.RequestedUserinfoClaims)
+		}, redeemed.Scope, redeemed.AuthorizationDetails, thumbprint, redeemed.RequestedIDTokenClaims, redeemed.RequestedUserinfoClaims)
 		if err != nil {
 			return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to issue refresh token", err))
 		}
@@ -411,8 +420,12 @@ func (s *Server) issueIDToken(ctx context.Context, client storage.RegisteredClie
 }
 
 // issueRefreshToken generates and persists a new refresh token, returning
-// its raw value.
-func (s *Server) issueRefreshToken(ctx context.Context, clientID fapi.ClientID, id identityAssertion, scope []string, thumbprint string, requestedIDTokenClaims, requestedUserinfoClaims []string) (string, error) {
+// its raw value. authorizationDetails carries forward the original
+// authorization's granted Rich Authorization Requests (RFC 9396) detail
+// array unchanged — RefreshAccessToken re-embeds it on every refresh, since
+// RFC 9396 defines no refresh-time narrowing parameter the way RFC 6749 §6
+// does for scope.
+func (s *Server) issueRefreshToken(ctx context.Context, clientID fapi.ClientID, id identityAssertion, scope []string, authorizationDetails json.RawMessage, thumbprint string, requestedIDTokenClaims, requestedUserinfoClaims []string) (string, error) {
 	raw, err := generateRefreshToken(s.deps.Random)
 	if err != nil {
 		return "", err
@@ -423,6 +436,7 @@ func (s *Server) issueRefreshToken(ctx context.Context, clientID fapi.ClientID, 
 		ClientID:                clientID,
 		Subject:                 id.Subject,
 		Scope:                   scope,
+		AuthorizationDetails:    authorizationDetails,
 		Thumbprint:              thumbprint,
 		AuthTime:                id.AuthTime,
 		ACR:                     id.ACR,

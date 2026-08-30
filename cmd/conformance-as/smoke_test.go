@@ -373,6 +373,38 @@ func (h *smokeHarness) runToConsent(ctx context.Context, scope []string) (handle
 	return handle
 }
 
+// runToConsentWithAuthorizationDetails mirrors runToConsent, additionally
+// carrying authorizationDetails on the pushed authorization request — for
+// exercising Config.RAR (wiring.go's newSampleRARRegistry) end-to-end
+// through this binary's real HTTP wiring, not just the server package's
+// own in-process tests.
+func (h *smokeHarness) runToConsentWithAuthorizationDetails(ctx context.Context, scope []string, authorizationDetails []json.RawMessage) (handle string) {
+	h.t.Helper()
+	session, err := h.client.BeginAuthorization(ctx, client.BeginAuthorizationRequest{
+		Scope: scope, AuthorizationDetails: authorizationDetails,
+	})
+	if err != nil {
+		h.t.Fatalf("BeginAuthorization: %v", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, session.URL().String(), nil)
+	if err != nil {
+		h.t.Fatalf("build authorize request: %v", err)
+	}
+	res, err := h.httpClient.Do(req)
+	if err != nil {
+		h.t.Fatalf("GET authorize: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		h.t.Fatalf("GET authorize returned status %d, want %d", res.StatusCode, http.StatusOK)
+	}
+	handle = res.Header.Get("X-Interaction-Handle")
+	if handle == "" {
+		h.t.Fatalf("authorize response carried no X-Interaction-Handle")
+	}
+	return handle
+}
+
 // submitDecision POSTs the consent form's decision and returns the
 // resulting redirect's raw query string.
 func (h *smokeHarness) submitDecision(ctx context.Context, handle, decision string, scope []string) string {
@@ -464,6 +496,48 @@ func testSmokeAuthorizationCodeFlow(t *testing.T, format AccessTokenFormat) {
 	// storage.TestGrantStoreContract/RedeemAuthorizationCodeIsSingleUse).
 	if _, err := h.client.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery}); err == nil {
 		t.Fatalf("replayed CompleteAuthorization succeeded, want an error")
+	}
+}
+
+// TestSmokeAuthorizationCodeFlowWithAuthorizationDetails drives a full
+// PAR -> authorize -> consent -> token flow carrying a Rich Authorization
+// Requests (RFC 9396) authorization_details array, over the plain
+// (non-request-object) parameter path ProfileFAPISecurity permits — the
+// same wire shape most exercises this binary's newSampleRARRegistry
+// wiring (wiring.go/rar.go) end-to-end: PAR's own plain-parameter JSON
+// array-text carve-out, the consent handler's auto-approval, and the
+// token response/JWT claim echo.
+func TestSmokeAuthorizationCodeFlowWithAuthorizationDetails(t *testing.T) {
+	h := newSmokeHarness(t, AccessTokenFormatJWT)
+	ctx := context.Background()
+	scope := []string{"openid", "accounts"}
+	authorizationDetails := []json.RawMessage{
+		json.RawMessage(`{"type":"transaction_approval","actions":["approve"],"amount":"SGD 500.00"}`),
+	}
+
+	handle := h.runToConsentWithAuthorizationDetails(ctx, scope, authorizationDetails)
+	rawQuery := h.submitDecision(ctx, handle, "approve", scope)
+
+	result, err := h.client.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery})
+	if err != nil {
+		t.Fatalf("CompleteAuthorization: %v", err)
+	}
+	success, ok := result.(client.CompletionSuccess)
+	if !ok {
+		t.Fatalf("CompleteAuthorization result = %T, want client.CompletionSuccess", result)
+	}
+	if success.Tokens.AccessToken.Reveal() == "" {
+		t.Fatalf("access token is empty")
+	}
+	if len(success.Tokens.AuthorizationDetails) == 0 {
+		t.Fatalf("TokenSet.AuthorizationDetails is empty, want the granted transaction_approval echoed back")
+	}
+	var got []sampleTransactionApprovalDetail
+	if err := json.Unmarshal(success.Tokens.AuthorizationDetails, &got); err != nil {
+		t.Fatalf("unmarshal TokenSet.AuthorizationDetails: %v", err)
+	}
+	if len(got) != 1 || got[0].Amount != "SGD 500.00" {
+		t.Fatalf("TokenSet.AuthorizationDetails = %s, want one SGD 500.00 transaction_approval", success.Tokens.AuthorizationDetails)
 	}
 }
 
@@ -664,6 +738,51 @@ func TestSmokeCIBAFlow(t *testing.T) {
 	// fail.
 	if _, err := h.client.PollBackchannelAuthentication(ctx, session); err == nil {
 		t.Fatalf("PollBackchannelAuthentication (replay after approval) = nil error, want error")
+	}
+}
+
+// TestSmokeCIBAFlowWithAuthorizationDetails mirrors
+// TestSmokeAuthorizationCodeFlowWithAuthorizationDetails for the CIBA
+// backchannel flow — this is the use case the RAR+CIBA combination is
+// specifically good for: a transaction-approval screen backed by a
+// structured description of what's being authorized, rather than a bare
+// scope string. Exercises newSampleRARRegistry's wiring through CIBA's
+// always-signed request object path (backchannel.go), not PAR's plain-
+// parameter path.
+func TestSmokeCIBAFlowWithAuthorizationDetails(t *testing.T) {
+	h := newSmokeHarnessWithOptions(t, AccessTokenFormatJWT, false, false, true)
+	ctx := context.Background()
+
+	session, err := h.client.BeginBackchannelAuthentication(ctx, client.BeginBackchannelAuthenticationRequest{
+		Scope: []string{"openid", "accounts"}, LoginHint: smokeSubject,
+		AuthorizationDetails: []json.RawMessage{
+			json.RawMessage(`{"type":"transaction_approval","actions":["approve"],"amount":"SGD 500.00"}`),
+		},
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+
+	h.callBackchannelApprove(ctx, session.AuthReqID(), "allow")
+	time.Sleep(session.Interval())
+
+	result, err := h.client.PollBackchannelAuthentication(ctx, session)
+	if err != nil {
+		t.Fatalf("PollBackchannelAuthentication (after approval): %v", err)
+	}
+	approved, ok := result.(client.BackchannelAuthenticationApproved)
+	if !ok {
+		t.Fatalf("PollBackchannelAuthentication (after approval) = %T, want client.BackchannelAuthenticationApproved", result)
+	}
+	if len(approved.Tokens.AuthorizationDetails) == 0 {
+		t.Fatalf("TokenSet.AuthorizationDetails is empty, want the granted transaction_approval echoed back")
+	}
+	var got []sampleTransactionApprovalDetail
+	if err := json.Unmarshal(approved.Tokens.AuthorizationDetails, &got); err != nil {
+		t.Fatalf("unmarshal TokenSet.AuthorizationDetails: %v", err)
+	}
+	if len(got) != 1 || got[0].Amount != "SGD 500.00" {
+		t.Fatalf("TokenSet.AuthorizationDetails = %s, want one SGD 500.00 transaction_approval", approved.Tokens.AuthorizationDetails)
 	}
 }
 

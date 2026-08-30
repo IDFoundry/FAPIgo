@@ -63,6 +63,17 @@ type NewAuthorizationCode struct {
 	ACR      string
 	AMR      []string
 
+	// AuthorizationDetails is the resource owner's granted Rich
+	// Authorization Requests (RFC 9396) detail array — one canonical JSON
+	// array (server.GrantedAuthorization.AuthorizationDetails, already
+	// validated as a subset of what was requested), or nil if the
+	// authorization request carried no authorization_details, or none of
+	// it was approved. RedeemAuthorizationCode must return it unmodified,
+	// mirroring Scope, so ExchangeAuthorizationCode can embed it as the
+	// issued access token's own "authorization_details" claim and echo it
+	// in the token response.
+	AuthorizationDetails json.RawMessage
+
 	// TokenClaims are the validated extension parameter values
 	// (extension.Definition.ReturnInTokenClaims) carried by the
 	// authorization request this code grants — see
@@ -103,13 +114,14 @@ type RedeemedAuthorizationCode struct {
 	CodeChallengeMethod string
 	DPoPJKT             string
 
-	Subject     string
-	Scope       []string
-	Nonce       string
-	AuthTime    time.Time
-	ACR         string
-	AMR         []string
-	TokenClaims map[string]json.RawMessage
+	Subject              string
+	Scope                []string
+	Nonce                string
+	AuthTime             time.Time
+	ACR                  string
+	AMR                  []string
+	AuthorizationDetails json.RawMessage
+	TokenClaims          map[string]json.RawMessage
 
 	// RequestedIDTokenClaims and RequestedUserinfoClaims mirror
 	// NewAuthorizationCode's fields of the same name.
@@ -132,14 +144,22 @@ type RedeemedAuthorizationCode struct {
 type NewRefreshToken struct {
 	TokenHash [32]byte
 
-	ClientID    fapi.ClientID
-	Subject     string
-	Scope       []string
-	Thumbprint  string
-	AuthTime    time.Time
-	ACR         string
-	AMR         []string
-	TokenClaims map[string]json.RawMessage
+	ClientID   fapi.ClientID
+	Subject    string
+	Scope      []string
+	Thumbprint string
+	AuthTime   time.Time
+	ACR        string
+	AMR        []string
+
+	// AuthorizationDetails carries forward the original authorization's
+	// granted Rich Authorization Requests (RFC 9396) detail array — see
+	// NewAuthorizationCode.AuthorizationDetails. RefreshAccessToken
+	// re-embeds it unchanged on every refresh; RFC 9396 defines no
+	// refresh-time narrowing parameter the way RFC 6749 §6 does for
+	// scope.
+	AuthorizationDetails json.RawMessage
+	TokenClaims          map[string]json.RawMessage
 
 	// RequestedIDTokenClaims and RequestedUserinfoClaims carry forward
 	// the original authorization request's "claims" parameter (see
@@ -163,14 +183,15 @@ type RefreshTokenRedemption struct {
 // RedeemedRefreshToken is what RedeemRefreshToken returns for a
 // successfully redeemed token.
 type RedeemedRefreshToken struct {
-	ClientID    fapi.ClientID
-	Subject     string
-	Scope       []string
-	Thumbprint  string
-	AuthTime    time.Time
-	ACR         string
-	AMR         []string
-	TokenClaims map[string]json.RawMessage
+	ClientID             fapi.ClientID
+	Subject              string
+	Scope                []string
+	Thumbprint           string
+	AuthTime             time.Time
+	ACR                  string
+	AMR                  []string
+	AuthorizationDetails json.RawMessage
+	TokenClaims          map[string]json.RawMessage
 
 	// RequestedIDTokenClaims and RequestedUserinfoClaims mirror
 	// NewRefreshToken's fields of the same name.

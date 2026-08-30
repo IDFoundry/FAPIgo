@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -69,4 +70,17 @@ func NewAuthenticationContext(authTime time.Time, acr string, amr []string) (Aut
 // request; it does not otherwise second-guess this decision.
 type GrantedAuthorization struct {
 	Scope []string
+
+	// AuthorizationDetails is the approved subset of the request's own
+	// Rich Authorization Requests (RFC 9396) detail objects — one entry
+	// per approved object, read out of InteractionRequest.AuthorizationDetails
+	// (or BackchannelInteractionRequest's) via extension.RARGet and
+	// re-encoded, or dropped/narrowed as the resource owner decided. Nil
+	// or empty if the request carried no authorization_details, or none
+	// of it was approved. CompleteAuthorization/
+	// CompleteBackchannelAuthentication reject an entry that isn't an
+	// acceptable narrowing (RARDefinition.ValidateGrant, or exact-match
+	// if that hook is nil) of some object in the original request — the
+	// same way a scope not present in the original request is rejected.
+	AuthorizationDetails []json.RawMessage
 }

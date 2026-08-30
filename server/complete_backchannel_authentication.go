@@ -37,8 +37,9 @@ type CompleteBackchannelAuthenticationRequest struct {
 // package's usual errors.As(err, &serverErr) pattern), never a bare
 // error from a dependency.
 func (s *Server) CompleteBackchannelAuthentication(ctx context.Context, req CompleteBackchannelAuthenticationRequest) error {
+	handleHash := backchannelHandleHash(req.Handle)
 	decision := storage.DecideBackchannelAuthentication{
-		HandleHash: backchannelHandleHash(req.Handle),
+		HandleHash: handleHash,
 	}
 
 	switch result := req.Result.(type) {
@@ -47,6 +48,21 @@ func (s *Server) CompleteBackchannelAuthentication(ctx context.Context, req Comp
 			err := newError(ErrorServerError, 500, "authorize result carries no authenticated subject", nil)
 			s.audit(ctx, AuditEventCompleteBackchannelAuthentication, "", AuditOutcomeFailure, string(err.Code()))
 			return err
+		}
+		if len(result.grant.AuthorizationDetails) > 0 {
+			pending, lookupErr := s.deps.Backchannel.LookupBackchannelAuthentication(ctx, handleHash)
+			if lookupErr != nil {
+				wrapped := newError(ErrorInvalidRequest, 400, "backchannel authentication handle is invalid, expired, or already decided", lookupErr)
+				s.audit(ctx, AuditEventCompleteBackchannelAuthentication, "", AuditOutcomeFailure, string(wrapped.Code()))
+				return wrapped
+			}
+			granted, validateErr := s.validateGrantedAuthorizationDetails(pending.Parameters[authorizationDetailsParameter], result.grant.AuthorizationDetails)
+			if validateErr != nil {
+				wrapped := newError(ErrorInvalidRequest, 400, "granted authorization_details exceeds what was requested", validateErr)
+				s.audit(ctx, AuditEventCompleteBackchannelAuthentication, pending.ClientID, AuditOutcomeFailure, string(wrapped.Code()))
+				return wrapped
+			}
+			decision.AuthorizationDetails = granted
 		}
 		decision.Status = storage.BackchannelAuthenticationApproved
 		decision.Subject = result.subject.ID().String()

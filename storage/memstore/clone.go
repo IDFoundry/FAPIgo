@@ -30,3 +30,13 @@ func cloneStrings(s []string) []string {
 	}
 	return append([]string(nil), s...)
 }
+
+// cloneRawMessage returns a deep copy of a single raw value (e.g. a
+// record's own AuthorizationDetails), for the same reason as
+// cloneRawMessageMap.
+func cloneRawMessage(v json.RawMessage) json.RawMessage {
+	if v == nil {
+		return nil
+	}
+	return append(json.RawMessage(nil), v...)
+}

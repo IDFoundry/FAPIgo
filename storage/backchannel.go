@@ -99,6 +99,19 @@ type NewBackchannelAuthentication struct {
 	ExpiresAt time.Time
 }
 
+// LookedUpBackchannelAuthentication is what
+// BackchannelAuthenticationStore.LookupBackchannelAuthentication returns
+// for a pending request, without consuming or deciding it.
+type LookedUpBackchannelAuthentication struct {
+	ClientID fapi.ClientID
+
+	// Parameters mirrors NewBackchannelAuthentication.Parameters — the
+	// original request's own parameters, unmodified, so a caller can
+	// validate a decision (e.g. a narrowed authorization_details grant)
+	// against exactly what was requested before recording that decision.
+	Parameters map[string]json.RawMessage
+}
+
 // DecideBackchannelAuthentication is the input to
 // BackchannelAuthenticationStore.DecideBackchannelAuthentication.
 type DecideBackchannelAuthentication struct {
@@ -108,13 +121,16 @@ type DecideBackchannelAuthentication struct {
 	// never Pending.
 	Status BackchannelAuthenticationStatus
 
-	// Subject, Scope, AuthTime, ACR and AMR are set only when Status is
-	// Approved.
-	Subject  string
-	Scope    []string
-	AuthTime time.Time
-	ACR      string
-	AMR      []string
+	// Subject, Scope, AuthorizationDetails, AuthTime, ACR and AMR are set
+	// only when Status is Approved. AuthorizationDetails mirrors
+	// NewAuthorizationCode.AuthorizationDetails — the resource owner's
+	// granted Rich Authorization Requests (RFC 9396) detail array, or nil.
+	Subject              string
+	Scope                []string
+	AuthorizationDetails json.RawMessage
+	AuthTime             time.Time
+	ACR                  string
+	AMR                  []string
 
 	// Reason is an optional, human-readable explanation, set when Status
 	// is Denied or AuthenticationFailed — mirrors Deny/AuthenticationFailed's
@@ -157,16 +173,17 @@ type PollBackchannelAuthentication struct {
 // PolledBackchannelAuthentication is what a successful
 // PollBackchannelAuthentication returns.
 type PolledBackchannelAuthentication struct {
-	Status      BackchannelAuthenticationStatus
-	ClientID    fapi.ClientID
-	Subject     string
-	Scope       []string
-	AuthTime    time.Time
-	ACR         string
-	AMR         []string
-	TokenClaims map[string]json.RawMessage
-	DPoPJKT     string
-	Reason      string
+	Status               BackchannelAuthenticationStatus
+	ClientID             fapi.ClientID
+	Subject              string
+	Scope                []string
+	AuthorizationDetails json.RawMessage
+	AuthTime             time.Time
+	ACR                  string
+	AMR                  []string
+	TokenClaims          map[string]json.RawMessage
+	DPoPJKT              string
+	Reason               string
 
 	// RequestedIDTokenClaims and RequestedUserinfoClaims mirror
 	// NewBackchannelAuthentication's fields of the same name.
@@ -210,6 +227,16 @@ func (e *BackchannelAuthenticationSlowDownError) Error() string {
 // client polling for that decision.
 type BackchannelAuthenticationStore interface {
 	CreateBackchannelAuthentication(ctx context.Context, record NewBackchannelAuthentication) error
+
+	// LookupBackchannelAuthentication returns the pending request
+	// identified by HandleHash's own ClientID and Parameters, without
+	// consuming or deciding it — unlike DecideBackchannelAuthentication,
+	// this may be called any number of times. It exists so a caller can
+	// validate a decision (e.g. that a narrowed authorization_details
+	// grant is an acceptable subset of what was requested) against the
+	// original request before calling DecideBackchannelAuthentication to
+	// record it. Returns a plain error if HandleHash is unknown.
+	LookupBackchannelAuthentication(ctx context.Context, handleHash [32]byte) (LookedUpBackchannelAuthentication, error)
 
 	// DecideBackchannelAuthentication atomically records the terminal
 	// outcome of a pending request identified by decision.HandleHash,

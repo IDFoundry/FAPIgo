@@ -27,13 +27,14 @@ type backchannelRecord struct {
 	pollInterval            time.Duration
 	expiresAt               time.Time
 
-	status   storage.BackchannelAuthenticationStatus
-	subject  string
-	scope    []string
-	authTime time.Time
-	acr      string
-	amr      []string
-	reason   string
+	status               storage.BackchannelAuthenticationStatus
+	subject              string
+	scope                []string
+	authorizationDetails json.RawMessage
+	authTime             time.Time
+	acr                  string
+	amr                  []string
+	reason               string
 
 	redeemed     bool
 	polledBefore bool
@@ -82,6 +83,21 @@ func (s *BackchannelAuthenticationStore) CreateBackchannelAuthentication(_ conte
 	return nil
 }
 
+// LookupBackchannelAuthentication implements
+// storage.BackchannelAuthenticationStore.
+func (s *BackchannelAuthenticationStore) LookupBackchannelAuthentication(_ context.Context, handleHash [32]byte) (storage.LookedUpBackchannelAuthentication, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, ok := s.byHandleHash[handleHash]
+	if !ok {
+		return storage.LookedUpBackchannelAuthentication{}, fmt.Errorf("memstore: no such backchannel authentication handle")
+	}
+	return storage.LookedUpBackchannelAuthentication{
+		ClientID:   rec.clientID,
+		Parameters: cloneRawMessageMap(rec.parameters),
+	}, nil
+}
+
 // DecideBackchannelAuthentication implements
 // storage.BackchannelAuthenticationStore.
 func (s *BackchannelAuthenticationStore) DecideBackchannelAuthentication(_ context.Context, decision storage.DecideBackchannelAuthentication) (storage.DecidedBackchannelAuthentication, error) {
@@ -97,6 +113,7 @@ func (s *BackchannelAuthenticationStore) DecideBackchannelAuthentication(_ conte
 	rec.status = decision.Status
 	rec.subject = decision.Subject
 	rec.scope = cloneStrings(decision.Scope)
+	rec.authorizationDetails = cloneRawMessage(decision.AuthorizationDetails)
 	rec.authTime = decision.AuthTime
 	rec.acr = decision.ACR
 	rec.amr = cloneStrings(decision.AMR)
@@ -152,6 +169,7 @@ func (s *BackchannelAuthenticationStore) PollBackchannelAuthentication(_ context
 		ClientID:                rec.clientID,
 		Subject:                 rec.subject,
 		Scope:                   cloneStrings(rec.scope),
+		AuthorizationDetails:    cloneRawMessage(rec.authorizationDetails),
 		AuthTime:                rec.authTime,
 		ACR:                     rec.acr,
 		AMR:                     cloneStrings(rec.amr),

@@ -266,6 +266,37 @@ func TestSessionStoreContractAgainstReference(t *testing.T) {
 	storage.TestSessionStoreContract(t, func() storage.SessionStore { return newRefSessionStore() })
 }
 
+type refNonceStore struct {
+	mu     sync.Mutex
+	nonces map[string]storage.NonceIssuance
+}
+
+func newRefNonceStore() *refNonceStore {
+	return &refNonceStore{nonces: make(map[string]storage.NonceIssuance)}
+}
+
+func (s *refNonceStore) Issue(_ context.Context, issuance storage.NonceIssuance) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.nonces[issuance.Nonce] = issuance
+	return nil
+}
+
+func (s *refNonceStore) Consume(_ context.Context, c storage.NonceConsumption) (storage.NonceRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	issuance, ok := s.nonces[c.Nonce]
+	if !ok {
+		return storage.NonceRecord{}, fmt.Errorf("unknown nonce")
+	}
+	delete(s.nonces, c.Nonce)
+	return storage.NonceRecord{ExpiresAt: issuance.ExpiresAt}, nil
+}
+
+func TestNonceStoreContractAgainstReference(t *testing.T) {
+	storage.TestNonceStoreContract(t, func() storage.NonceStore { return newRefNonceStore() })
+}
+
 type refAccessTokenStore struct {
 	mu     sync.Mutex
 	tokens map[[32]byte]storage.NewAccessToken

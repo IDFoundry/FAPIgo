@@ -105,6 +105,22 @@ for the full breakdown, including the four fixes (three driver-side,
 one genuine `client`/`internal/token` gap) that took the `-mtls`
 re-attempt from its first partial result to a clean 22/22.
 
+## RAR
+
+Rich Authorization Requests (RFC 9396, `authorization_details`) is
+implemented end-to-end across both the PAR-fed authorization-code flow
+and CIBA — the same `extension.RARDefinition`/`RARRegistry` types and
+validation logic wired into both, including a per-type narrowing hook
+so a resource owner may grant less than a client requested. Unlike
+CIBA, the OIDF suite has no dedicated RAR conformance plan at all, so
+this is deliberately outside the automated live-suite loop entirely,
+verified instead by `extension/rar_test.go`, `server/rar_test.go`
+(narrowing-grant validation, full PAR/CIBA end-to-end flows, rejection
+of ungranted/over-scoped `authorization_details`), and
+`cmd/conformance-as`'s own real-HTTP smoke tests
+(`TestSmokeAuthorizationCodeFlowWithAuthorizationDetails`,
+`TestSmokeCIBAFlowWithAuthorizationDetails`).
+
 ## Access-token format coverage
 
 `cmd/conformance-as` supports both of `server`'s access-token formats

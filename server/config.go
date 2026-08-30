@@ -285,7 +285,8 @@ type Config struct {
 
 	// RAR registers every Rich Authorization Requests (RFC 9396) detail
 	// type this server accepts in an "authorization_details" parameter,
-	// on both PAR and CIBA backchannel authentication requests. Unlike
+	// on PAR, CIBA backchannel authentication requests, and
+	// client_credentials token requests (RFC 9396 §6). Unlike
 	// Extensions, nil is not equivalent to an empty registry accepting
 	// nothing extra — it means "authorization_details" itself is
 	// rejected outright as an unregistered parameter, the same

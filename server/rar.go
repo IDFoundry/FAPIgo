@@ -7,12 +7,13 @@ import (
 	"github.com/idfoundry/fapigo/extension"
 )
 
-// authorizationDetailsParameter is the RFC 9396 §5 wire name shared by PAR
-// and CIBA backchannel authentication requests — structurally distinct
-// from an ordinary extension.Definition-backed parameter (it's a bounded
-// array of typed detail objects, not a single scalar/array value), so it's
-// validated against Config.RAR rather than Config.Extensions, even though
-// both end up stored the same way: as one more entry in the request's own
+// authorizationDetailsParameter is the RFC 9396 §5 wire name shared by PAR,
+// CIBA backchannel authentication requests, and client_credentials token
+// requests (RFC 9396 §6) — structurally distinct from an ordinary
+// extension.Definition-backed parameter (it's a bounded array of typed
+// detail objects, not a single scalar/array value), so it's validated
+// against Config.RAR rather than Config.Extensions, even though both end
+// up stored the same way: as one more entry in the request's own
 // Parameters map.
 const authorizationDetailsParameter = "authorization_details"
 
@@ -28,7 +29,8 @@ const authorizationDetailsParameter = "authorization_details"
 // uses for a malformed parameter — checkExtensions (PAR) and
 // checkBackchannelExtensions (CIBA) already apply the same per-flow split
 // for the generic extension.Registry, and this mirrors it rather than
-// picking one error code itself.
+// picking one error code itself; RequestClientCredentialsToken (which has
+// no request-object concept at all) always uses ErrorInvalidRequest.
 func (s *Server) parseRequestedAuthorizationDetails(params map[string]json.RawMessage) (json.RawMessage, error) {
 	raw, ok := params[authorizationDetailsParameter]
 	if !ok {

@@ -114,18 +114,24 @@ re-attempt from its first partial result to a clean 22/22.
 ## RAR
 
 Rich Authorization Requests (RFC 9396, `authorization_details`) is
-implemented end-to-end across both the PAR-fed authorization-code flow
-and CIBA — the same `extension.RARDefinition`/`RARRegistry` types and
-validation logic wired into both, including a per-type narrowing hook
-so a resource owner may grant less than a client requested. Unlike
-CIBA, the OIDF suite has no dedicated RAR conformance plan at all, so
-this is deliberately outside the automated live-suite loop entirely,
-verified instead by `extension/rar_test.go`, `server/rar_test.go`
-(narrowing-grant validation, full PAR/CIBA end-to-end flows, rejection
-of ungranted/over-scoped `authorization_details`), and
-`cmd/conformance-as`'s own real-HTTP smoke tests
-(`TestSmokeAuthorizationCodeFlowWithAuthorizationDetails`,
-`TestSmokeCIBAFlowWithAuthorizationDetails`).
+implemented end-to-end across the PAR-fed authorization-code flow,
+CIBA, and the client_credentials grant (RFC 9396 §6) — the same
+`extension.RARDefinition`/`RARRegistry` types wired into all three,
+though client_credentials is structurally simpler: PAR/CIBA both
+include a per-type narrowing hook so a resource owner may grant less
+than a client requested, but client_credentials has no resource owner
+at all, so `RARRegistry.Parse`'s own type/bounds check *is* the entire
+policy decision, and a valid request is issued verbatim (see
+ARCHITECTURE.md's own RAR section for the full detail). Unlike CIBA,
+the OIDF suite has no dedicated RAR conformance plan at all, so this is
+deliberately outside the automated live-suite loop entirely, verified
+instead by `extension/rar_test.go`, `server/rar_test.go`
+(narrowing-grant validation, full PAR/CIBA/client_credentials
+end-to-end flows, rejection of ungranted/over-scoped
+`authorization_details`), and `cmd/conformance-as`'s own real-HTTP
+smoke tests (`TestSmokeAuthorizationCodeFlowWithAuthorizationDetails`,
+`TestSmokeCIBAFlowWithAuthorizationDetails`,
+`TestSmokeClientCredentialsGrantFlowWithAuthorizationDetails`).
 
 ## OpenID Connect register profiles
 
@@ -156,7 +162,13 @@ client-auth-mtls-and-mtls}` containers rather than standing up new ones
 — this grant has no PAR/authorize/redirect_uri/browser hop at all, so
 nothing about container topology needed to change, only the token
 endpoint's own `grant_type` dispatch. **Confirmed live: all four
-clean — 15/15, 11/11, 10/10, 6/6 modules, 0 failures/0 warnings.**
+clean — 15/15, 11/11, 10/10, 6/6 modules, 0 failures/0 warnings.** Also
+supports Rich Authorization Requests (RFC 9396 §6) when `Config.RAR` is
+configured — see the [RAR](#rar) section above, since the suite has no
+plan variant that exercises `authorization_details` at all, this is
+verified by `server/client_credentials_test.go` and
+`TestSmokeClientCredentialsGrantFlowWithAuthorizationDetails`, not the
+live suite.
 
 One real, previously-undocumented finding: the OIDF suite's
 `fapi2-security-profile-final-test-plan` requires the `openid` variant

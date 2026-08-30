@@ -15,6 +15,7 @@ import (
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/extension"
 	"github.com/idfoundry/fapigo/internal/clientassertion"
 	"github.com/idfoundry/fapigo/internal/dpop"
 	"github.com/idfoundry/fapigo/internal/jose"
@@ -23,18 +24,25 @@ import (
 	"github.com/idfoundry/fapigo/storage"
 )
 
-// TestSmokeClientCredentialsGrantFlow drives the RFC 6749 §4.4
-// client_credentials grant against a real HTTP/TLS listener running the
-// exact newServerMux wiring main.go uses, with -client-credentials-grant
-// on. Unlike TestSmokeAuthorizationCodeFlow/TestSmokeMTLSFlow, this has
-// no PAR/authorize/consent step at all — it goes straight to /token —
-// so it builds the client assertion and DPoP proofs directly via
-// internal/clientassertion and internal/dpop rather than driving the
-// heavier client.Client, which is shaped for the authorization_code
-// flow this grant doesn't have. This is also the only Go-level exercise
-// of accountsHandler/buildAccountsURL (resource.go) — every other check
-// of those is live-suite-only (see conformance/README.md#client-credentials-grant).
-func TestSmokeClientCredentialsGrantFlow(t *testing.T) {
+// clientCredentialsSmokeServer bundles what both client_credentials smoke
+// tests below share: a live HTTP/TLS listener running the exact
+// newServerMux wiring main.go uses, with -client-credentials-grant on,
+// and the raw crypto.Signer key material needed to build a client
+// assertion and DPoP proofs directly — this grant has no PAR/authorize/
+// consent step at all, so there's nothing client.Client-shaped worth
+// driving through, unlike TestSmokeAuthorizationCodeFlow/TestSmokeMTLSFlow.
+type clientCredentialsSmokeServer struct {
+	httpClient      *http.Client
+	endpoints       server.Endpoints
+	accountsURL     fapi.URL
+	clientAuthPriv  *ecdsa.PrivateKey
+	dpopPriv        *ecdsa.PrivateKey
+	clientAuthKeyID string
+	clientID        fapi.ClientID
+}
+
+func newClientCredentialsSmokeServer(t *testing.T) clientCredentialsSmokeServer {
+	t.Helper()
 	cert, pool := selfSignedCert(t)
 	tcpListener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -124,26 +132,41 @@ func TestSmokeClientCredentialsGrantFlow(t *testing.T) {
 	t.Cleanup(func() { httpServer.Close() })
 
 	httpClient := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}
+	return clientCredentialsSmokeServer{
+		httpClient: httpClient, endpoints: endpoints, accountsURL: accountsURL,
+		clientAuthPriv: clientAuthPriv, dpopPriv: dpopPriv, clientAuthKeyID: clientAuthKeyID,
+		clientID: testClientID,
+	}
+}
+
+// TestSmokeClientCredentialsGrantFlow drives the RFC 6749 §4.4
+// client_credentials grant end to end over real HTTP: /token, then
+// /accounts with the issued access token. This is also the only
+// Go-level exercise of accountsHandler/buildAccountsURL (resource.go) —
+// every other check of those is live-suite-only (see
+// conformance/README.md#client-credentials-grant).
+func TestSmokeClientCredentialsGrantFlow(t *testing.T) {
+	s := newClientCredentialsSmokeServer(t)
 
 	now := time.Now()
 	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
-		Signer:    clientAuthPriv,
+		Signer:    s.clientAuthPriv,
 		Algorithm: fapi.ES256,
-		KeyID:     clientAuthKeyID,
-		ClientID:  string(testClientID),
-		Audience:  endpoints.Token.String(),
+		KeyID:     s.clientAuthKeyID,
+		ClientID:  string(s.clientID),
+		Audience:  s.endpoints.Token.String(),
 		Now:       now,
 		Lifetime:  time.Minute,
 	})
 	if err != nil {
 		t.Fatalf("create client assertion: %v", err)
 	}
-	tokenURL, err := url.Parse(endpoints.Token.String())
+	tokenURL, err := url.Parse(s.endpoints.Token.String())
 	if err != nil {
 		t.Fatalf("parse token url: %v", err)
 	}
 	tokenProof, err := dpop.CreateProof(dpop.ProofRequest{
-		Signer:    dpopPriv,
+		Signer:    s.dpopPriv,
 		Algorithm: fapi.ES256,
 		Method:    http.MethodPost,
 		URL:       tokenURL,
@@ -159,13 +182,13 @@ func TestSmokeClientCredentialsGrantFlow(t *testing.T) {
 		"client_assertion_type": {"urn:ietf:params:oauth:client-assertion-type:jwt-bearer"},
 		"client_assertion":      {assertion},
 	}
-	req, err := http.NewRequest(http.MethodPost, endpoints.Token.String(), strings.NewReader(form.Encode()))
+	req, err := http.NewRequest(http.MethodPost, s.endpoints.Token.String(), strings.NewReader(form.Encode()))
 	if err != nil {
 		t.Fatalf("build token request: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("DPoP", tokenProof)
-	res, err := httpClient.Do(req)
+	res, err := s.httpClient.Do(req)
 	if err != nil {
 		t.Fatalf("POST /token: %v", err)
 	}
@@ -191,9 +214,9 @@ func TestSmokeClientCredentialsGrantFlow(t *testing.T) {
 		t.Fatalf("access_token is empty")
 	}
 
-	accountsURLValue := accountsURL.URL()
+	accountsURLValue := s.accountsURL.URL()
 	resourceProof, err := dpop.CreateProof(dpop.ProofRequest{
-		Signer:      dpopPriv,
+		Signer:      s.dpopPriv,
 		Algorithm:   fapi.ES256,
 		Method:      http.MethodGet,
 		URL:         &accountsURLValue,
@@ -203,13 +226,13 @@ func TestSmokeClientCredentialsGrantFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create resource dpop proof: %v", err)
 	}
-	acctReq, err := http.NewRequest(http.MethodGet, accountsURL.String(), nil)
+	acctReq, err := http.NewRequest(http.MethodGet, s.accountsURL.String(), nil)
 	if err != nil {
 		t.Fatalf("build accounts request: %v", err)
 	}
 	acctReq.Header.Set("Authorization", "DPoP "+tokenResp.AccessToken)
 	acctReq.Header.Set("DPoP", resourceProof)
-	acctRes, err := httpClient.Do(acctReq)
+	acctRes, err := s.httpClient.Do(acctReq)
 	if err != nil {
 		t.Fatalf("GET /accounts: %v", err)
 	}
@@ -229,17 +252,104 @@ func TestSmokeClientCredentialsGrantFlow(t *testing.T) {
 	// without the matching DPoP proof must be rejected — proves this
 	// endpoint's own binding check runs, not just that the happy path
 	// works.
-	noProofReq, err := http.NewRequest(http.MethodGet, accountsURL.String(), nil)
+	noProofReq, err := http.NewRequest(http.MethodGet, s.accountsURL.String(), nil)
 	if err != nil {
 		t.Fatalf("build unbound accounts request: %v", err)
 	}
 	noProofReq.Header.Set("Authorization", "DPoP "+tokenResp.AccessToken)
-	noProofRes, err := httpClient.Do(noProofReq)
+	noProofRes, err := s.httpClient.Do(noProofReq)
 	if err != nil {
 		t.Fatalf("GET /accounts without dpop proof: %v", err)
 	}
 	defer noProofRes.Body.Close()
 	if noProofRes.StatusCode != http.StatusBadRequest {
 		t.Errorf("GET /accounts without dpop proof: status = %d, want %d", noProofRes.StatusCode, http.StatusBadRequest)
+	}
+}
+
+// TestSmokeClientCredentialsGrantFlowWithAuthorizationDetails covers RFC
+// 9396 §6's client_credentials support (server/client_credentials.go)
+// through this binary's own always-on newSampleRARRegistry wiring
+// (wiring.go/rar.go) — the same "prove both sides actually interoperate
+// over real HTTP" shape TestSmokeAuthorizationCodeFlowWithAuthorizationDetails
+// and TestSmokeCIBAFlowWithAuthorizationDetails already use for the
+// PAR/CIBA-shaped flows.
+func TestSmokeClientCredentialsGrantFlowWithAuthorizationDetails(t *testing.T) {
+	s := newClientCredentialsSmokeServer(t)
+
+	detail, err := extension.RARSet(sampleRARDefinition, sampleTransactionApprovalDetail{Actions: []string{"approve"}, Amount: "SGD 500.00"})
+	if err != nil {
+		t.Fatalf("RARSet: %v", err)
+	}
+	authorizationDetailsJSON, err := json.Marshal([]json.RawMessage{detail})
+	if err != nil {
+		t.Fatalf("marshal authorization_details: %v", err)
+	}
+
+	now := time.Now()
+	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
+		Signer:    s.clientAuthPriv,
+		Algorithm: fapi.ES256,
+		KeyID:     s.clientAuthKeyID,
+		ClientID:  string(s.clientID),
+		Audience:  s.endpoints.Token.String(),
+		Now:       now,
+		Lifetime:  time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("create client assertion: %v", err)
+	}
+	tokenURL, err := url.Parse(s.endpoints.Token.String())
+	if err != nil {
+		t.Fatalf("parse token url: %v", err)
+	}
+	tokenProof, err := dpop.CreateProof(dpop.ProofRequest{
+		Signer:    s.dpopPriv,
+		Algorithm: fapi.ES256,
+		Method:    http.MethodPost,
+		URL:       tokenURL,
+		Now:       now,
+	})
+	if err != nil {
+		t.Fatalf("create dpop proof: %v", err)
+	}
+
+	form := url.Values{
+		"grant_type":            {"client_credentials"},
+		"scope":                 {"accounts"},
+		"client_assertion_type": {"urn:ietf:params:oauth:client-assertion-type:jwt-bearer"},
+		"client_assertion":      {assertion},
+		"authorization_details": {string(authorizationDetailsJSON)},
+	}
+	req, err := http.NewRequest(http.MethodPost, s.endpoints.Token.String(), strings.NewReader(form.Encode()))
+	if err != nil {
+		t.Fatalf("build token request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("DPoP", tokenProof)
+	res, err := s.httpClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /token: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("POST /token: status = %d, want %d", res.StatusCode, http.StatusOK)
+	}
+	var tokenResp struct {
+		AccessToken          string          `json:"access_token"`
+		AuthorizationDetails json.RawMessage `json:"authorization_details"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&tokenResp); err != nil {
+		t.Fatalf("decode token response: %v", err)
+	}
+	if len(tokenResp.AuthorizationDetails) == 0 {
+		t.Fatalf("token response is missing authorization_details, want the granted transaction_approval echoed back")
+	}
+	var got []sampleTransactionApprovalDetail
+	if err := json.Unmarshal(tokenResp.AuthorizationDetails, &got); err != nil {
+		t.Fatalf("unmarshal authorization_details: %v", err)
+	}
+	if len(got) != 1 || got[0].Amount != "SGD 500.00" {
+		t.Fatalf("authorization_details = %s, want one SGD 500.00 transaction_approval", tokenResp.AuthorizationDetails)
 	}
 }

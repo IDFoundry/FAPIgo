@@ -418,8 +418,19 @@ func patchConformanceASConfig(path string, p profile, pub1, pub2, pubRS256 jwks)
 	if err := json.Unmarshal(top["clients"], &clients); err != nil {
 		return clientIDs, "", fmt.Errorf("parse clients: %w", err)
 	}
-	if len(clients) != 2 && len(clients) != 3 {
-		return clientIDs, "", fmt.Errorf("expected 2 or 3 clients, found %d", len(clients))
+	// Only requires *at least* 2 clients, not exactly 2 or 3 — the same
+	// "trailing clients this function doesn't own are safe to leave
+	// untouched" reasoning patchCIBAMTLSConfig's own doc comment
+	// explains: on a fresh clone this runs (baseline-plan.json etc. are
+	// gitignored, so the caller's already-exists guard never fires)
+	// against the already-committed config.json, which
+	// setupClientCredentialsGrantVariant has since grown to 5 entries
+	// for baseline/mtls (client1, client2, the RS256 client, and two
+	// client_credentials clients) — this function only ever reads/writes
+	// index 0, 1, and conditionally 2, so anything beyond that is safe
+	// to leave alone.
+	if len(clients) < 2 {
+		return clientIDs, "", fmt.Errorf("expected at least 2 clients, found %d", len(clients))
 	}
 
 	newJWKS := [2]jwks{pub1, pub2}
@@ -437,7 +448,12 @@ func patchConformanceASConfig(path string, p profile, pub1, pub2, pubRS256 jwks)
 		clients[i]["jwks"] = encoded
 	}
 
-	if len(clients) == 3 {
+	if len(clients) >= 3 {
+		// A third-or-later client already exists — position 2 is always
+		// the RS256/PS256 client specifically (the only one this or any
+		// other setup function ever inserts there; anything at index 3+
+		// is a later feature's own append, e.g. client_credentials'
+		// two clients, left untouched below).
 		if err := json.Unmarshal(clients[2]["id"], &rs256ClientID); err != nil {
 			return clientIDs, "", fmt.Errorf("parse clients[2].id: %w", err)
 		}
@@ -1070,8 +1086,15 @@ func patchClientAuthMTLSConfig(path string, thumb1, thumb2 string) (clientIDs [2
 	if err != nil {
 		return clientIDs, err
 	}
-	if len(clients) != 2 {
-		return clientIDs, fmt.Errorf("expected 2 clients, found %d", len(clients))
+	// At least 2, not exactly 2 — the same "trailing clients this
+	// function doesn't own are safe to leave untouched" reasoning
+	// patchCIBAMTLSConfig's own doc comment explains: on a fresh clone,
+	// setupClientCredentialsGrantVariant has since grown
+	// client-auth-mtls(-and-mtls).config.json to 4 entries (client1,
+	// client2, and two client_credentials clients); this function only
+	// ever reads/writes index 0 and 1.
+	if len(clients) < 2 {
+		return clientIDs, fmt.Errorf("expected at least 2 clients, found %d", len(clients))
 	}
 
 	thumbprints := [2]string{thumb1, thumb2}

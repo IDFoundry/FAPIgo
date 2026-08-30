@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Builds report.md from a completed conformance/scripts/run-all.sh run.
 
-run-all.sh calls this once, after all eleven suites have finished and
+run-all.sh calls this once, after all thirteen suites have finished and
 results.txt/the per-suite log files already exist — it doesn't run any
 part of the suites itself, only reads what's already on disk:
 
@@ -12,10 +12,10 @@ part of the suites itself, only reads what's already on disk:
   - as-{baseline,message-signing,ciba-mtls,ciba-ping,mtls,message
     -signing-mtls,client-auth-mtls}-retry.log, if retry-flaky-modules.py
     ran (only exists when that suite came back non-clean)
-  - rp-{baseline,message-signing,ciba-mtls}.log (cmd/conformance-client's
-    own stdout) — client-auth-mtls, ciba-ping, mtls, and
-    message-signing-mtls have no RP-side counterpart (see run-all.sh's
-    own comment on those legs)
+  - rp-{baseline,message-signing,ciba-mtls,client-auth-mtls,mtls,client
+    -auth-mtls-and-mtls}.log (cmd/conformance-client's own stdout) —
+    ciba-ping and message-signing-mtls have no RP-side counterpart (see
+    run-all.sh's own comment on those legs)
   - conformance/server/expected-{warnings,skips}-{baseline,message
     -signing,ciba-mtls,ciba-ping,mtls,message-signing-mtls,client-auth-mtls}.json
     — the same files run-test-plan.py itself reads, so every
@@ -51,7 +51,7 @@ ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 TEST_LINE_RE = re.compile(r"^(?:\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} )?Test \[(\d+):(\d+)\] (\S+) (\S+) (\S+) - result (\S+)\.")
 
 AS_SUITES = ["baseline", "message-signing", "ciba-mtls", "ciba-ping", "mtls", "message-signing-mtls", "client-auth-mtls"]
-RP_SUITES = ["baseline", "message-signing", "ciba-mtls", "client-auth-mtls"]
+RP_SUITES = ["baseline", "message-signing", "ciba-mtls", "client-auth-mtls", "mtls", "client-auth-mtls-and-mtls"]
 
 # Markdown separator row for a 2-column table (Module/Result).
 TABLE_SEPARATOR_2COL = "|---|---|"

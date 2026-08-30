@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Runs all eleven FAPI2 conformance suites this repo has driver support
-# for — AS baseline, AS message-signing, AS ciba-mtls, AS ciba-ping, AS
-# mtls, AS message-signing-mtls, AS client-auth-mtls, RP baseline, RP
-# message-signing, RP ciba-mtls, RP client-auth-mtls — against a
-# locally running OIDF conformance suite,
+# Runs all thirteen FAPI2 conformance suites this repo has driver
+# support for — AS baseline, AS message-signing, AS ciba-mtls, AS
+# ciba-ping, AS mtls, AS message-signing-mtls, AS client-auth-mtls, RP
+# baseline, RP message-signing, RP ciba-mtls, RP client-auth-mtls, RP
+# mtls, RP client-auth-mtls-and-mtls — against a locally running OIDF
+# conformance suite,
 # prints one combined summary at the end, and (via generate-report.py)
 # writes a fuller report.md alongside the raw per-suite logs — every
 # non-PASSED module, with the "why this is expected, not a defect"
@@ -50,10 +51,13 @@
 # (conformance-as-mtls, conformance-as-message-signing-mtls,
 # ../server/docker-compose.yml), generated via
 # ../server/scripts/setup-config/main.go's senderConstrainMTLS profile
-# flag. No RP-side counterpart yet:
-# cmd/conformance-client's own -mtls flag is currently hardcoded to
-# -profile=ciba only (see its own flag help text) — extending it to
-# -profile=baseline is a natural, separate follow-up.
+# flag. RP-side counterpart: cmd/conformance-client's own -mtls flag
+# now also works with -profile=baseline (previously hardcoded to
+# -profile=ciba only), closing the two RP register profiles that
+# combination unlocks — RP mtls (private key + MTLS) and RP
+# client-auth-mtls-and-mtls (MTLS + MTLS) below, alongside the
+# already-covered RP baseline (private key + DPoP) and RP
+# client-auth-mtls (MTLS + DPoP).
 #
 # Runs cmd/conformance-as under its default -access-token-format=jwt
 # only. An earlier version of this script looped the AS suites over
@@ -445,6 +449,20 @@ run_rp_plan "ciba-mtls" "ciba" -mtls
 # changes. See ../client/scripts/README.md's own client-authentication
 # mTLS section.
 run_rp_plan "client-auth-mtls" "baseline" -client-auth-mtls
+
+# RP mtls: cmd/conformance-client -profile=baseline -mtls — RFC 8705
+# §3 sender-constraining on the ordinary baseline plan, this driver's
+# own counterpart to AS mtls above (private_key_jwt client auth as
+# usual, mTLS-bound access tokens instead of DPoP). Completes the
+# "FAPI2SP RP private key + MTLS" register profile.
+run_rp_plan "mtls" "baseline" -mtls
+
+# RP client-auth-mtls-and-mtls: both flags together — a single
+# certificate covers RFC 8705 §2 client authentication and §3
+# sender-constraining at once (see run's own doc comment in main.go).
+# Completes the "FAPI2SP RP MTLS + MTLS" register profile, the last of
+# the four FAPI2SP auth×sender-constrain combos.
+run_rp_plan "client-auth-mtls-and-mtls" "baseline" -mtls -client-auth-mtls
 
 python3 "$SCRIPT_DIR/generate-report.py" "$WORKDIR" "$REPO_ROOT" || echo "warning: report generation failed (see above)" >&2
 

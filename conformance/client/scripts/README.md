@@ -37,6 +37,8 @@ generated in-process, once per run, and never persisted.
 go run ./cmd/conformance-client -profile=baseline
 go run ./cmd/conformance-client -profile=message-signing
 go run ./cmd/conformance-client -profile=baseline -client-auth-mtls
+go run ./cmd/conformance-client -profile=baseline -mtls
+go run ./cmd/conformance-client -profile=baseline -mtls -client-auth-mtls
 go run ./cmd/conformance-client -profile=ciba
 go run ./cmd/conformance-client -profile=ciba -mtls
 ```
@@ -49,17 +51,22 @@ go run ./cmd/conformance-client -profile=ciba -mtls
   its own section below; unlike the other two, most of its modules are
   expected to FAIL, for a confirmed, documented reason, not a driver
   bug). Defaults to `baseline`.
-- `-mtls`, with `-profile=ciba` only: use `storage.SenderConstrainMTLS`
-  (RFC 8705 §3, a throwaway self-signed client certificate) instead of
-  DPoP for sender-constraining — see this profile's own section below.
-  Ignored for `baseline`/`message-signing`.
+- `-mtls`, with `-profile=ciba` or `-profile=baseline`: use
+  `storage.SenderConstrainMTLS` (RFC 8705 §3, a throwaway self-signed
+  client certificate) instead of DPoP for sender-constraining — see
+  this profile's own section below. Ignored/invalid for
+  `message-signing`.
 - `-client-auth-mtls`, with `-profile=baseline` only: register via
   `storage.ClientAuthMethodSelfSignedTLSClientAuth` (RFC 8705 §2)
   instead of `private_key_jwt` — this driver presents a certificate
   (`client_id` + certificate, no `client_assertion`) at PAR and token
-  instead of a signed assertion; sender-constraining stays DPoP either
-  way, since the two axes are orthogonal — see this profile's own
-  section below. Not supported with `-profile=message-signing`/`ciba`.
+  instead of a signed assertion. Orthogonal to `-mtls`; combine both
+  for the MTLS+MTLS profile — see this profile's own section below. Not
+  supported with `-profile=message-signing`/`ciba`.
+- `-evidence-dir` writes one named log file per test module, in OIDF
+  RP-certification evidence format, alongside the usual combined
+  stdout log — see "Certification evidence" below. Empty (off) by
+  default; unused by daily CI.
 - `-suite` overrides the suite's base URL. Defaults to
   `https://localhost.emobix.co.uk:8443/`, the same dev-mode instance
   `conformance/server`'s own scripts target.
@@ -377,6 +384,98 @@ either side to sign or verify there — mirroring
 `client/jwks.go`'s own conditional omission of the
 `ClientAuthentication`-purpose key from `PublicJWKS` under a
 non-`private_key_jwt` `ClientAuthMethod`.
+
+## Sender-constrain mTLS (`-mtls` with `-profile=baseline`)
+
+The RP-side counterpart to `conformance/server`'s own AS mtls profile
+— RFC 8705 §3 sender-constraining on the ordinary baseline plan, this
+time with this driver playing the RP under test. Reuses
+`-profile=baseline`'s plan, just with `sender_constrain=mtls` instead
+of `dpop`; `client_auth_type` stays `private_key_jwt` unless combined
+with `-client-auth-mtls` below. Closes the "FAPI2SP RP private key +
+MTLS" register profile — previously unreachable, since `-mtls` was
+hardcoded to `-profile=ciba` only (see `run-all.sh`'s own header
+comment for the history).
+
+Mechanically this is `run()` (`main.go`) gaining the same
+`selfSignedClientCert`/`mtlsSuiteHTTPClient`/`client.certificate`
+machinery `-client-auth-mtls` already had, generalized behind a shared
+`clientAuthMTLS || senderConstrainMTLS` condition — one certificate
+covers both axes when combined, since RFC 8705 doesn't require separate
+certificates for §2 client auth vs. §3 binding, and the suite's own
+`EnsureClientCertificateMatches` condition reads the same
+`client.certificate` plan-config value regardless of which axis
+triggered the check. `runModule` sets `cfg.SenderConstrain =
+storage.SenderConstrainMTLS` and calls `applyMTLSEndpointAliases`
+(Token only — RFC 8705 §3 has no PAR-time pre-commitment concept, so
+unlike client authentication this never touches PAR), and the
+happy-path resource call switches to `callProtectedResourceBearer`
+(already built for CIBA `-mtls`, reused here unchanged) instead of a
+DPoP-proofed call.
+
+`-mtls -client-auth-mtls` together (both flags) exercises "FAPI2SP RP
+MTLS + MTLS" — the last of the four FAPI2SP auth×sender-constrain
+combos, and the last one this driver was missing.
+
+**Confirmed live: 20/20 PASS for both `-mtls` alone and `-mtls
+-client-auth-mtls` together, on the first attempt** — unlike every
+other mTLS re-attempt in this repo's conformance history, no driver
+fixes were needed here: all the underlying pieces
+(`client.Config.SenderConstrain`, `applyMTLSEndpointAliases`,
+`callProtectedResourceBearer`) already existed from the CIBA `-mtls`
+work, and `applyMTLSEndpointAliasesForClientAuth` from
+`-client-auth-mtls`'s own — this was purely a matter of wiring the
+existing pieces together behind the generalized flag.
+
+## Certification evidence (`-evidence-dir`)
+
+OIDF's RP certification process needs, for every test, evidence of
+what the client itself actually did — the suite grades the protocol
+interaction it can observe, but can't see inside the client under test,
+so a bare PASSED/FAILED grade alone isn't sufficient evidence for
+submission. OIDF's own guidance is explicit that this needs to be one
+appropriately-named file per test (e.g.
+`fapi2-client-test-invalid-iss.log`), not one combined log covering the
+whole run, and that a log which doesn't demonstrate the client's own
+behavior can result in a request to retest.
+
+`-evidence-dir=<path>` writes exactly that: one file per test module
+into `<path>`, named after the module's own suite-assigned test name
+(`writeEvidence`, `evidence.go`), containing:
+
+```
+TEST: <test name>
+RESULT: <suite-graded verdict>
+DRIVER: <this driver's own step/error, or a statement that the flow
+         completed without error>
+SUITE LOG: <suite base URL>api/log/<module ID>
+```
+
+The `DRIVER` line is exactly the same text this driver has always
+produced for negative-test modules (e.g. "complete authorization: jarm:
+signature verification failed") — this flag just gives each one its own
+named file instead of interleaving all of them into one shared stdout
+log. `-evidence-dir` is opt-in and unused by daily CI (`conformance.yml`
+only runs against a local suite instance, never
+`certification.openid.net` — see below), so it adds no new artifacts to
+the automated daily run.
+
+**Workflow for an actual certification run:** OIDF requires certification
+evidence to come from the OIDF-hosted production suite at
+`certification.openid.net`, not a local instance — and explicitly
+recommends against automating runs against it, reserving local suite
+runs (everything else in this README) for development. So the real
+certification run is a manual, one-off invocation:
+
+```
+go run ./cmd/conformance-client -suite=https://certification.openid.net/ \
+    -profile=baseline -evidence-dir=./evidence/private-key-dpop
+```
+
+repeated once per profile being certified (`-mtls`/`-client-auth-mtls`
+combinations, `-profile=message-signing` for JAR/JARM), collecting the
+resulting `evidence/` directory alongside the suite's own downloaded
+results ZIP from its "Publish for certification" step.
 
 ## Extending this driver
 

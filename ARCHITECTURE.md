@@ -820,10 +820,39 @@ own signed-request-object override, confirming mTLS sender-constraining
 composes correctly with JARM/signed request objects too. Full breakdown
 in `conformance/server/oidf-config/README.md`'s own section. Wired into
 `run-all.sh` as "AS mtls"/"AS message-signing-mtls" (two more
-`conformance-as` containers). No RP-side counterpart yet:
-`cmd/conformance-client`'s own `-mtls` flag is hardcoded to
-`-profile=ciba` only — extending it to `-profile=baseline` is a
-natural, separate follow-up.
+`conformance-as` containers).
+
+The RP side got the same generalization: `cmd/conformance-client`'s
+`-mtls` flag, previously hardcoded to `-profile=ciba` only, now also
+works with `-profile=baseline`, and combines with `-client-auth-mtls`
+(one shared certificate covers both RFC 8705 §2 and §3, since the
+suite's own `EnsureClientCertificateMatches` condition reads the same
+`client.certificate` plan-config value regardless of which axis
+triggered the check). This closes the two FAPI2SP RP register profiles
+that were unreachable before — "private key + MTLS" and "MTLS + MTLS"
+— alongside the already-covered "private key + DPoP"
+(`-profile=baseline`) and "MTLS + DPoP" (`-client-auth-mtls`), so all
+four FAPI2SP auth×sender-constrain combos now have a driver. **Confirmed
+live: 20/20 PASS for both, on the first attempt** — no driver fixes
+needed, since all the underlying library groundwork
+(`client.Config.SenderConstrain`/`ClientAuthMethod`,
+`applyMTLSEndpointAliases`/`ForClientAuth`, `callProtectedResourceBearer`)
+already existed from the CIBA `-mtls` and client-auth-mtls re-attempts
+above. Wired into `run-all.sh` as "RP mtls" and "RP
+client-auth-mtls-and-mtls". Full breakdown in
+`conformance/client/scripts/README.md`'s own "Sender-constrain mTLS"
+section.
+
+RP certification also needs evidence, per test, of what the client
+itself did — a bare suite-graded PASSED/FAILED isn't sufficient
+submission evidence on its own, since the suite can't see inside the
+client under test. `cmd/conformance-client`'s new `-evidence-dir` flag
+writes one named log file per test module (`evidence.go`) instead of
+the one combined stdout log this driver has always produced, opt-in and
+unused by daily CI — see `conformance/client/scripts/README.md`'s own
+"Certification evidence" section for the format and the actual
+certification-run workflow (against `certification.openid.net` by
+hand, never automated, same as every other suite this repo touches).
 
 Rich Authorization Requests (RFC 9396) has no OIDF conformance plan at
 all, unlike CIBA (which at least has `fapi-ciba-id1` to eventually

@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.20.0](https://github.com/IDFoundry/FAPIgo/compare/v0.19.0...v0.20.0) (2026-08-30)
+
+
+### Features
+
+* add first-class Rich Authorization Requests (RFC 9396) support ([#206](https://github.com/IDFoundry/FAPIgo/issues/206)) ([9408d3f](https://github.com/IDFoundry/FAPIgo/commit/9408d3f49792cac99a87f7b613abd3bf6fd797bf))
+* add per-type narrowing to RAR authorization_details grants ([c144c2e](https://github.com/IDFoundry/FAPIgo/commit/c144c2e73e142a7fc030173e01d59e8120e8a8e6))
+* add RARSet, the write-side counterpart to RARGet ([#209](https://github.com/IDFoundry/FAPIgo/issues/209)) ([7a25f44](https://github.com/IDFoundry/FAPIgo/commit/7a25f44f7cc12a214864a149062b3911318f8cca))
+* add Rich Authorization Requests support to the client package ([c7c2f4c](https://github.com/IDFoundry/FAPIgo/commit/c7c2f4c4dae5597bc8b02c723d95851f73ae8634))
+* thread Rich Authorization Requests through PAR and CIBA ([2400747](https://github.com/IDFoundry/FAPIgo/commit/2400747d87b1aa54c35f3a27b2e2b1156d0487c1))
+* wire Rich Authorization Requests into the reference AS and fapitest ([8fd28b8](https://github.com/IDFoundry/FAPIgo/commit/8fd28b86ec74f38a24e77c1efec0e1dba899a767))
+
+
+### Bug Fixes
+
+* validate granted scope against requested scope in CIBA ([#208](https://github.com/IDFoundry/FAPIgo/issues/208)) ([2445c3c](https://github.com/IDFoundry/FAPIgo/commit/2445c3cb610a7090f8581069dc9bcce393d4e552))
+
+
+### Reverts
+
+* undo direct-to-main RAR commits, pending PR ([2e5f1b9](https://github.com/IDFoundry/FAPIgo/commit/2e5f1b9791600d674d1720bff57f81c1e198ba7d))
+
 ## [0.19.0](https://github.com/IDFoundry/FAPIgo/compare/v0.18.2...v0.19.0) (2026-08-29)
 
 

@@ -110,6 +110,44 @@ func TestCompleteAuthorizationSuccessPlainProfile(t *testing.T) {
 	}
 }
 
+// TestCompleteAuthorizationRejectsGrantedScopeExceedingRequested covers
+// validateGrantedScopeSubset's rejection path directly — the request
+// only ever asks for "openid accounts" (standardAuthParams/
+// plainFormParameters), so granting "offline_access" alongside them must
+// be rejected, not silently widened into the issued authorization code.
+func TestCompleteAuthorizationRejectsGrantedScopeExceedingRequested(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	handle := beginInteraction(t, h)
+
+	subjectID, err := server.NewSubjectID("user-1")
+	if err != nil {
+		t.Fatalf("NewSubjectID: %v", err)
+	}
+	subject, err := server.NewAuthenticatedSubject(subjectID)
+	if err != nil {
+		t.Fatalf("NewAuthenticatedSubject: %v", err)
+	}
+	authCtx, err := server.NewAuthenticationContext(time.Now(), "", nil)
+	if err != nil {
+		t.Fatalf("NewAuthenticationContext: %v", err)
+	}
+
+	result, err := h.server.CompleteAuthorization(context.Background(), server.CompleteAuthorizationRequest{
+		Handle: handle,
+		Result: server.Authorize(subject, authCtx, server.GrantedAuthorization{Scope: []string{"openid", "accounts", "offline_access"}}),
+	})
+	if err != nil {
+		t.Fatalf("CompleteAuthorization: %v", err)
+	}
+	localErr, ok := result.(server.AuthorizationLocalError)
+	if !ok {
+		t.Fatalf("result = %T, want server.AuthorizationLocalError", result)
+	}
+	if localErr.Error.Code() != server.ErrorInvalidRequest {
+		t.Fatalf("Error.Code() = %v, want %v", localErr.Error.Code(), server.ErrorInvalidRequest)
+	}
+}
+
 func TestCompleteAuthorizationSuccessMessageSigningProfile(t *testing.T) {
 	h := newHarness(t, server.ProfileFAPISecurityWithMessageSigning, true)
 	handle := beginInteractionViaRequestObject(t, h)

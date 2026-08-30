@@ -49,13 +49,25 @@ func (s *Server) CompleteBackchannelAuthentication(ctx context.Context, req Comp
 			s.audit(ctx, AuditEventCompleteBackchannelAuthentication, "", AuditOutcomeFailure, string(err.Code()))
 			return err
 		}
+
+		// Looked up unconditionally (not just when authorization_details
+		// is granted, as before) — granted scope must be validated
+		// against the original request's own scope on every approval,
+		// mirroring completeAuthorize's identical check for the PAR flow.
+		pending, lookupErr := s.deps.Backchannel.LookupBackchannelAuthentication(ctx, handleHash)
+		if lookupErr != nil {
+			wrapped := newError(ErrorInvalidRequest, 400, "backchannel authentication handle is invalid, expired, or already decided", lookupErr)
+			s.audit(ctx, AuditEventCompleteBackchannelAuthentication, "", AuditOutcomeFailure, string(wrapped.Code()))
+			return wrapped
+		}
+		requestedScope, _ := jsonString(pending.Parameters, "scope")
+		if scopeErr := validateGrantedScopeSubset(result.grant.Scope, requestedScope); scopeErr != nil {
+			wrapped := newError(ErrorInvalidRequest, 400, "granted scope exceeds requested scope", scopeErr)
+			s.audit(ctx, AuditEventCompleteBackchannelAuthentication, pending.ClientID, AuditOutcomeFailure, string(wrapped.Code()))
+			return wrapped
+		}
+
 		if len(result.grant.AuthorizationDetails) > 0 {
-			pending, lookupErr := s.deps.Backchannel.LookupBackchannelAuthentication(ctx, handleHash)
-			if lookupErr != nil {
-				wrapped := newError(ErrorInvalidRequest, 400, "backchannel authentication handle is invalid, expired, or already decided", lookupErr)
-				s.audit(ctx, AuditEventCompleteBackchannelAuthentication, "", AuditOutcomeFailure, string(wrapped.Code()))
-				return wrapped
-			}
 			granted, validateErr := s.validateGrantedAuthorizationDetails(pending.Parameters[authorizationDetailsParameter], result.grant.AuthorizationDetails)
 			if validateErr != nil {
 				wrapped := newError(ErrorInvalidRequest, 400, "granted authorization_details exceeds what was requested", validateErr)

@@ -530,6 +530,31 @@ type overrideEntry struct {
 	Client *planClient `json:"client,omitempty"`
 }
 
+// baseOverrides returns the two override entries every plan config in
+// this tool needs regardless of client-authentication method: deny the
+// "user-rejects-authentication" module's consent, and limit the
+// reused-request-uri module to exactly one authorize visit before its
+// own retry visits consentBlock again.
+func baseOverrides(authorizeURL string, consentBlock browserBlock, matchLimit *int) map[string]overrideEntry {
+	return map[string]overrideEntry{
+		"fapi2-security-profile-final-user-rejects-authentication": {
+			Browser: []browserBlock{{
+				Match: authorizeURL,
+				Tasks: []browserTask{{
+					Task: "Deny", Match: authorizeURL,
+					Commands: [][]string{{"click", "xpath", "//button[@name='decision' and @value='deny']", "optional"}},
+				}},
+			}},
+		},
+		"fapi2-security-profile-final-par-ensure-reused-request-uri-prior-to-auth-completion-succeeds": {
+			Browser: []browserBlock{
+				{Match: authorizeURL, MatchLimit: matchLimit, Tasks: []browserTask{}},
+				consentBlock,
+			},
+		},
+	}
+}
+
 func writePlanConfig(path string, p profile, clientIDs [2]string, rs256ClientID string, priv1, priv2, privRS256 jwks) error {
 	authorizeURL := issuerURL(p.issuerHost, "/authorize*")
 	trueVal := true
@@ -586,24 +611,8 @@ func writePlanConfig(path string, p profile, clientIDs [2]string, rs256ClientID 
 		cfg.Resource.ResourceURL = issuerURL(p.issuerHost, userinfoPath)
 	}
 	cfg.Browser = []browserBlock{consentBlock}
-	cfg.Override = map[string]overrideEntry{
-		"fapi2-security-profile-final-user-rejects-authentication": {
-			Browser: []browserBlock{{
-				Match: authorizeURL,
-				Tasks: []browserTask{{
-					Task: "Deny", Match: authorizeURL,
-					Commands: [][]string{{"click", "xpath", "//button[@name='decision' and @value='deny']", "optional"}},
-				}},
-			}},
-		},
-		"fapi2-security-profile-final-par-ensure-reused-request-uri-prior-to-auth-completion-succeeds": {
-			Browser: []browserBlock{
-				{Match: authorizeURL, MatchLimit: &one, Tasks: []browserTask{}},
-				consentBlock,
-			},
-		},
-		"fapi2-security-profile-final-ensure-signed-client-assertion-with-RS256-fails": {Client: rs256Client},
-	}
+	cfg.Override = baseOverrides(authorizeURL, consentBlock, &one)
+	cfg.Override["fapi2-security-profile-final-ensure-signed-client-assertion-with-RS256-fails"] = overrideEntry{Client: rs256Client}
 	if p.name == "message-signing" || p.name == "message-signing-mtls" {
 		// Only reachable under a profile that actually sends signed
 		// request objects — see expected-skips-message-signing.json's
@@ -834,18 +843,30 @@ func generateMTLSCertKeyPEM(commonName string) (certPEM, keyPEM string, err erro
 // has since grown to 4 entries — this function only ever reads/writes
 // index 0 and 1, so those trailing ciba-ping clients are safe to leave
 // untouched.
-func patchCIBAMTLSConfig(path string, pubRSA, pubEC jwks) (clientIDs [2]string, err error) {
+// readConfigClients reads path (one of this tool's committed
+// conformance-as config.json files) and returns its top-level object
+// plus its "clients" array, both as json.RawMessage-valued maps so a
+// caller can patch or append individual client fields without
+// disturbing whatever this tool doesn't own — the shared first step
+// every patch/append function below needs.
+func readConfigClients(path string) (top map[string]json.RawMessage, clients []map[string]json.RawMessage, err error) {
 	data, err := os.ReadFile(path) // #nosec G304 -- path is this dev-only script's own fixed CLI argument, not untrusted input
 	if err != nil {
-		return clientIDs, err
+		return nil, nil, err
 	}
-	var top map[string]json.RawMessage
 	if err := json.Unmarshal(data, &top); err != nil {
-		return clientIDs, fmt.Errorf("parse: %w", err)
+		return nil, nil, fmt.Errorf("parse: %w", err)
 	}
-	var clients []map[string]json.RawMessage
 	if err := json.Unmarshal(top["clients"], &clients); err != nil {
-		return clientIDs, fmt.Errorf("parse clients: %w", err)
+		return nil, nil, fmt.Errorf("parse clients: %w", err)
+	}
+	return top, clients, nil
+}
+
+func patchCIBAMTLSConfig(path string, pubRSA, pubEC jwks) (clientIDs [2]string, err error) {
+	top, clients, err := readConfigClients(path)
+	if err != nil {
+		return clientIDs, err
 	}
 	if len(clients) < 2 {
 		return clientIDs, fmt.Errorf("expected at least 2 clients, found %d", len(clients))
@@ -1027,17 +1048,9 @@ func certPEMThumbprint(certPEM string) (string, error) {
 // already committed, the same preserve-what-this-tool-doesn't-own
 // approach patchConformanceASConfig/patchCIBAMTLSConfig use.
 func patchClientAuthMTLSConfig(path string, thumb1, thumb2 string) (clientIDs [2]string, err error) {
-	data, err := os.ReadFile(path) // #nosec G304 -- path is this dev-only script's own fixed CLI argument, not untrusted input
+	top, clients, err := readConfigClients(path)
 	if err != nil {
 		return clientIDs, err
-	}
-	var top map[string]json.RawMessage
-	if err := json.Unmarshal(data, &top); err != nil {
-		return clientIDs, fmt.Errorf("parse: %w", err)
-	}
-	var clients []map[string]json.RawMessage
-	if err := json.Unmarshal(top["clients"], &clients); err != nil {
-		return clientIDs, fmt.Errorf("parse clients: %w", err)
 	}
 	if len(clients) != 2 {
 		return clientIDs, fmt.Errorf("expected 2 clients, found %d", len(clients))
@@ -1161,23 +1174,7 @@ func setupClientAuthMTLSVariant(dir, name string, senderConstrainMTLS bool) erro
 		cfg.Resource.ResourceURL = issuerURL(issuerHost, userinfoPath)
 	}
 	cfg.Browser = []browserBlock{consentBlock}
-	cfg.Override = map[string]overrideEntry{
-		"fapi2-security-profile-final-user-rejects-authentication": {
-			Browser: []browserBlock{{
-				Match: authorizeURL,
-				Tasks: []browserTask{{
-					Task: "Deny", Match: authorizeURL,
-					Commands: [][]string{{"click", "xpath", "//button[@name='decision' and @value='deny']", "optional"}},
-				}},
-			}},
-		},
-		"fapi2-security-profile-final-par-ensure-reused-request-uri-prior-to-auth-completion-succeeds": {
-			Browser: []browserBlock{
-				{Match: authorizeURL, MatchLimit: &one, Tasks: []browserTask{}},
-				consentBlock,
-			},
-		},
-	}
+	cfg.Override = baseOverrides(authorizeURL, consentBlock, &one)
 	cfg.Options.BrowsercontrolCSSEnable = false
 
 	out, err := marshalIndentNoEscape(cfg)
@@ -1259,17 +1256,9 @@ func appendCIBAPingClients(path string, pub1, pub2 jwks, notificationEndpoint1, 
 	const clientID2 = conformanceKeyLabelPrefix + "ciba-ping-client-2"
 	clientIDs = [2]string{clientID1, clientID2}
 
-	data, err := os.ReadFile(path) // #nosec G304 -- path is this dev-only script's own fixed CLI argument, not untrusted input
+	top, clients, err := readConfigClients(path)
 	if err != nil {
 		return clientIDs, err
-	}
-	var top map[string]json.RawMessage
-	if err := json.Unmarshal(data, &top); err != nil {
-		return clientIDs, fmt.Errorf("parse: %w", err)
-	}
-	var clients []map[string]json.RawMessage
-	if err := json.Unmarshal(top["clients"], &clients); err != nil {
-		return clientIDs, fmt.Errorf("parse clients: %w", err)
 	}
 
 	newJWKS := map[string]jwks{clientID1: pub1, clientID2: pub2}
@@ -1464,17 +1453,9 @@ func appendCIBAClientAuthMTLSClients(path, idSuffix string, pub1, pub2 jwks, thu
 	clientID2 := conformanceKeyLabelPrefix + "ciba-" + idSuffix + "-client-2"
 	clientIDs = [2]string{clientID1, clientID2}
 
-	data, err := os.ReadFile(path) // #nosec G304 -- path is this dev-only script's own fixed CLI argument, not untrusted input
+	top, clients, err := readConfigClients(path)
 	if err != nil {
 		return clientIDs, err
-	}
-	var top map[string]json.RawMessage
-	if err := json.Unmarshal(data, &top); err != nil {
-		return clientIDs, fmt.Errorf("parse: %w", err)
-	}
-	var clients []map[string]json.RawMessage
-	if err := json.Unmarshal(top["clients"], &clients); err != nil {
-		return clientIDs, fmt.Errorf("parse clients: %w", err)
 	}
 
 	newEntries := map[string]jwks{clientID1: pub1, clientID2: pub2}

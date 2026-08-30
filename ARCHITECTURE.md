@@ -907,6 +907,24 @@ loop entirely, not a temporary gap, and is instead validated by
 `extension/rar_test.go`, `server/rar_test.go` and `cmd/conformance-as`'s
 own end-to-end smoke tests (`conformance/README.md#rar`).
 
+One more entry in that matrix review turned out not to be a gap at all
+on inspection: the register's separate "...OpenID Connect" AS/RP
+profiles aren't a distinct plan to add — they're the `openid`
+(AS)/`fapi_client_type` (RP) variant value every non-client_credentials
+leg this repo already runs selects (`openid_connect`/`oidc`, never
+`plain_oauth`). Confirmed live via `GET /api/plan/{id}`'s own
+`certificationProfileName` field against the already-running AS and RP
+baseline plans: `["FAPI2SP OP OpenID Connect", "FAPI2SP OP private
+key + DPoP"]` and `["FAPI2SP RP OpenID Connect", "FAPI2SP RP private
+key + DPoP"]` respectively — the same `openid_connect`/`oidc` value
+`run-all.sh` and `cmd/conformance-client`'s `profiles` map already
+request on every leg. Every "...OpenID Connect" register-profile entry
+this matrix covers is earned this way already, as a byproduct of the
+plans this repo runs for other reasons — the only variant that
+deliberately opts out is `openid=plain_oauth`, required by (and only
+by) the client_credentials grant below, since that grant has no
+end-user to ever produce an ID token for.
+
 The RFC 6749 §4.4 client_credentials grant closed the last real AS-side
 conformance gap this repo's own 15-profile OIDF matrix review surfaced
 — a genuinely missing grant type, not a conformance-setup gap like

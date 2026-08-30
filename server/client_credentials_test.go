@@ -113,19 +113,19 @@ func clientCredentialsFormParams(assertion, scope string) []server.FormParameter
 	}
 }
 
-// fakeClientCredentialsRARPolicy is a minimal, deterministic
-// server.ClientCredentialsRARPolicy: it grants every requested detail
+// fakeRARPolicy is a minimal, deterministic
+// server.RARPolicy: it grants every requested detail
 // object whose "type" member is in allow, up to maxGranted of them (0
 // means unlimited — enough to test allow/deny-by-type and narrowing a
 // multi-object request down to a subset), or returns authorizeErr
 // verbatim if set.
-type fakeClientCredentialsRARPolicy struct {
+type fakeRARPolicy struct {
 	allow        map[string]bool
 	maxGranted   int
 	authorizeErr error
 }
 
-func (p fakeClientCredentialsRARPolicy) Authorize(_ context.Context, _ fapi.ClientID, requested []json.RawMessage) ([]json.RawMessage, error) {
+func (p fakeRARPolicy) Authorize(_ context.Context, _ fapi.ClientID, requested []json.RawMessage) ([]json.RawMessage, error) {
 	if p.authorizeErr != nil {
 		return nil, p.authorizeErr
 	}
@@ -156,7 +156,7 @@ func (p fakeClientCredentialsRARPolicy) Authorize(_ context.Context, _ fapi.Clie
 // support has no resource-owner grant step of its own, so it doesn't
 // need newHarnessWithRAR's heavier PAR/CIBA-shaped wiring (backchannel
 // store, request-object algorithms, etc.).
-func newHarnessWithClientCredentialsGrantAndRAR(t *testing.T, registry *extension.RARRegistry, policy server.ClientCredentialsRARPolicy) harness {
+func newHarnessWithClientCredentialsGrantAndRAR(t *testing.T, registry *extension.RARRegistry, policy server.RARPolicy) harness {
 	t.Helper()
 	now := time.Now()
 	key := generateKey(t)
@@ -238,7 +238,7 @@ func newHarnessWithClientCredentialsGrantAndRAR(t *testing.T, registry *extensio
 // token's own claim.
 func TestRequestClientCredentialsTokenAuthorizationDetailsFlow(t *testing.T) {
 	registry := newTestRARRegistry(t)
-	policy := fakeClientCredentialsRARPolicy{allow: map[string]bool{"payment": true}}
+	policy := fakeRARPolicy{allow: map[string]bool{"payment": true}}
 	h := newHarnessWithClientCredentialsGrantAndRAR(t, registry, policy)
 	params := clientCredentialsFormParams(h.clientAssertion(t), "accounts")
 	params = append(params, formParam("authorization_details", `[{"type":"payment","actions":["approve"],"amount":"SGD 10.00"}]`))
@@ -276,7 +276,7 @@ func TestRequestClientCredentialsTokenAuthorizationDetailsFlow(t *testing.T) {
 // than a client asked for.
 func TestRequestClientCredentialsTokenAuthorizationDetailsPolicyNarrowsRequest(t *testing.T) {
 	registry := newTestRARRegistry(t)
-	policy := fakeClientCredentialsRARPolicy{allow: map[string]bool{"payment": true}, maxGranted: 1}
+	policy := fakeRARPolicy{allow: map[string]bool{"payment": true}, maxGranted: 1}
 	h := newHarnessWithClientCredentialsGrantAndRAR(t, registry, policy)
 	params := clientCredentialsFormParams(h.clientAssertion(t), "accounts")
 	params = append(params, formParam("authorization_details", `[{"type":"payment","actions":["approve"],"amount":"SGD 10.00"},{"type":"payment","actions":["approve"],"amount":"SGD 20.00"}]`))
@@ -364,7 +364,7 @@ func TestRequestClientCredentialsTokenRejectsAuthorizationDetailsWithoutPolicyCo
 // objects — RFC 9396 §6's own "the AS refuses the request" framing,
 // not a silent downgrade to no authorization_details.
 func TestRequestClientCredentialsTokenRejectsAuthorizationDetailsPolicyDeniesAll(t *testing.T) {
-	policy := fakeClientCredentialsRARPolicy{allow: map[string]bool{}} // denies every type
+	policy := fakeRARPolicy{allow: map[string]bool{}} // denies every type
 	h := newHarnessWithClientCredentialsGrantAndRAR(t, newTestRARRegistry(t), policy)
 	params := clientCredentialsFormParams(h.clientAssertion(t), "accounts")
 	params = append(params, formParam("authorization_details", `[{"type":"payment","actions":["approve"]}]`))
@@ -386,7 +386,7 @@ func TestRequestClientCredentialsTokenRejectsAuthorizationDetailsPolicyDeniesAll
 // unreachable policy engine) — surfaced the same way a denial is, since
 // the client-visible response can't distinguish the two.
 func TestRequestClientCredentialsTokenRejectsAuthorizationDetailsPolicyError(t *testing.T) {
-	policy := fakeClientCredentialsRARPolicy{authorizeErr: fmt.Errorf("policy engine unreachable")}
+	policy := fakeRARPolicy{authorizeErr: fmt.Errorf("policy engine unreachable")}
 	h := newHarnessWithClientCredentialsGrantAndRAR(t, newTestRARRegistry(t), policy)
 	params := clientCredentialsFormParams(h.clientAssertion(t), "accounts")
 	params = append(params, formParam("authorization_details", `[{"type":"payment","actions":["approve"]}]`))

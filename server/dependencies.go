@@ -107,10 +107,39 @@ type Dependencies struct {
 
 	// ClientCredentialsRARPolicy decides which Rich Authorization
 	// Requests (RFC 9396) detail objects a client_credentials token
-	// request is entitled to receive — see that type's own doc comment.
+	// request is entitled to receive — see RARPolicy's own doc comment.
 	// Optional, like IdentityClaims, but unlike IdentityClaims its
 	// absence is not permissive: a client_credentials request naming
 	// authorization_details with no policy configured is refused, not
 	// silently granted everything Config.RAR happens to have registered.
-	ClientCredentialsRARPolicy ClientCredentialsRARPolicy
+	ClientCredentialsRARPolicy RARPolicy
+
+	// AuthorizationCodeRARPolicy and CIBARARPolicy are the Authorization
+	// Code and CIBA grants' own request-time counterparts of
+	// ClientCredentialsRARPolicy — a defense-in-depth gate on which Rich
+	// Authorization Requests (RFC 9396) detail types a client may even
+	// *request* on each grant, consulted before the request is ever
+	// stored or shown to a resource owner. For Authorization Code, that
+	// means at PAR submission time (checkExtensions) — FAPI 2 makes PAR
+	// mandatory for this grant, so PAR is simply where its own request
+	// arrives, not a distinct grant of its own; the field is named for
+	// the grant it gates, not the endpoint. See RARPolicy's own doc
+	// comment for the full contract, including why an unconfigured
+	// policy refuses rather than falling back to "anything Config.RAR
+	// has registered is requestable" — the resource owner's own
+	// approval (GrantedAuthorization.AuthorizationDetails) remains the
+	// primary entitlement check for these two grants regardless of
+	// whether either field is set; this only narrows what a client may
+	// put in front of that resource owner in the first place.
+	//
+	// Deliberately two independent fields, not one shared between the
+	// two grants: neither checkExtensions (Authorization Code, called
+	// from PushAuthorizationRequest) nor checkBackchannelExtensions
+	// (CIBA) tells a RARPolicy which grant it's being consulted for, so
+	// a single shared field would give an integrator no way to permit
+	// authorization_details on one grant while refusing it on the
+	// other. Pass the same value to both when symmetric behavior is
+	// actually what's wanted.
+	AuthorizationCodeRARPolicy RARPolicy
+	CIBARARPolicy              RARPolicy
 }

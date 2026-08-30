@@ -55,18 +55,24 @@ func approvedAuthorizationDetails(requested extension.RARValues) []json.RawMessa
 	return granted
 }
 
-// sampleClientCredentialsRARPolicy is this reference server's own
-// server.ClientCredentialsRARPolicy (RFC 9396 §6) — a stand-in for a
-// real deployment's client-entitlement policy, the same way
-// approvedAuthorizationDetails above stands in for a real consent UI:
-// it grants every requested detail object verbatim, with no actual
-// per-client check. requested has already passed RARRegistry.Parse (a
-// registered type, correct shape, within bounds) by the time this is
-// called, so there's nothing left to reject here — a real deployment
-// would consult its own client-authorization records instead of always
-// returning requested unchanged.
-type sampleClientCredentialsRARPolicy struct{}
+// sampleRARPolicy is this reference server's own server.RARPolicy (RFC
+// 9396 §6) — a stand-in for a real deployment's client-entitlement
+// policy, the same way approvedAuthorizationDetails above stands in for
+// a real consent UI: it grants every requested detail object verbatim,
+// with no actual per-client check. requested has already passed
+// RARRegistry.Parse (a registered type, correct shape, within bounds)
+// by the time this is called, so there's nothing left to reject here —
+// a real deployment would consult its own client-authorization records
+// instead of always returning requested unchanged.
+//
+// Used for all three RARPolicy roles — Dependencies.ClientCredentialsRARPolicy
+// (the client_credentials grant's own entitlement check),
+// Dependencies.AuthorizationCodeRARPolicy, and Dependencies.CIBARARPolicy
+// (the Authorization Code and CIBA grants' own independent request-time
+// gates) — see wiring.go. Every role gets the same "approve everything"
+// stand-in here, matching approvedAuthorizationDetails' own scope.
+type sampleRARPolicy struct{}
 
-func (sampleClientCredentialsRARPolicy) Authorize(_ context.Context, _ fapi.ClientID, requested []json.RawMessage) ([]json.RawMessage, error) {
+func (sampleRARPolicy) Authorize(_ context.Context, _ fapi.ClientID, requested []json.RawMessage) ([]json.RawMessage, error) {
 	return requested, nil
 }

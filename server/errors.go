@@ -78,20 +78,22 @@ const (
 	// error code.
 	ErrorInvalidBindingMessage ErrorCode = "invalid_binding_message"
 
-	// ErrorInvalidAuthorizationDetails is RFC 9396 §6's dedicated error
-	// code for a client_credentials token request's own
-	// "authorization_details" — both when it's structurally invalid
-	// (unregistered type, wrong shape) and when Dependencies.ClientCredentialsRARPolicy
-	// refuses to grant it ("the AS refuses the request with the error
-	// code invalid_authorization_details (similar to invalid_scope)").
-	// PAR and CIBA's own equivalent checks reuse ErrorInvalidRequest/
-	// ErrorInvalidRequestObject instead — an existing, shipped choice
-	// this doesn't revisit — since RFC 9396 §14.6 only registers this
-	// code for the token and authorization endpoints, and
-	// RequestClientCredentialsToken is the only one of the three that
-	// ever rejects an authorization_details decision at the token
-	// endpoint itself (PAR/CIBA's own decision is a resource owner's,
-	// made later, at CompleteAuthorization/CompleteBackchannelAuthentication).
+	// ErrorInvalidAuthorizationDetails is RFC 9396 §6/§14.6's dedicated
+	// error code for an "authorization_details" entitlement decision —
+	// as distinct from a structural failure (unregistered type, wrong
+	// shape), which PAR and CIBA continue to report as
+	// ErrorInvalidRequest/ErrorInvalidRequestObject, an existing,
+	// shipped choice this doesn't revisit. Used by every RARPolicy
+	// rejection this package has: RequestClientCredentialsToken's own
+	// Dependencies.ClientCredentialsRARPolicy check (RFC 9396 §6's "the
+	// AS refuses the request with the error code
+	// invalid_authorization_details (similar to invalid_scope)"), and
+	// the Authorization Code and CIBA grants' own request-time
+	// Dependencies.AuthorizationCodeRARPolicy/CIBARARPolicy checks
+	// (checkExtensions/checkBackchannelExtensions) — RFC 9396 §14.6
+	// registers this code for both the token and the authorization
+	// endpoint, and PAR is this server's own pushed variant of the
+	// latter.
 	ErrorInvalidAuthorizationDetails ErrorCode = "invalid_authorization_details"
 )
 

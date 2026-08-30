@@ -344,7 +344,7 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 			return nil, nil, newError(ErrorInvalidRequest, 400, "a signed request object is required", nil)
 		}
 		plain := plainParamsToJSON(params)
-		tokenClaims, err := s.checkExtensions(plain, extension.SourcePlainParameter)
+		tokenClaims, err := s.checkExtensions(ctx, client.ID(), plain, extension.SourcePlainParameter)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -395,7 +395,7 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 	if err != nil {
 		return nil, nil, newError(ErrorInvalidRequestObject, 400, "request object verification failed", err)
 	}
-	tokenClaims, checkErr := s.checkExtensions(verified.Parameters, extension.SourceRequestObject)
+	tokenClaims, checkErr := s.checkExtensions(ctx, client.ID(), verified.Parameters, extension.SourceRequestObject)
 	if checkErr != nil {
 		return nil, nil, checkErr
 	}
@@ -414,7 +414,17 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 // JAR-6.2 is the applicable error family — matching what a client
 // embedding e.g. a stray "request_uri" claim inside its own request
 // object should see.
-func (s *Server) checkExtensions(params map[string]json.RawMessage, source extension.Source) (map[string]json.RawMessage, *Error) {
+//
+// Also runs Dependencies.AuthorizationCodeRARPolicy over any "authorization_details"
+// the request carries, once it's passed structural validation — see
+// RARPolicy's own doc comment for why this exists on top of the
+// resource-owner grant step CompleteAuthorization already enforces. On
+// success, params[authorizationDetailsParameter] is overwritten in place
+// with the policy-narrowed value — params is the same map the caller
+// (resolveAuthorizationParameters) goes on to persist as this PAR
+// record's own Parameters, so this mutation is what makes the narrowed
+// value the one a resource owner is ever shown.
+func (s *Server) checkExtensions(ctx context.Context, clientID fapi.ClientID, params map[string]json.RawMessage, source extension.Source) (map[string]json.RawMessage, *Error) {
 	values, err := s.cfg.Extensions.Parse(params, coreAuthorizationParameters, source)
 	if err != nil {
 		code := ErrorInvalidRequest
@@ -423,12 +433,20 @@ func (s *Server) checkExtensions(params map[string]json.RawMessage, source exten
 		}
 		return nil, newError(code, 400, "request contains an unregistered or invalid parameter", err)
 	}
-	if _, err := s.parseRequestedAuthorizationDetails(params); err != nil {
+	requestedAuthorizationDetails, err := s.parseRequestedAuthorizationDetails(params)
+	if err != nil {
 		code := ErrorInvalidRequest
 		if source == extension.SourceRequestObject {
 			code = ErrorInvalidRequestObject
 		}
 		return nil, newError(code, 400, "authorization_details is invalid", err)
+	}
+	if len(requestedAuthorizationDetails) > 0 {
+		granted, policyErr := s.applyRARPolicy(ctx, clientID, s.deps.AuthorizationCodeRARPolicy, requestedAuthorizationDetails)
+		if policyErr != nil {
+			return nil, newError(ErrorInvalidAuthorizationDetails, 400, "authorization_details is not permitted for this client", policyErr)
+		}
+		params[authorizationDetailsParameter] = granted
 	}
 	return extension.AsParameters(values, s.cfg.Extensions.Definitions()...), nil
 }

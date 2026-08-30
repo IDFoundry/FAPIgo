@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.1](https://github.com/IDFoundry/FAPIgo/compare/v0.22.0...v0.22.1) (2026-08-30)
+
+
+### Bug Fixes
+
+* relax setup-config's stale exact client-count checks ([#228](https://github.com/IDFoundry/FAPIgo/issues/228)) ([848f997](https://github.com/IDFoundry/FAPIgo/commit/848f997f23bed169cdbeee30613b723b7a191755))
+
 ## [0.22.0](https://github.com/IDFoundry/FAPIgo/compare/v0.21.0...v0.22.0) (2026-08-30)
 
 

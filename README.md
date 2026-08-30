@@ -59,8 +59,6 @@ core.
   Distinguished Name (DN) only — the alternative subject-alternative-name
   bindings (`san_dns`, `san_uri`, `san_ip`, `san_email`) are not
   implemented (`storage/client_repository.go`).
-- CIBA push delivery mode is not implemented — only poll and ping
-  (OpenID Connect CIBA Core 1.0 §7–§10; `storage/client_repository.go`).
 
 ```go
 import (

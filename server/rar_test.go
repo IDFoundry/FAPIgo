@@ -40,10 +40,14 @@ func newTestRARRegistry(t *testing.T) *extension.RARRegistry {
 }
 
 // newHarnessWithRAR mirrors newHarnessWithExtensions/newHarnessWithBackchannel,
-// combined: a harness with Config.RAR set, and CIBA fully wired (a real
+// combined: a harness with Config.RAR set, Dependencies.RARRequestPolicy
+// set to policy, and CIBA fully wired (a real
 // memstore.BackchannelAuthenticationStore, matching endpoint/algorithm/
 // limits), so the same harness can exercise both PAR and CIBA RAR flows.
-func newHarnessWithRAR(t *testing.T, profile server.Profile, registry *extension.RARRegistry) harness {
+// policy may be nil — TestPushAuthorizationRequestRejectsAuthorizationDetailsWithoutPolicyConfigured
+// and its CIBA counterpart deliberately pass nil to exercise that
+// rejection.
+func newHarnessWithRAR(t *testing.T, profile server.Profile, registry *extension.RARRegistry, policy server.RARPolicy) harness {
 	t.Helper()
 	now := time.Now()
 	key := generateKey(t)
@@ -117,6 +121,7 @@ func newHarnessWithRAR(t *testing.T, profile server.Profile, registry *extension
 		Random:              rand.Reader,
 		Backchannel:         memstore.NewBackchannelAuthenticationStore(),
 		BackchannelNotifier: server.NoBackchannelNotifications{},
+		RARRequestPolicy:    policy,
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {
@@ -168,7 +173,7 @@ func authorizationDetailsAccessTokenClaim(t *testing.T, raw string, publicKey an
 // --- PAR (plain-parameter path) -----------------------------------------
 
 func TestPushAuthorizationRequestPlainAuthorizationDetailsFlow(t *testing.T) {
-	h := newHarnessWithRAR(t, server.ProfileFAPISecurity, newTestRARRegistry(t))
+	h := newHarnessWithRAR(t, server.ProfileFAPISecurity, newTestRARRegistry(t), fakeRARPolicy{allow: map[string]bool{"payment": true}})
 
 	requested := `[{"type":"payment","actions":["approve"],"amount":"SGD 500.00"},{"type":"payment","actions":["approve"],"amount":"SGD 10.00"}]`
 	pushResult, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
@@ -252,7 +257,7 @@ func TestPushAuthorizationRequestPlainAuthorizationDetailsFlow(t *testing.T) {
 }
 
 func TestCompleteAuthorizationRejectsUnrequestedAuthorizationDetails(t *testing.T) {
-	h := newHarnessWithRAR(t, server.ProfileFAPISecurity, newTestRARRegistry(t))
+	h := newHarnessWithRAR(t, server.ProfileFAPISecurity, newTestRARRegistry(t), fakeRARPolicy{allow: map[string]bool{"payment": true}})
 
 	pushResult, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
 		HTTP: server.FormRequest{Parameters: plainFormParameters(t, h.clientAssertion(t), map[string]string{
@@ -311,8 +316,71 @@ func TestPushAuthorizationRequestRejectsAuthorizationDetailsWithoutRARConfigured
 	}
 }
 
+// TestPushAuthorizationRequestRejectsAuthorizationDetailsWithoutPolicyConfigured
+// covers Config.RAR being set (so authorization_details is structurally
+// accepted) but Dependencies.RARRequestPolicy left nil — the
+// "unconfigured is not permissive" case RARPolicy's own doc comment
+// describes, distinct from
+// TestPushAuthorizationRequestRejectsAuthorizationDetailsWithoutRARConfigured
+// above (which rejects earlier, at the structural-validation step,
+// because Config.RAR itself is nil).
+func TestPushAuthorizationRequestRejectsAuthorizationDetailsWithoutPolicyConfigured(t *testing.T) {
+	h := newHarnessWithRAR(t, server.ProfileFAPISecurity, newTestRARRegistry(t), nil) // policy left nil
+
+	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: plainFormParameters(t, h.clientAssertion(t), map[string]string{
+			"authorization_details": `[{"type":"payment","actions":["approve"]}]`,
+		})},
+	})
+	if err == nil {
+		t.Fatalf("PushAuthorizationRequest = nil error, want error (RARRequestPolicy is not configured)")
+	}
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidAuthorizationDetails {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidAuthorizationDetails)
+	}
+}
+
+// TestPushAuthorizationRequestRARRequestPolicyNarrowsWhatResourceOwnerSees
+// covers Dependencies.RARRequestPolicy trimming a multi-object request
+// down to a subset before it's ever stored or shown to a resource
+// owner — the request-time counterpart of
+// TestPushAuthorizationRequestPlainAuthorizationDetailsFlow's own
+// resource-owner-time narrowing (CompleteAuthorization).
+func TestPushAuthorizationRequestRARRequestPolicyNarrowsWhatResourceOwnerSees(t *testing.T) {
+	policy := fakeRARPolicy{allow: map[string]bool{"payment": true}, maxGranted: 1}
+	h := newHarnessWithRAR(t, server.ProfileFAPISecurity, newTestRARRegistry(t), policy)
+
+	requested := `[{"type":"payment","actions":["approve"],"amount":"SGD 500.00"},{"type":"payment","actions":["approve"],"amount":"SGD 10.00"}]`
+	pushResult, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: plainFormParameters(t, h.clientAssertion(t), map[string]string{
+			"authorization_details": requested,
+		})},
+	})
+	if err != nil {
+		t.Fatalf("PushAuthorizationRequest: %v", err)
+	}
+
+	action, err := h.server.BeginAuthorization(context.Background(), server.BeginAuthorizationRequest{
+		RequestURI: pushResult.RequestURI.String(), ClientID: testClientID,
+	})
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+	interaction, ok := action.(server.InteractionRequired)
+	if !ok {
+		t.Fatalf("action = %T, want server.InteractionRequired", action)
+	}
+	details, err := extension.RARGet(interaction.Interaction.AuthorizationDetails, paymentRARDef)
+	if err != nil {
+		t.Fatalf("RARGet: %v", err)
+	}
+	if len(details) != 1 || details[0].Fields.Amount != "SGD 500.00" {
+		t.Fatalf("resource owner was shown %+v, want only the first SGD 500.00 payment — the policy should have trimmed the second before storage", details)
+	}
+}
+
 func TestPushAuthorizationRequestRejectsMalformedAuthorizationDetails(t *testing.T) {
-	h := newHarnessWithRAR(t, server.ProfileFAPISecurity, newTestRARRegistry(t))
+	h := newHarnessWithRAR(t, server.ProfileFAPISecurity, newTestRARRegistry(t), fakeRARPolicy{allow: map[string]bool{"payment": true}})
 
 	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
 		HTTP: server.FormRequest{Parameters: plainFormParameters(t, h.clientAssertion(t), map[string]string{
@@ -330,7 +398,7 @@ func TestPushAuthorizationRequestRejectsMalformedAuthorizationDetails(t *testing
 }
 
 func TestBeginAuthorizationAuthorizationDetailsAbsentWhenNotRequested(t *testing.T) {
-	h := newHarnessWithRAR(t, server.ProfileFAPISecurity, newTestRARRegistry(t))
+	h := newHarnessWithRAR(t, server.ProfileFAPISecurity, newTestRARRegistry(t), fakeRARPolicy{allow: map[string]bool{"payment": true}})
 	action := pushAndBegin(t, h, nil)
 	interaction, ok := action.(server.InteractionRequired)
 	if !ok {
@@ -346,7 +414,7 @@ func TestBeginAuthorizationAuthorizationDetailsAbsentWhenNotRequested(t *testing
 }
 
 func TestCompleteAuthorizationRejectsAuthorizationDetailsGrantedButNeverRequested(t *testing.T) {
-	h := newHarnessWithRAR(t, server.ProfileFAPISecurity, newTestRARRegistry(t))
+	h := newHarnessWithRAR(t, server.ProfileFAPISecurity, newTestRARRegistry(t), fakeRARPolicy{allow: map[string]bool{"payment": true}})
 	// The pushed request carries no authorization_details at all.
 	action := pushAndBegin(t, h, nil)
 	interaction := action.(server.InteractionRequired)
@@ -374,7 +442,7 @@ func TestCompleteAuthorizationRejectsAuthorizationDetailsGrantedButNeverRequeste
 }
 
 func TestCompleteAuthorizationRejectsGrantedUnregisteredType(t *testing.T) {
-	h := newHarnessWithRAR(t, server.ProfileFAPISecurity, newTestRARRegistry(t))
+	h := newHarnessWithRAR(t, server.ProfileFAPISecurity, newTestRARRegistry(t), fakeRARPolicy{allow: map[string]bool{"payment": true}})
 
 	pushResult, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
 		HTTP: server.FormRequest{Parameters: plainFormParameters(t, h.clientAssertion(t), map[string]string{
@@ -424,7 +492,7 @@ func TestCompleteAuthorizationRejectsGrantedUnregisteredType(t *testing.T) {
 // withRequestedUserinfoClaims has already populated the access token's
 // claims map by the time withAuthorizationDetails runs.
 func TestExchangeAuthorizationCodeMergesAuthorizationDetailsWithExistingTokenClaims(t *testing.T) {
-	h := newHarnessWithRAR(t, server.ProfileFAPISecurity, newTestRARRegistry(t))
+	h := newHarnessWithRAR(t, server.ProfileFAPISecurity, newTestRARRegistry(t), fakeRARPolicy{allow: map[string]bool{"payment": true}})
 
 	pushResult, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
 		HTTP: server.FormRequest{Parameters: plainFormParameters(t, h.clientAssertion(t), map[string]string{
@@ -482,7 +550,7 @@ func TestExchangeAuthorizationCodeMergesAuthorizationDetailsWithExistingTokenCla
 // --- PAR (signed request object path) ------------------------------------
 
 func TestPushAuthorizationRequestJARAuthorizationDetailsAccepted(t *testing.T) {
-	h := newHarnessWithRAR(t, server.ProfileFAPISecurity, newTestRARRegistry(t))
+	h := newHarnessWithRAR(t, server.ProfileFAPISecurity, newTestRARRegistry(t), fakeRARPolicy{allow: map[string]bool{"payment": true}})
 
 	params := standardAuthParams(t)
 	params["authorization_details"] = jsonRaw(t, []testPaymentDetail{{Type: "payment", Actions: []string{"approve"}, Amount: "SGD 10.00"}})
@@ -519,8 +587,34 @@ func TestPushAuthorizationRequestJARAuthorizationDetailsAccepted(t *testing.T) {
 
 // --- CIBA ------------------------------------------------------------------
 
+// TestBeginBackchannelAuthenticationRejectsAuthorizationDetailsWithoutPolicyConfigured
+// is TestPushAuthorizationRequestRejectsAuthorizationDetailsWithoutPolicyConfigured's
+// CIBA counterpart.
+func TestBeginBackchannelAuthenticationRejectsAuthorizationDetailsWithoutPolicyConfigured(t *testing.T) {
+	h := newHarnessWithRAR(t, server.ProfileFAPISecurity, newTestRARRegistry(t), nil) // policy left nil
+	params := standardBackchannelParams(t)
+	params["authorization_details"] = jsonRaw(t, []testPaymentDetail{
+		{Type: "payment", Actions: []string{"approve"}},
+	})
+
+	requestObj := h.backchannelRequestObject(t, params)
+	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+		HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), requestObj)},
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+	localErr, ok := action.(server.BackchannelAuthenticationLocalError)
+	if !ok {
+		t.Fatalf("action = %T, want server.BackchannelAuthenticationLocalError (RARRequestPolicy is not configured)", action)
+	}
+	if localErr.Error.Code() != server.ErrorInvalidAuthorizationDetails {
+		t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorInvalidAuthorizationDetails)
+	}
+}
+
 func TestCIBAAuthorizationDetailsFlow(t *testing.T) {
-	h := newHarnessWithRAR(t, server.ProfileFAPISecurity, newTestRARRegistry(t))
+	h := newHarnessWithRAR(t, server.ProfileFAPISecurity, newTestRARRegistry(t), fakeRARPolicy{allow: map[string]bool{"payment": true}})
 
 	params := standardBackchannelParams(t)
 	params["authorization_details"] = jsonRaw(t, []testPaymentDetail{
@@ -579,7 +673,7 @@ func TestCIBAAuthorizationDetailsFlow(t *testing.T) {
 }
 
 func TestCompleteBackchannelAuthenticationRejectsUnrequestedAuthorizationDetails(t *testing.T) {
-	h := newHarnessWithRAR(t, server.ProfileFAPISecurity, newTestRARRegistry(t))
+	h := newHarnessWithRAR(t, server.ProfileFAPISecurity, newTestRARRegistry(t), fakeRARPolicy{allow: map[string]bool{"payment": true}})
 
 	params := standardBackchannelParams(t)
 	params["authorization_details"] = jsonRaw(t, []testPaymentDetail{

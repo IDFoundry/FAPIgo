@@ -107,10 +107,24 @@ type Dependencies struct {
 
 	// ClientCredentialsRARPolicy decides which Rich Authorization
 	// Requests (RFC 9396) detail objects a client_credentials token
-	// request is entitled to receive — see that type's own doc comment.
+	// request is entitled to receive — see RARPolicy's own doc comment.
 	// Optional, like IdentityClaims, but unlike IdentityClaims its
 	// absence is not permissive: a client_credentials request naming
 	// authorization_details with no policy configured is refused, not
 	// silently granted everything Config.RAR happens to have registered.
-	ClientCredentialsRARPolicy ClientCredentialsRARPolicy
+	ClientCredentialsRARPolicy RARPolicy
+
+	// RARRequestPolicy is PAR/CIBA's own request-time counterpart of
+	// ClientCredentialsRARPolicy — a defense-in-depth gate on which Rich
+	// Authorization Requests (RFC 9396) detail types a client may even
+	// *request*, consulted before the request is ever stored or shown to
+	// a resource owner. See RARPolicy's own doc comment for the full
+	// contract, including why an unconfigured policy refuses rather than
+	// falling back to "anything Config.RAR has registered is
+	// requestable" — the resource owner's own approval
+	// (GrantedAuthorization.AuthorizationDetails) remains the primary
+	// entitlement check for these two flows regardless of whether this
+	// field is set; this only narrows what a client may put in front of
+	// that resource owner in the first place.
+	RARRequestPolicy RARPolicy
 }

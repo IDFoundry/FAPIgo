@@ -452,27 +452,50 @@ registered into a `server.Config.RAR` (`*extension.RARRegistry`), separate
 from `Config.Extensions` because `authorization_details` is validated as
 a whole bounded array of typed detail objects (total size, nesting depth,
 per-type object count and size, duplicate/unknown JSON members), not
-parameter-by-parameter. It is wired identically into the PAR-fed
-authorization-code flow and the CIBA backchannel flow — the same
-`RARDefinition`s, the same `checkRAR`/`validateGrantedAuthorizationDetails`
-helpers (`server/rar.go`) — mirroring `scope`'s own request → interaction
-→ `GrantedAuthorization` → storage → token-claim lifecycle, so a resource
-owner may grant a narrower `authorization_details` array than was
-requested exactly the way a granted scope may narrow a requested one.
-The RFC 6749 §4.4 client_credentials grant supports it too (RFC 9396
-§6), but structurally differently: there is no resource owner to narrow
-anything against interactively, so a deployment-supplied
-`Dependencies.ClientCredentialsRARPolicy` makes that decision instead —
-`RARRegistry.Parse` only confirms the request is well-formed and
-registered, it is deliberately *not* treated as the entitlement decision
-itself (an unconfigured policy refuses any authorization_details, the
-same "unconfigured is not permissive" stance `Config.RAR` itself takes,
-rather than silently allowing anything structurally valid). The policy's
-own granted result is still checked through the existing
-`validateGrantedAuthorizationDetails` narrowing logic — it's the same
-"is this an acceptable subset of what was requested" check a resource
-owner's decision gets, just fed a programmatic decision instead of an
-interactive one (`server/client_credentials.go`).
+parameter-by-parameter. It is structurally validated identically across
+the PAR-fed authorization-code flow, the CIBA backchannel flow, and the
+RFC 6749 §4.4 client_credentials grant (RFC 9396 §6) — the same
+`RARDefinition`s, the same `parseRequestedAuthorizationDetails` helper
+(`server/rar.go`) — but the *entitlement* decision on top of that
+structural validation takes one of two shapes, both implementing the
+same `server.RARPolicy` interface:
+
+- **PAR/CIBA** (`Dependencies.RARRequestPolicy`, consulted by
+  `checkExtensions`/`checkBackchannelExtensions` before a request is
+  ever stored or shown to anyone): a defense-in-depth, request-time gate
+  on what a client may even *ask* for. The primary entitlement check for
+  these two flows remains the resource owner's own interactive decision
+  at `CompleteAuthorization`/`CompleteBackchannelAuthentication`
+  (`GrantedAuthorization.AuthorizationDetails`, checked by
+  `validateGrantedAuthorizationDetails` — mirroring `scope`'s own
+  request → interaction → `GrantedAuthorization` → storage →
+  token-claim lifecycle, so a resource owner may grant a narrower array
+  than was requested exactly the way a granted scope may narrow a
+  requested one); `RARRequestPolicy` narrows what's ever put in front of
+  that resource owner in the first place.
+- **client_credentials** (`Dependencies.ClientCredentialsRARPolicy`,
+  consulted by `RequestClientCredentialsToken` at token-issuance time):
+  this grant has no resource owner at all, so this policy is the *only*
+  entitlement check it ever gets.
+
+Both fields are optional, but neither's absence is permissive: a request
+naming `authorization_details` with no policy configured for the
+applicable field is refused with `ErrorInvalidAuthorizationDetails`
+(RFC 9396 §6's own dedicated error code) — `RARRegistry.Parse` only
+confirms a request is well-formed and registered, it is deliberately
+*not* treated as the entitlement decision itself, the same
+"unconfigured is not permissive" stance `Config.RAR` itself takes.
+Both roles funnel through one shared helper, `applyRARPolicy`
+(`server/rar.go`): call the configured `RARPolicy.Authorize`, then run
+its result back through `validateGrantedAuthorizationDetails` — the
+same "is this an acceptable subset of what was requested" check a
+resource owner's decision gets, just fed a programmatic decision
+instead of an interactive one. An empty result (no error) is a
+legitimate "deny everything requested" decision, surfaced as
+`ErrorInvalidAuthorizationDetails` rather than silently proceeding with
+no `authorization_details` at all — RFC 9396 §6's own "the AS refuses
+the request" framing.
+
 Whether a narrower grant is acceptable is, per type, decided by
 `RARDefinition.ValidateGrant(requested, granted T) error` — nil requires
 byte-for-byte (canonically re-encoded) equality; set, it can permit real

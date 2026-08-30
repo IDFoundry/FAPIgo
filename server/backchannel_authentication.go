@@ -272,7 +272,7 @@ func (s *Server) resolveBackchannelAuthenticationParameters(ctx context.Context,
 	if err != nil {
 		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "backchannel authentication request verification failed", err)
 	}
-	tokenClaims, checkErr := s.checkBackchannelExtensions(verified.Parameters)
+	tokenClaims, checkErr := s.checkBackchannelExtensions(ctx, client.ID(), verified.Parameters)
 	if checkErr != nil {
 		return verifiedBackchannelRequest{}, checkErr
 	}
@@ -280,14 +280,25 @@ func (s *Server) resolveBackchannelAuthenticationParameters(ctx context.Context,
 }
 
 // checkBackchannelExtensions is checkExtensions' CIBA counterpart —
-// same Config.Extensions registry, its own core-parameter allow-list.
-func (s *Server) checkBackchannelExtensions(params map[string]json.RawMessage) (map[string]json.RawMessage, *Error) {
+// same Config.Extensions registry, its own core-parameter allow-list,
+// and the same Dependencies.RARRequestPolicy narrowing (see
+// checkExtensions' own doc comment for the shared mechanism — params is
+// mutated in place the same way).
+func (s *Server) checkBackchannelExtensions(ctx context.Context, clientID fapi.ClientID, params map[string]json.RawMessage) (map[string]json.RawMessage, *Error) {
 	values, err := s.cfg.Extensions.Parse(params, coreBackchannelAuthenticationParameters, extension.SourceRequestObject)
 	if err != nil {
 		return nil, newError(ErrorInvalidRequest, 400, "request contains an unregistered or invalid parameter", err)
 	}
-	if _, err := s.parseRequestedAuthorizationDetails(params); err != nil {
+	requestedAuthorizationDetails, err := s.parseRequestedAuthorizationDetails(params)
+	if err != nil {
 		return nil, newError(ErrorInvalidRequest, 400, "authorization_details is invalid", err)
+	}
+	if len(requestedAuthorizationDetails) > 0 {
+		granted, policyErr := s.applyRARPolicy(ctx, clientID, s.deps.RARRequestPolicy, requestedAuthorizationDetails)
+		if policyErr != nil {
+			return nil, newError(ErrorInvalidAuthorizationDetails, 400, "authorization_details is not permitted for this client", policyErr)
+		}
+		params[authorizationDetailsParameter] = granted
 	}
 	return extension.AsParameters(values, s.cfg.Extensions.Definitions()...), nil
 }

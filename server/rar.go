@@ -1,9 +1,11 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
+	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/extension"
 )
 
@@ -97,6 +99,90 @@ func withAuthorizationDetails(details json.RawMessage, base map[string]json.RawM
 	}
 	merged[authorizationDetailsParameter] = details
 	return merged
+}
+
+// RARPolicy decides which of a set of Rich Authorization Requests (RFC
+// 9396) detail objects a client is entitled to receive — used in two
+// distinct roles, one per Dependencies field it may be assigned to:
+//
+//   - Dependencies.ClientCredentialsRARPolicy: RFC 9396 §6's "client's
+//     policy" check for the client_credentials grant, consulted at
+//     token-issuance time (RequestClientCredentialsToken). This grant
+//     has no resource owner at all, so this is the *only* entitlement
+//     check it ever gets.
+//   - Dependencies.RARRequestPolicy: a defense-in-depth, request-time
+//     gate for PAR and CIBA — consulted before a request's own
+//     authorization_details is ever stored or shown to a resource
+//     owner (checkExtensions/checkBackchannelExtensions), so an
+//     unentitled client can't even *ask* for a detail type, regardless
+//     of what a resource owner might otherwise approve. PAR/CIBA's own
+//     resource-owner grant step (validateGrantedAuthorizationDetails,
+//     driven by GrantedAuthorization.AuthorizationDetails) remains the
+//     primary entitlement check for those two flows either way — this
+//     is additional narrowing on top of it, not a replacement for it.
+//
+// Both fields are optional, but neither's absence is permissive: a
+// request naming authorization_details with no policy configured for
+// the applicable field is refused (applyRARPolicy), the same
+// "unconfigured is not the same as an empty registry accepting nothing
+// extra" stance Config.RAR itself takes — every registered RAR type is
+// available to be *requested* once Config.RAR is set, but nothing is
+// ever *entitled* to be granted, or even asked for, without an explicit
+// policy decision saying so.
+type RARPolicy interface {
+	// Authorize returns the subset of requested (each entry one of its
+	// already-validated — RARRegistry.Parse has run — detail objects)
+	// that clientID's own policy permits, narrowed or reordered however
+	// the implementation decides; applyRARPolicy checks the result is
+	// an acceptable narrowing of requested the same way
+	// validateGrantedAuthorizationDetails already checks a resource
+	// owner's own decision (RARDefinition.ValidateGrant, or exact-match
+	// if that hook is nil for a given type). Returning an empty granted
+	// (no error) is a legitimate "deny everything requested" decision —
+	// applyRARPolicy surfaces that as ErrorInvalidAuthorizationDetails
+	// itself, so an implementation doesn't need to return an error just
+	// to express a full denial. Returning an error instead signals a
+	// policy-evaluation failure (a lookup error, an unreachable policy
+	// engine) — also surfaced as ErrorInvalidAuthorizationDetails, since
+	// the caller cannot tell the two apart from the client-visible
+	// response.
+	Authorize(ctx context.Context, clientID fapi.ClientID, requested []json.RawMessage) ([]json.RawMessage, error)
+}
+
+// applyRARPolicy narrows requested (already structurally validated by
+// parseRequestedAuthorizationDetails — a registered type, correct
+// shape, within bounds) against policy — the shared implementation
+// behind both RequestClientCredentialsToken's own
+// Dependencies.ClientCredentialsRARPolicy check and PAR/CIBA's
+// request-time Dependencies.RARRequestPolicy check. requested empty (no
+// authorization_details in the request at all) returns (nil, nil)
+// unconditionally, even with policy == nil — a request that never asked
+// for anything has nothing for a policy to decide. Every caller wraps a
+// non-nil error in ErrorInvalidAuthorizationDetails (RFC 9396 §6's own
+// dedicated code for exactly this decision).
+func (s *Server) applyRARPolicy(ctx context.Context, clientID fapi.ClientID, policy RARPolicy, requested json.RawMessage) (json.RawMessage, error) {
+	if len(requested) == 0 {
+		return nil, nil
+	}
+	if policy == nil {
+		return nil, fmt.Errorf("no authorization_details policy is configured")
+	}
+	var requestedObjects []json.RawMessage
+	if err := json.Unmarshal(requested, &requestedObjects); err != nil {
+		return nil, fmt.Errorf("failed to decode validated authorization_details: %w", err)
+	}
+	granted, err := policy.Authorize(ctx, clientID, requestedObjects)
+	if err != nil {
+		return nil, fmt.Errorf("authorization_details policy rejected the request: %w", err)
+	}
+	if len(granted) == 0 {
+		return nil, fmt.Errorf("policy does not permit any of the requested authorization_details")
+	}
+	validated, err := s.validateGrantedAuthorizationDetails(requested, granted)
+	if err != nil {
+		return nil, fmt.Errorf("policy decision is not an acceptable narrowing of the request: %w", err)
+	}
+	return validated, nil
 }
 
 // rarValuesFromStoredParameters best-effort re-parses an

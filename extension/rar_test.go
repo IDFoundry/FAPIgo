@@ -197,3 +197,141 @@ func TestRARRegistryParseRejectsValidatorFailure(t *testing.T) {
 		t.Fatalf("Parse(validator failure) = nil error, want error")
 	}
 }
+
+// --- RARRegistry.ValidateGrant -------------------------------------------
+
+func TestRARRegistryValidateGrantAcceptsExactMatchByDefault(t *testing.T) {
+	reg, err := extension.NewRARRegistry(4096, 4, paymentDef)
+	if err != nil {
+		t.Fatalf("NewRARRegistry: %v", err)
+	}
+	requested, err := reg.Parse(json.RawMessage(`[{"type":"payment_initiation","instructed_amount":"100.00"}]`))
+	if err != nil {
+		t.Fatalf("Parse(requested): %v", err)
+	}
+	granted, err := reg.Parse(json.RawMessage(`[{"type":"payment_initiation","instructed_amount":"100.00"}]`))
+	if err != nil {
+		t.Fatalf("Parse(granted): %v", err)
+	}
+	if err := reg.ValidateGrant(requested, granted); err != nil {
+		t.Fatalf("ValidateGrant(identical objects) = %v, want nil", err)
+	}
+}
+
+func TestRARRegistryValidateGrantAcceptsSubsetByDroppingObjects(t *testing.T) {
+	reg, err := extension.NewRARRegistry(4096, 4, paymentDef)
+	if err != nil {
+		t.Fatalf("NewRARRegistry: %v", err)
+	}
+	requested, err := reg.Parse(json.RawMessage(`[{"type":"payment_initiation","instructed_amount":"100.00"},{"type":"payment_initiation","instructed_amount":"10.00"}]`))
+	if err != nil {
+		t.Fatalf("Parse(requested): %v", err)
+	}
+	granted, err := reg.Parse(json.RawMessage(`[{"type":"payment_initiation","instructed_amount":"10.00"}]`))
+	if err != nil {
+		t.Fatalf("Parse(granted): %v", err)
+	}
+	if err := reg.ValidateGrant(requested, granted); err != nil {
+		t.Fatalf("ValidateGrant(dropped one object) = %v, want nil", err)
+	}
+}
+
+func TestRARRegistryValidateGrantRejectsUnrequestedObjectByDefault(t *testing.T) {
+	reg, err := extension.NewRARRegistry(4096, 4, paymentDef)
+	if err != nil {
+		t.Fatalf("NewRARRegistry: %v", err)
+	}
+	requested, err := reg.Parse(json.RawMessage(`[{"type":"payment_initiation","instructed_amount":"100.00"}]`))
+	if err != nil {
+		t.Fatalf("Parse(requested): %v", err)
+	}
+	// A different amount than what was requested — not a subset, and
+	// with no ValidateGrant hook this type has no narrowing allowance at
+	// all, so this must be rejected.
+	granted, err := reg.Parse(json.RawMessage(`[{"type":"payment_initiation","instructed_amount":"999999.00"}]`))
+	if err != nil {
+		t.Fatalf("Parse(granted): %v", err)
+	}
+	if err := reg.ValidateGrant(requested, granted); !errors.Is(err, extension.ErrRARGrantExceedsRequest) {
+		t.Fatalf("ValidateGrant(unrequested amount) = %v, want errors.Is ErrRARGrantExceedsRequest", err)
+	}
+}
+
+func TestRARRegistryValidateGrantRejectsMoreObjectsThanRequested(t *testing.T) {
+	reg, err := extension.NewRARRegistry(4096, 4, paymentDef)
+	if err != nil {
+		t.Fatalf("NewRARRegistry: %v", err)
+	}
+	requested, err := reg.Parse(json.RawMessage(`[{"type":"payment_initiation","instructed_amount":"100.00"}]`))
+	if err != nil {
+		t.Fatalf("Parse(requested): %v", err)
+	}
+	// Two identical objects granted, but only one was ever requested.
+	granted, err := reg.Parse(json.RawMessage(`[{"type":"payment_initiation","instructed_amount":"100.00"},{"type":"payment_initiation","instructed_amount":"100.00"}]`))
+	if err != nil {
+		t.Fatalf("Parse(granted): %v", err)
+	}
+	if err := reg.ValidateGrant(requested, granted); !errors.Is(err, extension.ErrRARGrantExceedsRequest) {
+		t.Fatalf("ValidateGrant(more objects than requested) = %v, want errors.Is ErrRARGrantExceedsRequest", err)
+	}
+}
+
+func TestRARRegistryValidateGrantHonorsPerTypeNarrowingHook(t *testing.T) {
+	// narrowable permits a granted InstructedAmt that is numerically no
+	// greater than what was requested — real field-level narrowing,
+	// beyond exact match.
+	narrowable := extension.RARDefinition[paymentDetail]{
+		Type: "payment_initiation", MaxObjects: 5, MaxBytesPerObject: 512,
+		ValidateGrant: func(requested, granted paymentDetail) error {
+			if granted.InstructedAmt > requested.InstructedAmt {
+				return errors.New("granted amount exceeds requested amount")
+			}
+			return nil
+		},
+	}
+	reg, err := extension.NewRARRegistry(4096, 4, narrowable)
+	if err != nil {
+		t.Fatalf("NewRARRegistry: %v", err)
+	}
+	requested, err := reg.Parse(json.RawMessage(`[{"type":"payment_initiation","instructed_amount":"500.00"}]`))
+	if err != nil {
+		t.Fatalf("Parse(requested): %v", err)
+	}
+
+	granted, err := reg.Parse(json.RawMessage(`[{"type":"payment_initiation","instructed_amount":"100.00"}]`))
+	if err != nil {
+		t.Fatalf("Parse(granted): %v", err)
+	}
+	if err := reg.ValidateGrant(requested, granted); err != nil {
+		t.Fatalf("ValidateGrant(narrowed amount) = %v, want nil", err)
+	}
+
+	tooMuch, err := reg.Parse(json.RawMessage(`[{"type":"payment_initiation","instructed_amount":"900.00"}]`))
+	if err != nil {
+		t.Fatalf("Parse(tooMuch): %v", err)
+	}
+	if err := reg.ValidateGrant(requested, tooMuch); !errors.Is(err, extension.ErrRARGrantExceedsRequest) {
+		t.Fatalf("ValidateGrant(amount exceeding request) = %v, want errors.Is ErrRARGrantExceedsRequest", err)
+	}
+}
+
+func TestRARRegistryValidateGrantRejectsTypeNeverRequested(t *testing.T) {
+	accountDef := extension.RARDefinition[struct {
+		Type string `json:"type"`
+	}]{Type: "account_information", MaxObjects: 1, MaxBytesPerObject: 128}
+	reg, err := extension.NewRARRegistry(4096, 4, paymentDef, accountDef)
+	if err != nil {
+		t.Fatalf("NewRARRegistry: %v", err)
+	}
+	requested, err := reg.Parse(json.RawMessage(`[{"type":"payment_initiation","instructed_amount":"100.00"}]`))
+	if err != nil {
+		t.Fatalf("Parse(requested): %v", err)
+	}
+	granted, err := reg.Parse(json.RawMessage(`[{"type":"account_information"}]`))
+	if err != nil {
+		t.Fatalf("Parse(granted): %v", err)
+	}
+	if err := reg.ValidateGrant(requested, granted); err == nil {
+		t.Fatalf("ValidateGrant(type never requested) = nil error, want error")
+	}
+}

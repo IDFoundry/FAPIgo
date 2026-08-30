@@ -27,6 +27,16 @@ type RARDefinition[T any] struct {
 	// Validate, if non-nil, applies extra semantic checks beyond T's JSON
 	// shape.
 	Validate func(T) error
+
+	// ValidateGrant, if non-nil, decides whether a granted detail object
+	// (typically a resource owner's narrowed subset of what a client
+	// requested — see RARRegistry.ValidateGrant) is an acceptable
+	// narrowing of the requested object it's matched against, e.g.
+	// approving a lower payment amount or a subset of an "actions" list.
+	// If nil, a granted object of this type must be byte-for-byte
+	// identical (once canonically re-encoded) to the requested object it
+	// matches — no narrowing beyond dropping whole objects is permitted.
+	ValidateGrant func(requested, granted T) error
 }
 
 // RARDetail is one validated authorization_details object: its type and
@@ -43,6 +53,7 @@ type registeredRAR interface {
 	maxObjects() int
 	maxBytesPerObject() int
 	decodeCheck(raw json.RawMessage) error
+	validateGrant(requestedRaw, grantedRaw json.RawMessage) error
 }
 
 func (d RARDefinition[T]) rarType() string        { return d.Type }
@@ -60,6 +71,38 @@ func (d RARDefinition[T]) decodeCheck(raw json.RawMessage) error {
 		if err := d.Validate(v); err != nil {
 			return fmt.Errorf("extension: authorization_details type %q: %w", d.Type, err)
 		}
+	}
+	return nil
+}
+
+// validateGrant decides whether grantedRaw is an acceptable narrowing of
+// requestedRaw — see RARDefinition.ValidateGrant's own doc comment for the
+// default (exact-match) behavior when it is nil.
+func (d RARDefinition[T]) validateGrant(requestedRaw, grantedRaw json.RawMessage) error {
+	var requested, granted T
+	if err := json.Unmarshal(requestedRaw, &requested); err != nil {
+		return fmt.Errorf("extension: authorization_details type %q: malformed requested value: %w", d.Type, err)
+	}
+	if err := json.Unmarshal(grantedRaw, &granted); err != nil {
+		return fmt.Errorf("extension: authorization_details type %q: malformed granted value: %w", d.Type, err)
+	}
+	if d.ValidateGrant != nil {
+		if err := d.ValidateGrant(requested, granted); err != nil {
+			return fmt.Errorf("extension: authorization_details type %q: %w", d.Type, err)
+		}
+		return nil
+	}
+
+	canonicalRequested, err := json.Marshal(requested)
+	if err != nil {
+		return fmt.Errorf("extension: authorization_details type %q: %w", d.Type, err)
+	}
+	canonicalGranted, err := json.Marshal(granted)
+	if err != nil {
+		return fmt.Errorf("extension: authorization_details type %q: %w", d.Type, err)
+	}
+	if !bytes.Equal(canonicalRequested, canonicalGranted) {
+		return fmt.Errorf("%w: type %q", ErrRARGrantExceedsRequest, d.Type)
 	}
 	return nil
 }
@@ -178,6 +221,54 @@ func (r *RARRegistry) Parse(raw json.RawMessage) (RARValues, error) {
 		values.byType[head.Type] = append(values.byType[head.Type], objRaw)
 	}
 	return values, nil
+}
+
+// ValidateGrant checks that granted is no more than requested was: every
+// granted detail object must correspond to one of the requested objects of
+// the same type not already matched to another granted object. Per type, a
+// registered RARDefinition's own ValidateGrant hook decides whether a
+// granted object may narrow the requested object it's matched against
+// (e.g. a lower payment amount, or a subset of an "actions" list); when a
+// type's ValidateGrant is nil, the two must be byte-for-byte identical once
+// canonically re-encoded. Matching is greedy, in array order — RFC 9396
+// does not mandate a matching algorithm, only that an authorization server
+// "may grant less" than was requested; this is a deliberate, documented
+// choice, not a spec requirement.
+//
+// granted must already have been produced by this same registry's own
+// Parse (so every type it names is registered and every object already
+// passed its own decodeCheck) — ValidateGrant only checks granted against
+// requested, not granted's own well-formedness again.
+func (r *RARRegistry) ValidateGrant(requested, granted RARValues) error {
+	consumed := make(map[string][]bool, len(requested.byType))
+	for typ, raws := range requested.byType {
+		consumed[typ] = make([]bool, len(raws))
+	}
+	for typ, grantedRaws := range granted.byType {
+		def, ok := r.byType[typ]
+		if !ok {
+			return fmt.Errorf("%w: %q", ErrRARUnregisteredType, typ)
+		}
+		requestedRaws := requested.byType[typ]
+		usedIdx := consumed[typ]
+		for _, grantedRaw := range grantedRaws {
+			matched := false
+			for i, requestedRaw := range requestedRaws {
+				if usedIdx[i] {
+					continue
+				}
+				if err := def.validateGrant(requestedRaw, grantedRaw); err == nil {
+					usedIdx[i] = true
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				return fmt.Errorf("%w: type %q", ErrRARGrantExceedsRequest, typ)
+			}
+		}
+	}
+	return nil
 }
 
 // checkJSONDepth reports whether raw's JSON nesting ever exceeds

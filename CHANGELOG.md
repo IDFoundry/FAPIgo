@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.22.0](https://github.com/IDFoundry/FAPIgo/compare/v0.21.0...v0.22.0) (2026-08-30)
+
+
+### Features
+
+* add request-time RAR entitlement gate for PAR and CIBA ([d2d8b5e](https://github.com/IDFoundry/FAPIgo/commit/d2d8b5e460e7e58af6b415296d811d17f6a7531d))
+* add RFC 6749 §4.4 client_credentials grant support ([aaeb9f6](https://github.com/IDFoundry/FAPIgo/commit/aaeb9f60da6ddc50d0f43bf10e7ef45a7e91665b))
+* close AS MTLS+MTLS and CIBA client-auth-mTLS conformance gaps ([c399e26](https://github.com/IDFoundry/FAPIgo/commit/c399e26c88ad84d30a8c857453bab29f8d6c8b96))
+* close RP mTLS sender-constrain gap, add per-test evidence output ([#219](https://github.com/IDFoundry/FAPIgo/issues/219)) ([be6e2ef](https://github.com/IDFoundry/FAPIgo/commit/be6e2efa55087c091eb9567134e1efa9e72f102b))
+* support Rich Authorization Requests on the client_credentials grant ([f5b6604](https://github.com/IDFoundry/FAPIgo/commit/f5b66044f26d536e59a61c8192d98f1845d58cce))
+
+
+### Bug Fixes
+
+* rename PARRARPolicy to AuthorizationCodeRARPolicy ([6744eb8](https://github.com/IDFoundry/FAPIgo/commit/6744eb8ab98def1697c4656dd8eeed909966e66f))
+* require an explicit client policy for client_credentials RAR grants ([256aa13](https://github.com/IDFoundry/FAPIgo/commit/256aa1387562cf369079242349d87a31d1689868))
+* split RARRequestPolicy into independent PAR/CIBA policies ([1491ea2](https://github.com/IDFoundry/FAPIgo/commit/1491ea2cb87334d2278583be1436a6d488bd7116))
+* stop silently dropping 9 legs from the conformance summary ([c234c95](https://github.com/IDFoundry/FAPIgo/commit/c234c956ad1f3f3b3187674e6dc8cf421562de83))
+
 ## [0.21.0](https://github.com/IDFoundry/FAPIgo/compare/v0.20.0...v0.21.0) (2026-08-30)
 
 

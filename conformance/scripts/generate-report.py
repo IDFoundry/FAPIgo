@@ -311,7 +311,19 @@ def main():
     md.append("## Summary\n")
     md.append("| Suite | Result |")
     md.append(TABLE_SEPARATOR_2COL)
-    for label in ["AS baseline", "AS message-signing", "AS ciba-mtls", "AS ciba-ping", "AS mtls", "AS message-signing-mtls", "AS client-auth-mtls", "RP baseline", "RP message-signing", "RP ciba-mtls", "RP client-auth-mtls"]:
+    # Derived from AS_SUITES/RP_SUITES (the same lists the per-suite
+    # sections below iterate over), not a separate hardcoded list — a
+    # stale copy here previously left nine legs (added across later
+    # PRs: client-auth-mtls-and-mtls, the two ciba-*-client-auth-mtls
+    # legs, all four *-client-credentials legs, RP mtls, RP
+    # client-auth-mtls-and-mtls) out of this table even though they ran
+    # and recorded results, silently hiding them from run-all.sh's own
+    # printed "combined summary" and this table alike.
+    for name in AS_SUITES:
+        label = f"AS {name}"
+        md.append(f"| {label} | {results.get(label, 'DID NOT RUN')} |")
+    for name in RP_SUITES:
+        label = f"RP {name}"
         md.append(f"| {label} | {results.get(label, 'DID NOT RUN')} |")
     md.append("")
 

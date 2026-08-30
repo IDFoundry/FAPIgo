@@ -47,10 +47,10 @@ func writeEvidence(dir, testName string, result moduleResult, apiBase string) er
 		"TEST: %s\nRESULT: %s\nDRIVER: %s\nSUITE LOG: %s\n",
 		testName, result.Verdict, driverLine, suiteLog,
 	)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("create evidence directory: %w", err)
 	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		return fmt.Errorf("write evidence file: %w", err)
 	}
 	return nil

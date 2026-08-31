@@ -4,6 +4,7 @@ import (
 	"context"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // Metadata is this server's OAuth 2.0 Authorization Server Metadata
@@ -133,7 +134,7 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 		SubjectTypesSupported:         []string{"public"},
 		CodeChallengeMethodsSupported: []string{"S256"},
 
-		TokenEndpointAuthMethodsSupported:          []string{"private_key_jwt"},
+		TokenEndpointAuthMethodsSupported:          []string{storage.ClientAuthMethodPrivateKeyJWT.String()},
 		TokenEndpointAuthSigningAlgValuesSupported: algorithmSetStrings(s.cfg.Algorithms.ClientAssertion),
 		RequestObjectSigningAlgValuesSupported:     algorithmSetStrings(s.cfg.Algorithms.RequestObject),
 		IDTokenSigningAlgValuesSupported:           []string{s.cfg.Algorithms.IDToken.String()},
@@ -181,7 +182,7 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 		// it: a client can be registered for either mechanism, and this
 		// server never requires every client use the same one.
 		md.TokenEndpointAuthMethodsSupported = append(md.TokenEndpointAuthMethodsSupported,
-			"self_signed_tls_client_auth", "tls_client_auth")
+			storage.ClientAuthMethodSelfSignedTLSClientAuth.String(), storage.ClientAuthMethodTLSClientAuth.String())
 	}
 
 	if !s.cfg.Endpoints.BackchannelAuthentication.IsZero() {
@@ -193,7 +194,9 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 		// two RFC 8705 §2 entries are unconditional on Config.MTLSEndpoints
 		// alone: this is a server-wide capability declaration, not a
 		// per-client one.
-		md.BackchannelTokenDeliveryModesSupported = []string{"poll", "ping"}
+		md.BackchannelTokenDeliveryModesSupported = []string{
+			storage.BackchannelTokenDeliveryModePoll.String(), storage.BackchannelTokenDeliveryModePing.String(),
+		}
 		md.BackchannelAuthenticationRequestSigningAlgValuesSupported = algorithmSetStrings(s.cfg.Algorithms.BackchannelAuthenticationRequest)
 		md.GrantTypesSupported = append(md.GrantTypesSupported, CIBAGrantType)
 	}

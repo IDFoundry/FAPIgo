@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.2](https://github.com/IDFoundry/FAPIgo/compare/v0.22.1...v0.22.2) (2026-08-31)
+
+
+### Bug Fixes
+
+* regenerate client_credentials plan configs on a fresh checkout ([#230](https://github.com/IDFoundry/FAPIgo/issues/230)) ([712845d](https://github.com/IDFoundry/FAPIgo/commit/712845d8f3064ea7a166e84c10792bbec2ff8283))
+
 ## [0.22.1](https://github.com/IDFoundry/FAPIgo/compare/v0.22.0...v0.22.1) (2026-08-30)
 
 

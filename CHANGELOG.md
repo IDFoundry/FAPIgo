@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.24.0](https://github.com/IDFoundry/FAPIgo/compare/v0.23.0...v0.24.0) (2026-08-31)
+
+
+### Features
+
+* add memstore.SessionStore, the one storage.SessionStore gap ([dafd118](https://github.com/IDFoundry/FAPIgo/commit/dafd118e7f73f52c6718fd5c415ad596fa30733e))
+* add PeerCertificateFromHTTP to server and resource ([f099dd1](https://github.com/IDFoundry/FAPIgo/commit/f099dd1077d8cf6c818e22e9db47c21361b3f878))
+* add storage.RegisteredClientConfig.NeedsJWKS ([7ef35b4](https://github.com/IDFoundry/FAPIgo/commit/7ef35b44e6bf1c61d980acb541a11ed31cd65ceb))
+
+
+### Bug Fixes
+
+* derive dpop_signing_alg_values_supported from fapi.SignatureAlgorithm ([69ce782](https://github.com/IDFoundry/FAPIgo/commit/69ce7821eb4c77c4dc7a82db964dea9aa7a3c937))
+
 ## [0.23.0](https://github.com/IDFoundry/FAPIgo/compare/v0.22.2...v0.23.0) (2026-08-31)
 
 

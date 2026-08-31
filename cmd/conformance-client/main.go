@@ -55,6 +55,7 @@ import (
 	"github.com/idfoundry/fapigo/fapihttp"
 	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/keys/ephemeral"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -156,14 +157,14 @@ func run(apiBase string, profile driverProfile, clientAuthMTLS, senderConstrainM
 	// needs no ClientAuthentication-purpose key or jwks entry for it at
 	// all — mirroring server.jwks.ClientAuthMethod's own conditional
 	// PublicJWKS omission on the AS side (client/jwks.go).
-	purposes := []keys.SigningPurpose{keys.DPoPProofSigning}
+	purposes := map[keys.SigningPurpose]fapi.SignatureAlgorithm{keys.DPoPProofSigning: fapi.ES256}
 	if !clientAuthMTLS {
-		purposes = append(purposes, keys.ClientAuthentication)
+		purposes[keys.ClientAuthentication] = fapi.ES256
 	}
 	if profile.signRequestObject {
-		purposes = append(purposes, keys.RequestObjectSigning)
+		purposes[keys.RequestObjectSigning] = fapi.ES256
 	}
-	keyMgr, err := newEphemeralKeyManager(purposes)
+	keyMgr, err := ephemeral.NewKeyManager(purposes)
 	if err != nil {
 		return fmt.Errorf("generate keys: %w", err)
 	}
@@ -309,7 +310,7 @@ type moduleDriver struct {
 	PlanID      string
 	ClientID    string
 	RedirectURI string
-	Keys        *ephemeralKeyManager
+	Keys        *ephemeral.KeyManager
 	Profile     driverProfile
 
 	// ClientAuthMTLS selects storage.ClientAuthMethodSelfSignedTLSClientAuth
@@ -356,9 +357,11 @@ func (r moduleResult) String() string {
 // a denied callback, ...) is the module's whole point, not a bug in the
 // driver, so there is nothing here for a caller to usefully treat as
 // fatal. The suite's own graded result — fetched separately, after a
-// grace period, back in run — is what actually matters.
+// grace period, back in run — is what actually matters. Module/client
+// setup lives in buildModuleClient, split out purely to keep this
+// method's own setup/authorize/complete phases readable (go:S3776).
 func runModule(ctx context.Context, d moduleDriver, testName string) moduleResult {
-	rawHTTP, apiBase, planID, clientID, redirectURI, keyMgr, profile := d.HTTP, d.APIBase, d.PlanID, d.ClientID, d.RedirectURI, d.Keys, d.Profile
+	rawHTTP, apiBase, planID := d.HTTP, d.APIBase, d.PlanID
 	module, err := createModuleInstance(rawHTTP, apiBase, planID, testName)
 	if err != nil {
 		return moduleResult{Verdict: "ERROR", DriverErr: "create module instance: " + err.Error()}
@@ -368,9 +371,63 @@ func runModule(ctx context.Context, d moduleDriver, testName string) moduleResul
 		return moduleResult{Verdict: "ERROR", DriverErr: "wait for module ready: " + err.Error(), ModuleID: module.ID}
 	}
 
+	cl, failure := buildModuleClient(ctx, d, module)
+	if cl == nil {
+		return failure
+	}
+
+	session, err := cl.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}})
+	if err != nil {
+		return awaitVerdict(rawHTTP, apiBase, module.ID, "begin authorization: "+err.Error())
+	}
+
+	finalQuery, err := followAuthorizationRedirect(rawHTTP, session.URL().String())
+	if err != nil {
+		return awaitVerdict(rawHTTP, apiBase, module.ID, "follow authorization redirect: "+err.Error())
+	}
+
+	completion, err := cl.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: finalQuery})
+	if err != nil {
+		return awaitVerdict(rawHTTP, apiBase, module.ID, "complete authorization: "+err.Error())
+	}
+
+	switch r := completion.(type) {
+	case client.CompletionSuccess:
+		// The happy-path-shaped module's completion condition is
+		// profile-gated (AbstractFAPI2SPFinalClientTest /
+		// FAPI2ClientProfileBehavior.userInfoIsResourceEndpoint): for the
+		// plain FAPI2 profile this driver targets, calling userinfo alone
+		// leaves the module WAITING forever - it specifically wants a GET
+		// against the profile's own "accounts" resource endpoint, whose
+		// URL isn't part of OIDC discovery at all. The suite instead
+		// publishes it as an "exported value" (the same mechanism a human
+		// operator reads from the web frontend) under GET
+		// /api/runner/{id}, keyed "accounts_endpoint" - confirmed live,
+		// not assumed from the Java source alone.
+		if err := callAccountsEndpoint(ctx, cl, rawHTTP, apiBase, module.ID, r.Tokens); err != nil {
+			return moduleResult{Verdict: "ERROR", DriverErr: "call accounts endpoint: " + err.Error(), ModuleID: module.ID}
+		}
+	case client.CompletionDenied:
+		// Expected for the modules that deliberately deny the request
+		// (e.g. testing that this driver's own consent-rejection handling
+		// works) - not logged as an error.
+	}
+	return awaitVerdict(rawHTTP, apiBase, module.ID, "")
+}
+
+// buildModuleClient discovers module's issuer metadata and constructs
+// the client.Client runModule drives through the rest of the flow —
+// split out of runModule purely to keep that method's own setup/
+// authorize/complete phases readable (go:S3776). A nil *client.Client
+// return means module setup itself is this call's whole result: the
+// accompanying moduleResult (already run through awaitVerdict where
+// appropriate) is what runModule should return unchanged.
+func buildModuleClient(ctx context.Context, d moduleDriver, module suiteModule) (*client.Client, moduleResult) {
+	rawHTTP, apiBase, clientID, redirectURI, keyMgr, profile := d.HTTP, d.APIBase, d.ClientID, d.RedirectURI, d.Keys, d.Profile
+
 	issuer, err := fapi.ParseIssuerURL(module.URL + "/")
 	if err != nil {
-		return moduleResult{Verdict: "ERROR", DriverErr: "parse issuer URL: " + err.Error(), ModuleID: module.ID}
+		return nil, moduleResult{Verdict: "ERROR", DriverErr: "parse issuer URL: " + err.Error(), ModuleID: module.ID}
 	}
 
 	fetcher, err := fapihttp.New(rawHTTP, fapihttp.Config{
@@ -385,20 +442,20 @@ func runModule(ctx context.Context, d moduleDriver, testName string) moduleResul
 		AllowLoopbackHTTP: true,
 	})
 	if err != nil {
-		return moduleResult{Verdict: "ERROR", DriverErr: "build fetcher: " + err.Error(), ModuleID: module.ID}
+		return nil, moduleResult{Verdict: "ERROR", DriverErr: "build fetcher: " + err.Error(), ModuleID: module.ID}
 	}
 
 	discovered, err := client.Discover(ctx, fetcher, issuer)
 	if err != nil {
-		return awaitVerdict(rawHTTP, apiBase, module.ID, "discover issuer metadata: "+err.Error())
+		return nil, awaitVerdict(rawHTTP, apiBase, module.ID, "discover issuer metadata: "+err.Error())
 	}
 	if len(discovered.IDTokenAlgorithms) == 0 {
-		return awaitVerdict(rawHTTP, apiBase, module.ID, "issuer advertises no recognized ID token signing algorithm")
+		return nil, awaitVerdict(rawHTTP, apiBase, module.ID, "issuer advertises no recognized ID token signing algorithm")
 	}
 
 	issuerKeys, err := keys.NewJWKSIssuerKeySource(fetcher, discovered.JWKSURI, jwksCacheTTL)
 	if err != nil {
-		return moduleResult{Verdict: "ERROR", DriverErr: "build issuer key source: " + err.Error(), ModuleID: module.ID}
+		return nil, moduleResult{Verdict: "ERROR", DriverErr: "build issuer key source: " + err.Error(), ModuleID: module.ID}
 	}
 
 	algorithms := client.Algorithms{
@@ -425,10 +482,10 @@ func runModule(ctx context.Context, d moduleDriver, testName string) moduleResul
 		// with (confirmed live: taking [0] failed every module with
 		// "PS256 signer must use an RSA key, got *ecdsa.PublicKey").
 		if !containsES256(discovered.RequestObjectAlgorithms) {
-			return awaitVerdict(rawHTTP, apiBase, module.ID, "issuer does not advertise ES256 as a request object signing algorithm")
+			return nil, awaitVerdict(rawHTTP, apiBase, module.ID, "issuer does not advertise ES256 as a request object signing algorithm")
 		}
 		if len(discovered.JARMAlgorithms) == 0 {
-			return awaitVerdict(rawHTTP, apiBase, module.ID, "issuer advertises no recognized JARM signing algorithm")
+			return nil, awaitVerdict(rawHTTP, apiBase, module.ID, "issuer advertises no recognized JARM signing algorithm")
 		}
 		algorithms.RequestObject = fapi.ES256
 		algorithms.JARM = discovered.JARMAlgorithms[0]
@@ -461,11 +518,11 @@ func runModule(ctx context.Context, d moduleDriver, testName string) moduleResul
 		// pre-commitment concept), so the MTLS+MTLS combo is correctly
 		// handled by this branch alone.
 		if err := applyMTLSEndpointAliasesForClientAuth(&cfg, discovered); err != nil {
-			return awaitVerdict(rawHTTP, apiBase, module.ID, err.Error())
+			return nil, awaitVerdict(rawHTTP, apiBase, module.ID, err.Error())
 		}
 	} else if d.SenderConstrainMTLS {
 		if err := applyMTLSEndpointAliases(&cfg, discovered); err != nil {
-			return awaitVerdict(rawHTTP, apiBase, module.ID, err.Error())
+			return nil, awaitVerdict(rawHTTP, apiBase, module.ID, err.Error())
 		}
 	}
 	deps := client.Dependencies{
@@ -479,46 +536,9 @@ func runModule(ctx context.Context, d moduleDriver, testName string) moduleResul
 
 	cl, err := client.New(cfg, deps)
 	if err != nil {
-		return moduleResult{Verdict: "ERROR", DriverErr: "construct client: " + err.Error(), ModuleID: module.ID}
+		return nil, moduleResult{Verdict: "ERROR", DriverErr: "construct client: " + err.Error(), ModuleID: module.ID}
 	}
-
-	session, err := cl.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}})
-	if err != nil {
-		return awaitVerdict(rawHTTP, apiBase, module.ID, "begin authorization: "+err.Error())
-	}
-
-	finalQuery, err := followAuthorizationRedirect(rawHTTP, session.URL().String())
-	if err != nil {
-		return awaitVerdict(rawHTTP, apiBase, module.ID, "follow authorization redirect: "+err.Error())
-	}
-
-	result, err := cl.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: finalQuery})
-	if err != nil {
-		return awaitVerdict(rawHTTP, apiBase, module.ID, "complete authorization: "+err.Error())
-	}
-
-	switch r := result.(type) {
-	case client.CompletionSuccess:
-		// The happy-path-shaped module's completion condition is
-		// profile-gated (AbstractFAPI2SPFinalClientTest /
-		// FAPI2ClientProfileBehavior.userInfoIsResourceEndpoint): for the
-		// plain FAPI2 profile this driver targets, calling userinfo alone
-		// leaves the module WAITING forever - it specifically wants a GET
-		// against the profile's own "accounts" resource endpoint, whose
-		// URL isn't part of OIDC discovery at all. The suite instead
-		// publishes it as an "exported value" (the same mechanism a human
-		// operator reads from the web frontend) under GET
-		// /api/runner/{id}, keyed "accounts_endpoint" - confirmed live,
-		// not assumed from the Java source alone.
-		if err := callAccountsEndpoint(ctx, cl, rawHTTP, apiBase, module.ID, r.Tokens); err != nil {
-			return moduleResult{Verdict: "ERROR", DriverErr: "call accounts endpoint: " + err.Error(), ModuleID: module.ID}
-		}
-	case client.CompletionDenied:
-		// Expected for the modules that deliberately deny the request
-		// (e.g. testing that this driver's own consent-rejection handling
-		// works) - not logged as an error.
-	}
-	return awaitVerdict(rawHTTP, apiBase, module.ID, "")
+	return cl, moduleResult{}
 }
 
 // awaitVerdict polls the suite's own graded result for moduleID, which

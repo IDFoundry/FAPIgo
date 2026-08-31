@@ -27,6 +27,7 @@ import (
 	"github.com/idfoundry/fapigo/client"
 	"github.com/idfoundry/fapigo/fapihttp"
 	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/keys/ephemeral"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -95,7 +96,9 @@ var cibaVariant = map[string]string{
 func runCIBA(apiBase string, mtls bool) error {
 	ctx := context.Background()
 
-	purposes := []keys.SigningPurpose{keys.ClientAuthentication, keys.BackchannelAuthenticationRequestSigning}
+	purposes := map[keys.SigningPurpose]fapi.SignatureAlgorithm{
+		keys.ClientAuthentication: fapi.ES256, keys.BackchannelAuthenticationRequestSigning: fapi.ES256,
+	}
 	var rawHTTP *http.Client
 	var clientCertPEM string
 	if mtls {
@@ -116,11 +119,11 @@ func runCIBA(apiBase string, mtls bool) error {
 		// terminal state at all, no matter how long this driver waits.
 		clientCertPEM = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: clientCert.Certificate[0]}))
 	} else {
-		purposes = append(purposes, keys.DPoPProofSigning)
+		purposes[keys.DPoPProofSigning] = fapi.ES256
 		rawHTTP = insecureSuiteHTTPClient()
 	}
 
-	keyMgr, err := newEphemeralKeyManager(purposes)
+	keyMgr, err := ephemeral.NewKeyManager(purposes)
 	if err != nil {
 		return fmt.Errorf("generate keys: %w", err)
 	}
@@ -191,10 +194,11 @@ func runCIBA(apiBase string, mtls bool) error {
 	log.Printf("created plan %s (alias %s), %d modules", planID, alias, len(moduleNames))
 	log.Printf("plan detail: %splan-detail.html?plan=%s", apiBase, planID)
 
+	d := cibaModuleDriver{HTTP: rawHTTP, APIBase: apiBase, PlanID: planID, ClientID: clientID, Keys: keyMgr, MTLS: mtls}
 	summary := make(map[string]string, len(moduleNames))
 	for i, name := range moduleNames {
 		log.Printf("--- [%d/%d] %s ---", i+1, len(moduleNames), name)
-		outcome := runCIBAModule(ctx, rawHTTP, apiBase, planID, clientID, keyMgr, name, mtls)
+		outcome := runCIBAModule(ctx, d, name)
 		summary[name] = outcome
 		log.Printf("[%d/%d] %s: %s", i+1, len(moduleNames), name, outcome)
 	}
@@ -206,10 +210,26 @@ func runCIBA(apiBase string, mtls bool) error {
 	return nil
 }
 
+// cibaModuleDriver holds everything runCIBAModule needs that stays
+// fixed across every module in a single CIBA plan run — mirrors
+// moduleDriver's own shape in main.go for the identical go:S107
+// reason: only the module's own test name varies per call.
+type cibaModuleDriver struct {
+	HTTP     *http.Client
+	APIBase  string
+	PlanID   string
+	ClientID string
+	Keys     *ephemeral.KeyManager
+	MTLS     bool
+}
+
 // runCIBAModule drives testName through discover -> begin backchannel
 // authentication -> poll (bounded by cibaMaxPolls, spaced by whatever
-// interval the module's own response carried) -> awaitVerdict.
-func runCIBAModule(ctx context.Context, rawHTTP *http.Client, apiBase, planID, clientID string, keyMgr *ephemeralKeyManager, testName string, mtls bool) string {
+// interval the module's own response carried) -> awaitVerdict. Polling
+// itself lives in pollCIBABackchannelAuthentication, split out purely
+// to keep this method's own setup/poll phases readable (go:S3776).
+func runCIBAModule(ctx context.Context, d cibaModuleDriver, testName string) string {
+	rawHTTP, apiBase, planID, clientID, keyMgr, mtls := d.HTTP, d.APIBase, d.PlanID, d.ClientID, d.Keys, d.MTLS
 	module, err := createModuleInstance(rawHTTP, apiBase, planID, testName)
 	if err != nil {
 		return "ERROR: create module instance: " + err.Error()
@@ -303,12 +323,21 @@ func runCIBAModule(ctx context.Context, rawHTTP *http.Client, apiBase, planID, c
 		return awaitVerdict(rawHTTP, apiBase, module.ID, "begin backchannel authentication: "+err.Error()).String()
 	}
 
+	return pollCIBABackchannelAuthentication(ctx, cl, session, rawHTTP, apiBase, module.ID)
+}
+
+// pollCIBABackchannelAuthentication polls session (bounded by
+// cibaMaxPolls, spaced by whatever interval the module's own response
+// carried) until it's approved, denied, or expired — split out of
+// runCIBAModule purely to keep that method's own setup/poll phases
+// readable (go:S3776).
+func pollCIBABackchannelAuthentication(ctx context.Context, cl *client.Client, session client.BackchannelAuthenticationSession, rawHTTP *http.Client, apiBase, moduleID string) string {
 	interval := session.Interval()
 	for attempt := 0; attempt < cibaMaxPolls; attempt++ {
 		time.Sleep(interval)
 		result, err := cl.PollBackchannelAuthentication(ctx, session)
 		if err != nil {
-			return awaitVerdict(rawHTTP, apiBase, module.ID, "poll backchannel authentication: "+err.Error()).String()
+			return awaitVerdict(rawHTTP, apiBase, moduleID, "poll backchannel authentication: "+err.Error()).String()
 		}
 		switch r := result.(type) {
 		case client.BackchannelAuthenticationPending:
@@ -317,9 +346,9 @@ func runCIBAModule(ctx context.Context, rawHTTP *http.Client, apiBase, planID, c
 			}
 			continue
 		case client.BackchannelAuthenticationDenied:
-			return awaitVerdict(rawHTTP, apiBase, module.ID, "").String()
+			return awaitVerdict(rawHTTP, apiBase, moduleID, "").String()
 		case client.BackchannelAuthenticationExpired:
-			return awaitVerdict(rawHTTP, apiBase, module.ID, "").String()
+			return awaitVerdict(rawHTTP, apiBase, moduleID, "").String()
 		case client.BackchannelAuthenticationApproved:
 			// Mirrors runModule's own accounts-endpoint call
 			// (main.go): FAPICIBARPProfileBehavior's own
@@ -333,11 +362,11 @@ func runCIBAModule(ctx context.Context, rawHTTP *http.Client, apiBase, planID, c
 			// logged). Discovered exactly the same way as
 			// runModule's own version: the URL isn't part of OIDC
 			// discovery, only this "exported value" mechanism.
-			if err := callAccountsEndpoint(ctx, cl, rawHTTP, apiBase, module.ID, r.Tokens); err != nil {
+			if err := callAccountsEndpoint(ctx, cl, rawHTTP, apiBase, moduleID, r.Tokens); err != nil {
 				return "ERROR: call accounts endpoint: " + err.Error()
 			}
-			return awaitVerdict(rawHTTP, apiBase, module.ID, "").String()
+			return awaitVerdict(rawHTTP, apiBase, moduleID, "").String()
 		}
 	}
-	return awaitVerdict(rawHTTP, apiBase, module.ID, "gave up polling after "+fmt.Sprint(cibaMaxPolls)+" attempts").String()
+	return awaitVerdict(rawHTTP, apiBase, moduleID, "gave up polling after "+fmt.Sprint(cibaMaxPolls)+" attempts").String()
 }

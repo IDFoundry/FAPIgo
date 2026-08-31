@@ -55,6 +55,7 @@ import (
 	"github.com/idfoundry/fapigo/fapihttp"
 	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/keys/ephemeral"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -156,14 +157,14 @@ func run(apiBase string, profile driverProfile, clientAuthMTLS, senderConstrainM
 	// needs no ClientAuthentication-purpose key or jwks entry for it at
 	// all — mirroring server.jwks.ClientAuthMethod's own conditional
 	// PublicJWKS omission on the AS side (client/jwks.go).
-	purposes := []keys.SigningPurpose{keys.DPoPProofSigning}
+	purposes := map[keys.SigningPurpose]fapi.SignatureAlgorithm{keys.DPoPProofSigning: fapi.ES256}
 	if !clientAuthMTLS {
-		purposes = append(purposes, keys.ClientAuthentication)
+		purposes[keys.ClientAuthentication] = fapi.ES256
 	}
 	if profile.signRequestObject {
-		purposes = append(purposes, keys.RequestObjectSigning)
+		purposes[keys.RequestObjectSigning] = fapi.ES256
 	}
-	keyMgr, err := newEphemeralKeyManager(purposes)
+	keyMgr, err := ephemeral.NewKeyManager(purposes)
 	if err != nil {
 		return fmt.Errorf("generate keys: %w", err)
 	}
@@ -309,7 +310,7 @@ type moduleDriver struct {
 	PlanID      string
 	ClientID    string
 	RedirectURI string
-	Keys        *ephemeralKeyManager
+	Keys        *ephemeral.KeyManager
 	Profile     driverProfile
 
 	// ClientAuthMTLS selects storage.ClientAuthMethodSelfSignedTLSClientAuth

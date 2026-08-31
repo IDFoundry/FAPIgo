@@ -27,6 +27,7 @@ import (
 	"github.com/idfoundry/fapigo/client"
 	"github.com/idfoundry/fapigo/fapihttp"
 	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/keys/ephemeral"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -95,7 +96,9 @@ var cibaVariant = map[string]string{
 func runCIBA(apiBase string, mtls bool) error {
 	ctx := context.Background()
 
-	purposes := []keys.SigningPurpose{keys.ClientAuthentication, keys.BackchannelAuthenticationRequestSigning}
+	purposes := map[keys.SigningPurpose]fapi.SignatureAlgorithm{
+		keys.ClientAuthentication: fapi.ES256, keys.BackchannelAuthenticationRequestSigning: fapi.ES256,
+	}
 	var rawHTTP *http.Client
 	var clientCertPEM string
 	if mtls {
@@ -116,11 +119,11 @@ func runCIBA(apiBase string, mtls bool) error {
 		// terminal state at all, no matter how long this driver waits.
 		clientCertPEM = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: clientCert.Certificate[0]}))
 	} else {
-		purposes = append(purposes, keys.DPoPProofSigning)
+		purposes[keys.DPoPProofSigning] = fapi.ES256
 		rawHTTP = insecureSuiteHTTPClient()
 	}
 
-	keyMgr, err := newEphemeralKeyManager(purposes)
+	keyMgr, err := ephemeral.NewKeyManager(purposes)
 	if err != nil {
 		return fmt.Errorf("generate keys: %w", err)
 	}
@@ -209,7 +212,7 @@ func runCIBA(apiBase string, mtls bool) error {
 // runCIBAModule drives testName through discover -> begin backchannel
 // authentication -> poll (bounded by cibaMaxPolls, spaced by whatever
 // interval the module's own response carried) -> awaitVerdict.
-func runCIBAModule(ctx context.Context, rawHTTP *http.Client, apiBase, planID, clientID string, keyMgr *ephemeralKeyManager, testName string, mtls bool) string {
+func runCIBAModule(ctx context.Context, rawHTTP *http.Client, apiBase, planID, clientID string, keyMgr *ephemeral.KeyManager, testName string, mtls bool) string {
 	module, err := createModuleInstance(rawHTTP, apiBase, planID, testName)
 	if err != nil {
 		return "ERROR: create module instance: " + err.Error()

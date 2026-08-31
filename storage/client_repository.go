@@ -266,6 +266,23 @@ type RegisteredClientConfig struct {
 	AllowsClientCredentialsGrant bool
 }
 
+// NeedsJWKS reports whether a client configured this way needs a
+// discoverable JWKS at all — true iff it does any JWS signing:
+// ClientAuthMethodPrivateKeyJWT client assertions, signed request
+// objects (RequestObjectAlgorithm set), or signed CIBA backchannel
+// authentication requests (BackchannelAuthenticationRequestAlgorithm
+// set). A client registered for certificate-based authentication that
+// does neither of the latter two has no key material to publish.
+//
+// This only answers whether a JWKS is needed at all — not which of
+// jwks/jwks_uri (or both, or neither) a specific wire format should
+// carry for it; that's a caller's own config-format decision, the same
+// division ParseClientAuthMethod's own doc comment draws between
+// mechanism and policy.
+func (cfg RegisteredClientConfig) NeedsJWKS() bool {
+	return cfg.ClientAuthMethod == ClientAuthMethodPrivateKeyJWT || cfg.RequestObjectAlgorithm != 0 || cfg.BackchannelAuthenticationRequestAlgorithm != 0
+}
+
 // NewRegisteredClient validates cfg and returns an immutable
 // RegisteredClient.
 func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {

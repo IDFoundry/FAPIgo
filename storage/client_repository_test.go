@@ -106,6 +106,45 @@ func TestNewRegisteredClientBackchannelAuthenticationRequestAlgorithmConfigured(
 	}
 }
 
+func TestRegisteredClientConfigNeedsJWKS(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  RegisteredClientConfig
+		want bool
+	}{
+		{
+			name: "private_key_jwt (default) needs JWKS",
+			cfg:  RegisteredClientConfig{},
+			want: true,
+		},
+		{
+			name: "certificate-based auth, no request object or CIBA signing, needs no JWKS",
+			cfg:  RegisteredClientConfig{ClientAuthMethod: ClientAuthMethodSelfSignedTLSClientAuth},
+			want: false,
+		},
+		{
+			name: "certificate-based auth with a signed request object still needs JWKS",
+			cfg:  RegisteredClientConfig{ClientAuthMethod: ClientAuthMethodTLSClientAuth, RequestObjectAlgorithm: fapi.ES256},
+			want: true,
+		},
+		{
+			name: "certificate-based auth with signed CIBA requests still needs JWKS",
+			cfg: RegisteredClientConfig{
+				ClientAuthMethod: ClientAuthMethodSelfSignedTLSClientAuth,
+				BackchannelAuthenticationRequestAlgorithm: fapi.ES256,
+			},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cfg.NeedsJWKS(); got != tt.want {
+				t.Fatalf("NeedsJWKS() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestNewRegisteredClientSenderConstrainDefaultsToDPoP confirms the
 // zero value keeps every client config that predates this field
 // behaving exactly as before.

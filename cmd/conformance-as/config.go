@@ -370,12 +370,11 @@ func resolveClient(c ClientConfig) (storage.RegisteredClient, ephemeral.ClientKe
 		}
 	}
 
-	// A client needs a discoverable JWKS iff it does any JWS signing at
-	// all: private_key_jwt client assertions, signed request objects, or
-	// signed CIBA backchannel authentication requests. A client
-	// registered for certificate-based authentication that does neither
-	// of the latter two has no key material to publish.
-	needsJWKS := clientAuthMethod == storage.ClientAuthMethodPrivateKeyJWT || requestObjectAlg != 0 || backchannelAuthenticationRequestAlg != 0
+	needsJWKS := storage.RegisteredClientConfig{
+		ClientAuthMethod:                          clientAuthMethod,
+		RequestObjectAlgorithm:                    requestObjectAlg,
+		BackchannelAuthenticationRequestAlgorithm: backchannelAuthenticationRequestAlg,
+	}.NeedsJWKS()
 	hasJWKS := len(c.JWKS) > 0
 	hasJWKSURI := c.JWKSURI != ""
 	switch {

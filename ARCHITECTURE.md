@@ -262,9 +262,14 @@ type, body size, client certificate and DPoP proofs — not a pre-parsed
 `url.Values` or `map[string]string`. A map can silently collapse
 duplicate parameters before the engine ever sees them; `server` needs
 the lossless form to detect duplicate/conflicting values, malformed
-names, parameter-count abuse and oversized values itself. `fapihttp`
-(or an equivalent adapter) is responsible for building a `FormRequest`
-faithfully from `*http.Request`.
+names, parameter-count abuse and oversized values itself.
+`server.FormRequestFromHTTP(r *http.Request)` builds one faithfully —
+an optional convenience for a caller already using `net/http` to serve
+these endpoints, so every such adapter doesn't reimplement the same
+order/duplicate-preserving parse (`cmd/conformance-as` and `fapitest`
+both did, byte-for-byte, before this was centralized). A caller fronted
+by something other than `*http.Request` builds a `FormRequest` by hand
+instead.
 
 The same reasoning applies to the DPoP header specifically:
 `DPoPProofs []string` on every request type that accepts a DPoP proof

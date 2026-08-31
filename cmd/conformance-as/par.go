@@ -9,7 +9,7 @@ import (
 
 func parHandler(srv *server.Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		form, err := formRequestFromHTTP(r)
+		form, err := server.FormRequestFromHTTP(r)
 		if err != nil {
 			writeRawOAuthError(w, http.StatusBadRequest, server.ErrorInvalidRequest, err.Error())
 			return

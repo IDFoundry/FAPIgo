@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """Builds report.md from a completed conformance/scripts/run-all.sh run.
 
-run-all.sh calls this once, after all twenty suites have finished and
-results.txt/the per-suite log files already exist — it doesn't run any
-part of the suites itself, only reads what's already on disk:
+run-all.sh calls this once, after all twenty test configurations have
+finished and results.txt/the per-configuration log files already exist
+— it doesn't run any part of the suite itself, only reads what's
+already on disk:
 
   - results.txt (run-all.sh's own "NAME|LINE" record_result output)
   - as-{...AS_SUITES...}.log (run-test-plan.py's own verbose stdout,
     already captured by run-all.sh)
   - as-{...same set...}-retry.log, if retry-flaky-modules.py ran (only
-    exists when that suite came back non-clean)
+    exists when that configuration came back non-clean)
   - rp-{baseline,message-signing,ciba-mtls,client-auth-mtls,mtls,client
     -auth-mtls-and-mtls}.log (cmd/conformance-client's own stdout) —
     ciba-ping, message-signing-mtls, and every AS-only leg (client
@@ -23,7 +24,7 @@ part of the suites itself, only reads what's already on disk:
     is already authoritatively written down, not re-explained/duplicated
     here.
 
-Each suite section leads with a quick table of just its non-PASSED
+Each test-configuration section leads with a quick table of just its non-PASSED
 modules (empty/omitted when everything passed) so a regression is
 visible without scrolling, followed by a collapsed "All N modules run"
 <details> block listing every module by name with its own status —
@@ -281,7 +282,7 @@ def main():
         print("usage: generate-report.py <workdir> <repo_root>", file=sys.stderr)
         sys.exit(2)
     # Resolved to an absolute, canonical path and checked up front —
-    # every read/write this script does (results.txt, the per-suite
+    # every read/write this script does (results.txt, the per-configuration
     # logs, expected-{warnings,skips}-*.json, report.md itself) derives
     # from one of these two arguments, so this is the one place that
     # needs to fail clearly on a malformed one (e.g. a hallucinated or
@@ -309,9 +310,9 @@ def main():
     md.append(f"Generated {generated} by `conformance/scripts/run-all.sh`, FAPIgo at {where}.\n")
 
     md.append("## Summary\n")
-    md.append("| Suite | Result |")
+    md.append("| Configuration | Result |")
     md.append(TABLE_SEPARATOR_2COL)
-    # Derived from AS_SUITES/RP_SUITES (the same lists the per-suite
+    # Derived from AS_SUITES/RP_SUITES (the same lists the per-configuration
     # sections below iterate over), not a separate hardcoded list — a
     # stale copy here previously left nine legs (added across later
     # PRs: client-auth-mtls-and-mtls, the two ciba-*-client-auth-mtls

@@ -17,8 +17,8 @@ behaviour and negative-test expectations differ. See
   run scripts.
 - `server/` — OpenID Foundation FAPI 2.0 AS conformance configuration and
   run scripts.
-- `scripts/run-all.sh` — runs all twenty suites this repo has driver
-  support for (AS baseline, AS message-signing, AS ciba-mtls, AS
+- `scripts/run-all.sh` — runs all twenty test configurations this repo
+  has driver support for (AS baseline, AS message-signing, AS ciba-mtls, AS
   ciba-ping, AS mtls, AS message-signing-mtls, AS client-auth-mtls, AS
   client-auth-mtls-and-mtls, AS ciba-client-auth-mtls, AS
   ciba-ping-client-auth-mtls, AS baseline/mtls/client-auth-mtls/
@@ -232,7 +232,7 @@ via a runtime `-access-token-format=jwt|opaque` flag (see
 `server/docker-compose.yml`'s `ACCESS_TOKEN_FORMAT` env var for a
 manual one-off run against either), but `scripts/run-all.sh` only runs
 the live suite under the default, `jwt`. An earlier version of this
-script looped the AS suites over both formats on every run; that was
+script looped the AS legs over both formats on every run; that was
 dropped once `resource.AccessTokenResolver`'s contract was tightened
 (see PR #62) so DPoP binding, ordinary expiry, and revocation are
 enforced exactly once, uniformly, in `resource.Verify()` itself rather

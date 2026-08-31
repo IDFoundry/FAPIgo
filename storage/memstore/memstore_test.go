@@ -45,6 +45,12 @@ func TestBackchannelAuthenticationStoreContract(t *testing.T) {
 	})
 }
 
+func TestSessionStoreContract(t *testing.T) {
+	storage.TestSessionStoreContract(t, func() storage.SessionStore {
+		return NewSessionStore()
+	})
+}
+
 func TestRevocationStoreNotRevokedByDefault(t *testing.T) {
 	s := NewRevocationStore()
 

@@ -57,6 +57,7 @@ import (
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/keys/ephemeral"
 	"github.com/idfoundry/fapigo/storage"
+	"github.com/idfoundry/fapigo/storage/memstore"
 )
 
 const (
@@ -526,7 +527,7 @@ func buildModuleClient(ctx context.Context, d moduleDriver, module suiteModule) 
 		}
 	}
 	deps := client.Dependencies{
-		Sessions:   newMemSessionStore(),
+		Sessions:   memstore.NewSessionStore(),
 		Keys:       keyMgr,
 		IssuerKeys: issuerKeys,
 		HTTP:       rawHTTP,

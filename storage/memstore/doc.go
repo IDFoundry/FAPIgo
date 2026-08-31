@@ -1,7 +1,8 @@
 // Package memstore provides in-memory implementations of every
 // storage interface server.Dependencies needs (ClientRepository,
-// TransactionStore, GrantStore, ReplayStore) — for local development
-// and testing only. Never production.
+// TransactionStore, GrantStore, ReplayStore, ...) plus client's own
+// SessionStore — for local development and testing only. Never
+// production.
 //
 // Every type here is non-durable (an in-process map, gone on restart)
 // and grows unboundedly for the life of the process — there is no

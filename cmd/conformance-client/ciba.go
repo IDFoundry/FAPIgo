@@ -29,6 +29,7 @@ import (
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/keys/ephemeral"
 	"github.com/idfoundry/fapigo/storage"
+	"github.com/idfoundry/fapigo/storage/memstore"
 )
 
 const (
@@ -303,7 +304,7 @@ func runCIBAModule(ctx context.Context, d cibaModuleDriver, testName string) str
 		}
 	}
 	deps := client.Dependencies{
-		Sessions:   newMemSessionStore(),
+		Sessions:   memstore.NewSessionStore(),
 		Keys:       keyMgr,
 		IssuerKeys: issuerKeys,
 		HTTP:       rawHTTP,

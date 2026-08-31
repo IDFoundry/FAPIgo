@@ -13,6 +13,7 @@ import (
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
+	"github.com/idfoundry/fapigo/storage/memstore"
 )
 
 // TestDiscoverEndToEnd proves the full discovery pipeline against a
@@ -139,7 +140,7 @@ func TestDiscoverEndToEnd(t *testing.T) {
 		},
 	}
 	clientDeps := client.Dependencies{
-		Sessions: newMemSessionStore(), Keys: clientKeys, IssuerKeys: issuerKeys,
+		Sessions: memstore.NewSessionStore(), Keys: clientKeys, IssuerKeys: issuerKeys,
 		HTTP: httpClient, Clock: clock, Random: rand.Reader,
 	}
 	c, err := client.New(clientCfg, clientDeps)

@@ -38,8 +38,8 @@ type AutoApprove struct {
 
 // authServer wires a server.Server to real HTTP handlers over an
 // httptest.Server, including the raw-request-boundary adapter
-// (formRequestFromHTTP) and the interaction-auto-approval authorization
-// endpoint AutoApprove describes.
+// (server.FormRequestFromHTTP) and the interaction-auto-approval
+// authorization endpoint AutoApprove describes.
 type authServer struct {
 	t        *testing.T
 	srv      *server.Server
@@ -152,7 +152,7 @@ func (a *authServer) handleJWKS(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *authServer) handlePAR(w http.ResponseWriter, r *http.Request) {
-	form, err := formRequestFromHTTP(r)
+	form, err := server.FormRequestFromHTTP(r)
 	if err != nil {
 		a.writeOAuthError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
@@ -219,7 +219,7 @@ func (a *authServer) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *authServer) handleToken(w http.ResponseWriter, r *http.Request) {
-	form, err := formRequestFromHTTP(r)
+	form, err := server.FormRequestFromHTTP(r)
 	if err != nil {
 		a.writeOAuthError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return

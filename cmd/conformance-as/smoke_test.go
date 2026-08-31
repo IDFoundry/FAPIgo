@@ -420,12 +420,13 @@ func TestSmokeTokenEndpointOAuthErrorResponses(t *testing.T) {
 
 	t.Run("malformed form body", func(t *testing.T) {
 		// An invalid percent-escape ("%zz" isn't valid hex) is rejected by
-		// formRequestFromHTTP itself, before any grant_type dispatch —
-		// unlike a duplicated parameter, which formRequestFromHTTP
-		// deliberately preserves rather than rejecting (see its own doc
-		// comment), so that the *server* method it's eventually routed to
-		// detects it instead (a different, already-covered code path,
-		// via writeOAuthJSONError rather than writeRawOAuthError).
+		// server.FormRequestFromHTTP itself, before any grant_type
+		// dispatch — unlike a duplicated parameter, which
+		// FormRequestFromHTTP deliberately preserves rather than
+		// rejecting (see its own doc comment), so that the *server*
+		// method it's eventually routed to detects it instead (a
+		// different, already-covered code path, via writeOAuthJSONError
+		// rather than writeRawOAuthError).
 		res, body := postFormExpectingOAuthError(t, h.httpClient, h.token, "grant_type=%zz", nil)
 		if res.StatusCode != http.StatusBadRequest {
 			t.Errorf("status = %d, want %d", res.StatusCode, http.StatusBadRequest)

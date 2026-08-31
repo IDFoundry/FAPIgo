@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/idfoundry/fapigo/server"
@@ -37,14 +36,17 @@ type backchannelHandler struct {
 	clock          server.Clock
 	defaultSubject string
 
-	mu      sync.Mutex
-	pending map[string]pendingBackchannelAuthentication
+	// See pendingSet's own doc comment for the single-use/TTL-eviction
+	// contract this relies on — Put's ttl here is action.ExpiresIn
+	// itself (CIBA's own auth_req_id lifetime), not a guessed constant,
+	// unlike consentHandler.pending's consentPendingTTL.
+	pending *pendingSet[string, pendingBackchannelAuthentication]
 }
 
 func newBackchannelHandler(srv *server.Server, clock server.Clock, defaultSubject string) *backchannelHandler {
 	return &backchannelHandler{
 		srv: srv, clock: clock, defaultSubject: defaultSubject,
-		pending: make(map[string]pendingBackchannelAuthentication),
+		pending: newPendingSet[string, pendingBackchannelAuthentication](clock),
 	}
 }
 
@@ -66,11 +68,9 @@ func (h *backchannelHandler) handleAuthenticate(w http.ResponseWriter, r *http.R
 	switch action := action.(type) {
 	case server.BackchannelInteractionRequired:
 		approved := approvedAuthorizationDetails(action.Interaction.AuthorizationDetails)
-		h.mu.Lock()
-		h.pending[action.AuthReqID.String()] = pendingBackchannelAuthentication{
+		h.pending.Put(action.AuthReqID.String(), pendingBackchannelAuthentication{
 			handle: action.Handle, scope: action.Interaction.Scope, authorizationDetails: approved,
-		}
-		h.mu.Unlock()
+		}, action.ExpiresIn)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -94,12 +94,7 @@ func (h *backchannelHandler) handleApprove(w http.ResponseWriter, r *http.Reques
 	authReqID := r.URL.Query().Get("auth_req_id")
 	action := r.URL.Query().Get("action")
 
-	h.mu.Lock()
-	pending, ok := h.pending[authReqID]
-	if ok {
-		delete(h.pending, authReqID)
-	}
-	h.mu.Unlock()
+	pending, ok := h.pending.TakeOnce(authReqID)
 	if !ok {
 		http.Error(w, "unknown auth_req_id", http.StatusNotFound)
 		return

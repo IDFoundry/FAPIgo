@@ -3,12 +3,20 @@ package main
 import (
 	"encoding/json"
 	"net/http"
-	"sync"
+	"time"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
 )
+
+// consentPendingTTL bounds how long a stashed pendingAuthorization
+// survives an abandoned consent page — BeginAuthorization's own
+// InteractionRequired carries no expiry of its own to reuse (unlike
+// BackchannelInteractionRequired.ExpiresIn), so this is this binary's
+// own judgment call, generous enough for a slow human or scripted
+// browser, not derived from the protocol.
+const consentPendingTTL = 5 * time.Minute
 
 // consentHandler serves the browser-facing authorization endpoint with a
 // genuine HTML consent form — not an auto-approve shortcut — so a real
@@ -22,13 +30,11 @@ type consentHandler struct {
 
 	// server.InteractionHandle has no public constructor — only
 	// BeginAuthorization can produce one (server/interaction.go) — so this
-	// map bridges "GET rendered a form" to "POST submitted it" by
-	// retaining the original typed value, keyed by its own opaque string.
-	// This is HTTP-layer glue only: the protocol-level single-use
-	// guarantee still comes from TransactionStore.CompleteAuthorization;
-	// deleting the entry here is defense in depth on top of that.
-	mu      sync.Mutex
-	pending map[string]pendingAuthorization
+	// bridges "GET rendered a form" to "POST submitted it" by retaining
+	// the original typed value, keyed by its own opaque string. See
+	// pendingSet's own doc comment for the single-use/TTL-eviction
+	// contract this relies on.
+	pending *pendingSet[string, pendingAuthorization]
 }
 
 // pendingAuthorization is what handleBegin stashes per interaction
@@ -47,7 +53,7 @@ func newConsentHandler(srv *server.Server, clients storage.ClientRepository, clo
 		clients:        clients,
 		clock:          clock,
 		defaultSubject: defaultSubject,
-		pending:        make(map[string]pendingAuthorization),
+		pending:        newPendingSet[string, pendingAuthorization](clock),
 	}
 }
 
@@ -66,9 +72,7 @@ func (h *consentHandler) handleBegin(w http.ResponseWriter, r *http.Request) {
 	switch action := action.(type) {
 	case server.InteractionRequired:
 		approved := approvedAuthorizationDetails(action.Interaction.AuthorizationDetails)
-		h.mu.Lock()
-		h.pending[action.Handle.String()] = pendingAuthorization{handle: action.Handle, authorizationDetails: approved}
-		h.mu.Unlock()
+		h.pending.Put(action.Handle.String(), pendingAuthorization{handle: action.Handle, authorizationDetails: approved}, consentPendingTTL)
 
 		// Debug/test-support only, not security-relevant: lets the smoke
 		// test correlate a GET response with its interaction handle
@@ -144,12 +148,7 @@ func (h *consentHandler) handleDecision(w http.ResponseWriter, r *http.Request) 
 	}
 
 	handleValue := r.FormValue("handle")
-	h.mu.Lock()
-	handle, ok := h.pending[handleValue]
-	if ok {
-		delete(h.pending, handleValue)
-	}
-	h.mu.Unlock()
+	handle, ok := h.pending.TakeOnce(handleValue)
 	if !ok {
 		writeLocalHTMLErrorRaw(w, http.StatusBadRequest, "invalid_request", "interaction handle is unknown, expired, or already used")
 		return

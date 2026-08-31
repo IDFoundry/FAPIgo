@@ -23,14 +23,19 @@ import (
 type AuthorizationCodeExchangeRequest struct {
 	HTTP FormRequest
 
-	// DPoPProof is the value of the request's DPoP header — required
-	// when the authenticated client's storage.RegisteredClient.SenderConstrain()
-	// is SenderConstrainDPoP (the default).
-	DPoPProof string
+	// DPoPProofs is every "DPoP" header value the request carried, in
+	// receipt order — pass net/http's own Header.Values("DPoP")
+	// directly, not Header.Get, which silently discards every value but
+	// the first instead of preserving them for this package to reject
+	// (RFC 9449 §7.1: a request must never carry more than one). Empty
+	// is a valid "no proof presented" when the authenticated client's
+	// storage.RegisteredClient.SenderConstrain() isn't SenderConstrainDPoP
+	// (the default); a required proof is otherwise exactly one value.
+	DPoPProofs []string
 
 	// PeerCertificate is the TLS client certificate presented on the
 	// connection this request arrived on, if any — required instead of
-	// DPoPProof when the authenticated client's SenderConstrain() is
+	// a DPoP proof when the authenticated client's SenderConstrain() is
 	// SenderConstrainMTLS (RFC 8705 §3). An HTTP adapter reads this
 	// straight from the connection's own TLS state (e.g. Go's
 	// *http.Request.TLS.PeerCertificates[0]); this package never
@@ -89,6 +94,10 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, "", newError(ErrorInvalidRequest, 400, "the request contains a duplicated parameter", err))
 	}
+	dpopProof, dpopErr := resolveDPoPProof(req.DPoPProofs)
+	if dpopErr != nil {
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, "", dpopErr)
+	}
 
 	if params["grant_type"] != "authorization_code" {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, "", newError(ErrorUnsupportedGrantType, 400, "grant_type must be authorization_code", nil))
@@ -118,7 +127,7 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorInvalidGrant, 400, "code_verifier is required", nil))
 	}
 
-	thumbprint, bindingErr := s.verifyTokenRequestBinding(ctx, client, req.DPoPProof, req.PeerCertificate)
+	thumbprint, bindingErr := s.verifyTokenRequestBinding(ctx, client, dpopProof, req.PeerCertificate)
 	if bindingErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), bindingErr)
 	}
@@ -238,6 +247,24 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 
 	s.audit(ctx, AuditEventExchangeAuthorizationCode, client.ID(), AuditOutcomeSuccess, "")
 	return result, nil
+}
+
+// resolveDPoPProof reduces proofs — a request's own DPoPProofs field —
+// down to the single proof value the rest of this package's DPoP
+// verification expects, via internal/dpop.ResolveHeaderValues; see that
+// function's own doc comment for why more than one is always rejected
+// (RFC 9449 §7.1) regardless of whether any individual value would
+// otherwise have verified. Every public method whose request type
+// carries a DPoPProofs field calls this first, before doing anything
+// else with the request — the same "check malformed structural things
+// first" position formParametersToMap's own duplicate-parameter check
+// already takes.
+func resolveDPoPProof(proofs []string) (string, *Error) {
+	proof, ok := dpop.ResolveHeaderValues(proofs)
+	if !ok {
+		return "", newError(ErrorInvalidRequest, 400, "multiple DPoP proofs are not permitted", nil)
+	}
+	return proof, nil
 }
 
 // verifyTokenRequestBinding verifies whichever sender-constraining

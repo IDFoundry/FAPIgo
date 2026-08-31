@@ -121,7 +121,7 @@ func (f nonceFixture) verify(t *testing.T) (resource.AuthorizationContext, error
 		Method:        "GET",
 		URL:           f.target,
 		Authorization: "DPoP " + f.accessToken,
-		DPoPProof:     f.dpopProof,
+		DPoPProofs:    []string{f.dpopProof},
 	})
 }
 
@@ -134,7 +134,7 @@ func TestVerifyNonceDisabledByDefault(t *testing.T) {
 		Method:        "GET",
 		URL:           f.target,
 		Authorization: "DPoP " + f.accessToken,
-		DPoPProof:     f.dpopProof,
+		DPoPProofs:    []string{f.dpopProof},
 	})
 	if err != nil {
 		t.Fatalf("Verify: %v", err)

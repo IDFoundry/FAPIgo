@@ -808,7 +808,7 @@ func TestPushAuthorizationRequestCertClientAuthAcceptsDPoPProofAtMTLSAlias(t *te
 
 	if _, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
 		HTTP:            server.FormRequest{Parameters: certFormParameters(nil)},
-		DPoPProof:       dpopProofForURL(t, dpopKey, mtlsPAR, h.now),
+		DPoPProofs:      []string{dpopProofForURL(t, dpopKey, mtlsPAR, h.now)},
 		PeerCertificate: cert,
 	}); err != nil {
 		t.Fatalf("PushAuthorizationRequest: %v", err)
@@ -828,7 +828,7 @@ func TestExchangeAuthorizationCodeCertClientAuthAcceptsDPoPProofAtMTLSAlias(t *t
 			formParam("redirect_uri", testRedirectURI),
 			formParam("code_verifier", testCodeVerifier),
 		}},
-		DPoPProof:       dpopProofForURL(t, dpopKey, mtlsToken, h.now),
+		DPoPProofs:      []string{dpopProofForURL(t, dpopKey, mtlsToken, h.now)},
 		PeerCertificate: cert,
 	})
 	if err != nil {

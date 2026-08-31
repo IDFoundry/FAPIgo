@@ -640,8 +640,8 @@ func TestExchangeAuthorizationCodeAcceptsTokenEndpointURLAsClientAssertionAudien
 	}
 	dpopKey := generateKey(t)
 	if _, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(assertion, code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: createDPoPProof(t, dpopKey, h.now),
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(assertion, code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, dpopKey, h.now)},
 	}); err != nil {
 		t.Fatalf("ExchangeAuthorizationCode: %v", err)
 	}
@@ -1137,6 +1137,23 @@ func TestPushAuthorizationRequestRejectsDuplicateParameter(t *testing.T) {
 	}
 }
 
+// TestPushAuthorizationRequestRejectsMultipleDPoPProofs mirrors
+// TestExchangeAuthorizationCodeRejectsMultipleDPoPProofs (see its own
+// doc comment) for PAR, where a DPoP proof is optional (RFC 9449 §10)
+// but still rejected outright once more than one is presented.
+func TestPushAuthorizationRequestRejectsMultipleDPoPProofs(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	dpopKey := generateKey(t)
+
+	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP:       server.FormRequest{Parameters: plainFormParameters(t, h.clientAssertion(t), nil)},
+		DPoPProofs: []string{createDPoPProofForPAR(t, dpopKey, h.now), createDPoPProofForPAR(t, dpopKey, h.now)},
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequest)
+	}
+}
+
 func TestPushAuthorizationRequestDetectsClientAssertionReplay(t *testing.T) {
 	h := newHarness(t, server.ProfileFAPISecurity, true)
 	assertion := h.clientAssertion(t)
@@ -1389,8 +1406,8 @@ func TestPushAuthorizationRequestDerivesImplicitDPoPJKTFromPARProof(t *testing.T
 	params := plainFormParameters(t, h.clientAssertion(t), nil)
 
 	_, err = h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
-		HTTP:      server.FormRequest{Parameters: params},
-		DPoPProof: createDPoPProofForPAR(t, dpopKey, h.now),
+		HTTP:       server.FormRequest{Parameters: params},
+		DPoPProofs: []string{createDPoPProofForPAR(t, dpopKey, h.now)},
 	})
 	if err != nil {
 		t.Fatalf("PushAuthorizationRequest: %v", err)
@@ -1417,8 +1434,8 @@ func TestPushAuthorizationRequestAcceptsMatchingDPoPJKTAtPAR(t *testing.T) {
 	params := plainFormParameters(t, h.clientAssertion(t), map[string]string{"dpop_jkt": thumbprint.String()})
 
 	_, err = h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
-		HTTP:      server.FormRequest{Parameters: params},
-		DPoPProof: createDPoPProofForPAR(t, dpopKey, h.now),
+		HTTP:       server.FormRequest{Parameters: params},
+		DPoPProofs: []string{createDPoPProofForPAR(t, dpopKey, h.now)},
 	})
 	if err != nil {
 		t.Fatalf("PushAuthorizationRequest: %v", err)
@@ -1436,8 +1453,8 @@ func TestPushAuthorizationRequestRejectsMismatchedDPoPJKTAtPAR(t *testing.T) {
 	params := plainFormParameters(t, h.clientAssertion(t), map[string]string{"dpop_jkt": declaredThumbprint.String()})
 
 	_, err = h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
-		HTTP:      server.FormRequest{Parameters: params},
-		DPoPProof: createDPoPProofForPAR(t, proofKey, h.now),
+		HTTP:       server.FormRequest{Parameters: params},
+		DPoPProofs: []string{createDPoPProofForPAR(t, proofKey, h.now)},
 	})
 	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
 		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequest)

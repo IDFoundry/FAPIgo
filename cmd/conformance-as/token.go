@@ -16,23 +16,19 @@ func tokenHandler(srv *server.Server) http.HandlerFunc {
 			return
 		}
 		grantType := formValue(form, "grant_type")
-		dpopProof, ok := singleDPoPHeader(r)
-		if !ok {
-			writeRawOAuthError(w, http.StatusBadRequest, server.ErrorInvalidRequest, "multiple DPoP headers are not permitted")
-			return
-		}
+		dpopProofs := r.Header.Values("DPoP")
 		peerCert := peerCertificate(r)
 
 		var result server.TokenResult
 		switch grantType {
 		case "authorization_code":
-			result, err = srv.ExchangeAuthorizationCode(r.Context(), server.AuthorizationCodeExchangeRequest{HTTP: form, DPoPProof: dpopProof, PeerCertificate: peerCert})
+			result, err = srv.ExchangeAuthorizationCode(r.Context(), server.AuthorizationCodeExchangeRequest{HTTP: form, DPoPProofs: dpopProofs, PeerCertificate: peerCert})
 		case "refresh_token":
-			result, err = srv.RefreshAccessToken(r.Context(), server.RefreshTokenRequest{HTTP: form, DPoPProof: dpopProof, PeerCertificate: peerCert})
+			result, err = srv.RefreshAccessToken(r.Context(), server.RefreshTokenRequest{HTTP: form, DPoPProofs: dpopProofs, PeerCertificate: peerCert})
 		case server.CIBAGrantType:
-			result, err = srv.ExchangeBackchannelAuthentication(r.Context(), server.BackchannelTokenExchangeRequest{HTTP: form, DPoPProof: dpopProof, PeerCertificate: peerCert})
+			result, err = srv.ExchangeBackchannelAuthentication(r.Context(), server.BackchannelTokenExchangeRequest{HTTP: form, DPoPProofs: dpopProofs, PeerCertificate: peerCert})
 		case "client_credentials":
-			result, err = srv.RequestClientCredentialsToken(r.Context(), server.ClientCredentialsTokenRequest{HTTP: form, DPoPProof: dpopProof, PeerCertificate: peerCert})
+			result, err = srv.RequestClientCredentialsToken(r.Context(), server.ClientCredentialsTokenRequest{HTTP: form, DPoPProofs: dpopProofs, PeerCertificate: peerCert})
 		default:
 			writeRawOAuthError(w, http.StatusBadRequest, server.ErrorUnsupportedGrantType, "grant_type must be authorization_code, refresh_token, client_credentials, or "+server.CIBAGrantType)
 			return

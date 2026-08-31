@@ -100,10 +100,12 @@ type FormRequest struct {
 type PushAuthorizationRequest struct {
 	HTTP FormRequest
 
-	// DPoPProof is the value of the request's DPoP header, if present.
-	// A DPoP proof at the PAR endpoint is optional (RFC 9449 §10) — ""
+	// DPoPProofs is every "DPoP" header value the request carried, in
+	// receipt order — see AuthorizationCodeExchangeRequest.DPoPProofs'
+	// own doc comment for why this is a slice, not a single string. A
+	// DPoP proof at the PAR endpoint is optional (RFC 9449 §10) — empty
 	// means the client didn't send one.
-	DPoPProof string
+	DPoPProofs []string
 
 	// PeerCertificate is the TLS client certificate presented on the
 	// connection this request arrived on, if any — required when the
@@ -140,6 +142,10 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 	if err != nil {
 		return s.parFail(ctx, "", newError(ErrorInvalidRequest, 400, "the request contains a duplicated parameter", err))
 	}
+	dpopProof, proofErr := resolveDPoPProof(req.DPoPProofs)
+	if proofErr != nil {
+		return s.parFail(ctx, "", proofErr)
+	}
 
 	// PAR accepts no endpoint-URL audience at all — only the issuer
 	// identifier — see acceptableClientAssertionAudiences's own doc
@@ -160,7 +166,7 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 		return s.parFail(ctx, client.ID(), validateErr)
 	}
 
-	validated, dpopErr := s.reconcileParDPoPBinding(ctx, req.DPoPProof, validated)
+	validated, dpopErr := s.reconcileParDPoPBinding(ctx, dpopProof, validated)
 	if dpopErr != nil {
 		return s.parFail(ctx, client.ID(), dpopErr)
 	}

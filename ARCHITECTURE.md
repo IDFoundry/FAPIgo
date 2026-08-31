@@ -258,13 +258,27 @@ caller to assemble correctly.
 **Raw request boundary.** `PushAuthorizationRequest` and
 `AuthorizationCodeExchangeRequest` carry an `HTTP FormRequest` — an
 ordered list of `FormParameter{Name, Value}` plus method, URL, content
-type, body size, client certificate and DPoP proof — not a pre-parsed
+type, body size, client certificate and DPoP proofs — not a pre-parsed
 `url.Values` or `map[string]string`. A map can silently collapse
 duplicate parameters before the engine ever sees them; `server` needs
 the lossless form to detect duplicate/conflicting values, malformed
 names, parameter-count abuse and oversized values itself. `fapihttp`
 (or an equivalent adapter) is responsible for building a `FormRequest`
 faithfully from `*http.Request`.
+
+The same reasoning applies to the DPoP header specifically:
+`DPoPProofs []string` on every request type that accepts a DPoP proof
+(`server`'s six token/PAR/CIBA-begin request types, and
+`resource.VerifyRequest`) takes every raw "DPoP" header value a
+request carried, not a single already-resolved string — a caller
+passes `http.Header.Values("DPoP")` directly, never `Header.Get`, which
+silently returns only the first of several values instead of letting
+the request be rejected. RFC 9449 §7.1 requires a request carry at
+most one DPoP header; `internal/dpop.ResolveHeaderValues` (used by both
+`server` and `resource`) enforces that itself, rejecting more than one
+value regardless of whether any individual value would otherwise have
+verified, rather than depending on every HTTP adapter to remember its
+own check.
 
 **mTLS trusts the TLS-terminating adapter, not a CA store of its own.**
 `PeerCertificate` — on `PushAuthorizationRequest` and its siblings, and
@@ -391,7 +405,7 @@ specific DCR plan) has no DCR module at all. If it is added:
 
 ### 8. Resource server verifies in HTTP context, not in isolation
 
-`Verifier.Verify(ctx, VerifyRequest{Method, URL, Authorization, DPoPProof})`
+`Verifier.Verify(ctx, VerifyRequest{Method, URL, Authorization, DPoPProofs})`
 → `AuthorizationContext{Subject, ClientID, Scopes, Claims}`. Token
 verification is inseparable from method/URL/DPoP context, so there is no
 bare `VerifyJWT` entry point — and, symmetrically, no bare `VerifyDPoP`

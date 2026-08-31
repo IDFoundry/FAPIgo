@@ -236,7 +236,7 @@ alongside `authorize.go`.
 `resource.Verifier` is FAPI 2.0's third role, a deliberately separate
 package from `server` rather than a mode of it — verifying a presented
 access token is inseparable from the HTTP request it arrived on, so
-`Verify(ctx, VerifyRequest{Method, URL, Authorization, DPoPProof})` is
+`Verify(ctx, VerifyRequest{Method, URL, Authorization, DPoPProofs})` is
 the only entry point, never a bare `VerifyJWT`. In a real deployment
 this is usually a wholly separate service protecting its own API;
 `cmd/conformance-as` only co-locates it in the same binary because the
@@ -316,7 +316,7 @@ authCtx, err := verifier.Verify(ctx, resource.VerifyRequest{
 	Method:        r.Method,
 	URL:           protectedResourceURL, // this endpoint's own fixed external URL — see below, never r.URL
 	Authorization: r.Header.Get("Authorization"),
-	DPoPProof:     dpopProof,             // see below — not simply r.Header.Get("DPoP")
+	DPoPProofs:    r.Header.Values("DPoP"), // see below — never r.Header.Get("DPoP")
 })
 ```
 
@@ -338,17 +338,18 @@ func writeResourceError(w http.ResponseWriter, err error) {
 }
 ```
 
-Two easy-to-miss details `cmd/conformance-as/resource.go` gets right
-that are worth copying: `URL` must be this endpoint's own fixed,
+One easy-to-miss detail `cmd/conformance-as/resource.go` gets right
+that's worth copying: `URL` must be this endpoint's own fixed,
 externally-visible URL (it's the DPoP proof's expected `htu`) — never
 inferred from the incoming request's `Host` header, the same reasoning
-`server.Endpoints` is never inferred from a request either. And
-`DPoPProof` expects exactly one string, but `http.Header.Get("DPoP")`
-silently returns only the first of several duplicate headers — a
-smuggled second header would slip past unnoticed. Check
-`r.Header.Values("DPoP")` yourself and reject the request before ever
-calling `Verify` if there's more than one, exactly like that file's own
-`singleDPoPHeader` helper.
+`server.Endpoints` is never inferred from a request either.
+
+`DPoPProofs` takes every raw "DPoP" header value the request carried —
+pass `r.Header.Values("DPoP")` directly, never `r.Header.Get("DPoP")`,
+which silently returns only the first of several duplicate headers.
+`Verify` itself rejects a request that carried more than one (RFC 9449
+§7.1), so there's no adapter-side check to write here — unlike an
+older version of this library, which left that check to the caller.
 
 That's the whole surface: `resource.Verifier` has no other public entry
 point. Everything above `Verify` — routing, `WWW-Authenticate` framing,

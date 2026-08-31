@@ -14,15 +14,16 @@ import (
 type ClientCredentialsTokenRequest struct {
 	HTTP FormRequest
 
-	// DPoPProof is the value of the request's DPoP header — required
-	// when the authenticated client's storage.RegisteredClient.SenderConstrain()
+	// DPoPProofs is every "DPoP" header value the request carried, in
+	// receipt order — required (exactly one value) when the
+	// authenticated client's storage.RegisteredClient.SenderConstrain()
 	// is SenderConstrainDPoP (the default). Same shape as
-	// AuthorizationCodeExchangeRequest.DPoPProof.
-	DPoPProof string
+	// AuthorizationCodeExchangeRequest.DPoPProofs.
+	DPoPProofs []string
 
 	// PeerCertificate is the TLS client certificate presented on the
 	// connection this request arrived on, if any — required instead of
-	// DPoPProof when the authenticated client's SenderConstrain() is
+	// a DPoP proof when the authenticated client's SenderConstrain() is
 	// SenderConstrainMTLS (RFC 8705 §3). Same shape as
 	// AuthorizationCodeExchangeRequest.PeerCertificate.
 	PeerCertificate *x509.Certificate
@@ -55,6 +56,10 @@ func (s *Server) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 	params, err := formParametersToMap(req.HTTP.Parameters)
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, "", newError(ErrorInvalidRequest, 400, "the request contains a duplicated parameter", err))
+	}
+	dpopProof, dpopErr := resolveDPoPProof(req.DPoPProofs)
+	if dpopErr != nil {
+		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, "", dpopErr)
 	}
 
 	if params["grant_type"] != "client_credentials" {
@@ -97,7 +102,7 @@ func (s *Server) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), newError(ErrorInvalidAuthorizationDetails, 400, "authorization_details is not permitted for this client", err))
 	}
 
-	thumbprint, bindingErr := s.verifyTokenRequestBinding(ctx, client, req.DPoPProof, req.PeerCertificate)
+	thumbprint, bindingErr := s.verifyTokenRequestBinding(ctx, client, dpopProof, req.PeerCertificate)
 	if bindingErr != nil {
 		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), bindingErr)
 	}

@@ -81,8 +81,8 @@ func TestReturnInTokenClaimsPropagatesThroughAuthorizationCodeGrant(t *testing.T
 
 	dpopKey := generateKey(t)
 	exchangeResult, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: createDPoPProof(t, dpopKey, h.now),
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, dpopKey, h.now)},
 	})
 	if err != nil {
 		t.Fatalf("ExchangeAuthorizationCode: %v", err)

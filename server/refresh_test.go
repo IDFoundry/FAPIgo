@@ -32,8 +32,8 @@ func exchangeForTokensWithOfflineAccess(t *testing.T, h harness) (server.TokenRe
 	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts", "offline_access"})
 	dpopKey := generateKey(t)
 	result, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: createDPoPProof(t, dpopKey, h.now),
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, dpopKey, h.now)},
 	})
 	if err != nil {
 		t.Fatalf("ExchangeAuthorizationCode: %v", err)
@@ -54,8 +54,8 @@ func TestExchangeAuthorizationCodeNoRefreshTokenWithoutOfflineAccess(t *testing.
 	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
 
 	result, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err != nil {
 		t.Fatalf("ExchangeAuthorizationCode: %v", err)
@@ -70,8 +70,8 @@ func TestRefreshAccessTokenSuccess(t *testing.T) {
 	first, dpopKey := exchangeForTokensWithOfflineAccess(t, h)
 
 	result, err := h.server.RefreshAccessToken(context.Background(), server.RefreshTokenRequest{
-		HTTP:      server.FormRequest{Parameters: refreshFormParams(h.clientAssertion(t), first.RefreshToken.Reveal(), "")},
-		DPoPProof: createDPoPProof(t, dpopKey, h.now),
+		HTTP:       server.FormRequest{Parameters: refreshFormParams(h.clientAssertion(t), first.RefreshToken.Reveal(), "")},
+		DPoPProofs: []string{createDPoPProof(t, dpopKey, h.now)},
 	})
 	if err != nil {
 		t.Fatalf("RefreshAccessToken: %v", err)
@@ -107,15 +107,15 @@ func TestRefreshAccessTokenReusableAcrossMultipleCalls(t *testing.T) {
 	first, dpopKey := exchangeForTokensWithOfflineAccess(t, h)
 
 	if _, err := h.server.RefreshAccessToken(context.Background(), server.RefreshTokenRequest{
-		HTTP:      server.FormRequest{Parameters: refreshFormParams(h.clientAssertion(t), first.RefreshToken.Reveal(), "")},
-		DPoPProof: createDPoPProof(t, dpopKey, h.now),
+		HTTP:       server.FormRequest{Parameters: refreshFormParams(h.clientAssertion(t), first.RefreshToken.Reveal(), "")},
+		DPoPProofs: []string{createDPoPProof(t, dpopKey, h.now)},
 	}); err != nil {
 		t.Fatalf("first RefreshAccessToken: %v", err)
 	}
 
 	if _, err := h.server.RefreshAccessToken(context.Background(), server.RefreshTokenRequest{
-		HTTP:      server.FormRequest{Parameters: refreshFormParams(h.clientAssertion(t), first.RefreshToken.Reveal(), "")},
-		DPoPProof: createDPoPProof(t, dpopKey, h.now),
+		HTTP:       server.FormRequest{Parameters: refreshFormParams(h.clientAssertion(t), first.RefreshToken.Reveal(), "")},
+		DPoPProofs: []string{createDPoPProof(t, dpopKey, h.now)},
 	}); err != nil {
 		t.Fatalf("second RefreshAccessToken (same token again): %v, want success", err)
 	}
@@ -126,8 +126,8 @@ func TestRefreshAccessTokenNarrowsScope(t *testing.T) {
 	first, dpopKey := exchangeForTokensWithOfflineAccess(t, h)
 
 	result, err := h.server.RefreshAccessToken(context.Background(), server.RefreshTokenRequest{
-		HTTP:      server.FormRequest{Parameters: refreshFormParams(h.clientAssertion(t), first.RefreshToken.Reveal(), "accounts")},
-		DPoPProof: createDPoPProof(t, dpopKey, h.now),
+		HTTP:       server.FormRequest{Parameters: refreshFormParams(h.clientAssertion(t), first.RefreshToken.Reveal(), "accounts")},
+		DPoPProofs: []string{createDPoPProof(t, dpopKey, h.now)},
 	})
 	if err != nil {
 		t.Fatalf("RefreshAccessToken: %v", err)
@@ -145,8 +145,8 @@ func TestRefreshAccessTokenRejectsWideningScope(t *testing.T) {
 	first, dpopKey := exchangeForTokensWithOfflineAccess(t, h)
 
 	_, err := h.server.RefreshAccessToken(context.Background(), server.RefreshTokenRequest{
-		HTTP:      server.FormRequest{Parameters: refreshFormParams(h.clientAssertion(t), first.RefreshToken.Reveal(), "openid accounts offline_access payments")},
-		DPoPProof: createDPoPProof(t, dpopKey, h.now),
+		HTTP:       server.FormRequest{Parameters: refreshFormParams(h.clientAssertion(t), first.RefreshToken.Reveal(), "openid accounts offline_access payments")},
+		DPoPProofs: []string{createDPoPProof(t, dpopKey, h.now)},
 	})
 	if err == nil {
 		t.Fatalf("RefreshAccessToken(widened scope) = nil error, want error")
@@ -173,8 +173,8 @@ func TestRefreshAccessTokenAcceptsRotatedDPoPKey(t *testing.T) {
 
 	rotatedKey := generateKey(t)
 	result, err := h.server.RefreshAccessToken(context.Background(), server.RefreshTokenRequest{
-		HTTP:      server.FormRequest{Parameters: refreshFormParams(h.clientAssertion(t), first.RefreshToken.Reveal(), "")},
-		DPoPProof: createDPoPProof(t, rotatedKey, h.now),
+		HTTP:       server.FormRequest{Parameters: refreshFormParams(h.clientAssertion(t), first.RefreshToken.Reveal(), "")},
+		DPoPProofs: []string{createDPoPProof(t, rotatedKey, h.now)},
 	})
 	if err != nil {
 		t.Fatalf("RefreshAccessToken(rotated DPoP key): %v", err)
@@ -227,10 +227,26 @@ func TestRefreshAccessTokenRejectsWrongGrantType(t *testing.T) {
 		}
 	}
 	_, err := h.server.RefreshAccessToken(context.Background(), server.RefreshTokenRequest{
-		HTTP: server.FormRequest{Parameters: params}, DPoPProof: createDPoPProof(t, dpopKey, h.now),
+		HTTP: server.FormRequest{Parameters: params}, DPoPProofs: []string{createDPoPProof(t, dpopKey, h.now)},
 	})
 	if code := serverErrorCode(t, err); code != server.ErrorUnsupportedGrantType {
 		t.Fatalf("error code = %q, want %q", code, server.ErrorUnsupportedGrantType)
+	}
+}
+
+// TestRefreshAccessTokenRejectsMultipleDPoPProofs mirrors
+// TestExchangeAuthorizationCodeRejectsMultipleDPoPProofs (see its own
+// doc comment) for this grant.
+func TestRefreshAccessTokenRejectsMultipleDPoPProofs(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	first, dpopKey := exchangeForTokensWithOfflineAccess(t, h)
+
+	_, err := h.server.RefreshAccessToken(context.Background(), server.RefreshTokenRequest{
+		HTTP:       server.FormRequest{Parameters: refreshFormParams(h.clientAssertion(t), first.RefreshToken.Reveal(), "")},
+		DPoPProofs: []string{createDPoPProof(t, dpopKey, h.now), createDPoPProof(t, dpopKey, h.now)},
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequest)
 	}
 }
 
@@ -246,7 +262,7 @@ func TestRefreshAccessTokenRejectsMissingClientAssertion(t *testing.T) {
 		}
 	}
 	_, err := h.server.RefreshAccessToken(context.Background(), server.RefreshTokenRequest{
-		HTTP: server.FormRequest{Parameters: filtered}, DPoPProof: createDPoPProof(t, dpopKey, h.now),
+		HTTP: server.FormRequest{Parameters: filtered}, DPoPProofs: []string{createDPoPProof(t, dpopKey, h.now)},
 	})
 	if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
 		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidClient)
@@ -258,8 +274,8 @@ func TestRefreshAccessTokenAuditsOutcomes(t *testing.T) {
 	first, dpopKey := exchangeForTokensWithOfflineAccess(t, h)
 
 	if _, err := h.server.RefreshAccessToken(context.Background(), server.RefreshTokenRequest{
-		HTTP:      server.FormRequest{Parameters: refreshFormParams(h.clientAssertion(t), first.RefreshToken.Reveal(), "")},
-		DPoPProof: createDPoPProof(t, dpopKey, h.now),
+		HTTP:       server.FormRequest{Parameters: refreshFormParams(h.clientAssertion(t), first.RefreshToken.Reveal(), "")},
+		DPoPProofs: []string{createDPoPProof(t, dpopKey, h.now)},
 	}); err != nil {
 		t.Fatalf("RefreshAccessToken: %v", err)
 	}

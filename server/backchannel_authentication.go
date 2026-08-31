@@ -81,10 +81,12 @@ func (BackchannelAuthenticationLocalError) backchannelAuthenticationAction() {}
 type BeginBackchannelAuthenticationRequest struct {
 	HTTP FormRequest
 
-	// DPoPProof is the value of the request's DPoP header, if present.
-	// Optional, mirroring PushAuthorizationRequest.DPoPProof — see
+	// DPoPProofs is every "DPoP" header value the request carried, in
+	// receipt order — see AuthorizationCodeExchangeRequest.DPoPProofs'
+	// own doc comment for why this is a slice, not a single string.
+	// Optional, mirroring PushAuthorizationRequest.DPoPProofs — see
 	// reconcileBackchannelDPoPBinding.
-	DPoPProof string
+	DPoPProofs []string
 
 	// PeerCertificate is the TLS client certificate presented on the
 	// connection this request arrived on, if any — required when the
@@ -108,6 +110,10 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	params, err := formParametersToMap(req.HTTP.Parameters)
 	if err != nil {
 		return s.backchannelBeginFail(ctx, "", newError(ErrorInvalidRequest, 400, "the request contains a duplicated parameter", err)), nil
+	}
+	dpopProof, proofErr := resolveDPoPProof(req.DPoPProofs)
+	if proofErr != nil {
+		return s.backchannelBeginFail(ctx, "", proofErr), nil
 	}
 
 	// CIBA Core 1.0 §7.1 explicitly widens the backchannel authentication
@@ -133,7 +139,7 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		return s.backchannelBeginFail(ctx, client.ID(), validateErr), nil
 	}
 
-	dpopJKT, dpopErr := s.reconcileBackchannelDPoPBinding(ctx, req.DPoPProof)
+	dpopJKT, dpopErr := s.reconcileBackchannelDPoPBinding(ctx, dpopProof)
 	if dpopErr != nil {
 		return s.backchannelBeginFail(ctx, client.ID(), dpopErr), nil
 	}

@@ -237,8 +237,8 @@ func TestPushAuthorizationRequestPlainAuthorizationDetailsFlow(t *testing.T) {
 
 	dpopKey := generateKey(t)
 	exchangeResult, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: createDPoPProof(t, dpopKey, h.now),
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, dpopKey, h.now)},
 	})
 	if err != nil {
 		t.Fatalf("ExchangeAuthorizationCode: %v", err)
@@ -540,8 +540,8 @@ func TestExchangeAuthorizationCodeMergesAuthorizationDetailsWithExistingTokenCla
 
 	dpopKey := generateKey(t)
 	exchangeResult, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: createDPoPProof(t, dpopKey, h.now),
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, dpopKey, h.now)},
 	})
 	if err != nil {
 		t.Fatalf("ExchangeAuthorizationCode: %v", err)
@@ -693,7 +693,7 @@ func TestCIBAAuthorizationDetailsFlow(t *testing.T) {
 			formParam("grant_type", server.CIBAGrantType),
 			formParam("auth_req_id", required.AuthReqID.String()),
 		}},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err != nil {
 		t.Fatalf("ExchangeBackchannelAuthentication: %v", err)

@@ -144,8 +144,8 @@ func exchangeWithDPoPNonce(t *testing.T, h harness, dpopKey *ecdsa.PrivateKey, n
 		t.Fatalf("dpop.CreateProof: %v", err)
 	}
 	return h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: proof,
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{proof},
 	})
 }
 
@@ -157,8 +157,8 @@ func TestExchangeAuthorizationCodeNonceDisabledByDefault(t *testing.T) {
 	dpopKey := generateKey(t)
 
 	result, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: createDPoPProof(t, dpopKey, h.now),
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, dpopKey, h.now)},
 	})
 	if err != nil {
 		t.Fatalf("ExchangeAuthorizationCode: %v", err)
@@ -273,8 +273,8 @@ func TestExchangeAuthorizationCodeNonceCheckedBeforeCodeRedemption(t *testing.T)
 	}
 
 	_, err = h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: proofWithoutNonce,
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{proofWithoutNonce},
 	})
 	serr, ok := err.(*server.Error)
 	if !ok {
@@ -297,8 +297,8 @@ func TestExchangeAuthorizationCodeNonceCheckedBeforeCodeRedemption(t *testing.T)
 		t.Fatalf("dpop.CreateProof: %v", err)
 	}
 	if _, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: proofWithNonce,
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{proofWithNonce},
 	}); err != nil {
 		t.Fatalf("retry with the same authorization code and a valid nonce: %v", err)
 	}
@@ -320,8 +320,8 @@ func TestRefreshAccessTokenReissuesNonceOnSuccess(t *testing.T) {
 		t.Fatalf("dpop.CreateProof: %v", err)
 	}
 	_, err = h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: firstProof,
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{firstProof},
 	})
 	serr, ok := err.(*server.Error)
 	if !ok {
@@ -336,8 +336,8 @@ func TestRefreshAccessTokenReissuesNonceOnSuccess(t *testing.T) {
 		t.Fatalf("dpop.CreateProof: %v", err)
 	}
 	result, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: proof,
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{proof},
 	})
 	if err != nil {
 		t.Fatalf("ExchangeAuthorizationCode: %v", err)
@@ -359,7 +359,7 @@ func TestRefreshAccessTokenReissuesNonceOnSuccess(t *testing.T) {
 			formParam("grant_type", "refresh_token"),
 			formParam("refresh_token", result.RefreshToken.Reveal()),
 		}},
-		DPoPProof: refreshProof,
+		DPoPProofs: []string{refreshProof},
 	})
 	if err != nil {
 		t.Fatalf("RefreshAccessToken: %v", err)
@@ -417,7 +417,7 @@ func TestPushAuthorizationRequestChallengesMissingNonceWhenDPoPPresented(t *test
 	}
 
 	_, err = h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
-		HTTP: server.FormRequest{Parameters: parFormParams(t, h)}, DPoPProof: proof,
+		HTTP: server.FormRequest{Parameters: parFormParams(t, h)}, DPoPProofs: []string{proof},
 	})
 	serr, ok := err.(*server.Error)
 	if !ok {
@@ -445,7 +445,7 @@ func TestPushAuthorizationRequestAcceptsValidNonceAndIssuesNext(t *testing.T) {
 		t.Fatalf("dpop.CreateProof: %v", err)
 	}
 	_, err = h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
-		HTTP: server.FormRequest{Parameters: parFormParams(t, h)}, DPoPProof: firstProof,
+		HTTP: server.FormRequest{Parameters: parFormParams(t, h)}, DPoPProofs: []string{firstProof},
 	})
 	serr, ok := err.(*server.Error)
 	if !ok {
@@ -460,7 +460,7 @@ func TestPushAuthorizationRequestAcceptsValidNonceAndIssuesNext(t *testing.T) {
 		t.Fatalf("dpop.CreateProof: %v", err)
 	}
 	result, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
-		HTTP: server.FormRequest{Parameters: parFormParams(t, h)}, DPoPProof: retryProof,
+		HTTP: server.FormRequest{Parameters: parFormParams(t, h)}, DPoPProofs: []string{retryProof},
 	})
 	if err != nil {
 		t.Fatalf("PushAuthorizationRequest(valid nonce): %v", err)
@@ -488,7 +488,7 @@ func TestNonceIssuedAtPARIsValidAtTokenEndpoint(t *testing.T) {
 		t.Fatalf("dpop.CreateProof: %v", err)
 	}
 	_, err = h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
-		HTTP: server.FormRequest{Parameters: parFormParams(t, h)}, DPoPProof: parProof,
+		HTTP: server.FormRequest{Parameters: parFormParams(t, h)}, DPoPProofs: []string{parProof},
 	})
 	serr, ok := err.(*server.Error)
 	if !ok {

@@ -55,14 +55,8 @@ func (h *backchannelHandler) handleAuthenticate(w http.ResponseWriter, r *http.R
 		writeRawOAuthError(w, http.StatusBadRequest, server.ErrorInvalidRequest, err.Error())
 		return
 	}
-	dpopProof, ok := singleDPoPHeader(r)
-	if !ok {
-		writeRawOAuthError(w, http.StatusBadRequest, server.ErrorInvalidRequest, "multiple DPoP headers are not permitted")
-		return
-	}
-
 	action, err := h.srv.BeginBackchannelAuthentication(r.Context(), server.BeginBackchannelAuthenticationRequest{
-		HTTP: form, DPoPProof: dpopProof, PeerCertificate: peerCertificate(r),
+		HTTP: form, DPoPProofs: r.Header.Values("DPoP"), PeerCertificate: peerCertificate(r),
 	})
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)

@@ -82,16 +82,11 @@ func userinfoHandler(srv *server.Server, verifier *fapires.Verifier, userinfoURL
 		}
 		w.Header().Set(fapires.InteractionIDHeader, interactionID)
 
-		dpopProof, ok := singleDPoPHeader(r)
-		if !ok {
-			writeResourceErrorRaw(w, http.StatusBadRequest, "invalid_request", "multiple DPoP headers are not permitted")
-			return
-		}
 		authCtx, err := verifier.Verify(r.Context(), fapires.VerifyRequest{
 			Method:          r.Method,
 			URL:             userinfoURL,
 			Authorization:   r.Header.Get("Authorization"),
-			DPoPProof:       dpopProof,
+			DPoPProofs:      r.Header.Values("DPoP"),
 			PeerCertificate: peerCertificate(r),
 		})
 		if err != nil {
@@ -187,16 +182,11 @@ func accountsHandler(verifier *fapires.Verifier, accountsURL *url.URL) http.Hand
 		}
 		w.Header().Set(fapires.InteractionIDHeader, interactionID)
 
-		dpopProof, ok := singleDPoPHeader(r)
-		if !ok {
-			writeResourceErrorRaw(w, http.StatusBadRequest, "invalid_request", "multiple DPoP headers are not permitted")
-			return
-		}
 		authCtx, err := verifier.Verify(r.Context(), fapires.VerifyRequest{
 			Method:          r.Method,
 			URL:             accountsURL,
 			Authorization:   r.Header.Get("Authorization"),
-			DPoPProof:       dpopProof,
+			DPoPProofs:      r.Header.Values("DPoP"),
 			PeerCertificate: peerCertificate(r),
 		})
 		if err != nil {

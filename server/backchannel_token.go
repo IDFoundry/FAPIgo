@@ -23,15 +23,16 @@ const CIBAGrantType = "urn:openid:params:grant-type:ciba"
 type BackchannelTokenExchangeRequest struct {
 	HTTP FormRequest
 
-	// DPoPProof is the value of the request's DPoP header — required
-	// when the authenticated client's SenderConstrain() is
-	// SenderConstrainDPoP (the default), the same requirement
+	// DPoPProofs is every "DPoP" header value the request carried, in
+	// receipt order — required (exactly one value) when the
+	// authenticated client's SenderConstrain() is SenderConstrainDPoP
+	// (the default), the same requirement
 	// ExchangeAuthorizationCode/RefreshAccessToken already have.
-	DPoPProof string
+	DPoPProofs []string
 
 	// PeerCertificate is the TLS client certificate presented on the
 	// connection this request arrived on, if any — required instead of
-	// DPoPProof when the authenticated client's SenderConstrain() is
+	// a DPoP proof when the authenticated client's SenderConstrain() is
 	// SenderConstrainMTLS.
 	PeerCertificate *x509.Certificate
 }
@@ -49,6 +50,10 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 	params, err := formParametersToMap(req.HTTP.Parameters)
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, "", newError(ErrorInvalidRequest, 400, "the request contains a duplicated parameter", err))
+	}
+	dpopProof, dpopErr := resolveDPoPProof(req.DPoPProofs)
+	if dpopErr != nil {
+		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, "", dpopErr)
 	}
 
 	if params["grant_type"] != CIBAGrantType {
@@ -70,7 +75,7 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorInvalidRequest, 400, "auth_req_id is required", nil))
 	}
 
-	thumbprint, bindingErr := s.verifyTokenRequestBinding(ctx, client, req.DPoPProof, req.PeerCertificate)
+	thumbprint, bindingErr := s.verifyTokenRequestBinding(ctx, client, dpopProof, req.PeerCertificate)
 	if bindingErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), bindingErr)
 	}

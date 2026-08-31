@@ -23,6 +23,7 @@ import (
 	"github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
+	"github.com/idfoundry/fapigo/storage/memstore"
 )
 
 const (
@@ -363,7 +364,7 @@ func New(t *testing.T, cfg Config) *Harness {
 		clientCfg.Algorithms.IDTokenContentEncryption = contentEncryption
 	}
 	clientDeps := client.Dependencies{
-		Sessions:   newMemSessionStore(),
+		Sessions:   memstore.NewSessionStore(),
 		Keys:       clientKeys,
 		IssuerKeys: &memIssuerKeySource{issuer: Issuer, manager: asKeys},
 		HTTP:       httpClient,

@@ -21,7 +21,3 @@ func TestMemTransactionStoreContract(t *testing.T) {
 func TestMemReplayStoreContract(t *testing.T) {
 	storage.TestReplayStoreContract(t, func() storage.ReplayStore { return newMemReplayStore() })
 }
-
-func TestMemSessionStoreContract(t *testing.T) {
-	storage.TestSessionStoreContract(t, func() storage.SessionStore { return newMemSessionStore() })
-}

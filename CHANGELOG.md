@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.23.0](https://github.com/IDFoundry/FAPIgo/compare/v0.22.2...v0.23.0) (2026-08-31)
+
+
+### Features
+
+* add canonical String/Parse pairs for storage's enum types ([c3ae0e1](https://github.com/IDFoundry/FAPIgo/commit/c3ae0e1f41e0807d454e02de72201c960aea6c55))
+* export server.Error.WriteJSON and NewError ([79fe156](https://github.com/IDFoundry/FAPIgo/commit/79fe156eb11058255ccecb748faa49af4e950d8a))
+
+
+### Bug Fixes
+
+* reject multiple DPoP header values instead of trusting adapters ([c958b5c](https://github.com/IDFoundry/FAPIgo/commit/c958b5cdbb02b5163ef608a8c8ad89602fac1abd))
+
 ## [0.22.2](https://github.com/IDFoundry/FAPIgo/compare/v0.22.1...v0.22.2) (2026-08-31)
 
 

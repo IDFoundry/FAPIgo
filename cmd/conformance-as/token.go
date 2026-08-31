@@ -12,13 +12,13 @@ func tokenHandler(srv *server.Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		form, err := formRequestFromHTTP(r)
 		if err != nil {
-			writeRawOAuthError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			writeRawOAuthError(w, http.StatusBadRequest, server.ErrorInvalidRequest, err.Error())
 			return
 		}
 		grantType := formValue(form, "grant_type")
 		dpopProof, ok := singleDPoPHeader(r)
 		if !ok {
-			writeRawOAuthError(w, http.StatusBadRequest, "invalid_request", "multiple DPoP headers are not permitted")
+			writeRawOAuthError(w, http.StatusBadRequest, server.ErrorInvalidRequest, "multiple DPoP headers are not permitted")
 			return
 		}
 		peerCert := peerCertificate(r)
@@ -34,7 +34,7 @@ func tokenHandler(srv *server.Server) http.HandlerFunc {
 		case "client_credentials":
 			result, err = srv.RequestClientCredentialsToken(r.Context(), server.ClientCredentialsTokenRequest{HTTP: form, DPoPProof: dpopProof, PeerCertificate: peerCert})
 		default:
-			writeRawOAuthError(w, http.StatusBadRequest, "unsupported_grant_type", "grant_type must be authorization_code, refresh_token, client_credentials, or "+server.CIBAGrantType)
+			writeRawOAuthError(w, http.StatusBadRequest, server.ErrorUnsupportedGrantType, "grant_type must be authorization_code, refresh_token, client_credentials, or "+server.CIBAGrantType)
 			return
 		}
 		if err != nil {

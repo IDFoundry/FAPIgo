@@ -52,12 +52,12 @@ func newBackchannelHandler(srv *server.Server, clock server.Clock, defaultSubjec
 func (h *backchannelHandler) handleAuthenticate(w http.ResponseWriter, r *http.Request) {
 	form, err := formRequestFromHTTP(r)
 	if err != nil {
-		writeRawOAuthError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		writeRawOAuthError(w, http.StatusBadRequest, server.ErrorInvalidRequest, err.Error())
 		return
 	}
 	dpopProof, ok := singleDPoPHeader(r)
 	if !ok {
-		writeRawOAuthError(w, http.StatusBadRequest, "invalid_request", "multiple DPoP headers are not permitted")
+		writeRawOAuthError(w, http.StatusBadRequest, server.ErrorInvalidRequest, "multiple DPoP headers are not permitted")
 		return
 	}
 

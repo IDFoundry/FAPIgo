@@ -3,43 +3,30 @@ package main
 import (
 	"net/http"
 
-	"github.com/idfoundry/fapigo/internal/par"
 	"github.com/idfoundry/fapigo/server"
 )
 
 // writeOAuthJSONError translates err into an OAuth JSON error response
-// (RFC 6749 §5.2). Every server package method's error return is a
-// *server.Error; the fallback below only triggers for something outside
-// the request itself (e.g. context cancellation propagating from a
-// dependency).
+// (RFC 6749 §5.2) via *server.Error's own WriteJSON. Every server
+// package method's error return is a *server.Error; the fallback below
+// only triggers for something outside the request itself (e.g. context
+// cancellation propagating from a dependency).
 func writeOAuthJSONError(w http.ResponseWriter, err error) {
 	srvErr, ok := err.(*server.Error)
 	if !ok {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	// Set before writeRawOAuthError's own WriteHeader call — a header
-	// can't be added after that. Only ErrorUseDPoPNonce ever carries a
-	// nonce (Error.Nonce's own doc comment), so this is a no-op for
-	// every other rejection.
-	if srvErr.Nonce() != "" {
-		w.Header().Set("DPoP-Nonce", srvErr.Nonce())
-	}
-	writeRawOAuthError(w, srvErr.HTTPStatus(), string(srvErr.Code()), srvErr.PublicDescription())
+	srvErr.WriteJSON(w)
 }
 
 // writeRawOAuthError writes an OAuth JSON error response directly, for
 // failures detected before a *server.Error exists at all (e.g. a
-// malformed form body, or an unsupported grant_type).
-func writeRawOAuthError(w http.ResponseWriter, status int, code, description string) {
-	body, err := par.EncodeErrorResponse(par.ErrorResponse{Code: code, Description: description})
-	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_, _ = w.Write(body)
+// malformed form body, or an unrecognized grant_type) — via
+// server.NewError/*server.Error.WriteJSON, the same encoding every
+// *server.Error this binary ever receives already goes through.
+func writeRawOAuthError(w http.ResponseWriter, status int, code server.ErrorCode, description string) {
+	server.NewError(code, status, description).WriteJSON(w)
 }
 
 // writeLocalHTMLError renders err as a browser-facing HTML page, never a

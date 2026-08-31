@@ -282,46 +282,51 @@ func (cfg Config) Resolve(allowLoopbackHTTP bool, accessTokenFormat AccessTokenF
 }
 
 // parseClientAuthMethod maps a config-file client_auth_method string to
-// its storage.ClientAuthMethod, defaulting to private_key_jwt when
-// unset.
+// its storage.ClientAuthMethod via storage.ParseClientAuthMethod,
+// defaulting to private_key_jwt when unset — an absent field's default
+// is this config format's own policy decision, not
+// ParseClientAuthMethod's (see its own doc comment).
 func parseClientAuthMethod(raw string) (storage.ClientAuthMethod, error) {
-	switch raw {
-	case "", "private_key_jwt":
+	if raw == "" {
 		return storage.ClientAuthMethodPrivateKeyJWT, nil
-	case "self_signed_tls_client_auth":
-		return storage.ClientAuthMethodSelfSignedTLSClientAuth, nil
-	case "tls_client_auth":
-		return storage.ClientAuthMethodTLSClientAuth, nil
-	default:
-		return 0, fmt.Errorf("client_auth_method must be %q, %q, or %q, got %q", "private_key_jwt", "self_signed_tls_client_auth", "tls_client_auth", raw)
 	}
+	m, err := storage.ParseClientAuthMethod(raw)
+	if err != nil {
+		return 0, fmt.Errorf("client_auth_method: %w", err)
+	}
+	return m, nil
 }
 
 // parseSenderConstrain maps a config-file sender_constrain string to
-// its storage.SenderConstrain, defaulting to dpop when unset.
+// its storage.SenderConstrain via storage.ParseSenderConstrain,
+// defaulting to dpop when unset — see parseClientAuthMethod's own doc
+// comment for why that default lives here, not in Parse.
 func parseSenderConstrain(raw string) (storage.SenderConstrain, error) {
-	switch raw {
-	case "", "dpop":
+	if raw == "" {
 		return storage.SenderConstrainDPoP, nil
-	case "mtls":
-		return storage.SenderConstrainMTLS, nil
-	default:
-		return 0, fmt.Errorf("sender_constrain must be %q or %q, got %q", "dpop", "mtls", raw)
 	}
+	s, err := storage.ParseSenderConstrain(raw)
+	if err != nil {
+		return 0, fmt.Errorf("sender_constrain: %w", err)
+	}
+	return s, nil
 }
 
 // parseBackchannelTokenDeliveryMode maps a config-file
 // backchannel_token_delivery_mode string to its
-// storage.BackchannelTokenDeliveryMode, defaulting to poll when unset.
+// storage.BackchannelTokenDeliveryMode via
+// storage.ParseBackchannelTokenDeliveryMode, defaulting to poll when
+// unset — see parseClientAuthMethod's own doc comment for why that
+// default lives here, not in Parse.
 func parseBackchannelTokenDeliveryMode(raw string) (storage.BackchannelTokenDeliveryMode, error) {
-	switch raw {
-	case "", "poll":
+	if raw == "" {
 		return storage.BackchannelTokenDeliveryModePoll, nil
-	case "ping":
-		return storage.BackchannelTokenDeliveryModePing, nil
-	default:
-		return 0, fmt.Errorf("backchannel_token_delivery_mode must be %q or %q, got %q", "poll", "ping", raw)
 	}
+	m, err := storage.ParseBackchannelTokenDeliveryMode(raw)
+	if err != nil {
+		return 0, fmt.Errorf("backchannel_token_delivery_mode: %w", err)
+	}
+	return m, nil
 }
 
 func resolveClient(c ClientConfig) (storage.RegisteredClient, ephemeral.ClientKeySpec, error) {

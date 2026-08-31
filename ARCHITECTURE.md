@@ -303,6 +303,13 @@ own check.
 `PeerCertificate` — on `PushAuthorizationRequest` and its siblings, and
 on `resource.VerifyRequest` — carries whatever `*x509.Certificate` the
 connection's TLS handshake already produced.
+`server.PeerCertificateFromHTTP`/`resource.PeerCertificateFromHTTP` are
+optional `net/http` conveniences for reading it off an
+`*http.Request.TLS`, the same "no reason for every adapter to
+reimplement it" precedent as `FormRequestFromHTTP` — deliberately
+duplicated between the two packages rather than shared, since they
+never import each other (design rule 14) and the helper is small enough
+that a shared package would cost more than it saves.
 `server`/`resource` compare it — thumbprint for
 `ClientAuthMethodSelfSignedTLSClientAuth` and `SenderConstrainMTLS`
 (RFC 8705 §3), subject DN or a SAN field for

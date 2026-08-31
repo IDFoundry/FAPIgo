@@ -1,6 +1,10 @@
 package server
 
-import "fmt"
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+)
 
 // ErrorCode is a closed set of OAuth error codes (RFC 6749 §5.2, RFC
 // 9126) this server's public methods return.
@@ -114,6 +118,21 @@ func newError(code ErrorCode, httpStatus int, description string, cause error) *
 	return &Error{code: code, httpStatus: httpStatus, description: description, cause: cause}
 }
 
+// NewError builds an *Error for a caller reporting an OAuth-shaped
+// failure (RFC 6749 §5.2) it detected itself, before ever calling a
+// Server method — the one case this package's own methods can't cover,
+// since a *Error otherwise only ever comes from one of their return
+// values. The usual reason: an HTTP adapter's own request routing
+// rejects something (a malformed body, an unrecognized "grant_type"
+// value) before it can even decide which Server method to call. No
+// cause parameter, unlike the internal constructor every Server method
+// itself uses — there is no underlying error to wrap for a failure the
+// caller diagnosed directly, and Error's own doc comment already
+// forbids putting anything but PublicDescription in a response body.
+func NewError(code ErrorCode, httpStatus int, description string) *Error {
+	return &Error{code: code, httpStatus: httpStatus, description: description}
+}
+
 // Code returns the OAuth error code.
 func (e *Error) Code() ErrorCode { return e.code }
 
@@ -141,3 +160,29 @@ func (e *Error) Error() string {
 
 // Unwrap returns the underlying cause, if any.
 func (e *Error) Unwrap() error { return e.cause }
+
+// WriteJSON writes e as a complete RFC 6749 §5.2 OAuth JSON error
+// response to w: the DPoP-Nonce header when Nonce is non-empty (RFC
+// 9449 §8 — see Nonce's own doc comment for when that is), the
+// "application/json" Content-Type, e's own HTTPStatus, and a
+// {"error": ..., "error_description": ...} body built from Code and
+// PublicDescription — never Unwrap's cause. Every *Error this
+// package's own methods return, and any built with NewError, is safe
+// to pass here; there is no separate encoding step for an adapter to
+// get wrong, forget a header on, or need an internal package for.
+//
+// Must be called before anything else writes to w — like every
+// http.ResponseWriter header/status call, it has no effect once a
+// prior write has already sent the response's status line.
+func (e *Error) WriteJSON(w http.ResponseWriter) {
+	if e.nonce != "" {
+		w.Header().Set("DPoP-Nonce", e.nonce)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(e.httpStatus)
+	// Encoding two plain strings cannot fail.
+	_ = json.NewEncoder(w).Encode(struct {
+		Error            string `json:"error"`
+		ErrorDescription string `json:"error_description,omitempty"`
+	}{Error: string(e.code), ErrorDescription: e.description})
+}

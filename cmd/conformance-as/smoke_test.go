@@ -118,6 +118,8 @@ type smokeHarness struct {
 	client     *client.Client
 	httpClient *http.Client
 	authorize  string // base authorize endpoint URL, for building decision requests
+	token      string // base token endpoint URL, for tests that POST to it directly
+	par        string // base PAR endpoint URL, for tests that POST to it directly
 
 	// backchannelApprove is the base "/backchannel-approve" URL —
 	// populated only when newSmokeHarnessWithOptions was built with
@@ -125,6 +127,11 @@ type smokeHarness struct {
 	// directly, standing in for the OIDF suite's own
 	// CallAutomatedCibaApprovalEndpoint condition.
 	backchannelApprove string
+
+	// backchannelAuthenticate is the base "/backchannel-authenticate"
+	// URL — populated only when newSmokeHarnessWithOptions was built
+	// with ciba true — for tests that POST to it directly.
+	backchannelAuthenticate string
 }
 
 func newSmokeHarness(t *testing.T, format AccessTokenFormat) *smokeHarness {
@@ -314,7 +321,7 @@ func newSmokeHarnessWithOptions(t *testing.T, format AccessTokenFormat, dpopNonc
 			MaxJOSECompactBytes:  16 * 1024,
 		},
 	}
-	var backchannelApprove string
+	var backchannelApprove, backchannelAuthenticate string
 	if ciba {
 		backchannelAuthenticationURL, err := buildBackchannelAuthenticationURL(issuer, false)
 		if err != nil {
@@ -324,6 +331,7 @@ func newSmokeHarnessWithOptions(t *testing.T, format AccessTokenFormat, dpopNonc
 		clientCfg.Algorithms.BackchannelAuthenticationRequest = clientCIBAAlg
 		clientCfg.Limits.BackchannelAuthenticationRequestLifetime = time.Minute
 		backchannelApprove = issuer.String() + "/backchannel-approve"
+		backchannelAuthenticate = backchannelAuthenticationURL.String()
 	}
 	clientDeps := client.Dependencies{
 		Sessions:   newMemSessionStore(),
@@ -340,9 +348,156 @@ func newSmokeHarnessWithOptions(t *testing.T, format AccessTokenFormat, dpopNonc
 
 	return &smokeHarness{
 		t: t, client: c, httpClient: httpClient,
-		authorize:          endpoints.Authorization.String(),
-		backchannelApprove: backchannelApprove,
+		authorize:               endpoints.Authorization.String(),
+		token:                   endpoints.Token.String(),
+		par:                     endpoints.PushedAuthorizationRequest.String(),
+		backchannelApprove:      backchannelApprove,
+		backchannelAuthenticate: backchannelAuthenticate,
 	}
+}
+
+// postFormExpectingOAuthError POSTs body (already form-encoded) to url
+// and decodes the response as an RFC 6749 §5.2 OAuth JSON error —
+// shared by TestSmokeTokenEndpointOAuthErrorResponses,
+// TestSmokePAREndpointOAuthErrorResponses, and
+// TestSmokeBackchannelAuthenticationEndpointOAuthErrorResponses, all of
+// which exercise the same writeRawOAuthError/server.NewError/
+// (*server.Error).WriteJSON path from a different endpoint. extraHeaders
+// is applied after Content-Type, for the multiple-DPoP-header case
+// (http.Header.Add, not Set — a second call adds a second value rather
+// than replacing the first).
+func postFormExpectingOAuthError(t *testing.T, httpClient *http.Client, url, body string, extraHeaders map[string][]string) (*http.Response, map[string]any) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	for name, values := range extraHeaders {
+		for _, v := range values {
+			req.Header.Add(name, v)
+		}
+	}
+	res, err := httpClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST %s: %v", url, err)
+	}
+	t.Cleanup(func() { res.Body.Close() })
+	var decoded map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&decoded); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	return res, decoded
+}
+
+// TestSmokeTokenEndpointOAuthErrorResponses exercises /token's own raw
+// OAuth-error paths (writeRawOAuthError, server.NewError/(*server.Error).WriteJSON)
+// — failures this binary detects itself before ever calling a Server
+// method, so no *server.Error exists yet: an unrecognized grant_type,
+// a malformed form body, and multiple DPoP headers. Confirms the JSON
+// body/status/Content-Type WriteJSON produces is correct over real
+// HTTP, not just against a httptest.ResponseRecorder
+// (server/errors_test.go's own unit tests).
+func TestSmokeTokenEndpointOAuthErrorResponses(t *testing.T) {
+	h := newSmokeHarness(t, AccessTokenFormatJWT)
+
+	t.Run("unsupported grant_type", func(t *testing.T) {
+		res, body := postFormExpectingOAuthError(t, h.httpClient, h.token, url.Values{"grant_type": {"not-a-real-grant-type"}}.Encode(), nil)
+		if res.StatusCode != http.StatusBadRequest {
+			t.Errorf("status = %d, want %d", res.StatusCode, http.StatusBadRequest)
+		}
+		if ct := res.Header.Get("Content-Type"); ct != "application/json" {
+			t.Errorf("Content-Type = %q, want %q", ct, "application/json")
+		}
+		if body["error"] != string(server.ErrorUnsupportedGrantType) {
+			t.Errorf("error = %v, want %q", body["error"], server.ErrorUnsupportedGrantType)
+		}
+	})
+
+	t.Run("malformed form body", func(t *testing.T) {
+		// An invalid percent-escape ("%zz" isn't valid hex) is rejected by
+		// formRequestFromHTTP itself, before any grant_type dispatch —
+		// unlike a duplicated parameter, which formRequestFromHTTP
+		// deliberately preserves rather than rejecting (see its own doc
+		// comment), so that the *server* method it's eventually routed to
+		// detects it instead (a different, already-covered code path,
+		// via writeOAuthJSONError rather than writeRawOAuthError).
+		res, body := postFormExpectingOAuthError(t, h.httpClient, h.token, "grant_type=%zz", nil)
+		if res.StatusCode != http.StatusBadRequest {
+			t.Errorf("status = %d, want %d", res.StatusCode, http.StatusBadRequest)
+		}
+		if body["error"] != string(server.ErrorInvalidRequest) {
+			t.Errorf("error = %v, want %q", body["error"], server.ErrorInvalidRequest)
+		}
+	})
+
+	t.Run("multiple DPoP headers", func(t *testing.T) {
+		form := url.Values{"grant_type": {"client_credentials"}}.Encode()
+		res, body := postFormExpectingOAuthError(t, h.httpClient, h.token, form, map[string][]string{"DPoP": {"proof-1", "proof-2"}})
+		if res.StatusCode != http.StatusBadRequest {
+			t.Errorf("status = %d, want %d", res.StatusCode, http.StatusBadRequest)
+		}
+		if body["error"] != string(server.ErrorInvalidRequest) {
+			t.Errorf("error = %v, want %q", body["error"], server.ErrorInvalidRequest)
+		}
+	})
+}
+
+// TestSmokePAREndpointOAuthErrorResponses is
+// TestSmokeTokenEndpointOAuthErrorResponses' /par counterpart — no
+// grant_type concept there, so only the two raw-error paths every
+// FormRequest-consuming endpoint shares: a malformed form body and
+// multiple DPoP headers.
+func TestSmokePAREndpointOAuthErrorResponses(t *testing.T) {
+	h := newSmokeHarness(t, AccessTokenFormatJWT)
+
+	t.Run("malformed form body", func(t *testing.T) {
+		res, body := postFormExpectingOAuthError(t, h.httpClient, h.par, "client_id=%zz", nil)
+		if res.StatusCode != http.StatusBadRequest {
+			t.Errorf("status = %d, want %d", res.StatusCode, http.StatusBadRequest)
+		}
+		if body["error"] != string(server.ErrorInvalidRequest) {
+			t.Errorf("error = %v, want %q", body["error"], server.ErrorInvalidRequest)
+		}
+	})
+
+	t.Run("multiple DPoP headers", func(t *testing.T) {
+		res, body := postFormExpectingOAuthError(t, h.httpClient, h.par, url.Values{}.Encode(), map[string][]string{"DPoP": {"proof-1", "proof-2"}})
+		if res.StatusCode != http.StatusBadRequest {
+			t.Errorf("status = %d, want %d", res.StatusCode, http.StatusBadRequest)
+		}
+		if body["error"] != string(server.ErrorInvalidRequest) {
+			t.Errorf("error = %v, want %q", body["error"], server.ErrorInvalidRequest)
+		}
+	})
+}
+
+// TestSmokeBackchannelAuthenticationEndpointOAuthErrorResponses is
+// TestSmokeTokenEndpointOAuthErrorResponses' /backchannel-authenticate
+// counterpart — requires a harness built with ciba true, unlike /token
+// and /par which are always active.
+func TestSmokeBackchannelAuthenticationEndpointOAuthErrorResponses(t *testing.T) {
+	h := newSmokeHarnessWithOptions(t, AccessTokenFormatJWT, false, false, true)
+
+	t.Run("malformed form body", func(t *testing.T) {
+		res, body := postFormExpectingOAuthError(t, h.httpClient, h.backchannelAuthenticate, "client_id=%zz", nil)
+		if res.StatusCode != http.StatusBadRequest {
+			t.Errorf("status = %d, want %d", res.StatusCode, http.StatusBadRequest)
+		}
+		if body["error"] != string(server.ErrorInvalidRequest) {
+			t.Errorf("error = %v, want %q", body["error"], server.ErrorInvalidRequest)
+		}
+	})
+
+	t.Run("multiple DPoP headers", func(t *testing.T) {
+		res, body := postFormExpectingOAuthError(t, h.httpClient, h.backchannelAuthenticate, url.Values{}.Encode(), map[string][]string{"DPoP": {"proof-1", "proof-2"}})
+		if res.StatusCode != http.StatusBadRequest {
+			t.Errorf("status = %d, want %d", res.StatusCode, http.StatusBadRequest)
+		}
+		if body["error"] != string(server.ErrorInvalidRequest) {
+			t.Errorf("error = %v, want %q", body["error"], server.ErrorInvalidRequest)
+		}
+	})
 }
 
 // runToConsent begins an authorization attempt and GETs the resulting

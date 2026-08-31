@@ -589,6 +589,19 @@ internal diagnostic detail is never copied into a public
 unvalidated `redirect_uri` must produce a local error, never a redirect"
 enforceable in the type system rather than by convention.
 
+`server.Error` goes one step further for its own token-endpoint-exposure
+case: `WriteJSON(w http.ResponseWriter)` also owns *how* to encode that
+exposure once it's decided — the RFC 6749 §5.2 JSON body, status code,
+and (RFC 9449 §8) `DPoP-Nonce` header, all in one call — plus
+`NewError(code, httpStatus, description) *Error` for the one case this
+package's own methods can't produce an `*Error` for: an HTTP adapter's
+own request routing rejecting something (a malformed body, an
+unrecognized `grant_type`) before it can even decide which `Server`
+method to call. Before this, an adapter had to reach into
+`internal/par` (unavailable outside this module) to encode that body
+itself, one more manual step rule 16 exists specifically to avoid
+leaving to the embedding application.
+
 ### Conformance strategy
 
 Certification is tracked separately per role under `conformance/`. The

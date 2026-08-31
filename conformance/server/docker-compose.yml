@@ -22,8 +22,9 @@
 #
 # ACCESS_TOKEN_FORMAT=jwt|opaque (defaults to jwt) selects which
 # cmd/conformance-as -access-token-format both containers start with —
-# see conformance/scripts/run-all.sh, which loops the AS suites over
-# both.
+# for a manual one-off run against either; conformance/scripts/run-all.sh
+# itself only ever runs the AS legs under the default, jwt (see that
+# script's own comment for why the format is no longer looped).
 #
 # The suite sometimes shows a "visit https://conformance-as-baseline:8443/
 # authorize?..." link for you to open in your own browser — that

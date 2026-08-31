@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Runs all twenty FAPI2/FAPI-CIBA conformance suites this repo has
-# driver support for — AS baseline, AS message-signing, AS ciba-mtls, AS
-# ciba-ping, AS mtls, AS message-signing-mtls, AS client-auth-mtls, AS
+# Runs all twenty FAPI2/FAPI-CIBA test configurations this repo has
+# driver support for — one underlying OIDF conformance suite, exercised
+# under twenty different plan/variant combinations: AS baseline, AS
+# message-signing, AS ciba-mtls, AS ciba-ping, AS mtls, AS
+# message-signing-mtls, AS client-auth-mtls, AS
 # client-auth-mtls-and-mtls, AS ciba-client-auth-mtls, AS
 # ciba-ping-client-auth-mtls, AS baseline-client-credentials, AS
 # mtls-client-credentials, AS client-auth-mtls-client-credentials, AS
@@ -10,10 +12,10 @@
 # client-auth-mtls-and-mtls — against a locally running OIDF conformance
 # suite,
 # prints one combined summary at the end, and (via generate-report.py)
-# writes a fuller report.md alongside the raw per-suite logs — every
-# non-PASSED module, with the "why this is expected, not a defect"
-# reasoning pulled straight from expected-{warnings,skips}-*.json where
-# one exists.
+# writes a fuller report.md alongside the raw per-configuration logs —
+# every non-PASSED module, with the "why this is expected, not a
+# defect" reasoning pulled straight from expected-{warnings,skips}-*.json
+# where one exists.
 #
 # AS/RP client-auth-mtls cover RFC 8705 §2 client authentication
 # (client_auth_type=mtls) — orthogonal to AS/RP ciba-mtls's §3
@@ -64,7 +66,7 @@
 # client-auth-mtls (MTLS + DPoP).
 #
 # Runs cmd/conformance-as under its default -access-token-format=jwt
-# only. An earlier version of this script looped the AS suites over
+# only. An earlier version of this script looped the AS legs over
 # both jwt and opaque (see conformance/server/docker-compose.yml's
 # ACCESS_TOKEN_FORMAT, still there for a manual one-off run) — that was
 # dropped once resource.AccessTokenResolver's contract was tightened so
@@ -79,9 +81,9 @@
 # under both formats — see ARCHITECTURE.md's conformance strategy
 # section.
 #
-# Always runs every suite, even if an earlier one comes back unclean —
-# never stops early — so a bad result in one suite never hides results
-# from the others.
+# Always runs every test configuration, even if an earlier one comes
+# back unclean — never stops early — so a bad result in one never hides
+# results from the others.
 #
 # Prerequisites (see conformance/server/scripts/README.md and
 # conformance/client/scripts/README.md for the one-time setup each of
@@ -558,10 +560,10 @@ echo "report: $WORKDIR/report.md"
 
 if [[ "$OVERALL_CLEAN" = true ]]; then
 	echo
-	echo "All ${#ALL_SUITES[@]} suites completed with no unexpected results."
+	echo "All ${#ALL_SUITES[@]} test configurations completed with no unexpected results."
 	exit 0
 else
 	echo
-	echo "One or more suites had unexpected results — see the log paths above."
+	echo "One or more test configurations had unexpected results — see the log paths above."
 	exit 1
 fi

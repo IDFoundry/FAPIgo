@@ -702,8 +702,8 @@ explicitly widens the backchannel authentication endpoint specifically
 Backchannel Authentication Endpoint URL") — an initial overly-narrow
 first pass at the endpoint-scoped fix (BackchannelAuthentication's own
 URL only) briefly regressed the already-passing AS ciba-mtls/ciba-ping
-suites before this was caught by a second full local conformance run
-and corrected. Confirmed live: all nine suites clean after both fixes.
+legs before this was caught by a second full local conformance run
+and corrected. Confirmed live: all nine test configurations clean after both fixes.
 
 `client`'s own CIBA support
 (`BeginBackchannelAuthentication`/`PollBackchannelAuthentication`) was

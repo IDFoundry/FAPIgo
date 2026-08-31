@@ -1821,17 +1821,31 @@ func setupClientCredentialsGrantVariant(dir, baseName string, clientAuthMTLS, se
 	if err != nil {
 		return fmt.Errorf("read %s: %w", configPath, err)
 	}
-	for _, c := range clients {
+
+	// planPath's own os.Stat check above is the only thing that can
+	// ever skip regenerating these two clients' keys in the first
+	// place — and that plan file is gitignored, so on a fresh clone
+	// it's always missing and this function always runs with a
+	// brand-new keypair. So when these two client IDs are already
+	// present here (from a previous run's commit of this same,
+	// non-gitignored config file), this must refresh their entries in
+	// place to match, mirroring appendCIBAPingClients' own
+	// always-overwrite approach, rather than bail out without ever
+	// writing planPath: that leaves this profile with no plan config
+	// at all, which is exactly what silently SKIPPED all four
+	// client_credentials legs in CI rather than running them
+	// (confirmed live).
+	newEntries := map[string]map[string]any{clientID1: configEntry1, clientID2: configEntry2}
+	found := map[string]bool{}
+	for i, c := range clients {
 		var id string
 		if err := json.Unmarshal(c["id"], &id); err != nil {
 			return fmt.Errorf("parse clients[].id: %w", err)
 		}
-		if id == clientID1 {
-			fmt.Printf("%s: clients already present in %s, leaving this profile alone\n", name, configPath)
-			return nil
+		entry, ok := newEntries[id]
+		if !ok {
+			continue
 		}
-	}
-	for _, entry := range []map[string]any{configEntry1, configEntry2} {
 		encoded, err := marshalIndentNoEscape(entry)
 		if err != nil {
 			return err
@@ -1840,7 +1854,26 @@ func setupClientCredentialsGrantVariant(dir, baseName string, clientAuthMTLS, se
 		if err := json.Unmarshal(encoded, &raw); err != nil {
 			return err
 		}
-		clients = append(clients, raw)
+		clients[i] = raw
+		found[id] = true
+	}
+	switch {
+	case found[clientID1] && found[clientID2]:
+		fmt.Printf("%s: clients already present in %s, refreshed to match the freshly generated plan\n", name, configPath)
+	case found[clientID1] || found[clientID2]:
+		return fmt.Errorf("found only one of %q/%q in %s", clientID1, clientID2, configPath)
+	default:
+		for _, entry := range []map[string]any{configEntry1, configEntry2} {
+			encoded, err := marshalIndentNoEscape(entry)
+			if err != nil {
+				return err
+			}
+			var raw map[string]json.RawMessage
+			if err := json.Unmarshal(encoded, &raw); err != nil {
+				return err
+			}
+			clients = append(clients, raw)
+		}
 	}
 	if err := writeCIBAConfigClients(configPath, top, clients); err != nil {
 		return fmt.Errorf("update %s: %w", configPath, err)

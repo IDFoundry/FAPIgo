@@ -17,7 +17,7 @@ func tokenHandler(srv *server.Server) http.HandlerFunc {
 		}
 		grantType := formValue(form, "grant_type")
 		dpopProofs := r.Header.Values("DPoP")
-		peerCert := peerCertificate(r)
+		peerCert := server.PeerCertificateFromHTTP(r)
 
 		var result server.TokenResult
 		switch grantType {

@@ -87,7 +87,7 @@ func userinfoHandler(srv *server.Server, verifier *fapires.Verifier, userinfoURL
 			URL:             userinfoURL,
 			Authorization:   r.Header.Get("Authorization"),
 			DPoPProofs:      r.Header.Values("DPoP"),
-			PeerCertificate: peerCertificate(r),
+			PeerCertificate: fapires.PeerCertificateFromHTTP(r),
 		})
 		if err != nil {
 			writeResourceError(w, err)
@@ -187,7 +187,7 @@ func accountsHandler(verifier *fapires.Verifier, accountsURL *url.URL) http.Hand
 			URL:             accountsURL,
 			Authorization:   r.Header.Get("Authorization"),
 			DPoPProofs:      r.Header.Values("DPoP"),
-			PeerCertificate: peerCertificate(r),
+			PeerCertificate: fapires.PeerCertificateFromHTTP(r),
 		})
 		if err != nil {
 			writeResourceError(w, err)

@@ -2,7 +2,6 @@ package fapitest
 
 import (
 	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -62,7 +61,8 @@ type authServer struct {
 // plain-HTTP httptest.Server every other Config uses. Needed whenever a
 // certificate plays any role over the wire — sender-constraining
 // (Config.SenderConstrain storage.SenderConstrainMTLS, checked only at
-// token-issuance time — see peerCertificate's own doc comment) or
+// token-issuance time — see server.PeerCertificateFromHTTP's own doc
+// comment) or
 // certificate-based client authentication (Config.ClientAuthMethod's two
 // RFC 8705 §2 values, checked at every endpoint that authenticates a
 // client, including PAR).
@@ -85,24 +85,6 @@ func newAuthServer(t *testing.T, clock *manualClock, approve AutoApprove, tlsCli
 	}
 	t.Cleanup(a.ts.Close)
 	return a
-}
-
-// peerCertificate returns the first TLS client certificate presented
-// on r's own connection, or nil if none was (including when the
-// listener isn't TLS-capable at all — every Config that needs neither
-// mTLS sender-constraining nor certificate-based client authentication).
-// Threaded into handleToken (both grant branches) and handlePAR:
-// sender-constraining binds at token-issuance time exclusively (RFC 8705
-// §3 has no PAR-time pre-commitment concept the way DPoP's optional
-// dpop_jkt does), but certificate-based client authentication (RFC 8705
-// §2) is checked at every endpoint that authenticates a client, PAR
-// included — a nil PeerCertificate is harmless when the registered
-// client's ClientAuthMethod doesn't need one.
-func peerCertificate(r *http.Request) *x509.Certificate {
-	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
-		return nil
-	}
-	return r.TLS.PeerCertificates[0]
 }
 
 // handleMetadata serves this authorization server's own metadata
@@ -157,7 +139,7 @@ func (a *authServer) handlePAR(w http.ResponseWriter, r *http.Request) {
 		a.writeOAuthError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
-	result, pushErr := a.srv.PushAuthorizationRequest(r.Context(), server.PushAuthorizationRequest{HTTP: form, PeerCertificate: peerCertificate(r)})
+	result, pushErr := a.srv.PushAuthorizationRequest(r.Context(), server.PushAuthorizationRequest{HTTP: form, PeerCertificate: server.PeerCertificateFromHTTP(r)})
 	if pushErr != nil {
 		a.writeServerError(w, pushErr)
 		return
@@ -226,7 +208,7 @@ func (a *authServer) handleToken(w http.ResponseWriter, r *http.Request) {
 	}
 	grantType := formValue(form, "grant_type")
 	dpopProofs := r.Header.Values("DPoP")
-	peerCert := peerCertificate(r)
+	peerCert := server.PeerCertificateFromHTTP(r)
 
 	var (
 		result   server.TokenResult

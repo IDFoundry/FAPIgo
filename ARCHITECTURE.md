@@ -148,6 +148,20 @@ The response is a closed sum type, not one struct with optional fields —
 a caller cannot assume every callback carries a code, and cannot forget
 to branch on an error case that was silently left zero-valued.
 
+**Calling a protected resource is a generic capability, not something
+special-cased to UserInfo.** `Client.ProtectedResource(tokens)` returns
+a `*ResourceClient` bound to that token set; its `Do(ctx, req)` takes
+any `*http.Request` and sender-constrains it — a fresh DPoP proof plus
+the RFC 9449 §9 nonce-challenge retry under `SenderConstrainDPoP`, or a
+plain Bearer credential under `SenderConstrainMTLS` — entirely from
+`Config.SenderConstrain`, with no caller branching on which mode is
+active. `FetchUserInfo` is just this method's first caller, not a
+special path: it builds a `GET Config.Endpoints.UserInfo` request and
+hands it to the same `Do`. A caller with its own protected resource
+(a FAPI 2.0 "accounts" endpoint, for instance) reuses `ProtectedResource(tokens).Do`
+directly rather than reimplementing proof creation and nonce retry
+against `internal/dpop` itself.
+
 ### 4. Client session storage is atomic-consume, not CRUD
 
 `SessionStore.Create` / `SessionStore.Consume` — no `GetSession` /

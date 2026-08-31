@@ -510,24 +510,8 @@ func runModule(ctx context.Context, d moduleDriver, testName string) moduleResul
 		// operator reads from the web frontend) under GET
 		// /api/runner/{id}, keyed "accounts_endpoint" - confirmed live,
 		// not assumed from the Java source alone.
-		exposed, err := fetchExposedValues(rawHTTP, apiBase, module.ID)
-		if err != nil {
-			return moduleResult{Verdict: "ERROR", DriverErr: "fetch exposed values: " + err.Error(), ModuleID: module.ID}
-		}
-		if accountsEndpoint := exposed["accounts_endpoint"]; accountsEndpoint != "" {
-			if d.SenderConstrainMTLS {
-				if _, _, err := callProtectedResourceBearer(ctx, rawHTTP, accountsEndpoint, r.Tokens.AccessToken.Reveal()); err != nil {
-					return moduleResult{Verdict: "ERROR", DriverErr: "call accounts endpoint: " + err.Error(), ModuleID: module.ID}
-				}
-			} else {
-				resourceClient := dpopResourceClient{
-					HTTP: rawHTTP, Signer: keyMgr.keys[keys.DPoPProofSigning], Alg: fapi.ES256,
-					Random: rand.Reader, Now: time.Now,
-				}
-				if _, _, err := resourceClient.callProtectedResource(ctx, accountsEndpoint, r.Tokens.AccessToken.Reveal()); err != nil {
-					return moduleResult{Verdict: "ERROR", DriverErr: "call accounts endpoint: " + err.Error(), ModuleID: module.ID}
-				}
-			}
+		if err := callAccountsEndpoint(ctx, cl, rawHTTP, apiBase, module.ID, r.Tokens); err != nil {
+			return moduleResult{Verdict: "ERROR", DriverErr: "call accounts endpoint: " + err.Error(), ModuleID: module.ID}
 		}
 	case client.CompletionDenied:
 		// Expected for the modules that deliberately deny the request

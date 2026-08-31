@@ -333,43 +333,11 @@ func runCIBAModule(ctx context.Context, rawHTTP *http.Client, apiBase, planID, c
 			// logged). Discovered exactly the same way as
 			// runModule's own version: the URL isn't part of OIDC
 			// discovery, only this "exported value" mechanism.
-			if err := callAccountsEndpoint(ctx, rawHTTP, apiBase, module.ID, keyMgr, mtls, r.Tokens); err != nil {
+			if err := callAccountsEndpoint(ctx, cl, rawHTTP, apiBase, module.ID, r.Tokens); err != nil {
 				return "ERROR: call accounts endpoint: " + err.Error()
 			}
 			return awaitVerdict(rawHTTP, apiBase, module.ID, "").String()
 		}
 	}
 	return awaitVerdict(rawHTTP, apiBase, module.ID, "gave up polling after "+fmt.Sprint(cibaMaxPolls)+" attempts").String()
-}
-
-// callAccountsEndpoint fetches moduleID's exported "accounts_endpoint"
-// value (the same mechanism runModule's own version in main.go uses —
-// see that call site's doc comment for why this URL isn't discoverable
-// any other way) and, when present, presents tokens.AccessToken to it —
-// with a DPoP proof under the default sender-constraining, or as a
-// plain Bearer credential under mtls (RFC 8705 §3.4), matching whichever
-// binding this module's own client.Config used.
-func callAccountsEndpoint(ctx context.Context, rawHTTP *http.Client, apiBase, moduleID string, keyMgr *ephemeralKeyManager, mtls bool, tokens client.TokenSet) error {
-	exposed, err := fetchExposedValues(rawHTTP, apiBase, moduleID)
-	if err != nil {
-		return fmt.Errorf("fetch exposed values: %w", err)
-	}
-	accountsEndpoint := exposed["accounts_endpoint"]
-	if accountsEndpoint == "" {
-		return nil
-	}
-	if mtls {
-		if _, _, err := callProtectedResourceBearer(ctx, rawHTTP, accountsEndpoint, tokens.AccessToken.Reveal()); err != nil {
-			return fmt.Errorf("call accounts endpoint: %w", err)
-		}
-		return nil
-	}
-	resourceClient := dpopResourceClient{
-		HTTP: rawHTTP, Signer: keyMgr.keys[keys.DPoPProofSigning], Alg: fapi.ES256,
-		Random: rand.Reader, Now: time.Now,
-	}
-	if _, _, err := resourceClient.callProtectedResource(ctx, accountsEndpoint, tokens.AccessToken.Reveal()); err != nil {
-		return fmt.Errorf("call accounts endpoint: %w", err)
-	}
-	return nil
 }

@@ -225,7 +225,7 @@ func (a *authServer) handleToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	grantType := formValue(form, "grant_type")
-	dpopProof := r.Header.Get("DPoP")
+	dpopProofs := r.Header.Values("DPoP")
 	peerCert := peerCertificate(r)
 
 	var (
@@ -234,9 +234,9 @@ func (a *authServer) handleToken(w http.ResponseWriter, r *http.Request) {
 	)
 	switch grantType {
 	case "authorization_code":
-		result, tokenErr = a.srv.ExchangeAuthorizationCode(r.Context(), server.AuthorizationCodeExchangeRequest{HTTP: form, DPoPProof: dpopProof, PeerCertificate: peerCert})
+		result, tokenErr = a.srv.ExchangeAuthorizationCode(r.Context(), server.AuthorizationCodeExchangeRequest{HTTP: form, DPoPProofs: dpopProofs, PeerCertificate: peerCert})
 	case "refresh_token":
-		result, tokenErr = a.srv.RefreshAccessToken(r.Context(), server.RefreshTokenRequest{HTTP: form, DPoPProof: dpopProof, PeerCertificate: peerCert})
+		result, tokenErr = a.srv.RefreshAccessToken(r.Context(), server.RefreshTokenRequest{HTTP: form, DPoPProofs: dpopProofs, PeerCertificate: peerCert})
 	default:
 		a.writeOAuthError(w, http.StatusBadRequest, "unsupported_grant_type", "grant_type must be authorization_code or refresh_token")
 		return
@@ -285,7 +285,7 @@ func (a *authServer) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 		Method:        r.Method,
 		URL:           requestURL(r, a.ts.URL),
 		Authorization: r.Header.Get("Authorization"),
-		DPoPProof:     r.Header.Get("DPoP"),
+		DPoPProofs:    r.Header.Values("DPoP"),
 	})
 	if err != nil {
 		a.writeResourceError(w, err)

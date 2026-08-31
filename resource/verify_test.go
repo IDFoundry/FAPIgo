@@ -117,7 +117,7 @@ func TestVerifyAcceptsValidRequest(t *testing.T) {
 		Method:        "GET",
 		URL:           f.target,
 		Authorization: "DPoP " + f.accessToken,
-		DPoPProof:     f.dpopProof,
+		DPoPProofs:    []string{f.dpopProof},
 	})
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
@@ -147,7 +147,7 @@ func TestVerifyRejectsRevokedToken(t *testing.T) {
 		Method:        "GET",
 		URL:           f.target,
 		Authorization: "DPoP " + f.accessToken,
-		DPoPProof:     f.dpopProof,
+		DPoPProofs:    []string{f.dpopProof},
 	})
 	if err == nil {
 		t.Fatalf("Verify(revoked token) = nil error, want error")
@@ -169,7 +169,7 @@ func TestVerifyAcceptsNotRevokedToken(t *testing.T) {
 		Method:        "GET",
 		URL:           f.target,
 		Authorization: "DPoP " + f.accessToken,
-		DPoPProof:     f.dpopProof,
+		DPoPProofs:    []string{f.dpopProof},
 	}); err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestVerifyRejectsReplayedDPoPProof(t *testing.T) {
 	req := resource.VerifyRequest{
 		Method: "GET", URL: f.target,
 		Authorization: "DPoP " + f.accessToken,
-		DPoPProof:     f.dpopProof,
+		DPoPProofs:    []string{f.dpopProof},
 	}
 
 	if _, err := f.verifier.Verify(context.Background(), req); err != nil {
@@ -243,10 +243,34 @@ func TestVerifyRejectsMissingDPoPHeader(t *testing.T) {
 	_, err := f.verifier.Verify(context.Background(), resource.VerifyRequest{
 		Method: "GET", URL: f.target,
 		Authorization: "DPoP " + f.accessToken,
-		DPoPProof:     "",
+		DPoPProofs:    nil,
 	})
 	if err == nil {
 		t.Fatalf("Verify(no DPoP header) = nil error, want error")
+	}
+}
+
+// TestVerifyRejectsMultipleDPoPProofs mirrors
+// server_test.TestExchangeAuthorizationCodeRejectsMultipleDPoPProofs'
+// own doc comment: RFC 9449 §7.1 requires at most one DPoP header, and
+// Verify enforces it itself via internal/dpop.ResolveHeaderValues
+// rather than trusting an HTTP adapter to have already checked.
+func TestVerifyRejectsMultipleDPoPProofs(t *testing.T) {
+	f := newFixture(t)
+	_, err := f.verifier.Verify(context.Background(), resource.VerifyRequest{
+		Method: "GET", URL: f.target,
+		Authorization: "DPoP " + f.accessToken,
+		DPoPProofs:    []string{f.dpopProof, f.dpopProof},
+	})
+	if err == nil {
+		t.Fatalf("Verify(multiple DPoP headers) = nil error, want error")
+	}
+	rerr, ok := err.(*resource.Error)
+	if !ok {
+		t.Fatalf("error type = %T, want *resource.Error", err)
+	}
+	if rerr.Code() != resource.ErrorInvalidRequest {
+		t.Errorf("Code() = %v, want %v", rerr.Code(), resource.ErrorInvalidRequest)
 	}
 }
 
@@ -271,7 +295,7 @@ func TestVerifyRejectsWrongDPoPKey(t *testing.T) {
 	_, err = f.verifier.Verify(context.Background(), resource.VerifyRequest{
 		Method: "GET", URL: f.target,
 		Authorization: "DPoP " + f.accessToken,
-		DPoPProof:     wrongProof,
+		DPoPProofs:    []string{wrongProof},
 	})
 	if err == nil {
 		t.Fatalf("Verify(wrong DPoP key) = nil error, want error")
@@ -283,7 +307,7 @@ func TestVerifyRejectsMethodMismatch(t *testing.T) {
 	_, err := f.verifier.Verify(context.Background(), resource.VerifyRequest{
 		Method: "POST", URL: f.target,
 		Authorization: "DPoP " + f.accessToken,
-		DPoPProof:     f.dpopProof,
+		DPoPProofs:    []string{f.dpopProof},
 	})
 	if err == nil {
 		t.Fatalf("Verify(method mismatch) = nil error, want error")
@@ -297,7 +321,7 @@ func TestVerifyRejectsMalformedAuthorizationHeader(t *testing.T) {
 		_, err := f.verifier.Verify(context.Background(), resource.VerifyRequest{
 			Method: "GET", URL: f.target,
 			Authorization: authz,
-			DPoPProof:     f.dpopProof,
+			DPoPProofs:    []string{f.dpopProof},
 		})
 		if err == nil {
 			t.Fatalf("Verify(Authorization=%q) = nil error, want error", authz)
@@ -399,7 +423,7 @@ func TestVerifyAcceptsOpaqueAccessToken(t *testing.T) {
 		Method:        "GET",
 		URL:           f.target,
 		Authorization: "DPoP " + f.rawToken,
-		DPoPProof:     f.proof(t, f.dpopKey),
+		DPoPProofs:    []string{f.proof(t, f.dpopKey)},
 	})
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
@@ -435,7 +459,7 @@ func TestVerifyRejectsOpaqueTokenWrongDPoPKey(t *testing.T) {
 		Method:        "GET",
 		URL:           f.target,
 		Authorization: "DPoP " + f.rawToken,
-		DPoPProof:     f.proof(t, otherKey),
+		DPoPProofs:    []string{f.proof(t, otherKey)},
 	})
 	if err == nil {
 		t.Fatalf("Verify(wrong DPoP key) = nil error, want error")
@@ -455,7 +479,7 @@ func TestVerifyRejectsExpiredOpaqueToken(t *testing.T) {
 		Method:        "GET",
 		URL:           f.target,
 		Authorization: "DPoP " + f.rawToken,
-		DPoPProof:     f.proof(t, f.dpopKey),
+		DPoPProofs:    []string{f.proof(t, f.dpopKey)},
 	})
 	if err == nil {
 		t.Fatalf("Verify(expired token) = nil error, want error")
@@ -476,7 +500,7 @@ func TestErrorAccessors(t *testing.T) {
 		Method:        "GET",
 		URL:           f.target,
 		Authorization: "DPoP " + f.accessToken,
-		DPoPProof:     "not-a-valid-dpop-proof",
+		DPoPProofs:    []string{"not-a-valid-dpop-proof"},
 	})
 	if err == nil {
 		t.Fatalf("Verify(malformed DPoP proof) = nil error, want error")

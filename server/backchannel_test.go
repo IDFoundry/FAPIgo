@@ -611,6 +611,35 @@ func TestBeginBackchannelAuthenticationRejectsMissingRequest(t *testing.T) {
 	}
 }
 
+// TestBeginBackchannelAuthenticationRejectsMultipleDPoPProofs mirrors
+// TestExchangeAuthorizationCodeRejectsMultipleDPoPProofs (see its own
+// doc comment), except BeginBackchannelAuthentication surfaces its
+// failures through the returned action, not through err — see
+// TestBeginBackchannelAuthenticationRejectsMissingRequest for the same
+// shape.
+func TestBeginBackchannelAuthenticationRejectsMultipleDPoPProofs(t *testing.T) {
+	h, _ := newHarnessWithBackchannel(t)
+	dpopKey := generateKey(t)
+
+	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+		HTTP: server.FormRequest{Parameters: []server.FormParameter{
+			formParam("client_assertion", h.clientAssertion(t)),
+			formParam("client_assertion_type", clientassertion.AssertionType),
+		}},
+		DPoPProofs: []string{createDPoPProof(t, dpopKey, h.now), createDPoPProof(t, dpopKey, h.now)},
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+	localErr, ok := action.(server.BackchannelAuthenticationLocalError)
+	if !ok {
+		t.Fatalf("action = %T, want server.BackchannelAuthenticationLocalError", action)
+	}
+	if localErr.Error.Code() != server.ErrorInvalidRequest {
+		t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequest)
+	}
+}
+
 func TestBeginBackchannelAuthenticationRejectsClientNotPermitted(t *testing.T) {
 	h, _ := newHarnessWithBackchannel(t)
 
@@ -1142,7 +1171,7 @@ func TestCIBAFullFlowApproved(t *testing.T) {
 			formParam("grant_type", server.CIBAGrantType),
 			formParam("auth_req_id", required.AuthReqID.String()),
 		}},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err != nil {
 		t.Fatalf("ExchangeBackchannelAuthentication: %v", err)
@@ -1163,7 +1192,7 @@ func TestCIBAFullFlowApproved(t *testing.T) {
 			formParam("grant_type", server.CIBAGrantType),
 			formParam("auth_req_id", required.AuthReqID.String()),
 		}},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err == nil {
 		t.Fatalf("second ExchangeBackchannelAuthentication = nil error, want error")
@@ -1258,7 +1287,7 @@ func TestCIBAFullFlowDenied(t *testing.T) {
 			formParam("grant_type", server.CIBAGrantType),
 			formParam("auth_req_id", required.AuthReqID.String()),
 		}},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err == nil {
 		t.Fatalf("ExchangeBackchannelAuthentication(denied) = nil error, want error")
@@ -1406,7 +1435,7 @@ func TestExchangeBackchannelAuthenticationBeforeDecisionIsPending(t *testing.T) 
 			formParam("grant_type", server.CIBAGrantType),
 			formParam("auth_req_id", required.AuthReqID.String()),
 		}},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err == nil {
 		t.Fatalf("ExchangeBackchannelAuthentication(pending) = nil error, want error")
@@ -1426,7 +1455,7 @@ func TestExchangeBackchannelAuthenticationRejectsUnknownAuthReqID(t *testing.T) 
 			formParam("grant_type", server.CIBAGrantType),
 			formParam("auth_req_id", "never-issued"),
 		}},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err == nil {
 		t.Fatalf("ExchangeBackchannelAuthentication(unknown auth_req_id) = nil error, want error")
@@ -1446,13 +1475,34 @@ func TestExchangeBackchannelAuthenticationRejectsWrongGrantType(t *testing.T) {
 			formParam("grant_type", "authorization_code"),
 			formParam("auth_req_id", "whatever"),
 		}},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err == nil {
 		t.Fatalf("ExchangeBackchannelAuthentication(wrong grant_type) = nil error, want error")
 	}
 	if code := serverErrorCode(t, err); code != server.ErrorUnsupportedGrantType {
 		t.Fatalf("error code = %q, want %q", code, server.ErrorUnsupportedGrantType)
+	}
+}
+
+// TestExchangeBackchannelAuthenticationRejectsMultipleDPoPProofs mirrors
+// TestExchangeAuthorizationCodeRejectsMultipleDPoPProofs (see its own
+// doc comment) for this grant.
+func TestExchangeBackchannelAuthenticationRejectsMultipleDPoPProofs(t *testing.T) {
+	h, _ := newHarnessWithBackchannel(t)
+	dpopKey := generateKey(t)
+
+	_, err := h.server.ExchangeBackchannelAuthentication(context.Background(), server.BackchannelTokenExchangeRequest{
+		HTTP: server.FormRequest{Parameters: []server.FormParameter{
+			formParam("client_assertion", h.clientAssertion(t)),
+			formParam("client_assertion_type", clientassertion.AssertionType),
+			formParam("grant_type", server.CIBAGrantType),
+			formParam("auth_req_id", "whatever"),
+		}},
+		DPoPProofs: []string{createDPoPProof(t, dpopKey, h.now), createDPoPProof(t, dpopKey, h.now)},
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequest)
 	}
 }
 

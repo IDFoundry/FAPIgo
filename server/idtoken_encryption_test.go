@@ -132,8 +132,8 @@ func TestExchangeAuthorizationCodeIssuesEncryptedIDToken(t *testing.T) {
 	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
 
 	result, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err != nil {
 		t.Fatalf("ExchangeAuthorizationCode: %v", err)
@@ -194,8 +194,8 @@ func TestRefreshAccessTokenIssuesEncryptedIDToken(t *testing.T) {
 	first, dpopKey := exchangeForTokensWithOfflineAccess(t, h)
 
 	result, err := h.server.RefreshAccessToken(context.Background(), server.RefreshTokenRequest{
-		HTTP:      server.FormRequest{Parameters: refreshFormParams(h.clientAssertion(t), first.RefreshToken.Reveal(), "")},
-		DPoPProof: createDPoPProof(t, dpopKey, h.now),
+		HTTP:       server.FormRequest{Parameters: refreshFormParams(h.clientAssertion(t), first.RefreshToken.Reveal(), "")},
+		DPoPProofs: []string{createDPoPProof(t, dpopKey, h.now)},
 	})
 	if err != nil {
 		t.Fatalf("RefreshAccessToken: %v", err)
@@ -229,8 +229,8 @@ func TestExchangeAuthorizationCodeRejectsIDTokenEncryptionNotPermittedByServer(t
 	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
 
 	_, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err == nil {
 		t.Fatalf("ExchangeAuthorizationCode(server disallows configured encryption) = nil error, want error")
@@ -254,8 +254,8 @@ func TestExchangeAuthorizationCodeRejectsIDTokenEncryptionKeyResolutionFailure(t
 	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
 
 	_, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err == nil {
 		t.Fatalf("ExchangeAuthorizationCode(no matching encryption key) = nil error, want error")

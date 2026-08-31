@@ -244,8 +244,8 @@ func TestRequestClientCredentialsTokenAuthorizationDetailsFlow(t *testing.T) {
 	params = append(params, formParam("authorization_details", `[{"type":"payment","actions":["approve"],"amount":"SGD 10.00"}]`))
 
 	result, err := h.server.RequestClientCredentialsToken(context.Background(), server.ClientCredentialsTokenRequest{
-		HTTP:      server.FormRequest{Parameters: params},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: params},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err != nil {
 		t.Fatalf("RequestClientCredentialsToken: %v", err)
@@ -282,8 +282,8 @@ func TestRequestClientCredentialsTokenAuthorizationDetailsPolicyNarrowsRequest(t
 	params = append(params, formParam("authorization_details", `[{"type":"payment","actions":["approve"],"amount":"SGD 10.00"},{"type":"payment","actions":["approve"],"amount":"SGD 20.00"}]`))
 
 	result, err := h.server.RequestClientCredentialsToken(context.Background(), server.ClientCredentialsTokenRequest{
-		HTTP:      server.FormRequest{Parameters: params},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: params},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err != nil {
 		t.Fatalf("RequestClientCredentialsToken: %v", err)
@@ -307,8 +307,8 @@ func TestRequestClientCredentialsTokenRejectsMalformedAuthorizationDetails(t *te
 	params = append(params, formParam("authorization_details", `[{"type":"unregistered-type"}]`))
 
 	_, err := h.server.RequestClientCredentialsToken(context.Background(), server.ClientCredentialsTokenRequest{
-		HTTP:      server.FormRequest{Parameters: params},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: params},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err == nil {
 		t.Fatalf("RequestClientCredentialsToken = nil error, want error")
@@ -324,8 +324,8 @@ func TestRequestClientCredentialsTokenRejectsAuthorizationDetailsWithoutRARConfi
 	params = append(params, formParam("authorization_details", `[{"type":"payment","actions":["approve"]}]`))
 
 	_, err := h.server.RequestClientCredentialsToken(context.Background(), server.ClientCredentialsTokenRequest{
-		HTTP:      server.FormRequest{Parameters: params},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: params},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err == nil {
 		t.Fatalf("RequestClientCredentialsToken = nil error, want error")
@@ -348,8 +348,8 @@ func TestRequestClientCredentialsTokenRejectsAuthorizationDetailsWithoutPolicyCo
 	params = append(params, formParam("authorization_details", `[{"type":"payment","actions":["approve"]}]`))
 
 	_, err := h.server.RequestClientCredentialsToken(context.Background(), server.ClientCredentialsTokenRequest{
-		HTTP:      server.FormRequest{Parameters: params},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: params},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err == nil {
 		t.Fatalf("RequestClientCredentialsToken = nil error, want error")
@@ -370,8 +370,8 @@ func TestRequestClientCredentialsTokenRejectsAuthorizationDetailsPolicyDeniesAll
 	params = append(params, formParam("authorization_details", `[{"type":"payment","actions":["approve"]}]`))
 
 	_, err := h.server.RequestClientCredentialsToken(context.Background(), server.ClientCredentialsTokenRequest{
-		HTTP:      server.FormRequest{Parameters: params},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: params},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err == nil {
 		t.Fatalf("RequestClientCredentialsToken = nil error, want error")
@@ -392,8 +392,8 @@ func TestRequestClientCredentialsTokenRejectsAuthorizationDetailsPolicyError(t *
 	params = append(params, formParam("authorization_details", `[{"type":"payment","actions":["approve"]}]`))
 
 	_, err := h.server.RequestClientCredentialsToken(context.Background(), server.ClientCredentialsTokenRequest{
-		HTTP:      server.FormRequest{Parameters: params},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: params},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err == nil {
 		t.Fatalf("RequestClientCredentialsToken = nil error, want error")
@@ -408,8 +408,8 @@ func TestRequestClientCredentialsTokenSuccessDPoP(t *testing.T) {
 	dpopKey := generateKey(t)
 
 	result, err := h.server.RequestClientCredentialsToken(context.Background(), server.ClientCredentialsTokenRequest{
-		HTTP:      server.FormRequest{Parameters: clientCredentialsFormParams(h.clientAssertion(t), "accounts")},
-		DPoPProof: createDPoPProof(t, dpopKey, h.now),
+		HTTP:       server.FormRequest{Parameters: clientCredentialsFormParams(h.clientAssertion(t), "accounts")},
+		DPoPProofs: []string{createDPoPProof(t, dpopKey, h.now)},
 	})
 	if err != nil {
 		t.Fatalf("RequestClientCredentialsToken: %v", err)
@@ -494,8 +494,8 @@ func TestRequestClientCredentialsTokenRejectsWhenServerGrantDisabled(t *testing.
 	h := newHarness(t, server.ProfileFAPISecurity, true) // ClientCredentialsGrant left false
 
 	_, err := h.server.RequestClientCredentialsToken(context.Background(), server.ClientCredentialsTokenRequest{
-		HTTP:      server.FormRequest{Parameters: clientCredentialsFormParams(h.clientAssertion(t), "accounts")},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: clientCredentialsFormParams(h.clientAssertion(t), "accounts")},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err == nil {
 		t.Fatalf("RequestClientCredentialsToken = nil error, want error")
@@ -509,8 +509,8 @@ func TestRequestClientCredentialsTokenRejectsClientNotOptedIn(t *testing.T) {
 	h := newHarnessWithClientCredentialsGrant(t, storage.SenderConstrainDPoP, false)
 
 	_, err := h.server.RequestClientCredentialsToken(context.Background(), server.ClientCredentialsTokenRequest{
-		HTTP:      server.FormRequest{Parameters: clientCredentialsFormParams(h.clientAssertion(t), "accounts")},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: clientCredentialsFormParams(h.clientAssertion(t), "accounts")},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err == nil {
 		t.Fatalf("RequestClientCredentialsToken = nil error, want error")
@@ -524,8 +524,8 @@ func TestRequestClientCredentialsTokenRejectsMissingScope(t *testing.T) {
 	h := newHarnessWithClientCredentialsGrant(t, storage.SenderConstrainDPoP, true)
 
 	_, err := h.server.RequestClientCredentialsToken(context.Background(), server.ClientCredentialsTokenRequest{
-		HTTP:      server.FormRequest{Parameters: clientCredentialsFormParams(h.clientAssertion(t), "")},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: clientCredentialsFormParams(h.clientAssertion(t), "")},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err == nil {
 		t.Fatalf("RequestClientCredentialsToken = nil error, want error")
@@ -539,8 +539,8 @@ func TestRequestClientCredentialsTokenRejectsDisallowedScope(t *testing.T) {
 	h := newHarnessWithClientCredentialsGrant(t, storage.SenderConstrainDPoP, true)
 
 	_, err := h.server.RequestClientCredentialsToken(context.Background(), server.ClientCredentialsTokenRequest{
-		HTTP:      server.FormRequest{Parameters: clientCredentialsFormParams(h.clientAssertion(t), "openid")},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: clientCredentialsFormParams(h.clientAssertion(t), "openid")},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err == nil {
 		t.Fatalf("RequestClientCredentialsToken = nil error, want error")
@@ -560,14 +560,30 @@ func TestRequestClientCredentialsTokenRejectsWrongGrantType(t *testing.T) {
 	}
 
 	_, err := h.server.RequestClientCredentialsToken(context.Background(), server.ClientCredentialsTokenRequest{
-		HTTP:      server.FormRequest{Parameters: params},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: params},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err == nil {
 		t.Fatalf("RequestClientCredentialsToken = nil error, want error")
 	}
 	if code := serverErrorCode(t, err); code != server.ErrorUnsupportedGrantType {
 		t.Fatalf("error code = %q, want %q", code, server.ErrorUnsupportedGrantType)
+	}
+}
+
+// TestRequestClientCredentialsTokenRejectsMultipleDPoPProofs mirrors
+// TestExchangeAuthorizationCodeRejectsMultipleDPoPProofs (see its own
+// doc comment) for this grant.
+func TestRequestClientCredentialsTokenRejectsMultipleDPoPProofs(t *testing.T) {
+	h := newHarnessWithClientCredentialsGrant(t, storage.SenderConstrainDPoP, true)
+	dpopKey := generateKey(t)
+
+	_, err := h.server.RequestClientCredentialsToken(context.Background(), server.ClientCredentialsTokenRequest{
+		HTTP:       server.FormRequest{Parameters: clientCredentialsFormParams(h.clientAssertion(t), "accounts")},
+		DPoPProofs: []string{createDPoPProof(t, dpopKey, h.now), createDPoPProof(t, dpopKey, h.now)},
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequest)
 	}
 }
 
@@ -605,8 +621,8 @@ func TestRequestClientCredentialsTokenRejectsDuplicatedParameter(t *testing.T) {
 	params = append(params, formParam("scope", "accounts")) // duplicate
 
 	_, err := h.server.RequestClientCredentialsToken(context.Background(), server.ClientCredentialsTokenRequest{
-		HTTP:      server.FormRequest{Parameters: params},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: params},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err == nil {
 		t.Fatalf("RequestClientCredentialsToken = nil error, want error")
@@ -620,8 +636,8 @@ func TestRequestClientCredentialsTokenRejectsInvalidClientAssertion(t *testing.T
 	h := newHarnessWithClientCredentialsGrant(t, storage.SenderConstrainDPoP, true)
 
 	_, err := h.server.RequestClientCredentialsToken(context.Background(), server.ClientCredentialsTokenRequest{
-		HTTP:      server.FormRequest{Parameters: clientCredentialsFormParams("not-a-valid-jwt", "accounts")},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: clientCredentialsFormParams("not-a-valid-jwt", "accounts")},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err == nil {
 		t.Fatalf("RequestClientCredentialsToken = nil error, want error")
@@ -635,14 +651,14 @@ func TestRequestClientCredentialsTokenAuditsOutcomes(t *testing.T) {
 	h := newHarnessWithClientCredentialsGrant(t, storage.SenderConstrainDPoP, true)
 
 	if _, err := h.server.RequestClientCredentialsToken(context.Background(), server.ClientCredentialsTokenRequest{
-		HTTP:      server.FormRequest{Parameters: clientCredentialsFormParams(h.clientAssertion(t), "openid")},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: clientCredentialsFormParams(h.clientAssertion(t), "openid")},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	}); err == nil {
 		t.Fatalf("expected disallowed-scope request to fail")
 	}
 	if _, err := h.server.RequestClientCredentialsToken(context.Background(), server.ClientCredentialsTokenRequest{
-		HTTP:      server.FormRequest{Parameters: clientCredentialsFormParams(h.clientAssertion(t), "accounts")},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: clientCredentialsFormParams(h.clientAssertion(t), "accounts")},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	}); err != nil {
 		t.Fatalf("RequestClientCredentialsToken: %v", err)
 	}

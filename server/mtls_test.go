@@ -372,7 +372,7 @@ func TestExchangeAuthorizationCodeMTLSIgnoresDPoPProof(t *testing.T) {
 
 	result, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
 		HTTP:            server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof:       createDPoPProof(t, generateKey(t), h.now),
+		DPoPProofs:      []string{createDPoPProof(t, generateKey(t), h.now)},
 		PeerCertificate: cert,
 	})
 	if err != nil {

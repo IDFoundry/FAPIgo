@@ -59,7 +59,7 @@ func TestReturnInTokenClaimsPropagatesToIssuedAccessToken(t *testing.T) {
 		Method:        "GET",
 		URL:           target,
 		Authorization: "DPoP " + tokens.AccessToken.Reveal(),
-		DPoPProof:     proof,
+		DPoPProofs:    []string{proof},
 	})
 	if err != nil {
 		t.Fatalf("resource.Verify: %v", err)

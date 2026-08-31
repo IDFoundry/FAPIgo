@@ -108,7 +108,7 @@ func TestAuthorizationCodeFlowAccessTokenExpires(t *testing.T) {
 		Method:        "GET",
 		URL:           target,
 		Authorization: "DPoP " + tokens.AccessToken.Reveal(),
-		DPoPProof:     proof,
+		DPoPProofs:    []string{proof},
 	}); err == nil {
 		t.Fatalf("resource.Verify(expired access token) = nil error, want error")
 	}
@@ -137,7 +137,7 @@ func verifyAccessToken(t *testing.T, h *fapitest.Harness, tokens client.TokenSet
 		Method:        "GET",
 		URL:           target,
 		Authorization: "DPoP " + tokens.AccessToken.Reveal(),
-		DPoPProof:     proof,
+		DPoPProofs:    []string{proof},
 	})
 	if err != nil {
 		t.Fatalf("resource.Verify: %v", err)

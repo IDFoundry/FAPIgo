@@ -27,9 +27,14 @@ type VerifyRequest struct {
 	URL           *url.URL
 	Authorization string
 
-	// DPoPProof is the request's raw DPoP header value, "" if absent.
-	// Only relevant when Authorization uses the "DPoP" scheme.
-	DPoPProof string
+	// DPoPProofs is every "DPoP" header value the request carried, in
+	// receipt order — pass net/http's own Header.Values("DPoP")
+	// directly, not Header.Get, which silently collapses multiple
+	// values down to the first instead of letting Verify reject the
+	// request as RFC 9449 §7.1 requires. Empty means no DPoP header was
+	// present at all. Only relevant when Authorization uses the "DPoP"
+	// scheme.
+	DPoPProofs []string
 
 	// PeerCertificate is the TLS client certificate presented on the
 	// connection this request arrived on, if any. Only relevant when
@@ -89,6 +94,11 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (Authorization
 		return AuthorizationContext{}, newError(ErrorInvalidRequest, 400, "url is required", nil)
 	}
 
+	dpopProof, dpopOK := dpop.ResolveHeaderValues(req.DPoPProofs)
+	if !dpopOK {
+		return AuthorizationContext{}, newError(ErrorInvalidRequest, 400, "multiple DPoP proofs are not permitted", nil)
+	}
+
 	scheme, raw, ok := strings.Cut(req.Authorization, " ")
 	if !ok || raw == "" {
 		return AuthorizationContext{}, newError(ErrorInvalidRequest, 400, "authorization header is missing or malformed", nil)
@@ -96,7 +106,7 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (Authorization
 
 	now := v.deps.Clock.Now()
 
-	senderConstrain, verifiedProof, certThumbprint, verr := v.resolveCredential(ctx, req, raw, scheme, now)
+	senderConstrain, verifiedProof, certThumbprint, verr := v.resolveCredential(ctx, dpopProof, req.PeerCertificate, req.Method, req.URL, raw, scheme, now)
 	if verr != nil {
 		return AuthorizationContext{}, verr
 	}
@@ -178,16 +188,16 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (Authorization
 // the resolved access token against. Split out of Verify purely to keep
 // that method's own token-resolution/binding/revocation pipeline
 // readable — this is the one genuinely separable sub-task within it.
-func (v *Verifier) resolveCredential(ctx context.Context, req VerifyRequest, raw, scheme string, now time.Time) (storage.SenderConstrain, dpop.VerifiedProof, string, *Error) {
+func (v *Verifier) resolveCredential(ctx context.Context, dpopProof string, peerCert *x509.Certificate, method string, target *url.URL, raw, scheme string, now time.Time) (storage.SenderConstrain, dpop.VerifiedProof, string, *Error) {
 	switch {
 	case strings.EqualFold(scheme, "DPoP"):
-		if req.DPoPProof == "" {
+		if dpopProof == "" {
 			return 0, dpop.VerifiedProof{}, "", newError(ErrorInvalidRequest, 400, "DPoP header is required", nil)
 		}
 		verifiedProof, err := dpop.Verify(ctx, dpop.VerifyRequest{
-			Proof:        req.DPoPProof,
-			Method:       req.Method,
-			URL:          req.URL,
+			Proof:        dpopProof,
+			Method:       method,
+			URL:          target,
 			AccessToken:  raw,
 			Now:          now,
 			MaxProofAge:  v.cfg.Limits.MaxDPoPProofAge,
@@ -208,10 +218,10 @@ func (v *Verifier) resolveCredential(ctx context.Context, req VerifyRequest, raw
 		}
 		return storage.SenderConstrainDPoP, verifiedProof, "", nil
 	case strings.EqualFold(scheme, "Bearer"):
-		if req.PeerCertificate == nil {
+		if peerCert == nil {
 			return 0, dpop.VerifiedProof{}, "", newError(ErrorInvalidRequest, 400, "a client certificate is required", nil)
 		}
-		return storage.SenderConstrainMTLS, dpop.VerifiedProof{}, mtls.Thumbprint(req.PeerCertificate), nil
+		return storage.SenderConstrainMTLS, dpop.VerifiedProof{}, mtls.Thumbprint(peerCert), nil
 	default:
 		return 0, dpop.VerifiedProof{}, "", newError(ErrorInvalidRequest, 400, "authorization scheme must be DPoP or Bearer", nil)
 	}

@@ -143,8 +143,8 @@ func TestExchangeAuthorizationCodeSuccess(t *testing.T) {
 	dpopKey := generateKey(t)
 
 	result, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: createDPoPProof(t, dpopKey, h.now),
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, dpopKey, h.now)},
 	})
 	if err != nil {
 		t.Fatalf("ExchangeAuthorizationCode: %v", err)
@@ -218,8 +218,8 @@ func TestExchangeAuthorizationCodeWithoutOpenIDScope(t *testing.T) {
 	code := completeSuccessfulAuthorization(t, h, []string{"accounts"})
 
 	result, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err != nil {
 		t.Fatalf("ExchangeAuthorizationCode: %v", err)
@@ -258,10 +258,31 @@ func TestExchangeAuthorizationCodeRejectsWrongGrantType(t *testing.T) {
 		}
 	}
 	_, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP: server.FormRequest{Parameters: params}, DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP: server.FormRequest{Parameters: params}, DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if code := serverErrorCode(t, err); code != server.ErrorUnsupportedGrantType {
 		t.Fatalf("error code = %q, want %q", code, server.ErrorUnsupportedGrantType)
+	}
+}
+
+// TestExchangeAuthorizationCodeRejectsMultipleDPoPProofs exercises
+// resolveDPoPProof (internal/dpop.ResolveHeaderValues) directly against
+// a real Server method: RFC 9449 §7.1 requires a request carry at most
+// one DPoP header, and DPoPProofs exists specifically so a caller that
+// passes every raw header value through (e.g. net/http's own
+// Header.Values("DPoP")) gets this enforced by the library itself,
+// rather than depending on the HTTP adapter to reject it first.
+func TestExchangeAuthorizationCodeRejectsMultipleDPoPProofs(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
+
+	dpopKey := generateKey(t)
+	_, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, dpopKey, h.now), createDPoPProof(t, dpopKey, h.now)},
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequest)
 	}
 }
 
@@ -277,7 +298,7 @@ func TestExchangeAuthorizationCodeRejectsMissingClientAssertion(t *testing.T) {
 		}
 	}
 	_, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP: server.FormRequest{Parameters: filtered}, DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP: server.FormRequest{Parameters: filtered}, DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
 		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidClient)
@@ -289,8 +310,8 @@ func TestExchangeAuthorizationCodeRejectsWrongCodeVerifier(t *testing.T) {
 	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
 
 	_, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, "wrong-verifier-wrong-verifier-wrong-verif")},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, "wrong-verifier-wrong-verifier-wrong-verif")},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if code := serverErrorCode(t, err); code != server.ErrorInvalidGrant {
 		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidGrant)
@@ -307,8 +328,8 @@ func TestExchangeAuthorizationCodeRejectsMissingCodeVerifier(t *testing.T) {
 	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
 
 	_, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, "")},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, "")},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if code := serverErrorCode(t, err); code != server.ErrorInvalidGrant {
 		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidGrant)
@@ -320,8 +341,8 @@ func TestExchangeAuthorizationCodeRejectsWrongRedirectURI(t *testing.T) {
 	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
 
 	_, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, "https://attacker.example/callback", testCodeVerifier)},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, "https://attacker.example/callback", testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if code := serverErrorCode(t, err); code != server.ErrorInvalidGrant {
 		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidGrant)
@@ -402,8 +423,8 @@ func TestExchangeAuthorizationCodeAcceptsMatchingDPoPJKT(t *testing.T) {
 	code := completeAuthorizationWithDPoPJKT(t, h, boundThumbprint.String())
 
 	_, err = h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: createDPoPProof(t, boundKey, h.now),
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, boundKey, h.now)},
 	})
 	if err != nil {
 		t.Fatalf("ExchangeAuthorizationCode: %v", err)
@@ -422,8 +443,8 @@ func TestExchangeAuthorizationCodeRejectsMismatchedDPoPJKT(t *testing.T) {
 	// Present a different DPoP key at the token endpoint than the one
 	// declared via dpop_jkt at authorization time (RFC 9449 §10).
 	_, err = h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if code := serverErrorCode(t, err); code != server.ErrorInvalidGrant {
 		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidGrant)
@@ -435,8 +456,8 @@ func TestExchangeAuthorizationCodeIsSingleUse(t *testing.T) {
 	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
 
 	first, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err != nil {
 		t.Fatalf("first ExchangeAuthorizationCode: %v", err)
@@ -446,8 +467,8 @@ func TestExchangeAuthorizationCodeIsSingleUse(t *testing.T) {
 	}
 
 	_, err = h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err == nil {
 		t.Fatalf("second ExchangeAuthorizationCode (replayed code) = nil error, want error")
@@ -467,8 +488,8 @@ func TestExchangeAuthorizationCodeReuseRevokesAccessToken(t *testing.T) {
 	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
 
 	first, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err != nil {
 		t.Fatalf("first ExchangeAuthorizationCode: %v", err)
@@ -493,8 +514,8 @@ func TestExchangeAuthorizationCodeReuseRevokesAccessToken(t *testing.T) {
 	}
 
 	_, err = h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err == nil {
 		t.Fatalf("second ExchangeAuthorizationCode (replayed code) = nil error, want error")
@@ -515,8 +536,8 @@ func TestExchangeAuthorizationCodeReuseRevokesRefreshToken(t *testing.T) {
 	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts", "offline_access"})
 
 	first, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err != nil {
 		t.Fatalf("first ExchangeAuthorizationCode: %v", err)
@@ -526,22 +547,22 @@ func TestExchangeAuthorizationCodeReuseRevokesRefreshToken(t *testing.T) {
 	}
 
 	if _, err := h.server.RefreshAccessToken(context.Background(), server.RefreshTokenRequest{
-		HTTP:      server.FormRequest{Parameters: refreshFormParams(h.clientAssertion(t), first.RefreshToken.Reveal(), "")},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: refreshFormParams(h.clientAssertion(t), first.RefreshToken.Reveal(), "")},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	}); err != nil {
 		t.Fatalf("refresh before reuse was detected: %v", err)
 	}
 
 	if _, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	}); err == nil {
 		t.Fatalf("second ExchangeAuthorizationCode (replayed code) = nil error, want error")
 	}
 
 	if _, err := h.server.RefreshAccessToken(context.Background(), server.RefreshTokenRequest{
-		HTTP:      server.FormRequest{Parameters: refreshFormParams(h.clientAssertion(t), first.RefreshToken.Reveal(), "")},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: refreshFormParams(h.clientAssertion(t), first.RefreshToken.Reveal(), "")},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	}); err == nil {
 		t.Fatalf("refresh after code reuse was detected = nil error, want error (refresh token should be revoked)")
 	}
@@ -667,8 +688,8 @@ func TestExchangeAuthorizationCodeReuseRevokesOpaqueAccessToken(t *testing.T) {
 
 	dpopKey := generateKey(t)
 	first, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: createDPoPProof(t, dpopKey, h.now),
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, dpopKey, h.now)},
 	})
 	if err != nil {
 		t.Fatalf("first ExchangeAuthorizationCode: %v", err)
@@ -724,7 +745,7 @@ func TestExchangeAuthorizationCodeReuseRevokesOpaqueAccessToken(t *testing.T) {
 		_, err = verifier.Verify(context.Background(), resource.VerifyRequest{
 			Method: "GET", URL: target,
 			Authorization: "DPoP " + rawAccessToken,
-			DPoPProof:     proof,
+			DPoPProofs:    []string{proof},
 		})
 		return err
 	}
@@ -734,8 +755,8 @@ func TestExchangeAuthorizationCodeReuseRevokesOpaqueAccessToken(t *testing.T) {
 
 	// ... then trigger the code reuse ...
 	if _, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	}); err == nil {
 		t.Fatalf("second ExchangeAuthorizationCode (replayed code) = nil error, want error")
 	}
@@ -762,15 +783,15 @@ func TestExchangeAuthorizationCodeDetectsDPoPReplay(t *testing.T) {
 	proof := createDPoPProof(t, dpopKey, h.now)
 
 	if _, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code1, testRedirectURI, testCodeVerifier)},
-		DPoPProof: proof,
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code1, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{proof},
 	}); err != nil {
 		t.Fatalf("first ExchangeAuthorizationCode: %v", err)
 	}
 
 	_, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code2, testRedirectURI, testCodeVerifier)},
-		DPoPProof: proof, // reused proof, fresh code
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code2, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{proof}, // reused proof, fresh code
 	})
 	if err == nil {
 		t.Fatalf("ExchangeAuthorizationCode(reused dpop proof) = nil error, want error")
@@ -785,8 +806,8 @@ func TestExchangeAuthorizationCodeAuditsOutcomes(t *testing.T) {
 	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
 
 	if _, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	}); err != nil {
 		t.Fatalf("ExchangeAuthorizationCode: %v", err)
 	}

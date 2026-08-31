@@ -14,26 +14,28 @@ import (
 type RefreshTokenRequest struct {
 	HTTP FormRequest
 
-	// DPoPProof is the value of the request's DPoP header — required
-	// when the authenticated client's SenderConstrain() is
-	// SenderConstrainDPoP (the default). It must be a valid, fresh
-	// proof, but — since every client this server accepts is
-	// confidential (private_key_jwt client authentication is always
-	// required; there is no public-client path) — it need not be bound
-	// to the same key the refresh token was originally issued to. RFC
-	// 9449 §5: "Refresh tokens issued to confidential clients... are
-	// not bound to the DPoP proof public key because they are already
-	// sender-constrained with a different existing mechanism [client
-	// authentication]." The newly issued access token is bound to
-	// whichever key this request presents, so a client rotating its
-	// DPoP key at refresh time is expected and correctly handled, not
-	// an error.
-	DPoPProof string
+	// DPoPProofs is every "DPoP" header value the request carried, in
+	// receipt order — see AuthorizationCodeExchangeRequest.DPoPProofs'
+	// own doc comment for why this is a slice, not a single string.
+	// Required (exactly one value) when the authenticated client's
+	// SenderConstrain() is SenderConstrainDPoP (the default). It must
+	// be a valid, fresh proof, but — since every client this server
+	// accepts is confidential (private_key_jwt client authentication is
+	// always required; there is no public-client path) — it need not
+	// be bound to the same key the refresh token was originally issued
+	// to. RFC 9449 §5: "Refresh tokens issued to confidential
+	// clients... are not bound to the DPoP proof public key because
+	// they are already sender-constrained with a different existing
+	// mechanism [client authentication]." The newly issued access token
+	// is bound to whichever key this request presents, so a client
+	// rotating its DPoP key at refresh time is expected and correctly
+	// handled, not an error.
+	DPoPProofs []string
 
 	// PeerCertificate is the TLS client certificate presented on the
 	// connection this request arrived on, if any — required instead of
-	// DPoPProof when the authenticated client's SenderConstrain() is
-	// SenderConstrainMTLS. Mirrors DPoPProof's own "whichever credential
+	// a DPoP proof when the authenticated client's SenderConstrain() is
+	// SenderConstrainMTLS. Mirrors DPoPProofs' own "whichever credential
 	// shows up wins" reasoning: an mTLS-bound client rotating its
 	// certificate at refresh time is expected and correctly handled the
 	// same way.
@@ -55,6 +57,10 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, "", newError(ErrorInvalidRequest, 400, "the request contains a duplicated parameter", err))
 	}
+	dpopProof, dpopErr := resolveDPoPProof(req.DPoPProofs)
+	if dpopErr != nil {
+		return s.tokenFail(ctx, AuditEventRefreshAccessToken, "", dpopErr)
+	}
 
 	if params["grant_type"] != "refresh_token" {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, "", newError(ErrorUnsupportedGrantType, 400, "grant_type must be refresh_token", nil))
@@ -70,7 +76,7 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorInvalidRequest, 400, "refresh_token is required", nil))
 	}
 
-	thumbprint, bindingErr := s.verifyTokenRequestBinding(ctx, client, req.DPoPProof, req.PeerCertificate)
+	thumbprint, bindingErr := s.verifyTokenRequestBinding(ctx, client, dpopProof, req.PeerCertificate)
 	if bindingErr != nil {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), bindingErr)
 	}
@@ -90,7 +96,7 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorInvalidGrant, 400, "refresh_token was not issued to this client", nil))
 	}
 	// No DPoP-key match check against redeemed.Thumbprint here — see
-	// RefreshTokenRequest.DPoPProof's doc comment. client.ID() above is
+	// RefreshTokenRequest.DPoPProofs' doc comment. client.ID() above is
 	// only ever reached via successful client_assertion verification
 	// (authenticateClient), so every caller here is confidential; RFC
 	// 9449 §5 does not bind a confidential client's refresh token to a

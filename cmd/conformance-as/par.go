@@ -14,14 +14,9 @@ func parHandler(srv *server.Server) http.HandlerFunc {
 			writeRawOAuthError(w, http.StatusBadRequest, server.ErrorInvalidRequest, err.Error())
 			return
 		}
-		dpopProof, ok := singleDPoPHeader(r)
-		if !ok {
-			writeRawOAuthError(w, http.StatusBadRequest, server.ErrorInvalidRequest, "multiple DPoP headers are not permitted")
-			return
-		}
 		result, err := srv.PushAuthorizationRequest(r.Context(), server.PushAuthorizationRequest{
 			HTTP:            form,
-			DPoPProof:       dpopProof,
+			DPoPProofs:      r.Header.Values("DPoP"),
 			PeerCertificate: peerCertificate(r),
 		})
 		if err != nil {

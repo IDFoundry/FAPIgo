@@ -392,12 +392,16 @@ func postFormExpectingOAuthError(t *testing.T, httpClient *http.Client, url, bod
 
 // TestSmokeTokenEndpointOAuthErrorResponses exercises /token's own raw
 // OAuth-error paths (writeRawOAuthError, server.NewError/(*server.Error).WriteJSON)
-// — failures this binary detects itself before ever calling a Server
-// method, so no *server.Error exists yet: an unrecognized grant_type,
-// a malformed form body, and multiple DPoP headers. Confirms the JSON
+// for an unrecognized grant_type and a malformed form body — failures
+// this binary detects itself before ever calling a Server method, so no
+// *server.Error exists yet — plus multiple DPoP headers, which since
+// internal/dpop.ResolveHeaderValues moved that rejection into the
+// server package itself is now a *server.Error produced by whichever
+// Server method grant_type dispatches to (server.errors_test.go covers
+// this at the unit level; this confirms the same shape reaches the wire
+// unchanged, via writeOAuthJSONError this time). Confirms the JSON
 // body/status/Content-Type WriteJSON produces is correct over real
-// HTTP, not just against a httptest.ResponseRecorder
-// (server/errors_test.go's own unit tests).
+// HTTP, not just against a httptest.ResponseRecorder.
 func TestSmokeTokenEndpointOAuthErrorResponses(t *testing.T) {
 	h := newSmokeHarness(t, AccessTokenFormatJWT)
 
@@ -432,7 +436,13 @@ func TestSmokeTokenEndpointOAuthErrorResponses(t *testing.T) {
 	})
 
 	t.Run("multiple DPoP headers", func(t *testing.T) {
-		form := url.Values{"grant_type": {"client_credentials"}}.Encode()
+		// refresh_token, not client_credentials: RequestClientCredentialsToken
+		// rejects outright with unsupported_grant_type before ever reaching
+		// resolveDPoPProof when Config.ClientCredentialsGrant is unset (as
+		// on this plain smoke harness), which would mask the check this
+		// subtest means to exercise — RefreshAccessToken has no such gate
+		// ahead of its own resolveDPoPProof call.
+		form := url.Values{"grant_type": {"refresh_token"}}.Encode()
 		res, body := postFormExpectingOAuthError(t, h.httpClient, h.token, form, map[string][]string{"DPoP": {"proof-1", "proof-2"}})
 		if res.StatusCode != http.StatusBadRequest {
 			t.Errorf("status = %d, want %d", res.StatusCode, http.StatusBadRequest)

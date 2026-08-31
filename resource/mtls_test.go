@@ -180,7 +180,7 @@ func TestVerifyRejectsMTLSBoundTokenPresentedAsDPoP(t *testing.T) {
 	_, err = f.verifier.Verify(context.Background(), resource.VerifyRequest{
 		Method: "GET", URL: f.target,
 		Authorization: "DPoP " + f.accessToken,
-		DPoPProof:     proof,
+		DPoPProofs:    []string{proof},
 	})
 	if err == nil {
 		t.Fatalf("Verify(mTLS-bound token presented via DPoP) = nil error, want error")

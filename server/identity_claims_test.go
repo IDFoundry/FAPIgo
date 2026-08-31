@@ -320,8 +320,8 @@ func TestExchangeAuthorizationCodeIdentityClaimWinsOverExtensionClaimCollision(t
 	}
 
 	exchangeResult, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err != nil {
 		t.Fatalf("ExchangeAuthorizationCode: %v", err)
@@ -377,8 +377,8 @@ func TestExchangeAuthorizationCodeEmbedsOnlyRequestedIdentityClaims(t *testing.T
 	code := completeAuthorizationWithClaims(t, h, `{"id_token":{"name":null}}`)
 
 	result, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err != nil {
 		t.Fatalf("ExchangeAuthorizationCode: %v", err)
@@ -432,8 +432,8 @@ func TestExchangeAuthorizationCodeOmitsIdentityClaimsWithoutClaimsParameter(t *t
 	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
 
 	result, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err != nil {
 		t.Fatalf("ExchangeAuthorizationCode: %v", err)
@@ -481,8 +481,8 @@ func TestExchangeAuthorizationCodeSplitsIDTokenAndUserinfoRequestedClaims(t *tes
 	code := completeAuthorizationWithClaims(t, h, `{"userinfo":{"email":null}}`)
 
 	result, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err != nil {
 		t.Fatalf("ExchangeAuthorizationCode: %v", err)
@@ -533,8 +533,8 @@ func TestExchangeAuthorizationCodeToleratesNoIdentityClaims(t *testing.T) {
 
 	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
 	result, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
-		HTTP:      server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
-		DPoPProof: createDPoPProof(t, generateKey(t), h.now),
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 	})
 	if err != nil {
 		t.Fatalf("ExchangeAuthorizationCode: %v", err)

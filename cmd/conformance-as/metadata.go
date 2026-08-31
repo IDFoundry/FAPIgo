@@ -53,7 +53,13 @@ var claimsSupported = append(
 	identityClaimNames...,
 )
 
-var dpopSigningAlgValuesSupported = []string{"ES256", "PS256", "EdDSA"}
+// dpopSigningAlgValuesSupported names every algorithm
+// fapi.SignatureAlgorithm's own closed set supports, via each
+// constant's own String() rather than a hand-typed literal — Go has no
+// way to enumerate iota-based constants at runtime, so this still needs
+// updating by hand if that set ever grows, but can no longer silently
+// drift from the wire spelling String() itself produces.
+var dpopSigningAlgValuesSupported = []string{fapi.ES256.String(), fapi.PS256.String(), fapi.EdDSA.String()}
 
 func metadataHandler(srv *server.Server, advertisedScopes []string, userinfoURL *url.URL, mtlsUserinfoURL *fapi.URL) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

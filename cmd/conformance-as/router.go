@@ -23,7 +23,7 @@ import (
 // POST, and an OIDF suite plan config's resource.resourceMethod is a
 // free-form per-run choice for the generic-resource role this endpoint
 // also plays — nothing here depends on which method the suite picks.
-func newRouter(srv *server.Server, consent *consentHandler, backchannel *backchannelHandler, advertisedScopes []string, resourceVerifier *fapires.Verifier, userinfoURL *url.URL, mtlsUserinfoURL *fapi.URL, accountsURL *url.URL, identityClaims staticIdentityClaims, clients storage.ClientRepository, userinfoSigning bool) *http.ServeMux {
+func newRouter(srv *server.Server, consent *consentHandler, backchannel *backchannelHandler, advertisedScopes []string, resourceVerifier *fapires.Verifier, userinfoURL *url.URL, mtlsUserinfoURL *fapi.URL, accountsURL *url.URL, identityClaims staticIdentityClaims, clients storage.ClientRepository, userinfoSigning bool, cibaApprovalUIToken string) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /.well-known/openid-configuration", metadataHandler(srv, advertisedScopes, userinfoURL, mtlsUserinfoURL))
 	mux.HandleFunc("GET /jwks", jwksHandler(srv))
@@ -42,5 +42,13 @@ func newRouter(srv *server.Server, consent *consentHandler, backchannel *backcha
 	// Config.Endpoints.BackchannelAuthentication is set.
 	mux.HandleFunc("POST /backchannel-authenticate", backchannel.handleAuthenticate)
 	mux.HandleFunc("POST /backchannel-approve", backchannel.handleApprove)
+	// See backchannel_ui.go's own doc comment on why this is
+	// token-gated and only registered at all when a token is
+	// configured — off by default, matching -ciba/-client-credentials-grant's
+	// own "off unless explicitly enabled" convention.
+	if cibaApprovalUIToken != "" {
+		mux.HandleFunc("GET /ciba-approve", cibaApproveFormHandler(cibaApprovalUIToken))
+		mux.HandleFunc("POST /ciba-approve", cibaApproveSubmitHandler(backchannel, cibaApprovalUIToken))
+	}
 	return mux
 }

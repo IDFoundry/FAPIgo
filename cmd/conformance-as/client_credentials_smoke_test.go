@@ -123,7 +123,7 @@ func newClientCredentialsSmokeServer(t *testing.T) clientCredentialsSmokeServer 
 		AdvertisedScopes:  []string{"openid", "accounts"},
 	}
 
-	mux, err := newServerMux(resolved, false, false, false, false, true)
+	mux, err := newServerMux(resolved, false, false, false, false, true, "")
 	if err != nil {
 		t.Fatalf("build server mux: %v", err)
 	}

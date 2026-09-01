@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -86,6 +88,67 @@ func (h *backchannelHandler) handleAuthenticate(w http.ResponseWriter, r *http.R
 	}
 }
 
+// decideError is returned by backchannelHandler.decide — its status
+// mirrors the http.Error status handleApprove itself used to write
+// directly, before both it and the manual approve/deny UI
+// (backchannel_ui.go) needed to share this same decision logic while
+// rendering their own response formats (JSON vs HTML) around it.
+type decideError struct {
+	status  int
+	message string
+}
+
+func (e *decideError) Error() string { return e.message }
+
+// decide records an allow/deny decision for authReqID — the shared
+// core of both POST /backchannel-approve (JSON, called automatically
+// by the local suite's own automated_ciba_approval_url mechanism) and
+// the manual approve/deny UI's own POST handler (backchannel_ui.go),
+// which exists for exactly the case that mechanism doesn't cover: a
+// hosted certification run, where nothing calls this automatically.
+// Every error it returns is a *decideError.
+func (h *backchannelHandler) decide(ctx context.Context, authReqID, action string) error {
+	pending, ok := h.pending.TakeOnce(authReqID)
+	if !ok {
+		return &decideError{http.StatusNotFound, "unknown auth_req_id"}
+	}
+
+	var result server.InteractionResult
+	switch action {
+	case "allow":
+		subjectID, err := server.NewSubjectID(h.defaultSubject)
+		if err != nil {
+			return &decideError{http.StatusInternalServerError, "server_error"}
+		}
+		subject, err := server.NewAuthenticatedSubject(subjectID)
+		if err != nil {
+			return &decideError{http.StatusInternalServerError, "server_error"}
+		}
+		// No real authentication happens here — see this binary's
+		// consentHandler.handleDecision for the identical convention
+		// (fixed ACR/AMR placeholder values) applied to the
+		// browser-based flow.
+		authCtx, err := server.NewAuthenticationContext(h.clock.Now(), "urn:mace:incommon:iap:silver", []string{"pwd"})
+		if err != nil {
+			return &decideError{http.StatusInternalServerError, "server_error"}
+		}
+		result = server.Authorize(subject, authCtx, server.GrantedAuthorization{
+			Scope: pending.scope, AuthorizationDetails: pending.authorizationDetails,
+		})
+	case "deny":
+		result = server.Deny("user rejected authentication")
+	default:
+		return &decideError{http.StatusBadRequest, "action must be allow or deny"}
+	}
+
+	if err := h.srv.CompleteBackchannelAuthentication(ctx, server.CompleteBackchannelAuthenticationRequest{
+		Handle: pending.handle, Result: result,
+	}); err != nil {
+		return &decideError{http.StatusInternalServerError, "server_error"}
+	}
+	return nil
+}
+
 // handleApprove serves POST /backchannel-approve?auth_req_id=...&action=allow|deny.
 // See this type's own doc comment for why it exists; the suite's own
 // CallAutomatedCibaApprovalEndpoint condition substitutes both query
@@ -94,47 +157,12 @@ func (h *backchannelHandler) handleApprove(w http.ResponseWriter, r *http.Reques
 	authReqID := r.URL.Query().Get("auth_req_id")
 	action := r.URL.Query().Get("action")
 
-	pending, ok := h.pending.TakeOnce(authReqID)
-	if !ok {
-		http.Error(w, "unknown auth_req_id", http.StatusNotFound)
-		return
-	}
-
-	var result server.InteractionResult
-	switch action {
-	case "allow":
-		subjectID, err := server.NewSubjectID(h.defaultSubject)
-		if err != nil {
-			http.Error(w, "server_error", http.StatusInternalServerError)
+	if err := h.decide(r.Context(), authReqID, action); err != nil {
+		var de *decideError
+		if errors.As(err, &de) {
+			http.Error(w, de.message, de.status)
 			return
 		}
-		subject, err := server.NewAuthenticatedSubject(subjectID)
-		if err != nil {
-			http.Error(w, "server_error", http.StatusInternalServerError)
-			return
-		}
-		// No real authentication happens here — see this binary's
-		// consentHandler.handleDecision for the identical convention
-		// (fixed ACR/AMR placeholder values) applied to the
-		// browser-based flow.
-		authCtx, err := server.NewAuthenticationContext(h.clock.Now(), "urn:mace:incommon:iap:silver", []string{"pwd"})
-		if err != nil {
-			http.Error(w, "server_error", http.StatusInternalServerError)
-			return
-		}
-		result = server.Authorize(subject, authCtx, server.GrantedAuthorization{
-			Scope: pending.scope, AuthorizationDetails: pending.authorizationDetails,
-		})
-	case "deny":
-		result = server.Deny("user rejected authentication")
-	default:
-		http.Error(w, "action must be allow or deny", http.StatusBadRequest)
-		return
-	}
-
-	if err := h.srv.CompleteBackchannelAuthentication(r.Context(), server.CompleteBackchannelAuthenticationRequest{
-		Handle: pending.handle, Result: result,
-	}); err != nil {
 		http.Error(w, "server_error", http.StatusInternalServerError)
 		return
 	}

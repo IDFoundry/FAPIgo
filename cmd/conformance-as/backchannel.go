@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"time"
 
@@ -158,12 +157,11 @@ func (h *backchannelHandler) handleApprove(w http.ResponseWriter, r *http.Reques
 	action := r.URL.Query().Get("action")
 
 	if err := h.decide(r.Context(), authReqID, action); err != nil {
-		var de *decideError
-		if errors.As(err, &de) {
-			http.Error(w, de.message, de.status)
-			return
-		}
-		http.Error(w, "server_error", http.StatusInternalServerError)
+		// decide's own doc comment guarantees every error it returns is
+		// a *decideError — trusted directly rather than defensively
+		// falling back to a generic 500 for a shape it can't produce.
+		de := err.(*decideError)
+		http.Error(w, de.message, de.status)
 		return
 	}
 

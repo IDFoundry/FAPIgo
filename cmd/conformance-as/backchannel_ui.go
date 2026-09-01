@@ -2,7 +2,6 @@ package main
 
 import (
 	"crypto/subtle"
-	"errors"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -90,15 +89,14 @@ func cibaApproveSubmitHandler(backchannel *backchannelHandler, configuredToken s
 		action := r.PostFormValue("action")
 
 		if err := backchannel.decide(r.Context(), authReqID, action); err != nil {
-			status := http.StatusInternalServerError
-			message := "unexpected error"
-			var de *decideError
-			if errors.As(err, &de) {
-				status, message = de.status, de.message
-			}
+			// decide's own doc comment guarantees every error it
+			// returns is a *decideError — trusted directly rather than
+			// defensively falling back to a generic 500 for a shape it
+			// can't produce.
+			de := err.(*decideError)
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.WriteHeader(status)
-			_ = cibaApproveTemplate.Execute(w, cibaApprovePage{Token: token, Message: "Error: " + message})
+			w.WriteHeader(de.status)
+			_ = cibaApproveTemplate.Execute(w, cibaApprovePage{Token: token, Message: "Error: " + de.message})
 			return
 		}
 

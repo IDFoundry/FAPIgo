@@ -211,6 +211,42 @@ func TestCIBAApproveUIUnknownAuthReqID(t *testing.T) {
 	}
 }
 
+// TestCIBAApproveUIInvalidAction covers decide's default branch (an
+// action value that's neither "allow" nor "deny") through the UI's own
+// POST handler.
+func TestCIBAApproveUIInvalidAction(t *testing.T) {
+	const realToken = "correct-horse-battery-staple"
+	h := newSmokeHarnessWithOptions(t, AccessTokenFormatJWT, false, false, true, realToken)
+	ctx := context.Background()
+
+	session, err := h.client.BeginBackchannelAuthentication(ctx, client.BeginBackchannelAuthenticationRequest{
+		Scope: []string{"openid", "accounts"}, LoginHint: smokeSubject,
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+
+	res, err := h.httpClient.PostForm(h.cibaApproveUI, url.Values{
+		"token":       {realToken},
+		"auth_req_id": {session.AuthReqID()},
+		"action":      {"maybe"},
+	})
+	if err != nil {
+		t.Fatalf("POST /ciba-approve: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", res.StatusCode, http.StatusBadRequest)
+	}
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if !strings.Contains(string(body), "action must be allow or deny") {
+		t.Errorf("body = %s, want it to mention the invalid-action error", body)
+	}
+}
+
 // TestCIBAApproveUISubmitRequiresToken confirms a wrong token on the
 // POST path is rejected (404) without ever touching the pending
 // request — the same request must still be approvable afterward with

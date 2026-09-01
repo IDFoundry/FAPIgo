@@ -132,20 +132,26 @@ type smokeHarness struct {
 	// URL — populated only when newSmokeHarnessWithOptions was built
 	// with ciba true — for tests that POST to it directly.
 	backchannelAuthenticate string
+
+	// cibaApproveUI is the base "/ciba-approve" URL — populated only
+	// when newSmokeHarnessWithOptions was built with a non-empty
+	// cibaApprovalUIToken — for tests driving the manual approve/deny
+	// UI directly (backchannel_ui_test.go).
+	cibaApproveUI string
 }
 
 func newSmokeHarness(t *testing.T, format AccessTokenFormat) *smokeHarness {
-	return newSmokeHarnessWithOptions(t, format, false, false, false)
+	return newSmokeHarnessWithOptions(t, format, false, false, false, "")
 }
 
 // newSmokeHarnessWithNonceChallenge is newSmokeHarnessWithOptions with
-// userinfoSigning/ciba left off, for the (much more common)
-// nonce-challenge-only callers below.
+// userinfoSigning/ciba/cibaApprovalUIToken left off, for the (much more
+// common) nonce-challenge-only callers below.
 func newSmokeHarnessWithNonceChallenge(t *testing.T, format AccessTokenFormat, dpopNonceChallenge bool) *smokeHarness {
-	return newSmokeHarnessWithOptions(t, format, dpopNonceChallenge, false, false)
+	return newSmokeHarnessWithOptions(t, format, dpopNonceChallenge, false, false, "")
 }
 
-func newSmokeHarnessWithOptions(t *testing.T, format AccessTokenFormat, dpopNonceChallenge bool, userinfoSigning bool, ciba bool) *smokeHarness {
+func newSmokeHarnessWithOptions(t *testing.T, format AccessTokenFormat, dpopNonceChallenge bool, userinfoSigning bool, ciba bool, cibaApprovalUIToken string) *smokeHarness {
 	t.Helper()
 
 	cert, pool := selfSignedCert(t)
@@ -260,7 +266,7 @@ func newSmokeHarnessWithOptions(t *testing.T, format AccessTokenFormat, dpopNonc
 		AdvertisedScopes:  []string{"openid", "accounts", "offline_access"},
 	}
 
-	mux, err := newServerMux(resolved, false, dpopNonceChallenge, userinfoSigning, ciba, false)
+	mux, err := newServerMux(resolved, false, dpopNonceChallenge, userinfoSigning, ciba, false, cibaApprovalUIToken)
 	if err != nil {
 		t.Fatalf("build server mux: %v", err)
 	}
@@ -333,6 +339,10 @@ func newSmokeHarnessWithOptions(t *testing.T, format AccessTokenFormat, dpopNonc
 		backchannelApprove = issuer.String() + "/backchannel-approve"
 		backchannelAuthenticate = backchannelAuthenticationURL.String()
 	}
+	var cibaApproveUI string
+	if cibaApprovalUIToken != "" {
+		cibaApproveUI = issuer.String() + "/ciba-approve"
+	}
 	clientDeps := client.Dependencies{
 		Sessions:   newMemSessionStore(),
 		Keys:       clientKeyManager,
@@ -353,6 +363,7 @@ func newSmokeHarnessWithOptions(t *testing.T, format AccessTokenFormat, dpopNonc
 		par:                     endpoints.PushedAuthorizationRequest.String(),
 		backchannelApprove:      backchannelApprove,
 		backchannelAuthenticate: backchannelAuthenticate,
+		cibaApproveUI:           cibaApproveUI,
 	}
 }
 
@@ -488,7 +499,7 @@ func TestSmokePAREndpointOAuthErrorResponses(t *testing.T) {
 // counterpart — requires a harness built with ciba true, unlike /token
 // and /par which are always active.
 func TestSmokeBackchannelAuthenticationEndpointOAuthErrorResponses(t *testing.T) {
-	h := newSmokeHarnessWithOptions(t, AccessTokenFormatJWT, false, false, true)
+	h := newSmokeHarnessWithOptions(t, AccessTokenFormatJWT, false, false, true, "")
 
 	t.Run("malformed form body", func(t *testing.T) {
 		res, body := postFormExpectingOAuthError(t, h.httpClient, h.backchannelAuthenticate, "client_id=%zz", nil)
@@ -769,7 +780,7 @@ func TestSmokeUserInfoWithDPoPNonceChallenge(t *testing.T) {
 // actually interoperate" shape TestSmokeUserInfoWithDPoPNonceChallenge
 // already uses for the nonce-challenge wiring above.
 func TestSmokeSignedUserInfo(t *testing.T) {
-	h := newSmokeHarnessWithOptions(t, AccessTokenFormatJWT, false, true, false)
+	h := newSmokeHarnessWithOptions(t, AccessTokenFormatJWT, false, true, false, "")
 	ctx := context.Background()
 	scope := []string{"openid", "accounts"}
 
@@ -848,7 +859,7 @@ func (h *smokeHarness) callBackchannelApprove(ctx context.Context, authReqID, ac
 // isolation" pattern TestSmokeUserInfoWithDPoPNonceChallenge already
 // applies to UserInfo.
 func TestSmokeCIBAFlow(t *testing.T) {
-	h := newSmokeHarnessWithOptions(t, AccessTokenFormatJWT, false, false, true)
+	h := newSmokeHarnessWithOptions(t, AccessTokenFormatJWT, false, false, true, "")
 	ctx := context.Background()
 	scope := []string{"openid", "accounts", "offline_access"}
 
@@ -919,7 +930,7 @@ func TestSmokeCIBAFlow(t *testing.T) {
 // always-signed request object path (backchannel.go), not PAR's plain-
 // parameter path.
 func TestSmokeCIBAFlowWithAuthorizationDetails(t *testing.T) {
-	h := newSmokeHarnessWithOptions(t, AccessTokenFormatJWT, false, false, true)
+	h := newSmokeHarnessWithOptions(t, AccessTokenFormatJWT, false, false, true, "")
 	ctx := context.Background()
 
 	detail, err := extension.RARSet(sampleRARDefinition, sampleTransactionApprovalDetail{Actions: []string{"approve"}, Amount: "SGD 500.00"})
@@ -958,7 +969,7 @@ func TestSmokeCIBAFlowWithAuthorizationDetails(t *testing.T) {
 }
 
 func TestSmokeCIBADenied(t *testing.T) {
-	h := newSmokeHarnessWithOptions(t, AccessTokenFormatJWT, false, false, true)
+	h := newSmokeHarnessWithOptions(t, AccessTokenFormatJWT, false, false, true, "")
 	ctx := context.Background()
 
 	session, err := h.client.BeginBackchannelAuthentication(ctx, client.BeginBackchannelAuthenticationRequest{

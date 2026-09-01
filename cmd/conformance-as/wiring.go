@@ -19,7 +19,7 @@ import (
 // Factored out so the end-to-end smoke test can stand up the exact same
 // wiring main.go uses, against its own TLS listener, without going
 // through flags or a config file on disk.
-func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChallenge bool, userinfoSigning bool, ciba bool, clientCredentialsGrant bool) (*http.ServeMux, error) {
+func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChallenge bool, userinfoSigning bool, ciba bool, clientCredentialsGrant bool, cibaApprovalUIToken string) (*http.ServeMux, error) {
 	endpoints, err := buildEndpoints(resolved.Issuer, allowLoopbackHTTP)
 	if err != nil {
 		return nil, err
@@ -271,5 +271,5 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 	backchannel := newBackchannelHandler(srv, server.SystemClock{}, resolved.DefaultSubject)
 	userinfoURLValue := userinfoURL.URL()
 	accountsURLValue := accountsURL.URL()
-	return newRouter(srv, consent, backchannel, resolved.AdvertisedScopes, resourceVerifier, &userinfoURLValue, mtlsUserinfoURL, &accountsURLValue, identityClaims, clientRepo, userinfoSigning), nil
+	return newRouter(srv, consent, backchannel, resolved.AdvertisedScopes, resourceVerifier, &userinfoURLValue, mtlsUserinfoURL, &accountsURLValue, identityClaims, clientRepo, userinfoSigning, cibaApprovalUIToken), nil
 }

@@ -75,6 +75,7 @@ func main() {
 	userinfoSigning := flag.Bool("userinfo-signing", false, "sign /userinfo responses as a JWS (OIDC Core §5.3.2), using the same algorithm as ID tokens — off by default; the FAPI 2.0 Security Profile doesn't require this")
 	ciba := flag.Bool("ciba", false, "enable the CIBA backchannel authentication endpoint (poll and ping delivery) — off by default; not part of the FAPI 2.0 Security Profile itself")
 	clientCredentialsGrant := flag.Bool("client-credentials-grant", false, "enable the RFC 6749 §4.4 client_credentials grant at the token endpoint — off by default; not part of the FAPI 2.0 Security Profile itself. Only clients registered allows_client_credentials_grant may use it.")
+	cibaApprovalUIToken := flag.String("ciba-approval-ui-token", "", "if set, serve a token-gated manual approve/deny page at GET/POST /ciba-approve?token=<value> for driving pending CIBA backchannel authentication requests by hand — off by default; see backchannel_ui.go's own doc comment for why this needs its own token instead of relying on /backchannel-approve's existing (deliberately unauthenticated) JSON endpoint")
 	mtls := flag.Bool("mtls", false, "enable a second TLS listener (mtls_listen_addr in the config file, or -mtls-listen) that requests but does not require a client certificate, advertised via mtls_endpoint_aliases (RFC 8705 §5) for a client registered sender_constrain=mtls — off by default; requires real TLS, incompatible with -insecure-http")
 	mtlsListenOverride := flag.String("mtls-listen", "", "override mtls_listen_addr from the config file")
 	flag.Parse()
@@ -114,7 +115,7 @@ func main() {
 		}
 	}
 
-	mux, err := newServerMux(resolved, *insecureHTTP, *dpopNonceChallenge, *userinfoSigning, *ciba, *clientCredentialsGrant)
+	mux, err := newServerMux(resolved, *insecureHTTP, *dpopNonceChallenge, *userinfoSigning, *ciba, *clientCredentialsGrant, *cibaApprovalUIToken)
 	if err != nil {
 		log.Fatalf("conformance-as: %v", err)
 	}

@@ -449,6 +449,7 @@ RESULT: <suite-graded verdict>
 DRIVER: <this driver's own step/error, or a statement that the flow
          completed without error>
 SUITE LOG: <suite base URL>api/log/<module ID>
+INTERACTIONS: <request/response transcript — -issuer mode only, see below>
 ```
 
 The `DRIVER` line is exactly the same text this driver has always
@@ -460,22 +461,145 @@ only runs against a local suite instance, never
 `certification.openid.net` — see below), so it adds no new artifacts to
 the automated daily run.
 
+**`INTERACTIONS`** (`-issuer` mode only, `interactions.go`) is a full
+request/response transcript of every call the driver actually made —
+discovery, JWKS, PAR, the authorize redirect (including its `Location`
+header), token exchange, and the resource call — recorded generically
+by wrapping the shared `*http.Client`'s own `Transport`, not by
+instrumenting each call site. A bare `DRIVER` line states the outcome
+but not how the client got there; OIDF's own submission instructions
+require evidence that "demonstrates that your application is detecting
+the error condition under test", and the reference RP client itself
+logs this same level of detail. Bearer credentials (`access_token`,
+`refresh_token`, `client_assertion`, `client_secret`) are redacted
+before recording; everything else — including a full `id_token`, since
+its claims are exactly what most of these tests are about — is
+recorded as-is.
+
 **Workflow for an actual certification run:** OIDF requires certification
 evidence to come from the OIDF-hosted production suite at
 `certification.openid.net`, not a local instance — and explicitly
 recommends against automating runs against it, reserving local suite
-runs (everything else in this README) for development. So the real
-certification run is a manual, one-off invocation:
+runs (everything else in this README) for development.
+
+The invocation this section used to suggest — pointing `-suite` straight
+at the hosted suite and letting this driver self-generate a plan the
+same way it does locally — does **not** work against the real hosted
+suite: confirmed live, `POST /api/plan` there requires an authenticated
+session this driver has no support for, and (separately) the hosted
+suite requires a plan to be created through its own guided web UI
+first, with a fixed alias/`client_id`/certificate registered up front —
+not something this driver can create on its own. This was cross-checked
+against OIDF's own official reference RP client
+(`gitlab.com/openid/sample-openbanking-client-nodejs`), which takes its
+issuer/accounts-endpoint/certificate as fixed, literal config rather
+than fetching or generating any of it.
+
+**`-issuer` mode (`fixed_identity.go`)** is what actually works: create
+the plan through the hosted UI first (selecting the same
+client-auth-type/sender-constrain/profile variants this driver's own
+`-mtls`/`-client-auth-mtls`/`-profile` flags represent), note the
+`issuer`/`accounts_endpoint` values the UI's own "Exported Values" panel
+shows (identical across every module in the plan — they're derived from
+the plan's fixed alias, not the module), then drive one module at a
+time:
 
 ```
 go run ./cmd/conformance-client -suite=https://certification.openid.net/ \
-    -profile=baseline -evidence-dir=./evidence/private-key-dpop
+    -profile=baseline -mtls -client-auth-mtls \
+    -issuer=https://www.certification.openid.net/test/a/<your-alias>/ \
+    -client-id=<registered client_id> \
+    -redirect-uri=<registered redirect_uri> \
+    -accounts-endpoint=<the plan's exported accounts_endpoint> \
+    -client-cert=./client.pem -client-key=./client.key \
+    -test-name=<module under test> \
+    -scope="openid" \
+    -evidence-dir=./evidence/mtls-mtls
 ```
 
-repeated once per profile being certified (`-mtls`/`-client-auth-mtls`
-combinations, `-profile=message-signing` for JAR/JARM), collecting the
-resulting `evidence/` directory alongside the suite's own downloaded
-results ZIP from its "Publish for certification" step.
+`-client-cert`/`-client-key` are required whenever `-mtls`/
+`-client-auth-mtls` is set — the certificate must be the exact one
+already registered with the suite through the UI, not a
+driver-generated throwaway; `tls.LoadX509KeyPair` loads it. Repeat once
+per module under test (the suite attributes traffic to whichever module
+is currently "waiting" for that alias, the same shared-alias-routing
+behavior the AS side of this repo already relies on) and once per
+profile being certified.
+
+**`-scope` must exactly match the plan's own configured scope on the
+suite** (defaults to `"openid"`; some plans add e.g. `offline_access`).
+Confirmed live: on a mismatch, the hosted suite doesn't send a normal
+OAuth `error=invalid_scope` redirect back to `redirect_uri` — it
+redirects to its own internal log-detail page instead (a bare
+`log=<id>` query string), which this driver has no way to distinguish
+from a malformed response and reports as `authorization response is
+missing iss`. If you hit that error, check the suite's own log viewer
+for the run before assuming it's an RFC 9207 problem — it's very
+likely a `-scope` mismatch instead. Each module instance is also
+single-shot: after any attempt (success or failure), restart/re-arm it
+in the UI before running the driver against it again, or discovery
+itself starts 400ing.
+
+**No suite-graded verdict is available in this mode** — there's no
+suite module ID to poll a result from, since no plan/module REST call
+ever happens. The suite's own plan-detail page in the hosted UI is the
+source of truth for PASS/FAIL, the same way OIDF's own downloaded
+results ZIP has always been the authoritative certification evidence;
+this driver's evidence file is, as it always has been, supplementary
+evidence of what the client itself did, not a substitute for it.
+
+**`private_key_jwt` profiles** (private key+DPoP, private key+MTLS —
+`client_auth_type=private_key_jwt`, i.e. `-issuer` without
+`-client-auth-mtls`) need `-client-jwks=<path>`: a JWK Set JSON file
+holding the client's PRIVATE key, matching the public JWK already
+handed to the suite through its own guided UI at plan-creation time —
+without it, `validate()` fails fast rather than signing every client
+assertion with a useless ephemeral key the suite was never told about.
+`client_jwks.go`'s `loadClientAuthenticationSigner` reads the first
+P-256 EC key it finds; `buildFixedClientKeyManager` builds the actual
+`keys.KeyManager` from it via `keys.NewKeyManagerFromSigners`
+(`keys/signer_keymanager.go`) — every OTHER signing purpose this run
+needs (DPoP proof signing, an optional signed request object) still
+gets a fresh ephemeral key, since neither of those needs to match
+anything the suite has pre-registered. A `gen-rp-pkjwt-mtls.go`-style
+one-off script (crypto/ecdsa + hand-rolled RFC 7518 §6.2.1 JSON, no
+external dependency) is the fastest way to produce both halves: the
+server JWKS (full private key — the suite signs `id_token`s with it)
+and the client JWKS (public half registered with the suite; private
+half is what `-client-jwks` points at).
+
+### Submitting to OIDF
+
+Confirmed against OIDF's own submission instructions
+(`openid.net/certification/how-to-submit-your-certification-request/`):
+submission is a form at `submissions.openid.net`, and its "Exported
+Test Results" field wants **ZIP files**, one per profile being
+certified. Two separate evidence sources go into that ZIP (or a
+sibling one in the same submission — OIDF's own wording is "upload all
+relevant ZIP files... in a single submission"):
+
+- **The suite's own official export** — from the plan's own page in
+  the hosted UI, its "Publish for certification" button. This is the
+  suite-graded verdict for every module, the actual PASS/FAIL source of
+  truth (see above) — not something this driver produces or can
+  produce, since fixed-identity mode never queries the suite's API at
+  all.
+- **This driver's own `-evidence-dir` output** — the client-side
+  evidence OIDF's instructions explicitly require alongside the suite's
+  own logs: *"You must submit (at least) one log file per test, do not
+  submit one large log file covering all tests"* and *"the client data
+  evidence must demonstrate that your application is detecting the
+  error condition under test"*. `-evidence-dir`'s one-file-per-module,
+  test-name-prefixed output already matches this naming convention
+  as-is — no renaming needed before zipping it up, e.g.:
+
+  ```
+  cd <evidence-dir> && zip -j ../<plan-alias>-client-evidence.zip *.log
+  ```
+
+  (`-j` flattens the directory structure into the zip root — OIDF's own
+  filename convention is what identifies each test, not a directory
+  path.)
 
 ## Extending this driver
 

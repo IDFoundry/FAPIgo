@@ -107,7 +107,40 @@ func main() {
 	mtls := flag.Bool("mtls", false, "with -profile=ciba or -profile=baseline, present a client certificate and use storage.SenderConstrainMTLS instead of DPoP (RFC 8705 §3) — see mtls.go. Orthogonal to -client-auth-mtls (RFC 8705 §2); combine both for the MTLS+MTLS profile. Ignored/invalid for message-signing.")
 	clientAuthMTLS := flag.Bool("client-auth-mtls", false, "with -profile=baseline, register via storage.ClientAuthMethodSelfSignedTLSClientAuth (RFC 8705 §2) instead of private_key_jwt — presents a client certificate instead of a signed client assertion at PAR/token. Orthogonal to -mtls, which is §3 sender-constraining. Ignored/invalid for message-signing/ciba.")
 	evidenceDir := flag.String("evidence-dir", "", "if set, write one named log file per test module here in OIDF RP-certification evidence format, alongside the usual combined stdout log — see conformance/client/scripts/README.md's Certification evidence section. Unused by daily CI. Ignored for -profile=ciba.")
+	issuer := flag.String("issuer", "", "run a single flow attempt against a FIXED, externally-configured client identity instead of self-generating one and creating a new suite plan — for driving a plan already created through certification.openid.net's own guided web UI (see conformance/client/scripts/README.md and fixed_identity.go). The issuer URL exactly as shown on the suite's own plan page. Requires -client-id, -redirect-uri and -accounts-endpoint; -client-cert/-client-key are required too when -mtls/-client-auth-mtls is set. No suite-graded verdict is available in this mode — check the suite's own plan-detail page for the actual PASS/FAIL result. Not supported with -profile=ciba.")
+	clientID := flag.String("client-id", "", "with -issuer: the client_id already registered with the suite for this plan")
+	redirectURI := flag.String("redirect-uri", "", "with -issuer: the redirect_uri already registered with the suite for this plan — never actually visited (see followAuthorizationRedirect's own doc comment), but must match exactly for the mock AS's own validation")
+	accountsEndpoint := flag.String("accounts-endpoint", "", "with -issuer: the plan's own exported accounts_endpoint value, shown on the suite's plan page — this mode has no suite module ID to fetch it automatically with")
+	clientCert := flag.String("client-cert", "", "with -issuer, and -mtls/-client-auth-mtls: PEM file for the client certificate already registered with the suite, instead of generating a throwaway one")
+	clientKey := flag.String("client-key", "", "with -issuer, and -mtls/-client-auth-mtls: PEM file for the private key matching -client-cert")
+	clientJWKS := flag.String("client-jwks", "", "with -issuer, and NOT -client-auth-mtls (i.e. client_auth_type=private_key_jwt): JWK Set JSON file holding the client's PRIVATE key for signing client assertions, matching the public JWK already registered with the suite for this plan (see client_jwks.go and gen-rp-pkjwt-mtls.go-style generator scripts) — an ephemeral, freshly-generated-per-run key will never verify against a registration the suite already has on file. Required whenever -client-auth-mtls is not set.")
+	testName := flag.String("test-name", "", "with -issuer: the module under test, for the evidence file's own TEST: line and log messages only — this mode has no plan/module API call to send it to the suite on")
+	scope := flag.String("scope", "openid", "with -issuer: space-delimited scope list to request, exactly matching the plan's own module configuration on the suite (e.g. \"openid offline_access\") — a mismatch here surfaces as a confusing \"authorization response is missing iss\" driver error, not a normal OAuth scope error, since the suite redirects to its own internal log page instead of redirect_uri (see driveAuthorizationFlow's own doc comment)")
 	flag.Parse()
+
+	if *issuer != "" {
+		if *profileName == "ciba" {
+			log.Fatal("conformance-client: -issuer is not supported with -profile=ciba")
+		}
+		profile, ok := profiles[*profileName]
+		if !ok {
+			log.Fatalf("conformance-client: unknown -profile %q (want baseline or message-signing)", *profileName)
+		}
+		cfg := fixedIdentityConfig{
+			APIBase: *apiBase, Profile: profile,
+			ClientAuthMTLS: *clientAuthMTLS, SenderConstrainMTLS: *mtls,
+			EvidenceDir: *evidenceDir,
+			Issuer:      *issuer, ClientID: *clientID, RedirectURI: *redirectURI,
+			AccountsEndpoint: *accountsEndpoint,
+			ClientCertFile:   *clientCert, ClientKeyFile: *clientKey,
+			ClientJWKSFile: *clientJWKS,
+			TestName:       *testName, Scope: *scope,
+		}
+		if err := runFixedIdentity(cfg); err != nil {
+			log.Fatalf("conformance-client: %v", err)
+		}
+		return
+	}
 
 	if *profileName == "ciba" {
 		if *clientAuthMTLS {
@@ -311,8 +344,14 @@ type moduleDriver struct {
 	PlanID      string
 	ClientID    string
 	RedirectURI string
-	Keys        *ephemeral.KeyManager
-	Profile     driverProfile
+	// Keys is keys.KeyManager, not the concrete *ephemeral.KeyManager
+	// every caller but fixed_identity.go's -client-jwks path still
+	// uses — a plan registered with a fixed client JWKS through the
+	// suite's own guided UI needs that exact signing key every run
+	// (client_jwks.go's loadFixedClientSigner +
+	// keys.NewKeyManagerFromSigners), not a fresh ephemeral one.
+	Keys    keys.KeyManager
+	Profile driverProfile
 
 	// ClientAuthMTLS selects storage.ClientAuthMethodSelfSignedTLSClientAuth
 	// (RFC 8705 §2) instead of the default private_key_jwt — see run's
@@ -338,6 +377,20 @@ type moduleResult struct {
 	Verdict   string
 	DriverErr string
 	ModuleID  string
+	// SuiteLogNote overrides evidence.go's default "unavailable —
+	// module instance was never created" SUITE LOG line for a result
+	// with no ModuleID. That default is only true for a genuine
+	// pre-module-creation failure; fixed-identity mode (fixed_identity.go)
+	// has no ModuleID for a different reason — it drives a module the
+	// suite's own guided UI already created, never queried the API for
+	// its ID — and sets this instead so evidence submitted to OIDF
+	// doesn't falsely claim the module never existed.
+	SuiteLogNote string
+	// Interactions is an optional request/response transcript
+	// (interactions.go's interactionRecorder.transcript) — writeEvidence
+	// appends it as its own section when non-empty, omits it entirely
+	// when not (today, only fixed_identity.go ever sets this).
+	Interactions string
 }
 
 // String reproduces the exact "<verdict> [driver: <err>]" / "<verdict>"
@@ -377,19 +430,9 @@ func runModule(ctx context.Context, d moduleDriver, testName string) moduleResul
 		return failure
 	}
 
-	session, err := cl.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}})
+	completion, step, err := driveAuthorizationFlow(ctx, cl, rawHTTP, []string{"openid"})
 	if err != nil {
-		return awaitVerdict(rawHTTP, apiBase, module.ID, "begin authorization: "+err.Error())
-	}
-
-	finalQuery, err := followAuthorizationRedirect(rawHTTP, session.URL().String())
-	if err != nil {
-		return awaitVerdict(rawHTTP, apiBase, module.ID, "follow authorization redirect: "+err.Error())
-	}
-
-	completion, err := cl.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: finalQuery})
-	if err != nil {
-		return awaitVerdict(rawHTTP, apiBase, module.ID, "complete authorization: "+err.Error())
+		return awaitVerdict(rawHTTP, apiBase, module.ID, step+": "+err.Error())
 	}
 
 	switch r := completion.(type) {
@@ -448,10 +491,10 @@ func buildModuleClient(ctx context.Context, d moduleDriver, module suiteModule) 
 
 	discovered, err := client.Discover(ctx, fetcher, issuer)
 	if err != nil {
-		return nil, awaitVerdict(rawHTTP, apiBase, module.ID, "discover issuer metadata: "+err.Error())
+		return nil, verdictOrDriverErr(rawHTTP, apiBase, module.ID, "discover issuer metadata: "+err.Error())
 	}
 	if len(discovered.IDTokenAlgorithms) == 0 {
-		return nil, awaitVerdict(rawHTTP, apiBase, module.ID, "issuer advertises no recognized ID token signing algorithm")
+		return nil, verdictOrDriverErr(rawHTTP, apiBase, module.ID, "issuer advertises no recognized ID token signing algorithm")
 	}
 
 	issuerKeys, err := keys.NewJWKSIssuerKeySource(fetcher, discovered.JWKSURI, jwksCacheTTL)
@@ -542,6 +585,21 @@ func buildModuleClient(ctx context.Context, d moduleDriver, module suiteModule) 
 	return cl, moduleResult{}
 }
 
+// verdictOrDriverErr is buildModuleClient's own choice between polling
+// the suite for a real verdict and skipping that entirely: an empty
+// moduleID only ever happens in fixed-identity mode (fixed_identity.go),
+// which has no suite module ID to poll with in the first place —
+// calling awaitVerdict there would hit "api/info/" with nothing after
+// it and burn its own full timeout before giving up, for a result it
+// was never going to get. runFixedIdentity's own caller already has
+// its own "no suite-graded verdict available" messaging for this case.
+func verdictOrDriverErr(rawHTTP *http.Client, apiBase, moduleID, driverErr string) moduleResult {
+	if moduleID == "" {
+		return moduleResult{DriverErr: driverErr}
+	}
+	return awaitVerdict(rawHTTP, apiBase, moduleID, driverErr)
+}
+
 // awaitVerdict polls the suite's own graded result for moduleID, which
 // is the only thing that actually determines PASS/FAIL — this driver's
 // own driverErr (if any) is included for context but never overrides
@@ -573,6 +631,48 @@ func awaitVerdict(rawHTTP *http.Client, apiBase, moduleID, driverErr string) mod
 		verdict = fmt.Sprintf("status=%s (did not reach a final result: %v)", status, err)
 	}
 	return moduleResult{Verdict: verdict, DriverErr: driverErr, ModuleID: moduleID}
+}
+
+// driveAuthorizationFlow drives BeginAuthorization -> follow the
+// redirect -> CompleteAuthorization — the middle portion runModule and
+// runFixedIdentity (fixed_identity.go) share identically. Each caller
+// handles module/client setup before this and the
+// CompletionSuccess/CompletionDenied switch after it, since the two
+// callers need different accounts-endpoint sources there (runModule's
+// own callAccountsEndpoint fetches it via the suite's REST API;
+// runFixedIdentity is handed one directly, since it has no suite
+// module ID to fetch with). step is a non-empty description of which
+// call failed (e.g. "begin authorization"), for callers to build their
+// own DriverErr message from — mirrors runModule's pre-refactor
+// message shapes exactly, so its own behavior is unchanged. scope is
+// the exact space-delimited scope list to request — a self-created
+// dev-mode plan always wants "openid" alone, but a hosted plan
+// configured through the guided UI can require more (e.g. "openid
+// offline_access"), and validates the incoming request against that
+// configured value itself. On a mismatch, observed behavior against
+// the real hosted suite was not a normal OAuth error redirect back to
+// redirect_uri, but a redirect to the suite's own internal log-detail
+// page (a bare "log=<id>" query, confirmed via the suite's own log
+// viewer) — which this driver then misreports as "authorization
+// response is missing iss", since that redirect carries none of the
+// expected response parameters at all. Get the scope right and that
+// failure mode doesn't come up.
+func driveAuthorizationFlow(ctx context.Context, cl *client.Client, rawHTTP *http.Client, scope []string) (completion client.CompletionResult, step string, err error) {
+	session, err := cl.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: scope})
+	if err != nil {
+		return nil, "begin authorization", err
+	}
+
+	finalQuery, err := followAuthorizationRedirect(rawHTTP, session.URL().String())
+	if err != nil {
+		return nil, "follow authorization redirect", err
+	}
+
+	completion, err = cl.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: finalQuery})
+	if err != nil {
+		return nil, "complete authorization", err
+	}
+	return completion, "", nil
 }
 
 // followAuthorizationRedirect GETs authorizationURL and reads the

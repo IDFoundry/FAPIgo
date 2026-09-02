@@ -39,14 +39,20 @@ func writeEvidence(dir, testName string, result moduleResult, apiBase string) er
 		driverLine = "none — client completed the full discover/authorize/token/resource flow without error"
 	}
 	suiteLog := "unavailable — module instance was never created"
-	if result.ModuleID != "" {
+	switch {
+	case result.ModuleID != "":
 		suiteLog = apiBase + "api/log/" + result.ModuleID
+	case result.SuiteLogNote != "":
+		suiteLog = result.SuiteLogNote
 	}
 
 	content := fmt.Sprintf(
 		"TEST: %s\nRESULT: %s\nDRIVER: %s\nSUITE LOG: %s\n",
 		testName, result.Verdict, driverLine, suiteLog,
 	)
+	if result.Interactions != "" {
+		content += "INTERACTIONS:\n" + result.Interactions + "\n"
+	}
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("create evidence directory: %w", err)
 	}

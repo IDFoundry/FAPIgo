@@ -50,6 +50,9 @@ func writeEvidence(dir, testName string, result moduleResult, apiBase string) er
 		"TEST: %s\nRESULT: %s\nDRIVER: %s\nSUITE LOG: %s\n",
 		testName, result.Verdict, driverLine, suiteLog,
 	)
+	if result.Interactions != "" {
+		content += "INTERACTIONS:\n" + result.Interactions + "\n"
+	}
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("create evidence directory: %w", err)
 	}

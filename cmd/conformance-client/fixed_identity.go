@@ -136,6 +136,16 @@ func runFixedIdentity(c fixedIdentityConfig) error {
 	// either).
 	module := suiteModule{ID: "", URL: strings.TrimSuffix(issuerURL.String(), "/")}
 
+	// Wraps whichever rawHTTP the branch above landed on (plain or
+	// mTLS) — every request buildModuleClient/driveAuthorizationFlow/
+	// callAccountsEndpointDirect makes from here on shares this same
+	// *http.Client, so this one wrap point captures the full
+	// discovery/JWKS/PAR/authorize-redirect/token/resource transcript
+	// for evidence, with no call-site-specific instrumentation needed
+	// (see interactions.go's own doc comment for why).
+	rec := &interactionRecorder{}
+	rawHTTP.Transport = &loggingRoundTripper{next: rawHTTP.Transport, rec: rec}
+
 	driver := moduleDriver{
 		HTTP: rawHTTP, APIBase: c.APIBase,
 		ClientID: c.ClientID, RedirectURI: c.RedirectURI, Keys: keyMgr, Profile: c.Profile,
@@ -191,6 +201,7 @@ func runFixedIdentity(c fixedIdentityConfig) error {
 			SuiteLogNote: "not queried via API in fixed-identity mode (no known module ID) — the module instance " +
 				"does exist (it was created through the suite's own guided web UI, not by this driver); find its " +
 				"log-detail.html link on the suite's plan-detail page for -issuer=" + c.Issuer,
+			Interactions: rec.transcript(),
 		}
 		if err := writeEvidence(c.EvidenceDir, c.TestName, result, c.APIBase); err != nil {
 			log.Printf("WARNING: write evidence file: %v", err)

@@ -449,6 +449,7 @@ RESULT: <suite-graded verdict>
 DRIVER: <this driver's own step/error, or a statement that the flow
          completed without error>
 SUITE LOG: <suite base URL>api/log/<module ID>
+INTERACTIONS: <request/response transcript — -issuer mode only, see below>
 ```
 
 The `DRIVER` line is exactly the same text this driver has always
@@ -459,6 +460,21 @@ log. `-evidence-dir` is opt-in and unused by daily CI (`conformance.yml`
 only runs against a local suite instance, never
 `certification.openid.net` — see below), so it adds no new artifacts to
 the automated daily run.
+
+**`INTERACTIONS`** (`-issuer` mode only, `interactions.go`) is a full
+request/response transcript of every call the driver actually made —
+discovery, JWKS, PAR, the authorize redirect (including its `Location`
+header), token exchange, and the resource call — recorded generically
+by wrapping the shared `*http.Client`'s own `Transport`, not by
+instrumenting each call site. A bare `DRIVER` line states the outcome
+but not how the client got there; OIDF's own submission instructions
+require evidence that "demonstrates that your application is detecting
+the error condition under test", and the reference RP client itself
+logs this same level of detail. Bearer credentials (`access_token`,
+`refresh_token`, `client_assertion`, `client_secret`) are redacted
+before recording; everything else — including a full `id_token`, since
+its claims are exactly what most of these tests are about — is
+recorded as-is.
 
 **Workflow for an actual certification run:** OIDF requires certification
 evidence to come from the OIDF-hosted production suite at

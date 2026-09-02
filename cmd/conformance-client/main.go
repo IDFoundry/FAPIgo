@@ -378,6 +378,11 @@ type moduleResult struct {
 	// its ID — and sets this instead so evidence submitted to OIDF
 	// doesn't falsely claim the module never existed.
 	SuiteLogNote string
+	// Interactions is an optional request/response transcript
+	// (interactions.go's interactionRecorder.transcript) — writeEvidence
+	// appends it as its own section when non-empty, omits it entirely
+	// when not (today, only fixed_identity.go ever sets this).
+	Interactions string
 }
 
 // String reproduces the exact "<verdict> [driver: <err>]" / "<verdict>"

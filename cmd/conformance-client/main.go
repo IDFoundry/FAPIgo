@@ -114,6 +114,7 @@ func main() {
 	clientCert := flag.String("client-cert", "", "with -issuer, and -mtls/-client-auth-mtls: PEM file for the client certificate already registered with the suite, instead of generating a throwaway one")
 	clientKey := flag.String("client-key", "", "with -issuer, and -mtls/-client-auth-mtls: PEM file for the private key matching -client-cert")
 	testName := flag.String("test-name", "", "with -issuer: the module under test, for the evidence file's own TEST: line and log messages only — this mode has no plan/module API call to send it to the suite on")
+	scope := flag.String("scope", "openid", "with -issuer: space-delimited scope list to request, exactly matching the plan's own module configuration on the suite (e.g. \"openid offline_access\") — a mismatch here surfaces as a confusing \"authorization response is missing iss\" driver error, not a normal OAuth scope error, since the suite redirects to its own internal log page instead of redirect_uri (see driveAuthorizationFlow's own doc comment)")
 	flag.Parse()
 
 	if *issuer != "" {
@@ -131,7 +132,7 @@ func main() {
 			Issuer:      *issuer, ClientID: *clientID, RedirectURI: *redirectURI,
 			AccountsEndpoint: *accountsEndpoint,
 			ClientCertFile:   *clientCert, ClientKeyFile: *clientKey,
-			TestName: *testName,
+			TestName: *testName, Scope: *scope,
 		}
 		if err := runFixedIdentity(cfg); err != nil {
 			log.Fatalf("conformance-client: %v", err)
@@ -407,7 +408,7 @@ func runModule(ctx context.Context, d moduleDriver, testName string) moduleResul
 		return failure
 	}
 
-	completion, step, err := driveAuthorizationFlow(ctx, cl, rawHTTP)
+	completion, step, err := driveAuthorizationFlow(ctx, cl, rawHTTP, []string{"openid"})
 	if err != nil {
 		return awaitVerdict(rawHTTP, apiBase, module.ID, step+": "+err.Error())
 	}
@@ -606,9 +607,21 @@ func awaitVerdict(rawHTTP *http.Client, apiBase, moduleID, driverErr string) mod
 // module ID to fetch with). step is a non-empty description of which
 // call failed (e.g. "begin authorization"), for callers to build their
 // own DriverErr message from — mirrors runModule's pre-refactor
-// message shapes exactly, so its own behavior is unchanged.
-func driveAuthorizationFlow(ctx context.Context, cl *client.Client, rawHTTP *http.Client) (completion client.CompletionResult, step string, err error) {
-	session, err := cl.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}})
+// message shapes exactly, so its own behavior is unchanged. scope is
+// the exact space-delimited scope list to request — a self-created
+// dev-mode plan always wants "openid" alone, but a hosted plan
+// configured through the guided UI can require more (e.g. "openid
+// offline_access"), and validates the incoming request against that
+// configured value itself. On a mismatch, observed behavior against
+// the real hosted suite was not a normal OAuth error redirect back to
+// redirect_uri, but a redirect to the suite's own internal log-detail
+// page (a bare "log=<id>" query, confirmed via the suite's own log
+// viewer) — which this driver then misreports as "authorization
+// response is missing iss", since that redirect carries none of the
+// expected response parameters at all. Get the scope right and that
+// failure mode doesn't come up.
+func driveAuthorizationFlow(ctx context.Context, cl *client.Client, rawHTTP *http.Client, scope []string) (completion client.CompletionResult, step string, err error) {
+	session, err := cl.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: scope})
 	if err != nil {
 		return nil, "begin authorization", err
 	}

@@ -497,6 +497,7 @@ go run ./cmd/conformance-client -suite=https://certification.openid.net/ \
     -accounts-endpoint=<the plan's exported accounts_endpoint> \
     -client-cert=./client.pem -client-key=./client.key \
     -test-name=<module under test> \
+    -scope="openid" \
     -evidence-dir=./evidence/mtls-mtls
 ```
 
@@ -508,6 +509,20 @@ per module under test (the suite attributes traffic to whichever module
 is currently "waiting" for that alias, the same shared-alias-routing
 behavior the AS side of this repo already relies on) and once per
 profile being certified.
+
+**`-scope` must exactly match the plan's own configured scope on the
+suite** (defaults to `"openid"`; some plans add e.g. `offline_access`).
+Confirmed live: on a mismatch, the hosted suite doesn't send a normal
+OAuth `error=invalid_scope` redirect back to `redirect_uri` — it
+redirects to its own internal log-detail page instead (a bare
+`log=<id>` query string), which this driver has no way to distinguish
+from a malformed response and reports as `authorization response is
+missing iss`. If you hit that error, check the suite's own log viewer
+for the run before assuming it's an RFC 9207 problem — it's very
+likely a `-scope` mismatch instead. Each module instance is also
+single-shot: after any attempt (success or failure), restart/re-arm it
+in the UI before running the driver against it again, or discovery
+itself starts 400ing.
 
 **No suite-graded verdict is available in this mode** — there's no
 suite module ID to poll a result from, since no plan/module REST call

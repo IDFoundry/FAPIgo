@@ -47,6 +47,13 @@ type fixedIdentityConfig struct {
 	ClientCertFile   string
 	ClientKeyFile    string
 	TestName         string
+	// Scope is the space-delimited scope list to request — must match
+	// the plan's own module configuration on the suite exactly (see
+	// driveAuthorizationFlow's own doc comment in main.go for why a
+	// mismatch here can produce confusing, unrelated-looking failures
+	// rather than a clean insufficient-scope error). Empty defaults to
+	// "openid" in runFixedIdentity.
+	Scope string
 }
 
 // validate reports every missing companion flag at once, rather than
@@ -140,7 +147,11 @@ func runFixedIdentity(c fixedIdentityConfig) error {
 		return fmt.Errorf("%s", failure.DriverErr)
 	}
 
-	completion, step, err := driveAuthorizationFlow(ctx, cl, rawHTTP)
+	scope := strings.Fields(c.Scope)
+	if len(scope) == 0 {
+		scope = []string{"openid"}
+	}
+	completion, step, err := driveAuthorizationFlow(ctx, cl, rawHTTP, scope)
 	outcome, driverErr := "completed successfully", ""
 	switch {
 	case err != nil:

@@ -478,10 +478,10 @@ func buildModuleClient(ctx context.Context, d moduleDriver, module suiteModule) 
 
 	discovered, err := client.Discover(ctx, fetcher, issuer)
 	if err != nil {
-		return nil, awaitVerdict(rawHTTP, apiBase, module.ID, "discover issuer metadata: "+err.Error())
+		return nil, verdictOrDriverErr(rawHTTP, apiBase, module.ID, "discover issuer metadata: "+err.Error())
 	}
 	if len(discovered.IDTokenAlgorithms) == 0 {
-		return nil, awaitVerdict(rawHTTP, apiBase, module.ID, "issuer advertises no recognized ID token signing algorithm")
+		return nil, verdictOrDriverErr(rawHTTP, apiBase, module.ID, "issuer advertises no recognized ID token signing algorithm")
 	}
 
 	issuerKeys, err := keys.NewJWKSIssuerKeySource(fetcher, discovered.JWKSURI, jwksCacheTTL)
@@ -570,6 +570,21 @@ func buildModuleClient(ctx context.Context, d moduleDriver, module suiteModule) 
 		return nil, moduleResult{Verdict: "ERROR", DriverErr: "construct client: " + err.Error(), ModuleID: module.ID}
 	}
 	return cl, moduleResult{}
+}
+
+// verdictOrDriverErr is buildModuleClient's own choice between polling
+// the suite for a real verdict and skipping that entirely: an empty
+// moduleID only ever happens in fixed-identity mode (fixed_identity.go),
+// which has no suite module ID to poll with in the first place —
+// calling awaitVerdict there would hit "api/info/" with nothing after
+// it and burn its own full timeout before giving up, for a result it
+// was never going to get. runFixedIdentity's own caller already has
+// its own "no suite-graded verdict available" messaging for this case.
+func verdictOrDriverErr(rawHTTP *http.Client, apiBase, moduleID, driverErr string) moduleResult {
+	if moduleID == "" {
+		return moduleResult{DriverErr: driverErr}
+	}
+	return awaitVerdict(rawHTTP, apiBase, moduleID, driverErr)
 }
 
 // awaitVerdict polls the suite's own graded result for moduleID, which

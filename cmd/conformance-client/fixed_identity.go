@@ -142,30 +142,39 @@ func runFixedIdentity(c fixedIdentityConfig) error {
 		ClientAuthMTLS: c.ClientAuthMTLS, SenderConstrainMTLS: c.SenderConstrainMTLS,
 	}
 
-	cl, failure := buildModuleClient(ctx, driver, module)
-	if cl == nil {
-		return fmt.Errorf("%s", failure.DriverErr)
-	}
-
-	scope := strings.Fields(c.Scope)
-	if len(scope) == 0 {
-		scope = []string{"openid"}
-	}
-	completion, step, err := driveAuthorizationFlow(ctx, cl, rawHTTP, scope)
+	// cl == nil means buildModuleClient rejected the issuer before
+	// authorization ever began (e.g. a discovery-time check like the
+	// issuer-mismatch anti-spoofing check, OIDC Discovery 1.0 §4.3).
+	// For a negative-test module that's the correct, desired client
+	// behavior — not a driver crash — so this is reported and
+	// evidenced exactly like a driver error later in the flow, never
+	// as a fatal error with no evidence left behind.
 	outcome, driverErr := "completed successfully", ""
+	cl, failure := buildModuleClient(ctx, driver, module)
 	switch {
-	case err != nil:
-		driverErr = step + ": " + err.Error()
-		outcome = "driver error"
+	case cl == nil:
+		driverErr = failure.DriverErr
+		outcome = "client rejected the issuer before authorization began"
 	default:
-		switch r := completion.(type) {
-		case client.CompletionSuccess:
-			if err := callAccountsEndpointDirect(ctx, cl, c.AccountsEndpoint, r.Tokens); err != nil {
-				driverErr = "call accounts endpoint: " + err.Error()
-				outcome = "driver error"
+		scope := strings.Fields(c.Scope)
+		if len(scope) == 0 {
+			scope = []string{"openid"}
+		}
+		completion, step, err := driveAuthorizationFlow(ctx, cl, rawHTTP, scope)
+		switch {
+		case err != nil:
+			driverErr = step + ": " + err.Error()
+			outcome = "driver error"
+		default:
+			switch r := completion.(type) {
+			case client.CompletionSuccess:
+				if err := callAccountsEndpointDirect(ctx, cl, c.AccountsEndpoint, r.Tokens); err != nil {
+					driverErr = "call accounts endpoint: " + err.Error()
+					outcome = "driver error"
+				}
+			case client.CompletionDenied:
+				outcome = "authorization denied"
 			}
-		case client.CompletionDenied:
-			outcome = "authorization denied"
 		}
 	}
 

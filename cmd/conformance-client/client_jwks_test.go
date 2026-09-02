@@ -20,7 +20,7 @@ import (
 // writeTestJWKSFile generates an EC P-256 key, writes it as a JWK Set
 // JSON file (mirroring gen-rp-pkjwt-mtls.go's own output shape) into
 // t.TempDir, and returns the file path plus the private key it holds,
-// so a test can compare loadClientAuthenticationSigner's result
+// so a test can compare loadFixedClientSigner's result
 // against ground truth.
 func writeTestJWKSFile(t *testing.T, kid string, includePrivate bool) (path string, priv *ecdsa.PrivateKey) {
 	t.Helper()
@@ -48,12 +48,12 @@ func writeTestJWKSFile(t *testing.T, kid string, includePrivate bool) (path stri
 	return path, priv
 }
 
-func TestLoadClientAuthenticationSignerRoundTrip(t *testing.T) {
+func TestLoadFixedClientSignerRoundTrip(t *testing.T) {
 	path, want := writeTestJWKSFile(t, "test-key-1", true)
 
-	got, kid, err := loadClientAuthenticationSigner(path)
+	got, kid, err := loadFixedClientSigner(path)
 	if err != nil {
-		t.Fatalf("loadClientAuthenticationSigner() error = %v", err)
+		t.Fatalf("loadFixedClientSigner() error = %v", err)
 	}
 	if kid != "test-key-1" {
 		t.Errorf("kid = %q, want %q", kid, "test-key-1")
@@ -63,34 +63,65 @@ func TestLoadClientAuthenticationSignerRoundTrip(t *testing.T) {
 	}
 }
 
-func TestLoadClientAuthenticationSignerRejectsPublicOnlyKey(t *testing.T) {
+func TestLoadFixedClientSignerRejectsPublicOnlyKey(t *testing.T) {
 	path, _ := writeTestJWKSFile(t, "test-key-1", false)
 
-	_, _, err := loadClientAuthenticationSigner(path)
+	_, _, err := loadFixedClientSigner(path)
 	if err == nil {
-		t.Fatal("loadClientAuthenticationSigner() = nil error, want error for a public-only key")
+		t.Fatal("loadFixedClientSigner() = nil error, want error for a public-only key")
 	}
 	if !strings.Contains(err.Error(), "private component") {
 		t.Errorf("error %q does not explain the public-only-key problem", err.Error())
 	}
 }
 
-func TestLoadClientAuthenticationSignerNoECKey(t *testing.T) {
+func TestLoadFixedClientSignerNoECKey(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "client.jwks")
 	if err := os.WriteFile(path, []byte(`{"keys":[]}`), 0o600); err != nil {
 		t.Fatalf("write jwks file: %v", err)
 	}
-	if _, _, err := loadClientAuthenticationSigner(path); err == nil {
-		t.Fatal("loadClientAuthenticationSigner() = nil error, want error for an empty key set")
+	if _, _, err := loadFixedClientSigner(path); err == nil {
+		t.Fatal("loadFixedClientSigner() = nil error, want error for an empty key set")
 	}
 }
 
-func TestBuildFixedClientKeyManagerRequiresClientAuthenticationPurpose(t *testing.T) {
+func TestBuildFixedClientKeyManagerRequiresAFixedKeyPurpose(t *testing.T) {
 	path, _ := writeTestJWKSFile(t, "test-key-1", true)
 	purposes := map[keys.SigningPurpose]fapi.SignatureAlgorithm{keys.DPoPProofSigning: fapi.ES256}
 
 	if _, err := buildFixedClientKeyManager(path, purposes); err == nil {
-		t.Fatal("buildFixedClientKeyManager() = nil error, want error (no ClientAuthentication purpose)")
+		t.Fatal("buildFixedClientKeyManager() = nil error, want error (neither ClientAuthentication nor RequestObjectSigning is active)")
+	}
+}
+
+// TestBuildFixedClientKeyManagerBindsRequestObjectSigningAlone covers
+// client_auth_type=mtls combined with a signed request object (JAR) —
+// no ClientAuthentication purpose is ever active there (RFC 8705 §2:
+// the certificate itself is the credential), so the fixed key must
+// still bind to RequestObjectSigning alone, not just ClientAuthentication.
+func TestBuildFixedClientKeyManagerBindsRequestObjectSigningAlone(t *testing.T) {
+	path, want := writeTestJWKSFile(t, "test-key-1", true)
+	purposes := map[keys.SigningPurpose]fapi.SignatureAlgorithm{
+		keys.RequestObjectSigning: fapi.ES256,
+		keys.DPoPProofSigning:     fapi.ES256,
+	}
+
+	mgr, err := buildFixedClientKeyManager(path, purposes)
+	if err != nil {
+		t.Fatalf("buildFixedClientKeyManager() error = %v", err)
+	}
+
+	ctx := context.Background()
+	info, err := mgr.PublicKey(ctx, keys.RequestObjectSigning, fapi.ES256)
+	if err != nil {
+		t.Fatalf("PublicKey(RequestObjectSigning) error = %v", err)
+	}
+	pub, ok := info.PublicKey.(*ecdsa.PublicKey)
+	if !ok {
+		t.Fatalf("RequestObjectSigning public key = %T, want *ecdsa.PublicKey", info.PublicKey)
+	}
+	if pub.X.Cmp(want.X) != 0 || pub.Y.Cmp(want.Y) != 0 {
+		t.Fatal("RequestObjectSigning signer is not the fixed key loaded from the jwks file")
 	}
 }
 

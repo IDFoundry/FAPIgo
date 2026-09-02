@@ -348,7 +348,7 @@ type moduleDriver struct {
 	// every caller but fixed_identity.go's -client-jwks path still
 	// uses — a plan registered with a fixed client JWKS through the
 	// suite's own guided UI needs that exact signing key every run
-	// (client_jwks.go's loadClientAuthenticationSigner +
+	// (client_jwks.go's loadFixedClientSigner +
 	// keys.NewKeyManagerFromSigners), not a fresh ephemeral one.
 	Keys    keys.KeyManager
 	Profile driverProfile

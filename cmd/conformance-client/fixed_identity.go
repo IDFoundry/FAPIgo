@@ -89,12 +89,16 @@ func (c fixedIdentityConfig) validate() error {
 			missing = append(missing, "-client-key")
 		}
 	}
-	// !ClientAuthMTLS means client_auth_type=private_key_jwt — the
-	// suite already has this plan's registered client JWKS on file
-	// (handed to it through its own guided UI), and will reject a
-	// signed assertion from any other key, so an ephemeral one is
-	// never going to work here (see ClientJWKSFile's own doc comment).
-	if !c.ClientAuthMTLS && c.ClientJWKSFile == "" {
+	// A fixed client JWKS is needed whenever either purpose
+	// client_jwks.go's fixedKeyPurposes covers is actually active:
+	// !ClientAuthMTLS means client_auth_type=private_key_jwt (a signed
+	// client assertion), and Profile.signRequestObject means a signed
+	// request object (JAR) — client_auth_type=mtls plus JAR is exactly
+	// the combination with no ClientAuthentication purpose at all, but
+	// RequestObjectSigning still needs to match what the suite already
+	// has on file. Either way, an ephemeral key is never going to work
+	// (see ClientJWKSFile's own doc comment).
+	if (!c.ClientAuthMTLS || c.Profile.signRequestObject) && c.ClientJWKSFile == "" {
 		missing = append(missing, "-client-jwks")
 	}
 	if len(missing) > 0 {

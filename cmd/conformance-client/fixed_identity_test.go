@@ -75,6 +75,23 @@ func TestFixedIdentityConfigValidate(t *testing.T) {
 		}
 	})
 
+	t.Run("mTLS client auth with a signed request object still requires client jwks", func(t *testing.T) {
+		c := base
+		c.ClientAuthMTLS = true
+		c.SenderConstrainMTLS = true
+		c.ClientCertFile = "/tmp/cert.pem"
+		c.ClientKeyFile = "/tmp/key.pem"
+		c.ClientJWKSFile = ""
+		c.Profile.signRequestObject = true
+		err := c.validate()
+		if err == nil {
+			t.Fatal("validate() = nil, want error (JAR needs a fixed key even with client_auth_type=mtls)")
+		}
+		if !strings.Contains(err.Error(), "-client-jwks") {
+			t.Fatalf("validate() error %q does not mention -client-jwks", err.Error())
+		}
+	})
+
 	t.Run("private_key_jwt requires client jwks", func(t *testing.T) {
 		c := base
 		c.ClientJWKSFile = ""

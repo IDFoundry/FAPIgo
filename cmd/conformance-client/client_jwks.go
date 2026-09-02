@@ -55,7 +55,7 @@ type clientJWKS struct {
 // needs to match the suite's registration), so the first (and
 // normally only) P-256 entry found is used.
 func loadFixedClientSigner(path string) (*ecdsa.PrivateKey, string, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path) // #nosec G304 -- path is the operator's own -client-jwks flag value, not untrusted input
 	if err != nil {
 		return nil, "", fmt.Errorf("read client jwks file: %w", err)
 	}

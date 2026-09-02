@@ -47,6 +47,16 @@ type fixedIdentityConfig struct {
 	ClientCertFile   string
 	ClientKeyFile    string
 	TestName         string
+	// ClientJWKSFile is a JWK Set JSON file (client_jwks.go's own
+	// gen-rp-pkjwt-mtls.go-style shape) holding the client's PRIVATE
+	// key for private_key_jwt authentication — required exactly when
+	// !ClientAuthMTLS, since that's this run's only signed-assertion
+	// purpose. Empty means the ephemeral, freshly-generated-per-run key
+	// this driver has always used, which only ever works against a
+	// plan that never checked the client's registered JWKS in the
+	// first place (client_auth_type=mtls) or a local dev-mode plan this
+	// driver itself just registered a fresh key with.
+	ClientJWKSFile string
 	// Scope is the space-delimited scope list to request — must match
 	// the plan's own module configuration on the suite exactly (see
 	// driveAuthorizationFlow's own doc comment in main.go for why a
@@ -78,6 +88,14 @@ func (c fixedIdentityConfig) validate() error {
 		if c.ClientKeyFile == "" {
 			missing = append(missing, "-client-key")
 		}
+	}
+	// !ClientAuthMTLS means client_auth_type=private_key_jwt — the
+	// suite already has this plan's registered client JWKS on file
+	// (handed to it through its own guided UI), and will reject a
+	// signed assertion from any other key, so an ephemeral one is
+	// never going to work here (see ClientJWKSFile's own doc comment).
+	if !c.ClientAuthMTLS && c.ClientJWKSFile == "" {
+		missing = append(missing, "-client-jwks")
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("-issuer requires %s to also be set", strings.Join(missing, ", "))
@@ -111,7 +129,13 @@ func runFixedIdentity(c fixedIdentityConfig) error {
 	if c.Profile.signRequestObject {
 		purposes[keys.RequestObjectSigning] = fapi.ES256
 	}
-	keyMgr, err := ephemeral.NewKeyManager(purposes)
+	var keyMgr keys.KeyManager
+	var err error
+	if c.ClientJWKSFile != "" {
+		keyMgr, err = buildFixedClientKeyManager(c.ClientJWKSFile, purposes)
+	} else {
+		keyMgr, err = ephemeral.NewKeyManager(purposes)
+	}
 	if err != nil {
 		return fmt.Errorf("generate keys: %w", err)
 	}

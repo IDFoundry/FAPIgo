@@ -113,6 +113,7 @@ func main() {
 	accountsEndpoint := flag.String("accounts-endpoint", "", "with -issuer: the plan's own exported accounts_endpoint value, shown on the suite's plan page — this mode has no suite module ID to fetch it automatically with")
 	clientCert := flag.String("client-cert", "", "with -issuer, and -mtls/-client-auth-mtls: PEM file for the client certificate already registered with the suite, instead of generating a throwaway one")
 	clientKey := flag.String("client-key", "", "with -issuer, and -mtls/-client-auth-mtls: PEM file for the private key matching -client-cert")
+	clientJWKS := flag.String("client-jwks", "", "with -issuer, and NOT -client-auth-mtls (i.e. client_auth_type=private_key_jwt): JWK Set JSON file holding the client's PRIVATE key for signing client assertions, matching the public JWK already registered with the suite for this plan (see client_jwks.go and gen-rp-pkjwt-mtls.go-style generator scripts) — an ephemeral, freshly-generated-per-run key will never verify against a registration the suite already has on file. Required whenever -client-auth-mtls is not set.")
 	testName := flag.String("test-name", "", "with -issuer: the module under test, for the evidence file's own TEST: line and log messages only — this mode has no plan/module API call to send it to the suite on")
 	scope := flag.String("scope", "openid", "with -issuer: space-delimited scope list to request, exactly matching the plan's own module configuration on the suite (e.g. \"openid offline_access\") — a mismatch here surfaces as a confusing \"authorization response is missing iss\" driver error, not a normal OAuth scope error, since the suite redirects to its own internal log page instead of redirect_uri (see driveAuthorizationFlow's own doc comment)")
 	flag.Parse()
@@ -132,7 +133,8 @@ func main() {
 			Issuer:      *issuer, ClientID: *clientID, RedirectURI: *redirectURI,
 			AccountsEndpoint: *accountsEndpoint,
 			ClientCertFile:   *clientCert, ClientKeyFile: *clientKey,
-			TestName: *testName, Scope: *scope,
+			ClientJWKSFile: *clientJWKS,
+			TestName:       *testName, Scope: *scope,
 		}
 		if err := runFixedIdentity(cfg); err != nil {
 			log.Fatalf("conformance-client: %v", err)
@@ -342,8 +344,14 @@ type moduleDriver struct {
 	PlanID      string
 	ClientID    string
 	RedirectURI string
-	Keys        *ephemeral.KeyManager
-	Profile     driverProfile
+	// Keys is keys.KeyManager, not the concrete *ephemeral.KeyManager
+	// every caller but fixed_identity.go's -client-jwks path still
+	// uses — a plan registered with a fixed client JWKS through the
+	// suite's own guided UI needs that exact signing key every run
+	// (client_jwks.go's loadClientAuthenticationSigner +
+	// keys.NewKeyManagerFromSigners), not a fresh ephemeral one.
+	Keys    keys.KeyManager
+	Profile driverProfile
 
 	// ClientAuthMTLS selects storage.ClientAuthMethodSelfSignedTLSClientAuth
 	// (RFC 8705 §2) instead of the default private_key_jwt — see run's

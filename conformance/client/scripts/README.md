@@ -548,14 +548,25 @@ results ZIP has always been the authoritative certification evidence;
 this driver's evidence file is, as it always has been, supplementary
 evidence of what the client itself did, not a substitute for it.
 
-**Not yet supported in `-issuer` mode**: a fixed client JWKS loaded from
-a file, needed for the `private_key_jwt` profiles (private key+DPoP,
-private key+MTLS) — `-issuer` mode today only has a working credential
-path for `client_auth_type=mtls` (`-client-auth-mtls`, with or without
-`-mtls`), since that credential is certificate-only and needs no signed
-assertion. `keys.NewKeyManagerFromSigners` (`keys/signer_keymanager.go`)
-is the existing, already-tested mechanism this would build on when
-needed — see `ARCHITECTURE.md`/`GETTING_STARTED.md`.
+**`private_key_jwt` profiles** (private key+DPoP, private key+MTLS —
+`client_auth_type=private_key_jwt`, i.e. `-issuer` without
+`-client-auth-mtls`) need `-client-jwks=<path>`: a JWK Set JSON file
+holding the client's PRIVATE key, matching the public JWK already
+handed to the suite through its own guided UI at plan-creation time —
+without it, `validate()` fails fast rather than signing every client
+assertion with a useless ephemeral key the suite was never told about.
+`client_jwks.go`'s `loadClientAuthenticationSigner` reads the first
+P-256 EC key it finds; `buildFixedClientKeyManager` builds the actual
+`keys.KeyManager` from it via `keys.NewKeyManagerFromSigners`
+(`keys/signer_keymanager.go`) — every OTHER signing purpose this run
+needs (DPoP proof signing, an optional signed request object) still
+gets a fresh ephemeral key, since neither of those needs to match
+anything the suite has pre-registered. A `gen-rp-pkjwt-mtls.go`-style
+one-off script (crypto/ecdsa + hand-rolled RFC 7518 §6.2.1 JSON, no
+external dependency) is the fastest way to produce both halves: the
+server JWKS (full private key — the suite signs `id_token`s with it)
+and the client JWKS (public half registered with the suite; private
+half is what `-client-jwks` points at).
 
 ### Submitting to OIDF
 

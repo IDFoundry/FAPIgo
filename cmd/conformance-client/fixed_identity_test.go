@@ -9,6 +9,7 @@ func TestFixedIdentityConfigValidate(t *testing.T) {
 	base := fixedIdentityConfig{
 		ClientID: "client-1", RedirectURI: "http://localhost:8088/callback",
 		AccountsEndpoint: "https://suite.example/accounts",
+		ClientJWKSFile:   "/tmp/client.jwks",
 	}
 
 	t.Run("all required fields present, no mTLS", func(t *testing.T) {
@@ -71,6 +72,29 @@ func TestFixedIdentityConfigValidate(t *testing.T) {
 		c.ClientKeyFile = "/tmp/key.pem"
 		if err := c.validate(); err != nil {
 			t.Fatalf("validate() = %v, want nil", err)
+		}
+	})
+
+	t.Run("private_key_jwt requires client jwks", func(t *testing.T) {
+		c := base
+		c.ClientJWKSFile = ""
+		err := c.validate()
+		if err == nil {
+			t.Fatal("validate() = nil, want error (missing -client-jwks)")
+		}
+		if !strings.Contains(err.Error(), "-client-jwks") {
+			t.Fatalf("validate() error %q does not mention -client-jwks", err.Error())
+		}
+	})
+
+	t.Run("mTLS client auth does not require client jwks", func(t *testing.T) {
+		c := base
+		c.ClientAuthMTLS = true
+		c.ClientCertFile = "/tmp/cert.pem"
+		c.ClientKeyFile = "/tmp/key.pem"
+		c.ClientJWKSFile = ""
+		if err := c.validate(); err != nil {
+			t.Fatalf("validate() = %v, want nil (client_auth_type=mtls needs no signed assertion)", err)
 		}
 	})
 

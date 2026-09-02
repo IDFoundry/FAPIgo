@@ -22,11 +22,21 @@ func callAccountsEndpoint(ctx context.Context, cl *client.Client, rawHTTP *http.
 	if err != nil {
 		return fmt.Errorf("fetch exposed values: %w", err)
 	}
-	accountsEndpoint := exposed["accounts_endpoint"]
+	return callAccountsEndpointDirect(ctx, cl, exposed["accounts_endpoint"], tokens)
+}
+
+// callAccountsEndpointDirect is callAccountsEndpoint's shared core,
+// factored out so runFixedIdentity (fixed_identity.go) can present
+// tokens to an already-known accountsEndpoint without going through
+// fetchExposedValues — that call is keyed on a suite module ID
+// fixed-identity mode never has (see fixed_identity.go's own doc
+// comment). A blank accountsEndpoint is a no-op, matching
+// callAccountsEndpoint's own existing behavior when the suite exports
+// no accounts_endpoint value at all.
+func callAccountsEndpointDirect(ctx context.Context, cl *client.Client, accountsEndpoint string, tokens client.TokenSet) error {
 	if accountsEndpoint == "" {
 		return nil
 	}
-
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, accountsEndpoint, nil)
 	if err != nil {
 		return fmt.Errorf("build accounts endpoint request: %w", err)

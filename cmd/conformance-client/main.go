@@ -107,7 +107,37 @@ func main() {
 	mtls := flag.Bool("mtls", false, "with -profile=ciba or -profile=baseline, present a client certificate and use storage.SenderConstrainMTLS instead of DPoP (RFC 8705 §3) — see mtls.go. Orthogonal to -client-auth-mtls (RFC 8705 §2); combine both for the MTLS+MTLS profile. Ignored/invalid for message-signing.")
 	clientAuthMTLS := flag.Bool("client-auth-mtls", false, "with -profile=baseline, register via storage.ClientAuthMethodSelfSignedTLSClientAuth (RFC 8705 §2) instead of private_key_jwt — presents a client certificate instead of a signed client assertion at PAR/token. Orthogonal to -mtls, which is §3 sender-constraining. Ignored/invalid for message-signing/ciba.")
 	evidenceDir := flag.String("evidence-dir", "", "if set, write one named log file per test module here in OIDF RP-certification evidence format, alongside the usual combined stdout log — see conformance/client/scripts/README.md's Certification evidence section. Unused by daily CI. Ignored for -profile=ciba.")
+	issuer := flag.String("issuer", "", "run a single flow attempt against a FIXED, externally-configured client identity instead of self-generating one and creating a new suite plan — for driving a plan already created through certification.openid.net's own guided web UI (see conformance/client/scripts/README.md and fixed_identity.go). The issuer URL exactly as shown on the suite's own plan page. Requires -client-id, -redirect-uri and -accounts-endpoint; -client-cert/-client-key are required too when -mtls/-client-auth-mtls is set. No suite-graded verdict is available in this mode — check the suite's own plan-detail page for the actual PASS/FAIL result. Not supported with -profile=ciba.")
+	clientID := flag.String("client-id", "", "with -issuer: the client_id already registered with the suite for this plan")
+	redirectURI := flag.String("redirect-uri", "", "with -issuer: the redirect_uri already registered with the suite for this plan — never actually visited (see followAuthorizationRedirect's own doc comment), but must match exactly for the mock AS's own validation")
+	accountsEndpoint := flag.String("accounts-endpoint", "", "with -issuer: the plan's own exported accounts_endpoint value, shown on the suite's plan page — this mode has no suite module ID to fetch it automatically with")
+	clientCert := flag.String("client-cert", "", "with -issuer, and -mtls/-client-auth-mtls: PEM file for the client certificate already registered with the suite, instead of generating a throwaway one")
+	clientKey := flag.String("client-key", "", "with -issuer, and -mtls/-client-auth-mtls: PEM file for the private key matching -client-cert")
+	testName := flag.String("test-name", "", "with -issuer: the module under test, for the evidence file's own TEST: line and log messages only — this mode has no plan/module API call to send it to the suite on")
 	flag.Parse()
+
+	if *issuer != "" {
+		if *profileName == "ciba" {
+			log.Fatal("conformance-client: -issuer is not supported with -profile=ciba")
+		}
+		profile, ok := profiles[*profileName]
+		if !ok {
+			log.Fatalf("conformance-client: unknown -profile %q (want baseline or message-signing)", *profileName)
+		}
+		cfg := fixedIdentityConfig{
+			APIBase: *apiBase, Profile: profile,
+			ClientAuthMTLS: *clientAuthMTLS, SenderConstrainMTLS: *mtls,
+			EvidenceDir: *evidenceDir,
+			Issuer:      *issuer, ClientID: *clientID, RedirectURI: *redirectURI,
+			AccountsEndpoint: *accountsEndpoint,
+			ClientCertFile:   *clientCert, ClientKeyFile: *clientKey,
+			TestName: *testName,
+		}
+		if err := runFixedIdentity(cfg); err != nil {
+			log.Fatalf("conformance-client: %v", err)
+		}
+		return
+	}
 
 	if *profileName == "ciba" {
 		if *clientAuthMTLS {
@@ -377,19 +407,9 @@ func runModule(ctx context.Context, d moduleDriver, testName string) moduleResul
 		return failure
 	}
 
-	session, err := cl.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}})
+	completion, step, err := driveAuthorizationFlow(ctx, cl, rawHTTP)
 	if err != nil {
-		return awaitVerdict(rawHTTP, apiBase, module.ID, "begin authorization: "+err.Error())
-	}
-
-	finalQuery, err := followAuthorizationRedirect(rawHTTP, session.URL().String())
-	if err != nil {
-		return awaitVerdict(rawHTTP, apiBase, module.ID, "follow authorization redirect: "+err.Error())
-	}
-
-	completion, err := cl.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: finalQuery})
-	if err != nil {
-		return awaitVerdict(rawHTTP, apiBase, module.ID, "complete authorization: "+err.Error())
+		return awaitVerdict(rawHTTP, apiBase, module.ID, step+": "+err.Error())
 	}
 
 	switch r := completion.(type) {
@@ -573,6 +593,36 @@ func awaitVerdict(rawHTTP *http.Client, apiBase, moduleID, driverErr string) mod
 		verdict = fmt.Sprintf("status=%s (did not reach a final result: %v)", status, err)
 	}
 	return moduleResult{Verdict: verdict, DriverErr: driverErr, ModuleID: moduleID}
+}
+
+// driveAuthorizationFlow drives BeginAuthorization -> follow the
+// redirect -> CompleteAuthorization — the middle portion runModule and
+// runFixedIdentity (fixed_identity.go) share identically. Each caller
+// handles module/client setup before this and the
+// CompletionSuccess/CompletionDenied switch after it, since the two
+// callers need different accounts-endpoint sources there (runModule's
+// own callAccountsEndpoint fetches it via the suite's REST API;
+// runFixedIdentity is handed one directly, since it has no suite
+// module ID to fetch with). step is a non-empty description of which
+// call failed (e.g. "begin authorization"), for callers to build their
+// own DriverErr message from — mirrors runModule's pre-refactor
+// message shapes exactly, so its own behavior is unchanged.
+func driveAuthorizationFlow(ctx context.Context, cl *client.Client, rawHTTP *http.Client) (completion client.CompletionResult, step string, err error) {
+	session, err := cl.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}})
+	if err != nil {
+		return nil, "begin authorization", err
+	}
+
+	finalQuery, err := followAuthorizationRedirect(rawHTTP, session.URL().String())
+	if err != nil {
+		return nil, "follow authorization redirect", err
+	}
+
+	completion, err = cl.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: finalQuery})
+	if err != nil {
+		return nil, "complete authorization", err
+	}
+	return completion, "", nil
 }
 
 // followAuthorizationRedirect GETs authorizationURL and reads the

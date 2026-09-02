@@ -464,18 +464,67 @@ the automated daily run.
 evidence to come from the OIDF-hosted production suite at
 `certification.openid.net`, not a local instance — and explicitly
 recommends against automating runs against it, reserving local suite
-runs (everything else in this README) for development. So the real
-certification run is a manual, one-off invocation:
+runs (everything else in this README) for development.
+
+The invocation this section used to suggest — pointing `-suite` straight
+at the hosted suite and letting this driver self-generate a plan the
+same way it does locally — does **not** work against the real hosted
+suite: confirmed live, `POST /api/plan` there requires an authenticated
+session this driver has no support for, and (separately) the hosted
+suite requires a plan to be created through its own guided web UI
+first, with a fixed alias/`client_id`/certificate registered up front —
+not something this driver can create on its own. This was cross-checked
+against OIDF's own official reference RP client
+(`gitlab.com/openid/sample-openbanking-client-nodejs`), which takes its
+issuer/accounts-endpoint/certificate as fixed, literal config rather
+than fetching or generating any of it.
+
+**`-issuer` mode (`fixed_identity.go`)** is what actually works: create
+the plan through the hosted UI first (selecting the same
+client-auth-type/sender-constrain/profile variants this driver's own
+`-mtls`/`-client-auth-mtls`/`-profile` flags represent), note the
+`issuer`/`accounts_endpoint` values the UI's own "Exported Values" panel
+shows (identical across every module in the plan — they're derived from
+the plan's fixed alias, not the module), then drive one module at a
+time:
 
 ```
 go run ./cmd/conformance-client -suite=https://certification.openid.net/ \
-    -profile=baseline -evidence-dir=./evidence/private-key-dpop
+    -profile=baseline -mtls -client-auth-mtls \
+    -issuer=https://www.certification.openid.net/test/a/<your-alias>/ \
+    -client-id=<registered client_id> \
+    -redirect-uri=<registered redirect_uri> \
+    -accounts-endpoint=<the plan's exported accounts_endpoint> \
+    -client-cert=./client.pem -client-key=./client.key \
+    -test-name=<module under test> \
+    -evidence-dir=./evidence/mtls-mtls
 ```
 
-repeated once per profile being certified (`-mtls`/`-client-auth-mtls`
-combinations, `-profile=message-signing` for JAR/JARM), collecting the
-resulting `evidence/` directory alongside the suite's own downloaded
-results ZIP from its "Publish for certification" step.
+`-client-cert`/`-client-key` are required whenever `-mtls`/
+`-client-auth-mtls` is set — the certificate must be the exact one
+already registered with the suite through the UI, not a
+driver-generated throwaway; `tls.LoadX509KeyPair` loads it. Repeat once
+per module under test (the suite attributes traffic to whichever module
+is currently "waiting" for that alias, the same shared-alias-routing
+behavior the AS side of this repo already relies on) and once per
+profile being certified.
+
+**No suite-graded verdict is available in this mode** — there's no
+suite module ID to poll a result from, since no plan/module REST call
+ever happens. The suite's own plan-detail page in the hosted UI is the
+source of truth for PASS/FAIL, the same way OIDF's own downloaded
+results ZIP has always been the authoritative certification evidence;
+this driver's evidence file is, as it always has been, supplementary
+evidence of what the client itself did, not a substitute for it.
+
+**Not yet supported in `-issuer` mode**: a fixed client JWKS loaded from
+a file, needed for the `private_key_jwt` profiles (private key+DPoP,
+private key+MTLS) — `-issuer` mode today only has a working credential
+path for `client_auth_type=mtls` (`-client-auth-mtls`, with or without
+`-mtls`), since that credential is certificate-only and needs no signed
+assertion. `keys.NewKeyManagerFromSigners` (`keys/signer_keymanager.go`)
+is the existing, already-tested mechanism this would build on when
+needed — see `ARCHITECTURE.md`/`GETTING_STARTED.md`.
 
 ## Extending this driver
 

@@ -369,6 +369,15 @@ type moduleResult struct {
 	Verdict   string
 	DriverErr string
 	ModuleID  string
+	// SuiteLogNote overrides evidence.go's default "unavailable —
+	// module instance was never created" SUITE LOG line for a result
+	// with no ModuleID. That default is only true for a genuine
+	// pre-module-creation failure; fixed-identity mode (fixed_identity.go)
+	// has no ModuleID for a different reason — it drives a module the
+	// suite's own guided UI already created, never queried the API for
+	// its ID — and sets this instead so evidence submitted to OIDF
+	// doesn't falsely claim the module never existed.
+	SuiteLogNote string
 }
 
 // String reproduces the exact "<verdict> [driver: <err>]" / "<verdict>"

@@ -176,7 +176,13 @@ func runFixedIdentity(c fixedIdentityConfig) error {
 	log.Printf("no suite-graded verdict is available in fixed-identity mode — check the suite's own plan-detail page for the actual PASS/FAIL result")
 
 	if c.EvidenceDir != "" {
-		result := moduleResult{Verdict: "unavailable in fixed-identity mode — see the suite's own plan-detail page", DriverErr: driverErr}
+		result := moduleResult{
+			Verdict:   "unavailable in fixed-identity mode — see the suite's own plan-detail page",
+			DriverErr: driverErr,
+			SuiteLogNote: "not queried via API in fixed-identity mode (no known module ID) — the module instance " +
+				"does exist (it was created through the suite's own guided web UI, not by this driver); find its " +
+				"log-detail.html link on the suite's plan-detail page for -issuer=" + c.Issuer,
+		}
 		if err := writeEvidence(c.EvidenceDir, c.TestName, result, c.APIBase); err != nil {
 			log.Printf("WARNING: write evidence file: %v", err)
 		}

@@ -39,8 +39,11 @@ func writeEvidence(dir, testName string, result moduleResult, apiBase string) er
 		driverLine = "none — client completed the full discover/authorize/token/resource flow without error"
 	}
 	suiteLog := "unavailable — module instance was never created"
-	if result.ModuleID != "" {
+	switch {
+	case result.ModuleID != "":
 		suiteLog = apiBase + "api/log/" + result.ModuleID
+	case result.SuiteLogNote != "":
+		suiteLog = result.SuiteLogNote
 	}
 
 	content := fmt.Sprintf(

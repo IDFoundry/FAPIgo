@@ -161,8 +161,8 @@ func runFixedIdentity(c fixedIdentityConfig) error {
 	// as a fatal error with no evidence left behind.
 	outcome, driverErr := "completed successfully", ""
 	cl, failure := buildModuleClient(ctx, driver, module)
-	switch {
-	case cl == nil:
+	switch cl {
+	case nil:
 		driverErr = failure.DriverErr
 		outcome = "client rejected the issuer before authorization began"
 	default:

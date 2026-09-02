@@ -541,6 +541,39 @@ assertion. `keys.NewKeyManagerFromSigners` (`keys/signer_keymanager.go`)
 is the existing, already-tested mechanism this would build on when
 needed — see `ARCHITECTURE.md`/`GETTING_STARTED.md`.
 
+### Submitting to OIDF
+
+Confirmed against OIDF's own submission instructions
+(`openid.net/certification/how-to-submit-your-certification-request/`):
+submission is a form at `submissions.openid.net`, and its "Exported
+Test Results" field wants **ZIP files**, one per profile being
+certified. Two separate evidence sources go into that ZIP (or a
+sibling one in the same submission — OIDF's own wording is "upload all
+relevant ZIP files... in a single submission"):
+
+- **The suite's own official export** — from the plan's own page in
+  the hosted UI, its "Publish for certification" button. This is the
+  suite-graded verdict for every module, the actual PASS/FAIL source of
+  truth (see above) — not something this driver produces or can
+  produce, since fixed-identity mode never queries the suite's API at
+  all.
+- **This driver's own `-evidence-dir` output** — the client-side
+  evidence OIDF's instructions explicitly require alongside the suite's
+  own logs: *"You must submit (at least) one log file per test, do not
+  submit one large log file covering all tests"* and *"the client data
+  evidence must demonstrate that your application is detecting the
+  error condition under test"*. `-evidence-dir`'s one-file-per-module,
+  test-name-prefixed output already matches this naming convention
+  as-is — no renaming needed before zipping it up, e.g.:
+
+  ```
+  cd <evidence-dir> && zip -j ../<plan-alias>-client-evidence.zip *.log
+  ```
+
+  (`-j` flattens the directory structure into the zip root — OIDF's own
+  filename convention is what identifies each test, not a directory
+  path.)
+
 ## Extending this driver
 
 The `driverProfile` map in `main.go` is the extension point for a new

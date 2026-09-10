@@ -335,4 +335,43 @@ type Config struct {
 	// Algorithms.IDToken and Limits.IDTokenLifetime are not required
 	// when this is true — see their own doc comments.
 	OAuthOnly bool
+
+	// Federation configures this server's OpenID Federation 1.0
+	// self-issuance — see FederationConfig's own doc comment. Zero
+	// value (EntityID empty) disables federation support entirely:
+	// EntityConfiguration always fails, matching this package's
+	// existing "zero disables the feature" precedent for
+	// Endpoints.BackchannelAuthentication and friends.
+	Federation FederationConfig
+}
+
+// FederationConfig configures this server's OpenID Federation 1.0
+// self-issuance (EntityConfiguration) — the "thin, role-specific glue"
+// federation/doc.go describes this server building over
+// federation.SelfIssuer. Meaningless (and left unvalidated) when
+// EntityID is empty.
+type FederationConfig struct {
+	// EntityID is this server's own Entity Identifier (OpenID
+	// Federation 1.0 §1.2) — see federation.SelfIssueConfig.EntityID.
+	// Conventionally the same origin EntityConfiguration's output is
+	// served from, at federation.WellKnownPath.
+	EntityID string
+
+	// AuthorityHints is this server's own "authority_hints" claim — see
+	// federation.SelfIssueConfig.AuthorityHints.
+	AuthorityHints []string
+
+	// Lifetime bounds how far in the future EntityConfiguration's own
+	// "exp" claim is set, relative to Dependencies.Clock. Required when
+	// EntityID is set.
+	Lifetime time.Duration
+
+	// Algorithm this server signs its Entity Configuration with.
+	// Dependencies.Keys must have a key registered for
+	// keys.FederationEntitySigning at this algorithm — a key distinct
+	// from every other purpose this server's Keys already serves
+	// (JARMSigning, IDTokenSigning, UserInfoSigning), since a
+	// federation identity key is never reused as a protocol key.
+	// Required when EntityID is set.
+	Algorithm fapi.SignatureAlgorithm
 }

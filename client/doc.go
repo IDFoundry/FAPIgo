@@ -24,6 +24,14 @@
 // BeginAuthorizationRequest.Scope entirely and use this package as a
 // plain OAuth 2.0 + FAPI 2.0 client.
 //
+// RequestClientCredentialsToken (RFC 6749 §4.4) is the third, unrelated
+// flow this package drives, for a machine-to-machine client with no end
+// user at all: no BeginAuthorization/PAR, no browser hop, no session,
+// and no ID token or refresh token, ever — a Config with neither the
+// browser flow's endpoints nor Endpoints.BackchannelAuthentication set
+// is a legitimate client_credentials-only client, not an incomplete
+// one.
+//
 // FetchUserInfo, VerifyIssuerJWS and ProtectedResource (via
 // ResourceClient.Do) are the deliberate exceptions: a caller that
 // reaches a protected resource beyond token issuance (the UserInfo

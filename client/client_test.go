@@ -389,17 +389,26 @@ func TestNewAcceptsCIBAOnlyConfig(t *testing.T) {
 	}
 }
 
-// TestNewRejectsConfigWithNoFlowConfigured covers the case neither
+// TestNewAcceptsClientCredentialsOnlyConfig covers the case neither
 // TestNewAcceptsCIBAOnlyConfig nor validConfig's own browser-flow shape
-// represents: a client that configures no flow at all.
-func TestNewRejectsConfigWithNoFlowConfigured(t *testing.T) {
+// represents: a client with no browser flow and no CIBA configured at
+// all, relying solely on RequestClientCredentialsToken. This used to be
+// rejected outright ("at least one flow must be configured") before that
+// grant had a client-side driver; now it's a legitimate shape, and
+// Algorithms.IDToken — meaningless for a grant that never returns an ID
+// token — isn't required for it either.
+func TestNewAcceptsClientCredentialsOnlyConfig(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Endpoints.Authorization = fapi.URL{}
 	cfg.Endpoints.PushedAuthorizationRequest = fapi.URL{}
 	cfg.RedirectURI = ""
+	cfg.Algorithms.IDToken = 0
 
-	if _, err := client.New(cfg, validDependencies(t)); err == nil {
-		t.Fatalf("New(no flow configured) = nil error, want error")
+	deps := validDependencies(t)
+	deps.Sessions = nil
+
+	if _, err := client.New(cfg, deps); err != nil {
+		t.Fatalf("New(client_credentials-only config): %v", err)
 	}
 }
 

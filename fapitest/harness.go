@@ -99,6 +99,15 @@ type Config struct {
 	// with one side faked (server/client_auth_mtls_test.go) or via the
 	// live OIDF suite.
 	ClientAuthMethod storage.ClientAuthMethod
+
+	// ClientCredentialsGrant, if set, enables the RFC 6749 §4.4
+	// client_credentials grant on the harness's server (Config.ClientCredentialsGrant)
+	// and permits the harness's own registered client to use it
+	// (storage.RegisteredClientConfig.AllowsClientCredentialsGrant) — see
+	// both fields' own doc comments for why enabling the grant
+	// server-wide and permitting a specific client to use it are two
+	// separate opt-ins.
+	ClientCredentialsGrant bool
 }
 
 // Harness wires a real client.Client, server.Server and resource.Verifier
@@ -217,13 +226,14 @@ func New(t *testing.T, cfg Config) *Harness {
 	}
 
 	registeredClientCfg := storage.RegisteredClientConfig{
-		ID:                       ClientID,
-		RedirectURIs:             []fapi.RegisteredRedirectURI{RedirectURI},
-		ClientAssertionAlgorithm: sigAlg,
-		RequestObjectAlgorithm:   sigAlg,
-		SenderConstrain:          cfg.SenderConstrain,
-		ClientAuthMethod:         cfg.ClientAuthMethod,
-		AllowedScopes:            []string{"openid", "accounts", "offline_access"},
+		ID:                           ClientID,
+		RedirectURIs:                 []fapi.RegisteredRedirectURI{RedirectURI},
+		ClientAssertionAlgorithm:     sigAlg,
+		RequestObjectAlgorithm:       sigAlg,
+		SenderConstrain:              cfg.SenderConstrain,
+		ClientAuthMethod:             cfg.ClientAuthMethod,
+		AllowedScopes:                []string{"openid", "accounts", "offline_access"},
+		AllowsClientCredentialsGrant: cfg.ClientCredentialsGrant,
 	}
 	switch cfg.ClientAuthMethod {
 	case storage.ClientAuthMethodSelfSignedTLSClientAuth:
@@ -274,8 +284,9 @@ func New(t *testing.T, cfg Config) *Harness {
 			MaxDPoPProofAge:            time.Minute,
 			MaxClockSkew:               5 * time.Second,
 		},
-		Assurance:  server.AssuranceDevelopment,
-		Extensions: cfg.Extensions,
+		Assurance:              server.AssuranceDevelopment,
+		Extensions:             cfg.Extensions,
+		ClientCredentialsGrant: cfg.ClientCredentialsGrant,
 	}
 	if cfg.EncryptIDTokens {
 		srvCfg.Algorithms.IDTokenEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.RSAOAEP256}

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
-	"github.com/idfoundry/fapigo/internal/clientassertion"
 	"github.com/idfoundry/fapigo/internal/par"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
@@ -120,19 +119,8 @@ func (c *Client) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 		if authorizationDetailsJSON != "" {
 			form[authorizationDetailsParameter] = authorizationDetailsJSON
 		}
-		if c.cfg.ClientAuthMethod == storage.ClientAuthMethodPrivateKeyJWT {
-			assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
-				Signer: assertionSigner, Algorithm: c.cfg.Algorithms.ClientAuthentication, KeyID: assertionKID,
-				ClientID: c.cfg.ClientID.String(), Audience: c.cfg.Issuer.String(),
-				Now: c.deps.Clock.Now(), Lifetime: c.cfg.Limits.ClientAssertionLifetime, Random: c.deps.Random,
-			})
-			if err != nil {
-				return nil, err
-			}
-			form["client_assertion"] = assertion
-			form["client_assertion_type"] = clientassertion.AssertionType
-		} else {
-			form["client_id"] = c.cfg.ClientID.String()
+		if err := c.addClientAuthentication(form, assertionSigner, assertionKID); err != nil {
+			return nil, err
 		}
 		return par.EncodeForm(form), nil
 	}

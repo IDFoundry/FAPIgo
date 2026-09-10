@@ -82,6 +82,8 @@ type AlgorithmPolicy struct {
 	JARM fapi.SignatureAlgorithm
 
 	// IDToken is the single algorithm this server signs ID tokens with.
+	// Required unless Config.OAuthOnly is true, in which case this
+	// server never issues an ID token at all and this field is ignored.
 	IDToken fapi.SignatureAlgorithm
 
 	// IDTokenEncryptionKeyManagement/IDTokenEncryptionContentEncryption
@@ -203,6 +205,8 @@ type Limits struct {
 	AccessTokenLifetime time.Duration
 
 	// IDTokenLifetime bounds how long an issued ID token remains valid.
+	// Required unless Config.OAuthOnly is true — see
+	// AlgorithmPolicy.IDToken's own doc comment.
 	IDTokenLifetime time.Duration
 
 	// RefreshTokenLifetime bounds how long a newly issued (or rotated)
@@ -312,4 +316,23 @@ type Config struct {
 	// enabling it here does not implicitly permit every registered
 	// client to use it.
 	ClientCredentialsGrant bool
+
+	// OAuthOnly, if set, makes this server a pure OAuth 2.0 + FAPI 2.0
+	// authorization server: it never issues an ID token and never
+	// advertises OIDC-only Metadata fields (subject_types_supported,
+	// id_token_signing_alg_values_supported), regardless of what an
+	// individual RegisteredClient's own AllowedScopes says. "openid" is
+	// refused as a requested scope at PAR, CIBA and client_credentials
+	// alike — see checkScope — so a client can never end up with
+	// "openid" in a granted scope for containsScope's own
+	// openid-gated branches (issueIDToken and friends) to act on in the
+	// first place; this is what lets Metadata's own claims and this
+	// server's actual behavior never diverge. False (the default)
+	// preserves this package's original behavior exactly: ID token
+	// issuance remains driven purely by whether a request's granted
+	// scope includes "openid", with no deployment-wide switch at all.
+	//
+	// Algorithms.IDToken and Limits.IDTokenLifetime are not required
+	// when this is true — see their own doc comments.
+	OAuthOnly bool
 }

@@ -198,6 +198,81 @@ func TestPublicJWKSReturnsDistinctKeysPerPurpose(t *testing.T) {
 // Config.Algorithms.UserInfo is set — using multiKeyManager (distinct
 // kid per purpose) so a missing/wrong-purpose lookup would show up as a
 // missing kid, not silently dedupe away.
+// TestPublicJWKSOAuthOnlyOmitsIDTokenSigningKey confirms PublicJWKS
+// never even resolves an IDTokenSigning key under Config.OAuthOnly — km
+// has no keys.IDTokenSigning entry at all, so multiKeyManager.PublicKey
+// would panic on a nil *fakeKeyManager if PublicJWKS asked for one
+// anyway; a real deployment running OAuthOnly has no reason to
+// provision that key purpose in its own KeyManager at all.
+func TestPublicJWKSOAuthOnlyOmitsIDTokenSigningKey(t *testing.T) {
+	km := &multiKeyManager{byPurpose: map[keys.SigningPurpose]*fakeKeyManager{
+		keys.AccessTokenSigning: {key: generateKey(t), keyID: "access-key"},
+	}}
+
+	clientKey := generateKey(t)
+	client, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
+		ID:                       testClientID,
+		RedirectURIs:             []fapi.RegisteredRedirectURI{testRedirectURI},
+		ClientAssertionAlgorithm: fapi.ES256,
+		AllowedScopes:            []string{"accounts", "offline_access"},
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+	issuer, err := fapi.ParseIssuerURL(testIssuer)
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+	cfg := server.Config{
+		Issuer:    issuer,
+		Endpoints: testEndpoints(t),
+		Profile:   server.ProfileFAPISecurity,
+		Algorithms: server.AlgorithmPolicy{
+			ClientAssertion: server.AlgorithmSet{fapi.ES256},
+			RequestObject:   server.AlgorithmSet{fapi.ES256},
+		},
+		Limits: server.Limits{
+			PushedRequestLifetime:      90 * time.Second,
+			MaxClientAssertionLifetime: time.Minute,
+			MaxRequestObjectLifetime:   time.Minute,
+			InteractionLifetime:        5 * time.Minute,
+			AuthorizationCodeLifetime:  time.Minute,
+			AccessTokenLifetime:        5 * time.Minute,
+			RefreshTokenLifetime:       5 * time.Minute,
+			MaxDPoPProofAge:            time.Minute,
+			MaxClockSkew:               5 * time.Second,
+		},
+		Assurance: server.AssuranceDevelopment,
+		OAuthOnly: true,
+	}
+	deps := server.Dependencies{
+		Clients:      &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
+		Transactions: &fakeTransactionStore{},
+		Grants:       &fakeGrantStore{},
+		Replay:       &fakeReplayStore{},
+		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
+			testClientID: {{Algorithm: fapi.ES256, PublicKey: &clientKey.PublicKey}},
+		}},
+		Keys:         km,
+		AccessTokens: server.JWTAccessTokens{Keys: km, Algorithm: fapi.ES256},
+		Revocation:   server.NoRevocation{},
+		Clock:        fixedClock{now: time.Now()},
+		Random:       rand.Reader,
+	}
+	srv, err := server.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+
+	set, err := srv.PublicJWKS(context.Background())
+	if err != nil {
+		t.Fatalf("PublicJWKS: %v", err)
+	}
+	if len(set.Keys) != 1 || set.Keys[0].KeyID() != "access-key" {
+		t.Fatalf("Keys = %v, want exactly [access-key]", set.Keys)
+	}
+}
+
 func TestPublicJWKSIncludesUserInfoSigningKeyWhenConfigured(t *testing.T) {
 	km := &multiKeyManager{byPurpose: map[keys.SigningPurpose]*fakeKeyManager{
 		keys.AccessTokenSigning: {key: generateKey(t), keyID: "access-key"},

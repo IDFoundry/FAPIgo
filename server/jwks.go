@@ -34,7 +34,8 @@ func (j JWTAccessTokens) accessTokenSigningKeyUse() keys.SigningKeyUse {
 
 // PublicJWKS returns this server's current public keys: the union,
 // deduplicated by kid, of whatever key manager(s) are active for every
-// signing purpose Config/Dependencies declares in use — ID token,
+// signing purpose Config/Dependencies declares in use — ID token
+// (unless Config.OAuthOnly is set — this server never signs one),
 // (under ProfileFAPISecurityWithMessageSigning) JARM, and (when
 // Config.Algorithms.UserInfo is set) UserInfo signing, all from
 // Dependencies.Keys, plus an access-token signing key from
@@ -52,8 +53,9 @@ func (j JWTAccessTokens) accessTokenSigningKeyUse() keys.SigningKeyUse {
 // publishes exactly the one key PublicKey returns, as before. See
 // keys.PublicJWKS for the shared implementation.
 func (s *Server) PublicJWKS(ctx context.Context) (PublicKeySet, error) {
-	active := []keys.SigningKeyUse{
-		{Manager: s.deps.Keys, Purpose: keys.IDTokenSigning, Algorithm: s.cfg.Algorithms.IDToken},
+	var active []keys.SigningKeyUse
+	if !s.cfg.OAuthOnly {
+		active = append(active, keys.SigningKeyUse{Manager: s.deps.Keys, Purpose: keys.IDTokenSigning, Algorithm: s.cfg.Algorithms.IDToken})
 	}
 	if s.cfg.Profile == ProfileFAPISecurityWithMessageSigning {
 		active = append(active, keys.SigningKeyUse{Manager: s.deps.Keys, Purpose: keys.JARMSigning, Algorithm: s.cfg.Algorithms.JARM})

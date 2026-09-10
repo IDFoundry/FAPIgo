@@ -59,6 +59,13 @@ core.
 > "Client Credentials Grant" register profiles (MTLS+MTLS, MTLS+DPoP,
 > private key+MTLS, private key+DPoP) — see
 > [conformance/](conformance/README.md#client-credentials-grant).
+> `server.Config.OAuthOnly` turns the server into a pure OAuth 2.0 +
+> FAPI 2.0 AS — "openid" is refused as a requested scope everywhere
+> (PAR, CIBA, client_credentials alike), no ID token is ever issued, and
+> `Metadata` omits every OIDC-only field (`subject_types_supported`,
+> `id_token_signing_alg_values_supported`) — covered by unit tests and a
+> real-HTTP `fapitest` round trip, not an OIDF plan (the suite has no
+> bare-OAuth2 FAPI2 plan to run against).
 
 ```go
 import (

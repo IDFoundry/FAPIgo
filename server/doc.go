@@ -79,7 +79,11 @@
 //     claim only ever bound the *original* ID token to the authorization
 //     request that requested it. A refresh token is issued exactly when
 //     the granted scope includes "offline_access", matching common OIDC
-//     practice.
+//     practice. Config.OAuthOnly makes this server a pure OAuth 2.0 AS:
+//     "openid" is refused as a requested scope everywhere (PAR, CIBA,
+//     client_credentials alike), so it can never end up in a granted
+//     scope for the above to act on, and Metadata omits every field
+//     that would otherwise claim ID token support.
 //   - RefreshAccessToken lets a client narrow, but never widen, the
 //     scope it originally received — a widening request fails with
 //     ErrorInvalidScope rather than silently clamping to the original

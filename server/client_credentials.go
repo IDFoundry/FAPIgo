@@ -79,7 +79,7 @@ func (s *Server) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), newError(ErrorInvalidScope, 400, "scope is required", nil))
 	}
 	for _, tok := range scopeTokens {
-		if !client.AllowsScope(tok) {
+		if !s.clientAllowsScope(client, tok) {
 			return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), newError(ErrorInvalidScope, 400, "scope is not valid for this client", nil))
 		}
 	}

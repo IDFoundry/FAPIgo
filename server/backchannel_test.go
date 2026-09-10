@@ -126,6 +126,92 @@ func newHarnessWithBackchannel(t *testing.T) (harness, *memstore.BackchannelAuth
 	return harness{server: srv, key: key, serverKey: serverKey, now: now}, backchannel
 }
 
+// newHarnessWithBackchannelOAuthOnly mirrors newHarnessWithBackchannel
+// with Config.OAuthOnly set (Algorithms.IDToken/Limits.IDTokenLifetime
+// left zero, valid only because of it) — testClientID keeps "openid" in
+// its own AllowedScopes, same reasoning as par_test.go's own
+// newHarnessOAuthOnly: proving OAuthOnly overrides what the client is
+// otherwise registered for, not merely that an unregistered scope is
+// rejected the ordinary way.
+func newHarnessWithBackchannelOAuthOnly(t *testing.T) harness {
+	t.Helper()
+	now := time.Now()
+	key := generateKey(t)
+	serverKey := generateKey(t)
+
+	client, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
+		ID:                       testClientID,
+		RedirectURIs:             []fapi.RegisteredRedirectURI{testRedirectURI},
+		ClientAssertionAlgorithm: fapi.ES256,
+		AllowedScopes:            []string{"openid", "accounts", "offline_access"},
+		BackchannelAuthenticationRequestAlgorithm: fapi.ES256,
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+	issuer, err := fapi.ParseIssuerURL(testIssuer)
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+	backchannelEndpoint, err := fapi.ParseEndpointURL(testBackchannelAuthenticationEndpoint)
+	if err != nil {
+		t.Fatalf("ParseEndpointURL: %v", err)
+	}
+
+	endpoints := testEndpoints(t)
+	endpoints.BackchannelAuthentication = backchannelEndpoint
+
+	cfg := server.Config{
+		Issuer:    issuer,
+		Endpoints: endpoints,
+		Profile:   server.ProfileFAPISecurity,
+		Algorithms: server.AlgorithmPolicy{
+			ClientAssertion:                  server.AlgorithmSet{fapi.ES256},
+			RequestObject:                    server.AlgorithmSet{fapi.ES256},
+			BackchannelAuthenticationRequest: server.AlgorithmSet{fapi.ES256},
+		},
+		Limits: server.Limits{
+			PushedRequestLifetime:                       90 * time.Second,
+			MaxClientAssertionLifetime:                  time.Minute,
+			MaxRequestObjectLifetime:                    time.Minute,
+			InteractionLifetime:                         5 * time.Minute,
+			AuthorizationCodeLifetime:                   time.Minute,
+			AccessTokenLifetime:                         5 * time.Minute,
+			RefreshTokenLifetime:                        5 * time.Minute,
+			MaxDPoPProofAge:                             time.Minute,
+			MaxClockSkew:                                5 * time.Second,
+			BackchannelAuthenticationRequestLifetime:    2 * time.Minute,
+			MaxBackchannelAuthenticationRequestLifetime: time.Minute,
+			BackchannelAuthenticationPollInterval:       time.Millisecond,
+		},
+		Assurance: server.AssuranceDevelopment,
+		OAuthOnly: true,
+	}
+	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
+	backchannel := memstore.NewBackchannelAuthenticationStore()
+	deps := server.Dependencies{
+		Clients:      &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
+		Transactions: &fakeTransactionStore{},
+		Grants:       &fakeGrantStore{},
+		Replay:       &fakeReplayStore{},
+		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
+			testClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
+		}},
+		Keys:                serverKeyManager,
+		AccessTokens:        server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:          server.NoRevocation{},
+		Clock:               fixedClock{now: now},
+		Random:              rand.Reader,
+		Backchannel:         backchannel,
+		BackchannelNotifier: server.NoBackchannelNotifications{},
+	}
+	srv, err := server.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+	return harness{server: srv, key: key, serverKey: serverKey, now: now}
+}
+
 // newHarnessWithBackchannelMTLS mirrors newHarnessWithBackchannel
 // exactly, except testClientID is registered with SenderConstrain:
 // storage.SenderConstrainMTLS instead of the default DPoP. Client
@@ -751,6 +837,31 @@ func TestBeginBackchannelAuthenticationRejectsInvalidScope(t *testing.T) {
 				t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequest)
 			}
 		})
+	}
+}
+
+// TestBeginBackchannelAuthenticationOAuthOnlyRejectsOpenIDScope is
+// CIBA's counterpart of par_test.go's own
+// TestPushAuthorizationRequestOAuthOnlyRejectsOpenIDScope — same
+// override, different grant.
+func TestBeginBackchannelAuthenticationOAuthOnlyRejectsOpenIDScope(t *testing.T) {
+	h := newHarnessWithBackchannelOAuthOnly(t)
+	requestObj := h.backchannelRequestObject(t, map[string]json.RawMessage{
+		"scope": jsonRaw(t, "openid accounts"), "login_hint": jsonRaw(t, "user-1"),
+	})
+
+	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+		HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), requestObj)},
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+	localErr, ok := action.(server.BackchannelAuthenticationLocalError)
+	if !ok {
+		t.Fatalf("action = %T, want server.BackchannelAuthenticationLocalError", action)
+	}
+	if localErr.Error.Code() != server.ErrorInvalidRequest {
+		t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequest)
 	}
 }
 

@@ -245,6 +245,40 @@ func TestMetadataMarshalJSONUsesDiscoveryFieldNames(t *testing.T) {
 	}
 }
 
+// TestMetadataOAuthOnlyOmitsOIDCOnlyFields confirms Config.OAuthOnly
+// stops Metadata from claiming ID token support it can never provide —
+// subject_types_supported and id_token_signing_alg_values_supported are
+// the only two fields with no RFC 8414 counterpart that this package
+// used to emit unconditionally (every other OIDC-only field was already
+// gated on its own algorithm being configured).
+func TestMetadataOAuthOnlyOmitsOIDCOnlyFields(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.OAuthOnly = true
+	cfg.Algorithms.IDToken = 0
+	cfg.Limits.IDTokenLifetime = 0
+
+	srv, err := server.New(cfg, validDependencies())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	md := srv.Metadata(context.Background())
+
+	if len(md.SubjectTypesSupported) != 0 {
+		t.Fatalf("SubjectTypesSupported = %v, want empty under OAuthOnly", md.SubjectTypesSupported)
+	}
+	if len(md.IDTokenSigningAlgValuesSupported) != 0 {
+		t.Fatalf("IDTokenSigningAlgValuesSupported = %v, want empty under OAuthOnly", md.IDTokenSigningAlgValuesSupported)
+	}
+	// Every other RFC 8414 core field stays present — this is a
+	// narrower document, not a broken one.
+	if md.Issuer.String() != testIssuer {
+		t.Fatalf("Issuer = %q, want %q", md.Issuer.String(), testIssuer)
+	}
+	if !containsString(md.GrantTypesSupported, "authorization_code") {
+		t.Fatalf("GrantTypesSupported = %v, want to still contain authorization_code", md.GrantTypesSupported)
+	}
+}
+
 func TestMetadataOmitsClientCredentialsGrantWhenDisabled(t *testing.T) {
 	h := newHarness(t, server.ProfileFAPISecurity, true) // ClientCredentialsGrant left false
 	md := h.server.Metadata(context.Background())

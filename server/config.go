@@ -5,6 +5,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/extension"
+	"github.com/idfoundry/fapigo/federation"
 )
 
 // Profile selects which FAPI 2.0 security profile this server enforces.
@@ -343,6 +344,57 @@ type Config struct {
 	// existing "zero disables the feature" precedent for
 	// Endpoints.BackchannelAuthentication and friends.
 	Federation FederationConfig
+
+	// AutomaticRegistration configures OpenID Federation 1.0 §12.1
+	// "Automatic Registration" — see AutomaticRegistrationConfig's own
+	// doc comment. Zero value (TrustAnchors empty) disables it
+	// entirely: New never wraps Dependencies.Clients/ClientKeys, and
+	// this server behaves exactly as it always has, accepting only
+	// statically registered clients. Independent of Federation — a
+	// server can self-issue its own Entity Configuration without
+	// accepting automatic registration, or vice versa.
+	AutomaticRegistration AutomaticRegistrationConfig
+}
+
+// AutomaticRegistrationConfig configures this server to accept OpenID
+// Federation 1.0 §12.1 "Automatic Registration": a Relying Party that
+// presents its own Entity Identifier as client_id, with no prior
+// registration step, is resolved on demand via
+// federation.AutomaticClientRepository/AutomaticClientKeySource — see
+// their own doc comments for exactly which registration shapes are (and
+// are not) supported. New wraps Dependencies.Clients and
+// Dependencies.ClientKeys with these when TrustAnchors is non-empty;
+// every other server internal (PAR, the token endpoint, CIBA) keeps
+// calling those same Dependencies fields exactly as before, unaware of
+// the wrapping — statically registered clients (the original
+// Dependencies.Clients/ClientKeys) always take priority over a
+// federation-resolved one.
+type AutomaticRegistrationConfig struct {
+	// TrustAnchors is every Trust Anchor this server is willing to
+	// accept an automatically-registered Relying Party's Trust Chain
+	// rooted at — see federation.TrustAnchor. Required (at least one)
+	// to enable automatic registration at all.
+	TrustAnchors []federation.TrustAnchor
+
+	// AllowedScopes is the scope allowlist granted to every
+	// automatically-registered client, uniformly — see
+	// federation.AutomaticRegistrationConfig.AllowedScopes for why this
+	// deliberately never comes from an RP's own self-published
+	// metadata. Required when TrustAnchors is set.
+	AllowedScopes []string
+
+	// MaxPathLength/MaxStatementLifetime/MaxClockSkew bound Trust Chain
+	// resolution itself — see federation.Limits, which these configure
+	// directly. All required when TrustAnchors is set.
+	MaxPathLength        int
+	MaxStatementLifetime time.Duration
+	MaxClockSkew         time.Duration
+
+	// MaxCacheAge bounds how long a resolved client's Trust Chain is
+	// reused before it is resolved again — see
+	// federation.AutomaticRegistrationConfig.MaxCacheAge. Required when
+	// TrustAnchors is set.
+	MaxCacheAge time.Duration
 }
 
 // FederationConfig configures this server's OpenID Federation 1.0

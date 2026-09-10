@@ -216,7 +216,21 @@ func (a *AutomaticClientRepository) resolve(ctx context.Context, id fapi.ClientI
 // Underlying is tried first, exactly mirroring
 // AutomaticClientRepository's own "static registration always wins"
 // precedence — a statically registered client's real keys must never
-// be shadowed by a federation lookup.
+// be shadowed by a federation lookup. Unlike ResolveClient's own
+// single-value result, a keys.ClientKeySource legitimately returns an
+// empty, error-free VerificationKeySet to mean "no matching key" (e.g.
+// a real client mid-rotation, or simply a kid Underlying doesn't
+// recognize) — so an empty result from Underlying falls through to
+// federation resolution exactly like an error would, on the
+// expectation that an Underlying implementation unaware of a given
+// client ID at all is at least as likely to signal that with an empty
+// result as with an error (keys.ClientKeySource's own interface
+// documents no requirement either way). This mirrors
+// AutomaticClientRepository's own documented "Underlying's interface
+// has no way to distinguish these cases" limitation — a statically
+// registered client legitimately missing a requested key triggers one
+// wasted federation resolution attempt (which then also fails), not a
+// silent wrong answer.
 type AutomaticClientKeySource struct {
 	underlying keys.ClientKeySource
 	repo       *AutomaticClientRepository
@@ -239,7 +253,7 @@ func NewAutomaticClientKeySource(underlying keys.ClientKeySource, repo *Automati
 
 // ResolveVerificationKeys implements keys.ClientKeySource.
 func (s *AutomaticClientKeySource) ResolveVerificationKeys(ctx context.Context, req keys.ClientKeyRequest) (keys.VerificationKeySet, error) {
-	if set, err := s.underlying.ResolveVerificationKeys(ctx, req); err == nil {
+	if set, err := s.underlying.ResolveVerificationKeys(ctx, req); err == nil && len(set.Keys) > 0 {
 		return set, nil
 	}
 	return s.repo.resolveVerificationKeys(ctx, req)

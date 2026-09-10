@@ -1001,6 +1001,11 @@ unused by daily CI — see `conformance/client/scripts/README.md`'s own
 "Certification evidence" section for the format and the actual
 certification-run workflow (against `certification.openid.net` by
 hand, never automated, same as every other suite this repo touches).
+This workflow has since produced real, listed results — FAPIgo holds
+official OpenID Foundation certification for FAPI 2.0 OP, FAPI 2.0 RP
+(both Security Profile Final + Message Signing Final) and FAPI-CIBA OP;
+see [`conformance/README.md#oidf-certification`](conformance/README.md#oidf-certification)
+for the full list and links to each listing.
 
 Rich Authorization Requests (RFC 9396) has no OIDF conformance plan at
 all, unlike CIBA (which at least has `fapi-ciba-id1` to eventually

@@ -20,9 +20,15 @@ Hardened, separately conformant FAPI 2.0 client, authorization-server and
 resource-server engines for Go, built on one rigorously tested protocol
 core.
 
+> **🏅 OpenID Foundation Certified.** FAPIgo holds official OIDF
+> certification, not just a self-run pass against the live suite — see
+> [conformance/README.md#oidf-certification](conformance/README.md#oidf-certification)
+> for the full list of certified profiles and links to each official
+> listing.
+
 > **⚠ Work in progress.** FAPIgo is under active development. APIs, package structure, and behavior may change without notice. We recommend waiting for the v1.0 release before considering it for production use.
 
-> **Status:** all three roles (`client`, `server`, `resource`), the shared
+> **Status:** the detail behind the certification above. All three roles (`client`, `server`, `resource`), the shared
 > internal protocol core, `keys`, `storage` (including a reusable storage
 > contract test suite for downstream backends), `extension`, the hardened
 > `fapihttp` transport, client-side AS discovery (`client.Discover` +

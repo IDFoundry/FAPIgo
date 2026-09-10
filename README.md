@@ -20,8 +20,15 @@ Hardened, separately conformant FAPI 2.0 client, authorization-server and
 resource-server engines for Go, built on one rigorously tested protocol
 core.
 
-> **🏅 OpenID Foundation Certified.** FAPIgo holds official OIDF
-> certification, not just a self-run pass against the live suite — see
+[![OpenID Certified](https://openid.net/wordpress-content/uploads/2016/04/oid-l-certification-mark-l-rgb-150dpi-90mm-300x157.png)](https://openid.net/certification/)
+
+> **OpenID Certified™** by Oscar Sanderson to the FAPI 2.0 OP, FAPI 2.0
+> RP (both Security Profile Final + Message Signing Final), FAPI 2.0 OP
+> Client Credentials Grant Type, and FAPI-CIBA OP conformance profiles
+> of the OpenID Connect™ protocol, as tested for FAPIgo 0.25.0 — not
+> merely a self-run pass against the live suite, but a result submitted
+> to and published by the OpenID Foundation. This is a statement of
+> tested conformance, not an OIDF endorsement of FAPIgo generally. See
 > [conformance/README.md#oidf-certification](conformance/README.md#oidf-certification)
 > for the full list of certified profiles and links to each official
 > listing.
@@ -145,3 +152,10 @@ role is tested against the OpenID Foundation conformance suite.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+OpenID®, OpenID Connect™, and OpenID Certified™ are trademarks or
+registered trademarks of the OpenID Foundation in the United States and
+other countries. Use of these marks here is limited to the certified
+conformance statement above, per [Section 3(d) of the OpenID
+Certification Terms and
+Conditions](https://openid.net/wordpress-content/uploads/2015/03/OpenID-Certification-Terms-and-Conditions.pdf).

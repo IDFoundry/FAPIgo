@@ -4,10 +4,16 @@
 
 ## OIDF Certification
 
-FAPIgo holds official [OpenID Foundation certification](https://openid.net/certification/) —
-not merely a self-run pass against the live conformance suite, but a
-result submitted to and listed by OIDF itself. Every certification
-below is listed under "FAPIgo" / Oscar Sanderson:
+**OpenID Certified™** by Oscar Sanderson (Implementer) that FAPIgo
+0.25.0 (Deployment) conforms to the profiles below of the OpenID
+Connect™ protocol — official [OpenID Foundation
+certification](https://openid.net/certification/), submitted to and
+published by OIDF, not merely a self-run pass against the live
+conformance suite. As with any conformance certification, it is a
+statement of tested conformance for the listed deployment version, not
+an OIDF endorsement of FAPIgo generally, and it doesn't automatically
+extend to a later release without its own renewed submission (OpenID
+Certification Terms and Conditions §4(a)).
 
 | Certification | Profiles certified | Listing |
 | --- | --- | --- |

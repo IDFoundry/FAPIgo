@@ -2,6 +2,36 @@
 
 [![FAPI Conformance](https://github.com/IDFoundry/FAPIgo/actions/workflows/conformance.yml/badge.svg)](https://github.com/IDFoundry/FAPIgo/actions/workflows/conformance.yml)
 
+## OIDF Certification
+
+**OpenID Certified™** by Oscar Sanderson (Implementer) that FAPIgo
+0.25.0 (Deployment) conforms to the profiles below of the OpenID
+Connect™ protocol — official [OpenID Foundation
+certification](https://openid.net/certification/), submitted to and
+published by OIDF, not merely a self-run pass against the live
+conformance suite. As with any conformance certification, it is a
+statement of tested conformance for the listed deployment version, not
+an OIDF endorsement of FAPIgo generally, and it doesn't automatically
+extend to a later release without its own renewed submission (OpenID
+Certification Terms and Conditions §4(a)).
+
+| Certification | Profiles certified | Listing |
+| --- | --- | --- |
+| FAPI 2.0 OP — Security Profile Final + Message Signing Final | MTLS+MTLS, MTLS+DPoP, private key+MTLS, private key+DPoP, FAPI2MS OP JARM | [openid.net](https://openid.net/certification/certified-fapi-2-0-op-security-profile-final-message-signing-final/) |
+| FAPI 2.0 OP — Client Credentials Grant Type | Client Credentials × {MTLS+MTLS, MTLS+DPoP, private key+MTLS, private key+DPoP} | [openid.net](https://openid.net/certification/certified-fapi-2-0-op-security-profile-final-message-signing-final/) |
+| FAPI 2.0 RP — Security Profile Final + Message Signing Final | MTLS+MTLS, MTLS+DPoP, private key+MTLS, private key+DPoP, OpenID Connect, FAPI2MS RP JAR, FAPI2MS RP JARM | [openid.net](https://openid.net/certification/certified-fapi-2-0-rp-security-profile-final-message-signing-final/) |
+| FAPI-CIBA OP | Poll w/ MTLS, Poll w/ Private Key, Ping w/ MTLS, Ping w/ Private Key | [openid.net](https://openid.net/certification/certified-fapi-ciba-openid-providers-profiles/) |
+
+Everything else in this document — the live-suite runs, pass counts,
+and bug-by-bug breakdowns per plan, below and in
+[`server/oidf-config/README.md`](server/oidf-config/README.md)/
+[`client/scripts/README.md`](client/scripts/README.md) — is the
+self-run work that produced the evidence behind these certifications,
+not a substitute for them; see
+[`client/scripts/README.md`](client/scripts/README.md#certification-evidence--evidence-dir)
+specifically for how certification evidence itself is captured and
+submitted.
+
 Reflects the latest scheduled/manually-triggered run of
 [`scripts/run-all.sh`](scripts/run-all.sh) in CI (see
 [`../.github/workflows/conformance.yml`](../.github/workflows/conformance.yml))

@@ -400,19 +400,8 @@ func (c *Client) PollBackchannelAuthentication(ctx context.Context, session Back
 			"grant_type":  cibaGrantType,
 			"auth_req_id": session.authReqID,
 		}
-		if c.cfg.ClientAuthMethod == storage.ClientAuthMethodPrivateKeyJWT {
-			assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
-				Signer: assertionSigner, Algorithm: c.cfg.Algorithms.ClientAuthentication, KeyID: assertionKID,
-				ClientID: c.cfg.ClientID.String(), Audience: c.cfg.Issuer.String(),
-				Now: c.deps.Clock.Now(), Lifetime: c.cfg.Limits.ClientAssertionLifetime, Random: c.deps.Random,
-			})
-			if err != nil {
-				return nil, err
-			}
-			form["client_assertion"] = assertion
-			form["client_assertion_type"] = clientassertion.AssertionType
-		} else {
-			form["client_id"] = c.cfg.ClientID.String()
+		if err := c.addClientAuthentication(form, assertionSigner, assertionKID); err != nil {
+			return nil, err
 		}
 		return par.EncodeForm(form), nil
 	}

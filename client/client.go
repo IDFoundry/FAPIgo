@@ -42,16 +42,17 @@ func validateConfig(cfg Config) error {
 	// IDTokenKeyManagement/IDTokenContentEncryption pairing below. A
 	// CIBA-only client (Endpoints.BackchannelAuthentication set
 	// instead) has no browser flow at all, so leaving both zero is
-	// valid — but a client must configure at least one flow, checked
-	// just below.
+	// valid — and so is a client_credentials-only client with neither
+	// the browser flow nor CIBA configured (RequestClientCredentialsToken
+	// needs nothing beyond Endpoints.Token, already required above), so
+	// unlike an earlier version of this check, there is no longer a
+	// blanket "at least one flow must be configured" requirement here.
 	authorizationFlowConfigured := !cfg.Endpoints.Authorization.IsZero()
 	parConfigured := !cfg.Endpoints.PushedAuthorizationRequest.IsZero()
 	if authorizationFlowConfigured != parConfigured {
 		return fmt.Errorf("client: config: endpoints.authorization and endpoints.pushed_authorization_request must both be set, or both left zero")
 	}
-	if !authorizationFlowConfigured && cfg.Endpoints.BackchannelAuthentication.IsZero() {
-		return fmt.Errorf("client: config: at least one flow must be configured: endpoints.authorization (with endpoints.pushed_authorization_request), or endpoints.backchannel_authentication")
-	}
+	cibaConfigured := !cfg.Endpoints.BackchannelAuthentication.IsZero()
 	// RedirectURI only means anything to the browser flow — BeginAuthorization
 	// is the only place this module ever sends it.
 	if authorizationFlowConfigured && cfg.RedirectURI == "" {
@@ -95,8 +96,12 @@ func validateConfig(cfg Config) error {
 	if cfg.SenderConstrain == storage.SenderConstrainDPoP && !cfg.Algorithms.DPoP.IsValid() {
 		return fmt.Errorf("client: config: algorithms.dpop is required when sender_constrain is SenderConstrainDPoP")
 	}
-	if !cfg.Algorithms.IDToken.IsValid() {
-		return fmt.Errorf("client: config: algorithms.id_token is required")
+	// Only the browser flow and CIBA can ever return an ID token —
+	// RequestClientCredentialsToken never does (RFC 6749 §4.4 has no end
+	// user), so a client_credentials-only config has no use for this
+	// algorithm at all and shouldn't be forced to set one.
+	if (authorizationFlowConfigured || cibaConfigured) && !cfg.Algorithms.IDToken.IsValid() {
+		return fmt.Errorf("client: config: algorithms.id_token is required when endpoints.authorization or endpoints.backchannel_authentication is set")
 	}
 	// IDTokenKeyManagement/IDTokenContentEncryption declare encrypted
 	// ID token support as one coherent capability — required together,
@@ -170,7 +175,7 @@ func validateConfig(cfg Config) error {
 		}
 	}
 
-	if !cfg.Endpoints.BackchannelAuthentication.IsZero() {
+	if cibaConfigured {
 		if !cfg.Algorithms.BackchannelAuthenticationRequest.IsValid() {
 			return fmt.Errorf("client: config: algorithms.backchannel_authentication_request is required when endpoints.backchannel_authentication is set")
 		}
@@ -182,8 +187,13 @@ func validateConfig(cfg Config) error {
 }
 
 func validateDependencies(cfg Config, deps Dependencies) error {
-	if deps.Sessions == nil {
-		return fmt.Errorf("client: dependencies: sessions is required")
+	// Sessions is only ever touched by the browser flow (Create in
+	// BeginAuthorization, Consume in HandleAuthorizationResponse) — CIBA
+	// correlates its own poll/ping state through BackchannelAuthenticationSession
+	// instead, and RequestClientCredentialsToken has no session concept
+	// at all, so neither needs this dependency wired up.
+	if !cfg.Endpoints.Authorization.IsZero() && deps.Sessions == nil {
+		return fmt.Errorf("client: dependencies: sessions is required when endpoints.authorization is set")
 	}
 	if deps.Keys == nil {
 		return fmt.Errorf("client: dependencies: keys is required")

@@ -58,7 +58,12 @@ core.
 > `AllowsClientCredentialsGrant`), run clean against all four FAPI2SP OP
 > "Client Credentials Grant" register profiles (MTLS+MTLS, MTLS+DPoP,
 > private key+MTLS, private key+DPoP) — see
-> [conformance/](conformance/README.md#client-credentials-grant).
+> [conformance/](conformance/README.md#client-credentials-grant). `client`
+> implements the matching relying-party side (`RequestClientCredentialsToken`),
+> including a `client_credentials`-only `Config` (no browser flow, no
+> CIBA); this has no OIDF RP-side plan to run against (the grant has no
+> browser hop at all), so it's covered by unit tests and a real-HTTP
+> `fapitest` round trip instead.
 
 ```go
 import (

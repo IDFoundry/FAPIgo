@@ -50,6 +50,18 @@ func wellKnownURL(entityID string) (*url.URL, error) {
 	return &out, nil
 }
 
+// ValidEntityID reports whether id is a well-formed OpenID Federation
+// 1.0 §1.2 Entity Identifier — an https URL with a host and no
+// fragment. NewSelfIssuer and Resolver.Resolve both enforce this same
+// rule on every entity ID they're given; exported so a caller
+// validating its own configured entity ID eagerly (e.g. client.Config's
+// or server.Config's own construction-time validation) can reuse the
+// identical check rather than duplicating it.
+func ValidEntityID(id string) error {
+	_, err := wellKnownURL(id)
+	return err
+}
+
 // fetchEntityConfiguration fetches and parses (but does not verify)
 // entityID's own Entity Configuration.
 func fetchEntityConfiguration(ctx context.Context, fetcher *fapihttp.Client, entityID string) (intfed.Statement, error) {

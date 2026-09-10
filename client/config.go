@@ -354,4 +354,43 @@ type Config struct {
 	// HTTP server of its own. Reuses storage's enum type directly, the
 	// same precedent SenderConstrain/ClientAuthMethod establish.
 	BackchannelTokenDeliveryMode storage.BackchannelTokenDeliveryMode
+
+	// Federation configures this client's OpenID Federation 1.0
+	// self-issuance — see FederationConfig's own doc comment. Zero
+	// value (EntityID empty) disables federation support entirely:
+	// EntityConfiguration always fails, matching this package's
+	// existing "zero disables the feature" precedent for
+	// Endpoints.BackchannelAuthentication and friends.
+	Federation FederationConfig
+}
+
+// FederationConfig configures this client's OpenID Federation 1.0
+// self-issuance (EntityConfiguration) — the "thin, role-specific glue"
+// federation/doc.go describes this client building over
+// federation.SelfIssuer. Meaningless (and left unvalidated) when
+// EntityID is empty.
+type FederationConfig struct {
+	// EntityID is this client's own Entity Identifier (OpenID
+	// Federation 1.0 §1.2) — see federation.SelfIssueConfig.EntityID.
+	// Conventionally the same origin EntityConfiguration's output is
+	// served from, at federation.WellKnownPath.
+	EntityID string
+
+	// AuthorityHints is this client's own "authority_hints" claim — see
+	// federation.SelfIssueConfig.AuthorityHints.
+	AuthorityHints []string
+
+	// Lifetime bounds how far in the future EntityConfiguration's own
+	// "exp" claim is set, relative to Dependencies.Clock. Required when
+	// EntityID is set.
+	Lifetime time.Duration
+
+	// Algorithm this client signs its Entity Configuration with.
+	// Dependencies.Keys must have a key registered for
+	// keys.FederationEntitySigning at this algorithm — a key distinct
+	// from every other purpose this client's Keys already serves
+	// (ClientAuthentication, RequestObjectSigning, DPoPProofSigning),
+	// since a federation identity key is never reused as a protocol
+	// key. Required when EntityID is set.
+	Algorithm fapi.SignatureAlgorithm
 }

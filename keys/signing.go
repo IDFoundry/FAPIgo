@@ -10,9 +10,10 @@ import (
 // SigningPurpose is a closed set of reasons a party might need to sign
 // something with its own key, so an implementation can select different
 // keys (or apply different rotation/HSM policy) per purpose. The first
-// four are server purposes; the last four are client purposes — both
-// roles use the same KeyManager contract (see ARCHITECTURE.md design
-// rule 5), never a crypto.Signer or raw private key.
+// four are server purposes; the next four are client purposes; the
+// last is shared by both — every role uses the same KeyManager
+// contract (see ARCHITECTURE.md design rule 5), never a crypto.Signer
+// or raw private key.
 type SigningPurpose uint8
 
 const (
@@ -48,6 +49,16 @@ const (
 	// backend-initiated CIBA flow than for a browser-adjacent PAR
 	// request object.
 	BackchannelAuthenticationRequestSigning
+
+	// FederationEntitySigning signs an OpenID Federation 1.0 Entity
+	// Configuration (federation.SelfIssuer) — this entity's own
+	// federation signing key, distinct from every other purpose above,
+	// since a party's federation identity key and its OAuth/OIDC
+	// protocol keys are never the same key. Shared by both client and
+	// server, unlike every purpose above it: an OpenID Provider and a
+	// Relying Party each self-issue their own Entity Configuration the
+	// identical way.
+	FederationEntitySigning
 )
 
 // SigningRequest describes one signature to produce. Exactly one of

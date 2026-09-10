@@ -10,11 +10,20 @@ import (
 	intfed "github.com/idfoundry/fapigo/internal/federation"
 )
 
-// entityStatementContentType is the content type every successful
+// EntityStatementContentType is the content type every successful
 // Entity Statement response MUST declare (OpenID Federation 1.0
 // §8.1.2/§9.2) — distinct from a JSON error response, which uses
-// "application/json" instead (see checkErrorResponse).
-const entityStatementContentType = "application/entity-statement+jwt"
+// "application/json" instead. Exported so an embedder serving
+// SelfIssuer's own output over HTTP sets the same value this package's
+// own fetch side requires of a peer.
+const EntityStatementContentType = "application/entity-statement+jwt"
+
+// WellKnownPath is the path (OpenID Federation 1.0 §9) an embedder
+// should serve SelfIssuer's own EntityConfiguration output under,
+// relative to SelfIssueConfig.EntityID's own origin — the same suffix
+// wellKnownURL concatenates when this package fetches a peer's Entity
+// Configuration.
+const WellKnownPath = "/.well-known/openid-federation"
 
 // wellKnownURL builds entityID's Federation Entity Configuration
 // endpoint (OpenID Federation 1.0 §9): "/.well-known/openid-federation"
@@ -37,7 +46,7 @@ func wellKnownURL(entityID string) (*url.URL, error) {
 		return nil, fmt.Errorf("federation: entity identifier %q must not have a fragment", entityID)
 	}
 	out := *u
-	out.Path = strings.TrimSuffix(u.Path, "/") + "/.well-known/openid-federation"
+	out.Path = strings.TrimSuffix(u.Path, "/") + WellKnownPath
 	return &out, nil
 }
 
@@ -48,7 +57,7 @@ func fetchEntityConfiguration(ctx context.Context, fetcher *fapihttp.Client, ent
 	if err != nil {
 		return intfed.Statement{}, err
 	}
-	res, err := fetcher.Fetch(ctx, fapihttp.FetchRequest{URL: target, ExpectedContentType: entityStatementContentType})
+	res, err := fetcher.Fetch(ctx, fapihttp.FetchRequest{URL: target, ExpectedContentType: EntityStatementContentType})
 	if err != nil {
 		return intfed.Statement{}, fmt.Errorf("federation: fetch entity configuration for %q: %w", entityID, err)
 	}
@@ -74,7 +83,7 @@ func fetchSubordinateStatement(ctx context.Context, fetcher *fapihttp.Client, is
 	q.Set("sub", subjectID)
 	target.RawQuery = q.Encode()
 
-	res, err := fetcher.Fetch(ctx, fapihttp.FetchRequest{URL: target, ExpectedContentType: entityStatementContentType})
+	res, err := fetcher.Fetch(ctx, fapihttp.FetchRequest{URL: target, ExpectedContentType: EntityStatementContentType})
 	if err != nil {
 		return intfed.Statement{}, fmt.Errorf("federation: fetch subordinate statement for %q from %q: %w", subjectID, issuerFetchEndpoint, err)
 	}

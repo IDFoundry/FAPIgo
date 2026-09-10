@@ -516,7 +516,7 @@ func (s *Server) validateAuthorizationParameters(params map[string]json.RawMessa
 		if err != nil {
 			return nil, newError(ErrorInvalidRequest, 400, "scope must be a string", err)
 		}
-		if err := validateScope(scope, client); err != nil {
+		if err := s.validateScope(scope, client); err != nil {
 			return nil, newError(ErrorInvalidRequest, 400, "scope is not valid for this client", err)
 		}
 	}
@@ -579,13 +579,30 @@ func (s *Server) reconcileParDPoPBinding(ctx context.Context, proof string, para
 	return out, nil
 }
 
-func validateScope(scope string, client storage.RegisteredClient) error {
+func (s *Server) validateScope(scope string, client storage.RegisteredClient) error {
 	for _, tok := range strings.Fields(scope) {
-		if !client.AllowsScope(tok) {
+		if !s.clientAllowsScope(client, tok) {
 			return fmt.Errorf("scope %q is not permitted for this client", tok)
 		}
 	}
 	return nil
+}
+
+// clientAllowsScope is the single choke point every grant's own scope
+// check (PAR, CIBA, client_credentials) funnels through: client's own
+// AllowedScopes, narrowed further by Config.OAuthOnly refusing "openid"
+// universally — see its own doc comment. Because every scope a request
+// or a resource owner's grant can ever carry traces back to one of
+// these checks (a refresh or CIBA-notified poll only ever narrows an
+// already-validated grant, never adds to it), this is also what
+// guarantees the openid-gated branches in token.go/refresh.go/
+// backchannel_token.go (and Metadata's own OIDC fields) can never
+// disagree with what OAuthOnly actually allowed through.
+func (s *Server) clientAllowsScope(client storage.RegisteredClient, scope string) bool {
+	if s.cfg.OAuthOnly && scope == "openid" {
+		return false
+	}
+	return client.AllowsScope(scope)
 }
 
 func formParametersToMap(params []FormParameter) (map[string]string, error) {

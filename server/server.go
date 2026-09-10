@@ -74,8 +74,8 @@ func validateConfig(cfg Config) error {
 			return fmt.Errorf("server: config: algorithms.request_object contains an invalid algorithm")
 		}
 	}
-	if !cfg.Algorithms.IDToken.IsValid() {
-		return fmt.Errorf("server: config: algorithms.id_token is required")
+	if !cfg.OAuthOnly && !cfg.Algorithms.IDToken.IsValid() {
+		return fmt.Errorf("server: config: algorithms.id_token is required unless oauth_only is set")
 	}
 	idTokenEncKeyMgmtSet := len(cfg.Algorithms.IDTokenEncryptionKeyManagement) > 0
 	idTokenEncContentEncSet := len(cfg.Algorithms.IDTokenEncryptionContentEncryption) > 0
@@ -141,8 +141,8 @@ func validateConfig(cfg Config) error {
 	if cfg.Limits.AccessTokenLifetime <= 0 {
 		return fmt.Errorf("server: config: limits.access_token_lifetime must be positive")
 	}
-	if cfg.Limits.IDTokenLifetime <= 0 {
-		return fmt.Errorf("server: config: limits.id_token_lifetime must be positive")
+	if !cfg.OAuthOnly && cfg.Limits.IDTokenLifetime <= 0 {
+		return fmt.Errorf("server: config: limits.id_token_lifetime must be positive unless oauth_only is set")
 	}
 	if cfg.Limits.RefreshTokenLifetime <= 0 {
 		return fmt.Errorf("server: config: limits.refresh_token_lifetime must be positive")

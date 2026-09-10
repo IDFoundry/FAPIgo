@@ -32,18 +32,26 @@ type Metadata struct {
 	ResponseTypesSupported        []string `json:"response_types_supported,omitempty"`
 	ResponseModesSupported        []string `json:"response_modes_supported,omitempty"`
 	GrantTypesSupported           []string `json:"grant_types_supported,omitempty"`
-	SubjectTypesSupported         []string `json:"subject_types_supported,omitempty"`
 	CodeChallengeMethodsSupported []string `json:"code_challenge_methods_supported,omitempty"`
 
 	TokenEndpointAuthMethodsSupported          []string `json:"token_endpoint_auth_methods_supported,omitempty"`
 	TokenEndpointAuthSigningAlgValuesSupported []string `json:"token_endpoint_auth_signing_alg_values_supported,omitempty"`
 	RequestObjectSigningAlgValuesSupported     []string `json:"request_object_signing_alg_values_supported,omitempty"`
-	IDTokenSigningAlgValuesSupported           []string `json:"id_token_signing_alg_values_supported,omitempty"`
 
 	// AuthorizationSigningAlgValuesSupported is set only under
 	// ProfileFAPISecurityWithMessageSigning, since that's the only case
 	// this server signs authorization responses (JARM) at all.
 	AuthorizationSigningAlgValuesSupported []string `json:"authorization_signing_alg_values_supported,omitempty"`
+
+	// SubjectTypesSupported and IDTokenSigningAlgValuesSupported are
+	// OpenID Connect Discovery 1.0 fields with no RFC 8414 counterpart —
+	// omitted entirely under Config.OAuthOnly, so a pure OAuth 2.0
+	// deployment's own discovery document doesn't claim ID token
+	// support it can never actually provide (Config.OAuthOnly's own doc
+	// comment). Set unconditionally otherwise, matching this package's
+	// original behavior.
+	SubjectTypesSupported            []string `json:"subject_types_supported,omitempty"`
+	IDTokenSigningAlgValuesSupported []string `json:"id_token_signing_alg_values_supported,omitempty"`
 
 	// IDTokenEncryptionAlgValuesSupported/IDTokenEncryptionEncValuesSupported
 	// are set only when Config.Algorithms.IDTokenEncryptionKeyManagement/
@@ -131,16 +139,19 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 
 		ResponseTypesSupported:        []string{"code"},
 		GrantTypesSupported:           []string{"authorization_code", "refresh_token"},
-		SubjectTypesSupported:         []string{"public"},
 		CodeChallengeMethodsSupported: []string{"S256"},
 
 		TokenEndpointAuthMethodsSupported:          []string{storage.ClientAuthMethodPrivateKeyJWT.String()},
 		TokenEndpointAuthSigningAlgValuesSupported: algorithmSetStrings(s.cfg.Algorithms.ClientAssertion),
 		RequestObjectSigningAlgValuesSupported:     algorithmSetStrings(s.cfg.Algorithms.RequestObject),
-		IDTokenSigningAlgValuesSupported:           []string{s.cfg.Algorithms.IDToken.String()},
 
 		RequirePushedAuthorizationRequests:         true,
 		AuthorizationResponseIssParameterSupported: true,
+	}
+
+	if !s.cfg.OAuthOnly {
+		md.SubjectTypesSupported = []string{"public"}
+		md.IDTokenSigningAlgValuesSupported = []string{s.cfg.Algorithms.IDToken.String()}
 	}
 
 	if s.cfg.Profile == ProfileFAPISecurityWithMessageSigning {

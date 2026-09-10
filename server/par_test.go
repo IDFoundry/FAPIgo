@@ -547,6 +547,89 @@ func newHarness(t *testing.T, profile server.Profile, allowRequestObjects bool) 
 	return harness{server: srv, key: key, serverKey: serverKey, transactions: transactions, grants: grants, audit: audit, revocation: revocation, now: now}
 }
 
+// newHarnessOAuthOnly mirrors newHarness (baseline profile, request
+// objects allowed) with Config.OAuthOnly set — Algorithms.IDToken and
+// Limits.IDTokenLifetime deliberately left zero, since OAuthOnly is
+// exactly what makes that valid (TestNewAcceptsOAuthOnlyConfigWithoutIDTokenRequirements
+// covers that construction path on its own). testClientID keeps
+// "openid" in its own AllowedScopes, same as every other newHarness
+// variant — deliberately, so a PAR test using this harness proves
+// OAuthOnly overrides what the client would otherwise be allowed to
+// request, not merely that an unregistered scope is rejected the
+// ordinary way.
+func newHarnessOAuthOnly(t *testing.T) harness {
+	t.Helper()
+	now := time.Now()
+	key := generateKey(t)
+	serverKey := generateKey(t)
+
+	client, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
+		ID:                       testClientID,
+		RedirectURIs:             []fapi.RegisteredRedirectURI{testRedirectURI},
+		ClientAssertionAlgorithm: fapi.ES256,
+		RequestObjectAlgorithm:   fapi.ES256,
+		AllowedScopes:            []string{"openid", "accounts", "offline_access"},
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+
+	issuer, err := fapi.ParseIssuerURL(testIssuer)
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+
+	transactions := &fakeTransactionStore{}
+	grants := &fakeGrantStore{}
+	audit := &fakeAuditSink{}
+	revocation := &fakeRevocationSink{}
+
+	cfg := server.Config{
+		Issuer:    issuer,
+		Endpoints: testEndpoints(t),
+		Profile:   server.ProfileFAPISecurity,
+		Algorithms: server.AlgorithmPolicy{
+			ClientAssertion: server.AlgorithmSet{fapi.ES256},
+			RequestObject:   server.AlgorithmSet{fapi.ES256},
+		},
+		Limits: server.Limits{
+			PushedRequestLifetime:      90 * time.Second,
+			MaxClientAssertionLifetime: time.Minute,
+			MaxRequestObjectLifetime:   time.Minute,
+			InteractionLifetime:        5 * time.Minute,
+			AuthorizationCodeLifetime:  time.Minute,
+			AccessTokenLifetime:        5 * time.Minute,
+			RefreshTokenLifetime:       5 * time.Minute,
+			MaxDPoPProofAge:            time.Minute,
+			MaxClockSkew:               5 * time.Second,
+		},
+		Assurance: server.AssuranceDevelopment,
+		OAuthOnly: true,
+	}
+	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
+	deps := server.Dependencies{
+		Clients:      &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
+		Transactions: transactions,
+		Grants:       grants,
+		Replay:       &fakeReplayStore{},
+		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
+			testClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
+		}},
+		Keys:         serverKeyManager,
+		AccessTokens: server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:   revocation,
+		Audit:        audit,
+		Clock:        fixedClock{now: now},
+		Random:       rand.Reader,
+	}
+
+	srv, err := server.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+	return harness{server: srv, key: key, serverKey: serverKey, transactions: transactions, grants: grants, audit: audit, revocation: revocation, now: now}
+}
+
 // newHarnessWithClientKeys mirrors newHarness but lets a test supply
 // its own ClientKeySource — for exercising resolveClientKey's own
 // candidate-matching logic (kid/algorithm skip-and-continue, upstream
@@ -1113,6 +1196,28 @@ func TestPushAuthorizationRequestScopeNotAllowed(t *testing.T) {
 	for i := range params {
 		if params[i].Name == "scope" {
 			params[i].Value = "openid payments"
+		}
+	}
+
+	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: params},
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequest)
+	}
+}
+
+// TestPushAuthorizationRequestOAuthOnlyRejectsOpenIDScope confirms
+// Config.OAuthOnly refuses "openid" even though newHarnessOAuthOnly's
+// own testClientID has it in AllowedScopes — the deployment-wide switch
+// overrides what an individual client is otherwise registered for, not
+// merely a client-level restriction.
+func TestPushAuthorizationRequestOAuthOnlyRejectsOpenIDScope(t *testing.T) {
+	h := newHarnessOAuthOnly(t)
+	params := plainFormParameters(t, h.clientAssertion(t), nil)
+	for i := range params {
+		if params[i].Name == "scope" {
+			params[i].Value = "openid accounts"
 		}
 	}
 

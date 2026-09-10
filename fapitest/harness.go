@@ -108,6 +108,15 @@ type Config struct {
 	// server-wide and permitting a specific client to use it are two
 	// separate opt-ins.
 	ClientCredentialsGrant bool
+
+	// OAuthOnly, if set, builds the harness's server with
+	// Config.OAuthOnly (Algorithms.IDToken and Limits.IDTokenLifetime
+	// left zero, valid only because of it) — a pure OAuth 2.0 AS that
+	// refuses "openid" as a requested scope and never issues an ID
+	// token. The harness's registered client keeps "openid" in its own
+	// AllowedScopes regardless, so a test using this proves OAuthOnly's
+	// server-wide refusal, not merely an unregistered scope.
+	OAuthOnly bool
 }
 
 // Harness wires a real client.Client, server.Server and resource.Verifier
@@ -287,6 +296,11 @@ func New(t *testing.T, cfg Config) *Harness {
 		Assurance:              server.AssuranceDevelopment,
 		Extensions:             cfg.Extensions,
 		ClientCredentialsGrant: cfg.ClientCredentialsGrant,
+		OAuthOnly:              cfg.OAuthOnly,
+	}
+	if cfg.OAuthOnly {
+		srvCfg.Algorithms.IDToken = 0
+		srvCfg.Limits.IDTokenLifetime = 0
 	}
 	if cfg.EncryptIDTokens {
 		srvCfg.Algorithms.IDTokenEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.RSAOAEP256}

@@ -156,6 +156,42 @@ func TestNewRejectsMissingDependencies(t *testing.T) {
 	}
 }
 
+// TestNewAcceptsOAuthOnlyConfigWithoutIDTokenRequirements confirms
+// Config.OAuthOnly relaxes exactly the two requirements that only ever
+// matter for a server capable of issuing an ID token —
+// Algorithms.IDToken and Limits.IDTokenLifetime — and nothing else.
+func TestNewAcceptsOAuthOnlyConfigWithoutIDTokenRequirements(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.OAuthOnly = true
+	cfg.Algorithms.IDToken = 0
+	cfg.Limits.IDTokenLifetime = 0
+
+	if _, err := server.New(cfg, validDependencies()); err != nil {
+		t.Fatalf("New(OAuthOnly, no id token algorithm/lifetime): %v", err)
+	}
+}
+
+// TestNewRejectsIDTokenRequirementsWhenNotOAuthOnly confirms OAuthOnly's
+// relaxation is opt-in, not a silent, universal one — a server that
+// never set OAuthOnly still needs both fields exactly as before, the
+// same TestNewRejectsInvalidConfig cases this test would otherwise
+// duplicate.
+func TestNewRejectsIDTokenRequirementsWhenNotOAuthOnly(t *testing.T) {
+	cases := map[string]func(*server.Config){
+		"zero id token algorithm": func(c *server.Config) { c.Algorithms.IDToken = 0 },
+		"zero id token lifetime":  func(c *server.Config) { c.Limits.IDTokenLifetime = 0 },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg := validConfig(t)
+			mutate(&cfg)
+			if _, err := server.New(cfg, validDependencies()); err == nil {
+				t.Fatalf("New(%s, OAuthOnly false) = nil error, want error", name)
+			}
+		})
+	}
+}
+
 func TestNewRequiresJARMConfigUnderMessageSigning(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Profile = server.ProfileFAPISecurityWithMessageSigning

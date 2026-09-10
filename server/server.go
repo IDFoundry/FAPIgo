@@ -5,6 +5,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/extension"
+	"github.com/idfoundry/fapigo/federation"
 )
 
 // Server is a FAPI 2.0 authorization-server engine. It is entirely
@@ -197,6 +198,18 @@ func validateConfig(cfg Config) error {
 		}
 		if cfg.Limits.JARMResponseLifetime <= 0 {
 			return fmt.Errorf("server: config: limits.jarm_response_lifetime must be positive under ProfileFAPISecurityWithMessageSigning")
+		}
+	}
+
+	if cfg.Federation.EntityID != "" {
+		if err := federation.ValidEntityID(cfg.Federation.EntityID); err != nil {
+			return fmt.Errorf("server: config: federation.entity_id: %w", err)
+		}
+		if cfg.Federation.Lifetime <= 0 {
+			return fmt.Errorf("server: config: federation.lifetime must be positive when federation.entity_id is set")
+		}
+		if !cfg.Federation.Algorithm.IsValid() {
+			return fmt.Errorf("server: config: federation.algorithm is required when federation.entity_id is set")
 		}
 	}
 	return nil

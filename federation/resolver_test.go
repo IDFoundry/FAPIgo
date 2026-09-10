@@ -598,6 +598,7 @@ func TestWellKnownURLRejectsInvalidEntityID(t *testing.T) {
 		"not-a-url",
 		"http://plain.example.org",   // wrong scheme
 		"https://example.org/x#frag", // fragment not allowed
+		"https://example.org/%zz",    // invalid percent-encoding: fails url.Parse itself
 	} {
 		if _, err := r.Resolve(context.Background(), id); err == nil {
 			t.Errorf("Resolve(%q) = nil error, want error", id)

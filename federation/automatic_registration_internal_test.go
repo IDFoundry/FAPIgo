@@ -1,0 +1,247 @@
+package federation
+
+import (
+	"encoding/json"
+	"testing"
+
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/storage"
+)
+
+const testRPJWKS = `{"keys":[{"kty":"EC","crv":"P-256","kid":"rp-1","alg":"ES256","x":"MKBCTNIcKUSDii11ySs3526iDZ8AiTo7Tu6KPAqv7D4","y":"4Etl4P0Sr2SFmvDMTFwbjKz8XkNhP4EQhQGE-tfWFdI"}]}`
+
+func validRPMetadataJSON() string {
+	return `{
+		"redirect_uris": ["https://rp.example.org/cb"],
+		"token_endpoint_auth_method": "private_key_jwt",
+		"token_endpoint_auth_signing_alg": "ES256",
+		"jwks": ` + testRPJWKS + `
+	}`
+}
+
+func TestRegisteredClientConfigFromMetadata(t *testing.T) {
+	cfg, jwks, err := registeredClientConfigFromMetadata("https://rp.example.org", json.RawMessage(validRPMetadataJSON()), []string{"openid"})
+	if err != nil {
+		t.Fatalf("registeredClientConfigFromMetadata: %v", err)
+	}
+	if cfg.ID != "https://rp.example.org" {
+		t.Errorf("ID = %q", cfg.ID)
+	}
+	if len(cfg.RedirectURIs) != 1 || cfg.RedirectURIs[0] != "https://rp.example.org/cb" {
+		t.Errorf("RedirectURIs = %v", cfg.RedirectURIs)
+	}
+	if cfg.ClientAssertionAlgorithm != fapi.ES256 {
+		t.Errorf("ClientAssertionAlgorithm = %v, want ES256", cfg.ClientAssertionAlgorithm)
+	}
+	if len(jwks) == 0 {
+		t.Errorf("jwks is empty")
+	}
+}
+
+func TestRegisteredClientConfigFromMetadataRejectsMissingRedirectURIs(t *testing.T) {
+	raw := `{"token_endpoint_auth_method":"private_key_jwt","token_endpoint_auth_signing_alg":"ES256","jwks":` + testRPJWKS + `}`
+	if _, _, err := registeredClientConfigFromMetadata("https://rp.example.org", json.RawMessage(raw), []string{"openid"}); err == nil {
+		t.Fatalf("registeredClientConfigFromMetadata(no redirect_uris) = nil error, want error")
+	}
+}
+
+func TestRegisteredClientConfigFromMetadataRejectsMissingJWKS(t *testing.T) {
+	raw := `{"redirect_uris":["https://rp.example.org/cb"],"token_endpoint_auth_method":"private_key_jwt","token_endpoint_auth_signing_alg":"ES256"}`
+	if _, _, err := registeredClientConfigFromMetadata("https://rp.example.org", json.RawMessage(raw), []string{"openid"}); err == nil {
+		t.Fatalf("registeredClientConfigFromMetadata(no jwks) = nil error, want error")
+	}
+}
+
+func TestRegisteredClientConfigFromMetadataRejectsUnsupportedAuthMethod(t *testing.T) {
+	raw := `{"redirect_uris":["https://rp.example.org/cb"],"token_endpoint_auth_method":"self_signed_tls_client_auth","jwks":` + testRPJWKS + `}`
+	if _, _, err := registeredClientConfigFromMetadata("https://rp.example.org", json.RawMessage(raw), []string{"openid"}); err == nil {
+		t.Fatalf("registeredClientConfigFromMetadata(self_signed_tls_client_auth) = nil error, want error")
+	}
+}
+
+func TestRegisteredClientConfigFromMetadataRejectsInvalidAuthMethod(t *testing.T) {
+	raw := `{"redirect_uris":["https://rp.example.org/cb"],"token_endpoint_auth_method":"client_secret_basic","jwks":` + testRPJWKS + `}`
+	if _, _, err := registeredClientConfigFromMetadata("https://rp.example.org", json.RawMessage(raw), []string{"openid"}); err == nil {
+		t.Fatalf("registeredClientConfigFromMetadata(client_secret_basic) = nil error, want error")
+	}
+}
+
+func TestRegisteredClientConfigFromMetadataRejectsInvalidAssertionAlgorithm(t *testing.T) {
+	raw := `{"redirect_uris":["https://rp.example.org/cb"],"token_endpoint_auth_method":"private_key_jwt","token_endpoint_auth_signing_alg":"none","jwks":` + testRPJWKS + `}`
+	if _, _, err := registeredClientConfigFromMetadata("https://rp.example.org", json.RawMessage(raw), []string{"openid"}); err == nil {
+		t.Fatalf("registeredClientConfigFromMetadata(alg=none) = nil error, want error")
+	}
+}
+
+func TestRegisteredClientConfigFromMetadataRejectsMalformedJSON(t *testing.T) {
+	if _, _, err := registeredClientConfigFromMetadata("https://rp.example.org", json.RawMessage(`not json`), []string{"openid"}); err == nil {
+		t.Fatalf("registeredClientConfigFromMetadata(malformed json) = nil error, want error")
+	}
+}
+
+func TestRegisteredClientConfigFromMetadataAcceptsRequestObjectSigningAlg(t *testing.T) {
+	raw := `{
+		"redirect_uris": ["https://rp.example.org/cb"],
+		"token_endpoint_auth_method": "private_key_jwt",
+		"token_endpoint_auth_signing_alg": "ES256",
+		"request_object_signing_alg": "ES256",
+		"jwks": ` + testRPJWKS + `
+	}`
+	cfg, _, err := registeredClientConfigFromMetadata("https://rp.example.org", json.RawMessage(raw), []string{"openid"})
+	if err != nil {
+		t.Fatalf("registeredClientConfigFromMetadata: %v", err)
+	}
+	if alg, permitted := cfg.RequestObjectAlgorithm, cfg.RequestObjectAlgorithm != 0; !permitted || alg != fapi.ES256 {
+		t.Errorf("RequestObjectAlgorithm = %v, permitted = %v, want ES256/true", alg, permitted)
+	}
+}
+
+func TestRegisteredClientConfigFromMetadataRejectsInvalidRequestObjectSigningAlg(t *testing.T) {
+	raw := `{
+		"redirect_uris": ["https://rp.example.org/cb"],
+		"token_endpoint_auth_method": "private_key_jwt",
+		"token_endpoint_auth_signing_alg": "ES256",
+		"request_object_signing_alg": "bogus",
+		"jwks": ` + testRPJWKS + `
+	}`
+	if _, _, err := registeredClientConfigFromMetadata("https://rp.example.org", json.RawMessage(raw), []string{"openid"}); err == nil {
+		t.Fatalf("registeredClientConfigFromMetadata(bad request_object_signing_alg) = nil error, want error")
+	}
+}
+
+func TestRegisteredClientConfigFromMetadataMapsMTLSSenderConstrain(t *testing.T) {
+	raw := `{
+		"redirect_uris": ["https://rp.example.org/cb"],
+		"token_endpoint_auth_method": "private_key_jwt",
+		"token_endpoint_auth_signing_alg": "ES256",
+		"tls_client_certificate_bound_access_tokens": true,
+		"jwks": ` + testRPJWKS + `
+	}`
+	cfg, _, err := registeredClientConfigFromMetadata("https://rp.example.org", json.RawMessage(raw), []string{"openid"})
+	if err != nil {
+		t.Fatalf("registeredClientConfigFromMetadata: %v", err)
+	}
+	if cfg.SenderConstrain != storage.SenderConstrainMTLS {
+		t.Errorf("SenderConstrain = %v, want mtls", cfg.SenderConstrain)
+	}
+}
+
+func TestRegisteredClientConfigFromMetadataMapsIDTokenEncryption(t *testing.T) {
+	raw := `{
+		"redirect_uris": ["https://rp.example.org/cb"],
+		"token_endpoint_auth_method": "private_key_jwt",
+		"token_endpoint_auth_signing_alg": "ES256",
+		"id_token_encrypted_response_alg": "ECDH-ES+A256KW",
+		"id_token_encrypted_response_enc": "A256GCM",
+		"jwks": ` + testRPJWKS + `
+	}`
+	cfg, _, err := registeredClientConfigFromMetadata("https://rp.example.org", json.RawMessage(raw), []string{"openid"})
+	if err != nil {
+		t.Fatalf("registeredClientConfigFromMetadata: %v", err)
+	}
+	km, ce, enabled := cfg.IDTokenEncryptionKeyManagement, cfg.IDTokenEncryptionContentEncryption, cfg.IDTokenEncryptionKeyManagement != 0
+	if !enabled || km == 0 || ce == 0 {
+		t.Errorf("IDTokenEncryption = %v/%v/%v, want a non-zero pair", km, ce, enabled)
+	}
+}
+
+func TestRegisteredClientConfigFromMetadataRejectsUnpairedIDTokenEncryption(t *testing.T) {
+	raw := `{
+		"redirect_uris": ["https://rp.example.org/cb"],
+		"token_endpoint_auth_method": "private_key_jwt",
+		"token_endpoint_auth_signing_alg": "ES256",
+		"id_token_encrypted_response_alg": "ECDH-ES+A256KW",
+		"jwks": ` + testRPJWKS + `
+	}`
+	if _, _, err := registeredClientConfigFromMetadata("https://rp.example.org", json.RawMessage(raw), []string{"openid"}); err == nil {
+		t.Fatalf("registeredClientConfigFromMetadata(id_token enc alg without enc) = nil error, want error")
+	}
+}
+
+func TestRegisteredClientConfigFromMetadataRejectsInvalidIDTokenEncryptionKeyManagement(t *testing.T) {
+	raw := `{
+		"redirect_uris": ["https://rp.example.org/cb"],
+		"token_endpoint_auth_method": "private_key_jwt",
+		"token_endpoint_auth_signing_alg": "ES256",
+		"id_token_encrypted_response_alg": "bogus",
+		"id_token_encrypted_response_enc": "A256GCM",
+		"jwks": ` + testRPJWKS + `
+	}`
+	if _, _, err := registeredClientConfigFromMetadata("https://rp.example.org", json.RawMessage(raw), []string{"openid"}); err == nil {
+		t.Fatalf("registeredClientConfigFromMetadata(bogus id_token_encrypted_response_alg) = nil error, want error")
+	}
+}
+
+func TestRegisteredClientConfigFromMetadataRejectsInvalidIDTokenEncryptionContentEncryption(t *testing.T) {
+	raw := `{
+		"redirect_uris": ["https://rp.example.org/cb"],
+		"token_endpoint_auth_method": "private_key_jwt",
+		"token_endpoint_auth_signing_alg": "ES256",
+		"id_token_encrypted_response_alg": "ECDH-ES+A256KW",
+		"id_token_encrypted_response_enc": "bogus",
+		"jwks": ` + testRPJWKS + `
+	}`
+	if _, _, err := registeredClientConfigFromMetadata("https://rp.example.org", json.RawMessage(raw), []string{"openid"}); err == nil {
+		t.Fatalf("registeredClientConfigFromMetadata(bogus id_token_encrypted_response_enc) = nil error, want error")
+	}
+}
+
+func TestRegisteredClientConfigFromMetadataMapsUserInfoEncryption(t *testing.T) {
+	raw := `{
+		"redirect_uris": ["https://rp.example.org/cb"],
+		"token_endpoint_auth_method": "private_key_jwt",
+		"token_endpoint_auth_signing_alg": "ES256",
+		"userinfo_encrypted_response_alg": "ECDH-ES+A256KW",
+		"userinfo_encrypted_response_enc": "A256GCM",
+		"jwks": ` + testRPJWKS + `
+	}`
+	cfg, _, err := registeredClientConfigFromMetadata("https://rp.example.org", json.RawMessage(raw), []string{"openid"})
+	if err != nil {
+		t.Fatalf("registeredClientConfigFromMetadata: %v", err)
+	}
+	km, ce, enabled := cfg.UserInfoEncryptionKeyManagement, cfg.UserInfoEncryptionContentEncryption, cfg.UserInfoEncryptionKeyManagement != 0
+	if !enabled || km == 0 || ce == 0 {
+		t.Errorf("UserInfoEncryption = %v/%v/%v, want a non-zero pair", km, ce, enabled)
+	}
+}
+
+func TestRegisteredClientConfigFromMetadataRejectsInvalidUserInfoEncryptionKeyManagement(t *testing.T) {
+	raw := `{
+		"redirect_uris": ["https://rp.example.org/cb"],
+		"token_endpoint_auth_method": "private_key_jwt",
+		"token_endpoint_auth_signing_alg": "ES256",
+		"userinfo_encrypted_response_alg": "bogus",
+		"userinfo_encrypted_response_enc": "A256GCM",
+		"jwks": ` + testRPJWKS + `
+	}`
+	if _, _, err := registeredClientConfigFromMetadata("https://rp.example.org", json.RawMessage(raw), []string{"openid"}); err == nil {
+		t.Fatalf("registeredClientConfigFromMetadata(bogus userinfo_encrypted_response_alg) = nil error, want error")
+	}
+}
+
+func TestRegisteredClientConfigFromMetadataRejectsInvalidUserInfoEncryptionContentEncryption(t *testing.T) {
+	raw := `{
+		"redirect_uris": ["https://rp.example.org/cb"],
+		"token_endpoint_auth_method": "private_key_jwt",
+		"token_endpoint_auth_signing_alg": "ES256",
+		"userinfo_encrypted_response_alg": "ECDH-ES+A256KW",
+		"userinfo_encrypted_response_enc": "bogus",
+		"jwks": ` + testRPJWKS + `
+	}`
+	if _, _, err := registeredClientConfigFromMetadata("https://rp.example.org", json.RawMessage(raw), []string{"openid"}); err == nil {
+		t.Fatalf("registeredClientConfigFromMetadata(bogus userinfo_encrypted_response_enc) = nil error, want error")
+	}
+}
+
+func TestRegisteredClientConfigFromMetadataRejectsUnpairedUserInfoEncryption(t *testing.T) {
+	raw := `{
+		"redirect_uris": ["https://rp.example.org/cb"],
+		"token_endpoint_auth_method": "private_key_jwt",
+		"token_endpoint_auth_signing_alg": "ES256",
+		"userinfo_encrypted_response_enc": "A256GCM",
+		"jwks": ` + testRPJWKS + `
+	}`
+	if _, _, err := registeredClientConfigFromMetadata("https://rp.example.org", json.RawMessage(raw), []string{"openid"}); err == nil {
+		t.Fatalf("registeredClientConfigFromMetadata(userinfo enc without alg) = nil error, want error")
+	}
+}

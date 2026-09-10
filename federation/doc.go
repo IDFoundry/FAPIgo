@@ -32,13 +32,24 @@
 // mirroring how a TLS client is configured with a root CA bundle rather
 // than discovering trust roots live over the network.
 //
-// Trust marks (OpenID Federation 1.0 §7), the naming_constraints and
+// Trust marks (OpenID Federation 1.0 §7) and the naming_constraints and
 // allowed_entity_types members of a Subordinate Statement's own
-// constraints claim (OpenID Federation 1.0 §6.2.2/§6.2.3), and
-// automatic/explicit client registration are not implemented by this
-// package — Resolve enforces max_path_length (the constraint most
-// directly relevant to resource exhaustion) and leaves the rest for a
-// later revision once a concrete caller needs them, the same
-// deliberately-narrow-first-cut precedent internal/federation's own
-// doc.go already sets for trust marks.
+// constraints claim (OpenID Federation 1.0 §6.2.2/§6.2.3) are not
+// implemented by this package — Resolve enforces max_path_length (the
+// constraint most directly relevant to resource exhaustion) and leaves
+// the rest for a later revision once a concrete caller needs them, the
+// same deliberately-narrow-first-cut precedent internal/federation's
+// own doc.go already sets for trust marks.
+//
+// Automatic client registration (OpenID Federation 1.0 §12.1) is
+// implemented by AutomaticClientRepository/AutomaticClientKeySource,
+// for an OpenID Provider that wants to accept a Relying Party's own
+// Entity Identifier as client_id without a prior registration step —
+// see AutomaticClientRepository's own doc comment for exactly which
+// registration shapes this first version supports (only
+// ClientAuthMethodPrivateKeyJWT, only an inline jwks, no CIBA or
+// client_credentials) and which it deliberately doesn't yet
+// (server-side request_uri/JAR/PAR-level enforcement of §12.1.1's own
+// aud/sub/jti Request Object rules remains a caller concern; Explicit
+// Registration, §12.2, is not implemented by this package at all).
 package federation

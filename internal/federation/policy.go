@@ -109,7 +109,13 @@ func cloneParamPolicies(params map[string]PolicyOperators) map[string]PolicyOper
 // requirement when the operator is listed as critical, and erring on
 // the side of rejecting an ambiguous merge otherwise.
 func mergeOperators(current, next PolicyOperators, crit []string) (PolicyOperators, error) {
-	merged := make(PolicyOperators, len(current)+len(next))
+	// CodeQL (go/allocation-size-overflow) flags len(current)+len(next)
+	// as a theoretical overflow in the make() size argument — the
+	// capacity is only a hint, so drop the addition rather than carry
+	// the finding, matching this repo's own established fix for the
+	// identical pattern (server/token.go's withIdentityClaims,
+	// cmd/conformance-as/resource.go's userinfoHandler).
+	merged := make(PolicyOperators, len(current))
 	for name, value := range current {
 		merged[name] = value
 	}
@@ -255,7 +261,9 @@ func isStandardOperator(name string) bool {
 // behavior for an implementation with no support for a given
 // non-standard operator at all.
 func ApplyPolicy(policy MetadataPolicy, crit []string, metadata map[string]json.RawMessage) (map[string]json.RawMessage, error) {
-	entityTypes := make(map[string]bool, len(policy)+len(metadata))
+	// Capacity is only a hint; see mergeOperators' own doc comment on
+	// why this drops the addition rather than sum the two lengths.
+	entityTypes := make(map[string]bool, len(policy))
 	for entityType := range policy {
 		entityTypes[entityType] = true
 	}
@@ -285,7 +293,7 @@ func ApplyPolicy(policy MetadataPolicy, crit []string, metadata map[string]json.
 }
 
 func applyEntityTypePolicy(params map[string]PolicyOperators, crit []string, current map[string]json.RawMessage) (map[string]json.RawMessage, error) {
-	claims := make(map[string]bool, len(params)+len(current))
+	claims := make(map[string]bool, len(params))
 	for claim := range params {
 		claims[claim] = true
 	}

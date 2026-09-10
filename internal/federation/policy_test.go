@@ -324,6 +324,86 @@ func TestMergePolicyEntityTypeAndParameterUnion(t *testing.T) {
 	}
 }
 
+func TestMergePolicyNilShortcuts(t *testing.T) {
+	p := mustPolicy(t, `{"openid_relying_party":{"subject_type":{"value":"pairwise"}}}`)
+
+	got, err := MergePolicy(nil, nil, p, []string{"foo"})
+	if err != nil {
+		t.Fatalf("MergePolicy(nil current): %v", err)
+	}
+	assertPolicyEqual(t, got, p)
+
+	got, err = MergePolicy(p, []string{"foo"}, nil, nil)
+	if err != nil {
+		t.Fatalf("MergePolicy(nil next): %v", err)
+	}
+	assertPolicyEqual(t, got, p)
+}
+
+func TestUnionStringsBothDirections(t *testing.T) {
+	if got := unionStrings(nil, []string{"a"}); len(got) != 1 || got[0] != "a" {
+		t.Errorf("unionStrings(nil, [a]) = %v, want [a]", got)
+	}
+	if got := unionStrings([]string{"a"}, nil); len(got) != 1 || got[0] != "a" {
+		t.Errorf("unionStrings([a], nil) = %v, want [a]", got)
+	}
+	got := unionStrings([]string{"a", "b"}, []string{"b", "c"})
+	want := map[string]bool{"a": true, "b": true, "c": true}
+	if len(got) != 3 {
+		t.Fatalf("unionStrings([a,b],[b,c]) = %v, want 3 elements", got)
+	}
+	for _, s := range got {
+		if !want[s] {
+			t.Errorf("unionStrings result contains unexpected %q", s)
+		}
+	}
+}
+
+// TestApplyOperatorErrorBranches exercises applyOperator's own
+// malformed-input error paths — an operator or metadata parameter
+// value that doesn't have the JSON shape that operator requires.
+func TestApplyOperatorErrorBranches(t *testing.T) {
+	cases := []struct {
+		name    string
+		op      string
+		operand string
+		value   string
+		present bool
+	}{
+		{name: "value: malformed operand", op: opValue, operand: `{not json`, present: false},
+		{name: "add: metadata parameter not an array", op: opAdd, operand: `["x"]`, value: `"not an array"`, present: true},
+		{name: "add: operand not an array", op: opAdd, operand: `"not an array"`, value: `["x"]`, present: true},
+		{name: "one_of: malformed operand", op: opOneOf, operand: `"not an array"`, value: `"pairwise"`, present: true},
+		{name: "subset_of: metadata parameter not an array", op: opSubsetOf, operand: `["a"]`, value: `"not an array"`, present: true},
+		{name: "superset_of: malformed operand", op: opSupersetOf, operand: `"not an array"`, value: `["a"]`, present: true},
+		{name: "superset_of: metadata parameter not an array", op: opSupersetOf, operand: `["a"]`, value: `"not an array"`, present: true},
+		{name: "superset_of: missing required value", op: opSupersetOf, operand: `["a","b"]`, value: `["a"]`, present: true},
+		{name: "essential: malformed operand", op: opEssential, operand: `"not a bool"`, present: false},
+		{name: "one_of: value not among options", op: opOneOf, operand: `["a","b"]`, value: `"c"`, present: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var value json.RawMessage
+			if tc.present {
+				value = json.RawMessage(tc.value)
+			}
+			if _, _, err := applyOperator(tc.op, json.RawMessage(tc.operand), value, tc.present); err == nil {
+				t.Fatalf("applyOperator(%s) = nil error, want error", tc.name)
+			}
+		})
+	}
+}
+
+func TestDecodeArrayRejectsNonArray(t *testing.T) {
+	if _, err := decodeArray(json.RawMessage(`"not an array"`)); err == nil {
+		t.Fatalf("decodeArray(non-array) = nil error, want error")
+	}
+	got, err := decodeArray(nil)
+	if err != nil || got != nil {
+		t.Fatalf("decodeArray(nil) = %v, %v, want nil, nil", got, err)
+	}
+}
+
 func boolJSON(b bool) string {
 	if b {
 		return "true"

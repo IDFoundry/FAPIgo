@@ -285,3 +285,204 @@ func TestParseRejectsMissingRequiredClaims(t *testing.T) {
 		}
 	}
 }
+
+func TestParseRejectsNonJSONPayload(t *testing.T) {
+	key := generateKey(t)
+	token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: jwtType}, []byte("not json"))
+	if err != nil {
+		t.Fatalf("jose.Sign: %v", err)
+	}
+	if _, err := Parse(token); !errors.Is(err, ErrMalformedClaims) {
+		t.Errorf("Parse(non-JSON payload) error = %v, want ErrMalformedClaims", err)
+	}
+}
+
+func TestParseRejectsMalformedOptionalClaims(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	base := map[string]any{
+		"iss": "https://rp.example.org", "sub": "https://superior.example.org",
+		"iat": now.Unix(), "exp": now.Add(time.Hour).Unix(),
+		"jwks": json.RawMessage(testJWKS(t, key)),
+	}
+
+	cases := map[string]any{
+		"metadata":             `"not an object"`,
+		"authority_hints":      `"not an array"`,
+		"metadata_policy":      `["not an object"]`,
+		"metadata_policy_crit": `{"not":"an array"}`,
+		"source_endpoint":      `123`,
+	}
+	for claim, badValue := range cases {
+		t.Run(claim, func(t *testing.T) {
+			claims := map[string]any{}
+			for k, v := range base {
+				claims[k] = v
+			}
+			claims[claim] = json.RawMessage(badValue.(string))
+			payload, err := json.Marshal(claims)
+			if err != nil {
+				t.Fatalf("marshal claims: %v", err)
+			}
+			token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: jwtType}, payload)
+			if err != nil {
+				t.Fatalf("jose.Sign: %v", err)
+			}
+			if _, err := Parse(token); !errors.Is(err, ErrMalformedClaims) {
+				t.Errorf("Parse(malformed %q) error = %v, want ErrMalformedClaims", claim, err)
+			}
+		})
+	}
+}
+
+func TestParseRejectsMalformedCompact(t *testing.T) {
+	if _, err := Parse("not-a-jws-at-all"); err == nil {
+		t.Fatalf("Parse(garbage) = nil error, want error")
+	}
+}
+
+func TestStatementAlgorithm(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	token, err := Create(entityConfigParams(t, key, "https://rp.example.org", now))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	stmt, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if stmt.Algorithm() != fapi.ES256 {
+		t.Errorf("Algorithm() = %v, want ES256", stmt.Algorithm())
+	}
+}
+
+func TestCreateRejectsInvalidParams(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	validParams := func() CreateParams {
+		return entityConfigParams(t, key, "https://rp.example.org", now)
+	}
+
+	cases := map[string]func(*CreateParams){
+		"nil signer":        func(p *CreateParams) { p.Signer = nil },
+		"invalid algorithm": func(p *CreateParams) { p.Algorithm = 0 },
+		"empty issuer":      func(p *CreateParams) { p.Issuer = "" },
+		"empty subject":     func(p *CreateParams) { p.Subject = "" },
+		"zero now":          func(p *CreateParams) { p.Now = time.Time{} },
+		"zero lifetime":     func(p *CreateParams) { p.Lifetime = 0 },
+		"negative lifetime": func(p *CreateParams) { p.Lifetime = -time.Second },
+		"empty jwks":        func(p *CreateParams) { p.JWKS = nil },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			p := validParams()
+			mutate(&p)
+			if _, err := Create(p); err == nil {
+				t.Fatalf("Create(%s) = nil error, want error", name)
+			}
+		})
+	}
+}
+
+func TestCreateIncludesMetadataAndCriticalOperators(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	p := entityConfigParams(t, key, "https://rp.example.org", now)
+	p.Metadata = map[string]json.RawMessage{"openid_relying_party": json.RawMessage(`{"redirect_uris":["https://rp.example.org/cb"]}`)}
+	token, err := Create(p)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	stmt, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	claims, err := stmt.Verify(&key.PublicKey, VerifyPolicy{
+		ExpectedIssuer: "https://rp.example.org", ExpectedSubject: "https://rp.example.org",
+		Algorithm: fapi.ES256, Now: now, MaxLifetime: 2 * time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if claims.Metadata == nil {
+		t.Errorf("Metadata is nil")
+	}
+
+	sp := subordinateStatementParams(t, key, "https://superior.example.org", "https://rp.example.org", now)
+	sp.MetadataPolicyCritical = []string{"x-custom-op"}
+	token2, err := Create(sp)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	stmt2, err := Parse(token2)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	claims2, err := stmt2.Verify(&key.PublicKey, VerifyPolicy{
+		ExpectedIssuer: "https://superior.example.org", ExpectedSubject: "https://rp.example.org",
+		Algorithm: fapi.ES256, Now: now, MaxLifetime: 2 * time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if len(claims2.MetadataPolicyCritical) != 1 || claims2.MetadataPolicyCritical[0] != "x-custom-op" {
+		t.Errorf("MetadataPolicyCritical = %v", claims2.MetadataPolicyCritical)
+	}
+}
+
+func TestVerifyRejectsInvalidPolicy(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	token, err := Create(entityConfigParams(t, key, "https://rp.example.org", now))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	stmt, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	validPolicy := func() VerifyPolicy {
+		return VerifyPolicy{
+			ExpectedIssuer: "https://rp.example.org", ExpectedSubject: "https://rp.example.org",
+			Algorithm: fapi.ES256, Now: now, MaxLifetime: 2 * time.Hour,
+		}
+	}
+
+	cases := map[string]func(*VerifyPolicy){
+		"empty expected issuer":  func(p *VerifyPolicy) { p.ExpectedIssuer = "" },
+		"empty expected subject": func(p *VerifyPolicy) { p.ExpectedSubject = "" },
+		"zero now":               func(p *VerifyPolicy) { p.Now = time.Time{} },
+		"zero max lifetime":      func(p *VerifyPolicy) { p.MaxLifetime = 0 },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			policy := validPolicy()
+			mutate(&policy)
+			if _, err := stmt.Verify(&key.PublicKey, policy); err == nil {
+				t.Fatalf("Verify(%s) = nil error, want error", name)
+			}
+		})
+	}
+}
+
+func TestVerifyRejectsNotYetValid(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	token, err := Create(entityConfigParams(t, key, "https://rp.example.org", now))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	stmt, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	_, err = stmt.Verify(&key.PublicKey, VerifyPolicy{
+		ExpectedIssuer: "https://rp.example.org", ExpectedSubject: "https://rp.example.org",
+		Algorithm: fapi.ES256, Now: now.Add(-time.Hour), MaxLifetime: 2 * time.Hour,
+	})
+	if !errors.Is(err, ErrNotYetValid) {
+		t.Errorf("Verify(iat in the future) error = %v, want ErrNotYetValid", err)
+	}
+}

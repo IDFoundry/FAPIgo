@@ -1,0 +1,287 @@
+package federation
+
+import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"encoding/json"
+	"errors"
+	"testing"
+	"time"
+
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/jose"
+)
+
+func generateKey(t *testing.T) *ecdsa.PrivateKey {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	return key
+}
+
+func testJWKS(t *testing.T, key *ecdsa.PrivateKey) json.RawMessage {
+	t.Helper()
+	jwk, err := jose.NewJWK(&key.PublicKey, fapi.ES256)
+	if err != nil {
+		t.Fatalf("jose.NewJWK: %v", err)
+	}
+	jwkJSON, err := jwk.WithKeyID("test-kid").MarshalJSON()
+	if err != nil {
+		t.Fatalf("marshal jwk: %v", err)
+	}
+	set, err := json.Marshal(map[string][]json.RawMessage{"keys": {jwkJSON}})
+	if err != nil {
+		t.Fatalf("marshal jwk set: %v", err)
+	}
+	return set
+}
+
+func entityConfigParams(t *testing.T, key *ecdsa.PrivateKey, entityID string, now time.Time) CreateParams {
+	t.Helper()
+	return CreateParams{
+		Signer: key, Algorithm: fapi.ES256, KeyID: "test-kid",
+		Issuer: entityID, Subject: entityID,
+		Now: now, Lifetime: time.Hour,
+		JWKS:           testJWKS(t, key),
+		AuthorityHints: []string{"https://superior.example.org"},
+	}
+}
+
+func subordinateStatementParams(t *testing.T, superiorKey *ecdsa.PrivateKey, superiorID, subjectID string, now time.Time) CreateParams {
+	t.Helper()
+	return CreateParams{
+		Signer: superiorKey, Algorithm: fapi.ES256, KeyID: "superior-kid",
+		Issuer: superiorID, Subject: subjectID,
+		Now: now, Lifetime: time.Hour,
+		JWKS:           testJWKS(t, superiorKey),
+		MetadataPolicy: mustPolicy(t, `{"openid_relying_party":{"subject_type":{"value":"pairwise"}}}`),
+		SourceEndpoint: "https://superior.example.org/fetch",
+	}
+}
+
+func TestCreateAndVerifyEntityConfiguration(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	const entityID = "https://rp.example.org"
+
+	token, err := Create(entityConfigParams(t, key, entityID, now))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	stmt, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if stmt.ClaimedIssuer() != entityID {
+		t.Errorf("ClaimedIssuer = %q, want %q", stmt.ClaimedIssuer(), entityID)
+	}
+	if stmt.ClaimedSubject() != entityID {
+		t.Errorf("ClaimedSubject = %q, want %q", stmt.ClaimedSubject(), entityID)
+	}
+	if stmt.KeyID() != "test-kid" {
+		t.Errorf("KeyID = %q, want test-kid", stmt.KeyID())
+	}
+	if got := stmt.ClaimedAuthorityHints(); len(got) != 1 || got[0] != "https://superior.example.org" {
+		t.Errorf("ClaimedAuthorityHints = %v", got)
+	}
+
+	claims, err := stmt.Verify(&key.PublicKey, VerifyPolicy{
+		ExpectedIssuer: entityID, ExpectedSubject: entityID,
+		Algorithm: fapi.ES256, Now: now, MaxLifetime: 2 * time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if claims.Issuer != entityID || claims.Subject != entityID {
+		t.Errorf("verified claims iss/sub = %q/%q, want %q/%q", claims.Issuer, claims.Subject, entityID, entityID)
+	}
+	if len(claims.JWKS) == 0 {
+		t.Errorf("verified claims JWKS is empty")
+	}
+}
+
+func TestCreateAndVerifySubordinateStatement(t *testing.T) {
+	superiorKey := generateKey(t)
+	now := time.Now()
+	const superiorID = "https://superior.example.org"
+	const subjectID = "https://rp.example.org"
+
+	token, err := Create(subordinateStatementParams(t, superiorKey, superiorID, subjectID, now))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	stmt, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	claims, err := stmt.Verify(&superiorKey.PublicKey, VerifyPolicy{
+		ExpectedIssuer: superiorID, ExpectedSubject: subjectID,
+		Algorithm: fapi.ES256, Now: now, MaxLifetime: 2 * time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if claims.SourceEndpoint != "https://superior.example.org/fetch" {
+		t.Errorf("SourceEndpoint = %q", claims.SourceEndpoint)
+	}
+	if claims.MetadataPolicy == nil {
+		t.Errorf("MetadataPolicy is nil")
+	}
+}
+
+func TestCreateRejectsMixedVariantClaims(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	selfSignedWithPolicy := entityConfigParams(t, key, "https://rp.example.org", now)
+	selfSignedWithPolicy.MetadataPolicy = mustPolicy(t, `{"openid_relying_party":{}}`)
+	if _, err := Create(selfSignedWithPolicy); err == nil {
+		t.Errorf("Create(self-signed with metadata_policy) = nil error, want error")
+	}
+
+	subordinateWithHints := subordinateStatementParams(t, key, "https://superior.example.org", "https://rp.example.org", now)
+	subordinateWithHints.AuthorityHints = []string{"https://someone.example.org"}
+	if _, err := Create(subordinateWithHints); err == nil {
+		t.Errorf("Create(subordinate statement with authority_hints) = nil error, want error")
+	}
+}
+
+func TestVerifyRejectsIssuerAndSubjectMismatch(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	const entityID = "https://rp.example.org"
+
+	token, err := Create(entityConfigParams(t, key, entityID, now))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	stmt, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	basePolicy := VerifyPolicy{ExpectedIssuer: entityID, ExpectedSubject: entityID, Algorithm: fapi.ES256, Now: now, MaxLifetime: 2 * time.Hour}
+
+	wrongIssuer := basePolicy
+	wrongIssuer.ExpectedIssuer = "https://someone-else.example.org"
+	if _, err := stmt.Verify(&key.PublicKey, wrongIssuer); !errors.Is(err, ErrIssuerMismatch) {
+		t.Errorf("Verify(wrong issuer) error = %v, want ErrIssuerMismatch", err)
+	}
+
+	wrongSubject := basePolicy
+	wrongSubject.ExpectedSubject = "https://someone-else.example.org"
+	if _, err := stmt.Verify(&key.PublicKey, wrongSubject); !errors.Is(err, ErrSubjectMismatch) {
+		t.Errorf("Verify(wrong subject) error = %v, want ErrSubjectMismatch", err)
+	}
+}
+
+func TestVerifyRejectsExpiredAndOverLifetime(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	const entityID = "https://rp.example.org"
+
+	token, err := Create(entityConfigParams(t, key, entityID, now))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	stmt, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	expired := VerifyPolicy{
+		ExpectedIssuer: entityID, ExpectedSubject: entityID, Algorithm: fapi.ES256,
+		Now: now.Add(2 * time.Hour), MaxLifetime: 2 * time.Hour,
+	}
+	if _, err := stmt.Verify(&key.PublicKey, expired); !errors.Is(err, ErrExpired) {
+		t.Errorf("Verify(expired) error = %v, want ErrExpired", err)
+	}
+
+	tooShortMaxLifetime := VerifyPolicy{
+		ExpectedIssuer: entityID, ExpectedSubject: entityID, Algorithm: fapi.ES256,
+		Now: now, MaxLifetime: time.Minute,
+	}
+	if _, err := stmt.Verify(&key.PublicKey, tooShortMaxLifetime); !errors.Is(err, ErrLifetimeExceeded) {
+		t.Errorf("Verify(exceeds max lifetime) error = %v, want ErrLifetimeExceeded", err)
+	}
+}
+
+func TestVerifyRejectsAlgorithmMismatch(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	const entityID = "https://rp.example.org"
+
+	token, err := Create(entityConfigParams(t, key, entityID, now))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	stmt, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	_, err = stmt.Verify(&key.PublicKey, VerifyPolicy{
+		ExpectedIssuer: entityID, ExpectedSubject: entityID,
+		Algorithm: fapi.PS256, Now: now, MaxLifetime: 2 * time.Hour,
+	})
+	if err == nil {
+		t.Fatalf("Verify(wrong expected algorithm) = nil error, want error")
+	}
+}
+
+func TestParseRejectsWrongOrMissingType(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	claims := map[string]any{
+		"iss": "https://rp.example.org", "sub": "https://rp.example.org",
+		"iat": now.Unix(), "exp": now.Add(time.Hour).Unix(),
+		"jwks": json.RawMessage(testJWKS(t, key)),
+	}
+	payload, err := json.Marshal(claims)
+	if err != nil {
+		t.Fatalf("marshal claims: %v", err)
+	}
+
+	for _, typ := range []string{"", "some-other+jwt"} {
+		token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: typ}, payload)
+		if err != nil {
+			t.Fatalf("jose.Sign: %v", err)
+		}
+		if _, err := Parse(token); !errors.Is(err, ErrWrongType) {
+			t.Errorf("Parse(typ=%q) error = %v, want ErrWrongType", typ, err)
+		}
+	}
+}
+
+func TestParseRejectsMissingRequiredClaims(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	full := map[string]any{
+		"iss": "https://rp.example.org", "sub": "https://rp.example.org",
+		"iat": now.Unix(), "exp": now.Add(time.Hour).Unix(),
+		"jwks": json.RawMessage(testJWKS(t, key)),
+	}
+
+	for _, missing := range []string{"iss", "sub", "iat", "exp", "jwks"} {
+		claims := map[string]any{}
+		for k, v := range full {
+			if k != missing {
+				claims[k] = v
+			}
+		}
+		payload, err := json.Marshal(claims)
+		if err != nil {
+			t.Fatalf("marshal claims: %v", err)
+		}
+		token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: jwtType}, payload)
+		if err != nil {
+			t.Fatalf("jose.Sign: %v", err)
+		}
+		if _, err := Parse(token); !errors.Is(err, ErrMalformedClaims) {
+			t.Errorf("Parse(missing %q) error = %v, want ErrMalformedClaims", missing, err)
+		}
+	}
+}

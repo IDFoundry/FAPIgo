@@ -10,13 +10,15 @@
 // Like keys and storage, this is a shared subsystem package, not a
 // fourth role alongside client/server/resource — both an authorization
 // server (as an OpenID Provider) and a client (as a Relying Party) need
-// the identical capability (self-issue an Entity Configuration, resolve
-// a peer's Trust Chain), which is exactly why it isn't split
-// asymmetrically the way most of this module's internal/ packages are.
-// server and client each gain their own thin, role-specific glue over
-// this package (self-issuing an Entity Configuration for their own
-// endpoints, using Resolve to establish trust in a federation-presented
-// peer) rather than this package trying to be a fourth role itself.
+// the identical capability (self-issue an Entity Configuration via
+// SelfIssuer, resolve a peer's Trust Chain via Resolver), which is
+// exactly why it isn't split asymmetrically the way most of this
+// module's internal/ packages are. server and client each gain their
+// own thin, role-specific glue over this package — building their own
+// federation_entity/openid_relying_party/openid_provider metadata and
+// serving SelfIssuer's output at their own WellKnownPath, using Resolve
+// to establish trust in a federation-presented peer — rather than this
+// package trying to be a fourth role itself.
 //
 // # Scope
 //

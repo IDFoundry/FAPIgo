@@ -335,6 +335,78 @@ func TestParseRejectsMalformedOptionalClaims(t *testing.T) {
 	}
 }
 
+func TestParseRejectsMalformedRequiredClaims(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	base := map[string]any{
+		"iss": "https://rp.example.org", "sub": "https://rp.example.org",
+		"iat": now.Unix(), "exp": now.Add(time.Hour).Unix(),
+		"jwks": json.RawMessage(testJWKS(t, key)),
+	}
+
+	cases := map[string]string{
+		"iss": `123`, // not a string
+		"sub": `""`,  // empty string, rejected same as absent
+		"iat": `"x"`, // not an integer
+		"exp": `"x"`, // not an integer
+	}
+	for claim, badValue := range cases {
+		t.Run(claim, func(t *testing.T) {
+			claims := map[string]any{}
+			for k, v := range base {
+				claims[k] = v
+			}
+			claims[claim] = json.RawMessage(badValue)
+			payload, err := json.Marshal(claims)
+			if err != nil {
+				t.Fatalf("marshal claims: %v", err)
+			}
+			token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: jwtType}, payload)
+			if err != nil {
+				t.Fatalf("jose.Sign: %v", err)
+			}
+			if _, err := Parse(token); !errors.Is(err, ErrMalformedClaims) {
+				t.Errorf("Parse(malformed %q) error = %v, want ErrMalformedClaims", claim, err)
+			}
+		})
+	}
+}
+
+func TestParseRejectsInvalidConstraints(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	base := map[string]any{
+		"iss": "https://rp.example.org", "sub": "https://rp.example.org",
+		"iat": now.Unix(), "exp": now.Add(time.Hour).Unix(),
+		"jwks": json.RawMessage(testJWKS(t, key)),
+	}
+
+	cases := map[string]string{
+		"malformed json":           `"not an object"`,
+		"negative max_path_length": `{"max_path_length":-1}`,
+	}
+	for name, badValue := range cases {
+		t.Run(name, func(t *testing.T) {
+			claims := map[string]any{}
+			for k, v := range base {
+				claims[k] = v
+			}
+			claims["constraints"] = json.RawMessage(badValue)
+			payload, err := json.Marshal(claims)
+			if err != nil {
+				t.Fatalf("marshal claims: %v", err)
+			}
+			token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: jwtType}, payload)
+			if err != nil {
+				t.Fatalf("jose.Sign: %v", err)
+			}
+			if _, err := Parse(token); !errors.Is(err, ErrMalformedClaims) {
+				t.Errorf("Parse(invalid constraints: %s) error = %v, want ErrMalformedClaims", name, err)
+			}
+		})
+	}
+}
+
 func TestParseRejectsMalformedCompact(t *testing.T) {
 	if _, err := Parse("not-a-jws-at-all"); err == nil {
 		t.Fatalf("Parse(garbage) = nil error, want error")

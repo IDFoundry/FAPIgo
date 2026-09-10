@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.26.0](https://github.com/IDFoundry/FAPIgo/compare/v0.25.0...v0.26.0) (2026-09-10)
+
+
+### Features
+
+* add RequestClientCredentialsToken (RFC 6749 §4.4) ([#249](https://github.com/IDFoundry/FAPIgo/issues/249)) ([8c7de04](https://github.com/IDFoundry/FAPIgo/commit/8c7de0446e537f7e76690b63e43f1ea75d515188))
+* **server:** add Config.OAuthOnly for a pure OAuth 2.0 + FAPI 2.0 AS ([#250](https://github.com/IDFoundry/FAPIgo/issues/250)) ([e62a392](https://github.com/IDFoundry/FAPIgo/commit/e62a3920d7af4d18c5935a393ab8d30bf152d92f))
+
 ## [0.25.0](https://github.com/IDFoundry/FAPIgo/compare/v0.24.0...v0.25.0) (2026-09-01)
 
 

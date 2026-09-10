@@ -77,6 +77,12 @@ type CreateParams struct {
 	// meaningful (and only accepted) when Subject does not equal
 	// Issuer.
 	SourceEndpoint string
+
+	// Constraints is the "constraints" claim (OpenID Federation 1.0
+	// §6.2) — restrictions Issuer places on Trust Chains passing
+	// through it. Only meaningful (and only accepted) when Subject
+	// does not equal Issuer.
+	Constraints *Constraints
 }
 
 // Create builds and signs an Entity Statement for p.
@@ -104,8 +110,8 @@ func Create(p CreateParams) (string, error) {
 	}
 
 	selfSigned := p.Issuer == p.Subject
-	if selfSigned && (p.MetadataPolicy != nil || p.MetadataPolicyCritical != nil || p.SourceEndpoint != "") {
-		return "", fmt.Errorf("federation: metadata_policy, metadata_policy_crit and source_endpoint are Subordinate Statement claims, but issuer equals subject (an Entity Configuration)")
+	if selfSigned && (p.MetadataPolicy != nil || p.MetadataPolicyCritical != nil || p.SourceEndpoint != "" || p.Constraints != nil) {
+		return "", fmt.Errorf("federation: metadata_policy, metadata_policy_crit, source_endpoint and constraints are Subordinate Statement claims, but issuer equals subject (an Entity Configuration)")
 	}
 	if !selfSigned && p.AuthorityHints != nil {
 		return "", fmt.Errorf("federation: authority_hints is an Entity Configuration claim, but issuer does not equal subject (a Subordinate Statement)")
@@ -133,6 +139,9 @@ func Create(p CreateParams) (string, error) {
 	if p.SourceEndpoint != "" {
 		claims["source_endpoint"] = p.SourceEndpoint
 	}
+	if p.Constraints != nil {
+		claims["constraints"] = constraintsWireValue(*p.Constraints)
+	}
 
 	payload, err := json.Marshal(claims)
 	if err != nil {
@@ -145,4 +154,30 @@ func Create(p CreateParams) (string, error) {
 		return "", fmt.Errorf("federation: %w", err)
 	}
 	return token, nil
+}
+
+// constraintsWireValue builds the wire shape parseConstraints expects
+// back — a plain map rather than a struct with json tags, so
+// max_path_length is omitted entirely when HasMaxPathLength is false
+// rather than round-tripping as an explicit 0 (a meaningfully
+// different constraint; see Constraints' own doc comment).
+func constraintsWireValue(c Constraints) map[string]any {
+	out := map[string]any{}
+	if c.HasMaxPathLength {
+		out["max_path_length"] = c.MaxPathLength
+	}
+	if c.NamingConstraints != nil {
+		nc := map[string]any{}
+		if c.NamingConstraints.Permitted != nil {
+			nc["permitted"] = c.NamingConstraints.Permitted
+		}
+		if c.NamingConstraints.Excluded != nil {
+			nc["excluded"] = c.NamingConstraints.Excluded
+		}
+		out["naming_constraints"] = nc
+	}
+	if c.AllowedEntityTypes != nil {
+		out["allowed_entity_types"] = c.AllowedEntityTypes
+	}
+	return out
 }

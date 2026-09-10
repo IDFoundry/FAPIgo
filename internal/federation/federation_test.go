@@ -486,3 +486,127 @@ func TestVerifyRejectsNotYetValid(t *testing.T) {
 		t.Errorf("Verify(iat in the future) error = %v, want ErrNotYetValid", err)
 	}
 }
+
+func TestCreateAndVerifyConstraints(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	p := subordinateStatementParams(t, key, "https://superior.example.org", "https://intermediate.example.org", now)
+	p.Constraints = &Constraints{
+		MaxPathLength:      1,
+		HasMaxPathLength:   true,
+		NamingConstraints:  &NamingConstraints{Permitted: []string{".example.org"}, Excluded: []string{"east.example.org"}},
+		AllowedEntityTypes: []string{"openid_provider", "openid_relying_party"},
+	}
+	token, err := Create(p)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	stmt, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	claims, err := stmt.Verify(&key.PublicKey, VerifyPolicy{
+		ExpectedIssuer: "https://superior.example.org", ExpectedSubject: "https://intermediate.example.org",
+		Algorithm: fapi.ES256, Now: now, MaxLifetime: 2 * time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if claims.Constraints == nil {
+		t.Fatalf("Constraints is nil")
+	}
+	if !claims.Constraints.HasMaxPathLength || claims.Constraints.MaxPathLength != 1 {
+		t.Errorf("MaxPathLength = %v (has=%v), want 1 (true)", claims.Constraints.MaxPathLength, claims.Constraints.HasMaxPathLength)
+	}
+	if claims.Constraints.NamingConstraints == nil || len(claims.Constraints.NamingConstraints.Permitted) != 1 {
+		t.Errorf("NamingConstraints = %+v", claims.Constraints.NamingConstraints)
+	}
+	if len(claims.Constraints.AllowedEntityTypes) != 2 {
+		t.Errorf("AllowedEntityTypes = %v", claims.Constraints.AllowedEntityTypes)
+	}
+}
+
+// TestCreateAndVerifyMaxPathLengthZero confirms max_path_length: 0 (a
+// meaningful "no intermediates allowed" constraint) round-trips as
+// present, distinct from the constraint being entirely absent.
+func TestCreateAndVerifyMaxPathLengthZero(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	p := subordinateStatementParams(t, key, "https://superior.example.org", "https://leaf.example.org", now)
+	p.Constraints = &Constraints{MaxPathLength: 0, HasMaxPathLength: true}
+	token, err := Create(p)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	stmt, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	claims, err := stmt.Verify(&key.PublicKey, VerifyPolicy{
+		ExpectedIssuer: "https://superior.example.org", ExpectedSubject: "https://leaf.example.org",
+		Algorithm: fapi.ES256, Now: now, MaxLifetime: 2 * time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if claims.Constraints == nil || !claims.Constraints.HasMaxPathLength || claims.Constraints.MaxPathLength != 0 {
+		t.Fatalf("Constraints = %+v, want HasMaxPathLength=true, MaxPathLength=0", claims.Constraints)
+	}
+}
+
+func TestCreateRejectsConstraintsOnEntityConfiguration(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	p := entityConfigParams(t, key, "https://rp.example.org", now)
+	p.Constraints = &Constraints{MaxPathLength: 1, HasMaxPathLength: true}
+	if _, err := Create(p); err == nil {
+		t.Errorf("Create(self-signed with constraints) = nil error, want error")
+	}
+}
+
+func TestStatementClaimedJWKS(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	jwks := testJWKS(t, key)
+	p := entityConfigParams(t, key, "https://rp.example.org", now)
+	p.JWKS = jwks
+	token, err := Create(p)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	stmt, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	eq, err := jsonEqual(stmt.ClaimedJWKS(), jwks)
+	if err != nil {
+		t.Fatalf("jsonEqual: %v", err)
+	}
+	if !eq {
+		t.Errorf("ClaimedJWKS() = %s, want %s", stmt.ClaimedJWKS(), jwks)
+	}
+}
+
+func TestStatementClaimedMetadataPolicy(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	wantPolicy := mustPolicy(t, `{"openid_relying_party":{"subject_type":{"value":"pairwise"}}}`)
+
+	p := subordinateStatementParams(t, key, "https://superior.example.org", "https://rp.example.org", now)
+	p.MetadataPolicy = wantPolicy
+	p.MetadataPolicyCritical = []string{"x-custom-op"}
+	token, err := Create(p)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	stmt, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	policy, crit := stmt.ClaimedMetadataPolicy()
+	assertPolicyEqual(t, policy, wantPolicy)
+	if len(crit) != 1 || crit[0] != "x-custom-op" {
+		t.Errorf("ClaimedMetadataPolicy() crit = %v, want [x-custom-op]", crit)
+	}
+}

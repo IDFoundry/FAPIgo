@@ -213,10 +213,14 @@ func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntit
 			return ResolvedEntity{}, fmt.Errorf("federation: trust chain for %q exceeds the configured max path length (%d)", subjectID, r.cfg.Limits.MaxPathLength)
 		}
 
-		selfConfig := leafStmt
+		// selfConfig is only fetched (and read) when entityAt has moved
+		// past the original subject — at hop 0, selfClaims is already
+		// leafClaims (from the self-verify done before this loop), and
+		// there is nothing else in this entity to fetch its own config
+		// for.
 		selfClaims := leafClaims
 		if entityAt != subjectID {
-			selfConfig, err = fetchEntityConfiguration(ctx, r.deps.HTTP, entityAt)
+			selfConfig, err := fetchEntityConfiguration(ctx, r.deps.HTTP, entityAt)
 			if err != nil {
 				return ResolvedEntity{}, err
 			}

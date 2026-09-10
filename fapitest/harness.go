@@ -100,6 +100,15 @@ type Config struct {
 	// live OIDF suite.
 	ClientAuthMethod storage.ClientAuthMethod
 
+	// ClientCredentialsGrant, if set, enables the RFC 6749 §4.4
+	// client_credentials grant on the harness's server (Config.ClientCredentialsGrant)
+	// and permits the harness's own registered client to use it
+	// (storage.RegisteredClientConfig.AllowsClientCredentialsGrant) — see
+	// both fields' own doc comments for why enabling the grant
+	// server-wide and permitting a specific client to use it are two
+	// separate opt-ins.
+	ClientCredentialsGrant bool
+
 	// OAuthOnly, if set, builds the harness's server with
 	// Config.OAuthOnly (Algorithms.IDToken and Limits.IDTokenLifetime
 	// left zero, valid only because of it) — a pure OAuth 2.0 AS that
@@ -226,13 +235,14 @@ func New(t *testing.T, cfg Config) *Harness {
 	}
 
 	registeredClientCfg := storage.RegisteredClientConfig{
-		ID:                       ClientID,
-		RedirectURIs:             []fapi.RegisteredRedirectURI{RedirectURI},
-		ClientAssertionAlgorithm: sigAlg,
-		RequestObjectAlgorithm:   sigAlg,
-		SenderConstrain:          cfg.SenderConstrain,
-		ClientAuthMethod:         cfg.ClientAuthMethod,
-		AllowedScopes:            []string{"openid", "accounts", "offline_access"},
+		ID:                           ClientID,
+		RedirectURIs:                 []fapi.RegisteredRedirectURI{RedirectURI},
+		ClientAssertionAlgorithm:     sigAlg,
+		RequestObjectAlgorithm:       sigAlg,
+		SenderConstrain:              cfg.SenderConstrain,
+		ClientAuthMethod:             cfg.ClientAuthMethod,
+		AllowedScopes:                []string{"openid", "accounts", "offline_access"},
+		AllowsClientCredentialsGrant: cfg.ClientCredentialsGrant,
 	}
 	switch cfg.ClientAuthMethod {
 	case storage.ClientAuthMethodSelfSignedTLSClientAuth:
@@ -283,9 +293,10 @@ func New(t *testing.T, cfg Config) *Harness {
 			MaxDPoPProofAge:            time.Minute,
 			MaxClockSkew:               5 * time.Second,
 		},
-		Assurance:  server.AssuranceDevelopment,
-		Extensions: cfg.Extensions,
-		OAuthOnly:  cfg.OAuthOnly,
+		Assurance:              server.AssuranceDevelopment,
+		Extensions:             cfg.Extensions,
+		ClientCredentialsGrant: cfg.ClientCredentialsGrant,
+		OAuthOnly:              cfg.OAuthOnly,
 	}
 	if cfg.OAuthOnly {
 		srvCfg.Algorithms.IDToken = 0

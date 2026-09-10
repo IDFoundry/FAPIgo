@@ -58,14 +58,18 @@ core.
 > `AllowsClientCredentialsGrant`), run clean against all four FAPI2SP OP
 > "Client Credentials Grant" register profiles (MTLS+MTLS, MTLS+DPoP,
 > private key+MTLS, private key+DPoP) — see
-> [conformance/](conformance/README.md#client-credentials-grant).
-> `server.Config.OAuthOnly` turns the server into a pure OAuth 2.0 +
-> FAPI 2.0 AS — "openid" is refused as a requested scope everywhere
-> (PAR, CIBA, client_credentials alike), no ID token is ever issued, and
-> `Metadata` omits every OIDC-only field (`subject_types_supported`,
-> `id_token_signing_alg_values_supported`) — covered by unit tests and a
-> real-HTTP `fapitest` round trip, not an OIDF plan (the suite has no
-> bare-OAuth2 FAPI2 plan to run against).
+> [conformance/](conformance/README.md#client-credentials-grant). `client`
+> implements the matching relying-party side (`RequestClientCredentialsToken`),
+> including a `client_credentials`-only `Config` (no browser flow, no
+> CIBA); this has no OIDF RP-side plan to run against (the grant has no
+> browser hop at all), so it's covered by unit tests and a real-HTTP
+> `fapitest` round trip instead. `server.Config.OAuthOnly` turns the
+> server into a pure OAuth 2.0 + FAPI 2.0 AS — "openid" is refused as a
+> requested scope everywhere (PAR, CIBA, client_credentials alike), no
+> ID token is ever issued, and `Metadata` omits every OIDC-only field
+> (`subject_types_supported`, `id_token_signing_alg_values_supported`)
+> — covered by unit tests and a real-HTTP `fapitest` round trip, not an
+> OIDF plan (the suite has no bare-OAuth2 FAPI2 plan to run against).
 
 ```go
 import (

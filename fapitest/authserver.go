@@ -219,8 +219,10 @@ func (a *authServer) handleToken(w http.ResponseWriter, r *http.Request) {
 		result, tokenErr = a.srv.ExchangeAuthorizationCode(r.Context(), server.AuthorizationCodeExchangeRequest{HTTP: form, DPoPProofs: dpopProofs, PeerCertificate: peerCert})
 	case "refresh_token":
 		result, tokenErr = a.srv.RefreshAccessToken(r.Context(), server.RefreshTokenRequest{HTTP: form, DPoPProofs: dpopProofs, PeerCertificate: peerCert})
+	case "client_credentials":
+		result, tokenErr = a.srv.RequestClientCredentialsToken(r.Context(), server.ClientCredentialsTokenRequest{HTTP: form, DPoPProofs: dpopProofs, PeerCertificate: peerCert})
 	default:
-		a.writeOAuthError(w, http.StatusBadRequest, "unsupported_grant_type", "grant_type must be authorization_code or refresh_token")
+		a.writeOAuthError(w, http.StatusBadRequest, "unsupported_grant_type", "grant_type must be authorization_code, refresh_token, or client_credentials")
 		return
 	}
 	if tokenErr != nil {

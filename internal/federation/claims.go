@@ -97,6 +97,47 @@ type Claims struct {
 	// statement served from somewhere other than where it claims to
 	// come from.
 	SourceEndpoint string
+
+	// Constraints is a Subordinate Statement's own "constraints" claim
+	// (OpenID Federation 1.0 §6.2) — nil for an Entity Configuration,
+	// and a normal (not an error) absence for a Subordinate Statement
+	// that sets none.
+	Constraints *Constraints
+}
+
+// Constraints is a Subordinate Statement's "constraints" claim (OpenID
+// Federation 1.0 §6.2) — restrictions a superior places on the Trust
+// Chains that may pass through it. A resolver (outside this package;
+// see doc.go) is responsible for actually enforcing these while
+// walking a chain; this package only parses them.
+type Constraints struct {
+	// MaxPathLength is the "max_path_length" constraint — the maximum
+	// number of Intermediate Entities allowed between the entity
+	// setting this constraint and the Trust Chain subject. Zero is a
+	// meaningful value ("no Intermediates may appear"), distinct from
+	// the constraint being absent — see HasMaxPathLength.
+	MaxPathLength    int
+	HasMaxPathLength bool
+
+	// NamingConstraints is the "naming_constraints" constraint, if any —
+	// restrictions on Subordinate Entity Identifiers' host names, in
+	// RFC 5280 §4.2.1.10 domain-name-constraint syntax.
+	NamingConstraints *NamingConstraints
+
+	// AllowedEntityTypes is the "allowed_entity_types" constraint, if
+	// any — nil means the claim was absent (no constraint; any Entity
+	// Type is allowed); a non-nil, empty slice means the claim was
+	// present as an empty array (OpenID Federation 1.0 §6.2.3: only the
+	// federation_entity Entity Type — which this constraint MUST NOT
+	// itself list, and which is always allowed regardless — is
+	// permitted).
+	AllowedEntityTypes []string
+}
+
+// NamingConstraints is Constraints' own "naming_constraints" member.
+type NamingConstraints struct {
+	Permitted []string
+	Excluded  []string
 }
 
 func parseClaims(payload []byte) (Claims, error) {
@@ -170,7 +211,40 @@ func parseClaims(payload []byte) (Claims, error) {
 		}
 		c.SourceEndpoint = source
 	}
+	if constraintsRaw, ok := raw["constraints"]; ok {
+		constraints, err := parseConstraints(constraintsRaw)
+		if err != nil {
+			return Claims{}, fmt.Errorf("%w: constraints: %v", ErrMalformedClaims, err)
+		}
+		c.Constraints = &constraints
+	}
 
+	return c, nil
+}
+
+func parseConstraints(payload json.RawMessage) (Constraints, error) {
+	var raw struct {
+		MaxPathLength     *int `json:"max_path_length"`
+		NamingConstraints *struct {
+			Permitted []string `json:"permitted"`
+			Excluded  []string `json:"excluded"`
+		} `json:"naming_constraints"`
+		AllowedEntityTypes []string `json:"allowed_entity_types"`
+	}
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		return Constraints{}, err
+	}
+	c := Constraints{AllowedEntityTypes: raw.AllowedEntityTypes}
+	if raw.MaxPathLength != nil {
+		if *raw.MaxPathLength < 0 {
+			return Constraints{}, fmt.Errorf("max_path_length must not be negative")
+		}
+		c.MaxPathLength = *raw.MaxPathLength
+		c.HasMaxPathLength = true
+	}
+	if raw.NamingConstraints != nil {
+		c.NamingConstraints = &NamingConstraints{Permitted: raw.NamingConstraints.Permitted, Excluded: raw.NamingConstraints.Excluded}
+	}
 	return c, nil
 }
 

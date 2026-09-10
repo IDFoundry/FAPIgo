@@ -2,6 +2,7 @@ package federation
 
 import (
 	"crypto"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -64,6 +65,38 @@ func (s Statement) ClaimedSubject() string { return s.claims.Subject }
 // Statement's own doc comment for why this is safe to act on before
 // Verify succeeds.
 func (s Statement) ClaimedAuthorityHints() []string { return s.claims.AuthorityHints }
+
+// ClaimedJWKS returns the statement's unverified "jwks" claim, for use
+// as a candidate public key source only. This is what makes
+// self-verification possible at all: an Entity Configuration's own
+// signature can only ever be checked against a key the statement
+// itself claims to hold (OpenID Federation 1.0 §10.2's own "For ES[0],
+// verify that its signature validates with a public key in
+// ES[0]['jwks']") — there is no other source for that key before
+// Verify has run. That's sound only because Verify still performs the
+// actual cryptographic check against whichever candidate key a caller
+// selects from this; nothing is trusted merely because a statement
+// claims to hold it, exactly as DPoP's own embedded "jwk" header
+// (internal/dpop) is used the same way, for the same reason. A caller
+// resolving trust — a federation.Resolver, most notably — additionally
+// cross-checks that this self-claimed key set agrees with what an
+// independent source already vouches for (a superior's own Subordinate
+// Statement, or a pre-configured Trust Anchor key) before treating the
+// statement as trusted.
+func (s Statement) ClaimedJWKS() json.RawMessage { return s.claims.JWKS }
+
+// ClaimedMetadataPolicy returns the statement's unverified
+// "metadata_policy"/"metadata_policy_crit" claims. Safe to read before
+// Verify succeeds for the same reason every other Claimed* accessor
+// is: a caller resolving a multi-hop Trust Chain (a federation.Resolver,
+// most notably) reads this from a Subordinate Statement whose own
+// signature is verified one loop iteration later — by the time the
+// value is actually merged and applied, the whole chain (this statement
+// included) has already been cryptographically verified; nothing here
+// is used, on its own, as a basis for trust before that happens.
+func (s Statement) ClaimedMetadataPolicy() (MetadataPolicy, []string) {
+	return s.claims.MetadataPolicy, s.claims.MetadataPolicyCritical
+}
 
 // VerifyPolicy is the set of checks Verify enforces against a
 // Statement.

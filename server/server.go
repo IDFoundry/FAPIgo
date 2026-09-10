@@ -36,6 +36,39 @@ func New(cfg Config, deps Dependencies) (*Server, error) {
 		}
 		cfg.Extensions = empty
 	}
+	if len(cfg.AutomaticRegistration.TrustAnchors) > 0 {
+		// Wraps deps.Clients/ClientKeys transparently — every other
+		// internal (PAR, the token endpoint, CIBA) keeps calling those
+		// same Dependencies fields exactly as before, unaware an
+		// automatically-registered client is now also possible. The
+		// original deps.Clients/ClientKeys (statically registered
+		// clients) are passed in as Underlying, so they always take
+		// priority — see AutomaticRegistrationConfig's own doc comment.
+		resolver, err := federation.NewResolver(federation.Config{
+			TrustAnchors: cfg.AutomaticRegistration.TrustAnchors,
+			Limits: federation.Limits{
+				MaxPathLength:        cfg.AutomaticRegistration.MaxPathLength,
+				MaxStatementLifetime: cfg.AutomaticRegistration.MaxStatementLifetime,
+				MaxClockSkew:         cfg.AutomaticRegistration.MaxClockSkew,
+			},
+		}, federation.Dependencies{HTTP: deps.FederationHTTP, Clock: deps.Clock})
+		if err != nil {
+			return nil, fmt.Errorf("server: config: automatic_registration: %w", err)
+		}
+		automaticClients, err := federation.NewAutomaticClientRepository(deps.Clients, resolver, federation.AutomaticRegistrationConfig{
+			AllowedScopes: cfg.AutomaticRegistration.AllowedScopes,
+			MaxCacheAge:   cfg.AutomaticRegistration.MaxCacheAge,
+		}, deps.Clock)
+		if err != nil {
+			return nil, fmt.Errorf("server: config: automatic_registration: %w", err)
+		}
+		automaticClientKeys, err := federation.NewAutomaticClientKeySource(deps.ClientKeys, automaticClients)
+		if err != nil {
+			return nil, fmt.Errorf("server: config: automatic_registration: %w", err)
+		}
+		deps.Clients = automaticClients
+		deps.ClientKeys = automaticClientKeys
+	}
 	return &Server{cfg: cfg, deps: deps}, nil
 }
 
@@ -212,6 +245,21 @@ func validateConfig(cfg Config) error {
 			return fmt.Errorf("server: config: federation.algorithm is required when federation.entity_id is set")
 		}
 	}
+
+	if len(cfg.AutomaticRegistration.TrustAnchors) > 0 {
+		// TrustAnchors/MaxPathLength/MaxStatementLifetime/MaxClockSkew
+		// are validated when federation.NewResolver actually constructs
+		// a Resolver from them in New(), the same "nested validating
+		// constructor invoked directly in New(), not re-validated here"
+		// precedent Config.Extensions already follows — only the fields
+		// federation.NewResolver doesn't itself own need checking here.
+		if len(cfg.AutomaticRegistration.AllowedScopes) == 0 {
+			return fmt.Errorf("server: config: automatic_registration.allowed_scopes is required when automatic_registration.trust_anchors is set")
+		}
+		if cfg.AutomaticRegistration.MaxCacheAge <= 0 {
+			return fmt.Errorf("server: config: automatic_registration.max_cache_age must be positive when automatic_registration.trust_anchors is set")
+		}
+	}
 	return nil
 }
 
@@ -276,6 +324,9 @@ func validateDependencies(cfg Config, deps Dependencies) error {
 	}
 	if cibaEnabled && deps.BackchannelNotifier == nil {
 		return fmt.Errorf("server: dependencies: backchannel notifier is required when endpoints.backchannel_authentication is set")
+	}
+	if len(cfg.AutomaticRegistration.TrustAnchors) > 0 && deps.FederationHTTP == nil {
+		return fmt.Errorf("server: dependencies: federation_http is required when automatic_registration.trust_anchors is set")
 	}
 	if cfg.Assurance == AssuranceProduction {
 		if deps.Audit == nil {

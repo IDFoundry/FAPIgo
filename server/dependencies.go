@@ -3,6 +3,7 @@ package server
 import (
 	"io"
 
+	"github.com/idfoundry/fapigo/fapihttp"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -142,4 +143,16 @@ type Dependencies struct {
 	// actually what's wanted.
 	AuthorizationCodeRARPolicy RARPolicy
 	CIBARARPolicy              RARPolicy
+
+	// FederationHTTP performs every outbound fetch OpenID Federation
+	// 1.0 §12.1 "Automatic Registration" needs to resolve an
+	// automatically-registered Relying Party's own Trust Chain —
+	// through fapihttp's own hardened protections (ARCHITECTURE.md
+	// design rule 6), the same primitive federation.Resolver itself
+	// requires. Required exactly when
+	// Config.AutomaticRegistration.TrustAnchors is set; nil otherwise —
+	// like ClientEncryptionKeys/Backchannel, an opt-in dependency this
+	// server never touches unless the corresponding Config capability
+	// is enabled.
+	FederationHTTP *fapihttp.Client
 }

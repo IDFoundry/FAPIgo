@@ -3,6 +3,7 @@ package client
 import (
 	"fmt"
 
+	"github.com/idfoundry/fapigo/federation"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -181,6 +182,18 @@ func validateConfig(cfg Config) error {
 		}
 		if cfg.Limits.BackchannelAuthenticationRequestLifetime <= 0 {
 			return fmt.Errorf("client: config: limits.backchannel_authentication_request_lifetime must be positive when endpoints.backchannel_authentication is set")
+		}
+	}
+
+	if cfg.Federation.EntityID != "" {
+		if err := federation.ValidEntityID(cfg.Federation.EntityID); err != nil {
+			return fmt.Errorf("client: config: federation.entity_id: %w", err)
+		}
+		if cfg.Federation.Lifetime <= 0 {
+			return fmt.Errorf("client: config: federation.lifetime must be positive when federation.entity_id is set")
+		}
+		if !cfg.Federation.Algorithm.IsValid() {
+			return fmt.Errorf("client: config: federation.algorithm is required when federation.entity_id is set")
 		}
 	}
 	return nil

@@ -84,7 +84,7 @@ func NewSelfIssuer(cfg SelfIssueConfig, deps SelfIssueDependencies) (*SelfIssuer
 	if cfg.EntityID == "" {
 		return nil, fmt.Errorf("federation: config: entity ID is required")
 	}
-	if _, err := wellKnownURL(cfg.EntityID); err != nil {
+	if err := ValidEntityID(cfg.EntityID); err != nil {
 		return nil, fmt.Errorf("federation: config: %w", err)
 	}
 	if cfg.Lifetime <= 0 {

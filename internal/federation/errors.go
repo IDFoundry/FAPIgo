@@ -46,4 +46,24 @@ var (
 	// published jwks) could be matched before verification was
 	// attempted.
 	ErrNoMatchingKey = errors.New("federation: no issuer key matches the statement's kid")
+
+	// ErrTrustMarkWrongType indicates a Trust Mark JWT's "typ" header
+	// was not "trust-mark+jwt" (OpenID Federation 1.0 §7's own "Trust
+	// Marks without a typ header parameter or an unrecognized typ value
+	// MUST be rejected").
+	ErrTrustMarkWrongType = errors.New("federation: trust mark header typ is not trust-mark+jwt")
+
+	// ErrTrustMarkTypeMismatch indicates a Trust Mark's own
+	// "trust_mark_type" claim did not equal the type its wrapper
+	// RawTrustMark declared it under.
+	ErrTrustMarkTypeMismatch = errors.New("federation: trust mark's own trust_mark_type does not match its declared type")
+
+	// ErrTrustMarkExpired indicates the Trust Mark's exp claim (when
+	// present at all — an absent exp means it never expires) is not
+	// after the verification time.
+	ErrTrustMarkExpired = errors.New("federation: trust mark has expired")
+
+	// ErrTrustMarkNotYetValid indicates the Trust Mark's iat claim is in
+	// the future beyond the configured clock-skew tolerance.
+	ErrTrustMarkNotYetValid = errors.New("federation: trust mark is not yet valid")
 )

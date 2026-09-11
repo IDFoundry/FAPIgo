@@ -83,6 +83,13 @@ type CreateParams struct {
 	// through it. Only meaningful (and only accepted) when Subject
 	// does not equal Issuer.
 	Constraints *Constraints
+
+	// TrustMarks is the "trust_marks" claim (OpenID Federation 1.0 §7)
+	// — Trust Marks Issuer holds about itself. Only meaningful (and
+	// only accepted) when Subject equals Issuer (an Entity
+	// Configuration); see doc.go's own "Trust Marks" section for what
+	// this package does and does not do with one once parsed back.
+	TrustMarks []RawTrustMark
 }
 
 // Create builds and signs an Entity Statement for p.
@@ -116,6 +123,9 @@ func Create(p CreateParams) (string, error) {
 	if !selfSigned && p.AuthorityHints != nil {
 		return "", fmt.Errorf("federation: authority_hints is an Entity Configuration claim, but issuer does not equal subject (a Subordinate Statement)")
 	}
+	if !selfSigned && p.TrustMarks != nil {
+		return "", fmt.Errorf("federation: trust_marks is an Entity Configuration claim, but issuer does not equal subject (a Subordinate Statement)")
+	}
 
 	claims := map[string]any{
 		"iss":  p.Issuer,
@@ -141,6 +151,13 @@ func Create(p CreateParams) (string, error) {
 	}
 	if p.Constraints != nil {
 		claims["constraints"] = constraintsWireValue(*p.Constraints)
+	}
+	if p.TrustMarks != nil {
+		trustMarks := make([]map[string]string, len(p.TrustMarks))
+		for i, tm := range p.TrustMarks {
+			trustMarks[i] = map[string]string{"trust_mark_type": tm.TrustMarkType, "trust_mark": tm.TrustMark}
+		}
+		claims["trust_marks"] = trustMarks
 	}
 
 	payload, err := json.Marshal(claims)

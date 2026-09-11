@@ -90,6 +90,13 @@ type CreateParams struct {
 	// Configuration); see doc.go's own "Trust Marks" section for what
 	// this package does and does not do with one once parsed back.
 	TrustMarks []RawTrustMark
+
+	// TrustMarkOwners is the "trust_mark_owners" claim (OpenID
+	// Federation 1.0 §7.2), keyed by trust_mark_type — set only by a
+	// Trust Anchor, naming each Trust Mark type's real owner and that
+	// owner's own keys. Only meaningful (and only accepted) when
+	// Subject equals Issuer (an Entity Configuration).
+	TrustMarkOwners map[string]TrustMarkOwner
 }
 
 // Create builds and signs an Entity Statement for p.
@@ -126,6 +133,9 @@ func Create(p CreateParams) (string, error) {
 	if !selfSigned && p.TrustMarks != nil {
 		return "", fmt.Errorf("federation: trust_marks is an Entity Configuration claim, but issuer does not equal subject (a Subordinate Statement)")
 	}
+	if !selfSigned && p.TrustMarkOwners != nil {
+		return "", fmt.Errorf("federation: trust_mark_owners is an Entity Configuration claim, but issuer does not equal subject (a Subordinate Statement)")
+	}
 
 	claims := map[string]any{
 		"iss":  p.Issuer,
@@ -158,6 +168,13 @@ func Create(p CreateParams) (string, error) {
 			trustMarks[i] = map[string]string{"trust_mark_type": tm.TrustMarkType, "trust_mark": tm.TrustMark}
 		}
 		claims["trust_marks"] = trustMarks
+	}
+	if p.TrustMarkOwners != nil {
+		owners := make(map[string]map[string]any, len(p.TrustMarkOwners))
+		for trustMarkType, o := range p.TrustMarkOwners {
+			owners[trustMarkType] = map[string]any{"sub": o.Subject, "jwks": json.RawMessage(o.JWKS)}
+		}
+		claims["trust_mark_owners"] = owners
 	}
 
 	payload, err := json.Marshal(claims)

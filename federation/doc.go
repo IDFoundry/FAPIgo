@@ -42,11 +42,16 @@
 // itself are surfaced, unverified, as ResolvedEntity.TrustMarks;
 // Resolver.VerifyTrustMark establishes trust in one, resolving the
 // mark's own issuer as a fresh Trust Chain against this Resolver's own
-// Trust Anchors before checking its signature and claims — see its own
-// doc comment, and internal/federation's own doc.go "Trust Marks"
-// section, for exactly which parts of §7 this first version does not
-// yet implement (the "delegation" claim, the Trust Mark Status/Trust
-// Marked Entities Listing endpoints, and Trust Mark issuance).
+// Trust Anchors before checking its signature and claims — and, when
+// the Trust Anchor used to establish that trust names the mark's own
+// type in its own "trust_mark_owners" claim (§7.2), additionally
+// requiring and validating a "delegation" claim against that type's
+// real owner (whose keys are published directly in trust_mark_owners,
+// not resolved via a separate Trust Chain). See its own doc comment,
+// and internal/federation's own doc.go "Trust Marks" section, for
+// exactly which parts of §7 this first version does not yet implement
+// (the Trust Mark Status/Trust Marked Entities Listing endpoints, and
+// Trust Mark issuance).
 //
 // Automatic client registration (OpenID Federation 1.0 §12.1) is
 // implemented by AutomaticClientRepository/AutomaticClientKeySource,

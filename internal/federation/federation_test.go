@@ -154,6 +154,14 @@ func TestCreateRejectsMixedVariantClaims(t *testing.T) {
 	if _, err := Create(subordinateWithTrustMarks); err == nil {
 		t.Errorf("Create(subordinate statement with trust_marks) = nil error, want error")
 	}
+
+	subordinateWithTrustMarkOwners := subordinateStatementParams(t, key, "https://superior.example.org", "https://rp.example.org", now)
+	subordinateWithTrustMarkOwners.TrustMarkOwners = map[string]TrustMarkOwner{
+		"https://federation.example.org/marks/certified": {Subject: "https://owner.example.org", JWKS: testJWKS(t, key)},
+	}
+	if _, err := Create(subordinateWithTrustMarkOwners); err == nil {
+		t.Errorf("Create(subordinate statement with trust_mark_owners) = nil error, want error")
+	}
 }
 
 func TestCreateAndParseRoundTripsTrustMarksClaim(t *testing.T) {
@@ -179,6 +187,36 @@ func TestCreateAndParseRoundTripsTrustMarksClaim(t *testing.T) {
 	got := stmt.claims.TrustMarks[0]
 	if got.TrustMarkType != "https://federation.example.org/marks/certified" || got.TrustMark != "opaque-trust-mark-jwt" {
 		t.Errorf("TrustMarks[0] = %+v", got)
+	}
+}
+
+func TestCreateAndParseRoundTripsTrustMarkOwnersClaim(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	const entityID = "https://ta.example.org"
+	ownerJWKS := testJWKS(t, generateKey(t))
+
+	p := entityConfigParams(t, key, entityID, now)
+	p.TrustMarkOwners = map[string]TrustMarkOwner{
+		"https://federation.example.org/marks/certified": {Subject: "https://owner.example.org", JWKS: ownerJWKS},
+	}
+	token, err := Create(p)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	stmt, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(stmt.claims.TrustMarkOwners) != 1 {
+		t.Fatalf("TrustMarkOwners = %v, want 1 entry", stmt.claims.TrustMarkOwners)
+	}
+	got := stmt.claims.TrustMarkOwners["https://federation.example.org/marks/certified"]
+	if got.Subject != "https://owner.example.org" {
+		t.Errorf("TrustMarkOwners[...].Subject = %q", got.Subject)
+	}
+	if string(got.JWKS) != string(ownerJWKS) {
+		t.Errorf("TrustMarkOwners[...].JWKS = %s, want %s", got.JWKS, ownerJWKS)
 	}
 }
 
@@ -502,6 +540,42 @@ func TestParseRejectsInvalidTrustMarksClaim(t *testing.T) {
 			}
 			if _, err := Parse(token); !errors.Is(err, ErrMalformedClaims) {
 				t.Errorf("Parse(invalid trust_marks: %s) error = %v, want ErrMalformedClaims", name, err)
+			}
+		})
+	}
+}
+
+func TestParseRejectsInvalidTrustMarkOwnersClaim(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	base := map[string]any{
+		"iss": "https://ta.example.org", "sub": "https://ta.example.org",
+		"iat": now.Unix(), "exp": now.Add(time.Hour).Unix(),
+		"jwks": json.RawMessage(testJWKS(t, key)),
+	}
+
+	cases := map[string]string{
+		"malformed json": `"not an object"`,
+		"missing sub":    `{"https://federation.example.org/marks/certified":{"jwks":{"keys":[]}}}`,
+		"missing jwks":   `{"https://federation.example.org/marks/certified":{"sub":"https://owner.example.org"}}`,
+	}
+	for name, badValue := range cases {
+		t.Run(name, func(t *testing.T) {
+			claims := map[string]any{}
+			for k, v := range base {
+				claims[k] = v
+			}
+			claims["trust_mark_owners"] = json.RawMessage(badValue)
+			payload, err := json.Marshal(claims)
+			if err != nil {
+				t.Fatalf("marshal claims: %v", err)
+			}
+			token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: jwtType}, payload)
+			if err != nil {
+				t.Fatalf("jose.Sign: %v", err)
+			}
+			if _, err := Parse(token); !errors.Is(err, ErrMalformedClaims) {
+				t.Errorf("Parse(invalid trust_mark_owners: %s) error = %v, want ErrMalformedClaims", name, err)
 			}
 		})
 	}

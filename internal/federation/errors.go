@@ -66,4 +66,24 @@ var (
 	// ErrTrustMarkNotYetValid indicates the Trust Mark's iat claim is in
 	// the future beyond the configured clock-skew tolerance.
 	ErrTrustMarkNotYetValid = errors.New("federation: trust mark is not yet valid")
+
+	// ErrTrustMarkDelegationWrongType indicates a Trust Mark Delegation
+	// JWT's "typ" header was not "trust-mark-delegation+jwt" (OpenID
+	// Federation 1.0 §7.2's own "Trust Mark delegation JWTs without a
+	// typ header parameter or with a different typ value MUST be
+	// rejected").
+	ErrTrustMarkDelegationWrongType = errors.New("federation: trust mark delegation header typ is not trust-mark-delegation+jwt")
+
+	// ErrTrustMarkDelegationTypeMismatch indicates a delegation's own
+	// "trust_mark_type" claim did not equal the Trust Mark's own.
+	ErrTrustMarkDelegationTypeMismatch = errors.New("federation: trust mark delegation's own trust_mark_type does not match the trust mark's")
+
+	// ErrTrustMarkDelegationExpired indicates the delegation's exp claim
+	// (when present at all — an absent exp means it never expires) is
+	// not after the verification time.
+	ErrTrustMarkDelegationExpired = errors.New("federation: trust mark delegation has expired")
+
+	// ErrTrustMarkDelegationNotYetValid indicates the delegation's iat
+	// claim is in the future beyond the configured clock-skew tolerance.
+	ErrTrustMarkDelegationNotYetValid = errors.New("federation: trust mark delegation is not yet valid")
 )

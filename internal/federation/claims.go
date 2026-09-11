@@ -40,10 +40,10 @@ type MetadataPolicy map[string]map[string]PolicyOperators
 // JSON, decided by the caller" precedent extension.Registry already
 // uses for custom parameters.
 //
-// The "trust_mark_issuers" and "trust_mark_owners" claims (OpenID
-// Federation 1.0 §7) are deliberately not modeled here — see doc.go's
-// own "Trust Marks" section for exactly what this package's Trust Mark
-// support does and does not cover.
+// The "trust_mark_issuers" claim (OpenID Federation 1.0 §7) is
+// deliberately not modeled here — see doc.go's own "Trust Marks"
+// section for exactly what this package's Trust Mark support does and
+// does not cover.
 type Claims struct {
 	Issuer  string
 	Subject string
@@ -107,6 +107,17 @@ type Claims struct {
 	// unparsed and unverified — see doc.go's own "Trust Marks" section
 	// for how a caller establishes trust in one.
 	TrustMarks []RawTrustMark
+
+	// TrustMarkOwners is an Entity Configuration's own "trust_mark_owners"
+	// claim (OpenID Federation 1.0 §7.2), keyed by trust_mark_type — nil
+	// for a Subordinate Statement, and a normal (not an error) absence
+	// for an Entity Configuration that declares none. A Trust Anchor
+	// publishes this to name, for a given Trust Mark type, both the
+	// type's real owner and that owner's own keys (published directly
+	// here, not resolved via a separate Trust Chain the way a Trust
+	// Mark Issuer's keys are) — used to validate a "delegation" claim on
+	// a Trust Mark of that type; see doc.go's own "Trust Marks" section.
+	TrustMarkOwners map[string]TrustMarkOwner
 }
 
 // RawTrustMark is one entry of an Entity Configuration's own
@@ -116,6 +127,16 @@ type Claims struct {
 type RawTrustMark struct {
 	TrustMarkType string
 	TrustMark     string
+}
+
+// TrustMarkOwner is one entry of an Entity Configuration's own
+// "trust_mark_owners" claim (OpenID Federation 1.0 §7.2) — a Trust
+// Mark type's real owner (Subject) and that owner's own JWK Set
+// (JWKS), published directly by the Trust Anchor rather than resolved
+// via a separate Trust Chain.
+type TrustMarkOwner struct {
+	Subject string
+	JWKS    json.RawMessage
 }
 
 // Constraints is a Subordinate Statement's "constraints" claim (OpenID
@@ -245,6 +266,22 @@ func parseClaims(payload []byte) (Claims, error) {
 				return Claims{}, fmt.Errorf("%w: trust_marks[%d]: trust_mark_type and trust_mark are both required", ErrMalformedClaims, i)
 			}
 			c.TrustMarks[i] = RawTrustMark{TrustMarkType: tm.TrustMarkType, TrustMark: tm.TrustMark}
+		}
+	}
+	if ownersRaw, ok := raw["trust_mark_owners"]; ok {
+		var owners map[string]struct {
+			Subject string          `json:"sub"`
+			JWKS    json.RawMessage `json:"jwks"`
+		}
+		if err := json.Unmarshal(ownersRaw, &owners); err != nil {
+			return Claims{}, fmt.Errorf("%w: trust_mark_owners: %v", ErrMalformedClaims, err)
+		}
+		c.TrustMarkOwners = make(map[string]TrustMarkOwner, len(owners))
+		for trustMarkType, o := range owners {
+			if o.Subject == "" || len(o.JWKS) == 0 {
+				return Claims{}, fmt.Errorf("%w: trust_mark_owners[%q]: sub and jwks are both required", ErrMalformedClaims, trustMarkType)
+			}
+			c.TrustMarkOwners[trustMarkType] = TrustMarkOwner{Subject: o.Subject, JWKS: o.JWKS}
 		}
 	}
 

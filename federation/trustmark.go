@@ -22,10 +22,14 @@ import (
 // ResolvedEntity.JWKS — the key set its immediate superior vouches for,
 // not merely what the issuer claims about itself.
 //
-// This first version does not validate a "delegation" claim (OpenID
-// Federation 1.0 §7.2) or cross-check a Trust Anchor's own
-// "trust_mark_owners" claim — see internal/federation's own doc.go for
-// exactly what is and is not covered.
+// If the Trust Anchor that vouched for the issuer names this Trust
+// Mark's own type in its own "trust_mark_owners" claim (§7.2), a
+// "delegation" claim proving the issuer was actually authorized by that
+// type's real owner is additionally required and checked — see
+// checkTrustMarkDelegation. This first version does not implement the
+// Trust Mark Status or Trust Marked Entities Listing endpoints (§8/§9)
+// — see internal/federation's own doc.go for exactly what is and is
+// not covered.
 func (r *Resolver) VerifyTrustMark(ctx context.Context, subjectID string, raw intfed.RawTrustMark) (intfed.TrustMarkClaims, error) {
 	if subjectID == "" {
 		return intfed.TrustMarkClaims{}, fmt.Errorf("federation: subject entity ID is empty")
@@ -44,7 +48,45 @@ func (r *Resolver) VerifyTrustMark(ctx context.Context, subjectID string, raw in
 	if err != nil {
 		return intfed.TrustMarkClaims{}, fmt.Errorf("federation: trust mark: %w", err)
 	}
+
+	if err := r.checkTrustMarkDelegation(ctx, issuer.TrustAnchor, tm, claims); err != nil {
+		return intfed.TrustMarkClaims{}, fmt.Errorf("federation: trust mark: %w", err)
+	}
+
 	return claims, nil
+}
+
+// checkTrustMarkDelegation enforces OpenID Federation 1.0 §7.2: when
+// trustAnchorID's own "trust_mark_owners" claim names claims.TrustMarkType
+// at all, tm MUST carry a "delegation" claim proving its own issuer
+// (claims.Issuer) was actually authorized by that type's real owner —
+// checked against the owner's keys as published directly in
+// trust_mark_owners, never resolved via a separate Trust Chain the way
+// the issuer's own keys are (OpenID Federation 1.0 §7.2's own "The
+// Trust Mark Owner's keys can be found in the trust_mark_owners Claim
+// in the Trust Anchor's Entity Configuration"). A type absent from
+// trust_mark_owners requires no delegation at all — this is not a
+// generic "delegation, if present, is always checked" pass.
+func (r *Resolver) checkTrustMarkDelegation(ctx context.Context, trustAnchorID string, tm intfed.TrustMark, claims intfed.TrustMarkClaims) error {
+	trustAnchor, err := r.Resolve(ctx, trustAnchorID)
+	if err != nil {
+		return fmt.Errorf("resolve trust anchor %q for trust_mark_owners: %w", trustAnchorID, err)
+	}
+	owner, required := trustAnchor.TrustMarkOwners[claims.TrustMarkType]
+	if !required {
+		return nil
+	}
+	if tm.ClaimedDelegation() == "" {
+		return fmt.Errorf("trust_mark_type %q is named in the trust anchor's own trust_mark_owners claim, but the trust mark carries no delegation claim", claims.TrustMarkType)
+	}
+	delegation, err := intfed.ParseTrustMarkDelegation(tm.ClaimedDelegation())
+	if err != nil {
+		return fmt.Errorf("parse trust mark delegation: %w", err)
+	}
+	if _, err := r.verifyTrustMarkDelegationAgainstJWKS(delegation, owner.JWKS, owner.Subject, claims.Issuer, claims.TrustMarkType, delegation.Algorithm(), r.deps.Clock.Now()); err != nil {
+		return fmt.Errorf("trust mark delegation: %w", err)
+	}
+	return nil
 }
 
 // verifyTrustMarkAgainstJWKS mirrors Resolver.verifyAgainstJWKS exactly
@@ -83,4 +125,38 @@ func (r *Resolver) verifyTrustMarkAgainstJWKS(tm intfed.TrustMark, jwksRaw json.
 		return intfed.TrustMarkClaims{}, fmt.Errorf("no candidate key found for algorithm %v kid %q among %d keys", algorithm, kid, len(candidates))
 	}
 	return intfed.TrustMarkClaims{}, fmt.Errorf("signature verification failed against every candidate key: %w", lastErr)
+}
+
+// verifyTrustMarkDelegationAgainstJWKS mirrors verifyTrustMarkAgainstJWKS
+// exactly, for an intfed.TrustMarkDelegation rather than a TrustMark.
+func (r *Resolver) verifyTrustMarkDelegationAgainstJWKS(d intfed.TrustMarkDelegation, jwksRaw json.RawMessage, expectedIssuer, expectedSubject, expectedTrustMarkType string, algorithm fapi.SignatureAlgorithm, now time.Time) (intfed.TrustMarkDelegationClaims, error) {
+	candidates, err := jose.ParseJWKSet(jwksRaw)
+	if err != nil {
+		return intfed.TrustMarkDelegationClaims{}, fmt.Errorf("parse jwks: %w", err)
+	}
+	policy := intfed.TrustMarkDelegationVerifyPolicy{
+		ExpectedIssuer: expectedIssuer, ExpectedSubject: expectedSubject, ExpectedTrustMarkType: expectedTrustMarkType,
+		Algorithm: algorithm, Now: now, MaxClockSkew: r.cfg.Limits.MaxClockSkew,
+	}
+	kid := d.KeyID()
+	var lastErr error
+	tried := false
+	for _, c := range candidates {
+		if c.Algorithm != algorithm {
+			continue
+		}
+		if kid != "" && c.KeyID != kid {
+			continue
+		}
+		tried = true
+		claims, err := d.Verify(c.PublicKey, policy)
+		if err == nil {
+			return claims, nil
+		}
+		lastErr = err
+	}
+	if !tried {
+		return intfed.TrustMarkDelegationClaims{}, fmt.Errorf("no candidate key found for algorithm %v kid %q among %d keys", algorithm, kid, len(candidates))
+	}
+	return intfed.TrustMarkDelegationClaims{}, fmt.Errorf("signature verification failed against every candidate key: %w", lastErr)
 }

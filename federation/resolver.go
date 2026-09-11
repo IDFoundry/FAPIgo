@@ -41,11 +41,11 @@ type Limits struct {
 	// enforced regardless of what any individual Subordinate
 	// Statement's own "constraints" claim (OpenID Federation 1.0 §6.2)
 	// says, so a misbehaving or malicious federation member can't send
-	// Resolve down an unbounded (or merely very long) chain. This
-	// release does not yet enforce a Subordinate Statement's own
-	// per-statement max_path_length/naming_constraints/
-	// allowed_entity_types constraints (internal/federation.Constraints
-	// is parsed but not acted on here) — see doc.go.
+	// Resolve down an unbounded (or merely very long) chain. Resolve
+	// separately enforces each Subordinate Statement's own
+	// naming_constraints (§6.2.2) and allowed_entity_types (§6.2.3);
+	// this release does not yet enforce a per-statement max_path_length
+	// constraint (§6.2.1) — see doc.go.
 	MaxPathLength int
 
 	// MaxStatementLifetime bounds how far in the future (relative to
@@ -149,11 +149,13 @@ type ResolvedEntity struct {
 }
 
 // Resolve resolves subjectID's Trust Chain against one of
-// Config.TrustAnchors and returns its Resolved Metadata. See doc.go
-// for this release's scope (leaf-entity resolution only, automatic
+// Config.TrustAnchors and returns its Resolved Metadata, enforcing
+// every Subordinate Statement's own naming_constraints and
+// allowed_entity_types constraints along the way. See doc.go for this
+// release's scope (leaf-entity resolution only, automatic
 // registration's own trust model — no server-side federation endpoints
-// of this Resolver's own, no trust marks, no per-statement constraints
-// beyond the hard Limits.MaxPathLength ceiling).
+// of this Resolver's own, no trust marks, no per-statement
+// max_path_length beyond the hard Limits.MaxPathLength ceiling).
 func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntity, error) {
 	if subjectID == "" {
 		return ResolvedEntity{}, fmt.Errorf("federation: subject entity ID is empty")
@@ -207,6 +209,7 @@ func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntit
 	chain := []string{subjectID}
 
 	var subordinatePolicies []subordinatePolicy
+	var subordinateConstraints []subordinateConstraint
 
 	for hop := 0; ; hop++ {
 		if hop >= r.cfg.Limits.MaxPathLength {
@@ -286,8 +289,18 @@ func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntit
 				return ResolvedEntity{}, fmt.Errorf("federation: %q's statement (issued by %q) does not match the keys vouched for it by %q: %w", belowSubject, belowIssuer, superiorID, err)
 			}
 			subordinatePolicies = append(subordinatePolicies, subordinatePolicy{policy: aboveClaims.MetadataPolicy, crit: aboveClaims.MetadataPolicyCritical})
+			if aboveClaims.Constraints != nil {
+				subordinateConstraints = append(subordinateConstraints, subordinateConstraint{
+					constraints: *aboveClaims.Constraints,
+					appliesTo:   append([]string{}, chain[:len(chain)-1]...),
+				})
+			}
 
-			resolvedMetadata, err := r.resolveMetadata(subordinatePolicies, leafClaims.Metadata)
+			if err := checkNamingConstraints(subordinateConstraints); err != nil {
+				return ResolvedEntity{}, err
+			}
+			leafMetadata := filterAllowedEntityTypes(subordinateConstraints, leafClaims.Metadata)
+			resolvedMetadata, err := r.resolveMetadata(subordinatePolicies, leafMetadata)
 			if err != nil {
 				return ResolvedEntity{}, err
 			}
@@ -315,6 +328,16 @@ func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntit
 		// statement included, has been cryptographically verified.
 		policy, crit := aboveStmt.ClaimedMetadataPolicy()
 		subordinatePolicies = append(subordinatePolicies, subordinatePolicy{policy: policy, crit: crit})
+		// aboveStmt's own constraints claim is unverified for exactly the
+		// same reason and until exactly the same later point as its
+		// metadata_policy, immediately above — see
+		// intfed.Statement.ClaimedConstraints's own doc comment.
+		if constraints := aboveStmt.ClaimedConstraints(); constraints != nil {
+			subordinateConstraints = append(subordinateConstraints, subordinateConstraint{
+				constraints: *constraints,
+				appliesTo:   append([]string{}, chain[:len(chain)-1]...),
+			})
+		}
 
 		belowStmt = aboveStmt
 		belowIssuer = superiorID

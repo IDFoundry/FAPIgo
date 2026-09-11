@@ -77,12 +77,14 @@ type cachedClient struct {
 // (ClientAuthMethodSelfSignedTLSClientAuth and its siblings — verifying
 // these correctly needs the "x5c" member of the client's own published
 // JWK, which internal/jose's JWK Set parsing does not currently
-// preserve, so only ClientAuthMethodPrivateKeyJWT is supported), the
+// preserve, so only ClientAuthMethodPrivateKeyJWT is supported), and the
 // client_credentials grant and CIBA (neither is permitted for an
-// automatically-registered client in this version), and
-// request_uri/JAR/PAR-level enforcement of OpenID Federation 1.0
-// §12.1.1's own aud/sub/jti Request Object rules (a request-handling
-// concern, not a client registration one).
+// automatically-registered client in this version). PAR/JAR-level
+// enforcement of OpenID Federation 1.0 §12.1.1's own aud/sub/jti
+// Request Object rules is a request-handling concern, not a client
+// registration one — see storage.RegisteredClientConfig's own
+// AutomaticFederationRegistration field and
+// requestobject.VerifyPolicy.AutomaticFederationRegistration.
 type AutomaticClientRepository struct {
 	underlying storage.ClientRepository
 	resolver   *Resolver
@@ -378,9 +380,10 @@ func registeredClientConfigFromMetadata(id fapi.ClientID, raw json.RawMessage, a
 	cfg := storage.RegisteredClientConfig{
 		ID: id, RedirectURIs: redirectURIs,
 		ClientAuthMethod: authMethod, ClientAssertionAlgorithm: assertionAlg,
-		RequestObjectAlgorithm: requestObjectAlg,
-		SenderConstrain:        senderConstrain,
-		AllowedScopes:          allowedScopes,
+		RequestObjectAlgorithm:          requestObjectAlg,
+		SenderConstrain:                 senderConstrain,
+		AllowedScopes:                   allowedScopes,
+		AutomaticFederationRegistration: true,
 	}
 
 	idTokenAlgSet := m.IDTokenEncryptedResponseAlg != ""

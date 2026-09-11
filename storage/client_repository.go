@@ -137,7 +137,8 @@ type RegisteredClient struct {
 	backchannelTokenDeliveryMode              BackchannelTokenDeliveryMode
 	backchannelClientNotificationEndpoint     fapi.URL
 
-	allowsClientCredentialsGrant bool
+	allowsClientCredentialsGrant    bool
+	automaticFederationRegistration bool
 }
 
 // RegisteredClientConfig is the input to NewRegisteredClient.
@@ -264,6 +265,17 @@ type RegisteredClientConfig struct {
 	// this field alone does not activate the grant if that deployment
 	// -wide switch is off.
 	AllowsClientCredentialsGrant bool
+
+	// AutomaticFederationRegistration marks this client as resolved via
+	// OpenID Federation 1.0 §12.1 ("Automatic Registration") rather than
+	// statically configured — set only by
+	// federation.AutomaticClientRepository, never by a caller
+	// configuring a static client by hand. When true, server-side
+	// request object handling applies §12.1.1's stricter Request Object
+	// rules instead of the generic RFC 9101 ones: see
+	// requestobject.VerifyPolicy.AutomaticFederationRegistration's own
+	// doc comment for exactly what that changes.
+	AutomaticFederationRegistration bool
 }
 
 // NeedsJWKS reports whether a client configured this way needs a
@@ -411,6 +423,7 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 		backchannelTokenDeliveryMode:              cfg.BackchannelTokenDeliveryMode,
 		backchannelClientNotificationEndpoint:     cfg.BackchannelClientNotificationEndpoint,
 		allowsClientCredentialsGrant:              cfg.AllowsClientCredentialsGrant,
+		automaticFederationRegistration:           cfg.AutomaticFederationRegistration,
 	}, nil
 }
 
@@ -531,6 +544,14 @@ func (c RegisteredClient) BackchannelClientNotificationEndpoint() fapi.URL {
 // RFC 6749 §4.4 client_credentials grant.
 func (c RegisteredClient) AllowsClientCredentialsGrant() bool {
 	return c.allowsClientCredentialsGrant
+}
+
+// AutomaticFederationRegistration reports whether this client was
+// resolved via OpenID Federation 1.0 §12.1 Automatic Registration —
+// see RegisteredClientConfig.AutomaticFederationRegistration's own doc
+// comment.
+func (c RegisteredClient) AutomaticFederationRegistration() bool {
+	return c.automaticFederationRegistration
 }
 
 // AllowsScope reports whether scope is in this client's registered set

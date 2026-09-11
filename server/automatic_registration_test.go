@@ -18,6 +18,7 @@ import (
 	"github.com/idfoundry/fapigo/internal/clientassertion"
 	intfed "github.com/idfoundry/fapigo/internal/federation"
 	"github.com/idfoundry/fapigo/internal/jose"
+	"github.com/idfoundry/fapigo/internal/requestobject"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
@@ -103,6 +104,7 @@ func setupAutomaticRegistrationFixture(t *testing.T, redirectURI string) *automa
 		"redirect_uris":                   []string{redirectURI},
 		"token_endpoint_auth_method":      "private_key_jwt",
 		"token_endpoint_auth_signing_alg": "ES256",
+		"request_object_signing_alg":      "ES256",
 		"jwks":                            json.RawMessage(fedJWKS(t, "rp-oidc", rpOIDCKey)),
 	})
 	if err != nil {
@@ -222,9 +224,13 @@ func TestNewRejectsMalformedTrustAnchorEntry(t *testing.T) {
 // Relying Party this server has never seen before, authenticated with a
 // client assertion signed by the key that RP published in its own
 // federation-resolved openid_relying_party metadata.
-func TestNewWiresAutomaticRegistrationIntoPushAuthorizationRequest(t *testing.T) {
-	f := setupAutomaticRegistrationFixture(t, testRedirectURI)
-
+// newAutomaticRegistrationTestServer builds a server.Server wired to f's
+// TA -> RP federation, with Dependencies.Clients/ClientKeys deliberately
+// empty (no statically registered client would ever resolve) — so any
+// successful request against the returned server for f.rpID can only be
+// explained by AutomaticRegistration having kicked in.
+func newAutomaticRegistrationTestServer(t *testing.T, f *automaticRegistrationFixture) *server.Server {
+	t.Helper()
 	issuer, err := fapi.ParseIssuerURL(testIssuer)
 	if err != nil {
 		t.Fatalf("ParseIssuerURL: %v", err)
@@ -258,9 +264,6 @@ func TestNewWiresAutomaticRegistrationIntoPushAuthorizationRequest(t *testing.T)
 	serverKey := generateKey(t)
 	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
 	deps := server.Dependencies{
-		// Deliberately empty: no statically registered client would
-		// ever resolve, so PushAuthorizationRequest's success below can
-		// only be explained by AutomaticRegistration having kicked in.
 		Clients:        &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{}},
 		Transactions:   &fakeTransactionStore{},
 		Grants:         &fakeGrantStore{},
@@ -279,6 +282,12 @@ func TestNewWiresAutomaticRegistrationIntoPushAuthorizationRequest(t *testing.T)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
+	return srv
+}
+
+func TestNewWiresAutomaticRegistrationIntoPushAuthorizationRequest(t *testing.T) {
+	f := setupAutomaticRegistrationFixture(t, testRedirectURI)
+	srv := newAutomaticRegistrationTestServer(t, f)
 
 	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
 		Signer: f.rpOIDCKey, Algorithm: fapi.ES256, KeyID: "rp-oidc",
@@ -294,4 +303,60 @@ func TestNewWiresAutomaticRegistrationIntoPushAuthorizationRequest(t *testing.T)
 	}); err != nil {
 		t.Fatalf("PushAuthorizationRequest (automatically-registered client): %v", err)
 	}
+}
+
+// TestNewWiresAutomaticRegistrationRequestObjectFederationRules proves
+// server.New applies OpenID Federation 1.0 §12.1.1's stricter Request
+// Object rules (via
+// storage.RegisteredClient.AutomaticFederationRegistration) to an
+// automatically-registered client's real PAR request, not just the
+// generic RFC 9101 ones a statically registered client gets — see
+// internal/requestobject's own tests for exhaustive claim-combination
+// coverage; this proves the wiring reaches this real end-to-end path.
+func TestNewWiresAutomaticRegistrationRequestObjectFederationRules(t *testing.T) {
+	f := setupAutomaticRegistrationFixture(t, testRedirectURI)
+	srv := newAutomaticRegistrationTestServer(t, f)
+
+	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
+		Signer: f.rpOIDCKey, Algorithm: fapi.ES256, KeyID: "rp-oidc",
+		ClientID: f.rpID, Audience: testIssuer,
+		Now: f.now, Lifetime: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssertion: %v", err)
+	}
+
+	push := func(t *testing.T, params map[string]json.RawMessage) error {
+		t.Helper()
+		requestObj, err := requestobject.Create(requestobject.CreateParams{
+			Signer: f.rpOIDCKey, Algorithm: fapi.ES256, KeyID: "rp-oidc",
+			ClientID: f.rpID, Audience: testIssuer,
+			Now: f.now, Lifetime: 30 * time.Second, Parameters: params,
+		})
+		if err != nil {
+			t.Fatalf("requestobject.Create: %v", err)
+		}
+		_, err = srv.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+			HTTP: server.FormRequest{Parameters: []server.FormParameter{
+				formParam("client_assertion", assertion),
+				formParam("client_assertion_type", clientassertion.AssertionType),
+				formParam("request", requestObj),
+			}},
+		})
+		return err
+	}
+
+	t.Run("compliant request object succeeds", func(t *testing.T) {
+		if err := push(t, standardAuthParams(t)); err != nil {
+			t.Fatalf("PushAuthorizationRequest (compliant) = %v, want nil error", err)
+		}
+	})
+
+	t.Run("rejects a sub claim", func(t *testing.T) {
+		params := standardAuthParams(t)
+		params["sub"] = jsonRaw(t, f.rpID)
+		if err := push(t, params); err == nil {
+			t.Fatalf("PushAuthorizationRequest (sub present) = nil error, want error")
+		}
+	})
 }

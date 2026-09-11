@@ -11,8 +11,12 @@
 // verification policy (what the server is willing to accept) are
 // independent decisions that must be configurable independently.
 //
-// Only the JWT-standard claims (iss, aud, exp, nbf, iat, jti) are parsed
-// into typed fields. Every other top-level claim — the actual
+// Only the JWT-standard claims (iss, aud, exp, nbf, iat, jti, sub) are
+// parsed into typed fields — sub only as a presence flag (HasSubject),
+// since OpenID Federation 1.0 §12.1.1 requires it be absent from a
+// Request Object used for Automatic Registration
+// (VerifyPolicy.AutomaticFederationRegistration). Every other top-level
+// claim — the actual
 // authorization request parameters, including any registered
 // extension/RAR parameter — is left as raw JSON in Parameters for the
 // extension package to interpret; this package has no opinion on which

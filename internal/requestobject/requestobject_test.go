@@ -394,6 +394,122 @@ func TestVerifyRejectsAudienceMismatch(t *testing.T) {
 	}
 }
 
+// OpenID Federation 1.0 §12.1.1 requires aud to be exactly the OP's
+// Entity Identifier with no other values — unlike the generic RFC 9101
+// rule TestVerifyAcceptsAudienceArrayContainingExpected exercises above,
+// an object otherwise identical to that one (same array, containing the
+// expected audience among others) must be rejected once
+// AutomaticFederationRegistration is set.
+func TestVerifyAutomaticFederationRegistrationRejectsExtraAudience(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256"}`))
+	payloadJSON, err := json.Marshal(map[string]any{
+		"iss": "client-123",
+		"aud": []string{"https://as.example", "https://other.example.com"},
+		"exp": now.Add(time.Minute).Unix(),
+		"jti": "some-jti",
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	signingInput := header + "." + base64.RawURLEncoding.EncodeToString(payloadJSON)
+	sig, err := signRaw(key, signingInput)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	token := signingInput + "." + sig
+
+	obj, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	policy := basePolicy(now)
+	policy.AutomaticFederationRegistration = true
+	if _, err := obj.Verify(context.Background(), &key.PublicKey, policy); !errors.Is(err, ErrAudienceMismatch) {
+		t.Fatalf("Verify(aud array with extra value, AutomaticFederationRegistration) = %v, want ErrAudienceMismatch", err)
+	}
+}
+
+// A request object whose aud is exactly the expected single value (the
+// shape createTestObject always produces) must still succeed under
+// AutomaticFederationRegistration.
+func TestVerifyAutomaticFederationRegistrationAcceptsExactAudience(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	token := createTestObject(t, key, now, time.Minute)
+
+	obj, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	policy := basePolicy(now)
+	policy.AutomaticFederationRegistration = true
+	if _, err := obj.Verify(context.Background(), &key.PublicKey, policy); err != nil {
+		t.Fatalf("Verify(exact aud, AutomaticFederationRegistration) = %v, want nil error", err)
+	}
+}
+
+// OpenID Federation 1.0 §12.1.1: "sub" MUST NOT be present, specifically
+// to stop a request object being reused as a private_key_jwt client
+// assertion (which is keyed on iss+sub).
+func TestVerifyAutomaticFederationRegistrationRejectsSubjectClaim(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	token, err := Create(CreateParams{
+		Signer: key, Algorithm: fapi.ES256, ClientID: "client-123", Audience: "https://as.example",
+		Now: now, Lifetime: time.Minute,
+		Parameters: map[string]json.RawMessage{"sub": jsonRaw(t, "client-123")},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	obj, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	policy := basePolicy(now)
+	policy.AutomaticFederationRegistration = true
+	if _, err := obj.Verify(context.Background(), &key.PublicKey, policy); !errors.Is(err, ErrUnexpectedSubject) {
+		t.Fatalf("Verify(sub present, AutomaticFederationRegistration) = %v, want ErrUnexpectedSubject", err)
+	}
+}
+
+// jti becomes required under AutomaticFederationRegistration even
+// though the base policy (no RequireJTI) would otherwise accept an
+// object with none — mirroring TestVerifyRejectsMissingJTIWhenRequired
+// but via the federation-specific policy field.
+func TestVerifyAutomaticFederationRegistrationRejectsMissingJTI(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256"}`))
+	payloadJSON, err := json.Marshal(map[string]any{
+		"iss": "client-123", "aud": "https://as.example", "exp": now.Add(time.Minute).Unix(),
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	signingInput := header + "." + base64.RawURLEncoding.EncodeToString(payloadJSON)
+	sig, err := signRaw(key, signingInput)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	token := signingInput + "." + sig
+
+	obj, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	policy := basePolicy(now)
+	policy.AutomaticFederationRegistration = true
+	if _, err := obj.Verify(context.Background(), &key.PublicKey, policy); !errors.Is(err, ErrMissingJTI) {
+		t.Fatalf("Verify(no jti, AutomaticFederationRegistration) = %v, want ErrMissingJTI", err)
+	}
+}
+
 func TestVerifyRejectsExpiredObject(t *testing.T) {
 	key := generateKey(t)
 	now := time.Now()

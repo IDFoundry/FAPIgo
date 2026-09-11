@@ -682,3 +682,55 @@ func TestStatementClaimedMetadataPolicy(t *testing.T) {
 		t.Errorf("ClaimedMetadataPolicy() crit = %v, want [x-custom-op]", crit)
 	}
 }
+
+func TestStatementClaimedConstraints(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	maxPathLength := 2
+
+	p := subordinateStatementParams(t, key, "https://superior.example.org", "https://rp.example.org", now)
+	p.Constraints = &Constraints{
+		MaxPathLength: maxPathLength, HasMaxPathLength: true,
+		NamingConstraints:  &NamingConstraints{Permitted: []string{".example.org"}, Excluded: []string{"bad.example.org"}},
+		AllowedEntityTypes: []string{"openid_relying_party"},
+	}
+	token, err := Create(p)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	stmt, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	constraints := stmt.ClaimedConstraints()
+	if constraints == nil {
+		t.Fatalf("ClaimedConstraints() = nil, want non-nil")
+	}
+	if !constraints.HasMaxPathLength || constraints.MaxPathLength != maxPathLength {
+		t.Errorf("MaxPathLength = (%d, %v), want (%d, true)", constraints.MaxPathLength, constraints.HasMaxPathLength, maxPathLength)
+	}
+	if constraints.NamingConstraints == nil || len(constraints.NamingConstraints.Permitted) != 1 || len(constraints.NamingConstraints.Excluded) != 1 {
+		t.Errorf("NamingConstraints = %+v, want one permitted and one excluded entry", constraints.NamingConstraints)
+	}
+	if len(constraints.AllowedEntityTypes) != 1 || constraints.AllowedEntityTypes[0] != "openid_relying_party" {
+		t.Errorf("AllowedEntityTypes = %v, want [openid_relying_party]", constraints.AllowedEntityTypes)
+	}
+}
+
+func TestStatementClaimedConstraintsAbsent(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	p := subordinateStatementParams(t, key, "https://superior.example.org", "https://rp.example.org", now)
+	p.Constraints = nil
+	token, err := Create(p)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	stmt, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if constraints := stmt.ClaimedConstraints(); constraints != nil {
+		t.Errorf("ClaimedConstraints() = %+v, want nil", constraints)
+	}
+}

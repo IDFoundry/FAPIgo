@@ -98,6 +98,17 @@ func (s Statement) ClaimedMetadataPolicy() (MetadataPolicy, []string) {
 	return s.claims.MetadataPolicy, s.claims.MetadataPolicyCritical
 }
 
+// ClaimedConstraints returns the statement's unverified "constraints"
+// claim (OpenID Federation 1.0 §6.2), nil if absent. Safe to read
+// before Verify succeeds for the exact reason ClaimedMetadataPolicy's
+// own doc comment gives — a caller resolving a multi-hop Trust Chain
+// reads this from a Subordinate Statement whose own signature is
+// verified one loop iteration later, and only acts on the value once
+// the whole chain has already been cryptographically verified.
+func (s Statement) ClaimedConstraints() *Constraints {
+	return s.claims.Constraints
+}
+
 // VerifyPolicy is the set of checks Verify enforces against a
 // Statement.
 type VerifyPolicy struct {

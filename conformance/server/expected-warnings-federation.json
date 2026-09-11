@@ -3,5 +3,10 @@
     "test-name": "*",
     "condition": "OIDCCCheckDiscEndpointIdTokenSigningAlgValuesSupported",
     "expected-result": "failure"
+  },
+  {
+    "test-name": "*",
+    "condition": "CheckDiscEndpointRequestObjectSigningAlgValuesSupportedIncludesRS256",
+    "expected-result": "warning"
   }
 ]

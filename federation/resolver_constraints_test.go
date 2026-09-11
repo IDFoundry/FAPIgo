@@ -240,7 +240,7 @@ func TestResolveAllowsAnyEntityTypeWithoutAllowedEntityTypesConstraint(t *testin
 // which setupConstrainedFederation's own two-level TA -> LE topology
 // never reaches (there, the constraint always comes from the
 // TrustAnchor-terminal branch's already-verified aboveClaims instead).
-func setupThreeLevelConstrainedFederation(t *testing.T, intermediateConstraints *intfed.Constraints) *constrainedFederation {
+func setupThreeLevelConstrainedFederation(t *testing.T, taConstraints, intermediateConstraints *intfed.Constraints) *constrainedFederation {
 	t.Helper()
 	now := time.Now()
 
@@ -276,6 +276,7 @@ func setupThreeLevelConstrainedFederation(t *testing.T, intermediateConstraints 
 	taAboutI1 := sign(intfed.CreateParams{
 		Signer: taKey, Algorithm: fapi.ES256, KeyID: "ta",
 		Issuer: taID, Subject: i1ID, Now: now, Lifetime: time.Hour, JWKS: i1JWKS,
+		Constraints: taConstraints,
 	})
 	i1Config := sign(intfed.CreateParams{
 		Signer: i1Key, Algorithm: fapi.ES256, KeyID: "i1",
@@ -320,7 +321,7 @@ func setupThreeLevelConstrainedFederation(t *testing.T, intermediateConstraints 
 }
 
 func TestResolveEnforcesIntermediateNamingConstraints(t *testing.T) {
-	f := setupThreeLevelConstrainedFederation(t, &intfed.Constraints{
+	f := setupThreeLevelConstrainedFederation(t, nil, &intfed.Constraints{
 		NamingConstraints: &intfed.NamingConstraints{Excluded: []string{loopbackHost}},
 	})
 	r := f.newResolver(t)
@@ -330,9 +331,29 @@ func TestResolveEnforcesIntermediateNamingConstraints(t *testing.T) {
 }
 
 func TestResolveAcceptsIntermediateWithNoConstraints(t *testing.T) {
-	f := setupThreeLevelConstrainedFederation(t, nil)
+	f := setupThreeLevelConstrainedFederation(t, nil, nil)
 	r := f.newResolver(t)
 	if _, err := r.Resolve(context.Background(), f.leID); err != nil {
 		t.Fatalf("Resolve(intermediate sets no constraints): %v, want nil error", err)
+	}
+}
+
+// TestResolveEnforcesMaxPathLengthConstraint proves Resolve wires
+// checkMaxPathLengthConstraints into the real chain walk: TA's own
+// max_path_length=0 forbids any Intermediate between TA and LE, but
+// this fixture's chain (TA -> I1 -> LE) has exactly one (I1).
+func TestResolveEnforcesMaxPathLengthConstraint(t *testing.T) {
+	f := setupThreeLevelConstrainedFederation(t, &intfed.Constraints{MaxPathLength: 0, HasMaxPathLength: true}, nil)
+	r := f.newResolver(t)
+	if _, err := r.Resolve(context.Background(), f.leID); err == nil {
+		t.Fatalf("Resolve(TA max_path_length=0, 1 actual intermediate) = nil error, want error")
+	}
+}
+
+func TestResolveAcceptsSatisfiedMaxPathLengthConstraint(t *testing.T) {
+	f := setupThreeLevelConstrainedFederation(t, &intfed.Constraints{MaxPathLength: 1, HasMaxPathLength: true}, nil)
+	r := f.newResolver(t)
+	if _, err := r.Resolve(context.Background(), f.leID); err != nil {
+		t.Fatalf("Resolve(TA max_path_length=1, 1 actual intermediate): %v, want nil error", err)
 	}
 }

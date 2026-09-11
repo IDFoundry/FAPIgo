@@ -19,7 +19,12 @@ import (
 // constraint only ever governs entities already below its issuer in
 // the chain, never ones discovered later above it, so a later entity's
 // own constraint must not retroactively apply to entities recorded
-// under an earlier, unrelated snapshot.
+// under an earlier, unrelated snapshot. appliesTo doubles as the
+// population checkMaxPathLengthConstraints counts against: since
+// appliesTo[0] is always the Trust Chain subject itself (never counted
+// as an "Intermediate Entity"), len(appliesTo)-1 is exactly the number
+// of Intermediate Entities between the constraint's issuer and the
+// subject.
 type subordinateConstraint struct {
 	constraints intfed.Constraints
 	appliesTo   []string
@@ -70,6 +75,27 @@ func checkNamingConstraint(nc intfed.NamingConstraints, entityID string) error {
 		}
 	}
 	return fmt.Errorf("federation: entity %q is not within any permitted naming_constraints namespace", entityID)
+}
+
+// checkMaxPathLengthConstraints validates every collected per-statement
+// max_path_length constraint (OpenID Federation 1.0 §6.2.1) — distinct
+// from the resolver-wide, hard Limits.MaxPathLength ceiling Resolve
+// enforces unconditionally regardless of any statement's own claims.
+// Per §6.2.1's own worked example, the constraint bounds how many
+// Intermediate Entities appear between the entity that set it and the
+// Trust Chain subject; see subordinateConstraint's own doc comment for
+// why len(appliesTo)-1 is exactly that count.
+func checkMaxPathLengthConstraints(constraints []subordinateConstraint) error {
+	for _, sc := range constraints {
+		if !sc.constraints.HasMaxPathLength {
+			continue
+		}
+		if intermediateCount := len(sc.appliesTo) - 1; intermediateCount > sc.constraints.MaxPathLength {
+			return fmt.Errorf("federation: trust chain has %d intermediate entities below a superior whose own max_path_length constraint permits at most %d",
+				intermediateCount, sc.constraints.MaxPathLength)
+		}
+	}
+	return nil
 }
 
 // entityIDHost extracts entityID's own host — every entity ID reaching

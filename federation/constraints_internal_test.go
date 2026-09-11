@@ -101,6 +101,87 @@ func TestCheckNamingConstraintsAppliesToEveryEntryInAppliesTo(t *testing.T) {
 	}
 }
 
+// The following four cases reproduce OpenID Federation 1.0 §6.2.1's own
+// worked example verbatim: a four-Entity-Statement chain LE -> I1 -> I2
+// -> TA, where appliesTo mirrors exactly what Resolve's own bottom-up
+// walk would have collected by the time each entity's statement is
+// read (appliesTo[0] is always LE itself, never counted as an
+// Intermediate Entity — see subordinateConstraint's own doc comment).
+func maxPathLengthWorkedExampleAppliesTo(entitiesBelow ...string) []string {
+	return append([]string{"https://le.example.org"}, entitiesBelow...)
+}
+
+func TestCheckMaxPathLengthConstraintsAcceptsTASpecifyingAtLeastTwo(t *testing.T) {
+	// "The TA specifies a max_path_length that is greater than or equal
+	// to 2."
+	constraints := []subordinateConstraint{
+		{
+			constraints: intfed.Constraints{MaxPathLength: 2, HasMaxPathLength: true},
+			appliesTo:   maxPathLengthWorkedExampleAppliesTo("https://i1.example.org", "https://i2.example.org"),
+		},
+	}
+	if err := checkMaxPathLengthConstraints(constraints); err != nil {
+		t.Fatalf("checkMaxPathLengthConstraints(TA max_path_length=2, 2 intermediates): %v, want nil error", err)
+	}
+}
+
+func TestCheckMaxPathLengthConstraintsAcceptsTAAndI2Combination(t *testing.T) {
+	// "TA specifies a max_path_length of 2, I2 specifies a
+	// max_path_length of 1, and I1 omits the max_path_length
+	// constraint."
+	constraints := []subordinateConstraint{
+		{
+			constraints: intfed.Constraints{MaxPathLength: 1, HasMaxPathLength: true},
+			appliesTo:   maxPathLengthWorkedExampleAppliesTo("https://i1.example.org"),
+		},
+		{
+			constraints: intfed.Constraints{MaxPathLength: 2, HasMaxPathLength: true},
+			appliesTo:   maxPathLengthWorkedExampleAppliesTo("https://i1.example.org", "https://i2.example.org"),
+		},
+	}
+	if err := checkMaxPathLengthConstraints(constraints); err != nil {
+		t.Fatalf("checkMaxPathLengthConstraints(TA=2, I2=1): %v, want nil error", err)
+	}
+}
+
+func TestCheckMaxPathLengthConstraintsAcceptsI1SpecifyingZero(t *testing.T) {
+	// "Neither TA nor I2 specifies any max_path_length constraint while
+	// I1 sets max_path_length to 0."
+	constraints := []subordinateConstraint{
+		{
+			constraints: intfed.Constraints{MaxPathLength: 0, HasMaxPathLength: true},
+			appliesTo:   maxPathLengthWorkedExampleAppliesTo(),
+		},
+	}
+	if err := checkMaxPathLengthConstraints(constraints); err != nil {
+		t.Fatalf("checkMaxPathLengthConstraints(I1 max_path_length=0, 0 intermediates): %v, want nil error", err)
+	}
+}
+
+func TestCheckMaxPathLengthConstraintsRejectsTASpecifyingOne(t *testing.T) {
+	// "The Trust Chain does not fulfill the constraints if ... the TA
+	// sets the max_path_length to 1" — 2 actual intermediates (I1, I2)
+	// exceed it.
+	constraints := []subordinateConstraint{
+		{
+			constraints: intfed.Constraints{MaxPathLength: 1, HasMaxPathLength: true},
+			appliesTo:   maxPathLengthWorkedExampleAppliesTo("https://i1.example.org", "https://i2.example.org"),
+		},
+	}
+	if err := checkMaxPathLengthConstraints(constraints); err == nil {
+		t.Fatalf("checkMaxPathLengthConstraints(TA max_path_length=1, 2 intermediates) = nil error, want error")
+	}
+}
+
+func TestCheckMaxPathLengthConstraintsIgnoresAbsentConstraint(t *testing.T) {
+	constraints := []subordinateConstraint{
+		{constraints: intfed.Constraints{HasMaxPathLength: false}, appliesTo: maxPathLengthWorkedExampleAppliesTo("https://i1.example.org", "https://i2.example.org", "https://i3.example.org")},
+	}
+	if err := checkMaxPathLengthConstraints(constraints); err != nil {
+		t.Fatalf("checkMaxPathLengthConstraints(no max_path_length constraint): %v, want nil error", err)
+	}
+}
+
 func TestFilterAllowedEntityTypesNoConstraintsReturnsUnchanged(t *testing.T) {
 	metadata := map[string]json.RawMessage{"openid_relying_party": json.RawMessage(`{}`)}
 	got := filterAllowedEntityTypes(nil, metadata)

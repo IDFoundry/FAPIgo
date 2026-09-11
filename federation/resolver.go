@@ -43,9 +43,10 @@ type Limits struct {
 	// says, so a misbehaving or malicious federation member can't send
 	// Resolve down an unbounded (or merely very long) chain. Resolve
 	// separately enforces each Subordinate Statement's own
-	// naming_constraints (§6.2.2) and allowed_entity_types (§6.2.3);
-	// this release does not yet enforce a per-statement max_path_length
-	// constraint (§6.2.1) — see doc.go.
+	// max_path_length (§6.2.1), naming_constraints (§6.2.2) and
+	// allowed_entity_types (§6.2.3) constraints — this field is this
+	// package's own independent, always-on ceiling, not a substitute for
+	// those per-statement ones.
 	MaxPathLength int
 
 	// MaxStatementLifetime bounds how far in the future (relative to
@@ -150,12 +151,11 @@ type ResolvedEntity struct {
 
 // Resolve resolves subjectID's Trust Chain against one of
 // Config.TrustAnchors and returns its Resolved Metadata, enforcing
-// every Subordinate Statement's own naming_constraints and
-// allowed_entity_types constraints along the way. See doc.go for this
-// release's scope (leaf-entity resolution only, automatic
+// every Subordinate Statement's own max_path_length, naming_constraints
+// and allowed_entity_types constraints along the way. See doc.go for
+// this release's scope (leaf-entity resolution only, automatic
 // registration's own trust model — no server-side federation endpoints
-// of this Resolver's own, no trust marks, no per-statement
-// max_path_length beyond the hard Limits.MaxPathLength ceiling).
+// of this Resolver's own, no trust marks).
 func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntity, error) {
 	if subjectID == "" {
 		return ResolvedEntity{}, fmt.Errorf("federation: subject entity ID is empty")
@@ -297,6 +297,9 @@ func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntit
 			}
 
 			if err := checkNamingConstraints(subordinateConstraints); err != nil {
+				return ResolvedEntity{}, err
+			}
+			if err := checkMaxPathLengthConstraints(subordinateConstraints); err != nil {
 				return ResolvedEntity{}, err
 			}
 			leafMetadata := filterAllowedEntityTypes(subordinateConstraints, leafClaims.Metadata)

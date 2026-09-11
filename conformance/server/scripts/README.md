@@ -288,7 +288,22 @@ The "Entity joined to test federation OP/RP test" plans exercise
 automatic registration end to end instead (§12.1) — same Trust Anchor,
 but the suite additionally plays the RP/OP role itself, driving a real
 Request Object/PAR exchange against this AS. Not yet reliably runnable
-end to end — see the "alpha" caveat above.
+end to end — see the "alpha" caveat above; this is why
+`conformance/scripts/run-all.sh` only automates the Deployed Entity plan
+(steps 1-4 above), never these.
+
+**Steps 1-4 above are automated** by
+`conformance/server/scripts/run-federation-plan.py`, driven by
+`conformance/scripts/run-all.sh`'s own `run_federation_plan` — it brings
+up both federation containers, does the ephemeral-key re-sync from step
+2 itself (no manual curl/paste needed), creates the plan, runs every
+module, and exits non-zero on any unexpected FAILURE/WARNING. The known
+RS256 discovery-check failure every module hits (this AS is ES256-only;
+the check is generic OIDC discovery metadata, unrelated to federation
+itself) is recorded once in
+`conformance/server/expected-warnings-federation.json` rather than
+worked around or silenced — see that script's own doc comment for the
+expected-result matching it does against that file.
 
 ## CI-style run (no browser, no human)
 
@@ -312,8 +327,9 @@ the manual flow above has), so
 `*-plan.json` files (and updates the matching `oidf-config/*.config.json`)
 in one shot — see [../oidf-config/README.md](../oidf-config/README.md)'s
 "Quick start". `conformance/scripts/run-all.sh`, which drives this
-CI-style flow for all twenty test configurations at once, expects
-exactly the files that command produces.
+CI-style flow for all twenty-one test configurations at once (including
+the federation leg above), expects exactly the files that command
+produces.
 
 ```
 pip install -r <suite-checkout>/scripts/requirements.txt   # one-time: httpx, pyparsing

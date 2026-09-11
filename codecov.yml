@@ -26,7 +26,15 @@
 # flag.Parse(), log.Fatal (os.Exit) on every validation failure, and
 # blocks forever on ListenAndServeTLS — see sonar-project.properties'
 # own longer account of this one.
+#
+# cmd/conformance-federation-trust-anchor is the same story as the
+# conformance/** dev tooling above: a minimal standing OpenID
+# Federation Trust Anchor for conformance-testing this repo's own AS
+# against a live OIDF suite instance, verified by actually running it
+# (conformance/server/scripts/README.md's own "OpenID Federation"
+# section), not by unit tests.
 ignore:
   - "conformance/**"
   - "cmd/conformance-client/**"
   - "cmd/conformance-as/main.go"
+  - "cmd/conformance-federation-trust-anchor/**"

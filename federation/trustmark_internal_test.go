@@ -1,6 +1,7 @@
 package federation
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -79,8 +80,32 @@ func signTestTrustMark(t *testing.T, key *ecdsa.PrivateKey, kid string, claims m
 	return tm
 }
 
+type fixedTestClock struct{ now time.Time }
+
+func (c fixedTestClock) Now() time.Time { return c.now }
+
 func testResolver() *Resolver {
-	return &Resolver{cfg: Config{Limits: Limits{MaxClockSkew: 5 * time.Second}}}
+	return &Resolver{
+		cfg:  Config{Limits: Limits{MaxClockSkew: 5 * time.Second}},
+		deps: Dependencies{Clock: fixedTestClock{now: time.Now()}},
+	}
+}
+
+func signTestTrustMarkDelegation(t *testing.T, key *ecdsa.PrivateKey, kid string, claims map[string]any) intfed.TrustMarkDelegation {
+	t.Helper()
+	payload, err := json.Marshal(claims)
+	if err != nil {
+		t.Fatalf("marshal claims: %v", err)
+	}
+	token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: "trust-mark-delegation+jwt", KeyID: kid}, payload)
+	if err != nil {
+		t.Fatalf("jose.Sign: %v", err)
+	}
+	d, err := intfed.ParseTrustMarkDelegation(token)
+	if err != nil {
+		t.Fatalf("intfed.ParseTrustMarkDelegation: %v", err)
+	}
+	return d
 }
 
 func TestVerifyTrustMarkAgainstJWKSRejectsMalformedJWKS(t *testing.T) {
@@ -155,5 +180,92 @@ func TestVerifyTrustMarkAgainstJWKSRejectsNoMatchingCandidate(t *testing.T) {
 
 	if _, err := testResolver().verifyTrustMarkAgainstJWKS(tm, jwks, "https://rp.example.org", "https://federation.example.org/marks/certified", fapi.ES256, now); err == nil {
 		t.Fatalf("verifyTrustMarkAgainstJWKS(no matching kid) = nil error, want error")
+	}
+}
+
+func TestCheckTrustMarkDelegationRejectsUnresolvableTrustAnchor(t *testing.T) {
+	tm := signTestTrustMark(t, generateTestKey(t), "issuer-kid", map[string]any{
+		"iss": "https://issuer.example.org", "sub": "https://rp.example.org",
+		"trust_mark_type": "https://federation.example.org/marks/certified",
+		"iat":             time.Now().Unix(),
+	})
+	claims := intfed.TrustMarkClaims{TrustMarkType: "https://federation.example.org/marks/certified"}
+	if err := testResolver().checkTrustMarkDelegation(context.Background(), "not-a-valid-entity-id", tm, claims); err == nil {
+		t.Fatalf("checkTrustMarkDelegation(unresolvable trust anchor) = nil error, want error")
+	}
+}
+
+func TestVerifyTrustMarkDelegationAgainstJWKSRejectsMalformedJWKS(t *testing.T) {
+	key := generateTestKey(t)
+	d := signTestTrustMarkDelegation(t, key, "owner-kid", map[string]any{
+		"iss": "https://owner.example.org", "sub": "https://issuer.example.org",
+		"trust_mark_type": "https://federation.example.org/marks/certified",
+		"iat":             time.Now().Unix(),
+	})
+	if _, err := testResolver().verifyTrustMarkDelegationAgainstJWKS(d, json.RawMessage(`not json`), "https://owner.example.org", "https://issuer.example.org", "https://federation.example.org/marks/certified", fapi.ES256, time.Now()); err == nil {
+		t.Fatalf("verifyTrustMarkDelegationAgainstJWKS(malformed jwks) = nil error, want error")
+	}
+}
+
+func TestVerifyTrustMarkDelegationAgainstJWKSSkipsWrongAlgorithm(t *testing.T) {
+	rsaJWKS := testRSAJWKS(t, "rsa-kid")
+	esKey := generateTestKey(t)
+	esJWKS := testKeyJWKS(t, "es-kid", esKey, fapi.ES256)
+	jwks := jwkSetOf(t, rsaJWKS, esJWKS)
+
+	now := time.Now()
+	d := signTestTrustMarkDelegation(t, esKey, "es-kid", map[string]any{
+		"iss": "https://owner.example.org", "sub": "https://issuer.example.org",
+		"trust_mark_type": "https://federation.example.org/marks/certified",
+		"iat":             now.Unix(),
+	})
+
+	claims, err := testResolver().verifyTrustMarkDelegationAgainstJWKS(d, jwks, "https://owner.example.org", "https://issuer.example.org", "https://federation.example.org/marks/certified", fapi.ES256, now)
+	if err != nil {
+		t.Fatalf("verifyTrustMarkDelegationAgainstJWKS: %v", err)
+	}
+	if claims.Issuer != "https://owner.example.org" {
+		t.Errorf("claims.Issuer = %q", claims.Issuer)
+	}
+}
+
+func TestVerifyTrustMarkDelegationAgainstJWKSSkipsWrongKeyID(t *testing.T) {
+	otherKey := generateTestKey(t)
+	otherJWKS := testKeyJWKS(t, "other-kid", otherKey, fapi.ES256)
+	key := generateTestKey(t)
+	matchingJWKS := testKeyJWKS(t, "owner-kid", key, fapi.ES256)
+	jwks := jwkSetOf(t, otherJWKS, matchingJWKS)
+
+	now := time.Now()
+	d := signTestTrustMarkDelegation(t, key, "owner-kid", map[string]any{
+		"iss": "https://owner.example.org", "sub": "https://issuer.example.org",
+		"trust_mark_type": "https://federation.example.org/marks/certified",
+		"iat":             now.Unix(),
+	})
+
+	claims, err := testResolver().verifyTrustMarkDelegationAgainstJWKS(d, jwks, "https://owner.example.org", "https://issuer.example.org", "https://federation.example.org/marks/certified", fapi.ES256, now)
+	if err != nil {
+		t.Fatalf("verifyTrustMarkDelegationAgainstJWKS: %v", err)
+	}
+	if claims.Subject != "https://issuer.example.org" {
+		t.Errorf("claims.Subject = %q", claims.Subject)
+	}
+}
+
+func TestVerifyTrustMarkDelegationAgainstJWKSRejectsNoMatchingCandidate(t *testing.T) {
+	otherKey := generateTestKey(t)
+	otherJWKS := testKeyJWKS(t, "other-kid", otherKey, fapi.ES256)
+	jwks := jwkSetOf(t, otherJWKS)
+
+	key := generateTestKey(t)
+	now := time.Now()
+	d := signTestTrustMarkDelegation(t, key, "owner-kid", map[string]any{
+		"iss": "https://owner.example.org", "sub": "https://issuer.example.org",
+		"trust_mark_type": "https://federation.example.org/marks/certified",
+		"iat":             now.Unix(),
+	})
+
+	if _, err := testResolver().verifyTrustMarkDelegationAgainstJWKS(d, jwks, "https://owner.example.org", "https://issuer.example.org", "https://federation.example.org/marks/certified", fapi.ES256, now); err == nil {
+		t.Fatalf("verifyTrustMarkDelegationAgainstJWKS(no matching kid) = nil error, want error")
 	}
 }

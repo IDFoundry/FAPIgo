@@ -52,11 +52,14 @@ type trustMarkFederation struct {
 	now        time.Time
 }
 
-// setupTrustMarkFederation builds the fixture. trustMarkClaims, if
-// non-nil, overrides the Trust Mark JWT's own claims (merged over a
-// valid baseline) — used by the negative tests to corrupt one field at
-// a time.
-func setupTrustMarkFederation(t *testing.T, trustMarkClaimOverrides map[string]any) *trustMarkFederation {
+// setupTrustMarkFederation builds the fixture. buildOverrides, if
+// non-nil, is called once taID/leID are known and its result is merged
+// over the Trust Mark JWT's own valid-baseline claims — used by the
+// negative tests to corrupt one field at a time, and by the delegation
+// tests (which need taID to build a delegation JWT's own "sub" claim).
+// taTrustMarkOwners, if non-nil, becomes TA's own "trust_mark_owners"
+// claim.
+func setupTrustMarkFederation(t *testing.T, buildOverrides func(taID, leID string) map[string]any, taTrustMarkOwners map[string]intfed.TrustMarkOwner) *trustMarkFederation {
 	t.Helper()
 	now := time.Now()
 
@@ -84,7 +87,8 @@ func setupTrustMarkFederation(t *testing.T, trustMarkClaimOverrides map[string]a
 	taConfig := sign(intfed.CreateParams{
 		Signer: taKey, Algorithm: fapi.ES256, KeyID: "ta",
 		Issuer: taID, Subject: taID, Now: now, Lifetime: time.Hour, JWKS: taJWKS,
-		Metadata: federationEntityMetadata(t, taID+"/fetch"),
+		Metadata:        federationEntityMetadata(t, taID+"/fetch"),
+		TrustMarkOwners: taTrustMarkOwners,
 	})
 	taAboutLE := sign(intfed.CreateParams{
 		Signer: taKey, Algorithm: fapi.ES256, KeyID: "ta",
@@ -95,8 +99,10 @@ func setupTrustMarkFederation(t *testing.T, trustMarkClaimOverrides map[string]a
 		"iss": taID, "sub": leID, "trust_mark_type": testTrustMarkType,
 		"iat": now.Unix(), "exp": now.Add(time.Hour).Unix(),
 	}
-	for k, v := range trustMarkClaimOverrides {
-		trustMarkClaims[k] = v
+	if buildOverrides != nil {
+		for k, v := range buildOverrides(taID, leID) {
+			trustMarkClaims[k] = v
+		}
 	}
 	trustMarkJWT := signTrustMark(t, taKey, "ta", trustMarkClaims)
 
@@ -141,7 +147,7 @@ func (f *trustMarkFederation) newResolver(t *testing.T) *federation.Resolver {
 }
 
 func TestResolveExposesUnverifiedTrustMarks(t *testing.T) {
-	f := setupTrustMarkFederation(t, nil)
+	f := setupTrustMarkFederation(t, nil, nil)
 	r := f.newResolver(t)
 
 	resolved, err := r.Resolve(context.Background(), f.leID)
@@ -160,7 +166,7 @@ func TestResolveExposesUnverifiedTrustMarks(t *testing.T) {
 }
 
 func TestVerifyTrustMarkSucceeds(t *testing.T) {
-	f := setupTrustMarkFederation(t, nil)
+	f := setupTrustMarkFederation(t, nil, nil)
 	r := f.newResolver(t)
 
 	resolved, err := r.Resolve(context.Background(), f.leID)
@@ -183,7 +189,9 @@ func TestVerifyTrustMarkSucceeds(t *testing.T) {
 }
 
 func TestVerifyTrustMarkRejectsSubjectMismatch(t *testing.T) {
-	f := setupTrustMarkFederation(t, map[string]any{"sub": "https://someone-else.example.org"})
+	f := setupTrustMarkFederation(t, func(taID, leID string) map[string]any {
+		return map[string]any{"sub": "https://someone-else.example.org"}
+	}, nil)
 	r := f.newResolver(t)
 
 	resolved, err := r.Resolve(context.Background(), f.leID)
@@ -196,10 +204,12 @@ func TestVerifyTrustMarkRejectsSubjectMismatch(t *testing.T) {
 }
 
 func TestVerifyTrustMarkRejectsExpired(t *testing.T) {
-	f := setupTrustMarkFederation(t, map[string]any{
-		"iat": time.Now().Add(-2 * time.Hour).Unix(),
-		"exp": time.Now().Add(-time.Hour).Unix(),
-	})
+	f := setupTrustMarkFederation(t, func(taID, leID string) map[string]any {
+		return map[string]any{
+			"iat": time.Now().Add(-2 * time.Hour).Unix(),
+			"exp": time.Now().Add(-time.Hour).Unix(),
+		}
+	}, nil)
 	r := f.newResolver(t)
 
 	resolved, err := r.Resolve(context.Background(), f.leID)
@@ -212,7 +222,9 @@ func TestVerifyTrustMarkRejectsExpired(t *testing.T) {
 }
 
 func TestVerifyTrustMarkRejectsUnresolvableIssuer(t *testing.T) {
-	f := setupTrustMarkFederation(t, map[string]any{"iss": "https://unreachable-issuer.example.org"})
+	f := setupTrustMarkFederation(t, func(taID, leID string) map[string]any {
+		return map[string]any{"iss": "https://unreachable-issuer.example.org"}
+	}, nil)
 	r := f.newResolver(t)
 
 	resolved, err := r.Resolve(context.Background(), f.leID)
@@ -225,7 +237,7 @@ func TestVerifyTrustMarkRejectsUnresolvableIssuer(t *testing.T) {
 }
 
 func TestVerifyTrustMarkRejectsWrongTrustMarkType(t *testing.T) {
-	f := setupTrustMarkFederation(t, nil)
+	f := setupTrustMarkFederation(t, nil, nil)
 	r := f.newResolver(t)
 
 	resolved, err := r.Resolve(context.Background(), f.leID)
@@ -240,7 +252,7 @@ func TestVerifyTrustMarkRejectsWrongTrustMarkType(t *testing.T) {
 }
 
 func TestVerifyTrustMarkRejectsEmptySubjectID(t *testing.T) {
-	f := setupTrustMarkFederation(t, nil)
+	f := setupTrustMarkFederation(t, nil, nil)
 	r := f.newResolver(t)
 
 	resolved, err := r.Resolve(context.Background(), f.leID)
@@ -253,11 +265,188 @@ func TestVerifyTrustMarkRejectsEmptySubjectID(t *testing.T) {
 }
 
 func TestVerifyTrustMarkRejectsMalformedTrustMarkJWT(t *testing.T) {
-	f := setupTrustMarkFederation(t, nil)
+	f := setupTrustMarkFederation(t, nil, nil)
 	r := f.newResolver(t)
 
 	malformed := intfed.RawTrustMark{TrustMarkType: testTrustMarkType, TrustMark: "not-a-jwt"}
 	if _, err := r.VerifyTrustMark(context.Background(), f.leID, malformed); err == nil {
 		t.Fatalf("VerifyTrustMark(malformed trust mark JWT) = nil error, want error")
+	}
+}
+
+// --- Trust Mark Delegation (OpenID Federation 1.0 §7.2) ---------------
+//
+// The Trust Mark Owner (ownerKey/testOwnerID below) is a third party
+// outside the TA -> LE federation entirely — its keys are published
+// directly in TA's own "trust_mark_owners" claim (never resolved via a
+// separate Trust Chain), exactly as the spec describes.
+
+const testOwnerID = "https://owner.example.org"
+
+func signTrustMarkDelegation(t *testing.T, key *ecdsa.PrivateKey, kid string, claims map[string]any) string {
+	t.Helper()
+	payload, err := json.Marshal(claims)
+	if err != nil {
+		t.Fatalf("marshal delegation claims: %v", err)
+	}
+	token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: "trust-mark-delegation+jwt", KeyID: kid}, payload)
+	if err != nil {
+		t.Fatalf("jose.Sign: %v", err)
+	}
+	return token
+}
+
+func TestVerifyTrustMarkRequiresDelegationWhenOwnerNamesType(t *testing.T) {
+	ownerKey := generateKey(t)
+	owners := map[string]intfed.TrustMarkOwner{testTrustMarkType: {Subject: testOwnerID, JWKS: jwksFor(t, "owner", ownerKey)}}
+
+	// No delegation claim on the trust mark, even though TA's own
+	// trust_mark_owners names this type.
+	f := setupTrustMarkFederation(t, nil, owners)
+	r := f.newResolver(t)
+
+	resolved, err := r.Resolve(context.Background(), f.leID)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if _, err := r.VerifyTrustMark(context.Background(), f.leID, resolved.TrustMarks[0]); err == nil {
+		t.Fatalf("VerifyTrustMark(owner names type, no delegation claim) = nil error, want error")
+	}
+}
+
+func TestVerifyTrustMarkSucceedsWithValidDelegation(t *testing.T) {
+	ownerKey := generateKey(t)
+	owners := map[string]intfed.TrustMarkOwner{testTrustMarkType: {Subject: testOwnerID, JWKS: jwksFor(t, "owner", ownerKey)}}
+	now := time.Now()
+
+	f := setupTrustMarkFederation(t, func(taID, leID string) map[string]any {
+		delegation := signTrustMarkDelegation(t, ownerKey, "owner", map[string]any{
+			"iss": testOwnerID, "sub": taID, "trust_mark_type": testTrustMarkType,
+			"iat": now.Unix(), "exp": now.Add(time.Hour).Unix(),
+		})
+		return map[string]any{"delegation": delegation}
+	}, owners)
+	r := f.newResolver(t)
+
+	resolved, err := r.Resolve(context.Background(), f.leID)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	claims, err := r.VerifyTrustMark(context.Background(), f.leID, resolved.TrustMarks[0])
+	if err != nil {
+		t.Fatalf("VerifyTrustMark(valid delegation): %v, want nil error", err)
+	}
+	if claims.Issuer != f.taID {
+		t.Errorf("claims.Issuer = %q, want %q", claims.Issuer, f.taID)
+	}
+}
+
+func TestVerifyTrustMarkRejectsDelegationWrongSubject(t *testing.T) {
+	ownerKey := generateKey(t)
+	owners := map[string]intfed.TrustMarkOwner{testTrustMarkType: {Subject: testOwnerID, JWKS: jwksFor(t, "owner", ownerKey)}}
+	now := time.Now()
+
+	f := setupTrustMarkFederation(t, func(taID, leID string) map[string]any {
+		delegation := signTrustMarkDelegation(t, ownerKey, "owner", map[string]any{
+			// sub should be taID (the trust mark's own issuer) — using a
+			// different value must fail delegation validation.
+			"iss": testOwnerID, "sub": "https://someone-else.example.org", "trust_mark_type": testTrustMarkType,
+			"iat": now.Unix(), "exp": now.Add(time.Hour).Unix(),
+		})
+		return map[string]any{"delegation": delegation}
+	}, owners)
+	r := f.newResolver(t)
+
+	resolved, err := r.Resolve(context.Background(), f.leID)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if _, err := r.VerifyTrustMark(context.Background(), f.leID, resolved.TrustMarks[0]); err == nil {
+		t.Fatalf("VerifyTrustMark(delegation sub mismatch) = nil error, want error")
+	}
+}
+
+func TestVerifyTrustMarkRejectsDelegationWrongIssuer(t *testing.T) {
+	ownerKey := generateKey(t)
+	owners := map[string]intfed.TrustMarkOwner{testTrustMarkType: {Subject: testOwnerID, JWKS: jwksFor(t, "owner", ownerKey)}}
+	now := time.Now()
+
+	f := setupTrustMarkFederation(t, func(taID, leID string) map[string]any {
+		delegation := signTrustMarkDelegation(t, ownerKey, "owner", map[string]any{
+			// iss should be testOwnerID (the real owner per trust_mark_owners).
+			"iss": "https://not-the-real-owner.example.org", "sub": taID, "trust_mark_type": testTrustMarkType,
+			"iat": now.Unix(), "exp": now.Add(time.Hour).Unix(),
+		})
+		return map[string]any{"delegation": delegation}
+	}, owners)
+	r := f.newResolver(t)
+
+	resolved, err := r.Resolve(context.Background(), f.leID)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if _, err := r.VerifyTrustMark(context.Background(), f.leID, resolved.TrustMarks[0]); err == nil {
+		t.Fatalf("VerifyTrustMark(delegation iss mismatch) = nil error, want error")
+	}
+}
+
+func TestVerifyTrustMarkRejectsDelegationSignedByWrongKey(t *testing.T) {
+	ownerKey := generateKey(t)
+	wrongKey := generateKey(t)
+	owners := map[string]intfed.TrustMarkOwner{testTrustMarkType: {Subject: testOwnerID, JWKS: jwksFor(t, "owner", ownerKey)}}
+	now := time.Now()
+
+	f := setupTrustMarkFederation(t, func(taID, leID string) map[string]any {
+		delegation := signTrustMarkDelegation(t, wrongKey, "owner", map[string]any{
+			"iss": testOwnerID, "sub": taID, "trust_mark_type": testTrustMarkType,
+			"iat": now.Unix(), "exp": now.Add(time.Hour).Unix(),
+		})
+		return map[string]any{"delegation": delegation}
+	}, owners)
+	r := f.newResolver(t)
+
+	resolved, err := r.Resolve(context.Background(), f.leID)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if _, err := r.VerifyTrustMark(context.Background(), f.leID, resolved.TrustMarks[0]); err == nil {
+		t.Fatalf("VerifyTrustMark(delegation signed by wrong key) = nil error, want error")
+	}
+}
+
+func TestVerifyTrustMarkRejectsMalformedDelegationJWT(t *testing.T) {
+	owners := map[string]intfed.TrustMarkOwner{testTrustMarkType: {Subject: testOwnerID, JWKS: jwksFor(t, "owner", generateKey(t))}}
+
+	f := setupTrustMarkFederation(t, func(taID, leID string) map[string]any {
+		return map[string]any{"delegation": "not-a-jwt"}
+	}, owners)
+	r := f.newResolver(t)
+
+	resolved, err := r.Resolve(context.Background(), f.leID)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if _, err := r.VerifyTrustMark(context.Background(), f.leID, resolved.TrustMarks[0]); err == nil {
+		t.Fatalf("VerifyTrustMark(malformed delegation JWT) = nil error, want error")
+	}
+}
+
+func TestVerifyTrustMarkIgnoresDelegationWhenTypeNotOwned(t *testing.T) {
+	// TA's own trust_mark_owners is nil (no type named at all), so no
+	// delegation is required and none is present — the existing
+	// TestVerifyTrustMarkSucceeds already covers this baseline; this
+	// test instead confirms a PRESENT delegation is simply not checked
+	// when the type isn't owned, even a broken one.
+	f := setupTrustMarkFederation(t, func(taID, leID string) map[string]any {
+		return map[string]any{"delegation": "not-a-jwt"}
+	}, nil)
+	r := f.newResolver(t)
+
+	resolved, err := r.Resolve(context.Background(), f.leID)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if _, err := r.VerifyTrustMark(context.Background(), f.leID, resolved.TrustMarks[0]); err != nil {
+		t.Fatalf("VerifyTrustMark(broken delegation, type not owned): %v, want nil error", err)
 	}
 }

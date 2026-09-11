@@ -163,6 +163,15 @@ type ResolvedEntity struct {
 	// specific entry with VerifyTrustMark before relying on it for
 	// anything.
 	TrustMarks []intfed.RawTrustMark
+
+	// TrustMarkOwners is EntityID's own "trust_mark_owners" claim
+	// (OpenID Federation 1.0 §7.2), exactly as
+	// intfed.Claims.TrustMarkOwners describes — nil if EntityID declared
+	// none. Only meaningful when EntityID is a Trust Anchor;
+	// VerifyTrustMark reads this (from the Trust Anchor actually used to
+	// establish trust in a Trust Mark's own issuer) to decide whether
+	// that Trust Mark's type requires a "delegation" claim at all.
+	TrustMarkOwners map[string]intfed.TrustMarkOwner
 }
 
 // Resolve resolves subjectID's Trust Chain against one of
@@ -204,7 +213,7 @@ func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntit
 		return ResolvedEntity{
 			EntityID: subjectID, TrustAnchor: subjectID, Chain: []string{subjectID},
 			Metadata: leafClaims.Metadata, ExpiresAt: minExpiry,
-			JWKS: anchor.JWKS, TrustMarks: leafClaims.TrustMarks,
+			JWKS: anchor.JWKS, TrustMarks: leafClaims.TrustMarks, TrustMarkOwners: leafClaims.TrustMarkOwners,
 		}, nil
 	}
 
@@ -336,7 +345,7 @@ func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntit
 			return ResolvedEntity{
 				EntityID: subjectID, TrustAnchor: superiorID, Chain: chain,
 				Metadata: resolvedMetadata, ExpiresAt: minExpiry,
-				JWKS: subjectJWKS, TrustMarks: leafClaims.TrustMarks,
+				JWKS: subjectJWKS, TrustMarks: leafClaims.TrustMarks, TrustMarkOwners: leafClaims.TrustMarkOwners,
 			}, nil
 		}
 

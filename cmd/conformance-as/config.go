@@ -25,6 +25,7 @@ import (
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/federation"
 	"github.com/idfoundry/fapigo/keys/ephemeral"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
@@ -56,10 +57,50 @@ type Config struct {
 
 	Clients []ClientConfig `json:"clients"`
 
+	// Federation enables OpenID Federation 1.0 self-issuance
+	// (.well-known/openid-federation) and automatic client registration
+	// (§12.1) — see FederationConfig's own doc comment. Omit the
+	// "federation" key entirely (nil) to disable both: this binary then
+	// behaves exactly as it always has, serving no federation
+	// well-known endpoint and accepting only the Clients registered
+	// above.
+	Federation *FederationConfig `json:"federation,omitempty"`
+
 	TLS struct {
 		CertFile string `json:"cert_file"`
 		KeyFile  string `json:"key_file"`
 	} `json:"tls"`
+}
+
+// FederationConfig configures this binary's OpenID Federation 1.0
+// support — see server.Config.Federation/AutomaticRegistration, which
+// this maps directly onto.
+type FederationConfig struct {
+	// EntityID is this AS's own Entity Identifier — conventionally
+	// equal to Issuer, since the federation well-known endpoint is
+	// served from the same origin. Required.
+	EntityID string `json:"entity_id"`
+
+	// AuthorityHints is this AS's own "authority_hints" claim — see
+	// federation.SelfIssueConfig.AuthorityHints. Optional.
+	AuthorityHints []string `json:"authority_hints,omitempty"`
+
+	// TrustAnchors is every Trust Anchor this AS accepts an
+	// automatically-registered Relying Party's Trust Chain rooted at —
+	// see server.AutomaticRegistrationConfig.TrustAnchors. Required —
+	// at least one.
+	TrustAnchors []TrustAnchorConfig `json:"trust_anchors"`
+
+	// AllowedScopes is the scope allowlist granted to every
+	// automatically-registered client — see
+	// server.AutomaticRegistrationConfig.AllowedScopes. Required.
+	AllowedScopes []string `json:"allowed_scopes"`
+}
+
+// TrustAnchorConfig is one federation.TrustAnchor, as JSON.
+type TrustAnchorConfig struct {
+	EntityID string          `json:"entity_id"`
+	JWKS     json.RawMessage `json:"jwks"`
 }
 
 // AccessTokenFormat selects which server.AccessTokenIssuer/
@@ -183,8 +224,21 @@ type ResolvedConfig struct {
 	// scopes, published at the metadata endpoint's scopes_supported.
 	AdvertisedScopes []string
 
+	// Federation is non-nil exactly when Config.Federation was set —
+	// see FederationConfig's own doc comment.
+	Federation *ResolvedFederation
+
 	TLSCertFile string
 	TLSKeyFile  string
+}
+
+// ResolvedFederation is FederationConfig translated into the typed
+// values server.Config.Federation/AutomaticRegistration need.
+type ResolvedFederation struct {
+	EntityID       string
+	AuthorityHints []string
+	TrustAnchors   []federation.TrustAnchor
+	AllowedScopes  []string
 }
 
 // Resolve validates cfg and converts it into a ResolvedConfig, or a
@@ -275,6 +329,34 @@ func (cfg Config) Resolve(allowLoopbackHTTP bool, accessTokenFormat AccessTokenF
 	if out.TLSCertFile == "" || out.TLSKeyFile == "" {
 		if !allowLoopbackHTTP {
 			return ResolvedConfig{}, fmt.Errorf("tls.cert_file and tls.key_file are required unless -insecure-http is set")
+		}
+	}
+
+	if cfg.Federation != nil {
+		if cfg.Federation.EntityID == "" {
+			return ResolvedConfig{}, fmt.Errorf("federation.entity_id is required")
+		}
+		if len(cfg.Federation.TrustAnchors) == 0 {
+			return ResolvedConfig{}, fmt.Errorf("federation.trust_anchors: at least one is required")
+		}
+		if len(cfg.Federation.AllowedScopes) == 0 {
+			return ResolvedConfig{}, fmt.Errorf("federation.allowed_scopes is required")
+		}
+		anchors := make([]federation.TrustAnchor, len(cfg.Federation.TrustAnchors))
+		for i, a := range cfg.Federation.TrustAnchors {
+			if a.EntityID == "" {
+				return ResolvedConfig{}, fmt.Errorf("federation.trust_anchors[%d].entity_id is required", i)
+			}
+			if len(a.JWKS) == 0 {
+				return ResolvedConfig{}, fmt.Errorf("federation.trust_anchors[%d].jwks is required", i)
+			}
+			anchors[i] = federation.TrustAnchor{EntityID: a.EntityID, JWKS: a.JWKS}
+		}
+		out.Federation = &ResolvedFederation{
+			EntityID:       cfg.Federation.EntityID,
+			AuthorityHints: cfg.Federation.AuthorityHints,
+			TrustAnchors:   anchors,
+			AllowedScopes:  cfg.Federation.AllowedScopes,
 		}
 	}
 

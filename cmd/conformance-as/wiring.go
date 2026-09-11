@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"net/http"
+	"time"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/fapihttp"
@@ -12,6 +13,28 @@ import (
 	fapires "github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage/memstore"
+)
+
+// federationSigningAlgorithm is the algorithm this binary self-issues
+// its Entity Configuration with, and requires of an
+// automatically-registered client's own openid_relying_party
+// private_key_jwt registration — matches every other algorithm choice
+// in this binary (server.RecommendedAlgorithms()'s own ES256 default).
+const federationSigningAlgorithm = fapi.ES256
+
+// federationStatementLifetime/federationMaxStatementLifetime/
+// federationMaxPathLength/federationMaxCacheAge bound this binary's own
+// federation.SelfIssuer/federation.Resolver — see server.FederationConfig/
+// AutomaticRegistrationConfig for what each configures. Generous, fixed
+// values: this binary's own federation posture isn't a conformance-run
+// dimension the way -ciba/-mtls are, so unlike Algorithms/Limits (see
+// Config's own doc comment) there's no server.Recommended* federation
+// equivalent to defer to yet.
+const (
+	federationStatementLifetime    = time.Hour
+	federationMaxStatementLifetime = 2 * time.Hour
+	federationMaxPathLength        = 5
+	federationMaxCacheAge          = 5 * time.Minute
 )
 
 // newServerMux builds the full server.Server + HTTP router wiring from a
@@ -63,6 +86,9 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 	}
 	if userinfoSigning {
 		purposes[keys.UserInfoSigning] = resolved.Algorithms.IDToken
+	}
+	if resolved.Federation != nil {
+		purposes[keys.FederationEntitySigning] = federationSigningAlgorithm
 	}
 	keyManager, err := ephemeral.NewKeyManager(purposes)
 	if err != nil {
@@ -135,6 +161,22 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 		// so this stays a worked-example opt-in like -ciba/-userinfo-signing
 		// above.
 		ClientCredentialsGrant: clientCredentialsGrant,
+	}
+	if resolved.Federation != nil {
+		srvCfg.Federation = server.FederationConfig{
+			EntityID:       resolved.Federation.EntityID,
+			AuthorityHints: resolved.Federation.AuthorityHints,
+			Lifetime:       federationStatementLifetime,
+			Algorithm:      federationSigningAlgorithm,
+		}
+		srvCfg.AutomaticRegistration = server.AutomaticRegistrationConfig{
+			TrustAnchors:         resolved.Federation.TrustAnchors,
+			AllowedScopes:        resolved.Federation.AllowedScopes,
+			MaxPathLength:        federationMaxPathLength,
+			MaxStatementLifetime: federationMaxStatementLifetime,
+			MaxClockSkew:         resolved.Limits.MaxClockSkew,
+			MaxCacheAge:          federationMaxCacheAge,
+		}
 	}
 	replayStore := memstore.NewReplayStore()
 	revocationStore := memstore.NewRevocationStore()
@@ -213,6 +255,11 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 		ClientCredentialsRARPolicy: sampleRARPolicy{},
 		AuthorizationCodeRARPolicy: sampleRARPolicy{},
 		CIBARARPolicy:              sampleRARPolicy{},
+		// Only required when srvCfg.AutomaticRegistration.TrustAnchors
+		// is set (above); harmless to set unconditionally otherwise —
+		// reuses the same fapihttp.Client already built for
+		// ephemeral.NewClientKeySource's own remote jwks_uri fetches.
+		FederationHTTP: fetcher,
 	}
 	// Off by default (main.go's -dpop-nonce-challenge flag) — same
 	// reasoning as the resource-side block below: client.ExchangeCode
@@ -271,5 +318,5 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 	backchannel := newBackchannelHandler(srv, server.SystemClock{}, resolved.DefaultSubject)
 	userinfoURLValue := userinfoURL.URL()
 	accountsURLValue := accountsURL.URL()
-	return newRouter(srv, consent, backchannel, resolved.AdvertisedScopes, resourceVerifier, &userinfoURLValue, mtlsUserinfoURL, &accountsURLValue, identityClaims, clientRepo, userinfoSigning, cibaApprovalUIToken), nil
+	return newRouter(srv, consent, backchannel, resolved.AdvertisedScopes, resourceVerifier, &userinfoURLValue, mtlsUserinfoURL, &accountsURLValue, identityClaims, clientRepo, userinfoSigning, cibaApprovalUIToken, resolved.Federation != nil), nil
 }

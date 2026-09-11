@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -63,22 +64,32 @@ var dpopSigningAlgValuesSupported = []string{fapi.ES256.String(), fapi.PS256.Str
 
 func metadataHandler(srv *server.Server, advertisedScopes []string, userinfoURL *url.URL, mtlsUserinfoURL *fapi.URL) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		md := srv.Metadata(r.Context())
-		doc := wireMetadata{
-			Metadata:                      md,
-			ScopesSupported:               advertisedScopes,
-			ClaimsSupported:               claimsSupported,
-			ClaimsParameterSupported:      true,
-			UserinfoEndpoint:              userinfoURL.String(),
-			DPoPSigningAlgValuesSupported: dpopSigningAlgValuesSupported,
-		}
-		if md.MTLSEndpointAliases != nil && mtlsUserinfoURL != nil {
-			doc.MTLSEndpointAliases = &wireMTLSEndpointAliases{
-				MTLSEndpointAliases: *md.MTLSEndpointAliases,
-				UserinfoEndpoint:    *mtlsUserinfoURL,
-			}
-		}
+		doc := buildWireMetadata(srv, r.Context(), advertisedScopes, userinfoURL, mtlsUserinfoURL)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(doc)
 	}
+}
+
+// buildWireMetadata assembles this AS's full discovery document —
+// shared by metadataHandler (GET /.well-known/openid-configuration) and
+// wellKnownFederationHandler (federation.go), which embeds the same
+// document as its own "openid_provider" Entity Type metadata rather
+// than building it twice.
+func buildWireMetadata(srv *server.Server, ctx context.Context, advertisedScopes []string, userinfoURL *url.URL, mtlsUserinfoURL *fapi.URL) wireMetadata {
+	md := srv.Metadata(ctx)
+	doc := wireMetadata{
+		Metadata:                      md,
+		ScopesSupported:               advertisedScopes,
+		ClaimsSupported:               claimsSupported,
+		ClaimsParameterSupported:      true,
+		UserinfoEndpoint:              userinfoURL.String(),
+		DPoPSigningAlgValuesSupported: dpopSigningAlgValuesSupported,
+	}
+	if md.MTLSEndpointAliases != nil && mtlsUserinfoURL != nil {
+		doc.MTLSEndpointAliases = &wireMTLSEndpointAliases{
+			MTLSEndpointAliases: *md.MTLSEndpointAliases,
+			UserinfoEndpoint:    *mtlsUserinfoURL,
+		}
+	}
+	return doc
 }

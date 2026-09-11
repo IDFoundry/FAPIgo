@@ -397,6 +397,12 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 		// request object; the base FAPI 2.0 Security Profile does not —
 		// see requestobject.VerifyPolicy.RequireNotBefore's doc comment.
 		RequireNotBefore: s.cfg.Profile == ProfileFAPISecurityWithMessageSigning,
+		// OpenID Federation 1.0 §12.1.1's stricter aud/sub/jti Request
+		// Object rules apply only to a client resolved via Automatic
+		// Registration — see
+		// requestobject.VerifyPolicy.AutomaticFederationRegistration's
+		// own doc comment.
+		AutomaticFederationRegistration: client.AutomaticFederationRegistration(),
 	})
 	if err != nil {
 		return nil, nil, newError(ErrorInvalidRequestObject, 400, "request object verification failed", err)

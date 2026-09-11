@@ -42,6 +42,25 @@ func TestNewRegisteredClient(t *testing.T) {
 	if c.AllowsClientCredentialsGrant() {
 		t.Fatalf("AllowsClientCredentialsGrant() = true, want false (not set)")
 	}
+	if c.AutomaticFederationRegistration() {
+		t.Fatalf("AutomaticFederationRegistration() = true, want false (not set)")
+	}
+}
+
+func TestNewRegisteredClientAutomaticFederationRegistration(t *testing.T) {
+	c, err := NewRegisteredClient(RegisteredClientConfig{
+		ID:                              "client-123",
+		RedirectURIs:                    []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+		ClientAssertionAlgorithm:        fapi.ES256,
+		AllowedScopes:                   []string{"accounts"},
+		AutomaticFederationRegistration: true,
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+	if !c.AutomaticFederationRegistration() {
+		t.Fatalf("AutomaticFederationRegistration() = false, want true")
+	}
 }
 
 func TestNewRegisteredClientAllowsClientCredentialsGrant(t *testing.T) {

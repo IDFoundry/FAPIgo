@@ -39,6 +39,9 @@ func TestRegisteredClientConfigFromMetadata(t *testing.T) {
 	if jwks.uri != "" {
 		t.Errorf("jwks.uri = %q, want empty", jwks.uri)
 	}
+	if !cfg.AutomaticFederationRegistration {
+		t.Errorf("AutomaticFederationRegistration = false, want true")
+	}
 }
 
 func TestRegisteredClientConfigFromMetadataAcceptsJWKSURI(t *testing.T) {

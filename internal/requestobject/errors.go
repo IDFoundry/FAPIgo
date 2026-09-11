@@ -25,8 +25,17 @@ var (
 	// ErrAudienceMismatch indicates the object's aud claim (a single
 	// value or, per RFC 7519 §4.1.3, an array of values) did not contain
 	// the audience (authorization server issuer identifier) the caller
-	// expected.
+	// expected — or, under
+	// VerifyPolicy.AutomaticFederationRegistration, that aud was not
+	// exactly that one value (OpenID Federation 1.0 §12.1.1 forbids any
+	// other value alongside it).
 	ErrAudienceMismatch = errors.New("requestobject: aud does not match expected audience")
+
+	// ErrUnexpectedSubject indicates VerifyPolicy.AutomaticFederationRegistration
+	// was set but the object carries a "sub" claim — OpenID Federation
+	// 1.0 §12.1.1 requires it be absent, specifically to stop such a
+	// request object being reused as a private_key_jwt client assertion.
+	ErrUnexpectedSubject = errors.New("requestobject: sub claim must not be present")
 
 	// ErrExpired indicates the object's exp claim is not after the
 	// verification time.

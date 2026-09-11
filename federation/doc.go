@@ -48,8 +48,10 @@
 // see AutomaticClientRepository's own doc comment for exactly which
 // registration shapes this first version supports (only
 // ClientAuthMethodPrivateKeyJWT, jwks or jwks_uri, no CIBA or
-// client_credentials) and which it deliberately doesn't yet
-// (server-side request_uri/JAR/PAR-level enforcement of §12.1.1's own
-// aud/sub/jti Request Object rules remains a caller concern; Explicit
+// client_credentials) and which it deliberately doesn't yet (Explicit
 // Registration, §12.2, is not implemented by this package at all).
+// §12.1.1's own aud/sub/jti Request Object rules are enforced by the
+// server package via storage.RegisteredClientConfig's own
+// AutomaticFederationRegistration field, not by this package — a
+// request-handling concern, not a client registration one.
 package federation

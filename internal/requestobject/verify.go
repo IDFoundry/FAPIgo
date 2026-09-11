@@ -151,6 +151,22 @@ type VerifyPolicy struct {
 	// EnsureRequestObjectMissingJtiFails negative test) — the caller
 	// sets this only for that request kind, not for PAR's.
 	RequireJTI bool
+
+	// AutomaticFederationRegistration applies OpenID Federation 1.0
+	// §12.1.1's stricter Request Object rules, for a request object from
+	// a client resolved via §12.1 Automatic Registration
+	// (storage.RegisteredClient.AutomaticFederationRegistration)
+	// rather than statically configured. It replaces the generic RFC
+	// 9101 checks with three federation-specific ones: aud MUST equal
+	// ExpectedAudience exactly, with no other values present (where the
+	// generic rule only requires ExpectedAudience be one of possibly
+	// several); a "sub" claim MUST NOT be present at all (this is what
+	// stops the same object being replayed as a private_key_jwt client
+	// assertion, which is keyed on iss+sub); and jti becomes required,
+	// exactly as RequireJTI would (set independently here rather than
+	// requiring the caller to also set RequireJTI, since both are always
+	// implied together by this one policy).
+	AutomaticFederationRegistration bool
 }
 
 // VerifiedObject is what remains once a request object has been
@@ -185,7 +201,14 @@ func (o Object) Verify(ctx context.Context, pub crypto.PublicKey, policy VerifyP
 	if c.Issuer != policy.ExpectedClientID {
 		return VerifiedObject{}, ErrIssuerMismatch
 	}
-	if !slices.Contains(c.Audience, policy.ExpectedAudience) {
+	if policy.AutomaticFederationRegistration {
+		if len(c.Audience) != 1 || c.Audience[0] != policy.ExpectedAudience {
+			return VerifiedObject{}, ErrAudienceMismatch
+		}
+		if c.HasSubject {
+			return VerifiedObject{}, ErrUnexpectedSubject
+		}
+	} else if !slices.Contains(c.Audience, policy.ExpectedAudience) {
 		return VerifiedObject{}, ErrAudienceMismatch
 	}
 	if c.IssuedAt.IsZero() && policy.RequireIssuedAt {
@@ -208,7 +231,7 @@ func (o Object) Verify(ctx context.Context, pub crypto.PublicKey, policy VerifyP
 		return VerifiedObject{}, ErrNotBeforeTooOld
 	}
 
-	if c.JTI == "" && policy.RequireJTI {
+	if c.JTI == "" && (policy.RequireJTI || policy.AutomaticFederationRegistration) {
 		return VerifiedObject{}, ErrMissingJTI
 	}
 	if policy.Replay != nil && c.JTI != "" {

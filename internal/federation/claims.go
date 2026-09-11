@@ -40,14 +40,10 @@ type MetadataPolicy map[string]map[string]PolicyOperators
 // JSON, decided by the caller" precedent extension.Registry already
 // uses for custom parameters.
 //
-// Trust Marks (OpenID Federation 1.0 §7 — the "trust_marks",
-// "trust_mark_issuers" and "trust_mark_owners" claims) are
-// deliberately not modeled here: nothing in this package's current
-// scope (Entity Statement create/verify, metadata policy application)
-// reads them. A caller that needs to inspect them today can still
-// reach the statement's raw payload before it's discarded; a later
-// revision adds typed accessors once something actually consumes them,
-// rather than modeling them speculatively now.
+// The "trust_mark_issuers" and "trust_mark_owners" claims (OpenID
+// Federation 1.0 §7) are deliberately not modeled here — see doc.go's
+// own "Trust Marks" section for exactly what this package's Trust Mark
+// support does and does not cover.
 type Claims struct {
 	Issuer  string
 	Subject string
@@ -103,6 +99,23 @@ type Claims struct {
 	// and a normal (not an error) absence for a Subordinate Statement
 	// that sets none.
 	Constraints *Constraints
+
+	// TrustMarks is an Entity Configuration's own "trust_marks" claim
+	// (OpenID Federation 1.0 §7) — nil for a Subordinate Statement, and
+	// a normal (not an error) absence for an Entity Configuration that
+	// declares none. Each entry's own "trust_mark" JWT is retained raw,
+	// unparsed and unverified — see doc.go's own "Trust Marks" section
+	// for how a caller establishes trust in one.
+	TrustMarks []RawTrustMark
+}
+
+// RawTrustMark is one entry of an Entity Configuration's own
+// "trust_marks" claim — the wrapper object's own "trust_mark_type" and
+// "trust_mark" (a signed Trust Mark JWT) members, exactly as published,
+// before ParseTrustMark or any trust decision is made about them.
+type RawTrustMark struct {
+	TrustMarkType string
+	TrustMark     string
 }
 
 // Constraints is a Subordinate Statement's "constraints" claim (OpenID
@@ -217,6 +230,22 @@ func parseClaims(payload []byte) (Claims, error) {
 			return Claims{}, fmt.Errorf("%w: constraints: %v", ErrMalformedClaims, err)
 		}
 		c.Constraints = &constraints
+	}
+	if trustMarksRaw, ok := raw["trust_marks"]; ok {
+		var trustMarks []struct {
+			TrustMarkType string `json:"trust_mark_type"`
+			TrustMark     string `json:"trust_mark"`
+		}
+		if err := json.Unmarshal(trustMarksRaw, &trustMarks); err != nil {
+			return Claims{}, fmt.Errorf("%w: trust_marks: %v", ErrMalformedClaims, err)
+		}
+		c.TrustMarks = make([]RawTrustMark, len(trustMarks))
+		for i, tm := range trustMarks {
+			if tm.TrustMarkType == "" || tm.TrustMark == "" {
+				return Claims{}, fmt.Errorf("%w: trust_marks[%d]: trust_mark_type and trust_mark are both required", ErrMalformedClaims, i)
+			}
+			c.TrustMarks[i] = RawTrustMark{TrustMarkType: tm.TrustMarkType, TrustMark: tm.TrustMark}
+		}
 	}
 
 	return c, nil

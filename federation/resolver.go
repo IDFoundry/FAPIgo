@@ -147,6 +147,22 @@ type ResolvedEntity struct {
 	// gets a fresh chain, not a stale one — this package performs no
 	// caching of its own.
 	ExpiresAt time.Time
+
+	// JWKS is EntityID's own trusted Federation Entity Keys (a JWK Set)
+	// — whatever its immediate superior's own Subordinate Statement
+	// vouches for (or, when EntityID is itself a configured Trust
+	// Anchor, the pre-configured TrustAnchor.JWKS), not necessarily
+	// identical to EntityID's own self-claimed jwks. This is the key
+	// set trusted to verify anything else EntityID itself signs — most
+	// notably a Trust Mark it issued — via VerifyTrustMark.
+	JWKS json.RawMessage
+
+	// TrustMarks is EntityID's own unverified "trust_marks" claim
+	// (OpenID Federation 1.0 §7), exactly as intfed.Claims.TrustMarks
+	// describes — nil if EntityID declared none. Establish trust in a
+	// specific entry with VerifyTrustMark before relying on it for
+	// anything.
+	TrustMarks []intfed.RawTrustMark
 }
 
 // Resolve resolves subjectID's Trust Chain against one of
@@ -188,6 +204,7 @@ func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntit
 		return ResolvedEntity{
 			EntityID: subjectID, TrustAnchor: subjectID, Chain: []string{subjectID},
 			Metadata: leafClaims.Metadata, ExpiresAt: minExpiry,
+			JWKS: anchor.JWKS, TrustMarks: leafClaims.TrustMarks,
 		}, nil
 	}
 
@@ -210,6 +227,12 @@ func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntit
 
 	var subordinatePolicies []subordinatePolicy
 	var subordinateConstraints []subordinateConstraint
+	// subjectJWKS is captured exactly once, at hop 0 — the first
+	// superior's own statement "about entityAt" is, at that point,
+	// necessarily about subjectID itself (entityAt only ever advances
+	// past subjectID at the end of hop 0). See ResolvedEntity.JWKS's
+	// own doc comment for what this value means and is used for.
+	var subjectJWKS json.RawMessage
 
 	for hop := 0; ; hop++ {
 		if hop >= r.cfg.Limits.MaxPathLength {
@@ -288,6 +311,9 @@ func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntit
 			if _, err := r.verifyAgainstJWKS(belowStmt, aboveClaims.JWKS, belowIssuer, belowSubject, belowStmt.Algorithm(), now); err != nil {
 				return ResolvedEntity{}, fmt.Errorf("federation: %q's statement (issued by %q) does not match the keys vouched for it by %q: %w", belowSubject, belowIssuer, superiorID, err)
 			}
+			if hop == 0 {
+				subjectJWKS = aboveClaims.JWKS
+			}
 			subordinatePolicies = append(subordinatePolicies, subordinatePolicy{policy: aboveClaims.MetadataPolicy, crit: aboveClaims.MetadataPolicyCritical})
 			if aboveClaims.Constraints != nil {
 				subordinateConstraints = append(subordinateConstraints, subordinateConstraint{
@@ -310,6 +336,7 @@ func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntit
 			return ResolvedEntity{
 				EntityID: subjectID, TrustAnchor: superiorID, Chain: chain,
 				Metadata: resolvedMetadata, ExpiresAt: minExpiry,
+				JWKS: subjectJWKS, TrustMarks: leafClaims.TrustMarks,
 			}, nil
 		}
 
@@ -322,6 +349,14 @@ func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntit
 		// verification rule calls for.
 		if _, err := r.verifyAgainstJWKS(belowStmt, aboveStmt.ClaimedJWKS(), belowIssuer, belowSubject, belowStmt.Algorithm(), now); err != nil {
 			return ResolvedEntity{}, fmt.Errorf("federation: %q's statement (issued by %q) does not match the keys vouched for it by %q: %w", belowSubject, belowIssuer, superiorID, err)
+		}
+		if hop == 0 {
+			// Unverified until the next iteration verifies aboveStmt's
+			// signature (as the new belowStmt) — safe to capture now for
+			// the same reason ClaimedMetadataPolicy's own doc comment
+			// gives; see ResolvedEntity.JWKS's own doc comment for why
+			// hop 0 specifically.
+			subjectJWKS = aboveStmt.ClaimedJWKS()
 		}
 		// aboveStmt's own metadata_policy is unverified until the next
 		// iteration verifies aboveStmt's signature (as the new

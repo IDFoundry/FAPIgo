@@ -25,4 +25,24 @@
 // while resolving a trust chain, so Create and Verify are both
 // exported here rather than split one-per-role the way
 // internal/jarm/internal/requestobject are.
+//
+// # Trust Marks
+//
+// trustmark.go covers Trust Mark JWTs (OpenID Federation 1.0 §7) the
+// same narrow way this package covers Entity Statements: parsing and
+// verifying one Trust Mark JWT in isolation (TrustMark/ParseTrustMark/
+// Verify), never fetching or resolving anything itself. This first
+// version deliberately does not implement: the "delegation" claim
+// (§7.2, a second, nested JWT type letting a Trust Mark Issuer that
+// isn't the Trust Mark's owner issue it anyway) or cross-checking a
+// Trust Anchor's own "trust_mark_owners" claim to know when a
+// delegation is required at all; the Trust Mark Status endpoint (§8)
+// or Trust Marked Entities Listing endpoint (§9), both live
+// alternatives/supplements to the offline validation procedure this
+// package implements; and Trust Mark issuance (this package only ever
+// verifies a Trust Mark someone else issued, the same "consumer, not
+// producer" stance this package already takes toward Explicit
+// Registration Responses). A federation.Resolver (the public package)
+// is what actually establishes trust in a Trust Mark Issuer — see its
+// own VerifyTrustMark.
 package federation

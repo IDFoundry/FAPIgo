@@ -148,6 +148,38 @@ func TestCreateRejectsMixedVariantClaims(t *testing.T) {
 	if _, err := Create(subordinateWithHints); err == nil {
 		t.Errorf("Create(subordinate statement with authority_hints) = nil error, want error")
 	}
+
+	subordinateWithTrustMarks := subordinateStatementParams(t, key, "https://superior.example.org", "https://rp.example.org", now)
+	subordinateWithTrustMarks.TrustMarks = []RawTrustMark{{TrustMarkType: "https://federation.example.org/marks/certified", TrustMark: "opaque"}}
+	if _, err := Create(subordinateWithTrustMarks); err == nil {
+		t.Errorf("Create(subordinate statement with trust_marks) = nil error, want error")
+	}
+}
+
+func TestCreateAndParseRoundTripsTrustMarksClaim(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	const entityID = "https://rp.example.org"
+
+	p := entityConfigParams(t, key, entityID, now)
+	p.TrustMarks = []RawTrustMark{
+		{TrustMarkType: "https://federation.example.org/marks/certified", TrustMark: "opaque-trust-mark-jwt"},
+	}
+	token, err := Create(p)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	stmt, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(stmt.claims.TrustMarks) != 1 {
+		t.Fatalf("TrustMarks = %v, want 1 entry", stmt.claims.TrustMarks)
+	}
+	got := stmt.claims.TrustMarks[0]
+	if got.TrustMarkType != "https://federation.example.org/marks/certified" || got.TrustMark != "opaque-trust-mark-jwt" {
+		t.Errorf("TrustMarks[0] = %+v", got)
+	}
 }
 
 func TestVerifyRejectsIssuerAndSubjectMismatch(t *testing.T) {
@@ -402,6 +434,74 @@ func TestParseRejectsInvalidConstraints(t *testing.T) {
 			}
 			if _, err := Parse(token); !errors.Is(err, ErrMalformedClaims) {
 				t.Errorf("Parse(invalid constraints: %s) error = %v, want ErrMalformedClaims", name, err)
+			}
+		})
+	}
+}
+
+func TestParseParsesTrustMarksClaim(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	claims := map[string]any{
+		"iss": "https://rp.example.org", "sub": "https://rp.example.org",
+		"iat": now.Unix(), "exp": now.Add(time.Hour).Unix(),
+		"jwks": json.RawMessage(testJWKS(t, key)),
+		"trust_marks": []map[string]string{
+			{"trust_mark_type": "https://federation.example.org/marks/certified", "trust_mark": "eyJhbGciOiJFUzI1NiJ9.e30.sig"},
+		},
+	}
+	payload, err := json.Marshal(claims)
+	if err != nil {
+		t.Fatalf("marshal claims: %v", err)
+	}
+	token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: jwtType}, payload)
+	if err != nil {
+		t.Fatalf("jose.Sign: %v", err)
+	}
+	stmt, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(stmt.claims.TrustMarks) != 1 {
+		t.Fatalf("TrustMarks = %v, want 1 entry", stmt.claims.TrustMarks)
+	}
+	got := stmt.claims.TrustMarks[0]
+	if got.TrustMarkType != "https://federation.example.org/marks/certified" || got.TrustMark != "eyJhbGciOiJFUzI1NiJ9.e30.sig" {
+		t.Errorf("TrustMarks[0] = %+v", got)
+	}
+}
+
+func TestParseRejectsInvalidTrustMarksClaim(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	base := map[string]any{
+		"iss": "https://rp.example.org", "sub": "https://rp.example.org",
+		"iat": now.Unix(), "exp": now.Add(time.Hour).Unix(),
+		"jwks": json.RawMessage(testJWKS(t, key)),
+	}
+
+	cases := map[string]string{
+		"malformed json":          `"not an array"`,
+		"missing trust_mark":      `[{"trust_mark_type":"https://federation.example.org/marks/certified"}]`,
+		"missing trust_mark_type": `[{"trust_mark":"eyJhbGciOiJFUzI1NiJ9.e30.sig"}]`,
+	}
+	for name, badValue := range cases {
+		t.Run(name, func(t *testing.T) {
+			claims := map[string]any{}
+			for k, v := range base {
+				claims[k] = v
+			}
+			claims["trust_marks"] = json.RawMessage(badValue)
+			payload, err := json.Marshal(claims)
+			if err != nil {
+				t.Fatalf("marshal claims: %v", err)
+			}
+			token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: jwtType}, payload)
+			if err != nil {
+				t.Fatalf("jose.Sign: %v", err)
+			}
+			if _, err := Parse(token); !errors.Is(err, ErrMalformedClaims) {
+				t.Errorf("Parse(invalid trust_marks: %s) error = %v, want ErrMalformedClaims", name, err)
 			}
 		})
 	}

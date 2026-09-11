@@ -1,0 +1,20 @@
+{
+  "subordinates": [
+    {
+      "entity_id": "https://conformance-as-federation:8443",
+      "jwks": {
+        "keys": [
+          {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "VqIMdCyzPlgo4rNK-B0X0lvPTzPmyOGGa_8mYZf_eko",
+            "y": "Kcwj8NwayOfuJ3Ax7pxkx7MdGpp49Z4FGmCedi45H80",
+            "use": "sig",
+            "alg": "ES256",
+            "kid": "ephemeral-9-ES256"
+          }
+        ]
+      }
+    }
+  ]
+}

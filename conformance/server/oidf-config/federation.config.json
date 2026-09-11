@@ -1,0 +1,44 @@
+{
+  "listen_addr": "0.0.0.0:8443",
+  "issuer": "https://conformance-as-federation:8443",
+  "profile": "fapi2-security",
+  "default_subject": "conformance-federation-user",
+  "clients": [
+    {
+      "id": "gofapi-conformance-fed-client-1",
+      "redirect_uris": [
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-fed-deployed/callback"
+      ],
+      "client_assertion_algorithm": "ES256",
+      "allowed_scopes": ["openid", "accounts", "offline_access"],
+      "jwks": {
+        "keys": [
+          {
+            "kty": "EC",
+            "alg": "ES256",
+            "use": "sig",
+            "kid": "gofapi-conformance-fed-client1-key1",
+            "crv": "P-256",
+            "x": "sykeXEKb0d9czriN2Bd5waXxx5ftpWj9VfebK-j2Jfk",
+            "y": "_IDOs2uxgAk0161utX3Ozky20A8GT22L4emKAegkOUA"
+          }
+        ]
+      }
+    }
+  ],
+  "federation": {
+    "entity_id": "https://conformance-as-federation:8443",
+    "authority_hints": ["https://conformance-federation-trust-anchor:8443"],
+    "trust_anchors": [
+      {
+        "entity_id": "https://conformance-federation-trust-anchor:8443",
+        "jwks": {"keys": []}
+      }
+    ],
+    "allowed_scopes": ["openid"]
+  },
+  "tls": {
+    "cert_file": "/certs/server.crt",
+    "key_file": "/certs/server.key"
+  }
+}

@@ -228,6 +228,68 @@ docker compose up -d --force-recreate <service>
      pattern, so this one override covers both without any extra
      config.
 
+## OpenID Federation
+
+`cmd/conformance-as`'s `-config` file can carry an optional `"federation"`
+block (`oidf-config/federation.config.json` is the working example)
+enabling self-issuance (`.well-known/openid-federation`) and automatic
+client registration (§12.1) — see `cmd/conformance-as/federation.go`'s
+own doc comment. The suite's own Federation test plans need a real
+Trust Anchor to root a chain at; `cmd/conformance-federation-trust-anchor`
+is a minimal standing one for exactly this (see its own doc comment for
+why it exists instead of depending on a real third party like
+`https://trust-anchor.authlete.net/`, the example the OIDF suite's own
+configs use).
+
+The local suite checkout needs "Show early version tests" / the
+Federation spec family enabled to see these plans at all — Federation
+test modules are themselves marked "alpha version — may be incomplete
+or incorrect" by OIDF, so expect rough edges (one of the "Entity joined
+to test federation OP test" plan's own modules was found to fail
+deterministically, suite-side, before ever reaching an implementation
+under test — see git history for the diagnostic).
+
+1. Bring up the suite (as in step 1 above) and `conformance-as-federation`
+   / `conformance-federation-trust-anchor` (`docker compose up --build
+   conformance-as-federation conformance-federation-trust-anchor`, same
+   `SUITE_NETWORK` as every other service here).
+2. `conformance-as-federation`'s own federation signing key is
+   ephemeral — freshly random on every start, never pinned (see
+   `federationSigningAlgorithm`'s own doc comment in
+   `cmd/conformance-as/wiring.go` for why nothing needs it pinned across
+   restarts *except* the standing Trust Anchor's own "who do I vouch
+   for, with which key" list). After every restart, recapture its
+   current public key and feed it to the Trust Anchor:
+   ```
+   curl -sk https://localhost:18456/.well-known/openid-federation \
+     | cut -d. -f2 | base64 -d 2>/dev/null | python3 -c \
+     "import json,sys; print(json.dumps(json.load(sys.stdin)['jwks']))"
+   ```
+   Paste that into `oidf-config/federation-trust-anchor-subordinates.json`'s
+   one `subordinates[].jwks` entry, then
+   `docker compose up -d --force-recreate conformance-federation-trust-anchor`
+   (no rebuild needed — only the mounted config file changed).
+3. Create an `openid-federation-deployed-entity-test-plan` plan (via the
+   suite's UI, or its API — `POST /api/plan?planName=...&variant=...`,
+   see `Conformance.create_test_plan` in the suite's own
+   `scripts/conformance.py`) with variant
+   `{"server_metadata":"discovery","client_registration":"automatic"}`
+   and a config body naming `federation.entity_identifier` (this AS's
+   own, e.g. `https://conformance-as-federation:8443`),
+   `federation.de_trust_anchor` (the standing Trust Anchor's own entity
+   ID) and `federation.de_trust_anchor_jwks` (its current public key —
+   also ephemeral across restarts; re-fetch
+   `https://conformance-federation-trust-anchor:8443/.well-known/openid-federation`
+   the same way as step 2 whenever it restarts).
+4. Run each module (`POST /api/runner?test=<module>&plan=<id>`) and
+   read back `GET /api/log/<test-id>` for the per-condition results.
+
+The "Entity joined to test federation OP/RP test" plans exercise
+automatic registration end to end instead (§12.1) — same Trust Anchor,
+but the suite additionally plays the RP/OP role itself, driving a real
+Request Object/PAR exchange against this AS. Not yet reliably runnable
+end to end — see the "alpha" caveat above.
+
 ## CI-style run (no browser, no human)
 
 The suite ships its own headless CI runner,

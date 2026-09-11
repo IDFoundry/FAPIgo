@@ -22,15 +22,37 @@
 //
 // # Scope
 //
-// This first version resolves a chain for a leaf entity only — it
-// fetches Entity Configurations and Subordinate Statements as a client
-// of those endpoints (OpenID Federation 1.0 §8.1/§9), it does not
-// implement the server side of those endpoints for an entity acting as
-// an Intermediate or Trust Anchor. A Trust Anchor's own Entity
-// Identifier and public signing keys must be supplied out of band (see
-// TrustAnchor) — OpenID Federation 1.0 §10's own opening requirement,
-// mirroring how a TLS client is configured with a root CA bundle rather
-// than discovering trust roots live over the network.
+// Resolving a Trust Chain (Resolver) fetches Entity Configurations and
+// Subordinate Statements as a client of those endpoints (OpenID
+// Federation 1.0 §8.1/§9). A Trust Anchor's own Entity Identifier and
+// public signing keys must be supplied out of band (see TrustAnchor) —
+// OpenID Federation 1.0 §10's own opening requirement, mirroring how a
+// TLS client is configured with a root CA bundle rather than
+// discovering trust roots live over the network.
+//
+// SubordinateIssuer is the counterpart for an entity acting as an
+// Intermediate or Trust Anchor — it signs Subordinate Statements about
+// its own Immediate Subordinates, the same way SelfIssuer signs an
+// Entity Configuration. Like every other type in this package, it is
+// transport-agnostic: SubjectFromFetchRequest and
+// RejectUnsupportedListingFilters are small net/http adapter helpers
+// for the request-shape checks OpenID Federation 1.0 §9/§8.2 require of
+// a federation_fetch_endpoint/federation_list_endpoint, but this
+// package still does not itself serve HTTP — an embedder wires
+// SubordinateIssuer and these helpers into its own http.Handler, the
+// same way it already does for SelfIssuer's own output at WellKnownPath
+// (see cmd/conformance-federation-trust-anchor for a complete
+// reference). What this package still doesn't do: serve the actual
+// Fetch/List endpoints itself (no role in this module owns an
+// http.Server — see ARCHITECTURE.md design rules 6-7), track which
+// entities are subordinates (an embedder's own storage, not a
+// federation.SubordinateRepository this package doesn't define — see
+// SubordinateStatementParams' own doc comment for why a direct-call-
+// argument shape was chosen over a lookup interface), or support any of
+// §8.2's four Subordinate Listing filter parameters (entity_type,
+// trust_marked, trust_mark_type, intermediate) — RejectUnsupportedListingFilters
+// exists specifically because this package cannot honor them, not
+// despite that.
 //
 // Resolve enforces the resolver-wide Limits.MaxPathLength ceiling (the
 // constraint most directly relevant to resource exhaustion) and every

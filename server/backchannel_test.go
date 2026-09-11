@@ -1621,8 +1621,8 @@ func TestMetadataOmitsBackchannelAuthenticationWhenNotConfigured(t *testing.T) {
 	h := newHarness(t, server.ProfileFAPISecurity, true)
 	md := h.server.Metadata(context.Background())
 
-	if !md.BackchannelAuthenticationEndpoint.IsZero() {
-		t.Fatalf("BackchannelAuthenticationEndpoint = %v, want zero", md.BackchannelAuthenticationEndpoint)
+	if md.BackchannelAuthenticationEndpoint != nil {
+		t.Fatalf("BackchannelAuthenticationEndpoint = %v, want nil", md.BackchannelAuthenticationEndpoint)
 	}
 	if len(md.BackchannelTokenDeliveryModesSupported) != 0 {
 		t.Fatalf("BackchannelTokenDeliveryModesSupported = %v, want empty", md.BackchannelTokenDeliveryModesSupported)
@@ -1631,6 +1631,26 @@ func TestMetadataOmitsBackchannelAuthenticationWhenNotConfigured(t *testing.T) {
 		if grantType == server.CIBAGrantType {
 			t.Fatalf("GrantTypesSupported = %v, want no CIBA grant type", md.GrantTypesSupported)
 		}
+	}
+
+	// The actual regression this guards: a plain (non-pointer) fapi.URL
+	// field's "omitempty" json tag is silently inert (encoding/json
+	// never treats a struct-kind field as empty), so this used to
+	// marshal as "backchannel_authentication_endpoint":"" instead of
+	// omitting the key entirely — confirmed live against the OIDF
+	// conformance suite's own OpenID Federation "deployed entity" test,
+	// whose CheckDiscEndpointAllEndpointsAreHttps module flags exactly
+	// that as "backchannel_authentication_endpoint is not a valid URL".
+	raw, err := json.Marshal(md)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if _, present := doc["backchannel_authentication_endpoint"]; present {
+		t.Errorf("marshaled metadata contains %q, want the key omitted entirely: %s", "backchannel_authentication_endpoint", raw)
 	}
 }
 

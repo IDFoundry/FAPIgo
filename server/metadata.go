@@ -82,9 +82,21 @@ type Metadata struct {
 	// UserInfo handler), BackchannelAuthenticationEndpoint is a real
 	// field here because this package does implement the backchannel
 	// authentication endpoint itself (BeginBackchannelAuthentication).
-	BackchannelAuthenticationEndpoint                         fapi.URL `json:"backchannel_authentication_endpoint,omitempty"`
-	BackchannelTokenDeliveryModesSupported                    []string `json:"backchannel_token_delivery_modes_supported,omitempty"`
-	BackchannelAuthenticationRequestSigningAlgValuesSupported []string `json:"backchannel_authentication_request_signing_alg_values_supported,omitempty"`
+	//
+	// A pointer, not a plain fapi.URL: encoding/json's own "omitempty"
+	// never treats a struct-kind field as empty regardless of its own
+	// zero-ness (it only recognizes booleans, numbers, strings, and
+	// nil/zero-length slices, maps, and pointers) — a plain fapi.URL
+	// here would silently marshal its zero value as
+	// "backchannel_authentication_endpoint":"" whenever CIBA is
+	// disabled, instead of omitting the field entirely as every doc
+	// comment here already promises. Confirmed live: the OIDF
+	// conformance suite's own OpenID Federation "deployed entity" test
+	// module flags exactly this as "backchannel_authentication_endpoint
+	// is not a valid URL" against a CIBA-disabled deployment.
+	BackchannelAuthenticationEndpoint                         *fapi.URL `json:"backchannel_authentication_endpoint,omitempty"`
+	BackchannelTokenDeliveryModesSupported                    []string  `json:"backchannel_token_delivery_modes_supported,omitempty"`
+	BackchannelAuthenticationRequestSigningAlgValuesSupported []string  `json:"backchannel_authentication_request_signing_alg_values_supported,omitempty"`
 
 	// MTLSEndpointAliases (RFC 8705 §5) is set only when
 	// Config.MTLSEndpoints is non-zero — most deployments never offer
@@ -122,10 +134,18 @@ type Metadata struct {
 // mirroring Metadata's own field set, not RFC 8705's full example list
 // (which also names introspection/revocation/userinfo endpoints this
 // package doesn't implement at all).
+// Every field is a pointer, not a plain fapi.URL — see
+// Metadata.BackchannelAuthenticationEndpoint's own doc comment for why
+// a plain fapi.URL's "omitempty" tag would silently marshal a zero
+// value as e.g. "backchannel_authentication_endpoint":"" instead of
+// omitting the field, which matters here too: Config.MTLSEndpoints
+// being non-zero only guarantees at least one of its three own fields
+// is set, not all three, so any individual alias below can still be
+// legitimately absent even once this struct itself is constructed.
 type MTLSEndpointAliases struct {
-	TokenEndpoint                      fapi.URL `json:"token_endpoint,omitempty"`
-	PushedAuthorizationRequestEndpoint fapi.URL `json:"pushed_authorization_request_endpoint,omitempty"`
-	BackchannelAuthenticationEndpoint  fapi.URL `json:"backchannel_authentication_endpoint,omitempty"`
+	TokenEndpoint                      *fapi.URL `json:"token_endpoint,omitempty"`
+	PushedAuthorizationRequestEndpoint *fapi.URL `json:"pushed_authorization_request_endpoint,omitempty"`
+	BackchannelAuthenticationEndpoint  *fapi.URL `json:"backchannel_authentication_endpoint,omitempty"`
 }
 
 // Metadata returns this server's metadata document.
@@ -179,9 +199,9 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 	}
 	if !s.cfg.MTLSEndpoints.IsZero() {
 		md.MTLSEndpointAliases = &MTLSEndpointAliases{
-			TokenEndpoint:                      s.cfg.MTLSEndpoints.Token,
-			PushedAuthorizationRequestEndpoint: s.cfg.MTLSEndpoints.PushedAuthorizationRequest,
-			BackchannelAuthenticationEndpoint:  s.cfg.MTLSEndpoints.BackchannelAuthentication,
+			TokenEndpoint:                      urlOrNil(s.cfg.MTLSEndpoints.Token),
+			PushedAuthorizationRequestEndpoint: urlOrNil(s.cfg.MTLSEndpoints.PushedAuthorizationRequest),
+			BackchannelAuthenticationEndpoint:  urlOrNil(s.cfg.MTLSEndpoints.BackchannelAuthentication),
 		}
 		md.TLSClientCertificateBoundAccessTokens = true
 		// The two RFC 8705 §2 client-authentication methods
@@ -197,7 +217,7 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 	}
 
 	if !s.cfg.Endpoints.BackchannelAuthentication.IsZero() {
-		md.BackchannelAuthenticationEndpoint = s.cfg.Endpoints.BackchannelAuthentication
+		md.BackchannelAuthenticationEndpoint = urlOrNil(s.cfg.Endpoints.BackchannelAuthentication)
 		// Both poll (CIBA §10.3) and ping (CIBA §10.2) — push is not
 		// implemented (storage.BackchannelTokenDeliveryMode has no value
 		// for it). Unconditional on any specific client's own
@@ -217,6 +237,18 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 	}
 
 	return md
+}
+
+// urlOrNil returns nil for u's zero value, and a pointer to u otherwise
+// — the constructor every optional *fapi.URL metadata field goes
+// through, so its own "omitted unless set" contract actually holds (see
+// Metadata.BackchannelAuthenticationEndpoint's own doc comment for why
+// a plain, non-pointer fapi.URL can't provide that).
+func urlOrNil(u fapi.URL) *fapi.URL {
+	if u.IsZero() {
+		return nil
+	}
+	return &u
 }
 
 // algorithmString is satisfied by any of this package's closed algorithm

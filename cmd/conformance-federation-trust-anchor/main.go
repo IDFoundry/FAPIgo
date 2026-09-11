@@ -8,11 +8,16 @@
 // It is throwaway conformance-run tooling, not library code (see
 // ARCHITECTURE.md's "No public JOSE utility package" and
 // conformance/server/scripts/generate-client-key's own doc comment for
-// this repo's established precedent) — it calls internal/federation's
-// Create directly (available since cmd/ is inside this module) rather
-// than exposing any new public API for "act as a Trust Anchor", which
-// federation/doc.go deliberately leaves out of this module's own public
-// surface for now.
+// this repo's established precedent) — but the actual federation logic
+// it wires into net/http is entirely this module's own public API:
+// federation.SelfIssuer for its own Entity Configuration,
+// federation.SubordinateIssuer for the Subordinate Statements it issues
+// about each configured subordinate, and federation.SubjectFromFetchRequest/
+// RejectUnsupportedListingFilters for the Fetch/List request-shape
+// checks OpenID Federation 1.0 §8.2/§9 require. This is exactly the
+// reference wiring federation/doc.go's own "Scope" section points at —
+// this package deliberately never owns an http.Server itself (see that
+// doc comment).
 //
 // Subordinates (the leaf entities this Trust Anchor vouches for) are
 // configured via a JSON file — see subordinatesFile — since federation
@@ -33,6 +38,7 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"flag"
 	"log"
 	"net/http"
@@ -41,7 +47,6 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/federation"
-	intfed "github.com/idfoundry/fapigo/internal/federation"
 	"github.com/idfoundry/fapigo/internal/jose"
 )
 
@@ -127,16 +132,28 @@ func main() {
 		subordinateEntityIDs = append(subordinateEntityIDs, id)
 	}
 
+	selfIssuer, err := federation.NewSelfIssuer(federation.SelfIssueConfig{
+		EntityID: *entityID, Lifetime: entityConfigurationLifetime,
+	}, federation.SelfIssueDependencies{
+		Signer: priv, Algorithm: fapi.ES256, KeyID: "ta-key1", JWKS: ownJWKS, Clock: federation.SystemClock{},
+	})
+	if err != nil {
+		log.Fatalf("conformance-federation-trust-anchor: build self issuer: %v", err)
+	}
+	subordinateIssuer, err := federation.NewSubordinateIssuer(federation.SubordinateIssueConfig{
+		EntityID: *entityID, Lifetime: subordinateStatementLifetime,
+	}, federation.SubordinateIssueDependencies{
+		Signer: priv, Algorithm: fapi.ES256, KeyID: "ta-key1", Clock: federation.SystemClock{},
+	})
+	if err != nil {
+		log.Fatalf("conformance-federation-trust-anchor: build subordinate issuer: %v", err)
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /.well-known/openid-federation", func(w http.ResponseWriter, r *http.Request) {
-		token, err := intfed.Create(intfed.CreateParams{
-			Signer: priv, Algorithm: fapi.ES256, KeyID: "ta-key1",
-			Issuer: *entityID, Subject: *entityID,
-			Now: time.Now(), Lifetime: entityConfigurationLifetime, JWKS: ownJWKS,
-			Metadata: map[string]json.RawMessage{"federation_entity": federationEntityMetadata},
-		})
+		token, err := selfIssuer.EntityConfiguration(map[string]json.RawMessage{"federation_entity": federationEntityMetadata})
 		if err != nil {
-			log.Printf("conformance-federation-trust-anchor: create entity configuration: %v", err)
+			log.Printf("conformance-federation-trust-anchor: self-issue entity configuration: %v", err)
 			http.Error(w, "server_error", http.StatusInternalServerError)
 			return
 		}
@@ -144,21 +161,31 @@ func main() {
 		_, _ = w.Write([]byte(token))
 	})
 	mux.HandleFunc("GET /fetch", func(w http.ResponseWriter, r *http.Request) {
-		sub := r.URL.Query().Get("sub")
-		jwks, ok := subordinateJWKS[sub]
-		if !ok {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusNotFound)
-			_, _ = w.Write([]byte(`{"error":"not_found"}`))
+		sub, err := federation.SubjectFromFetchRequest(r)
+		if err != nil {
+			var fedErr *federation.Error
+			if errors.As(err, &fedErr) {
+				fedErr.WriteJSON(w)
+				return
+			}
+			http.Error(w, "server_error", http.StatusInternalServerError)
 			return
 		}
-		token, err := intfed.Create(intfed.CreateParams{
-			Signer: priv, Algorithm: fapi.ES256, KeyID: "ta-key1",
-			Issuer: *entityID, Subject: sub,
-			Now: time.Now(), Lifetime: subordinateStatementLifetime, JWKS: jwks,
+		jwks, ok := subordinateJWKS[sub]
+		if !ok {
+			federation.NewError(federation.ErrorNotFound, http.StatusNotFound, "no such subordinate").WriteJSON(w)
+			return
+		}
+		token, err := subordinateIssuer.SubordinateStatement(federation.SubordinateStatementParams{
+			Subject: sub, JWKS: jwks, SourceEndpoint: fetchEndpoint,
 		})
 		if err != nil {
-			log.Printf("conformance-federation-trust-anchor: create subordinate statement for %q: %v", sub, err) // #nosec G706 -- %q Go-quotes sub, escaping newlines/control characters, so a malicious "sub" cannot forge a fake log line
+			var fedErr *federation.Error
+			if errors.As(err, &fedErr) {
+				fedErr.WriteJSON(w)
+				return
+			}
+			log.Printf("conformance-federation-trust-anchor: issue subordinate statement for %q: %v", sub, err) // #nosec G706 -- %q Go-quotes sub, escaping newlines/control characters, so a malicious "sub" cannot forge a fake log line
 			http.Error(w, "server_error", http.StatusInternalServerError)
 			return
 		}
@@ -167,6 +194,15 @@ func main() {
 	})
 
 	mux.HandleFunc("GET /list", func(w http.ResponseWriter, r *http.Request) {
+		if err := federation.RejectUnsupportedListingFilters(r); err != nil {
+			var fedErr *federation.Error
+			if errors.As(err, &fedErr) {
+				fedErr.WriteJSON(w)
+				return
+			}
+			http.Error(w, "server_error", http.StatusInternalServerError)
+			return
+		}
 		body, err := json.Marshal(subordinateEntityIDs)
 		if err != nil {
 			http.Error(w, "server_error", http.StatusInternalServerError)

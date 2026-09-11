@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"sync"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/fapihttp"
 	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
@@ -75,16 +77,16 @@ type cachedClient struct {
 // (ClientAuthMethodSelfSignedTLSClientAuth and its siblings — verifying
 // these correctly needs the "x5c" member of the client's own published
 // JWK, which internal/jose's JWK Set parsing does not currently
-// preserve, so only ClientAuthMethodPrivateKeyJWT is supported), remote
-// jwks_uri (only an inline "jwks" object in the Resolved Metadata is
-// read), the client_credentials grant and CIBA (neither is permitted
-// for an automatically-registered client in this version), and
+// preserve, so only ClientAuthMethodPrivateKeyJWT is supported), the
+// client_credentials grant and CIBA (neither is permitted for an
+// automatically-registered client in this version), and
 // request_uri/JAR/PAR-level enforcement of OpenID Federation 1.0
 // §12.1.1's own aud/sub/jti Request Object rules (a request-handling
 // concern, not a client registration one).
 type AutomaticClientRepository struct {
 	underlying storage.ClientRepository
 	resolver   *Resolver
+	fetcher    *fapihttp.Client
 	cfg        AutomaticRegistrationConfig
 	clock      Clock
 
@@ -93,17 +95,24 @@ type AutomaticClientRepository struct {
 }
 
 // NewAutomaticClientRepository validates cfg and returns an
-// AutomaticClientRepository. underlying, resolver and clock must all be
-// non-nil — there is no implicit fallback. Pass an underlying that
-// always fails (e.g. one backed by an empty in-memory store) to get
-// automatic-registration-only behavior, with no statically registered
-// clients at all.
-func NewAutomaticClientRepository(underlying storage.ClientRepository, resolver *Resolver, cfg AutomaticRegistrationConfig, clock Clock) (*AutomaticClientRepository, error) {
+// AutomaticClientRepository. underlying, resolver, fetcher and clock
+// must all be non-nil — there is no implicit fallback. Pass an
+// underlying that always fails (e.g. one backed by an empty in-memory
+// store) to get automatic-registration-only behavior, with no
+// statically registered clients at all. fetcher resolves a client's own
+// "jwks_uri", when its openid_relying_party metadata declares one
+// instead of publishing its keys inline — typically the same
+// *fapihttp.Client already passed as resolver's own
+// Dependencies.HTTP.
+func NewAutomaticClientRepository(underlying storage.ClientRepository, resolver *Resolver, fetcher *fapihttp.Client, cfg AutomaticRegistrationConfig, clock Clock) (*AutomaticClientRepository, error) {
 	if underlying == nil {
 		return nil, fmt.Errorf("federation: underlying client repository is required")
 	}
 	if resolver == nil {
 		return nil, fmt.Errorf("federation: resolver is required")
+	}
+	if fetcher == nil {
+		return nil, fmt.Errorf("federation: fetcher is required")
 	}
 	if len(cfg.AllowedScopes) == 0 {
 		return nil, fmt.Errorf("federation: config: allowed_scopes is required")
@@ -115,7 +124,7 @@ func NewAutomaticClientRepository(underlying storage.ClientRepository, resolver 
 		return nil, fmt.Errorf("federation: clock is required")
 	}
 	return &AutomaticClientRepository{
-		underlying: underlying, resolver: resolver, cfg: cfg, clock: clock,
+		underlying: underlying, resolver: resolver, fetcher: fetcher, cfg: cfg, clock: clock,
 		cache: make(map[fapi.ClientID]cachedClient),
 	}, nil
 }
@@ -182,13 +191,19 @@ func (a *AutomaticClientRepository) resolve(ctx context.Context, id fapi.ClientI
 	if !ok {
 		return cachedClient{}, fmt.Errorf("federation: %q has no %s metadata", id, relyingPartyEntityType)
 	}
-	clientCfg, jwks, err := registeredClientConfigFromMetadata(id, raw, a.cfg.AllowedScopes)
+	clientCfg, jwksSrc, err := registeredClientConfigFromMetadata(id, raw, a.cfg.AllowedScopes)
 	if err != nil {
 		return cachedClient{}, fmt.Errorf("federation: %q: %w", id, err)
 	}
 	client, err := storage.NewRegisteredClient(clientCfg)
 	if err != nil {
 		return cachedClient{}, fmt.Errorf("federation: %q: %w", id, err)
+	}
+	jwks := jwksSrc.inline
+	if jwksSrc.uri != "" {
+		if jwks, err = a.fetchJWKS(ctx, jwksSrc.uri); err != nil {
+			return cachedClient{}, fmt.Errorf("federation: %q: %w", id, err)
+		}
 	}
 
 	expiresAt := resolved.ExpiresAt
@@ -201,6 +216,30 @@ func (a *AutomaticClientRepository) resolve(ctx context.Context, id fapi.ClientI
 	a.cache[id] = entry
 	a.mu.Unlock()
 	return entry, nil
+}
+
+// fetchJWKS fetches and parses a client's remote jwks_uri, mirroring
+// keys/ephemeral/clientkeysource.go's own refetch convention — the
+// same hardened fapihttp.Client applies the SSRF/size-limit/
+// content-type protections ARCHITECTURE.md requires for exactly this
+// case, so this reuses it rather than issuing its own HTTP request.
+func (a *AutomaticClientRepository) fetchJWKS(ctx context.Context, uri string) (json.RawMessage, error) {
+	u, err := url.Parse(uri)
+	if err != nil {
+		return nil, fmt.Errorf("parse jwks_uri: %w", err)
+	}
+	res, err := a.fetcher.Fetch(ctx, fapihttp.FetchRequest{
+		URL:                   u,
+		ExpectedContentType:   "application/json",
+		AlternateContentTypes: []string{"application/jwk-set+json"},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("fetch jwks_uri: %w", err)
+	}
+	if _, err := jose.ParseJWKSet(res.Body); err != nil {
+		return nil, fmt.Errorf("parse fetched jwks: %w", err)
+	}
+	return json.RawMessage(res.Body), nil
 }
 
 // AutomaticClientKeySource implements keys.ClientKeySource by resolving
@@ -271,6 +310,7 @@ type relyingPartyMetadata struct {
 	TokenEndpointAuthSigningAlg           string          `json:"token_endpoint_auth_signing_alg"`
 	RequestObjectSigningAlg               string          `json:"request_object_signing_alg"`
 	JWKS                                  json.RawMessage `json:"jwks"`
+	JWKSURI                               string          `json:"jwks_uri"`
 	TLSClientCertificateBoundAccessTokens bool            `json:"tls_client_certificate_bound_access_tokens"`
 	IDTokenEncryptedResponseAlg           string          `json:"id_token_encrypted_response_alg"`
 	IDTokenEncryptedResponseEnc           string          `json:"id_token_encrypted_response_enc"`
@@ -278,40 +318,50 @@ type relyingPartyMetadata struct {
 	UserinfoEncryptedResponseEnc          string          `json:"userinfo_encrypted_response_enc"`
 }
 
+// jwksSource is a client's verification key material as declared by its
+// own openid_relying_party metadata — exactly one of inline (already
+// resolved, no I/O needed) or uri (fetched live via
+// AutomaticClientRepository.fetchJWKS) is set, enforced by
+// registeredClientConfigFromMetadata.
+type jwksSource struct {
+	inline json.RawMessage
+	uri    string
+}
+
 // registeredClientConfigFromMetadata parses raw (an openid_relying_party
 // Resolved Metadata object) and builds the storage.RegisteredClientConfig
-// it describes, returning its inline jwks separately (needed by
+// it describes, returning its jwks source separately (needed by
 // AutomaticClientKeySource, not stored on storage.RegisteredClient
 // itself).
-func registeredClientConfigFromMetadata(id fapi.ClientID, raw json.RawMessage, allowedScopes []string) (storage.RegisteredClientConfig, json.RawMessage, error) {
+func registeredClientConfigFromMetadata(id fapi.ClientID, raw json.RawMessage, allowedScopes []string) (storage.RegisteredClientConfig, jwksSource, error) {
 	var m relyingPartyMetadata
 	if err := json.Unmarshal(raw, &m); err != nil {
-		return storage.RegisteredClientConfig{}, nil, fmt.Errorf("parse %s metadata: %w", relyingPartyEntityType, err)
+		return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("parse %s metadata: %w", relyingPartyEntityType, err)
 	}
 	if len(m.RedirectURIs) == 0 {
-		return storage.RegisteredClientConfig{}, nil, fmt.Errorf("%s metadata has no redirect_uris", relyingPartyEntityType)
+		return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("%s metadata has no redirect_uris", relyingPartyEntityType)
 	}
-	if len(m.JWKS) == 0 {
-		return storage.RegisteredClientConfig{}, nil, fmt.Errorf("%s metadata has no inline jwks (jwks_uri is not supported)", relyingPartyEntityType)
+	if (len(m.JWKS) > 0) == (m.JWKSURI != "") {
+		return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("%s metadata must declare exactly one of jwks or jwks_uri", relyingPartyEntityType)
 	}
 
 	authMethod, err := storage.ParseClientAuthMethod(m.TokenEndpointAuthMethod)
 	if err != nil {
-		return storage.RegisteredClientConfig{}, nil, fmt.Errorf("token_endpoint_auth_method: %w", err)
+		return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("token_endpoint_auth_method: %w", err)
 	}
 	if authMethod != storage.ClientAuthMethodPrivateKeyJWT {
-		return storage.RegisteredClientConfig{}, nil, fmt.Errorf("token_endpoint_auth_method %q is not yet supported by automatic registration (only private_key_jwt)", m.TokenEndpointAuthMethod)
+		return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("token_endpoint_auth_method %q is not yet supported by automatic registration (only private_key_jwt)", m.TokenEndpointAuthMethod)
 	}
 	assertionAlg, err := fapi.ParseSignatureAlgorithm(m.TokenEndpointAuthSigningAlg)
 	if err != nil {
-		return storage.RegisteredClientConfig{}, nil, fmt.Errorf("token_endpoint_auth_signing_alg: %w", err)
+		return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("token_endpoint_auth_signing_alg: %w", err)
 	}
 
 	var requestObjectAlg fapi.SignatureAlgorithm
 	if m.RequestObjectSigningAlg != "" {
 		requestObjectAlg, err = fapi.ParseSignatureAlgorithm(m.RequestObjectSigningAlg)
 		if err != nil {
-			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("request_object_signing_alg: %w", err)
+			return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("request_object_signing_alg: %w", err)
 		}
 	}
 
@@ -336,30 +386,30 @@ func registeredClientConfigFromMetadata(id fapi.ClientID, raw json.RawMessage, a
 	idTokenAlgSet := m.IDTokenEncryptedResponseAlg != ""
 	idTokenEncSet := m.IDTokenEncryptedResponseEnc != ""
 	if idTokenAlgSet != idTokenEncSet {
-		return storage.RegisteredClientConfig{}, nil, fmt.Errorf("id_token_encrypted_response_alg and id_token_encrypted_response_enc must both be set, or neither")
+		return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("id_token_encrypted_response_alg and id_token_encrypted_response_enc must both be set, or neither")
 	}
 	if idTokenAlgSet {
 		if cfg.IDTokenEncryptionKeyManagement, err = fapi.ParseKeyManagementAlgorithm(m.IDTokenEncryptedResponseAlg); err != nil {
-			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("id_token_encrypted_response_alg: %w", err)
+			return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("id_token_encrypted_response_alg: %w", err)
 		}
 		if cfg.IDTokenEncryptionContentEncryption, err = fapi.ParseContentEncryptionAlgorithm(m.IDTokenEncryptedResponseEnc); err != nil {
-			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("id_token_encrypted_response_enc: %w", err)
+			return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("id_token_encrypted_response_enc: %w", err)
 		}
 	}
 
 	userInfoAlgSet := m.UserinfoEncryptedResponseAlg != ""
 	userInfoEncSet := m.UserinfoEncryptedResponseEnc != ""
 	if userInfoAlgSet != userInfoEncSet {
-		return storage.RegisteredClientConfig{}, nil, fmt.Errorf("userinfo_encrypted_response_alg and userinfo_encrypted_response_enc must both be set, or neither")
+		return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("userinfo_encrypted_response_alg and userinfo_encrypted_response_enc must both be set, or neither")
 	}
 	if userInfoAlgSet {
 		if cfg.UserInfoEncryptionKeyManagement, err = fapi.ParseKeyManagementAlgorithm(m.UserinfoEncryptedResponseAlg); err != nil {
-			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("userinfo_encrypted_response_alg: %w", err)
+			return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("userinfo_encrypted_response_alg: %w", err)
 		}
 		if cfg.UserInfoEncryptionContentEncryption, err = fapi.ParseContentEncryptionAlgorithm(m.UserinfoEncryptedResponseEnc); err != nil {
-			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("userinfo_encrypted_response_enc: %w", err)
+			return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("userinfo_encrypted_response_enc: %w", err)
 		}
 	}
 
-	return cfg, m.JWKS, nil
+	return cfg, jwksSource{inline: m.JWKS, uri: m.JWKSURI}, nil
 }

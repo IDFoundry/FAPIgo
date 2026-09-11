@@ -47,7 +47,7 @@
 // Entity Identifier as client_id without a prior registration step —
 // see AutomaticClientRepository's own doc comment for exactly which
 // registration shapes this first version supports (only
-// ClientAuthMethodPrivateKeyJWT, only an inline jwks, no CIBA or
+// ClientAuthMethodPrivateKeyJWT, jwks or jwks_uri, no CIBA or
 // client_credentials) and which it deliberately doesn't yet
 // (server-side request_uri/JAR/PAR-level enforcement of §12.1.1's own
 // aud/sub/jti Request Object rules remains a caller concern; Explicit

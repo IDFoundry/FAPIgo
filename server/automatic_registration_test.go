@@ -22,6 +22,7 @@ import (
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
+	"github.com/idfoundry/fapigo/storage/memstore"
 )
 
 // automaticRegistrationFixture is a two-level federation (TA -> RP)
@@ -101,11 +102,12 @@ func setupAutomaticRegistrationFixture(t *testing.T, redirectURI string) *automa
 		Issuer: taID, Subject: rpID, Now: now, Lifetime: time.Hour, JWKS: rpFedJWKS,
 	})
 	rpMetadataJSON, err := json.Marshal(map[string]any{
-		"redirect_uris":                   []string{redirectURI},
-		"token_endpoint_auth_method":      "private_key_jwt",
-		"token_endpoint_auth_signing_alg": "ES256",
-		"request_object_signing_alg":      "ES256",
-		"jwks":                            json.RawMessage(fedJWKS(t, "rp-oidc", rpOIDCKey)),
+		"redirect_uris":                                  []string{redirectURI},
+		"token_endpoint_auth_method":                     "private_key_jwt",
+		"token_endpoint_auth_signing_alg":                "ES256",
+		"request_object_signing_alg":                     "ES256",
+		"backchannel_authentication_request_signing_alg": "ES256",
+		"jwks": json.RawMessage(fedJWKS(t, "rp-oidc", rpOIDCKey)),
 	})
 	if err != nil {
 		t.Fatalf("marshal openid_relying_party metadata: %v", err)
@@ -216,20 +218,16 @@ func TestNewRejectsMalformedTrustAnchorEntry(t *testing.T) {
 	}
 }
 
-// TestNewWiresAutomaticRegistrationIntoPushAuthorizationRequest proves
-// server.New actually wraps Dependencies.Clients/ClientKeys when
-// AutomaticRegistration is configured: Dependencies.Clients/ClientKeys
-// are both deliberately empty (no statically registered client would
-// ever resolve), yet PushAuthorizationRequest still succeeds for a
-// Relying Party this server has never seen before, authenticated with a
-// client assertion signed by the key that RP published in its own
-// federation-resolved openid_relying_party metadata.
 // newAutomaticRegistrationTestServer builds a server.Server wired to f's
 // TA -> RP federation, with Dependencies.Clients/ClientKeys deliberately
 // empty (no statically registered client would ever resolve) — so any
 // successful request against the returned server for f.rpID can only be
-// explained by AutomaticRegistration having kicked in.
-func newAutomaticRegistrationTestServer(t *testing.T, f *automaticRegistrationFixture) *server.Server {
+// explained by AutomaticRegistration having kicked in. Each configure
+// func, if any, is applied (in order) after the base cfg/deps are built
+// and before server.New is called — for a test that needs an additional
+// capability (e.g. AllowsClientCredentialsGrant, CIBA endpoints/deps)
+// beyond this shared baseline.
+func newAutomaticRegistrationTestServer(t *testing.T, f *automaticRegistrationFixture, configure ...func(*server.Config, *server.Dependencies)) *server.Server {
 	t.Helper()
 	issuer, err := fapi.ParseIssuerURL(testIssuer)
 	if err != nil {
@@ -276,6 +274,9 @@ func newAutomaticRegistrationTestServer(t *testing.T, f *automaticRegistrationFi
 		Clock:          fixedClock{now: f.now},
 		Random:         rand.Reader,
 		FederationHTTP: f.fetcher,
+	}
+	for _, c := range configure {
+		c(&cfg, &deps)
 	}
 
 	srv, err := server.New(cfg, deps)
@@ -357,6 +358,142 @@ func TestNewWiresAutomaticRegistrationRequestObjectFederationRules(t *testing.T)
 		params["sub"] = jsonRaw(t, f.rpID)
 		if err := push(t, params); err == nil {
 			t.Fatalf("PushAuthorizationRequest (sub present) = nil error, want error")
+		}
+	})
+}
+
+// TestNewWiresAutomaticRegistrationIntoClientCredentialsGrant proves
+// that once both Config.ClientCredentialsGrant (server-wide) and
+// AutomaticRegistration.AllowsClientCredentialsGrant (the automatic-
+// registration-specific capability grant) are set, an automatically-
+// registered client can use the client_credentials grant — with
+// neither switch alone being sufficient.
+func TestNewWiresAutomaticRegistrationIntoClientCredentialsGrant(t *testing.T) {
+	f := setupAutomaticRegistrationFixture(t, testRedirectURI)
+
+	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
+		Signer: f.rpOIDCKey, Algorithm: fapi.ES256, KeyID: "rp-oidc",
+		ClientID: f.rpID, Audience: testIssuer,
+		Now: f.now, Lifetime: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssertion: %v", err)
+	}
+	params := []server.FormParameter{
+		formParam("grant_type", "client_credentials"),
+		formParam("client_assertion", assertion),
+		formParam("client_assertion_type", clientassertion.AssertionType),
+		formParam("scope", "accounts"),
+	}
+	// The RP's metadata never sets tls_client_certificate_bound_access_tokens,
+	// so the resolved client defaults to DPoP sender-constraining — a DPoP
+	// proof is required, exactly as it would be for any statically
+	// registered DPoP client.
+	dpopProofs := []string{createDPoPProof(t, generateKey(t), f.now)}
+
+	t.Run("disabled by default", func(t *testing.T) {
+		srv := newAutomaticRegistrationTestServer(t, f)
+		if _, err := srv.RequestClientCredentialsToken(context.Background(), server.ClientCredentialsTokenRequest{
+			HTTP: server.FormRequest{Parameters: params}, DPoPProofs: dpopProofs,
+		}); err == nil {
+			t.Fatalf("RequestClientCredentialsToken (neither switch set) = nil error, want error")
+		}
+	})
+
+	t.Run("still disabled with only the automatic-registration switch set", func(t *testing.T) {
+		srv := newAutomaticRegistrationTestServer(t, f, func(cfg *server.Config, deps *server.Dependencies) {
+			cfg.AutomaticRegistration.AllowsClientCredentialsGrant = true
+		})
+		if _, err := srv.RequestClientCredentialsToken(context.Background(), server.ClientCredentialsTokenRequest{
+			HTTP: server.FormRequest{Parameters: params}, DPoPProofs: dpopProofs,
+		}); err == nil {
+			t.Fatalf("RequestClientCredentialsToken (server-wide switch not set) = nil error, want error")
+		}
+	})
+
+	t.Run("succeeds with both switches set", func(t *testing.T) {
+		srv := newAutomaticRegistrationTestServer(t, f, func(cfg *server.Config, deps *server.Dependencies) {
+			cfg.ClientCredentialsGrant = true
+			cfg.AutomaticRegistration.AllowsClientCredentialsGrant = true
+		})
+		if _, err := srv.RequestClientCredentialsToken(context.Background(), server.ClientCredentialsTokenRequest{
+			HTTP: server.FormRequest{Parameters: params}, DPoPProofs: dpopProofs,
+		}); err != nil {
+			t.Fatalf("RequestClientCredentialsToken (both switches set) = %v, want nil error", err)
+		}
+	})
+}
+
+// TestNewWiresAutomaticRegistrationIntoBeginBackchannelAuthentication
+// proves that once AutomaticRegistration.AllowsCIBA is set, an
+// automatically-registered client's own
+// backchannel_authentication_request_signing_alg metadata (always
+// published by this fixture's RP, but otherwise ignored per
+// federation's own tests) takes effect and CIBA succeeds; it stays
+// disabled without that switch even though the RP publishes the same
+// metadata.
+func TestNewWiresAutomaticRegistrationIntoBeginBackchannelAuthentication(t *testing.T) {
+	f := setupAutomaticRegistrationFixture(t, testRedirectURI)
+	backchannelEndpoint, err := fapi.ParseEndpointURL(testBackchannelAuthenticationEndpoint)
+	if err != nil {
+		t.Fatalf("ParseEndpointURL: %v", err)
+	}
+	configureCIBA := func(cfg *server.Config, deps *server.Dependencies) {
+		cfg.Endpoints.BackchannelAuthentication = backchannelEndpoint
+		cfg.Algorithms.BackchannelAuthenticationRequest = server.AlgorithmSet{fapi.ES256}
+		cfg.Limits.BackchannelAuthenticationRequestLifetime = 2 * time.Minute
+		cfg.Limits.MaxBackchannelAuthenticationRequestLifetime = time.Minute
+		cfg.Limits.BackchannelAuthenticationPollInterval = time.Millisecond
+		deps.Backchannel = memstore.NewBackchannelAuthenticationStore()
+		deps.BackchannelNotifier = server.NoBackchannelNotifications{}
+	}
+
+	requestObj, err := requestobject.Create(requestobject.CreateParams{
+		Signer: f.rpOIDCKey, Algorithm: fapi.ES256, KeyID: "rp-oidc",
+		ClientID: f.rpID, Audience: testIssuer,
+		Now: f.now, Lifetime: 30 * time.Second, Parameters: standardBackchannelParams(t),
+	})
+	if err != nil {
+		t.Fatalf("requestobject.Create: %v", err)
+	}
+	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
+		Signer: f.rpOIDCKey, Algorithm: fapi.ES256, KeyID: "rp-oidc",
+		ClientID: f.rpID, Audience: testIssuer,
+		Now: f.now, Lifetime: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssertion: %v", err)
+	}
+	beginParams := backchannelFormParams(assertion, requestObj)
+
+	t.Run("disabled without AllowsCIBA", func(t *testing.T) {
+		srv := newAutomaticRegistrationTestServer(t, f, configureCIBA)
+		// BeginBackchannelAuthentication reports a rejection via its own
+		// BackchannelAuthenticationAction sum type, not a Go error — see
+		// its own doc comment / backchannelBeginFail.
+		action, err := srv.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+			HTTP: server.FormRequest{Parameters: beginParams},
+		})
+		if err != nil {
+			t.Fatalf("BeginBackchannelAuthentication: %v", err)
+		}
+		if _, ok := action.(server.BackchannelAuthenticationLocalError); !ok {
+			t.Fatalf("action = %T, want server.BackchannelAuthenticationLocalError (AllowsCIBA not set)", action)
+		}
+	})
+
+	t.Run("succeeds with AllowsCIBA", func(t *testing.T) {
+		srv := newAutomaticRegistrationTestServer(t, f, configureCIBA, func(cfg *server.Config, deps *server.Dependencies) {
+			cfg.AutomaticRegistration.AllowsCIBA = true
+		})
+		action, err := srv.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+			HTTP: server.FormRequest{Parameters: beginParams},
+		})
+		if err != nil {
+			t.Fatalf("BeginBackchannelAuthentication (AllowsCIBA set) = %v, want nil error", err)
+		}
+		if _, ok := action.(server.BackchannelInteractionRequired); !ok {
+			t.Fatalf("action = %T, want server.BackchannelInteractionRequired", action)
 		}
 	})
 }

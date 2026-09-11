@@ -47,9 +47,11 @@
 // Entity Identifier as client_id without a prior registration step —
 // see AutomaticClientRepository's own doc comment for exactly which
 // registration shapes this first version supports (only
-// ClientAuthMethodPrivateKeyJWT, jwks or jwks_uri, no CIBA or
-// client_credentials) and which it deliberately doesn't yet (Explicit
-// Registration, §12.2, is not implemented by this package at all).
+// ClientAuthMethodPrivateKeyJWT; jwks or jwks_uri; CIBA and
+// client_credentials each gated by their own
+// AutomaticRegistrationConfig switch, off by default) and which it
+// deliberately doesn't yet (Explicit Registration, §12.2, is not
+// implemented by this package at all).
 // §12.1.1's own aud/sub/jti Request Object rules are enforced by the
 // server package via storage.RegisteredClientConfig's own
 // AutomaticFederationRegistration field, not by this package — a

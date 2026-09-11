@@ -33,14 +33,13 @@
 // than discovering trust roots live over the network.
 //
 // Trust marks (OpenID Federation 1.0 §7) are not implemented by this
-// package. Resolve enforces the resolver-wide Limits.MaxPathLength
-// ceiling (the constraint most directly relevant to resource
-// exhaustion), and every Subordinate Statement's own naming_constraints
-// and allowed_entity_types constraints (§6.2.2/§6.2.3), but not yet a
-// per-statement max_path_length constraint (§6.2.1) — left for a later
-// revision once a concrete caller needs it, the same
-// deliberately-narrow-first-cut precedent internal/federation's own
-// doc.go already sets for trust marks.
+// package — left for a later revision once a concrete caller needs
+// them, the same deliberately-narrow-first-cut precedent
+// internal/federation's own doc.go already sets. Resolve enforces the
+// resolver-wide Limits.MaxPathLength ceiling (the constraint most
+// directly relevant to resource exhaustion) and every Subordinate
+// Statement's own constraints claim in full: max_path_length (§6.2.1),
+// naming_constraints (§6.2.2) and allowed_entity_types (§6.2.3).
 //
 // Automatic client registration (OpenID Federation 1.0 §12.1) is
 // implemented by AutomaticClientRepository/AutomaticClientKeySource,

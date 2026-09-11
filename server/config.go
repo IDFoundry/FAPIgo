@@ -395,6 +395,20 @@ type AutomaticRegistrationConfig struct {
 	// federation.AutomaticRegistrationConfig.MaxCacheAge. Required when
 	// TrustAnchors is set.
 	MaxCacheAge time.Duration
+
+	// AllowsClientCredentialsGrant permits every automatically-registered
+	// client to use the client_credentials grant — see
+	// federation.AutomaticRegistrationConfig.AllowsClientCredentialsGrant
+	// for why this is a config-level switch, never inferred from an RP's
+	// own metadata. Still also requires Config.ClientCredentialsGrant to
+	// be enabled server-wide.
+	AllowsClientCredentialsGrant bool
+
+	// AllowsCIBA permits every automatically-registered client to use
+	// CIBA — see federation.AutomaticRegistrationConfig.AllowsCIBA for
+	// why this is a config-level switch, never inferred from an RP's own
+	// metadata.
+	AllowsCIBA bool
 }
 
 // FederationConfig configures this server's OpenID Federation 1.0

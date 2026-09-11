@@ -176,6 +176,31 @@ func rpMetadataBuilderWithJWKSURI(t *testing.T) func(rpID string, rpOIDCKey *ecd
 	}
 }
 
+// rpMetadataBuilderWithCIBA mirrors rpMetadataBuilder, but additionally
+// declares backchannel_authentication_request_signing_alg/
+// backchannel_token_delivery_mode/backchannel_client_notification_endpoint —
+// exercised only when the fixture's AutomaticRegistrationConfig also
+// sets AllowsCIBA (see registeredClientConfigFromMetadata's own "ignore
+// unless allowed" behavior).
+func rpMetadataBuilderWithCIBA(t *testing.T) func(rpID string, rpOIDCKey *ecdsa.PrivateKey) json.RawMessage {
+	return func(rpID string, rpOIDCKey *ecdsa.PrivateKey) json.RawMessage {
+		t.Helper()
+		raw, err := json.Marshal(map[string]any{
+			"redirect_uris":                   []string{rpID + "/cb"},
+			"token_endpoint_auth_method":      "private_key_jwt",
+			"token_endpoint_auth_signing_alg": "ES256",
+			"jwks":                            json.RawMessage(jwksFor(t, "rp-oidc", rpOIDCKey)),
+			"backchannel_authentication_request_signing_alg": "ES256",
+			"backchannel_token_delivery_mode":                "ping",
+			"backchannel_client_notification_endpoint":       rpID + "/notify",
+		})
+		if err != nil {
+			t.Fatalf("marshal openid_relying_party metadata: %v", err)
+		}
+		return raw
+	}
+}
+
 // alwaysFailsRepository is a storage.ClientRepository that always
 // fails — for tests wanting AutomaticClientRepository's federation
 // fallback exercised unconditionally.
@@ -320,6 +345,85 @@ func TestAutomaticClientRepositoryResolveClientFallsBackToFederation(t *testing.
 	}
 	if !got.AllowsScope("openid") {
 		t.Errorf("AllowsScope(openid) = false, want true (from AutomaticRegistrationConfig.AllowedScopes)")
+	}
+}
+
+func TestAutomaticClientRepositoryResolveClientDoesNotAllowClientCredentialsByDefault(t *testing.T) {
+	f := setupAutomaticRegistrationFixture(t, rpMetadataBuilder(t))
+	resolver := f.newResolver(t)
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, f.fetcher, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
+	if err != nil {
+		t.Fatalf("NewAutomaticClientRepository: %v", err)
+	}
+
+	got, err := repo.ResolveClient(context.Background(), fapi.ClientID(f.rpID))
+	if err != nil {
+		t.Fatalf("ResolveClient: %v", err)
+	}
+	if got.AllowsClientCredentialsGrant() {
+		t.Errorf("AllowsClientCredentialsGrant() = true, want false (AutomaticRegistrationConfig.AllowsClientCredentialsGrant not set)")
+	}
+}
+
+func TestAutomaticClientRepositoryResolveClientAllowsClientCredentialsWhenConfigured(t *testing.T) {
+	f := setupAutomaticRegistrationFixture(t, rpMetadataBuilder(t))
+	resolver := f.newResolver(t)
+	cfg := validAutomaticRegistrationConfig()
+	cfg.AllowsClientCredentialsGrant = true
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, f.fetcher, cfg, fixedClock{now: f.now})
+	if err != nil {
+		t.Fatalf("NewAutomaticClientRepository: %v", err)
+	}
+
+	got, err := repo.ResolveClient(context.Background(), fapi.ClientID(f.rpID))
+	if err != nil {
+		t.Fatalf("ResolveClient: %v", err)
+	}
+	if !got.AllowsClientCredentialsGrant() {
+		t.Errorf("AllowsClientCredentialsGrant() = false, want true (AutomaticRegistrationConfig.AllowsClientCredentialsGrant is set)")
+	}
+}
+
+func TestAutomaticClientRepositoryResolveClientIgnoresCIBAMetadataByDefault(t *testing.T) {
+	f := setupAutomaticRegistrationFixture(t, rpMetadataBuilderWithCIBA(t))
+	resolver := f.newResolver(t)
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, f.fetcher, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
+	if err != nil {
+		t.Fatalf("NewAutomaticClientRepository: %v", err)
+	}
+
+	got, err := repo.ResolveClient(context.Background(), fapi.ClientID(f.rpID))
+	if err != nil {
+		t.Fatalf("ResolveClient: %v", err)
+	}
+	if _, permitted := got.BackchannelAuthenticationRequestAlgorithm(); permitted {
+		t.Errorf("BackchannelAuthenticationRequestAlgorithm permitted = true, want false (AutomaticRegistrationConfig.AllowsCIBA not set)")
+	}
+}
+
+func TestAutomaticClientRepositoryResolveClientAllowsCIBAWhenConfigured(t *testing.T) {
+	f := setupAutomaticRegistrationFixture(t, rpMetadataBuilderWithCIBA(t))
+	resolver := f.newResolver(t)
+	cfg := validAutomaticRegistrationConfig()
+	cfg.AllowsCIBA = true
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, f.fetcher, cfg, fixedClock{now: f.now})
+	if err != nil {
+		t.Fatalf("NewAutomaticClientRepository: %v", err)
+	}
+
+	got, err := repo.ResolveClient(context.Background(), fapi.ClientID(f.rpID))
+	if err != nil {
+		t.Fatalf("ResolveClient: %v", err)
+	}
+	alg, permitted := got.BackchannelAuthenticationRequestAlgorithm()
+	if !permitted || alg != fapi.ES256 {
+		t.Errorf("BackchannelAuthenticationRequestAlgorithm() = (%v, %v), want (ES256, true)", alg, permitted)
+	}
+	if got.BackchannelTokenDeliveryMode() != storage.BackchannelTokenDeliveryModePing {
+		t.Errorf("BackchannelTokenDeliveryMode() = %v, want ping", got.BackchannelTokenDeliveryMode())
+	}
+	if got.BackchannelClientNotificationEndpoint().String() != f.rpID+"/notify" {
+		t.Errorf("BackchannelClientNotificationEndpoint() = %q, want %q", got.BackchannelClientNotificationEndpoint().String(), f.rpID+"/notify")
 	}
 }
 

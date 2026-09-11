@@ -41,6 +41,40 @@ type AutomaticRegistrationConfig struct {
 	// ResolvedEntity.ExpiresAt), never longer than the chain itself
 	// remains valid. Required — must be positive.
 	MaxCacheAge time.Duration
+
+	// AllowsClientCredentialsGrant permits every automatically-registered
+	// client to use the RFC 6749 §4.4 client_credentials grant —
+	// uniformly, exactly like AllowedScopes, and for the identical
+	// reason: never inferred from the RP's own self-published metadata.
+	// Deciding whether a client may mint a token representing itself,
+	// with no end user or authorization code involved at all, is a
+	// capability grant, not a mechanism detail an RP can safely
+	// self-assert. False (the zero value/default) means no
+	// automatically-registered client may use client_credentials,
+	// regardless of what it publishes. Also still requires
+	// server.Config.ClientCredentialsGrant to be enabled server-wide,
+	// exactly as storage.RegisteredClientConfig's own field of the same
+	// name does for a statically registered client.
+	AllowsClientCredentialsGrant bool
+
+	// AllowsCIBA permits every automatically-registered client to use
+	// OpenID Connect Client-Initiated Backchannel Authentication —
+	// uniformly, for the identical reason AllowsClientCredentialsGrant
+	// is a config-level switch rather than inferred from RP metadata:
+	// whether an RP may request authentication for an end user
+	// out-of-band, with no browser redirect to anchor consent to, is a
+	// capability grant. When true, an RP's own
+	// backchannel_authentication_request_signing_alg (which doubles as
+	// its CIBA opt-in flag, exactly as
+	// storage.RegisteredClientConfig.BackchannelAuthenticationRequestAlgorithm's
+	// own doc comment describes), backchannel_token_delivery_mode and
+	// backchannel_client_notification_endpoint metadata is read — these
+	// are mechanism details (which algorithm, which delivery mode), safe
+	// to trust from self-published metadata the same way
+	// RequestObjectSigningAlg already is, once the capability itself has
+	// been granted here. When false, that metadata is ignored entirely
+	// and CIBA stays disabled for every automatically-registered client.
+	AllowsCIBA bool
 }
 
 // cachedClient is one Relying Party's resolved registration, cached
@@ -72,17 +106,20 @@ type cachedClient struct {
 // registered" here — an inherent limitation of that interface, not
 // something this type can work around.
 //
-// See doc.go for what this first version deliberately does not
-// implement: every RFC 8705 mTLS client authentication method
+// The client_credentials grant and CIBA are each gated by their own
+// config-level switch (AutomaticRegistrationConfig.AllowsClientCredentialsGrant/
+// AllowsCIBA) — off by default, since whether an automatically-resolved
+// RP may use either is a capability grant an operator makes, never
+// something an RP's own self-published metadata can grant itself. See
+// doc.go for what this first version still deliberately does not
+// implement at all: every RFC 8705 mTLS client authentication method
 // (ClientAuthMethodSelfSignedTLSClientAuth and its siblings — verifying
 // these correctly needs the "x5c" member of the client's own published
 // JWK, which internal/jose's JWK Set parsing does not currently
-// preserve, so only ClientAuthMethodPrivateKeyJWT is supported), and the
-// client_credentials grant and CIBA (neither is permitted for an
-// automatically-registered client in this version). PAR/JAR-level
-// enforcement of OpenID Federation 1.0 §12.1.1's own aud/sub/jti
-// Request Object rules is a request-handling concern, not a client
-// registration one — see storage.RegisteredClientConfig's own
+// preserve, so only ClientAuthMethodPrivateKeyJWT is supported).
+// PAR/JAR-level enforcement of OpenID Federation 1.0 §12.1.1's own
+// aud/sub/jti Request Object rules is a request-handling concern, not a
+// client registration one — see storage.RegisteredClientConfig's own
 // AutomaticFederationRegistration field and
 // requestobject.VerifyPolicy.AutomaticFederationRegistration.
 type AutomaticClientRepository struct {
@@ -193,7 +230,7 @@ func (a *AutomaticClientRepository) resolve(ctx context.Context, id fapi.ClientI
 	if !ok {
 		return cachedClient{}, fmt.Errorf("federation: %q has no %s metadata", id, relyingPartyEntityType)
 	}
-	clientCfg, jwksSrc, err := registeredClientConfigFromMetadata(id, raw, a.cfg.AllowedScopes)
+	clientCfg, jwksSrc, err := registeredClientConfigFromMetadata(id, raw, a.cfg)
 	if err != nil {
 		return cachedClient{}, fmt.Errorf("federation: %q: %w", id, err)
 	}
@@ -318,6 +355,15 @@ type relyingPartyMetadata struct {
 	IDTokenEncryptedResponseEnc           string          `json:"id_token_encrypted_response_enc"`
 	UserinfoEncryptedResponseAlg          string          `json:"userinfo_encrypted_response_alg"`
 	UserinfoEncryptedResponseEnc          string          `json:"userinfo_encrypted_response_enc"`
+
+	// BackchannelAuthenticationRequestSigningAlg/BackchannelTokenDeliveryMode/
+	// BackchannelClientNotificationEndpoint are read only when
+	// AutomaticRegistrationConfig.AllowsCIBA permits it at all — see its
+	// own doc comment for why granting the capability is a config-level
+	// decision, while these are just mechanism details once granted.
+	BackchannelAuthenticationRequestSigningAlg string `json:"backchannel_authentication_request_signing_alg"`
+	BackchannelTokenDeliveryMode               string `json:"backchannel_token_delivery_mode"`
+	BackchannelClientNotificationEndpoint      string `json:"backchannel_client_notification_endpoint"`
 }
 
 // jwksSource is a client's verification key material as declared by its
@@ -334,8 +380,11 @@ type jwksSource struct {
 // Resolved Metadata object) and builds the storage.RegisteredClientConfig
 // it describes, returning its jwks source separately (needed by
 // AutomaticClientKeySource, not stored on storage.RegisteredClient
-// itself).
-func registeredClientConfigFromMetadata(id fapi.ClientID, raw json.RawMessage, allowedScopes []string) (storage.RegisteredClientConfig, jwksSource, error) {
+// itself). automaticCfg supplies the operator-level capability grants
+// (AllowedScopes, AllowsClientCredentialsGrant, AllowsCIBA) that must
+// never be inferred from raw itself — see AutomaticRegistrationConfig's
+// own doc comments for why.
+func registeredClientConfigFromMetadata(id fapi.ClientID, raw json.RawMessage, automaticCfg AutomaticRegistrationConfig) (storage.RegisteredClientConfig, jwksSource, error) {
 	var m relyingPartyMetadata
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("parse %s metadata: %w", relyingPartyEntityType, err)
@@ -382,8 +431,27 @@ func registeredClientConfigFromMetadata(id fapi.ClientID, raw json.RawMessage, a
 		ClientAuthMethod: authMethod, ClientAssertionAlgorithm: assertionAlg,
 		RequestObjectAlgorithm:          requestObjectAlg,
 		SenderConstrain:                 senderConstrain,
-		AllowedScopes:                   allowedScopes,
+		AllowedScopes:                   automaticCfg.AllowedScopes,
 		AutomaticFederationRegistration: true,
+		AllowsClientCredentialsGrant:    automaticCfg.AllowsClientCredentialsGrant,
+	}
+
+	if automaticCfg.AllowsCIBA && m.BackchannelAuthenticationRequestSigningAlg != "" {
+		if cfg.BackchannelAuthenticationRequestAlgorithm, err = fapi.ParseSignatureAlgorithm(m.BackchannelAuthenticationRequestSigningAlg); err != nil {
+			return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("backchannel_authentication_request_signing_alg: %w", err)
+		}
+		deliveryMode := m.BackchannelTokenDeliveryMode
+		if deliveryMode == "" {
+			deliveryMode = "poll"
+		}
+		if cfg.BackchannelTokenDeliveryMode, err = storage.ParseBackchannelTokenDeliveryMode(deliveryMode); err != nil {
+			return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("backchannel_token_delivery_mode: %w", err)
+		}
+		if m.BackchannelClientNotificationEndpoint != "" {
+			if cfg.BackchannelClientNotificationEndpoint, err = fapi.ParseEndpointURL(m.BackchannelClientNotificationEndpoint); err != nil {
+				return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("backchannel_client_notification_endpoint: %w", err)
+			}
+		}
 	}
 
 	idTokenAlgSet := m.IDTokenEncryptedResponseAlg != ""

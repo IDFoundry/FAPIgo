@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Runs all twenty FAPI2/FAPI-CIBA test configurations this repo has
-# driver support for — one underlying OIDF conformance suite, exercised
-# under twenty different plan/variant combinations: AS baseline, AS
-# message-signing, AS ciba-mtls, AS ciba-ping, AS mtls, AS
-# message-signing-mtls, AS client-auth-mtls, AS
+# Runs all twenty-one FAPI2/FAPI-CIBA/OpenID-Federation test
+# configurations this repo has driver support for — one underlying OIDF
+# conformance suite, exercised under twenty-one different plan/variant
+# combinations: AS baseline, AS message-signing, AS ciba-mtls, AS
+# ciba-ping, AS mtls, AS message-signing-mtls, AS client-auth-mtls, AS
 # client-auth-mtls-and-mtls, AS ciba-client-auth-mtls, AS
 # ciba-ping-client-auth-mtls, AS baseline-client-credentials, AS
 # mtls-client-credentials, AS client-auth-mtls-client-credentials, AS
 # client-auth-mtls-and-mtls-client-credentials, RP baseline, RP
 # message-signing, RP ciba-mtls, RP client-auth-mtls, RP mtls, RP
-# client-auth-mtls-and-mtls — against a locally running OIDF conformance
-# suite,
+# client-auth-mtls-and-mtls, Federation federation-deployed-entity —
+# against a locally running OIDF conformance suite,
 # prints one combined summary at the end, and (via generate-report.py)
 # writes a fuller report.md alongside the raw per-configuration logs —
 # every non-PASSED module, with the "why this is expected, not a
@@ -80,6 +80,23 @@
 # resource/verify_test.go) and cmd/conformance-as's own smoke test
 # under both formats — see ARCHITECTURE.md's conformance strategy
 # section.
+#
+# Federation federation-deployed-entity runs the OIDF suite's own
+# "Deployed federation entity" plan (openid-federation-deployed-entity-
+# test-plan) against conformance-as-federation/
+# conformance-federation-trust-anchor (../server/docker-compose.yml) —
+# every module in it is a pure server-to-server Entity Statement/Trust
+# Chain check with no browser step, so it's driven by
+# scripts/run-federation-plan.py directly rather than run-test-plan.py
+# (see that script's own doc comment). Deliberately NOT included: the
+# "Entity joined to test federation OP/RP test" plans that exercise
+# automatic registration live — those hit a deterministic, suite-side
+# bug ("Illegal test state change: CREATED -> RUNNING") in a module
+# OIDF's own maintainers mark "alpha version — may be incomplete or
+# incorrect, please email certification@oidf.org", failing before ever
+# reaching cmd/conformance-as and not resolved by
+# retry-flaky-modules.py's known-flake logic (confirmed via repeated
+# attempts) — revisit once OIDF fixes that module.
 #
 # Always runs every test configuration, even if an earlier one comes
 # back unclean — never stops early — so a bad result in one never hides
@@ -353,6 +370,135 @@ run_rp_plan() {
 	fi
 }
 
+FEDERATION_TA_SUBORDINATES_CONFIG="$SERVER_DIR/oidf-config/federation-trust-anchor-subordinates.json"
+
+# wait_federation_ready PORT CONTAINER — wait_as_ready's own logic,
+# scoped to one federation container so a timeout's diagnostic dump
+# shows that container's own logs instead of the six unrelated AS
+# containers wait_as_ready would dump.
+wait_federation_ready() {
+	local port="$1" container="$2"
+	for _ in $(seq 1 120); do
+		if curl -sk --max-time 2 -o /dev/null "https://127.0.0.1:$port/"; then
+			return 0
+		fi
+		sleep 1
+	done
+	echo "error: $container on port $port did not respond within 2 minutes" >&2
+	(cd "$SERVER_DIR" && docker compose ps) >&2 || true
+	(cd "$SERVER_DIR" && docker compose logs --tail=100 "$container") >&2 || true
+	exit 1
+}
+
+# entity_jwks ENTITY_URL — fetches ENTITY_URL/.well-known/openid-federation
+# (a self-signed Entity Configuration JWT) and prints its own "jwks"
+# claim as JSON on stdout. Used both to read the AS's own ephemeral
+# Federation Entity Key (regenerated fresh on every
+# conformance-as-federation container start — cmd/conformance-as's
+# federation self-issuance never persists a key across restarts — so it
+# has to be re-synced into the Trust Anchor's subordinates config here
+# rather than committed) and to read the Trust Anchor's own jwks
+# for run-federation-plan.py's --trust-anchor-jwks bootstrap value. Same
+# curl-to-file / explicit base64-padding-correction approach confirmed
+# working by hand before being scripted here — a raw
+# curl-to-cut-to-base64-decode one-liner truncates the payload under
+# `set -e` in ways that are hard to diagnose blind.
+#
+# Callers below invoke this as `if ! x="$(entity_jwks ...)"` — note that
+# `set -e` is (surprisingly) disabled for a command's *entire* execution,
+# including every command a function it calls goes on to run, whenever
+# that command sits in a context -e already ignores (an if condition,
+# here). So curl failing here would NOT, on its own, stop this function
+# short — the explicit `|| return 1` below is load-bearing, not
+# defensive boilerplate; without it a failed fetch would fall through to
+# handing the caller garbage instead of a clean failure.
+entity_jwks() {
+	local url="$1" jwt_file
+	jwt_file="$(mktemp)"
+	curl -sk --max-time 10 -f "${url}/.well-known/openid-federation" -o "$jwt_file" || {
+		rm -f "$jwt_file"
+		return 1
+	}
+	python3 -c '
+import base64, json, sys
+with open(sys.argv[1]) as f:
+    jwt = f.read().strip()
+payload = jwt.split(".")[1]
+payload += "=" * (-len(payload) % 4)
+claims = json.loads(base64.urlsafe_b64decode(payload))
+json.dump(claims["jwks"], sys.stdout)
+' "$jwt_file"
+	local status=$?
+	rm -f "$jwt_file"
+	return "$status"
+}
+
+# run_federation_plan — the one federation leg, "Deployed federation
+# entity" (see this file's own header comment for why it's the only
+# federation plan run here, and why it's driven by
+# scripts/run-federation-plan.py rather than run-test-plan.py).
+run_federation_plan() {
+	local name="federation-deployed-entity"
+	local log_file="$WORKDIR/$name.log"
+	ALL_SUITES+=("Federation $name")
+
+	log "Federation: bringing up conformance-as-federation, conformance-federation-trust-anchor"
+	(cd "$SERVER_DIR" && docker compose up -d --build conformance-as-federation conformance-federation-trust-anchor) >"$WORKDIR/docker-compose-federation.log" 2>&1
+	wait_federation_ready 18456 conformance-as-federation
+	wait_federation_ready 18457 conformance-federation-trust-anchor
+
+	log "Federation: syncing AS's ephemeral Federation Entity Key into the Trust Anchor's subordinates config"
+	local as_jwks
+	if ! as_jwks="$(entity_jwks https://127.0.0.1:18456)"; then
+		OVERALL_CLEAN=false
+		record_result "Federation $name" "DID NOT COMPLETE — could not fetch AS's own entity configuration"
+		return
+	fi
+	python3 -c '
+import json, sys
+path, jwks_json = sys.argv[1], sys.argv[2]
+with open(path) as f:
+    config = json.load(f)
+config["subordinates"][0]["jwks"] = json.loads(jwks_json)
+with open(path, "w") as f:
+    json.dump(config, f, indent=2)
+    f.write("\n")
+' "$FEDERATION_TA_SUBORDINATES_CONFIG" "$as_jwks"
+
+	(cd "$SERVER_DIR" && docker compose up -d --force-recreate conformance-federation-trust-anchor) >>"$WORKDIR/docker-compose-federation.log" 2>&1
+	wait_federation_ready 18457 conformance-federation-trust-anchor
+
+	local ta_jwks
+	if ! ta_jwks="$(entity_jwks https://127.0.0.1:18457)"; then
+		OVERALL_CLEAN=false
+		record_result "Federation $name" "DID NOT COMPLETE — could not fetch Trust Anchor's own entity configuration"
+		return
+	fi
+
+	log "Federation: starting run-federation-plan.py"
+	local exit_code=0
+	CONFORMANCE_SERVER="$CONFORMANCE_SERVER" python3 "$SERVER_DIR/scripts/run-federation-plan.py" \
+		--entity-identifier "https://conformance-as-federation:8443" \
+		--trust-anchor "https://conformance-federation-trust-anchor:8443" \
+		--trust-anchor-jwks "$ta_jwks" \
+		--expected-warnings "$SERVER_DIR/expected-warnings-federation.json" \
+		--expected-skips "$SERVER_DIR/expected-skips-federation.json" \
+		>"$log_file" 2>&1 || exit_code=$?
+
+	local totals
+	totals="$(grep 'Overall totals' "$log_file" | tail -1)" || true
+	if [[ "$exit_code" -eq 0 && -n "$totals" ]]; then
+		record_result "Federation $name" "OK — ${totals#*Overall totals: }"
+	else
+		OVERALL_CLEAN=false
+		if [[ -n "$totals" ]]; then
+			record_result "Federation $name" "UNEXPECTED RESULTS — ${totals#*Overall totals: } (see $log_file)"
+		else
+			record_result "Federation $name" "DID NOT COMPLETE (see $log_file)"
+		fi
+	fi
+}
+
 check_suite_reachable
 
 log "bringing up conformance-as containers"
@@ -540,6 +686,8 @@ run_rp_plan "mtls" "baseline" -mtls
 # Completes the "FAPI2SP RP MTLS + MTLS" register profile, the last of
 # the four FAPI2SP auth×sender-constrain combos.
 run_rp_plan "client-auth-mtls-and-mtls" "baseline" -mtls -client-auth-mtls
+
+run_federation_plan
 
 python3 "$SCRIPT_DIR/generate-report.py" "$WORKDIR" "$REPO_ROOT" || echo "warning: report generation failed (see above)" >&2
 

@@ -1,15 +1,16 @@
 name: FAPI Conformance
 
-# Runs all twenty FAPI2/FAPI-CIBA test configurations this repo has
-# driver support for — one underlying OIDF conformance suite, exercised
-# under twenty different plan/variant combinations: including the
-# CIBA/mTLS pair (AS ciba-mtls, RP ciba-mtls), AS ciba-ping, the
-# client-auth-mtls pair (AS/RP), the client-auth-mtls-and-mtls pair
-# (AS/RP), the two ciba-*-client-auth-mtls legs, and the four
-# *-client-credentials legs, each of which needs its own extra
-# conformance-as container and/or mTLS driver flag — see
-# conformance/scripts/run-all.sh, against a freshly-brought-up OIDF
-# conformance suite. Deliberately not triggered
+# Runs all twenty-one FAPI2/FAPI-CIBA/OpenID-Federation test
+# configurations this repo has driver support for — one underlying OIDF
+# conformance suite, exercised under twenty-one different plan/variant
+# combinations: including the CIBA/mTLS pair (AS ciba-mtls, RP
+# ciba-mtls), AS ciba-ping, the client-auth-mtls pair (AS/RP), the
+# client-auth-mtls-and-mtls pair (AS/RP), the two ciba-*-client-auth-mtls
+# legs, the four *-client-credentials legs, each of which needs its own
+# extra conformance-as container and/or mTLS driver flag, and the one
+# OpenID Federation leg (Federation federation-deployed-entity, its own
+# pair of federation-aware containers) — see conformance/scripts/run-all.sh,
+# against a freshly-brought-up OIDF conformance suite. Deliberately not triggered
 # on push/pull_request — this is a heavy job (bringing up the suite's
 # own Docker stack, ~6-7 minutes of test execution locally) that would
 # otherwise slow down every PR's feedback loop. Scheduled instead,
@@ -91,12 +92,14 @@ jobs:
         run: ./conformance/server/scripts/generate-server-cert.sh
 
       # run-all.sh itself waits for the suite to become reachable, waits
-      # for the AS containers to come up, runs all twenty test
-      # configurations, retries the one known suite-internal flake
-      # automatically, and writes report.md — nothing CI-specific
+      # for the AS containers to come up, runs all twenty-one test
+      # configurations (including bringing up its own federation
+      # containers and syncing their ephemeral keys — no separate step
+      # needed here for that), retries the one known suite-internal
+      # flake automatically, and writes report.md — nothing CI-specific
       # needed here beyond pointing it at the suite checkout and a
       # predictable results directory.
-      - name: Run all twenty conformance test configurations
+      - name: Run all twenty-one conformance test configurations
         env:
           CONFORMANCE_SUITE_CHECKOUT: /tmp/conformance-suite
           WORKDIR: ${{ runner.temp }}/conformance-results

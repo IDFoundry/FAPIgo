@@ -33,8 +33,35 @@ func TestRegisteredClientConfigFromMetadata(t *testing.T) {
 	if cfg.ClientAssertionAlgorithm != fapi.ES256 {
 		t.Errorf("ClientAssertionAlgorithm = %v, want ES256", cfg.ClientAssertionAlgorithm)
 	}
-	if len(jwks) == 0 {
-		t.Errorf("jwks is empty")
+	if len(jwks.inline) == 0 {
+		t.Errorf("jwks.inline is empty")
+	}
+	if jwks.uri != "" {
+		t.Errorf("jwks.uri = %q, want empty", jwks.uri)
+	}
+}
+
+func TestRegisteredClientConfigFromMetadataAcceptsJWKSURI(t *testing.T) {
+	raw := `{"redirect_uris":["https://rp.example.org/cb"],"token_endpoint_auth_method":"private_key_jwt","token_endpoint_auth_signing_alg":"ES256","jwks_uri":"https://rp.example.org/jwks.json"}`
+	cfg, jwks, err := registeredClientConfigFromMetadata("https://rp.example.org", json.RawMessage(raw), []string{"openid"})
+	if err != nil {
+		t.Fatalf("registeredClientConfigFromMetadata: %v", err)
+	}
+	if cfg.ID != "https://rp.example.org" {
+		t.Errorf("ID = %q", cfg.ID)
+	}
+	if jwks.uri != "https://rp.example.org/jwks.json" {
+		t.Errorf("jwks.uri = %q", jwks.uri)
+	}
+	if len(jwks.inline) != 0 {
+		t.Errorf("jwks.inline = %q, want empty", jwks.inline)
+	}
+}
+
+func TestRegisteredClientConfigFromMetadataRejectsBothJWKSAndJWKSURI(t *testing.T) {
+	raw := `{"redirect_uris":["https://rp.example.org/cb"],"token_endpoint_auth_method":"private_key_jwt","token_endpoint_auth_signing_alg":"ES256","jwks_uri":"https://rp.example.org/jwks.json","jwks":` + testRPJWKS + `}`
+	if _, _, err := registeredClientConfigFromMetadata("https://rp.example.org", json.RawMessage(raw), []string{"openid"}); err == nil {
+		t.Fatalf("registeredClientConfigFromMetadata(both jwks and jwks_uri) = nil error, want error")
 	}
 }
 

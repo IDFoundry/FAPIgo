@@ -55,7 +55,7 @@ func New(cfg Config, deps Dependencies) (*Server, error) {
 		if err != nil {
 			return nil, fmt.Errorf("server: config: automatic_registration: %w", err)
 		}
-		automaticClients, err := federation.NewAutomaticClientRepository(deps.Clients, resolver, federation.AutomaticRegistrationConfig{
+		automaticClients, err := federation.NewAutomaticClientRepository(deps.Clients, resolver, deps.FederationHTTP, federation.AutomaticRegistrationConfig{
 			AllowedScopes: cfg.AutomaticRegistration.AllowedScopes,
 			MaxCacheAge:   cfg.AutomaticRegistration.MaxCacheAge,
 		}, deps.Clock)

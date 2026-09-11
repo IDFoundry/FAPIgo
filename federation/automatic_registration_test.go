@@ -38,6 +38,7 @@ type automaticRegistrationFixture struct {
 	fetcher             *fapihttp.Client
 	now                 time.Time
 	rpConfigCalls       *int32
+	rpMux               *http.ServeMux
 }
 
 // setupAutomaticRegistrationFixture builds the fixture. metadataFn, if
@@ -115,6 +116,7 @@ func setupAutomaticRegistrationFixture(t *testing.T, metadataFn func(rpID string
 		taID: taID, rpID: rpID, taKey: taKey, taJWKS: taJWKS,
 		rpFedKey: rpFedKey, rpOIDCKey: rpOIDCKey,
 		fetcher: fetcher, now: now, rpConfigCalls: &calls,
+		rpMux: rpMux,
 	}
 }
 
@@ -144,6 +146,28 @@ func rpMetadataBuilder(t *testing.T) func(rpID string, rpOIDCKey *ecdsa.PrivateK
 			"token_endpoint_auth_method":      "private_key_jwt",
 			"token_endpoint_auth_signing_alg": "ES256",
 			"jwks":                            json.RawMessage(jwksFor(t, "rp-oidc", rpOIDCKey)),
+		})
+		if err != nil {
+			t.Fatalf("marshal openid_relying_party metadata: %v", err)
+		}
+		return raw
+	}
+}
+
+// rpMetadataBuilderWithJWKSURI mirrors rpMetadataBuilder, but declares a
+// "jwks_uri" instead of publishing rpOIDCKey's jwks inline — the caller
+// is responsible for registering a handler on the fixture's own rpMux
+// at "/jwks.json" (via f.rpMux) once the fixture returns, since the
+// server isn't listening at a fixed URL until httptest.NewTLSServer
+// runs.
+func rpMetadataBuilderWithJWKSURI(t *testing.T) func(rpID string, rpOIDCKey *ecdsa.PrivateKey) json.RawMessage {
+	return func(rpID string, rpOIDCKey *ecdsa.PrivateKey) json.RawMessage {
+		t.Helper()
+		raw, err := json.Marshal(map[string]any{
+			"redirect_uris":                   []string{rpID + "/cb"},
+			"token_endpoint_auth_method":      "private_key_jwt",
+			"token_endpoint_auth_signing_alg": "ES256",
+			"jwks_uri":                        rpID + "/jwks.json",
 		})
 		if err != nil {
 			t.Fatalf("marshal openid_relying_party metadata: %v", err)
@@ -206,31 +230,34 @@ func TestNewAutomaticClientRepositoryRejectsInvalidConfig(t *testing.T) {
 	f := setupAutomaticRegistrationFixture(t, nil)
 	resolver := f.newResolver(t)
 
-	cases := map[string]func() (storage.ClientRepository, *federation.Resolver, federation.AutomaticRegistrationConfig, federation.Clock){
-		"nil underlying": func() (storage.ClientRepository, *federation.Resolver, federation.AutomaticRegistrationConfig, federation.Clock) {
-			return nil, resolver, validAutomaticRegistrationConfig(), fixedClock{now: f.now}
+	cases := map[string]func() (storage.ClientRepository, *federation.Resolver, *fapihttp.Client, federation.AutomaticRegistrationConfig, federation.Clock){
+		"nil underlying": func() (storage.ClientRepository, *federation.Resolver, *fapihttp.Client, federation.AutomaticRegistrationConfig, federation.Clock) {
+			return nil, resolver, f.fetcher, validAutomaticRegistrationConfig(), fixedClock{now: f.now}
 		},
-		"nil resolver": func() (storage.ClientRepository, *federation.Resolver, federation.AutomaticRegistrationConfig, federation.Clock) {
-			return alwaysFailsRepository{}, nil, validAutomaticRegistrationConfig(), fixedClock{now: f.now}
+		"nil resolver": func() (storage.ClientRepository, *federation.Resolver, *fapihttp.Client, federation.AutomaticRegistrationConfig, federation.Clock) {
+			return alwaysFailsRepository{}, nil, f.fetcher, validAutomaticRegistrationConfig(), fixedClock{now: f.now}
 		},
-		"empty allowed scopes": func() (storage.ClientRepository, *federation.Resolver, federation.AutomaticRegistrationConfig, federation.Clock) {
+		"nil fetcher": func() (storage.ClientRepository, *federation.Resolver, *fapihttp.Client, federation.AutomaticRegistrationConfig, federation.Clock) {
+			return alwaysFailsRepository{}, resolver, nil, validAutomaticRegistrationConfig(), fixedClock{now: f.now}
+		},
+		"empty allowed scopes": func() (storage.ClientRepository, *federation.Resolver, *fapihttp.Client, federation.AutomaticRegistrationConfig, federation.Clock) {
 			cfg := validAutomaticRegistrationConfig()
 			cfg.AllowedScopes = nil
-			return alwaysFailsRepository{}, resolver, cfg, fixedClock{now: f.now}
+			return alwaysFailsRepository{}, resolver, f.fetcher, cfg, fixedClock{now: f.now}
 		},
-		"zero max cache age": func() (storage.ClientRepository, *federation.Resolver, federation.AutomaticRegistrationConfig, federation.Clock) {
+		"zero max cache age": func() (storage.ClientRepository, *federation.Resolver, *fapihttp.Client, federation.AutomaticRegistrationConfig, federation.Clock) {
 			cfg := validAutomaticRegistrationConfig()
 			cfg.MaxCacheAge = 0
-			return alwaysFailsRepository{}, resolver, cfg, fixedClock{now: f.now}
+			return alwaysFailsRepository{}, resolver, f.fetcher, cfg, fixedClock{now: f.now}
 		},
-		"nil clock": func() (storage.ClientRepository, *federation.Resolver, federation.AutomaticRegistrationConfig, federation.Clock) {
-			return alwaysFailsRepository{}, resolver, validAutomaticRegistrationConfig(), nil
+		"nil clock": func() (storage.ClientRepository, *federation.Resolver, *fapihttp.Client, federation.AutomaticRegistrationConfig, federation.Clock) {
+			return alwaysFailsRepository{}, resolver, f.fetcher, validAutomaticRegistrationConfig(), nil
 		},
 	}
 	for name, build := range cases {
 		t.Run(name, func(t *testing.T) {
-			underlying, resolver, cfg, clock := build()
-			if _, err := federation.NewAutomaticClientRepository(underlying, resolver, cfg, clock); err == nil {
+			underlying, resolver, fetcher, cfg, clock := build()
+			if _, err := federation.NewAutomaticClientRepository(underlying, resolver, fetcher, cfg, clock); err == nil {
 				t.Fatalf("NewAutomaticClientRepository(%s) = nil error, want error", name)
 			}
 		})
@@ -251,7 +278,7 @@ func TestAutomaticClientRepositoryResolveClientPrefersUnderlying(t *testing.T) {
 	}
 
 	repo, err := federation.NewAutomaticClientRepository(
-		staticRepository{id: fapi.ClientID(f.rpID), client: staticClient}, resolver,
+		staticRepository{id: fapi.ClientID(f.rpID), client: staticClient}, resolver, f.fetcher,
 		validAutomaticRegistrationConfig(), fixedClock{now: f.now})
 	if err != nil {
 		t.Fatalf("NewAutomaticClientRepository: %v", err)
@@ -273,7 +300,7 @@ func TestAutomaticClientRepositoryResolveClientFallsBackToFederation(t *testing.
 	f := setupAutomaticRegistrationFixture(t, rpMetadataBuilder(t))
 	resolver := f.newResolver(t)
 
-	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, f.fetcher, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
 	if err != nil {
 		t.Fatalf("NewAutomaticClientRepository: %v", err)
 	}
@@ -299,7 +326,7 @@ func TestAutomaticClientRepositoryResolveClientFallsBackToFederation(t *testing.
 func TestAutomaticClientRepositoryResolveClientRejectsNonEntityID(t *testing.T) {
 	f := setupAutomaticRegistrationFixture(t, nil)
 	resolver := f.newResolver(t)
-	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, f.fetcher, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
 	if err != nil {
 		t.Fatalf("NewAutomaticClientRepository: %v", err)
 	}
@@ -311,7 +338,7 @@ func TestAutomaticClientRepositoryResolveClientRejectsNonEntityID(t *testing.T) 
 func TestAutomaticClientRepositoryResolveClientRejectsMissingRelyingPartyMetadata(t *testing.T) {
 	f := setupAutomaticRegistrationFixture(t, nil) // RP publishes no openid_relying_party metadata at all
 	resolver := f.newResolver(t)
-	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, f.fetcher, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
 	if err != nil {
 		t.Fatalf("NewAutomaticClientRepository: %v", err)
 	}
@@ -323,7 +350,7 @@ func TestAutomaticClientRepositoryResolveClientRejectsMissingRelyingPartyMetadat
 func TestAutomaticClientRepositoryCachesAcrossCalls(t *testing.T) {
 	f := setupAutomaticRegistrationFixture(t, rpMetadataBuilder(t))
 	resolver := f.newResolver(t)
-	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, f.fetcher, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
 	if err != nil {
 		t.Fatalf("NewAutomaticClientRepository: %v", err)
 	}
@@ -342,7 +369,7 @@ func TestAutomaticClientRepositoryCachesAcrossCalls(t *testing.T) {
 func TestAutomaticClientKeySourceResolvesFromRelyingPartyMetadataJWKS(t *testing.T) {
 	f := setupAutomaticRegistrationFixture(t, rpMetadataBuilder(t))
 	resolver := f.newResolver(t)
-	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, f.fetcher, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
 	if err != nil {
 		t.Fatalf("NewAutomaticClientRepository: %v", err)
 	}
@@ -367,10 +394,57 @@ func TestAutomaticClientKeySourceResolvesFromRelyingPartyMetadataJWKS(t *testing
 	}
 }
 
+func TestAutomaticClientKeySourceResolvesFromRelyingPartyJWKSURI(t *testing.T) {
+	f := setupAutomaticRegistrationFixture(t, rpMetadataBuilderWithJWKSURI(t))
+	f.rpMux.HandleFunc("/jwks.json", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(jwksFor(t, "rp-oidc", f.rpOIDCKey))
+	})
+	resolver := f.newResolver(t)
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, f.fetcher, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
+	if err != nil {
+		t.Fatalf("NewAutomaticClientRepository: %v", err)
+	}
+	src, err := federation.NewAutomaticClientKeySource(alwaysFailsKeySource{}, repo)
+	if err != nil {
+		t.Fatalf("NewAutomaticClientKeySource: %v", err)
+	}
+
+	set, err := src.ResolveVerificationKeys(context.Background(), keys.ClientKeyRequest{
+		ClientID: fapi.ClientID(f.rpID), Purpose: keys.ClientAssertionVerification,
+		Algorithm: fapi.ES256, KeyID: "rp-oidc",
+	})
+	if err != nil {
+		t.Fatalf("ResolveVerificationKeys: %v", err)
+	}
+	if len(set.Keys) != 1 {
+		t.Fatalf("ResolveVerificationKeys returned %d keys, want 1", len(set.Keys))
+	}
+	pub, ok := set.Keys[0].PublicKey.(*ecdsa.PublicKey)
+	if !ok || !pub.Equal(&f.rpOIDCKey.PublicKey) {
+		t.Errorf("resolved key does not match the RP's own jwks_uri-published key (rpOIDCKey)")
+	}
+}
+
+func TestAutomaticClientRepositoryResolveClientFailsOnJWKSURIFetchError(t *testing.T) {
+	f := setupAutomaticRegistrationFixture(t, rpMetadataBuilderWithJWKSURI(t))
+	f.rpMux.HandleFunc("/jwks.json", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	})
+	resolver := f.newResolver(t)
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, f.fetcher, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
+	if err != nil {
+		t.Fatalf("NewAutomaticClientRepository: %v", err)
+	}
+	if _, err := repo.ResolveClient(context.Background(), fapi.ClientID(f.rpID)); err == nil {
+		t.Fatalf("ResolveClient(jwks_uri fetch fails) = nil error, want error")
+	}
+}
+
 func TestAutomaticClientKeySourcePrefersUnderlying(t *testing.T) {
 	f := setupAutomaticRegistrationFixture(t, rpMetadataBuilder(t))
 	resolver := f.newResolver(t)
-	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, f.fetcher, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
 	if err != nil {
 		t.Fatalf("NewAutomaticClientRepository: %v", err)
 	}
@@ -404,7 +478,7 @@ func TestAutomaticClientKeySourcePrefersUnderlying(t *testing.T) {
 func TestAutomaticClientRepositoryResolveClientRejectsUnreachableFederationEntity(t *testing.T) {
 	f := setupAutomaticRegistrationFixture(t, nil)
 	resolver := f.newResolver(t)
-	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, f.fetcher, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
 	if err != nil {
 		t.Fatalf("NewAutomaticClientRepository: %v", err)
 	}
@@ -432,7 +506,7 @@ func TestAutomaticClientRepositoryResolveClientRejectsInvalidRelyingPartyMetadat
 		return raw
 	})
 	resolver := f.newResolver(t)
-	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, f.fetcher, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
 	if err != nil {
 		t.Fatalf("NewAutomaticClientRepository: %v", err)
 	}
@@ -446,7 +520,7 @@ func TestAutomaticClientRepositoryResolveClientRejectsInvalidAllowedScope(t *tes
 	resolver := f.newResolver(t)
 	cfg := validAutomaticRegistrationConfig()
 	cfg.AllowedScopes = []string{""} // passes NewAutomaticClientRepository's own len()>0 check, but storage.NewRegisteredClient rejects an empty scope entry
-	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, cfg, fixedClock{now: f.now})
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, f.fetcher, cfg, fixedClock{now: f.now})
 	if err != nil {
 		t.Fatalf("NewAutomaticClientRepository: %v", err)
 	}
@@ -458,7 +532,7 @@ func TestAutomaticClientRepositoryResolveClientRejectsInvalidAllowedScope(t *tes
 func TestAutomaticClientKeySourceRejectsUnresolvableClient(t *testing.T) {
 	f := setupAutomaticRegistrationFixture(t, nil)
 	resolver := f.newResolver(t)
-	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, f.fetcher, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
 	if err != nil {
 		t.Fatalf("NewAutomaticClientRepository: %v", err)
 	}
@@ -485,7 +559,7 @@ func TestAutomaticClientKeySourceRejectsMalformedResolvedJWKS(t *testing.T) {
 		return raw
 	})
 	resolver := f.newResolver(t)
-	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, f.fetcher, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
 	if err != nil {
 		t.Fatalf("NewAutomaticClientRepository: %v", err)
 	}
@@ -501,7 +575,7 @@ func TestAutomaticClientKeySourceRejectsMalformedResolvedJWKS(t *testing.T) {
 func TestAutomaticClientKeySourceSkipsCandidatesWithWrongAlgorithmOrKeyID(t *testing.T) {
 	f := setupAutomaticRegistrationFixture(t, rpMetadataBuilder(t))
 	resolver := f.newResolver(t)
-	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, f.fetcher, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
 	if err != nil {
 		t.Fatalf("NewAutomaticClientRepository: %v", err)
 	}
@@ -537,7 +611,7 @@ func TestAutomaticClientKeySourceSkipsCandidatesWithWrongAlgorithmOrKeyID(t *tes
 func TestNewAutomaticClientKeySourceRejectsInvalidArguments(t *testing.T) {
 	f := setupAutomaticRegistrationFixture(t, nil)
 	resolver := f.newResolver(t)
-	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, f.fetcher, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
 	if err != nil {
 		t.Fatalf("NewAutomaticClientRepository: %v", err)
 	}

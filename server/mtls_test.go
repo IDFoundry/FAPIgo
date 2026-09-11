@@ -525,8 +525,8 @@ func TestServerMetadataAdvertisesMTLSEndpointAliasesWhenConfigured(t *testing.T)
 	if md.MTLSEndpointAliases.PushedAuthorizationRequestEndpoint.String() != mtlsPAR.String() {
 		t.Errorf("MTLSEndpointAliases.PushedAuthorizationRequestEndpoint = %q, want %q", md.MTLSEndpointAliases.PushedAuthorizationRequestEndpoint.String(), mtlsPAR.String())
 	}
-	if !md.MTLSEndpointAliases.BackchannelAuthenticationEndpoint.IsZero() {
-		t.Errorf("MTLSEndpointAliases.BackchannelAuthenticationEndpoint = %q, want zero", md.MTLSEndpointAliases.BackchannelAuthenticationEndpoint.String())
+	if md.MTLSEndpointAliases.BackchannelAuthenticationEndpoint != nil {
+		t.Errorf("MTLSEndpointAliases.BackchannelAuthenticationEndpoint = %q, want nil", md.MTLSEndpointAliases.BackchannelAuthenticationEndpoint.String())
 	}
 	if !md.TLSClientCertificateBoundAccessTokens {
 		t.Errorf("TLSClientCertificateBoundAccessTokens = false, want true (RFC 8705 §3.3)")

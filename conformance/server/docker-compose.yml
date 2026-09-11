@@ -209,6 +209,54 @@ services:
       - -mtls
       - -client-credentials-grant
 
+  # OpenID Federation 1.0 self-issuance/automatic-registration wiring —
+  # see cmd/conformance-as/federation.go and oidf-config/federation.config.json.
+  # authority_hints in that config points at conformance-federation-trust-anchor
+  # below — both must be reachable from each other by hostname (this
+  # compose network's own DNS), not just from the suite.
+  conformance-as-federation:
+    build:
+      context: ../..
+      dockerfile: conformance/server/Dockerfile
+    hostname: conformance-as-federation
+    networks: [suite]
+    ports:
+      - "18456:8443" # see conformance-as-baseline's port comment above
+    volumes:
+      - ./oidf-config/federation.config.json:/config.json:ro
+      - ./certs:/certs:ro
+    command:
+      - -config=/config.json
+      - -cert=/certs/server.crt
+      - -key=/certs/server.key
+      - -access-token-format=${ACCESS_TOKEN_FORMAT:-jwt}
+
+  # A minimal, standing OpenID Federation 1.0 Trust Anchor — see
+  # cmd/conformance-federation-trust-anchor's own doc comment for why
+  # this exists instead of depending on a real third-party one.
+  # oidf-config/federation-trust-anchor-subordinates.json must be
+  # regenerated (see conformance/server/scripts/README.md) whenever
+  # conformance-as-federation's own federation signing key changes
+  # (every container restart — that key is never pinned, see that
+  # command's own doc comment for why nothing needs it to be).
+  conformance-federation-trust-anchor:
+    build:
+      context: ../..
+      dockerfile: cmd/conformance-federation-trust-anchor/Dockerfile
+    hostname: conformance-federation-trust-anchor
+    networks: [suite]
+    ports:
+      - "18457:8443" # see conformance-as-baseline's port comment above
+    volumes:
+      - ./oidf-config/federation-trust-anchor-subordinates.json:/subordinates.json:ro
+      - ./certs:/certs:ro
+    command:
+      - -entity-id=https://conformance-federation-trust-anchor:8443
+      - -listen=0.0.0.0:8443
+      - -cert=/certs/server.crt
+      - -key=/certs/server.key
+      - -subordinates=/subordinates.json
+
 networks:
   suite:
     external: true

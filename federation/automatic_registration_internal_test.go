@@ -261,6 +261,39 @@ func TestRegisteredClientConfigFromMetadataRejectsInvalidCIBASigningAlg(t *testi
 	}
 }
 
+func TestRegisteredClientConfigFromMetadataRejectsInvalidCIBADeliveryMode(t *testing.T) {
+	raw := `{
+		"redirect_uris": ["https://rp.example.org/cb"],
+		"token_endpoint_auth_method": "private_key_jwt",
+		"token_endpoint_auth_signing_alg": "ES256",
+		"backchannel_authentication_request_signing_alg": "ES256",
+		"backchannel_token_delivery_mode": "push",
+		"jwks": ` + testRPJWKS + `
+	}`
+	if _, _, err := registeredClientConfigFromMetadata("https://rp.example.org", json.RawMessage(raw), AutomaticRegistrationConfig{
+		AllowedScopes: []string{"openid"}, AllowsCIBA: true,
+	}); err == nil {
+		t.Fatalf("registeredClientConfigFromMetadata(backchannel_token_delivery_mode=push) = nil error, want error")
+	}
+}
+
+func TestRegisteredClientConfigFromMetadataRejectsInvalidCIBANotificationEndpoint(t *testing.T) {
+	raw := `{
+		"redirect_uris": ["https://rp.example.org/cb"],
+		"token_endpoint_auth_method": "private_key_jwt",
+		"token_endpoint_auth_signing_alg": "ES256",
+		"backchannel_authentication_request_signing_alg": "ES256",
+		"backchannel_token_delivery_mode": "ping",
+		"backchannel_client_notification_endpoint": "not a url",
+		"jwks": ` + testRPJWKS + `
+	}`
+	if _, _, err := registeredClientConfigFromMetadata("https://rp.example.org", json.RawMessage(raw), AutomaticRegistrationConfig{
+		AllowedScopes: []string{"openid"}, AllowsCIBA: true,
+	}); err == nil {
+		t.Fatalf("registeredClientConfigFromMetadata(malformed backchannel_client_notification_endpoint) = nil error, want error")
+	}
+}
+
 func TestRegisteredClientConfigFromMetadataMapsIDTokenEncryption(t *testing.T) {
 	raw := `{
 		"redirect_uris": ["https://rp.example.org/cb"],

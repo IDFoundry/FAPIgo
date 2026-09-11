@@ -68,6 +68,10 @@ FEDERATION_LINE_RE = re.compile(r"^(\S+) \((\S+)\): (.+)$")
 
 # Markdown separator row for a 2-column table (Module/Result).
 TABLE_SEPARATOR_2COL = "|---|---|"
+MODULE_RESULT_HEADER = "| Module | Result |"
+DEFAULT_RESULT = "DID NOT RUN"
+ALL_PASSED_MSG = "Every module PASSED.\n"
+DETAILS_CLOSE = "</details>\n"
 
 
 def strip_ansi(s):
@@ -204,7 +208,7 @@ def parse_rp_log(log_path):
 def render_as_suite(md, name, workdir, repo_root, results):
     log_path = workdir / f"as-{name}.log"
     retry_log_path = workdir / f"as-{name}-retry.log"
-    result_line = results.get(f"AS {name}", "DID NOT RUN")
+    result_line = results.get(f"AS {name}", DEFAULT_RESULT)
 
     md.append(f"## AS {name}\n")
     md.append(f"**{result_line}**\n")
@@ -240,7 +244,7 @@ def render_as_suite(md, name, workdir, repo_root, results):
             md.append(f"| `{m['test_name']}` | {m['status']} | {m['result']} | {why_for(m)} |")
         md.append("")
     else:
-        md.append("Every module PASSED.\n")
+        md.append(ALL_PASSED_MSG)
 
     md.append(f"<details><summary>All {len(modules)} modules run</summary>\n")
     md.append("| Module | Status | Result | Why |")
@@ -248,7 +252,7 @@ def render_as_suite(md, name, workdir, repo_root, results):
     for m in modules:
         md.append(f"| `{m['test_name']}` | {m['status']} | {m['result']} | {why_for(m)} |")
     md.append("")
-    md.append("</details>\n")
+    md.append(DETAILS_CLOSE)
 
     md.append(f"Full log: [{log_path.name}]({log_path.name})\n")
 
@@ -275,68 +279,47 @@ def parse_federation_log(log_path):
     return modules
 
 
-def render_federation_suite(md, name, workdir, results):
-    log_path = workdir / f"{name}.log"
-    result_line = results.get(f"Federation {name}", "DID NOT RUN")
-    md.append(f"## Federation {name}\n")
+def render_two_column_suite(md, label, log_path, result_key, results, parse_fn):
+    """Shared renderer for a Module/Result section — RP and Federation
+    suites both need exactly this shape (unlike AS suites, which also
+    carry a Status column and a "why is this expected" lookup against
+    expected-{warnings,skips}-*.json)."""
+    result_line = results.get(result_key, DEFAULT_RESULT)
+    md.append(f"## {label}\n")
     md.append(f"**{result_line}**\n")
 
-    modules = parse_federation_log(log_path)
+    modules = parse_fn(log_path)
     if not modules:
         md.append(f"_No module detail available — see [{log_path.name}]({log_path.name})._\n")
         return
 
     not_passed = [m for m in modules if m["result"] != "PASSED"]
     if not_passed:
-        md.append("| Module | Result |")
+        md.append(MODULE_RESULT_HEADER)
         md.append(TABLE_SEPARATOR_2COL)
         for m in not_passed:
             md.append(f"| `{m['test_name']}` | {m['detail']} |")
         md.append("")
     else:
-        md.append("Every module PASSED.\n")
+        md.append(ALL_PASSED_MSG)
 
     md.append(f"<details><summary>All {len(modules)} modules run</summary>\n")
-    md.append("| Module | Result |")
+    md.append(MODULE_RESULT_HEADER)
     md.append(TABLE_SEPARATOR_2COL)
     for m in modules:
         md.append(f"| `{m['test_name']}` | {m['detail']} |")
     md.append("")
-    md.append("</details>\n")
+    md.append(DETAILS_CLOSE)
 
     md.append(f"Full log: [{log_path.name}]({log_path.name})\n")
+
+
+def render_federation_suite(md, name, workdir, results):
+    render_two_column_suite(md, f"Federation {name}", workdir / f"{name}.log", f"Federation {name}", results, parse_federation_log)
 
 
 def render_rp_suite(md, name, workdir, results):
-    log_path = workdir / f"rp-{name}.log"
-    result_line = results.get(f"RP {name}", "DID NOT RUN")
-    md.append(f"## RP {name}\n")
-    md.append(f"**{result_line}**\n")
-
-    modules = parse_rp_log(log_path)
-    if not modules:
-        md.append(f"_No module detail available — see [{log_path.name}]({log_path.name})._\n")
-        return
-
-    not_passed = [m for m in modules if m["result"] != "PASSED"]
-    if not_passed:
-        md.append("| Module | Result |")
-        md.append(TABLE_SEPARATOR_2COL)
-        for m in not_passed:
-            md.append(f"| `{m['test_name']}` | {m['detail']} |")
-        md.append("")
-    else:
-        md.append("Every module PASSED.\n")
-
-    md.append(f"<details><summary>All {len(modules)} modules run</summary>\n")
-    md.append("| Module | Result |")
-    md.append(TABLE_SEPARATOR_2COL)
-    for m in modules:
-        md.append(f"| `{m['test_name']}` | {m['detail']} |")
-    md.append("")
-    md.append("</details>\n")
-
-    md.append(f"Full log: [{log_path.name}]({log_path.name})\n")
+    render_two_column_suite(md, f"RP {name}", workdir / f"rp-{name}.log", f"RP {name}", results, parse_rp_log)
 
 
 def main():
@@ -384,13 +367,13 @@ def main():
     # printed "combined summary" and this table alike.
     for name in AS_SUITES:
         label = f"AS {name}"
-        md.append(f"| {label} | {results.get(label, 'DID NOT RUN')} |")
+        md.append(f"| {label} | {results.get(label, DEFAULT_RESULT)} |")
     for name in RP_SUITES:
         label = f"RP {name}"
-        md.append(f"| {label} | {results.get(label, 'DID NOT RUN')} |")
+        md.append(f"| {label} | {results.get(label, DEFAULT_RESULT)} |")
     for name in FEDERATION_SUITES:
         label = f"Federation {name}"
-        md.append(f"| {label} | {results.get(label, 'DID NOT RUN')} |")
+        md.append(f"| {label} | {results.get(label, DEFAULT_RESULT)} |")
     md.append("")
 
     for name in AS_SUITES:

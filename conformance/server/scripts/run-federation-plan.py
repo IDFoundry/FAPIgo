@@ -41,6 +41,7 @@ import json
 import os
 import sys
 import time
+from pathlib import Path
 from urllib.parse import quote, urlsplit
 
 from _sslutil import local_only_ssl_context
@@ -109,10 +110,17 @@ def load_expected(path):
     configuration-filename/variant matching: this plan has exactly one
     fixed configuration, so those fields would never vary) — see this
     script's own doc comment for why run-test-plan.py's machinery isn't
-    reused here at all."""
-    if not os.path.exists(path):
+    reused here at all. Resolved before opening — mirrors
+    generate-report.py's own handling of its CLI-supplied path
+    arguments, since `path` here likewise comes straight from argparse
+    (--expected-warnings/--expected-skips, both fixed paths under
+    conformance/server/ in every real invocation, but this is
+    general-purpose CLI-argument-handling hygiene, not a defense against
+    a real external actor)."""
+    resolved = Path(path).resolve()
+    if not resolved.exists():
         return []
-    with open(path) as f:
+    with open(resolved) as f:
         return json.load(f)
 
 
@@ -157,7 +165,7 @@ def wait_for_finished(client, module_id):
     raise RuntimeError(f"module {module_id} did not reach FINISHED within {MODULE_POLL_TIMEOUT_SECONDS}s")
 
 
-def evaluate_module(client, test_module, module_id, expected_warnings, expected_skips):
+def evaluate_module(client, test_module, module_id, expected_warnings):
     """Returns (clean: bool, summary: str)."""
     log = client.get_json(f"/api/log/{module_id}")
     unexpected = []
@@ -191,8 +199,11 @@ def main():
 
     trust_anchor_jwks = json.loads(args.trust_anchor_jwks)
     expected_warnings = load_expected(args.expected_warnings)
-    expected_skips = load_expected(args.expected_skips)  # currently unused: no federation module is ever expected to SKIP — kept for schema symmetry with the other legs' expected-*.json pairs.
-    _ = expected_skips
+    # args.expected_skips is accepted but never read: no module in this
+    # plan is ever expected to SKIP, so there's nothing to match against
+    # it — the flag stays required purely so run-all.sh's own
+    # run_federation_plan can pass --expected-warnings/--expected-skips
+    # uniformly, the same pair every other leg's config takes.
 
     client = KeepAliveClient()
 
@@ -208,7 +219,7 @@ def main():
         module_id = run_module(client, plan_id, test_module)
         try:
             wait_for_finished(client, module_id)
-            clean, summary = evaluate_module(client, test_module, module_id, expected_warnings, expected_skips)
+            clean, summary = evaluate_module(client, test_module, module_id, expected_warnings)
         except Exception as e:
             clean, summary = False, f"ERROR: {e}"
         if clean:

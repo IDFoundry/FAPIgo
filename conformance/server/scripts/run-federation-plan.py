@@ -84,12 +84,23 @@ class KeepAliveClient:
                 if attempt == 1:
                     raise
 
-    def post_json(self, path, payload):
-        body = json.dumps(payload).encode("utf-8")
+    def post_json(self, path, payload=None):
+        """POSTs `path`. `payload=None` sends no body at all — required
+        for /api/runner?test=...&plan=...: the suite's own client
+        (Connect.create_test_from_plan_with_variant in the suite's own
+        scripts/conformance.py) sends that call with query params only,
+        no `data=`, and a `{}` JSON body there gets rejected outright
+        (confirmed live: HTTP 400 with an empty response body — found
+        only by actually running this script against a live suite, not
+        by inspecting the suite's REST API docs, which don't document
+        this). /api/plan does need its config as a real JSON body, so
+        that call still passes an explicit payload."""
+        body = None if payload is None else json.dumps(payload).encode("utf-8")
+        headers = {} if payload is None else {"Content-Type": "application/json"}
         for attempt in range(2):
             try:
                 self._ensure()
-                self.conn.request("POST", path, body=body, headers={"Content-Type": "application/json"})
+                self.conn.request("POST", path, body=body, headers=headers)
                 resp = self.conn.getresponse()
                 resp_body = resp.read()
                 if resp.status not in (200, 201):
@@ -151,7 +162,7 @@ def create_plan(client, entity_identifier, trust_anchor, trust_anchor_jwks):
 
 
 def run_module(client, plan_id, test_module):
-    result = client.post_json(f"/api/runner?test={quote(test_module)}&plan={plan_id}", {})
+    result = client.post_json(f"/api/runner?test={quote(test_module)}&plan={plan_id}")
     return result["id"]
 
 

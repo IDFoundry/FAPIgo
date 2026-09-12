@@ -13,7 +13,7 @@ func tokenHandler(srv *server.Server) http.HandlerFunc {
 			writeRawOAuthError(w, http.StatusBadRequest, server.ErrorInvalidRequest, err.Error())
 			return
 		}
-		grantType := formValue(form, "grant_type")
+		grantType := form.Get("grant_type")
 		dpopProofs := r.Header.Values("DPoP")
 		peerCert := server.PeerCertificateFromHTTP(r)
 

@@ -39,6 +39,15 @@ func (s AlgorithmSet) Contains(alg fapi.SignatureAlgorithm) bool {
 	return false
 }
 
+// Strings returns s's own elements' wire values, in order — the shape
+// an "*_alg_values_supported" discovery-metadata field needs (RFC 8414
+// §2, OIDC Discovery 1.0 §3). Go has no way to enumerate an iota-based
+// constant's own closed set at runtime, so an embedder extending
+// Metadata with its own additional algorithm-list field (see Metadata's
+// own doc comment) needs exactly this conversion; Metadata's own
+// generation uses it internally for every field of this shape already.
+func (s AlgorithmSet) Strings() []string { return algorithmSetStrings(s) }
+
 // KeyManagementAlgorithmSet is a closed, ordered allow-list of JWE
 // key-management algorithms.
 type KeyManagementAlgorithmSet []fapi.KeyManagementAlgorithm
@@ -53,6 +62,10 @@ func (s KeyManagementAlgorithmSet) Contains(alg fapi.KeyManagementAlgorithm) boo
 	return false
 }
 
+// Strings returns s's own elements' wire values, in order — see
+// AlgorithmSet.Strings' own doc comment.
+func (s KeyManagementAlgorithmSet) Strings() []string { return algorithmSetStrings(s) }
+
 // ContentEncryptionAlgorithmSet is a closed, ordered allow-list of JWE
 // content-encryption algorithms.
 type ContentEncryptionAlgorithmSet []fapi.ContentEncryptionAlgorithm
@@ -66,6 +79,10 @@ func (s ContentEncryptionAlgorithmSet) Contains(alg fapi.ContentEncryptionAlgori
 	}
 	return false
 }
+
+// Strings returns s's own elements' wire values, in order — see
+// AlgorithmSet.Strings' own doc comment.
+func (s ContentEncryptionAlgorithmSet) Strings() []string { return algorithmSetStrings(s) }
 
 // AlgorithmPolicy is the server-wide allow-list of algorithms clients
 // may use, independent of and in addition to each RegisteredClient's own

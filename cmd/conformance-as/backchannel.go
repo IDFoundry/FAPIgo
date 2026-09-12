@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"time"
 
 	"github.com/idfoundry/fapigo/server"
 )
@@ -73,13 +72,7 @@ func (h *backchannelHandler) handleAuthenticate(w http.ResponseWriter, r *http.R
 			handle: action.Handle, scope: action.Interaction.Scope, authorizationDetails: approved,
 		}, action.ExpiresIn)
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"auth_req_id": action.AuthReqID.String(),
-			"expires_in":  int64(action.ExpiresIn / time.Second),
-			"interval":    int64(action.Interval / time.Second),
-		})
+		action.WriteJSON(w)
 	case server.BackchannelAuthenticationLocalError:
 		writeOAuthJSONError(w, action.Error)
 	default:

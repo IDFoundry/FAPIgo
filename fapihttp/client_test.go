@@ -440,3 +440,185 @@ func TestFetchRejectsMissingTLSState(t *testing.T) {
 		t.Fatalf("Fetch(no TLS state) = nil error, want error")
 	}
 }
+
+func TestPostSendsBodyAndContentType(t *testing.T) {
+	var gotMethod, gotContentType, gotBody string
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotContentType = r.Header.Get("Content-Type")
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.Header().Set("Content-Type", "application/trust-mark-status-response+jwt")
+		w.Write([]byte("a.b.c"))
+	}))
+	defer ts.Close()
+
+	c, err := fapihttp.New(ts.Client(), validLoopbackConfig())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	res, err := c.Post(context.Background(), fapihttp.PostRequest{
+		URL:                 mustParseURL(t, ts.URL),
+		Body:                []byte("trust_mark=abc"),
+		ContentType:         "application/x-www-form-urlencoded",
+		ExpectedContentType: "application/trust-mark-status-response+jwt",
+	})
+	if err != nil {
+		t.Fatalf("Post: %v", err)
+	}
+	if string(res.Body) != "a.b.c" {
+		t.Errorf("Body = %q, want %q", res.Body, "a.b.c")
+	}
+	if gotMethod != http.MethodPost {
+		t.Errorf("server saw method %q, want POST", gotMethod)
+	}
+	if gotContentType != "application/x-www-form-urlencoded" {
+		t.Errorf("server saw Content-Type %q, want application/x-www-form-urlencoded", gotContentType)
+	}
+	if gotBody != "trust_mark=abc" {
+		t.Errorf("server saw body %q, want %q", gotBody, "trust_mark=abc")
+	}
+}
+
+func TestPostRejectsMissingFields(t *testing.T) {
+	c, err := fapihttp.New(http.DefaultClient, validConfig())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	cases := map[string]fapihttp.PostRequest{
+		"no url":                   {ContentType: "application/x-www-form-urlencoded", ExpectedContentType: "application/json"},
+		"no content type":          {URL: mustParseURL(t, "https://example.org"), ExpectedContentType: "application/json"},
+		"no expected content type": {URL: mustParseURL(t, "https://example.org"), ContentType: "application/x-www-form-urlencoded"},
+	}
+	for name, req := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := c.Post(context.Background(), req); err == nil {
+				t.Fatalf("Post(%s) = nil error, want error", name)
+			}
+		})
+	}
+}
+
+func TestPostRejectsContentTypeMismatch(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte("not the expected type"))
+	}))
+	defer ts.Close()
+
+	c, err := fapihttp.New(ts.Client(), validLoopbackConfig())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = c.Post(context.Background(), fapihttp.PostRequest{
+		URL: mustParseURL(t, ts.URL), Body: []byte("x=1"),
+		ContentType: "application/x-www-form-urlencoded", ExpectedContentType: "application/json",
+	})
+	if err == nil {
+		t.Fatalf("Post = nil error, want error")
+	}
+}
+
+func TestPostRejectsOversizedBody(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(strings.Repeat("a", 2048)))
+	}))
+	defer ts.Close()
+
+	cfg := validLoopbackConfig()
+	cfg.MaxResponseBytes = 16
+	c, err := fapihttp.New(ts.Client(), cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = c.Post(context.Background(), fapihttp.PostRequest{
+		URL: mustParseURL(t, ts.URL), Body: []byte("x=1"),
+		ContentType: "application/x-www-form-urlencoded", ExpectedContentType: "application/json",
+	})
+	if err == nil {
+		t.Fatalf("Post = nil error, want error")
+	}
+}
+
+func TestPostRejectsNonOKStatus(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"error":"not_found"}`))
+	}))
+	defer ts.Close()
+
+	c, err := fapihttp.New(ts.Client(), validLoopbackConfig())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = c.Post(context.Background(), fapihttp.PostRequest{
+		URL: mustParseURL(t, ts.URL), Body: []byte("x=1"),
+		ContentType: "application/x-www-form-urlencoded", ExpectedContentType: "application/json",
+	})
+	if !errors.Is(err, fapihttp.ErrUnexpectedStatus) {
+		t.Fatalf("Post = %v, want ErrUnexpectedStatus", err)
+	}
+}
+
+// TestPostDoesNotFollowRedirects covers Post's one deliberate difference
+// from Fetch — see Post's own doc comment for why resending a POST body
+// across a 3xx is out of scope rather than silently mishandled.
+func TestPostDoesNotFollowRedirects(t *testing.T) {
+	var ts *httptest.Server
+	ts = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, ts.URL+"/elsewhere", http.StatusFound)
+	}))
+	defer ts.Close()
+
+	c, err := fapihttp.New(noRedirectClient(ts), validLoopbackConfig())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = c.Post(context.Background(), fapihttp.PostRequest{
+		URL: mustParseURL(t, ts.URL), Body: []byte("x=1"),
+		ContentType: "application/x-www-form-urlencoded", ExpectedContentType: "application/json",
+	})
+	if !errors.Is(err, fapihttp.ErrUnexpectedStatus) {
+		t.Fatalf("Post(redirect response) = %v, want ErrUnexpectedStatus", err)
+	}
+}
+
+// TestPostRejectsInsecureURL confirms Post reuses the same URL
+// validation Fetch does — not an exhaustive re-verification of every
+// SSRF/scheme rule, which Fetch's own test suite already covers for the
+// shared validateFetchURL/checkHostIPs code.
+func TestPostRejectsInsecureURL(t *testing.T) {
+	c, err := fapihttp.New(http.DefaultClient, validConfig())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = c.Post(context.Background(), fapihttp.PostRequest{
+		URL: mustParseURL(t, "http://example.org"), Body: []byte("x=1"),
+		ContentType: "application/x-www-form-urlencoded", ExpectedContentType: "application/json",
+	})
+	if !errors.Is(err, fapihttp.ErrInsecureURL) {
+		t.Fatalf("Post(http URL) = %v, want ErrInsecureURL", err)
+	}
+}
+
+func TestPostRejectsMissingTLSState(t *testing.T) {
+	fake := &fakeHTTPClient{response: &http.Response{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{}`)),
+		TLS:        nil,
+	}}
+	c, err := fapihttp.New(fake, validConfig())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = c.Post(context.Background(), fapihttp.PostRequest{
+		URL: mustParseURL(t, "https://1.1.1.1/status"), Body: []byte("x=1"),
+		ContentType: "application/x-www-form-urlencoded", ExpectedContentType: "application/json",
+	})
+	if err == nil {
+		t.Fatalf("Post(no TLS state) = nil error, want error")
+	}
+}

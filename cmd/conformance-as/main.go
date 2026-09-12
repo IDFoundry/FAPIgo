@@ -39,29 +39,6 @@ const (
 // indefinitely (a Slowloris-style DoS).
 const readHeaderTimeout = 10 * time.Second
 
-// fapiRWTLS12CipherSuites is the TLS 1.2 cipher suite allow-list this
-// binary serves under: ECDHE key exchange (forward secrecy) with an
-// AEAD cipher only — no CBC-mode suites, which Go's zero-value
-// tls.Config still offers by default for broader interop. TLS 1.3
-// needs no equivalent list: crypto/tls ignores CipherSuites for 1.3
-// and always offers only its three built-in AEAD suites.
-//
-// This is the narrower FAPI-RW §8.5 list (AES-GCM only, both ECDSA and
-// RSA), not the broader BCP195/RFC 7525 set FAPI2-SP-FINAL-5.2.2 cites
-// (which also permits ChaCha20-Poly1305) — confirmed live: the OIDF
-// suite's own FAPI-RW-8.5-1/8.5-2 conformance check, exercised by the
-// fapi-ciba-id1-test-plan, hardcodes a TLS 1.2 probe against exactly
-// this narrower list and flags ChaCha20-Poly1305 as "not permitted"
-// even though BCP195 itself endorses it. Narrowed to this list so that
-// check passes; a real BCP195-only deployment would be free to widen
-// it back.
-var fapiRWTLS12CipherSuites = []uint16{
-	tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-	tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-	tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-	tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-}
-
 func main() {
 	log.SetFlags(0)
 
@@ -123,7 +100,7 @@ func main() {
 	httpServer := &http.Server{
 		Addr:              resolved.ListenAddr,
 		Handler:           mux,
-		TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS12, CipherSuites: fapiRWTLS12CipherSuites},
+		TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS12, CipherSuites: server.FAPIRWTLSCipherSuites},
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 
@@ -185,7 +162,7 @@ func newMTLSServer(resolved ResolvedConfig, mux http.Handler) (*http.Server, err
 		Handler: mux,
 		TLSConfig: &tls.Config{
 			MinVersion:   tls.VersionTLS12,
-			CipherSuites: fapiRWTLS12CipherSuites,
+			CipherSuites: server.FAPIRWTLSCipherSuites,
 			Certificates: []tls.Certificate{mtlsCert},
 			ClientAuth:   tls.RequestClientCert,
 		},

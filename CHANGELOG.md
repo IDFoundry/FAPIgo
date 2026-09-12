@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.27.0](https://github.com/IDFoundry/FAPIgo/compare/v0.26.0...v0.27.0) (2026-09-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* **server:** server.Metadata.BackchannelAuthenticationEndpoint and every field of server.MTLSEndpointAliases are now *fapi.URL, not fapi.URL.
+
+### Features
+
+* **client:** add MTLSEndpoints.ApplyForSenderConstrain/ApplyForClientAuth ([5b1b91f](https://github.com/IDFoundry/FAPIgo/commit/5b1b91faed5e56cacfdc2f84baedf92ed7718e3c))
+* **client:** wire OpenID Federation self-issuance into client.Config ([#257](https://github.com/IDFoundry/FAPIgo/issues/257)) ([d01a08c](https://github.com/IDFoundry/FAPIgo/commit/d01a08caa62858ddc4d7e128a3c3c79f9ca1fcf5))
+* **conformance-as:** add OpenID Federation self-issuance support ([#261](https://github.com/IDFoundry/FAPIgo/issues/261)) ([e1ccc23](https://github.com/IDFoundry/FAPIgo/commit/e1ccc239a6ffdcc3c0aa6c6f8f7cd2997eda033f))
+* **conformance:** add a standing OpenID Federation Trust Anchor ([#263](https://github.com/IDFoundry/FAPIgo/issues/263)) ([61013f0](https://github.com/IDFoundry/FAPIgo/commit/61013f0ba1dcb627fbcc31112385ecf896ea2358))
+* enforce OpenID Federation §12.1.1 request object rules for automatically-registered clients ([1b90464](https://github.com/IDFoundry/FAPIgo/commit/1b90464310a706f905c74161f19d075923032166))
+* **errors:** add resource.Error.WriteJSON/NewError and WriteError helpers ([7d9574d](https://github.com/IDFoundry/FAPIgo/commit/7d9574d9c0d0adbe7a1a5310f9895febb6f57db7))
+* **federation:** add automatic client registration (OpenID Federation 1.0 §12.1) ([fdba8f0](https://github.com/IDFoundry/FAPIgo/commit/fdba8f0228d41d0b92dbd2f9a4e9c38a1a29bc4b))
+* **federation:** add internal Entity Statement primitives (OpenID Federation 1.0) ([25d8eca](https://github.com/IDFoundry/FAPIgo/commit/25d8ecaade1d87e834bbac59f7ee7f369bcfea38))
+* **federation:** add SelfIssuer for self-issuing an Entity Configuration ([ebbba04](https://github.com/IDFoundry/FAPIgo/commit/ebbba0435a9970551569b6ec9ea42178d328fbb9))
+* **federation:** add SubordinateIssuer for entities acting as a Trust Anchor/Intermediate ([#273](https://github.com/IDFoundry/FAPIgo/issues/273)) ([a79516b](https://github.com/IDFoundry/FAPIgo/commit/a79516ba2d1688e2f667f85f4441d283357ef5b5))
+* **federation:** add trust chain resolver (OpenID Federation 1.0 Phase 2) ([784f1b0](https://github.com/IDFoundry/FAPIgo/commit/784f1b00802c704eb8d6488ac0c0e29e5ad9e5e7))
+* **federation:** add Trust Mark Status and Trust Marked Entities Listing ([21c9409](https://github.com/IDFoundry/FAPIgo/commit/21c94098179e465c14ef51327975e39fedc2c5b9))
+* **federation:** enforce naming_constraints and allowed_entity_types ([4c913e5](https://github.com/IDFoundry/FAPIgo/commit/4c913e5d60c11afcb4b2eae2c0c4023c4da5e351))
+* **federation:** enforce per-statement max_path_length constraint ([c214e99](https://github.com/IDFoundry/FAPIgo/commit/c214e990a41e2b950a675779d3ee8bba272f807f))
+* **federation:** support CIBA and client_credentials for automatically-registered clients ([46ec0f7](https://github.com/IDFoundry/FAPIgo/commit/46ec0f7d53190a84e5ebbec449487fad428eaa7f))
+* **federation:** support jwks_uri in automatic client registration ([0b27a74](https://github.com/IDFoundry/FAPIgo/commit/0b27a7464a65b0541a4f4bc28752843df3c43ebb))
+* **federation:** validate Trust Mark delegation (OpenID Federation 1.0 §7.2) ([0a14dc7](https://github.com/IDFoundry/FAPIgo/commit/0a14dc723ea27880016e2d8222e62a452f5814de))
+* **federation:** verify Trust Marks (OpenID Federation 1.0 §7) ([00356a2](https://github.com/IDFoundry/FAPIgo/commit/00356a232ef02cfd5dea9eb03b75e01ee61ca8af))
+* **server:** add FormRequest.Get ([#282](https://github.com/IDFoundry/FAPIgo/issues/282)) ([39be5ca](https://github.com/IDFoundry/FAPIgo/commit/39be5cad5c98e6b918079c77f01eefef5760bb1b))
+* **server:** add TokenResult.WriteJSON ([5addc46](https://github.com/IDFoundry/FAPIgo/commit/5addc46393f9f9e892ea96a069c5c1662a6451d9))
+* **server:** export FAPIRWTLSCipherSuites ([a3b5451](https://github.com/IDFoundry/FAPIgo/commit/a3b54518b2637faf37e0bb6db5643e966a5b9a01))
+* **server:** wire automatic client registration into server.Config ([73e4633](https://github.com/IDFoundry/FAPIgo/commit/73e46335f67bbf3b7e6beb9038497aefb8493989))
+* **server:** wire OpenID Federation self-issuance into server.Config ([aab3d61](https://github.com/IDFoundry/FAPIgo/commit/aab3d61d7547e6e22b4346b5613503a0cc9bccb4))
+
+
+### Bug Fixes
+
+* **conformance:** fix /api/runner call and record a second known warning ([#272](https://github.com/IDFoundry/FAPIgo/issues/272)) ([8251799](https://github.com/IDFoundry/FAPIgo/commit/825179958cf3adf53dfafa915bca5a7b27160b00))
+* remove dead store flagged by staticcheck in Resolve ([6082e64](https://github.com/IDFoundry/FAPIgo/commit/6082e64aab6a57fb91846f9577ccfb9e29f7392d))
+* resolve CodeQL allocation-size-overflow finding, raise test coverage ([a162603](https://github.com/IDFoundry/FAPIgo/commit/a162603c1c01ef8a26178826d23746703de96a83))
+* **server:** omit optional metadata URL fields instead of empty strings ([d8584e0](https://github.com/IDFoundry/FAPIgo/commit/d8584e089e6967e49e2696014470422138070506))
+* **server:** suppress gosec G117 false positive on TokenResult.WriteJSON ([e7d32f0](https://github.com/IDFoundry/FAPIgo/commit/e7d32f004af9cc511b9fe0375ac492630854dd98))
+
 ## [0.26.0](https://github.com/IDFoundry/FAPIgo/compare/v0.25.0...v0.26.0) (2026-09-10)
 
 

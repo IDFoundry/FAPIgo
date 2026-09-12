@@ -224,7 +224,7 @@ func New(t *testing.T, cfg Config) *Harness {
 	var mtlsCert *x509.Certificate
 	var mtlsTLSCert tls.Certificate
 	if tlsClientCert {
-		mtlsTLSCert, err = selfSignedClientCert("fapitest-mtls-client")
+		mtlsTLSCert, err = SelfSignedClientCert("fapitest-mtls-client")
 		if err != nil {
 			t.Fatalf("fapitest: generate mtls client certificate: %v", err)
 		}

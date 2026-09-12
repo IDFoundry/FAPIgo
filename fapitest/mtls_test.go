@@ -2,15 +2,9 @@ package fapitest_test
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/x509"
-	"crypto/x509/pkix"
-	"math/big"
 	"net/url"
 	"testing"
-	"time"
 
 	"github.com/idfoundry/fapigo/fapitest"
 	"github.com/idfoundry/fapigo/resource"
@@ -92,33 +86,14 @@ func TestAuthorizationCodeFlowMTLSBinding(t *testing.T) {
 }
 
 // otherTestCertificate generates a throwaway self-signed certificate,
-// standing in for some other client's own — this package's black-box
-// test package can't reach fapitest's own unexported selfSignedClientCert,
-// so this mirrors it directly, the same way every other *_test.go's own
-// selfSignedTestClientCert helper in this repo does for its own package.
+// standing in for some other client's own.
 func otherTestCertificate(t *testing.T) *x509.Certificate {
 	t.Helper()
-	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	tlsCert, err := fapitest.SelfSignedClientCert("some-other-client")
 	if err != nil {
-		t.Fatalf("generate key: %v", err)
+		t.Fatalf("generate certificate: %v", err)
 	}
-	serial, err := rand.Int(rand.Reader, big.NewInt(1<<62))
-	if err != nil {
-		t.Fatalf("generate serial: %v", err)
-	}
-	template := &x509.Certificate{
-		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: "some-other-client"},
-		NotBefore:    time.Now().Add(-time.Minute),
-		NotAfter:     time.Now().Add(time.Hour),
-		KeyUsage:     x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
-	}
-	der, err := x509.CreateCertificate(rand.Reader, template, template, &priv.PublicKey, priv)
-	if err != nil {
-		t.Fatalf("create certificate: %v", err)
-	}
-	cert, err := x509.ParseCertificate(der)
+	cert, err := x509.ParseCertificate(tlsCert.Certificate[0])
 	if err != nil {
 		t.Fatalf("parse certificate: %v", err)
 	}

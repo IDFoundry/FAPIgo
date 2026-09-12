@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strings"
 	"time"
 
@@ -81,6 +82,53 @@ type TokenResult struct {
 	// Dependencies.Nonces is nil (nonce-challenge support disabled);
 	// otherwise always populated on success.
 	NextDPoPNonce string
+}
+
+// WriteJSON writes t as a complete RFC 6749 §5.1 token response to w:
+// the DPoP-Nonce header when NextDPoPNonce is non-empty (RFC 9449 §8),
+// the Cache-Control: no-store header §5.1 itself requires on every
+// token response, the "application/json" Content-Type, and a body of
+// access_token/token_type/expires_in/scope plus id_token,
+// refresh_token and authorization_details wherever HasIDToken,
+// HasRefreshToken or AuthorizationDetails say to include them.
+//
+// Must be called before anything else writes to w — like every
+// http.ResponseWriter header/status call, it has no effect once a
+// prior write has already sent the response's status line.
+func (t TokenResult) WriteJSON(w http.ResponseWriter) {
+	body := struct {
+		AccessToken          string          `json:"access_token"`
+		TokenType            string          `json:"token_type"`
+		ExpiresIn            int64           `json:"expires_in"`
+		Scope                string          `json:"scope"`
+		IDToken              string          `json:"id_token,omitempty"`
+		RefreshToken         string          `json:"refresh_token,omitempty"`
+		AuthorizationDetails json.RawMessage `json:"authorization_details,omitempty"`
+	}{
+		AccessToken: t.AccessToken.Reveal(),
+		TokenType:   t.TokenType,
+		ExpiresIn:   int64(t.ExpiresIn / time.Second),
+		Scope:       t.Scope,
+	}
+	if t.HasIDToken {
+		body.IDToken = t.IDToken.Reveal()
+	}
+	if t.HasRefreshToken {
+		body.RefreshToken = t.RefreshToken.Reveal()
+	}
+	if len(t.AuthorizationDetails) > 0 {
+		body.AuthorizationDetails = t.AuthorizationDetails
+	}
+
+	if t.NextDPoPNonce != "" {
+		w.Header().Set("DPoP-Nonce", t.NextDPoPNonce)
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json")
+	// Encoding this shape cannot fail: every field is a plain string,
+	// int64, or the already-valid json.RawMessage AuthorizationDetails
+	// was built from.
+	_ = json.NewEncoder(w).Encode(body)
 }
 
 // ExchangeAuthorizationCode authenticates the client, verifies its DPoP

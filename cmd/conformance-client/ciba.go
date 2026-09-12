@@ -299,8 +299,8 @@ func runCIBAModule(ctx context.Context, d cibaModuleDriver, testName string) str
 	}
 	if mtls {
 		cfg.SenderConstrain = storage.SenderConstrainMTLS
-		if err := applyMTLSEndpointAliases(&cfg, discovered); err != nil {
-			return awaitVerdict(rawHTTP, apiBase, module.ID, err.Error()).String()
+		if !discovered.MTLSEndpointAliases.ApplyForSenderConstrain(&cfg.Endpoints) {
+			return awaitVerdict(rawHTTP, apiBase, module.ID, "issuer does not advertise mtls_endpoint_aliases").String()
 		}
 	}
 	deps := client.Dependencies{

@@ -176,6 +176,53 @@ type MTLSEndpoints struct {
 	BackchannelAuthentication  fapi.URL
 }
 
+// ApplyForSenderConstrain overrides endpoints' Token and
+// BackchannelAuthentication fields with m's own advertised aliases,
+// wherever m advertises one (RFC 8705 §5) — for a
+// Config.SenderConstrain == SenderConstrainMTLS client, whose
+// certificate-bound access tokens may need to be requested, and CIBA
+// polls sent, on a separate mTLS-only origin than the server's plain
+// endpoints. m may be nil (the server never advertised
+// mtls_endpoint_aliases at all); ApplyForSenderConstrain then leaves
+// endpoints untouched and reports false — a SenderConstrainMTLS client
+// with no advertised alias has nowhere else to send these calls, which
+// is a caller's own decision to treat as fatal, not this method's.
+func (m *MTLSEndpoints) ApplyForSenderConstrain(endpoints *Endpoints) bool {
+	if m == nil {
+		return false
+	}
+	if !m.Token.IsZero() {
+		endpoints.Token = m.Token
+	}
+	if !m.BackchannelAuthentication.IsZero() {
+		endpoints.BackchannelAuthentication = m.BackchannelAuthentication
+	}
+	return true
+}
+
+// ApplyForClientAuth is ApplyForSenderConstrain's own counterpart for
+// RFC 8705 §2 client authentication
+// (Config.ClientAuthMethod == ClientAuthMethodSelfSignedTLSClientAuth
+// or ClientAuthMethodTLSClientAuth): overrides endpoints' Token and
+// PushedAuthorizationRequest fields, since a certificate-authenticated
+// client must present its certificate at PAR too, not just at the
+// token endpoint — the same asymmetry a server's own client
+// authentication enforces. m may be nil, in which case
+// ApplyForClientAuth leaves endpoints untouched and reports false, for
+// the same reason ApplyForSenderConstrain does.
+func (m *MTLSEndpoints) ApplyForClientAuth(endpoints *Endpoints) bool {
+	if m == nil {
+		return false
+	}
+	if !m.Token.IsZero() {
+		endpoints.Token = m.Token
+	}
+	if !m.PushedAuthorizationRequest.IsZero() {
+		endpoints.PushedAuthorizationRequest = m.PushedAuthorizationRequest
+	}
+	return true
+}
+
 // Limits bounds the lifetimes and clock tolerances this client enforces
 // or sets. None of these have an implicit default — New rejects a zero
 // (or, for MaxClockSkew, negative) value.

@@ -1,6 +1,7 @@
 package fapihttp
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -197,10 +198,97 @@ func (c *Client) Fetch(ctx context.Context, req FetchRequest) (FetchResponse, er
 	}
 }
 
+// PostRequest describes one outbound POST — the counterpart to
+// FetchRequest for a caller that needs to submit a body rather than
+// merely retrieve a resource (e.g. OpenID Federation 1.0 §8's Trust
+// Mark Status endpoint, POST-only per spec). Like FetchRequest, it is
+// narrow and single-purpose: there is no way to add arbitrary headers
+// or otherwise build an unconstrained request.
+type PostRequest struct {
+	// URL is the endpoint to POST to. Validated exactly like
+	// FetchRequest.URL — see its own doc comment for what that does and
+	// does not guarantee.
+	URL *url.URL
+
+	// Body is the request body, sent as-is.
+	Body []byte
+
+	// ContentType is the request's own Content-Type header. Required.
+	ContentType string
+
+	// ExpectedContentType is the response's required Content-Type, and
+	// AlternateContentTypes any additional accepted values — both work
+	// exactly like their FetchRequest counterparts.
+	ExpectedContentType   string
+	AlternateContentTypes []string
+}
+
+// Post performs req and returns the response, enforcing every
+// protection Fetch does (URL/SSRF validation, response size limit,
+// content-type check, TLS verification) — with one deliberate
+// difference: Post never follows a redirect. Resending a POST body
+// across a 3xx has ambiguous semantics that differ by status code
+// (307/308 preserve method and body; 301/302/303 don't, and most
+// clients silently downgrade to GET), and nothing in the specs this
+// method exists for requires a POST-only endpoint to redirect at all.
+// A 3xx response is therefore treated as ErrUnexpectedStatus, the same
+// as any other non-200 — not specially followed the way Fetch's own
+// bounded, origin-checked redirect handling does for GET.
+func (c *Client) Post(ctx context.Context, req PostRequest) (FetchResponse, error) {
+	if req.URL == nil {
+		return FetchResponse{}, fmt.Errorf("fapihttp: url is required")
+	}
+	if req.ContentType == "" {
+		return FetchResponse{}, fmt.Errorf("fapihttp: content type is required")
+	}
+	if req.ExpectedContentType == "" {
+		return FetchResponse{}, fmt.Errorf("fapihttp: expected content type is required")
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, c.cfg.RequestTimeout)
+	defer cancel()
+
+	if err := c.validateFetchURL(ctx, req.URL); err != nil {
+		return FetchResponse{}, err
+	}
+
+	res, err := c.doRoundTrip(ctx, http.MethodPost, req.URL, req.Body, req.ContentType)
+	if err != nil {
+		return FetchResponse{}, err
+	}
+
+	body, readErr := readBounded(res.Body, c.cfg.MaxResponseBytes)
+	_ = res.Body.Close()
+	if readErr != nil {
+		return FetchResponse{}, readErr
+	}
+	if res.StatusCode != http.StatusOK {
+		return FetchResponse{}, fmt.Errorf("%w: %d", ErrUnexpectedStatus, res.StatusCode)
+	}
+	if err := checkContentType(res.Header.Get("Content-Type"), req.ExpectedContentType, req.AlternateContentTypes); err != nil {
+		return FetchResponse{}, err
+	}
+	return FetchResponse{Body: body, StatusCode: res.StatusCode}, nil
+}
+
 func (c *Client) roundTrip(ctx context.Context, target *url.URL) (*http.Response, error) {
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
+	return c.doRoundTrip(ctx, http.MethodGet, target, nil, "")
+}
+
+// doRoundTrip is roundTrip generalized over method/body/contentType —
+// Fetch's own behavior (GET, no body) is unchanged; Post is the only
+// other caller.
+func (c *Client) doRoundTrip(ctx context.Context, method string, target *url.URL, body []byte, contentType string) (*http.Response, error) {
+	var bodyReader io.Reader
+	if body != nil {
+		bodyReader = bytes.NewReader(body)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, method, target.String(), bodyReader)
 	if err != nil {
 		return nil, fmt.Errorf("fapihttp: build request: %w", err)
+	}
+	if contentType != "" {
+		httpReq.Header.Set("Content-Type", contentType)
 	}
 	res, err := c.http.Do(httpReq)
 	if err != nil {

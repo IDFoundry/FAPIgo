@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/json"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -64,6 +65,30 @@ type BackchannelInteractionRequired struct {
 }
 
 func (BackchannelInteractionRequired) backchannelAuthenticationAction() {}
+
+// WriteJSON writes a as a complete CIBA §10.2/§10.3 backchannel
+// authentication response to w: the "application/json" Content-Type,
+// HTTP 200, and a {"auth_req_id": ..., "expires_in": ..., "interval": ...}
+// body. Every a BeginBackchannelAuthentication returns as this
+// action is safe to pass here.
+//
+// Must be called before anything else writes to w — like every
+// http.ResponseWriter header/status call, it has no effect once a
+// prior write has already sent the response's status line.
+func (a BackchannelInteractionRequired) WriteJSON(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	// Encoding a string and two ints cannot fail.
+	_ = json.NewEncoder(w).Encode(struct {
+		AuthReqID string `json:"auth_req_id"`
+		ExpiresIn int64  `json:"expires_in"`
+		Interval  int64  `json:"interval"`
+	}{
+		AuthReqID: a.AuthReqID.String(),
+		ExpiresIn: int64(a.ExpiresIn / time.Second),
+		Interval:  int64(a.Interval / time.Second),
+	})
+}
 
 // BackchannelAuthenticationLocalError means the caller must report an
 // error rather than issue an auth_req_id — CIBA has no redirect to

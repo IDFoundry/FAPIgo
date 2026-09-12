@@ -1,10 +1,10 @@
 package resource
 
 import (
-	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
+
+	"github.com/idfoundry/fapigo/internal/httperror"
 )
 
 // ErrorCode is a closed set of error codes Verify returns, matching the
@@ -72,10 +72,7 @@ func (e *Error) HTTPStatus() int { return e.httpStatus }
 // Error implements the error interface. Its output includes the
 // internal cause and is meant for logs, not for a public response.
 func (e *Error) Error() string {
-	if e.cause != nil {
-		return fmt.Sprintf("resource: %s: %s: %v", e.code, e.description, e.cause)
-	}
-	return fmt.Sprintf("resource: %s: %s", e.code, e.description)
+	return httperror.Message("resource", string(e.code), e.description, e.cause)
 }
 
 // Unwrap returns the underlying cause, if any.
@@ -110,17 +107,7 @@ func (e *Error) WriteJSON(w http.ResponseWriter) {
 	if e.code == ErrorUseDPoPNonce {
 		scheme = "DPoP"
 	}
-	if e.nonce != "" {
-		w.Header().Set("DPoP-Nonce", e.nonce)
-	}
-	w.Header().Set("WWW-Authenticate", scheme+` error="`+string(e.code)+`"`)
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(e.httpStatus)
-	// Encoding two plain strings cannot fail.
-	_ = json.NewEncoder(w).Encode(struct {
-		Error            string `json:"error"`
-		ErrorDescription string `json:"error_description,omitempty"`
-	}{Error: string(e.code), ErrorDescription: e.description})
+	httperror.WriteJSON(w, e.nonce, scheme, string(e.code), e.description, e.httpStatus)
 }
 
 // WriteError writes err to w: err's own WriteJSON if err is a *Error

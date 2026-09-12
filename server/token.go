@@ -128,7 +128,7 @@ func (t TokenResult) WriteJSON(w http.ResponseWriter) {
 	// Encoding this shape cannot fail: every field is a plain string,
 	// int64, or the already-valid json.RawMessage AuthorizationDetails
 	// was built from.
-	_ = json.NewEncoder(w).Encode(body)
+	_ = json.NewEncoder(w).Encode(body) // #nosec G117 -- deliberately serializing the already-revealed access/refresh/ID token strings into the RFC 6749 §5.1 response body; that's WriteJSON's entire job, not a leak
 }
 
 // ExchangeAuthorizationCode authenticates the client, verifies its DPoP

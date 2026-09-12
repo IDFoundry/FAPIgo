@@ -69,11 +69,15 @@
 // type in its own "trust_mark_owners" claim (§7.2), additionally
 // requiring and validating a "delegation" claim against that type's
 // real owner (whose keys are published directly in trust_mark_owners,
-// not resolved via a separate Trust Chain). See its own doc comment,
-// and internal/federation's own doc.go "Trust Marks" section, for
-// exactly which parts of §7 this first version does not yet implement
-// (the Trust Mark Status/Trust Marked Entities Listing endpoints, and
-// Trust Mark issuance).
+// not resolved via a separate Trust Chain). TrustMarkIssuer issues
+// Trust Marks and Trust Mark Delegations for a caller acting as a Trust
+// Mark Issuer or a type's real owner — transport-agnostic like
+// everything else here, since (unlike Fetch/List) OpenID Federation 1.0
+// defines no HTTP endpoint for requesting one; issuance is always an
+// out-of-band administrative act. See its own doc comment, and
+// internal/federation's own doc.go "Trust Marks" section, for exactly
+// which parts of §7 this first version does not yet implement (the
+// Trust Mark Status/Trust Marked Entities Listing endpoints, §8/§9).
 //
 // Automatic client registration (OpenID Federation 1.0 §12.1) is
 // implemented by AutomaticClientRepository/AutomaticClientKeySource,

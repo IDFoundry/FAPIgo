@@ -1,6 +1,11 @@
 package resource
 
-import "fmt"
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+)
 
 // ErrorCode is a closed set of error codes Verify returns, matching the
 // "error" values RFC 6750 §3.1 and RFC 9449 §7.1 define for a
@@ -39,6 +44,15 @@ func newError(code ErrorCode, httpStatus int, description string, cause error) *
 	return &Error{code: code, httpStatus: httpStatus, description: description, cause: cause}
 }
 
+// NewError builds an *Error for a caller reporting an RFC 6750/RFC 9449
+// -shaped failure it detected itself — an HTTP adapter's own request
+// routing rejecting something before it ever calls Verify (a malformed
+// Authorization header, more than one DPoP header — see
+// dpop.ResolveHeaderValues). Mirrors server.NewError.
+func NewError(code ErrorCode, httpStatus int, description string) *Error {
+	return &Error{code: code, httpStatus: httpStatus, description: description}
+}
+
 // Code returns the error code.
 func (e *Error) Code() ErrorCode { return e.code }
 
@@ -66,3 +80,60 @@ func (e *Error) Error() string {
 
 // Unwrap returns the underlying cause, if any.
 func (e *Error) Unwrap() error { return e.cause }
+
+// WriteJSON writes e as a complete RFC 6750 §3.1 challenge response to
+// w: a WWW-Authenticate header, the DPoP-Nonce header when Nonce is
+// non-empty (RFC 9449 §8 — see Nonce's own doc comment for when that
+// is), the "application/json" Content-Type, e's own HTTPStatus, and a
+// {"error": ..., "error_description": ...} body built from Code and
+// PublicDescription — never Unwrap's cause. Every *Error this
+// package's own methods return, and any built with NewError, is safe
+// to pass here.
+//
+// The WWW-Authenticate scheme is "DPoP" when Code is ErrorUseDPoPNonce
+// (the only sensible scheme there — that error is impossible for a
+// request that didn't present a DPoP proof in the first place) and
+// "Bearer" otherwise: this package accepts both DPoP-bound and
+// mTLS-bound access tokens on the same Verifier (SenderConstrain is
+// resolved per token/request, not fixed per deployment — see
+// VerifyRequest.PeerCertificate's own doc comment), and RFC 8705 §3.4
+// presents an mTLS-bound token as an ordinary Bearer credential with no
+// scheme of its own. "Bearer" is the universally correct RFC 6750
+// challenge regardless of which binding a given rejected request
+// actually used.
+//
+// Must be called before anything else writes to w — like every
+// http.ResponseWriter header/status call, it has no effect once a
+// prior write has already sent the response's status line.
+func (e *Error) WriteJSON(w http.ResponseWriter) {
+	scheme := "Bearer"
+	if e.code == ErrorUseDPoPNonce {
+		scheme = "DPoP"
+	}
+	if e.nonce != "" {
+		w.Header().Set("DPoP-Nonce", e.nonce)
+	}
+	w.Header().Set("WWW-Authenticate", scheme+` error="`+string(e.code)+`"`)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(e.httpStatus)
+	// Encoding two plain strings cannot fail.
+	_ = json.NewEncoder(w).Encode(struct {
+		Error            string `json:"error"`
+		ErrorDescription string `json:"error_description,omitempty"`
+	}{Error: string(e.code), ErrorDescription: e.description})
+}
+
+// WriteError writes err to w: err's own WriteJSON if err is a *Error
+// (as every error Verify returns is), or a generic 500 otherwise —
+// the one case this package can't itself produce a *Error for, e.g. a
+// context cancellation surfacing from a dependency. Saves every HTTP
+// adapter from reimplementing this same errors.As-or-fallback dance
+// itself.
+func WriteError(w http.ResponseWriter, err error) {
+	var resErr *Error
+	if errors.As(err, &resErr) {
+		resErr.WriteJSON(w)
+		return
+	}
+	http.Error(w, "server_error", http.StatusInternalServerError)
+}

@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 )
@@ -185,4 +186,20 @@ func (e *Error) WriteJSON(w http.ResponseWriter) {
 		Error            string `json:"error"`
 		ErrorDescription string `json:"error_description,omitempty"`
 	}{Error: string(e.code), ErrorDescription: e.description})
+}
+
+// WriteError writes err to w: err's own WriteJSON if err is a *Error
+// (as every error this package's own methods return is), or a generic
+// 500 otherwise — the one case this package can't itself produce a
+// *Error for, e.g. a context cancellation surfacing from a dependency
+// before this package ever got the chance to classify the failure.
+// Saves every HTTP adapter from reimplementing this same
+// errors.As-or-fallback dance itself.
+func WriteError(w http.ResponseWriter, err error) {
+	var srvErr *Error
+	if errors.As(err, &srvErr) {
+		srvErr.WriteJSON(w)
+		return
+	}
+	http.Error(w, "server_error", http.StatusInternalServerError)
 }

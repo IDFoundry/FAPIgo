@@ -3,6 +3,7 @@ package federation_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -67,5 +68,41 @@ func TestErrorAccessors(t *testing.T) {
 	}
 	if err.Error() == "" {
 		t.Error("Error() = \"\", want a non-empty log message")
+	}
+}
+
+// TestWriteErrorWithFederationError covers WriteError's main path: a
+// *federation.Error (wrapped, since errors.As must unwrap it, not just
+// type-assert) is encoded via its own WriteJSON.
+func TestWriteErrorWithFederationError(t *testing.T) {
+	err := federation.NewError(federation.ErrorNotFound, http.StatusNotFound, "no such subordinate")
+	wrapped := fmt.Errorf("fetch failed: %w", err)
+
+	rec := httptest.NewRecorder()
+	federation.WriteError(rec, wrapped)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	if decodeErr := json.Unmarshal(rec.Body.Bytes(), &body); decodeErr != nil {
+		t.Fatalf("unmarshal body: %v (body: %s)", decodeErr, rec.Body.Bytes())
+	}
+	if body.Error != string(federation.ErrorNotFound) {
+		t.Fatalf("error = %q, want %q", body.Error, federation.ErrorNotFound)
+	}
+}
+
+// TestWriteErrorFallsBackForUnknownError covers WriteError's other
+// branch: an error that isn't (and doesn't wrap) a *federation.Error
+// gets a generic 500.
+func TestWriteErrorFallsBackForUnknownError(t *testing.T) {
+	rec := httptest.NewRecorder()
+	federation.WriteError(rec, errors.New("something unrelated failed"))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
 	}
 }

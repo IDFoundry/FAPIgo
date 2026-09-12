@@ -12,12 +12,15 @@
 // it wires into net/http is entirely this module's own public API:
 // federation.SelfIssuer for its own Entity Configuration,
 // federation.SubordinateIssuer for the Subordinate Statements it issues
-// about each configured subordinate, and federation.SubjectFromFetchRequest/
+// about each configured subordinate, federation.SubjectFromFetchRequest/
 // RejectUnsupportedListingFilters for the Fetch/List request-shape
-// checks OpenID Federation 1.0 §8.2/§9 require. This is exactly the
-// reference wiring federation/doc.go's own "Scope" section points at —
-// this package deliberately never owns an http.Server itself (see that
-// doc comment).
+// checks OpenID Federation 1.0 §8.2/§9 require, and federation.WriteError
+// for translating any of the above's *federation.Error into the
+// correct wire response (or a generic 500 for anything else) without
+// reimplementing that unwrap-or-fallback dance at every handler. This
+// is exactly the reference wiring federation/doc.go's own "Scope"
+// section points at — this package deliberately never owns an
+// http.Server itself (see that doc comment).
 //
 // Subordinates (the leaf entities this Trust Anchor vouches for) are
 // configured via a JSON file — see subordinatesFile — since federation
@@ -38,7 +41,6 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"encoding/json"
-	"errors"
 	"flag"
 	"log"
 	"net/http"
@@ -163,12 +165,7 @@ func main() {
 	mux.HandleFunc("GET /fetch", func(w http.ResponseWriter, r *http.Request) {
 		sub, err := federation.SubjectFromFetchRequest(r)
 		if err != nil {
-			var fedErr *federation.Error
-			if errors.As(err, &fedErr) {
-				fedErr.WriteJSON(w)
-				return
-			}
-			http.Error(w, "server_error", http.StatusInternalServerError)
+			federation.WriteError(w, err)
 			return
 		}
 		jwks, ok := subordinateJWKS[sub]
@@ -180,13 +177,8 @@ func main() {
 			Subject: sub, JWKS: jwks, SourceEndpoint: fetchEndpoint,
 		})
 		if err != nil {
-			var fedErr *federation.Error
-			if errors.As(err, &fedErr) {
-				fedErr.WriteJSON(w)
-				return
-			}
 			log.Printf("conformance-federation-trust-anchor: issue subordinate statement for %q: %v", sub, err) // #nosec G706 -- %q Go-quotes sub, escaping newlines/control characters, so a malicious "sub" cannot forge a fake log line
-			http.Error(w, "server_error", http.StatusInternalServerError)
+			federation.WriteError(w, err)
 			return
 		}
 		w.Header().Set("Content-Type", federation.EntityStatementContentType)
@@ -195,12 +187,7 @@ func main() {
 
 	mux.HandleFunc("GET /list", func(w http.ResponseWriter, r *http.Request) {
 		if err := federation.RejectUnsupportedListingFilters(r); err != nil {
-			var fedErr *federation.Error
-			if errors.As(err, &fedErr) {
-				fedErr.WriteJSON(w)
-				return
-			}
-			http.Error(w, "server_error", http.StatusInternalServerError)
+			federation.WriteError(w, err)
 			return
 		}
 		body, err := json.Marshal(subordinateEntityIDs)

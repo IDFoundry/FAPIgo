@@ -2,6 +2,7 @@ package federation
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 )
@@ -101,4 +102,20 @@ func (e *Error) WriteJSON(w http.ResponseWriter) {
 		Error            string `json:"error"`
 		ErrorDescription string `json:"error_description,omitempty"`
 	}{Error: string(e.code), ErrorDescription: e.description})
+}
+
+// WriteError writes err to w: err's own WriteJSON if err is a *Error
+// (as every error this package's own HTTP-adjacent helpers return is),
+// or a generic 500 otherwise. Saves every HTTP adapter from
+// reimplementing this same errors.As-or-fallback dance itself — see
+// cmd/conformance-federation-trust-anchor's own history for exactly
+// this boilerplate, repeated inline at every one of its endpoints
+// before this existed.
+func WriteError(w http.ResponseWriter, err error) {
+	var fedErr *Error
+	if errors.As(err, &fedErr) {
+		fedErr.WriteJSON(w)
+		return
+	}
+	http.Error(w, "server_error", http.StatusInternalServerError)
 }

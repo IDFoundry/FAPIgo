@@ -7,17 +7,12 @@ import (
 )
 
 // writeOAuthJSONError translates err into an OAuth JSON error response
-// (RFC 6749 §5.2) via *server.Error's own WriteJSON. Every server
-// package method's error return is a *server.Error; the fallback below
-// only triggers for something outside the request itself (e.g. context
-// cancellation propagating from a dependency).
+// (RFC 6749 §5.2) via server.WriteError. Kept as this binary's own
+// named wrapper — every call site already reads naturally as "write an
+// OAuth JSON error" — rather than switching every one of them over to
+// calling server.WriteError directly for no behavioral difference.
 func writeOAuthJSONError(w http.ResponseWriter, err error) {
-	srvErr, ok := err.(*server.Error)
-	if !ok {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	srvErr.WriteJSON(w)
+	server.WriteError(w, err)
 }
 
 // writeRawOAuthError writes an OAuth JSON error response directly, for

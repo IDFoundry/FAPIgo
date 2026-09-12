@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.28.0](https://github.com/IDFoundry/FAPIgo/compare/v0.27.0...v0.28.0) (2026-09-12)
+
+
+### Features
+
+* **fapitest:** export SelfSignedClientCert ([832be68](https://github.com/IDFoundry/FAPIgo/commit/832be6892ab777eb4005146a1d6c9b31bcc5ca27))
+* **server:** add AlgorithmSet/KeyManagementAlgorithmSet/ContentEncryptionAlgorithmSet.Strings ([32a346d](https://github.com/IDFoundry/FAPIgo/commit/32a346da4d9bed7c5a008ca8ac431e2a27c479dd))
+* **server:** add BackchannelInteractionRequired.WriteJSON ([eadc09c](https://github.com/IDFoundry/FAPIgo/commit/eadc09cd2d81cfdd38c61d8adff66449391566d7))
+* **server:** add PushAuthorizationResult.WriteJSON ([1864457](https://github.com/IDFoundry/FAPIgo/commit/1864457af9df76e937cbfff8c62b31357f093a0c))
+
 ## [0.27.0](https://github.com/IDFoundry/FAPIgo/compare/v0.26.0...v0.27.0) (2026-09-12)
 
 

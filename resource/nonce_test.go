@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"net/http/httptest"
 	"net/url"
 	"testing"
 	"time"
@@ -160,6 +161,12 @@ func TestVerifyChallengesMissingNonce(t *testing.T) {
 	}
 	if rerr.Nonce() == "" {
 		t.Errorf("Nonce() is empty, want a freshly issued nonce")
+	}
+
+	rec := httptest.NewRecorder()
+	rerr.WriteJSON(rec)
+	if got := rec.Header().Get("DPoP-Nonce"); got != rerr.Nonce() {
+		t.Errorf("DPoP-Nonce header = %q, want %q", got, rerr.Nonce())
 	}
 }
 

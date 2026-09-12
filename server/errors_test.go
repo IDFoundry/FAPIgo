@@ -2,6 +2,8 @@ package server_test
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http/httptest"
 	"testing"
 
@@ -92,5 +94,42 @@ func TestErrorWriteJSONIncludesDPoPNonceHeader(t *testing.T) {
 	}
 	if rec.Code != serr.HTTPStatus() {
 		t.Fatalf("status = %d, want %d", rec.Code, serr.HTTPStatus())
+	}
+}
+
+// TestWriteErrorWithServerError covers WriteError's main path: a
+// *server.Error (wrapped, since errors.As must unwrap it, not just
+// type-assert) is encoded via its own WriteJSON, matching what an
+// HTTP adapter would get calling WriteJSON directly.
+func TestWriteErrorWithServerError(t *testing.T) {
+	err := server.NewError(server.ErrorInvalidGrant, 400, "the authorization code has expired")
+	wrapped := fmt.Errorf("exchange failed: %w", err)
+
+	rec := httptest.NewRecorder()
+	server.WriteError(rec, wrapped)
+
+	if rec.Code != 400 {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	if decodeErr := json.Unmarshal(rec.Body.Bytes(), &body); decodeErr != nil {
+		t.Fatalf("unmarshal body: %v (body: %s)", decodeErr, rec.Body.Bytes())
+	}
+	if body.Error != string(server.ErrorInvalidGrant) {
+		t.Fatalf("error = %q, want %q", body.Error, server.ErrorInvalidGrant)
+	}
+}
+
+// TestWriteErrorFallsBackForUnknownError covers WriteError's other
+// branch: an error that isn't (and doesn't wrap) a *server.Error gets a
+// generic 500, not a panic or a malformed OAuth body.
+func TestWriteErrorFallsBackForUnknownError(t *testing.T) {
+	rec := httptest.NewRecorder()
+	server.WriteError(rec, errors.New("something unrelated failed"))
+
+	if rec.Code != 500 {
+		t.Fatalf("status = %d, want 500", rec.Code)
 	}
 }

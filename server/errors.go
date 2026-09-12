@@ -1,9 +1,10 @@
 package server
 
 import (
-	"encoding/json"
-	"fmt"
+	"errors"
 	"net/http"
+
+	"github.com/idfoundry/fapigo/internal/httperror"
 )
 
 // ErrorCode is a closed set of OAuth error codes (RFC 6749 §5.2, RFC
@@ -152,10 +153,7 @@ func (e *Error) HTTPStatus() int { return e.httpStatus }
 // Error implements the error interface. Its output includes the
 // internal cause and is meant for logs, not for an OAuth response body.
 func (e *Error) Error() string {
-	if e.cause != nil {
-		return fmt.Sprintf("server: %s: %s: %v", e.code, e.description, e.cause)
-	}
-	return fmt.Sprintf("server: %s: %s", e.code, e.description)
+	return httperror.Message("server", string(e.code), e.description, e.cause)
 }
 
 // Unwrap returns the underlying cause, if any.
@@ -175,14 +173,21 @@ func (e *Error) Unwrap() error { return e.cause }
 // http.ResponseWriter header/status call, it has no effect once a
 // prior write has already sent the response's status line.
 func (e *Error) WriteJSON(w http.ResponseWriter) {
-	if e.nonce != "" {
-		w.Header().Set("DPoP-Nonce", e.nonce)
+	httperror.WriteJSON(w, e.nonce, "", string(e.code), e.description, e.httpStatus)
+}
+
+// WriteError writes err to w: err's own WriteJSON if err is a *Error
+// (as every error this package's own methods return is), or a generic
+// 500 otherwise — the one case this package can't itself produce a
+// *Error for, e.g. a context cancellation surfacing from a dependency
+// before this package ever got the chance to classify the failure.
+// Saves every HTTP adapter from reimplementing this same
+// errors.As-or-fallback dance itself.
+func WriteError(w http.ResponseWriter, err error) {
+	var srvErr *Error
+	if errors.As(err, &srvErr) {
+		srvErr.WriteJSON(w)
+		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(e.httpStatus)
-	// Encoding two plain strings cannot fail.
-	_ = json.NewEncoder(w).Encode(struct {
-		Error            string `json:"error"`
-		ErrorDescription string `json:"error_description,omitempty"`
-	}{Error: string(e.code), ErrorDescription: e.description})
+	http.Error(w, "server_error", http.StatusInternalServerError)
 }

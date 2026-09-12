@@ -1,9 +1,10 @@
 package federation
 
 import (
-	"encoding/json"
-	"fmt"
+	"errors"
 	"net/http"
+
+	"github.com/idfoundry/fapigo/internal/httperror"
 )
 
 // ErrorCode is a closed set of OpenID Federation 1.0 §8.9 error codes
@@ -36,11 +37,7 @@ const (
 // (SubjectFromFetchRequest, RejectUnsupportedListingFilters,
 // SubordinateIssuer.SubordinateStatement) return for a condition
 // OpenID Federation 1.0 §8.9 itself defines a wire error for — safe to
-// pass directly to WriteJSON. Mirrors server.Error's own shape
-// (Code/PublicDescription/HTTPStatus/Unwrap/WriteJSON) for the same
-// reason that package's own doc comment gives: the embedding
-// application never has to decide the status code or body shape for a
-// failure this package already knows how to describe correctly.
+// pass directly to WriteJSON.
 type Error struct {
 	code        ErrorCode
 	httpStatus  int
@@ -74,10 +71,7 @@ func (e *Error) HTTPStatus() int { return e.httpStatus }
 // underlying cause and is meant for logs, not for a federation error
 // response body.
 func (e *Error) Error() string {
-	if e.cause != nil {
-		return fmt.Sprintf("federation: %s: %s: %v", e.code, e.description, e.cause)
-	}
-	return fmt.Sprintf("federation: %s: %s", e.code, e.description)
+	return httperror.Message("federation", string(e.code), e.description, e.cause)
 }
 
 // Unwrap returns the underlying cause, if any.
@@ -94,11 +88,21 @@ func (e *Error) Unwrap() error { return e.cause }
 // http.ResponseWriter header/status call, it has no effect once a
 // prior write has already sent the response's status line.
 func (e *Error) WriteJSON(w http.ResponseWriter) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(e.httpStatus)
-	// Encoding two plain strings cannot fail.
-	_ = json.NewEncoder(w).Encode(struct {
-		Error            string `json:"error"`
-		ErrorDescription string `json:"error_description,omitempty"`
-	}{Error: string(e.code), ErrorDescription: e.description})
+	httperror.WriteJSON(w, "", "", string(e.code), e.description, e.httpStatus)
+}
+
+// WriteError writes err to w: err's own WriteJSON if err is a *Error
+// (as every error this package's own HTTP-adjacent helpers return is),
+// or a generic 500 otherwise. Saves every HTTP adapter from
+// reimplementing this same errors.As-or-fallback dance itself — see
+// cmd/conformance-federation-trust-anchor's own history for exactly
+// this boilerplate, repeated inline at every one of its endpoints
+// before this existed.
+func WriteError(w http.ResponseWriter, err error) {
+	var fedErr *Error
+	if errors.As(err, &fedErr) {
+		fedErr.WriteJSON(w)
+		return
+	}
+	http.Error(w, "server_error", http.StatusInternalServerError)
 }

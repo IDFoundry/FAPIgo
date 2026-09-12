@@ -262,6 +262,40 @@ type CreateTrustMarkParams struct {
 
 // CreateTrustMark builds and signs a Trust Mark JWT for p.
 func CreateTrustMark(p CreateTrustMarkParams) (string, error) {
+	return createTrustMarkLikeJWT(trustMarkLikeParams{
+		Signer: p.Signer, Algorithm: p.Algorithm, KeyID: p.KeyID,
+		Issuer: p.Issuer, Subject: p.Subject, TrustMarkType: p.TrustMarkType,
+		Now: p.Now, Lifetime: p.Lifetime, Delegation: p.Delegation,
+		typ:            trustMarkJWTType,
+		kidRequirement: `OpenID Federation 1.0 §7.1: "Trust Mark JWTs MUST include the kid header parameter"`,
+	})
+}
+
+// trustMarkLikeParams is the common shape CreateTrustMark and
+// CreateTrustMarkDelegation both build and sign — the two JWT types
+// differ only in their "typ" header, the wording of their (identical)
+// kid requirement, and whether a "delegation" claim is meaningful at
+// all (only for a Trust Mark itself, never for a Delegation, which
+// createTrustMarkLikeJWT's own caller enforces by simply never setting
+// Delegation for the latter).
+type trustMarkLikeParams struct {
+	Signer         crypto.Signer
+	Algorithm      fapi.SignatureAlgorithm
+	KeyID          string
+	Issuer         string
+	Subject        string
+	TrustMarkType  string
+	Now            time.Time
+	Lifetime       time.Duration
+	Delegation     string
+	typ            string
+	kidRequirement string
+}
+
+// createTrustMarkLikeJWT builds and signs a Trust Mark or Trust Mark
+// Delegation JWT for p — see trustMarkLikeParams' own doc comment for
+// what actually varies between the two.
+func createTrustMarkLikeJWT(p trustMarkLikeParams) (string, error) {
 	if p.Signer == nil {
 		return "", fmt.Errorf("federation: signer is nil")
 	}
@@ -269,7 +303,7 @@ func CreateTrustMark(p CreateTrustMarkParams) (string, error) {
 		return "", fmt.Errorf("federation: invalid algorithm %v", p.Algorithm)
 	}
 	if p.KeyID == "" {
-		return "", fmt.Errorf("federation: key id is required (OpenID Federation 1.0 §7.1: \"Trust Mark JWTs MUST include the kid header parameter\")")
+		return "", fmt.Errorf("federation: key id is required (%s)", p.kidRequirement)
 	}
 	if p.Issuer == "" {
 		return "", fmt.Errorf("federation: issuer is empty")
@@ -298,7 +332,7 @@ func CreateTrustMark(p CreateTrustMarkParams) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("federation: marshal claims: %w", err)
 	}
-	header := jose.Header{Algorithm: p.Algorithm, Type: trustMarkJWTType, KeyID: p.KeyID}
+	header := jose.Header{Algorithm: p.Algorithm, Type: p.typ, KeyID: p.KeyID}
 	token, err := jose.Sign(p.Signer, header, payload)
 	if err != nil {
 		return "", fmt.Errorf("federation: %w", err)
@@ -533,43 +567,11 @@ type CreateTrustMarkDelegationParams struct {
 // CreateTrustMarkDelegation builds and signs a Trust Mark Delegation
 // JWT for p.
 func CreateTrustMarkDelegation(p CreateTrustMarkDelegationParams) (string, error) {
-	if p.Signer == nil {
-		return "", fmt.Errorf("federation: signer is nil")
-	}
-	if !p.Algorithm.IsValid() {
-		return "", fmt.Errorf("federation: invalid algorithm %v", p.Algorithm)
-	}
-	if p.KeyID == "" {
-		return "", fmt.Errorf("federation: key id is required (OpenID Federation 1.0 §7.2: \"Trust Mark delegation JWTs MUST include the kid header parameter\")")
-	}
-	if p.Issuer == "" {
-		return "", fmt.Errorf("federation: issuer is empty")
-	}
-	if p.Subject == "" {
-		return "", fmt.Errorf("federation: subject is empty")
-	}
-	if p.TrustMarkType == "" {
-		return "", fmt.Errorf("federation: trust mark type is empty")
-	}
-	if p.Now.IsZero() {
-		return "", fmt.Errorf("federation: now is zero")
-	}
-
-	claims := map[string]any{
-		"iss": p.Issuer, "sub": p.Subject, "trust_mark_type": p.TrustMarkType, "iat": p.Now.Unix(),
-	}
-	if p.Lifetime > 0 {
-		claims["exp"] = p.Now.Add(p.Lifetime).Unix()
-	}
-
-	payload, err := json.Marshal(claims)
-	if err != nil {
-		return "", fmt.Errorf("federation: marshal claims: %w", err)
-	}
-	header := jose.Header{Algorithm: p.Algorithm, Type: trustMarkDelegationJWTType, KeyID: p.KeyID}
-	token, err := jose.Sign(p.Signer, header, payload)
-	if err != nil {
-		return "", fmt.Errorf("federation: %w", err)
-	}
-	return token, nil
+	return createTrustMarkLikeJWT(trustMarkLikeParams{
+		Signer: p.Signer, Algorithm: p.Algorithm, KeyID: p.KeyID,
+		Issuer: p.Issuer, Subject: p.Subject, TrustMarkType: p.TrustMarkType,
+		Now: p.Now, Lifetime: p.Lifetime,
+		typ:            trustMarkDelegationJWTType,
+		kidRequirement: `OpenID Federation 1.0 §7.2: "Trust Mark delegation JWTs MUST include the kid header parameter"`,
+	})
 }

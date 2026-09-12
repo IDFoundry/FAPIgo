@@ -3,7 +3,6 @@ package main
 import (
 	"net/http"
 
-	"github.com/idfoundry/fapigo/internal/par"
 	"github.com/idfoundry/fapigo/server"
 )
 
@@ -23,16 +22,6 @@ func parHandler(srv *server.Server) http.HandlerFunc {
 			writeOAuthJSONError(w, err)
 			return
 		}
-		body, err := par.EncodeResult(par.PushResult{RequestURI: result.RequestURI.String(), ExpiresIn: result.ExpiresIn})
-		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		if result.NextDPoPNonce != "" {
-			w.Header().Set("DPoP-Nonce", result.NextDPoPNonce)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write(body)
+		result.WriteJSON(w)
 	}
 }

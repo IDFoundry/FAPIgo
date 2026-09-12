@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -150,6 +151,30 @@ type PushAuthorizationResult struct {
 	// pick one up as early as PAR. Always "" when Dependencies.Nonces is
 	// nil.
 	NextDPoPNonce string
+}
+
+// WriteJSON writes r as a complete RFC 9126 §2.2 PAR response to w: the
+// DPoP-Nonce header when NextDPoPNonce is non-empty (RFC 9449 §8), the
+// "application/json" Content-Type, HTTP 201 Created (§2.2's own
+// required status), and a {"request_uri": ..., "expires_in": ...}
+// body. Every r this package's own PushAuthorizationRequest returns is
+// safe to pass here — RequestURI is only ever non-empty (there is no
+// exported way to construct a RequestURI otherwise) and ExpiresIn only
+// ever positive on a genuinely successful result.
+//
+// Must be called before anything else writes to w — like every
+// http.ResponseWriter header/status call, it has no effect once a
+// prior write has already sent the response's status line.
+func (r PushAuthorizationResult) WriteJSON(w http.ResponseWriter) {
+	// par.EncodeResult's own validation cannot fail for a legitimately
+	// successful r — see this method's own doc comment.
+	body, _ := par.EncodeResult(par.PushResult{RequestURI: r.RequestURI.String(), ExpiresIn: r.ExpiresIn})
+	if r.NextDPoPNonce != "" {
+		w.Header().Set("DPoP-Nonce", r.NextDPoPNonce)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_, _ = w.Write(body)
 }
 
 // PushAuthorizationRequest authenticates the client, verifies either its

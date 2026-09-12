@@ -162,8 +162,8 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 		CodeChallengeMethodsSupported: []string{"S256"},
 
 		TokenEndpointAuthMethodsSupported:          []string{storage.ClientAuthMethodPrivateKeyJWT.String()},
-		TokenEndpointAuthSigningAlgValuesSupported: algorithmSetStrings(s.cfg.Algorithms.ClientAssertion),
-		RequestObjectSigningAlgValuesSupported:     algorithmSetStrings(s.cfg.Algorithms.RequestObject),
+		TokenEndpointAuthSigningAlgValuesSupported: s.cfg.Algorithms.ClientAssertion.Strings(),
+		RequestObjectSigningAlgValuesSupported:     s.cfg.Algorithms.RequestObject.Strings(),
 
 		RequirePushedAuthorizationRequests:         true,
 		AuthorizationResponseIssParameterSupported: true,
@@ -183,19 +183,19 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 	}
 
 	if len(s.cfg.Algorithms.IDTokenEncryptionKeyManagement) > 0 {
-		md.IDTokenEncryptionAlgValuesSupported = algorithmSetStrings(s.cfg.Algorithms.IDTokenEncryptionKeyManagement)
+		md.IDTokenEncryptionAlgValuesSupported = s.cfg.Algorithms.IDTokenEncryptionKeyManagement.Strings()
 	}
 	if len(s.cfg.Algorithms.IDTokenEncryptionContentEncryption) > 0 {
-		md.IDTokenEncryptionEncValuesSupported = algorithmSetStrings(s.cfg.Algorithms.IDTokenEncryptionContentEncryption)
+		md.IDTokenEncryptionEncValuesSupported = s.cfg.Algorithms.IDTokenEncryptionContentEncryption.Strings()
 	}
 	if s.cfg.Algorithms.UserInfo != 0 {
 		md.UserinfoSigningAlgValuesSupported = []string{s.cfg.Algorithms.UserInfo.String()}
 	}
 	if len(s.cfg.Algorithms.UserInfoEncryptionKeyManagement) > 0 {
-		md.UserinfoEncryptionAlgValuesSupported = algorithmSetStrings(s.cfg.Algorithms.UserInfoEncryptionKeyManagement)
+		md.UserinfoEncryptionAlgValuesSupported = s.cfg.Algorithms.UserInfoEncryptionKeyManagement.Strings()
 	}
 	if len(s.cfg.Algorithms.UserInfoEncryptionContentEncryption) > 0 {
-		md.UserinfoEncryptionEncValuesSupported = algorithmSetStrings(s.cfg.Algorithms.UserInfoEncryptionContentEncryption)
+		md.UserinfoEncryptionEncValuesSupported = s.cfg.Algorithms.UserInfoEncryptionContentEncryption.Strings()
 	}
 	if !s.cfg.MTLSEndpoints.IsZero() {
 		md.MTLSEndpointAliases = &MTLSEndpointAliases{
@@ -228,7 +228,7 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 		md.BackchannelTokenDeliveryModesSupported = []string{
 			storage.BackchannelTokenDeliveryModePoll.String(), storage.BackchannelTokenDeliveryModePing.String(),
 		}
-		md.BackchannelAuthenticationRequestSigningAlgValuesSupported = algorithmSetStrings(s.cfg.Algorithms.BackchannelAuthenticationRequest)
+		md.BackchannelAuthenticationRequestSigningAlgValuesSupported = s.cfg.Algorithms.BackchannelAuthenticationRequest.Strings()
 		md.GrantTypesSupported = append(md.GrantTypesSupported, CIBAGrantType)
 	}
 

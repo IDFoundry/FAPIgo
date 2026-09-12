@@ -37,12 +37,19 @@
 // itself, and never cross-checking a Trust Anchor's own
 // "trust_mark_owners" claim to know whether a delegation is required at
 // all (a federation.Resolver's own concern; see its VerifyTrustMark).
+// trustmarkstatus.go covers the Trust Mark Status Response JWT (§8) the
+// identical way — TrustMarkStatusResponse/ParseTrustMarkStatusResponse/
+// Verify/CreateTrustMarkStatusResponse — one JWT in isolation, with the
+// live query-and-verify sequence itself living in
+// federation.Resolver.CheckTrustMarkStatus.
 // federation.TrustMarkIssuer wraps CreateTrustMark/
-// CreateTrustMarkDelegation the same way SelfIssuer/SubordinateIssuer
-// wrap this package's own Create, for a caller acting as a Trust Mark
-// Issuer or a type's real owner.
-// This first version deliberately does not implement the Trust Mark
-// Status endpoint (§8) or Trust Marked Entities Listing endpoint (§9)
-// — both live alternatives/supplements to the offline validation
-// procedure this package implements, unrelated to issuance itself.
+// CreateTrustMarkDelegation/CreateTrustMarkStatusResponse the same way
+// SelfIssuer/SubordinateIssuer wrap this package's own Create, for a
+// caller acting as a Trust Mark Issuer or a type's real owner.
+// Trust Marked Entities Listing (§9's first endpoint) needs no JWT type
+// of its own at all — its response is a bare JSON array, so
+// federation.TrustMarkListingFilters' request-shape validation is the
+// whole of what §9 needs from this package. Not implemented: the
+// adjacent Trust Mark endpoint (§9's third endpoint, a subject
+// retrieving its own Trust Mark by type).
 package federation

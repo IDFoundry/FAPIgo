@@ -86,4 +86,27 @@ var (
 	// ErrTrustMarkDelegationNotYetValid indicates the delegation's iat
 	// claim is in the future beyond the configured clock-skew tolerance.
 	ErrTrustMarkDelegationNotYetValid = errors.New("federation: trust mark delegation is not yet valid")
+
+	// ErrTrustMarkStatusResponseWrongType indicates a Trust Mark Status
+	// Response JWT's "typ" header was not
+	// "trust-mark-status-response+jwt" (OpenID Federation 1.0 §8's own
+	// "Trust Mark Status Responses without a typ header parameter or
+	// with a different typ value MUST be rejected").
+	ErrTrustMarkStatusResponseWrongType = errors.New("federation: trust mark status response header typ is not trust-mark-status-response+jwt")
+
+	// ErrTrustMarkStatusResponseIssuerMismatch indicates a Trust Mark
+	// Status Response's own "iss" claim did not equal the Trust Mark
+	// Issuer the caller queried.
+	ErrTrustMarkStatusResponseIssuerMismatch = errors.New("federation: trust mark status response's iss does not match the queried issuer")
+
+	// ErrTrustMarkStatusResponseTrustMarkMismatch indicates a Trust Mark
+	// Status Response's own "trust_mark" claim did not equal the Trust
+	// Mark the caller actually queried about — without this check, a
+	// Trust Mark Issuer's response about a different mark it happened
+	// to also answer could be replayed as an answer to this query.
+	ErrTrustMarkStatusResponseTrustMarkMismatch = errors.New("federation: trust mark status response's trust_mark does not match the queried trust mark")
+
+	// ErrTrustMarkStatusResponseNotYetValid indicates the response's iat
+	// claim is in the future beyond the configured clock-skew tolerance.
+	ErrTrustMarkStatusResponseNotYetValid = errors.New("federation: trust mark status response is not yet valid")
 )

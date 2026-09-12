@@ -2,11 +2,15 @@ package federation
 
 import (
 	"context"
+	"crypto"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"strings"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/fapihttp"
 	intfed "github.com/idfoundry/fapigo/internal/federation"
 	"github.com/idfoundry/fapigo/internal/jose"
 )
@@ -89,74 +93,127 @@ func (r *Resolver) checkTrustMarkDelegation(ctx context.Context, trustAnchorID s
 	return nil
 }
 
-// verifyTrustMarkAgainstJWKS mirrors Resolver.verifyAgainstJWKS exactly
-// (resolve candidate keys matching algorithm/kid, try Verify against
-// each), but for a TrustMark rather than an intfed.Statement — kept as
-// a separate, small function rather than generalizing
-// verifyAgainstJWKS itself, since the two verified types have distinct
-// Verify signatures and this is the only other caller.
-func (r *Resolver) verifyTrustMarkAgainstJWKS(tm intfed.TrustMark, jwksRaw json.RawMessage, expectedSubject, expectedTrustMarkType string, algorithm fapi.SignatureAlgorithm, now time.Time) (intfed.TrustMarkClaims, error) {
+// verifyAgainstCandidateKeys resolves jwksRaw's own keys matching
+// algorithm (and kid, if non-empty), calling verify with each
+// candidate's public key until one succeeds. Shared by every "parsed
+// token type + its own Verify(pub, policy) signature" this file checks
+// against a resolved JWKS (TrustMark, TrustMarkDelegation,
+// TrustMarkStatusResponse) — extracted once a third near-identical copy
+// of this exact loop was about to exist (see PR #274's own
+// SonarCloud-duplication lesson for why this is done proactively here
+// rather than reactively after a gate failure).
+func verifyAgainstCandidateKeys[C any](jwksRaw json.RawMessage, kid string, algorithm fapi.SignatureAlgorithm, verify func(pub crypto.PublicKey) (C, error)) (C, error) {
+	var zero C
 	candidates, err := jose.ParseJWKSet(jwksRaw)
 	if err != nil {
-		return intfed.TrustMarkClaims{}, fmt.Errorf("parse jwks: %w", err)
+		return zero, fmt.Errorf("parse jwks: %w", err)
 	}
+	var lastErr error
+	tried := false
+	for _, c := range candidates {
+		if c.Algorithm != algorithm {
+			continue
+		}
+		if kid != "" && c.KeyID != kid {
+			continue
+		}
+		tried = true
+		claims, err := verify(c.PublicKey)
+		if err == nil {
+			return claims, nil
+		}
+		lastErr = err
+	}
+	if !tried {
+		return zero, fmt.Errorf("no candidate key found for algorithm %v kid %q among %d keys", algorithm, kid, len(candidates))
+	}
+	return zero, fmt.Errorf("signature verification failed against every candidate key: %w", lastErr)
+}
+
+// verifyTrustMarkAgainstJWKS verifies tm against jwksRaw's own
+// candidate keys.
+func (r *Resolver) verifyTrustMarkAgainstJWKS(tm intfed.TrustMark, jwksRaw json.RawMessage, expectedSubject, expectedTrustMarkType string, algorithm fapi.SignatureAlgorithm, now time.Time) (intfed.TrustMarkClaims, error) {
 	policy := intfed.TrustMarkVerifyPolicy{
 		ExpectedSubject: expectedSubject, ExpectedTrustMarkType: expectedTrustMarkType,
 		Algorithm: algorithm, Now: now, MaxClockSkew: r.cfg.Limits.MaxClockSkew,
 	}
-	kid := tm.KeyID()
-	var lastErr error
-	tried := false
-	for _, c := range candidates {
-		if c.Algorithm != algorithm {
-			continue
-		}
-		if kid != "" && c.KeyID != kid {
-			continue
-		}
-		tried = true
-		claims, err := tm.Verify(c.PublicKey, policy)
-		if err == nil {
-			return claims, nil
-		}
-		lastErr = err
-	}
-	if !tried {
-		return intfed.TrustMarkClaims{}, fmt.Errorf("no candidate key found for algorithm %v kid %q among %d keys", algorithm, kid, len(candidates))
-	}
-	return intfed.TrustMarkClaims{}, fmt.Errorf("signature verification failed against every candidate key: %w", lastErr)
+	return verifyAgainstCandidateKeys(jwksRaw, tm.KeyID(), algorithm, func(pub crypto.PublicKey) (intfed.TrustMarkClaims, error) {
+		return tm.Verify(pub, policy)
+	})
 }
 
-// verifyTrustMarkDelegationAgainstJWKS mirrors verifyTrustMarkAgainstJWKS
-// exactly, for an intfed.TrustMarkDelegation rather than a TrustMark.
+// verifyTrustMarkDelegationAgainstJWKS verifies d against jwksRaw's own
+// candidate keys.
 func (r *Resolver) verifyTrustMarkDelegationAgainstJWKS(d intfed.TrustMarkDelegation, jwksRaw json.RawMessage, expectedIssuer, expectedSubject, expectedTrustMarkType string, algorithm fapi.SignatureAlgorithm, now time.Time) (intfed.TrustMarkDelegationClaims, error) {
-	candidates, err := jose.ParseJWKSet(jwksRaw)
-	if err != nil {
-		return intfed.TrustMarkDelegationClaims{}, fmt.Errorf("parse jwks: %w", err)
-	}
 	policy := intfed.TrustMarkDelegationVerifyPolicy{
 		ExpectedIssuer: expectedIssuer, ExpectedSubject: expectedSubject, ExpectedTrustMarkType: expectedTrustMarkType,
 		Algorithm: algorithm, Now: now, MaxClockSkew: r.cfg.Limits.MaxClockSkew,
 	}
-	kid := d.KeyID()
-	var lastErr error
-	tried := false
-	for _, c := range candidates {
-		if c.Algorithm != algorithm {
-			continue
-		}
-		if kid != "" && c.KeyID != kid {
-			continue
-		}
-		tried = true
-		claims, err := d.Verify(c.PublicKey, policy)
-		if err == nil {
-			return claims, nil
-		}
-		lastErr = err
+	return verifyAgainstCandidateKeys(jwksRaw, d.KeyID(), algorithm, func(pub crypto.PublicKey) (intfed.TrustMarkDelegationClaims, error) {
+		return d.Verify(pub, policy)
+	})
+}
+
+// CheckTrustMarkStatus queries trustMarkToken's own issuer for its
+// current status (OpenID Federation 1.0 §8) and returns the verified
+// response claims. §8: "The query MUST be sent to the Trust Mark
+// Issuer" — trustMarkToken's own unverified "iss" claim names it, and
+// that issuer is resolved as a fresh Trust Chain (the same way
+// VerifyTrustMark already establishes trust in a Trust Mark's issuer)
+// before its published federation_trust_mark_status_endpoint is ever
+// queried or its response ever trusted.
+//
+// A Trust Mark Issuer that answers with HTTP 404 for an unknown Trust
+// Mark (§8's own "MUST respond with 404") surfaces here as
+// fapihttp.ErrUnexpectedStatus wrapping that status code — the same as
+// any other unexpected status from a Fetch/Post call, not a dedicated
+// typed error in this first version.
+func (r *Resolver) CheckTrustMarkStatus(ctx context.Context, trustMarkToken string) (intfed.TrustMarkStatusResponseClaims, error) {
+	if trustMarkToken == "" {
+		return intfed.TrustMarkStatusResponseClaims{}, fmt.Errorf("federation: trust mark is empty")
 	}
-	if !tried {
-		return intfed.TrustMarkDelegationClaims{}, fmt.Errorf("no candidate key found for algorithm %v kid %q among %d keys", algorithm, kid, len(candidates))
+	tm, err := intfed.ParseTrustMark(trustMarkToken)
+	if err != nil {
+		return intfed.TrustMarkStatusResponseClaims{}, fmt.Errorf("federation: parse trust mark: %w", err)
 	}
-	return intfed.TrustMarkDelegationClaims{}, fmt.Errorf("signature verification failed against every candidate key: %w", lastErr)
+
+	issuer, err := r.Resolve(ctx, tm.ClaimedIssuer())
+	if err != nil {
+		return intfed.TrustMarkStatusResponseClaims{}, fmt.Errorf("federation: resolve trust mark issuer %q: %w", tm.ClaimedIssuer(), err)
+	}
+	issuerMeta, err := parseEntityMetadata(issuer.Metadata)
+	if err != nil {
+		return intfed.TrustMarkStatusResponseClaims{}, fmt.Errorf("federation: parse trust mark issuer's own federation_entity metadata: %w", err)
+	}
+	if issuerMeta.TrustMarkStatusEndpoint == "" {
+		return intfed.TrustMarkStatusResponseClaims{}, fmt.Errorf("federation: trust mark issuer %q published no federation_trust_mark_status_endpoint", tm.ClaimedIssuer())
+	}
+	endpoint, err := url.Parse(issuerMeta.TrustMarkStatusEndpoint)
+	if err != nil {
+		return intfed.TrustMarkStatusResponseClaims{}, fmt.Errorf("federation: parse trust mark issuer's own status endpoint: %w", err)
+	}
+
+	body := url.Values{"trust_mark": {trustMarkToken}}.Encode()
+	res, err := r.deps.HTTP.Post(ctx, fapihttp.PostRequest{
+		URL: endpoint, Body: []byte(body), ContentType: "application/x-www-form-urlencoded",
+		ExpectedContentType: "application/trust-mark-status-response+jwt",
+	})
+	if err != nil {
+		return intfed.TrustMarkStatusResponseClaims{}, fmt.Errorf("federation: query trust mark status: %w", err)
+	}
+
+	response, err := intfed.ParseTrustMarkStatusResponse(strings.TrimSpace(string(res.Body)))
+	if err != nil {
+		return intfed.TrustMarkStatusResponseClaims{}, fmt.Errorf("federation: parse trust mark status response: %w", err)
+	}
+	claims, err := verifyAgainstCandidateKeys(issuer.JWKS, response.KeyID(), response.Algorithm(), func(pub crypto.PublicKey) (intfed.TrustMarkStatusResponseClaims, error) {
+		return response.Verify(pub, intfed.TrustMarkStatusResponseVerifyPolicy{
+			ExpectedIssuer: tm.ClaimedIssuer(), ExpectedTrustMark: trustMarkToken,
+			Algorithm: response.Algorithm(), Now: r.deps.Clock.Now(), MaxClockSkew: r.cfg.Limits.MaxClockSkew,
+		})
+	})
+	if err != nil {
+		return intfed.TrustMarkStatusResponseClaims{}, fmt.Errorf("federation: trust mark status response: %w", err)
+	}
+	return claims, nil
 }

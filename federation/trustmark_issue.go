@@ -47,18 +47,25 @@ type TrustMarkIssueDependencies struct {
 	Clock Clock
 }
 
-// TrustMarkIssuer signs Trust Marks (OpenID Federation 1.0 §7.1) and
-// Trust Mark Delegations (§7.2). Construct one with NewTrustMarkIssuer.
+// TrustMarkIssuer signs Trust Marks (OpenID Federation 1.0 §7.1), Trust
+// Mark Delegations (§7.2), and Trust Mark Status Responses (§8).
+// Construct one with NewTrustMarkIssuer.
 //
 // Like every other type in this package, TrustMarkIssuer is
-// transport-agnostic: unlike Fetch/List (OpenID Federation 1.0 §9/§8.2,
-// which SubjectFromFetchRequest/RejectUnsupportedListingFilters cover),
-// there is no federation-defined HTTP endpoint for "issue me a Trust
-// Mark" at all — issuance is an out-of-band administrative act (an
-// entity applies for certification, an operator decides to grant it),
-// so TrustMarkIssuer's own methods return plain errors, not a
-// federation.Error: there is no request for the error's HTTPStatus to
-// answer.
+// transport-agnostic — it signs and returns a token, never serving
+// HTTP itself. TrustMark and Delegation answer to no federation-defined
+// HTTP endpoint at all: issuance is an out-of-band administrative act
+// (an entity applies for certification, an operator decides to grant
+// it). StatusResponse is different — the Status endpoint (§8) IS a
+// real, request-driven endpoint — but the request-shape validation for
+// it (TrustMarkFromStatusRequest) is still a separate, small net/http
+// helper, the same division SubordinateIssuer/SubjectFromFetchRequest
+// already establish for Fetch. Every method here returns a plain
+// error, not a federation.Error: whether a status query is even
+// answerable (is TrustMark actually one this issuer issued?) is a
+// caller lookup this package has no way to validate itself, so there's
+// no wire-shaped failure this type could produce on its own to attach
+// an HTTPStatus to.
 type TrustMarkIssuer struct {
 	cfg  TrustMarkIssueConfig
 	deps TrustMarkIssueDependencies
@@ -182,6 +189,49 @@ func (i *TrustMarkIssuer) Delegation(p DelegationParams) (string, error) {
 	})
 	if err != nil {
 		return "", fmt.Errorf("federation: issue trust mark delegation for %q: %w", p.Subject, err)
+	}
+	return token, nil
+}
+
+// StatusResponseParams describes one Trust Mark Status Response to
+// issue.
+type StatusResponseParams struct {
+	// TrustMark is the "trust_mark" claim — the exact Trust Mark JWT
+	// (as received in a Trust Mark Status request, see
+	// TrustMarkFromStatusRequest) this response is about. Required.
+	TrustMark string
+
+	// Status is the "status" claim — whatever this Trust Mark Issuer's
+	// own storage says about TrustMark's current standing. This package
+	// tracks no revocation/expiry state of its own; the caller's own
+	// lookup (matching TrustMark's own claims — subject, type, issuance
+	// time — against however it records issued marks) decides this
+	// value. Required.
+	Status intfed.TrustMarkStatus
+}
+
+// StatusResponse signs and returns a Trust Mark Status Response
+// (OpenID Federation 1.0 §8: iss == Config.EntityID) for p. The
+// returned token is a trust-mark-status-response+jwt compact
+// serialization, meant to be served verbatim, with Content-Type
+// "application/trust-mark-status-response+jwt", from this entity's own
+// federation_trust_mark_status_endpoint in response to a request
+// TrustMarkFromStatusRequest already validated.
+func (i *TrustMarkIssuer) StatusResponse(p StatusResponseParams) (string, error) {
+	if p.TrustMark == "" {
+		return "", fmt.Errorf("federation: trust mark status response: trust mark is required")
+	}
+	if p.Status == "" {
+		return "", fmt.Errorf("federation: trust mark status response: status is required")
+	}
+
+	token, err := intfed.CreateTrustMarkStatusResponse(intfed.CreateTrustMarkStatusResponseParams{
+		Signer: i.deps.Signer, Algorithm: i.deps.Algorithm, KeyID: i.deps.KeyID,
+		Issuer: i.cfg.EntityID, TrustMark: p.TrustMark, Status: p.Status,
+		Now: i.deps.Clock.Now(),
+	})
+	if err != nil {
+		return "", fmt.Errorf("federation: issue trust mark status response: %w", err)
 	}
 	return token, nil
 }

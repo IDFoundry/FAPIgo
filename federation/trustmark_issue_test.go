@@ -219,4 +219,67 @@ func TestTrustMarkAndDelegationWrapCreateFailure(t *testing.T) {
 	}); err == nil {
 		t.Fatal("Delegation(invalid algorithm) = nil error, want error")
 	}
+	if _, err := i.StatusResponse(federation.StatusResponseParams{
+		TrustMark: "a.b.c", Status: intfed.TrustMarkStatusActive,
+	}); err == nil {
+		t.Fatal("StatusResponse(invalid algorithm) = nil error, want error")
+	}
+}
+
+func TestStatusResponseRoundTrips(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	i, err := federation.NewTrustMarkIssuer(validTrustMarkIssueConfig(), federation.TrustMarkIssueDependencies{
+		Signer: key, Algorithm: fapi.ES256, KeyID: "issuer-kid", Clock: fixedClock{now: now},
+	})
+	if err != nil {
+		t.Fatalf("NewTrustMarkIssuer: %v", err)
+	}
+
+	token, err := i.StatusResponse(federation.StatusResponseParams{
+		TrustMark: "a.b.c", Status: intfed.TrustMarkStatusRevoked,
+	})
+	if err != nil {
+		t.Fatalf("StatusResponse: %v", err)
+	}
+
+	r, err := intfed.ParseTrustMarkStatusResponse(token)
+	if err != nil {
+		t.Fatalf("intfed.ParseTrustMarkStatusResponse: %v", err)
+	}
+	if r.ClaimedIssuer() != "https://issuer.example.org" || r.ClaimedTrustMark() != "a.b.c" {
+		t.Errorf("iss/trust_mark = %q/%q", r.ClaimedIssuer(), r.ClaimedTrustMark())
+	}
+	if r.KeyID() != "issuer-kid" {
+		t.Errorf("KeyID = %q, want \"issuer-kid\"", r.KeyID())
+	}
+	claims, err := r.Verify(&key.PublicKey, intfed.TrustMarkStatusResponseVerifyPolicy{
+		ExpectedIssuer: "https://issuer.example.org", ExpectedTrustMark: "a.b.c",
+		Algorithm: fapi.ES256, Now: now,
+	})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if claims.Status != intfed.TrustMarkStatusRevoked {
+		t.Errorf("claims.Status = %q, want revoked", claims.Status)
+	}
+}
+
+func TestStatusResponseRejectsInvalidParams(t *testing.T) {
+	i, err := federation.NewTrustMarkIssuer(validTrustMarkIssueConfig(), validTrustMarkIssueDeps(t))
+	if err != nil {
+		t.Fatalf("NewTrustMarkIssuer: %v", err)
+	}
+	cases := map[string]federation.StatusResponseParams{
+		"empty trust mark": {Status: intfed.TrustMarkStatusActive},
+		"empty status":     {TrustMark: "a.b.c"},
+	}
+	for name, p := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := i.StatusResponse(p); err == nil {
+				t.Fatalf("StatusResponse(%s) = nil error, want error", name)
+			}
+		})
+	}
 }

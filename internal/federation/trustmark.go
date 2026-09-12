@@ -328,16 +328,7 @@ func createTrustMarkLikeJWT(p trustMarkLikeParams) (string, error) {
 		claims["delegation"] = p.Delegation
 	}
 
-	payload, err := json.Marshal(claims)
-	if err != nil {
-		return "", fmt.Errorf("federation: marshal claims: %w", err)
-	}
-	header := jose.Header{Algorithm: p.Algorithm, Type: p.typ, KeyID: p.KeyID}
-	token, err := jose.Sign(p.Signer, header, payload)
-	if err != nil {
-		return "", fmt.Errorf("federation: %w", err)
-	}
-	return token, nil
+	return signClaims(p.Signer, p.Algorithm, p.KeyID, p.typ, claims)
 }
 
 // trustMarkDelegationJWTType is the JWS "typ" header value every Trust

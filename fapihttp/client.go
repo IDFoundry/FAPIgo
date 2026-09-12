@@ -13,6 +13,12 @@ import (
 	"time"
 )
 
+// contentTypeHeader is the one HTTP header name this package ever sets
+// or reads itself (a request's own outbound Content-Type for Post, and
+// a response's inbound Content-Type for both Fetch and Post's own
+// checkContentType call).
+const contentTypeHeader = "Content-Type"
+
 // HTTPClient is the narrow interface Client wraps — it matches
 // *http.Client's Do method, so a caller can supply either an
 // *http.Client (ideally one built by NewClient) or a purpose-built
@@ -183,19 +189,26 @@ func (c *Client) Fetch(ctx context.Context, req FetchRequest) (FetchResponse, er
 			continue
 		}
 
-		body, readErr := readBounded(res.Body, c.cfg.MaxResponseBytes)
-		_ = res.Body.Close()
-		if readErr != nil {
-			return FetchResponse{}, readErr
-		}
-		if res.StatusCode != http.StatusOK {
-			return FetchResponse{}, fmt.Errorf("%w: %d", ErrUnexpectedStatus, res.StatusCode)
-		}
-		if err := checkContentType(res.Header.Get("Content-Type"), req.ExpectedContentType, req.AlternateContentTypes); err != nil {
-			return FetchResponse{}, err
-		}
-		return FetchResponse{Body: body, StatusCode: res.StatusCode}, nil
+		return c.readResponse(res, c.cfg.MaxResponseBytes, req.ExpectedContentType, req.AlternateContentTypes)
 	}
+}
+
+// readResponse reads and validates res the same way for both Fetch's
+// final (non-redirect) response and every Post response: bounded read,
+// non-200 rejected, Content-Type checked. Always closes res.Body.
+func (c *Client) readResponse(res *http.Response, maxBytes int64, expectedContentType string, alternateContentTypes []string) (FetchResponse, error) {
+	body, readErr := readBounded(res.Body, maxBytes)
+	_ = res.Body.Close()
+	if readErr != nil {
+		return FetchResponse{}, readErr
+	}
+	if res.StatusCode != http.StatusOK {
+		return FetchResponse{}, fmt.Errorf("%w: %d", ErrUnexpectedStatus, res.StatusCode)
+	}
+	if err := checkContentType(res.Header.Get(contentTypeHeader), expectedContentType, alternateContentTypes); err != nil {
+		return FetchResponse{}, err
+	}
+	return FetchResponse{Body: body, StatusCode: res.StatusCode}, nil
 }
 
 // PostRequest describes one outbound POST — the counterpart to
@@ -256,19 +269,7 @@ func (c *Client) Post(ctx context.Context, req PostRequest) (FetchResponse, erro
 	if err != nil {
 		return FetchResponse{}, err
 	}
-
-	body, readErr := readBounded(res.Body, c.cfg.MaxResponseBytes)
-	_ = res.Body.Close()
-	if readErr != nil {
-		return FetchResponse{}, readErr
-	}
-	if res.StatusCode != http.StatusOK {
-		return FetchResponse{}, fmt.Errorf("%w: %d", ErrUnexpectedStatus, res.StatusCode)
-	}
-	if err := checkContentType(res.Header.Get("Content-Type"), req.ExpectedContentType, req.AlternateContentTypes); err != nil {
-		return FetchResponse{}, err
-	}
-	return FetchResponse{Body: body, StatusCode: res.StatusCode}, nil
+	return c.readResponse(res, c.cfg.MaxResponseBytes, req.ExpectedContentType, req.AlternateContentTypes)
 }
 
 func (c *Client) roundTrip(ctx context.Context, target *url.URL) (*http.Response, error) {
@@ -288,7 +289,7 @@ func (c *Client) doRoundTrip(ctx context.Context, method string, target *url.URL
 		return nil, fmt.Errorf("fapihttp: build request: %w", err)
 	}
 	if contentType != "" {
-		httpReq.Header.Set("Content-Type", contentType)
+		httpReq.Header.Set(contentTypeHeader, contentType)
 	}
 	res, err := c.http.Do(httpReq)
 	if err != nil {

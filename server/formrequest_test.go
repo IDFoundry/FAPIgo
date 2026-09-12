@@ -85,3 +85,34 @@ func TestFormRequestFromHTTPAcceptsEmptyBody(t *testing.T) {
 		t.Fatalf("Parameters = %v, want empty", form.Parameters)
 	}
 }
+
+// TestFormRequestGetReturnsFirstMatch covers Get's own first-match
+// semantics, distinct from this package's internal duplicate-rejecting
+// parameter handling — see Get's own doc comment for why that
+// difference is deliberate.
+func TestFormRequestGetReturnsFirstMatch(t *testing.T) {
+	form := server.FormRequest{Parameters: []server.FormParameter{
+		{Name: "grant_type", Value: "authorization_code"},
+		{Name: "grant_type", Value: "refresh_token"},
+		{Name: "code", Value: "abc123"},
+	}}
+
+	if got := form.Get("grant_type"); got != "authorization_code" {
+		t.Fatalf("Get(grant_type) = %q, want %q (first occurrence)", got, "authorization_code")
+	}
+	if got := form.Get("code"); got != "abc123" {
+		t.Fatalf("Get(code) = %q, want %q", got, "abc123")
+	}
+}
+
+// TestFormRequestGetAbsentReturnsEmpty covers Get's other branch: a
+// name that never appears returns "", not an error.
+func TestFormRequestGetAbsentReturnsEmpty(t *testing.T) {
+	form := server.FormRequest{Parameters: []server.FormParameter{
+		{Name: "code", Value: "abc123"},
+	}}
+
+	if got := form.Get("grant_type"); got != "" {
+		t.Fatalf("Get(grant_type) = %q, want \"\" for an absent parameter", got)
+	}
+}

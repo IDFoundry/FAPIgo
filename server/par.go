@@ -96,6 +96,25 @@ type FormRequest struct {
 	Parameters []FormParameter
 }
 
+// Get returns the first value of name in f, or "" if absent — for an
+// adapter that needs to inspect a single parameter (e.g. "grant_type",
+// to pick which Server method to call) before this package's own
+// validation runs. Unlike this package's internal parameter handling,
+// Get does not reject a duplicated name; it silently returns the
+// first occurrence, matching net/url.Values.Get's own first-match
+// semantics. That's fine for routing on a value's mere presence, but
+// never a substitute for actually calling the Server method that
+// value routes to — every real validation (including duplicate
+// rejection) happens there.
+func (f FormRequest) Get(name string) string {
+	for _, p := range f.Parameters {
+		if p.Name == name {
+			return p.Value
+		}
+	}
+	return ""
+}
+
 // PushAuthorizationRequest is the input to Server.PushAuthorizationRequest.
 type PushAuthorizationRequest struct {
 	HTTP FormRequest

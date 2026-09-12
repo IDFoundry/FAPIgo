@@ -25,6 +25,11 @@ where deeper, hard-won knowledge already lives.
   the version and `CHANGELOG.md` — that PR needs its own merge (by a
   human or on explicit instruction) before the new version is actually
   cut/tagged.
+- Write PR descriptions (and commit messages) as a focused summary of
+  what changed and why — never narrate the conversation that produced
+  it (no "the user asked...", "I was told to...", etc.). A reviewer
+  wants the change's own rationale, not a transcript of how it was
+  requested.
 
 ## Where conformance-suite knowledge already lives
 

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
-	"github.com/idfoundry/fapigo/internal/jose"
 )
 
 // CreateParams describes one Entity Statement to create — either an
@@ -177,17 +176,7 @@ func Create(p CreateParams) (string, error) {
 		claims["trust_mark_owners"] = owners
 	}
 
-	payload, err := json.Marshal(claims)
-	if err != nil {
-		return "", fmt.Errorf("federation: marshal claims: %w", err)
-	}
-
-	header := jose.Header{Algorithm: p.Algorithm, Type: jwtType, KeyID: p.KeyID}
-	token, err := jose.Sign(p.Signer, header, payload)
-	if err != nil {
-		return "", fmt.Errorf("federation: %w", err)
-	}
-	return token, nil
+	return signClaims(p.Signer, p.Algorithm, p.KeyID, jwtType, claims)
 }
 
 // constraintsWireValue builds the wire shape parseConstraints expects

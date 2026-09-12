@@ -74,10 +74,28 @@
 // Mark Issuer or a type's real owner — transport-agnostic like
 // everything else here, since (unlike Fetch/List) OpenID Federation 1.0
 // defines no HTTP endpoint for requesting one; issuance is always an
-// out-of-band administrative act. See its own doc comment, and
-// internal/federation's own doc.go "Trust Marks" section, for exactly
-// which parts of §7 this first version does not yet implement (the
-// Trust Mark Status/Trust Marked Entities Listing endpoints, §8/§9).
+// out-of-band administrative act.
+//
+// §7's two live-query companions are both covered too.
+// Resolver.CheckTrustMarkStatus is a real network call (like Resolve
+// itself) — it queries a Trust Mark's own issuer's Trust Mark Status
+// endpoint (§8, POST-only, hence fapihttp.Client.Post) and verifies the
+// signed response the same "resolve the issuer's Trust Chain first"
+// way VerifyTrustMark does. TrustMarkIssuer.StatusResponse and
+// TrustMarkFromStatusRequest are the producer-side counterpart — sign
+// the answer, validate the incoming query's shape — for an embedder
+// serving that endpoint itself; see cmd/conformance-federation-trust-anchor's
+// own doc comment style of reference wiring for the analogous
+// Fetch/List pattern (this package doesn't yet ship one for Status,
+// but the shape is identical). Trust Marked Entities Listing (§9's
+// first endpoint) is request-parsing only — TrustMarkListingFilters —
+// since, like Subordinate Listing, an embedder's own storage of issued
+// Trust Marks answers the actual query. Not covered: the adjacent
+// Trust Mark endpoint (§9's third endpoint, a subject retrieving its
+// own Trust Mark by type) and any revocation/active-tracking storage
+// of this package's own — CheckTrustMarkStatus and StatusResponse
+// exist to move the wire format, never to decide or record a Trust
+// Mark's actual standing.
 //
 // Automatic client registration (OpenID Federation 1.0 §12.1) is
 // implemented by AutomaticClientRepository/AutomaticClientKeySource,

@@ -62,3 +62,48 @@ func RejectUnsupportedListingFilters(r *http.Request) error {
 	}
 	return nil
 }
+
+// TrustMarkFromStatusRequest extracts and validates the "trust_mark"
+// POST form parameter from an OpenID Federation 1.0 §8 Trust Mark
+// Status Request — REQUIRED. Returns a *Error (ErrorInvalidRequest,
+// HTTP 400, ready to pass to WriteJSON) when absent.
+//
+// Only the no-client-authentication shape (POST, parameters in the
+// body) is covered — §8's client-authenticated variant is POST too, so
+// r.PostFormValue already handles both; there is no GET variant to
+// additionally support the way Fetch has one.
+func TrustMarkFromStatusRequest(r *http.Request) (string, error) {
+	trustMark := r.PostFormValue("trust_mark")
+	if trustMark == "" {
+		return "", newError(ErrorInvalidRequest, http.StatusBadRequest, `"trust_mark" is required`, nil)
+	}
+	return trustMark, nil
+}
+
+// TrustMarkListingFilters extracts and validates the query parameters
+// of an OpenID Federation 1.0 §9 Trust Marked Entities Listing Request:
+// "trust_mark_type" (REQUIRED) and "sub" (OPTIONAL, validated as an
+// Entity Identifier when present). Returns a *Error (ErrorInvalidRequest,
+// HTTP 400, ready to pass to WriteJSON) when trust_mark_type is absent
+// or sub is present but malformed.
+//
+// This package offers no way to build the actual filtered list — an
+// embedder's own storage of issued Trust Marks answers the query once
+// these two values are known, the same "caller's own storage decides,
+// this package only validates the request shape" division
+// RejectUnsupportedListingFilters and SubordinateStatementParams
+// already establish.
+func TrustMarkListingFilters(r *http.Request) (trustMarkType, subject string, err error) {
+	query := r.URL.Query()
+	trustMarkType = query.Get("trust_mark_type")
+	if trustMarkType == "" {
+		return "", "", newError(ErrorInvalidRequest, http.StatusBadRequest, `"trust_mark_type" is required`, nil)
+	}
+	subject = query.Get("sub")
+	if subject != "" {
+		if err := ValidEntityID(subject); err != nil {
+			return "", "", newError(ErrorInvalidRequest, http.StatusBadRequest, `"sub" is not a valid Entity Identifier`, err)
+		}
+	}
+	return trustMarkType, subject, nil
+}

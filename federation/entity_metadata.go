@@ -11,12 +11,14 @@ import "encoding/json"
 const federationEntityType = "federation_entity"
 
 // entityMetadata is the subset of an Entity's federation_entity
-// metadata this package's own Resolve needs — just enough to walk a
-// Trust Chain, not a general-purpose federation_entity metadata type.
-// A caller that needs the rest (organization_name, contacts, ...)
-// reads Claims.Metadata["federation_entity"] directly.
+// metadata this package's own Resolve/CheckTrustMarkStatus need — just
+// enough to walk a Trust Chain and query a Trust Mark Status endpoint,
+// not a general-purpose federation_entity metadata type. A caller that
+// needs the rest (organization_name, contacts, ...) reads
+// Claims.Metadata["federation_entity"] directly.
 type entityMetadata struct {
-	FetchEndpoint string `json:"federation_fetch_endpoint"`
+	FetchEndpoint           string `json:"federation_fetch_endpoint"`
+	TrustMarkStatusEndpoint string `json:"federation_trust_mark_status_endpoint"`
 }
 
 // parseEntityMetadata extracts federation_entity metadata from

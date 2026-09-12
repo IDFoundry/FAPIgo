@@ -561,12 +561,12 @@ func buildModuleClient(ctx context.Context, d moduleDriver, module suiteModule) 
 		// needs (Token only; RFC 8705 §3 has no PAR-time
 		// pre-commitment concept), so the MTLS+MTLS combo is correctly
 		// handled by this branch alone.
-		if err := applyMTLSEndpointAliasesForClientAuth(&cfg, discovered); err != nil {
-			return nil, awaitVerdict(rawHTTP, apiBase, module.ID, err.Error())
+		if !discovered.MTLSEndpointAliases.ApplyForClientAuth(&cfg.Endpoints) {
+			return nil, awaitVerdict(rawHTTP, apiBase, module.ID, "issuer does not advertise mtls_endpoint_aliases")
 		}
 	} else if d.SenderConstrainMTLS {
-		if err := applyMTLSEndpointAliases(&cfg, discovered); err != nil {
-			return nil, awaitVerdict(rawHTTP, apiBase, module.ID, err.Error())
+		if !discovered.MTLSEndpointAliases.ApplyForSenderConstrain(&cfg.Endpoints) {
+			return nil, awaitVerdict(rawHTTP, apiBase, module.ID, "issuer does not advertise mtls_endpoint_aliases")
 		}
 	}
 	deps := client.Dependencies{

@@ -24,8 +24,6 @@ import (
 	"math/big"
 	"net/http"
 	"time"
-
-	"github.com/idfoundry/fapigo/client"
 )
 
 // selfSignedClientCert generates a throwaway ECDSA P-256 self-signed
@@ -73,45 +71,4 @@ func mtlsSuiteHTTPClient(cert tls.Certificate) *http.Client {
 	client := insecureSuiteHTTPClient()
 	client.Transport.(*http.Transport).TLSClientConfig.Certificates = []tls.Certificate{cert}
 	return client
-}
-
-// applyMTLSEndpointAliases overrides cfg's Token/BackchannelAuthentication
-// endpoints with discovered's mtls_endpoint_aliases (RFC 8705 §5), when
-// the issuer advertised one — the suite's own mock AS listens for an
-// mTLS-sender-constrained client's calls on a second, alias-only origin
-// ("base_mtls_url" in its own terms). Returns an error string (not
-// awaitVerdict itself, so callers keep their own message prefix) when
-// no alias was advertised at all, since a SenderConstrainMTLS client
-// has nowhere else to send these calls.
-func applyMTLSEndpointAliases(cfg *client.Config, discovered client.DiscoveredMetadata) error {
-	if discovered.MTLSEndpointAliases == nil {
-		return fmt.Errorf("issuer does not advertise mtls_endpoint_aliases")
-	}
-	if !discovered.MTLSEndpointAliases.Token.IsZero() {
-		cfg.Endpoints.Token = discovered.MTLSEndpointAliases.Token
-	}
-	if !discovered.MTLSEndpointAliases.BackchannelAuthentication.IsZero() {
-		cfg.Endpoints.BackchannelAuthentication = discovered.MTLSEndpointAliases.BackchannelAuthentication
-	}
-	return nil
-}
-
-// applyMTLSEndpointAliasesForClientAuth is applyMTLSEndpointAliases' own
-// counterpart for RFC 8705 §2 client authentication (main.go's
-// -client-auth-mtls): covers PushedAuthorizationRequest instead of
-// BackchannelAuthentication, since a certificate-authenticated client
-// (unlike an mTLS-sender-constrained one) must present its certificate
-// at PAR too, not just at the token endpoint — the same asymmetry
-// server/par.go's own authenticateClient enforces on the AS side.
-func applyMTLSEndpointAliasesForClientAuth(cfg *client.Config, discovered client.DiscoveredMetadata) error {
-	if discovered.MTLSEndpointAliases == nil {
-		return fmt.Errorf("issuer does not advertise mtls_endpoint_aliases")
-	}
-	if !discovered.MTLSEndpointAliases.Token.IsZero() {
-		cfg.Endpoints.Token = discovered.MTLSEndpointAliases.Token
-	}
-	if !discovered.MTLSEndpointAliases.PushedAuthorizationRequest.IsZero() {
-		cfg.Endpoints.PushedAuthorizationRequest = discovered.MTLSEndpointAliases.PushedAuthorizationRequest
-	}
-	return nil
 }

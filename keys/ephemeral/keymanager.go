@@ -40,7 +40,7 @@ func NewKeyManager(purposes map[keys.SigningPurpose]fapi.SignatureAlgorithm) (*K
 		kid:  make(map[keys.SigningPurpose]string, len(purposes)),
 	}
 	for purpose, alg := range purposes {
-		signer, err := generateSigner(alg)
+		signer, err := GenerateSigner(alg)
 		if err != nil {
 			return nil, fmt.Errorf("generate key for purpose %v: %w", purpose, err)
 		}
@@ -50,7 +50,13 @@ func NewKeyManager(purposes map[keys.SigningPurpose]fapi.SignatureAlgorithm) (*K
 	return m, nil
 }
 
-func generateSigner(alg fapi.SignatureAlgorithm) (crypto.Signer, error) {
+// GenerateSigner generates a fresh crypto.Signer sized for alg: ECDSA
+// P-256 for ES256, RSA-2048 for PS256, Ed25519 for EdDSA — the three
+// algorithms this module supports. Exported so a caller needing an
+// ephemeral key without a full KeyManager around it (e.g. a
+// conformance-testing driver generating one-off keys per run) doesn't
+// have to duplicate this switch itself.
+func GenerateSigner(alg fapi.SignatureAlgorithm) (crypto.Signer, error) {
 	switch alg {
 	case fapi.ES256:
 		return ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

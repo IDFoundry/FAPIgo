@@ -16,10 +16,7 @@ package main
 import (
 	"crypto"
 	"crypto/ecdsa"
-	"crypto/ed25519"
 	"crypto/elliptic"
-	"crypto/rand"
-	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -28,6 +25,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/keys/ephemeral"
 )
 
 type clientJWK struct {
@@ -146,7 +144,7 @@ func buildFixedClientKeyManager(jwksFile string, purposes map[keys.SigningPurpos
 			anyFixed = true
 			continue
 		}
-		signer, err := generateEphemeralSigner(alg)
+		signer, err := ephemeral.GenerateSigner(alg)
 		if err != nil {
 			return nil, fmt.Errorf("generate ephemeral key for purpose %v: %w", purpose, err)
 		}
@@ -158,22 +156,4 @@ func buildFixedClientKeyManager(jwksFile string, purposes map[keys.SigningPurpos
 			"JWKS at all — drop -client-jwks)")
 	}
 	return keys.NewKeyManagerFromSigners(signers, algorithms, kids)
-}
-
-// generateEphemeralSigner mirrors keys/ephemeral's own unexported
-// generateSigner — duplicated rather than exported from there, since
-// it's an internal implementation detail of a different package this
-// one has no other reason to depend on beyond this one helper.
-func generateEphemeralSigner(alg fapi.SignatureAlgorithm) (crypto.Signer, error) {
-	switch alg {
-	case fapi.ES256:
-		return ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	case fapi.PS256:
-		return rsa.GenerateKey(rand.Reader, 2048)
-	case fapi.EdDSA:
-		_, priv, err := ed25519.GenerateKey(rand.Reader)
-		return priv, err
-	default:
-		return nil, fmt.Errorf("unsupported algorithm %v for ephemeral signer", alg)
-	}
 }

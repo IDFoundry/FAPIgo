@@ -215,6 +215,131 @@ func parseTrustMarkClaims(payload []byte) (TrustMarkClaims, error) {
 	return c, nil
 }
 
+// CreateTrustMarkParams describes one Trust Mark to create (OpenID
+// Federation 1.0 §7.1).
+type CreateTrustMarkParams struct {
+	// Signer produces the Trust Mark's signature — the issuing entity's
+	// own federation key. This is the type's real owner's own key when
+	// Delegation is empty, or a delegate's own key (distinct from the
+	// owner's) when Delegation carries a Trust Mark Delegation JWT
+	// authorizing Issuer to sign this trust_mark_type.
+	Signer crypto.Signer
+
+	// Algorithm Signer signs with.
+	Algorithm fapi.SignatureAlgorithm
+
+	// KeyID is recorded in the Trust Mark's "kid" header. Required —
+	// OpenID Federation 1.0 §7.1: "Trust Mark JWTs MUST include the kid
+	// header parameter," unlike an Entity Statement's own KeyID
+	// (CreateParams' own field, optional there).
+	KeyID string
+
+	// Issuer is the "iss" claim — the Trust Mark Issuer.
+	Issuer string
+
+	// Subject is the "sub" claim — the Entity this Trust Mark is about.
+	Subject string
+
+	// TrustMarkType is the "trust_mark_type" claim.
+	TrustMarkType string
+
+	// Now is the Trust Mark's issuance time ("iat").
+	Now time.Time
+
+	// Lifetime bounds how long the Trust Mark is valid for (exp = Now +
+	// Lifetime). Zero omits the "exp" claim entirely — OpenID Federation
+	// 1.0 §7.1: "If not present, it means that the Trust Mark does not
+	// expire," a real, valid choice, unlike CreateParams.Lifetime (an
+	// Entity Statement's own exp is never optional).
+	Lifetime time.Duration
+
+	// Delegation is the "delegation" claim (OpenID Federation 1.0 §7.2)
+	// — a Trust Mark Delegation JWT (see CreateTrustMarkDelegation)
+	// authorizing Issuer to issue this trust_mark_type, when Issuer is
+	// not itself the type's real owner. Optional.
+	Delegation string
+}
+
+// CreateTrustMark builds and signs a Trust Mark JWT for p.
+func CreateTrustMark(p CreateTrustMarkParams) (string, error) {
+	return createTrustMarkLikeJWT(trustMarkLikeParams{
+		Signer: p.Signer, Algorithm: p.Algorithm, KeyID: p.KeyID,
+		Issuer: p.Issuer, Subject: p.Subject, TrustMarkType: p.TrustMarkType,
+		Now: p.Now, Lifetime: p.Lifetime, Delegation: p.Delegation,
+		typ:            trustMarkJWTType,
+		kidRequirement: `OpenID Federation 1.0 §7.1: "Trust Mark JWTs MUST include the kid header parameter"`,
+	})
+}
+
+// trustMarkLikeParams is the common shape CreateTrustMark and
+// CreateTrustMarkDelegation both build and sign — the two JWT types
+// differ only in their "typ" header, the wording of their (identical)
+// kid requirement, and whether a "delegation" claim is meaningful at
+// all (only for a Trust Mark itself, never for a Delegation, which
+// createTrustMarkLikeJWT's own caller enforces by simply never setting
+// Delegation for the latter).
+type trustMarkLikeParams struct {
+	Signer         crypto.Signer
+	Algorithm      fapi.SignatureAlgorithm
+	KeyID          string
+	Issuer         string
+	Subject        string
+	TrustMarkType  string
+	Now            time.Time
+	Lifetime       time.Duration
+	Delegation     string
+	typ            string
+	kidRequirement string
+}
+
+// createTrustMarkLikeJWT builds and signs a Trust Mark or Trust Mark
+// Delegation JWT for p — see trustMarkLikeParams' own doc comment for
+// what actually varies between the two.
+func createTrustMarkLikeJWT(p trustMarkLikeParams) (string, error) {
+	if p.Signer == nil {
+		return "", fmt.Errorf("federation: signer is nil")
+	}
+	if !p.Algorithm.IsValid() {
+		return "", fmt.Errorf("federation: invalid algorithm %v", p.Algorithm)
+	}
+	if p.KeyID == "" {
+		return "", fmt.Errorf("federation: key id is required (%s)", p.kidRequirement)
+	}
+	if p.Issuer == "" {
+		return "", fmt.Errorf("federation: issuer is empty")
+	}
+	if p.Subject == "" {
+		return "", fmt.Errorf("federation: subject is empty")
+	}
+	if p.TrustMarkType == "" {
+		return "", fmt.Errorf("federation: trust mark type is empty")
+	}
+	if p.Now.IsZero() {
+		return "", fmt.Errorf("federation: now is zero")
+	}
+
+	claims := map[string]any{
+		"iss": p.Issuer, "sub": p.Subject, "trust_mark_type": p.TrustMarkType, "iat": p.Now.Unix(),
+	}
+	if p.Lifetime > 0 {
+		claims["exp"] = p.Now.Add(p.Lifetime).Unix()
+	}
+	if p.Delegation != "" {
+		claims["delegation"] = p.Delegation
+	}
+
+	payload, err := json.Marshal(claims)
+	if err != nil {
+		return "", fmt.Errorf("federation: marshal claims: %w", err)
+	}
+	header := jose.Header{Algorithm: p.Algorithm, Type: p.typ, KeyID: p.KeyID}
+	token, err := jose.Sign(p.Signer, header, payload)
+	if err != nil {
+		return "", fmt.Errorf("federation: %w", err)
+	}
+	return token, nil
+}
+
 // trustMarkDelegationJWTType is the JWS "typ" header value every Trust
 // Mark Delegation JWT MUST carry (OpenID Federation 1.0 §7.2: "MUST be
 // explicitly typed, by setting the typ header parameter to
@@ -401,4 +526,52 @@ func parseTrustMarkDelegationClaims(payload []byte) (TrustMarkDelegationClaims, 
 		c.ExpiresAt = time.Unix(exp, 0)
 	}
 	return c, nil
+}
+
+// CreateTrustMarkDelegationParams describes one Trust Mark Delegation
+// to create (OpenID Federation 1.0 §7.2).
+type CreateTrustMarkDelegationParams struct {
+	// Signer produces the delegation's signature — the Trust Mark
+	// type's real owner's own federation key (never the delegate's).
+	Signer crypto.Signer
+
+	// Algorithm Signer signs with.
+	Algorithm fapi.SignatureAlgorithm
+
+	// KeyID is recorded in the delegation's "kid" header. Required —
+	// OpenID Federation 1.0 §7.2: "Trust Mark delegation JWTs MUST
+	// include the kid header parameter."
+	KeyID string
+
+	// Issuer is the "iss" claim — the Trust Mark type's real owner,
+	// i.e. this same entity.
+	Issuer string
+
+	// Subject is the "sub" claim — the Trust Mark Issuer being
+	// delegated to.
+	Subject string
+
+	// TrustMarkType is the "trust_mark_type" claim.
+	TrustMarkType string
+
+	// Now is the delegation's issuance time ("iat").
+	Now time.Time
+
+	// Lifetime bounds how long the delegation is valid for (exp = Now +
+	// Lifetime). Zero omits the "exp" claim entirely — OpenID Federation
+	// 1.0 §7.2: "If not present, it means that the delegation does not
+	// expire."
+	Lifetime time.Duration
+}
+
+// CreateTrustMarkDelegation builds and signs a Trust Mark Delegation
+// JWT for p.
+func CreateTrustMarkDelegation(p CreateTrustMarkDelegationParams) (string, error) {
+	return createTrustMarkLikeJWT(trustMarkLikeParams{
+		Signer: p.Signer, Algorithm: p.Algorithm, KeyID: p.KeyID,
+		Issuer: p.Issuer, Subject: p.Subject, TrustMarkType: p.TrustMarkType,
+		Now: p.Now, Lifetime: p.Lifetime,
+		typ:            trustMarkDelegationJWTType,
+		kidRequirement: `OpenID Federation 1.0 §7.2: "Trust Mark delegation JWTs MUST include the kid header parameter"`,
+	})
 }

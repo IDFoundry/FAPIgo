@@ -30,17 +30,19 @@
 //
 // trustmark.go covers Trust Mark JWTs (OpenID Federation 1.0 §7) and
 // Trust Mark Delegation JWTs (§7.2) the same narrow way this package
-// covers Entity Statements: parsing and verifying one JWT in isolation
-// (TrustMark/ParseTrustMark/Verify, TrustMarkDelegation/
-// ParseTrustMarkDelegation/Verify), never fetching or resolving
-// anything itself, and never cross-checking a Trust Anchor's own
+// covers Entity Statements: building/signing and parsing/verifying one
+// JWT in isolation (TrustMark/ParseTrustMark/Verify/CreateTrustMark,
+// TrustMarkDelegation/ParseTrustMarkDelegation/Verify/
+// CreateTrustMarkDelegation), never fetching or resolving anything
+// itself, and never cross-checking a Trust Anchor's own
 // "trust_mark_owners" claim to know whether a delegation is required at
 // all (a federation.Resolver's own concern; see its VerifyTrustMark).
-// This first version deliberately does not implement: the Trust Mark
-// Status endpoint (§8) or Trust Marked Entities Listing endpoint (§9),
-// both live alternatives/supplements to the offline validation
-// procedure this package implements; and Trust Mark (or delegation)
-// issuance (this package only ever verifies one someone else issued,
-// the same "consumer, not producer" stance this package already takes
-// toward Explicit Registration Responses).
+// federation.TrustMarkIssuer wraps CreateTrustMark/
+// CreateTrustMarkDelegation the same way SelfIssuer/SubordinateIssuer
+// wrap this package's own Create, for a caller acting as a Trust Mark
+// Issuer or a type's real owner.
+// This first version deliberately does not implement the Trust Mark
+// Status endpoint (§8) or Trust Marked Entities Listing endpoint (§9)
+// — both live alternatives/supplements to the offline validation
+// procedure this package implements, unrelated to issuance itself.
 package federation

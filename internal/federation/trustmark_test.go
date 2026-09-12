@@ -12,10 +12,11 @@ import (
 )
 
 // createTrustMarkToken signs a Trust Mark JWT with the given claims,
-// typ (pass trustMarkJWTType for a well-formed one) and kid — there is
-// no exported Create for Trust Marks (this package only ever verifies
-// one someone else issued; see doc.go), so tests sign one directly via
-// jose.Sign rather than through a package API.
+// typ (pass trustMarkJWTType for a well-formed one) and kid, bypassing
+// CreateTrustMark entirely — used only for cases CreateTrustMark
+// itself can't produce (a wrong typ header, a malformed claim), so
+// those parse/verify tests aren't coupled to CreateTrustMark's own
+// correctness.
 func createTrustMarkToken(t *testing.T, key *ecdsa.PrivateKey, kid, typ string, claims map[string]any) string {
 	t.Helper()
 	payload, err := json.Marshal(claims)
@@ -554,5 +555,206 @@ func TestVerifyTrustMarkDelegationRejectsMissingPolicyFields(t *testing.T) {
 	policy.Now = time.Time{}
 	if _, err := d.Verify(&key.PublicKey, policy); err == nil {
 		t.Fatalf("Verify(zero Now) = nil error, want error")
+	}
+}
+
+func TestCreateTrustMarkRoundTripsThroughParseAndVerify(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	token, err := CreateTrustMark(CreateTrustMarkParams{
+		Signer: key, Algorithm: fapi.ES256, KeyID: "issuer-kid",
+		Issuer: "https://issuer.example.org", Subject: "https://rp.example.org",
+		TrustMarkType: "https://federation.example.org/marks/certified",
+		Now:           now, Lifetime: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("CreateTrustMark: %v", err)
+	}
+
+	tm, err := ParseTrustMark(token)
+	if err != nil {
+		t.Fatalf("ParseTrustMark: %v", err)
+	}
+	if tm.KeyID() != "issuer-kid" {
+		t.Errorf("KeyID = %q, want \"issuer-kid\"", tm.KeyID())
+	}
+	claims, err := tm.Verify(&key.PublicKey, trustMarkVerifyPolicy(now))
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if claims.ExpiresAt.Unix() != now.Add(time.Hour).Unix() {
+		t.Errorf("ExpiresAt = %v, want %v", claims.ExpiresAt, now.Add(time.Hour))
+	}
+}
+
+func TestCreateTrustMarkOmitsExpWhenLifetimeIsZero(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	token, err := CreateTrustMark(CreateTrustMarkParams{
+		Signer: key, Algorithm: fapi.ES256, KeyID: "issuer-kid",
+		Issuer: "https://issuer.example.org", Subject: "https://rp.example.org",
+		TrustMarkType: "https://federation.example.org/marks/certified",
+		Now:           now,
+	})
+	if err != nil {
+		t.Fatalf("CreateTrustMark: %v", err)
+	}
+	tm, err := ParseTrustMark(token)
+	if err != nil {
+		t.Fatalf("ParseTrustMark: %v", err)
+	}
+	policy := trustMarkVerifyPolicy(now)
+	claims, err := tm.Verify(&key.PublicKey, policy)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if !claims.ExpiresAt.IsZero() {
+		t.Errorf("ExpiresAt = %v, want zero (no exp claim)", claims.ExpiresAt)
+	}
+}
+
+func TestCreateTrustMarkIncludesDelegation(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	token, err := CreateTrustMark(CreateTrustMarkParams{
+		Signer: key, Algorithm: fapi.ES256, KeyID: "issuer-kid",
+		Issuer: "https://issuer.example.org", Subject: "https://rp.example.org",
+		TrustMarkType: "https://federation.example.org/marks/certified",
+		Now:           now, Lifetime: time.Hour, Delegation: "a.b.c",
+	})
+	if err != nil {
+		t.Fatalf("CreateTrustMark: %v", err)
+	}
+	tm, err := ParseTrustMark(token)
+	if err != nil {
+		t.Fatalf("ParseTrustMark: %v", err)
+	}
+	if tm.ClaimedDelegation() != "a.b.c" {
+		t.Errorf("ClaimedDelegation = %q, want \"a.b.c\"", tm.ClaimedDelegation())
+	}
+}
+
+func TestCreateTrustMarkRejectsInvalidParams(t *testing.T) {
+	valid := func() CreateTrustMarkParams {
+		return CreateTrustMarkParams{
+			Signer: generateKey(t), Algorithm: fapi.ES256, KeyID: "k",
+			Issuer: "https://issuer.example.org", Subject: "https://rp.example.org",
+			TrustMarkType: "https://federation.example.org/marks/certified",
+			Now:           time.Now(),
+		}
+	}
+	cases := map[string]func(*CreateTrustMarkParams){
+		"nil signer":        func(p *CreateTrustMarkParams) { p.Signer = nil },
+		"invalid algorithm": func(p *CreateTrustMarkParams) { p.Algorithm = fapi.SignatureAlgorithm(255) },
+		"empty key id":      func(p *CreateTrustMarkParams) { p.KeyID = "" },
+		"empty issuer":      func(p *CreateTrustMarkParams) { p.Issuer = "" },
+		"empty subject":     func(p *CreateTrustMarkParams) { p.Subject = "" },
+		"empty type":        func(p *CreateTrustMarkParams) { p.TrustMarkType = "" },
+		"zero now":          func(p *CreateTrustMarkParams) { p.Now = time.Time{} },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			p := valid()
+			mutate(&p)
+			if _, err := CreateTrustMark(p); err == nil {
+				t.Fatalf("CreateTrustMark(%s) = nil error, want error", name)
+			}
+		})
+	}
+}
+
+func TestCreateTrustMarkDelegationRoundTripsThroughParseAndVerify(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	token, err := CreateTrustMarkDelegation(CreateTrustMarkDelegationParams{
+		Signer: key, Algorithm: fapi.ES256, KeyID: "owner-kid",
+		Issuer: "https://owner.example.org", Subject: "https://issuer.example.org",
+		TrustMarkType: "https://federation.example.org/marks/certified",
+		Now:           now, Lifetime: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("CreateTrustMarkDelegation: %v", err)
+	}
+
+	d, err := ParseTrustMarkDelegation(token)
+	if err != nil {
+		t.Fatalf("ParseTrustMarkDelegation: %v", err)
+	}
+	if d.KeyID() != "owner-kid" {
+		t.Errorf("KeyID = %q, want \"owner-kid\"", d.KeyID())
+	}
+	claims, err := d.Verify(&key.PublicKey, TrustMarkDelegationVerifyPolicy{
+		ExpectedIssuer: "https://owner.example.org", ExpectedSubject: "https://issuer.example.org",
+		ExpectedTrustMarkType: "https://federation.example.org/marks/certified",
+		Algorithm:             fapi.ES256, Now: now,
+	})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if claims.ExpiresAt.Unix() != now.Add(time.Hour).Unix() {
+		t.Errorf("ExpiresAt = %v, want %v", claims.ExpiresAt, now.Add(time.Hour))
+	}
+}
+
+func TestCreateTrustMarkDelegationOmitsExpWhenLifetimeIsZero(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	token, err := CreateTrustMarkDelegation(CreateTrustMarkDelegationParams{
+		Signer: key, Algorithm: fapi.ES256, KeyID: "owner-kid",
+		Issuer: "https://owner.example.org", Subject: "https://issuer.example.org",
+		TrustMarkType: "https://federation.example.org/marks/certified",
+		Now:           now,
+	})
+	if err != nil {
+		t.Fatalf("CreateTrustMarkDelegation: %v", err)
+	}
+	d, err := ParseTrustMarkDelegation(token)
+	if err != nil {
+		t.Fatalf("ParseTrustMarkDelegation: %v", err)
+	}
+	claims, err := d.Verify(&key.PublicKey, TrustMarkDelegationVerifyPolicy{
+		ExpectedIssuer: "https://owner.example.org", ExpectedSubject: "https://issuer.example.org",
+		ExpectedTrustMarkType: "https://federation.example.org/marks/certified",
+		Algorithm:             fapi.ES256, Now: now,
+	})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if !claims.ExpiresAt.IsZero() {
+		t.Errorf("ExpiresAt = %v, want zero (no exp claim)", claims.ExpiresAt)
+	}
+}
+
+func TestCreateTrustMarkDelegationRejectsInvalidParams(t *testing.T) {
+	valid := func() CreateTrustMarkDelegationParams {
+		return CreateTrustMarkDelegationParams{
+			Signer: generateKey(t), Algorithm: fapi.ES256, KeyID: "k",
+			Issuer: "https://owner.example.org", Subject: "https://issuer.example.org",
+			TrustMarkType: "https://federation.example.org/marks/certified",
+			Now:           time.Now(),
+		}
+	}
+	cases := map[string]func(*CreateTrustMarkDelegationParams){
+		"nil signer":        func(p *CreateTrustMarkDelegationParams) { p.Signer = nil },
+		"invalid algorithm": func(p *CreateTrustMarkDelegationParams) { p.Algorithm = fapi.SignatureAlgorithm(255) },
+		"empty key id":      func(p *CreateTrustMarkDelegationParams) { p.KeyID = "" },
+		"empty issuer":      func(p *CreateTrustMarkDelegationParams) { p.Issuer = "" },
+		"empty subject":     func(p *CreateTrustMarkDelegationParams) { p.Subject = "" },
+		"empty type":        func(p *CreateTrustMarkDelegationParams) { p.TrustMarkType = "" },
+		"zero now":          func(p *CreateTrustMarkDelegationParams) { p.Now = time.Time{} },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			p := valid()
+			mutate(&p)
+			if _, err := CreateTrustMarkDelegation(p); err == nil {
+				t.Fatalf("CreateTrustMarkDelegation(%s) = nil error, want error", name)
+			}
+		})
 	}
 }

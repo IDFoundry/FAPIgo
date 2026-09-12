@@ -83,6 +83,21 @@ core.
 > (`subject_types_supported`, `id_token_signing_alg_values_supported`)
 > — covered by unit tests and a real-HTTP `fapitest` round trip, not an
 > OIDF plan (the suite has no bare-OAuth2 FAPI2 plan to run against).
+>
+> The `federation` package adds OpenID Federation 1.0 (Final) support:
+> Trust Chain resolution (`Resolver`, §10, enforcing every `constraints`
+> claim and a resolver-wide path-length ceiling), self-issuance of an
+> entity's own Entity Configuration (`SelfIssuer`), Automatic Client
+> Registration for an OP (§12.1, `AutomaticClientRepository`), acting as
+> a Trust Anchor or Intermediate (`SubordinateIssuer`, §3.2), and Trust
+> Marks end to end — verification (§7), issuance (`TrustMarkIssuer`),
+> and live status queries (§8, `Resolver.CheckTrustMarkStatus`) — plus
+> Trust Marked Entities Listing request validation (§9). **Explicit
+> Registration (§12.2) is not implemented**: an OP can accept RPs via
+> Automatic Registration, but provisioning a distinct `client_id`/
+> `client_secret` through a dedicated federation registration request is
+> not supported. See `federation/doc.go` for the exact scope of every
+> capability above.
 
 ```go
 import (

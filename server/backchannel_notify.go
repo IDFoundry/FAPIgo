@@ -1,7 +1,11 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
 
 	fapi "github.com/idfoundry/fapigo"
 )
@@ -44,13 +48,41 @@ type BackchannelNotifier interface {
 	// Content-Type: application/json, a body of exactly
 	// {"auth_req_id": "{notification.AuthReqID}"} — CIBA §10.2's own
 	// required shape, confirmed against the OIDF conformance suite's own
-	// verification (it rejects any other field being present). A CIBA
-	// client is required to keep polling regardless of whether — or how
-	// — this call actually lands (CIBA §10.3's backup-polling
-	// guarantee), so this server treats any error Notify returns as
-	// best-effort informational only: it is never allowed to fail the
-	// decision that triggered it.
+	// verification (it rejects any other field being present) — see
+	// NewBackchannelNotificationRequest, which builds exactly this
+	// *http.Request. A CIBA client is required to keep polling
+	// regardless of whether — or how — this call actually lands (CIBA
+	// §10.3's backup-polling guarantee), so this server treats any error
+	// Notify returns as best-effort informational only: it is never
+	// allowed to fail the decision that triggered it.
 	Notify(ctx context.Context, notification BackchannelNotification) error
+}
+
+// NewBackchannelNotificationRequest builds the *http.Request a
+// BackchannelNotifier.Notify implementation should send for
+// notification: POST to notification.Endpoint, Authorization: Bearer
+// {ClientNotificationToken}, Content-Type: application/json, and a
+// body of exactly {"auth_req_id": "..."} — CIBA §10.2's own required
+// shape, the same one BackchannelNotifier.Notify's own doc comment
+// specifies. This only builds the request; it never sends it (see
+// BackchannelNotifier's own doc comment for why this package never
+// originates the actual connection itself) — pass the result to a
+// caller-supplied *http.Client.Do, after setting whatever transport
+// policy (TLS trust, timeout, proxying) that deployment needs.
+func NewBackchannelNotificationRequest(ctx context.Context, notification BackchannelNotification) (*http.Request, error) {
+	body, err := json.Marshal(struct {
+		AuthReqID string `json:"auth_req_id"`
+	}{AuthReqID: notification.AuthReqID})
+	if err != nil {
+		return nil, fmt.Errorf("marshal notification body: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, notification.Endpoint.String(), bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("build notification request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+notification.ClientNotificationToken.Reveal())
+	return req, nil
 }
 
 // NoBackchannelNotifications is an explicit no-op BackchannelNotifier

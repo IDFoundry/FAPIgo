@@ -1,10 +1,8 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -51,25 +49,18 @@ func newHTTPBackchannelNotifier() *httpBackchannelNotifier {
 	}
 }
 
-// Notify implements server.BackchannelNotifier — see that interface's
-// own doc comment for the exact required request shape (CIBA §10.2,
-// confirmed against the OIDF conformance suite's own verification
-// logic: POST, Content-Type: application/json, Authorization: Bearer
-// {token}, body {"auth_req_id": "..."}). Any non-2xx response, or a
-// failure to even complete the request, is reported back as an error —
-// the caller (server.CompleteBackchannelAuthentication) treats it as
+// Notify implements server.BackchannelNotifier — see
+// server.NewBackchannelNotificationRequest for the exact required
+// request shape (CIBA §10.2, confirmed against the OIDF conformance
+// suite's own verification logic). Any non-2xx response, or a failure
+// to even complete the request, is reported back as an error — the
+// caller (server.CompleteBackchannelAuthentication) treats it as
 // best-effort and never fails the decision over it.
 func (n *httpBackchannelNotifier) Notify(ctx context.Context, notification server.BackchannelNotification) error {
-	body, err := json.Marshal(map[string]string{"auth_req_id": notification.AuthReqID})
-	if err != nil {
-		return fmt.Errorf("marshal notification body: %w", err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, notification.Endpoint.String(), bytes.NewReader(body))
+	req, err := server.NewBackchannelNotificationRequest(ctx, notification)
 	if err != nil {
 		return fmt.Errorf("build notification request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+notification.ClientNotificationToken.Reveal())
 
 	resp, err := n.client.Do(req)
 	if err != nil {

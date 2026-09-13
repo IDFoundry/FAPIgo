@@ -3,6 +3,7 @@ package server
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"fmt"
 	"io"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -17,18 +18,37 @@ import (
 const interactionHandleSize = 32
 
 // InteractionHandle identifies one in-progress authorization
-// interaction. It has no public constructor — only BeginAuthorization
-// can produce one — is high-entropy, bound to a single pushed
-// authorization request, and expires per Config.Limits.InteractionLifetime.
-// It must never be confused with, or substituted for, a request_uri or
-// an authorization code: the login UI receives only this handle, never
-// a storage primary key or the underlying PAR reference.
+// interaction. Only BeginAuthorization produces a new one — is
+// high-entropy, bound to a single pushed authorization request, and
+// expires per Config.Limits.InteractionLifetime. It must never be
+// confused with, or substituted for, a request_uri or an authorization
+// code: the login UI receives only this handle, never a storage
+// primary key or the underlying PAR reference.
 type InteractionHandle struct {
 	value string
 }
 
 // String returns the handle's opaque wire value.
 func (h InteractionHandle) String() string { return h.value }
+
+// ParseInteractionHandle reconstructs the InteractionHandle
+// BeginAuthorization originally returned, from its own wire value
+// (InteractionHandle.String()) — for a consent-UI bridge that persists
+// that value in its own distributed storage (a database, a signed
+// cookie, a queue) rather than keeping it in this process's own
+// memory, and needs to hand it back to CompleteAuthorization from a
+// different request, goroutine, or instance than the one
+// BeginAuthorization ran on. value must be exactly what
+// InteractionHandle.String() produced; ParseInteractionHandle applies
+// no format validation beyond rejecting an empty value — an
+// unrecognized or expired handle is instead reported by
+// CompleteAuthorization itself, the same as any other invalid one.
+func ParseInteractionHandle(value string) (InteractionHandle, error) {
+	if value == "" {
+		return InteractionHandle{}, fmt.Errorf("server: interaction handle is empty")
+	}
+	return InteractionHandle{value: value}, nil
+}
 
 func generateInteractionHandle(random io.Reader) (string, error) {
 	if random == nil {

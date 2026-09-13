@@ -70,12 +70,10 @@ type BackchannelNotifier interface {
 // caller-supplied *http.Client.Do, after setting whatever transport
 // policy (TLS trust, timeout, proxying) that deployment needs.
 func NewBackchannelNotificationRequest(ctx context.Context, notification BackchannelNotification) (*http.Request, error) {
-	body, err := json.Marshal(struct {
+	// Encoding a single fixed string field cannot fail.
+	body, _ := json.Marshal(struct {
 		AuthReqID string `json:"auth_req_id"`
 	}{AuthReqID: notification.AuthReqID})
-	if err != nil {
-		return nil, fmt.Errorf("marshal notification body: %w", err)
-	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, notification.Endpoint.String(), bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("build notification request: %w", err)

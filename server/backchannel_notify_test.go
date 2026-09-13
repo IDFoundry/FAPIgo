@@ -63,3 +63,24 @@ func TestNewBackchannelNotificationRequest(t *testing.T) {
 		t.Fatalf("auth_req_id = %q, want %q", authReqID, "auth-req-id-value")
 	}
 }
+
+// TestNewBackchannelNotificationRequestRejectsNilContext covers the
+// one real failure mode this constructor can hit: net/http itself
+// rejects a nil context (returning an error, not panicking) rather
+// than silently proceeding with one.
+func TestNewBackchannelNotificationRequestRejectsNilContext(t *testing.T) {
+	endpoint, err := fapi.ParseEndpointURL("https://rp.example.com/ciba-notify")
+	if err != nil {
+		t.Fatalf("ParseEndpointURL: %v", err)
+	}
+	notification := server.BackchannelNotification{
+		Endpoint:                endpoint,
+		ClientNotificationToken: fapi.NewSecret("notif-token-value"),
+		AuthReqID:               "auth-req-id-value",
+	}
+
+	//nolint:staticcheck // SA1012: deliberately exercising net/http's own nil-Context rejection
+	if _, err := server.NewBackchannelNotificationRequest(nil, notification); err == nil {
+		t.Fatal("NewBackchannelNotificationRequest(nil context) = nil error, want error")
+	}
+}

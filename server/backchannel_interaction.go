@@ -3,6 +3,7 @@ package server
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"fmt"
 	"io"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -20,18 +21,36 @@ const (
 // BackchannelAuthenticationHandle identifies one pending CIBA
 // backchannel authentication request, for the embedder's own
 // out-of-band authentication component to pass to
-// CompleteBackchannelAuthentication. It has no public constructor —
-// only BeginBackchannelAuthentication can produce one — and must never
-// be confused with, or substituted for, AuthReqID: a value safe to hand
-// to the OAuth client (AuthReqID) must never double as the value that
-// authorizes recording a decision (this handle), the same separation
-// InteractionHandle keeps from a request_uri.
+// CompleteBackchannelAuthentication. Only BeginBackchannelAuthentication
+// produces a new one, and it must never be confused with, or
+// substituted for, AuthReqID: a value safe to hand to the OAuth client
+// (AuthReqID) must never double as the value that authorizes recording
+// a decision (this handle), the same separation InteractionHandle
+// keeps from a request_uri.
 type BackchannelAuthenticationHandle struct {
 	value string
 }
 
 // String returns the handle's opaque wire value.
 func (h BackchannelAuthenticationHandle) String() string { return h.value }
+
+// ParseBackchannelAuthenticationHandle reconstructs the
+// BackchannelAuthenticationHandle BeginBackchannelAuthentication
+// originally returned, from its own wire value
+// (BackchannelAuthenticationHandle.String()) — mirroring
+// ParseInteractionHandle for CIBA's own out-of-band authentication
+// component: it lets that component persist the value in its own
+// distributed storage and hand it back to
+// CompleteBackchannelAuthentication from a different request,
+// goroutine, or instance than the one BeginBackchannelAuthentication
+// ran on. See ParseInteractionHandle's own doc comment for the
+// validation contract this mirrors exactly.
+func ParseBackchannelAuthenticationHandle(value string) (BackchannelAuthenticationHandle, error) {
+	if value == "" {
+		return BackchannelAuthenticationHandle{}, fmt.Errorf("server: backchannel authentication handle is empty")
+	}
+	return BackchannelAuthenticationHandle{value: value}, nil
+}
 
 func generateBackchannelAuthenticationHandle(random io.Reader) (string, error) {
 	if random == nil {

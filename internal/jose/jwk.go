@@ -360,6 +360,9 @@ func validateKeyForAlgorithm(pub crypto.PublicKey, alg fapi.SignatureAlgorithm) 
 		if key.N.BitLen() < 2048 {
 			return fmt.Errorf("jose: PS256 requires an RSA key of at least 2048 bits, got %d", key.N.BitLen())
 		}
+		if key.N.BitLen() > maxRSAModulusBits {
+			return fmt.Errorf("jose: PS256 requires an RSA key of at most %d bits, got %d", maxRSAModulusBits, key.N.BitLen())
+		}
 	case fapi.EdDSA:
 		key, ok := pub.(ed25519.PublicKey)
 		if !ok {
@@ -391,6 +394,9 @@ func validateKeyForKeyManagementAlgorithm(pub crypto.PublicKey, alg fapi.KeyMana
 		}
 		if key.N.BitLen() < 2048 {
 			return fmt.Errorf("jose: RSAOAEP256 requires an RSA key of at least 2048 bits, got %d", key.N.BitLen())
+		}
+		if key.N.BitLen() > maxRSAModulusBits {
+			return fmt.Errorf("jose: RSAOAEP256 requires an RSA key of at most %d bits, got %d", maxRSAModulusBits, key.N.BitLen())
 		}
 	case fapi.ECDHESA256KW:
 		key, ok := pub.(*ecdh.PublicKey)

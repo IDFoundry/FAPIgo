@@ -7,7 +7,7 @@
         "offline_access"
       ],
       "client_auth_method": "self_signed_tls_client_auth",
-      "expected_certificate_thumbprint": "9AuCv27qPfw3jmXL-2Jy5_1ISCe9uUWYhtAGwXvMXvU",
+      "expected_certificate_thumbprint": "DqduoDsBpvrE6ZNtyyYfb9W1Znk7pCki0bSowdKcjbQ",
       "id": "gofapi-conformance-client-auth-mtls-client-1",
       "redirect_uris": [
         "https://localhost.emobix.co.uk:8443/test/a/gofapi-client-auth-mtls/callback",
@@ -21,7 +21,7 @@
         "offline_access"
       ],
       "client_auth_method": "self_signed_tls_client_auth",
-      "expected_certificate_thumbprint": "3WW3O7J8ElBwg2OjD-agX4AjHcWks9vAJIEXvd51sWw",
+      "expected_certificate_thumbprint": "uNQAmTB2GiVXvscsh6jVZPmwln9xJgxKQ9z2J-f1lg8",
       "id": "gofapi-conformance-client-auth-mtls-client-2",
       "redirect_uris": [
         "https://localhost.emobix.co.uk:8443/test/a/gofapi-client-auth-mtls/callback",
@@ -34,7 +34,7 @@
       ],
       "allows_client_credentials_grant": true,
       "client_auth_method": "self_signed_tls_client_auth",
-      "expected_certificate_thumbprint": "8A2Dph6TWtj0Xvpx3rOKqw6QjEnNZZ2GNDBMYAuS8k0",
+      "expected_certificate_thumbprint": "JxFaqj_brctf2Sel0CWYcLmLObgIHMd-FCeGOaIjngY",
       "id": "gofapi-conformance-client-auth-mtls-client-credentials-client-1",
       "redirect_uris": [
         "https://localhost.emobix.co.uk:8443/test/a/gofapi-conformance-client-auth-mtls-client-credentials-client-1/callback"
@@ -46,7 +46,7 @@
       ],
       "allows_client_credentials_grant": true,
       "client_auth_method": "self_signed_tls_client_auth",
-      "expected_certificate_thumbprint": "L-pX7yqo35C6Lk8-X9idacyTm-tOGevTZ8VT66kyS9s",
+      "expected_certificate_thumbprint": "6rKgcikIGl23cxDZoWpA1vQm3DBBbRjgjtR4Px5n2UI",
       "id": "gofapi-conformance-client-auth-mtls-client-credentials-client-2",
       "redirect_uris": [
         "https://localhost.emobix.co.uk:8443/test/a/gofapi-conformance-client-auth-mtls-client-credentials-client-2/callback"

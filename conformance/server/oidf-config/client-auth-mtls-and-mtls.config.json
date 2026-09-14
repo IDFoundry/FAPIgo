@@ -7,7 +7,7 @@
         "offline_access"
       ],
       "client_auth_method": "self_signed_tls_client_auth",
-      "expected_certificate_thumbprint": "bLq2jAhxOa7t0dWbfB04zB1mBnwhaONiXnzGiW-NYOE",
+      "expected_certificate_thumbprint": "q9jiEYI1lRI6giVIuImasumSHtG6G8MTyNHAycvFijw",
       "id": "gofapi-conformance-client-auth-mtls-and-mtls-client-1",
       "redirect_uris": [
         "https://localhost.emobix.co.uk:8443/test/a/gofapi-client-auth-mtls-and-mtls/callback",
@@ -22,7 +22,7 @@
         "offline_access"
       ],
       "client_auth_method": "self_signed_tls_client_auth",
-      "expected_certificate_thumbprint": "jJJNk6Kd7H8HbowRa4-_IesUCKB25ESTd6pCtXGrdRU",
+      "expected_certificate_thumbprint": "yRFEH3flwI_PGpoOYp9DYByCqqASstWtk3b_9OaB4sQ",
       "id": "gofapi-conformance-client-auth-mtls-and-mtls-client-2",
       "redirect_uris": [
         "https://localhost.emobix.co.uk:8443/test/a/gofapi-client-auth-mtls-and-mtls/callback",
@@ -36,7 +36,7 @@
       ],
       "allows_client_credentials_grant": true,
       "client_auth_method": "self_signed_tls_client_auth",
-      "expected_certificate_thumbprint": "XCdGrK9SIGrAElX7zHF4Eee7rXetiKLoESSemehztSg",
+      "expected_certificate_thumbprint": "bRZ7p8m5K8enVeMwZSzMPwUkK6TQPjJoJoOW1Upcn5g",
       "id": "gofapi-conformance-client-auth-mtls-and-mtls-client-credentials-client-1",
       "redirect_uris": [
         "https://localhost.emobix.co.uk:8443/test/a/gofapi-conformance-client-auth-mtls-and-mtls-client-credentials-client-1/callback"
@@ -49,7 +49,7 @@
       ],
       "allows_client_credentials_grant": true,
       "client_auth_method": "self_signed_tls_client_auth",
-      "expected_certificate_thumbprint": "5cV-PPuV4y7qMNuWgDDXa1KMjvg-xGGcs2tZ0p2I8SA",
+      "expected_certificate_thumbprint": "JQaATYE5j5D_lLpBWz1-8OpQyR8UhHz1FHrBw9qZjYk",
       "id": "gofapi-conformance-client-auth-mtls-and-mtls-client-credentials-client-2",
       "redirect_uris": [
         "https://localhost.emobix.co.uk:8443/test/a/gofapi-conformance-client-auth-mtls-and-mtls-client-credentials-client-2/callback"

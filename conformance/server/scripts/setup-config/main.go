@@ -27,11 +27,23 @@
 // RFC 8705 thumbprint) into this repo's own (committed) conformance-as
 // config file for that profile, so the two stay in sync.
 //
-// Idempotent by design: if a profile's plan config already exists, this
-// tool leaves that profile alone entirely — it never regenerates keys
-// or overwrites a working local setup, it only fills in what's
-// missing. Run it again after a `git clean` or on a fresh clone; it's a
-// no-op everywhere it already has what it needs.
+// Idempotent, and self-healing rather than a pure no-op: if a profile's
+// plan config already exists, this tool never regenerates or
+// overwrites its key/certificate material (a working local setup, or
+// one already loaded into a live suite run, is never invalidated) —
+// but it always re-derives the public half (or certificate thumbprint)
+// from whatever that existing plan currently holds and re-patches the
+// committed config file to match, on every run, rather than trusting
+// the plan file's mere presence as proof the two are still in sync.
+// That sync can otherwise drift silently: anything that changes the
+// committed config file afterward (a teammate's own setup-config run,
+// a merge, a manual edit) leaves an already-generated local plan
+// signing with a private key whose public half no longer matches what
+// the AS has registered, and every request that client makes then
+// fails client-assertion (or certificate) verification — confirmed
+// live. Run it again after a `git clean` or on a fresh clone to
+// generate what's missing from scratch; run it again any other time
+// to heal exactly this drift.
 //
 // Usage:
 //
@@ -107,6 +119,12 @@ const conformanceKeyLabelPrefix = "gofapi-conformance-"
 // client alike.
 const fullScope = "openid accounts offline_access"
 
+// rs256ClientAssertionOverrideKey is the suite test-module name
+// writePlanConfig keys its RS256-override entry under — named here too
+// so the main loop's resync path can read the same override entry's
+// own Client.JWKS back out of an already-existing plan config.
+const rs256ClientAssertionOverrideKey = "fapi2-security-profile-final-ensure-signed-client-assertion-with-RS256-fails"
+
 // wellKnownConfigPath, userinfoPath, backchannelApprovalPath, and
 // cibaApprovalQuery are path/query fragments every profile's own
 // setupXxx function builds a URL from — shared here rather than
@@ -172,30 +190,53 @@ func main() {
 
 	for _, p := range profiles {
 		planPath := filepath.Join(dir, p.name+"-plan.json")
-		if _, err := os.Stat(planPath); err == nil {
-			fmt.Printf("%s: %s already exists, leaving this profile alone\n", p.name, planPath)
-			continue
-		}
-
-		priv1, pub1, err := generateKey(p.keyLabel1)
-		if err != nil {
-			log.Fatalf("%s: generate client1 key: %v", p.name, err)
-		}
-		priv2, pub2, err := generateKey(p.keyLabel2)
-		if err != nil {
-			log.Fatalf("%s: generate client2 key: %v", p.name, err)
-		}
-		privRS256, pubRS256, err := generatePS256Key(conformanceKeyLabelPrefix + p.keyLabel1 + "-rs256-key1")
-		if err != nil {
-			log.Fatalf("%s: generate RS256 test-client key: %v", p.name, err)
-		}
-
 		configPath := filepath.Join(dir, p.name+".config.json")
+
+		existing, planExists, err := loadExistingPlan[planConfig](planPath)
+		if err != nil {
+			log.Fatalf("%s: %v", p.name, err)
+		}
+
+		var priv1, priv2, privRS256 jwks
+		if planExists {
+			priv1, priv2 = existing.Client.JWKS, existing.Client2.JWKS
+			if override, ok := existing.Override[rs256ClientAssertionOverrideKey]; ok && override.Client != nil {
+				privRS256 = override.Client.JWKS
+			}
+			if err := requireNonEmptyPrivateKey(priv1, planPath+": client"); err != nil {
+				log.Fatalf("%s: %v", p.name, err)
+			}
+			if err := requireNonEmptyPrivateKey(priv2, planPath+": client2"); err != nil {
+				log.Fatalf("%s: %v", p.name, err)
+			}
+			if err := requireNonEmptyPrivateKey(privRS256, planPath+": override RS256 client"); err != nil {
+				log.Fatalf("%s: %v", p.name, err)
+			}
+		} else {
+			priv1, _, err = generateKey(p.keyLabel1)
+			if err != nil {
+				log.Fatalf("%s: generate client1 key: %v", p.name, err)
+			}
+			priv2, _, err = generateKey(p.keyLabel2)
+			if err != nil {
+				log.Fatalf("%s: generate client2 key: %v", p.name, err)
+			}
+			privRS256, _, err = generatePS256Key(conformanceKeyLabelPrefix + p.keyLabel1 + "-rs256-key1")
+			if err != nil {
+				log.Fatalf("%s: generate RS256 test-client key: %v", p.name, err)
+			}
+		}
+		pub1, pub2, pubRS256 := publicOnly(priv1), publicOnly(priv2), publicOnly(privRS256)
+
 		clientIDs, rs256ClientID, err := patchConformanceASConfig(configPath, p, pub1, pub2, pubRS256)
 		if err != nil {
 			log.Fatalf("%s: update %s: %v", p.name, configPath, err)
 		}
 
+		if planExists {
+			fmt.Printf("%s: %s already exists — resynced %s's public keys to match it\n", p.name, planPath, configPath)
+			continue
+		}
 		if err := writePlanConfig(planPath, p, clientIDs, rs256ClientID, priv1, priv2, privRS256); err != nil {
 			log.Fatalf("%s: write %s: %v", p.name, planPath, err)
 		}
@@ -369,6 +410,71 @@ func generatePS256Key(kid string) (private, public jwks, err error) {
 
 func b64(b []byte) string {
 	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// publicOnly returns ks with every key's private components cleared —
+// the exact inverse of generateKey/generatePS256Key's own
+// private/public split (each private jwk is just the public one plus
+// D, or plus D/P/Q/DP/DQ/QI for RSA). This lets every setupXxx
+// function below re-derive the public half it needs to patch into a
+// committed config.json straight from a plan config's own
+// already-generated private key material, without ever touching
+// crypto/* again — see loadExistingPlan's own doc comment for why this
+// matters.
+func publicOnly(ks jwks) jwks {
+	pub := jwks{Keys: make([]jwk, len(ks.Keys))}
+	for i, k := range ks.Keys {
+		k.D, k.P, k.Q, k.DP, k.DQ, k.QI = "", "", "", "", "", ""
+		pub.Keys[i] = k
+	}
+	return pub
+}
+
+// requireNonEmptyPrivateKey fails loudly if ks doesn't actually carry
+// private key material — guards against silently proceeding with a
+// corrupted or hand-edited plan config on the resync path below,
+// rather than writing an obviously-broken keypair into a committed
+// config.json.
+func requireNonEmptyPrivateKey(ks jwks, context string) error {
+	if len(ks.Keys) == 0 || ks.Keys[0].D == "" {
+		return fmt.Errorf("%s: missing or empty private key material", context)
+	}
+	return nil
+}
+
+// loadExistingPlan reads path and unmarshals it into T, reporting
+// exists=false (not an error) only when the file is genuinely absent —
+// every other read or parse failure is a hard error, since a plan file
+// that exists but can't be understood must never be silently treated
+// as safe to leave alone.
+//
+// This is the fix for a real, confirmed-live bug: every setupXxx
+// function below used to skip regenerating anything at all once its
+// own plan-*.json existed, on the theory that "the plan and the
+// committed config.json it patches were written together, so they're
+// still in sync." That's false the moment anything else changes the
+// committed config.json afterward (a teammate's own setup-config run,
+// a merge, a manual edit) — the local, gitignored plan file then
+// silently signs with a private key whose public half no longer
+// matches what's registered, and every request that client makes fails
+// client-assertion (or certificate) verification. Reading the existing
+// plan's own key material back out and re-patching config.json from it
+// on every run — instead of skipping when the plan file merely exists —
+// makes setup-config self-healing against exactly that drift, without
+// ever needing to regenerate (and thereby invalidate) a plan a
+// developer already has loaded into a live suite run.
+func loadExistingPlan[T any](path string) (cfg T, exists bool, err error) {
+	data, err := os.ReadFile(path) // #nosec G304 -- path is this dev-only script's own fixed CLI argument, not untrusted input
+	if err != nil {
+		if os.IsNotExist(err) {
+			return cfg, false, nil
+		}
+		return cfg, false, fmt.Errorf("read %s: %w", path, err)
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return cfg, false, fmt.Errorf("parse existing %s: %w", path, err)
+	}
+	return cfg, true, nil
 }
 
 // marshalIndentNoEscape is json.MarshalIndent, except it doesn't
@@ -646,7 +752,7 @@ func writePlanConfig(path string, p profile, clientIDs [2]string, rs256ClientID 
 	}
 	cfg.Browser = []browserBlock{consentBlock}
 	cfg.Override = baseOverrides(authorizeURL, consentBlock, &one)
-	cfg.Override["fapi2-security-profile-final-ensure-signed-client-assertion-with-RS256-fails"] = overrideEntry{Client: rs256Client}
+	cfg.Override[rs256ClientAssertionOverrideKey] = overrideEntry{Client: rs256Client}
 	if p.name == "message-signing" || p.name == "message-signing-mtls" {
 		// Only reachable under a profile that actually sends signed
 		// request objects — see expected-skips-message-signing.json's
@@ -713,7 +819,9 @@ type cibaPlan struct {
 // factored out separately (rather than added as a third profiles[]
 // entry) because writeCIBAPlanConfig's output shape is unrelated to
 // writePlanConfig's, not just a variation of it. Idempotent the same
-// way: leaves an existing ciba-plan.json alone entirely.
+// way — see the package doc comment: never regenerates an existing
+// ciba-plan.json's own keys, but always resyncs ciba.config.json's
+// public keys to match whatever it currently holds.
 //
 // Reuses patchConformanceASConfig as-is against ciba.config.json's own
 // three clients (client1/client2/a PS256-registered third client) —
@@ -730,29 +838,59 @@ type cibaPlan struct {
 // block to force them to run.
 func setupCIBA(dir string) error {
 	planPath := filepath.Join(dir, "ciba-plan.json")
-	if _, err := os.Stat(planPath); err == nil {
-		fmt.Printf("ciba: %s already exists, leaving this profile alone\n", planPath)
-		return nil
+	p := profile{name: "ciba", alias: "gofapi-ciba", issuerHost: "conformance-as-ciba", keyLabel1: "ciba-client1", keyLabel2: "ciba-client2"}
+
+	existing, planExists, err := loadExistingPlan[cibaPlan](planPath)
+	if err != nil {
+		return err
 	}
 
-	p := profile{name: "ciba", alias: "gofapi-ciba", issuerHost: "conformance-as-ciba", keyLabel1: "ciba-client1", keyLabel2: "ciba-client2"}
-	priv1, pub1, err := generateKey(p.keyLabel1)
-	if err != nil {
-		return fmt.Errorf("generate client1 key: %w", err)
+	var priv1, priv2 jwks
+	if planExists {
+		priv1, priv2 = existing.Client.JWKS, existing.Client2.JWKS
+		if err := requireNonEmptyPrivateKey(priv1, planPath+": client"); err != nil {
+			return err
+		}
+		if err := requireNonEmptyPrivateKey(priv2, planPath+": client2"); err != nil {
+			return err
+		}
+	} else {
+		priv1, _, err = generateKey(p.keyLabel1)
+		if err != nil {
+			return fmt.Errorf("generate client1 key: %w", err)
+		}
+		priv2, _, err = generateKey(p.keyLabel2)
+		if err != nil {
+			return fmt.Errorf("generate client2 key: %w", err)
+		}
 	}
-	priv2, pub2, err := generateKey(p.keyLabel2)
-	if err != nil {
-		return fmt.Errorf("generate client2 key: %w", err)
-	}
-	_, pubRS256, err := generatePS256Key(conformanceKeyLabelPrefix + p.keyLabel1 + "-rs256-key1")
-	if err != nil {
-		return fmt.Errorf("generate RS256 test-client key: %w", err)
-	}
+	pub1, pub2 := publicOnly(priv1), publicOnly(priv2)
 
 	configPath := filepath.Join(dir, "ciba.config.json")
+
+	// This third client's own key is never referenced by ciba-plan.json
+	// at all (see this function's own package doc comment) — nothing
+	// ever compares it to a private counterpart, so there's no existing
+	// plan to recover it from. Reuse whatever's already committed in
+	// config.json when there is one, purely to avoid a needless key
+	// rotation (and the resulting no-op-looking git diff) on every run;
+	// mint a fresh one only the first time.
+	pubRS256, ok := existingThirdClientPublicKey(configPath)
+	if !ok {
+		_, pubRS256, err = generatePS256Key(conformanceKeyLabelPrefix + p.keyLabel1 + "-rs256-key1")
+		if err != nil {
+			return fmt.Errorf("generate RS256 test-client key: %w", err)
+		}
+	}
+
 	clientIDs, _, err := patchConformanceASConfig(configPath, p, pub1, pub2, pubRS256)
 	if err != nil {
 		return fmt.Errorf("update %s: %w", configPath, err)
+	}
+
+	if planExists {
+		fmt.Printf("ciba: %s already exists — resynced %s's public keys to match it\n", planPath, configPath)
+		return nil
 	}
 
 	cfg := cibaPlan{Alias: p.alias}
@@ -897,6 +1035,24 @@ func readConfigClients(path string) (top map[string]json.RawMessage, clients []m
 	return top, clients, nil
 }
 
+// existingThirdClientPublicKey returns the jwks of path's own third
+// client entry, if path already exists and already has one. setupCIBA
+// uses this to avoid a needless key rotation every run on a public key
+// nothing ever checks against anything (see its own doc comment for
+// why): once a valid one is already committed, reusing it instead of
+// minting a fresh replacement keeps a clean run-twice-get-no-diff
+// property everywhere else in this file already has.
+func existingThirdClientPublicKey(path string) (pub jwks, ok bool) {
+	_, clients, err := readConfigClients(path)
+	if err != nil || len(clients) < 3 {
+		return jwks{}, false
+	}
+	if err := json.Unmarshal(clients[2]["jwks"], &pub); err != nil || len(pub.Keys) == 0 {
+		return jwks{}, false
+	}
+	return pub, true
+}
+
 func patchCIBAMTLSConfig(path string, pubRSA, pubEC jwks) (clientIDs [2]string, err error) {
 	top, clients, err := readConfigClients(path)
 	if err != nil {
@@ -940,32 +1096,64 @@ func patchCIBAMTLSConfig(path string, pubRSA, pubEC jwks) (clientIDs [2]string, 
 // since the two profiles' plan shapes and client key types genuinely
 // differ (RSA/PS256 client1 + EC/ES256 client2 here, vs ES256-only
 // there; mtls/mtls2 cert blocks here, dpop_signing_alg there), not just
-// a parameter away from each other. Idempotent the same way: leaves an
-// existing ciba-mtls-plan.json alone entirely.
+// a parameter away from each other. Idempotent the same way — see the
+// package doc comment: never regenerates an existing ciba-mtls-plan.json's
+// own keys, but always resyncs ciba-mtls.config.json's public keys to
+// match whatever it currently holds.
 func setupCIBAMTLS(dir string) error {
 	planPath := filepath.Join(dir, "ciba-mtls-plan.json")
-	if _, err := os.Stat(planPath); err == nil {
-		fmt.Printf("ciba-mtls: %s already exists, leaving this profile alone\n", planPath)
-		return nil
-	}
-
 	const alias = "gofapi-ciba-mtls"
 	const issuerHost = "conformance-as-ciba-mtls"
 
-	// client1 is registered PS256/RSA directly (not ES256 plus a
-	// separate third client, unlike baseline/message-signing/ciba) —
-	// the suite's own ...-signature-algorithm-is-RS256-fails modules
-	// only need the plan's first client already PS256-registered to
-	// stop self-skipping; see oidf-config/README.md's own account of
-	// switching this client from ES256 for exactly that reason.
-	priv1, pub1, err := generatePS256Key(conformanceKeyLabelPrefix + "ciba-mtls-client1-rsa-key1")
+	existing, planExists, err := loadExistingPlan[cibaMTLSPlan](planPath)
 	if err != nil {
-		return fmt.Errorf("generate client1 key: %w", err)
+		return err
 	}
-	priv2, pub2, err := generateKey("ciba-mtls-client2")
+
+	var priv1, priv2 jwks
+	if planExists {
+		priv1, priv2 = existing.Client.JWKS, existing.Client2.JWKS
+		if err := requireNonEmptyPrivateKey(priv1, planPath+": client"); err != nil {
+			return err
+		}
+		if err := requireNonEmptyPrivateKey(priv2, planPath+": client2"); err != nil {
+			return err
+		}
+	} else {
+		// client1 is registered PS256/RSA directly (not ES256 plus a
+		// separate third client, unlike baseline/message-signing/ciba) —
+		// the suite's own ...-signature-algorithm-is-RS256-fails modules
+		// only need the plan's first client already PS256-registered to
+		// stop self-skipping; see oidf-config/README.md's own account of
+		// switching this client from ES256 for exactly that reason.
+		priv1, _, err = generatePS256Key(conformanceKeyLabelPrefix + "ciba-mtls-client1-rsa-key1")
+		if err != nil {
+			return fmt.Errorf("generate client1 key: %w", err)
+		}
+		priv2, _, err = generateKey("ciba-mtls-client2")
+		if err != nil {
+			return fmt.Errorf("generate client2 key: %w", err)
+		}
+	}
+	pub1, pub2 := publicOnly(priv1), publicOnly(priv2)
+
+	configPath := filepath.Join(dir, "ciba-mtls.config.json")
+	clientIDs, err := patchCIBAMTLSConfig(configPath, pub1, pub2)
 	if err != nil {
-		return fmt.Errorf("generate client2 key: %w", err)
+		return fmt.Errorf("update %s: %w", configPath, err)
 	}
+
+	if planExists {
+		fmt.Printf("ciba-mtls: %s already exists — resynced %s's public keys to match it\n", planPath, configPath)
+		return nil
+	}
+
+	// The suite's own mTLS-bound-token check for this profile never
+	// pre-registers a certificate thumbprint anywhere in config.json
+	// (sender_constrain=mtls binds dynamically to whatever certificate
+	// is actually presented at token time) — unlike client-auth-mtls's
+	// own certificate, this one has nothing to stay in sync with, so a
+	// fresh certificate on every run is fine even when resyncing keys.
 	mtlsCert, mtlsKey, err := generateMTLSCertKeyPEM(alias + mtlsSuiteClientCNSuffix)
 	if err != nil {
 		return fmt.Errorf("generate client1 mtls certificate: %w", err)
@@ -973,12 +1161,6 @@ func setupCIBAMTLS(dir string) error {
 	mtls2Cert, mtls2Key, err := generateMTLSCertKeyPEM(alias + mtlsSuiteClient2CNSuffix)
 	if err != nil {
 		return fmt.Errorf("generate client2 mtls certificate: %w", err)
-	}
-
-	configPath := filepath.Join(dir, "ciba-mtls.config.json")
-	clientIDs, err := patchCIBAMTLSConfig(configPath, pub1, pub2)
-	if err != nil {
-		return fmt.Errorf("update %s: %w", configPath, err)
 	}
 
 	cfg := cibaMTLSPlan{Alias: alias}
@@ -1149,29 +1331,54 @@ func patchClientAuthMTLSConfig(path string, thumb1, thumb2 string) (clientIDs [2
 // additionally fabricate or reason about a subject DN.
 func setupClientAuthMTLSVariant(dir, name string, senderConstrainMTLS bool) error {
 	planPath := filepath.Join(dir, name+"-plan.json")
-	if _, err := os.Stat(planPath); err == nil {
-		fmt.Printf("%s: %s already exists, leaving this profile alone\n", name, planPath)
-		return nil
-	}
-
 	alias := "gofapi-" + name
 	issuerHost := "conformance-as-" + name
 
-	cert1PEM, key1PEM, err := generateMTLSCertKeyPEM(alias + mtlsSuiteClientCNSuffix)
+	existing, planExists, err := loadExistingPlan[clientAuthMTLSPlan](planPath)
 	if err != nil {
-		return fmt.Errorf("generate client1 mtls certificate: %w", err)
+		return err
 	}
-	cert2PEM, key2PEM, err := generateMTLSCertKeyPEM(alias + mtlsSuiteClient2CNSuffix)
-	if err != nil {
-		return fmt.Errorf("generate client2 mtls certificate: %w", err)
+
+	// thumb1/thumb2 — derived from whichever certificate is actually in
+	// play, existing or fresh — are the only thing that has to stay in
+	// sync with config.json here: clientAuthMTLSClient.JWKS is a
+	// structural-only key neither side ever checks (see that type's own
+	// doc comment), so it's always safe to mint fresh even on resync.
+	var cert1PEM, key1PEM, cert2PEM, key2PEM, thumb1, thumb2 string
+	if planExists {
+		cert1PEM, key1PEM = existing.MTLS.Cert, existing.MTLS.Key
+		cert2PEM, key2PEM = existing.MTLS2.Cert, existing.MTLS2.Key
+		if cert1PEM == "" || cert2PEM == "" {
+			return fmt.Errorf("%s: missing mtls/mtls2 certificate blocks", planPath)
+		}
+	} else {
+		cert1PEM, key1PEM, err = generateMTLSCertKeyPEM(alias + mtlsSuiteClientCNSuffix)
+		if err != nil {
+			return fmt.Errorf("generate client1 mtls certificate: %w", err)
+		}
+		cert2PEM, key2PEM, err = generateMTLSCertKeyPEM(alias + mtlsSuiteClient2CNSuffix)
+		if err != nil {
+			return fmt.Errorf("generate client2 mtls certificate: %w", err)
+		}
 	}
-	thumb1, err := certPEMThumbprint(cert1PEM)
+	thumb1, err = certPEMThumbprint(cert1PEM)
 	if err != nil {
 		return fmt.Errorf("thumbprint client1 certificate: %w", err)
 	}
-	thumb2, err := certPEMThumbprint(cert2PEM)
+	thumb2, err = certPEMThumbprint(cert2PEM)
 	if err != nil {
 		return fmt.Errorf("thumbprint client2 certificate: %w", err)
+	}
+
+	configPath := filepath.Join(dir, name+".config.json")
+	clientIDs, err := patchClientAuthMTLSConfig(configPath, thumb1, thumb2)
+	if err != nil {
+		return fmt.Errorf("update %s: %w", configPath, err)
+	}
+
+	if planExists {
+		fmt.Printf("%s: %s already exists — resynced %s's certificate thumbprints to match it\n", name, planPath, configPath)
+		return nil
 	}
 
 	priv1, _, err := generateKey(name + "-client1")
@@ -1181,12 +1388,6 @@ func setupClientAuthMTLSVariant(dir, name string, senderConstrainMTLS bool) erro
 	priv2, _, err := generateKey(name + "-client2")
 	if err != nil {
 		return fmt.Errorf("generate client2 key: %w", err)
-	}
-
-	configPath := filepath.Join(dir, name+".config.json")
-	clientIDs, err := patchClientAuthMTLSConfig(configPath, thumb1, thumb2)
-	if err != nil {
-		return fmt.Errorf("update %s: %w", configPath, err)
 	}
 
 	authorizeURL := issuerURL(issuerHost, "/authorize*")
@@ -1278,20 +1479,21 @@ type cibaPingPlan struct {
 // non-DCR client registers is fixed for the client's whole lifetime,
 // so it can't be shared with a plan run using a different alias.
 //
-// setupCIBAPing's own idempotency gate (ciba-ping-plan.json already
-// exists) is the only thing that can ever skip regenerating pub1/pub2
-// in the first place — and that plan file is gitignored, so on a fresh
-// clone it's always missing and this function always runs with a
-// brand-new keypair. So when these two client IDs are already present
-// here (from a previous run's commit of this same, non-gitignored
-// config file), this must refresh their "jwks" in place to match —
-// mirroring patchCIBAMTLSConfig's own always-overwrite approach —
-// rather than leave the file alone: skipping would leave the server
-// still registered with the *old* public key while the freshly
-// generated plan signs with a brand-new private key, so every request
-// this client makes fails client assertion verification (confirmed
-// live: "invalid_client: client assertion verification failed" on the
-// very first backchannel authentication request).
+// pub1/pub2 are always this client's own current public keys —
+// setupCIBAPing derives them either from a brand-new keypair (no
+// existing ciba-ping-plan.json) or straight from that plan's own
+// already-generated private key (see loadExistingPlan's own doc
+// comment for why this must happen on every run, not just once). So
+// when these two client IDs are already present here (from a previous
+// run's commit of this same, non-gitignored config file), this must
+// refresh their "jwks" in place to match — mirroring
+// patchCIBAMTLSConfig's own always-overwrite approach — rather than
+// leave the file alone: doing so would leave the server registered
+// with a *stale* public key while the plan signs with a different
+// private key, so every request this client makes fails client
+// assertion verification (confirmed live:
+// "invalid_client: client assertion verification failed" on the very
+// first backchannel authentication request).
 func appendCIBAPingClients(path string, pub1, pub2 jwks, notificationEndpoint1, notificationEndpoint2 string) (clientIDs [2]string, err error) {
 	const clientID1 = conformanceKeyLabelPrefix + "ciba-ping-client-1"
 	const clientID2 = conformanceKeyLabelPrefix + "ciba-ping-client-2"
@@ -1404,34 +1606,40 @@ func writeCIBAConfigClients(path string, top map[string]json.RawMessage, clients
 // plan alias ("gofapi-ciba-ping") so this plan's notification endpoint
 // doesn't collide with the poll-mode plan's — see
 // appendCIBAPingClients's own doc comment. Idempotent the same way
-// every other setup* function here is: leaves an existing
-// ciba-ping-plan.json alone entirely.
+// every other setup* function here is — see the package doc comment:
+// never regenerates an existing ciba-ping-plan.json's own keys, but
+// always resyncs ciba-mtls.config.json's public keys to match whatever
+// it currently holds.
 func setupCIBAPing(dir string) error {
 	planPath := filepath.Join(dir, "ciba-ping-plan.json")
-	if _, err := os.Stat(planPath); err == nil {
-		fmt.Printf("ciba-ping: %s already exists, leaving this profile alone\n", planPath)
-		return nil
-	}
-
 	const alias = "gofapi-ciba-ping"
 	const issuerHost = "conformance-as-ciba-mtls" // same running container as setupCIBAMTLS
 
-	priv1JWKS, pub1, err := generatePS256Key(conformanceKeyLabelPrefix + "ciba-ping-client1-rsa-key1")
+	existing, planExists, err := loadExistingPlan[cibaPingPlan](planPath)
 	if err != nil {
-		return fmt.Errorf("generate client1 key: %w", err)
+		return err
 	}
-	priv2JWKS, pub2, err := generateKey("ciba-ping-client2")
-	if err != nil {
-		return fmt.Errorf("generate client2 key: %w", err)
+
+	var priv1JWKS, priv2JWKS jwks
+	if planExists {
+		priv1JWKS, priv2JWKS = existing.Client.JWKS, existing.Client2.JWKS
+		if err := requireNonEmptyPrivateKey(priv1JWKS, planPath+": client"); err != nil {
+			return err
+		}
+		if err := requireNonEmptyPrivateKey(priv2JWKS, planPath+": client2"); err != nil {
+			return err
+		}
+	} else {
+		priv1JWKS, _, err = generatePS256Key(conformanceKeyLabelPrefix + "ciba-ping-client1-rsa-key1")
+		if err != nil {
+			return fmt.Errorf("generate client1 key: %w", err)
+		}
+		priv2JWKS, _, err = generateKey("ciba-ping-client2")
+		if err != nil {
+			return fmt.Errorf("generate client2 key: %w", err)
+		}
 	}
-	mtlsCert, mtlsKey, err := generateMTLSCertKeyPEM(alias + mtlsSuiteClientCNSuffix)
-	if err != nil {
-		return fmt.Errorf("generate client1 mtls certificate: %w", err)
-	}
-	mtls2Cert, mtls2Key, err := generateMTLSCertKeyPEM(alias + mtlsSuiteClient2CNSuffix)
-	if err != nil {
-		return fmt.Errorf("generate client2 mtls certificate: %w", err)
-	}
+	pub1, pub2 := publicOnly(priv1JWKS), publicOnly(priv2JWKS)
 
 	notificationEndpoint := "https://localhost.emobix.co.uk:8443/test/a/" + alias + "/ciba-notification-endpoint"
 
@@ -1439,6 +1647,24 @@ func setupCIBAPing(dir string) error {
 	clientIDs, err := appendCIBAPingClients(configPath, pub1, pub2, notificationEndpoint, notificationEndpoint)
 	if err != nil {
 		return fmt.Errorf("update %s: %w", configPath, err)
+	}
+
+	if planExists {
+		return nil // appendCIBAPingClients already reported the resync above
+	}
+
+	// Same reasoning as setupCIBAMTLS's own identical comment: this
+	// certificate is never pre-registered anywhere in config.json, so a
+	// fresh one on every run is fine even when resyncing keys — but that
+	// branch already returned above, so this only ever runs when
+	// generating everything from scratch.
+	mtlsCert, mtlsKey, err := generateMTLSCertKeyPEM(alias + mtlsSuiteClientCNSuffix)
+	if err != nil {
+		return fmt.Errorf("generate client1 mtls certificate: %w", err)
+	}
+	mtls2Cert, mtls2Key, err := generateMTLSCertKeyPEM(alias + mtlsSuiteClient2CNSuffix)
+	if err != nil {
+		return fmt.Errorf("generate client2 mtls certificate: %w", err)
 	}
 
 	cfg := cibaPingPlan{Alias: alias}
@@ -1589,34 +1815,59 @@ func appendCIBAClientAuthMTLSClients(path, idSuffix string, pub1, pub2 jwks, thu
 // ciba-mtls.config.json and the same running conformance-as-ciba-mtls
 // container setupCIBAMTLS already configures, under their own suite
 // plan alias so registrations don't collide with the private_key_jwt
-// plans'. Idempotent the same way every other setup* function here is.
+// plans'. Idempotent the same way every other setup* function here is —
+// see the package doc comment.
 func setupCIBAClientAuthMTLSVariant(dir, suffix, deliveryMode string) error {
 	name := "ciba-" + suffix
 	planPath := filepath.Join(dir, name+"-plan.json")
-	if _, err := os.Stat(planPath); err == nil {
-		fmt.Printf("%s: %s already exists, leaving this profile alone\n", name, planPath)
-		return nil
-	}
-
 	alias := "gofapi-" + name
 	const issuerHost = "conformance-as-ciba-mtls" // same running container as setupCIBAMTLS
 
-	priv1JWKS, pub1, err := generatePS256Key(conformanceKeyLabelPrefix + name + "-client1-rsa-key1")
+	existing, planExists, err := loadExistingPlan[cibaMTLSPlan](planPath)
 	if err != nil {
-		return fmt.Errorf("generate client1 key: %w", err)
+		return err
 	}
-	priv2JWKS, pub2, err := generateKey(name + "-client2")
-	if err != nil {
-		return fmt.Errorf("generate client2 key: %w", err)
+
+	// Both the jwks (the backchannel authentication *request*'s own
+	// signing key — required regardless of client-authentication method,
+	// see appendCIBAClientAuthMTLSClients' own doc comment) and the
+	// certificate thumbprint (this profile's actual client-authentication
+	// credential) matter here, unlike setupClientAuthMTLSVariant's
+	// throwaway jwks — both must come from the existing plan on resync.
+	var priv1JWKS, priv2JWKS jwks
+	var mtlsCert, mtlsKey, mtls2Cert, mtls2Key string
+	if planExists {
+		priv1JWKS, priv2JWKS = existing.Client.JWKS, existing.Client2.JWKS
+		mtlsCert, mtlsKey = existing.MTLS.Cert, existing.MTLS.Key
+		mtls2Cert, mtls2Key = existing.MTLS2.Cert, existing.MTLS2.Key
+		if err := requireNonEmptyPrivateKey(priv1JWKS, planPath+": client"); err != nil {
+			return err
+		}
+		if err := requireNonEmptyPrivateKey(priv2JWKS, planPath+": client2"); err != nil {
+			return err
+		}
+		if mtlsCert == "" || mtls2Cert == "" {
+			return fmt.Errorf("%s: missing mtls/mtls2 certificate blocks", planPath)
+		}
+	} else {
+		priv1JWKS, _, err = generatePS256Key(conformanceKeyLabelPrefix + name + "-client1-rsa-key1")
+		if err != nil {
+			return fmt.Errorf("generate client1 key: %w", err)
+		}
+		priv2JWKS, _, err = generateKey(name + "-client2")
+		if err != nil {
+			return fmt.Errorf("generate client2 key: %w", err)
+		}
+		mtlsCert, mtlsKey, err = generateMTLSCertKeyPEM(alias + mtlsSuiteClientCNSuffix)
+		if err != nil {
+			return fmt.Errorf("generate client1 mtls certificate: %w", err)
+		}
+		mtls2Cert, mtls2Key, err = generateMTLSCertKeyPEM(alias + mtlsSuiteClient2CNSuffix)
+		if err != nil {
+			return fmt.Errorf("generate client2 mtls certificate: %w", err)
+		}
 	}
-	mtlsCert, mtlsKey, err := generateMTLSCertKeyPEM(alias + mtlsSuiteClientCNSuffix)
-	if err != nil {
-		return fmt.Errorf("generate client1 mtls certificate: %w", err)
-	}
-	mtls2Cert, mtls2Key, err := generateMTLSCertKeyPEM(alias + mtlsSuiteClient2CNSuffix)
-	if err != nil {
-		return fmt.Errorf("generate client2 mtls certificate: %w", err)
-	}
+	pub1, pub2 := publicOnly(priv1JWKS), publicOnly(priv2JWKS)
 	thumb1, err := certPEMThumbprint(mtlsCert)
 	if err != nil {
 		return fmt.Errorf("thumbprint client1 certificate: %w", err)
@@ -1636,6 +1887,10 @@ func setupCIBAClientAuthMTLSVariant(dir, suffix, deliveryMode string) error {
 	clientIDs, err := appendCIBAClientAuthMTLSClients(configPath, suffix, pub1, pub2, thumb1, thumb2, deliveryMode, notification1, notification2)
 	if err != nil {
 		return fmt.Errorf("update %s: %w", configPath, err)
+	}
+
+	if planExists {
+		return nil // appendCIBAClientAuthMTLSClients already reported the resync above
 	}
 
 	cfg := cibaMTLSPlan{Alias: alias}
@@ -1697,19 +1952,57 @@ var clientCredentialsGrantContainers = []struct {
 // generation; !clientAuthMTLS mirrors the generic profile/writePlanConfig
 // machinery's own jwks generation) rather than introducing a third
 // client-shape convention.
-// clientCredentialsGrantClient builds one client's config.json entry
-// and plan "client"/"client2" entry — client1 PS256/RSA under
-// !clientAuthMTLS (mirrors setupCIBAMTLS/appendCIBAPingClients' own
-// identical reasoning: the plan's fapi2-security-profile-final-ensure
-// -signed-client-assertion-with-RS256-fails module, present in every
-// private_key_jwt combo's own module list, only starts running rather
-// than self-skipping once the plan's first client is already
-// PS256-registered), client2 (and both clients under clientAuthMTLS,
-// which has no client_assertion/algorithm concept at all) plain ES256.
-// Returns the mtls certificate/key PEM too (empty under !clientAuthMTLS
-// && !senderConstrainMTLS) for the caller to fold into the plan's own
-// mtls/mtls2 blocks.
-func clientCredentialsGrantClient(clientID, keyLabel, certCNSuffix string, clientAuthMTLS, senderConstrainMTLS, forceRSA bool) (configEntry, planEntry map[string]any, certPEM, keyPEM string, err error) {
+// clientCredentialsGrantMaterial is the per-client key/certificate
+// material clientCredentialsGrantEntries needs to build one client's
+// config.json/plan.json entries — either freshly generated
+// (generateClientCredentialsGrantMaterial) or recovered from an
+// already-existing plan (setupClientCredentialsGrantVariant's own
+// resync path), so both paths produce byte-for-byte identical entries
+// for the same underlying material.
+type clientCredentialsGrantMaterial struct {
+	priv, pub       jwks
+	certPEM, keyPEM string
+}
+
+// generateClientCredentialsGrantMaterial mints fresh key/certificate
+// material for one client — needsCert mirrors clientAuthMTLS ||
+// senderConstrainMTLS at the call site (one certificate covers both
+// axes when combined, the same one-certificate precedent
+// setupClientAuthMTLSVariant's own "MTLS + MTLS" case already
+// established).
+func generateClientCredentialsGrantMaterial(keyLabel, certCNSuffix string, needsCert, forceRSA bool) (m clientCredentialsGrantMaterial, err error) {
+	if needsCert {
+		m.certPEM, m.keyPEM, err = generateMTLSCertKeyPEM(certCNSuffix)
+		if err != nil {
+			return m, fmt.Errorf("generate client mtls certificate: %w", err)
+		}
+	}
+	if forceRSA {
+		m.priv, m.pub, err = generatePS256Key(keyLabel + "-rsa-key1")
+	} else {
+		m.priv, m.pub, err = generateKey(keyLabel)
+	}
+	if err != nil {
+		return m, fmt.Errorf("generate client key: %w", err)
+	}
+	return m, nil
+}
+
+// clientCredentialsGrantEntries builds one client's config.json entry
+// and plan "client"/"client2" entry from already-known material m —
+// client1 PS256/RSA under !clientAuthMTLS (mirrors
+// setupCIBAMTLS/appendCIBAPingClients' own identical reasoning: the
+// plan's fapi2-security-profile-final-ensure-signed-client-assertion
+// -with-RS256-fails module, present in every private_key_jwt combo's
+// own module list, only starts running rather than self-skipping once
+// the plan's first client is already PS256-registered), client2 (and
+// both clients under clientAuthMTLS, which has no client_assertion
+// /algorithm concept at all) plain ES256. The entry-shaping half of
+// what a single clientCredentialsGrantClient call used to do in one
+// step, split out so setupClientCredentialsGrantVariant's resync path
+// can reuse it against material recovered from an existing plan
+// instead of freshly generated material.
+func clientCredentialsGrantEntries(clientID string, m clientCredentialsGrantMaterial, clientAuthMTLS, senderConstrainMTLS, forceRSA bool) (configEntry, planEntry map[string]any, err error) {
 	configEntry = map[string]any{
 		"id": clientID,
 		// Structurally required by storage.NewRegisteredClient (every
@@ -1727,34 +2020,13 @@ func clientCredentialsGrantClient(clientID, keyLabel, certCNSuffix string, clien
 	if senderConstrainMTLS {
 		configEntry["sender_constrain"] = "mtls"
 	}
-
-	// One certificate covers both axes when combined (clientAuthMTLS
-	// needs it for §2 client authentication; senderConstrainMTLS needs
-	// it for §3 token-binding presentation) — the same one-certificate
-	// precedent setupClientAuthMTLSVariant's own "MTLS + MTLS" case
-	// already established.
-	if clientAuthMTLS || senderConstrainMTLS {
-		certPEM, keyPEM, err = generateMTLSCertKeyPEM(certCNSuffix)
+	if clientAuthMTLS {
+		thumb, err := certPEMThumbprint(m.certPEM)
 		if err != nil {
-			return nil, nil, "", "", fmt.Errorf("generate client mtls certificate: %w", err)
+			return nil, nil, fmt.Errorf("thumbprint client certificate: %w", err)
 		}
-		if clientAuthMTLS {
-			thumb, err := certPEMThumbprint(certPEM)
-			if err != nil {
-				return nil, nil, "", "", fmt.Errorf("thumbprint client certificate: %w", err)
-			}
-			configEntry["client_auth_method"] = "self_signed_tls_client_auth"
-			configEntry["expected_certificate_thumbprint"] = thumb
-		}
-	}
-	var priv, pub jwks
-	if forceRSA {
-		priv, pub, err = generatePS256Key(keyLabel + "-rsa-key1")
-	} else {
-		priv, pub, err = generateKey(keyLabel)
-	}
-	if err != nil {
-		return nil, nil, "", "", fmt.Errorf("generate client key: %w", err)
+		configEntry["client_auth_method"] = "self_signed_tls_client_auth"
+		configEntry["expected_certificate_thumbprint"] = thumb
 	}
 	// The suite's own plan config needs a "jwks" entry regardless of
 	// client_auth_type — ValidateClientJWKsPrivatePart runs
@@ -1766,16 +2038,32 @@ func clientCredentialsGrantClient(clientID, keyLabel, certCNSuffix string, clien
 	// mechanism (!clientAuthMTLS) — under clientAuthMTLS the
 	// certificate alone authenticates the client, so the config-side
 	// jwks/client_assertion_algorithm fields would go unused.
-	planEntry["jwks"] = priv
+	planEntry["jwks"] = m.priv
 	if !clientAuthMTLS {
 		if forceRSA {
 			configEntry["client_assertion_algorithm"] = "PS256"
 		} else {
 			configEntry["client_assertion_algorithm"] = "ES256"
 		}
-		configEntry["jwks"] = pub
+		configEntry["jwks"] = m.pub
 	}
-	return configEntry, planEntry, certPEM, keyPEM, nil
+	return configEntry, planEntry, nil
+}
+
+// clientCredentialsPlanKeys is the minimal shape
+// setupClientCredentialsGrantVariant needs to read back out of its own
+// already-written plan.json — that plan is otherwise built as a plain
+// map[string]any (see its own construction below), not a dedicated
+// struct, since nothing else in this file needs to round-trip it.
+type clientCredentialsPlanKeys struct {
+	Client struct {
+		JWKS jwks `json:"jwks"`
+	} `json:"client"`
+	Client2 struct {
+		JWKS jwks `json:"jwks"`
+	} `json:"client2"`
+	MTLS  *mtlsBlock `json:"mtls,omitempty"`
+	MTLS2 *mtlsBlock `json:"mtls2,omitempty"`
 }
 
 // setupClientCredentialsGrantVariant adds two more clients (client1,
@@ -1797,21 +2085,50 @@ func clientCredentialsGrantClient(clientID, keyLabel, certCNSuffix string, clien
 func setupClientCredentialsGrantVariant(dir, baseName string, clientAuthMTLS, senderConstrainMTLS bool) error {
 	name := baseName + "-client-credentials"
 	planPath := filepath.Join(dir, name+"-plan.json")
-	if _, err := os.Stat(planPath); err == nil {
-		fmt.Printf("%s: %s already exists, leaving this profile alone\n", name, planPath)
-		return nil
-	}
-
 	alias := "gofapi-" + name
 	issuerHost := "conformance-as-" + baseName
 	clientID1 := conformanceKeyLabelPrefix + name + "-client-1"
 	clientID2 := conformanceKeyLabelPrefix + name + "-client-2"
+	needsCert := clientAuthMTLS || senderConstrainMTLS
 
-	configEntry1, planEntry1, cert1, key1, err := clientCredentialsGrantClient(clientID1, name+"-client1", alias+mtlsSuiteClientCNSuffix, clientAuthMTLS, senderConstrainMTLS, true)
+	existing, planExists, err := loadExistingPlan[clientCredentialsPlanKeys](planPath)
 	if err != nil {
 		return err
 	}
-	configEntry2, planEntry2, cert2, key2, err := clientCredentialsGrantClient(clientID2, name+"-client2", alias+mtlsSuiteClient2CNSuffix, clientAuthMTLS, senderConstrainMTLS, false)
+
+	var m1, m2 clientCredentialsGrantMaterial
+	if planExists {
+		m1 = clientCredentialsGrantMaterial{priv: existing.Client.JWKS, pub: publicOnly(existing.Client.JWKS)}
+		m2 = clientCredentialsGrantMaterial{priv: existing.Client2.JWKS, pub: publicOnly(existing.Client2.JWKS)}
+		if err := requireNonEmptyPrivateKey(m1.priv, planPath+": client"); err != nil {
+			return err
+		}
+		if err := requireNonEmptyPrivateKey(m2.priv, planPath+": client2"); err != nil {
+			return err
+		}
+		if needsCert {
+			if existing.MTLS == nil || existing.MTLS2 == nil {
+				return fmt.Errorf("%s: missing mtls/mtls2 certificate blocks", planPath)
+			}
+			m1.certPEM, m1.keyPEM = existing.MTLS.Cert, existing.MTLS.Key
+			m2.certPEM, m2.keyPEM = existing.MTLS2.Cert, existing.MTLS2.Key
+		}
+	} else {
+		m1, err = generateClientCredentialsGrantMaterial(name+"-client1", alias+mtlsSuiteClientCNSuffix, needsCert, true)
+		if err != nil {
+			return err
+		}
+		m2, err = generateClientCredentialsGrantMaterial(name+"-client2", alias+mtlsSuiteClient2CNSuffix, needsCert, false)
+		if err != nil {
+			return err
+		}
+	}
+
+	configEntry1, planEntry1, err := clientCredentialsGrantEntries(clientID1, m1, clientAuthMTLS, senderConstrainMTLS, true)
+	if err != nil {
+		return err
+	}
+	configEntry2, planEntry2, err := clientCredentialsGrantEntries(clientID2, m2, clientAuthMTLS, senderConstrainMTLS, false)
 	if err != nil {
 		return err
 	}
@@ -1822,19 +2139,11 @@ func setupClientCredentialsGrantVariant(dir, baseName string, clientAuthMTLS, se
 		return fmt.Errorf("read %s: %w", configPath, err)
 	}
 
-	// planPath's own os.Stat check above is the only thing that can
-	// ever skip regenerating these two clients' keys in the first
-	// place — and that plan file is gitignored, so on a fresh clone
-	// it's always missing and this function always runs with a
-	// brand-new keypair. So when these two client IDs are already
-	// present here (from a previous run's commit of this same,
-	// non-gitignored config file), this must refresh their entries in
-	// place to match, mirroring appendCIBAPingClients' own
-	// always-overwrite approach, rather than bail out without ever
-	// writing planPath: that leaves this profile with no plan config
-	// at all, which is exactly what silently SKIPPED all four
-	// client_credentials legs in CI rather than running them
-	// (confirmed live).
+	// Refresh these two client IDs' entries in place if config.json
+	// already has them (mirroring appendCIBAPingClients' own
+	// always-overwrite approach), rather than leaving a mismatched
+	// config.json alone — the resync this whole file now performs on
+	// every run, not just a one-time fresh-clone bootstrap.
 	newEntries := map[string]map[string]any{clientID1: configEntry1, clientID2: configEntry2}
 	found := map[string]bool{}
 	for i, c := range clients {
@@ -1859,7 +2168,7 @@ func setupClientCredentialsGrantVariant(dir, baseName string, clientAuthMTLS, se
 	}
 	switch {
 	case found[clientID1] && found[clientID2]:
-		fmt.Printf("%s: clients already present in %s, refreshed to match the freshly generated plan\n", name, configPath)
+		fmt.Printf("%s: clients already present in %s, refreshed to match %s\n", name, configPath, planPath)
 	case found[clientID1] || found[clientID2]:
 		return fmt.Errorf("found only one of %q/%q in %s", clientID1, clientID2, configPath)
 	default:
@@ -1877,6 +2186,11 @@ func setupClientCredentialsGrantVariant(dir, baseName string, clientAuthMTLS, se
 	}
 	if err := writeCIBAConfigClients(configPath, top, clients); err != nil {
 		return fmt.Errorf("update %s: %w", configPath, err)
+	}
+
+	if planExists {
+		fmt.Printf("%s: %s already exists — resynced %s to match it\n", name, planPath, configPath)
+		return nil
 	}
 
 	// accountsPath, not userinfoPath: see that constant's own doc
@@ -1898,9 +2212,9 @@ func setupClientCredentialsGrantVariant(dir, baseName string, clientAuthMTLS, se
 		"client2":  planEntry2,
 		"resource": map[string]any{"resourceUrl": resourceURL},
 	}
-	if cert1 != "" {
-		plan["mtls"] = mtlsBlock{Cert: cert1, Key: key1}
-		plan["mtls2"] = mtlsBlock{Cert: cert2, Key: key2}
+	if needsCert {
+		plan["mtls"] = mtlsBlock{Cert: m1.certPEM, Key: m1.keyPEM}
+		plan["mtls2"] = mtlsBlock{Cert: m2.certPEM, Key: m2.keyPEM}
 	}
 
 	out, err := marshalIndentNoEscape(plan)

@@ -16,8 +16,8 @@
             "use": "sig",
             "kid": "gofapi-conformance-client1-key1",
             "crv": "P-256",
-            "x": "sykeXEKb0d9czriN2Bd5waXxx5ftpWj9VfebK-j2Jfk",
-            "y": "_IDOs2uxgAk0161utX3Ozky20A8GT22L4emKAegkOUA"
+            "x": "FatJkNFv85OAziHeSzp3vPxxJSzOFFnRpBOIZJnONc4",
+            "y": "tKCngZTSBc1sQadCdInjLWh8HUHulzv8UbHNKgrJSmA"
           }
         ]
       },
@@ -43,8 +43,8 @@
             "use": "sig",
             "kid": "gofapi-conformance-client2-key1",
             "crv": "P-256",
-            "x": "zzJmYGXLC-nDMizO4kQ8sTeUxfXy2wq02E-goEx9NRg",
-            "y": "8lwr8Jft5zHZ7p5cH3tO_XOwjPEUbTPj36wioECqnqM"
+            "x": "1qu0ijVu5uYhM55Q9WRG9U7bnc_Wit41_6piAkwrytQ",
+            "y": "JvGFzWGoAAdno4TvtoNsxHOA-bmWenXiLSwR-juRKYQ"
           }
         ]
       },
@@ -69,7 +69,7 @@
             "alg": "PS256",
             "use": "sig",
             "kid": "gofapi-conformance-client1-rs256-key1",
-            "n": "ySkQyRv0BG0gvz7n5FfU6uunI_Fhe8jaJ89cb7OmOT8m8ZiV4vvSDu17toACmUVUIZa_JztadIFvdQGwHQtP9TNLxUr15aq77IdRTmFyZFo6SINdSXCPuSvE6w7V6rCFKXtrrxU4HxcEW8b5QJqHhDH22_vHydbJGhYTOLuV5T0eKTvWGWcPnZFJ_QM77xX5sv7SLGg9CsujukPL1o4v1pWDrzvcpVKSVY6m6mbxwlMwrVCQZLT9P1A0EIjTmdH4Vmp1GcEMRdv_qn2Vr0rHQVysfcncHPXSWN-boaK0Pc5_cefa0mlJhVzwUqdN7A3WQdMRuRp87D59Hj0lLNEI2w",
+            "n": "7wufWvOAjSltJsHPxyrIxXXJNH5rd61S5nj_uQf8dY-tTFmlcrWMg3vi0NakjW579nWc8BISkUho0UDdlcaBpJBU8ptEnKkN2fYdZehGEKkye4rfGtDx1fzcm0WIsqhDuQsS4bLpbPt5nmv-KklfXuS0GKVg7IkjtnK4rIobEEYTLXi7C6-lWRQTWiSp5qCR9UF3Nm1_gp5BorNXS57_NNM49aYef2A0XaRyB3rIPIVMn_qLYMoHXuooeVO7eHBu9DiVykXkNA4y8dYCmn9hG3E21J3HOmQtMVW-mFtsF314MDNI-O8xRv-o8a2d1x1GYf5qu8I0J-36BQXQJsOr5w",
             "e": "AQAB"
           }
         ]
@@ -94,7 +94,7 @@
             "alg": "PS256",
             "use": "sig",
             "kid": "baseline-client-credentials-client1-rsa-key1",
-            "n": "qsF2Pd-FGbB5t0QcM7-ml94aV0kJmxjL0VKhv9gkdTy3D0EkytGMjcfALncpjOSdkuYsoKlNVEZW1gE6Kj96l1LyZ7IcAvs99aEzRNNlHWZBd2OoJ4Pg3Vijta98os1HGNtCWCzQm-CauFuGutocJjobARP4ERo2-TGbwgVD4xqB2ugo6VMzqRymURU_DZ8t2-1zdivDKEhdLmeACkNsgcWIyZRPYktw9jDcayQlUjNat9ZdodSR3Wn2ReciONYypi7i6xPhofftnWrj1Xh1qpPMthZxAXGFBIk2woYyBZhyMbLXcStKZmjdNq71n5-sreXN7KB0HEHzooBVXsoIZQ",
+            "n": "wKL6iKy20ELq7kUXr2-sD83Jl-pt5XF96TURpcOlJ8PeigTiuh-mmWIhCFeplcGKf1Sln5uCjSVOYCBFRHMhP2qE2pJSY11PxM8e773N5WwPZnMc0fshsdn0XvREJNhLf6mF2QNYuID93I_2dkp1KHlJq4zT-Ar3n1uZXbMou89gDzgZwJNhjhtWzPUNpzaj-mCFUUsb1Kg-0glhBrNyKhs7IK6iW00Gd8rUeAh_W5hedZuB6I276I9WsvK-Hkk06qgkhF8_na08IF4VPs5MUwvbNVkl_0tQUSZCXwSL1kncoggRNQ-Knh3y-jHKbywpAVY0j4BwVzVTIL-tc8t0_w",
             "e": "AQAB"
           }
         ]
@@ -118,8 +118,8 @@
             "use": "sig",
             "kid": "gofapi-conformance-baseline-client-credentials-client2-key1",
             "crv": "P-256",
-            "x": "nPF3LmQxVC94O-ouEgJ5N9Gn8rHyy7tNUSYsKlaor9Y",
-            "y": "D-YojUHNl3Yb14b2ApGNfYeWcQ_mCCzPQbxLCbZvS4s"
+            "x": "Ub-BYEFvrvArqog-6YQfnM0c-SWSXsEdAVWD4KZbrss",
+            "y": "rzdN5jPrQiWTz2I207o2W0eQ8cH0pLFF51KsVrT0-8k"
           }
         ]
       },

@@ -282,6 +282,18 @@ type Config struct {
 	Limits     Limits
 	Assurance  AssuranceLevel
 
+	// HorizontallyScaled declares that this server runs as more than one
+	// process/instance sharing the same storage tier — a load-balanced
+	// fleet, not a single machine. Under AssuranceProduction, this
+	// additionally requires every store checkStoreAssurance covers to
+	// declare storage.Capabilities.CrossInstanceConsistent; false (the
+	// default) does not, so a single-instance production deployment
+	// using an otherwise fully durable, atomic store (e.g. a local
+	// SQLite file) is not forced to falsely declare a horizontal-scaling
+	// guarantee it doesn't need and was never asked to provide. Ignored
+	// entirely under AssuranceDevelopment.
+	HorizontallyScaled bool
+
 	// MTLSEndpoints are this server's mTLS-requiring alternate URLs, if
 	// any — see MTLSEndpoints' own doc comment. Optional; zero value
 	// omits mtls_endpoint_aliases from Metadata.

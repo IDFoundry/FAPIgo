@@ -334,20 +334,36 @@ func validateDependencies(cfg Config, deps Dependencies) error {
 		if deps.Audit == nil {
 			return fmt.Errorf("server: dependencies: audit is required under AssuranceProduction")
 		}
-		if err := checkStoreAssurance("clients", deps.Clients, false); err != nil {
+		scaled := cfg.HorizontallyScaled
+		if err := checkStoreAssurance("clients", deps.Clients, false, scaled); err != nil {
 			return err
 		}
-		if err := checkStoreAssurance("transactions", deps.Transactions, true); err != nil {
+		if err := checkStoreAssurance("transactions", deps.Transactions, true, scaled); err != nil {
 			return err
 		}
-		if err := checkStoreAssurance("grants", deps.Grants, true); err != nil {
+		if err := checkStoreAssurance("grants", deps.Grants, true, scaled); err != nil {
 			return err
 		}
-		if err := checkStoreAssurance("replay", deps.Replay, true); err != nil {
+		if err := checkStoreAssurance("replay", deps.Replay, true, scaled); err != nil {
 			return err
 		}
 		if cibaEnabled {
-			if err := checkStoreAssurance("backchannel", deps.Backchannel, true); err != nil {
+			if err := checkStoreAssurance("backchannel", deps.Backchannel, true, scaled); err != nil {
+				return err
+			}
+		}
+		if deps.Nonces != nil {
+			if err := checkStoreAssurance("nonces", deps.Nonces, true, scaled); err != nil {
+				return err
+			}
+		}
+		if opaque, ok := deps.AccessTokens.(OpaqueAccessTokens); ok {
+			if err := checkStoreAssurance("access_tokens", opaque.Store, false, scaled); err != nil {
+				return err
+			}
+		}
+		if _, declinedRevocation := deps.Revocation.(NoRevocation); !declinedRevocation {
+			if err := checkStoreAssurance("revocation", deps.Revocation, false, scaled); err != nil {
 				return err
 			}
 		}

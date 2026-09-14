@@ -1,0 +1,207 @@
+package server_test
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/idfoundry/fapigo/server"
+	"github.com/idfoundry/fapigo/storage"
+)
+
+// This file covers AssuranceProduction's own coverage of the three
+// stores it previously missed entirely (Dependencies.Nonces, the
+// opaque-token store nested inside Dependencies.AccessTokens, and
+// Dependencies.Revocation), plus Config.HorizontallyScaled's own
+// CrossInstanceConsistent requirement — see checkStoreAssurance's own
+// doc comment. Mirrors the existing bareReplayStore/capReplayStore
+// pattern in server_test.go for each store type.
+
+type bareNonceStore struct{}
+
+func (bareNonceStore) Issue(context.Context, storage.NonceIssuance) error { return nil }
+func (bareNonceStore) Consume(context.Context, storage.NonceConsumption) (storage.NonceRecord, error) {
+	return storage.NonceRecord{}, nil
+}
+
+type capNonceStore struct {
+	bareNonceStore
+	caps storage.Capabilities
+}
+
+func (s capNonceStore) Capabilities() storage.Capabilities { return s.caps }
+
+func TestNewRejectsNonceStoreWithoutStoreAssuranceUnderProduction(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = server.AssuranceProduction
+	deps := validDependencies()
+	deps.Audit = &fakeAuditSink{}
+	deps.Nonces = bareNonceStore{}
+
+	if _, err := server.New(cfg, deps); err == nil {
+		t.Fatal("New(production, nonce store without StoreAssurance) = nil error, want error")
+	}
+}
+
+func TestNewAcceptsAdequateNonceStoreUnderProduction(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = server.AssuranceProduction
+	deps := validDependencies()
+	deps.Audit = &fakeAuditSink{}
+	deps.Nonces = capNonceStore{caps: storage.Capabilities{Durable: true, AtomicConsume: true}}
+	cfg.Limits.DPoPNonceLifetime = time.Minute
+
+	if _, err := server.New(cfg, deps); err != nil {
+		t.Fatalf("New(production, adequate nonce store): %v", err)
+	}
+}
+
+func TestNewSkipsNonceCheckWhenNoncesNotConfigured(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = server.AssuranceProduction
+	deps := validDependencies()
+	deps.Audit = &fakeAuditSink{}
+	deps.Nonces = nil // genuinely optional — DPoP nonce-challenge support disabled
+
+	if _, err := server.New(cfg, deps); err != nil {
+		t.Fatalf("New(production, no nonce store configured): %v", err)
+	}
+}
+
+type bareAccessTokenStore struct{}
+
+func (bareAccessTokenStore) CreateAccessToken(context.Context, storage.NewAccessToken) error {
+	return nil
+}
+func (bareAccessTokenStore) LookupAccessToken(context.Context, storage.AccessTokenLookup) (storage.LookedUpAccessToken, error) {
+	return storage.LookedUpAccessToken{}, nil
+}
+
+type capAccessTokenStore struct {
+	bareAccessTokenStore
+	caps storage.Capabilities
+}
+
+func (s capAccessTokenStore) Capabilities() storage.Capabilities { return s.caps }
+
+func TestNewRejectsOpaqueAccessTokenStoreWithoutStoreAssuranceUnderProduction(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = server.AssuranceProduction
+	deps := validDependencies()
+	deps.Audit = &fakeAuditSink{}
+	deps.AccessTokens = server.OpaqueAccessTokens{Store: bareAccessTokenStore{}}
+
+	if _, err := server.New(cfg, deps); err == nil {
+		t.Fatal("New(production, opaque access-token store without StoreAssurance) = nil error, want error")
+	}
+}
+
+func TestNewAcceptsAdequateOpaqueAccessTokenStoreUnderProduction(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = server.AssuranceProduction
+	deps := validDependencies()
+	deps.Audit = &fakeAuditSink{}
+	deps.AccessTokens = server.OpaqueAccessTokens{
+		Store: capAccessTokenStore{caps: storage.Capabilities{Durable: true}},
+	}
+
+	if _, err := server.New(cfg, deps); err != nil {
+		t.Fatalf("New(production, adequate opaque access-token store): %v", err)
+	}
+}
+
+func TestNewSkipsAccessTokenCheckForJWTAccessTokens(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = server.AssuranceProduction
+	deps := validDependencies() // AccessTokens: server.JWTAccessTokens{...} by default — no separate store
+	deps.Audit = &fakeAuditSink{}
+
+	if _, err := server.New(cfg, deps); err != nil {
+		t.Fatalf("New(production, JWTAccessTokens issuer): %v", err)
+	}
+}
+
+type capRevocationSink struct {
+	caps storage.Capabilities
+}
+
+func (capRevocationSink) Revoke(context.Context, string, time.Time) error { return nil }
+func (s capRevocationSink) Capabilities() storage.Capabilities            { return s.caps }
+
+type bareRevocationSink struct{}
+
+func (bareRevocationSink) Revoke(context.Context, string, time.Time) error { return nil }
+
+func TestNewRejectsRevocationWithoutStoreAssuranceUnderProduction(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = server.AssuranceProduction
+	deps := validDependencies()
+	deps.Audit = &fakeAuditSink{}
+	deps.Revocation = bareRevocationSink{}
+
+	if _, err := server.New(cfg, deps); err == nil {
+		t.Fatal("New(production, revocation sink without StoreAssurance) = nil error, want error")
+	}
+}
+
+func TestNewAcceptsAdequateRevocationUnderProduction(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = server.AssuranceProduction
+	deps := validDependencies()
+	deps.Audit = &fakeAuditSink{}
+	deps.Revocation = capRevocationSink{caps: storage.Capabilities{Durable: true}}
+
+	if _, err := server.New(cfg, deps); err != nil {
+		t.Fatalf("New(production, adequate revocation sink): %v", err)
+	}
+}
+
+func TestNewSkipsRevocationCheckWhenDeclined(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = server.AssuranceProduction
+	deps := validDependencies() // Revocation: server.NoRevocation{} by default
+	deps.Audit = &fakeAuditSink{}
+
+	if _, err := server.New(cfg, deps); err != nil {
+		t.Fatalf("New(production, NoRevocation{}): %v", err)
+	}
+}
+
+func TestNewRequiresCrossInstanceConsistentWhenHorizontallyScaled(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = server.AssuranceProduction
+	cfg.HorizontallyScaled = true
+	deps := validDependencies()
+	deps.Audit = &fakeAuditSink{}
+	deps.Replay = capReplayStore{caps: storage.Capabilities{Durable: true, AtomicConsume: true, CrossInstanceConsistent: false}}
+
+	if _, err := server.New(cfg, deps); err == nil {
+		t.Fatal("New(production, horizontally scaled, replay store not cross-instance consistent) = nil error, want error")
+	}
+}
+
+func TestNewAcceptsCrossInstanceConsistentStoreWhenHorizontallyScaled(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = server.AssuranceProduction
+	cfg.HorizontallyScaled = true
+	deps := validDependencies()
+	deps.Audit = &fakeAuditSink{}
+	deps.Replay = capReplayStore{caps: storage.Capabilities{Durable: true, AtomicConsume: true, CrossInstanceConsistent: true}}
+
+	if _, err := server.New(cfg, deps); err != nil {
+		t.Fatalf("New(production, horizontally scaled, cross-instance consistent replay store): %v", err)
+	}
+}
+
+func TestNewIgnoresCrossInstanceConsistentWhenNotHorizontallyScaled(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = server.AssuranceProduction
+	cfg.HorizontallyScaled = false
+	deps := validDependencies()
+	deps.Audit = &fakeAuditSink{}
+	deps.Replay = capReplayStore{caps: storage.Capabilities{Durable: true, AtomicConsume: true, CrossInstanceConsistent: false}}
+
+	if _, err := server.New(cfg, deps); err != nil {
+		t.Fatalf("New(production, not horizontally scaled, replay store not cross-instance consistent): %v", err)
+	}
+}

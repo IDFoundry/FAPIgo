@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.29.0](https://github.com/IDFoundry/FAPIgo/compare/v0.28.0...v0.29.0) (2026-09-14)
+
+
+### Features
+
+* implement attestation-based client authentication ([2707dcd](https://github.com/IDFoundry/FAPIgo/commit/2707dcd69529d72dfa752e1d01eb22b732115662))
+
+
+### Bug Fixes
+
+* **docs:** badge follow-ups from the README refresh ([dcb8a9b](https://github.com/IDFoundry/FAPIgo/commit/dcb8a9be1ce6763155ca4f76bdd85d6de810139e))
+* **docs:** drop the retired Go Report Card badge ([61b1a0a](https://github.com/IDFoundry/FAPIgo/commit/61b1a0a9d46f1553654d4be2782c985b258adc98))
+* **docs:** serve the OpenID Certified badge with a white background baked in ([ba8d789](https://github.com/IDFoundry/FAPIgo/commit/ba8d789c59269aa084cd613b54cb29f0275f05b3))
+
 ## [0.28.0](https://github.com/IDFoundry/FAPIgo/compare/v0.27.0...v0.28.0) (2026-09-14)
 
 

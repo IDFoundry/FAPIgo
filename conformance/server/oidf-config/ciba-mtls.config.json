@@ -16,7 +16,7 @@
             "alg": "PS256",
             "use": "sig",
             "kid": "gofapi-conformance-ciba-mtls-client1-rsa-key1",
-            "n": "oq1lr05JV_pkTC8jLu2cpCQlYAOycJzjlyXbGDV_igH_nVVzZCy-MizwKot_HyylsOkO2iUILu0XQ24a7sJIqimeLh97Vdmk4C_2uCFpm0c1RuAgOuVeHilDaNBGxiJkY2aRS2cthgaSHZEvXNXYTJCySE-WejROi3dUDAUkMuMpPuJw8-JLqQk-P6Fq_GH-sn1WYrN7MDZ7-qgpKLk6qriJSmR97PAXwcW4MveVJRqE_qNc6AwYF1w6o1bSBh0JGO8hanTEPTs7nGYjEgan1ZSI5mZpWLgOoQV7LtFW2S-5iN8gKW3JRvyKjqB77IVSgH947bMivEVWkaH-WiZ0ow",
+            "n": "vA5dVN_XKBtmISs9oEK_A28ixP9O4NMNiEifopoQVRPtKhgaMI15OGtZ9qs5TskP0Wtw70kyB6r7KCAs9mG5H5mlnzx-JzfFrFyY3aG-TJgm4Uh84KStohOavSLmb1Nli8GXu0alyahG2gw_eDR5Zx-13zd6Mco4_76W0lHHKVrNT00WuSbiVbLEF_6dBk--zB2IcFl6qQwGCLRDAhQFY0jR-L9tzikGg3X_4u5hyeseZi-ZVGu4wJpVBPgnnfHi4GKJNGv5dWiLnQkcN3V-bxeCWW2QASKcnoqDmldv5Fso8JVVQXkqrq0QBxNHp6_Rb41Bm8_gwiFAQ9yertrwGw",
             "e": "AQAB"
           }
         ]
@@ -44,8 +44,8 @@
             "use": "sig",
             "kid": "gofapi-conformance-ciba-mtls-client2-key1",
             "crv": "P-256",
-            "x": "HOFcxC4neNrlxMLW3ugG6XALlwHlKCjxQ5TlQBYuO48",
-            "y": "LbQx1H6WMeTEqaS5ds8d_fKtrYtvHgBmUsbD7nYjkBQ"
+            "x": "IeunoiTu8rOVQ9xPdBnnw4InlrUNrranGeqfnY_zGKQ",
+            "y": "5zxnNZMCdCfin5mPIBfz6OlGjysYnQnLwIGIMw_N9AE"
           }
         ]
       },
@@ -73,7 +73,7 @@
             "alg": "PS256",
             "use": "sig",
             "kid": "gofapi-conformance-ciba-ping-client1-rsa-key1",
-            "n": "5TeFNqDM189ZjqzU0OJFrI1x6ptXHPV3mZbAlnkOc0i5uOH0PcuJ4ktp-A3nMo3pQ2oUF_5CHvOrLsLEJftrZ8DvYC_OcZDoEoTuljctBGrGo8c5z4R0FztxroqVPGWvQJftuHMPNtNuSNFGEvIjceqSG6GvtYdzW64jtMXFt3wFJDOCeJg8sL5206cQvi4LMLH22uVn25u-7c4J8D947e8Fvb5evMx9foKbiPylxOpCBDeywQOYYGzJT0PKfmu1eBvP25id1cfcPjjORYmdf06UWFoTz-CeyM8X6cZ5QUBgfjq2dirx2UyM6iTWsBsOzP8t6Cw45SgkMd9CS5aomQ",
+            "n": "wV8k04AUs13qVfdcyUKvHXKsOitmKTx-IqVIxS1c1zogEGbM09WFqWpn8UaNr6Sez3Nz98GED2D-SJ7LyoWfQG5jkRQ1isynHB3mXWfVH_XQKaSo9pwhyDDTJC-Re644l7Jz83nIAZJPWEdYiHY-AzPtVxhYJ_TgbiWNTQ88hbODNMuMZS_v3kc3Kc3BdiW5EzZHzMo3fUeKtwtw2HHXzImE6dnox2IztymK10fEm89tNejQdGqs_WK4A1ZvIhnYSlrvxg-p22c2nM3hiwGLPQMvQVrvx8oKCZc_aNt1mhqmU4oamDsWYOvlmk-x3dJOnhexodFaZq-veE1wuQIO3Q",
             "e": "AQAB"
           }
         ]
@@ -102,8 +102,8 @@
             "use": "sig",
             "kid": "gofapi-conformance-ciba-ping-client2-key1",
             "crv": "P-256",
-            "x": "_ggunVvP4Rt9poN85bHRCtSgUtgy6Mb7MQezqTK0WUc",
-            "y": "bKIsl9p77Pwx_WtBssZsdrkacpuN_w0vyjPzgq_atB8"
+            "x": "B3tPWsdAaekJqkNEKhOWdkBcXGLBdBNSQ8-y-5AFVcU",
+            "y": "VzeLfENo8cDoobhrYE-Fng9MSWgmDfNMG83h49WHrKY"
           }
         ]
       },
@@ -120,7 +120,7 @@
       ],
       "backchannel_authentication_request_algorithm": "PS256",
       "client_auth_method": "self_signed_tls_client_auth",
-      "expected_certificate_thumbprint": "4Unj7Uc8ssINjwnpUXsBxCV9f3oOPLB3qtl2VZ5d1NE",
+      "expected_certificate_thumbprint": "1S7VxVh3q5PtPogY1PPga-5teKKevH8FdmRynWCWnXU",
       "id": "gofapi-conformance-ciba-client-auth-mtls-client-1",
       "jwks": {
         "keys": [
@@ -129,7 +129,7 @@
             "alg": "PS256",
             "use": "sig",
             "kid": "gofapi-conformance-ciba-client-auth-mtls-client1-rsa-key1",
-            "n": "0ZIFicUwIXu3V7gtliE1PEZT_sbvLBQlHsmpQ0kSWKm_RF5E_Lhji_Jv2YqWoT5a1mw9BMWn9Grm9m_MSIEw4Y-gLkAFy90ogyVj3SzgQ70sgXKEKkk5rtEHkIWJKWYoWPnIlUKt-3qmK-sOGlDT84x-nD4dPb1vBxuk-tMqef8M1GLMX348Xw8AhJ5LHOrhgv2EMQHNULu7xweDESyOan9oci27VAumhrG4sKRcXmlRrR_OasOxcg9Gxen7aPdnQaU541wecylNZzcshA1Ob9XlB-bzArJ5cltabwZiQgc5emRweu2_X0ZjaJyro2kaqpNh4WQEGhrdwEG51-0xCw",
+            "n": "vaohA-HJSIes8dE7RnIj72ZY-VSfzaAFRS3vh6eNnRKBCRyJZjAwYZld35bkW13ko4_0C5XtUxV7yKrgG22tJ8YfRJf_RIhIcHn7T9i9rdEt9zlJtYuS6N_Ag34Hmw9nndyxX0GfFh8Dg1hbx82umvJlbqFch37tHLra_6zFMu-AqpKGeRW7SJyR_MdwfHsUT2pJx5Qa5ZSg15Op_C7N5fjuVuMBILCCQI3kfMOg1c_SFqArfYc4MLANfNUjN2huQcTVv_ZegLgBnIwMZ3jknttzswvuX2SKZ7WQr6NSf_XbdmP6jVh9TJWXc-3OuhRSIBNnoqEOVgszHjzQHpFoRw",
             "e": "AQAB"
           }
         ]
@@ -147,7 +147,7 @@
       ],
       "backchannel_authentication_request_algorithm": "ES256",
       "client_auth_method": "self_signed_tls_client_auth",
-      "expected_certificate_thumbprint": "APeQUK2cRPWUdWM9pZ8xNjcQziXuNyb_L3F07XC6Ka4",
+      "expected_certificate_thumbprint": "MwqCaAiI7AyrNWJoyRoXRCWGi74zPMNH2MPKLqwGZrs",
       "id": "gofapi-conformance-ciba-client-auth-mtls-client-2",
       "jwks": {
         "keys": [
@@ -157,8 +157,8 @@
             "use": "sig",
             "kid": "gofapi-conformance-ciba-client-auth-mtls-client2-key1",
             "crv": "P-256",
-            "x": "a9tmW_RwzXfIk4C_u6G2tGQs31IppGxGy05MgzcjSKM",
-            "y": "C7Q13obVgQx81YJdDF7XngxON7DlvladOe4WMS9TZjI"
+            "x": "t4I_8uT6TcB8Vr2NeJVsqMlGOwZ6BRI3nNdBQg3cVSE",
+            "y": "zmR952gS_deGVXFcXaOCNoZ8TBIkKqtH46Mwbsrsv1E"
           }
         ]
       },
@@ -177,7 +177,7 @@
       "backchannel_client_notification_endpoint": "https://localhost.emobix.co.uk:8443/test/a/gofapi-ciba-ping-client-auth-mtls/ciba-notification-endpoint",
       "backchannel_token_delivery_mode": "ping",
       "client_auth_method": "self_signed_tls_client_auth",
-      "expected_certificate_thumbprint": "WfDMe5kqYA2Eznwg7DvJsHGxdyvhO3pWC_jNR4AZLIo",
+      "expected_certificate_thumbprint": "XRzlFz6EahCFSFpqvZGrws2QXnDtn66VWh-KL_ddmbM",
       "id": "gofapi-conformance-ciba-ping-client-auth-mtls-client-1",
       "jwks": {
         "keys": [
@@ -186,7 +186,7 @@
             "alg": "PS256",
             "use": "sig",
             "kid": "gofapi-conformance-ciba-ping-client-auth-mtls-client1-rsa-key1",
-            "n": "spc6qkUNxE1m6ZeJFHD0liYcLGoT0nO3lOSj5D-hKVE8UWDWUWOjtaskXQy1RnDWYcwftzVAVnQMXqGAeOPmcjcYKjXAU_NBWFDYM-StQ8e8H_ggJTx_bw5EY6-2F5ibrZSUEwkNCOvjhYrDZj2GjTm6jefHstnJGNv_QcBcV-FF6X8tJ2LPBbyGeN2xOs9q0MsvVTYQNlFsBXzwY5tsxTlGpEZBF55QWcWZO72zeCb2Z6rDXDVcUDJZX_2rfWnpzOYUrRJLWzvGD0l_Q-iBhjhylenFTwawZkehTkWNZVMZ4134hY71UUjZJzlQmajgM0CzGgLGjYAqQeX6XHwPvw",
+            "n": "tf0_m2yTjs49H9vm0plSL87AVoL8k0HerrNYElK6oPkW_m_4LCk4k9h7yOK2oeVp_YvY6TVnmwbeH_5LWhp2YLbn-WjJg0Z2Ro5LWcqg38ZGo5Ayr6WCDbNJ2wz4uzAWb0UR92I2ibaEEu4YnfO0MHNhwR6fThmghi5Qot9IljAr34LHQR4_jawCa3TvSHYMqDCNZcG53ohz3oF592nGNd9uxk9VyLhTcjM5RHAFInXTpX0_HK_g-CsaCRlKbWI9N1Kxvy88AvStw9iSgZN0Nn6sY1PuDLG9aezejrpjsNl94xHRLp8DM6nvqiqtEOunW6VYLSa7GI2wt62nZG1k7Q",
             "e": "AQAB"
           }
         ]
@@ -206,7 +206,7 @@
       "backchannel_client_notification_endpoint": "https://localhost.emobix.co.uk:8443/test/a/gofapi-ciba-ping-client-auth-mtls/ciba-notification-endpoint",
       "backchannel_token_delivery_mode": "ping",
       "client_auth_method": "self_signed_tls_client_auth",
-      "expected_certificate_thumbprint": "IIwt9QFXXixLnTYc9NR08ZXTrml6rpU2mId-NQgOO28",
+      "expected_certificate_thumbprint": "ap-0DjVgxtqw4XIQT7TgqYBxygkxS4ekh2GtOpv-CkE",
       "id": "gofapi-conformance-ciba-ping-client-auth-mtls-client-2",
       "jwks": {
         "keys": [
@@ -216,8 +216,8 @@
             "use": "sig",
             "kid": "gofapi-conformance-ciba-ping-client-auth-mtls-client2-key1",
             "crv": "P-256",
-            "x": "kE_vi-HNX3noG64zzo1ZcsrifdnU8GNYjtEf7e3DJjQ",
-            "y": "wM0vke5A1r4FPyJOsaa6w5q2ZMXAkAUYKn8gZYupfLM"
+            "x": "AZHME9DtXWH4sG8QxOC4oZ724gDAZlcnLJRHLt46qpw",
+            "y": "fa3O5taXdcpS3fg0VcFjiLJ4WXrMMlh3TzOQysb6SBs"
           }
         ]
       },

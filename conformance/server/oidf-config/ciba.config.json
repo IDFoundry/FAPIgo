@@ -17,8 +17,8 @@
             "use": "sig",
             "kid": "gofapi-conformance-ciba-client1-key1",
             "crv": "P-256",
-            "x": "_LDKqzSgRpR6jz9v7jaNHFuFCnJONPvTB1JLq4p6nGY",
-            "y": "QiezTqe-sGhXJM56qbUs7iCYOIqP_M1XKAlsogI4zUE"
+            "x": "H-QuwBt7NILJiAPr6GeusQM1QVf9t5Imr0qRfod6geg",
+            "y": "384nYPxZm54FuHIkcMrNPxPUAKUIIlAHKDWLPi7dUrQ"
           }
         ]
       },
@@ -44,8 +44,8 @@
             "use": "sig",
             "kid": "gofapi-conformance-ciba-client2-key1",
             "crv": "P-256",
-            "x": "XaVoOe6pQnAnQFV56WD0R25spjyFtDpjzgZKd4bigIo",
-            "y": "sK4oM7985H9wc3KhWcSo6USMgvP9pTxgLPEO3NIiB1w"
+            "x": "a5G-FfC7cK3CxwdxXjg0oeW0ETgWCUNb3hF72cIjl3c",
+            "y": "n4S4bv4R_sC4YTfcWdgI4ORWHLOMLEzYBBcXPYCZXxU"
           }
         ]
       },
@@ -70,7 +70,7 @@
             "alg": "PS256",
             "use": "sig",
             "kid": "gofapi-conformance-ciba-client1-rs256-key1",
-            "n": "zZvTCRk2x5gZaGj1TzCGMCLDFSnawhCU7TnhBF_N5wD5JBNAR7ML7vzEPAq88kvLzgpkS6FuMi4z_0lmxeTuowOAXbRfrAyoHHQ-L-lQ0ulh7wKbxzsd9grPvpmM8DMjWbrjE4OhMi59bjPBhMOKDWZeotKvp1O1M8cgGsSfl0JnrZbhJIzj6nk36n-1Mt58kUZI1yrDkZFe0mv6dagn5UkemY_zBfJOrZLZ6sOyMVM2iiwLWcTfFuMFQhCytid2BRvbSu9dMMLQZzV3QhjVIDTYmppB8itdjM5Awi-H-sy31Ta4yzjZCcsVG8V9qCQqrzcycdS50DDDVY3Isy6dNw",
+            "n": "moGGJe3csJ9J3-ZS8tINuBwe9EFiFyQcSCI9Ry-ca8TjrB56dtaKv6a-ccehmR07YZRAG4HASSb5Xn0yDExzSrrmTw8vgcZJ5LuT-ojttAZ8CkjrJDccWo1ImlM8aNG5f9OtnmudB4vdbhE7Z6BSMYzp8mga8apFsg4QFm5gy91gGOLs5uadRHM1wZRRg-OEVp13glf7NQ7KNCjtUPF3vuiEHJ5s7E7enjbWI0Cb3YyCZ2zJL5tg7M40RU4eGWU0auQjs_1IkR0vVRw56ymDAT_i38BvvUMXcWspnwAdv0qyBK5cwUg8cG3AdHlYSIQo_ayoNj1hBHTKx5eOwtLm2w",
             "e": "AQAB"
           }
         ]

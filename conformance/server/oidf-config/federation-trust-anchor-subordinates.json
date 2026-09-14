@@ -7,8 +7,8 @@
           {
             "kty": "EC",
             "crv": "P-256",
-            "x": "VqIMdCyzPlgo4rNK-B0X0lvPTzPmyOGGa_8mYZf_eko",
-            "y": "Kcwj8NwayOfuJ3Ax7pxkx7MdGpp49Z4FGmCedi45H80",
+            "x": "l6KU5B7J1OKROAty2OyAsI_T07185JZ9YCXo0cyuj1E",
+            "y": "R11J2KsUSrM2Oz0L86kfXdFHbPDkAva2IeB9N1MgwVA",
             "use": "sig",
             "alg": "ES256",
             "kid": "ephemeral-9-ES256"

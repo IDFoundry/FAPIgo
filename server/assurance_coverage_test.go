@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -16,6 +17,87 @@ import (
 // CrossInstanceConsistent requirement — see checkStoreAssurance's own
 // doc comment. Mirrors the existing bareReplayStore/capReplayStore
 // pattern in server_test.go for each store type.
+//
+// It also adds a negative test for each of the pre-existing
+// checkStoreAssurance call sites (clients, transactions, grants,
+// backchannel) that this change touched — by adding the new scaled
+// argument — without previously having its own failure-path test;
+// validDependencies' fakes for those stores already declare adequate
+// capabilities, so nothing before this change exercised the "store
+// implements the domain interface but not storage.StoreAssurance"
+// branch for them. Each bare*Store embeds the plain storage interface
+// so it satisfies that interface by delegation (its methods are never
+// actually called — checkStoreAssurance only type-asserts for
+// storage.StoreAssurance) while genuinely lacking a Capabilities
+// method, unlike embedding one of validDependencies' own fakes would.
+
+type bareClientRepository struct{ storage.ClientRepository }
+
+type bareTransactionStore struct{ storage.TransactionStore }
+
+type bareGrantStore struct{ storage.GrantStore }
+
+type bareBackchannelAuthenticationStore struct {
+	storage.BackchannelAuthenticationStore
+}
+
+func TestNewRejectsClientsStoreWithoutStoreAssuranceUnderProduction(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = server.AssuranceProduction
+	deps := validDependencies()
+	deps.Audit = &fakeAuditSink{}
+	deps.Clients = bareClientRepository{}
+
+	if _, err := server.New(cfg, deps); err == nil {
+		t.Fatal("New(production, clients store without StoreAssurance) = nil error, want error")
+	}
+}
+
+func TestNewRejectsTransactionsStoreWithoutStoreAssuranceUnderProduction(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = server.AssuranceProduction
+	deps := validDependencies()
+	deps.Audit = &fakeAuditSink{}
+	deps.Transactions = bareTransactionStore{}
+
+	if _, err := server.New(cfg, deps); err == nil {
+		t.Fatal("New(production, transactions store without StoreAssurance) = nil error, want error")
+	}
+}
+
+func TestNewRejectsGrantsStoreWithoutStoreAssuranceUnderProduction(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = server.AssuranceProduction
+	deps := validDependencies()
+	deps.Audit = &fakeAuditSink{}
+	deps.Grants = bareGrantStore{}
+
+	if _, err := server.New(cfg, deps); err == nil {
+		t.Fatal("New(production, grants store without StoreAssurance) = nil error, want error")
+	}
+}
+
+func TestNewRejectsBackchannelStoreWithoutStoreAssuranceUnderProduction(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = server.AssuranceProduction
+	backchannelEndpoint, err := fapi.ParseEndpointURL(testBackchannelAuthenticationEndpoint)
+	if err != nil {
+		t.Fatalf("ParseEndpointURL: %v", err)
+	}
+	cfg.Endpoints.BackchannelAuthentication = backchannelEndpoint
+	cfg.Algorithms.BackchannelAuthenticationRequest = server.AlgorithmSet{fapi.ES256}
+	cfg.Limits.BackchannelAuthenticationRequestLifetime = 2 * time.Minute
+	cfg.Limits.MaxBackchannelAuthenticationRequestLifetime = time.Minute
+	cfg.Limits.BackchannelAuthenticationPollInterval = time.Millisecond
+	deps := validDependencies()
+	deps.Audit = &fakeAuditSink{}
+	deps.Backchannel = bareBackchannelAuthenticationStore{}
+	deps.BackchannelNotifier = server.NoBackchannelNotifications{}
+
+	if _, err := server.New(cfg, deps); err == nil {
+		t.Fatal("New(production, backchannel store without StoreAssurance) = nil error, want error")
+	}
+}
 
 type bareNonceStore struct{}
 
@@ -37,6 +119,7 @@ func TestNewRejectsNonceStoreWithoutStoreAssuranceUnderProduction(t *testing.T) 
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
 	deps.Nonces = bareNonceStore{}
+	cfg.Limits.DPoPNonceLifetime = time.Minute
 
 	if _, err := server.New(cfg, deps); err == nil {
 		t.Fatal("New(production, nonce store without StoreAssurance) = nil error, want error")

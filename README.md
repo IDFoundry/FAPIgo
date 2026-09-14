@@ -47,9 +47,7 @@ variants.
 - OpenID Federation 1.0 (trust chains, automatic client registration, trust marks)
 - OpenID Certified™ for OP, RP and FAPI-CIBA OP conformance profiles — see below
 
-<table cellpadding="10"><tr><td bgcolor="#ffffff" align="center">
-<a href="https://openid.net/certification/"><img alt="OpenID Certified" src="https://openid.net/wordpress-content/uploads/2016/04/oid-l-certification-mark-l-rgb-150dpi-90mm-300x157.png" /></a>
-</td></tr></table>
+[![OpenID Certified](assets/openid-certified-badge.png)](https://openid.net/certification/)
 
 > **OpenID Certified™** by Oscar Sanderson to the FAPI 2.0 OP, FAPI 2.0
 > RP (both Security Profile Final + Message Signing Final), FAPI 2.0 OP

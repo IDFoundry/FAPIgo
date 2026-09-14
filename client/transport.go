@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/idfoundry/fapigo/fapihttp"
 )
 
 // errTokenRequestFailed is the shared newError description both
@@ -42,6 +44,23 @@ func (c *Client) postForm(ctx context.Context, url string, body []byte, extraHea
 		return nil, 0, nil, fmt.Errorf("client: %w", err)
 	}
 	defer func() { _ = res.Body.Close() }()
+
+	// Dependencies.HTTP is a fully-trusted collaborator (any
+	// http.Client-shaped value satisfies it) — unlike Discover's own
+	// fetcher, which fapihttp.Client itself asserts this for. A
+	// round-tripper that silently downgraded (a stripped proxy, a
+	// custom Transport that never dials TLS) leaves res.TLS nil after
+	// an https request; that's unambiguous evidence this wasn't really
+	// TLS, so PAR/token submission — the calls carrying the client
+	// assertion and receiving the token response — get the same
+	// backstop fapihttp.Client already applies to discovery/JWKS
+	// fetches. This does not, and cannot, detect a transport with
+	// certificate verification disabled (InsecureSkipVerify: true still
+	// performs a real handshake and populates res.TLS) — only that TLS
+	// was used at all.
+	if req.URL.Scheme == "https" && res.TLS == nil {
+		return nil, 0, nil, fapihttp.ErrMissingTLS
+	}
 
 	data, err := io.ReadAll(io.LimitReader(res.Body, c.cfg.Limits.MaxHTTPResponseBytes+1))
 	if err != nil {

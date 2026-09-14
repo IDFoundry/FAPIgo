@@ -34,6 +34,20 @@ type AuthorizationCodeExchangeRequest struct {
 	// (the default); a required proof is otherwise exactly one value.
 	DPoPProofs []string
 
+	// ClientAttestations/ClientAttestationPoPs are every
+	// "OAuth-Client-Attestation"/"OAuth-Client-Attestation-PoP" header
+	// value the request carried, in receipt order — pass net/http's own
+	// Header.Values(...) directly, not Header.Get, for the same
+	// "preserve duplicates for this package to reject" reason
+	// DPoPProofs does (draft-ietf-oauth-attestation-based-client-auth-07
+	// §9 rule 1: exactly one of each is required). Both empty is a
+	// valid "didn't authenticate via ClientAuthMethodAttestation" —
+	// meaningless unless Config.AttestationBasedClientAuthentication is
+	// enabled, in which case a client actually registered with that
+	// method must supply exactly one of each.
+	ClientAttestations    []string
+	ClientAttestationPoPs []string
+
 	// PeerCertificate is the TLS client certificate presented on the
 	// connection this request arrived on, if any — required instead of
 	// a DPoP proof when the authenticated client's SenderConstrain() is
@@ -146,12 +160,16 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	if dpopErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, "", dpopErr)
 	}
+	attestation, attestationPoP, attErr := resolveAttestationHeaders(req.ClientAttestations, req.ClientAttestationPoPs)
+	if attErr != nil {
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, "", attErr)
+	}
 
 	if params["grant_type"] != "authorization_code" {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, "", newError(ErrorUnsupportedGrantType, 400, "grant_type must be authorization_code", nil))
 	}
 
-	client, _, authErr := s.authenticateClient(ctx, params, req.PeerCertificate, []fapi.URL{s.cfg.Endpoints.Token}, []fapi.URL{s.cfg.MTLSEndpoints.Token})
+	client, _, authErr := s.authenticateClient(ctx, params, req.PeerCertificate, attestation, attestationPoP, []fapi.URL{s.cfg.Endpoints.Token}, []fapi.URL{s.cfg.MTLSEndpoints.Token})
 	if authErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, "", authErr)
 	}

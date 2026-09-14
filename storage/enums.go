@@ -25,6 +25,10 @@ func (c ClientAuthMethod) String() string {
 		return "tls_client_auth_san_ip"
 	case ClientAuthMethodTLSClientAuthSANEmail:
 		return "tls_client_auth_san_email"
+	case ClientAuthMethodAttestation:
+		// draft-ietf-oauth-attestation-based-client-auth-07 §13.4's own
+		// IANA "OAuth Token Endpoint Authentication Methods" registration.
+		return "attest_jwt_client_auth"
 	default:
 		return ""
 	}
@@ -39,7 +43,8 @@ func (c ClientAuthMethod) IsValid() bool {
 	switch c {
 	case ClientAuthMethodPrivateKeyJWT, ClientAuthMethodSelfSignedTLSClientAuth, ClientAuthMethodTLSClientAuth,
 		ClientAuthMethodTLSClientAuthSANDNS, ClientAuthMethodTLSClientAuthSANURI,
-		ClientAuthMethodTLSClientAuthSANIP, ClientAuthMethodTLSClientAuthSANEmail:
+		ClientAuthMethodTLSClientAuthSANIP, ClientAuthMethodTLSClientAuthSANEmail,
+		ClientAuthMethodAttestation:
 		return true
 	default:
 		return false
@@ -69,6 +74,8 @@ func ParseClientAuthMethod(s string) (ClientAuthMethod, error) {
 		return ClientAuthMethodTLSClientAuthSANIP, nil
 	case "tls_client_auth_san_email":
 		return ClientAuthMethodTLSClientAuthSANEmail, nil
+	case "attest_jwt_client_auth":
+		return ClientAuthMethodAttestation, nil
 	default:
 		return 0, fmt.Errorf("storage: unrecognized client auth method %q", s)
 	}

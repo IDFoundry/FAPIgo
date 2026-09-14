@@ -113,6 +113,12 @@ type BeginBackchannelAuthenticationRequest struct {
 	// reconcileBackchannelDPoPBinding.
 	DPoPProofs []string
 
+	// ClientAttestations/ClientAttestationPoPs mirror
+	// AuthorizationCodeExchangeRequest's own fields — see its doc
+	// comment.
+	ClientAttestations    []string
+	ClientAttestationPoPs []string
+
 	// PeerCertificate is the TLS client certificate presented on the
 	// connection this request arrived on, if any — required when the
 	// client authenticates via ClientAuthMethodSelfSignedTLSClientAuth
@@ -140,6 +146,10 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	if proofErr != nil {
 		return s.backchannelBeginFail(ctx, "", proofErr), nil
 	}
+	attestation, attestationPoP, attErr := resolveAttestationHeaders(req.ClientAttestations, req.ClientAttestationPoPs)
+	if attErr != nil {
+		return s.backchannelBeginFail(ctx, "", attErr), nil
+	}
 
 	// CIBA Core 1.0 §7.1 explicitly widens the backchannel authentication
 	// endpoint's own accepted audiences beyond just its own URL: "the OP
@@ -147,7 +157,7 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	// Backchannel Authentication Endpoint URL" — confirmed live via the
 	// OIDF conformance suite's own fapi-ciba-id1/-refresh-token modules,
 	// which deliberately sign "aud" as the token endpoint's URL here.
-	client, _, authErr := s.authenticateClient(ctx, params, req.PeerCertificate,
+	client, _, authErr := s.authenticateClient(ctx, params, req.PeerCertificate, attestation, attestationPoP,
 		[]fapi.URL{s.cfg.Endpoints.BackchannelAuthentication, s.cfg.Endpoints.Token},
 		[]fapi.URL{s.cfg.MTLSEndpoints.BackchannelAuthentication, s.cfg.MTLSEndpoints.Token})
 	if authErr != nil {

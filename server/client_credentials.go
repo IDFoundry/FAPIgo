@@ -21,6 +21,12 @@ type ClientCredentialsTokenRequest struct {
 	// AuthorizationCodeExchangeRequest.DPoPProofs.
 	DPoPProofs []string
 
+	// ClientAttestations/ClientAttestationPoPs mirror
+	// AuthorizationCodeExchangeRequest's own fields — see its doc
+	// comment.
+	ClientAttestations    []string
+	ClientAttestationPoPs []string
+
 	// PeerCertificate is the TLS client certificate presented on the
 	// connection this request arrived on, if any — required instead of
 	// a DPoP proof when the authenticated client's SenderConstrain() is
@@ -61,12 +67,16 @@ func (s *Server) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 	if dpopErr != nil {
 		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, "", dpopErr)
 	}
+	attestation, attestationPoP, attErr := resolveAttestationHeaders(req.ClientAttestations, req.ClientAttestationPoPs)
+	if attErr != nil {
+		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, "", attErr)
+	}
 
 	if params["grant_type"] != "client_credentials" {
 		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, "", newError(ErrorUnsupportedGrantType, 400, "grant_type must be client_credentials", nil))
 	}
 
-	client, _, authErr := s.authenticateClient(ctx, params, req.PeerCertificate, []fapi.URL{s.cfg.Endpoints.Token}, []fapi.URL{s.cfg.MTLSEndpoints.Token})
+	client, _, authErr := s.authenticateClient(ctx, params, req.PeerCertificate, attestation, attestationPoP, []fapi.URL{s.cfg.Endpoints.Token}, []fapi.URL{s.cfg.MTLSEndpoints.Token})
 	if authErr != nil {
 		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, "", authErr)
 	}

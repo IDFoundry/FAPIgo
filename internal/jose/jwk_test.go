@@ -268,6 +268,24 @@ func TestJWKRejectsSmallRSAKey(t *testing.T) {
 	}
 }
 
+// oversizedRSAPublicKey fabricates an *rsa.PublicKey whose modulus has
+// exactly bits bits — not a real, factorable RSA key (generating one
+// this large would be impractically slow in a test), but every ceiling
+// check maxRSAModulusBits guards only inspects N.BitLen(), so a
+// fabricated modulus of the right size exercises it identically.
+func oversizedRSAPublicKey(t *testing.T, bits int) *rsa.PublicKey {
+	t.Helper()
+	n := new(big.Int).Lsh(big.NewInt(1), uint(bits-1))
+	return &rsa.PublicKey{N: n, E: 65537}
+}
+
+func TestJWKRejectsOversizedRSAKey(t *testing.T) {
+	oversized := oversizedRSAPublicKey(t, maxRSAModulusBits+1)
+	if _, err := NewJWK(oversized, fapi.PS256); err == nil {
+		t.Fatalf("NewJWK(%d-bit rsa key, PS256) = nil error, want error", maxRSAModulusBits+1)
+	}
+}
+
 func TestParseJWKRejectsDegenerateRSAExponent(t *testing.T) {
 	rsaKey := generateRSA(t)
 	n := base64.RawURLEncoding.EncodeToString(rsaKey.N.Bytes())
@@ -548,6 +566,13 @@ func TestNewEncryptionJWKRejectsSmallRSAKey(t *testing.T) {
 	}
 	if _, err := NewEncryptionJWK(&priv.PublicKey, fapi.RSAOAEP256); err == nil {
 		t.Fatal("NewEncryptionJWK(1024-bit rsa key) = nil error, want error")
+	}
+}
+
+func TestNewEncryptionJWKRejectsOversizedRSAKey(t *testing.T) {
+	oversized := oversizedRSAPublicKey(t, maxRSAModulusBits+1)
+	if _, err := NewEncryptionJWK(oversized, fapi.RSAOAEP256); err == nil {
+		t.Fatalf("NewEncryptionJWK(%d-bit rsa key) = nil error, want error", maxRSAModulusBits+1)
 	}
 }
 

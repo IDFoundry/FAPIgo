@@ -1,15 +1,29 @@
 package jose
 
 import (
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"errors"
+	"io"
 	"testing"
 
 	fapi "github.com/idfoundry/fapigo"
 )
+
+// fakeOversizedRSASigner satisfies crypto.Signer with a fabricated
+// oversized public key (oversizedRSAPublicKey, jwk_test.go) and a Sign
+// method that must never actually be reached — signRSAPSS's ceiling
+// check has to reject before ever calling it.
+type fakeOversizedRSASigner struct{ pub *rsa.PublicKey }
+
+func (f fakeOversizedRSASigner) Public() crypto.PublicKey { return f.pub }
+
+func (f fakeOversizedRSASigner) Sign(io.Reader, []byte, crypto.SignerOpts) ([]byte, error) {
+	panic("signRSAPSS must reject an oversized key before calling Sign")
+}
 
 // TestSignEmbedsMatchingHeaderJWK covers the header.JWK-embedding branch
 // of marshalHeader (and, on the read side, parseHeader's matching
@@ -228,6 +242,13 @@ func TestSignRSAPSSRejectsSmallKey(t *testing.T) {
 	}
 }
 
+func TestSignRSAPSSRejectsOversizedKey(t *testing.T) {
+	oversized := oversizedRSAPublicKey(t, maxRSAModulusBits+1)
+	if _, err := signRSAPSS(fakeOversizedRSASigner{pub: oversized}, make([]byte, 32)); err == nil {
+		t.Fatalf("signRSAPSS(%d-bit key) = nil error, want error", maxRSAModulusBits+1)
+	}
+}
+
 func TestVerifyRSAPSSRejectsNonRSAKey(t *testing.T) {
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -257,6 +278,13 @@ func TestVerifyRSAPSSRejectsSmallKey(t *testing.T) {
 func TestVerifyRSAPSSRejectsNilModulusWithoutPanic(t *testing.T) {
 	if err := verifyRSAPSS(&rsa.PublicKey{}, make([]byte, 32), make([]byte, 256)); !errors.Is(err, ErrInvalidSignature) {
 		t.Fatalf("verifyRSAPSS(nil modulus) = %v, want ErrInvalidSignature", err)
+	}
+}
+
+func TestVerifyRSAPSSRejectsOversizedKey(t *testing.T) {
+	oversized := oversizedRSAPublicKey(t, maxRSAModulusBits+1)
+	if err := verifyRSAPSS(oversized, make([]byte, 32), make([]byte, 128)); !errors.Is(err, ErrInvalidSignature) {
+		t.Fatalf("verifyRSAPSS(%d-bit key) = %v, want ErrInvalidSignature", maxRSAModulusBits+1, err)
 	}
 }
 

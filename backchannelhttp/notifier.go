@@ -70,7 +70,7 @@ func (n *Notifier) Notify(ctx context.Context, notification server.BackchannelNo
 	if err != nil {
 		return fmt.Errorf("backchannelhttp: %w", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if _, err := io.Copy(io.Discard, io.LimitReader(res.Body, maxDrainBytes)); err != nil {
 		return fmt.Errorf("backchannelhttp: read response: %w", err)
 	}

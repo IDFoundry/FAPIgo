@@ -127,6 +127,7 @@ func TestDiscoverEndToEnd(t *testing.T) {
 		Issuer: issuer, ClientID: ClientID, RedirectURI: RedirectURI,
 		Endpoints: discovered.Endpoints,
 		Profile:   client.ProfileFAPISecurity,
+		Assurance: client.AssuranceDevelopment,
 		Algorithms: client.Algorithms{
 			ClientAuthentication: fapi.ES256,
 			DPoP:                 fapi.ES256,

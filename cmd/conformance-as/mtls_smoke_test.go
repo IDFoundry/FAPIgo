@@ -228,6 +228,7 @@ func TestSmokeMTLSFlow(t *testing.T) {
 			UserInfo:                   mtlsUserinfoURL,
 		},
 		Profile:         client.ProfileFAPISecurity,
+		Assurance:       client.AssuranceDevelopment,
 		SenderConstrain: storage.SenderConstrainMTLS,
 		Algorithms: client.Algorithms{
 			ClientAuthentication: fapi.ES256,

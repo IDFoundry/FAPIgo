@@ -75,6 +75,9 @@ func validateConfig(cfg Config) error {
 	if cfg.Endpoints.Token.IsZero() {
 		return fmt.Errorf("client: config: endpoints.token is required")
 	}
+	if cfg.Assurance != AssuranceDevelopment && cfg.Assurance != AssuranceProduction {
+		return fmt.Errorf("client: config: assurance is invalid")
+	}
 	// Authorization and PushedAuthorizationRequest declare browser-flow
 	// support as one coherent capability — required together, not
 	// independently optional, mirroring the
@@ -256,6 +259,11 @@ func validateDependencies(cfg Config, deps Dependencies) error {
 	// at all, so neither needs this dependency wired up.
 	if !cfg.Endpoints.Authorization.IsZero() && deps.Sessions == nil {
 		return fmt.Errorf("client: dependencies: sessions is required when endpoints.authorization is set")
+	}
+	if cfg.Assurance == AssuranceProduction && deps.Sessions != nil {
+		if err := checkStoreAssurance("sessions", deps.Sessions); err != nil {
+			return err
+		}
 	}
 	if deps.Keys == nil {
 		return fmt.Errorf("client: dependencies: keys is required")

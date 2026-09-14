@@ -548,6 +548,7 @@ func buildModuleClient(ctx context.Context, d moduleDriver, module suiteModule) 
 		RedirectURI: redirectURI,
 		Endpoints:   discovered.Endpoints,
 		Profile:     profile.clientProfile,
+		Assurance:   client.AssuranceDevelopment,
 		Algorithms:  algorithms,
 		Limits:      limits,
 	}

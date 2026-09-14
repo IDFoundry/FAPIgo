@@ -166,6 +166,7 @@ func validConfig(t *testing.T) client.Config {
 		RedirectURI: testRedirect,
 		Endpoints:   client.Endpoints{Authorization: authz, Token: tok, PushedAuthorizationRequest: par},
 		Profile:     client.ProfileFAPISecurity,
+		Assurance:   client.AssuranceDevelopment,
 		Algorithms: client.Algorithms{
 			ClientAuthentication: fapi.ES256,
 			DPoP:                 fapi.ES256,
@@ -301,6 +302,7 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 		"zero token ep":               func(c *client.Config) { c.Endpoints.Token = fapi.URL{} },
 		"zero par ep":                 func(c *client.Config) { c.Endpoints.PushedAuthorizationRequest = fapi.URL{} },
 		"invalid profile":             func(c *client.Config) { c.Profile = 0 },
+		"invalid assurance":           func(c *client.Config) { c.Assurance = client.AssuranceLevel(99) },
 		"invalid client auth alg":     func(c *client.Config) { c.Algorithms.ClientAuthentication = 0 },
 		"invalid dpop alg":            func(c *client.Config) { c.Algorithms.DPoP = 0 },
 		"invalid id token alg":        func(c *client.Config) { c.Algorithms.IDToken = 0 },

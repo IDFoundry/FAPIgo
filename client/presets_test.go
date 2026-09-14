@@ -45,6 +45,7 @@ func TestRecommendedPresetsProduceAWorkingClient(t *testing.T) {
 		RedirectURI: testRedirect,
 		Endpoints:   client.Endpoints{Authorization: authz, Token: tok, PushedAuthorizationRequest: par},
 		Profile:     client.ProfileFAPISecurity,
+		Assurance:   client.AssuranceDevelopment,
 		Algorithms:  algorithms,
 		Limits:      limits,
 	}

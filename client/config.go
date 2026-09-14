@@ -300,6 +300,7 @@ type Config struct {
 	Profile    Profile
 	Algorithms Algorithms
 	Limits     Limits
+	Assurance  AssuranceLevel
 
 	// RequireAuthorizationResponseIss makes HandleAuthorizationResponse
 	// reject a callback with no "iss" parameter at all, rather than only

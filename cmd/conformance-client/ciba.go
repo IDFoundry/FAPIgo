@@ -279,6 +279,7 @@ func runCIBAModule(ctx context.Context, d cibaModuleDriver, testName string) str
 		ClientID:  fapi.ClientID(clientID),
 		Endpoints: discovered.Endpoints,
 		Profile:   client.ProfileFAPISecurity,
+		Assurance: client.AssuranceDevelopment,
 		Algorithms: client.Algorithms{
 			ClientAuthentication:             fapi.ES256,
 			DPoP:                             fapi.ES256,

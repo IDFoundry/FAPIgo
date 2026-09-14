@@ -578,7 +578,7 @@ func buildModuleClient(ctx context.Context, d moduleDriver, module suiteModule) 
 		Random:     rand.Reader,
 	}
 
-	cl, err := client.New(cfg, deps)
+	cl, err := client.NewFromDiscovery(discovered, cfg, deps)
 	if err != nil {
 		return nil, moduleResult{Verdict: "ERROR", DriverErr: "construct client: " + err.Error(), ModuleID: module.ID}
 	}

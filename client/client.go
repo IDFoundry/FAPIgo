@@ -27,6 +27,30 @@ func New(cfg Config, deps Dependencies) (*Client, error) {
 	return &Client{cfg: cfg, deps: deps}, nil
 }
 
+// NewFromDiscovery is New plus one extra check only discovery can
+// supply: that discovered's issuer actually advertises support for
+// every algorithm cfg declares (discovered.SupportsAlgorithms) —
+// otherwise identical to New, which never receives DiscoveredMetadata
+// and so can't cross-check declared algorithms against what the issuer
+// published. Without this, a declared-but-unadvertised algorithm stays
+// silent until the first live signature or JWE-decrypt failure, far
+// from the misconfigured line; NewFromDiscovery turns that into a
+// startup error instead.
+//
+// NewFromDiscovery does not read or modify cfg.Endpoints — build that
+// from discovered.Endpoints yourself first (DiscoveredMetadata's own
+// doc comment covers the direct-assignment case), and apply
+// discovered.MTLSEndpointAliases.ApplyForSenderConstrain/ApplyForClientAuth
+// after that if this client is mTLS-sender-constrained or
+// mTLS-client-authenticated, exactly as when calling plain New — this
+// function only adds the algorithm cross-check on top.
+func NewFromDiscovery(discovered DiscoveredMetadata, cfg Config, deps Dependencies) (*Client, error) {
+	if err := discovered.SupportsAlgorithms(cfg.Algorithms); err != nil {
+		return nil, err
+	}
+	return New(cfg, deps)
+}
+
 func validateConfig(cfg Config) error {
 	if cfg.Issuer.IsZero() {
 		return fmt.Errorf("client: config: issuer is required")
@@ -137,6 +161,17 @@ func validateConfig(cfg Config) error {
 		if !cfg.Algorithms.UserInfoContentEncryption.IsValid() {
 			return fmt.Errorf("client: config: algorithms.userinfo_content_encryption is invalid")
 		}
+	}
+	// A UserInfo algorithm only ever matters to FetchUserInfo/VerifyIssuerJWS,
+	// both of which need Endpoints.UserInfo — catching a declared
+	// algorithm with no endpoint here, rather than at the first
+	// FetchUserInfo call, turns a first-user-login failure into a
+	// startup one. Unlike ClientAuthentication/DPoP/IDToken above, this
+	// checks the declared-vs-configured direction rather than
+	// endpoint-vs-required, since Algorithms.UserInfo has no other
+	// field whose presence already implies it.
+	if (cfg.Algorithms.UserInfo != 0 || userInfoKeyManagementSet) && cfg.Endpoints.UserInfo.IsZero() {
+		return fmt.Errorf("client: config: endpoints.userinfo is required when algorithms.userinfo or algorithms.userinfo_key_management is set")
 	}
 
 	if cfg.ClientAuthMethod == storage.ClientAuthMethodPrivateKeyJWT && cfg.Limits.ClientAssertionLifetime <= 0 {

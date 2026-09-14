@@ -16,6 +16,7 @@ const (
 	requestObjectReplayNamespace                    storage.ReplayNamespace = "server:request-object"
 	dpopReplayNamespace                             storage.ReplayNamespace = "server:dpop"
 	backchannelAuthenticationRequestReplayNamespace storage.ReplayNamespace = "server:backchannel-authentication-request"
+	clientAttestationPoPReplayNamespace             storage.ReplayNamespace = "server:client-attestation-pop"
 )
 
 // replayChecker adapts storage.ReplayStore — which is keyed by a
@@ -50,4 +51,8 @@ func (s *Server) dpopReplayChecker() replayChecker {
 
 func (s *Server) backchannelAuthenticationRequestReplayChecker() replayChecker {
 	return replayChecker{store: s.deps.Replay, namespace: backchannelAuthenticationRequestReplayNamespace}
+}
+
+func (s *Server) clientAttestationPoPReplayChecker() replayChecker {
+	return replayChecker{store: s.deps.Replay, namespace: clientAttestationPoPReplayNamespace}
 }

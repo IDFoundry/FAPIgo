@@ -7,6 +7,7 @@ func TestClientAuthMethodStringRoundTrip(t *testing.T) {
 		ClientAuthMethodPrivateKeyJWT, ClientAuthMethodSelfSignedTLSClientAuth, ClientAuthMethodTLSClientAuth,
 		ClientAuthMethodTLSClientAuthSANDNS, ClientAuthMethodTLSClientAuthSANURI,
 		ClientAuthMethodTLSClientAuthSANIP, ClientAuthMethodTLSClientAuthSANEmail,
+		ClientAuthMethodAttestation,
 	}
 	for _, m := range methods {
 		s := m.String()

@@ -140,6 +140,27 @@ type AlgorithmPolicy struct {
 	// reasonably want a different algorithm for each. Required (and
 	// validated) only when Endpoints.BackchannelAuthentication is set.
 	BackchannelAuthenticationRequest AlgorithmSet
+
+	// ClientAttestation is the server-wide allow-list for a Client
+	// Attestation JWT's signing algorithm (OAuth 2.0 Attestation-Based
+	// Client Authentication draft-07 §5.1) — checked in addition to
+	// each client's own registered ClientAttestationAlgorithm, the same
+	// operator-override relationship ClientAssertion has with
+	// storage.RegisteredClient.ClientAssertionAlgorithm(). Required
+	// (and validated) only when Config.AttestationBasedClientAuthentication
+	// is true.
+	ClientAttestation AlgorithmSet
+
+	// ClientAttestationPoP is the server-wide allow-list for a Client
+	// Attestation PoP JWT's signing algorithm (draft-07 §5.2). Unlike
+	// ClientAttestation, there is no per-client registered algorithm to
+	// intersect with — a PoP is verified against the Client Instance
+	// Key the already-verified Client Attestation names, not a
+	// pre-registered one (see internal/clientattestation's package doc
+	// comment), so this set is this server's sole algorithm policy for
+	// it. Required (and validated) only when
+	// Config.AttestationBasedClientAuthentication is true.
+	ClientAttestationPoP AlgorithmSet
 }
 
 // Endpoints are this server's own endpoint URLs: the expected
@@ -265,6 +286,25 @@ type Limits struct {
 	// than this fails with ErrorSlowDown). Required only when
 	// Endpoints.BackchannelAuthentication is set.
 	BackchannelAuthenticationPollInterval time.Duration
+
+	// MaxClientAttestationLifetime bounds how far in the future a
+	// Client Attestation JWT's exp claim may be, relative to the time
+	// it's verified (OAuth 2.0 Attestation-Based Client Authentication
+	// draft-07 §5.1). Unlike MaxClientAssertionLifetime, a Client
+	// Attestation is deliberately meant to be reused across many
+	// requests (draft-07 §10.2), so this is ordinarily configured much
+	// longer than a client assertion's own lifetime bound. Required
+	// only when Config.AttestationBasedClientAuthentication is true.
+	MaxClientAttestationLifetime time.Duration
+
+	// MaxClientAttestationPoPAge bounds how old (relative to
+	// verification time) a Client Attestation PoP JWT's iat claim may
+	// be (draft-07 §9 rule 9) — mirrors MaxDPoPProofAge's role for a
+	// DPoP proof, since a PoP JWT has no exp claim of its own and is
+	// meant to be freshly created per request (§10.2 contrasts this
+	// explicitly with the reusable Client Attestation). Required only
+	// when Config.AttestationBasedClientAuthentication is true.
+	MaxClientAttestationPoPAge time.Duration
 }
 
 // Config is this server's immutable configuration. It is copied by New;
@@ -346,6 +386,26 @@ type Config struct {
 	// enabling it here does not implicitly permit every registered
 	// client to use it.
 	ClientCredentialsGrant bool
+
+	// AttestationBasedClientAuthentication enables
+	// storage.ClientAuthMethodAttestation (OAuth 2.0 Attestation-Based
+	// Client Authentication draft-07) — false (the zero value/default)
+	// disables it entirely: authenticateClient never inspects the
+	// OAuth-Client-Attestation/OAuth-Client-Attestation-PoP headers, no
+	// client may be registered with ClientAuthMethodAttestation
+	// (NewRegisteredClient still accepts the value; this switch is
+	// enforced at the server that would authenticate such a client, not
+	// at registration), and Metadata omits "attest_jwt_client_auth"
+	// from token_endpoint_auth_methods_supported along with both
+	// client_attestation_*_signing_alg_values_supported fields. The
+	// same bare deployment-wide switch ClientCredentialsGrant is, for
+	// the same reason: this mechanism needs its own required Limits
+	// (MaxClientAttestationLifetime, MaxClientAttestationPoPAge) and
+	// AlgorithmPolicy (ClientAttestation, ClientAttestationPoP) fields
+	// that most deployments — which will never register an
+	// attestation-authenticated client — shouldn't be forced to
+	// configure.
+	AttestationBasedClientAuthentication bool
 
 	// OAuthOnly, if set, makes this server a pure OAuth 2.0 + FAPI 2.0
 	// authorization server: it never issues an ID token and never

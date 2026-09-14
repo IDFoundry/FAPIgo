@@ -231,6 +231,48 @@ func TestNewRegisteredClientAuthMethodSelfSignedTLSClientAuth(t *testing.T) {
 	}
 }
 
+func TestNewRegisteredClientAuthMethodAttestation(t *testing.T) {
+	c, err := NewRegisteredClient(RegisteredClientConfig{
+		ID:                         "client-123",
+		RedirectURIs:               []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+		ClientAuthMethod:           ClientAuthMethodAttestation,
+		ExpectedAttesterIssuer:     "https://attester.example.com",
+		ClientAttestationAlgorithm: fapi.ES256,
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+	if c.ClientAuthMethod() != ClientAuthMethodAttestation {
+		t.Fatalf("ClientAuthMethod() = %v, want ClientAuthMethodAttestation", c.ClientAuthMethod())
+	}
+	if c.ExpectedAttesterIssuer() != "https://attester.example.com" {
+		t.Fatalf("ExpectedAttesterIssuer() = %q, want %q", c.ExpectedAttesterIssuer(), "https://attester.example.com")
+	}
+	if c.ClientAttestationAlgorithm() != fapi.ES256 {
+		t.Fatalf("ClientAttestationAlgorithm() = %v, want ES256", c.ClientAttestationAlgorithm())
+	}
+}
+
+func TestNewRegisteredClientAuthMethodAttestation_RequiresFields(t *testing.T) {
+	base := RegisteredClientConfig{
+		ID:               "client-123",
+		RedirectURIs:     []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+		ClientAuthMethod: ClientAuthMethodAttestation,
+	}
+
+	missingIssuer := base
+	missingIssuer.ClientAttestationAlgorithm = fapi.ES256
+	if _, err := NewRegisteredClient(missingIssuer); err == nil {
+		t.Fatalf("NewRegisteredClient accepted ClientAuthMethodAttestation with no ExpectedAttesterIssuer")
+	}
+
+	missingAlg := base
+	missingAlg.ExpectedAttesterIssuer = "https://attester.example.com"
+	if _, err := NewRegisteredClient(missingAlg); err == nil {
+		t.Fatalf("NewRegisteredClient accepted ClientAuthMethodAttestation with no ClientAttestationAlgorithm")
+	}
+}
+
 func TestNewRegisteredClientAuthMethodTLSClientAuth(t *testing.T) {
 	c, err := NewRegisteredClient(RegisteredClientConfig{
 		ID:                "client-123",

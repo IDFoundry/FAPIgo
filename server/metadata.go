@@ -38,6 +38,18 @@ type Metadata struct {
 	TokenEndpointAuthSigningAlgValuesSupported []string `json:"token_endpoint_auth_signing_alg_values_supported,omitempty"`
 	RequestObjectSigningAlgValuesSupported     []string `json:"request_object_signing_alg_values_supported,omitempty"`
 
+	// ClientAttestationSigningAlgValuesSupported/ClientAttestationPoPSigningAlgValuesSupported
+	// are draft-ietf-oauth-attestation-based-client-auth-07 §10.1's own
+	// metadata extension (no RFC 8414/OIDC Discovery counterpart) — set
+	// only when Config.AttestationBasedClientAuthentication is true,
+	// alongside "attest_jwt_client_auth" in
+	// TokenEndpointAuthMethodsSupported. §10.1: "The Authorization
+	// Server MUST include [these two fields] in its published metadata
+	// if the token_endpoint_auth_methods_supported includes
+	// attest_jwt_client_auth."
+	ClientAttestationSigningAlgValuesSupported    []string `json:"client_attestation_signing_alg_values_supported,omitempty"`
+	ClientAttestationPoPSigningAlgValuesSupported []string `json:"client_attestation_pop_signing_alg_values_supported,omitempty"`
+
 	// AuthorizationSigningAlgValuesSupported is set only under
 	// ProfileFAPISecurityWithMessageSigning, since that's the only case
 	// this server signs authorization responses (JARM) at all.
@@ -234,6 +246,18 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 
 	if s.cfg.ClientCredentialsGrant {
 		md.GrantTypesSupported = append(md.GrantTypesSupported, "client_credentials")
+	}
+
+	if s.cfg.AttestationBasedClientAuthentication {
+		// Advertised alongside "private_key_jwt" (and, if configured,
+		// the RFC 8705 §2 mTLS methods above), not in place of any of
+		// them — a client can be registered for whichever mechanism it
+		// actually implements, the same non-exclusive stance this
+		// server already takes for every ClientAuthMethod.
+		md.TokenEndpointAuthMethodsSupported = append(md.TokenEndpointAuthMethodsSupported,
+			storage.ClientAuthMethodAttestation.String())
+		md.ClientAttestationSigningAlgValuesSupported = s.cfg.Algorithms.ClientAttestation.Strings()
+		md.ClientAttestationPoPSigningAlgValuesSupported = s.cfg.Algorithms.ClientAttestationPoP.Strings()
 	}
 
 	return md

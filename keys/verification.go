@@ -29,6 +29,21 @@ const (
 	// (FAPI-CIBA mandates this always be signed, unlike PAR's request
 	// object, which is signed only under some profiles).
 	BackchannelAuthenticationRequestVerification
+
+	// AttestationVerification resolves a key to verify a Client
+	// Attestation JWT (OAuth 2.0 Attestation-Based Client Authentication
+	// draft-07 §5.1). Unlike every other VerificationPurpose, the key
+	// this resolves is not the named client's own key — it belongs to
+	// the Attester that vouches for the client (storage.RegisteredClient
+	// .ExpectedAttesterIssuer), a third party. ClientKeyRequest.ClientID
+	// is still the right lookup key: an implementation decides how a
+	// given client maps to its trusted Attester's key (e.g. by looking
+	// up the client's registered Attester issuer and resolving that
+	// issuer's own JWKS), the same way it already decides how to
+	// resolve any other purpose's keys — this purpose only distinguishes
+	// "which trust relationship" from ClientAssertionVerification's "the
+	// client's own key," it doesn't change ClientKeySource's shape.
+	AttestationVerification
 )
 
 // ClientKeyRequest describes which of a client's verification keys is

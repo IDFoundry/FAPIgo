@@ -159,6 +159,25 @@ func validateConfig(cfg Config) error {
 		}
 	}
 
+	if cfg.AttestationBasedClientAuthentication {
+		if len(cfg.Algorithms.ClientAttestation) == 0 {
+			return fmt.Errorf("server: config: algorithms.client_attestation must not be empty when attestation_based_client_authentication is set")
+		}
+		for _, a := range cfg.Algorithms.ClientAttestation {
+			if !a.IsValid() {
+				return fmt.Errorf("server: config: algorithms.client_attestation contains an invalid algorithm")
+			}
+		}
+		if len(cfg.Algorithms.ClientAttestationPoP) == 0 {
+			return fmt.Errorf("server: config: algorithms.client_attestation_pop must not be empty when attestation_based_client_authentication is set")
+		}
+		for _, a := range cfg.Algorithms.ClientAttestationPoP {
+			if !a.IsValid() {
+				return fmt.Errorf("server: config: algorithms.client_attestation_pop contains an invalid algorithm")
+			}
+		}
+	}
+
 	if cfg.Limits.PushedRequestLifetime <= 0 {
 		return fmt.Errorf("server: config: limits.pushed_request_lifetime must be positive")
 	}
@@ -198,6 +217,15 @@ func validateConfig(cfg Config) error {
 		}
 		if cfg.Limits.BackchannelAuthenticationPollInterval <= 0 {
 			return fmt.Errorf("server: config: limits.backchannel_authentication_poll_interval must be positive when endpoints.backchannel_authentication is set")
+		}
+	}
+
+	if cfg.AttestationBasedClientAuthentication {
+		if cfg.Limits.MaxClientAttestationLifetime <= 0 {
+			return fmt.Errorf("server: config: limits.max_client_attestation_lifetime must be positive when attestation_based_client_authentication is set")
+		}
+		if cfg.Limits.MaxClientAttestationPoPAge <= 0 {
+			return fmt.Errorf("server: config: limits.max_client_attestation_pop_age must be positive when attestation_based_client_authentication is set")
 		}
 	}
 

@@ -101,6 +101,23 @@ const (
 	// "tls_client_auth_san_email". Same chain-trust posture as
 	// ClientAuthMethodTLSClientAuth — see its own doc comment.
 	ClientAuthMethodTLSClientAuthSANEmail
+
+	// ClientAuthMethodAttestation authenticates via a pair of JWTs — a
+	// Client Attestation, signed by a trusted Attester (ExpectedAttesterIssuer)
+	// and vouching for this client, plus a Client Attestation PoP signed
+	// by the Client Instance Key the Attestation names in its "cnf"
+	// claim — per OAuth 2.0 Attestation-Based Client Authentication
+	// (draft-ietf-oauth-attestation-based-client-auth-07). Unlike every
+	// other ClientAuthMethod, the credential proving this client's
+	// identity is issued by a third party (the Attester), not held
+	// directly by the client or pre-registered with this server; only
+	// the Attester's own trust relationship is registered
+	// (ExpectedAttesterIssuer, ClientAttestationAlgorithm). Requires
+	// server.Config.AttestationBasedClientAuthentication to be enabled
+	// server-wide — this value alone does not activate the mechanism if
+	// that deployment-wide switch is off, the same relationship
+	// AllowsClientCredentialsGrant has with Config.ClientCredentialsGrant.
+	ClientAuthMethodAttestation
 )
 
 // BackchannelTokenDeliveryMode is the closed set of mechanisms this
@@ -142,6 +159,8 @@ type RegisteredClient struct {
 	expectedSANURI                string
 	expectedSANIP                 string
 	expectedSANEmail              string
+	expectedAttesterIssuer        string
+	clientAttestationAlgorithm    fapi.SignatureAlgorithm
 	allowedScopes                 map[string]struct{}
 
 	idTokenEncryptionKeyManagement     fapi.KeyManagementAlgorithm
@@ -201,6 +220,26 @@ type RegisteredClientConfig struct {
 	ExpectedSANDNS   string
 	ExpectedSANURI   string
 	ExpectedSANEmail string
+
+	// ExpectedAttesterIssuer is the "iss" value this client's Client
+	// Attestation JWT must carry (OAuth 2.0 Attestation-Based Client
+	// Authentication draft-07 §5.1) — the trusted Attester vouching for
+	// this Client Instance. Required only when ClientAuthMethod is
+	// ClientAuthMethodAttestation. Compared by exact string match, the
+	// same way ExpectedSubjectDN/ExpectedSAN* are.
+	ExpectedAttesterIssuer string
+
+	// ClientAttestationAlgorithm is the only algorithm this client's
+	// Client Attestation JWTs are accepted under (draft-07 §5.1) —
+	// never inferred from the Attestation's own header, the same
+	// algorithm-confusion protection ClientAssertionAlgorithm provides
+	// for private_key_jwt. Required only when ClientAuthMethod is
+	// ClientAuthMethodAttestation. The accompanying Client Attestation
+	// PoP JWT (draft-07 §5.2) needs no algorithm registered here: its
+	// signing key is the Client Instance Key the already-verified
+	// Attestation names in its own "cnf" claim, not a pre-registered
+	// one — see internal/clientattestation's package doc comment.
+	ClientAttestationAlgorithm fapi.SignatureAlgorithm
 
 	// ExpectedSANIP is this client's certificate's expected
 	// subjectAltName iPAddress entry (RFC 8705 §2.1's
@@ -353,6 +392,13 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 		if cfg.ExpectedSANEmail == "" {
 			return RegisteredClient{}, fmt.Errorf("storage: client %q must set ExpectedSANEmail for tls_client_auth_san_email", cfg.ID)
 		}
+	case ClientAuthMethodAttestation:
+		if cfg.ExpectedAttesterIssuer == "" {
+			return RegisteredClient{}, fmt.Errorf("storage: client %q must set ExpectedAttesterIssuer for attest_jwt_client_auth", cfg.ID)
+		}
+		if !cfg.ClientAttestationAlgorithm.IsValid() {
+			return RegisteredClient{}, fmt.Errorf("storage: client %q has no valid client attestation algorithm", cfg.ID)
+		}
 	default:
 		return RegisteredClient{}, fmt.Errorf("storage: client %q has an invalid client auth method", cfg.ID)
 	}
@@ -431,6 +477,8 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 		expectedSANURI:                            cfg.ExpectedSANURI,
 		expectedSANIP:                             cfg.ExpectedSANIP,
 		expectedSANEmail:                          cfg.ExpectedSANEmail,
+		expectedAttesterIssuer:                    cfg.ExpectedAttesterIssuer,
+		clientAttestationAlgorithm:                cfg.ClientAttestationAlgorithm,
 		allowedScopes:                             scopes,
 		idTokenEncryptionKeyManagement:            cfg.IDTokenEncryptionKeyManagement,
 		idTokenEncryptionContentEncryption:        cfg.IDTokenEncryptionContentEncryption,
@@ -521,6 +569,19 @@ func (c RegisteredClient) ExpectedSANIP() string {
 // ClientAuthMethodTLSClientAuthSANEmail.
 func (c RegisteredClient) ExpectedSANEmail() string {
 	return c.expectedSANEmail
+}
+
+// ExpectedAttesterIssuer returns the trusted Attester "iss" value this
+// client's Client Attestation JWTs must carry under
+// ClientAuthMethodAttestation.
+func (c RegisteredClient) ExpectedAttesterIssuer() string {
+	return c.expectedAttesterIssuer
+}
+
+// ClientAttestationAlgorithm returns the algorithm this client's Client
+// Attestation JWTs must be signed with under ClientAuthMethodAttestation.
+func (c RegisteredClient) ClientAttestationAlgorithm() fapi.SignatureAlgorithm {
+	return c.clientAttestationAlgorithm
 }
 
 // IDTokenEncryption returns the algorithms this client's ID tokens must

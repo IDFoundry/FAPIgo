@@ -127,6 +127,15 @@ type PushAuthorizationRequest struct {
 	// means the client didn't send one.
 	DPoPProofs []string
 
+	// ClientAttestations/ClientAttestationPoPs are every
+	// "OAuth-Client-Attestation"/"OAuth-Client-Attestation-PoP" header
+	// value the request carried, in receipt order — see
+	// AuthorizationCodeExchangeRequest.ClientAttestations' own doc
+	// comment. Empty means the client didn't authenticate via
+	// ClientAuthMethodAttestation.
+	ClientAttestations    []string
+	ClientAttestationPoPs []string
+
 	// PeerCertificate is the TLS client certificate presented on the
 	// connection this request arrived on, if any — required when the
 	// client authenticates via ClientAuthMethodSelfSignedTLSClientAuth
@@ -190,11 +199,15 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 	if proofErr != nil {
 		return s.parFail(ctx, "", proofErr)
 	}
+	attestation, attestationPoP, attErr := resolveAttestationHeaders(req.ClientAttestations, req.ClientAttestationPoPs)
+	if attErr != nil {
+		return s.parFail(ctx, "", attErr)
+	}
 
 	// PAR accepts no endpoint-URL audience at all — only the issuer
 	// identifier — see acceptableClientAssertionAudiences's own doc
 	// comment for why.
-	client, _, authErr := s.authenticateClient(ctx, params, req.PeerCertificate, nil, nil)
+	client, _, authErr := s.authenticateClient(ctx, params, req.PeerCertificate, attestation, attestationPoP, nil, nil)
 	if authErr != nil {
 		var clientID fapi.ClientID
 		return s.parFail(ctx, clientID, authErr)
@@ -250,11 +263,19 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 	}, nil
 }
 
-// authenticateClient authenticates the request's client — via a signed
-// client_assertion (RFC 7523) or, for a client registered under
+// authenticateClient authenticates the request's client — via a Client
+// Attestation/PoP header pair (OAuth 2.0 Attestation-Based Client
+// Authentication draft-07, for a client registered under
+// ClientAuthMethodAttestation), a signed client_assertion (RFC 7523),
+// or, for a client registered under
 // ClientAuthMethodSelfSignedTLSClientAuth/ClientAuthMethodTLSClientAuth,
 // via a plain client_id form parameter plus peerCert (RFC 8705 §2) — and
 // resolves the registered client it identifies.
+//
+// attestation/attestationPoP are the request's already-reduced-to-one
+// OAuth-Client-Attestation/OAuth-Client-Attestation-PoP header values
+// (see resolveAttestationHeaders) — both empty means neither header was
+// sent.
 //
 // endpoints/mtlsEndpoints list every endpoint URL (and its RFC 8705 §5
 // mTLS alias, if any) a client_assertion's "aud" may name, in addition
@@ -265,8 +286,10 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 // interchangeably. Pass nil for both when the calling endpoint accepts
 // no endpoint-URL audience at all (PAR — see
 // PushAuthorizationRequest's own call site).
-func (s *Server) authenticateClient(ctx context.Context, params map[string]string, peerCert *x509.Certificate, endpoints, mtlsEndpoints []fapi.URL) (storage.RegisteredClient, clientassertion.VerifiedAssertion, *Error) {
+func (s *Server) authenticateClient(ctx context.Context, params map[string]string, peerCert *x509.Certificate, attestation, attestationPoP string, endpoints, mtlsEndpoints []fapi.URL) (storage.RegisteredClient, clientassertion.VerifiedAssertion, *Error) {
 	switch {
+	case attestation != "" || attestationPoP != "":
+		return s.authenticateClientViaAttestation(ctx, attestation, attestationPoP)
 	case params["client_assertion"] != "":
 		return s.authenticateClientViaAssertion(ctx, params, endpoints, mtlsEndpoints)
 	case params["client_id"] != "":

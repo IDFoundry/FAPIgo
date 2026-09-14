@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.28.0](https://github.com/IDFoundry/FAPIgo/compare/v0.27.0...v0.28.0) (2026-09-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **client:** add session-store assurance gate mirroring server ([#294](https://github.com/IDFoundry/FAPIgo/issues/294))
+
+### Features
+
+* **backchannelhttp:** add hardened CIBA ping-notification sender ([1cbecc0](https://github.com/IDFoundry/FAPIgo/commit/1cbecc0d421c50b17d27519a759dace17215e2f8))
+* **client:** add session-store assurance gate mirroring server ([#294](https://github.com/IDFoundry/FAPIgo/issues/294)) ([ec91ae5](https://github.com/IDFoundry/FAPIgo/commit/ec91ae5745ffa78c48ddf4ad0ae5fd89c7396528))
+* **client:** auto-enable RFC 9207 iss enforcement via NewFromDiscovery ([0a2ff9f](https://github.com/IDFoundry/FAPIgo/commit/0a2ff9f9ad4f6a6e490de599c42c1a5b579dbf70))
+* **client:** validate declared config against discovery at construction ([ea77381](https://github.com/IDFoundry/FAPIgo/commit/ea77381c50cda9670cecb134388c0efd35df8cd1))
+* **fapitest:** export SelfSignedClientCert ([832be68](https://github.com/IDFoundry/FAPIgo/commit/832be6892ab777eb4005146a1d6c9b31bcc5ca27))
+* **server:** add AlgorithmSet/KeyManagementAlgorithmSet/ContentEncryptionAlgorithmSet.Strings ([32a346d](https://github.com/IDFoundry/FAPIgo/commit/32a346da4d9bed7c5a008ca8ac431e2a27c479dd))
+* **server:** add BackchannelInteractionRequired.WriteJSON ([eadc09c](https://github.com/IDFoundry/FAPIgo/commit/eadc09cd2d81cfdd38c61d8adff66449391566d7))
+* **server:** add NewBackchannelNotificationRequest ([77bd584](https://github.com/IDFoundry/FAPIgo/commit/77bd584dff4cff7862ae45f129c44391ea44d991))
+* **server:** add optional chain-trust gate for PKI mTLS client auth ([#296](https://github.com/IDFoundry/FAPIgo/issues/296)) ([57d167d](https://github.com/IDFoundry/FAPIgo/commit/57d167dcf84cc4342015936890b23093fccada5c))
+* **server:** add ParseInteractionHandle/ParseBackchannelAuthenticationHandle ([#290](https://github.com/IDFoundry/FAPIgo/issues/290)) ([5e2eb37](https://github.com/IDFoundry/FAPIgo/commit/5e2eb37f242cf7ef22da5126a38a05e64b5b72f7))
+* **server:** add PushAuthorizationResult.WriteJSON ([1864457](https://github.com/IDFoundry/FAPIgo/commit/1864457af9df76e937cbfff8c62b31357f093a0c))
+* **server:** complete AssuranceProduction store-assurance gate ([#295](https://github.com/IDFoundry/FAPIgo/issues/295)) ([f0bd7d9](https://github.com/IDFoundry/FAPIgo/commit/f0bd7d9d9738e48f5904209c348bc71ac031b768))
+
+
+### Bug Fixes
+
+* **backchannelhttp:** check res.Body.Close error per repo convention ([3c804da](https://github.com/IDFoundry/FAPIgo/commit/3c804da0f57da9856c805325691ebf6476261f29))
+* **client:** assert TLS on the PAR/token POST path ([#292](https://github.com/IDFoundry/FAPIgo/issues/292)) ([d5f9c58](https://github.com/IDFoundry/FAPIgo/commit/d5f9c589da3ea01438057ccace94420c03772ace))
+* **conformance:** make setup-config self-healing, not a one-time skip ([fa8d898](https://github.com/IDFoundry/FAPIgo/commit/fa8d898b2469fa50e74d88a93c02ea774cdd4b14))
+* **conformance:** resync AS test-client public keys with local plan configs ([e9361e4](https://github.com/IDFoundry/FAPIgo/commit/e9361e45010af21b732ea6d5457ce01de4db30b9))
+* **jose:** reject RSA keys above a maximum modulus size ([#297](https://github.com/IDFoundry/FAPIgo/issues/297)) ([67afd6f](https://github.com/IDFoundry/FAPIgo/commit/67afd6fad843b85c3862c9772efc77fce524055f))
+* **server:** close codecov coverage gap in NewBackchannelNotificationRequest ([79e1c76](https://github.com/IDFoundry/FAPIgo/commit/79e1c7621c6bb526ce355ae340cb8904c59e6f71))
+
 ## [0.27.0](https://github.com/IDFoundry/FAPIgo/compare/v0.26.0...v0.27.0) (2026-09-12)
 
 

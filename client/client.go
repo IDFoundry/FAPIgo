@@ -27,15 +27,26 @@ func New(cfg Config, deps Dependencies) (*Client, error) {
 	return &Client{cfg: cfg, deps: deps}, nil
 }
 
-// NewFromDiscovery is New plus one extra check only discovery can
-// supply: that discovered's issuer actually advertises support for
-// every algorithm cfg declares (discovered.SupportsAlgorithms) —
-// otherwise identical to New, which never receives DiscoveredMetadata
-// and so can't cross-check declared algorithms against what the issuer
-// published. Without this, a declared-but-unadvertised algorithm stays
-// silent until the first live signature or JWE-decrypt failure, far
-// from the misconfigured line; NewFromDiscovery turns that into a
-// startup error instead.
+// NewFromDiscovery is New plus two extra steps only discovery can
+// supply:
+//
+//  1. It checks that discovered's issuer actually advertises support
+//     for every algorithm cfg declares (discovered.SupportsAlgorithms)
+//     — otherwise identical to New, which never receives
+//     DiscoveredMetadata and so can't cross-check declared algorithms
+//     against what the issuer published. Without this, a
+//     declared-but-unadvertised algorithm stays silent until the first
+//     live signature or JWE-decrypt failure, far from the
+//     misconfigured line; NewFromDiscovery turns that into a startup
+//     error instead.
+//  2. It sets cfg.RequireAuthorizationResponseIss to true when
+//     discovered.AuthorizationResponseIssSupported is — RFC 9207 §2.4
+//     MUST-rejects a callback missing "iss" once the issuer is known to
+//     always send one, and this is never a legitimate place for a
+//     caller to want the opposite: it only ever raises the enforcement
+//     bar, never lowers a value the caller explicitly set. See
+//     RequireAuthorizationResponseIss's own doc comment, which
+//     otherwise requires the caller to set this by hand.
 //
 // NewFromDiscovery does not read or modify cfg.Endpoints — build that
 // from discovered.Endpoints yourself first (DiscoveredMetadata's own
@@ -43,10 +54,13 @@ func New(cfg Config, deps Dependencies) (*Client, error) {
 // discovered.MTLSEndpointAliases.ApplyForSenderConstrain/ApplyForClientAuth
 // after that if this client is mTLS-sender-constrained or
 // mTLS-client-authenticated, exactly as when calling plain New — this
-// function only adds the algorithm cross-check on top.
+// function only adds the two checks above on top.
 func NewFromDiscovery(discovered DiscoveredMetadata, cfg Config, deps Dependencies) (*Client, error) {
 	if err := discovered.SupportsAlgorithms(cfg.Algorithms); err != nil {
 		return nil, err
+	}
+	if discovered.AuthorizationResponseIssSupported {
+		cfg.RequireAuthorizationResponseIss = true
 	}
 	return New(cfg, deps)
 }

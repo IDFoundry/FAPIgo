@@ -55,6 +55,8 @@ type discoveryDoc struct {
 	BackchannelAuthenticationRequestSigningAlgValuesSupported []string `json:"backchannel_authentication_request_signing_alg_values_supported,omitempty"`
 
 	MTLSEndpointAliases *discoveryMTLSEndpointAliases `json:"mtls_endpoint_aliases,omitempty"`
+
+	AuthorizationResponseIssParameterSupported bool `json:"authorization_response_iss_parameter_supported,omitempty"`
 }
 
 type discoveryMTLSEndpointAliases struct {

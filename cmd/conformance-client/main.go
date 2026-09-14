@@ -543,14 +543,13 @@ func buildModuleClient(ctx context.Context, d moduleDriver, module suiteModule) 
 	}
 
 	cfg := client.Config{
-		Issuer:                          issuer,
-		ClientID:                        fapi.ClientID(clientID),
-		RedirectURI:                     redirectURI,
-		Endpoints:                       discovered.Endpoints,
-		Profile:                         profile.clientProfile,
-		RequireAuthorizationResponseIss: discovered.AuthorizationResponseIssSupported,
-		Algorithms:                      algorithms,
-		Limits:                          limits,
+		Issuer:      issuer,
+		ClientID:    fapi.ClientID(clientID),
+		RedirectURI: redirectURI,
+		Endpoints:   discovered.Endpoints,
+		Profile:     profile.clientProfile,
+		Algorithms:  algorithms,
+		Limits:      limits,
 	}
 	if d.SenderConstrainMTLS {
 		cfg.SenderConstrain = storage.SenderConstrainMTLS

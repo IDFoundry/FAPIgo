@@ -310,7 +310,8 @@ type Config struct {
 	// that do support the parameter", which this client can't determine
 	// on its own; set this from
 	// DiscoveredMetadata.AuthorizationResponseIssSupported (or a
-	// deployment's own out-of-band knowledge of the server).
+	// deployment's own out-of-band knowledge of the server) — or use
+	// NewFromDiscovery, which does this automatically.
 	RequireAuthorizationResponseIss bool
 
 	// TrustedIDTokenAudiences lists any other party this client trusts

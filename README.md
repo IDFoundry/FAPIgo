@@ -4,6 +4,8 @@
 [![CI](https://github.com/IDFoundry/FAPIgo/actions/workflows/ci.yml/badge.svg)](https://github.com/IDFoundry/FAPIgo/actions/workflows/ci.yml)
 [![FAPI Conformance](https://github.com/IDFoundry/FAPIgo/actions/workflows/conformance.yml/badge.svg)](https://github.com/IDFoundry/FAPIgo/actions/workflows/conformance.yml)
 [![codecov](https://codecov.io/gh/IDFoundry/FAPIgo/graph/badge.svg)](https://codecov.io/gh/IDFoundry/FAPIgo)
+[![Go Reference](https://pkg.go.dev/badge/github.com/idfoundry/fapigo.svg)](https://pkg.go.dev/github.com/idfoundry/fapigo)
+[![Go Report Card](https://goreportcard.com/badge/github.com/idfoundry/fapigo)](https://goreportcard.com/report/github.com/idfoundry/fapigo)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 [![Quality Gate](https://sonarcloud.io/api/project_badges/quality_gate?project=IDFoundry_FAPIgo)](https://sonarcloud.io/summary/new_code?id=IDFoundry_FAPIgo)
@@ -16,11 +18,38 @@
 [![Code Smells](https://sonarcloud.io/api/project_badges/measure?project=IDFoundry_FAPIgo&metric=code_smells)](https://sonarcloud.io/summary/new_code?id=IDFoundry_FAPIgo)
 [![Technical Debt](https://sonarcloud.io/api/project_badges/measure?project=IDFoundry_FAPIgo&metric=sqale_index)](https://sonarcloud.io/summary/new_code?id=IDFoundry_FAPIgo)
 
-Hardened, separately conformant FAPI 2.0 client, authorization-server and
-resource-server engines for Go, built on one rigorously tested protocol
-core.
+**Standards-first FAPI 2.0 for Go.** OpenID Certified™, hardened, separately
+conformant client, authorization-server and resource-server engines, built on
+one rigorously tested protocol core — so you build against the security
+profile instead of reverse-engineering it yourself.
 
-[![OpenID Certified](https://openid.net/wordpress-content/uploads/2016/04/oid-l-certification-mark-l-rgb-150dpi-90mm-300x157.png)](https://openid.net/certification/)
+FAPI 2.0 (Financial-grade API) is the OpenID Foundation's security profile
+for OAuth 2.0 and OpenID Connect, used by open banking, open finance and
+other high-assurance API ecosystems to mandate protections — sender-
+constrained tokens, request integrity, strong client authentication — that
+plain OAuth leaves optional. Getting PAR, DPoP, JAR/JARM, mTLS or
+private_key_jwt, and RAR/CIBA all correct by hand is a significant amount of
+security-critical work; FAPIgo does that work once, as tested and
+OIDF-certified Go packages.
+
+This isn't a stricter default you can opt out of: legacy patterns FAPI 2.0
+and RFC 9700 identify as insecure — the implicit/hybrid response types,
+`client_secret_basic`/`client_secret_post` authentication — aren't
+configuration options that happen to be off, they simply aren't
+implemented. `server` only ever accepts `response_type=code`, and
+`ClientAuthMethod` is a closed enum of `private_key_jwt` and the mTLS
+variants.
+
+- FAPI 2.0 Security Profile Final + Message Signing Final
+- PAR (RFC 9126) · DPoP (RFC 9449) · mTLS client auth & cert-bound tokens (RFC 8705)
+- private_key_jwt client authentication
+- JAR / JARM · RAR (RFC 9396) · CIBA (poll & ping delivery)
+- OpenID Federation 1.0 (trust chains, automatic client registration, trust marks)
+- OpenID Certified™ for OP, RP and FAPI-CIBA OP conformance profiles — see below
+
+<table cellpadding="10"><tr><td bgcolor="#ffffff" align="center">
+<a href="https://openid.net/certification/"><img alt="OpenID Certified" src="https://openid.net/wordpress-content/uploads/2016/04/oid-l-certification-mark-l-rgb-150dpi-90mm-300x157.png" /></a>
+</td></tr></table>
 
 > **OpenID Certified™** by Oscar Sanderson to the FAPI 2.0 OP, FAPI 2.0
 > RP (both Security Profile Final + Message Signing Final), FAPI 2.0 OP
@@ -35,7 +64,68 @@ core.
 
 > **⚠ Work in progress.** FAPIgo is under active development. APIs, package structure, and behavior may change without notice. We recommend waiting for the v1.0 release before considering it for production use.
 
-> **Status:** the detail behind the certification above. All three roles (`client`, `server`, `resource`), the shared
+Requires Go 1.26.5+ (per `go.mod`'s `go` directive).
+
+```
+go get github.com/idfoundry/fapigo
+```
+
+```go
+import (
+    "github.com/idfoundry/fapigo/client"
+    "github.com/idfoundry/fapigo/server"
+    "github.com/idfoundry/fapigo/resource"
+)
+```
+
+*(Go module paths are lowercased; the GitHub repository itself is
+[IDFoundry/FAPIgo](https://github.com/IDFoundry/FAPIgo).)*
+
+`client` (relying party), `server` (authorization server) and `resource`
+(resource server / token verification) are independent public packages
+with distinct constructors, configuration and workflow APIs — there is no
+generic API that tries to behave as more than one role. They share a
+rigorously tested internal protocol core (JOSE, DPoP, PAR, PKCE, JARM,
+request objects, client assertions, canonicalization) without sharing
+role-level types or behaviour.
+
+See [GETTING_STARTED.md](GETTING_STARTED.md) for a full walkthrough of
+standing up an authorization server and resource server end to end,
+including a runnable configuration you can start from.
+
+`storage/memstore` and `keys/ephemeral` provide in-memory, non-durable
+implementations of every interface `server` needs (client repository,
+transaction/grant/replay/access-token stores, key manager, client key
+source) — for local development and testing only, never production —
+so integrating `server` doesn't require writing real persistence and
+key management from scratch just to see it run. `server.RecommendedLimits()`
+and `server.RecommendedAlgorithms()` do the same for `Config`'s algorithm
+and duration fields, each grounded in a specific FAPI 2.0 Security
+Profile Final or RFC 9449 requirement where one exists.
+
+Access tokens can be issued as self-contained JWTs (RFC 9068 — the
+default, `server.JWTAccessTokens`/`resource.JWTAccessTokens`) or as
+opaque, storage-backed values (`server.OpaqueAccessTokens`/
+`resource.OpaqueAccessTokens`) — FAPI 2.0 doesn't mandate a format, so
+this is a deployment's own choice, not something the library imposes.
+
+OpenID Connect identity (an ID token) is likewise optional, not
+assumed: `server` issues one alongside the access token exactly when
+the granted scope includes `"openid"`, and `client` populates
+`TokenSet.IDToken`/`Subject`/`IDTokenClaims` exactly when the token
+response actually carried one — leaving `TokenSet.HasIDToken` false is
+a normal outcome, not an error. A deployment that only needs access
+tokens can drop `"openid"` from a client's `AllowedScopes` entirely and
+run this library as plain OAuth 2.0 + FAPI 2.0.
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design rationale and
+package layout, and [conformance/](conformance/README.md) for how each
+role is tested against the OpenID Foundation conformance suite.
+
+<details>
+<summary><strong>Full conformance and capability status</strong> (the detail behind the certification and checklist above)</summary>
+
+> All three roles (`client`, `server`, `resource`), the shared
 > internal protocol core, `keys`, `storage` (including a reusable storage
 > contract test suite for downstream backends), `extension`, the hardened
 > `fapihttp` transport, client-side AS discovery (`client.Discover` +
@@ -99,52 +189,7 @@ core.
 > not supported. See `federation/doc.go` for the exact scope of every
 > capability above.
 
-```go
-import (
-    "github.com/idfoundry/fapigo/client"
-    "github.com/idfoundry/fapigo/server"
-    "github.com/idfoundry/fapigo/resource"
-)
-```
-
-`client` (relying party), `server` (authorization server) and `resource`
-(resource server / token verification) are independent public packages
-with distinct constructors, configuration and workflow APIs — there is no
-generic API that tries to behave as more than one role. They share a
-rigorously tested internal protocol core (JOSE, DPoP, PAR, PKCE, JARM,
-request objects, client assertions, canonicalization) without sharing
-role-level types or behaviour.
-
-`storage/memstore` and `keys/ephemeral` provide in-memory, non-durable
-implementations of every interface `server` needs (client repository,
-transaction/grant/replay/access-token stores, key manager, client key
-source) — for local development and testing only, never production —
-so integrating `server` doesn't require writing real persistence and
-key management from scratch just to see it run. `server.RecommendedLimits()`
-and `server.RecommendedAlgorithms()` do the same for `Config`'s algorithm
-and duration fields, each grounded in a specific FAPI 2.0 Security
-Profile Final or RFC 9449 requirement where one exists — see
-[GETTING_STARTED.md](GETTING_STARTED.md) for a walkthrough of standing
-up an authorization server and resource server end to end.
-
-Access tokens can be issued as self-contained JWTs (RFC 9068 — the
-default, `server.JWTAccessTokens`/`resource.JWTAccessTokens`) or as
-opaque, storage-backed values (`server.OpaqueAccessTokens`/
-`resource.OpaqueAccessTokens`) — FAPI 2.0 doesn't mandate a format, so
-this is a deployment's own choice, not something the library imposes.
-
-OpenID Connect identity (an ID token) is likewise optional, not
-assumed: `server` issues one alongside the access token exactly when
-the granted scope includes `"openid"`, and `client` populates
-`TokenSet.IDToken`/`Subject`/`IDTokenClaims` exactly when the token
-response actually carried one — leaving `TokenSet.HasIDToken` false is
-a normal outcome, not an error. A deployment that only needs access
-tokens can drop `"openid"` from a client's `AllowedScopes` entirely and
-run this library as plain OAuth 2.0 + FAPI 2.0.
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design rationale and
-package layout, and [conformance/](conformance/README.md) for how each
-role is tested against the OpenID Foundation conformance suite.
+</details>
 
 ## Relevant specifications
 
@@ -163,6 +208,12 @@ role is tested against the OpenID Foundation conformance suite.
 [mtls]: https://www.rfc-editor.org/info/rfc8705
 [ciba]: https://openid.net/specs/openid-client-initiated-backchannel-authentication-core-1_0.html
 [rar]: https://www.rfc-editor.org/info/rfc9396
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the conformance-first development
+philosophy and pre-PR checklist, [SECURITY.md](SECURITY.md) to report a
+vulnerability, and [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## License
 

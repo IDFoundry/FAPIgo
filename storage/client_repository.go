@@ -51,22 +51,38 @@ const (
 	// ClientAuthMethodTLSClientAuthSAN* values below for the others).
 	// This package does not itself validate the certificate against a CA
 	// trust store — that's a deployment/adapter concern
-	// (tls.Config.ClientCAs), the same posture SenderConstrainMTLS
-	// already documents for sender-constraining.
+	// (tls.Config.ClientCAs) — and neither does the field match alone:
+	// unlike ClientAuthMethodSelfSignedTLSClientAuth's thumbprint (which
+	// cryptographically binds the exact certificate), a subject-DN/SAN
+	// match by itself proves nothing about who issued the certificate —
+	// any self-signed certificate whose subject an attacker chooses to
+	// match a registered value would pass unless something also checks
+	// the certificate's chain. server.Dependencies.MTLSClientCAs is that
+	// something: when set, this server independently verifies the
+	// presented certificate against it before ever comparing subject/SAN
+	// fields, for every ClientAuthMethodTLSClientAuth*/SAN* method (not
+	// ClientAuthMethodSelfSignedTLSClientAuth, which needs no chain
+	// trust). Leaving it unset relies entirely on the deployment's own
+	// TLS termination to have already required and verified the chain
+	// (tls.Config.ClientAuth: RequireAndVerifyClientCert or
+	// VerifyClientCertIfGiven, with ClientCAs set) before this server
+	// ever sees the request — get that wrong, on either side, and any
+	// self-signed certificate with a matching subject/SAN is accepted as
+	// this client.
 	ClientAuthMethodTLSClientAuth
 
 	// ClientAuthMethodTLSClientAuthSANDNS authenticates by exact match
 	// of ExpectedSANDNS against one of the presented certificate's
 	// subjectAltName dNSName entries — RFC 8705 §2.1's
-	// "tls_client_auth_san_dns". Same no-CA-validation posture as
-	// ClientAuthMethodTLSClientAuth.
+	// "tls_client_auth_san_dns". Same chain-trust posture as
+	// ClientAuthMethodTLSClientAuth — see its own doc comment.
 	ClientAuthMethodTLSClientAuthSANDNS
 
 	// ClientAuthMethodTLSClientAuthSANURI authenticates by exact match
 	// of ExpectedSANURI against one of the presented certificate's
 	// subjectAltName uniformResourceIdentifier entries — RFC 8705
-	// §2.1's "tls_client_auth_san_uri". Same no-CA-validation posture as
-	// ClientAuthMethodTLSClientAuth.
+	// §2.1's "tls_client_auth_san_uri". Same chain-trust posture as
+	// ClientAuthMethodTLSClientAuth — see its own doc comment.
 	ClientAuthMethodTLSClientAuthSANURI
 
 	// ClientAuthMethodTLSClientAuthSANIP authenticates by match of
@@ -75,14 +91,15 @@ const (
 	// "tls_client_auth_san_ip". Compared as parsed net.IP values (not a
 	// bare string), so equivalent representations of the same address
 	// (e.g. an IPv4 address written in its IPv4-in-IPv6 form) still
-	// match. Same no-CA-validation posture as ClientAuthMethodTLSClientAuth.
+	// match. Same chain-trust posture as ClientAuthMethodTLSClientAuth —
+	// see its own doc comment.
 	ClientAuthMethodTLSClientAuthSANIP
 
 	// ClientAuthMethodTLSClientAuthSANEmail authenticates by exact
 	// match of ExpectedSANEmail against one of the presented
 	// certificate's subjectAltName rfc822Name entries — RFC 8705 §2.1's
-	// "tls_client_auth_san_email". Same no-CA-validation posture as
-	// ClientAuthMethodTLSClientAuth.
+	// "tls_client_auth_san_email". Same chain-trust posture as
+	// ClientAuthMethodTLSClientAuth — see its own doc comment.
 	ClientAuthMethodTLSClientAuthSANEmail
 )
 

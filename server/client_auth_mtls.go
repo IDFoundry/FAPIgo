@@ -101,6 +101,20 @@ func matchesRegisteredSANEmail(cert *x509.Certificate, expected string) bool {
 	return false
 }
 
+// verifiesAgainstRoots reports whether cert chains to one of roots' trust
+// anchors for client authentication (crypto/x509.Certificate.Verify,
+// ExtKeyUsageClientAuth), consulted by authenticateClientViaCertificate
+// before any ClientAuthMethodTLSClientAuth/SAN* field-match when
+// Dependencies.MTLSClientCAs is set — see that field's own doc comment
+// for why (ClientAuthMethodSelfSignedTLSClientAuth needs no such check).
+func verifiesAgainstRoots(cert *x509.Certificate, roots *x509.CertPool) bool {
+	_, err := cert.Verify(x509.VerifyOptions{
+		Roots:     roots,
+		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	})
+	return err == nil
+}
+
 // authenticateClientViaCertificate authenticates a client identified by a
 // plain client_id form parameter (no client_assertion — the TLS client
 // certificate itself is the credential) against its registered
@@ -126,26 +140,46 @@ func (s *Server) authenticateClientViaCertificate(ctx context.Context, clientID 
 				newError(ErrorInvalidClient, 401, "client certificate does not match the registered thumbprint", nil)
 		}
 	case storage.ClientAuthMethodTLSClientAuth:
+		if s.deps.MTLSClientCAs != nil && !verifiesAgainstRoots(peerCert, s.deps.MTLSClientCAs) {
+			return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
+				newError(ErrorInvalidClient, 401, "client certificate does not chain to a trusted root", nil)
+		}
 		if !matchesRegisteredSubjectDN(peerCert, client.ExpectedSubjectDN()) {
 			return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
 				newError(ErrorInvalidClient, 401, "client certificate subject does not match the registered subject", nil)
 		}
 	case storage.ClientAuthMethodTLSClientAuthSANDNS:
+		if s.deps.MTLSClientCAs != nil && !verifiesAgainstRoots(peerCert, s.deps.MTLSClientCAs) {
+			return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
+				newError(ErrorInvalidClient, 401, "client certificate does not chain to a trusted root", nil)
+		}
 		if !matchesRegisteredSANDNS(peerCert, client.ExpectedSANDNS()) {
 			return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
 				newError(ErrorInvalidClient, 401, "client certificate subject does not match the registered subject", nil)
 		}
 	case storage.ClientAuthMethodTLSClientAuthSANURI:
+		if s.deps.MTLSClientCAs != nil && !verifiesAgainstRoots(peerCert, s.deps.MTLSClientCAs) {
+			return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
+				newError(ErrorInvalidClient, 401, "client certificate does not chain to a trusted root", nil)
+		}
 		if !matchesRegisteredSANURI(peerCert, client.ExpectedSANURI()) {
 			return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
 				newError(ErrorInvalidClient, 401, "client certificate subject does not match the registered subject", nil)
 		}
 	case storage.ClientAuthMethodTLSClientAuthSANIP:
+		if s.deps.MTLSClientCAs != nil && !verifiesAgainstRoots(peerCert, s.deps.MTLSClientCAs) {
+			return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
+				newError(ErrorInvalidClient, 401, "client certificate does not chain to a trusted root", nil)
+		}
 		if !matchesRegisteredSANIP(peerCert, client.ExpectedSANIP()) {
 			return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
 				newError(ErrorInvalidClient, 401, "client certificate subject does not match the registered subject", nil)
 		}
 	case storage.ClientAuthMethodTLSClientAuthSANEmail:
+		if s.deps.MTLSClientCAs != nil && !verifiesAgainstRoots(peerCert, s.deps.MTLSClientCAs) {
+			return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
+				newError(ErrorInvalidClient, 401, "client certificate does not chain to a trusted root", nil)
+		}
 		if !matchesRegisteredSANEmail(peerCert, client.ExpectedSANEmail()) {
 			return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
 				newError(ErrorInvalidClient, 401, "client certificate subject does not match the registered subject", nil)

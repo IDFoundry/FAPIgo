@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/x509"
 	"io"
 
 	"github.com/idfoundry/fapigo/fapihttp"
@@ -155,4 +156,34 @@ type Dependencies struct {
 	// server never touches unless the corresponding Config capability
 	// is enabled.
 	FederationHTTP *fapihttp.Client
+
+	// MTLSClientCAs, when set, is consulted before every
+	// ClientAuthMethodTLSClientAuth/SAN* field-match check (subject DN,
+	// SAN DNS/URI/IP/email — see their own doc comments in
+	// storage.ClientAuthMethod): the presented certificate must verify
+	// against one of these roots (crypto/x509.Certificate.Verify, EKU
+	// ClientAuth) or authentication fails before the field itself is
+	// even compared. Verification uses only Roots, no Intermediates
+	// pool — this server only ever sees the single leaf certificate a
+	// caller extracted (e.g. via PeerCertificateFromHTTP), never the
+	// full chain a real TLS handshake presented, so a PKI whose client
+	// certificates are issued through an intermediate CA should include
+	// that intermediate directly in this pool rather than only its
+	// ultimate root.
+	//
+	// Nil — the default — leaves chain trust entirely up to whatever
+	// already produced the certificate this server was handed (normally
+	// the deployment's own TLS termination, via tls.Config.ClientCAs and
+	// ClientAuth: RequireAndVerifyClientCert/VerifyClientCertIfGiven);
+	// existing deployments that already do this correctly need not set
+	// it. It exists for the deployments that can't rely on that alone —
+	// e.g. mTLS terminated by a gateway in front of this process that
+	// forwards the presented certificate without having verified its
+	// chain itself — so this server can enforce chain trust directly
+	// instead of silently accepting any certificate whose subject/SAN an
+	// attacker chose to match a registered value.
+	// ClientAuthMethodSelfSignedTLSClientAuth is unaffected regardless:
+	// its thumbprint match already cryptographically binds the exact
+	// certificate, so it needs no chain trust to begin with.
+	MTLSClientCAs *x509.CertPool
 }

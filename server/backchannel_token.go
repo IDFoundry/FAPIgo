@@ -57,15 +57,6 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, "", newError(ErrorInvalidRequest, 400, "the request contains a duplicated parameter", err))
 	}
-	dpopProof, dpopErr := resolveDPoPProof(req.DPoPProofs)
-	if dpopErr != nil {
-		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, "", dpopErr)
-	}
-	attestation, attestationPoP, attErr := resolveAttestationHeaders(req.ClientAttestations, req.ClientAttestationPoPs)
-	if attErr != nil {
-		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, "", attErr)
-	}
-
 	if params["grant_type"] != CIBAGrantType {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, "", newError(ErrorUnsupportedGrantType, 400, "grant_type must be "+CIBAGrantType, nil))
 	}
@@ -75,7 +66,7 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 	// CIBAGrantType's own doc comment — so this authenticates against
 	// the Token endpoint's own audience carve-out, the same as
 	// ExchangeAuthorizationCode/RefreshAccessToken.
-	client, _, authErr := s.authenticateClient(ctx, params, req.PeerCertificate, attestation, attestationPoP, []fapi.URL{s.cfg.Endpoints.Token}, []fapi.URL{s.cfg.MTLSEndpoints.Token})
+	client, dpopProof, authErr := s.authenticateRequest(ctx, params, req.PeerCertificate, req.DPoPProofs, req.ClientAttestations, req.ClientAttestationPoPs, []fapi.URL{s.cfg.Endpoints.Token}, []fapi.URL{s.cfg.MTLSEndpoints.Token})
 	if authErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, "", authErr)
 	}

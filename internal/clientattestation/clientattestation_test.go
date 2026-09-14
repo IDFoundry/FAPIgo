@@ -318,6 +318,64 @@ func TestAttestation_Verify_RejectsLifetimeExceeded(t *testing.T) {
 	}
 }
 
+func TestParse_RejectsMalformedInput(t *testing.T) {
+	if _, err := Parse("not-a-jwt"); err == nil {
+		t.Errorf("Parse accepted a malformed compact JWS")
+	}
+}
+
+func TestAttestation_Verify_RejectsIncompletePolicy(t *testing.T) {
+	attesterKey := generateKey(t)
+	clientKey := generateKey(t)
+	now := time.Unix(1300816000, 0)
+	attestation := createTestAttestation(t, attesterKey, attestationClaimsInput{
+		Issuer: "https://attester.example.com", Subject: "https://client.example.com",
+		ExpiresAt: now.Add(5 * time.Minute).Unix(), CNFJWK: confirmationJWK(t, &clientKey.PublicKey),
+	})
+	parsed, err := Parse(attestation)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	cases := []struct {
+		name   string
+		mutate func(VerifyPolicy) VerifyPolicy
+	}{
+		{"empty ExpectedIssuer", func(p VerifyPolicy) VerifyPolicy { p.ExpectedIssuer = ""; return p }},
+		{"empty ExpectedSubject", func(p VerifyPolicy) VerifyPolicy { p.ExpectedSubject = ""; return p }},
+		{"zero Now", func(p VerifyPolicy) VerifyPolicy { p.Now = time.Time{}; return p }},
+		{"zero MaxLifetime", func(p VerifyPolicy) VerifyPolicy { p.MaxLifetime = 0; return p }},
+	}
+	for _, c := range cases {
+		policy := c.mutate(basePolicy(now))
+		if _, err := parsed.Verify(&attesterKey.PublicKey, policy); err == nil {
+			t.Errorf("%s: Verify accepted an incomplete policy", c.name)
+		}
+	}
+}
+
+func TestAttestation_Verify_RejectsNotYetValid(t *testing.T) {
+	attesterKey := generateKey(t)
+	clientKey := generateKey(t)
+	now := time.Unix(1300816000, 0)
+	attestation := createTestAttestation(t, attesterKey, attestationClaimsInput{
+		Issuer: "https://attester.example.com", Subject: "https://client.example.com",
+		NotBefore: now.Add(time.Hour).Unix(), ExpiresAt: now.Add(2 * time.Hour).Unix(),
+		CNFJWK: confirmationJWK(t, &clientKey.PublicKey),
+	})
+	parsed, err := Parse(attestation)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	// A generous MaxLifetime here so the nbf check, not the exp/lifetime
+	// check earlier in Verify, is what actually rejects this attestation.
+	policy := basePolicy(now)
+	policy.MaxLifetime = 3 * time.Hour
+	if _, err := parsed.Verify(&attesterKey.PublicKey, policy); err != ErrNotYetValid {
+		t.Errorf("Verify error = %v, want ErrNotYetValid", err)
+	}
+}
+
 func TestAttestation_Verify_RejectsTypMismatch(t *testing.T) {
 	attesterKey := generateKey(t)
 	clientKey := generateKey(t)
@@ -372,6 +430,139 @@ func TestPoP_VerifyRoundTrip(t *testing.T) {
 	}
 	if verified.ClientID != "https://client.example.com" {
 		t.Errorf("ClientID = %q", verified.ClientID)
+	}
+}
+
+func TestParsePoP_RejectsMalformedInput(t *testing.T) {
+	if _, err := ParsePoP("not-a-jwt"); err == nil {
+		t.Errorf("ParsePoP accepted a malformed compact JWS")
+	}
+}
+
+func TestPoP_Verify_RejectsIncompletePolicy(t *testing.T) {
+	clientKey := generateKey(t)
+	now := time.Unix(1300816000, 0)
+	jwk := confirmationJWK(t, &clientKey.PublicKey)
+	pop := createTestPoP(t, clientKey, popClaimsInput{
+		Issuer: "https://client.example.com", Audience: "https://as.example.com",
+		JTI: "jti-1", IssuedAt: now.Unix(),
+	})
+	parsed, err := ParsePoP(pop)
+	if err != nil {
+		t.Fatalf("ParsePoP: %v", err)
+	}
+
+	cases := []struct {
+		name   string
+		mutate func(PoPVerifyPolicy) PoPVerifyPolicy
+	}{
+		{"empty ExpectedIssuer", func(p PoPVerifyPolicy) PoPVerifyPolicy { p.ExpectedIssuer = ""; return p }},
+		{"empty ExpectedAudience", func(p PoPVerifyPolicy) PoPVerifyPolicy { p.ExpectedAudience = ""; return p }},
+		{"zero Now", func(p PoPVerifyPolicy) PoPVerifyPolicy { p.Now = time.Time{}; return p }},
+		{"zero MaxAge", func(p PoPVerifyPolicy) PoPVerifyPolicy { p.MaxAge = 0; return p }},
+	}
+	for _, c := range cases {
+		policy := c.mutate(basePoPPolicy(now))
+		if _, err := parsed.Verify(context.Background(), jwk, policy); err == nil {
+			t.Errorf("%s: Verify accepted an incomplete policy", c.name)
+		}
+	}
+}
+
+func TestPoP_Verify_RejectsNotYetValid(t *testing.T) {
+	clientKey := generateKey(t)
+	now := time.Unix(1300816000, 0)
+	jwk := confirmationJWK(t, &clientKey.PublicKey)
+	pop := createTestPoP(t, clientKey, popClaimsInput{
+		Issuer: "https://client.example.com", Audience: "https://as.example.com",
+		JTI: "jti-1", IssuedAt: now.Unix(), NotBefore: now.Add(time.Hour).Unix(),
+	})
+	parsed, err := ParsePoP(pop)
+	if err != nil {
+		t.Fatalf("ParsePoP: %v", err)
+	}
+	if _, err := parsed.Verify(context.Background(), jwk, basePoPPolicy(now)); err != ErrNotYetValid {
+		t.Errorf("Verify error = %v, want ErrNotYetValid", err)
+	}
+}
+
+func TestPoP_Verify_RejectsFutureIat(t *testing.T) {
+	clientKey := generateKey(t)
+	now := time.Unix(1300816000, 0)
+	jwk := confirmationJWK(t, &clientKey.PublicKey)
+	pop := createTestPoP(t, clientKey, popClaimsInput{
+		Issuer: "https://client.example.com", Audience: "https://as.example.com",
+		JTI: "jti-1", IssuedAt: now.Add(time.Hour).Unix(),
+	})
+	parsed, err := ParsePoP(pop)
+	if err != nil {
+		t.Fatalf("ParsePoP: %v", err)
+	}
+	if _, err := parsed.Verify(context.Background(), jwk, basePoPPolicy(now)); err != ErrNotYetValid {
+		t.Errorf("Verify error = %v, want ErrNotYetValid", err)
+	}
+}
+
+func TestPoP_Verify_RejectsTypMismatch(t *testing.T) {
+	clientKey := generateKey(t)
+	now := time.Unix(1300816000, 0)
+	jwk := confirmationJWK(t, &clientKey.PublicKey)
+	payload, err := json.Marshal(map[string]any{
+		"iss": "https://client.example.com", "aud": "https://as.example.com",
+		"jti": "jti-1", "iat": now.Unix(),
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	wrongTyp, err := jose.Sign(clientKey, jose.Header{Algorithm: fapi.ES256, Type: "not-the-right-typ"}, payload)
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	parsed, err := ParsePoP(wrongTyp)
+	if err != nil {
+		t.Fatalf("ParsePoP: %v", err)
+	}
+	if _, err := parsed.Verify(context.Background(), jwk, basePoPPolicy(now)); !errors.Is(err, ErrTypMismatch) {
+		t.Errorf("Verify error = %v, want ErrTypMismatch", err)
+	}
+}
+
+func TestPoP_Verify_RejectsMalformedConfirmationKey(t *testing.T) {
+	clientKey := generateKey(t)
+	now := time.Unix(1300816000, 0)
+	pop := createTestPoP(t, clientKey, popClaimsInput{
+		Issuer: "https://client.example.com", Audience: "https://as.example.com",
+		JTI: "jti-1", IssuedAt: now.Unix(),
+	})
+	parsed, err := ParsePoP(pop)
+	if err != nil {
+		t.Fatalf("ParsePoP: %v", err)
+	}
+	if _, err := parsed.Verify(context.Background(), []byte("not a jwk"), basePoPPolicy(now)); err == nil {
+		t.Errorf("Verify accepted a malformed confirmation key")
+	}
+}
+
+func TestParse_RejectsInvalidClaims(t *testing.T) {
+	key := generateKey(t)
+	// Well-formed JWS, but a payload missing every required attestation claim.
+	compact, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: TypHeader}, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	if _, err := Parse(compact); err == nil {
+		t.Errorf("Parse accepted a well-formed JWS with invalid claims")
+	}
+}
+
+func TestParsePoP_RejectsInvalidClaims(t *testing.T) {
+	key := generateKey(t)
+	compact, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: PoPTypHeader}, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	if _, err := ParsePoP(compact); err == nil {
+		t.Errorf("ParsePoP accepted a well-formed JWS with invalid claims")
 	}
 }
 

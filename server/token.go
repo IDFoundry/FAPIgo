@@ -156,20 +156,11 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, "", newError(ErrorInvalidRequest, 400, "the request contains a duplicated parameter", err))
 	}
-	dpopProof, dpopErr := resolveDPoPProof(req.DPoPProofs)
-	if dpopErr != nil {
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, "", dpopErr)
-	}
-	attestation, attestationPoP, attErr := resolveAttestationHeaders(req.ClientAttestations, req.ClientAttestationPoPs)
-	if attErr != nil {
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, "", attErr)
-	}
-
 	if params["grant_type"] != "authorization_code" {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, "", newError(ErrorUnsupportedGrantType, 400, "grant_type must be authorization_code", nil))
 	}
 
-	client, _, authErr := s.authenticateClient(ctx, params, req.PeerCertificate, attestation, attestationPoP, []fapi.URL{s.cfg.Endpoints.Token}, []fapi.URL{s.cfg.MTLSEndpoints.Token})
+	client, dpopProof, authErr := s.authenticateRequest(ctx, params, req.PeerCertificate, req.DPoPProofs, req.ClientAttestations, req.ClientAttestationPoPs, []fapi.URL{s.cfg.Endpoints.Token}, []fapi.URL{s.cfg.MTLSEndpoints.Token})
 	if authErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, "", authErr)
 	}

@@ -67,20 +67,11 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, "", newError(ErrorInvalidRequest, 400, "the request contains a duplicated parameter", err))
 	}
-	dpopProof, dpopErr := resolveDPoPProof(req.DPoPProofs)
-	if dpopErr != nil {
-		return s.tokenFail(ctx, AuditEventRefreshAccessToken, "", dpopErr)
-	}
-	attestation, attestationPoP, attErr := resolveAttestationHeaders(req.ClientAttestations, req.ClientAttestationPoPs)
-	if attErr != nil {
-		return s.tokenFail(ctx, AuditEventRefreshAccessToken, "", attErr)
-	}
-
 	if params["grant_type"] != "refresh_token" {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, "", newError(ErrorUnsupportedGrantType, 400, "grant_type must be refresh_token", nil))
 	}
 
-	client, _, authErr := s.authenticateClient(ctx, params, req.PeerCertificate, attestation, attestationPoP, []fapi.URL{s.cfg.Endpoints.Token}, []fapi.URL{s.cfg.MTLSEndpoints.Token})
+	client, dpopProof, authErr := s.authenticateRequest(ctx, params, req.PeerCertificate, req.DPoPProofs, req.ClientAttestations, req.ClientAttestationPoPs, []fapi.URL{s.cfg.Endpoints.Token}, []fapi.URL{s.cfg.MTLSEndpoints.Token})
 	if authErr != nil {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, "", authErr)
 	}

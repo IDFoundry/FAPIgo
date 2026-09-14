@@ -5,7 +5,6 @@
 [![FAPI Conformance](https://github.com/IDFoundry/FAPIgo/actions/workflows/conformance.yml/badge.svg)](https://github.com/IDFoundry/FAPIgo/actions/workflows/conformance.yml)
 [![codecov](https://codecov.io/gh/IDFoundry/FAPIgo/graph/badge.svg)](https://codecov.io/gh/IDFoundry/FAPIgo)
 [![Go Reference](https://pkg.go.dev/badge/github.com/idfoundry/fapigo.svg)](https://pkg.go.dev/github.com/idfoundry/fapigo)
-[![Go Report Card](https://goreportcard.com/badge/github.com/idfoundry/fapigo)](https://goreportcard.com/report/github.com/idfoundry/fapigo)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 [![Quality Gate](https://sonarcloud.io/api/project_badges/quality_gate?project=IDFoundry_FAPIgo)](https://sonarcloud.io/summary/new_code?id=IDFoundry_FAPIgo)
@@ -47,9 +46,7 @@ variants.
 - OpenID Federation 1.0 (trust chains, automatic client registration, trust marks)
 - OpenID Certified™ for OP, RP and FAPI-CIBA OP conformance profiles — see below
 
-<table cellpadding="10"><tr><td bgcolor="#ffffff" align="center">
-<a href="https://openid.net/certification/"><img alt="OpenID Certified" src="https://openid.net/wordpress-content/uploads/2016/04/oid-l-certification-mark-l-rgb-150dpi-90mm-300x157.png" /></a>
-</td></tr></table>
+[![OpenID Certified](assets/openid-certified-badge.png)](https://openid.net/certification/)
 
 > **OpenID Certified™** by Oscar Sanderson to the FAPI 2.0 OP, FAPI 2.0
 > RP (both Security Profile Final + Message Signing Final), FAPI 2.0 OP

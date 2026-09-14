@@ -312,7 +312,7 @@ func runCIBAModule(ctx context.Context, d cibaModuleDriver, testName string) str
 		Random:     rand.Reader,
 	}
 
-	cl, err := client.New(cfg, deps)
+	cl, err := client.NewFromDiscovery(discovered, cfg, deps)
 	if err != nil {
 		return "ERROR: construct client: " + err.Error()
 	}

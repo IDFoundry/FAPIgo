@@ -337,6 +337,13 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 			c.Endpoints.BackchannelAuthentication = mustParseEndpointURL(t, testIssuer+"/backchannel-authenticate")
 			c.Algorithms.BackchannelAuthenticationRequest = fapi.ES256
 		},
+		"userinfo algorithm set without endpoint": func(c *client.Config) {
+			c.Algorithms.UserInfo = fapi.ES256
+		},
+		"userinfo key management set without endpoint": func(c *client.Config) {
+			c.Algorithms.UserInfoKeyManagement = fapi.RSAOAEP256
+			c.Algorithms.UserInfoContentEncryption = fapi.A256GCM
+		},
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -458,7 +465,12 @@ func TestNewRequiresDecryptionDependencyWhenIDTokenEncryptionConfigured(t *testi
 }
 
 func TestNewRequiresDecryptionDependencyWhenUserInfoEncryptionConfigured(t *testing.T) {
+	userInfoURL, err := fapi.ParseEndpointURL("https://as.example.com/userinfo")
+	if err != nil {
+		t.Fatalf("ParseEndpointURL: %v", err)
+	}
 	cfg := validConfig(t)
+	cfg.Endpoints.UserInfo = userInfoURL
 	cfg.Algorithms.UserInfoKeyManagement = fapi.RSAOAEP256
 	cfg.Algorithms.UserInfoContentEncryption = fapi.A256GCM
 

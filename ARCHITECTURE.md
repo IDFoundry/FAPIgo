@@ -315,19 +315,25 @@ that a shared package would cost more than it saves.
 (RFC 8705 §3), subject DN or a SAN field for
 `ClientAuthMethodTLSClientAuth`/`...SANDNS`/`...SANURI`/`...SANIP`/
 `...SANEmail` (RFC 8705 §2.1) — against the client's registration in
-`storage.RegisteredClientConfig`, but never re-verify the certificate's
-chain to a trusted CA; neither package holds a CA trust store. This
-follows directly from `PeerCertificate`'s own doc comment ("this
-package never terminates TLS itself"): since no role here owns a TLS
-listener, chain trust can only come from whichever
+`storage.RegisteredClientConfig`. Neither package owns a TLS listener,
+so by default chain trust can only come from whichever
 `tls.Config.ClientCAs`/`ClientAuth` mode the embedding HTTP server
 configures before a request ever reaches this library — a
 `RegisteredClientConfig` entry authenticates a client's identity claim,
-not its certificate's trustworthiness. `cmd/conformance-as` makes the
-gap concrete: its listener sets `tls.RequestClientCert` with no
-`ClientCAs`, so even that reference binary performs zero chain
-verification — a production deployment must configure its own trust
-store in its own adapter.
+not its certificate's trustworthiness, unless something else also
+checks the chain. `server.Dependencies.MTLSClientCAs` (optional) is
+that something for `server`: when set, `authenticateClientViaCertificate`
+independently re-verifies the presented certificate against it before
+any subject/SAN field-match, for deployments that can't rely on their
+own TLS termination alone — e.g. mTLS terminated by a gateway in front
+of this process that forwards the presented certificate without having
+verified its chain itself. `resource` has no equivalent field; a
+protected-resource deployment still depends entirely on its own TLS
+termination for chain trust. `cmd/conformance-as` makes the
+unconfigured case concrete: its listener sets `tls.RequestClientCert`
+with no `ClientCAs`, and it doesn't set `MTLSClientCAs` either, so that
+reference binary performs zero chain verification — a production
+deployment must configure one or the other in its own adapter.
 
 **Opaque identifiers.** `PushAuthorizationResult.RequestURI` and the
 `InteractionHandle` handed to the embedding application's login UI have

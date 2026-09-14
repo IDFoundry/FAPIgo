@@ -5,7 +5,6 @@
 [![FAPI Conformance](https://github.com/IDFoundry/FAPIgo/actions/workflows/conformance.yml/badge.svg)](https://github.com/IDFoundry/FAPIgo/actions/workflows/conformance.yml)
 [![codecov](https://codecov.io/gh/IDFoundry/FAPIgo/graph/badge.svg)](https://codecov.io/gh/IDFoundry/FAPIgo)
 [![Go Reference](https://pkg.go.dev/badge/github.com/idfoundry/fapigo.svg)](https://pkg.go.dev/github.com/idfoundry/fapigo)
-[![Go Report Card](https://goreportcard.com/badge/github.com/idfoundry/fapigo)](https://goreportcard.com/report/github.com/idfoundry/fapigo)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 [![Quality Gate](https://sonarcloud.io/api/project_badges/quality_gate?project=IDFoundry_FAPIgo)](https://sonarcloud.io/summary/new_code?id=IDFoundry_FAPIgo)

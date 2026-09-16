@@ -183,12 +183,15 @@ role is tested against the OpenID Foundation conformance suite.
 > a Trust Anchor or Intermediate (`SubordinateIssuer`, §3.2), and Trust
 > Marks end to end — verification (§7), issuance (`TrustMarkIssuer`),
 > and live status queries (§8, `Resolver.CheckTrustMarkStatus`) — plus
-> Trust Marked Entities Listing request validation (§9). **Explicit
-> Registration (§12.2) is not implemented**: an OP can accept RPs via
-> Automatic Registration, but provisioning a distinct `client_id`/
-> `client_secret` through a dedicated federation registration request is
-> not supported. See `federation/doc.go` for the exact scope of every
-> capability above.
+> Trust Marked Entities Listing request validation (§9), and the Resolve
+> endpoint (§8.3, `Resolver.ResolveViaEndpoint`) — querying a peer's
+> resolve-as-a-service endpoint instead of walking its Trust Chain hop
+> by hop, consumer side only (no `ResolveIssuer` serving the endpoint
+> itself yet). **Explicit Registration (§12.2) is not implemented**: an
+> OP can accept RPs via Automatic Registration, but provisioning a
+> distinct `client_id`/`client_secret` through a dedicated federation
+> registration request is not supported. See `federation/doc.go` for the
+> exact scope of every capability above.
 
 </details>
 

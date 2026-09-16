@@ -486,11 +486,24 @@ value)`; server registers the same definition in `server.Config.Extensions`
 (an `*extension.Registry`) and reads the validated value back out through
 a typed accessor — `extension.Get(validated.Extensions, Definition)` —
 never a generic `map[string]any`, which would allow name collisions and
-invalid type assertions. Any parameter without a registered definition is
-rejected by default; there is no production option to silently preserve
-unknown fields; a caller who genuinely needs that (a compatibility
-gateway, a test server) must opt in explicitly and separately rather than
-being one missed check away from it.
+invalid type assertions. An authorization request parameter without a
+registered definition is ignored, not rejected: RFC 6749 §3.1, RFC 9126
+§2.1 and OIDC Core §3.1.2.2 all require an authorization server to accept
+an otherwise-valid request in spite of one, and a live OIDF HAIP
+conformance run against this package surfaced exactly this — a
+deliberately injected, unrecognized parameter failing an otherwise-valid
+request that should have succeeded. "Ignored" is not "silently
+preserved", though: `extension.Registry.Parse` deletes the name from the
+caller's own params map as it goes, so its value never reaches storage,
+an audit sink, or a token claim. There is still no production option to
+silently forward an unrecognized parameter's value anywhere; a caller who
+genuinely needs that (a compatibility gateway, a test server) must opt in
+explicitly and separately rather than being one missed check away from
+it. `request_uri` is the one name PAR-2.1 requires rejecting outright
+regardless of whether it's "recognized" in this sense — `server/par.go`
+enforces that with two dedicated checks (one per source: a sibling form
+parameter, or a claim inside a request object) rather than relying on
+Registry.Parse's now-permissive default.
 
 Rich Authorization Requests ([RFC 9396][rar]) uses a structurally
 distinct sibling in the same package — `extension.RARDefinition[T]`,

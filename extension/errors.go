@@ -3,11 +3,6 @@ package extension
 import "errors"
 
 var (
-	// ErrUnregisteredParameter indicates an authorization parameter had
-	// no matching registered Definition — the default-reject behavior
-	// this package requires (see doc.go).
-	ErrUnregisteredParameter = errors.New("extension: unregistered parameter")
-
 	// ErrSourceNotAllowed indicates a parameter arrived somewhere its
 	// Definition's AllowedSources does not permit (e.g. a
 	// SourceRequestObject-only value submitted as a plain parameter).

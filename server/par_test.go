@@ -1032,6 +1032,35 @@ func TestPushAuthorizationRequestRejectsRequestUriInsideRequestObject(t *testing
 	}
 }
 
+// Same ignore-and-strip behavior as the plain-form-parameter case (see
+// TestPushAuthorizationRequestIgnoresAndStripsUnregisteredExtensionParameter),
+// but for an unrecognized claim carried inside a signed request object
+// (extension.SourceRequestObject) instead — checkExtensions shares the
+// same Registry.Parse mechanism for both sources.
+func TestPushAuthorizationRequestIgnoresAndStripsUnregisteredParameterInsideRequestObject(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurityWithMessageSigning, true)
+	params := standardAuthParams(t)
+	params["x_unknown"] = jsonRaw(t, "value")
+	requestObj := h.requestObject(t, params)
+
+	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: []server.FormParameter{
+			formParam("client_assertion", h.clientAssertion(t)),
+			formParam("client_assertion_type", clientassertion.AssertionType),
+			formParam("request", requestObj),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("PushAuthorizationRequest: %v", err)
+	}
+	if len(h.transactions.records) != 1 {
+		t.Fatalf("len(records) = %d, want 1", len(h.transactions.records))
+	}
+	if _, present := h.transactions.records[0].Parameters["x_unknown"]; present {
+		t.Errorf("persisted PAR record still contains x_unknown, want it stripped")
+	}
+}
+
 func TestPushAuthorizationRequestPlainSuccessUnderSecurityProfile(t *testing.T) {
 	h := newHarness(t, server.ProfileFAPISecurity, true)
 
@@ -1390,10 +1419,11 @@ func newHarnessWithExtensions(t *testing.T, profile server.Profile, registry *ex
 		Assurance:  server.AssuranceDevelopment,
 		Extensions: registry,
 	}
+	transactions := &fakeTransactionStore{}
 	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
 	deps := server.Dependencies{
 		Clients:      &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
-		Transactions: &fakeTransactionStore{},
+		Transactions: transactions,
 		Grants:       &fakeGrantStore{},
 		Replay:       &fakeReplayStore{},
 		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
@@ -1409,14 +1439,110 @@ func newHarnessWithExtensions(t *testing.T, profile server.Profile, registry *ex
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
-	return harness{server: srv, key: key, serverKey: serverKey, now: now}
+	return harness{server: srv, key: key, serverKey: serverKey, transactions: transactions, now: now}
 }
 
-func TestPushAuthorizationRequestRejectsUnregisteredExtensionParameter(t *testing.T) {
+// coreAuthorizationParameters didn't list acr_values until this package
+// started ignoring (rather than rejecting on) unrecognized parameters —
+// client/begin_authorization.go has sent it on the PAR path since it
+// gained BeginAuthorizationRequest.ACRValues, so this exact request
+// shape was previously rejected outright by FAPIgo's own client talking
+// to FAPIgo's own server. Registering it as core keeps it in the
+// persisted PAR record instead of merely not-rejecting the request.
+func TestPushAuthorizationRequestKeepsACRValues(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, false)
+	params := plainFormParameters(t, h.clientAssertion(t), map[string]string{"acr_values": "urn:mace:incommon:iap:silver"})
+
+	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: params},
+	})
+	if err != nil {
+		t.Fatalf("PushAuthorizationRequest: %v", err)
+	}
+	if len(h.transactions.records) != 1 {
+		t.Fatalf("len(records) = %d, want 1", len(h.transactions.records))
+	}
+	raw, present := h.transactions.records[0].Parameters["acr_values"]
+	if !present {
+		t.Fatalf("persisted PAR record is missing acr_values, want it kept")
+	}
+	var got string
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal acr_values: %v", err)
+	}
+	if got != "urn:mace:incommon:iap:silver" {
+		t.Errorf("acr_values = %q, want urn:mace:incommon:iap:silver", got)
+	}
+}
+
+// RFC 6749 §3.1 / RFC 9126 §2.1: an unrecognized authorization request
+// parameter must not fail an otherwise-valid PAR request — an OIDF HAIP
+// conformance run against this package caught the previous reject-on-
+// unregistered behavior as a spec violation. "Ignored" is not "silently
+// preserved" though (see extension/doc.go): the unrecognized parameter
+// must not reach the persisted PAR record either.
+func TestPushAuthorizationRequestIgnoresAndStripsUnregisteredExtensionParameter(t *testing.T) {
 	h := newHarnessWithExtensions(t, server.ProfileFAPISecurity, nil)
 	params := plainFormParameters(t, h.clientAssertion(t), map[string]string{"x_custom": "hello"})
 
 	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: params},
+	})
+	if err != nil {
+		t.Fatalf("PushAuthorizationRequest: %v", err)
+	}
+	if len(h.transactions.records) != 1 {
+		t.Fatalf("len(records) = %d, want 1", len(h.transactions.records))
+	}
+	if _, present := h.transactions.records[0].Parameters["x_custom"]; present {
+		t.Errorf("persisted PAR record still contains x_custom, want it stripped")
+	}
+}
+
+// The same request but with multiple unrecognized parameters, none of
+// which is registered — all are ignored and stripped, not just the
+// first one encountered.
+func TestPushAuthorizationRequestIgnoresMultipleUnregisteredExtensionParameters(t *testing.T) {
+	h := newHarnessWithExtensions(t, server.ProfileFAPISecurity, nil)
+	params := plainFormParameters(t, h.clientAssertion(t), map[string]string{
+		"x_custom_one": "hello", "x_custom_two": "world",
+	})
+
+	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: params},
+	})
+	if err != nil {
+		t.Fatalf("PushAuthorizationRequest: %v", err)
+	}
+	if len(h.transactions.records) != 1 {
+		t.Fatalf("len(records) = %d, want 1", len(h.transactions.records))
+	}
+	got := h.transactions.records[0].Parameters
+	if _, present := got["x_custom_one"]; present {
+		t.Errorf("persisted PAR record still contains x_custom_one, want it stripped")
+	}
+	if _, present := got["x_custom_two"]; present {
+		t.Errorf("persisted PAR record still contains x_custom_two, want it stripped")
+	}
+}
+
+// An unrecognized parameter alongside a recognized-but-invalid one is
+// still rejected — for the invalid one, not the unrecognized one.
+func TestPushAuthorizationRequestRejectsInvalidRegisteredParameterAlongsideUnregisteredOne(t *testing.T) {
+	def := extension.Definition[string]{
+		Name: "x_custom", Cardinality: extension.Single,
+		AllowedSources: extension.SourcePlainParameter, MaxBytes: 4,
+	}
+	registry, err := extension.NewRegistry(def)
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	h := newHarnessWithExtensions(t, server.ProfileFAPISecurity, registry)
+	params := plainFormParameters(t, h.clientAssertion(t), map[string]string{
+		"x_custom": "this value exceeds the 4 byte limit", "x_unknown": "hello",
+	})
+
+	_, err = h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
 		HTTP: server.FormRequest{Parameters: params},
 	})
 	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {

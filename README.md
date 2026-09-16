@@ -183,11 +183,16 @@ role is tested against the OpenID Foundation conformance suite.
 > a Trust Anchor or Intermediate (`SubordinateIssuer`, §3.2), and Trust
 > Marks end to end — verification (§7), issuance (`TrustMarkIssuer`),
 > and live status queries (§8, `Resolver.CheckTrustMarkStatus`) — plus
-> Trust Marked Entities Listing request validation (§9), and the Resolve
+> Trust Marked Entities Listing request validation (§9), the Resolve
 > endpoint (§8.3, `Resolver.ResolveViaEndpoint`) — querying a peer's
 > resolve-as-a-service endpoint instead of walking its Trust Chain hop
 > by hop, consumer side only (no `ResolveIssuer` serving the endpoint
-> itself yet). **Explicit Registration (§12.2) is not implemented**: an
+> itself yet) — and the Federation Historical Keys endpoint (§8.7,
+> `Resolver.FetchHistoricalKeys`), both sides: querying a peer's retired
+> keys (with their own expiry and, if applicable, revocation status) to
+> keep an older Trust Chain verifiable after key rotation, and signing
+> that response for an embedder's own retired keys. **Explicit
+> Registration (§12.2) is not implemented**: an
 > OP can accept RPs via Automatic Registration, but provisioning a
 > distinct `client_id`/`client_secret` through a dedicated federation
 > registration request is not supported. See `federation/doc.go` for the

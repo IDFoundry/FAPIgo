@@ -63,33 +63,43 @@ func ValidEntityID(id string) error {
 }
 
 // fetchEntityConfiguration fetches and parses (but does not verify)
-// entityID's own Entity Configuration.
-func fetchEntityConfiguration(ctx context.Context, fetcher *fapihttp.Client, entityID string) (intfed.Statement, error) {
+// entityID's own Entity Configuration, returning the raw compact-
+// serialized token alongside the parsed Statement — Resolve's own
+// ResolvedEntity.Tokens needs the exact raw bytes each hop was
+// published as (OpenID Federation 1.0 §4's own Trust Chain, ES[0..i]),
+// not a re-serialization of the parsed claims, which is not guaranteed
+// to be byte-identical (canonicalization, member order) and would
+// break the signature a verifier checks it against.
+func fetchEntityConfiguration(ctx context.Context, fetcher *fapihttp.Client, entityID string) (intfed.Statement, string, error) {
 	target, err := wellKnownURL(entityID)
 	if err != nil {
-		return intfed.Statement{}, err
+		return intfed.Statement{}, "", err
 	}
 	res, err := fetcher.Fetch(ctx, fapihttp.FetchRequest{URL: target, ExpectedContentType: EntityStatementContentType})
 	if err != nil {
-		return intfed.Statement{}, fmt.Errorf("federation: fetch entity configuration for %q: %w", entityID, err)
+		return intfed.Statement{}, "", fmt.Errorf("federation: fetch entity configuration for %q: %w", entityID, err)
 	}
-	stmt, err := intfed.Parse(string(res.Body))
+	token := string(res.Body)
+	stmt, err := intfed.Parse(token)
 	if err != nil {
-		return intfed.Statement{}, fmt.Errorf("federation: parse entity configuration for %q: %w", entityID, err)
+		return intfed.Statement{}, "", fmt.Errorf("federation: parse entity configuration for %q: %w", entityID, err)
 	}
-	return stmt, nil
+	return stmt, token, nil
 }
 
 // fetchSubordinateStatement fetches and parses (but does not verify)
 // the Subordinate Statement issuerFetchEndpoint's own issuer publishes
-// about subjectID (OpenID Federation 1.0 §8.1).
-func fetchSubordinateStatement(ctx context.Context, fetcher *fapihttp.Client, issuerFetchEndpoint, subjectID string) (intfed.Statement, error) {
+// about subjectID (OpenID Federation 1.0 §8.1), returning the raw
+// compact-serialized token alongside the parsed Statement — see
+// fetchEntityConfiguration's own doc comment for why the raw token,
+// specifically, is needed.
+func fetchSubordinateStatement(ctx context.Context, fetcher *fapihttp.Client, issuerFetchEndpoint, subjectID string) (intfed.Statement, string, error) {
 	target, err := url.Parse(issuerFetchEndpoint)
 	if err != nil {
-		return intfed.Statement{}, fmt.Errorf("federation: invalid federation_fetch_endpoint %q: %w", issuerFetchEndpoint, err)
+		return intfed.Statement{}, "", fmt.Errorf("federation: invalid federation_fetch_endpoint %q: %w", issuerFetchEndpoint, err)
 	}
 	if target.Scheme != "https" {
-		return intfed.Statement{}, fmt.Errorf("federation: federation_fetch_endpoint %q must use https", issuerFetchEndpoint)
+		return intfed.Statement{}, "", fmt.Errorf("federation: federation_fetch_endpoint %q must use https", issuerFetchEndpoint)
 	}
 	q := target.Query()
 	q.Set("sub", subjectID)
@@ -97,11 +107,12 @@ func fetchSubordinateStatement(ctx context.Context, fetcher *fapihttp.Client, is
 
 	res, err := fetcher.Fetch(ctx, fapihttp.FetchRequest{URL: target, ExpectedContentType: EntityStatementContentType})
 	if err != nil {
-		return intfed.Statement{}, fmt.Errorf("federation: fetch subordinate statement for %q from %q: %w", subjectID, issuerFetchEndpoint, err)
+		return intfed.Statement{}, "", fmt.Errorf("federation: fetch subordinate statement for %q from %q: %w", subjectID, issuerFetchEndpoint, err)
 	}
-	stmt, err := intfed.Parse(string(res.Body))
+	token := string(res.Body)
+	stmt, err := intfed.Parse(token)
 	if err != nil {
-		return intfed.Statement{}, fmt.Errorf("federation: parse subordinate statement for %q from %q: %w", subjectID, issuerFetchEndpoint, err)
+		return intfed.Statement{}, "", fmt.Errorf("federation: parse subordinate statement for %q from %q: %w", subjectID, issuerFetchEndpoint, err)
 	}
-	return stmt, nil
+	return stmt, token, nil
 }

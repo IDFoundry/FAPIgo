@@ -172,6 +172,24 @@ type ResolvedEntity struct {
 	// establish trust in a Trust Mark's own issuer) to decide whether
 	// that Trust Mark's type requires a "delegation" claim at all.
 	TrustMarkOwners map[string]intfed.TrustMarkOwner
+
+	// Tokens is the raw compact-serialized Entity Statement JWTs
+	// composing this Trust Chain, in the exact order OpenID Federation
+	// 1.0 §4 defines: ES[0] (EntityID's own Entity Configuration), each
+	// Subordinate Statement from EntityID's immediate superior up
+	// through the Trust Anchor's own Subordinate Statement about the
+	// top-most Intermediate (or EntityID itself, if there are none), and
+	// finally ES[i] (TrustAnchor's own Entity Configuration) — every
+	// entry Resolve actually verified, never a re-serialization of
+	// parsed claims (not guaranteed byte-identical to what was signed).
+	// Every Intermediate's own self-signed Entity Configuration, fetched
+	// along the way purely to discover its authority_hints and
+	// federation_fetch_endpoint, is deliberately excluded — §4's own
+	// worked example names exactly these entries and no others. Chiefly
+	// useful for ResolveIssuer.Response's own "trust_chain" claim
+	// (OpenID Federation 1.0 §8.3.2); most callers have no reason to
+	// read this directly.
+	Tokens []string
 }
 
 // Resolve resolves subjectID's Trust Chain against one of
@@ -187,7 +205,7 @@ func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntit
 	}
 	now := r.deps.Clock.Now()
 
-	leafStmt, err := fetchEntityConfiguration(ctx, r.deps.HTTP, subjectID)
+	leafStmt, leafToken, err := fetchEntityConfiguration(ctx, r.deps.HTTP, subjectID)
 	if err != nil {
 		return ResolvedEntity{}, err
 	}
@@ -214,6 +232,7 @@ func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntit
 			EntityID: subjectID, TrustAnchor: subjectID, Chain: []string{subjectID},
 			Metadata: leafClaims.Metadata, ExpiresAt: minExpiry,
 			JWKS: anchor.JWKS, TrustMarks: leafClaims.TrustMarks, TrustMarkOwners: leafClaims.TrustMarkOwners,
+			Tokens: []string{leafToken},
 		}, nil
 	}
 
@@ -233,6 +252,7 @@ func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntit
 	entityAt := subjectID
 	visited := map[string]bool{subjectID: true}
 	chain := []string{subjectID}
+	tokens := []string{leafToken}
 
 	var subordinatePolicies []subordinatePolicy
 	var subordinateConstraints []subordinateConstraint
@@ -252,10 +272,14 @@ func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntit
 		// past the original subject — at hop 0, selfClaims is already
 		// leafClaims (from the self-verify done before this loop), and
 		// there is nothing else in this entity to fetch its own config
-		// for.
+		// for. Its own raw token is discarded (not appended to tokens):
+		// an Intermediate's self-signed Entity Configuration is fetched
+		// purely to discover its authority_hints/federation_fetch_endpoint
+		// for routing, and is not itself an entry of the canonical Trust
+		// Chain sequence — see ResolvedEntity.Tokens's own doc comment.
 		selfClaims := leafClaims
 		if entityAt != subjectID {
-			selfConfig, err := fetchEntityConfiguration(ctx, r.deps.HTTP, entityAt)
+			selfConfig, _, err := fetchEntityConfiguration(ctx, r.deps.HTTP, entityAt)
 			if err != nil {
 				return ResolvedEntity{}, err
 			}
@@ -277,7 +301,7 @@ func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntit
 			return ResolvedEntity{}, fmt.Errorf("federation: %q has no authority_hints and is not a configured trust anchor: no path to a trusted trust anchor", entityAt)
 		}
 
-		superiorID, superiorConfig, superiorClaims, err := r.findReachableSuperior(ctx, hints, visited, now)
+		superiorID, superiorConfig, superiorToken, superiorClaims, err := r.findReachableSuperior(ctx, hints, visited, now)
 		if err != nil {
 			return ResolvedEntity{}, fmt.Errorf("federation: %q: %w", entityAt, err)
 		}
@@ -293,7 +317,7 @@ func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntit
 		if aboveMeta.FetchEndpoint == "" {
 			return ResolvedEntity{}, fmt.Errorf("federation: %q has no federation_fetch_endpoint", superiorID)
 		}
-		aboveStmt, err := fetchSubordinateStatement(ctx, r.deps.HTTP, aboveMeta.FetchEndpoint, entityAt)
+		aboveStmt, aboveToken, err := fetchSubordinateStatement(ctx, r.deps.HTTP, aboveMeta.FetchEndpoint, entityAt)
 		if err != nil {
 			return ResolvedEntity{}, err
 		}
@@ -303,6 +327,11 @@ func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntit
 		}
 
 		chain = append(chain, superiorID)
+		// aboveStmt (issued by superiorID, about entityAt) is a genuine
+		// Trust Chain entry regardless of whether superiorID turns out to
+		// be a Trust Anchor or another Intermediate — unlike selfConfig
+		// above, appended here unconditionally, in order.
+		tokens = append(tokens, aboveToken)
 
 		if anchor, ok := r.trustAnchorsByID[superiorID]; ok {
 			// superiorConfig now plays two roles at once: it's both the
@@ -342,10 +371,14 @@ func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntit
 			if err != nil {
 				return ResolvedEntity{}, err
 			}
+			// superiorConfig's own raw token (ES[i], the Trust Anchor's
+			// own Entity Configuration) closes the sequence — see
+			// ResolvedEntity.Tokens's own doc comment.
 			return ResolvedEntity{
 				EntityID: subjectID, TrustAnchor: superiorID, Chain: chain,
 				Metadata: resolvedMetadata, ExpiresAt: minExpiry,
 				JWKS: subjectJWKS, TrustMarks: leafClaims.TrustMarks, TrustMarkOwners: leafClaims.TrustMarkOwners,
+				Tokens: append(tokens, superiorToken),
 			}, nil
 		}
 
@@ -453,13 +486,13 @@ func (r *Resolver) resolveMetadata(policies []subordinatePolicy, leafMetadata ma
 // attempt to fetch Entity Statements they already have obtained during
 // this process"), returning the first whose Entity Configuration
 // fetches and self-verifies successfully.
-func (r *Resolver) findReachableSuperior(ctx context.Context, hints []string, visited map[string]bool, now time.Time) (string, intfed.Statement, intfed.Claims, error) {
+func (r *Resolver) findReachableSuperior(ctx context.Context, hints []string, visited map[string]bool, now time.Time) (string, intfed.Statement, string, intfed.Claims, error) {
 	var lastErr error
 	for _, hint := range hints {
 		if visited[hint] {
 			continue
 		}
-		stmt, err := fetchEntityConfiguration(ctx, r.deps.HTTP, hint)
+		stmt, token, err := fetchEntityConfiguration(ctx, r.deps.HTTP, hint)
 		if err != nil {
 			lastErr = err
 			continue
@@ -473,12 +506,12 @@ func (r *Resolver) findReachableSuperior(ctx context.Context, hints []string, vi
 			lastErr = err
 			continue
 		}
-		return hint, stmt, claims, nil
+		return hint, stmt, token, claims, nil
 	}
 	if lastErr != nil {
-		return "", intfed.Statement{}, intfed.Claims{}, fmt.Errorf("no reachable superior among %v (last error: %w)", hints, lastErr)
+		return "", intfed.Statement{}, "", intfed.Claims{}, fmt.Errorf("no reachable superior among %v (last error: %w)", hints, lastErr)
 	}
-	return "", intfed.Statement{}, intfed.Claims{}, fmt.Errorf("no unvisited superior among %v", hints)
+	return "", intfed.Statement{}, "", intfed.Claims{}, fmt.Errorf("no unvisited superior among %v", hints)
 }
 
 // verifySelfSigned verifies stmt (expected to be entityID's own Entity

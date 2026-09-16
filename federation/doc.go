@@ -104,15 +104,21 @@
 // "establish trust in the issuer before trusting its signature" pattern
 // VerifyTrustMark/CheckTrustMarkStatus already use — then verifying the
 // signature against that issuer's own vouched-for key, never a key the
-// response itself merely claims to hold. There is no producer-side
-// counterpart yet (no ResolveIssuer serving the endpoint itself):
-// intfed.CreateResolveResponse exists as a low-level signing primitive,
-// but building one from a real resolution requires the raw
-// compact-serialized Entity Statement tokens that composed the chain
-// for its own "trust_chain" claim — data Resolver.Resolve's
-// ResolvedEntity does not currently expose (only entity ID names, in
-// Chain) — so wiring an embedder-facing producer is a separate,
-// larger change to Resolve's own internals, not implemented here.
+// response itself merely claims to hold. The producer side is covered
+// too: ResolveIssuer.Response signs a Resolve Response for an
+// already-resolved ResolvedEntity (a caller's own Resolve result,
+// exposed via ResolvedEntity.Tokens — the raw compact-serialized Entity
+// Statement tokens that composed the chain, OpenID Federation 1.0 §4's
+// own ES[0..i] sequence, excluding every Intermediate's own self-signed
+// Entity Configuration fetched purely for routing) rather than
+// performing a resolution of its own — the resolution work is identical
+// to what Resolve already does for any other caller. Response itself
+// checks the resolved Trust Anchor is one of the request's own (possibly
+// repeated) "trust_anchor" values (§8.3.1); ResolveRequestFromHTTP
+// parses an incoming request's shape the same way SubjectFromFetchRequest/
+// TrustMarkFromStatusRequest already do for their own endpoints. Trust
+// Mark inclusion in a Resolve Response (§8.3's own "and Trust Marks for
+// an Entity") is not implemented in this version.
 //
 // The Federation Historical Keys endpoint (§8.7) is covered on both
 // sides, unlike Resolve — publishing a rotated-out key's own lifetime

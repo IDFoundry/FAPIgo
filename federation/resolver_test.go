@@ -97,6 +97,18 @@ type threeLevelFederation struct {
 	taJWKS, i1JWKS, leJWKS json.RawMessage
 	fetcher                *fapihttp.Client
 	now                    time.Time
+
+	// taConfigToken/taAboutI1Token/i1AboutLEToken/leConfigToken are the
+	// exact raw compact-serialized tokens this fixture signs and serves
+	// — the canonical Trust Chain sequence for f.leID (OpenID Federation
+	// 1.0 §4: leConfigToken is ES[0], i1AboutLEToken is ES[1],
+	// taAboutI1Token is ES[2], taConfigToken is ES[3]) — exposed so a
+	// test can confirm Resolve's own ResolvedEntity.Tokens matches
+	// byte-for-byte, not just check Chain's entity-ID names. i1Config is
+	// deliberately not exposed here: I1's own self-signed Entity
+	// Configuration is fetched for routing only and is never itself a
+	// Trust Chain entry — see ResolvedEntity.Tokens's own doc comment.
+	taConfigToken, taAboutI1Token, i1AboutLEToken, leConfigToken string
 }
 
 func setupThreeLevelFederation(t *testing.T) *threeLevelFederation {
@@ -181,6 +193,7 @@ func setupThreeLevelFederation(t *testing.T) *threeLevelFederation {
 		taKey: taKey, i1Key: i1Key, leKey: leKey,
 		taJWKS: taJWKS, i1JWKS: i1JWKS, leJWKS: leJWKS,
 		fetcher: fetcher, now: now,
+		taConfigToken: taConfig, taAboutI1Token: taAboutI1, i1AboutLEToken: i1AboutLE, leConfigToken: leConfig,
 	}
 }
 
@@ -240,6 +253,31 @@ func TestResolveThreeLevelChain(t *testing.T) {
 	}
 }
 
+// TestResolveTokensMatchesTrustChain confirms ResolvedEntity.Tokens is
+// the exact raw compact-serialized sequence OpenID Federation 1.0 §4
+// defines — ES[0..i] in order, byte-for-byte identical to what was
+// fetched and verified, not a re-serialization of parsed claims — and
+// specifically that I1's own self-signed Entity Configuration (fetched
+// only for routing) is excluded.
+func TestResolveTokensMatchesTrustChain(t *testing.T) {
+	f := setupThreeLevelFederation(t)
+	r := f.newResolver(t)
+
+	result, err := r.Resolve(context.Background(), f.leID)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	want := []string{f.leConfigToken, f.i1AboutLEToken, f.taAboutI1Token, f.taConfigToken}
+	if len(result.Tokens) != len(want) {
+		t.Fatalf("len(Tokens) = %d, want %d: %v", len(result.Tokens), len(want), result.Tokens)
+	}
+	for i, token := range want {
+		if result.Tokens[i] != token {
+			t.Errorf("Tokens[%d] = %q, want %q", i, result.Tokens[i], token)
+		}
+	}
+}
+
 func TestResolveSubjectIsTrustAnchor(t *testing.T) {
 	f := setupThreeLevelFederation(t)
 	r := f.newResolver(t)
@@ -250,6 +288,9 @@ func TestResolveSubjectIsTrustAnchor(t *testing.T) {
 	}
 	if result.TrustAnchor != f.taID || len(result.Chain) != 1 || result.Chain[0] != f.taID {
 		t.Errorf("result = %+v, want a degenerate zero-hop chain naming only the trust anchor", result)
+	}
+	if len(result.Tokens) != 1 || result.Tokens[0] != f.taConfigToken {
+		t.Errorf("Tokens = %v, want [%q] (the trust anchor's own self-signed config)", result.Tokens, f.taConfigToken)
 	}
 }
 

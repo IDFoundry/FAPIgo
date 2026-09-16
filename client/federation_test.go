@@ -2,12 +2,21 @@ package client_test
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/client"
+	"github.com/idfoundry/fapigo/fapihttp"
+	"github.com/idfoundry/fapigo/federation"
 	intfed "github.com/idfoundry/fapigo/internal/federation"
 	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/keys"
@@ -163,5 +172,166 @@ func TestClientEntityConfiguration(t *testing.T) {
 	}
 	if err := json.Unmarshal(rp, &rpMeta); err != nil || len(rpMeta.RedirectURIs) != 1 {
 		t.Errorf("openid_relying_party = %s, want the redirect_uris passed through", rp)
+	}
+}
+
+// selfAnchoredOpenIDProvider starts an httptest.TLSServer that is its
+// own OpenID Federation Trust Anchor (a degenerate, zero-hop chain —
+// federation.Resolver.Resolve's own "subject may itself be a configured
+// Trust Anchor" case) and serves a self-issued Entity Configuration
+// carrying buildMetadata's own return value as its own "metadata"
+// claim. buildMetadata is called with the entity ID (== the server's
+// own URL, known only once the server has started) so a caller can
+// embed it as the "issuer" field of an "openid_provider" object — see
+// metadata.ParseAndValidate's anti-spoofing check, which requires
+// exactly that. buildMetadata may be nil (an Entity Configuration with
+// no metadata claim at all). Returns the entity ID and a
+// *federation.Resolver already configured to trust it.
+func selfAnchoredOpenIDProvider(t *testing.T, buildMetadata func(entityID string) map[string]json.RawMessage) (entityID string, resolver *federation.Resolver) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	jwk, err := jose.NewJWK(&key.PublicKey, fapi.ES256)
+	if err != nil {
+		t.Fatalf("jose.NewJWK: %v", err)
+	}
+	jwkJSON, err := jwk.WithKeyID("as-federation-key").MarshalJSON()
+	if err != nil {
+		t.Fatalf("marshal jwk: %v", err)
+	}
+	jwks, err := json.Marshal(map[string][]json.RawMessage{"keys": {jwkJSON}})
+	if err != nil {
+		t.Fatalf("marshal jwk set: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	ts := httptest.NewTLSServer(mux)
+	t.Cleanup(ts.Close)
+	entityID = ts.URL
+
+	issuer, err := federation.NewSelfIssuer(federation.SelfIssueConfig{
+		EntityID: entityID, Lifetime: time.Hour,
+	}, federation.SelfIssueDependencies{
+		Signer: key, Algorithm: fapi.ES256, KeyID: "as-federation-key",
+		JWKS: jwks, Clock: federation.SystemClock{},
+	})
+	if err != nil {
+		t.Fatalf("NewSelfIssuer: %v", err)
+	}
+	var metadata map[string]json.RawMessage
+	if buildMetadata != nil {
+		metadata = buildMetadata(entityID)
+	}
+	token, err := issuer.EntityConfiguration(metadata)
+	if err != nil {
+		t.Fatalf("EntityConfiguration: %v", err)
+	}
+	mux.HandleFunc(federation.WellKnownPath, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", federation.EntityStatementContentType)
+		w.Write([]byte(token))
+	})
+
+	pool := x509.NewCertPool()
+	pool.AddCert(ts.Certificate())
+	httpClient := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}
+	fetcher, err := fapihttp.New(httpClient, fapihttp.Config{
+		MaxResponseBytes: 1 << 16, RequestTimeout: 5 * time.Second, MaxRedirects: 1,
+		AllowLoopbackHTTP: true,
+	})
+	if err != nil {
+		t.Fatalf("fapihttp.New: %v", err)
+	}
+	resolver, err = federation.NewResolver(federation.Config{
+		TrustAnchors: []federation.TrustAnchor{{EntityID: entityID, JWKS: jwks}},
+		Limits:       federation.Limits{MaxPathLength: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
+	}, federation.Dependencies{HTTP: fetcher, Clock: federation.SystemClock{}})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	return entityID, resolver
+}
+
+func mustMarshal(t *testing.T, v any) json.RawMessage {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return b
+}
+
+func TestDiscoverViaFederationRejectsNilResolver(t *testing.T) {
+	if _, err := client.DiscoverViaFederation(context.Background(), nil, "https://as.example.org"); err == nil {
+		t.Fatalf("DiscoverViaFederation(nil resolver) = nil error, want error")
+	}
+}
+
+func TestDiscoverViaFederationRejectsEmptyIssuer(t *testing.T) {
+	_, resolver := selfAnchoredOpenIDProvider(t, nil)
+	if _, err := client.DiscoverViaFederation(context.Background(), resolver, ""); err == nil {
+		t.Fatalf("DiscoverViaFederation(empty issuer) = nil error, want error")
+	}
+}
+
+func TestDiscoverViaFederationRejectsMissingOpenIDProviderMetadata(t *testing.T) {
+	entityID, resolver := selfAnchoredOpenIDProvider(t, nil)
+	if _, err := client.DiscoverViaFederation(context.Background(), resolver, entityID); err == nil {
+		t.Fatalf("DiscoverViaFederation(no openid_provider metadata) = nil error, want error")
+	}
+}
+
+// TestDiscoverViaFederation confirms DiscoverViaFederation produces the
+// identical DiscoveredMetadata shape client.Discover does, sourced from
+// a Trust-Chain-verified "openid_provider" object instead of a live
+// ".well-known/openid-configuration" fetch.
+func TestDiscoverViaFederation(t *testing.T) {
+	entityID, resolver := selfAnchoredOpenIDProvider(t, func(entityID string) map[string]json.RawMessage {
+		openIDProvider := map[string]json.RawMessage{
+			"issuer":                                mustMarshal(t, entityID),
+			"token_endpoint":                        mustMarshal(t, entityID+"/token"),
+			"jwks_uri":                              mustMarshal(t, entityID+"/jwks"),
+			"id_token_signing_alg_values_supported": mustMarshal(t, []string{"ES256"}),
+			"authorization_response_iss_parameter_supported": mustMarshal(t, true),
+		}
+		return map[string]json.RawMessage{"openid_provider": mustMarshal(t, openIDProvider)}
+	})
+
+	md, err := client.DiscoverViaFederation(context.Background(), resolver, entityID)
+	if err != nil {
+		t.Fatalf("DiscoverViaFederation: %v", err)
+	}
+	if got, want := md.Endpoints.Token.String(), entityID+"/token"; got != want {
+		t.Errorf("Endpoints.Token = %q, want %q", got, want)
+	}
+	if got, want := md.JWKSURI.String(), entityID+"/jwks"; got != want {
+		t.Errorf("JWKSURI = %q, want %q", got, want)
+	}
+	if len(md.IDTokenAlgorithms) != 1 || md.IDTokenAlgorithms[0] != fapi.ES256 {
+		t.Errorf("IDTokenAlgorithms = %v, want [ES256]", md.IDTokenAlgorithms)
+	}
+	if !md.AuthorizationResponseIssSupported {
+		t.Errorf("AuthorizationResponseIssSupported = false, want true")
+	}
+}
+
+// TestDiscoverViaFederationRejectsIssuerMismatch confirms the same
+// anti-spoofing check client.Discover itself enforces (OIDC Discovery
+// 1.0 §4.3) still applies here: an "openid_provider" object whose own
+// "issuer" field doesn't match the resolved entity ID is rejected, even
+// though the object arrived inside an already Trust-Chain-verified
+// Entity Configuration.
+func TestDiscoverViaFederationRejectsIssuerMismatch(t *testing.T) {
+	entityID, resolver := selfAnchoredOpenIDProvider(t, func(entityID string) map[string]json.RawMessage {
+		openIDProvider := map[string]json.RawMessage{
+			"issuer":         mustMarshal(t, "https://wrong-issuer.example.org"),
+			"token_endpoint": mustMarshal(t, entityID+"/token"),
+			"jwks_uri":       mustMarshal(t, entityID+"/jwks"),
+		}
+		return map[string]json.RawMessage{"openid_provider": mustMarshal(t, openIDProvider)}
+	})
+	if _, err := client.DiscoverViaFederation(context.Background(), resolver, entityID); err == nil {
+		t.Fatalf("DiscoverViaFederation(issuer mismatch) = nil error, want error")
 	}
 }

@@ -237,7 +237,20 @@ func Discover(ctx context.Context, fetcher *fapihttp.Client, issuer fapi.URL, op
 	if err != nil {
 		return DiscoveredMetadata{}, fmt.Errorf("client: discover: %w", err)
 	}
+	return buildDiscoveredMetadata(doc, opts...)
+}
 
+// buildDiscoveredMetadata is Discover's own tail, factored out so
+// DiscoverViaFederation (client/federation.go) can build the identical
+// DiscoveredMetadata shape from an already-obtained, already-validated
+// metadata.Document — resolved.Metadata's own "openid_provider" object,
+// in that case, rather than a live ".well-known/openid-configuration"
+// fetch. Both callers have already done their own anti-spoofing issuer
+// check (metadata.ParseAndValidate's own expectedIssuer parameter)
+// before this runs; this function only ever parses doc's own field
+// values into typed URLs and algorithm lists, never fetches anything
+// itself.
+func buildDiscoveredMetadata(doc metadata.Document, opts ...fapi.URLOption) (DiscoveredMetadata, error) {
 	tok, err := fapi.ParseEndpointURL(doc.TokenEndpoint, opts...)
 	if err != nil {
 		return DiscoveredMetadata{}, fmt.Errorf("client: discover: token_endpoint: %w", err)

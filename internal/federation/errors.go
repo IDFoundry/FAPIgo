@@ -135,4 +135,20 @@ var (
 	// ErrResolveResponseNotYetValid indicates the response's iat claim
 	// is in the future beyond the configured clock-skew tolerance.
 	ErrResolveResponseNotYetValid = errors.New("federation: resolve response is not yet valid")
+
+	// ErrHistoricalKeysWrongType indicates a Federation Historical Keys
+	// response JWT's "typ" header was not "jwk-set+jwt" (OpenID
+	// Federation 1.0 §8.7.2's own "Historical keys JWTs without a typ
+	// header parameter or with a different typ value MUST be rejected").
+	ErrHistoricalKeysWrongType = errors.New("federation: historical keys response header typ is not jwk-set+jwt")
+
+	// ErrHistoricalKeysIssuerMismatch indicates a Federation Historical
+	// Keys response's own "iss" claim did not equal the entity the
+	// caller established trust in before checking the response's
+	// signature.
+	ErrHistoricalKeysIssuerMismatch = errors.New("federation: historical keys response's iss does not match the trusted issuer")
+
+	// ErrHistoricalKeysNotYetValid indicates the response's iat claim is
+	// in the future beyond the configured clock-skew tolerance.
+	ErrHistoricalKeysNotYetValid = errors.New("federation: historical keys response is not yet valid")
 )

@@ -114,6 +114,20 @@
 // Chain) — so wiring an embedder-facing producer is a separate,
 // larger change to Resolve's own internals, not implemented here.
 //
+// The Federation Historical Keys endpoint (§8.7) is covered on both
+// sides, unlike Resolve — publishing a rotated-out key's own lifetime
+// and revocation status (§8.7.3) is self-contained per-entity data, not
+// dependent on Resolve's own internals the way a Resolve Response's
+// trust_chain claim is. Resolver.FetchHistoricalKeys queries a peer's
+// endpoint and authenticates the response the identical way
+// ResolveViaEndpoint does (resolve the response's own issuer as a fresh
+// Trust Chain first, verify against that resolution's own vouched-for
+// key); intfed.CreateHistoricalKeysResponse is the producer-side signing
+// primitive, for an embedder tracking its own retired keys. Consulting
+// this endpoint is always an explicit, separate call — Resolve itself
+// never falls back to it automatically when a statement's own "kid"
+// isn't found among an issuer's current jwks.
+//
 // Automatic client registration (OpenID Federation 1.0 §12.1) is
 // implemented by AutomaticClientRepository/AutomaticClientKeySource,
 // for an OpenID Provider that wants to accept a Relying Party's own

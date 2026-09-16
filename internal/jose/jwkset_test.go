@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/rsa"
+	"encoding/base64"
 	"encoding/json"
 	"testing"
 
@@ -160,5 +161,76 @@ func TestParseJWKSetSkipsMalformedAndUnsupportedEntries(t *testing.T) {
 func TestParseJWKSetRejectsMalformedTopLevelJSON(t *testing.T) {
 	if _, err := ParseJWKSet([]byte(`not json`)); err == nil {
 		t.Fatalf("ParseJWKSet(not json) = nil error, want error")
+	}
+}
+
+// TestParseJWKSetPreservesX5C confirms ParseJWKSet.Certificates decodes
+// RFC 7517 §4.7's own standard-alphabet base64 encoding — not base64url
+// — into raw DER bytes. certDER doesn't need to be an actual valid
+// certificate: ParsedJWK.Certificates is deliberately unparsed (see its
+// own doc comment), so this only exercises the base64 decode itself.
+func TestParseJWKSetPreservesX5C(t *testing.T) {
+	priv := generateEC(t)
+	jwk, err := NewJWK(&priv.PublicKey, fapi.ES256)
+	if err != nil {
+		t.Fatalf("NewJWK: %v", err)
+	}
+	certDER := []byte("stand-in DER bytes, not a real certificate")
+	entry := rawKeySetEntry(t, jwk.WithKeyID("ec-kid"), map[string]any{
+		"x5c": []string{base64.StdEncoding.EncodeToString(certDER)},
+	})
+
+	parsed, err := ParseJWKSet(jwkSetBody(t, entry))
+	if err != nil {
+		t.Fatalf("ParseJWKSet: %v", err)
+	}
+	if len(parsed) != 1 {
+		t.Fatalf("len(parsed) = %d, want 1", len(parsed))
+	}
+	if len(parsed[0].Certificates) != 1 || string(parsed[0].Certificates[0]) != string(certDER) {
+		t.Errorf("Certificates = %v, want [%q]", parsed[0].Certificates, certDER)
+	}
+}
+
+func TestParseJWKSetOmitsCertificatesWhenAbsent(t *testing.T) {
+	priv := generateEC(t)
+	jwk, err := NewJWK(&priv.PublicKey, fapi.ES256)
+	if err != nil {
+		t.Fatalf("NewJWK: %v", err)
+	}
+	parsed, err := ParseJWKSet(jwkSetBody(t, rawKeySetEntry(t, jwk.WithKeyID("ec-kid"), nil)))
+	if err != nil {
+		t.Fatalf("ParseJWKSet: %v", err)
+	}
+	if len(parsed) != 1 {
+		t.Fatalf("len(parsed) = %d, want 1", len(parsed))
+	}
+	if parsed[0].Certificates != nil {
+		t.Errorf("Certificates = %v, want nil", parsed[0].Certificates)
+	}
+}
+
+// TestParseJWKSetSkipsMalformedX5CEntry confirms a malformed x5c entry
+// (not valid base64) doesn't invalidate the key itself — only the
+// Certificates field ends up empty.
+func TestParseJWKSetSkipsMalformedX5CEntry(t *testing.T) {
+	priv := generateEC(t)
+	jwk, err := NewJWK(&priv.PublicKey, fapi.ES256)
+	if err != nil {
+		t.Fatalf("NewJWK: %v", err)
+	}
+	entry := rawKeySetEntry(t, jwk.WithKeyID("ec-kid"), map[string]any{
+		"x5c": []string{"not valid base64!!!"},
+	})
+
+	parsed, err := ParseJWKSet(jwkSetBody(t, entry))
+	if err != nil {
+		t.Fatalf("ParseJWKSet: %v", err)
+	}
+	if len(parsed) != 1 {
+		t.Fatalf("len(parsed) = %d, want 1", len(parsed))
+	}
+	if parsed[0].Certificates != nil {
+		t.Errorf("Certificates = %v, want nil (malformed entry skipped)", parsed[0].Certificates)
 	}
 }

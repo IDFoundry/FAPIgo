@@ -2,6 +2,7 @@ package federation
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -11,6 +12,7 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/fapihttp"
 	"github.com/idfoundry/fapigo/internal/jose"
+	"github.com/idfoundry/fapigo/internal/mtls"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -110,14 +112,17 @@ type cachedClient struct {
 // config-level switch (AutomaticRegistrationConfig.AllowsClientCredentialsGrant/
 // AllowsCIBA) — off by default, since whether an automatically-resolved
 // RP may use either is a capability grant an operator makes, never
-// something an RP's own self-published metadata can grant itself. See
-// doc.go for what this first version still deliberately does not
-// implement at all: every RFC 8705 mTLS client authentication method
-// (ClientAuthMethodSelfSignedTLSClientAuth and its siblings — verifying
-// these correctly needs the "x5c" member of the client's own published
-// JWK, which internal/jose's JWK Set parsing does not currently
-// preserve, so only ClientAuthMethodPrivateKeyJWT is supported).
-// PAR/JAR-level enforcement of OpenID Federation 1.0 §12.1.1's own
+// something an RP's own self-published metadata can grant itself. Every
+// storage.ClientAuthMethod this package's own storage type supports is
+// readable from an RP's own token_endpoint_auth_method metadata,
+// including every RFC 8705 mTLS method: ClientAuthMethodSelfSignedTLSClientAuth
+// reads the RP's own certificate from the "x5c" member of a jwks/jwks_uri
+// entry (RFC 8705 §2.2) and computes its expected thumbprint from it;
+// ClientAuthMethodTLSClientAuth and its four SAN-typed siblings read
+// their own plain-string metadata parameter directly (RFC 8705 §2.1.2:
+// tls_client_auth_subject_dn/tls_client_auth_san_dns/_san_uri/_san_ip/
+// _san_email) — see registeredClientConfigFromMetadata. PAR/JAR-level
+// enforcement of OpenID Federation 1.0 §12.1.1's own
 // aud/sub/jti Request Object rules is a request-handling concern, not a
 // client registration one — see storage.RegisteredClientConfig's own
 // AutomaticFederationRegistration field and
@@ -230,19 +235,13 @@ func (a *AutomaticClientRepository) resolve(ctx context.Context, id fapi.ClientI
 	if !ok {
 		return cachedClient{}, fmt.Errorf("federation: %q has no %s metadata", id, relyingPartyEntityType)
 	}
-	clientCfg, jwksSrc, err := registeredClientConfigFromMetadata(id, raw, a.cfg)
+	clientCfg, jwks, err := a.registeredClientConfigFromMetadata(ctx, id, raw)
 	if err != nil {
 		return cachedClient{}, fmt.Errorf("federation: %q: %w", id, err)
 	}
 	client, err := storage.NewRegisteredClient(clientCfg)
 	if err != nil {
 		return cachedClient{}, fmt.Errorf("federation: %q: %w", id, err)
-	}
-	jwks := jwksSrc.inline
-	if jwksSrc.uri != "" {
-		if jwks, err = a.fetchJWKS(ctx, jwksSrc.uri); err != nil {
-			return cachedClient{}, fmt.Errorf("federation: %q: %w", id, err)
-		}
 	}
 
 	expiresAt := resolved.ExpiresAt
@@ -364,55 +363,68 @@ type relyingPartyMetadata struct {
 	BackchannelAuthenticationRequestSigningAlg string `json:"backchannel_authentication_request_signing_alg"`
 	BackchannelTokenDeliveryMode               string `json:"backchannel_token_delivery_mode"`
 	BackchannelClientNotificationEndpoint      string `json:"backchannel_client_notification_endpoint"`
-}
 
-// jwksSource is a client's verification key material as declared by its
-// own openid_relying_party metadata — exactly one of inline (already
-// resolved, no I/O needed) or uri (fetched live via
-// AutomaticClientRepository.fetchJWKS) is set, enforced by
-// registeredClientConfigFromMetadata.
-type jwksSource struct {
-	inline json.RawMessage
-	uri    string
+	// TLSClientAuthSubjectDN/TLSClientAuthSANDNS/TLSClientAuthSANURI/
+	// TLSClientAuthSANIP/TLSClientAuthSANEmail are RFC 8705 §2.1.2's own
+	// PKI mutual-TLS client metadata parameters. Read only when
+	// TokenEndpointAuthMethod is tls_client_auth or the matching
+	// SAN-typed sibling — §2.1: "A client using the tls_client_auth
+	// authentication method MUST use exactly one of the below metadata
+	// parameters" — registeredClientConfigFromMetadata enforces exactly
+	// which one for the declared method.
+	TLSClientAuthSubjectDN string `json:"tls_client_auth_subject_dn"`
+	TLSClientAuthSANDNS    string `json:"tls_client_auth_san_dns"`
+	TLSClientAuthSANURI    string `json:"tls_client_auth_san_uri"`
+	TLSClientAuthSANIP     string `json:"tls_client_auth_san_ip"`
+	TLSClientAuthSANEmail  string `json:"tls_client_auth_san_email"`
 }
 
 // registeredClientConfigFromMetadata parses raw (an openid_relying_party
 // Resolved Metadata object) and builds the storage.RegisteredClientConfig
-// it describes, returning its jwks source separately (needed by
-// AutomaticClientKeySource, not stored on storage.RegisteredClient
-// itself). automaticCfg supplies the operator-level capability grants
-// (AllowedScopes, AllowsClientCredentialsGrant, AllowsCIBA) that must
-// never be inferred from raw itself — see AutomaticRegistrationConfig's
-// own doc comments for why.
-func registeredClientConfigFromMetadata(id fapi.ClientID, raw json.RawMessage, automaticCfg AutomaticRegistrationConfig) (storage.RegisteredClientConfig, jwksSource, error) {
+// it describes, returning the client's actual, resolved jwks bytes
+// separately (needed by AutomaticClientKeySource, not stored on
+// storage.RegisteredClient itself). jwks_uri, when declared instead of
+// an inline jwks, is fetched here — eagerly, before returning — rather
+// than left for the caller to resolve afterward the way an earlier
+// version of this function did: ClientAuthMethodSelfSignedTLSClientAuth
+// needs the jwks content itself (specifically its own "x5c" member) to
+// compute ExpectedCertificateThumbprint before storage.NewRegisteredClient
+// can even validate the resulting config, so there is no later point at
+// which deferring the fetch would still work for every auth method.
+//
+// a.cfg supplies the operator-level capability grants (AllowedScopes,
+// AllowsClientCredentialsGrant, AllowsCIBA) that must never be inferred
+// from raw itself — see AutomaticRegistrationConfig's own doc comments
+// for why.
+func (a *AutomaticClientRepository) registeredClientConfigFromMetadata(ctx context.Context, id fapi.ClientID, raw json.RawMessage) (storage.RegisteredClientConfig, json.RawMessage, error) {
 	var m relyingPartyMetadata
 	if err := json.Unmarshal(raw, &m); err != nil {
-		return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("parse %s metadata: %w", relyingPartyEntityType, err)
+		return storage.RegisteredClientConfig{}, nil, fmt.Errorf("parse %s metadata: %w", relyingPartyEntityType, err)
 	}
 	if len(m.RedirectURIs) == 0 {
-		return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("%s metadata has no redirect_uris", relyingPartyEntityType)
+		return storage.RegisteredClientConfig{}, nil, fmt.Errorf("%s metadata has no redirect_uris", relyingPartyEntityType)
 	}
 	if (len(m.JWKS) > 0) == (m.JWKSURI != "") {
-		return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("%s metadata must declare exactly one of jwks or jwks_uri", relyingPartyEntityType)
+		return storage.RegisteredClientConfig{}, nil, fmt.Errorf("%s metadata must declare exactly one of jwks or jwks_uri", relyingPartyEntityType)
 	}
 
 	authMethod, err := storage.ParseClientAuthMethod(m.TokenEndpointAuthMethod)
 	if err != nil {
-		return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("token_endpoint_auth_method: %w", err)
+		return storage.RegisteredClientConfig{}, nil, fmt.Errorf("token_endpoint_auth_method: %w", err)
 	}
-	if authMethod != storage.ClientAuthMethodPrivateKeyJWT {
-		return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("token_endpoint_auth_method %q is not yet supported by automatic registration (only private_key_jwt)", m.TokenEndpointAuthMethod)
-	}
-	assertionAlg, err := fapi.ParseSignatureAlgorithm(m.TokenEndpointAuthSigningAlg)
-	if err != nil {
-		return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("token_endpoint_auth_signing_alg: %w", err)
+
+	jwks := m.JWKS
+	if m.JWKSURI != "" {
+		if jwks, err = a.fetchJWKS(ctx, m.JWKSURI); err != nil {
+			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("jwks_uri: %w", err)
+		}
 	}
 
 	var requestObjectAlg fapi.SignatureAlgorithm
 	if m.RequestObjectSigningAlg != "" {
 		requestObjectAlg, err = fapi.ParseSignatureAlgorithm(m.RequestObjectSigningAlg)
 		if err != nil {
-			return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("request_object_signing_alg: %w", err)
+			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("request_object_signing_alg: %w", err)
 		}
 	}
 
@@ -428,28 +440,78 @@ func registeredClientConfigFromMetadata(id fapi.ClientID, raw json.RawMessage, a
 
 	cfg := storage.RegisteredClientConfig{
 		ID: id, RedirectURIs: redirectURIs,
-		ClientAuthMethod: authMethod, ClientAssertionAlgorithm: assertionAlg,
+		ClientAuthMethod:                authMethod,
 		RequestObjectAlgorithm:          requestObjectAlg,
 		SenderConstrain:                 senderConstrain,
-		AllowedScopes:                   automaticCfg.AllowedScopes,
+		AllowedScopes:                   a.cfg.AllowedScopes,
 		AutomaticFederationRegistration: true,
-		AllowsClientCredentialsGrant:    automaticCfg.AllowsClientCredentialsGrant,
+		AllowsClientCredentialsGrant:    a.cfg.AllowsClientCredentialsGrant,
 	}
 
-	if automaticCfg.AllowsCIBA && m.BackchannelAuthenticationRequestSigningAlg != "" {
+	// storage.NewRegisteredClient's own switch on ClientAuthMethod
+	// requires exactly one corresponding field per method (see its own
+	// doc comment) — mirrored here, reading each from wherever RFC 8705
+	// actually places it: token_endpoint_auth_signing_alg for
+	// private_key_jwt, the client's own published certificate (via jwks/
+	// jwks_uri's "x5c") for self_signed_tls_client_auth, and a plain
+	// metadata string for tls_client_auth and its four SAN-typed
+	// siblings.
+	switch authMethod {
+	case storage.ClientAuthMethodPrivateKeyJWT:
+		if cfg.ClientAssertionAlgorithm, err = fapi.ParseSignatureAlgorithm(m.TokenEndpointAuthSigningAlg); err != nil {
+			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("token_endpoint_auth_signing_alg: %w", err)
+		}
+	case storage.ClientAuthMethodSelfSignedTLSClientAuth:
+		if cfg.ExpectedCertificateThumbprint, err = certificateThumbprintFromJWKS(jwks); err != nil {
+			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("self_signed_tls_client_auth: %w", err)
+		}
+	case storage.ClientAuthMethodTLSClientAuth:
+		if m.TLSClientAuthSubjectDN == "" {
+			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("tls_client_auth_subject_dn is required for tls_client_auth")
+		}
+		cfg.ExpectedSubjectDN = m.TLSClientAuthSubjectDN
+	case storage.ClientAuthMethodTLSClientAuthSANDNS:
+		if m.TLSClientAuthSANDNS == "" {
+			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("tls_client_auth_san_dns is required for tls_client_auth_san_dns")
+		}
+		cfg.ExpectedSANDNS = m.TLSClientAuthSANDNS
+	case storage.ClientAuthMethodTLSClientAuthSANURI:
+		if m.TLSClientAuthSANURI == "" {
+			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("tls_client_auth_san_uri is required for tls_client_auth_san_uri")
+		}
+		cfg.ExpectedSANURI = m.TLSClientAuthSANURI
+	case storage.ClientAuthMethodTLSClientAuthSANIP:
+		if m.TLSClientAuthSANIP == "" {
+			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("tls_client_auth_san_ip is required for tls_client_auth_san_ip")
+		}
+		cfg.ExpectedSANIP = m.TLSClientAuthSANIP
+	case storage.ClientAuthMethodTLSClientAuthSANEmail:
+		if m.TLSClientAuthSANEmail == "" {
+			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("tls_client_auth_san_email is required for tls_client_auth_san_email")
+		}
+		cfg.ExpectedSANEmail = m.TLSClientAuthSANEmail
+	default:
+		// Unreachable in practice — storage.ParseClientAuthMethod's own
+		// closed set already rejected anything else above — kept for the
+		// same defensive-completeness reason a switch over a closed enum
+		// gets one elsewhere in this module.
+		return storage.RegisteredClientConfig{}, nil, fmt.Errorf("token_endpoint_auth_method %q is not supported", m.TokenEndpointAuthMethod)
+	}
+
+	if a.cfg.AllowsCIBA && m.BackchannelAuthenticationRequestSigningAlg != "" {
 		if cfg.BackchannelAuthenticationRequestAlgorithm, err = fapi.ParseSignatureAlgorithm(m.BackchannelAuthenticationRequestSigningAlg); err != nil {
-			return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("backchannel_authentication_request_signing_alg: %w", err)
+			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("backchannel_authentication_request_signing_alg: %w", err)
 		}
 		deliveryMode := m.BackchannelTokenDeliveryMode
 		if deliveryMode == "" {
 			deliveryMode = "poll"
 		}
 		if cfg.BackchannelTokenDeliveryMode, err = storage.ParseBackchannelTokenDeliveryMode(deliveryMode); err != nil {
-			return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("backchannel_token_delivery_mode: %w", err)
+			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("backchannel_token_delivery_mode: %w", err)
 		}
 		if m.BackchannelClientNotificationEndpoint != "" {
 			if cfg.BackchannelClientNotificationEndpoint, err = fapi.ParseEndpointURL(m.BackchannelClientNotificationEndpoint); err != nil {
-				return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("backchannel_client_notification_endpoint: %w", err)
+				return storage.RegisteredClientConfig{}, nil, fmt.Errorf("backchannel_client_notification_endpoint: %w", err)
 			}
 		}
 	}
@@ -457,30 +519,57 @@ func registeredClientConfigFromMetadata(id fapi.ClientID, raw json.RawMessage, a
 	idTokenAlgSet := m.IDTokenEncryptedResponseAlg != ""
 	idTokenEncSet := m.IDTokenEncryptedResponseEnc != ""
 	if idTokenAlgSet != idTokenEncSet {
-		return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("id_token_encrypted_response_alg and id_token_encrypted_response_enc must both be set, or neither")
+		return storage.RegisteredClientConfig{}, nil, fmt.Errorf("id_token_encrypted_response_alg and id_token_encrypted_response_enc must both be set, or neither")
 	}
 	if idTokenAlgSet {
 		if cfg.IDTokenEncryptionKeyManagement, err = fapi.ParseKeyManagementAlgorithm(m.IDTokenEncryptedResponseAlg); err != nil {
-			return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("id_token_encrypted_response_alg: %w", err)
+			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("id_token_encrypted_response_alg: %w", err)
 		}
 		if cfg.IDTokenEncryptionContentEncryption, err = fapi.ParseContentEncryptionAlgorithm(m.IDTokenEncryptedResponseEnc); err != nil {
-			return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("id_token_encrypted_response_enc: %w", err)
+			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("id_token_encrypted_response_enc: %w", err)
 		}
 	}
 
 	userInfoAlgSet := m.UserinfoEncryptedResponseAlg != ""
 	userInfoEncSet := m.UserinfoEncryptedResponseEnc != ""
 	if userInfoAlgSet != userInfoEncSet {
-		return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("userinfo_encrypted_response_alg and userinfo_encrypted_response_enc must both be set, or neither")
+		return storage.RegisteredClientConfig{}, nil, fmt.Errorf("userinfo_encrypted_response_alg and userinfo_encrypted_response_enc must both be set, or neither")
 	}
 	if userInfoAlgSet {
 		if cfg.UserInfoEncryptionKeyManagement, err = fapi.ParseKeyManagementAlgorithm(m.UserinfoEncryptedResponseAlg); err != nil {
-			return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("userinfo_encrypted_response_alg: %w", err)
+			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("userinfo_encrypted_response_alg: %w", err)
 		}
 		if cfg.UserInfoEncryptionContentEncryption, err = fapi.ParseContentEncryptionAlgorithm(m.UserinfoEncryptedResponseEnc); err != nil {
-			return storage.RegisteredClientConfig{}, jwksSource{}, fmt.Errorf("userinfo_encrypted_response_enc: %w", err)
+			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("userinfo_encrypted_response_enc: %w", err)
 		}
 	}
 
-	return cfg, jwksSource{inline: m.JWKS, uri: m.JWKSURI}, nil
+	return cfg, jwks, nil
+}
+
+// certificateThumbprintFromJWKS extracts and computes the RFC 8705 §3.1
+// x5t#S256 thumbprint of the first "x5c"-bearing entry found across
+// jwks' own keys (RFC 8705 §2.2: "the existing jwks_uri or jwks
+// metadata parameters... are used to convey the client's certificates
+// via JWK... A certificate is represented with the x5c parameter").
+// AutomaticClientRepository only ever registers one mTLS-authenticating
+// identity per client, so the first usable entry is sufficient — unlike
+// resource-server-side signature verification, there's no second
+// candidate to try if this one doesn't work; a client publishing more
+// than one is expected to put its authenticating certificate first.
+func certificateThumbprintFromJWKS(jwks json.RawMessage) (string, error) {
+	candidates, err := jose.ParseJWKSet(jwks)
+	if err != nil {
+		return "", fmt.Errorf("parse jwks: %w", err)
+	}
+	for _, c := range candidates {
+		for _, der := range c.Certificates {
+			cert, err := x509.ParseCertificate(der)
+			if err != nil {
+				continue
+			}
+			return mtls.Thumbprint(cert), nil
+		}
+	}
+	return "", fmt.Errorf("jwks has no usable x5c certificate")
 }

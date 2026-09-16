@@ -142,6 +142,22 @@ func TestNewRARRegistryRejectsInvalidBounds(t *testing.T) {
 	}
 }
 
+// RFC 9396 §7's "authorization_details_types_supported" metadata field
+// just needs the registered type strings, sorted for a deterministic
+// wire value.
+func TestRARRegistryTypesReturnsSortedRegisteredTypes(t *testing.T) {
+	accountAccessDef := extension.RARDefinition[paymentDetail]{Type: "account_access", MaxObjects: 1, MaxBytesPerObject: 64}
+	reg, err := extension.NewRARRegistry(4096, 4, paymentDef, accountAccessDef)
+	if err != nil {
+		t.Fatalf("NewRARRegistry: %v", err)
+	}
+	got := reg.Types()
+	want := []string{"account_access", "payment_initiation"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("Types() = %v, want %v", got, want)
+	}
+}
+
 func TestRARRegistryParseRejectsNonArrayTopLevel(t *testing.T) {
 	reg, err := extension.NewRARRegistry(4096, 4, paymentDef)
 	if err != nil {

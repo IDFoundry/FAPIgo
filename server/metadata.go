@@ -137,6 +137,23 @@ type Metadata struct {
 	// "iss" parameter (RFC 9207); a JARM response's own "iss" claim
 	// serves the same purpose instead.
 	AuthorizationResponseIssParameterSupported bool `json:"authorization_response_iss_parameter_supported,omitempty"`
+
+	// DPoPSigningAlgValuesSupported (RFC 9449 §5.1) is always the same
+	// fixed value: unlike every other *SigningAlgValuesSupported field
+	// above, DPoP proof algorithm acceptance isn't a Config.Algorithms
+	// choice a deployment makes — internal/dpop.Verify accepts whatever
+	// internal/jose's header parsing accepts, which is this module's own
+	// fapi.SignatureAlgorithm closed set (ES256, PS256, EdDSA) for every
+	// JWS this package verifies, DPoP proofs included. So there is
+	// nothing per-deployment to read this from; it's the same three
+	// values every server using this package would report.
+	DPoPSigningAlgValuesSupported []string `json:"dpop_signing_alg_values_supported,omitempty"`
+
+	// AuthorizationDetailsTypesSupported (RFC 9396 §7) is set only when
+	// Config.RAR is configured — RAR is an entirely optional capability,
+	// the same gating Config.Endpoints.BackchannelAuthentication gets
+	// for CIBA's own metadata fields above.
+	AuthorizationDetailsTypesSupported []string `json:"authorization_details_types_supported,omitempty"`
 }
 
 // MTLSEndpointAliases is the RFC 8705 §5 "mtls_endpoint_aliases"
@@ -179,6 +196,14 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 
 		RequirePushedAuthorizationRequests:         true,
 		AuthorizationResponseIssParameterSupported: true,
+
+		// See DPoPSigningAlgValuesSupported's own doc comment for why
+		// this is a fixed literal, not read from Config.
+		DPoPSigningAlgValuesSupported: []string{fapi.ES256.String(), fapi.PS256.String(), fapi.EdDSA.String()},
+	}
+
+	if s.cfg.RAR != nil {
+		md.AuthorizationDetailsTypesSupported = s.cfg.RAR.Types()
 	}
 
 	if !s.cfg.OAuthOnly {

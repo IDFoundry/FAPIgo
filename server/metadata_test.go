@@ -81,6 +81,35 @@ func TestMetadataSecurityProfile(t *testing.T) {
 	if !containsString(md.ResponseModesSupported, "query") {
 		t.Fatalf("ResponseModesSupported = %v, want to contain query", md.ResponseModesSupported)
 	}
+	// RFC 9449 §5.1: unconditional, unlike every other
+	// *SigningAlgValuesSupported field — see DPoPSigningAlgValuesSupported's
+	// own doc comment for why this isn't Config.Algorithms-driven.
+	if !containsString(md.DPoPSigningAlgValuesSupported, "ES256") ||
+		!containsString(md.DPoPSigningAlgValuesSupported, "PS256") ||
+		!containsString(md.DPoPSigningAlgValuesSupported, "EdDSA") {
+		t.Fatalf("DPoPSigningAlgValuesSupported = %v, want to contain ES256, PS256 and EdDSA", md.DPoPSigningAlgValuesSupported)
+	}
+}
+
+// RFC 9396 §7: omitted when Config.RAR isn't configured — RAR is an
+// entirely optional capability, the same gating CIBA's own metadata
+// fields get from Config.Endpoints.BackchannelAuthentication.
+func TestMetadataOmitsAuthorizationDetailsTypesWhenRARNotConfigured(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	md := h.server.Metadata(context.Background())
+
+	if len(md.AuthorizationDetailsTypesSupported) != 0 {
+		t.Fatalf("AuthorizationDetailsTypesSupported = %v, want empty when Config.RAR is nil", md.AuthorizationDetailsTypesSupported)
+	}
+}
+
+func TestMetadataAdvertisesAuthorizationDetailsTypesWhenRARConfigured(t *testing.T) {
+	h := newHarnessWithRAR(t, server.ProfileFAPISecurity, newTestRARRegistry(t), nil, nil)
+	md := h.server.Metadata(context.Background())
+
+	if !containsString(md.AuthorizationDetailsTypesSupported, "payment") || len(md.AuthorizationDetailsTypesSupported) != 1 {
+		t.Fatalf("AuthorizationDetailsTypesSupported = %v, want [payment]", md.AuthorizationDetailsTypesSupported)
+	}
 }
 
 func TestMetadataMessageSigningProfile(t *testing.T) {
@@ -223,6 +252,7 @@ func TestMetadataMarshalJSONUsesDiscoveryFieldNames(t *testing.T) {
 		"require_pushed_authorization_requests",
 		"require_signed_request_object",
 		"authorization_response_iss_parameter_supported",
+		"dpop_signing_alg_values_supported",
 	} {
 		if _, ok := decoded[key]; !ok {
 			t.Fatalf("Marshal(md) missing key %q, got %s", key, b)

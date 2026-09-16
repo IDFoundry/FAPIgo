@@ -114,6 +114,115 @@ func TestResolveViaEndpointRejectsUnresolvableIssuer(t *testing.T) {
 	}
 }
 
+func TestResolveViaEndpointRejectsNonHTTPSEndpoint(t *testing.T) {
+	metadata := map[string]json.RawMessage{"openid_provider": json.RawMessage(`{}`)}
+	entityID, _, resolver, _ := selfAnchoredResolveEndpoint(t, "https://op.example.org", metadata)
+	if _, err := resolver.ResolveViaEndpoint(context.Background(), federation.ResolveRequest{
+		Endpoint: "http://not-https.example.org/resolve", Subject: "https://op.example.org", TrustAnchor: entityID,
+	}); err == nil {
+		t.Fatalf("ResolveViaEndpoint(non-https endpoint) = nil error, want error")
+	}
+}
+
+func TestResolveViaEndpointRejectsFetchFailure(t *testing.T) {
+	metadata := map[string]json.RawMessage{"openid_provider": json.RawMessage(`{}`)}
+	entityID, resolveEndpoint, resolver, _ := selfAnchoredResolveEndpoint(t, "https://op.example.org", metadata)
+	// The fixture's own /resolve handler 404s for any subject other than
+	// the one it was configured to answer about.
+	if _, err := resolver.ResolveViaEndpoint(context.Background(), federation.ResolveRequest{
+		Endpoint: resolveEndpoint, Subject: "https://someone-else.example.org", TrustAnchor: entityID,
+	}); err == nil {
+		t.Fatalf("ResolveViaEndpoint(fetch failure) = nil error, want error")
+	}
+}
+
+func TestResolveViaEndpointRejectsMalformedResponseBody(t *testing.T) {
+	mux := http.NewServeMux()
+	ts := httptest.NewTLSServer(mux)
+	t.Cleanup(ts.Close)
+	entityID := ts.URL
+	key := generateKey(t)
+	jwks := jwksFor(t, "k", key)
+	ecToken, err := intfed.Create(intfed.CreateParams{
+		Signer: key, Algorithm: fapi.ES256, KeyID: "k",
+		Issuer: entityID, Subject: entityID,
+		Now: time.Now(), Lifetime: time.Hour, JWKS: jwks,
+	})
+	if err != nil {
+		t.Fatalf("intfed.Create: %v", err)
+	}
+	mux.HandleFunc("/.well-known/openid-federation", serveStatement(ecToken))
+	mux.HandleFunc("/resolve", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", federation.ResolveResponseContentType)
+		w.Write([]byte("not-a-valid-jwt"))
+	})
+
+	resolver, err := federation.NewResolver(federation.Config{
+		TrustAnchors: []federation.TrustAnchor{{EntityID: entityID, JWKS: jwks}},
+		Limits:       federation.Limits{MaxPathLength: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
+	}, federation.Dependencies{HTTP: fetcherFor(t, ts), Clock: federation.SystemClock{}})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	if _, err := resolver.ResolveViaEndpoint(context.Background(), federation.ResolveRequest{
+		Endpoint: entityID + "/resolve", Subject: "https://op.example.org", TrustAnchor: entityID,
+	}); err == nil {
+		t.Fatalf("ResolveViaEndpoint(malformed response body) = nil error, want error")
+	}
+}
+
+// TestResolveViaEndpointRejectsSignatureMismatch confirms establishing
+// trust in the response's issuer identity is not, on its own, enough —
+// the response is signed with a key different from the one that
+// issuer's own Trust Chain actually vouches for (same claimed kid,
+// wrong key), and must still be rejected.
+func TestResolveViaEndpointRejectsSignatureMismatch(t *testing.T) {
+	mux := http.NewServeMux()
+	ts := httptest.NewTLSServer(mux)
+	t.Cleanup(ts.Close)
+	entityID := ts.URL
+	key := generateKey(t)
+	otherKey := generateKey(t)
+	jwks := jwksFor(t, "k", key)
+	ecToken, err := intfed.Create(intfed.CreateParams{
+		Signer: key, Algorithm: fapi.ES256, KeyID: "k",
+		Issuer: entityID, Subject: entityID,
+		Now: time.Now(), Lifetime: time.Hour, JWKS: jwks,
+	})
+	if err != nil {
+		t.Fatalf("intfed.Create: %v", err)
+	}
+	mux.HandleFunc("/.well-known/openid-federation", serveStatement(ecToken))
+
+	responseToken, err := intfed.CreateResolveResponse(intfed.CreateResolveResponseParams{
+		Signer: otherKey, Algorithm: fapi.ES256, KeyID: "k",
+		Issuer: entityID, Subject: "https://op.example.org",
+		Now: time.Now(), Lifetime: time.Hour,
+		Metadata:   map[string]json.RawMessage{"openid_provider": json.RawMessage(`{}`)},
+		TrustChain: []string{"placeholder-chain-entry"},
+	})
+	if err != nil {
+		t.Fatalf("intfed.CreateResolveResponse: %v", err)
+	}
+	mux.HandleFunc("/resolve", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", federation.ResolveResponseContentType)
+		w.Write([]byte(responseToken))
+	})
+
+	resolver, err := federation.NewResolver(federation.Config{
+		TrustAnchors: []federation.TrustAnchor{{EntityID: entityID, JWKS: jwks}},
+		Limits:       federation.Limits{MaxPathLength: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
+	}, federation.Dependencies{HTTP: fetcherFor(t, ts), Clock: federation.SystemClock{}})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	if _, err := resolver.ResolveViaEndpoint(context.Background(), federation.ResolveRequest{
+		Endpoint: entityID + "/resolve", Subject: "https://op.example.org", TrustAnchor: entityID,
+	}); err == nil {
+		t.Fatalf("ResolveViaEndpoint(signature mismatch) = nil error, want error")
+	}
+}
+
 func TestResolveViaEndpointRequiresFields(t *testing.T) {
 	metadata := map[string]json.RawMessage{"openid_provider": json.RawMessage(`{}`)}
 	entityID, resolveEndpoint, resolver, _ := selfAnchoredResolveEndpoint(t, "https://op.example.org", metadata)

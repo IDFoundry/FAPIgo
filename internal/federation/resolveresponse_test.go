@@ -106,6 +106,95 @@ func TestParseResolveResponseRejectsMissingRequiredClaims(t *testing.T) {
 	}
 }
 
+func TestParseResolveResponseRejectsMalformedCompact(t *testing.T) {
+	if _, err := ParseResolveResponse("not-a-jws-at-all"); err == nil {
+		t.Fatalf("ParseResolveResponse(garbage) = nil error, want error")
+	}
+}
+
+func TestParseResolveResponseRejectsNonJSONPayload(t *testing.T) {
+	key := generateKey(t)
+	token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: resolveResponseJWTType}, []byte("not json"))
+	if err != nil {
+		t.Fatalf("jose.Sign: %v", err)
+	}
+	if _, err := ParseResolveResponse(token); !errors.Is(err, ErrMalformedClaims) {
+		t.Fatalf("ParseResolveResponse(non-JSON payload) = %v, want ErrMalformedClaims", err)
+	}
+}
+
+func TestParseResolveResponseRejectsMalformedFields(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	cases := map[string]func(map[string]any){
+		"metadata not an object":    func(c map[string]any) { c["metadata"] = "not-an-object" },
+		"trust_chain not an array":  func(c map[string]any) { c["trust_chain"] = "not-an-array" },
+		"trust_marks not an array":  func(c map[string]any) { c["trust_marks"] = "not-an-array" },
+		"trust_marks entry missing": func(c map[string]any) { c["trust_marks"] = []map[string]string{{"trust_mark_type": "x"}} },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			claims := validResolveResponseClaims(now)
+			mutate(claims)
+			token := createResolveResponseToken(t, key, "resolver-kid", resolveResponseJWTType, claims)
+			if _, err := ParseResolveResponse(token); !errors.Is(err, ErrMalformedClaims) {
+				t.Fatalf("ParseResolveResponse(%s) = %v, want ErrMalformedClaims", name, err)
+			}
+		})
+	}
+}
+
+func TestResolveResponseAlgorithm(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	token := createResolveResponseToken(t, key, "resolver-kid", resolveResponseJWTType, validResolveResponseClaims(now))
+	r, err := ParseResolveResponse(token)
+	if err != nil {
+		t.Fatalf("ParseResolveResponse: %v", err)
+	}
+	if r.Algorithm() != fapi.ES256 {
+		t.Errorf("Algorithm() = %v, want ES256", r.Algorithm())
+	}
+}
+
+func TestResolveResponseVerifyRejectsWrongKey(t *testing.T) {
+	key := generateKey(t)
+	otherKey := generateKey(t)
+	now := time.Now()
+	token := createResolveResponseToken(t, key, "resolver-kid", resolveResponseJWTType, validResolveResponseClaims(now))
+	r, err := ParseResolveResponse(token)
+	if err != nil {
+		t.Fatalf("ParseResolveResponse: %v", err)
+	}
+	if _, err := r.Verify(&otherKey.PublicKey, resolveResponseVerifyPolicy(now.Add(time.Second))); err == nil {
+		t.Fatal("Verify(wrong key) = nil error, want error")
+	}
+}
+
+func TestResolveResponseVerifyRejectsMissingPolicyFields(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	token := createResolveResponseToken(t, key, "resolver-kid", resolveResponseJWTType, validResolveResponseClaims(now))
+	r, err := ParseResolveResponse(token)
+	if err != nil {
+		t.Fatalf("ParseResolveResponse: %v", err)
+	}
+	cases := map[string]func(*ResolveResponseVerifyPolicy){
+		"no expected issuer":  func(p *ResolveResponseVerifyPolicy) { p.ExpectedIssuer = "" },
+		"no expected subject": func(p *ResolveResponseVerifyPolicy) { p.ExpectedSubject = "" },
+		"zero now":            func(p *ResolveResponseVerifyPolicy) { p.Now = time.Time{} },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			policy := resolveResponseVerifyPolicy(now.Add(time.Second))
+			mutate(&policy)
+			if _, err := r.Verify(&key.PublicKey, policy); err == nil {
+				t.Fatalf("Verify(%s) = nil error, want error", name)
+			}
+		})
+	}
+}
+
 func TestResolveResponseVerifyRejectsIssuerMismatch(t *testing.T) {
 	key := generateKey(t)
 	now := time.Now()
@@ -199,6 +288,7 @@ func TestCreateResolveResponseRejectsMissingFields(t *testing.T) {
 		"no key id":      func(p *CreateResolveResponseParams) { p.KeyID = "" },
 		"no issuer":      func(p *CreateResolveResponseParams) { p.Issuer = "" },
 		"no subject":     func(p *CreateResolveResponseParams) { p.Subject = "" },
+		"zero now":       func(p *CreateResolveResponseParams) { p.Now = time.Time{} },
 		"zero lifetime":  func(p *CreateResolveResponseParams) { p.Lifetime = 0 },
 		"no metadata":    func(p *CreateResolveResponseParams) { p.Metadata = nil },
 		"no trust chain": func(p *CreateResolveResponseParams) { p.TrustChain = nil },

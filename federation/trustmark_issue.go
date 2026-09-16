@@ -47,6 +47,12 @@ type TrustMarkIssueDependencies struct {
 	Clock Clock
 }
 
+// TrustMarkContentType is the Content-Type an embedder's own
+// federation_trust_mark_endpoint (§8.6) serves a TrustMark result
+// under (§8.6.2: "A successful response MUST use... the content type
+// application/trust-mark+jwt").
+const TrustMarkContentType = "application/trust-mark+jwt"
+
 // TrustMarkIssuer signs Trust Marks (OpenID Federation 1.0 §7.1), Trust
 // Mark Delegations (§7.2), and Trust Mark Status Responses (§8).
 // Construct one with NewTrustMarkIssuer.
@@ -120,8 +126,12 @@ type TrustMarkParams struct {
 // iss == Config.EntityID) for p. The returned token is a
 // trust-mark+jwt compact serialization, meant to be embedded verbatim
 // in the subject's own Entity Configuration "trust_marks" claim (see
-// SelfIssuer.EntityConfiguration's own metadata parameter) or handed to
-// it out of band to embed itself.
+// SelfIssuer.EntityConfiguration's own metadata parameter), handed to
+// it out of band to embed itself, or served verbatim (Content-Type
+// TrustMarkContentType) from this entity's own
+// federation_trust_mark_endpoint (§8.6) in response to a request
+// TrustMarkRequestFromHTTP already validated — the same token whichever
+// way it reaches a caller.
 func (i *TrustMarkIssuer) TrustMark(p TrustMarkParams) (string, error) {
 	if p.Subject == "" {
 		return "", fmt.Errorf("federation: trust mark: subject is required")

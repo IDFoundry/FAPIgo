@@ -93,12 +93,20 @@
 // serving that endpoint itself; see cmd/conformance-federation-trust-anchor's
 // own doc comment style of reference wiring for the analogous
 // Fetch/List pattern (this package doesn't yet ship one for Status,
-// but the shape is identical). Trust Marked Entities Listing (§9's
-// first endpoint) is request-parsing only — TrustMarkListingFilters —
-// since, like Subordinate Listing, an embedder's own storage of issued
-// Trust Marks answers the actual query. Not covered: the adjacent
-// Trust Mark endpoint (§9's third endpoint, a subject retrieving its
-// own Trust Mark by type) and any revocation/active-tracking storage
+// but the shape is identical). Trust Marked Entities Listing (§8.5) is
+// request-parsing only — TrustMarkListingFilters — since, like
+// Subordinate Listing, an embedder's own storage of issued Trust Marks
+// answers the actual query. The adjacent Trust Mark endpoint (§8.6, a
+// subject — or, when the embedder chooses to allow it, another
+// authenticated party — retrieving a subject's own Trust Mark by type)
+// is covered the identical "request-parsing only" way:
+// TrustMarkRequestFromHTTP validates the incoming "trust_mark_type"/
+// "sub" (both REQUIRED, unlike Listing's own OPTIONAL "sub"), and
+// TrustMarkIssuer.TrustMark's own returned token — already meant to be
+// served verbatim, Content-Type TrustMarkContentType — answers it once
+// the embedder's own storage confirms the subject actually has that
+// Trust Mark; ErrorNotFound (via NewError) is the §8.6.2-shaped 404
+// when it doesn't. Not covered: any revocation/active-tracking storage
 // of this package's own — CheckTrustMarkStatus and StatusResponse
 // exist to move the wire format, never to decide or record a Trust
 // Mark's actual standing.

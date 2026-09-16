@@ -154,6 +154,49 @@ func SubordinateListingFiltersFromRequest(r *http.Request) (SubordinateListingFi
 	return filters, nil
 }
 
+// TrustMarkRequestFromHTTP extracts and validates the query parameters
+// of an OpenID Federation 1.0 §8.6.1 Trust Mark Request:
+// "trust_mark_type" and "sub" — both REQUIRED here, unlike
+// TrustMarkListingFilters' own "sub", which is OPTIONAL for that
+// endpoint. Returns a *Error (ErrorInvalidRequest, HTTP 400, ready to
+// pass to WriteJSON) when either is absent, or "sub" is not a valid
+// Entity Identifier.
+//
+// Only GET requests with query parameters are supported — this
+// package's own §8.6.1 text notes a client-authenticated request uses
+// POST with the same parameters in the body instead (and MAY, at the
+// endpoint's own choice, come from a requester other than the subject
+// itself: "An example use case is to let a Federation Entity retrieve
+// the Trust Mark for another Entity"), which this helper does not
+// parse; an embedder needing that variant reads r.PostForm's own
+// values directly.
+//
+// This package offers no way to look up whether subject actually has a
+// trustMarkType Trust Mark — an embedder's own storage of issued Trust
+// Marks answers that once these two values are known, the same
+// "caller's own storage decides, this package only validates the
+// request shape" division TrustMarkListingFilters and
+// SubordinateListingFiltersFromRequest already establish. When it
+// doesn't, build the §8.6.2-shaped 404 with
+// NewError(ErrorNotFound, http.StatusNotFound, ...); when it does,
+// TrustMarkIssuer.TrustMark's own returned token is the response body
+// to serve, Content-Type TrustMarkContentType.
+func TrustMarkRequestFromHTTP(r *http.Request) (trustMarkType, subject string, err error) {
+	query := r.URL.Query()
+	trustMarkType = query.Get("trust_mark_type")
+	if trustMarkType == "" {
+		return "", "", newError(ErrorInvalidRequest, http.StatusBadRequest, `"trust_mark_type" is required`, nil)
+	}
+	subject = query.Get("sub")
+	if subject == "" {
+		return "", "", newError(ErrorInvalidRequest, http.StatusBadRequest, `"sub" is required`, nil)
+	}
+	if verr := ValidEntityID(subject); verr != nil {
+		return "", "", newError(ErrorInvalidRequest, http.StatusBadRequest, `"sub" is not a valid Entity Identifier`, verr)
+	}
+	return trustMarkType, subject, nil
+}
+
 func parseListingFilterBool(name, raw string) (bool, error) {
 	switch raw {
 	case "true":

@@ -175,3 +175,44 @@ func TestTrustMarkListingFiltersRejectsInvalidSub(t *testing.T) {
 		t.Errorf("error = %v, want a *federation.Error with code invalid_request", err)
 	}
 }
+
+func TestTrustMarkRequestFromHTTP(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "https://issuer.example.org/trust_mark?trust_mark_type=https%3A%2F%2Ffederation.example.org%2Fmarks%2Fcertified&sub=https%3A%2F%2Frp.example.org", nil)
+	trustMarkType, subject, err := federation.TrustMarkRequestFromHTTP(r)
+	if err != nil {
+		t.Fatalf("TrustMarkRequestFromHTTP: %v", err)
+	}
+	if trustMarkType != "https://federation.example.org/marks/certified" {
+		t.Errorf("trustMarkType = %q", trustMarkType)
+	}
+	if subject != "https://rp.example.org" {
+		t.Errorf("subject = %q", subject)
+	}
+}
+
+func TestTrustMarkRequestFromHTTPRejectsMissingType(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "https://issuer.example.org/trust_mark?sub=https%3A%2F%2Frp.example.org", nil)
+	_, _, err := federation.TrustMarkRequestFromHTTP(r)
+	var fedErr *federation.Error
+	if !errors.As(err, &fedErr) || fedErr.Code() != federation.ErrorInvalidRequest || fedErr.HTTPStatus() != http.StatusBadRequest {
+		t.Errorf("error = %v, want a *federation.Error with code invalid_request/400", err)
+	}
+}
+
+func TestTrustMarkRequestFromHTTPRejectsMissingSub(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "https://issuer.example.org/trust_mark?trust_mark_type=x", nil)
+	_, _, err := federation.TrustMarkRequestFromHTTP(r)
+	var fedErr *federation.Error
+	if !errors.As(err, &fedErr) || fedErr.Code() != federation.ErrorInvalidRequest || fedErr.HTTPStatus() != http.StatusBadRequest {
+		t.Errorf("error = %v, want a *federation.Error with code invalid_request/400", err)
+	}
+}
+
+func TestTrustMarkRequestFromHTTPRejectsInvalidSub(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "https://issuer.example.org/trust_mark?trust_mark_type=x&sub=not-a-url", nil)
+	_, _, err := federation.TrustMarkRequestFromHTTP(r)
+	var fedErr *federation.Error
+	if !errors.As(err, &fedErr) || fedErr.Code() != federation.ErrorInvalidRequest {
+		t.Errorf("error = %v, want a *federation.Error with code invalid_request", err)
+	}
+}

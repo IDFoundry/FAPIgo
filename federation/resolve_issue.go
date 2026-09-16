@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"time"
 
 	fapi "github.com/idfoundry/fapigo"
 	intfed "github.com/idfoundry/fapigo/internal/federation"
@@ -52,11 +53,11 @@ type ResolveIssueDependencies struct {
 // result) and signs a response reporting it, rather than owning a
 // *Resolver of its own: the resolution work is identical to what
 // Resolve already does for any other caller, so there is no separate
-// "resolve, but for serving a response" code path to own.
-//
-// Trust Mark inclusion (§8.3's own "and Trust Marks for an Entity",
-// the response's OPTIONAL "trust_marks" claim) is not implemented in
-// this version — Response never sets it. See doc.go.
+// "resolve, but for serving a response" code path to own. Trust Mark
+// verification (§8.3's own "and Trust Marks for an Entity", the
+// response's OPTIONAL "trust_marks" claim) follows the identical
+// division: Response never verifies a Trust Mark itself, the same way
+// it never resolves a Trust Chain itself — see its own doc comment.
 type ResolveIssuer struct {
 	cfg  ResolveIssueConfig
 	deps ResolveIssueDependencies
@@ -82,6 +83,25 @@ func NewResolveIssuer(cfg ResolveIssueConfig, deps ResolveIssueDependencies) (*R
 	return &ResolveIssuer{cfg: cfg, deps: deps}, nil
 }
 
+// VerifiedTrustMark pairs an already-verified Trust Mark's own wire
+// form (intfed.RawTrustMark: its type and the original compact JWT) with
+// its verified expiry — Response's own trustMarks parameter. Build one
+// per entry of ResolvedEntity.TrustMarks that a caller has itself
+// verified via Resolver.VerifyTrustMark, keeping its ExpiresAt from the
+// returned intfed.TrustMarkClaims (intfed.RawTrustMark alone doesn't
+// carry it).
+type VerifiedTrustMark struct {
+	intfed.RawTrustMark
+
+	// ExpiresAt is the Trust Mark's own verified "exp" claim — zero
+	// means it does not expire (§7.1). Response folds this into the
+	// resolve response's own "exp" the same way it already does for
+	// resolved.ExpiresAt (§8.3.2's own "MUST be the minimum of the exp
+	// value of the Trust Chain... as well as any Trust Mark included in
+	// the response").
+	ExpiresAt time.Time
+}
+
 // Response signs a Resolve Response (OpenID Federation 1.0 §8.3.2) for
 // resolved — the result of a caller's own resolver.Resolve(ctx,
 // subject) — answering a Resolve Request that named trustAnchors (its
@@ -90,6 +110,16 @@ func NewResolveIssuer(cfg ResolveIssueConfig, deps ResolveIssueDependencies) (*R
 // "entity_type" parameter; empty returns every Entity Type
 // resolved.Metadata carries).
 //
+// trustMarks is the response's OPTIONAL "trust_marks" claim (§8.3's own
+// "and Trust Marks for an Entity") — nil/empty omits it entirely.
+// Response never verifies a Trust Mark itself: §8.3's own "The response
+// set MUST include only verified Trust Marks" is the caller's own
+// responsibility to uphold before calling Response, typically by
+// looping over resolved.TrustMarks, calling Resolver.VerifyTrustMark on
+// each, and passing through only the ones that verify — the identical
+// "caller resolves, Response only signs" division Response already
+// applies to resolved itself.
+//
 // Response itself checks resolved.TrustAnchor is one of trustAnchors —
 // §8.3.1's own "trust_anchor request parameter MAY occur multiple
 // times, in which case[] the resolver MAY return a successful resolve
@@ -97,12 +127,14 @@ func NewResolveIssuer(cfg ResolveIssueConfig, deps ResolveIssueDependencies) (*R
 // leaving that to the caller; Response has no second resolution attempt
 // to try a different one if it isn't.
 //
-// The response's own "exp" claim is set from resolved.ExpiresAt exactly
+// The response's own "exp" claim is set to the minimum of
+// resolved.ExpiresAt and every trustMarks entry's own ExpiresAt exactly
 // (§8.3.2: "MUST be the minimum of the exp value of the Trust Chain
-// from which the resolve response was derived") — Response fails with a
-// clear error if it's already passed, rather than silently issuing an
+// from which the resolve response was derived, as well as any Trust
+// Mark included in the response") — Response fails with a clear error
+// if that minimum has already passed, rather than silently issuing an
 // already-expired response.
-func (i *ResolveIssuer) Response(resolved ResolvedEntity, trustAnchors, entityTypes []string) (string, error) {
+func (i *ResolveIssuer) Response(resolved ResolvedEntity, trustAnchors, entityTypes []string, trustMarks []VerifiedTrustMark) (string, error) {
 	if len(resolved.Tokens) == 0 {
 		return "", fmt.Errorf("federation: resolved entity has no trust chain tokens")
 	}
@@ -116,16 +148,30 @@ func (i *ResolveIssuer) Response(resolved ResolvedEntity, trustAnchors, entityTy
 	}
 
 	now := i.deps.Clock.Now()
-	lifetime := resolved.ExpiresAt.Sub(now)
+	expiresAt := resolved.ExpiresAt
+	for _, tm := range trustMarks {
+		if !tm.ExpiresAt.IsZero() && tm.ExpiresAt.Before(expiresAt) {
+			expiresAt = tm.ExpiresAt
+		}
+	}
+	lifetime := expiresAt.Sub(now)
 	if lifetime <= 0 {
-		return "", fmt.Errorf("federation: resolved entity's trust chain already expired at %s", resolved.ExpiresAt)
+		return "", fmt.Errorf("federation: resolved entity's trust chain (or an included trust mark) already expired at %s", expiresAt)
+	}
+
+	var rawTrustMarks []intfed.RawTrustMark
+	if len(trustMarks) > 0 {
+		rawTrustMarks = make([]intfed.RawTrustMark, len(trustMarks))
+		for j, tm := range trustMarks {
+			rawTrustMarks[j] = tm.RawTrustMark
+		}
 	}
 
 	return intfed.CreateResolveResponse(intfed.CreateResolveResponseParams{
 		Signer: i.deps.Signer, Algorithm: i.deps.Algorithm, KeyID: i.deps.KeyID,
 		Issuer: i.cfg.EntityID, Subject: resolved.EntityID,
 		Now: now, Lifetime: lifetime,
-		Metadata: metadata, TrustChain: resolved.Tokens,
+		Metadata: metadata, TrustChain: resolved.Tokens, TrustMarks: rawTrustMarks,
 	})
 }
 

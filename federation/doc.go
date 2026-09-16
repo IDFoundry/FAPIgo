@@ -124,7 +124,12 @@
 // parses an incoming request's shape the same way SubjectFromFetchRequest/
 // TrustMarkFromStatusRequest already do for their own endpoints. Trust
 // Mark inclusion in a Resolve Response (§8.3's own "and Trust Marks for
-// an Entity") is not implemented in this version.
+// an Entity") is covered too: Response's own trustMarks parameter takes
+// a caller-verified []VerifiedTrustMark (typically produced by looping
+// over ResolvedEntity.TrustMarks and calling VerifyTrustMark on each,
+// keeping only the ones that verify — Response itself never verifies
+// one) and folds each entry's own expiry into the response's "exp" the
+// same way resolved.ExpiresAt already is.
 //
 // The Federation Historical Keys endpoint (§8.7) is covered on both
 // sides, unlike Resolve — publishing a rotated-out key's own lifetime

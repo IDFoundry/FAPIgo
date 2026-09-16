@@ -139,12 +139,16 @@
 // for an OpenID Provider that wants to accept a Relying Party's own
 // Entity Identifier as client_id without a prior registration step —
 // see AutomaticClientRepository's own doc comment for exactly which
-// registration shapes this first version supports (only
-// ClientAuthMethodPrivateKeyJWT; jwks or jwks_uri; CIBA and
+// registration shapes this first version supports: every
+// storage.ClientAuthMethod this module implements (private_key_jwt, and
+// every RFC 8705 mTLS method — self_signed_tls_client_auth reads the
+// RP's own certificate from its jwks/jwks_uri's own "x5c" member; the
+// four SAN-typed siblings each read their own plain-string RFC 8705
+// §2.1.2 metadata parameter directly); jwks or jwks_uri; CIBA and
 // client_credentials each gated by their own
-// AutomaticRegistrationConfig switch, off by default) and which it
-// deliberately doesn't yet (Explicit Registration, §12.2, is not
-// implemented by this package at all).
+// AutomaticRegistrationConfig switch, off by default. Deliberately not
+// yet implemented: Explicit Registration (§12.2, not implemented by
+// this package at all).
 // §12.1.1's own aud/sub/jti Request Object rules are enforced by the
 // server package via storage.RegisteredClientConfig's own
 // AutomaticFederationRegistration field, not by this package — a

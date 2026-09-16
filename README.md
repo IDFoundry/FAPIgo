@@ -175,7 +175,10 @@ role is tested against the OpenID Foundation conformance suite.
 > Trust Chain resolution (`Resolver`, §10, enforcing every `constraints`
 > claim and a resolver-wide path-length ceiling), self-issuance of an
 > entity's own Entity Configuration (`SelfIssuer`), Automatic Client
-> Registration for an OP (§12.1, `AutomaticClientRepository`), the
+> Registration for an OP (§12.1, `AutomaticClientRepository` —
+> including every RFC 8705 mTLS client authentication method, reading a
+> resolved RP's own certificate straight from its `jwks`/`jwks_uri`'s
+> own `x5c` member for `self_signed_tls_client_auth`), the
 > symmetric capability on the RP side (`client.DiscoverViaFederation` —
 > the same `DiscoveredMetadata` `client.Discover` produces, sourced from
 > a Trust-Chain-verified `openid_provider` object instead of a live

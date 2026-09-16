@@ -59,6 +59,50 @@ func TestRejectUnsupportedListingFiltersRejectsEachFilter(t *testing.T) {
 	}
 }
 
+func TestSubordinateListingFiltersFromRequestAllowsPlainRequest(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "https://ta.example.org/list", nil)
+	filters, err := federation.SubordinateListingFiltersFromRequest(r)
+	if err != nil {
+		t.Fatalf("SubordinateListingFiltersFromRequest: %v", err)
+	}
+	if len(filters.EntityTypes) != 0 || filters.TrustMarkedSet || filters.TrustMarkType != "" || filters.IntermediateSet {
+		t.Errorf("filters = %+v, want every field at its zero value", filters)
+	}
+}
+
+func TestSubordinateListingFiltersFromRequestParsesEveryFilter(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "https://ta.example.org/list?entity_type=openid_provider&entity_type=openid_relying_party&trust_marked=true&trust_mark_type=https%3A%2F%2Ffederation.example.org%2Fmarks%2Fcertified&intermediate=false", nil)
+	filters, err := federation.SubordinateListingFiltersFromRequest(r)
+	if err != nil {
+		t.Fatalf("SubordinateListingFiltersFromRequest: %v", err)
+	}
+	if len(filters.EntityTypes) != 2 || filters.EntityTypes[0] != "openid_provider" || filters.EntityTypes[1] != "openid_relying_party" {
+		t.Errorf("EntityTypes = %v, want [openid_provider openid_relying_party]", filters.EntityTypes)
+	}
+	if !filters.TrustMarkedSet || !filters.TrustMarked {
+		t.Errorf("TrustMarked/TrustMarkedSet = %v/%v, want true/true", filters.TrustMarked, filters.TrustMarkedSet)
+	}
+	if filters.TrustMarkType != "https://federation.example.org/marks/certified" {
+		t.Errorf("TrustMarkType = %q", filters.TrustMarkType)
+	}
+	if !filters.IntermediateSet || filters.Intermediate {
+		t.Errorf("Intermediate/IntermediateSet = %v/%v, want false/true", filters.Intermediate, filters.IntermediateSet)
+	}
+}
+
+func TestSubordinateListingFiltersFromRequestRejectsInvalidBoolean(t *testing.T) {
+	for _, param := range []string{"trust_marked", "intermediate"} {
+		t.Run(param, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, "https://ta.example.org/list?"+param+"=yes", nil)
+			_, err := federation.SubordinateListingFiltersFromRequest(r)
+			var fedErr *federation.Error
+			if !errors.As(err, &fedErr) || fedErr.Code() != federation.ErrorInvalidRequest || fedErr.HTTPStatus() != http.StatusBadRequest {
+				t.Errorf("error = %v, want a *federation.Error with code invalid_request/400", err)
+			}
+		})
+	}
+}
+
 func postFormRequest(t *testing.T, url, body string) *http.Request {
 	t.Helper()
 	r := httptest.NewRequest(http.MethodPost, url, strings.NewReader(body))

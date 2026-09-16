@@ -48,11 +48,17 @@
 // entities are subordinates (an embedder's own storage, not a
 // federation.SubordinateRepository this package doesn't define — see
 // SubordinateStatementParams' own doc comment for why a direct-call-
-// argument shape was chosen over a lookup interface), or support any of
-// §8.2's four Subordinate Listing filter parameters (entity_type,
-// trust_marked, trust_mark_type, intermediate) — RejectUnsupportedListingFilters
-// exists specifically because this package cannot honor them, not
-// despite that.
+// argument shape was chosen over a lookup interface), or decide
+// whether a given filtered listing is actually correct — §8.2's four
+// Subordinate Listing filter parameters (entity_type, trust_marked,
+// trust_mark_type, intermediate) are parsed and validated by
+// SubordinateListingFiltersFromRequest, the same "this package only
+// validates the request shape, the embedder's own storage answers the
+// query" division TrustMarkListingFilters already establishes for its
+// own endpoint; an embedder that can't honor any of the four instead
+// calls RejectUnsupportedListingFilters, per §8.2's own requirement
+// that an unsupported filter be rejected outright rather than silently
+// ignored.
 //
 // Resolve enforces the resolver-wide Limits.MaxPathLength ceiling (the
 // constraint most directly relevant to resource exhaustion) and every

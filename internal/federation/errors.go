@@ -109,4 +109,30 @@ var (
 	// ErrTrustMarkStatusResponseNotYetValid indicates the response's iat
 	// claim is in the future beyond the configured clock-skew tolerance.
 	ErrTrustMarkStatusResponseNotYetValid = errors.New("federation: trust mark status response is not yet valid")
+
+	// ErrResolveResponseWrongType indicates a Resolve Response JWT's
+	// "typ" header was not "resolve-response+jwt" (OpenID Federation 1.0
+	// §8.3.2's own "Resolve responses without a typ header parameter or
+	// with a different typ value MUST be rejected").
+	ErrResolveResponseWrongType = errors.New("federation: resolve response header typ is not resolve-response+jwt")
+
+	// ErrResolveResponseIssuerMismatch indicates a Resolve Response's
+	// own "iss" claim did not equal the entity the caller established
+	// trust in before checking the response's signature.
+	ErrResolveResponseIssuerMismatch = errors.New("federation: resolve response's iss does not match the trusted issuer")
+
+	// ErrResolveResponseSubjectMismatch indicates a Resolve Response's
+	// own "sub" claim did not equal the entity the caller actually
+	// queried about — without this check, a resolve endpoint's response
+	// about a different subject it happened to also answer could be
+	// replayed as an answer to this query.
+	ErrResolveResponseSubjectMismatch = errors.New("federation: resolve response's sub does not match the queried subject")
+
+	// ErrResolveResponseExpired indicates the response's exp claim is
+	// not after the verification time.
+	ErrResolveResponseExpired = errors.New("federation: resolve response has expired")
+
+	// ErrResolveResponseNotYetValid indicates the response's iat claim
+	// is in the future beyond the configured clock-skew tolerance.
+	ErrResolveResponseNotYetValid = errors.New("federation: resolve response is not yet valid")
 )

@@ -97,6 +97,23 @@
 // exist to move the wire format, never to decide or record a Trust
 // Mark's actual standing.
 //
+// The Resolve endpoint (§8.3) is covered on the consumer side only:
+// Resolver.ResolveViaEndpoint queries a peer's resolve endpoint instead
+// of walking a Trust Chain hop by hop itself, trusting the response by
+// resolving its own issuer as a fresh Trust Chain first — the same
+// "establish trust in the issuer before trusting its signature" pattern
+// VerifyTrustMark/CheckTrustMarkStatus already use — then verifying the
+// signature against that issuer's own vouched-for key, never a key the
+// response itself merely claims to hold. There is no producer-side
+// counterpart yet (no ResolveIssuer serving the endpoint itself):
+// intfed.CreateResolveResponse exists as a low-level signing primitive,
+// but building one from a real resolution requires the raw
+// compact-serialized Entity Statement tokens that composed the chain
+// for its own "trust_chain" claim — data Resolver.Resolve's
+// ResolvedEntity does not currently expose (only entity ID names, in
+// Chain) — so wiring an embedder-facing producer is a separate,
+// larger change to Resolve's own internals, not implemented here.
+//
 // Automatic client registration (OpenID Federation 1.0 §12.1) is
 // implemented by AutomaticClientRepository/AutomaticClientKeySource,
 // for an OpenID Provider that wants to accept a Relying Party's own

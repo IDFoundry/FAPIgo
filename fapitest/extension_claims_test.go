@@ -78,18 +78,50 @@ func TestReturnInTokenClaimsPropagatesToIssuedAccessToken(t *testing.T) {
 	}
 }
 
-func TestUnregisteredExtensionParameterIsRejectedAtPAR(t *testing.T) {
-	// No registry configured at all: every non-core parameter must be
-	// rejected, not silently accepted — see server.Config.Extensions.
+// RFC 6749 §3.1 / RFC 9126 §2.1: an unrecognized authorization request
+// parameter must not fail an otherwise-valid request — end to end over
+// real HTTP, not just at the extension/server package level, since an
+// OIDF HAIP conformance run against this package caught exactly this
+// (a deliberately injected, unrecognized parameter failing PAR). With no
+// registry configured, x_account_hint is unregistered, so the flow must
+// still succeed — but "ignored" is not "silently preserved" (see
+// extension/doc.go): the value must not surface anywhere downstream,
+// including a resource server's view of the resulting access token's
+// claims, which is exactly where TestReturnInTokenClaimsPropagatesToIssuedAccessToken
+// (above) proves it *does* surface when the same parameter is registered
+// with ReturnInTokenClaims.
+func TestUnregisteredExtensionParameterIsIgnoredAndNotPropagated(t *testing.T) {
 	h := fapitest.New(t, fapitest.Config{Profile: server.ProfileFAPISecurityWithMessageSigning})
 	ctx := context.Background()
 
-	req := client.BeginAuthorizationRequest{Scope: []string{"openid"}}
+	req := client.BeginAuthorizationRequest{Scope: []string{"openid", "accounts"}}
 	if err := extension.Set(&req.Extensions, accountHintDef, "acc-1"); err != nil {
 		t.Fatalf("extension.Set: %v", err)
 	}
 
-	if _, err := h.RunAuthorizationCodeFlowWithRequest(ctx, req); err == nil {
-		t.Fatalf("RunAuthorizationCodeFlowWithRequest(unregistered extension) = nil error, want error")
+	tokens, err := h.RunAuthorizationCodeFlowWithRequest(ctx, req)
+	if err != nil {
+		t.Fatalf("RunAuthorizationCodeFlowWithRequest(unregistered extension) = %v, want nil error", err)
+	}
+
+	target, err := url.Parse("https://rs.fapitest.internal/accounts")
+	if err != nil {
+		t.Fatalf("parse target url: %v", err)
+	}
+	proof, err := h.NewResourceRequestDPoPProof(ctx, "GET", target, tokens.AccessToken.Reveal())
+	if err != nil {
+		t.Fatalf("NewResourceRequestDPoPProof: %v", err)
+	}
+	authz, err := h.Resource.Verify(ctx, resource.VerifyRequest{
+		Method:        "GET",
+		URL:           target,
+		Authorization: "DPoP " + tokens.AccessToken.Reveal(),
+		DPoPProofs:    []string{proof},
+	})
+	if err != nil {
+		t.Fatalf("resource.Verify: %v", err)
+	}
+	if _, present := authz.Claims["x_account_hint"]; present {
+		t.Errorf("access token claims contain x_account_hint, want it dropped as unregistered")
 	}
 }

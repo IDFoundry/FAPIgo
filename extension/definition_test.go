@@ -120,14 +120,31 @@ func TestRegistryParseAcceptsRegisteredParameter(t *testing.T) {
 	}
 }
 
-func TestRegistryParseRejectsUnregisteredParameter(t *testing.T) {
+// RFC 6749 §3.1 / RFC 9126 §2.1: an unrecognized parameter must not
+// fail an otherwise-valid request. Parse also deletes it from params in
+// place — "ignored" is not "silently preserved" (see doc.go) — so a
+// caller persisting params afterward never sees it either.
+func TestRegistryParseIgnoresAndStripsUnregisteredParameter(t *testing.T) {
 	reg, err := extension.NewRegistry(accountHintDef)
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
 	}
-	params := map[string]json.RawMessage{"x_unknown": rawJSON(t, "value")}
-	if _, err := reg.Parse(params, nil, extension.SourcePlainParameter); !errors.Is(err, extension.ErrUnregisteredParameter) {
-		t.Fatalf("Parse(unregistered) error = %v, want ErrUnregisteredParameter", err)
+	params := map[string]json.RawMessage{
+		"x_account_hint": rawJSON(t, accountHint{AccountID: "acc-2"}),
+		"x_unknown":      rawJSON(t, "value"),
+	}
+	values, err := reg.Parse(params, nil, extension.SourcePlainParameter)
+	if err != nil {
+		t.Fatalf("Parse(unregistered) error = %v, want nil", err)
+	}
+	if got, ok := extension.Get(values, accountHintDef); !ok || got.AccountID != "acc-2" {
+		t.Errorf("Get after Parse = %+v, %v; want acc-2, true", got, ok)
+	}
+	if _, present := params["x_unknown"]; present {
+		t.Errorf("params still contains x_unknown after Parse, want it stripped")
+	}
+	if _, present := params["x_account_hint"]; !present {
+		t.Errorf("params no longer contains x_account_hint after Parse, want it kept")
 	}
 }
 

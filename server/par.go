@@ -78,6 +78,20 @@ var coreAuthorizationParameters = map[string]struct{}{
 	// what a request asks for. It only needs to not be rejected as an
 	// unregistered parameter.
 	"response_mode": {},
+
+	// acr_values (OIDC Core §3.1.2.1) lets a client request one or more
+	// Authentication Context Class References. server/backchannel_authentication.go's
+	// coreBackchannelAuthenticationParameters has always listed this for
+	// CIBA; client/begin_authorization.go has sent it on the browser/PAR
+	// path since it gained BeginAuthorizationRequest.ACRValues, but this
+	// package never listed it as core here, so a PAR request carrying it
+	// was rejected outright as unregistered before this package started
+	// ignoring (rather than rejecting on) unrecognized parameters — see
+	// checkExtensions. Listing it here only stops it from being dropped;
+	// this package still does not read its value or surface the
+	// requested ACR to a deployment before interaction the way CIBA's
+	// checkBackchannelExtensions does.
+	"acr_values": {},
 }
 
 // FormParameter is one name/value pair from a form-encoded request body,
@@ -489,6 +503,18 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 	if err != nil {
 		return nil, nil, newError(ErrorInvalidRequestObject, 400, "request object verification failed", err)
 	}
+	// Same RFC 9101 §5 / PAR-2.1 prohibition as the sibling-parameter
+	// check above, but for "request_uri" claimed *inside* the signed
+	// request object instead of alongside it. This can no longer rely on
+	// checkExtensions'/Registry.Parse's own unregistered-parameter
+	// handling to catch it: that now ignores (and strips) an unrecognized
+	// name rather than rejecting the request over it (RFC 6749 §3.1), so
+	// without this explicit check a request_uri smuggled inside the
+	// object would be silently dropped and the request would succeed —
+	// exactly what PAR-2.1 forbids.
+	if _, hasRequestURI := verified.Parameters["request_uri"]; hasRequestURI {
+		return nil, nil, newError(ErrorInvalidRequestObject, 400, "request object must not contain request_uri", nil)
+	}
 	tokenClaims, checkErr := s.checkExtensions(ctx, client.ID(), verified.Parameters, extension.SourceRequestObject)
 	if checkErr != nil {
 		return nil, nil, checkErr
@@ -497,17 +523,26 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 }
 
 // checkExtensions validates every non-core parameter in params against
-// Config.Extensions, rejecting any name without a registered Definition
-// (Config.Extensions is never nil once New has run — see server.New),
-// and returns the claims-eligible subset (ReturnInTokenClaims) ready to
-// copy into a future access/ID token.
+// Config.Extensions (Config.Extensions is never nil once New has run —
+// see server.New), and returns the claims-eligible subset
+// (ReturnInTokenClaims) ready to copy into a future access/ID token. A
+// name with no registered Definition is not rejected — RFC 6749 §3.1 and
+// RFC 9126 §2.1 require this package to accept an otherwise-valid
+// request in spite of it — but Registry.Parse deletes it from params in
+// place as it goes, so it is dropped, not silently forwarded into
+// storage or a token claim; see Registry.Parse's own doc comment.
+// request_uri is a case that still needs explicit rejection regardless
+// of source — see the two dedicated checks in
+// resolveAuthorizationParameters, one for a sibling form parameter and
+// one for a claim inside a request object — since PAR-2.1's prohibition
+// on it doesn't turn on whether this package happens to have a
+// Definition registered for it.
 //
-// The rejection uses ErrorInvalidRequestObject, not ErrorInvalidRequest,
-// when source is extension.SourceRequestObject: the offending parameter
-// came from inside a signed request object, not the outer form body, so
-// JAR-6.2 is the applicable error family — matching what a client
-// embedding e.g. a stray "request_uri" claim inside its own request
-// object should see.
+// A recognized-but-invalid parameter is still rejected. That rejection
+// uses ErrorInvalidRequestObject, not ErrorInvalidRequest, when source
+// is extension.SourceRequestObject: the offending parameter came from
+// inside a signed request object, not the outer form body, so JAR-6.2 is
+// the applicable error family.
 //
 // Also runs Dependencies.AuthorizationCodeRARPolicy over any "authorization_details"
 // the request carries, once it's passed structural validation — see
@@ -525,7 +560,7 @@ func (s *Server) checkExtensions(ctx context.Context, clientID fapi.ClientID, pa
 		if source == extension.SourceRequestObject {
 			code = ErrorInvalidRequestObject
 		}
-		return nil, newError(code, 400, "request contains an unregistered or invalid parameter", err)
+		return nil, newError(code, 400, "request contains an invalid parameter", err)
 	}
 	requestedAuthorizationDetails, err := s.parseRequestedAuthorizationDetails(params)
 	if err != nil {

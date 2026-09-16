@@ -34,11 +34,28 @@ func NewRegistry(defs ...Registered) (*Registry, error) {
 
 // Parse validates params against the registry: every name not present
 // in core (the caller's own set of standard protocol parameter names,
-// already handled elsewhere) must have a registered Definition — a name
-// with neither is rejected with ErrUnregisteredParameter, the
-// default-reject behavior this package requires. source identifies
-// where params came from (a plain parameter or a signed request
-// object), checked against each matching Definition's AllowedSources.
+// already handled elsewhere) must have a registered Definition to be
+// parsed and validated. A name with neither is an unrecognized
+// authorization request parameter — RFC 6749 §3.1 and RFC 9126 §2.1
+// require an authorization server to accept an otherwise-valid request
+// in spite of one (OIDC Core §3.1.2.2 asks the same of an OIDC request),
+// so Parse does not fail the request over it. It also does not merely
+// tolerate it: Parse deletes the name from params in place before
+// returning, so an unrecognized parameter's value never reaches
+// storage, an audit sink, or a token claim — "ignored" and "silently
+// preserved" are different things, and this package only does the
+// former (see doc.go). params is therefore mutated as a side effect;
+// callers that need the original request as submitted must copy it
+// first. source identifies where params came from (a plain parameter or
+// a signed request object), checked against each matching Definition's
+// AllowedSources.
+//
+// This is authorization-request-parameter scoped, not a general
+// extensibility stance: an authorization_details array (RFC 9396) is a
+// structurally distinct, closed schema validated by RARRegistry.Parse
+// instead, which does reject an unknown "type" or unknown JSON member —
+// RFC 9396 defines it as a bounded array of typed detail objects, not an
+// open parameter list, so RFC 6749 §3.1's rule doesn't apply to it.
 func (r *Registry) Parse(params map[string]json.RawMessage, core map[string]struct{}, source Source) (Values, error) {
 	var values Values
 	for name, raw := range params {
@@ -47,7 +64,8 @@ func (r *Registry) Parse(params map[string]json.RawMessage, core map[string]stru
 		}
 		def, ok := r.byName[name]
 		if !ok {
-			return Values{}, fmt.Errorf("%w: %q", ErrUnregisteredParameter, name)
+			delete(params, name)
+			continue
 		}
 		if err := def.validate(raw, source, &values); err != nil {
 			return Values{}, err

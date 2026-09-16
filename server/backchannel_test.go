@@ -865,7 +865,13 @@ func TestBeginBackchannelAuthenticationOAuthOnlyRejectsOpenIDScope(t *testing.T)
 	}
 }
 
-func TestBeginBackchannelAuthenticationRejectsUnregisteredExtensionParameter(t *testing.T) {
+// checkBackchannelExtensions shares checkExtensions'/Registry.Parse's
+// mechanism (see server/par.go's own doc comments): RFC 6749 §3.1 / RFC
+// 9126 §2.1 require an unrecognized parameter to be ignored, not to fail
+// an otherwise-valid request — an OIDF HAIP conformance run against this
+// package caught the previous reject-on-unregistered behavior as a spec
+// violation.
+func TestBeginBackchannelAuthenticationIgnoresUnregisteredExtensionParameter(t *testing.T) {
 	h, _ := newHarnessWithBackchannel(t)
 	params := standardBackchannelParams(t)
 	params["bogus_extension_parameter"] = jsonRaw(t, "value")
@@ -877,12 +883,8 @@ func TestBeginBackchannelAuthenticationRejectsUnregisteredExtensionParameter(t *
 	if err != nil {
 		t.Fatalf("BeginBackchannelAuthentication: %v", err)
 	}
-	localErr, ok := action.(server.BackchannelAuthenticationLocalError)
-	if !ok {
-		t.Fatalf("action = %T, want server.BackchannelAuthenticationLocalError", action)
-	}
-	if localErr.Error.Code() != server.ErrorInvalidRequest {
-		t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequest)
+	if _, ok := action.(server.BackchannelInteractionRequired); !ok {
+		t.Fatalf("action = %T, want server.BackchannelInteractionRequired", action)
 	}
 }
 

@@ -18,11 +18,16 @@
 // additionally bounds the number of detail objects, bytes per object,
 // total bytes, JSON depth, and duplicate/unknown JSON members.
 //
-// Any parameter without a registered Definition is rejected by default;
-// there is no production option to silently preserve unknown fields.
-// extension has no dependency on client or server and must stay that
-// way — wiring a Registry into server's authorization-parameter
-// validation and into client's outgoing request construction is the
-// integration step that depends on this package, not the other way
-// around.
+// An authorization request parameter without a registered Definition is
+// ignored, not rejected — RFC 6749 §3.1, RFC 9126 §2.1 and OIDC Core
+// §3.1.2.2 all require an authorization server to tolerate one rather
+// than fail the whole request — but "ignored" is not "silently
+// preserved": Registry.Parse deletes it from the caller's own params map
+// as it goes, so its value never reaches storage, an audit sink, or a
+// token claim. There is still no production option to silently forward
+// an unrecognized parameter's value anywhere. extension has no
+// dependency on client or server and must stay that way — wiring a
+// Registry into server's authorization-parameter validation and into
+// client's outgoing request construction is the integration step that
+// depends on this package, not the other way around.
 package extension

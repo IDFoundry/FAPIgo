@@ -319,7 +319,7 @@ func (s *Server) resolveBackchannelAuthenticationParameters(ctx context.Context,
 func (s *Server) checkBackchannelExtensions(ctx context.Context, clientID fapi.ClientID, params map[string]json.RawMessage) (map[string]json.RawMessage, *Error) {
 	values, err := s.cfg.Extensions.Parse(params, coreBackchannelAuthenticationParameters, extension.SourceRequestObject)
 	if err != nil {
-		return nil, newError(ErrorInvalidRequest, 400, "request contains an unregistered or invalid parameter", err)
+		return nil, newError(ErrorInvalidRequest, 400, "request contains an invalid parameter", err)
 	}
 	requestedAuthorizationDetails, err := s.parseRequestedAuthorizationDetails(params)
 	if err != nil {

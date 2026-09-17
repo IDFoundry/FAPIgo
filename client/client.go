@@ -113,7 +113,7 @@ func validateConfig(cfg Config) error {
 	case storage.ClientAuthMethodPrivateKeyJWT, storage.ClientAuthMethodSelfSignedTLSClientAuth,
 		storage.ClientAuthMethodTLSClientAuth, storage.ClientAuthMethodTLSClientAuthSANDNS,
 		storage.ClientAuthMethodTLSClientAuthSANURI, storage.ClientAuthMethodTLSClientAuthSANIP,
-		storage.ClientAuthMethodTLSClientAuthSANEmail:
+		storage.ClientAuthMethodTLSClientAuthSANEmail, storage.ClientAuthMethodAttestation:
 	default:
 		return fmt.Errorf("client: config: client_auth_method is invalid")
 	}
@@ -131,6 +131,13 @@ func validateConfig(cfg Config) error {
 		if !cfg.Algorithms.ClientAuthentication.IsValid() {
 			return fmt.Errorf("client: config: algorithms.client_authentication is required when client_auth_method is ClientAuthMethodPrivateKeyJWT")
 		}
+	}
+	// Algorithms.ClientAttestationPoP is required only under
+	// ClientAuthMethodAttestation — see its own doc comment for why
+	// this method needs no accompanying lifetime field the way
+	// ClientAuthMethodPrivateKeyJWT does.
+	if cfg.ClientAuthMethod == storage.ClientAuthMethodAttestation && !cfg.Algorithms.ClientAttestationPoP.IsValid() {
+		return fmt.Errorf("client: config: algorithms.client_attestation_pop is required when client_auth_method is ClientAuthMethodAttestation")
 	}
 	// Algorithms.DPoP is required only under SenderConstrainDPoP (the
 	// default) — an mTLS-sender-constrained client never builds a DPoP
@@ -285,6 +292,9 @@ func validateDependencies(cfg Config, deps Dependencies) error {
 	}
 	if cfg.Algorithms.UserInfoKeyManagement != 0 && deps.Decryption == nil {
 		return fmt.Errorf("client: dependencies: decryption is required when algorithms.userinfo_key_management is set")
+	}
+	if cfg.ClientAuthMethod == storage.ClientAuthMethodAttestation && deps.Attestation == nil {
+		return fmt.Errorf("client: dependencies: attestation is required when client_auth_method is ClientAuthMethodAttestation")
 	}
 	return nil
 }

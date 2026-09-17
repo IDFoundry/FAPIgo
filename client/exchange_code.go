@@ -180,24 +180,25 @@ func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationRe
 	// RFC 8705 mTLS client authentication method, no assertion is built
 	// at all — client_id is sent instead, and the TLS certificate
 	// Dependencies.HTTP's own transport presents is the credential.
-	buildTokenForm := func() ([]byte, error) {
+	buildTokenForm := func() ([]byte, map[string]string, error) {
 		form := map[string]string{
 			"grant_type":    "authorization_code",
 			"code":          resp.code,
 			"redirect_uri":  resp.redirectURI,
 			"code_verifier": resp.pkceVerifier,
 		}
-		if err := c.addClientAuthentication(form, assertionSigner, assertionKID); err != nil {
-			return nil, err
+		headers, err := c.addClientAuthentication(ctx, form, assertionSigner, assertionKID)
+		if err != nil {
+			return nil, nil, err
 		}
-		return par.EncodeForm(form), nil
+		return par.EncodeForm(form), headers, nil
 	}
 
-	form, err := buildTokenForm()
+	form, headers, err := buildTokenForm()
 	if err != nil {
 		return TokenSet{}, newError(ErrorInternal, "failed to build client assertion", err)
 	}
-	body, tokenErr := c.sendTokenRequest(ctx, dpopSigner, &tokenURL, buildTokenForm, form)
+	body, tokenErr := c.sendTokenRequest(ctx, dpopSigner, &tokenURL, buildTokenForm, form, headers)
 	if tokenErr != nil {
 		return TokenSet{}, tokenErr
 	}
@@ -249,9 +250,9 @@ func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationRe
 // single plain call relying entirely on Dependencies.HTTP's own
 // configured transport to present this client's certificate; mTLS has
 // no equivalent nonce-challenge/retry concept.
-func (c *Client) sendTokenRequest(ctx context.Context, dpopSigner crypto.Signer, tokenURL *url.URL, buildTokenForm func() ([]byte, error), form []byte) ([]byte, *Error) {
+func (c *Client) sendTokenRequest(ctx context.Context, dpopSigner crypto.Signer, tokenURL *url.URL, buildTokenForm func() ([]byte, map[string]string, error), form []byte, headers map[string]string) ([]byte, *Error) {
 	if c.cfg.SenderConstrain == storage.SenderConstrainMTLS {
-		body, status, _, err := c.postForm(ctx, tokenURL.String(), form, nil)
+		body, status, _, err := c.postForm(ctx, tokenURL.String(), form, headers)
 		if err != nil {
 			return nil, newError(ErrorInternal, errTokenRequestFailed, err)
 		}
@@ -260,7 +261,7 @@ func (c *Client) sendTokenRequest(ctx context.Context, dpopSigner crypto.Signer,
 		}
 		return body, nil
 	}
-	body, status, header, err := c.postTokenRequestWithDPoP(ctx, dpopSigner, tokenURL, form, c.cachedDPoPNonce(ctx, asNonceScope))
+	body, status, header, err := c.postTokenRequestWithDPoP(ctx, dpopSigner, tokenURL, form, c.cachedDPoPNonce(ctx, asNonceScope), headers)
 	if err != nil {
 		return nil, newError(ErrorInternal, errTokenRequestFailed, err)
 	}
@@ -273,11 +274,11 @@ func (c *Client) sendTokenRequest(ctx context.Context, dpopSigner crypto.Signer,
 	if nextNonce == "" || !isDPoPNonceError(body) {
 		return nil, parErrorFromResponse(body)
 	}
-	retryForm, buildErr := buildTokenForm()
+	retryForm, retryHeaders, buildErr := buildTokenForm()
 	if buildErr != nil {
 		return nil, newError(ErrorInternal, "failed to build client assertion", buildErr)
 	}
-	body, status, header, err = c.postTokenRequestWithDPoP(ctx, dpopSigner, tokenURL, retryForm, nextNonce)
+	body, status, header, err = c.postTokenRequestWithDPoP(ctx, dpopSigner, tokenURL, retryForm, nextNonce, retryHeaders)
 	if err != nil {
 		return nil, newError(ErrorInternal, errTokenRequestFailed, err)
 	}
@@ -330,7 +331,7 @@ func tokenTypeFor(senderConstrain storage.SenderConstrain) string {
 // it. A fresh proof (new iat and jti) is built on every call, including
 // a retry after a use_dpop_nonce challenge: reusing the first proof's
 // timestamp/jti for the retry would make it look replayed.
-func (c *Client) postTokenRequestWithDPoP(ctx context.Context, dpopSigner crypto.Signer, tokenURL *url.URL, form []byte, nonce string) ([]byte, int, http.Header, error) {
+func (c *Client) postTokenRequestWithDPoP(ctx context.Context, dpopSigner crypto.Signer, tokenURL *url.URL, form []byte, nonce string, extraHeaders map[string]string) ([]byte, int, http.Header, error) {
 	proof, err := dpop.CreateProof(dpop.ProofRequest{
 		Signer: dpopSigner, Algorithm: c.cfg.Algorithms.DPoP,
 		Method: http.MethodPost, URL: tokenURL, Now: c.deps.Clock.Now(),
@@ -339,7 +340,7 @@ func (c *Client) postTokenRequestWithDPoP(ctx context.Context, dpopSigner crypto
 	if err != nil {
 		return nil, 0, nil, fmt.Errorf("build DPoP proof: %w", err)
 	}
-	return c.postForm(ctx, tokenURL.String(), form, map[string]string{"DPoP": proof})
+	return c.postForm(ctx, tokenURL.String(), form, mergeHeaders(map[string]string{"DPoP": proof}, extraHeaders))
 }
 
 // isDPoPNonceError reports whether body is an OAuth error response whose

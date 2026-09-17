@@ -51,31 +51,47 @@ func (c *Client) newSigner(ctx context.Context, purpose keys.SigningPurpose, alg
 	return signer, info.KeyID, nil
 }
 
-// addClientAuthentication adds this client's authentication to form — a
-// freshly signed client_assertion (new iat and jti every call, exactly
-// as single-use as a DPoP proof — see ExchangeCode's own buildTokenForm
-// doc comment for why reusing one across a retry gets rejected as jti
-// replay) under ClientAuthMethodPrivateKeyJWT, or a plain client_id
-// under any RFC 8705 §2 mTLS method, where the TLS certificate
-// Dependencies.HTTP's own transport presents is the credential instead.
-// Shared by every closure that builds a token-endpoint form —
-// ExchangeCode, PollBackchannelAuthentication, and
-// RequestClientCredentialsToken — so this decision lives in one place
-// rather than being reimplemented per call site.
-func (c *Client) addClientAuthentication(form map[string]string, assertionSigner crypto.Signer, assertionKID string) error {
-	if c.cfg.ClientAuthMethod != storage.ClientAuthMethodPrivateKeyJWT {
+// addClientAuthentication adds this client's authentication for one
+// request, either to form or as extra HTTP headers to send alongside
+// it (never both):
+//
+//   - ClientAuthMethodPrivateKeyJWT: a freshly signed client_assertion
+//     (new iat and jti every call, exactly as single-use as a DPoP
+//     proof — see ExchangeCode's own buildTokenForm doc comment for
+//     why reusing one across a retry gets rejected as jti replay),
+//     added to form. No headers.
+//   - ClientAuthMethodAttestation: the two Attestation-Based Client
+//     Authentication headers (draft-ietf-oauth-attestation-based-client-auth-07
+//     §5) — see attestationHeaders' own doc comment. form is left
+//     untouched: no client_id or client_assertion* field is sent
+//     alongside attestation headers.
+//   - any other (RFC 8705 §2 mTLS) method: a plain client_id in form,
+//     since the TLS certificate Dependencies.HTTP's own transport
+//     presents is the credential instead. No headers.
+//
+// Shared by every closure that builds a PAR, token-endpoint or CIBA
+// backchannel-authentication request form — BeginAuthorization,
+// BeginBackchannelAuthentication, PollBackchannelAuthentication,
+// ExchangeCode, and RequestClientCredentialsToken — so this decision
+// lives in one place rather than being reimplemented per call site.
+func (c *Client) addClientAuthentication(ctx context.Context, form map[string]string, assertionSigner crypto.Signer, assertionKID string) (map[string]string, error) {
+	switch c.cfg.ClientAuthMethod {
+	case storage.ClientAuthMethodPrivateKeyJWT:
+		assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
+			Signer: assertionSigner, Algorithm: c.cfg.Algorithms.ClientAuthentication, KeyID: assertionKID,
+			ClientID: c.cfg.ClientID.String(), Audience: c.cfg.Issuer.String(),
+			Now: c.deps.Clock.Now(), Lifetime: c.cfg.Limits.ClientAssertionLifetime, Random: c.deps.Random,
+		})
+		if err != nil {
+			return nil, err
+		}
+		form["client_assertion"] = assertion
+		form["client_assertion_type"] = clientassertion.AssertionType
+		return nil, nil
+	case storage.ClientAuthMethodAttestation:
+		return c.attestationHeaders(ctx)
+	default:
 		form["client_id"] = c.cfg.ClientID.String()
-		return nil
+		return nil, nil
 	}
-	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
-		Signer: assertionSigner, Algorithm: c.cfg.Algorithms.ClientAuthentication, KeyID: assertionKID,
-		ClientID: c.cfg.ClientID.String(), Audience: c.cfg.Issuer.String(),
-		Now: c.deps.Clock.Now(), Lifetime: c.cfg.Limits.ClientAssertionLifetime, Random: c.deps.Random,
-	})
-	if err != nil {
-		return err
-	}
-	form["client_assertion"] = assertion
-	form["client_assertion_type"] = clientassertion.AssertionType
-	return nil
 }

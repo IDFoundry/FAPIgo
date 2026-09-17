@@ -16,6 +16,29 @@ import (
 // within either retry sequence.
 const errTokenRequestFailed = "token request failed"
 
+// mergeHeaders combines base with extra, extra taking precedence on a
+// key collision (none expected in practice: a "DPoP" proof header and
+// the two Attestation-Based Client Authentication headers are always
+// disjoint). Returns base unchanged, not a copy, when extra is empty —
+// none of this package's callers mutate the returned map afterward.
+// Shared by every postXxxWithDPoP helper (token, PAR, CIBA backchannel)
+// that needs to attach a caller-supplied extra header — currently only
+// addClientAuthentication's Attestation branch — alongside its own
+// hardcoded DPoP proof header.
+func mergeHeaders(base map[string]string, extra map[string]string) map[string]string {
+	if len(extra) == 0 {
+		return base
+	}
+	merged := make(map[string]string, len(base)+len(extra))
+	for k, v := range base {
+		merged[k] = v
+	}
+	for k, v := range extra {
+		merged[k] = v
+	}
+	return merged
+}
+
 // postFormResponse is a hardened application/x-www-form-urlencoded POST:
 // bounded by c.cfg.Limits.HTTPTimeout and c.cfg.Limits.MaxHTTPResponseBytes,
 // with every extra header added by extraHeaders. fapihttp.Client.Fetch

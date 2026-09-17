@@ -50,4 +50,17 @@ type Dependencies struct {
 	// optimization entirely; pass NewInMemoryDPoPNonceCache() to enable
 	// it, the same deliberate opt-in Clock: SystemClock{} already is.
 	DPoPNonceCache DPoPNonceCache
+
+	// Attestation supplies the pre-issued Client Attestation JWT this
+	// client attaches to every PAR/token/CIBA request under
+	// storage.ClientAuthMethodAttestation — see AttestationSource's own
+	// doc comment. The Client Instance Key each request's own fresh
+	// Client Attestation PoP JWT is signed with instead comes from Keys
+	// above, under the keys.ClientAttestationPoPSigning purpose, the
+	// same "keys are handles and operations, never raw private keys"
+	// convention every other signing need in this struct already
+	// follows. Required exactly when Config.ClientAuthMethod is
+	// storage.ClientAuthMethodAttestation; nil otherwise, the same
+	// opt-in shape as Decryption above.
+	Attestation AttestationSource
 }

@@ -11,6 +11,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/fapihttp"
+	"github.com/idfoundry/fapigo/fapitest"
 	"github.com/idfoundry/fapigo/federation"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/keys/ephemeral"
@@ -79,7 +80,7 @@ func buildFederationFetcher(resolved ResolvedConfig, allowLoopbackHTTP, federati
 			if !peerCertPool.AppendCertsFromPEM(certPEM) {
 				return nil, fapihttp.Config{}, nil, fmt.Errorf("federation: no certificates found in %s", resolved.TLSCertFile)
 			}
-			peerHTTPClient.Transport = &http.Transport{TLSClientConfig: peerTLSConfig(peerCertPool, nil)}
+			peerHTTPClient.Transport = &http.Transport{TLSClientConfig: fapitest.PeerTLSConfig(peerCertPool, nil)}
 		}
 	}
 

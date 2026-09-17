@@ -12,6 +12,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/fapihttp"
+	"github.com/idfoundry/fapigo/fapitest"
 	"github.com/idfoundry/fapigo/federation"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
@@ -114,7 +115,7 @@ func (d *dynamicFederationClients) rebuild(trustAnchors []federation.TrustAnchor
 	}
 	httpClient := &http.Client{Timeout: d.cfg.HTTPTimeout}
 	if d.cfg.PeerCertPool != nil {
-		httpClient.Transport = &http.Transport{TLSClientConfig: peerTLSConfig(d.cfg.PeerCertPool, allowedPrivateHosts)}
+		httpClient.Transport = &http.Transport{TLSClientConfig: fapitest.PeerTLSConfig(d.cfg.PeerCertPool, allowedPrivateHosts)}
 	}
 	fetcherCfg := d.cfg.FetcherCfg
 	fetcherCfg.AllowedPrivateHosts = allowedPrivateHosts

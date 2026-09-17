@@ -3,10 +3,13 @@ package main
 import (
 	"crypto/tls"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -161,5 +164,105 @@ func TestSmokeFederationWellKnownEndpoint(t *testing.T) {
 	}
 	if len(opMeta.ClientRegistrationTypesSupported) != 1 || opMeta.ClientRegistrationTypesSupported[0] != "automatic" {
 		t.Errorf("openid_provider.client_registration_types_supported = %v, want [\"automatic\"]", opMeta.ClientRegistrationTypesSupported)
+	}
+}
+
+// minimalFederationResolvedConfig builds the smallest ResolvedConfig
+// newServerMux accepts with Federation set — the same shape
+// TestSmokeFederationWellKnownEndpoint uses, factored out for the
+// newServerMux-level unit tests below, which don't need a real TLS
+// listener at all (they only exercise wiring/config-validation errors,
+// never make a request against the built mux).
+func minimalFederationResolvedConfig(t *testing.T) ResolvedConfig {
+	t.Helper()
+	const testClientID = fapi.ClientID("federation-unit-test-client")
+	registered, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
+		ID:                       testClientID,
+		RedirectURIs:             []fapi.RegisteredRedirectURI{"https://rp.unittest.internal/callback"},
+		ClientAssertionAlgorithm: fapi.ES256,
+		AllowedScopes:            []string{"openid"},
+	})
+	if err != nil {
+		t.Fatalf("build registered client: %v", err)
+	}
+	issuer, err := fapi.ParseIssuerURL("https://as.unittest.internal")
+	if err != nil {
+		t.Fatalf("parse issuer: %v", err)
+	}
+	return ResolvedConfig{
+		ListenAddr:        "127.0.0.1:0",
+		Issuer:            issuer,
+		Profile:           server.ProfileFAPISecurity,
+		DefaultSubject:    smokeSubject,
+		Algorithms:        server.RecommendedAlgorithms(),
+		Limits:            server.RecommendedLimits(),
+		AccessTokenFormat: AccessTokenFormatJWT,
+		Clients:           []storage.RegisteredClient{registered},
+		ClientKeys:        []ephemeral.ClientKeySpec{{ClientID: testClientID, JWKS: json.RawMessage(`{"keys":[]}`)}},
+		AdvertisedScopes:  []string{"openid"},
+		Federation: &ResolvedFederation{
+			EntityID:      issuer.String(),
+			TrustAnchors:  []federation.TrustAnchor{{EntityID: "https://ta.unittest.internal", JWKS: json.RawMessage(`{"keys":[]}`)}},
+			AllowedScopes: []string{"openid"},
+		},
+	}
+}
+
+// writePEMCertFile PEM-encodes cert's own DER bytes to a temp file and
+// returns its path — the on-disk shape newServerMux's federationFetcher
+// construction reads via resolved.TLSCertFile (selfSignedCert itself
+// stays deliberately in-memory-only; see its own doc comment).
+func writePEMCertFile(t *testing.T, cert tls.Certificate) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "server.crt")
+	f, err := os.Create(path) // #nosec G304 -- t.TempDir()'s own path, not untrusted input
+	if err != nil {
+		t.Fatalf("create cert file: %v", err)
+	}
+	defer f.Close()
+	if err := pem.Encode(f, &pem.Block{Type: "CERTIFICATE", Bytes: cert.Certificate[0]}); err != nil {
+		t.Fatalf("pem.Encode: %v", err)
+	}
+	return path
+}
+
+// TestNewServerMuxPinsFederationPeerCert confirms newServerMux, given a
+// real on-disk TLS cert file, builds successfully (the federationFetcher
+// construction path added for cmd/conformance-federation-trust-anchor's
+// own peer — reading the file, parsing it into a *x509.CertPool — never
+// errors against a well-formed cert).
+func TestNewServerMuxPinsFederationPeerCert(t *testing.T) {
+	cert, _ := selfSignedCert(t)
+	resolved := minimalFederationResolvedConfig(t)
+	resolved.TLSCertFile = writePEMCertFile(t, cert)
+
+	if _, err := newServerMux(resolved, false, false, false, false, false, ""); err != nil {
+		t.Fatalf("newServerMux: %v", err)
+	}
+}
+
+// TestNewServerMuxRejectsMissingCertFile confirms a configured but
+// nonexistent TLSCertFile surfaces as an error from newServerMux, rather
+// than a federationFetcher silently built without TLS trust.
+func TestNewServerMuxRejectsMissingCertFile(t *testing.T) {
+	resolved := minimalFederationResolvedConfig(t)
+	resolved.TLSCertFile = filepath.Join(t.TempDir(), "does-not-exist.crt")
+
+	if _, err := newServerMux(resolved, false, false, false, false, false, ""); err == nil {
+		t.Fatalf("newServerMux(missing cert file) = nil error, want error")
+	}
+}
+
+// TestNewServerMuxRejectsInvalidTrustAnchorEntityID confirms a
+// syntactically malformed trust anchor entity_id — not caught by
+// Config.Resolve's own validation, which only checks non-empty (see
+// config.go) — is still rejected here, when newServerMux tries to parse
+// it into an AllowedPrivateHosts hostname.
+func TestNewServerMuxRejectsInvalidTrustAnchorEntityID(t *testing.T) {
+	resolved := minimalFederationResolvedConfig(t)
+	resolved.Federation.TrustAnchors[0].EntityID = "https://ta.example.org/%zz"
+
+	if _, err := newServerMux(resolved, false, false, false, false, false, ""); err == nil {
+		t.Fatalf("newServerMux(malformed trust anchor entity id) = nil error, want error")
 	}
 }

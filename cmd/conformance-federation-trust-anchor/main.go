@@ -281,8 +281,7 @@ func main() {
 			http.Error(w, "server_error", http.StatusInternalServerError)
 			return
 		}
-		w.Header().Set("Content-Type", federation.EntityStatementContentType)
-		_, _ = w.Write([]byte(token))
+		federation.WriteEntityStatement(w, token)
 	})
 	mux.HandleFunc("GET /fetch", func(w http.ResponseWriter, r *http.Request) {
 		sub, err := federation.SubjectFromFetchRequest(r)
@@ -303,8 +302,7 @@ func main() {
 			federation.WriteError(w, err)
 			return
 		}
-		w.Header().Set("Content-Type", federation.EntityStatementContentType)
-		_, _ = w.Write([]byte(token))
+		federation.WriteEntityStatement(w, token)
 	})
 
 	mux.HandleFunc("GET /list", func(w http.ResponseWriter, r *http.Request) {

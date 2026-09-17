@@ -119,8 +119,7 @@ func newFederationRPListener() (net.Listener, int, error) {
 func serveFederationRPServer(listener net.Listener, entityConfigurationJWT string) *federationRPServer {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+federation.WellKnownPath, func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", federation.EntityStatementContentType)
-		_, _ = w.Write([]byte(entityConfigurationJWT))
+		federation.WriteEntityStatement(w, entityConfigurationJWT)
 	})
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = srv.Serve(listener) }()

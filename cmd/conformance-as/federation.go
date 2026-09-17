@@ -47,7 +47,6 @@ func wellKnownFederationHandler(srv *server.Server, advertisedScopes []string, u
 			http.Error(w, "server_error", http.StatusInternalServerError)
 			return
 		}
-		w.Header().Set("Content-Type", federation.EntityStatementContentType)
-		_, _ = w.Write([]byte(token))
+		federation.WriteEntityStatement(w, token)
 	}
 }

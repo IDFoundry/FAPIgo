@@ -97,7 +97,11 @@ func newFederationRPListener() (net.Listener, int, error) {
 	if err != nil {
 		return nil, 0, fmt.Errorf("generate server certificate: %w", err)
 	}
-	listener, err := tls.Listen("tcp", "0.0.0.0:0", &tls.Config{
+	// G102: binding every interface, not just loopback, is deliberate —
+	// this driver's own dev-only listener must be reachable from inside
+	// the suite's docker-compose network via federationRPListenHost
+	// (host.docker.internal), which a loopback-only bind would refuse.
+	listener, err := tls.Listen("tcp", "0.0.0.0:0", &tls.Config{ //nolint:gosec
 		MinVersion:   tls.VersionTLS12,
 		Certificates: []tls.Certificate{cert},
 	})

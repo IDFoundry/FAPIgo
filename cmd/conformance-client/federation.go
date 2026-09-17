@@ -142,7 +142,11 @@ func runFederationRP(apiBase, evidenceDir string) error {
 		return fmt.Errorf("marshal trust anchor public jwks: %w", err)
 	}
 
-	rpMetadataJSON, err := json.Marshal(openIDRelyingPartyMetadata{
+	// G101 false positive on the struct literal below: gosec attributes
+	// it to this opening line, not TokenEndpointAuthMethod's own field
+	// line — its value is "private_key_jwt", a public OAuth client-
+	// authentication method identifier (RFC 7523 §2.2), not a secret.
+	rpMetadataJSON, err := json.Marshal(openIDRelyingPartyMetadata{ //nolint:gosec
 		ClientRegistrationTypes: []string{"automatic"},
 		ResponseTypes:           []string{"code"},
 		RedirectURIs:            []string{redirectURI},

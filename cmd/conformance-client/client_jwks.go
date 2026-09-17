@@ -34,7 +34,12 @@ type clientJWK struct {
 	Kid string `json:"kid"`
 	X   string `json:"x"`
 	Y   string `json:"y"`
-	D   string `json:"d"`
+	D   string `json:"d,omitempty"`
+	// Alg/Use are only ever set by federation_keys.go's own
+	// generateFederationJWK — loadFixedClientSigner (below) never reads
+	// either, so a -client-jwks file omitting them is unaffected.
+	Alg string `json:"alg,omitempty"`
+	Use string `json:"use,omitempty"`
 }
 
 type clientJWKS struct {

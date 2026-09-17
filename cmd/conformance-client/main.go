@@ -155,9 +155,23 @@ func main() {
 		return
 	}
 
+	if *profileName == "federation" {
+		if *clientAuthMTLS || *mtls {
+			log.Fatal("conformance-client: -client-auth-mtls/-mtls are not supported with -profile=federation")
+		}
+		// The federation RP plan has no fixed driverProfile-shaped
+		// variant table and needs its own live-hosted Entity
+		// Configuration endpoint (federation.go's own package doc
+		// comment) — dispatched separately, same reasoning as -profile=ciba.
+		if err := runFederationRP(*apiBase, *evidenceDir); err != nil {
+			log.Fatalf("conformance-client: %v", err)
+		}
+		return
+	}
+
 	profile, ok := profiles[*profileName]
 	if !ok {
-		log.Fatalf("conformance-client: unknown -profile %q (want baseline, message-signing, or ciba)", *profileName)
+		log.Fatalf("conformance-client: unknown -profile %q (want baseline, message-signing, ciba, or federation)", *profileName)
 	}
 	if *clientAuthMTLS && *profileName != "baseline" {
 		log.Fatalf("conformance-client: -client-auth-mtls is only supported with -profile=baseline, got %q", *profileName)

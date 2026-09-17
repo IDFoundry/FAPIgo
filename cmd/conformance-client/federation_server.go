@@ -16,18 +16,13 @@ package main
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/tls"
-	"crypto/x509"
-	"crypto/x509/pkix"
 	"fmt"
-	"math/big"
 	"net"
 	"net/http"
 	"time"
 
+	"github.com/idfoundry/fapigo/fapitest"
 	"github.com/idfoundry/fapigo/federation"
 )
 
@@ -42,39 +37,6 @@ import (
 // there's no network alias to lean on; host.docker.internal is Docker
 // Desktop's own built-in equivalent for exactly this direction.
 const federationRPListenHost = "host.docker.internal"
-
-// selfSignedServerCert generates a throwaway ECDSA P-256 self-signed
-// TLS server certificate for federationRPListenHost — the server-side
-// mirror of mtls.go's own selfSignedClientCert (ExtKeyUsageServerAuth,
-// plus a DNS SAN, since unlike a client certificate the suite's own
-// outbound fetch validates this one's hostname — confirmed necessary by
-// this exact class of failure once already, see
-// conformance/server/scripts/generate-server-cert.sh's own history).
-func selfSignedServerCert(host string) (tls.Certificate, error) {
-	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return tls.Certificate{}, fmt.Errorf("generate key: %w", err)
-	}
-	serial, err := rand.Int(rand.Reader, big.NewInt(1<<62))
-	if err != nil {
-		return tls.Certificate{}, fmt.Errorf("generate serial: %w", err)
-	}
-	template := &x509.Certificate{
-		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: host},
-		NotBefore:    time.Now().Add(-time.Minute),
-		NotAfter:     time.Now().Add(time.Hour),
-		KeyUsage:     x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		DNSNames:     []string{host, "localhost"},
-		IPAddresses:  []net.IP{net.IPv4(127, 0, 0, 1)},
-	}
-	der, err := x509.CreateCertificate(rand.Reader, template, template, &priv.PublicKey, priv)
-	if err != nil {
-		return tls.Certificate{}, fmt.Errorf("create certificate: %w", err)
-	}
-	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: priv}, nil
-}
 
 // federationRPServer serves this driver's own Entity Configuration at
 // federation.WellKnownPath — the one thing the suite's own RP test
@@ -93,7 +55,7 @@ type federationRPServer struct {
 // accept a connection before the handler that will serve it is ready —
 // see serveFederationRPServer, called only once that JWT exists.
 func newFederationRPListener() (net.Listener, int, error) {
-	cert, err := selfSignedServerCert(federationRPListenHost)
+	cert, err := fapitest.SelfSignedServerCert(federationRPListenHost)
 	if err != nil {
 		return nil, 0, fmt.Errorf("generate server certificate: %w", err)
 	}

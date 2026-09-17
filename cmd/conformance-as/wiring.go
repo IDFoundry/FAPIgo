@@ -2,7 +2,6 @@ package main
 
 import (
 	"crypto/rand"
-	"crypto/tls"
 	"crypto/x509"
 	"fmt"
 	"net/http"
@@ -12,6 +11,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/fapihttp"
+	"github.com/idfoundry/fapigo/federation"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/keys/ephemeral"
 	fapires "github.com/idfoundry/fapigo/resource"
@@ -46,7 +46,7 @@ const (
 // Factored out so the end-to-end smoke test can stand up the exact same
 // wiring main.go uses, against its own TLS listener, without going
 // through flags or a config file on disk.
-func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChallenge bool, userinfoSigning bool, ciba bool, clientCredentialsGrant bool, cibaApprovalUIToken string) (*http.ServeMux, error) {
+func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChallenge bool, userinfoSigning bool, ciba bool, clientCredentialsGrant bool, cibaApprovalUIToken string, federationTrustAnchorAdmin bool) (*http.ServeMux, error) {
 	endpoints, err := buildEndpoints(resolved.Issuer, allowLoopbackHTTP)
 	if err != nil {
 		return nil, err
@@ -113,23 +113,52 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 		return nil, err
 	}
 
-	// federationFetcher is deliberately separate from fetcher above, not
-	// a shared instance: it's the only one that needs
-	// fapihttp.Config.AllowedPrivateHosts (federation.Resolver's own
-	// outbound Trust Chain walk crosses container boundaries within
-	// docker-compose's own private network the same way
-	// cmd/conformance-federation-trust-anchor's own /resolve endpoint
-	// does — see that binary's own doc comment for the full reasoning)
-	// and, when a TLS cert file is actually configured (resolved.TLSCertFile
-	// — empty under -insecure-http, where there's no TLS to verify at
-	// all), a pinned root CA (the shared self-signed cert, trusted here
-	// the same specific way, not InsecureSkipVerify). fetcher's own use
-	// — resolving a registered client's own, potentially arbitrary
-	// jwks_uri — keeps its narrower, unmodified SSRF posture: no reason
-	// to widen what that path accepts just because this binary's
-	// federation peer also happens to need private-network access.
-	var federationFetcher *fapihttp.Client
+	// peerHTTPClient is this binary's own outbound TLS client for
+	// reaching another federation peer over docker-compose's private
+	// network — resolved.Federation != nil is the only case anything
+	// needs it. Pinned to the shared self-signed cert (RootCAs), when
+	// one is actually configured (resolved.TLSCertFile — empty under
+	// -insecure-http, where there's no TLS to verify at all), rather
+	// than InsecureSkipVerify.
+	var peerHTTPClient *http.Client
+	var peerCertPool *x509.CertPool
 	if resolved.Federation != nil {
+		peerHTTPClient = &http.Client{Timeout: httpFetchTimeout}
+		if resolved.TLSCertFile != "" {
+			certPEM, err := os.ReadFile(resolved.TLSCertFile) // #nosec G304 -- operator's own -cert/tls.cert_file config value, not untrusted input
+			if err != nil {
+				return nil, fmt.Errorf("federation: read cert file for peer trust pool: %w", err)
+			}
+			peerCertPool = x509.NewCertPool()
+			if !peerCertPool.AppendCertsFromPEM(certPEM) {
+				return nil, fmt.Errorf("federation: no certificates found in %s", resolved.TLSCertFile)
+			}
+			peerHTTPClient.Transport = &http.Transport{TLSClientConfig: peerTLSConfig(peerCertPool, nil)}
+		}
+	}
+
+	// federationFetcherCfg is fapihttp.Config's own shared template for
+	// every federation peer fetch this binary makes — AllowedPrivateHosts
+	// deliberately left unset here (federation.Resolver's own outbound
+	// Trust Chain walk crosses container boundaries within docker-compose's
+	// own private network the same way cmd/conformance-federation-trust-anchor's
+	// own /resolve endpoint does — see that binary's own doc comment for
+	// the full reasoning): under !federationTrustAnchorAdmin it's set
+	// once below from resolved.Federation.TrustAnchors' own hosts; under
+	// federationTrustAnchorAdmin, dynamicFederationClients computes it
+	// fresh on every rebuild instead (see its own doc comment for why a
+	// fixed set isn't enough there). Never shared with fetcher above —
+	// that one resolves a registered client's own, potentially
+	// arbitrary jwks_uri, and keeps its narrower, unmodified SSRF
+	// posture: no reason to widen what that unrelated path accepts.
+	federationFetcherCfg := fapihttp.Config{
+		MaxResponseBytes:  1 << 20,
+		RequestTimeout:    httpFetchTimeout,
+		MaxRedirects:      2,
+		AllowLoopbackHTTP: allowLoopbackHTTP,
+	}
+	var federationFetcher *fapihttp.Client
+	if resolved.Federation != nil && !federationTrustAnchorAdmin {
 		allowedPrivateHosts := make([]string, 0, len(resolved.Federation.TrustAnchors))
 		for _, ta := range resolved.Federation.TrustAnchors {
 			u, err := url.Parse(ta.EntityID)
@@ -138,25 +167,9 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 			}
 			allowedPrivateHosts = append(allowedPrivateHosts, u.Hostname())
 		}
-		peerHTTPClient := &http.Client{Timeout: httpFetchTimeout}
-		if resolved.TLSCertFile != "" {
-			certPEM, err := os.ReadFile(resolved.TLSCertFile) // #nosec G304 -- operator's own -cert/tls.cert_file config value, not untrusted input
-			if err != nil {
-				return nil, fmt.Errorf("federation: read cert file for peer trust pool: %w", err)
-			}
-			peerCertPool := x509.NewCertPool()
-			if !peerCertPool.AppendCertsFromPEM(certPEM) {
-				return nil, fmt.Errorf("federation: no certificates found in %s", resolved.TLSCertFile)
-			}
-			peerHTTPClient.Transport = &http.Transport{TLSClientConfig: &tls.Config{RootCAs: peerCertPool, MinVersion: tls.VersionTLS12}}
-		}
-		federationFetcher, err = fapihttp.New(peerHTTPClient, fapihttp.Config{
-			MaxResponseBytes:    1 << 20,
-			RequestTimeout:      httpFetchTimeout,
-			MaxRedirects:        2,
-			AllowLoopbackHTTP:   allowLoopbackHTTP,
-			AllowedPrivateHosts: allowedPrivateHosts,
-		})
+		cfg := federationFetcherCfg
+		cfg.AllowedPrivateHosts = allowedPrivateHosts
+		federationFetcher, err = fapihttp.New(peerHTTPClient, cfg)
 		if err != nil {
 			return nil, err
 		}
@@ -215,6 +228,17 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 		// above.
 		ClientCredentialsGrant: clientCredentialsGrant,
 	}
+	// autoRegLimits/autoRegCfg carry the values that would normally go
+	// straight into srvCfg.AutomaticRegistration (letting server.New
+	// build its own immutable AutomaticClientRepository internally) —
+	// under federationTrustAnchorAdmin, srvCfg.AutomaticRegistration is
+	// instead left at its zero value (server.New skips that internal
+	// construction entirely) and these same values feed
+	// newDynamicFederationClients below, once clientRepo/clientKeys
+	// exist to use as its own Underlying. See
+	// dynamicFederationClients' own doc comment for why.
+	var autoRegLimits federation.Limits
+	var autoRegCfg federation.AutomaticRegistrationConfig
 	if resolved.Federation != nil {
 		srvCfg.Federation = server.FederationConfig{
 			EntityID:       resolved.Federation.EntityID,
@@ -222,19 +246,45 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 			Lifetime:       federationStatementLifetime,
 			Algorithm:      federationSigningAlgorithm,
 		}
-		srvCfg.AutomaticRegistration = server.AutomaticRegistrationConfig{
-			TrustAnchors:         resolved.Federation.TrustAnchors,
-			AllowedScopes:        resolved.Federation.AllowedScopes,
+		autoRegLimits = federation.Limits{
 			MaxPathLength:        federationMaxPathLength,
 			MaxStatementLifetime: federationMaxStatementLifetime,
 			MaxClockSkew:         resolved.Limits.MaxClockSkew,
-			MaxCacheAge:          federationMaxCacheAge,
+		}
+		autoRegCfg = federation.AutomaticRegistrationConfig{
+			AllowedScopes: resolved.Federation.AllowedScopes,
+			MaxCacheAge:   federationMaxCacheAge,
+		}
+		if !federationTrustAnchorAdmin {
+			srvCfg.AutomaticRegistration = server.AutomaticRegistrationConfig{
+				TrustAnchors:         resolved.Federation.TrustAnchors,
+				AllowedScopes:        resolved.Federation.AllowedScopes,
+				MaxPathLength:        federationMaxPathLength,
+				MaxStatementLifetime: federationMaxStatementLifetime,
+				MaxClockSkew:         resolved.Limits.MaxClockSkew,
+				MaxCacheAge:          federationMaxCacheAge,
+			}
 		}
 	}
 	replayStore := memstore.NewReplayStore()
 	revocationStore := memstore.NewRevocationStore()
 	identityClaims := newStaticIdentityClaims(resolved.DefaultSubject, server.SystemClock{})
 	clientRepo := memstore.NewClientRepository(resolved.Clients)
+
+	// dynClients is non-nil only under federationTrustAnchorAdmin — see
+	// dynamicFederationClients' own doc comment. It wraps clientRepo/
+	// clientKeys as its own Underlying, exactly mirroring what
+	// server.New would otherwise build internally from
+	// srvCfg.AutomaticRegistration (left at its zero value in that
+	// case, above, so server.New skips its own construction).
+	var dynClients *dynamicFederationClients
+	if resolved.Federation != nil && federationTrustAnchorAdmin {
+		var err error
+		dynClients, err = newDynamicFederationClients(resolved.Federation.TrustAnchors, clientRepo, clientKeys, peerCertPool, httpFetchTimeout, federationFetcherCfg, autoRegLimits, autoRegCfg, federation.SystemClock{})
+		if err != nil {
+			return nil, fmt.Errorf("federation trust anchor admin: %w", err)
+		}
+	}
 
 	// Which server.AccessTokenIssuer/resource.AccessTokenResolver pair
 	// this run uses — see main.go's -access-token-format flag. Under
@@ -315,6 +365,10 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 		// see federationFetcher's own doc comment above for why.
 		FederationHTTP: federationFetcher,
 	}
+	if dynClients != nil {
+		srvDeps.Clients = dynClients
+		srvDeps.ClientKeys = dynClients
+	}
 	// Off by default (main.go's -dpop-nonce-challenge flag) — same
 	// reasoning as the resource-side block below: client.ExchangeCode
 	// already retries a use_dpop_nonce challenge, but the OIDF suite's
@@ -372,5 +426,5 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 	backchannel := newBackchannelHandler(srv, server.SystemClock{}, resolved.DefaultSubject)
 	userinfoURLValue := userinfoURL.URL()
 	accountsURLValue := accountsURL.URL()
-	return newRouter(srv, consent, backchannel, resolved.AdvertisedScopes, resourceVerifier, &userinfoURLValue, mtlsUserinfoURL, &accountsURLValue, identityClaims, clientRepo, userinfoSigning, cibaApprovalUIToken, resolved.Federation != nil), nil
+	return newRouter(srv, consent, backchannel, resolved.AdvertisedScopes, resourceVerifier, &userinfoURLValue, mtlsUserinfoURL, &accountsURLValue, identityClaims, clientRepo, userinfoSigning, cibaApprovalUIToken, resolved.Federation != nil, dynClients), nil
 }

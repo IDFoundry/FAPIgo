@@ -87,7 +87,7 @@ func TestSmokeFederationWellKnownEndpoint(t *testing.T) {
 		},
 	}
 
-	mux, err := newServerMux(resolved, false, false, false, false, false, "")
+	mux, err := newServerMux(resolved, false, false, false, false, false, "", false)
 	if err != nil {
 		t.Fatalf("build server mux: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestNewServerMuxPinsFederationPeerCert(t *testing.T) {
 	resolved := minimalFederationResolvedConfig(t)
 	resolved.TLSCertFile = writePEMCertFile(t, cert)
 
-	if _, err := newServerMux(resolved, false, false, false, false, false, ""); err != nil {
+	if _, err := newServerMux(resolved, false, false, false, false, false, "", false); err != nil {
 		t.Fatalf("newServerMux: %v", err)
 	}
 }
@@ -248,7 +248,7 @@ func TestNewServerMuxRejectsMissingCertFile(t *testing.T) {
 	resolved := minimalFederationResolvedConfig(t)
 	resolved.TLSCertFile = filepath.Join(t.TempDir(), "does-not-exist.crt")
 
-	if _, err := newServerMux(resolved, false, false, false, false, false, ""); err == nil {
+	if _, err := newServerMux(resolved, false, false, false, false, false, "", false); err == nil {
 		t.Fatalf("newServerMux(missing cert file) = nil error, want error")
 	}
 }
@@ -262,7 +262,7 @@ func TestNewServerMuxRejectsInvalidTrustAnchorEntityID(t *testing.T) {
 	resolved := minimalFederationResolvedConfig(t)
 	resolved.Federation.TrustAnchors[0].EntityID = "https://ta.example.org/%zz"
 
-	if _, err := newServerMux(resolved, false, false, false, false, false, ""); err == nil {
+	if _, err := newServerMux(resolved, false, false, false, false, false, "", false); err == nil {
 		t.Fatalf("newServerMux(malformed trust anchor entity id) = nil error, want error")
 	}
 }

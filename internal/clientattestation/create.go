@@ -52,6 +52,14 @@ type PoPCreateRequest struct {
 	// Random is the source of randomness for the PoP's "jti". If nil,
 	// crypto/rand.Reader is used.
 	Random io.Reader
+
+	// Challenge, if non-empty, is the PoP's "challenge" claim (draft-07
+	// §8) — an Attestation Challenge previously fetched from the
+	// authorization server's own challenge_endpoint. Leave empty for an
+	// authorization server that doesn't issue challenges and relies on
+	// iat freshness alone (see PoPVerifyPolicy.ExpectedChallenge's own
+	// doc comment for the verifying side of this same claim).
+	Challenge string
 }
 
 // CreatePoP builds and signs a Client Attestation PoP JWT for req.
@@ -78,10 +86,11 @@ func CreatePoP(req PoPCreateRequest) (string, error) {
 	}
 
 	c := popClaims{
-		Issuer:   string(req.ClientID),
-		Audience: req.Audience,
-		JTI:      jti,
-		IssuedAt: req.Now.Unix(),
+		Issuer:    string(req.ClientID),
+		Audience:  req.Audience,
+		JTI:       jti,
+		IssuedAt:  req.Now.Unix(),
+		Challenge: req.Challenge,
 	}
 	payload, err := json.Marshal(c)
 	if err != nil {

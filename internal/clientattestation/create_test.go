@@ -105,6 +105,77 @@ func TestCreatePoPRoundTripsWithVerify(t *testing.T) {
 	}
 }
 
+// TestCreatePoPRoundTripsWithChallenge mirrors
+// TestCreatePoPRoundTripsWithVerify for PoPCreateRequest.Challenge —
+// draft-07 §8's optional Attestation Challenge claim, added so an
+// authorization server that issues one (e.g. via a challenge_endpoint)
+// can bind a PoP to it. Proves CreatePoP's own "challenge" claim is
+// accepted by Verify when PoPVerifyPolicy.ExpectedChallenge matches.
+func TestCreatePoPRoundTripsWithChallenge(t *testing.T) {
+	instanceKey := generateKey(t)
+	clientID := fapi.ClientID("https://client.example.com")
+	audience := "https://as.example.com"
+	now := time.Now()
+	const challenge = "server-issued-challenge-value"
+
+	compact, err := CreatePoP(PoPCreateRequest{
+		Signer: instanceKey, Algorithm: fapi.ES256,
+		ClientID: clientID, Audience: audience, Now: now,
+		Challenge: challenge,
+	})
+	if err != nil {
+		t.Fatalf("CreatePoP: %v", err)
+	}
+
+	parsed, err := ParsePoP(compact)
+	if err != nil {
+		t.Fatalf("ParsePoP: %v", err)
+	}
+
+	confirmationJWK := confirmationJWK(t, &instanceKey.PublicKey)
+	if _, err := parsed.Verify(context.Background(), confirmationJWK, PoPVerifyPolicy{
+		ExpectedIssuer: string(clientID), ExpectedAudience: audience,
+		ExpectedChallenge: challenge,
+		Now:               now, MaxAge: time.Minute,
+	}); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+}
+
+// TestCreatePoPRoundTrip_RejectsMismatchedChallenge confirms Verify
+// rejects a PoP whose "challenge" claim doesn't match
+// PoPVerifyPolicy.ExpectedChallenge — proving CreatePoP's claim and
+// Verify's check are wired to the same field, not just both present.
+func TestCreatePoPRoundTrip_RejectsMismatchedChallenge(t *testing.T) {
+	instanceKey := generateKey(t)
+	clientID := fapi.ClientID("https://client.example.com")
+	audience := "https://as.example.com"
+	now := time.Now()
+
+	compact, err := CreatePoP(PoPCreateRequest{
+		Signer: instanceKey, Algorithm: fapi.ES256,
+		ClientID: clientID, Audience: audience, Now: now,
+		Challenge: "the-challenge-the-pop-actually-carries",
+	})
+	if err != nil {
+		t.Fatalf("CreatePoP: %v", err)
+	}
+
+	parsed, err := ParsePoP(compact)
+	if err != nil {
+		t.Fatalf("ParsePoP: %v", err)
+	}
+
+	confirmationJWK := confirmationJWK(t, &instanceKey.PublicKey)
+	if _, err := parsed.Verify(context.Background(), confirmationJWK, PoPVerifyPolicy{
+		ExpectedIssuer: string(clientID), ExpectedAudience: audience,
+		ExpectedChallenge: "a-different-challenge-the-server-expects",
+		Now:               now, MaxAge: time.Minute,
+	}); err == nil {
+		t.Fatal("Verify accepted a PoP with a mismatched challenge")
+	}
+}
+
 // TestCreatePoPRoundTrip_RejectsWrongInstanceKey confirms Verify still
 // rejects a PoP signed by the wrong key even though CreatePoP itself
 // has no way to check that its own Signer matches a given confirmation

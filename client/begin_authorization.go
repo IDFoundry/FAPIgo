@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/idfoundry/fapigo/extension"
-	"github.com/idfoundry/fapigo/internal/clientassertion"
 	"github.com/idfoundry/fapigo/internal/dpop"
 	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/internal/par"
@@ -202,11 +201,11 @@ func (c *Client) dpopKeyThumbprint(ctx context.Context) (string, error) {
 // connection Dependencies.HTTP's own configured transport establishes,
 // not from a signed application-layer proof.
 func (c *Client) pushAuthorizationRequestPlain(ctx context.Context, params map[string]string, extensions extension.Values, authorizationDetails []json.RawMessage) ([]byte, *Error) {
-	formParams, buildErr := c.buildPushedRequestForm(ctx, c.deps.Clock.Now(), params, extensions, authorizationDetails)
+	formParams, headers, buildErr := c.buildPushedRequestForm(ctx, c.deps.Clock.Now(), params, extensions, authorizationDetails)
 	if buildErr != nil {
 		return nil, buildErr
 	}
-	body, status, _, err := c.postForm(ctx, c.cfg.Endpoints.PushedAuthorizationRequest.String(), par.EncodeForm(formParams), nil)
+	body, status, _, err := c.postForm(ctx, c.cfg.Endpoints.PushedAuthorizationRequest.String(), par.EncodeForm(formParams), headers)
 	if err != nil {
 		return nil, newError(ErrorInternal, errPushedAuthorizationRequestFailed, err)
 	}
@@ -229,11 +228,11 @@ func (c *Client) pushAuthorizationRequestWithJKT(ctx context.Context, params map
 	}
 	params["dpop_jkt"] = dpopThumbprint
 
-	formParams, buildErr := c.buildPushedRequestForm(ctx, c.deps.Clock.Now(), params, extensions, authorizationDetails)
+	formParams, headers, buildErr := c.buildPushedRequestForm(ctx, c.deps.Clock.Now(), params, extensions, authorizationDetails)
 	if buildErr != nil {
 		return nil, buildErr
 	}
-	body, status, _, err := c.postForm(ctx, c.cfg.Endpoints.PushedAuthorizationRequest.String(), par.EncodeForm(formParams), nil)
+	body, status, _, err := c.postForm(ctx, c.cfg.Endpoints.PushedAuthorizationRequest.String(), par.EncodeForm(formParams), headers)
 	if err != nil {
 		return nil, newError(ErrorInternal, errPushedAuthorizationRequestFailed, err)
 	}
@@ -261,19 +260,19 @@ func (c *Client) pushAuthorizationRequestWithDPoPProof(ctx context.Context, para
 	}
 	parURL := c.cfg.Endpoints.PushedAuthorizationRequest.URL()
 
-	buildParForm := func() ([]byte, error) {
-		formParams, buildErr := c.buildPushedRequestForm(ctx, c.deps.Clock.Now(), params, extensions, authorizationDetails)
+	buildParForm := func() ([]byte, map[string]string, error) {
+		formParams, headers, buildErr := c.buildPushedRequestForm(ctx, c.deps.Clock.Now(), params, extensions, authorizationDetails)
 		if buildErr != nil {
-			return nil, buildErr
+			return nil, nil, buildErr
 		}
-		return par.EncodeForm(formParams), nil
+		return par.EncodeForm(formParams), headers, nil
 	}
-	form, buildErr := buildParForm()
+	form, headers, buildErr := buildParForm()
 	if buildErr != nil {
 		return nil, newError(ErrorInternal, "failed to build pushed authorization request", buildErr)
 	}
 
-	body, status, header, err := c.postParRequestWithDPoP(ctx, dpopSigner, &parURL, form, c.cachedDPoPNonce(ctx, asNonceScope))
+	body, status, header, err := c.postParRequestWithDPoP(ctx, dpopSigner, &parURL, form, c.cachedDPoPNonce(ctx, asNonceScope), headers)
 	if err != nil {
 		return nil, newError(ErrorInternal, errPushedAuthorizationRequestFailed, err)
 	}
@@ -286,11 +285,11 @@ func (c *Client) pushAuthorizationRequestWithDPoPProof(ctx context.Context, para
 	if nextNonce == "" || !isDPoPNonceError(body) {
 		return nil, parErrorFromResponse(body)
 	}
-	retryForm, buildErr := buildParForm()
+	retryForm, retryHeaders, buildErr := buildParForm()
 	if buildErr != nil {
 		return nil, newError(ErrorInternal, "failed to build pushed authorization request", buildErr)
 	}
-	body, status, header, err = c.postParRequestWithDPoP(ctx, dpopSigner, &parURL, retryForm, nextNonce)
+	body, status, header, err = c.postParRequestWithDPoP(ctx, dpopSigner, &parURL, retryForm, nextNonce, retryHeaders)
 	if err != nil {
 		return nil, newError(ErrorInternal, errPushedAuthorizationRequestFailed, err)
 	}
@@ -305,7 +304,7 @@ func (c *Client) pushAuthorizationRequestWithDPoPProof(ctx context.Context, para
 // the pushed authorization request — no AccessToken/ath, since none
 // exists yet at PAR time, matching how server/par.go's own dpop.Verify
 // call never expects one either — and posts form to it.
-func (c *Client) postParRequestWithDPoP(ctx context.Context, dpopSigner crypto.Signer, parURL *url.URL, form []byte, nonce string) ([]byte, int, http.Header, error) {
+func (c *Client) postParRequestWithDPoP(ctx context.Context, dpopSigner crypto.Signer, parURL *url.URL, form []byte, nonce string, extraHeaders map[string]string) ([]byte, int, http.Header, error) {
 	proof, err := dpop.CreateProof(dpop.ProofRequest{
 		Signer: dpopSigner, Algorithm: c.cfg.Algorithms.DPoP,
 		Method: http.MethodPost, URL: parURL, Now: c.deps.Clock.Now(),
@@ -314,32 +313,32 @@ func (c *Client) postParRequestWithDPoP(ctx context.Context, dpopSigner crypto.S
 	if err != nil {
 		return nil, 0, nil, fmt.Errorf("build DPoP proof: %w", err)
 	}
-	return c.postForm(ctx, parURL.String(), form, map[string]string{"DPoP": proof})
+	return c.postForm(ctx, parURL.String(), form, mergeHeaders(map[string]string{"DPoP": proof}, extraHeaders))
 }
 
-// buildPushedRequestForm builds the PAR endpoint's form body: a client
-// assertion for authentication, plus either a signed request object
-// (ProfileFAPISecurityWithMessageSigning) or the plain authorization
-// parameters directly.
-func (c *Client) buildPushedRequestForm(ctx context.Context, now time.Time, params map[string]string, extensions extension.Values, authorizationDetails []json.RawMessage) (map[string]string, *Error) {
+// buildPushedRequestForm builds the PAR endpoint's form body and any
+// extra headers this client's authentication method requires: a client
+// assertion for authentication (or, under ClientAuthMethodAttestation,
+// the Attestation-Based Client Authentication headers instead — see
+// addClientAuthentication's own doc comment), plus either a signed
+// request object (ProfileFAPISecurityWithMessageSigning) or the plain
+// authorization parameters directly.
+func (c *Client) buildPushedRequestForm(ctx context.Context, now time.Time, params map[string]string, extensions extension.Values, authorizationDetails []json.RawMessage) (map[string]string, map[string]string, *Error) {
 	form := map[string]string{}
+	var (
+		assertionSigner crypto.Signer
+		assertionKID    string
+	)
 	if c.cfg.ClientAuthMethod == storage.ClientAuthMethodPrivateKeyJWT {
-		assertionSigner, assertionKID, err := c.newSigner(ctx, keys.ClientAuthentication, c.cfg.Algorithms.ClientAuthentication)
+		var err error
+		assertionSigner, assertionKID, err = c.newSigner(ctx, keys.ClientAuthentication, c.cfg.Algorithms.ClientAuthentication)
 		if err != nil {
-			return nil, newError(ErrorInternal, "failed to resolve client authentication key", err)
+			return nil, nil, newError(ErrorInternal, "failed to resolve client authentication key", err)
 		}
-		assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
-			Signer: assertionSigner, Algorithm: c.cfg.Algorithms.ClientAuthentication, KeyID: assertionKID,
-			ClientID: c.cfg.ClientID.String(), Audience: c.cfg.Issuer.String(),
-			Now: now, Lifetime: c.cfg.Limits.ClientAssertionLifetime, Random: c.deps.Random,
-		})
-		if err != nil {
-			return nil, newError(ErrorInternal, "failed to build client assertion", err)
-		}
-		form["client_assertion"] = assertion
-		form["client_assertion_type"] = clientassertion.AssertionType
-	} else {
-		form["client_id"] = c.cfg.ClientID.String()
+	}
+	headers, err := c.addClientAuthentication(ctx, form, assertionSigner, assertionKID)
+	if err != nil {
+		return nil, nil, newError(ErrorInternal, "failed to build client authentication", err)
 	}
 
 	snapshot := extension.Snapshot(extensions)
@@ -348,7 +347,7 @@ func (c *Client) buildPushedRequestForm(ctx context.Context, now time.Time, para
 	if len(authorizationDetails) > 0 {
 		encoded, err := json.Marshal(authorizationDetails)
 		if err != nil {
-			return nil, newError(ErrorInternal, "failed to encode authorization_details", err)
+			return nil, nil, newError(ErrorInternal, "failed to encode authorization_details", err)
 		}
 		authorizationDetailsRaw = encoded
 	}
@@ -356,7 +355,7 @@ func (c *Client) buildPushedRequestForm(ctx context.Context, now time.Time, para
 	if c.cfg.Profile != ProfileFAPISecurityWithMessageSigning {
 		for name, raw := range snapshot {
 			if _, reserved := params[name]; reserved {
-				return nil, newError(ErrorInvalidRequest, fmt.Sprintf("extension parameter %q collides with a core parameter name", name), nil)
+				return nil, nil, newError(ErrorInvalidRequest, fmt.Sprintf("extension parameter %q collides with a core parameter name", name), nil)
 			}
 			// A plain top-level parameter has no way to represent
 			// anything but a bare string — unlike the signing path
@@ -367,7 +366,7 @@ func (c *Client) buildPushedRequestForm(ctx context.Context, now time.Time, para
 			// profile instead of being silently flattened.
 			var value string
 			if err := json.Unmarshal(raw, &value); err != nil {
-				return nil, newError(ErrorInvalidRequest,
+				return nil, nil, newError(ErrorInvalidRequest,
 					fmt.Sprintf("extension parameter %q is not a plain string; non-string extension values require ProfileFAPISecurityWithMessageSigning", name), nil)
 			}
 			params[name] = value
@@ -384,7 +383,7 @@ func (c *Client) buildPushedRequestForm(ctx context.Context, now time.Time, para
 			// path below, regardless of Config.Profile.
 			form[authorizationDetailsParameter] = string(authorizationDetailsRaw)
 		}
-		return form, nil
+		return form, headers, nil
 	}
 
 	objectParams := make(map[string]json.RawMessage, len(params)+len(snapshot)+1)
@@ -395,7 +394,7 @@ func (c *Client) buildPushedRequestForm(ctx context.Context, now time.Time, para
 
 	for name, raw := range snapshot {
 		if _, reserved := objectParams[name]; reserved {
-			return nil, newError(ErrorInvalidRequest, fmt.Sprintf("extension parameter %q collides with a core parameter name", name), nil)
+			return nil, nil, newError(ErrorInvalidRequest, fmt.Sprintf("extension parameter %q collides with a core parameter name", name), nil)
 		}
 		objectParams[name] = raw
 	}
@@ -406,7 +405,7 @@ func (c *Client) buildPushedRequestForm(ctx context.Context, now time.Time, para
 
 	objectSigner, objectKID, err := c.newSigner(ctx, keys.RequestObjectSigning, c.cfg.Algorithms.RequestObject)
 	if err != nil {
-		return nil, newError(ErrorInternal, "failed to resolve request object signing key", err)
+		return nil, nil, newError(ErrorInternal, "failed to resolve request object signing key", err)
 	}
 	object, err := requestobject.Create(requestobject.CreateParams{
 		Signer: objectSigner, Algorithm: c.cfg.Algorithms.RequestObject, KeyID: objectKID,
@@ -415,10 +414,10 @@ func (c *Client) buildPushedRequestForm(ctx context.Context, now time.Time, para
 		Parameters: objectParams,
 	})
 	if err != nil {
-		return nil, newError(ErrorInternal, "failed to build request object", err)
+		return nil, nil, newError(ErrorInternal, "failed to build request object", err)
 	}
 	form["request"] = object
-	return form, nil
+	return form, headers, nil
 }
 
 // parErrorFromResponse maps a non-success PAR (or token-endpoint) HTTP

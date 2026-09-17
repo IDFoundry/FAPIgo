@@ -111,7 +111,7 @@ func (c *Client) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 	// challenge — see ExchangeCode's own buildTokenForm doc comment for
 	// why reusing one across two requests would get the retry rejected
 	// as jti replay.
-	buildForm := func() ([]byte, error) {
+	buildForm := func() ([]byte, map[string]string, error) {
 		form := map[string]string{
 			"grant_type": "client_credentials",
 			"scope":      strings.Join(req.Scope, " "),
@@ -119,17 +119,18 @@ func (c *Client) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 		if authorizationDetailsJSON != "" {
 			form[authorizationDetailsParameter] = authorizationDetailsJSON
 		}
-		if err := c.addClientAuthentication(form, assertionSigner, assertionKID); err != nil {
-			return nil, err
+		headers, err := c.addClientAuthentication(ctx, form, assertionSigner, assertionKID)
+		if err != nil {
+			return nil, nil, err
 		}
-		return par.EncodeForm(form), nil
+		return par.EncodeForm(form), headers, nil
 	}
 
-	form, err := buildForm()
+	form, headers, err := buildForm()
 	if err != nil {
 		return ClientCredentialsTokenResult{}, newError(ErrorInternal, "failed to build client assertion", err)
 	}
-	body, tokenErr := c.sendTokenRequest(ctx, dpopSigner, &tokenURL, buildForm, form)
+	body, tokenErr := c.sendTokenRequest(ctx, dpopSigner, &tokenURL, buildForm, form, headers)
 	if tokenErr != nil {
 		return ClientCredentialsTokenResult{}, tokenErr
 	}

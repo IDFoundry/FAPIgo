@@ -10,7 +10,7 @@ import (
 // SigningPurpose is a closed set of reasons a party might need to sign
 // something with its own key, so an implementation can select different
 // keys (or apply different rotation/HSM policy) per purpose. The first
-// four are server purposes; the next four are client purposes; the
+// four are server purposes; the next five are client purposes; the
 // last is shared by both — every role uses the same KeyManager
 // contract (see ARCHITECTURE.md design rule 5), never a crypto.Signer
 // or raw private key.
@@ -49,6 +49,17 @@ const (
 	// backend-initiated CIBA flow than for a browser-adjacent PAR
 	// request object.
 	BackchannelAuthenticationRequestSigning
+
+	// ClientAttestationPoPSigning signs a Client Attestation PoP JWT
+	// (OAuth 2.0 Attestation-Based Client Authentication draft-07 §5.2)
+	// with the Client Instance Key — the key an already-issued Client
+	// Attestation JWT names in its own "cnf.jwk" claim, not a
+	// pre-registered long-lived key the way ClientAuthentication's key
+	// is. Kept distinct from ClientAuthentication since a deployment
+	// may reasonably manage the Client Instance Key (often
+	// hardware-backed, e.g. a secure enclave) under a different
+	// rotation/storage policy than a plain private_key_jwt signing key.
+	ClientAttestationPoPSigning
 
 	// FederationEntitySigning signs an OpenID Federation 1.0 Entity
 	// Configuration (federation.SelfIssuer) — this entity's own

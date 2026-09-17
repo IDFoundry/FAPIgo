@@ -139,6 +139,17 @@ type Algorithms struct {
 	// signs its CIBA backchannel authentication requests with.
 	// Required only when Endpoints.BackchannelAuthentication is set.
 	BackchannelAuthenticationRequest fapi.SignatureAlgorithm
+
+	// ClientAttestationPoP is the algorithm this client signs its
+	// Client Attestation PoP JWTs with
+	// (draft-ietf-oauth-attestation-based-client-auth-07 §5.2) — must
+	// match the Client Instance Key Dependencies.Keys holds under
+	// keys.ClientAttestationPoPSigning. Required only when
+	// ClientAuthMethod is storage.ClientAuthMethodAttestation. Unlike
+	// ClientAuthentication, this carries no accompanying lifetime
+	// field: the PoP has no "exp" claim of its own for this client to
+	// choose — only a fresh "iat" the server bounds on its own side.
+	ClientAttestationPoP fapi.SignatureAlgorithm
 }
 
 // Endpoints are the authorization server's endpoint URLs this client

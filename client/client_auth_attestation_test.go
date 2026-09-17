@@ -43,6 +43,19 @@ func (f fakeAttestationSource) CurrentAttestation(context.Context) (string, erro
 	return f.attestation, nil
 }
 
+// fakeAttestationSourceWithChallenge additionally implements
+// client.ChallengeSource, opting in to sending a "challenge" claim on
+// every PoP — exercising the opt-in path plain fakeAttestationSource
+// deliberately doesn't.
+type fakeAttestationSourceWithChallenge struct {
+	fakeAttestationSource
+	challenge string
+}
+
+func (f fakeAttestationSourceWithChallenge) CurrentChallenge(context.Context) (string, error) {
+	return f.challenge, nil
+}
+
 // mustConfirmationJWK builds the raw JWK bytes internal/clientattestation's
 // own PoP.Verify expects as its confirmation key — the same shape
 // server/client_auth_attestation.go extracts from an Attestation's own
@@ -188,6 +201,15 @@ func (a *fakeAttestationAuthAS) handleBackchannel(w http.ResponseWriter, r *http
 // endpoint). SenderConstrain stays the default (DPoP).
 func newTestClientWithAttestationAuth(t *testing.T) (*client.Client, *fakeAttestationAuthAS) {
 	t.Helper()
+	return newTestClientWithAttestationSource(t, fakeAttestationSource{attestation: testAttestationJWT})
+}
+
+// newTestClientWithAttestationSource is newTestClientWithAttestationAuth's
+// own underlying builder, parameterized on the AttestationSource so
+// TestExchangeCodeAttestationSendsChallengeInPoP can supply one that
+// also implements ChallengeSource without duplicating this setup.
+func newTestClientWithAttestationSource(t *testing.T, source client.AttestationSource) (*client.Client, *fakeAttestationAuthAS) {
+	t.Helper()
 	km := newFakeKeyManager(t, keys.ClientAttestationPoPSigning, keys.DPoPProofSigning)
 	info, err := km.PublicKey(context.Background(), keys.ClientAttestationPoPSigning, fapi.ES256)
 	if err != nil {
@@ -217,7 +239,7 @@ func newTestClientWithAttestationAuth(t *testing.T) (*client.Client, *fakeAttest
 	deps := validDependencies(t)
 	deps.HTTP = ts.Client()
 	deps.Keys = km
-	deps.Attestation = fakeAttestationSource{attestation: testAttestationJWT}
+	deps.Attestation = source
 
 	c, err := client.New(cfg, deps)
 	if err != nil {
@@ -274,6 +296,38 @@ func TestRequestClientCredentialsTokenAttestationSendsHeaders(t *testing.T) {
 	}
 	if as.lastTokenHeaders.Get("OAuth-Client-Attestation") == "" {
 		t.Errorf("token: missing OAuth-Client-Attestation header")
+	}
+}
+
+// TestRequestClientCredentialsTokenAttestationSendsChallengeInPoP
+// confirms attestationHeaders embeds a ChallengeSource's own value as
+// the PoP's "challenge" claim — the opt-in path a plain
+// AttestationSource (every other test in this file) doesn't exercise.
+func TestRequestClientCredentialsTokenAttestationSendsChallengeInPoP(t *testing.T) {
+	const wantChallenge = "server-issued-challenge-value"
+	source := fakeAttestationSourceWithChallenge{
+		fakeAttestationSource: fakeAttestationSource{attestation: testAttestationJWT},
+		challenge:             wantChallenge,
+	}
+	c, as := newTestClientWithAttestationSource(t, source)
+	if _, err := c.RequestClientCredentialsToken(context.Background(), client.ClientCredentialsTokenRequest{Scope: []string{"accounts"}}); err != nil {
+		t.Fatalf("RequestClientCredentialsToken: %v", err)
+	}
+
+	popCompact := as.lastTokenHeaders.Get("OAuth-Client-Attestation-PoP")
+	if popCompact == "" {
+		t.Fatalf("token: missing OAuth-Client-Attestation-PoP header")
+	}
+	pop, err := clientattestation.ParsePoP(popCompact)
+	if err != nil {
+		t.Fatalf("ParsePoP: %v", err)
+	}
+	if _, err := pop.Verify(context.Background(), as.confirmationJWK, clientattestation.PoPVerifyPolicy{
+		ExpectedIssuer: testClientID, ExpectedAudience: testIssuer,
+		ExpectedChallenge: wantChallenge,
+		Now:               time.Now(), MaxAge: time.Minute,
+	}); err != nil {
+		t.Fatalf("Verify(ExpectedChallenge=%q): %v", wantChallenge, err)
 	}
 }
 

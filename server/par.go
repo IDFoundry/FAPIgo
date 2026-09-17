@@ -439,6 +439,18 @@ func (s *Server) acceptableClientAssertionAudiences(client storage.RegisteredCli
 // those parameters (extension.Definition.ReturnInTokenClaims) that
 // should be copied into any token this authorization eventually issues.
 func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[string]string, client storage.RegisteredClient) (map[string]json.RawMessage, map[string]json.RawMessage, *Error) {
+	// RFC 9101 §5 / PAR-2.1: "request_uri" is never a meaningful *input*
+	// here, whether or not "request" is also present — PAR generates its
+	// own request_uri as this call's *result*, and a client is never
+	// meant to redeem one request_uri by presenting another. Checked
+	// unconditionally, before branching on "request" below: the plain
+	// (no "request" object) form parameters path used to only run this
+	// check when "request" was also present, so a request_uri sent
+	// *alone* fell through to plainParamsToJSON unrejected.
+	if _, hasRequestURI := params["request_uri"]; hasRequestURI {
+		return nil, nil, newError(ErrorInvalidRequest, 400, "request_uri must not be present", nil)
+	}
+
 	requestParam, hasRequestParam := params["request"]
 
 	if !hasRequestParam {
@@ -451,16 +463,6 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 			return nil, nil, err
 		}
 		return plain, tokenClaims, nil
-	}
-
-	// RFC 9101 §5: a request must not carry both "request" and
-	// "request_uri" — they are mutually exclusive ways of conveying the
-	// same authorization request. PAR generates its own request_uri as
-	// this call's *result*; a client sending one as an *input* parameter
-	// here is never meaningful, whether or not "request" is also
-	// present (PAR-2.1).
-	if _, hasRequestURI := params["request_uri"]; hasRequestURI {
-		return nil, nil, newError(ErrorInvalidRequest, 400, "request and request_uri must not both be present", nil)
 	}
 
 	alg, permitted := client.RequestObjectAlgorithm()

@@ -88,6 +88,37 @@ func TestBeginAuthorizationRejectsExtensionCollidingWithCoreParameterUnderBaseli
 	}
 }
 
+// Regression test: buildPushedRequestForm used to merge a plain-parameter
+// extension by writing it back into its caller's own params map.
+// pushAuthorizationRequestWithDPoPProof's own DPoP-nonce retry calls
+// buildPushedRequestForm a second time with that *same* params map, so
+// the retry saw its own first attempt's extension value already
+// present under its wire name and misreported it as a "core
+// parameter" collision — meaning any plain-string extension broke the
+// moment a PAR call actually needed to retry on a DPoP nonce
+// challenge, exactly the case this test forces.
+func TestBeginAuthorizationSendsExtensionOnPARDPoPNonceRetry(t *testing.T) {
+	c, as, _ := newTestClientWithPARBinding(t, client.PARDPoPBindingProof)
+	as.challengeParDPoPNonce = "server-issued-par-nonce-2"
+	ctx := context.Background()
+
+	var req client.BeginAuthorizationRequest
+	req.Scope = []string{"openid"}
+	if err := extension.Set(&req.Extensions, accountHintDef, "acc-retry"); err != nil {
+		t.Fatalf("extension.Set: %v", err)
+	}
+
+	if _, err := c.BeginAuthorization(ctx, req); err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+	if as.parCallCount != 2 {
+		t.Errorf("PAR endpoint called %d times, want 2 (initial + nonce retry)", as.parCallCount)
+	}
+	if got := as.lastPARForm.Get("x_account_hint"); got != "acc-retry" {
+		t.Errorf("PAR form (retry) x_account_hint = %q, want acc-retry", got)
+	}
+}
+
 func TestBeginAuthorizationEmbedsExtensionsInSignedRequestObject(t *testing.T) {
 	c, as, _ := newTestClient(t, true) // message-signing profile
 	ctx := context.Background()

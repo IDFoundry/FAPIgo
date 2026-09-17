@@ -353,6 +353,15 @@ func (c *Client) buildPushedRequestForm(ctx context.Context, now time.Time, para
 	}
 
 	if c.cfg.Profile != ProfileFAPISecurityWithMessageSigning {
+		// Copy params into form (never mutate the caller's own params
+		// map — pushAuthorizationRequestWithDPoPProof's own DPoP-nonce
+		// retry calls this twice with the *same* params map, so writing
+		// an extension's value back into params here would make the
+		// second call see its own first-attempt value already present
+		// and misreport it as a "core parameter" collision).
+		for k, v := range params {
+			form[k] = v
+		}
 		for name, raw := range snapshot {
 			if _, reserved := params[name]; reserved {
 				return nil, nil, newError(ErrorInvalidRequest, fmt.Sprintf("extension parameter %q collides with a core parameter name", name), nil)
@@ -369,10 +378,7 @@ func (c *Client) buildPushedRequestForm(ctx context.Context, now time.Time, para
 				return nil, nil, newError(ErrorInvalidRequest,
 					fmt.Sprintf("extension parameter %q is not a plain string; non-string extension values require ProfileFAPISecurityWithMessageSigning", name), nil)
 			}
-			params[name] = value
-		}
-		for k, v := range params {
-			form[k] = v
+			form[name] = value
 		}
 		if authorizationDetailsRaw != nil {
 			// RFC 9396 §5: unlike an extension.Definition value, a plain

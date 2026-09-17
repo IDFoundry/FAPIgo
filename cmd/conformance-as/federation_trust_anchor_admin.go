@@ -54,12 +54,7 @@ import (
 type dynamicFederationClients struct {
 	underlyingClients storage.ClientRepository
 	underlyingKeys    keys.ClientKeySource
-	peerCertPool      *x509.CertPool // nil under -insecure-http, where there's no TLS to verify at all
-	httpTimeout       time.Duration
-	fetcherCfg        fapihttp.Config // template: every field except AllowedPrivateHosts, which rebuild computes itself
-	limits            federation.Limits
-	autoCfg           federation.AutomaticRegistrationConfig
-	clock             federation.Clock
+	cfg               dynamicFederationClientsConfig
 
 	mu           sync.RWMutex
 	trustAnchors []federation.TrustAnchor
@@ -67,17 +62,32 @@ type dynamicFederationClients struct {
 	clientKeys   *federation.AutomaticClientKeySource
 }
 
+// dynamicFederationClientsConfig bundles every dynamicFederationClients
+// dependency that isn't "what to wrap" (underlyingClients/underlyingKeys,
+// passed separately to newDynamicFederationClients) or "what to start
+// trusting" (initial, likewise) — everything rebuild needs to build a
+// fresh outbound *http.Client + Resolver on every call.
+type dynamicFederationClientsConfig struct {
+	// PeerCertPool is nil under -insecure-http, where there's no TLS to
+	// verify at all.
+	PeerCertPool *x509.CertPool
+	HTTPTimeout  time.Duration
+	// FetcherCfg is a template: every field except AllowedPrivateHosts,
+	// which rebuild computes fresh from the current trust anchor set on
+	// every call.
+	FetcherCfg fapihttp.Config
+	Limits     federation.Limits
+	AutoCfg    federation.AutomaticRegistrationConfig
+	Clock      federation.Clock
+}
+
 // newDynamicFederationClients validates its arguments, builds the
 // initial Resolver/AutomaticClientRepository/AutomaticClientKeySource
 // from initial, and returns a dynamicFederationClients ready to serve
-// ResolveClient/ResolveVerificationKeys immediately. fetcherCfg's own
-// AllowedPrivateHosts is ignored — rebuild always computes it fresh
-// from the current trust anchor set.
-func newDynamicFederationClients(initial []federation.TrustAnchor, underlyingClients storage.ClientRepository, underlyingKeys keys.ClientKeySource, peerCertPool *x509.CertPool, httpTimeout time.Duration, fetcherCfg fapihttp.Config, limits federation.Limits, autoCfg federation.AutomaticRegistrationConfig, clock federation.Clock) (*dynamicFederationClients, error) {
+// ResolveClient/ResolveVerificationKeys immediately.
+func newDynamicFederationClients(initial []federation.TrustAnchor, underlyingClients storage.ClientRepository, underlyingKeys keys.ClientKeySource, cfg dynamicFederationClientsConfig) (*dynamicFederationClients, error) {
 	d := &dynamicFederationClients{
-		underlyingClients: underlyingClients, underlyingKeys: underlyingKeys,
-		peerCertPool: peerCertPool, httpTimeout: httpTimeout, fetcherCfg: fetcherCfg,
-		limits: limits, autoCfg: autoCfg, clock: clock,
+		underlyingClients: underlyingClients, underlyingKeys: underlyingKeys, cfg: cfg,
 	}
 	if err := d.rebuild(initial); err != nil {
 		return nil, err
@@ -102,21 +112,21 @@ func (d *dynamicFederationClients) rebuild(trustAnchors []federation.TrustAnchor
 		}
 		allowedPrivateHosts = append(allowedPrivateHosts, host)
 	}
-	httpClient := &http.Client{Timeout: d.httpTimeout}
-	if d.peerCertPool != nil {
-		httpClient.Transport = &http.Transport{TLSClientConfig: peerTLSConfig(d.peerCertPool, allowedPrivateHosts)}
+	httpClient := &http.Client{Timeout: d.cfg.HTTPTimeout}
+	if d.cfg.PeerCertPool != nil {
+		httpClient.Transport = &http.Transport{TLSClientConfig: peerTLSConfig(d.cfg.PeerCertPool, allowedPrivateHosts)}
 	}
-	cfg := d.fetcherCfg
-	cfg.AllowedPrivateHosts = allowedPrivateHosts
-	fetcher, err := fapihttp.New(httpClient, cfg)
+	fetcherCfg := d.cfg.FetcherCfg
+	fetcherCfg.AllowedPrivateHosts = allowedPrivateHosts
+	fetcher, err := fapihttp.New(httpClient, fetcherCfg)
 	if err != nil {
 		return fmt.Errorf("build fetcher: %w", err)
 	}
-	resolver, err := federation.NewResolver(federation.Config{TrustAnchors: trustAnchors, Limits: d.limits}, federation.Dependencies{HTTP: fetcher, Clock: d.clock})
+	resolver, err := federation.NewResolver(federation.Config{TrustAnchors: trustAnchors, Limits: d.cfg.Limits}, federation.Dependencies{HTTP: fetcher, Clock: d.cfg.Clock})
 	if err != nil {
 		return fmt.Errorf("build resolver: %w", err)
 	}
-	repo, err := federation.NewAutomaticClientRepository(d.underlyingClients, resolver, fetcher, d.autoCfg, d.clock)
+	repo, err := federation.NewAutomaticClientRepository(d.underlyingClients, resolver, fetcher, d.cfg.AutoCfg, d.cfg.Clock)
 	if err != nil {
 		return fmt.Errorf("build automatic client repository: %w", err)
 	}

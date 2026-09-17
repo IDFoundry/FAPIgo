@@ -41,6 +41,15 @@ func testFetcherCfg() fapihttp.Config {
 	return fapihttp.Config{MaxResponseBytes: 1 << 16, RequestTimeout: 5 * time.Second, MaxRedirects: 1}
 }
 
+func testDynamicFederationClientsConfig() dynamicFederationClientsConfig {
+	return dynamicFederationClientsConfig{
+		HTTPTimeout: 5 * time.Second, FetcherCfg: testFetcherCfg(),
+		Limits:  federation.Limits{MaxPathLength: 5, MaxStatementLifetime: time.Hour, MaxClockSkew: 5 * time.Second},
+		AutoCfg: federation.AutomaticRegistrationConfig{AllowedScopes: []string{"openid"}, MaxCacheAge: time.Hour},
+		Clock:   federation.SystemClock{},
+	}
+}
+
 func newTestDynamicFederationClients(t *testing.T) *dynamicFederationClients {
 	t.Helper()
 	// federation.NewResolver requires at least one trust anchor — in
@@ -51,10 +60,7 @@ func newTestDynamicFederationClients(t *testing.T) *dynamicFederationClients {
 	seed := federation.TrustAnchor{EntityID: "https://seed-ta.example.org", JWKS: testTrustAnchorJWKS(t)}
 	d, err := newDynamicFederationClients(
 		[]federation.TrustAnchor{seed}, stubClientRepository{}, stubClientKeySource{},
-		nil, 5*time.Second, testFetcherCfg(),
-		federation.Limits{MaxPathLength: 5, MaxStatementLifetime: time.Hour, MaxClockSkew: 5 * time.Second},
-		federation.AutomaticRegistrationConfig{AllowedScopes: []string{"openid"}, MaxCacheAge: time.Hour},
-		federation.SystemClock{},
+		testDynamicFederationClientsConfig(),
 	)
 	if err != nil {
 		t.Fatalf("newDynamicFederationClients: %v", err)
@@ -81,13 +87,9 @@ func testTrustAnchorJWKS(t *testing.T) []byte {
 
 func TestNewDynamicFederationClientsRejectsInvalidLimits(t *testing.T) {
 	seed := federation.TrustAnchor{EntityID: "https://seed-ta.example.org", JWKS: testTrustAnchorJWKS(t)}
-	_, err := newDynamicFederationClients(
-		[]federation.TrustAnchor{seed}, stubClientRepository{}, stubClientKeySource{},
-		nil, 5*time.Second, testFetcherCfg(),
-		federation.Limits{}, // zero value: MaxPathLength/MaxStatementLifetime must be positive
-		federation.AutomaticRegistrationConfig{AllowedScopes: []string{"openid"}, MaxCacheAge: time.Hour},
-		federation.SystemClock{},
-	)
+	cfg := testDynamicFederationClientsConfig()
+	cfg.Limits = federation.Limits{} // zero value: MaxPathLength/MaxStatementLifetime must be positive
+	_, err := newDynamicFederationClients([]federation.TrustAnchor{seed}, stubClientRepository{}, stubClientKeySource{}, cfg)
 	if err == nil {
 		t.Fatalf("newDynamicFederationClients(zero Limits) = nil error, want error")
 	}
@@ -95,13 +97,9 @@ func TestNewDynamicFederationClientsRejectsInvalidLimits(t *testing.T) {
 
 func TestNewDynamicFederationClientsRejectsInvalidAutoRegConfig(t *testing.T) {
 	seed := federation.TrustAnchor{EntityID: "https://seed-ta.example.org", JWKS: testTrustAnchorJWKS(t)}
-	_, err := newDynamicFederationClients(
-		[]federation.TrustAnchor{seed}, stubClientRepository{}, stubClientKeySource{},
-		nil, 5*time.Second, testFetcherCfg(),
-		federation.Limits{MaxPathLength: 5, MaxStatementLifetime: time.Hour, MaxClockSkew: 5 * time.Second},
-		federation.AutomaticRegistrationConfig{}, // zero value: AllowedScopes/MaxCacheAge required
-		federation.SystemClock{},
-	)
+	cfg := testDynamicFederationClientsConfig()
+	cfg.AutoCfg = federation.AutomaticRegistrationConfig{} // zero value: AllowedScopes/MaxCacheAge required
+	_, err := newDynamicFederationClients([]federation.TrustAnchor{seed}, stubClientRepository{}, stubClientKeySource{}, cfg)
 	if err == nil {
 		t.Fatalf("newDynamicFederationClients(zero AutomaticRegistrationConfig) = nil error, want error")
 	}

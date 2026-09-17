@@ -41,6 +41,73 @@ const (
 	federationMaxCacheAge          = 5 * time.Minute
 )
 
+// buildFederationFetcher builds this binary's own outbound TLS client
+// for reaching another federation peer over docker-compose's private
+// network (peerCertPool, pinned to the shared self-signed cert
+// RootCAs when one is actually configured — resolved.TLSCertFile,
+// empty under -insecure-http, where there's no TLS to verify at all —
+// rather than InsecureSkipVerify), federationFetcherCfg (fapihttp.Config's
+// own shared template for every federation peer fetch this binary
+// makes, AllowedPrivateHosts deliberately left unset here — see below
+// for why), and, when appropriate, the static federationFetcher itself.
+//
+// federationFetcher is nil when resolved.Federation == nil (nothing
+// needs it), or when federationTrustAnchorAdmin is set: in that case
+// dynamicFederationClients builds its own fetcher fresh on every
+// rebuild instead, with AllowedPrivateHosts computed from the
+// *current* trust anchor set rather than a fixed one from startup —
+// federation.Resolver's own outbound Trust Chain walk crosses
+// container boundaries within docker-compose's own private network
+// the same way cmd/conformance-federation-trust-anchor's own /resolve
+// endpoint does; see that binary's own doc comment for the full
+// reasoning, and dynamicFederationClients' own doc comment for why a
+// fixed set isn't enough once a Trust Anchor can be added at runtime.
+// Never shared with ephemeral.NewClientKeySource's own fetcher — that
+// one resolves a registered client's own, potentially arbitrary
+// jwks_uri, and keeps its narrower, unmodified SSRF posture: no reason
+// to widen what that unrelated path accepts.
+func buildFederationFetcher(resolved ResolvedConfig, allowLoopbackHTTP, federationTrustAnchorAdmin bool) (federationFetcher *fapihttp.Client, federationFetcherCfg fapihttp.Config, peerCertPool *x509.CertPool, err error) {
+	var peerHTTPClient *http.Client
+	if resolved.Federation != nil {
+		peerHTTPClient = &http.Client{Timeout: httpFetchTimeout}
+		if resolved.TLSCertFile != "" {
+			certPEM, err := os.ReadFile(resolved.TLSCertFile) // #nosec G304 -- operator's own -cert/tls.cert_file config value, not untrusted input
+			if err != nil {
+				return nil, fapihttp.Config{}, nil, fmt.Errorf("federation: read cert file for peer trust pool: %w", err)
+			}
+			peerCertPool = x509.NewCertPool()
+			if !peerCertPool.AppendCertsFromPEM(certPEM) {
+				return nil, fapihttp.Config{}, nil, fmt.Errorf("federation: no certificates found in %s", resolved.TLSCertFile)
+			}
+			peerHTTPClient.Transport = &http.Transport{TLSClientConfig: peerTLSConfig(peerCertPool, nil)}
+		}
+	}
+
+	federationFetcherCfg = fapihttp.Config{
+		MaxResponseBytes:  1 << 20,
+		RequestTimeout:    httpFetchTimeout,
+		MaxRedirects:      2,
+		AllowLoopbackHTTP: allowLoopbackHTTP,
+	}
+	if resolved.Federation != nil && !federationTrustAnchorAdmin {
+		allowedPrivateHosts := make([]string, 0, len(resolved.Federation.TrustAnchors))
+		for _, ta := range resolved.Federation.TrustAnchors {
+			u, err := url.Parse(ta.EntityID)
+			if err != nil {
+				return nil, fapihttp.Config{}, nil, fmt.Errorf("federation: trust anchor entity id %q: %w", ta.EntityID, err)
+			}
+			allowedPrivateHosts = append(allowedPrivateHosts, u.Hostname())
+		}
+		cfg := federationFetcherCfg
+		cfg.AllowedPrivateHosts = allowedPrivateHosts
+		federationFetcher, err = fapihttp.New(peerHTTPClient, cfg)
+		if err != nil {
+			return nil, fapihttp.Config{}, nil, err
+		}
+	}
+	return federationFetcher, federationFetcherCfg, peerCertPool, nil
+}
+
 // newServerMux builds the full server.Server + HTTP router wiring from a
 // resolved config — everything main needs before it can start listening.
 // Factored out so the end-to-end smoke test can stand up the exact same
@@ -113,66 +180,9 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 		return nil, err
 	}
 
-	// peerHTTPClient is this binary's own outbound TLS client for
-	// reaching another federation peer over docker-compose's private
-	// network — resolved.Federation != nil is the only case anything
-	// needs it. Pinned to the shared self-signed cert (RootCAs), when
-	// one is actually configured (resolved.TLSCertFile — empty under
-	// -insecure-http, where there's no TLS to verify at all), rather
-	// than InsecureSkipVerify.
-	var peerHTTPClient *http.Client
-	var peerCertPool *x509.CertPool
-	if resolved.Federation != nil {
-		peerHTTPClient = &http.Client{Timeout: httpFetchTimeout}
-		if resolved.TLSCertFile != "" {
-			certPEM, err := os.ReadFile(resolved.TLSCertFile) // #nosec G304 -- operator's own -cert/tls.cert_file config value, not untrusted input
-			if err != nil {
-				return nil, fmt.Errorf("federation: read cert file for peer trust pool: %w", err)
-			}
-			peerCertPool = x509.NewCertPool()
-			if !peerCertPool.AppendCertsFromPEM(certPEM) {
-				return nil, fmt.Errorf("federation: no certificates found in %s", resolved.TLSCertFile)
-			}
-			peerHTTPClient.Transport = &http.Transport{TLSClientConfig: peerTLSConfig(peerCertPool, nil)}
-		}
-	}
-
-	// federationFetcherCfg is fapihttp.Config's own shared template for
-	// every federation peer fetch this binary makes — AllowedPrivateHosts
-	// deliberately left unset here (federation.Resolver's own outbound
-	// Trust Chain walk crosses container boundaries within docker-compose's
-	// own private network the same way cmd/conformance-federation-trust-anchor's
-	// own /resolve endpoint does — see that binary's own doc comment for
-	// the full reasoning): under !federationTrustAnchorAdmin it's set
-	// once below from resolved.Federation.TrustAnchors' own hosts; under
-	// federationTrustAnchorAdmin, dynamicFederationClients computes it
-	// fresh on every rebuild instead (see its own doc comment for why a
-	// fixed set isn't enough there). Never shared with fetcher above —
-	// that one resolves a registered client's own, potentially
-	// arbitrary jwks_uri, and keeps its narrower, unmodified SSRF
-	// posture: no reason to widen what that unrelated path accepts.
-	federationFetcherCfg := fapihttp.Config{
-		MaxResponseBytes:  1 << 20,
-		RequestTimeout:    httpFetchTimeout,
-		MaxRedirects:      2,
-		AllowLoopbackHTTP: allowLoopbackHTTP,
-	}
-	var federationFetcher *fapihttp.Client
-	if resolved.Federation != nil && !federationTrustAnchorAdmin {
-		allowedPrivateHosts := make([]string, 0, len(resolved.Federation.TrustAnchors))
-		for _, ta := range resolved.Federation.TrustAnchors {
-			u, err := url.Parse(ta.EntityID)
-			if err != nil {
-				return nil, fmt.Errorf("federation: trust anchor entity id %q: %w", ta.EntityID, err)
-			}
-			allowedPrivateHosts = append(allowedPrivateHosts, u.Hostname())
-		}
-		cfg := federationFetcherCfg
-		cfg.AllowedPrivateHosts = allowedPrivateHosts
-		federationFetcher, err = fapihttp.New(peerHTTPClient, cfg)
-		if err != nil {
-			return nil, err
-		}
+	federationFetcher, federationFetcherCfg, peerCertPool, err := buildFederationFetcher(resolved, allowLoopbackHTTP, federationTrustAnchorAdmin)
+	if err != nil {
+		return nil, err
 	}
 
 	algorithms := resolved.Algorithms
@@ -280,7 +290,10 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 	var dynClients *dynamicFederationClients
 	if resolved.Federation != nil && federationTrustAnchorAdmin {
 		var err error
-		dynClients, err = newDynamicFederationClients(resolved.Federation.TrustAnchors, clientRepo, clientKeys, peerCertPool, httpFetchTimeout, federationFetcherCfg, autoRegLimits, autoRegCfg, federation.SystemClock{})
+		dynClients, err = newDynamicFederationClients(resolved.Federation.TrustAnchors, clientRepo, clientKeys, dynamicFederationClientsConfig{
+			PeerCertPool: peerCertPool, HTTPTimeout: httpFetchTimeout, FetcherCfg: federationFetcherCfg,
+			Limits: autoRegLimits, AutoCfg: autoRegCfg, Clock: federation.SystemClock{},
+		})
 		if err != nil {
 			return nil, fmt.Errorf("federation trust anchor admin: %w", err)
 		}

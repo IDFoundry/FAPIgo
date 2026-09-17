@@ -49,10 +49,14 @@ func (f fakeAttestationSource) CurrentAttestation(context.Context) (string, erro
 // deliberately doesn't.
 type fakeAttestationSourceWithChallenge struct {
 	fakeAttestationSource
-	challenge string
+	challenge    string
+	challengeErr error
 }
 
 func (f fakeAttestationSourceWithChallenge) CurrentChallenge(context.Context) (string, error) {
+	if f.challengeErr != nil {
+		return "", f.challengeErr
+	}
 	return f.challenge, nil
 }
 
@@ -328,6 +332,21 @@ func TestRequestClientCredentialsTokenAttestationSendsChallengeInPoP(t *testing.
 		Now:               time.Now(), MaxAge: time.Minute,
 	}); err != nil {
 		t.Fatalf("Verify(ExpectedChallenge=%q): %v", wantChallenge, err)
+	}
+}
+
+// TestRequestClientCredentialsTokenAttestationPropagatesChallengeSourceError
+// confirms attestationHeaders surfaces a failing
+// ChallengeSource.CurrentChallenge call as an error, the same way a
+// failing AttestationSource.CurrentAttestation call already is.
+func TestRequestClientCredentialsTokenAttestationPropagatesChallengeSourceError(t *testing.T) {
+	source := fakeAttestationSourceWithChallenge{
+		fakeAttestationSource: fakeAttestationSource{attestation: testAttestationJWT},
+		challengeErr:          fmt.Errorf("challenge endpoint unavailable"),
+	}
+	c, _ := newTestClientWithAttestationSource(t, source)
+	if _, err := c.RequestClientCredentialsToken(context.Background(), client.ClientCredentialsTokenRequest{Scope: []string{"accounts"}}); err == nil {
+		t.Fatalf("RequestClientCredentialsToken(failing ChallengeSource) = nil error, want error")
 	}
 }
 

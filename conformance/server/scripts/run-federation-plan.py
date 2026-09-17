@@ -30,9 +30,14 @@ Prints one line per module plus a final "Overall totals: X/Y passed"
 line — run-all.sh's own run_federation_plan greps that line the exact
 same way run_as_plan already does for run-test-plan.py's own output.
 Exits 0 only if every module finished with zero unexpected
-failures/warnings (an expected one, matched against the given
---expected-warnings file, doesn't count against this); exits 1
-otherwise.
+failures/warnings/skips (an expected one, matched against the given
+--expected-warnings/--expected-skips file, doesn't count against this);
+exits 1 otherwise. A SKIPPED module (its own top-level result, not a
+"FAILURE"/"WARNING" log entry — see evaluate_module's own doc comment)
+counts as unexpected here even though the suite itself reports it as a
+non-failing outcome: a skip means the module's real assertion never
+ran at all, which this script treats as no different from it having
+failed to run, unless --expected-skips says otherwise.
 """
 import argparse
 import fnmatch
@@ -116,7 +121,13 @@ def load_expected(path):
     """Loads an expected-warnings/expected-skips JSON file — a list of
     {"test-name": <fnmatch pattern, matched against the module's own
     testModule name>, "condition": <the log entry's own "src">,
-    "expected-result": "warning"|"failure"} objects. A deliberately
+    "expected-result": "warning"|"failure"|"skip"} objects, plus an
+    optional "note" string on any entry — read by nobody, kept purely
+    so a human can see why a given skip/warning/failure is accepted
+    without cross-referencing this script or run-all.sh. For a "skip"
+    entry, "condition" is the module's own testModule name again, not a
+    specific condition class — see evaluate_module's own doc comment
+    for why a SKIPPED log entry's "src" is shaped that way. A deliberately
     smaller schema than the suite's own run-test-plan.py uses (no
     configuration-filename/variant matching: this plan has exactly one
     fixed configuration, so those fields would never vary) — see this
@@ -136,7 +147,12 @@ def load_expected(path):
 
 
 def is_expected(entry_list, test_module, src, result):
-    expected_result = "warning" if result == "WARNING" else "failure"
+    if result == "WARNING":
+        expected_result = "warning"
+    elif result == "SKIPPED":
+        expected_result = "skip"
+    else:
+        expected_result = "failure"
     for obj in entry_list:
         if not fnmatch.fnmatch(test_module, obj["test-name"]):
             continue
@@ -176,17 +192,32 @@ def wait_for_finished(client, module_id):
     raise RuntimeError(f"module {module_id} did not reach FINISHED within {MODULE_POLL_TIMEOUT_SECONDS}s")
 
 
-def evaluate_module(client, test_module, module_id, expected_warnings):
-    """Returns (clean: bool, summary: str)."""
+def evaluate_module(client, test_module, module_id, expected_warnings, expected_skips):
+    """Returns (clean: bool, summary: str).
+
+    Scans the module's own log for FAILURE/WARNING entries — one per
+    failed/warned condition, matched against expected_warnings — and
+    separately for a SKIPPED entry: the module's own fireTestSkipped
+    outcome, logged with the module's own testModule name as "src"
+    rather than a specific condition's class name (see the suite's own
+    AbstractTestModule.handleException). A module can reach FINISHED
+    having never actually run its real assertion at all this way —
+    SKIPPED is neither FAILURE nor WARNING, so scanning for only those
+    two (this function's own earlier shape) reports a skipped module as
+    clean. Matched against expected_skips instead of expected_warnings;
+    unless listed there, a skip counts as unexpected, the same as any
+    other un-listed condition.
+    """
     log = client.get_json(f"/api/log/{module_id}")
     unexpected = []
     expected_seen = []
     for entry in log:
         result = entry.get("result")
-        if result not in ("FAILURE", "WARNING"):
+        if result not in ("FAILURE", "WARNING", "SKIPPED"):
             continue
         src = entry.get("src", "")
-        if is_expected(expected_warnings, test_module, src, result):
+        expected = expected_skips if result == "SKIPPED" else expected_warnings
+        if is_expected(expected, test_module, src, result):
             expected_seen.append((result, src))
         else:
             unexpected.append((result, src))
@@ -210,11 +241,7 @@ def main():
 
     trust_anchor_jwks = json.loads(args.trust_anchor_jwks)
     expected_warnings = load_expected(args.expected_warnings)
-    # args.expected_skips is accepted but never read: no module in this
-    # plan is ever expected to SKIP, so there's nothing to match against
-    # it — the flag stays required purely so run-all.sh's own
-    # run_federation_plan can pass --expected-warnings/--expected-skips
-    # uniformly, the same pair every other leg's config takes.
+    expected_skips = load_expected(args.expected_skips)
 
     client = KeepAliveClient()
 
@@ -230,7 +257,7 @@ def main():
         module_id = run_module(client, plan_id, test_module)
         try:
             wait_for_finished(client, module_id)
-            clean, summary = evaluate_module(client, test_module, module_id, expected_warnings)
+            clean, summary = evaluate_module(client, test_module, module_id, expected_warnings, expected_skips)
         except Exception as e:
             clean, summary = False, f"ERROR: {e}"
         if clean:

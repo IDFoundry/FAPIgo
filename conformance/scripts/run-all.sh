@@ -98,6 +98,30 @@
 # retry-flaky-modules.py's known-flake logic (confirmed via repeated
 # attempts) — revisit once OIDF fixes that module.
 #
+# run-federation-plan.py also treats a SKIPPED module as unexpected
+# (not just FAILURE/WARNING) unless listed in
+# expected-skips-federation.json — a module reaching FINISHED without
+# ever running its real assertion is not the same as it passing. That
+# file currently accepts three: two permanently, because
+# conformance-as-federation is a leaf entity with no
+# federation_fetch_endpoint of its own (openid-federation-ensure-fetch-
+# with-invalid-sub-fails/-iss-as-sub-fails both test the entity under
+# test's own fetch endpoint, which only a Trust Anchor/Intermediate
+# serves); one temporarily, because conformance-federation-trust-anchor
+# doesn't yet serve a federation_resolve_endpoint
+# (openid-federation-compare-trust-chain-to-resolve) even though
+# federation.ResolveIssuer/Resolver.ResolveViaEndpoint fully support it
+# — see that file's own "note" field on each entry for the full
+# reasoning, and expected-skips-federation.json's third entry
+# specifically for why wiring that endpoint in isn't a simple addition
+# (fapihttp.Client.Fetch's own SSRF hardening unconditionally blocks
+# every address in this compose network's private IP range, and
+# federation.Resolver requires exactly *fapihttp.Client — ARCHITECTURE.md
+# design rule 6 — so there's no way to plug in a different HTTP client
+# for just this one cross-container call without either loosening a
+# shared, security-relevant package or bypassing federation.Resolver
+# entirely for this binary).
+#
 # Always runs every test configuration, even if an earlier one comes
 # back unclean — never stops early — so a bad result in one never hides
 # results from the others.

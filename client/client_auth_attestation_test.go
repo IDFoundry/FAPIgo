@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -273,6 +274,54 @@ func TestRequestClientCredentialsTokenAttestationSendsHeaders(t *testing.T) {
 	}
 	if as.lastTokenHeaders.Get("OAuth-Client-Attestation") == "" {
 		t.Errorf("token: missing OAuth-Client-Attestation header")
+	}
+}
+
+// TestRequestClientCredentialsTokenAttestationPropagatesAttestationSourceError
+// confirms attestationHeaders surfaces a failing
+// Dependencies.Attestation.CurrentAttestation call as an error, rather
+// than sending a request with a missing or empty header.
+func TestRequestClientCredentialsTokenAttestationPropagatesAttestationSourceError(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.ClientAuthMethod = storage.ClientAuthMethodAttestation
+	cfg.Algorithms.ClientAuthentication = 0
+	cfg.Limits.ClientAssertionLifetime = 0
+	cfg.Algorithms.ClientAttestationPoP = fapi.ES256
+
+	deps := validDependencies(t)
+	deps.Keys = newFakeKeyManager(t, keys.ClientAttestationPoPSigning, keys.DPoPProofSigning)
+	deps.Attestation = fakeAttestationSource{err: fmt.Errorf("attestation source unavailable")}
+
+	c, err := client.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	if _, err := c.RequestClientCredentialsToken(context.Background(), client.ClientCredentialsTokenRequest{Scope: []string{"accounts"}}); err == nil {
+		t.Fatalf("RequestClientCredentialsToken(failing attestation source) = nil error, want error")
+	}
+}
+
+// TestRequestClientCredentialsTokenAttestationPropagatesInstanceKeyError
+// confirms attestationHeaders surfaces a failure resolving the Client
+// Instance Key (Dependencies.Keys has no key under
+// keys.ClientAttestationPoPSigning) as an error.
+func TestRequestClientCredentialsTokenAttestationPropagatesInstanceKeyError(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.ClientAuthMethod = storage.ClientAuthMethodAttestation
+	cfg.Algorithms.ClientAuthentication = 0
+	cfg.Limits.ClientAssertionLifetime = 0
+	cfg.Algorithms.ClientAttestationPoP = fapi.ES256
+
+	deps := validDependencies(t)
+	// deps.Keys carries no keys.ClientAttestationPoPSigning key at all.
+	deps.Attestation = fakeAttestationSource{attestation: testAttestationJWT}
+
+	c, err := client.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	if _, err := c.RequestClientCredentialsToken(context.Background(), client.ClientCredentialsTokenRequest{Scope: []string{"accounts"}}); err == nil {
+		t.Fatalf("RequestClientCredentialsToken(no Client Instance Key) = nil error, want error")
 	}
 }
 

@@ -15,10 +15,13 @@
 // exactly why it isn't split asymmetrically the way most of this
 // module's internal/ packages are. server and client each gain their
 // own thin, role-specific glue over this package — building their own
-// federation_entity/openid_relying_party/openid_provider metadata and
-// serving SelfIssuer's output at their own WellKnownPath, using Resolve
-// to establish trust in a federation-presented peer — rather than this
-// package trying to be a fourth role itself.
+// federation_entity/openid_provider metadata (OpenIDRelyingPartyMetadata
+// is this package's own typed struct for the openid_relying_party side)
+// and serving SelfIssuer's output at their own WellKnownPath
+// (WriteEntityStatement writes the Content-Type header and body an HTTP
+// handler needs for that, and for a SubordinateIssuer's own output),
+// using Resolve to establish trust in a federation-presented peer —
+// rather than this package trying to be a fourth role itself.
 //
 // # Scope
 //

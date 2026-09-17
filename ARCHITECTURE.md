@@ -54,6 +54,8 @@ fapigo/                    // package fapi: shared value types only
 ├── client/                // RP public API
 ├── server/                // AS public API
 ├── resource/              // RS verification API
+├── federation/            // OpenID Federation 1.0 leaf-entity primitives — a shared
+│                           // subsystem package like keys/storage, not a fourth role
 ├── extension/             // shared custom-parameter & RAR definitions
 ├── storage/                // role-specific storage contracts, shared replay primitive,
 │                           // StoreAssurance capability checks + reusable contract test suite
@@ -61,19 +63,24 @@ fapigo/                    // package fapi: shared value types only
 ├── keys/                  // operation-based signing/verification contracts (Sign, never Signer)
 │   └── ephemeral/          // in-memory reference KeyManager/ClientKeySource (dev/test only, never production)
 ├── fapihttp/               // hardened HTTP transport used by all three roles
+├── backchannelhttp/        // fapihttp-backed CIBA §10.2 ping-delivery Notifier
 ├── fapitest/               // in-process interop harness (test-only)
 ├── internal/
-│   ├── oauth/              // OAuth 2.0 protocol core
-│   ├── oidc/                // OIDC protocol core
 │   ├── jose/                 // JWT/JWS/JWK parsing & algorithm policy
+│   ├── jwe/                   // JWE (RFC 7516) encryption/decryption
 │   ├── dpop/                 // DPoP proof create (client) / verify (server, resource)
+│   ├── mtls/                   // RFC 8705 mTLS certificate thumbprint (x5t#S256)
 │   ├── pkce/                 // PKCE generate (client) / verify (server)
 │   ├── par/                  // PAR wire format
 │   ├── jarm/                  // JARM sign (server) / verify (client)
 │   ├── requestobject/         // request object sign (client) / verify (server)
 │   ├── clientassertion/       // client assertion create (client) / verify (server)
+│   ├── clientattestation/      // OAuth 2.0 attestation-based client authentication
+│   ├── federation/             // OpenID Federation 1.0 Entity Statement wire primitives
 │   ├── token/                 // token issue (server) / validate (client, resource)
 │   ├── metadata/               // AS/client metadata parsing
+│   ├── httperror/               // shared error-type (server/resource/federation) mechanical bookkeeping
+│   ├── critical/                 // JWS/JWE "crit" header parameter check (RFC 7515/7516)
 │   ├── canonical/               // URL/JSON canonicalization
 │   └── validation/               // generic strict-parsing helpers
 └── conformance/
@@ -633,7 +640,19 @@ real wire encoding and HTTP semantics — catching parameter
 serialization bugs, duplicate handling, header issues, URI
 canonicalization mismatches, content-type handling and redirect
 behaviour that in-process shortcuts would hide. It is test-only and must
-never be reachable from production code paths.
+never be reachable from a production, customer-deployed application's
+own code paths.
+
+This repo's own `cmd/conformance-as`/`cmd/conformance-client`/
+`cmd/conformance-federation-trust-anchor` binaries import `fapitest`
+directly (`fapitest.SelfSignedServerCert`, `fapitest.PeerTLSConfig`,
+...) without violating this rule: those binaries exist solely to drive
+OIDF conformance suites against this module's own `client`/`server`
+implementations — they are dev/test tooling themselves, never deployed
+as a production service, the same category `fapitest` and
+`keys/ephemeral`/`storage/memstore` already occupy. The rule's actual
+boundary is "a real integrator's own production code," not "this
+repo's own non-test Go files."
 
 ### 16. Errors carry their own exposure — the caller doesn't decide
 
@@ -1100,14 +1119,99 @@ to this profile — a `fapi2-security-profile-final-test-plan`-wide
 requirement, confirmed live), in
 `conformance/server/oidf-config/README.md#client-credentials-grant`.
 
+OpenID Federation 1.0 (`federation`, plus `cmd/conformance-as`'s
+self-issuance/automatic-registration wiring and
+`cmd/conformance-federation-trust-anchor`) got the same live-conformance
+treatment, against all three OIDF Federation test plans. "Deployed
+federation entity" (server-to-server Entity Statement/Trust Chain
+checks, no browser hop) is fully automated: **5/5 modules PASS**, wired
+into `run-all.sh` as its own "Federation federation-deployed-entity"
+leg. The other two plans — "Entity joined to test federation OP test"
+and its RP-side counterpart — exercise automatic registration (§12.1)
+live, with the suite playing the opposite role from this repo in each
+one, and landed in two different, both genuinely confirmed, suite-side
+gaps:
+
+The OP plan (suite plays the RP, tests this AS) was long assumed
+suite-blocked by a deterministic test-runner bug ("Illegal test state
+change: CREATED -> RUNNING") — disproven by reconstructing the plan's
+full config from scratch (real RP/Trust Anchor JWKS, via the suite's
+own REST API) and driving it live: that failure never reproduced once
+the config was actually complete. Two real, previously-unknown gaps
+surfaced and were fixed instead — the suite self-hosts a *fresh* Trust
+Anchor per run (a random path segment, no static config can name it in
+advance) and this AS's own outbound federation fetcher lacked
+`fapihttp.Config.AllowedPrivateHosts`/TLS peer trust for reaching it.
+Both fixed (`cmd/conformance-as -federation-trust-anchor-admin`, a
+runtime `POST /internal/federation/trust-anchors` admin endpoint —
+explicitly gated behind that flag and never appropriate outside a
+conformance run, see `dynamicFederationClients`'s own doc comment) and
+driven all the way to a real PAR call every time. The plan's actual,
+still-unfixed blocker is narrower and unambiguous: the suite's own
+self-hosted RP entity config never sets `token_endpoint_auth_method`,
+so this AS correctly refuses to auto-register a client with no declared
+auth method (no implicit `client_secret_basic` default — both this
+module's own "no implicit defaults" design and FAPI 2.0's own
+prohibition on client-secret-based methods). Confirmed unfixed upstream
+(checked the suite's own git history directly, hundreds of commits past
+this repo's checkout, none touching the relevant file). Not wired into
+`run-all.sh` — every module in this plan would fail identically on the
+same gap.
+
+The RP plan (suite plays the OP, tests this repo's own RP driver,
+`cmd/conformance-client -profile=federation`) needed `cmd/conformance-client`
+to become a real inbound HTTPS listener for the first time — every
+other profile it drives only ever makes outbound calls. The plan's own
+`server_metadata` variant name (`static` vs `discovery`) initially
+suggested a static config value could avoid this; reading the suite's
+own source disproved that too — the suite's live authorize/PAR handling
+unconditionally fetches the RP's Entity Configuration over HTTP no
+matter which variant is selected. **Confirmed live: 7 of 10 modules
+PASS.** The remaining 3 (the happy path, plus the two ID-token-tampering
+negative tests — every module that needs this driver to actually reach
+ID token issuance) hit a different, equally confirmed suite-side gap:
+the suite's own mock OP metadata never sets `issuer`, a field OIDC
+Discovery 1.0 §3 makes REQUIRED and OpenID Federation 1.0 explicitly
+incorporates by reference (additionally requiring it match the Entity
+Identifier) — verified against the spec text directly, not assumed.
+Wired into `run-all.sh` as the "RP federation-rp" leg via a new
+`cmd/conformance-client -expected-failures=<file>` allowlist mechanism
+(`conformance/client/expected-failures-federation.json` names these
+exact 3 modules), the RP-side counterpart to the AS side's
+`expected-skips`/`expected-warnings` JSON files, checking for drift in
+both directions — an allowlisted module unexpectedly passing (e.g. the
+suite shipping a fix upstream) is flagged just as reliably as a new
+regression. Full breakdown of both plans in
+`conformance/server/scripts/README.md` and
+`conformance/client/scripts/README.md`'s own Federation sections.
+
+Building and driving this live surfaced four hand-rolled pieces of
+crypto/HTTP boilerplate a genuine third-party OpenID Federation
+integrator would also need, later promoted out of the conformance
+binaries into the public library: `federation.WriteEntityStatement`
+(the Content-Type-header-plus-body-write every Entity Statement HTTP
+response needs, existed independently 4 times across the three
+binaries), `federation.OpenIDRelyingPartyMetadata` (a typed
+`openid_relying_party` metadata struct — closes off the exact
+`token_endpoint_auth_method`-omission bug class above by construction),
+and `fapitest.SelfSignedServerCert`/`fapitest.PeerTLSConfig` (the
+server-cert and verify-except-an-explicit-allowlist `tls.Config`
+patterns every local multi-service integration test with no shared CA
+needs — see design rule 15 above for why importing `fapitest` from
+these binaries' own non-test code doesn't violate that rule).
+
 ## What is and isn't shared
 
 **Shared** (via `internal/`, `extension`, `storage`'s replay primitive
-and contract test suite, `keys`, `fapihttp`, and the root `fapi`
-package's value types): strict parsers, canonicalization rules, JOSE
-implementation, algorithm policy primitives, `Secret`, typed `URL`, key
-representations, extension/RAR definitions, replay machinery, storage
-contract tests, conformance test vectors.
+and contract test suite, `keys`, `fapihttp`, `backchannelhttp`,
+`federation`, and the root `fapi` package's value types): strict
+parsers, canonicalization rules, JOSE implementation, algorithm policy
+primitives, `Secret`, typed `URL`, key representations, extension/RAR
+definitions, replay machinery, storage contract tests, conformance test
+vectors, OpenID Federation 1.0 Trust Chain resolution and self-issuance
+(`federation` — a shared subsystem package like `keys`/`storage`, not a
+fourth role: see `federation/doc.go`), CIBA ping-delivery notification
+(`backchannelhttp`).
 
 **Not shared**: role-level configuration, workflow APIs, transaction
 types, untrusted vs. validated request types, storage interfaces where
@@ -1120,9 +1224,11 @@ None of `client`, `server` or `resource` exposes a general-purpose
 JWT/JWS/JWK helper. If one did, callers would eventually reach for it
 outside the exact protocol context it was validated for and end up with
 a verification path missing an issuer, audience, lifetime or replay
-check. Everything JOSE-shaped stays under `internal/jose` and its
-asymmetric callers (`internal/dpop`, `internal/jarm`,
-`internal/requestobject`, `internal/clientassertion`, `internal/token`);
+check. Everything JOSE-shaped stays under `internal/jose` (plus
+`internal/jwe` for encryption) and its asymmetric callers
+(`internal/dpop`, `internal/mtls`, `internal/jarm`,
+`internal/requestobject`, `internal/clientassertion`,
+`internal/clientattestation`, `internal/federation`, `internal/token`);
 the public surface is limited to `keys.KeyManager`, registered public
 key types, the closed `SignatureAlgorithm` enum, and each role's own
 signed protocol outputs.

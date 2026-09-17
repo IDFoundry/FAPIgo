@@ -48,7 +48,7 @@ import (
 //     case) starts by fetching that subject's own Entity Configuration,
 //     at the identical host.
 //  2. TLS verification for that same host needs an exception — see
-//     peerTLSConfig's own doc comment for why a fixed pinned cert
+//     fapitest.PeerTLSConfig's own doc comment for why a fixed pinned cert
 //     (this binary's own peer cert, used for its one real, named peer
 //     conformance-federation-trust-anchor) can't also cover the
 //     suite's own, completely separate self-signed cert.
@@ -97,7 +97,7 @@ func newDynamicFederationClients(initial []federation.TrustAnchor, underlyingCli
 }
 
 // rebuild constructs a fresh *http.Client + fapihttp.Client
-// (AllowedPrivateHosts, and the peerTLSConfig verification exception,
+// (AllowedPrivateHosts, and the fapitest.PeerTLSConfig verification exception,
 // both set to exactly trustAnchors' own hosts) and a fresh Resolver/
 // AutomaticClientRepository/AutomaticClientKeySource trio built on it,
 // then atomically swaps them in — every in-flight ResolveClient/

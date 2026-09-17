@@ -23,27 +23,11 @@ import (
 // Config.SenderConstrain storage.SenderConstrainMTLS support uses it
 // the same way.
 func SelfSignedClientCert(commonName string) (tls.Certificate, error) {
-	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return tls.Certificate{}, fmt.Errorf("generate key: %w", err)
-	}
-	serial, err := rand.Int(rand.Reader, big.NewInt(1<<62))
-	if err != nil {
-		return tls.Certificate{}, fmt.Errorf("generate serial: %w", err)
-	}
-	template := &x509.Certificate{
-		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: commonName},
-		NotBefore:    time.Now().Add(-time.Minute),
-		NotAfter:     time.Now().Add(time.Hour),
-		KeyUsage:     x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
-	}
-	der, err := x509.CreateCertificate(rand.Reader, template, template, &priv.PublicKey, priv)
-	if err != nil {
-		return tls.Certificate{}, fmt.Errorf("create certificate: %w", err)
-	}
-	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: priv}, nil
+	return selfSignedCert(&x509.Certificate{
+		Subject:     pkix.Name{CommonName: commonName},
+		KeyUsage:    x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	})
 }
 
 // SelfSignedServerCert generates a throwaway ECDSA P-256 self-signed
@@ -58,6 +42,22 @@ func SelfSignedClientCert(commonName string) (tls.Certificate, error) {
 // with no shared CA to issue from) can name every hostname a peer
 // might dial it as in one call.
 func SelfSignedServerCert(commonName string, sans ...string) (tls.Certificate, error) {
+	return selfSignedCert(&x509.Certificate{
+		Subject:     pkix.Name{CommonName: commonName},
+		KeyUsage:    x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		DNSNames:    append([]string{commonName, "localhost"}, sans...),
+		IPAddresses: []net.IP{net.IPv4(127, 0, 0, 1)},
+	})
+}
+
+// selfSignedCert fills in the fields SelfSignedClientCert/
+// SelfSignedServerCert don't each already set on template (SerialNumber,
+// NotBefore/NotAfter) — a private key, self-signs, and returns it — the
+// one place this package generates a throwaway self-signed certificate,
+// shared by both exported constructors above so the ECDSA/serial/
+// self-sign boilerplate exists exactly once.
+func selfSignedCert(template *x509.Certificate) (tls.Certificate, error) {
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return tls.Certificate{}, fmt.Errorf("generate key: %w", err)
@@ -66,16 +66,9 @@ func SelfSignedServerCert(commonName string, sans ...string) (tls.Certificate, e
 	if err != nil {
 		return tls.Certificate{}, fmt.Errorf("generate serial: %w", err)
 	}
-	template := &x509.Certificate{
-		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: commonName},
-		NotBefore:    time.Now().Add(-time.Minute),
-		NotAfter:     time.Now().Add(time.Hour),
-		KeyUsage:     x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		DNSNames:     append([]string{commonName, "localhost"}, sans...),
-		IPAddresses:  []net.IP{net.IPv4(127, 0, 0, 1)},
-	}
+	template.SerialNumber = serial
+	template.NotBefore = time.Now().Add(-time.Minute)
+	template.NotAfter = time.Now().Add(time.Hour)
 	der, err := x509.CreateCertificate(rand.Reader, template, template, &priv.PublicKey, priv)
 	if err != nil {
 		return tls.Certificate{}, fmt.Errorf("create certificate: %w", err)

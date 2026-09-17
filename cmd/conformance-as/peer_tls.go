@@ -39,13 +39,13 @@ import (
 // Every host not in unverifiedHosts still gets full certificate
 // verification against pool; this is not a blanket bypass.
 func peerTLSConfig(pool *x509.CertPool, unverifiedHosts []string) *tls.Config {
-	return &tls.Config{
+	return &tls.Config{ // NOSONAR: go:S4830 -- see InsecureSkipVerify's own trailing comment below: VerifyConnection performs real verification, this isn't a blind bypass
 		MinVersion: tls.VersionTLS12,
 		// VerifyConnection below does the real verification work —
 		// InsecureSkipVerify alone would accept anything; Go's own
 		// tls.Config doc guarantees VerifyConnection still runs
 		// alongside it.
-		InsecureSkipVerify: true, //nolint:gosec // codeql[go/disabled-certificate-check] NOSONAR: go:S4830 -- VerifyConnection below performs real chain+hostname verification for every host except unverifiedHosts (see its own doc comment); not a blind bypass
+		InsecureSkipVerify: true, //nolint:gosec // codeql[go/disabled-certificate-check] -- VerifyConnection below performs real chain+hostname verification for every host except unverifiedHosts (see its own doc comment); not a blind bypass
 		VerifyConnection: func(cs tls.ConnectionState) error {
 			for _, h := range unverifiedHosts {
 				if strings.EqualFold(cs.ServerName, h) {

@@ -116,6 +116,7 @@ func main() {
 	clientJWKS := flag.String("client-jwks", "", "with -issuer, and NOT -client-auth-mtls (i.e. client_auth_type=private_key_jwt): JWK Set JSON file holding the client's PRIVATE key for signing client assertions, matching the public JWK already registered with the suite for this plan (see client_jwks.go and gen-rp-pkjwt-mtls.go-style generator scripts) — an ephemeral, freshly-generated-per-run key will never verify against a registration the suite already has on file. Required whenever -client-auth-mtls is not set.")
 	testName := flag.String("test-name", "", "with -issuer: the module under test, for the evidence file's own TEST: line and log messages only — this mode has no plan/module API call to send it to the suite on")
 	scope := flag.String("scope", "openid", "with -issuer: space-delimited scope list to request, exactly matching the plan's own module configuration on the suite (e.g. \"openid offline_access\") — a mismatch here surfaces as a confusing \"authorization response is missing iss\" driver error, not a normal OAuth scope error, since the suite redirects to its own internal log page instead of redirect_uri (see driveAuthorizationFlow's own doc comment)")
+	expectedFailures := flag.String("expected-failures", "", "with -profile=federation: a JSON file (see conformance/client/expected-failures-federation.json) naming modules this run is known to never PASS, and why — when set, a deviation in either direction (an expected-to-fail module PASSED, or an unlisted module didn't) makes this run exit non-zero with a \"=== deviations ===\" report, even though every module still gets driven and graded normally. Ignored for every other profile.")
 	flag.Parse()
 
 	if *issuer != "" {
@@ -163,7 +164,7 @@ func main() {
 		// variant table and needs its own live-hosted Entity
 		// Configuration endpoint (federation.go's own package doc
 		// comment) — dispatched separately, same reasoning as -profile=ciba.
-		if err := runFederationRP(*apiBase, *evidenceDir); err != nil {
+		if err := runFederationRP(*apiBase, *evidenceDir, *expectedFailures); err != nil {
 			log.Fatalf("conformance-client: %v", err)
 		}
 		return

@@ -1,0 +1,14 @@
+[
+  {
+    "test-name": "openid-federation-client-test",
+    "note": "Permanent: needs this driver to reach ID token issuance, which needs client.DiscoverViaFederation to accept the suite's own mock OP metadata. AddOpenIDProviderMetadataToEntityConfiguration.java never sets \"issuer\", a field OIDC Discovery 1.0 §3 requires and OpenID Federation 1.0 incorporates by reference (also requiring it match the Entity Identifier) — confirmed unfixed upstream as of PR #321."
+  },
+  {
+    "test-name": "openid-federation-client-invalid-aud-in-id-token",
+    "note": "Permanent: same root cause as openid-federation-client-test above — also needs ID token issuance to be reached before its own aud check can even run."
+  },
+  {
+    "test-name": "openid-federation-client-invalid-iss-in-id-token",
+    "note": "Permanent: same root cause as openid-federation-client-test above — also needs ID token issuance to be reached before its own iss check can even run."
+  }
+]

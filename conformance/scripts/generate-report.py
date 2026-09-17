@@ -59,7 +59,7 @@ AS_SUITES = [
     "baseline-client-credentials", "mtls-client-credentials",
     "client-auth-mtls-client-credentials", "client-auth-mtls-and-mtls-client-credentials",
 ]
-RP_SUITES = ["baseline", "message-signing", "ciba-mtls", "client-auth-mtls", "mtls", "client-auth-mtls-and-mtls"]
+RP_SUITES = ["baseline", "message-signing", "ciba-mtls", "client-auth-mtls", "mtls", "client-auth-mtls-and-mtls", "federation-rp"]
 FEDERATION_SUITES = ["federation-deployed-entity"]
 
 # scripts/run-federation-plan.py's own per-module output line — see its

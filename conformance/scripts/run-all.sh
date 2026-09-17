@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Runs all twenty-one FAPI2/FAPI-CIBA/OpenID-Federation test
+# Runs all twenty-two FAPI2/FAPI-CIBA/OpenID-Federation test
 # configurations this repo has driver support for — one underlying OIDF
-# conformance suite, exercised under twenty-one different plan/variant
+# conformance suite, exercised under twenty-two different plan/variant
 # combinations: AS baseline, AS message-signing, AS ciba-mtls, AS
 # ciba-ping, AS mtls, AS message-signing-mtls, AS client-auth-mtls, AS
 # client-auth-mtls-and-mtls, AS ciba-client-auth-mtls, AS
@@ -9,13 +9,16 @@
 # mtls-client-credentials, AS client-auth-mtls-client-credentials, AS
 # client-auth-mtls-and-mtls-client-credentials, RP baseline, RP
 # message-signing, RP ciba-mtls, RP client-auth-mtls, RP mtls, RP
-# client-auth-mtls-and-mtls, Federation federation-deployed-entity —
-# against a locally running OIDF conformance suite,
-# prints one combined summary at the end, and (via generate-report.py)
-# writes a fuller report.md alongside the raw per-configuration logs —
-# every non-PASSED module, with the "why this is expected, not a
-# defect" reasoning pulled straight from expected-{warnings,skips}-*.json
-# where one exists.
+# client-auth-mtls-and-mtls, RP federation-rp, Federation
+# federation-deployed-entity — against a locally running OIDF
+# conformance suite, prints one combined summary at the end, and (via
+# generate-report.py) writes a fuller report.md alongside the raw
+# per-configuration logs — every non-PASSED module, with the "why this
+# is expected, not a defect" reasoning pulled straight from
+# expected-{warnings,skips}-*.json (AS-side legs) or
+# expected-failures-*.json (RP federation-rp, ../client's own
+# module-level counterpart — see run_federation_rp_plan's own comment
+# for why the grain differs) where one exists.
 #
 # AS/RP client-auth-mtls cover RFC 8705 §2 client authentication
 # (client_auth_type=mtls) — orthogonal to AS/RP ciba-mtls's §3
@@ -88,15 +91,27 @@
 # every module in it is a pure server-to-server Entity Statement/Trust
 # Chain check with no browser step, so it's driven by
 # scripts/run-federation-plan.py directly rather than run-test-plan.py
-# (see that script's own doc comment). Deliberately NOT included: the
-# "Entity joined to test federation OP/RP test" plans that exercise
-# automatic registration live — those hit a deterministic, suite-side
-# bug ("Illegal test state change: CREATED -> RUNNING") in a module
-# OIDF's own maintainers mark "alpha version — may be incomplete or
-# incorrect, please email certification@oidf.org", failing before ever
-# reaching cmd/conformance-as and not resolved by
-# retry-flaky-modules.py's known-flake logic (confirmed via repeated
-# attempts) — revisit once OIDF fixes that module.
+# (see that script's own doc comment).
+#
+# The OIDF suite's other two federation plans ("Entity joined to test
+# federation OP/RP test") exercise automatic registration live, playing
+# the opposite role from each other. Both were investigated in depth
+# (PRs #319-321) — the "Illegal test state change: CREATED -> RUNNING"
+# failure earlier revisions of this comment attributed to a suite-side
+# alpha bug never actually reproduced once driven with a *complete*
+# config (race condition + missing FAPIgo-side connectivity, both real
+# bugs, both fixed). Current, confirmed state for each:
+#   - OP plan (suite plays RP, tests cmd/conformance-as): genuinely
+#     suite-blocked — AddOpenIDRelyingPartyMetadataToEntityConfiguration.java
+#     never sets token_endpoint_auth_method on its own self-hosted RP,
+#     so this AS correctly refuses to auto-register it (no implicit
+#     client_secret_basic default, FAPI 2.0's own prohibition). Not
+#     wired in here at all: every module in it would fail the same way.
+#   - RP plan (suite plays OP, tests cmd/conformance-client): "RP
+#     federation-rp" below — 7 of 10 modules pass; the other 3 hit a
+#     different, equally confirmed suite-side gap (missing "issuer" in
+#     the suite's own OP metadata) — see run_federation_rp_plan's own
+#     comment and ../client/expected-failures-federation.json.
 #
 # run-federation-plan.py also treats a SKIPPED module as unexpected
 # (not just FAILURE/WARNING) unless listed in
@@ -393,6 +408,45 @@ run_rp_plan() {
 	else
 		OVERALL_CLEAN=false
 		record_result "RP $name" "UNEXPECTED RESULTS — $passed/$total PASSED (see $log_file)"
+	fi
+}
+
+# run_federation_rp_plan — cmd/conformance-client -profile=federation
+# against the OIDF suite's own "Entity joined to test federation RP
+# test" plan. Unlike every run_rp_plan caller above, "clean" here isn't
+# 100% PASSED: 3 of 10 modules are permanently blocked by a confirmed
+# suite-side gap (this file's own header comment, and
+# ../client/scripts/README.md's "Federation" section, have the full
+# story). So this driver's own -expected-failures flag does that
+# module-by-module comparison itself and reports the *result* via exit
+# code — this function trusts that exit code rather than re-deriving
+# pass/fail from parsing "=== summary ===" the way run_rp_plan does for
+# every plan that's expected fully clean; the awk one-liners below are
+# only for this leg's own display line, not its OK/UNEXPECTED verdict.
+# No docker-compose bring-up needed at all, unlike run_federation_plan
+# below: the suite plays the OP and self-hosts its own Trust Anchor
+# entirely on its own side for this plan (../client/federation.go's own
+# doc comment) — no go-fapi AS/Trust Anchor container is ever involved.
+run_federation_rp_plan() {
+	local name="federation-rp"
+	local log_file="$WORKDIR/rp-$name.log"
+	ALL_SUITES+=("RP $name")
+
+	log "RP $name: starting cmd/conformance-client -profile=federation"
+	local exit_code=0
+	(cd "$REPO_ROOT" && go run ./cmd/conformance-client -suite="$CONFORMANCE_SERVER" -profile=federation \
+		-expected-failures="$REPO_ROOT/conformance/client/expected-failures-federation.json") \
+		>"$log_file" 2>&1 || exit_code=$?
+
+	local total passed
+	total="$(awk '/=== summary ===/{f=1;next} f && NF{c++} END{print c+0}' "$log_file")"
+	passed="$(awk '/=== summary ===/{f=1;next} f && $3=="PASSED"{c++} END{print c+0}' "$log_file")"
+
+	if [[ "$exit_code" -eq 0 ]]; then
+		record_result "RP $name" "OK — $passed/$total PASSED, matches expected-failures-federation.json"
+	else
+		OVERALL_CLEAN=false
+		record_result "RP $name" "UNEXPECTED RESULTS — $passed/$total PASSED, deviated from expected-failures-federation.json (see $log_file)"
 	fi
 }
 
@@ -712,6 +766,8 @@ run_rp_plan "mtls" "baseline" -mtls
 # Completes the "FAPI2SP RP MTLS + MTLS" register profile, the last of
 # the four FAPI2SP auth×sender-constrain combos.
 run_rp_plan "client-auth-mtls-and-mtls" "baseline" -mtls -client-auth-mtls
+
+run_federation_rp_plan
 
 run_federation_plan
 

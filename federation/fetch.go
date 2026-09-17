@@ -3,6 +3,7 @@ package federation
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 
@@ -24,6 +25,27 @@ const EntityStatementContentType = "application/entity-statement+jwt"
 // wellKnownURL concatenates when this package fetches a peer's Entity
 // Configuration.
 const WellKnownPath = "/.well-known/openid-federation"
+
+// WriteEntityStatement writes jwt — either SelfIssuer.EntityConfiguration's
+// own return value, or SubordinateIssuer.SubordinateStatement's — to w
+// as a complete, correctly-typed Entity Statement response (OpenID
+// Federation 1.0 §3: both are Entity Statements, self-signed or not,
+// and share the identical EntityStatementContentType regardless): the
+// Content-Type header, then jwt verbatim as the body. This package
+// still owns no transport of its own (ARCHITECTURE.md design rule 6;
+// the caller's own http.Server is what's actually listening at
+// WellKnownPath or its own fetch endpoint) — this is the same category
+// of helper as resource.Error.WriteJSON/server.TokenResult.WriteJSON:
+// it writes to an http.ResponseWriter the caller already has, nothing
+// more.
+//
+// Must be called before anything else writes to w — like every
+// http.ResponseWriter header/status call, it has no effect once a
+// prior write has already sent the response's status line.
+func WriteEntityStatement(w http.ResponseWriter, jwt string) {
+	w.Header().Set("Content-Type", EntityStatementContentType)
+	_, _ = w.Write([]byte(jwt))
+}
 
 // wellKnownURL builds entityID's Federation Entity Configuration
 // endpoint (OpenID Federation 1.0 §9): "/.well-known/openid-federation"

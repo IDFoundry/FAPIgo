@@ -1,15 +1,37 @@
-package main
+package fapitest_test
 
 import (
 	"crypto/tls"
 	"crypto/x509"
 	"testing"
+
+	"github.com/idfoundry/fapigo/fapitest"
 )
+
+// selfSignedLeafAndPool generates a throwaway self-signed cert
+// (fapitest.SelfSignedServerCert itself — dogfooding the sibling
+// promotion) and returns its parsed leaf plus a pool that trusts it,
+// for PeerTLSConfig's own "verify a non-listed host against pool" tests
+// below.
+func selfSignedLeafAndPool(t *testing.T) (*x509.Certificate, *x509.CertPool) {
+	t.Helper()
+	cert, err := fapitest.SelfSignedServerCert("127.0.0.1")
+	if err != nil {
+		t.Fatalf("SelfSignedServerCert() error = %v", err)
+	}
+	leaf, err := x509.ParseCertificate(cert.Certificate[0])
+	if err != nil {
+		t.Fatalf("parse generated certificate: %v", err)
+	}
+	pool := x509.NewCertPool()
+	pool.AddCert(leaf)
+	return leaf, pool
+}
 
 func TestPeerTLSConfigAcceptsUnverifiedHostRegardlessOfCert(t *testing.T) {
 	// No certificate at all — an unverified host still passes, since
 	// VerifyConnection returns before ever looking at PeerCertificates.
-	cfg := peerTLSConfig(x509.NewCertPool(), []string{"ta.example.org"})
+	cfg := fapitest.PeerTLSConfig(x509.NewCertPool(), []string{"ta.example.org"})
 	err := cfg.VerifyConnection(tls.ConnectionState{ServerName: "ta.example.org"})
 	if err != nil {
 		t.Errorf("VerifyConnection(unverified host, no certs) = %v, want nil", err)
@@ -17,7 +39,7 @@ func TestPeerTLSConfigAcceptsUnverifiedHostRegardlessOfCert(t *testing.T) {
 }
 
 func TestPeerTLSConfigMatchesUnverifiedHostCaseInsensitively(t *testing.T) {
-	cfg := peerTLSConfig(x509.NewCertPool(), []string{"TA.example.org"})
+	cfg := fapitest.PeerTLSConfig(x509.NewCertPool(), []string{"TA.example.org"})
 	err := cfg.VerifyConnection(tls.ConnectionState{ServerName: "ta.example.org"})
 	if err != nil {
 		t.Errorf("VerifyConnection = %v, want nil (case-insensitive match)", err)
@@ -25,13 +47,12 @@ func TestPeerTLSConfigMatchesUnverifiedHostCaseInsensitively(t *testing.T) {
 }
 
 func TestPeerTLSConfigVerifiesNonListedHostAgainstPool(t *testing.T) {
-	cert, pool := selfSignedCert(t)
-	leaf := cert.Leaf
+	leaf, pool := selfSignedLeafAndPool(t)
 
-	// The cert's own CommonName/IP SANs are "127.0.0.1" (selfSignedCert's
-	// own doc comment) — verifying against that same name, with the
-	// matching pool, succeeds.
-	err := peerTLSConfig(pool, nil).VerifyConnection(tls.ConnectionState{
+	// SelfSignedServerCert's own CommonName/IP SAN is "127.0.0.1" —
+	// verifying against that same name, with the matching pool,
+	// succeeds.
+	err := fapitest.PeerTLSConfig(pool, nil).VerifyConnection(tls.ConnectionState{
 		ServerName: "127.0.0.1", PeerCertificates: []*x509.Certificate{leaf},
 	})
 	if err != nil {
@@ -40,11 +61,10 @@ func TestPeerTLSConfigVerifiesNonListedHostAgainstPool(t *testing.T) {
 }
 
 func TestPeerTLSConfigRejectsNonListedHostWithUntrustedCert(t *testing.T) {
-	cert, _ := selfSignedCert(t)
-	leaf := cert.Leaf
+	leaf, _ := selfSignedLeafAndPool(t)
 	// An empty pool trusts nothing — the cert this connection actually
 	// presented isn't in it.
-	err := peerTLSConfig(x509.NewCertPool(), nil).VerifyConnection(tls.ConnectionState{
+	err := fapitest.PeerTLSConfig(x509.NewCertPool(), nil).VerifyConnection(tls.ConnectionState{
 		ServerName: "127.0.0.1", PeerCertificates: []*x509.Certificate{leaf},
 	})
 	if err == nil {
@@ -53,7 +73,7 @@ func TestPeerTLSConfigRejectsNonListedHostWithUntrustedCert(t *testing.T) {
 }
 
 func TestPeerTLSConfigRejectsNoPeerCertificates(t *testing.T) {
-	err := peerTLSConfig(x509.NewCertPool(), nil).VerifyConnection(tls.ConnectionState{ServerName: "ta.example.org"})
+	err := fapitest.PeerTLSConfig(x509.NewCertPool(), nil).VerifyConnection(tls.ConnectionState{ServerName: "ta.example.org"})
 	if err == nil {
 		t.Errorf("VerifyConnection(no peer certificates) = nil error, want error")
 	}

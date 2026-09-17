@@ -10,60 +10,77 @@ func TestDisallowedIP(t *testing.T) {
 		name          string
 		ip            string
 		allowLoopback bool
+		allowPrivate  bool
 		want          bool
 	}{
-		{"loopback v4, not allowed", "127.0.0.1", false, true},
-		{"loopback v4, allowed", "127.0.0.1", true, false},
-		{"loopback v6, not allowed", "::1", false, true},
-		{"loopback v6, allowed", "::1", true, false},
-		{"unspecified v6", "::", false, true},
-		{"IPv4-mapped IPv6 loopback", "::ffff:127.0.0.1", false, true},
-		{"private RFC1918", "10.0.0.5", false, true},
-		{"link-local (cloud metadata)", "169.254.169.254", false, true},
-		{"link-local, allowLoopback does not except it", "169.254.169.254", true, true},
-		{"unspecified", "0.0.0.0", false, true},
-		{"multicast", "224.0.0.1", false, true},
-		{"public", "8.8.8.8", false, false},
-		{"public, allowLoopback still fine", "8.8.8.8", true, false},
-		{"CGNAT low", "100.64.0.1", false, true},
-		{"CGNAT high", "100.127.255.254", false, true},
-		{"reserved 240/4", "240.0.0.1", false, true},
-		{"broadcast", "255.255.255.255", false, true},
-		{"IETF protocol assignment", "192.0.0.1", false, true},
-		{"benchmarking", "198.18.0.1", false, true},
-		{"IPv4-mapped IPv6 CGNAT", "::ffff:100.64.0.1", false, true},
-		{"IPv4-mapped IPv6 link-local", "::ffff:169.254.169.254", false, true},
-		{"public, real-world address", "93.184.216.34", false, false},
+		{"loopback v4, not allowed", "127.0.0.1", false, false, true},
+		{"loopback v4, allowed", "127.0.0.1", true, false, false},
+		{"loopback v6, not allowed", "::1", false, false, true},
+		{"loopback v6, allowed", "::1", true, false, false},
+		{"unspecified v6", "::", false, false, true},
+		{"IPv4-mapped IPv6 loopback", "::ffff:127.0.0.1", false, false, true},
+		{"private RFC1918", "10.0.0.5", false, false, true},
+		{"link-local (cloud metadata)", "169.254.169.254", false, false, true},
+		{"link-local, allowLoopback does not except it", "169.254.169.254", true, false, true},
+		{"unspecified", "0.0.0.0", false, false, true},
+		{"multicast", "224.0.0.1", false, false, true},
+		{"public", "8.8.8.8", false, false, false},
+		{"public, allowLoopback still fine", "8.8.8.8", true, false, false},
+		{"CGNAT low", "100.64.0.1", false, false, true},
+		{"CGNAT high", "100.127.255.254", false, false, true},
+		{"reserved 240/4", "240.0.0.1", false, false, true},
+		{"broadcast", "255.255.255.255", false, false, true},
+		{"IETF protocol assignment", "192.0.0.1", false, false, true},
+		{"benchmarking", "198.18.0.1", false, false, true},
+		{"IPv4-mapped IPv6 CGNAT", "::ffff:100.64.0.1", false, false, true},
+		{"IPv4-mapped IPv6 link-local", "::ffff:169.254.169.254", false, false, true},
+		{"public, real-world address", "93.184.216.34", false, false, false},
 
 		// IPv6 transition addresses that tunnel an IPv4 destination:
 		// each of these must be judged by the embedded v4 address, not
 		// by the (global-unicast-looking) IPv6 form itself.
-		{"NAT64 -> link-local (cloud metadata)", "64:ff9b::a9fe:a9fe", false, true},
-		{"NAT64 -> loopback", "64:ff9b::7f00:1", false, true},
-		{"NAT64 -> private", "64:ff9b::a00:1", false, true},
-		{"NAT64 -> public, stays allowed", "64:ff9b::808:808", false, false},
-		{"NAT64 -> loopback, allowLoopback exempts it", "64:ff9b::7f00:1", true, false},
-		{"6to4 -> loopback", "2002:7f00:1::", false, true},
-		{"6to4 -> link-local (cloud metadata)", "2002:a9fe:a9fe::", false, true},
+		{"NAT64 -> link-local (cloud metadata)", "64:ff9b::a9fe:a9fe", false, false, true},
+		{"NAT64 -> loopback", "64:ff9b::7f00:1", false, false, true},
+		{"NAT64 -> private", "64:ff9b::a00:1", false, false, true},
+		{"NAT64 -> public, stays allowed", "64:ff9b::808:808", false, false, false},
+		{"NAT64 -> loopback, allowLoopback exempts it", "64:ff9b::7f00:1", true, false, false},
+		{"6to4 -> loopback", "2002:7f00:1::", false, false, true},
+		{"6to4 -> link-local (cloud metadata)", "2002:a9fe:a9fe::", false, false, true},
 		// Teredo (RFC 4380): client v4 lives in the low 32 bits,
 		// bit-inverted. Target 169.254.169.254 = A9.FE.A9.FE; XOR each
 		// byte with 0xFF -> 56.01.56.01 -> hextets 5601:5601.
-		{"Teredo -> link-local (cloud metadata)", "2001:0:0:0:0:0:5601:5601", false, true},
-		{"IPv4-compatible -> link-local (cloud metadata)", "::a9fe:a9fe", false, true},
-		{"ordinary global-unicast IPv6, unaffected", "2606:4700:4700::1111", false, false},
+		{"Teredo -> link-local (cloud metadata)", "2001:0:0:0:0:0:5601:5601", false, false, true},
+		{"IPv4-compatible -> link-local (cloud metadata)", "::a9fe:a9fe", false, false, true},
+		{"ordinary global-unicast IPv6, unaffected", "2606:4700:4700::1111", false, false, false},
 
 		// ISATAP (RFC 5214): identified by the 0000:5efe/0200:5efe
 		// interface-ID marker, not by prefix.
-		{"ISATAP 0000:5efe -> private", "2001:db8::5efe:c0a8:101", false, true},
-		{"ISATAP already blocked via link-local, unaffected by the marker", "fe80::5efe:c0a8:101", false, true},
-		{"ISATAP 0200:5efe -> loopback", "2001:db8::200:5efe:7f00:1", false, true},
-		{"5efe present but not at the ISATAP interface-ID position, unaffected", "2001:db8:aaaa:bbbb:cccc:dddd:5efe:c0a8", false, false},
+		{"ISATAP 0000:5efe -> private", "2001:db8::5efe:c0a8:101", false, false, true},
+		{"ISATAP already blocked via link-local, unaffected by the marker", "fe80::5efe:c0a8:101", false, false, true},
+		{"ISATAP 0200:5efe -> loopback", "2001:db8::200:5efe:7f00:1", false, false, true},
+		{"5efe present but not at the ISATAP interface-ID position, unaffected", "2001:db8:aaaa:bbbb:cccc:dddd:5efe:c0a8", false, false, false},
 
 		// Non-routable IPv4 ranges the plain checks don't cover.
-		{"0.0.0.0/8 non-zero (\"this network\")", "0.1.2.3", false, true},
-		{"TEST-NET-1 documentation", "192.0.2.1", false, true},
-		{"TEST-NET-2 documentation", "198.51.100.1", false, true},
-		{"TEST-NET-3 documentation", "203.0.113.1", false, true},
+		{"0.0.0.0/8 non-zero (\"this network\")", "0.1.2.3", false, false, true},
+		{"TEST-NET-1 documentation", "192.0.2.1", false, false, true},
+		{"TEST-NET-2 documentation", "198.51.100.1", false, false, true},
+		{"TEST-NET-3 documentation", "203.0.113.1", false, false, true},
+
+		// allowPrivate lifts only the IsPrivate check — every other
+		// category (link-local, unspecified, multicast, loopback,
+		// extraBlockedCIDRs, tunneled addresses) stays blocked even
+		// with allowPrivate set.
+		{"private RFC1918, allowPrivate exempts it", "10.0.0.5", false, true, false},
+		{"private RFC1918 172.16/12, allowPrivate exempts it", "172.17.0.5", false, true, false},
+		{"private RFC1918 192.168/16, allowPrivate exempts it", "192.168.1.5", false, true, false},
+		{"link-local, allowPrivate does not except it", "169.254.169.254", false, true, true},
+		{"loopback, allowPrivate does not except it", "127.0.0.1", false, true, true},
+		{"unspecified, allowPrivate does not except it", "0.0.0.0", false, true, true},
+		{"multicast, allowPrivate does not except it", "224.0.0.1", false, true, true},
+		{"CGNAT, allowPrivate does not except it (not IsPrivate)", "100.64.0.1", false, true, true},
+		{"public, allowPrivate is a no-op", "8.8.8.8", false, true, false},
+		{"NAT64 -> private, allowPrivate exempts the embedded address too", "64:ff9b::a00:1", false, true, false},
+		{"NAT64 -> link-local, allowPrivate does not except the embedded address", "64:ff9b::a9fe:a9fe", false, true, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -71,8 +88,32 @@ func TestDisallowedIP(t *testing.T) {
 			if ip == nil {
 				t.Fatalf("net.ParseIP(%q) = nil", tc.ip)
 			}
-			if got := disallowedIP(ip, tc.allowLoopback); got != tc.want {
-				t.Errorf("disallowedIP(%s, allowLoopback=%v) = %v, want %v", tc.ip, tc.allowLoopback, got, tc.want)
+			if got := disallowedIP(ip, tc.allowLoopback, tc.allowPrivate); got != tc.want {
+				t.Errorf("disallowedIP(%s, allowLoopback=%v, allowPrivate=%v) = %v, want %v", tc.ip, tc.allowLoopback, tc.allowPrivate, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsAllowedPrivateHost(t *testing.T) {
+	allowed := []string{"conformance-federation-trust-anchor", "conformance-as-federation"}
+	cases := []struct {
+		name string
+		host string
+		want bool
+	}{
+		{"exact match", "conformance-as-federation", true},
+		{"exact match with port", "conformance-as-federation:8443", true},
+		{"case-insensitive", "Conformance-AS-Federation", true},
+		{"not in the list", "evil.example.org", false},
+		{"suffix is not a match", "not-conformance-as-federation", false},
+		{"prefix is not a match", "conformance-as-federation.evil.example.org", false},
+		{"empty allow-list entry never matches a real host", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isAllowedPrivateHost(tc.host, allowed); got != tc.want {
+				t.Errorf("isAllowedPrivateHost(%q, %v) = %v, want %v", tc.host, allowed, got, tc.want)
 			}
 		})
 	}

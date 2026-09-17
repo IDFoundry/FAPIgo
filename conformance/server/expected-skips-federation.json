@@ -10,11 +10,5 @@
     "condition": "openid-federation-ensure-fetch-with-iss-as-sub-fails",
     "expected-result": "skip",
     "note": "Permanent: same reason as openid-federation-ensure-fetch-with-invalid-sub-fails above."
-  },
-  {
-    "test-name": "openid-federation-compare-trust-chain-to-resolve",
-    "condition": "openid-federation-compare-trust-chain-to-resolve",
-    "expected-result": "skip",
-    "note": "TEMPORARY known gap, not a permanent one: skips because conformance-federation-trust-anchor doesn't serve a federation_resolve_endpoint yet, even though federation.ResolveIssuer/Resolver.ResolveViaEndpoint fully support it as of PRs #307/#309/#312. Remove this entry once that endpoint is wired into the binary — see run-all.sh's own federation section comment for why that isn't done yet."
   }
 ]

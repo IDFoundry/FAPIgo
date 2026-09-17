@@ -12,7 +12,17 @@
 # The SAN list covers every hostname this binary might be reached as
 # across the setups documented in that README (docker-compose service
 # names, plus localhost/host.docker.internal for running conformance-as
-# directly on the host).
+# directly on the host), plus conformance-as-federation and
+# conformance-federation-trust-anchor: unlike every other pairing here,
+# those two binaries also call each other directly (Resolver.Resolve,
+# driving conformance-federation-trust-anchor's own /resolve endpoint)
+# rather than being called only by the suite's own trust-all client, so
+# their own real TLS verification (net/http's ordinary certificate
+# checking, not fapihttp's separate SSRF allow-list —
+# fapihttp.Config.AllowedPrivateHosts in cmd/conformance-federation-
+# trust-anchor/main.go handles that different problem) needs an actual
+# matching SAN, not just this cert's own general "self-signed is enough
+# because the suite doesn't check" reasoning above.
 #
 # RSA, not ECDSA: confirmed live against fapi-ciba-id1-test-plan's own
 # FAPI-RW-8.5-1 cipher check (net.openid.conformance.condition.common
@@ -32,7 +42,7 @@ mkdir -p certs
 openssl req -x509 -nodes -newkey rsa:2048 \
   -keyout certs/server.key -out certs/server.crt -days 3650 \
   -subj "/CN=conformance-as" \
-  -addext "subjectAltName=DNS:conformance-as-baseline,DNS:conformance-as-message-signing,DNS:conformance-as-ciba,DNS:conformance-as-ciba-mtls,DNS:localhost,DNS:host.docker.internal,IP:127.0.0.1"
+  -addext "subjectAltName=DNS:conformance-as-baseline,DNS:conformance-as-message-signing,DNS:conformance-as-ciba,DNS:conformance-as-ciba-mtls,DNS:conformance-as-federation,DNS:conformance-federation-trust-anchor,DNS:localhost,DNS:host.docker.internal,IP:127.0.0.1"
 
 # openssl's default 0600 on the key is only readable by the host user
 # that ran this script — but the container reads it as the distroless

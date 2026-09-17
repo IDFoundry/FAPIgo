@@ -60,6 +60,23 @@ type Config struct {
 	// loopback address, matching fapi.AllowLoopbackHTTP. It exists for
 	// local development only.
 	AllowLoopbackHTTP bool
+
+	// AllowedPrivateHosts is a fixed, explicit set of hostnames (matched
+	// case-insensitively, exactly — no wildcards, no suffix/prefix
+	// matching) an operator has decided to trust resolving to a private
+	// address, lifting only the IsPrivate portion of disallowedIP's own
+	// block for that host's own resolved IPs — every other SSRF check
+	// (link-local, unspecified, multicast, extraBlockedCIDRs, the IPv6
+	// tunnel-embedding check) still applies even to an allowed host.
+	//
+	// Exists for a fixed, closed deployment topology — e.g. a
+	// docker-compose network where an operator's own services address
+	// each other by a known hostname whose resolved IP is dynamic and
+	// outside that operator's control, so a CIDR-based allow-list
+	// wouldn't work — never for arbitrary or end-user-supplied input.
+	// Nil/empty (the zero value) exempts nothing, matching every other
+	// optional field here.
+	AllowedPrivateHosts []string
 }
 
 // Client performs hardened GET fetches for discovery documents, JWKS
@@ -370,8 +387,9 @@ func (c *Client) validateFetchURL(ctx context.Context, u *url.URL) error {
 // HTTPClient may re-resolve the host at connect time — see
 // FetchRequest.URL's doc comment.
 func (c *Client) checkHostIPs(ctx context.Context, host string) error {
+	allowPrivate := isAllowedPrivateHost(host, c.cfg.AllowedPrivateHosts)
 	if ip := net.ParseIP(host); ip != nil {
-		if disallowedIP(ip, c.cfg.AllowLoopbackHTTP) {
+		if disallowedIP(ip, c.cfg.AllowLoopbackHTTP, allowPrivate) {
 			return ErrSSRFBlocked
 		}
 		return nil
@@ -384,7 +402,7 @@ func (c *Client) checkHostIPs(ctx context.Context, host string) error {
 		return ErrSSRFBlocked
 	}
 	for _, ip := range ips {
-		if disallowedIP(ip, c.cfg.AllowLoopbackHTTP) {
+		if disallowedIP(ip, c.cfg.AllowLoopbackHTTP, allowPrivate) {
 			return ErrSSRFBlocked
 		}
 	}
@@ -401,6 +419,23 @@ func isLoopbackHost(host string) bool {
 	}
 	ip := net.ParseIP(h)
 	return ip != nil && ip.IsLoopback()
+}
+
+// isAllowedPrivateHost reports whether host (stripped of any port)
+// exactly matches one of allowed, case-insensitively — see
+// Config.AllowedPrivateHosts/TransportConfig.AllowedPrivateHosts' own
+// doc comment for why this stays this narrow.
+func isAllowedPrivateHost(host string, allowed []string) bool {
+	h := host
+	if hostOnly, _, err := net.SplitHostPort(host); err == nil {
+		h = hostOnly
+	}
+	for _, a := range allowed {
+		if strings.EqualFold(h, a) {
+			return true
+		}
+	}
+	return false
 }
 
 func readBounded(r io.Reader, max int64) ([]byte, error) {

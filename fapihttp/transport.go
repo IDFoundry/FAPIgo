@@ -23,6 +23,13 @@ type TransportConfig struct {
 	// development only — see fapi.AllowLoopbackHTTP. It never exempts
 	// any other private, link-local, unspecified or multicast address.
 	AllowLoopbackHTTP bool
+
+	// AllowedPrivateHosts — see Config.AllowedPrivateHosts' own doc
+	// comment (client.go): the identical exemption, applied here at
+	// dial time instead of Client.Fetch's own pre-dial check. A caller
+	// wanting both layers to honor the same allow-list sets this to the
+	// same value passed to Config.
+	AllowedPrivateHosts []string
 }
 
 // NewClient builds an *http.Client whose Transport resolves each host
@@ -51,7 +58,7 @@ func NewClient(cfg TransportConfig) (*http.Client, error) {
 
 	base := &net.Dialer{Timeout: cfg.DialTimeout}
 	transport := &http.Transport{
-		DialContext:         safeDialContext(base, cfg.AllowLoopbackHTTP),
+		DialContext:         safeDialContext(base, cfg.AllowLoopbackHTTP, cfg.AllowedPrivateHosts),
 		TLSHandshakeTimeout: cfg.TLSHandshakeTimeout,
 		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
 		ForceAttemptHTTP2:   true,
@@ -69,12 +76,13 @@ func NewClient(cfg TransportConfig) (*http.Client, error) {
 // dials the first one that passes — so the address actually connected to
 // is always one this function itself checked, never a name resolved a
 // second time by the caller's dialer.
-func safeDialContext(base *net.Dialer, allowLoopback bool) func(context.Context, string, string) (net.Conn, error) {
+func safeDialContext(base *net.Dialer, allowLoopback bool, allowedPrivateHosts []string) func(context.Context, string, string) (net.Conn, error) {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(addr)
 		if err != nil {
 			return nil, err
 		}
+		allowPrivate := isAllowedPrivateHost(host, allowedPrivateHosts)
 
 		var candidates []net.IP
 		if ip := net.ParseIP(host); ip != nil {
@@ -91,7 +99,7 @@ func safeDialContext(base *net.Dialer, allowLoopback bool) func(context.Context,
 
 		var lastErr = ErrSSRFBlocked
 		for _, ip := range candidates {
-			if disallowedIP(ip, allowLoopback) {
+			if disallowedIP(ip, allowLoopback, allowPrivate) {
 				continue
 			}
 			conn, dialErr := base.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
@@ -133,17 +141,23 @@ var extraBlockedCIDRs = func() []*net.IPNet {
 }()
 
 // disallowedIP reports whether ip is not an acceptable target for a
-// server-initiated fetch: loopback (unless allowLoopback), private,
-// link-local, unspecified, multicast, one of extraBlockedCIDRs, or an
-// IPv6 transition address that tunnels one of the above.
-func disallowedIP(ip net.IP, allowLoopback bool) bool {
+// server-initiated fetch: loopback (unless allowLoopback), private
+// (unless allowPrivate — see Config.AllowedPrivateHosts' own doc
+// comment for what that does and does not exempt), link-local,
+// unspecified, multicast, one of extraBlockedCIDRs, or an IPv6
+// transition address that tunnels one of the above.
+func disallowedIP(ip net.IP, allowLoopback, allowPrivate bool) bool {
 	if v4 := ip.To4(); v4 != nil {
 		ip = v4
 	}
 	if ip.IsLoopback() {
 		return !allowLoopback
 	}
-	if ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+	if ip.IsPrivate() {
+		if !allowPrivate {
+			return true
+		}
+	} else if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
 		ip.IsUnspecified() || ip.IsMulticast() {
 		return true
 	}
@@ -159,9 +173,11 @@ func disallowedIP(ip net.IP, allowLoopback bool) bool {
 	// loopback/private/link-local. Recursing here can only add a
 	// block: a recursed 4-byte address never matches
 	// embeddedIPv4's own prefix checks, so this can recurse at most
-	// once.
+	// once. allowPrivate still applies to the embedded address — an
+	// allowed hostname's own tunneled address is exactly as trusted as
+	// its own direct one.
 	if embedded := embeddedIPv4(ip); embedded != nil {
-		return disallowedIP(embedded, allowLoopback)
+		return disallowedIP(embedded, allowLoopback, allowPrivate)
 	}
 	return false
 }

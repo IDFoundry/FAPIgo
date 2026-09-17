@@ -88,6 +88,59 @@ func TestFetchRejectsHTTPSResolvingToLoopback(t *testing.T) {
 	}
 }
 
+// TestFetchAllowsPrivateIPForAllowedHost proves Config.AllowedPrivateHosts
+// lets Fetch through for a host that resolves to a private address, when
+// (and only when) that exact host is on the list — a real docker-compose
+// peer-service scenario, not the fixed loopback address every other
+// pre-dial-check test here uses.
+func TestFetchAllowsPrivateIPForAllowedHost(t *testing.T) {
+	resolver := &fakeIPResolver{results: [][]net.IP{{net.ParseIP("10.0.0.5")}}}
+	okResp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader("{}")),
+		TLS:        &tls.ConnectionState{},
+	}
+	c := &Client{
+		http: &sequencedHTTPClient{t: t, responses: []*http.Response{okResp}},
+		cfg: Config{
+			MaxResponseBytes: 1024, RequestTimeout: 5 * time.Second, MaxRedirects: 1,
+			AllowedPrivateHosts: []string{"internal.test"},
+		},
+		resolveIPs: resolver.resolve,
+	}
+	_, err := c.Fetch(context.Background(), FetchRequest{
+		URL:                 mustParseTestURL(t, "https://internal.test/a"),
+		ExpectedContentType: "application/json",
+	})
+	if err != nil {
+		t.Fatalf("Fetch error = %v, want nil (internal.test is on AllowedPrivateHosts)", err)
+	}
+}
+
+// TestFetchRejectsPrivateIPForHostNotAllowed proves
+// Config.AllowedPrivateHosts is exact-match, not a blanket exemption: a
+// different private-resolving host, absent from the list, is still
+// blocked.
+func TestFetchRejectsPrivateIPForHostNotAllowed(t *testing.T) {
+	resolver := &fakeIPResolver{results: [][]net.IP{{net.ParseIP("10.0.0.5")}}}
+	c := &Client{
+		http: failIfCalledHTTPClient{t: t},
+		cfg: Config{
+			MaxResponseBytes: 1024, RequestTimeout: 5 * time.Second, MaxRedirects: 1,
+			AllowedPrivateHosts: []string{"some-other-host.test"},
+		},
+		resolveIPs: resolver.resolve,
+	}
+	_, err := c.Fetch(context.Background(), FetchRequest{
+		URL:                 mustParseTestURL(t, "https://internal.test/a"),
+		ExpectedContentType: "application/json",
+	})
+	if !errors.Is(err, ErrSSRFBlocked) {
+		t.Fatalf("Fetch error = %v, want ErrSSRFBlocked", err)
+	}
+}
+
 // TestFetchRejectsRedirectToInternalIP proves the same pre-dial IP
 // check applies to every redirect hop, not only the initial request:
 // the first resolution of the (same) hostname is safe, so the initial

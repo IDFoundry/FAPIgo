@@ -81,7 +81,12 @@ type openIDRelyingPartyMetadata struct {
 // modules / print-summary shape run (main.go) uses for every other
 // plan — only module setup (buildFederationModuleClient, below) and
 // this plan's own config differ enough to need their own file.
-func runFederationRP(apiBase, evidenceDir string) error {
+// expectedFailuresFile, if non-empty, is checked against the final
+// summary via checkExpectedFailures (expected_failures.go) — every
+// module still runs and gets graded either way, this only changes
+// whether a permanently non-PASSED module makes the run return an
+// error.
+func runFederationRP(apiBase, evidenceDir, expectedFailuresFile string) error {
 	ctx := context.Background()
 	rawHTTP := insecureSuiteHTTPClient()
 
@@ -268,7 +273,32 @@ func runFederationRP(apiBase, evidenceDir string) error {
 	for _, name := range moduleNames {
 		log.Printf("%-16s %s", summary[name], name)
 	}
-	return nil
+
+	if expectedFailuresFile == "" {
+		return nil
+	}
+	expected, err := loadExpectedFailures(expectedFailuresFile)
+	if err != nil {
+		return fmt.Errorf("load expected failures: %w", err)
+	}
+	// Deliberately no "every module matched" success line here: run-all.sh's
+	// own run_federation_rp_plan counts this run's "=== summary ===" block
+	// with a generic "every non-empty line after it is one module" awk
+	// one-liner (matching every other run_rp_plan caller) — an extra
+	// line here would silently inflate its own displayed module count
+	// (confirmed live: showed "7/11 PASSED" instead of "7/10"). The
+	// caller already learns success from this function's nil return
+	// (exit code 0) and, in run-all.sh, from record_result's own
+	// "matches expected-failures-federation.json" text.
+	deviations := checkExpectedFailures(summary, moduleNames, expected)
+	if len(deviations) == 0 {
+		return nil
+	}
+	log.Printf("=== deviations from %s ===", expectedFailuresFile)
+	for _, d := range deviations {
+		log.Printf("%s", d)
+	}
+	return fmt.Errorf("%d module(s) deviated from %s", len(deviations), expectedFailuresFile)
 }
 
 // federationModuleDriver holds everything runFederationModule needs

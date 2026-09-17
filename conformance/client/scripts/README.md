@@ -402,10 +402,16 @@ confirmed suite-side gap** — not a grab-bag of unrelated issues:
   suite's own metadata document over this before this driver ever gets
   far enough to attempt authorization. Checked upstream (github.com/openid/federation-suite
   — 500+ commits ahead of this repo's checkout at the time) for a fix:
-  none touch this file. Not wired into `conformance/scripts/run-all.sh`
-  or daily CI — unlike the AS-side federation legs, this profile has no
-  established expected-failure tracking mechanism yet, and 3 permanently
-  failing modules would need one before this could run unattended.
+  none touch this file. Wired into `conformance/scripts/run-all.sh` as
+  the "RP federation-rp" leg, via a new `-expected-failures` flag
+  (`expected_failures.go`) — the RP-side counterpart to the AS side's
+  `expected-skips-federation.json`/`expected-warnings-federation.json`,
+  at this driver's own coarser module-level grain (one verdict per
+  module, not per log entry). `conformance/client/expected-failures-federation.json`
+  names these exact 3 modules; the leg only reports UNEXPECTED RESULTS
+  if reality drifts from that file in *either* direction — a newly
+  non-passing module, or one of these 3 unexpectedly starting to PASS
+  (worth noticing: it'd mean the suite shipped a fix upstream).
 
 ## Client authentication mTLS (`-client-auth-mtls`)
 

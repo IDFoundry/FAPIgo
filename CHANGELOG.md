@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.29.0](https://github.com/IDFoundry/FAPIgo/compare/v0.28.0...v0.29.0) (2026-09-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* ignore unrecognized authorization request parameters at PAR/CIBA ([#304](https://github.com/IDFoundry/FAPIgo/issues/304))
+
+### Features
+
+* **client:** add client-side Attestation-Based Client Authentication ([#317](https://github.com/IDFoundry/FAPIgo/issues/317)) ([ca54d10](https://github.com/IDFoundry/FAPIgo/commit/ca54d1019b0300042320f36ba2d8257fa5ff7d9a))
+* **client:** add DiscoverViaFederation, the RP-side federation.Resolver consumer ([7d27b57](https://github.com/IDFoundry/FAPIgo/commit/7d27b57dad44b21e4c95df84c5525bdd6e21e619))
+* **client:** support the Attestation Challenge claim client-side ([b80054b](https://github.com/IDFoundry/FAPIgo/commit/b80054b777a7e8d5841e8267b48d3dea95817b6b))
+* **cmd/conformance-as:** add a runtime Trust Anchor admin endpoint ([e034aed](https://github.com/IDFoundry/FAPIgo/commit/e034aed9e74cf6851d5fdd2a9cac01ba92120ff6))
+* **cmd/conformance-client:** add -profile=federation for the OIDF RP test plan ([#321](https://github.com/IDFoundry/FAPIgo/issues/321)) ([7249381](https://github.com/IDFoundry/FAPIgo/commit/7249381d9b51aa21a96e7ba65a9d82c8b6a851fa))
+* **conformance:** wire -profile=federation into run-all.sh/CI ([146e44f](https://github.com/IDFoundry/FAPIgo/commit/146e44f9b6696a52e47e0761cc83a11b6e3ecd7b))
+* **fapihttp,federation:** serve a live federation_resolve_endpoint ([9d8df42](https://github.com/IDFoundry/FAPIgo/commit/9d8df42693785940510763146f0354469c2b1aa2))
+* **fapitest:** add PeerTLSConfig, promoted from cmd/conformance-as ([6553166](https://github.com/IDFoundry/FAPIgo/commit/655316668f296f1596df8b79f35c4b29d19f6c64))
+* **fapitest:** add SelfSignedServerCert, promoted from cmd/conformance-client ([d1c7845](https://github.com/IDFoundry/FAPIgo/commit/d1c7845fd51c441cd8a62f2f73ca087b4fb7e717))
+* **federation:** add Federation Historical Keys endpoint (§8.7), both sides ([7f66998](https://github.com/IDFoundry/FAPIgo/commit/7f66998b93a8f8d2851a624a8380f2100882176c))
+* **federation:** add OpenIDRelyingPartyMetadata, promoted from cmd/conformance-client ([fd20e6a](https://github.com/IDFoundry/FAPIgo/commit/fd20e6a887fd5c954552e16f68a17cbbd9117deb))
+* **federation:** add request-parsing support for the Trust Mark endpoint ([fa8a63e](https://github.com/IDFoundry/FAPIgo/commit/fa8a63ece7f8b7998fb5acb44c9be3d1209db883))
+* **federation:** add Resolve endpoint (§8.3) support, consumer side ([ccfe4b4](https://github.com/IDFoundry/FAPIgo/commit/ccfe4b4b0f9712ee7b6b8a716df0a9c019b7a3c6))
+* **federation:** add ResolveIssuer, the Resolve endpoint producer side ([8211c39](https://github.com/IDFoundry/FAPIgo/commit/8211c39cdb8b30d32978f5dcde7c5a8c97a4a7ec))
+* **federation:** add WriteEntityStatement, promoted from 4 conformance binaries ([df72cca](https://github.com/IDFoundry/FAPIgo/commit/df72cca07edabf12b702b3ab6f84cce887af0738))
+* **federation:** include verified Trust Marks in a Resolve Response ([6fbf72e](https://github.com/IDFoundry/FAPIgo/commit/6fbf72e808034ed6c9de62b1c2e2872ff26f5e28))
+* **federation:** parse and validate Subordinate Listing filter parameters ([8974c1f](https://github.com/IDFoundry/FAPIgo/commit/8974c1f09ea0588db76b75e2fe20ecd1ae3c3d8e))
+* **federation:** support every RFC 8705 mTLS method in Automatic Registration ([4012831](https://github.com/IDFoundry/FAPIgo/commit/4012831f9b663b96f478255566f7bd738d7f3e7d))
+* implement attestation-based client authentication ([2707dcd](https://github.com/IDFoundry/FAPIgo/commit/2707dcd69529d72dfa752e1d01eb22b732115662))
+* **server:** advertise dpop_signing_alg_values_supported and authorization_details_types_supported ([bab2c43](https://github.com/IDFoundry/FAPIgo/commit/bab2c431bf2bc8b952702871bace073c4b8e28af))
+
+
+### Bug Fixes
+
+* address SonarCloud/CodeQL findings on the trust anchor admin PR ([4d5ed42](https://github.com/IDFoundry/FAPIgo/commit/4d5ed420c3d2d5abd3d6f66bf9ba1fc08a7d537f))
+* **client:** stop buildPushedRequestForm mutating its caller's params map ([4756502](https://github.com/IDFoundry/FAPIgo/commit/4756502ed1bc8ee9081f83921225ce8f94935994))
+* **cmd/conformance-as:** give the federation resolver its own peer-trusting fetcher ([1cd45be](https://github.com/IDFoundry/FAPIgo/commit/1cd45be98227622ed5f44fbe826e784e91ba85cb))
+* **conformance:** detect a silently SKIPPED federation module as unexpected ([#314](https://github.com/IDFoundry/FAPIgo/issues/314)) ([9c58852](https://github.com/IDFoundry/FAPIgo/commit/9c588526deb922c2b04d9e7cc4c4a8725a9da08f))
+* deduplicate SelfSignedClientCert/SelfSignedServerCert ([f50594c](https://github.com/IDFoundry/FAPIgo/commit/f50594cf4a71a13d277ec24ceb52ea8e388a27ac))
+* **docs:** badge follow-ups from the README refresh ([dcb8a9b](https://github.com/IDFoundry/FAPIgo/commit/dcb8a9be1ce6763155ca4f76bdd85d6de810139e))
+* **docs:** drop the retired Go Report Card badge ([61b1a0a](https://github.com/IDFoundry/FAPIgo/commit/61b1a0a9d46f1553654d4be2782c985b258adc98))
+* **docs:** serve the OpenID Certified badge with a white background baked in ([ba8d789](https://github.com/IDFoundry/FAPIgo/commit/ba8d789c59269aa084cd613b54cb29f0275f05b3))
+* ignore unrecognized authorization request parameters at PAR/CIBA ([#304](https://github.com/IDFoundry/FAPIgo/issues/304)) ([597f2a7](https://github.com/IDFoundry/FAPIgo/commit/597f2a785ed0196b1b1a90e200b4e601f58e6e47))
+* move NOSONAR go:S4830 suppression to the line SonarCloud actually reports ([7494381](https://github.com/IDFoundry/FAPIgo/commit/749438105bb40a5fe20928f8b7f23d591480e562))
+* place codeql suppression comment on its own line before the alert ([1f0df77](https://github.com/IDFoundry/FAPIgo/commit/1f0df774b41a0a681d1f78ead7db25d417cd04e8))
+* **server:** reject a bare request_uri PAR form parameter ([3a3b4df](https://github.com/IDFoundry/FAPIgo/commit/3a3b4dfe252f0ce2fe77d4919e80967fdd9a275d))
+* suppress CodeQL's disabled-certificate-check alert on peerTLSConfig ([6ac2903](https://github.com/IDFoundry/FAPIgo/commit/6ac29037d17be703be7bc894bf37ba63b5c487e8))
+
 ## [0.28.0](https://github.com/IDFoundry/FAPIgo/compare/v0.27.0...v0.28.0) (2026-09-14)
 
 

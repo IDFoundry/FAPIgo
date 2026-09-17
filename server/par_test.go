@@ -1032,6 +1032,32 @@ func TestPushAuthorizationRequestRejectsRequestUriInsideRequestObject(t *testing
 	}
 }
 
+// A "request_uri" form parameter sent alone (no "request" object at
+// all — the plain-parameters flow) must be rejected too, not just the
+// alongside-"request" case TestPushAuthorizationRequestRejectsRequestUriAlongsideRequest
+// covers: confirmed live against the OIDF conformance suite's own
+// fapi2-security-profile-final-par-authorization-request-containing-request_uri-form-param
+// module, which this previously failed — resolveAuthorizationParameters
+// only ran the request_uri check inside the "request present" branch,
+// so a request_uri with no sibling "request" fell straight through to
+// plainParamsToJSON unrejected.
+func TestPushAuthorizationRequestRejectsRequestUriAlone(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	assertion := h.clientAssertion(t)
+
+	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: plainFormParameters(t, assertion, map[string]string{
+			"request_uri": "urn:ietf:params:oauth:request_uri:bogus",
+		})},
+	})
+	if err == nil {
+		t.Fatalf("PushAuthorizationRequest(request_uri alone) = nil error, want error")
+	}
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequest)
+	}
+}
+
 // Same ignore-and-strip behavior as the plain-form-parameter case (see
 // TestPushAuthorizationRequestIgnoresAndStripsUnregisteredExtensionParameter),
 // but for an unrecognized claim carried inside a signed request object

@@ -58,24 +58,6 @@ import (
 
 const federationPlanName = "openid-federation-entity-joined-to-test-federation-rp-test-plan"
 
-// openIDRelyingPartyMetadata is this driver's own "openid_relying_party"
-// federation metadata (OpenID Federation 1.0 §5.2), signed into its own
-// Entity Configuration below — deliberately sets token_endpoint_auth_method
-// explicitly: AddOpenIDRelyingPartyMetadataToEntityConfiguration.java
-// (the suite's own, structurally identical builder for its self-hosted
-// RP in the OP-side plan) never sets this field at all, which is the
-// exact gap PR #320 traced FAPIgo's own PAR endpoint's correct
-// rejection of an auto-registered client with no declared auth method
-// back to — this driver has no reason to repeat that omission on its
-// own metadata just because the suite's own does.
-type openIDRelyingPartyMetadata struct {
-	ClientRegistrationTypes []string       `json:"client_registration_types"`
-	ResponseTypes           []string       `json:"response_types"`
-	RedirectURIs            []string       `json:"redirect_uris"`
-	TokenEndpointAuthMethod string         `json:"token_endpoint_auth_method"`
-	JWKS                    map[string]any `json:"jwks"`
-}
-
 // runFederationRP drives every module of the federation RP test plan
 // against apiBase, following the exact same create-plan / loop-over-
 // modules / print-summary shape run (main.go) uses for every other
@@ -125,9 +107,11 @@ func runFederationRP(apiBase, evidenceDir, expectedFailuresFile string) error {
 	if err != nil {
 		return fmt.Errorf("marshal rp client authentication public jwk: %w", err)
 	}
-	var rpClientAuthPubJSON map[string]any
-	if err := json.Unmarshal(rpClientAuthPubBytes, &rpClientAuthPubJSON); err != nil {
-		return fmt.Errorf("decode rp client authentication public jwk: %w", err)
+	rpClientAuthJWKS, err := json.Marshal(struct {
+		Keys []json.RawMessage `json:"keys"`
+	}{Keys: []json.RawMessage{rpClientAuthPubBytes}})
+	if err != nil {
+		return fmt.Errorf("marshal rp client authentication jwks: %w", err)
 	}
 
 	_, opECJWKS, err := generateFederationJWK("op-ec-key1")
@@ -151,12 +135,12 @@ func runFederationRP(apiBase, evidenceDir, expectedFailuresFile string) error {
 	// it to this opening line, not TokenEndpointAuthMethod's own field
 	// line — its value is "private_key_jwt", a public OAuth client-
 	// authentication method identifier (RFC 7523 §2.2), not a secret.
-	rpMetadataJSON, err := json.Marshal(openIDRelyingPartyMetadata{ //nolint:gosec
+	rpMetadataJSON, err := json.Marshal(federation.OpenIDRelyingPartyMetadata{ //nolint:gosec
 		ClientRegistrationTypes: []string{"automatic"},
 		ResponseTypes:           []string{"code"},
 		RedirectURIs:            []string{redirectURI},
 		TokenEndpointAuthMethod: "private_key_jwt",
-		JWKS:                    map[string]any{"keys": []any{rpClientAuthPubJSON}},
+		JWKS:                    rpClientAuthJWKS,
 	})
 	if err != nil {
 		return fmt.Errorf("marshal rp metadata: %w", err)

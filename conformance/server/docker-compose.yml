@@ -230,6 +230,12 @@ services:
       - -cert=/certs/server.crt
       - -key=/certs/server.key
       - -access-token-format=${ACCESS_TOKEN_FORMAT:-jwt}
+      # Lets conformance/server/scripts/run-federation-op-plan.py add
+      # the OIDF suite's own self-hosted, per-test-run Trust Anchor at
+      # runtime — see cmd/conformance-as/federation_trust_anchor_admin.go's
+      # own doc comment for why this is the only conformance-as variant
+      # that needs it.
+      - -federation-trust-anchor-admin
 
   # A minimal, standing OpenID Federation 1.0 Trust Anchor — see
   # cmd/conformance-federation-trust-anchor's own doc comment for why

@@ -352,7 +352,10 @@ func (cfg RegisteredClientConfig) NeedsJWKS() bool {
 }
 
 // NewRegisteredClient validates cfg and returns an immutable
-// RegisteredClient.
+// RegisteredClient. Each thematic group of checks is split into its
+// own function purely to keep this constructor's own cognitive
+// complexity manageable — the checks, their order and their error
+// messages are unchanged.
 func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 	if cfg.ID == "" {
 		return RegisteredClient{}, fmt.Errorf("storage: client ID is empty")
@@ -360,47 +363,8 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 	if len(cfg.RedirectURIs) == 0 {
 		return RegisteredClient{}, fmt.Errorf("storage: client %q has no registered redirect URIs", cfg.ID)
 	}
-	switch cfg.ClientAuthMethod {
-	case ClientAuthMethodPrivateKeyJWT:
-		if !cfg.ClientAssertionAlgorithm.IsValid() {
-			return RegisteredClient{}, fmt.Errorf("storage: client %q has no valid client assertion algorithm", cfg.ID)
-		}
-	case ClientAuthMethodSelfSignedTLSClientAuth:
-		if cfg.ExpectedCertificateThumbprint == "" {
-			return RegisteredClient{}, fmt.Errorf("storage: client %q must set ExpectedCertificateThumbprint for self_signed_tls_client_auth", cfg.ID)
-		}
-	case ClientAuthMethodTLSClientAuth:
-		if cfg.ExpectedSubjectDN == "" {
-			return RegisteredClient{}, fmt.Errorf("storage: client %q must set ExpectedSubjectDN for tls_client_auth", cfg.ID)
-		}
-	case ClientAuthMethodTLSClientAuthSANDNS:
-		if cfg.ExpectedSANDNS == "" {
-			return RegisteredClient{}, fmt.Errorf("storage: client %q must set ExpectedSANDNS for tls_client_auth_san_dns", cfg.ID)
-		}
-	case ClientAuthMethodTLSClientAuthSANURI:
-		if cfg.ExpectedSANURI == "" {
-			return RegisteredClient{}, fmt.Errorf("storage: client %q must set ExpectedSANURI for tls_client_auth_san_uri", cfg.ID)
-		}
-	case ClientAuthMethodTLSClientAuthSANIP:
-		if cfg.ExpectedSANIP == "" {
-			return RegisteredClient{}, fmt.Errorf("storage: client %q must set ExpectedSANIP for tls_client_auth_san_ip", cfg.ID)
-		}
-		if net.ParseIP(cfg.ExpectedSANIP) == nil {
-			return RegisteredClient{}, fmt.Errorf("storage: client %q has an invalid ExpectedSANIP %q", cfg.ID, cfg.ExpectedSANIP)
-		}
-	case ClientAuthMethodTLSClientAuthSANEmail:
-		if cfg.ExpectedSANEmail == "" {
-			return RegisteredClient{}, fmt.Errorf("storage: client %q must set ExpectedSANEmail for tls_client_auth_san_email", cfg.ID)
-		}
-	case ClientAuthMethodAttestation:
-		if cfg.ExpectedAttesterIssuer == "" {
-			return RegisteredClient{}, fmt.Errorf("storage: client %q must set ExpectedAttesterIssuer for attest_jwt_client_auth", cfg.ID)
-		}
-		if !cfg.ClientAttestationAlgorithm.IsValid() {
-			return RegisteredClient{}, fmt.Errorf("storage: client %q has no valid client attestation algorithm", cfg.ID)
-		}
-	default:
-		return RegisteredClient{}, fmt.Errorf("storage: client %q has an invalid client auth method", cfg.ID)
+	if err := validateClientAuthMethodFields(cfg); err != nil {
+		return RegisteredClient{}, err
 	}
 	if cfg.RequestObjectAlgorithm != 0 && !cfg.RequestObjectAlgorithm.IsValid() {
 		return RegisteredClient{}, fmt.Errorf("storage: client %q has an invalid request object algorithm", cfg.ID)
@@ -411,46 +375,14 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 	if cfg.BackchannelAuthenticationRequestAlgorithm != 0 && !cfg.BackchannelAuthenticationRequestAlgorithm.IsValid() {
 		return RegisteredClient{}, fmt.Errorf("storage: client %q has an invalid backchannel authentication request algorithm", cfg.ID)
 	}
-	switch cfg.BackchannelTokenDeliveryMode {
-	case BackchannelTokenDeliveryModePoll:
-		if !cfg.BackchannelClientNotificationEndpoint.IsZero() {
-			return RegisteredClient{}, fmt.Errorf("storage: client %q must not set BackchannelClientNotificationEndpoint for poll delivery", cfg.ID)
-		}
-	case BackchannelTokenDeliveryModePing:
-		if cfg.BackchannelAuthenticationRequestAlgorithm == 0 {
-			return RegisteredClient{}, fmt.Errorf("storage: client %q must be permitted to use CIBA (set BackchannelAuthenticationRequestAlgorithm) to use ping delivery", cfg.ID)
-		}
-		if cfg.BackchannelClientNotificationEndpoint.IsZero() {
-			return RegisteredClient{}, fmt.Errorf("storage: client %q must set BackchannelClientNotificationEndpoint for ping delivery", cfg.ID)
-		}
-	default:
-		return RegisteredClient{}, fmt.Errorf("storage: client %q has an invalid backchannel token delivery mode", cfg.ID)
+	if err := validateBackchannelTokenDeliveryMode(cfg); err != nil {
+		return RegisteredClient{}, err
 	}
-	idTokenEncKeyMgmtSet := cfg.IDTokenEncryptionKeyManagement != 0
-	idTokenEncContentEncSet := cfg.IDTokenEncryptionContentEncryption != 0
-	if idTokenEncKeyMgmtSet != idTokenEncContentEncSet {
-		return RegisteredClient{}, fmt.Errorf("storage: client %q must set both IDTokenEncryptionKeyManagement and IDTokenEncryptionContentEncryption, or neither", cfg.ID)
+	if err := validateIDTokenEncryptionFields(cfg); err != nil {
+		return RegisteredClient{}, err
 	}
-	if idTokenEncKeyMgmtSet {
-		if !cfg.IDTokenEncryptionKeyManagement.IsValid() {
-			return RegisteredClient{}, fmt.Errorf("storage: client %q has an invalid ID token encryption key management algorithm", cfg.ID)
-		}
-		if !cfg.IDTokenEncryptionContentEncryption.IsValid() {
-			return RegisteredClient{}, fmt.Errorf("storage: client %q has an invalid ID token encryption content encryption algorithm", cfg.ID)
-		}
-	}
-	userInfoEncKeyMgmtSet := cfg.UserInfoEncryptionKeyManagement != 0
-	userInfoEncContentEncSet := cfg.UserInfoEncryptionContentEncryption != 0
-	if userInfoEncKeyMgmtSet != userInfoEncContentEncSet {
-		return RegisteredClient{}, fmt.Errorf("storage: client %q must set both UserInfoEncryptionKeyManagement and UserInfoEncryptionContentEncryption, or neither", cfg.ID)
-	}
-	if userInfoEncKeyMgmtSet {
-		if !cfg.UserInfoEncryptionKeyManagement.IsValid() {
-			return RegisteredClient{}, fmt.Errorf("storage: client %q has an invalid UserInfo encryption key management algorithm", cfg.ID)
-		}
-		if !cfg.UserInfoEncryptionContentEncryption.IsValid() {
-			return RegisteredClient{}, fmt.Errorf("storage: client %q has an invalid UserInfo encryption content encryption algorithm", cfg.ID)
-		}
+	if err := validateUserInfoEncryptionFields(cfg); err != nil {
+		return RegisteredClient{}, err
 	}
 
 	scopes := make(map[string]struct{}, len(cfg.AllowedScopes))
@@ -490,6 +422,121 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 		allowsClientCredentialsGrant:              cfg.AllowsClientCredentialsGrant,
 		automaticFederationRegistration:           cfg.AutomaticFederationRegistration,
 	}, nil
+}
+
+// validateClientAuthMethodFields checks the field(s) each
+// ClientAuthMethod requires of cfg — split out of NewRegisteredClient
+// purely to keep that function's own cognitive complexity manageable.
+func validateClientAuthMethodFields(cfg RegisteredClientConfig) error {
+	switch cfg.ClientAuthMethod {
+	case ClientAuthMethodPrivateKeyJWT:
+		if !cfg.ClientAssertionAlgorithm.IsValid() {
+			return fmt.Errorf("storage: client %q has no valid client assertion algorithm", cfg.ID)
+		}
+	case ClientAuthMethodSelfSignedTLSClientAuth:
+		if cfg.ExpectedCertificateThumbprint == "" {
+			return fmt.Errorf("storage: client %q must set ExpectedCertificateThumbprint for self_signed_tls_client_auth", cfg.ID)
+		}
+	case ClientAuthMethodTLSClientAuth:
+		if cfg.ExpectedSubjectDN == "" {
+			return fmt.Errorf("storage: client %q must set ExpectedSubjectDN for tls_client_auth", cfg.ID)
+		}
+	case ClientAuthMethodTLSClientAuthSANDNS:
+		if cfg.ExpectedSANDNS == "" {
+			return fmt.Errorf("storage: client %q must set ExpectedSANDNS for tls_client_auth_san_dns", cfg.ID)
+		}
+	case ClientAuthMethodTLSClientAuthSANURI:
+		if cfg.ExpectedSANURI == "" {
+			return fmt.Errorf("storage: client %q must set ExpectedSANURI for tls_client_auth_san_uri", cfg.ID)
+		}
+	case ClientAuthMethodTLSClientAuthSANIP:
+		if cfg.ExpectedSANIP == "" {
+			return fmt.Errorf("storage: client %q must set ExpectedSANIP for tls_client_auth_san_ip", cfg.ID)
+		}
+		if net.ParseIP(cfg.ExpectedSANIP) == nil {
+			return fmt.Errorf("storage: client %q has an invalid ExpectedSANIP %q", cfg.ID, cfg.ExpectedSANIP)
+		}
+	case ClientAuthMethodTLSClientAuthSANEmail:
+		if cfg.ExpectedSANEmail == "" {
+			return fmt.Errorf("storage: client %q must set ExpectedSANEmail for tls_client_auth_san_email", cfg.ID)
+		}
+	case ClientAuthMethodAttestation:
+		if cfg.ExpectedAttesterIssuer == "" {
+			return fmt.Errorf("storage: client %q must set ExpectedAttesterIssuer for attest_jwt_client_auth", cfg.ID)
+		}
+		if !cfg.ClientAttestationAlgorithm.IsValid() {
+			return fmt.Errorf("storage: client %q has no valid client attestation algorithm", cfg.ID)
+		}
+	default:
+		return fmt.Errorf("storage: client %q has an invalid client auth method", cfg.ID)
+	}
+	return nil
+}
+
+// validateBackchannelTokenDeliveryMode checks the field(s) each
+// BackchannelTokenDeliveryMode requires of cfg — split out of
+// NewRegisteredClient for the same reason
+// validateClientAuthMethodFields is.
+func validateBackchannelTokenDeliveryMode(cfg RegisteredClientConfig) error {
+	switch cfg.BackchannelTokenDeliveryMode {
+	case BackchannelTokenDeliveryModePoll:
+		if !cfg.BackchannelClientNotificationEndpoint.IsZero() {
+			return fmt.Errorf("storage: client %q must not set BackchannelClientNotificationEndpoint for poll delivery", cfg.ID)
+		}
+	case BackchannelTokenDeliveryModePing:
+		if cfg.BackchannelAuthenticationRequestAlgorithm == 0 {
+			return fmt.Errorf("storage: client %q must be permitted to use CIBA (set BackchannelAuthenticationRequestAlgorithm) to use ping delivery", cfg.ID)
+		}
+		if cfg.BackchannelClientNotificationEndpoint.IsZero() {
+			return fmt.Errorf("storage: client %q must set BackchannelClientNotificationEndpoint for ping delivery", cfg.ID)
+		}
+	default:
+		return fmt.Errorf("storage: client %q has an invalid backchannel token delivery mode", cfg.ID)
+	}
+	return nil
+}
+
+// validateIDTokenEncryptionFields checks that
+// IDTokenEncryptionKeyManagement/IDTokenEncryptionContentEncryption are
+// both set or both empty, and valid when set — split out of
+// NewRegisteredClient for the same reason
+// validateClientAuthMethodFields is.
+func validateIDTokenEncryptionFields(cfg RegisteredClientConfig) error {
+	keyMgmtSet := cfg.IDTokenEncryptionKeyManagement != 0
+	contentEncSet := cfg.IDTokenEncryptionContentEncryption != 0
+	if keyMgmtSet != contentEncSet {
+		return fmt.Errorf("storage: client %q must set both IDTokenEncryptionKeyManagement and IDTokenEncryptionContentEncryption, or neither", cfg.ID)
+	}
+	if !keyMgmtSet {
+		return nil
+	}
+	if !cfg.IDTokenEncryptionKeyManagement.IsValid() {
+		return fmt.Errorf("storage: client %q has an invalid ID token encryption key management algorithm", cfg.ID)
+	}
+	if !cfg.IDTokenEncryptionContentEncryption.IsValid() {
+		return fmt.Errorf("storage: client %q has an invalid ID token encryption content encryption algorithm", cfg.ID)
+	}
+	return nil
+}
+
+// validateUserInfoEncryptionFields mirrors
+// validateIDTokenEncryptionFields for the UserInfo encryption pair.
+func validateUserInfoEncryptionFields(cfg RegisteredClientConfig) error {
+	keyMgmtSet := cfg.UserInfoEncryptionKeyManagement != 0
+	contentEncSet := cfg.UserInfoEncryptionContentEncryption != 0
+	if keyMgmtSet != contentEncSet {
+		return fmt.Errorf("storage: client %q must set both UserInfoEncryptionKeyManagement and UserInfoEncryptionContentEncryption, or neither", cfg.ID)
+	}
+	if !keyMgmtSet {
+		return nil
+	}
+	if !cfg.UserInfoEncryptionKeyManagement.IsValid() {
+		return fmt.Errorf("storage: client %q has an invalid UserInfo encryption key management algorithm", cfg.ID)
+	}
+	if !cfg.UserInfoEncryptionContentEncryption.IsValid() {
+		return fmt.Errorf("storage: client %q has an invalid UserInfo encryption content encryption algorithm", cfg.ID)
+	}
+	return nil
 }
 
 // ID returns the client's ID.

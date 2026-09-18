@@ -188,51 +188,59 @@ func Encrypt(req EncryptRequest) (string, error) {
 // wrapCEK delivers cek to recipientKey under alg, returning the
 // encrypted_key compact-serialization component and — for an
 // ECDH-ES-family algorithm — the ephemeral public key to embed as the
-// header's "epk" (nil for RSAOAEP256).
+// header's "epk" (nil for RSAOAEP256). Each algorithm's own logic is
+// split into its own function purely to keep this dispatcher's
+// cognitive complexity manageable.
 func wrapCEK(alg fapi.KeyManagementAlgorithm, recipientKey any, cek []byte, random io.Reader) ([]byte, *ecdh.PublicKey, error) {
 	switch alg {
 	case fapi.RSAOAEP256:
-		pub, ok := recipientKey.(*rsa.PublicKey)
-		if !ok {
-			return nil, nil, fmt.Errorf("jwe: RSAOAEP256 requires an *rsa.PublicKey, got %T", recipientKey)
-		}
-		if pub.N == nil || pub.N.BitLen() < minRSAModulusBits {
-			return nil, nil, fmt.Errorf("jwe: RSAOAEP256 requires an RSA key of at least %d bits", minRSAModulusBits)
-		}
-		encryptedKey, err := rsa.EncryptOAEP(sha256.New(), random, pub, cek, nil)
-		if err != nil {
-			return nil, nil, fmt.Errorf("jwe: rsa-oaep-256 wrap: %w", err)
-		}
-		return encryptedKey, nil, nil
-
+		return wrapCEKRSAOAEP256(recipientKey, cek, random)
 	case fapi.ECDHESA256KW:
-		pub, ok := recipientKey.(*ecdh.PublicKey)
-		if !ok || pub.Curve() != ecdh.P256() {
-			return nil, nil, fmt.Errorf("jwe: ECDHESA256KW requires a P-256 *ecdh.PublicKey, got %T", recipientKey)
-		}
-		ephemeral, err := ecdh.P256().GenerateKey(random)
-		if err != nil {
-			return nil, nil, fmt.Errorf("jwe: generate ephemeral key: %w", err)
-		}
-		z, err := ephemeral.ECDH(pub)
-		if err != nil {
-			return nil, nil, fmt.Errorf("jwe: ecdh: %w", err)
-		}
-		const kekSizeBits = 256 // AES-256 Key Wrap's own key size
-		info, err := otherInfo(alg.String(), nil, nil, kekSizeBits)
-		if err != nil {
-			return nil, nil, fmt.Errorf("jwe: %w", err)
-		}
-		kek := concatKDF(z, kekSizeBits, info)
-		encryptedKey, err := aesKeyWrap(kek, cek)
-		if err != nil {
-			return nil, nil, fmt.Errorf("jwe: ecdh-es+a256kw wrap: %w", err)
-		}
-		return encryptedKey, ephemeral.PublicKey(), nil
-
+		return wrapCEKECDHESA256KW(alg, recipientKey, cek, random)
 	default:
 		return nil, nil, fmt.Errorf("jwe: unsupported key management algorithm %v", alg)
 	}
+}
+
+func wrapCEKRSAOAEP256(recipientKey any, cek []byte, random io.Reader) ([]byte, *ecdh.PublicKey, error) {
+	pub, ok := recipientKey.(*rsa.PublicKey)
+	if !ok {
+		return nil, nil, fmt.Errorf("jwe: RSAOAEP256 requires an *rsa.PublicKey, got %T", recipientKey)
+	}
+	if pub.N == nil || pub.N.BitLen() < minRSAModulusBits {
+		return nil, nil, fmt.Errorf("jwe: RSAOAEP256 requires an RSA key of at least %d bits", minRSAModulusBits)
+	}
+	encryptedKey, err := rsa.EncryptOAEP(sha256.New(), random, pub, cek, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("jwe: rsa-oaep-256 wrap: %w", err)
+	}
+	return encryptedKey, nil, nil
+}
+
+func wrapCEKECDHESA256KW(alg fapi.KeyManagementAlgorithm, recipientKey any, cek []byte, random io.Reader) ([]byte, *ecdh.PublicKey, error) {
+	pub, ok := recipientKey.(*ecdh.PublicKey)
+	if !ok || pub.Curve() != ecdh.P256() {
+		return nil, nil, fmt.Errorf("jwe: ECDHESA256KW requires a P-256 *ecdh.PublicKey, got %T", recipientKey)
+	}
+	ephemeral, err := ecdh.P256().GenerateKey(random)
+	if err != nil {
+		return nil, nil, fmt.Errorf("jwe: generate ephemeral key: %w", err)
+	}
+	z, err := ephemeral.ECDH(pub)
+	if err != nil {
+		return nil, nil, fmt.Errorf("jwe: ecdh: %w", err)
+	}
+	const kekSizeBits = 256 // AES-256 Key Wrap's own key size
+	info, err := otherInfo(alg.String(), nil, nil, kekSizeBits)
+	if err != nil {
+		return nil, nil, fmt.Errorf("jwe: %w", err)
+	}
+	kek := concatKDF(z, kekSizeBits, info)
+	encryptedKey, err := aesKeyWrap(kek, cek)
+	if err != nil {
+		return nil, nil, fmt.Errorf("jwe: ecdh-es+a256kw wrap: %w", err)
+	}
+	return encryptedKey, ephemeral.PublicKey(), nil
 }
 
 // seal encrypts plaintext under cek with A256GCM, returning ciphertext

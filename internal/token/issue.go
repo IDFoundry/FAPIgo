@@ -52,43 +52,54 @@ type AccessTokenParams struct {
 	Parameters map[string]json.RawMessage
 }
 
+// validateAccessTokenParams checks p's required fields and invariants,
+// split out of IssueAccessToken purely to keep that function's own
+// cognitive complexity manageable — this is every check IssueAccessToken
+// must pass before it does any actual work.
+func validateAccessTokenParams(p AccessTokenParams) error {
+	if p.Signer == nil {
+		return fmt.Errorf("token: signer is nil")
+	}
+	if !p.Algorithm.IsValid() {
+		return fmt.Errorf("token: invalid algorithm %v", p.Algorithm)
+	}
+	if p.Issuer == "" {
+		return fmt.Errorf("token: issuer is empty")
+	}
+	if p.Subject == "" {
+		return fmt.Errorf("token: subject is empty")
+	}
+	if p.Audience == "" {
+		return fmt.Errorf("token: audience is empty")
+	}
+	if p.ClientID == "" {
+		return fmt.Errorf("token: client ID is empty")
+	}
+	if p.Now.IsZero() {
+		return fmt.Errorf("token: now is zero")
+	}
+	if p.Lifetime <= 0 {
+		return fmt.Errorf("token: lifetime must be positive")
+	}
+	for _, reserved := range accessTokenReservedClaims {
+		if _, ok := p.Parameters[reserved]; ok {
+			return fmt.Errorf("token: parameters must not set reserved claim %q", reserved)
+		}
+	}
+	if p.Confirmation != nil && (p.Confirmation.JKT == "") == (p.Confirmation.X5TS256 == "") {
+		return fmt.Errorf("token: confirmation must set exactly one of jkt or x5t#S256")
+	}
+	return nil
+}
+
 // IssueAccessToken builds and signs a JWT access token for p, returning
 // the compact JWT and the "jti" claim embedded in it — callers that
 // need to later revoke this specific token (e.g. on detected
 // authorization-code reuse, RFC 6749 §4.1.2) need the jti; previously
 // generated internally and discarded.
 func IssueAccessToken(p AccessTokenParams) (token string, jti string, err error) {
-	if p.Signer == nil {
-		return "", "", fmt.Errorf("token: signer is nil")
-	}
-	if !p.Algorithm.IsValid() {
-		return "", "", fmt.Errorf("token: invalid algorithm %v", p.Algorithm)
-	}
-	if p.Issuer == "" {
-		return "", "", fmt.Errorf("token: issuer is empty")
-	}
-	if p.Subject == "" {
-		return "", "", fmt.Errorf("token: subject is empty")
-	}
-	if p.Audience == "" {
-		return "", "", fmt.Errorf("token: audience is empty")
-	}
-	if p.ClientID == "" {
-		return "", "", fmt.Errorf("token: client ID is empty")
-	}
-	if p.Now.IsZero() {
-		return "", "", fmt.Errorf("token: now is zero")
-	}
-	if p.Lifetime <= 0 {
-		return "", "", fmt.Errorf("token: lifetime must be positive")
-	}
-	for _, reserved := range accessTokenReservedClaims {
-		if _, ok := p.Parameters[reserved]; ok {
-			return "", "", fmt.Errorf("token: parameters must not set reserved claim %q", reserved)
-		}
-	}
-	if p.Confirmation != nil && (p.Confirmation.JKT == "") == (p.Confirmation.X5TS256 == "") {
-		return "", "", fmt.Errorf("token: confirmation must set exactly one of jkt or x5t#S256")
+	if err := validateAccessTokenParams(p); err != nil {
+		return "", "", err
 	}
 
 	jti, err = randomJTI(p.Random)
@@ -171,33 +182,43 @@ type IDTokenParams struct {
 	Parameters map[string]json.RawMessage
 }
 
-// IssueIDToken builds and signs an ID token for p.
-func IssueIDToken(p IDTokenParams) (string, error) {
+// validateIDTokenParams checks p's required fields and invariants,
+// split out of IssueIDToken for the same reason
+// validateAccessTokenParams is split out of IssueAccessToken.
+func validateIDTokenParams(p IDTokenParams) error {
 	if p.Signer == nil {
-		return "", fmt.Errorf("token: signer is nil")
+		return fmt.Errorf("token: signer is nil")
 	}
 	if !p.Algorithm.IsValid() {
-		return "", fmt.Errorf("token: invalid algorithm %v", p.Algorithm)
+		return fmt.Errorf("token: invalid algorithm %v", p.Algorithm)
 	}
 	if p.Issuer == "" {
-		return "", fmt.Errorf("token: issuer is empty")
+		return fmt.Errorf("token: issuer is empty")
 	}
 	if p.Subject == "" {
-		return "", fmt.Errorf("token: subject is empty")
+		return fmt.Errorf("token: subject is empty")
 	}
 	if p.Audience == "" {
-		return "", fmt.Errorf("token: audience is empty")
+		return fmt.Errorf("token: audience is empty")
 	}
 	if p.Now.IsZero() {
-		return "", fmt.Errorf("token: now is zero")
+		return fmt.Errorf("token: now is zero")
 	}
 	if p.Lifetime <= 0 {
-		return "", fmt.Errorf("token: lifetime must be positive")
+		return fmt.Errorf("token: lifetime must be positive")
 	}
 	for _, reserved := range idTokenReservedClaims {
 		if _, ok := p.Parameters[reserved]; ok {
-			return "", fmt.Errorf("token: parameters must not set reserved claim %q", reserved)
+			return fmt.Errorf("token: parameters must not set reserved claim %q", reserved)
 		}
+	}
+	return nil
+}
+
+// IssueIDToken builds and signs an ID token for p.
+func IssueIDToken(p IDTokenParams) (string, error) {
+	if err := validateIDTokenParams(p); err != nil {
+		return "", err
 	}
 
 	claims := make(map[string]json.RawMessage, len(p.Parameters)+8)

@@ -352,39 +352,8 @@ func (t IDToken) Validate(pub crypto.PublicKey, policy IDTokenValidatePolicy) (V
 	if c.Issuer != policy.ExpectedIssuer {
 		return ValidatedIDToken{}, ErrIssuerMismatch
 	}
-	// OIDC Core §3.1.3.7 step 3: aud "MUST contain" the Client's own
-	// client_id "as an audience value", and "MAY contain an array with
-	// more than one element. The ID Token MUST be rejected... if it
-	// contains additional audiences not trusted by the Client" — every
-	// element must be either ExpectedAudience itself or one of
-	// policy.TrustedAudiences, and ExpectedAudience must actually be
-	// present (not merely permitted).
-	sawExpectedAudience := false
-	for _, aud := range c.Audience {
-		if aud == policy.ExpectedAudience {
-			sawExpectedAudience = true
-			continue
-		}
-		if !containsString(policy.TrustedAudiences, aud) {
-			return ValidatedIDToken{}, ErrAudienceMismatch
-		}
-	}
-	if !sawExpectedAudience {
-		return ValidatedIDToken{}, ErrAudienceMismatch
-	}
-	// OIDC Core §3.1.3.7 steps 9-10: when aud has multiple entries, the
-	// Client SHOULD verify azp is present; when azp is present
-	// (regardless of aud's length), the Client SHOULD verify it equals
-	// the Client's own client_id. This package treats both as enforced,
-	// not merely advisory: azp exists specifically to disambiguate which
-	// party a multi-audience ID token was authorized for, and silently
-	// ignoring it would defeat that purpose exactly where it matters —
-	// when the token also names a trusted third-party audience.
-	if len(c.Audience) > 1 && c.AZP == "" {
-		return ValidatedIDToken{}, ErrMissingAuthorizedParty
-	}
-	if c.AZP != "" && c.AZP != policy.ExpectedAudience {
-		return ValidatedIDToken{}, ErrAuthorizedPartyMismatch
+	if err := checkIDTokenAudience(c, policy); err != nil {
+		return ValidatedIDToken{}, err
 	}
 	if policy.Now.After(c.ExpiresAt.Add(policy.MaxClockSkew)) {
 		return ValidatedIDToken{}, ErrExpired
@@ -418,17 +387,8 @@ func (t IDToken) Validate(pub crypto.PublicKey, policy IDTokenValidatePolicy) (V
 	// contract than what was actually reported missing (see this
 	// field's own doc comment for the narrower, present-but-unusable
 	// case this package does still treat as an error).
-	if c.ATHash != "" {
-		if policy.AccessToken == "" {
-			return ValidatedIDToken{}, fmt.Errorf("token: id token carries at_hash but no access token was supplied to check it against")
-		}
-		wantHash, err := computeATHash(policy.AccessToken, policy.Algorithm)
-		if err != nil {
-			return ValidatedIDToken{}, fmt.Errorf("token: %w", err)
-		}
-		if subtle.ConstantTimeCompare([]byte(c.ATHash), []byte(wantHash)) != 1 {
-			return ValidatedIDToken{}, ErrAccessTokenHashMismatch
-		}
+	if err := checkATHash(c, policy); err != nil {
+		return ValidatedIDToken{}, err
 	}
 
 	return ValidatedIDToken{
@@ -444,6 +404,79 @@ func (t IDToken) Validate(pub crypto.PublicKey, policy IDTokenValidatePolicy) (V
 		Nonce:      c.Nonce,
 		AZP:        c.AZP,
 	}, nil
+}
+
+// checkIDTokenAudience enforces OIDC Core §3.1.3.7 step 3's aud rule
+// and steps 9-10's azp rule — split out of Validate purely to keep
+// that method's own cognitive complexity manageable.
+//
+// Step 3: aud "MUST contain" the Client's own client_id "as an
+// audience value", and "MAY contain an array with more than one
+// element. The ID Token MUST be rejected... if it contains additional
+// audiences not trusted by the Client" — every element must be either
+// ExpectedAudience itself or one of policy.TrustedAudiences, and
+// ExpectedAudience must actually be present (not merely permitted).
+//
+// Steps 9-10: when aud has multiple entries, the Client SHOULD verify
+// azp is present; when azp is present (regardless of aud's length),
+// the Client SHOULD verify it equals the Client's own client_id. This
+// package treats both as enforced, not merely advisory: azp exists
+// specifically to disambiguate which party a multi-audience ID token
+// was authorized for, and silently ignoring it would defeat that
+// purpose exactly where it matters — when the token also names a
+// trusted third-party audience.
+func checkIDTokenAudience(c IDTokenClaims, policy IDTokenValidatePolicy) error {
+	sawExpectedAudience := false
+	for _, aud := range c.Audience {
+		if aud == policy.ExpectedAudience {
+			sawExpectedAudience = true
+			continue
+		}
+		if !containsString(policy.TrustedAudiences, aud) {
+			return ErrAudienceMismatch
+		}
+	}
+	if !sawExpectedAudience {
+		return ErrAudienceMismatch
+	}
+	if len(c.Audience) > 1 && c.AZP == "" {
+		return ErrMissingAuthorizedParty
+	}
+	if c.AZP != "" && c.AZP != policy.ExpectedAudience {
+		return ErrAuthorizedPartyMismatch
+	}
+	return nil
+}
+
+// checkATHash enforces OIDC Core §3.1.3.6: at_hash, when present, binds
+// this ID token to one specific access token — "the Client MUST
+// validate the access token by calculating its hash... and comparing
+// it to the value of the at_hash Claim." A token with no at_hash at
+// all is not itself rejected here: OIDC Core marks it REQUIRED only
+// "except when the ID Token is issued from the Authorization Endpoint"
+// — this package has no way to know from the claims alone whether an
+// issuer that omitted it did so because it doesn't implement this
+// check, and rejecting every such token would make this a stricter
+// contract than what was actually reported missing (see
+// IDTokenValidatePolicy.AccessToken's own doc comment for the
+// narrower, present-but-unusable case this package does still treat
+// as an error). Split out of Validate for the same reason
+// checkIDTokenAudience is.
+func checkATHash(c IDTokenClaims, policy IDTokenValidatePolicy) error {
+	if c.ATHash == "" {
+		return nil
+	}
+	if policy.AccessToken == "" {
+		return fmt.Errorf("token: id token carries at_hash but no access token was supplied to check it against")
+	}
+	wantHash, err := computeATHash(policy.AccessToken, policy.Algorithm)
+	if err != nil {
+		return fmt.Errorf("token: %w", err)
+	}
+	if subtle.ConstantTimeCompare([]byte(c.ATHash), []byte(wantHash)) != 1 {
+		return ErrAccessTokenHashMismatch
+	}
+	return nil
 }
 
 // computeATHash implements OIDC Core §3.1.3.6's at_hash construction:

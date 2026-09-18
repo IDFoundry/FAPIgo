@@ -252,40 +252,64 @@ func parseClaims(payload []byte) (Claims, error) {
 		}
 		c.Constraints = &constraints
 	}
-	if trustMarksRaw, ok := raw["trust_marks"]; ok {
-		var trustMarks []struct {
-			TrustMarkType string `json:"trust_mark_type"`
-			TrustMark     string `json:"trust_mark"`
-		}
-		if err := json.Unmarshal(trustMarksRaw, &trustMarks); err != nil {
-			return Claims{}, fmt.Errorf("%w: trust_marks: %v", ErrMalformedClaims, err)
-		}
-		c.TrustMarks = make([]RawTrustMark, len(trustMarks))
-		for i, tm := range trustMarks {
-			if tm.TrustMarkType == "" || tm.TrustMark == "" {
-				return Claims{}, fmt.Errorf("%w: trust_marks[%d]: trust_mark_type and trust_mark are both required", ErrMalformedClaims, i)
-			}
-			c.TrustMarks[i] = RawTrustMark{TrustMarkType: tm.TrustMarkType, TrustMark: tm.TrustMark}
-		}
+	if err := parseTrustMarks(raw, &c); err != nil {
+		return Claims{}, err
 	}
-	if ownersRaw, ok := raw["trust_mark_owners"]; ok {
-		var owners map[string]struct {
-			Subject string          `json:"sub"`
-			JWKS    json.RawMessage `json:"jwks"`
-		}
-		if err := json.Unmarshal(ownersRaw, &owners); err != nil {
-			return Claims{}, fmt.Errorf("%w: trust_mark_owners: %v", ErrMalformedClaims, err)
-		}
-		c.TrustMarkOwners = make(map[string]TrustMarkOwner, len(owners))
-		for trustMarkType, o := range owners {
-			if o.Subject == "" || len(o.JWKS) == 0 {
-				return Claims{}, fmt.Errorf("%w: trust_mark_owners[%q]: sub and jwks are both required", ErrMalformedClaims, trustMarkType)
-			}
-			c.TrustMarkOwners[trustMarkType] = TrustMarkOwner{Subject: o.Subject, JWKS: o.JWKS}
-		}
+	if err := parseTrustMarkOwners(raw, &c); err != nil {
+		return Claims{}, err
 	}
 
 	return c, nil
+}
+
+// parseTrustMarks parses raw's "trust_marks" claim into c, if present —
+// split out of parseClaims purely to keep that function's own
+// cognitive complexity manageable.
+func parseTrustMarks(raw map[string]json.RawMessage, c *Claims) error {
+	trustMarksRaw, ok := raw["trust_marks"]
+	if !ok {
+		return nil
+	}
+	var trustMarks []struct {
+		TrustMarkType string `json:"trust_mark_type"`
+		TrustMark     string `json:"trust_mark"`
+	}
+	if err := json.Unmarshal(trustMarksRaw, &trustMarks); err != nil {
+		return fmt.Errorf("%w: trust_marks: %v", ErrMalformedClaims, err)
+	}
+	c.TrustMarks = make([]RawTrustMark, len(trustMarks))
+	for i, tm := range trustMarks {
+		if tm.TrustMarkType == "" || tm.TrustMark == "" {
+			return fmt.Errorf("%w: trust_marks[%d]: trust_mark_type and trust_mark are both required", ErrMalformedClaims, i)
+		}
+		c.TrustMarks[i] = RawTrustMark{TrustMarkType: tm.TrustMarkType, TrustMark: tm.TrustMark}
+	}
+	return nil
+}
+
+// parseTrustMarkOwners parses raw's "trust_mark_owners" claim into c,
+// if present — split out of parseClaims for the same reason
+// parseTrustMarks is.
+func parseTrustMarkOwners(raw map[string]json.RawMessage, c *Claims) error {
+	ownersRaw, ok := raw["trust_mark_owners"]
+	if !ok {
+		return nil
+	}
+	var owners map[string]struct {
+		Subject string          `json:"sub"`
+		JWKS    json.RawMessage `json:"jwks"`
+	}
+	if err := json.Unmarshal(ownersRaw, &owners); err != nil {
+		return fmt.Errorf("%w: trust_mark_owners: %v", ErrMalformedClaims, err)
+	}
+	c.TrustMarkOwners = make(map[string]TrustMarkOwner, len(owners))
+	for trustMarkType, o := range owners {
+		if o.Subject == "" || len(o.JWKS) == 0 {
+			return fmt.Errorf("%w: trust_mark_owners[%q]: sub and jwks are both required", ErrMalformedClaims, trustMarkType)
+		}
+		c.TrustMarkOwners[trustMarkType] = TrustMarkOwner{Subject: o.Subject, JWKS: o.JWKS}
+	}
+	return nil
 }
 
 func parseConstraints(payload json.RawMessage) (Constraints, error) {

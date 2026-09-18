@@ -136,7 +136,7 @@ func IssueAccessToken(p AccessTokenParams) (token string, jti string, err error)
 	return tok, jti, nil
 }
 
-var idTokenReservedClaims = []string{"iss", "sub", "aud", "exp", "iat", "nonce", "auth_time", "acr", "amr"}
+var idTokenReservedClaims = []string{"iss", "sub", "aud", "exp", "iat", "nonce", "auth_time", "acr", "amr", "at_hash"}
 
 // IDTokenParams describes one ID token to issue.
 type IDTokenParams struct {
@@ -152,6 +152,15 @@ type IDTokenParams struct {
 	AuthTime time.Time // zero to omit
 	ACR      string    // "" to omit
 	AMR      []string  // nil to omit
+
+	// AccessToken, when non-empty, is hashed into this ID token's own
+	// at_hash claim (OIDC Core §3.1.3.6) — the access token issued
+	// alongside this ID token in the same response. Leave empty only
+	// for an ID token issued with no access token in the same response
+	// (e.g. a refresh that returns no new access token); see
+	// IDTokenValidatePolicy.AccessToken's own doc comment for why a
+	// client normally always has one to check against.
+	AccessToken string // "" to omit
 
 	Now      time.Time
 	Lifetime time.Duration
@@ -213,6 +222,13 @@ func IssueIDToken(p IDTokenParams) (string, error) {
 	}
 	if len(p.AMR) > 0 {
 		standard["amr"] = p.AMR
+	}
+	if p.AccessToken != "" {
+		atHash, err := computeATHash(p.AccessToken, p.Algorithm)
+		if err != nil {
+			return "", fmt.Errorf("token: %w", err)
+		}
+		standard["at_hash"] = atHash
 	}
 	for k, v := range standard {
 		encoded, err := json.Marshal(v)

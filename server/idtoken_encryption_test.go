@@ -164,6 +164,7 @@ func TestExchangeAuthorizationCodeIssuesEncryptedIDToken(t *testing.T) {
 	validatedIDT, err := parsedIDT.Validate(&h.serverKey.PublicKey, token.IDTokenValidatePolicy{
 		ExpectedIssuer: testIssuer, ExpectedAudience: testClientID.String(),
 		Algorithm: fapi.ES256, Now: h.now, MaxLifetime: 10 * time.Minute,
+		AccessToken: result.AccessToken.Reveal(),
 	})
 	if err != nil {
 		t.Fatalf("Validate ID token: %v", err)

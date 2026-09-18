@@ -65,19 +65,11 @@ func NewFromDiscovery(discovered DiscoveredMetadata, cfg Config, deps Dependenci
 	return New(cfg, deps)
 }
 
+// validateConfig checks cfg as a whole. Each thematic group of checks
+// is split into its own function purely to keep this dispatcher's own
+// cognitive complexity manageable — the checks, their order and their
+// error messages are unchanged.
 func validateConfig(cfg Config) error {
-	if cfg.Issuer.IsZero() {
-		return fmt.Errorf("client: config: issuer is required")
-	}
-	if cfg.ClientID == "" {
-		return fmt.Errorf("client: config: client ID is required")
-	}
-	if cfg.Endpoints.Token.IsZero() {
-		return fmt.Errorf("client: config: endpoints.token is required")
-	}
-	if cfg.Assurance != AssuranceDevelopment && cfg.Assurance != AssuranceProduction {
-		return fmt.Errorf("client: config: assurance is invalid")
-	}
 	// Authorization and PushedAuthorizationRequest declare browser-flow
 	// support as one coherent capability — required together, not
 	// independently optional, mirroring the
@@ -91,15 +83,67 @@ func validateConfig(cfg Config) error {
 	// blanket "at least one flow must be configured" requirement here.
 	authorizationFlowConfigured := !cfg.Endpoints.Authorization.IsZero()
 	parConfigured := !cfg.Endpoints.PushedAuthorizationRequest.IsZero()
+	cibaConfigured := !cfg.Endpoints.BackchannelAuthentication.IsZero()
+
+	if err := validateRequiredConfig(cfg); err != nil {
+		return err
+	}
 	if authorizationFlowConfigured != parConfigured {
 		return fmt.Errorf("client: config: endpoints.authorization and endpoints.pushed_authorization_request must both be set, or both left zero")
 	}
-	cibaConfigured := !cfg.Endpoints.BackchannelAuthentication.IsZero()
 	// RedirectURI only means anything to the browser flow — BeginAuthorization
 	// is the only place this module ever sends it.
 	if authorizationFlowConfigured && cfg.RedirectURI == "" {
 		return fmt.Errorf("client: config: redirect_uri is required when endpoints.authorization is set")
 	}
+	if err := validateEnumFields(cfg); err != nil {
+		return err
+	}
+	if err := validateAuthMethodAlgorithms(cfg); err != nil {
+		return err
+	}
+	// Only the browser flow and CIBA can ever return an ID token —
+	// RequestClientCredentialsToken never does (RFC 6749 §4.4 has no end
+	// user), so a client_credentials-only config has no use for this
+	// algorithm at all and shouldn't be forced to set one.
+	if (authorizationFlowConfigured || cibaConfigured) && !cfg.Algorithms.IDToken.IsValid() {
+		return fmt.Errorf("client: config: algorithms.id_token is required when endpoints.authorization or endpoints.backchannel_authentication is set")
+	}
+	if err := validateIDTokenEncryptionFields(cfg); err != nil {
+		return err
+	}
+	if err := validateUserInfoConfig(cfg); err != nil {
+		return err
+	}
+	if err := validateClientLimits(cfg); err != nil {
+		return err
+	}
+	if err := validateMessageSigningProfile(cfg); err != nil {
+		return err
+	}
+	if err := validateCIBAConfig(cfg, cibaConfigured); err != nil {
+		return err
+	}
+	return validateFederationConfig(cfg)
+}
+
+func validateRequiredConfig(cfg Config) error {
+	if cfg.Issuer.IsZero() {
+		return fmt.Errorf("client: config: issuer is required")
+	}
+	if cfg.ClientID == "" {
+		return fmt.Errorf("client: config: client ID is required")
+	}
+	if cfg.Endpoints.Token.IsZero() {
+		return fmt.Errorf("client: config: endpoints.token is required")
+	}
+	if cfg.Assurance != AssuranceDevelopment && cfg.Assurance != AssuranceProduction {
+		return fmt.Errorf("client: config: assurance is invalid")
+	}
+	return nil
+}
+
+func validateEnumFields(cfg Config) error {
 	if cfg.Profile != ProfileFAPISecurity && cfg.Profile != ProfileFAPISecurityWithMessageSigning {
 		return fmt.Errorf("client: config: profile is invalid")
 	}
@@ -121,7 +165,13 @@ func validateConfig(cfg Config) error {
 		cfg.BackchannelTokenDeliveryMode != storage.BackchannelTokenDeliveryModePing {
 		return fmt.Errorf("client: config: backchannel_token_delivery_mode is invalid")
 	}
+	return nil
+}
 
+// validateAuthMethodAlgorithms checks the algorithm(s) each
+// ClientAuthMethod/SenderConstrain choice requires — split out of
+// validateConfig for the same reason validateEnumFields is.
+func validateAuthMethodAlgorithms(cfg Config) error {
 	// Algorithms.ClientAuthentication and Limits.ClientAssertionLifetime
 	// are required only under ClientAuthMethodPrivateKeyJWT — every
 	// other RFC 8705 mTLS method sends no client_assertion at all, so
@@ -145,31 +195,37 @@ func validateConfig(cfg Config) error {
 	if cfg.SenderConstrain == storage.SenderConstrainDPoP && !cfg.Algorithms.DPoP.IsValid() {
 		return fmt.Errorf("client: config: algorithms.dpop is required when sender_constrain is SenderConstrainDPoP")
 	}
-	// Only the browser flow and CIBA can ever return an ID token —
-	// RequestClientCredentialsToken never does (RFC 6749 §4.4 has no end
-	// user), so a client_credentials-only config has no use for this
-	// algorithm at all and shouldn't be forced to set one.
-	if (authorizationFlowConfigured || cibaConfigured) && !cfg.Algorithms.IDToken.IsValid() {
-		return fmt.Errorf("client: config: algorithms.id_token is required when endpoints.authorization or endpoints.backchannel_authentication is set")
-	}
-	// IDTokenKeyManagement/IDTokenContentEncryption declare encrypted
-	// ID token support as one coherent capability — required together,
-	// not independently optional, so a config can't end up in a state
-	// that only half-describes what to expect.
+	return nil
+}
+
+// validateIDTokenEncryptionFields checks that
+// IDTokenKeyManagement/IDTokenContentEncryption declare encrypted ID
+// token support as one coherent capability — required together, not
+// independently optional, so a config can't end up in a state that
+// only half-describes what to expect. Split out of validateConfig for
+// the same reason validateEnumFields is.
+func validateIDTokenEncryptionFields(cfg Config) error {
 	keyManagementSet := cfg.Algorithms.IDTokenKeyManagement != 0
 	contentEncryptionSet := cfg.Algorithms.IDTokenContentEncryption != 0
 	if keyManagementSet != contentEncryptionSet {
 		return fmt.Errorf("client: config: algorithms.id_token_key_management and algorithms.id_token_content_encryption must both be set, or both left zero")
 	}
-	if keyManagementSet {
-		if !cfg.Algorithms.IDTokenKeyManagement.IsValid() {
-			return fmt.Errorf("client: config: algorithms.id_token_key_management is invalid")
-		}
-		if !cfg.Algorithms.IDTokenContentEncryption.IsValid() {
-			return fmt.Errorf("client: config: algorithms.id_token_content_encryption is invalid")
-		}
+	if !keyManagementSet {
+		return nil
 	}
+	if !cfg.Algorithms.IDTokenKeyManagement.IsValid() {
+		return fmt.Errorf("client: config: algorithms.id_token_key_management is invalid")
+	}
+	if !cfg.Algorithms.IDTokenContentEncryption.IsValid() {
+		return fmt.Errorf("client: config: algorithms.id_token_content_encryption is invalid")
+	}
+	return nil
+}
 
+// validateUserInfoConfig mirrors validateIDTokenEncryptionFields for
+// the UserInfo encryption pair, plus the endpoint check that pair (or
+// a plain Algorithms.UserInfo) implies.
+func validateUserInfoConfig(cfg Config) error {
 	// UserInfoKeyManagement/UserInfoContentEncryption mirror
 	// IDTokenKeyManagement/IDTokenContentEncryption's own coherent-pair
 	// requirement, for the same reason.
@@ -197,7 +253,10 @@ func validateConfig(cfg Config) error {
 	if (cfg.Algorithms.UserInfo != 0 || userInfoKeyManagementSet) && cfg.Endpoints.UserInfo.IsZero() {
 		return fmt.Errorf("client: config: endpoints.userinfo is required when algorithms.userinfo or algorithms.userinfo_key_management is set")
 	}
+	return nil
+}
 
+func validateClientLimits(cfg Config) error {
 	if cfg.ClientAuthMethod == storage.ClientAuthMethodPrivateKeyJWT && cfg.Limits.ClientAssertionLifetime <= 0 {
 		return fmt.Errorf("client: config: limits.client_assertion_lifetime must be positive when client_auth_method is ClientAuthMethodPrivateKeyJWT")
 	}
@@ -219,41 +278,53 @@ func validateConfig(cfg Config) error {
 	if cfg.Limits.MaxJOSECompactBytes <= 0 {
 		return fmt.Errorf("client: config: limits.max_jose_compact_bytes must be positive")
 	}
+	return nil
+}
 
-	if cfg.Profile == ProfileFAPISecurityWithMessageSigning {
-		if !cfg.Algorithms.RequestObject.IsValid() {
-			return fmt.Errorf("client: config: algorithms.request_object is required under ProfileFAPISecurityWithMessageSigning")
-		}
-		if !cfg.Algorithms.JARM.IsValid() {
-			return fmt.Errorf("client: config: algorithms.jarm is required under ProfileFAPISecurityWithMessageSigning")
-		}
-		if cfg.Limits.RequestObjectLifetime <= 0 {
-			return fmt.Errorf("client: config: limits.request_object_lifetime must be positive under ProfileFAPISecurityWithMessageSigning")
-		}
-		if cfg.Limits.MaxJARMResponseLifetime <= 0 {
-			return fmt.Errorf("client: config: limits.max_jarm_response_lifetime must be positive under ProfileFAPISecurityWithMessageSigning")
-		}
+func validateMessageSigningProfile(cfg Config) error {
+	if cfg.Profile != ProfileFAPISecurityWithMessageSigning {
+		return nil
 	}
-
-	if cibaConfigured {
-		if !cfg.Algorithms.BackchannelAuthenticationRequest.IsValid() {
-			return fmt.Errorf("client: config: algorithms.backchannel_authentication_request is required when endpoints.backchannel_authentication is set")
-		}
-		if cfg.Limits.BackchannelAuthenticationRequestLifetime <= 0 {
-			return fmt.Errorf("client: config: limits.backchannel_authentication_request_lifetime must be positive when endpoints.backchannel_authentication is set")
-		}
+	if !cfg.Algorithms.RequestObject.IsValid() {
+		return fmt.Errorf("client: config: algorithms.request_object is required under ProfileFAPISecurityWithMessageSigning")
 	}
+	if !cfg.Algorithms.JARM.IsValid() {
+		return fmt.Errorf("client: config: algorithms.jarm is required under ProfileFAPISecurityWithMessageSigning")
+	}
+	if cfg.Limits.RequestObjectLifetime <= 0 {
+		return fmt.Errorf("client: config: limits.request_object_lifetime must be positive under ProfileFAPISecurityWithMessageSigning")
+	}
+	if cfg.Limits.MaxJARMResponseLifetime <= 0 {
+		return fmt.Errorf("client: config: limits.max_jarm_response_lifetime must be positive under ProfileFAPISecurityWithMessageSigning")
+	}
+	return nil
+}
 
-	if cfg.Federation.EntityID != "" {
-		if err := federation.ValidEntityID(cfg.Federation.EntityID); err != nil {
-			return fmt.Errorf("client: config: federation.entity_id: %w", err)
-		}
-		if cfg.Federation.Lifetime <= 0 {
-			return fmt.Errorf("client: config: federation.lifetime must be positive when federation.entity_id is set")
-		}
-		if !cfg.Federation.Algorithm.IsValid() {
-			return fmt.Errorf("client: config: federation.algorithm is required when federation.entity_id is set")
-		}
+func validateCIBAConfig(cfg Config, cibaConfigured bool) error {
+	if !cibaConfigured {
+		return nil
+	}
+	if !cfg.Algorithms.BackchannelAuthenticationRequest.IsValid() {
+		return fmt.Errorf("client: config: algorithms.backchannel_authentication_request is required when endpoints.backchannel_authentication is set")
+	}
+	if cfg.Limits.BackchannelAuthenticationRequestLifetime <= 0 {
+		return fmt.Errorf("client: config: limits.backchannel_authentication_request_lifetime must be positive when endpoints.backchannel_authentication is set")
+	}
+	return nil
+}
+
+func validateFederationConfig(cfg Config) error {
+	if cfg.Federation.EntityID == "" {
+		return nil
+	}
+	if err := federation.ValidEntityID(cfg.Federation.EntityID); err != nil {
+		return fmt.Errorf("client: config: federation.entity_id: %w", err)
+	}
+	if cfg.Federation.Lifetime <= 0 {
+		return fmt.Errorf("client: config: federation.lifetime must be positive when federation.entity_id is set")
+	}
+	if !cfg.Federation.Algorithm.IsValid() {
+		return fmt.Errorf("client: config: federation.algorithm is required when federation.entity_id is set")
 	}
 	return nil
 }

@@ -71,6 +71,10 @@ jobs:
             name: FuzzParseClientAttestation
           - pkg: ./internal/clientattestation
             name: FuzzParsePoP
+          - pkg: ./internal/par
+            name: FuzzDecodeForm
+          - pkg: ./internal/metadata
+            name: FuzzParseAndValidate
     steps:
       - uses: actions/checkout@v7
 

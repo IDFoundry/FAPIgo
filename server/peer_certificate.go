@@ -18,8 +18,8 @@ import (
 // concern, whether that's the net/http server's own tls.Config
 // (ClientCAs set, and ClientAuth: RequireAndVerifyClientCert or
 // VerifyClientCertIfGiven — not a mode that merely requests a
-// certificate without verifying it) or Dependencies.MTLSClientCAs when
-// mTLS is terminated somewhere this server can't configure directly
+// certificate without verifying it) or Dependencies.ClientCertificateTrust
+// when mTLS is terminated somewhere this server can't configure directly
 // (e.g. a gateway forwarding the presented certificate). Get neither
 // right and a ClientAuthMethodTLSClientAuth/SAN*-registered client
 // accepts any self-signed certificate whose subject an attacker chose

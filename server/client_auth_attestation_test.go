@@ -143,12 +143,13 @@ func newHarnessWithAttestationClientCredentials(t *testing.T, attesterKey *ecdsa
 		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
 			testClientID: {{Algorithm: fapi.ES256, PublicKey: &attesterKey.PublicKey}},
 		}},
-		Keys:         serverKeyManager,
-		AccessTokens: server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
-		Revocation:   revocation,
-		Audit:        audit,
-		Clock:        fixedClock{now: now},
-		Random:       rand.Reader,
+		Keys:                   serverKeyManager,
+		AccessTokens:           server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:             revocation,
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		Audit:                  audit,
+		Clock:                  fixedClock{now: now},
+		Random:                 rand.Reader,
 	}
 
 	srv, err := server.New(cfg, deps)
@@ -245,6 +246,7 @@ func TestRequestClientCredentialsToken_AttestationRejectsWhenDisabled(t *testing
 		}},
 		Keys: serverKeyManager, AccessTokens: server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
 		Revocation: &fakeRevocationSink{}, Audit: &fakeAuditSink{}, Clock: fixedClock{now: h.now}, Random: rand.Reader,
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {
@@ -566,6 +568,7 @@ func TestRequestClientCredentialsToken_AttestationRejectsClientNotRegisteredForI
 		}},
 		Keys: serverKeyManager, AccessTokens: server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
 		Revocation: &fakeRevocationSink{}, Audit: &fakeAuditSink{}, Clock: fixedClock{now: now}, Random: rand.Reader,
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {
@@ -638,6 +641,7 @@ func TestRequestClientCredentialsToken_AttestationRejectsDisallowedAttestationAl
 		}},
 		Keys: serverKeyManager, AccessTokens: server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
 		Revocation: &fakeRevocationSink{}, Audit: &fakeAuditSink{}, Clock: fixedClock{now: now}, Random: rand.Reader,
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {
@@ -732,6 +736,7 @@ func TestRequestClientCredentialsToken_AttestationRejectsNoAttesterKeyRegistered
 		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{}},
 		Keys:       serverKeyManager, AccessTokens: server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
 		Revocation: &fakeRevocationSink{}, Audit: &fakeAuditSink{}, Clock: fixedClock{now: now}, Random: rand.Reader,
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {

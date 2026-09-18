@@ -133,12 +133,13 @@ func newHarnessWithSenderConstrainMTLS(t *testing.T) harness {
 		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
 			testClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
 		}},
-		Keys:         serverKeyManager,
-		AccessTokens: server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
-		Revocation:   revocation,
-		Audit:        audit,
-		Clock:        fixedClock{now: now},
-		Random:       rand.Reader,
+		Keys:                   serverKeyManager,
+		AccessTokens:           server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:             revocation,
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		Audit:                  audit,
+		Clock:                  fixedClock{now: now},
+		Random:                 rand.Reader,
 	}
 
 	srv, err := server.New(cfg, deps)
@@ -214,11 +215,12 @@ func newHarnessWithSenderConstrainMTLSAndAliases(t *testing.T) (harness, string)
 		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
 			testClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
 		}},
-		Keys:         serverKeyManager,
-		AccessTokens: server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
-		Revocation:   &fakeRevocationSink{},
-		Clock:        fixedClock{now: now},
-		Random:       rand.Reader,
+		Keys:                   serverKeyManager,
+		AccessTokens:           server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:             &fakeRevocationSink{},
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		Clock:                  fixedClock{now: now},
+		Random:                 rand.Reader,
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {
@@ -500,16 +502,17 @@ func TestServerMetadataAdvertisesMTLSEndpointAliasesWhenConfigured(t *testing.T)
 		},
 		Assurance: server.AssuranceDevelopment,
 	}, server.Dependencies{
-		Clients:      &fakeClientRepository{},
-		Transactions: &fakeTransactionStore{},
-		Grants:       &fakeGrantStore{},
-		Replay:       &fakeReplayStore{},
-		ClientKeys:   &fakeClientKeySource{},
-		Keys:         serverKeyManager,
-		AccessTokens: server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
-		Revocation:   &fakeRevocationSink{},
-		Clock:        fixedClock{now: time.Now()},
-		Random:       rand.Reader,
+		Clients:                &fakeClientRepository{},
+		Transactions:           &fakeTransactionStore{},
+		Grants:                 &fakeGrantStore{},
+		Replay:                 &fakeReplayStore{},
+		ClientKeys:             &fakeClientKeySource{},
+		Keys:                   serverKeyManager,
+		AccessTokens:           server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:             &fakeRevocationSink{},
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		Clock:                  fixedClock{now: time.Now()},
+		Random:                 rand.Reader,
 	})
 	if err != nil {
 		t.Fatalf("server.New: %v", err)

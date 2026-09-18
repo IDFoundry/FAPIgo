@@ -68,11 +68,12 @@ func newServerWithKeyManager(t *testing.T, profile server.Profile, km keys.KeyMa
 		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
 			testClientID: {{Algorithm: fapi.ES256, PublicKey: &clientKey.PublicKey}},
 		}},
-		Keys:         km,
-		AccessTokens: server.JWTAccessTokens{Keys: km, Algorithm: fapi.ES256},
-		Revocation:   server.NoRevocation{},
-		Clock:        fixedClock{now: time.Now()},
-		Random:       rand.Reader,
+		Keys:                   km,
+		AccessTokens:           server.JWTAccessTokens{Keys: km, Algorithm: fapi.ES256},
+		Revocation:             server.NoRevocation{},
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		Clock:                  fixedClock{now: time.Now()},
+		Random:                 rand.Reader,
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {
@@ -253,11 +254,12 @@ func TestPublicJWKSOAuthOnlyOmitsIDTokenSigningKey(t *testing.T) {
 		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
 			testClientID: {{Algorithm: fapi.ES256, PublicKey: &clientKey.PublicKey}},
 		}},
-		Keys:         km,
-		AccessTokens: server.JWTAccessTokens{Keys: km, Algorithm: fapi.ES256},
-		Revocation:   server.NoRevocation{},
-		Clock:        fixedClock{now: time.Now()},
-		Random:       rand.Reader,
+		Keys:                   km,
+		AccessTokens:           server.JWTAccessTokens{Keys: km, Algorithm: fapi.ES256},
+		Revocation:             server.NoRevocation{},
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		Clock:                  fixedClock{now: time.Now()},
+		Random:                 rand.Reader,
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {
@@ -374,11 +376,12 @@ func newServerWithKeyManagerAndUserInfo(t *testing.T, profile server.Profile, km
 		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
 			testClientID: {{Algorithm: fapi.ES256, PublicKey: &clientKey.PublicKey}},
 		}},
-		Keys:         km,
-		AccessTokens: server.JWTAccessTokens{Keys: km, Algorithm: fapi.ES256},
-		Revocation:   server.NoRevocation{},
-		Clock:        fixedClock{now: time.Now()},
-		Random:       rand.Reader,
+		Keys:                   km,
+		AccessTokens:           server.JWTAccessTokens{Keys: km, Algorithm: fapi.ES256},
+		Revocation:             server.NoRevocation{},
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		Clock:                  fixedClock{now: time.Now()},
+		Random:                 rand.Reader,
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {

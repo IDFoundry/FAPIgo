@@ -262,18 +262,19 @@ func newAutomaticRegistrationTestServer(t *testing.T, f *automaticRegistrationFi
 	serverKey := generateKey(t)
 	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
 	deps := server.Dependencies{
-		Clients:        &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{}},
-		Transactions:   &fakeTransactionStore{},
-		Grants:         &fakeGrantStore{},
-		Replay:         &fakeReplayStore{},
-		ClientKeys:     &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{}},
-		Keys:           serverKeyManager,
-		AccessTokens:   server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
-		Revocation:     &fakeRevocationSink{},
-		Audit:          &fakeAuditSink{},
-		Clock:          fixedClock{now: f.now},
-		Random:         rand.Reader,
-		FederationHTTP: f.fetcher,
+		Clients:                &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{}},
+		Transactions:           &fakeTransactionStore{},
+		Grants:                 &fakeGrantStore{},
+		Replay:                 &fakeReplayStore{},
+		ClientKeys:             &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{}},
+		Keys:                   serverKeyManager,
+		AccessTokens:           server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:             &fakeRevocationSink{},
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		Audit:                  &fakeAuditSink{},
+		Clock:                  fixedClock{now: f.now},
+		Random:                 rand.Reader,
+		FederationHTTP:         f.fetcher,
 	}
 	for _, c := range configure {
 		c(&cfg, &deps)

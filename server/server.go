@@ -443,6 +443,9 @@ func validateRequiredDependencies(deps Dependencies) error {
 	if deps.Revocation == nil {
 		return fmt.Errorf("server: dependencies: revocation is required (pass NoRevocation{} to explicitly decline)")
 	}
+	if deps.ClientCertificateTrust == nil {
+		return fmt.Errorf("server: dependencies: client certificate trust is required (pass TrustedClientCAs{...} or NoClientCertificateChainTrust{} to explicitly decline this package's own chain check)")
+	}
 	if deps.AccessTokens == nil {
 		return fmt.Errorf("server: dependencies: access tokens is required (pass JWTAccessTokens{...} or OpaqueAccessTokens{...})")
 	}

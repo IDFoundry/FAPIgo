@@ -124,6 +124,7 @@ func newHarnessWithRAR(t *testing.T, profile server.Profile, registry *extension
 		Keys:                       serverKeyManager,
 		AccessTokens:               server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
 		Revocation:                 server.NoRevocation{},
+		ClientCertificateTrust:     server.NoClientCertificateChainTrust{},
 		Clock:                      fixedClock{now: now},
 		Random:                     rand.Reader,
 		Backchannel:                memstore.NewBackchannelAuthenticationStore(),

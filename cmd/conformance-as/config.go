@@ -10,8 +10,10 @@
 // only — see storage.ClientAuthMethodTLSClientAuth's own doc comment);
 // see ClientConfig.ClientAuthMethod. This binary does not stand up a CA
 // trust store, so tls_client_auth here is DN-matching only, with no
-// certificate-chain trust enforcement — a real tls_client_auth
-// deployment would configure tls.Config.ClientCAs in its own adapter.
+// certificate-chain trust enforcement — wiring.go passes
+// server.NoClientCertificateChainTrust{} to make that an explicit
+// choice rather than a silent gap; a real tls_client_auth deployment
+// would pass server.TrustedClientCAs{Roots: ...} instead.
 // mTLS sender-constrained access tokens (RFC 8705 §3, cnf.x5t#S256) are
 // a separate, orthogonal capability, supported as an alternative to
 // DPoP: see -mtls and ClientConfig.SenderConstrain.

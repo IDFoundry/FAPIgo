@@ -157,12 +157,13 @@ func newHarnessWithIdentityClaims(t *testing.T, identityClaims server.IdentityCl
 		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
 			testClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
 		}},
-		Keys:           serverKeyManager,
-		AccessTokens:   server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
-		Revocation:     server.NoRevocation{},
-		Clock:          fixedClock{now: now},
-		Random:         rand.Reader,
-		IdentityClaims: identityClaims,
+		Keys:                   serverKeyManager,
+		AccessTokens:           server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:             server.NoRevocation{},
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		Clock:                  fixedClock{now: now},
+		Random:                 rand.Reader,
+		IdentityClaims:         identityClaims,
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {
@@ -230,12 +231,13 @@ func newHarnessWithIdentityClaimsAndExtensions(t *testing.T, identityClaims serv
 		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
 			testClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
 		}},
-		Keys:           serverKeyManager,
-		AccessTokens:   server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
-		Revocation:     server.NoRevocation{},
-		Clock:          fixedClock{now: now},
-		Random:         rand.Reader,
-		IdentityClaims: identityClaims,
+		Keys:                   serverKeyManager,
+		AccessTokens:           server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:             server.NoRevocation{},
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		Clock:                  fixedClock{now: now},
+		Random:                 rand.Reader,
+		IdentityClaims:         identityClaims,
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {

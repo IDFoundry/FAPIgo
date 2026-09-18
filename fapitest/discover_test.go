@@ -82,16 +82,17 @@ func TestDiscoverEndToEnd(t *testing.T) {
 		t.Fatalf("server.NewJWTAccessTokens: %v", err)
 	}
 	srvDeps := server.Dependencies{
-		Clients:      &memClientRepository{client: registeredClient},
-		Transactions: newMemTransactionStore(),
-		Grants:       newMemGrantStore(),
-		Replay:       newMemReplayStore(),
-		ClientKeys:   &memClientKeySource{clientID: ClientID, manager: clientKeys},
-		Keys:         asKeys,
-		AccessTokens: jwtAccessTokens,
-		Revocation:   server.NoRevocation{},
-		Clock:        clock,
-		Random:       rand.Reader,
+		Clients:                &memClientRepository{client: registeredClient},
+		Transactions:           newMemTransactionStore(),
+		Grants:                 newMemGrantStore(),
+		Replay:                 newMemReplayStore(),
+		ClientKeys:             &memClientKeySource{clientID: ClientID, manager: clientKeys},
+		Keys:                   asKeys,
+		AccessTokens:           jwtAccessTokens,
+		Revocation:             server.NoRevocation{},
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		Clock:                  clock,
+		Random:                 rand.Reader,
 	}
 	srv, err := server.New(srvCfg, srvDeps)
 	if err != nil {

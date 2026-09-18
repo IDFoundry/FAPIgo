@@ -111,13 +111,14 @@ func newHarnessWithBackchannel(t *testing.T) (harness, *memstore.BackchannelAuth
 			testClientID:             {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
 			testNotPermittedClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
 		}},
-		Keys:                serverKeyManager,
-		AccessTokens:        server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
-		Revocation:          server.NoRevocation{},
-		Clock:               fixedClock{now: now},
-		Random:              rand.Reader,
-		Backchannel:         backchannel,
-		BackchannelNotifier: server.NoBackchannelNotifications{},
+		Keys:                   serverKeyManager,
+		AccessTokens:           server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:             server.NoRevocation{},
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		Clock:                  fixedClock{now: now},
+		Random:                 rand.Reader,
+		Backchannel:            backchannel,
+		BackchannelNotifier:    server.NoBackchannelNotifications{},
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {
@@ -197,13 +198,14 @@ func newHarnessWithBackchannelOAuthOnly(t *testing.T) harness {
 		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
 			testClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
 		}},
-		Keys:                serverKeyManager,
-		AccessTokens:        server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
-		Revocation:          server.NoRevocation{},
-		Clock:               fixedClock{now: now},
-		Random:              rand.Reader,
-		Backchannel:         backchannel,
-		BackchannelNotifier: server.NoBackchannelNotifications{},
+		Keys:                   serverKeyManager,
+		AccessTokens:           server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:             server.NoRevocation{},
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		Clock:                  fixedClock{now: now},
+		Random:                 rand.Reader,
+		Backchannel:            backchannel,
+		BackchannelNotifier:    server.NoBackchannelNotifications{},
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {
@@ -289,13 +291,14 @@ func newHarnessWithBackchannelMTLS(t *testing.T) harness {
 		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
 			testClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
 		}},
-		Keys:                serverKeyManager,
-		AccessTokens:        server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
-		Revocation:          server.NoRevocation{},
-		Clock:               fixedClock{now: now},
-		Random:              rand.Reader,
-		Backchannel:         memstore.NewBackchannelAuthenticationStore(),
-		BackchannelNotifier: server.NoBackchannelNotifications{},
+		Keys:                   serverKeyManager,
+		AccessTokens:           server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:             server.NoRevocation{},
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		Clock:                  fixedClock{now: now},
+		Random:                 rand.Reader,
+		Backchannel:            memstore.NewBackchannelAuthenticationStore(),
+		BackchannelNotifier:    server.NoBackchannelNotifications{},
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {
@@ -415,13 +418,14 @@ func newHarnessWithBackchannelPing(t *testing.T) (harness, *memstore.Backchannel
 		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
 			testClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
 		}},
-		Keys:                serverKeyManager,
-		AccessTokens:        server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
-		Revocation:          server.NoRevocation{},
-		Clock:               fixedClock{now: now},
-		Random:              rand.Reader,
-		Backchannel:         backchannel,
-		BackchannelNotifier: notifier,
+		Keys:                   serverKeyManager,
+		AccessTokens:           server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:             server.NoRevocation{},
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		Clock:                  fixedClock{now: now},
+		Random:                 rand.Reader,
+		Backchannel:            backchannel,
+		BackchannelNotifier:    notifier,
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {

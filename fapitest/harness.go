@@ -312,16 +312,17 @@ func New(t *testing.T, cfg Config) *Harness {
 		t.Fatalf("fapitest: server.NewJWTAccessTokens: %v", err)
 	}
 	srvDeps := server.Dependencies{
-		Clients:      &memClientRepository{client: registeredClient},
-		Transactions: newMemTransactionStore(),
-		Grants:       newMemGrantStore(),
-		Replay:       replay,
-		ClientKeys:   &memClientKeySource{clientID: ClientID, manager: clientKeys},
-		Keys:         asKeys,
-		AccessTokens: jwtAccessTokens,
-		Revocation:   revocation,
-		Clock:        clock,
-		Random:       rand.Reader,
+		Clients:                &memClientRepository{client: registeredClient},
+		Transactions:           newMemTransactionStore(),
+		Grants:                 newMemGrantStore(),
+		Replay:                 replay,
+		ClientKeys:             &memClientKeySource{clientID: ClientID, manager: clientKeys},
+		Keys:                   asKeys,
+		AccessTokens:           jwtAccessTokens,
+		Revocation:             revocation,
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		Clock:                  clock,
+		Random:                 rand.Reader,
 	}
 	if cfg.EncryptIDTokens {
 		srvDeps.ClientEncryptionKeys = &memClientEncryptionKeySource{clientID: ClientID, decrypter: clientDecryption}

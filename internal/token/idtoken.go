@@ -32,6 +32,7 @@ type IDTokenClaims struct {
 	ACR       string    // "" if absent
 	AMR       []string  // nil if absent
 	AZP       string    // "" if absent
+	ATHash    string    // "" if absent
 
 	Parameters map[string]json.RawMessage
 }
@@ -82,6 +83,10 @@ func parseIDTokenClaims(payload []byte) (IDTokenClaims, error) {
 	if err != nil {
 		return IDTokenClaims{}, err
 	}
+	atHash, _, err := popString(raw, "at_hash", false)
+	if err != nil {
+		return IDTokenClaims{}, err
+	}
 
 	c := IDTokenClaims{
 		Issuer:     iss,
@@ -93,6 +98,7 @@ func parseIDTokenClaims(payload []byte) (IDTokenClaims, error) {
 		ACR:        acr,
 		AMR:        amr,
 		AZP:        azp,
+		ATHash:     atHash,
 		Parameters: raw,
 	}
 	if hasAuthTime {

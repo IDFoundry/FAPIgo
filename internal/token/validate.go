@@ -2,7 +2,10 @@ package token
 
 import (
 	"crypto"
+	"crypto/sha256"
+	"crypto/sha512"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -256,6 +259,18 @@ type IDTokenValidatePolicy struct {
 	// only when the authorization request itself carried no nonce.
 	ExpectedNonce string
 
+	// AccessToken is the access token issued alongside this ID token in
+	// the same response (OIDC Core §3.1.3.6) — checked against the
+	// token's own at_hash claim when present. Every flow this module
+	// implements returns access_token together with id_token (this
+	// package never validates an ID token issued from the Authorization
+	// Endpoint alone, the one case OIDC Core exempts from requiring
+	// at_hash at all), so a caller normally always has one to supply
+	// here. Leaving this empty while the token actually carries an
+	// at_hash claim is treated as a caller error, not silently
+	// tolerated — see Validate's own at_hash handling.
+	AccessToken string
+
 	Now          time.Time
 	MaxLifetime  time.Duration
 	MaxClockSkew time.Duration
@@ -359,6 +374,30 @@ func (t IDToken) Validate(pub crypto.PublicKey, policy IDTokenValidatePolicy) (V
 			return ValidatedIDToken{}, ErrNonceMismatch
 		}
 	}
+	// OIDC Core §3.1.3.6: at_hash, when present, binds this ID token to
+	// one specific access token — "the Client MUST validate the access
+	// token by calculating its hash... and comparing it to the value of
+	// the at_hash Claim." A token with no at_hash at all is not itself
+	// rejected here: OIDC Core marks it REQUIRED only "except when the
+	// ID Token is issued from the Authorization Endpoint" — this
+	// package has no way to know from the claims alone whether an
+	// issuer that omitted it did so because it doesn't implement this
+	// check, and rejecting every such token would make this a stricter
+	// contract than what was actually reported missing (see this
+	// field's own doc comment for the narrower, present-but-unusable
+	// case this package does still treat as an error).
+	if c.ATHash != "" {
+		if policy.AccessToken == "" {
+			return ValidatedIDToken{}, fmt.Errorf("token: id token carries at_hash but no access token was supplied to check it against")
+		}
+		wantHash, err := computeATHash(policy.AccessToken, policy.Algorithm)
+		if err != nil {
+			return ValidatedIDToken{}, fmt.Errorf("token: %w", err)
+		}
+		if subtle.ConstantTimeCompare([]byte(c.ATHash), []byte(wantHash)) != 1 {
+			return ValidatedIDToken{}, ErrAccessTokenHashMismatch
+		}
+	}
 
 	return ValidatedIDToken{
 		Subject:    c.Subject,
@@ -369,4 +408,29 @@ func (t IDToken) Validate(pub crypto.PublicKey, policy IDTokenValidatePolicy) (V
 		ExpiresAt:  c.ExpiresAt,
 		IssuedAt:   c.IssuedAt,
 	}, nil
+}
+
+// computeATHash implements OIDC Core §3.1.3.6's at_hash construction:
+// "the base64url encoding of the left-most half of the hash of the
+// octets of the ASCII representation of the access_token value, where
+// the hash algorithm used is the hash algorithm used in the alg Header
+// Parameter of the ID Token's JOSE Header" — ES256/PS256 both use
+// SHA-256 (RFC 7518 §3.4/§3.5); EdDSA has no such pairing defined by
+// JOSE itself, but SHA-512 is the established value for Ed25519 (the
+// only EdDSA variant this module supports — see fapi.EdDSA's own doc
+// comment), matching every other OIDC implementation's own interop
+// behavior for it.
+func computeATHash(accessToken string, alg fapi.SignatureAlgorithm) (string, error) {
+	var sum []byte
+	switch alg {
+	case fapi.ES256, fapi.PS256:
+		digest := sha256.Sum256([]byte(accessToken))
+		sum = digest[:]
+	case fapi.EdDSA:
+		digest := sha512.Sum512([]byte(accessToken))
+		sum = digest[:]
+	default:
+		return "", fmt.Errorf("at_hash: unsupported signature algorithm %v", alg)
+	}
+	return base64.RawURLEncoding.EncodeToString(sum[:len(sum)/2]), nil
 }

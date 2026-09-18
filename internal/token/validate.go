@@ -432,11 +432,23 @@ func (t IDToken) Validate(pub crypto.PublicKey, policy IDTokenValidatePolicy) (V
 // octets of the ASCII representation of the access_token value, where
 // the hash algorithm used is the hash algorithm used in the alg Header
 // Parameter of the ID Token's JOSE Header" — ES256/PS256 both use
-// SHA-256 (RFC 7518 §3.4/§3.5); EdDSA has no such pairing defined by
-// JOSE itself, but SHA-512 is the established value for Ed25519 (the
-// only EdDSA variant this module supports — see fapi.EdDSA's own doc
-// comment), matching every other OIDC implementation's own interop
-// behavior for it.
+// SHA-256 (RFC 7518 §3.4/§3.5).
+//
+// EdDSA has no such pairing defined by JOSE itself — OIDC Core predates
+// RFC 8037 and never mentions EdDSA at all, and a 2021 OpenID WG
+// proposal to standardize an EdDSA-to-hash mapping was never formally
+// ratified (its tracking issue, bitbucket.org/openid/connect/issues/1125,
+// is now dead). This is a real gap, not a detail this package failed to
+// find — so SHA-512 for Ed25519 (the only EdDSA variant this module
+// supports — see fapi.EdDSA's own doc comment) is convention, not a
+// spec requirement: it's what Ed25519 itself already uses internally
+// for key expansion and signing, and independently-written
+// implementations converged on it anyway, rather than each inferring a
+// hash from the key type in their own incompatible way — confirmed
+// against panva/oidc-token-hash (the reference implementation the OIDC
+// ecosystem generally defers to for this), coreos/go-oidc, and at least
+// one production IdP's own public docs. Ed448 would need SHAKE256 by
+// the same convention, but this module has no Ed448 support to need it.
 func computeATHash(accessToken string, alg fapi.SignatureAlgorithm) (string, error) {
 	var sum []byte
 	switch alg {

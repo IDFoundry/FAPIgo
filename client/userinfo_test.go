@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/client"
@@ -110,7 +111,10 @@ func TestFetchUserInfoVerifiesSignedJWTResponse(t *testing.T) {
 		t.Fatalf("generate userinfo key: %v", err)
 	}
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		compact := signUserInfoJWS(t, userInfoKey, map[string]any{"sub": userInfoTestSubject, "name": "Ada"})
+		compact := signUserInfoJWS(t, userInfoKey, map[string]any{
+			"sub": userInfoTestSubject, "name": "Ada",
+			"iss": testIssuer, "aud": testClientID,
+		})
 		w.Header().Set("Content-Type", "application/jwt")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(compact))
@@ -124,6 +128,193 @@ func TestFetchUserInfoVerifiesSignedJWTResponse(t *testing.T) {
 	}
 	if info.Subject != userInfoTestSubject {
 		t.Errorf("Subject = %q, want %q", info.Subject, userInfoTestSubject)
+	}
+}
+
+// newSignedUserInfoTestClient starts a test server that always returns
+// the given claims as a signed UserInfo JWT, and a client configured
+// to verify it — a shared setup for the checkUserInfoJWTClaims defense-
+// in-depth tests below, all of which only differ in what claims map
+// they hand the server.
+func newSignedUserInfoTestClient(t *testing.T, userInfoKey *ecdsa.PrivateKey, claims map[string]any) *client.Client {
+	t.Helper()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		compact := signUserInfoJWS(t, userInfoKey, claims)
+		w.Header().Set("Content-Type", "application/jwt")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(compact))
+	}))
+	t.Cleanup(ts.Close)
+	return newUserInfoTestClient(t, ts, &userInfoKey.PublicKey, nil, nil)
+}
+
+// TestFetchUserInfoRejectsSignedJWTWrongIssuer, TestFetchUserInfoRejectsSignedJWTMissingIssuer,
+// TestFetchUserInfoRejectsSignedJWTAudienceMismatch,
+// TestFetchUserInfoAcceptsSignedJWTMultiValuedAudience,
+// TestFetchUserInfoRejectsExpiredSignedJWT and
+// TestFetchUserInfoAcceptsSignedJWTWithoutExp together cover
+// checkUserInfoJWTClaims — defense in depth OIDC Core §5.3.4 itself
+// does not require (see that function's own doc comment for the exact
+// spec text), added on top of the §5.3.4/§5.3.2 checks the tests above
+// already cover (TLS via the test server itself, decryption, and
+// signature verification).
+
+func TestFetchUserInfoRejectsSignedJWTWrongIssuer(t *testing.T) {
+	userInfoKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate userinfo key: %v", err)
+	}
+	c := newSignedUserInfoTestClient(t, userInfoKey, map[string]any{
+		"sub": userInfoTestSubject, "iss": "https://not-the-configured-issuer.example", "aud": testClientID,
+	})
+	if _, err := c.FetchUserInfo(context.Background(), userInfoTestTokens()); err == nil {
+		t.Fatalf("FetchUserInfo(wrong iss) = nil error, want error")
+	}
+}
+
+func TestFetchUserInfoRejectsSignedJWTMissingIssuer(t *testing.T) {
+	userInfoKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate userinfo key: %v", err)
+	}
+	c := newSignedUserInfoTestClient(t, userInfoKey, map[string]any{
+		"sub": userInfoTestSubject, "aud": testClientID,
+	})
+	if _, err := c.FetchUserInfo(context.Background(), userInfoTestTokens()); err == nil {
+		t.Fatalf("FetchUserInfo(missing iss) = nil error, want error")
+	}
+}
+
+func TestFetchUserInfoRejectsSignedJWTAudienceMismatch(t *testing.T) {
+	userInfoKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate userinfo key: %v", err)
+	}
+	c := newSignedUserInfoTestClient(t, userInfoKey, map[string]any{
+		"sub": userInfoTestSubject, "iss": testIssuer, "aud": "some-other-client",
+	})
+	if _, err := c.FetchUserInfo(context.Background(), userInfoTestTokens()); err == nil {
+		t.Fatalf("FetchUserInfo(aud mismatch) = nil error, want error")
+	}
+}
+
+// TestFetchUserInfoAcceptsSignedJWTMultiValuedAudience confirms aud is
+// accepted as an array too (OIDC Core §5.3.2: "The aud value MUST be
+// or include the RP's Client ID value") — not just a bare string.
+func TestFetchUserInfoAcceptsSignedJWTMultiValuedAudience(t *testing.T) {
+	userInfoKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate userinfo key: %v", err)
+	}
+	c := newSignedUserInfoTestClient(t, userInfoKey, map[string]any{
+		"sub": userInfoTestSubject, "iss": testIssuer, "aud": []string{"some-other-client", testClientID},
+	})
+	if _, err := c.FetchUserInfo(context.Background(), userInfoTestTokens()); err != nil {
+		t.Fatalf("FetchUserInfo(multi-valued aud containing client ID) = %v, want nil error", err)
+	}
+}
+
+func TestFetchUserInfoRejectsExpiredSignedJWT(t *testing.T) {
+	userInfoKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate userinfo key: %v", err)
+	}
+	c := newSignedUserInfoTestClient(t, userInfoKey, map[string]any{
+		"sub": userInfoTestSubject, "iss": testIssuer, "aud": testClientID,
+		"exp": time.Now().Add(-time.Hour).Unix(),
+	})
+	if _, err := c.FetchUserInfo(context.Background(), userInfoTestTokens()); err == nil {
+		t.Fatalf("FetchUserInfo(expired exp) = nil error, want error")
+	}
+}
+
+// TestFetchUserInfoAcceptsSignedJWTWithoutExp confirms an absent exp is
+// tolerated, not rejected — OIDC Core §5.3.2 never lists exp among the
+// Claims a signed UserInfo Response MUST contain (unlike iss/aud), so
+// treating a present one as required would be stricter than the spec.
+func TestFetchUserInfoAcceptsSignedJWTWithoutExp(t *testing.T) {
+	userInfoKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate userinfo key: %v", err)
+	}
+	c := newSignedUserInfoTestClient(t, userInfoKey, map[string]any{
+		"sub": userInfoTestSubject, "iss": testIssuer, "aud": testClientID,
+	})
+	if _, err := c.FetchUserInfo(context.Background(), userInfoTestTokens()); err != nil {
+		t.Fatalf("FetchUserInfo(no exp) = %v, want nil error", err)
+	}
+}
+
+func TestFetchUserInfoAcceptsUnexpiredSignedJWT(t *testing.T) {
+	userInfoKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate userinfo key: %v", err)
+	}
+	c := newSignedUserInfoTestClient(t, userInfoKey, map[string]any{
+		"sub": userInfoTestSubject, "iss": testIssuer, "aud": testClientID,
+		"exp": time.Now().Add(time.Hour).Unix(),
+	})
+	if _, err := c.FetchUserInfo(context.Background(), userInfoTestTokens()); err != nil {
+		t.Fatalf("FetchUserInfo(unexpired exp) = %v, want nil error", err)
+	}
+}
+
+func TestFetchUserInfoRejectsSignedJWTMissingAudience(t *testing.T) {
+	userInfoKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate userinfo key: %v", err)
+	}
+	c := newSignedUserInfoTestClient(t, userInfoKey, map[string]any{
+		"sub": userInfoTestSubject, "iss": testIssuer,
+	})
+	if _, err := c.FetchUserInfo(context.Background(), userInfoTestTokens()); err == nil {
+		t.Fatalf("FetchUserInfo(missing aud) = nil error, want error")
+	}
+}
+
+// TestFetchUserInfoRejectsSignedJWTMalformedAudienceType covers aud
+// being neither a string nor an array of strings (a JSON number here)
+// — paramStringOrStringSlice's own "not a recognized shape" error path.
+func TestFetchUserInfoRejectsSignedJWTMalformedAudienceType(t *testing.T) {
+	userInfoKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate userinfo key: %v", err)
+	}
+	c := newSignedUserInfoTestClient(t, userInfoKey, map[string]any{
+		"sub": userInfoTestSubject, "iss": testIssuer, "aud": 12345,
+	})
+	if _, err := c.FetchUserInfo(context.Background(), userInfoTestTokens()); err == nil {
+		t.Fatalf("FetchUserInfo(aud is a number) = nil error, want error")
+	}
+}
+
+// TestFetchUserInfoRejectsSignedJWTEmptyAudience covers aud being
+// present as the empty string — a distinct code path from aud being
+// absent entirely (paramStringOrStringSlice's own "non-empty" check).
+func TestFetchUserInfoRejectsSignedJWTEmptyAudience(t *testing.T) {
+	userInfoKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate userinfo key: %v", err)
+	}
+	c := newSignedUserInfoTestClient(t, userInfoKey, map[string]any{
+		"sub": userInfoTestSubject, "iss": testIssuer, "aud": "",
+	})
+	if _, err := c.FetchUserInfo(context.Background(), userInfoTestTokens()); err == nil {
+		t.Fatalf("FetchUserInfo(empty aud) = nil error, want error")
+	}
+}
+
+func TestFetchUserInfoRejectsSignedJWTMalformedExp(t *testing.T) {
+	userInfoKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate userinfo key: %v", err)
+	}
+	c := newSignedUserInfoTestClient(t, userInfoKey, map[string]any{
+		"sub": userInfoTestSubject, "iss": testIssuer, "aud": testClientID,
+		"exp": "not-a-number",
+	})
+	if _, err := c.FetchUserInfo(context.Background(), userInfoTestTokens()); err == nil {
+		t.Fatalf("FetchUserInfo(malformed exp) = nil error, want error")
 	}
 }
 
@@ -197,7 +388,10 @@ func TestFetchUserInfoDecryptsSignedThenEncryptedResponse(t *testing.T) {
 	}
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		signed := signUserInfoJWS(t, userInfoKey, map[string]any{"sub": userInfoTestSubject, "name": "Ada"})
+		signed := signUserInfoJWS(t, userInfoKey, map[string]any{
+			"sub": userInfoTestSubject, "name": "Ada",
+			"iss": testIssuer, "aud": testClientID,
+		})
 		encrypted, err := jwe.Encrypt(jwe.EncryptRequest{
 			Algorithm: fapi.ECDHESA256KW, Encryption: fapi.A256GCM,
 			RecipientKey: info.PublicKey, ContentType: "JWT", Plaintext: []byte(signed),
@@ -250,7 +444,10 @@ func TestFetchUserInfoDecryptsResponseWithMissingContentType(t *testing.T) {
 	}
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		signed := signUserInfoJWS(t, userInfoKey, map[string]any{"sub": userInfoTestSubject, "name": "Ada"})
+		signed := signUserInfoJWS(t, userInfoKey, map[string]any{
+			"sub": userInfoTestSubject, "name": "Ada",
+			"iss": testIssuer, "aud": testClientID,
+		})
 		// ContentType deliberately omitted, unlike
 		// TestFetchUserInfoDecryptsSignedThenEncryptedResponse above
 		// which always sets it to "JWT".

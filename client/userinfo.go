@@ -9,6 +9,7 @@ import (
 	"mime"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/idfoundry/fapigo/internal/jwe"
 	"github.com/idfoundry/fapigo/keys"
@@ -195,7 +196,107 @@ func (c *Client) verifyUserInfoJWS(ctx context.Context, raw string) (map[string]
 		}
 		return nil, newError(ErrorInvalidResponse, "UserInfo response verification failed", err)
 	}
-	return decodeUserInfoJSON(payload)
+	claims, decErr := decodeUserInfoJSON(payload)
+	if decErr != nil {
+		return nil, decErr
+	}
+	if idErr := c.checkUserInfoJWTClaims(claims); idErr != nil {
+		return nil, idErr
+	}
+	return claims, nil
+}
+
+// checkUserInfoJWTClaims is DEFENSE IN DEPTH, not an OIDC Core
+// requirement — read this comment before assuming a failure here means
+// the OP is non-conformant.
+//
+// OIDC Core §5.3.4 ("UserInfo Response Validation") is the section
+// that actually tells a client what it must check, and its entire
+// checklist is: (1) a TLS server certificate check of the responding
+// OP — satisfied structurally here, since Endpoints.UserInfo is a
+// fixed, pre-configured HTTPS URL that Go's standard TLS stack
+// verifies on every request, never a value this method itself parses
+// or trusts from the wire; (2) decrypt if
+// userinfo_encrypted_response_alg was registered (decryptUserInfoJWE,
+// called before this); (3) SHOULD — not MUST — validate the signature
+// (VerifyIssuerJWS, applied unconditionally above, stronger than the
+// spec demands). That's the whole list. It does NOT require checking
+// iss, aud, or exp.
+//
+// §5.3.2 separately obligates the OP's side: "If signed, the UserInfo
+// Response MUST contain the Claims iss (issuer) and aud (audience) as
+// members. The iss value MUST be the OP's Issuer Identifier URL. The
+// aud value MUST be or include the RP's Client ID value." OIDC Core
+// simply never closes the loop by telling the client to verify what
+// the OP was required to send. This function closes that gap anyway,
+// as cheap defense in depth: a signed UserInfo response from the wrong
+// issuer, addressed to a different client, or presented past its own
+// stated expiry, is rejected — checked against values the OP was
+// already required to set correctly, so there is no interop cost to a
+// conformant OP. exp itself is not even mentioned in §5.3.2 as
+// required content, so a present one is checked but an absent one is
+// tolerated — the same “required if present, not required at all”
+// treatment this package already gives an ID token's at_hash.
+func (c *Client) checkUserInfoJWTClaims(claims map[string]json.RawMessage) *Error {
+	iss, ok := paramString(claims, "iss")
+	if !ok || iss == "" {
+		return newError(ErrorInvalidResponse, "signed UserInfo response is missing iss", nil)
+	}
+	if iss != c.cfg.Issuer.String() {
+		return newError(ErrorInvalidResponse, "signed UserInfo response iss does not match the configured issuer", nil)
+	}
+
+	audRaw, ok := claims["aud"]
+	if !ok {
+		return newError(ErrorInvalidResponse, "signed UserInfo response is missing aud", nil)
+	}
+	audiences, err := paramStringOrStringSlice(audRaw)
+	if err != nil {
+		return newError(ErrorInvalidResponse, "signed UserInfo response aud is malformed", err)
+	}
+	if !containsAudience(audiences, c.cfg.ClientID.String()) {
+		return newError(ErrorInvalidResponse, "signed UserInfo response aud does not include this client's ID", nil)
+	}
+
+	if expRaw, ok := claims["exp"]; ok {
+		var expUnix int64
+		if err := json.Unmarshal(expRaw, &expUnix); err != nil {
+			return newError(ErrorInvalidResponse, "signed UserInfo response exp is malformed", err)
+		}
+		if c.deps.Clock.Now().After(time.Unix(expUnix, 0).Add(c.cfg.Limits.MaxClockSkew)) {
+			return newError(ErrorInvalidResponse, "signed UserInfo response has expired", nil)
+		}
+	}
+
+	return nil
+}
+
+// paramStringOrStringSlice decodes raw as either a single JSON string
+// or an array of strings — OIDC Core §2's "aud" shape (a single
+// element is just the one-string case), the same tolerance
+// internal/token.parseIDTokenClaims applies to an ID token's own aud.
+func paramStringOrStringSlice(raw json.RawMessage) ([]string, error) {
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		if s == "" {
+			return nil, fmt.Errorf("must be a non-empty string or array of strings")
+		}
+		return []string{s}, nil
+	}
+	var arr []string
+	if err := json.Unmarshal(raw, &arr); err != nil || len(arr) == 0 {
+		return nil, fmt.Errorf("must be a non-empty string or array of strings")
+	}
+	return arr, nil
+}
+
+func containsAudience(audiences []string, want string) bool {
+	for _, aud := range audiences {
+		if aud == want {
+			return true
+		}
+	}
+	return false
 }
 
 // checkUserInfoSubject enforces OIDC Core §5.3.2: "The sub (subject)

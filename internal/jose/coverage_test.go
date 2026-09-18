@@ -78,6 +78,19 @@ func TestSignRejectsNilSigner(t *testing.T) {
 	}
 }
 
+func TestSignRejectsEmptyPayload(t *testing.T) {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	if _, err := Sign(priv, Header{Algorithm: fapi.ES256}, []byte{}); err == nil {
+		t.Fatalf("Sign(empty payload) = nil error, want error")
+	}
+	if _, err := Sign(priv, Header{Algorithm: fapi.ES256}, nil); err == nil {
+		t.Fatalf("Sign(nil payload) = nil error, want error")
+	}
+}
+
 func TestJWKAlgorithm(t *testing.T) {
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {

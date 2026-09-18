@@ -87,6 +87,16 @@ jobs:
             name: FuzzDecodeResult
           - pkg: ./internal/par
             name: FuzzDecodeErrorResponse
+          - pkg: ./resource
+            name: FuzzVerifyResourceRequest
+          - pkg: ./server
+            name: FuzzFormRequestFromHTTP
+          - pkg: ./server
+            name: FuzzFormRequestFromHTTPQueryUnescape
+          - pkg: ./client
+            name: FuzzDecodeTokenResponse
+          - pkg: ./client
+            name: FuzzDecodeBackchannelAuthenticationResponse
     steps:
       - uses: actions/checkout@v7
 

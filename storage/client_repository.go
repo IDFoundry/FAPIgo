@@ -450,25 +450,43 @@ func validateClientAuthMethodFields(cfg RegisteredClientConfig) error {
 			return fmt.Errorf("storage: client %q must set ExpectedSANURI for tls_client_auth_san_uri", cfg.ID)
 		}
 	case ClientAuthMethodTLSClientAuthSANIP:
-		if cfg.ExpectedSANIP == "" {
-			return fmt.Errorf("storage: client %q must set ExpectedSANIP for tls_client_auth_san_ip", cfg.ID)
-		}
-		if net.ParseIP(cfg.ExpectedSANIP) == nil {
-			return fmt.Errorf("storage: client %q has an invalid ExpectedSANIP %q", cfg.ID, cfg.ExpectedSANIP)
-		}
+		return validateSANIPField(cfg)
 	case ClientAuthMethodTLSClientAuthSANEmail:
 		if cfg.ExpectedSANEmail == "" {
 			return fmt.Errorf("storage: client %q must set ExpectedSANEmail for tls_client_auth_san_email", cfg.ID)
 		}
 	case ClientAuthMethodAttestation:
-		if cfg.ExpectedAttesterIssuer == "" {
-			return fmt.Errorf("storage: client %q must set ExpectedAttesterIssuer for attest_jwt_client_auth", cfg.ID)
-		}
-		if !cfg.ClientAttestationAlgorithm.IsValid() {
-			return fmt.Errorf("storage: client %q has no valid client attestation algorithm", cfg.ID)
-		}
+		return validateAttestationFields(cfg)
 	default:
 		return fmt.Errorf("storage: client %q has an invalid client auth method", cfg.ID)
+	}
+	return nil
+}
+
+// validateSANIPField checks ExpectedSANIP — split out of
+// validateClientAuthMethodFields's own ClientAuthMethodTLSClientAuthSANIP
+// case purely to keep that function's own cognitive complexity
+// manageable (this case alone has two checks, unlike its siblings).
+func validateSANIPField(cfg RegisteredClientConfig) error {
+	if cfg.ExpectedSANIP == "" {
+		return fmt.Errorf("storage: client %q must set ExpectedSANIP for tls_client_auth_san_ip", cfg.ID)
+	}
+	if net.ParseIP(cfg.ExpectedSANIP) == nil {
+		return fmt.Errorf("storage: client %q has an invalid ExpectedSANIP %q", cfg.ID, cfg.ExpectedSANIP)
+	}
+	return nil
+}
+
+// validateAttestationFields checks ExpectedAttesterIssuer and
+// ClientAttestationAlgorithm — split out of
+// validateClientAuthMethodFields's own ClientAuthMethodAttestation case
+// for the same reason validateSANIPField is.
+func validateAttestationFields(cfg RegisteredClientConfig) error {
+	if cfg.ExpectedAttesterIssuer == "" {
+		return fmt.Errorf("storage: client %q must set ExpectedAttesterIssuer for attest_jwt_client_auth", cfg.ID)
+	}
+	if !cfg.ClientAttestationAlgorithm.IsValid() {
+		return fmt.Errorf("storage: client %q has no valid client attestation algorithm", cfg.ID)
 	}
 	return nil
 }

@@ -69,6 +69,8 @@ jobs:
             name: FuzzParseRequestObject
           - pkg: ./internal/dpop
             name: FuzzVerifyDPoPProof
+          - pkg: ./internal/dpop
+            name: FuzzVerifyDPoPProofClaimMismatch
           - pkg: ./internal/clientassertion
             name: FuzzParseClientAssertion
           - pkg: ./internal/clientattestation
@@ -77,6 +79,8 @@ jobs:
             name: FuzzParsePoP
           - pkg: ./internal/par
             name: FuzzDecodeForm
+          - pkg: ./internal/par
+            name: FuzzFormRoundTrip
           - pkg: ./internal/metadata
             name: FuzzParseAndValidate
           - pkg: ./internal/jarm
@@ -91,6 +95,10 @@ jobs:
             name: FuzzDecodeResult
           - pkg: ./internal/par
             name: FuzzDecodeErrorResponse
+          - pkg: ./internal/par
+            name: FuzzResultRoundTrip
+          - pkg: ./internal/par
+            name: FuzzErrorResponseRoundTrip
           - pkg: ./resource
             name: FuzzVerifyResourceRequest
           - pkg: ./server

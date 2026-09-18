@@ -45,6 +45,8 @@ jobs:
             name: FuzzParseJWK
           - pkg: ./internal/jose
             name: FuzzParseJWKSet
+          - pkg: ./internal/jose
+            name: FuzzSignVerifyTamper
           - pkg: ./internal/canonical
             name: FuzzURI
           - pkg: ./internal/federation
@@ -61,6 +63,8 @@ jobs:
             name: FuzzParseTrustMarkStatusResponse
           - pkg: ./internal/jwe
             name: FuzzDecrypt
+          - pkg: ./internal/jwe
+            name: FuzzEncryptDecryptTamper
           - pkg: ./internal/requestobject
             name: FuzzParseRequestObject
           - pkg: ./internal/dpop

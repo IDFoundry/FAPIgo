@@ -25,10 +25,17 @@ const DefaultMaxCompactBytes = 16 * 1024
 //
 // If header.JWK is set, it must match signer's public key — Sign refuses
 // to produce a proof that asserts possession of a key other than the one
-// actually used to sign.
+// actually used to sign. payload must be non-empty: ParseCompact rejects
+// any empty segment (including an empty payload's ""), so Sign refuses
+// to produce a token its own sibling function can't parse back — every
+// caller in this module already marshals a real claims struct (at
+// minimum "{}"), so this never triggers in practice.
 func Sign(signer crypto.Signer, header Header, payload []byte) (string, error) {
 	if signer == nil {
 		return "", fmt.Errorf("jose: signer is nil")
+	}
+	if len(payload) == 0 {
+		return "", fmt.Errorf("jose: payload is empty")
 	}
 	if !header.Algorithm.IsValid() {
 		return "", fmt.Errorf("jose: invalid algorithm %v", header.Algorithm)

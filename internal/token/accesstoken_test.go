@@ -73,6 +73,15 @@ func TestAccessTokenRoundTrip(t *testing.T) {
 	if validated.JKT != "" {
 		t.Fatalf("validated.JKT = %q, want \"\" (no Confirmation was set)", validated.JKT)
 	}
+	if validated.Issuer != "https://as.example" {
+		t.Fatalf("Issuer = %q, want %q", validated.Issuer, "https://as.example")
+	}
+	if len(validated.Audience) != 1 || validated.Audience[0] != "https://rs.example" {
+		t.Fatalf("Audience = %v, want [https://rs.example]", validated.Audience)
+	}
+	if validated.IssuedAt.Unix() != now.Unix() {
+		t.Fatalf("IssuedAt = %v, want %v", validated.IssuedAt, now)
+	}
 }
 
 func TestAccessTokenWithKeyID(t *testing.T) {

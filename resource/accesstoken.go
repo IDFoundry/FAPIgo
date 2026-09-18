@@ -58,6 +58,20 @@ type ResolvedAccessToken struct {
 	// exactly as returned; its shape is an implementation detail
 	// specific to each AccessTokenResolver.
 	Key string
+
+	// Issuer, Audience and IssuedAt are the token's "iss", "aud" and
+	// "iat" — for a JWT access token, already checked (iss/aud) or
+	// required-present (iat) by internal/token.AccessToken.Validate;
+	// exposed for a caller's own telemetry or audit logging, not for
+	// re-validation. OpaqueAccessTokens has no wire-level claims to
+	// report these from — storage.LookedUpAccessToken carries no
+	// issuer/audience/issued-at of its own, since an opaque token is
+	// only ever redeemed against the single store this resolver already
+	// trusts implicitly — so these are always their zero values
+	// ("", nil, and the zero time) for an opaque token.
+	Issuer   string
+	Audience []string
+	IssuedAt time.Time
 }
 
 // AccessTokenResolver resolves a presented access token's raw bytes to
@@ -227,7 +241,10 @@ func (j JWTAccessTokens) ResolveAccessToken(ctx context.Context, req ResolveAcce
 		// internal, JWT-only by construction (internal/token never
 		// handles opaque tokens, see internal/token/doc.go). Only this
 		// package-level ResolvedAccessToken.Key is.
-		Key: validated.JTI,
+		Key:      validated.JTI,
+		Issuer:   validated.Issuer,
+		Audience: validated.Audience,
+		IssuedAt: validated.IssuedAt,
 	}, nil
 }
 

@@ -51,6 +51,14 @@ jobs:
             name: FuzzParseEntityStatement
           - pkg: ./internal/federation
             name: FuzzParseTrustMark
+          - pkg: ./internal/federation
+            name: FuzzParseTrustMarkDelegation
+          - pkg: ./internal/federation
+            name: FuzzParseResolveResponse
+          - pkg: ./internal/federation
+            name: FuzzParseHistoricalKeysResponse
+          - pkg: ./internal/federation
+            name: FuzzParseTrustMarkStatusResponse
     steps:
       - uses: actions/checkout@v7
 

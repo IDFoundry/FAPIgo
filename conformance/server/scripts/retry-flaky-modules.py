@@ -4,7 +4,7 @@ AS-side conformance runs, so a transient suite-internal race doesn't
 need a full run-all.sh re-run (or, worse, get mistaken for an AS
 regression) every time it happens.
 
-Two distinct flakes are known so far, both confirmed to originate in
+Three distinct flakes are known so far, all confirmed to originate in
 the suite itself, never in cmd/conformance-as:
 
 1. Stale implicit-submit browser JS. Confirmed via direct MongoDB
@@ -45,13 +45,34 @@ the suite itself, never in cmd/conformance-as:
    artifact in the suite's own HTTP client, only observed so far on a
    GitHub Actions runner, never locally.
 
-Every occurrence of either flake across this session's history has
-passed cleanly on a full re-run.
+3. Stale implicit-submit browser JS, cousin of flake 1 above but a
+   distinct failure signature: rather than landing on a *different*
+   module (flake 1's alias-stealing shape), the suite's HtmlUnit
+   browser driver double-fires the *same* module's own already-
+   processed implicit-submit callback — confirmed live 2026-09-19
+   against two real captured module logs (/api/log/{id}), both
+   showing the module complete its entire intended test flow
+   successfully first (every step SUCCESS, no HTTP-level failure of
+   any kind — one even reached and passed its own final assertion,
+   "Authorization endpoint returned expected 'error' of
+   'invalid_request_uri'"), then a duplicate "Incoming HTTP request to
+   /test/a/<alias>/implicit/<token>" for the exact same implicit
+   token arriving a few hundred milliseconds later, after the module
+   had already begun finalising. The suite's own background-task
+   scheduler then throws `java.lang.RuntimeException: runInBackground
+   called after runFinalisationTaskInBackground()`, which interrupts
+   an otherwise-fully-passing module. Distinguishable from flake 1 by
+   that exact exception string rather than "that wasn't expected"/
+   "Illegal test state change" — narrower and more specific, so kept
+   as its own signature rather than folded into flake 1's.
+
+Every occurrence of any of the three flakes across this session's
+history has passed cleanly on a full re-run.
 
 This script parses run-test-plan.py's own verbose stdout (the log file
 run-all.sh already captures) for modules it flagged with "Unexpected
 failure:" whose status was INTERRUPTED, confirms each one's own event
-log carries the exact signature of one of the two flakes above
+log carries the exact signature of one of the three flakes above
 (deliberately narrow — this only ever retries a module whose failure
 looks EXACTLY like a known, understood race, never a module that
 failed for any other reason), and for each confirmed match, creates a
@@ -173,10 +194,11 @@ def find_unexpected_modules(log_path):
     itself considers responsible for its non-zero exit code, regardless
     of status. Deliberately does not filter to INTERRUPTED here (that
     used to happen in this function, and was a real bug - see git
-    history): both known flakes are specifically INTERRUPTED-state
+    history): all three known flakes are specifically INTERRUPTED-state
     races (see has_flake_signature / has_token_response_mismatch_
-    signature's own doc comments), so a FINISHED module is never retry-
-    eligible - but it still needs to come back from this function so
+    signature / has_finalisation_race_signature's own doc comments), so
+    a FINISHED module is never retry-eligible - but it still needs to
+    come back from this function so
     main() can count it as a genuine, unresolved failure. Filtering it
     out here made a real AS-baseline failure (a FINISHED module,
     unrelated to an INTERRUPTED flake that happened to occur in the
@@ -249,6 +271,29 @@ def has_token_response_mismatch_signature(log):
     return False
 
 
+# The exact Java exception string the suite's own background-task
+# scheduler throws for the third known flake (see this file's own doc
+# comment) — specific enough on its own that no additional pairing
+# logic is needed the way the other two signatures need.
+FINALISATION_RACE_MESSAGE = "runInBackground called after runFinalisationTaskInBackground()"
+
+
+def has_finalisation_race_signature(log):
+    """log is the module's own /api/log/{id} entries. Fingerprint for
+    the third known flake (see this file's own doc comment): a
+    duplicate copy of the module's own already-processed implicit-
+    submit callback arrives after the module has already begun
+    finalising, and the suite's own background-task scheduler throws
+    FINALISATION_RACE_MESSAGE — checked across msg/cause/error since
+    it appears in more than one entry shape (an "unexpected exception
+    caught: ..." FAILURE entry, then the INTERRUPTED entry itself)."""
+    return any(
+        FINALISATION_RACE_MESSAGE in str(entry.get(field, ""))
+        for entry in log
+        for field in ("msg", "cause", "error")
+    )
+
+
 def find_module_variant(plan, module_id):
     for module in plan.get("modules", []):
         for inst in module.get("instances", []):
@@ -317,7 +362,11 @@ def main():
             non_matching.append((module_id, test_name))
             continue
 
-        matched_flake = has_flake_signature(log) or has_token_response_mismatch_signature(log)
+        matched_flake = (
+            has_flake_signature(log)
+            or has_token_response_mismatch_signature(log)
+            or has_finalisation_race_signature(log)
+        )
         if not matched_flake:
             print(f"retry-flaky-modules: {test_name} {module_id} is INTERRUPTED but doesn't match a known flake signature — leaving as a real failure", flush=True)
             non_matching.append((module_id, test_name))

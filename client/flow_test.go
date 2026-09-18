@@ -676,6 +676,23 @@ func TestCompleteAuthorizationHappyPathBaseline(t *testing.T) {
 	if !success.Tokens.IDTokenClaims.IssuedAt.Before(success.Tokens.IDTokenClaims.ExpiresAt) {
 		t.Errorf("IssuedAt (%v) is not before ExpiresAt (%v)", success.Tokens.IDTokenClaims.IssuedAt, success.Tokens.IDTokenClaims.ExpiresAt)
 	}
+	// Issuer/Audience/Nonce round-trip from the same validated ID token
+	// too — a caller (e.g. a multi-issuer relying party) needs these for
+	// its own audit/telemetry, not just Subject/ExpiresAt/IssuedAt.
+	if success.Tokens.IDTokenClaims.Issuer != testIssuer {
+		t.Errorf("IDTokenClaims.Issuer = %q, want %q", success.Tokens.IDTokenClaims.Issuer, testIssuer)
+	}
+	if len(success.Tokens.IDTokenClaims.Audience) != 1 || success.Tokens.IDTokenClaims.Audience[0] != testClientID {
+		t.Errorf("IDTokenClaims.Audience = %v, want [%s]", success.Tokens.IDTokenClaims.Audience, testClientID)
+	}
+	if success.Tokens.IDTokenClaims.Nonce == "" || success.Tokens.IDTokenClaims.Nonce != as.lastNonce {
+		t.Errorf("IDTokenClaims.Nonce = %q, want the request's own nonce %q", success.Tokens.IDTokenClaims.Nonce, as.lastNonce)
+	}
+	// AZP is only required/set for a multi-audience token (OIDC Core
+	// §3.1.3.7 step 9) — this flow's ID token names only testClientID.
+	if success.Tokens.IDTokenClaims.AZP != "" {
+		t.Errorf("IDTokenClaims.AZP = %q, want empty (single-audience token)", success.Tokens.IDTokenClaims.AZP)
+	}
 }
 
 func TestCompleteAuthorizationHappyPathMessageSigning(t *testing.T) {

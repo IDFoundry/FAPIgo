@@ -78,6 +78,52 @@ func TestIDTokenRoundTrip(t *testing.T) {
 	if _, ok := validated.Parameters["custom_claim"]; !ok {
 		t.Fatalf("Parameters missing custom_claim")
 	}
+	if validated.Issuer != "https://as.example" {
+		t.Fatalf("Issuer = %q, want %q", validated.Issuer, "https://as.example")
+	}
+	if len(validated.Audience) != 1 || validated.Audience[0] != "client-123" {
+		t.Fatalf("Audience = %v, want [client-123]", validated.Audience)
+	}
+	if validated.Nonce != "opaque-nonce" {
+		t.Fatalf("Nonce = %q, want %q", validated.Nonce, "opaque-nonce")
+	}
+	if validated.AZP != "" {
+		t.Fatalf("AZP = %q, want empty (single-audience token)", validated.AZP)
+	}
+}
+
+// TestIDTokenValidateExposesAZP confirms AZP survives Validate for a
+// multi-audience token — TestIDTokenRoundTrip only exercises the
+// single-audience (AZP absent) case.
+func TestIDTokenValidateExposesAZP(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	tok := buildRawIDTokenWithClaims(t, key, map[string]any{
+		"iss": "https://as.example",
+		"sub": "user-1",
+		"aud": []string{"client-123", "trusted-party"},
+		"azp": "client-123",
+		"exp": now.Add(time.Minute).Unix(),
+		"iat": now.Unix(),
+	})
+
+	parsed, err := ParseIDToken(tok)
+	if err != nil {
+		t.Fatalf("ParseIDToken: %v", err)
+	}
+	policy := baseIDTokenPolicy(now)
+	policy.TrustedAudiences = []string{"trusted-party"}
+	validated, err := parsed.Validate(&key.PublicKey, policy)
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if validated.AZP != "client-123" {
+		t.Fatalf("AZP = %q, want %q", validated.AZP, "client-123")
+	}
+	if len(validated.Audience) != 2 || validated.Audience[0] != "client-123" || validated.Audience[1] != "trusted-party" {
+		t.Fatalf("Audience = %v, want [client-123 trusted-party]", validated.Audience)
+	}
 }
 
 func TestIDTokenWithoutNonceWhenNotExpected(t *testing.T) {

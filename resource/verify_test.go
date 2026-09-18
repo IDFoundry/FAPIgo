@@ -137,6 +137,15 @@ func TestVerifyAcceptsValidRequest(t *testing.T) {
 	if authz.Key != f.jti {
 		t.Errorf("Key = %q, want %q", authz.Key, f.jti)
 	}
+	if authz.Issuer != testIssuer {
+		t.Errorf("Issuer = %q, want %q", authz.Issuer, testIssuer)
+	}
+	if len(authz.Audience) != 1 || authz.Audience[0] != testIssuer {
+		t.Errorf("Audience = %v, want [%s]", authz.Audience, testIssuer)
+	}
+	if authz.IssuedAt.Unix() != f.now.Unix() {
+		t.Errorf("IssuedAt = %v, want %v", authz.IssuedAt, f.now)
+	}
 }
 
 func TestVerifyRejectsRevokedToken(t *testing.T) {
@@ -436,6 +445,18 @@ func TestVerifyAcceptsOpaqueAccessToken(t *testing.T) {
 	}
 	if len(authz.Scopes) != 2 || authz.Scopes[0] != "read" || authz.Scopes[1] != "write" {
 		t.Errorf("Scopes = %v, want [read write]", authz.Scopes)
+	}
+	// An opaque access token has no wire-level iss/aud/iat to report —
+	// see ResolvedAccessToken's own doc comment — so these stay zero
+	// even on an otherwise-successful Verify.
+	if authz.Issuer != "" {
+		t.Errorf("Issuer = %q, want empty for an opaque access token", authz.Issuer)
+	}
+	if authz.Audience != nil {
+		t.Errorf("Audience = %v, want nil for an opaque access token", authz.Audience)
+	}
+	if !authz.IssuedAt.IsZero() {
+		t.Errorf("IssuedAt = %v, want zero for an opaque access token", authz.IssuedAt)
 	}
 }
 

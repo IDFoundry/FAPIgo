@@ -115,6 +115,22 @@ type ValidatedAccessToken struct {
 	// bound at all). Mirrors JKT's own contract exactly, for mTLS
 	// binding instead of DPoP.
 	X5TS256 string
+
+	// Issuer and Audience are the token's "iss" and "aud" claims,
+	// already checked against policy.ExpectedIssuer/ExpectedAudience
+	// above. Exposed the same way ValidatedIDToken's own Issuer/
+	// Audience are: for the caller's own telemetry, audit, or display,
+	// not for re-validation.
+	Issuer   string
+	Audience []string
+
+	// IssuedAt is the token's "iat" — required to be present and
+	// well-formed for parsing to succeed at all, but not itself checked
+	// against any policy here (RFC 9068 defines no equivalent to an ID
+	// token's max-age-since-iat check). Exposed for a caller's own
+	// telemetry, mirroring ValidatedIDToken.IssuedAt's identical
+	// contract.
+	IssuedAt time.Time
 }
 
 // Validate checks t's signature against pub and its claims against
@@ -178,6 +194,9 @@ func (t AccessToken) Validate(pub crypto.PublicKey, policy AccessTokenValidatePo
 		JTI:        c.JTI,
 		JKT:        jkt,
 		X5TS256:    x5ts256,
+		Issuer:     c.Issuer,
+		Audience:   c.Audience,
+		IssuedAt:   c.IssuedAt,
 	}, nil
 }
 

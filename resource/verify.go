@@ -63,6 +63,13 @@ type AuthorizationContext struct {
 	// Dependencies.Revocation), so surfacing it costs nothing.
 	Key string
 
+	// Issuer, Audience and IssuedAt mirror ResolvedAccessToken's own
+	// fields of the same name — see that type's doc comment, including
+	// why they're always zero for an opaque access token.
+	Issuer   string
+	Audience []string
+	IssuedAt time.Time
+
 	// NextDPoPNonce is a freshly issued DPoP nonce the caller should set
 	// as this response's own DPoP-Nonce header, so its next call already
 	// carries a valid one instead of needing its own challenge/retry
@@ -177,6 +184,9 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (Authorization
 		Claims:        resolved.Claims,
 		ExpiresAt:     resolved.ExpiresAt,
 		Key:           resolved.Key,
+		Issuer:        resolved.Issuer,
+		Audience:      resolved.Audience,
+		IssuedAt:      resolved.IssuedAt,
 		NextDPoPNonce: nextNonce,
 	}, nil
 }

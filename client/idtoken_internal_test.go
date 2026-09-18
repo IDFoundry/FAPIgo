@@ -174,7 +174,7 @@ func TestValidateIDTokenReturnsFullClaims(t *testing.T) {
 	c, idKey := idTokenTestClient(t, now, Algorithms{IDToken: fapi.ES256}, nil)
 	raw := buildTestSignedIDTokenWithClaims(t, idKey, now)
 
-	validated, err := c.validateIDToken(context.Background(), raw, idTokenTestNonce)
+	validated, err := c.validateIDToken(context.Background(), raw, "", idTokenTestNonce)
 	if err != nil {
 		t.Fatalf("validateIDToken: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestValidateIDTokenReturnsFullClaimsWhenEncrypted(t *testing.T) {
 		t.Fatalf("jwe.Encrypt: %v", err)
 	}
 
-	validated, verr := c.validateIDToken(context.Background(), encrypted, idTokenTestNonce)
+	validated, verr := c.validateIDToken(context.Background(), encrypted, "", idTokenTestNonce)
 	if verr != nil {
 		t.Fatalf("validateIDToken: %v", verr)
 	}
@@ -222,7 +222,7 @@ func TestValidateIDTokenAcceptsPlainSignedToken(t *testing.T) {
 	c, idKey := idTokenTestClient(t, now, Algorithms{IDToken: fapi.ES256}, nil)
 	raw := buildTestSignedIDToken(t, idKey, now)
 
-	validated, err := c.validateIDToken(context.Background(), raw, idTokenTestNonce)
+	validated, err := c.validateIDToken(context.Background(), raw, "", idTokenTestNonce)
 	if err != nil {
 		t.Fatalf("validateIDToken: %v", err)
 	}
@@ -256,7 +256,7 @@ func TestValidateIDTokenAcceptsEncryptedTokenRSAOAEP256(t *testing.T) {
 		t.Fatalf("jwe.Encrypt: %v", err)
 	}
 
-	validated, verr := c.validateIDToken(context.Background(), encrypted, idTokenTestNonce)
+	validated, verr := c.validateIDToken(context.Background(), encrypted, "", idTokenTestNonce)
 	if verr != nil {
 		t.Fatalf("validateIDToken: %v", verr)
 	}
@@ -290,7 +290,7 @@ func TestValidateIDTokenAcceptsEncryptedTokenECDHESA256KW(t *testing.T) {
 		t.Fatalf("jwe.Encrypt: %v", err)
 	}
 
-	validated, verr := c.validateIDToken(context.Background(), encrypted, idTokenTestNonce)
+	validated, verr := c.validateIDToken(context.Background(), encrypted, "", idTokenTestNonce)
 	if verr != nil {
 		t.Fatalf("validateIDToken: %v", verr)
 	}
@@ -315,7 +315,7 @@ func TestValidateIDTokenRejectsPlainTokenWhenEncryptionRequired(t *testing.T) {
 	}, decrypter)
 	raw := buildTestSignedIDToken(t, idKey, now)
 
-	_, verr := c.validateIDToken(context.Background(), raw, idTokenTestNonce)
+	_, verr := c.validateIDToken(context.Background(), raw, "", idTokenTestNonce)
 	if verr == nil {
 		t.Fatalf("validateIDToken(plain token, encryption required) = nil error, want error")
 	}
@@ -355,7 +355,7 @@ func TestValidateIDTokenRejectsEncryptedTokenWhenNotConfigured(t *testing.T) {
 		t.Fatalf("jwe.Encrypt: %v", err)
 	}
 
-	_, verr := c.validateIDToken(context.Background(), encrypted, idTokenTestNonce)
+	_, verr := c.validateIDToken(context.Background(), encrypted, "", idTokenTestNonce)
 	if verr == nil {
 		t.Fatalf("validateIDToken(encrypted token, not configured) = nil error, want error")
 	}
@@ -404,7 +404,7 @@ func TestValidateIDTokenAcceptsMissingContentType(t *testing.T) {
 		t.Fatalf("jwe.Encrypt: %v", err)
 	}
 
-	if _, err := c.validateIDToken(context.Background(), encrypted, idTokenTestNonce); err != nil {
+	if _, err := c.validateIDToken(context.Background(), encrypted, "", idTokenTestNonce); err != nil {
 		t.Fatalf("validateIDToken(missing cty) = %v, want nil error", err)
 	}
 }
@@ -438,7 +438,7 @@ func TestValidateIDTokenRejectsWrongContentType(t *testing.T) {
 		t.Fatalf("jwe.Encrypt: %v", err)
 	}
 
-	if _, err := c.validateIDToken(context.Background(), encrypted, idTokenTestNonce); err == nil {
+	if _, err := c.validateIDToken(context.Background(), encrypted, "", idTokenTestNonce); err == nil {
 		t.Fatalf("validateIDToken(wrong cty) = nil error, want error")
 	}
 }
@@ -469,7 +469,7 @@ func TestValidateIDTokenRejectsMalformedSegmentCount(t *testing.T) {
 		"four segments": "aaaa.bbbb.cccc.dddd",
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := c.validateIDToken(context.Background(), raw, idTokenTestNonce); err == nil {
+			if _, err := c.validateIDToken(context.Background(), raw, "", idTokenTestNonce); err == nil {
 				t.Fatalf("validateIDToken(%s) = nil error, want error", name)
 			}
 		})
@@ -507,7 +507,7 @@ func TestValidateIDTokenRejectsDecryptionWithWrongKey(t *testing.T) {
 		t.Fatalf("jwe.Encrypt: %v", err)
 	}
 
-	if _, err := c.validateIDToken(context.Background(), encrypted, idTokenTestNonce); err == nil {
+	if _, err := c.validateIDToken(context.Background(), encrypted, "", idTokenTestNonce); err == nil {
 		t.Fatalf("validateIDToken(wrong decryption key) = nil error, want error")
 	}
 }
@@ -521,7 +521,7 @@ func TestValidateSignedIDTokenRejectsMalformedToken(t *testing.T) {
 	now := time.Now()
 	c, _ := idTokenTestClient(t, now, Algorithms{IDToken: fapi.ES256}, nil)
 	malformed := "not-base64url.not-base64url.not-base64url"
-	if _, err := c.validateIDToken(context.Background(), malformed, idTokenTestNonce); err == nil {
+	if _, err := c.validateIDToken(context.Background(), malformed, "", idTokenTestNonce); err == nil {
 		t.Fatalf("validateIDToken(malformed token) = nil error, want error")
 	}
 }
@@ -538,7 +538,7 @@ func TestValidateSignedIDTokenRejectsIssuerKeyResolutionError(t *testing.T) {
 	c := idTokenTestClientWithIssuerKeys(t, now, Algorithms{IDToken: fapi.ES256},
 		fakeIDTokenIssuerKeys{err: fmt.Errorf("resolve failed")})
 	raw := buildTestSignedIDToken(t, idKey, now)
-	if _, err := c.validateIDToken(context.Background(), raw, idTokenTestNonce); err == nil {
+	if _, err := c.validateIDToken(context.Background(), raw, "", idTokenTestNonce); err == nil {
 		t.Fatalf("validateIDToken(issuer key resolution error) = nil error, want error")
 	}
 }
@@ -554,7 +554,7 @@ func TestValidateSignedIDTokenRejectsNoMatchingIssuerKey(t *testing.T) {
 	}
 	c := idTokenTestClientWithIssuerKeys(t, now, Algorithms{IDToken: fapi.ES256}, fakeIDTokenIssuerKeys{})
 	raw := buildTestSignedIDToken(t, idKey, now)
-	if _, err := c.validateIDToken(context.Background(), raw, idTokenTestNonce); err == nil {
+	if _, err := c.validateIDToken(context.Background(), raw, "", idTokenTestNonce); err == nil {
 		t.Fatalf("validateIDToken(no matching issuer key) = nil error, want error")
 	}
 }
@@ -575,7 +575,7 @@ func TestValidateSignedIDTokenRejectsSignatureVerificationFailure(t *testing.T) 
 	}
 	c := idTokenTestClientWithIssuerKeys(t, now, Algorithms{IDToken: fapi.ES256}, fakeIDTokenIssuerKeys{pub: &wrongKey.PublicKey})
 	raw := buildTestSignedIDToken(t, signingKey, now)
-	if _, err := c.validateIDToken(context.Background(), raw, idTokenTestNonce); err == nil {
+	if _, err := c.validateIDToken(context.Background(), raw, "", idTokenTestNonce); err == nil {
 		t.Fatalf("validateIDToken(signature verification failure) = nil error, want error")
 	}
 }

@@ -297,7 +297,7 @@ func (c *Client) populateIDToken(ctx context.Context, result *TokenSet, raw rawT
 	if raw.IDToken == "" {
 		return nil
 	}
-	validated, idErr := c.validateIDToken(ctx, raw.IDToken, nonce)
+	validated, idErr := c.validateIDToken(ctx, raw.IDToken, raw.AccessToken, nonce)
 	if idErr != nil {
 		return idErr
 	}
@@ -370,14 +370,14 @@ func isDPoPNonceError(body []byte) bool {
 // with, and trusting whatever the token's own header claims would be
 // exactly the "never treat an untrusted alg header as policy" mistake
 // this module avoids everywhere else.
-func (c *Client) validateIDToken(ctx context.Context, raw, nonce string) (token.ValidatedIDToken, *Error) {
+func (c *Client) validateIDToken(ctx context.Context, raw, accessToken, nonce string) (token.ValidatedIDToken, *Error) {
 	expectEncrypted := c.cfg.Algorithms.IDTokenKeyManagement != 0
 	switch strings.Count(raw, ".") + 1 {
 	case 3:
 		if expectEncrypted {
 			return token.ValidatedIDToken{}, newError(ErrorInvalidResponse, "ID token is not encrypted, but this client is configured to require an encrypted ID token", nil)
 		}
-		return c.validateSignedIDToken(ctx, raw, nonce)
+		return c.validateSignedIDToken(ctx, raw, accessToken, nonce)
 	case 5:
 		if !expectEncrypted {
 			return token.ValidatedIDToken{}, newError(ErrorInvalidResponse, "ID token is encrypted, but this client is not configured to expect an encrypted ID token", nil)
@@ -386,7 +386,7 @@ func (c *Client) validateIDToken(ctx context.Context, raw, nonce string) (token.
 		if decErr != nil {
 			return token.ValidatedIDToken{}, decErr
 		}
-		return c.validateSignedIDToken(ctx, innerJWT, nonce)
+		return c.validateSignedIDToken(ctx, innerJWT, accessToken, nonce)
 	default:
 		return token.ValidatedIDToken{}, newError(ErrorInvalidResponse, "malformed ID token", nil)
 	}
@@ -445,7 +445,7 @@ func isAcceptableNestedJWTContentType(cty string) bool {
 // validateSignedIDToken verifies an ordinary signed-only ID token —
 // either one that arrived that way directly, or the inner JWT
 // decryptIDToken recovered from an encrypted one.
-func (c *Client) validateSignedIDToken(ctx context.Context, raw, nonce string) (token.ValidatedIDToken, *Error) {
+func (c *Client) validateSignedIDToken(ctx context.Context, raw, accessToken, nonce string) (token.ValidatedIDToken, *Error) {
 	parsed, err := token.ParseIDTokenMax(raw, c.cfg.Limits.MaxJOSECompactBytes)
 	if err != nil {
 		if errors.Is(err, jose.ErrTooLarge) {
@@ -468,7 +468,8 @@ func (c *Client) validateSignedIDToken(ctx context.Context, raw, nonce string) (
 			ExpectedIssuer: c.cfg.Issuer.String(), ExpectedAudience: c.cfg.ClientID.String(),
 			TrustedAudiences: c.cfg.TrustedIDTokenAudiences,
 			Algorithm:        c.cfg.Algorithms.IDToken, ExpectedNonce: nonce,
-			Now: c.deps.Clock.Now(), MaxLifetime: c.cfg.Limits.MaxIDTokenLifetime, MaxClockSkew: c.cfg.Limits.MaxClockSkew,
+			AccessToken: accessToken,
+			Now:         c.deps.Clock.Now(), MaxLifetime: c.cfg.Limits.MaxIDTokenLifetime, MaxClockSkew: c.cfg.Limits.MaxClockSkew,
 		})
 		if verifyErr == nil {
 			break

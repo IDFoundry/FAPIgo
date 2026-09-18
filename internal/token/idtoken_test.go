@@ -3,6 +3,10 @@ package token
 import (
 	"crypto"
 	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -422,5 +426,175 @@ func TestParseIDTokenRejectsMissingRequiredClaims(t *testing.T) {
 		if _, err := ParseIDToken(tok); !errors.Is(err, ErrMalformedClaims) {
 			t.Fatalf("ParseIDToken(%s) = %v, want ErrMalformedClaims", payloadJSON, err)
 		}
+	}
+}
+
+// wantATHash independently computes OIDC Core §3.1.3.6's at_hash value —
+// base64url(leftmost half of hash(accessToken)), hashed with SHA-256 for
+// ES256/PS256 or SHA-512 for EdDSA (the convention for a hash algorithm
+// with no natural "half," matching panva/oidc-token-hash) — without
+// calling computeATHash itself, so these tests actually exercise its
+// correctness rather than just its wiring.
+func wantATHash(t *testing.T, accessToken string, alg fapi.SignatureAlgorithm) string {
+	t.Helper()
+	var sum []byte
+	switch alg {
+	case fapi.ES256, fapi.PS256:
+		digest := sha256.Sum256([]byte(accessToken))
+		sum = digest[:]
+	case fapi.EdDSA:
+		digest := sha512.Sum512([]byte(accessToken))
+		sum = digest[:]
+	default:
+		t.Fatalf("wantATHash: unsupported algorithm %v", alg)
+	}
+	return base64.RawURLEncoding.EncodeToString(sum[:len(sum)/2])
+}
+
+func TestIDTokenValidateAcceptsCorrectATHash(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	accessToken := "access-token-value"
+
+	p := baseIDTokenParams(key, now, time.Minute)
+	p.Parameters = map[string]json.RawMessage{"at_hash": jsonRaw(t, wantATHash(t, accessToken, fapi.ES256))}
+	tok, err := IssueIDToken(p)
+	if err != nil {
+		t.Fatalf("IssueIDToken: %v", err)
+	}
+	parsed, err := ParseIDToken(tok)
+	if err != nil {
+		t.Fatalf("ParseIDToken: %v", err)
+	}
+
+	policy := baseIDTokenPolicy(now)
+	policy.AccessToken = accessToken
+	if _, err := parsed.Validate(&key.PublicKey, policy); err != nil {
+		t.Fatalf("Validate(correct at_hash) = %v, want nil error", err)
+	}
+}
+
+func TestIDTokenValidateAcceptsCorrectATHashEdDSA(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate ed25519 key: %v", err)
+	}
+	now := time.Now()
+	accessToken := "access-token-value"
+
+	p := IDTokenParams{
+		Signer: priv, Algorithm: fapi.EdDSA,
+		Issuer: "https://as.example", Subject: "user-1", Audience: "client-123",
+		Now: now, Lifetime: time.Minute,
+		Parameters: map[string]json.RawMessage{"at_hash": jsonRaw(t, wantATHash(t, accessToken, fapi.EdDSA))},
+	}
+	tok, err := IssueIDToken(p)
+	if err != nil {
+		t.Fatalf("IssueIDToken: %v", err)
+	}
+	parsed, err := ParseIDToken(tok)
+	if err != nil {
+		t.Fatalf("ParseIDToken: %v", err)
+	}
+
+	policy := IDTokenValidatePolicy{
+		ExpectedIssuer: "https://as.example", ExpectedAudience: "client-123",
+		Algorithm: fapi.EdDSA, Now: now, MaxLifetime: 2 * time.Minute,
+		AccessToken: accessToken,
+	}
+	if _, err := parsed.Validate(pub, policy); err != nil {
+		t.Fatalf("Validate(correct at_hash, EdDSA) = %v, want nil error", err)
+	}
+}
+
+func TestIDTokenValidateRejectsATHashMismatch(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	p := baseIDTokenParams(key, now, time.Minute)
+	p.Parameters = map[string]json.RawMessage{"at_hash": jsonRaw(t, wantATHash(t, "access-token-value", fapi.ES256))}
+	tok, err := IssueIDToken(p)
+	if err != nil {
+		t.Fatalf("IssueIDToken: %v", err)
+	}
+	parsed, err := ParseIDToken(tok)
+	if err != nil {
+		t.Fatalf("ParseIDToken: %v", err)
+	}
+
+	policy := baseIDTokenPolicy(now)
+	policy.AccessToken = "a-different-access-token"
+	if _, err := parsed.Validate(&key.PublicKey, policy); !errors.Is(err, ErrAccessTokenHashMismatch) {
+		t.Fatalf("Validate(at_hash mismatch) = %v, want ErrAccessTokenHashMismatch", err)
+	}
+}
+
+// OIDC Core §3.1.3.6 requires a client to verify at_hash whenever it is
+// present — a caller that forgot to supply the access token it received
+// alongside this ID token is a bug, not a token free to pass unchecked.
+func TestIDTokenValidateRejectsATHashWithoutAccessToken(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	p := baseIDTokenParams(key, now, time.Minute)
+	p.Parameters = map[string]json.RawMessage{"at_hash": jsonRaw(t, wantATHash(t, "access-token-value", fapi.ES256))}
+	tok, err := IssueIDToken(p)
+	if err != nil {
+		t.Fatalf("IssueIDToken: %v", err)
+	}
+	parsed, err := ParseIDToken(tok)
+	if err != nil {
+		t.Fatalf("ParseIDToken: %v", err)
+	}
+
+	if _, err := parsed.Validate(&key.PublicKey, baseIDTokenPolicy(now)); err == nil {
+		t.Fatalf("Validate(at_hash present, no AccessToken in policy) = nil error, want error")
+	} else if errors.Is(err, ErrAccessTokenHashMismatch) {
+		t.Fatalf("Validate(at_hash present, no AccessToken in policy) = %v, want a caller-error, not ErrAccessTokenHashMismatch", err)
+	}
+}
+
+// A token that never carries at_hash at all must validate regardless of
+// whether the caller happens to supply AccessToken — mirrors every other
+// existing test in this file, none of which set policy.AccessToken.
+func TestIDTokenValidateAcceptsMissingATHashRegardlessOfAccessToken(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	tok, err := IssueIDToken(baseIDTokenParams(key, now, time.Minute))
+	if err != nil {
+		t.Fatalf("IssueIDToken: %v", err)
+	}
+	parsed, err := ParseIDToken(tok)
+	if err != nil {
+		t.Fatalf("ParseIDToken: %v", err)
+	}
+
+	policy := baseIDTokenPolicy(now)
+	policy.AccessToken = "access-token-value"
+	if _, err := parsed.Validate(&key.PublicKey, policy); err != nil {
+		t.Fatalf("Validate(no at_hash, AccessToken supplied) = %v, want nil error", err)
+	}
+}
+
+func TestParseIDTokenRejectsNonStringATHash(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	tok := buildRawIDTokenWithClaims(t, key, map[string]any{
+		"iss":     "https://as.example",
+		"sub":     "user-1",
+		"aud":     "client-123",
+		"exp":     now.Add(time.Minute).Unix(),
+		"iat":     now.Unix(),
+		"at_hash": 12345,
+	})
+	if _, err := ParseIDToken(tok); !errors.Is(err, ErrMalformedClaims) {
+		t.Fatalf("ParseIDToken(non-string at_hash) = %v, want ErrMalformedClaims", err)
+	}
+}
+
+func TestComputeATHashRejectsUnsupportedAlgorithm(t *testing.T) {
+	if _, err := computeATHash("access-token-value", fapi.SignatureAlgorithm(99)); err == nil {
+		t.Fatalf("computeATHash(unsupported algorithm) = nil error, want error")
 	}
 }

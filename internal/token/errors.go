@@ -52,4 +52,11 @@ var (
 	// ErrLifetimeExceeded's own bound on exp, applied to the opposite
 	// direction around Now.
 	ErrIssuedAtTooOld = errors.New("token: iat exceeds maximum allowed age")
+
+	// ErrAccessTokenHashMismatch indicates an ID token's at_hash claim
+	// did not match the access token issued alongside it (OIDC Core
+	// §3.1.3.6) — either a different access token was substituted after
+	// the ID token was signed, or the two were never actually issued
+	// together.
+	ErrAccessTokenHashMismatch = errors.New("token: at_hash does not match access token")
 )

@@ -268,7 +268,7 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		}
 		idToken, err := s.issueIDToken(ctx, client, identityAssertion{
 			Subject: redeemed.Subject, AuthTime: redeemed.AuthTime, ACR: redeemed.ACR, AMR: redeemed.AMR, TokenClaims: idTokenClaims,
-		}, redeemed.Nonce)
+		}, redeemed.Nonce, accessToken)
 		if err != nil {
 			return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to issue ID token", err))
 		}
@@ -480,7 +480,7 @@ type identityAssertion struct {
 	TokenClaims map[string]json.RawMessage
 }
 
-func (s *Server) issueIDToken(ctx context.Context, client storage.RegisteredClient, id identityAssertion, nonce string) (string, error) {
+func (s *Server) issueIDToken(ctx context.Context, client storage.RegisteredClient, id identityAssertion, nonce, accessToken string) (string, error) {
 	signer, kid, err := s.newSigner(ctx, keys.IDTokenSigning, s.cfg.Algorithms.IDToken)
 	if err != nil {
 		return "", err
@@ -489,7 +489,8 @@ func (s *Server) issueIDToken(ctx context.Context, client storage.RegisteredClie
 		Signer: signer, Algorithm: s.cfg.Algorithms.IDToken, KeyID: kid,
 		Issuer: s.cfg.Issuer.String(), Subject: id.Subject, Audience: client.ID().String(),
 		Nonce: nonce, AuthTime: id.AuthTime, ACR: id.ACR, AMR: id.AMR,
-		Now: s.deps.Clock.Now(), Lifetime: s.cfg.Limits.IDTokenLifetime,
+		AccessToken: accessToken,
+		Now:         s.deps.Clock.Now(), Lifetime: s.cfg.Limits.IDTokenLifetime,
 		Parameters: id.TokenClaims,
 	})
 	if err != nil {

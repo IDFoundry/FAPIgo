@@ -451,13 +451,58 @@ func wantATHash(t *testing.T, accessToken string, alg fapi.SignatureAlgorithm) s
 	return base64.RawURLEncoding.EncodeToString(sum[:len(sum)/2])
 }
 
+func TestIssueIDTokenSetsCorrectATHash(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	accessToken := "access-token-value"
+
+	p := baseIDTokenParams(key, now, time.Minute)
+	p.AccessToken = accessToken
+	tok, err := IssueIDToken(p)
+	if err != nil {
+		t.Fatalf("IssueIDToken: %v", err)
+	}
+	parsed, err := ParseIDToken(tok)
+	if err != nil {
+		t.Fatalf("ParseIDToken: %v", err)
+	}
+	if want := wantATHash(t, accessToken, fapi.ES256); parsed.claims.ATHash != want {
+		t.Fatalf("at_hash = %q, want %q", parsed.claims.ATHash, want)
+	}
+}
+
+func TestIssueIDTokenOmitsATHashWithoutAccessToken(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	tok, err := IssueIDToken(baseIDTokenParams(key, now, time.Minute))
+	if err != nil {
+		t.Fatalf("IssueIDToken: %v", err)
+	}
+	parsed, err := ParseIDToken(tok)
+	if err != nil {
+		t.Fatalf("ParseIDToken: %v", err)
+	}
+	if parsed.claims.ATHash != "" {
+		t.Fatalf("at_hash = %q, want empty", parsed.claims.ATHash)
+	}
+}
+
+func TestIssueIDTokenRejectsATHashParameterCollision(t *testing.T) {
+	key := generateKey(t)
+	p := baseIDTokenParams(key, time.Now(), time.Minute)
+	p.Parameters = map[string]json.RawMessage{"at_hash": jsonRaw(t, "custom")}
+	if _, err := IssueIDToken(p); err == nil {
+		t.Fatalf("IssueIDToken with reserved at_hash parameter = nil error, want error")
+	}
+}
+
 func TestIDTokenValidateAcceptsCorrectATHash(t *testing.T) {
 	key := generateKey(t)
 	now := time.Now()
 	accessToken := "access-token-value"
 
 	p := baseIDTokenParams(key, now, time.Minute)
-	p.Parameters = map[string]json.RawMessage{"at_hash": jsonRaw(t, wantATHash(t, accessToken, fapi.ES256))}
+	p.AccessToken = accessToken
 	tok, err := IssueIDToken(p)
 	if err != nil {
 		t.Fatalf("IssueIDToken: %v", err)
@@ -486,7 +531,7 @@ func TestIDTokenValidateAcceptsCorrectATHashEdDSA(t *testing.T) {
 		Signer: priv, Algorithm: fapi.EdDSA,
 		Issuer: "https://as.example", Subject: "user-1", Audience: "client-123",
 		Now: now, Lifetime: time.Minute,
-		Parameters: map[string]json.RawMessage{"at_hash": jsonRaw(t, wantATHash(t, accessToken, fapi.EdDSA))},
+		AccessToken: accessToken,
 	}
 	tok, err := IssueIDToken(p)
 	if err != nil {
@@ -512,7 +557,7 @@ func TestIDTokenValidateRejectsATHashMismatch(t *testing.T) {
 	now := time.Now()
 
 	p := baseIDTokenParams(key, now, time.Minute)
-	p.Parameters = map[string]json.RawMessage{"at_hash": jsonRaw(t, wantATHash(t, "access-token-value", fapi.ES256))}
+	p.AccessToken = "access-token-value"
 	tok, err := IssueIDToken(p)
 	if err != nil {
 		t.Fatalf("IssueIDToken: %v", err)
@@ -537,7 +582,7 @@ func TestIDTokenValidateRejectsATHashWithoutAccessToken(t *testing.T) {
 	now := time.Now()
 
 	p := baseIDTokenParams(key, now, time.Minute)
-	p.Parameters = map[string]json.RawMessage{"at_hash": jsonRaw(t, wantATHash(t, "access-token-value", fapi.ES256))}
+	p.AccessToken = "access-token-value"
 	tok, err := IssueIDToken(p)
 	if err != nil {
 		t.Fatalf("IssueIDToken: %v", err)

@@ -150,7 +150,7 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 		}
 		idToken, err := s.issueIDToken(ctx, client, identityAssertion{
 			Subject: polled.Subject, AuthTime: polled.AuthTime, ACR: polled.ACR, AMR: polled.AMR, TokenClaims: idTokenClaims,
-		}, "")
+		}, "", accessToken)
 		if err != nil {
 			return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorServerError, 500, "failed to issue ID token", err))
 		}

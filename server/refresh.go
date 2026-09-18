@@ -154,7 +154,7 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 		}
 		idToken, err := s.issueIDToken(ctx, client, identityAssertion{
 			Subject: redeemed.Subject, AuthTime: redeemed.AuthTime, ACR: redeemed.ACR, AMR: redeemed.AMR, TokenClaims: idTokenClaims,
-		}, "")
+		}, "", accessToken)
 		if err != nil {
 			return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorServerError, 500, "failed to issue ID token", err))
 		}

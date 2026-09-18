@@ -341,6 +341,7 @@ func TestExchangeAuthorizationCodeIdentityClaimWinsOverExtensionClaimCollision(t
 		Now:              h.now,
 		MaxLifetime:      5 * time.Minute,
 		MaxClockSkew:     5 * time.Second,
+		AccessToken:      exchangeResult.AccessToken.Reveal(),
 	})
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
@@ -398,6 +399,7 @@ func TestExchangeAuthorizationCodeEmbedsOnlyRequestedIdentityClaims(t *testing.T
 		Now:              h.now,
 		MaxLifetime:      5 * time.Minute,
 		MaxClockSkew:     5 * time.Second,
+		AccessToken:      result.AccessToken.Reveal(),
 	})
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
@@ -453,6 +455,7 @@ func TestExchangeAuthorizationCodeOmitsIdentityClaimsWithoutClaimsParameter(t *t
 		Now:              h.now,
 		MaxLifetime:      5 * time.Minute,
 		MaxClockSkew:     5 * time.Second,
+		AccessToken:      result.AccessToken.Reveal(),
 	})
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
@@ -495,6 +498,7 @@ func TestExchangeAuthorizationCodeSplitsIDTokenAndUserinfoRequestedClaims(t *tes
 	validatedIDToken, err := parsedIDToken.Validate(&h.serverKey.PublicKey, token.IDTokenValidatePolicy{
 		ExpectedIssuer: testIssuer, ExpectedAudience: testClientID.String(), Algorithm: fapi.ES256,
 		Now: h.now, MaxLifetime: 5 * time.Minute, MaxClockSkew: 5 * time.Second,
+		AccessToken: result.AccessToken.Reveal(),
 	})
 	if err != nil {
 		t.Fatalf("Validate id_token: %v", err)

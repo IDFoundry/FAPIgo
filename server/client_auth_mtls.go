@@ -133,61 +133,61 @@ func (s *Server) authenticateClientViaCertificate(ctx context.Context, clientID 
 			newError(ErrorInvalidClient, 401, "a client certificate is required for client authentication", nil)
 	}
 
-	switch client.ClientAuthMethod() {
-	case storage.ClientAuthMethodSelfSignedTLSClientAuth:
-		if !matchesRegisteredThumbprint(peerCert, client.ExpectedCertificateThumbprint()) {
-			return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
-				newError(ErrorInvalidClient, 401, "client certificate does not match the registered thumbprint", nil)
-		}
-	case storage.ClientAuthMethodTLSClientAuth:
-		if s.deps.MTLSClientCAs != nil && !verifiesAgainstRoots(peerCert, s.deps.MTLSClientCAs) {
-			return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
-				newError(ErrorInvalidClient, 401, "client certificate does not chain to a trusted root", nil)
-		}
-		if !matchesRegisteredSubjectDN(peerCert, client.ExpectedSubjectDN()) {
-			return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
-				newError(ErrorInvalidClient, 401, "client certificate subject does not match the registered subject", nil)
-		}
-	case storage.ClientAuthMethodTLSClientAuthSANDNS:
-		if s.deps.MTLSClientCAs != nil && !verifiesAgainstRoots(peerCert, s.deps.MTLSClientCAs) {
-			return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
-				newError(ErrorInvalidClient, 401, "client certificate does not chain to a trusted root", nil)
-		}
-		if !matchesRegisteredSANDNS(peerCert, client.ExpectedSANDNS()) {
-			return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
-				newError(ErrorInvalidClient, 401, "client certificate subject does not match the registered subject", nil)
-		}
-	case storage.ClientAuthMethodTLSClientAuthSANURI:
-		if s.deps.MTLSClientCAs != nil && !verifiesAgainstRoots(peerCert, s.deps.MTLSClientCAs) {
-			return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
-				newError(ErrorInvalidClient, 401, "client certificate does not chain to a trusted root", nil)
-		}
-		if !matchesRegisteredSANURI(peerCert, client.ExpectedSANURI()) {
-			return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
-				newError(ErrorInvalidClient, 401, "client certificate subject does not match the registered subject", nil)
-		}
-	case storage.ClientAuthMethodTLSClientAuthSANIP:
-		if s.deps.MTLSClientCAs != nil && !verifiesAgainstRoots(peerCert, s.deps.MTLSClientCAs) {
-			return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
-				newError(ErrorInvalidClient, 401, "client certificate does not chain to a trusted root", nil)
-		}
-		if !matchesRegisteredSANIP(peerCert, client.ExpectedSANIP()) {
-			return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
-				newError(ErrorInvalidClient, 401, "client certificate subject does not match the registered subject", nil)
-		}
-	case storage.ClientAuthMethodTLSClientAuthSANEmail:
-		if s.deps.MTLSClientCAs != nil && !verifiesAgainstRoots(peerCert, s.deps.MTLSClientCAs) {
-			return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
-				newError(ErrorInvalidClient, 401, "client certificate does not chain to a trusted root", nil)
-		}
-		if !matchesRegisteredSANEmail(peerCert, client.ExpectedSANEmail()) {
-			return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
-				newError(ErrorInvalidClient, 401, "client certificate subject does not match the registered subject", nil)
-		}
-	default:
-		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
-			newError(ErrorInvalidClient, 401, "client is not registered for certificate-based client authentication", nil)
+	if verifyErr := s.verifyClientCertificate(client, peerCert); verifyErr != nil {
+		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{}, verifyErr
 	}
 
 	return client, clientassertion.VerifiedAssertion{ClientID: clientID.String()}, nil
+}
+
+// verifyClientCertificate dispatches to client's own registered
+// ClientAuthMethod's certificate check — split out of
+// authenticateClientViaCertificate purely to keep that method's own
+// cognitive complexity manageable.
+func (s *Server) verifyClientCertificate(client storage.RegisteredClient, peerCert *x509.Certificate) *Error {
+	switch client.ClientAuthMethod() {
+	case storage.ClientAuthMethodSelfSignedTLSClientAuth:
+		if !matchesRegisteredThumbprint(peerCert, client.ExpectedCertificateThumbprint()) {
+			return newError(ErrorInvalidClient, 401, "client certificate does not match the registered thumbprint", nil)
+		}
+		return nil
+	case storage.ClientAuthMethodTLSClientAuth:
+		return s.verifyChainedFieldMatch(peerCert, matchesRegisteredSubjectDN(peerCert, client.ExpectedSubjectDN()))
+	case storage.ClientAuthMethodTLSClientAuthSANDNS:
+		return s.verifyChainedFieldMatch(peerCert, matchesRegisteredSANDNS(peerCert, client.ExpectedSANDNS()))
+	case storage.ClientAuthMethodTLSClientAuthSANURI:
+		return s.verifyChainedFieldMatch(peerCert, matchesRegisteredSANURI(peerCert, client.ExpectedSANURI()))
+	case storage.ClientAuthMethodTLSClientAuthSANIP:
+		return s.verifyChainedFieldMatch(peerCert, matchesRegisteredSANIP(peerCert, client.ExpectedSANIP()))
+	case storage.ClientAuthMethodTLSClientAuthSANEmail:
+		return s.verifyChainedFieldMatch(peerCert, matchesRegisteredSANEmail(peerCert, client.ExpectedSANEmail()))
+	default:
+		return newError(ErrorInvalidClient, 401, "client is not registered for certificate-based client authentication", nil)
+	}
+}
+
+// verifyChainedFieldMatch is the shared shape 5 of
+// verifyClientCertificate's 6 ClientAuthMethod cases have: check
+// Dependencies.MTLSClientCAs (when set — see checkChainsToRoot's own
+// doc comment), then fieldMatched, the case's own already-computed
+// registered-field comparison.
+func (s *Server) verifyChainedFieldMatch(peerCert *x509.Certificate, fieldMatched bool) *Error {
+	if chainErr := s.checkChainsToRoot(peerCert); chainErr != nil {
+		return chainErr
+	}
+	if !fieldMatched {
+		return newError(ErrorInvalidClient, 401, "client certificate subject does not match the registered subject", nil)
+	}
+	return nil
+}
+
+// checkChainsToRoot enforces Dependencies.MTLSClientCAs, when set — see
+// that field's own doc comment for why
+// ClientAuthMethodSelfSignedTLSClientAuth (checked before this is ever
+// called) needs no such check.
+func (s *Server) checkChainsToRoot(peerCert *x509.Certificate) *Error {
+	if s.deps.MTLSClientCAs != nil && !verifiesAgainstRoots(peerCert, s.deps.MTLSClientCAs) {
+		return newError(ErrorInvalidClient, 401, "client certificate does not chain to a trusted root", nil)
+	}
+	return nil
 }

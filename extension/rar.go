@@ -308,23 +308,30 @@ func (r *RARRegistry) ValidateGrant(requested, granted RARValues) error {
 		requestedRaws := requested.byType[typ]
 		usedIdx := consumed[typ]
 		for _, grantedRaw := range grantedRaws {
-			matched := false
-			for i, requestedRaw := range requestedRaws {
-				if usedIdx[i] {
-					continue
-				}
-				if err := def.validateGrant(requestedRaw, grantedRaw); err == nil {
-					usedIdx[i] = true
-					matched = true
-					break
-				}
-			}
-			if !matched {
+			if !matchGrantedObject(def, grantedRaw, requestedRaws, usedIdx) {
 				return fmt.Errorf("%w: type %q", ErrRARGrantExceedsRequest, typ)
 			}
 		}
 	}
 	return nil
+}
+
+// matchGrantedObject finds an unused entry of requestedRaws that
+// def.validateGrant accepts grantedRaw against, marking it used
+// (usedIdx) and reporting whether a match was found — split out of
+// ValidateGrant purely to keep that method's own cognitive complexity
+// manageable.
+func matchGrantedObject(def registeredRAR, grantedRaw json.RawMessage, requestedRaws []json.RawMessage, usedIdx []bool) bool {
+	for i, requestedRaw := range requestedRaws {
+		if usedIdx[i] {
+			continue
+		}
+		if err := def.validateGrant(requestedRaw, grantedRaw); err == nil {
+			usedIdx[i] = true
+			return true
+		}
+	}
+	return false
 }
 
 // checkJSONDepth reports whether raw's JSON nesting ever exceeds

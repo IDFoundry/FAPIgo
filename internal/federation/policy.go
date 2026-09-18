@@ -341,87 +341,118 @@ func applyClaimPolicy(ops PolicyOperators, crit []string, value json.RawMessage,
 	return value, present, nil
 }
 
+// applyOperator applies op to value/present per §6.1.3.1.1's operator
+// table. Each operator's own logic is split into its own function
+// purely to keep this dispatcher's cognitive complexity manageable.
 func applyOperator(op string, operand json.RawMessage, value json.RawMessage, present bool) (json.RawMessage, bool, error) {
 	switch op {
 	case opValue:
-		var v any
-		if err := json.Unmarshal(operand, &v); err != nil {
-			return nil, false, policyError("value: %v", err)
-		}
-		if v == nil {
-			return nil, false, nil
-		}
-		return operand, true, nil
+		return applyValueOperator(operand)
 	case opAdd:
-		merged, err := unionArrays(value, operand)
-		if err != nil {
-			return nil, false, fmt.Errorf("add: %w", err)
-		}
-		return merged, true, nil
+		return applyAddOperator(operand, value)
 	case opDefault:
-		if present {
-			return value, present, nil
-		}
-		return operand, true, nil
+		return applyDefaultOperator(operand, value, present)
 	case opOneOf:
-		if !present {
-			return value, present, nil
-		}
-		var options []json.RawMessage
-		if err := json.Unmarshal(operand, &options); err != nil {
-			return nil, false, policyError("one_of: %v", err)
-		}
-		ok, err := containsRaw(options, value)
-		if err != nil {
-			return nil, false, fmt.Errorf("one_of: %w", err)
-		}
-		if !ok {
-			return nil, false, policyError("value is not one of the allowed values")
-		}
-		return value, present, nil
+		return applyOneOfOperator(operand, value, present)
 	case opSubsetOf:
-		if !present {
-			return value, present, nil
-		}
-		result, err := intersectArrays(value, operand)
-		if err != nil {
-			return nil, false, fmt.Errorf("subset_of: %w", err)
-		}
-		return result, true, nil
+		return applySubsetOfOperator(operand, value, present)
 	case opSupersetOf:
-		if !present {
-			return value, present, nil
-		}
-		var required []json.RawMessage
-		if err := json.Unmarshal(operand, &required); err != nil {
-			return nil, false, policyError("superset_of: %v", err)
-		}
-		var have []json.RawMessage
-		if err := json.Unmarshal(value, &have); err != nil {
-			return nil, false, policyError("superset_of: metadata parameter is not an array: %v", err)
-		}
-		for _, want := range required {
-			ok, err := containsRaw(have, want)
-			if err != nil {
-				return nil, false, fmt.Errorf("superset_of: %w", err)
-			}
-			if !ok {
-				return nil, false, policyError("value does not contain all required superset_of values")
-			}
-		}
-		return value, present, nil
+		return applySupersetOfOperator(operand, value, present)
 	case opEssential:
-		var essential bool
-		if err := json.Unmarshal(operand, &essential); err != nil {
-			return nil, false, policyError("essential: %v", err)
-		}
-		if essential && !present {
-			return nil, false, policyError("essential metadata parameter is absent after applying policy")
-		}
-		return value, present, nil
+		return applyEssentialOperator(operand, value, present)
 	default:
 		return value, present, nil
 	}
+}
+
+func applyValueOperator(operand json.RawMessage) (json.RawMessage, bool, error) {
+	var v any
+	if err := json.Unmarshal(operand, &v); err != nil {
+		return nil, false, policyError("value: %v", err)
+	}
+	if v == nil {
+		return nil, false, nil
+	}
+	return operand, true, nil
+}
+
+func applyAddOperator(operand, value json.RawMessage) (json.RawMessage, bool, error) {
+	merged, err := unionArrays(value, operand)
+	if err != nil {
+		return nil, false, fmt.Errorf("add: %w", err)
+	}
+	return merged, true, nil
+}
+
+func applyDefaultOperator(operand, value json.RawMessage, present bool) (json.RawMessage, bool, error) {
+	if present {
+		return value, present, nil
+	}
+	return operand, true, nil
+}
+
+func applyOneOfOperator(operand, value json.RawMessage, present bool) (json.RawMessage, bool, error) {
+	if !present {
+		return value, present, nil
+	}
+	var options []json.RawMessage
+	if err := json.Unmarshal(operand, &options); err != nil {
+		return nil, false, policyError("one_of: %v", err)
+	}
+	ok, err := containsRaw(options, value)
+	if err != nil {
+		return nil, false, fmt.Errorf("one_of: %w", err)
+	}
+	if !ok {
+		return nil, false, policyError("value is not one of the allowed values")
+	}
+	return value, present, nil
+}
+
+func applySubsetOfOperator(operand, value json.RawMessage, present bool) (json.RawMessage, bool, error) {
+	if !present {
+		return value, present, nil
+	}
+	result, err := intersectArrays(value, operand)
+	if err != nil {
+		return nil, false, fmt.Errorf("subset_of: %w", err)
+	}
+	return result, true, nil
+}
+
+func applySupersetOfOperator(operand, value json.RawMessage, present bool) (json.RawMessage, bool, error) {
+	if !present {
+		return value, present, nil
+	}
+	var required []json.RawMessage
+	if err := json.Unmarshal(operand, &required); err != nil {
+		return nil, false, policyError("superset_of: %v", err)
+	}
+	var have []json.RawMessage
+	if err := json.Unmarshal(value, &have); err != nil {
+		return nil, false, policyError("superset_of: metadata parameter is not an array: %v", err)
+	}
+	for _, want := range required {
+		ok, err := containsRaw(have, want)
+		if err != nil {
+			return nil, false, fmt.Errorf("superset_of: %w", err)
+		}
+		if !ok {
+			return nil, false, policyError("value does not contain all required superset_of values")
+		}
+	}
+	return value, present, nil
+}
+
+func applyEssentialOperator(operand, value json.RawMessage, present bool) (json.RawMessage, bool, error) {
+	var essential bool
+	if err := json.Unmarshal(operand, &essential); err != nil {
+		return nil, false, policyError("essential: %v", err)
+	}
+	if essential && !present {
+		return nil, false, policyError("essential metadata parameter is absent after applying policy")
+	}
+	return value, present, nil
 }
 
 // unionArrays returns the set union of a and b — both JSON arrays,

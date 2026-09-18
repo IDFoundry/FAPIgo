@@ -450,44 +450,77 @@ func (a *AutomaticClientRepository) registeredClientConfigFromMetadata(ctx conte
 
 	// storage.NewRegisteredClient's own switch on ClientAuthMethod
 	// requires exactly one corresponding field per method (see its own
-	// doc comment) — mirrored here, reading each from wherever RFC 8705
-	// actually places it: token_endpoint_auth_signing_alg for
-	// private_key_jwt, the client's own published certificate (via jwks/
-	// jwks_uri's "x5c") for self_signed_tls_client_auth, and a plain
-	// metadata string for tls_client_auth and its four SAN-typed
+	// doc comment) — mirrored in applyClientAuthMethodFields, reading
+	// each from wherever RFC 8705 actually places it: token_endpoint_auth_signing_alg
+	// for private_key_jwt, the client's own published certificate (via
+	// jwks/jwks_uri's "x5c") for self_signed_tls_client_auth, and a
+	// plain metadata string for tls_client_auth and its four SAN-typed
 	// siblings.
+	if err := applyClientAuthMethodFields(&cfg, authMethod, m, jwks); err != nil {
+		return storage.RegisteredClientConfig{}, nil, err
+	}
+
+	if err := a.applyBackchannelAuthenticationFields(&cfg, m); err != nil {
+		return storage.RegisteredClientConfig{}, nil, err
+	}
+
+	cfg.IDTokenEncryptionKeyManagement, cfg.IDTokenEncryptionContentEncryption, err = parseEncryptionAlgorithmPair(
+		m.IDTokenEncryptedResponseAlg, m.IDTokenEncryptedResponseEnc,
+		"id_token_encrypted_response_alg", "id_token_encrypted_response_enc")
+	if err != nil {
+		return storage.RegisteredClientConfig{}, nil, err
+	}
+
+	cfg.UserInfoEncryptionKeyManagement, cfg.UserInfoEncryptionContentEncryption, err = parseEncryptionAlgorithmPair(
+		m.UserinfoEncryptedResponseAlg, m.UserinfoEncryptedResponseEnc,
+		"userinfo_encrypted_response_alg", "userinfo_encrypted_response_enc")
+	if err != nil {
+		return storage.RegisteredClientConfig{}, nil, err
+	}
+
+	return cfg, jwks, nil
+}
+
+// applyClientAuthMethodFields sets cfg's authMethod-specific field from
+// m/jwks — split out of registeredClientConfigFromMetadata purely to
+// keep that method's own cognitive complexity manageable.
+func applyClientAuthMethodFields(cfg *storage.RegisteredClientConfig, authMethod storage.ClientAuthMethod, m relyingPartyMetadata, jwks json.RawMessage) error {
 	switch authMethod {
 	case storage.ClientAuthMethodPrivateKeyJWT:
-		if cfg.ClientAssertionAlgorithm, err = fapi.ParseSignatureAlgorithm(m.TokenEndpointAuthSigningAlg); err != nil {
-			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("token_endpoint_auth_signing_alg: %w", err)
+		alg, err := fapi.ParseSignatureAlgorithm(m.TokenEndpointAuthSigningAlg)
+		if err != nil {
+			return fmt.Errorf("token_endpoint_auth_signing_alg: %w", err)
 		}
+		cfg.ClientAssertionAlgorithm = alg
 	case storage.ClientAuthMethodSelfSignedTLSClientAuth:
-		if cfg.ExpectedCertificateThumbprint, err = certificateThumbprintFromJWKS(jwks); err != nil {
-			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("self_signed_tls_client_auth: %w", err)
+		thumbprint, err := certificateThumbprintFromJWKS(jwks)
+		if err != nil {
+			return fmt.Errorf("self_signed_tls_client_auth: %w", err)
 		}
+		cfg.ExpectedCertificateThumbprint = thumbprint
 	case storage.ClientAuthMethodTLSClientAuth:
 		if m.TLSClientAuthSubjectDN == "" {
-			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("tls_client_auth_subject_dn is required for tls_client_auth")
+			return fmt.Errorf("tls_client_auth_subject_dn is required for tls_client_auth")
 		}
 		cfg.ExpectedSubjectDN = m.TLSClientAuthSubjectDN
 	case storage.ClientAuthMethodTLSClientAuthSANDNS:
 		if m.TLSClientAuthSANDNS == "" {
-			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("tls_client_auth_san_dns is required for tls_client_auth_san_dns")
+			return fmt.Errorf("tls_client_auth_san_dns is required for tls_client_auth_san_dns")
 		}
 		cfg.ExpectedSANDNS = m.TLSClientAuthSANDNS
 	case storage.ClientAuthMethodTLSClientAuthSANURI:
 		if m.TLSClientAuthSANURI == "" {
-			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("tls_client_auth_san_uri is required for tls_client_auth_san_uri")
+			return fmt.Errorf("tls_client_auth_san_uri is required for tls_client_auth_san_uri")
 		}
 		cfg.ExpectedSANURI = m.TLSClientAuthSANURI
 	case storage.ClientAuthMethodTLSClientAuthSANIP:
 		if m.TLSClientAuthSANIP == "" {
-			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("tls_client_auth_san_ip is required for tls_client_auth_san_ip")
+			return fmt.Errorf("tls_client_auth_san_ip is required for tls_client_auth_san_ip")
 		}
 		cfg.ExpectedSANIP = m.TLSClientAuthSANIP
 	case storage.ClientAuthMethodTLSClientAuthSANEmail:
 		if m.TLSClientAuthSANEmail == "" {
-			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("tls_client_auth_san_email is required for tls_client_auth_san_email")
+			return fmt.Errorf("tls_client_auth_san_email is required for tls_client_auth_san_email")
 		}
 		cfg.ExpectedSANEmail = m.TLSClientAuthSANEmail
 	default:
@@ -495,56 +528,68 @@ func (a *AutomaticClientRepository) registeredClientConfigFromMetadata(ctx conte
 		// closed set already rejected anything else above — kept for the
 		// same defensive-completeness reason a switch over a closed enum
 		// gets one elsewhere in this module.
-		return storage.RegisteredClientConfig{}, nil, fmt.Errorf("token_endpoint_auth_method %q is not supported", m.TokenEndpointAuthMethod)
+		return fmt.Errorf("token_endpoint_auth_method %q is not supported", m.TokenEndpointAuthMethod)
 	}
+	return nil
+}
 
-	if a.cfg.AllowsCIBA && m.BackchannelAuthenticationRequestSigningAlg != "" {
-		if cfg.BackchannelAuthenticationRequestAlgorithm, err = fapi.ParseSignatureAlgorithm(m.BackchannelAuthenticationRequestSigningAlg); err != nil {
-			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("backchannel_authentication_request_signing_alg: %w", err)
-		}
-		deliveryMode := m.BackchannelTokenDeliveryMode
-		if deliveryMode == "" {
-			deliveryMode = "poll"
-		}
-		if cfg.BackchannelTokenDeliveryMode, err = storage.ParseBackchannelTokenDeliveryMode(deliveryMode); err != nil {
-			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("backchannel_token_delivery_mode: %w", err)
-		}
-		if m.BackchannelClientNotificationEndpoint != "" {
-			if cfg.BackchannelClientNotificationEndpoint, err = fapi.ParseEndpointURL(m.BackchannelClientNotificationEndpoint); err != nil {
-				return storage.RegisteredClientConfig{}, nil, fmt.Errorf("backchannel_client_notification_endpoint: %w", err)
-			}
-		}
+// applyBackchannelAuthenticationFields sets cfg's CIBA fields from m
+// when this repository allows CIBA and m actually advertises it — a
+// no-op otherwise. Split out of registeredClientConfigFromMetadata for
+// the same reason applyClientAuthMethodFields is.
+func (a *AutomaticClientRepository) applyBackchannelAuthenticationFields(cfg *storage.RegisteredClientConfig, m relyingPartyMetadata) error {
+	if !a.cfg.AllowsCIBA || m.BackchannelAuthenticationRequestSigningAlg == "" {
+		return nil
 	}
+	alg, err := fapi.ParseSignatureAlgorithm(m.BackchannelAuthenticationRequestSigningAlg)
+	if err != nil {
+		return fmt.Errorf("backchannel_authentication_request_signing_alg: %w", err)
+	}
+	cfg.BackchannelAuthenticationRequestAlgorithm = alg
 
-	idTokenAlgSet := m.IDTokenEncryptedResponseAlg != ""
-	idTokenEncSet := m.IDTokenEncryptedResponseEnc != ""
-	if idTokenAlgSet != idTokenEncSet {
-		return storage.RegisteredClientConfig{}, nil, fmt.Errorf("id_token_encrypted_response_alg and id_token_encrypted_response_enc must both be set, or neither")
+	deliveryMode := m.BackchannelTokenDeliveryMode
+	if deliveryMode == "" {
+		deliveryMode = "poll"
 	}
-	if idTokenAlgSet {
-		if cfg.IDTokenEncryptionKeyManagement, err = fapi.ParseKeyManagementAlgorithm(m.IDTokenEncryptedResponseAlg); err != nil {
-			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("id_token_encrypted_response_alg: %w", err)
-		}
-		if cfg.IDTokenEncryptionContentEncryption, err = fapi.ParseContentEncryptionAlgorithm(m.IDTokenEncryptedResponseEnc); err != nil {
-			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("id_token_encrypted_response_enc: %w", err)
-		}
+	mode, err := storage.ParseBackchannelTokenDeliveryMode(deliveryMode)
+	if err != nil {
+		return fmt.Errorf("backchannel_token_delivery_mode: %w", err)
 	}
+	cfg.BackchannelTokenDeliveryMode = mode
 
-	userInfoAlgSet := m.UserinfoEncryptedResponseAlg != ""
-	userInfoEncSet := m.UserinfoEncryptedResponseEnc != ""
-	if userInfoAlgSet != userInfoEncSet {
-		return storage.RegisteredClientConfig{}, nil, fmt.Errorf("userinfo_encrypted_response_alg and userinfo_encrypted_response_enc must both be set, or neither")
-	}
-	if userInfoAlgSet {
-		if cfg.UserInfoEncryptionKeyManagement, err = fapi.ParseKeyManagementAlgorithm(m.UserinfoEncryptedResponseAlg); err != nil {
-			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("userinfo_encrypted_response_alg: %w", err)
+	if m.BackchannelClientNotificationEndpoint != "" {
+		endpoint, err := fapi.ParseEndpointURL(m.BackchannelClientNotificationEndpoint)
+		if err != nil {
+			return fmt.Errorf("backchannel_client_notification_endpoint: %w", err)
 		}
-		if cfg.UserInfoEncryptionContentEncryption, err = fapi.ParseContentEncryptionAlgorithm(m.UserinfoEncryptedResponseEnc); err != nil {
-			return storage.RegisteredClientConfig{}, nil, fmt.Errorf("userinfo_encrypted_response_enc: %w", err)
-		}
+		cfg.BackchannelClientNotificationEndpoint = endpoint
 	}
+	return nil
+}
 
-	return cfg, jwks, nil
+// parseEncryptionAlgorithmPair parses a key-management/content-encryption
+// metadata pair that must be set together or not at all — algLabel/
+// encLabel name the two metadata fields, for error messages. Shared by
+// registeredClientConfigFromMetadata's id_token and userinfo encryption
+// handling, which are otherwise identical.
+func parseEncryptionAlgorithmPair(algValue, encValue, algLabel, encLabel string) (fapi.KeyManagementAlgorithm, fapi.ContentEncryptionAlgorithm, error) {
+	algSet := algValue != ""
+	encSet := encValue != ""
+	if algSet != encSet {
+		return 0, 0, fmt.Errorf("%s and %s must both be set, or neither", algLabel, encLabel)
+	}
+	if !algSet {
+		return 0, 0, nil
+	}
+	alg, err := fapi.ParseKeyManagementAlgorithm(algValue)
+	if err != nil {
+		return 0, 0, fmt.Errorf("%s: %w", algLabel, err)
+	}
+	enc, err := fapi.ParseContentEncryptionAlgorithm(encValue)
+	if err != nil {
+		return 0, 0, fmt.Errorf("%s: %w", encLabel, err)
+	}
+	return alg, enc, nil
 }
 
 // certificateThumbprintFromJWKS extracts and computes the RFC 8705 §3.1

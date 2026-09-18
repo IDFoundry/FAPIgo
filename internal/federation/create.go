@@ -98,42 +98,53 @@ type CreateParams struct {
 	TrustMarkOwners map[string]TrustMarkOwner
 }
 
-// Create builds and signs an Entity Statement for p.
-func Create(p CreateParams) (string, error) {
+// validateCreateParams checks p's required fields and its Entity
+// Configuration/Subordinate Statement claim-mixing invariant — split
+// out of Create purely to keep that function's own cognitive
+// complexity manageable.
+func validateCreateParams(p CreateParams) error {
 	if p.Signer == nil {
-		return "", fmt.Errorf("federation: signer is nil")
+		return fmt.Errorf("federation: signer is nil")
 	}
 	if !p.Algorithm.IsValid() {
-		return "", fmt.Errorf("federation: invalid algorithm %v", p.Algorithm)
+		return fmt.Errorf("federation: invalid algorithm %v", p.Algorithm)
 	}
 	if p.Issuer == "" {
-		return "", fmt.Errorf("federation: issuer is empty")
+		return fmt.Errorf("federation: issuer is empty")
 	}
 	if p.Subject == "" {
-		return "", fmt.Errorf("federation: subject is empty")
+		return fmt.Errorf("federation: subject is empty")
 	}
 	if p.Now.IsZero() {
-		return "", fmt.Errorf("federation: now is zero")
+		return fmt.Errorf("federation: now is zero")
 	}
 	if p.Lifetime <= 0 {
-		return "", fmt.Errorf("federation: lifetime must be positive")
+		return fmt.Errorf("federation: lifetime must be positive")
 	}
 	if len(p.JWKS) == 0 {
-		return "", fmt.Errorf("federation: jwks is empty")
+		return fmt.Errorf("federation: jwks is empty")
 	}
 
 	selfSigned := p.Issuer == p.Subject
 	if selfSigned && (p.MetadataPolicy != nil || p.MetadataPolicyCritical != nil || p.SourceEndpoint != "" || p.Constraints != nil) {
-		return "", fmt.Errorf("federation: metadata_policy, metadata_policy_crit, source_endpoint and constraints are Subordinate Statement claims, but issuer equals subject (an Entity Configuration)")
+		return fmt.Errorf("federation: metadata_policy, metadata_policy_crit, source_endpoint and constraints are Subordinate Statement claims, but issuer equals subject (an Entity Configuration)")
 	}
 	if !selfSigned && p.AuthorityHints != nil {
-		return "", fmt.Errorf("federation: authority_hints is an Entity Configuration claim, but issuer does not equal subject (a Subordinate Statement)")
+		return fmt.Errorf("federation: authority_hints is an Entity Configuration claim, but issuer does not equal subject (a Subordinate Statement)")
 	}
 	if !selfSigned && p.TrustMarks != nil {
-		return "", fmt.Errorf("federation: trust_marks is an Entity Configuration claim, but issuer does not equal subject (a Subordinate Statement)")
+		return fmt.Errorf("federation: trust_marks is an Entity Configuration claim, but issuer does not equal subject (a Subordinate Statement)")
 	}
 	if !selfSigned && p.TrustMarkOwners != nil {
-		return "", fmt.Errorf("federation: trust_mark_owners is an Entity Configuration claim, but issuer does not equal subject (a Subordinate Statement)")
+		return fmt.Errorf("federation: trust_mark_owners is an Entity Configuration claim, but issuer does not equal subject (a Subordinate Statement)")
+	}
+	return nil
+}
+
+// Create builds and signs an Entity Statement for p.
+func Create(p CreateParams) (string, error) {
+	if err := validateCreateParams(p); err != nil {
+		return "", err
 	}
 
 	claims := map[string]any{

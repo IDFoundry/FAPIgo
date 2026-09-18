@@ -201,34 +201,15 @@ func (o Object) Verify(ctx context.Context, pub crypto.PublicKey, policy VerifyP
 	if c.Issuer != policy.ExpectedClientID {
 		return VerifiedObject{}, ErrIssuerMismatch
 	}
-	if policy.AutomaticFederationRegistration {
-		if len(c.Audience) != 1 || c.Audience[0] != policy.ExpectedAudience {
-			return VerifiedObject{}, ErrAudienceMismatch
-		}
-		if c.HasSubject {
-			return VerifiedObject{}, ErrUnexpectedSubject
-		}
-	} else if !slices.Contains(c.Audience, policy.ExpectedAudience) {
-		return VerifiedObject{}, ErrAudienceMismatch
+	if err := checkAudienceAndSubject(c, policy); err != nil {
+		return VerifiedObject{}, err
 	}
 	if c.IssuedAt.IsZero() && policy.RequireIssuedAt {
 		return VerifiedObject{}, ErrMissingIssuedAt
 	}
 
-	if policy.Now.After(c.ExpiresAt.Add(policy.MaxClockSkew)) {
-		return VerifiedObject{}, ErrExpired
-	}
-	if c.ExpiresAt.Sub(policy.Now) > policy.MaxLifetime {
-		return VerifiedObject{}, ErrLifetimeExceeded
-	}
-	if c.NotBefore.IsZero() {
-		if policy.RequireNotBefore {
-			return VerifiedObject{}, ErrMissingNotBefore
-		}
-	} else if policy.Now.Before(c.NotBefore.Add(-policy.MaxClockSkew)) {
-		return VerifiedObject{}, ErrNotYetValid
-	} else if policy.Now.Sub(c.NotBefore) > policy.MaxLifetime {
-		return VerifiedObject{}, ErrNotBeforeTooOld
+	if err := checkLifetime(c, policy); err != nil {
+		return VerifiedObject{}, err
 	}
 
 	if c.JTI == "" && (policy.RequireJTI || policy.AutomaticFederationRegistration) {
@@ -244,4 +225,49 @@ func (o Object) Verify(ctx context.Context, pub crypto.PublicKey, policy VerifyP
 	}
 
 	return VerifiedObject{ClientID: c.Issuer, Parameters: c.Parameters, ExpiresAt: c.ExpiresAt}, nil
+}
+
+// checkAudienceAndSubject enforces the "aud"/"sub" claim rules — either
+// AutomaticFederationRegistration's stricter Federation 1.0 §12.1.1
+// rules, or the generic RFC 9101 one — split out of Verify purely to
+// keep that method's own cognitive complexity manageable.
+func checkAudienceAndSubject(c Claims, policy VerifyPolicy) error {
+	if policy.AutomaticFederationRegistration {
+		if len(c.Audience) != 1 || c.Audience[0] != policy.ExpectedAudience {
+			return ErrAudienceMismatch
+		}
+		if c.HasSubject {
+			return ErrUnexpectedSubject
+		}
+		return nil
+	}
+	if !slices.Contains(c.Audience, policy.ExpectedAudience) {
+		return ErrAudienceMismatch
+	}
+	return nil
+}
+
+// checkLifetime enforces exp/nbf against policy's clock-skew and
+// max-lifetime bounds — split out of Verify for the same reason
+// checkAudienceAndSubject is.
+func checkLifetime(c Claims, policy VerifyPolicy) error {
+	if policy.Now.After(c.ExpiresAt.Add(policy.MaxClockSkew)) {
+		return ErrExpired
+	}
+	if c.ExpiresAt.Sub(policy.Now) > policy.MaxLifetime {
+		return ErrLifetimeExceeded
+	}
+	if c.NotBefore.IsZero() {
+		if policy.RequireNotBefore {
+			return ErrMissingNotBefore
+		}
+		return nil
+	}
+	if policy.Now.Before(c.NotBefore.Add(-policy.MaxClockSkew)) {
+		return ErrNotYetValid
+	}
+	if policy.Now.Sub(c.NotBefore) > policy.MaxLifetime {
+		return ErrNotBeforeTooOld
+	}
+	return nil
 }

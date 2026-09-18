@@ -350,24 +350,28 @@ type BackchannelAuthenticationResult interface {
 // behalf.
 type BackchannelAuthenticationPending struct{ SlowDown bool }
 
+// Discriminator for BackchannelAuthenticationResult — deliberately empty.
 func (BackchannelAuthenticationPending) backchannelAuthenticationResult() {}
 
 // BackchannelAuthenticationDenied means the end user (or the
 // authorization server on their behalf) declined the request.
 type BackchannelAuthenticationDenied struct{ Code, Description string }
 
+// Discriminator for BackchannelAuthenticationResult — deliberately empty.
 func (BackchannelAuthenticationDenied) backchannelAuthenticationResult() {}
 
 // BackchannelAuthenticationExpired means auth_req_id's own expiry
 // passed before a decision was made.
 type BackchannelAuthenticationExpired struct{}
 
+// Discriminator for BackchannelAuthenticationResult — deliberately empty.
 func (BackchannelAuthenticationExpired) backchannelAuthenticationResult() {}
 
 // BackchannelAuthenticationApproved means the request was approved and
 // Tokens were issued.
 type BackchannelAuthenticationApproved struct{ Tokens TokenSet }
 
+// Discriminator for BackchannelAuthenticationResult — deliberately empty.
 func (BackchannelAuthenticationApproved) backchannelAuthenticationResult() {}
 
 // PollBackchannelAuthentication performs a single token-endpoint poll

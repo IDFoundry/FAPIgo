@@ -18,6 +18,11 @@ import (
 // package. It exists only inside this package and is never handed to a
 // caller — the same pattern server uses for its own signing keys.
 type keyManagerSigner struct {
+	// ctx is stored, not threaded through as a Sign parameter, because
+	// crypto.Signer.Sign's signature is fixed by the standard library —
+	// it has no context.Context parameter to pass one through, so a
+	// struct field is the only way to carry it from construction to
+	// Sign.
 	ctx       context.Context
 	manager   keys.KeyManager
 	purpose   keys.SigningPurpose

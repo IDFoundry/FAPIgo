@@ -523,6 +523,11 @@ func (h *Harness) RunAuthorizationCodeFlowWithCallback(ctx context.Context, rawQ
 // assuming a pre-hashed digest, since EdDSA needs the raw message
 // instead (see keys.SigningRequest's own doc comment).
 type harnessSigner struct {
+	// ctx is stored, not threaded through as a Sign parameter, because
+	// crypto.Signer.Sign's signature is fixed by the standard library —
+	// it has no context.Context parameter to pass one through, so a
+	// struct field is the only way to carry it from construction to
+	// Sign.
 	ctx       context.Context
 	manager   keys.KeyManager
 	purpose   keys.SigningPurpose

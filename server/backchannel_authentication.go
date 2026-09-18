@@ -64,6 +64,7 @@ type BackchannelInteractionRequired struct {
 	Interaction BackchannelInteractionRequest
 }
 
+// Discriminator for BackchannelAuthenticationAction — deliberately empty.
 func (BackchannelInteractionRequired) backchannelAuthenticationAction() {}
 
 // WriteJSON writes a as a complete CIBA §10.2/§10.3 backchannel
@@ -99,6 +100,7 @@ type BackchannelAuthenticationLocalError struct {
 	Error *Error
 }
 
+// Discriminator for BackchannelAuthenticationAction — deliberately empty.
 func (BackchannelAuthenticationLocalError) backchannelAuthenticationAction() {}
 
 // BeginBackchannelAuthenticationRequest is the input to

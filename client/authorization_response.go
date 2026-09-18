@@ -46,6 +46,7 @@ type CallbackSuccess struct {
 	Response ValidatedAuthorizationResponse
 }
 
+// Discriminator for CallbackResult — deliberately empty.
 func (CallbackSuccess) callbackResult() {}
 
 // CallbackDenied means the authorization server (or the resource owner,
@@ -57,6 +58,7 @@ type CallbackDenied struct {
 	Description string
 }
 
+// Discriminator for CallbackResult — deliberately empty.
 func (CallbackDenied) callbackResult() {}
 
 // HandleAuthorizationResponse validates an authorization callback: the

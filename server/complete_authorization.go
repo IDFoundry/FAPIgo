@@ -30,6 +30,7 @@ type AuthorizationRedirect struct {
 	destination fapi.URL
 }
 
+// Discriminator for AuthorizationResult — deliberately empty.
 func (AuthorizationRedirect) authorizationResult() {}
 
 // Destination returns the complete, engine-assembled redirect target.
@@ -42,6 +43,7 @@ type AuthorizationLocalError struct {
 	Error *Error
 }
 
+// Discriminator for AuthorizationResult — deliberately empty.
 func (AuthorizationLocalError) authorizationResult() {}
 
 // CompleteAuthorizationRequest is the input to Server.CompleteAuthorization.

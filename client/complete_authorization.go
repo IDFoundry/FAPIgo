@@ -12,6 +12,7 @@ type CompletionSuccess struct {
 	Tokens TokenSet
 }
 
+// Discriminator for CompletionResult — deliberately empty.
 func (CompletionSuccess) completionResult() {}
 
 // CompletionDenied means the authorization server (or the resource
@@ -21,6 +22,7 @@ type CompletionDenied struct {
 	Description string
 }
 
+// Discriminator for CompletionResult — deliberately empty.
 func (CompletionDenied) completionResult() {}
 
 // CompleteAuthorization validates cb via HandleAuthorizationResponse and,

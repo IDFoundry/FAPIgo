@@ -192,6 +192,67 @@ type ResolvedEntity struct {
 	Tokens []string
 }
 
+// chainWalkState is Resolve's own mutable state as it walks upward from
+// subjectID, one hop (one Intermediate) at a time, until it reaches a
+// configured Trust Anchor. Split out purely to keep Resolve itself and
+// its per-hop helpers (selfClaimsForHop, finalizeTrustChain,
+// advanceIntermediateHop) within a manageable parameter count — every
+// field here is exactly one of the loop-scoped variables the original,
+// unsplit Resolve tracked directly; see each helper's own doc comment
+// for how and when it reads or mutates one.
+type chainWalkState struct {
+	subjectID  string
+	leafClaims intfed.Claims
+
+	minExpiry time.Time
+
+	// belowStmt is always "the most recently fetched statement that
+	// still needs to be verified against a key vouched for by its own
+	// issuer's superior" — initially LE's self-signed Entity
+	// Configuration (ES[0]). belowIssuer/belowSubject are belowStmt's
+	// own claimed iss/sub, tracked explicitly rather than re-derived
+	// from entityAt: once belowStmt becomes a genuine Subordinate
+	// Statement (any hop after the first), its subject is whichever
+	// entity was entityAt when it was fetched, not entityAt's current
+	// value — entityAt keeps advancing up the chain every iteration,
+	// but a Subordinate Statement's own "sub" never changes.
+	belowStmt    intfed.Statement
+	belowIssuer  string
+	belowSubject string
+	entityAt     string
+
+	visited map[string]bool
+	chain   []string
+	tokens  []string
+
+	subordinatePolicies    []subordinatePolicy
+	subordinateConstraints []subordinateConstraint
+
+	// subjectJWKS is captured exactly once, at hop 0 — the first
+	// superior's own statement "about entityAt" is, at that point,
+	// necessarily about subjectID itself (entityAt only ever advances
+	// past subjectID at the end of hop 0). See ResolvedEntity.JWKS's
+	// own doc comment for what this value means and is used for.
+	subjectJWKS json.RawMessage
+}
+
+func newChainWalkState(subjectID string, leafStmt intfed.Statement, leafToken string, leafClaims intfed.Claims) *chainWalkState {
+	return &chainWalkState{
+		subjectID:  subjectID,
+		leafClaims: leafClaims,
+		minExpiry:  leafClaims.ExpiresAt,
+
+		belowStmt:    leafStmt,
+		belowIssuer:  subjectID,
+		belowSubject: subjectID,
+		entityAt:     subjectID,
+
+		visited: map[string]bool{subjectID: true},
+		chain:   []string{subjectID},
+		tokens:  []string{leafToken},
+	}
+}
+
 // Resolve resolves subjectID's Trust Chain against one of
 // Config.TrustAnchors and returns its Resolved Metadata, enforcing
 // every Subordinate Statement's own max_path_length, naming_constraints
@@ -217,7 +278,6 @@ func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntit
 	if err != nil {
 		return ResolvedEntity{}, fmt.Errorf("federation: entity configuration for %q: %w", subjectID, err)
 	}
-	minExpiry := leafClaims.ExpiresAt
 
 	// The subject may itself be a configured Trust Anchor — a
 	// degenerate, zero-hop Trust Chain: its own Entity Configuration is
@@ -225,205 +285,235 @@ func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntit
 	// validates against the pre-configured key, not merely its own
 	// self-claimed one.
 	if anchor, ok := r.trustAnchorsByID[subjectID]; ok {
-		if _, err := r.verifyAgainstJWKS(leafStmt, anchor.JWKS, subjectID, subjectID, leafStmt.Algorithm(), now); err != nil {
-			return ResolvedEntity{}, fmt.Errorf("federation: %q is configured as a trust anchor but does not validate against its configured keys: %w", subjectID, err)
-		}
-		return ResolvedEntity{
-			EntityID: subjectID, TrustAnchor: subjectID, Chain: []string{subjectID},
-			Metadata: leafClaims.Metadata, ExpiresAt: minExpiry,
-			JWKS: anchor.JWKS, TrustMarks: leafClaims.TrustMarks, TrustMarkOwners: leafClaims.TrustMarkOwners,
-			Tokens: []string{leafToken},
-		}, nil
+		return r.resolveSelfAsTrustAnchor(subjectID, leafStmt, leafToken, leafClaims, anchor, now)
 	}
 
-	// belowStmt is always "the most recently fetched statement that
-	// still needs to be verified against a key vouched for by its own
-	// issuer's superior" — initially LE's self-signed Entity
-	// Configuration (ES[0]). belowIssuer/belowSubject are belowStmt's
-	// own claimed iss/sub, tracked explicitly rather than re-derived
-	// from entityAt: once belowStmt becomes a genuine Subordinate
-	// Statement (any hop after the first), its subject is whichever
-	// entity was entityAt when it was fetched, not entityAt's current
-	// value — entityAt keeps advancing up the chain every iteration,
-	// but a Subordinate Statement's own "sub" never changes.
-	belowStmt := leafStmt
-	belowIssuer := subjectID
-	belowSubject := subjectID
-	entityAt := subjectID
-	visited := map[string]bool{subjectID: true}
-	chain := []string{subjectID}
-	tokens := []string{leafToken}
-
-	var subordinatePolicies []subordinatePolicy
-	var subordinateConstraints []subordinateConstraint
-	// subjectJWKS is captured exactly once, at hop 0 — the first
-	// superior's own statement "about entityAt" is, at that point,
-	// necessarily about subjectID itself (entityAt only ever advances
-	// past subjectID at the end of hop 0). See ResolvedEntity.JWKS's
-	// own doc comment for what this value means and is used for.
-	var subjectJWKS json.RawMessage
+	st := newChainWalkState(subjectID, leafStmt, leafToken, leafClaims)
 
 	for hop := 0; ; hop++ {
 		if hop >= r.cfg.Limits.MaxPathLength {
 			return ResolvedEntity{}, fmt.Errorf("federation: trust chain for %q exceeds the configured max path length (%d)", subjectID, r.cfg.Limits.MaxPathLength)
 		}
 
-		// selfConfig is only fetched (and read) when entityAt has moved
-		// past the original subject — at hop 0, selfClaims is already
-		// leafClaims (from the self-verify done before this loop), and
-		// there is nothing else in this entity to fetch its own config
-		// for. Its own raw token is discarded (not appended to tokens):
-		// an Intermediate's self-signed Entity Configuration is fetched
-		// purely to discover its authority_hints/federation_fetch_endpoint
-		// for routing, and is not itself an entry of the canonical Trust
-		// Chain sequence — see ResolvedEntity.Tokens's own doc comment.
-		selfClaims := leafClaims
-		if entityAt != subjectID {
-			selfConfig, _, err := fetchEntityConfiguration(ctx, r.deps.HTTP, entityAt)
-			if err != nil {
-				return ResolvedEntity{}, err
-			}
-			if selfConfig.ClaimedIssuer() != entityAt || selfConfig.ClaimedSubject() != entityAt {
-				return ResolvedEntity{}, fmt.Errorf("federation: entity configuration for %q has iss=%q sub=%q, want both equal to %q",
-					entityAt, selfConfig.ClaimedIssuer(), selfConfig.ClaimedSubject(), entityAt)
-			}
-			selfClaims, err = r.verifySelfSigned(selfConfig, entityAt, now)
-			if err != nil {
-				return ResolvedEntity{}, fmt.Errorf("federation: entity configuration for %q: %w", entityAt, err)
-			}
-			if selfClaims.ExpiresAt.Before(minExpiry) {
-				minExpiry = selfClaims.ExpiresAt
-			}
+		selfClaims, err := r.selfClaimsForHop(ctx, st, now)
+		if err != nil {
+			return ResolvedEntity{}, err
 		}
 
 		hints := selfClaims.AuthorityHints
 		if len(hints) == 0 {
-			return ResolvedEntity{}, fmt.Errorf("federation: %q has no authority_hints and is not a configured trust anchor: no path to a trusted trust anchor", entityAt)
+			return ResolvedEntity{}, fmt.Errorf("federation: %q has no authority_hints and is not a configured trust anchor: no path to a trusted trust anchor", st.entityAt)
 		}
 
-		superiorID, superiorConfig, superiorToken, superiorClaims, err := r.findReachableSuperior(ctx, hints, visited, now)
+		superiorID, superiorConfig, superiorToken, superiorClaims, err := r.findReachableSuperior(ctx, hints, st.visited, now)
 		if err != nil {
-			return ResolvedEntity{}, fmt.Errorf("federation: %q: %w", entityAt, err)
+			return ResolvedEntity{}, fmt.Errorf("federation: %q: %w", st.entityAt, err)
 		}
-		visited[superiorID] = true
-		if superiorClaims.ExpiresAt.Before(minExpiry) {
-			minExpiry = superiorClaims.ExpiresAt
+		st.visited[superiorID] = true
+		if superiorClaims.ExpiresAt.Before(st.minExpiry) {
+			st.minExpiry = superiorClaims.ExpiresAt
 		}
 
-		aboveMeta, err := parseEntityMetadata(superiorClaims.Metadata)
-		if err != nil {
-			return ResolvedEntity{}, fmt.Errorf("federation: %q: federation_entity metadata: %w", superiorID, err)
-		}
-		if aboveMeta.FetchEndpoint == "" {
-			return ResolvedEntity{}, fmt.Errorf("federation: %q has no federation_fetch_endpoint", superiorID)
-		}
-		aboveStmt, aboveToken, err := fetchSubordinateStatement(ctx, r.deps.HTTP, aboveMeta.FetchEndpoint, entityAt)
+		aboveStmt, aboveToken, err := r.fetchAboveStatement(ctx, superiorID, superiorClaims, st.entityAt)
 		if err != nil {
 			return ResolvedEntity{}, err
 		}
-		if aboveStmt.ClaimedIssuer() != superiorID || aboveStmt.ClaimedSubject() != entityAt {
-			return ResolvedEntity{}, fmt.Errorf("federation: subordinate statement about %q from %q has iss=%q sub=%q",
-				entityAt, superiorID, aboveStmt.ClaimedIssuer(), aboveStmt.ClaimedSubject())
-		}
 
-		chain = append(chain, superiorID)
+		st.chain = append(st.chain, superiorID)
 		// aboveStmt (issued by superiorID, about entityAt) is a genuine
 		// Trust Chain entry regardless of whether superiorID turns out to
-		// be a Trust Anchor or another Intermediate — unlike selfConfig
-		// above, appended here unconditionally, in order.
-		tokens = append(tokens, aboveToken)
+		// be a Trust Anchor or another Intermediate — unlike an
+		// Intermediate's own self-signed Entity Configuration (see
+		// selfClaimsForHop's own doc comment), appended here
+		// unconditionally, in order.
+		st.tokens = append(st.tokens, aboveToken)
 
 		if anchor, ok := r.trustAnchorsByID[superiorID]; ok {
-			// superiorConfig now plays two roles at once: it's both the
-			// routing statement that got us here, and ES[i] — "the
-			// statement about superiorID" collapses to superiorID's own
-			// self-signed config, since a trust anchor has no superior
-			// of its own to issue a separate one.
-			if _, err := r.verifyAgainstJWKS(superiorConfig, anchor.JWKS, superiorID, superiorID, superiorConfig.Algorithm(), now); err != nil {
-				return ResolvedEntity{}, fmt.Errorf("federation: trust anchor %q does not validate against its configured keys: %w", superiorID, err)
-			}
-			aboveClaims, err := r.verifyAgainstJWKS(aboveStmt, superiorClaims.JWKS, superiorID, entityAt, aboveStmt.Algorithm(), now)
-			if err != nil {
-				return ResolvedEntity{}, fmt.Errorf("federation: subordinate statement about %q from trust anchor %q: %w", entityAt, superiorID, err)
-			}
-			if _, err := r.verifyAgainstJWKS(belowStmt, aboveClaims.JWKS, belowIssuer, belowSubject, belowStmt.Algorithm(), now); err != nil {
-				return ResolvedEntity{}, fmt.Errorf("federation: %q's statement (issued by %q) does not match the keys vouched for it by %q: %w", belowSubject, belowIssuer, superiorID, err)
-			}
-			if hop == 0 {
-				subjectJWKS = aboveClaims.JWKS
-			}
-			subordinatePolicies = append(subordinatePolicies, subordinatePolicy{policy: aboveClaims.MetadataPolicy, crit: aboveClaims.MetadataPolicyCritical})
-			if aboveClaims.Constraints != nil {
-				subordinateConstraints = append(subordinateConstraints, subordinateConstraint{
-					constraints: *aboveClaims.Constraints,
-					appliesTo:   append([]string{}, chain[:len(chain)-1]...),
-				})
-			}
-
-			if err := checkNamingConstraints(subordinateConstraints); err != nil {
-				return ResolvedEntity{}, err
-			}
-			if err := checkMaxPathLengthConstraints(subordinateConstraints); err != nil {
-				return ResolvedEntity{}, err
-			}
-			leafMetadata := filterAllowedEntityTypes(subordinateConstraints, leafClaims.Metadata)
-			resolvedMetadata, err := r.resolveMetadata(subordinatePolicies, leafMetadata)
-			if err != nil {
-				return ResolvedEntity{}, err
-			}
-			// superiorConfig's own raw token (ES[i], the Trust Anchor's
-			// own Entity Configuration) closes the sequence — see
-			// ResolvedEntity.Tokens's own doc comment.
-			return ResolvedEntity{
-				EntityID: subjectID, TrustAnchor: superiorID, Chain: chain,
-				Metadata: resolvedMetadata, ExpiresAt: minExpiry,
-				JWKS: subjectJWKS, TrustMarks: leafClaims.TrustMarks, TrustMarkOwners: leafClaims.TrustMarkOwners,
-				Tokens: append(tokens, superiorToken),
-			}, nil
+			return r.finalizeTrustChain(st, hop, superiorID, superiorConfig, superiorClaims, aboveStmt, superiorToken, anchor, now)
 		}
 
-		// superiorID is an Intermediate, not (yet known to be) a Trust
-		// Anchor — aboveStmt can't be verified until we learn what
-		// vouches for superiorID's own keys, at the next iteration; it
-		// becomes the new belowStmt. Verify the OLD belowStmt now,
-		// though: aboveStmt (issued by superiorID, about entityAt) is
-		// exactly "the statement about entityAt" that belowStmt's own
-		// verification rule calls for.
-		if _, err := r.verifyAgainstJWKS(belowStmt, aboveStmt.ClaimedJWKS(), belowIssuer, belowSubject, belowStmt.Algorithm(), now); err != nil {
-			return ResolvedEntity{}, fmt.Errorf("federation: %q's statement (issued by %q) does not match the keys vouched for it by %q: %w", belowSubject, belowIssuer, superiorID, err)
+		if err := r.advanceIntermediateHop(st, hop, superiorID, aboveStmt, now); err != nil {
+			return ResolvedEntity{}, err
 		}
-		if hop == 0 {
-			// Unverified until the next iteration verifies aboveStmt's
-			// signature (as the new belowStmt) — safe to capture now for
-			// the same reason ClaimedMetadataPolicy's own doc comment
-			// gives; see ResolvedEntity.JWKS's own doc comment for why
-			// hop 0 specifically.
-			subjectJWKS = aboveStmt.ClaimedJWKS()
-		}
-		// aboveStmt's own metadata_policy is unverified until the next
-		// iteration verifies aboveStmt's signature (as the new
-		// belowStmt) — safe to read now for the reasons
-		// Statement.ClaimedMetadataPolicy's own doc comment gives: it's
-		// only ever merged and applied once the whole chain, this
-		// statement included, has been cryptographically verified.
-		policy, crit := aboveStmt.ClaimedMetadataPolicy()
-		subordinatePolicies = append(subordinatePolicies, subordinatePolicy{policy: policy, crit: crit})
-		// aboveStmt's own constraints claim is unverified for exactly the
-		// same reason and until exactly the same later point as its
-		// metadata_policy, immediately above — see
-		// intfed.Statement.ClaimedConstraints's own doc comment.
-		if constraints := aboveStmt.ClaimedConstraints(); constraints != nil {
-			subordinateConstraints = append(subordinateConstraints, subordinateConstraint{
-				constraints: *constraints,
-				appliesTo:   append([]string{}, chain[:len(chain)-1]...),
-			})
-		}
-
-		belowStmt = aboveStmt
-		belowIssuer = superiorID
-		belowSubject = entityAt
-		entityAt = superiorID
 	}
+}
+
+// resolveSelfAsTrustAnchor handles Resolve's degenerate, zero-hop case:
+// subjectID is itself a configured Trust Anchor, so leafStmt (ES[0]) is
+// also ES[i] — the only remaining check is that it validates against
+// the pre-configured key, not merely its own self-claimed one. See
+// Resolve's own call site comment for why this never needs to enter the
+// hop loop.
+func (r *Resolver) resolveSelfAsTrustAnchor(subjectID string, leafStmt intfed.Statement, leafToken string, leafClaims intfed.Claims, anchor TrustAnchor, now time.Time) (ResolvedEntity, error) {
+	if _, err := r.verifyAgainstJWKS(leafStmt, anchor.JWKS, subjectID, subjectID, leafStmt.Algorithm(), now); err != nil {
+		return ResolvedEntity{}, fmt.Errorf("federation: %q is configured as a trust anchor but does not validate against its configured keys: %w", subjectID, err)
+	}
+	return ResolvedEntity{
+		EntityID: subjectID, TrustAnchor: subjectID, Chain: []string{subjectID},
+		Metadata: leafClaims.Metadata, ExpiresAt: leafClaims.ExpiresAt,
+		JWKS: anchor.JWKS, TrustMarks: leafClaims.TrustMarks, TrustMarkOwners: leafClaims.TrustMarkOwners,
+		Tokens: []string{leafToken},
+	}, nil
+}
+
+// selfClaimsForHop returns st.entityAt's own claims for this hop — at
+// hop 0 that's simply st.leafClaims (already self-verified by Resolve
+// before the loop began: st.entityAt starts equal to st.subjectID, and
+// moves away from it only at the end of advanceIntermediateHop, so
+// entityAt == subjectID is exactly "hop 0" for every call this function
+// can see). Every later hop fetches and self-verifies entityAt's own
+// Entity Configuration purely to discover its authority_hints and
+// federation_fetch_endpoint; that self-signed statement's own raw token
+// is discarded, never appended to st.tokens — it is not itself an entry
+// of the canonical Trust Chain sequence, see ResolvedEntity.Tokens's own
+// doc comment. Updates st.minExpiry when this hop's statement expires
+// sooner than every one already seen.
+func (r *Resolver) selfClaimsForHop(ctx context.Context, st *chainWalkState, now time.Time) (intfed.Claims, error) {
+	if st.entityAt == st.subjectID {
+		return st.leafClaims, nil
+	}
+	selfConfig, _, err := fetchEntityConfiguration(ctx, r.deps.HTTP, st.entityAt)
+	if err != nil {
+		return intfed.Claims{}, err
+	}
+	if selfConfig.ClaimedIssuer() != st.entityAt || selfConfig.ClaimedSubject() != st.entityAt {
+		return intfed.Claims{}, fmt.Errorf("federation: entity configuration for %q has iss=%q sub=%q, want both equal to %q",
+			st.entityAt, selfConfig.ClaimedIssuer(), selfConfig.ClaimedSubject(), st.entityAt)
+	}
+	selfClaims, err := r.verifySelfSigned(selfConfig, st.entityAt, now)
+	if err != nil {
+		return intfed.Claims{}, fmt.Errorf("federation: entity configuration for %q: %w", st.entityAt, err)
+	}
+	if selfClaims.ExpiresAt.Before(st.minExpiry) {
+		st.minExpiry = selfClaims.ExpiresAt
+	}
+	return selfClaims, nil
+}
+
+// fetchAboveStatement fetches and validates the Subordinate Statement
+// that superiorID's own federation_fetch_endpoint (resolved from
+// superiorClaims' federation_entity metadata) issues about entityAt —
+// the "aboveStmt" that Resolve either closes the Trust Chain with
+// (superiorID is a configured Trust Anchor, see finalizeTrustChain) or
+// carries into the next hop as the new belowStmt (see
+// advanceIntermediateHop).
+func (r *Resolver) fetchAboveStatement(ctx context.Context, superiorID string, superiorClaims intfed.Claims, entityAt string) (intfed.Statement, string, error) {
+	aboveMeta, err := parseEntityMetadata(superiorClaims.Metadata)
+	if err != nil {
+		return intfed.Statement{}, "", fmt.Errorf("federation: %q: federation_entity metadata: %w", superiorID, err)
+	}
+	if aboveMeta.FetchEndpoint == "" {
+		return intfed.Statement{}, "", fmt.Errorf("federation: %q has no federation_fetch_endpoint", superiorID)
+	}
+	aboveStmt, aboveToken, err := fetchSubordinateStatement(ctx, r.deps.HTTP, aboveMeta.FetchEndpoint, entityAt)
+	if err != nil {
+		return intfed.Statement{}, "", err
+	}
+	if aboveStmt.ClaimedIssuer() != superiorID || aboveStmt.ClaimedSubject() != entityAt {
+		return intfed.Statement{}, "", fmt.Errorf("federation: subordinate statement about %q from %q has iss=%q sub=%q",
+			entityAt, superiorID, aboveStmt.ClaimedIssuer(), aboveStmt.ClaimedSubject())
+	}
+	return aboveStmt, aboveToken, nil
+}
+
+// finalizeTrustChain handles the hop where superiorID — whose
+// Subordinate Statement aboveStmt about st.entityAt was just fetched and
+// appended to st.chain/st.tokens — turns out to be a configured Trust
+// Anchor, closing the Trust Chain. Called at most once per Resolve call,
+// from the hop where it happens; see Resolve's own call site.
+func (r *Resolver) finalizeTrustChain(st *chainWalkState, hop int, superiorID string, superiorConfig intfed.Statement, superiorClaims intfed.Claims, aboveStmt intfed.Statement, superiorToken string, anchor TrustAnchor, now time.Time) (ResolvedEntity, error) {
+	// superiorConfig now plays two roles at once: it's both the routing
+	// statement that got us here, and ES[i] — "the statement about
+	// superiorID" collapses to superiorID's own self-signed config,
+	// since a trust anchor has no superior of its own to issue a
+	// separate one.
+	if _, err := r.verifyAgainstJWKS(superiorConfig, anchor.JWKS, superiorID, superiorID, superiorConfig.Algorithm(), now); err != nil {
+		return ResolvedEntity{}, fmt.Errorf("federation: trust anchor %q does not validate against its configured keys: %w", superiorID, err)
+	}
+	aboveClaims, err := r.verifyAgainstJWKS(aboveStmt, superiorClaims.JWKS, superiorID, st.entityAt, aboveStmt.Algorithm(), now)
+	if err != nil {
+		return ResolvedEntity{}, fmt.Errorf("federation: subordinate statement about %q from trust anchor %q: %w", st.entityAt, superiorID, err)
+	}
+	if _, err := r.verifyAgainstJWKS(st.belowStmt, aboveClaims.JWKS, st.belowIssuer, st.belowSubject, st.belowStmt.Algorithm(), now); err != nil {
+		return ResolvedEntity{}, fmt.Errorf("federation: %q's statement (issued by %q) does not match the keys vouched for it by %q: %w", st.belowSubject, st.belowIssuer, superiorID, err)
+	}
+	if hop == 0 {
+		st.subjectJWKS = aboveClaims.JWKS
+	}
+	st.subordinatePolicies = append(st.subordinatePolicies, subordinatePolicy{policy: aboveClaims.MetadataPolicy, crit: aboveClaims.MetadataPolicyCritical})
+	if aboveClaims.Constraints != nil {
+		st.subordinateConstraints = append(st.subordinateConstraints, subordinateConstraint{
+			constraints: *aboveClaims.Constraints,
+			appliesTo:   append([]string{}, st.chain[:len(st.chain)-1]...),
+		})
+	}
+
+	if err := checkNamingConstraints(st.subordinateConstraints); err != nil {
+		return ResolvedEntity{}, err
+	}
+	if err := checkMaxPathLengthConstraints(st.subordinateConstraints); err != nil {
+		return ResolvedEntity{}, err
+	}
+	leafMetadata := filterAllowedEntityTypes(st.subordinateConstraints, st.leafClaims.Metadata)
+	resolvedMetadata, err := r.resolveMetadata(st.subordinatePolicies, leafMetadata)
+	if err != nil {
+		return ResolvedEntity{}, err
+	}
+	// superiorConfig's own raw token (ES[i], the Trust Anchor's own
+	// Entity Configuration) closes the sequence — see
+	// ResolvedEntity.Tokens's own doc comment.
+	return ResolvedEntity{
+		EntityID: st.subjectID, TrustAnchor: superiorID, Chain: st.chain,
+		Metadata: resolvedMetadata, ExpiresAt: st.minExpiry,
+		JWKS: st.subjectJWKS, TrustMarks: st.leafClaims.TrustMarks, TrustMarkOwners: st.leafClaims.TrustMarkOwners,
+		Tokens: append(st.tokens, superiorToken),
+	}, nil
+}
+
+// advanceIntermediateHop handles the hop where superiorID — whose
+// Subordinate Statement aboveStmt about st.entityAt was just fetched and
+// appended to st.chain/st.tokens — is an Intermediate, not (yet known to
+// be) a Trust Anchor: aboveStmt can't be verified until the next hop
+// learns what vouches for superiorID's own keys, so it becomes the new
+// st.belowStmt. Verifies the OLD st.belowStmt now, though: aboveStmt
+// (issued by superiorID, about st.entityAt) is exactly "the statement
+// about st.entityAt" that belowStmt's own verification rule calls for.
+func (r *Resolver) advanceIntermediateHop(st *chainWalkState, hop int, superiorID string, aboveStmt intfed.Statement, now time.Time) error {
+	if _, err := r.verifyAgainstJWKS(st.belowStmt, aboveStmt.ClaimedJWKS(), st.belowIssuer, st.belowSubject, st.belowStmt.Algorithm(), now); err != nil {
+		return fmt.Errorf("federation: %q's statement (issued by %q) does not match the keys vouched for it by %q: %w", st.belowSubject, st.belowIssuer, superiorID, err)
+	}
+	if hop == 0 {
+		// Unverified until the next iteration verifies aboveStmt's
+		// signature (as the new belowStmt) — safe to capture now for
+		// the same reason ClaimedMetadataPolicy's own doc comment
+		// gives; see ResolvedEntity.JWKS's own doc comment for why
+		// hop 0 specifically.
+		st.subjectJWKS = aboveStmt.ClaimedJWKS()
+	}
+	// aboveStmt's own metadata_policy is unverified until the next
+	// iteration verifies aboveStmt's signature (as the new
+	// belowStmt) — safe to read now for the reasons
+	// Statement.ClaimedMetadataPolicy's own doc comment gives: it's
+	// only ever merged and applied once the whole chain, this
+	// statement included, has been cryptographically verified.
+	policy, crit := aboveStmt.ClaimedMetadataPolicy()
+	st.subordinatePolicies = append(st.subordinatePolicies, subordinatePolicy{policy: policy, crit: crit})
+	// aboveStmt's own constraints claim is unverified for exactly the
+	// same reason and until exactly the same later point as its
+	// metadata_policy, immediately above — see
+	// intfed.Statement.ClaimedConstraints's own doc comment.
+	if constraints := aboveStmt.ClaimedConstraints(); constraints != nil {
+		st.subordinateConstraints = append(st.subordinateConstraints, subordinateConstraint{
+			constraints: *constraints,
+			appliesTo:   append([]string{}, st.chain[:len(st.chain)-1]...),
+		})
+	}
+
+	st.belowStmt = aboveStmt
+	st.belowIssuer = superiorID
+	st.belowSubject = st.entityAt
+	st.entityAt = superiorID
+	return nil
 }
 
 // subordinatePolicy is one Subordinate Statement's own metadata_policy

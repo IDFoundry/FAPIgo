@@ -117,43 +117,9 @@ func Verify(ctx context.Context, req VerifyRequest) (VerifiedProof, error) {
 		return VerifiedProof{}, err
 	}
 
-	if c.HTM != strings.ToUpper(req.Method) {
-		return VerifiedProof{}, ErrMethodMismatch
-	}
-	// htu is compared canonicalized on both sides (RFC 9449 §4.3: "the
-	// query and fragment parts of the htu... are ignored"), not as a raw
-	// string — a proof's own htu claim may legitimately differ from
-	// req.URL in case or in carrying a query/fragment the sender didn't
-	// bother to strip.
-	htu, err := url.Parse(c.HTU)
-	if err != nil {
-		return VerifiedProof{}, ErrURIMismatch
-	}
-	if canonical.URI(htu) != canonical.URI(req.URL) {
-		return VerifiedProof{}, ErrURIMismatch
-	}
-
 	iat := time.Unix(c.IAT, 0)
-	if iat.After(req.Now.Add(req.MaxClockSkew)) {
-		return VerifiedProof{}, ErrIssuedInFuture
-	}
-	if req.Now.Sub(iat) > req.MaxProofAge {
-		return VerifiedProof{}, ErrExpired
-	}
-
-	if req.AccessToken != "" {
-		want := accessTokenHash(req.AccessToken)
-		if subtle.ConstantTimeCompare([]byte(c.ATH), []byte(want)) != 1 {
-			return VerifiedProof{}, ErrAccessTokenHashMismatch
-		}
-	} else if c.ATH != "" {
-		return VerifiedProof{}, ErrAccessTokenHashMismatch
-	}
-
-	if req.RequiredNonce != "" {
-		if subtle.ConstantTimeCompare([]byte(c.Nonce), []byte(req.RequiredNonce)) != 1 {
-			return VerifiedProof{}, ErrNonceMismatch
-		}
+	if err := verifyProofClaims(c, req, iat); err != nil {
+		return VerifiedProof{}, err
 	}
 
 	if req.Replay != nil {
@@ -167,4 +133,48 @@ func Verify(ctx context.Context, req VerifyRequest) (VerifiedProof, error) {
 		return VerifiedProof{}, fmt.Errorf("dpop: %w", err)
 	}
 	return VerifiedProof{Thumbprint: thumbprint, IssuedAt: iat, Nonce: c.Nonce}, nil
+}
+
+// verifyProofClaims checks c's htm/htu/iat/ath/nonce claims against
+// req, given iat already parsed from c.IAT — split out of Verify
+// purely to keep that function's own cognitive complexity manageable.
+func verifyProofClaims(c claims, req VerifyRequest, iat time.Time) error {
+	if c.HTM != strings.ToUpper(req.Method) {
+		return ErrMethodMismatch
+	}
+	// htu is compared canonicalized on both sides (RFC 9449 §4.3: "the
+	// query and fragment parts of the htu... are ignored"), not as a raw
+	// string — a proof's own htu claim may legitimately differ from
+	// req.URL in case or in carrying a query/fragment the sender didn't
+	// bother to strip.
+	htu, err := url.Parse(c.HTU)
+	if err != nil {
+		return ErrURIMismatch
+	}
+	if canonical.URI(htu) != canonical.URI(req.URL) {
+		return ErrURIMismatch
+	}
+
+	if iat.After(req.Now.Add(req.MaxClockSkew)) {
+		return ErrIssuedInFuture
+	}
+	if req.Now.Sub(iat) > req.MaxProofAge {
+		return ErrExpired
+	}
+
+	if req.AccessToken != "" {
+		want := accessTokenHash(req.AccessToken)
+		if subtle.ConstantTimeCompare([]byte(c.ATH), []byte(want)) != 1 {
+			return ErrAccessTokenHashMismatch
+		}
+	} else if c.ATH != "" {
+		return ErrAccessTokenHashMismatch
+	}
+
+	if req.RequiredNonce != "" {
+		if subtle.ConstantTimeCompare([]byte(c.Nonce), []byte(req.RequiredNonce)) != 1 {
+			return ErrNonceMismatch
+		}
+	}
+	return nil
 }

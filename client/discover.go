@@ -162,27 +162,49 @@ func (d DiscoveredMetadata) SupportsAlgorithms(algs Algorithms) error {
 	if algs.JARM != 0 && !slices.Contains(d.JARMAlgorithms, algs.JARM) {
 		return fmt.Errorf("client: issuer does not support %v for JARM; advertises: %v", algs.JARM, d.JARMAlgorithms)
 	}
-	if algs.IDTokenKeyManagement != 0 {
-		if !slices.Contains(d.IDTokenEncryptionAlgorithms, algs.IDTokenKeyManagement) {
-			return fmt.Errorf("client: issuer does not support %v for id_token encryption; advertises: %v", algs.IDTokenKeyManagement, d.IDTokenEncryptionAlgorithms)
-		}
-		if !slices.Contains(d.IDTokenEncryptionEncValues, algs.IDTokenContentEncryption) {
-			return fmt.Errorf("client: issuer does not support %v content encryption for id_token; advertises: %v", algs.IDTokenContentEncryption, d.IDTokenEncryptionEncValues)
-		}
+	if err := d.checkIDTokenEncryptionSupport(algs); err != nil {
+		return err
 	}
 	if algs.UserInfo != 0 && !slices.Contains(d.UserInfoAlgorithms, algs.UserInfo) {
 		return fmt.Errorf("client: issuer does not support %v for userinfo; advertises: %v", algs.UserInfo, d.UserInfoAlgorithms)
 	}
-	if algs.UserInfoKeyManagement != 0 {
-		if !slices.Contains(d.UserInfoEncryptionAlgorithms, algs.UserInfoKeyManagement) {
-			return fmt.Errorf("client: issuer does not support %v for userinfo encryption; advertises: %v", algs.UserInfoKeyManagement, d.UserInfoEncryptionAlgorithms)
-		}
-		if !slices.Contains(d.UserInfoEncryptionEncValues, algs.UserInfoContentEncryption) {
-			return fmt.Errorf("client: issuer does not support %v content encryption for userinfo; advertises: %v", algs.UserInfoContentEncryption, d.UserInfoEncryptionEncValues)
-		}
+	if err := d.checkUserInfoEncryptionSupport(algs); err != nil {
+		return err
 	}
 	if algs.BackchannelAuthenticationRequest != 0 && !slices.Contains(d.BackchannelAuthenticationRequestAlgorithms, algs.BackchannelAuthenticationRequest) {
 		return fmt.Errorf("client: issuer does not support %v for backchannel authentication requests; advertises: %v", algs.BackchannelAuthenticationRequest, d.BackchannelAuthenticationRequestAlgorithms)
+	}
+	return nil
+}
+
+// checkIDTokenEncryptionSupport is SupportsAlgorithms' own
+// IDTokenKeyManagement/IDTokenContentEncryption pair check, split out
+// purely to keep that method's own cognitive complexity manageable —
+// see its doc comment for why the pair is checked together.
+func (d DiscoveredMetadata) checkIDTokenEncryptionSupport(algs Algorithms) error {
+	if algs.IDTokenKeyManagement == 0 {
+		return nil
+	}
+	if !slices.Contains(d.IDTokenEncryptionAlgorithms, algs.IDTokenKeyManagement) {
+		return fmt.Errorf("client: issuer does not support %v for id_token encryption; advertises: %v", algs.IDTokenKeyManagement, d.IDTokenEncryptionAlgorithms)
+	}
+	if !slices.Contains(d.IDTokenEncryptionEncValues, algs.IDTokenContentEncryption) {
+		return fmt.Errorf("client: issuer does not support %v content encryption for id_token; advertises: %v", algs.IDTokenContentEncryption, d.IDTokenEncryptionEncValues)
+	}
+	return nil
+}
+
+// checkUserInfoEncryptionSupport mirrors checkIDTokenEncryptionSupport
+// for the UserInfoKeyManagement/UserInfoContentEncryption pair.
+func (d DiscoveredMetadata) checkUserInfoEncryptionSupport(algs Algorithms) error {
+	if algs.UserInfoKeyManagement == 0 {
+		return nil
+	}
+	if !slices.Contains(d.UserInfoEncryptionAlgorithms, algs.UserInfoKeyManagement) {
+		return fmt.Errorf("client: issuer does not support %v for userinfo encryption; advertises: %v", algs.UserInfoKeyManagement, d.UserInfoEncryptionAlgorithms)
+	}
+	if !slices.Contains(d.UserInfoEncryptionEncValues, algs.UserInfoContentEncryption) {
+		return fmt.Errorf("client: issuer does not support %v content encryption for userinfo; advertises: %v", algs.UserInfoContentEncryption, d.UserInfoEncryptionEncValues)
 	}
 	return nil
 }

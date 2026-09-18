@@ -145,6 +145,29 @@ func (t TokenResult) WriteJSON(w http.ResponseWriter) {
 	_ = json.NewEncoder(w).Encode(body) // #nosec G117 -- deliberately serializing the already-revealed access/refresh/ID token strings into the RFC 6749 §5.1 response body; that's WriteJSON's entire job, not a leak
 }
 
+// validateRedeemedAuthorizationCode checks a freshly-redeemed
+// authorization code's own stored state against the token request that
+// redeemed it — split out of ExchangeAuthorizationCode purely to keep
+// that method's own cognitive complexity manageable.
+func validateRedeemedAuthorizationCode(redeemed storage.RedeemedAuthorizationCode, clientID fapi.ClientID, redirectURI, thumbprint, codeVerifier string, now time.Time) *Error {
+	if !now.Before(redeemed.ExpiresAt) {
+		return newError(ErrorInvalidGrant, 400, "code has expired", nil)
+	}
+	if redeemed.ClientID != clientID {
+		return newError(ErrorInvalidGrant, 400, "code was not issued to this client", nil)
+	}
+	if !fapi.RegisteredRedirectURI(redeemed.RedirectURI).Equal(redirectURI) {
+		return newError(ErrorInvalidGrant, 400, "redirect_uri does not match the authorization request", nil)
+	}
+	if redeemed.DPoPJKT != "" && redeemed.DPoPJKT != thumbprint {
+		return newError(ErrorInvalidGrant, 400, "DPoP proof key does not match the dpop_jkt bound to this authorization code", nil)
+	}
+	if err := pkce.Verify(redeemed.CodeChallenge, pkce.S256, codeVerifier); err != nil {
+		return newError(ErrorInvalidGrant, 400, "code_verifier does not match code_challenge", err)
+	}
+	return nil
+}
+
 // ExchangeAuthorizationCode authenticates the client, verifies its DPoP
 // proof, redeems the authorization code (single-use — a second exchange
 // with the same code fails), checks PKCE and redirect_uri, and issues an
@@ -203,33 +226,13 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		// RecordIssuedRefreshToken were actually called for the
 		// original redemption — see AuthorizationCodeAlreadyRedeemedError's
 		// own doc comment for when that's the case.
-		var alreadyRedeemed *storage.AuthorizationCodeAlreadyRedeemedError
-		if errors.As(err, &alreadyRedeemed) {
-			if alreadyRedeemed.IssuedAccessTokenKey != "" {
-				_ = s.deps.Revocation.Revoke(ctx, alreadyRedeemed.IssuedAccessTokenKey, s.deps.Clock.Now().Add(s.cfg.Limits.AccessTokenLifetime))
-			}
-			if alreadyRedeemed.IssuedRefreshTokenHash != nil {
-				_ = s.deps.Grants.RevokeRefreshToken(ctx, *alreadyRedeemed.IssuedRefreshTokenHash)
-			}
-		}
+		s.revokeTokensForReusedCode(ctx, err)
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorInvalidGrant, 400, "code is invalid, expired, or already used", err))
 	}
 
 	now := s.deps.Clock.Now()
-	if !now.Before(redeemed.ExpiresAt) {
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorInvalidGrant, 400, "code has expired", nil))
-	}
-	if redeemed.ClientID != client.ID() {
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorInvalidGrant, 400, "code was not issued to this client", nil))
-	}
-	if !fapi.RegisteredRedirectURI(redeemed.RedirectURI).Equal(redirectURI) {
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorInvalidGrant, 400, "redirect_uri does not match the authorization request", nil))
-	}
-	if redeemed.DPoPJKT != "" && redeemed.DPoPJKT != thumbprint {
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorInvalidGrant, 400, "DPoP proof key does not match the dpop_jkt bound to this authorization code", nil))
-	}
-	if err := pkce.Verify(redeemed.CodeChallenge, pkce.S256, codeVerifier); err != nil {
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorInvalidGrant, 400, "code_verifier does not match code_challenge", err))
+	if valErr := validateRedeemedAuthorizationCode(redeemed, client.ID(), redirectURI, thumbprint, codeVerifier, now); valErr != nil {
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), valErr)
 	}
 
 	accessTokenClaims, err := withRequestedUserinfoClaims(redeemed.RequestedUserinfoClaims, redeemed.TokenClaims)
@@ -261,37 +264,12 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		AuthorizationDetails: redeemed.AuthorizationDetails,
 	}
 
-	if containsScope(redeemed.Scope, "openid") {
-		idTokenClaims, err := s.withIdentityClaims(ctx, redeemed.Subject, redeemed.RequestedIDTokenClaims, redeemed.TokenClaims)
-		if err != nil {
-			return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to resolve identity claims", err))
-		}
-		idToken, err := s.issueIDToken(ctx, client, identityAssertion{
-			Subject: redeemed.Subject, AuthTime: redeemed.AuthTime, ACR: redeemed.ACR, AMR: redeemed.AMR, TokenClaims: idTokenClaims,
-		}, redeemed.Nonce, accessToken)
-		if err != nil {
-			return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to issue ID token", err))
-		}
-		result.IDToken = fapi.NewSecret(idToken)
-		result.HasIDToken = true
+	if idErr := s.issueOptionalIDToken(ctx, client, redeemed, accessToken, &result); idErr != nil {
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), idErr)
 	}
 
-	if containsScope(redeemed.Scope, "offline_access") {
-		refreshToken, err := s.issueRefreshToken(ctx, client.ID(), identityAssertion{
-			Subject: redeemed.Subject, AuthTime: redeemed.AuthTime, ACR: redeemed.ACR, AMR: redeemed.AMR, TokenClaims: redeemed.TokenClaims,
-		}, redeemed.Scope, redeemed.AuthorizationDetails, thumbprint, redeemed.RequestedIDTokenClaims, redeemed.RequestedUserinfoClaims)
-		if err != nil {
-			return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to issue refresh token", err))
-		}
-		// Recomputed rather than threaded through issueRefreshToken's
-		// return: the caller already gets the raw value back, and this
-		// is the exact same hash CreateRefreshToken itself used to key
-		// the stored record — see RecordIssuedRefreshToken's own doc
-		// comment for why this association is recorded at all.
-		refreshTokenHash := sha256.Sum256([]byte(refreshToken))
-		_ = s.deps.Grants.RecordIssuedRefreshToken(ctx, codeHash, refreshTokenHash, now.Add(s.cfg.Limits.RefreshTokenLifetime))
-		result.RefreshToken = fapi.NewSecret(refreshToken)
-		result.HasRefreshToken = true
+	if refreshErr := s.issueOptionalRefreshToken(ctx, client, redeemed, thumbprint, codeHash, now, &result); refreshErr != nil {
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), refreshErr)
 	}
 
 	if s.deps.Nonces != nil && client.SenderConstrain() == storage.SenderConstrainDPoP {
@@ -304,6 +282,75 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 
 	s.audit(ctx, AuditEventExchangeAuthorizationCode, client.ID(), AuditOutcomeSuccess, "")
 	return result, nil
+}
+
+// revokeTokensForReusedCode best-effort revokes whatever was already
+// issued for a reused authorization code — RFC 6749 §4.1.2's "SHOULD
+// revoke (if possible) all tokens previously issued based on that
+// authorization code" — when err is a
+// storage.AuthorizationCodeAlreadyRedeemedError; a no-op for any other
+// error. Split out of ExchangeAuthorizationCode purely to keep that
+// method's own cognitive complexity manageable.
+func (s *Server) revokeTokensForReusedCode(ctx context.Context, err error) {
+	var alreadyRedeemed *storage.AuthorizationCodeAlreadyRedeemedError
+	if !errors.As(err, &alreadyRedeemed) {
+		return
+	}
+	if alreadyRedeemed.IssuedAccessTokenKey != "" {
+		_ = s.deps.Revocation.Revoke(ctx, alreadyRedeemed.IssuedAccessTokenKey, s.deps.Clock.Now().Add(s.cfg.Limits.AccessTokenLifetime))
+	}
+	if alreadyRedeemed.IssuedRefreshTokenHash != nil {
+		_ = s.deps.Grants.RevokeRefreshToken(ctx, *alreadyRedeemed.IssuedRefreshTokenHash)
+	}
+}
+
+// issueOptionalIDToken issues an ID token and records it onto result
+// when redeemed's granted scope includes "openid" — a no-op otherwise.
+// Split out of ExchangeAuthorizationCode purely to keep that method's
+// own cognitive complexity manageable.
+func (s *Server) issueOptionalIDToken(ctx context.Context, client storage.RegisteredClient, redeemed storage.RedeemedAuthorizationCode, accessToken string, result *TokenResult) *Error {
+	if !containsScope(redeemed.Scope, "openid") {
+		return nil
+	}
+	idTokenClaims, err := s.withIdentityClaims(ctx, redeemed.Subject, redeemed.RequestedIDTokenClaims, redeemed.TokenClaims)
+	if err != nil {
+		return newError(ErrorServerError, 500, "failed to resolve identity claims", err)
+	}
+	idToken, err := s.issueIDToken(ctx, client, identityAssertion{
+		Subject: redeemed.Subject, AuthTime: redeemed.AuthTime, ACR: redeemed.ACR, AMR: redeemed.AMR, TokenClaims: idTokenClaims,
+	}, redeemed.Nonce, accessToken)
+	if err != nil {
+		return newError(ErrorServerError, 500, "failed to issue ID token", err)
+	}
+	result.IDToken = fapi.NewSecret(idToken)
+	result.HasIDToken = true
+	return nil
+}
+
+// issueOptionalRefreshToken issues a refresh token and records it onto
+// result when redeemed's granted scope includes "offline_access" — a
+// no-op otherwise. Split out of ExchangeAuthorizationCode for the same
+// reason issueOptionalIDToken is.
+func (s *Server) issueOptionalRefreshToken(ctx context.Context, client storage.RegisteredClient, redeemed storage.RedeemedAuthorizationCode, thumbprint string, codeHash [32]byte, now time.Time, result *TokenResult) *Error {
+	if !containsScope(redeemed.Scope, "offline_access") {
+		return nil
+	}
+	refreshToken, err := s.issueRefreshToken(ctx, client.ID(), identityAssertion{
+		Subject: redeemed.Subject, AuthTime: redeemed.AuthTime, ACR: redeemed.ACR, AMR: redeemed.AMR, TokenClaims: redeemed.TokenClaims,
+	}, redeemed.Scope, redeemed.AuthorizationDetails, thumbprint, redeemed.RequestedIDTokenClaims, redeemed.RequestedUserinfoClaims)
+	if err != nil {
+		return newError(ErrorServerError, 500, "failed to issue refresh token", err)
+	}
+	// Recomputed rather than threaded through issueRefreshToken's
+	// return: the caller already gets the raw value back, and this
+	// is the exact same hash CreateRefreshToken itself used to key
+	// the stored record — see RecordIssuedRefreshToken's own doc
+	// comment for why this association is recorded at all.
+	refreshTokenHash := sha256.Sum256([]byte(refreshToken))
+	_ = s.deps.Grants.RecordIssuedRefreshToken(ctx, codeHash, refreshTokenHash, now.Add(s.cfg.Limits.RefreshTokenLifetime))
+	result.RefreshToken = fapi.NewSecret(refreshToken)
+	result.HasRefreshToken = true
+	return nil
 }
 
 // resolveDPoPProof reduces proofs — a request's own DPoPProofs field —

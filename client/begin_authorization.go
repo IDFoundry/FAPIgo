@@ -353,45 +353,67 @@ func (c *Client) buildPushedRequestForm(ctx context.Context, now time.Time, para
 	}
 
 	if c.cfg.Profile != ProfileFAPISecurityWithMessageSigning {
-		// Copy params into form (never mutate the caller's own params
-		// map — pushAuthorizationRequestWithDPoPProof's own DPoP-nonce
-		// retry calls this twice with the *same* params map, so writing
-		// an extension's value back into params here would make the
-		// second call see its own first-attempt value already present
-		// and misreport it as a "core parameter" collision).
-		for k, v := range params {
-			form[k] = v
-		}
-		for name, raw := range snapshot {
-			if _, reserved := params[name]; reserved {
-				return nil, nil, newError(ErrorInvalidRequest, fmt.Sprintf("extension parameter %q collides with a core parameter name", name), nil)
-			}
-			// A plain top-level parameter has no way to represent
-			// anything but a bare string — unlike the signing path
-			// below, which embeds raw straight into the request
-			// object's JSON and so preserves any shape. Only a value
-			// that is itself a bare JSON string round-trips here
-			// without loss; anything else must go through the signing
-			// profile instead of being silently flattened.
-			var value string
-			if err := json.Unmarshal(raw, &value); err != nil {
-				return nil, nil, newError(ErrorInvalidRequest,
-					fmt.Sprintf("extension parameter %q is not a plain string; non-string extension values require ProfileFAPISecurityWithMessageSigning", name), nil)
-			}
-			form[name] = value
-		}
-		if authorizationDetailsRaw != nil {
-			// RFC 9396 §5: unlike an extension.Definition value, a plain
-			// "authorization_details" parameter's value is itself JSON
-			// array text — this is the one plain parameter this package
-			// sends un-stringified, so it round-trips through
-			// checkRAR/RARRegistry.Parse identically to the signed-object
-			// path below, regardless of Config.Profile.
-			form[authorizationDetailsParameter] = string(authorizationDetailsRaw)
+		if idErr := populatePlainPushedRequestForm(form, params, snapshot, authorizationDetailsRaw); idErr != nil {
+			return nil, nil, idErr
 		}
 		return form, headers, nil
 	}
 
+	if idErr := c.signPushedRequestForm(ctx, now, form, params, snapshot, authorizationDetailsRaw); idErr != nil {
+		return nil, nil, idErr
+	}
+	return form, headers, nil
+}
+
+// populatePlainPushedRequestForm fills form with params and snapshot for
+// a plain (non-message-signing) PAR request — split out of
+// buildPushedRequestForm purely to keep that function's own cognitive
+// complexity manageable.
+func populatePlainPushedRequestForm(form, params map[string]string, snapshot map[string]json.RawMessage, authorizationDetailsRaw json.RawMessage) *Error {
+	// Copy params into form (never mutate the caller's own params
+	// map — pushAuthorizationRequestWithDPoPProof's own DPoP-nonce
+	// retry calls this twice with the *same* params map, so writing
+	// an extension's value back into params here would make the
+	// second call see its own first-attempt value already present
+	// and misreport it as a "core parameter" collision).
+	for k, v := range params {
+		form[k] = v
+	}
+	for name, raw := range snapshot {
+		if _, reserved := params[name]; reserved {
+			return newError(ErrorInvalidRequest, fmt.Sprintf("extension parameter %q collides with a core parameter name", name), nil)
+		}
+		// A plain top-level parameter has no way to represent
+		// anything but a bare string — unlike the signing path
+		// below, which embeds raw straight into the request
+		// object's JSON and so preserves any shape. Only a value
+		// that is itself a bare JSON string round-trips here
+		// without loss; anything else must go through the signing
+		// profile instead of being silently flattened.
+		var value string
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return newError(ErrorInvalidRequest,
+				fmt.Sprintf("extension parameter %q is not a plain string; non-string extension values require ProfileFAPISecurityWithMessageSigning", name), nil)
+		}
+		form[name] = value
+	}
+	if authorizationDetailsRaw != nil {
+		// RFC 9396 §5: unlike an extension.Definition value, a plain
+		// "authorization_details" parameter's value is itself JSON
+		// array text — this is the one plain parameter this package
+		// sends un-stringified, so it round-trips through
+		// checkRAR/RARRegistry.Parse identically to the signed-object
+		// path below, regardless of Config.Profile.
+		form[authorizationDetailsParameter] = string(authorizationDetailsRaw)
+	}
+	return nil
+}
+
+// signPushedRequestForm builds and signs a request object embedding
+// params/snapshot/authorizationDetailsRaw, storing it under form's
+// "request" key — split out of buildPushedRequestForm for the same
+// reason populatePlainPushedRequestForm is.
+func (c *Client) signPushedRequestForm(ctx context.Context, now time.Time, form, params map[string]string, snapshot map[string]json.RawMessage, authorizationDetailsRaw json.RawMessage) *Error {
 	objectParams := make(map[string]json.RawMessage, len(params)+len(snapshot)+1)
 	for k, v := range params {
 		encoded, _ := json.Marshal(v) // marshaling a string cannot fail
@@ -400,7 +422,7 @@ func (c *Client) buildPushedRequestForm(ctx context.Context, now time.Time, para
 
 	for name, raw := range snapshot {
 		if _, reserved := objectParams[name]; reserved {
-			return nil, nil, newError(ErrorInvalidRequest, fmt.Sprintf("extension parameter %q collides with a core parameter name", name), nil)
+			return newError(ErrorInvalidRequest, fmt.Sprintf("extension parameter %q collides with a core parameter name", name), nil)
 		}
 		objectParams[name] = raw
 	}
@@ -411,7 +433,7 @@ func (c *Client) buildPushedRequestForm(ctx context.Context, now time.Time, para
 
 	objectSigner, objectKID, err := c.newSigner(ctx, keys.RequestObjectSigning, c.cfg.Algorithms.RequestObject)
 	if err != nil {
-		return nil, nil, newError(ErrorInternal, "failed to resolve request object signing key", err)
+		return newError(ErrorInternal, "failed to resolve request object signing key", err)
 	}
 	object, err := requestobject.Create(requestobject.CreateParams{
 		Signer: objectSigner, Algorithm: c.cfg.Algorithms.RequestObject, KeyID: objectKID,
@@ -420,10 +442,10 @@ func (c *Client) buildPushedRequestForm(ctx context.Context, now time.Time, para
 		Parameters: objectParams,
 	})
 	if err != nil {
-		return nil, nil, newError(ErrorInternal, "failed to build request object", err)
+		return newError(ErrorInternal, "failed to build request object", err)
 	}
 	form["request"] = object
-	return form, headers, nil
+	return nil
 }
 
 // parErrorFromResponse maps a non-success PAR (or token-endpoint) HTTP

@@ -81,6 +81,12 @@ jobs:
             name: FuzzParseAccessToken
           - pkg: ./internal/token
             name: FuzzParseIDToken
+          - pkg: ./extension
+            name: FuzzRARRegistryParse
+          - pkg: ./internal/par
+            name: FuzzDecodeResult
+          - pkg: ./internal/par
+            name: FuzzDecodeErrorResponse
     steps:
       - uses: actions/checkout@v7
 

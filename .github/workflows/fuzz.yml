@@ -59,6 +59,8 @@ jobs:
             name: FuzzParseHistoricalKeysResponse
           - pkg: ./internal/federation
             name: FuzzParseTrustMarkStatusResponse
+          - pkg: ./internal/jwe
+            name: FuzzDecrypt
     steps:
       - uses: actions/checkout@v7
 

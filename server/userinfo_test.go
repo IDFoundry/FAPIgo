@@ -140,6 +140,35 @@ func TestSignUserInfoResponseProducesVerifiableJWS(t *testing.T) {
 	if claims["sub"] != "user-1" || claims["email"] != "user-1@example.com" {
 		t.Fatalf("claims = %v, want sub=user-1 email=user-1@example.com", claims)
 	}
+	// OIDC Core §5.3.2: "If signed, the UserInfo Response MUST contain
+	// the Claims iss (issuer) and aud (audience) as members" —
+	// SignUserInfoResponse adds these itself, not left to the caller.
+	if claims["iss"] != testIssuer {
+		t.Fatalf(`claims["iss"] = %q, want %q`, claims["iss"], testIssuer)
+	}
+	if claims["aud"] != testClientID.String() {
+		t.Fatalf(`claims["aud"] = %q, want %q`, claims["aud"], testClientID.String())
+	}
+}
+
+// TestSignUserInfoResponseRejectsReservedClaims confirms a caller
+// cannot override iss/aud by setting them in its own claims map —
+// SignUserInfoResponse owns those two, the same reserved-claim
+// discipline IssueIDToken/IssueAccessToken already apply.
+func TestSignUserInfoResponseRejectsReservedClaims(t *testing.T) {
+	h, client := newHarnessWithUserInfo(t, nil, nil, 0, 0, nil)
+
+	for _, reserved := range []string{"iss", "aud"} {
+		claims := testUserInfoClaims(t)
+		v, err := json.Marshal("attacker-supplied-value")
+		if err != nil {
+			t.Fatalf("json.Marshal: %v", err)
+		}
+		claims[reserved] = v
+		if _, srvErr := h.server.SignUserInfoResponse(context.Background(), client, claims); srvErr == nil {
+			t.Fatalf("SignUserInfoResponse(claims setting %q) = nil error, want error", reserved)
+		}
+	}
 }
 
 // TestSignUserInfoResponseEncryptsWhenClientRegistered confirms that

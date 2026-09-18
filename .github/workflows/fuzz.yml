@@ -61,6 +61,16 @@ jobs:
             name: FuzzParseTrustMarkStatusResponse
           - pkg: ./internal/jwe
             name: FuzzDecrypt
+          - pkg: ./internal/requestobject
+            name: FuzzParseRequestObject
+          - pkg: ./internal/dpop
+            name: FuzzVerifyDPoPProof
+          - pkg: ./internal/clientassertion
+            name: FuzzParseClientAssertion
+          - pkg: ./internal/clientattestation
+            name: FuzzParseClientAttestation
+          - pkg: ./internal/clientattestation
+            name: FuzzParsePoP
     steps:
       - uses: actions/checkout@v7
 

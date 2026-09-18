@@ -79,16 +79,17 @@ func newHarnessWithClientAuthSelfSignedTLS(t *testing.T) (harness, *x509.Certifi
 	}
 	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
 	deps := server.Dependencies{
-		Clients:      &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
-		Transactions: &fakeTransactionStore{},
-		Grants:       &fakeGrantStore{},
-		Replay:       &fakeReplayStore{},
-		ClientKeys:   &fakeClientKeySource{},
-		Keys:         serverKeyManager,
-		AccessTokens: server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
-		Revocation:   &fakeRevocationSink{},
-		Clock:        fixedClock{now: now},
-		Random:       rand.Reader,
+		Clients:                &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
+		Transactions:           &fakeTransactionStore{},
+		Grants:                 &fakeGrantStore{},
+		Replay:                 &fakeReplayStore{},
+		ClientKeys:             &fakeClientKeySource{},
+		Keys:                   serverKeyManager,
+		AccessTokens:           server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:             &fakeRevocationSink{},
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		Clock:                  fixedClock{now: now},
+		Random:                 rand.Reader,
 	}
 
 	srv, err := server.New(cfg, deps)
@@ -162,16 +163,17 @@ func newHarnessWithClientAuthTLSSubjectDNValue(t *testing.T, cert *x509.Certific
 	}
 	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
 	deps := server.Dependencies{
-		Clients:      &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
-		Transactions: &fakeTransactionStore{},
-		Grants:       &fakeGrantStore{},
-		Replay:       &fakeReplayStore{},
-		ClientKeys:   &fakeClientKeySource{},
-		Keys:         serverKeyManager,
-		AccessTokens: server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
-		Revocation:   &fakeRevocationSink{},
-		Clock:        fixedClock{now: now},
-		Random:       rand.Reader,
+		Clients:                &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
+		Transactions:           &fakeTransactionStore{},
+		Grants:                 &fakeGrantStore{},
+		Replay:                 &fakeReplayStore{},
+		ClientKeys:             &fakeClientKeySource{},
+		Keys:                   serverKeyManager,
+		AccessTokens:           server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:             &fakeRevocationSink{},
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		Clock:                  fixedClock{now: now},
+		Random:                 rand.Reader,
 	}
 
 	srv, err := server.New(cfg, deps)
@@ -247,16 +249,17 @@ func newHarnessWithClientAuthTLSSAN(t *testing.T, method storage.ClientAuthMetho
 	}
 	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
 	deps := server.Dependencies{
-		Clients:      &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
-		Transactions: &fakeTransactionStore{},
-		Grants:       &fakeGrantStore{},
-		Replay:       &fakeReplayStore{},
-		ClientKeys:   &fakeClientKeySource{},
-		Keys:         serverKeyManager,
-		AccessTokens: server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
-		Revocation:   &fakeRevocationSink{},
-		Clock:        fixedClock{now: now},
-		Random:       rand.Reader,
+		Clients:                &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
+		Transactions:           &fakeTransactionStore{},
+		Grants:                 &fakeGrantStore{},
+		Replay:                 &fakeReplayStore{},
+		ClientKeys:             &fakeClientKeySource{},
+		Keys:                   serverKeyManager,
+		AccessTokens:           server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:             &fakeRevocationSink{},
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		Clock:                  fixedClock{now: now},
+		Random:                 rand.Reader,
 	}
 
 	srv, err := server.New(srvCfg, deps)
@@ -643,18 +646,19 @@ func TestBeginBackchannelAuthenticationCertClientAuthReachesPeerCertificate(t *t
 	}
 	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
 	deps := server.Dependencies{
-		Clients:             &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
-		Transactions:        &fakeTransactionStore{},
-		Grants:              &fakeGrantStore{},
-		Replay:              &fakeReplayStore{},
-		ClientKeys:          &fakeClientKeySource{},
-		Keys:                serverKeyManager,
-		AccessTokens:        server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
-		Revocation:          server.NoRevocation{},
-		Clock:               fixedClock{now: now},
-		Random:              rand.Reader,
-		Backchannel:         memstore.NewBackchannelAuthenticationStore(),
-		BackchannelNotifier: server.NoBackchannelNotifications{},
+		Clients:                &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
+		Transactions:           &fakeTransactionStore{},
+		Grants:                 &fakeGrantStore{},
+		Replay:                 &fakeReplayStore{},
+		ClientKeys:             &fakeClientKeySource{},
+		Keys:                   serverKeyManager,
+		AccessTokens:           server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:             server.NoRevocation{},
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		Clock:                  fixedClock{now: now},
+		Random:                 rand.Reader,
+		Backchannel:            memstore.NewBackchannelAuthenticationStore(),
+		BackchannelNotifier:    server.NoBackchannelNotifications{},
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {
@@ -756,16 +760,17 @@ func newHarnessWithClientAuthMTLSAndDPoP(t *testing.T) (harness, *x509.Certifica
 	}
 	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
 	deps := server.Dependencies{
-		Clients:      &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
-		Transactions: &fakeTransactionStore{},
-		Grants:       &fakeGrantStore{},
-		Replay:       &fakeReplayStore{},
-		ClientKeys:   &fakeClientKeySource{},
-		Keys:         serverKeyManager,
-		AccessTokens: server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
-		Revocation:   &fakeRevocationSink{},
-		Clock:        fixedClock{now: now},
-		Random:       rand.Reader,
+		Clients:                &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
+		Transactions:           &fakeTransactionStore{},
+		Grants:                 &fakeGrantStore{},
+		Replay:                 &fakeReplayStore{},
+		ClientKeys:             &fakeClientKeySource{},
+		Keys:                   serverKeyManager,
+		AccessTokens:           server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:             &fakeRevocationSink{},
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		Clock:                  fixedClock{now: now},
+		Random:                 rand.Reader,
 	}
 
 	srv, err := server.New(cfg, deps)

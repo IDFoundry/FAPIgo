@@ -58,8 +58,9 @@ func testCA(t *testing.T) (*x509.Certificate, *ecdsa.PrivateKey, *x509.CertPool)
 // caSignedTestClientCertWithSAN mirrors selfSignedTestClientCertWithSAN
 // (mtls_test.go) exactly, except the resulting certificate is signed by
 // caCert/caKey (testCA) rather than being self-signed — for exercising
-// Dependencies.MTLSClientCAs' chain-trust check, which a self-signed
-// certificate can never satisfy against an independent CA pool.
+// Dependencies.ClientCertificateTrust's TrustedClientCAs chain-trust
+// check, which a self-signed certificate can never satisfy against an
+// independent CA pool.
 func caSignedTestClientCertWithSAN(t *testing.T, caCert *x509.Certificate, caKey *ecdsa.PrivateKey, mutate func(*x509.Certificate)) *x509.Certificate {
 	t.Helper()
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -92,7 +93,7 @@ func caSignedTestClientCertWithSAN(t *testing.T, caCert *x509.Certificate, caKey
 
 // newHarnessWithClientAuthTLSSubjectDNAndCAs mirrors
 // newHarnessWithClientAuthTLSSubjectDNValue exactly, but also sets
-// Dependencies.MTLSClientCAs to roots.
+// Dependencies.ClientCertificateTrust to server.TrustedClientCAs{Roots: roots}.
 func newHarnessWithClientAuthTLSSubjectDNAndCAs(t *testing.T, cert *x509.Certificate, expectedSubjectDN string, roots *x509.CertPool) harness {
 	t.Helper()
 	now := time.Now()
@@ -142,17 +143,17 @@ func newHarnessWithClientAuthTLSSubjectDNAndCAs(t *testing.T, cert *x509.Certifi
 	}
 	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
 	deps := server.Dependencies{
-		Clients:       &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
-		Transactions:  &fakeTransactionStore{},
-		Grants:        &fakeGrantStore{},
-		Replay:        &fakeReplayStore{},
-		ClientKeys:    &fakeClientKeySource{},
-		Keys:          serverKeyManager,
-		AccessTokens:  server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
-		Revocation:    &fakeRevocationSink{},
-		Clock:         fixedClock{now: now},
-		Random:        rand.Reader,
-		MTLSClientCAs: roots,
+		Clients:                &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
+		Transactions:           &fakeTransactionStore{},
+		Grants:                 &fakeGrantStore{},
+		Replay:                 &fakeReplayStore{},
+		ClientKeys:             &fakeClientKeySource{},
+		Keys:                   serverKeyManager,
+		AccessTokens:           server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:             &fakeRevocationSink{},
+		Clock:                  fixedClock{now: now},
+		Random:                 rand.Reader,
+		ClientCertificateTrust: server.TrustedClientCAs{Roots: roots},
 	}
 
 	srv, err := server.New(cfg, deps)
@@ -163,7 +164,8 @@ func newHarnessWithClientAuthTLSSubjectDNAndCAs(t *testing.T, cert *x509.Certifi
 }
 
 // newHarnessWithClientAuthTLSSANAndCAs mirrors newHarnessWithClientAuthTLSSAN
-// exactly, but also sets Dependencies.MTLSClientCAs to roots.
+// exactly, but also sets Dependencies.ClientCertificateTrust to
+// server.TrustedClientCAs{Roots: roots}.
 func newHarnessWithClientAuthTLSSANAndCAs(t *testing.T, method storage.ClientAuthMethod, registeredValue string, certSAN func(*x509.Certificate), roots *x509.CertPool) (harness, *x509.Certificate) {
 	t.Helper()
 	now := time.Now()
@@ -224,17 +226,17 @@ func newHarnessWithClientAuthTLSSANAndCAs(t *testing.T, method storage.ClientAut
 	}
 	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
 	deps := server.Dependencies{
-		Clients:       &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
-		Transactions:  &fakeTransactionStore{},
-		Grants:        &fakeGrantStore{},
-		Replay:        &fakeReplayStore{},
-		ClientKeys:    &fakeClientKeySource{},
-		Keys:          serverKeyManager,
-		AccessTokens:  server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
-		Revocation:    &fakeRevocationSink{},
-		Clock:         fixedClock{now: now},
-		Random:        rand.Reader,
-		MTLSClientCAs: roots,
+		Clients:                &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
+		Transactions:           &fakeTransactionStore{},
+		Grants:                 &fakeGrantStore{},
+		Replay:                 &fakeReplayStore{},
+		ClientKeys:             &fakeClientKeySource{},
+		Keys:                   serverKeyManager,
+		AccessTokens:           server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:             &fakeRevocationSink{},
+		Clock:                  fixedClock{now: now},
+		Random:                 rand.Reader,
+		ClientCertificateTrust: server.TrustedClientCAs{Roots: roots},
 	}
 
 	srv, err := server.New(srvCfg, deps)
@@ -244,13 +246,14 @@ func newHarnessWithClientAuthTLSSANAndCAs(t *testing.T, method storage.ClientAut
 	return harness{server: srv, serverKey: serverKey, now: now}, cert
 }
 
-// TestPushAuthorizationRequestTLSClientAuthSANRejectsUntrustedChainWhenMTLSClientCAsSet
+// TestPushAuthorizationRequestTLSClientAuthSANRejectsUntrustedChainWhenTrustedClientCAsSet
 // covers all four SAN-based ClientAuthMethodTLSClientAuthSAN* variants'
 // own chain-trust check: a certificate whose SAN entry matches the
-// registration but that doesn't chain to MTLSClientCAs must still be
-// rejected, mirroring TestPushAuthorizationRequestTLSClientAuthRejectsUntrustedChainWhenMTLSClientCAsSet
+// registration but that doesn't chain to the configured TrustedClientCAs
+// must still be rejected, mirroring
+// TestPushAuthorizationRequestTLSClientAuthRejectsUntrustedChainWhenTrustedClientCAsSet
 // for the plain subject-DN method.
-func TestPushAuthorizationRequestTLSClientAuthSANRejectsUntrustedChainWhenMTLSClientCAsSet(t *testing.T) {
+func TestPushAuthorizationRequestTLSClientAuthSANRejectsUntrustedChainWhenTrustedClientCAsSet(t *testing.T) {
 	cases := []struct {
 		name   string
 		method storage.ClientAuthMethod
@@ -298,11 +301,11 @@ func TestPushAuthorizationRequestTLSClientAuthSANRejectsUntrustedChainWhenMTLSCl
 	}
 }
 
-func TestPushAuthorizationRequestTLSClientAuthRejectsUntrustedChainWhenMTLSClientCAsSet(t *testing.T) {
+func TestPushAuthorizationRequestTLSClientAuthRejectsUntrustedChainWhenTrustedClientCAsSet(t *testing.T) {
 	_, _, roots := testCA(t)
 	// Self-signed, not issued by the CA in roots — subject matches, but
 	// the chain doesn't, so this must be rejected even though the exact
-	// same certificate would pass with MTLSClientCAs unset (see
+	// same certificate would pass with NoClientCertificateChainTrust{} (see
 	// TestPushAuthorizationRequestTLSClientAuthSuccess).
 	cert := selfSignedTestClientCert(t)
 	h := newHarnessWithClientAuthTLSSubjectDNAndCAs(t, cert, cert.Subject.String(), roots)
@@ -319,7 +322,7 @@ func TestPushAuthorizationRequestTLSClientAuthRejectsUntrustedChainWhenMTLSClien
 	}
 }
 
-func TestPushAuthorizationRequestTLSClientAuthAcceptsTrustedChainWhenMTLSClientCAsSet(t *testing.T) {
+func TestPushAuthorizationRequestTLSClientAuthAcceptsTrustedChainWhenTrustedClientCAsSet(t *testing.T) {
 	caCert, caKey, roots := testCA(t)
 	cert := caSignedTestClientCertWithSAN(t, caCert, caKey, func(*x509.Certificate) {})
 	h := newHarnessWithClientAuthTLSSubjectDNAndCAs(t, cert, cert.Subject.String(), roots)
@@ -332,12 +335,12 @@ func TestPushAuthorizationRequestTLSClientAuthAcceptsTrustedChainWhenMTLSClientC
 	}
 }
 
-// TestPushAuthorizationRequestSelfSignedTLSClientAuthUnaffectedByMTLSClientCAs
+// TestPushAuthorizationRequestSelfSignedTLSClientAuthUnaffectedByTrustedClientCAs
 // confirms ClientAuthMethodSelfSignedTLSClientAuth's thumbprint match
 // needs no chain trust: it must still succeed under a certificate that
-// cannot possibly verify against an unrelated MTLSClientCAs pool, per
-// MTLSClientCAs' own doc comment.
-func TestPushAuthorizationRequestSelfSignedTLSClientAuthUnaffectedByMTLSClientCAs(t *testing.T) {
+// cannot possibly verify against an unrelated TrustedClientCAs pool, per
+// TrustedClientCAs' own doc comment.
+func TestPushAuthorizationRequestSelfSignedTLSClientAuthUnaffectedByTrustedClientCAs(t *testing.T) {
 	_, _, roots := testCA(t)
 	now := time.Now()
 	serverKey := generateKey(t)
@@ -385,17 +388,17 @@ func TestPushAuthorizationRequestSelfSignedTLSClientAuthUnaffectedByMTLSClientCA
 	}
 	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
 	deps := server.Dependencies{
-		Clients:       &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
-		Transactions:  &fakeTransactionStore{},
-		Grants:        &fakeGrantStore{},
-		Replay:        &fakeReplayStore{},
-		ClientKeys:    &fakeClientKeySource{},
-		Keys:          serverKeyManager,
-		AccessTokens:  server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
-		Revocation:    &fakeRevocationSink{},
-		Clock:         fixedClock{now: now},
-		Random:        rand.Reader,
-		MTLSClientCAs: roots,
+		Clients:                &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
+		Transactions:           &fakeTransactionStore{},
+		Grants:                 &fakeGrantStore{},
+		Replay:                 &fakeReplayStore{},
+		ClientKeys:             &fakeClientKeySource{},
+		Keys:                   serverKeyManager,
+		AccessTokens:           server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:             &fakeRevocationSink{},
+		Clock:                  fixedClock{now: now},
+		Random:                 rand.Reader,
+		ClientCertificateTrust: server.TrustedClientCAs{Roots: roots},
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {

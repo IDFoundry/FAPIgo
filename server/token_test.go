@@ -640,12 +640,13 @@ func newHarnessWithOpaqueAccessTokens(t *testing.T, profile server.Profile, allo
 		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
 			testClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
 		}},
-		Keys:         &fakeKeyManager{key: serverKey, keyID: "as-key-1"},
-		AccessTokens: server.OpaqueAccessTokens{Store: store},
-		Revocation:   revocation,
-		Audit:        audit,
-		Clock:        fixedClock{now: now},
-		Random:       rand.Reader,
+		Keys:                   &fakeKeyManager{key: serverKey, keyID: "as-key-1"},
+		AccessTokens:           server.OpaqueAccessTokens{Store: store},
+		Revocation:             revocation,
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		Audit:                  audit,
+		Clock:                  fixedClock{now: now},
+		Random:                 rand.Reader,
 	}
 
 	srv, err := server.New(cfg, deps)

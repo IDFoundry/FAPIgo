@@ -86,13 +86,14 @@ func newHarnessWithUserInfo(t *testing.T, serverKeyManagement server.KeyManageme
 		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
 			testClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
 		}},
-		ClientEncryptionKeys: clientEncryptionKeys,
-		Keys:                 serverKeyManager,
-		AccessTokens:         server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
-		Revocation:           &fakeRevocationSink{},
-		Audit:                &fakeAuditSink{},
-		Clock:                fixedClock{now: now},
-		Random:               rand.Reader,
+		ClientEncryptionKeys:   clientEncryptionKeys,
+		Keys:                   serverKeyManager,
+		AccessTokens:           server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:             &fakeRevocationSink{},
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		Audit:                  &fakeAuditSink{},
+		Clock:                  fixedClock{now: now},
+		Random:                 rand.Reader,
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {

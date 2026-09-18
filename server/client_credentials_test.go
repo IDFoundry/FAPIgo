@@ -89,12 +89,13 @@ func newHarnessWithClientCredentialsGrant(t *testing.T, senderConstrain storage.
 		ClientKeys: &fakeClientKeySource{keysByClient: map[fapi.ClientID][]keys.VerificationKey{
 			testClientID: {{Algorithm: fapi.ES256, PublicKey: &key.PublicKey}},
 		}},
-		Keys:         serverKeyManager,
-		AccessTokens: server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
-		Revocation:   revocation,
-		Audit:        audit,
-		Clock:        fixedClock{now: now},
-		Random:       rand.Reader,
+		Keys:                   serverKeyManager,
+		AccessTokens:           server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:             revocation,
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		Audit:                  audit,
+		Clock:                  fixedClock{now: now},
+		Random:                 rand.Reader,
 	}
 
 	srv, err := server.New(cfg, deps)
@@ -218,6 +219,7 @@ func newHarnessWithClientCredentialsGrantAndRAR(t *testing.T, registry *extensio
 		Keys:                       serverKeyManager,
 		AccessTokens:               server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
 		Revocation:                 server.NoRevocation{},
+		ClientCertificateTrust:     server.NoClientCertificateChainTrust{},
 		Clock:                      fixedClock{now: now},
 		Random:                     rand.Reader,
 		ClientCredentialsRARPolicy: policy,

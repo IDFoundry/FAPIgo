@@ -348,17 +348,26 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 	}
 
 	srvDeps := server.Dependencies{
-		Clients:        clientRepo,
-		Transactions:   memstore.NewTransactionStore(),
-		Grants:         memstore.NewGrantStore(),
-		Replay:         replayStore,
-		ClientKeys:     clientKeys,
-		Keys:           keyManager,
-		AccessTokens:   srvAccessTokens,
-		Revocation:     revocationStore,
-		Clock:          server.SystemClock{},
-		Random:         rand.Reader,
-		IdentityClaims: identityClaims,
+		Clients:      clientRepo,
+		Transactions: memstore.NewTransactionStore(),
+		Grants:       memstore.NewGrantStore(),
+		Replay:       replayStore,
+		ClientKeys:   clientKeys,
+		Keys:         keyManager,
+		AccessTokens: srvAccessTokens,
+		Revocation:   revocationStore,
+		// This binary's mTLS listener (see newMTLSServer in main.go) only
+		// requests a client certificate (tls.RequestClientCert); it never
+		// verifies the chain itself, and this binary stands up no CA
+		// trust store of its own to verify against — see config.go's own
+		// top-of-file doc comment. NoClientCertificateChainTrust{} makes
+		// that pre-existing, deliberate limitation an explicit, visible
+		// choice instead of an implicit one: a real tls_client_auth
+		// deployment would pass TrustedClientCAs{Roots: ...} here instead.
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		Clock:                  server.SystemClock{},
+		Random:                 rand.Reader,
+		IdentityClaims:         identityClaims,
 		// Inert unless a request actually sends authorization_details,
 		// same as RAR itself (srvCfg.RAR above) — see sampleRARPolicy's
 		// own doc comment for why this reference binary always grants

@@ -328,19 +328,23 @@ so by default chain trust can only come from whichever
 configures before a request ever reaches this library — a
 `RegisteredClientConfig` entry authenticates a client's identity claim,
 not its certificate's trustworthiness, unless something else also
-checks the chain. `server.Dependencies.MTLSClientCAs` (optional) is
-that something for `server`: when set, `authenticateClientViaCertificate`
-independently re-verifies the presented certificate against it before
-any subject/SAN field-match, for deployments that can't rely on their
-own TLS termination alone — e.g. mTLS terminated by a gateway in front
-of this process that forwards the presented certificate without having
-verified its chain itself. `resource` has no equivalent field; a
-protected-resource deployment still depends entirely on its own TLS
-termination for chain trust. `cmd/conformance-as` makes the
-unconfigured case concrete: its listener sets `tls.RequestClientCert`
-with no `ClientCAs`, and it doesn't set `MTLSClientCAs` either, so that
-reference binary performs zero chain verification — a production
-deployment must configure one or the other in its own adapter.
+checks the chain. `server.Dependencies.ClientCertificateTrust` (required
+— no default) is that something for `server`:
+`server.TrustedClientCAs{Roots: ...}` has `authenticateClientViaCertificate`
+independently re-verify the presented certificate before any subject/SAN
+field-match, for deployments that can't rely on their own TLS
+termination alone — e.g. mTLS terminated by a gateway in front of this
+process that forwards the presented certificate without having verified
+its chain itself; `server.NoClientCertificateChainTrust{}` explicitly
+declines, the same "conscious, visible choice, not a silent default"
+pattern `NoRevocation{}` uses for `Dependencies.Revocation`. `resource`
+has no equivalent field; a protected-resource deployment still depends
+entirely on its own TLS termination for chain trust. `cmd/conformance-as`
+makes the unconfigured case concrete: its listener sets
+`tls.RequestClientCert` with no `ClientCAs`, and its wiring passes
+`server.NoClientCertificateChainTrust{}`, so that reference binary
+performs zero chain verification — a production deployment must
+configure one or the other in its own adapter.
 
 **Opaque identifiers.** `PushAuthorizationResult.RequestURI` and the
 `InteractionHandle` handed to the embedding application's login UI have

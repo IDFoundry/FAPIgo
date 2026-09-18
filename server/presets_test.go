@@ -45,16 +45,17 @@ func TestRecommendedPresetsProduceAWorkingServer(t *testing.T) {
 	}
 
 	deps := server.Dependencies{
-		Clients:      memstore.NewClientRepository(nil),
-		Transactions: memstore.NewTransactionStore(),
-		Grants:       memstore.NewGrantStore(),
-		Replay:       memstore.NewReplayStore(),
-		ClientKeys:   clientKeys,
-		Keys:         keyManager,
-		AccessTokens: server.JWTAccessTokens{Keys: keyManager, Algorithm: fapi.ES256},
-		Revocation:   memstore.NewRevocationStore(),
-		Clock:        server.SystemClock{},
-		Random:       rand.Reader,
+		Clients:                memstore.NewClientRepository(nil),
+		Transactions:           memstore.NewTransactionStore(),
+		Grants:                 memstore.NewGrantStore(),
+		Replay:                 memstore.NewReplayStore(),
+		ClientKeys:             clientKeys,
+		Keys:                   keyManager,
+		AccessTokens:           server.JWTAccessTokens{Keys: keyManager, Algorithm: fapi.ES256},
+		Revocation:             memstore.NewRevocationStore(),
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		Clock:                  server.SystemClock{},
+		Random:                 rand.Reader,
 	}
 
 	srv, err := server.New(cfg, deps)
@@ -101,16 +102,17 @@ func TestRecommendedAlgorithmsWorksUnderMessageSigning(t *testing.T) {
 	}
 
 	deps := server.Dependencies{
-		Clients:      memstore.NewClientRepository(nil),
-		Transactions: memstore.NewTransactionStore(),
-		Grants:       memstore.NewGrantStore(),
-		Replay:       memstore.NewReplayStore(),
-		ClientKeys:   clientKeys,
-		Keys:         keyManager,
-		AccessTokens: server.JWTAccessTokens{Keys: keyManager, Algorithm: fapi.ES256},
-		Revocation:   memstore.NewRevocationStore(),
-		Clock:        server.SystemClock{},
-		Random:       rand.Reader,
+		Clients:                memstore.NewClientRepository(nil),
+		Transactions:           memstore.NewTransactionStore(),
+		Grants:                 memstore.NewGrantStore(),
+		Replay:                 memstore.NewReplayStore(),
+		ClientKeys:             clientKeys,
+		Keys:                   keyManager,
+		AccessTokens:           server.JWTAccessTokens{Keys: keyManager, Algorithm: fapi.ES256},
+		Revocation:             memstore.NewRevocationStore(),
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		Clock:                  server.SystemClock{},
+		Random:                 rand.Reader,
 	}
 
 	if _, err := server.New(cfg, deps); err != nil {

@@ -57,18 +57,19 @@ const (
 	// match by itself proves nothing about who issued the certificate —
 	// any self-signed certificate whose subject an attacker chooses to
 	// match a registered value would pass unless something also checks
-	// the certificate's chain. server.Dependencies.MTLSClientCAs is that
-	// something: when set, this server independently verifies the
-	// presented certificate against it before ever comparing subject/SAN
-	// fields, for every ClientAuthMethodTLSClientAuth*/SAN* method (not
+	// the certificate's chain. server.Dependencies.ClientCertificateTrust
+	// is that something: server.TrustedClientCAs{...} has this server
+	// independently verify the presented certificate before ever
+	// comparing subject/SAN fields, for every
+	// ClientAuthMethodTLSClientAuth*/SAN* method (not
 	// ClientAuthMethodSelfSignedTLSClientAuth, which needs no chain
-	// trust). Leaving it unset relies entirely on the deployment's own
-	// TLS termination to have already required and verified the chain
-	// (tls.Config.ClientAuth: RequireAndVerifyClientCert or
-	// VerifyClientCertIfGiven, with ClientCAs set) before this server
-	// ever sees the request — get that wrong, on either side, and any
-	// self-signed certificate with a matching subject/SAN is accepted as
-	// this client.
+	// trust); server.NoClientCertificateChainTrust{} instead relies
+	// entirely on the deployment's own TLS termination to have already
+	// required and verified the chain (tls.Config.ClientAuth:
+	// RequireAndVerifyClientCert or VerifyClientCertIfGiven, with
+	// ClientCAs set) before this server ever sees the request — get that
+	// wrong, on either side, and any self-signed certificate with a
+	// matching subject/SAN is accepted as this client.
 	ClientAuthMethodTLSClientAuth
 
 	// ClientAuthMethodTLSClientAuthSANDNS authenticates by exact match

@@ -55,16 +55,17 @@ func validConfig(t *testing.T) server.Config {
 
 func validDependencies() server.Dependencies {
 	return server.Dependencies{
-		Clients:      &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{}},
-		Transactions: &fakeTransactionStore{},
-		Grants:       &fakeGrantStore{},
-		Replay:       &fakeReplayStore{},
-		ClientKeys:   &fakeClientKeySource{},
-		Keys:         &fakeKeyManager{},
-		AccessTokens: server.JWTAccessTokens{Keys: &fakeKeyManager{}, Algorithm: fapi.ES256},
-		Revocation:   server.NoRevocation{},
-		Clock:        fixedClock{now: time.Now()},
-		Random:       rand.Reader,
+		Clients:                &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{}},
+		Transactions:           &fakeTransactionStore{},
+		Grants:                 &fakeGrantStore{},
+		Replay:                 &fakeReplayStore{},
+		ClientKeys:             &fakeClientKeySource{},
+		Keys:                   &fakeKeyManager{},
+		AccessTokens:           server.JWTAccessTokens{Keys: &fakeKeyManager{}, Algorithm: fapi.ES256},
+		Revocation:             server.NoRevocation{},
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		Clock:                  fixedClock{now: time.Now()},
+		Random:                 rand.Reader,
 	}
 }
 

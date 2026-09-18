@@ -103,10 +103,8 @@ func matchesRegisteredSANEmail(cert *x509.Certificate, expected string) bool {
 
 // verifiesAgainstRoots reports whether cert chains to one of roots' trust
 // anchors for client authentication (crypto/x509.Certificate.Verify,
-// ExtKeyUsageClientAuth), consulted by authenticateClientViaCertificate
-// before any ClientAuthMethodTLSClientAuth/SAN* field-match when
-// Dependencies.MTLSClientCAs is set — see that field's own doc comment
-// for why (ClientAuthMethodSelfSignedTLSClientAuth needs no such check).
+// ExtKeyUsageClientAuth) — TrustedClientCAs.verifyChain's own
+// implementation.
 func verifiesAgainstRoots(cert *x509.Certificate, roots *x509.CertPool) bool {
 	_, err := cert.Verify(x509.VerifyOptions{
 		Roots:     roots,
@@ -168,8 +166,8 @@ func (s *Server) verifyClientCertificate(client storage.RegisteredClient, peerCe
 
 // verifyChainedFieldMatch is the shared shape 5 of
 // verifyClientCertificate's 6 ClientAuthMethod cases have: check
-// Dependencies.MTLSClientCAs (when set — see checkChainsToRoot's own
-// doc comment), then fieldMatched, the case's own already-computed
+// Dependencies.ClientCertificateTrust (see checkChainsToRoot's own doc
+// comment), then fieldMatched, the case's own already-computed
 // registered-field comparison.
 func (s *Server) verifyChainedFieldMatch(peerCert *x509.Certificate, fieldMatched bool) *Error {
 	if chainErr := s.checkChainsToRoot(peerCert); chainErr != nil {
@@ -181,12 +179,12 @@ func (s *Server) verifyChainedFieldMatch(peerCert *x509.Certificate, fieldMatche
 	return nil
 }
 
-// checkChainsToRoot enforces Dependencies.MTLSClientCAs, when set — see
+// checkChainsToRoot enforces Dependencies.ClientCertificateTrust — see
 // that field's own doc comment for why
 // ClientAuthMethodSelfSignedTLSClientAuth (checked before this is ever
 // called) needs no such check.
 func (s *Server) checkChainsToRoot(peerCert *x509.Certificate) *Error {
-	if s.deps.MTLSClientCAs != nil && !verifiesAgainstRoots(peerCert, s.deps.MTLSClientCAs) {
+	if !s.deps.ClientCertificateTrust.verifyChain(peerCert) {
 		return newError(ErrorInvalidClient, 401, "client certificate does not chain to a trusted root", nil)
 	}
 	return nil

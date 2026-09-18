@@ -27,6 +27,7 @@ type InteractionRequired struct {
 	Interaction InteractionRequest
 }
 
+// Discriminator for AuthorizationAction — deliberately empty.
 func (InteractionRequired) authorizationAction() {}
 
 // RedirectResponse means the caller should redirect the browser to
@@ -40,6 +41,7 @@ type RedirectResponse struct {
 	Destination fapi.URL
 }
 
+// Discriminator for AuthorizationAction — deliberately empty.
 func (RedirectResponse) authorizationAction() {}
 
 // LocalErrorResponse means the caller must render a local error rather
@@ -49,6 +51,7 @@ type LocalErrorResponse struct {
 	Error *Error
 }
 
+// Discriminator for AuthorizationAction — deliberately empty.
 func (LocalErrorResponse) authorizationAction() {}
 
 // BeginAuthorizationRequest is the input to Server.BeginAuthorization —

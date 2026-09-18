@@ -15,6 +15,7 @@ type authorizeResult struct {
 	grant   GrantedAuthorization
 }
 
+// Discriminator for InteractionResult — deliberately empty.
 func (authorizeResult) interactionResult() {}
 
 // Authorize records that subject authenticated (per auth) and the
@@ -27,6 +28,7 @@ type denyResult struct {
 	reason string
 }
 
+// Discriminator for InteractionResult — deliberately empty.
 func (denyResult) interactionResult() {}
 
 // Deny records that the resource owner (or the application, on their
@@ -41,6 +43,7 @@ type authenticationFailedResult struct {
 	reason string
 }
 
+// Discriminator for InteractionResult — deliberately empty.
 func (authenticationFailedResult) interactionResult() {}
 
 // AuthenticationFailed records that the resource owner could not be

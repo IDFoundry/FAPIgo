@@ -47,6 +47,10 @@ jobs:
             name: FuzzParseJWKSet
           - pkg: ./internal/canonical
             name: FuzzURI
+          - pkg: ./internal/federation
+            name: FuzzParseEntityStatement
+          - pkg: ./internal/federation
+            name: FuzzParseTrustMark
     steps:
       - uses: actions/checkout@v7
 

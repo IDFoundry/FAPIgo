@@ -71,8 +71,7 @@ type TokenSet struct {
 // Config's issuer, audience, algorithm, nonce and clock-skew policy,
 // exactly like Subject. Parameters holds every other claim the token
 // carried (custom identity claims, extension claims, etc.) — anything
-// not already surfaced as one of the named fields or implicitly
-// verified (iss, aud, nonce).
+// not already surfaced as one of the named fields.
 //
 // For an encrypted ID token, this is the only way to reach anything
 // beyond Subject at all: decryption happens entirely inside client, so
@@ -96,29 +95,47 @@ type IDTokenClaims struct {
 	// caller's own telemetry or cross-checks, not something this
 	// package enforces a bound on.
 	IssuedAt time.Time
+
+	// Issuer, Audience, Nonce and AZP are the token's "iss", "aud",
+	// "nonce" and "azp" claims — already validated against Config's
+	// issuer/audience/nonce policy during ExchangeCode (azp against
+	// Config's own client ID, when present). Exposed the same way
+	// IssuedAt is: for the caller's own telemetry, audit, and display —
+	// e.g. a multi-issuer relying party recording which issuer minted a
+	// given session's token — not for re-validation, which ExchangeCode
+	// has already done. Nonce and AZP are "" when the token carried
+	// neither.
+	Issuer   string
+	Audience []string
+	Nonce    string
+	AZP      string
 }
 
 // AsMap returns c's claims as a single map keyed by their JSON claim
-// names — Subject/ExpiresAt/IssuedAt/AuthTime/ACR/AMR merged into a
-// copy of Parameters — for a caller that wants the full validated
-// claim set as one document (display, logging, forwarding) instead of
-// re-deriving this merge by hand, which risks silently dropping one of
-// the typed fields (there is nothing about Parameters that reminds a
-// caller iat, say, needs to be re-added).
+// names — Subject/ExpiresAt/IssuedAt/AuthTime/ACR/AMR/Issuer/Audience/
+// Nonce/AZP merged into a copy of Parameters — for a caller that wants
+// the full validated claim set as one document (display, logging,
+// forwarding) instead of re-deriving this merge by hand, which risks
+// silently dropping one of the typed fields (there is nothing about
+// Parameters that reminds a caller iat, say, needs to be re-added).
 //
 // exp, iat and auth_time come back as Unix seconds, matching how OIDC
 // Core §2 actually defines these claims on the wire — not time.Time's
 // own JSON encoding, which would silently produce the wrong shape.
-// auth_time, acr and amr are omitted entirely when absent (AuthTime
-// zero, ACR "", AMR nil) rather than included as an empty value, the
-// same convention internal/token's own issuing side already uses when
-// producing these claims (see internal/token/issue.go).
+// auth_time, acr, amr, aud, nonce and azp are omitted entirely when
+// absent (AuthTime zero, ACR "", AMR nil, Audience empty, Nonce "",
+// AZP "") rather than included as an empty value, the same convention
+// internal/token's own issuing side already uses when producing these
+// claims (see internal/token/issue.go). iss is included unconditionally,
+// like sub/exp/iat — Validate requires it to be present and non-empty
+// for validation to succeed at all, so it is never legitimately absent
+// on a validated token.
 //
 // AsMap cannot fail: every Parameters value already round-tripped
 // through json.Unmarshal once when the token was first parsed, so
 // re-decoding it here into any is guaranteed to succeed.
 func (c IDTokenClaims) AsMap() map[string]any {
-	out := make(map[string]any, len(c.Parameters)+6)
+	out := make(map[string]any, len(c.Parameters)+10)
 	for k, v := range c.Parameters {
 		var val any
 		_ = json.Unmarshal(v, &val)
@@ -127,11 +144,21 @@ func (c IDTokenClaims) AsMap() map[string]any {
 	out["sub"] = c.Subject
 	out["exp"] = c.ExpiresAt.Unix()
 	out["iat"] = c.IssuedAt.Unix()
+	out["iss"] = c.Issuer
 	if !c.AuthTime.IsZero() {
 		out["auth_time"] = c.AuthTime.Unix()
 	}
 	if c.ACR != "" {
 		out["acr"] = c.ACR
+	}
+	if len(c.Audience) > 0 {
+		out["aud"] = c.Audience
+	}
+	if c.Nonce != "" {
+		out["nonce"] = c.Nonce
+	}
+	if c.AZP != "" {
+		out["azp"] = c.AZP
 	}
 	if len(c.AMR) > 0 {
 		out["amr"] = c.AMR
@@ -309,6 +336,8 @@ func (c *Client) populateIDToken(ctx context.Context, result *TokenSet, raw rawT
 		ACR: validated.ACR, AMR: validated.AMR,
 		Parameters: validated.Parameters, ExpiresAt: validated.ExpiresAt,
 		IssuedAt: validated.IssuedAt,
+		Issuer:   validated.Issuer, Audience: validated.Audience,
+		Nonce: validated.Nonce, AZP: validated.AZP,
 	}
 	return nil
 }

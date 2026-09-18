@@ -19,6 +19,10 @@ func TestIDTokenClaimsAsMapIncludesOptionalFieldsWhenPresent(t *testing.T) {
 		AuthTime:  authTime,
 		ACR:       "urn:mace:incommon:iap:silver",
 		AMR:       []string{"pwd", "otp"},
+		Issuer:    "https://as.example.com",
+		Audience:  []string{"client-123", "trusted-party"},
+		Nonce:     "opaque-nonce",
+		AZP:       "client-123",
 		Parameters: map[string]json.RawMessage{
 			"name":  json.RawMessage(`"Ada"`),
 			"email": json.RawMessage(`"ada@example.com"`),
@@ -34,6 +38,10 @@ func TestIDTokenClaimsAsMapIncludesOptionalFieldsWhenPresent(t *testing.T) {
 		"auth_time": authTime.Unix(),
 		"acr":       "urn:mace:incommon:iap:silver",
 		"amr":       []string{"pwd", "otp"},
+		"iss":       "https://as.example.com",
+		"aud":       []string{"client-123", "trusted-party"},
+		"nonce":     "opaque-nonce",
+		"azp":       "client-123",
 		"name":      "Ada",
 		"email":     "ada@example.com",
 	}
@@ -55,11 +63,15 @@ func TestIDTokenClaimsAsMapIncludesOptionalFieldsWhenPresent(t *testing.T) {
 }
 
 // TestIDTokenClaimsAsMapOmitsAbsentOptionalFields confirms auth_time,
-// acr and amr are left out entirely when the token never carried them
-// (AuthTime zero, ACR "", AMR nil) — not included as a zero/empty
-// value, which would misrepresent an absent claim as a present one
-// (auth_time: 0 in particular would read as "authenticated at the Unix
-// epoch", not "no auth_time claim at all").
+// acr, amr, aud, nonce and azp are left out entirely when the token
+// never carried them (AuthTime zero, ACR "", AMR nil, Audience empty,
+// Nonce "", AZP "") — not included as a zero/empty value, which would
+// misrepresent an absent claim as a present one (auth_time: 0 in
+// particular would read as "authenticated at the Unix epoch", not "no
+// auth_time claim at all"). iss is the one exception — it is never
+// legitimately absent on a validated token (see AsMap's own doc
+// comment), so it stays unconditional and is asserted present here
+// even though this fixture leaves it at its zero value.
 func TestIDTokenClaimsAsMapOmitsAbsentOptionalFields(t *testing.T) {
 	claims := client.IDTokenClaims{
 		Subject:    "user-1",
@@ -70,10 +82,13 @@ func TestIDTokenClaimsAsMapOmitsAbsentOptionalFields(t *testing.T) {
 
 	got := claims.AsMap()
 
-	for _, key := range []string{"auth_time", "acr", "amr"} {
+	for _, key := range []string{"auth_time", "acr", "amr", "aud", "nonce", "azp"} {
 		if _, ok := got[key]; ok {
 			t.Errorf("AsMap()[%q] = %v, want absent", key, got[key])
 		}
+	}
+	if _, ok := got["iss"]; !ok {
+		t.Errorf(`AsMap()["iss"] missing, want present (even as "")`)
 	}
 	if got["sub"] != "user-1" {
 		t.Errorf("AsMap()[sub] = %v, want user-1", got["sub"])

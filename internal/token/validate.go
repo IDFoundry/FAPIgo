@@ -294,6 +294,19 @@ type ValidatedIDToken struct {
 	// check). Exposed for a caller's own telemetry or cross-checks
 	// beyond that one bound.
 	IssuedAt time.Time
+
+	// Issuer, Audience, Nonce and AZP are the token's "iss", "aud",
+	// "nonce" and "azp" claims, already checked against
+	// policy.ExpectedIssuer/ExpectedAudience/TrustedAudiences/
+	// ExpectedNonce (and, for AZP, policy.ExpectedAudience — see
+	// Validate's own azp check) below. Exposed the same way IssuedAt
+	// is: for a caller's own telemetry, audit, or display, not for
+	// re-validation — Validate has already done that. Nonce and AZP are
+	// "" when the token carried neither.
+	Issuer   string
+	Audience []string
+	Nonce    string
+	AZP      string
 }
 
 // Validate checks t's signature against pub and its claims against
@@ -407,6 +420,10 @@ func (t IDToken) Validate(pub crypto.PublicKey, policy IDTokenValidatePolicy) (V
 		Parameters: c.Parameters,
 		ExpiresAt:  c.ExpiresAt,
 		IssuedAt:   c.IssuedAt,
+		Issuer:     c.Issuer,
+		Audience:   c.Audience,
+		Nonce:      c.Nonce,
+		AZP:        c.AZP,
 	}, nil
 }
 

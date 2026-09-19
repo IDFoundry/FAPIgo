@@ -349,6 +349,11 @@ func validateDependencies(cfg Config, deps Dependencies) error {
 	if deps.IssuerKeys == nil {
 		return fmt.Errorf("client: dependencies: issuer keys is required")
 	}
+	if cfg.Assurance == AssuranceProduction {
+		if err := checkKeySourceAssurance("issuer_keys", deps.IssuerKeys); err != nil {
+			return err
+		}
+	}
 	if deps.HTTP == nil {
 		return fmt.Errorf("client: dependencies: http is required")
 	}

@@ -3,6 +3,7 @@ package client
 import (
 	"fmt"
 
+	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -34,7 +35,12 @@ const (
 	// adequate, exactly like server's own rule. This does not verify
 	// the declaration; see storage.StoreAssurance's own doc comment
 	// for why a store should also run storage.TestSessionStoreContract
-	// against itself.
+	// against itself. The same "declaring capabilities is not optional"
+	// stance applies to Dependencies.IssuerKeys: it must implement
+	// keys.KeySourceAssurance and declare LiveFetchHardened — see that
+	// interface's own doc comment for why a plain IssuerKeySource has no
+	// structural way to tell a hardened implementation from a naive one
+	// apart from this declaration.
 	AssuranceProduction
 )
 
@@ -54,6 +60,20 @@ func checkStoreAssurance(name string, store any) error {
 	}
 	if !caps.AtomicConsume {
 		return fmt.Errorf("client: dependencies: %s must declare AtomicConsume capability under AssuranceProduction", name)
+	}
+	return nil
+}
+
+// checkKeySourceAssurance requires source to implement
+// keys.KeySourceAssurance and to declare LiveFetchHardened — mirrors
+// server's own helper of the same name and signature.
+func checkKeySourceAssurance(name string, source any) error {
+	asserter, ok := source.(keys.KeySourceAssurance)
+	if !ok {
+		return fmt.Errorf("client: dependencies: %s must implement keys.KeySourceAssurance under AssuranceProduction", name)
+	}
+	if !asserter.Capabilities().LiveFetchHardened {
+		return fmt.Errorf("client: dependencies: %s must declare LiveFetchHardened capability under AssuranceProduction", name)
 	}
 	return nil
 }

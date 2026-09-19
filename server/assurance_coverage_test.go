@@ -6,6 +6,7 @@ import (
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -286,5 +287,109 @@ func TestNewIgnoresCrossInstanceConsistentWhenNotHorizontallyScaled(t *testing.T
 
 	if _, err := server.New(cfg, deps); err != nil {
 		t.Fatalf("New(production, not horizontally scaled, replay store not cross-instance consistent): %v", err)
+	}
+}
+
+// bareClientKeySource/bareClientEncryptionKeySource embed the plain
+// domain interface so each satisfies it by delegation (never actually
+// called — checkKeySourceAssurance only type-asserts for
+// keys.KeySourceAssurance) while genuinely lacking a Capabilities
+// method, mirroring the bare*Store pattern above.
+type bareClientKeySource struct{ keys.ClientKeySource }
+
+type bareClientEncryptionKeySource struct{ keys.ClientEncryptionKeySource }
+
+// capClientKeySource/capClientEncryptionKeySource declare an explicit
+// keys.KeySourceCapabilities, for the declared-but-insufficient case.
+type capClientKeySource struct {
+	keys.ClientKeySource
+	caps keys.KeySourceCapabilities
+}
+
+func (s capClientKeySource) Capabilities() keys.KeySourceCapabilities { return s.caps }
+
+type capClientEncryptionKeySource struct {
+	keys.ClientEncryptionKeySource
+	caps keys.KeySourceCapabilities
+}
+
+func (s capClientEncryptionKeySource) Capabilities() keys.KeySourceCapabilities { return s.caps }
+
+func TestNewRejectsClientKeysWithoutKeySourceAssuranceUnderProduction(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = server.AssuranceProduction
+	deps := validDependencies()
+	deps.Audit = &fakeAuditSink{}
+	deps.ClientKeys = bareClientKeySource{}
+
+	if _, err := server.New(cfg, deps); err == nil {
+		t.Fatal("New(production, client keys without KeySourceAssurance) = nil error, want error")
+	}
+}
+
+func TestNewRejectsClientKeysNotLiveFetchHardenedUnderProduction(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = server.AssuranceProduction
+	deps := validDependencies()
+	deps.Audit = &fakeAuditSink{}
+	deps.ClientKeys = capClientKeySource{caps: keys.KeySourceCapabilities{LiveFetchHardened: false}}
+
+	if _, err := server.New(cfg, deps); err == nil {
+		t.Fatal("New(production, client keys declaring LiveFetchHardened=false) = nil error, want error")
+	}
+}
+
+func TestNewAcceptsLiveFetchHardenedClientKeysUnderProduction(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = server.AssuranceProduction
+	deps := validDependencies()
+	deps.Audit = &fakeAuditSink{}
+	deps.ClientKeys = capClientKeySource{caps: keys.KeySourceCapabilities{LiveFetchHardened: true}}
+
+	if _, err := server.New(cfg, deps); err != nil {
+		t.Fatalf("New(production, LiveFetchHardened client keys): %v", err)
+	}
+}
+
+// TestNewSkipsClientEncryptionKeysAssuranceCheckWhenNotConfigured
+// confirms the gate only applies when ClientEncryptionKeys is actually
+// set — validDependencies() leaves it nil by default, and no encryption
+// algorithm is configured here, so New never requires it at all.
+func TestNewSkipsClientEncryptionKeysAssuranceCheckWhenNotConfigured(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = server.AssuranceProduction
+	deps := validDependencies()
+	deps.Audit = &fakeAuditSink{}
+
+	if _, err := server.New(cfg, deps); err != nil {
+		t.Fatalf("New(production, no client encryption keys configured): %v", err)
+	}
+}
+
+func TestNewRejectsClientEncryptionKeysWithoutKeySourceAssuranceUnderProduction(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = server.AssuranceProduction
+	cfg.Algorithms.IDTokenEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.RSAOAEP256}
+	cfg.Algorithms.IDTokenEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{fapi.A256GCM}
+	deps := validDependencies()
+	deps.Audit = &fakeAuditSink{}
+	deps.ClientEncryptionKeys = bareClientEncryptionKeySource{}
+
+	if _, err := server.New(cfg, deps); err == nil {
+		t.Fatal("New(production, client encryption keys without KeySourceAssurance) = nil error, want error")
+	}
+}
+
+func TestNewAcceptsLiveFetchHardenedClientEncryptionKeysUnderProduction(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = server.AssuranceProduction
+	cfg.Algorithms.IDTokenEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.RSAOAEP256}
+	cfg.Algorithms.IDTokenEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{fapi.A256GCM}
+	deps := validDependencies()
+	deps.Audit = &fakeAuditSink{}
+	deps.ClientEncryptionKeys = capClientEncryptionKeySource{caps: keys.KeySourceCapabilities{LiveFetchHardened: true}}
+
+	if _, err := server.New(cfg, deps); err != nil {
+		t.Fatalf("New(production, LiveFetchHardened client encryption keys): %v", err)
 	}
 }

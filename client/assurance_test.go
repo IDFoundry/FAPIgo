@@ -5,6 +5,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/client"
+	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
 	"github.com/idfoundry/fapigo/storage/memstore"
 )
@@ -18,6 +19,18 @@ type assuringSessionStore struct {
 }
 
 func (s assuringSessionStore) Capabilities() storage.Capabilities { return s.caps }
+
+// assuringIssuerKeySource wraps fakeIssuerKeySource with an overridden
+// keys.KeySourceAssurance declaration, for tests that need to control
+// exactly what LiveFetchHardened value AssuranceProduction sees —
+// fakeIssuerKeySource itself already always declares true (see its own
+// doc comment), so this type exists specifically for the false case.
+type assuringIssuerKeySource struct {
+	*fakeIssuerKeySource
+	caps keys.KeySourceCapabilities
+}
+
+func (s assuringIssuerKeySource) Capabilities() keys.KeySourceCapabilities { return s.caps }
 
 // TestNewAcceptsDevelopmentAssuranceWithPlainSessionStore confirms
 // AssuranceDevelopment asks no StoreAssurance question at all — the
@@ -135,5 +148,76 @@ func TestNewSkipsSessionAssuranceCheckWhenSessionsNotConfigured(t *testing.T) {
 
 	if _, err := client.New(cfg, deps); err != nil {
 		t.Fatalf("New(AssuranceProduction, no browser flow, no Sessions dependency): %v", err)
+	}
+}
+
+// TestNewAcceptsDevelopmentAssuranceWithPlainIssuerKeySource confirms
+// AssuranceDevelopment asks no keys.KeySourceAssurance question either
+// — emptyIssuerKeySource (declares nothing) still works.
+func TestNewAcceptsDevelopmentAssuranceWithPlainIssuerKeySource(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = client.AssuranceDevelopment
+	deps := validDependencies(t)
+	deps.IssuerKeys = emptyIssuerKeySource{}
+
+	if _, err := client.New(cfg, deps); err != nil {
+		t.Fatalf("New(AssuranceDevelopment, plain issuer key source): %v", err)
+	}
+}
+
+// TestNewRejectsProductionAssuranceWithoutKeySourceAssuranceDeclaration
+// covers the core of the gate for Dependencies.IssuerKeys, mirroring
+// TestNewRejectsProductionAssuranceWithoutStoreAssuranceDeclaration for
+// Sessions: an IssuerKeySource that doesn't implement
+// keys.KeySourceAssurance at all is rejected rather than assumed
+// adequate.
+func TestNewRejectsProductionAssuranceWithoutKeySourceAssuranceDeclaration(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = client.AssuranceProduction
+	deps := validDependencies(t)
+	deps.IssuerKeys = emptyIssuerKeySource{}
+
+	if _, err := client.New(cfg, deps); err == nil {
+		t.Fatal("New(AssuranceProduction, issuer key source without KeySourceAssurance) = nil error, want error")
+	}
+}
+
+// TestNewRejectsProductionAssuranceWhenIssuerKeySourceNotLiveFetchHardened
+// covers the declared-but-insufficient case.
+func TestNewRejectsProductionAssuranceWhenIssuerKeySourceNotLiveFetchHardened(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = client.AssuranceProduction
+	deps := validDependencies(t)
+	deps.IssuerKeys = assuringIssuerKeySource{
+		fakeIssuerKeySource: deps.IssuerKeys.(*fakeIssuerKeySource),
+		caps:                keys.KeySourceCapabilities{LiveFetchHardened: false},
+	}
+
+	if _, err := client.New(cfg, deps); err == nil {
+		t.Fatal("New(AssuranceProduction, issuer key source declaring LiveFetchHardened=false) = nil error, want error")
+	}
+}
+
+// TestNewAcceptsProductionAssuranceWithLiveFetchHardenedIssuerKeySource
+// is the positive case: an issuer key source declaring
+// LiveFetchHardened is accepted.
+func TestNewAcceptsProductionAssuranceWithLiveFetchHardenedIssuerKeySource(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = client.AssuranceProduction
+	deps := validDependencies(t)
+	deps.IssuerKeys = assuringIssuerKeySource{
+		fakeIssuerKeySource: deps.IssuerKeys.(*fakeIssuerKeySource),
+		caps:                keys.KeySourceCapabilities{LiveFetchHardened: true},
+	}
+	// Sessions has its own, independent AssuranceProduction gate (see
+	// TestNewAcceptsProductionAssuranceWithFullyDeclaredSessionStore) —
+	// satisfy it too here so this test isolates the IssuerKeys check.
+	deps.Sessions = assuringSessionStore{
+		fakeSessionStore: newFakeSessionStore(),
+		caps:             storage.Capabilities{Durable: true, AtomicConsume: true},
+	}
+
+	if _, err := client.New(cfg, deps); err != nil {
+		t.Fatalf("New(AssuranceProduction, LiveFetchHardened issuer key source): %v", err)
 	}
 }

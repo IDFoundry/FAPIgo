@@ -412,7 +412,7 @@ func validateDependencies(cfg Config, deps Dependencies) error {
 	if cfg.Assurance != AssuranceProduction {
 		return nil
 	}
-	return validateProductionStoreAssurance(cfg, deps, cibaEnabled)
+	return validateProductionAssurance(cfg, deps, cibaEnabled)
 }
 
 func validateRequiredDependencies(deps Dependencies) error {
@@ -477,18 +477,26 @@ func validateConditionalDependencies(cfg Config, deps Dependencies) error {
 	return nil
 }
 
-// validateProductionStoreAssurance applies StoreAssurance to every
-// dependency AssuranceProduction requires it of — split out of
+// validateProductionAssurance applies StoreAssurance/KeySourceAssurance
+// to every dependency AssuranceProduction requires it of — split out of
 // validateDependencies purely to keep that function's own cognitive
 // complexity manageable. Only ever called once cfg.Assurance is
 // already known to be AssuranceProduction.
-func validateProductionStoreAssurance(cfg Config, deps Dependencies, cibaEnabled bool) error {
+func validateProductionAssurance(cfg Config, deps Dependencies, cibaEnabled bool) error {
 	if deps.Audit == nil {
 		return fmt.Errorf("server: dependencies: audit is required under AssuranceProduction")
 	}
 	scaled := cfg.HorizontallyScaled
 	if err := checkStoreAssurance("clients", deps.Clients, false, scaled); err != nil {
 		return err
+	}
+	if err := checkKeySourceAssurance("client_keys", deps.ClientKeys); err != nil {
+		return err
+	}
+	if deps.ClientEncryptionKeys != nil {
+		if err := checkKeySourceAssurance("client_encryption_keys", deps.ClientEncryptionKeys); err != nil {
+			return err
+		}
 	}
 	if err := checkStoreAssurance("transactions", deps.Transactions, true, scaled); err != nil {
 		return err

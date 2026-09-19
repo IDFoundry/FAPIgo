@@ -137,9 +137,10 @@ func beginAndCallbackWithoutIss(t *testing.T, discovered client.DiscoveredMetada
 
 // TestNewFromDiscoveryEnablesIssEnforcementWhenAdvertised covers Ask
 // 3's whole point: when discovered.AuthorizationResponseIssSupported
-// is true, NewFromDiscovery sets RequireAuthorizationResponseIss even
-// though the caller never touched it, so a callback missing "iss" is
-// now rejected — RFC 9207 §2.4's MUST, applied automatically.
+// is true, NewFromDiscovery sets AuthorizationResponseIssPolicy to
+// RequireAuthorizationResponseIss even though the caller never touched
+// it, so a callback missing "iss" is now rejected — RFC 9207 §2.4's
+// MUST, applied automatically.
 func TestNewFromDiscoveryEnablesIssEnforcementWhenAdvertised(t *testing.T) {
 	discovered := discoverWithIssParameterSupport(t, true)
 	if err := beginAndCallbackWithoutIss(t, discovered); err == nil {
@@ -150,9 +151,10 @@ func TestNewFromDiscoveryEnablesIssEnforcementWhenAdvertised(t *testing.T) {
 // TestNewFromDiscoveryLeavesIssEnforcementOffWhenNotAdvertised is the
 // contrast case: when discovery never advertised
 // authorization_response_iss_parameter_supported, NewFromDiscovery
-// leaves RequireAuthorizationResponseIss false, exactly like plain New
-// — a missing "iss" is not an error here (RFC 9207's MUST only applies
-// once the issuer is known to support the parameter).
+// leaves AuthorizationResponseIssPolicy at whatever the caller already
+// set (TolerateAbsentAuthorizationResponseIss here, exactly like plain
+// New) — a missing "iss" is not an error here (RFC 9207's MUST only
+// applies once the issuer is known to support the parameter).
 func TestNewFromDiscoveryLeavesIssEnforcementOffWhenNotAdvertised(t *testing.T) {
 	discovered := discoverWithIssParameterSupport(t, false)
 	if err := beginAndCallbackWithoutIss(t, discovered); err != nil {
@@ -162,9 +164,9 @@ func TestNewFromDiscoveryLeavesIssEnforcementOffWhenNotAdvertised(t *testing.T) 
 
 // TestNewFromDiscoveryNeverDisablesExplicitIssEnforcement guards the
 // direction NewFromDiscovery must never go: it only ever raises
-// RequireAuthorizationResponseIss to true, never lowers a value the
-// caller already set, even when discovery itself never advertised
-// support.
+// AuthorizationResponseIssPolicy to RequireAuthorizationResponseIss,
+// never lowers a value the caller already set, even when discovery
+// itself never advertised support.
 func TestNewFromDiscoveryNeverDisablesExplicitIssEnforcement(t *testing.T) {
 	discovered := discoverWithIssParameterSupport(t, false)
 	as := newFakeAS(t, testIssuer, false)
@@ -173,7 +175,7 @@ func TestNewFromDiscoveryNeverDisablesExplicitIssEnforcement(t *testing.T) {
 
 	cfg := validConfig(t)
 	cfg.Algorithms.IDToken = fapi.ES256
-	cfg.RequireAuthorizationResponseIss = true
+	cfg.AuthorizationResponseIssPolicy = client.RequireAuthorizationResponseIss
 	parURL, err := fapi.ParseEndpointURL(ts.URL+"/par", fapi.AllowLoopbackHTTP())
 	if err != nil {
 		t.Fatalf("ParseEndpointURL(par): %v", err)

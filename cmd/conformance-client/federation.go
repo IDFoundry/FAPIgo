@@ -367,12 +367,13 @@ func buildFederationModuleClient(ctx context.Context, d federationModuleDriver, 
 	}
 
 	cfg := client.Config{
-		Issuer:      issuer,
-		ClientID:    fapi.ClientID(d.EntityID),
-		RedirectURI: d.RedirectURI,
-		Endpoints:   discovered.Endpoints,
-		Profile:     client.ProfileFAPISecurity,
-		Assurance:   client.AssuranceDevelopment,
+		Issuer:                         issuer,
+		ClientID:                       fapi.ClientID(d.EntityID),
+		RedirectURI:                    d.RedirectURI,
+		Endpoints:                      discovered.Endpoints,
+		Profile:                        client.ProfileFAPISecurity,
+		Assurance:                      client.AssuranceDevelopment,
+		AuthorizationResponseIssPolicy: client.TolerateAbsentAuthorizationResponseIss, // NewFromDiscovery below raises this when discovery confirms support
 		Algorithms: client.Algorithms{
 			DPoP:                 fapi.ES256,
 			IDToken:              discovered.IDTokenAlgorithms[0],

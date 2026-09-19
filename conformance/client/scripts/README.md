@@ -179,9 +179,9 @@ changing this driver or `client` itself:
   `jarm.Verify`. `client`'s RFC 9207 plain-mode `iss` check used to run
   unconditionally regardless of response mode, and `internal/jarm`'s
   claims parsing pops `iss` out of the parameters map entirely — so
-  `Config.RequireAuthorizationResponseIss=true` rejected *every*
-  legitimate JARM response as "missing iss". Fixed in `client` by
-  scoping that check to plain-mode responses only.
+  `Config.AuthorizationResponseIssPolicy=RequireAuthorizationResponseIss`
+  rejected *every* legitimate JARM response as "missing iss". Fixed in
+  `client` by scoping that check to plain-mode responses only.
 
 ## CIBA (`-profile=ciba`)
 

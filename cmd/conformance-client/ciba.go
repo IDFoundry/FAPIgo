@@ -275,11 +275,12 @@ func runCIBAModule(ctx context.Context, d cibaModuleDriver, testName string) str
 	}
 
 	cfg := client.Config{
-		Issuer:    issuer,
-		ClientID:  fapi.ClientID(clientID),
-		Endpoints: discovered.Endpoints,
-		Profile:   client.ProfileFAPISecurity,
-		Assurance: client.AssuranceDevelopment,
+		Issuer:                         issuer,
+		ClientID:                       fapi.ClientID(clientID),
+		Endpoints:                      discovered.Endpoints,
+		Profile:                        client.ProfileFAPISecurity,
+		Assurance:                      client.AssuranceDevelopment,
+		AuthorizationResponseIssPolicy: client.TolerateAbsentAuthorizationResponseIss, // NewFromDiscovery below raises this when discovery confirms support
 		Algorithms: client.Algorithms{
 			ClientAuthentication:             fapi.ES256,
 			DPoP:                             fapi.ES256,

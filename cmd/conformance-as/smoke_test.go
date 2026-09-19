@@ -306,8 +306,9 @@ func newSmokeHarnessWithOptions(t *testing.T, format AccessTokenFormat, dpopNonc
 			PushedAuthorizationRequest: endpoints.PushedAuthorizationRequest,
 			UserInfo:                   userinfoURL,
 		},
-		Profile:   client.ProfileFAPISecurity,
-		Assurance: client.AssuranceDevelopment,
+		Profile:                        client.ProfileFAPISecurity,
+		Assurance:                      client.AssuranceDevelopment,
+		AuthorizationResponseIssPolicy: client.TolerateAbsentAuthorizationResponseIss,
 		Algorithms: client.Algorithms{
 			ClientAuthentication: fapi.ES256,
 			DPoP:                 fapi.ES256,

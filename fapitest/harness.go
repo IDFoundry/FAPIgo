@@ -363,8 +363,9 @@ func New(t *testing.T, cfg Config) *Harness {
 			PushedAuthorizationRequest: srvCfg.Endpoints.PushedAuthorizationRequest,
 			UserInfo:                   userInfoURL,
 		},
-		Profile:   clientProfile,
-		Assurance: client.AssuranceDevelopment,
+		Profile:                        clientProfile,
+		Assurance:                      client.AssuranceDevelopment,
+		AuthorizationResponseIssPolicy: client.TolerateAbsentAuthorizationResponseIss,
 		Algorithms: client.Algorithms{
 			ClientAuthentication: sigAlg,
 			RequestObject:        sigAlg,

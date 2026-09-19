@@ -91,12 +91,12 @@ func (c *Client) HandleAuthorizationResponse(ctx context.Context, cb Authorizati
 		// absent one is only an error when the server is known to
 		// support the parameter — this client can't tell that on its
 		// own, so the caller states it via
-		// Config.RequireAuthorizationResponseIss.
+		// Config.AuthorizationResponseIssPolicy.
 		if iss, ok := paramString(params, "iss"); ok {
 			if iss != c.cfg.Issuer.String() {
 				return nil, newError(ErrorInvalidResponse, "authorization response iss does not match expected issuer", nil)
 			}
-		} else if c.cfg.RequireAuthorizationResponseIss {
+		} else if c.cfg.AuthorizationResponseIssPolicy == RequireAuthorizationResponseIss {
 			return nil, newError(ErrorInvalidResponse, "authorization response is missing iss", nil)
 		}
 	}

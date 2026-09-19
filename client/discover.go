@@ -100,10 +100,11 @@ type DiscoveredMetadata struct {
 	// AuthorizationResponseIssSupported reflects the server's own
 	// authorization_response_iss_parameter_supported metadata value — a
 	// caller targeting that server should set
-	// Config.RequireAuthorizationResponseIss accordingly (RFC 9207 §2.4:
+	// Config.AuthorizationResponseIssPolicy accordingly (RFC 9207 §2.4:
 	// "Clients MUST reject authorization responses without the iss
 	// parameter from authorization servers that do support the
-	// parameter").
+	// parameter") — or use NewFromDiscovery, which does this
+	// automatically.
 	AuthorizationResponseIssSupported bool
 }
 

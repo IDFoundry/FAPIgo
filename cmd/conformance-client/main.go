@@ -558,14 +558,15 @@ func buildModuleClient(ctx context.Context, d moduleDriver, module suiteModule) 
 	}
 
 	cfg := client.Config{
-		Issuer:      issuer,
-		ClientID:    fapi.ClientID(clientID),
-		RedirectURI: redirectURI,
-		Endpoints:   discovered.Endpoints,
-		Profile:     profile.clientProfile,
-		Assurance:   client.AssuranceDevelopment,
-		Algorithms:  algorithms,
-		Limits:      limits,
+		Issuer:                         issuer,
+		ClientID:                       fapi.ClientID(clientID),
+		RedirectURI:                    redirectURI,
+		Endpoints:                      discovered.Endpoints,
+		Profile:                        profile.clientProfile,
+		Assurance:                      client.AssuranceDevelopment,
+		AuthorizationResponseIssPolicy: client.TolerateAbsentAuthorizationResponseIss, // NewFromDiscovery below raises this when discovery confirms support
+		Algorithms:                     algorithms,
+		Limits:                         limits,
 	}
 	if d.SenderConstrainMTLS {
 		cfg.SenderConstrain = storage.SenderConstrainMTLS

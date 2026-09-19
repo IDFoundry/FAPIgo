@@ -40,14 +40,15 @@ func TestRecommendedPresetsProduceAWorkingClient(t *testing.T) {
 	limits.MaxIDTokenLifetime = 5 * time.Minute // the one limit this preset can't guess
 
 	cfg := client.Config{
-		Issuer:      issuer,
-		ClientID:    testClientID,
-		RedirectURI: testRedirect,
-		Endpoints:   client.Endpoints{Authorization: authz, Token: tok, PushedAuthorizationRequest: par},
-		Profile:     client.ProfileFAPISecurity,
-		Assurance:   client.AssuranceDevelopment,
-		Algorithms:  algorithms,
-		Limits:      limits,
+		Issuer:                         issuer,
+		ClientID:                       testClientID,
+		RedirectURI:                    testRedirect,
+		Endpoints:                      client.Endpoints{Authorization: authz, Token: tok, PushedAuthorizationRequest: par},
+		Profile:                        client.ProfileFAPISecurity,
+		Assurance:                      client.AssuranceDevelopment,
+		AuthorizationResponseIssPolicy: client.TolerateAbsentAuthorizationResponseIss,
+		Algorithms:                     algorithms,
+		Limits:                         limits,
 	}
 
 	if _, err := client.New(cfg, validDependencies(t)); err != nil {

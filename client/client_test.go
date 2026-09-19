@@ -170,12 +170,13 @@ func validConfig(t *testing.T) client.Config {
 		t.Fatalf("ParseEndpointURL(par): %v", err)
 	}
 	return client.Config{
-		Issuer:      issuer,
-		ClientID:    testClientID,
-		RedirectURI: testRedirect,
-		Endpoints:   client.Endpoints{Authorization: authz, Token: tok, PushedAuthorizationRequest: par},
-		Profile:     client.ProfileFAPISecurity,
-		Assurance:   client.AssuranceDevelopment,
+		Issuer:                         issuer,
+		ClientID:                       testClientID,
+		RedirectURI:                    testRedirect,
+		Endpoints:                      client.Endpoints{Authorization: authz, Token: tok, PushedAuthorizationRequest: par},
+		Profile:                        client.ProfileFAPISecurity,
+		Assurance:                      client.AssuranceDevelopment,
+		AuthorizationResponseIssPolicy: client.TolerateAbsentAuthorizationResponseIss,
 		Algorithms: client.Algorithms{
 			ClientAuthentication: fapi.ES256,
 			DPoP:                 fapi.ES256,
@@ -323,8 +324,14 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 		"zero max response bytes":     func(c *client.Config) { c.Limits.MaxHTTPResponseBytes = 0 },
 		"zero max jose compact bytes": func(c *client.Config) { c.Limits.MaxJOSECompactBytes = 0 },
 		"invalid par dpop binding":    func(c *client.Config) { c.PARDPoPBinding = client.PARDPoPBinding(99) },
-		"invalid sender constrain":    func(c *client.Config) { c.SenderConstrain = storage.SenderConstrain(99) },
-		"invalid client auth method":  func(c *client.Config) { c.ClientAuthMethod = storage.ClientAuthMethod(99) },
+		"invalid authorization response iss policy": func(c *client.Config) {
+			c.AuthorizationResponseIssPolicy = client.AuthorizationResponseIssPolicy(99)
+		},
+		"zero authorization response iss policy": func(c *client.Config) {
+			c.AuthorizationResponseIssPolicy = 0
+		},
+		"invalid sender constrain":   func(c *client.Config) { c.SenderConstrain = storage.SenderConstrain(99) },
+		"invalid client auth method": func(c *client.Config) { c.ClientAuthMethod = storage.ClientAuthMethod(99) },
 		"invalid backchannel token delivery mode": func(c *client.Config) {
 			c.BackchannelTokenDeliveryMode = storage.BackchannelTokenDeliveryMode(99)
 		},

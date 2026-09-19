@@ -993,7 +993,7 @@ func TestCompleteAuthorizationMessageSigningSucceedsWithRequireAuthorizationResp
 	t.Cleanup(ts.Close)
 
 	cfg := validConfig(t)
-	cfg.RequireAuthorizationResponseIss = true
+	cfg.AuthorizationResponseIssPolicy = client.RequireAuthorizationResponseIss
 	cfg.Profile = client.ProfileFAPISecurityWithMessageSigning
 	cfg.Algorithms.RequestObject = fapi.ES256
 	cfg.Algorithms.JARM = fapi.ES256
@@ -1192,14 +1192,14 @@ func TestHandleAuthorizationResponseRejectsIssMismatch(t *testing.T) {
 // RFC 9207 §2.4: "Clients MUST reject authorization responses without
 // the iss parameter from authorization servers that do support the
 // parameter" - this client can't know that on its own, so it's gated on
-// Config.RequireAuthorizationResponseIss.
+// Config.AuthorizationResponseIssPolicy.
 func TestHandleAuthorizationResponseRejectsMissingIssWhenRequired(t *testing.T) {
 	as := newFakeAS(t, testIssuer, false)
 	ts := httptest.NewServer(as.handler())
 	t.Cleanup(ts.Close)
 
 	cfg := validConfig(t)
-	cfg.RequireAuthorizationResponseIss = true
+	cfg.AuthorizationResponseIssPolicy = client.RequireAuthorizationResponseIss
 	parURL, err := fapi.ParseEndpointURL(ts.URL+"/par", fapi.AllowLoopbackHTTP())
 	if err != nil {
 		t.Fatalf("ParseEndpointURL(par): %v", err)

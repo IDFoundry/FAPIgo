@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.31.0](https://github.com/IDFoundry/FAPIgo/compare/v0.30.0...v0.31.0) (2026-09-19)
+
+
+### ⚠ BREAKING CHANGES
+
+* client.Config.RequireAuthorizationResponseIss (bool) is renamed to AuthorizationResponseIssPolicy (AuthorizationResponseIssPolicy) and is now required. Existing callers must set it explicitly: RequireAuthorizationResponseIss (matches former true) or TolerateAbsentAuthorizationResponseIss (matches former false/zero value).
+
+### Features
+
+* gate ClientKeySource/IssuerKeySource/ClientEncryptionKeySource behind KeySourceAssurance ([54497b9](https://github.com/IDFoundry/FAPIgo/commit/54497b959cb9b3202604dd5c374a9dd1e4e6216b))
+* require explicit AuthorizationResponseIssPolicy ([ef83978](https://github.com/IDFoundry/FAPIgo/commit/ef839780c4d304378990a21d08cd1a52545f7c28))
+
+
+### Bug Fixes
+
+* bump Go toolchain to 1.26.6 for 6 stdlib CVEs ([51804e2](https://github.com/IDFoundry/FAPIgo/commit/51804e250cfc3417579ae8aae9b51cd9315b6149))
+
 ## [0.30.0](https://github.com/IDFoundry/FAPIgo/compare/v0.29.0...v0.30.0) (2026-09-18)
 
 

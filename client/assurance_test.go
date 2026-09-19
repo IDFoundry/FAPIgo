@@ -1,6 +1,7 @@
 package client_test
 
 import (
+	"strings"
 	"testing"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -176,9 +177,21 @@ func TestNewRejectsProductionAssuranceWithoutKeySourceAssuranceDeclaration(t *te
 	cfg.Assurance = client.AssuranceProduction
 	deps := validDependencies(t)
 	deps.IssuerKeys = emptyIssuerKeySource{}
+	// Sessions has its own, independent AssuranceProduction gate — satisfy
+	// it too here so a Sessions failure can't stand in for (and mask a
+	// missing) IssuerKeys failure, the way it did before this fix: an
+	// err==nil check alone can't tell which dependency actually failed.
+	deps.Sessions = assuringSessionStore{
+		fakeSessionStore: newFakeSessionStore(),
+		caps:             storage.Capabilities{Durable: true, AtomicConsume: true},
+	}
 
-	if _, err := client.New(cfg, deps); err == nil {
+	_, err := client.New(cfg, deps)
+	if err == nil {
 		t.Fatal("New(AssuranceProduction, issuer key source without KeySourceAssurance) = nil error, want error")
+	}
+	if !strings.Contains(err.Error(), "issuer_keys") {
+		t.Fatalf("New(...) error = %q, want it to mention issuer_keys", err)
 	}
 }
 
@@ -192,9 +205,17 @@ func TestNewRejectsProductionAssuranceWhenIssuerKeySourceNotLiveFetchHardened(t 
 		fakeIssuerKeySource: deps.IssuerKeys.(*fakeIssuerKeySource),
 		caps:                keys.KeySourceCapabilities{LiveFetchHardened: false},
 	}
+	deps.Sessions = assuringSessionStore{
+		fakeSessionStore: newFakeSessionStore(),
+		caps:             storage.Capabilities{Durable: true, AtomicConsume: true},
+	}
 
-	if _, err := client.New(cfg, deps); err == nil {
+	_, err := client.New(cfg, deps)
+	if err == nil {
 		t.Fatal("New(AssuranceProduction, issuer key source declaring LiveFetchHardened=false) = nil error, want error")
+	}
+	if !strings.Contains(err.Error(), "issuer_keys") {
+		t.Fatalf("New(...) error = %q, want it to mention issuer_keys", err)
 	}
 }
 

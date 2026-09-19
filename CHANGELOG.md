@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.30.0](https://github.com/IDFoundry/FAPIgo/compare/v0.29.0...v0.30.0) (2026-09-18)
+
+
+### ⚠ BREAKING CHANGES
+
+* server.Dependencies.MTLSClientCAs is renamed to ClientCertificateTrust and is now required. Existing callers that left it unset must add ClientCertificateTrust: server.NoClientCertificateChainTrust{} (matching prior behavior) or server.TrustedClientCAs{Roots: ...} (enabling this package's own chain check); callers that already set MTLSClientCAs should switch to
+
+### Features
+
+* add DPoP claim-mismatch and PAR round-trip fuzz targets ([50259c7](https://github.com/IDFoundry/FAPIgo/commit/50259c7eb5c0999877e53b00bf0dfa83e6362371))
+* add DPoP claim-mismatch and PAR round-trip fuzz targets ([ba6fc11](https://github.com/IDFoundry/FAPIgo/commit/ba6fc1147985b8c375f643c59c6320c26609eaba))
+* add DPoP/client-attestation header extraction helpers ([125fbdd](https://github.com/IDFoundry/FAPIgo/commit/125fbdd0ca207fae51a426cb63e204b197af4324))
+* add DPoP/client-attestation header extraction helpers ([f7b319c](https://github.com/IDFoundry/FAPIgo/commit/f7b319c86d9d1443e2a57be94affd060893cba01))
+* add fuzz target for internal/jwe.Decrypt ([#347](https://github.com/IDFoundry/FAPIgo/issues/347)) ([639aebb](https://github.com/IDFoundry/FAPIgo/commit/639aebbee6fde562e9fdad0d40c1f2a0aa497af9))
+* add fuzz targets for federation Entity Statement/Trust Mark parsing ([0ae76f2](https://github.com/IDFoundry/FAPIgo/commit/0ae76f2834375a3a78c86b31f7ef4719f6658533))
+* add fuzz targets for JARM responses and access/ID tokens ([8ef0de0](https://github.com/IDFoundry/FAPIgo/commit/8ef0de01da63020e731fa034c105c943e1b35846))
+* add fuzz targets for PAR form decoding and metadata parsing ([68c857f](https://github.com/IDFoundry/FAPIgo/commit/68c857f1dbd580ff9b6aacd8e2b420b9e4951d6d))
+* add fuzz targets for RAR parsing and PAR response decoding ([#351](https://github.com/IDFoundry/FAPIgo/issues/351)) ([fff00c3](https://github.com/IDFoundry/FAPIgo/commit/fff00c3018209d1fe915489ca21065398af7e8cd))
+* add fuzz targets for the remaining client-supplied compact JWTs ([4ae502b](https://github.com/IDFoundry/FAPIgo/commit/4ae502b2f4ef9532ebd5c94a7c2b1a5690ab3df9))
+* add fuzz targets found in a final security-critical review ([f03085c](https://github.com/IDFoundry/FAPIgo/commit/f03085cc251b39bec8deca4c2f0181142075406f))
+* add native Go fuzz targets and a daily fuzz CI job ([#344](https://github.com/IDFoundry/FAPIgo/issues/344)) ([3473b30](https://github.com/IDFoundry/FAPIgo/commit/3473b308534930ec8c67a79b14fefc1ee13e11c1))
+* add tamper-detection fuzz targets for jose Sign and jwe Encrypt ([5024eac](https://github.com/IDFoundry/FAPIgo/commit/5024eac4818edda31a93a724cf953fa3a6d5452d))
+* add tamper-detection fuzz targets for jose Sign and jwe Encrypt ([1318929](https://github.com/IDFoundry/FAPIgo/commit/131892946d7f0550dabf356449f733666fb3605b))
+* **client,server:** defense-in-depth iss/aud/exp checks on signed UserInfo responses ([87f500f](https://github.com/IDFoundry/FAPIgo/commit/87f500f2a36ae3cecdd9a3db9855931cb4a65716))
+* **client:** expose validated iss/aud/nonce/azp on IDTokenClaims ([35e7f23](https://github.com/IDFoundry/FAPIgo/commit/35e7f23e8bc98b2004b45edeaa2c4fbbcdfb6ab5))
+* complete fuzz coverage for internal/federation's Parse* functions ([46b44cc](https://github.com/IDFoundry/FAPIgo/commit/46b44cc9948c3c927dd6f397f49b6ca2183c5ea7))
+* require explicit ClientCertificateTrust for mTLS chain verification ([7e5dc0a](https://github.com/IDFoundry/FAPIgo/commit/7e5dc0ab1e0db3ee00710a1ec451d4b40de6c07b))
+* **resource:** expose validated iss/aud/iat on resolved access tokens ([a10d37b](https://github.com/IDFoundry/FAPIgo/commit/a10d37bf2629e13ec40c278416d274bec80eccea))
+* **server:** set at_hash when issuing an ID token alongside an access token ([dc81207](https://github.com/IDFoundry/FAPIgo/commit/dc81207d22250edd91f9ee0149b51ae30a817321))
+
+
+### Bug Fixes
+
+* **client:** verify at_hash when an ID token carries it ([2a7f43c](https://github.com/IDFoundry/FAPIgo/commit/2a7f43c91eb02576fae7f245de00af7fc24ab724))
+* recognize a third suite-internal flake signature in retry-flaky-modules ([2929f5a](https://github.com/IDFoundry/FAPIgo/commit/2929f5a1cbca4e07ce537ef9549da1bc04efda80))
+* reduce federation.Resolver.finalizeTrustChain's parameter count ([a5bb46e](https://github.com/IDFoundry/FAPIgo/commit/a5bb46e3002044825c7bbd0c2eee05ccbf5e4493))
+
 ## [0.29.0](https://github.com/IDFoundry/FAPIgo/compare/v0.28.0...v0.29.0) (2026-09-17)
 
 

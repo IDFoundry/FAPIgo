@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 
+	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -42,9 +43,16 @@ const (
 	// CrossInstanceConsistent. This does not verify any declaration; see
 	// storage.StoreAssurance's doc comment for why a store should also
 	// run this package's contract test suite (storage.TestGrantStoreContract
-	// and friends) against itself. Further checks (HSM-backed keys where
-	// required, and the rest of the checklist ARCHITECTURE.md describes)
-	// will be added here as the mechanisms to check them are built.
+	// and friends) against itself. The same "declaring capabilities is
+	// not optional" stance applies to Dependencies.ClientKeys (always)
+	// and ClientEncryptionKeys (when set): both must implement
+	// keys.KeySourceAssurance and declare LiveFetchHardened — see that
+	// interface's own doc comment for why a plain ClientKeySource/
+	// ClientEncryptionKeySource has no structural way to tell a hardened
+	// implementation from a naive one apart from this declaration.
+	// Further checks (HSM-backed keys where required, and the rest of
+	// the checklist ARCHITECTURE.md describes) will be added here as the
+	// mechanisms to check them are built.
 	AssuranceProduction
 )
 
@@ -66,6 +74,19 @@ func checkStoreAssurance(name string, store any, requireAtomicConsume, requireCr
 	}
 	if requireCrossInstanceConsistent && !caps.CrossInstanceConsistent {
 		return fmt.Errorf("server: dependencies: %s must declare CrossInstanceConsistent capability under AssuranceProduction with HorizontallyScaled", name)
+	}
+	return nil
+}
+
+// checkKeySourceAssurance requires source to implement
+// keys.KeySourceAssurance and to declare LiveFetchHardened.
+func checkKeySourceAssurance(name string, source any) error {
+	asserter, ok := source.(keys.KeySourceAssurance)
+	if !ok {
+		return fmt.Errorf("server: dependencies: %s must implement keys.KeySourceAssurance under AssuranceProduction", name)
+	}
+	if !asserter.Capabilities().LiveFetchHardened {
+		return fmt.Errorf("server: dependencies: %s must declare LiveFetchHardened capability under AssuranceProduction", name)
 	}
 	return nil
 }

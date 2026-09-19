@@ -127,6 +127,13 @@ func NewJWKSIssuerKeySource(fetcher *fapihttp.Client, jwksURI fapi.URL, cacheTTL
 	return s, nil
 }
 
+// Capabilities implements KeySourceAssurance. fetcher is required and
+// non-nil (enforced by NewJWKSIssuerKeySource), so every live fetch
+// this type performs is unconditionally hardened.
+func (s *JWKSIssuerKeySource) Capabilities() KeySourceCapabilities {
+	return KeySourceCapabilities{LiveFetchHardened: true}
+}
+
 // ResolveIssuerKeys returns every cached key matching req.Algorithm
 // (and req.KeyID, if set). If a specific KeyID was requested and isn't
 // found in the cache, it forces one refresh before giving up — the

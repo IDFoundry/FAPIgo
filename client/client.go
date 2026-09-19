@@ -39,14 +39,16 @@ func New(cfg Config, deps Dependencies) (*Client, error) {
 //     live signature or JWE-decrypt failure, far from the
 //     misconfigured line; NewFromDiscovery turns that into a startup
 //     error instead.
-//  2. It sets cfg.RequireAuthorizationResponseIss to true when
+//  2. It sets cfg.AuthorizationResponseIssPolicy to
+//     RequireAuthorizationResponseIss when
 //     discovered.AuthorizationResponseIssSupported is — RFC 9207 §2.4
 //     MUST-rejects a callback missing "iss" once the issuer is known to
 //     always send one, and this is never a legitimate place for a
 //     caller to want the opposite: it only ever raises the enforcement
 //     bar, never lowers a value the caller explicitly set. See
-//     RequireAuthorizationResponseIss's own doc comment, which
-//     otherwise requires the caller to set this by hand.
+//     AuthorizationResponseIssPolicy's own doc comment — plain New still
+//     requires the caller to set this field explicitly by hand, since
+//     there is no default.
 //
 // NewFromDiscovery does not read or modify cfg.Endpoints — build that
 // from discovered.Endpoints yourself first (DiscoveredMetadata's own
@@ -60,7 +62,7 @@ func NewFromDiscovery(discovered DiscoveredMetadata, cfg Config, deps Dependenci
 		return nil, err
 	}
 	if discovered.AuthorizationResponseIssSupported {
-		cfg.RequireAuthorizationResponseIss = true
+		cfg.AuthorizationResponseIssPolicy = RequireAuthorizationResponseIss
 	}
 	return New(cfg, deps)
 }
@@ -149,6 +151,9 @@ func validateEnumFields(cfg Config) error {
 	}
 	if cfg.PARDPoPBinding != PARDPoPBindingProof && cfg.PARDPoPBinding != PARDPoPBindingJKT {
 		return fmt.Errorf("client: config: par_dpop_binding is invalid")
+	}
+	if cfg.AuthorizationResponseIssPolicy != RequireAuthorizationResponseIss && cfg.AuthorizationResponseIssPolicy != TolerateAbsentAuthorizationResponseIss {
+		return fmt.Errorf("client: config: authorization_response_iss_policy is required (RequireAuthorizationResponseIss or TolerateAbsentAuthorizationResponseIss)")
 	}
 	if cfg.SenderConstrain != storage.SenderConstrainDPoP && cfg.SenderConstrain != storage.SenderConstrainMTLS {
 		return fmt.Errorf("client: config: sender_constrain is invalid")

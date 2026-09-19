@@ -292,6 +292,41 @@ type Limits struct {
 	MaxJOSECompactBytes int
 }
 
+// AuthorizationResponseIssPolicy decides whether
+// HandleAuthorizationResponse requires a plain-mode callback to carry
+// an "iss" parameter at all, or only checks one that's present. RFC
+// 9207 §2.4 mandates the latter half unconditionally either way — a
+// present-but-wrong "iss" is always rejected — but "MUST reject
+// authorization responses without the iss parameter" applies only
+// "from authorization servers that do support the parameter", which
+// this client can't determine on its own from Issuer/Endpoints alone.
+// Unlike PARDPoPBinding, whose zero value is a real, meaningful
+// default, there's no universally-safe default here: defaulting to
+// "require" would break every authorization server that doesn't send
+// iss, and defaulting to "tolerate" is the weaker RFC 9207 posture — so
+// the zero value is deliberately invalid, forcing an explicit choice.
+type AuthorizationResponseIssPolicy uint8
+
+const (
+	_ AuthorizationResponseIssPolicy = iota
+
+	// RequireAuthorizationResponseIss rejects a plain-mode callback with
+	// no "iss" parameter at all. Set this from
+	// DiscoveredMetadata.AuthorizationResponseIssSupported (or a
+	// deployment's own out-of-band knowledge that the server supports
+	// RFC 9207) — or use NewFromDiscovery, which sets it automatically
+	// whenever discovery confirms support, regardless of what this Config
+	// otherwise declares: RFC 9207 support is a one-way ratchet here,
+	// never something discovery should lower.
+	RequireAuthorizationResponseIss
+
+	// TolerateAbsentAuthorizationResponseIss accepts a plain-mode
+	// callback missing "iss" — the weaker, pre-RFC-9207 posture. An
+	// explicit opt-out for a server known not to support the parameter,
+	// not a fallback for "haven't checked yet".
+	TolerateAbsentAuthorizationResponseIss
+)
+
 // Config is this client's immutable configuration. It is copied by New;
 // mutating a Config after passing it to New has no effect.
 type Config struct {
@@ -313,18 +348,9 @@ type Config struct {
 	Limits     Limits
 	Assurance  AssuranceLevel
 
-	// RequireAuthorizationResponseIss makes HandleAuthorizationResponse
-	// reject a callback with no "iss" parameter at all, rather than only
-	// checking one that's present. RFC 9207 §2.4 mandates both halves
-	// unconditionally regardless of this setting — a present-but-wrong
-	// "iss" is always rejected — but "MUST reject authorization responses
-	// without the iss parameter" applies only "from authorization servers
-	// that do support the parameter", which this client can't determine
-	// on its own; set this from
-	// DiscoveredMetadata.AuthorizationResponseIssSupported (or a
-	// deployment's own out-of-band knowledge of the server) — or use
-	// NewFromDiscovery, which does this automatically.
-	RequireAuthorizationResponseIss bool
+	// AuthorizationResponseIssPolicy has no default — see its own type
+	// doc comment for why.
+	AuthorizationResponseIssPolicy AuthorizationResponseIssPolicy
 
 	// TrustedIDTokenAudiences lists any other party this client trusts
 	// to also be named alongside its own ClientID in a multi-valued

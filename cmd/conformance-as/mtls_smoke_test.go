@@ -227,9 +227,10 @@ func TestSmokeMTLSFlow(t *testing.T) {
 			PushedAuthorizationRequest: endpoints.PushedAuthorizationRequest,
 			UserInfo:                   mtlsUserinfoURL,
 		},
-		Profile:         client.ProfileFAPISecurity,
-		Assurance:       client.AssuranceDevelopment,
-		SenderConstrain: storage.SenderConstrainMTLS,
+		Profile:                        client.ProfileFAPISecurity,
+		Assurance:                      client.AssuranceDevelopment,
+		AuthorizationResponseIssPolicy: client.TolerateAbsentAuthorizationResponseIss,
+		SenderConstrain:                storage.SenderConstrainMTLS,
 		Algorithms: client.Algorithms{
 			ClientAuthentication: fapi.ES256,
 			IDToken:              fapi.ES256,

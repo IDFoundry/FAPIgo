@@ -76,7 +76,12 @@ func (m *fakeKeyManager) PublicKey(ctx context.Context, purpose keys.SigningPurp
 }
 
 // fakeIssuerKeySource stands in for the authorization server's own
-// published verification keys.
+// published verification keys. Declares keys.KeySourceAssurance with
+// LiveFetchHardened true — it performs no live fetch at all (a plain
+// in-memory map), so it's honestly safe under AssuranceProduction, and
+// every other test in this package that doesn't care about assurance
+// at all (the overwhelming majority) should keep passing under either
+// AssuranceLevel without having to know this gate exists.
 type fakeIssuerKeySource struct {
 	keys map[keys.IssuerVerificationPurpose]crypto.PublicKey
 }
@@ -87,6 +92,10 @@ func (f *fakeIssuerKeySource) ResolveIssuerKeys(ctx context.Context, req keys.Is
 		return keys.IssuerKeySet{}, fmt.Errorf("fakeIssuerKeySource: no key for purpose %v", req.Purpose)
 	}
 	return keys.IssuerKeySet{Keys: []keys.IssuerKey{{KeyID: "as-kid", Algorithm: fapi.ES256, PublicKey: pub}}}, nil
+}
+
+func (f *fakeIssuerKeySource) Capabilities() keys.KeySourceCapabilities {
+	return keys.KeySourceCapabilities{LiveFetchHardened: true}
 }
 
 // emptyIssuerKeySource simulates keys.IssuerKeySource.ResolveIssuerKeys

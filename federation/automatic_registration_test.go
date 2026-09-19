@@ -579,6 +579,49 @@ func TestAutomaticClientKeySourcePrefersUnderlying(t *testing.T) {
 	}
 }
 
+// capStaticKeySource wraps staticKeySource with an explicit
+// keys.KeySourceAssurance declaration.
+type capStaticKeySource struct {
+	staticKeySource
+	caps keys.KeySourceCapabilities
+}
+
+func (s capStaticKeySource) Capabilities() keys.KeySourceCapabilities { return s.caps }
+
+// TestAutomaticClientKeySourceCapabilitiesForwardsUnderlying covers
+// AutomaticClientKeySource's own keys.KeySourceAssurance implementation:
+// it must forward Underlying's own declaration rather than assert
+// anything on its own, since Underlying is tried first (see this
+// type's own doc comment) and this type's own federation-derived
+// fallback path being hardened doesn't make an unhardened Underlying
+// safe.
+func TestAutomaticClientKeySourceCapabilitiesForwardsUnderlying(t *testing.T) {
+	f := setupAutomaticRegistrationFixture(t, rpMetadataBuilder(t))
+	resolver := f.newResolver(t)
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, f.fetcher, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
+	if err != nil {
+		t.Fatalf("NewAutomaticClientRepository: %v", err)
+	}
+
+	declaring := capStaticKeySource{caps: keys.KeySourceCapabilities{LiveFetchHardened: true}}
+	src, err := federation.NewAutomaticClientKeySource(declaring, repo)
+	if err != nil {
+		t.Fatalf("NewAutomaticClientKeySource: %v", err)
+	}
+	if got := src.Capabilities(); !got.LiveFetchHardened {
+		t.Errorf("Capabilities() = %+v, want LiveFetchHardened forwarded from Underlying", got)
+	}
+
+	notDeclaring := staticKeySource{} // does not implement keys.KeySourceAssurance at all
+	src, err = federation.NewAutomaticClientKeySource(notDeclaring, repo)
+	if err != nil {
+		t.Fatalf("NewAutomaticClientKeySource: %v", err)
+	}
+	if got := src.Capabilities(); got.LiveFetchHardened {
+		t.Errorf("Capabilities() = %+v, want the zero value when Underlying doesn't implement keys.KeySourceAssurance", got)
+	}
+}
+
 func TestAutomaticClientRepositoryResolveClientRejectsUnreachableFederationEntity(t *testing.T) {
 	f := setupAutomaticRegistrationFixture(t, nil)
 	resolver := f.newResolver(t)

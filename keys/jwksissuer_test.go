@@ -74,6 +74,32 @@ func TestJWKSIssuerKeySourceResolvesKeyByAlgorithm(t *testing.T) {
 	}
 }
 
+// TestJWKSIssuerKeySourceDeclaresLiveFetchHardened covers
+// JWKSIssuerKeySource's own keys.KeySourceAssurance implementation:
+// NewJWKSIssuerKeySource requires a non-nil fetcher (*fapihttp.Client),
+// so every live fetch this type performs is unconditionally hardened —
+// Capabilities() must say so unconditionally too.
+func TestJWKSIssuerKeySourceDeclaresLiveFetchHardened(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"keys":[]}`)
+	}))
+	defer ts.Close()
+
+	jwksURI, err := fapi.ParseEndpointURL(ts.URL + "/jwks")
+	if err != nil {
+		t.Fatalf("ParseEndpointURL: %v", err)
+	}
+	src, err := keys.NewJWKSIssuerKeySource(newTestFetcherTLS(t, ts), jwksURI, time.Minute)
+	if err != nil {
+		t.Fatalf("NewJWKSIssuerKeySource: %v", err)
+	}
+
+	if got := src.Capabilities(); !got.LiveFetchHardened {
+		t.Errorf("Capabilities() = %+v, want LiveFetchHardened", got)
+	}
+}
+
 // TestJWKSIssuerKeySourceAcceptsRegisteredMediaType covers a JWKS
 // server that serves RFC 7517 §8.5.1's registered
 // "application/jwk-set+json" instead of the plain "application/json"

@@ -161,6 +161,11 @@ func (f *fakeReplayStore) Capabilities() storage.Capabilities {
 	return storage.Capabilities{Durable: true, AtomicConsume: true, SerializableRedemption: true, CrossInstanceConsistent: true, EncryptedAtRest: true}
 }
 
+// fakeClientKeySource declares keys.KeySourceAssurance with
+// LiveFetchHardened true — it performs no live fetch at all (a plain
+// in-memory map), so it's honestly safe under AssuranceProduction, and
+// every other test using it that doesn't care about assurance (the
+// overwhelming majority) keeps passing under either AssuranceLevel.
 type fakeClientKeySource struct {
 	keysByClient map[fapi.ClientID][]keys.VerificationKey
 	err          error
@@ -171,6 +176,10 @@ func (f *fakeClientKeySource) ResolveVerificationKeys(_ context.Context, req key
 		return keys.VerificationKeySet{}, f.err
 	}
 	return keys.VerificationKeySet{Keys: f.keysByClient[req.ClientID]}, nil
+}
+
+func (f *fakeClientKeySource) Capabilities() keys.KeySourceCapabilities {
+	return keys.KeySourceCapabilities{LiveFetchHardened: true}
 }
 
 type fakeGrantStore struct {

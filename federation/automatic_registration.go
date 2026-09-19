@@ -328,6 +328,22 @@ func NewAutomaticClientKeySource(underlying keys.ClientKeySource, repo *Automati
 	return &AutomaticClientKeySource{underlying: underlying, repo: repo}, nil
 }
 
+// Capabilities implements keys.KeySourceAssurance by forwarding
+// Underlying's own declaration, if it makes one. This type's own
+// federation-derived resolution path is always hardened (it goes
+// through AutomaticClientRepository's Resolver, which requires a real
+// fapihttp.Client), but that alone doesn't make the whole type safe to
+// declare LiveFetchHardened unconditionally: Underlying is tried first
+// (see this type's own doc comment), so an Underlying that isn't itself
+// hardened — or doesn't declare — must not be silently papered over by
+// this type's other, safe path.
+func (s *AutomaticClientKeySource) Capabilities() keys.KeySourceCapabilities {
+	if asserter, ok := s.underlying.(keys.KeySourceAssurance); ok {
+		return asserter.Capabilities()
+	}
+	return keys.KeySourceCapabilities{}
+}
+
 // ResolveVerificationKeys implements keys.ClientKeySource.
 func (s *AutomaticClientKeySource) ResolveVerificationKeys(ctx context.Context, req keys.ClientKeyRequest) (keys.VerificationKeySet, error) {
 	if set, err := s.underlying.ResolveVerificationKeys(ctx, req); err == nil && len(set.Keys) > 0 {

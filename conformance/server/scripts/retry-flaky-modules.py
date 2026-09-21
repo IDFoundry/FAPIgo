@@ -45,6 +45,33 @@ the suite itself, never in cmd/conformance-as:
    artifact in the suite's own HTTP client, only observed so far on a
    GitHub Actions runner, never locally.
 
+   A second shape of the same underlying bug was confirmed live
+   2026-09-21 (local run, release-v5.3.1): the exact same body,
+   {"error":"invalid_grant","error_description":"code is invalid,
+   expired, or already used"}, turned up as an orphaned "HTTP
+   response" log entry — no "HTTP request" entry at all under the same
+   blockId — attributed to a fapi2-security-profile-final-refresh-token
+   module's Refresh Token Request block. That text is exactly, and
+   only, server/token.go's ExchangeAuthorizationCode literal (grep
+   confirms it appears nowhere else); server/refresh.go's own
+   RefreshAccessToken can only ever produce "refresh_token is invalid,
+   expired, or already used" (or one of two other refresh-specific
+   messages) for an ErrorInvalidGrant, and the actual outgoing request
+   body for that block (also captured in the same log) was
+   grant_type=refresh_token with no code parameter at all — so this
+   response could not have been FAPIgo's real answer to that call
+   under any code path. The module's own log shows why: an earlier
+   block in the same test module sent its own genuine
+   authorization_code /token request and logged it, but never received
+   a logged response at all before a *different*, later block's
+   request/response pair completed cleanly in between — the suite's
+   own HTTP client lost track of which pending call a response
+   belonged to and surfaced it later, positionally, against a
+   completely unrelated request. Same root cause as the first shape
+   (a connection-reuse/response-bookkeeping bug in the suite's own
+   Java HTTP client), just manifesting as an orphaned response instead
+   of a same-timing swap with an immediately adjacent call.
+
 3. Stale implicit-submit browser JS, cousin of flake 1 above but a
    distinct failure signature: rather than landing on a *different*
    module (flake 1's alias-stealing shape), the suite's HtmlUnit
@@ -243,30 +270,56 @@ def has_flake_signature(log):
     return saw_unexpected_request and saw_illegal_state_change
 
 
+# The exact, literal error_description server/token.go's
+# ExchangeAuthorizationCode uses for a reused/expired/unknown
+# authorization code — grep server/*.go confirms this string appears
+# nowhere else in FAPIgo, including nowhere in server/refresh.go's own
+# refresh_token-specific invalid_grant messages. See
+# has_token_response_mismatch_signature's own doc comment for why that
+# makes it a reliable fingerprint for the second flake shape.
+AUTHORIZATION_CODE_INVALID_GRANT_DESCRIPTION = "code is invalid, expired, or already used"
+
+
 def has_token_response_mismatch_signature(log):
     """log is the module's own /api/log/{id} entries. Fingerprint for
-    the second known flake (see this file's own doc comment): an "HTTP
-    response" entry whose body is a /token grant error
-    (error=invalid_grant) delivered as the answer to the immediately
-    preceding "HTTP request" entry when that request wasn't a /token
-    call at all. FAPIgo never emits invalid_grant from any endpoint
-    but /token (grep server/errors.go), so this pairing is only
-    possible if the suite's own HTTP client matched a stale response to
-    the wrong request — never a real FAPIgo response to the request it
-    was actually paired with."""
+    the second known flake (see this file's own doc comment), which
+    has two confirmed shapes:
+
+    1. An "HTTP response" entry whose body is a /token grant error
+       (error=invalid_grant) delivered as the answer to the
+       immediately preceding "HTTP request" entry when that request
+       wasn't a /token call at all. FAPIgo never emits invalid_grant
+       from any endpoint but /token (grep server/errors.go), so this
+       pairing is only possible if the suite's own HTTP client matched
+       a stale response to the wrong request.
+
+    2. An "HTTP response" entry carrying
+       AUTHORIZATION_CODE_INVALID_GRANT_DESCRIPTION with no "HTTP
+       request" entry at all under its own blockId — an orphaned
+       response. That exact description only ever comes from
+       ExchangeAuthorizationCode, so an orphaned copy of it can never
+       be a real FAPIgo answer to whatever block it landed on."""
+    requests_by_block = {}
+    for entry in log:
+        if entry.get("msg") == "HTTP request":
+            requests_by_block.setdefault(entry.get("blockId"), []).append(entry)
+
     pending_request_uri = None
     for entry in log:
         msg = entry.get("msg")
         if msg == "HTTP request":
             pending_request_uri = entry.get("request_uri", "")
             continue
-        if msg == "HTTP response" and pending_request_uri is not None:
+        if msg == "HTTP response":
             try:
                 body = json.loads(entry.get("response_body") or "")
             except (TypeError, ValueError):
                 body = {}
-            if not pending_request_uri.rstrip("/").endswith("/token") and body.get("error") == "invalid_grant":
-                return True
+            if body.get("error") == "invalid_grant":
+                if pending_request_uri is not None and not pending_request_uri.rstrip("/").endswith("/token"):
+                    return True
+                if body.get("error_description") == AUTHORIZATION_CODE_INVALID_GRANT_DESCRIPTION and not requests_by_block.get(entry.get("blockId")):
+                    return True
             pending_request_uri = None
     return False
 

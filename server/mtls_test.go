@@ -229,16 +229,12 @@ func newHarnessWithSenderConstrainMTLSAndAliases(t *testing.T) (harness, string)
 	return harness{server: srv, key: key, serverKey: serverKey, now: now}, mtlsToken.String()
 }
 
-// TestExchangeAuthorizationCodeAcceptsMTLSAliasAsClientAssertionAudience
-// covers RFC 7523 §3's own looseness ("aud"... identifies the AS,
-// not necessarily one fixed URL): an mTLS-bound client may call the
-// token endpoint via its RFC 8705 §5 alias and sign its client
-// assertion's "aud" against that alias URL rather than the issuer,
-// since both identify the same authorization server. Scoped to the
-// token endpoint specifically — see
-// TestPushAuthorizationRequestRejectsMTLSAliasAsClientAssertionAudience
-// for why PAR must reject this exact same value.
-func TestExchangeAuthorizationCodeAcceptsMTLSAliasAsClientAssertionAudience(t *testing.T) {
+// TestExchangeAuthorizationCodeRejectsMTLSAliasAsClientAssertionAudience
+// confirms FAPI 2.0 Security Profile Final §5.3.2.1's issuer-only "aud"
+// rule applies to the token endpoint's RFC 8705 §5 mTLS alias too — the
+// alias identifies the same authorization server, but it isn't the
+// issuer identifier. See acceptableClientAssertionAudiences.
+func TestExchangeAuthorizationCodeRejectsMTLSAliasAsClientAssertionAudience(t *testing.T) {
 	h, mtlsToken := newHarnessWithSenderConstrainMTLSAndAliases(t)
 	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
 	cert := selfSignedTestClientCert(t)
@@ -250,11 +246,12 @@ func TestExchangeAuthorizationCodeAcceptsMTLSAliasAsClientAssertionAudience(t *t
 	if err != nil {
 		t.Fatalf("CreateAssertion: %v", err)
 	}
-	if _, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
+	_, err = h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
 		HTTP:            server.FormRequest{Parameters: exchangeFormParams(assertion, code, testRedirectURI, testCodeVerifier)},
 		PeerCertificate: cert,
-	}); err != nil {
-		t.Fatalf("ExchangeAuthorizationCode: %v", err)
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidClient)
 	}
 }
 

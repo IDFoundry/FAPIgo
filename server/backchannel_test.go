@@ -584,7 +584,7 @@ func TestBeginBackchannelAuthenticationSuccess(t *testing.T) {
 }
 
 // TestBeginBackchannelAuthenticationAcceptsBackchannelAuthenticationEndpointURLAsClientAssertionAudience
-// covers RFC 7523 §3's URL-audience carve-out as scoped to the
+// covers CIBA Core 1.0 §7.1's URL-audience widening as scoped to the
 // backchannel authentication endpoint specifically — confirmed live
 // against the OIDF conformance suite's own CIBA client, which signs
 // "aud" as whichever endpoint URL it is actually calling. See
@@ -1580,6 +1580,39 @@ func TestExchangeBackchannelAuthenticationBeforeDecisionIsPending(t *testing.T) 
 	}
 	if code := serverErrorCode(t, err); code != server.ErrorAuthorizationPending {
 		t.Fatalf("error code = %q, want %q", code, server.ErrorAuthorizationPending)
+	}
+}
+
+// TestExchangeBackchannelAuthenticationAcceptsTokenEndpointURLAsClientAssertionAudience
+// confirms a CIBA-registered client keeps CIBA Core 1.0 §7.1's widened
+// audiences at the token endpoint, even though FAPI 2.0 Final makes
+// every other client issuer-only there: the OIDF FAPI-CIBA-ID1 suite
+// signs every token-endpoint assertion (polling and refresh alike) with
+// the token endpoint URL. Reaching authorization_pending proves client
+// authentication succeeded.
+func TestExchangeBackchannelAuthenticationAcceptsTokenEndpointURLAsClientAssertionAudience(t *testing.T) {
+	h, _ := newHarnessWithBackchannel(t)
+	required := beginBackchannel(t, h, standardBackchannelParams(t))
+	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
+		Signer: h.key, Algorithm: fapi.ES256,
+		ClientID: testClientID.String(), Audience: testTokenEndpoint,
+		Now: h.now, Lifetime: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssertion: %v", err)
+	}
+
+	_, err = h.server.ExchangeBackchannelAuthentication(context.Background(), server.BackchannelTokenExchangeRequest{
+		HTTP: server.FormRequest{Parameters: []server.FormParameter{
+			formParam("client_assertion", assertion),
+			formParam("client_assertion_type", clientassertion.AssertionType),
+			formParam("grant_type", server.CIBAGrantType),
+			formParam("auth_req_id", required.AuthReqID.String()),
+		}},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorAuthorizationPending {
+		t.Fatalf("error code = %q, want %q (client authentication should have succeeded)", code, server.ErrorAuthorizationPending)
 	}
 }
 

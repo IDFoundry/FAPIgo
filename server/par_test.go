@@ -715,14 +715,16 @@ func newHarnessWithClientKeys(t *testing.T, clientKeys keys.ClientKeySource) har
 	return harness{server: srv, key: key, serverKey: serverKey, now: now}
 }
 
-// TestExchangeAuthorizationCodeAcceptsTokenEndpointURLAsClientAssertionAudience
-// covers RFC 7523 §3's own sanctioned alternative to the issuer
-// identifier: "The token endpoint URL of the authorization server MAY
-// be used as a value for an 'aud' element". This carve-out is scoped to
-// the token endpoint specifically — see
-// TestPushAuthorizationRequestRejectsTokenEndpointURLAsClientAssertionAudience
-// for why PAR must reject this exact same value.
-func TestExchangeAuthorizationCodeAcceptsTokenEndpointURLAsClientAssertionAudience(t *testing.T) {
+// TestExchangeAuthorizationCodeRejectsTokenEndpointURLAsClientAssertionAudience
+// covers FAPI 2.0 Security Profile Final §5.3.2.1: the authorization
+// server "shall only accept its issuer identifier value ... as a string
+// in the aud claim received in client authentication assertions" —
+// including at the token endpoint, where RFC 7523 §3 alone would have
+// permitted the token endpoint URL. Confirmed live via the OIDF suite's
+// fapi2-security-profile-final-ensure-invalid-client-assertions-fail
+// module. Only a CIBA-registered client keeps the URL audiences — see
+// TestExchangeBackchannelAuthenticationAcceptsTokenEndpointURLAsClientAssertionAudience.
+func TestExchangeAuthorizationCodeRejectsTokenEndpointURLAsClientAssertionAudience(t *testing.T) {
 	h := newHarness(t, server.ProfileFAPISecurity, true)
 	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
 	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
@@ -734,11 +736,12 @@ func TestExchangeAuthorizationCodeAcceptsTokenEndpointURLAsClientAssertionAudien
 		t.Fatalf("CreateAssertion: %v", err)
 	}
 	dpopKey := generateKey(t)
-	if _, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
+	_, err = h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
 		HTTP:       server.FormRequest{Parameters: exchangeFormParams(assertion, code, testRedirectURI, testCodeVerifier)},
 		DPoPProofs: []string{createDPoPProof(t, dpopKey, h.now)},
-	}); err != nil {
-		t.Fatalf("ExchangeAuthorizationCode: %v", err)
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidClient)
 	}
 }
 
@@ -747,10 +750,9 @@ func TestExchangeAuthorizationCodeAcceptsTokenEndpointURLAsClientAssertionAudien
 // cover PAR's own, narrower audience acceptance — confirmed live against
 // the OIDF conformance suite's own
 // fapi2-security-profile-final-par-test-{token,par}-endpoint-url-as-audience-fails
-// modules: unlike Token and BackchannelAuthentication, PAR was never
-// granted a URL-audience carve-out by RFC 7523 in the first place (see
-// acceptableClientAssertionAudiences's own doc comment), so PAR accepts
-// only the issuer identifier — not even its own endpoint URL.
+// modules: PAR accepts only the issuer identifier for every client —
+// not even its own endpoint URL, and not even for a CIBA-registered
+// client (see acceptableClientAssertionAudiences's own doc comment).
 func TestPushAuthorizationRequestRejectsTokenEndpointURLAsClientAssertionAudience(t *testing.T) {
 	h := newHarness(t, server.ProfileFAPISecurity, true)
 	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{

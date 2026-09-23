@@ -544,7 +544,14 @@ surfaced seven real, since-fixed library/harness gaps:
   client-authenticated endpoint URL this server exposes (Token, PAR,
   BackchannelAuthentication), plus their mTLS aliases for an
   mTLS-bound client. This is not mTLS-specific — a DPoP-bound client
-  gets the same widened set now too (`TestPushAuthorizationRequestAcceptsTokenEndpointURLAsClientAssertionAudience`).
+  gets the same widened set now too. **Since narrowed twice:** PAR
+  became issuer-only (FAPI2's `par-test-{par,token}-endpoint-url-as-audience-fails`),
+  then FAPI 2.0 SP Final §5.3.2.1's issuer-only rule was applied at
+  every endpoint for non-CIBA clients (FAPI2's
+  `ensure-invalid-client-assertions-fail`, client-credentials variant).
+  The widened set above now applies only to CIBA-registered clients —
+  which is all this CIBA plan's clients are, so this plan is
+  unaffected. See `acceptableClientAssertionAudiences`' doc comment.
 - **Fixed: FAPI-RW-8.5-1/8.5-2 ("Server accepted a cipher that is not
   on the list of permitted ciphers") — two distinct causes, both
   resolved.** First cause: `cmd/conformance-as/main.go`'s own cipher

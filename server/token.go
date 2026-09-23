@@ -449,11 +449,10 @@ func (s *Server) verifyTokenRequestDPoP(ctx context.Context, proof string) (dpop
 // conformance suite's own FAPI2SPFinal driver does exactly this once it
 // discovers mtls_endpoint_aliases, for a client_auth_type=mtls client
 // that is otherwise plain sender_constrain=dpop. Both URLs
-// unambiguously identify this same authorization server (the same
-// reasoning acceptableClientAssertionAudiences documents for the
-// analogous "aud" case), so accepting either is interoperability, not a
-// security relaxation — and unconditional on which client, unlike that
-// aud-widening: any client may legitimately reach either URL.
+// unambiguously identify this same authorization server, so accepting
+// either is interoperability, not a security relaxation — and
+// unconditional on which client, unlike acceptableClientAssertionAudiences's
+// CIBA-only "aud" widening: any client may legitimately reach either URL.
 func verifyDPoPAtEitherEndpoint(ctx context.Context, req dpop.VerifyRequest, primary, mtlsAlias fapi.URL) (dpop.VerifiedProof, error) {
 	primaryURL := primary.URL()
 	req.URL = &primaryURL

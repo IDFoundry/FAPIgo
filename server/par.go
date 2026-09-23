@@ -403,31 +403,39 @@ func (s *Server) authenticateClientViaAssertion(ctx context.Context, params map[
 
 // acceptableClientAssertionAudiences returns the "aud" values this
 // server accepts on a client assertion presented to one specific
-// endpoint: always the issuer identifier, plus — only the endpoint URLs
-// actually named in endpoints, appropriate for the endpoint actually
-// authenticating this request — those URLs, and, for a client actually
-// registered SenderConstrainMTLS, their RFC 8705 §5 mTLS aliases
-// (mtlsEndpoints, matched by position to endpoints). RFC 7523 §3
-// sanctions "the token endpoint URL" as "aud" alongside the issuer
-// identifier; CIBA Core 1.0 §7.1 separately, explicitly widens this for
-// its own backchannel authentication endpoint: "the OP MUST accept its
-// Issuer Identifier, Token Endpoint URL, or Backchannel Authentication
-// Endpoint URL as values that identify it as an intended audience" —
-// confirmed live via the OIDF conformance suite's own
-// fapi-ciba-id1/-refresh-token modules, each of which deliberately
-// signs "aud" as the token endpoint's URL on a request sent to the
-// backchannel authentication endpoint and requires it to succeed.
+// endpoint. Always the issuer identifier — and, for a client not
+// registered for CIBA, only the issuer identifier: FAPI 2.0 Security
+// Profile Final §5.3.2.1 requires the authorization server to "only
+// accept its issuer identifier value ... as a string in the aud claim
+// received in client authentication assertions", at every endpoint —
+// narrowing RFC 7523 §3's older "the token endpoint URL ... MAY be used"
+// allowance. Confirmed live via the OIDF suite's
+// fapi2-security-profile-final-ensure-invalid-client-assertions-fail
+// module, which (for the client_credentials variant, where the token
+// endpoint is the first authenticated endpoint) requires a token
+// endpoint URL "aud" to be rejected.
 //
-// Deliberately NOT a blanket "any of this server's own endpoint URLs,
-// from any endpoint" — confirmed live via
+// A client registered for CIBA (BackchannelAuthenticationRequestAlgorithm
+// set) instead follows FAPI-CIBA's rules at every endpoint that passes
+// endpoints: CIBA Core 1.0 §7.1 requires that "the OP MUST accept its
+// Issuer Identifier, Token Endpoint URL, or Backchannel Authentication
+// Endpoint URL as values that identify it as an intended audience", and
+// the OIDF FAPI-CIBA-ID1 suite signs every token-endpoint assertion —
+// including refresh — with the token endpoint URL. For such a client,
+// the result also includes the URLs actually named in endpoints (those
+// appropriate for the endpoint authenticating this request) and, when
+// it is registered SenderConstrainMTLS, their RFC 8705 §5 mTLS aliases
+// (mtlsEndpoints, matched by position to endpoints).
+//
+// PAR never accepts an endpoint-URL audience, for any client —
+// confirmed live via
 // fapi2-security-profile-final-par-test-{par,token}-endpoint-url-as-audience-fails
-// that PAR must reject a client assertion whose "aud" is the PAR
-// endpoint's own URL, or the token endpoint's URL: unlike Token and
-// BackchannelAuthentication, PAR was never granted a URL-audience
-// carve-out by RFC 7523 or CIBA, so PushAuthorizationRequest passes nil
-// for both parameters, accepting only the issuer identifier.
+// — so PushAuthorizationRequest passes nil for both parameters.
 func (s *Server) acceptableClientAssertionAudiences(client storage.RegisteredClient, endpoints, mtlsEndpoints []fapi.URL) []string {
 	auds := []string{s.cfg.Issuer.String()}
+	if _, ciba := client.BackchannelAuthenticationRequestAlgorithm(); !ciba {
+		return auds
+	}
 	for _, u := range endpoints {
 		if !u.IsZero() {
 			auds = append(auds, u.String())

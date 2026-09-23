@@ -33,6 +33,7 @@ import (
 // driving through, unlike TestSmokeAuthorizationCodeFlow/TestSmokeMTLSFlow.
 type clientCredentialsSmokeServer struct {
 	httpClient      *http.Client
+	issuer          fapi.URL
 	endpoints       server.Endpoints
 	accountsURL     fapi.URL
 	clientAuthPriv  *ecdsa.PrivateKey
@@ -133,7 +134,7 @@ func newClientCredentialsSmokeServer(t *testing.T) clientCredentialsSmokeServer 
 
 	httpClient := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}
 	return clientCredentialsSmokeServer{
-		httpClient: httpClient, endpoints: endpoints, accountsURL: accountsURL,
+		httpClient: httpClient, issuer: issuer, endpoints: endpoints, accountsURL: accountsURL,
 		clientAuthPriv: clientAuthPriv, dpopPriv: dpopPriv, clientAuthKeyID: clientAuthKeyID,
 		clientID: testClientID,
 	}
@@ -154,7 +155,7 @@ func TestSmokeClientCredentialsGrantFlow(t *testing.T) {
 		Algorithm: fapi.ES256,
 		KeyID:     s.clientAuthKeyID,
 		ClientID:  string(s.clientID),
-		Audience:  s.endpoints.Token.String(),
+		Audience:  s.issuer.String(), // FAPI 2.0 SP Final §5.3.2.1: issuer only
 		Now:       now,
 		Lifetime:  time.Minute,
 	})
@@ -292,7 +293,7 @@ func TestSmokeClientCredentialsGrantFlowWithAuthorizationDetails(t *testing.T) {
 		Algorithm: fapi.ES256,
 		KeyID:     s.clientAuthKeyID,
 		ClientID:  string(s.clientID),
-		Audience:  s.endpoints.Token.String(),
+		Audience:  s.issuer.String(), // FAPI 2.0 SP Final §5.3.2.1: issuer only
 		Now:       now,
 		Lifetime:  time.Minute,
 	})

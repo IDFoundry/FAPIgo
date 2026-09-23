@@ -60,6 +60,7 @@ func New(cfg Config, deps Dependencies) (*Server, error) {
 			MaxCacheAge:                  cfg.AutomaticRegistration.MaxCacheAge,
 			AllowsClientCredentialsGrant: cfg.AutomaticRegistration.AllowsClientCredentialsGrant,
 			AllowsCIBA:                   cfg.AutomaticRegistration.AllowsCIBA,
+			AllowedClientAuthMethods:     cfg.AutomaticRegistration.AllowedClientAuthMethods,
 		}, deps.Clock)
 		if err != nil {
 			return nil, fmt.Errorf("server: config: automatic_registration: %w", err)

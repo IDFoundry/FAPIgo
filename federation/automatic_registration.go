@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"slices"
 	"sync"
 	"time"
 
@@ -77,6 +78,20 @@ type AutomaticRegistrationConfig struct {
 	// been granted here. When false, that metadata is ignored entirely
 	// and CIBA stays disabled for every automatically-registered client.
 	AllowsCIBA bool
+
+	// AllowedClientAuthMethods restricts which token_endpoint_auth_method
+	// an automatically-registered client may declare in its own
+	// metadata. An RP whose metadata names a method outside this list
+	// fails to resolve at all, exactly like one with malformed metadata.
+	// Empty (the default) permits every storage.ClientAuthMethod this
+	// package can read from metadata — each is a FAPI 2.0-permitted,
+	// sender-proving method, so the RP choosing one is a mechanism
+	// detail, not a capability grant like AllowsCIBA. Set it when an
+	// operator wants federation RPs held to a narrower set than its
+	// statically registered clients (e.g. only
+	// storage.ClientAuthMethodPrivateKeyJWT, even though some static
+	// clients use mTLS). Every entry must be a valid ClientAuthMethod.
+	AllowedClientAuthMethods []storage.ClientAuthMethod
 }
 
 // cachedClient is one Relying Party's resolved registration, cached
@@ -121,7 +136,8 @@ type cachedClient struct {
 // ClientAuthMethodTLSClientAuth and its four SAN-typed siblings read
 // their own plain-string metadata parameter directly (RFC 8705 §2.1.2:
 // tls_client_auth_subject_dn/tls_client_auth_san_dns/_san_uri/_san_ip/
-// _san_email) — see registeredClientConfigFromMetadata. PAR/JAR-level
+// _san_email) — see registeredClientConfigFromMetadata — unless
+// AutomaticRegistrationConfig.AllowedClientAuthMethods narrows that set. PAR/JAR-level
 // enforcement of OpenID Federation 1.0 §12.1.1's own
 // aud/sub/jti Request Object rules is a request-handling concern, not a
 // client registration one — see storage.RegisteredClientConfig's own
@@ -163,6 +179,11 @@ func NewAutomaticClientRepository(underlying storage.ClientRepository, resolver 
 	}
 	if cfg.MaxCacheAge <= 0 {
 		return nil, fmt.Errorf("federation: config: max_cache_age must be positive")
+	}
+	for _, method := range cfg.AllowedClientAuthMethods {
+		if !method.IsValid() {
+			return nil, fmt.Errorf("federation: config: allowed_client_auth_methods: invalid client auth method %v", method)
+		}
 	}
 	if clock == nil {
 		return nil, fmt.Errorf("federation: clock is required")
@@ -410,7 +431,8 @@ type relyingPartyMetadata struct {
 //
 // a.cfg supplies the operator-level capability grants (AllowedScopes,
 // AllowsClientCredentialsGrant, AllowsCIBA) that must never be inferred
-// from raw itself — see AutomaticRegistrationConfig's own doc comments
+// from raw itself, plus the AllowedClientAuthMethods restriction raw's
+// own token_endpoint_auth_method is checked against — see AutomaticRegistrationConfig's own doc comments
 // for why.
 func (a *AutomaticClientRepository) registeredClientConfigFromMetadata(ctx context.Context, id fapi.ClientID, raw json.RawMessage) (storage.RegisteredClientConfig, json.RawMessage, error) {
 	var m relyingPartyMetadata
@@ -427,6 +449,9 @@ func (a *AutomaticClientRepository) registeredClientConfigFromMetadata(ctx conte
 	authMethod, err := storage.ParseClientAuthMethod(m.TokenEndpointAuthMethod)
 	if err != nil {
 		return storage.RegisteredClientConfig{}, nil, fmt.Errorf("token_endpoint_auth_method: %w", err)
+	}
+	if !a.allowsClientAuthMethod(authMethod) {
+		return storage.RegisteredClientConfig{}, nil, fmt.Errorf("token_endpoint_auth_method %q is not permitted by allowed_client_auth_methods", authMethod)
 	}
 
 	jwks := m.JWKS
@@ -547,6 +572,13 @@ func applyClientAuthMethodFields(cfg *storage.RegisteredClientConfig, authMethod
 		return fmt.Errorf("token_endpoint_auth_method %q is not supported", m.TokenEndpointAuthMethod)
 	}
 	return nil
+}
+
+// allowsClientAuthMethod reports whether method is permitted by
+// AutomaticRegistrationConfig.AllowedClientAuthMethods — every method
+// when that list is empty.
+func (a *AutomaticClientRepository) allowsClientAuthMethod(method storage.ClientAuthMethod) bool {
+	return len(a.cfg.AllowedClientAuthMethods) == 0 || slices.Contains(a.cfg.AllowedClientAuthMethods, method)
 }
 
 // applyBackchannelAuthenticationFields sets cfg's CIBA fields from m

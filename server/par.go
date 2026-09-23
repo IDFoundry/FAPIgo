@@ -212,7 +212,9 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 	// PAR accepts no endpoint-URL audience at all — only the issuer
 	// identifier — see acceptableClientAssertionAudiences's own doc
 	// comment for why.
-	client, dpopProof, authErr := s.authenticateRequest(ctx, params, req.PeerCertificate, req.DPoPProofs, req.ClientAttestations, req.ClientAttestationPoPs, nil, nil)
+	client, dpopProof, authErr := s.authenticateRequest(ctx, params, requestCredentials{
+		PeerCertificate: req.PeerCertificate, DPoPProofs: req.DPoPProofs, ClientAttestations: req.ClientAttestations, ClientAttestationPoPs: req.ClientAttestationPoPs,
+	}, nil, nil)
 	if authErr != nil {
 		var clientID fapi.ClientID
 		return s.parFail(ctx, clientID, authErr)
@@ -305,6 +307,16 @@ func (s *Server) authenticateClient(ctx context.Context, params map[string]strin
 	}
 }
 
+// requestCredentials is the raw, not-yet-validated client credential
+// material a grant endpoint's request carries — the fields every
+// *Request type shares for authenticateRequest's purposes.
+type requestCredentials struct {
+	PeerCertificate       *x509.Certificate
+	DPoPProofs            []string
+	ClientAttestations    []string
+	ClientAttestationPoPs []string
+}
+
 // authenticateRequest resolves a request's DPoP proof and attestation
 // headers and authenticates its client with them — the three checks
 // (resolveDPoPProof, resolveAttestationHeaders, authenticateClient)
@@ -313,16 +325,16 @@ func (s *Server) authenticateClient(ctx context.Context, params map[string]strin
 // one error check) at each call site, instead of three, is what keeps
 // endpoint methods like RefreshAccessToken from tripping a cognitive-
 // complexity limit on their own sequential guard clauses.
-func (s *Server) authenticateRequest(ctx context.Context, params map[string]string, peerCert *x509.Certificate, dpopProofs, attestations, attestationPoPs []string, endpoints, mtlsEndpoints []fapi.URL) (storage.RegisteredClient, string, *Error) {
-	dpopProof, dpopErr := resolveDPoPProof(dpopProofs)
+func (s *Server) authenticateRequest(ctx context.Context, params map[string]string, creds requestCredentials, endpoints, mtlsEndpoints []fapi.URL) (storage.RegisteredClient, string, *Error) {
+	dpopProof, dpopErr := resolveDPoPProof(creds.DPoPProofs)
 	if dpopErr != nil {
 		return storage.RegisteredClient{}, "", dpopErr
 	}
-	attestation, attestationPoP, attErr := resolveAttestationHeaders(attestations, attestationPoPs)
+	attestation, attestationPoP, attErr := resolveAttestationHeaders(creds.ClientAttestations, creds.ClientAttestationPoPs)
 	if attErr != nil {
 		return storage.RegisteredClient{}, "", attErr
 	}
-	client, _, authErr := s.authenticateClient(ctx, params, peerCert, attestation, attestationPoP, endpoints, mtlsEndpoints)
+	client, _, authErr := s.authenticateClient(ctx, params, creds.PeerCertificate, attestation, attestationPoP, endpoints, mtlsEndpoints)
 	if authErr != nil {
 		return storage.RegisteredClient{}, "", authErr
 	}

@@ -44,7 +44,7 @@ func TestErrorMessageIncludesCause(t *testing.T) {
 	if err == nil {
 		t.Fatal("SubjectFromFetchRequest(invalid sub) = nil error, want error")
 	}
-	if got := err.Error(); got == "" {
+	if err.Error() == "" {
 		t.Error("Error() = \"\", want a non-empty message including the underlying cause")
 	}
 	if errors.Unwrap(err) == nil {

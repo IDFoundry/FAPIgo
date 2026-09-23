@@ -191,13 +191,13 @@ func rebuildRequestBody(req *http.Request) (*http.Request, error) {
 	return clone, nil
 }
 
-// boundResponseBody reads res's body up to max bytes, replacing it with
+// boundResponseBody reads res's body up to limit bytes, replacing it with
 // an in-memory, replay-safe reader — the same eager-read-and-bound
 // discipline postForm applies to every other outbound response this
 // client reads, so a caller can't be handed an unbounded stream by
 // mistake.
-func boundResponseBody(res *http.Response, max int64) (*http.Response, error) {
-	data, readErr := io.ReadAll(io.LimitReader(res.Body, max+1))
+func boundResponseBody(res *http.Response, limit int64) (*http.Response, error) {
+	data, readErr := io.ReadAll(io.LimitReader(res.Body, limit+1))
 	closeErr := res.Body.Close()
 	if readErr != nil {
 		return nil, readErr
@@ -205,7 +205,7 @@ func boundResponseBody(res *http.Response, max int64) (*http.Response, error) {
 	if closeErr != nil {
 		return nil, closeErr
 	}
-	if int64(len(data)) > max {
+	if int64(len(data)) > limit {
 		return nil, errResponseBodyTooLarge
 	}
 	res.Body = io.NopCloser(bytes.NewReader(data))

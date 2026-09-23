@@ -269,7 +269,7 @@ func jwtAccessTokensWithCandidateKeys(t *testing.T, decoyCount, maxKeyCandidates
 }
 
 // TestResolveAccessTokenRejectsKeyBeyondMaxCandidates covers the fix for
-// the DoS-shaped TODO this MaxKeyCandidates field replaced: an
+// the DoS-shaped gap this MaxKeyCandidates field closed: an
 // IssuerKeySource returning more candidates than MaxKeyCandidates must
 // not let ResolveAccessToken try one beyond the configured bound, even
 // though it would otherwise validate successfully.

@@ -113,7 +113,7 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (Authorization
 
 	now := v.deps.Clock.Now()
 
-	senderConstrain, verifiedProof, certThumbprint, verr := v.resolveCredential(ctx, dpopProof, req.PeerCertificate, req.Method, req.URL, raw, scheme, now)
+	senderConstrain, verifiedProof, certThumbprint, verr := v.resolveCredential(ctx, req, dpopProof, raw, scheme, now)
 	if verr != nil {
 		return AuthorizationContext{}, verr
 	}
@@ -198,7 +198,7 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (Authorization
 // the resolved access token against. Split out of Verify purely to keep
 // that method's own token-resolution/binding/revocation pipeline
 // readable — this is the one genuinely separable sub-task within it.
-func (v *Verifier) resolveCredential(ctx context.Context, dpopProof string, peerCert *x509.Certificate, method string, target *url.URL, raw, scheme string, now time.Time) (storage.SenderConstrain, dpop.VerifiedProof, string, *Error) {
+func (v *Verifier) resolveCredential(ctx context.Context, req VerifyRequest, dpopProof, raw, scheme string, now time.Time) (storage.SenderConstrain, dpop.VerifiedProof, string, *Error) {
 	switch {
 	case strings.EqualFold(scheme, "DPoP"):
 		if dpopProof == "" {
@@ -206,8 +206,8 @@ func (v *Verifier) resolveCredential(ctx context.Context, dpopProof string, peer
 		}
 		verifiedProof, err := dpop.Verify(ctx, dpop.VerifyRequest{
 			Proof:        dpopProof,
-			Method:       method,
-			URL:          target,
+			Method:       req.Method,
+			URL:          req.URL,
 			AccessToken:  raw,
 			Now:          now,
 			MaxProofAge:  v.cfg.Limits.MaxDPoPProofAge,
@@ -228,10 +228,10 @@ func (v *Verifier) resolveCredential(ctx context.Context, dpopProof string, peer
 		}
 		return storage.SenderConstrainDPoP, verifiedProof, "", nil
 	case strings.EqualFold(scheme, "Bearer"):
-		if peerCert == nil {
+		if req.PeerCertificate == nil {
 			return 0, dpop.VerifiedProof{}, "", newError(ErrorInvalidRequest, 400, "a client certificate is required", nil)
 		}
-		return storage.SenderConstrainMTLS, dpop.VerifiedProof{}, mtls.Thumbprint(peerCert), nil
+		return storage.SenderConstrainMTLS, dpop.VerifiedProof{}, mtls.Thumbprint(req.PeerCertificate), nil
 	default:
 		return 0, dpop.VerifiedProof{}, "", newError(ErrorInvalidRequest, 400, "authorization scheme must be DPoP or Bearer", nil)
 	}

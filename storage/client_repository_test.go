@@ -332,7 +332,7 @@ func TestNewRegisteredClientAuthMethodTLSClientAuthSAN(t *testing.T) {
 			if c.ClientAuthMethod() != tc.method {
 				t.Fatalf("ClientAuthMethod() = %v, want %v", c.ClientAuthMethod(), tc.method)
 			}
-			if got := tc.accessor(c); got == "" {
+			if tc.accessor(c) == "" {
 				t.Fatalf("accessor returned empty string")
 			}
 		})

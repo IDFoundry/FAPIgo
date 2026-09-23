@@ -368,6 +368,13 @@ func validateDependencies(cfg Config, deps Dependencies) error {
 	if deps.Random == nil {
 		return fmt.Errorf("client: dependencies: random is required")
 	}
+	return validateConfigDrivenDependencies(cfg, deps)
+}
+
+// validateConfigDrivenDependencies checks the dependencies only some
+// Config settings require — split out of validateDependencies purely to
+// keep that function's own cognitive complexity manageable.
+func validateConfigDrivenDependencies(cfg Config, deps Dependencies) error {
 	if cfg.Algorithms.IDTokenKeyManagement != 0 && deps.Decryption == nil {
 		return fmt.Errorf("client: dependencies: decryption is required when algorithms.id_token_key_management is set")
 	}

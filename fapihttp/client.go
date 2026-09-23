@@ -438,12 +438,12 @@ func isAllowedPrivateHost(host string, allowed []string) bool {
 	return false
 }
 
-func readBounded(r io.Reader, max int64) ([]byte, error) {
-	data, err := io.ReadAll(io.LimitReader(r, max+1))
+func readBounded(r io.Reader, limit int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, limit+1))
 	if err != nil {
 		return nil, fmt.Errorf("fapihttp: read response body: %w", err)
 	}
-	if int64(len(data)) > max {
+	if int64(len(data)) > limit {
 		return nil, ErrResponseTooLarge
 	}
 	return data, nil

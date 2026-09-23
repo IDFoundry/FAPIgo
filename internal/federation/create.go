@@ -98,8 +98,9 @@ type CreateParams struct {
 	TrustMarkOwners map[string]TrustMarkOwner
 }
 
-// validateCreateParams checks p's required fields and its Entity
-// Configuration/Subordinate Statement claim-mixing invariant — split
+// validateCreateParams checks p's required fields and (via
+// validateClaimMixing) its Entity Configuration/Subordinate Statement
+// claim-mixing invariant — split
 // out of Create purely to keep that function's own cognitive
 // complexity manageable.
 func validateCreateParams(p CreateParams) error {
@@ -124,7 +125,13 @@ func validateCreateParams(p CreateParams) error {
 	if len(p.JWKS) == 0 {
 		return fmt.Errorf("federation: jwks is empty")
 	}
+	return validateClaimMixing(p)
+}
 
+// validateClaimMixing enforces that p carries only Entity Configuration
+// claims when Issuer equals Subject, and only Subordinate Statement
+// claims otherwise.
+func validateClaimMixing(p CreateParams) error {
 	selfSigned := p.Issuer == p.Subject
 	if selfSigned && (p.MetadataPolicy != nil || p.MetadataPolicyCritical != nil || p.SourceEndpoint != "" || p.Constraints != nil) {
 		return fmt.Errorf("federation: metadata_policy, metadata_policy_crit, source_endpoint and constraints are Subordinate Statement claims, but issuer equals subject (an Entity Configuration)")

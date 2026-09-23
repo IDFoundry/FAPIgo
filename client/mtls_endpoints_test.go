@@ -32,7 +32,7 @@ func TestMTLSEndpointsApplyForSenderConstrainOverridesTokenAndBackchannel(t *tes
 		BackchannelAuthentication:  mustEndpointURL(t, "https://as.example.com/backchannel"),
 	}
 
-	if ok := aliases.ApplyForSenderConstrain(&endpoints); !ok {
+	if !aliases.ApplyForSenderConstrain(&endpoints) {
 		t.Fatal("ApplyForSenderConstrain() = false, want true")
 	}
 	if got, want := endpoints.Token.String(), aliases.Token.String(); got != want {
@@ -65,7 +65,7 @@ func TestMTLSEndpointsApplyForClientAuthOverridesTokenAndPAR(t *testing.T) {
 		BackchannelAuthentication:  mustEndpointURL(t, "https://as.example.com/backchannel"),
 	}
 
-	if ok := aliases.ApplyForClientAuth(&endpoints); !ok {
+	if !aliases.ApplyForClientAuth(&endpoints) {
 		t.Fatal("ApplyForClientAuth() = false, want true")
 	}
 	if got, want := endpoints.Token.String(), aliases.Token.String(); got != want {
@@ -95,7 +95,7 @@ func TestMTLSEndpointsApplyNilReportsFalseAndLeavesEndpointsUntouched(t *testing
 	}
 
 	endpoints := newEndpoints()
-	if ok := aliases.ApplyForSenderConstrain(&endpoints); ok {
+	if aliases.ApplyForSenderConstrain(&endpoints) {
 		t.Error("ApplyForSenderConstrain(nil) = true, want false")
 	}
 	if endpoints != newEndpoints() {
@@ -103,7 +103,7 @@ func TestMTLSEndpointsApplyNilReportsFalseAndLeavesEndpointsUntouched(t *testing
 	}
 
 	endpoints = newEndpoints()
-	if ok := aliases.ApplyForClientAuth(&endpoints); ok {
+	if aliases.ApplyForClientAuth(&endpoints) {
 		t.Error("ApplyForClientAuth(nil) = true, want false")
 	}
 	if endpoints != newEndpoints() {
@@ -123,7 +123,7 @@ func TestMTLSEndpointsApplyPartialLeavesUnadvertisedFieldsUntouched(t *testing.T
 		BackchannelAuthentication: mustEndpointURL(t, "https://as.example.com/backchannel"),
 	}
 
-	if ok := aliases.ApplyForSenderConstrain(&endpoints); !ok {
+	if !aliases.ApplyForSenderConstrain(&endpoints) {
 		t.Fatal("ApplyForSenderConstrain() = false, want true")
 	}
 	if got, want := endpoints.Token.String(), aliases.Token.String(); got != want {

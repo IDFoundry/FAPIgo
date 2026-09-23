@@ -800,6 +800,21 @@ URL only) briefly regressed the already-passing AS ciba-mtls/ciba-ping
 legs before this was caught by a second full local conformance run
 and corrected. Confirmed live: all nine test configurations clean after both fixes.
 
+The token endpoint's own URL-audience allowance was narrowed further
+later still, again caught by the daily `conformance.yml` run: FAPI 2.0
+Security Profile Final §5.3.2.1 says the authorization server "shall
+only accept its issuer identifier value ... as a string in the aud
+claim received in client authentication assertions", overriding RFC
+7523 §3's token-endpoint-URL allowance, and the suite's
+`ensure-invalid-client-assertions-fail` module began enforcing it at the
+token endpoint for the client-credentials variant. Endpoint-URL
+audiences are now accepted only for a client registered for CIBA
+(`BackchannelAuthenticationRequestAlgorithm` set), which keeps CIBA Core
+1.0 §7.1's widened set at the token and backchannel authentication
+endpoints — the FAPI-CIBA-ID1 suite signs every token-endpoint
+assertion, refresh included, with the token endpoint URL. Every other
+client is issuer-only at every endpoint.
+
 `client`'s own CIBA support
 (`BeginBackchannelAuthentication`/`PollBackchannelAuthentication`) was
 genuinely attempted against the OIDF suite's RP-side plan

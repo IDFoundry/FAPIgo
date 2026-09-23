@@ -64,8 +64,11 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 	// CIBA's own token-polling step (CIBA §10.1) is a grant_type on the
 	// physical token endpoint, not a separate endpoint of its own — see
 	// CIBAGrantType's own doc comment — so this authenticates against
-	// the Token endpoint's own audience carve-out, the same as
-	// ExchangeAuthorizationCode/RefreshAccessToken.
+	// the Token endpoint's audiences, the same as
+	// ExchangeAuthorizationCode/RefreshAccessToken. Only a CIBA-registered
+	// client can hold an auth_req_id, and such a client keeps CIBA Core
+	// §7.1's endpoint-URL audiences — see
+	// acceptableClientAssertionAudiences.
 	client, dpopProof, authErr := s.authenticateRequest(ctx, params, requestCredentials{
 		PeerCertificate: req.PeerCertificate, DPoPProofs: req.DPoPProofs, ClientAttestations: req.ClientAttestations, ClientAttestationPoPs: req.ClientAttestationPoPs,
 	}, []fapi.URL{s.cfg.Endpoints.Token}, []fapi.URL{s.cfg.MTLSEndpoints.Token})

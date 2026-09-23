@@ -451,6 +451,20 @@ func TestNewWiresAutomaticRegistrationIntoClientCredentialsGrant(t *testing.T) {
 			t.Fatalf("RequestClientCredentialsToken (both switches set) = %v, want nil error", err)
 		}
 	})
+
+	t.Run("rejected when the RP's auth method is not in AllowedClientAuthMethods", func(t *testing.T) {
+		srv := newAutomaticRegistrationTestServer(t, f, func(cfg *server.Config, deps *server.Dependencies) {
+			cfg.ClientCredentialsGrant = true
+			cfg.AutomaticRegistration.AllowsClientCredentialsGrant = true
+			cfg.AutomaticRegistration.AllowedClientAuthMethods = []storage.ClientAuthMethod{storage.ClientAuthMethodTLSClientAuth}
+		})
+		_, err := srv.RequestClientCredentialsToken(context.Background(), server.ClientCredentialsTokenRequest{
+			HTTP: server.FormRequest{Parameters: params}, DPoPProofs: dpopProofs,
+		})
+		if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
+			t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidClient)
+		}
+	})
 }
 
 // TestNewWiresAutomaticRegistrationIntoBeginBackchannelAuthentication

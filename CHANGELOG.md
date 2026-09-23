@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.32.0](https://github.com/IDFoundry/FAPIgo/compare/v0.31.0...v0.32.0) (2026-09-23)
+
+
+### Features
+
+* add AllowedClientAuthMethods to federation automatic registration ([#366](https://github.com/IDFoundry/FAPIgo/issues/366)) ([cdad8e2](https://github.com/IDFoundry/FAPIgo/commit/cdad8e29a2f06d493225ee32d8305d673993262e))
+
+
+### Bug Fixes
+
+* accept only the issuer as client assertion aud for non-CIBA clients ([#370](https://github.com/IDFoundry/FAPIgo/issues/370)) ([3f94297](https://github.com/IDFoundry/FAPIgo/commit/3f94297fa153f574ad180743ecd739bddf43cfe4))
+* return unauthorized_client for clients not permitted to use CIBA ([e598c3c](https://github.com/IDFoundry/FAPIgo/commit/e598c3c5d2e479954417152532c598bc9b8ce3a5))
+
 ## [0.31.0](https://github.com/IDFoundry/FAPIgo/compare/v0.30.0...v0.31.0) (2026-09-19)
 
 

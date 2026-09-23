@@ -733,35 +733,56 @@ func TestBeginBackchannelAuthenticationRejectsMultipleDPoPProofs(t *testing.T) {
 func TestBeginBackchannelAuthenticationRejectsClientNotPermitted(t *testing.T) {
 	h, _ := newHarnessWithBackchannel(t)
 
-	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
-		Signer: h.key, Algorithm: fapi.ES256,
-		ClientID: testNotPermittedClientID.String(), Audience: testIssuer,
-		Now: h.now, Lifetime: 30 * time.Second,
-	})
-	if err != nil {
-		t.Fatalf("CreateAssertion: %v", err)
-	}
-	requestObj, err := requestobject.Create(requestobject.CreateParams{
-		Signer: h.key, Algorithm: fapi.ES256,
-		ClientID: testNotPermittedClientID.String(), Audience: testIssuer,
-		Now: h.now, Lifetime: 30 * time.Second, Parameters: standardBackchannelParams(t),
-	})
-	if err != nil {
-		t.Fatalf("requestobject.Create: %v", err)
-	}
+	// CIBA Core 1.0 §13: unauthorized_client, regardless of whether a
+	// request object was sent — the client itself isn't permitted.
+	for _, tc := range []struct {
+		name           string
+		includeRequest bool
+	}{
+		{"with request object", true},
+		{"without request object", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// A fresh assertion per subtest — the harness's replay cache
+			// would reject a reused jti as invalid_client.
+			assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
+				Signer: h.key, Algorithm: fapi.ES256,
+				ClientID: testNotPermittedClientID.String(), Audience: testIssuer,
+				Now: h.now, Lifetime: 30 * time.Second,
+			})
+			if err != nil {
+				t.Fatalf("CreateAssertion: %v", err)
+			}
+			params := []server.FormParameter{
+				formParam("client_assertion", assertion),
+				formParam("client_assertion_type", clientassertion.AssertionType),
+			}
+			if tc.includeRequest {
+				requestObj, err := requestobject.Create(requestobject.CreateParams{
+					Signer: h.key, Algorithm: fapi.ES256,
+					ClientID: testNotPermittedClientID.String(), Audience: testIssuer,
+					Now: h.now, Lifetime: 30 * time.Second, Parameters: standardBackchannelParams(t),
+				})
+				if err != nil {
+					t.Fatalf("requestobject.Create: %v", err)
+				}
+				params = backchannelFormParams(assertion, requestObj)
+			}
 
-	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
-		HTTP: server.FormRequest{Parameters: backchannelFormParams(assertion, requestObj)},
-	})
-	if err != nil {
-		t.Fatalf("BeginBackchannelAuthentication: %v", err)
-	}
-	localErr, ok := action.(server.BackchannelAuthenticationLocalError)
-	if !ok {
-		t.Fatalf("action = %T, want server.BackchannelAuthenticationLocalError", action)
-	}
-	if localErr.Error.Code() != server.ErrorInvalidRequest {
-		t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequest)
+			action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+				HTTP: server.FormRequest{Parameters: params},
+			})
+			if err != nil {
+				t.Fatalf("BeginBackchannelAuthentication: %v", err)
+			}
+			localErr, ok := action.(server.BackchannelAuthenticationLocalError)
+			if !ok {
+				t.Fatalf("action = %T, want server.BackchannelAuthenticationLocalError", action)
+			}
+			if localErr.Error.Code() != server.ErrorUnauthorizedClient {
+				t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorUnauthorizedClient)
+			}
+		})
 	}
 }
 

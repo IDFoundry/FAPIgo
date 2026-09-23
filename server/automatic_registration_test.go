@@ -520,8 +520,12 @@ func TestNewWiresAutomaticRegistrationIntoBeginBackchannelAuthentication(t *test
 		if err != nil {
 			t.Fatalf("BeginBackchannelAuthentication: %v", err)
 		}
-		if _, ok := action.(server.BackchannelAuthenticationLocalError); !ok {
+		localErr, ok := action.(server.BackchannelAuthenticationLocalError)
+		if !ok {
 			t.Fatalf("action = %T, want server.BackchannelAuthenticationLocalError (AllowsCIBA not set)", action)
+		}
+		if localErr.Error.Code() != server.ErrorUnauthorizedClient {
+			t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorUnauthorizedClient)
 		}
 	})
 

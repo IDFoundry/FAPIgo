@@ -261,16 +261,21 @@ type verifiedBackchannelRequest struct {
 // (AbstractFAPICIBAID1EnsureSendingInvalidBackchannelAuthorizationRequest,
 // confirmed by disassembling its own checkErrorFromBackchannelAuthorizationRequestResponse)
 // uniformly expects plain invalid_request, regardless of which claim
-// is missing or malformed.
+// is missing or malformed. The one exception is a client not permitted
+// to use CIBA at all, checked first so it applies whether or not a
+// request object was sent: that is a property of the client, not the
+// request, and §13 gives it its own code — unauthorized_client, "The
+// Client is not authorized to use this authentication flow" (§13's own
+// example response is exactly this case).
 func (s *Server) resolveBackchannelAuthenticationParameters(ctx context.Context, params map[string]string, client storage.RegisteredClient) (verifiedBackchannelRequest, *Error) {
+	alg, permitted := client.BackchannelAuthenticationRequestAlgorithm()
+	if !permitted {
+		return verifiedBackchannelRequest{}, newError(ErrorUnauthorizedClient, 400, "client is not permitted to use CIBA", nil)
+	}
+
 	requestParam, ok := params["request"]
 	if !ok || requestParam == "" {
 		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "a signed backchannel authentication request is required", nil)
-	}
-
-	alg, permitted := client.BackchannelAuthenticationRequestAlgorithm()
-	if !permitted {
-		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "client is not permitted to use CIBA", nil)
 	}
 	if !s.cfg.Algorithms.BackchannelAuthenticationRequest.Contains(alg) {
 		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "backchannel authentication request algorithm is not permitted", nil)

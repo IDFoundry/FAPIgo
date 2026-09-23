@@ -66,7 +66,9 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 	// CIBAGrantType's own doc comment — so this authenticates against
 	// the Token endpoint's own audience carve-out, the same as
 	// ExchangeAuthorizationCode/RefreshAccessToken.
-	client, dpopProof, authErr := s.authenticateRequest(ctx, params, req.PeerCertificate, req.DPoPProofs, req.ClientAttestations, req.ClientAttestationPoPs, []fapi.URL{s.cfg.Endpoints.Token}, []fapi.URL{s.cfg.MTLSEndpoints.Token})
+	client, dpopProof, authErr := s.authenticateRequest(ctx, params, requestCredentials{
+		PeerCertificate: req.PeerCertificate, DPoPProofs: req.DPoPProofs, ClientAttestations: req.ClientAttestations, ClientAttestationPoPs: req.ClientAttestationPoPs,
+	}, []fapi.URL{s.cfg.Endpoints.Token}, []fapi.URL{s.cfg.MTLSEndpoints.Token})
 	if authErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, "", authErr)
 	}
@@ -161,7 +163,9 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 	if containsScope(polled.Scope, "offline_access") {
 		refreshToken, err := s.issueRefreshToken(ctx, client.ID(), identityAssertion{
 			Subject: polled.Subject, AuthTime: polled.AuthTime, ACR: polled.ACR, AMR: polled.AMR, TokenClaims: polled.TokenClaims,
-		}, polled.Scope, polled.AuthorizationDetails, thumbprint, polled.RequestedIDTokenClaims, polled.RequestedUserinfoClaims)
+		}, refreshTokenGrant{
+			Scope: polled.Scope, AuthorizationDetails: polled.AuthorizationDetails, RequestedIDTokenClaims: polled.RequestedIDTokenClaims, RequestedUserinfoClaims: polled.RequestedUserinfoClaims,
+		}, thumbprint)
 		if err != nil {
 			return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorServerError, 500, "failed to issue refresh token", err))
 		}

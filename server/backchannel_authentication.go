@@ -150,7 +150,9 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	// Backchannel Authentication Endpoint URL" — confirmed live via the
 	// OIDF conformance suite's own fapi-ciba-id1/-refresh-token modules,
 	// which deliberately sign "aud" as the token endpoint's URL here.
-	client, dpopProof, authErr := s.authenticateRequest(ctx, params, req.PeerCertificate, req.DPoPProofs, req.ClientAttestations, req.ClientAttestationPoPs,
+	client, dpopProof, authErr := s.authenticateRequest(ctx, params, requestCredentials{
+		PeerCertificate: req.PeerCertificate, DPoPProofs: req.DPoPProofs, ClientAttestations: req.ClientAttestations, ClientAttestationPoPs: req.ClientAttestationPoPs,
+	},
 		[]fapi.URL{s.cfg.Endpoints.BackchannelAuthentication, s.cfg.Endpoints.Token},
 		[]fapi.URL{s.cfg.MTLSEndpoints.BackchannelAuthentication, s.cfg.MTLSEndpoints.Token})
 	if authErr != nil {
@@ -473,18 +475,18 @@ func (s *Server) reconcileBackchannelDPoPBinding(ctx context.Context, proof stri
 // or that configured default if the client didn't send one (or sent an
 // unparseable value).
 func (s *Server) backchannelAuthenticationLifetime(params map[string]json.RawMessage) time.Duration {
-	max := s.cfg.Limits.BackchannelAuthenticationRequestLifetime
+	maxLifetime := s.cfg.Limits.BackchannelAuthenticationRequestLifetime
 	raw, ok := params["requested_expiry"]
 	if !ok {
-		return max
+		return maxLifetime
 	}
 	seconds, ok := parseRequestedExpiry(raw)
 	if !ok || seconds <= 0 {
-		return max
+		return maxLifetime
 	}
 	requested := time.Duration(seconds) * time.Second
-	if requested > max {
-		return max
+	if requested > maxLifetime {
+		return maxLifetime
 	}
 	return requested
 }

@@ -25,7 +25,7 @@ const errTokenRequestFailed = "token request failed"
 // that needs to attach a caller-supplied extra header — currently only
 // addClientAuthentication's Attestation branch — alongside its own
 // hardcoded DPoP proof header.
-func mergeHeaders(base map[string]string, extra map[string]string) map[string]string {
+func mergeHeaders(base, extra map[string]string) map[string]string {
 	if len(extra) == 0 {
 		return base
 	}

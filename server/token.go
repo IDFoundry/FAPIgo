@@ -183,7 +183,9 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, "", newError(ErrorUnsupportedGrantType, 400, "grant_type must be authorization_code", nil))
 	}
 
-	client, dpopProof, authErr := s.authenticateRequest(ctx, params, req.PeerCertificate, req.DPoPProofs, req.ClientAttestations, req.ClientAttestationPoPs, []fapi.URL{s.cfg.Endpoints.Token}, []fapi.URL{s.cfg.MTLSEndpoints.Token})
+	client, dpopProof, authErr := s.authenticateRequest(ctx, params, requestCredentials{
+		PeerCertificate: req.PeerCertificate, DPoPProofs: req.DPoPProofs, ClientAttestations: req.ClientAttestations, ClientAttestationPoPs: req.ClientAttestationPoPs,
+	}, []fapi.URL{s.cfg.Endpoints.Token}, []fapi.URL{s.cfg.MTLSEndpoints.Token})
 	if authErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, "", authErr)
 	}
@@ -337,7 +339,9 @@ func (s *Server) issueOptionalRefreshToken(ctx context.Context, client storage.R
 	}
 	refreshToken, err := s.issueRefreshToken(ctx, client.ID(), identityAssertion{
 		Subject: redeemed.Subject, AuthTime: redeemed.AuthTime, ACR: redeemed.ACR, AMR: redeemed.AMR, TokenClaims: redeemed.TokenClaims,
-	}, redeemed.Scope, redeemed.AuthorizationDetails, thumbprint, redeemed.RequestedIDTokenClaims, redeemed.RequestedUserinfoClaims)
+	}, refreshTokenGrant{
+		Scope: redeemed.Scope, AuthorizationDetails: redeemed.AuthorizationDetails, RequestedIDTokenClaims: redeemed.RequestedIDTokenClaims, RequestedUserinfoClaims: redeemed.RequestedUserinfoClaims,
+	}, thumbprint)
 	if err != nil {
 		return newError(ErrorServerError, 500, "failed to issue refresh token", err)
 	}
@@ -551,13 +555,23 @@ func (s *Server) issueIDToken(ctx context.Context, client storage.RegisteredClie
 	return s.encryptIDToken(ctx, client.ID(), keyManagement, contentEncryption, signedJWT)
 }
 
+// refreshTokenGrant is the authorization a refresh token carries forward
+// from the grant it was issued alongside — grouped so issueRefreshToken's
+// callers pass it as one value.
+type refreshTokenGrant struct {
+	Scope                   []string
+	AuthorizationDetails    json.RawMessage
+	RequestedIDTokenClaims  []string
+	RequestedUserinfoClaims []string
+}
+
 // issueRefreshToken generates and persists a new refresh token, returning
-// its raw value. authorizationDetails carries forward the original
+// its raw value. grant.AuthorizationDetails carries forward the original
 // authorization's granted Rich Authorization Requests (RFC 9396) detail
 // array unchanged — RefreshAccessToken re-embeds it on every refresh, since
 // RFC 9396 defines no refresh-time narrowing parameter the way RFC 6749 §6
 // does for scope.
-func (s *Server) issueRefreshToken(ctx context.Context, clientID fapi.ClientID, id identityAssertion, scope []string, authorizationDetails json.RawMessage, thumbprint string, requestedIDTokenClaims, requestedUserinfoClaims []string) (string, error) {
+func (s *Server) issueRefreshToken(ctx context.Context, clientID fapi.ClientID, id identityAssertion, grant refreshTokenGrant, thumbprint string) (string, error) {
 	raw, err := generateRefreshToken(s.deps.Random)
 	if err != nil {
 		return "", err
@@ -567,15 +581,15 @@ func (s *Server) issueRefreshToken(ctx context.Context, clientID fapi.ClientID, 
 		TokenHash:               sha256.Sum256([]byte(raw)),
 		ClientID:                clientID,
 		Subject:                 id.Subject,
-		Scope:                   scope,
-		AuthorizationDetails:    authorizationDetails,
+		Scope:                   grant.Scope,
+		AuthorizationDetails:    grant.AuthorizationDetails,
 		Thumbprint:              thumbprint,
 		AuthTime:                id.AuthTime,
 		ACR:                     id.ACR,
 		AMR:                     id.AMR,
 		TokenClaims:             id.TokenClaims,
-		RequestedIDTokenClaims:  requestedIDTokenClaims,
-		RequestedUserinfoClaims: requestedUserinfoClaims,
+		RequestedIDTokenClaims:  grant.RequestedIDTokenClaims,
+		RequestedUserinfoClaims: grant.RequestedUserinfoClaims,
 		ExpiresAt:               now.Add(s.cfg.Limits.RefreshTokenLifetime),
 	}); err != nil {
 		return "", err

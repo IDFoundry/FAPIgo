@@ -25,7 +25,7 @@ func TestFixedIdentityConfigValidate(t *testing.T) {
 		if err == nil {
 			t.Fatal("validate() = nil, want error")
 		}
-		if got := err.Error(); got == "" {
+		if err.Error() == "" {
 			t.Fatalf("validate() error message is empty")
 		}
 	})

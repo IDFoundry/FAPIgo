@@ -6,6 +6,7 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/extension"
 	"github.com/idfoundry/fapigo/federation"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // Profile selects which FAPI 2.0 security profile this server enforces.
@@ -498,6 +499,13 @@ type AutomaticRegistrationConfig struct {
 	// why this is a config-level switch, never inferred from an RP's own
 	// metadata.
 	AllowsCIBA bool
+
+	// AllowedClientAuthMethods restricts which token_endpoint_auth_method
+	// an automatically-registered client may declare — see
+	// federation.AutomaticRegistrationConfig.AllowedClientAuthMethods.
+	// Empty (the default) permits every method. Statically registered
+	// clients are unaffected.
+	AllowedClientAuthMethods []storage.ClientAuthMethod
 }
 
 // FederationConfig configures this server's OpenID Federation 1.0

@@ -275,6 +275,11 @@ func TestNewAutomaticClientRepositoryRejectsInvalidConfig(t *testing.T) {
 			cfg.MaxCacheAge = 0
 			return alwaysFailsRepository{}, resolver, f.fetcher, cfg, fixedClock{now: f.now}
 		},
+		"invalid allowed client auth method": func() (storage.ClientRepository, *federation.Resolver, *fapihttp.Client, federation.AutomaticRegistrationConfig, federation.Clock) {
+			cfg := validAutomaticRegistrationConfig()
+			cfg.AllowedClientAuthMethods = []storage.ClientAuthMethod{storage.ClientAuthMethod(255)}
+			return alwaysFailsRepository{}, resolver, f.fetcher, cfg, fixedClock{now: f.now}
+		},
 		"nil clock": func() (storage.ClientRepository, *federation.Resolver, *fapihttp.Client, federation.AutomaticRegistrationConfig, federation.Clock) {
 			return alwaysFailsRepository{}, resolver, f.fetcher, validAutomaticRegistrationConfig(), nil
 		},
@@ -424,6 +429,45 @@ func TestAutomaticClientRepositoryResolveClientAllowsCIBAWhenConfigured(t *testi
 	}
 	if got.BackchannelClientNotificationEndpoint().String() != f.rpID+"/notify" {
 		t.Errorf("BackchannelClientNotificationEndpoint() = %q, want %q", got.BackchannelClientNotificationEndpoint().String(), f.rpID+"/notify")
+	}
+}
+
+func TestAutomaticClientRepositoryResolveClientAllowedClientAuthMethods(t *testing.T) {
+	// rpMetadataBuilder's RP declares private_key_jwt.
+	cases := map[string]struct {
+		allowed []storage.ClientAuthMethod
+		wantErr bool
+	}{
+		"empty permits every method": {allowed: nil},
+		"listed method permitted": {allowed: []storage.ClientAuthMethod{
+			storage.ClientAuthMethodSelfSignedTLSClientAuth, storage.ClientAuthMethodPrivateKeyJWT,
+		}},
+		"unlisted method rejected": {allowed: []storage.ClientAuthMethod{storage.ClientAuthMethodTLSClientAuth}, wantErr: true},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := setupAutomaticRegistrationFixture(t, rpMetadataBuilder(t))
+			cfg := validAutomaticRegistrationConfig()
+			cfg.AllowedClientAuthMethods = tc.allowed
+			repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, f.newResolver(t), f.fetcher, cfg, fixedClock{now: f.now})
+			if err != nil {
+				t.Fatalf("NewAutomaticClientRepository: %v", err)
+			}
+
+			got, err := repo.ResolveClient(context.Background(), fapi.ClientID(f.rpID))
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("ResolveClient = nil error, want error (private_key_jwt not in AllowedClientAuthMethods)")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ResolveClient: %v", err)
+			}
+			if got.ClientAuthMethod() != storage.ClientAuthMethodPrivateKeyJWT {
+				t.Errorf("ClientAuthMethod() = %v, want ClientAuthMethodPrivateKeyJWT", got.ClientAuthMethod())
+			}
+		})
 	}
 }
 

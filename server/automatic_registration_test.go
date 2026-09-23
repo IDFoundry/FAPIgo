@@ -307,6 +307,34 @@ func TestNewWiresAutomaticRegistrationIntoPushAuthorizationRequest(t *testing.T)
 	}
 }
 
+// TestNewWiresAutomaticRegistrationAllowedClientAuthMethods proves
+// server.New passes AutomaticRegistrationConfig.AllowedClientAuthMethods
+// through to the federation repository: the fixture RP declares
+// private_key_jwt, so an allowlist excluding it makes the RP
+// unresolvable and its PAR request fails client authentication.
+func TestNewWiresAutomaticRegistrationAllowedClientAuthMethods(t *testing.T) {
+	f := setupAutomaticRegistrationFixture(t, testRedirectURI)
+	srv := newAutomaticRegistrationTestServer(t, f, func(cfg *server.Config, deps *server.Dependencies) {
+		cfg.AutomaticRegistration.AllowedClientAuthMethods = []storage.ClientAuthMethod{storage.ClientAuthMethodTLSClientAuth}
+	})
+
+	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
+		Signer: f.rpOIDCKey, Algorithm: fapi.ES256, KeyID: "rp-oidc",
+		ClientID: f.rpID, Audience: testIssuer,
+		Now: f.now, Lifetime: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssertion: %v", err)
+	}
+
+	_, err = srv.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: plainFormParameters(t, assertion, nil)},
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidClient)
+	}
+}
+
 // TestNewWiresAutomaticRegistrationRequestObjectFederationRules proves
 // server.New applies OpenID Federation 1.0 §12.1.1's stricter Request
 // Object rules (via

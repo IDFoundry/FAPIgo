@@ -38,9 +38,10 @@ type BeginAuthorizationRequest struct {
 	// Definition, value). A value whose encoded JSON shape is a bare
 	// string is sent as a plain top-level authorization/PAR parameter
 	// regardless of Config.Profile. Any other shape (object, array,
-	// number, bool) requires
-	// Config.Profile == ProfileFAPISecurityWithMessageSigning: a signed
-	// request object carries a value's native JSON shape losslessly,
+	// number, bool) requires a signed request object
+	// (Config.Profile == ProfileFAPISecurityWithMessageSigning, or
+	// Config.PushedRequestEncoding == PushedRequestEncodingRequestObject):
+	// a signed request object carries a value's native JSON shape losslessly,
 	// while a plain top-level parameter has no way to represent anything
 	// but a bare string. A non-string value under the baseline profile
 	// is rejected rather than mis-encoded.
@@ -321,8 +322,8 @@ func (c *Client) postParRequestWithDPoP(ctx context.Context, dpopSigner crypto.S
 // assertion for authentication (or, under ClientAuthMethodAttestation,
 // the Attestation-Based Client Authentication headers instead — see
 // addClientAuthentication's own doc comment), plus either a signed
-// request object (ProfileFAPISecurityWithMessageSigning) or the plain
-// authorization parameters directly.
+// request object (see signsRequestObject) or the plain authorization
+// parameters directly.
 func (c *Client) buildPushedRequestForm(ctx context.Context, now time.Time, params map[string]string, extensions extension.Values, authorizationDetails []json.RawMessage) (map[string]string, map[string]string, *Error) {
 	form := map[string]string{}
 	var (
@@ -352,7 +353,7 @@ func (c *Client) buildPushedRequestForm(ctx context.Context, now time.Time, para
 		authorizationDetailsRaw = encoded
 	}
 
-	if c.cfg.Profile != ProfileFAPISecurityWithMessageSigning {
+	if !c.signsRequestObject() {
 		if idErr := populatePlainPushedRequestForm(form, params, snapshot, authorizationDetailsRaw); idErr != nil {
 			return nil, nil, idErr
 		}
@@ -363,6 +364,14 @@ func (c *Client) buildPushedRequestForm(ctx context.Context, now time.Time, para
 		return nil, nil, idErr
 	}
 	return form, headers, nil
+}
+
+// signsRequestObject reports whether pushed authorization requests carry
+// a signed request object rather than plain parameters — see
+// PushedRequestEncoding.
+func (c *Client) signsRequestObject() bool {
+	return c.cfg.Profile == ProfileFAPISecurityWithMessageSigning ||
+		c.cfg.PushedRequestEncoding == PushedRequestEncodingRequestObject
 }
 
 // populatePlainPushedRequestForm fills form with params and snapshot for
@@ -393,7 +402,7 @@ func populatePlainPushedRequestForm(form, params map[string]string, snapshot map
 		var value string
 		if err := json.Unmarshal(raw, &value); err != nil {
 			return newError(ErrorInvalidRequest,
-				fmt.Sprintf("extension parameter %q is not a plain string; non-string extension values require ProfileFAPISecurityWithMessageSigning", name), nil)
+				fmt.Sprintf("extension parameter %q is not a plain string; non-string extension values require a signed request object (ProfileFAPISecurityWithMessageSigning or PushedRequestEncodingRequestObject)", name), nil)
 		}
 		form[name] = value
 	}

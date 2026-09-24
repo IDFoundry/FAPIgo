@@ -25,8 +25,9 @@ type PublicKeySet = keys.PublicKeySet
 // ClientAuthentication signing key (only under
 // storage.ClientAuthMethodPrivateKeyJWT — the two RFC 8705 mTLS client
 // authentication methods have no assertion-signing key to publish at
-// all), its RequestObjectSigning key (only under
-// ProfileFAPISecurityWithMessageSigning), and its
+// all), its RequestObjectSigning key (only when it signs request
+// objects — ProfileFAPISecurityWithMessageSigning or
+// PushedRequestEncodingRequestObject), and its
 // IDTokenDecryption/UserInfoDecryption encryption key(s) — whichever of
 // Config.Algorithms.IDTokenKeyManagement/UserInfoKeyManagement are set
 // — deduplicated by kid. DPoPProofSigning is deliberately excluded: RFC
@@ -45,7 +46,7 @@ func (c *Client) PublicJWKS(ctx context.Context) (PublicKeySet, error) {
 	if c.cfg.ClientAuthMethod == storage.ClientAuthMethodPrivateKeyJWT {
 		signing = append(signing, keys.SigningKeyUse{Manager: c.deps.Keys, Purpose: keys.ClientAuthentication, Algorithm: c.cfg.Algorithms.ClientAuthentication})
 	}
-	if c.cfg.Profile == ProfileFAPISecurityWithMessageSigning {
+	if c.signsRequestObject() {
 		signing = append(signing, keys.SigningKeyUse{Manager: c.deps.Keys, Purpose: keys.RequestObjectSigning, Algorithm: c.cfg.Algorithms.RequestObject})
 	}
 

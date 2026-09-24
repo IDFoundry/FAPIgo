@@ -1185,18 +1185,21 @@ other profile it drives only ever makes outbound calls. The plan's own
 suggested a static config value could avoid this; reading the suite's
 own source disproved that too — the suite's live authorize/PAR handling
 unconditionally fetches the RP's Entity Configuration over HTTP no
-matter which variant is selected. **Confirmed live: 7 of 10 modules
-PASS.** The remaining 3 (the happy path, plus the two ID-token-tampering
-negative tests — every module that needs this driver to actually reach
-ID token issuance) hit a different, equally confirmed suite-side gap:
-the suite's own mock OP metadata never sets `issuer`, a field OIDC
-Discovery 1.0 §3 makes REQUIRED and OpenID Federation 1.0 explicitly
-incorporates by reference (additionally requiring it match the Entity
-Identifier) — verified against the spec text directly, not assumed.
+matter which variant is selected. **Confirmed live (2026-09-24): 6 of
+10 modules PASS.** The remaining 4 (every module that reaches the
+token endpoint) hit two suite-side bugs there: the suite checks the
+client assertion's `aud` against the RP's own Entity Identifier rather
+than the OP's, and its token response carries only `id_token` (no
+`access_token`/`token_type`, which RFC 6749 §5.1 requires). Until the
+suite added `issuer` to its mock OP metadata (2026-09-23) every module
+stopped at discovery instead, which had made three negative tests pass
+for the wrong reason. See `conformance/client/scripts/README.md`'s
+Federation section for the request-object and `host.docker.internal`
+details this plan needs.
 Wired into `run-all.sh` as the "RP federation-rp" leg via a new
 `cmd/conformance-client -expected-failures=<file>` allowlist mechanism
-(`conformance/client/expected-failures-federation.json` names these
-exact 3 modules), the RP-side counterpart to the AS side's
+(`conformance/client/expected-failures-federation.json` names the
+failing modules), the RP-side counterpart to the AS side's
 `expected-skips`/`expected-warnings` JSON files, checking for drift in
 both directions — an allowlisted module unexpectedly passing (e.g. the
 suite shipping a fix upstream) is flagged just as reliably as a new

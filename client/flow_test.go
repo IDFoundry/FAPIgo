@@ -41,6 +41,11 @@ type fakeAS struct {
 	issuer        string
 	messageSigned bool
 
+	// requestObjectPAR makes handlePAR expect a signed request object
+	// without messageSigned's JARM callbacks — the
+	// PushedRequestEncodingRequestObject shape.
+	requestObjectPAR bool
+
 	lastPARForm        url.Values
 	lastPARDPoPProof   string
 	lastTokenForm      url.Values
@@ -143,7 +148,7 @@ func (a *fakeAS) handlePAR(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if a.messageSigned {
+	if a.messageSigned || a.requestObjectPAR {
 		requestJWT := r.PostForm.Get("request")
 		if requestJWT == "" {
 			a.t.Errorf("PAR: missing signed request object under message-signing profile")
@@ -366,6 +371,45 @@ func newTestClient(t *testing.T, messageSigned bool) (*client.Client, *fakeAS, *
 		t.Fatalf("client.New: %v", err)
 	}
 	return c, as, ts
+}
+
+// newTestClientWithRequestObjectEncoding is newTestClient (baseline
+// profile) with Config.PushedRequestEncoding set to
+// PushedRequestEncodingRequestObject: signed request objects at PAR,
+// plain (non-JARM) authorization responses.
+func newTestClientWithRequestObjectEncoding(t *testing.T) (*client.Client, *fakeAS) {
+	t.Helper()
+	as := newFakeAS(t, testIssuer, false)
+	as.requestObjectPAR = true
+	ts := httptest.NewServer(as.handler())
+	t.Cleanup(ts.Close)
+
+	cfg := validConfig(t)
+	parURL, err := fapi.ParseEndpointURL(ts.URL+"/par", fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseEndpointURL(par): %v", err)
+	}
+	tokenURL, err := fapi.ParseEndpointURL(ts.URL+"/token", fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseEndpointURL(token): %v", err)
+	}
+	cfg.Endpoints.PushedAuthorizationRequest = parURL
+	cfg.Endpoints.Token = tokenURL
+	cfg.PushedRequestEncoding = client.PushedRequestEncodingRequestObject
+	cfg.Algorithms.RequestObject = fapi.ES256
+	cfg.Limits.RequestObjectLifetime = time.Minute
+
+	deps := validDependencies(t)
+	deps.HTTP = ts.Client()
+	deps.IssuerKeys = &fakeIssuerKeySource{keys: map[keys.IssuerVerificationPurpose]crypto.PublicKey{
+		keys.IDTokenVerification: &as.idTokenKey.PublicKey,
+	}}
+
+	c, err := client.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	return c, as
 }
 
 // newTestClientWithPARBinding is newTestClient (baseline profile only)
@@ -715,6 +759,42 @@ func TestCompleteAuthorizationHappyPathMessageSigning(t *testing.T) {
 	}
 	if success.Tokens.Subject != "end-user-1" {
 		t.Errorf("Subject = %q, want end-user-1", success.Tokens.Subject)
+	}
+}
+
+// PushedRequestEncodingRequestObject under the baseline profile: PAR
+// carries only a signed request object (no plain authorization
+// parameters alongside it), while the authorization response stays
+// plain query parameters — no JARM, unlike
+// ProfileFAPISecurityWithMessageSigning.
+func TestCompleteAuthorizationRequestObjectEncodingWithoutJARM(t *testing.T) {
+	c, as := newTestClientWithRequestObjectEncoding(t)
+	ctx := context.Background()
+
+	session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid", "accounts"}})
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+	obj, err := requestobject.Parse(as.lastPARForm.Get("request"))
+	if err != nil {
+		t.Fatalf("parse request object: %v", err)
+	}
+	if _, ok := obj.Parameter("code_challenge"); !ok {
+		t.Errorf("request object is missing code_challenge")
+	}
+	for _, plain := range []string{"code_challenge", "scope", "redirect_uri", "state"} {
+		if _, present := as.lastPARForm[plain]; present {
+			t.Errorf("PAR form carries plain %q alongside the request object, want it only inside the request object", plain)
+		}
+	}
+
+	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-ro", "")
+	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery})
+	if err != nil {
+		t.Fatalf("CompleteAuthorization (plain response): %v", err)
+	}
+	if _, ok := result.(client.CompletionSuccess); !ok {
+		t.Fatalf("result type = %T, want client.CompletionSuccess", result)
 	}
 }
 

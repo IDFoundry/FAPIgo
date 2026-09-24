@@ -53,8 +53,8 @@ go run ./cmd/conformance-client -profile=federation
   expected to FAIL, for a confirmed, documented reason, not a driver
   bug), or `federation`
   (`openid-federation-entity-joined-to-test-federation-rp-test-plan` —
-  see its own section below; 7 of 10 modules PASS, the rest blocked by
-  a confirmed suite-side gap). Defaults to `baseline`.
+  see its own section below; 6 of 10 modules PASS, the rest blocked by
+  confirmed suite-side bugs). Defaults to `baseline`.
 - `-mtls`, with `-profile=ciba` or `-profile=baseline`: use
   `storage.SenderConstrainMTLS` (RFC 8705 §3, a throwaway self-signed
   client certificate) instead of DPoP for sender-constraining — see
@@ -373,45 +373,60 @@ signature, with no static-config shortcut in that particular code path —
 found by reading the suite's own source, not assumed from the variant's
 own description.
 
-**Result of a live run: 7 of 10 modules PASS, 3 blocked by one single,
-confirmed suite-side gap** — not a grab-bag of unrelated issues:
+**Result of a live run (2026-09-24, suite image with commit
+`37ae2faad`): 6 of 10 modules PASS, 4 blocked by two suite-side bugs at
+the suite's own token endpoint.**
 
-- **PASS** (7): every negative test that only needs a malformed *Entity
-  Configuration* to be correctly detected and refused
-  (`openid-federation-client-invalid-iss-in-entity-configuration`,
-  `-invalid-sub-in-entity-configuration`, `-invalid-missing-exp-in-entity-configuration`,
-  `-invalid-missing-iat-in-entity-configuration`,
-  `-invalid-missing-client-registration-types-supported`,
-  `-invalid-empty-client-registration-types-supported`,
-  `-valid-unknown-client-registration-types-supported`) — this driver's
-  own `federation.Resolver` catches every one of these locally, before
-  ever attempting an authorization request, and the suite grades that
-  correctly.
-- **FAIL/stuck WAITING** (3): `openid-federation-client-test` (the happy
-  path), `-invalid-aud-in-id-token`, `-invalid-iss-in-id-token` — every
-  module that needs this driver to actually reach ID token issuance.
-  Root cause, confirmed by reading both the suite's own source and the
-  OpenID Federation 1.0 spec text directly: `AddOpenIDProviderMetadataToEntityConfiguration.java`
-  (the suite's own condition building its mock OP's `openid_provider`
-  metadata) never sets `issuer` — a field OIDC Discovery 1.0 §3 makes
-  REQUIRED, and which OpenID Federation 1.0's own §"OpenID Connect
-  OpenID Provider" section explicitly incorporates by reference ("All
-  parameters defined in Section 3 of OpenID Connect Discovery 1.0 ...
-  are applicable") while additionally requiring it match the Entity
-  Identifier. `client.DiscoverViaFederation` correctly rejects the
-  suite's own metadata document over this before this driver ever gets
-  far enough to attempt authorization. Checked upstream (github.com/openid/federation-suite
-  — 500+ commits ahead of this repo's checkout at the time) for a fix:
-  none touch this file. Wired into `conformance/scripts/run-all.sh` as
-  the "RP federation-rp" leg, via a new `-expected-failures` flag
-  (`expected_failures.go`) — the RP-side counterpart to the AS side's
-  `expected-skips-federation.json`/`expected-warnings-federation.json`,
-  at this driver's own coarser module-level grain (one verdict per
-  module, not per log entry). `conformance/client/expected-failures-federation.json`
-  names these exact 3 modules; the leg only reports UNEXPECTED RESULTS
-  if reality drifts from that file in *either* direction — a newly
-  non-passing module, or one of these 3 unexpectedly starting to PASS
-  (worth noticing: it'd mean the suite shipped a fix upstream).
+- **PASS** (6): every negative test where the RP must refuse the OP
+  before any authorization request. Four catch a malformed *Entity
+  Configuration* (`-invalid-{iss,sub}-in-entity-configuration`,
+  `-invalid-missing-{exp,iat}-in-entity-configuration`), all caught by
+  `federation.Resolver`. The other two catch an OP whose
+  `openid_provider` metadata is missing `client_registration_types_supported`
+  or has it empty (`-invalid-{missing,empty}-client-registration-types-supported`).
+  `client.DiscoverViaFederation` refuses an OP that doesn't list
+  `automatic` there, since OpenID Federation 1.0 §12.1 says an OP
+  supporting Automatic Registration MUST.
+- **FAIL** (4): `openid-federation-client-test` (the happy path),
+  `-valid-unknown-client-registration-types-supported`,
+  `-invalid-aud-in-id-token`, `-invalid-iss-in-id-token`: every module
+  that reaches the token endpoint. The suite's `tokenResponse` checks the
+  client assertion's `aud` against the plan config's
+  `federation.entity_identifier`, which is the RP's own Entity
+  Identifier in this plan, not the OP's. So an assertion addressed to
+  the OP's issuer fails with `aud mismatch`, even though the suite's
+  `ValidateClientAssertionClaims` otherwise accepts the issuer. The same
+  response also carries only `id_token`, with no `access_token` or
+  `token_type` (RFC 6749 §5.1 requires both), which
+  `client.CompleteAuthorization` correctly rejects.
+  `conformance/client/expected-failures-federation.json` names these 4
+  modules. The leg reports UNEXPECTED RESULTS if reality drifts from
+  that file in *either* direction.
+
+Two things the driver does specifically for this plan:
+
+- **Signed request object at PAR.** OpenID Federation 1.0 §12.1.1.2
+  lets an automatically registered RP prove control of its keys at PAR
+  with *either* a signed request object *or* `private_key_jwt` client
+  authentication. The suite's OP only implements the request-object
+  option (`ExtractRequestObject` on every PAR), so the driver sets
+  `client.Config.PushedRequestEncoding` to
+  `PushedRequestEncodingRequestObject`, signing with the same published
+  RP key as its client assertion. Client authentication stays
+  `private_key_jwt`.
+- **`host.docker.internal` on Linux.** The suite's server container
+  fetches the driver's Entity Configuration from
+  `https://host.docker.internal:<port>`. Docker Desktop resolves that
+  name; Linux Docker Engine doesn't, so
+  `.github/workflows/conformance.yml` brings the suite up with
+  `conformance/scripts/suite-host-gateway.override.yml`, which maps it
+  to `host-gateway`. For a local run on Linux, pass the same override.
+
+History: until 2026-09-23 the suite's mock OP metadata had no `issuer`,
+so `client.DiscoverViaFederation` refused it before any module reached
+an authorization request. That made the leg report 7 of 10 PASS, three
+of them for the wrong reason (the missing `issuer`, not the
+`client_registration_types_supported` problem each module tests).
 
 ## Client authentication mTLS (`-client-auth-mtls`)
 

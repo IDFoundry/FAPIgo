@@ -392,6 +392,34 @@ func TestNewRequiresMessageSigningConfigUnderThatProfile(t *testing.T) {
 	}
 }
 
+// PushedRequestEncodingRequestObject needs the request-object half of
+// the message-signing configuration, but never JARM's.
+func TestNewRequiresRequestObjectConfigUnderRequestObjectEncoding(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.PushedRequestEncoding = client.PushedRequestEncodingRequestObject
+	deps := validDependencies(t)
+
+	if _, err := client.New(cfg, deps); err == nil {
+		t.Fatalf("New(request object encoding, unconfigured) = nil error, want error")
+	}
+	cfg.Algorithms.RequestObject = fapi.ES256
+	if _, err := client.New(cfg, deps); err == nil {
+		t.Fatalf("New(request object encoding, no lifetime) = nil error, want error")
+	}
+	cfg.Limits.RequestObjectLifetime = time.Minute
+	if _, err := client.New(cfg, deps); err != nil {
+		t.Fatalf("New(request object encoding, configured without JARM): %v", err)
+	}
+}
+
+func TestNewRejectsInvalidPushedRequestEncoding(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.PushedRequestEncoding = client.PushedRequestEncoding(255)
+	if _, err := client.New(cfg, validDependencies(t)); err == nil {
+		t.Fatalf("New(invalid pushed_request_encoding) = nil error, want error")
+	}
+}
+
 // TestNewAcceptsCIBAOnlyConfig covers a client that only ever uses CIBA
 // — no browser flow at all, mirroring a CIBA-only authorization
 // server's own discovery document (see

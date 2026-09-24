@@ -1,0 +1,13 @@
+# Compose override for the OIDF conformance suite's own
+# docker-compose-prebuilt.yml, used by .github/workflows/conformance.yml.
+#
+# The RP federation-rp leg's driver (cmd/conformance-client
+# -profile=federation) serves its Entity Configuration from the host at
+# https://host.docker.internal:<port>, and the suite's server container
+# fetches it from there. Docker Desktop defines host.docker.internal
+# automatically; Docker Engine on Linux (the GitHub Actions runner) does
+# not, so map it to the host gateway explicitly.
+services:
+  server:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

@@ -160,32 +160,40 @@ func TestApplyPolicyEssentialSubsetOfTable(t *testing.T) {
 				value = json.RawMessage(tc.input)
 			}
 			result, resultPresent, err := applyClaimPolicy(ops, nil, value, present)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("applyClaimPolicy() = nil error, want error")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("applyClaimPolicy: %v", err)
-			}
-			if tc.wantJSON == "" {
-				if resultPresent {
-					t.Fatalf("result present = true, want absent")
-				}
-				return
-			}
-			if !resultPresent {
-				t.Fatalf("result present = false, want present")
-			}
-			eq, err := jsonEqual(result, json.RawMessage(tc.wantJSON))
-			if err != nil {
-				t.Fatalf("jsonEqual: %v", err)
-			}
-			if !eq {
-				t.Fatalf("result = %s, want %s", result, tc.wantJSON)
-			}
+			checkClaimPolicyResult(t, result, resultPresent, err, tc.wantJSON, tc.wantErr)
 		})
+	}
+}
+
+// checkClaimPolicyResult asserts applyClaimPolicy's output against one
+// table row's expectation: an error (wantErr), an absent parameter
+// (wantJSON == ""), or a present one equal to wantJSON.
+func checkClaimPolicyResult(t *testing.T, result json.RawMessage, present bool, err error, wantJSON string, wantErr bool) {
+	t.Helper()
+	if wantErr {
+		if err == nil {
+			t.Fatalf("applyClaimPolicy() = nil error, want error")
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("applyClaimPolicy: %v", err)
+	}
+	if wantJSON == "" {
+		if present {
+			t.Fatalf("result present = true, want absent")
+		}
+		return
+	}
+	if !present {
+		t.Fatalf("result present = false, want present")
+	}
+	eq, err := jsonEqual(result, json.RawMessage(wantJSON))
+	if err != nil {
+		t.Fatalf("jsonEqual: %v", err)
+	}
+	if !eq {
+		t.Fatalf("result = %s, want %s", result, wantJSON)
 	}
 }
 

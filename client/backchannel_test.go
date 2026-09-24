@@ -257,39 +257,13 @@ func TestBeginBackchannelAuthenticationHappyPath(t *testing.T) {
 	if obj.ClaimedIssuer() != testClientID {
 		t.Errorf("request object client_id (iss) = %q, want %q", obj.ClaimedIssuer(), testClientID)
 	}
-
-	wantStrings := map[string]string{
+	assertStringClaims(t, obj, map[string]string{
 		"scope":           "openid accounts",
 		"login_hint":      "user@example.com",
 		"acr_values":      "urn:mace:incommon:iap:silver",
 		"binding_message": "W4SCT",
-	}
-	for name, want := range wantStrings {
-		raw, ok := obj.Parameter(name)
-		if !ok {
-			t.Errorf("request object missing %q claim", name)
-			continue
-		}
-		var got string
-		if err := json.Unmarshal(raw, &got); err != nil {
-			t.Errorf("%q claim is not a string: %v", name, err)
-			continue
-		}
-		if got != want {
-			t.Errorf("%q = %q, want %q", name, got, want)
-		}
-	}
-	requestedExpiryRaw, ok := obj.Parameter("requested_expiry")
-	if !ok {
-		t.Fatalf("request object missing requested_expiry claim")
-	}
-	var requestedExpiry int64
-	if err := json.Unmarshal(requestedExpiryRaw, &requestedExpiry); err != nil {
-		t.Fatalf("requested_expiry claim is not a number: %v", err)
-	}
-	if requestedExpiry != 90 {
-		t.Errorf("requested_expiry = %d, want 90", requestedExpiry)
-	}
+	})
+	assertRequestedExpiryClaim(t, obj, 90)
 
 	// Regression guard: the default (Poll) delivery mode sends no
 	// client_notification_token at all, and the returned session's own
@@ -301,6 +275,44 @@ func TestBeginBackchannelAuthenticationHappyPath(t *testing.T) {
 	}
 	if _, ok := obj.Parameter("client_notification_token"); ok {
 		t.Errorf("request object carries a client_notification_token claim under the default Poll delivery mode, want none")
+	}
+}
+
+// assertStringClaims checks each named request object claim is present,
+// a JSON string, and equal to its expected value.
+func assertStringClaims(t *testing.T, obj requestobject.Object, want map[string]string) {
+	t.Helper()
+	for name, wantValue := range want {
+		raw, ok := obj.Parameter(name)
+		if !ok {
+			t.Errorf("request object missing %q claim", name)
+			continue
+		}
+		var got string
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Errorf("%q claim is not a string: %v", name, err)
+			continue
+		}
+		if got != wantValue {
+			t.Errorf("%q = %q, want %q", name, got, wantValue)
+		}
+	}
+}
+
+// assertRequestedExpiryClaim checks the request object's
+// requested_expiry claim is a number equal to wantSeconds.
+func assertRequestedExpiryClaim(t *testing.T, obj requestobject.Object, wantSeconds int64) {
+	t.Helper()
+	raw, ok := obj.Parameter("requested_expiry")
+	if !ok {
+		t.Fatalf("request object missing requested_expiry claim")
+	}
+	var got int64
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("requested_expiry claim is not a number: %v", err)
+	}
+	if got != wantSeconds {
+		t.Errorf("requested_expiry = %d, want %d", got, wantSeconds)
 	}
 }
 

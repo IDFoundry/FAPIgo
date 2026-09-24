@@ -55,32 +55,8 @@ func FuzzVerifyDPoPProofClaimMismatch(f *testing.F) {
 			AccessToken: baseAccessToken, Nonce: baseNonce,
 			Now: now,
 		}
-
-		switch field % 4 {
-		case 0: // htm mismatch
-			if alt == "" || strings.ToUpper(alt) == baseMethod {
-				return
-			}
-			proofReq.Method = alt
-		case 1: // htu mismatch
-			altURL, err := url.Parse(alt)
-			if err != nil {
-				return
-			}
-			if canonical.URI(altURL) == canonical.URI(baseURL) {
-				return
-			}
-			proofReq.URL = altURL
-		case 2: // ath mismatch
-			if alt == baseAccessToken {
-				return
-			}
-			proofReq.AccessToken = alt
-		case 3: // nonce mismatch
-			if alt == baseNonce {
-				return
-			}
-			proofReq.Nonce = alt
+		if !mismatchProofRequest(&proofReq, field, alt) {
+			return
 		}
 
 		proof, err := CreateProof(proofReq)
@@ -96,4 +72,38 @@ func FuzzVerifyDPoPProofClaimMismatch(f *testing.F) {
 			t.Fatalf("Verify succeeded despite mismatched field %d: alt=%q", field%4, alt)
 		}
 	})
+}
+
+// mismatchProofRequest replaces the one ProofRequest field selected by
+// field%4 (htm, htu, ath, nonce) with alt, reporting false — skip this
+// input — when alt wouldn't actually differ from the original value
+// after the comparison Verify itself applies (e.g. a case-folded method,
+// or a URL that canonicalizes the same way).
+func mismatchProofRequest(req *ProofRequest, field uint8, alt string) bool {
+	switch field % 4 {
+	case 0: // htm mismatch — req.Method is still the upper-case base
+		// method here. Conservatively skips any alt that upper-cases to
+		// it (e.g. "post"), even though Verify would reject that too.
+		if alt == "" || strings.ToUpper(alt) == req.Method {
+			return false
+		}
+		req.Method = alt
+	case 1: // htu mismatch
+		altURL, err := url.Parse(alt)
+		if err != nil || canonical.URI(altURL) == canonical.URI(req.URL) {
+			return false
+		}
+		req.URL = altURL
+	case 2: // ath mismatch
+		if alt == req.AccessToken {
+			return false
+		}
+		req.AccessToken = alt
+	case 3: // nonce mismatch
+		if alt == req.Nonce {
+			return false
+		}
+		req.Nonce = alt
+	}
+	return true
 }

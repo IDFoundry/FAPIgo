@@ -149,23 +149,15 @@ type Harness struct {
 // resource.Verifier able to check the access tokens it issues.
 func New(t *testing.T, cfg Config) *Harness {
 	t.Helper()
-	if cfg.Profile != server.ProfileFAPISecurity && cfg.Profile != server.ProfileFAPISecurityWithMessageSigning {
-		t.Fatalf("fapitest: Config.Profile is invalid")
-	}
-	clientProfile := client.ProfileFAPISecurity
-	if cfg.Profile == server.ProfileFAPISecurityWithMessageSigning {
-		clientProfile = client.ProfileFAPISecurityWithMessageSigning
-	}
+	validateConfig(t, cfg)
+	clientProfile := clientProfileFor(cfg.Profile)
 
 	clock := &manualClock{now: time.Now()}
 
 	// sigAlg resolves Config.SignatureAlgorithm's zero-means-ES256
 	// default; every signing purpose below uses this one algorithm, so
 	// the client and server always agree, exactly like Config.Profile.
-	sigAlg := cfg.SignatureAlgorithm
-	if sigAlg == 0 {
-		sigAlg = fapi.ES256
-	}
+	sigAlg := signatureAlgorithmOrDefault(cfg)
 
 	asKeys := newAlgorithmKeyManager(t, sigAlg, keys.JARMSigning, keys.AccessTokenSigning, keys.IDTokenSigning)
 	clientKeys := newAlgorithmKeyManager(t, sigAlg, keys.ClientAuthentication, keys.RequestObjectSigning, keys.DPoPProofSigning)
@@ -173,49 +165,27 @@ func New(t *testing.T, cfg Config) *Harness {
 	// contentEncryption resolves Config.IDTokenContentEncryption's
 	// zero-means-A256GCM default; only meaningful when EncryptIDTokens
 	// is set.
-	contentEncryption := cfg.IDTokenContentEncryption
-	if contentEncryption == 0 {
-		contentEncryption = fapi.A256GCM
-	}
+	contentEncryption := contentEncryptionOrDefault(cfg)
 
 	// clientDecryption is only generated (and only wired into the
 	// client/server configs below) when EncryptIDTokens is set — a
 	// separate keys.Decrypter from clientKeys (an RSA key, unrelated to
 	// clientKeys' own sigAlg-keyed signing keys), the same way
 	// client.Dependencies itself keeps Decryption separate from Keys.
-	var clientDecryption *ephemeral.KeyManager
-	if cfg.EncryptIDTokens {
-		var err error
-		clientDecryption, err = ephemeral.NewKeyManagerWithDecryption(nil, map[keys.DecryptionPurpose]fapi.KeyManagementAlgorithm{
-			keys.IDTokenDecryption: fapi.RSAOAEP256,
-		})
-		if err != nil {
-			t.Fatalf("fapitest: ephemeral.NewKeyManagerWithDecryption: %v", err)
-		}
-	}
+	clientDecryption := newIDTokenDecrypter(t, cfg)
 
 	issuer, err := fapi.ParseIssuerURL(Issuer)
 	if err != nil {
 		t.Fatalf("fapitest: ParseIssuerURL: %v", err)
 	}
 
-	if cfg.SenderConstrain != storage.SenderConstrainDPoP && cfg.SenderConstrain != storage.SenderConstrainMTLS {
-		t.Fatalf("fapitest: Config.SenderConstrain is invalid")
-	}
-	if cfg.ClientAuthMethod != storage.ClientAuthMethodPrivateKeyJWT &&
-		cfg.ClientAuthMethod != storage.ClientAuthMethodSelfSignedTLSClientAuth &&
-		cfg.ClientAuthMethod != storage.ClientAuthMethodTLSClientAuth {
-		t.Fatalf("fapitest: Config.ClientAuthMethod is invalid")
-	}
 	// tlsClientCert is true whenever a client certificate plays any role
 	// over the wire — sender-constraining, certificate-based client
 	// authentication, or (in principle) both at once, one certificate
 	// serving both purposes, the same as a real deployment presenting
 	// one connection-level client certificate regardless of how many
 	// things it's used to prove.
-	tlsClientCert := cfg.SenderConstrain == storage.SenderConstrainMTLS ||
-		cfg.ClientAuthMethod == storage.ClientAuthMethodSelfSignedTLSClientAuth ||
-		cfg.ClientAuthMethod == storage.ClientAuthMethodTLSClientAuth
+	tlsClientCert := usesTLSClientCert(cfg)
 	// Generated once, up front, when tlsClientCert: the same certificate
 	// is presented on every connection the harness's httpClient makes
 	// (below) and registered here as this client's expected identity —
@@ -224,37 +194,10 @@ func New(t *testing.T, cfg Config) *Harness {
 	var mtlsCert *x509.Certificate
 	var mtlsTLSCert tls.Certificate
 	if tlsClientCert {
-		mtlsTLSCert, err = SelfSignedClientCert("fapitest-mtls-client")
-		if err != nil {
-			t.Fatalf("fapitest: generate mtls client certificate: %v", err)
-		}
-		mtlsCert, err = x509.ParseCertificate(mtlsTLSCert.Certificate[0])
-		if err != nil {
-			t.Fatalf("fapitest: parse mtls client certificate: %v", err)
-		}
+		mtlsTLSCert, mtlsCert = newMTLSClientCertificate(t)
 	}
 
-	registeredClientCfg := storage.RegisteredClientConfig{
-		ID:                           ClientID,
-		RedirectURIs:                 []fapi.RegisteredRedirectURI{RedirectURI},
-		ClientAssertionAlgorithm:     sigAlg,
-		RequestObjectAlgorithm:       sigAlg,
-		SenderConstrain:              cfg.SenderConstrain,
-		ClientAuthMethod:             cfg.ClientAuthMethod,
-		AllowedScopes:                []string{"openid", "accounts", "offline_access"},
-		AllowsClientCredentialsGrant: cfg.ClientCredentialsGrant,
-	}
-	switch cfg.ClientAuthMethod {
-	case storage.ClientAuthMethodSelfSignedTLSClientAuth:
-		registeredClientCfg.ExpectedCertificateThumbprint = mtls.Thumbprint(mtlsCert)
-	case storage.ClientAuthMethodTLSClientAuth:
-		registeredClientCfg.ExpectedSubjectDN = mtlsCert.Subject.String()
-	}
-	if cfg.EncryptIDTokens {
-		registeredClientCfg.IDTokenEncryptionKeyManagement = fapi.RSAOAEP256
-		registeredClientCfg.IDTokenEncryptionContentEncryption = contentEncryption
-	}
-	registeredClient, err := storage.NewRegisteredClient(registeredClientCfg)
+	registeredClient, err := storage.NewRegisteredClient(registeredClientConfig(cfg, sigAlg, contentEncryption, mtlsCert))
 	if err != nil {
 		t.Fatalf("fapitest: NewRegisteredClient: %v", err)
 	}
@@ -298,14 +241,7 @@ func New(t *testing.T, cfg Config) *Harness {
 		ClientCredentialsGrant: cfg.ClientCredentialsGrant,
 		OAuthOnly:              cfg.OAuthOnly,
 	}
-	if cfg.OAuthOnly {
-		srvCfg.Algorithms.IDToken = 0
-		srvCfg.Limits.IDTokenLifetime = 0
-	}
-	if cfg.EncryptIDTokens {
-		srvCfg.Algorithms.IDTokenEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.RSAOAEP256}
-		srvCfg.Algorithms.IDTokenEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{contentEncryption}
-	}
+	applyServerIDTokenOptions(&srvCfg, cfg, contentEncryption)
 	revocation := newMemRevocationStore()
 	jwtAccessTokens, err := server.NewJWTAccessTokens(asKeys, sigAlg)
 	if err != nil {
@@ -340,14 +276,7 @@ func New(t *testing.T, cfg Config) *Harness {
 	// the whole codebase (httptest's own), rather than constructing a
 	// second one here, mirroring cmd/conformance-client/mtls.go's own
 	// mtlsSuiteHTTPClient.
-	var httpClient *http.Client
-	if tlsClientCert {
-		httpClient = as.ts.Client()
-		httpClient.Transport.(*http.Transport).TLSClientConfig.Certificates = []tls.Certificate{mtlsTLSCert}
-	} else {
-		httpClient = &http.Client{}
-	}
-	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	httpClient := harnessHTTPClient(as, tlsClientCert, mtlsTLSCert)
 
 	userInfoURL, err := fapi.ParseEndpointURL(as.ts.URL+"/userinfo", fapi.AllowLoopbackHTTP())
 	if err != nil {
@@ -387,10 +316,7 @@ func New(t *testing.T, cfg Config) *Harness {
 		SenderConstrain:  cfg.SenderConstrain,
 		ClientAuthMethod: cfg.ClientAuthMethod,
 	}
-	if cfg.EncryptIDTokens {
-		clientCfg.Algorithms.IDTokenKeyManagement = fapi.RSAOAEP256
-		clientCfg.Algorithms.IDTokenContentEncryption = contentEncryption
-	}
+	applyClientIDTokenOptions(&clientCfg, cfg, contentEncryption)
 	clientDeps := client.Dependencies{
 		Sessions:   memstore.NewSessionStore(),
 		Keys:       clientKeys,
@@ -433,6 +359,159 @@ func New(t *testing.T, cfg Config) *Harness {
 		t: t, Client: c, Resource: rs, Clock: clock, authServer: as, httpClient: httpClient,
 		clientKeys: clientKeys, signatureAlgorithm: sigAlg, MTLSCertificate: mtlsCert,
 	}
+}
+
+// validateConfig rejects a Config whose enum fields hold values the
+// harness can't wire up — split out of New purely to keep that
+// function's own cognitive complexity manageable.
+func validateConfig(t *testing.T, cfg Config) {
+	t.Helper()
+	if cfg.Profile != server.ProfileFAPISecurity && cfg.Profile != server.ProfileFAPISecurityWithMessageSigning {
+		t.Fatalf("fapitest: Config.Profile is invalid")
+	}
+	if cfg.SenderConstrain != storage.SenderConstrainDPoP && cfg.SenderConstrain != storage.SenderConstrainMTLS {
+		t.Fatalf("fapitest: Config.SenderConstrain is invalid")
+	}
+	if cfg.ClientAuthMethod != storage.ClientAuthMethodPrivateKeyJWT &&
+		cfg.ClientAuthMethod != storage.ClientAuthMethodSelfSignedTLSClientAuth &&
+		cfg.ClientAuthMethod != storage.ClientAuthMethodTLSClientAuth {
+		t.Fatalf("fapitest: Config.ClientAuthMethod is invalid")
+	}
+}
+
+// clientProfileFor maps the server profile under test to the matching
+// client profile, so both sides of the harness always agree.
+func clientProfileFor(profile server.Profile) client.Profile {
+	if profile == server.ProfileFAPISecurityWithMessageSigning {
+		return client.ProfileFAPISecurityWithMessageSigning
+	}
+	return client.ProfileFAPISecurity
+}
+
+// applyServerIDTokenOptions adjusts srvCfg for Config.OAuthOnly (no ID
+// tokens at all) and Config.EncryptIDTokens.
+func applyServerIDTokenOptions(srvCfg *server.Config, cfg Config, contentEncryption fapi.ContentEncryptionAlgorithm) {
+	if cfg.OAuthOnly {
+		srvCfg.Algorithms.IDToken = 0
+		srvCfg.Limits.IDTokenLifetime = 0
+	}
+	if cfg.EncryptIDTokens {
+		srvCfg.Algorithms.IDTokenEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.RSAOAEP256}
+		srvCfg.Algorithms.IDTokenEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{contentEncryption}
+	}
+}
+
+// applyClientIDTokenOptions is applyServerIDTokenOptions' client-side
+// counterpart for Config.EncryptIDTokens.
+func applyClientIDTokenOptions(clientCfg *client.Config, cfg Config, contentEncryption fapi.ContentEncryptionAlgorithm) {
+	if cfg.EncryptIDTokens {
+		clientCfg.Algorithms.IDTokenKeyManagement = fapi.RSAOAEP256
+		clientCfg.Algorithms.IDTokenContentEncryption = contentEncryption
+	}
+}
+
+// signatureAlgorithmOrDefault resolves Config.SignatureAlgorithm's
+// zero-means-ES256 default.
+func signatureAlgorithmOrDefault(cfg Config) fapi.SignatureAlgorithm {
+	if cfg.SignatureAlgorithm == 0 {
+		return fapi.ES256
+	}
+	return cfg.SignatureAlgorithm
+}
+
+// contentEncryptionOrDefault resolves Config.IDTokenContentEncryption's
+// zero-means-A256GCM default.
+func contentEncryptionOrDefault(cfg Config) fapi.ContentEncryptionAlgorithm {
+	if cfg.IDTokenContentEncryption == 0 {
+		return fapi.A256GCM
+	}
+	return cfg.IDTokenContentEncryption
+}
+
+// newIDTokenDecrypter returns the client's ID token decryption key
+// manager when Config.EncryptIDTokens is set, nil otherwise.
+func newIDTokenDecrypter(t *testing.T, cfg Config) *ephemeral.KeyManager {
+	t.Helper()
+	if !cfg.EncryptIDTokens {
+		return nil
+	}
+	clientDecryption, err := ephemeral.NewKeyManagerWithDecryption(nil, map[keys.DecryptionPurpose]fapi.KeyManagementAlgorithm{
+		keys.IDTokenDecryption: fapi.RSAOAEP256,
+	})
+	if err != nil {
+		t.Fatalf("fapitest: ephemeral.NewKeyManagerWithDecryption: %v", err)
+	}
+	return clientDecryption
+}
+
+// usesTLSClientCert reports whether cfg needs a client certificate over
+// the wire, for sender-constraining, certificate-based client
+// authentication, or both — see New's own comment at its call site.
+func usesTLSClientCert(cfg Config) bool {
+	return cfg.SenderConstrain == storage.SenderConstrainMTLS ||
+		cfg.ClientAuthMethod == storage.ClientAuthMethodSelfSignedTLSClientAuth ||
+		cfg.ClientAuthMethod == storage.ClientAuthMethodTLSClientAuth
+}
+
+// newMTLSClientCertificate generates the harness's one self-signed
+// client certificate, returning both its tls.Certificate (presented on
+// the wire) and parsed *x509.Certificate (registered as the client's
+// expected identity).
+func newMTLSClientCertificate(t *testing.T) (tls.Certificate, *x509.Certificate) {
+	t.Helper()
+	tlsCert, err := SelfSignedClientCert("fapitest-mtls-client")
+	if err != nil {
+		t.Fatalf("fapitest: generate mtls client certificate: %v", err)
+	}
+	cert, err := x509.ParseCertificate(tlsCert.Certificate[0])
+	if err != nil {
+		t.Fatalf("fapitest: parse mtls client certificate: %v", err)
+	}
+	return tlsCert, cert
+}
+
+// registeredClientConfig builds the harness's one registered client,
+// binding it to mtlsCert under the certificate-based client
+// authentication methods (mtlsCert is nil otherwise) and registering
+// for encrypted ID tokens when Config.EncryptIDTokens is set.
+func registeredClientConfig(cfg Config, sigAlg fapi.SignatureAlgorithm, contentEncryption fapi.ContentEncryptionAlgorithm, mtlsCert *x509.Certificate) storage.RegisteredClientConfig {
+	registeredClientCfg := storage.RegisteredClientConfig{
+		ID:                           ClientID,
+		RedirectURIs:                 []fapi.RegisteredRedirectURI{RedirectURI},
+		ClientAssertionAlgorithm:     sigAlg,
+		RequestObjectAlgorithm:       sigAlg,
+		SenderConstrain:              cfg.SenderConstrain,
+		ClientAuthMethod:             cfg.ClientAuthMethod,
+		AllowedScopes:                []string{"openid", "accounts", "offline_access"},
+		AllowsClientCredentialsGrant: cfg.ClientCredentialsGrant,
+	}
+	switch cfg.ClientAuthMethod {
+	case storage.ClientAuthMethodSelfSignedTLSClientAuth:
+		registeredClientCfg.ExpectedCertificateThumbprint = mtls.Thumbprint(mtlsCert)
+	case storage.ClientAuthMethodTLSClientAuth:
+		registeredClientCfg.ExpectedSubjectDN = mtlsCert.Subject.String()
+	}
+	if cfg.EncryptIDTokens {
+		registeredClientCfg.IDTokenEncryptionKeyManagement = fapi.RSAOAEP256
+		registeredClientCfg.IDTokenEncryptionContentEncryption = contentEncryption
+	}
+	return registeredClientCfg
+}
+
+// harnessHTTPClient builds the client-side HTTP client — presenting
+// mtlsTLSCert when tlsClientCert, see New's own comment at its call
+// site — that never follows redirects, so authorization redirects come
+// back to the harness instead.
+func harnessHTTPClient(as *authServer, tlsClientCert bool, mtlsTLSCert tls.Certificate) *http.Client {
+	var httpClient *http.Client
+	if tlsClientCert {
+		httpClient = as.ts.Client()
+		httpClient.Transport.(*http.Transport).TLSClientConfig.Certificates = []tls.Certificate{mtlsTLSCert}
+	} else {
+		httpClient = &http.Client{}
+	}
+	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return httpClient
 }
 
 func loopbackEndpoints(base string) server.Endpoints {

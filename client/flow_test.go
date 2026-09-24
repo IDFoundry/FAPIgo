@@ -148,24 +148,7 @@ func (a *fakeAS) handlePAR(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if a.messageSigned || a.requestObjectPAR {
-		requestJWT := r.PostForm.Get("request")
-		if requestJWT == "" {
-			a.t.Errorf("PAR: missing signed request object under message-signing profile")
-		} else {
-			obj, err := requestobject.Parse(requestJWT)
-			if err != nil {
-				a.t.Errorf("PAR: parse request object: %v", err)
-			} else if nonceRaw, ok := obj.Parameter("nonce"); ok {
-				json.Unmarshal(nonceRaw, &a.lastNonce)
-			}
-		}
-	} else {
-		if r.PostForm.Get("code_challenge") == "" {
-			a.t.Errorf("PAR: missing code_challenge under baseline profile")
-		}
-		a.lastNonce = r.PostForm.Get("nonce")
-	}
+	a.recordPARParameters(r.PostForm)
 
 	if a.nextDPoPNonce != "" {
 		w.Header().Set("DPoP-Nonce", a.nextDPoPNonce)
@@ -176,6 +159,32 @@ func (a *fakeAS) handlePAR(w http.ResponseWriter, r *http.Request) {
 		"request_uri": "urn:ietf:params:oauth:request_uri:abc123",
 		"expires_in":  60,
 	})
+}
+
+// recordPARParameters checks the pushed request carries its parameters
+// the way this fake AS expects (a signed request object, or plain form
+// parameters) and records the nonce it was sent.
+func (a *fakeAS) recordPARParameters(form url.Values) {
+	if !a.messageSigned && !a.requestObjectPAR {
+		if form.Get("code_challenge") == "" {
+			a.t.Errorf("PAR: missing code_challenge under baseline profile")
+		}
+		a.lastNonce = form.Get("nonce")
+		return
+	}
+	requestJWT := form.Get("request")
+	if requestJWT == "" {
+		a.t.Errorf("PAR: missing signed request object")
+		return
+	}
+	obj, err := requestobject.Parse(requestJWT)
+	if err != nil {
+		a.t.Errorf("PAR: parse request object: %v", err)
+		return
+	}
+	if nonceRaw, ok := obj.Parameter("nonce"); ok {
+		json.Unmarshal(nonceRaw, &a.lastNonce)
+	}
 }
 
 // callbackFor builds the query string a real authorization server would

@@ -2,6 +2,7 @@ package federation
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -227,23 +228,31 @@ func TestMergeOperatorValuePerOperator(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := mergeOperatorValue(tc.op, json.RawMessage(tc.current), json.RawMessage(tc.next))
-			if tc.wantErrLike != "" {
-				if err == nil {
-					t.Fatalf("mergeOperatorValue() = nil error, want error containing %q", tc.wantErrLike)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("mergeOperatorValue: %v", err)
-			}
-			eq, err := jsonEqual(got, json.RawMessage(tc.want))
-			if err != nil {
-				t.Fatalf("jsonEqual: %v", err)
-			}
-			if !eq {
-				t.Fatalf("mergeOperatorValue() = %s, want %s", got, tc.want)
-			}
+			checkMergeOperatorResult(t, got, err, tc.want, tc.wantErrLike)
 		})
+	}
+}
+
+// checkMergeOperatorResult asserts mergeOperatorValue's output against
+// one table row: an error containing wantErrLike when that's set,
+// otherwise a result equal to want.
+func checkMergeOperatorResult(t *testing.T, got json.RawMessage, err error, want, wantErrLike string) {
+	t.Helper()
+	if wantErrLike != "" {
+		if err == nil || !strings.Contains(err.Error(), wantErrLike) {
+			t.Fatalf("mergeOperatorValue() error = %v, want error containing %q", err, wantErrLike)
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("mergeOperatorValue: %v", err)
+	}
+	eq, err := jsonEqual(got, json.RawMessage(want))
+	if err != nil {
+		t.Fatalf("jsonEqual: %v", err)
+	}
+	if !eq {
+		t.Fatalf("mergeOperatorValue() = %s, want %s", got, want)
 	}
 }
 

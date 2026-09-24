@@ -66,7 +66,7 @@ func (s *Server) SignUserInfoResponse(ctx context.Context, client storage.Regist
 	if err != nil {
 		return "", newError(ErrorServerError, 500, "failed to encode userinfo aud", err)
 	}
-	signedClaims := make(map[string]json.RawMessage, len(claims)+2)
+	signedClaims := make(map[string]json.RawMessage, len(claims))
 	for k, v := range claims {
 		signedClaims[k] = v
 	}

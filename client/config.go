@@ -60,6 +60,31 @@ const (
 	PARDPoPBindingJKT
 )
 
+// PushedRequestEncoding selects how BeginAuthorization encodes the
+// authorization parameters it pushes to the PAR endpoint. Like
+// PARDPoPBinding, its zero value is a real, meaningful default rather
+// than a validation error.
+type PushedRequestEncoding uint8
+
+const (
+	// PushedRequestEncodingProfileDefault (the default, zero value)
+	// follows Profile: plain form parameters under ProfileFAPISecurity,
+	// a signed request object under ProfileFAPISecurityWithMessageSigning.
+	PushedRequestEncodingProfileDefault PushedRequestEncoding = iota
+
+	// PushedRequestEncodingRequestObject always sends a signed request
+	// object (RFC 9101), even under ProfileFAPISecurity. Unlike
+	// ProfileFAPISecurityWithMessageSigning, it does not also switch the
+	// authorization response to JARM — the response stays plain query
+	// parameters. For an authorization server that requires signed
+	// requests without supporting JARM, e.g. an OpenID Federation 1.0
+	// OP using Automatic Registration (§12.1.1.1–§12.1.1.2), where a
+	// request object is one of the two ways an RP may prove control of
+	// its keys. Requires Algorithms.RequestObject and
+	// Limits.RequestObjectLifetime.
+	PushedRequestEncodingRequestObject
+)
+
 // Algorithms are the single algorithm this client uses for each signing
 // operation it performs, and the single algorithm it expects the
 // authorization server to use for each of its own. A closed
@@ -72,7 +97,8 @@ type Algorithms struct {
 
 	// RequestObject is the algorithm this client signs pushed
 	// authorization request objects with. Required only when Profile is
-	// ProfileFAPISecurityWithMessageSigning.
+	// ProfileFAPISecurityWithMessageSigning or PushedRequestEncoding is
+	// PushedRequestEncodingRequestObject.
 	RequestObject fapi.SignatureAlgorithm
 
 	// DPoP is the algorithm this client signs DPoP proofs with.
@@ -244,7 +270,8 @@ type Limits struct {
 
 	// RequestObjectLifetime is how long a signed request object this
 	// client produces remains valid for. Required only when Profile is
-	// ProfileFAPISecurityWithMessageSigning.
+	// ProfileFAPISecurityWithMessageSigning or PushedRequestEncoding is
+	// PushedRequestEncodingRequestObject.
 	RequestObjectLifetime time.Duration
 
 	// SessionLifetime bounds how long between BeginAuthorization and a
@@ -395,6 +422,12 @@ type Config struct {
 	// binding is derived purely from whichever certificate authenticates
 	// the eventual token-endpoint connection).
 	PARDPoPBinding PARDPoPBinding
+
+	// PushedRequestEncoding selects whether pushed authorization
+	// requests carry plain parameters or a signed request object — see
+	// PushedRequestEncoding's own doc comment. Defaults to
+	// PushedRequestEncodingProfileDefault, which follows Profile.
+	PushedRequestEncoding PushedRequestEncoding
 
 	// SenderConstrain selects how this client's access tokens are
 	// sender-constrained — storage.SenderConstrainDPoP (the default,

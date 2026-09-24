@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/federation"
@@ -85,7 +86,10 @@ func (c *Client) EntityConfiguration(ctx context.Context, metadata map[string]js
 // exists to guard against — that identical check is still performed
 // here too, against resolved.EntityID, since "openid_provider" metadata
 // carries its own "issuer" claim by OIDC Discovery 1.0 convention
-// regardless of how it was obtained.
+// regardless of how it was obtained. The OP must also advertise
+// Automatic Registration ("automatic" in
+// client_registration_types_supported, OpenID Federation 1.0 §12.1) —
+// the only registration type this package supports.
 //
 // The operational keys DiscoveredMetadata.JWKSURI/.IssuerKeySource
 // point at are still fetched live over HTTP, exactly as Discover's own
@@ -113,5 +117,28 @@ func DiscoverViaFederation(ctx context.Context, resolver *federation.Resolver, i
 	if err != nil {
 		return DiscoveredMetadata{}, fmt.Errorf("client: discover via federation: %w", err)
 	}
+	if err := requireAutomaticRegistration(raw); err != nil {
+		return DiscoveredMetadata{}, fmt.Errorf("client: discover via federation: %w", err)
+	}
 	return buildDiscoveredMetadata(doc, opts...)
+}
+
+// requireAutomaticRegistration checks that an OP's "openid_provider"
+// metadata advertises Automatic Registration — the only registration
+// type this package's federation support uses (see EntityConfiguration).
+// OpenID Federation 1.0 §12.1: "An OP that supports Automatic
+// Registration MUST include the automatic keyword in its
+// client_registration_types_supported metadata parameter." Values this
+// package doesn't recognize alongside "automatic" are ignored.
+func requireAutomaticRegistration(raw json.RawMessage) error {
+	var md struct {
+		ClientRegistrationTypesSupported []string `json:"client_registration_types_supported"`
+	}
+	if err := json.Unmarshal(raw, &md); err != nil {
+		return fmt.Errorf("parse client_registration_types_supported: %w", err)
+	}
+	if !slices.Contains(md.ClientRegistrationTypesSupported, "automatic") {
+		return fmt.Errorf("openid_provider metadata client_registration_types_supported %q does not include \"automatic\"", md.ClientRegistrationTypesSupported)
+	}
+	return nil
 }

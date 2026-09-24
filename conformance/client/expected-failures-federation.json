@@ -1,14 +1,18 @@
 [
   {
     "test-name": "openid-federation-client-test",
-    "note": "Permanent: needs this driver to reach ID token issuance, which needs client.DiscoverViaFederation to accept the suite's own mock OP metadata. AddOpenIDProviderMetadataToEntityConfiguration.java never sets \"issuer\", a field OIDC Discovery 1.0 §3 requires and OpenID Federation 1.0 incorporates by reference (also requiring it match the Entity Identifier) — confirmed unfixed upstream as of PR #321."
+    "note": "Suite-side: the suite's token endpoint (OpenIDFederationClientTest.tokenResponse) validates the client assertion aud against config federation.entity_identifier, which in this plan is the RP's own Entity Identifier rather than the OP's, so an assertion addressed to the OP's issuer (which the suite's ValidateClientAssertionClaims otherwise accepts) fails 'aud mismatch'. The same response also omits access_token/token_type (RFC 6749 §5.1), which client.CompleteAuthorization correctly rejects. Reachable since the suite added issuer to its OP metadata (suite commit 37ae2faad, 2026-09-23)."
+  },
+  {
+    "test-name": "openid-federation-client-valid-unknown-client-registration-types-supported",
+    "note": "Same suite-side token endpoint bugs as openid-federation-client-test."
   },
   {
     "test-name": "openid-federation-client-invalid-aud-in-id-token",
-    "note": "Permanent: same root cause as openid-federation-client-test above — also needs ID token issuance to be reached before its own aud check can even run."
+    "note": "Same suite-side token endpoint bugs as openid-federation-client-test; the suite fails the module before its ID token aud check can run."
   },
   {
     "test-name": "openid-federation-client-invalid-iss-in-id-token",
-    "note": "Permanent: same root cause as openid-federation-client-test above — also needs ID token issuance to be reached before its own iss check can even run."
+    "note": "Same suite-side token endpoint bugs as openid-federation-client-test; the suite fails the module before its ID token iss check can run."
   }
 ]

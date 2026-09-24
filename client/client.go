@@ -152,6 +152,9 @@ func validateEnumFields(cfg Config) error {
 	if cfg.PARDPoPBinding != PARDPoPBindingProof && cfg.PARDPoPBinding != PARDPoPBindingJKT {
 		return fmt.Errorf("client: config: par_dpop_binding is invalid")
 	}
+	if cfg.PushedRequestEncoding != PushedRequestEncodingProfileDefault && cfg.PushedRequestEncoding != PushedRequestEncodingRequestObject {
+		return fmt.Errorf("client: config: pushed_request_encoding is invalid")
+	}
 	if cfg.AuthorizationResponseIssPolicy != RequireAuthorizationResponseIss && cfg.AuthorizationResponseIssPolicy != TolerateAbsentAuthorizationResponseIss {
 		return fmt.Errorf("client: config: authorization_response_iss_policy is required (RequireAuthorizationResponseIss or TolerateAbsentAuthorizationResponseIss)")
 	}
@@ -288,7 +291,7 @@ func validateClientLimits(cfg Config) error {
 
 func validateMessageSigningProfile(cfg Config) error {
 	if cfg.Profile != ProfileFAPISecurityWithMessageSigning {
-		return nil
+		return validateRequestObjectEncoding(cfg)
 	}
 	if !cfg.Algorithms.RequestObject.IsValid() {
 		return fmt.Errorf("client: config: algorithms.request_object is required under ProfileFAPISecurityWithMessageSigning")
@@ -301,6 +304,23 @@ func validateMessageSigningProfile(cfg Config) error {
 	}
 	if cfg.Limits.MaxJARMResponseLifetime <= 0 {
 		return fmt.Errorf("client: config: limits.max_jarm_response_lifetime must be positive under ProfileFAPISecurityWithMessageSigning")
+	}
+	return nil
+}
+
+// validateRequestObjectEncoding checks the fields
+// PushedRequestEncodingRequestObject needs under ProfileFAPISecurity —
+// the request-object half of validateMessageSigningProfile's checks,
+// without JARM's.
+func validateRequestObjectEncoding(cfg Config) error {
+	if cfg.PushedRequestEncoding != PushedRequestEncodingRequestObject {
+		return nil
+	}
+	if !cfg.Algorithms.RequestObject.IsValid() {
+		return fmt.Errorf("client: config: algorithms.request_object is required under PushedRequestEncodingRequestObject")
+	}
+	if cfg.Limits.RequestObjectLifetime <= 0 {
+		return fmt.Errorf("client: config: limits.request_object_lifetime must be positive under PushedRequestEncodingRequestObject")
 	}
 	return nil
 }

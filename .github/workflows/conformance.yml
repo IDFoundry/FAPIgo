@@ -77,10 +77,12 @@ jobs:
 
       # Prebuilt images — no Java/Maven build needed, mirrors this
       # repo's own conformance/server/scripts/README.md "Manual test
-      # run" step 1.
+      # run" step 1. The override maps host.docker.internal for the
+      # suite's server container, which Linux Docker doesn't define on
+      # its own — see the override file's comment.
       - name: Bring up OIDF conformance suite
         working-directory: /tmp/conformance-suite
-        run: docker compose -f docker-compose-prebuilt.yml up -d
+        run: docker compose -f docker-compose-prebuilt.yml -f "$GITHUB_WORKSPACE/conformance/scripts/suite-host-gateway.override.yml" up -d
 
       # Generates the gitignored plan configs (private test-client keys)
       # plus registers matching public keys with this AS — exactly the

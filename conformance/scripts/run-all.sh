@@ -108,10 +108,9 @@
 #     client_secret_basic default, FAPI 2.0's own prohibition). Not
 #     wired in here at all: every module in it would fail the same way.
 #   - RP plan (suite plays OP, tests cmd/conformance-client): "RP
-#     federation-rp" below — 7 of 10 modules pass; the other 3 hit a
-#     different, equally confirmed suite-side gap (missing "issuer" in
-#     the suite's own OP metadata) — see run_federation_rp_plan's own
-#     comment and ../client/expected-failures-federation.json.
+#     federation-rp" below — 6 of 10 modules pass; the other 4 reach
+#     the suite's own token endpoint and hit two suite-side bugs there
+#     (see ../client/expected-failures-federation.json).
 #
 # run-federation-plan.py also treats a SKIPPED module as unexpected
 # (not just FAILURE/WARNING) unless listed in
@@ -400,8 +399,12 @@ run_rp_plan() {
 	(cd "$REPO_ROOT" && go run ./cmd/conformance-client -suite="$CONFORMANCE_SERVER" -profile="$profile" "$@") >"$log_file" 2>&1 || true
 
 	local total passed
-	total="$(awk '/=== summary ===/{f=1;next} f && NF{c++} END{print c+0}' "$log_file")"
-	passed="$(awk '/=== summary ===/{f=1;next} f && $3=="PASSED"{c++} END{print c+0}' "$log_file")"
+	# Count only the summary block's own per-module lines — stop at the
+	# "=== deviations" block the driver appends after it when results
+	# drift from an expected-failures file, or those lines would be
+	# counted as extra modules.
+	total="$(awk '/=== summary ===/{f=1;next} /=== deviations/{f=0} f && NF{c++} END{print c+0}' "$log_file")"
+	passed="$(awk '/=== summary ===/{f=1;next} /=== deviations/{f=0} f && $3=="PASSED"{c++} END{print c+0}' "$log_file")"
 
 	if [[ -n "$total" && "$total" != "0" && "$passed" = "$total" ]]; then
 		record_result "RP $name" "OK — $passed/$total PASSED"
@@ -414,8 +417,8 @@ run_rp_plan() {
 # run_federation_rp_plan — cmd/conformance-client -profile=federation
 # against the OIDF suite's own "Entity joined to test federation RP
 # test" plan. Unlike every run_rp_plan caller above, "clean" here isn't
-# 100% PASSED: 3 of 10 modules are permanently blocked by a confirmed
-# suite-side gap (this file's own header comment, and
+# 100% PASSED: 4 of 10 modules are blocked by confirmed suite-side
+# bugs (this file's own header comment, and
 # ../client/scripts/README.md's "Federation" section, have the full
 # story). So this driver's own -expected-failures flag does that
 # module-by-module comparison itself and reports the *result* via exit
@@ -439,8 +442,12 @@ run_federation_rp_plan() {
 		>"$log_file" 2>&1 || exit_code=$?
 
 	local total passed
-	total="$(awk '/=== summary ===/{f=1;next} f && NF{c++} END{print c+0}' "$log_file")"
-	passed="$(awk '/=== summary ===/{f=1;next} f && $3=="PASSED"{c++} END{print c+0}' "$log_file")"
+	# Count only the summary block's own per-module lines — stop at the
+	# "=== deviations" block the driver appends after it when results
+	# drift from an expected-failures file, or those lines would be
+	# counted as extra modules.
+	total="$(awk '/=== summary ===/{f=1;next} /=== deviations/{f=0} f && NF{c++} END{print c+0}' "$log_file")"
+	passed="$(awk '/=== summary ===/{f=1;next} /=== deviations/{f=0} f && $3=="PASSED"{c++} END{print c+0}' "$log_file")"
 
 	if [[ "$exit_code" -eq 0 ]]; then
 		record_result "RP $name" "OK — $passed/$total PASSED, matches expected-failures-federation.json"

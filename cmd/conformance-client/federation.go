@@ -140,6 +140,7 @@ func runFederationRP(apiBase, evidenceDir, expectedFailuresFile string) error {
 		ResponseTypes:           []string{"code"},
 		RedirectURIs:            []string{redirectURI},
 		TokenEndpointAuthMethod: "private_key_jwt",
+		RequestObjectSigningAlg: fapi.ES256.String(),
 		JWKS:                    rpClientAuthJWKS,
 	})
 	if err != nil {
@@ -220,15 +221,23 @@ func runFederationRP(apiBase, evidenceDir, expectedFailuresFile string) error {
 		return fmt.Errorf("generate dpop key: %w", err)
 	}
 	keyMgr, err := keys.NewKeyManagerFromSigners(
+		// The request object is signed with the same published RP key
+		// as the client assertion — OpenID Federation 1.0 §12.1.1.1
+		// only requires it to be a key in the RP's own JWK Set.
 		map[keys.SigningPurpose]crypto.Signer{
 			keys.ClientAuthentication: rpClientAuthPriv,
+			keys.RequestObjectSigning: rpClientAuthPriv,
 			keys.DPoPProofSigning:     dpopSigner,
 		},
 		map[keys.SigningPurpose]fapi.SignatureAlgorithm{
 			keys.ClientAuthentication: fapi.ES256,
+			keys.RequestObjectSigning: fapi.ES256,
 			keys.DPoPProofSigning:     fapi.ES256,
 		},
-		map[keys.SigningPurpose]string{keys.ClientAuthentication: "rp-client-key1"},
+		map[keys.SigningPurpose]string{
+			keys.ClientAuthentication: "rp-client-key1",
+			keys.RequestObjectSigning: "rp-client-key1",
+		},
 	)
 	if err != nil {
 		return fmt.Errorf("build key manager: %w", err)
@@ -374,13 +383,21 @@ func buildFederationModuleClient(ctx context.Context, d federationModuleDriver, 
 		Profile:                        client.ProfileFAPISecurity,
 		Assurance:                      client.AssuranceDevelopment,
 		AuthorizationResponseIssPolicy: client.TolerateAbsentAuthorizationResponseIss, // NewFromDiscovery below raises this when discovery confirms support
+		// OpenID Federation 1.0 §12.1.1.2 lets an automatically
+		// registered RP prove control of its keys at PAR with either a
+		// signed request object or private_key_jwt client auth; the
+		// suite's OP only implements the request-object option, so send
+		// both (client auth stays private_key_jwt regardless).
+		PushedRequestEncoding: client.PushedRequestEncodingRequestObject,
 		Algorithms: client.Algorithms{
 			DPoP:                 fapi.ES256,
 			IDToken:              discovered.IDTokenAlgorithms[0],
 			ClientAuthentication: fapi.ES256,
+			RequestObject:        fapi.ES256,
 		},
 		Limits: client.Limits{
 			ClientAssertionLifetime: time.Minute,
+			RequestObjectLifetime:   time.Minute,
 			SessionLifetime:         5 * time.Minute,
 			MaxIDTokenLifetime:      5 * time.Minute,
 			MaxClockSkew:            15 * time.Second,

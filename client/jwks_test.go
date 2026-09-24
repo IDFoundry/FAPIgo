@@ -130,6 +130,31 @@ func TestPublicJWKSMessageSigningProfileIncludesRequestObjectKey(t *testing.T) {
 	}
 }
 
+func TestPublicJWKSRequestObjectEncodingIncludesRequestObjectKey(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.PushedRequestEncoding = client.PushedRequestEncodingRequestObject
+	cfg.Algorithms.RequestObject = fapi.ES256
+	cfg.Limits.RequestObjectLifetime = time.Minute
+	deps := validDependencies(t)
+	km := deps.Keys.(*fakeKeyManager)
+
+	c, err := client.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	set, err := c.PublicJWKS(context.Background())
+	if err != nil {
+		t.Fatalf("PublicJWKS: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, k := range set.Keys {
+		seen[k.KeyID()] = true
+	}
+	if !seen[km.keyID(keys.RequestObjectSigning)] {
+		t.Fatalf("Keys missing request object kid %q; got %v", km.keyID(keys.RequestObjectSigning), seen)
+	}
+}
+
 // TestPublicJWKSExcludesDPoPKey confirms DPoPProofSigning's key never
 // appears in PublicJWKS's output regardless of profile — RFC 9449
 // embeds a DPoP proof's public key directly in the proof's own header,

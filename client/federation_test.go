@@ -294,6 +294,7 @@ func TestDiscoverViaFederation(t *testing.T) {
 			"jwks_uri":                              mustMarshal(t, entityID+"/jwks"),
 			"id_token_signing_alg_values_supported": mustMarshal(t, []string{"ES256"}),
 			"authorization_response_iss_parameter_supported": mustMarshal(t, true),
+			"client_registration_types_supported":            mustMarshal(t, []string{"automatic"}),
 		}
 		return map[string]json.RawMessage{"openid_provider": mustMarshal(t, openIDProvider)}
 	})
@@ -333,5 +334,47 @@ func TestDiscoverViaFederationRejectsIssuerMismatch(t *testing.T) {
 	})
 	if _, err := client.DiscoverViaFederation(context.Background(), resolver, entityID); err == nil {
 		t.Fatalf("DiscoverViaFederation(issuer mismatch) = nil error, want error")
+	}
+}
+
+// TestDiscoverViaFederationClientRegistrationTypes covers OpenID
+// Federation 1.0 §12.1: an OP supporting Automatic Registration MUST
+// list "automatic" in client_registration_types_supported, and this
+// package only does Automatic Registration — so an OP that omits it
+// (or lists only "explicit") must be refused before any authorization
+// request is attempted. Unrecognized extra values are tolerated.
+func TestDiscoverViaFederationClientRegistrationTypes(t *testing.T) {
+	cases := map[string]struct {
+		types   any
+		wantErr bool
+	}{
+		"missing":                {types: nil, wantErr: true},
+		"empty":                  {types: []string{}, wantErr: true},
+		"explicit only":          {types: []string{"explicit"}, wantErr: true},
+		"automatic":              {types: []string{"automatic"}},
+		"automatic plus unknown": {types: []string{"automatic", "some-future-type"}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			entityID, resolver := selfAnchoredOpenIDProvider(t, func(entityID string) map[string]json.RawMessage {
+				openIDProvider := map[string]json.RawMessage{
+					"issuer":                                mustMarshal(t, entityID),
+					"token_endpoint":                        mustMarshal(t, entityID+"/token"),
+					"jwks_uri":                              mustMarshal(t, entityID+"/jwks"),
+					"id_token_signing_alg_values_supported": mustMarshal(t, []string{"ES256"}),
+				}
+				if tc.types != nil {
+					openIDProvider["client_registration_types_supported"] = mustMarshal(t, tc.types)
+				}
+				return map[string]json.RawMessage{"openid_provider": mustMarshal(t, openIDProvider)}
+			})
+			_, err := client.DiscoverViaFederation(context.Background(), resolver, entityID)
+			if tc.wantErr && err == nil {
+				t.Fatalf("DiscoverViaFederation(%s) = nil error, want error", name)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("DiscoverViaFederation(%s): %v", name, err)
+			}
+		})
 	}
 }

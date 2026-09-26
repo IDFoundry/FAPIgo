@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"reflect"
 	"testing"
@@ -69,10 +70,20 @@ func FuzzGrantRecordRoundTrip(f *testing.F) {
 	})
 }
 
+// jsonEquivalent reports whether a and b are the same JSON value,
+// ignoring whitespace and key order. Numbers compare by their literal
+// text (UseNumber), so one outside float64's range — valid JSON the
+// encoder passes through untouched — doesn't fail to decode.
 func jsonEquivalent(a, b []byte) bool {
-	var av, bv any
-	if json.Unmarshal(a, &av) != nil || json.Unmarshal(b, &bv) != nil {
-		return false
-	}
-	return reflect.DeepEqual(av, bv)
+	av, aErr := decodeJSONValue(a)
+	bv, bErr := decodeJSONValue(b)
+	return aErr == nil && bErr == nil && reflect.DeepEqual(av, bv)
+}
+
+func decodeJSONValue(raw []byte) (any, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var v any
+	err := dec.Decode(&v)
+	return v, err
 }

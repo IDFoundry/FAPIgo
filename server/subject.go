@@ -110,8 +110,10 @@ type GrantedAuthorization struct {
 	// or a CIBA poll). Nil if the application adds none.
 	//
 	// CompleteAuthorization/CompleteBackchannelAuthentication reject a
-	// claim name the server manages itself (see reservedIDTokenClaims)
-	// or a value that isn't valid JSON. A name that collides with an
+	// claim name the server manages itself (see reservedIDTokenClaims),
+	// a name that isn't valid UTF-8, a value that isn't valid JSON, and
+	// claims whose total size exceeds Limits.MaxIDTokenClaimsBytes —
+	// a budget identity and extension claims share at issuance. A name that collides with an
 	// IdentityClaimsSource or extension (ReturnInTokenClaims) claim
 	// overrides it: this is the application's own decision at login,
 	// the most specific source of the three. The claims are ignored if

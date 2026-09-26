@@ -211,9 +211,10 @@ func (e MTLSEndpoints) IsZero() bool {
 	return e.Token.IsZero() && e.PushedAuthorizationRequest.IsZero() && e.BackchannelAuthentication.IsZero()
 }
 
-// Limits bounds the lifetimes and clock tolerances this server enforces.
-// None of these have an implicit default — New rejects a zero (or, for
-// MaxClockSkew, negative) value.
+// Limits bounds the lifetimes, clock tolerances and sizes this server
+// enforces. None of these have an implicit default — New rejects a zero
+// (or, for MaxClockSkew, negative) value. RecommendedLimits returns a
+// documented starting point for every field.
 type Limits struct {
 	// PushedRequestLifetime is how long a pushed authorization request's
 	// request_uri remains valid, and is reported to the client as
@@ -248,6 +249,32 @@ type Limits struct {
 	// Required unless Config.OAuthOnly is true — see
 	// AlgorithmPolicy.IDToken's own doc comment.
 	IDTokenLifetime time.Duration
+
+	// MaxIDTokenClaimsBytes bounds the total size of the non-standard
+	// claims in an issued ID token — every claim beyond iss, sub, aud,
+	// exp, iat, nonce, auth_time, acr, amr and at_hash — measured as
+	// each claim name's length plus its JSON-encoded value's. It covers
+	// all three sources such claims come from:
+	//
+	//   - GrantedAuthorization.IDTokenClaims, supplied by the
+	//     application at login;
+	//   - Dependencies.IdentityClaims, for names the client requested
+	//     via the OIDC "claims" parameter;
+	//   - extension parameters registered with ReturnInTokenClaims.
+	//
+	// Nothing else bounds how large an ID token gets, and relying
+	// parties cap what they'll accept — this module's own client
+	// defaults to 16 KiB for a compact token, and an encrypted ID token
+	// is about a third larger again. The limit is checked twice:
+	// CompleteAuthorization and CompleteBackchannelAuthentication reject
+	// IDTokenClaims that alone exceed it (invalid_request, before
+	// anything is stored), and every ID token issuance — code exchange,
+	// refresh, CIBA — rejects the merged total if identity or extension
+	// claims push it over (server_error, since those are only resolved
+	// then). Raise it only alongside every relying party's own limit.
+	//
+	// Required unless Config.OAuthOnly is true.
+	MaxIDTokenClaimsBytes int
 
 	// RefreshTokenLifetime bounds how long a newly issued (or rotated)
 	// refresh token remains redeemable.

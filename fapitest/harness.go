@@ -248,6 +248,7 @@ func New(t *testing.T, cfg Config) *Harness {
 			JARMResponseLifetime:       time.Minute,
 			AccessTokenLifetime:        5 * time.Minute,
 			IDTokenLifetime:            5 * time.Minute,
+			MaxIDTokenClaimsBytes:      4096,
 			RefreshTokenLifetime:       5 * time.Minute,
 			MaxDPoPProofAge:            time.Minute,
 			MaxClockSkew:               5 * time.Second,
@@ -410,6 +411,7 @@ func applyServerIDTokenOptions(srvCfg *server.Config, cfg Config, contentEncrypt
 	if cfg.OAuthOnly {
 		srvCfg.Algorithms.IDToken = 0
 		srvCfg.Limits.IDTokenLifetime = 0
+		srvCfg.Limits.MaxIDTokenClaimsBytes = 0
 	}
 	if cfg.EncryptIDTokens {
 		srvCfg.Algorithms.IDTokenEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.RSAOAEP256}

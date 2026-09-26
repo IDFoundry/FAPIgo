@@ -74,7 +74,7 @@ func (s *Server) CompleteBackchannelAuthentication(ctx context.Context, req Comp
 			return wrapped
 		}
 
-		if claimsErr := validateGrantedIDTokenClaims(result.grant.IDTokenClaims); claimsErr != nil {
+		if claimsErr := validateGrantedIDTokenClaims(result.grant.IDTokenClaims, s.cfg.Limits.MaxIDTokenClaimsBytes); claimsErr != nil {
 			wrapped := newError(ErrorInvalidRequest, 400, "granted ID token claims are not valid", claimsErr)
 			s.audit(ctx, AuditEventCompleteBackchannelAuthentication, pending.ClientID, AuditOutcomeFailure, string(wrapped.Code()))
 			return wrapped

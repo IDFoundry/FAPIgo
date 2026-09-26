@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.33.0](https://github.com/IDFoundry/FAPIgo/compare/v0.32.0...v0.33.0) (2026-09-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* **server:** Limits.MaxIDTokenClaimsBytes is required unless Config.OAuthOnly is set — New rejects a zero value, like every other Limits field. Configs built from RecommendedLimits() get 4096; a hand-built Limits must set it.
+* **storage:** custom TransactionStore, GrantStore and BackchannelAuthenticationStore implementations must replace the removed per-field columns with a single Request or Grant value, persisted and returned unmodified. Records written by a previous version cannot be read after upgrading; they are all short-lived (pushed requests, authorization codes, CIBA requests) except refresh tokens, which clients must re-obtain.
+
+### Features
+
+* add client PushedRequestEncoding and fix federation RP conformance ([#371](https://github.com/IDFoundry/FAPIgo/issues/371)) ([28333c3](https://github.com/IDFoundry/FAPIgo/commit/28333c355f584c8b5aff2271c6a349c1ed54bac3))
+* **server:** add Limits.MaxIDTokenClaimsBytes to bound ID token size ([dc4e077](https://github.com/IDFoundry/FAPIgo/commit/dc4e077c0e704f2b1429bf0e48d34fb03709283b))
+* **server:** application-supplied ID token claims at authorization time ([a09b7cb](https://github.com/IDFoundry/FAPIgo/commit/a09b7cb8936c6fe70386de68522ee54503607e6f))
+* **storage:** persist grants and requests as opaque server-owned payloads ([4c23620](https://github.com/IDFoundry/FAPIgo/commit/4c2362062703d77c75b136e8fc17fcb9c2fe95d8))
+
+
+### Bug Fixes
+
+* **server:** accept loopback http redirect URIs outside production ([fa0be87](https://github.com/IDFoundry/FAPIgo/commit/fa0be8730838b6dbcb23068f0155823ed379898e))
+* **server:** reject invalid UTF-8 subject, acr/amr and ID token claim names ([26546be](https://github.com/IDFoundry/FAPIgo/commit/26546be1f949bfaa8ecea469f1ef1b25bc6a8c52))
+* treat a bracketed IPv6 loopback host without a port as loopback ([4a52e60](https://github.com/IDFoundry/FAPIgo/commit/4a52e609303afd9c30755e33fd75d00e094f69cc))
+
 ## [0.32.0](https://github.com/IDFoundry/FAPIgo/compare/v0.31.0...v0.32.0) (2026-09-23)
 
 

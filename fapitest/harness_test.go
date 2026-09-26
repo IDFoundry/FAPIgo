@@ -149,3 +149,25 @@ func verifyAccessToken(t *testing.T, h *fapitest.Harness, tokens client.TokenSet
 		t.Errorf("ClientID = %q, want %q", authz.ClientID, fapitest.ClientID.String())
 	}
 }
+
+// TestAuthorizationCodeFlowLoopbackHTTPRedirectURI covers a client
+// registered for a loopback http redirect URI (RFC 8252 §7.3), accepted
+// under the harness's AssuranceDevelopment server, through a complete
+// flow under both profiles.
+func TestAuthorizationCodeFlowLoopbackHTTPRedirectURI(t *testing.T) {
+	profiles := map[string]server.Profile{
+		"security":        server.ProfileFAPISecurity,
+		"message-signing": server.ProfileFAPISecurityWithMessageSigning,
+	}
+	for name, profile := range profiles {
+		t.Run(name, func(t *testing.T) {
+			h := fapitest.New(t, fapitest.Config{Profile: profile, RedirectURI: "http://localhost:8080/callback"})
+
+			tokens, err := h.RunAuthorizationCodeFlow(context.Background(), []string{"openid", "accounts"})
+			if err != nil {
+				t.Fatalf("RunAuthorizationCodeFlow: %v", err)
+			}
+			verifyAccessToken(t, h, tokens)
+		})
+	}
+}

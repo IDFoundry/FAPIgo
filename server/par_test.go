@@ -388,6 +388,10 @@ func (f *fakeRevocationSink) Revoke(_ context.Context, jti string, _ time.Time) 
 	return nil
 }
 
+func (f *fakeRevocationSink) Capabilities() storage.Capabilities {
+	return storage.Capabilities{Durable: true}
+}
+
 func (f *fakeRevocationSink) all() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -478,6 +482,14 @@ type harness struct {
 
 func newHarness(t *testing.T, profile server.Profile, allowRequestObjects bool) harness {
 	t.Helper()
+	return newHarnessWithRedirectURI(t, profile, allowRequestObjects, testRedirectURI, server.AssuranceDevelopment)
+}
+
+// newHarnessWithRedirectURI is newHarness with testClientID registered
+// for redirectURI instead of testRedirectURI, under assurance — for
+// exercising which redirect URIs each assurance level accepts.
+func newHarnessWithRedirectURI(t *testing.T, profile server.Profile, allowRequestObjects bool, redirectURI string, assurance server.AssuranceLevel) harness {
+	t.Helper()
 	now := time.Now()
 	key := generateKey(t)
 	serverKey := generateKey(t)
@@ -488,7 +500,7 @@ func newHarness(t *testing.T, profile server.Profile, allowRequestObjects bool) 
 	}
 	client, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
 		ID:                       testClientID,
-		RedirectURIs:             []fapi.RegisteredRedirectURI{testRedirectURI},
+		RedirectURIs:             []fapi.RegisteredRedirectURI{fapi.RegisteredRedirectURI(redirectURI)},
 		ClientAssertionAlgorithm: fapi.ES256,
 		RequestObjectAlgorithm:   reqObjAlg,
 		AllowedScopes:            []string{"openid", "accounts", "offline_access"},
@@ -530,7 +542,7 @@ func newHarness(t *testing.T, profile server.Profile, allowRequestObjects bool) 
 			MaxDPoPProofAge:            time.Minute,
 			MaxClockSkew:               5 * time.Second,
 		},
-		Assurance: server.AssuranceDevelopment,
+		Assurance: assurance,
 	}
 	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
 	deps := server.Dependencies{

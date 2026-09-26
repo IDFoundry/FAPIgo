@@ -117,6 +117,15 @@ type Config struct {
 	// AllowedScopes regardless, so a test using this proves OAuthOnly's
 	// server-wide refusal, not merely an unregistered scope.
 	OAuthOnly bool
+
+	// RedirectURI, if set, replaces the package-level RedirectURI as the
+	// harness's client's registered and requested redirect URI — e.g. a
+	// loopback http one ("http://localhost:8080/callback"), which the
+	// harness's server (always AssuranceDevelopment) accepts per RFC 8252
+	// §7.3. The harness never dereferences it over the network; it only
+	// reads the query string back off the authorization endpoint's
+	// redirect, so it needn't be listening.
+	RedirectURI string
 }
 
 // Harness wires a real client.Client, server.Server and resource.Verifier
@@ -285,7 +294,7 @@ func New(t *testing.T, cfg Config) *Harness {
 	clientCfg := client.Config{
 		Issuer:      issuer,
 		ClientID:    ClientID,
-		RedirectURI: RedirectURI,
+		RedirectURI: redirectURIOrDefault(cfg),
 		Endpoints: client.Endpoints{
 			Authorization:              srvCfg.Endpoints.Authorization,
 			Token:                      srvCfg.Endpoints.Token,
@@ -419,6 +428,15 @@ func signatureAlgorithmOrDefault(cfg Config) fapi.SignatureAlgorithm {
 	return cfg.SignatureAlgorithm
 }
 
+// redirectURIOrDefault resolves Config.RedirectURI's zero-means-
+// RedirectURI default.
+func redirectURIOrDefault(cfg Config) string {
+	if cfg.RedirectURI == "" {
+		return RedirectURI
+	}
+	return cfg.RedirectURI
+}
+
 // contentEncryptionOrDefault resolves Config.IDTokenContentEncryption's
 // zero-means-A256GCM default.
 func contentEncryptionOrDefault(cfg Config) fapi.ContentEncryptionAlgorithm {
@@ -477,7 +495,7 @@ func newMTLSClientCertificate(t *testing.T) (tls.Certificate, *x509.Certificate)
 func registeredClientConfig(cfg Config, sigAlg fapi.SignatureAlgorithm, contentEncryption fapi.ContentEncryptionAlgorithm, mtlsCert *x509.Certificate) storage.RegisteredClientConfig {
 	registeredClientCfg := storage.RegisteredClientConfig{
 		ID:                           ClientID,
-		RedirectURIs:                 []fapi.RegisteredRedirectURI{RedirectURI},
+		RedirectURIs:                 []fapi.RegisteredRedirectURI{fapi.RegisteredRedirectURI(redirectURIOrDefault(cfg))},
 		ClientAssertionAlgorithm:     sigAlg,
 		RequestObjectAlgorithm:       sigAlg,
 		SenderConstrain:              cfg.SenderConstrain,

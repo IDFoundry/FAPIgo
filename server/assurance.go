@@ -17,7 +17,9 @@ const (
 	// AssuranceDevelopment permits a configuration meant for local
 	// development only — most importantly, it does not require an
 	// AuditSink or a store that declares storage.StoreAssurance
-	// capabilities.
+	// capabilities. It also accepts loopback http redirect URIs
+	// (RFC 8252 §7.3, e.g. "http://localhost:8080/callback"), which
+	// AssuranceProduction refuses at the pushed authorization request.
 	AssuranceDevelopment
 
 	// AssuranceProduction rejects a configuration missing anything this
@@ -50,6 +52,10 @@ const (
 	// interface's own doc comment for why a plain ClientKeySource/
 	// ClientEncryptionKeySource has no structural way to tell a hardened
 	// implementation from a naive one apart from this declaration.
+	// Unlike every check above, which New performs once, a client's
+	// loopback http redirect URI is refused per request, at the pushed
+	// authorization request, as invalid_request — redirect URIs belong
+	// to client registrations, which New never sees.
 	// Further checks (HSM-backed keys where required, and the rest of
 	// the checklist ARCHITECTURE.md describes) will be added here as the
 	// mechanisms to check them are built.

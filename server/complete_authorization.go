@@ -110,6 +110,10 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 		return s.completeLocalFail(ctx, clientID, newError(ErrorInvalidRequest, 400, "granted authorization_details exceeds what was requested", err)), nil
 	}
 
+	if err := validateGrantedIDTokenClaims(result.grant.IDTokenClaims); err != nil {
+		return s.completeLocalFail(ctx, clientID, newError(ErrorInvalidRequest, 400, "granted ID token claims are not valid", err)), nil
+	}
+
 	codeChallenge, err := jsonString(request.Parameters, "code_challenge")
 	if err != nil {
 		return s.completeLocalFail(ctx, clientID, newError(ErrorServerError, 500, "pushed authorization request is missing code_challenge", err)), nil
@@ -137,6 +141,7 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 		TokenClaims:             request.TokenClaims,
 		RequestedIDTokenClaims:  idTokenClaims,
 		RequestedUserinfoClaims: userinfoClaims,
+		IDTokenClaims:           result.grant.IDTokenClaims,
 	})
 	if err != nil {
 		return s.completeLocalFail(ctx, clientID, newError(ErrorServerError, 500, "failed to encode authorization code grant", err)), nil

@@ -83,4 +83,21 @@ type GrantedAuthorization struct {
 	// if that hook is nil) of some object in the original request — the
 	// same way a scope not present in the original request is rejected.
 	AuthorizationDetails []json.RawMessage
+
+	// IDTokenClaims are additional claims the application wants in the
+	// ID token issued for this authorization — e.g. provider-specific
+	// claims describing the authenticated subject or who it is acting
+	// for — keyed by claim name, each value already JSON-encoded. They go
+	// into the ID token only, never the access token, and are carried
+	// forward to every ID token re-issued from the same grant (a refresh,
+	// or a CIBA poll). Nil if the application adds none.
+	//
+	// CompleteAuthorization/CompleteBackchannelAuthentication reject a
+	// claim name the server manages itself (see reservedIDTokenClaims)
+	// or a value that isn't valid JSON. A name that collides with an
+	// IdentityClaimsSource or extension (ReturnInTokenClaims) claim
+	// overrides it: this is the application's own decision at login,
+	// the most specific source of the three. The claims are ignored if
+	// no ID token is issued ("openid" not granted).
+	IDTokenClaims map[string]json.RawMessage
 }

@@ -33,6 +33,10 @@ type AutoApprove struct {
 	ACR      string
 	AMR      []string
 	AuthTime time.Time
+
+	// IDTokenClaims, if set, is granted as
+	// server.GrantedAuthorization.IDTokenClaims on every approval.
+	IDTokenClaims map[string]json.RawMessage
 }
 
 // authServer wires a server.Server to real HTTP handlers over an
@@ -192,7 +196,7 @@ func (a *authServer) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 
 	result, err := a.srv.CompleteAuthorization(ctx, server.CompleteAuthorizationRequest{
 		Handle: interaction.Handle,
-		Result: server.Authorize(subject, authCtx, server.GrantedAuthorization{Scope: interaction.Interaction.Scope}),
+		Result: server.Authorize(subject, authCtx, server.GrantedAuthorization{Scope: interaction.Interaction.Scope, IDTokenClaims: a.approve.IDTokenClaims}),
 	})
 	if err != nil {
 		a.t.Fatalf("fapitest: CompleteAuthorization: %v", err)

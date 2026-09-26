@@ -120,7 +120,7 @@ func TestAuthorizationCodeFlowAccessTokenExpires(t *testing.T) {
 // proof, server-bound cnf.jkt, resource-side verification) is mutually
 // consistent end to end, not just that each role's own unit tests pass
 // in isolation.
-func verifyAccessToken(t *testing.T, h *fapitest.Harness, tokens client.TokenSet) {
+func verifyAccessToken(t *testing.T, h *fapitest.Harness, tokens client.TokenSet) resource.AuthorizationContext {
 	t.Helper()
 	ctx := context.Background()
 	target, err := url.Parse("https://rs.fapitest.internal/accounts")
@@ -148,6 +148,7 @@ func verifyAccessToken(t *testing.T, h *fapitest.Harness, tokens client.TokenSet
 	if authz.ClientID != fapitest.ClientID.String() {
 		t.Errorf("ClientID = %q, want %q", authz.ClientID, fapitest.ClientID.String())
 	}
+	return authz
 }
 
 // TestAuthorizationCodeFlowLoopbackHTTPRedirectURI covers a client

@@ -12,6 +12,16 @@ name: Fuzz
 # instead, daily (staggered an hour after conformance.yml's own 6am UTC
 # run to avoid contending for runner minutes), plus available on demand.
 #
+# The corpus each target builds up (the "interesting" inputs go test
+# -fuzz keeps under $(go env GOCACHE)/fuzz) is carried from run to run
+# with actions/cache, so every night resumes from the last one's
+# coverage instead of re-deriving it from the seed corpus. setup-go's
+# own cache can't do this: its key is fixed per Go version and go.mod,
+# so it only ever saves once. Each run saves under a run-unique key and
+# restores the newest for its target; GitHub evicts ones left unused.
+# The corpus is only saved when the job succeeds — a failing input is
+# uploaded as an artifact instead (below).
+#
 # Informational only: nothing in branch protection depends on this
 # workflow, since it never runs against a PR. A found failure fails the
 # job and uploads the failing input as a build artifact (go test -fuzz
@@ -130,6 +140,18 @@ jobs:
           # dependencies (see go.mod) — see ci.yml's identical setting
           # for why this is needed instead.
           cache-dependency-path: go.mod
+
+      - name: Locate fuzz corpus
+        id: corpus
+        run: echo "dir=$(go env GOCACHE)/fuzz" >> "$GITHUB_OUTPUT"
+
+      - name: Restore fuzz corpus
+        uses: actions/cache@v6
+        with:
+          path: ${{ steps.corpus.outputs.dir }}
+          key: fuzz-corpus-${{ matrix.target.pkg }}-${{ matrix.target.name }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-corpus-${{ matrix.target.pkg }}-${{ matrix.target.name }}-
 
       - name: go test -fuzz=${{ matrix.target.name }}
         run: go test ${{ matrix.target.pkg }} -run='^$' -fuzz='^${{ matrix.target.name }}$' -fuzztime=5m

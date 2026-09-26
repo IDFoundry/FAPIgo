@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+	"unicode/utf8"
 )
 
 // SubjectID identifies a resource owner the server has authenticated. It
@@ -17,6 +18,12 @@ type SubjectID struct {
 func NewSubjectID(value string) (SubjectID, error) {
 	if value == "" {
 		return SubjectID{}, fmt.Errorf("server: subject ID is empty")
+	}
+	// A token's "sub" is a JSON string, which can't carry invalid UTF-8:
+	// encoding would silently replace the bad bytes, issuing tokens for
+	// a subject other than the one authenticated.
+	if !utf8.ValidString(value) {
+		return SubjectID{}, fmt.Errorf("server: subject ID is not valid UTF-8")
 	}
 	return SubjectID{value: value}, nil
 }
@@ -58,6 +65,16 @@ type AuthenticationContext struct {
 func NewAuthenticationContext(authTime time.Time, acr string, amr []string) (AuthenticationContext, error) {
 	if authTime.IsZero() {
 		return AuthenticationContext{}, fmt.Errorf("server: authentication context requires a non-zero authTime")
+	}
+	// Same reason as NewSubjectID: acr and amr are JSON strings in the
+	// issued ID token.
+	if !utf8.ValidString(acr) {
+		return AuthenticationContext{}, fmt.Errorf("server: authentication context acr is not valid UTF-8")
+	}
+	for _, method := range amr {
+		if !utf8.ValidString(method) {
+			return AuthenticationContext{}, fmt.Errorf("server: authentication context amr is not valid UTF-8")
+		}
 	}
 	amrCopy := make([]string, len(amr))
 	copy(amrCopy, amr)

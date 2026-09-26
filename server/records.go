@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+	"unicode/utf8"
 )
 
 // recordVersion versions the JSON payloads this package hands storage
@@ -105,6 +106,12 @@ func (g grantRecord) accessTokenClaims() (map[string]json.RawMessage, error) {
 
 func encodeRequestRecord(r requestRecord) (json.RawMessage, error) {
 	r.Version = recordVersion
+	if err := requireUTF8(r.DPoPJKT); err != nil {
+		return nil, err
+	}
+	if err := requireUTF8Keys(r.Parameters, r.TokenClaims); err != nil {
+		return nil, err
+	}
 	return json.Marshal(r)
 }
 
@@ -118,7 +125,43 @@ func decodeRequestRecord(raw json.RawMessage) (requestRecord, error) {
 
 func encodeGrantRecord(g grantRecord) (json.RawMessage, error) {
 	g.Version = recordVersion
+	strs := []string{g.RedirectURI, g.CodeChallenge, g.Nonce, g.DPoPJKT, g.Thumbprint, g.Subject, g.ACR}
+	for _, list := range [][]string{g.Scope, g.AMR, g.RequestedIDTokenClaims, g.RequestedUserinfoClaims} {
+		strs = append(strs, list...)
+	}
+	if err := requireUTF8(strs...); err != nil {
+		return nil, err
+	}
+	if err := requireUTF8Keys(g.TokenClaims, g.IDTokenClaims); err != nil {
+		return nil, err
+	}
 	return json.Marshal(g)
+}
+
+// requireUTF8 and requireUTF8Keys refuse to encode a record whose
+// strings JSON can't represent exactly: json.Marshal would silently
+// replace invalid UTF-8, so the record read back would differ from the
+// one written. Every such value is either validated earlier (the
+// app-facing constructors) or arrived as JSON already; this is the
+// backstop that makes a missed case fail closed instead.
+func requireUTF8(values ...string) error {
+	for _, v := range values {
+		if !utf8.ValidString(v) {
+			return fmt.Errorf("record value %q is not valid UTF-8", v)
+		}
+	}
+	return nil
+}
+
+func requireUTF8Keys(maps ...map[string]json.RawMessage) error {
+	for _, m := range maps {
+		for k := range m {
+			if err := requireUTF8(k); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func decodeGrantRecord(raw json.RawMessage) (grantRecord, error) {

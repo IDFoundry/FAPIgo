@@ -145,14 +145,15 @@ func TestGrantedIDTokenClaimsIssuedInIDTokenOnlyAndSurviveRefresh(t *testing.T) 
 
 func invalidGrantedIDTokenClaims() map[string]map[string]json.RawMessage {
 	return map[string]map[string]json.RawMessage{
-		"iss":          {"iss": json.RawMessage(`"https://evil.example"`)},
-		"sub":          {"sub": json.RawMessage(`"someone-else"`)},
-		"nonce":        {"nonce": json.RawMessage(`"n"`)},
-		"at_hash":      {"at_hash": json.RawMessage(`"h"`)},
-		"azp":          {"azp": json.RawMessage(`"other-client"`)},
-		"jti":          {"jti": json.RawMessage(`"j"`)},
-		"empty name":   {"": json.RawMessage(`"x"`)},
-		"invalid JSON": {"sub_type": json.RawMessage(`user`)},
+		"iss":                {"iss": json.RawMessage(`"https://evil.example"`)},
+		"sub":                {"sub": json.RawMessage(`"someone-else"`)},
+		"nonce":              {"nonce": json.RawMessage(`"n"`)},
+		"at_hash":            {"at_hash": json.RawMessage(`"h"`)},
+		"azp":                {"azp": json.RawMessage(`"other-client"`)},
+		"jti":                {"jti": json.RawMessage(`"j"`)},
+		"empty name":         {"": json.RawMessage(`"x"`)},
+		"invalid UTF-8 name": {"name\xff": json.RawMessage(`"x"`)},
+		"invalid JSON":       {"sub_type": json.RawMessage(`user`)},
 	}
 }
 

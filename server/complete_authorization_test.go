@@ -388,6 +388,23 @@ func TestNewSubjectIDRejectsEmpty(t *testing.T) {
 	}
 }
 
+// Found by FuzzGrantRecordRoundTrip: an invalid-UTF-8 subject can't be
+// carried in a token's "sub" (a JSON string) without being altered.
+func TestNewSubjectIDRejectsInvalidUTF8(t *testing.T) {
+	if _, err := server.NewSubjectID("user\xff"); err == nil {
+		t.Fatalf("NewSubjectID(invalid UTF-8) = nil error, want error")
+	}
+}
+
+func TestNewAuthenticationContextRejectsInvalidUTF8(t *testing.T) {
+	if _, err := server.NewAuthenticationContext(time.Now(), "acr\xff", nil); err == nil {
+		t.Fatalf("NewAuthenticationContext(invalid UTF-8 acr) = nil error, want error")
+	}
+	if _, err := server.NewAuthenticationContext(time.Now(), "", []string{"pwd", "otp\xff"}); err == nil {
+		t.Fatalf("NewAuthenticationContext(invalid UTF-8 amr) = nil error, want error")
+	}
+}
+
 func TestNewAuthenticatedSubjectRejectsZeroValueID(t *testing.T) {
 	if _, err := server.NewAuthenticatedSubject(server.SubjectID{}); err == nil {
 		t.Fatalf("NewAuthenticatedSubject(zero SubjectID) = nil error, want error")

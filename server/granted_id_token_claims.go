@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"unicode/utf8"
 
 	"github.com/idfoundry/fapigo/internal/token"
 )
@@ -23,6 +24,9 @@ func validateGrantedIDTokenClaims(claims map[string]json.RawMessage) error {
 	for name, value := range claims {
 		if name == "" {
 			return fmt.Errorf("ID token claim name must not be empty")
+		}
+		if !utf8.ValidString(name) {
+			return fmt.Errorf("ID token claim name %q is not valid UTF-8", name)
 		}
 		if token.IsIDTokenReservedClaim(name) || slices.Contains(reservedIDTokenClaims, name) {
 			return fmt.Errorf("ID token claim %q is managed by the server and must not be set", name)

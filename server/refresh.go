@@ -102,34 +102,37 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 	if redeemed.ClientID != client.ID() {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorInvalidGrant, 400, "refresh_token was not issued to this client", nil))
 	}
-	// No DPoP-key match check against redeemed.Thumbprint here — see
+	grant, err := decodeGrantRecord(redeemed.Grant)
+	if err != nil {
+		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorServerError, 500, "failed to decode refresh token grant", err))
+	}
+	// No DPoP-key match check against grant.Thumbprint here — see
 	// RefreshTokenRequest.DPoPProofs' doc comment. client.ID() above is
 	// only ever reached via successful client_assertion verification
 	// (authenticateClient), so every caller here is confidential; RFC
 	// 9449 §5 does not bind a confidential client's refresh token to a
 	// specific DPoP key at all.
 
-	scope := redeemed.Scope
+	scope := grant.Scope
 	if requestedScope, ok := params["scope"]; ok && requestedScope != "" {
 		narrowed := strings.Fields(requestedScope)
-		if err := validateGrantedScopeSubset(narrowed, strings.Join(redeemed.Scope, " ")); err != nil {
+		if err := validateGrantedScopeSubset(narrowed, strings.Join(grant.Scope, " ")); err != nil {
 			return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorInvalidScope, 400, "requested scope exceeds the original grant", err))
 		}
 		scope = narrowed
 	}
 
-	accessTokenClaims, err := withRequestedUserinfoClaims(redeemed.RequestedUserinfoClaims, redeemed.TokenClaims)
+	accessTokenClaims, err := grant.accessTokenClaims()
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorServerError, 500, "failed to encode requested userinfo claims", err))
 	}
-	accessTokenClaims = withAuthorizationDetails(redeemed.AuthorizationDetails, accessTokenClaims)
 	// Revocation-lookup key discarded — refresh-token redemption is
 	// deliberately not single-use (FAPI2-SP-FINAL 5.3.2.1-9), so
 	// there's no "reuse" event on this path to revoke an access token
 	// against; that tracking is specific to authorization-code reuse
 	// (see ExchangeAuthorizationCode).
 	accessToken, _, err := s.deps.AccessTokens.IssueAccessToken(ctx, AccessTokenParams{
-		ClientID: client.ID(), Subject: redeemed.Subject, Scope: scope,
+		ClientID: client.ID(), Subject: grant.Subject, Scope: scope,
 		Thumbprint: thumbprint, SenderConstrain: client.SenderConstrain(), Claims: accessTokenClaims,
 		Issuer: s.cfg.Issuer.String(), Audience: s.cfg.Issuer.String(),
 		Now: now, Lifetime: s.cfg.Limits.AccessTokenLifetime, Random: s.deps.Random,
@@ -143,22 +146,16 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 		TokenType:            tokenTypeFor(client.SenderConstrain()),
 		ExpiresIn:            s.cfg.Limits.AccessTokenLifetime,
 		Scope:                strings.Join(scope, " "),
-		AuthorizationDetails: redeemed.AuthorizationDetails,
+		AuthorizationDetails: grant.AuthorizationDetails,
 	}
 
 	if containsScope(scope, "openid") {
 		// A refreshed ID token omits nonce — it was only ever meant to
 		// bind the *original* ID token to the authorization request that
 		// requested it, not to every subsequent refresh.
-		idTokenClaims, err := s.withIdentityClaims(ctx, redeemed.Subject, redeemed.RequestedIDTokenClaims, redeemed.TokenClaims)
-		if err != nil {
-			return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorServerError, 500, "failed to resolve identity claims", err))
-		}
-		idToken, err := s.issueIDToken(ctx, client, identityAssertion{
-			Subject: redeemed.Subject, AuthTime: redeemed.AuthTime, ACR: redeemed.ACR, AMR: redeemed.AMR, TokenClaims: idTokenClaims,
-		}, "", accessToken)
-		if err != nil {
-			return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorServerError, 500, "failed to issue ID token", err))
+		idToken, idErr := s.issueIDTokenForGrant(ctx, client, grant, "", accessToken)
+		if idErr != nil {
+			return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), idErr)
 		}
 		result.IDToken = fapi.NewSecret(idToken)
 		result.HasIDToken = true

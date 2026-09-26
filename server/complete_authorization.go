@@ -72,15 +72,20 @@ func (s *Server) CompleteAuthorization(ctx context.Context, req CompleteAuthoriz
 		return s.completeLocalFail(ctx, completed.ClientID, newError(ErrorInvalidRequest, 400, "interaction handle has expired", nil)), nil
 	}
 
-	redirectURI, err := jsonString(completed.Parameters, "redirect_uri")
+	request, err := decodeRequestRecord(completed.Request)
+	if err != nil {
+		return s.completeLocalFail(ctx, completed.ClientID, newError(ErrorServerError, 500, "failed to decode pushed authorization request", err)), nil
+	}
+
+	redirectURI, err := jsonString(request.Parameters, "redirect_uri")
 	if err != nil {
 		return s.completeLocalFail(ctx, completed.ClientID, newError(ErrorServerError, 500, "pushed authorization request is missing redirect_uri", err)), nil
 	}
-	state, _ := jsonString(completed.Parameters, "state")
+	state, _ := jsonString(request.Parameters, "state")
 
 	switch result := req.Result.(type) {
 	case authorizeResult:
-		return s.completeAuthorize(ctx, completed, redirectURI, state, result)
+		return s.completeAuthorize(ctx, completed.ClientID, request, redirectURI, state, result)
 	case denyResult:
 		return s.completeErrorRedirect(ctx, completed.ClientID, redirectURI, state, "access_denied", result.reason, AuditOutcomeFailure)
 	case authenticationFailedResult:
@@ -90,65 +95,71 @@ func (s *Server) CompleteAuthorization(ctx context.Context, req CompleteAuthoriz
 	}
 }
 
-func (s *Server) completeAuthorize(ctx context.Context, completed storage.CompletedInteraction, redirectURI, state string, result authorizeResult) (AuthorizationResult, error) {
+func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, request requestRecord, redirectURI, state string, result authorizeResult) (AuthorizationResult, error) {
 	if result.subject.id.value == "" {
-		return s.completeLocalFail(ctx, completed.ClientID, newError(ErrorServerError, 500, "authorize result carries no authenticated subject", nil)), nil
+		return s.completeLocalFail(ctx, clientID, newError(ErrorServerError, 500, "authorize result carries no authenticated subject", nil)), nil
 	}
 
-	requestedScope, _ := jsonString(completed.Parameters, "scope")
+	requestedScope, _ := jsonString(request.Parameters, "scope")
 	if err := validateGrantedScopeSubset(result.grant.Scope, requestedScope); err != nil {
-		return s.completeLocalFail(ctx, completed.ClientID, newError(ErrorInvalidRequest, 400, "granted scope exceeds requested scope", err)), nil
+		return s.completeLocalFail(ctx, clientID, newError(ErrorInvalidRequest, 400, "granted scope exceeds requested scope", err)), nil
 	}
 
-	grantedAuthorizationDetails, err := s.validateGrantedAuthorizationDetails(completed.Parameters[authorizationDetailsParameter], result.grant.AuthorizationDetails)
+	grantedAuthorizationDetails, err := s.validateGrantedAuthorizationDetails(request.Parameters[authorizationDetailsParameter], result.grant.AuthorizationDetails)
 	if err != nil {
-		return s.completeLocalFail(ctx, completed.ClientID, newError(ErrorInvalidRequest, 400, "granted authorization_details exceeds what was requested", err)), nil
+		return s.completeLocalFail(ctx, clientID, newError(ErrorInvalidRequest, 400, "granted authorization_details exceeds what was requested", err)), nil
 	}
 
-	codeChallenge, err := jsonString(completed.Parameters, "code_challenge")
+	codeChallenge, err := jsonString(request.Parameters, "code_challenge")
 	if err != nil {
-		return s.completeLocalFail(ctx, completed.ClientID, newError(ErrorServerError, 500, "pushed authorization request is missing code_challenge", err)), nil
+		return s.completeLocalFail(ctx, clientID, newError(ErrorServerError, 500, "pushed authorization request is missing code_challenge", err)), nil
 	}
 
 	code, err := generateAuthorizationCode(s.deps.Random)
 	if err != nil {
-		return s.completeLocalFail(ctx, completed.ClientID, newError(ErrorServerError, 500, "failed to generate authorization code", err)), nil
+		return s.completeLocalFail(ctx, clientID, newError(ErrorServerError, 500, "failed to generate authorization code", err)), nil
 	}
-	nonce, _ := jsonString(completed.Parameters, "nonce")
-	dpopJKT, _ := jsonString(completed.Parameters, "dpop_jkt") // optional, RFC 9449 §10
-	idTokenClaims, userinfoClaims := parseRequestedClaimNames(completed.Parameters["claims"])
+	nonce, _ := jsonString(request.Parameters, "nonce")
+	dpopJKT, _ := jsonString(request.Parameters, "dpop_jkt") // optional, RFC 9449 §10
+	idTokenClaims, userinfoClaims := parseRequestedClaimNames(request.Parameters["claims"])
 
-	now := s.deps.Clock.Now()
-	if err := s.deps.Grants.CreateAuthorizationCode(ctx, storage.NewAuthorizationCode{
-		CodeHash:                sha256.Sum256([]byte(code)),
-		ClientID:                completed.ClientID,
+	grant, err := encodeGrantRecord(grantRecord{
 		RedirectURI:             redirectURI,
 		CodeChallenge:           codeChallenge,
-		CodeChallengeMethod:     "S256",
+		Nonce:                   nonce,
 		DPoPJKT:                 dpopJKT,
 		Subject:                 result.subject.ID().String(),
 		Scope:                   result.grant.Scope,
-		Nonce:                   nonce,
 		AuthTime:                result.auth.authTime,
 		ACR:                     result.auth.acr,
 		AMR:                     result.auth.amr,
 		AuthorizationDetails:    grantedAuthorizationDetails,
-		TokenClaims:             completed.TokenClaims,
+		TokenClaims:             request.TokenClaims,
 		RequestedIDTokenClaims:  idTokenClaims,
 		RequestedUserinfoClaims: userinfoClaims,
-		ExpiresAt:               now.Add(s.cfg.Limits.AuthorizationCodeLifetime),
-	}); err != nil {
-		return s.completeLocalFail(ctx, completed.ClientID, newError(ErrorServerError, 500, "failed to persist authorization code", err)), nil
+	})
+	if err != nil {
+		return s.completeLocalFail(ctx, clientID, newError(ErrorServerError, 500, "failed to encode authorization code grant", err)), nil
 	}
 
-	destination, buildErr := s.buildAuthorizationResponse(ctx, completed.ClientID, redirectURI, map[string]string{
+	now := s.deps.Clock.Now()
+	if err := s.deps.Grants.CreateAuthorizationCode(ctx, storage.NewAuthorizationCode{
+		CodeHash:  sha256.Sum256([]byte(code)),
+		ClientID:  clientID,
+		Grant:     grant,
+		ExpiresAt: now.Add(s.cfg.Limits.AuthorizationCodeLifetime),
+	}); err != nil {
+		return s.completeLocalFail(ctx, clientID, newError(ErrorServerError, 500, "failed to persist authorization code", err)), nil
+	}
+
+	destination, buildErr := s.buildAuthorizationResponse(ctx, clientID, redirectURI, map[string]string{
 		"code": code, "state": state,
 	})
 	if buildErr != nil {
-		return s.completeLocalFail(ctx, completed.ClientID, buildErr), nil
+		return s.completeLocalFail(ctx, clientID, buildErr), nil
 	}
 
-	s.audit(ctx, AuditEventCompleteAuthorization, completed.ClientID, AuditOutcomeSuccess, "")
+	s.audit(ctx, AuditEventCompleteAuthorization, clientID, AuditOutcomeSuccess, "")
 	return AuthorizationRedirect{destination: destination}, nil
 }
 

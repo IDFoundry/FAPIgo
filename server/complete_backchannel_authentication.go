@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -60,28 +61,49 @@ func (s *Server) CompleteBackchannelAuthentication(ctx context.Context, req Comp
 			s.audit(ctx, AuditEventCompleteBackchannelAuthentication, "", AuditOutcomeFailure, string(wrapped.Code()))
 			return wrapped
 		}
-		requestedScope, _ := jsonString(pending.Parameters, "scope")
+		request, decodeErr := decodeRequestRecord(pending.Request)
+		if decodeErr != nil {
+			wrapped := newError(ErrorServerError, 500, "failed to decode backchannel authentication request", decodeErr)
+			s.audit(ctx, AuditEventCompleteBackchannelAuthentication, pending.ClientID, AuditOutcomeFailure, string(wrapped.Code()))
+			return wrapped
+		}
+		requestedScope, _ := jsonString(request.Parameters, "scope")
 		if scopeErr := validateGrantedScopeSubset(result.grant.Scope, requestedScope); scopeErr != nil {
 			wrapped := newError(ErrorInvalidRequest, 400, "granted scope exceeds requested scope", scopeErr)
 			s.audit(ctx, AuditEventCompleteBackchannelAuthentication, pending.ClientID, AuditOutcomeFailure, string(wrapped.Code()))
 			return wrapped
 		}
 
+		var grantedAuthorizationDetails json.RawMessage
 		if len(result.grant.AuthorizationDetails) > 0 {
-			granted, validateErr := s.validateGrantedAuthorizationDetails(pending.Parameters[authorizationDetailsParameter], result.grant.AuthorizationDetails)
+			granted, validateErr := s.validateGrantedAuthorizationDetails(request.Parameters[authorizationDetailsParameter], result.grant.AuthorizationDetails)
 			if validateErr != nil {
 				wrapped := newError(ErrorInvalidRequest, 400, "granted authorization_details exceeds what was requested", validateErr)
 				s.audit(ctx, AuditEventCompleteBackchannelAuthentication, pending.ClientID, AuditOutcomeFailure, string(wrapped.Code()))
 				return wrapped
 			}
-			decision.AuthorizationDetails = granted
+			grantedAuthorizationDetails = granted
+		}
+		idTokenClaims, userinfoClaims := parseRequestedClaimNames(request.Parameters["claims"])
+		grant, encodeErr := encodeGrantRecord(grantRecord{
+			DPoPJKT:                 request.DPoPJKT,
+			Subject:                 result.subject.ID().String(),
+			Scope:                   result.grant.Scope,
+			AuthTime:                result.auth.authTime,
+			ACR:                     result.auth.acr,
+			AMR:                     result.auth.amr,
+			AuthorizationDetails:    grantedAuthorizationDetails,
+			TokenClaims:             request.TokenClaims,
+			RequestedIDTokenClaims:  idTokenClaims,
+			RequestedUserinfoClaims: userinfoClaims,
+		})
+		if encodeErr != nil {
+			wrapped := newError(ErrorServerError, 500, "failed to encode backchannel authentication grant", encodeErr)
+			s.audit(ctx, AuditEventCompleteBackchannelAuthentication, pending.ClientID, AuditOutcomeFailure, string(wrapped.Code()))
+			return wrapped
 		}
 		decision.Status = storage.BackchannelAuthenticationApproved
-		decision.Subject = result.subject.ID().String()
-		decision.Scope = result.grant.Scope
-		decision.AuthTime = result.auth.authTime
-		decision.ACR = result.auth.acr
-		decision.AMR = result.auth.amr
+		decision.Grant = grant
 	case denyResult:
 		decision.Status = storage.BackchannelAuthenticationDenied
 		decision.Reason = result.reason

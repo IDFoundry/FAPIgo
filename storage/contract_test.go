@@ -59,15 +59,7 @@ func (s *refGrantStore) RedeemAuthorizationCode(_ context.Context, r storage.Aut
 	}
 	s.redeemed[r.CodeHash] = true
 	return storage.RedeemedAuthorizationCode{
-		ClientID: code.ClientID, RedirectURI: code.RedirectURI,
-		CodeChallenge: code.CodeChallenge, CodeChallengeMethod: code.CodeChallengeMethod,
-		DPoPJKT: code.DPoPJKT,
-		Subject: code.Subject, Scope: code.Scope, Nonce: code.Nonce,
-		AuthTime: code.AuthTime, ACR: code.ACR, AMR: code.AMR,
-		AuthorizationDetails:   code.AuthorizationDetails,
-		TokenClaims:            code.TokenClaims,
-		RequestedIDTokenClaims: code.RequestedIDTokenClaims, RequestedUserinfoClaims: code.RequestedUserinfoClaims,
-		ExpiresAt: code.ExpiresAt,
+		ClientID: code.ClientID, Grant: code.Grant, ExpiresAt: code.ExpiresAt,
 	}, nil
 }
 
@@ -106,12 +98,7 @@ func (s *refGrantStore) RedeemRefreshToken(_ context.Context, r storage.RefreshT
 		return storage.RedeemedRefreshToken{}, fmt.Errorf("unknown token")
 	}
 	return storage.RedeemedRefreshToken{
-		ClientID: tok.ClientID, Subject: tok.Subject, Scope: tok.Scope,
-		Thumbprint: tok.Thumbprint, AuthTime: tok.AuthTime, ACR: tok.ACR, AMR: tok.AMR,
-		AuthorizationDetails:   tok.AuthorizationDetails,
-		TokenClaims:            tok.TokenClaims,
-		RequestedIDTokenClaims: tok.RequestedIDTokenClaims, RequestedUserinfoClaims: tok.RequestedUserinfoClaims,
-		ExpiresAt: tok.ExpiresAt,
+		ClientID: tok.ClientID, Grant: tok.Grant, ExpiresAt: tok.ExpiresAt,
 	}, nil
 }
 
@@ -171,12 +158,12 @@ func (s *refTransactionStore) BeginAuthorization(_ context.Context, txn storage.
 	s.byHandle[txn.Handle] = refPendingInteraction{
 		reference: txn.Reference,
 		interaction: storage.CompletedInteraction{
-			ClientID: record.ClientID, Parameters: record.Parameters, TokenClaims: record.TokenClaims,
+			ClientID: record.ClientID, Request: record.Request,
 			ExpiresAt: txn.HandleExpiresAt,
 		},
 	}
 	return storage.PushedAuthorizationRequest{
-		ClientID: record.ClientID, Parameters: record.Parameters, TokenClaims: record.TokenClaims,
+		ClientID: record.ClientID, Request: record.Request,
 		ExpiresAt: record.ExpiresAt,
 	}, nil
 }
@@ -332,18 +319,13 @@ func TestAccessTokenStoreContractAgainstReference(t *testing.T) {
 }
 
 type refBackchannelAuthenticationRecord struct {
-	record               storage.NewBackchannelAuthentication
-	status               storage.BackchannelAuthenticationStatus
-	subject              string
-	scope                []string
-	authorizationDetails json.RawMessage
-	authTime             time.Time
-	acr                  string
-	amr                  []string
-	reason               string
-	redeemed             bool
-	polledBefore         bool
-	lastPolledAt         time.Time
+	record       storage.NewBackchannelAuthentication
+	status       storage.BackchannelAuthenticationStatus
+	grant        json.RawMessage
+	reason       string
+	redeemed     bool
+	polledBefore bool
+	lastPolledAt time.Time
 }
 
 type refBackchannelAuthenticationStore struct {
@@ -376,8 +358,8 @@ func (s *refBackchannelAuthenticationStore) LookupBackchannelAuthentication(_ co
 		return storage.LookedUpBackchannelAuthentication{}, fmt.Errorf("unknown backchannel authentication handle")
 	}
 	return storage.LookedUpBackchannelAuthentication{
-		ClientID:   rec.record.ClientID,
-		Parameters: rec.record.Parameters,
+		ClientID: rec.record.ClientID,
+		Request:  rec.record.Request,
 	}, nil
 }
 
@@ -392,12 +374,7 @@ func (s *refBackchannelAuthenticationStore) DecideBackchannelAuthentication(_ co
 		return storage.DecidedBackchannelAuthentication{}, fmt.Errorf("backchannel authentication request already decided")
 	}
 	rec.status = decision.Status
-	rec.subject = decision.Subject
-	rec.scope = decision.Scope
-	rec.authorizationDetails = decision.AuthorizationDetails
-	rec.authTime = decision.AuthTime
-	rec.acr = decision.ACR
-	rec.amr = decision.AMR
+	rec.grant = decision.Grant
 	rec.reason = decision.Reason
 	if rec.record.DeliveryMode == "ping" {
 		// See memstore's identical reset for why — CIBA Core 1.0 §10.2's
@@ -437,11 +414,7 @@ func (s *refBackchannelAuthenticationStore) PollBackchannelAuthentication(_ cont
 	}
 	return storage.PolledBackchannelAuthentication{
 		Status: rec.status, ClientID: rec.record.ClientID,
-		Subject: rec.subject, Scope: rec.scope, AuthorizationDetails: rec.authorizationDetails,
-		AuthTime: rec.authTime, ACR: rec.acr, AMR: rec.amr,
-		TokenClaims: rec.record.TokenClaims, DPoPJKT: rec.record.DPoPJKT, Reason: rec.reason,
-		RequestedIDTokenClaims:  rec.record.RequestedIDTokenClaims,
-		RequestedUserinfoClaims: rec.record.RequestedUserinfoClaims,
+		Request: rec.record.Request, Grant: rec.grant, Reason: rec.reason,
 	}, nil
 }
 

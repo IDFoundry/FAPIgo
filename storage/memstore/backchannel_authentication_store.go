@@ -16,25 +16,16 @@ import (
 // BackchannelAuthenticationStore's two lookup maps.
 type backchannelRecord struct {
 	clientID                fapi.ClientID
-	parameters              map[string]json.RawMessage
-	tokenClaims             map[string]json.RawMessage
-	requestedIDTokenClaims  []string
-	requestedUserinfoClaims []string
+	request                 json.RawMessage
 	deliveryMode            string
 	clientNotificationToken fapi.Secret
 	authReqID               string
-	dpopJKT                 string
 	pollInterval            time.Duration
 	expiresAt               time.Time
 
-	status               storage.BackchannelAuthenticationStatus
-	subject              string
-	scope                []string
-	authorizationDetails json.RawMessage
-	authTime             time.Time
-	acr                  string
-	amr                  []string
-	reason               string
+	status storage.BackchannelAuthenticationStatus
+	grant  json.RawMessage
+	reason string
 
 	redeemed     bool
 	polledBefore bool
@@ -64,14 +55,10 @@ func NewBackchannelAuthenticationStore() *BackchannelAuthenticationStore {
 func (s *BackchannelAuthenticationStore) CreateBackchannelAuthentication(_ context.Context, record storage.NewBackchannelAuthentication) error {
 	rec := &backchannelRecord{
 		clientID:                record.ClientID,
-		parameters:              cloneRawMessageMap(record.Parameters),
-		tokenClaims:             cloneRawMessageMap(record.TokenClaims),
-		requestedIDTokenClaims:  cloneStrings(record.RequestedIDTokenClaims),
-		requestedUserinfoClaims: cloneStrings(record.RequestedUserinfoClaims),
+		request:                 cloneRawMessage(record.Request),
 		deliveryMode:            record.DeliveryMode,
 		clientNotificationToken: record.ClientNotificationToken,
 		authReqID:               record.AuthReqID,
-		dpopJKT:                 record.DPoPJKT,
 		pollInterval:            record.PollInterval,
 		expiresAt:               record.ExpiresAt,
 		status:                  storage.BackchannelAuthenticationPending,
@@ -93,8 +80,8 @@ func (s *BackchannelAuthenticationStore) LookupBackchannelAuthentication(_ conte
 		return storage.LookedUpBackchannelAuthentication{}, fmt.Errorf("memstore: no such backchannel authentication handle")
 	}
 	return storage.LookedUpBackchannelAuthentication{
-		ClientID:   rec.clientID,
-		Parameters: cloneRawMessageMap(rec.parameters),
+		ClientID: rec.clientID,
+		Request:  cloneRawMessage(rec.request),
 	}, nil
 }
 
@@ -111,12 +98,7 @@ func (s *BackchannelAuthenticationStore) DecideBackchannelAuthentication(_ conte
 		return storage.DecidedBackchannelAuthentication{}, fmt.Errorf("memstore: backchannel authentication request already decided")
 	}
 	rec.status = decision.Status
-	rec.subject = decision.Subject
-	rec.scope = cloneStrings(decision.Scope)
-	rec.authorizationDetails = cloneRawMessage(decision.AuthorizationDetails)
-	rec.authTime = decision.AuthTime
-	rec.acr = decision.ACR
-	rec.amr = cloneStrings(decision.AMR)
+	rec.grant = cloneRawMessage(decision.Grant)
 	rec.reason = decision.Reason
 	if rec.deliveryMode == "ping" {
 		// CIBA Core 1.0 §10.2: ping delivery's whole point is letting the
@@ -165,18 +147,10 @@ func (s *BackchannelAuthenticationStore) PollBackchannelAuthentication(_ context
 		rec.redeemed = true
 	}
 	return storage.PolledBackchannelAuthentication{
-		Status:                  rec.status,
-		ClientID:                rec.clientID,
-		Subject:                 rec.subject,
-		Scope:                   cloneStrings(rec.scope),
-		AuthorizationDetails:    cloneRawMessage(rec.authorizationDetails),
-		AuthTime:                rec.authTime,
-		ACR:                     rec.acr,
-		AMR:                     cloneStrings(rec.amr),
-		TokenClaims:             cloneRawMessageMap(rec.tokenClaims),
-		DPoPJKT:                 rec.dpopJKT,
-		Reason:                  rec.reason,
-		RequestedIDTokenClaims:  cloneStrings(rec.requestedIDTokenClaims),
-		RequestedUserinfoClaims: cloneStrings(rec.requestedUserinfoClaims),
+		Status:   rec.status,
+		ClientID: rec.clientID,
+		Request:  cloneRawMessage(rec.request),
+		Grant:    cloneRawMessage(rec.grant),
+		Reason:   rec.reason,
 	}, nil
 }

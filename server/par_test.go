@@ -95,18 +95,16 @@ func (f *fakeTransactionStore) BeginAuthorization(_ context.Context, txn storage
 	f.byHandle[txn.Handle] = fakePendingInteraction{
 		reference: txn.Reference,
 		interaction: storage.CompletedInteraction{
-			ClientID:    record.ClientID,
-			Parameters:  record.Parameters,
-			TokenClaims: record.TokenClaims,
-			ExpiresAt:   txn.HandleExpiresAt,
+			ClientID:  record.ClientID,
+			Request:   record.Request,
+			ExpiresAt: txn.HandleExpiresAt,
 		},
 	}
 
 	return storage.PushedAuthorizationRequest{
-		ClientID:    record.ClientID,
-		Parameters:  record.Parameters,
-		TokenClaims: record.TokenClaims,
-		ExpiresAt:   record.ExpiresAt,
+		ClientID:  record.ClientID,
+		Request:   record.Request,
+		ExpiresAt: record.ExpiresAt,
 	}, nil
 }
 
@@ -227,22 +225,9 @@ func (f *fakeGrantStore) RedeemAuthorizationCode(_ context.Context, redemption s
 	}
 	f.redeemed[redemption.CodeHash] = true
 	return storage.RedeemedAuthorizationCode{
-		ClientID:                code.ClientID,
-		RedirectURI:             code.RedirectURI,
-		CodeChallenge:           code.CodeChallenge,
-		CodeChallengeMethod:     code.CodeChallengeMethod,
-		DPoPJKT:                 code.DPoPJKT,
-		Subject:                 code.Subject,
-		Scope:                   code.Scope,
-		Nonce:                   code.Nonce,
-		AuthTime:                code.AuthTime,
-		ACR:                     code.ACR,
-		AMR:                     code.AMR,
-		AuthorizationDetails:    code.AuthorizationDetails,
-		TokenClaims:             code.TokenClaims,
-		RequestedIDTokenClaims:  code.RequestedIDTokenClaims,
-		RequestedUserinfoClaims: code.RequestedUserinfoClaims,
-		ExpiresAt:               code.ExpiresAt,
+		ClientID:  code.ClientID,
+		Grant:     code.Grant,
+		ExpiresAt: code.ExpiresAt,
 	}, nil
 }
 
@@ -309,18 +294,9 @@ func (f *fakeGrantStore) RedeemRefreshToken(_ context.Context, redemption storag
 		return storage.RedeemedRefreshToken{}, fmt.Errorf("no such refresh token")
 	}
 	return storage.RedeemedRefreshToken{
-		ClientID:                tok.ClientID,
-		Subject:                 tok.Subject,
-		Scope:                   tok.Scope,
-		Thumbprint:              tok.Thumbprint,
-		AuthTime:                tok.AuthTime,
-		ACR:                     tok.ACR,
-		AMR:                     tok.AMR,
-		AuthorizationDetails:    tok.AuthorizationDetails,
-		TokenClaims:             tok.TokenClaims,
-		RequestedIDTokenClaims:  tok.RequestedIDTokenClaims,
-		RequestedUserinfoClaims: tok.RequestedUserinfoClaims,
-		ExpiresAt:               tok.ExpiresAt,
+		ClientID:  tok.ClientID,
+		Grant:     tok.Grant,
+		ExpiresAt: tok.ExpiresAt,
 	}, nil
 }
 
@@ -934,6 +910,32 @@ func (h harness) requestObject(t *testing.T, params map[string]json.RawMessage) 
 	return obj
 }
 
+// storedParameters decodes the parameters out of a stored PAR record's
+// opaque Request, as server wrote it.
+func storedParameters(t *testing.T, record storage.NewPARRecord) map[string]json.RawMessage {
+	t.Helper()
+	var decoded struct {
+		Parameters map[string]json.RawMessage `json:"parameters"`
+	}
+	if err := json.Unmarshal(record.Request, &decoded); err != nil {
+		t.Fatalf("decode stored request: %v", err)
+	}
+	return decoded.Parameters
+}
+
+// storedGrantSubject decodes the subject out of a stored opaque Grant,
+// as server wrote it.
+func storedGrantSubject(t *testing.T, grant json.RawMessage) string {
+	t.Helper()
+	var decoded struct {
+		Subject string `json:"sub"`
+	}
+	if err := json.Unmarshal(grant, &decoded); err != nil {
+		t.Fatalf("decode stored grant: %v", err)
+	}
+	return decoded.Subject
+}
+
 func formParam(name, value string) server.FormParameter {
 	return server.FormParameter{Name: name, Value: value}
 }
@@ -996,8 +998,8 @@ func TestPushAuthorizationRequestJARSuccess(t *testing.T) {
 		t.Fatalf("records[0].ClientID = %q, want %q", records[0].ClientID, testClientID)
 	}
 	var scope string
-	if err := json.Unmarshal(records[0].Parameters["scope"], &scope); err != nil || scope != "openid accounts" {
-		t.Fatalf("records[0].Parameters[scope] = %q, want %q", scope, "openid accounts")
+	if err := json.Unmarshal(storedParameters(t, records[0])["scope"], &scope); err != nil || scope != "openid accounts" {
+		t.Fatalf("storedParameters(t, records[0])[scope] = %q, want %q", scope, "openid accounts")
 	}
 
 	events := h.audit.all()
@@ -1108,7 +1110,7 @@ func TestPushAuthorizationRequestIgnoresAndStripsUnregisteredParameterInsideRequ
 	if len(h.transactions.records) != 1 {
 		t.Fatalf("len(records) = %d, want 1", len(h.transactions.records))
 	}
-	if _, present := h.transactions.records[0].Parameters["x_unknown"]; present {
+	if _, present := storedParameters(t, h.transactions.records[0])["x_unknown"]; present {
 		t.Errorf("persisted PAR record still contains x_unknown, want it stripped")
 	}
 }
@@ -1515,7 +1517,7 @@ func TestPushAuthorizationRequestKeepsACRValues(t *testing.T) {
 	if len(h.transactions.records) != 1 {
 		t.Fatalf("len(records) = %d, want 1", len(h.transactions.records))
 	}
-	raw, present := h.transactions.records[0].Parameters["acr_values"]
+	raw, present := storedParameters(t, h.transactions.records[0])["acr_values"]
 	if !present {
 		t.Fatalf("persisted PAR record is missing acr_values, want it kept")
 	}
@@ -1547,7 +1549,7 @@ func TestPushAuthorizationRequestIgnoresAndStripsUnregisteredExtensionParameter(
 	if len(h.transactions.records) != 1 {
 		t.Fatalf("len(records) = %d, want 1", len(h.transactions.records))
 	}
-	if _, present := h.transactions.records[0].Parameters["x_custom"]; present {
+	if _, present := storedParameters(t, h.transactions.records[0])["x_custom"]; present {
 		t.Errorf("persisted PAR record still contains x_custom, want it stripped")
 	}
 }
@@ -1570,7 +1572,7 @@ func TestPushAuthorizationRequestIgnoresMultipleUnregisteredExtensionParameters(
 	if len(h.transactions.records) != 1 {
 		t.Fatalf("len(records) = %d, want 1", len(h.transactions.records))
 	}
-	got := h.transactions.records[0].Parameters
+	got := storedParameters(t, h.transactions.records[0])
 	if _, present := got["x_custom_one"]; present {
 		t.Errorf("persisted PAR record still contains x_custom_one, want it stripped")
 	}
@@ -1700,7 +1702,7 @@ func TestPushAuthorizationRequestDerivesImplicitDPoPJKTFromPARProof(t *testing.T
 		t.Fatalf("len(records) = %d, want 1", len(h.transactions.records))
 	}
 	var storedJKT string
-	if err := json.Unmarshal(h.transactions.records[0].Parameters["dpop_jkt"], &storedJKT); err != nil {
+	if err := json.Unmarshal(storedParameters(t, h.transactions.records[0])["dpop_jkt"], &storedJKT); err != nil {
 		t.Fatalf("dpop_jkt not stored as a string: %v", err)
 	}
 	if storedJKT != thumbprint.String() {

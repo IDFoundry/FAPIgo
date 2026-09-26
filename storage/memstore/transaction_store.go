@@ -40,8 +40,7 @@ func NewTransactionStore() *TransactionStore {
 
 // CreatePAR implements storage.TransactionStore.
 func (s *TransactionStore) CreatePAR(_ context.Context, record storage.NewPARRecord) error {
-	record.Parameters = cloneRawMessageMap(record.Parameters)
-	record.TokenClaims = cloneRawMessageMap(record.TokenClaims)
+	record.Request = cloneRawMessage(record.Request)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.byReference[record.Reference] = record
@@ -62,12 +61,12 @@ func (s *TransactionStore) BeginAuthorization(_ context.Context, txn storage.Beg
 	s.byHandle[txn.Handle] = pendingInteraction{
 		reference: txn.Reference,
 		interaction: storage.CompletedInteraction{
-			ClientID: record.ClientID, Parameters: cloneRawMessageMap(record.Parameters), TokenClaims: cloneRawMessageMap(record.TokenClaims),
+			ClientID: record.ClientID, Request: cloneRawMessage(record.Request),
 			ExpiresAt: txn.HandleExpiresAt,
 		},
 	}
 	return storage.PushedAuthorizationRequest{
-		ClientID: record.ClientID, Parameters: cloneRawMessageMap(record.Parameters), TokenClaims: cloneRawMessageMap(record.TokenClaims),
+		ClientID: record.ClientID, Request: cloneRawMessage(record.Request),
 		ExpiresAt: record.ExpiresAt,
 	}, nil
 }
@@ -89,7 +88,6 @@ func (s *TransactionStore) CompleteAuthorization(_ context.Context, txn storage.
 	s.handleConsumed[txn.Handle] = true
 	s.referenceCompleted[pending.reference] = true
 	interaction := pending.interaction
-	interaction.Parameters = cloneRawMessageMap(interaction.Parameters)
-	interaction.TokenClaims = cloneRawMessageMap(interaction.TokenClaims)
+	interaction.Request = cloneRawMessage(interaction.Request)
 	return interaction, nil
 }

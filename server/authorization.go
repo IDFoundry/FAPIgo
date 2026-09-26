@@ -99,9 +99,14 @@ func (s *Server) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 		return s.beginFail(ctx, req.ClientID, newError(ErrorInvalidRequestURI, 400, "request_uri has expired", nil)), nil
 	}
 
+	request, err := decodeRequestRecord(pushed.Request)
+	if err != nil {
+		return s.beginFail(ctx, req.ClientID, newError(ErrorServerError, 500, "failed to decode pushed authorization request", err)), nil
+	}
+
 	action := InteractionRequired{
 		Handle:      InteractionHandle{value: handle},
-		Interaction: s.interactionRequestFrom(req.ClientID, pushed.Parameters),
+		Interaction: s.interactionRequestFrom(req.ClientID, request.Parameters),
 	}
 	s.audit(ctx, AuditEventBeginAuthorization, req.ClientID, AuditOutcomeSuccess, "")
 	return action, nil

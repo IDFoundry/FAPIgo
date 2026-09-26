@@ -71,12 +71,12 @@ func (s *memTransactionStore) BeginAuthorization(_ context.Context, txn storage.
 	s.byHandle[txn.Handle] = memPendingInteraction{
 		reference: txn.Reference,
 		interaction: storage.CompletedInteraction{
-			ClientID: record.ClientID, Parameters: record.Parameters, TokenClaims: record.TokenClaims,
+			ClientID: record.ClientID, Request: record.Request,
 			ExpiresAt: txn.HandleExpiresAt,
 		},
 	}
 	return storage.PushedAuthorizationRequest{
-		ClientID: record.ClientID, Parameters: record.Parameters, TokenClaims: record.TokenClaims,
+		ClientID: record.ClientID, Request: record.Request,
 		ExpiresAt: record.ExpiresAt,
 	}, nil
 }
@@ -145,14 +145,7 @@ func (s *memGrantStore) RedeemAuthorizationCode(_ context.Context, redemption st
 	}
 	s.codeRedeemed[redemption.CodeHash] = true
 	return storage.RedeemedAuthorizationCode{
-		ClientID: code.ClientID, RedirectURI: code.RedirectURI,
-		CodeChallenge: code.CodeChallenge, CodeChallengeMethod: code.CodeChallengeMethod,
-		DPoPJKT: code.DPoPJKT,
-		Subject: code.Subject, Scope: code.Scope, Nonce: code.Nonce,
-		AuthTime: code.AuthTime, ACR: code.ACR, AMR: code.AMR,
-		AuthorizationDetails: code.AuthorizationDetails, TokenClaims: code.TokenClaims,
-		RequestedIDTokenClaims: code.RequestedIDTokenClaims, RequestedUserinfoClaims: code.RequestedUserinfoClaims,
-		ExpiresAt: code.ExpiresAt,
+		ClientID: code.ClientID, Grant: code.Grant, ExpiresAt: code.ExpiresAt,
 	}, nil
 }
 
@@ -191,12 +184,7 @@ func (s *memGrantStore) RedeemRefreshToken(_ context.Context, redemption storage
 		return storage.RedeemedRefreshToken{}, fmt.Errorf("fapitest: unknown refresh token")
 	}
 	return storage.RedeemedRefreshToken{
-		ClientID: token.ClientID, Subject: token.Subject, Scope: token.Scope,
-		Thumbprint: token.Thumbprint, AuthTime: token.AuthTime, ACR: token.ACR, AMR: token.AMR,
-		AuthorizationDetails:   token.AuthorizationDetails,
-		TokenClaims:            token.TokenClaims,
-		RequestedIDTokenClaims: token.RequestedIDTokenClaims, RequestedUserinfoClaims: token.RequestedUserinfoClaims,
-		ExpiresAt: token.ExpiresAt,
+		ClientID: token.ClientID, Grant: token.Grant, ExpiresAt: token.ExpiresAt,
 	}, nil
 }
 

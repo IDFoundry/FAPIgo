@@ -76,6 +76,15 @@ func RecommendedLimits() Limits {
 		// as AccessTokenLifetime.
 		IDTokenLifetime: 10 * time.Minute,
 
+		// Not spec-mandated — no spec bounds ID token size, but relying
+		// parties do: this module's own client rejects a compact token
+		// over 16 KiB by default, and encryption adds about a third. 4
+		// KiB of non-standard claims keeps a signed ID token near 6 KiB
+		// and an encrypted one under 9 KiB, with room to spare;
+		// provider-specific and typical identity claims are well under
+		// 1 KiB. Raise it only alongside your relying parties' limits.
+		MaxIDTokenClaimsBytes: 4096,
+
 		// Not spec-mandated — this is a session-length choice, not a
 		// protocol requirement. 24 hours is a reasonable "valid for
 		// the day" default; adjust to your own session policy.

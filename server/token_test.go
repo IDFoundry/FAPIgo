@@ -626,6 +626,7 @@ func newHarnessWithOpaqueAccessTokens(t *testing.T, profile server.Profile, allo
 			JARMResponseLifetime:       time.Minute,
 			AccessTokenLifetime:        5 * time.Minute,
 			IDTokenLifetime:            5 * time.Minute,
+			MaxIDTokenClaimsBytes:      4096,
 			RefreshTokenLifetime:       5 * time.Minute,
 			MaxDPoPProofAge:            time.Minute,
 			MaxClockSkew:               5 * time.Second,

@@ -17,7 +17,9 @@ import (
 // — agrees with what ID token issuance can actually honour: a claim it
 // accepts at CompleteAuthorization must later issue without error (not
 // fail as a server_error at the token endpoint) and come back out of the
-// signed ID token under the same name with an equivalent value.
+// signed ID token under the same name with an equivalent value, in a
+// token small enough for a relying party's default size limit (the
+// property RecommendedLimits' MaxIDTokenClaimsBytes exists to keep).
 func FuzzGrantedIDTokenClaims(f *testing.F) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -36,7 +38,7 @@ func FuzzGrantedIDTokenClaims(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, name string, value []byte) {
 		claims := map[string]json.RawMessage{name: value}
-		if validateGrantedIDTokenClaims(claims) != nil {
+		if validateGrantedIDTokenClaims(claims, RecommendedLimits().MaxIDTokenClaimsBytes) != nil {
 			return
 		}
 		now := time.Now()

@@ -19,8 +19,13 @@ var reservedIDTokenClaims = []string{"azp", "jti", "nbf", "cnf"}
 // validateGrantedIDTokenClaims checks GrantedAuthorization.IDTokenClaims
 // before anything is persisted, so a bad claim is reported to the
 // application that supplied it rather than failing ID token issuance
-// later at the token endpoint.
-func validateGrantedIDTokenClaims(claims map[string]json.RawMessage) error {
+// later at the token endpoint. maxBytes is Limits.MaxIDTokenClaimsBytes:
+// the application's own claims alone may not exceed the budget every
+// non-standard ID token claim shares.
+func validateGrantedIDTokenClaims(claims map[string]json.RawMessage, maxBytes int) error {
+	if size := claimsSize(claims); size > maxBytes {
+		return fmt.Errorf("ID token claims total %d bytes, over limits.max_id_token_claims_bytes (%d)", size, maxBytes)
+	}
 	for name, value := range claims {
 		if name == "" {
 			return fmt.Errorf("ID token claim name must not be empty")
@@ -36,4 +41,14 @@ func validateGrantedIDTokenClaims(claims map[string]json.RawMessage) error {
 		}
 	}
 	return nil
+}
+
+// claimsSize is the size Limits.MaxIDTokenClaimsBytes measures: every
+// claim name plus its encoded value.
+func claimsSize(claims map[string]json.RawMessage) int {
+	size := 0
+	for name, value := range claims {
+		size += len(name) + len(value)
+	}
+	return size
 }

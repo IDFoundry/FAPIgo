@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -513,8 +514,12 @@ func withRequestedUserinfoClaims(names []string, base map[string]json.RawMessage
 // claims, then whatever identity claims its "claims" parameter requested
 // (see withIdentityClaims), then the application's own
 // GrantedAuthorization.IDTokenClaims — each layer overriding the one
-// before (see that field for why). nonce is grant.Nonce for the first
-// ID token issued from an authorization code, "" otherwise.
+// before (see that field for why). The merged claims must fit
+// Limits.MaxIDTokenClaimsBytes; identity claims are only known here, so
+// this — not CompleteAuthorization — is where the whole budget is
+// checked, failing as server_error rather than issuing a token a relying
+// party would reject. nonce is grant.Nonce for the first ID token issued
+// from an authorization code, "" otherwise.
 func (s *Server) issueIDTokenForGrant(ctx context.Context, client storage.RegisteredClient, grant grantRecord, nonce, accessToken string) (string, *Error) {
 	claims, err := s.withIdentityClaims(ctx, grant.Subject, grant.RequestedIDTokenClaims, grant.TokenClaims)
 	if err != nil {
@@ -529,6 +534,9 @@ func (s *Server) issueIDTokenForGrant(ctx context.Context, client storage.Regist
 			merged[k] = v
 		}
 		claims = merged
+	}
+	if size := claimsSize(claims); size > s.cfg.Limits.MaxIDTokenClaimsBytes {
+		return "", newError(ErrorServerError, 500, fmt.Sprintf("ID token claims total %d bytes, over limits.max_id_token_claims_bytes (%d)", size, s.cfg.Limits.MaxIDTokenClaimsBytes), nil)
 	}
 	idToken, err := s.issueIDToken(ctx, client, grant, claims, nonce, accessToken)
 	if err != nil {

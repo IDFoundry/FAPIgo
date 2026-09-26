@@ -45,6 +45,7 @@ func validConfig(t *testing.T) server.Config {
 			AuthorizationCodeLifetime:  time.Minute,
 			AccessTokenLifetime:        5 * time.Minute,
 			IDTokenLifetime:            5 * time.Minute,
+			MaxIDTokenClaimsBytes:      4096,
 			RefreshTokenLifetime:       5 * time.Minute,
 			MaxDPoPProofAge:            time.Minute,
 			MaxClockSkew:               5 * time.Second,
@@ -93,6 +94,7 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 		"zero authorization code lifetime": func(c *server.Config) { c.Limits.AuthorizationCodeLifetime = 0 },
 		"zero access token lifetime":       func(c *server.Config) { c.Limits.AccessTokenLifetime = 0 },
 		"zero id token lifetime":           func(c *server.Config) { c.Limits.IDTokenLifetime = 0 },
+		"zero max id token claims bytes":   func(c *server.Config) { c.Limits.MaxIDTokenClaimsBytes = 0 },
 		"zero refresh token lifetime":      func(c *server.Config) { c.Limits.RefreshTokenLifetime = 0 },
 		"zero max dpop proof age":          func(c *server.Config) { c.Limits.MaxDPoPProofAge = 0 },
 		"negative clock skew":              func(c *server.Config) { c.Limits.MaxClockSkew = -time.Second },
@@ -166,9 +168,10 @@ func TestNewAcceptsOAuthOnlyConfigWithoutIDTokenRequirements(t *testing.T) {
 	cfg.OAuthOnly = true
 	cfg.Algorithms.IDToken = 0
 	cfg.Limits.IDTokenLifetime = 0
+	cfg.Limits.MaxIDTokenClaimsBytes = 0
 
 	if _, err := server.New(cfg, validDependencies()); err != nil {
-		t.Fatalf("New(OAuthOnly, no id token algorithm/lifetime): %v", err)
+		t.Fatalf("New(OAuthOnly, no id token algorithm/lifetime/claims budget): %v", err)
 	}
 }
 
@@ -179,8 +182,9 @@ func TestNewAcceptsOAuthOnlyConfigWithoutIDTokenRequirements(t *testing.T) {
 // duplicate.
 func TestNewRejectsIDTokenRequirementsWhenNotOAuthOnly(t *testing.T) {
 	cases := map[string]func(*server.Config){
-		"zero id token algorithm": func(c *server.Config) { c.Algorithms.IDToken = 0 },
-		"zero id token lifetime":  func(c *server.Config) { c.Limits.IDTokenLifetime = 0 },
+		"zero id token algorithm":     func(c *server.Config) { c.Algorithms.IDToken = 0 },
+		"zero id token lifetime":      func(c *server.Config) { c.Limits.IDTokenLifetime = 0 },
+		"zero id token claims budget": func(c *server.Config) { c.Limits.MaxIDTokenClaimsBytes = 0 },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {

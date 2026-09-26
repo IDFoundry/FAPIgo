@@ -45,8 +45,8 @@ already implement — directly into a `KeyManager`; see `keys/doc.go`.
 
 Every field below is required — `server.New` rejects a zero value for
 any of them, on purpose (see `server/doc.go`: "no implicit defaults, no
-silently-installed in-memory store"). `Algorithms` and `Limits` are five
-and nine fields respectively with no sane universal default, so
+silently-installed in-memory store"). `Algorithms` and `Limits` hold
+many fields with no sane universal default, so
 `server.RecommendedAlgorithms()` and `server.RecommendedLimits()` exist
 as an explicit, deliberate starting point — each field is documented
 with exactly how it's grounded (a direct FAPI 2.0 Security Profile Final
@@ -74,6 +74,14 @@ cfg := server.Config{
 
 Under `ProfileFAPISecurityWithMessageSigning`, `Algorithms.JARM` is
 required too.
+
+Most `Limits` fields are lifetimes and clock tolerances. One is a size:
+`Limits.MaxIDTokenClaimsBytes` (4096 in `RecommendedLimits()`) caps the
+total size of the non-standard claims in an ID token, so the server
+never issues one larger than relying parties accept — this module's own
+client rejects a compact token over 16 KiB by default. See [Adding
+claims to tokens](#adding-claims-to-tokens) for what counts against it,
+and raise it only alongside your relying parties' own limits.
 
 ## 3. Register at least one client
 
@@ -241,6 +249,13 @@ decides and where the claim lands, so pick by what you need:
 collision the more specific source wins: `IDTokenClaims` over identity
 claims over extension claims. All three are carried forward to ID
 tokens re-issued on refresh, with no storage change on your side.
+
+All three share one size budget, `Limits.MaxIDTokenClaimsBytes` (each
+claim's name plus its JSON-encoded value). `CompleteAuthorization`
+rejects `IDTokenClaims` that exceed it on their own, before anything is
+stored; the token endpoint rejects the merged total, as `server_error`,
+if identity or extension claims push it over — identity claims are only
+resolved there.
 
 ## 6. The rest of the HTTP surface
 

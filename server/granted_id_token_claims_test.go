@@ -3,6 +3,7 @@ package server_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -153,7 +154,9 @@ func invalidGrantedIDTokenClaims() map[string]map[string]json.RawMessage {
 		"jti":                {"jti": json.RawMessage(`"j"`)},
 		"empty name":         {"": json.RawMessage(`"x"`)},
 		"invalid UTF-8 name": {"name\xff": json.RawMessage(`"x"`)},
-		"invalid JSON":       {"sub_type": json.RawMessage(`user`)},
+		// newHarness sets Limits.MaxIDTokenClaimsBytes to 4096.
+		"over size budget": {"sub_attributes": json.RawMessage(`"` + strings.Repeat("x", 4096) + `"`)},
+		"invalid JSON":     {"sub_type": json.RawMessage(`user`)},
 	}
 }
 
@@ -231,5 +234,27 @@ func TestCompleteBackchannelAuthenticationRejectsInvalidGrantedIDTokenClaims(t *
 				t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequest)
 			}
 		})
+	}
+}
+
+// TestExchangeAuthorizationCodeRejectsIDTokenClaimsOverBudget covers the
+// issuance-time half of Limits.MaxIDTokenClaimsBytes: identity claims
+// are only resolved at the token endpoint, so a claim set that only
+// exceeds the budget once they're merged in fails there, as
+// server_error, rather than issuing an ID token relying parties reject.
+func TestExchangeAuthorizationCodeRejectsIDTokenClaimsOverBudget(t *testing.T) {
+	identityClaims := fakeIdentityClaims{
+		subject: "user-1",
+		claims:  map[string]json.RawMessage{"name": json.RawMessage(`"` + strings.Repeat("n", 4096) + `"`)},
+	}
+	h := newHarnessWithIdentityClaims(t, identityClaims)
+	code := completeAuthorizationWithClaims(t, h, `{"id_token":{"name":null}}`)
+
+	_, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorServerError {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorServerError)
 	}
 }

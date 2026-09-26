@@ -198,11 +198,26 @@ func (s *Server) buildAuthorizationResponse(ctx context.Context, clientID fapi.C
 		base.RawQuery = q.Encode()
 	}
 
-	destination, err := fapi.ParseEndpointURL(base.String())
+	destination, err := s.parseRedirectURI(base.String())
 	if err != nil {
 		return fapi.URL{}, newError(ErrorServerError, 500, "failed to construct redirect destination", err)
 	}
 	return destination, nil
+}
+
+// parseRedirectURI validates raw as a redirect destination. FAPI 2.0
+// §5.3.2.2 forbids http redirect URIs except loopback redirection per
+// RFC 8252 §7.3; this server permits that exception only outside
+// AssuranceProduction, the same line validateAssurance draws for the
+// server's own endpoints. The pushed authorization request checks the
+// redirect_uri with this too, so an unacceptable one is refused there
+// as invalid_request rather than surfacing as a server_error once the
+// flow completes.
+func (s *Server) parseRedirectURI(raw string) (fapi.URL, error) {
+	if s.cfg.Assurance == AssuranceProduction {
+		return fapi.ParseEndpointURL(raw)
+	}
+	return fapi.ParseEndpointURL(raw, fapi.AllowLoopbackHTTP())
 }
 
 func validateGrantedScopeSubset(granted []string, requestedSpaceDelimited string) error {

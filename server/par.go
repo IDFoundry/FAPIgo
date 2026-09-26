@@ -640,6 +640,9 @@ func (s *Server) validateAuthorizationParameters(params map[string]json.RawMessa
 	if !client.HasRedirectURI(redirectURI) {
 		return nil, newError(ErrorInvalidRequest, 400, "redirect_uri is not registered for this client", nil)
 	}
+	if _, err := s.parseRedirectURI(redirectURI); err != nil {
+		return nil, newError(ErrorInvalidRequest, 400, "redirect_uri is not an acceptable redirect destination", err)
+	}
 
 	codeChallenge, err := jsonString(params, "code_challenge")
 	if err != nil {

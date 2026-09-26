@@ -483,8 +483,8 @@ wait_federation_ready() {
 # Federation Entity Key (regenerated fresh on every
 # conformance-as-federation container start — cmd/conformance-as's
 # federation self-issuance never persists a key across restarts — so it
-# has to be re-synced into the Trust Anchor's subordinates config here
-# rather than committed) and to read the Trust Anchor's own jwks
+# has to be re-synced into the Trust Anchor's subordinates config on
+# every run rather than committed) and to read the Trust Anchor's own jwks
 # for run-federation-plan.py's --trust-anchor-jwks bootstrap value. Same
 # curl-to-file / explicit base64-padding-correction approach confirmed
 # working by hand before being scripted here — a raw
@@ -529,12 +529,19 @@ run_federation_plan() {
 	local log_file="$WORKDIR/$name.log"
 	ALL_SUITES+=("Federation $name")
 
+	# The Trust Anchor mounts $FEDERATION_TA_SUBORDINATES_FILE (see
+	# docker-compose.yml): a copy in WORKDIR, synced below, so the run
+	# never rewrites the tracked template in the working tree.
+	local subordinates="$WORKDIR/federation-trust-anchor-subordinates.json"
+	cp "$FEDERATION_TA_SUBORDINATES_CONFIG" "$subordinates"
+	export FEDERATION_TA_SUBORDINATES_FILE="$subordinates"
+
 	log "Federation: bringing up conformance-as-federation, conformance-federation-trust-anchor"
 	(cd "$SERVER_DIR" && docker compose up -d --build conformance-as-federation conformance-federation-trust-anchor) >"$WORKDIR/docker-compose-federation.log" 2>&1
 	wait_federation_ready 18456 conformance-as-federation
 	wait_federation_ready 18457 conformance-federation-trust-anchor
 
-	log "Federation: syncing AS's ephemeral Federation Entity Key into the Trust Anchor's subordinates config"
+	log "Federation: syncing AS's ephemeral Federation Entity Key into the Trust Anchor's subordinates config ($subordinates)"
 	local as_jwks
 	if ! as_jwks="$(entity_jwks https://127.0.0.1:18456)"; then
 		OVERALL_CLEAN=false
@@ -550,7 +557,7 @@ config["subordinates"][0]["jwks"] = json.loads(jwks_json)
 with open(path, "w") as f:
     json.dump(config, f, indent=2)
     f.write("\n")
-' "$FEDERATION_TA_SUBORDINATES_CONFIG" "$as_jwks"
+' "$subordinates" "$as_jwks"
 
 	(cd "$SERVER_DIR" && docker compose up -d --force-recreate conformance-federation-trust-anchor) >>"$WORKDIR/docker-compose-federation.log" 2>&1
 	wait_federation_ready 18457 conformance-federation-trust-anchor

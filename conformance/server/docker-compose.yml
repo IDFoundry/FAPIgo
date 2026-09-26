@@ -240,11 +240,15 @@ services:
   # A minimal, standing OpenID Federation 1.0 Trust Anchor — see
   # cmd/conformance-federation-trust-anchor's own doc comment for why
   # this exists instead of depending on a real third-party one.
-  # oidf-config/federation-trust-anchor-subordinates.json must be
-  # regenerated (see conformance/server/scripts/README.md) whenever
-  # conformance-as-federation's own federation signing key changes
-  # (every container restart — that key is never pinned, see that
-  # command's own doc comment for why nothing needs it to be).
+  # Its subordinates list must carry conformance-as-federation's current
+  # federation signing key, which changes on every container restart
+  # (that key is never pinned, see that command's own doc comment for
+  # why nothing needs it to be). The mounted file is
+  # $FEDERATION_TA_SUBORDINATES_FILE when set — run-all.sh points it at
+  # a synced copy in its own working directory, so a run never rewrites
+  # the tracked oidf-config/federation-trust-anchor-subordinates.json —
+  # and that tracked template otherwise (see
+  # conformance/server/scripts/README.md for syncing it by hand).
   conformance-federation-trust-anchor:
     build:
       context: ../..
@@ -254,7 +258,7 @@ services:
     ports:
       - "18457:8443" # see conformance-as-baseline's port comment above
     volumes:
-      - ./oidf-config/federation-trust-anchor-subordinates.json:/subordinates.json:ro
+      - ${FEDERATION_TA_SUBORDINATES_FILE:-./oidf-config/federation-trust-anchor-subordinates.json}:/subordinates.json:ro
       - ./certs:/certs:ro
     command:
       - -entity-id=https://conformance-federation-trust-anchor:8443

@@ -273,10 +273,17 @@ test" paragraph below for the full story and its RP-side counterpart.
      | cut -d. -f2 | base64 -d 2>/dev/null | python3 -c \
      "import json,sys; print(json.dumps(json.load(sys.stdin)['jwks']))"
    ```
-   Paste that into `oidf-config/federation-trust-anchor-subordinates.json`'s
-   one `subordinates[].jwks` entry, then
-   `docker compose up -d --force-recreate conformance-federation-trust-anchor`
-   (no rebuild needed — only the mounted config file changed).
+   Copy `oidf-config/federation-trust-anchor-subordinates.json` somewhere
+   outside the repo, paste that into the copy's one `subordinates[].jwks`
+   entry, then point the Trust Anchor at it and recreate it:
+   ```
+   FEDERATION_TA_SUBORDINATES_FILE=/path/to/copy.json \
+     docker compose up -d --force-recreate conformance-federation-trust-anchor
+   ```
+   (no rebuild needed — only the mounted config file changed). The
+   tracked file is a template: `conformance/scripts/run-all.sh` does the
+   same with a copy in its own working directory, so neither path
+   leaves it modified.
 3. Create an `openid-federation-deployed-entity-test-plan` plan (via the
    suite's UI, or its API — `POST /api/plan?planName=...&variant=...`,
    see `Conformance.create_test_plan` in the suite's own

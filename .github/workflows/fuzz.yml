@@ -109,6 +109,16 @@ jobs:
             name: FuzzDecodeTokenResponse
           - pkg: ./client
             name: FuzzDecodeBackchannelAuthenticationResponse
+          - pkg: .
+            name: FuzzParseEndpointURL
+          - pkg: ./server
+            name: FuzzParseRequestedClaimNames
+          - pkg: ./server
+            name: FuzzDecodeRecords
+          - pkg: ./server
+            name: FuzzGrantRecordRoundTrip
+          - pkg: ./server
+            name: FuzzGrantedIDTokenClaims
     steps:
       - uses: actions/checkout@v7
 

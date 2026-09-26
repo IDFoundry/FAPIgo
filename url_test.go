@@ -122,6 +122,9 @@ func TestParseEndpointURLAllowsLoopbackHTTPWhenEnabled(t *testing.T) {
 		"http://localhost:8080/par",
 		"http://127.0.0.1:8080/par",
 		"http://[::1]:8080/par",
+		"http://localhost/par",
+		"http://127.0.0.1/par",
+		"http://[::1]/par", // bracketed IPv6 with no port — found by FuzzParseEndpointURL
 	}
 	for _, c := range cases {
 		if _, err := ParseEndpointURL(c, AllowLoopbackHTTP()); err != nil {

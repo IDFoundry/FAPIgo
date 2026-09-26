@@ -96,3 +96,24 @@ func TestGrantRecordForRefreshTokenDropsCodeOnlyFields(t *testing.T) {
 		t.Fatalf("forRefreshToken = %+v, want grant carried forward with thumbprint", got)
 	}
 }
+
+// TestEncodeRecordsRejectInvalidUTF8 covers the backstop behind the
+// app-facing constructors: a record json.Marshal would silently alter
+// is refused rather than stored.
+func TestEncodeRecordsRejectInvalidUTF8(t *testing.T) {
+	grants := map[string]grantRecord{
+		"subject":         {Subject: "user\xff"},
+		"scope":           {Subject: "u", Scope: []string{"openid\xff"}},
+		"amr":             {Subject: "u", AMR: []string{"pwd\xff"}},
+		"token claim key": {Subject: "u", TokenClaims: map[string]json.RawMessage{"k\xff": json.RawMessage(`1`)}},
+		"id token key":    {Subject: "u", IDTokenClaims: map[string]json.RawMessage{"k\xff": json.RawMessage(`1`)}},
+	}
+	for name, g := range grants {
+		if _, err := encodeGrantRecord(g); err == nil {
+			t.Errorf("encodeGrantRecord(invalid UTF-8 %s) = nil error, want error", name)
+		}
+	}
+	if _, err := encodeRequestRecord(requestRecord{Parameters: map[string]json.RawMessage{"p\xff": json.RawMessage(`"x"`)}}); err == nil {
+		t.Errorf("encodeRequestRecord(invalid UTF-8 parameter name) = nil error, want error")
+	}
+}

@@ -75,6 +75,10 @@ type grantRecord struct {
 	// issued: an IdentityClaimsSource may hold more than was requested.
 	RequestedIDTokenClaims  []string `json:"requested_id_token_claims,omitempty"`
 	RequestedUserinfoClaims []string `json:"requested_userinfo_claims,omitempty"`
+
+	// IDTokenClaims are the application's own ID-token-only claims
+	// (GrantedAuthorization.IDTokenClaims), already validated.
+	IDTokenClaims map[string]json.RawMessage `json:"id_token_claims,omitempty"`
 }
 
 // forRefreshToken returns g as a refresh token carries it forward:

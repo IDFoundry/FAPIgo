@@ -510,13 +510,25 @@ func withRequestedUserinfoClaims(names []string, base map[string]json.RawMessage
 }
 
 // issueIDTokenForGrant issues the ID token for grant: its extension
-// claims plus whatever identity claims its "claims" parameter requested
-// (see withIdentityClaims). nonce is grant.Nonce for the first ID token
-// issued from an authorization code, "" otherwise.
+// claims, then whatever identity claims its "claims" parameter requested
+// (see withIdentityClaims), then the application's own
+// GrantedAuthorization.IDTokenClaims — each layer overriding the one
+// before (see that field for why). nonce is grant.Nonce for the first
+// ID token issued from an authorization code, "" otherwise.
 func (s *Server) issueIDTokenForGrant(ctx context.Context, client storage.RegisteredClient, grant grantRecord, nonce, accessToken string) (string, *Error) {
 	claims, err := s.withIdentityClaims(ctx, grant.Subject, grant.RequestedIDTokenClaims, grant.TokenClaims)
 	if err != nil {
 		return "", newError(ErrorServerError, 500, "failed to resolve identity claims", err)
+	}
+	if len(grant.IDTokenClaims) > 0 {
+		merged := make(map[string]json.RawMessage, len(claims))
+		for k, v := range claims {
+			merged[k] = v
+		}
+		for k, v := range grant.IDTokenClaims {
+			merged[k] = v
+		}
+		claims = merged
 	}
 	idToken, err := s.issueIDToken(ctx, client, grant, claims, nonce, accessToken)
 	if err != nil {

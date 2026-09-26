@@ -74,6 +74,12 @@ func (s *Server) CompleteBackchannelAuthentication(ctx context.Context, req Comp
 			return wrapped
 		}
 
+		if claimsErr := validateGrantedIDTokenClaims(result.grant.IDTokenClaims); claimsErr != nil {
+			wrapped := newError(ErrorInvalidRequest, 400, "granted ID token claims are not valid", claimsErr)
+			s.audit(ctx, AuditEventCompleteBackchannelAuthentication, pending.ClientID, AuditOutcomeFailure, string(wrapped.Code()))
+			return wrapped
+		}
+
 		var grantedAuthorizationDetails json.RawMessage
 		if len(result.grant.AuthorizationDetails) > 0 {
 			granted, validateErr := s.validateGrantedAuthorizationDetails(request.Parameters[authorizationDetailsParameter], result.grant.AuthorizationDetails)
@@ -96,6 +102,7 @@ func (s *Server) CompleteBackchannelAuthentication(ctx context.Context, req Comp
 			TokenClaims:             request.TokenClaims,
 			RequestedIDTokenClaims:  idTokenClaims,
 			RequestedUserinfoClaims: userinfoClaims,
+			IDTokenClaims:           result.grant.IDTokenClaims,
 		})
 		if encodeErr != nil {
 			wrapped := newError(ErrorServerError, 500, "failed to encode backchannel authentication grant", encodeErr)

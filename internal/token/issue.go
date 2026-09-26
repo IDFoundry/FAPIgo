@@ -149,6 +149,18 @@ func IssueAccessToken(p AccessTokenParams) (token string, jti string, err error)
 
 var idTokenReservedClaims = []string{"iss", "sub", "aud", "exp", "iat", "nonce", "auth_time", "acr", "amr", "at_hash"}
 
+// IsIDTokenReservedClaim reports whether name is one of the claims
+// IssueIDToken manages itself, which IDTokenParams.Parameters must not
+// set.
+func IsIDTokenReservedClaim(name string) bool {
+	for _, reserved := range idTokenReservedClaims {
+		if name == reserved {
+			return true
+		}
+	}
+	return false
+}
+
 // IDTokenParams describes one ID token to issue.
 type IDTokenParams struct {
 	Signer    crypto.Signer

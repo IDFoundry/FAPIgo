@@ -193,6 +193,10 @@ authCtx, _ := server.NewAuthenticationContext(time.Now(), acr, amr)
 
 result := server.Authorize(subject, authCtx, server.GrantedAuthorization{
 	Scope: whateverScopesTheUserActuallyApproved,
+	// Optional: extra claims for the ID token only (never the access
+	// token), each value already JSON-encoded. Server-managed names
+	// (iss, sub, aud, nonce, acr, ...) are rejected.
+	IDTokenClaims: map[string]json.RawMessage{"sub_type": json.RawMessage(`"user"`)},
 })
 // or: server.Deny("user declined") / server.AuthenticationFailed("bad credentials")
 
@@ -218,6 +222,25 @@ any username" field with no real authentication behind it, because this
 binary exists to drive OIDF conformance testing, not to demonstrate
 login UI. Building the real authentication step is the one part of this
 whole guide that's actually yours to write.
+
+### Adding claims to tokens
+
+Beyond the standard claims (`iss`, `sub`, `aud`, `acr`, `amr`, ...),
+there are three ways a claim gets into a token. They differ in who
+decides and where the claim lands, so pick by what you need:
+
+| You want to... | Use | Lands in |
+|---|---|---|
+| Add claims you decide at login (e.g. a subject type, or who is acting on an entity's behalf) | `GrantedAuthorization.IDTokenClaims` | ID token only |
+| Return identity claims (`name`, `email`, ...) only when the client asks via the OIDC `claims` parameter | `Dependencies.IdentityClaims` (`server.IdentityClaimsSource`) | ID token and/or UserInfo, per request |
+| Carry a value the client sent as a custom authorization request parameter | `extension.Definition` with `ReturnInTokenClaims` | Access token and ID token |
+
+`IDTokenClaims` values are JSON-encoded, and server-managed names
+(`iss`, `sub`, `aud`, `exp`, `iat`, `nonce`, `auth_time`, `acr`, `amr`,
+`at_hash`, `azp`, `jti`, `nbf`, `cnf`) are rejected. On a name
+collision the more specific source wins: `IDTokenClaims` over identity
+claims over extension claims. All three are carried forward to ID
+tokens re-issued on refresh, with no storage change on your side.
 
 ## 6. The rest of the HTTP surface
 

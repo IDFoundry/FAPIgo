@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -126,6 +127,12 @@ type Config struct {
 	// reads the query string back off the authorization endpoint's
 	// redirect, so it needn't be listening.
 	RedirectURI string
+
+	// IDTokenClaims, if set, is what the harness's auto-approving
+	// authorization endpoint grants as
+	// server.GrantedAuthorization.IDTokenClaims — application-supplied
+	// claims for the ID token only.
+	IDTokenClaims map[string]json.RawMessage
 }
 
 // Harness wires a real client.Client, server.Server and resource.Verifier
@@ -220,7 +227,7 @@ func New(t *testing.T, cfg Config) *Harness {
 	// handlers only dereference the *server.Server at request time, so
 	// attaching it afterward — before any test code makes a request — is
 	// safe; see newAuthServer.
-	as := newAuthServer(t, clock, AutoApprove{Subject: Subject, ACR: "urn:mace:incommon:iap:silver", AMR: []string{"pwd"}}, tlsClientCert)
+	as := newAuthServer(t, clock, AutoApprove{Subject: Subject, ACR: "urn:mace:incommon:iap:silver", AMR: []string{"pwd"}, IDTokenClaims: cfg.IDTokenClaims}, tlsClientCert)
 
 	srvCfg := server.Config{
 		Issuer:    issuer,

@@ -78,7 +78,7 @@ func parseSecureURL(raw string, opts []URLOption) (URL, error) {
 	switch parsed.Scheme {
 	case "https":
 	case "http":
-		if !o.allowLoopbackHTTP || !isLoopbackHost(parsed.Host) {
+		if !o.allowLoopbackHTTP || !isLoopbackHost(parsed.Hostname()) {
 			return URL{}, fmt.Errorf("URL must use https")
 		}
 	default:
@@ -90,15 +90,15 @@ func parseSecureURL(raw string, opts []URLOption) (URL, error) {
 	return URL{value: *parsed}, nil
 }
 
-func isLoopbackHost(host string) bool {
-	h := host
-	if hostOnly, _, err := net.SplitHostPort(host); err == nil {
-		h = hostOnly
-	}
-	if strings.EqualFold(h, "localhost") {
+// isLoopbackHost reports whether hostname — a URL's Hostname(), with
+// any port and IPv6 brackets already removed — names the loopback
+// interface. Taking Host instead would miss a bracketed IPv6 literal
+// with no port ("[::1]"), which net.SplitHostPort rejects.
+func isLoopbackHost(hostname string) bool {
+	if strings.EqualFold(hostname, "localhost") {
 		return true
 	}
-	ip := net.ParseIP(h)
+	ip := net.ParseIP(hostname)
 	return ip != nil && ip.IsLoopback()
 }
 

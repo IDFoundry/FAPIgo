@@ -172,3 +172,22 @@ func TestFetchRejectsRedirectToInternalIP(t *testing.T) {
 		t.Fatalf("Fetch error = %v, want ErrSSRFBlocked", err)
 	}
 }
+
+// TestIsLoopbackHostTakesHostname covers the IPv6 case
+// FuzzParseEndpointURL found in fapi's identical helper: a bracketed
+// literal with no port is loopback too, once Hostname() has removed
+// the brackets.
+func TestIsLoopbackHostTakesHostname(t *testing.T) {
+	for _, raw := range []string{"http://[::1]/x", "http://[::1]:8080/x", "http://localhost/x", "http://127.0.0.1:1/x"} {
+		u, err := url.Parse(raw)
+		if err != nil {
+			t.Fatalf("url.Parse(%q): %v", raw, err)
+		}
+		if !isLoopbackHost(u.Hostname()) {
+			t.Errorf("isLoopbackHost(%q) = false, want true", u.Hostname())
+		}
+	}
+	if isLoopbackHost("localhost.evil.example") {
+		t.Errorf("isLoopbackHost(localhost.evil.example) = true, want false")
+	}
+}

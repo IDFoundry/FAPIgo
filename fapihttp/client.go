@@ -363,7 +363,7 @@ func (c *Client) validateFetchURL(ctx context.Context, u *url.URL) error {
 	if u.User != nil {
 		return fmt.Errorf("fapihttp: url must not contain embedded credentials")
 	}
-	loopbackExempt := c.cfg.AllowLoopbackHTTP && isLoopbackHost(u.Host)
+	loopbackExempt := c.cfg.AllowLoopbackHTTP && isLoopbackHost(u.Hostname())
 	switch strings.ToLower(u.Scheme) {
 	case "https":
 		if loopbackExempt {
@@ -409,15 +409,13 @@ func (c *Client) checkHostIPs(ctx context.Context, host string) error {
 	return nil
 }
 
-func isLoopbackHost(host string) bool {
-	h := host
-	if hostOnly, _, err := net.SplitHostPort(host); err == nil {
-		h = hostOnly
-	}
-	if strings.EqualFold(h, "localhost") {
+// isLoopbackHost mirrors fapi's own: hostname is a URL's Hostname(),
+// with any port and IPv6 brackets already removed.
+func isLoopbackHost(hostname string) bool {
+	if strings.EqualFold(hostname, "localhost") {
 		return true
 	}
-	ip := net.ParseIP(h)
+	ip := net.ParseIP(hostname)
 	return ip != nil && ip.IsLoopback()
 }
 

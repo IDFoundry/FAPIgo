@@ -244,12 +244,15 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 	now := s.deps.Clock.Now()
 	expiresAt := now.Add(s.cfg.Limits.PushedRequestLifetime)
 
+	request, err := encodeRequestRecord(requestRecord{Parameters: validated, TokenClaims: tokenClaims})
+	if err != nil {
+		return s.parFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to encode pushed authorization request", err))
+	}
 	if err := s.deps.Transactions.CreatePAR(ctx, storage.NewPARRecord{
-		Reference:   reference,
-		ClientID:    client.ID(),
-		Parameters:  validated,
-		TokenClaims: tokenClaims,
-		ExpiresAt:   expiresAt,
+		Reference: reference,
+		ClientID:  client.ID(),
+		Request:   request,
+		ExpiresAt: expiresAt,
 	}); err != nil {
 		return s.parFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to persist pushed authorization request", err))
 	}

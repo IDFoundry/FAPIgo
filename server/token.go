@@ -149,20 +149,20 @@ func (t TokenResult) WriteJSON(w http.ResponseWriter) {
 // authorization code's own stored state against the token request that
 // redeemed it — split out of ExchangeAuthorizationCode purely to keep
 // that method's own cognitive complexity manageable.
-func validateRedeemedAuthorizationCode(redeemed storage.RedeemedAuthorizationCode, clientID fapi.ClientID, redirectURI, thumbprint, codeVerifier string, now time.Time) *Error {
+func validateRedeemedAuthorizationCode(redeemed storage.RedeemedAuthorizationCode, grant grantRecord, clientID fapi.ClientID, redirectURI, thumbprint, codeVerifier string, now time.Time) *Error {
 	if !now.Before(redeemed.ExpiresAt) {
 		return newError(ErrorInvalidGrant, 400, "code has expired", nil)
 	}
 	if redeemed.ClientID != clientID {
 		return newError(ErrorInvalidGrant, 400, "code was not issued to this client", nil)
 	}
-	if !fapi.RegisteredRedirectURI(redeemed.RedirectURI).Equal(redirectURI) {
+	if !fapi.RegisteredRedirectURI(grant.RedirectURI).Equal(redirectURI) {
 		return newError(ErrorInvalidGrant, 400, "redirect_uri does not match the authorization request", nil)
 	}
-	if redeemed.DPoPJKT != "" && redeemed.DPoPJKT != thumbprint {
+	if grant.DPoPJKT != "" && grant.DPoPJKT != thumbprint {
 		return newError(ErrorInvalidGrant, 400, "DPoP proof key does not match the dpop_jkt bound to this authorization code", nil)
 	}
-	if err := pkce.Verify(redeemed.CodeChallenge, pkce.S256, codeVerifier); err != nil {
+	if err := pkce.Verify(grant.CodeChallenge, pkce.S256, codeVerifier); err != nil {
 		return newError(ErrorInvalidGrant, 400, "code_verifier does not match code_challenge", err)
 	}
 	return nil
@@ -232,18 +232,22 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorInvalidGrant, 400, "code is invalid, expired, or already used", err))
 	}
 
+	grant, err := decodeGrantRecord(redeemed.Grant)
+	if err != nil {
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to decode authorization code grant", err))
+	}
+
 	now := s.deps.Clock.Now()
-	if valErr := validateRedeemedAuthorizationCode(redeemed, client.ID(), redirectURI, thumbprint, codeVerifier, now); valErr != nil {
+	if valErr := validateRedeemedAuthorizationCode(redeemed, grant, client.ID(), redirectURI, thumbprint, codeVerifier, now); valErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), valErr)
 	}
 
-	accessTokenClaims, err := withRequestedUserinfoClaims(redeemed.RequestedUserinfoClaims, redeemed.TokenClaims)
+	accessTokenClaims, err := grant.accessTokenClaims()
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to encode requested userinfo claims", err))
 	}
-	accessTokenClaims = withAuthorizationDetails(redeemed.AuthorizationDetails, accessTokenClaims)
 	accessToken, accessKey, err := s.deps.AccessTokens.IssueAccessToken(ctx, AccessTokenParams{
-		ClientID: client.ID(), Subject: redeemed.Subject, Scope: redeemed.Scope,
+		ClientID: client.ID(), Subject: grant.Subject, Scope: grant.Scope,
 		Thumbprint: thumbprint, SenderConstrain: client.SenderConstrain(), Claims: accessTokenClaims,
 		Issuer: s.cfg.Issuer.String(), Audience: s.cfg.Issuer.String(),
 		Now: now, Lifetime: s.cfg.Limits.AccessTokenLifetime, Random: s.deps.Random,
@@ -262,15 +266,15 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		AccessToken:          fapi.NewSecret(accessToken),
 		TokenType:            tokenTypeFor(client.SenderConstrain()),
 		ExpiresIn:            s.cfg.Limits.AccessTokenLifetime,
-		Scope:                strings.Join(redeemed.Scope, " "),
-		AuthorizationDetails: redeemed.AuthorizationDetails,
+		Scope:                strings.Join(grant.Scope, " "),
+		AuthorizationDetails: grant.AuthorizationDetails,
 	}
 
-	if idErr := s.issueOptionalIDToken(ctx, client, redeemed, accessToken, &result); idErr != nil {
+	if idErr := s.issueOptionalIDToken(ctx, client, grant, accessToken, &result); idErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), idErr)
 	}
 
-	if refreshErr := s.issueOptionalRefreshToken(ctx, client, redeemed, thumbprint, codeHash, now, &result); refreshErr != nil {
+	if refreshErr := s.issueOptionalRefreshToken(ctx, client, grant, thumbprint, codeHash, now, &result); refreshErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), refreshErr)
 	}
 
@@ -310,19 +314,13 @@ func (s *Server) revokeTokensForReusedCode(ctx context.Context, err error) {
 // when redeemed's granted scope includes "openid" — a no-op otherwise.
 // Split out of ExchangeAuthorizationCode purely to keep that method's
 // own cognitive complexity manageable.
-func (s *Server) issueOptionalIDToken(ctx context.Context, client storage.RegisteredClient, redeemed storage.RedeemedAuthorizationCode, accessToken string, result *TokenResult) *Error {
-	if !containsScope(redeemed.Scope, "openid") {
+func (s *Server) issueOptionalIDToken(ctx context.Context, client storage.RegisteredClient, grant grantRecord, accessToken string, result *TokenResult) *Error {
+	if !containsScope(grant.Scope, "openid") {
 		return nil
 	}
-	idTokenClaims, err := s.withIdentityClaims(ctx, redeemed.Subject, redeemed.RequestedIDTokenClaims, redeemed.TokenClaims)
+	idToken, err := s.issueIDTokenForGrant(ctx, client, grant, grant.Nonce, accessToken)
 	if err != nil {
-		return newError(ErrorServerError, 500, "failed to resolve identity claims", err)
-	}
-	idToken, err := s.issueIDToken(ctx, client, identityAssertion{
-		Subject: redeemed.Subject, AuthTime: redeemed.AuthTime, ACR: redeemed.ACR, AMR: redeemed.AMR, TokenClaims: idTokenClaims,
-	}, redeemed.Nonce, accessToken)
-	if err != nil {
-		return newError(ErrorServerError, 500, "failed to issue ID token", err)
+		return err
 	}
 	result.IDToken = fapi.NewSecret(idToken)
 	result.HasIDToken = true
@@ -333,15 +331,11 @@ func (s *Server) issueOptionalIDToken(ctx context.Context, client storage.Regist
 // result when redeemed's granted scope includes "offline_access" — a
 // no-op otherwise. Split out of ExchangeAuthorizationCode for the same
 // reason issueOptionalIDToken is.
-func (s *Server) issueOptionalRefreshToken(ctx context.Context, client storage.RegisteredClient, redeemed storage.RedeemedAuthorizationCode, thumbprint string, codeHash [32]byte, now time.Time, result *TokenResult) *Error {
-	if !containsScope(redeemed.Scope, "offline_access") {
+func (s *Server) issueOptionalRefreshToken(ctx context.Context, client storage.RegisteredClient, grant grantRecord, thumbprint string, codeHash [32]byte, now time.Time, result *TokenResult) *Error {
+	if !containsScope(grant.Scope, "offline_access") {
 		return nil
 	}
-	refreshToken, err := s.issueRefreshToken(ctx, client.ID(), identityAssertion{
-		Subject: redeemed.Subject, AuthTime: redeemed.AuthTime, ACR: redeemed.ACR, AMR: redeemed.AMR, TokenClaims: redeemed.TokenClaims,
-	}, refreshTokenGrant{
-		Scope: redeemed.Scope, AuthorizationDetails: redeemed.AuthorizationDetails, RequestedIDTokenClaims: redeemed.RequestedIDTokenClaims, RequestedUserinfoClaims: redeemed.RequestedUserinfoClaims,
-	}, thumbprint)
+	refreshToken, err := s.issueRefreshToken(ctx, client.ID(), grant, thumbprint)
 	if err != nil {
 		return newError(ErrorServerError, 500, "failed to issue refresh token", err)
 	}
@@ -515,33 +509,34 @@ func withRequestedUserinfoClaims(names []string, base map[string]json.RawMessage
 	return merged, nil
 }
 
-// identityAssertion is the subset of a redeemed authorization code or
-// refresh token — subject, authentication context and resolved token
-// claims — that issueIDToken and issueRefreshToken both need. Grouped
-// into one struct so neither function's own parameter list is
-// positional soup mixing several same-typed values (two string fields,
-// a []string) where a caller could transpose ACR and a scope element
-// without the compiler ever catching it.
-type identityAssertion struct {
-	Subject     string
-	AuthTime    time.Time
-	ACR         string
-	AMR         []string
-	TokenClaims map[string]json.RawMessage
+// issueIDTokenForGrant issues the ID token for grant: its extension
+// claims plus whatever identity claims its "claims" parameter requested
+// (see withIdentityClaims). nonce is grant.Nonce for the first ID token
+// issued from an authorization code, "" otherwise.
+func (s *Server) issueIDTokenForGrant(ctx context.Context, client storage.RegisteredClient, grant grantRecord, nonce, accessToken string) (string, *Error) {
+	claims, err := s.withIdentityClaims(ctx, grant.Subject, grant.RequestedIDTokenClaims, grant.TokenClaims)
+	if err != nil {
+		return "", newError(ErrorServerError, 500, "failed to resolve identity claims", err)
+	}
+	idToken, err := s.issueIDToken(ctx, client, grant, claims, nonce, accessToken)
+	if err != nil {
+		return "", newError(ErrorServerError, 500, "failed to issue ID token", err)
+	}
+	return idToken, nil
 }
 
-func (s *Server) issueIDToken(ctx context.Context, client storage.RegisteredClient, id identityAssertion, nonce, accessToken string) (string, error) {
+func (s *Server) issueIDToken(ctx context.Context, client storage.RegisteredClient, grant grantRecord, claims map[string]json.RawMessage, nonce, accessToken string) (string, error) {
 	signer, kid, err := s.newSigner(ctx, keys.IDTokenSigning, s.cfg.Algorithms.IDToken)
 	if err != nil {
 		return "", err
 	}
 	signedJWT, err := token.IssueIDToken(token.IDTokenParams{
 		Signer: signer, Algorithm: s.cfg.Algorithms.IDToken, KeyID: kid,
-		Issuer: s.cfg.Issuer.String(), Subject: id.Subject, Audience: client.ID().String(),
-		Nonce: nonce, AuthTime: id.AuthTime, ACR: id.ACR, AMR: id.AMR,
+		Issuer: s.cfg.Issuer.String(), Subject: grant.Subject, Audience: client.ID().String(),
+		Nonce: nonce, AuthTime: grant.AuthTime, ACR: grant.ACR, AMR: grant.AMR,
 		AccessToken: accessToken,
 		Now:         s.deps.Clock.Now(), Lifetime: s.cfg.Limits.IDTokenLifetime,
-		Parameters: id.TokenClaims,
+		Parameters: claims,
 	})
 	if err != nil {
 		return "", err
@@ -554,42 +549,27 @@ func (s *Server) issueIDToken(ctx context.Context, client storage.RegisteredClie
 	return s.encryptIDToken(ctx, client.ID(), keyManagement, contentEncryption, signedJWT)
 }
 
-// refreshTokenGrant is the authorization a refresh token carries forward
-// from the grant it was issued alongside — grouped so issueRefreshToken's
-// callers pass it as one value.
-type refreshTokenGrant struct {
-	Scope                   []string
-	AuthorizationDetails    json.RawMessage
-	RequestedIDTokenClaims  []string
-	RequestedUserinfoClaims []string
-}
-
-// issueRefreshToken generates and persists a new refresh token, returning
-// its raw value. grant.AuthorizationDetails carries forward the original
-// authorization's granted Rich Authorization Requests (RFC 9396) detail
-// array unchanged — RefreshAccessToken re-embeds it on every refresh, since
-// RFC 9396 defines no refresh-time narrowing parameter the way RFC 6749 §6
-// does for scope.
-func (s *Server) issueRefreshToken(ctx context.Context, clientID fapi.ClientID, id identityAssertion, grant refreshTokenGrant, thumbprint string) (string, error) {
+// issueRefreshToken generates and persists a new refresh token carrying
+// grant forward (see grantRecord.forRefreshToken), returning its raw
+// value. The grant's AuthorizationDetails carry forward unchanged —
+// RefreshAccessToken re-embeds them on every refresh, since RFC 9396
+// defines no refresh-time narrowing parameter the way RFC 6749 §6 does
+// for scope.
+func (s *Server) issueRefreshToken(ctx context.Context, clientID fapi.ClientID, grant grantRecord, thumbprint string) (string, error) {
 	raw, err := generateRefreshToken(s.deps.Random)
+	if err != nil {
+		return "", err
+	}
+	encoded, err := encodeGrantRecord(grant.forRefreshToken(thumbprint))
 	if err != nil {
 		return "", err
 	}
 	now := s.deps.Clock.Now()
 	if err := s.deps.Grants.CreateRefreshToken(ctx, storage.NewRefreshToken{
-		TokenHash:               sha256.Sum256([]byte(raw)),
-		ClientID:                clientID,
-		Subject:                 id.Subject,
-		Scope:                   grant.Scope,
-		AuthorizationDetails:    grant.AuthorizationDetails,
-		Thumbprint:              thumbprint,
-		AuthTime:                id.AuthTime,
-		ACR:                     id.ACR,
-		AMR:                     id.AMR,
-		TokenClaims:             id.TokenClaims,
-		RequestedIDTokenClaims:  grant.RequestedIDTokenClaims,
-		RequestedUserinfoClaims: grant.RequestedUserinfoClaims,
-		ExpiresAt:               now.Add(s.cfg.Limits.RefreshTokenLifetime),
+		TokenHash: sha256.Sum256([]byte(raw)),
+		ClientID:  clientID,
+		Grant:     encoded,
+		ExpiresAt: now.Add(s.cfg.Limits.RefreshTokenLifetime),
 	}); err != nil {
 		return "", err
 	}

@@ -10,6 +10,13 @@ import (
 	"github.com/idfoundry/fapigo/storage"
 )
 
+// testPayload is a stand-in for server's opaque Request/Grant values.
+const testPayload = `{"v":1,"scope":"openid"}`
+
+// tamper overwrites raw's first byte in place, the way a caller that
+// kept (or received) a reference to a stored slice could.
+func tamper(raw json.RawMessage) { raw[0] = 'X' }
+
 // TestTransactionStoreDoesNotAliasCallerOrInternalState covers both
 // directions of M-5: mutating the caller's own record after CreatePAR
 // must not reach what's stored, and mutating a returned
@@ -21,16 +28,15 @@ func TestTransactionStoreDoesNotAliasCallerOrInternalState(t *testing.T) {
 	expires := time.Now().Add(time.Hour)
 
 	record := storage.NewPARRecord{
-		Reference:   "ref-1",
-		ClientID:    "client-1",
-		Parameters:  map[string]json.RawMessage{"scope": json.RawMessage(`"openid"`)},
-		TokenClaims: map[string]json.RawMessage{"acr": json.RawMessage(`"urn:acr:1"`)},
-		ExpiresAt:   expires,
+		Reference: "ref-1",
+		ClientID:  "client-1",
+		Request:   json.RawMessage(testPayload),
+		ExpiresAt: expires,
 	}
 	if err := s.CreatePAR(ctx, record); err != nil {
 		t.Fatalf("CreatePAR: %v", err)
 	}
-	record.Parameters["scope"] = json.RawMessage(`"tampered-by-caller-after-create"`)
+	tamper(record.Request)
 
 	par, err := s.BeginAuthorization(ctx, storage.BeginAuthorizationTransaction{
 		Reference: "ref-1", Handle: "handle-1", HandleExpiresAt: expires,
@@ -38,18 +44,18 @@ func TestTransactionStoreDoesNotAliasCallerOrInternalState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginAuthorization: %v", err)
 	}
-	if got := string(par.Parameters["scope"]); got != `"openid"` {
-		t.Fatalf("Parameters[scope] = %s, want %q (CreatePAR aliased the caller's map)", got, `"openid"`)
+	if got := string(par.Request); got != testPayload {
+		t.Fatalf("Request = %s, want %s (CreatePAR aliased the caller's slice)", got, testPayload)
 	}
 
-	par.Parameters["scope"] = json.RawMessage(`"tampered-by-caller-after-begin"`)
+	tamper(par.Request)
 
 	completed, err := s.CompleteAuthorization(ctx, storage.CompleteAuthorizationTransaction{Handle: "handle-1"})
 	if err != nil {
 		t.Fatalf("CompleteAuthorization: %v", err)
 	}
-	if got := string(completed.Parameters["scope"]); got != `"openid"` {
-		t.Fatalf("CompletedInteraction.Parameters[scope] = %s, want %q (BeginAuthorization aliased its return value to internal state)", got, `"openid"`)
+	if got := string(completed.Request); got != testPayload {
+		t.Fatalf("CompletedInteraction.Request = %s, want %s (BeginAuthorization aliased its return value to internal state)", got, testPayload)
 	}
 }
 
@@ -63,10 +69,10 @@ func TestBeginAuthorizationReturnsIndependentCopyPerCall(t *testing.T) {
 	expires := time.Now().Add(time.Hour)
 
 	record := storage.NewPARRecord{
-		Reference:  "ref-2",
-		ClientID:   "client-1",
-		Parameters: map[string]json.RawMessage{"scope": json.RawMessage(`"openid"`)},
-		ExpiresAt:  expires,
+		Reference: "ref-2",
+		ClientID:  "client-1",
+		Request:   json.RawMessage(testPayload),
+		ExpiresAt: expires,
 	}
 	if err := s.CreatePAR(ctx, record); err != nil {
 		t.Fatalf("CreatePAR: %v", err)
@@ -78,7 +84,7 @@ func TestBeginAuthorizationReturnsIndependentCopyPerCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginAuthorization(handle-a): %v", err)
 	}
-	first.Parameters["scope"] = json.RawMessage(`"tampered"`)
+	tamper(first.Request)
 
 	second, err := s.BeginAuthorization(ctx, storage.BeginAuthorizationTransaction{
 		Reference: "ref-2", Handle: "handle-b", HandleExpiresAt: expires,
@@ -86,8 +92,8 @@ func TestBeginAuthorizationReturnsIndependentCopyPerCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginAuthorization(handle-b): %v", err)
 	}
-	if got := string(second.Parameters["scope"]); got != `"openid"` {
-		t.Fatalf("Parameters[scope] = %s, want %q (BeginAuthorization calls shared an aliased map)", got, `"openid"`)
+	if got := string(second.Request); got != testPayload {
+		t.Fatalf("Request = %s, want %s (BeginAuthorization calls shared an aliased slice)", got, testPayload)
 	}
 }
 
@@ -98,37 +104,35 @@ func TestCreateAuthorizationCodeDoesNotAliasCallerSlices(t *testing.T) {
 	s := NewGrantStore()
 	ctx := context.Background()
 
-	scope := []string{"openid", "profile"}
 	code := storage.NewAuthorizationCode{
-		CodeHash: [32]byte{1}, ClientID: "client-1", RedirectURI: "https://cb.example/callback",
-		CodeChallenge: "challenge", CodeChallengeMethod: "S256", Subject: "sub-1",
-		Scope: scope, AuthTime: time.Now(), ExpiresAt: time.Now().Add(time.Minute),
+		CodeHash: [32]byte{1}, ClientID: "client-1",
+		Grant: json.RawMessage(testPayload), ExpiresAt: time.Now().Add(time.Minute),
 	}
 	if err := s.CreateAuthorizationCode(ctx, code); err != nil {
 		t.Fatalf("CreateAuthorizationCode: %v", err)
 	}
-	scope[0] = "tampered"
+	tamper(code.Grant)
 
 	redeemed, err := s.RedeemAuthorizationCode(ctx, storage.AuthorizationCodeRedemption{CodeHash: [32]byte{1}})
 	if err != nil {
 		t.Fatalf("RedeemAuthorizationCode: %v", err)
 	}
-	if redeemed.Scope[0] != "openid" {
-		t.Fatalf("Scope[0] = %q, want %q (CreateAuthorizationCode aliased the caller's slice)", redeemed.Scope[0], "openid")
+	if got := string(redeemed.Grant); got != testPayload {
+		t.Fatalf("Grant = %s, want %s (CreateAuthorizationCode aliased the caller's slice)", got, testPayload)
 	}
 }
 
 // TestRedeemRefreshTokenReturnsIndependentCopyEachTime covers the
 // live-est case: RedeemRefreshToken is explicitly not single-use, so a
-// caller mutating one redemption's returned Scope must not corrupt the
+// caller mutating one redemption's returned Grant must not corrupt the
 // next redemption of the same token.
 func TestRedeemRefreshTokenReturnsIndependentCopyEachTime(t *testing.T) {
 	s := NewGrantStore()
 	ctx := context.Background()
 
 	token := storage.NewRefreshToken{
-		TokenHash: [32]byte{2}, ClientID: "client-1", Subject: "sub-1",
-		Scope: []string{"openid", "offline_access"}, ExpiresAt: time.Now().Add(time.Hour),
+		TokenHash: [32]byte{2}, ClientID: "client-1",
+		Grant: json.RawMessage(testPayload), ExpiresAt: time.Now().Add(time.Hour),
 	}
 	if err := s.CreateRefreshToken(ctx, token); err != nil {
 		t.Fatalf("CreateRefreshToken: %v", err)
@@ -138,14 +142,14 @@ func TestRedeemRefreshTokenReturnsIndependentCopyEachTime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RedeemRefreshToken (first): %v", err)
 	}
-	first.Scope[0] = "tampered"
+	tamper(first.Grant)
 
 	second, err := s.RedeemRefreshToken(ctx, storage.RefreshTokenRedemption{TokenHash: [32]byte{2}})
 	if err != nil {
 		t.Fatalf("RedeemRefreshToken (second): %v", err)
 	}
-	if second.Scope[0] != "openid" {
-		t.Fatalf("Scope[0] = %q, want %q (RedeemRefreshToken calls shared an aliased slice)", second.Scope[0], "openid")
+	if got := string(second.Grant); got != testPayload {
+		t.Fatalf("Grant = %s, want %s (RedeemRefreshToken calls shared an aliased slice)", got, testPayload)
 	}
 }
 
@@ -225,8 +229,8 @@ func TestConcurrentRedeemRefreshTokenNoRace(t *testing.T) {
 	s := NewGrantStore()
 	ctx := context.Background()
 	token := storage.NewRefreshToken{
-		TokenHash: [32]byte{5}, ClientID: "client-1", Subject: "sub-1",
-		Scope: []string{"openid", "offline_access"}, ExpiresAt: time.Now().Add(time.Hour),
+		TokenHash: [32]byte{5}, ClientID: "client-1",
+		Grant: json.RawMessage(testPayload), ExpiresAt: time.Now().Add(time.Hour),
 	}
 	if err := s.CreateRefreshToken(ctx, token); err != nil {
 		t.Fatalf("CreateRefreshToken: %v", err)
@@ -242,7 +246,7 @@ func TestConcurrentRedeemRefreshTokenNoRace(t *testing.T) {
 				t.Errorf("RedeemRefreshToken: %v", err)
 				return
 			}
-			got.Scope[0] = "mutated"
+			tamper(got.Grant)
 		}()
 	}
 	wg.Wait()

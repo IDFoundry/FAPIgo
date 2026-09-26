@@ -16,17 +16,12 @@ type NewPARRecord struct {
 	// request_uri string.
 	Reference string
 
-	ClientID   fapi.ClientID
-	Parameters map[string]json.RawMessage
+	ClientID fapi.ClientID
 
-	// TokenClaims are the already-validated extension parameter values
-	// (extension.Definition.ReturnInTokenClaims) this pushed request
-	// carried, keyed by wire name — the subset of Parameters that should
-	// be copied into any access/ID token this authorization eventually
-	// produces. A TransactionStore implementation must carry this field
-	// through to PushedAuthorizationRequest and CompletedInteraction
-	// unmodified, exactly as it already does for Parameters.
-	TokenClaims map[string]json.RawMessage
+	// Request is the pushed request as server needs it later — opaque
+	// to the store (see the package doc). BeginAuthorization and
+	// CompleteAuthorization must return it unmodified.
+	Request json.RawMessage
 
 	ExpiresAt time.Time
 }
@@ -35,10 +30,9 @@ type NewPARRecord struct {
 // one previously pushed authorization request. Retrieving it does not
 // by itself consume the request — see BeginAuthorization's doc comment.
 type PushedAuthorizationRequest struct {
-	ClientID    fapi.ClientID
-	Parameters  map[string]json.RawMessage
-	TokenClaims map[string]json.RawMessage
-	ExpiresAt   time.Time
+	ClientID  fapi.ClientID
+	Request   json.RawMessage
+	ExpiresAt time.Time
 }
 
 // BeginAuthorizationTransaction is the input to
@@ -60,10 +54,9 @@ type BeginAuthorizationTransaction struct {
 // CompletedInteraction is what CompleteAuthorization retrieves and
 // consumes for one in-progress interaction.
 type CompletedInteraction struct {
-	ClientID    fapi.ClientID
-	Parameters  map[string]json.RawMessage
-	TokenClaims map[string]json.RawMessage
-	ExpiresAt   time.Time
+	ClientID  fapi.ClientID
+	Request   json.RawMessage
+	ExpiresAt time.Time
 }
 
 // CompleteAuthorizationTransaction is the input to

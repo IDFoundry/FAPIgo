@@ -102,8 +102,8 @@ func TestCompleteAuthorizationSuccessPlainProfile(t *testing.T) {
 	if len(codes) != 1 {
 		t.Fatalf("len(codes) = %d, want 1", len(codes))
 	}
-	if codes[0].Subject != "user-1" {
-		t.Fatalf("codes[0].Subject = %q, want %q", codes[0].Subject, "user-1")
+	if got := storedGrantSubject(t, codes[0].Grant); got != "user-1" {
+		t.Fatalf("stored grant subject = %q, want %q", got, "user-1")
 	}
 	if codes[0].ClientID != testClientID {
 		t.Fatalf("codes[0].ClientID = %q, want %q", codes[0].ClientID, testClientID)

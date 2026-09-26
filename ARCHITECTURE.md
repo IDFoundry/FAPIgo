@@ -602,8 +602,16 @@ role-conditional fields.
 distinct, and none of them expose generic CRUD (`GetSession`,
 `GetCode`, `UpdateCode`, `DeleteCode`, ...) — every method is a named
 security operation. `GrantStore.RedeemAuthorizationCode` in particular
-must atomically verify and consume a code hash, client ID, redirect URI,
-PKCE verifier and sender-binding together, in one step. `replay.Store`
+must atomically look up and consume a code by its hash, in one step;
+`server` then checks client ID, expiry, redirect URI, PKCE verifier and
+sender-binding against what it returns. A store only understands the
+fields it acts on (lookup hash, `ClientID`, `ExpiresAt`, and CIBA's
+decision and delivery state): everything else `server` needs later —
+the request's parameters, the granted scope, subject, authentication
+context and claims — is one opaque, versioned JSON value (`Request` or
+`Grant`) the store persists and returns without interpreting, so a
+feature that changes what a grant carries never changes a store.
+`replay.Store`
 stores only a digest and expiry per use (`ReplayUse{Namespace, Digest,
 ExpiresAt}`) — never a complete client assertion, DPoP proof or other
 sensitive payload — and callers must assign it a namespaced identifier

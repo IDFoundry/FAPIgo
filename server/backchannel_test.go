@@ -31,6 +31,14 @@ const testNotPermittedClientID = fapi.ClientID("not-ciba-permitted-client")
 // BackchannelAuthenticationRequestAlgorithm.
 func newHarnessWithBackchannel(t *testing.T) (harness, *memstore.BackchannelAuthenticationStore) {
 	t.Helper()
+	backchannel := memstore.NewBackchannelAuthenticationStore()
+	return newHarnessWithBackchannelStore(t, backchannel), backchannel
+}
+
+// newHarnessWithBackchannelStore is newHarnessWithBackchannel over a
+// caller-supplied store.
+func newHarnessWithBackchannelStore(t *testing.T, backchannel storage.BackchannelAuthenticationStore) harness {
+	t.Helper()
 	now := time.Now()
 	key := generateKey(t)
 	serverKey := generateKey(t)
@@ -98,7 +106,6 @@ func newHarnessWithBackchannel(t *testing.T) (harness, *memstore.BackchannelAuth
 		Assurance: server.AssuranceDevelopment,
 	}
 	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
-	backchannel := memstore.NewBackchannelAuthenticationStore()
 	deps := server.Dependencies{
 		Clients: &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{
 			testClientID:             client,
@@ -124,7 +131,7 @@ func newHarnessWithBackchannel(t *testing.T) (harness, *memstore.BackchannelAuth
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
-	return harness{server: srv, key: key, serverKey: serverKey, now: now}, backchannel
+	return harness{server: srv, key: key, serverKey: serverKey, now: now}
 }
 
 // newHarnessWithBackchannelOAuthOnly mirrors newHarnessWithBackchannel

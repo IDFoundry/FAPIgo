@@ -60,20 +60,11 @@ type NewBackchannelAuthentication struct {
 
 	ClientID fapi.ClientID
 
-	// Parameters are the backchannel authentication request's own
-	// parameters (scope, login_hint/login_hint_token/id_token_hint,
-	// acr_values, binding_message) — mirrors NewPARRecord.Parameters.
-	Parameters map[string]json.RawMessage
-
-	// TokenClaims mirrors NewPARRecord.TokenClaims.
-	TokenClaims map[string]json.RawMessage
-
-	// RequestedIDTokenClaims and RequestedUserinfoClaims mirror
-	// NewAuthorizationCode's fields of the same name — the claim names
-	// this request's own "claims" parameter (OIDC Core §5.5) asked for,
-	// split by delivery location.
-	RequestedIDTokenClaims  []string
-	RequestedUserinfoClaims []string
+	// Request is the backchannel authentication request as server needs
+	// it later — opaque to the store (see the package doc).
+	// LookupBackchannelAuthentication and PollBackchannelAuthentication
+	// must return it unmodified.
+	Request json.RawMessage
 
 	// DeliveryMode is "poll" or "ping" (CIBA §7.1's "backchannel_token_delivery_mode",
 	// restricted to these two values — FAPI-CIBA prohibits "push").
@@ -85,11 +76,6 @@ type NewBackchannelAuthentication struct {
 	// stores, this cannot be digest-only: the server is the party that
 	// later presents it, not merely compares against it.
 	ClientNotificationToken fapi.Secret
-
-	// DPoPJKT is the "dpop_jkt" request parameter, if the client sent
-	// one at BC-Auth time — "" if it didn't (see NewAuthorizationCode.DPoPJKT
-	// for the equivalent PAR-side field).
-	DPoPJKT string
 
 	// PollInterval is the minimum time that must elapse between two
 	// polls of this same request before PollBackchannelAuthentication
@@ -105,11 +91,10 @@ type NewBackchannelAuthentication struct {
 type LookedUpBackchannelAuthentication struct {
 	ClientID fapi.ClientID
 
-	// Parameters mirrors NewBackchannelAuthentication.Parameters — the
-	// original request's own parameters, unmodified, so a caller can
-	// validate a decision (e.g. a narrowed authorization_details grant)
-	// against exactly what was requested before recording that decision.
-	Parameters map[string]json.RawMessage
+	// Request is NewBackchannelAuthentication.Request, unmodified, so a
+	// caller can validate a decision against exactly what was requested
+	// before recording it.
+	Request json.RawMessage
 }
 
 // DecideBackchannelAuthentication is the input to
@@ -121,16 +106,11 @@ type DecideBackchannelAuthentication struct {
 	// never Pending.
 	Status BackchannelAuthenticationStatus
 
-	// Subject, Scope, AuthorizationDetails, AuthTime, ACR and AMR are set
-	// only when Status is Approved. AuthorizationDetails mirrors
-	// NewAuthorizationCode.AuthorizationDetails — the resource owner's
-	// granted Rich Authorization Requests (RFC 9396) detail array, or nil.
-	Subject              string
-	Scope                []string
-	AuthorizationDetails json.RawMessage
-	AuthTime             time.Time
-	ACR                  string
-	AMR                  []string
+	// Grant is set only when Status is Approved: the approved
+	// authorization — opaque to the store, like
+	// NewAuthorizationCode.Grant. PollBackchannelAuthentication must
+	// return it unmodified.
+	Grant json.RawMessage
 
 	// Reason is an optional, human-readable explanation, set when Status
 	// is Denied or AuthenticationFailed — mirrors Deny/AuthenticationFailed's
@@ -173,22 +153,16 @@ type PollBackchannelAuthentication struct {
 // PolledBackchannelAuthentication is what a successful
 // PollBackchannelAuthentication returns.
 type PolledBackchannelAuthentication struct {
-	Status               BackchannelAuthenticationStatus
-	ClientID             fapi.ClientID
-	Subject              string
-	Scope                []string
-	AuthorizationDetails json.RawMessage
-	AuthTime             time.Time
-	ACR                  string
-	AMR                  []string
-	TokenClaims          map[string]json.RawMessage
-	DPoPJKT              string
-	Reason               string
+	Status   BackchannelAuthenticationStatus
+	ClientID fapi.ClientID
 
-	// RequestedIDTokenClaims and RequestedUserinfoClaims mirror
-	// NewBackchannelAuthentication's fields of the same name.
-	RequestedIDTokenClaims  []string
-	RequestedUserinfoClaims []string
+	// Request is NewBackchannelAuthentication.Request and Grant is
+	// DecideBackchannelAuthentication.Grant (nil unless Status is
+	// Approved), both unmodified.
+	Request json.RawMessage
+	Grant   json.RawMessage
+
+	Reason string
 }
 
 // BackchannelAuthenticationAlreadyRedeemedError mirrors
@@ -229,7 +203,7 @@ type BackchannelAuthenticationStore interface {
 	CreateBackchannelAuthentication(ctx context.Context, record NewBackchannelAuthentication) error
 
 	// LookupBackchannelAuthentication returns the pending request
-	// identified by HandleHash's own ClientID and Parameters, without
+	// identified by HandleHash's own ClientID and Request, without
 	// consuming or deciding it — unlike DecideBackchannelAuthentication,
 	// this may be called any number of times. It exists so a caller can
 	// validate a decision (e.g. that a narrowed authorization_details

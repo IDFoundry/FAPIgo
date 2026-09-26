@@ -186,7 +186,6 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	now := s.deps.Clock.Now()
 	lifetime := s.backchannelAuthenticationLifetime(validated.params)
 	expiresAt := now.Add(lifetime)
-	idTokenClaims, userinfoClaims := parseRequestedClaimNames(validated.params["claims"])
 
 	// deliveryMode/notificationToken mirror client's own registered
 	// BackchannelTokenDeliveryMode exactly — validateBackchannelAuthenticationParameters
@@ -208,18 +207,18 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		authReqIDForNotification = authReqIDRaw
 	}
 
+	request, err := encodeRequestRecord(requestRecord{Parameters: validated.params, TokenClaims: validated.tokenClaims, DPoPJKT: dpopJKT})
+	if err != nil {
+		return s.backchannelBeginFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to encode backchannel authentication request", err)), nil
+	}
 	if err := s.deps.Backchannel.CreateBackchannelAuthentication(ctx, storage.NewBackchannelAuthentication{
 		AuthReqIDHash:           sha256.Sum256([]byte(authReqIDRaw)),
 		AuthReqID:               authReqIDForNotification,
 		HandleHash:              sha256.Sum256([]byte(handleRaw)),
 		ClientID:                client.ID(),
-		Parameters:              validated.params,
-		TokenClaims:             validated.tokenClaims,
-		RequestedIDTokenClaims:  idTokenClaims,
-		RequestedUserinfoClaims: userinfoClaims,
+		Request:                 request,
 		DeliveryMode:            deliveryMode,
 		ClientNotificationToken: notificationToken,
-		DPoPJKT:                 dpopJKT,
 		PollInterval:            s.cfg.Limits.BackchannelAuthenticationPollInterval,
 		ExpiresAt:               expiresAt,
 	}); err != nil {

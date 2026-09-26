@@ -110,7 +110,11 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 	if polled.ClientID != client.ID() {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorInvalidGrant, 400, "auth_req_id was not issued to this client", nil))
 	}
-	if polled.DPoPJKT != "" && polled.DPoPJKT != thumbprint {
+	request, err := decodeRequestRecord(polled.Request)
+	if err != nil {
+		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorServerError, 500, "failed to decode backchannel authentication request", err))
+	}
+	if request.DPoPJKT != "" && request.DPoPJKT != thumbprint {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorInvalidGrant, 400, "DPoP proof key does not match the dpop_jkt bound to this backchannel authentication request", nil))
 	}
 
@@ -125,13 +129,16 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorServerError, 500, "unrecognized backchannel authentication status", nil))
 	}
 
-	accessTokenClaims, err := withRequestedUserinfoClaims(polled.RequestedUserinfoClaims, polled.TokenClaims)
+	grant, err := decodeGrantRecord(polled.Grant)
+	if err != nil {
+		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorServerError, 500, "failed to decode backchannel authentication grant", err))
+	}
+	accessTokenClaims, err := grant.accessTokenClaims()
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorServerError, 500, "failed to encode requested userinfo claims", err))
 	}
-	accessTokenClaims = withAuthorizationDetails(polled.AuthorizationDetails, accessTokenClaims)
 	accessToken, _, err := s.deps.AccessTokens.IssueAccessToken(ctx, AccessTokenParams{
-		ClientID: client.ID(), Subject: polled.Subject, Scope: polled.Scope,
+		ClientID: client.ID(), Subject: grant.Subject, Scope: grant.Scope,
 		Thumbprint: thumbprint, SenderConstrain: client.SenderConstrain(), Claims: accessTokenClaims,
 		Issuer: s.cfg.Issuer.String(), Audience: s.cfg.Issuer.String(),
 		Now: now, Lifetime: s.cfg.Limits.AccessTokenLifetime, Random: s.deps.Random,
@@ -144,31 +151,21 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 		AccessToken:          fapi.NewSecret(accessToken),
 		TokenType:            tokenTypeFor(client.SenderConstrain()),
 		ExpiresIn:            s.cfg.Limits.AccessTokenLifetime,
-		Scope:                strings.Join(polled.Scope, " "),
-		AuthorizationDetails: polled.AuthorizationDetails,
+		Scope:                strings.Join(grant.Scope, " "),
+		AuthorizationDetails: grant.AuthorizationDetails,
 	}
 
-	if containsScope(polled.Scope, "openid") {
-		idTokenClaims, err := s.withIdentityClaims(ctx, polled.Subject, polled.RequestedIDTokenClaims, polled.TokenClaims)
-		if err != nil {
-			return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorServerError, 500, "failed to resolve identity claims", err))
-		}
-		idToken, err := s.issueIDToken(ctx, client, identityAssertion{
-			Subject: polled.Subject, AuthTime: polled.AuthTime, ACR: polled.ACR, AMR: polled.AMR, TokenClaims: idTokenClaims,
-		}, "", accessToken)
-		if err != nil {
-			return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorServerError, 500, "failed to issue ID token", err))
+	if containsScope(grant.Scope, "openid") {
+		idToken, idErr := s.issueIDTokenForGrant(ctx, client, grant, "", accessToken)
+		if idErr != nil {
+			return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), idErr)
 		}
 		result.IDToken = fapi.NewSecret(idToken)
 		result.HasIDToken = true
 	}
 
-	if containsScope(polled.Scope, "offline_access") {
-		refreshToken, err := s.issueRefreshToken(ctx, client.ID(), identityAssertion{
-			Subject: polled.Subject, AuthTime: polled.AuthTime, ACR: polled.ACR, AMR: polled.AMR, TokenClaims: polled.TokenClaims,
-		}, refreshTokenGrant{
-			Scope: polled.Scope, AuthorizationDetails: polled.AuthorizationDetails, RequestedIDTokenClaims: polled.RequestedIDTokenClaims, RequestedUserinfoClaims: polled.RequestedUserinfoClaims,
-		}, thumbprint)
+	if containsScope(grant.Scope, "offline_access") {
+		refreshToken, err := s.issueRefreshToken(ctx, client.ID(), grant, thumbprint)
 		if err != nil {
 			return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorServerError, 500, "failed to issue refresh token", err))
 		}

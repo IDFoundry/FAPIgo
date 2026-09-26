@@ -19,8 +19,12 @@ name: Fuzz
 # own cache can't do this: its key is fixed per Go version and go.mod,
 # so it only ever saves once. Each run saves under a run-unique key and
 # restores the newest for its target; GitHub evicts ones left unused.
-# The corpus is only saved when the job succeeds — a failing input is
-# uploaded as an artifact instead (below).
+# The corpus is saved even when the job fails: a crashing input is
+# written to testdata/ (and uploaded as an artifact, below), never into
+# the corpus, and go test -fuzz occasionally reports "context deadline
+# exceeded" right at -fuzztime with no failing input at all — saving
+# regardless keeps that harness quirk from discarding a night's
+# progress.
 #
 # Informational only: nothing in branch protection depends on this
 # workflow, since it never runs against a PR. A found failure fails the
@@ -146,15 +150,22 @@ jobs:
         run: echo "dir=$(go env GOCACHE)/fuzz" >> "$GITHUB_OUTPUT"
 
       - name: Restore fuzz corpus
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: ${{ steps.corpus.outputs.dir }}
-          key: fuzz-corpus-${{ matrix.target.pkg }}-${{ matrix.target.name }}-${{ github.run_id }}
+          key: fuzz-corpus-${{ matrix.target.pkg }}-${{ matrix.target.name }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             fuzz-corpus-${{ matrix.target.pkg }}-${{ matrix.target.name }}-
 
       - name: go test -fuzz=${{ matrix.target.name }}
         run: go test ${{ matrix.target.pkg }} -run='^$' -fuzz='^${{ matrix.target.name }}$' -fuzztime=5m
+
+      - name: Save fuzz corpus
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ steps.corpus.outputs.dir }}
+          key: fuzz-corpus-${{ matrix.target.pkg }}-${{ matrix.target.name }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload failing input
         if: failure()

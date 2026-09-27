@@ -324,6 +324,12 @@ func (c *Client) populateIDToken(ctx context.Context, result *TokenSet, raw rawT
 	if raw.IDToken == "" {
 		return nil
 	}
+	if c.cfg.OAuthOnly {
+		// "openid" can't have been requested, so a conforming server
+		// never sends one; it's rejected rather than silently dropped,
+		// since this client has no issuer keys to check it with.
+		return newError(ErrorInvalidResponse, "token response carries an id_token, but this client is oauth_only", nil)
+	}
 	validated, idErr := c.validateIDToken(ctx, raw.IDToken, raw.AccessToken, nonce)
 	if idErr != nil {
 		return idErr
@@ -518,6 +524,9 @@ func (c *Client) validateSignedIDToken(ctx context.Context, raw, accessToken, no
 // handling lives in exactly one place rather than being re-derived per
 // caller.
 func (c *Client) resolveIssuerKeyCandidates(ctx context.Context, purpose keys.IssuerVerificationPurpose, algorithm fapi.SignatureAlgorithm, keyID string) ([]keys.IssuerKey, *Error) {
+	if c.deps.IssuerKeys == nil {
+		return nil, newError(ErrorInternal, "no issuer keys configured (Dependencies.IssuerKeys is nil, which Config.OAuthOnly permits only when nothing issuer-signed is verified)", nil)
+	}
 	candidates, err := c.deps.IssuerKeys.ResolveIssuerKeys(ctx, keys.IssuerKeyRequest{
 		Issuer: c.cfg.Issuer.String(), Purpose: purpose, Algorithm: algorithm, KeyID: keyID,
 	})

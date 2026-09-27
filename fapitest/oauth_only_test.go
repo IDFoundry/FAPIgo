@@ -2,6 +2,7 @@ package fapitest_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/idfoundry/fapigo/client"
@@ -42,5 +43,29 @@ func TestOAuthOnlyServerRejectsOpenIDScope(t *testing.T) {
 	_, err := h.Client.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid", "accounts"}})
 	if err == nil {
 		t.Fatalf("BeginAuthorization(openid scope) = nil error, want error")
+	}
+}
+
+// TestOAuthOnlyClientAgainstOAuthOnlyServer covers the Wallet shape end
+// to end: an OAuthOnly client with no issuer keys at all obtains and
+// uses an access token from an OAuthOnly server, and refuses "openid"
+// itself before any request is made.
+func TestOAuthOnlyClientAgainstOAuthOnlyServer(t *testing.T) {
+	h := fapitest.New(t, fapitest.Config{Profile: server.ProfileFAPISecurity, OAuthOnly: true, ClientOAuthOnly: true})
+	ctx := context.Background()
+
+	tokens, err := h.RunAuthorizationCodeFlow(ctx, []string{"accounts"})
+	if err != nil {
+		t.Fatalf("RunAuthorizationCodeFlow: %v", err)
+	}
+	if tokens.AccessToken.Reveal() == "" || tokens.HasIDToken {
+		t.Fatalf("tokens = access %q, HasIDToken %v; want an access token and no ID token", tokens.AccessToken.Reveal(), tokens.HasIDToken)
+	}
+	verifyAccessToken(t, h, tokens)
+
+	_, err = h.Client.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid", "accounts"}})
+	var cerr *client.Error
+	if !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidRequest {
+		t.Fatalf("BeginAuthorization(openid) error = %v, want client invalid_request", err)
 	}
 }

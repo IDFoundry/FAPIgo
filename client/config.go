@@ -481,6 +481,28 @@ type Config struct {
 	// existing "zero disables the feature" precedent for
 	// Endpoints.BackchannelAuthentication and friends.
 	Federation FederationConfig
+
+	// OAuthOnly, if set, makes this a pure OAuth 2.0 + FAPI 2.0 client
+	// that never handles an OpenID Connect ID token — for example a
+	// Wallet obtaining access tokens from a Credential Issuer's
+	// authorization server. It mirrors server.Config.OAuthOnly:
+	//
+	//   - BeginAuthorization and BeginBackchannelAuthentication refuse
+	//     "openid" in the requested scope;
+	//   - a token response carrying an id_token is rejected as
+	//     invalid_response rather than verified;
+	//   - Algorithms.IDToken is not required, and ID token encryption
+	//     (Algorithms.IDTokenKeyManagement/IDTokenContentEncryption)
+	//     must not be configured;
+	//   - Dependencies.IssuerKeys is only required if something else
+	//     still verifies an issuer signature: a JARM response
+	//     (ProfileFAPISecurityWithMessageSigning) or VerifyIssuerJWS/
+	//     FetchUserInfo's signed responses (Algorithms.UserInfo).
+	//     Otherwise leave it nil.
+	//
+	// False (the default) keeps ID token handling driven purely by what
+	// the authorization server grants, as before.
+	OAuthOnly bool
 }
 
 // FederationConfig configures this client's OpenID Federation 1.0

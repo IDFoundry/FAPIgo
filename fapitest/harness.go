@@ -119,6 +119,12 @@ type Config struct {
 	// server-wide refusal, not merely an unregistered scope.
 	OAuthOnly bool
 
+	// ClientOAuthOnly additionally makes the harness's client
+	// client.Config.OAuthOnly, with no Algorithms.IDToken and — unless
+	// the profile verifies JARM responses — no Dependencies.IssuerKeys.
+	// Requires OAuthOnly: the server must not issue ID tokens either.
+	ClientOAuthOnly bool
+
 	// RedirectURI, if set, replaces the package-level RedirectURI as the
 	// harness's client's registered and requested redirect URI — e.g. a
 	// loopback http one ("http://localhost:8080/callback"), which the
@@ -345,6 +351,13 @@ func New(t *testing.T, cfg Config) *Harness {
 	if cfg.EncryptIDTokens {
 		clientDeps.Decryption = clientDecryption
 	}
+	if cfg.ClientOAuthOnly {
+		clientCfg.OAuthOnly = true
+		clientCfg.Algorithms.IDToken = 0
+		if cfg.Profile != server.ProfileFAPISecurityWithMessageSigning {
+			clientDeps.IssuerKeys = nil
+		}
+	}
 	c, err := client.New(clientCfg, clientDeps)
 	if err != nil {
 		t.Fatalf("fapitest: client.New: %v", err)
@@ -383,6 +396,9 @@ func New(t *testing.T, cfg Config) *Harness {
 // function's own cognitive complexity manageable.
 func validateConfig(t *testing.T, cfg Config) {
 	t.Helper()
+	if cfg.ClientOAuthOnly && !cfg.OAuthOnly {
+		t.Fatalf("fapitest: Config.ClientOAuthOnly requires OAuthOnly")
+	}
 	if cfg.Profile != server.ProfileFAPISecurity && cfg.Profile != server.ProfileFAPISecurityWithMessageSigning {
 		t.Fatalf("fapitest: Config.Profile is invalid")
 	}

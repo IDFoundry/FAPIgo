@@ -603,28 +603,42 @@ func (h *Harness) RunAuthorizationCodeFlowWithRequest(ctx context.Context, req c
 		return client.TokenSet{}, fmt.Errorf("fapitest: BeginAuthorization: %w", err)
 	}
 
+	rawQuery, err := h.CaptureCallback(ctx, session)
+	if err != nil {
+		return client.TokenSet{}, err
+	}
+	return h.RunAuthorizationCodeFlowWithCallback(ctx, session.Handle(), rawQuery)
+}
+
+// CaptureCallback drives session's authorization URL through the
+// harness's auto-approving authorization endpoint and returns the raw
+// query of the redirect back to the client — the callback, without
+// completing it — so a test can deliver it however it likes (e.g. to a
+// different session; see RunAuthorizationCodeFlowWithCallback).
+func (h *Harness) CaptureCallback(ctx context.Context, session client.AuthorizationSession) (string, error) {
+	h.t.Helper()
 	authorizeReq, err := http.NewRequestWithContext(ctx, http.MethodGet, session.URL().String(), nil)
 	if err != nil {
-		return client.TokenSet{}, fmt.Errorf("fapitest: build authorize request: %w", err)
+		return "", fmt.Errorf("fapitest: build authorize request: %w", err)
 	}
 	res, err := h.httpClient.Do(authorizeReq)
 	if err != nil {
-		return client.TokenSet{}, fmt.Errorf("fapitest: GET authorize: %w", err)
+		return "", fmt.Errorf("fapitest: GET authorize: %w", err)
 	}
 	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusFound {
-		return client.TokenSet{}, fmt.Errorf("fapitest: authorize endpoint returned status %d, want %d", res.StatusCode, http.StatusFound)
+		return "", fmt.Errorf("fapitest: authorize endpoint returned status %d, want %d", res.StatusCode, http.StatusFound)
 	}
 	location := res.Header.Get("Location")
 	if location == "" {
-		return client.TokenSet{}, fmt.Errorf("fapitest: authorize endpoint redirect had no Location header")
+		return "", fmt.Errorf("fapitest: authorize endpoint redirect had no Location header")
 	}
 	redirectURL, err := url.Parse(location)
 	if err != nil {
-		return client.TokenSet{}, fmt.Errorf("fapitest: parse redirect location: %w", err)
+		return "", fmt.Errorf("fapitest: parse redirect location: %w", err)
 	}
 
-	return h.RunAuthorizationCodeFlowWithCallback(ctx, redirectURL.RawQuery)
+	return redirectURL.RawQuery, nil
 }
 
 // RunAuthorizationCodeFlowWithCallback completes an authorization
@@ -632,9 +646,14 @@ func (h *Harness) RunAuthorizationCodeFlowWithRequest(ctx context.Context, req c
 // skipping BeginAuthorization and the authorization-endpoint HTTP round
 // trip — for exercising CompleteAuthorization's own error paths (e.g. a
 // callback referencing a session that was never started).
-func (h *Harness) RunAuthorizationCodeFlowWithCallback(ctx context.Context, rawQuery string) (client.TokenSet, error) {
+//
+// session is the SessionHandle BeginAuthorization returned — what a real
+// application recovers from the cookie it bound the flow to (see
+// client.SessionHandle) — so a test can also exercise a callback bound
+// to the wrong session.
+func (h *Harness) RunAuthorizationCodeFlowWithCallback(ctx context.Context, session client.SessionHandle, rawQuery string) (client.TokenSet, error) {
 	h.t.Helper()
-	result, err := h.Client.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery})
+	result, err := h.Client.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session})
 	if err != nil {
 		return client.TokenSet{}, fmt.Errorf("fapitest: CompleteAuthorization: %w", err)
 	}

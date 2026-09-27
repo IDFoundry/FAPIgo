@@ -131,7 +131,7 @@ func beginAndCallbackWithoutIss(t *testing.T, discovered client.DiscoveredMetada
 	q.Set("code", "auth-code-no-iss")
 	// deliberately no "iss"
 
-	_, err = c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: q.Encode()})
+	_, err = c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: q.Encode(), Session: session.Handle()})
 	return err
 }
 
@@ -198,7 +198,7 @@ func TestNewFromDiscoveryNeverDisablesExplicitIssEnforcement(t *testing.T) {
 	q := url.Values{}
 	q.Set("state", session.Handle().String())
 	q.Set("code", "auth-code-no-iss")
-	if _, err := c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: q.Encode()}); err == nil {
+	if _, err := c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: q.Encode(), Session: session.Handle()}); err == nil {
 		t.Fatal("HandleAuthorizationResponse(missing iss, caller explicitly required it) = nil error, want error")
 	}
 }

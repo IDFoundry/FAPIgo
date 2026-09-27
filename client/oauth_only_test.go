@@ -38,7 +38,7 @@ func TestOAuthOnlyClientCompletesFlowWithoutIssuerKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginAuthorization: %v", err)
 	}
-	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: as.callbackFor(t, session.Handle().String(), "auth-code-123", "")})
+	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: as.callbackFor(t, session.Handle().String(), "auth-code-123", ""), Session: session.Handle()})
 	if err != nil {
 		t.Fatalf("CompleteAuthorization: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestOAuthOnlyClientRejectsUnrequestedIDToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginAuthorization: %v", err)
 	}
-	_, err = c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: as.callbackFor(t, session.Handle().String(), "auth-code-123", "")})
+	_, err = c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: as.callbackFor(t, session.Handle().String(), "auth-code-123", ""), Session: session.Handle()})
 	if code := clientErrorCode(t, err); code != client.ErrorInvalidResponse {
 		t.Fatalf("error code = %q, want %q", code, client.ErrorInvalidResponse)
 	}

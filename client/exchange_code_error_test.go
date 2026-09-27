@@ -26,7 +26,7 @@ func TestExchangeCodeRejectsPlainTokenError(t *testing.T) {
 		t.Fatalf("BeginAuthorization: %v", err)
 	}
 	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-123", "")
-	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery}); err == nil {
+	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()}); err == nil {
 		t.Fatal("CompleteAuthorization(plain token error) = nil error, want error")
 	}
 	if as.tokenCallCount != 1 {
@@ -48,7 +48,7 @@ func TestExchangeCodeGivesUpAfterRetryStillFails(t *testing.T) {
 		t.Fatalf("BeginAuthorization: %v", err)
 	}
 	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-123", "")
-	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery}); err == nil {
+	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()}); err == nil {
 		t.Fatal("CompleteAuthorization(persistent DPoP-nonce challenge) = nil error, want error")
 	}
 	if as.tokenCallCount != 2 {
@@ -122,7 +122,7 @@ func TestExchangeCodePropagatesTransportErrorOnFirstAttempt(t *testing.T) {
 		t.Fatalf("BeginAuthorization: %v", err)
 	}
 	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-123", "")
-	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery}); err == nil {
+	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()}); err == nil {
 		t.Fatal("CompleteAuthorization(transport failure on first attempt) = nil error, want error")
 	}
 }
@@ -137,7 +137,7 @@ func TestExchangeCodePropagatesTransportErrorOnRetry(t *testing.T) {
 		t.Fatalf("BeginAuthorization: %v", err)
 	}
 	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-123", "")
-	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery}); err == nil {
+	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()}); err == nil {
 		t.Fatal("CompleteAuthorization(transport failure on retry) = nil error, want error")
 	}
 }

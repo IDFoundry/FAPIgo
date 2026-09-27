@@ -279,7 +279,7 @@ func TestExchangeCodeAttestationSendsHeadersNoClientAssertion(t *testing.T) {
 		t.Fatalf("BeginAuthorization: %v", err)
 	}
 	rawQuery := mtlsCallbackFor(testIssuer, session.Handle().String(), "auth-code-123")
-	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery}); err != nil {
+	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()}); err != nil {
 		t.Fatalf("CompleteAuthorization: %v", err)
 	}
 	if as.lastTokenForm.Get("client_assertion") != "" {

@@ -637,7 +637,7 @@ func TestExchangeCodeRetriesOnDPoPNonceChallenge(t *testing.T) {
 	}
 
 	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-123", "")
-	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery})
+	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()})
 	if err != nil {
 		t.Fatalf("CompleteAuthorization: %v", err)
 	}
@@ -665,7 +665,7 @@ func TestExchangeCodeAcceptsCaseInsensitiveTokenType(t *testing.T) {
 		t.Fatalf("BeginAuthorization: %v", err)
 	}
 	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-123", "")
-	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery})
+	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()})
 	if err != nil {
 		t.Fatalf("CompleteAuthorization: %v", err)
 	}
@@ -691,7 +691,7 @@ func TestExchangeCodeToleratesMissingExpiresIn(t *testing.T) {
 		t.Fatalf("BeginAuthorization: %v", err)
 	}
 	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-123", "")
-	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery})
+	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()})
 	if err != nil {
 		t.Fatalf("CompleteAuthorization: %v", err)
 	}
@@ -714,7 +714,7 @@ func TestCompleteAuthorizationHappyPathBaseline(t *testing.T) {
 	}
 
 	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-123", "")
-	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery})
+	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()})
 	if err != nil {
 		t.Fatalf("CompleteAuthorization: %v", err)
 	}
@@ -776,7 +776,7 @@ func TestCompleteAuthorizationHappyPathMessageSigning(t *testing.T) {
 	}
 
 	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-456", "")
-	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery})
+	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()})
 	if err != nil {
 		t.Fatalf("CompleteAuthorization: %v", err)
 	}
@@ -816,7 +816,7 @@ func TestCompleteAuthorizationRequestObjectEncodingWithoutJARM(t *testing.T) {
 	}
 
 	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-ro", "")
-	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery})
+	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()})
 	if err != nil {
 		t.Fatalf("CompleteAuthorization (plain response): %v", err)
 	}
@@ -841,7 +841,7 @@ func TestCompleteAuthorizationDecryptsEncryptedIDToken(t *testing.T) {
 			}
 
 			rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-encrypted", "")
-			result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery})
+			result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()})
 			if err != nil {
 				t.Fatalf("CompleteAuthorization: %v", err)
 			}
@@ -943,7 +943,7 @@ func TestBeginAuthorizationCommitsDPoPKeyAtPARMatchingTokenEndpointProofJKT(t *t
 	}
 
 	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-dpop-jkt", "")
-	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery}); err != nil {
+	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()}); err != nil {
 		t.Fatalf("CompleteAuthorization: %v", err)
 	}
 
@@ -974,7 +974,7 @@ func TestBeginAuthorizationCommitsDPoPKeyAtPARMatchingTokenEndpointProofDefault(
 	parJKT := dpopProofJKT(t, as.lastPARDPoPProof)
 
 	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-dpop-proof", "")
-	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery}); err != nil {
+	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()}); err != nil {
 		t.Fatalf("CompleteAuthorization: %v", err)
 	}
 
@@ -1017,7 +1017,7 @@ func TestBeginAuthorizationAndExchangeCodeReuseCachedNonceOnSecondFlow(t *testin
 		t.Fatalf("first flow PAR call count = %d, want 2 (challenge + retry)", as.parCallCount)
 	}
 	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-1", "")
-	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery}); err != nil {
+	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()}); err != nil {
 		t.Fatalf("CompleteAuthorization (first): %v", err)
 	}
 	if as.tokenCallCount != 1 {
@@ -1035,7 +1035,7 @@ func TestBeginAuthorizationAndExchangeCodeReuseCachedNonceOnSecondFlow(t *testin
 		t.Fatalf("PAR call count after second BeginAuthorization = %d, want 3 (no retry needed)", as.parCallCount)
 	}
 	rawQuery = as.callbackFor(t, session.Handle().String(), "auth-code-2", "")
-	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery}); err != nil {
+	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()}); err != nil {
 		t.Fatalf("CompleteAuthorization (second): %v", err)
 	}
 	if as.tokenCallCount != 2 {
@@ -1136,7 +1136,7 @@ func TestCompleteAuthorizationMessageSigningSucceedsWithRequireAuthorizationResp
 	}
 
 	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-jarm-iss-required", "")
-	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery})
+	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()})
 	if err != nil {
 		t.Fatalf("CompleteAuthorization: %v", err)
 	}
@@ -1194,7 +1194,7 @@ func TestHandleAuthorizationResponseRejectsEmptyIssuerKeySetForJARM(t *testing.T
 	}
 
 	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-empty-keyset", "")
-	_, err = c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: rawQuery})
+	_, err = c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()})
 	if err == nil {
 		t.Fatalf("HandleAuthorizationResponse(empty issuer keyset) = nil error, want error")
 	}
@@ -1221,7 +1221,7 @@ func TestCompleteAuthorizationDenied(t *testing.T) {
 	}
 
 	rawQuery := as.callbackFor(t, session.Handle().String(), "", "access_denied")
-	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery})
+	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()})
 	if err != nil {
 		t.Fatalf("CompleteAuthorization: %v", err)
 	}
@@ -1244,10 +1244,10 @@ func TestHandleAuthorizationResponseRejectsReplayedState(t *testing.T) {
 	}
 	rawQuery := as.callbackFor(t, session.Handle().String(), "auth-code-789", "")
 
-	if _, err := c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: rawQuery}); err != nil {
+	if _, err := c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()}); err != nil {
 		t.Fatalf("first HandleAuthorizationResponse: %v", err)
 	}
-	if _, err := c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: rawQuery}); err == nil {
+	if _, err := c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()}); err == nil {
 		t.Fatalf("second HandleAuthorizationResponse (replay) = nil error, want error")
 	}
 }
@@ -1268,7 +1268,7 @@ func TestHandleAuthorizationResponseRejectsResponseModeDowngrade(t *testing.T) {
 	q.Set("code", "downgrade-attempt")
 	q.Set("iss", testIssuer)
 
-	if _, err := c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: q.Encode()}); err == nil {
+	if _, err := c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: q.Encode(), Session: session.Handle()}); err == nil {
 		t.Fatalf("HandleAuthorizationResponse(plain callback under message-signing profile) = nil error, want error")
 	}
 }
@@ -1291,7 +1291,7 @@ func TestHandleAuthorizationResponseRejectsIssMismatch(t *testing.T) {
 	q.Set("code", "auth-code-iss-mismatch")
 	q.Set("iss", "https://attacker.example")
 
-	if _, err := c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: q.Encode()}); err == nil {
+	if _, err := c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: q.Encode(), Session: session.Handle()}); err == nil {
 		t.Fatalf("HandleAuthorizationResponse(wrong iss) = nil error, want error")
 	}
 }
@@ -1332,7 +1332,7 @@ func TestHandleAuthorizationResponseRejectsMissingIssWhenRequired(t *testing.T) 
 	q.Set("code", "auth-code-no-iss")
 	// deliberately no "iss"
 
-	if _, err := c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: q.Encode()}); err == nil {
+	if _, err := c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: q.Encode(), Session: session.Handle()}); err == nil {
 		t.Fatalf("HandleAuthorizationResponse(missing iss, required) = nil error, want error")
 	}
 }

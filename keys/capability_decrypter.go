@@ -61,7 +61,11 @@ type capabilityDecrypter struct {
 // algorithm(s) it needs to support — so this constructor can fail at
 // setup time rather than on the first request. Use NewSingleKeyDecrypter
 // for the common case where one backend serves every purpose.
-func NewDecrypter(backends map[DecryptionPurpose]RecipientKey) (Decrypter, error) {
+//
+// Only the caller knows how the backends' keys are held, so pass
+// DeclareCustody to say — required for production assurance (see
+// KeyCustody).
+func NewDecrypter(backends map[DecryptionPurpose]RecipientKey, opts ...CustodyOption) (Decrypter, error) {
 	if len(backends) == 0 {
 		return nil, fmt.Errorf("keys: NewDecrypter requires at least one backend")
 	}
@@ -75,17 +79,31 @@ func NewDecrypter(backends map[DecryptionPurpose]RecipientKey) (Decrypter, error
 			return nil, fmt.Errorf("keys: backend for decryption purpose %v implements neither ECDHAgreer nor KeyDecrypter", purpose)
 		}
 	}
-	return &capabilityDecrypter{backends: backends}, nil
+	d := &capabilityDecrypter{backends: backends}
+	if decl := applyCustodyOptions(opts); decl.declared {
+		return custodyDecrypter{capabilityDecrypter: d, custody: decl.custody}, nil
+	}
+	return d, nil
 }
+
+// custodyDecrypter is a capabilityDecrypter whose caller declared its
+// KeyCustody.
+type custodyDecrypter struct {
+	*capabilityDecrypter
+	custody KeyCustody
+}
+
+// KeyCustody implements KeyCustodyAssurance.
+func (d custodyDecrypter) KeyCustody() KeyCustody { return d.custody }
 
 // NewSingleKeyDecrypter is NewDecrypter for the common case where one
 // backend serves both IDTokenDecryption and UserInfoDecryption — the
 // only two DecryptionPurpose values this module defines today.
-func NewSingleKeyDecrypter(backend RecipientKey) (Decrypter, error) {
+func NewSingleKeyDecrypter(backend RecipientKey, opts ...CustodyOption) (Decrypter, error) {
 	return NewDecrypter(map[DecryptionPurpose]RecipientKey{
 		IDTokenDecryption:  backend,
 		UserInfoDecryption: backend,
-	})
+	}, opts...)
 }
 
 // UnwrapContentEncryptionKey implements Decrypter.

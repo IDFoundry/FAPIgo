@@ -29,10 +29,12 @@ specifically so you don't have to do it before you can run anything:
 **Both are development/testing only. Never production** — see each
 package's own doc comment for exactly why (non-durable, no expiry GC,
 keys regenerated and lost on every restart). `server.New` already
-refuses `memstore`'s stores under `server.AssuranceProduction` (they
-don't implement `storage.StoreAssurance`, which that assurance level
-requires) — that's not a gap, it's what stops them from being used in
-production by accident. When you're ready for a real deployment, this
+refuses both under `server.AssuranceProduction` — `memstore`'s stores
+don't implement `storage.StoreAssurance` and `ephemeral`'s key manager
+doesn't implement `keys.KeyCustodyAssurance`, which that assurance
+level requires — and `client.New` refuses `ephemeral` keys the same way.
+That's not a gap, it's what stops them from being used in production
+by accident. When you're ready for a real deployment, this
 is the seam: implement the same interfaces (`storage.ClientRepository`
 and friends, `keys.KeyManager`, `keys.ClientKeySource`) against real
 persistence and a real key store (KMS/HSM), and swap them in — nothing
@@ -40,6 +42,10 @@ else in this guide changes. For `keys.KeyManager` specifically, you may
 not need to implement anything at all: `keys.NewKeyManagerFromSigners`
 adapts any `crypto.Signer` — what most HSM/KMS Go client wrappers
 already implement — directly into a `KeyManager`; see `keys/doc.go`.
+Pass it `keys.DeclareCustody(keys.KeyCustody{Durable: true})` (plus
+`CrossInstanceConsistent` if every instance shares the keys) to state
+how those keys are held — production assurance requires the
+declaration, and only you know the answer.
 
 ## 2. Build a `Config`
 

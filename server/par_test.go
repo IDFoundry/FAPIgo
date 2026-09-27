@@ -324,6 +324,11 @@ func (f *fakeKeyManager) Sign(_ context.Context, req keys.SigningRequest) (keys.
 	return keys.Signature{KeyID: f.keyID, Value: der}, nil
 }
 
+// KeyCustody is a test-only assertion — see fakeClientRepository.Capabilities.
+func (f *fakeKeyManager) KeyCustody() keys.KeyCustody {
+	return keys.KeyCustody{Durable: true, CrossInstanceConsistent: true}
+}
+
 func (f *fakeKeyManager) PublicKey(_ context.Context, _ keys.SigningPurpose, _ fapi.SignatureAlgorithm) (keys.PublicKeyInfo, error) {
 	return keys.PublicKeyInfo{KeyID: f.keyID, PublicKey: &f.key.PublicKey}, nil
 }

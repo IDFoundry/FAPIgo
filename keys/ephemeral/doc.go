@@ -1,6 +1,8 @@
 // Package ephemeral provides in-memory implementations of
 // keys.KeyManager and keys.ClientKeySource — for local development and
-// testing only. Never production.
+// testing only. Never production — its KeyManager deliberately doesn't
+// implement keys.KeyCustodyAssurance, so server.AssuranceProduction and
+// client.AssuranceProduction reject it.
 //
 // KeyManager generates fresh keys once at process startup and never
 // persists them. Restarting the process invalidates every previously

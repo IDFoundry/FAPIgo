@@ -374,6 +374,16 @@ func validateDependencies(cfg Config, deps Dependencies) error {
 	if deps.Keys == nil {
 		return fmt.Errorf("client: dependencies: keys is required")
 	}
+	if cfg.Assurance == AssuranceProduction {
+		if err := checkKeyCustody("keys", deps.Keys); err != nil {
+			return err
+		}
+		if deps.Decryption != nil {
+			if err := checkKeyCustody("decryption", deps.Decryption); err != nil {
+				return err
+			}
+		}
+	}
 	if deps.IssuerKeys == nil && issuerKeysNeeded(cfg) {
 		return fmt.Errorf("client: dependencies: issuer keys is required (it may be left nil only when oauth_only is set and neither a JARM response nor a signed UserInfo response is verified)")
 	}

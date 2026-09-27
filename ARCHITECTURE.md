@@ -380,13 +380,16 @@ produce a verified `SubjectID`.
 security-critical dependency is present and valid — no implicit
 in-memory fallback for clocks, randomness, replay storage, signing keys,
 client lookup or authorization-code storage. Under
-`AssuranceProduction`, `New` additionally rejects non-durable stores,
-stores without atomic consumption, software keys where policy requires
-HSM-backed keys, insecure issuer URLs, wildcard redirect configuration,
-excessive clock skew, a missing audit sink, missing replay protection,
-and unsupported/weak algorithms. A separate, explicitly named
-`NewDevelopmentServer` constructor exists for local/dev convenience so a
-caller can never end up on a weakened profile by omission.
+`AssuranceProduction`, `New` additionally requires every dependency to
+declare what production depends on — stores durable and atomically
+consuming (`storage.StoreAssurance`), key sources with hardened live
+fetches (`keys.KeySourceAssurance`), signing keys and decryption keys
+held durably (`keys.KeyCustodyAssurance`; an HSM or KMS is not required,
+only that the keys survive a restart), each also cross-instance
+consistent under `HorizontallyScaled` — plus an audit sink, and rejects
+loopback `http` issuer and endpoint URLs. The assurance level is itself a
+required `Config.Assurance` choice with no default, so a caller can never
+end up on the development level by omission.
 
 **Policy is a bounded deployment decision, not a bypass.**
 `AuthorizationPolicy.Evaluate` receives only already-validated protocol

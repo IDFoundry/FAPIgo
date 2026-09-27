@@ -34,6 +34,12 @@ type fakeKeyManager struct {
 	keys map[keys.SigningPurpose]*ecdsa.PrivateKey
 }
 
+// KeyCustody is a test-only assertion, so production-assurance tests
+// exercise the check they target rather than failing on key custody.
+func (m *fakeKeyManager) KeyCustody() keys.KeyCustody {
+	return keys.KeyCustody{Durable: true}
+}
+
 func newFakeKeyManager(t *testing.T, purposes ...keys.SigningPurpose) *fakeKeyManager {
 	t.Helper()
 	m := &fakeKeyManager{keys: map[keys.SigningPurpose]*ecdsa.PrivateKey{}}

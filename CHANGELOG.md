@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.37.0](https://github.com/IDFoundry/FAPIgo/compare/v0.36.0...v0.37.0) (2026-09-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* **client:** AuthorizationCallback now requires Session, and a callback without one is rejected. Store the SessionHandle from BeginAuthorization in an HttpOnly, Secure, SameSite=Lax cookie when redirecting the browser, read it back with client.ParseSessionHandle when the callback arrives, and pass it as Session. fapitest's RunAuthorizationCodeFlowWithCallback now takes the session handle as its second argument.
+* under AssuranceProduction, server and client signing keys and client decryption keys must declare durable key custody. Pass keys.DeclareCustody to keys.NewKeyManagerFromSigners, keys.NewDecrypter or keys.NewSingleKeyDecrypter, or implement keys.KeyCustodyAssurance on a custom KeyManager or Decrypter. keys/ephemeral is rejected in production.
+
+### Features
+
+* require declared key custody for signing and decryption keys in production ([0168303](https://github.com/IDFoundry/FAPIgo/commit/01683037d501aa7eb493bf114b83b9470e198bbe))
+
+
+### Bug Fixes
+
+* **client:** bind authorization callbacks to the user agent that began the flow ([59618e7](https://github.com/IDFoundry/FAPIgo/commit/59618e7525f156b73a4399774a6d5ab9a7199e5c))
+
 ## [0.36.0](https://github.com/IDFoundry/FAPIgo/compare/v0.35.0...v0.36.0) (2026-09-27)
 
 

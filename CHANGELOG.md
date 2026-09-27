@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.38.0](https://github.com/IDFoundry/FAPIgo/compare/v0.37.0...v0.38.0) (2026-09-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* under AssuranceProduction, server.New and client.New now reject any Dependencies.Random other than crypto/rand.Reader, including a wrapper around it. Pass crypto/rand.Reader directly.
+
+### Features
+
+* **client:** expose the server's OAuth error response on client.Error ([c006df8](https://github.com/IDFoundry/FAPIgo/commit/c006df8a5a8149fb3c7305c3ec0be6af490d2b8c))
+* require crypto/rand.Reader as Dependencies.Random under production assurance ([5c2c82e](https://github.com/IDFoundry/FAPIgo/commit/5c2c82e6869ebccb89562f41a9ca198d909579bd))
+
+
+### Bug Fixes
+
+* reject case-variant JSON member names in JOSE and metadata parsing ([707772e](https://github.com/IDFoundry/FAPIgo/commit/707772ec3bb673a838f9bba25fc8b994d6fd40db))
+* **server:** return invalid_scope for a scope the client isn't allowed ([02cf7e0](https://github.com/IDFoundry/FAPIgo/commit/02cf7e0624b1c7095c17780a735277dbe1127070))
+
 ## [0.37.0](https://github.com/IDFoundry/FAPIgo/compare/v0.36.0...v0.37.0) (2026-09-27)
 
 

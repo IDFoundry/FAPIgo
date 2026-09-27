@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/idfoundry/fapigo/internal/clientattestation"
@@ -26,6 +27,27 @@ type AttestationSource interface {
 	// with under keys.ClientAttestationPoPSigning — this package never
 	// checks either correspondence itself.
 	CurrentAttestation(ctx context.Context) (string, error)
+}
+
+// StaticAttestation returns an AttestationSource that presents the same
+// Client Attestation JWT on every request — the simple case of a wallet
+// holding one attestation for its session. It never refreshes: once
+// the attestation expires the authorization server rejects it, so a
+// wallet that outlives its attestation should implement
+// AttestationSource itself and obtain a new one from its Attester. An
+// empty jwt fails every request with an error rather than sending an
+// empty header.
+func StaticAttestation(jwt string) AttestationSource {
+	return staticAttestation(jwt)
+}
+
+type staticAttestation string
+
+func (s staticAttestation) CurrentAttestation(context.Context) (string, error) {
+	if s == "" {
+		return "", errors.New("client: StaticAttestation has no attestation JWT")
+	}
+	return string(s), nil
 }
 
 // ChallengeSource optionally supplies a fresh Attestation Challenge

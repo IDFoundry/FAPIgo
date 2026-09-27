@@ -1,6 +1,9 @@
 package client_test
 
 import (
+	"crypto/ecdh"
+	"crypto/rand"
+	"github.com/idfoundry/fapigo/keys/ephemeral"
 	"strings"
 	"testing"
 
@@ -240,5 +243,86 @@ func TestNewAcceptsProductionAssuranceWithLiveFetchHardenedIssuerKeySource(t *te
 
 	if _, err := client.New(cfg, deps); err != nil {
 		t.Fatalf("New(AssuranceProduction, LiveFetchHardened issuer key source): %v", err)
+	}
+}
+
+// productionDeps is validDependencies with every non-key AssuranceProduction
+// declaration satisfied, so a test isolates the key custody checks.
+func productionDeps(t *testing.T) client.Dependencies {
+	t.Helper()
+	deps := validDependencies(t)
+	deps.IssuerKeys = assuringIssuerKeySource{
+		fakeIssuerKeySource: deps.IssuerKeys.(*fakeIssuerKeySource),
+		caps:                keys.KeySourceCapabilities{LiveFetchHardened: true},
+	}
+	deps.Sessions = assuringSessionStore{
+		fakeSessionStore: newFakeSessionStore(),
+		caps:             storage.Capabilities{Durable: true, AtomicConsume: true},
+	}
+	return deps
+}
+
+// undeclaredClientKeys has the fake key manager's methods but not its
+// test-only KeyCustody.
+type undeclaredClientKeys struct{ keys.KeyManager }
+
+func TestNewProductionRequiresClientKeyCustody(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = client.AssuranceProduction
+
+	deps := productionDeps(t)
+	if _, err := client.New(cfg, deps); err != nil {
+		t.Fatalf("New(production, declared keys): %v", err)
+	}
+
+	deps = productionDeps(t)
+	deps.Keys = undeclaredClientKeys{deps.Keys}
+	if _, err := client.New(cfg, deps); err == nil || !strings.Contains(err.Error(), "keys must implement keys.KeyCustodyAssurance") {
+		t.Fatalf("New(production, undeclared keys) error = %v, want a key custody error", err)
+	}
+
+	ephemeralKeys, err := ephemeral.NewKeyManager(map[keys.SigningPurpose]fapi.SignatureAlgorithm{keys.ClientAuthentication: fapi.ES256, keys.DPoPProofSigning: fapi.ES256})
+	if err != nil {
+		t.Fatalf("ephemeral.NewKeyManager: %v", err)
+	}
+	deps = productionDeps(t)
+	deps.Keys = ephemeralKeys
+	if _, err := client.New(cfg, deps); err == nil || !strings.Contains(err.Error(), "keys must implement keys.KeyCustodyAssurance") {
+		t.Fatalf("New(production, ephemeral keys) error = %v, want a key custody error", err)
+	}
+}
+
+func TestNewProductionRequiresDecryptionKeyCustody(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = client.AssuranceProduction
+	cfg.Algorithms.IDTokenKeyManagement = fapi.ECDHESA256KW
+	cfg.Algorithms.IDTokenContentEncryption = fapi.A256GCM
+
+	priv, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	backend, err := keys.NewInMemoryECDH(priv, "enc-1")
+	if err != nil {
+		t.Fatalf("NewInMemoryECDH: %v", err)
+	}
+	undeclared, err := keys.NewSingleKeyDecrypter(backend)
+	if err != nil {
+		t.Fatalf("NewSingleKeyDecrypter: %v", err)
+	}
+	declared, err := keys.NewSingleKeyDecrypter(backend, keys.DeclareCustody(keys.KeyCustody{Durable: true}))
+	if err != nil {
+		t.Fatalf("NewSingleKeyDecrypter: %v", err)
+	}
+
+	deps := productionDeps(t)
+	deps.Decryption = undeclared
+	if _, err := client.New(cfg, deps); err == nil || !strings.Contains(err.Error(), "decryption must implement keys.KeyCustodyAssurance") {
+		t.Fatalf("New(production, undeclared decryption) error = %v, want a key custody error", err)
+	}
+	deps = productionDeps(t)
+	deps.Decryption = declared
+	if _, err := client.New(cfg, deps); err != nil {
+		t.Fatalf("New(production, declared decryption): %v", err)
 	}
 }

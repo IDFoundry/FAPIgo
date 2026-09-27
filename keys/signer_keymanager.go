@@ -61,10 +61,16 @@ type signerKeyManager struct {
 // PS256's 2048-bit modulus floor, the same floors this module enforces
 // everywhere else — so a misconfigured backend fails at startup, not on
 // the first signing request.
+//
+// Only the caller knows how the signers' keys are held, so pass
+// DeclareCustody to say — required for production assurance (see
+// KeyCustody). Without it, the KeyManager declares nothing and is
+// accepted only under development assurance.
 func NewKeyManagerFromSigners(
 	signers map[SigningPurpose]crypto.Signer,
 	algorithms map[SigningPurpose]fapi.SignatureAlgorithm,
 	kids map[SigningPurpose]string,
+	opts ...CustodyOption,
 ) (KeyManager, error) {
 	if len(signers) == 0 {
 		return nil, fmt.Errorf("keys: NewKeyManagerFromSigners requires at least one signer")
@@ -83,8 +89,22 @@ func NewKeyManagerFromSigners(
 		}
 		backends[purpose] = signerBackend{signer: signer, algorithm: algorithm, kid: kids[purpose]}
 	}
-	return &signerKeyManager{backends: backends}, nil
+	km := &signerKeyManager{backends: backends}
+	if d := applyCustodyOptions(opts); d.declared {
+		return custodyKeyManager{signerKeyManager: km, custody: d.custody}, nil
+	}
+	return km, nil
 }
+
+// custodyKeyManager is a signerKeyManager whose caller declared its
+// KeyCustody.
+type custodyKeyManager struct {
+	*signerKeyManager
+	custody KeyCustody
+}
+
+// KeyCustody implements KeyCustodyAssurance.
+func (m custodyKeyManager) KeyCustody() KeyCustody { return m.custody }
 
 func validateSignerForAlgorithm(signer crypto.Signer, algorithm fapi.SignatureAlgorithm) error {
 	switch algorithm {

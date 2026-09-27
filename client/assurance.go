@@ -40,7 +40,10 @@ const (
 	// keys.KeySourceAssurance and declare LiveFetchHardened — see that
 	// interface's own doc comment for why a plain IssuerKeySource has no
 	// structural way to tell a hardened implementation from a naive one
-	// apart from this declaration.
+	// apart from this declaration. Likewise Dependencies.Keys, and
+	// Dependencies.Decryption when set, must implement
+	// keys.KeyCustodyAssurance and declare Durable: keys/ephemeral's
+	// in-memory keys, regenerated on every restart, never qualify.
 	AssuranceProduction
 )
 
@@ -60,6 +63,20 @@ func checkStoreAssurance(name string, store any) error {
 	}
 	if !caps.AtomicConsume {
 		return fmt.Errorf("client: dependencies: %s must declare AtomicConsume capability under AssuranceProduction", name)
+	}
+	return nil
+}
+
+// checkKeyCustody requires manager — a keys.KeyManager or
+// keys.Decrypter — to implement keys.KeyCustodyAssurance and declare
+// Durable, mirroring server's own helper.
+func checkKeyCustody(name string, manager any) error {
+	asserter, ok := manager.(keys.KeyCustodyAssurance)
+	if !ok {
+		return fmt.Errorf("client: dependencies: %s must implement keys.KeyCustodyAssurance under AssuranceProduction (keys/ephemeral never does; pass keys.DeclareCustody to keys.NewKeyManagerFromSigners)", name)
+	}
+	if !asserter.KeyCustody().Durable {
+		return fmt.Errorf("client: dependencies: %s must declare Durable key custody under AssuranceProduction", name)
 	}
 	return nil
 }

@@ -52,6 +52,13 @@ const (
 	// interface's own doc comment for why a plain ClientKeySource/
 	// ClientEncryptionKeySource has no structural way to tell a hardened
 	// implementation from a naive one apart from this declaration.
+	// Likewise the keys this server signs with — Dependencies.Keys, and
+	// JWTAccessTokens.Keys when access tokens are JWTs — must implement
+	// keys.KeyCustodyAssurance and declare Durable (and
+	// CrossInstanceConsistent with HorizontallyScaled): keys/ephemeral's
+	// in-memory keys, regenerated on every restart, never qualify. An
+	// HSM or KMS is not required — durable keys a deployment loads from
+	// its own storage qualify too — only that the declaration is made.
 	// Unlike every check above, which New performs once, a client's
 	// loopback http redirect URI is refused per request, at the pushed
 	// authorization request, as invalid_request — redirect URIs belong
@@ -80,6 +87,24 @@ func checkStoreAssurance(name string, store any, requireAtomicConsume, requireCr
 	}
 	if requireCrossInstanceConsistent && !caps.CrossInstanceConsistent {
 		return fmt.Errorf("server: dependencies: %s must declare CrossInstanceConsistent capability under AssuranceProduction with HorizontallyScaled", name)
+	}
+	return nil
+}
+
+// checkKeyCustody requires manager — a keys.KeyManager or
+// keys.Decrypter — to implement keys.KeyCustodyAssurance and to declare
+// Durable, and CrossInstanceConsistent when requireCrossInstanceConsistent.
+func checkKeyCustody(name string, manager any, requireCrossInstanceConsistent bool) error {
+	asserter, ok := manager.(keys.KeyCustodyAssurance)
+	if !ok {
+		return fmt.Errorf("server: dependencies: %s must implement keys.KeyCustodyAssurance under AssuranceProduction (keys/ephemeral never does; pass keys.DeclareCustody to keys.NewKeyManagerFromSigners)", name)
+	}
+	custody := asserter.KeyCustody()
+	if !custody.Durable {
+		return fmt.Errorf("server: dependencies: %s must declare Durable key custody under AssuranceProduction", name)
+	}
+	if requireCrossInstanceConsistent && !custody.CrossInstanceConsistent {
+		return fmt.Errorf("server: dependencies: %s must declare CrossInstanceConsistent key custody under AssuranceProduction with HorizontallyScaled", name)
 	}
 	return nil
 }

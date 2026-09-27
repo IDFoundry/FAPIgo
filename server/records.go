@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 	"unicode/utf8"
+
+	"github.com/idfoundry/fapigo/extension"
 )
 
 // recordVersion versions the JSON payloads this package hands storage
@@ -33,6 +35,13 @@ type requestRecord struct {
 	// creation. A pushed authorization request carries its binding as
 	// the "dpop_jkt" parameter instead.
 	DPoPJKT string `json:"dpop_jkt,omitempty"`
+
+	// ExtensionSource is where Parameters came from — a request object
+	// or plain PAR parameters — so the registered extension values
+	// among them can be read back at the interaction step exactly as
+	// they were validated (see Server.interactionExtensions). Zero in a
+	// record written before this field existed.
+	ExtensionSource extension.Source `json:"extension_source,omitempty"`
 }
 
 // grantRecord is what an authorization code, refresh token or approved

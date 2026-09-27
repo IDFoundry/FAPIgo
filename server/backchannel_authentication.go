@@ -225,12 +225,19 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		return s.backchannelBeginFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to persist backchannel authentication request", err)), nil
 	}
 
+	extensions, err := s.interactionExtensions(validated.params, coreBackchannelAuthenticationParameters, extension.SourceRequestObject)
+	if err != nil {
+		return s.backchannelBeginFail(ctx, client.ID(), newError(ErrorServerError, 500, "validated extension parameters could not be read back", err)), nil
+	}
+	interaction := s.backchannelInteractionRequestFrom(client.ID(), validated.params)
+	interaction.Extensions = extensions
+
 	action := BackchannelInteractionRequired{
 		Handle:      BackchannelAuthenticationHandle{value: handleRaw},
 		AuthReqID:   AuthReqID{value: authReqIDRaw},
 		ExpiresIn:   lifetime,
 		Interval:    s.cfg.Limits.BackchannelAuthenticationPollInterval,
-		Interaction: s.backchannelInteractionRequestFrom(client.ID(), validated.params),
+		Interaction: interaction,
 	}
 	s.audit(ctx, AuditEventBeginBackchannelAuthentication, client.ID(), AuditOutcomeSuccess, "")
 	return action, nil

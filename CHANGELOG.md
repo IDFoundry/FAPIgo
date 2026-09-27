@@ -5,7 +5,7 @@
 
 ### ⚠ BREAKING CHANGES
 
-* **server:** a server with Config.AttestationBasedClientAuthentication set must supply Dependencies.AttesterTrust — New rejects nil. Pass server.RegisteredAttesterKeys{} to keep the previous behaviour, or
+* **server:** a server with Config.AttestationBasedClientAuthentication set must supply Dependencies.AttesterTrust — New rejects nil. Pass server.RegisteredAttesterKeys{} to keep the previous behaviour, or server.X5CAttesterChain{TrustAnchors: ...} to verify the attestation's x5c certificate chain (HAIP 1.0 §4.4.1).
 
 ### Features
 

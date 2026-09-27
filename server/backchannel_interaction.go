@@ -107,4 +107,8 @@ type BackchannelInteractionRequest struct {
 	// AuthorizationDetails mirrors InteractionRequest.AuthorizationDetails
 	// exactly, for the CIBA flow.
 	AuthorizationDetails extension.RARValues
+
+	// Extensions mirrors InteractionRequest.Extensions, for the CIBA
+	// flow's signed backchannel authentication request.
+	Extensions extension.Values
 }

@@ -39,6 +39,13 @@ func newHarnessWithBackchannel(t *testing.T) (harness, *memstore.BackchannelAuth
 // caller-supplied store.
 func newHarnessWithBackchannelStore(t *testing.T, backchannel storage.BackchannelAuthenticationStore) harness {
 	t.Helper()
+	return newHarnessWithBackchannelConfig(t, backchannel, nil)
+}
+
+// newHarnessWithBackchannelConfig is newHarnessWithBackchannelStore with
+// mutate applied to the server config before server.New.
+func newHarnessWithBackchannelConfig(t *testing.T, backchannel storage.BackchannelAuthenticationStore, mutate func(*server.Config)) harness {
+	t.Helper()
 	now := time.Now()
 	key := generateKey(t)
 	serverKey := generateKey(t)
@@ -127,6 +134,9 @@ func newHarnessWithBackchannelStore(t *testing.T, backchannel storage.Backchanne
 		Random:                 rand.Reader,
 		Backchannel:            backchannel,
 		BackchannelNotifier:    server.NoBackchannelNotifications{},
+	}
+	if mutate != nil {
+		mutate(&cfg)
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {

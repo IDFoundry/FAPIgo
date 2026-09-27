@@ -104,9 +104,16 @@ func (s *Server) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 		return s.beginFail(ctx, req.ClientID, newError(ErrorServerError, 500, "failed to decode pushed authorization request", err)), nil
 	}
 
+	extensions, err := s.interactionExtensions(request.Parameters, coreAuthorizationParameters, request.ExtensionSource)
+	if err != nil {
+		return s.beginFail(ctx, req.ClientID, newError(ErrorServerError, 500, "stored extension parameters no longer validate", err)), nil
+	}
+	interaction := s.interactionRequestFrom(req.ClientID, request.Parameters)
+	interaction.Extensions = extensions
+
 	action := InteractionRequired{
 		Handle:      InteractionHandle{value: handle},
-		Interaction: s.interactionRequestFrom(req.ClientID, request.Parameters),
+		Interaction: interaction,
 	}
 	s.audit(ctx, AuditEventBeginAuthorization, req.ClientID, AuditOutcomeSuccess, "")
 	return action, nil

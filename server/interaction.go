@@ -3,6 +3,7 @@ package server
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 
@@ -91,4 +92,33 @@ type InteractionRequest struct {
 	// to render exactly what's being authorized (e.g. "Approve submission
 	// of Tax Return TX-12345") instead of a bare scope string.
 	AuthorizationDetails extension.RARValues
+
+	// Extensions holds the request's registered extension parameter
+	// values (Config.Extensions), validated at the pushed authorization
+	// request — whether they arrived as plain parameters or inside a
+	// signed request object. A consent step reads one back with
+	// extension.Get(interaction.Extensions, YourDefinition): an OID4VCI
+	// Credential Issuer's issuer_state, for example, to know which
+	// pending issuance is being approved. Every registered value is
+	// readable here, independent of ReturnInTokenClaims, which governs
+	// only what leaves the server in a token.
+	Extensions extension.Values
+}
+
+// interactionExtensions reads back the registered extension values in
+// params — validated when the request was made — for the interaction
+// step, as source (request object or plain parameters) validated them.
+// It parses a copy, since Registry.Parse drops unregistered names in
+// place. A zero source, from a record stored before the source was
+// recorded, yields no values rather than failing a request in flight
+// across an upgrade.
+func (s *Server) interactionExtensions(params map[string]json.RawMessage, core map[string]struct{}, source extension.Source) (extension.Values, error) {
+	if source == 0 {
+		return extension.Values{}, nil
+	}
+	copied := make(map[string]json.RawMessage, len(params))
+	for k, v := range params {
+		copied[k] = v
+	}
+	return s.cfg.Extensions.Parse(copied, core, source)
 }

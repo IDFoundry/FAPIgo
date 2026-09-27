@@ -205,7 +205,7 @@ func (a *fakeAttestationAuthAS) handleBackchannel(w http.ResponseWriter, r *http
 // endpoint). SenderConstrain stays the default (DPoP).
 func newTestClientWithAttestationAuth(t *testing.T) (*client.Client, *fakeAttestationAuthAS) {
 	t.Helper()
-	return newTestClientWithAttestationSource(t, fakeAttestationSource{attestation: testAttestationJWT})
+	return newTestClientWithAttestationSource(t, client.StaticAttestation(testAttestationJWT))
 }
 
 // newTestClientWithAttestationSource is newTestClientWithAttestationAuth's
@@ -540,5 +540,15 @@ func TestPublicJWKSOmitsAnyKeyUnderAttestationAuth(t *testing.T) {
 	}
 	if len(set.Keys) != 0 {
 		t.Fatalf("len(Keys) = %d, want 0", len(set.Keys))
+	}
+}
+
+func TestStaticAttestation(t *testing.T) {
+	got, err := client.StaticAttestation(testAttestationJWT).CurrentAttestation(context.Background())
+	if err != nil || got != testAttestationJWT {
+		t.Fatalf("CurrentAttestation() = %q, %v; want %q, nil", got, err, testAttestationJWT)
+	}
+	if _, err := client.StaticAttestation("").CurrentAttestation(context.Background()); err == nil {
+		t.Fatal("StaticAttestation(\"\").CurrentAttestation() = nil error, want error")
 	}
 }

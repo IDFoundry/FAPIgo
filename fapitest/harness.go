@@ -617,10 +617,10 @@ func (h *Harness) RunAuthorizationCodeFlowWithRequest(ctx context.Context, req c
 // different session; see RunAuthorizationCodeFlowWithCallback).
 func (h *Harness) CaptureCallback(ctx context.Context, session client.AuthorizationSession) (string, error) {
 	h.t.Helper()
-	authorizeReq, err := http.NewRequestWithContext(ctx, http.MethodGet, session.URL().String(), nil)
-	if err != nil {
-		return "", fmt.Errorf("fapitest: build authorize request: %w", err)
-	}
+	// Built directly from the already-validated session URL: unlike
+	// http.NewRequestWithContext there is no parse step left to fail.
+	authorizeURL := session.URL().URL()
+	authorizeReq := (&http.Request{Method: http.MethodGet, URL: &authorizeURL, Header: http.Header{}}).WithContext(ctx)
 	res, err := h.httpClient.Do(authorizeReq)
 	if err != nil {
 		return "", fmt.Errorf("fapitest: GET authorize: %w", err)
@@ -629,15 +629,10 @@ func (h *Harness) CaptureCallback(ctx context.Context, session client.Authorizat
 	if res.StatusCode != http.StatusFound {
 		return "", fmt.Errorf("fapitest: authorize endpoint returned status %d, want %d", res.StatusCode, http.StatusFound)
 	}
-	location := res.Header.Get("Location")
-	if location == "" {
-		return "", fmt.Errorf("fapitest: authorize endpoint redirect had no Location header")
+	redirectURL, err := url.Parse(res.Header.Get("Location"))
+	if err != nil || redirectURL.RawQuery == "" {
+		return "", fmt.Errorf("fapitest: authorize endpoint redirect has no usable Location header (%q): %v", res.Header.Get("Location"), err)
 	}
-	redirectURL, err := url.Parse(location)
-	if err != nil {
-		return "", fmt.Errorf("fapitest: parse redirect location: %w", err)
-	}
-
 	return redirectURL.RawQuery, nil
 }
 

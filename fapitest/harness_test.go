@@ -188,3 +188,30 @@ func TestAuthorizationCodeFlowLoopbackHTTPRedirectURI(t *testing.T) {
 		})
 	}
 }
+
+// TestCaptureCallbackReportsFailures covers CaptureCallback's error
+// paths a test can reach: the authorization request failing outright,
+// and the authorization endpoint answering without a redirect — here
+// because the session's request_uri was already used by an earlier
+// capture.
+func TestCaptureCallbackReportsFailures(t *testing.T) {
+	h := fapitest.New(t, fapitest.Config{Profile: server.ProfileFAPISecurity})
+	ctx := context.Background()
+	session, err := h.Client.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid", "accounts"}})
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := h.CaptureCallback(cancelled, session); err == nil {
+		t.Error("CaptureCallback(cancelled context) = nil error, want error")
+	}
+
+	if _, err := h.CaptureCallback(ctx, session); err != nil {
+		t.Fatalf("CaptureCallback: %v", err)
+	}
+	if _, err := h.CaptureCallback(ctx, session); err == nil {
+		t.Error("CaptureCallback(already used request_uri) = nil error, want error")
+	}
+}

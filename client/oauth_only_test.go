@@ -144,3 +144,48 @@ func TestNewOAuthOnlyIssuerKeysRequirement(t *testing.T) {
 		})
 	}
 }
+
+// TestNewMaxIDTokenLifetimeRequirement covers Limits.MaxIDTokenLifetime
+// being required exactly when the client can receive an ID token — the
+// same condition as Algorithms.IDToken — so an OAuthOnly or
+// client_credentials-only client isn't made to set a limit nothing
+// reads.
+func TestNewMaxIDTokenLifetimeRequirement(t *testing.T) {
+	noBrowserFlow := func(c *client.Config) {
+		c.Endpoints.Authorization = fapi.URL{}
+		c.Endpoints.PushedAuthorizationRequest = fapi.URL{}
+	}
+	cases := map[string]struct {
+		mutate  func(*client.Config, *client.Dependencies)
+		wantErr bool
+	}{
+		"browser flow": {func(*client.Config, *client.Dependencies) {}, true},
+		"browser flow, oauth_only": {func(c *client.Config, d *client.Dependencies) {
+			c.OAuthOnly = true
+			c.Algorithms.IDToken = 0
+			d.IssuerKeys = nil
+		}, false},
+		"client_credentials only": {func(c *client.Config, _ *client.Dependencies) { noBrowserFlow(c) }, false},
+		"CIBA": {func(c *client.Config, _ *client.Dependencies) {
+			noBrowserFlow(c)
+			c.Endpoints.BackchannelAuthentication = c.Endpoints.Token
+			c.Algorithms.BackchannelAuthenticationRequest = fapi.ES256
+			c.Limits.BackchannelAuthenticationRequestLifetime = time.Minute
+		}, true},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg := validConfig(t)
+			deps := validDependencies(t)
+			tc.mutate(&cfg, &deps)
+			cfg.Limits.MaxIDTokenLifetime = 0
+			_, err := client.New(cfg, deps)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("client.New() error = %v, wantErr %v", err, tc.wantErr)
+			}
+			if err != nil && !strings.Contains(err.Error(), "max_id_token_lifetime") {
+				t.Fatalf("client.New() error = %v, want one about max_id_token_lifetime", err)
+			}
+		})
+	}
+}

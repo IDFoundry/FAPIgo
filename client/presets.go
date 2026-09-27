@@ -19,8 +19,11 @@ import (
 // field here, it depends on the specific authorization server this
 // client talks to (how long that server actually makes its ID tokens
 // valid for), not on anything this module can recommend in the
-// abstract. New still rejects a zero MaxIDTokenLifetime, so a caller
-// must set this one field themselves before this value is usable.
+// abstract. New still rejects a zero MaxIDTokenLifetime for a client
+// that can receive ID tokens (the browser flow or CIBA, without
+// Config.OAuthOnly), so such a caller must set this one field
+// themselves; a client_credentials-only or OAuthOnly client can leave
+// it zero.
 func RecommendedLimits() Limits {
 	return Limits{
 		// Not spec-mandated — mirrors server.RecommendedLimits'

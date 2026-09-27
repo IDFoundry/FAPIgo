@@ -108,7 +108,7 @@ func validateConfig(cfg Config) error {
 	// RequestClientCredentialsToken never does (RFC 6749 §4.4 has no end
 	// user), so a client_credentials-only config has no use for this
 	// algorithm at all and shouldn't be forced to set one.
-	if !cfg.OAuthOnly && (authorizationFlowConfigured || cibaConfigured) && !cfg.Algorithms.IDToken.IsValid() {
+	if idTokensPossible(cfg) && !cfg.Algorithms.IDToken.IsValid() {
 		return fmt.Errorf("client: config: algorithms.id_token is required when endpoints.authorization or endpoints.backchannel_authentication is set, unless oauth_only is set")
 	}
 	if cfg.OAuthOnly && (cfg.Algorithms.IDTokenKeyManagement != 0 || cfg.Algorithms.IDTokenContentEncryption != 0) {
@@ -274,8 +274,8 @@ func validateClientLimits(cfg Config) error {
 	if cfg.Limits.SessionLifetime <= 0 {
 		return fmt.Errorf("client: config: limits.session_lifetime must be positive")
 	}
-	if cfg.Limits.MaxIDTokenLifetime <= 0 {
-		return fmt.Errorf("client: config: limits.max_id_token_lifetime must be positive")
+	if idTokensPossible(cfg) && cfg.Limits.MaxIDTokenLifetime <= 0 {
+		return fmt.Errorf("client: config: limits.max_id_token_lifetime must be positive when endpoints.authorization or endpoints.backchannel_authentication is set, unless oauth_only is set")
 	}
 	if cfg.Limits.MaxClockSkew < 0 {
 		return fmt.Errorf("client: config: limits.max_clock_skew must not be negative")
@@ -429,4 +429,13 @@ func (c *Client) checkOAuthOnlyScope(scope []string) *Error {
 		}
 	}
 	return nil
+}
+
+// idTokensPossible reports whether cfg can ever receive an ID token:
+// only the browser flow and CIBA return one, and never under
+// Config.OAuthOnly. Every ID-token-only requirement (Algorithms.IDToken,
+// Limits.MaxIDTokenLifetime) is conditioned on it, so none is demanded
+// of a client that can't use it.
+func idTokensPossible(cfg Config) bool {
+	return !cfg.OAuthOnly && (!cfg.Endpoints.Authorization.IsZero() || !cfg.Endpoints.BackchannelAuthentication.IsZero())
 }

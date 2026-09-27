@@ -291,7 +291,10 @@ type Limits struct {
 	BackchannelAuthenticationRequestLifetime time.Duration
 
 	// MaxIDTokenLifetime bounds how far in the future an ID token's exp
-	// claim may be.
+	// claim may be. Required when Endpoints.Authorization or
+	// Endpoints.BackchannelAuthentication is set — the only flows that
+	// return an ID token — unless Config.OAuthOnly is set; unused, and
+	// may be left zero, otherwise.
 	MaxIDTokenLifetime time.Duration
 
 	// MaxClockSkew bounds how far in the future an iat/nbf claim may be,
@@ -491,7 +494,8 @@ type Config struct {
 	//     "openid" in the requested scope;
 	//   - a token response carrying an id_token is rejected as
 	//     invalid_response rather than verified;
-	//   - Algorithms.IDToken is not required, and ID token encryption
+	//   - Algorithms.IDToken and Limits.MaxIDTokenLifetime are not
+	//     required, and ID token encryption
 	//     (Algorithms.IDTokenKeyManagement/IDTokenContentEncryption)
 	//     must not be configured;
 	//   - Dependencies.IssuerKeys is only required if something else

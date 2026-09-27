@@ -390,8 +390,10 @@ consuming (`storage.StoreAssurance`), key sources with hardened live
 fetches (`keys.KeySourceAssurance`), signing keys and decryption keys
 held durably (`keys.KeyCustodyAssurance`; an HSM or KMS is not required,
 only that the keys survive a restart), each also cross-instance
-consistent under `HorizontallyScaled` — plus an audit sink, and rejects
-loopback `http` issuer and endpoint URLs. The assurance level is itself a
+consistent under `HorizontallyScaled` — plus an audit sink and
+`crypto/rand.Reader` itself as `Dependencies.Random` (an `io.Reader`
+can't declare that it is a CSPRNG), and rejects loopback `http` issuer
+and endpoint URLs. The assurance level is itself a
 required `Config.Assurance` choice with no default, so a caller can never
 end up on the development level by omission.
 

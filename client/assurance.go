@@ -1,7 +1,9 @@
 package client
 
 import (
+	"crypto/rand"
 	"fmt"
+	"io"
 
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
@@ -44,6 +46,10 @@ const (
 	// Dependencies.Decryption when set, must implement
 	// keys.KeyCustodyAssurance and declare Durable: keys/ephemeral's
 	// in-memory keys, regenerated on every restart, never qualify.
+	// Dependencies.Random must be crypto/rand.Reader itself: state,
+	// nonce, PKCE verifiers and every jti this client signs are only as
+	// unguessable as that reader, and nothing about an io.Reader says
+	// whether it is a CSPRNG.
 	AssuranceProduction
 )
 
@@ -63,6 +69,14 @@ func checkStoreAssurance(name string, store any) error {
 	}
 	if !caps.AtomicConsume {
 		return fmt.Errorf("client: dependencies: %s must declare AtomicConsume capability under AssuranceProduction", name)
+	}
+	return nil
+}
+
+// checkRandom requires random to be crypto/rand.Reader itself.
+func checkRandom(random io.Reader) error {
+	if random != rand.Reader {
+		return fmt.Errorf("client: dependencies: random must be crypto/rand.Reader under AssuranceProduction")
 	}
 	return nil
 }

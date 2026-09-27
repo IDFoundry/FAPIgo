@@ -34,7 +34,8 @@ type Dependencies struct {
 	Clock Clock
 
 	// Random is the source of randomness for state, nonce and PKCE
-	// verifier generation.
+	// verifier generation. Under AssuranceProduction it must be
+	// crypto/rand.Reader itself.
 	Random io.Reader
 
 	// Decryption recovers the content-encryption key of an encrypted ID

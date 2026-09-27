@@ -375,6 +375,9 @@ func validateDependencies(cfg Config, deps Dependencies) error {
 		return fmt.Errorf("client: dependencies: keys is required")
 	}
 	if cfg.Assurance == AssuranceProduction {
+		if err := checkRandom(deps.Random); err != nil {
+			return err
+		}
 		if err := checkKeyCustody("keys", deps.Keys); err != nil {
 			return err
 		}

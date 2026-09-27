@@ -35,6 +35,16 @@
 //     all satisfy crypto.Signer directly) and an arbitrary KMS/HSM
 //     backend, with no FAPIgo-specific glue code in either case.
 //
+// Only the caller knows how the keys behind NewKeyManagerFromSigners,
+// NewDecrypter and NewSingleKeyDecrypter are held, so each takes a
+// DeclareCustody option (custody.go): server and client
+// production assurance require every signing KeyManager and Decrypter
+// to declare durable KeyCustody through KeyCustodyAssurance. Remote
+// verification keys come from JWKSIssuerKeySource (a live, fapihttp-
+// hardened JWKS fetch) or LocalIssuerKeys (an authorization server's own
+// KeyManager, for a verifier in the same process); production assurance
+// requires such a key source to declare KeySourceAssurance.
+//
 // The one exception to "production-suitable" above is keys/ephemeral,
 // an in-tree, in-memory KeyManager/Decrypter/ClientKeySource set that
 // always generates a fresh key rather than taking one — for local

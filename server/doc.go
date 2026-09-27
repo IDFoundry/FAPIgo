@@ -5,8 +5,11 @@
 //
 // The package exposes workflow methods — PushAuthorizationRequest,
 // BeginAuthorization, CompleteAuthorization, ExchangeAuthorizationCode,
-// RefreshAccessToken, SignUserInfoResponse, Metadata and PublicJWKS —
-// that only ever consume client-generated artefacts and validate them
+// RefreshAccessToken, the CIBA trio BeginBackchannelAuthentication,
+// CompleteBackchannelAuthentication and ExchangeBackchannelAuthentication,
+// RequestClientCredentialsToken, SignUserInfoResponse, Metadata,
+// PublicJWKS and (for OpenID Federation) EntityConfiguration — that
+// only ever consume client-generated artefacts and validate them
 // against server-held state and policy. Metadata and PublicJWKS are the
 // exceptions: Metadata describes the server itself rather than
 // processing a request, and is derived entirely from Config with no
@@ -39,11 +42,12 @@
 //     a second BeginAuthorization with the same request_uri, or a second
 //     CompleteAuthorization with the same handle, fails. An authorization
 //     code is likewise single-use: a second ExchangeAuthorizationCode
-//     with the same code fails. A refresh token is single-use too, but
-//     via rotation rather than outright consumption: every successful
-//     RefreshAccessToken call retires the presented token and returns a
-//     new one, so a stolen-and-replayed old token is detectable — it
-//     will already be consumed by the time it's misused.
+//     with the same code fails. A refresh token is deliberately not
+//     rotated — FAPI 2.0 Security Profile Final §5.3.2.1 says an
+//     authorization server "shall not use refresh token rotation except
+//     in extraordinary circumstances" — so it stays valid for repeated
+//     use until it expires or is revoked, and is bound to its client
+//     and (under DPoP) to the key it was issued under.
 //   - AuthorizationAction (from BeginAuthorization) and AuthorizationResult
 //     (from CompleteAuthorization) are closed sum types, not structs with
 //     optional fields, so a caller can never mistake a local error for a
@@ -55,23 +59,26 @@
 //     cause is available via Unwrap for logs only.
 //   - New fails unless every dependency (client lookup, transaction
 //     store, grant store, replay store, client key resolution, this
-//     server's own signing key manager, clock, randomness) is present,
-//     and unless every configured limit, endpoint and algorithm is
-//     valid. Config.Assurance additionally requires an AuditSink under
-//     AssuranceProduction; Config.Profile additionally requires a JARM
-//     algorithm under ProfileFAPISecurityWithMessageSigning. Further
-//     production-only checks (store durability/atomicity capabilities,
-//     HSM-required keys) will be added once the mechanisms to check them
-//     exist.
-//   - Every access token this server issues is DPoP sender-constrained
-//     (RFC 9449) — ExchangeAuthorizationCode and RefreshAccessToken each
-//     require a valid DPoP proof bound to the token endpoint and reject
-//     a replayed proof jti the same way they reject a replayed client
-//     assertion or request object. A refresh token is itself bound to
-//     the DPoP key it was issued under: RefreshAccessToken rejects a
-//     proof from any other key, even one belonging to the same client.
-//     Bearer (non-sender-constrained) tokens and mTLS binding are not
-//     supported.
+//     server's own signing key manager, access-token issuer, revocation,
+//     client-certificate trust, clock, randomness) is present, and
+//     unless every configured limit, endpoint and algorithm is valid.
+//     Config.Profile additionally requires a JARM algorithm under
+//     ProfileFAPISecurityWithMessageSigning. AssuranceProduction
+//     additionally requires an AuditSink, stores and key sources that
+//     declare production capabilities (storage.StoreAssurance,
+//     keys.KeySourceAssurance), signing and decryption keys with declared
+//     durable custody (keys.KeyCustodyAssurance), and crypto/rand.Reader
+//     as Dependencies.Random — see AssuranceProduction.
+//   - Every access token this server issues is sender-constrained,
+//     either by DPoP (RFC 9449) or by the client's mTLS certificate (RFC
+//     8705 §3), per the client's registered SenderConstrain. Under DPoP,
+//     ExchangeAuthorizationCode and RefreshAccessToken each require a
+//     valid DPoP proof bound to the token endpoint and reject a replayed
+//     proof jti the same way they reject a replayed client assertion or
+//     request object, and a refresh token is bound to the DPoP key it
+//     was issued under: RefreshAccessToken rejects a proof from any
+//     other key, even one belonging to the same client. Bearer
+//     (non-sender-constrained) tokens are not supported.
 //   - An ID token is issued alongside the access token exactly when the
 //     (possibly refresh-narrowed) granted scope includes "openid";
 //     nonce, auth_time, acr and amr come from what CompleteAuthorization

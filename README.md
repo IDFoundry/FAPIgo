@@ -36,12 +36,13 @@ and RFC 9700 identify as insecure — the implicit/hybrid response types,
 `client_secret_basic`/`client_secret_post` authentication — aren't
 configuration options that happen to be off, they simply aren't
 implemented. `server` only ever accepts `response_type=code`, and
-`ClientAuthMethod` is a closed enum of `private_key_jwt` and the mTLS
-variants.
+`ClientAuthMethod` is a closed enum of `private_key_jwt`, the mTLS
+variants and OAuth 2.0 attestation-based client authentication.
 
 - FAPI 2.0 Security Profile Final + Message Signing Final
 - PAR (RFC 9126) · DPoP (RFC 9449) · mTLS client auth & cert-bound tokens (RFC 8705)
 - private_key_jwt client authentication
+- OAuth 2.0 Attestation-Based Client Authentication, including HAIP 1.0 x5c attester certificate chains
 - JAR / JARM · RAR (RFC 9396) · CIBA (poll & ping delivery)
 - OpenID Federation 1.0 (trust chains, automatic client registration, trust marks)
 - OpenID Certified™ for OP, RP and FAPI-CIBA OP conformance profiles — see below
@@ -113,7 +114,9 @@ the granted scope includes `"openid"`, and `client` populates
 response actually carried one — leaving `TokenSet.HasIDToken` false is
 a normal outcome, not an error. A deployment that only needs access
 tokens can drop `"openid"` from a client's `AllowedScopes` entirely and
-run this library as plain OAuth 2.0 + FAPI 2.0.
+run this library as plain OAuth 2.0 + FAPI 2.0 — and `Config.OAuthOnly`
+(on `server` and `client` alike) makes that a checked configuration
+rather than a convention.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design rationale and
 package layout, and [conformance/](conformance/README.md) for how each

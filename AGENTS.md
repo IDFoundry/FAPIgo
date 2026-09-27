@@ -21,6 +21,8 @@ where deeper, hard-won knowledge already lives.
   `chore:`/`test:`/`refactor:`/`ci:` for anything that shouldn't bump
   the version) — see CONTRIBUTING.md's "Commit messages" section for
   the full rationale. Don't invent non-standard types.
+- A breaking PR (`feat!:`/`fix!:`) also adds its section to
+  [UPGRADING.md](UPGRADING.md) in the same PR — see CONTRIBUTING.md.
 - Merging a PR here triggers an automatic release-please PR bumping
   the version and `CHANGELOG.md` — that PR needs its own merge (by a
   human or on explicit instruction) before the new version is actually
@@ -69,7 +71,7 @@ flag and use the resulting page instead of hand-constructing
 ## Client alias naming convention
 
 When registering conformance-testing clients (locally or for a hosted
-run), this session settled on `fapigo-{family}-{axis1}-{axis2}`,
+run), this repo uses `fapigo-{family}-{axis1}-{axis2}`,
 mirroring the OIDF certification matrix's own column names:
 
 - `fapigo-sp-{auth}-{sender-constrain}` — FAPI2SP authorization_code

@@ -23,7 +23,7 @@ A caller decides who authenticated, what access was approved and which
 durable infrastructure to use. It must never be able to weaken request
 validation, bypass replay prevention, modify a signed output, or
 construct a security-sensitive protocol artefact by hand. See
-"Hardening rules for every role's public API" below.
+"Design rules" below.
 
 ## The one rule everything else follows
 
@@ -106,13 +106,14 @@ Not `fapi.New(RoleClient, ...)`.
 ### 2. Shared value types only where semantics match
 
 Identifiers and enums with one wire-level meaning regardless of role
-(`ClientID`, `Scope`, `Issuer`, `SignatureAlgorithm`, `SenderConstraint`)
-live in the root `fapi` package. Anything whose meaning depends on
-trust state does not — `client.AuthorizationRequest` (an instruction to
-construct a request) and `server.ValidatedAuthorizationRequest`
-(something already checked) are deliberately different types, so code
-can never accidentally treat untrusted input as validated protocol
-state.
+(`ClientID`, `RegisteredRedirectURI`, `SignatureAlgorithm`,
+`KeyManagementAlgorithm`, `ContentEncryptionAlgorithm`) live in the root
+`fapi` package. Anything whose meaning depends on trust state does not —
+`client.BeginAuthorizationRequest` (an instruction to construct a
+request) and `server.InteractionRequest` (a request the server has
+already validated, handed to the login UI) are deliberately different
+types, so code can never accidentally treat untrusted input as
+validated protocol state.
 
 Two more value types belong here because every role needs them
 identically:
@@ -127,8 +128,7 @@ identically:
   enabled loopback development mode), no fragment, no embedded
   credentials, normalized host. Registered redirect URIs are compared
   under OAuth registration semantics, never generic URL equivalence or
-  automatic normalization — see `RegisteredRedirectURI` in `client` and
-  `server`.
+  automatic normalization — see `fapi.RegisteredRedirectURI`.
 
 `SignatureAlgorithm` is a closed enum (`ES256`, `PS256`, ...), never a
 bare string accepted from a caller or read directly out of a JWT header
@@ -177,23 +177,24 @@ against `internal/dpop` itself.
 
 ### 4. Client session storage is atomic-consume, not CRUD
 
-`SessionStore.Create` / `SessionStore.Consume` — no `GetSession` /
-`DeleteSession`. `Consume` atomically validates and retires `state`,
-nonce, PKCE verifier, expected issuer, expected redirect URI, expected
-response mode, DPoP key reference and request-object identifier in one
-step, to prevent callback replay and race conditions.
+`storage.SessionStore.Create` / `Consume` — no `GetSession` /
+`DeleteSession`. `Consume` atomically looks up and retires a session by
+its `state`, returning the nonce, PKCE verifier, expected issuer,
+expected redirect URI, expected response mode and expiry recorded with
+it, in one step, to prevent callback replay and race conditions.
 
 ### 5. Keys are handles and operations, never raw private keys
 
 `KeyManager.Sign` / `KeyManager.PublicKey`, keyed by purpose
 (`ClientAuthentication`, `RequestObjectSigning`, `DPoPProofSigning`). A
-session refers to a DPoP key by an opaque `DPoPKeyHandle`, never a
-`crypto.PrivateKey` — DPoP's value depends on the private key never
-leaving its holder ([RFC 9449][dpop]).
+client's DPoP proofs are signed through its `KeyManager` under the
+`DPoPProofSigning` purpose, never with a `crypto.PrivateKey` this module
+holds — DPoP's value depends on the private key never leaving its
+holder ([RFC 9449][dpop]).
 
 `keys.KeyManager` never hands back a `crypto.Signer`, only a `Sign`
-operation and a public JWK — the same model `server` uses to select and
-use its own signing keys (`SelectSigningKey` / `Sign` / `PublicJWKS`),
+operation and a public JWK — the same model `server` uses for its own
+signing keys (`KeyManager.Sign`, published through `Server.PublicJWKS`),
 so both a client's and a server's key material can be backed by an HSM
 or a remote signing service without the module ever holding private key
 material in process. `client.PublicJWKS` is this same publication
@@ -377,9 +378,9 @@ looks like a normal redirect:
   invalid combinations of subject/grant/denial can't be constructed.
 
 Untrusted hints stay untrusted: `AuthenticationHints.LoginHint` is a
-plain string-wrapping type, never a `SubjectID` — only a
-`SubjectProvider` or the application's own authentication result can
-produce a verified `SubjectID`.
+plain string-wrapping type, never a `SubjectID` — only the
+application's own authentication result (an `AuthenticatedSubject`
+passed to `Authorize`) produces a verified subject.
 
 **Assurance levels.** `Config.Assurance` is `AssuranceDevelopment` or
 `AssuranceProduction`. `New` fails construction unless every
@@ -399,25 +400,28 @@ and endpoint URLs. The assurance level is itself a
 required `Config.Assurance` choice with no default, so a caller can never
 end up on the development level by omission.
 
-**Policy is a bounded deployment decision, not a bypass.**
-`AuthorizationPolicy.Evaluate` receives only already-validated protocol
-values (`RegisteredClient`, `AuthenticatedSubject`,
-`RequestedAuthorization`, `AuthenticationContext`, validated extensions)
-and may decide allowed scopes, claims, authorization details, consent
-requirements and token lifetime within configured bounds — it cannot
-disable PAR, PKCE, sender constraint, redirect URI validation, client
-authentication, replay protection, required signed request objects, or
-profile algorithm restrictions.
+**Policy is a bounded deployment decision, not a bypass.** The
+application's decision is a `GrantedAuthorization` passed to
+`Authorize`, made against an already-validated `InteractionRequest`:
+the granted scope (which `CompleteAuthorization` rejects if it isn't a
+subset of what was requested), approved `AuthorizationDetails` (each an
+acceptable narrowing of a requested object, per
+`RARDefinition.ValidateGrant`), and extra ID-token claims (server-managed
+names rejected, total size bounded by `Limits.MaxIDTokenClaimsBytes`).
+An optional `RARPolicy` narrows what a client may request before a
+resource owner ever sees it. None of this can disable PAR, PKCE, sender
+constraint, redirect URI validation, client authentication, replay
+protection, required signed request objects, or profile algorithm
+restrictions.
 
-**Audit is a typed dependency**, not a side channel a caller can leave
-disconnected: `Dependencies.Audit` records structured `AuditEvent`s
-(id, time, type, outcome, client/subject/transaction references, typed
-attributes — never a bare `map[string]any`, so a sensitive value can't
-end up in an audit record by accident). Whether audit failure is
-fail-closed for issuance events, buffered through a durable outbox, or
-tolerated for low-value diagnostics is a `server` configuration
-decision, not something left to `AuditSink` implementers to each decide
-differently.
+**Audit is a typed dependency**, required under `AssuranceProduction`:
+`Dependencies.Audit` records structured `AuditEvent`s (type, time,
+client ID, outcome and a short safe description such as an error code
+— never a bare `map[string]any`, a raw internal error, or anything that
+could carry a token, key or assertion value). Recording is best-effort:
+a failing `AuditSink.Record` never fails the request it describes, so a
+sink that must not lose events has to provide its own durability (a
+local outbox, for example).
 
 **Dynamic client registration ([RFC 7591][dcr] / [RFC 7592][dcrm]), if
 added, extends this state machine — it doesn't bypass it.** Not
@@ -499,10 +503,10 @@ policy.
 
 ### 10–11. Extension and RAR parameters are defined once, used by both sides
 
-A `extension.Definition[T]` captures wire name, cardinality, encoding,
-allowed source, max size, sensitivity, validator, whether it's
-integrity-protected, whether it may appear in request objects, and
-whether it may be returned in token claims — once. Client sets a value
+An `extension.Definition[T]` captures wire name, cardinality, allowed
+sources (a plain parameter, an integrity-protected request object, or
+both), max size, sensitivity, validator, and whether it may be returned
+in token claims — once. Client sets a value
 against the definition with `extension.Set(&req.Extensions, Definition,
 value)`; server registers the same definition in `server.Config.Extensions`
 (an `*extension.Registry`) and reads the validated value back out through
@@ -603,14 +607,14 @@ validated objects back out, typed, with `extension.RARGet`.
 ### 12. Configuration is per-role, not one shared struct
 
 `client.Config`, `server.Config` and `resource.Config` are separate
-types. They may reference the same validated value types (`Issuer`,
-algorithm policy types) but are not merged into one struct with
+types. They may reference the same validated value types (`fapi.URL`,
+algorithm types) but are not merged into one struct with
 role-conditional fields.
 
 ### 13. Storage contracts are per-role, with one shared replay primitive
 
-`client.SessionStore`, `server.TransactionStore`, `server.GrantStore` are
-distinct, and none of them expose generic CRUD (`GetSession`,
+`storage.SessionStore` (client), `storage.TransactionStore` and
+`storage.GrantStore` (server) are distinct, and none of them expose generic CRUD (`GetSession`,
 `GetCode`, `UpdateCode`, `DeleteCode`, ...) — every method is a named
 security operation. `GrantStore.RedeemAuthorizationCode` in particular
 must atomically look up and consume a code by its hash, in one step;
@@ -622,11 +626,10 @@ the request's parameters, the granted scope, subject, authentication
 context and claims — is one opaque, versioned JSON value (`Request` or
 `Grant`) the store persists and returns without interpreting, so a
 feature that changes what a grant carries never changes a store.
-`replay.Store`
-stores only a digest and expiry per use (`ReplayUse{Namespace, Digest,
+`storage.ReplayStore` stores only a digest and expiry per use (`ReplayUse{Namespace, Digest,
 ExpiresAt}`) — never a complete client assertion, DPoP proof or other
 sensitive payload — and callers must assign it a namespaced identifier
-per role/subsystem (`client:jarm`, `server:request-object`,
+per role/subsystem (`server:client-assertion`, `server:request-object`,
 `server:dpop`, `resource:dpop`, ...) so different subsystems can never
 collide on the same use-once token.
 
@@ -637,9 +640,12 @@ cross-instance-consistent, encrypted-at-rest) that `server`'s
 `AssuranceProduction` mode checks at construction time, and a reusable
 contract test suite (e.g. a `storage.TestGrantStoreContract(t,
 factory)` helper) that any storage implementation — first-party or
-downstream — runs against concurrent redemption, expiry boundaries,
-cancellation, transaction rollback and cross-connection consistency,
-rather than relying on the capability declaration alone.
+downstream — runs for single-use redemption under concurrency, field
+round-tripping, unknown-key handling and revocation, rather than
+relying on the capability declaration alone. What it can't observe
+through the interface (cross-instance atomicity, expiry eviction,
+encryption at rest) stays the backend's own responsibility — see
+`storage/doc.go`.
 
 ### 14. No cross-role dependency cycles
 
@@ -679,16 +685,20 @@ repo's own non-test Go files."
 
 ### 16. Errors carry their own exposure — the caller doesn't decide
 
-`client`, `server` and `resource` all return a typed `Error` (`Code()`,
-`PublicDescription()`, `HTTPStatus()`, `Unwrap()`) tagged with an
-`Exposure` — `ExposureLocal`, `ExposureRedirect`, `ExposureTokenEndpoint`
-for `server`; the equivalent split for `client` and `resource`. The
-engine, not the embedding application, decides whether a failure is safe
-to put in a redirect query string versus a response body versus neither;
-internal diagnostic detail is never copied into a public
-`error_description`-style field. This is what makes rule 7's "an
-unvalidated `redirect_uri` must produce a local error, never a redirect"
-enforceable in the type system rather than by convention.
+`client`, `server` and `resource` all return a typed `Error` — `Code()`,
+`PublicDescription()` and `Unwrap()` everywhere, `HTTPStatus()` on
+`server` and `resource`, and on `client` a `ServerResponse()` carrying
+the error response a server sent, if any. The engine, not the embedding
+application, decides whether a failure is safe to put in a redirect
+query string versus a response body versus neither, and it does so
+through the result's shape: `server`'s authorization-endpoint methods
+return a local-error variant (`LocalErrorResponse`,
+`AuthorizationLocalError`) distinct from a redirect, and a token or PAR
+failure is written with `Error.WriteJSON`. Internal diagnostic detail is
+never copied into a public `error_description`-style field. This is what
+makes rule 7's "an unvalidated `redirect_uri` must produce a local
+error, never a redirect" enforceable in the type system rather than by
+convention.
 
 `server.Error` goes one step further for its own token-endpoint-exposure
 case: `WriteJSON(w http.ResponseWriter)` also owns *how* to encode that
@@ -713,12 +723,24 @@ passing its suite is not evidence the other role conforms, even where
 both share internal JOSE code — protocol behaviour and negative-test
 expectations differ per role.
 
+**Current results.** `conformance/scripts/run-all.sh` runs 22 test
+configurations, and the daily `conformance.yml` run executes all of
+them. As of the 2026-09-27 run, all 14 AS configurations (baseline,
+message-signing, mtls, message-signing-mtls, client-auth-mtls,
+client-auth-mtls-and-mtls, four CIBA poll/ping variants, and four
+client-credentials variants) pass with 0 failures and 0 warnings; all 6
+FAPI RP configurations pass every module; the federation RP plan passes
+6/10, exactly matching its list of known suite-side failures; and the
+federation deployed-entity plan passes 5/5. The per-profile counts in
+the history below are from each profile's first clean run; the suite
+has added modules since, so the daily run's own report is the source of
+truth for today's numbers.
+
 CIBA (`server.BeginBackchannelAuthentication`/`CompleteBackchannelAuthentication`/
-`ExchangeBackchannelAuthentication`) is deliberately not part of this
-automated certification loop. It implements base OIDC CIBA and
-FAPI-CIBA's other requirements (a mandatory signed authentication
-request with `jti`/`nbf`, poll and ping delivery, DPoP- or
-mTLS-bound tokens), verified by unit/integration tests instead — but
+`ExchangeBackchannelAuthentication`) was initially left out of this
+automated loop. It implements base OIDC CIBA and FAPI-CIBA's other
+requirements (a mandatory signed authentication request with
+`jti`/`nbf`, poll and ping delivery, DPoP- or mTLS-bound tokens) — but
 the OIDF suite's own `fapi-ciba-id1-test-plan` requires MTLS-bound
 access tokens unconditionally, even under
 `client_auth_type=private_key_jwt` (confirmed directly from the
@@ -1256,8 +1278,8 @@ fourth role: see `federation/doc.go`), CIBA ping-delivery notification
 
 **Not shared**: role-level configuration, workflow APIs, transaction
 types, untrusted vs. validated request types, storage interfaces where
-semantics differ, generic JWT/DPoP verification methods, audit sink
-wiring (each role's `Dependencies` wires its own).
+semantics differ, generic JWT/DPoP verification methods, and audit
+(only `server` has an audit sink).
 
 ## No public JOSE utility package
 

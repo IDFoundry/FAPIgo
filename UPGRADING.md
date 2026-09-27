@@ -38,6 +38,26 @@ token `cnf` claim or AS metadata document whose member names only
 case-fold to a known name (`"ALG"` for `"alg"`) is now rejected instead
 of being read as that member. No code change is needed.
 
+### Scope errors are `invalid_scope` (server)
+
+**Affects:** anything matching on the error code. A pushed
+authorization request or CIBA backchannel authentication request naming
+a scope the client isn't allowed (or `openid` under `Config.OAuthOnly`)
+now gets `invalid_scope` instead of `invalid_request`, as RFC 6749 and
+CIBA Core §13 define. A missing or non-string scope is still
+`invalid_request`.
+
+### Server error text is character-checked (client)
+
+**Affects:** callers reading server-supplied error text. `error`,
+`error_description` and `error_uri` values outside RFC 6749 §5.2's
+character set are now dropped from `Error.PublicDescription`,
+`CallbackDenied.Description` and `BackchannelAuthenticationDenied.Description`,
+and an authorization error redirect whose `error` code is malformed is
+rejected as `invalid_response` rather than returned as `CallbackDenied`.
+Well-formed responses are unaffected. `Error.ServerResponse()` is new in
+this release and exposes the code, description, URI and HTTP status.
+
 ## v0.37.0
 
 ### `AuthorizationCallback.Session` is required (client)

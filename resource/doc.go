@@ -11,11 +11,11 @@
 // method, target URI, access-token hash, expected nonce and JTI replay
 // state alongside it. Verify is the primary API and takes the full
 // request context needed for issuer/audience/expiry checks, DPoP proof
-// validation, ath, method/URI binding, replay detection and cnf.jkt
-// binding.
+// validation, ath, method/URI binding, replay detection, and cnf
+// binding (a DPoP key's jkt, or an mTLS certificate's x5t#S256).
 //
 // AuthorizationContext.Claims uses fapi.Secret for any raw token value it
 // carries, and Verify returns a typed Error tagged with what's safe to
 // expose in a response, matching the pattern used by client and server —
-// see ARCHITECTURE.md, "Hardening rules for every role's public API".
+// see ARCHITECTURE.md, "Design rules".
 package resource

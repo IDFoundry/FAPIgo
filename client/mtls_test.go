@@ -180,7 +180,7 @@ func TestExchangeCodeMTLSBindingHappyPath(t *testing.T) {
 	}
 
 	rawQuery := mtlsCallbackFor(testIssuer, session.Handle().String(), "auth-code-123")
-	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery})
+	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()})
 	if err != nil {
 		t.Fatalf("CompleteAuthorization: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestExchangeCodePropagatesTransportFailureMTLS(t *testing.T) {
 		t.Fatalf("BeginAuthorization: %v", err)
 	}
 	rawQuery := mtlsCallbackFor(testIssuer, session.Handle().String(), "auth-code-123")
-	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery}); err == nil {
+	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()}); err == nil {
 		t.Fatalf("CompleteAuthorization(MTLS transport failure) = nil error, want error")
 	}
 }
@@ -601,7 +601,7 @@ func TestExchangeCodeMTLSRejectsUnexpectedTokenType(t *testing.T) {
 	}
 	rawQuery := mtlsCallbackFor(testIssuer, session.Handle().String(), "auth-code-123")
 
-	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery}); err == nil {
+	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()}); err == nil {
 		t.Fatalf("CompleteAuthorization(unexpected token_type) = nil error, want error")
 	}
 }

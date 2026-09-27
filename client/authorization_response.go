@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 
 	"github.com/idfoundry/fapigo/internal/jarm"
@@ -18,6 +19,14 @@ import (
 // discipline server's FormRequest applies; see internal/par.DecodeForm.
 type AuthorizationCallback struct {
 	RawQuery string
+
+	// Session is the SessionHandle BeginAuthorization returned for this
+	// attempt, recovered from wherever the caller bound it to the user
+	// agent (see SessionHandle) — never from the callback itself.
+	// Required: a callback whose "state" doesn't match it is rejected
+	// before its session is consumed, so a callback URL delivered to a
+	// different browser can't complete someone else's flow.
+	Session SessionHandle
 }
 
 // ValidatedAuthorizationResponse is what HandleAuthorizationResponse
@@ -104,6 +113,15 @@ func (c *Client) HandleAuthorizationResponse(ctx context.Context, cb Authorizati
 	state, _ := paramString(params, "state")
 	if state == "" {
 		return nil, newError(ErrorInvalidRequest, "callback is missing state", nil)
+	}
+	// Bind the callback to the user agent that began the flow (RFC 9700
+	// §4.7) before consuming anything: a mismatch leaves the session
+	// intact for its rightful browser.
+	if cb.Session.value == "" {
+		return nil, newError(ErrorInvalidRequest, "callback is not bound to a session: AuthorizationCallback.Session is required", nil)
+	}
+	if subtle.ConstantTimeCompare([]byte(state), []byte(cb.Session.value)) != 1 {
+		return nil, newError(ErrorInvalidRequest, "callback state does not match this user agent's session", nil)
 	}
 
 	consumed, consumeErr := c.deps.Sessions.Consume(ctx, storage.SessionConsumption{State: state})

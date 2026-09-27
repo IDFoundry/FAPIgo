@@ -114,8 +114,13 @@ func (s *memSessionStore) Consume(_ context.Context, c storage.SessionConsumptio
 // live AS, a client.Client pointed at it, and an HTTP client trusting the
 // AS's self-signed cert (for driving the consent form directly).
 type smokeHarness struct {
-	t          *testing.T
-	client     *client.Client
+	t      *testing.T
+	client *client.Client
+
+	// session is the client SessionHandle of the flow runToConsent last
+	// began — what a real relying party would keep in a cookie and pass
+	// back as AuthorizationCallback.Session.
+	session    client.SessionHandle
 	httpClient *http.Client
 	authorize  string // base authorize endpoint URL, for building decision requests
 	token      string // base token endpoint URL, for tests that POST to it directly
@@ -534,6 +539,7 @@ func (h *smokeHarness) runToConsent(ctx context.Context, scope []string) (handle
 	if err != nil {
 		h.t.Fatalf("BeginAuthorization: %v", err)
 	}
+	h.session = session.Handle()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, session.URL().String(), nil)
 	if err != nil {
 		h.t.Fatalf("build authorize request: %v", err)
@@ -566,6 +572,7 @@ func (h *smokeHarness) runToConsentWithAuthorizationDetails(ctx context.Context,
 	if err != nil {
 		h.t.Fatalf("BeginAuthorization: %v", err)
 	}
+	h.session = session.Handle()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, session.URL().String(), nil)
 	if err != nil {
 		h.t.Fatalf("build authorize request: %v", err)
@@ -633,7 +640,7 @@ func testSmokeAuthorizationCodeFlow(t *testing.T, format AccessTokenFormat) {
 	handle := h.runToConsent(ctx, scope)
 	rawQuery := h.submitDecision(ctx, handle, "approve", scope)
 
-	result, err := h.client.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery})
+	result, err := h.client.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: h.session})
 	if err != nil {
 		t.Fatalf("CompleteAuthorization: %v", err)
 	}
@@ -674,7 +681,7 @@ func testSmokeAuthorizationCodeFlow(t *testing.T, format AccessTokenFormat) {
 	// the first CompleteAuthorization call succeeded — AS-side code
 	// single-use is exercised directly by
 	// storage.TestGrantStoreContract/RedeemAuthorizationCodeIsSingleUse).
-	if _, err := h.client.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery}); err == nil {
+	if _, err := h.client.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: h.session}); err == nil {
 		t.Fatalf("replayed CompleteAuthorization succeeded, want an error")
 	}
 }
@@ -700,7 +707,7 @@ func TestSmokeAuthorizationCodeFlowWithAuthorizationDetails(t *testing.T) {
 	handle := h.runToConsentWithAuthorizationDetails(ctx, scope, authorizationDetails)
 	rawQuery := h.submitDecision(ctx, handle, "approve", scope)
 
-	result, err := h.client.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery})
+	result, err := h.client.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: h.session})
 	if err != nil {
 		t.Fatalf("CompleteAuthorization: %v", err)
 	}
@@ -744,7 +751,7 @@ func TestSmokeUserInfoWithDPoPNonceChallenge(t *testing.T) {
 	handle := h.runToConsent(ctx, scope)
 	rawQuery := h.submitDecision(ctx, handle, "approve", scope)
 
-	result, err := h.client.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery})
+	result, err := h.client.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: h.session})
 	if err != nil {
 		t.Fatalf("CompleteAuthorization: %v", err)
 	}
@@ -789,7 +796,7 @@ func TestSmokeSignedUserInfo(t *testing.T) {
 	handle := h.runToConsent(ctx, scope)
 	rawQuery := h.submitDecision(ctx, handle, "approve", scope)
 
-	result, err := h.client.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery})
+	result, err := h.client.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: h.session})
 	if err != nil {
 		t.Fatalf("CompleteAuthorization: %v", err)
 	}
@@ -815,7 +822,7 @@ func TestSmokeAuthorizationDenied(t *testing.T) {
 	handle := h.runToConsent(ctx, scope)
 	rawQuery := h.submitDecision(ctx, handle, "deny", scope)
 
-	result, err := h.client.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery})
+	result, err := h.client.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: h.session})
 	if err != nil {
 		t.Fatalf("CompleteAuthorization: %v", err)
 	}

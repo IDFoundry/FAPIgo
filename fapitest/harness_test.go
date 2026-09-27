@@ -66,16 +66,32 @@ func TestAuthorizationCodeFlowScopeWithoutOfflineAccessOmitsRefreshToken(t *test
 	}
 }
 
-func TestAuthorizationCodeFlowDeniedInteraction(t *testing.T) {
-	// The harness always auto-approves (see AutoApprove), so this test
-	// instead exercises the plain "no such request_uri" local-error path
-	// by never calling BeginAuthorization at all — confirming
-	// CompleteAuthorization surfaces a client-side error rather than a
-	// spurious success when the callback never happened.
+// TestAuthorizationCodeFlowRejectsCallbackFromAnotherSession is the
+// login CSRF case (RFC 9700 §4.7) end to end: flow B's genuine callback
+// URL, delivered to a browser holding flow A's session, is rejected —
+// and flow B still completes normally for its own session afterwards.
+func TestAuthorizationCodeFlowRejectsCallbackFromAnotherSession(t *testing.T) {
 	h := fapitest.New(t, fapitest.Config{Profile: server.ProfileFAPISecurity})
-	_, err := h.RunAuthorizationCodeFlowWithCallback(context.Background(), "state=does-not-exist&code=bogus")
-	if err == nil {
-		t.Fatalf("RunAuthorizationCodeFlowWithCallback(unknown state) = nil error, want error")
+	ctx := context.Background()
+
+	victim, err := h.Client.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid", "accounts"}})
+	if err != nil {
+		t.Fatalf("BeginAuthorization (victim): %v", err)
+	}
+	attacker, err := h.Client.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid", "accounts"}})
+	if err != nil {
+		t.Fatalf("BeginAuthorization (attacker): %v", err)
+	}
+	attackerCallback, err := h.CaptureCallback(ctx, attacker)
+	if err != nil {
+		t.Fatalf("CaptureCallback: %v", err)
+	}
+
+	if _, err := h.RunAuthorizationCodeFlowWithCallback(ctx, victim.Handle(), attackerCallback); err == nil {
+		t.Fatal("callback from another session completed; want it rejected")
+	}
+	if _, err := h.RunAuthorizationCodeFlowWithCallback(ctx, attacker.Handle(), attackerCallback); err != nil {
+		t.Fatalf("callback with its own session: %v (a rejected mismatch must not consume the session)", err)
 	}
 }
 
@@ -170,5 +186,32 @@ func TestAuthorizationCodeFlowLoopbackHTTPRedirectURI(t *testing.T) {
 			}
 			verifyAccessToken(t, h, tokens)
 		})
+	}
+}
+
+// TestCaptureCallbackReportsFailures covers CaptureCallback's error
+// paths a test can reach: the authorization request failing outright,
+// and the authorization endpoint answering without a redirect — here
+// because the session's request_uri was already used by an earlier
+// capture.
+func TestCaptureCallbackReportsFailures(t *testing.T) {
+	h := fapitest.New(t, fapitest.Config{Profile: server.ProfileFAPISecurity})
+	ctx := context.Background()
+	session, err := h.Client.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid", "accounts"}})
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := h.CaptureCallback(cancelled, session); err == nil {
+		t.Error("CaptureCallback(cancelled context) = nil error, want error")
+	}
+
+	if _, err := h.CaptureCallback(ctx, session); err != nil {
+		t.Fatalf("CaptureCallback: %v", err)
+	}
+	if _, err := h.CaptureCallback(ctx, session); err == nil {
+		t.Error("CaptureCallback(already used request_uri) = nil error, want error")
 	}
 }

@@ -147,9 +147,13 @@ and signs the request object when required, authenticates to and calls
 the PAR endpoint ([RFC 9126][par]), receives `request_uri`, builds the
 browser URL, and persists correlation state.
 
-`HandleAuthorizationResponse` internally validates: correlation state,
-issuer, JARM signature and claims, audience, expiry, response mode,
-authorization-code presence, error-response integrity, and replay.
+`HandleAuthorizationResponse` internally validates: that the callback
+belongs to the user agent that began the flow — the caller passes back
+the `SessionHandle` it bound to that browser (an HttpOnly cookie), and a
+callback whose `state` doesn't match it is rejected before anything is
+consumed, closing login CSRF ([RFC 9700 §4.7][bcp]) — then correlation
+state, issuer, JARM signature and claims, audience, expiry, response
+mode, authorization-code presence, error-response integrity, and replay.
 
 The response is a closed sum type, not one struct with optional fields —
 a caller cannot assume every callback carries a code, and cannot forget

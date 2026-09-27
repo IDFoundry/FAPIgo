@@ -684,7 +684,7 @@ func driveAuthorizationFlow(ctx context.Context, cl *client.Client, rawHTTP *htt
 		return nil, "follow authorization redirect", err
 	}
 
-	completion, err = cl.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: finalQuery})
+	completion, err = cl.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: finalQuery, Session: session.Handle()})
 	if err != nil {
 		return nil, "complete authorization", err
 	}

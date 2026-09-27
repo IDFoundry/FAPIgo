@@ -263,7 +263,7 @@ func TestSmokeMTLSFlow(t *testing.T) {
 	handle := h.runToConsent(ctx, []string{"openid", "accounts"})
 	finalQuery := h.submitDecision(ctx, handle, "approve", []string{"openid", "accounts"})
 
-	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: finalQuery})
+	result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: finalQuery, Session: h.session})
 	if err != nil {
 		t.Fatalf("CompleteAuthorization: %v", err)
 	}

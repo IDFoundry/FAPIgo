@@ -498,6 +498,9 @@ func validateProductionAssurance(cfg Config, deps Dependencies, cibaEnabled bool
 	if deps.Audit == nil {
 		return fmt.Errorf("server: dependencies: audit is required under AssuranceProduction")
 	}
+	if err := checkRandom(deps.Random); err != nil {
+		return err
+	}
 	scaled := cfg.HorizontallyScaled
 	if err := checkKeyCustody("keys", deps.Keys, scaled); err != nil {
 		return err

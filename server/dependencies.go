@@ -67,7 +67,8 @@ type Dependencies struct {
 	Clock Clock
 
 	// Random is the source of randomness for request_uri, interaction
-	// handle, authorization code and DPoP nonce generation.
+	// handle, authorization code and DPoP nonce generation. Under
+	// AssuranceProduction it must be crypto/rand.Reader itself.
 	Random io.Reader
 
 	// IdentityClaims resolves identity claim values (e.g. "name",

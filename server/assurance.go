@@ -1,7 +1,9 @@
 package server
 
 import (
+	"crypto/rand"
 	"fmt"
+	"io"
 
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
@@ -59,6 +61,11 @@ const (
 	// in-memory keys, regenerated on every restart, never qualify. An
 	// HSM or KMS is not required — durable keys a deployment loads from
 	// its own storage qualify too — only that the declaration is made.
+	// Dependencies.Random must be crypto/rand.Reader itself: every
+	// request_uri, authorization code, refresh token, opaque access
+	// token, jti and DPoP nonce this server issues is only as
+	// unguessable as that reader, and nothing about an io.Reader says
+	// whether it is a CSPRNG.
 	// Unlike every check above, which New performs once, a client's
 	// loopback http redirect URI is refused per request, at the pushed
 	// authorization request, as invalid_request — redirect URIs belong
@@ -87,6 +94,14 @@ func checkStoreAssurance(name string, store any, requireAtomicConsume, requireCr
 	}
 	if requireCrossInstanceConsistent && !caps.CrossInstanceConsistent {
 		return fmt.Errorf("server: dependencies: %s must declare CrossInstanceConsistent capability under AssuranceProduction with HorizontallyScaled", name)
+	}
+	return nil
+}
+
+// checkRandom requires random to be crypto/rand.Reader itself.
+func checkRandom(random io.Reader) error {
+	if random != rand.Reader {
+		return fmt.Errorf("server: dependencies: random must be crypto/rand.Reader under AssuranceProduction")
 	}
 	return nil
 }

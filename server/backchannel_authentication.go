@@ -366,7 +366,7 @@ func (s *Server) validateBackchannelAuthenticationParameters(verified verifiedBa
 		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "scope must be a string", err)
 	}
 	if err := s.validateScope(scope, client); err != nil {
-		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "scope is not valid for this client", err)
+		return verifiedBackchannelRequest{}, newError(ErrorInvalidScope, 400, "scope is not valid for this client", err)
 	}
 
 	hints := 0

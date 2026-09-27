@@ -852,21 +852,24 @@ func TestBeginBackchannelAuthenticationRejectsNoMatchingClientKey(t *testing.T) 
 }
 
 func TestBeginBackchannelAuthenticationRejectsInvalidScope(t *testing.T) {
-	cases := map[string]map[string]json.RawMessage{
-		"missing scope": {
+	cases := map[string]struct {
+		params map[string]json.RawMessage
+		want   server.ErrorCode
+	}{
+		"missing scope": {map[string]json.RawMessage{
 			"login_hint": jsonRaw(t, "user-1"),
-		},
-		"scope is not a string": {
+		}, server.ErrorInvalidRequest},
+		"scope is not a string": {map[string]json.RawMessage{
 			"scope": jsonRaw(t, 123), "login_hint": jsonRaw(t, "user-1"),
-		},
-		"scope not allowed for this client": {
+		}, server.ErrorInvalidRequest},
+		"scope not allowed for this client": {map[string]json.RawMessage{
 			"scope": jsonRaw(t, "openid unregistered_scope"), "login_hint": jsonRaw(t, "user-1"),
-		},
+		}, server.ErrorInvalidScope},
 	}
-	for name, params := range cases {
+	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			h, _ := newHarnessWithBackchannel(t)
-			requestObj := h.backchannelRequestObject(t, params)
+			requestObj := h.backchannelRequestObject(t, tc.params)
 
 			action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
 				HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), requestObj)},
@@ -878,8 +881,8 @@ func TestBeginBackchannelAuthenticationRejectsInvalidScope(t *testing.T) {
 			if !ok {
 				t.Fatalf("action = %T, want server.BackchannelAuthenticationLocalError", action)
 			}
-			if localErr.Error.Code() != server.ErrorInvalidRequest {
-				t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequest)
+			if localErr.Error.Code() != tc.want {
+				t.Fatalf("Code = %q, want %q", localErr.Error.Code(), tc.want)
 			}
 		})
 	}
@@ -905,8 +908,8 @@ func TestBeginBackchannelAuthenticationOAuthOnlyRejectsOpenIDScope(t *testing.T)
 	if !ok {
 		t.Fatalf("action = %T, want server.BackchannelAuthenticationLocalError", action)
 	}
-	if localErr.Error.Code() != server.ErrorInvalidRequest {
-		t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequest)
+	if localErr.Error.Code() != server.ErrorInvalidScope {
+		t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorInvalidScope)
 	}
 }
 

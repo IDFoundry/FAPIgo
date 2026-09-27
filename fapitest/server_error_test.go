@@ -34,7 +34,7 @@ func TestServerResponseFromPushedAuthorizationRequest(t *testing.T) {
 	if err == nil {
 		t.Fatal("BeginAuthorization(unregistered scope) = nil error, want error")
 	}
-	requireServerResponse(t, err, "invalid_request", http.StatusBadRequest)
+	requireServerResponse(t, err, "invalid_scope", http.StatusBadRequest)
 }
 
 func TestServerResponseFromTokenEndpoint(t *testing.T) {

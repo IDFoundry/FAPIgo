@@ -1,14 +1,11 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/url"
 
 	fapi "github.com/idfoundry/fapigo"
-	"github.com/idfoundry/fapigo/keys"
-	"github.com/idfoundry/fapigo/keys/ephemeral"
 	fapires "github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
@@ -17,27 +14,6 @@ import (
 // contentTypeHeader is the HTTP header name every JSON/JWT response
 // this file writes sets.
 const contentTypeHeader = "Content-Type"
-
-// selfIssuerKeySource resolves this same process's own access-token
-// signing key directly from its in-memory keyManager, rather than
-// looping the resource verifier's key lookup back over HTTP to this
-// binary's own /jwks endpoint. That loopback would hit this binary's
-// self-signed cert with a standard net/http.Client, which — unlike the
-// OIDF suite's own outbound client (see docker-compose.yml's header
-// comment) — does not trust it.
-type selfIssuerKeySource struct {
-	keyManager *ephemeral.KeyManager
-}
-
-func (s selfIssuerKeySource) ResolveIssuerKeys(ctx context.Context, req keys.IssuerKeyRequest) (keys.IssuerKeySet, error) {
-	pub, err := s.keyManager.PublicKey(ctx, keys.AccessTokenSigning, req.Algorithm)
-	if err != nil {
-		return keys.IssuerKeySet{}, err
-	}
-	return keys.IssuerKeySet{Keys: []keys.IssuerKey{
-		{KeyID: pub.KeyID, Algorithm: req.Algorithm, PublicKey: pub.PublicKey},
-	}}, nil
-}
 
 // userinfoHandler serves the OIDC UserInfo endpoint (OIDC Core §5.3) —
 // this conformance binary's one protected resource endpoint, using the

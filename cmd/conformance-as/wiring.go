@@ -306,8 +306,11 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 	// memstore.AccessTokenStore (issuance and verification against the
 	// same in-memory table, mirroring how revocationStore is already
 	// shared above); under AccessTokenFormatJWT, verification instead
-	// resolves the AS's own signing key via selfIssuerKeySource — see
-	// resource.go's userinfoHandler doc comment for why this
+	// resolves the AS's own signing key via keys.LocalIssuerKeys — read
+	// straight from keyManager rather than looped back over HTTP to this
+	// binary's own /jwks, whose self-signed cert a standard
+	// net/http.Client doesn't trust — see resource.go's userinfoHandler
+	// doc comment for why this
 	// conformance binary hosts its own protected-resource verification
 	// alongside the AS itself.
 	var (
@@ -321,11 +324,15 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 			return nil, err
 		}
 		srvAccessTokens = jwtIssuer
+		localKeys, err := keys.NewLocalIssuerKeys(resolved.Issuer, keyManager)
+		if err != nil {
+			return nil, err
+		}
 		jwtVerifier, err := fapires.NewJWTAccessTokens(
-			selfIssuerKeySource{keyManager: keyManager}, resolved.Issuer,
+			localKeys, resolved.Issuer,
 			resolved.Issuer.String(), // matches server/accesstoken.go's own access-token aud claim
 			resolved.Algorithms.IDToken, resolved.Limits.AccessTokenLifetime,
-			8, // selfIssuerKeySource reads keyManager directly — never more than a handful of keys
+			8, // LocalIssuerKeys reads keyManager directly — never more than a handful of keys
 		)
 		if err != nil {
 			return nil, err

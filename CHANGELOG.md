@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.36.0](https://github.com/IDFoundry/FAPIgo/compare/v0.35.0...v0.36.0) (2026-09-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* **server:** bind X5CAttesterChain certificates to the client's attester ([#393](https://github.com/IDFoundry/FAPIgo/issues/393))
+
+### Features
+
+* **server:** bind X5CAttesterChain certificates to the client's attester ([#393](https://github.com/IDFoundry/FAPIgo/issues/393)) ([5d7f413](https://github.com/IDFoundry/FAPIgo/commit/5d7f41391337666bf03e3bc4754f1a0f8c6528aa))
+
+
+### Bug Fixes
+
+* **server:** reserve c_hash and s_hash in application ID token claims ([a1c4e4f](https://github.com/IDFoundry/FAPIgo/commit/a1c4e4f1939014c43786fbd13440a5b190cf9529))
+
 ## [0.35.0](https://github.com/IDFoundry/FAPIgo/compare/v0.34.0...v0.35.0) (2026-09-27)
 
 

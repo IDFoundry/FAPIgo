@@ -5,7 +5,7 @@
 
 ### ⚠ BREAKING CHANGES
 
-* **server:** bind X5CAttesterChain certificates to the client's attester ([#393](https://github.com/IDFoundry/FAPIgo/issues/393))
+* **server:** X5CAttesterChain now requires IssuerBinding, and New rejects the zero value. Choose AttesterIssuerInCertificate when attester certificates carry the attester identifier as a URI SAN (the signing certificate must name the client's ExpectedAttesterIssuer), or AttesterIssuerByTrustAnchors when each client's trust anchors belong to its attester alone. Without a binding, any attester certified under a shared anchor could authenticate as another attester's clients ([#393](https://github.com/IDFoundry/FAPIgo/issues/393))
 
 ### Features
 

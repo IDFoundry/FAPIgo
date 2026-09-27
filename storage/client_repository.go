@@ -113,7 +113,10 @@ const (
 	// identity is issued by a third party (the Attester), not held
 	// directly by the client or pre-registered with this server; only
 	// the Attester's own trust relationship is registered
-	// (ExpectedAttesterIssuer, ClientAttestationAlgorithm). Requires
+	// (ExpectedAttesterIssuer, ClientAttestationAlgorithm); how the
+	// Attester's signing key is trusted — a certificate chain to trust
+	// anchors, or a registered key — is server.Dependencies.AttesterTrust's
+	// choice. Requires
 	// server.Config.AttestationBasedClientAuthentication to be enabled
 	// server-wide — this value alone does not activate the mechanism if
 	// that deployment-wide switch is off, the same relationship

@@ -25,6 +25,14 @@ type Header struct {
 	Type      string // "typ", optional
 	KeyID     string // "kid", optional
 	JWK       *JWK   // "jwk", optional — an embedded public key (used by DPoP)
+
+	// X5C is the "x5c" member (RFC 7515 §4.1.6) exactly as it appeared,
+	// or nil if absent. It is carried, never interpreted or validated
+	// here: a JWT type whose verification uses a certificate chain
+	// decodes and verifies it itself (clientattestation.Attestation's
+	// CertificateChain), and every other type ignores it as before, so
+	// a malformed x5c can't make an otherwise-valid JWT unparseable.
+	X5C json.RawMessage
 }
 
 type rawHeader struct {
@@ -32,6 +40,7 @@ type rawHeader struct {
 	Typ  string          `json:"typ,omitempty"`
 	Kid  string          `json:"kid,omitempty"`
 	Jwk  json.RawMessage `json:"jwk,omitempty"`
+	X5C  json.RawMessage `json:"x5c,omitempty"`
 	Crit []string        `json:"crit,omitempty"`
 }
 
@@ -49,7 +58,7 @@ func marshalHeader(h Header) ([]byte, error) {
 	if !h.Algorithm.IsValid() {
 		return nil, fmt.Errorf("jose: invalid algorithm %v", h.Algorithm)
 	}
-	raw := rawHeader{Alg: h.Algorithm.String(), Typ: h.Type, Kid: h.KeyID}
+	raw := rawHeader{Alg: h.Algorithm.String(), Typ: h.Type, Kid: h.KeyID, X5C: h.X5C}
 	if h.JWK != nil {
 		jwkJSON, err := h.JWK.MarshalJSON()
 		if err != nil {
@@ -73,7 +82,7 @@ func parseHeader(data []byte) (Header, error) {
 	if err != nil {
 		return Header{}, fmt.Errorf("jose: parse header: %w", err)
 	}
-	h := Header{Algorithm: alg, Type: raw.Typ, KeyID: raw.Kid}
+	h := Header{Algorithm: alg, Type: raw.Typ, KeyID: raw.Kid, X5C: raw.X5C}
 	if len(raw.Jwk) > 0 {
 		jwk, err := ParseJWK(raw.Jwk, alg)
 		if err != nil {

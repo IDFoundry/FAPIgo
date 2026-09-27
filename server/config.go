@@ -432,7 +432,11 @@ type Config struct {
 	// AlgorithmPolicy (ClientAttestation, ClientAttestationPoP) fields
 	// that most deployments — which will never register an
 	// attestation-authenticated client — shouldn't be forced to
-	// configure.
+	// configure. Enabling it also requires Dependencies.AttesterTrust,
+	// which decides how the attesting key is trusted: by the
+	// attestation's "x5c" certificate chain to trust anchors (HAIP 1.0
+	// §4.4.1 — X5CAttesterChain) or by keys registered through
+	// Dependencies.ClientKeys (RegisteredAttesterKeys).
 	AttestationBasedClientAuthentication bool
 
 	// OAuthOnly, if set, makes this server a pure OAuth 2.0 + FAPI 2.0

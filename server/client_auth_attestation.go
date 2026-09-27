@@ -6,7 +6,6 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/clientassertion"
 	"github.com/idfoundry/fapigo/internal/clientattestation"
-	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -69,7 +68,7 @@ func (s *Server) authenticateClientViaAttestation(ctx context.Context, attestati
 			newError(ErrorInvalidClient, 401, "client attestation algorithm is not permitted", nil)
 	}
 
-	attesterPub, err := s.resolveClientKey(ctx, client.ID(), keys.AttestationVerification, client.ClientAttestationAlgorithm(), parsedAttestation.KeyID())
+	attesterPub, err := s.deps.AttesterTrust.attesterKey(ctx, s, client, parsedAttestation)
 	if err != nil {
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
 			newError(ErrorInvalidClient, 401, "no matching attester key", err)

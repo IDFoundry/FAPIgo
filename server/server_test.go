@@ -65,6 +65,7 @@ func validDependencies() server.Dependencies {
 		AccessTokens:           server.JWTAccessTokens{Keys: &fakeKeyManager{}, Algorithm: fapi.ES256},
 		Revocation:             server.NoRevocation{},
 		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		AttesterTrust:          server.RegisteredAttesterKeys{},
 		Clock:                  fixedClock{now: time.Now()},
 		Random:                 rand.Reader,
 	}

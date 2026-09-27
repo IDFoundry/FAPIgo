@@ -263,3 +263,37 @@ func TestParseCompactMaxRespectsExplicitLimit(t *testing.T) {
 		t.Fatalf("ParseCompactMax(101 bytes, max 100) error = %v, want ErrTooLarge", err)
 	}
 }
+
+// TestHeaderCarriesX5CWithoutInterpretingIt pins that "x5c" is carried
+// through Sign/ParseCompact untouched and never validated here: a
+// malformed value mustn't make a JWT that doesn't use certificate
+// chains unparseable, exactly as before x5c was carried at all.
+func TestHeaderCarriesX5CWithoutInterpretingIt(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	for _, x5c := range []string{`["AQID"]`, `123`, `{"not":"an array"}`, `["!!not base64"]`} {
+		compact, err := Sign(key, Header{Algorithm: fapi.ES256, X5C: []byte(x5c)}, []byte(`{}`))
+		if err != nil {
+			t.Fatalf("Sign(x5c=%s): %v", x5c, err)
+		}
+		parsed, err := ParseCompact(compact)
+		if err != nil {
+			t.Fatalf("ParseCompact(x5c=%s): %v", x5c, err)
+		}
+		if string(parsed.Header.X5C) != x5c {
+			t.Fatalf("X5C = %s, want %s", parsed.Header.X5C, x5c)
+		}
+		if err := parsed.Verify(&key.PublicKey, fapi.ES256); err != nil {
+			t.Fatalf("Verify(x5c=%s): %v", x5c, err)
+		}
+	}
+	compact, err := Sign(key, Header{Algorithm: fapi.ES256}, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	if parsed, err := ParseCompact(compact); err != nil || parsed.Header.X5C != nil {
+		t.Fatalf("absent x5c: X5C = %s, err %v; want nil", parsed.Header.X5C, err)
+	}
+}

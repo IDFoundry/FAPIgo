@@ -168,4 +168,13 @@ type Dependencies struct {
 	// its thumbprint match already cryptographically binds the exact
 	// certificate, so it needs no chain trust to begin with.
 	ClientCertificateTrust ClientCertificateTrust
+
+	// AttesterTrust decides how the key verifying a client's attestation
+	// is established, for storage.ClientAuthMethodAttestation clients.
+	// Required exactly when Config.AttestationBasedClientAuthentication
+	// is set, with no default: pass X5CAttesterChain{...} to verify the
+	// attestation's "x5c" certificate chain against trust anchors (HAIP
+	// 1.0 §4.4.1), or RegisteredAttesterKeys{} to use keys registered
+	// through ClientKeys — see both types' own doc comments.
+	AttesterTrust AttesterTrust
 }

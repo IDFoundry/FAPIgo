@@ -245,7 +245,7 @@ decides and where the claim lands, so pick by what you need:
 
 `IDTokenClaims` values are JSON-encoded, and server-managed names
 (`iss`, `sub`, `aud`, `exp`, `iat`, `nonce`, `auth_time`, `acr`, `amr`,
-`at_hash`, `azp`, `jti`, `nbf`, `cnf`) are rejected. On a name
+`at_hash`, `azp`, `c_hash`, `s_hash`, `jti`, `nbf`, `cnf`) are rejected. On a name
 collision the more specific source wins: `IDTokenClaims` over identity
 claims over extension claims. All three are carried forward to ID
 tokens re-issued on refresh, with no storage change on your side.

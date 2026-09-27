@@ -672,7 +672,7 @@ func (s *Server) validateAuthorizationParameters(params map[string]json.RawMessa
 			return nil, newError(ErrorInvalidRequest, 400, "scope must be a string", err)
 		}
 		if err := s.validateScope(scope, client); err != nil {
-			return nil, newError(ErrorInvalidRequest, 400, "scope is not valid for this client", err)
+			return nil, newError(ErrorInvalidScope, 400, "scope is not valid for this client", err)
 		}
 	}
 

@@ -70,44 +70,6 @@ func signingPurposeFor(p keys.VerificationPurpose) (keys.SigningPurpose, error) 
 	}
 }
 
-// memIssuerKeySource adapts an authorization server's keys.KeyManager to
-// keys.IssuerKeySource — used by client to verify a JARM response or ID
-// token, and by resource to verify an access token.
-type memIssuerKeySource struct {
-	issuer  string
-	manager keys.KeyManager
-}
-
-func (s *memIssuerKeySource) ResolveIssuerKeys(ctx context.Context, req keys.IssuerKeyRequest) (keys.IssuerKeySet, error) {
-	if req.Issuer != s.issuer {
-		return keys.IssuerKeySet{}, fmt.Errorf("fapitest: unknown issuer %q", req.Issuer)
-	}
-	purpose, err := issuerSigningPurposeFor(req.Purpose)
-	if err != nil {
-		return keys.IssuerKeySet{}, err
-	}
-	info, err := s.manager.PublicKey(ctx, purpose, req.Algorithm)
-	if err != nil {
-		return keys.IssuerKeySet{}, err
-	}
-	return keys.IssuerKeySet{Keys: []keys.IssuerKey{
-		{KeyID: info.KeyID, Algorithm: req.Algorithm, PublicKey: info.PublicKey},
-	}}, nil
-}
-
-func issuerSigningPurposeFor(p keys.IssuerVerificationPurpose) (keys.SigningPurpose, error) {
-	switch p {
-	case keys.AccessTokenVerification:
-		return keys.AccessTokenSigning, nil
-	case keys.JARMVerification:
-		return keys.JARMSigning, nil
-	case keys.IDTokenVerification:
-		return keys.IDTokenSigning, nil
-	default:
-		return 0, fmt.Errorf("fapitest: unsupported issuer verification purpose %v", p)
-	}
-}
-
 // memClientEncryptionKeySource adapts a client's keys.Decrypter to
 // keys.ClientEncryptionKeySource — the server-side contract for
 // resolving a registered client's encryption key when issuing it an

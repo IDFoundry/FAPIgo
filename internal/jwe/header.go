@@ -10,6 +10,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/critical"
+	"github.com/idfoundry/fapigo/internal/strictjson"
 )
 
 // p256CoordinateSize is the fixed byte width of an EC public key
@@ -85,6 +86,9 @@ func marshalHeader(h Header) ([]byte, error) {
 func parseHeader(data []byte) (Header, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	var raw rawHeader
+	if err := strictjson.CheckFieldCase(data, &raw); err != nil {
+		return Header{}, fmt.Errorf("jwe: parse header: %w", err)
+	}
 	if err := dec.Decode(&raw); err != nil {
 		return Header{}, fmt.Errorf("jwe: parse header: %w", err)
 	}

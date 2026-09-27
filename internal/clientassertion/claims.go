@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/idfoundry/fapigo/internal/strictjson"
 )
 
 // AssertionType is the required client_assertion_type value (RFC 7523
@@ -31,6 +32,9 @@ func parseClaims(payload []byte) (claims, error) {
 	dec := json.NewDecoder(bytes.NewReader(payload))
 	dec.DisallowUnknownFields()
 	var c claims
+	if err := strictjson.CheckFieldCase(payload, &c); err != nil {
+		return claims{}, fmt.Errorf("%w: %v", ErrMalformedClaims, err)
+	}
 	if err := dec.Decode(&c); err != nil {
 		return claims{}, fmt.Errorf("%w: %v", ErrMalformedClaims, err)
 	}

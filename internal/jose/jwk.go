@@ -15,6 +15,7 @@ import (
 	"math/big"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/strictjson"
 )
 
 // JWK is a parsed, validated public key together with the algorithm it
@@ -213,6 +214,9 @@ func ecdhP256Coordinates(pub *ecdh.PublicKey) (x, y []byte, err error) {
 func ParseJWK(data []byte, alg fapi.SignatureAlgorithm) (JWK, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	var raw rawJWK
+	if err := strictjson.CheckFieldCase(data, &raw); err != nil {
+		return JWK{}, fmt.Errorf("jose: parse jwk: %w", err)
+	}
 	if err := dec.Decode(&raw); err != nil {
 		return JWK{}, fmt.Errorf("jose: parse jwk: %w", err)
 	}

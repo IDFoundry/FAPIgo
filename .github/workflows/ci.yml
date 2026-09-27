@@ -101,6 +101,38 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
+  # Every other job runs go.mod's own minimum Go version (exactly, via
+  # go-version-file), which is what keeps that minimum honest — but it
+  # means nothing ever builds or tests this module on the newest Go
+  # release, the one most consumers are actually on. This job does:
+  # vet and the race-enabled test suite on the latest stable Go, to
+  # catch a newer compiler or standard library breaking this module
+  # before a consumer reports it. GOTOOLCHAIN=local keeps the go command
+  # from switching to any other toolchain, so the version under test is
+  # exactly the one setup-go installed. Coverage and SonarQube stay on
+  # the test job above; running them twice would add nothing.
+  test-latest-go:
+    runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          check-latest: true
+          cache-dependency-path: go.mod
+
+      - name: go version
+        run: go version
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test (race)
+        run: go test -race ./...
+
   lint:
     runs-on: ubuntu-latest
     steps:

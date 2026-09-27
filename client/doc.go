@@ -3,8 +3,9 @@
 // flow against a FAPI-conformant authorization server.
 //
 // The package exposes workflow methods (BeginAuthorization,
-// HandleAuthorizationResponse, ExchangeCode, CompleteAuthorization) rather
-// than low-level JWT, PAR or DPoP primitives — those live under internal/
+// HandleAuthorizationResponse, ExchangeCode, CompleteAuthorization, and
+// for CIBA BeginBackchannelAuthentication and PollBackchannelAuthentication)
+// rather than low-level JWT, PAR or DPoP primitives — those live under internal/
 // and are composed here behind a state machine that a caller cannot drive
 // out of order. In particular, only this package may construct request
 // objects and PAR submissions; verifying them is the server package's
@@ -56,9 +57,12 @@
 // server; internal/requestobject signs here, but verifies in server).
 //
 // It follows the same hardening rules as server and resource (see
-// ARCHITECTURE.md, "Hardening rules for every role's public API"):
-// AuthorizationSession and SessionHandle are opaque with no public
-// constructor; HandleAuthorizationResponse returns a closed sum type
+// ARCHITECTURE.md, "Design rules"): AuthorizationSession is opaque with
+// no public constructor, and a SessionHandle can only be recovered from
+// its own String form (ParseSessionHandle) — the caller stores it with
+// the user agent that began the flow, and HandleAuthorizationResponse
+// rejects a callback that doesn't carry the matching one;
+// HandleAuthorizationResponse returns a closed sum type
 // rather than one struct with optional fields, so a caller can't assume
 // every callback carries a code; every DPoP proof, request-object
 // signature and client assertion is produced through Dependencies.Keys'
@@ -67,7 +71,8 @@
 // constructs, holds or is handed a crypto.PrivateKey, the same model
 // server uses for its own signing keys; TokenSet fields that carry raw
 // token values use fapi.Secret so they can't leak into a log line by
-// accident; and a validation failure is a typed Error tagged with where
-// it's safe to expose the description, not a bare error the caller has
-// to string-match.
+// accident; and a failure is a typed Error — with the server's own
+// error response, when there was one, available through
+// Error.ServerResponse — not a bare error the caller has to
+// string-match.
 package client

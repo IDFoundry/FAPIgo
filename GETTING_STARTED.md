@@ -12,10 +12,11 @@ study it directly and treat this as the map.
 
 ## 1. Dependencies: use the reference implementations to start
 
-`server.New` requires ten dependencies — a client repository,
+`server.New` requires eleven dependencies — a client repository,
 transaction/grant/replay stores, a key manager, a client key source, an
-access-token issuer, a revocation sink, a clock, a randomness source —
-with no implicit defaults for any of them (plus an audit sink, required
+access-token issuer, a revocation sink, a client-certificate trust
+choice, a clock, a randomness source — with no implicit defaults for
+any of them (plus an audit sink, required
 only under `AssuranceProduction` — see step 2's `Assurance` field).
 Writing real, production-shaped persistence and key management for all
 of that is real work, and not the place to start. Two packages exist
@@ -146,8 +147,14 @@ deps := server.Dependencies{
 	// explicitly decline — see its doc comment for why declining must
 	// be a conscious choice, not a silent default.
 	Revocation: memstore.NewRevocationStore(),
-	Clock:      server.SystemClock{},
-	Random:     rand.Reader,
+	// Whether this package re-verifies an mTLS client certificate's
+	// chain itself. NoClientCertificateChainTrust{} declines — right when
+	// no client uses mTLS, or when your TLS termination already verifies
+	// the chain; server.TrustedClientCAs{Roots: pool} has this package
+	// check it against pool instead.
+	ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+	Clock:                  server.SystemClock{},
+	Random:                 rand.Reader, // crypto/rand; production assurance requires exactly this reader
 }
 
 srv, err := server.New(cfg, deps)
@@ -310,9 +317,9 @@ the reason this section exists at all. Pick the side matching your AS:
 
 ```go
 // If the AS issues JWTAccessTokens: resolve its verification key(s),
-// typically by fetching its published JWKS live (or, for a co-located
-// deployment, an IssuerKeySource reading the key manager directly, the
-// way cmd/conformance-as's own selfIssuerKeySource does).
+// typically by fetching its published JWKS live (or, for a resource
+// server in the AS's own process, keys.NewLocalIssuerKeys(issuer,
+// keyManager), which reads the AS's key manager directly).
 issuerKeys, err := keys.NewJWKSIssuerKeySource(fetcher, asJWKSURL, 10*time.Minute)
 accessTokens, err := resource.NewJWTAccessTokens(
 	issuerKeys, asIssuer, asIssuer.String(), // audience: matches server/accesstoken.go's own self-addressed aud claim

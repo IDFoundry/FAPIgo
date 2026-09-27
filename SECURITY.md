@@ -19,9 +19,11 @@ include vulnerability details in a public issue.
 
 ## Supported versions
 
-FAPIgo is under active development (see the README's work-in-progress
-notice) and does not yet have tagged releases. Reports against `main`
-are the ones we can act on.
+FAPIgo is pre-1.0 and under active development (see the README's
+work-in-progress notice). Security fixes go into the next release from
+`main`; earlier releases aren't patched separately, so report against
+the latest release or `main`, and upgrade to the release that carries
+a fix.
 
 ## What to include
 

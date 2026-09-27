@@ -17,15 +17,16 @@
 // self-contained JWT access token (CreateAccessToken/LookupAccessToken
 // only — existence and expiry, never revocation, see that file's own
 // doc comment for why) — and replay.go defines a single-use ReplayStore
-// keyed by a namespaced identifier (e.g. "client:jarm", "server:dpop")
+// keyed by a namespaced identifier (e.g. "server:dpop", "resource:dpop")
 // so that different roles and subsystems can never collide on the same
-// use-once token. The client's own session store will follow the same
-// per-role-type pattern once the endpoint that needs it exists. No
+// use-once token. session.go defines the client's own SessionStore,
+// nonce.go the DPoP NonceStore, and backchannel.go the server's CIBA
+// BackchannelAuthenticationStore, on the same per-role pattern. No
 // interface here exposes GetX/UpdateX/DeleteX-style CRUD —
 // every method is a named security operation (Create, Consume, Redeem,
 // UseOnce), and redemption-style operations verify and consume state
 // atomically in one call rather than as separate check-then-act steps.
-// replay.Store persists only a digest and expiry per use, never a
+// ReplayStore persists only a digest and expiry per use, never a
 // complete client assertion or DPoP proof.
 //
 // Records keep as explicit fields only what a store itself acts on — a

@@ -75,11 +75,15 @@ behaviour and negative-test expectations differ. See
 
 `server`'s CIBA support (`BeginBackchannelAuthentication`/
 `CompleteBackchannelAuthentication`/`ExchangeBackchannelAuthentication`,
-poll and ping delivery) is verified by unit/integration tests, not the live
-OIDF suite as its primary gate: `fapi-ciba-id1-test-plan` requires
-MTLS-bound access tokens unconditionally. Now that this module supports
-mTLS sender-constraining (RFC 8705 §3, `-mtls`), this was genuinely
-re-attempted live against `ciba-mtls.config.json` — **34/34 PASS.**
+poll and ping delivery) runs against the live OIDF suite on every
+conformance run, in four AS legs (poll and ping, each with
+`private_key_jwt` and mTLS client authentication) plus the RP-side
+"RP ciba-mtls" leg. It was first verified by unit/integration tests only,
+because `fapi-ciba-id1-test-plan` requires MTLS-bound access tokens
+unconditionally. Once this module supported mTLS sender-constraining
+(RFC 8705 §3, `-mtls`), it was re-attempted live against
+`ciba-mtls.config.json` — **34/34 PASS** on that first run; the suite
+has since added a module, and the daily run passes all 35.
 Seven real library/harness gaps the attempt surfaced were all fixed
 along the way: `tls_client_certificate_bound_access_tokens` metadata,
 client-assertion `aud` acceptance being far too narrow, a stricter
@@ -102,8 +106,7 @@ display with `invalid_binding_message`, and the display-verification
 check is never reached. Full breakdown, live findings and reproduction
 steps in
 [`server/oidf-config/README.md`](server/oidf-config/README.md#ciba-mtlsconfigjson--the-genuine-mtls-re-attempt-automated).
-Wired into `scripts/run-all.sh` as its own "AS ciba-mtls" leg now that
-it's a clean 34/34.
+Wired into `scripts/run-all.sh` as its own "AS ciba-mtls" leg.
 
 CIBA §10.2 ping delivery mode got its own AS-side re-attempt too, once
 `server.BackchannelNotifier`/`storage.BackchannelTokenDeliveryModePing`
@@ -165,9 +168,7 @@ has no resource owner at all (RFC 9396 §6's own "client's policy"
 framing). None of the three fields' absence is permissive — an
 unconfigured policy refuses any `authorization_details`, the same
 stance an unconfigured `Config.RAR` itself takes (see ARCHITECTURE.md's
-own RAR section for the full detail, including why this is a
-`server.RARPolicy` rename from an earlier client_credentials-only
-`ClientCredentialsRARPolicy` type). Unlike CIBA,
+own RAR section for the full detail). Unlike CIBA,
 the OIDF suite has no dedicated RAR conformance plan at all, so this is
 deliberately outside the automated live-suite loop entirely, verified
 instead by `extension/rar_test.go`, `server/rar_test.go`
@@ -209,7 +210,10 @@ client-auth-mtls-and-mtls}` containers rather than standing up new ones
 — this grant has no PAR/authorize/redirect_uri/browser hop at all, so
 nothing about container topology needed to change, only the token
 endpoint's own `grant_type` dispatch. **Confirmed live: all four
-clean — 15/15, 11/11, 10/10, 6/6 modules, 0 failures/0 warnings.** Also
+clean, 0 failures/0 warnings** — as of the 2026-09-27 daily run,
+private key+DPoP (`baseline`) 16 modules, private key+MTLS (`mtls`) 12,
+MTLS+DPoP (`client-auth-mtls`) 10, and MTLS+MTLS
+(`client-auth-mtls-and-mtls`) 6. Also
 supports Rich Authorization Requests (RFC 9396 §6) when both
 `Config.RAR` and `Dependencies.ClientCredentialsRARPolicy` are
 configured — see the [RAR](#rar) section above. `cmd/conformance-as`'s

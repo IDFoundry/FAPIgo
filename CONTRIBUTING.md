@@ -57,6 +57,9 @@ decision, not something a commit message alone should trigger.
   a `govulncheck` finding is almost always a standard-library CVE fixed
   in a newer Go patch release, not something to fix in this repo's own
   code — bump the toolchain instead.
+- A breaking change (`feat!:`/`fix!:`) adds its own section to
+  [UPGRADING.md](UPGRADING.md), under the version it will ship in:
+  who's affected, why, and what to change.
 - Include tests for the behavior you're changing, not just the happy
   path — this codebase leans on tests as part of the actual
   specification (see e.g. `storage/contract.go`'s reusable contract

@@ -70,9 +70,6 @@ const (
 	// loopback http redirect URI is refused per request, at the pushed
 	// authorization request, as invalid_request — redirect URIs belong
 	// to client registrations, which New never sees.
-	// Further checks (HSM-backed keys where required, and the rest of
-	// the checklist ARCHITECTURE.md describes) will be added here as the
-	// mechanisms to check them are built.
 	AssuranceProduction
 )
 

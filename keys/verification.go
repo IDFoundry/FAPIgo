@@ -43,6 +43,12 @@ const (
 	// resolve any other purpose's keys — this purpose only distinguishes
 	// "which trust relationship" from ClientAssertionVerification's "the
 	// client's own key," it doesn't change ClientKeySource's shape.
+	//
+	// server only resolves keys for this purpose when its
+	// Dependencies.AttesterTrust is server.RegisteredAttesterKeys; under
+	// server.X5CAttesterChain the key comes from the attestation's own
+	// verified "x5c" certificate chain instead, and this purpose is
+	// never requested.
 	AttestationVerification
 )
 

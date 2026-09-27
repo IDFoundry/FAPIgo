@@ -17,8 +17,10 @@
 // header.
 //
 // attestation.go verifies the Client Attestation JWT against an
-// Attester's public key (resolved by the caller — see server's own
-// AttestationVerification keys.VerificationPurpose); pop.go verifies
+// Attester's public key, which the caller establishes — server does so
+// through its AttesterTrust dependency, either from a registered key
+// or by verifying the certificate chain CertificateChain decodes from
+// the attestation's "x5c" header; pop.go verifies
 // the PoP JWT against the Client Instance Key the Client Attestation
 // vouched for. Both directions are kept as separate types, mirroring
 // internal/clientassertion and internal/requestobject, so each JWT's

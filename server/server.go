@@ -475,6 +475,14 @@ func validateConditionalDependencies(cfg Config, deps Dependencies) error {
 	if cibaEnabled && deps.BackchannelNotifier == nil {
 		return fmt.Errorf("server: dependencies: backchannel notifier is required when endpoints.backchannel_authentication is set")
 	}
+	if cfg.AttestationBasedClientAuthentication {
+		if deps.AttesterTrust == nil {
+			return fmt.Errorf("server: dependencies: attester trust is required when attestation_based_client_authentication is set (pass X5CAttesterChain{...} or RegisteredAttesterKeys{})")
+		}
+		if err := deps.AttesterTrust.validate(); err != nil {
+			return err
+		}
+	}
 	if len(cfg.AutomaticRegistration.TrustAnchors) > 0 && deps.FederationHTTP == nil {
 		return fmt.Errorf("server: dependencies: federation_http is required when automatic_registration.trust_anchors is set")
 	}

@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -717,3 +718,52 @@ type fakeErr string
 func (e fakeErr) Error() string { return string(e) }
 
 const errReplayed = fakeErr("jti already used")
+
+func TestCertificateChain(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	sign := func(x5c string) Attestation {
+		t.Helper()
+		var raw []byte
+		if x5c != "" {
+			raw = []byte(x5c)
+		}
+		compact, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: TypHeader, X5C: raw},
+			[]byte(`{"iss":"https://attester.example","sub":"client","exp":4102444800,"cnf":{"jwk":{}}}`))
+		if err != nil {
+			t.Fatalf("jose.Sign: %v", err)
+		}
+		a, err := Parse(compact)
+		if err != nil {
+			t.Fatalf("Parse: %v", err)
+		}
+		return a
+	}
+
+	if ders, present, err := sign("").CertificateChain(); err != nil || present || ders != nil {
+		t.Fatalf("absent x5c = (%v, %v, %v), want (nil, false, nil)", ders, present, err)
+	}
+	ders, present, err := sign(`["AQID","BAU="]`).CertificateChain()
+	if err != nil || !present || len(ders) != 2 || string(ders[0]) != "\x01\x02\x03" || string(ders[1]) != "\x04\x05" {
+		t.Fatalf("valid x5c = (%v, %v, %v)", ders, present, err)
+	}
+	tooMany := "[" + strings.TrimSuffix(strings.Repeat(`"AQID",`, MaxCertificateChainLength+1), ",") + "]"
+	for name, x5c := range map[string]string{
+		"not an array":      `"AQID"`,
+		"null":              `null`,
+		"empty":             `[]`,
+		"non-string entry":  `[1]`,
+		"not base64":        `["!!"]`,
+		"url-safe base64":   `["-_-_"]`,
+		"empty certificate": `[""]`,
+		"over the limit":    tooMany,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, present, err := sign(x5c).CertificateChain(); err == nil || !present {
+				t.Fatalf("CertificateChain(%s) = present %v, err %v; want present with an error", x5c, present, err)
+			}
+		})
+	}
+}

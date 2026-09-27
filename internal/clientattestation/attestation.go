@@ -2,6 +2,8 @@ package clientattestation
 
 import (
 	"crypto"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -49,6 +51,47 @@ func (a Attestation) KeyID() string { return a.compact.Header.KeyID }
 // expect via VerifyPolicy rather than trusting this value, exactly as
 // jose.Compact.Verify requires.
 func (a Attestation) Algorithm() fapi.SignatureAlgorithm { return a.compact.Header.Algorithm }
+
+// MaxCertificateChainLength bounds how many certificates an "x5c"
+// header may carry. A Wallet Attestation's chain is the signing
+// certificate plus any intermediates, excluding the trust anchor (HAIP
+// 1.0 §4.4.1) — a handful at most; the bound only caps how much
+// untrusted input certificate parsing and path building will take on.
+const MaxCertificateChainLength = 10
+
+// CertificateChain returns the header's "x5c" certificates as DER,
+// leaf first (RFC 7515 §4.1.6), and whether the header carried "x5c"
+// at all. Untrusted until verified against a trust anchor; a caller
+// uses the chain only to establish the key Verify then checks the
+// signature with. It fails on an "x5c" that isn't a non-empty JSON
+// array of standard-base64 strings, or that exceeds
+// MaxCertificateChainLength. The certificates themselves are not
+// parsed here.
+func (a Attestation) CertificateChain() (ders [][]byte, present bool, err error) {
+	raw := a.compact.Header.X5C
+	if len(raw) == 0 {
+		return nil, false, nil
+	}
+	var entries []string
+	if err := json.Unmarshal(raw, &entries); err != nil || entries == nil {
+		return nil, true, fmt.Errorf("clientattestation: x5c is not an array of strings")
+	}
+	if len(entries) == 0 {
+		return nil, true, fmt.Errorf("clientattestation: x5c is empty")
+	}
+	if len(entries) > MaxCertificateChainLength {
+		return nil, true, fmt.Errorf("clientattestation: x5c has %d certificates, more than %d", len(entries), MaxCertificateChainLength)
+	}
+	ders = make([][]byte, len(entries))
+	for i, e := range entries {
+		der, err := base64.StdEncoding.DecodeString(e)
+		if err != nil || len(der) == 0 {
+			return nil, true, fmt.Errorf("clientattestation: x5c entry %d is not standard base64 DER", i)
+		}
+		ders[i] = der
+	}
+	return ders, true, nil
+}
 
 // ClaimedIssuer returns the unverified "iss" claim — the Attester — for
 // use as a key-lookup value only.

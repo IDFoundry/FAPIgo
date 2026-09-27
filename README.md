@@ -226,7 +226,8 @@ role is tested against the OpenID Foundation conformance suite.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the conformance-first development
 philosophy and pre-PR checklist, [SECURITY.md](SECURITY.md) to report a
-vulnerability, and [CHANGELOG.md](CHANGELOG.md) for release history.
+vulnerability, [CHANGELOG.md](CHANGELOG.md) for release history, and
+[UPGRADING.md](UPGRADING.md) for what to change when a release is breaking.
 
 ## License
 

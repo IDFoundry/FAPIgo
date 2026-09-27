@@ -174,7 +174,9 @@ type Dependencies struct {
 	// Required exactly when Config.AttestationBasedClientAuthentication
 	// is set, with no default: pass X5CAttesterChain{...} to verify the
 	// attestation's "x5c" certificate chain against trust anchors (HAIP
-	// 1.0 §4.4.1), or RegisteredAttesterKeys{} to use keys registered
-	// through ClientKeys — see both types' own doc comments.
+	// 1.0 §4.4.1) — choosing its IssuerBinding, which decides what ties
+	// the certificate to the client's attester — or
+	// RegisteredAttesterKeys{} to use keys registered through ClientKeys.
+	// See both types' own doc comments.
 	AttesterTrust AttesterTrust
 }

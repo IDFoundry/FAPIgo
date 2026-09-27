@@ -81,18 +81,67 @@ func (RegisteredAttesterKeys) validate() error { return nil }
 //     algorithm needs.
 //
 // Extended key usage isn't constrained: no standard value exists for
-// attestation signing. The attestation's "iss" is still checked
-// against the client's ExpectedAttesterIssuer as before; it isn't
-// matched against anything in the certificate. Revocation isn't
-// checked — an AttesterTrustAnchors that tracks a trust list can stop
-// returning an anchor that has been withdrawn.
+// attestation signing. Revocation isn't checked — an
+// AttesterTrustAnchors that tracks a trust list can stop returning an
+// anchor that has been withdrawn.
+//
+// A valid chain proves only that some attester certified under an
+// anchor signed the attestation, not which one. The attestation's "iss"
+// is checked against the client's ExpectedAttesterIssuer, but "iss" is
+// a claim the attester writes itself, so on its own it binds nothing:
+// with anchors shared between attesters — a trust list whose CA
+// certifies many Wallet Providers, StaticAttesterTrustAnchors across
+// clients, let alone public web PKI roots — any of them could attest
+// for any client. IssuerBinding says what ties the certificate to the
+// client's attester instead; see AttesterIssuerBinding.
 type X5CAttesterChain struct {
 	// TrustAnchors supplies the anchors a client's attestation chain
 	// must verify against. Required.
 	TrustAnchors AttesterTrustAnchors
+
+	// IssuerBinding decides what ties the signing certificate to the
+	// client's registered attester. Required, with no default — see
+	// AttesterIssuerBinding.
+	IssuerBinding AttesterIssuerBinding
 }
 
+// AttesterIssuerBinding decides what ties an X5CAttesterChain signing
+// certificate to the client's registered attester
+// (storage.RegisteredClient.ExpectedAttesterIssuer). There is no default:
+// the choice depends on how a deployment's anchors are shared, which
+// this package can't see.
+type AttesterIssuerBinding uint8
+
+const (
+	_ AttesterIssuerBinding = iota
+
+	// AttesterIssuerInCertificate requires the signing certificate to
+	// carry a URI subject alternative name exactly equal to the client's
+	// ExpectedAttesterIssuer, which the attestation's "iss" must also
+	// equal. The certificate then names the attester, so anchors may be
+	// shared between attesters — a trust list, one anchor pool for every
+	// client — without one attester being able to attest for another's
+	// clients. Choose it whenever the attesters' certificates carry their
+	// identifier this way.
+	AttesterIssuerInCertificate
+
+	// AttesterIssuerByTrustAnchors ties nothing in the certificate to the
+	// attester: it declares that the anchors TrustAnchors returns for a
+	// client are specific to that client's attester — every certificate
+	// chaining to them belongs to the attester the client is registered
+	// with — so the anchors themselves are the binding. That is the
+	// deployment's guarantee, not something this package checks: shared
+	// anchors (a multi-provider trust-list CA, StaticAttesterTrustAnchors
+	// serving clients of different attesters, system or web PKI roots)
+	// break it, and with it client authentication. Choose it only for
+	// attester certificates that carry no usable identifier.
+	AttesterIssuerByTrustAnchors
+)
+
 func (c X5CAttesterChain) validate() error {
+	if c.IssuerBinding != AttesterIssuerInCertificate && c.IssuerBinding != AttesterIssuerByTrustAnchors {
+		return fmt.Errorf("server: dependencies: attester_trust: X5CAttesterChain.IssuerBinding is required (AttesterIssuerInCertificate or AttesterIssuerByTrustAnchors)")
+	}
 	if c.TrustAnchors == nil {
 		return fmt.Errorf("server: dependencies: attester_trust: X5CAttesterChain.TrustAnchors is required")
 	}
@@ -124,7 +173,22 @@ func (c X5CAttesterChain) attesterKey(ctx context.Context, s *Server, client sto
 	if !keyFitsAlgorithm(leaf.PublicKey, client.ClientAttestationAlgorithm()) {
 		return nil, fmt.Errorf("attester certificate key does not fit algorithm %s", client.ClientAttestationAlgorithm())
 	}
+	if c.IssuerBinding == AttesterIssuerInCertificate && !hasURIName(leaf, client.ExpectedAttesterIssuer()) {
+		return nil, fmt.Errorf("attester certificate does not name the client's attester %q as a URI subject alternative name", client.ExpectedAttesterIssuer())
+	}
 	return leaf.PublicKey, nil
+}
+
+// hasURIName reports whether cert carries uri, exactly, as a URI
+// subject alternative name — exact string comparison, the same way the
+// attestation's "iss" is compared.
+func hasURIName(cert *x509.Certificate, uri string) bool {
+	for _, u := range cert.URIs {
+		if u.String() == uri {
+			return true
+		}
+	}
+	return false
 }
 
 // AttesterTrustAnchors supplies the trust anchors X5CAttesterChain
@@ -139,7 +203,9 @@ type AttesterTrustAnchors interface {
 }
 
 // StaticAttesterTrustAnchors trusts the same anchors, Roots, for every
-// client.
+// client. With clients of more than one attester that pool is shared,
+// so pair it with AttesterIssuerInCertificate — or keep it to a single
+// attester's own anchors.
 type StaticAttesterTrustAnchors struct {
 	Roots *x509.CertPool
 }

@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math/big"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -38,6 +39,7 @@ type certOptions struct {
 	notAfter  time.Time
 	keyUsage  x509.KeyUsage
 	key       crypto.Signer // nil: fresh P-256
+	uris      []string      // URI subject alternative names
 }
 
 var testSerial int64
@@ -73,6 +75,13 @@ func newTestCert(t *testing.T, name string, o certOptions) testCert {
 		KeyUsage:              o.keyUsage,
 		BasicConstraintsValid: true,
 		IsCA:                  o.isCA,
+	}
+	for _, raw := range o.uris {
+		u, err := url.Parse(raw)
+		if err != nil {
+			t.Fatalf("parse SAN URI %q: %v", raw, err)
+		}
+		tmpl.URIs = append(tmpl.URIs, u)
 	}
 	parentCert, parentKey := tmpl, key
 	if o.parent != nil {
@@ -167,7 +176,7 @@ func TestX5CAttesterChainAcceptsChainToTrustAnchor(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			h := newHarnessWithAttesterTrust(t, nil, server.X5CAttesterChain{TrustAnchors: server.StaticAttesterTrustAnchors{Roots: poolOf(root)}})
+			h := newHarnessWithAttesterTrust(t, nil, server.X5CAttesterChain{TrustAnchors: server.StaticAttesterTrustAnchors{Roots: poolOf(root)}, IssuerBinding: server.AttesterIssuerByTrustAnchors})
 			instanceKey := generateKey(t)
 			attestation := createX5CAttestation(t, tc.leaf.key, tc.x5c, tc.kid, &instanceKey.PublicKey, h.now)
 			if err := requestWithAttestation(t, h, attestation, instanceKey); err != nil {
@@ -211,7 +220,7 @@ func TestX5CAttesterChainRejectsUntrustedAttestation(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			h := newHarnessWithAttesterTrust(t, nil, server.X5CAttesterChain{TrustAnchors: server.StaticAttesterTrustAnchors{Roots: tc.roots}})
+			h := newHarnessWithAttesterTrust(t, nil, server.X5CAttesterChain{TrustAnchors: server.StaticAttesterTrustAnchors{Roots: tc.roots}, IssuerBinding: server.AttesterIssuerByTrustAnchors})
 			instanceKey := generateKey(t)
 			attestation := createX5CAttestation(t, tc.signer, tc.x5c, "", &instanceKey.PublicKey, h.now)
 			err := requestWithAttestation(t, h, attestation, instanceKey)
@@ -244,7 +253,7 @@ func TestX5CAttesterChainChecksValidityAtServerClock(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			h := newHarnessWithAttesterTrustAt(t, serverNow, nil, server.X5CAttesterChain{TrustAnchors: server.StaticAttesterTrustAnchors{Roots: poolOf(root)}})
+			h := newHarnessWithAttesterTrustAt(t, serverNow, nil, server.X5CAttesterChain{TrustAnchors: server.StaticAttesterTrustAnchors{Roots: poolOf(root)}, IssuerBinding: server.AttesterIssuerByTrustAnchors})
 			instanceKey := generateKey(t)
 			attestation := createX5CAttestation(t, tc.leaf.key, x5cOf(tc.leaf), "", &instanceKey.PublicKey, h.now)
 			err := requestWithAttestation(t, h, attestation, instanceKey)
@@ -288,7 +297,7 @@ func TestX5CAttesterChainUsesPerClientTrustAnchors(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			h := newHarnessWithAttesterTrust(t, nil, server.X5CAttesterChain{TrustAnchors: tc.anchors})
+			h := newHarnessWithAttesterTrust(t, nil, server.X5CAttesterChain{TrustAnchors: tc.anchors, IssuerBinding: server.AttesterIssuerByTrustAnchors})
 			instanceKey := generateKey(t)
 			attestation := createX5CAttestation(t, leaf.key, x5cOf(leaf), "", &instanceKey.PublicKey, h.now)
 			err := requestWithAttestation(t, h, attestation, instanceKey)
@@ -327,9 +336,12 @@ func TestNewAttesterTrustRequirements(t *testing.T) {
 		"required when attestation enabled":     {true, nil, true},
 		"not required when disabled":            {false, nil, false},
 		"registered keys":                       {true, server.RegisteredAttesterKeys{}, false},
-		"x5c chain with static anchors":         {true, server.X5CAttesterChain{TrustAnchors: server.StaticAttesterTrustAnchors{Roots: x509.NewCertPool()}}, false},
-		"x5c chain without trust anchors":       {true, server.X5CAttesterChain{}, true},
-		"x5c chain with nil static anchor pool": {true, server.X5CAttesterChain{TrustAnchors: server.StaticAttesterTrustAnchors{}}, true},
+		"x5c chain, issuer in certificate":      {true, server.X5CAttesterChain{TrustAnchors: server.StaticAttesterTrustAnchors{Roots: x509.NewCertPool()}, IssuerBinding: server.AttesterIssuerInCertificate}, false},
+		"x5c chain, bound by trust anchors":     {true, server.X5CAttesterChain{TrustAnchors: server.StaticAttesterTrustAnchors{Roots: x509.NewCertPool()}, IssuerBinding: server.AttesterIssuerByTrustAnchors}, false},
+		"x5c chain without issuer binding":      {true, server.X5CAttesterChain{TrustAnchors: server.StaticAttesterTrustAnchors{Roots: x509.NewCertPool()}}, true},
+		"x5c chain with unknown issuer binding": {true, server.X5CAttesterChain{TrustAnchors: server.StaticAttesterTrustAnchors{Roots: x509.NewCertPool()}, IssuerBinding: server.AttesterIssuerBinding(99)}, true},
+		"x5c chain without trust anchors":       {true, server.X5CAttesterChain{IssuerBinding: server.AttesterIssuerInCertificate}, true},
+		"x5c chain with nil static anchor pool": {true, server.X5CAttesterChain{TrustAnchors: server.StaticAttesterTrustAnchors{}, IssuerBinding: server.AttesterIssuerInCertificate}, true},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -358,4 +370,45 @@ func x5cRepeated(c testCert, n int) json.RawMessage {
 		certs[i] = c
 	}
 	return x5cOf(certs...)
+}
+
+// TestX5CAttesterChainIssuerInCertificate covers the impersonation
+// AttesterIssuerInCertificate exists to stop: with one anchor shared by
+// two attesters (a trust list, say), attester B's certificate must not
+// authenticate a client registered with attester A — even though B
+// writes A's identifier into the attestation's "iss".
+func TestX5CAttesterChainIssuerInCertificate(t *testing.T) {
+	sharedRoot := newTestCert(t, "trust list CA", certOptions{isCA: true})
+	cases := map[string]struct {
+		uris   []string
+		wantOK bool
+	}{
+		"certificate names the client's attester":         {[]string{testAttesterIssuer}, true},
+		"attester named among several SANs":               {[]string{"https://other.example", testAttesterIssuer}, true},
+		"another attester under the same anchor":          {[]string{"https://attester-b.example.com"}, false},
+		"certificate names no attester":                   {nil, false},
+		"near miss: trailing slash is a different string": {[]string{testAttesterIssuer + "/"}, false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			leaf := newTestCert(t, "attester", certOptions{parent: &sharedRoot, uris: tc.uris})
+			h := newHarnessWithAttesterTrust(t, nil, server.X5CAttesterChain{
+				TrustAnchors:  server.StaticAttesterTrustAnchors{Roots: poolOf(sharedRoot)},
+				IssuerBinding: server.AttesterIssuerInCertificate,
+			})
+			instanceKey := generateKey(t)
+			// "iss" is always the client's attester: the attester controls it.
+			attestation := createX5CAttestation(t, leaf.key, x5cOf(leaf), "", &instanceKey.PublicKey, h.now)
+			err := requestWithAttestation(t, h, attestation, instanceKey)
+			if tc.wantOK {
+				if err != nil {
+					t.Fatalf("RequestClientCredentialsToken: %v", err)
+				}
+				return
+			}
+			if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
+				t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidClient)
+			}
+		})
+	}
 }

@@ -119,6 +119,9 @@ func (s BackchannelAuthenticationSession) NotificationToken() string { return s.
 // proof bound to the request, and returns the resulting
 // BackchannelAuthenticationSession for the caller to poll.
 func (c *Client) BeginBackchannelAuthentication(ctx context.Context, req BeginBackchannelAuthenticationRequest) (BackchannelAuthenticationSession, error) {
+	if scopeErr := c.checkOAuthOnlyScope(req.Scope); scopeErr != nil {
+		return BackchannelAuthenticationSession{}, scopeErr
+	}
 	hints := 0
 	if req.LoginHint != "" {
 		hints++

@@ -86,6 +86,9 @@ const errPushedAuthorizationRequestFailed = "pushed authorization request failed
 // pushed-authorization-request endpoint (RFC 9126), and persists
 // correlation state for the eventual callback.
 func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationRequest) (AuthorizationSession, error) {
+	if scopeErr := c.checkOAuthOnlyScope(req.Scope); scopeErr != nil {
+		return AuthorizationSession{}, scopeErr
+	}
 	state, err := generateRandomToken(c.deps.Random)
 	if err != nil {
 		return AuthorizationSession{}, newError(ErrorInternal, "failed to generate state", err)

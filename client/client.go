@@ -108,8 +108,11 @@ func validateConfig(cfg Config) error {
 	// RequestClientCredentialsToken never does (RFC 6749 §4.4 has no end
 	// user), so a client_credentials-only config has no use for this
 	// algorithm at all and shouldn't be forced to set one.
-	if (authorizationFlowConfigured || cibaConfigured) && !cfg.Algorithms.IDToken.IsValid() {
-		return fmt.Errorf("client: config: algorithms.id_token is required when endpoints.authorization or endpoints.backchannel_authentication is set")
+	if !cfg.OAuthOnly && (authorizationFlowConfigured || cibaConfigured) && !cfg.Algorithms.IDToken.IsValid() {
+		return fmt.Errorf("client: config: algorithms.id_token is required when endpoints.authorization or endpoints.backchannel_authentication is set, unless oauth_only is set")
+	}
+	if cfg.OAuthOnly && (cfg.Algorithms.IDTokenKeyManagement != 0 || cfg.Algorithms.IDTokenContentEncryption != 0) {
+		return fmt.Errorf("client: config: algorithms.id_token_key_management/id_token_content_encryption must not be set when oauth_only is set")
 	}
 	if err := validateIDTokenEncryptionFields(cfg); err != nil {
 		return err
@@ -371,10 +374,10 @@ func validateDependencies(cfg Config, deps Dependencies) error {
 	if deps.Keys == nil {
 		return fmt.Errorf("client: dependencies: keys is required")
 	}
-	if deps.IssuerKeys == nil {
-		return fmt.Errorf("client: dependencies: issuer keys is required")
+	if deps.IssuerKeys == nil && issuerKeysNeeded(cfg) {
+		return fmt.Errorf("client: dependencies: issuer keys is required (it may be left nil only when oauth_only is set and neither a JARM response nor a signed UserInfo response is verified)")
 	}
-	if cfg.Assurance == AssuranceProduction {
+	if cfg.Assurance == AssuranceProduction && deps.IssuerKeys != nil {
 		if err := checkKeySourceAssurance("issuer_keys", deps.IssuerKeys); err != nil {
 			return err
 		}
@@ -403,6 +406,27 @@ func validateConfigDrivenDependencies(cfg Config, deps Dependencies) error {
 	}
 	if cfg.ClientAuthMethod == storage.ClientAuthMethodAttestation && deps.Attestation == nil {
 		return fmt.Errorf("client: dependencies: attestation is required when client_auth_method is ClientAuthMethodAttestation")
+	}
+	return nil
+}
+
+// issuerKeysNeeded reports whether cfg verifies anything the
+// authorization server signs — see Config.OAuthOnly for when it
+// doesn't.
+func issuerKeysNeeded(cfg Config) bool {
+	return !cfg.OAuthOnly || cfg.Profile == ProfileFAPISecurityWithMessageSigning || cfg.Algorithms.UserInfo != 0
+}
+
+// checkOAuthOnlyScope refuses "openid" in an OAuthOnly client's
+// requested scope — see Config.OAuthOnly.
+func (c *Client) checkOAuthOnlyScope(scope []string) *Error {
+	if !c.cfg.OAuthOnly {
+		return nil
+	}
+	for _, s := range scope {
+		if s == "openid" {
+			return newError(ErrorInvalidRequest, `"openid" cannot be requested by an oauth_only client`, nil)
+		}
 	}
 	return nil
 }

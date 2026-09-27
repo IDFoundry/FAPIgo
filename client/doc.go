@@ -22,7 +22,9 @@
 // normal outcome, not an error. A caller that only needs access
 // tokens — no identity layer at all — can omit "openid" from
 // BeginAuthorizationRequest.Scope entirely and use this package as a
-// plain OAuth 2.0 + FAPI 2.0 client.
+// plain OAuth 2.0 + FAPI 2.0 client; setting Config.OAuthOnly makes
+// that a checked configuration rather than a convention, and lets such
+// a client omit Dependencies.IssuerKeys.
 //
 // RequestClientCredentialsToken (RFC 6749 §4.4) is the third, unrelated
 // flow this package drives, for a machine-to-machine client with no end

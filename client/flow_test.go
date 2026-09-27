@@ -104,6 +104,10 @@ type fakeAS struct {
 	// verify path end to end, not just validateIDToken in isolation.
 	encryptIDTokenTo  crypto.PublicKey
 	encryptIDTokenAlg fapi.KeyManagementAlgorithm
+
+	// omitIDToken drops id_token from the token response and "openid"
+	// from its scope — an OAuth-only authorization server.
+	omitIDToken bool
 }
 
 func newFakeAS(t *testing.T, issuer string, messageSigned bool) *fakeAS {
@@ -334,6 +338,10 @@ func (a *fakeAS) writeTokenIssued(w http.ResponseWriter) {
 	if !a.omitExpiresIn {
 		resp["expires_in"] = 300
 	}
+	if a.omitIDToken {
+		delete(resp, "id_token")
+		resp["scope"] = "accounts"
+	}
 
 	if a.nextDPoPNonce != "" {
 		w.Header().Set("DPoP-Nonce", a.nextDPoPNonce)
@@ -343,6 +351,13 @@ func (a *fakeAS) writeTokenIssued(w http.ResponseWriter) {
 }
 
 func newTestClient(t *testing.T, messageSigned bool) (*client.Client, *fakeAS, *httptest.Server) {
+	t.Helper()
+	return newTestClientWith(t, messageSigned, nil)
+}
+
+// newTestClientWith is newTestClient with mutate applied to the config
+// and dependencies before client.New.
+func newTestClientWith(t *testing.T, messageSigned bool, mutate func(*client.Config, *client.Dependencies)) (*client.Client, *fakeAS, *httptest.Server) {
 	t.Helper()
 	as := newFakeAS(t, testIssuer, messageSigned)
 	ts := httptest.NewServer(as.handler())
@@ -373,6 +388,9 @@ func newTestClient(t *testing.T, messageSigned bool) (*client.Client, *fakeAS, *
 		cfg.Algorithms.JARM = fapi.ES256
 		cfg.Limits.RequestObjectLifetime = time.Minute
 		cfg.Limits.MaxJARMResponseLifetime = time.Minute
+	}
+	if mutate != nil {
+		mutate(&cfg, &deps)
 	}
 
 	c, err := client.New(cfg, deps)

@@ -21,8 +21,10 @@ type Dependencies struct {
 	Keys keys.KeyManager
 
 	// IssuerKeys resolves the authorization server's verification keys,
-	// to verify a JARM response (when Config.Profile requires one) and an
-	// issued ID token.
+	// to verify a JARM response (when Config.Profile requires one), an
+	// issued ID token, and signed UserInfo responses/VerifyIssuerJWS.
+	// Required, except that a Config.OAuthOnly client verifying neither
+	// JARM nor signed UserInfo leaves it nil — see Config.OAuthOnly.
 	IssuerKeys keys.IssuerKeySource
 
 	// HTTP performs this client's PAR and token-endpoint calls.

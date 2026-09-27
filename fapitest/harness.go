@@ -340,10 +340,16 @@ func New(t *testing.T, cfg Config) *Harness {
 		ClientAuthMethod: cfg.ClientAuthMethod,
 	}
 	applyClientIDTokenOptions(&clientCfg, cfg, contentEncryption)
+	// One process hosts the AS, client and RS, so both verify against
+	// the AS's own KeyManager directly.
+	issuerKeys, err := keys.NewLocalIssuerKeys(issuer, asKeys)
+	if err != nil {
+		t.Fatalf("fapitest: keys.NewLocalIssuerKeys: %v", err)
+	}
 	clientDeps := client.Dependencies{
 		Sessions:   memstore.NewSessionStore(),
 		Keys:       clientKeys,
-		IssuerKeys: &memIssuerKeySource{issuer: Issuer, manager: asKeys},
+		IssuerKeys: issuerKeys,
 		HTTP:       httpClient,
 		Clock:      clock,
 		Random:     rand.Reader,
@@ -369,7 +375,7 @@ func New(t *testing.T, cfg Config) *Harness {
 			MaxClockSkew:    5 * time.Second,
 		},
 	}
-	resourceJWT, err := resource.NewJWTAccessTokens(&memIssuerKeySource{issuer: Issuer, manager: asKeys}, issuer, Issuer, sigAlg, 5*time.Minute, 8)
+	resourceJWT, err := resource.NewJWTAccessTokens(issuerKeys, issuer, Issuer, sigAlg, 5*time.Minute, 8)
 	if err != nil {
 		t.Fatalf("fapitest: resource.NewJWTAccessTokens: %v", err)
 	}

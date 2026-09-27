@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.35.0](https://github.com/IDFoundry/FAPIgo/compare/v0.34.0...v0.35.0) (2026-09-27)
+
+
+### Features
+
+* **client:** add Config.OAuthOnly for clients that never handle ID tokens ([7456ab4](https://github.com/IDFoundry/FAPIgo/commit/7456ab4a19b0d392a58b44dd6acdf7e083d6fba1))
+* **client:** add StaticAttestation for a wallet holding one attestation ([01b7d30](https://github.com/IDFoundry/FAPIgo/commit/01b7d301633e25d79cbb568a5bbf1050b79d1f67))
+* **keys:** add LocalIssuerKeys for verifiers in the authorization server's process ([4190b90](https://github.com/IDFoundry/FAPIgo/commit/4190b90643dc2115882cf74f719a75da06927005))
+* **server:** expose registered extension values at the interaction step ([e7baf03](https://github.com/IDFoundry/FAPIgo/commit/e7baf039ab6bd995d63a6a2ba15324d75fe25d85))
+
+
+### Bug Fixes
+
+* **client:** require Limits.MaxIDTokenLifetime only when ID tokens are possible ([e1b3e27](https://github.com/IDFoundry/FAPIgo/commit/e1b3e27377fbea4f7cd80b820f395ef2c77f0921))
+
 ## [0.34.0](https://github.com/IDFoundry/FAPIgo/compare/v0.33.0...v0.34.0) (2026-09-27)
 
 

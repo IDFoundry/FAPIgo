@@ -615,3 +615,22 @@ func TestPollBackchannelAuthenticationUnknownAuthReqIDIsARealError(t *testing.T)
 		t.Errorf("Code() = %q, want %q", cerr.Code(), client.ErrorInvalidResponse)
 	}
 }
+
+func TestPollBackchannelAuthenticationDeniedDropsMalformedDescription(t *testing.T) {
+	c, as, _ := newTestClientWithCIBA(t)
+	session := beginTestBackchannelSession(t, c)
+
+	as.tokenResponses = []cibaTokenResponse{{
+		status: http.StatusBadRequest,
+		body:   map[string]any{"error": "access_denied", "error_description": "denied\r\nInjected: header"},
+	}}
+
+	result, err := c.PollBackchannelAuthentication(context.Background(), session)
+	if err != nil {
+		t.Fatalf("PollBackchannelAuthentication: %v", err)
+	}
+	denied, ok := result.(client.BackchannelAuthenticationDenied)
+	if !ok || denied.Code != "access_denied" || denied.Description != "" {
+		t.Fatalf("result = %#v, want access_denied with the malformed description dropped", result)
+	}
+}

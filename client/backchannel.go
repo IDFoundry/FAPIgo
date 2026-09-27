@@ -278,7 +278,7 @@ func (c *Client) sendBackchannelAuthenticationRequest(ctx context.Context, dpopS
 			return nil, newError(ErrorInternal, errBackchannelAuthenticationRequestFailed, err)
 		}
 		if status != http.StatusOK {
-			return nil, parErrorFromResponse(body)
+			return nil, parErrorFromResponse(status, body)
 		}
 		return body, nil
 	}
@@ -292,7 +292,7 @@ func (c *Client) sendBackchannelAuthenticationRequest(ctx context.Context, dpopS
 		return body, nil
 	}
 	if nextNonce == "" || !isDPoPNonceError(body) {
-		return nil, parErrorFromResponse(body)
+		return nil, parErrorFromResponse(status, body)
 	}
 	retryForm, retryHeaders, buildErr := buildForm()
 	if buildErr != nil {
@@ -304,7 +304,7 @@ func (c *Client) sendBackchannelAuthenticationRequest(ctx context.Context, dpopS
 	}
 	c.cacheDPoPNonce(ctx, asNonceScope, header.Get(dpopNonceHeader))
 	if status != http.StatusOK {
-		return nil, parErrorFromResponse(body)
+		return nil, parErrorFromResponse(status, body)
 	}
 	return body, nil
 }
@@ -358,6 +358,8 @@ func (BackchannelAuthenticationPending) backchannelAuthenticationResult() {}
 
 // BackchannelAuthenticationDenied means the end user (or the
 // authorization server on their behalf) declined the request.
+// Description is dropped if it falls outside RFC 6749 §5.2's character
+// set; see ServerErrorResponse.
 type BackchannelAuthenticationDenied struct{ Code, Description string }
 
 // Discriminator for BackchannelAuthenticationResult — deliberately empty.
@@ -446,7 +448,7 @@ func (c *Client) PollBackchannelAuthentication(ctx context.Context, session Back
 
 	errResp, decodeErr := par.DecodeErrorResponse(body)
 	if decodeErr != nil {
-		return nil, parErrorFromResponse(body)
+		return nil, parErrorFromResponse(status, body)
 	}
 	switch errResp.Code {
 	case "authorization_pending":
@@ -454,11 +456,11 @@ func (c *Client) PollBackchannelAuthentication(ctx context.Context, session Back
 	case "slow_down":
 		return BackchannelAuthenticationPending{SlowDown: true}, nil
 	case "access_denied":
-		return BackchannelAuthenticationDenied{Code: errResp.Code, Description: errResp.Description}, nil
+		return BackchannelAuthenticationDenied{Code: errResp.Code, Description: newServerErrorResponse(status, errResp.Code, errResp.Description, "").Description}, nil
 	case "expired_token":
 		return BackchannelAuthenticationExpired{}, nil
 	default:
-		return nil, parErrorFromResponse(body)
+		return nil, parErrorFromResponse(status, body)
 	}
 }
 
@@ -470,8 +472,8 @@ func (c *Client) PollBackchannelAuthentication(ctx context.Context, session Back
 // converted to a terminal *Error: PollBackchannelAuthentication's own
 // non-200 branch needs the raw OAuth error code (authorization_pending,
 // slow_down, access_denied, expired_token are expected polling
-// outcomes, not failures), which parErrorFromResponse's translation
-// discards. Under SenderConstrainMTLS, dpopSigner is unused (pass
+// outcomes, not failures), to branch on before anything becomes an
+// *Error. Under SenderConstrainMTLS, dpopSigner is unused (pass
 // nil) — a single plain call, no proof, no nonce retry.
 func (c *Client) pollBackchannelAuthenticationOnce(ctx context.Context, dpopSigner crypto.Signer, tokenURL *url.URL, buildForm func() ([]byte, map[string]string, error), form []byte, headers map[string]string) ([]byte, int, *Error) {
 	if c.cfg.SenderConstrain == storage.SenderConstrainMTLS {

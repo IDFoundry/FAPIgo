@@ -7,8 +7,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strings"
 
+	"github.com/idfoundry/fapigo/internal/authchallenge"
 	"github.com/idfoundry/fapigo/internal/dpop"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
@@ -166,9 +166,8 @@ func isResourceDPoPNonceChallenge(status int, header http.Header) bool {
 	if status != http.StatusUnauthorized || header.Get(dpopNonceHeader) == "" {
 		return false
 	}
-	challenge := header.Get("WWW-Authenticate")
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(challenge)), "dpop") &&
-		strings.Contains(challenge, `error="use_dpop_nonce"`)
+	challenge, ok, err := authchallenge.Find(header.Values("WWW-Authenticate"), "DPoP")
+	return err == nil && ok && challenge.Params["error"] == "use_dpop_nonce"
 }
 
 // rebuildRequestBody returns a copy of req with a fresh, unconsumed

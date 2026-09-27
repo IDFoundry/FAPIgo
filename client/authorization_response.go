@@ -60,8 +60,11 @@ func (CallbackSuccess) callbackResult() {}
 
 // CallbackDenied means the authorization server (or the resource owner,
 // via the authorization server) declined the request. Code and
-// Description come from the authorization server's own error response
-// and are safe to surface to the embedding application.
+// Description come from the authorization server's own error response,
+// restricted to RFC 6749 §4.1.2.1's character set: a malformed Code is
+// rejected, and a malformed Description is dropped. Description is the
+// server's own text, meant for an operator rather than as a
+// user-facing message.
 type CallbackDenied struct {
 	Code        string
 	Description string
@@ -137,7 +140,13 @@ func (c *Client) HandleAuthorizationResponse(ctx context.Context, cb Authorizati
 	}
 
 	if errCode, ok := paramString(params, "error"); ok && errCode != "" {
+		if !isErrorText(errCode) {
+			return nil, newError(ErrorInvalidResponse, "authorization error response has a malformed error code", nil)
+		}
 		errDesc, _ := paramString(params, "error_description")
+		if !isErrorText(errDesc) {
+			errDesc = ""
+		}
 		return CallbackDenied{Code: errCode, Description: errDesc}, nil
 	}
 

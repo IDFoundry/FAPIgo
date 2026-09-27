@@ -92,7 +92,8 @@ func (c *Client) FetchUserInfo(ctx context.Context, tokens TokenSet) (UserInfo, 
 		return UserInfo{}, newError(ErrorInvalidResponse, "failed to read UserInfo response", err)
 	}
 	if res.StatusCode != http.StatusOK {
-		return UserInfo{}, newError(ErrorInvalidResponse, fmt.Sprintf("UserInfo endpoint returned status %d", res.StatusCode), nil)
+		return UserInfo{}, newError(ErrorInvalidResponse, fmt.Sprintf("UserInfo endpoint returned status %d", res.StatusCode), nil).
+			withServerResponse(c.resourceErrorResponse(res, body))
 	}
 
 	claims, idErr := c.decodeUserInfoResponse(ctx, res.Header.Get("Content-Type"), body)

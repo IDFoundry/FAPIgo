@@ -284,7 +284,7 @@ func (c *Client) sendTokenRequest(ctx context.Context, dpopSigner crypto.Signer,
 			return nil, newError(ErrorInternal, errTokenRequestFailed, err)
 		}
 		if status != http.StatusOK {
-			return nil, parErrorFromResponse(body)
+			return nil, parErrorFromResponse(status, body)
 		}
 		return body, nil
 	}
@@ -299,7 +299,7 @@ func (c *Client) sendTokenRequest(ctx context.Context, dpopSigner crypto.Signer,
 	}
 
 	if nextNonce == "" || !isDPoPNonceError(body) {
-		return nil, parErrorFromResponse(body)
+		return nil, parErrorFromResponse(status, body)
 	}
 	retryForm, retryHeaders, buildErr := buildTokenForm()
 	if buildErr != nil {
@@ -311,7 +311,7 @@ func (c *Client) sendTokenRequest(ctx context.Context, dpopSigner crypto.Signer,
 	}
 	c.cacheDPoPNonce(ctx, asNonceScope, header.Get(dpopNonceHeader))
 	if status != http.StatusOK {
-		return nil, parErrorFromResponse(body)
+		return nil, parErrorFromResponse(status, body)
 	}
 	return body, nil
 }

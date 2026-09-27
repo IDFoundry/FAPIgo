@@ -133,6 +133,8 @@ jobs:
             name: FuzzGrantRecordRoundTrip
           - pkg: ./server
             name: FuzzGrantedIDTokenClaims
+          - pkg: ./internal/authchallenge
+            name: FuzzParse
     steps:
       - uses: actions/checkout@v7
 

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -214,7 +213,7 @@ func (c *Client) pushAuthorizationRequestPlain(ctx context.Context, params map[s
 		return nil, newError(ErrorInternal, errPushedAuthorizationRequestFailed, err)
 	}
 	if status != http.StatusCreated && status != http.StatusOK {
-		return nil, parErrorFromResponse(body)
+		return nil, parErrorFromResponse(status, body)
 	}
 	return body, nil
 }
@@ -241,7 +240,7 @@ func (c *Client) pushAuthorizationRequestWithJKT(ctx context.Context, params map
 		return nil, newError(ErrorInternal, errPushedAuthorizationRequestFailed, err)
 	}
 	if status != http.StatusCreated && status != http.StatusOK {
-		return nil, parErrorFromResponse(body)
+		return nil, parErrorFromResponse(status, body)
 	}
 	return body, nil
 }
@@ -287,7 +286,7 @@ func (c *Client) pushAuthorizationRequestWithDPoPProof(ctx context.Context, para
 	}
 
 	if nextNonce == "" || !isDPoPNonceError(body) {
-		return nil, parErrorFromResponse(body)
+		return nil, parErrorFromResponse(status, body)
 	}
 	retryForm, retryHeaders, buildErr := buildParForm()
 	if buildErr != nil {
@@ -299,7 +298,7 @@ func (c *Client) pushAuthorizationRequestWithDPoPProof(ctx context.Context, para
 	}
 	c.cacheDPoPNonce(ctx, asNonceScope, header.Get(dpopNonceHeader))
 	if status != http.StatusCreated && status != http.StatusOK {
-		return nil, parErrorFromResponse(body)
+		return nil, parErrorFromResponse(status, body)
 	}
 	return body, nil
 }
@@ -458,15 +457,4 @@ func (c *Client) signPushedRequestForm(ctx context.Context, now time.Time, form,
 	}
 	form["request"] = object
 	return nil
-}
-
-// parErrorFromResponse maps a non-success PAR (or token-endpoint) HTTP
-// response body to a typed Error, falling back to a generic message if
-// the body isn't a well-formed OAuth error response.
-func parErrorFromResponse(body []byte) *Error {
-	errResp, err := par.DecodeErrorResponse(body)
-	if err != nil {
-		return newError(ErrorInvalidResponse, "authorization server returned an error", fmt.Errorf("status body: %s", strconv.Quote(string(body))))
-	}
-	return newError(ErrorInvalidResponse, errResp.Description, fmt.Errorf("authorization server error: %s", errResp.Code))
 }

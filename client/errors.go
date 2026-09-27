@@ -29,6 +29,7 @@ type Error struct {
 	code        ErrorCode
 	description string
 	cause       error
+	server      *ServerErrorResponse
 }
 
 func newError(code ErrorCode, description string, cause error) *Error {
@@ -38,7 +39,10 @@ func newError(code ErrorCode, description string, cause error) *Error {
 // Code returns the error code.
 func (e *Error) Code() ErrorCode { return e.code }
 
-// PublicDescription returns a short, safe-to-expose description.
+// PublicDescription returns a short, safe-to-expose description. When
+// the Error was caused by a server's error response, it is that
+// response's error_description (see ServerResponse), which is the
+// server's own text.
 func (e *Error) PublicDescription() string { return e.description }
 
 // Error implements the error interface. Its output includes the

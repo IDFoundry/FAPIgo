@@ -120,7 +120,8 @@ type Config struct {
 	OAuthOnly bool
 
 	// ClientOAuthOnly additionally makes the harness's client
-	// client.Config.OAuthOnly, with no Algorithms.IDToken and — unless
+	// client.Config.OAuthOnly, with no Algorithms.IDToken or
+	// Limits.MaxIDTokenLifetime and — unless
 	// the profile verifies JARM responses — no Dependencies.IssuerKeys.
 	// Requires OAuthOnly: the server must not issue ID tokens either.
 	ClientOAuthOnly bool
@@ -360,6 +361,7 @@ func New(t *testing.T, cfg Config) *Harness {
 	if cfg.ClientOAuthOnly {
 		clientCfg.OAuthOnly = true
 		clientCfg.Algorithms.IDToken = 0
+		clientCfg.Limits.MaxIDTokenLifetime = 0
 		if cfg.Profile != server.ProfileFAPISecurityWithMessageSigning {
 			clientDeps.IssuerKeys = nil
 		}

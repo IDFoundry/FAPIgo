@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.34.0](https://github.com/IDFoundry/FAPIgo/compare/v0.33.0...v0.34.0) (2026-09-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* **server:** a server with Config.AttestationBasedClientAuthentication set must supply Dependencies.AttesterTrust — New rejects nil. Pass server.RegisteredAttesterKeys{} to keep the previous behaviour, or
+
+### Features
+
+* **server:** verify client attestations by their x5c certificate chain ([325f5ec](https://github.com/IDFoundry/FAPIgo/commit/325f5ec0dde79c5f3cc1efb40fe8a9b7682479ab))
+
 ## [0.33.0](https://github.com/IDFoundry/FAPIgo/compare/v0.32.0...v0.33.0) (2026-09-26)
 
 

@@ -152,6 +152,8 @@ func invalidGrantedIDTokenClaims() map[string]map[string]json.RawMessage {
 		"at_hash":            {"at_hash": json.RawMessage(`"h"`)},
 		"azp":                {"azp": json.RawMessage(`"other-client"`)},
 		"jti":                {"jti": json.RawMessage(`"j"`)},
+		"c_hash":             {"c_hash": json.RawMessage(`"h"`)},
+		"s_hash":             {"s_hash": json.RawMessage(`"h"`)},
 		"empty name":         {"": json.RawMessage(`"x"`)},
 		"invalid UTF-8 name": {"name\xff": json.RawMessage(`"x"`)},
 		// newHarness sets Limits.MaxIDTokenClaimsBytes to 4096.

@@ -11,10 +11,13 @@ import (
 
 // reservedIDTokenClaims are claim names GrantedAuthorization.IDTokenClaims
 // must not set beyond those token.IsIDTokenReservedClaim already covers:
-// ones a relying party validates against its own expectations (azp,
-// OIDC Core §3.1.3.7) or that describe the token itself (jti, nbf, cnf)
-// rather than the authenticated subject.
-var reservedIDTokenClaims = []string{"azp", "jti", "nbf", "cnf"}
+// ones a relying party validates against its own expectations — azp
+// (OIDC Core §3.1.3.7), and c_hash/s_hash, the hybrid-flow hashes of
+// the code and state (§3.3.2.11, FAPI 1.0 Advanced §5.2.2.1), which this
+// server never issues but a relying party supporting that flow would
+// check — or that describe the token itself (jti, nbf, cnf) rather than
+// the authenticated subject.
+var reservedIDTokenClaims = []string{"azp", "c_hash", "s_hash", "jti", "nbf", "cnf"}
 
 // validateGrantedIDTokenClaims checks GrantedAuthorization.IDTokenClaims
 // before anything is persisted, so a bad claim is reported to the

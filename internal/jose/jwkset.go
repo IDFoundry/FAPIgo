@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/strictjson"
 )
 
 // ParsedJWK is one key from a parsed JWK Set — algorithm and key ID
@@ -66,6 +67,9 @@ type jwkSetAlgHint struct {
 func ParseJWKSet(body []byte) ([]ParsedJWK, error) {
 	dec := json.NewDecoder(bytes.NewReader(body))
 	var set rawJWKSet
+	if err := strictjson.CheckFieldCase(body, &set); err != nil {
+		return nil, fmt.Errorf("malformed jwks: %w", err)
+	}
 	if err := dec.Decode(&set); err != nil {
 		return nil, fmt.Errorf("malformed jwks: %w", err)
 	}

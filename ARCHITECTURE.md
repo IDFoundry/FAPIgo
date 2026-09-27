@@ -82,6 +82,7 @@ fapigo/                    // package fapi: shared value types only
 │   ├── httperror/               // shared error-type (server/resource/federation) mechanical bookkeeping
 │   ├── critical/                 // JWS/JWE "crit" header parameter check (RFC 7515/7516)
 │   ├── canonical/               // URL/JSON canonicalization
+│   ├── strictjson/              // case-sensitive JSON member names for JOSE/metadata decoding
 │   └── validation/               // generic strict-parsing helpers
 └── conformance/
     ├── client/                  // OIDF RP/client test plan config + scripts

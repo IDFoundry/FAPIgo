@@ -7,6 +7,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/critical"
+	"github.com/idfoundry/fapigo/internal/strictjson"
 )
 
 // Header is a JWS protected header. Only the members this module's
@@ -72,6 +73,9 @@ func marshalHeader(h Header) ([]byte, error) {
 func parseHeader(data []byte) (Header, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	var raw rawHeader
+	if err := strictjson.CheckFieldCase(data, &raw); err != nil {
+		return Header{}, fmt.Errorf("jose: parse header: %w", err)
+	}
 	if err := dec.Decode(&raw); err != nil {
 		return Header{}, fmt.Errorf("jose: parse header: %w", err)
 	}

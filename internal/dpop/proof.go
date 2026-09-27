@@ -1,8 +1,8 @@
 package dpop
 
 import (
-	"encoding/json"
 	"fmt"
+	"github.com/idfoundry/fapigo/internal/strictjson"
 )
 
 // jwtType is the required JWS "typ" header value for a DPoP proof
@@ -25,7 +25,7 @@ type claims struct {
 
 func parseClaims(payload []byte) (claims, error) {
 	var c claims
-	if err := json.Unmarshal(payload, &c); err != nil {
+	if err := strictjson.Unmarshal(payload, &c); err != nil {
 		return claims{}, fmt.Errorf("%w: %v", ErrMalformedClaims, err)
 	}
 	if c.JTI == "" || c.HTM == "" || c.HTU == "" {

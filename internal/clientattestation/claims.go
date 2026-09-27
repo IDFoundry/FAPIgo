@@ -3,6 +3,7 @@ package clientattestation
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/idfoundry/fapigo/internal/strictjson"
 )
 
 // attestationClaims is the Client Attestation JWT's claims set
@@ -30,7 +31,7 @@ type confirmationClaims struct {
 
 func parseAttestationClaims(payload []byte) (attestationClaims, error) {
 	var c attestationClaims
-	if err := json.Unmarshal(payload, &c); err != nil {
+	if err := strictjson.Unmarshal(payload, &c); err != nil {
 		return attestationClaims{}, fmt.Errorf("%w: %v", ErrMalformedClaims, err)
 	}
 	if c.Issuer == "" || c.Subject == "" || c.ExpiresAt == 0 || len(c.Confirmation.JWK) == 0 {
@@ -57,7 +58,7 @@ type popClaims struct {
 
 func parsePoPClaims(payload []byte) (popClaims, error) {
 	var c popClaims
-	if err := json.Unmarshal(payload, &c); err != nil {
+	if err := strictjson.Unmarshal(payload, &c); err != nil {
 		return popClaims{}, fmt.Errorf("%w: %v", ErrMalformedClaims, err)
 	}
 	if c.Issuer == "" || c.Audience == "" || c.JTI == "" || c.IssuedAt == 0 {

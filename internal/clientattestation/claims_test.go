@@ -1,6 +1,9 @@
 package clientattestation
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseAttestationClaims_RejectsMalformedJSON(t *testing.T) {
 	if _, err := parseAttestationClaims([]byte("not json")); err == nil {
@@ -39,5 +42,14 @@ func TestParsePoPClaims_RejectsMissingRequiredFields(t *testing.T) {
 		if _, err := parsePoPClaims([]byte(payload)); err == nil {
 			t.Errorf("%s: parsePoPClaims accepted claims missing a required field", name)
 		}
+	}
+}
+
+func TestParseClaimsRejectCaseVariantMemberNames(t *testing.T) {
+	if _, err := parseAttestationClaims([]byte(`{"iss":"a","sub":"c","exp":1,"cnf":{"JWK":{}}}`)); err == nil || !strings.Contains(err.Error(), "case-sensitive") {
+		t.Errorf("parseAttestationClaims: err = %v, want case-sensitivity rejection", err)
+	}
+	if _, err := parsePoPClaims([]byte(`{"ISS":"c","aud":"https://as.example.com","jti":"j","iat":1}`)); err == nil || !strings.Contains(err.Error(), "case-sensitive") {
+		t.Errorf("parsePoPClaims: err = %v, want case-sensitivity rejection", err)
 	}
 }

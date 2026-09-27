@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/idfoundry/fapigo/internal/strictjson"
 )
 
 // atJWTType is the required JWS "typ" header value for a JWT access
@@ -96,6 +98,9 @@ func parseAccessTokenClaims(payload []byte) (AccessTokenClaims, error) {
 		var c rawConfirmation
 		// Exactly one of jkt/x5t#S256 — a token is bound exactly one
 		// way, never both and never neither.
+		if err := strictjson.CheckFieldCase(cnfRaw, &c); err != nil {
+			return AccessTokenClaims{}, fmt.Errorf("%w: cnf: %v", ErrMalformedClaims, err)
+		}
 		if err := dec.Decode(&c); err != nil || (c.JKT == "") == (c.X5TS256 == "") {
 			return AccessTokenClaims{}, fmt.Errorf("%w: cnf must be an object with exactly one of a non-empty jkt or x5t#S256", ErrMalformedClaims)
 		}

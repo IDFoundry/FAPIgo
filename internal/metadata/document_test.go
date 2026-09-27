@@ -269,3 +269,11 @@ func TestParseAndValidateRejectsEmptyExpectedIssuer(t *testing.T) {
 		t.Fatalf("ParseAndValidate(empty expected issuer) = nil error, want error")
 	}
 }
+
+func TestParseAndValidateRejectsCaseVariantMemberNames(t *testing.T) {
+	body := []byte(strings.Replace(string(validDocumentJSON(t, "https://as.example.com")), `"issuer"`, `"Issuer"`, 1))
+	_, err := metadata.ParseAndValidate(body, "https://as.example.com")
+	if !errors.Is(err, metadata.ErrMalformed) || !strings.Contains(err.Error(), "case-sensitive") {
+		t.Fatalf("err = %v, want ErrMalformed case-sensitivity rejection", err)
+	}
+}

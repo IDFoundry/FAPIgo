@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+
+	"github.com/idfoundry/fapigo/internal/strictjson"
 )
 
 // maxDocumentBytes bounds how large a metadata document this package
@@ -126,6 +128,9 @@ func ParseAndValidate(body []byte, expectedIssuer string) (Document, error) {
 
 	dec := json.NewDecoder(bytes.NewReader(body))
 	var doc Document
+	if err := strictjson.CheckFieldCase(body, &doc); err != nil {
+		return Document{}, fmt.Errorf("%w: %v", ErrMalformed, err)
+	}
 	if err := dec.Decode(&doc); err != nil {
 		return Document{}, fmt.Errorf("%w: %v", ErrMalformed, err)
 	}

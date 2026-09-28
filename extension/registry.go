@@ -3,6 +3,7 @@ package extension
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 )
 
 // Registry is an immutable set of registered Definitions, built once via
@@ -72,6 +73,21 @@ func (r *Registry) Parse(params map[string]json.RawMessage, core map[string]stru
 		}
 	}
 	return values, nil
+}
+
+// TokenClaimNames returns the wire names of every Definition registered
+// with ReturnInTokenClaims — the names under which a validated value
+// is copied into issued tokens, for a token issuer to check against the
+// claim names it assigns itself.
+func (r *Registry) TokenClaimNames() []string {
+	var out []string
+	for name, d := range r.byName {
+		if d.returnInTokenClaims() {
+			out = append(out, name)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // Definitions returns every Definition r was built with, for use with

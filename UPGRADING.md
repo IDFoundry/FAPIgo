@@ -94,6 +94,22 @@ or UserInfo wherever each was requested. Leaving the field nil releases
 none, and approving a claim that wasn't requested fails
 `CompleteAuthorization`/`CompleteBackchannelAuthentication`.
 
+### Extensions can't return values under standard claim names (server)
+
+**Affects:** servers whose `Config.Extensions` registers a definition
+with `ReturnInTokenClaims` under a name the server or the resource owner
+supplies: a claim the server sets itself (`sub`, `acr`, `cnf`,
+`authorization_details`, ...) or an OIDC Core §5.1 identity claim
+(`email`, `name`, `phone_number`, ...). `server.New` now rejects it.
+
+**Why:** the value is the client's own, copied into the token. Under a
+name like `email`, a relying party would read a client-supplied value
+as the user's identity claim — for example when the user didn't approve
+releasing their real email.
+
+Rename the extension, or drop `ReturnInTokenClaims` if the value only
+needs to reach the interaction step (`InteractionRequest.Extensions`).
+
 ## v0.38.0
 
 ### `Dependencies.Random` must be `crypto/rand.Reader` (production only)

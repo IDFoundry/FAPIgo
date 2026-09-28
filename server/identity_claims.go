@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+
+	"github.com/idfoundry/fapigo/extension"
 )
 
 // IdentityClaimsSource resolves a subject's identity claim values (OIDC
@@ -146,4 +148,32 @@ func approvedClaimNames(params map[string]json.RawMessage, approved []string) (i
 		return out
 	}
 	return keep(requested.IDToken), keep(requested.UserInfo), nil
+}
+
+// managedTokenClaims are claim names whose meaning a token's recipient
+// takes from this server or from the resource owner, never from a
+// client: the claims this package sets in access and ID tokens itself,
+// and the OIDC Core §5.1 standard claims, which Dependencies.IdentityClaims
+// supplies once approved. A client-supplied extension value must not
+// appear under one of them — an unapproved "email" would otherwise
+// reach an ID token as the client's own value.
+var managedTokenClaims = []string{
+	"iss", "sub", "aud", "exp", "iat", "nbf", "jti", "client_id", "scope", "cnf",
+	"nonce", "auth_time", "acr", "amr", "azp", "at_hash", "c_hash", "s_hash",
+	authorizationDetailsParameter, RequestedUserinfoClaimsKey,
+	"name", "given_name", "family_name", "middle_name", "nickname",
+	"preferred_username", "profile", "picture", "website", "email",
+	"email_verified", "gender", "birthdate", "zoneinfo", "locale",
+	"phone_number", "phone_number_verified", "address", "updated_at",
+}
+
+// checkExtensionClaimNames rejects a registry that would copy a
+// client-supplied value into a token under a managedTokenClaims name.
+func checkExtensionClaimNames(registry *extension.Registry) error {
+	for _, name := range registry.TokenClaimNames() {
+		if slices.Contains(managedTokenClaims, name) {
+			return fmt.Errorf("server: config: extension %q has ReturnInTokenClaims set, but %q is a claim the server or the resource owner supplies, not the client", name, name)
+		}
+	}
+	return nil
 }

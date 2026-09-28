@@ -142,7 +142,7 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 
 	params, err := formParametersToMap(req.HTTP.Parameters)
 	if err != nil {
-		return s.backchannelBeginFail(ctx, "", newError(ErrorInvalidRequest, 400, "the request contains a duplicated parameter", err)), nil
+		return s.backchannelBeginFail(ctx, "", newError(ErrorInvalidRequest, 400, "the request's parameters are duplicated, too many, or too large", err)), nil
 	}
 	// CIBA Core 1.0 §7.1 explicitly widens the backchannel authentication
 	// endpoint's own accepted audiences beyond just its own URL: "the OP
@@ -495,11 +495,12 @@ func (s *Server) backchannelAuthenticationLifetime(params map[string]json.RawMes
 	if !ok || seconds <= 0 {
 		return maxLifetime
 	}
-	requested := time.Duration(seconds) * time.Second
-	if requested > maxLifetime {
+	// Compared in whole seconds before converting, so a huge value can't
+	// overflow time.Duration into a negative lifetime.
+	if seconds > int64(maxLifetime/time.Second) {
 		return maxLifetime
 	}
-	return requested
+	return time.Duration(seconds) * time.Second
 }
 
 // parseRequestedExpiry accepts both forms the OIDF FAPI-CIBA-ID1

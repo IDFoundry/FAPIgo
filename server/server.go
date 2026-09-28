@@ -36,6 +36,9 @@ func New(cfg Config, deps Dependencies) (*Server, error) {
 		}
 		cfg.Extensions = empty
 	}
+	if err := checkExtensionClaimNames(cfg.Extensions); err != nil {
+		return nil, err
+	}
 	if len(cfg.AutomaticRegistration.TrustAnchors) > 0 {
 		// Wraps deps.Clients/ClientKeys transparently — every other
 		// internal (PAR, the token endpoint, CIBA) keeps calling those

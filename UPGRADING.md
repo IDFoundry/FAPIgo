@@ -69,6 +69,31 @@ link-local addresses at connect time and never follows a redirect. Use
 `Transport.AllowedPrivateHosts` for a notification endpoint that really
 is on a private network.
 
+### Identity claims need the user's approval (server)
+
+**Affects:** servers with `Dependencies.IdentityClaims` configured, whose
+clients request identity claims with the OIDC `claims` parameter.
+
+**Why:** requested claim names went straight to the claims source, with
+no scope check, no consent step and no client context, so any
+registered client could obtain any identity attribute the source holds.
+
+Show `InteractionRequest.RequestedClaims` (or
+`BackchannelInteractionRequest.RequestedClaims`) on the consent screen,
+and pass the names the user approves:
+
+```go
+server.GrantedAuthorization{
+	Scope:                  approvedScope,
+	ApprovedIdentityClaims: approvedClaims, // a subset of RequestedClaims.Names()
+}
+```
+
+Only claims both requested and approved are resolved, for the ID token
+or UserInfo wherever each was requested. Leaving the field nil releases
+none, and approving a claim that wasn't requested fails
+`CompleteAuthorization`/`CompleteBackchannelAuthentication`.
+
 ## v0.38.0
 
 ### `Dependencies.Random` must be `crypto/rand.Reader` (production only)

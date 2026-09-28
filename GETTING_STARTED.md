@@ -218,6 +218,10 @@ result := server.Authorize(subject, authCtx, server.GrantedAuthorization{
 	// token), each value already JSON-encoded. Server-managed names
 	// (iss, sub, aud, nonce, acr, ...) are rejected.
 	IDTokenClaims: map[string]json.RawMessage{"sub_type": json.RawMessage(`"user"`)},
+	// Identity claims the client asked for with the OIDC "claims"
+	// parameter (a.Interaction.RequestedClaims) that the user agreed to
+	// release. Nil releases none.
+	ApprovedIdentityClaims: whicheverRequestedClaimsTheUserApproved,
 })
 // or: server.Deny("user declined") / server.AuthenticationFailed("bad credentials")
 
@@ -267,7 +271,7 @@ decides and where the claim lands, so pick by what you need:
 | You want to... | Use | Lands in |
 |---|---|---|
 | Add claims you decide at login (e.g. a subject type, or who is acting on an entity's behalf) | `GrantedAuthorization.IDTokenClaims` | ID token only |
-| Return identity claims (`name`, `email`, ...) only when the client asks via the OIDC `claims` parameter | `Dependencies.IdentityClaims` (`server.IdentityClaimsSource`) | ID token and/or UserInfo, per request |
+| Return identity claims (`name`, `email`, ...) the client asks for via the OIDC `claims` parameter, once the user approves them | `Dependencies.IdentityClaims` (`server.IdentityClaimsSource`) plus `GrantedAuthorization.ApprovedIdentityClaims` | ID token and/or UserInfo, per request |
 | Carry a value the client sent as a custom authorization request parameter | `extension.Definition` with `ReturnInTokenClaims` | Access token and ID token |
 
 `IDTokenClaims` values are JSON-encoded, and server-managed names

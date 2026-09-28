@@ -108,6 +108,10 @@ type BackchannelInteractionRequest struct {
 	// exactly, for the CIBA flow.
 	AuthorizationDetails extension.RARValues
 
+	// RequestedClaims is the identity claims the client asked for with
+	// the "claims" parameter — see InteractionRequest.RequestedClaims.
+	RequestedClaims RequestedClaims
+
 	// Extensions mirrors InteractionRequest.Extensions, for the CIBA
 	// flow's signed backchannel authentication request.
 	Extensions extension.Values

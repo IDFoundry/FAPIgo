@@ -19,6 +19,9 @@ type pendingBackchannelAuthentication struct {
 	handle               server.BackchannelAuthenticationHandle
 	scope                []string
 	authorizationDetails []json.RawMessage
+	// identityClaims is every identity claim the request asked for,
+	// approved in full, as in the browser flow.
+	identityClaims []string
 }
 
 // backchannelHandler serves this binary's CIBA backchannel
@@ -70,6 +73,7 @@ func (h *backchannelHandler) handleAuthenticate(w http.ResponseWriter, r *http.R
 		approved := approvedAuthorizationDetails(action.Interaction.AuthorizationDetails)
 		h.pending.Put(action.AuthReqID.String(), pendingBackchannelAuthentication{
 			handle: action.Handle, scope: action.Interaction.Scope, authorizationDetails: approved,
+			identityClaims: action.Interaction.RequestedClaims.Names(),
 		}, action.ExpiresIn)
 
 		action.WriteJSON(w)
@@ -126,6 +130,7 @@ func (h *backchannelHandler) decide(ctx context.Context, authReqID, action strin
 		}
 		result = server.Authorize(subject, authCtx, server.GrantedAuthorization{
 			Scope: pending.scope, AuthorizationDetails: pending.authorizationDetails,
+			ApprovedIdentityClaims: pending.identityClaims,
 		})
 	case "deny":
 		result = server.Deny("user rejected authentication")

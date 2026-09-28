@@ -114,6 +114,11 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 		return s.completeLocalFail(ctx, clientID, newError(ErrorInvalidRequest, 400, "granted ID token claims are not valid", err)), nil
 	}
 
+	idTokenClaims, userinfoClaims, err := approvedClaimNames(request.Parameters, result.grant.ApprovedIdentityClaims)
+	if err != nil {
+		return s.completeLocalFail(ctx, clientID, newError(ErrorInvalidRequest, 400, "approved identity claims exceed what was requested", err)), nil
+	}
+
 	codeChallenge, err := jsonString(request.Parameters, "code_challenge")
 	if err != nil {
 		return s.completeLocalFail(ctx, clientID, newError(ErrorServerError, 500, "pushed authorization request is missing code_challenge", err)), nil
@@ -125,7 +130,6 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 	}
 	nonce, _ := jsonString(request.Parameters, "nonce")
 	dpopJKT, _ := jsonString(request.Parameters, "dpop_jkt") // optional, RFC 9449 §10
-	idTokenClaims, userinfoClaims := parseRequestedClaimNames(request.Parameters["claims"])
 
 	grant, err := encodeGrantRecord(grantRecord{
 		RedirectURI:             redirectURI,

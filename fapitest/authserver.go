@@ -196,7 +196,10 @@ func (a *authServer) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 
 	result, err := a.srv.CompleteAuthorization(ctx, server.CompleteAuthorizationRequest{
 		Handle: interaction.Handle,
-		Result: server.Authorize(subject, authCtx, server.GrantedAuthorization{Scope: interaction.Interaction.Scope, IDTokenClaims: a.approve.IDTokenClaims}),
+		Result: server.Authorize(subject, authCtx, server.GrantedAuthorization{
+			Scope: interaction.Interaction.Scope, IDTokenClaims: a.approve.IDTokenClaims,
+			ApprovedIdentityClaims: interaction.Interaction.RequestedClaims.Names(),
+		}),
 	})
 	if err != nil {
 		a.t.Fatalf("fapitest: CompleteAuthorization: %v", err)

@@ -128,6 +128,11 @@ var extraBlockedCIDRs = func() []*net.IPNet {
 		"198.51.100.0/24", // RFC 5737 TEST-NET-2 documentation
 		"203.0.113.0/24",  // RFC 5737 TEST-NET-3 documentation
 		"240.0.0.0/4",     // NOSONAR: go:S1313 — see 100.64.0.0/10 above. RFC 1112 reserved (includes 255.255.255.255).
+		// RFC 8215 local-use NAT64 prefix. Unlike the well-known
+		// 64:ff9b::/96, an operator picks where inside it the IPv4
+		// address sits, so embeddedIPv4 can't decode it; and being
+		// local-use it never leads anywhere public, so block it whole.
+		"64:ff9b:1::/48",
 	}
 	out := make([]*net.IPNet, 0, len(cidrs))
 	for _, c := range cidrs {

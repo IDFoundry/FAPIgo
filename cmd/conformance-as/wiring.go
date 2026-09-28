@@ -39,6 +39,7 @@ const (
 	federationStatementLifetime    = time.Hour
 	federationMaxStatementLifetime = 2 * time.Hour
 	federationMaxPathLength        = 5
+	federationMaxAuthorityHints    = 5
 	federationMaxCacheAge          = 5 * time.Minute
 )
 
@@ -259,6 +260,7 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 		}
 		autoRegLimits = federation.Limits{
 			MaxPathLength:        federationMaxPathLength,
+			MaxAuthorityHints:    federationMaxAuthorityHints,
 			MaxStatementLifetime: federationMaxStatementLifetime,
 			MaxClockSkew:         resolved.Limits.MaxClockSkew,
 		}
@@ -271,6 +273,7 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 				TrustAnchors:         resolved.Federation.TrustAnchors,
 				AllowedScopes:        resolved.Federation.AllowedScopes,
 				MaxPathLength:        federationMaxPathLength,
+				MaxAuthorityHints:    federationMaxAuthorityHints,
 				MaxStatementLifetime: federationMaxStatementLifetime,
 				MaxClockSkew:         resolved.Limits.MaxClockSkew,
 				MaxCacheAge:          federationMaxCacheAge,

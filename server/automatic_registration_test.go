@@ -158,6 +158,7 @@ func validAutomaticRegistrationServerConfig(f *automaticRegistrationFixture) ser
 		TrustAnchors:         []federation.TrustAnchor{{EntityID: f.taID, JWKS: f.taJWKS}},
 		AllowedScopes:        []string{"openid", "accounts"},
 		MaxPathLength:        5,
+		MaxAuthorityHints:    5,
 		MaxStatementLifetime: 2 * time.Hour,
 		MaxClockSkew:         5 * time.Second,
 		MaxCacheAge:          time.Hour,
@@ -184,10 +185,11 @@ func TestNewRejectsInvalidAutomaticRegistrationConfig(t *testing.T) {
 	validDeps.Clock = fixedClock{now: f.now}
 
 	cases := map[string]func(*server.Config, *server.Dependencies){
-		"empty allowed scopes": func(c *server.Config, d *server.Dependencies) { c.AutomaticRegistration.AllowedScopes = nil },
-		"zero max cache age":   func(c *server.Config, d *server.Dependencies) { c.AutomaticRegistration.MaxCacheAge = 0 },
-		"zero max path length": func(c *server.Config, d *server.Dependencies) { c.AutomaticRegistration.MaxPathLength = 0 },
-		"nil federation http":  func(c *server.Config, d *server.Dependencies) { d.FederationHTTP = nil },
+		"empty allowed scopes":     func(c *server.Config, d *server.Dependencies) { c.AutomaticRegistration.AllowedScopes = nil },
+		"zero max cache age":       func(c *server.Config, d *server.Dependencies) { c.AutomaticRegistration.MaxCacheAge = 0 },
+		"zero max path length":     func(c *server.Config, d *server.Dependencies) { c.AutomaticRegistration.MaxPathLength = 0 },
+		"zero max authority hints": func(c *server.Config, d *server.Dependencies) { c.AutomaticRegistration.MaxAuthorityHints = 0 },
+		"nil federation http":      func(c *server.Config, d *server.Dependencies) { d.FederationHTTP = nil },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {

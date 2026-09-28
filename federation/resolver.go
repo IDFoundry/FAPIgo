@@ -49,6 +49,22 @@ type Limits struct {
 	// those per-statement ones.
 	MaxPathLength int
 
+	// MaxAuthorityHints bounds how many "authority_hints" (OpenID
+	// Federation 1.0 §3.1.1) any one Entity Configuration on the path
+	// may list: Resolve rejects one that lists more, rather than trying
+	// only some of them. Resolve fetches each listed superior's Entity
+	// Configuration in turn until one validates, and the subject entity
+	// ID is often chosen by an unauthenticated caller (automatic
+	// registration resolves an unknown client_id before the request
+	// naming it can be authenticated), so without this bound one
+	// Entity Configuration listing thousands of hints would turn a
+	// single Resolve call into thousands of outbound fetches. Together
+	// with MaxPathLength it caps one Resolve call at
+	// MaxPathLength × (MaxAuthorityHints + 2) + 1 fetches. Real Entity
+	// Configurations list one hint, or a handful for an entity in
+	// several federations.
+	MaxAuthorityHints int
+
 	// MaxStatementLifetime bounds how far in the future (relative to
 	// Dependencies.Clock) any fetched Entity Statement's exp claim may
 	// be.
@@ -110,6 +126,9 @@ func NewResolver(cfg Config, deps Dependencies) (*Resolver, error) {
 	}
 	if cfg.Limits.MaxPathLength <= 0 {
 		return nil, fmt.Errorf("federation: config: limits.max_path_length must be positive")
+	}
+	if cfg.Limits.MaxAuthorityHints <= 0 {
+		return nil, fmt.Errorf("federation: config: limits.max_authority_hints must be positive")
 	}
 	if cfg.Limits.MaxStatementLifetime <= 0 {
 		return nil, fmt.Errorf("federation: config: limits.max_statement_lifetime must be positive")
@@ -303,6 +322,9 @@ func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntit
 		hints := selfClaims.AuthorityHints
 		if len(hints) == 0 {
 			return ResolvedEntity{}, fmt.Errorf("federation: %q has no authority_hints and is not a configured trust anchor: no path to a trusted trust anchor", st.entityAt)
+		}
+		if len(hints) > r.cfg.Limits.MaxAuthorityHints {
+			return ResolvedEntity{}, fmt.Errorf("federation: %q lists %d authority_hints, more than the configured limit (%d)", st.entityAt, len(hints), r.cfg.Limits.MaxAuthorityHints)
 		}
 
 		superiorID, superiorConfig, superiorToken, superiorClaims, err := r.findReachableSuperior(ctx, hints, st.visited, now)

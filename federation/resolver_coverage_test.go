@@ -29,7 +29,7 @@ func dummyResolver(t *testing.T, fetcher *fapihttp.Client, now time.Time) *feder
 	anchorKey := generateKey(t)
 	r, err := federation.NewResolver(federation.Config{
 		TrustAnchors: []federation.TrustAnchor{{EntityID: "https://ta.example.org", JWKS: jwksFor(t, "a", anchorKey)}},
-		Limits:       federation.Limits{MaxPathLength: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
+		Limits:       federation.Limits{MaxPathLength: 5, MaxAuthorityHints: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
 	}, federation.Dependencies{HTTP: fetcher, Clock: fixedClock{now: now}})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
@@ -268,7 +268,7 @@ func (h *threeLevelFederationHandle) newResolver(t *testing.T) *federation.Resol
 	t.Helper()
 	r, err := federation.NewResolver(federation.Config{
 		TrustAnchors: []federation.TrustAnchor{{EntityID: h.taID, JWKS: h.taJWKS}},
-		Limits:       federation.Limits{MaxPathLength: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
+		Limits:       federation.Limits{MaxPathLength: 5, MaxAuthorityHints: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
 	}, federation.Dependencies{HTTP: h.fetcher, Clock: fixedClock{now: h.now}})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
@@ -436,7 +436,7 @@ func TestResolveTracksEarliestExpiryAcrossChain(t *testing.T) {
 	})
 	r, err := federation.NewResolver(federation.Config{
 		TrustAnchors: []federation.TrustAnchor{{EntityID: f.taID, JWKS: f.taJWKS}},
-		Limits:       federation.Limits{MaxPathLength: 5, MaxStatementLifetime: 3 * time.Hour, MaxClockSkew: 5 * time.Second},
+		Limits:       federation.Limits{MaxPathLength: 5, MaxAuthorityHints: 5, MaxStatementLifetime: 3 * time.Hour, MaxClockSkew: 5 * time.Second},
 	}, federation.Dependencies{HTTP: f.fetcher, Clock: fixedClock{now: f.now}})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
@@ -604,7 +604,7 @@ func TestResolveSkipsUnreachableOrInvalidHintsToReachSuperior(t *testing.T) {
 	fetcher := fetcherFor(t, taServer, i1Server, leServer, mismatchTS, selfSigTS)
 	r, err := federation.NewResolver(federation.Config{
 		TrustAnchors: []federation.TrustAnchor{{EntityID: taID, JWKS: taJWKS}},
-		Limits:       federation.Limits{MaxPathLength: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
+		Limits:       federation.Limits{MaxPathLength: 5, MaxAuthorityHints: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
 	}, federation.Dependencies{HTTP: fetcher, Clock: fixedClock{now: now}})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
@@ -623,7 +623,7 @@ func TestResolveRejectsMalformedTrustAnchorJWKS(t *testing.T) {
 	f := setupThreeLevelFederation(t)
 	r, err := federation.NewResolver(federation.Config{
 		TrustAnchors: []federation.TrustAnchor{{EntityID: f.taID, JWKS: json.RawMessage(`not-json`)}},
-		Limits:       federation.Limits{MaxPathLength: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
+		Limits:       federation.Limits{MaxPathLength: 5, MaxAuthorityHints: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
 	}, federation.Dependencies{HTTP: f.fetcher, Clock: fixedClock{now: f.now}})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
@@ -663,7 +663,7 @@ func TestResolveSkipsCandidateKeysWithWrongAlgorithm(t *testing.T) {
 
 	r, err := federation.NewResolver(federation.Config{
 		TrustAnchors: []federation.TrustAnchor{{EntityID: f.taID, JWKS: mixedJWKS}},
-		Limits:       federation.Limits{MaxPathLength: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
+		Limits:       federation.Limits{MaxPathLength: 5, MaxAuthorityHints: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
 	}, federation.Dependencies{HTTP: f.fetcher, Clock: fixedClock{now: f.now}})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)

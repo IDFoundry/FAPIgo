@@ -210,7 +210,7 @@ func runFederationRP(apiBase, evidenceDir, expectedFailuresFile string) error {
 	}
 	resolver, err := federation.NewResolver(federation.Config{
 		TrustAnchors: []federation.TrustAnchor{{EntityID: trustAnchorEntityID, JWKS: trustAnchorPubJWKS}},
-		Limits:       federation.Limits{MaxPathLength: 5, MaxStatementLifetime: 25 * time.Hour, MaxClockSkew: 30 * time.Second},
+		Limits:       federation.Limits{MaxPathLength: 5, MaxAuthorityHints: 5, MaxStatementLifetime: 25 * time.Hour, MaxClockSkew: 30 * time.Second},
 	}, federation.Dependencies{HTTP: fetcher, Clock: federation.SystemClock{}})
 	if err != nil {
 		return fmt.Errorf("build resolver: %w", err)

@@ -48,6 +48,7 @@ func New(cfg Config, deps Dependencies) (*Server, error) {
 			TrustAnchors: cfg.AutomaticRegistration.TrustAnchors,
 			Limits: federation.Limits{
 				MaxPathLength:        cfg.AutomaticRegistration.MaxPathLength,
+				MaxAuthorityHints:    cfg.AutomaticRegistration.MaxAuthorityHints,
 				MaxStatementLifetime: cfg.AutomaticRegistration.MaxStatementLifetime,
 				MaxClockSkew:         cfg.AutomaticRegistration.MaxClockSkew,
 			},

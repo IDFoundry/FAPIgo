@@ -504,10 +504,11 @@ type AutomaticRegistrationConfig struct {
 	// metadata. Required when TrustAnchors is set.
 	AllowedScopes []string
 
-	// MaxPathLength/MaxStatementLifetime/MaxClockSkew bound Trust Chain
-	// resolution itself — see federation.Limits, which these configure
+	// MaxPathLength/MaxAuthorityHints/MaxStatementLifetime/MaxClockSkew
+	// bound Trust Chain resolution itself — see federation.Limits, which these configure
 	// directly. All required when TrustAnchors is set.
 	MaxPathLength        int
+	MaxAuthorityHints    int
 	MaxStatementLifetime time.Duration
 	MaxClockSkew         time.Duration
 

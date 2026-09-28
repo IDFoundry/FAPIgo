@@ -116,7 +116,7 @@ func (f *constrainedFederation) newResolver(t *testing.T) *federation.Resolver {
 	r, err := federation.NewResolver(federation.Config{
 		TrustAnchors: []federation.TrustAnchor{{EntityID: f.taID, JWKS: f.taJWKS}},
 		Limits: federation.Limits{
-			MaxPathLength: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second,
+			MaxPathLength: 5, MaxAuthorityHints: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second,
 		},
 	}, federation.Dependencies{HTTP: f.fetcher, Clock: fixedClock{now: f.now}})
 	if err != nil {

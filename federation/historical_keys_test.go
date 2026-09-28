@@ -65,7 +65,7 @@ func selfAnchoredHistoricalKeysEndpoint(t *testing.T) (entityID, endpoint string
 	fetcher := fetcherFor(t, ts)
 	resolver, err = federation.NewResolver(federation.Config{
 		TrustAnchors: []federation.TrustAnchor{{EntityID: entityID, JWKS: jwks}},
-		Limits:       federation.Limits{MaxPathLength: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
+		Limits:       federation.Limits{MaxPathLength: 5, MaxAuthorityHints: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
 	}, federation.Dependencies{HTTP: fetcher, Clock: federation.SystemClock{}})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
@@ -97,7 +97,7 @@ func TestFetchHistoricalKeysRejectsUnresolvableIssuer(t *testing.T) {
 	otherAnchorKey := generateKey(t)
 	otherResolver, err := federation.NewResolver(federation.Config{
 		TrustAnchors: []federation.TrustAnchor{{EntityID: "https://unrelated.example.org", JWKS: jwksFor(t, "other", otherAnchorKey)}},
-		Limits:       federation.Limits{MaxPathLength: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
+		Limits:       federation.Limits{MaxPathLength: 5, MaxAuthorityHints: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
 	}, federation.Dependencies{HTTP: fetcherFor(t, server), Clock: federation.SystemClock{}})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
@@ -144,7 +144,7 @@ func TestFetchHistoricalKeysRejectsMalformedResponseBody(t *testing.T) {
 
 	resolver, err := federation.NewResolver(federation.Config{
 		TrustAnchors: []federation.TrustAnchor{{EntityID: entityID, JWKS: jwks}},
-		Limits:       federation.Limits{MaxPathLength: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
+		Limits:       federation.Limits{MaxPathLength: 5, MaxAuthorityHints: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
 	}, federation.Dependencies{HTTP: fetcherFor(t, ts), Clock: federation.SystemClock{}})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
@@ -191,7 +191,7 @@ func TestFetchHistoricalKeysRejectsSignatureMismatch(t *testing.T) {
 
 	resolver, err := federation.NewResolver(federation.Config{
 		TrustAnchors: []federation.TrustAnchor{{EntityID: entityID, JWKS: jwks}},
-		Limits:       federation.Limits{MaxPathLength: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
+		Limits:       federation.Limits{MaxPathLength: 5, MaxAuthorityHints: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
 	}, federation.Dependencies{HTTP: fetcherFor(t, ts), Clock: federation.SystemClock{}})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)

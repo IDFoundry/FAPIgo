@@ -124,7 +124,7 @@ func (f *automaticRegistrationFixture) newResolver(t *testing.T) *federation.Res
 	t.Helper()
 	r, err := federation.NewResolver(federation.Config{
 		TrustAnchors: []federation.TrustAnchor{{EntityID: f.taID, JWKS: f.taJWKS}},
-		Limits:       federation.Limits{MaxPathLength: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
+		Limits:       federation.Limits{MaxPathLength: 5, MaxAuthorityHints: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
 	}, federation.Dependencies{HTTP: f.fetcher, Clock: fixedClock{now: f.now}})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)

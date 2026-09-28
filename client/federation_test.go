@@ -245,7 +245,7 @@ func selfAnchoredOpenIDProvider(t *testing.T, buildMetadata func(entityID string
 	}
 	resolver, err = federation.NewResolver(federation.Config{
 		TrustAnchors: []federation.TrustAnchor{{EntityID: entityID, JWKS: jwks}},
-		Limits:       federation.Limits{MaxPathLength: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
+		Limits:       federation.Limits{MaxPathLength: 5, MaxAuthorityHints: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
 	}, federation.Dependencies{HTTP: fetcher, Clock: federation.SystemClock{}})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)

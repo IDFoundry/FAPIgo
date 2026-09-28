@@ -102,6 +102,7 @@ const (
 // statement, confirmed live before landing this value.
 const (
 	resolveMaxPathLength        = 5
+	resolveMaxAuthorityHints    = 5
 	resolveMaxStatementLifetime = entityConfigurationLifetime + time.Hour
 	resolveMaxClockSkew         = 5 * time.Second
 	resolveHTTPTimeout          = 10 * time.Second
@@ -243,7 +244,7 @@ func main() {
 	resolver, err := federation.NewResolver(federation.Config{
 		TrustAnchors: []federation.TrustAnchor{{EntityID: *entityID, JWKS: ownJWKS}},
 		Limits: federation.Limits{
-			MaxPathLength: resolveMaxPathLength, MaxStatementLifetime: resolveMaxStatementLifetime, MaxClockSkew: resolveMaxClockSkew,
+			MaxPathLength: resolveMaxPathLength, MaxAuthorityHints: resolveMaxAuthorityHints, MaxStatementLifetime: resolveMaxStatementLifetime, MaxClockSkew: resolveMaxClockSkew,
 		},
 	}, federation.Dependencies{HTTP: fetcher, Clock: federation.SystemClock{}})
 	if err != nil {

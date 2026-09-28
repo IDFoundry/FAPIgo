@@ -44,7 +44,7 @@ func testFetcherCfg() fapihttp.Config {
 func testDynamicFederationClientsConfig() dynamicFederationClientsConfig {
 	return dynamicFederationClientsConfig{
 		HTTPTimeout: 5 * time.Second, FetcherCfg: testFetcherCfg(),
-		Limits:  federation.Limits{MaxPathLength: 5, MaxStatementLifetime: time.Hour, MaxClockSkew: 5 * time.Second},
+		Limits:  federation.Limits{MaxPathLength: 5, MaxAuthorityHints: 5, MaxStatementLifetime: time.Hour, MaxClockSkew: 5 * time.Second},
 		AutoCfg: federation.AutomaticRegistrationConfig{AllowedScopes: []string{"openid"}, MaxCacheAge: time.Hour},
 		Clock:   federation.SystemClock{},
 	}

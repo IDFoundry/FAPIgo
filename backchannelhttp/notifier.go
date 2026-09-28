@@ -17,9 +17,20 @@ import (
 // against a hostile or misbehaving endpoint.
 const maxDrainBytes = 64 << 10
 
-// Config bounds the Notifier New builds. Timeout has no implicit
-// default — New rejects a non-positive value.
+// Config bounds the Notifier New builds. Neither field has an implicit
+// default — New rejects a non-positive Timeout, and fapihttp.NewClient
+// rejects a zero Transport.
 type Config struct {
+	// Transport configures the fapihttp client New builds to send every
+	// notification: dial and TLS handshake timeouts, and the loopback
+	// and private-address exceptions its SSRF guard allows. A client's
+	// notification endpoint can come from outside this deployment — an
+	// OpenID Federation relying party's own metadata, under automatic
+	// registration — so New always sends through that guarded client,
+	// which never follows a redirect, rather than accepting one from
+	// the caller.
+	Transport fapihttp.TransportConfig
+
 	// Timeout bounds how long a single Notify call may take, in addition
 	// to whatever deadline ctx itself already carries — whichever is
 	// shorter wins. server.BackchannelNotifier.Notify is called
@@ -38,18 +49,22 @@ type Notifier struct {
 	timeout time.Duration
 }
 
-// New returns a Notifier that sends every notification through http,
-// bounded by cfg. Strongly prefer an *http.Client built by
-// fapihttp.NewClient — see its own doc comment for the SSRF/DNS-rebinding
-// protection a plain http.DefaultClient doesn't provide.
-func New(http fapihttp.HTTPClient, cfg Config) (*Notifier, error) {
-	if http == nil {
-		return nil, fmt.Errorf("backchannelhttp: http client is required")
-	}
+// New returns a Notifier that sends every notification through an
+// SSRF-guarded client built from cfg.Transport by fapihttp.NewClient,
+// bounded by cfg.Timeout.
+func New(cfg Config) (*Notifier, error) {
 	if cfg.Timeout <= 0 {
 		return nil, fmt.Errorf("backchannelhttp: config: timeout must be positive")
 	}
-	return &Notifier{http: http, timeout: cfg.Timeout}, nil
+	client, err := fapihttp.NewClient(cfg.Transport)
+	if err != nil {
+		return nil, fmt.Errorf("backchannelhttp: config: %w", err)
+	}
+	return newWithClient(client, cfg.Timeout), nil
+}
+
+func newWithClient(client fapihttp.HTTPClient, timeout time.Duration) *Notifier {
+	return &Notifier{http: client, timeout: timeout}
 }
 
 // Notify implements server.BackchannelNotifier: it builds the request via

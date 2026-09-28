@@ -11,6 +11,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/backchannelhttp"
+	"github.com/idfoundry/fapigo/fapihttp"
 	"github.com/idfoundry/fapigo/server"
 )
 
@@ -27,14 +28,18 @@ func testNotification(t *testing.T, endpointURL string) server.BackchannelNotifi
 	}
 }
 
-func TestNewRejectsNilHTTPClient(t *testing.T) {
-	if _, err := backchannelhttp.New(nil, backchannelhttp.Config{Timeout: time.Second}); err == nil {
-		t.Fatal("New(nil, ...) = nil error, want error")
+// loopbackTransport lets the notifier reach this test's httptest
+// servers, which listen on loopback.
+var loopbackTransport = fapihttp.TransportConfig{DialTimeout: time.Second, TLSHandshakeTimeout: time.Second, AllowLoopbackHTTP: true}
+
+func TestNewRejectsZeroTransport(t *testing.T) {
+	if _, err := backchannelhttp.New(backchannelhttp.Config{Timeout: time.Second}); err == nil {
+		t.Fatal("New(zero Transport) = nil error, want error")
 	}
 }
 
 func TestNewRejectsNonPositiveTimeout(t *testing.T) {
-	if _, err := backchannelhttp.New(http.DefaultClient, backchannelhttp.Config{Timeout: 0}); err == nil {
+	if _, err := backchannelhttp.New(backchannelhttp.Config{Timeout: 0, Transport: loopbackTransport}); err == nil {
 		t.Fatal("New(..., Timeout: 0) = nil error, want error")
 	}
 }
@@ -58,7 +63,7 @@ func TestNotifySendsCorrectRequestAndSucceedsOn2xx(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	n, err := backchannelhttp.New(http.DefaultClient, backchannelhttp.Config{Timeout: 5 * time.Second})
+	n, err := backchannelhttp.New(backchannelhttp.Config{Timeout: 5 * time.Second, Transport: loopbackTransport})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -86,7 +91,7 @@ func TestNotifyFailsOnNon2xxStatus(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	n, err := backchannelhttp.New(http.DefaultClient, backchannelhttp.Config{Timeout: 5 * time.Second})
+	n, err := backchannelhttp.New(backchannelhttp.Config{Timeout: 5 * time.Second, Transport: loopbackTransport})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -96,7 +101,7 @@ func TestNotifyFailsOnNon2xxStatus(t *testing.T) {
 }
 
 func TestNotifyFailsOnTransportError(t *testing.T) {
-	n, err := backchannelhttp.New(http.DefaultClient, backchannelhttp.Config{Timeout: 5 * time.Second})
+	n, err := backchannelhttp.New(backchannelhttp.Config{Timeout: 5 * time.Second, Transport: loopbackTransport})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -123,10 +128,7 @@ func (erroringBodyClient) Do(*http.Request) (*http.Response, error) {
 }
 
 func TestNotifyFailsWhenResponseBodyErrors(t *testing.T) {
-	n, err := backchannelhttp.New(erroringBodyClient{}, backchannelhttp.Config{Timeout: time.Second})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	n := backchannelhttp.NewWithClient(erroringBodyClient{}, time.Second)
 	if err := n.Notify(context.Background(), testNotification(t, "https://example.com")); err == nil {
 		t.Fatal("Notify(erroring response body) = nil error, want error")
 	}
@@ -147,7 +149,7 @@ func TestNotifyRespectsTimeout(t *testing.T) {
 	defer srv.Close()
 	defer close(block)
 
-	n, err := backchannelhttp.New(http.DefaultClient, backchannelhttp.Config{Timeout: 50 * time.Millisecond})
+	n, err := backchannelhttp.New(backchannelhttp.Config{Timeout: 50 * time.Millisecond, Transport: loopbackTransport})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -157,5 +159,43 @@ func TestNotifyRespectsTimeout(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
 		t.Fatalf("Notify took %v, want it bounded by Config.Timeout (50ms)", elapsed)
+	}
+}
+
+// TestNotifyRefusesLoopbackAndRedirects checks the guarantee New exists
+// to give: without an explicit loopback exception it refuses to reach a
+// loopback endpoint at all, and even with one it doesn't follow a
+// redirect — a notification endpoint supplied from outside the
+// deployment can't steer this server's own request anywhere else.
+func TestNotifyRefusesLoopbackAndRedirects(t *testing.T) {
+	var hits int
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer target.Close()
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	defer redirector.Close()
+
+	guarded, err := backchannelhttp.New(backchannelhttp.Config{Timeout: 5 * time.Second,
+		Transport: fapihttp.TransportConfig{DialTimeout: time.Second, TLSHandshakeTimeout: time.Second}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := guarded.Notify(context.Background(), testNotification(t, target.URL)); err == nil {
+		t.Fatal("Notify(loopback endpoint, no loopback exception) = nil error, want the SSRF guard's refusal")
+	}
+
+	loopbackOK, err := backchannelhttp.New(backchannelhttp.Config{Timeout: 5 * time.Second, Transport: loopbackTransport})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := loopbackOK.Notify(context.Background(), testNotification(t, redirector.URL)); err == nil {
+		t.Fatal("Notify(redirecting endpoint) = nil error, want the 302 treated as a failure")
+	}
+	if hits != 0 {
+		t.Fatalf("redirect target received %d requests, want 0", hits)
 	}
 }

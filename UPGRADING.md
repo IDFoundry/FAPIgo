@@ -43,6 +43,32 @@ federations. Concurrent automatic-registration requests for the same
 address in front of the server too: each distinct unknown `client_id`
 still costs one resolution.
 
+### `backchannelhttp.New` builds its own guarded client
+
+**Affects:** CIBA ping deployments using `backchannelhttp`.
+
+**Why:** a client's notification endpoint can come from an OpenID
+Federation relying party's own metadata under automatic registration,
+and `New` accepted any HTTP client. Passing a plain `http.Client` made
+every notification a server-side request forgery that could reach
+internal hosts and follow redirects.
+
+```go
+notifier, err := backchannelhttp.New(backchannelhttp.Config{
+	Timeout: 5 * time.Second,
+	Transport: fapihttp.TransportConfig{
+		DialTimeout:         5 * time.Second,
+		TLSHandshakeTimeout: 5 * time.Second,
+	},
+})
+```
+
+`New` no longer takes a client: it builds one with
+`fapihttp.NewClient(cfg.Transport)`, which blocks loopback, private and
+link-local addresses at connect time and never follows a redirect. Use
+`Transport.AllowedPrivateHosts` for a notification endpoint that really
+is on a private network.
+
 ## v0.38.0
 
 ### `Dependencies.Random` must be `crypto/rand.Reader` (production only)

@@ -46,8 +46,9 @@
 //     rotated — FAPI 2.0 Security Profile Final §5.3.2.1 says an
 //     authorization server "shall not use refresh token rotation except
 //     in extraordinary circumstances" — so it stays valid for repeated
-//     use until it expires or is revoked, and is bound to its client
-//     and (under DPoP) to the key it was issued under.
+//     use until it expires or is revoked, and is bound to the client it
+//     was issued to — only that client, authenticating itself, can
+//     redeem it.
 //   - AuthorizationAction (from BeginAuthorization) and AuthorizationResult
 //     (from CompleteAuthorization) are closed sum types, not structs with
 //     optional fields, so a caller can never mistake a local error for a
@@ -75,9 +76,13 @@
 //     ExchangeAuthorizationCode and RefreshAccessToken each require a
 //     valid DPoP proof bound to the token endpoint and reject a replayed
 //     proof jti the same way they reject a replayed client assertion or
-//     request object, and a refresh token is bound to the DPoP key it
-//     was issued under: RefreshAccessToken rejects a proof from any
-//     other key, even one belonging to the same client. Bearer
+//     request object. RefreshAccessToken does not require the proof to
+//     come from the key the refresh token was first issued under: every
+//     client here is confidential and authenticates at the token
+//     endpoint, and RFC 9449 §5 binds a confidential client's refresh
+//     token to that client authentication rather than to a DPoP key.
+//     Each new access token is bound to the key of the proof presented
+//     with it. Bearer
 //     (non-sender-constrained) tokens are not supported.
 //   - An ID token is issued alongside the access token exactly when the
 //     (possibly refresh-narrowed) granted scope includes "openid";

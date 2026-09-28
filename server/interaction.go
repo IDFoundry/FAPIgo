@@ -25,6 +25,22 @@ const interactionHandleSize = 32
 // confused with, or substituted for, a request_uri or an authorization
 // code: the login UI receives only this handle, never a storage
 // primary key or the underlying PAR reference.
+//
+// Bind it to the browser that started the interaction. The handle
+// identifies a pending authorization, not who may complete it, and
+// CompleteAuthorization accepts it from whoever presents it. If the
+// login UI round-trips it through a form field and authenticates the
+// user from an existing session cookie, a malicious client can start
+// its own authorization, place its handle in a form on its own page
+// that submits itself, and have a victim's already-signed-in browser
+// approve that authorization, so the client receives a code for the
+// victim's account (consent CSRF, the authorization-server side of RFC
+// 9700 §4.7's login CSRF). Keep the handle in an HttpOnly, Secure,
+// SameSite cookie set when the browser reaches the authorization
+// endpoint, read it back from that cookie (ParseInteractionHandle) when
+// the login or consent form is submitted, and protect that form with
+// the application's usual CSRF defence. Never accept the handle from
+// a form field or query parameter alone.
 type InteractionHandle struct {
 	value string
 }

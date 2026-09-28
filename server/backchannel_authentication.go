@@ -495,11 +495,12 @@ func (s *Server) backchannelAuthenticationLifetime(params map[string]json.RawMes
 	if !ok || seconds <= 0 {
 		return maxLifetime
 	}
-	requested := time.Duration(seconds) * time.Second
-	if requested > maxLifetime {
+	// Compared in whole seconds before converting, so a huge value can't
+	// overflow time.Duration into a negative lifetime.
+	if seconds > int64(maxLifetime/time.Second) {
 		return maxLifetime
 	}
-	return requested
+	return time.Duration(seconds) * time.Second
 }
 
 // parseRequestedExpiry accepts both forms the OIDF FAPI-CIBA-ID1

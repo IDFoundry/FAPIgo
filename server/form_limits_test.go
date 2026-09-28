@@ -2,9 +2,11 @@ package server_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/idfoundry/fapigo/server"
 )
@@ -58,5 +60,36 @@ func TestClientAssertionRejectsMismatchedClientID(t *testing.T) {
 	})
 	if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
 		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidClient)
+	}
+}
+
+// TestBackchannelRequestedExpiryClampedWithoutOverflow checks that a
+// requested_expiry too large to convert to a time.Duration is clamped to
+// the configured lifetime, not wrapped into a negative one; and that a
+// small one is honoured.
+func TestBackchannelRequestedExpiryClampedWithoutOverflow(t *testing.T) {
+	for name, tc := range map[string]struct {
+		requested json.RawMessage
+		clamped   bool
+	}{
+		"overflowing": {json.RawMessage(`9223372037`), true},
+		"huge":        {json.RawMessage(`9223372036854775807`), true},
+		"small":       {json.RawMessage(`30`), false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h, _ := newHarnessWithBackchannel(t)
+			params := standardBackchannelParams(t)
+			params["requested_expiry"] = tc.requested
+			required := beginBackchannel(t, h, params)
+			if required.ExpiresIn <= 0 {
+				t.Fatalf("ExpiresIn = %v, want positive", required.ExpiresIn)
+			}
+			if tc.clamped && required.ExpiresIn < 30*time.Second {
+				t.Fatalf("ExpiresIn = %v, want the configured maximum", required.ExpiresIn)
+			}
+			if !tc.clamped && required.ExpiresIn != 30*time.Second {
+				t.Fatalf("ExpiresIn = %v, want 30s", required.ExpiresIn)
+			}
+		})
 	}
 }

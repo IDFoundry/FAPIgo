@@ -76,6 +76,9 @@ type VerifiedProof struct {
 	Thumbprint jose.Thumbprint
 	IssuedAt   time.Time
 	Nonce      string
+	// JTI is the proof's "jti", for a caller that passed a nil Replay
+	// so it can record the use itself later.
+	JTI string
 }
 
 // Verify checks a DPoP proof against req. On success, the returned
@@ -132,7 +135,7 @@ func Verify(ctx context.Context, req VerifyRequest) (VerifiedProof, error) {
 	if err != nil {
 		return VerifiedProof{}, fmt.Errorf("dpop: %w", err)
 	}
-	return VerifiedProof{Thumbprint: thumbprint, IssuedAt: iat, Nonce: c.Nonce}, nil
+	return VerifiedProof{Thumbprint: thumbprint, IssuedAt: iat, Nonce: c.Nonce, JTI: c.JTI}, nil
 }
 
 // verifyProofClaims checks c's htm/htu/iat/ath/nonce claims against

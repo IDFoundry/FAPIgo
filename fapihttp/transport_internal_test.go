@@ -44,6 +44,8 @@ func TestDisallowedIP(t *testing.T) {
 		{"NAT64 -> private", "64:ff9b::a00:1", false, false, true},
 		{"NAT64 -> public, stays allowed", "64:ff9b::808:808", false, false, false},
 		{"NAT64 -> loopback, allowLoopback exempts it", "64:ff9b::7f00:1", true, false, false},
+		{"local-use NAT64 (RFC 8215), whatever it embeds", "64:ff9b:1:a00::1", false, false, true},
+		{"local-use NAT64 (RFC 8215), allowPrivate does not except it", "64:ff9b:1::808:808", false, true, true},
 		{"6to4 -> loopback", "2002:7f00:1::", false, false, true},
 		{"6to4 -> link-local (cloud metadata)", "2002:a9fe:a9fe::", false, false, true},
 		// Teredo (RFC 4380): client v4 lives in the low 32 bits,

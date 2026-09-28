@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -34,48 +35,90 @@ import (
 // Trust Mark Status or Trust Marked Entities Listing endpoints (§8/§9)
 // — see internal/federation's own doc.go for exactly what is and is
 // not covered.
-func (r *Resolver) VerifyTrustMark(ctx context.Context, subjectID string, raw intfed.RawTrustMark) (intfed.TrustMarkClaims, error) {
+func (r *Resolver) VerifyTrustMark(ctx context.Context, subjectID string, raw intfed.RawTrustMark, accreditation TrustMarkAccreditation) (intfed.TrustMarkClaims, error) {
 	if subjectID == "" {
 		return intfed.TrustMarkClaims{}, fmt.Errorf("federation: subject entity ID is empty")
+	}
+	if accreditation != RequireFederationAccreditation && accreditation != AcceptAnyFederationIssuer {
+		return intfed.TrustMarkClaims{}, fmt.Errorf("federation: trust mark accreditation policy is required (RequireFederationAccreditation or AcceptAnyFederationIssuer)")
 	}
 	tm, err := intfed.ParseTrustMark(raw.TrustMark)
 	if err != nil {
 		return intfed.TrustMarkClaims{}, fmt.Errorf("federation: parse trust mark: %w", err)
+	}
+	// OpenID Federation 1.0 §7: a Trust Mark MUST carry the kid of its
+	// signing key.
+	if tm.KeyID() == "" {
+		return intfed.TrustMarkClaims{}, fmt.Errorf("federation: trust mark has no kid header")
 	}
 
 	issuer, err := r.Resolve(ctx, tm.ClaimedIssuer())
 	if err != nil {
 		return intfed.TrustMarkClaims{}, fmt.Errorf("federation: resolve trust mark issuer %q: %w", tm.ClaimedIssuer(), err)
 	}
-
 	claims, err := r.verifyTrustMarkAgainstJWKS(tm, issuer.JWKS, subjectID, raw.TrustMarkType, tm.Algorithm(), r.deps.Clock.Now())
 	if err != nil {
 		return intfed.TrustMarkClaims{}, fmt.Errorf("federation: trust mark: %w", err)
 	}
-
-	if err := r.checkTrustMarkDelegation(ctx, issuer.TrustAnchor, tm, claims); err != nil {
+	trustAnchor, err := r.Resolve(ctx, issuer.TrustAnchor)
+	if err != nil {
+		return intfed.TrustMarkClaims{}, fmt.Errorf("federation: resolve trust anchor %q: %w", issuer.TrustAnchor, err)
+	}
+	if accreditation == RequireFederationAccreditation {
+		if err := checkTrustMarkAccreditation(trustAnchor, claims); err != nil {
+			return intfed.TrustMarkClaims{}, fmt.Errorf("federation: trust mark: %w", err)
+		}
+	}
+	if err := r.checkTrustMarkDelegation(trustAnchor, tm, claims); err != nil {
 		return intfed.TrustMarkClaims{}, fmt.Errorf("federation: trust mark: %w", err)
 	}
-
 	return claims, nil
 }
 
-// checkTrustMarkDelegation enforces OpenID Federation 1.0 §7.2: when
-// trustAnchorID's own "trust_mark_owners" claim names claims.TrustMarkType
-// at all, tm MUST carry a "delegation" claim proving its own issuer
-// (claims.Issuer) was actually authorized by that type's real owner —
-// checked against the owner's keys as published directly in
-// trust_mark_owners, never resolved via a separate Trust Chain the way
-// the issuer's own keys are (OpenID Federation 1.0 §7.2's own "The
-// Trust Mark Owner's keys can be found in the trust_mark_owners Claim
-// in the Trust Anchor's Entity Configuration"). A type absent from
-// trust_mark_owners requires no delegation at all — this is not a
-// generic "delegation, if present, is always checked" pass.
-func (r *Resolver) checkTrustMarkDelegation(ctx context.Context, trustAnchorID string, tm intfed.TrustMark, claims intfed.TrustMarkClaims) error {
-	trustAnchor, err := r.Resolve(ctx, trustAnchorID)
-	if err != nil {
-		return fmt.Errorf("resolve trust anchor %q for trust_mark_owners: %w", trustAnchorID, err)
+// TrustMarkAccreditation is VerifyTrustMark's required choice of whether
+// the federation itself must accredit a Trust Mark's issuer. Verifying a
+// Trust Mark (OpenID Federation 1.0 §7.3) only establishes that its
+// issuer is some member of the federation — any member, including the
+// entity the mark is about, can sign one of any type. Whether that
+// issuer is recognised for the mark's type is the Trust Anchor's
+// "trust_mark_issuers" claim, a federation policy (§17.6) this choice
+// decides whether to apply. There is no default.
+type TrustMarkAccreditation uint8
+
+const (
+	_ TrustMarkAccreditation = iota
+
+	// RequireFederationAccreditation accepts a Trust Mark only if the
+	// Trust Anchor used to trust its issuer lists the mark's
+	// trust_mark_type in its "trust_mark_issuers" claim, and either that
+	// type's list is empty (anyone may issue it) or it names the issuer.
+	RequireFederationAccreditation
+
+	// AcceptAnyFederationIssuer accepts a Trust Mark from any issuer
+	// with a valid Trust Chain, leaving accreditation to the caller —
+	// for a mark whose accreditation authority is established out of
+	// band (§17.6). Check TrustMarkClaims.Issuer yourself before
+	// relying on it.
+	AcceptAnyFederationIssuer
+)
+
+// checkTrustMarkAccreditation applies RequireFederationAccreditation
+// against trustAnchor's own "trust_mark_issuers" claim.
+func checkTrustMarkAccreditation(trustAnchor ResolvedEntity, claims intfed.TrustMarkClaims) error {
+	issuers, listed := trustAnchor.TrustMarkIssuers[claims.TrustMarkType]
+	if !listed {
+		return fmt.Errorf("trust_mark_type %q is not in trust anchor %q's trust_mark_issuers", claims.TrustMarkType, trustAnchor.EntityID)
 	}
+	if len(issuers) > 0 && !slices.Contains(issuers, claims.Issuer) {
+		return fmt.Errorf("trust anchor %q does not accredit %q to issue trust_mark_type %q", trustAnchor.EntityID, claims.Issuer, claims.TrustMarkType)
+	}
+	return nil
+}
+
+// checkTrustMarkDelegation requires and validates a "delegation" claim
+// when trustAnchor names the mark's type in its "trust_mark_owners"
+// claim (OpenID Federation 1.0 §7.3 steps 8-9).
+func (r *Resolver) checkTrustMarkDelegation(trustAnchor ResolvedEntity, tm intfed.TrustMark, claims intfed.TrustMarkClaims) error {
 	owner, required := trustAnchor.TrustMarkOwners[claims.TrustMarkType]
 	if !required {
 		return nil

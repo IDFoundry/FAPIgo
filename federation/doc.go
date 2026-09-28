@@ -73,7 +73,12 @@
 // itself are surfaced, unverified, as ResolvedEntity.TrustMarks;
 // Resolver.VerifyTrustMark establishes trust in one, resolving the
 // mark's own issuer as a fresh Trust Chain against this Resolver's own
-// Trust Anchors before checking its signature and claims — and, when
+// Trust Anchors before checking its signature and claims. Its required
+// TrustMarkAccreditation argument decides whether the issuer must also
+// be accredited for the mark's type in the Trust Anchor's
+// "trust_mark_issuers" claim (RequireFederationAccreditation) — without
+// it, any federation member, including the entity the mark is about,
+// can issue a mark of any type that verifies. And, when
 // the Trust Anchor used to establish that trust names the mark's own
 // type in its own "trust_mark_owners" claim (§7.2), additionally
 // requiring and validating a "delegation" claim against that type's

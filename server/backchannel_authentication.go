@@ -552,6 +552,7 @@ func (s *Server) backchannelInteractionRequestFrom(clientID fapi.ClientID, param
 		ClientID: clientID, Scope: scopes, Hints: hints,
 		ACRValues: acrValues, BindingMessage: bindingMessage,
 		AuthorizationDetails: rarValuesFromStoredParameters(s.cfg.RAR, params),
+		RequestedClaims:      requestedClaimsFrom(params),
 	}
 }
 

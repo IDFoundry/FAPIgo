@@ -88,6 +88,18 @@ func NewAuthenticationContext(authTime time.Time, acr string, amr []string) (Aut
 type GrantedAuthorization struct {
 	Scope []string
 
+	// ApprovedIdentityClaims names the identity claims, from the
+	// request's own RequestedClaims (InteractionRequest or
+	// BackchannelInteractionRequest), that the resource owner agreed to
+	// release — typically what the consent screen showed and the user
+	// left selected. Only claims both requested and approved are
+	// resolved through Dependencies.IdentityClaims, for the ID token or
+	// UserInfo, wherever each was requested. Nil releases none.
+	// CompleteAuthorization/CompleteBackchannelAuthentication reject a
+	// name that wasn't requested, the same way they reject a scope that
+	// wasn't.
+	ApprovedIdentityClaims []string
+
 	// AuthorizationDetails is the approved subset of the request's own
 	// Rich Authorization Requests (RFC 9396) detail objects — one entry
 	// per approved object, read out of InteractionRequest.AuthorizationDetails

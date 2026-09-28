@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"slices"
 )
 
 // IdentityClaimsSource resolves a subject's identity claim values (OIDC
@@ -16,7 +18,10 @@ import (
 type IdentityClaimsSource interface {
 	// ResolveIdentityClaims returns identity claim values for subject,
 	// restricted to names — a claim not in names must not appear in the
-	// result, even if this source has a value for it. names is never
+	// result, even if this source has a value for it. names holds only
+	// claims the client requested with the "claims" parameter (OIDC Core
+	// §5.5) and the application then approved for release, through
+	// GrantedAuthorization.ApprovedIdentityClaims. names is never
 	// empty when this method is called (callers skip the call entirely
 	// when nothing was requested), so an empty result here means "no
 	// value for any of these", not "return everything". Each value is
@@ -92,5 +97,53 @@ func claimNames(m map[string]json.RawMessage) []string {
 	for name := range m {
 		names = append(names, name)
 	}
+	slices.Sort(names)
 	return names
+}
+
+// RequestedClaims is the identity claims an authorization request asked
+// for with the OIDC Core §5.5 "claims" parameter, by where each would be
+// delivered. It is the client's request, not a decision: a client can
+// name any claim it likes, so the server releases only those the
+// application also approves in GrantedAuthorization.ApprovedIdentityClaims
+// — show these to the user alongside the requested scope.
+type RequestedClaims struct {
+	IDToken  []string // requested for the ID token
+	UserInfo []string // requested from the UserInfo endpoint
+}
+
+// Names returns every requested claim name, from either location, once
+// each and sorted.
+func (r RequestedClaims) Names() []string {
+	names := append(append([]string{}, r.IDToken...), r.UserInfo...)
+	slices.Sort(names)
+	return slices.Compact(names)
+}
+
+func requestedClaimsFrom(params map[string]json.RawMessage) RequestedClaims {
+	idToken, userinfo := parseRequestedClaimNames(params["claims"])
+	return RequestedClaims{IDToken: idToken, UserInfo: userinfo}
+}
+
+// approvedClaimNames returns, per delivery location, the requested
+// claims the application approved, rejecting an approval for a claim
+// that wasn't requested — the same rule a granted scope follows.
+func approvedClaimNames(params map[string]json.RawMessage, approved []string) (idToken, userinfo []string, err error) {
+	requested := requestedClaimsFrom(params)
+	all := requested.Names()
+	for _, name := range approved {
+		if !slices.Contains(all, name) {
+			return nil, nil, fmt.Errorf("claim %q was not requested", name)
+		}
+	}
+	keep := func(names []string) []string {
+		var out []string
+		for _, n := range names {
+			if slices.Contains(approved, n) {
+				out = append(out, n)
+			}
+		}
+		return out
+	}
+	return keep(requested.IDToken), keep(requested.UserInfo), nil
 }

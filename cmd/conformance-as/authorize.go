@@ -52,6 +52,9 @@ type consentHandler struct {
 type pendingAuthorization struct {
 	handle               server.InteractionHandle
 	authorizationDetails []json.RawMessage
+	// identityClaims is every identity claim the request asked for,
+	// approved in full the same way authorizationDetails is.
+	identityClaims []string
 }
 
 func newConsentHandler(srv *server.Server, clients storage.ClientRepository, clock server.Clock, defaultSubject string) *consentHandler {
@@ -79,7 +82,7 @@ func (h *consentHandler) handleBegin(w http.ResponseWriter, r *http.Request) {
 	switch action := action.(type) {
 	case server.InteractionRequired:
 		approved := approvedAuthorizationDetails(action.Interaction.AuthorizationDetails)
-		h.pending.Put(action.Handle.String(), pendingAuthorization{handle: action.Handle, authorizationDetails: approved}, consentPendingTTL)
+		h.pending.Put(action.Handle.String(), pendingAuthorization{handle: action.Handle, authorizationDetails: approved, identityClaims: action.Interaction.RequestedClaims.Names()}, consentPendingTTL)
 
 		// Debug/test-support only, not security-relevant: lets the smoke
 		// test correlate a GET response with its interaction handle
@@ -186,6 +189,7 @@ func (h *consentHandler) handleDecision(w http.ResponseWriter, r *http.Request) 
 	case "approve":
 		result = server.Authorize(subject, authCtx, server.GrantedAuthorization{
 			Scope: r.Form["scope"], AuthorizationDetails: handle.authorizationDetails,
+			ApprovedIdentityClaims: handle.identityClaims,
 		})
 	case "deny":
 		result = server.Deny("user denied the request")

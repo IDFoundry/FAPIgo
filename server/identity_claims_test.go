@@ -42,7 +42,28 @@ func (f fakeIdentityClaims) ResolveIdentityClaims(_ context.Context, subject str
 // but adds a "claims" (OIDC Core §5.5) authorization parameter, so tests
 // can exercise which identity claims actually get requested for the
 // id_token vs. userinfo delivery locations.
+// completeAuthorizationWithClaims completes an authorization whose
+// request carries claims, approving every requested identity claim.
 func completeAuthorizationWithClaims(t *testing.T, h harness, claims string) string {
+	t.Helper()
+	result, _ := completeAuthorizationApproving(t, h, claims, server.RequestedClaims.Names)
+	redirect, ok := result.(server.AuthorizationRedirect)
+	if !ok {
+		t.Fatalf("result = %T, want server.AuthorizationRedirect", result)
+	}
+	dest := redirect.Destination().URL()
+	code := dest.Query().Get("code")
+	if code == "" {
+		t.Fatalf("redirect carries no code")
+	}
+	return code
+}
+
+// completeAuthorizationApproving completes an authorization whose
+// request carries claims, approving whatever approve picks from the
+// interaction's RequestedClaims, and returns the result along with the
+// RequestedClaims the interaction showed.
+func completeAuthorizationApproving(t *testing.T, h harness, claims string, approve func(server.RequestedClaims) []string) (server.AuthorizationResult, server.RequestedClaims) {
 	t.Helper()
 	params := []server.FormParameter{
 		formParam("client_assertion", h.clientAssertion(t)),
@@ -86,21 +107,15 @@ func completeAuthorizationWithClaims(t *testing.T, h harness, claims string) str
 	}
 	result, err := h.server.CompleteAuthorization(context.Background(), server.CompleteAuthorizationRequest{
 		Handle: required.Handle,
-		Result: server.Authorize(subject, authCtx, server.GrantedAuthorization{Scope: []string{"openid", "accounts"}}),
+		Result: server.Authorize(subject, authCtx, server.GrantedAuthorization{
+			Scope:                  []string{"openid", "accounts"},
+			ApprovedIdentityClaims: approve(required.Interaction.RequestedClaims),
+		}),
 	})
 	if err != nil {
 		t.Fatalf("CompleteAuthorization: %v", err)
 	}
-	redirect, ok := result.(server.AuthorizationRedirect)
-	if !ok {
-		t.Fatalf("result = %T, want server.AuthorizationRedirect", result)
-	}
-	dest := redirect.Destination().URL()
-	code := dest.Query().Get("code")
-	if code == "" {
-		t.Fatalf("redirect missing code parameter: %q", dest.String())
-	}
-	return code
+	return result, required.Interaction.RequestedClaims
 }
 
 func newHarnessWithIdentityClaims(t *testing.T, identityClaims server.IdentityClaimsSource) harness {
@@ -308,7 +323,9 @@ func TestExchangeAuthorizationCodeIdentityClaimWinsOverExtensionClaimCollision(t
 	}
 	result, err := h.server.CompleteAuthorization(context.Background(), server.CompleteAuthorizationRequest{
 		Handle: interaction.Handle,
-		Result: server.Authorize(subject, authCtx, server.GrantedAuthorization{Scope: []string{"openid", "accounts"}}),
+		Result: server.Authorize(subject, authCtx, server.GrantedAuthorization{
+			Scope: []string{"openid", "accounts"}, ApprovedIdentityClaims: []string{"email"},
+		}),
 	})
 	if err != nil {
 		t.Fatalf("CompleteAuthorization: %v", err)
@@ -579,4 +596,146 @@ func jsonStringParam(params map[string]json.RawMessage, name string) (string, er
 		return "", err
 	}
 	return v, nil
+}
+
+// TestIdentityClaimsRequireApproval checks that a claim the client
+// requested with the "claims" parameter is released only once the
+// application approves it, that approval can be partial, that the
+// interaction shows what was requested, and that approving a claim the
+// client never requested is rejected.
+func TestIdentityClaimsRequireApproval(t *testing.T) {
+	identityClaims := fakeIdentityClaims{
+		subject: "user-1",
+		claims: map[string]json.RawMessage{
+			"name":         json.RawMessage(`"Test User"`),
+			"email":        json.RawMessage(`"user@example.com"`),
+			"phone_number": json.RawMessage(`"+15555550100"`),
+		},
+	}
+	request := `{"id_token":{"name":null,"email":null},"userinfo":{"phone_number":null}}`
+
+	idTokenClaimsFor := func(t *testing.T, approve func(server.RequestedClaims) []string) (idToken, accessToken map[string]json.RawMessage) {
+		t.Helper()
+		h := newHarnessWithIdentityClaims(t, identityClaims)
+		result, requested := completeAuthorizationApproving(t, h, request, approve)
+		if got := requested.IDToken; len(got) != 2 || got[0] != "email" || got[1] != "name" {
+			t.Fatalf("RequestedClaims.IDToken = %v, want [email name]", got)
+		}
+		if got := requested.UserInfo; len(got) != 1 || got[0] != "phone_number" {
+			t.Fatalf("RequestedClaims.UserInfo = %v, want [phone_number]", got)
+		}
+		redirect, ok := result.(server.AuthorizationRedirect)
+		if !ok {
+			t.Fatalf("result = %T, want server.AuthorizationRedirect", result)
+		}
+		dest := redirect.Destination().URL()
+		exchanged, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
+			HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), dest.Query().Get("code"), testRedirectURI, testCodeVerifier)},
+			DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
+		})
+		if err != nil {
+			t.Fatalf("ExchangeAuthorizationCode: %v", err)
+		}
+		parsed, err := token.ParseIDToken(exchanged.IDToken.Reveal())
+		if err != nil {
+			t.Fatalf("ParseIDToken: %v", err)
+		}
+		validated, err := parsed.Validate(&h.serverKey.PublicKey, token.IDTokenValidatePolicy{
+			ExpectedIssuer: testIssuer, ExpectedAudience: testClientID.String(), Algorithm: fapi.ES256,
+			Now: h.now, MaxLifetime: 5 * time.Minute, MaxClockSkew: 5 * time.Second,
+			AccessToken: exchanged.AccessToken.Reveal(),
+		})
+		if err != nil {
+			t.Fatalf("Validate: %v", err)
+		}
+		parsedAccessToken, err := token.ParseAccessToken(exchanged.AccessToken.Reveal())
+		if err != nil {
+			t.Fatalf("ParseAccessToken: %v", err)
+		}
+		validatedAccessToken, err := parsedAccessToken.Validate(&h.serverKey.PublicKey, token.AccessTokenValidatePolicy{
+			ExpectedIssuer: testIssuer, ExpectedAudience: testIssuer, Algorithm: fapi.ES256,
+			Now: h.now, MaxLifetime: 5 * time.Minute,
+		})
+		if err != nil {
+			t.Fatalf("Validate access_token: %v", err)
+		}
+		return validated.Parameters, validatedAccessToken.Parameters
+	}
+
+	none, noneAccess := idTokenClaimsFor(t, func(server.RequestedClaims) []string { return nil })
+	if raw, ok := noneAccess[server.RequestedUserinfoClaimsKey]; ok {
+		t.Errorf("access token carries %s = %s with nothing approved", server.RequestedUserinfoClaimsKey, raw)
+	}
+	if _, ok := none["name"]; ok {
+		t.Error("unapproved name was released")
+	}
+	if _, ok := none["email"]; ok {
+		t.Error("unapproved email was released")
+	}
+
+	partial, partialAccess := idTokenClaimsFor(t, func(server.RequestedClaims) []string { return []string{"email", "phone_number"} })
+	if raw := string(partialAccess[server.RequestedUserinfoClaimsKey]); raw != `["phone_number"]` {
+		t.Errorf("access token %s = %s, want [\"phone_number\"]", server.RequestedUserinfoClaimsKey, raw)
+	}
+	if _, ok := partial["email"]; !ok {
+		t.Error("approved email was not released")
+	}
+	if _, ok := partial["name"]; ok {
+		t.Error("unapproved name was released alongside approved email")
+	}
+
+	h := newHarnessWithIdentityClaims(t, identityClaims)
+	result, _ := completeAuthorizationApproving(t, h, request, func(server.RequestedClaims) []string {
+		return []string{"email", "address"}
+	})
+	if _, ok := result.(server.AuthorizationLocalError); !ok {
+		t.Fatalf("result = %T, want server.AuthorizationLocalError for approving an unrequested claim", result)
+	}
+}
+
+// TestCIBAIdentityClaimsRequireApproval checks the backchannel flow's
+// counterpart of TestIdentityClaimsRequireApproval: the interaction
+// shows the requested claims, and approving an unrequested one fails.
+func TestCIBAIdentityClaimsRequireApproval(t *testing.T) {
+	authorize := func(t *testing.T, h harness, approved []string) server.InteractionResult {
+		t.Helper()
+		subjectID, err := server.NewSubjectID("user-1")
+		if err != nil {
+			t.Fatalf("NewSubjectID: %v", err)
+		}
+		subject, err := server.NewAuthenticatedSubject(subjectID)
+		if err != nil {
+			t.Fatalf("NewAuthenticatedSubject: %v", err)
+		}
+		authCtx, err := server.NewAuthenticationContext(h.now, "urn:mace:incommon:iap:silver", []string{"pwd"})
+		if err != nil {
+			t.Fatalf("NewAuthenticationContext: %v", err)
+		}
+		return server.Authorize(subject, authCtx, server.GrantedAuthorization{
+			Scope: []string{"openid", "accounts"}, ApprovedIdentityClaims: approved,
+		})
+	}
+	params := func(t *testing.T) map[string]json.RawMessage {
+		p := standardBackchannelParams(t)
+		p["claims"] = json.RawMessage(`{"id_token":{"email":null}}`)
+		return p
+	}
+
+	h, _ := newHarnessWithBackchannel(t)
+	required := beginBackchannel(t, h, params(t))
+	if got := required.Interaction.RequestedClaims.IDToken; len(got) != 1 || got[0] != "email" {
+		t.Fatalf("RequestedClaims.IDToken = %v, want [email]", got)
+	}
+	if err := h.server.CompleteBackchannelAuthentication(context.Background(), server.CompleteBackchannelAuthenticationRequest{
+		Handle: required.Handle, Result: authorize(t, h, []string{"phone_number"}),
+	}); err == nil {
+		t.Fatal("CompleteBackchannelAuthentication(unrequested claim approved) = nil error, want error")
+	}
+
+	required = beginBackchannel(t, h, params(t))
+	if err := h.server.CompleteBackchannelAuthentication(context.Background(), server.CompleteBackchannelAuthenticationRequest{
+		Handle: required.Handle, Result: authorize(t, h, []string{"email"}),
+	}); err != nil {
+		t.Fatalf("CompleteBackchannelAuthentication(requested claim approved): %v", err)
+	}
 }

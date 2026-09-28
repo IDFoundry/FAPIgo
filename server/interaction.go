@@ -109,6 +109,11 @@ type InteractionRequest struct {
 	// of Tax Return TX-12345") instead of a bare scope string.
 	AuthorizationDetails extension.RARValues
 
+	// RequestedClaims is the identity claims the client asked for with
+	// the "claims" parameter. None is released unless the application
+	// approves it in GrantedAuthorization.ApprovedIdentityClaims.
+	RequestedClaims RequestedClaims
+
 	// Extensions holds the request's registered extension parameter
 	// values (Config.Extensions), validated at the pushed authorization
 	// request — whether they arrived as plain parameters or inside a

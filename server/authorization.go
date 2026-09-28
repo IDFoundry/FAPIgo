@@ -137,6 +137,7 @@ func (s *Server) interactionRequestFrom(clientID fapi.ClientID, params map[strin
 		Scope:                scopes,
 		Hints:                AuthenticationHints{LoginHint: hint},
 		AuthorizationDetails: rarValuesFromStoredParameters(s.cfg.RAR, params),
+		RequestedClaims:      requestedClaimsFrom(params),
 	}
 }
 

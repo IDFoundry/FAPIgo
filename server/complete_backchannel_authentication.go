@@ -90,7 +90,12 @@ func (s *Server) CompleteBackchannelAuthentication(ctx context.Context, req Comp
 			}
 			grantedAuthorizationDetails = granted
 		}
-		idTokenClaims, userinfoClaims := parseRequestedClaimNames(request.Parameters["claims"])
+		idTokenClaims, userinfoClaims, claimsErr := approvedClaimNames(request.Parameters, result.grant.ApprovedIdentityClaims)
+		if claimsErr != nil {
+			wrapped := newError(ErrorInvalidRequest, 400, "approved identity claims exceed what was requested", claimsErr)
+			s.audit(ctx, AuditEventCompleteBackchannelAuthentication, pending.ClientID, AuditOutcomeFailure, string(wrapped.Code()))
+			return wrapped
+		}
 		grant, encodeErr := encodeGrantRecord(grantRecord{
 			DPoPJKT:                 request.DPoPJKT,
 			Subject:                 result.subject.ID().String(),

@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.39.0](https://github.com/IDFoundry/FAPIgo/compare/v0.38.0...v0.39.0) (2026-09-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **federation:** federation.Resolver.VerifyTrustMark takes a fourth argument, a TrustMarkAccreditation. Pass RequireFederationAccreditation to require the Trust Anchor's accreditation of the issuer, or AcceptAnyFederationIssuer to keep the previous behaviour. Trust Marks without a kid header are rejected.
+* **server:** server.New rejects a Config.Extensions registry with a ReturnInTokenClaims definition named like a server-managed claim or an OIDC standard identity claim (for example email, acr or sub). Rename the extension, or drop ReturnInTokenClaims if the value only needs to reach the interaction step.
+* **server:** identity claims requested with the OIDC claims parameter are no longer released unless the application approves them. Show InteractionRequest.RequestedClaims (or the backchannel equivalent) to the user and set GrantedAuthorization.ApprovedIdentityClaims to the approved names; nil releases none.
+* **backchannelhttp:** backchannelhttp.New takes only a Config; pass the transport settings (dial and TLS handshake timeouts, and any loopback or private-host exceptions) in Config.Transport instead of an HTTP client.
+* **federation:** federation.Limits.MaxAuthorityHints (and server.AutomaticRegistrationConfig.MaxAuthorityHints when automatic registration is configured) is required, and NewResolver rejects zero. Set it to a small positive number such as 5.
+
+### Features
+
+* **federation:** bound authority_hints fetched per Trust Chain resolution ([efe31b4](https://github.com/IDFoundry/FAPIgo/commit/efe31b4b83cfa4578aa31826264c7d672f9284a9))
+* **federation:** let VerifyTrustMark require the federation's accreditation of the issuer ([85e4aa3](https://github.com/IDFoundry/FAPIgo/commit/85e4aa32019ea79aaa7f4f84f3c457e76ba56549))
+* **server:** release requested identity claims only once the user approves them ([a53a820](https://github.com/IDFoundry/FAPIgo/commit/a53a8201c71e969fb74218dfd765f0fd03235f9a))
+
+
+### Bug Fixes
+
+* **backchannelhttp:** always send CIBA ping notifications through a guarded client ([ec7b924](https://github.com/IDFoundry/FAPIgo/commit/ec7b924f2bd7ac799c5b0d636e3379d7e412a17b))
+* **fapihttp:** block the RFC 8215 local-use NAT64 prefix ([00a13ed](https://github.com/IDFoundry/FAPIgo/commit/00a13edb4d638e8d7e012e6afc9ea0ac4cbdde46))
+* **resource:** record DPoP nonces and jtis only for a valid access token ([f4aeae6](https://github.com/IDFoundry/FAPIgo/commit/f4aeae6ed75fcf378c9e3249d9cea84b130eb190))
+* **server:** bound request parameter count and size for hand-built forms ([5be5256](https://github.com/IDFoundry/FAPIgo/commit/5be52565c0bca611cfc78390c82ee6344b83dd79))
+* **server:** clamp requested_expiry before converting it to a duration ([b4e97a5](https://github.com/IDFoundry/FAPIgo/commit/b4e97a50379817f0346415a839e0f161b84b41fa))
+* **server:** reject a client_id that doesn't match the client assertion ([5a01223](https://github.com/IDFoundry/FAPIgo/commit/5a0122387d82d05a8f58b43aeb47f242bf9a279a))
+* **server:** reject token-claim extensions named like managed claims ([2efd2d9](https://github.com/IDFoundry/FAPIgo/commit/2efd2d963a33c4a22047eb6006cf39db549c4733))
+
 ## [0.38.0](https://github.com/IDFoundry/FAPIgo/compare/v0.37.0...v0.38.0) (2026-09-27)
 
 

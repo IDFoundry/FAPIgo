@@ -207,7 +207,7 @@ func (r PushAuthorizationResult) WriteJSON(w http.ResponseWriter) {
 func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthorizationRequest) (PushAuthorizationResult, error) {
 	params, err := formParametersToMap(req.HTTP.Parameters)
 	if err != nil {
-		return s.parFail(ctx, "", newError(ErrorInvalidRequest, 400, "the request contains a duplicated parameter", err))
+		return s.parFail(ctx, "", newError(ErrorInvalidRequest, 400, "the request's parameters are duplicated, too many, or too large", err))
 	}
 	// PAR accepts no endpoint-URL audience at all — only the issuer
 	// identifier — see acceptableClientAssertionAudiences's own doc
@@ -760,7 +760,28 @@ func (s *Server) clientAllowsScope(client storage.RegisteredClient, scope string
 	return client.AllowsScope(scope)
 }
 
+// maxFormParameters and maxFormParameterBytes bound a FormRequest this
+// package accepts from any caller — not only one built by
+// FormRequestFromHTTP, whose own read limit (maxFormRequestBytes) a
+// hand-built FormRequest never passes through. Every parameter's value
+// can end up stored with the request or grant, so the bound belongs
+// here. A real request carries a few dozen parameters at most.
+const (
+	maxFormParameters     = 100
+	maxFormParameterBytes = maxFormRequestBytes
+)
+
 func formParametersToMap(params []FormParameter) (map[string]string, error) {
+	if len(params) > maxFormParameters {
+		return nil, fmt.Errorf("%d parameters, more than %d", len(params), maxFormParameters)
+	}
+	size := 0
+	for _, p := range params {
+		size += len(p.Name) + len(p.Value)
+	}
+	if size > maxFormParameterBytes {
+		return nil, fmt.Errorf("parameters total %d bytes, more than %d", size, maxFormParameterBytes)
+	}
 	out := make(map[string]string, len(params))
 	for _, p := range params {
 		if _, exists := out[p.Name]; exists {

@@ -61,7 +61,7 @@ func (s *Server) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 
 	params, err := formParametersToMap(req.HTTP.Parameters)
 	if err != nil {
-		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, "", newError(ErrorInvalidRequest, 400, "the request contains a duplicated parameter", err))
+		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, "", newError(ErrorInvalidRequest, 400, "the request's parameters are duplicated, too many, or too large", err))
 	}
 	if params["grant_type"] != "client_credentials" {
 		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, "", newError(ErrorUnsupportedGrantType, 400, "grant_type must be client_credentials", nil))

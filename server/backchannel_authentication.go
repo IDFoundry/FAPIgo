@@ -142,7 +142,7 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 
 	params, err := formParametersToMap(req.HTTP.Parameters)
 	if err != nil {
-		return s.backchannelBeginFail(ctx, "", newError(ErrorInvalidRequest, 400, "the request contains a duplicated parameter", err)), nil
+		return s.backchannelBeginFail(ctx, "", newError(ErrorInvalidRequest, 400, "the request's parameters are duplicated, too many, or too large", err)), nil
 	}
 	// CIBA Core 1.0 §7.1 explicitly widens the backchannel authentication
 	// endpoint's own accepted audiences beyond just its own URL: "the OP

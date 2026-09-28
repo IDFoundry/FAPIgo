@@ -39,11 +39,6 @@ type MetadataPolicy map[string]map[string]PolicyOperators
 // federation_entity, ...), matching the same "typed accessor over raw
 // JSON, decided by the caller" precedent extension.Registry already
 // uses for custom parameters.
-//
-// The "trust_mark_issuers" claim (OpenID Federation 1.0 §7) is
-// deliberately not modeled here — see doc.go's own "Trust Marks"
-// section for exactly what this package's Trust Mark support does and
-// does not cover.
 type Claims struct {
 	Issuer  string
 	Subject string
@@ -118,6 +113,13 @@ type Claims struct {
 	// Mark Issuer's keys are) — used to validate a "delegation" claim on
 	// a Trust Mark of that type; see doc.go's own "Trust Marks" section.
 	TrustMarkOwners map[string]TrustMarkOwner
+
+	// TrustMarkIssuers is an Entity Configuration's own
+	// "trust_mark_issuers" claim (OpenID Federation 1.0 §3.1.1), keyed by
+	// trust_mark_type, each value the Entity Identifiers accredited to
+	// issue Trust Marks of that type — an empty list meaning anyone may.
+	// Only meaningful for a Trust Anchor; nil when the claim is absent.
+	TrustMarkIssuers map[string][]string
 }
 
 // RawTrustMark is one entry of an Entity Configuration's own
@@ -257,6 +259,11 @@ func parseClaims(payload []byte) (Claims, error) {
 	}
 	if err := parseTrustMarkOwners(raw, &c); err != nil {
 		return Claims{}, err
+	}
+	if issuersRaw, ok := raw["trust_mark_issuers"]; ok {
+		if err := json.Unmarshal(issuersRaw, &c.TrustMarkIssuers); err != nil {
+			return Claims{}, fmt.Errorf("%w: trust_mark_issuers: %v", ErrMalformedClaims, err)
+		}
 	}
 
 	return c, nil

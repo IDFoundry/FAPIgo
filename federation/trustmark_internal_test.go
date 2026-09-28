@@ -1,7 +1,6 @@
 package federation
 
 import (
-	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -183,15 +182,29 @@ func TestVerifyTrustMarkAgainstJWKSRejectsNoMatchingCandidate(t *testing.T) {
 	}
 }
 
-func TestCheckTrustMarkDelegationRejectsUnresolvableTrustAnchor(t *testing.T) {
-	tm := signTestTrustMark(t, generateTestKey(t), "issuer-kid", map[string]any{
-		"iss": "https://issuer.example.org", "sub": "https://rp.example.org",
-		"trust_mark_type": "https://federation.example.org/marks/certified",
-		"iat":             time.Now().Unix(),
-	})
-	claims := intfed.TrustMarkClaims{TrustMarkType: "https://federation.example.org/marks/certified"}
-	if err := testResolver().checkTrustMarkDelegation(context.Background(), "not-a-valid-entity-id", tm, claims); err == nil {
-		t.Fatalf("checkTrustMarkDelegation(unresolvable trust anchor) = nil error, want error")
+func TestCheckTrustMarkAccreditation(t *testing.T) {
+	const markType = "https://federation.example.org/marks/certified"
+	anchor := func(issuers map[string][]string) ResolvedEntity {
+		return ResolvedEntity{EntityID: "https://ta.example.org", TrustMarkIssuers: issuers}
+	}
+	claims := intfed.TrustMarkClaims{Issuer: "https://issuer.example.org", TrustMarkType: markType}
+	cases := map[string]struct {
+		issuers map[string][]string
+		wantErr bool
+	}{
+		"claim absent":           {nil, true},
+		"type not listed":        {map[string][]string{"https://other.example.org/mark": {}}, true},
+		"issuer not accredited":  {map[string][]string{markType: {"https://someone-else.example.org"}}, true},
+		"issuer accredited":      {map[string][]string{markType: {"https://issuer.example.org"}}, false},
+		"empty list, anyone may": {map[string][]string{markType: {}}, false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			err := checkTrustMarkAccreditation(anchor(tc.issuers), claims)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("checkTrustMarkAccreditation = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
 	}
 }
 

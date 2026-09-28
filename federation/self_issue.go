@@ -33,6 +33,14 @@ type SelfIssueConfig struct {
 	// whichever Resolver is asked to resolve it.
 	AuthorityHints []string
 
+	// TrustMarkIssuers is the "trust_mark_issuers" claim (OpenID
+	// Federation 1.0 §3.1.1) a Trust Anchor publishes: for each Trust
+	// Mark type, the Entity Identifiers accredited to issue it, or an
+	// empty list if anyone may. Resolver.VerifyTrustMark enforces it
+	// under RequireFederationAccreditation. Nil for any entity that
+	// isn't a Trust Anchor.
+	TrustMarkIssuers map[string][]string
+
 	// Lifetime bounds how far in the future EntityConfiguration's own
 	// "exp" claim is set, relative to Dependencies.Clock. Required —
 	// there is no implicit default.
@@ -120,6 +128,7 @@ func (s *SelfIssuer) EntityConfiguration(metadata map[string]json.RawMessage) (s
 		Issuer: s.cfg.EntityID, Subject: s.cfg.EntityID,
 		Now: s.deps.Clock.Now(), Lifetime: s.cfg.Lifetime,
 		JWKS: s.deps.JWKS, Metadata: metadata, AuthorityHints: s.cfg.AuthorityHints,
+		TrustMarkIssuers: s.cfg.TrustMarkIssuers,
 	})
 	if err != nil {
 		return "", fmt.Errorf("federation: self-issue entity configuration: %w", err)

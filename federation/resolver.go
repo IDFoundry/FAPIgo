@@ -192,6 +192,15 @@ type ResolvedEntity struct {
 	// that Trust Mark's type requires a "delegation" claim at all.
 	TrustMarkOwners map[string]intfed.TrustMarkOwner
 
+	// TrustMarkIssuers is EntityID's own "trust_mark_issuers" claim
+	// (OpenID Federation 1.0 §3.1.1), exactly as
+	// intfed.Claims.TrustMarkIssuers describes — nil if EntityID declared
+	// none. Only meaningful when EntityID is a Trust Anchor:
+	// VerifyTrustMark reads it (from the Trust Anchor used to establish
+	// trust in a Trust Mark's issuer) under
+	// RequireFederationAccreditation.
+	TrustMarkIssuers map[string][]string
+
 	// Tokens is the raw compact-serialized Entity Statement JWTs
 	// composing this Trust Chain, in the exact order OpenID Federation
 	// 1.0 §4 defines: ES[0] (EntityID's own Entity Configuration), each
@@ -390,7 +399,8 @@ func (r *Resolver) resolveSelfAsTrustAnchor(subjectID string, leafStmt intfed.St
 		EntityID: subjectID, TrustAnchor: subjectID, Chain: []string{subjectID},
 		Metadata: leafClaims.Metadata, ExpiresAt: leafClaims.ExpiresAt,
 		JWKS: anchor.JWKS, TrustMarks: leafClaims.TrustMarks, TrustMarkOwners: leafClaims.TrustMarkOwners,
-		Tokens: []string{leafToken},
+		TrustMarkIssuers: leafClaims.TrustMarkIssuers,
+		Tokens:           []string{leafToken},
 	}, nil
 }
 
@@ -502,7 +512,8 @@ func (r *Resolver) finalizeTrustChain(st *chainWalkState, hop int, sup hopSuperi
 		EntityID: st.subjectID, TrustAnchor: sup.id, Chain: st.chain,
 		Metadata: resolvedMetadata, ExpiresAt: st.minExpiry,
 		JWKS: st.subjectJWKS, TrustMarks: st.leafClaims.TrustMarks, TrustMarkOwners: st.leafClaims.TrustMarkOwners,
-		Tokens: append(st.tokens, sup.token),
+		TrustMarkIssuers: st.leafClaims.TrustMarkIssuers,
+		Tokens:           append(st.tokens, sup.token),
 	}, nil
 }
 

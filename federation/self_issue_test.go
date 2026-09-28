@@ -142,3 +142,47 @@ func TestSelfIssuerEntityConfigurationIsAcceptedBySelfVerification(t *testing.T)
 		t.Fatalf("Verify(self-issued statement against its own claimed key): %v", err)
 	}
 }
+
+// TestSelfIssuerPublishesTrustMarkIssuers checks that a Trust Anchor
+// built with SelfIssuer can publish the trust_mark_issuers claim
+// RequireFederationAccreditation enforces, including an empty list.
+func TestSelfIssuerPublishesTrustMarkIssuers(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	s, err := federation.NewSelfIssuer(federation.SelfIssueConfig{
+		EntityID: "https://ta.example.org",
+		Lifetime: time.Hour,
+		TrustMarkIssuers: map[string][]string{
+			"https://ta.example.org/marks/certified": {"https://issuer.example.org"},
+			"https://ta.example.org/marks/open":      nil,
+		},
+	}, federation.SelfIssueDependencies{
+		Signer: key, Algorithm: fapi.ES256, KeyID: "ta", JWKS: jwksFor(t, "ta", key), Clock: fixedClock{now: now},
+	})
+	if err != nil {
+		t.Fatalf("NewSelfIssuer: %v", err)
+	}
+	token, err := s.EntityConfiguration(map[string]json.RawMessage{
+		"federation_entity": federationEntityMetadata(t, "https://ta.example.org/fetch")["federation_entity"],
+	})
+	if err != nil {
+		t.Fatalf("EntityConfiguration: %v", err)
+	}
+	stmt, err := intfed.Parse(token)
+	if err != nil {
+		t.Fatalf("intfed.Parse: %v", err)
+	}
+	claims, err := stmt.Verify(&key.PublicKey, intfed.VerifyPolicy{
+		ExpectedIssuer: "https://ta.example.org", ExpectedSubject: "https://ta.example.org",
+		Algorithm: fapi.ES256, Now: now, MaxLifetime: 2 * time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if got := claims.TrustMarkIssuers["https://ta.example.org/marks/certified"]; len(got) != 1 || got[0] != "https://issuer.example.org" {
+		t.Errorf("certified issuers = %v", got)
+	}
+	if got, ok := claims.TrustMarkIssuers["https://ta.example.org/marks/open"]; !ok || got == nil || len(got) != 0 {
+		t.Errorf("open issuers = %#v, %v; want a present, empty list", got, ok)
+	}
+}

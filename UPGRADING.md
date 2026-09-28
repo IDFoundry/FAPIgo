@@ -110,6 +110,28 @@ releasing their real email.
 Rename the extension, or drop `ReturnInTokenClaims` if the value only
 needs to reach the interaction step (`InteractionRequest.Extensions`).
 
+### `Resolver.VerifyTrustMark` takes an accreditation policy (federation)
+
+**Affects:** callers of `federation.Resolver.VerifyTrustMark`.
+
+**Why:** a verified Trust Mark only proved its issuer was some member of
+the federation. Any member, including the entity the mark is about,
+could issue itself a mark of any type and have it verify.
+
+```go
+claims, err := resolver.VerifyTrustMark(ctx, subjectID, mark,
+	federation.RequireFederationAccreditation) // or AcceptAnyFederationIssuer
+```
+
+`RequireFederationAccreditation` accepts a mark only when the Trust
+Anchor's `trust_mark_issuers` lists its type and names its issuer (or
+leaves that type's list empty, meaning anyone may issue it).
+`AcceptAnyFederationIssuer` keeps the previous behaviour for marks
+accredited out of band; check `claims.Issuer` yourself then. A Trust
+Anchor built with `SelfIssuer` publishes the claim through
+`SelfIssueConfig.TrustMarkIssuers`. Trust Marks without a `kid` header
+are now rejected.
+
 ## v0.38.0
 
 ### `Dependencies.Random` must be `crypto/rand.Reader` (production only)

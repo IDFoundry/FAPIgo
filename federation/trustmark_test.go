@@ -174,7 +174,7 @@ func TestVerifyTrustMarkSucceeds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	claims, err := r.VerifyTrustMark(context.Background(), f.leID, resolved.TrustMarks[0])
+	claims, err := r.VerifyTrustMark(context.Background(), f.leID, resolved.TrustMarks[0], federation.AcceptAnyFederationIssuer)
 	if err != nil {
 		t.Fatalf("VerifyTrustMark: %v", err)
 	}
@@ -199,8 +199,8 @@ func TestVerifyTrustMarkRejectsSubjectMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if _, err := r.VerifyTrustMark(context.Background(), f.leID, resolved.TrustMarks[0]); err == nil {
-		t.Fatalf("VerifyTrustMark(sub mismatch) = nil error, want error")
+	if _, err := r.VerifyTrustMark(context.Background(), f.leID, resolved.TrustMarks[0], federation.AcceptAnyFederationIssuer); err == nil {
+		t.Fatalf("VerifyTrustMark(sub mismatch, federation.AcceptAnyFederationIssuer) = nil error, want error")
 	}
 }
 
@@ -217,8 +217,8 @@ func TestVerifyTrustMarkRejectsExpired(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if _, err := r.VerifyTrustMark(context.Background(), f.leID, resolved.TrustMarks[0]); err == nil {
-		t.Fatalf("VerifyTrustMark(expired) = nil error, want error")
+	if _, err := r.VerifyTrustMark(context.Background(), f.leID, resolved.TrustMarks[0], federation.AcceptAnyFederationIssuer); err == nil {
+		t.Fatalf("VerifyTrustMark(expired, federation.AcceptAnyFederationIssuer) = nil error, want error")
 	}
 }
 
@@ -232,8 +232,8 @@ func TestVerifyTrustMarkRejectsUnresolvableIssuer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if _, err := r.VerifyTrustMark(context.Background(), f.leID, resolved.TrustMarks[0]); err == nil {
-		t.Fatalf("VerifyTrustMark(unresolvable issuer) = nil error, want error")
+	if _, err := r.VerifyTrustMark(context.Background(), f.leID, resolved.TrustMarks[0], federation.AcceptAnyFederationIssuer); err == nil {
+		t.Fatalf("VerifyTrustMark(unresolvable issuer, federation.AcceptAnyFederationIssuer) = nil error, want error")
 	}
 }
 
@@ -247,8 +247,8 @@ func TestVerifyTrustMarkRejectsWrongTrustMarkType(t *testing.T) {
 	}
 	tampered := resolved.TrustMarks[0]
 	tampered.TrustMarkType = "https://federation.example.org/marks/different"
-	if _, err := r.VerifyTrustMark(context.Background(), f.leID, tampered); err == nil {
-		t.Fatalf("VerifyTrustMark(wrapper trust_mark_type does not match the JWT's own) = nil error, want error")
+	if _, err := r.VerifyTrustMark(context.Background(), f.leID, tampered, federation.AcceptAnyFederationIssuer); err == nil {
+		t.Fatalf("VerifyTrustMark(wrapper trust_mark_type does not match the JWT's own, federation.AcceptAnyFederationIssuer) = nil error, want error")
 	}
 }
 
@@ -260,8 +260,8 @@ func TestVerifyTrustMarkRejectsEmptySubjectID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if _, err := r.VerifyTrustMark(context.Background(), "", resolved.TrustMarks[0]); err == nil {
-		t.Fatalf("VerifyTrustMark(empty subjectID) = nil error, want error")
+	if _, err := r.VerifyTrustMark(context.Background(), "", resolved.TrustMarks[0], federation.AcceptAnyFederationIssuer); err == nil {
+		t.Fatalf("VerifyTrustMark(empty subjectID, federation.AcceptAnyFederationIssuer) = nil error, want error")
 	}
 }
 
@@ -270,8 +270,8 @@ func TestVerifyTrustMarkRejectsMalformedTrustMarkJWT(t *testing.T) {
 	r := f.newResolver(t)
 
 	malformed := intfed.RawTrustMark{TrustMarkType: testTrustMarkType, TrustMark: "not-a-jwt"}
-	if _, err := r.VerifyTrustMark(context.Background(), f.leID, malformed); err == nil {
-		t.Fatalf("VerifyTrustMark(malformed trust mark JWT) = nil error, want error")
+	if _, err := r.VerifyTrustMark(context.Background(), f.leID, malformed, federation.AcceptAnyFederationIssuer); err == nil {
+		t.Fatalf("VerifyTrustMark(malformed trust mark JWT, federation.AcceptAnyFederationIssuer) = nil error, want error")
 	}
 }
 
@@ -310,8 +310,8 @@ func TestVerifyTrustMarkRequiresDelegationWhenOwnerNamesType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if _, err := r.VerifyTrustMark(context.Background(), f.leID, resolved.TrustMarks[0]); err == nil {
-		t.Fatalf("VerifyTrustMark(owner names type, no delegation claim) = nil error, want error")
+	if _, err := r.VerifyTrustMark(context.Background(), f.leID, resolved.TrustMarks[0], federation.AcceptAnyFederationIssuer); err == nil {
+		t.Fatalf("VerifyTrustMark(owner names type, no delegation claim, federation.AcceptAnyFederationIssuer) = nil error, want error")
 	}
 }
 
@@ -333,9 +333,9 @@ func TestVerifyTrustMarkSucceedsWithValidDelegation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	claims, err := r.VerifyTrustMark(context.Background(), f.leID, resolved.TrustMarks[0])
+	claims, err := r.VerifyTrustMark(context.Background(), f.leID, resolved.TrustMarks[0], federation.AcceptAnyFederationIssuer)
 	if err != nil {
-		t.Fatalf("VerifyTrustMark(valid delegation): %v, want nil error", err)
+		t.Fatalf("VerifyTrustMark(valid delegation, federation.AcceptAnyFederationIssuer): %v, want nil error", err)
 	}
 	if claims.Issuer != f.taID {
 		t.Errorf("claims.Issuer = %q, want %q", claims.Issuer, f.taID)
@@ -362,8 +362,8 @@ func TestVerifyTrustMarkRejectsDelegationWrongSubject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if _, err := r.VerifyTrustMark(context.Background(), f.leID, resolved.TrustMarks[0]); err == nil {
-		t.Fatalf("VerifyTrustMark(delegation sub mismatch) = nil error, want error")
+	if _, err := r.VerifyTrustMark(context.Background(), f.leID, resolved.TrustMarks[0], federation.AcceptAnyFederationIssuer); err == nil {
+		t.Fatalf("VerifyTrustMark(delegation sub mismatch, federation.AcceptAnyFederationIssuer) = nil error, want error")
 	}
 }
 
@@ -386,8 +386,8 @@ func TestVerifyTrustMarkRejectsDelegationWrongIssuer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if _, err := r.VerifyTrustMark(context.Background(), f.leID, resolved.TrustMarks[0]); err == nil {
-		t.Fatalf("VerifyTrustMark(delegation iss mismatch) = nil error, want error")
+	if _, err := r.VerifyTrustMark(context.Background(), f.leID, resolved.TrustMarks[0], federation.AcceptAnyFederationIssuer); err == nil {
+		t.Fatalf("VerifyTrustMark(delegation iss mismatch, federation.AcceptAnyFederationIssuer) = nil error, want error")
 	}
 }
 
@@ -410,8 +410,8 @@ func TestVerifyTrustMarkRejectsDelegationSignedByWrongKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if _, err := r.VerifyTrustMark(context.Background(), f.leID, resolved.TrustMarks[0]); err == nil {
-		t.Fatalf("VerifyTrustMark(delegation signed by wrong key) = nil error, want error")
+	if _, err := r.VerifyTrustMark(context.Background(), f.leID, resolved.TrustMarks[0], federation.AcceptAnyFederationIssuer); err == nil {
+		t.Fatalf("VerifyTrustMark(delegation signed by wrong key, federation.AcceptAnyFederationIssuer) = nil error, want error")
 	}
 }
 
@@ -427,8 +427,8 @@ func TestVerifyTrustMarkRejectsMalformedDelegationJWT(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if _, err := r.VerifyTrustMark(context.Background(), f.leID, resolved.TrustMarks[0]); err == nil {
-		t.Fatalf("VerifyTrustMark(malformed delegation JWT) = nil error, want error")
+	if _, err := r.VerifyTrustMark(context.Background(), f.leID, resolved.TrustMarks[0], federation.AcceptAnyFederationIssuer); err == nil {
+		t.Fatalf("VerifyTrustMark(malformed delegation JWT, federation.AcceptAnyFederationIssuer) = nil error, want error")
 	}
 }
 
@@ -447,8 +447,8 @@ func TestVerifyTrustMarkIgnoresDelegationWhenTypeNotOwned(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if _, err := r.VerifyTrustMark(context.Background(), f.leID, resolved.TrustMarks[0]); err != nil {
-		t.Fatalf("VerifyTrustMark(broken delegation, type not owned): %v, want nil error", err)
+	if _, err := r.VerifyTrustMark(context.Background(), f.leID, resolved.TrustMarks[0], federation.AcceptAnyFederationIssuer); err != nil {
+		t.Fatalf("VerifyTrustMark(broken delegation, type not owned, federation.AcceptAnyFederationIssuer): %v, want nil error", err)
 	}
 }
 

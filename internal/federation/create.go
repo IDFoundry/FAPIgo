@@ -96,6 +96,13 @@ type CreateParams struct {
 	// owner's own keys. Only meaningful (and only accepted) when
 	// Subject equals Issuer (an Entity Configuration).
 	TrustMarkOwners map[string]TrustMarkOwner
+
+	// TrustMarkIssuers is the "trust_mark_issuers" claim (OpenID
+	// Federation 1.0 §3.1.1), keyed by trust_mark_type — set only by a
+	// Trust Anchor, naming the Entity Identifiers accredited to issue
+	// each type (an empty list: anyone may). Only accepted when Subject
+	// equals Issuer (an Entity Configuration).
+	TrustMarkIssuers map[string][]string
 }
 
 // validateCreateParams checks p's required fields and (via
@@ -141,6 +148,9 @@ func validateClaimMixing(p CreateParams) error {
 	}
 	if !selfSigned && p.TrustMarks != nil {
 		return fmt.Errorf("federation: trust_marks is an Entity Configuration claim, but issuer does not equal subject (a Subordinate Statement)")
+	}
+	if !selfSigned && p.TrustMarkIssuers != nil {
+		return fmt.Errorf("federation: trust_mark_issuers is an Entity Configuration claim, but issuer does not equal subject (a Subordinate Statement)")
 	}
 	if !selfSigned && p.TrustMarkOwners != nil {
 		return fmt.Errorf("federation: trust_mark_owners is an Entity Configuration claim, but issuer does not equal subject (a Subordinate Statement)")
@@ -192,6 +202,16 @@ func Create(p CreateParams) (string, error) {
 			owners[trustMarkType] = map[string]any{"sub": o.Subject, "jwks": json.RawMessage(o.JWKS)}
 		}
 		claims["trust_mark_owners"] = owners
+	}
+	if p.TrustMarkIssuers != nil {
+		issuers := make(map[string][]string, len(p.TrustMarkIssuers))
+		for trustMarkType, ids := range p.TrustMarkIssuers {
+			if ids == nil {
+				ids = []string{}
+			}
+			issuers[trustMarkType] = ids
+		}
+		claims["trust_mark_issuers"] = issuers
 	}
 
 	return signClaims(p.Signer, p.Algorithm, p.KeyID, jwtType, claims)

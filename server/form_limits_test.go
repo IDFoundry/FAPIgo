@@ -45,3 +45,18 @@ func TestPushAuthorizationRequestBoundsHandBuiltForm(t *testing.T) {
 		t.Fatalf("PushAuthorizationRequest(%d parameters): %v", len(atLimit), err)
 	}
 }
+
+// TestClientAssertionRejectsMismatchedClientID checks RFC 7521 §4.2: a
+// client_id sent alongside a client assertion must name the assertion's
+// own client.
+func TestClientAssertionRejectsMismatchedClientID(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, false)
+	params := plainFormParameters(t, h.clientAssertion(t), nil)
+	params = append(params, formParam("client_id", "some-other-client"))
+	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: params},
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidClient)
+	}
+}

@@ -364,6 +364,15 @@ func (s *Server) authenticateClientViaAssertion(ctx context.Context, params map[
 			newError(ErrorInvalidClient, 401, "malformed client assertion", err)
 	}
 
+	// RFC 7521 §4.2: a client_id sent alongside the assertion must
+	// identify the same client. Nothing downstream reads it — the
+	// authenticated client comes from the assertion — but a request
+	// naming two different clients is malformed, not ambiguous.
+	if formClientID := params["client_id"]; formClientID != "" && formClientID != assertion.ClaimedSubject() {
+		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
+			newError(ErrorInvalidClient, 401, "client_id does not match the client assertion's subject", nil)
+	}
+
 	client, err := s.deps.Clients.ResolveClient(ctx, fapi.ClientID(assertion.ClaimedSubject()))
 	if err != nil {
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},

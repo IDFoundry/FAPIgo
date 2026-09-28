@@ -234,10 +234,24 @@ case server.AuthorizationLocalError:
 }
 ```
 
+**Bind the interaction handle to the browser.** `CompleteAuthorization`
+accepts a handle from whoever presents it, so a login UI that carries it
+in a form field and signs users in from an existing session cookie is
+open to consent CSRF: a malicious client starts its own authorization,
+puts its handle in a self-submitting form on its own page, and a
+signed-in victim's browser approves it, sending that client a code for
+the victim's account. Set the handle (`a.Handle.String()`) in an
+HttpOnly, Secure, SameSite cookie when the browser reaches `/authorize`,
+read it back with `server.ParseInteractionHandle` when the form is
+submitted, and protect that form with your usual CSRF defence. See
+`server.InteractionHandle`'s doc comment.
+
 `cmd/conformance-as/authorize.go` is a complete, working version of
-exactly this — read it for the full picture, including how it bridges
-an `InteractionHandle` across the GET (render the form) and POST
-(handle the submission) halves of a real HTTP flow. Its own login form
+exactly this — read it for the full picture of the GET (render the
+form) and POST (handle the submission) halves of a real HTTP flow. Its
+handle bridge is not one to copy: it carries the handle in a hidden form
+field, which is only tolerable because it authenticates nobody — use
+the cookie binding above instead. Its own login form
 (`consent_template.go`) is a deliberate non-example: a free-text "type
 any username" field with no real authentication behind it, because this
 binary exists to drive OIDF conformance testing, not to demonstrate

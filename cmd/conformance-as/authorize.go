@@ -22,6 +22,13 @@ const consentPendingTTL = 5 * time.Minute
 // genuine HTML consent form — not an auto-approve shortcut — so a real
 // browser (including an automated conformance-suite browser driver) has
 // something to load and submit.
+//
+// Not a model for a production login UI: it carries the interaction
+// handle in a hidden form field, with no cookie binding it to the
+// browser and no CSRF protection on the POST, which a real deployment
+// must have — see server.InteractionHandle's doc comment for the
+// consent CSRF this would otherwise allow. It gets away with it only
+// because it authenticates nobody (the form's username is free text).
 type consentHandler struct {
 	srv            *server.Server
 	clients        storage.ClientRepository

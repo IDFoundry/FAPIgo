@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"crypto/x509"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"strings"
 	"time"
@@ -169,6 +170,12 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (Authorization
 		return AuthorizationContext{}, newError(ErrorInvalidToken, 401, "access token has been revoked", nil)
 	}
 
+	if senderConstrain == storage.SenderConstrainDPoP {
+		if verr := v.consumeDPoPProof(ctx, verifiedProof, now); verr != nil {
+			return AuthorizationContext{}, verr
+		}
+	}
+
 	var nextNonce string
 	if v.deps.Nonces != nil && senderConstrain == storage.SenderConstrainDPoP {
 		nextNonce, err = v.issueDPoPNonce(ctx, now)
@@ -204,6 +211,11 @@ func (v *Verifier) resolveCredential(ctx context.Context, req VerifyRequest, dpo
 		if dpopProof == "" {
 			return 0, dpop.VerifiedProof{}, "", newError(ErrorInvalidRequest, 400, "DPoP header is required", nil)
 		}
+		// No Replay here: recording the jti, like checking the nonce,
+		// writes to storage, so both wait until consumeDPoPProof, after
+		// the access token is known to be valid and bound to this
+		// proof's key. A proof anyone can sign with their own key and a
+		// made-up token must not be able to write to either store.
 		verifiedProof, err := dpop.Verify(ctx, dpop.VerifyRequest{
 			Proof:        dpopProof,
 			Method:       req.Method,
@@ -212,19 +224,9 @@ func (v *Verifier) resolveCredential(ctx context.Context, req VerifyRequest, dpo
 			Now:          now,
 			MaxProofAge:  v.cfg.Limits.MaxDPoPProofAge,
 			MaxClockSkew: v.cfg.Limits.MaxClockSkew,
-			Replay:       v.dpopReplayChecker(),
 		})
 		if err != nil {
 			return 0, dpop.VerifiedProof{}, "", newError(ErrorInvalidToken, 401, "DPoP proof verification failed", err)
-		}
-		// Nonce freshness is checked before spending the cost of
-		// resolving the access token — a request that fails this cheap,
-		// early gate shouldn't get as far as touching
-		// Dependencies.AccessTokens at all.
-		if v.deps.Nonces != nil {
-			if challenge := v.checkDPoPNonce(ctx, verifiedProof.Nonce, now); challenge != nil {
-				return 0, dpop.VerifiedProof{}, "", challenge
-			}
 		}
 		return storage.SenderConstrainDPoP, verifiedProof, "", nil
 	case strings.EqualFold(scheme, "Bearer"):
@@ -235,4 +237,23 @@ func (v *Verifier) resolveCredential(ctx context.Context, req VerifyRequest, dpo
 	default:
 		return 0, dpop.VerifiedProof{}, "", newError(ErrorInvalidRequest, 400, "authorization scheme must be DPoP or Bearer", nil)
 	}
+}
+
+// consumeDPoPProof applies the checks on a DPoP proof that write to
+// storage — the nonce challenge (RFC 9449 §9) and jti replay detection —
+// once Verify has established that the access token is valid, unrevoked
+// and bound to the proof's key. Done any earlier, an unauthenticated
+// caller could make every request write a nonce or jti record. The nonce
+// comes first, so a proof that only lacks a current nonce doesn't also
+// spend its jti.
+func (v *Verifier) consumeDPoPProof(ctx context.Context, proof dpop.VerifiedProof, now time.Time) *Error {
+	if v.deps.Nonces != nil {
+		if challenge := v.checkDPoPNonce(ctx, proof.Nonce, now); challenge != nil {
+			return challenge
+		}
+	}
+	if err := v.dpopReplayChecker().UseOnce(ctx, proof.JTI, proof.IssuedAt.Add(v.cfg.Limits.MaxDPoPProofAge)); err != nil {
+		return newError(ErrorInvalidToken, 401, "DPoP proof verification failed", fmt.Errorf("dpop: replay check: %w", err))
+	}
+	return nil
 }

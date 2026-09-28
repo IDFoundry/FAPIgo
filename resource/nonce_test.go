@@ -30,6 +30,7 @@ import (
 type nonceFixture struct {
 	verifier    *resource.Verifier
 	nonces      *memstore.NonceStore
+	replay      *fakeReplayStore
 	accessToken string
 	dpopProof   string
 	target      *url.URL
@@ -101,9 +102,10 @@ func newNonceFixture(t *testing.T, proofNonce string, nonces *memstore.NonceStor
 	}
 	cfg := validConfig(t)
 	cfg.Limits.DPoPNonceLifetime = time.Minute
+	replay := &fakeReplayStore{}
 	v, err := resource.NewVerifier(cfg, resource.Dependencies{
 		AccessTokens: jwtAccessTokens,
-		Replay:       &fakeReplayStore{},
+		Replay:       replay,
 		Revocation:   &fakeRevocationChecker{},
 		Clock:        fixedClock{now: now},
 		Nonces:       nonces,
@@ -113,7 +115,7 @@ func newNonceFixture(t *testing.T, proofNonce string, nonces *memstore.NonceStor
 		t.Fatalf("NewVerifier: %v", err)
 	}
 
-	return nonceFixture{verifier: v, nonces: nonces, accessToken: accessToken, dpopProof: dpopProof, target: target}
+	return nonceFixture{verifier: v, nonces: nonces, replay: replay, accessToken: accessToken, dpopProof: dpopProof, target: target}
 }
 
 func (f nonceFixture) verify(t *testing.T) (resource.AuthorizationContext, error) {

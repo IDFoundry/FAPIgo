@@ -139,7 +139,7 @@ func (f *trustMarkFederation) newResolver(t *testing.T) *federation.Resolver {
 	t.Helper()
 	r, err := federation.NewResolver(federation.Config{
 		TrustAnchors: []federation.TrustAnchor{{EntityID: f.taID, JWKS: f.taJWKS}},
-		Limits:       federation.Limits{MaxPathLength: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
+		Limits:       federation.Limits{MaxPathLength: 5, MaxAuthorityHints: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
 	}, federation.Dependencies{HTTP: f.fetcher, Clock: fixedClock{now: f.now}})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
@@ -526,7 +526,7 @@ func (f *trustMarkStatusFederation) newResolver(t *testing.T) *federation.Resolv
 	t.Helper()
 	r, err := federation.NewResolver(federation.Config{
 		TrustAnchors: []federation.TrustAnchor{{EntityID: f.issuerID, JWKS: f.issuerJWKS}},
-		Limits:       federation.Limits{MaxPathLength: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
+		Limits:       federation.Limits{MaxPathLength: 5, MaxAuthorityHints: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
 	}, federation.Dependencies{HTTP: f.fetcher, Clock: fixedClock{now: f.now}})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
@@ -633,7 +633,7 @@ func TestCheckTrustMarkStatusRejectsMalformedIssuerMetadata(t *testing.T) {
 	}
 	r, err := federation.NewResolver(federation.Config{
 		TrustAnchors: []federation.TrustAnchor{{EntityID: issuerID, JWKS: issuerJWKS}},
-		Limits:       federation.Limits{MaxPathLength: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
+		Limits:       federation.Limits{MaxPathLength: 5, MaxAuthorityHints: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
 	}, federation.Dependencies{HTTP: fetcher, Clock: fixedClock{now: now}})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
@@ -699,7 +699,7 @@ func TestCheckTrustMarkStatusRejectsMissingStatusEndpoint(t *testing.T) {
 	}
 	r, err := federation.NewResolver(federation.Config{
 		TrustAnchors: []federation.TrustAnchor{{EntityID: issuerID, JWKS: issuerJWKS}},
-		Limits:       federation.Limits{MaxPathLength: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
+		Limits:       federation.Limits{MaxPathLength: 5, MaxAuthorityHints: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
 	}, federation.Dependencies{HTTP: fetcher, Clock: fixedClock{now: now}})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)

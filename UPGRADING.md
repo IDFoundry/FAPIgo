@@ -13,6 +13,36 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.39.0
+
+### `federation.Limits.MaxAuthorityHints` is required
+
+**Affects:** every `federation.NewResolver` caller, and servers setting
+`server.Config.AutomaticRegistration` (its new `MaxAuthorityHints`
+field).
+
+**Why:** automatic registration resolves an unknown `client_id`'s Trust
+Chain before the request can be authenticated, and the resolver fetched
+every superior an Entity Configuration listed in `authority_hints`. One
+Entity Configuration listing thousands of hints could turn a single
+unauthenticated request into thousands of outbound fetches.
+
+```go
+federation.Limits{
+	MaxPathLength:        5,
+	MaxAuthorityHints:    5, // an entity listing more is rejected
+	MaxStatementLifetime: 24 * time.Hour,
+	MaxClockSkew:         30 * time.Second,
+}
+```
+
+An Entity Configuration listing more hints than the limit now fails
+resolution. Real ones list one, or a handful for an entity in several
+federations. Concurrent automatic-registration requests for the same
+`client_id` now also share one resolution. Rate-limit PAR per client
+address in front of the server too: each distinct unknown `client_id`
+still costs one resolution.
+
 ## v0.38.0
 
 ### `Dependencies.Random` must be `crypto/rand.Reader` (production only)

@@ -152,6 +152,20 @@ type AutomaticClientRepository struct {
 
 	mu    sync.Mutex
 	cache map[fapi.ClientID]cachedClient
+	// inflight holds the resolution currently running for each
+	// client_id, so concurrent requests naming the same unknown
+	// client_id share one Trust Chain resolution rather than each
+	// starting their own.
+	inflight map[fapi.ClientID]*inflightResolution
+}
+
+// inflightResolution is one in-progress resolution that concurrent
+// callers for the same client_id wait on; done is closed once entry and
+// err are set.
+type inflightResolution struct {
+	done  chan struct{}
+	entry cachedClient
+	err   error
 }
 
 // NewAutomaticClientRepository validates cfg and returns an
@@ -190,7 +204,8 @@ func NewAutomaticClientRepository(underlying storage.ClientRepository, resolver 
 	}
 	return &AutomaticClientRepository{
 		underlying: underlying, resolver: resolver, fetcher: fetcher, cfg: cfg, clock: clock,
-		cache: make(map[fapi.ClientID]cachedClient),
+		cache:    make(map[fapi.ClientID]cachedClient),
+		inflight: make(map[fapi.ClientID]*inflightResolution),
 	}, nil
 }
 
@@ -239,11 +254,34 @@ func (a *AutomaticClientRepository) resolve(ctx context.Context, id fapi.ClientI
 	now := a.clock.Now()
 
 	a.mu.Lock()
-	entry, ok := a.cache[id]
-	a.mu.Unlock()
-	if ok && now.Before(entry.expiresAt) {
+	if entry, ok := a.cache[id]; ok && now.Before(entry.expiresAt) {
+		a.mu.Unlock()
 		return entry, nil
 	}
+	if call, ok := a.inflight[id]; ok {
+		a.mu.Unlock()
+		select {
+		case <-call.done:
+			return call.entry, call.err
+		case <-ctx.Done():
+			return cachedClient{}, ctx.Err()
+		}
+	}
+	call := &inflightResolution{done: make(chan struct{})}
+	a.inflight[id] = call
+	a.mu.Unlock()
+
+	call.entry, call.err = a.resolveUncached(ctx, id, now)
+	a.mu.Lock()
+	delete(a.inflight, id)
+	a.mu.Unlock()
+	close(call.done)
+	return call.entry, call.err
+}
+
+// resolveUncached resolves id's Trust Chain and builds its registration,
+// caching a success. resolve runs at most one at a time per client_id.
+func (a *AutomaticClientRepository) resolveUncached(ctx context.Context, id fapi.ClientID, now time.Time) (cachedClient, error) {
 
 	if err := ValidEntityID(string(id)); err != nil {
 		return cachedClient{}, fmt.Errorf("federation: %q is not a registered client and not a valid federation entity ID: %w", id, err)
@@ -269,7 +307,7 @@ func (a *AutomaticClientRepository) resolve(ctx context.Context, id fapi.ClientI
 	if maxAge := now.Add(a.cfg.MaxCacheAge); maxAge.Before(expiresAt) {
 		expiresAt = maxAge
 	}
-	entry = cachedClient{client: client, jwks: jwks, expiresAt: expiresAt}
+	entry := cachedClient{client: client, jwks: jwks, expiresAt: expiresAt}
 
 	a.mu.Lock()
 	a.cache[id] = entry

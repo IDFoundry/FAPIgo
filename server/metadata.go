@@ -15,7 +15,8 @@ import (
 // API consistency with this type's other methods.
 //
 // Metadata is directly JSON-marshalable, using RFC 8414/OIDC Discovery's
-// own snake_case field names. It deliberately doesn't cover every
+// own snake_case field names, plus OpenID Federation 1.0's
+// client_registration_types_supported. It deliberately doesn't cover every
 // metadata field a real deployment may need to advertise (e.g.
 // userinfo_endpoint, scopes_supported, claims_supported — this package
 // doesn't implement a UserInfo endpoint or know an embedder's supported
@@ -138,6 +139,23 @@ type Metadata struct {
 	// serves the same purpose instead.
 	AuthorizationResponseIssParameterSupported bool `json:"authorization_response_iss_parameter_supported,omitempty"`
 
+	// ClaimsParameterSupported (OpenID Connect Discovery 1.0 §3) is true
+	// when Dependencies.IdentityClaims is set. The "claims" request
+	// parameter (OIDC Core §5.5) is always accepted, but without an
+	// IdentityClaimsSource it can never change what a token contains, so
+	// advertising it then would mislead a client.
+	ClaimsParameterSupported bool `json:"claims_parameter_supported,omitempty"`
+
+	// ClientRegistrationTypesSupported (OpenID Federation 1.0 §5.1.3) is
+	// ["automatic"] when Config.AutomaticRegistration is enabled — a
+	// relying party must see it before registering automatically (§12.1),
+	// and client.DiscoverViaFederation refuses an OP without it. Explicit
+	// Registration isn't implemented, so "explicit" never appears. An
+	// embedder that wires federation.AutomaticClientRepository into
+	// Dependencies.Clients itself, rather than through
+	// Config.AutomaticRegistration, must set this field itself.
+	ClientRegistrationTypesSupported []string `json:"client_registration_types_supported,omitempty"`
+
 	// DPoPSigningAlgValuesSupported (RFC 9449 §5.1) is always the same
 	// fixed value: unlike every other *SigningAlgValuesSupported field
 	// above, DPoP proof algorithm acceptance isn't a Config.Algorithms
@@ -209,6 +227,11 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 	if !s.cfg.OAuthOnly {
 		md.SubjectTypesSupported = []string{"public"}
 		md.IDTokenSigningAlgValuesSupported = []string{s.cfg.Algorithms.IDToken.String()}
+		md.ClaimsParameterSupported = s.deps.IdentityClaims != nil
+	}
+
+	if len(s.cfg.AutomaticRegistration.TrustAnchors) > 0 {
+		md.ClientRegistrationTypesSupported = []string{"automatic"}
 	}
 
 	if s.cfg.Profile == ProfileFAPISecurityWithMessageSigning {

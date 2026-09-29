@@ -13,7 +13,7 @@ import (
 // wireMetadata is server.Metadata (itself directly JSON-marshalable,
 // using RFC 8414/OIDC Discovery's own field names) extended with the
 // fields server.Metadata doesn't produce: scopes_supported,
-// claims_supported, claims_parameter_supported, userinfo_endpoint, and
+// claims_supported, userinfo_endpoint, and
 // dpop_signing_alg_values_supported. DPoP proof verification
 // (internal/dpop) checks a proof's own JWS header algorithm against this
 // module's whole closed algorithm set, not a configured subset, so that
@@ -30,7 +30,6 @@ type wireMetadata struct {
 	MTLSEndpointAliases           *wireMTLSEndpointAliases `json:"mtls_endpoint_aliases,omitempty"`
 	ScopesSupported               []string                 `json:"scopes_supported,omitempty"`
 	ClaimsSupported               []string                 `json:"claims_supported,omitempty"`
-	ClaimsParameterSupported      bool                     `json:"claims_parameter_supported,omitempty"`
 	UserinfoEndpoint              string                   `json:"userinfo_endpoint,omitempty"`
 	DPoPSigningAlgValuesSupported []string                 `json:"dpop_signing_alg_values_supported,omitempty"`
 }
@@ -81,7 +80,6 @@ func buildWireMetadata(srv *server.Server, ctx context.Context, advertisedScopes
 		Metadata:                      md,
 		ScopesSupported:               advertisedScopes,
 		ClaimsSupported:               claimsSupported,
-		ClaimsParameterSupported:      true,
 		UserinfoEndpoint:              userinfoURL.String(),
 		DPoPSigningAlgValuesSupported: dpopSigningAlgValuesSupported,
 	}

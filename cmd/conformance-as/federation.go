@@ -11,11 +11,13 @@ import (
 )
 
 // federationOpenIDProviderMetadata is buildWireMetadata's own document
-// (the same one served at /.well-known/openid-configuration), extended
-// with client_registration_types_supported — required by OpenID
-// Federation 1.0 §12.1 on any OP that supports Automatic Registration,
-// and not otherwise part of OIDC Discovery, so it's added only here,
-// never on the plain discovery document.
+// (the same one served at /.well-known/openid-configuration), with
+// client_registration_types_supported always set — OpenID Federation
+// 1.0 §12.1 requires it on any OP that supports Automatic Registration.
+// server.Metadata sets it itself when Config.AutomaticRegistration is
+// configured, but under -federation-trust-anchor-admin this AS wires its
+// own AutomaticClientRepository instead (wiring.go), leaving that config
+// zero, so it's set here for both modes.
 type federationOpenIDProviderMetadata struct {
 	wireMetadata
 	ClientRegistrationTypesSupported []string `json:"client_registration_types_supported"`

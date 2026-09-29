@@ -35,42 +35,42 @@ import (
 // Trust Mark Status or Trust Marked Entities Listing endpoints (§8/§9)
 // — see internal/federation's own doc.go for exactly what is and is
 // not covered.
-func (r *Resolver) VerifyTrustMark(ctx context.Context, subjectID string, raw intfed.RawTrustMark, accreditation TrustMarkAccreditation) (intfed.TrustMarkClaims, error) {
+func (r *Resolver) VerifyTrustMark(ctx context.Context, subjectID string, raw RawTrustMark, accreditation TrustMarkAccreditation) (TrustMarkClaims, error) {
 	if subjectID == "" {
-		return intfed.TrustMarkClaims{}, fmt.Errorf("federation: subject entity ID is empty")
+		return TrustMarkClaims{}, fmt.Errorf("federation: subject entity ID is empty")
 	}
 	if accreditation != RequireFederationAccreditation && accreditation != AcceptAnyFederationIssuer {
-		return intfed.TrustMarkClaims{}, fmt.Errorf("federation: trust mark accreditation policy is required (RequireFederationAccreditation or AcceptAnyFederationIssuer)")
+		return TrustMarkClaims{}, fmt.Errorf("federation: trust mark accreditation policy is required (RequireFederationAccreditation or AcceptAnyFederationIssuer)")
 	}
 	tm, err := intfed.ParseTrustMark(raw.TrustMark)
 	if err != nil {
-		return intfed.TrustMarkClaims{}, fmt.Errorf("federation: parse trust mark: %w", err)
+		return TrustMarkClaims{}, fmt.Errorf("federation: parse trust mark: %w", err)
 	}
 	// OpenID Federation 1.0 §7: a Trust Mark MUST carry the kid of its
 	// signing key.
 	if tm.KeyID() == "" {
-		return intfed.TrustMarkClaims{}, fmt.Errorf("federation: trust mark has no kid header")
+		return TrustMarkClaims{}, fmt.Errorf("federation: trust mark has no kid header")
 	}
 
 	issuer, err := r.Resolve(ctx, tm.ClaimedIssuer())
 	if err != nil {
-		return intfed.TrustMarkClaims{}, fmt.Errorf("federation: resolve trust mark issuer %q: %w", tm.ClaimedIssuer(), err)
+		return TrustMarkClaims{}, fmt.Errorf("federation: resolve trust mark issuer %q: %w", tm.ClaimedIssuer(), err)
 	}
 	claims, err := r.verifyTrustMarkAgainstJWKS(tm, issuer.JWKS, subjectID, raw.TrustMarkType, tm.Algorithm(), r.deps.Clock.Now())
 	if err != nil {
-		return intfed.TrustMarkClaims{}, fmt.Errorf("federation: trust mark: %w", err)
+		return TrustMarkClaims{}, fmt.Errorf("federation: trust mark: %w", err)
 	}
 	trustAnchor, err := r.Resolve(ctx, issuer.TrustAnchor)
 	if err != nil {
-		return intfed.TrustMarkClaims{}, fmt.Errorf("federation: resolve trust anchor %q: %w", issuer.TrustAnchor, err)
+		return TrustMarkClaims{}, fmt.Errorf("federation: resolve trust anchor %q: %w", issuer.TrustAnchor, err)
 	}
 	if accreditation == RequireFederationAccreditation {
 		if err := checkTrustMarkAccreditation(trustAnchor, claims); err != nil {
-			return intfed.TrustMarkClaims{}, fmt.Errorf("federation: trust mark: %w", err)
+			return TrustMarkClaims{}, fmt.Errorf("federation: trust mark: %w", err)
 		}
 	}
 	if err := r.checkTrustMarkDelegation(trustAnchor, tm, claims); err != nil {
-		return intfed.TrustMarkClaims{}, fmt.Errorf("federation: trust mark: %w", err)
+		return TrustMarkClaims{}, fmt.Errorf("federation: trust mark: %w", err)
 	}
 	return claims, nil
 }
@@ -104,7 +104,7 @@ const (
 
 // checkTrustMarkAccreditation applies RequireFederationAccreditation
 // against trustAnchor's own "trust_mark_issuers" claim.
-func checkTrustMarkAccreditation(trustAnchor ResolvedEntity, claims intfed.TrustMarkClaims) error {
+func checkTrustMarkAccreditation(trustAnchor ResolvedEntity, claims TrustMarkClaims) error {
 	issuers, listed := trustAnchor.TrustMarkIssuers[claims.TrustMarkType]
 	if !listed {
 		return fmt.Errorf("trust_mark_type %q is not in trust anchor %q's trust_mark_issuers", claims.TrustMarkType, trustAnchor.EntityID)
@@ -118,7 +118,7 @@ func checkTrustMarkAccreditation(trustAnchor ResolvedEntity, claims intfed.Trust
 // checkTrustMarkDelegation requires and validates a "delegation" claim
 // when trustAnchor names the mark's type in its "trust_mark_owners"
 // claim (OpenID Federation 1.0 §7.3 steps 8-9).
-func (r *Resolver) checkTrustMarkDelegation(trustAnchor ResolvedEntity, tm intfed.TrustMark, claims intfed.TrustMarkClaims) error {
+func (r *Resolver) checkTrustMarkDelegation(trustAnchor ResolvedEntity, tm intfed.TrustMark, claims TrustMarkClaims) error {
 	owner, required := trustAnchor.TrustMarkOwners[claims.TrustMarkType]
 	if !required {
 		return nil
@@ -175,12 +175,12 @@ func verifyAgainstCandidateKeys[C any](jwksRaw json.RawMessage, kid string, algo
 
 // verifyTrustMarkAgainstJWKS verifies tm against jwksRaw's own
 // candidate keys.
-func (r *Resolver) verifyTrustMarkAgainstJWKS(tm intfed.TrustMark, jwksRaw json.RawMessage, expectedSubject, expectedTrustMarkType string, algorithm fapi.SignatureAlgorithm, now time.Time) (intfed.TrustMarkClaims, error) {
+func (r *Resolver) verifyTrustMarkAgainstJWKS(tm intfed.TrustMark, jwksRaw json.RawMessage, expectedSubject, expectedTrustMarkType string, algorithm fapi.SignatureAlgorithm, now time.Time) (TrustMarkClaims, error) {
 	policy := intfed.TrustMarkVerifyPolicy{
 		ExpectedSubject: expectedSubject, ExpectedTrustMarkType: expectedTrustMarkType,
 		Algorithm: algorithm, Now: now, MaxClockSkew: r.cfg.Limits.MaxClockSkew,
 	}
-	return verifyAgainstCandidateKeys(jwksRaw, tm.KeyID(), algorithm, func(pub crypto.PublicKey) (intfed.TrustMarkClaims, error) {
+	return verifyAgainstCandidateKeys(jwksRaw, tm.KeyID(), algorithm, func(pub crypto.PublicKey) (TrustMarkClaims, error) {
 		return tm.Verify(pub, policy)
 	})
 }
@@ -211,29 +211,29 @@ func (r *Resolver) verifyTrustMarkDelegationAgainstJWKS(d intfed.TrustMarkDelega
 // fapihttp.ErrUnexpectedStatus wrapping that status code — the same as
 // any other unexpected status from a Fetch/Post call, not a dedicated
 // typed error in this first version.
-func (r *Resolver) CheckTrustMarkStatus(ctx context.Context, trustMarkToken string) (intfed.TrustMarkStatusResponseClaims, error) {
+func (r *Resolver) CheckTrustMarkStatus(ctx context.Context, trustMarkToken string) (TrustMarkStatusResponseClaims, error) {
 	if trustMarkToken == "" {
-		return intfed.TrustMarkStatusResponseClaims{}, fmt.Errorf("federation: trust mark is empty")
+		return TrustMarkStatusResponseClaims{}, fmt.Errorf("federation: trust mark is empty")
 	}
 	tm, err := intfed.ParseTrustMark(trustMarkToken)
 	if err != nil {
-		return intfed.TrustMarkStatusResponseClaims{}, fmt.Errorf("federation: parse trust mark: %w", err)
+		return TrustMarkStatusResponseClaims{}, fmt.Errorf("federation: parse trust mark: %w", err)
 	}
 
 	issuer, err := r.Resolve(ctx, tm.ClaimedIssuer())
 	if err != nil {
-		return intfed.TrustMarkStatusResponseClaims{}, fmt.Errorf("federation: resolve trust mark issuer %q: %w", tm.ClaimedIssuer(), err)
+		return TrustMarkStatusResponseClaims{}, fmt.Errorf("federation: resolve trust mark issuer %q: %w", tm.ClaimedIssuer(), err)
 	}
 	issuerMeta, err := parseEntityMetadata(issuer.Metadata)
 	if err != nil {
-		return intfed.TrustMarkStatusResponseClaims{}, fmt.Errorf("federation: parse trust mark issuer's own federation_entity metadata: %w", err)
+		return TrustMarkStatusResponseClaims{}, fmt.Errorf("federation: parse trust mark issuer's own federation_entity metadata: %w", err)
 	}
 	if issuerMeta.TrustMarkStatusEndpoint == "" {
-		return intfed.TrustMarkStatusResponseClaims{}, fmt.Errorf("federation: trust mark issuer %q published no federation_trust_mark_status_endpoint", tm.ClaimedIssuer())
+		return TrustMarkStatusResponseClaims{}, fmt.Errorf("federation: trust mark issuer %q published no federation_trust_mark_status_endpoint", tm.ClaimedIssuer())
 	}
 	endpoint, err := url.Parse(issuerMeta.TrustMarkStatusEndpoint)
 	if err != nil {
-		return intfed.TrustMarkStatusResponseClaims{}, fmt.Errorf("federation: parse trust mark issuer's own status endpoint: %w", err)
+		return TrustMarkStatusResponseClaims{}, fmt.Errorf("federation: parse trust mark issuer's own status endpoint: %w", err)
 	}
 
 	body := url.Values{"trust_mark": {trustMarkToken}}.Encode()
@@ -242,21 +242,21 @@ func (r *Resolver) CheckTrustMarkStatus(ctx context.Context, trustMarkToken stri
 		ExpectedContentType: "application/trust-mark-status-response+jwt",
 	})
 	if err != nil {
-		return intfed.TrustMarkStatusResponseClaims{}, fmt.Errorf("federation: query trust mark status: %w", err)
+		return TrustMarkStatusResponseClaims{}, fmt.Errorf("federation: query trust mark status: %w", err)
 	}
 
 	response, err := intfed.ParseTrustMarkStatusResponse(strings.TrimSpace(string(res.Body)))
 	if err != nil {
-		return intfed.TrustMarkStatusResponseClaims{}, fmt.Errorf("federation: parse trust mark status response: %w", err)
+		return TrustMarkStatusResponseClaims{}, fmt.Errorf("federation: parse trust mark status response: %w", err)
 	}
-	claims, err := verifyAgainstCandidateKeys(issuer.JWKS, response.KeyID(), response.Algorithm(), func(pub crypto.PublicKey) (intfed.TrustMarkStatusResponseClaims, error) {
+	claims, err := verifyAgainstCandidateKeys(issuer.JWKS, response.KeyID(), response.Algorithm(), func(pub crypto.PublicKey) (TrustMarkStatusResponseClaims, error) {
 		return response.Verify(pub, intfed.TrustMarkStatusResponseVerifyPolicy{
 			ExpectedIssuer: tm.ClaimedIssuer(), ExpectedTrustMark: trustMarkToken,
 			Algorithm: response.Algorithm(), Now: r.deps.Clock.Now(), MaxClockSkew: r.cfg.Limits.MaxClockSkew,
 		})
 	})
 	if err != nil {
-		return intfed.TrustMarkStatusResponseClaims{}, fmt.Errorf("federation: trust mark status response: %w", err)
+		return TrustMarkStatusResponseClaims{}, fmt.Errorf("federation: trust mark status response: %w", err)
 	}
 	return claims, nil
 }

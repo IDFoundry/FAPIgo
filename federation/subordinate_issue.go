@@ -121,7 +121,7 @@ type SubordinateStatementParams struct {
 	// 1.0 §6.1) — constraints this issuer places on Subject's own
 	// metadata (and, if Subject is itself an Intermediate, its
 	// subordinates' metadata in turn). Optional.
-	MetadataPolicy intfed.MetadataPolicy
+	MetadataPolicy MetadataPolicy
 
 	// MetadataPolicyCritical is the "metadata_policy_crit" claim.
 	// Optional.
@@ -131,7 +131,7 @@ type SubordinateStatementParams struct {
 	// §6.2) — max_path_length, naming_constraints and
 	// allowed_entity_types restrictions this issuer places on Trust
 	// Chains passing through Subject. Optional.
-	Constraints *intfed.Constraints
+	Constraints *Constraints
 
 	// SourceEndpoint is the "source_endpoint" claim — the fetch endpoint
 	// this statement was served from (OpenID Federation 1.0 §3.2),

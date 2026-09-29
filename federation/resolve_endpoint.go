@@ -64,29 +64,29 @@ type ResolveRequest struct {
 // re-verify each entry of the response's own TrustChain claim — doing
 // so unconditionally would defeat the purpose of a resolve endpoint at
 // all, which exists precisely so a caller doesn't have to perform that
-// walk itself; a caller wanting to independently audit it can still
-// parse those raw entries with intfed.Parse.
+// walk itself. The entries stay available raw, in TrustChain, for a
+// caller that wants to audit them with its own JWT handling.
 //
 // Only the no-client-authentication GET-request shape (§8.3.1) is
 // covered — the POST-with-client-authentication variant is not
 // implemented in this first version.
-func (r *Resolver) ResolveViaEndpoint(ctx context.Context, req ResolveRequest) (intfed.ResolveResponseClaims, error) {
+func (r *Resolver) ResolveViaEndpoint(ctx context.Context, req ResolveRequest) (ResolveResponseClaims, error) {
 	if req.Endpoint == "" {
-		return intfed.ResolveResponseClaims{}, fmt.Errorf("federation: resolve endpoint is empty")
+		return ResolveResponseClaims{}, fmt.Errorf("federation: resolve endpoint is empty")
 	}
 	if req.Subject == "" {
-		return intfed.ResolveResponseClaims{}, fmt.Errorf("federation: subject entity ID is empty")
+		return ResolveResponseClaims{}, fmt.Errorf("federation: subject entity ID is empty")
 	}
 	if req.TrustAnchor == "" {
-		return intfed.ResolveResponseClaims{}, fmt.Errorf("federation: trust anchor is empty")
+		return ResolveResponseClaims{}, fmt.Errorf("federation: trust anchor is empty")
 	}
 
 	target, err := url.Parse(req.Endpoint)
 	if err != nil {
-		return intfed.ResolveResponseClaims{}, fmt.Errorf("federation: invalid resolve endpoint %q: %w", req.Endpoint, err)
+		return ResolveResponseClaims{}, fmt.Errorf("federation: invalid resolve endpoint %q: %w", req.Endpoint, err)
 	}
 	if target.Scheme != "https" {
-		return intfed.ResolveResponseClaims{}, fmt.Errorf("federation: resolve endpoint %q must use https", req.Endpoint)
+		return ResolveResponseClaims{}, fmt.Errorf("federation: resolve endpoint %q must use https", req.Endpoint)
 	}
 	q := target.Query()
 	q.Set("sub", req.Subject)
@@ -98,27 +98,27 @@ func (r *Resolver) ResolveViaEndpoint(ctx context.Context, req ResolveRequest) (
 
 	res, err := r.deps.HTTP.Fetch(ctx, fapihttp.FetchRequest{URL: target, ExpectedContentType: ResolveResponseContentType})
 	if err != nil {
-		return intfed.ResolveResponseClaims{}, fmt.Errorf("federation: fetch resolve response for %q: %w", req.Subject, err)
+		return ResolveResponseClaims{}, fmt.Errorf("federation: fetch resolve response for %q: %w", req.Subject, err)
 	}
 	resp, err := intfed.ParseResolveResponse(string(res.Body))
 	if err != nil {
-		return intfed.ResolveResponseClaims{}, fmt.Errorf("federation: parse resolve response: %w", err)
+		return ResolveResponseClaims{}, fmt.Errorf("federation: parse resolve response: %w", err)
 	}
 
 	issuer, err := r.Resolve(ctx, resp.ClaimedIssuer())
 	if err != nil {
-		return intfed.ResolveResponseClaims{}, fmt.Errorf("federation: resolve resolve-response issuer %q: %w", resp.ClaimedIssuer(), err)
+		return ResolveResponseClaims{}, fmt.Errorf("federation: resolve resolve-response issuer %q: %w", resp.ClaimedIssuer(), err)
 	}
 
 	now := r.deps.Clock.Now()
-	claims, err := verifyAgainstCandidateKeys(issuer.JWKS, resp.KeyID(), resp.Algorithm(), func(pub crypto.PublicKey) (intfed.ResolveResponseClaims, error) {
+	claims, err := verifyAgainstCandidateKeys(issuer.JWKS, resp.KeyID(), resp.Algorithm(), func(pub crypto.PublicKey) (ResolveResponseClaims, error) {
 		return resp.Verify(pub, intfed.ResolveResponseVerifyPolicy{
 			ExpectedIssuer: resp.ClaimedIssuer(), ExpectedSubject: req.Subject,
 			Algorithm: resp.Algorithm(), Now: now, MaxClockSkew: r.cfg.Limits.MaxClockSkew,
 		})
 	})
 	if err != nil {
-		return intfed.ResolveResponseClaims{}, fmt.Errorf("federation: resolve response: %w", err)
+		return ResolveResponseClaims{}, fmt.Errorf("federation: resolve response: %w", err)
 	}
 	return claims, nil
 }

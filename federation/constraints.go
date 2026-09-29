@@ -6,8 +6,6 @@ import (
 	"net/url"
 	"slices"
 	"strings"
-
-	intfed "github.com/idfoundry/fapigo/internal/federation"
 )
 
 // subordinateConstraint is one Subordinate Statement's own
@@ -26,7 +24,7 @@ import (
 // of Intermediate Entities between the constraint's issuer and the
 // subject.
 type subordinateConstraint struct {
-	constraints intfed.Constraints
+	constraints Constraints
 	appliesTo   []string
 }
 
@@ -56,7 +54,7 @@ func checkNamingConstraints(constraints []subordinateConstraint) error {
 // the permitted list" — checked first, unconditionally — and otherwise,
 // when a permitted list is present at all, entityID's host must match
 // at least one of its entries.
-func checkNamingConstraint(nc intfed.NamingConstraints, entityID string) error {
+func checkNamingConstraint(nc NamingConstraints, entityID string) error {
 	host, err := entityIDHost(entityID)
 	if err != nil {
 		return err

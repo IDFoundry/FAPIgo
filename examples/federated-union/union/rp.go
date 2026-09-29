@@ -119,20 +119,12 @@ func (rp *relyingParty) metadata(context.Context) (map[string]json.RawMessage, e
 		JWKS:                        rp.authJWKS,
 		ClientName:                  rp.entity.name,
 		Contacts:                    []string{"federation@" + rp.entity.host},
+		GrantTypes:                  []string{"authorization_code", "refresh_token", "client_credentials"},
 	})
 	if err != nil {
 		return nil, err
 	}
-	var withGrants map[string]any
-	if err := json.Unmarshal(md, &withGrants); err != nil {
-		return nil, err
-	}
-	withGrants["grant_types"] = []string{"authorization_code", "refresh_token", "client_credentials"}
-	raw, err := json.Marshal(withGrants)
-	if err != nil {
-		return nil, err
-	}
-	return map[string]json.RawMessage{"openid_relying_party": raw}, nil
+	return map[string]json.RawMessage{"openid_relying_party": md}, nil
 }
 
 // providerStatus is how one identity provider looks from this service.
@@ -197,10 +189,16 @@ func (rp *relyingParty) clientFor(ctx context.Context, provider string) (*client
 	if err != nil {
 		return nil, err
 	}
-	issuerKeys, err := keys.NewJWKSIssuerKeySource(fetcher, discovered.JWKSURI, time.Minute)
+	issuerKeys, err := discovered.IssuerKeySource(fetcher, time.Minute)
 	if err != nil {
 		return nil, err
 	}
+	algorithms := client.RecommendedAlgorithms()
+	algorithms.IDToken, algorithms.RequestObject = fapi.ES256, fapi.ES256
+	limits := client.RecommendedLimits()
+	// No recommended value: it's how long this provider makes its ID
+	// tokens valid for (a FAPIgo server's recommendation is 10 minutes).
+	limits.MaxIDTokenLifetime = 10 * time.Minute
 	issuer, err := fapi.ParseIssuerURL(provider)
 	if err != nil {
 		return nil, err
@@ -214,17 +212,12 @@ func (rp *relyingParty) clientFor(ctx context.Context, provider string) (*client
 		Assurance:   client.AssuranceDevelopment,
 		// A service registered automatically proves control of its keys
 		// with a signed request object (OpenID Federation 1.0 §12.1.1.1).
-		PushedRequestEncoding:          client.PushedRequestEncodingRequestObject,
-		AuthorizationResponseIssPolicy: client.TolerateAbsentAuthorizationResponseIss,
-		Algorithms: client.Algorithms{
-			DPoP: fapi.ES256, IDToken: fapi.ES256, ClientAuthentication: fapi.ES256, RequestObject: fapi.ES256,
-		},
-		Limits: client.Limits{
-			ClientAssertionLifetime: time.Minute, RequestObjectLifetime: time.Minute,
-			SessionLifetime: 10 * time.Minute, MaxIDTokenLifetime: 10 * time.Minute,
-			MaxClockSkew: 30 * time.Second, HTTPTimeout: 10 * time.Second,
-			MaxHTTPResponseBytes: 1 << 20, MaxJOSECompactBytes: 16 * 1024,
-		},
+		PushedRequestEncoding: client.PushedRequestEncodingRequestObject,
+		// A service talking to several providers needs RFC 9207's iss to
+		// tell their responses apart.
+		AuthorizationResponseIssPolicy: client.RequireAuthorizationResponseIss,
+		Algorithms:                     algorithms,
+		Limits:                         limits,
 	}, client.Dependencies{
 		Sessions: rp.sessions, Keys: rp.keys, IssuerKeys: issuerKeys,
 		HTTP: rp.w.net.Client(rp.entity.host), Clock: client.SystemClock{}, Random: rand.Reader,

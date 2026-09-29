@@ -40,7 +40,15 @@ func (w *World) newConsole() (*console, error) {
 	mux.HandleFunc("POST /scene/reset", c.resetScenes)
 	mux.HandleFunc("GET /entity", c.entityPage)
 	mux.HandleFunc("GET /resolve", c.resolve)
-	w.router[consoleHost] = mux
+	// Scene switches accept POSTs from the demo's own pages (every page
+	// carries a reset button) but not from any other site.
+	protect := http.NewCrossOriginProtection()
+	for _, host := range Hosts() {
+		if err := protect.AddTrustedOrigin(w.URL(host, "")); err != nil {
+			return nil, err
+		}
+	}
+	w.router[consoleHost] = protect.Handler(mux)
 	return c, nil
 }
 

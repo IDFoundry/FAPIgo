@@ -55,7 +55,13 @@ type identityProvider struct {
 type pendingLogin struct {
 	handle      server.InteractionHandle
 	interaction server.InteractionRequest
+	started     time.Time
 }
+
+// pendingLifetime is how long a consent page stays answerable — the
+// server's own interaction lifetime (server.RecommendedLimits) is
+// shorter, so this only bounds how long an abandoned one is kept.
+const pendingLifetime = 15 * time.Minute
 
 const (
 	interactionCookie = "fu_interaction"
@@ -188,7 +194,11 @@ func (w *World) newIdentityProvider(c country, ta *entity) (*identityProvider, e
 	mux.HandleFunc("GET /jwks", idp.jwks)
 	mux.HandleFunc("POST /par", idp.par)
 	mux.HandleFunc("GET "+authorizePath, idp.authorize)
-	mux.HandleFunc("POST "+authorizePath, idp.decide)
+	// The interaction handle cookie is SameSite, but a sibling host on the
+	// same site (bank.southport.localhost next to id.southport.localhost)
+	// still sends it. Refusing cross-origin POSTs is the CSRF defence
+	// server.InteractionHandle's doc comment asks for.
+	mux.Handle("POST "+authorizePath, http.NewCrossOriginProtection().Handler(http.HandlerFunc(idp.decide)))
 	mux.HandleFunc("POST /token", idp.token)
 	return idp, nil
 }
@@ -315,7 +325,13 @@ func (p *identityProvider) authorize(w http.ResponseWriter, r *http.Request) {
 	switch a := action.(type) {
 	case server.InteractionRequired:
 		p.mu.Lock()
-		p.pending[a.Handle.String()] = pendingLogin{handle: a.Handle, interaction: a.Interaction}
+		now := time.Now()
+		for k, l := range p.pending {
+			if now.Sub(l.started) > pendingLifetime {
+				delete(p.pending, k) // abandoned
+			}
+		}
+		p.pending[a.Handle.String()] = pendingLogin{handle: a.Handle, interaction: a.Interaction, started: now}
 		p.mu.Unlock()
 		http.SetCookie(w, &http.Cookie{
 			Name: interactionCookie, Value: a.Handle.String(), Path: authorizePath,
@@ -360,7 +376,12 @@ func (p *identityProvider) decide(w http.ResponseWriter, r *http.Request) {
 	if r.PostForm.Get("decision") != "approve" {
 		result = server.Deny("the citizen declined")
 	} else {
-		subjectID, err := server.NewSubjectID(r.PostForm.Get("citizen"))
+		sub := r.PostForm.Get("citizen")
+		if !slices.ContainsFunc(p.country.citizens, func(c citizen) bool { return c.sub == sub }) {
+			p.w.renderError(w, http.StatusBadRequest, "No citizen chosen", "Choose one of "+p.country.idpName+"'s citizens.")
+			return
+		}
+		subjectID, err := server.NewSubjectID(sub)
 		if err != nil {
 			p.w.renderError(w, http.StatusBadRequest, "No citizen chosen", err.Error())
 			return
@@ -370,7 +391,7 @@ func (p *identityProvider) decide(w http.ResponseWriter, r *http.Request) {
 			p.w.renderError(w, http.StatusInternalServerError, signInFailed, err.Error())
 			return
 		}
-		authCtx, err := server.NewAuthenticationContext(time.Now(), "https://union.localhost/loa/high", []string{"hwk"})
+		authCtx, err := server.NewAuthenticationContext(time.Now(), p.w.loaHighType, []string{"hwk"})
 		if err != nil {
 			p.w.renderError(w, http.StatusInternalServerError, signInFailed, err.Error())
 			return

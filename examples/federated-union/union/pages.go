@@ -189,7 +189,7 @@ var pageTemplates = map[string]string{
 	"consent": `{{template "top" .}}
 <div class="card">
 <p><strong>{{.ClientName}}</strong> wants you to sign in with {{.Provider}}.</p>
-<p class="muted"><code>{{.Client}}</code> — registered automatically through the Meridian Union federation.</p>
+<p class="muted"><code>{{.Client}}</code> — registered automatically through its Trust Chain, with no onboarding beforehand.</p>
 <form method="post" action="/authorize">
 <h2>Who are you?</h2>
 {{range $i, $c := .Citizens}}<label class="row"><input type="radio" name="citizen" value="{{$c.Sub}}" {{if eq $i 0}}checked{{end}}> {{$c.Name}} <span class="muted">({{$c.Sub}})</span></label>{{end}}
@@ -230,6 +230,9 @@ func (w *World) render(rw http.ResponseWriter, name string, data any) {
 	}
 }
 
+// renderError shows detail, often an internal error's text, to the
+// browser: useful in a demo for seeing why something was refused, but a
+// real service or identity provider should log it instead.
 func (w *World) renderError(rw http.ResponseWriter, status int, heading, detail string) {
 	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
 	rw.WriteHeader(status)

@@ -20,7 +20,7 @@ func (w *World) sceneList() []scene {
 		{key: "suspend", title: "Suspend Eastmark", flag: &s.SuspendEastmark,
 			description: "The Union stops vouching for Eastmark's authority. Cross-border sign-ins with EastID fail; Eastmark's own services, which also trust their national authority directly, keep working."},
 		{key: "compromise", title: "Eastmark's authority is compromised", flag: &s.CompromiseEastmark,
-			description: "Eastmark's authority vouches for an impostor at bank.northland.localhost. The Union's naming constraints confine Eastmark to *.eastmark.localhost, so the impostor fails to resolve through the Union."},
+			description: "Eastmark's authority vouches for an impostor at bank.northland.localhost. The Union's naming constraints confine Eastmark to *.eastmark.localhost, so the impostor fails to resolve through the Union — but not for anyone who trusts Eastmark's authority directly, like EastID: naming constraints protect only those who rely on the Union."},
 	}
 }
 
@@ -100,7 +100,7 @@ func (c *console) tour() []tourStep {
 		{
 			Title:  "Contain a compromised authority",
 			Do:     "Turn the scene on, then resolve the impostor both ways.",
-			Notice: "Eastmark's authority now vouches for a Northland host. Through the Union, naming constraints reject it; through Eastmark's authority alone, it resolves.",
+			Notice: "Eastmark's authority now vouches for a Northland host. Through the Union, naming constraints reject it; through Eastmark's authority alone, it resolves — so EastID, which trusts that authority directly, isn't protected by the Union's constraint.",
 			Links: []tourLink{
 				{"Impostor, trusting the Union", resolve(impostorHost, "union")},
 				{"Impostor, trusting Eastmark", resolve(impostorHost, "eastmark")},

@@ -27,8 +27,10 @@ go run ./cmd/federated-union -open
 **https://console.localhost:8643/**, in a separate profile under
 `.union-state/chrome-profile` that accepts the demo's certificate — only
 that one, identified by its key — without a warning. Use that window for
-the whole demo. Chrome shows a banner about an unsupported command-line
-flag; that's expected. Ctrl-C stops the demo.
+the whole demo, and only for it: Chrome accepts that key for *any* host
+in this profile, and the key sits in `.union-state/`. Chrome shows a
+banner about an unsupported command-line flag; that's expected. Ctrl-C
+stops the demo.
 
 ### Other browsers
 
@@ -119,10 +121,14 @@ Then the console's scenes:
 |---|---|---|
 | **EastID forges its assurance mark** | EastID publishes a level-of-assurance mark it signed itself | The signature verifies — EastID is a federation member — but the Union doesn't accredit EastID to issue that mark, so services refuse EastID |
 | **Suspend Eastmark** | The Union stops vouching for Eastmark's authority | Cross-border sign-ins with EastID fail; Eastmark Telecom, which also trusts Eastmark's authority directly, keeps working |
-| **Eastmark's authority is compromised** | Eastmark's authority vouches for an impostor claiming a Northland host | The Union's naming constraints confine Eastmark to `*.eastmark.localhost`: the impostor resolves through Eastmark alone, but not through the Union |
+| **Eastmark's authority is compromised** | Eastmark's authority vouches for an impostor claiming a Northland host | The Union's naming constraints confine Eastmark to `*.eastmark.localhost`: the impostor resolves through Eastmark alone, but not through the Union. That protects only parties relying on the Union: EastID, which trusts Eastmark's authority directly, would still accept the impostor |
 
 Identity providers cache a service's registration for 10 seconds, so a
 scene can take that long to affect a sign-in already in progress.
+Everything else here resolves Trust Chains afresh, which is why
+suspension is near-instant. In a real federation, a Subordinate
+Statement stays valid until it expires (24 hours in this demo), so a
+party that cached it keeps trusting a suspended authority until then.
 
 The console's **Recent federation traffic** shows every request one
 entity made to another: each Entity Configuration, Subordinate Statement

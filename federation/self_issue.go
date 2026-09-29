@@ -122,13 +122,20 @@ func NewSelfIssuer(cfg SelfIssueConfig, deps SelfIssueDependencies) (*SelfIssuer
 // package does not itself serve HTTP, matching every other role
 // package's own transport-agnostic design (ARCHITECTURE.md design rule
 // 6).
-func (s *SelfIssuer) EntityConfiguration(metadata map[string]json.RawMessage) (string, error) {
+//
+// trustMarks become the "trust_marks" claim (OpenID Federation 1.0
+// §3.1.2): Trust Marks other entities have issued about this one, each
+// as its type and signed JWT, published unchanged. They are passed per
+// call, not configured once, because Trust Marks expire and get
+// reissued; this method doesn't verify them.
+func (s *SelfIssuer) EntityConfiguration(metadata map[string]json.RawMessage, trustMarks ...RawTrustMark) (string, error) {
 	token, err := intfed.Create(intfed.CreateParams{
 		Signer: s.deps.Signer, Algorithm: s.deps.Algorithm, KeyID: s.deps.KeyID,
 		Issuer: s.cfg.EntityID, Subject: s.cfg.EntityID,
 		Now: s.deps.Clock.Now(), Lifetime: s.cfg.Lifetime,
 		JWKS: s.deps.JWKS, Metadata: metadata, AuthorityHints: s.cfg.AuthorityHints,
 		TrustMarkIssuers: s.cfg.TrustMarkIssuers,
+		TrustMarks:       trustMarks,
 	})
 	if err != nil {
 		return "", fmt.Errorf("federation: self-issue entity configuration: %w", err)

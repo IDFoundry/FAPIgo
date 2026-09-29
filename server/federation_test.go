@@ -8,6 +8,7 @@ import (
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/federation"
 	intfed "github.com/idfoundry/fapigo/internal/federation"
 	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/keys"
@@ -164,5 +165,36 @@ func TestServerEntityConfigurationRejectsEmptyKeyID(t *testing.T) {
 	}
 	if _, err := srv.EntityConfiguration(context.Background(), nil); err == nil {
 		t.Fatalf("EntityConfiguration(key manager returns empty kid) = nil error, want error")
+	}
+}
+
+func TestServerEntityConfigurationPublishesTrustMarks(t *testing.T) {
+	key := generateKey(t)
+	deps := validDependencies()
+	deps.Keys = &fakeKeyManager{key: key, keyID: "as-fed-kid"}
+	srv, err := server.New(federationConfiguredConfig(t), deps)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	mark := federation.RawTrustMark{TrustMarkType: "https://federation.example.org/marks/loa-high", TrustMark: "a.b.c"}
+	token, err := srv.EntityConfiguration(context.Background(), map[string]json.RawMessage{
+		"openid_provider": json.RawMessage(`{"issuer":"https://as.example.org"}`),
+	}, mark)
+	if err != nil {
+		t.Fatalf("EntityConfiguration: %v", err)
+	}
+	stmt, err := intfed.Parse(token)
+	if err != nil {
+		t.Fatalf("intfed.Parse: %v", err)
+	}
+	claims, err := stmt.Verify(&key.PublicKey, intfed.VerifyPolicy{
+		ExpectedIssuer: "https://as.example.org", ExpectedSubject: "https://as.example.org",
+		Algorithm: fapi.ES256, Now: time.Now(), MaxLifetime: 2 * time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if len(claims.TrustMarks) != 1 || claims.TrustMarks[0] != mark {
+		t.Fatalf("TrustMarks = %v, want [%v]", claims.TrustMarks, mark)
 	}
 }

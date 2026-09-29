@@ -71,6 +71,13 @@ type ClientKeySource struct {
 // NewClientKeySource builds a ClientKeySource from specs, parsing every
 // inline static JWKS up front so a malformed one fails at construction
 // rather than on the first request that needs it.
+//
+// fetcher may be nil when every spec carries an inline JWKS: nothing is
+// ever fetched then. A spec that relies on its JWKSURI needs a fetcher,
+// and construction fails without one rather than at that client's first
+// request. So does a spec with no ClientID, a ClientID already used by
+// an earlier spec, neither JWKS nor JWKSURI, or a JWKSURI that isn't an
+// absolute URL.
 func NewClientKeySource(fetcher *fapihttp.Client, specs []ClientKeySpec, opts ...Option) (*ClientKeySource, error) {
 	s := &ClientKeySource{
 		fetcher:  fetcher,
@@ -81,23 +88,45 @@ func NewClientKeySource(fetcher *fapihttp.Client, specs []ClientKeySpec, opts ..
 		opt(s)
 	}
 	for _, spec := range specs {
-		entry := &clientKeyEntry{}
-		if len(spec.JWKS) > 0 {
-			parsed, err := parseVerificationKeys(spec.JWKS)
-			if err != nil {
-				return nil, fmt.Errorf("client %q: parse inline jwks: %w", spec.ClientID, err)
-			}
-			entry.static = parsed
-		} else {
-			u, err := url.Parse(spec.JWKSURI)
-			if err != nil {
-				return nil, fmt.Errorf("client %q: parse jwks_uri: %w", spec.ClientID, err)
-			}
-			entry.jwksURL = u
+		if spec.ClientID == "" {
+			return nil, fmt.Errorf("ephemeral: client key spec has no client ID")
+		}
+		if _, dup := s.clients[spec.ClientID]; dup {
+			return nil, fmt.Errorf("ephemeral: client %q has more than one key spec", spec.ClientID)
+		}
+		entry, err := newClientKeyEntry(spec, fetcher != nil)
+		if err != nil {
+			return nil, fmt.Errorf("ephemeral: client %q: %w", spec.ClientID, err)
 		}
 		s.clients[spec.ClientID] = entry
 	}
 	return s, nil
+}
+
+// newClientKeyEntry builds spec's entry: its parsed inline JWKS, or its
+// JWKS URI to fetch, which needs a fetcher.
+func newClientKeyEntry(spec ClientKeySpec, haveFetcher bool) (*clientKeyEntry, error) {
+	if len(spec.JWKS) > 0 {
+		parsed, err := parseVerificationKeys(spec.JWKS)
+		if err != nil {
+			return nil, fmt.Errorf("parse inline jwks: %w", err)
+		}
+		return &clientKeyEntry{static: parsed}, nil
+	}
+	if spec.JWKSURI == "" {
+		return nil, fmt.Errorf("neither jwks nor jwks_uri is set")
+	}
+	u, err := url.Parse(spec.JWKSURI)
+	if err != nil {
+		return nil, fmt.Errorf("parse jwks_uri: %w", err)
+	}
+	if !u.IsAbs() || u.Host == "" {
+		return nil, fmt.Errorf("jwks_uri %q is not an absolute URL", spec.JWKSURI)
+	}
+	if !haveFetcher {
+		return nil, fmt.Errorf("jwks_uri needs a fetcher, and none was given")
+	}
+	return &clientKeyEntry{jwksURL: u}, nil
 }
 
 // ResolveVerificationKeys implements keys.ClientKeySource.

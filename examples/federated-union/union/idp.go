@@ -216,22 +216,22 @@ func (p *identityProvider) trustMark() (federation.RawTrustMark, error) {
 	return p.w.accreditors[p.country.key].certify(p.entity.id)
 }
 
+// providerMetadata is the server's own metadata plus what only this
+// provider knows: the scopes and identity claims it offers.
+type providerMetadata struct {
+	server.Metadata
+	ScopesSupported []string `json:"scopes_supported"`
+	ClaimsSupported []string `json:"claims_supported"`
+}
+
 // entityConfiguration is the provider's Entity Configuration: its OpenID
 // Provider metadata, taken from the server, and its Trust Mark.
 func (p *identityProvider) entityConfiguration(ctx context.Context) (string, error) {
-	md, err := json.Marshal(p.srv.Metadata(ctx))
-	if err != nil {
-		return "", err
-	}
-	var op map[string]any
-	if err := json.Unmarshal(md, &op); err != nil {
-		return "", err
-	}
-	op["client_registration_types_supported"] = []string{"automatic"}
-	op["claims_parameter_supported"] = true
-	op["scopes_supported"] = []string{"openid"}
-	op["claims_supported"] = []string{"sub", "given_name", "family_name", "birthdate", "email", "address", "nationality"}
-	opRaw, err := json.Marshal(op)
+	op, err := json.Marshal(providerMetadata{
+		Metadata:        p.srv.Metadata(ctx),
+		ScopesSupported: []string{"openid"},
+		ClaimsSupported: []string{"sub", "given_name", "family_name", "birthdate", "email", "address", "nationality"},
+	})
 	if err != nil {
 		return "", err
 	}
@@ -240,7 +240,7 @@ func (p *identityProvider) entityConfiguration(ctx context.Context) (string, err
 		return "", err
 	}
 	return p.srv.EntityConfiguration(ctx, map[string]json.RawMessage{
-		"openid_provider":   opRaw,
+		"openid_provider":   op,
 		"federation_entity": p.entity.federationEntityMetadata(),
 	}, mark)
 }

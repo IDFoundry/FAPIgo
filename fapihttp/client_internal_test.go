@@ -191,3 +191,66 @@ func TestIsLoopbackHostTakesHostname(t *testing.T) {
 		t.Errorf("isLoopbackHost(localhost.evil.example) = true, want false")
 	}
 }
+
+// TestLoopbackPolicy covers which hosts may reach a loopback address:
+// literal loopback hosts (with AllowLoopbackHosts or AllowLoopbackHTTP)
+// and listed names — never an arbitrary name that resolves there.
+func TestLoopbackPolicy(t *testing.T) {
+	literal := loopbackPolicy{literalHosts: true}
+	for _, host := range []string{"localhost", "LOCALHOST", "id.eastmark.localhost", "127.0.0.1", "127.9.9.9", "::1"} {
+		if !literal.permits(host) {
+			t.Errorf("literal policy permits(%q) = false, want true", host)
+		}
+	}
+	for _, host := range []string{"evil.example", "localhost.evil.example", "localhost-evil.example", "10.0.0.1"} {
+		if literal.permits(host) {
+			t.Errorf("literal policy permits(%q) = true, want false", host)
+		}
+	}
+	if (loopbackPolicy{}).permits("localhost") {
+		t.Error("zero policy permits(localhost) = true, want false")
+	}
+	named := loopbackPolicy{named: []string{"suite.example"}}
+	if !named.permits("SUITE.example") || named.permits("localhost") || named.permits("other.example") {
+		t.Error("named policy should permit exactly its listed host")
+	}
+}
+
+// TestFetchLoopbackRules covers Fetch's pre-dial check under each
+// loopback setting, including the case the split exists for: a name
+// that merely resolves to 127.0.0.1 is blocked by AllowLoopbackHTTP and
+// AllowLoopbackHosts alike, and allowed only when listed.
+func TestFetchLoopbackRules(t *testing.T) {
+	loopbackIP := []net.IP{net.ParseIP("127.0.0.1")}
+	for _, tc := range []struct {
+		name string
+		cfg  Config
+		url  string
+		ips  []net.IP
+		want error
+	}{
+		{"nothing set, https literal", Config{}, "https://127.0.0.1/jwks", nil, ErrSSRFBlocked},
+		{"hosts, https literal", Config{AllowLoopbackHosts: true}, "https://127.0.0.1/jwks", nil, nil},
+		{"hosts, https .localhost", Config{AllowLoopbackHosts: true}, "https://id.eastmark.localhost/jwks", loopbackIP, nil},
+		{"hosts, http literal", Config{AllowLoopbackHosts: true}, "http://127.0.0.1/jwks", nil, ErrInsecureURL},
+		{"http, http literal", Config{AllowLoopbackHTTP: true}, "http://localhost/jwks", loopbackIP, nil},
+		{"http, https literal", Config{AllowLoopbackHTTP: true}, "https://[::1]/jwks", nil, nil},
+		{"http, https name resolving to loopback", Config{AllowLoopbackHTTP: true}, "https://evil.example/jwks", loopbackIP, ErrSSRFBlocked},
+		{"hosts, https name resolving to loopback", Config{AllowLoopbackHosts: true}, "https://evil.example/jwks", loopbackIP, ErrSSRFBlocked},
+		{"listed, https name resolving to loopback", Config{AllowedLoopbackHosts: []string{"suite.example"}}, "https://suite.example/jwks", loopbackIP, nil},
+		{"listed, http without AllowLoopbackHTTP", Config{AllowedLoopbackHosts: []string{"suite.example"}}, "http://suite.example/jwks", loopbackIP, ErrInsecureURL},
+		{"listed, only loopback lifted", Config{AllowedLoopbackHosts: []string{"suite.example"}}, "https://suite.example/jwks", []net.IP{net.ParseIP("10.0.0.5")}, ErrSSRFBlocked},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.cfg.MaxResponseBytes, tc.cfg.RequestTimeout, tc.cfg.MaxRedirects = 1024, 5*time.Second, 1
+			c := &Client{
+				http: failIfCalledHTTPClient{t: t}, cfg: tc.cfg,
+				resolveIPs: func(context.Context, string) ([]net.IP, error) { return tc.ips, nil },
+			}
+			err := c.validateFetchURL(context.Background(), mustParseTestURL(t, tc.url))
+			if !errors.Is(err, tc.want) || (tc.want == nil && err != nil) {
+				t.Errorf("validateFetchURL = %v, want %v", err, tc.want)
+			}
+		})
+	}
+}

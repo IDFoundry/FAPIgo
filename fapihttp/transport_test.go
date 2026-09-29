@@ -106,3 +106,29 @@ func TestNewClientAllowsLoopbackWhenConfigured(t *testing.T) {
 		t.Errorf("StatusCode = %d, want 200", res.StatusCode)
 	}
 }
+
+// TestNewClientLoopbackHostsDialsLoopbackLiteral covers the https-only
+// development setting at dial time: AllowLoopbackHosts alone lets the
+// transport dial a literal loopback address.
+func TestNewClientLoopbackHostsDialsLoopbackLiteral(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	}))
+	defer ts.Close()
+
+	cfg := validTransportConfig()
+	cfg.AllowLoopbackHosts = true
+	client, err := fapihttp.NewClient(cfg)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, ts.URL, nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	res, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("Do(loopback literal, AllowLoopbackHosts=true): %v", err)
+	}
+	res.Body.Close()
+}

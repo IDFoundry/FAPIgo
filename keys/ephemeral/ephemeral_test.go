@@ -363,6 +363,8 @@ func TestNewClientKeySourceRejectsUnusableSpecs(t *testing.T) {
 		// Previously accepted, then a fetch of an empty URL on first use.
 		"neither jwks nor jwks_uri": {fetcher, []ClientKeySpec{{ClientID: "c"}}},
 		"relative jwks_uri":         {fetcher, []ClientKeySpec{{ClientID: "c", JWKSURI: "/jwks"}}},
+		"unparseable jwks_uri":      {fetcher, []ClientKeySpec{{ClientID: "c", JWKSURI: "https://rp.example/%zz"}}},
+		"malformed inline jwks":     {nil, []ClientKeySpec{{ClientID: "c", JWKS: []byte(`{"keys":`)}}},
 		"no client ID":              {nil, []ClientKeySpec{{JWKS: jwks}}},
 		"duplicate client ID":       {nil, []ClientKeySpec{{ClientID: "c", JWKS: jwks}, {ClientID: "c", JWKS: jwks}}},
 	} {

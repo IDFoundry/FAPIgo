@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -360,22 +359,15 @@ func TestNewClientKeySourceRejectsUnusableSpecs(t *testing.T) {
 	}{
 		// Previously accepted, then a nil-pointer panic on first use.
 		"jwks_uri without a fetcher": {nil, []ClientKeySpec{{ClientID: "c", JWKSURI: "https://rp.example/jwks"}}},
-		// Previously accepted, then a fetch of an empty URL on first use.
-		"neither jwks nor jwks_uri": {fetcher, []ClientKeySpec{{ClientID: "c"}}},
-		"relative jwks_uri":         {fetcher, []ClientKeySpec{{ClientID: "c", JWKSURI: "/jwks"}}},
-		"unparseable jwks_uri":      {fetcher, []ClientKeySpec{{ClientID: "c", JWKSURI: "https://rp.example/%zz"}}},
-		"malformed inline jwks":     {nil, []ClientKeySpec{{ClientID: "c", JWKS: []byte(`{"keys":`)}}},
-		"no client ID":              {nil, []ClientKeySpec{{JWKS: jwks}}},
-		"duplicate client ID":       {nil, []ClientKeySpec{{ClientID: "c", JWKS: jwks}, {ClientID: "c", JWKS: jwks}}},
+		"relative jwks_uri":          {fetcher, []ClientKeySpec{{ClientID: "c", JWKSURI: "/jwks"}}},
+		"unparseable jwks_uri":       {fetcher, []ClientKeySpec{{ClientID: "c", JWKSURI: "https://rp.example/%zz"}}},
+		"malformed inline jwks":      {nil, []ClientKeySpec{{ClientID: "c", JWKS: []byte(`{"keys":`)}}},
+		"no client ID":               {nil, []ClientKeySpec{{JWKS: jwks}}},
+		"duplicate client ID":        {nil, []ClientKeySpec{{ClientID: "c", JWKS: jwks}, {ClientID: "c", JWKS: jwks}}},
 	} {
 		if _, err := NewClientKeySource(tc.fetcher, tc.specs); err == nil {
 			t.Errorf("%s: NewClientKeySource = nil error, want error", name)
 		}
-	}
-
-	// Says what's missing, not just that a URL is malformed.
-	if _, err := NewClientKeySource(fetcher, []ClientKeySpec{{ClientID: "c"}}); err == nil || !strings.Contains(err.Error(), "neither jwks nor jwks_uri") {
-		t.Errorf("spec with no keys: error = %v, want it to say neither jwks nor jwks_uri is set", err)
 	}
 
 	// A nil fetcher is fine when every spec is inline, and a fetcher
@@ -385,5 +377,23 @@ func TestNewClientKeySourceRejectsUnusableSpecs(t *testing.T) {
 	}
 	if _, err := NewClientKeySource(fetcher, []ClientKeySpec{{ClientID: "a", JWKSURI: "https://rp.example/jwks"}}); err != nil {
 		t.Errorf("jwks_uri spec with a fetcher: %v", err)
+	}
+}
+
+// TestClientKeySourceKeylessClient covers a client that does no JWS
+// signing (e.g. mTLS client authentication): registered with neither
+// jwks nor jwks_uri, it resolves to no keys, needs no fetcher, and never
+// triggers a fetch — previously a fetch of an empty URL.
+func TestClientKeySourceKeylessClient(t *testing.T) {
+	src, err := NewClientKeySource(nil, []ClientKeySpec{{ClientID: "mtls-client"}})
+	if err != nil {
+		t.Fatalf("NewClientKeySource(keyless client, nil fetcher): %v", err)
+	}
+	set, err := src.ResolveVerificationKeys(context.Background(), keys.ClientKeyRequest{ClientID: "mtls-client", Algorithm: fapi.ES256})
+	if err != nil {
+		t.Fatalf("ResolveVerificationKeys(keyless client): %v", err)
+	}
+	if len(set.Keys) != 0 {
+		t.Errorf("keyless client resolved %d keys, want none", len(set.Keys))
 	}
 }

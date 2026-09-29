@@ -47,8 +47,8 @@ func WithCacheTTL(d time.Duration) Option {
 // either a fixed, already-parsed static set (no I/O, no cache) or a
 // remote JWKS URL fetched and cached live.
 type clientKeyEntry struct {
-	static  []keys.VerificationKey // nil if this client's keys are fetched instead
-	jwksURL *url.URL
+	static  []keys.VerificationKey // nil if this client's keys are fetched instead, or it has none
+	jwksURL *url.URL               // nil unless this client's keys are fetched
 
 	mu       sync.Mutex
 	cached   []keys.VerificationKey
@@ -72,12 +72,15 @@ type ClientKeySource struct {
 // inline static JWKS up front so a malformed one fails at construction
 // rather than on the first request that needs it.
 //
-// fetcher may be nil when every spec carries an inline JWKS: nothing is
-// ever fetched then. A spec that relies on its JWKSURI needs a fetcher,
-// and construction fails without one rather than at that client's first
+// A spec with neither JWKS nor JWKSURI is a client with no verification
+// keys — one that does no JWS signing, e.g. one authenticating with a
+// TLS client certificate: its lookups return an empty set, and nothing
+// is fetched for it.
+//
+// fetcher may be nil unless some spec relies on its JWKSURI; such a spec
+// fails construction without one, rather than at that client's first
 // request. So does a spec with no ClientID, a ClientID already used by
-// an earlier spec, neither JWKS nor JWKSURI, or a JWKSURI that isn't an
-// absolute URL.
+// an earlier spec, or a JWKSURI that isn't an absolute URL.
 func NewClientKeySource(fetcher *fapihttp.Client, specs []ClientKeySpec, opts ...Option) (*ClientKeySource, error) {
 	s := &ClientKeySource{
 		fetcher:  fetcher,
@@ -103,8 +106,8 @@ func NewClientKeySource(fetcher *fapihttp.Client, specs []ClientKeySpec, opts ..
 	return s, nil
 }
 
-// newClientKeyEntry builds spec's entry: its parsed inline JWKS, or its
-// JWKS URI to fetch, which needs a fetcher.
+// newClientKeyEntry builds spec's entry: its parsed inline JWKS, its
+// JWKS URI to fetch (which needs a fetcher), or no keys at all.
 func newClientKeyEntry(spec ClientKeySpec, haveFetcher bool) (*clientKeyEntry, error) {
 	if len(spec.JWKS) > 0 {
 		parsed, err := parseVerificationKeys(spec.JWKS)
@@ -114,7 +117,7 @@ func newClientKeyEntry(spec ClientKeySpec, haveFetcher bool) (*clientKeyEntry, e
 		return &clientKeyEntry{static: parsed}, nil
 	}
 	if spec.JWKSURI == "" {
-		return nil, fmt.Errorf("neither jwks nor jwks_uri is set")
+		return &clientKeyEntry{}, nil // no keys
 	}
 	u, err := url.Parse(spec.JWKSURI)
 	if err != nil {
@@ -137,7 +140,7 @@ func (s *ClientKeySource) ResolveVerificationKeys(ctx context.Context, req keys.
 	}
 
 	candidates := entry.static
-	if candidates == nil {
+	if entry.jwksURL != nil {
 		fresh, err := s.currentFetchedKeys(ctx, entry, req.KeyID)
 		if err != nil {
 			return keys.VerificationKeySet{}, err

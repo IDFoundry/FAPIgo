@@ -330,3 +330,62 @@ func TestMetadataIncludesClientCredentialsGrantWhenEnabled(t *testing.T) {
 		t.Fatalf("GrantTypesSupported = %v, want to still contain authorization_code and refresh_token", md.GrantTypesSupported)
 	}
 }
+
+func TestMetadataClaimsParameterSupported(t *testing.T) {
+	newServer := func(t *testing.T, oauthOnly bool, source server.IdentityClaimsSource) server.Metadata {
+		t.Helper()
+		cfg := validConfig(t)
+		if oauthOnly {
+			cfg.OAuthOnly = true
+			cfg.Algorithms.IDToken = 0
+			cfg.Limits.IDTokenLifetime = 0
+		}
+		deps := validDependencies()
+		deps.IdentityClaims = source
+		srv, err := server.New(cfg, deps)
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		return srv.Metadata(context.Background())
+	}
+	source := fakeIdentityClaims{subject: "user-1"}
+
+	if !newServer(t, false, source).ClaimsParameterSupported {
+		t.Error("ClaimsParameterSupported = false with an IdentityClaimsSource, want true")
+	}
+	// Accepted but without effect: not advertised.
+	if newServer(t, false, nil).ClaimsParameterSupported {
+		t.Error("ClaimsParameterSupported = true with no IdentityClaimsSource, want false")
+	}
+	// No ID token, so nothing for the parameter to shape.
+	if newServer(t, true, source).ClaimsParameterSupported {
+		t.Error("ClaimsParameterSupported = true under OAuthOnly, want false")
+	}
+}
+
+func TestMetadataClientRegistrationTypesSupported(t *testing.T) {
+	srv, err := server.New(validConfig(t), validDependencies())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if got := srv.Metadata(context.Background()).ClientRegistrationTypesSupported; len(got) != 0 {
+		t.Errorf("ClientRegistrationTypesSupported = %v without automatic registration, want empty", got)
+	}
+
+	f := setupAutomaticRegistrationFixture(t, testRedirectURI)
+	md := newAutomaticRegistrationTestServer(t, f).Metadata(context.Background())
+	if len(md.ClientRegistrationTypesSupported) != 1 || md.ClientRegistrationTypesSupported[0] != "automatic" {
+		t.Errorf("ClientRegistrationTypesSupported = %v with automatic registration, want [automatic]", md.ClientRegistrationTypesSupported)
+	}
+	raw, err := json.Marshal(md)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if string(wire["client_registration_types_supported"]) != `["automatic"]` {
+		t.Errorf("client_registration_types_supported = %s, want [\"automatic\"]", wire["client_registration_types_supported"])
+	}
+}

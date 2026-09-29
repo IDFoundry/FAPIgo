@@ -44,6 +44,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -195,16 +196,14 @@ func runFederationRP(apiBase, evidenceDir, expectedFailuresFile string) error {
 	log.Printf("created plan %s (alias %s), %d modules", planID, alias, len(moduleNames))
 	log.Printf("plan detail: %splan-detail.html?plan=%s", apiBase, planID)
 
-	fetcher, err := fapihttp.New(rawHTTP, fapihttp.Config{
-		MaxResponseBytes: 1 << 20,
-		RequestTimeout:   fetchTimeout,
-		MaxRedirects:     5,
-		// Both directions this driver talks to under this profile
-		// resolve to loopback: apiBase (the suite) and, once
-		// federationRPListenHost's own DNS resolves back here on this
-		// host, this driver's own live endpoint too.
-		AllowLoopbackHTTP: true,
-	})
+	suiteURL, err := url.Parse(apiBase)
+	if err != nil {
+		return fmt.Errorf("parse suite URL: %w", err)
+	}
+	// Both directions this driver talks to under this profile resolve to
+	// loopback: the suite and, once federationRPListenHost's own DNS
+	// resolves back here on this host, this driver's own live endpoint.
+	fetcher, err := fapihttp.New(rawHTTP, suiteFetcherConfig(suiteURL.Hostname(), federationRPListenHost))
 	if err != nil {
 		return fmt.Errorf("build fetcher: %w", err)
 	}

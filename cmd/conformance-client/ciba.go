@@ -245,12 +245,8 @@ func runCIBAModule(ctx context.Context, d cibaModuleDriver, testName string) str
 		return "ERROR: parse issuer URL: " + err.Error()
 	}
 
-	fetcher, err := fapihttp.New(rawHTTP, fapihttp.Config{
-		MaxResponseBytes:  1 << 20,
-		RequestTimeout:    fetchTimeout,
-		MaxRedirects:      5,
-		AllowLoopbackHTTP: true,
-	})
+	issuerURL := issuer.URL()
+	fetcher, err := fapihttp.New(rawHTTP, suiteFetcherConfig(issuerURL.Hostname()))
 	if err != nil {
 		return "ERROR: build fetcher: " + err.Error()
 	}

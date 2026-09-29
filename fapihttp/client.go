@@ -56,10 +56,27 @@ type Config struct {
 	// ErrTooManyRedirects instead of the redirect body.
 	MaxRedirects int
 
-	// AllowLoopbackHTTP permits an http:// scheme when the host is a
-	// loopback address, matching fapi.AllowLoopbackHTTP. It exists for
-	// local development only.
+	// AllowLoopbackHosts permits fetching from a host that is itself a
+	// loopback name or address — "localhost", a name under ".localhost"
+	// (both reserved for loopback by RFC 6761), 127.0.0.0/8 or ::1 —
+	// over https. Only those: a name that merely resolves to a loopback
+	// address stays blocked unless it's listed in AllowedLoopbackHosts,
+	// so a URL an attacker supplies can't reach this machine's own
+	// services through a DNS name they control. Local development only.
+	AllowLoopbackHosts bool
+
+	// AllowLoopbackHTTP is AllowLoopbackHosts plus the plain http scheme
+	// for those hosts and AllowedLoopbackHosts — the counterpart of
+	// fapi.AllowLoopbackHTTP, which admits http URLs when parsing them.
+	// Local development only.
 	AllowLoopbackHTTP bool
+
+	// AllowedLoopbackHosts is a fixed, explicit set of hostnames (matched
+	// case-insensitively and exactly, like AllowedPrivateHosts) permitted
+	// to resolve to a loopback address — e.g. a local test suite whose
+	// public DNS name points at 127.0.0.1. Never for arbitrary or
+	// end-user-supplied input.
+	AllowedLoopbackHosts []string
 
 	// AllowedPrivateHosts is a fixed, explicit set of hostnames (matched
 	// case-insensitively, exactly — no wildcards, no suffix/prefix
@@ -351,11 +368,11 @@ func (c *Client) resolveRedirect(ctx context.Context, current *url.URL, location
 	return next, nil
 }
 
-// validateFetchURL checks u's scheme/host shape and, for an https URL
-// not exempted by AllowLoopbackHTTP, makes a best-effort check that
-// every address the host resolves to is allowed — see FetchRequest.URL
-// and HTTPClient's doc comments for what this does and does not
-// guarantee.
+// validateFetchURL checks u's scheme/host shape and makes a best-effort
+// check that every address its host resolves to is allowed — loopback
+// only for a host the loopback fields permit, and http only under
+// AllowLoopbackHTTP. See FetchRequest.URL and HTTPClient's doc comments
+// for what this does and does not guarantee.
 func (c *Client) validateFetchURL(ctx context.Context, u *url.URL) error {
 	if !u.IsAbs() || u.Host == "" {
 		return fmt.Errorf("fapihttp: url must be absolute")
@@ -363,16 +380,13 @@ func (c *Client) validateFetchURL(ctx context.Context, u *url.URL) error {
 	if u.User != nil {
 		return fmt.Errorf("fapihttp: url must not contain embedded credentials")
 	}
-	loopbackExempt := c.cfg.AllowLoopbackHTTP && isLoopbackHost(u.Hostname())
+	loopback := c.loopback().permits(u.Hostname())
 	switch strings.ToLower(u.Scheme) {
 	case "https":
-		if loopbackExempt {
-			return nil
-		}
-		return c.checkHostIPs(ctx, u.Hostname())
+		return c.checkHostIPs(ctx, u.Hostname(), loopback)
 	case "http":
-		if loopbackExempt {
-			return nil
+		if c.cfg.AllowLoopbackHTTP && loopback {
+			return c.checkHostIPs(ctx, u.Hostname(), true)
 		}
 		return ErrInsecureURL
 	default:
@@ -386,10 +400,10 @@ func (c *Client) validateFetchURL(ctx context.Context, u *url.URL) error {
 // only: it does not defeat DNS rebinding, since the caller's own
 // HTTPClient may re-resolve the host at connect time — see
 // FetchRequest.URL's doc comment.
-func (c *Client) checkHostIPs(ctx context.Context, host string) error {
-	allowPrivate := isAllowedPrivateHost(host, c.cfg.AllowedPrivateHosts)
+func (c *Client) checkHostIPs(ctx context.Context, host string, allowLoopback bool) error {
+	allowPrivate := hostListed(host, c.cfg.AllowedPrivateHosts)
 	if ip := net.ParseIP(host); ip != nil {
-		if disallowedIP(ip, c.cfg.AllowLoopbackHTTP, allowPrivate) {
+		if disallowedIP(ip, allowLoopback, allowPrivate) {
 			return ErrSSRFBlocked
 		}
 		return nil
@@ -402,28 +416,51 @@ func (c *Client) checkHostIPs(ctx context.Context, host string) error {
 		return ErrSSRFBlocked
 	}
 	for _, ip := range ips {
-		if disallowedIP(ip, c.cfg.AllowLoopbackHTTP, allowPrivate) {
+		if disallowedIP(ip, allowLoopback, allowPrivate) {
 			return ErrSSRFBlocked
 		}
 	}
 	return nil
 }
 
-// isLoopbackHost mirrors fapi's own: hostname is a URL's Hostname(),
-// with any port and IPv6 brackets already removed.
+// loopback is c's loopbackPolicy.
+func (c *Client) loopback() loopbackPolicy {
+	return loopbackPolicy{
+		literalHosts: c.cfg.AllowLoopbackHosts || c.cfg.AllowLoopbackHTTP,
+		named:        c.cfg.AllowedLoopbackHosts,
+	}
+}
+
+// loopbackPolicy decides which hosts may reach a loopback address:
+// literal loopback hosts when literalHosts is set, and the named ones.
+// Shared by Client's pre-fetch check and NewClient's dial-time check.
+type loopbackPolicy struct {
+	literalHosts bool
+	named        []string
+}
+
+func (p loopbackPolicy) permits(host string) bool {
+	return (p.literalHosts && isLoopbackHost(host)) || hostListed(host, p.named)
+}
+
+// isLoopbackHost reports whether hostname — a URL's Hostname(), with any
+// port and IPv6 brackets already removed — is itself a loopback name or
+// address: "localhost", a name under ".localhost" (RFC 6761), or a
+// loopback IP literal.
 func isLoopbackHost(hostname string) bool {
-	if strings.EqualFold(hostname, "localhost") {
+	lower := strings.ToLower(hostname)
+	if lower == "localhost" || strings.HasSuffix(lower, ".localhost") {
 		return true
 	}
 	ip := net.ParseIP(hostname)
 	return ip != nil && ip.IsLoopback()
 }
 
-// isAllowedPrivateHost reports whether host (stripped of any port)
-// exactly matches one of allowed, case-insensitively — see
-// Config.AllowedPrivateHosts/TransportConfig.AllowedPrivateHosts' own
-// doc comment for why this stays this narrow.
-func isAllowedPrivateHost(host string, allowed []string) bool {
+// hostListed reports whether host (stripped of any port) exactly
+// matches one of allowed, case-insensitively — see
+// Config.AllowedPrivateHosts/AllowedLoopbackHosts for why this stays
+// this narrow.
+func hostListed(host string, allowed []string) bool {
 	h := host
 	if hostOnly, _, err := net.SplitHostPort(host); err == nil {
 		h = hostOnly

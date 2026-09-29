@@ -13,6 +13,46 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.40.0
+
+### `fapihttp`'s loopback settings: literal hosts only, split from http
+
+**Affects:** `fapihttp.Config` and `fapihttp.TransportConfig` users that
+set `AllowLoopbackHTTP` (development setups fetching from a local
+issuer, wallet or test suite).
+
+**Why:** `AllowLoopbackHTTP` lifted the loopback SSRF block for https
+as well as http, and for any hostname that *resolved* to a loopback
+address, not just literal loopback hosts. A development server with it
+set could be made to fetch this machine's own services through any DNS
+name an attacker points at 127.0.0.1. And a setup that only needed https
+to a local server had to enable a flag named for plain http.
+
+Loopback is now reachable only from:
+
+- **`AllowLoopbackHosts`** (new): https to literal loopback hosts —
+  `localhost`, names under `.localhost` (RFC 6761), 127.0.0.0/8 and
+  `::1`.
+- **`AllowLoopbackHTTP`**: the same hosts, plus plain http.
+- **`AllowedLoopbackHosts`** (new): exact hostnames allowed to resolve to
+  loopback, e.g. a local test suite with public DNS pointing at
+  127.0.0.1.
+
+```go
+fapihttp.Config{
+	// ...
+	AllowLoopbackHosts: true, // https://localhost, https://*.localhost, https://127.0.0.1
+	// AllowLoopbackHTTP: true, // only if something is served over plain http
+	AllowedLoopbackHosts: []string{"suite.example.test"}, // a name that resolves to 127.0.0.1
+}
+```
+
+If you only fetch from `localhost`, `*.localhost` or a loopback IP over
+https, switch `AllowLoopbackHTTP` to `AllowLoopbackHosts`. If you fetch
+from a *name* that resolves to loopback (it now fails with
+`ErrSSRFBlocked`), list it in `AllowedLoopbackHosts`. Set the same
+fields on `TransportConfig` if you use `NewClient`.
+
 ## v0.39.0
 
 ### `federation.Limits.MaxAuthorityHints` is required

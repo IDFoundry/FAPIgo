@@ -5,12 +5,13 @@ import "errors"
 var (
 	// ErrInsecureURL indicates a fetch target (the original URL or a
 	// redirect destination) did not use https, and AllowLoopbackHTTP did
-	// not except it.
+	// not except its host.
 	ErrInsecureURL = errors.New("fapihttp: url must use https")
 
 	// ErrSSRFBlocked indicates every address a fetch target's host
 	// resolved to was loopback, private, link-local, unspecified or
-	// multicast, and AllowLoopbackHTTP did not except it.
+	// multicast, and the loopback fields (AllowLoopbackHosts,
+	// AllowLoopbackHTTP, AllowedLoopbackHosts) did not except its host.
 	ErrSSRFBlocked = errors.New("fapihttp: target address is not allowed")
 
 	// ErrTooManyRedirects indicates a fetch followed Config.MaxRedirects

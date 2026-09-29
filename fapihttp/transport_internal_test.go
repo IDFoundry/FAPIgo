@@ -114,8 +114,8 @@ func TestIsAllowedPrivateHost(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := isAllowedPrivateHost(tc.host, allowed); got != tc.want {
-				t.Errorf("isAllowedPrivateHost(%q, %v) = %v, want %v", tc.host, allowed, got, tc.want)
+			if got := hostListed(tc.host, allowed); got != tc.want {
+				t.Errorf("hostListed(%q, %v) = %v, want %v", tc.host, allowed, got, tc.want)
 			}
 		})
 	}

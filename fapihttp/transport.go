@@ -19,10 +19,16 @@ type TransportConfig struct {
 	// TLSHandshakeTimeout bounds how long the TLS handshake may take.
 	TLSHandshakeTimeout time.Duration
 
-	// AllowLoopbackHTTP permits dialing a loopback address, for local
-	// development only — see fapi.AllowLoopbackHTTP. It never exempts
-	// any other private, link-local, unspecified or multicast address.
-	AllowLoopbackHTTP bool
+	// AllowLoopbackHosts, AllowLoopbackHTTP and AllowedLoopbackHosts
+	// decide which hosts may be dialed at a loopback address — the same
+	// rules as the Config fields of the same names, applied at dial
+	// time (the transport never sees the scheme, so the two booleans act
+	// alike here). None exempts any private, link-local, unspecified or
+	// multicast address. A caller wanting both layers to agree sets
+	// these to the values passed to Config.
+	AllowLoopbackHosts   bool
+	AllowLoopbackHTTP    bool
+	AllowedLoopbackHosts []string
 
 	// AllowedPrivateHosts — see Config.AllowedPrivateHosts' own doc
 	// comment (client.go): the identical exemption, applied here at
@@ -34,7 +40,7 @@ type TransportConfig struct {
 
 // NewClient builds an *http.Client whose Transport resolves each host
 // itself and validates every candidate address before dialing it —
-// rejecting loopback (unless AllowLoopbackHTTP), private, link-local,
+// rejecting loopback (unless the loopback fields permit the host), private, link-local,
 // unspecified and multicast addresses — and never follows a redirect on
 // its own (CheckRedirect always returns http.ErrUseLastResponse), so
 // Client.Fetch's own bounded, origin-checked redirect handling is the
@@ -58,7 +64,10 @@ func NewClient(cfg TransportConfig) (*http.Client, error) {
 
 	base := &net.Dialer{Timeout: cfg.DialTimeout}
 	transport := &http.Transport{
-		DialContext:         safeDialContext(base, cfg.AllowLoopbackHTTP, cfg.AllowedPrivateHosts),
+		DialContext: safeDialContext(base, loopbackPolicy{
+			literalHosts: cfg.AllowLoopbackHosts || cfg.AllowLoopbackHTTP,
+			named:        cfg.AllowedLoopbackHosts,
+		}, cfg.AllowedPrivateHosts),
 		TLSHandshakeTimeout: cfg.TLSHandshakeTimeout,
 		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
 		ForceAttemptHTTP2:   true,
@@ -76,13 +85,14 @@ func NewClient(cfg TransportConfig) (*http.Client, error) {
 // dials the first one that passes — so the address actually connected to
 // is always one this function itself checked, never a name resolved a
 // second time by the caller's dialer.
-func safeDialContext(base *net.Dialer, allowLoopback bool, allowedPrivateHosts []string) func(context.Context, string, string) (net.Conn, error) {
+func safeDialContext(base *net.Dialer, loopback loopbackPolicy, allowedPrivateHosts []string) func(context.Context, string, string) (net.Conn, error) {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(addr)
 		if err != nil {
 			return nil, err
 		}
-		allowPrivate := isAllowedPrivateHost(host, allowedPrivateHosts)
+		allowPrivate := hostListed(host, allowedPrivateHosts)
+		allowLoopback := loopback.permits(host)
 
 		var candidates []net.IP
 		if ip := net.ParseIP(host); ip != nil {

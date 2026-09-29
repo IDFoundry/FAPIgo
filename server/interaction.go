@@ -9,6 +9,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/extension"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // interactionHandleSize is the byte length of a generated
@@ -99,6 +100,13 @@ type InteractionRequest struct {
 	ClientID fapi.ClientID
 	Scope    []string
 	Hints    AuthenticationHints
+
+	// ClientDisplay is what the consent screen can show about the client
+	// (name, logo, policy and terms links) — from its registration, or,
+	// for a client registered automatically through OpenID Federation,
+	// from its own published metadata. See storage.ClientDisplay: the
+	// client chose these values, so show ClientID alongside them.
+	ClientDisplay storage.ClientDisplay
 
 	// AuthorizationDetails holds the request's own validated Rich
 	// Authorization Requests (RFC 9396) detail objects, if any were

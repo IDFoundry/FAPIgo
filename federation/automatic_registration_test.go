@@ -911,3 +911,67 @@ func TestAutomaticClientRepositoryDoesNotReportNonFederationFailures(t *testing.
 		t.Errorf("OnResolutionFailure called for %q, want no calls", failures.ids)
 	}
 }
+
+// rpMetadataWith is rpMetadataBuilder's metadata with extra members.
+func rpMetadataWith(t *testing.T, extra map[string]any) func(rpID string, rpOIDCKey *ecdsa.PrivateKey) json.RawMessage {
+	return func(rpID string, rpOIDCKey *ecdsa.PrivateKey) json.RawMessage {
+		t.Helper()
+		md := map[string]any{
+			"redirect_uris":                   []string{rpID + "/cb"},
+			"token_endpoint_auth_method":      "private_key_jwt",
+			"token_endpoint_auth_signing_alg": "ES256",
+			"jwks":                            json.RawMessage(jwksFor(t, "rp-oidc", rpOIDCKey)),
+		}
+		for k, v := range extra {
+			md[k] = v
+		}
+		raw, err := json.Marshal(md)
+		if err != nil {
+			t.Fatalf("marshal openid_relying_party metadata: %v", err)
+		}
+		return raw
+	}
+}
+
+func TestAutomaticClientRepositoryReadsClientDisplay(t *testing.T) {
+	f := setupAutomaticRegistrationFixture(t, rpMetadataWith(t, map[string]any{
+		"client_name": "Federated RP",
+		"logo_uri":    "https://rp.example/logo.png",
+		"policy_uri":  "https://rp.example/privacy",
+		"tos_uri":     "https://rp.example/terms",
+	}))
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, f.newResolver(t), f.fetcher, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
+	if err != nil {
+		t.Fatalf("NewAutomaticClientRepository: %v", err)
+	}
+	client, err := repo.ResolveClient(context.Background(), fapi.ClientID(f.rpID))
+	if err != nil {
+		t.Fatalf("ResolveClient: %v", err)
+	}
+	d := client.Display()
+	if d.Name != "Federated RP" || d.LogoURI.String() != "https://rp.example/logo.png" ||
+		d.PolicyURI.String() != "https://rp.example/privacy" || d.TermsOfServiceURI.String() != "https://rp.example/terms" {
+		t.Errorf("Display() = %+v, want the RP's published client_name, logo_uri, policy_uri and tos_uri", d)
+	}
+}
+
+func TestAutomaticClientRepositoryRejectsUnsafeClientDisplay(t *testing.T) {
+	for label, extra := range map[string]map[string]any{
+		"javascript logo":   {"logo_uri": "javascript:alert(1)"},
+		"http policy":       {"policy_uri": "http://rp.example/privacy"},
+		"data terms":        {"tos_uri": "data:text/html,hi"},
+		"bidi-spoofed name": {"client_name": "Bank \u202egnp.exe"},
+		"multi-line name":   {"client_name": "Bank\nApproved by your government"},
+	} {
+		t.Run(label, func(t *testing.T) {
+			f := setupAutomaticRegistrationFixture(t, rpMetadataWith(t, extra))
+			repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, f.newResolver(t), f.fetcher, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
+			if err != nil {
+				t.Fatalf("NewAutomaticClientRepository: %v", err)
+			}
+			if _, err := repo.ResolveClient(context.Background(), fapi.ClientID(f.rpID)); err == nil {
+				t.Fatalf("ResolveClient(%s) = nil error, want error", label)
+			}
+		})
+	}
+}

@@ -484,6 +484,11 @@ type relyingPartyMetadata struct {
 	TLSClientAuthSANURI    string `json:"tls_client_auth_san_uri"`
 	TLSClientAuthSANIP     string `json:"tls_client_auth_san_ip"`
 	TLSClientAuthSANEmail  string `json:"tls_client_auth_san_email"`
+
+	ClientName string `json:"client_name"`
+	LogoURI    string `json:"logo_uri"`
+	PolicyURI  string `json:"policy_uri"`
+	TOSURI     string `json:"tos_uri"`
 }
 
 // registeredClientConfigFromMetadata parses raw (an openid_relying_party
@@ -558,6 +563,9 @@ func (a *AutomaticClientRepository) registeredClientConfigFromMetadata(ctx conte
 		AutomaticFederationRegistration: true,
 		AllowsClientCredentialsGrant:    a.cfg.AllowsClientCredentialsGrant,
 	}
+	if cfg.Display, err = clientDisplayFromMetadata(m); err != nil {
+		return storage.RegisteredClientConfig{}, nil, err
+	}
 
 	// storage.NewRegisteredClient's own switch on ClientAuthMethod
 	// requires exactly one corresponding field per method (see its own
@@ -590,6 +598,36 @@ func (a *AutomaticClientRepository) registeredClientConfigFromMetadata(ctx conte
 	}
 
 	return cfg, jwks, nil
+}
+
+// clientDisplayFromMetadata reads what a consent screen can show about
+// the client: client_name, logo_uri, policy_uri and tos_uri, each
+// optional. Present but unusable values — a name storage rejects, or a
+// URL that isn't https — fail the registration like any other malformed
+// metadata, rather than being passed on to a consent page.
+func clientDisplayFromMetadata(m relyingPartyMetadata) (storage.ClientDisplay, error) {
+	if err := storage.ValidateClientName(m.ClientName); err != nil {
+		return storage.ClientDisplay{}, fmt.Errorf("client_name: %w", err)
+	}
+	display := storage.ClientDisplay{Name: m.ClientName}
+	for _, field := range []struct {
+		name, raw string
+		dst       *fapi.URL
+	}{
+		{"logo_uri", m.LogoURI, &display.LogoURI},
+		{"policy_uri", m.PolicyURI, &display.PolicyURI},
+		{"tos_uri", m.TOSURI, &display.TermsOfServiceURI},
+	} {
+		if field.raw == "" {
+			continue
+		}
+		u, err := fapi.ParseEndpointURL(field.raw)
+		if err != nil {
+			return storage.ClientDisplay{}, fmt.Errorf("%s: %w", field.name, err)
+		}
+		*field.dst = u
+	}
+	return display, nil
 }
 
 // applyClientAuthMethodFields sets cfg's authMethod-specific field from

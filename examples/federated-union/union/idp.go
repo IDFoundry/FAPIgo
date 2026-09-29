@@ -275,14 +275,12 @@ func (p *identityProvider) jwks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *identityProvider) par(w http.ResponseWriter, r *http.Request) {
-	form, err := server.FormRequestFromHTTP(r)
+	req, err := server.PushAuthorizationRequestFromHTTP(r)
 	if err != nil {
 		server.NewError(server.ErrorInvalidRequest, http.StatusBadRequest, err.Error()).WriteJSON(w)
 		return
 	}
-	result, err := p.srv.PushAuthorizationRequest(r.Context(), server.PushAuthorizationRequest{
-		HTTP: form, DPoPProofs: r.Header.Values("DPoP"),
-	})
+	result, err := p.srv.PushAuthorizationRequest(r.Context(), req)
 	if err != nil {
 		server.WriteError(w, err)
 		return
@@ -291,18 +289,16 @@ func (p *identityProvider) par(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *identityProvider) token(w http.ResponseWriter, r *http.Request) {
-	form, err := server.FormRequestFromHTTP(r)
+	req, err := server.TokenEndpointRequestFromHTTP(r)
 	if err != nil {
 		server.NewError(server.ErrorInvalidRequest, http.StatusBadRequest, err.Error()).WriteJSON(w)
 		return
 	}
-	if form.Get("grant_type") != "authorization_code" {
+	if req.GrantType() != "authorization_code" {
 		server.NewError(server.ErrorUnsupportedGrantType, http.StatusBadRequest, "only authorization_code is supported").WriteJSON(w)
 		return
 	}
-	result, err := p.srv.ExchangeAuthorizationCode(r.Context(), server.AuthorizationCodeExchangeRequest{
-		HTTP: form, DPoPProofs: r.Header.Values("DPoP"),
-	})
+	result, err := p.srv.ExchangeAuthorizationCode(r.Context(), req.AuthorizationCodeExchange())
 	if err != nil {
 		server.WriteError(w, err)
 		return

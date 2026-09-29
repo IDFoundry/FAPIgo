@@ -199,13 +199,8 @@ func (rp *relyingParty) clientFor(ctx context.Context, provider string) (*client
 	// No recommended value: it's how long this provider makes its ID
 	// tokens valid for (a FAPIgo server's recommendation is 10 minutes).
 	limits.MaxIDTokenLifetime = 10 * time.Minute
-	issuer, err := fapi.ParseIssuerURL(provider)
-	if err != nil {
-		return nil, err
-	}
+	// Issuer and Endpoints come from discovery.
 	cl, err := client.NewFromDiscovery(discovered, client.Config{
-		Issuer:      issuer,
-		Endpoints:   discovered.Endpoints,
 		ClientID:    fapi.ClientID(rp.entity.id),
 		RedirectURI: rp.redirect,
 		Profile:     client.ProfileFAPISecurity,

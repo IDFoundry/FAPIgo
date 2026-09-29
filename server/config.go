@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -538,6 +539,13 @@ type AutomaticRegistrationConfig struct {
 	// Empty (the default) permits every method. Statically registered
 	// clients are unaffected.
 	AllowedClientAuthMethods []storage.ClientAuthMethod
+
+	// OnResolutionFailure, if set, is told why a would-be
+	// automatically-registered client was refused — the client itself
+	// only sees invalid_client. See
+	// federation.AutomaticRegistrationConfig.OnResolutionFailure: log
+	// err, never return it to the client, and don't block. Optional.
+	OnResolutionFailure func(ctx context.Context, clientID fapi.ClientID, err error)
 }
 
 // FederationConfig configures this server's OpenID Federation 1.0

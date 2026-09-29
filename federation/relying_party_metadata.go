@@ -34,11 +34,23 @@ import "encoding/json"
 // jwks/jwks_uri pair this module models (server.Metadata's own
 // JWKSURI, intfed's own subordinate/entity statement "jwks" claim): set
 // at most one.
+//
+// An OP built on AutomaticClientRepository needs more than "optional"
+// suggests, though: RedirectURIs, TokenEndpointAuthMethod, exactly one
+// of JWKS or JWKSURI (SignedJWKSURI alone isn't read), and whatever the
+// chosen method depends on — TokenEndpointAuthSigningAlg for
+// private_key_jwt, an "x5c" certificate in the key set for
+// self_signed_tls_client_auth, or the matching tls_client_auth_*
+// parameter for tls_client_auth and its SAN variants (not modelled
+// here; add it to the metadata JSON directly). Leave any of these out
+// and automatic registration fails; the RP only ever sees
+// invalid_client, and the OP's operator sees the reason through
+// AutomaticRegistrationConfig.OnResolutionFailure.
 type OpenIDRelyingPartyMetadata struct {
 	// ClientRegistrationTypes is RECOMMENDED (OpenID Federation 1.0
 	// §5.2) — "automatic" and/or "explicit", or a federation-specific
-	// extension value. AutomaticClientRepository-driven registration
-	// needs "automatic" present.
+	// extension value. Declare "automatic" to register automatically
+	// (§12.1); AutomaticClientRepository doesn't itself check it.
 	ClientRegistrationTypes []string `json:"client_registration_types,omitempty"`
 
 	RedirectURIs  []string `json:"redirect_uris,omitempty"`
@@ -54,7 +66,12 @@ type OpenIDRelyingPartyMetadata struct {
 	// applicable) — see this type's own doc comment for why leaving it
 	// unset is a real, previously-confirmed interoperability failure,
 	// not just an incomplete declaration.
-	TokenEndpointAuthMethod     string `json:"token_endpoint_auth_method,omitempty"`
+	TokenEndpointAuthMethod string `json:"token_endpoint_auth_method,omitempty"`
+
+	// TokenEndpointAuthSigningAlg is the JWS algorithm this RP signs its
+	// private_key_jwt client assertions with (e.g. fapi.ES256.String()).
+	// Required with private_key_jwt: AutomaticClientRepository has no
+	// default and refuses the registration without it.
 	TokenEndpointAuthSigningAlg string `json:"token_endpoint_auth_signing_alg,omitempty"`
 
 	// JWKS is this RP's own operational key set (client authentication,

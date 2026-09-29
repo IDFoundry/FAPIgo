@@ -1,2 +1,2 @@
-# Written at startup so a browser can be told to trust the demo's CA.
-union-ca.pem
+# The demo CA and TLS certificate, kept across runs (see README).
+.union-state/

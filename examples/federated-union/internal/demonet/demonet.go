@@ -5,24 +5,19 @@
 // Host names are subdomains of "localhost" (id.eastmark.localhost, ...):
 // browsers resolve those to the loopback address on their own (RFC 6761),
 // and the clients built here dial the listener directly, so nothing needs
-// adding to /etc/hosts. The TLS certificate is issued at startup by a
-// throwaway certificate authority, written out so a browser can be told
-// to trust it.
+// adding to /etc/hosts. The TLS certificate is issued by a demo
+// certificate authority that can only vouch for *.localhost, both kept in
+// a state directory so a browser can be told to trust the CA once.
 package demonet
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
-	"crypto/x509/pkix"
-	"encoding/pem"
 	"fmt"
-	"math/big"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -32,69 +27,39 @@ import (
 // entity host, and the address every client dials.
 type Net struct {
 	addr    string
-	caPEM   []byte
+	caPath  string
 	caPool  *x509.CertPool
 	serving tls.Certificate
 	log     *FetchLog
 }
 
-// New issues a certificate for hosts, signed by a fresh demo CA, for a
-// listener at addr (host:port, the address clients dial).
-func New(addr string, hosts []string) (*Net, error) {
-	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+// New builds the demo network for a listener at addr (host:port, the
+// address clients dial), serving a certificate for hosts. stateDir keeps
+// the demo CA and that certificate across runs, so a browser told to
+// trust the CA (or to accept the certificate) once stays that way; an
+// empty stateDir issues both afresh and keeps nothing.
+func New(addr string, hosts []string, stateDir string) (*Net, error) {
+	certs, err := loadOrIssue(stateDir, hosts, time.Now())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("demo certificates: %w", err)
 	}
-	now := time.Now()
-	caTemplate := &x509.Certificate{
-		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "Meridian Union demo CA"},
-		NotBefore:             now.Add(-time.Hour),
-		NotAfter:              now.Add(30 * 24 * time.Hour),
-		IsCA:                  true,
-		BasicConstraintsValid: true,
-		KeyUsage:              x509.KeyUsageCertSign,
-	}
-	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
-	if err != nil {
-		return nil, err
-	}
-	caCert, err := x509.ParseCertificate(caDER)
-	if err != nil {
-		return nil, err
-	}
-
-	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return nil, err
-	}
-	leafTemplate := &x509.Certificate{
-		SerialNumber: big.NewInt(2),
-		Subject:      pkix.Name{CommonName: hosts[0]},
-		DNSNames:     hosts,
-		NotBefore:    now.Add(-time.Hour),
-		NotAfter:     now.Add(30 * 24 * time.Hour),
-		KeyUsage:     x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-	}
-	leafDER, err := x509.CreateCertificate(rand.Reader, leafTemplate, caCert, &leafKey.PublicKey, caKey)
-	if err != nil {
-		return nil, err
-	}
-
 	pool := x509.NewCertPool()
-	pool.AddCert(caCert)
-	return &Net{
-		addr:    addr,
-		caPEM:   pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}),
-		caPool:  pool,
-		serving: tls.Certificate{Certificate: [][]byte{leafDER}, PrivateKey: leafKey},
-		log:     &FetchLog{},
-	}, nil
+	pool.AddCert(certs.ca)
+	n := &Net{addr: addr, caPool: pool, serving: certs.serving, log: &FetchLog{}}
+	if stateDir != "" {
+		n.caPath = filepath.Join(stateDir, caCertFile)
+	}
+	return n, nil
 }
 
-// CAPEM is the demo CA certificate, PEM-encoded.
-func (n *Net) CAPEM() []byte { return n.caPEM }
+// CAPath is where the demo CA certificate is kept, for a browser to
+// trust; "" when New was given no state directory.
+func (n *Net) CAPath() string { return n.caPath }
+
+// ServingSPKIHash identifies the serving certificate's key for Chrome's
+// --ignore-certificate-errors-spki-list, which accepts that one
+// certificate without trusting the CA.
+func (n *Net) ServingSPKIHash() string { return spkiHash(n.serving.Leaf) }
 
 // ServerTLS is the listener's TLS configuration.
 func (n *Net) ServerTLS() *tls.Config {

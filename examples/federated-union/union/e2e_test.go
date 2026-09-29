@@ -22,7 +22,7 @@ func startUnion(t *testing.T) (*union.World, *demonet.Net) {
 		t.Fatalf("listen: %v", err)
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
-	n, err := demonet.New(listener.Addr().String(), union.Hosts())
+	n, err := demonet.New(listener.Addr().String(), union.Hosts(), "")
 	if err != nil {
 		t.Fatalf("demonet.New: %v", err)
 	}

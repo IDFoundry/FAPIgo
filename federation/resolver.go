@@ -181,7 +181,7 @@ type ResolvedEntity struct {
 	// describes — nil if EntityID declared none. Establish trust in a
 	// specific entry with VerifyTrustMark before relying on it for
 	// anything.
-	TrustMarks []intfed.RawTrustMark
+	TrustMarks []RawTrustMark
 
 	// TrustMarkOwners is EntityID's own "trust_mark_owners" claim
 	// (OpenID Federation 1.0 §7.2), exactly as
@@ -190,7 +190,7 @@ type ResolvedEntity struct {
 	// VerifyTrustMark reads this (from the Trust Anchor actually used to
 	// establish trust in a Trust Mark's own issuer) to decide whether
 	// that Trust Mark's type requires a "delegation" claim at all.
-	TrustMarkOwners map[string]intfed.TrustMarkOwner
+	TrustMarkOwners map[string]TrustMarkOwner
 
 	// TrustMarkIssuers is EntityID's own "trust_mark_issuers" claim
 	// (OpenID Federation 1.0 §3.1.1), exactly as
@@ -567,7 +567,7 @@ func (r *Resolver) advanceIntermediateHop(st *chainWalkState, hop int, sup hopSu
 // and metadata_policy_crit claims, collected bottom-up (closest to the
 // Trust Chain subject first) as Resolve walks upward.
 type subordinatePolicy struct {
-	policy intfed.MetadataPolicy
+	policy MetadataPolicy
 	crit   []string
 }
 
@@ -576,8 +576,8 @@ type subordinatePolicy struct {
 // from the statement issued by the most superior entity — and applies
 // the result to leafMetadata (the Trust Chain subject's own declared
 // metadata, from its Entity Configuration).
-func resolveMetadataPolicies(policies []subordinatePolicy) (intfed.MetadataPolicy, []string, error) {
-	var merged intfed.MetadataPolicy
+func resolveMetadataPolicies(policies []subordinatePolicy) (MetadataPolicy, []string, error) {
+	var merged MetadataPolicy
 	var crit []string
 	for i := len(policies) - 1; i >= 0; i-- {
 		p := policies[i]

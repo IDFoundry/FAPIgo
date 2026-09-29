@@ -84,14 +84,14 @@ func NewResolveIssuer(cfg ResolveIssueConfig, deps ResolveIssueDependencies) (*R
 }
 
 // VerifiedTrustMark pairs an already-verified Trust Mark's own wire
-// form (intfed.RawTrustMark: its type and the original compact JWT) with
+// form (RawTrustMark: its type and the original compact JWT) with
 // its verified expiry — Response's own trustMarks parameter. Build one
 // per entry of ResolvedEntity.TrustMarks that a caller has itself
 // verified via Resolver.VerifyTrustMark, keeping its ExpiresAt from the
-// returned intfed.TrustMarkClaims (intfed.RawTrustMark alone doesn't
+// returned TrustMarkClaims (RawTrustMark alone doesn't
 // carry it).
 type VerifiedTrustMark struct {
-	intfed.RawTrustMark
+	RawTrustMark
 
 	// ExpiresAt is the Trust Mark's own verified "exp" claim — zero
 	// means it does not expire (§7.1). Response folds this into the
@@ -159,9 +159,9 @@ func (i *ResolveIssuer) Response(resolved ResolvedEntity, trustAnchors, entityTy
 		return "", fmt.Errorf("federation: resolved entity's trust chain (or an included trust mark) already expired at %s", expiresAt)
 	}
 
-	var rawTrustMarks []intfed.RawTrustMark
+	var rawTrustMarks []RawTrustMark
 	if len(trustMarks) > 0 {
-		rawTrustMarks = make([]intfed.RawTrustMark, len(trustMarks))
+		rawTrustMarks = make([]RawTrustMark, len(trustMarks))
 		for j, tm := range trustMarks {
 			rawTrustMarks[j] = tm.RawTrustMark
 		}

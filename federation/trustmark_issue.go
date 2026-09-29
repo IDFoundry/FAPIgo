@@ -217,7 +217,7 @@ type StatusResponseParams struct {
 	// lookup (matching TrustMark's own claims — subject, type, issuance
 	// time — against however it records issued marks) decides this
 	// value. Required.
-	Status intfed.TrustMarkStatus
+	Status TrustMarkStatus
 }
 
 // StatusResponse signs and returns a Trust Mark Status Response

@@ -24,7 +24,7 @@ go run ./cmd/federated-union -open
 ```
 
 `-open` starts Chrome (or Chromium; `-chrome` gives its path) on
-**https://console.localhost:8443/**, in a separate profile under
+**https://console.localhost:8643/**, in a separate profile under
 `.union-state/chrome-profile` that accepts the demo's certificate — only
 that one, identified by its key — without a warning. Use that window for
 the whole demo. Chrome shows a banner about an unsupported command-line

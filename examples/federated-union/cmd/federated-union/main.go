@@ -34,7 +34,8 @@ import (
 )
 
 func main() {
-	port := flag.Int("port", 8443, "HTTPS port every demo host is served on")
+	// Not 8443: a locally running OIDF conformance suite uses that.
+	port := flag.Int("port", 8643, "HTTPS port every demo host is served on")
 	state := flag.String("state", ".union-state", "directory the demo CA and TLS certificate are kept in")
 	reset := flag.Bool("reset", false, "delete the state directory first, issuing a new CA")
 	open := flag.Bool("open", false, "open the console in Chrome, in a separate profile that accepts the demo's certificate (no warnings)")
@@ -72,17 +73,19 @@ func run(ctx context.Context, opts options) error {
 	if err != nil {
 		return fmt.Errorf("build the union: %w", err)
 	}
-	listener, err := net.Listen("tcp", addr)
+	listeners, err := listen(port)
 	if err != nil {
 		return err
 	}
 	srv := &http.Server{Handler: world.Handler(), TLSConfig: n.ServerTLS(), ReadHeaderTimeout: 10 * time.Second}
-	failed := make(chan error, 1)
-	go func() {
-		if err := srv.ServeTLS(listener, "", ""); !errors.Is(err, http.ErrServerClosed) {
-			failed <- err
-		}
-	}()
+	failed := make(chan error, len(listeners))
+	for _, ln := range listeners {
+		go func() {
+			if err := srv.ServeTLS(ln, "", ""); !errors.Is(err, http.ErrServerClosed) {
+				failed <- err
+			}
+		}()
+	}
 
 	console := world.URL("console.localhost", "/")
 	caPath, err := filepath.Abs(n.CAPath())

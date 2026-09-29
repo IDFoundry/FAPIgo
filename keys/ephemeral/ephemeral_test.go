@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -339,5 +340,50 @@ func TestClientKeySourceRejectsUnknownClient(t *testing.T) {
 	}
 	if _, err := src.ResolveVerificationKeys(context.Background(), keys.ClientKeyRequest{ClientID: "client-1", Algorithm: fapi.ES256}); err == nil {
 		t.Fatal("ResolveVerificationKeys(unknown client) = nil error, want error")
+	}
+}
+
+func TestNewClientKeySourceRejectsUnusableSpecs(t *testing.T) {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	jwks := []byte(fmt.Sprintf(`{"keys":[%s]}`, p256JWKJSON(t, &priv.PublicKey, "kid-1", "ES256")))
+	fetcher, err := fapihttp.New(http.DefaultClient, fapihttp.Config{MaxResponseBytes: 1 << 16, RequestTimeout: time.Second, MaxRedirects: 1})
+	if err != nil {
+		t.Fatalf("fapihttp.New: %v", err)
+	}
+
+	for name, tc := range map[string]struct {
+		fetcher *fapihttp.Client
+		specs   []ClientKeySpec
+	}{
+		// Previously accepted, then a nil-pointer panic on first use.
+		"jwks_uri without a fetcher": {nil, []ClientKeySpec{{ClientID: "c", JWKSURI: "https://rp.example/jwks"}}},
+		// Previously accepted, then a fetch of an empty URL on first use.
+		"neither jwks nor jwks_uri": {fetcher, []ClientKeySpec{{ClientID: "c"}}},
+		"relative jwks_uri":         {fetcher, []ClientKeySpec{{ClientID: "c", JWKSURI: "/jwks"}}},
+		"unparseable jwks_uri":      {fetcher, []ClientKeySpec{{ClientID: "c", JWKSURI: "https://rp.example/%zz"}}},
+		"malformed inline jwks":     {nil, []ClientKeySpec{{ClientID: "c", JWKS: []byte(`{"keys":`)}}},
+		"no client ID":              {nil, []ClientKeySpec{{JWKS: jwks}}},
+		"duplicate client ID":       {nil, []ClientKeySpec{{ClientID: "c", JWKS: jwks}, {ClientID: "c", JWKS: jwks}}},
+	} {
+		if _, err := NewClientKeySource(tc.fetcher, tc.specs); err == nil {
+			t.Errorf("%s: NewClientKeySource = nil error, want error", name)
+		}
+	}
+
+	// Says what's missing, not just that a URL is malformed.
+	if _, err := NewClientKeySource(fetcher, []ClientKeySpec{{ClientID: "c"}}); err == nil || !strings.Contains(err.Error(), "neither jwks nor jwks_uri") {
+		t.Errorf("spec with no keys: error = %v, want it to say neither jwks nor jwks_uri is set", err)
+	}
+
+	// A nil fetcher is fine when every spec is inline, and a fetcher
+	// makes a jwks_uri spec acceptable.
+	if _, err := NewClientKeySource(nil, []ClientKeySpec{{ClientID: "a", JWKS: jwks}, {ClientID: "b", JWKS: jwks}}); err != nil {
+		t.Errorf("inline specs with no fetcher: %v", err)
+	}
+	if _, err := NewClientKeySource(fetcher, []ClientKeySpec{{ClientID: "a", JWKSURI: "https://rp.example/jwks"}}); err != nil {
+		t.Errorf("jwks_uri spec with a fetcher: %v", err)
 	}
 }

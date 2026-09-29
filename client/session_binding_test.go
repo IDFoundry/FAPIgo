@@ -2,9 +2,11 @@ package client_test
 
 import (
 	"context"
+	"net/url"
 	"strings"
 	"testing"
 
+	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/client"
 )
 
@@ -79,5 +81,36 @@ func TestParseSessionHandle(t *testing.T) {
 		if _, err := client.ParseSessionHandle(s); err == nil {
 			t.Errorf("ParseSessionHandle(%s) = nil error, want error", name)
 		}
+	}
+}
+
+// TestCallbackMustReachTheClientThatBeganIt covers an application with
+// one client per issuer over a shared SessionStore: a callback routed to
+// another issuer's client is rejected, even when its own "iss" matches
+// that client.
+func TestCallbackMustReachTheClientThatBeganIt(t *testing.T) {
+	shared := newFakeSessionStore()
+	useShared := func(_ *client.Config, deps *client.Dependencies) { deps.Sessions = shared }
+	began, _, _ := newTestClientWith(t, false, useShared)
+	const otherIssuer = "https://other-as.example"
+	other, _, _ := newTestClientWith(t, false, func(cfg *client.Config, deps *client.Dependencies) {
+		useShared(cfg, deps)
+		issuer, err := fapi.ParseIssuerURL(otherIssuer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg.Issuer = issuer
+	})
+	ctx := context.Background()
+
+	session, err := began.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid"}})
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+	// A callback that looks right to the other client: its own issuer.
+	callback := url.Values{"state": {session.Handle().String()}, "code": {"auth-code-123"}, "iss": {otherIssuer}}.Encode()
+	_, err = other.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: callback, Session: session.Handle()})
+	if code := clientErrorCode(t, err); code != client.ErrorInvalidRequest {
+		t.Fatalf("error code = %q, want %q", code, client.ErrorInvalidRequest)
 	}
 }

@@ -131,6 +131,14 @@ func (c *Client) HandleAuthorizationResponse(ctx context.Context, cb Authorizati
 	if consumeErr != nil {
 		return nil, newError(ErrorInvalidRequest, "session is invalid, expired, or already used", consumeErr)
 	}
+	// A session belongs to the client that began it. An application
+	// running one client per issuer over a shared SessionStore routes
+	// each callback to a client itself; a callback routed to the wrong
+	// one must not complete another issuer's flow with that flow's PKCE
+	// verifier and nonce.
+	if consumed.ExpectedIssuer != c.cfg.Issuer.String() {
+		return nil, newError(ErrorInvalidRequest, "session was begun by a client for a different issuer", nil)
+	}
 	now := c.deps.Clock.Now()
 	if !now.Before(consumed.ExpiresAt) {
 		return nil, newError(ErrorInvalidRequest, "session has expired", nil)

@@ -214,3 +214,85 @@ func TestTourAndSceneReset(t *testing.T) {
 		t.Fatalf("bank still warns of a scene after reset:\n%s", body)
 	}
 }
+
+// postFrom is post as a browser would send it from a page at origin.
+func (b browser) postFrom(origin, u string, form url.Values) int {
+	b.t.Helper()
+	req, err := http.NewRequest(http.MethodPost, u, strings.NewReader(form.Encode()))
+	if err != nil {
+		b.t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", origin)
+	res, err := b.c.Do(req)
+	if err != nil {
+		b.t.Fatalf("POST %s: %v", u, err)
+	}
+	_ = res.Body.Close()
+	return res.StatusCode
+}
+
+// startConsent opens service's sign-in with provider, stopping at the
+// consent page.
+func startConsent(t *testing.T, w *union.World, b browser, service, provider string) {
+	t.Helper()
+	status, body, at := b.get(w.URL(service, "/login?provider="+url.QueryEscape(w.URL(provider, ""))))
+	if status != http.StatusOK || at.Hostname() != provider {
+		t.Fatalf("sign-in didn't reach %s's consent page (%d at %s):\n%s", provider, status, at, body)
+	}
+}
+
+func TestDeclinedSignIn(t *testing.T) {
+	w, n := startUnion(t)
+	b := newBrowser(t, n)
+	startConsent(t, w, b, "bank.southport.localhost", "id.eastmark.localhost")
+	status, body, _ := b.post(w.URL("id.eastmark.localhost", "/authorize"), url.Values{"citizen": {"em-3306"}, "decision": {"deny"}})
+	if status != http.StatusForbidden {
+		t.Fatalf("declined sign-in = %d, want 403:\n%s", status, body)
+	}
+	mustContain(t, body, "Sign-in declined", "access_denied")
+}
+
+func TestConsentRefusesCrossOriginSubmission(t *testing.T) {
+	w, n := startUnion(t)
+	b := newBrowser(t, n)
+	startConsent(t, w, b, "bank.southport.localhost", "id.southport.localhost")
+	// A page on a sibling host: same site, so the SameSite cookie is sent.
+	form := url.Values{"citizen": {"sp-1180"}, "decision": {"approve"}, "claim": {"given_name"}}
+	if status := b.postFrom(w.URL("bank.southport.localhost", ""), w.URL("id.southport.localhost", "/authorize"), form); status != http.StatusForbidden {
+		t.Fatalf("consent submitted from a sibling origin = %d, want 403", status)
+	}
+	// The browser's own sign-in is still pending, and completes.
+	status, body, _ := b.post(w.URL("id.southport.localhost", "/authorize"), form)
+	if status != http.StatusOK {
+		t.Fatalf("same-origin consent = %d:\n%s", status, body)
+	}
+	mustContain(t, body, "signed in")
+}
+
+func TestConsentRejectsUnknownCitizen(t *testing.T) {
+	w, n := startUnion(t)
+	b := newBrowser(t, n)
+	startConsent(t, w, b, "telco.eastmark.localhost", "id.eastmark.localhost")
+	status, body, _ := b.post(w.URL("id.eastmark.localhost", "/authorize"), url.Values{"citizen": {"nl-4417"}, "decision": {"approve"}})
+	if status != http.StatusBadRequest {
+		t.Fatalf("another country's citizen = %d, want 400:\n%s", status, body)
+	}
+}
+
+func TestSceneSwitchesRefuseOtherSites(t *testing.T) {
+	w, n := startUnion(t)
+	b := newBrowser(t, n)
+	console := w.URL("console.localhost", "/scene")
+	on := url.Values{"scene": {"suspend"}, "on": {"true"}}
+	if status := b.postFrom("https://attacker.example", console, on); status != http.StatusForbidden {
+		t.Fatalf("scene switched from another site = %d, want 403", status)
+	}
+	if w.Scenes().SuspendEastmark.Load() {
+		t.Fatal("another site turned a scene on")
+	}
+	// The demo's own pages (the reset button on every page) still can.
+	if status := b.postFrom(w.URL("bank.southport.localhost", ""), console, on); status != http.StatusOK {
+		t.Fatalf("scene switched from a demo page = %d, want 200", status)
+	}
+}

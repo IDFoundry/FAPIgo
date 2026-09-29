@@ -1,0 +1,126 @@
+# Federated union demo
+
+Three fictional countries — **Northland**, **Southport** and
+**Eastmark** — each run their own identity federation, then join the
+**Meridian Union**, an [OpenID Federation 1.0](https://openid.net/specs/openid-federation-1_0.html)
+trust anchor above them. A service in one country can then accept a
+citizen of another: neither registers with the other beforehand, and the
+Union's rules apply on top of each country's own.
+
+Everything runs in one process, on your machine, each entity at its own
+`*.localhost` host.
+
+> This is a demo. Every store is in memory, every key is generated at
+> startup, and the countries, schemes and people are made up.
+
+This is a separate Go module. It builds against this checkout of the
+library (`replace` in `go.mod`), and release-please ignores it.
+
+## Running it
+
+```sh
+cd examples/federated-union
+go run ./cmd/federated-union
+```
+
+Then open **https://console.localhost:8443/**.
+
+The demo issues its own TLS certificate and writes the CA to
+`union-ca.pem`. Either trust that CA in your browser, or accept the
+certificate warning once per host. `*.localhost` names resolve to your
+own machine without any setup in Chrome and Firefox; `-port` changes the
+port.
+
+## Who's who
+
+```
+                      Meridian Union (trust anchor)
+          ┌─────────────────────┼─────────────────────┐
+  Northland authority    Southport authority    Eastmark authority      national authorities
+     │         │            │         │            │         │
+  NorthID  Accreditation  SouthID  Accreditation  EastID  Accreditation    identity providers
+           Office                  Office                 Office           + accreditation bodies
+                         Southport              Eastmark
+                         Savings Bank           Telecom                    services
+```
+
+| Host | Entity |
+|---|---|
+| `console.localhost` | The Union's console: members, scenes, Trust Chain inspector, federation traffic |
+| `union.localhost` | Meridian Union — the trust anchor |
+| `ta.<country>.localhost` | Each country's federation authority |
+| `accreditation.<country>.localhost` | Each country's accreditation office, which issues level-of-assurance Trust Marks |
+| `id.<country>.localhost` | Each country's identity provider: NorthID, SouthID, EastID |
+| `bank.southport.localhost` | Southport Savings Bank |
+| `telco.eastmark.localhost` | Eastmark Telecom |
+| `bank.northland.localhost` | An impostor, used by one scene |
+
+Services trust the Union and their own country's authority. Identity
+providers do too, and register services they've never seen automatically
+(OpenID Federation 1.0 §12.1).
+
+## What to try
+
+**1. Cross-border sign-in with no onboarding.** Open Southport Savings
+Bank and sign in with **EastID**. The bank finds EastID by resolving its
+Trust Chain (EastID → Eastmark authority → Meridian Union); EastID
+registers the bank the same way when its request arrives. Neither was
+told about the other.
+
+**2. Union rules on top of national rules.** In the console, open the
+bank's **trust chain**. The bank declares three grant types; the Union's
+metadata policy allows two, and Southport's adds that services must
+publish a contact. Compare "as the entity declares it" with "after every
+superior's policy".
+
+**3. Recognised assurance.** Each identity provider carries a
+level-of-assurance Trust Mark from its country's accreditation office.
+The Union lists exactly those offices as accredited issuers, and
+services only accept providers whose mark checks out.
+
+**4. Data minimisation.** The bank asks for name, date of birth,
+nationality and address. On EastID's consent page, untick the address:
+only what's ticked leaves EastID, and the bank's page shows the address
+as not shared.
+
+Then the console's scenes:
+
+| Scene | What happens | What stops it |
+|---|---|---|
+| **EastID forges its assurance mark** | EastID publishes a level-of-assurance mark it signed itself | The signature verifies — EastID is a federation member — but the Union doesn't accredit EastID to issue that mark, so services refuse EastID |
+| **Suspend Eastmark** | The Union stops vouching for Eastmark's authority | Cross-border sign-ins with EastID fail; Eastmark Telecom, which also trusts Eastmark's authority directly, keeps working |
+| **Eastmark's authority is compromised** | Eastmark's authority vouches for an impostor claiming a Northland host | The Union's naming constraints confine Eastmark to `*.eastmark.localhost`: the impostor resolves through Eastmark alone, but not through the Union |
+
+Identity providers cache a service's registration for 10 seconds, so a
+scene can take that long to affect a sign-in already in progress.
+
+The console's **Recent federation traffic** shows every request one
+entity made to another: each Entity Configuration, Subordinate Statement
+and key set fetched to build a Trust Chain.
+
+## How it's built
+
+Everything here uses FAPIgo's public API only.
+
+| Piece | FAPIgo |
+|---|---|
+| Union and national authorities | `federation.SelfIssuer` (with `TrustMarkIssuers`), `federation.SubordinateIssuer` with `MetadataPolicy` and `Constraints` |
+| Accreditation offices | `federation.TrustMarkIssuer` |
+| Identity providers | `server.Server` with `Config.AutomaticRegistration` and `Config.Federation`; `Server.EntityConfiguration` publishing the Trust Mark; `GrantedAuthorization.ApprovedIdentityClaims` from the consent page |
+| Services | `client.DiscoverViaFederation`, `client.NewFromDiscovery`, `BeginAuthorizationRequest.Claims`, `Resolver.VerifyTrustMark` with `RequireFederationAccreditation` |
+| Sign-in | PAR with a signed request object, PKCE, DPoP-bound tokens, and the session cookie binding (`client.ParseSessionHandle`) |
+
+The code:
+
+- [`union/world.go`](union/world.go) — the countries, the Union and its policy, the scenes.
+- [`union/idp.go`](union/idp.go) — the identity providers.
+- [`union/rp.go`](union/rp.go) — the services.
+- [`union/console.go`](union/console.go) — the console.
+- [`internal/demonet`](internal/demonet/demonet.go) — one listener serving every host, and the certificate.
+- [`union/e2e_test.go`](union/e2e_test.go) — every scene, driven end to end.
+
+## Not shown
+
+- Explicit registration (§12.2) — FAPIgo implements automatic registration only.
+- Key rollover through the Federation Historical Keys endpoint.
+- Trust Mark status queries.

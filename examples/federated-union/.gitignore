@@ -1,0 +1,2 @@
+# Written at startup so a browser can be told to trust the demo's CA.
+union-ca.pem

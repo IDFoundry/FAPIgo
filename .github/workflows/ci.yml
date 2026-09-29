@@ -152,6 +152,35 @@ jobs:
         with:
           version: v2.12
 
+  # examples/federated-union is its own Go module (it builds against
+  # this checkout through a replace directive), so the jobs above never
+  # see it. This keeps it compiling, linted and passing its end-to-end
+  # tests as the library changes underneath it.
+  examples:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: examples/federated-union
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: examples/federated-union/go.mod
+          check-latest: true
+          cache-dependency-path: examples/federated-union/go.mod
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test (race)
+        run: go test -race ./...
+
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.12
+          working-directory: examples/federated-union
+
   govulncheck:
     runs-on: ubuntu-latest
     steps:

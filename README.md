@@ -91,6 +91,11 @@ See [GETTING_STARTED.md](GETTING_STARTED.md) for a full walkthrough of
 standing up an authorization server and resource server end to end,
 including a runnable configuration you can start from.
 
+[examples/federated-union](examples/federated-union/README.md) is a
+runnable demo: three fictional countries' identity federations joined
+into one OpenID Federation, with cross-border sign-in, automatic
+registration, accredited Trust Marks and a console of attack scenes.
+
 `storage/memstore` and `keys/ephemeral` provide in-memory, non-durable
 implementations of every interface `server` needs (client repository,
 transaction/grant/replay/access-token stores, key manager, client key

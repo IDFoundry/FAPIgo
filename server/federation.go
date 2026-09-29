@@ -22,8 +22,9 @@ import (
 // still doesn't own HTTP transport itself.
 //
 // Fails if Config.Federation.EntityID is unset — see FederationConfig's
-// own doc comment.
-func (s *Server) EntityConfiguration(ctx context.Context, metadata map[string]json.RawMessage) (string, error) {
+// own doc comment. trustMarks are published as the "trust_marks"
+// claim, as federation.SelfIssuer.EntityConfiguration describes.
+func (s *Server) EntityConfiguration(ctx context.Context, metadata map[string]json.RawMessage, trustMarks ...federation.RawTrustMark) (string, error) {
 	if s.cfg.Federation.EntityID == "" {
 		return "", fmt.Errorf("server: federation self-issuance is not configured (config.federation.entity_id is empty)")
 	}
@@ -53,5 +54,5 @@ func (s *Server) EntityConfiguration(ctx context.Context, metadata map[string]js
 	if err != nil {
 		return "", fmt.Errorf("server: %w", err)
 	}
-	return issuer.EntityConfiguration(metadata)
+	return issuer.EntityConfiguration(metadata, trustMarks...)
 }

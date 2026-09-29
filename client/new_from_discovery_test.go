@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -52,6 +53,7 @@ func discoverWithIssParameterSupport(t *testing.T, issSupported bool) client.Dis
 func TestNewFromDiscoverySucceedsWhenAlgorithmsMatch(t *testing.T) {
 	discovered := discoverForAlgorithmTests(t)
 	cfg := validConfig(t)
+	cfg.Issuer = discovered.Issuer()
 	cfg.Algorithms.IDToken = fapi.ES256
 
 	if _, err := client.NewFromDiscovery(discovered, cfg, validDependencies(t)); err != nil {
@@ -66,6 +68,7 @@ func TestNewFromDiscoverySucceedsWhenAlgorithmsMatch(t *testing.T) {
 func TestNewFromDiscoveryRejectsUnsupportedAlgorithm(t *testing.T) {
 	discovered := discoverForAlgorithmTests(t)
 	cfg := validConfig(t)
+	cfg.Issuer = discovered.Issuer()
 	cfg.Algorithms.IDToken = fapi.PS256 // discoverForAlgorithmTests only ever advertises ES256
 
 	if _, err := client.NewFromDiscovery(discovered, cfg, validDependencies(t)); err == nil {
@@ -76,17 +79,17 @@ func TestNewFromDiscoveryRejectsUnsupportedAlgorithm(t *testing.T) {
 	}
 }
 
-// TestNewFromDiscoveryLeavesConfigEndpointsAlone covers the other half
-// of NewFromDiscovery's contract: it never reads or overwrites
-// cfg.Endpoints with discovered.Endpoints — a Config already pointing
-// at a completely different set of endpoints than the ones just
-// discovered (as would be the case after a caller already applied its
-// own MTLSEndpoints.ApplyForSenderConstrain/ApplyForClientAuth
+// TestNewFromDiscoveryLeavesConfigEndpointsAlone covers explicitly set
+// endpoints: NewFromDiscovery fills cfg.Endpoints only when it's
+// entirely zero, so a Config already pointing at a different set of
+// endpoints than the ones just discovered (as after a caller applied
+// its own MTLSEndpoints.ApplyForSenderConstrain/ApplyForClientAuth
 // override) still constructs successfully, using exactly the Config it
 // was given.
 func TestNewFromDiscoveryLeavesConfigEndpointsAlone(t *testing.T) {
 	discovered := discoverForAlgorithmTests(t)
 	cfg := validConfig(t) // endpoints at testIssuer, unrelated to discovered's own httptest server
+	cfg.Issuer = discovered.Issuer()
 	cfg.Algorithms.IDToken = fapi.ES256
 
 	if _, err := client.NewFromDiscovery(discovered, cfg, validDependencies(t)); err != nil {
@@ -105,6 +108,7 @@ func beginAndCallbackWithoutIss(t *testing.T, discovered client.DiscoveredMetada
 	t.Cleanup(ts.Close)
 
 	cfg := validConfig(t)
+	cfg.Issuer = discovered.Issuer()
 	cfg.Algorithms.IDToken = fapi.ES256
 	parURL, err := fapi.ParseEndpointURL(ts.URL+"/par", fapi.AllowLoopbackHTTP())
 	if err != nil {
@@ -174,6 +178,7 @@ func TestNewFromDiscoveryNeverDisablesExplicitIssEnforcement(t *testing.T) {
 	t.Cleanup(ts.Close)
 
 	cfg := validConfig(t)
+	cfg.Issuer = discovered.Issuer()
 	cfg.Algorithms.IDToken = fapi.ES256
 	cfg.AuthorizationResponseIssPolicy = client.RequireAuthorizationResponseIss
 	parURL, err := fapi.ParseEndpointURL(ts.URL+"/par", fapi.AllowLoopbackHTTP())
@@ -200,5 +205,58 @@ func TestNewFromDiscoveryNeverDisablesExplicitIssEnforcement(t *testing.T) {
 	q.Set("code", "auth-code-no-iss")
 	if _, err := c.HandleAuthorizationResponse(ctx, client.AuthorizationCallback{RawQuery: q.Encode(), Session: session.Handle()}); err == nil {
 		t.Fatal("HandleAuthorizationResponse(missing iss, caller explicitly required it) = nil error, want error")
+	}
+}
+
+// TestNewFromDiscoveryFillsIssuerAndEndpoints covers a Config that
+// leaves Issuer and Endpoints to discovery: plain New would reject it,
+// NewFromDiscovery completes it.
+func TestNewFromDiscoveryFillsIssuerAndEndpoints(t *testing.T) {
+	discovered := discoverForAlgorithmTests(t)
+	if discovered.Issuer().IsZero() {
+		t.Fatal("Discover returned no Issuer()")
+	}
+	cfg := validConfig(t)
+	cfg.Issuer = fapi.URL{}
+	cfg.Endpoints = client.Endpoints{}
+	cfg.Algorithms.IDToken = fapi.ES256
+
+	if _, err := client.New(cfg, validDependencies(t)); err == nil {
+		t.Fatal("New(no issuer, no endpoints) = nil error — the test needs a Config New rejects")
+	}
+	if _, err := client.NewFromDiscovery(discovered, cfg, validDependencies(t)); err != nil {
+		t.Fatalf("NewFromDiscovery(issuer and endpoints from discovery): %v", err)
+	}
+}
+
+// TestNewFromDiscoveryRejectsMismatchedIssuer covers pairing one
+// issuer's metadata with another issuer's identifier.
+func TestNewFromDiscoveryRejectsMismatchedIssuer(t *testing.T) {
+	discovered := discoverForAlgorithmTests(t)
+	cfg := validConfig(t) // testIssuer, not discovered's httptest server
+	cfg.Algorithms.IDToken = fapi.ES256
+
+	_, err := client.NewFromDiscovery(discovered, cfg, validDependencies(t))
+	if err == nil {
+		t.Fatal("NewFromDiscovery(another issuer's identifier) = nil error, want error")
+	}
+	if !strings.Contains(err.Error(), "doesn't match the discovered issuer") {
+		t.Fatalf("error = %v, want the issuer mismatch", err)
+	}
+}
+
+// TestNewFromDiscoveryHandBuiltMetadataNeedsIssuer covers a
+// DiscoveredMetadata assembled by hand: there's no verified issuer to
+// fill in, so Config.Issuer stays required.
+func TestNewFromDiscoveryHandBuiltMetadataNeedsIssuer(t *testing.T) {
+	cfg := validConfig(t)
+	discovered := client.DiscoveredMetadata{Endpoints: cfg.Endpoints, IDTokenAlgorithms: []fapi.SignatureAlgorithm{fapi.ES256}}
+	cfg.Algorithms.IDToken = fapi.ES256
+	if _, err := client.NewFromDiscovery(discovered, cfg, validDependencies(t)); err != nil {
+		t.Fatalf("NewFromDiscovery(hand-built, issuer set): %v", err)
+	}
+	cfg.Issuer = fapi.URL{}
+	if _, err := client.NewFromDiscovery(discovered, cfg, validDependencies(t)); err == nil {
+		t.Fatal("NewFromDiscovery(hand-built, no issuer) = nil error, want error")
 	}
 }

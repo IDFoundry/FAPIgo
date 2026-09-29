@@ -296,3 +296,14 @@ func TestSceneSwitchesRefuseOtherSites(t *testing.T) {
 		t.Fatalf("scene switched from a demo page = %d, want 200", status)
 	}
 }
+
+func TestConsentShowsTheServicesPublishedName(t *testing.T) {
+	w, n := startUnion(t)
+	b := newBrowser(t, n)
+	_, body, at := b.get(w.URL("bank.southport.localhost", "/login?provider="+url.QueryEscape(w.URL("id.eastmark.localhost", ""))))
+	if at.Hostname() != "id.eastmark.localhost" {
+		t.Fatalf("sign-in didn't reach EastID's consent page:\n%s", body)
+	}
+	// From the bank's own openid_relying_party metadata, resolved by EastID.
+	mustContain(t, body, "<strong>Southport Savings Bank</strong> wants you to sign in", w.URL("bank.southport.localhost", ""))
+}

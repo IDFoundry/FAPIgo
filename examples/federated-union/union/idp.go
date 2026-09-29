@@ -339,7 +339,9 @@ func (p *identityProvider) authorize(w http.ResponseWriter, r *http.Request) {
 		})
 		p.w.render(w, "consent", consentPage{
 			Page: p.w.page(p.country.idpName, p.country), Provider: p.country.idpName,
-			Client: string(a.Interaction.ClientID), ClientName: p.w.displayName(string(a.Interaction.ClientID)),
+			// The name the service published about itself, from its Trust
+			// Chain; shown with its entity ID, since the service chose it.
+			Client: string(a.Interaction.ClientID), ClientName: clientName(a.Interaction),
 			Scope: a.Interaction.Scope, Citizens: p.country.citizens,
 			Claims: claimRows(a.Interaction.RequestedClaims),
 		})
@@ -418,6 +420,15 @@ func (p *identityProvider) decide(w http.ResponseWriter, r *http.Request) {
 	case server.AuthorizationLocalError:
 		p.w.renderError(w, o.Error.HTTPStatus(), signInFailed, string(o.Error.Code())+": "+o.Error.PublicDescription())
 	}
+}
+
+// clientName is what the consent page calls the service: its published
+// client_name, or its entity ID if it published none.
+func clientName(in server.InteractionRequest) string {
+	if in.ClientDisplay.Name != "" {
+		return in.ClientDisplay.Name
+	}
+	return string(in.ClientID)
 }
 
 // claimRow is one requested claim on the consent page.

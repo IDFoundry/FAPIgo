@@ -487,7 +487,7 @@ func populatePlainPushedRequestForm(form, params map[string]string, snapshot map
 // "request" key — split out of buildPushedRequestForm for the same
 // reason populatePlainPushedRequestForm is.
 func (c *Client) signPushedRequestForm(ctx context.Context, now time.Time, form, params map[string]string, snapshot map[string]json.RawMessage, authorizationDetailsRaw json.RawMessage) *Error {
-	objectParams := make(map[string]json.RawMessage, len(params)+len(snapshot)+1)
+	objectParams := make(map[string]json.RawMessage)
 	for k, v := range params {
 		encoded, _ := json.Marshal(v) // marshaling a string cannot fail
 		objectParams[k] = encoded

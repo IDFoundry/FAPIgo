@@ -37,6 +37,7 @@ func (w *World) newConsole() (*console, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", c.home)
 	mux.HandleFunc("POST /scene", c.scene)
+	mux.HandleFunc("POST /scene/reset", c.resetScenes)
 	mux.HandleFunc("GET /entity", c.entityPage)
 	mux.HandleFunc("GET /resolve", c.resolve)
 	w.router[consoleHost] = mux
@@ -69,42 +70,40 @@ type sceneRow struct {
 }
 
 func (c *console) sceneRows() []sceneRow {
-	s := &c.w.scenes
-	return []sceneRow{
-		{Key: "suspend", Title: "Suspend Eastmark", On: s.SuspendEastmark.Load(),
-			Description: "The Union stops vouching for Eastmark's authority. Cross-border sign-ins with EastID fail; Eastmark's own services, which also trust their national authority directly, keep working."},
-		{Key: "forge", Title: "EastID forges its assurance mark", On: s.ForgeEastmarkMark.Load(),
-			Description: "EastID publishes a level-of-assurance Trust Mark it signed itself. It verifies as a signature — EastID is a federation member — but the Union doesn't accredit EastID to issue it, so services refuse it."},
-		{Key: "compromise", Title: "Eastmark's authority is compromised", On: s.CompromiseEastmark.Load(),
-			Description: "Eastmark's authority vouches for an impostor at bank.northland.localhost. The Union's naming constraints confine Eastmark to *.eastmark.localhost, so the impostor fails to resolve through the Union."},
+	var rows []sceneRow
+	for _, s := range c.w.sceneList() {
+		rows = append(rows, sceneRow{Key: s.key, Title: s.title, Description: s.description, On: s.flag.Load()})
 	}
+	return rows
 }
 
 func (c *console) home(w http.ResponseWriter, _ *http.Request) {
-	var services []entityRow
-	for _, rp := range c.w.services {
-		country := rp.country
-		services = append(services, entityRow{ID: rp.entity.id, Name: rp.entity.name, Country: country.name, Color: country.color, Page: rp.entity.id + "/"})
-	}
 	c.w.render(w, "console", consolePage{
-		Page: c.w.page("Meridian Union console", country{}), Entities: c.rows(), Scenes: c.sceneRows(),
-		Services: services, Log: c.w.net.Log().Recent(40), Impostor: c.w.impostor.id,
+		Page: c.w.page("Meridian Union console", country{}), Entities: c.rows(), Tour: c.tour(),
+		Log: c.w.net.Log().Recent(40),
 	})
 }
 
+// scene turns one scene on or off.
 func (c *console) scene(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	on := r.PostForm.Get("on") == "true"
-	switch r.PostForm.Get("scene") {
-	case "suspend":
-		c.w.scenes.SuspendEastmark.Store(on)
-	case "forge":
-		c.w.scenes.ForgeEastmarkMark.Store(on)
-	case "compromise":
-		c.w.scenes.CompromiseEastmark.Store(on)
+	back := "/"
+	for _, s := range c.w.sceneList() {
+		if s.key == r.PostForm.Get("scene") {
+			s.flag.Store(r.PostForm.Get("on") == "true")
+			back = "/#" + s.key // back to the tour step
+		}
+	}
+	http.Redirect(w, r, back, http.StatusSeeOther)
+}
+
+// resetScenes turns every scene off.
+func (c *console) resetScenes(w http.ResponseWriter, r *http.Request) {
+	for _, s := range c.w.sceneList() {
+		s.flag.Store(false)
 	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }

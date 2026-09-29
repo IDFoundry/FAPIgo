@@ -91,6 +91,10 @@ providers do too, and register services they've never seen automatically
 
 ## What to try
 
+The console's **Start here** panel walks through all of this in order,
+with a button for each scene. While any scene is on, every page says so
+and offers to turn them all off.
+
 **1. Cross-border sign-in with no onboarding.** Open Southport Savings
 Bank and sign in with **EastID**. The bank finds EastID by resolving its
 Trust Chain (EastID → Eastmark authority → Meridian Union); EastID

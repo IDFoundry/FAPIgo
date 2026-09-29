@@ -178,3 +178,39 @@ func TestConsolePagesRender(t *testing.T) {
 	_, body, _ := b.get(w.URL("console.localhost", "/resolve?via=union&subject="+url.QueryEscape(w.URL("bank.southport.localhost", ""))))
 	mustContain(t, body, "client_credentials", "Metadata after every superior")
 }
+
+func TestTourAndSceneReset(t *testing.T) {
+	w, n := startUnion(t)
+	b := newBrowser(t, n)
+	console := w.URL("console.localhost", "/")
+
+	_, body, _ := b.get(console)
+	mustContain(t, body, "Start here", "Sign in across a border", "Contain a compromised authority")
+	if strings.Contains(body, "Scene on:") {
+		t.Fatalf("console warns of a scene with none on:\n%s", body)
+	}
+
+	for _, key := range []string{"forge", "suspend"} {
+		if status, body, _ := b.post(console+"scene", url.Values{"scene": {key}, "on": {"true"}}); status != http.StatusOK {
+			t.Fatalf("turn on %s = %d:\n%s", key, status, body)
+		}
+	}
+	if !w.Scenes().ForgeEastmarkMark.Load() || !w.Scenes().SuspendEastmark.Load() {
+		t.Fatal("scene form didn't turn the scenes on")
+	}
+	// Every page, not just the console, says a scene is on.
+	_, body, _ = b.get(w.URL("bank.southport.localhost", "/"))
+	mustContain(t, body, "Scene on:", "EastID forges its assurance mark", "Suspend Eastmark", "Turn every scene off")
+
+	if status, body, _ := b.post(console+"scene/reset", nil); status != http.StatusOK {
+		t.Fatalf("reset = %d:\n%s", status, body)
+	}
+	s := w.Scenes()
+	if s.ForgeEastmarkMark.Load() || s.SuspendEastmark.Load() || s.CompromiseEastmark.Load() {
+		t.Fatal("reset left a scene on")
+	}
+	_, body, _ = b.get(w.URL("bank.southport.localhost", "/"))
+	if strings.Contains(body, "Scene on:") {
+		t.Fatalf("bank still warns of a scene after reset:\n%s", body)
+	}
+}

@@ -3,6 +3,10 @@
 //
 //	go run ./cmd/federated-union -open
 //
+// With -open it starts Chrome on the console, in a separate profile
+// (state/chrome-profile) that accepts the demo's certificate — and only
+// that one — without a warning.
+//
 // It keeps the demo CA and TLS certificate in a state directory (-state,
 // default .union-state), so a browser told to trust the CA once stays
 // that way; -reset starts over with a new one. Everything else — keys,
@@ -18,7 +22,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
@@ -34,7 +37,8 @@ func main() {
 	port := flag.Int("port", 8443, "HTTPS port every demo host is served on")
 	state := flag.String("state", ".union-state", "directory the demo CA and TLS certificate are kept in")
 	reset := flag.Bool("reset", false, "delete the state directory first, issuing a new CA")
-	open := flag.Bool("open", false, "open the console in the default browser once running")
+	open := flag.Bool("open", false, "open the console in Chrome, in a separate profile that accepts the demo's certificate (no warnings)")
+	chrome := flag.String("chrome", "", "with -open: the Chrome or Chromium executable (default: look in the usual places)")
 	flag.Parse()
 
 	if *reset {
@@ -44,12 +48,21 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := run(ctx, *port, *state, *open); err != nil {
+	if err := run(ctx, options{port: *port, state: *state, open: *open, chrome: *chrome}); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func run(ctx context.Context, port int, state string, open bool) error {
+// options are the command-line choices run acts on.
+type options struct {
+	port   int
+	state  string
+	open   bool   // open Chrome on the console once listening
+	chrome string // Chrome's path, when not in the usual places
+}
+
+func run(ctx context.Context, opts options) error {
+	port, state := opts.port, opts.state
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 	n, err := demonet.New(addr, union.Hosts(), state)
 	if err != nil {
@@ -76,10 +89,10 @@ func run(ctx context.Context, port int, state string, open bool) error {
 	if err != nil {
 		return err
 	}
-	printBanner(world, console, caPath, n.ServingSPKIHash())
-	if open {
-		if err := openBrowser(console); err != nil {
-			log.Printf("open %s: %v", console, err)
+	printBanner(world, console, caPath, opts.open)
+	if opts.open {
+		if err := openChrome(opts.chrome, state, n.ServingSPKIHash(), console); err != nil {
+			log.Printf("-open: %v", err)
 		}
 	}
 
@@ -93,7 +106,14 @@ func run(ctx context.Context, port int, state string, open bool) error {
 	return err
 }
 
-func printBanner(world *union.World, console, caPath, spki string) {
+func printBanner(world *union.World, console, caPath string, opened bool) {
+	browser := `Opening it in Chrome, in a separate profile that accepts the demo's
+certificate without a warning. Use that window for the whole demo.
+(Chrome's banner about an unsupported command-line flag is expected.)`
+	if !opened {
+		browser = `Run with -open to get a Chrome window that accepts the demo's
+certificate without a warning.`
+	}
 	fmt.Printf(`
 Meridian Union demo is running (Ctrl-C to stop)
 
@@ -101,17 +121,14 @@ Meridian Union demo is running (Ctrl-C to stop)
   services  %s
             %s
 
-Every page is served with one certificate from the demo CA, which can
-only vouch for *.localhost. Either:
+%s
 
-  trust the CA once (kept across runs; see the README to remove it):
-    %s
-
-  or open a throwaway Chrome profile that accepts just this certificate:
-    %s
+For any other browser, trust the demo CA once. It can only vouch for
+*.localhost, and is kept across runs (see the README to remove it):
+  %s
 
 `, console, world.URL("bank.southport.localhost", "/"), world.URL("telco.eastmark.localhost", "/"),
-		trustCommand(caPath), chromeCommand(console, spki))
+		browser, trustCommand(caPath))
 }
 
 // trustCommand adds the demo CA to the current user's trust store.
@@ -124,33 +141,4 @@ func trustCommand(caPath string) string {
 	default:
 		return fmt.Sprintf("certutil -d sql:$HOME/.pki/nssdb -A -t C,, -n \"Meridian Union demo CA\" -i %q", caPath)
 	}
-}
-
-// chromeCommand starts Chrome with a fresh profile that accepts the
-// certificate whose key hashes to spki, and nothing else it would
-// otherwise reject. Chrome only honours that flag with its own
-// --user-data-dir.
-func chromeCommand(url, spki string) string {
-	flags := "--ignore-certificate-errors-spki-list=" + spki
-	switch runtime.GOOS {
-	case "darwin":
-		return fmt.Sprintf(`open -na "Google Chrome" --args --user-data-dir="$(mktemp -d)" %s %s`, flags, url)
-	case "windows":
-		return fmt.Sprintf(`start chrome --user-data-dir="%%TEMP%%\union-chrome" %s %s`, flags, url)
-	default:
-		return fmt.Sprintf(`google-chrome --user-data-dir="$(mktemp -d)" %s %s`, flags, url)
-	}
-}
-
-// openBrowser opens url, the demo's own console URL, with the
-// platform's default handler.
-func openBrowser(url string) error {
-	name, args := "xdg-open", []string{url}
-	switch runtime.GOOS {
-	case "darwin":
-		name = "open"
-	case "windows":
-		name, args = "rundll32", []string{"url.dll,FileProtocolHandler", url}
-	}
-	return exec.Command(name, args...).Start() //nolint:gosec // G204: a fixed opener and the demo's own URL, never user input
 }

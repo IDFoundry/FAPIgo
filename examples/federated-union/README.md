@@ -23,36 +23,32 @@ cd examples/federated-union
 go run ./cmd/federated-union -open
 ```
 
-`-open` opens **https://console.localhost:8443/** in your browser once
-the demo is up. Ctrl-C stops it. `*.localhost` names resolve to your own
-machine in Chrome and Firefox with no setup.
+`-open` starts Chrome (or Chromium; `-chrome` gives its path) on
+**https://console.localhost:8443/**, in a separate profile under
+`.union-state/chrome-profile` that accepts the demo's certificate — only
+that one, identified by its key — without a warning. Use that window for
+the whole demo. Chrome shows a banner about an unsupported command-line
+flag; that's expected. Ctrl-C stops the demo.
 
-### The certificate
+### Other browsers
 
 Every page is served over HTTPS with one certificate from the demo's own
 CA. The CA can only vouch for `*.localhost` (an X.509 name constraint),
-never a real site or an IP address. Both are kept in `.union-state/`, so
-you set up your browser once, not every run. The startup banner prints
-the exact commands for your system. Pick one:
+never a real site or an IP address, and it's kept in `.union-state/`, so
+this is once, not every run. The startup banner prints the command for
+your system:
 
-- **Trust the demo CA** (recommended; covers every host, lasts across
-  runs):
+| | Trust | Remove |
+|---|---|---|
+| macOS (Chrome, Safari) | `security add-trusted-cert -r trustRoot -k ~/Library/Keychains/login.keychain-db .union-state/ca.pem` | `security delete-certificate -c "Meridian Union demo CA"` |
+| Linux (Chrome) | `certutil -d sql:$HOME/.pki/nssdb -A -t C,, -n "Meridian Union demo CA" -i .union-state/ca.pem` | `certutil -d sql:$HOME/.pki/nssdb -D -n "Meridian Union demo CA"` |
+| Windows | `certutil -user -addstore Root .union-state\ca.pem` | `certutil -user -delstore Root "Meridian Union demo CA"` |
+| Firefox | Settings → Privacy & Security → View Certificates → Authorities → Import | Same list → Delete |
 
-  | | Trust | Remove |
-  |---|---|---|
-  | macOS (Chrome, Safari) | `security add-trusted-cert -r trustRoot -k ~/Library/Keychains/login.keychain-db .union-state/ca.pem` | `security delete-certificate -c "Meridian Union demo CA"` |
-  | Linux (Chrome) | `certutil -d sql:$HOME/.pki/nssdb -A -t C,, -n "Meridian Union demo CA" -i .union-state/ca.pem` | `certutil -d sql:$HOME/.pki/nssdb -D -n "Meridian Union demo CA"` |
-  | Windows | `certutil -user -addstore Root .union-state\ca.pem` | `certutil -user -delstore Root "Meridian Union demo CA"` |
-  | Firefox | Settings → Privacy & Security → View Certificates → Authorities → Import | Same list → Delete |
-
-- **Or use a throwaway Chrome profile.** The banner prints a command that
-  starts Chrome with a fresh profile and
-  `--ignore-certificate-errors-spki-list`, which accepts exactly the
-  demo's certificate and nothing else. Nothing is installed.
-
-- **Or accept the warning** on each host the first time you reach it.
-  Chrome remembers that per host, and the certificate is reused across
-  runs, but a sign-in visits several hosts.
+Or accept the warning on each host the first time you reach it. The
+certificate is reused across runs, but a sign-in visits several hosts.
+`*.localhost` names resolve to your own machine in Chrome and Firefox
+with no setup.
 
 `-reset` deletes `.union-state/` and issues a new CA; remove the old one
 from your trust store if you'd trusted it. `-state` moves the directory,

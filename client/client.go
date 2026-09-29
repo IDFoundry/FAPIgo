@@ -27,37 +27,44 @@ func New(cfg Config, deps Dependencies) (*Client, error) {
 	return &Client{cfg: cfg, deps: deps}, nil
 }
 
-// NewFromDiscovery is New plus two extra steps only discovery can
-// supply:
+// NewFromDiscovery is New, with cfg completed and cross-checked from
+// discovered:
 //
-//  1. It checks that discovered's issuer actually advertises support
-//     for every algorithm cfg declares (discovered.SupportsAlgorithms)
-//     — otherwise identical to New, which never receives
-//     DiscoveredMetadata and so can't cross-check declared algorithms
-//     against what the issuer published. Without this, a
-//     declared-but-unadvertised algorithm stays silent until the first
-//     live signature or JWE-decrypt failure, far from the
-//     misconfigured line; NewFromDiscovery turns that into a startup
-//     error instead.
-//  2. It sets cfg.AuthorizationResponseIssPolicy to
+//  1. cfg.Issuer, if zero, is set to discovered.Issuer(); if set, it
+//     must equal it. A client pairing one issuer's metadata with another
+//     issuer's identifier would send its requests to one server while
+//     validating tokens as if from the other — easy to do by accident in
+//     a relying party talking to several issuers.
+//  2. cfg.Endpoints, if entirely zero, is set to discovered.Endpoints.
+//     Set it yourself instead when you need to adjust it first — e.g.
+//     discovered.MTLSEndpointAliases.ApplyForSenderConstrain/
+//     ApplyForClientAuth for an mTLS client — and it's left as given.
+//  3. It checks that the issuer advertises support for every algorithm
+//     cfg declares (discovered.SupportsAlgorithms), turning a
+//     declared-but-unadvertised algorithm into a startup error rather
+//     than a signature or JWE failure at first use.
+//  4. It sets cfg.AuthorizationResponseIssPolicy to
 //     RequireAuthorizationResponseIss when
 //     discovered.AuthorizationResponseIssSupported is — RFC 9207 §2.4
 //     MUST-rejects a callback missing "iss" once the issuer is known to
-//     always send one, and this is never a legitimate place for a
-//     caller to want the opposite: it only ever raises the enforcement
-//     bar, never lowers a value the caller explicitly set. See
-//     AuthorizationResponseIssPolicy's own doc comment — plain New still
-//     requires the caller to set this field explicitly by hand, since
-//     there is no default.
+//     always send one. It only ever raises the enforcement bar, never
+//     lowers a value the caller explicitly set; plain New still requires
+//     the caller to set this field, since there is no default.
 //
-// NewFromDiscovery does not read or modify cfg.Endpoints — build that
-// from discovered.Endpoints yourself first (DiscoveredMetadata's own
-// doc comment covers the direct-assignment case), and apply
-// discovered.MTLSEndpointAliases.ApplyForSenderConstrain/ApplyForClientAuth
-// after that if this client is mTLS-sender-constrained or
-// mTLS-client-authenticated, exactly as when calling plain New — this
-// function only adds the two checks above on top.
+// A DiscoveredMetadata assembled by hand (Issuer() zero) skips step 1:
+// cfg.Issuer must then be set, exactly as for New.
 func NewFromDiscovery(discovered DiscoveredMetadata, cfg Config, deps Dependencies) (*Client, error) {
+	if iss := discovered.Issuer(); !iss.IsZero() {
+		switch {
+		case cfg.Issuer.IsZero():
+			cfg.Issuer = iss
+		case cfg.Issuer.String() != iss.String():
+			return nil, fmt.Errorf("client: config: issuer %q doesn't match the discovered issuer %q", cfg.Issuer.String(), iss.String())
+		}
+	}
+	if cfg.Endpoints.isZero() {
+		cfg.Endpoints = discovered.Endpoints
+	}
 	if err := discovered.SupportsAlgorithms(cfg.Algorithms); err != nil {
 		return nil, err
 	}

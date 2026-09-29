@@ -202,6 +202,12 @@ type Endpoints struct {
 	BackchannelAuthentication fapi.URL
 }
 
+// isZero reports whether no endpoint is set at all.
+func (e Endpoints) isZero() bool {
+	return e.Authorization.IsZero() && e.Token.IsZero() && e.PushedAuthorizationRequest.IsZero() &&
+		e.UserInfo.IsZero() && e.BackchannelAuthentication.IsZero()
+}
+
 // MTLSEndpoints are the mTLS-requiring alternate URLs (RFC 8705 §5's
 // "mtls_endpoint_aliases") a server may advertise for whichever of its
 // own endpoints need one — only relevant to a

@@ -18,13 +18,14 @@ import (
 // authorization server metadata response to declare.
 const discoveryContentType = "application/json"
 
-// DiscoveredMetadata is what Discover returns: the endpoints and
-// published algorithm support a caller needs to build a Config, already
-// checked against the issuer identifier the caller asked for. It has no
-// public constructor — only Discover produces one — so a caller can't
-// assemble one from untrusted data and mistake it for something that
-// already went through the anti-spoofing issuer check RFC 8414 §3.3 and
-// OpenID Connect Discovery 1.0 §4.3 require.
+// DiscoveredMetadata is what Discover and DiscoverViaFederation return:
+// the endpoints and published algorithm support a caller needs to build
+// a Config, already checked against the issuer identifier the caller
+// asked for (the anti-spoofing check RFC 8414 §3.3 and OpenID Connect
+// Discovery 1.0 §4.3 require). Its fields are exported, so one can be
+// assembled by hand, but only those two functions record the issuer
+// they verified (Issuer) — which is what lets NewFromDiscovery fill in
+// and cross-check Config.Issuer.
 //
 // Discover never picks an algorithm on the caller's behalf — each
 // Algorithms slice is every value this module's closed
@@ -106,7 +107,14 @@ type DiscoveredMetadata struct {
 	// parameter") — or use NewFromDiscovery, which does this
 	// automatically.
 	AuthorizationResponseIssSupported bool
+
+	issuer fapi.URL
 }
+
+// Issuer is the issuer identifier this metadata was verified against —
+// zero for a DiscoveredMetadata not produced by Discover or
+// DiscoverViaFederation.
+func (d DiscoveredMetadata) Issuer() fapi.URL { return d.issuer }
 
 // SupportsAlgorithms reports whether every algorithm algs actually
 // requires is among what this server advertised, returning a
@@ -274,6 +282,10 @@ func Discover(ctx context.Context, fetcher *fapihttp.Client, issuer fapi.URL, op
 // values into typed URLs and algorithm lists, never fetches anything
 // itself.
 func buildDiscoveredMetadata(doc metadata.Document, opts ...fapi.URLOption) (DiscoveredMetadata, error) {
+	issuer, err := fapi.ParseIssuerURL(doc.Issuer, opts...)
+	if err != nil {
+		return DiscoveredMetadata{}, fmt.Errorf("client: discover: issuer: %w", err)
+	}
 	tok, err := fapi.ParseEndpointURL(doc.TokenEndpoint, opts...)
 	if err != nil {
 		return DiscoveredMetadata{}, fmt.Errorf("client: discover: token_endpoint: %w", err)
@@ -343,6 +355,7 @@ func buildDiscoveredMetadata(doc metadata.Document, opts ...fapi.URLOption) (Dis
 		BackchannelAuthenticationRequestAlgorithms: supportedAlgorithms(doc.BackchannelAuthenticationRequestSigningAlgValuesSupported),
 		RequireSignedRequestObject:                 doc.RequireSignedRequestObject,
 		AuthorizationResponseIssSupported:          doc.AuthorizationResponseIssParameterSupported,
+		issuer:                                     issuer,
 	}, nil
 }
 

@@ -18,7 +18,7 @@ type accreditation struct {
 }
 
 func (w *World) newAccreditation(c country, ta *entity) (*accreditation, error) {
-	host := "accreditation." + c.key + ".localhost"
+	host := countryHost("accreditation", c.key)
 	key, err := newSigningKey(c.key+"-accreditation-1", keys.FederationEntitySigning)
 	if err != nil {
 		return nil, err

@@ -56,17 +56,21 @@ type pendingLogin struct {
 	interaction server.InteractionRequest
 }
 
-const interactionCookie = "fu_interaction"
+const (
+	interactionCookie = "fu_interaction"
+	authorizePath     = "/authorize"
+	signInFailed      = "Sign-in failed"
+)
 
 func (w *World) newIdentityProvider(c country, ta *entity) (*identityProvider, error) {
-	host := "id." + c.key + ".localhost"
+	host := countryHost("id", c.key)
 	id := w.entityID(host)
 	issuer, err := fapi.ParseIssuerURL(id)
 	if err != nil {
 		return nil, err
 	}
 	endpoint := func(path string) (fapi.URL, error) { return fapi.ParseEndpointURL(id + path) }
-	authz, err := endpoint("/authorize")
+	authz, err := endpoint(authorizePath)
 	if err != nil {
 		return nil, err
 	}
@@ -177,8 +181,8 @@ func (w *World) newIdentityProvider(c country, ta *entity) (*identityProvider, e
 	mux := idp.entity.mux
 	mux.HandleFunc("GET /jwks", idp.jwks)
 	mux.HandleFunc("POST /par", idp.par)
-	mux.HandleFunc("GET /authorize", idp.authorize)
-	mux.HandleFunc("POST /authorize", idp.decide)
+	mux.HandleFunc("GET "+authorizePath, idp.authorize)
+	mux.HandleFunc("POST "+authorizePath, idp.decide)
 	mux.HandleFunc("POST /token", idp.token)
 	return idp, nil
 }
@@ -308,7 +312,7 @@ func (p *identityProvider) authorize(w http.ResponseWriter, r *http.Request) {
 		p.pending[a.Handle.String()] = pendingLogin{handle: a.Handle, interaction: a.Interaction}
 		p.mu.Unlock()
 		http.SetCookie(w, &http.Cookie{
-			Name: interactionCookie, Value: a.Handle.String(), Path: "/authorize",
+			Name: interactionCookie, Value: a.Handle.String(), Path: authorizePath,
 			HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode,
 		})
 		p.w.render(w, "consent", consentPage{
@@ -340,7 +344,7 @@ func (p *identityProvider) decide(w http.ResponseWriter, r *http.Request) {
 		p.w.renderError(w, http.StatusBadRequest, "Session expired", "The sign-in in progress is unknown or already finished.")
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: interactionCookie, Path: "/authorize", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, &http.Cookie{Name: interactionCookie, Path: authorizePath, MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 	if err := r.ParseForm(); err != nil {
 		p.w.renderError(w, http.StatusBadRequest, "Malformed form", err.Error())
 		return
@@ -357,12 +361,12 @@ func (p *identityProvider) decide(w http.ResponseWriter, r *http.Request) {
 		}
 		subject, err := server.NewAuthenticatedSubject(subjectID)
 		if err != nil {
-			p.w.renderError(w, http.StatusInternalServerError, "Sign-in failed", err.Error())
+			p.w.renderError(w, http.StatusInternalServerError, signInFailed, err.Error())
 			return
 		}
 		authCtx, err := server.NewAuthenticationContext(time.Now(), "https://union.localhost/loa/high", []string{"hwk"})
 		if err != nil {
-			p.w.renderError(w, http.StatusInternalServerError, "Sign-in failed", err.Error())
+			p.w.renderError(w, http.StatusInternalServerError, signInFailed, err.Error())
 			return
 		}
 		var approved []string
@@ -378,14 +382,14 @@ func (p *identityProvider) decide(w http.ResponseWriter, r *http.Request) {
 
 	outcome, err := p.srv.CompleteAuthorization(r.Context(), server.CompleteAuthorizationRequest{Handle: login.handle, Result: result})
 	if err != nil {
-		p.w.renderError(w, http.StatusInternalServerError, "Sign-in failed", err.Error())
+		p.w.renderError(w, http.StatusInternalServerError, signInFailed, err.Error())
 		return
 	}
 	switch o := outcome.(type) {
 	case server.AuthorizationRedirect:
 		http.Redirect(w, r, o.Destination().String(), http.StatusFound)
 	case server.AuthorizationLocalError:
-		p.w.renderError(w, o.Error.HTTPStatus(), "Sign-in failed", string(o.Error.Code())+": "+o.Error.PublicDescription())
+		p.w.renderError(w, o.Error.HTTPStatus(), signInFailed, string(o.Error.Code())+": "+o.Error.PublicDescription())
 	}
 }
 

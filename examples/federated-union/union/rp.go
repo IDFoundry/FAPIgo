@@ -43,6 +43,7 @@ type relyingParty struct {
 }
 
 const (
+	noSignIn       = "No sign-in in progress"
 	sessionCookie  = "fu_session"
 	providerCookie = "fu_provider"
 )
@@ -281,24 +282,24 @@ func (rp *relyingParty) callback(w http.ResponseWriter, r *http.Request) {
 	sessionC, err1 := r.Cookie(sessionCookie)
 	providerC, err2 := r.Cookie(providerCookie)
 	if err1 != nil || err2 != nil {
-		rp.w.renderError(w, http.StatusBadRequest, "No sign-in in progress", "This browser didn't start a sign-in here.")
+		rp.w.renderError(w, http.StatusBadRequest, noSignIn, "This browser didn't start a sign-in here.")
 		return
 	}
 	handle, err := client.ParseSessionHandle(sessionC.Value)
 	if err != nil {
-		rp.w.renderError(w, http.StatusBadRequest, "No sign-in in progress", err.Error())
+		rp.w.renderError(w, http.StatusBadRequest, noSignIn, err.Error())
 		return
 	}
 	rp.mu.Lock()
 	cl := rp.clients[providerC.Value]
 	rp.mu.Unlock()
 	if cl == nil {
-		rp.w.renderError(w, http.StatusBadRequest, "No sign-in in progress", "Unknown identity provider.")
+		rp.w.renderError(w, http.StatusBadRequest, noSignIn, "Unknown identity provider.")
 		return
 	}
 	result, err := cl.CompleteAuthorization(r.Context(), client.AuthorizationCallback{RawQuery: r.URL.RawQuery, Session: handle})
 	if err != nil {
-		rp.w.renderError(w, http.StatusBadGateway, "Sign-in failed", err.Error())
+		rp.w.renderError(w, http.StatusBadGateway, signInFailed, err.Error())
 		return
 	}
 	idp := rp.w.idpByID(providerC.Value)
@@ -321,7 +322,7 @@ func (rp *relyingParty) callback(w http.ResponseWriter, r *http.Request) {
 	case client.CompletionDenied:
 		rp.w.renderError(w, http.StatusForbidden, "Sign-in declined", res.Code+": "+res.Description)
 	default:
-		rp.w.renderError(w, http.StatusBadGateway, "Sign-in failed", fmt.Sprintf("unexpected result %T", result))
+		rp.w.renderError(w, http.StatusBadGateway, signInFailed, fmt.Sprintf("unexpected result %T", result))
 	}
 }
 

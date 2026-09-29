@@ -56,6 +56,12 @@ var services = []serviceSpec{
 	{host: "telco.eastmark.localhost", name: "Eastmark Telecom", country: "eastmark"},
 }
 
+// localhost is the suffix every demo host shares.
+const localhost = ".localhost"
+
+// countryHost is role's host in country, e.g. id.eastmark.localhost.
+func countryHost(role, countryKey string) string { return role + "." + countryKey + localhost }
+
 const (
 	unionHost    = "union.localhost"
 	consoleHost  = "console.localhost"
@@ -97,7 +103,7 @@ type World struct {
 func Hosts() []string {
 	hosts := []string{unionHost, consoleHost, impostorHost}
 	for _, c := range countries {
-		hosts = append(hosts, "ta."+c.key+".localhost", "accreditation."+c.key+".localhost", "id."+c.key+".localhost")
+		hosts = append(hosts, countryHost("ta", c.key), countryHost("accreditation", c.key), countryHost("id", c.key))
 	}
 	for _, s := range services {
 		hosts = append(hosts, s.host)
@@ -196,7 +202,7 @@ func (w *World) build() error {
 		trustMarkIssuers: map[string][]string{},
 	}
 	for _, c := range countries {
-		w.union.trustMarkIssuers[w.loaHighType] = append(w.union.trustMarkIssuers[w.loaHighType], w.entityID("accreditation."+c.key+".localhost"))
+		w.union.trustMarkIssuers[w.loaHighType] = append(w.union.trustMarkIssuers[w.loaHighType], w.entityID(countryHost("accreditation", c.key)))
 	}
 	w.union.subordinates = w.unionSubordinates
 	if err := w.add(w.union); err != nil {
@@ -223,7 +229,7 @@ func (w *World) build() error {
 	w.impostor = &entity{
 		id: w.entityID(impostorHost), host: impostorHost, name: "Northland Bank (impostor)", role: "impostor service",
 		country: "eastmark", key: impostorKey,
-		authorityHints: []string{w.entityID("ta.eastmark.localhost")},
+		authorityHints: []string{w.entityID(countryHost("ta", "eastmark"))},
 		metadata: func(context.Context) (map[string]json.RawMessage, error) {
 			return map[string]json.RawMessage{"openid_relying_party": json.RawMessage(`{"client_name":"Northland Bank","response_types":["code"]}`)}, nil
 		},
@@ -254,7 +260,7 @@ func (w *World) unionSubordinates() map[string]subordinate {
 			jwks: ta.key.jwks,
 			constraints: &federation.Constraints{
 				MaxPathLength: 1, HasMaxPathLength: true,
-				NamingConstraints: &federation.NamingConstraints{Permitted: []string{"." + c.key + ".localhost"}},
+				NamingConstraints: &federation.NamingConstraints{Permitted: []string{"." + c.key + localhost}},
 			},
 			policy: federation.MetadataPolicy{
 				"openid_relying_party": {
@@ -270,7 +276,7 @@ func (w *World) unionSubordinates() map[string]subordinate {
 // buildCountry creates c's national authority, accreditation body and
 // identity provider.
 func (w *World) buildCountry(c country) error {
-	taHost := "ta." + c.key + ".localhost"
+	taHost := countryHost("ta", c.key)
 	taKey, err := newSigningKey(c.key+"-ta-1", keys.FederationEntitySigning)
 	if err != nil {
 		return err

@@ -198,39 +198,43 @@ func (c *console) resolve(w http.ResponseWriter, r *http.Request) {
 	view := resolveView{Subject: subject, SubjectName: c.w.displayName(subject), Via: via, ViaName: c.viaName(via)}
 	view.Declared = c.declaredMetadata(r.Context(), subject)
 
-	resolved, err := resolver.Resolve(r.Context(), subject)
-	if err != nil {
+	if resolved, err := resolver.Resolve(r.Context(), subject); err != nil {
 		view.Error = err.Error()
 	} else {
-		view.ExpiresAt = resolved.ExpiresAt
-		for _, id := range resolved.Chain {
-			e := c.w.entityByID(id)
-			row := entityRow{ID: id, Name: c.w.displayName(id)}
-			if e != nil {
-				country := countryByKey(e.country)
-				row.Role, row.Country, row.Color = e.role, country.name, country.color
-			}
-			view.Chain = append(view.Chain, row)
-		}
-		for _, t := range sortedKeys(resolved.Metadata) {
-			view.Resolved = append(view.Resolved, metadataView{Type: t, JSON: prettyJSON(resolved.Metadata[t])})
-		}
-		for _, mark := range resolved.TrustMarks {
-			mv := markView{Type: mark.TrustMarkType}
-			claims, err := resolver.VerifyTrustMark(r.Context(), subject, mark, federation.RequireFederationAccreditation)
-			if err != nil {
-				mv.Status = err.Error()
-			} else {
-				mv.OK, mv.Issuer, mv.Status = true, c.w.displayName(claims.Issuer), "accredited by the Union"
-			}
-			view.Marks = append(view.Marks, mv)
-		}
+		c.describeResolved(r.Context(), resolver, subject, resolved, &view)
 	}
 	country := country{}
 	if e := c.w.entityByID(subject); e != nil {
 		country = countryByKey(e.country)
 	}
 	c.w.render(w, "resolve", resolvePage{Page: c.w.page("Trust Chain of "+view.SubjectName, country), View: view, Entities: c.rows(), Anchors: c.anchorOptions()})
+}
+
+// describeResolved fills view with resolved's Trust Chain, resolved
+// metadata and Trust Marks, each mark verified against the Union's
+// accreditation.
+func (c *console) describeResolved(ctx context.Context, resolver *federation.Resolver, subject string, resolved federation.ResolvedEntity, view *resolveView) {
+	view.ExpiresAt = resolved.ExpiresAt
+	for _, id := range resolved.Chain {
+		row := entityRow{ID: id, Name: c.w.displayName(id)}
+		if e := c.w.entityByID(id); e != nil {
+			country := countryByKey(e.country)
+			row.Role, row.Country, row.Color = e.role, country.name, country.color
+		}
+		view.Chain = append(view.Chain, row)
+	}
+	for _, t := range sortedKeys(resolved.Metadata) {
+		view.Resolved = append(view.Resolved, metadataView{Type: t, JSON: prettyJSON(resolved.Metadata[t])})
+	}
+	for _, mark := range resolved.TrustMarks {
+		mv := markView{Type: mark.TrustMarkType}
+		if claims, err := resolver.VerifyTrustMark(ctx, subject, mark, federation.RequireFederationAccreditation); err != nil {
+			mv.Status = err.Error()
+		} else {
+			mv.OK, mv.Issuer, mv.Status = true, c.w.displayName(claims.Issuer), "accredited by the Union"
+		}
+		view.Marks = append(view.Marks, mv)
+	}
 }
 
 // declaredMetadata is the subject's own metadata as it declares it,

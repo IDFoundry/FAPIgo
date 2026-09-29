@@ -230,6 +230,7 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		return s.backchannelBeginFail(ctx, client.ID(), newError(ErrorServerError, 500, "validated extension parameters could not be read back", err)), nil
 	}
 	interaction := s.backchannelInteractionRequestFrom(client.ID(), validated.params)
+	interaction.ClientDisplay = client.Display()
 	interaction.Extensions = extensions
 
 	action := BackchannelInteractionRequired{

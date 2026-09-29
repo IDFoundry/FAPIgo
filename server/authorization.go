@@ -98,6 +98,14 @@ func (s *Server) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 	if !now.Before(pushed.ExpiresAt) {
 		return s.beginFail(ctx, req.ClientID, newError(ErrorInvalidRequestURI, 400, "request_uri has expired", nil)), nil
 	}
+	// Resolved again, not carried over from the pushed request: the
+	// consent screen needs its display details, and a client that has
+	// since stopped resolving (e.g. a federation member whose Trust Chain
+	// no longer holds) shouldn't be consented to.
+	client, err := s.deps.Clients.ResolveClient(ctx, req.ClientID)
+	if err != nil {
+		return s.beginFail(ctx, req.ClientID, newError(ErrorUnauthorizedClient, 400, "client is no longer registered", err)), nil
+	}
 
 	request, err := decodeRequestRecord(pushed.Request)
 	if err != nil {
@@ -109,6 +117,7 @@ func (s *Server) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 		return s.beginFail(ctx, req.ClientID, newError(ErrorServerError, 500, "stored extension parameters no longer validate", err)), nil
 	}
 	interaction := s.interactionRequestFrom(req.ClientID, request.Parameters)
+	interaction.ClientDisplay = client.Display()
 	interaction.Extensions = extensions
 
 	action := InteractionRequired{

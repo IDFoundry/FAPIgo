@@ -452,6 +452,7 @@ func generateKey(t *testing.T) *ecdsa.PrivateKey {
 
 type harness struct {
 	server       *server.Server
+	clients      *fakeClientRepository
 	key          *ecdsa.PrivateKey
 	serverKey    *ecdsa.PrivateKey
 	transactions *fakeTransactionStore
@@ -527,8 +528,9 @@ func newHarnessWithRedirectURI(t *testing.T, profile server.Profile, allowReques
 		Assurance: assurance,
 	}
 	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
+	clients := &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}}
 	deps := server.Dependencies{
-		Clients:      &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
+		Clients:      clients,
 		Transactions: transactions,
 		Grants:       grants,
 		Replay:       &fakeReplayStore{},
@@ -548,7 +550,7 @@ func newHarnessWithRedirectURI(t *testing.T, profile server.Profile, allowReques
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
-	return harness{server: srv, key: key, serverKey: serverKey, transactions: transactions, grants: grants, audit: audit, revocation: revocation, now: now}
+	return harness{server: srv, clients: clients, key: key, serverKey: serverKey, transactions: transactions, grants: grants, audit: audit, revocation: revocation, now: now}
 }
 
 // newHarnessOAuthOnly mirrors newHarness (baseline profile, request

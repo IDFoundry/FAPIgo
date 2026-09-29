@@ -89,8 +89,15 @@ type OpenIDRelyingPartyMetadata struct {
 	IDTokenSignedResponseAlg string `json:"id_token_signed_response_alg,omitempty"`
 	RequestObjectSigningAlg  string `json:"request_object_signing_alg,omitempty"`
 
+	// ClientName, LogoURI, PolicyURI and TOSURI are what an OP's
+	// consent screen shows about this RP (storage.ClientDisplay). Keep
+	// ClientName to storage.MaxClientNameBytes with no control
+	// characters, and the URIs https: AutomaticClientRepository refuses
+	// the registration otherwise.
 	OrganizationName string   `json:"organization_name,omitempty"`
 	ClientName       string   `json:"client_name,omitempty"`
 	LogoURI          string   `json:"logo_uri,omitempty"`
+	PolicyURI        string   `json:"policy_uri,omitempty"`
+	TOSURI           string   `json:"tos_uri,omitempty"`
 	Contacts         []string `json:"contacts,omitempty"`
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"unicode"
+	"unicode/utf8"
 
 	fapi "github.com/idfoundry/fapigo"
 )
@@ -179,6 +181,7 @@ type RegisteredClient struct {
 
 	allowsClientCredentialsGrant    bool
 	automaticFederationRegistration bool
+	display                         ClientDisplay
 }
 
 // RegisteredClientConfig is the input to NewRegisteredClient.
@@ -336,6 +339,55 @@ type RegisteredClientConfig struct {
 	// requestobject.VerifyPolicy.AutomaticFederationRegistration's own
 	// doc comment for exactly what that changes.
 	AutomaticFederationRegistration bool
+
+	// Display is how a consent screen can present this client. Optional:
+	// the zero value means nothing beyond ClientID is known.
+	Display ClientDisplay
+}
+
+// MaxClientNameBytes bounds ClientDisplay.Name.
+const MaxClientNameBytes = 200
+
+// ClientDisplay is what a consent screen can show about a client — the
+// OpenID Connect Dynamic Client Registration 1.0 §2 client_name,
+// logo_uri, policy_uri and tos_uri. For a client registered
+// automatically through OpenID Federation it comes from the client's
+// own published metadata, as its superiors' metadata policies left it:
+// the client chose it, so show it alongside the client ID, never
+// instead of it, and escape it like any other untrusted text.
+type ClientDisplay struct {
+	// Name is at most MaxClientNameBytes of valid UTF-8, with no
+	// control or bidirectional-formatting characters (which could make
+	// it render as something other than what it is).
+	Name string
+
+	// LogoURI, PolicyURI and TermsOfServiceURI are https URLs (fapi.URL
+	// guarantees the scheme, so none can be a javascript: or data: URL).
+	LogoURI           fapi.URL
+	PolicyURI         fapi.URL
+	TermsOfServiceURI fapi.URL
+}
+
+// IsZero reports whether nothing is known about the client beyond its ID.
+func (d ClientDisplay) IsZero() bool {
+	return d.Name == "" && d.LogoURI.IsZero() && d.PolicyURI.IsZero() && d.TermsOfServiceURI.IsZero()
+}
+
+// ValidateClientName reports whether name is acceptable as
+// ClientDisplay.Name.
+func ValidateClientName(name string) error {
+	if len(name) > MaxClientNameBytes {
+		return fmt.Errorf("client name is longer than %d bytes", MaxClientNameBytes)
+	}
+	if !utf8.ValidString(name) {
+		return fmt.Errorf("client name is not valid UTF-8")
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) || unicode.Is(unicode.Bidi_Control, r) {
+			return fmt.Errorf("client name contains control character %U", r)
+		}
+	}
+	return nil
 }
 
 // NeedsJWKS reports whether a client configured this way needs a
@@ -369,6 +421,9 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 	}
 	if err := validateClientAuthMethodFields(cfg); err != nil {
 		return RegisteredClient{}, err
+	}
+	if err := ValidateClientName(cfg.Display.Name); err != nil {
+		return RegisteredClient{}, fmt.Errorf("storage: client %q: %w", cfg.ID, err)
 	}
 	if cfg.RequestObjectAlgorithm != 0 && !cfg.RequestObjectAlgorithm.IsValid() {
 		return RegisteredClient{}, fmt.Errorf("storage: client %q has an invalid request object algorithm", cfg.ID)
@@ -425,6 +480,7 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 		backchannelClientNotificationEndpoint:     cfg.BackchannelClientNotificationEndpoint,
 		allowsClientCredentialsGrant:              cfg.AllowsClientCredentialsGrant,
 		automaticFederationRegistration:           cfg.AutomaticFederationRegistration,
+		display:                                   cfg.Display,
 	}, nil
 }
 
@@ -700,6 +756,10 @@ func (c RegisteredClient) AllowsClientCredentialsGrant() bool {
 func (c RegisteredClient) AutomaticFederationRegistration() bool {
 	return c.automaticFederationRegistration
 }
+
+// Display is how a consent screen can present this client — see
+// ClientDisplay.
+func (c RegisteredClient) Display() ClientDisplay { return c.display }
 
 // AllowsScope reports whether scope is in this client's registered set
 // of allowed scopes.

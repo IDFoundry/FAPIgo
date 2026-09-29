@@ -8,6 +8,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/extension"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // backchannelAuthenticationHandleSize and authReqIDSize are the byte
@@ -103,6 +104,10 @@ type BackchannelInteractionRequest struct {
 	Hints          BackchannelAuthenticationHints
 	ACRValues      []string
 	BindingMessage string
+
+	// ClientDisplay mirrors InteractionRequest.ClientDisplay, for the
+	// CIBA flow.
+	ClientDisplay storage.ClientDisplay
 
 	// AuthorizationDetails mirrors InteractionRequest.AuthorizationDetails
 	// exactly, for the CIBA flow.

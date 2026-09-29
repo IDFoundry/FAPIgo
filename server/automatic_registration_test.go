@@ -109,7 +109,9 @@ func setupAutomaticRegistrationFixture(t *testing.T, redirectURI string) *automa
 		"token_endpoint_auth_signing_alg":                "ES256",
 		"request_object_signing_alg":                     "ES256",
 		"backchannel_authentication_request_signing_alg": "ES256",
-		"jwks": json.RawMessage(fedJWKS(t, "rp-oidc", rpOIDCKey)),
+		"jwks":        json.RawMessage(fedJWKS(t, "rp-oidc", rpOIDCKey)),
+		"client_name": testFederatedClientName,
+		"logo_uri":    testFederatedClientLogo,
 	})
 	if err != nil {
 		t.Fatalf("marshal openid_relying_party metadata: %v", err)
@@ -305,12 +307,34 @@ func TestNewWiresAutomaticRegistrationIntoPushAuthorizationRequest(t *testing.T)
 		t.Fatalf("CreateAssertion: %v", err)
 	}
 
-	if _, err := srv.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+	pushed, err := srv.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
 		HTTP: server.FormRequest{Parameters: plainFormParameters(t, assertion, nil)},
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("PushAuthorizationRequest (automatically-registered client): %v", err)
 	}
+
+	// The consent screen sees what the RP published about itself.
+	action, err := srv.BeginAuthorization(context.Background(), server.BeginAuthorizationRequest{
+		RequestURI: pushed.RequestURI.String(), ClientID: fapi.ClientID(f.rpID),
+	})
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+	required, ok := action.(server.InteractionRequired)
+	if !ok {
+		t.Fatalf("action = %T, want server.InteractionRequired", action)
+	}
+	display := required.Interaction.ClientDisplay
+	if display.Name != testFederatedClientName || display.LogoURI.String() != testFederatedClientLogo {
+		t.Errorf("ClientDisplay = %+v, want the RP's client_name and logo_uri", display)
+	}
 }
+
+const (
+	testFederatedClientName = "Federated RP"
+	testFederatedClientLogo = "https://rp.example/logo.png"
+)
 
 // TestNewWiresAutomaticRegistrationAllowedClientAuthMethods proves
 // server.New passes AutomaticRegistrationConfig.AllowedClientAuthMethods
@@ -587,8 +611,12 @@ func TestNewWiresAutomaticRegistrationIntoBeginBackchannelAuthentication(t *test
 		if err != nil {
 			t.Fatalf("BeginBackchannelAuthentication (AllowsCIBA set) = %v, want nil error", err)
 		}
-		if _, ok := action.(server.BackchannelInteractionRequired); !ok {
+		required, ok := action.(server.BackchannelInteractionRequired)
+		if !ok {
 			t.Fatalf("action = %T, want server.BackchannelInteractionRequired", action)
+		}
+		if got := required.Interaction.ClientDisplay.Name; got != testFederatedClientName {
+			t.Errorf("ClientDisplay.Name = %q, want %q", got, testFederatedClientName)
 		}
 	})
 }

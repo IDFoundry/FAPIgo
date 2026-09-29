@@ -7,8 +7,10 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -335,6 +337,49 @@ func TestNewWiresAutomaticRegistrationAllowedClientAuthMethods(t *testing.T) {
 	})
 	if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
 		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidClient)
+	}
+}
+
+// TestNewWiresAutomaticRegistrationOnResolutionFailure proves server.New
+// passes AutomaticRegistrationConfig.OnResolutionFailure through: the
+// operator's hook hears why the RP was refused, while the RP itself
+// still only gets invalid_client.
+func TestNewWiresAutomaticRegistrationOnResolutionFailure(t *testing.T) {
+	f := setupAutomaticRegistrationFixture(t, testRedirectURI)
+	var gotID fapi.ClientID
+	var gotErr error
+	srv := newAutomaticRegistrationTestServer(t, f, func(cfg *server.Config, deps *server.Dependencies) {
+		cfg.AutomaticRegistration.AllowedClientAuthMethods = []storage.ClientAuthMethod{storage.ClientAuthMethodTLSClientAuth}
+		cfg.AutomaticRegistration.OnResolutionFailure = func(_ context.Context, id fapi.ClientID, err error) {
+			gotID, gotErr = id, err
+		}
+	})
+
+	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
+		Signer: f.rpOIDCKey, Algorithm: fapi.ES256, KeyID: "rp-oidc",
+		ClientID: f.rpID, Audience: testIssuer,
+		Now: f.now, Lifetime: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssertion: %v", err)
+	}
+
+	_, err = srv.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: plainFormParameters(t, assertion, nil)},
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidClient)
+	}
+	if gotID != fapi.ClientID(f.rpID) {
+		t.Errorf("OnResolutionFailure clientID = %q, want %q", gotID, f.rpID)
+	}
+	const reason = "allowed_client_auth_methods"
+	if gotErr == nil || !strings.Contains(gotErr.Error(), reason) {
+		t.Errorf("OnResolutionFailure err = %v, want it to name %s", gotErr, reason)
+	}
+	var serverErr *server.Error
+	if errors.As(err, &serverErr) && strings.Contains(serverErr.PublicDescription(), reason) {
+		t.Errorf("client-facing error_description %q exposes the resolution failure", serverErr.PublicDescription())
 	}
 }
 

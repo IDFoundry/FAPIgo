@@ -92,6 +92,24 @@ type AutomaticRegistrationConfig struct {
 	// storage.ClientAuthMethodPrivateKeyJWT, even though some static
 	// clients use mTLS). Every entry must be a valid ClientAuthMethod.
 	AllowedClientAuthMethods []storage.ClientAuthMethod
+
+	// OnResolutionFailure, if set, is called with the reason whenever a
+	// client_id that is a well-formed Entity Identifier, and not
+	// statically registered, fails automatic registration: its Trust
+	// Chain doesn't resolve to a configured Trust Anchor, it has no
+	// openid_relying_party metadata, or that metadata can't be used
+	// (e.g. private_key_jwt with no token_endpoint_auth_signing_alg, or
+	// a token_endpoint_auth_method outside AllowedClientAuthMethods).
+	// The client itself only ever sees a generic invalid-client error,
+	// so this is how an operator finds out why.
+	//
+	// err can carry text from the RP's own statements and metadata: log
+	// it, never return it to the client. It is called synchronously, on
+	// the request that triggered the resolution — concurrent requests
+	// for the same client_id share that one call — so it must not
+	// block. Failures aren't cached: an RP that keeps retrying is
+	// reported once per attempt. Optional.
+	OnResolutionFailure func(ctx context.Context, clientID fapi.ClientID, err error)
 }
 
 // cachedClient is one Relying Party's resolved registration, cached
@@ -280,12 +298,31 @@ func (a *AutomaticClientRepository) resolve(ctx context.Context, id fapi.ClientI
 }
 
 // resolveUncached resolves id's Trust Chain and builds its registration,
-// caching a success. resolve runs at most one at a time per client_id.
+// caching a success and reporting a failure to
+// AutomaticRegistrationConfig.OnResolutionFailure. resolve runs at most
+// one at a time per client_id.
 func (a *AutomaticClientRepository) resolveUncached(ctx context.Context, id fapi.ClientID, now time.Time) (cachedClient, error) {
-
 	if err := ValidEntityID(string(id)); err != nil {
+		// Not a federation client_id at all — an ordinary unknown
+		// client, so nothing for OnResolutionFailure to report.
 		return cachedClient{}, fmt.Errorf("federation: %q is not a registered client and not a valid federation entity ID: %w", id, err)
 	}
+	entry, err := a.register(ctx, id, now)
+	if err != nil {
+		if a.cfg.OnResolutionFailure != nil {
+			a.cfg.OnResolutionFailure(ctx, id, err)
+		}
+		return cachedClient{}, err
+	}
+	a.mu.Lock()
+	a.cache[id] = entry
+	a.mu.Unlock()
+	return entry, nil
+}
+
+// register resolves the Entity Identifier id's Trust Chain and builds
+// its registration from the resolved openid_relying_party metadata.
+func (a *AutomaticClientRepository) register(ctx context.Context, id fapi.ClientID, now time.Time) (cachedClient, error) {
 	resolved, err := a.resolver.Resolve(ctx, string(id))
 	if err != nil {
 		return cachedClient{}, fmt.Errorf("federation: resolve client %q: %w", id, err)
@@ -307,12 +344,7 @@ func (a *AutomaticClientRepository) resolveUncached(ctx context.Context, id fapi
 	if maxAge := now.Add(a.cfg.MaxCacheAge); maxAge.Before(expiresAt) {
 		expiresAt = maxAge
 	}
-	entry := cachedClient{client: client, jwks: jwks, expiresAt: expiresAt}
-
-	a.mu.Lock()
-	a.cache[id] = entry
-	a.mu.Unlock()
-	return entry, nil
+	return cachedClient{client: client, jwks: jwks, expiresAt: expiresAt}, nil
 }
 
 // fetchJWKS fetches and parses a client's remote jwks_uri, mirroring

@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -811,5 +813,101 @@ func TestNewAutomaticClientKeySourceRejectsInvalidArguments(t *testing.T) {
 	}
 	if _, err := federation.NewAutomaticClientKeySource(alwaysFailsKeySource{}, nil); err == nil {
 		t.Fatalf("NewAutomaticClientKeySource(nil repo) = nil error, want error")
+	}
+}
+
+// resolutionFailures records every AutomaticRegistrationConfig.OnResolutionFailure call.
+type resolutionFailures struct {
+	mu   sync.Mutex
+	ids  []fapi.ClientID
+	errs []error
+}
+
+func (r *resolutionFailures) record(_ context.Context, id fapi.ClientID, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ids = append(r.ids, id)
+	r.errs = append(r.errs, err)
+}
+
+func TestAutomaticClientRepositoryReportsResolutionFailure(t *testing.T) {
+	// private_key_jwt with no token_endpoint_auth_signing_alg: the
+	// Trust Chain resolves, but the metadata can't become a client.
+	f := setupAutomaticRegistrationFixture(t, func(rpID string, rpOIDCKey *ecdsa.PrivateKey) json.RawMessage {
+		raw, err := json.Marshal(map[string]any{
+			"redirect_uris":              []string{rpID + "/cb"},
+			"token_endpoint_auth_method": "private_key_jwt",
+			"jwks":                       json.RawMessage(jwksFor(t, "rp-oidc", rpOIDCKey)),
+		})
+		if err != nil {
+			t.Fatalf("marshal openid_relying_party metadata: %v", err)
+		}
+		return raw
+	})
+	var failures resolutionFailures
+	cfg := validAutomaticRegistrationConfig()
+	cfg.OnResolutionFailure = failures.record
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, f.newResolver(t), f.fetcher, cfg, fixedClock{now: f.now})
+	if err != nil {
+		t.Fatalf("NewAutomaticClientRepository: %v", err)
+	}
+
+	_, err1 := repo.ResolveClient(context.Background(), fapi.ClientID(f.rpID))
+	_, err2 := repo.ResolveClient(context.Background(), fapi.ClientID(f.rpID))
+	if err1 == nil || err2 == nil {
+		t.Fatalf("ResolveClient = %v, %v, want errors", err1, err2)
+	}
+	// Failures aren't cached, so each attempt is reported.
+	if len(failures.ids) != 2 {
+		t.Fatalf("OnResolutionFailure called %d times, want 2", len(failures.ids))
+	}
+	if failures.ids[0] != fapi.ClientID(f.rpID) {
+		t.Errorf("OnResolutionFailure clientID = %q, want %q", failures.ids[0], f.rpID)
+	}
+	if failures.errs[0] != err1 {
+		t.Errorf("OnResolutionFailure err = %v, want ResolveClient's own error %v", failures.errs[0], err1)
+	}
+	if !strings.Contains(failures.errs[0].Error(), "token_endpoint_auth_signing_alg") {
+		t.Errorf("OnResolutionFailure err = %v, want it to name token_endpoint_auth_signing_alg", failures.errs[0])
+	}
+}
+
+func TestAutomaticClientRepositoryReportsUnresolvableTrustChain(t *testing.T) {
+	f := setupAutomaticRegistrationFixture(t, nil)
+	var failures resolutionFailures
+	cfg := validAutomaticRegistrationConfig()
+	cfg.OnResolutionFailure = failures.record
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, f.newResolver(t), f.fetcher, cfg, fixedClock{now: f.now})
+	if err != nil {
+		t.Fatalf("NewAutomaticClientRepository: %v", err)
+	}
+	const id = "https://nonexistent-rp-host.example.invalid"
+	if _, err := repo.ResolveClient(context.Background(), id); err == nil {
+		t.Fatalf("ResolveClient(unreachable federation entity) = nil error, want error")
+	}
+	if len(failures.ids) != 1 || failures.ids[0] != id {
+		t.Errorf("OnResolutionFailure calls = %q, want exactly [%q]", failures.ids, id)
+	}
+}
+
+func TestAutomaticClientRepositoryDoesNotReportNonFederationFailures(t *testing.T) {
+	f := setupAutomaticRegistrationFixture(t, rpMetadataBuilder(t))
+	var failures resolutionFailures
+	cfg := validAutomaticRegistrationConfig()
+	cfg.OnResolutionFailure = failures.record
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, f.newResolver(t), f.fetcher, cfg, fixedClock{now: f.now})
+	if err != nil {
+		t.Fatalf("NewAutomaticClientRepository: %v", err)
+	}
+	// An ordinary unknown client_id, not an Entity Identifier.
+	if _, err := repo.ResolveClient(context.Background(), "not-a-url"); err == nil {
+		t.Fatalf("ResolveClient(\"not-a-url\") = nil error, want error")
+	}
+	// A federation client that registers fine.
+	if _, err := repo.ResolveClient(context.Background(), fapi.ClientID(f.rpID)); err != nil {
+		t.Fatalf("ResolveClient: %v", err)
+	}
+	if len(failures.ids) != 0 {
+		t.Errorf("OnResolutionFailure called for %q, want no calls", failures.ids)
 	}
 }

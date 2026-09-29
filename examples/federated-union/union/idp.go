@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"slices"
 	"sync"
@@ -142,6 +143,11 @@ func (w *World) newIdentityProvider(c country, ta *entity) (*identityProvider, e
 			// Short, so suspending a country takes effect within the
 			// demo rather than after a real deployment's caching period.
 			MaxCacheAge: 10 * time.Second,
+			// A refused service only sees invalid_client; the reason is
+			// for the identity provider's operator.
+			OnResolutionFailure: func(_ context.Context, clientID fapi.ClientID, err error) {
+				log.Printf("%s refused automatic registration of %s: %v", c.idpName, clientID, err)
+			},
 		},
 	}
 	idp := &identityProvider{country: c, fedKey: fedKey, w: w, pending: map[string]pendingLogin{}}

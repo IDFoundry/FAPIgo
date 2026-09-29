@@ -55,14 +55,12 @@ func newBackchannelHandler(srv *server.Server, clock server.Clock, defaultSubjec
 
 // handleAuthenticate serves POST /backchannel-authenticate.
 func (h *backchannelHandler) handleAuthenticate(w http.ResponseWriter, r *http.Request) {
-	form, err := server.FormRequestFromHTTP(r)
+	req, err := server.BeginBackchannelAuthenticationRequestFromHTTP(r)
 	if err != nil {
 		writeRawOAuthError(w, http.StatusBadRequest, server.ErrorInvalidRequest, err.Error())
 		return
 	}
-	action, err := h.srv.BeginBackchannelAuthentication(r.Context(), server.BeginBackchannelAuthenticationRequest{
-		HTTP: form, DPoPProofs: r.Header.Values("DPoP"), PeerCertificate: server.PeerCertificateFromHTTP(r),
-	})
+	action, err := h.srv.BeginBackchannelAuthentication(r.Context(), req)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return

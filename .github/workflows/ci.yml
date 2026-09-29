@@ -173,6 +173,17 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+      # An example's module path sits under the library's, so Go would
+      # let it import the library's internal packages — which a real
+      # integrator can't. Keep examples to the public API.
+      - name: public API only
+        run: |
+          internal=$(go list -f '{{range .Imports}}{{.}} {{end}}{{range .TestImports}}{{.}} {{end}}{{range .XTestImports}}{{.}} {{end}}' ./... | tr ' ' '\n' | grep '^github.com/idfoundry/fapigo/internal' || true)
+          if [ -n "$internal" ]; then
+            echo "examples must use FAPIgo's public API only; found: $internal"
+            exit 1
+          fi
+
       - name: go test (race)
         run: go test -race ./...
 

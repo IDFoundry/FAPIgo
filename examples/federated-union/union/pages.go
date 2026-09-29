@@ -12,6 +12,9 @@ import (
 // Page is what every page's layout needs.
 type Page struct {
 	Title, Country, Color, Console string
+	// ActiveScenes are the titles of the console scenes that are on, so
+	// every page can say its behaviour is altered.
+	ActiveScenes []string
 }
 
 func (w *World) page(title string, c country) Page {
@@ -19,16 +22,14 @@ func (w *World) page(title string, c country) Page {
 	if color == "" {
 		color = "#4f46e5"
 	}
-	return Page{Title: title, Country: c.name, Color: color, Console: w.URL(consoleHost, "/")}
+	return Page{Title: title, Country: c.name, Color: color, Console: w.URL(consoleHost, "/"), ActiveScenes: w.activeScenes()}
 }
 
 type consolePage struct {
 	Page
 	Entities []entityRow
-	Scenes   []sceneRow
-	Services []entityRow
+	Tour     []tourStep
 	Log      []demonet.FetchEntry
-	Impostor string
 }
 
 type entityPage struct {
@@ -106,8 +107,17 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .error { color: var(--bad); font-size: 13px; word-break: break-word; }
 label.row { display: flex; gap: 8px; align-items: center; padding: 4px 0; }
 code { font-size: 12px; word-break: break-all; }
+.scenes-on { background: #fef3c7; color: #92400e; padding: 8px 24px; font-size: 13px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.scenes-on form { margin: 0; } .scenes-on button { padding: 3px 10px; font-size: 12px; }
+ol.tour { list-style: none; padding: 0; margin: 0; counter-reset: step; }
+ol.tour > li { counter-increment: step; position: relative; padding-left: 44px; }
+ol.tour > li::before { content: counter(step); position: absolute; left: 14px; top: 16px; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 12px; font-weight: 700; text-align: center; line-height: 22px; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+.actions form { margin: 0; }
 </style></head><body>
 <header><h1>{{.Title}}</h1><span>{{if .Country}}{{.Country}} · {{end}}<a href="{{.Console}}">Meridian Union console</a></span></header>
+{{if .ActiveScenes}}<div class="scenes-on"><span><strong>Scene on:</strong> {{range $i, $s := .ActiveScenes}}{{if $i}}; {{end}}{{$s}}{{end}}. Sign-ins behave differently until it's off.</span>
+<form method="post" action="{{.Console}}scene/reset"><button class="secondary">Turn every scene off</button></form></div>{{end}}
 <main>{{end}}
 {{define "bottom"}}</main></body></html>{{end}}`
 
@@ -115,17 +125,15 @@ var pageTemplates = map[string]string{
 	"console": `{{template "top" .}}
 <p class="muted">Three countries — Northland, Southport and Eastmark — run their own identity federations and have joined the Meridian Union, so a service in one country can accept a citizen of another without either registering with the other. Everything below runs in this one process, each entity at its own host.</p>
 
-<h2>Try it</h2>
-<div class="grid">{{range .Services}}<div class="card"><span class="dot" style="background:{{.Color}}"></span><strong>{{.Name}}</strong> <span class="muted">({{.Country}})</span><p class="muted">Sign in with any Union country's national identity.</p><a class="button" href="{{.Page}}">Open</a></div>{{end}}</div>
-
-<h2>Scenes</h2>
-<div class="grid">{{range .Scenes}}<div class="card">
-<strong>{{.Title}}</strong> {{if .On}}<span class="pill bad">on</span>{{else}}<span class="pill off">off</span>{{end}}
-<p class="muted">{{.Description}}</p>
-<form method="post" action="/scene"><input type="hidden" name="scene" value="{{.Key}}">
-{{if .On}}<input type="hidden" name="on" value="false"><button class="secondary">Turn off</button>{{else}}<input type="hidden" name="on" value="true"><button>Turn on</button>{{end}}</form>
-</div>{{end}}</div>
-<p class="muted">With the compromise scene on, compare <a href="/resolve?subject={{.Impostor}}&via=union">the impostor through the Union</a> with <a href="/resolve?subject={{.Impostor}}&via=eastmark">the impostor through Eastmark's authority alone</a>.</p>
+<h2>Start here</h2>
+<ol class="tour">{{range .Tour}}<li class="card"{{with .Scene}} id="{{.Key}}"{{end}}>
+<strong>{{.Title}}</strong>{{with .Scene}} {{if .On}}<span class="pill bad">scene on</span>{{else}}<span class="pill off">scene off</span>{{end}}{{end}}
+<p>{{.Do}}</p>
+<p class="muted">{{.Notice}}</p>
+<div class="actions">{{with .Scene}}<form method="post" action="/scene"><input type="hidden" name="scene" value="{{.Key}}">{{if .On}}<input type="hidden" name="on" value="false"><button class="secondary">Turn scene off</button>{{else}}<input type="hidden" name="on" value="true"><button>Turn scene on</button>{{end}}</form>{{end}}
+{{range .Links}}<a class="button" href="{{.Href}}">{{.Text}}</a>{{end}}</div>
+{{with .Scene}}<p class="muted"><em>{{.Description}}</em></p>{{end}}
+</li>{{end}}</ol>
 
 <h2>Members</h2>
 <div class="card"><table><tr><th>Entity</th><th>Role</th><th>Country</th><th></th></tr>

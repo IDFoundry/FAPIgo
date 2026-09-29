@@ -57,6 +57,58 @@ type BeginAuthorizationRequest struct {
 	// text, not a bare string), so it works under the baseline profile
 	// too, not just ProfileFAPISecurityWithMessageSigning.
 	AuthorizationDetails []json.RawMessage
+
+	// Claims requests specific identity claims with the OIDC "claims"
+	// parameter (OIDC Core §5.5), by where each should be delivered —
+	// sent only when at least one name is set. The authorization server
+	// decides what it actually releases: a FAPIgo server releases only
+	// those the resource owner approves.
+	Claims RequestedClaims
+}
+
+// RequestedClaims names identity claims to request with the OIDC
+// "claims" parameter, by delivery location. Each is requested as a
+// voluntary claim with no particular value (OIDC Core §5.5.1's null
+// request).
+type RequestedClaims struct {
+	IDToken  []string // claims wanted in the ID token
+	UserInfo []string // claims wanted from the UserInfo endpoint
+}
+
+// claimsParameter is the OIDC Core §5.5 "claims" request parameter.
+const claimsParameter = "claims"
+
+// encode returns r as the "claims" parameter's JSON object, or nil if it
+// names no claims.
+func (r RequestedClaims) encode() (json.RawMessage, error) {
+	location := func(names []string) (map[string]json.RawMessage, error) {
+		if len(names) == 0 {
+			return nil, nil
+		}
+		out := make(map[string]json.RawMessage, len(names))
+		for _, name := range names {
+			if name == "" {
+				return nil, fmt.Errorf("claim name is empty")
+			}
+			out[name] = json.RawMessage("null")
+		}
+		return out, nil
+	}
+	idToken, err := location(r.IDToken)
+	if err != nil {
+		return nil, err
+	}
+	userinfo, err := location(r.UserInfo)
+	if err != nil {
+		return nil, err
+	}
+	if idToken == nil && userinfo == nil {
+		return nil, nil
+	}
+	return json.Marshal(struct {
+		IDToken  map[string]json.RawMessage `json:"id_token,omitempty"`
+		UserInfo map[string]json.RawMessage `json:"userinfo,omitempty"`
+	}{idToken, userinfo})
 }
 
 // responseModePlain and responseModeJARM record how this session expects
@@ -123,6 +175,16 @@ func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 	}
 	if len(req.ACRValues) > 0 {
 		params["acr_values"] = strings.Join(req.ACRValues, " ")
+	}
+	claims, err := req.Claims.encode()
+	if err != nil {
+		return AuthorizationSession{}, newError(ErrorInvalidRequest, "claims request is invalid", err)
+	}
+	if claims != nil {
+		// JSON object text: sent as-is as a plain PAR parameter, and
+		// embedded as a native object in a request object (see
+		// signPushedRequestForm).
+		params[claimsParameter] = string(claims)
 	}
 
 	var (
@@ -440,6 +502,9 @@ func (c *Client) signPushedRequestForm(ctx context.Context, now time.Time, form,
 
 	if authorizationDetailsRaw != nil {
 		objectParams[authorizationDetailsParameter] = authorizationDetailsRaw
+	}
+	if claims, ok := params[claimsParameter]; ok {
+		objectParams[claimsParameter] = json.RawMessage(claims)
 	}
 
 	objectSigner, objectKID, err := c.newSigner(ctx, keys.RequestObjectSigning, c.cfg.Algorithms.RequestObject)

@@ -47,6 +47,12 @@ type Config struct {
 	// ReturnInTokenClaims value round-trips into the issued tokens.
 	Extensions *extension.Registry
 
+	// IdentityClaims, if set, is the harness's server Dependencies.IdentityClaims.
+	// The harness's consent step approves every identity claim a request
+	// asks for with the "claims" parameter, so a test can observe them
+	// arrive in the ID token.
+	IdentityClaims server.IdentityClaimsSource
+
 	// EncryptIDTokens, if set, registers the harness's client for
 	// encrypted ID tokens (OIDC Core §2) on both sides — the client's
 	// own Algorithms.IDTokenKeyManagement/ContentEncryption, the
@@ -284,6 +290,7 @@ func New(t *testing.T, cfg Config) *Harness {
 		Clock:                  clock,
 		Random:                 rand.Reader,
 	}
+	srvDeps.IdentityClaims = cfg.IdentityClaims
 	if cfg.EncryptIDTokens {
 		srvDeps.ClientEncryptionKeys = &memClientEncryptionKeySource{clientID: ClientID, decrypter: clientDecryption}
 	}

@@ -1413,3 +1413,45 @@ func TestBeginAuthorizationPropagatesRandomFailure(t *testing.T) {
 		t.Fatalf("BeginAuthorization(failing random) made an HTTP call, want fail-closed before any I/O")
 	}
 }
+
+// TestBeginAuthorizationSendsClaimsParameter checks the OIDC "claims"
+// parameter's encoding under both PAR shapes: JSON object text as a
+// plain parameter, and a native JSON object — not a string — inside a
+// request object; and that it's omitted when nothing is requested.
+func TestBeginAuthorizationSendsClaimsParameter(t *testing.T) {
+	claims := client.RequestedClaims{IDToken: []string{"email"}, UserInfo: []string{"address"}}
+	const want = `{"id_token":{"email":null},"userinfo":{"address":null}}`
+
+	c, as, _ := newTestClient(t, false)
+	if _, err := c.BeginAuthorization(context.Background(), client.BeginAuthorizationRequest{Scope: []string{"openid"}, Claims: claims}); err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+	if got := as.lastPARForm.Get("claims"); got != want {
+		t.Errorf("plain claims = %s, want %s", got, want)
+	}
+	if _, err := c.BeginAuthorization(context.Background(), client.BeginAuthorizationRequest{Scope: []string{"openid"}}); err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+	if _, present := as.lastPARForm["claims"]; present {
+		t.Errorf("claims sent with nothing requested")
+	}
+
+	ro, roAS := newTestClientWithRequestObjectEncoding(t)
+	if _, err := ro.BeginAuthorization(context.Background(), client.BeginAuthorizationRequest{Scope: []string{"openid", "accounts"}, Claims: claims}); err != nil {
+		t.Fatalf("BeginAuthorization (request object): %v", err)
+	}
+	obj, err := requestobject.Parse(roAS.lastPARForm.Get("request"))
+	if err != nil {
+		t.Fatalf("parse request object: %v", err)
+	}
+	raw, ok := obj.Parameter("claims")
+	if !ok || string(raw) != want {
+		t.Errorf("request object claims = %s, want the native object %s", raw, want)
+	}
+
+	if _, err := c.BeginAuthorization(context.Background(), client.BeginAuthorizationRequest{
+		Scope: []string{"openid"}, Claims: client.RequestedClaims{IDToken: []string{""}},
+	}); err == nil {
+		t.Error("BeginAuthorization(empty claim name) = nil error, want error")
+	}
+}

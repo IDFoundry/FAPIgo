@@ -148,8 +148,9 @@ func (w *World) entityID(host string) string {
 func (w *World) fetcher(host string) (*fapihttp.Client, error) {
 	return fapihttp.New(w.net.Client(host), fapihttp.Config{
 		MaxResponseBytes: 1 << 20, RequestTimeout: 10 * time.Second, MaxRedirects: 2,
-		// Every demo host resolves to the loopback address.
-		AllowLoopbackHTTP: true,
+		// Every demo host is a *.localhost name, which RFC 6761 reserves
+		// for loopback. https only: nothing here is served over http.
+		AllowLoopbackHosts: true,
 	})
 }
 

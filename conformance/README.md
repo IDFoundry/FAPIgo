@@ -47,7 +47,7 @@ behaviour and negative-test expectations differ. See
   run scripts.
 - `server/` — OpenID Foundation FAPI 2.0 AS conformance configuration and
   run scripts.
-- `scripts/run-all.sh` — runs all twenty-two test configurations this repo
+- `scripts/run-all.sh` — runs all twenty-three test configurations this repo
   has driver support for (AS baseline, AS message-signing, AS ciba-mtls, AS
   ciba-ping, AS mtls, AS message-signing-mtls, AS client-auth-mtls, AS
   client-auth-mtls-and-mtls, AS ciba-client-auth-mtls, AS
@@ -55,7 +55,8 @@ behaviour and negative-test expectations differ. See
   client-auth-mtls-and-mtls-client-credentials, RP baseline, RP
   message-signing, RP ciba-mtls, RP client-auth-mtls, RP mtls, RP
   client-auth-mtls-and-mtls, RP federation-rp, Federation
-  federation-deployed-entity) against a locally running suite and prints
+  federation-deployed-entity, Federation federation-trust-anchor) against a
+  locally running suite and prints
   one combined summary. See the script's own header comment for
   prerequisites and env vars.
 - `resource/` — resource-server verification test vectors (DPoP proof

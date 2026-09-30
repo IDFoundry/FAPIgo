@@ -204,3 +204,31 @@ func TestPhoneRefusesCrossSitePost(t *testing.T) {
 		t.Error("the request is no longer pending")
 	}
 }
+
+// TestPocketwiseRefusesForgedPing covers the CIBA ping endpoint: a
+// notification without the token Pocketwise sent for that request is
+// refused, and doesn't make Pocketwise collect.
+func TestPocketwiseRefusesForgedPing(t *testing.T) {
+	d := start(t)
+	_, link := d.post("pocketwise.localhost", "/link", url.Values{"customer": {"sam"}, "scenario": {"accounts"}})
+	authReqID := orderID(link)
+	for name, token := range map[string]string{"wrong token": "Bearer guessed", "no token": ""} {
+		req, err := http.NewRequest(http.MethodPost, d.world.URL("pocketwise.localhost", "/ciba-notify"), strings.NewReader(`{"auth_req_id":"`+authReqID+`"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if token != "" {
+			req.Header.Set("Authorization", token)
+		}
+		res, err := d.http.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = res.Body.Close()
+		if res.StatusCode/100 != 4 {
+			t.Errorf("%s: ping = %s, want refused", name, res.Status)
+		}
+	}
+	mustContain(t, "Pocketwise", d.get("pocketwise.localhost", link), "Waiting for Alder Bank")
+}

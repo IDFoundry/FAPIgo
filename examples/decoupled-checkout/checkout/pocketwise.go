@@ -2,11 +2,9 @@ package checkout
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"log"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -152,20 +150,18 @@ func (p *pocketwise) show(w http.ResponseWriter, r *http.Request) {
 // notify is Pocketwise's CIBA ping endpoint: the bank POSTs the
 // auth_req_id of a decided request, authenticated with the
 // client_notification_token Pocketwise sent with that request. Only a
-// matching token is trusted to mean "go and collect".
+// notification that authenticates against its session is trusted to
+// mean "go and collect".
 func (p *pocketwise) notify(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		AuthReqID string `json:"auth_req_id"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
+	notification, err := client.ParseBackchannelNotification(r)
+	if err != nil {
 		http.Error(w, "malformed notification", http.StatusBadRequest)
 		return
 	}
-	token, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	p.mu.Lock()
-	l, ok := p.links[body.AuthReqID]
+	l, ok := p.links[notification.AuthReqID()]
 	p.mu.Unlock()
-	if !ok || subtle.ConstantTimeCompare([]byte(token), []byte(l.session.NotificationToken())) != 1 {
+	if !ok || !notification.Authenticates(l.session) {
 		http.Error(w, "unknown request or wrong token", http.StatusUnauthorized)
 		return
 	}

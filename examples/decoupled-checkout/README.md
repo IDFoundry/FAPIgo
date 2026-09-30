@@ -121,12 +121,12 @@ Everything here uses FAPIgo's public API only.
 
 | Piece | FAPIgo |
 |---|---|
-| Alder Bank | `server.Server` with `Endpoints.BackchannelAuthentication`, `Config.RAR` (an `extension.RARRegistry` of both detail types), and `Dependencies.CIBARARPolicy` limiting which types each client may request |
+| Alder Bank | `server.Server` with `Endpoints.BackchannelAuthentication`, `Config.RAR` (an `extension.RARRegistry` of both detail types), `Dependencies.CIBARARPolicy` limiting which types each client may request, and `Dependencies.BackchannelHints` refusing a login hint that names no customer with `unknown_user_id` |
 | Sam's phone | `server.BackchannelInteractionRequest` — `AuthorizationDetails`, `BindingMessage`, `ClientDisplay` — and `CompleteBackchannelAuthentication` with `GrantedAuthorization.AuthorizationDetails` |
 | Narrowing | `RARDefinition.ValidateGrant`: an account-access grant may drop accounts and actions, never add them; a payment is granted exactly as asked |
-| The APIs | `serverresource.NewVerifier`, built from the bank's own server configuration; the granted details from the access token's `authorization_details` claim |
+| The APIs | `serverresource.NewVerifier`, built from the bank's own server configuration; the granted details from the access token's `authorization_details` claim, and `resource.ErrorInsufficientScope` for a request they don't cover |
 | The till and Pocketwise | `client.Discover`, `client.NewFromDiscovery`, `BeginBackchannelAuthentication` with `AuthorizationDetails`, `PollBackchannelAuthentication`, `ProtectedResource` for DPoP-bound API calls |
-| Ping delivery | `Config.BackchannelTokenDeliveryMode` ping on Pocketwise, whose endpoint checks `BackchannelAuthenticationSession.NotificationToken`; the bank sends with `server.NewBackchannelNotificationRequest` |
+| Ping delivery | `Config.BackchannelTokenDeliveryMode` ping on Pocketwise, whose endpoint reads the callback with `client.ParseBackchannelNotification` and checks it with `Authenticates`; the bank sends with `server.NewBackchannelNotificationRequest` |
 
 The code:
 

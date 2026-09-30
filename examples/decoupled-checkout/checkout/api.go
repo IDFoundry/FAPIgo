@@ -71,7 +71,7 @@ func (a *api) verify(r *http.Request) (resource.AuthorizationContext, error) {
 // forbidden is RFC 6750 §3.1's insufficient_scope: a valid token that
 // doesn't cover this request.
 func forbidden(w http.ResponseWriter, description string) {
-	resource.NewError("insufficient_scope", http.StatusForbidden, description).WriteJSON(w)
+	resource.NewError(resource.ErrorInsufficientScope, http.StatusForbidden, description).WriteJSON(w)
 }
 
 // grantedDetails decodes the token's authorization_details claim.

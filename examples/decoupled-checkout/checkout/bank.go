@@ -178,13 +178,8 @@ func (w *World) registeredClients() ([]storage.RegisteredClient, error) {
 			BackchannelClientNotificationEndpoint: notify,
 		},
 	} {
-		host := tillHost
-		if cfg.ID == pocketwiseClientID {
-			host = pocketwiseHost
-		}
-		// A CIBA client never receives a redirect, but every registered
-		// client needs one.
-		cfg.RedirectURIs = []fapi.RegisteredRedirectURI{fapi.RegisteredRedirectURI(w.URL(host, "/callback"))}
+		// Registered only for CIBA, so no redirect URIs: neither client
+		// can use the authorization code grant.
 		cfg.ClientAuthMethod = storage.ClientAuthMethodPrivateKeyJWT
 		cfg.ClientAssertionAlgorithm = fapi.ES256
 		cfg.RequestObjectAlgorithm = fapi.ES256

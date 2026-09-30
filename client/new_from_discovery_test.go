@@ -268,3 +268,29 @@ func TestDiscoverHasNoResolvedEntity(t *testing.T) {
 		t.Error("ResolvedEntity() ok = true for Discover metadata, want false")
 	}
 }
+
+// TestNewFromDiscoveryWithoutRedirectURI covers a client with no
+// redirect URI — one using only CIBA or client credentials: discovery
+// fills its endpoints without the redirect-based flow's, so it needs no
+// RedirectURI and can't begin that flow.
+func TestNewFromDiscoveryWithoutRedirectURI(t *testing.T) {
+	discovered := discoverForAlgorithmTests(t)
+	if discovered.Endpoints.Authorization.IsZero() {
+		t.Fatal("test setup: discovered metadata has no authorization endpoint")
+	}
+	cfg := validConfig(t)
+	cfg.Issuer, cfg.Endpoints, cfg.RedirectURI = discovered.Issuer(), client.Endpoints{}, ""
+	cfg.Algorithms.IDToken = fapi.ES256
+	c, err := client.NewFromDiscovery(discovered, cfg, validDependencies(t))
+	if err != nil {
+		t.Fatalf("NewFromDiscovery(no redirect URI): %v", err)
+	}
+	if _, err := c.BeginAuthorization(context.Background(), client.BeginAuthorizationRequest{Scope: []string{"openid"}}); err == nil {
+		t.Error("BeginAuthorization without a redirect URI = nil error, want error")
+	}
+
+	cfg.RedirectURI = testRedirect
+	if _, err := client.NewFromDiscovery(discovered, cfg, validDependencies(t)); err != nil {
+		t.Errorf("NewFromDiscovery(with a redirect URI): %v", err)
+	}
+}

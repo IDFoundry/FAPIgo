@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -267,13 +269,22 @@ type chainWalkState struct {
 	// past subjectID at the end of hop 0). See ResolvedEntity.JWKS's
 	// own doc comment for what this value means and is used for.
 	subjectJWKS json.RawMessage
+
+	// entityAtClaims are entityAt's own self-verified Entity
+	// Configuration claims.
+	entityAtClaims intfed.Claims
+
+	// cache is shared by every branch of the search.
+	cache *statementCache
 }
 
-func newChainWalkState(subjectID string, leafStmt intfed.Statement, leafToken string, leafClaims intfed.Claims) *chainWalkState {
+func newChainWalkState(subjectID string, leafStmt intfed.Statement, leafToken string, leafClaims intfed.Claims, cache *statementCache) *chainWalkState {
 	return &chainWalkState{
-		subjectID:  subjectID,
-		leafClaims: leafClaims,
-		minExpiry:  leafClaims.ExpiresAt,
+		cache:          cache,
+		entityAtClaims: leafClaims,
+		subjectID:      subjectID,
+		leafClaims:     leafClaims,
+		minExpiry:      leafClaims.ExpiresAt,
 
 		belowStmt:    leafStmt,
 		belowIssuer:  subjectID,
@@ -299,7 +310,8 @@ func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntit
 	}
 	now := r.deps.Clock.Now()
 
-	leafStmt, leafToken, err := fetchEntityConfiguration(ctx, r.deps.HTTP, subjectID)
+	cache := newStatementCache()
+	leafStmt, leafToken, err := cache.entityConfiguration(ctx, r.deps.HTTP, subjectID)
 	if err != nil {
 		return ResolvedEntity{}, err
 	}
@@ -321,59 +333,169 @@ func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntit
 		return r.resolveSelfAsTrustAnchor(subjectID, leafStmt, leafToken, leafClaims, anchor, now)
 	}
 
-	st := newChainWalkState(subjectID, leafStmt, leafToken, leafClaims)
+	st := newChainWalkState(subjectID, leafStmt, leafToken, leafClaims, cache)
+	budget := r.cfg.Limits.MaxPathLength * r.cfg.Limits.MaxAuthorityHints
+	return r.walk(ctx, st, 0, &budget, now)
+}
 
-	for hop := 0; ; hop++ {
-		if hop >= r.cfg.Limits.MaxPathLength {
-			return ResolvedEntity{}, fmt.Errorf("federation: trust chain for %q exceeds the configured max path length (%d)", subjectID, r.cfg.Limits.MaxPathLength)
+// walk extends the Trust Chain in st from its current entity (st.entityAt)
+// by one hop, trying each of that entity's authority hints — configured
+// Trust Anchors first, then the rest in the order listed — and
+// backtracking to the next hint whenever a branch can't reach a
+// configured Trust Anchor. OpenID Federation 1.0 §10.1 builds chains
+// through every authority hint, so taking only the first reachable one
+// would fail to resolve an entity whose first superior leads nowhere
+// trusted while another reaches a configured Trust Anchor.
+//
+// budget bounds the whole search to MaxPathLength × MaxAuthorityHints
+// superiors tried — the most a single first-reachable walk could already
+// fetch — so backtracking adds no amplification an entity's authority
+// hints could exploit (§18.1).
+func (r *Resolver) walk(ctx context.Context, st *chainWalkState, hop int, budget *int, now time.Time) (ResolvedEntity, error) {
+	if hop >= r.cfg.Limits.MaxPathLength {
+		return ResolvedEntity{}, fmt.Errorf("federation: trust chain for %q exceeds the configured max path length (%d)", st.subjectID, r.cfg.Limits.MaxPathLength)
+	}
+	hints := r.selfClaimsForHop(st).AuthorityHints
+	if len(hints) == 0 {
+		return ResolvedEntity{}, fmt.Errorf("federation: %q has no authority_hints and is not a configured trust anchor: no path to a trusted trust anchor", st.entityAt)
+	}
+	if len(hints) > r.cfg.Limits.MaxAuthorityHints {
+		return ResolvedEntity{}, fmt.Errorf("federation: %q lists %d authority_hints, more than the configured limit (%d)", st.entityAt, len(hints), r.cfg.Limits.MaxAuthorityHints)
+	}
+
+	var lastErr error
+	for _, hint := range r.trustAnchorsFirst(hints) {
+		if st.visited[hint] {
+			continue
 		}
-
-		selfClaims, err := r.selfClaimsForHop(ctx, st, now)
-		if err != nil {
-			return ResolvedEntity{}, err
+		if *budget <= 0 {
+			return ResolvedEntity{}, fmt.Errorf("federation: trust chain for %q: stopped after trying %d superiors (MaxPathLength × MaxAuthorityHints)", st.subjectID, r.cfg.Limits.MaxPathLength*r.cfg.Limits.MaxAuthorityHints)
 		}
-
-		hints := selfClaims.AuthorityHints
-		if len(hints) == 0 {
-			return ResolvedEntity{}, fmt.Errorf("federation: %q has no authority_hints and is not a configured trust anchor: no path to a trusted trust anchor", st.entityAt)
+		*budget--
+		result, err := r.tryHint(ctx, st, hop, hint, budget, now)
+		if err == nil {
+			return result, nil
 		}
-		if len(hints) > r.cfg.Limits.MaxAuthorityHints {
-			return ResolvedEntity{}, fmt.Errorf("federation: %q lists %d authority_hints, more than the configured limit (%d)", st.entityAt, len(hints), r.cfg.Limits.MaxAuthorityHints)
-		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		return ResolvedEntity{}, fmt.Errorf("federation: %q: no unvisited superior among %v", st.entityAt, hints)
+	}
+	return ResolvedEntity{}, fmt.Errorf("federation: %q: no path to a configured trust anchor through %v (last error: %w)", st.entityAt, hints, lastErr)
+}
 
-		superiorID, superiorConfig, superiorToken, superiorClaims, err := r.findReachableSuperior(ctx, hints, st.visited, now)
-		if err != nil {
-			return ResolvedEntity{}, fmt.Errorf("federation: %q: %w", st.entityAt, err)
-		}
-		st.visited[superiorID] = true
-		if superiorClaims.ExpiresAt.Before(st.minExpiry) {
-			st.minExpiry = superiorClaims.ExpiresAt
-		}
+// tryHint extends a copy of st through the superior hint — its Entity
+// Configuration and its Subordinate Statement about st.entityAt — and
+// either completes the chain there, when hint is a configured Trust
+// Anchor, or continues the walk above it. st itself is never modified,
+// so a failed branch leaves nothing behind for the next hint.
+func (r *Resolver) tryHint(ctx context.Context, st *chainWalkState, hop int, hint string, budget *int, now time.Time) (ResolvedEntity, error) {
+	config, token, err := st.cache.entityConfiguration(ctx, r.deps.HTTP, hint)
+	if err != nil {
+		return ResolvedEntity{}, err
+	}
+	if config.ClaimedIssuer() != hint || config.ClaimedSubject() != hint {
+		return ResolvedEntity{}, fmt.Errorf("federation: entity configuration for %q has iss=%q sub=%q", hint, config.ClaimedIssuer(), config.ClaimedSubject())
+	}
+	claims, err := r.verifySelfSigned(config, hint, now)
+	if err != nil {
+		return ResolvedEntity{}, fmt.Errorf("federation: entity configuration for %q: %w", hint, err)
+	}
+	aboveStmt, aboveToken, err := r.fetchAboveStatement(ctx, st.cache, hint, claims, st.entityAt)
+	if err != nil {
+		return ResolvedEntity{}, err
+	}
 
-		aboveStmt, aboveToken, err := r.fetchAboveStatement(ctx, superiorID, superiorClaims, st.entityAt)
-		if err != nil {
-			return ResolvedEntity{}, err
-		}
+	branch := st.clone()
+	branch.visited[hint] = true
+	if claims.ExpiresAt.Before(branch.minExpiry) {
+		branch.minExpiry = claims.ExpiresAt
+	}
+	branch.chain = append(branch.chain, hint)
+	// aboveStmt (issued by hint, about st.entityAt) is a genuine Trust
+	// Chain entry whether hint is a Trust Anchor or another Intermediate
+	// — unlike an Intermediate's own self-signed Entity Configuration
+	// (see selfClaimsForHop), which is fetched for routing only.
+	branch.tokens = append(branch.tokens, aboveToken)
+	sup := hopSuperior{id: hint, config: config, claims: claims, token: token, aboveStmt: aboveStmt}
 
-		st.chain = append(st.chain, superiorID)
-		// aboveStmt (issued by superiorID, about entityAt) is a genuine
-		// Trust Chain entry regardless of whether superiorID turns out to
-		// be a Trust Anchor or another Intermediate — unlike an
-		// Intermediate's own self-signed Entity Configuration (see
-		// selfClaimsForHop's own doc comment), appended here
-		// unconditionally, in order.
-		st.tokens = append(st.tokens, aboveToken)
+	if anchor, ok := r.trustAnchorsByID[hint]; ok {
+		return r.finalizeTrustChain(branch, hop, sup, anchor, now)
+	}
+	if err := r.advanceIntermediateHop(branch, hop, sup, now); err != nil {
+		return ResolvedEntity{}, err
+	}
+	return r.walk(ctx, branch, hop+1, budget, now)
+}
 
-		sup := hopSuperior{id: superiorID, config: superiorConfig, claims: superiorClaims, token: superiorToken, aboveStmt: aboveStmt}
-
-		if anchor, ok := r.trustAnchorsByID[superiorID]; ok {
-			return r.finalizeTrustChain(st, hop, sup, anchor, now)
-		}
-
-		if err := r.advanceIntermediateHop(st, hop, sup, now); err != nil {
-			return ResolvedEntity{}, err
+// trustAnchorsFirst orders hints with this resolver's configured Trust
+// Anchors first, each group keeping the order the entity listed them in.
+func (r *Resolver) trustAnchorsFirst(hints []string) []string {
+	ordered := make([]string, 0, len(hints))
+	for _, h := range hints {
+		if _, ok := r.trustAnchorsByID[h]; ok {
+			ordered = append(ordered, h)
 		}
 	}
+	for _, h := range hints {
+		if _, ok := r.trustAnchorsByID[h]; !ok {
+			ordered = append(ordered, h)
+		}
+	}
+	return ordered
+}
+
+// statementCache holds every Entity Configuration and Subordinate
+// Statement fetched during one Resolve — including failed fetches — so
+// the search never fetches one twice: OpenID Federation 1.0 §10.1's
+// "Federation participants MUST NOT attempt to fetch Entity Statements
+// they already have obtained during this process", which backtracking
+// through a federation where two superiors share a superior would
+// otherwise do. Every branch of the search shares it.
+type statementCache struct {
+	configs      map[string]fetchedStatement
+	subordinates map[string]fetchedStatement
+}
+
+type fetchedStatement struct {
+	stmt  intfed.Statement
+	token string
+	err   error
+}
+
+func newStatementCache() *statementCache {
+	return &statementCache{configs: map[string]fetchedStatement{}, subordinates: map[string]fetchedStatement{}}
+}
+
+func (c *statementCache) entityConfiguration(ctx context.Context, fetcher *fapihttp.Client, entityID string) (intfed.Statement, string, error) {
+	f, ok := c.configs[entityID]
+	if !ok {
+		f.stmt, f.token, f.err = fetchEntityConfiguration(ctx, fetcher, entityID)
+		c.configs[entityID] = f
+	}
+	return f.stmt, f.token, f.err
+}
+
+func (c *statementCache) subordinateStatement(ctx context.Context, fetcher *fapihttp.Client, fetchEndpoint, subjectID string) (intfed.Statement, string, error) {
+	key := fetchEndpoint + "\x00" + subjectID
+	f, ok := c.subordinates[key]
+	if !ok {
+		f.stmt, f.token, f.err = fetchSubordinateStatement(ctx, fetcher, fetchEndpoint, subjectID)
+		c.subordinates[key] = f
+	}
+	return f.stmt, f.token, f.err
+}
+
+// clone copies st for one branch of the search, so extending the copy
+// never changes st or any other branch.
+func (st *chainWalkState) clone() *chainWalkState {
+	c := *st
+	c.visited = maps.Clone(st.visited)
+	c.chain = slices.Clone(st.chain)
+	c.tokens = slices.Clone(st.tokens)
+	c.subordinatePolicies = slices.Clone(st.subordinatePolicies)
+	c.subordinateConstraints = slices.Clone(st.subordinateConstraints)
+	return &c
 }
 
 // hopSuperior groups the reachable superior a hop discovered (via
@@ -409,38 +531,17 @@ func (r *Resolver) resolveSelfAsTrustAnchor(subjectID string, leafStmt intfed.St
 	}, nil
 }
 
-// selfClaimsForHop returns st.entityAt's own claims for this hop — at
-// hop 0 that's simply st.leafClaims (already self-verified by Resolve
-// before the loop began: st.entityAt starts equal to st.subjectID, and
-// moves away from it only at the end of advanceIntermediateHop, so
-// entityAt == subjectID is exactly "hop 0" for every call this function
-// can see). Every later hop fetches and self-verifies entityAt's own
-// Entity Configuration purely to discover its authority_hints and
-// federation_fetch_endpoint; that self-signed statement's own raw token
-// is discarded, never appended to st.tokens — it is not itself an entry
-// of the canonical Trust Chain sequence, see ResolvedEntity.Tokens's own
-// doc comment. Updates st.minExpiry when this hop's statement expires
-// sooner than every one already seen.
-func (r *Resolver) selfClaimsForHop(ctx context.Context, st *chainWalkState, now time.Time) (intfed.Claims, error) {
-	if st.entityAt == st.subjectID {
-		return st.leafClaims, nil
-	}
-	selfConfig, _, err := fetchEntityConfiguration(ctx, r.deps.HTTP, st.entityAt)
-	if err != nil {
-		return intfed.Claims{}, err
-	}
-	if selfConfig.ClaimedIssuer() != st.entityAt || selfConfig.ClaimedSubject() != st.entityAt {
-		return intfed.Claims{}, fmt.Errorf("federation: entity configuration for %q has iss=%q sub=%q, want both equal to %q",
-			st.entityAt, selfConfig.ClaimedIssuer(), selfConfig.ClaimedSubject(), st.entityAt)
-	}
-	selfClaims, err := r.verifySelfSigned(selfConfig, st.entityAt, now)
-	if err != nil {
-		return intfed.Claims{}, fmt.Errorf("federation: entity configuration for %q: %w", st.entityAt, err)
-	}
-	if selfClaims.ExpiresAt.Before(st.minExpiry) {
-		st.minExpiry = selfClaims.ExpiresAt
-	}
-	return selfClaims, nil
+// selfClaimsForHop returns st.entityAt's own claims for this hop: the
+// subject's own at hop 0, and at every later hop the claims of the
+// Entity Configuration tryHint already fetched and self-verified when it
+// chose entityAt as a superior (and folded into st.minExpiry then). The
+// configuration is never fetched a second time, so the one that decided
+// the hop is the one whose authority_hints continue it. Its raw token is
+// never appended to st.tokens: an Intermediate's own Entity
+// Configuration is fetched for routing only, not itself an entry of the
+// canonical Trust Chain (see ResolvedEntity.Tokens).
+func (r *Resolver) selfClaimsForHop(st *chainWalkState) intfed.Claims {
+	return st.entityAtClaims
 }
 
 // fetchAboveStatement fetches and validates the Subordinate Statement
@@ -450,7 +551,7 @@ func (r *Resolver) selfClaimsForHop(ctx context.Context, st *chainWalkState, now
 // (superiorID is a configured Trust Anchor, see finalizeTrustChain) or
 // carries into the next hop as the new belowStmt (see
 // advanceIntermediateHop).
-func (r *Resolver) fetchAboveStatement(ctx context.Context, superiorID string, superiorClaims intfed.Claims, entityAt string) (intfed.Statement, string, error) {
+func (r *Resolver) fetchAboveStatement(ctx context.Context, cache *statementCache, superiorID string, superiorClaims intfed.Claims, entityAt string) (intfed.Statement, string, error) {
 	aboveMeta, err := parseEntityMetadata(superiorClaims.Metadata)
 	if err != nil {
 		return intfed.Statement{}, "", fmt.Errorf("federation: %q: federation_entity metadata: %w", superiorID, err)
@@ -458,7 +559,7 @@ func (r *Resolver) fetchAboveStatement(ctx context.Context, superiorID string, s
 	if aboveMeta.FetchEndpoint == "" {
 		return intfed.Statement{}, "", fmt.Errorf("federation: %q has no federation_fetch_endpoint", superiorID)
 	}
-	aboveStmt, aboveToken, err := fetchSubordinateStatement(ctx, r.deps.HTTP, aboveMeta.FetchEndpoint, entityAt)
+	aboveStmt, aboveToken, err := cache.subordinateStatement(ctx, r.deps.HTTP, aboveMeta.FetchEndpoint, entityAt)
 	if err != nil {
 		return intfed.Statement{}, "", err
 	}
@@ -571,6 +672,7 @@ func (r *Resolver) advanceIntermediateHop(st *chainWalkState, hop int, sup hopSu
 	st.belowIssuer = sup.id
 	st.belowSubject = st.entityAt
 	st.entityAt = sup.id
+	st.entityAtClaims = sup.claims
 	return nil
 }
 
@@ -667,39 +769,6 @@ func (r *Resolver) resolveMetadata(policies []subordinatePolicy, leafMetadata ma
 		return nil, fmt.Errorf("federation: apply metadata policy: %w", err)
 	}
 	return resolved, nil
-}
-
-// findReachableSuperior tries each hint in order (OpenID Federation 1.0
-// §10.1's own loop-prevention rule: "Federation participants MUST NOT
-// attempt to fetch Entity Statements they already have obtained during
-// this process"), returning the first whose Entity Configuration
-// fetches and self-verifies successfully.
-func (r *Resolver) findReachableSuperior(ctx context.Context, hints []string, visited map[string]bool, now time.Time) (string, intfed.Statement, string, intfed.Claims, error) {
-	var lastErr error
-	for _, hint := range hints {
-		if visited[hint] {
-			continue
-		}
-		stmt, token, err := fetchEntityConfiguration(ctx, r.deps.HTTP, hint)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		if stmt.ClaimedIssuer() != hint || stmt.ClaimedSubject() != hint {
-			lastErr = fmt.Errorf("entity configuration for %q has iss=%q sub=%q", hint, stmt.ClaimedIssuer(), stmt.ClaimedSubject())
-			continue
-		}
-		claims, err := r.verifySelfSigned(stmt, hint, now)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		return hint, stmt, token, claims, nil
-	}
-	if lastErr != nil {
-		return "", intfed.Statement{}, "", intfed.Claims{}, fmt.Errorf("no reachable superior among %v (last error: %w)", hints, lastErr)
-	}
-	return "", intfed.Statement{}, "", intfed.Claims{}, fmt.Errorf("no unvisited superior among %v", hints)
 }
 
 // verifySelfSigned verifies stmt (expected to be entityID's own Entity

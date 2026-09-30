@@ -3,6 +3,7 @@ package client
 import (
 	"fmt"
 
+	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/federation"
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -35,8 +36,12 @@ func New(cfg Config, deps Dependencies) (*Client, error) {
 //     issuer's identifier would send its requests to one server while
 //     validating tokens as if from the other — easy to do by accident in
 //     a relying party talking to several issuers.
-//  2. cfg.Endpoints, if entirely zero, is set to discovered.Endpoints.
-//     Set it yourself instead when you need to adjust it first — e.g.
+//  2. cfg.Endpoints, if entirely zero, is set to discovered.Endpoints —
+//     without the authorization and pushed authorization request
+//     endpoints when cfg.RedirectURI is empty, since a client with no
+//     redirect URI (one using only CIBA or client credentials) never
+//     uses the redirect-based flow. Set it yourself instead when you
+//     need to adjust it first — e.g.
 //     discovered.MTLSEndpointAliases.ApplyForSenderConstrain/
 //     ApplyForClientAuth for an mTLS client — and it's left as given.
 //  3. It checks that the issuer advertises support for every algorithm
@@ -64,6 +69,9 @@ func NewFromDiscovery(discovered DiscoveredMetadata, cfg Config, deps Dependenci
 	}
 	if cfg.Endpoints.isZero() {
 		cfg.Endpoints = discovered.Endpoints
+		if cfg.RedirectURI == "" {
+			cfg.Endpoints.Authorization, cfg.Endpoints.PushedAuthorizationRequest = fapi.URL{}, fapi.URL{}
+		}
 	}
 	if err := discovered.SupportsAlgorithms(cfg.Algorithms); err != nil {
 		return nil, err
@@ -365,42 +373,14 @@ func validateFederationConfig(cfg Config) error {
 }
 
 func validateDependencies(cfg Config, deps Dependencies) error {
-	// Sessions is only ever touched by the browser flow (Create in
-	// BeginAuthorization, Consume in HandleAuthorizationResponse) — CIBA
-	// correlates its own poll/ping state through BackchannelAuthenticationSession
-	// instead, and RequestClientCredentialsToken has no session concept
-	// at all, so neither needs this dependency wired up.
-	if !cfg.Endpoints.Authorization.IsZero() && deps.Sessions == nil {
-		return fmt.Errorf("client: dependencies: sessions is required when endpoints.authorization is set")
+	if err := validateSessionsDependency(cfg, deps); err != nil {
+		return err
 	}
-	if cfg.Assurance == AssuranceProduction && deps.Sessions != nil {
-		if err := checkStoreAssurance("sessions", deps.Sessions); err != nil {
-			return err
-		}
+	if err := validateKeysDependency(cfg, deps); err != nil {
+		return err
 	}
-	if deps.Keys == nil {
-		return fmt.Errorf("client: dependencies: keys is required")
-	}
-	if cfg.Assurance == AssuranceProduction {
-		if err := checkRandom(deps.Random); err != nil {
-			return err
-		}
-		if err := checkKeyCustody("keys", deps.Keys); err != nil {
-			return err
-		}
-		if deps.Decryption != nil {
-			if err := checkKeyCustody("decryption", deps.Decryption); err != nil {
-				return err
-			}
-		}
-	}
-	if deps.IssuerKeys == nil && issuerKeysNeeded(cfg) {
-		return fmt.Errorf("client: dependencies: issuer keys is required (it may be left nil only when oauth_only is set and neither a JARM response nor a signed UserInfo response is verified)")
-	}
-	if cfg.Assurance == AssuranceProduction && deps.IssuerKeys != nil {
-		if err := checkKeySourceAssurance("issuer_keys", deps.IssuerKeys); err != nil {
-			return err
-		}
+	if err := validateIssuerKeysDependency(cfg, deps); err != nil {
+		return err
 	}
 	if deps.HTTP == nil {
 		return fmt.Errorf("client: dependencies: http is required")
@@ -412,6 +392,55 @@ func validateDependencies(cfg Config, deps Dependencies) error {
 		return fmt.Errorf("client: dependencies: random is required")
 	}
 	return validateConfigDrivenDependencies(cfg, deps)
+}
+
+// validateSessionsDependency checks deps.Sessions. It is only ever
+// touched by the browser flow (Create in BeginAuthorization, Consume in
+// HandleAuthorizationResponse) — CIBA correlates its own poll/ping state
+// through BackchannelAuthenticationSession instead, and
+// RequestClientCredentialsToken has no session concept at all, so
+// neither needs this dependency wired up.
+func validateSessionsDependency(cfg Config, deps Dependencies) error {
+	if !cfg.Endpoints.Authorization.IsZero() && deps.Sessions == nil {
+		return fmt.Errorf("client: dependencies: sessions is required when endpoints.authorization is set")
+	}
+	if cfg.Assurance == AssuranceProduction && deps.Sessions != nil {
+		return checkStoreAssurance("sessions", deps.Sessions)
+	}
+	return nil
+}
+
+// validateKeysDependency checks deps.Keys and, under production
+// assurance, deps.Random and the custody of the keys deps.Keys and
+// deps.Decryption hold.
+func validateKeysDependency(cfg Config, deps Dependencies) error {
+	if deps.Keys == nil {
+		return fmt.Errorf("client: dependencies: keys is required")
+	}
+	if cfg.Assurance != AssuranceProduction {
+		return nil
+	}
+	if err := checkRandom(deps.Random); err != nil {
+		return err
+	}
+	if err := checkKeyCustody("keys", deps.Keys); err != nil {
+		return err
+	}
+	if deps.Decryption != nil {
+		return checkKeyCustody("decryption", deps.Decryption)
+	}
+	return nil
+}
+
+// validateIssuerKeysDependency checks deps.IssuerKeys.
+func validateIssuerKeysDependency(cfg Config, deps Dependencies) error {
+	if deps.IssuerKeys == nil && issuerKeysNeeded(cfg) {
+		return fmt.Errorf("client: dependencies: issuer keys is required (it may be left nil only when oauth_only is set and neither a JARM response nor a signed UserInfo response is verified)")
+	}
+	if cfg.Assurance == AssuranceProduction && deps.IssuerKeys != nil {
+		return checkKeySourceAssurance("issuer_keys", deps.IssuerKeys)
+	}
+	return nil
 }
 
 // validateConfigDrivenDependencies checks the dependencies only some

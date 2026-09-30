@@ -46,6 +46,13 @@ func newHarnessWithBackchannelStore(t *testing.T, backchannel storage.Backchanne
 // mutate applied to the server config before server.New.
 func newHarnessWithBackchannelConfig(t *testing.T, backchannel storage.BackchannelAuthenticationStore, mutate func(*server.Config)) harness {
 	t.Helper()
+	return newHarnessWithBackchannelOptions(t, backchannel, mutate, nil)
+}
+
+// newHarnessWithBackchannelOptions is newHarnessWithBackchannelConfig
+// with mutateDeps also applied to the dependencies.
+func newHarnessWithBackchannelOptions(t *testing.T, backchannel storage.BackchannelAuthenticationStore, mutate func(*server.Config), mutateDeps func(*server.Dependencies)) harness {
+	t.Helper()
 	now := time.Now()
 	key := generateKey(t)
 	serverKey := generateKey(t)
@@ -137,6 +144,9 @@ func newHarnessWithBackchannelConfig(t *testing.T, backchannel storage.Backchann
 	}
 	if mutate != nil {
 		mutate(&cfg)
+	}
+	if mutateDeps != nil {
+		mutateDeps(&deps)
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {

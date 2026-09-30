@@ -107,6 +107,19 @@ type Dependencies struct {
 	// decline (see that type's own doc comment for why).
 	BackchannelNotifier BackchannelNotifier
 
+	// BackchannelHints, if set, checks each CIBA backchannel
+	// authentication request's hint before the request is stored, so a
+	// request naming nobody this server can ask is refused with CIBA
+	// §13's unknown_user_id (or expired_login_hint_token) instead of
+	// being stored and left for the embedder to deny — see
+	// BackchannelHintChecker. It runs only after the client has
+	// authenticated, so only a registered CIBA client can learn whether a
+	// hint names a known user. Nil accepts every hint, as before: the
+	// embedder resolves the hint from BackchannelInteractionRequest.Hints
+	// and denies the request if it names nobody. Ignored unless
+	// Config.Endpoints.BackchannelAuthentication is set.
+	BackchannelHints BackchannelHintChecker
+
 	// ClientCredentialsRARPolicy decides which Rich Authorization
 	// Requests (RFC 9396) detail objects a client_credentials token
 	// request is entitled to receive — see RARPolicy's own doc comment.

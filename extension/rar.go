@@ -425,28 +425,30 @@ func declaresTypeMember(t reflect.Type) bool {
 		return false
 	}
 	for i := range t.NumField() {
-		f := t.Field(i)
-		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
-		if name == "-" && f.Tag.Get("json") == "-" {
-			continue
-		}
-		if name == "" && f.Anonymous {
-			if declaresTypeMember(f.Type) {
-				return true
-			}
-			continue
-		}
-		if !f.IsExported() {
-			continue
-		}
-		if name == "" {
-			name = f.Name
-		}
-		if strings.EqualFold(name, "type") {
+		if readsTypeMember(t.Field(i)) {
 			return true
 		}
 	}
 	return false
+}
+
+// readsTypeMember reports whether encoding/json decodes an object's
+// "type" member into f, or into a field f embeds.
+func readsTypeMember(f reflect.StructField) bool {
+	tag := f.Tag.Get("json")
+	if tag == "-" {
+		return false
+	}
+	name, _, _ := strings.Cut(tag, ",")
+	switch {
+	case name == "" && f.Anonymous:
+		return declaresTypeMember(f.Type) // its fields are promoted
+	case !f.IsExported():
+		return false
+	case name == "":
+		name = f.Name
+	}
+	return strings.EqualFold(name, "type")
 }
 
 // withoutTypeMember is raw, a JSON object, without its "type" member.

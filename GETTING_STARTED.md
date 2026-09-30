@@ -329,6 +329,21 @@ or negative `MaxClockSkew`, the same "no implicit default" discipline
 
 ### Wire `Dependencies`
 
+**Hosting the protected endpoints in the authorization server's own
+process** (a UserInfo endpoint, say)? Then skip the rest of this
+section: `serverresource.NewVerifier` builds the verifier from the
+`server.Config` and `server.Dependencies` step 4 built, taking the
+access-token format, revocation store, replay store, clock and DPoP
+limits from them so they always match, and failing if the revocation
+store can't be checked from the resource side:
+
+```go
+// cfg and deps: the server.Config and server.Dependencies from steps 2 and 4.
+verifier, err := serverresource.NewVerifier(cfg, deps, serverresource.Options{})
+```
+
+A resource server deployed on its own wires `Dependencies` itself:
+
 **The access-token format must match whatever the authorization server
 actually issues** — this is exactly the coupling step 4 flagged, and
 the reason this section exists at all. Pick the side matching your AS:

@@ -15,8 +15,8 @@ import (
 	"github.com/idfoundry/fapigo/federation"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/keys/ephemeral"
-	fapires "github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/server"
+	"github.com/idfoundry/fapigo/serverresource"
 	"github.com/idfoundry/fapigo/storage/memstore"
 )
 
@@ -304,23 +304,16 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 		}
 	}
 
-	// Which server.AccessTokenIssuer/resource.AccessTokenResolver pair
-	// this run uses — see main.go's -access-token-format flag. Under
-	// AccessTokenFormatOpaque, both sides share one
-	// memstore.AccessTokenStore (issuance and verification against the
-	// same in-memory table, mirroring how revocationStore is already
-	// shared above); under AccessTokenFormatJWT, verification instead
-	// resolves the AS's own signing key via keys.LocalIssuerKeys — read
-	// straight from keyManager rather than looped back over HTTP to this
-	// binary's own /jwks, whose self-signed cert a standard
-	// net/http.Client doesn't trust — see resource.go's userinfoHandler
-	// doc comment for why this
-	// conformance binary hosts its own protected-resource verification
-	// alongside the AS itself.
-	var (
-		srvAccessTokens      server.AccessTokenIssuer
-		resourceAccessTokens fapires.AccessTokenResolver
-	)
+	// Which server.AccessTokenIssuer this run uses — see main.go's
+	// -access-token-format flag. The protected-resource verifier built
+	// below (serverresource.NewVerifier) mirrors it: the same
+	// memstore.AccessTokenStore for opaque tokens, or keyManager itself
+	// (via keys.LocalIssuerKeys) for JWTs — never looped back over HTTP
+	// to this binary's own /jwks, whose self-signed cert a standard
+	// net/http.Client doesn't trust. See resource.go's userinfoHandler
+	// doc comment for why this conformance binary hosts its own
+	// protected-resource verification alongside the AS itself.
+	var srvAccessTokens server.AccessTokenIssuer
 	switch resolved.AccessTokenFormat {
 	case AccessTokenFormatJWT:
 		jwtIssuer, err := server.NewJWTAccessTokens(keyManager, resolved.Algorithms.IDToken)
@@ -328,32 +321,12 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 			return nil, err
 		}
 		srvAccessTokens = jwtIssuer
-		localKeys, err := keys.NewLocalIssuerKeys(resolved.Issuer, keyManager)
-		if err != nil {
-			return nil, err
-		}
-		jwtVerifier, err := fapires.NewJWTAccessTokens(
-			localKeys, resolved.Issuer,
-			resolved.Issuer.String(), // matches server/accesstoken.go's own access-token aud claim
-			resolved.Algorithms.IDToken, resolved.Limits.AccessTokenLifetime,
-			8, // LocalIssuerKeys reads keyManager directly — never more than a handful of keys
-		)
-		if err != nil {
-			return nil, err
-		}
-		resourceAccessTokens = jwtVerifier
 	case AccessTokenFormatOpaque:
-		accessTokenStore := memstore.NewAccessTokenStore()
-		opaqueIssuer, err := server.NewOpaqueAccessTokens(accessTokenStore)
+		opaqueIssuer, err := server.NewOpaqueAccessTokens(memstore.NewAccessTokenStore())
 		if err != nil {
 			return nil, err
 		}
 		srvAccessTokens = opaqueIssuer
-		opaqueVerifier, err := fapires.NewOpaqueAccessTokens(accessTokenStore)
-		if err != nil {
-			return nil, err
-		}
-		resourceAccessTokens = opaqueVerifier
 	default:
 		return nil, fmt.Errorf("conformance-as: unknown access token format %q", resolved.AccessTokenFormat)
 	}
@@ -429,29 +402,19 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 		return nil, err
 	}
 
-	resourceCfg := fapires.Config{
-		Limits: fapires.Limits{
-			MaxDPoPProofAge: resolved.Limits.MaxDPoPProofAge,
-			MaxClockSkew:    resolved.Limits.MaxClockSkew,
-		},
-	}
-	resourceDeps := fapires.Dependencies{
-		AccessTokens: resourceAccessTokens,
-		Replay:       replayStore,
-		Revocation:   revocationStore,
-		Clock:        fapires.SystemClock{},
-	}
-	// Off by default (main.go's -dpop-nonce-challenge flag): the OIDF
-	// suite's own AS-plan protected-resource caller isn't guaranteed to
-	// implement the client-side nonce-challenge retry the way this
-	// module's own client package does, so turning this on
-	// unconditionally would risk breaking unrelated AS conformance.
+	// The protected-resource verifier mirrors srv's own access-token
+	// format, revocation store, replay store, clock and DPoP limits.
+	// Nonce challenges are off by default (main.go's
+	// -dpop-nonce-challenge flag): the OIDF suite's own AS-plan
+	// protected-resource caller isn't guaranteed to implement the
+	// client-side nonce-challenge retry the way this module's own client
+	// package does, so turning this on unconditionally would risk
+	// breaking unrelated AS conformance.
+	var resourceOpts serverresource.Options
 	if dpopNonceChallenge {
-		resourceCfg.Limits.DPoPNonceLifetime = dpopNonceLifetime
-		resourceDeps.Nonces = memstore.NewNonceStore()
-		resourceDeps.Random = rand.Reader
+		resourceOpts = serverresource.Options{Nonces: memstore.NewNonceStore(), NonceLifetime: dpopNonceLifetime}
 	}
-	resourceVerifier, err := fapires.NewVerifier(resourceCfg, resourceDeps)
+	resourceVerifier, err := serverresource.NewVerifier(srvCfg, srvDeps, resourceOpts)
 	if err != nil {
 		return nil, err
 	}

@@ -18,4 +18,9 @@
 // carries, and Verify returns a typed Error tagged with what's safe to
 // expose in a response, matching the pattern used by client and server —
 // see ARCHITECTURE.md, "Design rules".
+//
+// A verifier for endpoints hosted in the authorization server's own
+// process can be built from that server's configuration with
+// serverresource.NewVerifier instead, so its access-token format and
+// revocation store always match the server's.
 package resource

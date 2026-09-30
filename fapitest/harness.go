@@ -23,6 +23,7 @@ import (
 	"github.com/idfoundry/fapigo/keys/ephemeral"
 	"github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/server"
+	"github.com/idfoundry/fapigo/serverresource"
 	"github.com/idfoundry/fapigo/storage"
 	"github.com/idfoundry/fapigo/storage/memstore"
 )
@@ -378,25 +379,9 @@ func New(t *testing.T, cfg Config) *Harness {
 		t.Fatalf("fapitest: client.New: %v", err)
 	}
 
-	resourceCfg := resource.Config{
-		Limits: resource.Limits{
-			MaxDPoPProofAge: time.Minute,
-			MaxClockSkew:    5 * time.Second,
-		},
-	}
-	resourceJWT, err := resource.NewJWTAccessTokens(issuerKeys, issuer, Issuer, sigAlg, 5*time.Minute, 8)
+	rs, err := serverresource.NewVerifier(srvCfg, srvDeps, serverresource.Options{})
 	if err != nil {
-		t.Fatalf("fapitest: resource.NewJWTAccessTokens: %v", err)
-	}
-	resourceDeps := resource.Dependencies{
-		AccessTokens: resourceJWT,
-		Replay:       replay,
-		Revocation:   revocation,
-		Clock:        clock,
-	}
-	rs, err := resource.NewVerifier(resourceCfg, resourceDeps)
-	if err != nil {
-		t.Fatalf("fapitest: resource.NewVerifier: %v", err)
+		t.Fatalf("fapitest: serverresource.NewVerifier: %v", err)
 	}
 	as.resource = rs
 

@@ -659,7 +659,10 @@ storage   ──▶ shared storage primitives
 keys      ──▶ signing contracts
 ```
 
-`client` and `server` never import each other.
+`client` and `server` never import each other, and neither do `server`
+and `resource`. `serverresource`, which builds a `resource.Verifier`
+from a `server.Server`'s own configuration for endpoints hosted in the
+same process, imports both, so neither role package has to.
 
 ### 15. fapitest is a real-HTTP interop harness, not a shortcut
 

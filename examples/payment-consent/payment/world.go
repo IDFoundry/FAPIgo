@@ -68,7 +68,7 @@ const shopIBAN = "XA37ALDR00007777888899"
 // payees is Alder Bank's directory of the accounts it can confirm a
 // name for: what its consent screen shows as verified, as opposed to the
 // name a shop put in its own request.
-var payees = map[string]string{shopIBAN: "Northgate Outfitters"}
+var payees = map[string]string{shopIBAN: shopName}
 
 // World is the whole running demo.
 type World struct {

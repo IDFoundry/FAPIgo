@@ -27,6 +27,8 @@ import (
 const shopClientID fapi.ClientID = "northgate-outfitters"
 
 const (
+	bankKeyID         = "alder-1"
+	approvalFailed    = "Approval failed"
 	authorizePath     = "/authorize"
 	interactionCookie = "alder_interaction"
 	// interactionLifetime is how long a consent page stays answerable.
@@ -71,7 +73,7 @@ func (w *World) newBank(shop clientKeys) (*bank, error) {
 	manager, err := keys.NewKeyManagerFromSigners(
 		map[keys.SigningPurpose]crypto.Signer{keys.IDTokenSigning: signer, keys.AccessTokenSigning: signer, keys.JARMSigning: signer},
 		map[keys.SigningPurpose]fapi.SignatureAlgorithm{keys.IDTokenSigning: fapi.ES256, keys.AccessTokenSigning: fapi.ES256, keys.JARMSigning: fapi.ES256},
-		map[keys.SigningPurpose]string{keys.IDTokenSigning: "alder-1", keys.AccessTokenSigning: "alder-1", keys.JARMSigning: "alder-1"},
+		map[keys.SigningPurpose]string{keys.IDTokenSigning: bankKeyID, keys.AccessTokenSigning: bankKeyID, keys.JARMSigning: bankKeyID},
 	)
 	if err != nil {
 		return nil, err
@@ -92,7 +94,7 @@ func (w *World) newBank(shop clientKeys) (*bank, error) {
 		RequestObjectAlgorithm:   fapi.ES256,
 		SenderConstrain:          storage.SenderConstrainDPoP,
 		AllowedScopes:            []string{"openid"},
-		Display:                  storage.ClientDisplay{Name: "Northgate Outfitters"},
+		Display:                  storage.ClientDisplay{Name: shopName},
 	})
 	if err != nil {
 		return nil, err
@@ -275,24 +277,24 @@ func (b *bank) decide(w http.ResponseWriter, r *http.Request) {
 		for _, pay := range paymentsOf(in.AuthorizationDetails) {
 			raw, err := extension.RARSet(paymentInitiationType, pay)
 			if err != nil {
-				b.w.renderError(w, bankHost, http.StatusInternalServerError, "Approval failed", err.Error())
+				b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, err.Error())
 				return
 			}
 			granted = append(granted, raw)
 		}
 		subjectID, err := server.NewSubjectID(c.username)
 		if err != nil {
-			b.w.renderError(w, bankHost, http.StatusInternalServerError, "Approval failed", err.Error())
+			b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, err.Error())
 			return
 		}
 		subject, err := server.NewAuthenticatedSubject(subjectID)
 		if err != nil {
-			b.w.renderError(w, bankHost, http.StatusInternalServerError, "Approval failed", err.Error())
+			b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, err.Error())
 			return
 		}
 		auth, err := server.NewAuthenticationContext(time.Now(), "urn:alder-bank:acr:pin", []string{"pin"})
 		if err != nil {
-			b.w.renderError(w, bankHost, http.StatusInternalServerError, "Approval failed", err.Error())
+			b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, err.Error())
 			return
 		}
 		result = server.Authorize(subject, auth, server.GrantedAuthorization{Scope: in.Scope, AuthorizationDetails: granted})
@@ -300,7 +302,7 @@ func (b *bank) decide(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{Name: interactionCookie, Path: authorizePath, MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 	outcome, err := b.srv.CompleteAuthorization(r.Context(), server.CompleteAuthorizationRequest{Handle: handle, Result: result})
 	if err != nil {
-		b.w.renderError(w, bankHost, http.StatusInternalServerError, "Approval failed", err.Error())
+		b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, err.Error())
 		return
 	}
 	switch o := outcome.(type) {
@@ -308,7 +310,7 @@ func (b *bank) decide(w http.ResponseWriter, r *http.Request) {
 		// The signed (JARM) response goes back to the shop.
 		http.Redirect(w, r, o.Destination().String(), http.StatusFound)
 	case server.AuthorizationLocalError:
-		b.w.renderError(w, bankHost, o.Error.HTTPStatus(), "Approval failed", string(o.Error.Code())+": "+o.Error.PublicDescription())
+		b.w.renderError(w, bankHost, o.Error.HTTPStatus(), approvalFailed, string(o.Error.Code())+": "+o.Error.PublicDescription())
 	}
 }
 

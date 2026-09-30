@@ -25,6 +25,7 @@ import (
 )
 
 const (
+	shopName      = "Northgate Outfitters"
 	callbackPath  = "/callback"
 	sessionCookie = "northgate_session"
 	orderCookie   = "northgate_order"
@@ -160,8 +161,11 @@ func (l *lazyClient) get(ctx context.Context) (*client.Client, error) {
 	return c, nil
 }
 
+// orderURL is the address of order id's page.
+func orderURL(id string) string { return "/order?id=" + id }
+
 func (s *shop) home(w http.ResponseWriter, _ *http.Request) {
-	s.w.render(w, "shop-home", s.w.page("Northgate Outfitters", shopHost))
+	s.w.render(w, "shop-home", s.w.page(shopName, shopHost))
 }
 
 func (s *shop) newOrder(scenario string) *order {
@@ -182,7 +186,7 @@ func (s *shop) lookup(id string) (*order, bool) {
 func paymentDetail(orderID string) (json.RawMessage, error) {
 	return extension.RARSet(paymentInitiationType, paymentInitiation{
 		InstructedAmount: amount{Currency: "EUR", Amount: price},
-		CreditorName:     "Northgate Outfitters", CreditorAccount: account{IBAN: shopIBAN},
+		CreditorName:     shopName, CreditorAccount: account{IBAN: shopIBAN},
 		RemittanceMessage: "Order " + orderID,
 	})
 }
@@ -219,7 +223,7 @@ func (s *shop) pay(w http.ResponseWriter, r *http.Request) {
 	session, err := s.begin(r.Context(), o, lc, o.Scenario == "tamper")
 	if err != nil {
 		o.Status, o.Problem = "failed", describeError(err)
-		http.Redirect(w, r, "/order?id="+o.ID, http.StatusSeeOther)
+		http.Redirect(w, r, orderURL(o.ID), http.StatusSeeOther)
 		return
 	}
 	s.startSession(w, o, session)
@@ -262,7 +266,7 @@ func (s *shop) callback(w http.ResponseWriter, r *http.Request) {
 		o.trace.add("Authorization response (JARM)", "GET "+callbackPath+"?response=…\nresponse (signed by Alder Bank): "+decodeJWT(jarm))
 	}
 	s.complete(r.Context(), o, handle, r.URL.RawQuery)
-	http.Redirect(w, r, "/order?id="+o.ID, http.StatusSeeOther)
+	http.Redirect(w, r, orderURL(o.ID), http.StatusSeeOther)
 }
 
 // complete validates the callback, exchanges the code and pays.
@@ -311,7 +315,7 @@ func (s *shop) show(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.w.render(w, "shop-order", orderPage{Page: s.w.page("Northgate Outfitters", shopHost), Order: o, Trace: o.trace.Steps()})
+	s.w.render(w, "shop-order", orderPage{Page: s.w.page(shopName, shopHost), Order: o, Trace: o.trace.Steps()})
 }
 
 // callAPI makes a DPoP-bound payment request to Alder Bank's API.
@@ -358,7 +362,7 @@ func (s *shop) direct(w http.ResponseWriter, r *http.Request) {
 		_ = res.Body.Close()
 		o.Problem = fmt.Sprintf("Alder Bank answered %s: %s", res.Status, pageError(body))
 	}
-	http.Redirect(w, r, "/order?id="+o.ID, http.StatusSeeOther)
+	http.Redirect(w, r, orderURL(o.ID), http.StatusSeeOther)
 }
 
 // inject is the authorization code injection attack: an attacker
@@ -370,7 +374,7 @@ func (s *shop) inject(w http.ResponseWriter, r *http.Request) {
 	session, err := s.begin(r.Context(), o, s.client, false)
 	if err != nil {
 		o.Status, o.Problem = "failed", describeError(err)
-		http.Redirect(w, r, "/order?id="+o.ID, http.StatusSeeOther)
+		http.Redirect(w, r, orderURL(o.ID), http.StatusSeeOther)
 		return
 	}
 	s.startSession(w, o, session)
@@ -381,7 +385,7 @@ func (s *shop) inject(w http.ResponseWriter, r *http.Request) {
 		o.Injected = attackerResponse
 		o.trace.add("The attacker's own authorization response", "Alex approved a payment of their own on their own device, and stopped before returning to the shop:\n"+attackerResponse)
 	}
-	http.Redirect(w, r, "/order?id="+o.ID, http.StatusSeeOther)
+	http.Redirect(w, r, orderURL(o.ID), http.StatusSeeOther)
 }
 
 // approveOnAnotherDevice checks out and approves the payment as
@@ -463,7 +467,7 @@ func (s *shop) attack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	o.Attempts = append(o.Attempts, a)
-	http.Redirect(w, r, "/order?id="+o.ID+"#attempts", http.StatusSeeOther)
+	http.Redirect(w, r, orderURL(o.ID)+"#attempts", http.StatusSeeOther)
 }
 
 func (s *shop) apiAttempt(ctx context.Context, title string, lc *lazyClient, tokens client.TokenSet, body paymentOrder) attempt {

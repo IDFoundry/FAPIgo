@@ -64,8 +64,14 @@ func wellKnownURL(entityID string) (*url.URL, error) {
 	if u.Scheme != "https" || u.Host == "" {
 		return nil, fmt.Errorf("federation: entity identifier %q must be an https URL with a host", entityID)
 	}
-	if u.Fragment != "" {
-		return nil, fmt.Errorf("federation: entity identifier %q must not have a fragment", entityID)
+	// OpenID Federation 1.0 §1.2: https, a host, and optionally a port
+	// and path — "It MUST NOT contain query parameter or fragment
+	// components". An empty query ("?") or fragment ("#") is still one.
+	if u.RawQuery != "" || u.ForceQuery || strings.Contains(entityID, "#") {
+		return nil, fmt.Errorf("federation: entity identifier %q must not have a query or fragment", entityID)
+	}
+	if u.User != nil {
+		return nil, fmt.Errorf("federation: entity identifier %q must not have userinfo", entityID)
 	}
 	out := *u
 	out.Path = strings.TrimSuffix(u.Path, "/") + WellKnownPath
@@ -73,8 +79,8 @@ func wellKnownURL(entityID string) (*url.URL, error) {
 }
 
 // ValidEntityID reports whether id is a well-formed OpenID Federation
-// 1.0 §1.2 Entity Identifier — an https URL with a host and no
-// fragment. NewSelfIssuer and Resolver.Resolve both enforce this same
+// 1.0 §1.2 Entity Identifier — an https URL with a host, optionally a
+// port and path, and no query, fragment or userinfo. NewSelfIssuer and Resolver.Resolve both enforce this same
 // rule on every entity ID they're given; exported so a caller
 // validating its own configured entity ID eagerly (e.g. client.Config's
 // or server.Config's own construction-time validation) can reuse the

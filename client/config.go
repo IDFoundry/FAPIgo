@@ -478,8 +478,9 @@ type Config struct {
 	// client_notification_token, exposed on the returned
 	// BackchannelAuthenticationSession for the caller to correlate an
 	// incoming ping callback (CIBA §10.2) back to the right session —
-	// this package never receives that callback itself, since it has no
-	// HTTP server of its own. Reuses storage's enum type directly, the
+	// this package has no HTTP server of its own to receive that
+	// callback, but ParseBackchannelNotification reads it for the
+	// caller's endpoint. Reuses storage's enum type directly, the
 	// same precedent SenderConstrain/ClientAuthMethod establish.
 	BackchannelTokenDeliveryMode storage.BackchannelTokenDeliveryMode
 

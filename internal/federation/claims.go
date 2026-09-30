@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/idfoundry/fapigo/internal/strictjson"
 )
 
 // jwtType is the JWS "typ" header value every Entity Statement carries
@@ -386,7 +388,7 @@ func validateKeyIDs(jwks json.RawMessage) error {
 			KeyID *string `json:"kid"`
 		} `json:"keys"`
 	}
-	if err := json.Unmarshal(jwks, &set); err != nil {
+	if err := strictjson.Unmarshal(jwks, &set); err != nil {
 		return fmt.Errorf("%w: %v", ErrMalformedJWKS, err)
 	}
 	seen := make(map[string]bool, len(set.Keys))

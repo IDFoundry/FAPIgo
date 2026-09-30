@@ -358,6 +358,7 @@ func TestDiscoverViaFederationRejectsIssuerMismatch(t *testing.T) {
 func TestDiscoverViaFederationClientRegistrationTypes(t *testing.T) {
 	cases := map[string]struct {
 		types   any
+		variant any
 		wantErr bool
 	}{
 		"missing":                {types: nil, wantErr: true},
@@ -365,6 +366,8 @@ func TestDiscoverViaFederationClientRegistrationTypes(t *testing.T) {
 		"explicit only":          {types: []string{"explicit"}, wantErr: true},
 		"automatic":              {types: []string{"automatic"}},
 		"automatic plus unknown": {types: []string{"automatic", "some-future-type"}},
+		// Member names are case-sensitive: this is not client_registration_types_supported.
+		"automatic in a case-variant member": {types: nil, variant: []string{"automatic"}, wantErr: true},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -377,6 +380,9 @@ func TestDiscoverViaFederationClientRegistrationTypes(t *testing.T) {
 				}
 				if tc.types != nil {
 					openIDProvider["client_registration_types_supported"] = mustMarshal(t, tc.types)
+				}
+				if tc.variant != nil {
+					openIDProvider["Client_Registration_Types_Supported"] = mustMarshal(t, tc.variant)
 				}
 				return map[string]json.RawMessage{"openid_provider": mustMarshal(t, openIDProvider)}
 			})

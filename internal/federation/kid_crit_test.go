@@ -47,9 +47,12 @@ func TestParseRequiresKeyID(t *testing.T) {
 func TestParseRequiresUniqueJWKSKeyIDs(t *testing.T) {
 	a := json.RawMessage(`{"kty":"EC","crv":"P-256","x":"MKBCTNIcKUSDii11ySs3526iDZ8AiTo7Tu6KPAqv7D4","y":"4Etl6SRW2YiLUrN5vfvVHuhp7x8PxltmWWlbbM4IFyM","kid":"a"}`)
 	noKid := json.RawMessage(`{"kty":"EC","crv":"P-256","x":"MKBCTNIcKUSDii11ySs3526iDZ8AiTo7Tu6KPAqv7D4","y":"4Etl6SRW2YiLUrN5vfvVHuhp7x8PxltmWWlbbM4IFyM"}`)
+	upperKid := json.RawMessage(`{"kty":"EC","crv":"P-256","x":"MKBCTNIcKUSDii11ySs3526iDZ8AiTo7Tu6KPAqv7D4","y":"4Etl6SRW2YiLUrN5vfvVHuhp7x8PxltmWWlbbM4IFyM","KID":"b"}`)
 	for name, keys := range map[string][]json.RawMessage{
 		"key without kid": {noKid},
-		"duplicate kid":   {a, a},
+		// Member names are case-sensitive: "KID" is not "kid".
+		"kid in another case": {upperKid},
+		"duplicate kid":       {a, a},
 	} {
 		token := signStatement(t, "test-kid", map[string]any{"jwks": map[string]any{"keys": keys}})
 		if _, err := Parse(token); !errors.Is(err, ErrMalformedJWKS) {

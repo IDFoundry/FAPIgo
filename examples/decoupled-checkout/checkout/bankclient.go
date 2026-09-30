@@ -61,11 +61,11 @@ func (b *bankClient) get(ctx context.Context) (*client.Client, error) {
 	// minutes (server.RecommendedLimits).
 	limits.MaxIDTokenLifetime = 10 * time.Minute
 	c, err := client.NewFromDiscovery(discovered, client.Config{
+		// No RedirectURI: a CIBA client is never redirected, so
+		// NewFromDiscovery leaves out the authorization endpoints.
 		Issuer: issuer, ClientID: b.clientID,
-		// Required of every client; a CIBA client is never redirected.
-		RedirectURI: b.w.URL(b.host, "/callback"),
-		Profile:     client.ProfileFAPISecurity,
-		Assurance:   client.AssuranceDevelopment,
+		Profile:   client.ProfileFAPISecurity,
+		Assurance: client.AssuranceDevelopment,
 		Algorithms: client.Algorithms{
 			ClientAuthentication: fapi.ES256, DPoP: fapi.ES256, IDToken: fapi.ES256,
 			BackchannelAuthenticationRequest: fapi.ES256,

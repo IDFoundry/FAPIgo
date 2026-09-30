@@ -1187,9 +1187,13 @@ self-issuance/automatic-registration wiring and
 `cmd/conformance-federation-trust-anchor`) got the same live-conformance
 treatment, against all three OIDF Federation test plans. "Deployed
 federation entity" (server-to-server Entity Statement/Trust Chain
-checks, no browser hop) is fully automated: **5/5 modules PASS**, wired
-into `run-all.sh` as its own "Federation federation-deployed-entity"
-leg. The other two plans — "Entity joined to test federation OP test"
+checks, no browser hop) is fully automated, as two `run-all.sh` legs:
+"Federation federation-deployed-entity" runs it against
+`conformance-as-federation`, where every module passes except two that
+test the entity's own fetch endpoint and skip, since a leaf entity has
+none; "Federation federation-trust-anchor" runs it against
+`cmd/conformance-federation-trust-anchor`, which serves fetch, list and
+resolve, so those modules run for real there. The other two plans — "Entity joined to test federation OP test"
 and its RP-side counterpart — exercise automatic registration (§12.1)
 live, with the suite playing the opposite role from this repo in each
 one, and landed in two different, both genuinely confirmed, suite-side
@@ -1209,17 +1213,18 @@ Both fixed (`cmd/conformance-as -federation-trust-anchor-admin`, a
 runtime `POST /internal/federation/trust-anchors` admin endpoint —
 explicitly gated behind that flag and never appropriate outside a
 conformance run, see `dynamicFederationClients`'s own doc comment) and
-driven all the way to a real PAR call every time. The plan's actual,
-still-unfixed blocker is narrower and unambiguous: the suite's own
-self-hosted RP entity config never sets `token_endpoint_auth_method`,
-so this AS correctly refuses to auto-register a client with no declared
-auth method (no implicit `client_secret_basic` default — both this
-module's own "no implicit defaults" design and FAPI 2.0's own
-prohibition on client-secret-based methods). Confirmed unfixed upstream
-(checked the suite's own git history directly, hundreds of commits past
-this repo's checkout, none touching the relevant file). Not wired into
-`run-all.sh` — every module in this plan would fail identically on the
-same gap.
+driven all the way to a real PAR call every time. The plan's actual
+blocker is that the suite's RP is a plain OpenID Connect client, not a
+FAPI 2.0 one: it uses no PKCE and no DPoP or mTLS sender-constraining,
+all of which this AS requires. Its self-hosted RP entity config also
+never sets `token_endpoint_auth_method`, so this AS refuses to
+auto-register it at all (no implicit `client_secret_basic` default —
+both this module's own "no implicit defaults" design and FAPI 2.0's own
+prohibition on client-secret-based methods), but declaring a method
+wouldn't be enough. Of the plan's other modules, most negative ones send
+their Request Object by value to the authorization endpoint, which a
+PAR-only AS never accepts regardless, and the JAR-direct positive ones
+don't apply under FAPI 2.0. Not wired into `run-all.sh`.
 
 The RP plan (suite plays the OP, tests this repo's own RP driver,
 `cmd/conformance-client -profile=federation`) needed `cmd/conformance-client`

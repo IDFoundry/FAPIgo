@@ -24,7 +24,7 @@ type CreateParams struct {
 	// it.
 	Algorithm fapi.SignatureAlgorithm
 
-	// KeyID, if non-empty, is recorded in the statement's "kid" header
+	// KeyID is recorded in the statement's "kid" header — required
 	// so a verifier can select the right key from Issuer's own
 	// published jwks without trial and error.
 	KeyID string
@@ -131,6 +131,12 @@ func validateCreateParams(p CreateParams) error {
 	}
 	if len(p.JWKS) == 0 {
 		return fmt.Errorf("federation: jwks is empty")
+	}
+	if p.KeyID == "" {
+		return fmt.Errorf("federation: key ID is empty: every Entity Statement's header needs a kid")
+	}
+	if err := validateKeyIDs(p.JWKS); err != nil {
+		return err
 	}
 	return validateClaimMixing(p)
 }

@@ -346,7 +346,7 @@ func TestParseRejectsMissingRequiredClaims(t *testing.T) {
 		if err != nil {
 			t.Fatalf("marshal claims: %v", err)
 		}
-		token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: jwtType}, payload)
+		token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: jwtType, KeyID: "test-kid"}, payload)
 		if err != nil {
 			t.Fatalf("jose.Sign: %v", err)
 		}
@@ -358,7 +358,7 @@ func TestParseRejectsMissingRequiredClaims(t *testing.T) {
 
 func TestParseRejectsNonJSONPayload(t *testing.T) {
 	key := generateKey(t)
-	token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: jwtType}, []byte("not json"))
+	token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: jwtType, KeyID: "test-kid"}, []byte("not json"))
 	if err != nil {
 		t.Fatalf("jose.Sign: %v", err)
 	}
@@ -394,7 +394,7 @@ func TestParseRejectsMalformedOptionalClaims(t *testing.T) {
 			if err != nil {
 				t.Fatalf("marshal claims: %v", err)
 			}
-			token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: jwtType}, payload)
+			token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: jwtType, KeyID: "test-kid"}, payload)
 			if err != nil {
 				t.Fatalf("jose.Sign: %v", err)
 			}
@@ -431,7 +431,7 @@ func TestParseRejectsMalformedRequiredClaims(t *testing.T) {
 			if err != nil {
 				t.Fatalf("marshal claims: %v", err)
 			}
-			token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: jwtType}, payload)
+			token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: jwtType, KeyID: "test-kid"}, payload)
 			if err != nil {
 				t.Fatalf("jose.Sign: %v", err)
 			}
@@ -466,7 +466,7 @@ func TestParseRejectsInvalidConstraints(t *testing.T) {
 			if err != nil {
 				t.Fatalf("marshal claims: %v", err)
 			}
-			token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: jwtType}, payload)
+			token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: jwtType, KeyID: "test-kid"}, payload)
 			if err != nil {
 				t.Fatalf("jose.Sign: %v", err)
 			}
@@ -492,7 +492,7 @@ func TestParseParsesTrustMarksClaim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal claims: %v", err)
 	}
-	token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: jwtType}, payload)
+	token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: jwtType, KeyID: "test-kid"}, payload)
 	if err != nil {
 		t.Fatalf("jose.Sign: %v", err)
 	}
@@ -534,7 +534,7 @@ func TestParseRejectsInvalidTrustMarksClaim(t *testing.T) {
 			if err != nil {
 				t.Fatalf("marshal claims: %v", err)
 			}
-			token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: jwtType}, payload)
+			token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: jwtType, KeyID: "test-kid"}, payload)
 			if err != nil {
 				t.Fatalf("jose.Sign: %v", err)
 			}
@@ -570,7 +570,7 @@ func TestParseRejectsInvalidTrustMarkOwnersClaim(t *testing.T) {
 			if err != nil {
 				t.Fatalf("marshal claims: %v", err)
 			}
-			token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: jwtType}, payload)
+			token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: jwtType, KeyID: "test-kid"}, payload)
 			if err != nil {
 				t.Fatalf("jose.Sign: %v", err)
 			}

@@ -748,3 +748,35 @@ func TestResolveRejectsMalformedSuperiorMetadata(t *testing.T) {
 		t.Fatal("Resolve(superior metadata not a JSON object) = nil error, want error")
 	}
 }
+
+// TestResolveRejectsEntityConfigurationWithoutKeyID covers OpenID
+// Federation 1.0 §3.2 step 11 end to end: an Entity Configuration whose
+// header has no kid isn't verified against every key, it's rejected.
+func TestResolveRejectsEntityConfigurationWithoutKeyID(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	entityID, server := singleEntityServer(t, func(entityID string) string {
+		payload, err := json.Marshal(map[string]any{
+			"iss": entityID, "sub": entityID, "iat": now.Unix(), "exp": now.Add(time.Hour).Unix(),
+			"jwks": json.RawMessage(jwksFor(t, "k", key)),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: "entity-statement+jwt"}, payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return token
+	}, nil)
+	r, err := federation.NewResolver(federation.Config{
+		TrustAnchors: []federation.TrustAnchor{{EntityID: entityID, JWKS: jwksFor(t, "k", key)}},
+		Limits:       federation.Limits{MaxPathLength: 2, MaxAuthorityHints: 2, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
+	}, federation.Dependencies{HTTP: fetcherFor(t, server), Clock: fixedClock{now: now}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Resolve(context.Background(), entityID); err == nil {
+		t.Fatal("Resolve(Entity Configuration without kid) = nil error, want error")
+	}
+}

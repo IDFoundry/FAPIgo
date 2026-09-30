@@ -202,7 +202,13 @@ func parseClaims(payload []byte) (Claims, error) {
 	if !hasJWKS {
 		return Claims{}, fmt.Errorf("%w: missing \"jwks\"", ErrMalformedClaims)
 	}
+	if err := validateKeyIDs(jwks); err != nil {
+		return Claims{}, err
+	}
 	delete(raw, "jwks")
+	if err := rejectCriticalClaims(raw); err != nil {
+		return Claims{}, err
+	}
 
 	c := Claims{
 		Issuer:    iss,
@@ -369,4 +375,45 @@ func popRequiredInt64(m map[string]json.RawMessage, key string) (int64, error) {
 		return 0, fmt.Errorf("%w: %q must be an integer", ErrMalformedClaims, key)
 	}
 	return n, nil
+}
+
+// validateKeyIDs checks every key in a JWK Set has a "kid", and no two
+// share one (OpenID Federation 1.0 §3.1.1) — so the statement's own
+// header kid selects exactly one key.
+func validateKeyIDs(jwks json.RawMessage) error {
+	var set struct {
+		Keys []struct {
+			KeyID *string `json:"kid"`
+		} `json:"keys"`
+	}
+	if err := json.Unmarshal(jwks, &set); err != nil {
+		return fmt.Errorf("%w: %v", ErrMalformedJWKS, err)
+	}
+	seen := make(map[string]bool, len(set.Keys))
+	for i, key := range set.Keys {
+		if key.KeyID == nil || *key.KeyID == "" {
+			return fmt.Errorf("%w: key %d has no kid", ErrMalformedJWKS, i)
+		}
+		if seen[*key.KeyID] {
+			return fmt.Errorf("%w: kid %q appears more than once", ErrMalformedJWKS, *key.KeyID)
+		}
+		seen[*key.KeyID] = true
+	}
+	return nil
+}
+
+// rejectCriticalClaims rejects a statement whose "crit" claim names any
+// claim: OpenID Federation 1.0 §3.2 step 13 requires each named extension
+// claim to be understood and processed, and this package implements
+// none. A "crit" that isn't a non-empty array of strings is rejected too.
+func rejectCriticalClaims(raw map[string]json.RawMessage) error {
+	critRaw, ok := raw["crit"]
+	if !ok {
+		return nil
+	}
+	var crit []string
+	if err := json.Unmarshal(critRaw, &crit); err != nil || len(crit) == 0 {
+		return fmt.Errorf("%w: crit must be a non-empty array of claim names", ErrUnsupportedCriticalClaim)
+	}
+	return fmt.Errorf("%w: %q", ErrUnsupportedCriticalClaim, crit[0])
 }

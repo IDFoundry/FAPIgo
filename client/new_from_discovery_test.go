@@ -260,3 +260,11 @@ func TestNewFromDiscoveryHandBuiltMetadataNeedsIssuer(t *testing.T) {
 		t.Fatal("NewFromDiscovery(hand-built, no issuer) = nil error, want error")
 	}
 }
+
+// TestDiscoverHasNoResolvedEntity covers plain OIDC/RFC 8414 discovery:
+// there's no Trust Chain to report.
+func TestDiscoverHasNoResolvedEntity(t *testing.T) {
+	if _, ok := discoverForAlgorithmTests(t).ResolvedEntity(); ok {
+		t.Error("ResolvedEntity() ok = true for Discover metadata, want false")
+	}
+}

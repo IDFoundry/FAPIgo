@@ -315,6 +315,18 @@ func TestDiscoverViaFederation(t *testing.T) {
 	if !md.AuthorizationResponseIssSupported {
 		t.Errorf("AuthorizationResponseIssSupported = false, want true")
 	}
+	// The Trust Chain it resolved is kept, so a caller checking Trust
+	// Marks needn't resolve it again.
+	resolved, ok := md.ResolvedEntity()
+	if !ok {
+		t.Fatal("ResolvedEntity() ok = false for DiscoverViaFederation metadata")
+	}
+	if resolved.EntityID != entityID || len(resolved.Chain) == 0 {
+		t.Errorf("ResolvedEntity() = %+v, want %s's resolved chain", resolved, entityID)
+	}
+	if _, ok := resolved.Metadata["openid_provider"]; !ok {
+		t.Error("ResolvedEntity().Metadata has no openid_provider")
+	}
 }
 
 // TestDiscoverViaFederationRejectsIssuerMismatch confirms the same

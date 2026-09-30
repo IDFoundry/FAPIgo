@@ -16,8 +16,21 @@ var (
 	ErrMalformedClaims = errors.New("federation: malformed claims")
 
 	// ErrMalformedJWKS indicates the "jwks" claim was present but not a
-	// well-formed JWK Set.
+	// well-formed JWK Set — including a key with no "kid", or two keys
+	// with the same one (OpenID Federation 1.0 §3.1.1: "Every JWK in the
+	// JWK Set MUST have a unique kid").
 	ErrMalformedJWKS = errors.New("federation: malformed jwks claim")
+
+	// ErrMissingKeyID indicates the statement's JWS header had no "kid"
+	// (OpenID Federation 1.0 §3.2 step 11: it "MUST be a non-zero length
+	// string").
+	ErrMissingKeyID = errors.New("federation: header kid is missing")
+
+	// ErrUnsupportedCriticalClaim indicates the statement's "crit" claim
+	// named an extension claim this package doesn't understand — which
+	// is every one, since it implements none (OpenID Federation 1.0
+	// §3.1.1, §3.2 step 13) — or wasn't a non-empty array of strings.
+	ErrUnsupportedCriticalClaim = errors.New("federation: critical claim not understood")
 
 	// ErrSubjectMismatch indicates a parsed statement's "sub" claim did
 	// not equal the entity identifier the caller expected it to be

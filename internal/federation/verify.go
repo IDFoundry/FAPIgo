@@ -33,6 +33,9 @@ func Parse(token string) (Statement, error) {
 	if compact.Header.Type != jwtType {
 		return Statement{}, ErrWrongType
 	}
+	if compact.Header.KeyID == "" {
+		return Statement{}, ErrMissingKeyID
+	}
 	claims, err := parseClaims(compact.Payload)
 	if err != nil {
 		return Statement{}, err
@@ -40,7 +43,8 @@ func Parse(token string) (Statement, error) {
 	return Statement{compact: compact, claims: claims}, nil
 }
 
-// KeyID returns the statement header's "kid", or "" if absent.
+// KeyID returns the statement header's "kid" — never empty, since Parse
+// rejects a statement without one.
 // Untrusted until Verify succeeds; use only to select which of the
 // issuer's published keys to verify against.
 func (s Statement) KeyID() string { return s.compact.Header.KeyID }

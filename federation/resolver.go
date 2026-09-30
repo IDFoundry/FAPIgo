@@ -807,7 +807,7 @@ func (r *Resolver) verifyAgainstJWKS(stmt intfed.Statement, jwksRaw json.RawMess
 		if c.Algorithm != algorithm {
 			continue
 		}
-		if kid != "" && c.KeyID != kid {
+		if c.KeyID != kid { // Parse guarantees kid is set
 			continue
 		}
 		tried = true

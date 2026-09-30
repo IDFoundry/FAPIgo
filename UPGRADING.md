@@ -15,6 +15,25 @@ and `keys/ephemeral` needs only the steps not marked *production only*.
 
 ## v0.41.0
 
+### Entity Statements need a `kid`, unique key IDs, and no `crit`
+
+**Affects:** anyone resolving Trust Chains, and anyone signing Entity
+Statements with `internal/federation`-backed issuers (`SelfIssuer`,
+`SubordinateIssuer`, `server.Server.EntityConfiguration`).
+
+**Why:** OpenID Federation 1.0 §3.2 requires an Entity Statement's
+header `kid` to be a non-empty string naming a key of its issuer, and
+§3.1.1 requires every key in its `jwks` to have a unique `kid`. A
+statement without a `kid` was verified against every key of the right
+algorithm instead. And a statement whose `crit` claim marked an
+extension claim critical was accepted, although §3.2 requires rejecting
+one the implementation doesn't understand. All three are now rejected.
+
+Issuers already set `kid` from their `KeyID`; `jwks` passed to them must
+give every key a unique `kid` (`keys.PublicJWKS` does). A federation
+member publishing statements without `kid`, with duplicate or missing
+key IDs, or with `crit`, no longer resolves.
+
 ### Trust Chain resolution tries every authority hint
 
 **Affects:** anyone resolving Trust Chains for entities that list more

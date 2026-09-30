@@ -1,14 +1,16 @@
-// Package demonet runs every entity of the demo federation on one local
-// HTTPS listener, telling them apart by host name, and gives each entity
-// an HTTP client that reaches the others through that same listener.
+// Package demokit is the local network every FAPIgo example demo runs
+// on: one HTTPS listener for all of a demo's entities, told apart by
+// host name, an HTTP client per entity that reaches the others through
+// that same listener, and a Chrome window that accepts the demo's
+// certificate.
 //
-// Host names are subdomains of "localhost" (id.eastmark.localhost, ...):
+// Host names are subdomains of "localhost" (bank.localhost, ...):
 // browsers resolve those to the loopback address on their own (RFC 6761),
 // and the clients built here dial the listener directly, so nothing needs
 // adding to /etc/hosts. The TLS certificate is issued by a demo
 // certificate authority that can only vouch for *.localhost, both kept in
 // a state directory so a browser can be told to trust the CA once.
-package demonet
+package demokit
 
 import (
 	"context"
@@ -34,12 +36,13 @@ type Net struct {
 }
 
 // New builds the demo network for a listener at addr (host:port, the
-// address clients dial), serving a certificate for hosts. stateDir keeps
-// the demo CA and that certificate across runs, so a browser told to
-// trust the CA (or to accept the certificate) once stays that way; an
-// empty stateDir issues both afresh and keeps nothing.
-func New(addr string, hosts []string, stateDir string) (*Net, error) {
-	certs, err := loadOrIssue(stateDir, hosts, time.Now())
+// address clients dial), serving a certificate for hosts. The demo CA
+// that issues it is named caName, which is what a browser's trust store
+// shows. stateDir keeps the CA and that certificate across runs, so a
+// browser told to trust the CA (or to accept the certificate) once stays
+// that way; an empty stateDir issues both afresh and keeps nothing.
+func New(addr string, hosts []string, stateDir, caName string) (*Net, error) {
+	certs, err := loadOrIssue(stateDir, caName, hosts, time.Now())
 	if err != nil {
 		return nil, fmt.Errorf("demo certificates: %w", err)
 	}

@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/idfoundry/fapigo/examples/federated-union/internal/demonet"
+	"github.com/idfoundry/fapigo/examples/internal/demokit"
 )
 
 // Page is what every page's layout needs.
@@ -29,7 +29,7 @@ type consolePage struct {
 	Page
 	Entities []entityRow
 	Tour     []tourStep
-	Log      []demonet.FetchEntry
+	Log      []demokit.FetchEntry
 }
 
 type entityPage struct {

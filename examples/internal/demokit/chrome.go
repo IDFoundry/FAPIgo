@@ -1,4 +1,4 @@
-package main
+package demokit
 
 import (
 	"errors"
@@ -58,10 +58,11 @@ func findChrome(path string) (string, error) {
 	return "", errors.New("no Chrome or Chromium found in the usual places; pass its path with -chrome")
 }
 
-// openChrome starts Chrome on urls with its profile in
+// OpenChrome starts Chrome on urls with its profile in
 // state/chrome-profile, accepting the certificate whose key hashes to
-// spki. It doesn't wait for Chrome to exit.
-func openChrome(chromePath, state, spki string, urls ...string) error {
+// spki (Net.ServingSPKIHash). chromePath is Chrome's executable, or ""
+// to look in the usual places. It doesn't wait for Chrome to exit.
+func OpenChrome(chromePath, state, spki string, urls ...string) error {
 	path, err := findChrome(chromePath)
 	if err != nil {
 		return err

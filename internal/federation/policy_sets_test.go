@@ -2,6 +2,7 @@ package federation
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -78,5 +79,43 @@ func TestPolicySetOperationsAreNotQuadratic(t *testing.T) {
 	// Linear work takes well under a second; the quadratic version took minutes.
 	if elapsed := time.Since(start); elapsed > 10*time.Second {
 		t.Errorf("merging and applying %d-value policies took %v", n, elapsed)
+	}
+}
+
+// TestPolicySetOperationsRejectUndecodableValues covers array elements
+// that are valid JSON but can't be decoded for comparison (a number out
+// of float64's range): each set operation reports a policy error.
+func TestPolicySetOperationsRejectUndecodableValues(t *testing.T) {
+	const huge = `1e400`
+	for name, policy := range map[string]string{
+		"subset check":      `{"x":{"y":{"add":[1],"subset_of":[` + huge + `]}}}`,
+		"value in one_of":   `{"x":{"y":{"value":1,"one_of":[` + huge + `]}}}`,
+		"undecodable value": `{"x":{"y":{"value":` + huge + `,"one_of":[1]}}}`,
+	} {
+		if err := ValidatePolicy(mustPolicy(t, policy), nil); !errors.Is(err, ErrPolicyError) {
+			t.Errorf("ValidatePolicy(%s) = %v, want ErrPolicyError", name, err)
+		}
+	}
+
+	for name, tc := range map[string]struct{ policy, metadata string }{
+		"superset_of":         {`{"x":{"y":{"superset_of":[1]}}}`, `{"x":{"y":[` + huge + `]}}`},
+		"subset_of intersect": {`{"x":{"y":{"subset_of":[` + huge + `]}}}`, `{"x":{"y":[1]}}`},
+		"add union":           {`{"x":{"y":{"add":[1]}}}`, `{"x":{"y":[` + huge + `]}}`},
+		"one_of":              {`{"x":{"y":{"one_of":[` + huge + `]}}}`, `{"x":{"y":1}}`},
+	} {
+		var md map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(tc.metadata), &md); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ApplyPolicy(mustPolicy(t, tc.policy), nil, md); !errors.Is(err, ErrPolicyError) {
+			t.Errorf("ApplyPolicy(%s) = %v, want ErrPolicyError", name, err)
+		}
+	}
+
+	if _, err := unionArrays(json.RawMessage(`[1]`), json.RawMessage(`[`+huge+`]`)); !errors.Is(err, ErrPolicyError) {
+		t.Errorf("unionArrays(undecodable) = %v, want ErrPolicyError", err)
+	}
+	if _, err := jsonEqual(json.RawMessage(huge), json.RawMessage(`1`)); !errors.Is(err, ErrPolicyError) {
+		t.Errorf("jsonEqual(undecodable) = %v, want ErrPolicyError", err)
 	}
 }

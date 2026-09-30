@@ -3,6 +3,7 @@ package client
 import (
 	"fmt"
 
+	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/federation"
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -35,8 +36,12 @@ func New(cfg Config, deps Dependencies) (*Client, error) {
 //     issuer's identifier would send its requests to one server while
 //     validating tokens as if from the other — easy to do by accident in
 //     a relying party talking to several issuers.
-//  2. cfg.Endpoints, if entirely zero, is set to discovered.Endpoints.
-//     Set it yourself instead when you need to adjust it first — e.g.
+//  2. cfg.Endpoints, if entirely zero, is set to discovered.Endpoints —
+//     without the authorization and pushed authorization request
+//     endpoints when cfg.RedirectURI is empty, since a client with no
+//     redirect URI (one using only CIBA or client credentials) never
+//     uses the redirect-based flow. Set it yourself instead when you
+//     need to adjust it first — e.g.
 //     discovered.MTLSEndpointAliases.ApplyForSenderConstrain/
 //     ApplyForClientAuth for an mTLS client — and it's left as given.
 //  3. It checks that the issuer advertises support for every algorithm
@@ -64,6 +69,9 @@ func NewFromDiscovery(discovered DiscoveredMetadata, cfg Config, deps Dependenci
 	}
 	if cfg.Endpoints.isZero() {
 		cfg.Endpoints = discovered.Endpoints
+		if cfg.RedirectURI == "" {
+			cfg.Endpoints.Authorization, cfg.Endpoints.PushedAuthorizationRequest = fapi.URL{}, fapi.URL{}
+		}
 	}
 	if err := discovered.SupportsAlgorithms(cfg.Algorithms); err != nil {
 		return nil, err

@@ -189,7 +189,15 @@ type RegisteredClient struct {
 
 // RegisteredClientConfig is the input to NewRegisteredClient.
 type RegisteredClientConfig struct {
-	ID           fapi.ClientID
+	ID fapi.ClientID
+
+	// RedirectURIs are where the authorization code grant may send its
+	// response. Required, unless the client is registered only for
+	// grants that never redirect — CIBA
+	// (BackchannelAuthenticationRequestAlgorithm set) or client
+	// credentials (AllowsClientCredentialsGrant) — in which case, left
+	// empty, the client can't use the authorization code grant (see
+	// RegisteredClient.AllowsAuthorizationCodeGrant).
 	RedirectURIs []fapi.RegisteredRedirectURI
 
 	// ClientAuthMethod selects how this client authenticates —
@@ -446,8 +454,10 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 	if cfg.ID == "" {
 		return RegisteredClient{}, fmt.Errorf("storage: client ID is empty")
 	}
-	if len(cfg.RedirectURIs) == 0 {
-		return RegisteredClient{}, fmt.Errorf("storage: client %q has no registered redirect URIs", cfg.ID)
+	// Only the authorization code grant redirects: a client registered
+	// only for CIBA or client credentials needs no redirect URI.
+	if len(cfg.RedirectURIs) == 0 && cfg.BackchannelAuthenticationRequestAlgorithm == 0 && !cfg.AllowsClientCredentialsGrant {
+		return RegisteredClient{}, fmt.Errorf("storage: client %q has no registered redirect URIs, and isn't registered for CIBA or client credentials", cfg.ID)
 	}
 	methods, err := clientAuthMethods(cfg)
 	if err != nil {
@@ -713,6 +723,11 @@ func validateUserInfoEncryptionFields(cfg RegisteredClientConfig) error {
 
 // ID returns the client's ID.
 func (c RegisteredClient) ID() fapi.ClientID { return c.id }
+
+// AllowsAuthorizationCodeGrant reports whether the client may use the
+// authorization code grant: whether it has any registered redirect URI.
+// A client registered only for CIBA or client credentials has none.
+func (c RegisteredClient) AllowsAuthorizationCodeGrant() bool { return len(c.redirectURIs) > 0 }
 
 // HasRedirectURI reports whether candidate is exactly one of this
 // client's registered redirect URIs (RegisteredRedirectURI.Equal

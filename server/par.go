@@ -648,6 +648,12 @@ func (s *Server) resolveClientKey(ctx context.Context, id fapi.ClientID, purpose
 // against client. It returns params unmodified on success; every other
 // parameter is stored as-is for the authorization endpoint to interpret.
 func (s *Server) validateAuthorizationParameters(params map[string]json.RawMessage, client storage.RegisteredClient) (map[string]json.RawMessage, *Error) {
+	// RFC 6749 §4.1.2.1's unauthorized_client: a client with no
+	// registered redirect URI (CIBA or client credentials only) can't
+	// use the authorization code grant.
+	if !client.AllowsAuthorizationCodeGrant() {
+		return nil, newError(ErrorUnauthorizedClient, 400, "the client is not registered for the authorization code grant", nil)
+	}
 	responseType, err := jsonString(params, "response_type")
 	if err != nil || responseType != "code" {
 		return nil, newError(ErrorInvalidRequest, 400, `response_type must be "code"`, err)

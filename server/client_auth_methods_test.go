@@ -3,6 +3,7 @@ package server_test
 import (
 	"context"
 	"crypto/x509"
+	"errors"
 	"testing"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -103,5 +104,20 @@ func TestClientCertificateMatchingAnyCertificateMethod(t *testing.T) {
 	registerTestClient(t, h, func(*storage.RegisteredClientConfig) {})
 	if code := serverErrorCode(t, pushCert(h, cert)); code != server.ErrorInvalidClient {
 		t.Errorf("certificate for a private_key_jwt-only client: code = %q, want %q", code, server.ErrorInvalidClient)
+	}
+}
+
+// TestPushedAuthorizationRequestRefusesClientWithoutRedirectURI covers
+// #452: a client registered only for CIBA has no redirect URI, and its
+// pushed authorization request gets unauthorized_client.
+func TestPushedAuthorizationRequestRefusesClientWithoutRedirectURI(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	registerTestClient(t, h, func(c *storage.RegisteredClientConfig) {
+		c.RedirectURIs = nil
+		c.BackchannelAuthenticationRequestAlgorithm = fapi.ES256
+	})
+	var serverErr *server.Error
+	if err := pushWithAssertion(t, h); !errors.As(err, &serverErr) || serverErr.Code() != server.ErrorUnauthorizedClient {
+		t.Errorf("PAR from a CIBA-only client = %v, want unauthorized_client", err)
 	}
 }

@@ -48,6 +48,20 @@ func TestNewErrorWriteJSON(t *testing.T) {
 	}
 }
 
+// TestInsufficientScopeWriteJSON covers the challenge a protected
+// resource sends for a valid token that doesn't cover the request
+// (RFC 6750 §3.1).
+func TestInsufficientScopeWriteJSON(t *testing.T) {
+	rec := httptest.NewRecorder()
+	resource.NewError(resource.ErrorInsufficientScope, 403, "payments need the payments scope").WriteJSON(rec)
+	if rec.Code != 403 {
+		t.Errorf("status = %d, want 403", rec.Code)
+	}
+	if got := rec.Header().Get("WWW-Authenticate"); got != `Bearer error="insufficient_scope"` {
+		t.Errorf("WWW-Authenticate = %q, want %q", got, `Bearer error="insufficient_scope"`)
+	}
+}
+
 // TestErrorWriteJSONUsesDPoPSchemeForUseDPoPNonce covers WriteJSON's
 // scheme selection — see its own doc comment for why ErrorUseDPoPNonce
 // is the one code that always challenges with "DPoP", not "Bearer".

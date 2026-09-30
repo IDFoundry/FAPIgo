@@ -1,6 +1,10 @@
 package federation
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/idfoundry/fapigo/internal/strictjson"
+)
 
 // federationEntityType is the Entity Type Identifier every federation
 // participant's own operational metadata (fetch/list/resolve endpoints,
@@ -35,7 +39,7 @@ func parseEntityMetadata(metadata map[string]json.RawMessage) (entityMetadata, e
 		return entityMetadata{}, nil
 	}
 	var m entityMetadata
-	if err := json.Unmarshal(raw, &m); err != nil {
+	if err := strictjson.Unmarshal(raw, &m); err != nil {
 		return entityMetadata{}, err
 	}
 	return m, nil

@@ -52,6 +52,13 @@ type automaticRegistrationFixture struct {
 // openid_relying_party metadata at all.
 func setupAutomaticRegistrationFixture(t *testing.T, metadataFn func(rpID string, rpOIDCKey *ecdsa.PrivateKey) json.RawMessage) *automaticRegistrationFixture {
 	t.Helper()
+	return setupAutomaticRegistrationFixtureWithPolicy(t, metadataFn, nil)
+}
+
+// setupAutomaticRegistrationFixtureWithPolicy is setupAutomaticRegistrationFixture
+// with the Trust Anchor's Subordinate Statement about the RP carrying policy.
+func setupAutomaticRegistrationFixtureWithPolicy(t *testing.T, metadataFn func(rpID string, rpOIDCKey *ecdsa.PrivateKey) json.RawMessage, policy intfed.MetadataPolicy) *automaticRegistrationFixture {
+	t.Helper()
 	now := time.Now()
 
 	taKey, rpFedKey, rpOIDCKey := generateKey(t), generateKey(t), generateKey(t)
@@ -84,6 +91,7 @@ func setupAutomaticRegistrationFixture(t *testing.T, metadataFn func(rpID string
 	taAboutRP := sign(intfed.CreateParams{
 		Signer: taKey, Algorithm: fapi.ES256, KeyID: "ta",
 		Issuer: taID, Subject: rpID, Now: now, Lifetime: time.Hour, JWKS: rpFedJWKS,
+		MetadataPolicy: policy,
 	})
 	var metadata map[string]json.RawMessage
 	if metadataFn != nil {
@@ -1067,5 +1075,65 @@ func TestNewAutomaticClientRepositoryRejectsInvalidDefaultAlgorithm(t *testing.T
 	cfg.ClientAssertionAlgorithms = []fapi.SignatureAlgorithm{fapi.ES256, 0}
 	if _, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, f.newResolver(t), f.fetcher, cfg, fixedClock{now: f.now}); err == nil {
 		t.Fatal("NewAutomaticClientRepository(invalid client_assertion_algorithms) = nil error, want error")
+	}
+}
+
+// rpMetadataMembers returns a metadataFn publishing exactly members, plus
+// the fixture RP's jwks.
+func rpMetadataMembers(t *testing.T, members map[string]any) func(rpID string, rpOIDCKey *ecdsa.PrivateKey) json.RawMessage {
+	return func(_ string, rpOIDCKey *ecdsa.PrivateKey) json.RawMessage {
+		t.Helper()
+		md := map[string]any{"jwks": json.RawMessage(jwksFor(t, "rp-oidc", rpOIDCKey))}
+		for k, v := range members {
+			md[k] = v
+		}
+		raw, err := json.Marshal(md)
+		if err != nil {
+			t.Fatalf("marshal openid_relying_party metadata: %v", err)
+		}
+		return raw
+	}
+}
+
+// TestAutomaticRegistrationRejectsCaseVariantMemberNames covers metadata
+// member names differing from a registered parameter only in case.
+// Metadata policy applies to exact names (OpenID Federation 1.0 §6.1),
+// so if such a member were read as the parameter, an RP could publish a
+// value its superiors' policy never saw. It must be refused, not read.
+func TestAutomaticRegistrationRejectsCaseVariantMemberNames(t *testing.T) {
+	policy := intfed.MetadataPolicy{"openid_relying_party": {
+		"token_endpoint_auth_method": {"one_of": json.RawMessage(`["private_key_jwt"]`)},
+	}}
+	const cb = "https://rp.example/cb"
+	for name, members := range map[string]map[string]any{
+		// Absent under its exact name, so the one_of above never applies.
+		"auth method only in another case": {
+			"redirect_uris":              []string{cb},
+			"Token_Endpoint_Auth_Method": "tls_client_auth",
+			"tls_client_auth_subject_dn": "CN=rp.example",
+		},
+		"auth method in both cases": {
+			"redirect_uris":                   []string{cb},
+			"token_endpoint_auth_method":      "private_key_jwt",
+			"token_endpoint_auth_signing_alg": "ES256",
+			"TOKEN_ENDPOINT_AUTH_METHOD":      "tls_client_auth",
+		},
+		"redirect_uris in another case": {
+			"redirect_uris":                   []string{cb},
+			"Redirect_URIs":                   []string{"https://attacker.example/cb"},
+			"token_endpoint_auth_method":      "private_key_jwt",
+			"token_endpoint_auth_signing_alg": "ES256",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := setupAutomaticRegistrationFixtureWithPolicy(t, rpMetadataMembers(t, members), policy)
+			repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, f.newResolver(t), f.fetcher, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
+			if err != nil {
+				t.Fatalf("NewAutomaticClientRepository: %v", err)
+			}
+			if client, err := repo.ResolveClient(context.Background(), fapi.ClientID(f.rpID)); err == nil {
+				t.Fatalf("ResolveClient = %v, nil error; want the case-variant member refused", client.ClientAuthMethods())
+			}
+		})
 	}
 }

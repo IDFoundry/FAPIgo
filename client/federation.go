@@ -9,6 +9,7 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/federation"
 	"github.com/idfoundry/fapigo/internal/metadata"
+	"github.com/idfoundry/fapigo/internal/strictjson"
 	"github.com/idfoundry/fapigo/keys"
 )
 
@@ -139,7 +140,7 @@ func requireAutomaticRegistration(raw json.RawMessage) error {
 	var md struct {
 		ClientRegistrationTypesSupported []string `json:"client_registration_types_supported"`
 	}
-	if err := json.Unmarshal(raw, &md); err != nil {
+	if err := strictjson.Unmarshal(raw, &md); err != nil {
 		return fmt.Errorf("parse client_registration_types_supported: %w", err)
 	}
 	if !slices.Contains(md.ClientRegistrationTypesSupported, "automatic") {

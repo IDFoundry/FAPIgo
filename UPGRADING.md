@@ -15,6 +15,25 @@ and `keys/ephemeral` needs only the steps not marked *production only*.
 
 ## v0.41.0
 
+### Federation metadata member names are case-sensitive
+
+**Affects:** anyone using `federation.AutomaticClientRepository`,
+resolving Trust Chains, or calling `client.DiscoverViaFederation`.
+
+**Why:** OpenID Federation metadata policy applies to parameters by
+their exact names, but relying-party and `federation_entity` metadata
+were decoded with Go's case-insensitive field matching. An RP could
+publish `Token_Endpoint_Auth_Method` instead of
+`token_endpoint_auth_method`, escape a superior's policy on that
+parameter, and still have its value registered. Metadata with a member
+name matching a known parameter only in a different case is now
+rejected, as are Entity Statement `jwks` keys whose `kid` is spelled
+that way.
+
+Metadata using the specifications' exact parameter names is unaffected.
+A federation member publishing case-variant names no longer registers
+or resolves; it must correct its metadata.
+
 ### Entity Statements need a `kid`, unique key IDs, and no `crit`
 
 **Affects:** anyone resolving Trust Chains, and anyone signing Entity

@@ -14,6 +14,7 @@ import (
 	"github.com/idfoundry/fapigo/fapihttp"
 	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/internal/mtls"
+	"github.com/idfoundry/fapigo/internal/strictjson"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -535,7 +536,7 @@ type relyingPartyMetadata struct {
 // for why.
 func (a *AutomaticClientRepository) registeredClientConfigFromMetadata(ctx context.Context, id fapi.ClientID, raw json.RawMessage) (storage.RegisteredClientConfig, json.RawMessage, error) {
 	var m relyingPartyMetadata
-	if err := json.Unmarshal(raw, &m); err != nil {
+	if err := strictjson.Unmarshal(raw, &m); err != nil {
 		return storage.RegisteredClientConfig{}, nil, fmt.Errorf("parse %s metadata: %w", relyingPartyEntityType, err)
 	}
 	if len(m.RedirectURIs) == 0 {

@@ -83,6 +83,14 @@ const (
 	// error code.
 	ErrorInvalidBindingMessage ErrorCode = "invalid_binding_message"
 
+	// ErrorUnknownUserID and ErrorExpiredLoginHintToken are CIBA §13's
+	// codes for a backchannel authentication request whose hint names
+	// no end user this server can ask, or whose login_hint_token has
+	// expired — decided by Dependencies.BackchannelHints; see
+	// BackchannelHintChecker.
+	ErrorUnknownUserID         ErrorCode = "unknown_user_id"
+	ErrorExpiredLoginHintToken ErrorCode = "expired_login_hint_token"
+
 	// ErrorInvalidAuthorizationDetails is RFC 9396 §6/§14.6's dedicated
 	// error code for an "authorization_details" entitlement decision —
 	// as distinct from a structural failure (unregistered type, wrong

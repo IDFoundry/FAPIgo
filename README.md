@@ -98,6 +98,12 @@ runnable demo: three fictional countries' identity federations joined
 into one OpenID Federation, with cross-border sign-in, automatic
 registration, accredited Trust Marks and a console of attack scenes.
 
+[examples/decoupled-checkout](examples/decoupled-checkout/README.md) is
+another: a customer approves, on their phone, a payment or account access
+started on another device, with CIBA and Rich Authorization Requests —
+the phone shows exactly what's being approved, and the bank's APIs allow
+exactly that.
+
 `storage/memstore` and `keys/ephemeral` provide in-memory, non-durable
 implementations of every interface `server` needs (client repository,
 transaction/grant/replay/access-token stores, key manager, client key

@@ -265,8 +265,9 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 			MaxClockSkew:         resolved.Limits.MaxClockSkew,
 		}
 		autoRegCfg = federation.AutomaticRegistrationConfig{
-			AllowedScopes: resolved.Federation.AllowedScopes,
-			MaxCacheAge:   federationMaxCacheAge,
+			AllowedScopes:             resolved.Federation.AllowedScopes,
+			MaxCacheAge:               federationMaxCacheAge,
+			ClientAssertionAlgorithms: srvCfg.Algorithms.ClientAssertion,
 		}
 		if !federationTrustAnchorAdmin {
 			srvCfg.AutomaticRegistration = server.AutomaticRegistrationConfig{

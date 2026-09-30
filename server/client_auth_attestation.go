@@ -58,7 +58,7 @@ func (s *Server) authenticateClientViaAttestation(ctx context.Context, attestati
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
 			newError(ErrorInvalidClient, 401, "unknown client", err)
 	}
-	if client.ClientAuthMethod() != storage.ClientAuthMethodAttestation {
+	if !client.AllowsClientAuthMethod(storage.ClientAuthMethodAttestation) {
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
 			newError(ErrorInvalidClient, 401, "client is not registered for attestation-based client authentication", nil)
 	}

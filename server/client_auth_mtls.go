@@ -143,24 +143,46 @@ func (s *Server) authenticateClientViaCertificate(ctx context.Context, clientID 
 // authenticateClientViaCertificate purely to keep that method's own
 // cognitive complexity manageable.
 func (s *Server) verifyClientCertificate(client storage.RegisteredClient, peerCert *x509.Certificate) *Error {
-	switch client.ClientAuthMethod() {
+	var lastErr *Error
+	for _, method := range client.ClientAuthMethods() {
+		err, certificateBased := s.verifyClientCertificateFor(method, client, peerCert)
+		if !certificateBased {
+			continue
+		}
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		return newError(ErrorInvalidClient, 401, "client is not registered for certificate-based client authentication", nil)
+	}
+	return lastErr
+}
+
+// verifyClientCertificateFor checks peerCert against client's
+// registration for one certificate-based method, reporting false when
+// method isn't certificate-based. A client allowing several such methods
+// is authenticated when any one of them matches.
+func (s *Server) verifyClientCertificateFor(method storage.ClientAuthMethod, client storage.RegisteredClient, peerCert *x509.Certificate) (*Error, bool) {
+	switch method {
 	case storage.ClientAuthMethodSelfSignedTLSClientAuth:
 		if !matchesRegisteredThumbprint(peerCert, client.ExpectedCertificateThumbprint()) {
-			return newError(ErrorInvalidClient, 401, "client certificate does not match the registered thumbprint", nil)
+			return newError(ErrorInvalidClient, 401, "client certificate does not match the registered thumbprint", nil), true
 		}
-		return nil
+		return nil, true
 	case storage.ClientAuthMethodTLSClientAuth:
-		return s.verifyChainedFieldMatch(peerCert, matchesRegisteredSubjectDN(peerCert, client.ExpectedSubjectDN()))
+		return s.verifyChainedFieldMatch(peerCert, matchesRegisteredSubjectDN(peerCert, client.ExpectedSubjectDN())), true
 	case storage.ClientAuthMethodTLSClientAuthSANDNS:
-		return s.verifyChainedFieldMatch(peerCert, matchesRegisteredSANDNS(peerCert, client.ExpectedSANDNS()))
+		return s.verifyChainedFieldMatch(peerCert, matchesRegisteredSANDNS(peerCert, client.ExpectedSANDNS())), true
 	case storage.ClientAuthMethodTLSClientAuthSANURI:
-		return s.verifyChainedFieldMatch(peerCert, matchesRegisteredSANURI(peerCert, client.ExpectedSANURI()))
+		return s.verifyChainedFieldMatch(peerCert, matchesRegisteredSANURI(peerCert, client.ExpectedSANURI())), true
 	case storage.ClientAuthMethodTLSClientAuthSANIP:
-		return s.verifyChainedFieldMatch(peerCert, matchesRegisteredSANIP(peerCert, client.ExpectedSANIP()))
+		return s.verifyChainedFieldMatch(peerCert, matchesRegisteredSANIP(peerCert, client.ExpectedSANIP())), true
 	case storage.ClientAuthMethodTLSClientAuthSANEmail:
-		return s.verifyChainedFieldMatch(peerCert, matchesRegisteredSANEmail(peerCert, client.ExpectedSANEmail()))
+		return s.verifyChainedFieldMatch(peerCert, matchesRegisteredSANEmail(peerCert, client.ExpectedSANEmail())), true
 	default:
-		return newError(ErrorInvalidClient, 401, "client is not registered for certificate-based client authentication", nil)
+		return nil, false
 	}
 }
 

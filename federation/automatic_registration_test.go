@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -973,5 +974,98 @@ func TestAutomaticClientRepositoryRejectsUnsafeClientDisplay(t *testing.T) {
 				t.Fatalf("ResolveClient(%s) = nil error, want error", label)
 			}
 		})
+	}
+}
+
+// resolveWithMetadata registers the fixture RP with its metadata changed
+// by extra (a nil value removes a member), under cfg.
+func resolveWithMetadata(t *testing.T, cfg federation.AutomaticRegistrationConfig, extra map[string]any) (storage.RegisteredClient, error) {
+	t.Helper()
+	f := setupAutomaticRegistrationFixture(t, rpMetadataWith(t, extra))
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, f.newResolver(t), f.fetcher, cfg, fixedClock{now: f.now})
+	if err != nil {
+		t.Fatalf("NewAutomaticClientRepository: %v", err)
+	}
+	return repo.ResolveClient(context.Background(), fapi.ClientID(f.rpID))
+}
+
+// TestAutomaticRegistrationReadsMethodChoices covers OpenID Federation
+// 1.0 §12.1.4 with RP Metadata Choices 1.0: an RP may declare its methods
+// as a list, and the OP accepts any mutually supported one.
+func TestAutomaticRegistrationReadsMethodChoices(t *testing.T) {
+	client, err := resolveWithMetadata(t, validAutomaticRegistrationConfig(), map[string]any{
+		"token_endpoint_auth_method": nil,
+		// client_secret_basic isn't implemented: skipped. self_signed_tls_client_auth
+		// needs an x5c the fixture's jwks lacks: dropped, since only listed.
+		"token_endpoint_auth_methods_supported": []string{"client_secret_basic", "private_key_jwt", "self_signed_tls_client_auth"},
+	})
+	if err != nil {
+		t.Fatalf("ResolveClient: %v", err)
+	}
+	if !client.AllowsClientAuthMethod(storage.ClientAuthMethodPrivateKeyJWT) || client.AllowsClientAuthMethod(storage.ClientAuthMethodSelfSignedTLSClientAuth) {
+		t.Errorf("ClientAuthMethods() = %v, want only private_key_jwt", client.ClientAuthMethods())
+	}
+}
+
+// TestAutomaticRegistrationAssertionAlgorithms covers where a
+// private_key_jwt RP's algorithms come from.
+func TestAutomaticRegistrationAssertionAlgorithms(t *testing.T) {
+	withDefaults := validAutomaticRegistrationConfig()
+	withDefaults.ClientAssertionAlgorithms = []fapi.SignatureAlgorithm{fapi.ES256, fapi.PS256}
+
+	for _, tc := range []struct {
+		name  string
+		cfg   federation.AutomaticRegistrationConfig
+		extra map[string]any
+		want  []fapi.SignatureAlgorithm
+	}{
+		{"declared algorithm", withDefaults, nil, []fapi.SignatureAlgorithm{fapi.ES256}},
+		{"declared list", withDefaults, map[string]any{"token_endpoint_auth_signing_alg": nil, "token_endpoint_auth_signing_alg_values_supported": []string{"PS256", "HS256"}}, []fapi.SignatureAlgorithm{fapi.PS256}},
+		// Dynamic Client Registration: omitted means any the OP supports.
+		{"none declared", withDefaults, map[string]any{"token_endpoint_auth_signing_alg": nil}, []fapi.SignatureAlgorithm{fapi.ES256, fapi.PS256}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client, err := resolveWithMetadata(t, tc.cfg, tc.extra)
+			if err != nil {
+				t.Fatalf("ResolveClient: %v", err)
+			}
+			if got := client.ClientAssertionAlgorithms(); !slices.Equal(got, tc.want) {
+				t.Errorf("ClientAssertionAlgorithms() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAutomaticRegistrationRejectsUnusableMethodChoices(t *testing.T) {
+	withDefaults := validAutomaticRegistrationConfig()
+	withDefaults.ClientAssertionAlgorithms = []fapi.SignatureAlgorithm{fapi.ES256}
+	for _, tc := range []struct {
+		name  string
+		cfg   federation.AutomaticRegistrationConfig
+		extra map[string]any
+	}{
+		{"no method declared", withDefaults, map[string]any{"token_endpoint_auth_method": nil}},
+		{"method not in its own list", withDefaults, map[string]any{"token_endpoint_auth_methods_supported": []string{"self_signed_tls_client_auth"}}},
+		{"no listed method implemented", withDefaults, map[string]any{"token_endpoint_auth_method": nil, "token_endpoint_auth_methods_supported": []string{"client_secret_basic"}}},
+		{"no listed method usable", withDefaults, map[string]any{"token_endpoint_auth_method": nil, "token_endpoint_auth_methods_supported": []string{"self_signed_tls_client_auth"}}},
+		{"explicit method unusable", withDefaults, map[string]any{"token_endpoint_auth_method": "tls_client_auth"}},
+		{"algorithm not in its own list", withDefaults, map[string]any{"token_endpoint_auth_signing_alg_values_supported": []string{"PS256"}}},
+		{"no listed algorithm implemented", withDefaults, map[string]any{"token_endpoint_auth_signing_alg": nil, "token_endpoint_auth_signing_alg_values_supported": []string{"HS256"}}},
+		{"no algorithm and no default", validAutomaticRegistrationConfig(), map[string]any{"token_endpoint_auth_signing_alg": nil}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := resolveWithMetadata(t, tc.cfg, tc.extra); err == nil {
+				t.Fatal("ResolveClient = nil error, want error")
+			}
+		})
+	}
+}
+
+func TestNewAutomaticClientRepositoryRejectsInvalidDefaultAlgorithm(t *testing.T) {
+	f := setupAutomaticRegistrationFixture(t, nil)
+	cfg := validAutomaticRegistrationConfig()
+	cfg.ClientAssertionAlgorithms = []fapi.SignatureAlgorithm{fapi.ES256, 0}
+	if _, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, f.newResolver(t), f.fetcher, cfg, fixedClock{now: f.now}); err == nil {
+		t.Fatal("NewAutomaticClientRepository(invalid client_assertion_algorithms) = nil error, want error")
 	}
 }

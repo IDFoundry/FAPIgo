@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"slices"
 	"unicode"
 	"unicode/utf8"
 
@@ -156,9 +157,11 @@ type RegisteredClient struct {
 	id                            fapi.ClientID
 	redirectURIs                  []fapi.RegisteredRedirectURI
 	clientAssertionAlgorithm      fapi.SignatureAlgorithm
+	clientAssertionAlgorithms     []fapi.SignatureAlgorithm
 	requestObjectAlgorithm        fapi.SignatureAlgorithm
 	senderConstrain               SenderConstrain
 	clientAuthMethod              ClientAuthMethod
+	clientAuthMethods             []ClientAuthMethod
 	expectedCertificateThumbprint string
 	expectedSubjectDN             string
 	expectedSANDNS                string
@@ -192,14 +195,34 @@ type RegisteredClientConfig struct {
 	// ClientAuthMethod selects how this client authenticates —
 	// ClientAuthMethodPrivateKeyJWT (the zero value/default),
 	// ClientAuthMethodSelfSignedTLSClientAuth, or
-	// ClientAuthMethodTLSClientAuth.
+	// ClientAuthMethodTLSClientAuth. Ignored when ClientAuthMethods is
+	// set, unless it names a method that list doesn't include, which is
+	// an error.
 	ClientAuthMethod ClientAuthMethod
 
-	// ClientAssertionAlgorithm is the only algorithm this client's
-	// private_key_jwt client assertions are accepted under. It is never
-	// inferred from an assertion's own header. Required only when
-	// ClientAuthMethod is ClientAuthMethodPrivateKeyJWT.
+	// ClientAuthMethods, when set, is every method this client may
+	// authenticate with — e.g. a relying party's own
+	// token_endpoint_auth_methods_supported (OpenID Connect RP Metadata
+	// Choices 1.0). The server accepts whichever of them a request
+	// actually uses. Each listed method needs its own field below
+	// (ClientAssertionAlgorithm(s) for private_key_jwt,
+	// ExpectedCertificateThumbprint for self_signed_tls_client_auth, and
+	// so on). Optional; the zero value means ClientAuthMethod alone.
+	ClientAuthMethods []ClientAuthMethod
+
+	// ClientAssertionAlgorithm is the algorithm this client's
+	// private_key_jwt client assertions are accepted under. Required when
+	// private_key_jwt is among its methods, unless
+	// ClientAssertionAlgorithms is set.
 	ClientAssertionAlgorithm fapi.SignatureAlgorithm
+
+	// ClientAssertionAlgorithms, when set, is every algorithm this
+	// client's private_key_jwt client assertions may be signed with. An
+	// assertion's own header "alg" only selects among these — an
+	// algorithm not listed here (or not allowed by the server) is
+	// rejected, never inferred. ClientAssertionAlgorithm, if also set,
+	// must be one of them. Optional.
+	ClientAssertionAlgorithms []fapi.SignatureAlgorithm
 
 	// ExpectedCertificateThumbprint is the RFC 8705 §3.1 x5t#S256 value
 	// (base64url, no padding — the same shape internal/mtls.Thumbprint
@@ -409,7 +432,9 @@ func ValidateClientName(name string) error {
 // division ParseClientAuthMethod's own doc comment draws between
 // mechanism and policy.
 func (cfg RegisteredClientConfig) NeedsJWKS() bool {
-	return cfg.ClientAuthMethod == ClientAuthMethodPrivateKeyJWT || cfg.RequestObjectAlgorithm != 0 || cfg.BackchannelAuthenticationRequestAlgorithm != 0
+	usesPrivateKeyJWT := cfg.ClientAuthMethod == ClientAuthMethodPrivateKeyJWT && len(cfg.ClientAuthMethods) == 0 ||
+		slices.Contains(cfg.ClientAuthMethods, ClientAuthMethodPrivateKeyJWT)
+	return usesPrivateKeyJWT || cfg.RequestObjectAlgorithm != 0 || cfg.BackchannelAuthenticationRequestAlgorithm != 0
 }
 
 // NewRegisteredClient validates cfg and returns an immutable
@@ -424,8 +449,22 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 	if len(cfg.RedirectURIs) == 0 {
 		return RegisteredClient{}, fmt.Errorf("storage: client %q has no registered redirect URIs", cfg.ID)
 	}
-	if err := validateClientAuthMethodFields(cfg); err != nil {
+	methods, err := clientAuthMethods(cfg)
+	if err != nil {
 		return RegisteredClient{}, err
+	}
+	algs, err := clientAssertionAlgorithms(cfg)
+	if err != nil {
+		return RegisteredClient{}, err
+	}
+	for _, method := range methods {
+		if err := validateClientAuthMethodFields(cfg, method, algs); err != nil {
+			return RegisteredClient{}, err
+		}
+	}
+	var primaryAlg fapi.SignatureAlgorithm
+	if len(algs) > 0 {
+		primaryAlg = algs[0]
 	}
 	if err := ValidateClientName(cfg.Display.Name); err != nil {
 		return RegisteredClient{}, fmt.Errorf("storage: client %q: %w", cfg.ID, err)
@@ -463,10 +502,12 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 	return RegisteredClient{
 		id:                                        cfg.ID,
 		redirectURIs:                              redirectURIs,
-		clientAssertionAlgorithm:                  cfg.ClientAssertionAlgorithm,
+		clientAssertionAlgorithm:                  primaryAlg,
+		clientAssertionAlgorithms:                 algs,
 		requestObjectAlgorithm:                    cfg.RequestObjectAlgorithm,
 		senderConstrain:                           cfg.SenderConstrain,
-		clientAuthMethod:                          cfg.ClientAuthMethod,
+		clientAuthMethod:                          methods[0],
+		clientAuthMethods:                         methods,
 		expectedCertificateThumbprint:             cfg.ExpectedCertificateThumbprint,
 		expectedSubjectDN:                         cfg.ExpectedSubjectDN,
 		expectedSANDNS:                            cfg.ExpectedSANDNS,
@@ -489,14 +530,62 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 	}, nil
 }
 
-// validateClientAuthMethodFields checks the field(s) each
-// ClientAuthMethod requires of cfg — split out of NewRegisteredClient
-// purely to keep that function's own cognitive complexity manageable.
-func validateClientAuthMethodFields(cfg RegisteredClientConfig) error {
-	switch cfg.ClientAuthMethod {
+// clientAuthMethods is every method cfg allows: ClientAuthMethods when
+// set (which must include a non-default ClientAuthMethod), otherwise
+// ClientAuthMethod alone. Duplicates are dropped.
+func clientAuthMethods(cfg RegisteredClientConfig) ([]ClientAuthMethod, error) {
+	if len(cfg.ClientAuthMethods) == 0 {
+		return []ClientAuthMethod{cfg.ClientAuthMethod}, nil
+	}
+	if cfg.ClientAuthMethod != ClientAuthMethodPrivateKeyJWT && !slices.Contains(cfg.ClientAuthMethods, cfg.ClientAuthMethod) {
+		return nil, fmt.Errorf("storage: client %q's ClientAuthMethod is not among its ClientAuthMethods", cfg.ID)
+	}
+	var methods []ClientAuthMethod
+	for _, m := range cfg.ClientAuthMethods {
+		if !slices.Contains(methods, m) {
+			methods = append(methods, m)
+		}
+	}
+	return methods, nil
+}
+
+// clientAssertionAlgorithms is every algorithm cfg allows for
+// private_key_jwt: ClientAssertionAlgorithms when set (which must include
+// a set ClientAssertionAlgorithm), otherwise ClientAssertionAlgorithm
+// alone, if set. Duplicates are dropped.
+func clientAssertionAlgorithms(cfg RegisteredClientConfig) ([]fapi.SignatureAlgorithm, error) {
+	if len(cfg.ClientAssertionAlgorithms) == 0 {
+		if cfg.ClientAssertionAlgorithm == 0 {
+			return nil, nil
+		}
+		return []fapi.SignatureAlgorithm{cfg.ClientAssertionAlgorithm}, nil
+	}
+	if cfg.ClientAssertionAlgorithm != 0 && !slices.Contains(cfg.ClientAssertionAlgorithms, cfg.ClientAssertionAlgorithm) {
+		return nil, fmt.Errorf("storage: client %q's ClientAssertionAlgorithm is not among its ClientAssertionAlgorithms", cfg.ID)
+	}
+	var algs []fapi.SignatureAlgorithm
+	for _, a := range cfg.ClientAssertionAlgorithms {
+		if !slices.Contains(algs, a) {
+			algs = append(algs, a)
+		}
+	}
+	return algs, nil
+}
+
+// validateClientAuthMethodFields checks the field(s) method requires of
+// cfg — split out of NewRegisteredClient purely to keep that function's
+// own cognitive complexity manageable. algs is cfg's resolved
+// private_key_jwt algorithm list.
+func validateClientAuthMethodFields(cfg RegisteredClientConfig, method ClientAuthMethod, algs []fapi.SignatureAlgorithm) error {
+	switch method {
 	case ClientAuthMethodPrivateKeyJWT:
-		if !cfg.ClientAssertionAlgorithm.IsValid() {
+		if len(algs) == 0 {
 			return fmt.Errorf("storage: client %q has no valid client assertion algorithm", cfg.ID)
+		}
+		for _, a := range algs {
+			if !a.IsValid() {
+				return fmt.Errorf("storage: client %q has no valid client assertion algorithm", cfg.ID)
+			}
 		}
 	case ClientAuthMethodSelfSignedTLSClientAuth:
 		if cfg.ExpectedCertificateThumbprint == "" {
@@ -637,10 +726,24 @@ func (c RegisteredClient) HasRedirectURI(candidate string) bool {
 	return false
 }
 
-// ClientAssertionAlgorithm returns the algorithm this client's client
-// assertions must be signed with.
+// ClientAssertionAlgorithm returns the first of the algorithms this
+// client's client assertions may be signed with — the only one, unless
+// it was registered with ClientAssertionAlgorithms. See
+// AllowsClientAssertionAlgorithm.
 func (c RegisteredClient) ClientAssertionAlgorithm() fapi.SignatureAlgorithm {
 	return c.clientAssertionAlgorithm
+}
+
+// ClientAssertionAlgorithms returns every algorithm this client's
+// private_key_jwt client assertions may be signed with.
+func (c RegisteredClient) ClientAssertionAlgorithms() []fapi.SignatureAlgorithm {
+	return slices.Clone(c.clientAssertionAlgorithms)
+}
+
+// AllowsClientAssertionAlgorithm reports whether this client's client
+// assertions may be signed with alg.
+func (c RegisteredClient) AllowsClientAssertionAlgorithm(alg fapi.SignatureAlgorithm) bool {
+	return slices.Contains(c.clientAssertionAlgorithms, alg)
 }
 
 // RequestObjectAlgorithm returns the algorithm this client's request
@@ -656,9 +759,23 @@ func (c RegisteredClient) SenderConstrain() SenderConstrain {
 	return c.senderConstrain
 }
 
-// ClientAuthMethod returns how this client authenticates itself.
+// ClientAuthMethod returns how this client authenticates itself — the
+// first of its methods, and the only one unless it was registered with
+// ClientAuthMethods. See AllowsClientAuthMethod.
 func (c RegisteredClient) ClientAuthMethod() ClientAuthMethod {
 	return c.clientAuthMethod
+}
+
+// ClientAuthMethods returns every method this client may authenticate
+// with.
+func (c RegisteredClient) ClientAuthMethods() []ClientAuthMethod {
+	return slices.Clone(c.clientAuthMethods)
+}
+
+// AllowsClientAuthMethod reports whether this client may authenticate
+// with method.
+func (c RegisteredClient) AllowsClientAuthMethod(method ClientAuthMethod) bool {
+	return slices.Contains(c.clientAuthMethods, method)
 }
 
 // ExpectedCertificateThumbprint returns the RFC 8705 §3.1 x5t#S256

@@ -69,6 +69,14 @@ jobs:
             name: FuzzParseTrustMark
           - pkg: ./internal/federation
             name: FuzzMetadataPolicy
+          - pkg: ./federation
+            name: FuzzRegisteredClientConfigFromMetadata
+          - pkg: ./federation
+            name: FuzzDomainNameConstraintMatches
+          - pkg: ./federation
+            name: FuzzApplySuperiorMetadata
+          - pkg: ./federation
+            name: FuzzValidEntityID
           - pkg: ./internal/federation
             name: FuzzParseTrustMarkDelegation
           - pkg: ./internal/federation

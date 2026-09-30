@@ -15,6 +15,22 @@ and `keys/ephemeral` needs only the steps not marked *production only*.
 
 ## v0.41.0
 
+### Entity Identifiers with a query or userinfo are rejected
+
+**Affects:** anyone resolving Trust Chains, registering federation
+clients automatically, or passing an Entity Identifier to
+`federation.ValidEntityID` or `NewSelfIssuer`.
+
+**Why:** OpenID Federation 1.0 §1.2 defines an Entity Identifier as an
+https URL with a host and optionally a port and path, which "MUST NOT
+contain query parameter or fragment components". Only a non-empty
+fragment was rejected: a query, an empty `?` or `#`, and userinfo
+(`https://user@host`) were accepted, and the query and userinfo were
+carried into the Entity Configuration fetch. All are now rejected.
+
+Entity Identifiers of the form the specification allows are
+unaffected.
+
 ### Federation metadata member names are case-sensitive
 
 **Affects:** anyone using `federation.AutomaticClientRepository`,

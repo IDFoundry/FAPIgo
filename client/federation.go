@@ -120,7 +120,12 @@ func DiscoverViaFederation(ctx context.Context, resolver *federation.Resolver, i
 	if err := requireAutomaticRegistration(raw); err != nil {
 		return DiscoveredMetadata{}, fmt.Errorf("client: discover via federation: %w", err)
 	}
-	return buildDiscoveredMetadata(doc, opts...)
+	md, err := buildDiscoveredMetadata(doc, opts...)
+	if err != nil {
+		return DiscoveredMetadata{}, err
+	}
+	md.resolved = &resolved
+	return md, nil
 }
 
 // requireAutomaticRegistration checks that an OP's "openid_provider"

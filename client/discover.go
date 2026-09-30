@@ -10,6 +10,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/fapihttp"
+	"github.com/idfoundry/fapigo/federation"
 	"github.com/idfoundry/fapigo/internal/metadata"
 	"github.com/idfoundry/fapigo/keys"
 )
@@ -109,6 +110,24 @@ type DiscoveredMetadata struct {
 	AuthorizationResponseIssSupported bool
 
 	issuer fapi.URL
+
+	// resolved is the issuer's resolved Trust Chain, for metadata from
+	// DiscoverViaFederation; nil otherwise.
+	resolved *federation.ResolvedEntity
+}
+
+// ResolvedEntity is the issuer's resolved Trust Chain — its Trust
+// Anchor, chain, every Entity Type's metadata, and its Trust Marks —
+// when this metadata came from DiscoverViaFederation, so a caller that
+// also checks those (e.g. a Trust Mark with federation.Resolver.VerifyTrustMark)
+// needn't resolve the chain a second time. ok is false for metadata from
+// Discover. Treat the result as read-only: its maps and slices are
+// shared with this DiscoveredMetadata.
+func (d DiscoveredMetadata) ResolvedEntity() (entity federation.ResolvedEntity, ok bool) {
+	if d.resolved == nil {
+		return federation.ResolvedEntity{}, false
+	}
+	return *d.resolved, true
 }
 
 // Issuer is the issuer identifier this metadata was verified against —

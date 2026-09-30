@@ -315,6 +315,18 @@ func TestDiscoverViaFederation(t *testing.T) {
 	if !md.AuthorizationResponseIssSupported {
 		t.Errorf("AuthorizationResponseIssSupported = false, want true")
 	}
+	// The Trust Chain it resolved is kept, so a caller checking Trust
+	// Marks needn't resolve it again.
+	resolved, ok := md.ResolvedEntity()
+	if !ok {
+		t.Fatal("ResolvedEntity() ok = false for DiscoverViaFederation metadata")
+	}
+	if resolved.EntityID != entityID || len(resolved.Chain) == 0 {
+		t.Errorf("ResolvedEntity() = %+v, want %s's resolved chain", resolved, entityID)
+	}
+	if _, ok := resolved.Metadata["openid_provider"]; !ok {
+		t.Error("ResolvedEntity().Metadata has no openid_provider")
+	}
 }
 
 // TestDiscoverViaFederationRejectsIssuerMismatch confirms the same
@@ -376,5 +388,23 @@ func TestDiscoverViaFederationClientRegistrationTypes(t *testing.T) {
 				t.Fatalf("DiscoverViaFederation(%s): %v", name, err)
 			}
 		})
+	}
+}
+
+// TestDiscoverViaFederationRejectsUnusableEndpoint covers resolved
+// openid_provider metadata that validates as a document but names an
+// endpoint this package can't use (plain http).
+func TestDiscoverViaFederationRejectsUnusableEndpoint(t *testing.T) {
+	entityID, resolver := selfAnchoredOpenIDProvider(t, func(entityID string) map[string]json.RawMessage {
+		openIDProvider := map[string]json.RawMessage{
+			"issuer":                              mustMarshal(t, entityID),
+			"token_endpoint":                      mustMarshal(t, "http://op.example/token"),
+			"jwks_uri":                            mustMarshal(t, entityID+"/jwks"),
+			"client_registration_types_supported": mustMarshal(t, []string{"automatic"}),
+		}
+		return map[string]json.RawMessage{"openid_provider": mustMarshal(t, openIDProvider)}
+	})
+	if _, err := client.DiscoverViaFederation(context.Background(), resolver, entityID); err == nil {
+		t.Fatal("DiscoverViaFederation(http token_endpoint) = nil error, want error")
 	}
 }

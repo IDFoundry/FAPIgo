@@ -297,9 +297,9 @@ func runCIBAModule(ctx context.Context, d cibaModuleDriver, testName string) str
 	}
 	if mtls {
 		cfg.SenderConstrain = storage.SenderConstrainMTLS
-		if !discovered.MTLSEndpointAliases.ApplyForSenderConstrain(&cfg.Endpoints) {
-			return awaitVerdict(rawHTTP, apiBase, module.ID, "issuer does not advertise mtls_endpoint_aliases").String()
-		}
+		// Without mtls_endpoint_aliases (optional, RFC 8705 §5) the
+		// ordinary endpoints take mutual TLS.
+		discovered.MTLSEndpointAliases.ApplyForSenderConstrain(&cfg.Endpoints)
 	}
 	deps := client.Dependencies{
 		Sessions:   memstore.NewSessionStore(),

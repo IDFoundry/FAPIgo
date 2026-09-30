@@ -3,7 +3,6 @@ package federation
 import (
 	"encoding/json"
 	"fmt"
-	"reflect"
 )
 
 // Standard metadata policy operator names (OpenID Federation 1.0
@@ -55,8 +54,8 @@ func policyError(format string, args ...any) error {
 // claim — see mergeOperators' own doc comment for how a non-standard
 // operator's merge is decided.
 func MergePolicy(current MetadataPolicy, currentCrit []string, next MetadataPolicy, nextCrit []string) (MetadataPolicy, error) {
-	crit := unionStrings(currentCrit, nextCrit)
-	if err := ValidatePolicy(next, crit); err != nil {
+	crit := newCritSet(currentCrit, nextCrit)
+	if err := validatePolicy(next, crit); err != nil {
 		return nil, err
 	}
 	if current == nil {
@@ -111,7 +110,7 @@ func cloneParamPolicies(params map[string]PolicyOperators) map[string]PolicyOper
 // error, matching crit's own "must be understood to be processed"
 // requirement when the operator is listed as critical, and erring on
 // the side of rejecting an ambiguous merge otherwise.
-func mergeOperators(current, next PolicyOperators, crit []string) (PolicyOperators, error) {
+func mergeOperators(current, next PolicyOperators, crit critSet) (PolicyOperators, error) {
 	// CodeQL (go/allocation-size-overflow) flags len(current)+len(next)
 	// as a theoretical overflow in the make() size argument — the
 	// capacity is only a hint, so drop the addition rather than carry
@@ -210,7 +209,7 @@ func mergeOperatorValue(name string, current, next json.RawMessage) (json.RawMes
 // "The values of value" for a null value (which removes the parameter)
 // are taken to be none, so a null value is compatible with an empty add,
 // with subset_of, and with an empty superset_of, and with nothing else.
-func validateCombination(ops PolicyOperators, crit []string) error {
+func validateCombination(ops PolicyOperators, crit critSet) error {
 	if err := validateOperandTypes(ops); err != nil {
 		return err
 	}
@@ -236,7 +235,7 @@ func validateCombination(ops PolicyOperators, crit []string) error {
 		if isStandardOperator(name) {
 			continue
 		}
-		if containsString(crit, name) {
+		if _, critical := crit[name]; critical {
 			return policyError("metadata_policy_crit requires understanding non-standard operator %q, which this package does not implement", name)
 		}
 	}
@@ -283,7 +282,7 @@ func validateValueCombinations(valueRaw json.RawMessage, ops PolicyOperators) er
 	}
 	if raw, ok := ops[opOneOf]; ok {
 		options, _ := decodeArray(raw) // type already checked
-		found, err := containsRaw(options, valueRaw)
+		found, err := contains(options, valueRaw)
 		if err != nil {
 			return policyError("one_of: %v", err)
 		}
@@ -326,8 +325,12 @@ func requireSubset(ops PolicyOperators, sub, super, msg string) error {
 	if err != nil {
 		return err
 	}
+	superSet, err := newValueSet(superValues)
+	if err != nil {
+		return policyError("%s: %v", msg, err)
+	}
 	for _, v := range subValues {
-		found, err := containsRaw(superValues, v)
+		found, err := superSet.contains(v)
 		if err != nil {
 			return policyError("%s: %v", msg, err)
 		}
@@ -360,6 +363,10 @@ func isJSONNull(raw json.RawMessage) bool {
 // ValidatePolicy checks every metadata parameter policy in policy with
 // validateCombination.
 func ValidatePolicy(policy MetadataPolicy, crit []string) error {
+	return validatePolicy(policy, newCritSet(crit))
+}
+
+func validatePolicy(policy MetadataPolicy, crit critSet) error {
 	for entityType, params := range policy {
 		for claim, ops := range params {
 			if err := validateCombination(ops, crit); err != nil {
@@ -397,8 +404,9 @@ func isStandardOperator(name string) bool {
 // the only two options available, matching the spec's own fallback
 // behavior for an implementation with no support for a given
 // non-standard operator at all.
-func ApplyPolicy(policy MetadataPolicy, crit []string, metadata map[string]json.RawMessage) (map[string]json.RawMessage, error) {
-	if err := ValidatePolicy(policy, crit); err != nil {
+func ApplyPolicy(policy MetadataPolicy, critNames []string, metadata map[string]json.RawMessage) (map[string]json.RawMessage, error) {
+	crit := newCritSet(critNames)
+	if err := validatePolicy(policy, crit); err != nil {
 		return nil, err
 	}
 	// Capacity is only a hint; see mergeOperators' own doc comment on
@@ -432,7 +440,7 @@ func ApplyPolicy(policy MetadataPolicy, crit []string, metadata map[string]json.
 	return resolved, nil
 }
 
-func applyEntityTypePolicy(params map[string]PolicyOperators, crit []string, current map[string]json.RawMessage) (map[string]json.RawMessage, error) {
+func applyEntityTypePolicy(params map[string]PolicyOperators, crit critSet, current map[string]json.RawMessage) (map[string]json.RawMessage, error) {
 	claims := make(map[string]bool, len(params))
 	for claim := range params {
 		claims[claim] = true
@@ -457,7 +465,7 @@ func applyEntityTypePolicy(params map[string]PolicyOperators, crit []string, cur
 
 // applyClaimPolicy applies ops to one metadata parameter's current
 // value, in the fixed order operatorApplicationOrder declares.
-func applyClaimPolicy(ops PolicyOperators, crit []string, value json.RawMessage, present bool) (json.RawMessage, bool, error) {
+func applyClaimPolicy(ops PolicyOperators, crit critSet, value json.RawMessage, present bool) (json.RawMessage, bool, error) {
 	for _, op := range operatorApplicationOrder {
 		raw, ok := ops[op]
 		if !ok {
@@ -473,7 +481,7 @@ func applyClaimPolicy(ops PolicyOperators, crit []string, value json.RawMessage,
 		if isStandardOperator(name) {
 			continue
 		}
-		if containsString(crit, name) {
+		if _, critical := crit[name]; critical {
 			return nil, false, policyError("metadata_policy_crit requires understanding non-standard operator %q, which this package does not implement", name)
 		}
 		// Not critical: ignored, per ApplyPolicy's own doc comment.
@@ -539,7 +547,7 @@ func applyOneOfOperator(operand, value json.RawMessage, present bool) (json.RawM
 	if err := json.Unmarshal(operand, &options); err != nil {
 		return nil, false, policyError("one_of: %v", err)
 	}
-	ok, err := containsRaw(options, value)
+	ok, err := contains(options, value)
 	if err != nil {
 		return nil, false, fmt.Errorf("one_of: %w", err)
 	}
@@ -572,8 +580,12 @@ func applySupersetOfOperator(operand, value json.RawMessage, present bool) (json
 	if err := json.Unmarshal(value, &have); err != nil {
 		return nil, false, policyError("superset_of: metadata parameter is not an array: %v", err)
 	}
+	haveSet, err := newValueSet(have)
+	if err != nil {
+		return nil, false, fmt.Errorf("superset_of: %w", err)
+	}
 	for _, want := range required {
-		ok, err := containsRaw(have, want)
+		ok, err := haveSet.contains(want)
 		if err != nil {
 			return nil, false, fmt.Errorf("superset_of: %w", err)
 		}
@@ -610,13 +622,17 @@ func unionArrays(a, b json.RawMessage) (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
+	seen, err := newValueSet(aArr)
+	if err != nil {
+		return nil, err
+	}
 	out := append([]json.RawMessage{}, aArr...)
 	for _, v := range bArr {
-		ok, err := containsRaw(out, v)
+		added, err := seen.add(v)
 		if err != nil {
 			return nil, err
 		}
-		if !ok {
+		if added {
 			out = append(out, v)
 		}
 	}
@@ -633,9 +649,13 @@ func intersectArrays(a, b json.RawMessage) (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
+	bSet, err := newValueSet(bArr)
+	if err != nil {
+		return nil, err
+	}
 	out := []json.RawMessage{}
 	for _, v := range aArr {
-		ok, err := containsRaw(bArr, v)
+		ok, err := bSet.contains(v)
 		if err != nil {
 			return nil, err
 		}
@@ -657,17 +677,14 @@ func decodeArray(raw json.RawMessage) ([]json.RawMessage, error) {
 	return arr, nil
 }
 
-func containsRaw(arr []json.RawMessage, target json.RawMessage) (bool, error) {
-	for _, v := range arr {
-		equal, err := jsonEqual(v, target)
-		if err != nil {
-			return false, err
-		}
-		if equal {
-			return true, nil
-		}
+// contains reports whether target is among arr's values, compared as
+// jsonEqual does.
+func contains(arr []json.RawMessage, target json.RawMessage) (bool, error) {
+	set, err := newValueSet(arr)
+	if err != nil {
+		return false, err
 	}
-	return false, nil
+	return set.contains(target)
 }
 
 // jsonEqual reports whether a and b decode to structurally equal JSON
@@ -677,37 +694,100 @@ func containsRaw(arr []json.RawMessage, target json.RawMessage) (bool, error) {
 // equal, matching ordinary JSON value equality; object member order
 // never matters, since both sides are decoded before comparing.
 func jsonEqual(a, b json.RawMessage) (bool, error) {
-	var av, bv any
-	if err := json.Unmarshal(a, &av); err != nil {
-		return false, policyError("%v", err)
+	ak, err := canonicalJSON(a)
+	if err != nil {
+		return false, err
 	}
-	if err := json.Unmarshal(b, &bv); err != nil {
-		return false, policyError("%v", err)
+	bk, err := canonicalJSON(b)
+	if err != nil {
+		return false, err
 	}
-	return reflect.DeepEqual(av, bv), nil
+	return ak == bk, nil
 }
 
-func unionStrings(a, b []string) []string {
-	if len(a) == 0 {
-		return b
+// canonicalJSON re-encodes raw so that two structurally equal JSON
+// values (see jsonEqual) always encode identically: decoding normalizes
+// numbers to float64, and encoding sorts object members. Negative zero
+// is the one decoded value encoding differently from a value it equals,
+// so it is normalized to zero.
+func canonicalJSON(raw json.RawMessage) (string, error) {
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return "", policyError("%v", err)
 	}
-	if len(b) == 0 {
-		return a
+	encoded, err := json.Marshal(normalizeZero(v))
+	if err != nil {
+		return "", policyError("%v", err)
 	}
-	out := append([]string{}, a...)
-	for _, s := range b {
-		if !containsString(out, s) {
-			out = append(out, s)
-		}
-	}
-	return out
+	return string(encoded), nil
 }
 
-func containsString(arr []string, target string) bool {
-	for _, s := range arr {
-		if s == target {
-			return true
+func normalizeZero(v any) any {
+	switch t := v.(type) {
+	case float64:
+		if t == 0 {
+			return float64(0)
+		}
+	case []any:
+		for i, e := range t {
+			t[i] = normalizeZero(e)
+		}
+	case map[string]any:
+		for k, e := range t {
+			t[k] = normalizeZero(e)
 		}
 	}
-	return false
+	return v
+}
+
+// valueSet is a set of JSON values keyed by canonicalJSON, so that set
+// operations over a policy's arrays take time linear in their sizes.
+// Policies come from any superior in a Trust Chain, and chains are
+// resolved before a client authenticates, so comparing every pair of
+// values would let a large array cost quadratic time.
+type valueSet map[string]struct{}
+
+func newValueSet(values []json.RawMessage) (valueSet, error) {
+	set := make(valueSet, len(values))
+	for _, v := range values {
+		if _, err := set.add(v); err != nil {
+			return nil, err
+		}
+	}
+	return set, nil
+}
+
+// add adds v, reporting whether it was not already present.
+func (s valueSet) add(v json.RawMessage) (bool, error) {
+	key, err := canonicalJSON(v)
+	if err != nil {
+		return false, err
+	}
+	if _, ok := s[key]; ok {
+		return false, nil
+	}
+	s[key] = struct{}{}
+	return true, nil
+}
+
+func (s valueSet) contains(v json.RawMessage) (bool, error) {
+	key, err := canonicalJSON(v)
+	if err != nil {
+		return false, err
+	}
+	_, ok := s[key]
+	return ok, nil
+}
+
+// critSet is a union of metadata_policy_crit claims, as a set.
+type critSet map[string]struct{}
+
+func newCritSet(lists ...[]string) critSet {
+	set := critSet{}
+	for _, list := range lists {
+		for _, name := range list {
+			set[name] = struct{}{}
+		}
+	}
+	return set
 }

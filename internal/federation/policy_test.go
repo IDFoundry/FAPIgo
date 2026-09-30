@@ -357,21 +357,14 @@ func TestMergePolicyNilShortcuts(t *testing.T) {
 	assertPolicyEqual(t, got, p)
 }
 
-func TestUnionStringsBothDirections(t *testing.T) {
-	if got := unionStrings(nil, []string{"a"}); len(got) != 1 || got[0] != "a" {
-		t.Errorf("unionStrings(nil, [a]) = %v, want [a]", got)
-	}
-	if got := unionStrings([]string{"a"}, nil); len(got) != 1 || got[0] != "a" {
-		t.Errorf("unionStrings([a], nil) = %v, want [a]", got)
-	}
-	got := unionStrings([]string{"a", "b"}, []string{"b", "c"})
-	want := map[string]bool{"a": true, "b": true, "c": true}
+func TestNewCritSet(t *testing.T) {
+	got := newCritSet(nil, []string{"a", "b"}, []string{"b", "c"})
 	if len(got) != 3 {
-		t.Fatalf("unionStrings([a,b],[b,c]) = %v, want 3 elements", got)
+		t.Fatalf("newCritSet = %v, want a, b and c", got)
 	}
-	for _, s := range got {
-		if !want[s] {
-			t.Errorf("unionStrings result contains unexpected %q", s)
+	for _, name := range []string{"a", "b", "c"} {
+		if _, ok := got[name]; !ok {
+			t.Errorf("newCritSet is missing %q", name)
 		}
 	}
 }

@@ -178,7 +178,7 @@ func (e *entity) SubordinateStatement(sub string) (string, bool, error) {
 }
 
 func (e *entity) serveFetch(w http.ResponseWriter, r *http.Request) {
-	sub, err := federation.SubjectFromFetchRequest(r)
+	sub, err := e.subIssuer.SubjectFromFetchRequest(r)
 	if err != nil {
 		federation.WriteError(w, err)
 		return

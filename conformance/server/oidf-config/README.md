@@ -874,7 +874,9 @@ its own `conformance-as-client-auth-mtls-and-mtls` container
 `expected-skips-client-auth-mtls-and-mtls.json` stay empty, matching
 every other clean profile above.
 
-## Client Credentials Grant (`{baseline,mtls,client-auth-mtls,client-auth-mtls-and-mtls}-client-credentials.config.json`)
+## Client Credentials Grant
+
+Configs: `{baseline,mtls,client-auth-mtls,client-auth-mtls-and-mtls}-client-credentials.config.json`.
 
 `server.RequestClientCredentialsToken` (RFC 6749 §4.4) has no
 PAR/authorize/redirect_uri/browser hop at all — a direct

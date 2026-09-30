@@ -5,7 +5,8 @@
 //
 // The package exposes workflow methods — PushAuthorizationRequest,
 // BeginAuthorization, CompleteAuthorization, ExchangeAuthorizationCode,
-// RefreshAccessToken, the CIBA trio BeginBackchannelAuthentication,
+// RefreshAccessToken, the CIBA methods BeginBackchannelAuthentication,
+// LookupBackchannelInteraction (which reads a pending request back),
 // CompleteBackchannelAuthentication and ExchangeBackchannelAuthentication,
 // RequestClientCredentialsToken, SignUserInfoResponse, Metadata,
 // PublicJWKS and (for OpenID Federation) EntityConfiguration — that

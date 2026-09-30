@@ -250,6 +250,18 @@ read it back with `server.ParseInteractionHandle` when the form is
 submitted, and protect that form with your usual CSRF defence. See
 `server.InteractionHandle`'s doc comment.
 
+**Keep the interaction until the form comes back.** The submission
+needs `a.Interaction` again: the scope, the requested claims and any
+authorization details the user is approving. Encode it with
+`a.Interaction.MarshalText()` and keep it with the handle, somewhere only
+your application can write: a server-side session, or a cookie you
+sign. Restore it with `server.ParseInteractionRequest`. Then any
+instance can handle the submission, not only the one that began the
+authorization. A modified copy can't widen the grant, since
+`CompleteAuthorization` checks it against the request the server
+stored. `examples/federated-union` keeps both in a signed cookie
+(`union/interaction_cookie.go`).
+
 `cmd/conformance-as/authorize.go` is a complete, working version of
 exactly this — read it for the full picture of the GET (render the
 form) and POST (handle the submission) halves of a real HTTP flow. Its

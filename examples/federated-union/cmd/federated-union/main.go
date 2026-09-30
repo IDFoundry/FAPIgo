@@ -24,14 +24,16 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"syscall"
 	"time"
 
-	"github.com/idfoundry/fapigo/examples/federated-union/internal/demonet"
 	"github.com/idfoundry/fapigo/examples/federated-union/union"
+	"github.com/idfoundry/fapigo/examples/internal/demokit"
 )
+
+// caName is the demo CA's name, as a browser's trust store shows it.
+const caName = "Meridian Union demo CA"
 
 func main() {
 	// Not 8443: a locally running OIDF conformance suite uses that.
@@ -65,7 +67,7 @@ type options struct {
 func run(ctx context.Context, opts options) error {
 	port, state := opts.port, opts.state
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
-	n, err := demonet.New(addr, union.Hosts(), state)
+	n, err := demokit.New(addr, union.Hosts(), state, caName)
 	if err != nil {
 		return err
 	}
@@ -73,7 +75,7 @@ func run(ctx context.Context, opts options) error {
 	if err != nil {
 		return fmt.Errorf("build the union: %w", err)
 	}
-	listeners, err := listen(port)
+	listeners, err := demokit.Listen(port)
 	if err != nil {
 		return err
 	}
@@ -94,7 +96,7 @@ func run(ctx context.Context, opts options) error {
 	}
 	printBanner(world, console, caPath, opts.open)
 	if opts.open {
-		if err := openChrome(opts.chrome, state, n.ServingSPKIHash(), console); err != nil {
+		if err := demokit.OpenChrome(opts.chrome, state, n.ServingSPKIHash(), console); err != nil {
 			log.Printf("-open: %v", err)
 		}
 	}
@@ -131,17 +133,5 @@ For any other browser, trust the demo CA once. It can only vouch for
   %s
 
 `, console, world.URL("bank.southport.localhost", "/"), world.URL("telco.eastmark.localhost", "/"),
-		browser, trustCommand(caPath))
-}
-
-// trustCommand adds the demo CA to the current user's trust store.
-func trustCommand(caPath string) string {
-	switch runtime.GOOS {
-	case "darwin":
-		return fmt.Sprintf("security add-trusted-cert -r trustRoot -k ~/Library/Keychains/login.keychain-db %q", caPath)
-	case "windows":
-		return fmt.Sprintf("certutil -user -addstore Root %q", caPath)
-	default:
-		return fmt.Sprintf("certutil -d sql:$HOME/.pki/nssdb -A -t C,, -n \"Meridian Union demo CA\" -i %q", caPath)
-	}
+		browser, demokit.TrustCommand(caPath, caName))
 }

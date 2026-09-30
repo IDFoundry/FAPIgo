@@ -1,4 +1,4 @@
-package main
+package demokit
 
 import (
 	"errors"
@@ -8,7 +8,7 @@ import (
 	"syscall"
 )
 
-// listen binds port on both loopback addresses. Browsers resolve
+// Listen binds port on both loopback addresses. Browsers resolve
 // *.localhost to ::1 as well as 127.0.0.1 and usually try ::1 first, so
 // listening on IPv4 alone would send them elsewhere — or nowhere.
 //
@@ -16,7 +16,7 @@ import (
 // a wildcard listener (a container publishing the port, say) would
 // otherwise quietly take the browser's ::1 connections, or be shadowed
 // by the demo on 127.0.0.1.
-func listen(port int) ([]net.Listener, error) {
+func Listen(port int) ([]net.Listener, error) {
 	p := strconv.Itoa(port)
 	probe, err := net.Listen("tcp", ":"+p)
 	if err != nil {

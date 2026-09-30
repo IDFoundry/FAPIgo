@@ -1,4 +1,4 @@
-package demonet
+package demokit
 
 import (
 	"bytes"
@@ -11,13 +11,15 @@ import (
 
 var testHosts = []string{"console.localhost", "id.eastmark.localhost"}
 
+const testCAName = "Demo CA"
+
 func TestLoadOrIssueKeepsCertificatesAcrossRuns(t *testing.T) {
 	dir, now := t.TempDir(), time.Now()
-	first, err := loadOrIssue(dir, testHosts, now)
+	first, err := loadOrIssue(dir, testCAName, testHosts, now)
 	if err != nil {
 		t.Fatalf("first run: %v", err)
 	}
-	second, err := loadOrIssue(dir, []string{"id.eastmark.localhost", "console.localhost"}, now.Add(24*time.Hour))
+	second, err := loadOrIssue(dir, testCAName, []string{"id.eastmark.localhost", "console.localhost"}, now.Add(24*time.Hour))
 	if err != nil {
 		t.Fatalf("second run: %v", err)
 	}
@@ -40,12 +42,12 @@ func TestLoadOrIssueKeepsCertificatesAcrossRuns(t *testing.T) {
 
 func TestLoadOrIssueReissuesServingCertificateForNewHosts(t *testing.T) {
 	dir, now := t.TempDir(), time.Now()
-	first, err := loadOrIssue(dir, testHosts, now)
+	first, err := loadOrIssue(dir, testCAName, testHosts, now)
 	if err != nil {
 		t.Fatalf("first run: %v", err)
 	}
 	hosts := append([]string{"union.localhost"}, testHosts...)
-	second, err := loadOrIssue(dir, hosts, now)
+	second, err := loadOrIssue(dir, testCAName, hosts, now)
 	if err != nil {
 		t.Fatalf("second run: %v", err)
 	}
@@ -59,14 +61,14 @@ func TestLoadOrIssueReissuesServingCertificateForNewHosts(t *testing.T) {
 
 func TestLoadOrIssueRenewsBeforeExpiry(t *testing.T) {
 	dir, now := t.TempDir(), time.Now()
-	first, err := loadOrIssue(dir, testHosts, now)
+	first, err := loadOrIssue(dir, testCAName, testHosts, now)
 	if err != nil {
 		t.Fatalf("first run: %v", err)
 	}
 	// Within renewBefore of the serving certificate's expiry, but not
 	// the CA's.
 	later := first.serving.Leaf.NotAfter.Add(-renewBefore / 2)
-	second, err := loadOrIssue(dir, testHosts, later)
+	second, err := loadOrIssue(dir, testCAName, testHosts, later)
 	if err != nil {
 		t.Fatalf("second run: %v", err)
 	}
@@ -76,7 +78,7 @@ func TestLoadOrIssueRenewsBeforeExpiry(t *testing.T) {
 	if bytes.Equal(first.serving.Certificate[0], second.serving.Certificate[0]) {
 		t.Error("serving certificate close to expiry was kept, want it renewed")
 	}
-	third, err := loadOrIssue(dir, testHosts, first.ca.NotAfter.Add(-renewBefore/2))
+	third, err := loadOrIssue(dir, testCAName, testHosts, first.ca.NotAfter.Add(-renewBefore/2))
 	if err != nil {
 		t.Fatalf("third run: %v", err)
 	}
@@ -87,7 +89,7 @@ func TestLoadOrIssueRenewsBeforeExpiry(t *testing.T) {
 
 func TestCAOnlyVouchesForLocalhost(t *testing.T) {
 	now := time.Now()
-	ca, caKey, err := issueCA(now)
+	ca, caKey, err := issueCA(now, testCAName)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +116,7 @@ func TestCAOnlyVouchesForLocalhost(t *testing.T) {
 func TestLoadOrIssueWithoutStateDirKeepsNothing(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
-	if _, err := loadOrIssue("", testHosts, time.Now()); err != nil {
+	if _, err := loadOrIssue("", testCAName, testHosts, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if entries, _ := os.ReadDir(dir); len(entries) != 0 {

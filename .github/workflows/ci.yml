@@ -152,23 +152,28 @@ jobs:
         with:
           version: v2.12
 
-  # examples/federated-union is its own Go module (it builds against
-  # this checkout through a replace directive), so the jobs above never
-  # see it. This keeps it compiling, linted and passing its end-to-end
-  # tests as the library changes underneath it.
+  # Each example, and the demokit package they share, is its own Go
+  # module (building against this checkout through replace directives),
+  # so the jobs above never see them. This keeps each one compiling,
+  # linted and passing its end-to-end tests as the library changes
+  # underneath it.
   examples:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [examples/internal/demokit, examples/federated-union]
     defaults:
       run:
-        working-directory: examples/federated-union
+        working-directory: ${{ matrix.module }}
     steps:
       - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v7
         with:
-          go-version-file: examples/federated-union/go.mod
+          go-version-file: ${{ matrix.module }}/go.mod
           check-latest: true
-          cache-dependency-path: examples/federated-union/go.mod
+          cache-dependency-path: ${{ matrix.module }}/go.mod
 
       - name: go vet
         run: go vet ./...
@@ -190,7 +195,7 @@ jobs:
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.12
-          working-directory: examples/federated-union
+          working-directory: ${{ matrix.module }}
 
   govulncheck:
     runs-on: ubuntu-latest

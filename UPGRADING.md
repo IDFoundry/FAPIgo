@@ -53,6 +53,22 @@ from a *name* that resolves to loopback (it now fails with
 `ErrSSRFBlocked`), list it in `AllowedLoopbackHosts`. Set the same
 fields on `TransportConfig` if you use `NewClient`.
 
+### Custom `SessionStore`s must return `ExpectedIssuer`
+
+**Affects:** relying parties using `client` with their own
+`storage.SessionStore` (not `memstore`).
+
+**Why:** completing a callback now checks the consumed session's
+`ExpectedIssuer` against the completing client's issuer, so a callback
+routed to the wrong client (one client per issuer over a shared store)
+can't finish another issuer's flow. Nothing read that field before, so
+a store that never persisted it now fails every sign-in with "session
+was begun by a client for a different issuer".
+
+Stores that pass `storage.TestSessionStoreContract` already round-trip it.
+Otherwise, persist `NewSession.ExpectedIssuer` and return it as
+`ConsumedSession.ExpectedIssuer`.
+
 ## v0.39.0
 
 ### `federation.Limits.MaxAuthorityHints` is required

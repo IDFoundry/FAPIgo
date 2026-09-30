@@ -285,7 +285,7 @@ func main() {
 		federation.WriteEntityStatement(w, token)
 	})
 	mux.HandleFunc("GET /fetch", func(w http.ResponseWriter, r *http.Request) {
-		sub, err := federation.SubjectFromFetchRequest(r)
+		sub, err := subordinateIssuer.SubjectFromFetchRequest(r)
 		if err != nil {
 			federation.WriteError(w, err)
 			return

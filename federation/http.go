@@ -25,10 +25,13 @@ var listingFilterParams = []string{"entity_type", "trust_marked", "trust_mark_ty
 // does not parse; an embedder needing that variant reads r.PostForm's
 // own "sub" value directly.
 //
-// The one other case §9 separately calls out — "sub" naming the
-// issuing entity itself — isn't checked here: only
-// SubordinateIssueConfig.EntityID knows the issuer's own identity, so
-// SubordinateIssuer.SubordinateStatement rejects that case instead.
+// The one other case §8.1.2 separately calls out — "sub" naming the
+// issuing entity itself, for which invalid_request is RECOMMENDED — isn't
+// checked here, since only the issuer knows its own identity. Prefer
+// SubordinateIssuer.SubjectFromFetchRequest, which checks both: a handler
+// that looks "sub" up among its subordinates before reaching
+// SubordinateIssuer.SubordinateStatement would otherwise answer
+// not_found.
 func SubjectFromFetchRequest(r *http.Request) (string, error) {
 	sub := r.URL.Query().Get("sub")
 	if sub == "" {

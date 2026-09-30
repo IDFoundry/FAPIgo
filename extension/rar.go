@@ -460,3 +460,45 @@ func withoutTypeMember(raw json.RawMessage) (json.RawMessage, error) {
 	delete(members, "type")
 	return json.Marshal(members)
 }
+
+// MarshalJSON encodes v as an authorization_details array of its
+// objects, grouped by type — for storing, with the rest of an
+// interaction, until the end user decides (see
+// server.InteractionRequest.MarshalText).
+func (v RARValues) MarshalJSON() ([]byte, error) {
+	types := make([]string, 0, len(v.byType))
+	for t := range v.byType {
+		types = append(types, t)
+	}
+	sort.Strings(types)
+	objects := []json.RawMessage{}
+	for _, t := range types {
+		objects = append(objects, v.byType[t]...)
+	}
+	return json.Marshal(objects)
+}
+
+// UnmarshalJSON restores values MarshalJSON encoded. It doesn't validate
+// the objects against a RARRegistry: restored values are for reading
+// with RARGet, as values RARRegistry.Parse returned are, and a server
+// checks any grant against the request it stored itself.
+func (v *RARValues) UnmarshalJSON(data []byte) error {
+	var objects []json.RawMessage
+	if err := json.Unmarshal(data, &objects); err != nil {
+		return fmt.Errorf("extension: authorization details: %w", err)
+	}
+	if len(objects) == 0 {
+		v.byType = nil // the zero value, as RARValues{} encodes
+		return nil
+	}
+	byType := make(map[string][]json.RawMessage, len(objects))
+	for _, obj := range objects {
+		var head rarObjectHead
+		if err := json.Unmarshal(obj, &head); err != nil || head.Type == "" {
+			return fmt.Errorf("extension: authorization details: an object has no type")
+		}
+		byType[head.Type] = append(byType[head.Type], obj)
+	}
+	v.byType = byType
+	return nil
+}

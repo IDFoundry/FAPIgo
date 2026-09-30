@@ -187,3 +187,28 @@ func AsParameters(values Values, defs ...Registered) map[string]json.RawMessage 
 	}
 	return out
 }
+
+// MarshalJSON encodes values as a JSON object of their wire names — for
+// storing, with the rest of an interaction, until the end user decides
+// (see server.InteractionRequest.MarshalText).
+func (values Values) MarshalJSON() ([]byte, error) {
+	if values.raw == nil {
+		return []byte("{}"), nil
+	}
+	return json.Marshal(values.raw)
+}
+
+// UnmarshalJSON restores values MarshalJSON encoded. It doesn't validate
+// them against a Registry: restored values are for reading with Get, as
+// values Registry.Parse returned are.
+func (values *Values) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("extension: values: %w", err)
+	}
+	if len(raw) == 0 {
+		raw = nil // the zero value, as Values{} encodes
+	}
+	values.raw = raw
+	return nil
+}

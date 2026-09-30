@@ -10,21 +10,21 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/idfoundry/fapigo/examples/federated-union/internal/demonet"
 	"github.com/idfoundry/fapigo/examples/federated-union/union"
+	"github.com/idfoundry/fapigo/examples/internal/demokit"
 )
 
 // startUnion runs the whole federation on a free local port.
-func startUnion(t *testing.T) (*union.World, *demonet.Net) {
+func startUnion(t *testing.T) (*union.World, *demokit.Net) {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
-	n, err := demonet.New(listener.Addr().String(), union.Hosts(), "")
+	n, err := demokit.New(listener.Addr().String(), union.Hosts(), "", "Test CA")
 	if err != nil {
-		t.Fatalf("demonet.New: %v", err)
+		t.Fatalf("demokit.New: %v", err)
 	}
 	w, err := union.New(port, n)
 	if err != nil {
@@ -41,7 +41,7 @@ type browser struct {
 	c *http.Client
 }
 
-func newBrowser(t *testing.T, n *demonet.Net) browser {
+func newBrowser(t *testing.T, n *demokit.Net) browser {
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		t.Fatalf("cookiejar: %v", err)

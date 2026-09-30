@@ -1,4 +1,4 @@
-package demonet
+package demokit
 
 import (
 	"crypto"
@@ -47,13 +47,13 @@ type certificates struct {
 
 // loadOrIssue returns the CA and serving certificate kept in dir, issuing
 // and saving whichever is missing, expiring soon, or (for the serving
-// certificate) no longer covers hosts. An empty dir keeps nothing: both
-// are issued afresh.
-func loadOrIssue(dir string, hosts []string, now time.Time) (certificates, error) {
+// certificate) no longer covers hosts; a new CA is named caName. An
+// empty dir keeps nothing: both are issued afresh.
+func loadOrIssue(dir, caName string, hosts []string, now time.Time) (certificates, error) {
 	var c certificates
 	var err error
 	if c.ca, c.caKey, err = loadCA(dir, now); err != nil {
-		if c.ca, c.caKey, err = issueCA(now); err != nil {
+		if c.ca, c.caKey, err = issueCA(now, caName); err != nil {
 			return certificates{}, err
 		}
 		if err := save(dir, caCertFile, caKeyFile, c.ca.Raw, c.caKey); err != nil {
@@ -71,7 +71,7 @@ func loadOrIssue(dir string, hosts []string, now time.Time) (certificates, error
 	return c, nil
 }
 
-func issueCA(now time.Time) (*x509.Certificate, crypto.Signer, error) {
+func issueCA(now time.Time, name string) (*x509.Certificate, crypto.Signer, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, nil, err
@@ -82,7 +82,7 @@ func issueCA(now time.Time) (*x509.Certificate, crypto.Signer, error) {
 	}
 	template := &x509.Certificate{
 		SerialNumber:          serial,
-		Subject:               pkix.Name{CommonName: "Meridian Union demo CA"},
+		Subject:               pkix.Name{CommonName: name},
 		NotBefore:             now.Add(-time.Hour),
 		NotAfter:              now.Add(caLifetime),
 		IsCA:                  true,

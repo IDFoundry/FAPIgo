@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/idfoundry/fapigo/extension"
+	"github.com/idfoundry/fapigo/server"
 )
 
 // phone is Alder Bank's app on Sam's phone: where a request started on
@@ -34,11 +35,15 @@ type notificationView struct {
 	Age                            string
 }
 
-func (p *phone) home(w http.ResponseWriter, _ *http.Request) {
+func (p *phone) home(w http.ResponseWriter, r *http.Request) {
 	var views []notificationView
 	for _, req := range p.w.bank.pendingFor(p.owner) {
+		interaction, err := p.w.bank.interaction(r.Context(), req)
+		if err != nil {
+			continue // answered or expired since
+		}
 		views = append(views, notificationView{
-			AuthReqID: req.authReqID, ClientName: clientName(req), Summary: summary(req.interaction.AuthorizationDetails),
+			AuthReqID: req.authReqID, ClientName: clientName(interaction), Summary: summary(interaction.AuthorizationDetails),
 			Age: time.Since(req.received).Round(time.Second).String(),
 		})
 	}
@@ -47,11 +52,11 @@ func (p *phone) home(w http.ResponseWriter, _ *http.Request) {
 	p.w.render(w, "phone-home", page)
 }
 
-func clientName(req *pendingRequest) string {
-	if req.interaction.ClientDisplay.Name != "" {
-		return req.interaction.ClientDisplay.Name
+func clientName(interaction server.BackchannelInteractionRequest) string {
+	if interaction.ClientDisplay.Name != "" {
+		return interaction.ClientDisplay.Name
 	}
-	return string(req.interaction.ClientID)
+	return string(interaction.ClientID)
 }
 
 // summary is a one-line description of what a request asks for.
@@ -93,15 +98,20 @@ var actionLabels = map[string]string{
 
 func (p *phone) request(w http.ResponseWriter, r *http.Request) {
 	req, ok := p.w.bank.lookup(p.owner, r.URL.Query().Get("id"))
-	if !ok {
+	var interaction server.BackchannelInteractionRequest
+	var err error
+	if ok {
+		interaction, err = p.w.bank.interaction(r.Context(), req)
+	}
+	if !ok || err != nil {
 		p.w.renderError(w, phoneHost, http.StatusNotFound, "Nothing to approve", "This request was already answered, or has expired.")
 		return
 	}
 	page := approvalPage{
-		Page: p.w.page("Alder Bank", phoneHost), AuthReqID: req.authReqID, ClientName: clientName(req),
-		BindingMessage: req.interaction.BindingMessage, Expires: time.Until(req.expires).Round(time.Second).String(),
+		Page: p.w.page("Alder Bank", phoneHost), AuthReqID: req.authReqID, ClientName: clientName(interaction),
+		BindingMessage: interaction.BindingMessage, Expires: time.Until(req.expires).Round(time.Second).String(),
 	}
-	for _, pay := range paymentsOf(req.interaction.AuthorizationDetails) {
+	for _, pay := range paymentsOf(interaction.AuthorizationDetails) {
 		payee, verified := payees[pay.CreditorAccount.IBAN]
 		page.Payments = append(page.Payments, paymentView{
 			Amount: "€" + pay.InstructedAmount.Amount, Payee: payee, PayeeVerified: verified,
@@ -109,7 +119,7 @@ func (p *phone) request(w http.ResponseWriter, r *http.Request) {
 			DebitAccount: describeAccount(p.owner.accounts[0]),
 		})
 	}
-	for _, access := range accountAccessOf(req.interaction.AuthorizationDetails) {
+	for _, access := range accountAccessOf(interaction.AuthorizationDetails) {
 		var view accessView
 		for _, a := range access.Accounts {
 			label := a.IBAN + " (not your account)"
@@ -149,7 +159,12 @@ func (p *phone) decide(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PostForm.Get("id")
 	req, ok := p.w.bank.lookup(p.owner, id)
-	if !ok {
+	var interaction server.BackchannelInteractionRequest
+	var err error
+	if ok {
+		interaction, err = p.w.bank.interaction(r.Context(), req)
+	}
+	if !ok || err != nil {
 		p.w.renderError(w, phoneHost, http.StatusNotFound, "Nothing to approve", "This request was already answered, or has expired.")
 		return
 	}
@@ -157,7 +172,7 @@ func (p *phone) decide(w http.ResponseWriter, r *http.Request) {
 	var granted []json.RawMessage
 	if approve {
 		var err error
-		if granted, err = grantFromForm(req, r.PostForm["account"], r.PostForm["action"]); err != nil {
+		if granted, err = grantFromForm(interaction, r.PostForm["account"], r.PostForm["action"]); err != nil {
 			p.w.renderError(w, phoneHost, http.StatusBadRequest, "Nothing approved", err.Error())
 			return
 		}
@@ -166,7 +181,7 @@ func (p *phone) decide(w http.ResponseWriter, r *http.Request) {
 		p.w.renderError(w, phoneHost, http.StatusNotFound, "Nothing to approve", "This request was already answered, or has expired.")
 		return
 	}
-	if err := p.w.bank.decide(r.Context(), req, approve, granted); err != nil {
+	if err := p.w.bank.decide(r.Context(), req, interaction.Scope, approve, granted); err != nil {
 		p.w.renderError(w, phoneHost, http.StatusInternalServerError, "The bank couldn't record that", err.Error())
 		return
 	}
@@ -177,16 +192,16 @@ func (p *phone) decide(w http.ResponseWriter, r *http.Request) {
 // and each account-access request narrowed to the ticked accounts and
 // actions. The server checks the result is a narrowing of the request
 // (RARDefinition.ValidateGrant), so a tampered form can't widen it.
-func grantFromForm(req *pendingRequest, accounts, actions []string) ([]json.RawMessage, error) {
+func grantFromForm(interaction server.BackchannelInteractionRequest, accounts, actions []string) ([]json.RawMessage, error) {
 	var granted []json.RawMessage
-	for _, pay := range paymentsOf(req.interaction.AuthorizationDetails) {
+	for _, pay := range paymentsOf(interaction.AuthorizationDetails) {
 		raw, err := extension.RARSet(paymentInitiationType, pay)
 		if err != nil {
 			return nil, err
 		}
 		granted = append(granted, raw)
 	}
-	for _, access := range accountAccessOf(req.interaction.AuthorizationDetails) {
+	for _, access := range accountAccessOf(interaction.AuthorizationDetails) {
 		var narrowed accountInformation
 		for _, a := range access.Accounts {
 			if slices.Contains(accounts, a.IBAN) {

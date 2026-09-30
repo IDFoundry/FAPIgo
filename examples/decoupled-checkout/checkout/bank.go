@@ -44,18 +44,22 @@ type bank struct {
 	cfg  server.Config
 	deps server.Dependencies
 
-	mu      sync.Mutex
-	pending map[string]*pendingRequest // by auth_req_id
+	// inbox is which requests await which customer's decision: what a
+	// real bank keeps alongside the push notifications it sends to
+	// phones. The requests themselves stay with the server, which any
+	// instance sharing its store can look up.
+	mu    sync.Mutex
+	inbox map[string]*pendingRequest // by auth_req_id
 }
 
-// pendingRequest is a request waiting for the customer on their phone.
+// pendingRequest is a request waiting for the customer on their phone:
+// its handle, and whose phone it's for.
 type pendingRequest struct {
-	authReqID   string
-	handle      server.BackchannelAuthenticationHandle
-	interaction server.BackchannelInteractionRequest
-	customer    customer
-	received    time.Time
-	expires     time.Time
+	authReqID string
+	handle    server.BackchannelAuthenticationHandle
+	customer  customer
+	received  time.Time
+	expires   time.Time
 }
 
 func (w *World) newBank(till, pocketwise clientKeys) (*bank, error) {
@@ -118,7 +122,7 @@ func (w *World) newBank(till, pocketwise clientKeys) (*bank, error) {
 	algorithms := server.RecommendedAlgorithms()
 	algorithms.BackchannelAuthenticationRequest = server.RecommendedAlgorithmSet()
 
-	b := &bank{w: w, pending: map[string]*pendingRequest{}}
+	b := &bank{w: w, inbox: map[string]*pendingRequest{}}
 	b.cfg = server.Config{
 		Issuer: issuer, Endpoints: endpoints, Profile: server.ProfileFAPISecurity,
 		Algorithms: algorithms, Limits: limits, Assurance: server.AssuranceDevelopment,
@@ -238,8 +242,8 @@ func (b *bank) backchannelAuthentication(w http.ResponseWriter, r *http.Request)
 		}
 		now := time.Now()
 		b.mu.Lock()
-		b.pending[a.AuthReqID.String()] = &pendingRequest{
-			authReqID: a.AuthReqID.String(), handle: a.Handle, interaction: a.Interaction,
+		b.inbox[a.AuthReqID.String()] = &pendingRequest{
+			authReqID: a.AuthReqID.String(), handle: a.Handle,
 			customer: c, received: now, expires: now.Add(a.ExpiresIn),
 		}
 		b.mu.Unlock()
@@ -271,9 +275,9 @@ func (b *bank) pendingFor(c customer) []*pendingRequest {
 	defer b.mu.Unlock()
 	now := time.Now()
 	var out []*pendingRequest
-	for id, p := range b.pending {
+	for id, p := range b.inbox {
 		if now.After(p.expires) {
-			delete(b.pending, id)
+			delete(b.inbox, id)
 			continue
 		}
 		if p.customer.loginHint == c.loginHint {
@@ -288,26 +292,32 @@ func (b *bank) pendingFor(c customer) []*pendingRequest {
 func (b *bank) take(c customer, authReqID string) (*pendingRequest, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	p, ok := b.pending[authReqID]
+	p, ok := b.inbox[authReqID]
 	if !ok || p.customer.loginHint != c.loginHint || time.Now().After(p.expires) {
 		return nil, false
 	}
-	delete(b.pending, authReqID)
+	delete(b.inbox, authReqID)
 	return p, true
 }
 
 func (b *bank) lookup(c customer, authReqID string) (*pendingRequest, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	p, ok := b.pending[authReqID]
+	p, ok := b.inbox[authReqID]
 	if !ok || p.customer.loginHint != c.loginHint {
 		return nil, false
 	}
 	return p, true
 }
 
-// decide records the customer's decision: approve with granted, or deny.
-func (b *bank) decide(ctx context.Context, p *pendingRequest, approve bool, granted []json.RawMessage) error {
+// interaction is p's request, as the server stored it.
+func (b *bank) interaction(ctx context.Context, p *pendingRequest) (server.BackchannelInteractionRequest, error) {
+	return b.srv.LookupBackchannelInteraction(ctx, p.handle)
+}
+
+// decide records the customer's decision on p, which asked for scope:
+// approve with granted, or deny.
+func (b *bank) decide(ctx context.Context, p *pendingRequest, scope []string, approve bool, granted []json.RawMessage) error {
 	result := server.Deny("the customer declined")
 	if approve {
 		subjectID, err := server.NewSubjectID(p.customer.loginHint)
@@ -324,7 +334,7 @@ func (b *bank) decide(ctx context.Context, p *pendingRequest, approve bool, gran
 			return err
 		}
 		result = server.Authorize(subject, auth, server.GrantedAuthorization{
-			Scope: p.interaction.Scope, AuthorizationDetails: granted,
+			Scope: scope, AuthorizationDetails: granted,
 		})
 	}
 	return b.srv.CompleteBackchannelAuthentication(ctx, server.CompleteBackchannelAuthenticationRequest{Handle: p.handle, Result: result})

@@ -142,14 +142,14 @@ Everything here uses FAPIgo's public API only.
 |---|---|
 | Union and national authorities | `federation.SelfIssuer` (with `TrustMarkIssuers`), `federation.SubordinateIssuer` with `MetadataPolicy` and `Constraints` |
 | Accreditation offices | `federation.TrustMarkIssuer` |
-| Identity providers | `server.Server` with `Config.AutomaticRegistration` and `Config.Federation`; `Server.EntityConfiguration` publishing the Trust Mark; `GrantedAuthorization.ApprovedIdentityClaims` from the consent page |
+| Identity providers | `server.Server` with `Config.AutomaticRegistration` and `Config.Federation`; `Server.EntityConfiguration` publishing the Trust Mark; `GrantedAuthorization.ApprovedIdentityClaims` from the consent page; the pending sign-in kept in a signed cookie (`InteractionRequest.MarshalText`, `server.ParseInteractionRequest`) rather than in the process, as a provider running several instances would |
 | Services | `client.DiscoverViaFederation`, `client.NewFromDiscovery`, `BeginAuthorizationRequest.Claims`, `Resolver.VerifyTrustMark` with `RequireFederationAccreditation` |
 | Sign-in | PAR with a signed request object, PKCE, DPoP-bound tokens, and the session cookie binding (`client.ParseSessionHandle`) |
 
 The code:
 
 - [`union/world.go`](union/world.go) — the countries, the Union and its policy, the scenes.
-- [`union/idp.go`](union/idp.go) — the identity providers.
+- [`union/idp.go`](union/idp.go) — the identity providers; [`union/interaction_cookie.go`](union/interaction_cookie.go) — the signed cookie a pending sign-in travels in.
 - [`union/rp.go`](union/rp.go) — the services.
 - [`union/console.go`](union/console.go) — the console.
 - [`../internal/demokit`](../internal/demokit/net.go) — one listener serving every host, the certificate, and the Chrome window; shared with the other example demos.

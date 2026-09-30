@@ -1,16 +1,17 @@
-// Command federated-union runs the Meridian Union demo: three fictional
-// countries' identity federations joined into one OpenID Federation.
+// Command decoupled-checkout runs the decoupled-checkout demo: Alder
+// Bank's customer approves, on their phone, payments and account access
+// started on other devices, with CIBA and Rich Authorization Requests.
 //
-//	go run ./cmd/federated-union -open
+//	go run ./cmd/decoupled-checkout -open
 //
 // With -open it starts Chrome on the console, in a separate profile
 // (state/chrome-profile) that accepts the demo's certificate — and only
 // that one — without a warning.
 //
 // It keeps the demo CA and TLS certificate in a state directory (-state,
-// default .union-state), so a browser told to trust the CA once stays
+// default .checkout-state), so a browser told to trust the CA once stays
 // that way; -reset starts over with a new one. Everything else — keys,
-// registrations, sign-ins — is in memory and starts fresh each run.
+// registrations, requests — is in memory and starts fresh each run.
 package main
 
 import (
@@ -28,17 +29,18 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/idfoundry/fapigo/examples/federated-union/union"
+	"github.com/idfoundry/fapigo/examples/decoupled-checkout/checkout"
 	"github.com/idfoundry/fapigo/examples/internal/demokit"
 )
 
 // caName is the demo CA's name, as a browser's trust store shows it.
-const caName = "Meridian Union demo CA"
+const caName = "Decoupled checkout demo CA"
 
 func main() {
-	// Not 8443: a locally running OIDF conformance suite uses that.
-	port := flag.Int("port", 8643, "HTTPS port every demo host is served on")
-	state := flag.String("state", ".union-state", "directory the demo CA and TLS certificate are kept in")
+	// Not 8443 (a locally running OIDF conformance suite), nor 8643
+	// (the federated-union demo), so both demos can run at once.
+	port := flag.Int("port", 8644, "HTTPS port every demo host is served on")
+	state := flag.String("state", ".checkout-state", "directory the demo CA and TLS certificate are kept in")
 	reset := flag.Bool("reset", false, "delete the state directory first, issuing a new CA")
 	open := flag.Bool("open", false, "open the console in Chrome, in a separate profile that accepts the demo's certificate (no warnings)")
 	chrome := flag.String("chrome", "", "with -open: the Chrome or Chromium executable (default: look in the usual places)")
@@ -51,29 +53,20 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := run(ctx, options{port: *port, state: *state, open: *open, chrome: *chrome}); err != nil {
+	if err := run(ctx, *port, *state, *open, *chrome); err != nil {
 		log.Fatal(err)
 	}
 }
 
-// options are the command-line choices run acts on.
-type options struct {
-	port   int
-	state  string
-	open   bool   // open Chrome on the console once listening
-	chrome string // Chrome's path, when not in the usual places
-}
-
-func run(ctx context.Context, opts options) error {
-	port, state := opts.port, opts.state
+func run(ctx context.Context, port int, state string, open bool, chrome string) error {
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
-	n, err := demokit.New(addr, union.Hosts(), state, caName)
+	n, err := demokit.New(addr, checkout.Hosts(), state, caName)
 	if err != nil {
 		return err
 	}
-	world, err := union.New(port, n)
+	world, err := checkout.New(port, n)
 	if err != nil {
-		return fmt.Errorf("build the union: %w", err)
+		return fmt.Errorf("build the demo: %w", err)
 	}
 	listeners, err := demokit.Listen(port)
 	if err != nil {
@@ -94,9 +87,9 @@ func run(ctx context.Context, opts options) error {
 	if err != nil {
 		return err
 	}
-	printBanner(world, console, caPath, opts.open)
-	if opts.open {
-		if err := demokit.OpenChrome(opts.chrome, state, n.ServingSPKIHash(), console); err != nil {
+	printBanner(console, caPath, open)
+	if open {
+		if err := demokit.OpenChrome(chrome, state, n.ServingSPKIHash(), console); err != nil {
 			log.Printf("-open: %v", err)
 		}
 	}
@@ -111,7 +104,7 @@ func run(ctx context.Context, opts options) error {
 	return err
 }
 
-func printBanner(world *union.World, console, caPath string, opened bool) {
+func printBanner(console, caPath string, opened bool) {
 	browser := `Opening it in Chrome, in a separate profile that accepts the demo's
 certificate without a warning. Use that window for the whole demo.
 (Chrome's banner about an unsupported command-line flag is expected.)`
@@ -120,11 +113,9 @@ certificate without a warning. Use that window for the whole demo.
 certificate without a warning.`
 	}
 	fmt.Printf(`
-Meridian Union demo is running (Ctrl-C to stop)
+Decoupled checkout demo is running (Ctrl-C to stop)
 
   console   %s   start here
-  services  %s
-            %s
 
 %s
 
@@ -132,6 +123,5 @@ For any other browser, trust the demo CA once. It can only vouch for
 *.localhost, and is kept across runs (see the README to remove it):
   %s
 
-`, console, world.URL("bank.southport.localhost", "/"), world.URL("telco.eastmark.localhost", "/"),
-		browser, demokit.TrustCommand(caPath, caName))
+`, console, browser, demokit.TrustCommand(caPath, caName))
 }

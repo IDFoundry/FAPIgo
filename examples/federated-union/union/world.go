@@ -5,7 +5,7 @@
 //
 // Every entity — the Union, each national authority, accreditation body,
 // identity provider and service — runs in one process behind a
-// demonet.HostRouter, each at its own *.localhost host.
+// demokit.HostRouter, each at its own *.localhost host.
 package union
 
 import (
@@ -17,7 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/idfoundry/fapigo/examples/federated-union/internal/demonet"
+	"github.com/idfoundry/fapigo/examples/internal/demokit"
 	"github.com/idfoundry/fapigo/fapihttp"
 	"github.com/idfoundry/fapigo/federation"
 	"github.com/idfoundry/fapigo/keys"
@@ -84,7 +84,7 @@ type Scenes struct {
 // World is the whole running federation.
 type World struct {
 	port   int
-	net    *demonet.Net
+	net    *demokit.Net
 	scenes Scenes
 
 	union        *entity
@@ -95,7 +95,7 @@ type World struct {
 	impostor     *entity
 	entities     []*entity // every entity, for the console
 	loaHighType  string
-	router       demonet.HostRouter
+	router       demokit.HostRouter
 	consoleState *console
 }
 
@@ -112,13 +112,13 @@ func Hosts() []string {
 }
 
 // New builds the federation for a listener on port, reached through n.
-func New(port int, n *demonet.Net) (*World, error) {
+func New(port int, n *demokit.Net) (*World, error) {
 	w := &World{
 		port: port, net: n,
 		authorities: map[string]*entity{},
 		accreditors: map[string]*accreditation{},
 		idps:        map[string]*identityProvider{},
-		router:      demonet.HostRouter{},
+		router:      demokit.HostRouter{},
 	}
 	w.loaHighType = w.entityID(unionHost) + "/marks/loa-high"
 	if err := w.build(); err != nil {

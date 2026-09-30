@@ -1,4 +1,4 @@
-module github.com/idfoundry/fapigo/examples/federated-union
+module github.com/idfoundry/fapigo/examples/decoupled-checkout
 
 go 1.26.6
 

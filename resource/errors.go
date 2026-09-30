@@ -7,9 +7,10 @@ import (
 	"github.com/idfoundry/fapigo/internal/httperror"
 )
 
-// ErrorCode is a closed set of error codes Verify returns, matching the
-// "error" values RFC 6750 §3.1 and RFC 9449 §7.1 define for a
-// WWW-Authenticate challenge.
+// ErrorCode is a closed set of error codes, matching the "error" values
+// RFC 6750 §3.1 and RFC 9449 §7.1 define for a WWW-Authenticate
+// challenge. Verify returns every one except ErrorInsufficientScope,
+// which only the protected resource itself can decide.
 type ErrorCode string
 
 const (
@@ -25,6 +26,15 @@ const (
 	// Nonce method returns). Only ever returned when
 	// Dependencies.Nonces is configured.
 	ErrorUseDPoPNonce ErrorCode = "use_dpop_nonce"
+
+	// ErrorInsufficientScope is RFC 6750 §3.1's "The request requires
+	// higher privileges than provided by the access token", sent with
+	// HTTP 403 Forbidden. Verify never returns it: a token that verifies
+	// is valid, and only the protected resource knows whether it covers
+	// the request — its scope, or its granted authorization_details
+	// (RFC 9396). An adapter reports that with
+	// NewError(ErrorInsufficientScope, http.StatusForbidden, ...).
+	ErrorInsufficientScope ErrorCode = "insufficient_scope"
 )
 
 // Error is the error type Verify returns. Code and PublicDescription

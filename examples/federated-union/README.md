@@ -152,7 +152,7 @@ The code:
 - [`union/idp.go`](union/idp.go) — the identity providers.
 - [`union/rp.go`](union/rp.go) — the services.
 - [`union/console.go`](union/console.go) — the console.
-- [`internal/demonet`](internal/demonet/demonet.go) — one listener serving every host, and the certificate.
+- [`../internal/demokit`](../internal/demokit/net.go) — one listener serving every host, the certificate, and the Chrome window; shared with the other example demos.
 - [`union/e2e_test.go`](union/e2e_test.go) — every scene, driven end to end.
 
 ## Not shown

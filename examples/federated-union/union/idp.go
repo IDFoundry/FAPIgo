@@ -270,8 +270,7 @@ func (p *identityProvider) jwks(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(set)
+	set.WriteJSON(w)
 }
 
 func (p *identityProvider) par(w http.ResponseWriter, r *http.Request) {

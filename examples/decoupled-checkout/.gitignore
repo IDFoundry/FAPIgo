@@ -1,0 +1,2 @@
+# The demo CA and TLS certificate, kept across runs (see README).
+.checkout-state/

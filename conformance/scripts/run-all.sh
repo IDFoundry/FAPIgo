@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Runs all twenty-two FAPI2/FAPI-CIBA/OpenID-Federation test
+# Runs all twenty-three FAPI2/FAPI-CIBA/OpenID-Federation test
 # configurations this repo has driver support for — one underlying OIDF
-# conformance suite, exercised under twenty-two different plan/variant
+# conformance suite, exercised under twenty-three different plan/variant
 # combinations: AS baseline, AS message-signing, AS ciba-mtls, AS
 # ciba-ping, AS mtls, AS message-signing-mtls, AS client-auth-mtls, AS
 # client-auth-mtls-and-mtls, AS ciba-client-auth-mtls, AS
@@ -10,7 +10,8 @@
 # client-auth-mtls-and-mtls-client-credentials, RP baseline, RP
 # message-signing, RP ciba-mtls, RP client-auth-mtls, RP mtls, RP
 # client-auth-mtls-and-mtls, RP federation-rp, Federation
-# federation-deployed-entity — against a locally running OIDF
+# federation-deployed-entity, Federation federation-trust-anchor —
+# against a locally running OIDF
 # conformance suite, prints one combined summary at the end, and (via
 # generate-report.py) writes a fuller report.md alongside the raw
 # per-configuration logs — every non-PASSED module, with the "why this
@@ -121,7 +122,10 @@
 # (openid-federation-ensure-fetch-with-invalid-sub-fails/-iss-as-sub-fails
 # both test the entity under test's own fetch endpoint, which only a
 # Trust Anchor/Intermediate serves) — see that file's own "note" field
-# on each entry.
+# on each entry. Those modules run for real in "Federation
+# federation-trust-anchor", the same plan against
+# conformance-federation-trust-anchor itself, which has its own
+# (empty) expected-warnings/-skips-federation-trust-anchor.json.
 #
 # conformance-federation-trust-anchor also answers its own /resolve
 # endpoint (§8.3, cmd/conformance-federation-trust-anchor/main.go), so
@@ -520,14 +524,16 @@ json.dump(claims["jwks"], sys.stdout)
 	return "$status"
 }
 
-# run_federation_plan — the one federation leg, "Deployed federation
-# entity" (see this file's own header comment for why it's the only
-# federation plan run here, and why it's driven by
+# run_federation_plan — the "Deployed federation entity" plan, run
+# twice: against the leaf AS and against the Trust Anchor itself (see
+# this file's own header comment for why it's driven by
 # scripts/run-federation-plan.py rather than run-test-plan.py).
 run_federation_plan() {
 	local name="federation-deployed-entity"
-	local log_file="$WORKDIR/$name.log"
-	ALL_SUITES+=("Federation $name")
+	# Both Deployed Entity legs — this one and federation-trust-anchor
+	# below — are registered now, so an early failure is still reported
+	# for each rather than dropping the second from the summary.
+	ALL_SUITES+=("Federation $name" "Federation federation-trust-anchor")
 
 	# The Trust Anchor mounts $FEDERATION_TA_SUBORDINATES_FILE (see
 	# docker-compose.yml): a copy in WORKDIR, synced below, so the run
@@ -546,6 +552,7 @@ run_federation_plan() {
 	if ! as_jwks="$(entity_jwks https://127.0.0.1:18456)"; then
 		OVERALL_CLEAN=false
 		record_result "Federation $name" "DID NOT COMPLETE — could not fetch AS's own entity configuration"
+		record_result "Federation federation-trust-anchor" "DID NOT COMPLETE — could not fetch AS's own entity configuration"
 		return
 	fi
 	python3 -c '
@@ -566,19 +573,36 @@ with open(path, "w") as f:
 	if ! ta_jwks="$(entity_jwks https://127.0.0.1:18457)"; then
 		OVERALL_CLEAN=false
 		record_result "Federation $name" "DID NOT COMPLETE — could not fetch Trust Anchor's own entity configuration"
+		record_result "Federation federation-trust-anchor" "DID NOT COMPLETE — could not fetch Trust Anchor's own entity configuration"
 		return
 	fi
 
-	log "Federation: starting run-federation-plan.py"
+	run_federation_deployed_entity "$name" "https://conformance-as-federation:8443" "$ta_jwks" \
+		"$SERVER_DIR/expected-warnings-federation.json" "$SERVER_DIR/expected-skips-federation.json"
+	# The same plan again, with the Trust Anchor itself as the entity
+	# under test: it serves federation_fetch_endpoint/list/resolve, so
+	# the fetch modules that skip for the leaf AS run for real here —
+	# exercising SubordinateIssuer and friends against the suite.
+	run_federation_deployed_entity "federation-trust-anchor" "https://conformance-federation-trust-anchor:8443" "$ta_jwks" \
+		"$SERVER_DIR/expected-warnings-federation-trust-anchor.json" "$SERVER_DIR/expected-skips-federation-trust-anchor.json"
+}
+
+# run_federation_deployed_entity NAME ENTITY_ID TA_JWKS WARNINGS SKIPS —
+# runs the Deployed Entity plan against ENTITY_ID (trusting
+# conformance-federation-trust-anchor, whose keys are TA_JWKS) and
+# records the result as "Federation NAME".
+run_federation_deployed_entity() {
+	local name="$1" entity_id="$2" ta_jwks="$3" warnings="$4" skips="$5"
+	local log_file="$WORKDIR/$name.log"
+	log "Federation $name: starting run-federation-plan.py against $entity_id"
 	local exit_code=0
 	CONFORMANCE_SERVER="$CONFORMANCE_SERVER" python3 "$SERVER_DIR/scripts/run-federation-plan.py" \
-		--entity-identifier "https://conformance-as-federation:8443" \
+		--entity-identifier "$entity_id" \
 		--trust-anchor "https://conformance-federation-trust-anchor:8443" \
 		--trust-anchor-jwks "$ta_jwks" \
-		--expected-warnings "$SERVER_DIR/expected-warnings-federation.json" \
-		--expected-skips "$SERVER_DIR/expected-skips-federation.json" \
+		--expected-warnings "$warnings" \
+		--expected-skips "$skips" \
 		>"$log_file" 2>&1 || exit_code=$?
-
 	local totals
 	totals="$(grep 'Overall totals' "$log_file" | tail -1)" || true
 	if [[ "$exit_code" -eq 0 && -n "$totals" ]]; then

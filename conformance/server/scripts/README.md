@@ -357,7 +357,7 @@ the manual flow above has), so
 `*-plan.json` files (and updates the matching `oidf-config/*.config.json`)
 in one shot — see [../oidf-config/README.md](../oidf-config/README.md)'s
 "Quick start". `conformance/scripts/run-all.sh`, which drives this
-CI-style flow for all twenty-two test configurations at once (including
+CI-style flow for all twenty-three test configurations at once (including
 the federation leg above), expects exactly the files that command
 produces.
 

@@ -98,6 +98,12 @@ runnable demo: three fictional countries' identity federations joined
 into one OpenID Federation, with cross-border sign-in, automatic
 registration, accredited Trust Marks and a console of attack scenes.
 
+[examples/payment-consent](examples/payment-consent/README.md) shows the
+FAPI 2.0 Message Signing redirect flow end to end: a web shop takes
+payment by bank with PAR, a signed request object, a RAR consent screen,
+JARM and a DPoP-bound token, and an attack lab tries to break each of
+them, with a protocol trace of every step.
+
 [examples/decoupled-checkout](examples/decoupled-checkout/README.md) is
 another: a customer approves, on their phone, a payment or account access
 started on another device, with CIBA and Rich Authorization Requests —

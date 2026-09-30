@@ -68,6 +68,8 @@ jobs:
           - pkg: ./internal/federation
             name: FuzzParseTrustMark
           - pkg: ./internal/federation
+            name: FuzzMetadataPolicy
+          - pkg: ./internal/federation
             name: FuzzParseTrustMarkDelegation
           - pkg: ./internal/federation
             name: FuzzParseResolveResponse

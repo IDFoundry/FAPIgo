@@ -384,17 +384,21 @@ func (s *Server) authenticateClientViaAssertion(ctx context.Context, params map[
 	// registered method is the sole credential shape that proves its
 	// identity, in either direction (see
 	// authenticateClientViaCertificate's own symmetric check).
-	if client.ClientAuthMethod() != storage.ClientAuthMethodPrivateKeyJWT {
+	if !client.AllowsClientAuthMethod(storage.ClientAuthMethodPrivateKeyJWT) {
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
 			newError(ErrorInvalidClient, 401, "client is not registered for private_key_jwt client authentication", nil)
 	}
 
-	if !s.cfg.Algorithms.ClientAssertion.Contains(client.ClientAssertionAlgorithm()) {
+	// The header's alg only selects among the algorithms both this client
+	// registered and the server allows; the assertion is then verified
+	// strictly under that one.
+	alg := assertion.Algorithm()
+	if !client.AllowsClientAssertionAlgorithm(alg) || !s.cfg.Algorithms.ClientAssertion.Contains(alg) {
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
 			newError(ErrorInvalidClient, 401, "client assertion algorithm is not permitted", nil)
 	}
 
-	pub, err := s.resolveClientKey(ctx, client.ID(), keys.ClientAssertionVerification, client.ClientAssertionAlgorithm(), assertion.KeyID())
+	pub, err := s.resolveClientKey(ctx, client.ID(), keys.ClientAssertionVerification, alg, assertion.KeyID())
 	if err != nil {
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
 			newError(ErrorInvalidClient, 401, "no matching client key", err)
@@ -403,7 +407,7 @@ func (s *Server) authenticateClientViaAssertion(ctx context.Context, params map[
 	verified, err := assertion.Verify(ctx, pub, clientassertion.VerifyPolicy{
 		ExpectedClientID:  client.ID().String(),
 		ExpectedAudiences: s.acceptableClientAssertionAudiences(client, endpoints, mtlsEndpoints),
-		Algorithm:         client.ClientAssertionAlgorithm(),
+		Algorithm:         alg,
 		Now:               s.deps.Clock.Now(),
 		MaxLifetime:       s.cfg.Limits.MaxClientAssertionLifetime,
 		MaxClockSkew:      s.cfg.Limits.MaxClockSkew,

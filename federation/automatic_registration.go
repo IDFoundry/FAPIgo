@@ -93,6 +93,17 @@ type AutomaticRegistrationConfig struct {
 	// clients use mTLS). Every entry must be a valid ClientAuthMethod.
 	AllowedClientAuthMethods []storage.ClientAuthMethod
 
+	// ClientAssertionAlgorithms is what an automatically registered
+	// client using private_key_jwt may sign its assertions with when its
+	// metadata names no token_endpoint_auth_signing_alg (or
+	// token_endpoint_auth_signing_alg_values_supported) — OpenID Connect
+	// Dynamic Client Registration 1.0: "The default, if omitted, is that
+	// any algorithm supported by the OP and the RP MAY be used". Typically
+	// the server's own allowed client assertion algorithms (server.New
+	// sets it so). Empty means an RP must name its algorithm to register
+	// for private_key_jwt.
+	ClientAssertionAlgorithms []fapi.SignatureAlgorithm
+
 	// OnResolutionFailure, if set, is called with the reason whenever a
 	// client_id that is a well-formed Entity Identifier, and not
 	// statically registered, fails automatic registration: its Trust
@@ -147,7 +158,10 @@ type cachedClient struct {
 // RP may use either is a capability grant an operator makes, never
 // something an RP's own self-published metadata can grant itself. Every
 // storage.ClientAuthMethod this package's own storage type supports is
-// readable from an RP's own token_endpoint_auth_method metadata,
+// readable from an RP's own token_endpoint_auth_method and/or
+// token_endpoint_auth_methods_supported metadata — every declared
+// method the RP's metadata supports is registered, and the server
+// accepts whichever it uses (see declaredClientAuthMethods) —
 // including every RFC 8705 mTLS method: ClientAuthMethodSelfSignedTLSClientAuth
 // reads the RP's own certificate from the "x5c" member of a jwks/jwks_uri
 // entry (RFC 8705 §2.2) and computes its expected thumbprint from it;
@@ -215,6 +229,11 @@ func NewAutomaticClientRepository(underlying storage.ClientRepository, resolver 
 	for _, method := range cfg.AllowedClientAuthMethods {
 		if !method.IsValid() {
 			return nil, fmt.Errorf("federation: config: allowed_client_auth_methods: invalid client auth method %v", method)
+		}
+	}
+	for _, alg := range cfg.ClientAssertionAlgorithms {
+		if !alg.IsValid() {
+			return nil, fmt.Errorf("federation: config: client_assertion_algorithms: invalid algorithm %v", alg)
 		}
 	}
 	if clock == nil {
@@ -450,17 +469,22 @@ func (s *AutomaticClientKeySource) ResolveVerificationKeys(ctx context.Context, 
 // comment for exactly which registration shapes are (and are not)
 // supported in this first version.
 type relyingPartyMetadata struct {
-	RedirectURIs                          []string        `json:"redirect_uris"`
-	TokenEndpointAuthMethod               string          `json:"token_endpoint_auth_method"`
-	TokenEndpointAuthSigningAlg           string          `json:"token_endpoint_auth_signing_alg"`
-	RequestObjectSigningAlg               string          `json:"request_object_signing_alg"`
-	JWKS                                  json.RawMessage `json:"jwks"`
-	JWKSURI                               string          `json:"jwks_uri"`
-	TLSClientCertificateBoundAccessTokens bool            `json:"tls_client_certificate_bound_access_tokens"`
-	IDTokenEncryptedResponseAlg           string          `json:"id_token_encrypted_response_alg"`
-	IDTokenEncryptedResponseEnc           string          `json:"id_token_encrypted_response_enc"`
-	UserinfoEncryptedResponseAlg          string          `json:"userinfo_encrypted_response_alg"`
-	UserinfoEncryptedResponseEnc          string          `json:"userinfo_encrypted_response_enc"`
+	RedirectURIs                []string `json:"redirect_uris"`
+	TokenEndpointAuthMethod     string   `json:"token_endpoint_auth_method"`
+	TokenEndpointAuthSigningAlg string   `json:"token_endpoint_auth_signing_alg"`
+
+	// OpenID Connect RP Metadata Choices 1.0's lists of what the RP
+	// supports; the singular values above, when present, must be in them.
+	TokenEndpointAuthMethodsSupported          []string        `json:"token_endpoint_auth_methods_supported"`
+	TokenEndpointAuthSigningAlgValuesSupported []string        `json:"token_endpoint_auth_signing_alg_values_supported"`
+	RequestObjectSigningAlg                    string          `json:"request_object_signing_alg"`
+	JWKS                                       json.RawMessage `json:"jwks"`
+	JWKSURI                                    string          `json:"jwks_uri"`
+	TLSClientCertificateBoundAccessTokens      bool            `json:"tls_client_certificate_bound_access_tokens"`
+	IDTokenEncryptedResponseAlg                string          `json:"id_token_encrypted_response_alg"`
+	IDTokenEncryptedResponseEnc                string          `json:"id_token_encrypted_response_enc"`
+	UserinfoEncryptedResponseAlg               string          `json:"userinfo_encrypted_response_alg"`
+	UserinfoEncryptedResponseEnc               string          `json:"userinfo_encrypted_response_enc"`
 
 	// BackchannelAuthenticationRequestSigningAlg/BackchannelTokenDeliveryMode/
 	// BackchannelClientNotificationEndpoint are read only when
@@ -521,12 +545,9 @@ func (a *AutomaticClientRepository) registeredClientConfigFromMetadata(ctx conte
 		return storage.RegisteredClientConfig{}, nil, fmt.Errorf("%s metadata must declare exactly one of jwks or jwks_uri", relyingPartyEntityType)
 	}
 
-	authMethod, err := storage.ParseClientAuthMethod(m.TokenEndpointAuthMethod)
+	declared, err := a.declaredClientAuthMethods(m)
 	if err != nil {
-		return storage.RegisteredClientConfig{}, nil, fmt.Errorf("token_endpoint_auth_method: %w", err)
-	}
-	if !a.allowsClientAuthMethod(authMethod) {
-		return storage.RegisteredClientConfig{}, nil, fmt.Errorf("token_endpoint_auth_method %q is not permitted by allowed_client_auth_methods", authMethod)
+		return storage.RegisteredClientConfig{}, nil, err
 	}
 
 	jwks := m.JWKS
@@ -556,7 +577,6 @@ func (a *AutomaticClientRepository) registeredClientConfigFromMetadata(ctx conte
 
 	cfg := storage.RegisteredClientConfig{
 		ID: id, RedirectURIs: redirectURIs,
-		ClientAuthMethod:                authMethod,
 		RequestObjectAlgorithm:          requestObjectAlg,
 		SenderConstrain:                 senderConstrain,
 		AllowedScopes:                   a.cfg.AllowedScopes,
@@ -567,15 +587,13 @@ func (a *AutomaticClientRepository) registeredClientConfigFromMetadata(ctx conte
 		return storage.RegisteredClientConfig{}, nil, err
 	}
 
-	// storage.NewRegisteredClient's own switch on ClientAuthMethod
-	// requires exactly one corresponding field per method (see its own
-	// doc comment) — mirrored in applyClientAuthMethodFields, reading
-	// each from wherever RFC 8705 actually places it: token_endpoint_auth_signing_alg
-	// for private_key_jwt, the client's own published certificate (via
-	// jwks/jwks_uri's "x5c") for self_signed_tls_client_auth, and a
-	// plain metadata string for tls_client_auth and its four SAN-typed
-	// siblings.
-	if err := applyClientAuthMethodFields(&cfg, authMethod, m, jwks); err != nil {
+	// storage.NewRegisteredClient requires each method's own field —
+	// read, per method, from wherever RFC 8705 actually places it:
+	// token_endpoint_auth_signing_alg(s) for private_key_jwt, the
+	// client's own published certificate (via jwks/jwks_uri's "x5c") for
+	// self_signed_tls_client_auth, and a plain metadata string for
+	// tls_client_auth and its four SAN-typed siblings.
+	if err := a.applyClientAuthMethods(&cfg, declared, m, jwks); err != nil {
 		return storage.RegisteredClientConfig{}, nil, err
 	}
 
@@ -633,14 +651,14 @@ func clientDisplayFromMetadata(m relyingPartyMetadata) (storage.ClientDisplay, e
 // applyClientAuthMethodFields sets cfg's authMethod-specific field from
 // m/jwks — split out of registeredClientConfigFromMetadata purely to
 // keep that method's own cognitive complexity manageable.
-func applyClientAuthMethodFields(cfg *storage.RegisteredClientConfig, authMethod storage.ClientAuthMethod, m relyingPartyMetadata, jwks json.RawMessage) error {
+func applyClientAuthMethodFields(cfg *storage.RegisteredClientConfig, authMethod storage.ClientAuthMethod, m relyingPartyMetadata, jwks json.RawMessage, defaultAlgs []fapi.SignatureAlgorithm) error {
 	switch authMethod {
 	case storage.ClientAuthMethodPrivateKeyJWT:
-		alg, err := fapi.ParseSignatureAlgorithm(m.TokenEndpointAuthSigningAlg)
+		algs, err := assertionAlgorithms(m, defaultAlgs)
 		if err != nil {
-			return fmt.Errorf("token_endpoint_auth_signing_alg: %w", err)
+			return err
 		}
-		cfg.ClientAssertionAlgorithm = alg
+		cfg.ClientAssertionAlgorithm, cfg.ClientAssertionAlgorithms = algs[0], algs
 	case storage.ClientAuthMethodSelfSignedTLSClientAuth:
 		thumbprint, err := certificateThumbprintFromJWKS(jwks)
 		if err != nil {
@@ -680,6 +698,119 @@ func applyClientAuthMethodFields(cfg *storage.RegisteredClientConfig, authMethod
 		return fmt.Errorf("token_endpoint_auth_method %q is not supported", m.TokenEndpointAuthMethod)
 	}
 	return nil
+}
+
+// declaredMethod is one client authentication method an RP's metadata
+// declares, and whether it declared it as its token_endpoint_auth_method
+// (rather than only among token_endpoint_auth_methods_supported).
+type declaredMethod struct {
+	method   storage.ClientAuthMethod
+	explicit bool
+}
+
+// declaredClientAuthMethods is every method the RP declares that this
+// package implements and AllowedClientAuthMethods permits (OpenID
+// Federation 1.0 §12.1.4: declared either with token_endpoint_auth_method
+// or with RP Metadata Choices' token_endpoint_auth_methods_supported,
+// which, when both are present, must include the former). An RP
+// declaring neither is refused: automatic registration has no secret for
+// Dynamic Client Registration's client_secret_basic default, and this
+// package infers no other. Listed methods it doesn't implement are
+// skipped; a token_endpoint_auth_method it doesn't implement, or one
+// AllowedClientAuthMethods refuses, fails the registration.
+func (a *AutomaticClientRepository) declaredClientAuthMethods(m relyingPartyMetadata) ([]declaredMethod, error) {
+	single := m.TokenEndpointAuthMethod
+	list := m.TokenEndpointAuthMethodsSupported
+	if single == "" && len(list) == 0 {
+		return nil, fmt.Errorf("%s metadata declares no client authentication method (token_endpoint_auth_method or token_endpoint_auth_methods_supported)", relyingPartyEntityType)
+	}
+	if single != "" && len(list) > 0 && !slices.Contains(list, single) {
+		return nil, fmt.Errorf("token_endpoint_auth_method %q is not among token_endpoint_auth_methods_supported", single)
+	}
+	var declared []declaredMethod
+	if single != "" {
+		method, err := storage.ParseClientAuthMethod(single)
+		if err != nil {
+			return nil, fmt.Errorf("token_endpoint_auth_method: %w", err)
+		}
+		if !a.allowsClientAuthMethod(method) {
+			return nil, fmt.Errorf("token_endpoint_auth_method %q is not permitted by allowed_client_auth_methods", method)
+		}
+		declared = append(declared, declaredMethod{method: method, explicit: true})
+	}
+	for _, name := range list {
+		method, err := storage.ParseClientAuthMethod(name)
+		if err != nil || !a.allowsClientAuthMethod(method) || slices.ContainsFunc(declared, func(d declaredMethod) bool { return d.method == method }) {
+			continue
+		}
+		declared = append(declared, declaredMethod{method: method})
+	}
+	if len(declared) == 0 {
+		return nil, fmt.Errorf("none of token_endpoint_auth_methods_supported %v is supported and permitted by allowed_client_auth_methods", list)
+	}
+	return declared, nil
+}
+
+// applyClientAuthMethods sets cfg's methods and each one's own fields
+// from m/jwks. A method only listed in token_endpoint_auth_methods_supported
+// whose metadata can't support it (e.g. tls_client_auth with no
+// tls_client_auth_subject_dn) is dropped; the explicitly requested
+// token_endpoint_auth_method must be usable. At least one method must
+// remain.
+func (a *AutomaticClientRepository) applyClientAuthMethods(cfg *storage.RegisteredClientConfig, declared []declaredMethod, m relyingPartyMetadata, jwks json.RawMessage) error {
+	var lastErr error
+	for _, d := range declared {
+		if err := applyClientAuthMethodFields(cfg, d.method, m, jwks, a.cfg.ClientAssertionAlgorithms); err != nil {
+			if d.explicit {
+				return err
+			}
+			lastErr = err
+			continue
+		}
+		cfg.ClientAuthMethods = append(cfg.ClientAuthMethods, d.method)
+	}
+	if len(cfg.ClientAuthMethods) == 0 {
+		return fmt.Errorf("no declared client authentication method is usable: %w", lastErr)
+	}
+	cfg.ClientAuthMethod = cfg.ClientAuthMethods[0]
+	return nil
+}
+
+// assertionAlgorithms is what an RP using private_key_jwt may sign its
+// assertions with: its token_endpoint_auth_signing_alg if declared (which
+// Dynamic Client Registration makes the only one), else its
+// token_endpoint_auth_signing_alg_values_supported (skipping algorithms
+// this package doesn't implement), else defaultAlgs — "any algorithm
+// supported by the OP and the RP".
+func assertionAlgorithms(m relyingPartyMetadata, defaultAlgs []fapi.SignatureAlgorithm) ([]fapi.SignatureAlgorithm, error) {
+	single := m.TokenEndpointAuthSigningAlg
+	list := m.TokenEndpointAuthSigningAlgValuesSupported
+	if single != "" {
+		if len(list) > 0 && !slices.Contains(list, single) {
+			return nil, fmt.Errorf("token_endpoint_auth_signing_alg %q is not among token_endpoint_auth_signing_alg_values_supported", single)
+		}
+		alg, err := fapi.ParseSignatureAlgorithm(single)
+		if err != nil {
+			return nil, fmt.Errorf("token_endpoint_auth_signing_alg: %w", err)
+		}
+		return []fapi.SignatureAlgorithm{alg}, nil
+	}
+	if len(list) > 0 {
+		var algs []fapi.SignatureAlgorithm
+		for _, name := range list {
+			if alg, err := fapi.ParseSignatureAlgorithm(name); err == nil && !slices.Contains(algs, alg) {
+				algs = append(algs, alg)
+			}
+		}
+		if len(algs) == 0 {
+			return nil, fmt.Errorf("none of token_endpoint_auth_signing_alg_values_supported %v is supported", list)
+		}
+		return algs, nil
+	}
+	if len(defaultAlgs) == 0 {
+		return nil, fmt.Errorf("token_endpoint_auth_signing_alg is required for private_key_jwt: no default algorithms are configured")
+	}
+	return slices.Clone(defaultAlgs), nil
 }
 
 // allowsClientAuthMethod reports whether method is permitted by

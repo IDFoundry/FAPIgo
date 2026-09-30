@@ -36,14 +36,18 @@ import "encoding/json"
 // at most one.
 //
 // An OP built on AutomaticClientRepository needs more than "optional"
-// suggests, though: RedirectURIs, TokenEndpointAuthMethod, exactly one
-// of JWKS or JWKSURI (SignedJWKSURI alone isn't read), and whatever the
-// chosen method depends on — TokenEndpointAuthSigningAlg for
-// private_key_jwt, an "x5c" certificate in the key set for
-// self_signed_tls_client_auth, or the matching tls_client_auth_*
-// parameter for tls_client_auth and its SAN variants (not modelled
-// here; add it to the metadata JSON directly). Leave any of these out
-// and automatic registration fails; the RP only ever sees
+// suggests, though: RedirectURIs; at least one client authentication
+// method, via TokenEndpointAuthMethod and/or
+// TokenEndpointAuthMethodsSupported (OpenID Federation 1.0 §12.1.4 — a
+// FAPIgo OP accepts any of them the RP then uses); exactly one of JWKS
+// or JWKSURI (SignedJWKSURI alone isn't read); and whatever each method
+// depends on — an "x5c" certificate in the key set for
+// self_signed_tls_client_auth, the matching tls_client_auth_* parameter
+// for tls_client_auth and its SAN variants (not modelled here; add it to
+// the metadata JSON directly), and for private_key_jwt either a signing
+// algorithm or an OP that defaults to its own (a FAPIgo OP does). A
+// method only listed that its metadata can't support is skipped; if none
+// is usable, automatic registration fails — the RP only ever sees
 // invalid_client, and the OP's operator sees the reason through
 // AutomaticRegistrationConfig.OnResolutionFailure.
 type OpenIDRelyingPartyMetadata struct {
@@ -70,9 +74,19 @@ type OpenIDRelyingPartyMetadata struct {
 
 	// TokenEndpointAuthSigningAlg is the JWS algorithm this RP signs its
 	// private_key_jwt client assertions with (e.g. fapi.ES256.String()).
-	// Required with private_key_jwt: AutomaticClientRepository has no
-	// default and refuses the registration without it.
+	// When set, it's the only one an OP accepts from this RP. Optional:
+	// Dynamic Client Registration's default is any algorithm the OP and
+	// RP both support (a FAPIgo OP uses its own allowed set).
 	TokenEndpointAuthSigningAlg string `json:"token_endpoint_auth_signing_alg,omitempty"`
+
+	// TokenEndpointAuthMethodsSupported and
+	// TokenEndpointAuthSigningAlgValuesSupported are OpenID Connect RP
+	// Metadata Choices 1.0's lists of every client authentication method
+	// and assertion signing algorithm this RP supports — an OP may then
+	// accept any of them. TokenEndpointAuthMethod and
+	// TokenEndpointAuthSigningAlg, when also set, must be among them.
+	TokenEndpointAuthMethodsSupported          []string `json:"token_endpoint_auth_methods_supported,omitempty"`
+	TokenEndpointAuthSigningAlgValuesSupported []string `json:"token_endpoint_auth_signing_alg_values_supported,omitempty"`
 
 	// JWKS is this RP's own operational key set (client authentication,
 	// request-object signing, ...) — set directly, or via JWKSURI

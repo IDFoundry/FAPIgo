@@ -13,7 +13,29 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
-## v0.40.0
+## v0.41.0
+
+### Metadata policies that combine operators the spec disallows now fail
+
+**Affects:** relying parties and OPs resolving Trust Chains
+(`federation.Resolver`, automatic registration), when some statement in
+the chain uses a metadata policy with a disallowed operator combination.
+
+**Why:** OpenID Federation 1.0 §6.1.3 fixes which policy operators may
+appear together for one metadata parameter, and how their values must
+relate (e.g. `add`'s values must be among `value`'s). Only one rule was
+enforced, so a statement lower in a chain could loosen what a superior
+fixed: an Intermediate's `add` extended a Trust Anchor's `value`, and its
+`default` restored a parameter the Trust Anchor had removed with
+`value: null`. Every rule is now enforced, for each statement's own
+policy and for every merge, and a violation is a policy error that fails
+the resolution, as §6.1.4 requires.
+
+Nothing changes for a federation whose policies are valid. If a Trust
+Chain that used to resolve now fails with a `policy error`, the error
+names the entity type, parameter and rule; the federation's policy needs
+correcting — don't work around it.
+
 
 ### `fapihttp`'s loopback settings: literal hosts only, split from http
 

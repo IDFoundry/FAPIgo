@@ -55,13 +55,16 @@ func policyError(format string, args ...any) error {
 // claim — see mergeOperators' own doc comment for how a non-standard
 // operator's merge is decided.
 func MergePolicy(current MetadataPolicy, currentCrit []string, next MetadataPolicy, nextCrit []string) (MetadataPolicy, error) {
+	crit := unionStrings(currentCrit, nextCrit)
+	if err := ValidatePolicy(next, crit); err != nil {
+		return nil, err
+	}
 	if current == nil {
 		return next, nil
 	}
 	if next == nil {
 		return current, nil
 	}
-	crit := unionStrings(currentCrit, nextCrit)
 
 	merged := make(MetadataPolicy, len(current))
 	for entityType, params := range current {
@@ -194,40 +197,174 @@ func mergeOperatorValue(name string, current, next json.RawMessage) (json.RawMes
 	}
 }
 
-// validateCombination rejects the specific operator combinations
-// OpenID Federation 1.0 §6.1.3.1 explicitly disallows. This is not a
-// complete combination linter for every MAY-combine rule the standard
-// operators declare (e.g. "add MUST be a subset of value") — those
-// constrain what a well-formed policy author writes, not what this
-// package must reject to compute a correct Resolved Metadata, and
-// enforcing all of them is deferred until something in this codebase
-// actually needs that completeness. The one combination this function
-// does enforce — value: null with essential: true — is checked because
-// ApplyPolicy's own value/essential ordering would otherwise silently
-// produce a confusing result (a required parameter deleted by the
-// same policy that requires it) rather than the policy error the spec
-// calls for.
+// validateCombination checks one metadata parameter's operators against
+// OpenID Federation 1.0 §6.1.3.1: each standard operator's value has the
+// right JSON type, only allowed operators appear together, and combined
+// operators' values are consistent with each other. §6.1.4.1 requires a
+// policy error otherwise — both for each statement's own policy and for
+// the result of every merge, so that no statement lower in the chain can
+// loosen what a superior's policy fixed (e.g. an intermediate's "add"
+// extending a Trust Anchor's "value"). A non-standard operator listed in
+// crit is a policy error too, since this package implements none.
+//
+// "The values of value" for a null value (which removes the parameter)
+// are taken to be none, so a null value is compatible with an empty add,
+// with subset_of, and with an empty superset_of, and with nothing else.
 func validateCombination(ops PolicyOperators, crit []string) error {
-	valueRaw, hasValue := ops[opValue]
-	essentialRaw, hasEssential := ops[opEssential]
-	if hasValue && hasEssential {
-		var essential bool
-		if err := json.Unmarshal(essentialRaw, &essential); err == nil && essential {
-			var v any
-			if json.Unmarshal(valueRaw, &v) == nil && v == nil {
-				return policyError("value operator is null and essential operator is true")
+	if err := validateOperandTypes(ops); err != nil {
+		return err
+	}
+	if _, ok := ops[opOneOf]; ok {
+		for _, other := range []string{opAdd, opSubsetOf, opSupersetOf} {
+			if _, ok := ops[other]; ok {
+				return policyError("one_of cannot be combined with %s", other)
 			}
 		}
+	}
+	if valueRaw, ok := ops[opValue]; ok {
+		if err := validateValueCombinations(valueRaw, ops); err != nil {
+			return err
+		}
+	}
+	if err := requireSubset(ops, opAdd, opSubsetOf, "add values must be a subset of subset_of"); err != nil {
+		return err
+	}
+	if err := requireSubset(ops, opSupersetOf, opSubsetOf, "subset_of values must be a superset of superset_of"); err != nil {
+		return err
 	}
 	for name := range ops {
 		if isStandardOperator(name) {
 			continue
 		}
-		// A non-standard operator this package doesn't otherwise act
-		// on (see ApplyPolicy) is fine to carry through unless the
-		// statement itself demanded it be understood.
 		if containsString(crit, name) {
 			return policyError("metadata_policy_crit requires understanding non-standard operator %q, which this package does not implement", name)
+		}
+	}
+	return nil
+}
+
+// validateOperandTypes checks each standard operator's value has the
+// JSON type §6.1.3.1 gives it: arrays for add, one_of, subset_of and
+// superset_of, a boolean for essential, and a non-null value for default.
+func validateOperandTypes(ops PolicyOperators) error {
+	for _, name := range []string{opAdd, opOneOf, opSubsetOf, opSupersetOf} {
+		if raw, ok := ops[name]; ok {
+			if _, err := decodeArray(raw); err != nil {
+				return policyError("%s operator value must be an array: %v", name, err)
+			}
+		}
+	}
+	if raw, ok := ops[opEssential]; ok {
+		var essential bool
+		if err := json.Unmarshal(raw, &essential); err != nil {
+			return policyError("essential operator value must be a boolean: %v", err)
+		}
+	}
+	if raw, ok := ops[opDefault]; ok && isJSONNull(raw) {
+		return policyError("default operator value must not be null")
+	}
+	return nil
+}
+
+// validateValueCombinations checks value against every operator it is
+// combined with (§6.1.3.1.1).
+func validateValueCombinations(valueRaw json.RawMessage, ops PolicyOperators) error {
+	if isJSONNull(valueRaw) {
+		if _, ok := ops[opDefault]; ok {
+			return policyError("value is null and cannot be combined with default")
+		}
+		if raw, ok := ops[opEssential]; ok {
+			var essential bool
+			_ = json.Unmarshal(raw, &essential) // type already checked
+			if essential {
+				return policyError("value operator is null and essential operator is true")
+			}
+		}
+	}
+	if raw, ok := ops[opOneOf]; ok {
+		options, _ := decodeArray(raw) // type already checked
+		found, err := containsRaw(options, valueRaw)
+		if err != nil {
+			return policyError("one_of: %v", err)
+		}
+		if !found { // a null value is among no one_of values
+			return policyError("value must be among the one_of values")
+		}
+	}
+	for _, check := range []struct {
+		op, subsetOf, msg string
+	}{
+		{opAdd, opValue, "add values must be a subset of value"},
+		{opValue, opSubsetOf, "value must be a subset of subset_of"},
+		{opSupersetOf, opValue, "value must be a superset of superset_of"},
+	} {
+		if err := requireSubset(ops, check.op, check.subsetOf, check.msg); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// requireSubset reports a policy error unless the values of operator sub
+// are all among the values of operator super, when both are present. A
+// null value (from the value operator) has no values; any other non-array
+// value can't be compared as a set and is a policy error.
+func requireSubset(ops PolicyOperators, sub, super, msg string) error {
+	subRaw, ok := ops[sub]
+	if !ok {
+		return nil
+	}
+	superRaw, ok := ops[super]
+	if !ok {
+		return nil
+	}
+	subValues, err := policyValues(sub, subRaw)
+	if err != nil {
+		return err
+	}
+	superValues, err := policyValues(super, superRaw)
+	if err != nil {
+		return err
+	}
+	for _, v := range subValues {
+		found, err := containsRaw(superValues, v)
+		if err != nil {
+			return policyError("%s: %v", msg, err)
+		}
+		if !found {
+			return policyError("%s", msg)
+		}
+	}
+	return nil
+}
+
+// policyValues is an operator's value as a set of values: its elements
+// for an array, none for null.
+func policyValues(op string, raw json.RawMessage) ([]json.RawMessage, error) {
+	if isJSONNull(raw) {
+		return nil, nil
+	}
+	values, err := decodeArray(raw)
+	if err != nil {
+		return nil, policyError("%s must be an array to be combined as a set of values: %v", op, err)
+	}
+	return values, nil
+}
+
+// isJSONNull reports whether raw is the JSON literal null.
+func isJSONNull(raw json.RawMessage) bool {
+	var v any
+	return json.Unmarshal(raw, &v) == nil && v == nil
+}
+
+// ValidatePolicy checks every metadata parameter policy in policy with
+// validateCombination.
+func ValidatePolicy(policy MetadataPolicy, crit []string) error {
+	for entityType, params := range policy {
+		for claim, ops := range params {
+			if err := validateCombination(ops, crit); err != nil {
+				return fmt.Errorf("federation: metadata_policy: %s.%s: %w", entityType, claim, err)
+			}
 		}
 	}
 	return nil
@@ -261,6 +398,9 @@ func isStandardOperator(name string) bool {
 // behavior for an implementation with no support for a given
 // non-standard operator at all.
 func ApplyPolicy(policy MetadataPolicy, crit []string, metadata map[string]json.RawMessage) (map[string]json.RawMessage, error) {
+	if err := ValidatePolicy(policy, crit); err != nil {
+		return nil, err
+	}
 	// Capacity is only a hint; see mergeOperators' own doc comment on
 	// why this drops the addition rather than sum the two lengths.
 	entityTypes := make(map[string]bool, len(policy))

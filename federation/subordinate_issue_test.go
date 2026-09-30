@@ -129,6 +129,7 @@ func TestSubordinateStatementPassesThroughMetadataPolicyAndConstraints(t *testin
 	token, err := s.SubordinateStatement(federation.SubordinateStatementParams{
 		Subject: "https://le.example.org", JWKS: jwksFor(t, "sub-key", subKey),
 		Constraints: &intfed.Constraints{MaxPathLength: 0, HasMaxPathLength: true},
+		Metadata:    map[string]json.RawMessage{"openid_relying_party": json.RawMessage(`{"client_name":"Set by the TA"}`)},
 	})
 	if err != nil {
 		t.Fatalf("SubordinateStatement: %v", err)
@@ -137,6 +138,9 @@ func TestSubordinateStatementPassesThroughMetadataPolicyAndConstraints(t *testin
 	stmt, err := intfed.Parse(token)
 	if err != nil {
 		t.Fatalf("intfed.Parse: %v", err)
+	}
+	if got := string(stmt.ClaimedMetadata()["openid_relying_party"]); got != `{"client_name":"Set by the TA"}` {
+		t.Errorf("ClaimedMetadata()[openid_relying_party] = %s, want the issuer's metadata", got)
 	}
 	constraints := stmt.ClaimedConstraints()
 	if constraints == nil || !constraints.HasMaxPathLength || constraints.MaxPathLength != 0 {

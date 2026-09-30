@@ -98,6 +98,15 @@ func (s Statement) ClaimedMetadataPolicy() (MetadataPolicy, []string) {
 	return s.claims.MetadataPolicy, s.claims.MetadataPolicyCritical
 }
 
+// ClaimedMetadata returns the statement's unverified "metadata" claim,
+// nil if absent. In a Subordinate Statement it is the Immediate
+// Superior's own values for its subject's metadata (OpenID Federation
+// 1.0 §3.1.1). Safe to read before Verify succeeds for the reason
+// ClaimedMetadataPolicy's own doc comment gives.
+func (s Statement) ClaimedMetadata() map[string]json.RawMessage {
+	return s.claims.Metadata
+}
+
 // ClaimedConstraints returns the statement's unverified "constraints"
 // claim (OpenID Federation 1.0 §6.2), nil if absent. Safe to read
 // before Verify succeeds for the exact reason ClaimedMetadataPolicy's

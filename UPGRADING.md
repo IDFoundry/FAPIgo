@@ -15,6 +15,23 @@ and `keys/ephemeral` needs only the steps not marked *production only*.
 
 ## v0.41.0
 
+### A superior's `metadata` for its subordinate now applies
+
+**Affects:** anyone resolving Trust Chains in a federation where an
+Intermediate or Trust Anchor puts a `metadata` claim in a Subordinate
+Statement.
+
+**Why:** OpenID Federation 1.0 §3.1.1 lets an Immediate Superior set
+metadata values for its subordinate, overriding the subordinate's own,
+and §6.1.4.2 applies them before any metadata policy. `Resolver`
+ignored them, so `ResolvedEntity.Metadata` carried the subordinate's
+self-declared values instead of its superior's. Resolved metadata now
+reflects them — only for Entity Types the subordinate itself declares,
+and only for the statement's own subject. `SubordinateStatementParams`
+gains `Metadata`, so a FAPIgo Intermediate or Trust Anchor can set them.
+
+Nothing changes where no superior uses the claim.
+
 ### Metadata policies that combine operators the spec disallows now fail
 
 **Affects:** relying parties and OPs resolving Trust Chains

@@ -127,6 +127,14 @@ type SubordinateStatementParams struct {
 	// Optional.
 	MetadataPolicyCritical []string
 
+	// Metadata is the "metadata" claim (OpenID Federation 1.0 §3.1.1):
+	// this issuer's own values for Subject's metadata, by Entity Type.
+	// A resolver applies them before any metadata policy, replacing
+	// Subject's identically named parameters — but only for Entity Types
+	// Subject's own Entity Configuration declares, and only for Subject
+	// itself, never its subordinates. Optional.
+	Metadata map[string]json.RawMessage
+
 	// Constraints is the "constraints" claim (OpenID Federation 1.0
 	// §6.2) — max_path_length, naming_constraints and
 	// allowed_entity_types restrictions this issuer places on Trust
@@ -165,7 +173,7 @@ func (s *SubordinateIssuer) SubordinateStatement(p SubordinateStatementParams) (
 		Signer: s.deps.Signer, Algorithm: s.deps.Algorithm, KeyID: s.deps.KeyID,
 		Issuer: s.cfg.EntityID, Subject: p.Subject,
 		Now: s.deps.Clock.Now(), Lifetime: s.cfg.Lifetime,
-		JWKS: p.JWKS, MetadataPolicy: p.MetadataPolicy, MetadataPolicyCritical: p.MetadataPolicyCritical,
+		JWKS: p.JWKS, Metadata: p.Metadata, MetadataPolicy: p.MetadataPolicy, MetadataPolicyCritical: p.MetadataPolicyCritical,
 		Constraints: p.Constraints, SourceEndpoint: p.SourceEndpoint,
 	})
 	if err != nil {

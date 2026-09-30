@@ -256,6 +256,11 @@ type chainWalkState struct {
 	subordinatePolicies    []subordinatePolicy
 	subordinateConstraints []subordinateConstraint
 
+	// superiorMetadata is the "metadata" claim of the Subordinate
+	// Statement about the subject — its Immediate Superior's own values
+	// for the subject's metadata (§3.1.1), applied before any policy.
+	superiorMetadata map[string]json.RawMessage
+
 	// subjectJWKS is captured exactly once, at hop 0 — the first
 	// superior's own statement "about entityAt" is, at that point,
 	// necessarily about subjectID itself (entityAt only ever advances
@@ -486,6 +491,7 @@ func (r *Resolver) finalizeTrustChain(st *chainWalkState, hop int, sup hopSuperi
 	}
 	if hop == 0 {
 		st.subjectJWKS = aboveClaims.JWKS
+		st.superiorMetadata = aboveClaims.Metadata
 	}
 	st.subordinatePolicies = append(st.subordinatePolicies, subordinatePolicy{policy: aboveClaims.MetadataPolicy, crit: aboveClaims.MetadataPolicyCritical})
 	if aboveClaims.Constraints != nil {
@@ -501,7 +507,11 @@ func (r *Resolver) finalizeTrustChain(st *chainWalkState, hop int, sup hopSuperi
 	if err := checkMaxPathLengthConstraints(st.subordinateConstraints); err != nil {
 		return ResolvedEntity{}, err
 	}
-	leafMetadata := filterAllowedEntityTypes(st.subordinateConstraints, st.leafClaims.Metadata)
+	declared, err := applySuperiorMetadata(st.leafClaims.Metadata, st.superiorMetadata)
+	if err != nil {
+		return ResolvedEntity{}, fmt.Errorf("federation: metadata %q's Immediate Superior sets for it: %w", st.subjectID, err)
+	}
+	leafMetadata := filterAllowedEntityTypes(st.subordinateConstraints, declared)
 	resolvedMetadata, err := r.resolveMetadata(st.subordinatePolicies, leafMetadata)
 	if err != nil {
 		return ResolvedEntity{}, err
@@ -536,6 +546,7 @@ func (r *Resolver) advanceIntermediateHop(st *chainWalkState, hop int, sup hopSu
 		// gives; see ResolvedEntity.JWKS's own doc comment for why
 		// hop 0 specifically.
 		st.subjectJWKS = sup.aboveStmt.ClaimedJWKS()
+		st.superiorMetadata = sup.aboveStmt.ClaimedMetadata()
 	}
 	// sup.aboveStmt's own metadata_policy is unverified until the next
 	// iteration verifies its signature (as the new belowStmt) — safe to
@@ -561,6 +572,46 @@ func (r *Resolver) advanceIntermediateHop(st *chainWalkState, hop int, sup hopSu
 	st.belowSubject = st.entityAt
 	st.entityAt = sup.id
 	return nil
+}
+
+// applySuperiorMetadata applies the Immediate Superior's own metadata
+// values (the "metadata" claim of its Subordinate Statement about the
+// subject) to the subject's declared metadata, as OpenID Federation 1.0
+// §3.1.1 and §6.1.4.2 require before any metadata policy: each parameter
+// the superior sets replaces the subject's own under the same Entity
+// Type, and only for Entity Types the subject's Entity Configuration
+// itself declares. subject is not modified.
+func applySuperiorMetadata(subject, superior map[string]json.RawMessage) (map[string]json.RawMessage, error) {
+	if len(superior) == 0 {
+		return subject, nil
+	}
+	out := make(map[string]json.RawMessage, len(subject))
+	for entityType, raw := range subject {
+		out[entityType] = raw
+		override, ok := superior[entityType]
+		if !ok {
+			continue
+		}
+		var params, overrides map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &params); err != nil {
+			return nil, fmt.Errorf("the subject's %s metadata is not a JSON object: %w", entityType, err)
+		}
+		if err := json.Unmarshal(override, &overrides); err != nil {
+			return nil, fmt.Errorf("the superior's %s metadata is not a JSON object: %w", entityType, err)
+		}
+		if params == nil {
+			params = make(map[string]json.RawMessage, len(overrides))
+		}
+		for name, value := range overrides {
+			params[name] = value
+		}
+		merged, err := json.Marshal(params)
+		if err != nil {
+			return nil, err
+		}
+		out[entityType] = merged
+	}
+	return out, nil
 }
 
 // subordinatePolicy is one Subordinate Statement's own metadata_policy

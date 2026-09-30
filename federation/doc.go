@@ -1,6 +1,7 @@
 // Package federation implements the leaf-entity side of OpenID
 // Federation 1.0 (Final): resolving a Trust Chain from a subject entity
-// up to a pre-configured Trust Anchor, applying every metadata_policy
+// up to a pre-configured Trust Anchor, applying the metadata its
+// Immediate Superior sets for it and then every metadata_policy
 // encountered along the way, and returning the subject's Resolved
 // Metadata (OpenID Federation 1.0 §10). It wraps internal/federation's
 // Entity Statement create/verify/policy primitives with the network

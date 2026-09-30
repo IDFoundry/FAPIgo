@@ -2,7 +2,9 @@ package keys
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/jose"
@@ -35,6 +37,23 @@ func (k PublicJWK) MarshalJSON() ([]byte, error) {
 // role's own concern.
 type PublicKeySet struct {
 	Keys []PublicJWK `json:"keys"`
+}
+
+// WriteJSON writes s as a JWKS endpoint's 200 response, with Content-Type
+// application/json — alongside the WriteJSON methods of the server's
+// other responses. Unlike a token response it sets no Cache-Control: a
+// published key set is meant to be cached, for as long as the
+// publisher's key rotation allows, so choose a header for that yourself.
+// If s can't be encoded, the response is a 500 instead.
+func (s PublicKeySet) WriteJSON(w http.ResponseWriter) {
+	body, err := json.Marshal(s)
+	if err != nil {
+		http.Error(w, "server_error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
 }
 
 // SigningKeyUse names one public signing key to resolve and publish:

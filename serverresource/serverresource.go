@@ -157,11 +157,17 @@ func revocationChecker(sink server.RevocationSink) (resource.RevocationChecker, 
 	return checker, nil
 }
 
-// sameValue reports whether a and b hold the same comparable value,
-// without panicking on dynamic types that can't be compared.
-func sameValue(a, b any) bool {
+// sameValue reports whether a and b hold the same comparable value. A
+// type can be comparable yet hold an uncomparable value in an interface
+// field, where == panics; such values are reported as different.
+func sameValue(a, b any) (same bool) {
 	if a == nil || b == nil || reflect.TypeOf(a) != reflect.TypeOf(b) || !reflect.TypeOf(a).Comparable() {
 		return false
 	}
+	defer func() {
+		if recover() != nil {
+			same = false
+		}
+	}()
 	return a == b
 }

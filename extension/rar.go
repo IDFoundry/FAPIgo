@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"reflect"
 	"sort"
+	"strings"
 )
 
 // RARDefinition captures the wire contract for one Rich Authorization
@@ -61,7 +63,17 @@ func (d RARDefinition[T]) rarType() string        { return d.Type }
 func (d RARDefinition[T]) maxObjects() int        { return d.MaxObjects }
 func (d RARDefinition[T]) maxBytesPerObject() int { return d.MaxBytesPerObject }
 
+// decodeCheck decodes raw into T strictly: a member T doesn't declare
+// is an error. The "type" member is the exception when T doesn't declare
+// it: it's the discriminator every detail object carries, which RARSet
+// adds itself so that T need not.
 func (d RARDefinition[T]) decodeCheck(raw json.RawMessage) error {
+	if !declaresTypeMember(reflect.TypeFor[T]()) {
+		var err error
+		if raw, err = withoutTypeMember(raw); err != nil {
+			return fmt.Errorf("extension: authorization_details type %q: malformed value: %w", d.Type, err)
+		}
+	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	var v T
@@ -399,4 +411,50 @@ func checkNoDuplicateTopLevelKeys(raw json.RawMessage) error {
 		}
 	}
 	return nil
+}
+
+// declaresTypeMember reports whether decoding a JSON object into t would
+// read its "type" member: a field tagged "type", or an untagged field
+// whose name matches it as encoding/json matches names, including
+// through embedded structs.
+func declaresTypeMember(t reflect.Type) bool {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return false
+	}
+	for i := range t.NumField() {
+		f := t.Field(i)
+		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+		if name == "-" && f.Tag.Get("json") == "-" {
+			continue
+		}
+		if name == "" && f.Anonymous {
+			if declaresTypeMember(f.Type) {
+				return true
+			}
+			continue
+		}
+		if !f.IsExported() {
+			continue
+		}
+		if name == "" {
+			name = f.Name
+		}
+		if strings.EqualFold(name, "type") {
+			return true
+		}
+	}
+	return false
+}
+
+// withoutTypeMember is raw, a JSON object, without its "type" member.
+func withoutTypeMember(raw json.RawMessage) (json.RawMessage, error) {
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &members); err != nil {
+		return nil, err
+	}
+	delete(members, "type")
+	return json.Marshal(members)
 }

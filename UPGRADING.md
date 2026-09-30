@@ -15,6 +15,23 @@ and `keys/ephemeral` needs only the steps not marked *production only*.
 
 ## v0.41.0
 
+### An invalid DPoP proof is invalid_dpop_proof
+
+**Affects:** anything that checks the error codes of `server` (the PAR,
+token and backchannel authentication endpoints) or `resource.Verifier`.
+
+**Why:** RFC 9449 gives an invalid DPoP proof its own error code,
+`invalid_dpop_proof`: at the authorization server "If the DPoP proof is
+invalid, the authorization server issues an error response ... with
+invalid_dpop_proof" (§5), and at a protected resource for a proof
+"deemed invalid based on the criteria of Section 4.3" (§7.1). A proof
+that fails verification, is replayed, or isn't the only DPoP header was
+reported as `invalid_request` by `server` and `invalid_token` (or, for
+more than one DPoP header, 400 `invalid_request`) by `resource`. They're
+now `server.ErrorInvalidDPoPProof` (HTTP 400) and
+`resource.ErrorInvalidDPoPProof` (HTTP 401, in a `DPoP` challenge). A
+request with no proof at all is still `invalid_request`.
+
 ### A resource request without credentials gets 401, not 400
 
 **Affects:** anyone using `resource.Verifier`, and anything that checks

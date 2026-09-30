@@ -475,7 +475,7 @@ func (s *Server) reconcileBackchannelDPoPBinding(ctx context.Context, proof stri
 		Replay:       s.dpopReplayChecker(),
 	})
 	if err != nil {
-		return "", newError(ErrorInvalidRequest, 400, "DPoP proof verification failed", err)
+		return "", newError(ErrorInvalidDPoPProof, 400, "DPoP proof verification failed", err)
 	}
 	if s.deps.Nonces != nil {
 		if challenge := s.checkDPoPNonce(ctx, verified.Nonce, s.deps.Clock.Now()); challenge != nil {

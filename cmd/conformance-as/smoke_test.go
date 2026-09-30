@@ -466,8 +466,8 @@ func TestSmokeTokenEndpointOAuthErrorResponses(t *testing.T) {
 		if res.StatusCode != http.StatusBadRequest {
 			t.Errorf("status = %d, want %d", res.StatusCode, http.StatusBadRequest)
 		}
-		if body["error"] != string(server.ErrorInvalidRequest) {
-			t.Errorf("error = %v, want %q", body["error"], server.ErrorInvalidRequest)
+		if body["error"] != string(server.ErrorInvalidDPoPProof) {
+			t.Errorf("error = %v, want %q", body["error"], server.ErrorInvalidDPoPProof)
 		}
 	})
 }
@@ -495,8 +495,8 @@ func TestSmokePAREndpointOAuthErrorResponses(t *testing.T) {
 		if res.StatusCode != http.StatusBadRequest {
 			t.Errorf("status = %d, want %d", res.StatusCode, http.StatusBadRequest)
 		}
-		if body["error"] != string(server.ErrorInvalidRequest) {
-			t.Errorf("error = %v, want %q", body["error"], server.ErrorInvalidRequest)
+		if body["error"] != string(server.ErrorInvalidDPoPProof) {
+			t.Errorf("error = %v, want %q", body["error"], server.ErrorInvalidDPoPProof)
 		}
 	})
 }
@@ -523,8 +523,8 @@ func TestSmokeBackchannelAuthenticationEndpointOAuthErrorResponses(t *testing.T)
 		if res.StatusCode != http.StatusBadRequest {
 			t.Errorf("status = %d, want %d", res.StatusCode, http.StatusBadRequest)
 		}
-		if body["error"] != string(server.ErrorInvalidRequest) {
-			t.Errorf("error = %v, want %q", body["error"], server.ErrorInvalidRequest)
+		if body["error"] != string(server.ErrorInvalidDPoPProof) {
+			t.Errorf("error = %v, want %q", body["error"], server.ErrorInvalidDPoPProof)
 		}
 	})
 }

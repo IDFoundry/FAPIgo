@@ -1346,8 +1346,8 @@ func TestPushAuthorizationRequestRejectsMultipleDPoPProofs(t *testing.T) {
 		HTTP:       server.FormRequest{Parameters: plainFormParameters(t, h.clientAssertion(t), nil)},
 		DPoPProofs: []string{createDPoPProofForPAR(t, dpopKey, h.now), createDPoPProofForPAR(t, dpopKey, h.now)},
 	})
-	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
-		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequest)
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidDPoPProof {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidDPoPProof)
 	}
 }
 

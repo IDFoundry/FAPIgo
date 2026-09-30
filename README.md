@@ -85,7 +85,9 @@ with distinct constructors, configuration and workflow APIs — there is no
 generic API that tries to behave as more than one role. They share a
 rigorously tested internal protocol core (JOSE, DPoP, PAR, PKCE, JARM,
 request objects, client assertions, canonicalization) without sharing
-role-level types or behaviour.
+role-level types or behaviour. `serverresource` builds a `resource`
+verifier matching a `server` in the same process, for an authorization
+server that hosts its own protected endpoints.
 
 See [GETTING_STARTED.md](GETTING_STARTED.md) for a full walkthrough of
 standing up an authorization server and resource server end to end,

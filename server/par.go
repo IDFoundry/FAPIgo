@@ -722,7 +722,7 @@ func (s *Server) reconcileParDPoPBinding(ctx context.Context, proof string, para
 		Replay:       s.dpopReplayChecker(),
 	}, s.cfg.Endpoints.PushedAuthorizationRequest, s.cfg.MTLSEndpoints.PushedAuthorizationRequest)
 	if err != nil {
-		return nil, newError(ErrorInvalidRequest, 400, "DPoP proof verification failed", err)
+		return nil, newError(ErrorInvalidDPoPProof, 400, "DPoP proof verification failed", err)
 	}
 	if s.deps.Nonces != nil {
 		if challenge := s.checkDPoPNonce(ctx, verified.Nonce, s.deps.Clock.Now()); challenge != nil {

@@ -755,8 +755,8 @@ func TestBeginBackchannelAuthenticationRejectsMultipleDPoPProofs(t *testing.T) {
 	if !ok {
 		t.Fatalf("action = %T, want server.BackchannelAuthenticationLocalError", action)
 	}
-	if localErr.Error.Code() != server.ErrorInvalidRequest {
-		t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequest)
+	if localErr.Error.Code() != server.ErrorInvalidDPoPProof {
+		t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorInvalidDPoPProof)
 	}
 }
 
@@ -1705,8 +1705,8 @@ func TestExchangeBackchannelAuthenticationRejectsMultipleDPoPProofs(t *testing.T
 		}},
 		DPoPProofs: []string{createDPoPProof(t, dpopKey, h.now), createDPoPProof(t, dpopKey, h.now)},
 	})
-	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
-		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequest)
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidDPoPProof {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidDPoPProof)
 	}
 }
 

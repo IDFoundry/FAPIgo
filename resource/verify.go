@@ -128,7 +128,9 @@ func (v *Verifier) verify(ctx context.Context, req VerifyRequest) (Authorization
 
 	dpopProof, dpopOK := dpop.ResolveHeaderValues(req.DPoPProofs)
 	if !dpopOK {
-		return AuthorizationContext{}, false, newError(ErrorInvalidRequest, 400, "multiple DPoP proofs are not permitted", nil)
+		// RFC 9449 §4.3 check 1: a proof is valid only as the one DPoP
+		// header field.
+		return AuthorizationContext{}, true, newError(ErrorInvalidDPoPProof, 401, "multiple DPoP proofs are not permitted", nil)
 	}
 
 	if strings.TrimSpace(req.Authorization) == "" {
@@ -256,7 +258,7 @@ func (v *Verifier) resolveCredential(ctx context.Context, req VerifyRequest, dpo
 			MaxClockSkew: v.cfg.Limits.MaxClockSkew,
 		})
 		if err != nil {
-			return 0, dpop.VerifiedProof{}, "", newError(ErrorInvalidToken, 401, "DPoP proof verification failed", err)
+			return 0, dpop.VerifiedProof{}, "", newError(ErrorInvalidDPoPProof, 401, "DPoP proof verification failed", err)
 		}
 		return storage.SenderConstrainDPoP, verifiedProof, "", nil
 	}
@@ -281,7 +283,7 @@ func (v *Verifier) consumeDPoPProof(ctx context.Context, proof dpop.VerifiedProo
 		}
 	}
 	if err := v.dpopReplayChecker().UseOnce(ctx, proof.JTI, proof.IssuedAt.Add(v.cfg.Limits.MaxDPoPProofAge)); err != nil {
-		return newError(ErrorInvalidToken, 401, "DPoP proof verification failed", fmt.Errorf("dpop: replay check: %w", err))
+		return newError(ErrorInvalidDPoPProof, 401, "DPoP proof verification failed", fmt.Errorf("dpop: replay check: %w", err))
 	}
 	return nil
 }

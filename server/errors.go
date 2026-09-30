@@ -83,6 +83,13 @@ const (
 	// error code.
 	ErrorInvalidBindingMessage ErrorCode = "invalid_binding_message"
 
+	// ErrorInvalidDPoPProof is RFC 9449 §5's error for a DPoP proof that
+	// fails the checks of its §4.3: "If the DPoP proof is invalid, the
+	// authorization server issues an error response per Section 5.2 of
+	// [RFC6749] with invalid_dpop_proof as the value of the error
+	// parameter". A missing proof is invalid_request instead.
+	ErrorInvalidDPoPProof ErrorCode = "invalid_dpop_proof"
+
 	// ErrorUnknownUserID and ErrorExpiredLoginHintToken are CIBA §13's
 	// codes for a backchannel authentication request whose hint names
 	// no end user this server can ask, or whose login_hint_token has

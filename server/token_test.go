@@ -282,8 +282,8 @@ func TestExchangeAuthorizationCodeRejectsMultipleDPoPProofs(t *testing.T) {
 		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
 		DPoPProofs: []string{createDPoPProof(t, dpopKey, h.now), createDPoPProof(t, dpopKey, h.now)},
 	})
-	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
-		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequest)
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidDPoPProof {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidDPoPProof)
 	}
 }
 
@@ -799,8 +799,8 @@ func TestExchangeAuthorizationCodeDetectsDPoPReplay(t *testing.T) {
 	if err == nil {
 		t.Fatalf("ExchangeAuthorizationCode(reused dpop proof) = nil error, want error")
 	}
-	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
-		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequest)
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidDPoPProof {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidDPoPProof)
 	}
 }
 

@@ -27,6 +27,13 @@ const (
 	// Dependencies.Nonces is configured.
 	ErrorUseDPoPNonce ErrorCode = "use_dpop_nonce"
 
+	// ErrorInvalidDPoPProof is RFC 9449 §7.1's error for a DPoP proof
+	// "deemed invalid based on the criteria of Section 4.3" — one that
+	// fails verification, is replayed, or isn't the only DPoP header —
+	// distinct from ErrorInvalidToken, which is about the access token.
+	// Always sent in a DPoP challenge.
+	ErrorInvalidDPoPProof ErrorCode = "invalid_dpop_proof"
+
 	// ErrorInsufficientScope is RFC 6750 §3.1's "The request requires
 	// higher privileges than provided by the access token", sent with
 	// HTTP 403 Forbidden. Verify never returns it: a token that verifies
@@ -122,7 +129,8 @@ func (e *Error) Unwrap() error { return e.cause }
 //     this verifier accepts — gets "Bearer, DPoP algs=..." with no error
 //     information and no body, as RFC 6750 §3.1 asks.
 //   - An error for a request that used the DPoP scheme, and
-//     ErrorUseDPoPNonce, gets a DPoP challenge with the error and algs.
+//     ErrorUseDPoPNonce and ErrorInvalidDPoPProof, gets a DPoP challenge
+//     with the error and algs.
 //   - Anything else, including every error built with NewError, gets a
 //     Bearer challenge with the error.
 //
@@ -135,7 +143,7 @@ func (e *Error) WriteJSON(w http.ResponseWriter) {
 		w.Header().Set("WWW-Authenticate", `Bearer, DPoP algs="`+dpopAlgorithms+`"`)
 		w.WriteHeader(e.httpStatus)
 		return
-	case e.dpopChallenge || e.code == ErrorUseDPoPNonce:
+	case e.dpopChallenge || e.code == ErrorUseDPoPNonce || e.code == ErrorInvalidDPoPProof:
 		w.Header().Set("WWW-Authenticate", `DPoP error="`+string(e.code)+`", algs="`+dpopAlgorithms+`"`)
 	default:
 		w.Header().Set("WWW-Authenticate", `Bearer error="`+string(e.code)+`"`)

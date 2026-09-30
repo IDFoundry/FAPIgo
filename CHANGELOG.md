@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.40.0](https://github.com/IDFoundry/FAPIgo/compare/v0.39.0...v0.40.0) (2026-09-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* **fapihttp:** fapihttp's AllowLoopbackHTTP no longer lets a hostname that merely resolves to a loopback address through; list such names in the new AllowedLoopbackHosts. For https-only local setups use the new AllowLoopbackHosts.
+
+### Features
+
+* **client:** keep the Trust Chain DiscoverViaFederation resolved ([7e987f6](https://github.com/IDFoundry/FAPIgo/commit/7e987f6c07aa56c4be54660e07d4caa6a0351eb2))
+* **client:** let NewFromDiscovery fill and check Issuer and Endpoints ([2584377](https://github.com/IDFoundry/FAPIgo/commit/2584377d688f19e4319a2f1cec64c1a639bb27bd))
+* **client:** request identity claims with the OIDC claims parameter ([75151b7](https://github.com/IDFoundry/FAPIgo/commit/75151b7fcdfbaed8d1c47a0460b25062b8ca3429))
+* **fapihttp:** limit loopback access to literal hosts, split from plain http ([7615576](https://github.com/IDFoundry/FAPIgo/commit/761557690e5d8db6796438351729eaee0582199e))
+* **federation:** name the federation types in the public API ([e08e329](https://github.com/IDFoundry/FAPIgo/commit/e08e3291d8bb013bc4a13a962c31e5cbd1515470))
+* **federation:** publish Trust Marks in an Entity Configuration ([4954e4c](https://github.com/IDFoundry/FAPIgo/commit/4954e4cff2ee3b7a6d177bedb9ce69b3b5a7c548))
+* **federation:** report why automatic registration refused a client ([645c8f5](https://github.com/IDFoundry/FAPIgo/commit/645c8f53b83b6c3b5a87ede1415961e801b8263f))
+* **keys:** write a published key set as a JWKS response ([20febaa](https://github.com/IDFoundry/FAPIgo/commit/20febaa29cd1c235271c00ff9421ccb8b83958d2))
+* **server:** advertise automatic registration and claims parameter support ([ef96cb4](https://github.com/IDFoundry/FAPIgo/commit/ef96cb4133d8c1dafe342537405f0b9f9056e5ae))
+* **server:** build whole PAR, CIBA and token requests from an *http.Request ([b8d8c91](https://github.com/IDFoundry/FAPIgo/commit/b8d8c91f243191957b426a73845eea65b40e4e02))
+* **server:** tell the consent screen who the client is ([52b818d](https://github.com/IDFoundry/FAPIgo/commit/52b818d8737dc97133791cb904ca60de0cb28407))
+
+
+### Bug Fixes
+
+* **client:** reject a callback completed by another issuer's client ([572f7dc](https://github.com/IDFoundry/FAPIgo/commit/572f7dcde0e87c4171bec92982696341573b4957))
+* **ephemeral:** reject client key specs NewClientKeySource can't serve ([29f5331](https://github.com/IDFoundry/FAPIgo/commit/29f53318acf14317bdde3c3331fe67a2cf98df76))
+* **ephemeral:** treat a key spec with no keys as a client with no keys ([f2391a8](https://github.com/IDFoundry/FAPIgo/commit/f2391a8bb6737c53b3fa71712225917658ad161d))
+* **examples:** harden federated-union's consent and scenes, use library presets ([a1f3905](https://github.com/IDFoundry/FAPIgo/commit/a1f390504cb3a069626cd60e295250f0fe408ae0))
+
 ## [0.39.0](https://github.com/IDFoundry/FAPIgo/compare/v0.38.0...v0.39.0) (2026-09-28)
 
 

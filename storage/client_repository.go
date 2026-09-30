@@ -363,6 +363,11 @@ type ClientDisplay struct {
 
 	// LogoURI, PolicyURI and TermsOfServiceURI are https URLs (fapi.URL
 	// guarantees the scheme, so none can be a javascript: or data: URL).
+	// They point wherever the client chose: a consent page that loads
+	// LogoURI straight from the user's browser tells the client's host
+	// that, when and (by IP address) to whom its consent screen was shown,
+	// and can aim the browser at an https address on the user's own
+	// network. Fetch and cache the logo server-side, or leave it out.
 	LogoURI           fapi.URL
 	PolicyURI         fapi.URL
 	TermsOfServiceURI fapi.URL

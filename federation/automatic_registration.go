@@ -80,12 +80,15 @@ type AutomaticRegistrationConfig struct {
 	// and CIBA stays disabled for every automatically-registered client.
 	AllowsCIBA bool
 
-	// AllowedClientAuthMethods restricts which token_endpoint_auth_method
-	// an automatically-registered client may declare in its own
-	// metadata. An RP whose metadata names a method outside this list
-	// fails to resolve at all, exactly like one with malformed metadata.
-	// Empty (the default) permits every storage.ClientAuthMethod this
-	// package can read from metadata — each is a FAPI 2.0-permitted,
+	// AllowedClientAuthMethods restricts which client authentication
+	// methods an automatically-registered client may register. An RP
+	// whose token_endpoint_auth_method is outside this list fails to
+	// resolve at all, exactly like one with malformed metadata; methods
+	// outside it that the RP only lists in
+	// token_endpoint_auth_methods_supported are skipped, and the RP fails
+	// only if none of its listed methods remains. Empty (the default)
+	// permits every storage.ClientAuthMethod this package can read from
+	// metadata — each is a FAPI 2.0-permitted,
 	// sender-proving method, so the RP choosing one is a mechanism
 	// detail, not a capability grant like AllowsCIBA. Set it when an
 	// operator wants federation RPs held to a narrower set than its
@@ -110,7 +113,7 @@ type AutomaticRegistrationConfig struct {
 	// statically registered, fails automatic registration: its Trust
 	// Chain doesn't resolve to a configured Trust Anchor, it has no
 	// openid_relying_party metadata, or that metadata can't be used
-	// (e.g. private_key_jwt with no token_endpoint_auth_signing_alg, or
+	// (e.g. no client authentication method this package implements, or
 	// a token_endpoint_auth_method outside AllowedClientAuthMethods).
 	// The client itself only ever sees a generic invalid-client error,
 	// so this is how an operator finds out why.

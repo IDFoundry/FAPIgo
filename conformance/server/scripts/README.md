@@ -250,12 +250,11 @@ deterministic, suite-side test-runner bug ("Illegal test state change")
 before ever reaching this AS — investigated in depth and disproven:
 that failure never reproduces once the plan is driven with a genuinely
 complete config (it was actually a race condition plus a missing
-FAPIgo-side connectivity gap, both real and both since fixed). The
-plan's real, still-unfixed blocker is narrower and confirmed
-suite-side: the suite's own self-hosted RP entity config never sets
-`token_endpoint_auth_method`, so this AS correctly refuses to
-auto-register it — see the "Entity joined to test federation OP/RP
-test" paragraph below for the full story and its RP-side counterpart.
+FAPIgo-side connectivity gap, both real and both since fixed). Its
+real blocker is that the suite's RP is a plain OpenID Connect client
+rather than a FAPI 2.0 one — see the "Entity joined to test federation
+OP/RP test" paragraph below for the full story and its RP-side
+counterpart.
 
 1. Bring up the suite (as in step 1 above) and `conformance-as-federation`
    / `conformance-federation-trust-anchor` (`docker compose up --build
@@ -303,28 +302,37 @@ The "Entity joined to test federation OP/RP test" plans exercise
 automatic registration end to end instead (§12.1) — same Trust Anchor,
 but the suite additionally plays the RP or OP role itself, driving a
 real Request Object/PAR exchange against the implementation under
-test. The two plans play opposite roles and land in different genuine
-blockers, both confirmed suite-side (checked upstream, unfixed as of
-this writing):
-- **OP test** (suite plays the RP, tests this AS): the suite's own
-  self-hosted RP entity config never sets `token_endpoint_auth_method`
-  — see the paragraph above. `conformance/scripts/run-all.sh` doesn't
-  automate this one at all; every module would fail identically on the
-  same gap.
+test. The two plans play opposite roles and land in different
+blockers, both suite-side:
+- **OP test** (suite plays the RP, tests this AS): the suite's RP is a
+  plain OpenID Connect client, with no PKCE and no DPoP or mTLS
+  sender-constraining, all of which this AS requires. Its self-hosted
+  RP entity config also never sets `token_endpoint_auth_method`, so
+  this AS refuses to auto-register it at all. Most negative modules
+  send their Request Object by value to the authorization endpoint,
+  which a PAR-only AS never accepts regardless, and the JAR-direct
+  positive ones don't apply under FAPI 2.0.
+  `conformance/scripts/run-all.sh` doesn't automate this plan.
 - **RP test** (suite plays the OP, tests this repo's own RP driver
-  instead of this AS): a *different* gap — the suite's own self-hosted
-  OP metadata never sets the OIDC-Discovery-required `issuer` field.
-  Narrower in effect: 7 of the plan's 10 modules pass regardless, so
-  `conformance/scripts/run-all.sh` *does* automate this one (the "RP
-  federation-rp" leg, `run_federation_rp_plan`) with the 3 permanently
-  blocked modules tracked in an expected-failures allowlist. This one
+  instead of this AS): 6 of the plan's 10 modules pass. The 4 that
+  reach the token endpoint hit two suite bugs there — it checks the
+  client assertion's `aud` against the RP's own Entity Identifier
+  rather than the OP's, and its token response carries only an
+  `id_token` — so `conformance/scripts/run-all.sh` automates this one
+  (the "RP federation-rp" leg, `run_federation_rp_plan`) with those 4
+  tracked in an expected-failures allowlist. This one
   is driven entirely from `cmd/conformance-client`, not this AS — see
   `conformance/client/scripts/README.md`'s own "Federation" section for
   the full story.
 
 **Steps 1-4 above are automated** by
 `conformance/server/scripts/run-federation-plan.py`, driven by
-`conformance/scripts/run-all.sh`'s own `run_federation_plan` — it brings
+`conformance/scripts/run-all.sh`'s own `run_federation_plan`, which runs
+the plan twice: against `conformance-as-federation` ("Federation
+federation-deployed-entity") and against
+`conformance-federation-trust-anchor` itself ("Federation
+federation-trust-anchor"), where the two fetch-endpoint modules that
+skip for a leaf entity run for real. It brings
 up both federation containers, does the ephemeral-key re-sync from step
 2 itself (no manual curl/paste needed), creates the plan, runs every
 module, and exits non-zero on any unexpected FAILURE/WARNING. The known
@@ -358,7 +366,7 @@ the manual flow above has), so
 in one shot — see [../oidf-config/README.md](../oidf-config/README.md)'s
 "Quick start". `conformance/scripts/run-all.sh`, which drives this
 CI-style flow for all twenty-three test configurations at once (including
-the federation leg above), expects exactly the files that command
+the federation legs above), expects exactly the files that command
 produces.
 
 ```

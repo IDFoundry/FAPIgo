@@ -1,0 +1,358 @@
+package payment
+
+import (
+	"crypto"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/extension"
+	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/keys/ephemeral"
+	"github.com/idfoundry/fapigo/server"
+	"github.com/idfoundry/fapigo/storage"
+	"github.com/idfoundry/fapigo/storage/memstore"
+)
+
+// shopClientID is the client ID Alder Bank registered Northgate
+// Outfitters under.
+const shopClientID fapi.ClientID = "northgate-outfitters"
+
+const (
+	authorizePath     = "/authorize"
+	interactionCookie = "alder_interaction"
+	// interactionLifetime is how long a consent page stays answerable.
+	interactionLifetime = 10 * time.Minute
+)
+
+// bank is Alder Bank's authorization server, with its own sign-in and
+// consent pages.
+type bank struct {
+	w   *World
+	srv *server.Server
+	// cfg and deps are what srv was built with, for the API's verifier
+	// (serverresource.NewVerifier).
+	cfg  server.Config
+	deps server.Dependencies
+	// cookieKey signs the consent page's cookie: every instance of the
+	// bank would share it.
+	cookieKey []byte
+}
+
+func (w *World) newBank(shop clientKeys) (*bank, error) {
+	issuer, err := fapi.ParseIssuerURL(w.URL(bankHost, ""))
+	if err != nil {
+		return nil, err
+	}
+	var endpoints server.Endpoints
+	for _, e := range []struct {
+		dst  *fapi.URL
+		path string
+	}{
+		{&endpoints.Authorization, authorizePath}, {&endpoints.PushedAuthorizationRequest, "/par"},
+		{&endpoints.Token, "/token"}, {&endpoints.JWKS, "/jwks"},
+	} {
+		if *e.dst, err = fapi.ParseEndpointURL(w.URL(bankHost, e.path)); err != nil {
+			return nil, err
+		}
+	}
+	signer, err := ephemeral.GenerateSigner(fapi.ES256)
+	if err != nil {
+		return nil, err
+	}
+	manager, err := keys.NewKeyManagerFromSigners(
+		map[keys.SigningPurpose]crypto.Signer{keys.IDTokenSigning: signer, keys.AccessTokenSigning: signer, keys.JARMSigning: signer},
+		map[keys.SigningPurpose]fapi.SignatureAlgorithm{keys.IDTokenSigning: fapi.ES256, keys.AccessTokenSigning: fapi.ES256, keys.JARMSigning: fapi.ES256},
+		map[keys.SigningPurpose]string{keys.IDTokenSigning: "alder-1", keys.AccessTokenSigning: "alder-1", keys.JARMSigning: "alder-1"},
+	)
+	if err != nil {
+		return nil, err
+	}
+	accessTokens, err := server.NewJWTAccessTokens(manager, fapi.ES256)
+	if err != nil {
+		return nil, err
+	}
+	registry, err := newRARRegistry()
+	if err != nil {
+		return nil, err
+	}
+	shopClient, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
+		ID:                       shopClientID,
+		RedirectURIs:             []fapi.RegisteredRedirectURI{fapi.RegisteredRedirectURI(w.URL(shopHost, callbackPath))},
+		ClientAuthMethod:         storage.ClientAuthMethodPrivateKeyJWT,
+		ClientAssertionAlgorithm: fapi.ES256,
+		RequestObjectAlgorithm:   fapi.ES256,
+		SenderConstrain:          storage.SenderConstrainDPoP,
+		AllowedScopes:            []string{"openid"},
+		Display:                  storage.ClientDisplay{Name: "Northgate Outfitters"},
+	})
+	if err != nil {
+		return nil, err
+	}
+	clientKeySource, err := ephemeral.NewClientKeySource(nil, []ephemeral.ClientKeySpec{{ClientID: shopClientID, JWKS: shop.authJWKS}})
+	if err != nil {
+		return nil, err
+	}
+	cookieKey := make([]byte, 32)
+	if _, err := rand.Read(cookieKey); err != nil {
+		return nil, err
+	}
+
+	b := &bank{w: w, cookieKey: cookieKey}
+	b.cfg = server.Config{
+		Issuer: issuer, Endpoints: endpoints,
+		// Message Signing: the shop's request must be a signed request
+		// object, and the bank's response is signed too (JARM).
+		Profile:    server.ProfileFAPISecurityWithMessageSigning,
+		Algorithms: server.RecommendedAlgorithms(), Limits: server.RecommendedLimits(),
+		Assurance: server.AssuranceDevelopment, RAR: registry,
+	}
+	b.deps = server.Dependencies{
+		Clients:                    memstore.NewClientRepository([]storage.RegisteredClient{shopClient}),
+		Transactions:               memstore.NewTransactionStore(),
+		Grants:                     memstore.NewGrantStore(),
+		Replay:                     memstore.NewReplayStore(),
+		ClientKeys:                 clientKeySource,
+		Keys:                       manager,
+		AccessTokens:               accessTokens,
+		Revocation:                 memstore.NewRevocationStore(),
+		ClientCertificateTrust:     server.NoClientCertificateChainTrust{},
+		Clock:                      server.SystemClock{},
+		Random:                     rand.Reader,
+		AuthorizationCodeRARPolicy: entitlements{shopClientID: {paymentInitiationType.Type}},
+	}
+	if b.srv, err = server.New(b.cfg, b.deps); err != nil {
+		return nil, err
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /.well-known/openid-configuration", b.discovery)
+	mux.HandleFunc("GET /jwks", b.jwks)
+	mux.HandleFunc("POST /par", b.par)
+	mux.HandleFunc("GET "+authorizePath, b.authorize)
+	// The interaction cookie is SameSite, but a sibling *.localhost host
+	// is the same site; refusing cross-origin POSTs is the CSRF defence
+	// server.InteractionHandle's doc comment asks for.
+	mux.Handle("POST "+authorizePath, http.NewCrossOriginProtection().Handler(http.HandlerFunc(b.decide)))
+	mux.HandleFunc("POST /token", b.token)
+	w.router[bankHost] = mux
+	return b, nil
+}
+
+func (b *bank) discovery(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(b.srv.Metadata(r.Context()))
+}
+
+func (b *bank) jwks(w http.ResponseWriter, r *http.Request) {
+	set, err := b.srv.PublicJWKS(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	set.WriteJSON(w)
+}
+
+func (b *bank) par(w http.ResponseWriter, r *http.Request) {
+	req, err := server.PushAuthorizationRequestFromHTTP(r)
+	if err != nil {
+		server.NewError(server.ErrorInvalidRequest, http.StatusBadRequest, err.Error()).WriteJSON(w)
+		return
+	}
+	result, err := b.srv.PushAuthorizationRequest(r.Context(), req)
+	if err != nil {
+		server.WriteError(w, err)
+		return
+	}
+	result.WriteJSON(w)
+}
+
+func (b *bank) token(w http.ResponseWriter, r *http.Request) {
+	req, err := server.TokenEndpointRequestFromHTTP(r)
+	if err != nil {
+		server.NewError(server.ErrorInvalidRequest, http.StatusBadRequest, err.Error()).WriteJSON(w)
+		return
+	}
+	if req.GrantType() != "authorization_code" {
+		server.NewError(server.ErrorUnsupportedGrantType, http.StatusBadRequest, "only authorization_code is supported").WriteJSON(w)
+		return
+	}
+	result, err := b.srv.ExchangeAuthorizationCode(r.Context(), req.AuthorizationCodeExchange())
+	if err != nil {
+		server.WriteError(w, err)
+		return
+	}
+	result.WriteJSON(w)
+}
+
+// authorize starts the interaction and shows the sign-in and consent
+// page. The interaction goes with the browser in a cookie the bank
+// signs, so any instance of the bank can finish it.
+func (b *bank) authorize(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	action, err := b.srv.BeginAuthorization(r.Context(), server.BeginAuthorizationRequest{
+		RequestURI: q.Get("request_uri"), ClientID: fapi.ClientID(q.Get("client_id")),
+	})
+	if err != nil {
+		b.w.renderError(w, bankHost, http.StatusInternalServerError, "Sign-in could not start", err.Error())
+		return
+	}
+	switch a := action.(type) {
+	case server.InteractionRequired:
+		sealed, err := b.seal(a.Handle, a.Interaction, time.Now())
+		if err != nil {
+			b.w.renderError(w, bankHost, http.StatusInternalServerError, "Sign-in could not start", err.Error())
+			return
+		}
+		http.SetCookie(w, &http.Cookie{
+			Name: interactionCookie, Value: sealed, Path: authorizePath, MaxAge: int(interactionLifetime / time.Second),
+			HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode,
+		})
+		b.w.render(w, "consent", b.consentPage(a.Interaction, ""))
+	case server.RedirectResponse:
+		http.Redirect(w, r, a.Destination.String(), http.StatusFound)
+	case server.LocalErrorResponse:
+		b.w.renderError(w, bankHost, a.Error.HTTPStatus(), "Alder Bank refused the payment request", string(a.Error.Code())+": "+a.Error.PublicDescription())
+	}
+}
+
+// consentView is one payment on the consent page. Payee is the name
+// Alder Bank has on record for the account; CreditorName and Reference
+// are only what the shop wrote.
+type consentView struct {
+	Amount, Payee, CreditorName, IBAN, Reference string
+	PayeeVerified                                bool
+}
+
+func (b *bank) consentPage(in server.InteractionRequest, problem string) consentPage {
+	page := consentPage{Page: b.w.page("Alder Bank", bankHost), ClientName: in.ClientDisplay.Name, Problem: problem}
+	if page.ClientName == "" {
+		page.ClientName = string(in.ClientID)
+	}
+	for _, pay := range paymentsOf(in.AuthorizationDetails) {
+		payee, verified := payees[pay.CreditorAccount.IBAN]
+		page.Payments = append(page.Payments, consentView{
+			Amount: "€" + pay.InstructedAmount.Amount, Payee: payee, PayeeVerified: verified,
+			CreditorName: pay.CreditorName, IBAN: pay.CreditorAccount.IBAN, Reference: pay.RemittanceMessage,
+		})
+	}
+	return page
+}
+
+// decide signs the customer in and records their decision. The payment
+// is granted exactly as asked: the server refuses anything else.
+func (b *bank) decide(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie(interactionCookie)
+	if err != nil {
+		b.w.renderError(w, bankHost, http.StatusBadRequest, "Session expired", "This browser has no payment approval in progress.")
+		return
+	}
+	handle, in, err := b.open(cookie.Value, time.Now())
+	if err != nil {
+		b.w.renderError(w, bankHost, http.StatusBadRequest, "Session expired", err.Error())
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		b.w.renderError(w, bankHost, http.StatusBadRequest, "Malformed form", err.Error())
+		return
+	}
+	result := server.Deny("the customer declined")
+	if r.PostForm.Get("decision") == "approve" {
+		c, ok := customerByName(r.PostForm.Get("username"))
+		if !ok || !hmac.Equal([]byte(c.pin), []byte(r.PostForm.Get("pin"))) {
+			b.w.render(w, "consent", b.consentPage(in, "That username and PIN don't match."))
+			return
+		}
+		var granted []json.RawMessage
+		for _, pay := range paymentsOf(in.AuthorizationDetails) {
+			raw, err := extension.RARSet(paymentInitiationType, pay)
+			if err != nil {
+				b.w.renderError(w, bankHost, http.StatusInternalServerError, "Approval failed", err.Error())
+				return
+			}
+			granted = append(granted, raw)
+		}
+		subjectID, err := server.NewSubjectID(c.username)
+		if err != nil {
+			b.w.renderError(w, bankHost, http.StatusInternalServerError, "Approval failed", err.Error())
+			return
+		}
+		subject, err := server.NewAuthenticatedSubject(subjectID)
+		if err != nil {
+			b.w.renderError(w, bankHost, http.StatusInternalServerError, "Approval failed", err.Error())
+			return
+		}
+		auth, err := server.NewAuthenticationContext(time.Now(), "urn:alder-bank:acr:pin", []string{"pin"})
+		if err != nil {
+			b.w.renderError(w, bankHost, http.StatusInternalServerError, "Approval failed", err.Error())
+			return
+		}
+		result = server.Authorize(subject, auth, server.GrantedAuthorization{Scope: in.Scope, AuthorizationDetails: granted})
+	}
+	http.SetCookie(w, &http.Cookie{Name: interactionCookie, Path: authorizePath, MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+	outcome, err := b.srv.CompleteAuthorization(r.Context(), server.CompleteAuthorizationRequest{Handle: handle, Result: result})
+	if err != nil {
+		b.w.renderError(w, bankHost, http.StatusInternalServerError, "Approval failed", err.Error())
+		return
+	}
+	switch o := outcome.(type) {
+	case server.AuthorizationRedirect:
+		// The signed (JARM) response goes back to the shop.
+		http.Redirect(w, r, o.Destination().String(), http.StatusFound)
+	case server.AuthorizationLocalError:
+		b.w.renderError(w, bankHost, o.Error.HTTPStatus(), "Approval failed", string(o.Error.Code())+": "+o.Error.PublicDescription())
+	}
+}
+
+// seal is the consent cookie for handle and in, issued at now: the
+// handle, the encoded interaction (InteractionRequest.MarshalText) and
+// the time, under an HMAC. The signature keeps the browser from
+// altering what the consent page shows; the server checks the grant
+// against the request it stored all the same.
+func (b *bank) seal(handle server.InteractionHandle, in server.InteractionRequest, now time.Time) (string, error) {
+	encoded, err := in.MarshalText()
+	if err != nil {
+		return "", err
+	}
+	payload := handle.String() + "~" + string(encoded) + "~" + strconv.FormatInt(now.Unix(), 10)
+	return payload + "~" + b.mac(payload), nil
+}
+
+// open checks a consent cookie's signature and age.
+func (b *bank) open(value string, now time.Time) (server.InteractionHandle, server.InteractionRequest, error) {
+	i := strings.LastIndex(value, "~")
+	if i < 0 || !hmac.Equal([]byte(value[i+1:]), []byte(b.mac(value[:i]))) {
+		return server.InteractionHandle{}, server.InteractionRequest{}, errors.New("the approval cookie isn't one Alder Bank issued")
+	}
+	parts := strings.Split(value[:i], "~")
+	if len(parts) != 3 {
+		return server.InteractionHandle{}, server.InteractionRequest{}, errors.New("malformed approval cookie")
+	}
+	issued, err := strconv.ParseInt(parts[2], 10, 64)
+	if err != nil || now.Sub(time.Unix(issued, 0)) > interactionLifetime {
+		return server.InteractionHandle{}, server.InteractionRequest{}, errors.New("the approval has expired")
+	}
+	handle, err := server.ParseInteractionHandle(parts[0])
+	if err != nil {
+		return server.InteractionHandle{}, server.InteractionRequest{}, err
+	}
+	in, err := server.ParseInteractionRequest(parts[1])
+	if err != nil {
+		return server.InteractionHandle{}, server.InteractionRequest{}, err
+	}
+	return handle, in, nil
+}
+
+func (b *bank) mac(payload string) string {
+	m := hmac.New(sha256.New, b.cookieKey)
+	m.Write([]byte(payload))
+	return base64.RawURLEncoding.EncodeToString(m.Sum(nil))
+}

@@ -227,9 +227,10 @@ type MTLSEndpoints struct {
 // polls sent, on a separate mTLS-only origin than the server's plain
 // endpoints. m may be nil (the server never advertised
 // mtls_endpoint_aliases at all); ApplyForSenderConstrain then leaves
-// endpoints untouched and reports false — a SenderConstrainMTLS client
-// with no advertised alias has nowhere else to send these calls, which
-// is a caller's own decision to treat as fatal, not this method's.
+// endpoints untouched and reports false. That's not an error: the
+// aliases are optional (RFC 8705 §5), and a server that advertises none
+// accepts mutual TLS at its ordinary endpoints, which is where a
+// SenderConstrainMTLS client then sends these calls.
 func (m *MTLSEndpoints) ApplyForSenderConstrain(endpoints *Endpoints) bool {
 	if m == nil {
 		return false

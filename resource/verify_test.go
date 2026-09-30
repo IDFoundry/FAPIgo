@@ -280,8 +280,8 @@ func TestVerifyRejectsMultipleDPoPProofs(t *testing.T) {
 	if !ok {
 		t.Fatalf("error type = %T, want *resource.Error", err)
 	}
-	if rerr.Code() != resource.ErrorInvalidRequest {
-		t.Errorf("Code() = %v, want %v", rerr.Code(), resource.ErrorInvalidRequest)
+	if rerr.Code() != resource.ErrorInvalidDPoPProof {
+		t.Errorf("Code() = %v, want %v", rerr.Code(), resource.ErrorInvalidDPoPProof)
 	}
 }
 
@@ -532,8 +532,8 @@ func TestErrorAccessors(t *testing.T) {
 	if !ok {
 		t.Fatalf("error type = %T, want *resource.Error", err)
 	}
-	if rerr.Code() != resource.ErrorInvalidToken {
-		t.Fatalf("Code() = %q, want %q", rerr.Code(), resource.ErrorInvalidToken)
+	if rerr.Code() != resource.ErrorInvalidDPoPProof {
+		t.Fatalf("Code() = %q, want %q", rerr.Code(), resource.ErrorInvalidDPoPProof)
 	}
 	if rerr.PublicDescription() != "DPoP proof verification failed" {
 		t.Fatalf("PublicDescription() = %q, want %q", rerr.PublicDescription(), "DPoP proof verification failed")

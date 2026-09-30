@@ -365,7 +365,9 @@ func (s *Server) issueOptionalRefreshToken(ctx context.Context, client storage.R
 func resolveDPoPProof(proofs []string) (string, *Error) {
 	proof, ok := dpop.ResolveHeaderValues(proofs)
 	if !ok {
-		return "", newError(ErrorInvalidRequest, 400, "multiple DPoP proofs are not permitted", nil)
+		// RFC 9449 §4.3 check 1: a proof is valid only as the one DPoP
+		// header field.
+		return "", newError(ErrorInvalidDPoPProof, 400, "multiple DPoP proofs are not permitted", nil)
 	}
 	return proof, nil
 }
@@ -417,7 +419,7 @@ func (s *Server) verifyTokenRequestDPoP(ctx context.Context, proof string) (dpop
 		Replay:       s.dpopReplayChecker(),
 	}, s.cfg.Endpoints.Token, s.cfg.MTLSEndpoints.Token)
 	if err != nil {
-		return dpop.VerifiedProof{}, newError(ErrorInvalidRequest, 400, "DPoP proof verification failed", err)
+		return dpop.VerifiedProof{}, newError(ErrorInvalidDPoPProof, 400, "DPoP proof verification failed", err)
 	}
 	if s.deps.Nonces != nil {
 		if challenge := s.checkDPoPNonce(ctx, verified.Nonce, s.deps.Clock.Now()); challenge != nil {

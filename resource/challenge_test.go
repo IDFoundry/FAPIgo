@@ -67,9 +67,15 @@ func TestChallengeFollowsScheme(t *testing.T) {
 			resource.VerifyRequest{Authorization: "DPoP " + f.accessToken},
 			400, `DPoP error="invalid_request", algs="ES256 PS256 EdDSA"`,
 		},
-		"DPoP with an invalid token": {
+		// The proof's ath is bound to the real token, so the proof itself
+		// is invalid for any other (RFC 9449 §4.3).
+		"DPoP with another token": {
 			resource.VerifyRequest{Authorization: "DPoP not-a-token", DPoPProofs: []string{f.dpopProof}},
-			401, `DPoP error="invalid_token", algs="ES256 PS256 EdDSA"`,
+			401, `DPoP error="invalid_dpop_proof", algs="ES256 PS256 EdDSA"`,
+		},
+		"two DPoP proofs": {
+			resource.VerifyRequest{Authorization: "DPoP " + f.accessToken, DPoPProofs: []string{f.dpopProof, f.dpopProof}},
+			401, `DPoP error="invalid_dpop_proof", algs="ES256 PS256 EdDSA"`,
 		},
 		"Bearer without a token": {
 			resource.VerifyRequest{Authorization: "Bearer "},

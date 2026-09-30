@@ -9,7 +9,6 @@ import (
 	"log"
 	"net/http"
 	"slices"
-	"sync"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -47,20 +46,14 @@ type identityProvider struct {
 	forgedBy *federation.TrustMarkIssuer // EastID signing its own mark, for the forge scene
 	w        *World
 
-	mu      sync.Mutex
-	pending map[string]pendingLogin // by interaction handle
-}
-
-// pendingLogin is what the consent page needs back when it's submitted.
-type pendingLogin struct {
-	handle      server.InteractionHandle
-	interaction server.InteractionRequest
-	started     time.Time
+	// cookieKey signs the sign-in cookie (see interaction_cookie.go):
+	// every instance of this provider would share it.
+	cookieKey []byte
 }
 
 // pendingLifetime is how long a consent page stays answerable — the
 // server's own interaction lifetime (server.RecommendedLimits) is
-// shorter, so this only bounds how long an abandoned one is kept.
+// shorter, so this only bounds how long a sign-in cookie is honoured.
 const pendingLifetime = 15 * time.Minute
 
 const (
@@ -156,7 +149,11 @@ func (w *World) newIdentityProvider(c country, ta *entity) (*identityProvider, e
 			},
 		},
 	}
-	idp := &identityProvider{country: c, fedKey: fedKey, w: w, pending: map[string]pendingLogin{}}
+	cookieKey := make([]byte, 32)
+	if _, err := rand.Read(cookieKey); err != nil {
+		return nil, err
+	}
+	idp := &identityProvider{country: c, fedKey: fedKey, w: w, cookieKey: cookieKey}
 	deps := server.Dependencies{
 		Clients:                memstore.NewClientRepository(nil),
 		Transactions:           memstore.NewTransactionStore(),
@@ -319,17 +316,15 @@ func (p *identityProvider) authorize(w http.ResponseWriter, r *http.Request) {
 	}
 	switch a := action.(type) {
 	case server.InteractionRequired:
-		p.mu.Lock()
-		now := time.Now()
-		for k, l := range p.pending {
-			if now.Sub(l.started) > pendingLifetime {
-				delete(p.pending, k) // abandoned
-			}
+		// The consent page's state goes with the browser, signed, not
+		// into this process: see interaction_cookie.go.
+		sealed, err := p.sealInteraction(a.Handle, a.Interaction, time.Now())
+		if err != nil {
+			p.w.renderError(w, http.StatusInternalServerError, "Sign-in could not start", err.Error())
+			return
 		}
-		p.pending[a.Handle.String()] = pendingLogin{handle: a.Handle, interaction: a.Interaction, started: now}
-		p.mu.Unlock()
 		http.SetCookie(w, &http.Cookie{
-			Name: interactionCookie, Value: a.Handle.String(), Path: authorizePath,
+			Name: interactionCookie, Value: sealed, Path: authorizePath, MaxAge: int(pendingLifetime / time.Second),
 			HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode,
 		})
 		p.w.render(w, "consent", consentPage{
@@ -355,12 +350,9 @@ func (p *identityProvider) decide(w http.ResponseWriter, r *http.Request) {
 		p.w.renderError(w, http.StatusBadRequest, "Session expired", "This browser has no sign-in in progress.")
 		return
 	}
-	p.mu.Lock()
-	login, ok := p.pending[cookie.Value]
-	delete(p.pending, cookie.Value)
-	p.mu.Unlock()
-	if !ok {
-		p.w.renderError(w, http.StatusBadRequest, "Session expired", "The sign-in in progress is unknown or already finished.")
+	handle, interaction, err := p.openInteraction(cookie.Value, time.Now())
+	if err != nil {
+		p.w.renderError(w, http.StatusBadRequest, "Session expired", err.Error())
 		return
 	}
 	http.SetCookie(w, &http.Cookie{Name: interactionCookie, Path: authorizePath, MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
@@ -395,16 +387,16 @@ func (p *identityProvider) decide(w http.ResponseWriter, r *http.Request) {
 		}
 		var approved []string
 		for _, name := range r.PostForm["claim"] {
-			if slices.Contains(login.interaction.RequestedClaims.Names(), name) {
+			if slices.Contains(interaction.RequestedClaims.Names(), name) {
 				approved = append(approved, name)
 			}
 		}
 		result = server.Authorize(subject, authCtx, server.GrantedAuthorization{
-			Scope: login.interaction.Scope, ApprovedIdentityClaims: approved,
+			Scope: interaction.Scope, ApprovedIdentityClaims: approved,
 		})
 	}
 
-	outcome, err := p.srv.CompleteAuthorization(r.Context(), server.CompleteAuthorizationRequest{Handle: login.handle, Result: result})
+	outcome, err := p.srv.CompleteAuthorization(r.Context(), server.CompleteAuthorizationRequest{Handle: handle, Result: result})
 	if err != nil {
 		p.w.renderError(w, http.StatusInternalServerError, signInFailed, err.Error())
 		return

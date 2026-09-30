@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.41.0](https://github.com/IDFoundry/FAPIgo/compare/v0.40.0...v0.41.0) (2026-09-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* server and resource report an invalid, replayed or duplicated DPoP proof with the error code invalid_dpop_proof instead of invalid_request or invalid_token; resource answers more than one DPoP header with 401 instead of 400.
+* **resource:** a resource request with no credentials, or with an unsupported authorization scheme, now fails with HTTP 401 and an empty error code instead of 400 invalid_request; errors for DPoP-scheme requests are sent in a DPoP challenge.
+* **federation:** Entity Identifiers with a query, an empty query or fragment marker, or userinfo are now rejected by ValidEntityID and everywhere an Entity Identifier is resolved or issued.
+* **federation:** federation metadata or Entity Statement jwks using a case-variant spelling of a known parameter name is now rejected rather than read as that parameter.
+* **federation:** Entity Statements without a header kid, with jwks keys missing or sharing a kid, or with a crit claim are now rejected, where they previously resolved.
+* **federation:** an entity listing both an Intermediate and a configured Trust Anchor as authority hints now resolves through the Trust Anchor directly, so the Intermediate's metadata policy no longer applies; entities whose first authority hint was a dead end now resolve instead of failing.
+* **federation:** where a superior sets metadata for its subordinate, the resolved metadata now carries the superior's values instead of the subordinate's own.
+* **federation:** a Trust Chain whose metadata policies combine operators in a way OpenID Federation 1.0 section 6.1.3 disallows now fails to resolve with a policy error, where it previously resolved.
+
+### Features
+
+* **client:** parse and authenticate CIBA ping callbacks ([3b75148](https://github.com/IDFoundry/FAPIgo/commit/3b75148053676131207fb4d5ac783bdfa35d6c63))
+* **client:** store and restore a CIBA session ([f460b72](https://github.com/IDFoundry/FAPIgo/commit/f460b72839edf98998ffcaced98061497b776c3c))
+* **federation:** let a SubordinateIssuer parse fetch requests itself ([e28e4ac](https://github.com/IDFoundry/FAPIgo/commit/e28e4aca8f946ddf1c1c3085ea71d7fd3c5071c7))
+* **federation:** register every client authentication method an RP supports ([64c8291](https://github.com/IDFoundry/FAPIgo/commit/64c8291debefa51a950f9673c9cf04550264f4bc))
+* let CIBA and client-credentials clients omit redirect URIs ([988ef93](https://github.com/IDFoundry/FAPIgo/commit/988ef93af7bc488b4191196cc944fc0b69d98d75))
+* **resource:** add ErrorInsufficientScope ([458ddca](https://github.com/IDFoundry/FAPIgo/commit/458ddca56c2f4a3402b94dbe30624d00da198131))
+* **server:** look up a pending CIBA request's interaction by handle ([4a9774d](https://github.com/IDFoundry/FAPIgo/commit/4a9774d81309805a4b2a82ec128b3d619b7ebd48))
+* **server:** refuse unknown CIBA login hints with unknown_user_id ([7133e72](https://github.com/IDFoundry/FAPIgo/commit/7133e72bf1bb1ae3745dace09392dd1db91e26fb))
+* **serverresource:** build a resource verifier from a server's own configuration ([bfca87a](https://github.com/IDFoundry/FAPIgo/commit/bfca87a6eb31f6609ead519b0bf6f8437e325357))
+* **server:** store and restore an InteractionRequest ([2da178a](https://github.com/IDFoundry/FAPIgo/commit/2da178a1a232336d5e572a2e194d12bb3738d33c))
+
+
+### Bug Fixes
+
+* **extension:** accept RARSet's own type member when parsing authorization details ([5545700](https://github.com/IDFoundry/FAPIgo/commit/5545700f1310d9bef03adfad46da4cf68cbdecc5))
+* **extension:** accept RARSet's own type member when parsing authorization details ([0f03f00](https://github.com/IDFoundry/FAPIgo/commit/0f03f003b7182a9dab5596f9ce583f1158fbc1ab))
+* **federation:** apply a superior's metadata for its subordinate before policy ([5a79bea](https://github.com/IDFoundry/FAPIgo/commit/5a79bea2da33845add579fe267fb8bc1a6845875))
+* **federation:** compare metadata policy values in linear time ([78d3393](https://github.com/IDFoundry/FAPIgo/commit/78d339349ab61cd4957f9dd41fd50f56badecb50))
+* **federation:** decode federation metadata with case-sensitive member names ([441cca7](https://github.com/IDFoundry/FAPIgo/commit/441cca722d573f6babb8808d107cf0b6befb40a7))
+* **federation:** enforce every metadata policy operator combination rule ([cf29c68](https://github.com/IDFoundry/FAPIgo/commit/cf29c680749c3a3f957383953907848dfcd8b88a))
+* **federation:** reject Entity Identifiers with a query, fragment or userinfo ([cb4dc27](https://github.com/IDFoundry/FAPIgo/commit/cb4dc27abb302498a6aa047dee8586d5daf81107))
+* **federation:** require kid and unique key IDs, reject crit, in Entity Statements ([55144fe](https://github.com/IDFoundry/FAPIgo/commit/55144fe98b7f243840284838a80644af9c29f65d))
+* **federation:** try every authority hint when resolving a Trust Chain ([6ffa6ca](https://github.com/IDFoundry/FAPIgo/commit/6ffa6ca5d2e09a7182a2f08259590fa155145de5))
+* report an invalid DPoP proof as invalid_dpop_proof ([94586bf](https://github.com/IDFoundry/FAPIgo/commit/94586bf4e680679b92d3bb1295fd82561e0b8c9b))
+* **resource:** answer a request without credentials with 401 and no error code ([9f6328a](https://github.com/IDFoundry/FAPIgo/commit/9f6328ae8dd91851e2279ec6c263913a9616590c))
+* **serverresource:** don't panic comparing an uncomparable nonce store ([63f7fc3](https://github.com/IDFoundry/FAPIgo/commit/63f7fc30443c1782cbba7dbf439523c77cf5eae7))
+
 ## [0.40.0](https://github.com/IDFoundry/FAPIgo/compare/v0.39.0...v0.40.0) (2026-09-30)
 
 

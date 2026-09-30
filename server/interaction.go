@@ -95,7 +95,10 @@ type AuthenticationHints struct {
 
 // InteractionRequest is what the embedding application needs to render
 // an interaction (typically a login/consent UI) for a pending
-// authorization.
+// authorization. BeginAuthorization returns it once; to show or complete
+// the interaction on another instance, store it with MarshalText and
+// restore it with ParseInteractionRequest, alongside the
+// InteractionHandle's String form.
 type InteractionRequest struct {
 	ClientID fapi.ClientID
 	Scope    []string

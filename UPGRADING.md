@@ -15,6 +15,25 @@ and `keys/ephemeral` needs only the steps not marked *production only*.
 
 ## v0.41.0
 
+### Trust Chain resolution tries every authority hint
+
+**Affects:** anyone resolving Trust Chains for entities that list more
+than one authority hint.
+
+**Why:** `Resolver` followed only the first authority hint whose Entity
+Configuration verified, so an entity whose first superior led nowhere
+trusted failed to resolve even when another hint reached a configured
+Trust Anchor (OpenID Federation 1.0 §10.1 builds chains through every
+hint). It now tries each hint, backtracking from dead ends, with a
+configured Trust Anchor tried first — which also means an entity listing
+both an Intermediate and a configured Trust Anchor now resolves through
+the Trust Anchor directly (§10.3's shorter chain), so the Intermediate's
+metadata policy no longer applies to it. The search is bounded by
+`MaxPathLength × MaxAuthorityHints` superiors in total, and each Entity
+Statement is fetched at most once per resolution.
+
+Nothing changes for an entity with one authority hint per level.
+
 ### A superior's `metadata` for its subordinate now applies
 
 **Affects:** anyone resolving Trust Chains in a federation where an

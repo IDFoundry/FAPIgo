@@ -276,54 +276,20 @@ func (h *threeLevelFederationHandle) newResolver(t *testing.T) *federation.Resol
 	return r
 }
 
-func TestResolveRejectsIntermediateSelfConfigFetchError(t *testing.T) {
+// TestResolveFetchesEachEntityConfigurationOnce covers OpenID Federation
+// 1.0 §10.1's "MUST NOT attempt to fetch Entity Statements they already
+// have obtained": I1's Entity Configuration is fetched once, when it's
+// tried as the leaf's superior, and that same verified copy continues the
+// walk — a different response to a second request is never seen.
+func TestResolveFetchesEachEntityConfigurationOnce(t *testing.T) {
 	f := setupFlakyIntermediateFederation(t, func(string, *ecdsa.PrivateKey, time.Time) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
+			t.Error("I1's Entity Configuration was fetched a second time")
 			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(`{"error":"server_error"}`))
 		}
 	})
-	r := f.newResolver(t)
-	if _, err := r.Resolve(context.Background(), f.leID); err == nil {
-		t.Fatalf("Resolve(intermediate's own self-config re-fetch fails) = nil error, want error")
-	}
-}
-
-func TestResolveRejectsIntermediateSelfConfigIssuerSubjectMismatch(t *testing.T) {
-	f := setupFlakyIntermediateFederation(t, func(i1ID string, i1Key *ecdsa.PrivateKey, now time.Time) http.HandlerFunc {
-		bad, err := intfed.Create(intfed.CreateParams{
-			Signer: i1Key, Algorithm: fapi.ES256, KeyID: "i1",
-			Issuer: i1ID, Subject: "https://someone-else.example.org",
-			Now: now, Lifetime: time.Hour, JWKS: jwksFor(t, "i1", i1Key),
-		})
-		if err != nil {
-			t.Fatalf("intfed.Create: %v", err)
-		}
-		return serveStatement(bad)
-	})
-	r := f.newResolver(t)
-	if _, err := r.Resolve(context.Background(), f.leID); err == nil {
-		t.Fatalf("Resolve(intermediate's own self-config re-fetch has iss/sub mismatch) = nil error, want error")
-	}
-}
-
-func TestResolveRejectsIntermediateSelfConfigVerifyFailure(t *testing.T) {
-	f := setupFlakyIntermediateFederation(t, func(i1ID string, i1Key *ecdsa.PrivateKey, now time.Time) http.HandlerFunc {
-		wrongKey := generateKey(t)
-		bad, err := intfed.Create(intfed.CreateParams{
-			Signer: wrongKey, Algorithm: fapi.ES256, KeyID: "i1",
-			Issuer: i1ID, Subject: i1ID, Now: now, Lifetime: time.Hour,
-			JWKS: jwksFor(t, "i1", i1Key), // claims i1Key, but signed by wrongKey
-		})
-		if err != nil {
-			t.Fatalf("intfed.Create: %v", err)
-		}
-		return serveStatement(bad)
-	})
-	r := f.newResolver(t)
-	if _, err := r.Resolve(context.Background(), f.leID); err == nil {
-		t.Fatalf("Resolve(intermediate's own self-config re-fetch does not self-verify) = nil error, want error")
+	if _, err := f.newResolver(t).Resolve(context.Background(), f.leID); err != nil {
+		t.Fatalf("Resolve: %v", err)
 	}
 }
 

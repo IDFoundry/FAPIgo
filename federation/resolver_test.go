@@ -113,6 +113,17 @@ type threeLevelFederation struct {
 
 func setupThreeLevelFederation(t *testing.T) *threeLevelFederation {
 	t.Helper()
+	return setupThreeLevelFederationWith(t, threeLevelOptions{})
+}
+
+// threeLevelOptions adds a "metadata" claim to either Subordinate
+// Statement setupThreeLevelFederationWith signs.
+type threeLevelOptions struct {
+	taAboutI1Metadata, i1AboutLEMetadata map[string]json.RawMessage
+}
+
+func setupThreeLevelFederationWith(t *testing.T, opts threeLevelOptions) *threeLevelFederation {
+	t.Helper()
 	now := time.Now()
 
 	taKey, i1Key, leKey := generateKey(t), generateKey(t), generateKey(t)
@@ -147,6 +158,7 @@ func setupThreeLevelFederation(t *testing.T) *threeLevelFederation {
 	taAboutI1 := sign(intfed.CreateParams{
 		Signer: taKey, Algorithm: fapi.ES256, KeyID: "ta",
 		Issuer: taID, Subject: i1ID, Now: now, Lifetime: time.Hour, JWKS: i1JWKS,
+		Metadata: opts.taAboutI1Metadata,
 	})
 	i1Config := sign(intfed.CreateParams{
 		Signer: i1Key, Algorithm: fapi.ES256, KeyID: "i1",
@@ -157,6 +169,7 @@ func setupThreeLevelFederation(t *testing.T) *threeLevelFederation {
 	i1AboutLE := sign(intfed.CreateParams{
 		Signer: i1Key, Algorithm: fapi.ES256, KeyID: "i1",
 		Issuer: i1ID, Subject: leID, Now: now, Lifetime: time.Hour, JWKS: leJWKS,
+		Metadata:       opts.i1AboutLEMetadata,
 		MetadataPolicy: mustPolicy(t, `{"openid_relying_party":{"subject_type":{"value":"pairwise"}}}`),
 	})
 	leConfig := sign(intfed.CreateParams{
@@ -645,5 +658,93 @@ func TestWellKnownURLRejectsInvalidEntityID(t *testing.T) {
 		if _, err := r.Resolve(context.Background(), id); err == nil {
 			t.Errorf("Resolve(%q) = nil error, want error", id)
 		}
+	}
+}
+
+// resolvedParams is entityType's resolved metadata parameters.
+func resolvedParams(t *testing.T, result federation.ResolvedEntity, entityType string) map[string]json.RawMessage {
+	t.Helper()
+	raw, ok := result.Metadata[entityType]
+	if !ok {
+		t.Fatalf("Metadata missing %s: %v", entityType, result.Metadata)
+	}
+	var params map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &params); err != nil {
+		t.Fatalf("unmarshal %s: %v", entityType, err)
+	}
+	return params
+}
+
+// TestResolveAppliesImmediateSuperiorMetadata covers OpenID Federation
+// 1.0 §3.1.1/§6.1.4.2: the "metadata" of the Subordinate Statement about
+// the subject overrides the subject's own values, before metadata
+// policy, only for Entity Types the subject declares — and a statement
+// about an Intermediate never reaches that Intermediate's subordinates.
+func TestResolveAppliesImmediateSuperiorMetadata(t *testing.T) {
+	f := setupThreeLevelFederationWith(t, threeLevelOptions{
+		i1AboutLEMetadata: map[string]json.RawMessage{
+			"openid_relying_party": json.RawMessage(`{"redirect_uris":["https://set-by-i1.example/cb"],"client_name":"Named by I1","subject_type":"public"}`),
+			// The leaf declares no openid_provider: not added.
+			"openid_provider": json.RawMessage(`{"issuer":"https://not-the-leaf.example"}`),
+		},
+		taAboutI1Metadata: map[string]json.RawMessage{
+			// About I1 only: never reaches I1's subordinate.
+			"openid_relying_party": json.RawMessage(`{"client_name":"Named by the Trust Anchor","logo_uri":"https://ta.example/logo.png"}`),
+		},
+	})
+	result, err := f.newResolver(t).Resolve(context.Background(), f.leID)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	rp := resolvedParams(t, result, "openid_relying_party")
+	if got := string(rp["redirect_uris"]); got != `["https://set-by-i1.example/cb"]` {
+		t.Errorf("redirect_uris = %s, want I1's value replacing the leaf's", got)
+	}
+	if got := string(rp["client_name"]); got != `"Named by I1"` {
+		t.Errorf("client_name = %s, want I1's value", got)
+	}
+	if got := string(rp["response_types"]); got != `["code"]` {
+		t.Errorf("response_types = %s, want the leaf's own value, which I1 doesn't set", got)
+	}
+	// I1's metadata says "public", its policy's value says "pairwise":
+	// metadata first, then policy.
+	if got := string(rp["subject_type"]); got != `"pairwise"` {
+		t.Errorf("subject_type = %s, want the policy applied after I1's metadata", got)
+	}
+	if _, ok := rp["logo_uri"]; ok {
+		t.Errorf("logo_uri = %s, want absent: the Trust Anchor's statement is about I1, not the leaf", rp["logo_uri"])
+	}
+	if _, ok := result.Metadata["openid_provider"]; ok {
+		t.Error("openid_provider present, want absent: the leaf declares no such Entity Type")
+	}
+}
+
+// TestResolveAppliesTrustAnchorMetadataToItsSubordinate covers a chain
+// whose subject's Immediate Superior is the Trust Anchor itself.
+func TestResolveAppliesTrustAnchorMetadataToItsSubordinate(t *testing.T) {
+	f := setupThreeLevelFederationWith(t, threeLevelOptions{
+		taAboutI1Metadata: map[string]json.RawMessage{
+			"federation_entity": json.RawMessage(`{"organization_name":"Named by the Trust Anchor"}`),
+		},
+	})
+	result, err := f.newResolver(t).Resolve(context.Background(), f.i1ID)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	fe := resolvedParams(t, result, "federation_entity")
+	if got := string(fe["organization_name"]); got != `"Named by the Trust Anchor"` {
+		t.Errorf("organization_name = %s, want the Trust Anchor's value", got)
+	}
+	if _, ok := fe["federation_fetch_endpoint"]; !ok {
+		t.Error("federation_fetch_endpoint missing, want I1's own value kept")
+	}
+}
+
+func TestResolveRejectsMalformedSuperiorMetadata(t *testing.T) {
+	f := setupThreeLevelFederationWith(t, threeLevelOptions{
+		i1AboutLEMetadata: map[string]json.RawMessage{"openid_relying_party": json.RawMessage(`["not","an","object"]`)},
+	})
+	if _, err := f.newResolver(t).Resolve(context.Background(), f.leID); err == nil {
+		t.Fatal("Resolve(superior metadata not a JSON object) = nil error, want error")
 	}
 }

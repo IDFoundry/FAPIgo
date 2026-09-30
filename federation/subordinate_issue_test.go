@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -222,5 +223,31 @@ func TestSubordinateStatementRejectsEmptyJWKS(t *testing.T) {
 	}
 	if _, err := s.SubordinateStatement(federation.SubordinateStatementParams{Subject: "https://le.example.org"}); err == nil {
 		t.Fatal("SubordinateStatement(empty jwks) = nil error, want error")
+	}
+}
+
+func TestSubordinateIssuerSubjectFromFetchRequest(t *testing.T) {
+	s, err := federation.NewSubordinateIssuer(federation.SubordinateIssueConfig{
+		EntityID: "https://ta.example.org", Lifetime: time.Hour,
+	}, federation.SubordinateIssueDependencies{
+		Signer: generateKey(t), Algorithm: fapi.ES256, KeyID: "ta-key", Clock: fixedClock{now: time.Now()},
+	})
+	if err != nil {
+		t.Fatalf("NewSubordinateIssuer: %v", err)
+	}
+	get := func(query string) (string, error) {
+		return s.SubjectFromFetchRequest(httptest.NewRequest(http.MethodGet, "https://ta.example.org/fetch"+query, nil))
+	}
+	if sub, err := get("?sub=https%3A%2F%2Fle.example.org"); err != nil || sub != "https://le.example.org" {
+		t.Errorf("subordinate sub = %q, %v; want it accepted", sub, err)
+	}
+	// §8.1.2: invalid_request, not not_found, for the issuer's own ID.
+	_, err = get("?sub=https%3A%2F%2Fta.example.org")
+	var fedErr *federation.Error
+	if !errors.As(err, &fedErr) || fedErr.Code() != federation.ErrorInvalidRequest || fedErr.HTTPStatus() != http.StatusBadRequest {
+		t.Errorf("issuer's own sub = %v, want a 400 invalid_request federation.Error", err)
+	}
+	if _, err := get(""); err == nil {
+		t.Error("missing sub = nil error, want error")
 	}
 }

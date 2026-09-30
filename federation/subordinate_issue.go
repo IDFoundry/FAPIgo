@@ -148,6 +148,21 @@ type SubordinateStatementParams struct {
 	SourceEndpoint string
 }
 
+// SubjectFromFetchRequest is the package-level SubjectFromFetchRequest,
+// also rejecting a "sub" naming this issuer itself with invalid_request
+// (OpenID Federation 1.0 §8.1.2) — before a handler looks the subject up
+// among its subordinates, where it would otherwise not be found.
+func (s *SubordinateIssuer) SubjectFromFetchRequest(r *http.Request) (string, error) {
+	sub, err := SubjectFromFetchRequest(r)
+	if err != nil {
+		return "", err
+	}
+	if sub == s.cfg.EntityID {
+		return "", newError(ErrorInvalidRequest, http.StatusBadRequest, `"sub" must not equal the issuing entity's own identifier`, nil)
+	}
+	return sub, nil
+}
+
 // SubordinateStatement signs and returns a Subordinate Statement
 // (OpenID Federation 1.0 §3.2: an Entity Statement with iss ==
 // Config.EntityID, sub == p.Subject) for p. The returned token is an

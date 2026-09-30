@@ -174,7 +174,10 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		return s.backchannelBeginFail(ctx, client.ID(), dpopErr), nil
 	}
 
-	interaction := s.backchannelInteractionRequestFrom(client.ID(), validated.params)
+	interaction, err := s.backchannelInteraction(client, validated.params)
+	if err != nil {
+		return s.backchannelBeginFail(ctx, client.ID(), newError(ErrorServerError, 500, "validated extension parameters could not be read back", err)), nil
+	}
 	if hintErr := s.checkBackchannelHints(ctx, client.ID(), interaction.Hints); hintErr != nil {
 		return s.backchannelBeginFail(ctx, client.ID(), hintErr), nil
 	}
@@ -229,13 +232,6 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	}); err != nil {
 		return s.backchannelBeginFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to persist backchannel authentication request", err)), nil
 	}
-
-	extensions, err := s.interactionExtensions(validated.params, coreBackchannelAuthenticationParameters, extension.SourceRequestObject)
-	if err != nil {
-		return s.backchannelBeginFail(ctx, client.ID(), newError(ErrorServerError, 500, "validated extension parameters could not be read back", err)), nil
-	}
-	interaction.ClientDisplay = client.Display()
-	interaction.Extensions = extensions
 
 	action := BackchannelInteractionRequired{
 		Handle:      BackchannelAuthenticationHandle{value: handleRaw},
@@ -565,4 +561,53 @@ func (s *Server) backchannelInteractionRequestFrom(clientID fapi.ClientID, param
 func (s *Server) backchannelBeginFail(ctx context.Context, clientID fapi.ClientID, err *Error) BackchannelAuthenticationAction {
 	s.audit(ctx, AuditEventBeginBackchannelAuthentication, clientID, AuditOutcomeFailure, string(err.Code()))
 	return BackchannelAuthenticationLocalError{Error: err}
+}
+
+// backchannelInteraction is the BackchannelInteractionRequest for a
+// request from client with params, as BeginBackchannelAuthentication and
+// LookupBackchannelInteraction return it.
+func (s *Server) backchannelInteraction(client storage.RegisteredClient, params map[string]json.RawMessage) (BackchannelInteractionRequest, error) {
+	interaction := s.backchannelInteractionRequestFrom(client.ID(), params)
+	interaction.ClientDisplay = client.Display()
+	extensions, err := s.interactionExtensions(params, coreBackchannelAuthenticationParameters, extension.SourceRequestObject)
+	if err != nil {
+		return BackchannelInteractionRequest{}, err
+	}
+	interaction.Extensions = extensions
+	return interaction, nil
+}
+
+// LookupBackchannelInteraction returns the BackchannelInteractionRequest
+// of the CIBA request handle identifies, rebuilt from what
+// BeginBackchannelAuthentication stored: what an out-of-band
+// authentication component needs to show the end user, on any instance
+// sharing this server's Dependencies.Backchannel store — not only the one
+// that began the request.
+//
+// It returns the request as stored, whether or not it has since been
+// decided or has expired (BackchannelAuthenticationStore's lookup doesn't
+// say); CompleteBackchannelAuthentication is what enforces both, so a
+// stale lookup can at most show a request that can no longer be
+// completed. An unknown handle is an ErrorInvalidRequest *Error.
+func (s *Server) LookupBackchannelInteraction(ctx context.Context, handle BackchannelAuthenticationHandle) (BackchannelInteractionRequest, error) {
+	if s.deps.Backchannel == nil {
+		return BackchannelInteractionRequest{}, newError(ErrorServerError, 500, "backchannel authentication is not configured", nil)
+	}
+	pending, err := s.deps.Backchannel.LookupBackchannelAuthentication(ctx, backchannelHandleHash(handle))
+	if err != nil {
+		return BackchannelInteractionRequest{}, newError(ErrorInvalidRequest, 400, "backchannel authentication handle is unknown", err)
+	}
+	request, err := decodeRequestRecord(pending.Request)
+	if err != nil {
+		return BackchannelInteractionRequest{}, newError(ErrorServerError, 500, "failed to decode backchannel authentication request", err)
+	}
+	client, err := s.deps.Clients.ResolveClient(ctx, pending.ClientID)
+	if err != nil {
+		return BackchannelInteractionRequest{}, newError(ErrorServerError, 500, "the request's client could not be resolved", err)
+	}
+	interaction, err := s.backchannelInteraction(client, request.Parameters)
+	if err != nil {
+		return BackchannelInteractionRequest{}, newError(ErrorServerError, 500, "the request's extension parameters could not be read back", err)
+	}
+	return interaction, nil
 }

@@ -582,13 +582,13 @@ func buildModuleClient(ctx context.Context, d moduleDriver, module suiteModule) 
 		// needs (Token only; RFC 8705 §3 has no PAR-time
 		// pre-commitment concept), so the MTLS+MTLS combo is correctly
 		// handled by this branch alone.
-		if !discovered.MTLSEndpointAliases.ApplyForClientAuth(&cfg.Endpoints) {
-			return nil, awaitVerdict(rawHTTP, apiBase, module.ID, "issuer does not advertise mtls_endpoint_aliases")
-		}
+		// Without mtls_endpoint_aliases (optional, RFC 8705 §5) the
+		// ordinary endpoints take mutual TLS — the suite's
+		// *-happy-path-no-mtls-endpoint-aliases modules check exactly
+		// that.
+		discovered.MTLSEndpointAliases.ApplyForClientAuth(&cfg.Endpoints)
 	} else if d.SenderConstrainMTLS {
-		if !discovered.MTLSEndpointAliases.ApplyForSenderConstrain(&cfg.Endpoints) {
-			return nil, awaitVerdict(rawHTTP, apiBase, module.ID, "issuer does not advertise mtls_endpoint_aliases")
-		}
+		discovered.MTLSEndpointAliases.ApplyForSenderConstrain(&cfg.Endpoints)
 	}
 	deps := client.Dependencies{
 		Sessions:   memstore.NewSessionStore(),

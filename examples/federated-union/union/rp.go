@@ -139,15 +139,27 @@ type providerStatus struct {
 }
 
 // assess resolves provider's Trust Chain from this service and checks its
-// level-of-assurance Trust Mark, requiring the Union's accreditation of
-// the mark's issuer.
+// level-of-assurance Trust Mark — for the service's home page, which
+// shows every provider without signing in to any.
 func (rp *relyingParty) assess(ctx context.Context, idp *identityProvider) providerStatus {
-	st := providerStatus{ID: idp.entity.id, Name: idp.country.idpName, Country: idp.country.name, Color: idp.country.color}
 	resolved, err := rp.resolver.Resolve(ctx, idp.entity.id)
 	if err != nil {
+		st := rp.newStatus(idp)
 		st.Problem = err.Error()
 		return st
 	}
+	return rp.checkAssurance(ctx, idp, resolved)
+}
+
+func (rp *relyingParty) newStatus(idp *identityProvider) providerStatus {
+	return providerStatus{ID: idp.entity.id, Name: idp.country.idpName, Country: idp.country.name, Color: idp.country.color}
+}
+
+// checkAssurance checks idp's resolved Trust Chain for a
+// level-of-assurance Trust Mark, requiring the Union's accreditation of
+// the mark's issuer.
+func (rp *relyingParty) checkAssurance(ctx context.Context, idp *identityProvider, resolved federation.ResolvedEntity) providerStatus {
+	st := rp.newStatus(idp)
 	st.Reachable = true
 	st.Chain = resolved.Chain
 	st.LoAProblem = "publishes no level-of-assurance mark"
@@ -177,14 +189,10 @@ func (rp *relyingParty) home(w http.ResponseWriter, r *http.Request) {
 	rp.w.render(w, "service", servicePage{Page: rp.w.page(rp.entity.name, rp.country), Providers: providers, Requested: requestedClaims.IDToken})
 }
 
-// clientFor discovers provider through the federation and builds a
-// client for it, identified by this service's own Entity Identifier —
-// no registration with the provider beforehand.
-func (rp *relyingParty) clientFor(ctx context.Context, provider string) (*client.Client, error) {
-	discovered, err := client.DiscoverViaFederation(ctx, rp.resolver, provider)
-	if err != nil {
-		return nil, err
-	}
+// clientFor builds a client for the provider discovered through the
+// federation, identified by this service's own Entity Identifier — no
+// registration with the provider beforehand.
+func (rp *relyingParty) clientFor(provider string, discovered client.DiscoveredMetadata) (*client.Client, error) {
 	fetcher, err := rp.w.fetcher(rp.entity.host)
 	if err != nil {
 		return nil, err
@@ -233,16 +241,19 @@ func (rp *relyingParty) login(w http.ResponseWriter, r *http.Request) {
 		rp.w.renderError(w, http.StatusBadRequest, "Unknown identity provider", provider)
 		return
 	}
-	status := rp.assess(r.Context(), idp)
-	if !status.Reachable {
-		rp.w.renderError(w, http.StatusForbidden, idp.country.idpName+" is not trusted", status.Problem)
+	// One Trust Chain resolution: discovery keeps the chain it resolved,
+	// and the assurance check reads the provider's Trust Marks from it.
+	discovered, err := client.DiscoverViaFederation(r.Context(), rp.resolver, provider)
+	if err != nil {
+		rp.w.renderError(w, http.StatusForbidden, idp.country.idpName+" is not trusted", err.Error())
 		return
 	}
-	if !status.LoAHigh {
+	resolved, _ := discovered.ResolvedEntity()
+	if status := rp.checkAssurance(r.Context(), idp, resolved); !status.LoAHigh {
 		rp.w.renderError(w, http.StatusForbidden, idp.country.idpName+" is not accredited at a high level of assurance", status.LoAProblem)
 		return
 	}
-	cl, err := rp.clientFor(r.Context(), provider)
+	cl, err := rp.clientFor(provider, discovered)
 	if err != nil {
 		rp.w.renderError(w, http.StatusBadGateway, "Could not discover "+idp.country.idpName, err.Error())
 		return

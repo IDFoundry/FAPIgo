@@ -307,3 +307,30 @@ func TestConsentShowsTheServicesPublishedName(t *testing.T) {
 	// From the bank's own openid_relying_party metadata, resolved by EastID.
 	mustContain(t, body, "<strong>Southport Savings Bank</strong> wants you to sign in", w.URL("bank.southport.localhost", ""))
 }
+
+// TestSignInResolvesTheProviderOnce covers discovery keeping the Trust
+// Chain it resolved: starting a sign-in fetches the provider's Entity
+// Configuration once, not once for the assurance check and again for
+// discovery.
+func TestSignInResolvesTheProviderOnce(t *testing.T) {
+	w, n := startUnion(t)
+	b := newBrowser(t, n)
+	eastID := w.URL("id.eastmark.localhost", "/.well-known/openid-federation")
+	count := func() int {
+		c := 0
+		for _, e := range n.Log().Recent(300) {
+			if e.From == "bank.southport.localhost" && e.URL == eastID {
+				c++
+			}
+		}
+		return c
+	}
+	before := count()
+	_, body, at := b.get(w.URL("bank.southport.localhost", "/login?provider="+url.QueryEscape(w.URL("id.eastmark.localhost", ""))))
+	if at.Hostname() != "id.eastmark.localhost" {
+		t.Fatalf("sign-in didn't reach EastID:\n%s", body)
+	}
+	if got := count() - before; got != 1 {
+		t.Errorf("bank fetched EastID's Entity Configuration %d times to start one sign-in, want 1", got)
+	}
+}

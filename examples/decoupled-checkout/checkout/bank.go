@@ -138,6 +138,9 @@ func (w *World) newBank(till, pocketwise clientKeys) (*bank, error) {
 		Random:                 rand.Reader,
 		Backchannel:            memstore.NewBackchannelAuthenticationStore(),
 		BackchannelNotifier:    demoNotifier{client: w.net.Client(bankHost)},
+		// A request naming no customer is refused with unknown_user_id
+		// before it's stored.
+		BackchannelHints: customerDirectory{},
 		CIBARARPolicy: entitlements{
 			tillClientID:       {paymentInitiationType.Type},
 			pocketwiseClientID: {accountInformationType.Type},
@@ -232,14 +235,10 @@ func (b *bank) backchannelAuthentication(w http.ResponseWriter, r *http.Request)
 	case server.BackchannelInteractionRequired:
 		// The login hint is only a hint: it says whose phone to ask, and
 		// the customer's approval there is what authenticates them.
+		// customerDirectory already refused hints naming nobody.
 		c, ok := customerByHint(string(a.Interaction.Hints.LoginHint))
 		if !ok {
-			// CIBA §13's unknown_user_id. The request was already stored,
-			// so close it too.
-			_ = b.srv.CompleteBackchannelAuthentication(r.Context(), server.CompleteBackchannelAuthenticationRequest{
-				Handle: a.Handle, Result: server.Deny("unknown user"),
-			})
-			server.NewError("unknown_user_id", http.StatusBadRequest, "no Alder Bank customer matches that login hint").WriteJSON(w)
+			server.NewError(server.ErrorServerError, http.StatusInternalServerError, "customer not found").WriteJSON(w)
 			return
 		}
 		now := time.Now()
@@ -334,6 +333,17 @@ func (b *bank) decide(ctx context.Context, p *pendingRequest, approve bool, gran
 		})
 	}
 	return b.srv.CompleteBackchannelAuthentication(ctx, server.CompleteBackchannelAuthenticationRequest{Handle: p.handle, Result: result})
+}
+
+// customerDirectory is Alder Bank's server.BackchannelHintChecker: a
+// backchannel request must name one of its customers by login hint.
+type customerDirectory struct{}
+
+func (customerDirectory) CheckBackchannelHints(_ context.Context, _ fapi.ClientID, hints server.BackchannelAuthenticationHints) error {
+	if _, ok := customerByHint(string(hints.LoginHint)); !ok {
+		return server.ErrUnknownUserID
+	}
+	return nil
 }
 
 // demoNotifier sends CIBA ping notifications (§10.2) through the demo

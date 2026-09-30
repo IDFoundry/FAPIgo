@@ -82,6 +82,10 @@ type BeginBackchannelAuthenticationRequest struct {
 // there is no browser round trip to hide it from — so it has a plain
 // string accessor, the same relationship RequestURI already has to its
 // own wire value.
+//
+// A session can be stored and restored — MarshalText, and
+// ParseBackchannelAuthenticationSession — so another instance can poll
+// for it, or authenticate its ping callback.
 type BackchannelAuthenticationSession struct {
 	authReqID         string
 	interval          time.Duration

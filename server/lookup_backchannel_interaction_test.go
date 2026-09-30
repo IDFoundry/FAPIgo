@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/extension"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
 	"github.com/idfoundry/fapigo/storage/memstore"
@@ -80,5 +81,38 @@ func TestLookupBackchannelInteractionServerErrors(t *testing.T) {
 		if !errors.As(err, &serverErr) || serverErr.Code() != server.ErrorServerError {
 			t.Errorf("%s: LookupBackchannelInteraction = %v, want server_error", name, err)
 		}
+	}
+}
+
+// fixedRecordStore returns record as every looked-up request.
+type fixedRecordStore struct {
+	*memstore.BackchannelAuthenticationStore
+	record json.RawMessage
+}
+
+func (s fixedRecordStore) LookupBackchannelAuthentication(ctx context.Context, handleHash [32]byte) (storage.LookedUpBackchannelAuthentication, error) {
+	rec, err := s.BackchannelAuthenticationStore.LookupBackchannelAuthentication(ctx, handleHash)
+	rec.Request = s.record
+	return rec, err
+}
+
+// TestLookupBackchannelInteractionUnreadableExtension covers a stored
+// extension value this server's registry no longer accepts.
+func TestLookupBackchannelInteractionUnreadableExtension(t *testing.T) {
+	store := memstore.NewBackchannelAuthenticationStore()
+	required := beginBackchannel(t, newHarnessWithBackchannelStore(t, store), standardBackchannelParams(t))
+
+	registry, err := extension.NewRegistry(extension.Definition[string]{
+		Name: "x_state", Cardinality: extension.Single, AllowedSources: extension.SourceRequestObject, MaxBytes: 8,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := json.RawMessage(`{"v":1,"parameters":{"scope":"openid","login_hint":"user-1","x_state":"far longer than eight bytes"}}`)
+	h := newHarnessWithBackchannelConfig(t, fixedRecordStore{store, record}, func(c *server.Config) { c.Extensions = registry })
+	_, err = h.server.LookupBackchannelInteraction(context.Background(), required.Handle)
+	var serverErr *server.Error
+	if !errors.As(err, &serverErr) || serverErr.Code() != server.ErrorServerError {
+		t.Errorf("LookupBackchannelInteraction = %v, want server_error", err)
 	}
 }

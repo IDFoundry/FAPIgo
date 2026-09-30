@@ -103,13 +103,11 @@ func (s BackchannelAuthenticationSession) ExpiresAt() time.Time { return s.expir
 // NotificationToken is the client_notification_token this client sent
 // with its backchannel authentication request, under
 // Config.BackchannelTokenDeliveryMode == storage.BackchannelTokenDeliveryModePing
-// — empty under the default (Poll). This package never receives the
-// resulting CIBA §10.2 ping callback itself (it has no HTTP server of
-// its own); the caller is responsible for persisting this value
-// alongside whatever it already tracks about the pending session, and,
-// in its own webhook handler, comparing an incoming ping's bearer
-// token against it (a constant-time comparison — crypto/subtle.ConstantTimeCompare)
-// before calling PollBackchannelAuthentication.
+// — empty under the default (Poll). This package has no HTTP server of
+// its own, so the caller receives the resulting CIBA §10.2 ping
+// callback: ParseBackchannelNotification reads it, and
+// BackchannelNotification.Authenticates checks it against this session
+// before the caller calls PollBackchannelAuthentication.
 func (s BackchannelAuthenticationSession) NotificationToken() string { return s.notificationToken }
 
 // BeginBackchannelAuthentication builds and signs a CIBA backchannel

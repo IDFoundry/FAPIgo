@@ -1,4 +1,4 @@
-package main
+package demokit
 
 import (
 	"net"
@@ -13,7 +13,7 @@ func TestListenRefusesAPortInUse(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = other.Close() }()
-	if listeners, err := listen(other.Addr().(*net.TCPAddr).Port); err == nil {
+	if listeners, err := Listen(other.Addr().(*net.TCPAddr).Port); err == nil {
 		for _, l := range listeners {
 			_ = l.Close()
 		}
@@ -29,7 +29,7 @@ func TestListenBindsBothLoopbacks(t *testing.T) {
 	port := free.Addr().(*net.TCPAddr).Port
 	_ = free.Close()
 
-	listeners, err := listen(port)
+	listeners, err := Listen(port)
 	if err != nil {
 		t.Fatal(err)
 	}

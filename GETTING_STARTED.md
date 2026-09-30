@@ -406,19 +406,16 @@ authCtx, err := verifier.Verify(ctx, resource.VerifyRequest{
 
 On success, `authCtx.Subject`/`ClientID`/`Scopes`/`Claims` are what your
 API handler needs to authorize the call. On failure, `err` is always a
-`*resource.Error` — `Code()`/`PublicDescription()`/`HTTPStatus()` are
-safe to put directly into an RFC 6750 `WWW-Authenticate` challenge and
-response body; `Unwrap()` is for logs only, never the response:
+`*resource.Error`, and `resource.WriteError` sends it as the RFC 6750 /
+RFC 9449 response: the status, a `WWW-Authenticate` challenge in the
+scheme the request used, and the error body. A request with no
+credentials at all gets 401 and a challenge with no error code, as RFC
+6750 §3.1 asks. `Unwrap()` is for logs only, never the response:
 
 ```go
-func writeResourceError(w http.ResponseWriter, err error) {
-	resErr, ok := err.(*resource.Error)
-	if !ok {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("WWW-Authenticate", `DPoP error="`+string(resErr.Code())+`"`)
-	http.Error(w, resErr.PublicDescription(), resErr.HTTPStatus())
+if err != nil {
+	resource.WriteError(w, err)
+	return
 }
 ```
 
@@ -436,9 +433,9 @@ which silently returns only the first of several duplicate headers.
 older version of this library, which left that check to the caller.
 
 That's the whole surface: `resource.Verifier` has no other public entry
-point. Everything above `Verify` — routing, `WWW-Authenticate` framing,
-what the protected API actually returns — is your own handler, same as
-step 5's login flow was yours to build for `server`.
+point. Everything above `Verify` — routing, and what the protected API
+actually returns — is your own handler, same as step 5's login flow was
+yours to build for `server`.
 
 ## 8. Run it
 

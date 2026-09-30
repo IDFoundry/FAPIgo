@@ -15,6 +15,30 @@ and `keys/ephemeral` needs only the steps not marked *production only*.
 
 ## v0.41.0
 
+### A resource request without credentials gets 401, not 400
+
+**Affects:** anyone using `resource.Verifier`, and anything that checks
+its errors' status codes or error codes.
+
+**Why:** RFC 6750 §3.1 answers a request that "lacks any authentication
+information (e.g., the client was unaware that authentication is
+necessary or attempted using an unsupported authentication method)"
+with 401 and a challenge carrying no error code; RFC 9449 §7.2 says the
+same for a resource server accepting both DPoP and Bearer. `Verify`
+answered it with 400 `invalid_request`. It now returns a
+`*resource.Error` with an empty `Code()` and status 401, for a missing
+Authorization header and for a scheme other than DPoP or Bearer.
+`WriteJSON`/`WriteError` send it as `WWW-Authenticate: Bearer, DPoP
+algs="ES256 PS256 EdDSA"` with no body. A header with a supported
+scheme but no token is still 400 `invalid_request`.
+
+Errors for a request that used the DPoP scheme are now sent in a `DPoP`
+challenge, with `algs`, rather than a `Bearer` one (RFC 9449 §7.2).
+
+If you pass `Verify`'s errors to `WriteJSON` or `WriteError`, there's
+nothing to change. If you build the response yourself, send no error
+code when `Code()` is empty, and use the challenge `WriteJSON` would.
+
 ### Entity Identifiers with a query or userinfo are rejected
 
 **Affects:** anyone resolving Trust Chains, registering federation

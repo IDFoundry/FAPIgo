@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -94,29 +95,59 @@ type AuthorizationContext struct {
 // AuthorizationContext the caller is granted; on failure it returns a
 // typed Error describing what's safe to expose to the caller of the
 // protected API.
+//
+// A request presenting no credentials at all — no Authorization header,
+// or a scheme this verifier doesn't accept — fails with an *Error whose
+// Code is empty: RFC 6750 §3.1 and RFC 9449 §7.2 answer it with 401 and
+// a challenge carrying no error information (see Error.WriteJSON).
 func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (AuthorizationContext, error) {
+	authz, usedDPoP, err := v.verify(ctx, req)
+	if err != nil && usedDPoP {
+		// RFC 9449 §7.2: the request used the DPoP scheme, so its error
+		// goes in a DPoP challenge. A copy: an AccessTokenResolver's own
+		// *Error isn't this method's to modify.
+		var e *Error
+		if errors.As(err, &e) {
+			c := *e
+			c.dpopChallenge = true
+			return AuthorizationContext{}, &c
+		}
+	}
+	return authz, err
+}
+
+// verify is Verify, also reporting whether the request used the DPoP
+// scheme, which decides the challenge an error is sent with.
+func (v *Verifier) verify(ctx context.Context, req VerifyRequest) (AuthorizationContext, bool, error) {
 	if req.Method == "" {
-		return AuthorizationContext{}, newError(ErrorInvalidRequest, 400, "method is required", nil)
+		return AuthorizationContext{}, false, newError(ErrorInvalidRequest, 400, "method is required", nil)
 	}
 	if req.URL == nil {
-		return AuthorizationContext{}, newError(ErrorInvalidRequest, 400, "url is required", nil)
+		return AuthorizationContext{}, false, newError(ErrorInvalidRequest, 400, "url is required", nil)
 	}
 
 	dpopProof, dpopOK := dpop.ResolveHeaderValues(req.DPoPProofs)
 	if !dpopOK {
-		return AuthorizationContext{}, newError(ErrorInvalidRequest, 400, "multiple DPoP proofs are not permitted", nil)
+		return AuthorizationContext{}, false, newError(ErrorInvalidRequest, 400, "multiple DPoP proofs are not permitted", nil)
 	}
 
-	scheme, raw, ok := strings.Cut(req.Authorization, " ")
-	if !ok || raw == "" {
-		return AuthorizationContext{}, newError(ErrorInvalidRequest, 400, "authorization header is missing or malformed", nil)
+	if strings.TrimSpace(req.Authorization) == "" {
+		return AuthorizationContext{}, false, noCredentials("no Authorization header")
+	}
+	scheme, raw, _ := strings.Cut(req.Authorization, " ")
+	usedDPoP := strings.EqualFold(scheme, "DPoP")
+	if !usedDPoP && !strings.EqualFold(scheme, "Bearer") {
+		return AuthorizationContext{}, false, noCredentials("authorization scheme is neither DPoP nor Bearer")
+	}
+	if raw == "" {
+		return AuthorizationContext{}, usedDPoP, newError(ErrorInvalidRequest, 400, "authorization header has no access token", nil)
 	}
 
 	now := v.deps.Clock.Now()
 
-	senderConstrain, verifiedProof, certThumbprint, verr := v.resolveCredential(ctx, req, dpopProof, raw, scheme, now)
+	senderConstrain, verifiedProof, certThumbprint, verr := v.resolveCredential(ctx, req, dpopProof, raw, usedDPoP, now)
 	if verr != nil {
-		return AuthorizationContext{}, verr
+		return AuthorizationContext{}, usedDPoP, verr
 	}
 
 	resolved, err := v.deps.AccessTokens.ResolveAccessToken(ctx, ResolveAccessTokenRequest{Raw: raw, Now: now})
@@ -128,9 +159,9 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (Authorization
 		// convention) falls back to the same invalid_token/401 every
 		// other rejection here defaults to.
 		if rerr, ok := err.(*Error); ok {
-			return AuthorizationContext{}, rerr
+			return AuthorizationContext{}, usedDPoP, rerr
 		}
-		return AuthorizationContext{}, newError(ErrorInvalidToken, 401, "access token is invalid", err)
+		return AuthorizationContext{}, usedDPoP, newError(ErrorInvalidToken, 401, "access token is invalid", err)
 	}
 
 	// A token bound one way can't be redeemed by presenting the other
@@ -139,7 +170,7 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (Authorization
 	// unrelated value spaces and a caller shouldn't have to reason about
 	// whether they could ever collide.
 	if resolved.SenderConstrain != senderConstrain {
-		return AuthorizationContext{}, newError(ErrorInvalidToken, 401, "access token is not bound via the presented credential's mechanism", nil)
+		return AuthorizationContext{}, usedDPoP, newError(ErrorInvalidToken, 401, "access token is not bound via the presented credential's mechanism", nil)
 	}
 
 	// Sender-constraint binding and ordinary expiry are enforced here,
@@ -156,23 +187,23 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (Authorization
 		presented = verifiedProof.Thumbprint.String()
 	}
 	if subtle.ConstantTimeCompare([]byte(resolved.Thumbprint), []byte(presented)) != 1 {
-		return AuthorizationContext{}, newError(ErrorInvalidToken, 401, "access token is not bound to the presented credential", nil)
+		return AuthorizationContext{}, usedDPoP, newError(ErrorInvalidToken, 401, "access token is not bound to the presented credential", nil)
 	}
 	if now.After(resolved.ExpiresAt.Add(v.cfg.Limits.MaxClockSkew)) {
-		return AuthorizationContext{}, newError(ErrorInvalidToken, 401, "access token has expired", nil)
+		return AuthorizationContext{}, usedDPoP, newError(ErrorInvalidToken, 401, "access token has expired", nil)
 	}
 
 	revoked, err := v.deps.Revocation.IsRevoked(ctx, resolved.Key)
 	if err != nil {
-		return AuthorizationContext{}, newError(ErrorServerError, 500, "failed to check token revocation", err)
+		return AuthorizationContext{}, usedDPoP, newError(ErrorServerError, 500, "failed to check token revocation", err)
 	}
 	if revoked {
-		return AuthorizationContext{}, newError(ErrorInvalidToken, 401, "access token has been revoked", nil)
+		return AuthorizationContext{}, usedDPoP, newError(ErrorInvalidToken, 401, "access token has been revoked", nil)
 	}
 
 	if senderConstrain == storage.SenderConstrainDPoP {
 		if verr := v.consumeDPoPProof(ctx, verifiedProof, now); verr != nil {
-			return AuthorizationContext{}, verr
+			return AuthorizationContext{}, usedDPoP, verr
 		}
 	}
 
@@ -180,7 +211,7 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (Authorization
 	if v.deps.Nonces != nil && senderConstrain == storage.SenderConstrainDPoP {
 		nextNonce, err = v.issueDPoPNonce(ctx, now)
 		if err != nil {
-			return AuthorizationContext{}, newError(ErrorServerError, 500, "failed to issue dpop nonce", err)
+			return AuthorizationContext{}, usedDPoP, newError(ErrorServerError, 500, "failed to issue dpop nonce", err)
 		}
 	}
 
@@ -195,7 +226,7 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (Authorization
 		Audience:      resolved.Audience,
 		IssuedAt:      resolved.IssuedAt,
 		NextDPoPNonce: nextNonce,
-	}, nil
+	}, usedDPoP, nil
 }
 
 // resolveCredential verifies whichever sender-constraining credential
@@ -205,9 +236,8 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (Authorization
 // the resolved access token against. Split out of Verify purely to keep
 // that method's own token-resolution/binding/revocation pipeline
 // readable — this is the one genuinely separable sub-task within it.
-func (v *Verifier) resolveCredential(ctx context.Context, req VerifyRequest, dpopProof, raw, scheme string, now time.Time) (storage.SenderConstrain, dpop.VerifiedProof, string, *Error) {
-	switch {
-	case strings.EqualFold(scheme, "DPoP"):
+func (v *Verifier) resolveCredential(ctx context.Context, req VerifyRequest, dpopProof, raw string, usedDPoP bool, now time.Time) (storage.SenderConstrain, dpop.VerifiedProof, string, *Error) {
+	if usedDPoP {
 		if dpopProof == "" {
 			return 0, dpop.VerifiedProof{}, "", newError(ErrorInvalidRequest, 400, "DPoP header is required", nil)
 		}
@@ -229,14 +259,12 @@ func (v *Verifier) resolveCredential(ctx context.Context, req VerifyRequest, dpo
 			return 0, dpop.VerifiedProof{}, "", newError(ErrorInvalidToken, 401, "DPoP proof verification failed", err)
 		}
 		return storage.SenderConstrainDPoP, verifiedProof, "", nil
-	case strings.EqualFold(scheme, "Bearer"):
-		if req.PeerCertificate == nil {
-			return 0, dpop.VerifiedProof{}, "", newError(ErrorInvalidRequest, 400, "a client certificate is required", nil)
-		}
-		return storage.SenderConstrainMTLS, dpop.VerifiedProof{}, mtls.Thumbprint(req.PeerCertificate), nil
-	default:
-		return 0, dpop.VerifiedProof{}, "", newError(ErrorInvalidRequest, 400, "authorization scheme must be DPoP or Bearer", nil)
 	}
+	// Bearer: RFC 8705 §3.4's presentation of an mTLS-bound token.
+	if req.PeerCertificate == nil {
+		return 0, dpop.VerifiedProof{}, "", newError(ErrorInvalidRequest, 400, "a client certificate is required", nil)
+	}
+	return storage.SenderConstrainMTLS, dpop.VerifiedProof{}, mtls.Thumbprint(req.PeerCertificate), nil
 }
 
 // consumeDPoPProof applies the checks on a DPoP proof that write to

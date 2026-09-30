@@ -48,7 +48,22 @@ type Error struct {
 	description string
 	cause       error
 	nonce       string
+	// dpopChallenge sends the error in a DPoP challenge: set by Verify
+	// for a request that used the DPoP scheme (RFC 9449 §7.2).
+	dpopChallenge bool
 }
+
+// noCredentials is the error for a request presenting no credentials
+// this verifier accepts: 401 with an empty Code, so WriteJSON sends a
+// challenge without error information (RFC 6750 §3.1). reason is for
+// logs only.
+func noCredentials(reason string) *Error {
+	return &Error{httpStatus: 401, cause: errors.New(reason)}
+}
+
+// dpopAlgorithms is the algs parameter of a DPoP challenge (RFC 9449
+// §7.1): every algorithm the verifier accepts a DPoP proof signed with.
+const dpopAlgorithms = "ES256 PS256 EdDSA"
 
 func newError(code ErrorCode, httpStatus int, description string, cause error) *Error {
 	return &Error{code: code, httpStatus: httpStatus, description: description, cause: cause}
@@ -63,7 +78,9 @@ func NewError(code ErrorCode, httpStatus int, description string) *Error {
 	return &Error{code: code, httpStatus: httpStatus, description: description}
 }
 
-// Code returns the error code.
+// Code returns the error code — empty for a request that presented no
+// credentials at all, which RFC 6750 §3.1 answers without one (see
+// Verify).
 func (e *Error) Code() ErrorCode { return e.code }
 
 // PublicDescription returns a short, safe-to-expose description.
@@ -97,27 +114,33 @@ func (e *Error) Unwrap() error { return e.cause }
 // package's own methods return, and any built with NewError, is safe
 // to pass here.
 //
-// The WWW-Authenticate scheme is "DPoP" when Code is ErrorUseDPoPNonce
-// (the only sensible scheme there — that error is impossible for a
-// request that didn't present a DPoP proof in the first place) and
-// "Bearer" otherwise: this package accepts both DPoP-bound and
-// mTLS-bound access tokens on the same Verifier (SenderConstrain is
-// resolved per token/request, not fixed per deployment — see
-// VerifyRequest.PeerCertificate's own doc comment), and RFC 8705 §3.4
-// presents an mTLS-bound token as an ordinary Bearer credential with no
-// scheme of its own. "Bearer" is the universally correct RFC 6750
-// challenge regardless of which binding a given rejected request
-// actually used.
+// The challenge follows RFC 9449 §7.2, for a verifier accepting both
+// DPoP-bound and mTLS-bound tokens (the latter presented with the Bearer
+// scheme, RFC 8705 §3.4):
+//
+//   - An Error with an empty Code — the request presented no credentials
+//     this verifier accepts — gets "Bearer, DPoP algs=..." with no error
+//     information and no body, as RFC 6750 §3.1 asks.
+//   - An error for a request that used the DPoP scheme, and
+//     ErrorUseDPoPNonce, gets a DPoP challenge with the error and algs.
+//   - Anything else, including every error built with NewError, gets a
+//     Bearer challenge with the error.
 //
 // Must be called before anything else writes to w — like every
 // http.ResponseWriter header/status call, it has no effect once a
 // prior write has already sent the response's status line.
 func (e *Error) WriteJSON(w http.ResponseWriter) {
-	scheme := "Bearer"
-	if e.code == ErrorUseDPoPNonce {
-		scheme = "DPoP"
+	switch {
+	case e.code == "":
+		w.Header().Set("WWW-Authenticate", `Bearer, DPoP algs="`+dpopAlgorithms+`"`)
+		w.WriteHeader(e.httpStatus)
+		return
+	case e.dpopChallenge || e.code == ErrorUseDPoPNonce:
+		w.Header().Set("WWW-Authenticate", `DPoP error="`+string(e.code)+`", algs="`+dpopAlgorithms+`"`)
+	default:
+		w.Header().Set("WWW-Authenticate", `Bearer error="`+string(e.code)+`"`)
 	}
-	httperror.WriteJSON(w, e.nonce, scheme, string(e.code), e.description, e.httpStatus)
+	httperror.WriteJSON(w, e.nonce, "", string(e.code), e.description, e.httpStatus)
 }
 
 // WriteError writes err to w: err's own WriteJSON if err is a *Error

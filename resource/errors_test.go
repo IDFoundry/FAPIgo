@@ -71,8 +71,8 @@ func TestErrorWriteJSONUsesDPoPSchemeForUseDPoPNonce(t *testing.T) {
 	rec := httptest.NewRecorder()
 	err.WriteJSON(rec)
 
-	if got := rec.Header().Get("WWW-Authenticate"); got != `DPoP error="use_dpop_nonce"` {
-		t.Fatalf("WWW-Authenticate = %q, want %q", got, `DPoP error="use_dpop_nonce"`)
+	if want := `DPoP error="use_dpop_nonce", algs="ES256 PS256 EdDSA"`; rec.Header().Get("WWW-Authenticate") != want {
+		t.Fatalf("WWW-Authenticate = %q, want %q", rec.Header().Get("WWW-Authenticate"), want)
 	}
 }
 

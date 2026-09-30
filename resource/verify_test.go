@@ -242,8 +242,10 @@ func TestVerifyRejectsUnrecognizedScheme(t *testing.T) {
 	if !ok {
 		t.Fatalf("error type = %T, want *resource.Error", err)
 	}
-	if rerr.Code() != resource.ErrorInvalidRequest {
-		t.Errorf("Code() = %v, want %v", rerr.Code(), resource.ErrorInvalidRequest)
+	// RFC 6750 §3.1: an unsupported authentication method is no
+	// credentials, answered without an error code.
+	if rerr.Code() != "" || rerr.HTTPStatus() != 401 {
+		t.Errorf("Code(), HTTPStatus() = %q, %d, want no code and 401", rerr.Code(), rerr.HTTPStatus())
 	}
 }
 

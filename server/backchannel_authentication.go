@@ -174,6 +174,11 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		return s.backchannelBeginFail(ctx, client.ID(), dpopErr), nil
 	}
 
+	interaction := s.backchannelInteractionRequestFrom(client.ID(), validated.params)
+	if hintErr := s.checkBackchannelHints(ctx, client.ID(), interaction.Hints); hintErr != nil {
+		return s.backchannelBeginFail(ctx, client.ID(), hintErr), nil
+	}
+
 	authReqIDRaw, err := generateAuthReqID(s.deps.Random)
 	if err != nil {
 		return s.backchannelBeginFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to generate auth_req_id", err)), nil
@@ -229,7 +234,6 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	if err != nil {
 		return s.backchannelBeginFail(ctx, client.ID(), newError(ErrorServerError, 500, "validated extension parameters could not be read back", err)), nil
 	}
-	interaction := s.backchannelInteractionRequestFrom(client.ID(), validated.params)
 	interaction.ClientDisplay = client.Display()
 	interaction.Extensions = extensions
 

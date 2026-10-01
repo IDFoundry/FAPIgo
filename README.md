@@ -117,6 +117,12 @@ the client credentials grant, certificate revocation and a Rich
 Authorization Request checked against a standing mandate, with an attack
 lab and a certificate rotation panel.
 
+[examples/identity-check](examples/identity-check/README.md) shows the
+bank as an OpenID Provider: a fintech verifies a new customer's identity
+with the `claims` parameter, per-claim consent, `acr_values` and
+`max_age`, and an ID token and UserInfo response signed by the bank and
+encrypted to the relying party, with an attack lab.
+
 `storage/memstore` and `keys/ephemeral` provide in-memory, non-durable
 implementations of every interface `server` needs (client repository,
 transaction/grant/replay/access-token stores, key manager, client key

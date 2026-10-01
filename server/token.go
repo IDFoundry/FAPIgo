@@ -84,8 +84,10 @@ type TokenResult struct {
 	HasIDToken bool
 
 	// RefreshToken is set only when the granted scope included
-	// "offline_access" (ExchangeAuthorizationCode) or on every
-	// successful RefreshAccessToken call, which always rotates it.
+	// "offline_access" (ExchangeAuthorizationCode), and on every
+	// successful RefreshAccessToken call, which returns the presented
+	// refresh token unchanged: under FAPI 2.0 it isn't rotated (see
+	// RefreshAccessToken).
 	RefreshToken    fapi.Secret
 	HasRefreshToken bool
 

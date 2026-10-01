@@ -3,8 +3,9 @@
 // flow against a FAPI-conformant authorization server.
 //
 // The package exposes workflow methods (BeginAuthorization,
-// HandleAuthorizationResponse, ExchangeCode, CompleteAuthorization, and
-// for CIBA BeginBackchannelAuthentication and PollBackchannelAuthentication)
+// HandleAuthorizationResponse, ExchangeCode, CompleteAuthorization, for
+// CIBA BeginBackchannelAuthentication and PollBackchannelAuthentication,
+// and RefreshTokens to redeem a refresh token either issued)
 // rather than low-level JWT, PAR or DPoP primitives — those live under internal/
 // and are composed here behind a state machine that a caller cannot drive
 // out of order. In particular, only this package may construct request

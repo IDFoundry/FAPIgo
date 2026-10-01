@@ -277,8 +277,10 @@ type Limits struct {
 	// Required unless Config.OAuthOnly is true.
 	MaxIDTokenClaimsBytes int
 
-	// RefreshTokenLifetime bounds how long a newly issued (or rotated)
-	// refresh token remains redeemable.
+	// RefreshTokenLifetime bounds how long a newly issued refresh token
+	// remains redeemable. Refreshing doesn't extend it: the token isn't
+	// rotated (see RefreshAccessToken), so it expires this long after it
+	// was first issued.
 	RefreshTokenLifetime time.Duration
 
 	// MaxDPoPProofAge bounds how old (relative to verification time) a

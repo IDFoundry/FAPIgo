@@ -49,6 +49,10 @@ const (
 	// AuditEventRequestClientCredentialsToken records the outcome of a
 	// RequestClientCredentialsToken call.
 	AuditEventRequestClientCredentialsToken
+
+	// AuditEventAuthenticateAttestedClient records the outcome of an
+	// AuthenticateAttestedClient call.
+	AuditEventAuthenticateAttestedClient
 )
 
 // AuditOutcome is a closed set of outcomes for an AuditEvent.

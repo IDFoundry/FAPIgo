@@ -94,9 +94,17 @@ func newHarnessWithAttesterTrust(t *testing.T, registeredKey *ecdsa.PrivateKey, 
 // server's Clock fixed at now.
 func newHarnessWithAttesterTrustAt(t *testing.T, now time.Time, registeredKey *ecdsa.PrivateKey, trust server.AttesterTrust) harness {
 	t.Helper()
+	return newAttestationHarness(t, now, registeredKey, trust, nil)
+}
+
+// newAttestationHarness is newHarnessWithAttesterTrustAt, with tweak, if
+// non-nil, adjusting the server's Config and testClientID's registration
+// before either is built.
+func newAttestationHarness(t *testing.T, now time.Time, registeredKey *ecdsa.PrivateKey, trust server.AttesterTrust, tweak func(*server.Config, *storage.RegisteredClientConfig)) harness {
+	t.Helper()
 	serverKey := generateKey(t)
 
-	client, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
+	clientConfig := storage.RegisteredClientConfig{
 		ID:                           testClientID,
 		RedirectURIs:                 []fapi.RegisteredRedirectURI{testRedirectURI},
 		ClientAuthMethod:             storage.ClientAuthMethodAttestation,
@@ -104,11 +112,7 @@ func newHarnessWithAttesterTrustAt(t *testing.T, now time.Time, registeredKey *e
 		ClientAttestationAlgorithm:   fapi.ES256,
 		AllowedScopes:                []string{"accounts"},
 		AllowsClientCredentialsGrant: true,
-	})
-	if err != nil {
-		t.Fatalf("NewRegisteredClient: %v", err)
 	}
-
 	issuer, err := fapi.ParseIssuerURL(testIssuer)
 	if err != nil {
 		t.Fatalf("ParseIssuerURL: %v", err)
@@ -149,6 +153,14 @@ func newHarnessWithAttesterTrustAt(t *testing.T, now time.Time, registeredKey *e
 		ClientCredentialsGrant:               true,
 		AttestationBasedClientAuthentication: true,
 	}
+	if tweak != nil {
+		tweak(&cfg, &clientConfig)
+	}
+	client, err := storage.NewRegisteredClient(clientConfig)
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+
 	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
 	deps := server.Dependencies{
 		Clients:                &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},

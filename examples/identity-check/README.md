@@ -13,8 +13,9 @@ bank, **Alder Bank**, acting as an [OpenID Provider](https://openid.net/specs/op
 - Sam sees every claim on the bank's consent page and can untick any of
   them: the bank releases only what's left ticked.
 - The ID token and the UserInfo response come back signed by the bank
-  and encrypted to Fernway, so nothing on the wire between them can read
-  the claims.
+  and encrypted to Fernway (RSA-OAEP-256 for the ID token,
+  ECDH-ES+A256KW for UserInfo), so nothing on the wire between them can
+  read the claims.
 
 A second relying party, **Brightline Rentals**, asks for less and gets
 its ID token signed but not encrypted. An **attack lab** tries to get
@@ -124,7 +125,7 @@ Everything here uses FAPIgo's public API only.
 
 | Piece | FAPIgo |
 |---|---|
-| Alder Bank | `server.Server` with `Dependencies.IdentityClaims` (its customers' verified claims), `Dependencies.ClientEncryptionKeys` (its clients' registered encryption keys), and `Algorithms.UserInfo` and the ID token and UserInfo encryption algorithms; clients registered for encrypted ID tokens and UserInfo responses; the consent page reading `InteractionRequest.RequestedClaims`, `ACRValues` and `MaxAge`, and answering with `GrantedAuthorization.ApprovedIdentityClaims` and `NewAuthenticationContext`'s `acr` and authentication time; discovery from `server.Metadata` plus `userinfo_endpoint` and `claims_supported` |
+| Alder Bank | `server.Server` with `Dependencies.IdentityClaims` (its customers' verified claims), `Dependencies.ClientKeys` and `Dependencies.ClientEncryptionKeys` both set to an `ephemeral.ClientKeySource` holding each client's registered JWK Set (its client-assertion key and the keys to encrypt to it), and `Algorithms.UserInfo` and the ID token and UserInfo encryption algorithms; clients registered for encrypted ID tokens and UserInfo responses; the consent page reading `InteractionRequest.RequestedClaims`, `ACRValues` and `MaxAge`, and answering with `GrantedAuthorization.ApprovedIdentityClaims` and `NewAuthenticationContext`'s `acr` and authentication time; discovery from `server.Metadata` plus `userinfo_endpoint` and `claims_supported` |
 | The UserInfo endpoint | `serverresource.NewVerifier`; the approved claim names from the access token's `server.RequestedUserinfoClaimsKey`; `Server.SignUserInfoResponse`, which signs and, for a client that registered for it, encrypts |
 | Fernway, Brightline | `client.NewFromDiscovery`; `BeginAuthorization` with `Claims`, `ACRValues` and `MaxAge`; `ExchangeCode`, with `Dependencies.Decryption` for the encrypted ID token; `TokenSet.IDTokenClaims` (`ACR`, `AuthTime`, the claims); `FetchUserInfo` |
 
@@ -140,10 +141,11 @@ The code:
 
 - Sign-in is a username and a PIN; "approve in the app" is a radio
   button. A real bank would run its own strong authentication.
-- The bank holds each client's encryption public key directly, as if
-  registered out of band. A client would usually register a JWKS (or a
-  `jwks_uri`) with its encryption keys, and the bank's
-  `keys.ClientEncryptionKeySource` would read them from it.
+- Each client's JWK Set is registered inline, and `keys/ephemeral`'s
+  `ClientKeySource` reads it: development only. A production deployment
+  supplies its own `keys.ClientKeySource` and
+  `keys.ClientEncryptionKeySource`, for registered keys or a client's
+  `jwks_uri`.
 - The OIDC Core §3.1.3.7 checks of `acr` and `auth_time` are Fernway's
   own code: FAPIgo exposes both on `TokenSet.IDTokenClaims` and leaves
   the decision to the relying party, while the bank enforces `max_age`

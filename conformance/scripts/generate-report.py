@@ -354,9 +354,7 @@ def main():
         where = "(commit unknown)"
     md.append(f"Generated {generated} by `conformance/scripts/run-all.sh`, FAPIgo at {where}.\n")
 
-    md.append("## Summary\n")
-    md.append("| Configuration | Result |")
-    md.append(TABLE_SEPARATOR_2COL)
+    md.extend(["## Summary\n", "| Configuration | Result |", TABLE_SEPARATOR_2COL])
     # Derived from AS_SUITES/RP_SUITES (the same lists the per-configuration
     # sections below iterate over), not a separate hardcoded list — a
     # stale copy here previously left nine legs (added across later

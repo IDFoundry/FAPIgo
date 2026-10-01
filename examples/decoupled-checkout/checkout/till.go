@@ -57,6 +57,9 @@ const (
 	scenarioMisleading = "misleading" // €500.00, with a binding message claiming it's a refund
 )
 
+// tillName is the merchant's name, as the bank registered it.
+const tillName = "Harbour Coffee"
+
 func (w *World) newTill(keys clientKeys) (*till, error) {
 	thiefKeys, err := newClientKeys("stolen-device")
 	if err != nil {
@@ -79,7 +82,7 @@ func (w *World) newTill(keys clientKeys) (*till, error) {
 }
 
 func (t *till) home(w http.ResponseWriter, _ *http.Request) {
-	t.w.render(w, "till-home", t.w.page("Harbour Coffee", tillHost))
+	t.w.render(w, "till-home", t.w.page(tillName, tillHost))
 }
 
 // pay starts a checkout: a signed CIBA request to Alder Bank naming the
@@ -98,7 +101,7 @@ func (t *till) pay(w http.ResponseWriter, r *http.Request) {
 	}
 	payment, err := extension.RARSet(paymentInitiationType, paymentInitiation{
 		InstructedAmount: amount{Currency: "EUR", Amount: o.Amount},
-		CreditorName:     "Harbour Coffee", CreditorAccount: account{IBAN: tillIBAN},
+		CreditorName:     tillName, CreditorAccount: account{IBAN: tillIBAN},
 		RemittanceMessage: "Order " + o.ID,
 	})
 	if err != nil {
@@ -144,7 +147,7 @@ func (t *till) show(w http.ResponseWriter, r *http.Request) {
 	if o.Status == "waiting" && time.Since(o.lastPoll) >= o.session.Interval() {
 		t.poll(r.Context(), o)
 	}
-	page := tillOrderPage{Page: t.w.page("Harbour Coffee", tillHost), Order: o}
+	page := tillOrderPage{Page: t.w.page(tillName, tillHost), Order: o}
 	page.Refresh = o.Status == "waiting"
 	t.w.render(w, "till-order", page)
 }

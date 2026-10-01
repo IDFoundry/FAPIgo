@@ -261,7 +261,7 @@ func (rp *relyingParty) describeRequest() []string {
 func (rp *relyingParty) start(w http.ResponseWriter, r *http.Request) {
 	ck := &check{ID: randomCode(8), Scenario: r.FormValue("scenario"), Status: "redirected", trace: &trace{}, wire: &wireArtifacts{}}
 	switch ck.Scenario {
-	case "swap-alex", "swap-brightline":
+	case swapAlex, swapBrightline:
 		// Captured earlier by the attack lab itself, never taken from
 		// the browser.
 		ck.swapIDToken = rp.w.captured.idTokenFor(ck.Scenario)

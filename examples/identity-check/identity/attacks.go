@@ -19,13 +19,19 @@ type captures struct {
 	alexIDToken, alexUserInfo, brightlineIDToken string
 }
 
+// The attack lab's ID token swaps: the scenario values its buttons post.
+const (
+	swapAlex       = "swap-alex"
+	swapBrightline = "swap-brightline"
+)
+
 func (c *captures) idTokenFor(scenario string) string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	switch scenario {
-	case "swap-alex":
+	case swapAlex:
 		return c.alexIDToken
-	case "swap-brightline":
+	case swapBrightline:
 		return c.brightlineIDToken
 	}
 	return ""
@@ -118,10 +124,10 @@ func (rp *relyingParty) attack(w http.ResponseWriter, r *http.Request) {
 		a = rp.askAgain(ctx, ck)
 	case "eavesdrop":
 		a = rp.eavesdrop(ck)
-	case "swap-alex":
-		a = rp.replay(ctx, "Swap in Alex's ID token", "swap-alex")
-	case "swap-brightline":
-		a = rp.replay(ctx, "Swap in the ID token Alder Bank gave Brightline", "swap-brightline")
+	case swapAlex:
+		a = rp.replay(ctx, "Swap in Alex's ID token", swapAlex)
+	case swapBrightline:
+		a = rp.replay(ctx, "Swap in the ID token Alder Bank gave Brightline", swapBrightline)
 	case "other-userinfo":
 		a = rp.userInfoAttempt(ctx, "Swap in Alex's UserInfo response", rp.client, ck, func(o *traceOptions) error {
 			if err := rp.w.capture(ctx); err != nil {

@@ -70,7 +70,7 @@ func customerByHint(hint string) (customer, bool) {
 // name for (like a confirmation-of-payee check): what the phone shows as
 // verified, as opposed to the name a merchant put in its own request.
 var payees = map[string]string{
-	tillIBAN: "Harbour Coffee",
+	tillIBAN: tillName,
 }
 
 const tillIBAN = "XA55ALDR00004242424242"

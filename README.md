@@ -40,7 +40,7 @@ implemented. `server` only ever accepts `response_type=code`, and
 variants and OAuth 2.0 attestation-based client authentication.
 
 - FAPI 2.0 Security Profile Final + Message Signing Final
-- PAR (RFC 9126) · DPoP (RFC 9449) · mTLS client auth & cert-bound tokens (RFC 8705)
+- PAR (RFC 9126) · DPoP (RFC 9449) · mTLS client auth & cert-bound tokens (RFC 8705), with CRL revocation checking
 - private_key_jwt client authentication
 - OAuth 2.0 Attestation-Based Client Authentication, including HAIP 1.0 x5c attester certificate chains
 - JAR / JARM · RAR (RFC 9396) · CIBA (poll & ping delivery)

@@ -46,7 +46,10 @@ type World struct {
 	net    *demokit.Net
 	router demokit.HostRouter
 
-	pki        *pki
+	// Alder Bank's client certificate PKI: the root, the issuing CA in
+	// use, and the retired issuing CA the root revoked.
+	rootCA, clientCA, retiredCA *pki
+
 	bank       *bank
 	api        *api
 	ledgerline *ledgerline
@@ -56,8 +59,8 @@ type World struct {
 func New(port int, n *demokit.Net) (*World, error) {
 	w := &World{port: port, net: n, router: demokit.HostRouter{}}
 	var err error
-	if w.pki, err = newPKI(bankCAName, time.Now()); err != nil {
-		return nil, fmt.Errorf("bank CA: %w", err)
+	if err = w.newBankPKI(time.Now()); err != nil {
+		return nil, fmt.Errorf("bank PKI: %w", err)
 	}
 	certs, err := w.issueCertificates(time.Now())
 	if err != nil {

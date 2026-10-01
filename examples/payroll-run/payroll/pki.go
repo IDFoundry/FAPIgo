@@ -16,10 +16,18 @@ import (
 	"time"
 )
 
-// bankCAName is the CA Alder Bank issues its API clients' certificates
-// from. It's not the demo CA a browser is told to trust: that one serves
-// the demo's pages and can only vouch for *.localhost.
-const bankCAName = "Alder Bank client CA"
+// Alder Bank's PKI for its API clients' certificates: a root CA, which
+// only issues and revokes issuing CAs, and the issuing CAs below it. It's
+// not the demo CA a browser is told to trust: that one serves the demo's
+// pages and can only vouch for *.localhost.
+const (
+	rootCAName = "Alder Bank root CA"
+	// clientCAName issues client certificates today.
+	clientCAName = "Alder Bank client CA 2"
+	// retiredCAName issued them before; its key leaked, and the root
+	// revoked it.
+	retiredCAName = "Alder Bank client CA 1"
+)
 
 const (
 	certificateLifetime = 90 * 24 * time.Hour
@@ -49,22 +57,52 @@ type pki struct {
 	number  int64
 }
 
+// newPKI is a root CA named name, which may issue one level of issuing
+// CAs (subordinate).
 func newPKI(name string, now time.Time) (*pki, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, err
 	}
+	template, err := caTemplate(name, now)
+	if err != nil {
+		return nil, err
+	}
+	template.MaxPathLen = 1
+	return newCA(template, template, key, key)
+}
+
+// subordinate is an issuing CA named name that p issues: it signs client
+// certificates, not further CAs.
+func (p *pki) subordinate(name string, now time.Time) (*pki, error) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+	template, err := caTemplate(name, now)
+	if err != nil {
+		return nil, err
+	}
+	template.MaxPathLenZero = true
+	return newCA(template, p.ca, key, p.key)
+}
+
+func caTemplate(name string, now time.Time) (*x509.Certificate, error) {
 	serial, err := randomSerial()
 	if err != nil {
 		return nil, err
 	}
-	template := &x509.Certificate{
+	return &x509.Certificate{
 		SerialNumber: serial, Subject: pkix.Name{Organization: []string{"Alder Bank"}, CommonName: name},
 		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(365 * 24 * time.Hour),
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
-		BasicConstraintsValid: true, IsCA: true, MaxPathLenZero: true,
-	}
-	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+		BasicConstraintsValid: true, IsCA: true,
+	}, nil
+}
+
+// newCA signs template with parentKey as parent, for key.
+func newCA(template, parent *x509.Certificate, key, parentKey *ecdsa.PrivateKey) (*pki, error) {
+	der, err := x509.CreateCertificate(rand.Reader, template, parent, &key.PublicKey, parentKey)
 	if err != nil {
 		return nil, err
 	}
@@ -83,6 +121,23 @@ func (p *pki) issue(subject pkix.Name, notBefore, notAfter time.Time) (*tls.Cert
 	return newClientCertificate(subject, notBefore, notAfter, func(template *x509.Certificate, key *ecdsa.PrivateKey) ([]byte, error) {
 		return x509.CreateCertificate(rand.Reader, template, p.ca, &key.PublicKey, p.key)
 	})
+}
+
+// newBankPKI builds Alder Bank's root CA and its two issuing CAs, the
+// retired one already revoked by the root.
+func (w *World) newBankPKI(now time.Time) error {
+	var err error
+	if w.rootCA, err = newPKI(rootCAName, now); err != nil {
+		return err
+	}
+	if w.clientCA, err = w.rootCA.subordinate(clientCAName, now); err != nil {
+		return err
+	}
+	if w.retiredCA, err = w.rootCA.subordinate(retiredCAName, now); err != nil {
+		return err
+	}
+	w.rootCA.revoke(w.retiredCA.ca, now.Add(-time.Hour))
+	return nil
 }
 
 // selfSigned is a TLS client certificate for subject that signs itself:
@@ -127,17 +182,16 @@ func (p *pki) revoke(cert *x509.Certificate, at time.Time) {
 	p.crl = nil
 }
 
-// currentCRLs is the CRL Alder Bank's authorization server checks client
-// certificates against (server.ClientCertificateCRLs.Lists). A real
-// deployment would fetch and cache its CA's published list; here the
-// CA is in the same process, so it signs a fresh one whenever the last
-// is close to its nextUpdate or a certificate has been revoked since.
-func (p *pki) currentCRLs(context.Context) ([]*x509.RevocationList, error) {
+// currentCRL is p's current CRL. A real deployment would fetch and cache
+// each CA's published list; here the CAs are in the same process, so
+// each signs a fresh one whenever its last is close to its nextUpdate or
+// it has revoked a certificate since.
+func (p *pki) currentCRL() (*x509.RevocationList, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	now := time.Now()
 	if p.crl != nil && now.Before(p.crl.NextUpdate.Add(-crlLifetime/4)) {
-		return []*x509.RevocationList{p.crl}, nil
+		return p.crl, nil
 	}
 	p.number++
 	der, err := x509.CreateRevocationList(rand.Reader, &x509.RevocationList{
@@ -152,7 +206,23 @@ func (p *pki) currentCRLs(context.Context) ([]*x509.RevocationList, error) {
 		return nil, err
 	}
 	p.crl = crl
-	return []*x509.RevocationList{crl}, nil
+	return crl, nil
+}
+
+// currentCRLs is every CRL Alder Bank's authorization server checks
+// client certificates against (server.ClientCertificateCRLs.Lists): one
+// from each CA that issues a certificate in a chain. The root's revokes
+// issuing CAs, the issuing CAs' revoke client certificates.
+func (w *World) currentCRLs(context.Context) ([]*x509.RevocationList, error) {
+	var lists []*x509.RevocationList
+	for _, ca := range []*pki{w.rootCA, w.clientCA, w.retiredCA} {
+		crl, err := ca.currentCRL()
+		if err != nil {
+			return nil, err
+		}
+		lists = append(lists, crl)
+	}
+	return lists, nil
 }
 
 func randomSerial() (*big.Int, error) {
@@ -184,13 +254,16 @@ type certificates struct {
 	// impostor names Ledgerline as its subject, issued by a CA calling
 	// itself Alder Bank's.
 	impostor *tls.Certificate
+	// retired names Ledgerline as its subject, minted with the retired
+	// issuing CA's leaked key after the root revoked that CA.
+	retired *tls.Certificate
 }
 
 func (w *World) issueCertificates(now time.Time) (certificates, error) {
 	var c certificates
 	var err error
 	valid := func(subject pkix.Name) (*tls.Certificate, error) {
-		return w.pki.issue(subject, now.Add(-time.Hour), now.Add(certificateLifetime))
+		return w.clientCA.issue(subject, now.Add(-time.Hour), now.Add(certificateLifetime))
 	}
 	if c.ledgerline, err = valid(ledgerlineSubject); err != nil {
 		return certificates{}, err
@@ -198,8 +271,8 @@ func (w *World) issueCertificates(now time.Time) (certificates, error) {
 	if c.leaked, err = valid(ledgerlineSubject); err != nil {
 		return certificates{}, err
 	}
-	w.pki.revoke(c.leaked.Leaf, now.Add(-time.Hour))
-	if c.expired, err = w.pki.issue(ledgerlineSubject, now.Add(-certificateLifetime-24*time.Hour), now.Add(-24*time.Hour)); err != nil {
+	w.clientCA.revoke(c.leaked.Leaf, now.Add(-time.Hour))
+	if c.expired, err = w.clientCA.issue(ledgerlineSubject, now.Add(-certificateLifetime-24*time.Hour), now.Add(-24*time.Hour)); err != nil {
 		return certificates{}, err
 	}
 	if c.copperfield, err = valid(copperfieldSubject); err != nil {
@@ -208,7 +281,10 @@ func (w *World) issueCertificates(now time.Time) (certificates, error) {
 	if c.selfSigned, err = selfSigned(ledgerlineSubject, now); err != nil {
 		return certificates{}, err
 	}
-	impostorCA, err := newPKI(bankCAName, now)
+	if c.retired, err = w.retiredCA.issue(ledgerlineSubject, now.Add(-time.Minute), now.Add(certificateLifetime)); err != nil {
+		return certificates{}, err
+	}
+	impostorCA, err := newPKI(clientCAName, now)
 	if err != nil {
 		return certificates{}, err
 	}

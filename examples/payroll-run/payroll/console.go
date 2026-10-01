@@ -12,7 +12,7 @@ var tour = []tourStep{
 		Title: "Run payroll",
 		Do:    "Open Ledgerline and press Run payroll.",
 		Notice: "Nobody signs in. Ledgerline's connection to the bank's token endpoint presents its TLS client certificate, which is how it authenticates: " +
-			"the bank checks that its client CA issued it, that it hasn't been revoked, and that its subject is the one registered for Ledgerline. " +
+			"the bank checks that it chains through an issuing CA to its root CA, that neither it nor that CA has been revoked, and that its subject is the one registered for Ledgerline. " +
 			"The token it issues carries the certificate's thumbprint (cnf.x5t#S256), and grants exactly this batch from Harbour Coffee's account, " +
 			"which Harbour Coffee's mandate allows. The run page's protocol trace shows the certificate presented and the token decoded.",
 	},
@@ -26,8 +26,9 @@ var tour = []tourStep{
 		Title: "Get a token without Ledgerline's key",
 		Do:    "Back on Ledgerline's page, try each attack at the token endpoint.",
 		Notice: "A certificate naming Ledgerline proves nothing on its own: a self-signed one, or one from another CA calling itself Alder Bank's, " +
-			"doesn't chain to the bank's client CA. Ledgerline's expired certificate has run out, and its earlier certificate whose key leaked is " +
-			"on the bank's revocation list. Copperfield's certificate is valid, but its subject isn't the one registered for Ledgerline.",
+			"doesn't chain to the bank's root CA. Ledgerline's expired certificate has run out, and its earlier certificate whose key leaked is " +
+			"on its issuing CA's revocation list. A certificate minted with the key of the bank's retired issuing CA chains fine, but the root " +
+			"has revoked that CA itself. Copperfield's certificate is valid, but its subject isn't the one registered for Ledgerline.",
 	},
 	{
 		Title:  "Exceed the mandate",

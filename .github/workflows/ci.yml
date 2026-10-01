@@ -162,7 +162,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [examples/internal/demokit, examples/federated-union, examples/decoupled-checkout, examples/payment-consent, examples/payroll-run, examples/identity-check]
+        module: [examples/internal/demokit, examples/federated-union, examples/decoupled-checkout, examples/payment-consent, examples/payroll-run, examples/identity-check, examples/linked-accounts]
     defaults:
       run:
         working-directory: ${{ matrix.module }}

@@ -123,6 +123,12 @@ with the `claims` parameter, per-claim consent, `acr_values` and
 `max_age`, and an ID token and UserInfo response signed by the bank and
 encrypted to the relying party, with an attack lab.
 
+[examples/linked-accounts](examples/linked-accounts/README.md) shows
+long-lived access: a budgeting app links a customer's accounts for 90
+days and syncs with a refresh token, while the customer can revoke the
+whole grant from the bank's Connected apps page, with a demo clock and
+an attack lab.
+
 `storage/memstore` and `keys/ephemeral` provide in-memory, non-durable
 implementations of every interface `server` needs (client repository,
 transaction/grant/replay/access-token stores, key manager, client key

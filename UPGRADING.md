@@ -92,6 +92,29 @@ invalid or expired token without a certificate gets the same answer. A
 `DPoP` request without a `DPoP` header is unchanged: still 400
 `invalid_request`.
 
+### `max_age` is enforced (server)
+
+**Affects:** a server whose clients send `max_age`, and whose
+application completes an authorization with an earlier authentication,
+from a single sign-on session for example, rather than authenticating
+the user again.
+
+**Why:** OIDC Core §3.1.2.1 says that when more than `max_age` seconds
+have passed since the user last actively authenticated, "the OP MUST
+attempt to actively re-authenticate the End-User". The server used to
+ignore `max_age`. It now validates it at the pushed authorization
+request (a malformed value is `invalid_request`), surfaces it as
+`InteractionRequest.MaxAge`/`HasMaxAge`, and has `CompleteAuthorization`
+answer the client with `login_required` when the authentication time
+passed to `NewAuthenticationContext` is older than that.
+
+**What to change:** when `InteractionRequest.HasMaxAge` is set and your
+user's last authentication is older than `MaxAge`, authenticate them
+again before calling `Authorize`. A `max_age` of 0 asks for a fresh
+authentication every time. `InteractionRequest.ACRValues` now carries
+the client's `acr_values` too, for deciding how strongly to
+authenticate. It's a request, not a requirement.
+
 ## v0.41.0
 
 ### An invalid DPoP proof is invalid_dpop_proof

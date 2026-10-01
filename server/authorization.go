@@ -141,10 +141,17 @@ func (s *Server) interactionRequestFrom(clientID fapi.ClientID, params map[strin
 		}
 	}
 
+	// Validated at the pushed authorization request, so an error here
+	// can't happen; ignoring it leaves HasMaxAge false.
+	maxAge, hasMaxAge, _ := requestedMaxAge(params)
+
 	return InteractionRequest{
 		ClientID:             clientID,
 		Scope:                scopes,
 		Hints:                AuthenticationHints{LoginHint: hint},
+		ACRValues:            requestedACRValues(params),
+		MaxAge:               maxAge,
+		HasMaxAge:            hasMaxAge,
 		AuthorizationDetails: rarValuesFromStoredParameters(s.cfg.RAR, params),
 		RequestedClaims:      requestedClaimsFrom(params),
 	}

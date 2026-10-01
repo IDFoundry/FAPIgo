@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +32,17 @@ type BeginAuthorizationRequest struct {
 	// client that hasn't been specifically provisioned for it, so this
 	// is opt-in, never sent by default.
 	ACRValues []string
+
+	// MaxAge, when HasMaxAge, is sent as "max_age" (OIDC Core §3.1.2.1):
+	// the most time that may have passed since the user last actively
+	// authenticated at the authorization server, which must otherwise
+	// authenticate them again. It's sent in whole seconds, rounded down;
+	// HasMaxAge with a zero MaxAge asks for a fresh authentication every
+	// time. The ID token's auth_time (TokenSet.IDTokenClaims.AuthTime)
+	// says when the user authenticated: OIDC Core §3.1.3.7 has the
+	// client check it, and this package leaves that check to the caller.
+	MaxAge    time.Duration
+	HasMaxAge bool
 
 	// Extensions carries any custom authorization parameters to attach
 	// to this request — set via extension.Set(&req.Extensions,
@@ -77,6 +89,9 @@ type RequestedClaims struct {
 
 // claimsParameter is the OIDC Core §5.5 "claims" request parameter.
 const claimsParameter = "claims"
+
+// maxAgeParameter is the OIDC Core §3.1.2.1 "max_age" parameter.
+const maxAgeParameter = "max_age"
 
 // encode returns r as the "claims" parameter's JSON object, or nil if it
 // names no claims.
@@ -175,6 +190,12 @@ func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 	}
 	if len(req.ACRValues) > 0 {
 		params["acr_values"] = strings.Join(req.ACRValues, " ")
+	}
+	if req.HasMaxAge {
+		if req.MaxAge < 0 {
+			return AuthorizationSession{}, newError(ErrorInvalidRequest, "max_age must not be negative", nil)
+		}
+		params[maxAgeParameter] = strconv.FormatInt(int64(req.MaxAge/time.Second), 10)
 	}
 	claims, err := req.Claims.encode()
 	if err != nil {
@@ -505,6 +526,10 @@ func (c *Client) signPushedRequestForm(ctx context.Context, now time.Time, form,
 
 	if authorizationDetailsRaw != nil {
 		objectParams[authorizationDetailsParameter] = authorizationDetailsRaw
+	}
+	if maxAge, ok := params[maxAgeParameter]; ok {
+		// A JSON number in a request object, as OIDC Core §6.1 shows it.
+		objectParams[maxAgeParameter] = json.RawMessage(maxAge)
 	}
 	if claims, ok := params[claimsParameter]; ok {
 		objectParams[claimsParameter] = json.RawMessage(claims)

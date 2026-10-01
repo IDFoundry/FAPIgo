@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"strings"
@@ -215,10 +216,7 @@ func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationRe
 // buildTokenForm), or client_id under mTLS client authentication.
 func (c *Client) tokenFormBuilder(ctx context.Context, params map[string]string, assertionSigner crypto.Signer, assertionKID string) func() ([]byte, map[string]string, error) {
 	return func() ([]byte, map[string]string, error) {
-		form := make(map[string]string, len(params)+2)
-		for k, v := range params {
-			form[k] = v
-		}
+		form := maps.Clone(params)
 		headers, err := c.addClientAuthentication(ctx, form, assertionSigner, assertionKID)
 		if err != nil {
 			return nil, nil, err

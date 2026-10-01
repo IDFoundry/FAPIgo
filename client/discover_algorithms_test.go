@@ -236,3 +236,11 @@ func TestSupportsAlgorithmsIgnoresClientOwnSigningChoices(t *testing.T) {
 		t.Fatalf("SupportsAlgorithms(ClientAuthentication/DPoP never advertised anywhere): %v", err)
 	}
 }
+
+func TestSupportsAlgorithmsSkipsIDTokenWhenZero(t *testing.T) {
+	md := discoverForAlgorithmTests(t)
+	// An OAuthOnly client leaves IDToken zero: never a mismatch.
+	if err := md.SupportsAlgorithms(client.Algorithms{}); err != nil {
+		t.Fatalf("SupportsAlgorithms(IDToken unset): %v", err)
+	}
+}

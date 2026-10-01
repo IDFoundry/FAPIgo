@@ -18,6 +18,7 @@ import (
 	"github.com/idfoundry/fapigo/internal/token"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/resource"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // selfSignedTestClientCert generates a throwaway self-signed
@@ -217,4 +218,65 @@ func TestVerifyRejectsRevokedMTLSBoundToken(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Verify(revoked mTLS-bound token) = nil error, want error")
 	}
+}
+
+// wantInvalidToken401 fails t unless err is a 401 invalid_token.
+func wantInvalidToken401(t *testing.T, err error) {
+	t.Helper()
+	rerr, ok := err.(*resource.Error)
+	if !ok {
+		t.Fatalf("error = %v (%T), want *resource.Error", err, err)
+	}
+	if rerr.Code() != resource.ErrorInvalidToken || rerr.HTTPStatus() != 401 {
+		t.Errorf("error = %v %d, want %v 401", rerr.Code(), rerr.HTTPStatus(), resource.ErrorInvalidToken)
+	}
+}
+
+// TestVerifyRejectsMTLSBoundTokenWithoutCertificate covers RFC 8705 §3:
+// a certificate that doesn't match the token's is refused with 401
+// invalid_token, and no certificate matches none — whether the token
+// itself is good or not.
+func TestVerifyRejectsMTLSBoundTokenWithoutCertificate(t *testing.T) {
+	f := newMTLSFixture(t)
+	for name, token := range map[string]string{"bound token": f.accessToken, "not a token": "not-a-token"} {
+		t.Run(name, func(t *testing.T) {
+			_, err := f.verifier.Verify(context.Background(), resource.VerifyRequest{
+				Method: "GET", URL: f.target, Authorization: "Bearer " + token,
+			})
+			wantInvalidToken401(t, err)
+		})
+	}
+}
+
+// emptyThumbprintResolver resolves every token as mTLS-bound but, like a
+// careless third-party AccessTokenResolver, never sets its Thumbprint.
+type emptyThumbprintResolver struct{ now time.Time }
+
+func (r emptyThumbprintResolver) ResolveAccessToken(context.Context, resource.ResolveAccessTokenRequest) (resource.ResolvedAccessToken, error) {
+	return resource.ResolvedAccessToken{
+		Subject: "user-1", ClientID: "client-1", Key: "k",
+		SenderConstrain: storage.SenderConstrainMTLS, ExpiresAt: r.now.Add(time.Minute),
+	}, nil
+}
+
+// TestVerifyRefusesNoCertificateAgainstEmptyThumbprint covers a Bearer
+// request with no certificate against a resolver that leaves Thumbprint
+// empty: the two empty values must never count as a match.
+func TestVerifyRefusesNoCertificateAgainstEmptyThumbprint(t *testing.T) {
+	now := time.Now()
+	target, err := url.Parse("https://rs.example.com/accounts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := resource.NewVerifier(validConfig(t), resource.Dependencies{
+		AccessTokens: emptyThumbprintResolver{now: now},
+		Replay:       &fakeReplayStore{},
+		Revocation:   &fakeRevocationChecker{},
+		Clock:        fixedClock{now: now},
+	})
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+	_, err = v.Verify(context.Background(), resource.VerifyRequest{Method: "GET", URL: target, Authorization: "Bearer anything"})
+	wantInvalidToken401(t, err)
 }

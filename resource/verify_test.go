@@ -200,14 +200,12 @@ func TestVerifyRejectsReplayedDPoPProof(t *testing.T) {
 	}
 }
 
-// TestVerifyRejectsBearerSchemeWithoutCertificate covers the "Bearer"
-// scheme's own required credential being absent — Bearer is a real,
-// accepted scheme now (RFC 8705 §3.4, for mTLS-bound tokens; see
-// TestVerifyAcceptsMTLSBoundToken below), so this presents no
-// PeerCertificate rather than testing that the scheme itself is
-// rejected outright. f's own token is DPoP-bound anyway, so even a
-// presented certificate wouldn't help here — see
-// TestVerifyRejectsMTLSBoundTokenPresentedAsDPoP for that mismatch case.
+// TestVerifyRejectsBearerSchemeWithoutCertificate covers a DPoP-bound
+// token presented with the "Bearer" scheme (RFC 8705 §3.4's
+// presentation of an mTLS-bound token) and no certificate: the token
+// isn't bound to the credential presented, so it's invalid_token —
+// see TestVerifyRejectsMTLSBoundTokenWithoutCertificate for an
+// mTLS-bound token.
 func TestVerifyRejectsBearerSchemeWithoutCertificate(t *testing.T) {
 	f := newFixture(t)
 	_, err := f.verifier.Verify(context.Background(), resource.VerifyRequest{
@@ -221,8 +219,8 @@ func TestVerifyRejectsBearerSchemeWithoutCertificate(t *testing.T) {
 	if !ok {
 		t.Fatalf("error type = %T, want *resource.Error", err)
 	}
-	if rerr.Code() != resource.ErrorInvalidRequest {
-		t.Errorf("Code() = %v, want %v", rerr.Code(), resource.ErrorInvalidRequest)
+	if rerr.Code() != resource.ErrorInvalidToken || rerr.HTTPStatus() != 401 {
+		t.Errorf("error = %v %d, want %v 401", rerr.Code(), rerr.HTTPStatus(), resource.ErrorInvalidToken)
 	}
 }
 

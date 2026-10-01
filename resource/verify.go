@@ -181,14 +181,16 @@ func (v *Verifier) verify(ctx context.Context, req VerifyRequest) (Authorization
 	// each implementation. Constant-time: resolved.Thumbprint (from an
 	// implementation that never set it) is "", which always
 	// length-mismatches a real presented credential's own thumbprint
-	// encoding (never empty) and so always fails closed.
+	// encoding (never empty) and so always fails closed. The one empty
+	// presented value — a Bearer request with no client certificate —
+	// is refused explicitly, so it can never equal that "".
 	var presented string
 	if senderConstrain == storage.SenderConstrainMTLS {
 		presented = certThumbprint
 	} else {
 		presented = verifiedProof.Thumbprint.String()
 	}
-	if subtle.ConstantTimeCompare([]byte(resolved.Thumbprint), []byte(presented)) != 1 {
+	if presented == "" || subtle.ConstantTimeCompare([]byte(resolved.Thumbprint), []byte(presented)) != 1 {
 		return AuthorizationContext{}, usedDPoP, newError(ErrorInvalidToken, 401, "access token is not bound to the presented credential", nil)
 	}
 	if now.After(resolved.ExpiresAt.Add(v.cfg.Limits.MaxClockSkew)) {
@@ -262,9 +264,15 @@ func (v *Verifier) resolveCredential(ctx context.Context, req VerifyRequest, dpo
 		}
 		return storage.SenderConstrainDPoP, verifiedProof, "", nil
 	}
-	// Bearer: RFC 8705 §3.4's presentation of an mTLS-bound token.
+	// Bearer: RFC 8705 §3.4's presentation of an mTLS-bound token. With
+	// no certificate on the connection the thumbprint stays "", and the
+	// request is refused once the token is resolved: RFC 8705 §3 answers
+	// a certificate that doesn't match the token's with 401
+	// invalid_token, and no certificate matches none. Unlike a missing
+	// DPoP header under the DPoP scheme, nothing is missing from the
+	// HTTP request itself, so this isn't invalid_request.
 	if req.PeerCertificate == nil {
-		return 0, dpop.VerifiedProof{}, "", newError(ErrorInvalidRequest, 400, "a client certificate is required", nil)
+		return storage.SenderConstrainMTLS, dpop.VerifiedProof{}, "", nil
 	}
 	return storage.SenderConstrainMTLS, dpop.VerifiedProof{}, mtls.Thumbprint(req.PeerCertificate), nil
 }

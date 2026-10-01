@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +13,17 @@ import (
 	"github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/storage"
 )
+
+// grantKeyFailure is a revocation store that answers for tokens but
+// fails for grants.
+type grantKeyFailure struct{}
+
+func (grantKeyFailure) IsRevoked(_ context.Context, key string) (bool, error) {
+	if strings.HasPrefix(key, "grant:") {
+		return false, errors.New("down")
+	}
+	return false, nil
+}
 
 // grantClaimResolver resolves every token as mTLS-bound to cert,
 // carrying claims.
@@ -40,7 +52,7 @@ func TestVerifyChecksTheGrantRevocation(t *testing.T) {
 	}
 	for name, tc := range map[string]struct {
 		claim      json.RawMessage
-		revocation *fakeRevocationChecker
+		revocation resource.RevocationChecker
 		want       resource.ErrorCode
 	}{
 		"not revoked":           {json.RawMessage(`"grant-1"`), &fakeRevocationChecker{}, ""},

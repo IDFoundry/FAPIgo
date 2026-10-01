@@ -12,8 +12,9 @@ import (
 // ClientCertificateCRLs checks a client certificate against Certificate
 // Revocation Lists (RFC 5280 §5). Every certificate in the verified
 // chain below the trust anchor is checked against a CRL its issuer
-// signed, so a revoked intermediate in TrustedClientCAs.Roots is
-// caught as well as a revoked leaf.
+// signed: the leaf, and any intermediate CA from
+// TrustedClientCAs.Intermediates. The trust anchor itself, from
+// TrustedClientCAs.Roots, is never checked — see TrustedClientCAs.
 //
 // A list is used for an issuer only when its issuer name matches, its
 // signature verifies against that issuer's key, and the check's Now
@@ -25,9 +26,9 @@ import (
 // distribution point extension limits its scope, is never treated as
 // complete and is skipped.
 type ClientCertificateCRLs struct {
-	// Lists returns the current CRLs, at least one per CA that issues
-	// client certificates (or intermediates) under
-	// TrustedClientCAs.Roots. It is called on every check: keep the
+	// Lists returns the current CRLs, at least one from each CA that
+	// issues a certificate in the chain: the CA issuing client
+	// certificates, and the CA above each intermediate. It is called on every check: keep the
 	// parsed lists in memory and refresh them in the background before
 	// their nextUpdate, rather than fetching here. Required.
 	Lists func(ctx context.Context) ([]*x509.RevocationList, error)

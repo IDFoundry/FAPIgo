@@ -277,3 +277,62 @@ func TestNewRejectsIncompleteTrustedClientCAs(t *testing.T) {
 		t.Fatalf("New(complete TrustedClientCAs): %v", err)
 	}
 }
+
+// subordinate is an intermediate CA ca issues, valid as long as ca.
+func (ca revocationCA) subordinate(t *testing.T, name string) revocationCA {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate intermediate key: %v", err)
+	}
+	der, err := x509.CreateCertificate(rand.Reader, &x509.Certificate{
+		SerialNumber: randomSerial(t), Subject: pkix.Name{CommonName: name},
+		NotBefore: ca.cert.NotBefore, NotAfter: ca.cert.NotAfter,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		BasicConstraintsValid: true, IsCA: true,
+	}, ca.cert, &key.PublicKey, ca.key)
+	if err != nil {
+		t.Fatalf("create intermediate certificate: %v", err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatalf("parse intermediate certificate: %v", err)
+	}
+	pool := x509.NewCertPool()
+	pool.AddCert(cert)
+	return revocationCA{cert: cert, key: key, pool: pool}
+}
+
+// TestTLSClientAuthChecksIntermediateRevocation covers client
+// certificates issued by an intermediate CA in Intermediates, under a
+// root in Roots: the intermediate is part of the verified chain, so
+// its own revocation by the root is caught.
+func TestTLSClientAuthChecksIntermediateRevocation(t *testing.T) {
+	now := time.Now()
+	root := newRevocationCA(t, "root-ca", now.Add(-time.Hour), now.Add(time.Hour))
+	intermediate := root.subordinate(t, "issuing-ca")
+	cert := intermediate.issue(t, now.Add(-time.Minute), now.Add(time.Hour))
+	window := func(ca revocationCA, revoked ...*x509.Certificate) *x509.RevocationList {
+		return ca.crl(t, now.Add(-time.Minute), now.Add(time.Hour), nil, revoked...)
+	}
+	trust := func(lists ...*x509.RevocationList) server.TrustedClientCAs {
+		return server.TrustedClientCAs{Roots: root.pool, Intermediates: intermediate.pool, Revocation: staticCRLs(lists...)}
+	}
+
+	if err := pushWithCertificate(t, cert, trust(window(root), window(intermediate)), now); err != nil {
+		t.Fatalf("PushAuthorizationRequest(nothing revoked): %v", err)
+	}
+	t.Run("intermediate revoked by the root", func(t *testing.T) {
+		wantInvalidClient(t, pushWithCertificate(t, cert, trust(window(root, intermediate.cert), window(intermediate)), now))
+	})
+	t.Run("leaf revoked by the intermediate", func(t *testing.T) {
+		wantInvalidClient(t, pushWithCertificate(t, cert, trust(window(root), window(intermediate, cert)), now))
+	})
+	t.Run("no CRL from the root", func(t *testing.T) {
+		wantInvalidClient(t, pushWithCertificate(t, cert, trust(window(intermediate)), now))
+	})
+	t.Run("intermediate not configured", func(t *testing.T) {
+		noIntermediates := server.TrustedClientCAs{Roots: root.pool, Revocation: staticCRLs(window(root), window(intermediate))}
+		wantInvalidClient(t, pushWithCertificate(t, cert, noIntermediates, now))
+	})
+}

@@ -37,6 +37,10 @@ type AutoApprove struct {
 	// IDTokenClaims, if set, is granted as
 	// server.GrantedAuthorization.IDTokenClaims on every approval.
 	IDTokenClaims map[string]json.RawMessage
+
+	// GrantID, if set, is granted as server.GrantedAuthorization.GrantID
+	// on every approval, for Harness.RevokeGrant to revoke.
+	GrantID string
 }
 
 // authServer wires a server.Server to real HTTP handlers over an
@@ -197,7 +201,7 @@ func (a *authServer) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	result, err := a.srv.CompleteAuthorization(ctx, server.CompleteAuthorizationRequest{
 		Handle: interaction.Handle,
 		Result: server.Authorize(subject, authCtx, server.GrantedAuthorization{
-			Scope: interaction.Interaction.Scope, IDTokenClaims: a.approve.IDTokenClaims,
+			Scope: interaction.Interaction.Scope, IDTokenClaims: a.approve.IDTokenClaims, GrantID: a.approve.GrantID,
 			ApprovedIdentityClaims: interaction.Interaction.RequestedClaims.Names(),
 		}),
 	})

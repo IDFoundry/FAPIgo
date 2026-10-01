@@ -244,6 +244,9 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	if valErr := validateRedeemedAuthorizationCode(redeemed, grant, client.ID(), redirectURI, thumbprint, codeVerifier, now); valErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), valErr)
 	}
+	if revErr := s.checkGrantNotRevoked(ctx, grant); revErr != nil {
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), revErr)
+	}
 
 	accessTokenClaims, err := grant.accessTokenClaims()
 	if err != nil {

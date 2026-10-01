@@ -123,6 +123,9 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 	if err := validateGrantedIDTokenClaims(result.grant.IDTokenClaims, s.cfg.Limits.MaxIDTokenClaimsBytes); err != nil {
 		return s.completeLocalFail(ctx, clientID, newError(ErrorInvalidRequest, 400, "granted ID token claims are not valid", err)), nil
 	}
+	if err := s.validateGrantID(result.grant.GrantID); err != nil {
+		return s.completeLocalFail(ctx, clientID, newError(ErrorInvalidRequest, 400, "the grant ID is not valid", err)), nil
+	}
 
 	idTokenClaims, userinfoClaims, err := approvedClaimNames(request.Parameters, result.grant.ApprovedIdentityClaims)
 	if err != nil {
@@ -156,6 +159,7 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 		RequestedIDTokenClaims:  idTokenClaims,
 		RequestedUserinfoClaims: userinfoClaims,
 		IDTokenClaims:           result.grant.IDTokenClaims,
+		GrantID:                 result.grant.GrantID,
 	})
 	if err != nil {
 		return s.completeLocalFail(ctx, clientID, newError(ErrorServerError, 500, "failed to encode authorization code grant", err)), nil

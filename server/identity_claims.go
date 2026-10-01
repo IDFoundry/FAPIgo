@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/idfoundry/fapigo/extension"
+	"github.com/idfoundry/fapigo/internal/grantrevocation"
 )
 
 // IdentityClaimsSource resolves a subject's identity claim values (OIDC
@@ -160,7 +161,7 @@ func approvedClaimNames(params map[string]json.RawMessage, approved []string) (i
 var managedTokenClaims = []string{
 	"iss", "sub", "aud", "exp", "iat", "nbf", "jti", "client_id", "scope", "cnf",
 	"nonce", "auth_time", "acr", "amr", "azp", "at_hash", "c_hash", "s_hash",
-	authorizationDetailsParameter, RequestedUserinfoClaimsKey,
+	authorizationDetailsParameter, RequestedUserinfoClaimsKey, grantrevocation.Claim,
 	"name", "given_name", "family_name", "middle_name", "nickname",
 	"preferred_username", "profile", "picture", "website", "email",
 	"email_verified", "gender", "birthdate", "zoneinfo", "locale",

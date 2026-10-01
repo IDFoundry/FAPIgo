@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/idfoundry/fapigo/internal/dpop"
+	"github.com/idfoundry/fapigo/internal/grantrevocation"
 	"github.com/idfoundry/fapigo/internal/mtls"
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -204,6 +205,9 @@ func (v *Verifier) verify(ctx context.Context, req VerifyRequest) (Authorization
 	if revoked {
 		return AuthorizationContext{}, usedDPoP, newError(ErrorInvalidToken, 401, "access token has been revoked", nil)
 	}
+	if verr := v.checkGrantNotRevoked(ctx, resolved.Claims); verr != nil {
+		return AuthorizationContext{}, usedDPoP, verr
+	}
 
 	if senderConstrain == storage.SenderConstrainDPoP {
 		if verr := v.consumeDPoPProof(ctx, verifiedProof, now); verr != nil {
@@ -292,6 +296,29 @@ func (v *Verifier) consumeDPoPProof(ctx context.Context, proof dpop.VerifiedProo
 	}
 	if err := v.dpopReplayChecker().UseOnce(ctx, proof.JTI, proof.IssuedAt.Add(v.cfg.Limits.MaxDPoPProofAge)); err != nil {
 		return newError(ErrorInvalidDPoPProof, 401, "DPoP proof verification failed", fmt.Errorf("dpop: replay check: %w", err))
+	}
+	return nil
+}
+
+// checkGrantNotRevoked refuses an access token whose grant has been
+// revoked (server.RevokeGrant): one carrying a grant_id claim the
+// revocation store records as revoked. A token without one is
+// unaffected — its grant has no ID to revoke it by.
+func (v *Verifier) checkGrantNotRevoked(ctx context.Context, claims map[string]json.RawMessage) *Error {
+	raw, ok := claims[grantrevocation.Claim]
+	if !ok {
+		return nil
+	}
+	var grantID string
+	if err := json.Unmarshal(raw, &grantID); err != nil || grantID == "" {
+		return newError(ErrorInvalidToken, 401, "access token's grant_id is malformed", err)
+	}
+	revoked, err := v.deps.Revocation.IsRevoked(ctx, grantrevocation.Key(grantID))
+	if err != nil {
+		return newError(ErrorServerError, 500, "failed to check grant revocation", err)
+	}
+	if revoked {
+		return newError(ErrorInvalidToken, 401, "access token's grant has been revoked", nil)
 	}
 	return nil
 }

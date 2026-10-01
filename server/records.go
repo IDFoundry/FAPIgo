@@ -3,10 +3,12 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"time"
 	"unicode/utf8"
 
 	"github.com/idfoundry/fapigo/extension"
+	"github.com/idfoundry/fapigo/internal/grantrevocation"
 )
 
 // recordVersion versions the JSON payloads this package hands storage
@@ -89,6 +91,9 @@ type grantRecord struct {
 	// IDTokenClaims are the application's own ID-token-only claims
 	// (GrantedAuthorization.IDTokenClaims), already validated.
 	IDTokenClaims map[string]json.RawMessage `json:"id_token_claims,omitempty"`
+	// GrantID is GrantedAuthorization.GrantID: carried into every access
+	// token from the grant, and checked against RevokeGrant.
+	GrantID string `json:"grant_id,omitempty"`
 }
 
 // forRefreshToken returns g as a refresh token carries it forward:
@@ -110,7 +115,15 @@ func (g grantRecord) accessTokenClaims() (map[string]json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return withAuthorizationDetails(g.AuthorizationDetails, claims), nil
+	claims = withAuthorizationDetails(g.AuthorizationDetails, claims)
+	if g.GrantID != "" {
+		// A string always marshals.
+		raw, _ := json.Marshal(g.GrantID)
+		withGrant := map[string]json.RawMessage{grantrevocation.Claim: raw}
+		maps.Copy(withGrant, claims) // grant_id is managed, so never among claims
+		claims = withGrant
+	}
+	return claims, nil
 }
 
 func encodeRequestRecord(r requestRecord) (json.RawMessage, error) {

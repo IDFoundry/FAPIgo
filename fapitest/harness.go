@@ -147,6 +147,10 @@ type Config struct {
 	// server.GrantedAuthorization.IDTokenClaims — application-supplied
 	// claims for the ID token only.
 	IDTokenClaims map[string]json.RawMessage
+
+	// GrantID, if set, names every grant the harness approves
+	// (server.GrantedAuthorization.GrantID), for Harness.RevokeGrant.
+	GrantID string
 }
 
 // Harness wires a real client.Client, server.Server and resource.Verifier
@@ -241,7 +245,7 @@ func New(t *testing.T, cfg Config) *Harness {
 	// handlers only dereference the *server.Server at request time, so
 	// attaching it afterward — before any test code makes a request — is
 	// safe; see newAuthServer.
-	as := newAuthServer(t, clock, AutoApprove{Subject: Subject, ACR: "urn:mace:incommon:iap:silver", AMR: []string{"pwd"}, IDTokenClaims: cfg.IDTokenClaims}, tlsClientCert)
+	as := newAuthServer(t, clock, AutoApprove{Subject: Subject, ACR: "urn:mace:incommon:iap:silver", AMR: []string{"pwd"}, IDTokenClaims: cfg.IDTokenClaims, GrantID: cfg.GrantID}, tlsClientCert)
 
 	srvCfg := server.Config{
 		Issuer:    issuer,
@@ -710,4 +714,10 @@ func (h *Harness) NewResourceRequestDPoPProof(ctx context.Context, method string
 		return "", fmt.Errorf("fapitest: create dpop proof: %w", err)
 	}
 	return proof, nil
+}
+
+// RevokeGrant revokes the grant AutoApprove.GrantID named, through the
+// harness's own server.Server — see server.Server.RevokeGrant.
+func (h *Harness) RevokeGrant(ctx context.Context, grantID string) error {
+	return h.authServer.srv.RevokeGrant(ctx, grantID)
 }

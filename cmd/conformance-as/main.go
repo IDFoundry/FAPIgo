@@ -223,7 +223,7 @@ func buildMTLSEndpoints(issuer fapi.URL, mtlsListenAddr string, ciba bool) (serv
 // userinfo_endpoint with an mTLS-bound access token's certificate
 // still presented gets rejected — the plain listener never asks for
 // one, so the certificate binding check has nothing to compare against
-// and returns 400 "a client certificate is required"
+// and returns 401 invalid_token
 // (fapi2-security-profile-final-test-claims-parameter-identity-claims
 // is the module that actually resolves userinfo_endpoint this way,
 // rather than using the plan's own resource.resourceUrl override).

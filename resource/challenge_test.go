@@ -81,9 +81,10 @@ func TestChallengeFollowsScheme(t *testing.T) {
 			resource.VerifyRequest{Authorization: "Bearer "},
 			400, `Bearer error="invalid_request"`,
 		},
+		// RFC 8705 §3: no certificate can't match the token's.
 		"Bearer without a client certificate": {
 			resource.VerifyRequest{Authorization: "Bearer " + f.accessToken},
-			400, `Bearer error="invalid_request"`,
+			401, `Bearer error="invalid_token"`,
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

@@ -298,15 +298,12 @@ func TestSmokeMTLSFlow(t *testing.T) {
 		t.Fatalf("GET userinfo without client cert: %v", err)
 	}
 	defer res.Body.Close()
-	// "a client certificate is required" is invalid_request/400 — the
-	// caller sent no credential at all, the same status
-	// resource.Verify's "DPoP header is required" case uses for a DPoP-
-	// bound token, distinct from invalid_token/401 (a credential was
-	// presented but didn't check out).
-	if res.StatusCode != http.StatusBadRequest {
-		t.Errorf("GET userinfo without client cert: status = %d, want %d", res.StatusCode, http.StatusBadRequest)
+	// RFC 8705 §3: a certificate that doesn't match the token's — and
+	// no certificate matches none — is refused with 401 invalid_token.
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("GET userinfo without client cert: status = %d, want %d", res.StatusCode, http.StatusUnauthorized)
 	}
-	if www := res.Header.Get("WWW-Authenticate"); !strings.Contains(www, "invalid_request") {
-		t.Errorf("WWW-Authenticate = %q, want it to mention invalid_request", www)
+	if www := res.Header.Get("WWW-Authenticate"); !strings.Contains(www, "invalid_token") {
+		t.Errorf("WWW-Authenticate = %q, want it to mention invalid_token", www)
 	}
 }

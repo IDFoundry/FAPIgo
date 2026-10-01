@@ -65,6 +65,27 @@ the wall clock, while everything else (tokens, assertions, attester
 certificates) uses `Dependencies.Clock`. A test with a fixed clock now
 needs client certificates valid at that clock's time.
 
+### An mTLS-bound token without a certificate is invalid_token (resource)
+
+**Affects:** anything that checks the status or error code
+`resource.Verifier` returns for a `Bearer` request arriving without a TLS
+client certificate.
+
+**Why:** RFC 8705 §3 has a protected resource reject an access token
+whose certificate doesn't match the one presented "using an HTTP 401
+status code and the "invalid_token" error code", and no certificate
+matches none. Such a request was answered 400 `invalid_request`, before
+the token was even looked at. Nothing is missing from the HTTP request
+itself: the certificate belongs to the connection. The usual cause is a
+client calling the resource's plain host rather than its mTLS host, or
+a TLS stack that didn't send its certificate.
+
+**What to change:** expect 401 with `WWW-Authenticate: Bearer
+error="invalid_token"` instead. The token is now resolved first, so an
+invalid or expired token without a certificate gets the same answer. A
+`DPoP` request without a `DPoP` header is unchanged: still 400
+`invalid_request`.
+
 ## v0.41.0
 
 ### An invalid DPoP proof is invalid_dpop_proof

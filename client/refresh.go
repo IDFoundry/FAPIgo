@@ -2,12 +2,7 @@ package client
 
 import (
 	"context"
-	"fmt"
 	"strings"
-	"time"
-
-	fapi "github.com/idfoundry/fapigo"
-	"github.com/idfoundry/fapigo/internal/par"
 )
 
 // RefreshTokenRequest is the input to Client.RefreshTokens.
@@ -50,22 +45,14 @@ func (c *Client) RefreshTokens(ctx context.Context, req RefreshTokenRequest) (To
 	}
 	tokenURL := c.cfg.Endpoints.Token.URL()
 
-	// A fresh client assertion every time, including for a DPoP nonce
-	// retry — see ExchangeCode's buildTokenForm.
-	buildTokenForm := func() ([]byte, map[string]string, error) {
-		form := map[string]string{
-			"grant_type":    "refresh_token",
-			"refresh_token": req.Tokens.RefreshToken.Reveal(),
-		}
-		if len(req.Scope) > 0 {
-			form["scope"] = strings.Join(req.Scope, " ")
-		}
-		headers, err := c.addClientAuthentication(ctx, form, assertionSigner, assertionKID)
-		if err != nil {
-			return nil, nil, err
-		}
-		return par.EncodeForm(form), headers, nil
+	params := map[string]string{
+		"grant_type":    "refresh_token",
+		"refresh_token": req.Tokens.RefreshToken.Reveal(),
 	}
+	if len(req.Scope) > 0 {
+		params["scope"] = strings.Join(req.Scope, " ")
+	}
+	buildTokenForm := c.tokenFormBuilder(ctx, params, assertionSigner, assertionKID)
 	form, headers, err := buildTokenForm()
 	if err != nil {
 		return TokenSet{}, newError(ErrorInternal, "failed to build client assertion", err)
@@ -74,32 +61,13 @@ func (c *Client) RefreshTokens(ctx context.Context, req RefreshTokenRequest) (To
 	if tokenErr != nil {
 		return TokenSet{}, tokenErr
 	}
-
-	raw, err := decodeTokenResponse(body)
-	if err != nil {
-		return TokenSet{}, newError(ErrorInvalidResponse, "malformed token response", err)
-	}
-	wantTokenType := tokenTypeFor(c.cfg.SenderConstrain)
-	if !strings.EqualFold(raw.TokenType, wantTokenType) {
-		return TokenSet{}, newError(ErrorInvalidResponse, fmt.Sprintf("token response token_type is not %s", wantTokenType), nil)
-	}
-	result := TokenSet{
-		AccessToken:          fapi.NewSecret(raw.AccessToken),
-		TokenType:            wantTokenType,
-		Scope:                raw.Scope,
-		AuthorizationDetails: raw.AuthorizationDetails,
-		RefreshToken:         req.Tokens.RefreshToken,
-		HasRefreshToken:      true,
-	}
-	if raw.ExpiresIn > 0 {
-		result.ExpiresIn = time.Duration(raw.ExpiresIn) * time.Second
-		result.HasExpiresIn = true
-	}
-	if raw.RefreshToken != "" {
-		result.RefreshToken = fapi.NewSecret(raw.RefreshToken)
-	}
-	if idErr := c.populateIDToken(ctx, &result, raw, ""); idErr != nil {
+	// No nonce: a refreshed ID token has none to match.
+	result, idErr := c.tokenSetFromResponse(ctx, body, "")
+	if idErr != nil {
 		return TokenSet{}, idErr
+	}
+	if !result.HasRefreshToken {
+		result.RefreshToken, result.HasRefreshToken = req.Tokens.RefreshToken, true
 	}
 	if result.HasIDToken {
 		if idErr := checkRefreshedIDToken(req.Tokens, result.IDTokenClaims); idErr != nil {

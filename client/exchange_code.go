@@ -171,28 +171,9 @@ func (c IDTokenClaims) AsMap() map[string]any {
 // an access token — validating any returned ID token before trusting its
 // subject claim.
 func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationResponse) (TokenSet, error) {
-	// assertionSigner stays nil (and assertionKID "") when ClientAuthMethod
-	// isn't ClientAuthMethodPrivateKeyJWT — buildTokenForm never uses
-	// them in that case, since no client_assertion is ever built.
-	var (
-		assertionSigner crypto.Signer
-		assertionKID    string
-		err             error
-	)
-	if c.cfg.ClientAuthMethod == storage.ClientAuthMethodPrivateKeyJWT {
-		assertionSigner, assertionKID, err = c.newSigner(ctx, keys.ClientAuthentication, c.cfg.Algorithms.ClientAuthentication)
-		if err != nil {
-			return TokenSet{}, newError(ErrorInternal, "failed to resolve client authentication key", err)
-		}
-	}
-	// dpopSigner stays nil under SenderConstrainMTLS — sendTokenRequest
-	// never uses it in that case, since no DPoP proof is ever built.
-	var dpopSigner crypto.Signer
-	if c.cfg.SenderConstrain == storage.SenderConstrainDPoP {
-		dpopSigner, _, err = c.newSigner(ctx, keys.DPoPProofSigning, c.cfg.Algorithms.DPoP)
-		if err != nil {
-			return TokenSet{}, newError(ErrorInternal, "failed to resolve DPoP signing key", err)
-		}
+	assertionSigner, assertionKID, dpopSigner, err := c.resolveClientAuthAndDPoPSigners(ctx)
+	if err != nil {
+		return TokenSet{}, newError(ErrorInternal, "failed to resolve signing keys", err)
 	}
 	tokenURL := c.cfg.Endpoints.Token.URL()
 
@@ -207,20 +188,12 @@ func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationRe
 	// RFC 8705 mTLS client authentication method, no assertion is built
 	// at all — client_id is sent instead, and the TLS certificate
 	// Dependencies.HTTP's own transport presents is the credential.
-	buildTokenForm := func() ([]byte, map[string]string, error) {
-		form := map[string]string{
-			"grant_type":    "authorization_code",
-			"code":          resp.code,
-			"redirect_uri":  resp.redirectURI,
-			"code_verifier": resp.pkceVerifier,
-		}
-		headers, err := c.addClientAuthentication(ctx, form, assertionSigner, assertionKID)
-		if err != nil {
-			return nil, nil, err
-		}
-		return par.EncodeForm(form), headers, nil
-	}
-
+	buildTokenForm := c.tokenFormBuilder(ctx, map[string]string{
+		"grant_type":    "authorization_code",
+		"code":          resp.code,
+		"redirect_uri":  resp.redirectURI,
+		"code_verifier": resp.pkceVerifier,
+	}, assertionSigner, assertionKID)
 	form, headers, err := buildTokenForm()
 	if err != nil {
 		return TokenSet{}, newError(ErrorInternal, "failed to build client assertion", err)
@@ -229,7 +202,35 @@ func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationRe
 	if tokenErr != nil {
 		return TokenSet{}, tokenErr
 	}
+	result, idErr := c.tokenSetFromResponse(ctx, body, resp.nonce)
+	if idErr != nil {
+		return TokenSet{}, idErr
+	}
+	return result, nil
+}
 
+// tokenFormBuilder returns a function building the token request form
+// params describe, with this client's authentication added: a freshly
+// signed client assertion each time it's called (see ExchangeCode's
+// buildTokenForm), or client_id under mTLS client authentication.
+func (c *Client) tokenFormBuilder(ctx context.Context, params map[string]string, assertionSigner crypto.Signer, assertionKID string) func() ([]byte, map[string]string, error) {
+	return func() ([]byte, map[string]string, error) {
+		form := make(map[string]string, len(params)+2)
+		for k, v := range params {
+			form[k] = v
+		}
+		headers, err := c.addClientAuthentication(ctx, form, assertionSigner, assertionKID)
+		if err != nil {
+			return nil, nil, err
+		}
+		return par.EncodeForm(form), headers, nil
+	}
+}
+
+// tokenSetFromResponse decodes a successful token response body into a
+// TokenSet: the token_type this client's sender constraint calls for,
+// and any ID token validated against nonce ("" expects none to check).
+func (c *Client) tokenSetFromResponse(ctx context.Context, body []byte, nonce string) (TokenSet, *Error) {
 	raw, err := decodeTokenResponse(body)
 	if err != nil {
 		return TokenSet{}, newError(ErrorInvalidResponse, "malformed token response", err)
@@ -250,14 +251,13 @@ func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationRe
 		result.HasExpiresIn = true
 	}
 
-	if idErr := c.populateIDToken(ctx, &result, raw, resp.nonce); idErr != nil {
+	if idErr := c.populateIDToken(ctx, &result, raw, nonce); idErr != nil {
 		return TokenSet{}, idErr
 	}
 	if raw.RefreshToken != "" {
 		result.RefreshToken = fapi.NewSecret(raw.RefreshToken)
 		result.HasRefreshToken = true
 	}
-
 	return result, nil
 }
 

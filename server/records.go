@@ -117,15 +117,11 @@ func (g grantRecord) accessTokenClaims() (map[string]json.RawMessage, error) {
 	}
 	claims = withAuthorizationDetails(g.AuthorizationDetails, claims)
 	if g.GrantID != "" {
-		raw, err := json.Marshal(g.GrantID)
-		if err != nil {
-			return nil, err
-		}
-		claims = maps.Clone(claims)
-		if claims == nil {
-			claims = map[string]json.RawMessage{}
-		}
-		claims[grantrevocation.Claim] = raw
+		// A string always marshals.
+		raw, _ := json.Marshal(g.GrantID)
+		withGrant := map[string]json.RawMessage{grantrevocation.Claim: raw}
+		maps.Copy(withGrant, claims) // grant_id is managed, so never among claims
+		claims = withGrant
 	}
 	return claims, nil
 }

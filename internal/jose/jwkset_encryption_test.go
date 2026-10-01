@@ -52,6 +52,7 @@ func TestParseEncryptionJWKSet(t *testing.T) {
 		rawKeySetEntry(t, encryptionJWK(t, &rsaKey.PublicKey, fapi.RSAOAEP256, "rsa-enc"), nil),
 		// "use":"enc" with no "alg": the key type decides.
 		rawKeySetEntry(t, encryptionJWK(t, ecKey.PublicKey(), fapi.ECDHESA256KW, "ec-enc"), map[string]any{"alg": nil}),
+		rawKeySetEntry(t, encryptionJWK(t, &rsaKey.PublicKey, fapi.RSAOAEP256, "rsa-noalg"), map[string]any{"alg": nil}),
 		// An explicit key management "alg", with no "use".
 		rawKeySetEntry(t, encryptionJWK(t, &rsaKey.PublicKey, fapi.RSAOAEP256, "rsa-alg"), map[string]any{"use": nil, "alg": "RSA-OAEP-256"}),
 		// Not encryption keys: a signature key, an RSA key with neither
@@ -68,7 +69,7 @@ func TestParseEncryptionJWKSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseEncryptionJWKSet: %v", err)
 	}
-	want := map[string]fapi.KeyManagementAlgorithm{"rsa-enc": fapi.RSAOAEP256, "ec-enc": fapi.ECDHESA256KW, "rsa-alg": fapi.RSAOAEP256}
+	want := map[string]fapi.KeyManagementAlgorithm{"rsa-enc": fapi.RSAOAEP256, "ec-enc": fapi.ECDHESA256KW, "rsa-noalg": fapi.RSAOAEP256, "rsa-alg": fapi.RSAOAEP256}
 	if len(got) != len(want) {
 		t.Fatalf("got %d keys %v, want %d", len(got), got, len(want))
 	}
@@ -102,5 +103,32 @@ func TestParseJWKSetSkipsEncryptionKeys(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("ParseJWKSet returned %d keys from an encryption-only set, want 0: %v", len(got), got)
+	}
+}
+
+func TestParseEncryptionJWKSetRejectsMalformedSets(t *testing.T) {
+	for _, body := range []string{`{"keys":`, `{"KEYS":[]}`, `[]`} {
+		if _, err := ParseEncryptionJWKSet([]byte(body)); err == nil {
+			t.Errorf("ParseEncryptionJWKSet(%s) = nil error, want error", body)
+		}
+	}
+}
+
+// TestParseEncryptionJWKSetSkipsUnusableEntries covers entries skipped
+// without failing the set: one that isn't a JSON object, and "use":"enc"
+// keys of a type or curve no supported key management algorithm uses.
+func TestParseEncryptionJWKSetSkipsUnusableEntries(t *testing.T) {
+	body := []byte(`{"keys":[
+		1,
+		{"kty":"OKP","crv":"X25519","use":"enc","x":"hSDwCYkwp1R0i33ctD73Wg2_Og0mOBr066SpjqqbTmo"},
+		{"kty":"EC","crv":"P-384","use":"enc","x":"AA","y":"AA"},
+		{"kty":"oct","alg":"RSA-OAEP-256","use":"enc"}
+	]}`)
+	got, err := ParseEncryptionJWKSet(body)
+	if err != nil {
+		t.Fatalf("ParseEncryptionJWKSet: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("got %d keys, want none: %v", len(got), got)
 	}
 }

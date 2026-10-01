@@ -60,7 +60,7 @@ func TestVerifyChecksTheGrantRevocation(t *testing.T) {
 		"another grant revoked": {json.RawMessage(`"grant-1"`), &fakeRevocationChecker{revoked: map[string]bool{"grant:grant-2": true}}, ""},
 		"malformed":             {json.RawMessage(`42`), &fakeRevocationChecker{}, resource.ErrorInvalidToken},
 		"empty":                 {json.RawMessage(`""`), &fakeRevocationChecker{}, resource.ErrorInvalidToken},
-		"store fails":           {json.RawMessage(`"grant-1"`), &fakeRevocationChecker{err: errors.New("down")}, resource.ErrorServerError},
+		"store fails":           {json.RawMessage(`"grant-1"`), grantKeyFailure{}, resource.ErrorServerError},
 	} {
 		t.Run(name, func(t *testing.T) {
 			v, err := resource.NewVerifier(validConfig(t), resource.Dependencies{

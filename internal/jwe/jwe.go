@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -483,9 +484,7 @@ func open(cek, iv, ciphertext, tag, aad []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	sealed := make([]byte, 0, len(ciphertext)+len(tag))
-	sealed = append(sealed, ciphertext...)
-	sealed = append(sealed, tag...)
+	sealed := slices.Concat(ciphertext, tag)
 	plaintext, err := gcm.Open(nil, iv, sealed, aad)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrDecryptionFailed, err)

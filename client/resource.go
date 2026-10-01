@@ -34,9 +34,10 @@ const errProtectedResourceRequestFailed = "protected resource request failed"
 // resource with one already-issued access token — most commonly the
 // OIDC UserInfo endpoint, but any FAPI 2.0 protected resource
 // sender-constrained to the same token follows the identical shape. It
-// has no public constructor — only Client.ProtectedResource produces
-// one, always scoped to a specific TokenSet, so a caller can't assemble
-// one detached from an actual access token.
+// has no public constructor — only Client.ProtectedResource and
+// Client.ClientCredentialsResource produce one, always scoped to a
+// token this client obtained, so a caller can't assemble one detached
+// from an actual access token.
 type ResourceClient struct {
 	client *Client
 	token  string
@@ -53,6 +54,13 @@ type ResourceClient struct {
 // configured TLS transport.
 func (c *Client) ProtectedResource(tokens TokenSet) *ResourceClient {
 	return &ResourceClient{client: c, token: tokens.AccessToken.Reveal()}
+}
+
+// ClientCredentialsResource is ProtectedResource for an access token
+// from RequestClientCredentialsToken: a ResourceClient bound to
+// result's access token, sender-constrained the same way.
+func (c *Client) ClientCredentialsResource(result ClientCredentialsTokenResult) *ResourceClient {
+	return &ResourceClient{client: c, token: result.AccessToken.Reveal()}
 }
 
 // Do performs req as a sender-constrained request, bounded by

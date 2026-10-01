@@ -16,8 +16,17 @@ type Dependencies struct {
 	Sessions storage.SessionStore
 
 	// Keys performs this client's own signing operations: client
-	// assertion signing, request-object signing (when Config.Profile
-	// requires it), and DPoP proof signing.
+	// assertions (ClientAuthMethodPrivateKeyJWT), attestation PoPs
+	// (ClientAuthMethodAttestation), DPoP proofs (SenderConstrainDPoP),
+	// request objects (ProfileFAPISecurityWithMessageSigning or
+	// PushedRequestEncodingRequestObject), CIBA authentication requests
+	// (Endpoints.BackchannelAuthentication) and its federation Entity
+	// Configuration (Federation.EntityID). Required when the Config uses
+	// any of those; leave it nil for a client that signs nothing — one
+	// authenticating with a TLS client certificate
+	// (ClientAuthMethodTLSClientAuth and its siblings, or
+	// ClientAuthMethodSelfSignedTLSClientAuth) whose tokens are bound to
+	// that certificate (SenderConstrainMTLS).
 	Keys keys.KeyManager
 
 	// IssuerKeys resolves the authorization server's verification keys,

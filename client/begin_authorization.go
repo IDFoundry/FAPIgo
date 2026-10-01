@@ -244,6 +244,9 @@ func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 // is guaranteed to match whichever key ExchangeCode later presents a
 // DPoP proof with for the same client instance.
 func (c *Client) dpopKeyThumbprint(ctx context.Context) (string, error) {
+	if c.deps.Keys == nil {
+		return "", errNoSigningKeys
+	}
 	info, err := c.deps.Keys.PublicKey(ctx, keys.DPoPProofSigning, c.cfg.Algorithms.DPoP)
 	if err != nil {
 		return "", fmt.Errorf("resolve DPoP key: %w", err)

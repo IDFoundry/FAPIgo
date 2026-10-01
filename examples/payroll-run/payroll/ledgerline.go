@@ -3,7 +3,6 @@ package payroll
 import (
 	"bytes"
 	"context"
-	"crypto"
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
@@ -18,8 +17,6 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/client"
 	"github.com/idfoundry/fapigo/extension"
-	"github.com/idfoundry/fapigo/keys"
-	"github.com/idfoundry/fapigo/keys/ephemeral"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -80,7 +77,7 @@ type run struct {
 	Problem string
 	trace   *trace
 	// token, and the certificate it was issued to.
-	token    client.TokenSet
+	token    client.ClientCredentialsTokenResult
 	boundTo  *x509.Certificate
 	Payment  *apiResponse
 	Attempts []attempt
@@ -172,10 +169,6 @@ func (l *lazyClient) get(ctx context.Context) (*client.Client, error) {
 		return nil, errors.New("the bank advertises no mTLS token endpoint")
 	}
 	endpoints.Authorization, endpoints.PushedAuthorizationRequest = fapi.URL{}, fapi.URL{}
-	signer, err := unusedSigner()
-	if err != nil {
-		return nil, err
-	}
 	c, err := client.NewFromDiscovery(discovered, client.Config{
 		ClientID: ledgerlineClientID, Endpoints: endpoints,
 		Profile: client.ProfileFAPISecurity, Assurance: client.AssuranceDevelopment,
@@ -183,12 +176,12 @@ func (l *lazyClient) get(ctx context.Context) (*client.Client, error) {
 		Limits:                         client.RecommendedLimits(),
 		// RFC 8705: the client authenticates with its TLS certificate,
 		// and its tokens are bound to it. The certificate is the HTTP
-		// client's own business: FAPIgo never sees its key.
+		// client's own business: FAPIgo never sees its key, and with
+		// nothing else to sign, the client needs no Keys of its own.
 		ClientAuthMethod: storage.ClientAuthMethodTLSClientAuth,
 		SenderConstrain:  storage.SenderConstrainMTLS,
 		OAuthOnly:        true,
 	}, client.Dependencies{
-		Keys:  signer,
 		HTTP:  tracingClient{next: l.w.net.ClientWithCertificate(ledgerlineHost, l.cert), cert: l.cert},
 		Clock: client.SystemClock{}, Random: rand.Reader,
 	})
@@ -197,21 +190,6 @@ func (l *lazyClient) get(ctx context.Context) (*client.Client, error) {
 	}
 	l.c = c
 	return c, nil
-}
-
-// unusedSigner satisfies client.Dependencies.Keys, which needs at least
-// one key even for a client like this one that never signs anything:
-// it authenticates and binds its tokens with its TLS certificate.
-func unusedSigner() (keys.KeyManager, error) {
-	signer, err := ephemeral.GenerateSigner(fapi.ES256)
-	if err != nil {
-		return nil, err
-	}
-	return keys.NewKeyManagerFromSigners(
-		map[keys.SigningPurpose]crypto.Signer{keys.ClientAuthentication: signer},
-		map[keys.SigningPurpose]fapi.SignatureAlgorithm{keys.ClientAuthentication: fapi.ES256},
-		nil,
-	)
 }
 
 // batchGrant is the payroll_batch Ledgerline asks for: total cents from
@@ -258,7 +236,7 @@ func payrollBatchBody(extra int64) ([]byte, error) {
 
 // submit sends the payroll batch (with extra cents) to the API with
 // token, through lc: so presenting lc's certificate.
-func (l *ledgerline) submit(ctx context.Context, lc *lazyClient, token client.TokenSet, extra int64) (apiResponse, error) {
+func (l *ledgerline) submit(ctx context.Context, lc *lazyClient, token client.ClientCredentialsTokenResult, extra int64) (apiResponse, error) {
 	c, err := lc.get(ctx)
 	if err != nil {
 		return apiResponse{}, err
@@ -274,7 +252,7 @@ func (l *ledgerline) submit(ctx context.Context, lc *lazyClient, token client.To
 	req.Header.Set("Content-Type", "application/json")
 	// Under mTLS the token goes as a plain Bearer token: what binds it
 	// is the certificate the connection presents.
-	res, err := c.ProtectedResource(token).Do(ctx, req)
+	res, err := c.ClientCredentialsResource(token).Do(ctx, req)
 	if err != nil {
 		return apiResponse{}, err
 	}
@@ -284,12 +262,6 @@ func (l *ledgerline) submit(ctx context.Context, lc *lazyClient, token client.To
 		return apiResponse{}, err
 	}
 	return apiResponse{Status: res.StatusCode, Body: prettyJSON(bytes.TrimSpace(out))}, nil
-}
-
-// tokenSet carries a client credentials token where client.ProtectedResource
-// expects one.
-func tokenSet(t client.ClientCredentialsTokenResult) client.TokenSet {
-	return client.TokenSet{AccessToken: t.AccessToken, TokenType: t.TokenType, Scope: t.Scope, AuthorizationDetails: t.AuthorizationDetails}
 }
 
 // runPayroll runs Harbour Coffee's payroll: a token for this batch, then
@@ -308,7 +280,7 @@ func (l *ledgerline) runPayroll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	l.mu.Lock()
-	rn.token, rn.boundTo = tokenSet(token), cert.Leaf
+	rn.token, rn.boundTo = token, cert.Leaf
 	l.mu.Unlock()
 	res, err := l.submit(ctx, l.client, rn.token, 0)
 	if err != nil {
@@ -448,7 +420,7 @@ func (l *ledgerline) rotate(w http.ResponseWriter, r *http.Request) {
 	l.mu.Unlock()
 
 	reuse := &trace{}
-	res, err := l.submit(withTrace(ctx, reuse), l.client, tokenSet(token), 0)
+	res, err := l.submit(withTrace(ctx, reuse), l.client, token, 0)
 	switch {
 	case err != nil:
 		step("Use that token with the new certificate", true, err.Error(), reuse)

@@ -146,7 +146,7 @@ Everything here uses FAPIgo's public API only.
 |---|---|
 | Alder Bank | `server.Server` with `ClientCredentialsGrant`, `OAuthOnly`, `MTLSEndpoints`, `Config.RAR` and `Dependencies.ClientCredentialsRARPolicy`; clients registered with `ClientAuthMethodTLSClientAuth` and `SenderConstrainMTLS`; `Dependencies.ClientCertificateTrust` set to `TrustedClientCAs` with `ClientCertificateCRLs` |
 | The payroll API | `serverresource.NewVerifier`, built from the bank's own server configuration, with `VerifyRequest.PeerCertificate`; the granted batch from the access token's `authorization_details` claim |
-| Ledgerline | `client.Discover`, `MTLSEndpointAliases.ApplyForClientAuth`, `client.NewFromDiscovery` with `ClientAuthMethodTLSClientAuth`, `SenderConstrainMTLS` and `OAuthOnly`; `RequestClientCredentialsToken` with `AuthorizationDetails`; `ProtectedResource` for the API call. The certificate lives in the HTTP client's TLS configuration: FAPIgo never sees its key |
+| Ledgerline | `client.Discover`, `MTLSEndpointAliases.ApplyForClientAuth`, `client.NewFromDiscovery` with `ClientAuthMethodTLSClientAuth`, `SenderConstrainMTLS` and `OAuthOnly`; `RequestClientCredentialsToken` with `AuthorizationDetails`; `ClientCredentialsResource` for the API call. The certificate lives in the HTTP client's TLS configuration: FAPIgo never sees its key, and with nothing else to sign, Ledgerline has no `Dependencies.Keys` at all |
 
 The code:
 
@@ -170,6 +170,3 @@ The code:
   until it expires, so keep access tokens short-lived.
 - One process plays every party, so the bank and its API share their
   stores directly. Separate services would share a database instead.
-- `client.Dependencies.Keys` needs a key even for a client like
-  Ledgerline that never signs anything, so Ledgerline has one it never
-  uses.

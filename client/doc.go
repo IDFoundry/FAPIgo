@@ -33,10 +33,13 @@
 // and no ID token or refresh token, ever — a Config with neither the
 // browser flow's endpoints nor Endpoints.BackchannelAuthentication set
 // is a legitimate client_credentials-only client, not an incomplete
-// one.
+// one. ClientCredentialsResource sends its token to a protected
+// resource. Such a client authenticating with a TLS client certificate
+// and holding mTLS-bound tokens signs nothing, and needs no
+// Dependencies.Keys.
 //
-// FetchUserInfo, VerifyIssuerJWS and ProtectedResource (via
-// ResourceClient.Do) are the deliberate exceptions: a caller that
+// FetchUserInfo, VerifyIssuerJWS and ProtectedResource or
+// ClientCredentialsResource (via ResourceClient.Do) are the deliberate exceptions: a caller that
 // reaches a protected resource beyond token issuance (the UserInfo
 // endpoint, most commonly, which FetchUserInfo covers directly) needs
 // both to sign a DPoP proof bound to that request and to check

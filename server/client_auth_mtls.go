@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/x509"
 	"net"
+	"slices"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/clientassertion"
@@ -101,6 +102,18 @@ func matchesRegisteredSANEmail(cert *x509.Certificate, expected string) bool {
 	return false
 }
 
+// isCertificateAuthMethod reports whether method authenticates a client
+// with its TLS client certificate (RFC 8705 §2).
+func isCertificateAuthMethod(method storage.ClientAuthMethod) bool {
+	switch method {
+	case storage.ClientAuthMethodSelfSignedTLSClientAuth, storage.ClientAuthMethodTLSClientAuth,
+		storage.ClientAuthMethodTLSClientAuthSANDNS, storage.ClientAuthMethodTLSClientAuthSANURI,
+		storage.ClientAuthMethodTLSClientAuthSANIP, storage.ClientAuthMethodTLSClientAuthSANEmail:
+		return true
+	}
+	return false
+}
+
 // authenticateClientViaCertificate authenticates a client identified by a
 // plain client_id form parameter (no client_assertion — the TLS client
 // certificate itself is the credential) against its registered
@@ -113,6 +126,15 @@ func (s *Server) authenticateClientViaCertificate(ctx context.Context, clientID 
 	if err != nil {
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
 			newError(ErrorInvalidClient, 401, "unknown client", err)
+	}
+	// A client_id with no other credential is certificate
+	// authentication only for a client registered for it. For any other
+	// client — private_key_jwt or attestation, say — the request simply
+	// carried no credential: answer as for no credentials at all, rather
+	// than asking for a certificate the client was never meant to have.
+	if !slices.ContainsFunc(client.ClientAuthMethods(), isCertificateAuthMethod) {
+		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
+			newError(ErrorInvalidClient, 401, "client authentication is required", nil)
 	}
 	if peerCert == nil {
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},

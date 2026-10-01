@@ -194,7 +194,7 @@ func newHarnessWithIdentityClaims(t *testing.T, identityClaims server.IdentityCl
 // the server or the resource owner supplies — an identity claim such as
 // "email", or a claim the server sets itself.
 func TestNewRejectsExtensionClaimShadowingManagedClaim(t *testing.T) {
-	for _, name := range []string{"email", "acr", "requested_userinfo_claims"} {
+	for _, name := range []string{"email", "acr", "requested_userinfo_claims", "grant_id"} {
 		t.Run(name, func(t *testing.T) {
 			registry, err := extension.NewRegistry(extension.Definition[string]{
 				Name: name, Cardinality: extension.Single,

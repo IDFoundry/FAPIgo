@@ -133,6 +133,9 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorServerError, 500, "failed to decode backchannel authentication grant", err))
 	}
+	if revErr := s.checkGrantNotRevoked(ctx, grant); revErr != nil {
+		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), revErr)
+	}
 	accessTokenClaims, err := grant.accessTokenClaims()
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorServerError, 500, "failed to encode requested userinfo claims", err))

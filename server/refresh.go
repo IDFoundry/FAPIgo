@@ -106,6 +106,9 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorServerError, 500, "failed to decode refresh token grant", err))
 	}
+	if revErr := s.checkGrantNotRevoked(ctx, grant); revErr != nil {
+		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), revErr)
+	}
 	// No DPoP-key match check against grant.Thumbprint here — see
 	// RefreshTokenRequest.DPoPProofs' doc comment. client.ID() above is
 	// only ever reached via successful client_assertion verification

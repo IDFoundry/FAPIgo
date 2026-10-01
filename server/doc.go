@@ -50,6 +50,11 @@
 //     use until it expires or is revoked, and is bound to the client it
 //     was issued to — only that client, authenticating itself, can
 //     redeem it.
+//   - A grant can be revoked as a whole: an application that names it
+//     when authorizing (GrantedAuthorization.GrantID) can later call
+//     RevokeGrant, which stops its authorization code, its refresh
+//     token, and — at a resource.Verifier reading the same revocation
+//     store — every access token issued from it.
 //   - AuthorizationAction (from BeginAuthorization) and AuthorizationResult
 //     (from CompleteAuthorization) are closed sum types, not structs with
 //     optional fields, so a caller can never mistake a local error for a

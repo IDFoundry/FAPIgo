@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -360,13 +361,26 @@ func (f *fakeAuditSink) all() []server.AuditEvent {
 type fakeRevocationSink struct {
 	mu      sync.Mutex
 	revoked []string
+	until   map[string]time.Time
 }
 
-func (f *fakeRevocationSink) Revoke(_ context.Context, jti string, _ time.Time) error {
+func (f *fakeRevocationSink) Revoke(_ context.Context, jti string, expiresAt time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.revoked = append(f.revoked, jti)
+	if f.until == nil {
+		f.until = map[string]time.Time{}
+	}
+	f.until[jti] = expiresAt
 	return nil
+}
+
+// IsRevoked lets the server check what it revoked, as a real
+// revocation store (memstore.RevocationStore) does.
+func (f *fakeRevocationSink) IsRevoked(_ context.Context, key string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Contains(f.revoked, key), nil
 }
 
 func (f *fakeRevocationSink) Capabilities() storage.Capabilities {

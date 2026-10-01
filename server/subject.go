@@ -131,4 +131,19 @@ type GrantedAuthorization struct {
 	// the most specific source of the three. The claims are ignored if
 	// no ID token is issued ("openid" not granted).
 	IDTokenClaims map[string]json.RawMessage
+
+	// GrantID, if set, names this grant so the application can revoke it
+	// later with Server.RevokeGrant — its authorization code, refresh
+	// token and every access token issued from it — for a "connected
+	// apps" page, for example. The application chooses it, typically a
+	// random identifier keying its own record of what was approved; it
+	// is carried in every access token from the grant (as "grant_id"),
+	// so it mustn't be personal data. 1 to 128 characters from A-Z,
+	// a-z, 0-9, '.', '_', '~' and '-'. Empty leaves the grant revocable
+	// only token by token.
+	//
+	// CompleteAuthorization/CompleteBackchannelAuthentication reject a
+	// grant ID that doesn't fit, or one set while Dependencies.Revocation
+	// can't be checked (see RevokeGrant).
+	GrantID string
 }

@@ -1,6 +1,12 @@
 package server
 
-import "crypto/x509"
+import (
+	"context"
+	"crypto/x509"
+	"errors"
+	"fmt"
+	"time"
+)
 
 // ClientCertificateTrust decides how chain-of-trust for a client
 // certificate presented under ClientAuthMethodTLSClientAuth or one of
@@ -14,23 +20,68 @@ import "crypto/x509"
 // binds the exact certificate, so it needs no chain trust to begin
 // with.
 type ClientCertificateTrust interface {
-	verifyChain(cert *x509.Certificate) bool
+	verifyChain(ctx context.Context, cert *x509.Certificate, now time.Time) *Error
+	validate() error
 }
 
 // TrustedClientCAs has this package verify a presented client
 // certificate against Roots itself (crypto/x509.Certificate.Verify,
-// ExtKeyUsageClientAuth). Roots only, no Intermediates pool — this
-// server only ever sees the single leaf certificate a caller extracted
-// (e.g. via PeerCertificateFromHTTP), never the full chain a real TLS
-// handshake presented, so a PKI whose client certificates are issued
-// through an intermediate CA should include that intermediate directly
-// in Roots rather than only its ultimate root.
+// ExtKeyUsageClientAuth), at Dependencies.Clock's current time, then
+// ask Revocation whether it has been revoked. Roots only, no
+// Intermediates pool — this server only ever sees the single leaf
+// certificate a caller extracted (e.g. via PeerCertificateFromHTTP),
+// never the full chain a real TLS handshake presented, so a PKI whose
+// client certificates are issued through an intermediate CA should
+// include that intermediate directly in Roots rather than only its
+// ultimate root.
 type TrustedClientCAs struct {
+	// Roots is required. A nil pool would have crypto/x509 fall back to
+	// the system roots, trusting every public CA to issue client
+	// certificates, so New rejects it.
 	Roots *x509.CertPool
+
+	// Revocation is required, with no default: pass
+	// ClientCertificateCRLs{...}, your own ClientCertificateRevocation
+	// (OCSP, for example), or NoClientCertificateRevocationCheck{} to
+	// explicitly decline. A certificate's validity period alone can't
+	// stop a compromised key before it expires; that's what revocation
+	// is for. It's checked whenever a client authenticates with a
+	// certificate. An access token already bound to that certificate
+	// stays usable at a resource server (resource.Verifier checks the
+	// binding, not revocation) until it expires, so keep
+	// Limits.AccessTokenLifetime short.
+	Revocation ClientCertificateRevocation
 }
 
-func (t TrustedClientCAs) verifyChain(cert *x509.Certificate) bool {
-	return verifiesAgainstRoots(cert, t.Roots)
+func (t TrustedClientCAs) verifyChain(ctx context.Context, cert *x509.Certificate, now time.Time) *Error {
+	chains, err := cert.Verify(x509.VerifyOptions{
+		Roots:       t.Roots,
+		CurrentTime: now,
+		KeyUsages:   []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	})
+	if err != nil {
+		return newError(ErrorInvalidClient, 401, "client certificate does not chain to a trusted root", err)
+	}
+	check := ClientCertificateRevocationCheck{Chain: chains[0], Now: now}
+	if err := t.Revocation.CheckRevocation(ctx, check); err != nil {
+		return newError(ErrorInvalidClient, 401, "client certificate is revoked or its revocation status is unknown", err)
+	}
+	return nil
+}
+
+func (t TrustedClientCAs) validate() error {
+	if t.Roots == nil {
+		return errors.New("trusted client CAs: roots is required")
+	}
+	if t.Revocation == nil {
+		return errors.New("trusted client CAs: revocation is required (pass ClientCertificateCRLs{...} or NoClientCertificateRevocationCheck{} to explicitly decline)")
+	}
+	if v, ok := t.Revocation.(interface{ validate() error }); ok {
+		if err := v.validate(); err != nil {
+			return fmt.Errorf("trusted client CAs: %w", err)
+		}
+	}
+	return nil
 }
 
 // NoClientCertificateChainTrust explicitly declines this package's own
@@ -48,7 +99,56 @@ func (t TrustedClientCAs) verifyChain(cert *x509.Certificate) bool {
 // self-signed certificate whose subject/SAN an attacker chose to match
 // a registered value is accepted. Exists so that mistake requires a
 // conscious, visible line of code, the same reason NoRevocation
-// exists.
+// exists. Whoever establishes chain trust in case (1) also owns
+// checking revocation.
 type NoClientCertificateChainTrust struct{}
 
-func (NoClientCertificateChainTrust) verifyChain(*x509.Certificate) bool { return true }
+func (NoClientCertificateChainTrust) verifyChain(context.Context, *x509.Certificate, time.Time) *Error {
+	return nil
+}
+
+func (NoClientCertificateChainTrust) validate() error { return nil }
+
+// ClientCertificateRevocation decides whether a client certificate that
+// TrustedClientCAs has already verified the chain of has been revoked.
+// Implement it for a revocation source this package doesn't bundle
+// (OCSP, a revocation service of your own); ClientCertificateCRLs
+// covers Certificate Revocation Lists.
+type ClientCertificateRevocation interface {
+	// CheckRevocation returns nil when no certificate in check.Chain
+	// below its trust anchor has been revoked. Any error rejects the
+	// client with invalid_client: this package fails closed, so an
+	// implementation that would rather accept a certificate whose
+	// status it can't currently determine (soft-fail) returns nil
+	// itself. It runs on every certificate-authenticated request, so
+	// cache whatever it fetches.
+	CheckRevocation(ctx context.Context, check ClientCertificateRevocationCheck) error
+}
+
+// ClientCertificateRevocationCheck is what ClientCertificateRevocation
+// checks.
+type ClientCertificateRevocationCheck struct {
+	// Chain is the chain crypto/x509 verified, leaf first and ending
+	// at the trust anchor from TrustedClientCAs.Roots, so Chain[i+1]
+	// issued Chain[i]. When more than one chain verifies, it is the
+	// first one crypto/x509 returns.
+	Chain []*x509.Certificate
+	// Now is Dependencies.Clock's current time, the time the chain was
+	// verified at.
+	Now time.Time
+}
+
+// NoClientCertificateRevocationCheck explicitly declines checking
+// whether a client certificate has been revoked: a certificate stays
+// accepted until it expires, even if its key is compromised. Right for
+// a development or test deployment, or a PKI whose certificates are so
+// short-lived that expiry stands in for revocation. Exists so declining
+// is a conscious, visible line of code, the same reason
+// NoClientCertificateChainTrust exists.
+type NoClientCertificateRevocationCheck struct{}
+
+// CheckRevocation implements ClientCertificateRevocation by accepting
+// every certificate.
+func (NoClientCertificateRevocationCheck) CheckRevocation(context.Context, ClientCertificateRevocationCheck) error {
+	return nil
+}

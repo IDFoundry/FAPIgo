@@ -150,8 +150,9 @@ deps := server.Dependencies{
 	// Whether this package re-verifies an mTLS client certificate's
 	// chain itself. NoClientCertificateChainTrust{} declines — right when
 	// no client uses mTLS, or when your TLS termination already verifies
-	// the chain; server.TrustedClientCAs{Roots: pool} has this package
-	// check it against pool instead.
+	// the chain; server.TrustedClientCAs{Roots: pool, Revocation: ...}
+	// has this package check it against pool, and whether it has been
+	// revoked (server.ClientCertificateCRLs, for example), instead.
 	ClientCertificateTrust: server.NoClientCertificateChainTrust{},
 	Clock:                  server.SystemClock{},
 	Random:                 rand.Reader, // crypto/rand; production assurance requires exactly this reader

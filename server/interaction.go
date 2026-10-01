@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"time"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/extension"
@@ -103,6 +104,25 @@ type InteractionRequest struct {
 	ClientID fapi.ClientID
 	Scope    []string
 	Hints    AuthenticationHints
+
+	// ACRValues are the Authentication Context Class References the
+	// client asked for with "acr_values" (OIDC Core §3.1.2.1), most
+	// preferred first: how strongly it wants the user authenticated.
+	// They're a request, not a requirement: the application decides
+	// which class its authentication satisfies, and reports it as the
+	// acr of NewAuthenticationContext, which the ID token carries.
+	ACRValues []string
+
+	// MaxAge is the client's "max_age" (OIDC Core §3.1.2.1), when
+	// HasMaxAge: the most time that may have passed since the user last
+	// actively authenticated. If the application's last authentication
+	// of this user is older, it must authenticate them again before
+	// authorizing. CompleteAuthorization enforces it: an Authorize whose
+	// authentication time is older answers the client with
+	// login_required. HasMaxAge distinguishes max_age=0, which asks for
+	// a fresh authentication every time, from no max_age at all.
+	MaxAge    time.Duration
+	HasMaxAge bool
 
 	// ClientDisplay is what the consent screen can show about the client
 	// (name, logo, policy and terms links) — from its registration, or,

@@ -80,18 +80,16 @@ var coreAuthorizationParameters = map[string]struct{}{
 	"response_mode": {},
 
 	// acr_values (OIDC Core §3.1.2.1) lets a client request one or more
-	// Authentication Context Class References. server/backchannel_authentication.go's
-	// coreBackchannelAuthenticationParameters has always listed this for
-	// CIBA; client/begin_authorization.go has sent it on the browser/PAR
-	// path since it gained BeginAuthorizationRequest.ACRValues, but this
-	// package never listed it as core here, so a PAR request carrying it
-	// was rejected outright as unregistered before this package started
-	// ignoring (rather than rejecting on) unrecognized parameters — see
-	// checkExtensions. Listing it here only stops it from being dropped;
-	// this package still does not read its value or surface the
-	// requested ACR to a deployment before interaction the way CIBA's
-	// checkBackchannelExtensions does.
+	// Authentication Context Class References, surfaced to the
+	// application as InteractionRequest.ACRValues (and, for CIBA, as
+	// BackchannelInteractionRequest.ACRValues).
 	"acr_values": {},
+
+	// max_age (OIDC Core §3.1.2.1) is the most time that may have passed
+	// since the user last actively authenticated: validated here,
+	// surfaced as InteractionRequest.MaxAge, and enforced by
+	// CompleteAuthorization.
+	"max_age": {},
 }
 
 // FormParameter is one name/value pair from a form-encoded request body,
@@ -683,6 +681,10 @@ func (s *Server) validateAuthorizationParameters(params map[string]json.RawMessa
 	}
 	if _, err := pkce.ParseMethod(codeChallengeMethod); err != nil {
 		return nil, newError(ErrorInvalidRequest, 400, "code_challenge_method must be S256", err)
+	}
+
+	if _, _, err := requestedMaxAge(params); err != nil {
+		return nil, newError(ErrorInvalidRequest, 400, "max_age must be a non-negative whole number of seconds", err)
 	}
 
 	if scopeRaw, ok := params["scope"]; ok {

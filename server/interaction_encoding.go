@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/extension"
@@ -25,6 +26,8 @@ type encodedInteractionRequest struct {
 	ClientID             fapi.ClientID       `json:"client_id"`
 	Scope                []string            `json:"scope,omitempty"`
 	LoginHint            LoginHint           `json:"login_hint,omitempty"`
+	ACRValues            []string            `json:"acr_values,omitempty"`
+	MaxAgeSeconds        *int64              `json:"max_age,omitempty"`
 	ClientName           string              `json:"client_name,omitempty"`
 	LogoURI              string              `json:"logo_uri,omitempty"`
 	PolicyURI            string              `json:"policy_uri,omitempty"`
@@ -54,8 +57,14 @@ func (r InteractionRequest) MarshalText() ([]byte, error) {
 	if r.ClientID == "" {
 		return nil, errors.New("server: an interaction request without a client can't be encoded")
 	}
+	var maxAge *int64
+	if r.HasMaxAge {
+		seconds := int64(r.MaxAge / time.Second)
+		maxAge = &seconds
+	}
 	raw, err := json.Marshal(encodedInteractionRequest{
 		ClientID: r.ClientID, Scope: r.Scope, LoginHint: r.Hints.LoginHint,
+		ACRValues: r.ACRValues, MaxAgeSeconds: maxAge,
 		ClientName: r.ClientDisplay.Name, LogoURI: urlString(r.ClientDisplay.LogoURI),
 		PolicyURI: urlString(r.ClientDisplay.PolicyURI), TermsOfServiceURI: urlString(r.ClientDisplay.TermsOfServiceURI),
 		AuthorizationDetails: r.AuthorizationDetails,
@@ -118,12 +127,20 @@ func ParseInteractionRequest(text string) (InteractionRequest, error) {
 			return invalid(err)
 		}
 	}
-	return InteractionRequest{
+	r := InteractionRequest{
 		ClientID: e.ClientID, Scope: e.Scope, Hints: AuthenticationHints{LoginHint: e.LoginHint},
+		ACRValues:     e.ACRValues,
 		ClientDisplay: display, AuthorizationDetails: e.AuthorizationDetails,
 		RequestedClaims: RequestedClaims{IDToken: e.IDTokenClaims, UserInfo: e.UserInfoClaims},
 		Extensions:      e.Extensions,
-	}, nil
+	}
+	if e.MaxAgeSeconds != nil {
+		if *e.MaxAgeSeconds < 0 || *e.MaxAgeSeconds > maxMaxAge {
+			return invalid(errors.New("max_age is out of range"))
+		}
+		r.MaxAge, r.HasMaxAge = time.Duration(*e.MaxAgeSeconds)*time.Second, true
+	}
+	return r, nil
 }
 
 func urlString(u fapi.URL) string {

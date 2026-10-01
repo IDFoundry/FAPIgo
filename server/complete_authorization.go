@@ -100,6 +100,16 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 		return s.completeLocalFail(ctx, clientID, newError(ErrorServerError, 500, "authorize result carries no authenticated subject", nil)), nil
 	}
 
+	// OIDC Core §3.1.2.1: with max_age, an authentication older than
+	// max_age must be repeated, and if it isn't, the client gets an
+	// error, "typically login_required" (§3.1.2.1, prompt=login).
+	if maxAge, ok, _ := requestedMaxAge(request.Parameters); ok {
+		oldest := s.deps.Clock.Now().Add(-maxAge - s.cfg.Limits.MaxClockSkew)
+		if result.auth.authTime.Before(oldest) {
+			return s.completeErrorRedirect(ctx, clientID, redirectURI, state, "login_required", "the user's authentication is older than the requested max_age", AuditOutcomeFailure)
+		}
+	}
+
 	requestedScope, _ := jsonString(request.Parameters, "scope")
 	if err := validateGrantedScopeSubset(result.grant.Scope, requestedScope); err != nil {
 		return s.completeLocalFail(ctx, clientID, newError(ErrorInvalidRequest, 400, "granted scope exceeds requested scope", err)), nil

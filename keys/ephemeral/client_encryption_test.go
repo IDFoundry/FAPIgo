@@ -132,3 +132,49 @@ func TestClientKeySourceFetchesEncryptionKeys(t *testing.T) {
 		t.Errorf("fetched %d times after a pinned kid the cache lacked, want 2", got)
 	}
 }
+
+// TestClientKeySourceReportsFetchFailures covers a jwks_uri that fails
+// or serves something that isn't a JWK Set: both kinds of lookup fail.
+func TestClientKeySourceReportsFetchFailures(t *testing.T) {
+	for name, handler := range map[string]http.HandlerFunc{
+		"server error": func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "down", http.StatusInternalServerError) },
+		"not a JWK Set": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"keys":`))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ts := httptest.NewTLSServer(handler)
+			defer ts.Close()
+			fetcher, err := fapihttp.New(ts.Client(), fapihttp.Config{
+				MaxResponseBytes: 1 << 16, RequestTimeout: 5 * time.Second, MaxRedirects: 1, AllowLoopbackHTTP: true,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			src, err := NewClientKeySource(fetcher, []ClientKeySpec{{ClientID: "client-1", JWKSURI: ts.URL + "/jwks"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := context.Background()
+			if _, err := src.ResolveEncryptionKeys(ctx, keys.ClientEncryptionKeyRequest{ClientID: "client-1", Algorithm: fapi.RSAOAEP256}); err == nil {
+				t.Error("ResolveEncryptionKeys = nil error, want the fetch failure")
+			}
+			if _, err := src.ResolveVerificationKeys(ctx, keys.ClientKeyRequest{ClientID: "client-1", Algorithm: fapi.ES256}); err == nil {
+				t.Error("ResolveVerificationKeys = nil error, want the fetch failure")
+			}
+		})
+	}
+}
+
+func TestClientKeySourcePinnedVerificationKeyID(t *testing.T) {
+	_, jwks := clientWithEncryptionKeys(t, nil)
+	src, err := NewClientKeySource(nil, []ClientKeySpec{{ClientID: "client-1", JWKS: jwks}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, err := src.ResolveVerificationKeys(context.Background(), keys.ClientKeyRequest{ClientID: "client-1", Algorithm: fapi.ES256, KeyID: "another"})
+	if err != nil || len(set.Keys) != 0 {
+		t.Fatalf("ResolveVerificationKeys(unknown kid) = %+v, %v; want no keys", set.Keys, err)
+	}
+}

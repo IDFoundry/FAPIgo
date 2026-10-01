@@ -148,8 +148,11 @@ func (d DiscoveredMetadata) Issuer() fapi.URL { return d.issuer }
 // Only the fields this type actually has discovered data for are
 // checked:
 //
-//   - IDToken, against IDTokenAlgorithms, unconditionally — an ID
-//     token is always expected, regardless of Profile.
+//   - IDToken, against IDTokenAlgorithms, only if algs.IDToken is
+//     non-zero — Config requires it whenever an ID token can be
+//     returned, and an OAuthOnly client, which never handles one,
+//     leaves it zero (as does an OAuth-only server's discovery
+//     document, which advertises no ID token algorithms).
 //   - RequestObject, against RequestObjectAlgorithms, only if algs.RequestObject
 //     is non-zero (Config only requires it under
 //     ProfileFAPISecurityWithMessageSigning).
@@ -181,7 +184,7 @@ func (d DiscoveredMetadata) Issuer() fapi.URL { return d.issuer }
 // as "supported" the way it does for what it produces or accepts as an
 // encryption target.
 func (d DiscoveredMetadata) SupportsAlgorithms(algs Algorithms) error {
-	if !slices.Contains(d.IDTokenAlgorithms, algs.IDToken) {
+	if algs.IDToken != 0 && !slices.Contains(d.IDTokenAlgorithms, algs.IDToken) {
 		return fmt.Errorf("client: issuer does not support %v for id_token; advertises: %v", algs.IDToken, d.IDTokenAlgorithms)
 	}
 	if algs.RequestObject != 0 && !slices.Contains(d.RequestObjectAlgorithms, algs.RequestObject) {

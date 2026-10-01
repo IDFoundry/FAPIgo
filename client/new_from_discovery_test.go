@@ -294,3 +294,44 @@ func TestNewFromDiscoveryWithoutRedirectURI(t *testing.T) {
 		t.Errorf("NewFromDiscovery(with a redirect URI): %v", err)
 	}
 }
+
+// TestNewFromDiscoveryAcceptsOAuthOnlyClient covers an OAuthOnly client,
+// which leaves Algorithms.IDToken zero: NewFromDiscovery must not check
+// that zero value against the issuer's advertised ID token algorithms,
+// whether the issuer advertises some (an OpenID provider) or none (an
+// OAuth-only authorization server).
+func TestNewFromDiscoveryAcceptsOAuthOnlyClient(t *testing.T) {
+	var oauthServer *httptest.Server
+	oauthServer = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(discoveryDoc{ //nolint:errcheck
+			Issuer: oauthServer.URL, TokenEndpoint: oauthServer.URL + "/token", JWKSURI: oauthServer.URL + "/jwks",
+		})
+	}))
+	t.Cleanup(oauthServer.Close)
+	oauthIssuer, err := fapi.ParseIssuerURL(oauthServer.URL, fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+	oauthDiscovered, err := client.Discover(context.Background(), newDiscoveryFetcher(t, oauthServer), oauthIssuer, fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("Discover(OAuth-only server): %v", err)
+	}
+
+	for name, discovered := range map[string]client.DiscoveredMetadata{
+		"OpenID provider":   discoverForAlgorithmTests(t),
+		"OAuth-only server": oauthDiscovered,
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg, deps := validConfig(t), validDependencies(t)
+			oauthOnly(&cfg, &deps)
+			cfg.Issuer = discovered.Issuer()
+			cfg.Endpoints = client.Endpoints{Token: discovered.Endpoints.Token}
+			cfg.RedirectURI = ""
+			deps.Sessions = nil
+			if _, err := client.NewFromDiscovery(discovered, cfg, deps); err != nil {
+				t.Fatalf("NewFromDiscovery(OAuthOnly): %v", err)
+			}
+		})
+	}
+}

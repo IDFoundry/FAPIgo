@@ -27,18 +27,28 @@ type ClientCertificateTrust interface {
 // TrustedClientCAs has this package verify a presented client
 // certificate against Roots itself (crypto/x509.Certificate.Verify,
 // ExtKeyUsageClientAuth), at Dependencies.Clock's current time, then
-// ask Revocation whether it has been revoked. Roots only, no
-// Intermediates pool — this server only ever sees the single leaf
-// certificate a caller extracted (e.g. via PeerCertificateFromHTTP),
-// never the full chain a real TLS handshake presented, so a PKI whose
-// client certificates are issued through an intermediate CA should
-// include that intermediate directly in Roots rather than only its
-// ultimate root.
+// ask Revocation whether it has been revoked. This server only ever
+// sees the single leaf certificate a caller extracted (e.g. via
+// PeerCertificateFromHTTP), never the full chain a TLS handshake
+// presented, so it builds the chain from Intermediates and Roots.
+//
+// A certificate in Roots is a trust anchor: chain building stops at it,
+// and nothing checks whether it has been revoked — revoking one means
+// removing it from Roots. For a PKI whose client certificates are
+// issued by an intermediate CA, put its root in Roots and the
+// intermediate in Intermediates, so the intermediate is part of the
+// verified chain and Revocation checks it too. A leaf certificate put
+// directly in Roots is its own trust anchor, never checked for
+// revocation at all.
 type TrustedClientCAs struct {
 	// Roots is required. A nil pool would have crypto/x509 fall back to
 	// the system roots, trusting every public CA to issue client
 	// certificates, so New rejects it.
 	Roots *x509.CertPool
+
+	// Intermediates are CA certificates chains may pass through to
+	// reach Roots, without being trusted on their own. Optional.
+	Intermediates *x509.CertPool
 
 	// Revocation is required, with no default: pass
 	// ClientCertificateCRLs{...}, your own ClientCertificateRevocation
@@ -55,9 +65,10 @@ type TrustedClientCAs struct {
 
 func (t TrustedClientCAs) verifyChain(ctx context.Context, cert *x509.Certificate, now time.Time) *Error {
 	chains, err := cert.Verify(x509.VerifyOptions{
-		Roots:       t.Roots,
-		CurrentTime: now,
-		KeyUsages:   []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		Roots:         t.Roots,
+		Intermediates: t.Intermediates,
+		CurrentTime:   now,
+		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 	})
 	if err != nil {
 		return newError(ErrorInvalidClient, 401, "client certificate does not chain to a trusted root", err)
@@ -128,10 +139,11 @@ type ClientCertificateRevocation interface {
 // ClientCertificateRevocationCheck is what ClientCertificateRevocation
 // checks.
 type ClientCertificateRevocationCheck struct {
-	// Chain is the chain crypto/x509 verified, leaf first and ending
-	// at the trust anchor from TrustedClientCAs.Roots, so Chain[i+1]
-	// issued Chain[i]. When more than one chain verifies, it is the
-	// first one crypto/x509 returns.
+	// Chain is the chain crypto/x509 verified, leaf first, through any
+	// of TrustedClientCAs.Intermediates, and ending at the trust anchor
+	// from TrustedClientCAs.Roots, so Chain[i+1] issued Chain[i]. When
+	// more than one chain verifies, it is the first one crypto/x509
+	// returns.
 	Chain []*x509.Certificate
 	// Now is Dependencies.Clock's current time, the time the chain was
 	// verified at.

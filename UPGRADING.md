@@ -43,6 +43,12 @@ public CA to issue client certificates.
 - `server.NoClientCertificateRevocationCheck{}` to keep the old
   behaviour.
 
+If your client certificates are issued by an intermediate CA that you
+put in `Roots`, move it to the new `Intermediates` pool and put its root
+in `Roots` instead. A CA in `Roots` is a trust anchor, so its own
+revocation is never checked. In `Intermediates`, it's part of the
+verified chain and is checked against its root's CRL like the leaf.
+
 ```go
 // Before
 ClientCertificateTrust: server.TrustedClientCAs{Roots: pool},

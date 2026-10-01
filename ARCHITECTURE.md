@@ -351,7 +351,10 @@ revoked: `server.ClientCertificateCRLs{...}` checks it against
 Certificate Revocation Lists, a custom
 `server.ClientCertificateRevocation` can use OCSP or anything else,
 and `server.NoClientCertificateRevocationCheck{}` declines the same
-explicit way. Revocation is checked when a client authenticates, so an
+explicit way. A CA in `Roots` is a trust anchor and is never itself checked
+for revocation. An issuing intermediate goes in
+`TrustedClientCAs.Intermediates` instead, so its own revocation is
+checked too. Revocation is checked when a client authenticates, so an
 access token already bound to a revoked certificate stays usable until
 it expires. `resource`
 has no equivalent field; a protected-resource deployment still depends

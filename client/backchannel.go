@@ -506,9 +506,9 @@ func (c *Client) pollBackchannelAuthenticationOnce(ctx context.Context, dpopSign
 	return body, status, nil
 }
 
-// resolveClientAuthAndDPoPSigners resolves the pair of signers both
-// BeginBackchannelAuthentication and PollBackchannelAuthentication need
-// before building their own request form: assertionSigner/assertionKID
+// resolveClientAuthAndDPoPSigners resolves the pair of signers
+// BeginBackchannelAuthentication, PollBackchannelAuthentication and
+// RefreshTokens need before building their own request form: assertionSigner/assertionKID
 // stay nil/"" when ClientAuthMethod isn't ClientAuthMethodPrivateKeyJWT
 // (no client_assertion is ever built in that case), and dpopSigner
 // stays nil under SenderConstrainMTLS (no DPoP proof is ever built).

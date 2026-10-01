@@ -20,6 +20,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -64,9 +65,26 @@ func (n *Net) CAPath() string { return n.caPath }
 // certificate without trusting the CA.
 func (n *Net) ServingSPKIHash() string { return spkiHash(n.serving.Leaf) }
 
-// ServerTLS is the listener's TLS configuration.
-func (n *Net) ServerTLS() *tls.Config {
-	return &tls.Config{Certificates: []tls.Certificate{n.serving}, MinVersion: tls.VersionTLS12}
+// ServerTLS is the listener's TLS configuration. A client connecting to
+// one of clientCertHosts (by SNI) is asked for a TLS client certificate,
+// for mutual TLS; every other host never asks, so a browser visiting it
+// never shows a certificate picker. Asking isn't verifying: the
+// handshake accepts any certificate, or none, and whatever serves the
+// host decides what a certificate proves.
+func (n *Net) ServerTLS(clientCertHosts ...string) *tls.Config {
+	cfg := &tls.Config{Certificates: []tls.Certificate{n.serving}, MinVersion: tls.VersionTLS12}
+	if len(clientCertHosts) == 0 {
+		return cfg
+	}
+	mutual := cfg.Clone()
+	mutual.ClientAuth = tls.RequestClientCert
+	cfg.GetConfigForClient = func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+		if slices.Contains(clientCertHosts, strings.ToLower(hello.ServerName)) {
+			return mutual, nil
+		}
+		return nil, nil
+	}
+	return cfg
 }
 
 // Log is the record of every request the entities have made to each
@@ -78,13 +96,40 @@ func (n *Net) Log() *FetchLog { return n.log }
 // redirects (fapihttp handles those itself), and records each request in
 // Log under from.
 func (n *Net) Client(from string) *http.Client {
+	return n.client(from, n.transport(&tls.Config{RootCAs: n.caPool, MinVersion: tls.VersionTLS12}))
+}
+
+// ClientWithCertificate is Client, presenting the TLS client
+// certificate cert returns to every server that asks for one (nil
+// presents none). It opens a new connection for every request, so a
+// different certificate cert starts returning is the one the very next
+// request presents.
+func (n *Net) ClientWithCertificate(from string, cert func() *tls.Certificate) *http.Client {
+	transport := n.transport(&tls.Config{
+		RootCAs: n.caPool, MinVersion: tls.VersionTLS12,
+		GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+			if c := cert(); c != nil {
+				return c, nil
+			}
+			return &tls.Certificate{}, nil
+		},
+	})
+	transport.DisableKeepAlives = true
+	return n.client(from, transport)
+}
+
+// transport dials the demo listener whatever host a URL names.
+func (n *Net) transport(tlsConfig *tls.Config) *http.Transport {
 	dialer := &net.Dialer{Timeout: 5 * time.Second}
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{RootCAs: n.caPool, MinVersion: tls.VersionTLS12},
+	return &http.Transport{
+		TLSClientConfig: tlsConfig,
 		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
 			return dialer.DialContext(ctx, network, n.addr)
 		},
 	}
+}
+
+func (n *Net) client(from string, transport http.RoundTripper) *http.Client {
 	return &http.Client{
 		Transport: &loggingTransport{from: from, next: transport, log: n.log},
 		CheckRedirect: func(*http.Request, []*http.Request) error {

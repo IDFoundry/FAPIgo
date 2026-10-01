@@ -97,7 +97,6 @@ func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
 
 	var registered []storage.RegisteredClient
 	var keySpecs []ephemeral.ClientKeySpec
-	encryptionKeys := registeredEncryptionKeys{}
 	for _, rp := range rps {
 		cfg := storage.RegisteredClientConfig{
 			ID:                       rp.setup.clientID,
@@ -113,17 +112,14 @@ func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
 			// responses encrypted to it (OIDC Dynamic Client Registration
 			// §2's id_token_encrypted_response_alg/enc and userinfo_…).
 			cfg.IDTokenEncryptionKeyManagement, cfg.IDTokenEncryptionContentEncryption = fapi.RSAOAEP256, fapi.A256GCM
-			cfg.UserInfoEncryptionKeyManagement, cfg.UserInfoEncryptionContentEncryption = fapi.RSAOAEP256, fapi.A256GCM
-			if err := encryptionKeys.register(rp); err != nil {
-				return nil, err
-			}
+			cfg.UserInfoEncryptionKeyManagement, cfg.UserInfoEncryptionContentEncryption = fapi.ECDHESA256KW, fapi.A256GCM
 		}
 		client, err := storage.NewRegisteredClient(cfg)
 		if err != nil {
 			return nil, fmt.Errorf("register %s: %w", rp.setup.name, err)
 		}
 		registered = append(registered, client)
-		keySpecs = append(keySpecs, ephemeral.ClientKeySpec{ClientID: rp.setup.clientID, JWKS: rp.authJWKS})
+		keySpecs = append(keySpecs, ephemeral.ClientKeySpec{ClientID: rp.setup.clientID, JWKS: rp.jwks})
 	}
 	clientKeys, err := ephemeral.NewClientKeySource(nil, keySpecs)
 	if err != nil {
@@ -138,7 +134,7 @@ func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
 	algs.UserInfo = fapi.ES256
 	algs.IDTokenEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.RSAOAEP256}
 	algs.IDTokenEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{fapi.A256GCM}
-	algs.UserInfoEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.RSAOAEP256}
+	algs.UserInfoEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.ECDHESA256KW}
 	algs.UserInfoEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{fapi.A256GCM}
 
 	b := &bank{w: w, clients: memstore.NewClientRepository(registered), cookieKey: cookieKey}
@@ -147,12 +143,15 @@ func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
 		Algorithms: algs, Limits: server.RecommendedLimits(), Assurance: server.AssuranceDevelopment,
 	}
 	deps := server.Dependencies{
-		Clients:                b.clients,
-		Transactions:           memstore.NewTransactionStore(),
-		Grants:                 memstore.NewGrantStore(),
-		Replay:                 memstore.NewReplayStore(),
+		Clients:      b.clients,
+		Transactions: memstore.NewTransactionStore(),
+		Grants:       memstore.NewGrantStore(),
+		Replay:       memstore.NewReplayStore(),
+		// Each client's registered JWK Set: the keys that verify its
+		// client assertions, and the keys to encrypt its ID tokens and
+		// UserInfo responses to.
 		ClientKeys:             clientKeys,
-		ClientEncryptionKeys:   encryptionKeys,
+		ClientEncryptionKeys:   clientKeys,
 		Keys:                   manager,
 		AccessTokens:           accessTokens,
 		Revocation:             memstore.NewRevocationStore(),
@@ -205,35 +204,6 @@ func (customerClaims) ResolveIdentityClaims(_ context.Context, subject string, n
 		}
 	}
 	return out, nil
-}
-
-// registeredEncryptionKeys is Alder Bank's ClientEncryptionKeySource:
-// the public encryption keys its clients registered, one per purpose.
-// keys.ClientEncryptionKeySource's doc comment prefers registered keys
-// to fetching a client's JWKS while issuing a token.
-type registeredEncryptionKeys map[fapi.ClientID]map[keys.ClientEncryptionPurpose]keys.ClientEncryptionKey
-
-func (r registeredEncryptionKeys) register(rp *relyingParty) error {
-	r[rp.setup.clientID] = map[keys.ClientEncryptionPurpose]keys.ClientEncryptionKey{}
-	for purpose, decryption := range map[keys.ClientEncryptionPurpose]keys.DecryptionPurpose{
-		keys.IDTokenEncryption: keys.IDTokenDecryption, keys.UserInfoEncryption: keys.UserInfoDecryption,
-	} {
-		info, err := rp.keys.EncryptionPublicKey(context.Background(), decryption, fapi.RSAOAEP256)
-		if err != nil {
-			return err
-		}
-		r[rp.setup.clientID][purpose] = keys.ClientEncryptionKey{KeyID: info.KeyID, Algorithm: fapi.RSAOAEP256, PublicKey: info.PublicKey}
-	}
-	return nil
-}
-
-// ResolveEncryptionKeys implements keys.ClientEncryptionKeySource.
-func (r registeredEncryptionKeys) ResolveEncryptionKeys(_ context.Context, req keys.ClientEncryptionKeyRequest) (keys.ClientEncryptionKeySet, error) {
-	key, ok := r[req.ClientID][req.Purpose]
-	if !ok || key.Algorithm != req.Algorithm {
-		return keys.ClientEncryptionKeySet{}, fmt.Errorf("client %q registered no %v key", req.ClientID, req.Algorithm)
-	}
-	return keys.ClientEncryptionKeySet{Keys: []keys.ClientEncryptionKey{key}}, nil
 }
 
 // discoveryDocument is server.Metadata plus what a deployment adds

@@ -57,13 +57,15 @@ type jwkSetAlgHint struct {
 	Crv string   `json:"crv,omitempty"`
 	Alg string   `json:"alg,omitempty"`
 	Kid string   `json:"kid,omitempty"`
+	Use string   `json:"use,omitempty"`
 	X5C []string `json:"x5c,omitempty"`
 }
 
-// ParseJWKSet parses a JWK Set (RFC 7517 §5) into this module's closed
-// algorithm set, skipping any entry whose algorithm isn't supported or
-// whose shape doesn't parse — one malformed or unsupported entry does
-// not invalidate an otherwise usable key set.
+// ParseJWKSet parses a JWK Set (RFC 7517 §5)'s signature verification
+// keys into this module's closed algorithm set, skipping any entry whose
+// algorithm isn't supported, whose shape doesn't parse, or that is
+// marked "use":"enc" — one malformed or unsupported entry does not
+// invalidate an otherwise usable key set.
 func ParseJWKSet(body []byte) ([]ParsedJWK, error) {
 	dec := json.NewDecoder(bytes.NewReader(body))
 	var set rawJWKSet
@@ -78,6 +80,11 @@ func ParseJWKSet(body []byte) ([]ParsedJWK, error) {
 	for _, raw := range set.Keys {
 		var hint jwkSetAlgHint
 		if err := json.Unmarshal(raw, &hint); err != nil {
+			continue
+		}
+		// RFC 7517 §4.2: a key for encryption isn't one to verify
+		// signatures with — see ParseEncryptionJWKSet.
+		if hint.Use == string(jwkUseEncryption) {
 			continue
 		}
 		alg, ok := algorithmForJWKSetHint(hint)

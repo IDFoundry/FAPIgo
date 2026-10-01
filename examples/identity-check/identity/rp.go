@@ -68,7 +68,7 @@ type relyingParty struct {
 	// and, for one that registered for encryption, decrypts what the bank
 	// encrypts to it.
 	keys     *ephemeral.KeyManager
-	authJWKS json.RawMessage
+	jwks     json.RawMessage
 	sessions storage.SessionStore
 	// client is the relying party's FAPIgo client. thief is the same
 	// client software without its DPoP key: what someone who stole an
@@ -107,8 +107,10 @@ type attempt struct {
 func (w *World) newRelyingParty(setup rpSetup) (*relyingParty, error) {
 	decryption := map[keys.DecryptionPurpose]fapi.KeyManagementAlgorithm{}
 	if setup.encrypt {
+		// One key per algorithm: the bank picks the key to encrypt to by
+		// algorithm, from the JWK Set this relying party publishes.
 		decryption[keys.IDTokenDecryption] = fapi.RSAOAEP256
-		decryption[keys.UserInfoDecryption] = fapi.RSAOAEP256
+		decryption[keys.UserInfoDecryption] = fapi.ECDHESA256KW
 	}
 	signing := map[keys.SigningPurpose]fapi.SignatureAlgorithm{keys.ClientAuthentication: fapi.ES256, keys.DPoPProofSigning: fapi.ES256}
 	km, err := ephemeral.NewKeyManagerWithDecryption(signing, decryption)
@@ -119,7 +121,13 @@ func (w *World) newRelyingParty(setup rpSetup) (*relyingParty, error) {
 	if err != nil {
 		return nil, err
 	}
-	set, err := keys.PublicJWKS(context.Background(), []keys.SigningKeyUse{{Manager: km, Purpose: keys.ClientAuthentication, Algorithm: fapi.ES256}}, nil)
+	// The JWK Set this relying party registers with the bank: its
+	// client-assertion key, and the keys to encrypt to it.
+	var encryption []keys.EncryptionKeyUse
+	for purpose, alg := range decryption {
+		encryption = append(encryption, keys.EncryptionKeyUse{Decrypter: km, Purpose: purpose, Algorithm: alg})
+	}
+	set, err := keys.PublicJWKS(context.Background(), []keys.SigningKeyUse{{Manager: km, Purpose: keys.ClientAuthentication, Algorithm: fapi.ES256}}, encryption)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +135,7 @@ func (w *World) newRelyingParty(setup rpSetup) (*relyingParty, error) {
 	if err != nil {
 		return nil, err
 	}
-	rp := &relyingParty{w: w, setup: setup, keys: km, authJWKS: jwks, sessions: memstore.NewSessionStore(), checks: map[string]*check{}}
+	rp := &relyingParty{w: w, setup: setup, keys: km, jwks: jwks, sessions: memstore.NewSessionStore(), checks: map[string]*check{}}
 	rp.client = &lazyClient{rp: rp, keys: km}
 	rp.thief = &lazyClient{rp: rp, keys: thiefKeys}
 
@@ -187,7 +195,7 @@ func (l *lazyClient) get(ctx context.Context) (*client.Client, error) {
 		// its own key; the ID token and UserInfo response inside are still
 		// verified as signed by the bank.
 		algorithms.IDTokenKeyManagement, algorithms.IDTokenContentEncryption = fapi.RSAOAEP256, fapi.A256GCM
-		algorithms.UserInfoKeyManagement, algorithms.UserInfoContentEncryption = fapi.RSAOAEP256, fapi.A256GCM
+		algorithms.UserInfoKeyManagement, algorithms.UserInfoContentEncryption = fapi.ECDHESA256KW, fapi.A256GCM
 		deps.Decryption = l.keys
 	}
 	limits := client.RecommendedLimits()

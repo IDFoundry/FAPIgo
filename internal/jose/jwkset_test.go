@@ -11,8 +11,7 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 )
 
-// rawKeySetJSON marshals jwk (via its own MarshalJSON, which never
-// includes "alg" — see JWK.MarshalJSON's own doc comment) and applies
+// rawKeySetEntry marshals jwk (via its own MarshalJSON) and applies
 // edits to the resulting member map before re-marshaling, then wraps it
 // in a one-entry `{"keys": [...]}` JWK Set body. edits == nil leaves
 // the marshaled JWK untouched.

@@ -93,10 +93,20 @@ func caSignedTestClientCertWithSAN(t *testing.T, caCert *x509.Certificate, caKey
 
 // newHarnessWithClientAuthTLSSubjectDNAndCAs mirrors
 // newHarnessWithClientAuthTLSSubjectDNValue exactly, but also sets
-// Dependencies.ClientCertificateTrust to server.TrustedClientCAs{Roots: roots}.
-func newHarnessWithClientAuthTLSSubjectDNAndCAs(t *testing.T, cert *x509.Certificate, expectedSubjectDN string, roots *x509.CertPool) harness {
+// Dependencies.ClientCertificateTrust to server.TrustedClientCAs{Roots: roots}
+// with no revocation check.
+func newHarnessWithClientAuthTLSSubjectDNAndCAs(t *testing.T, expectedSubjectDN string, roots *x509.CertPool) harness {
 	t.Helper()
-	now := time.Now()
+	trust := server.TrustedClientCAs{Roots: roots, Revocation: server.NoClientCertificateRevocationCheck{}}
+	return newHarnessWithClientAuthTLSSubjectDNAndTrust(t, expectedSubjectDN, trust, time.Now())
+}
+
+// newHarnessWithClientAuthTLSSubjectDNAndTrust registers a
+// ClientAuthMethodTLSClientAuth client expecting expectedSubjectDN, with
+// Dependencies.ClientCertificateTrust set to trust and Dependencies.Clock
+// fixed at now.
+func newHarnessWithClientAuthTLSSubjectDNAndTrust(t *testing.T, expectedSubjectDN string, trust server.ClientCertificateTrust, now time.Time) harness {
+	t.Helper()
 	serverKey := generateKey(t)
 
 	client, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
@@ -154,7 +164,7 @@ func newHarnessWithClientAuthTLSSubjectDNAndCAs(t *testing.T, cert *x509.Certifi
 		Revocation:             &fakeRevocationSink{},
 		Clock:                  fixedClock{now: now},
 		Random:                 rand.Reader,
-		ClientCertificateTrust: server.TrustedClientCAs{Roots: roots},
+		ClientCertificateTrust: trust,
 	}
 
 	srv, err := server.New(cfg, deps)
@@ -238,7 +248,7 @@ func newHarnessWithClientAuthTLSSANAndCAs(t *testing.T, method storage.ClientAut
 		Revocation:             &fakeRevocationSink{},
 		Clock:                  fixedClock{now: now},
 		Random:                 rand.Reader,
-		ClientCertificateTrust: server.TrustedClientCAs{Roots: roots},
+		ClientCertificateTrust: server.TrustedClientCAs{Roots: roots, Revocation: server.NoClientCertificateRevocationCheck{}},
 	}
 
 	srv, err := server.New(srvCfg, deps)
@@ -310,7 +320,7 @@ func TestPushAuthorizationRequestTLSClientAuthRejectsUntrustedChainWhenTrustedCl
 	// same certificate would pass with NoClientCertificateChainTrust{} (see
 	// TestPushAuthorizationRequestTLSClientAuthSuccess).
 	cert := selfSignedTestClientCert(t)
-	h := newHarnessWithClientAuthTLSSubjectDNAndCAs(t, cert, cert.Subject.String(), roots)
+	h := newHarnessWithClientAuthTLSSubjectDNAndCAs(t, cert.Subject.String(), roots)
 
 	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
 		HTTP:            server.FormRequest{Parameters: certFormParameters(nil)},
@@ -327,7 +337,7 @@ func TestPushAuthorizationRequestTLSClientAuthRejectsUntrustedChainWhenTrustedCl
 func TestPushAuthorizationRequestTLSClientAuthAcceptsTrustedChainWhenTrustedClientCAsSet(t *testing.T) {
 	caCert, caKey, roots := testCA(t)
 	cert := caSignedTestClientCertWithSAN(t, caCert, caKey, func(*x509.Certificate) {})
-	h := newHarnessWithClientAuthTLSSubjectDNAndCAs(t, cert, cert.Subject.String(), roots)
+	h := newHarnessWithClientAuthTLSSubjectDNAndCAs(t, cert.Subject.String(), roots)
 
 	if _, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
 		HTTP:            server.FormRequest{Parameters: certFormParameters(nil)},
@@ -401,7 +411,7 @@ func TestPushAuthorizationRequestSelfSignedTLSClientAuthUnaffectedByTrustedClien
 		Revocation:             &fakeRevocationSink{},
 		Clock:                  fixedClock{now: now},
 		Random:                 rand.Reader,
-		ClientCertificateTrust: server.TrustedClientCAs{Roots: roots},
+		ClientCertificateTrust: server.TrustedClientCAs{Roots: roots, Revocation: server.NoClientCertificateRevocationCheck{}},
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {

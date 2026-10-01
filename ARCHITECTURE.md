@@ -344,7 +344,16 @@ termination alone — e.g. mTLS terminated by a gateway in front of this
 process that forwards the presented certificate without having verified
 its chain itself; `server.NoClientCertificateChainTrust{}` explicitly
 declines, the same "conscious, visible choice, not a silent default"
-pattern `NoRevocation{}` uses for `Dependencies.Revocation`. `resource`
+pattern `NoRevocation{}` uses for `Dependencies.Revocation`.
+`TrustedClientCAs` verifies at `Dependencies.Clock`'s time and then
+asks its required `Revocation` whether the verified chain has been
+revoked: `server.ClientCertificateCRLs{...}` checks it against
+Certificate Revocation Lists, a custom
+`server.ClientCertificateRevocation` can use OCSP or anything else,
+and `server.NoClientCertificateRevocationCheck{}` declines the same
+explicit way. Revocation is checked when a client authenticates, so an
+access token already bound to a revoked certificate stays usable until
+it expires. `resource`
 has no equivalent field; a protected-resource deployment still depends
 entirely on its own TLS termination for chain trust. `cmd/conformance-as`
 makes the unconfigured case concrete: its listener sets

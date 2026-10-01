@@ -101,18 +101,6 @@ func matchesRegisteredSANEmail(cert *x509.Certificate, expected string) bool {
 	return false
 }
 
-// verifiesAgainstRoots reports whether cert chains to one of roots' trust
-// anchors for client authentication (crypto/x509.Certificate.Verify,
-// ExtKeyUsageClientAuth) — TrustedClientCAs.verifyChain's own
-// implementation.
-func verifiesAgainstRoots(cert *x509.Certificate, roots *x509.CertPool) bool {
-	_, err := cert.Verify(x509.VerifyOptions{
-		Roots:     roots,
-		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
-	})
-	return err == nil
-}
-
 // authenticateClientViaCertificate authenticates a client identified by a
 // plain client_id form parameter (no client_assertion — the TLS client
 // certificate itself is the credential) against its registered
@@ -131,7 +119,7 @@ func (s *Server) authenticateClientViaCertificate(ctx context.Context, clientID 
 			newError(ErrorInvalidClient, 401, "a client certificate is required for client authentication", nil)
 	}
 
-	if verifyErr := s.verifyClientCertificate(client, peerCert); verifyErr != nil {
+	if verifyErr := s.verifyClientCertificate(ctx, client, peerCert); verifyErr != nil {
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{}, verifyErr
 	}
 
@@ -142,10 +130,10 @@ func (s *Server) authenticateClientViaCertificate(ctx context.Context, clientID 
 // ClientAuthMethod's certificate check — split out of
 // authenticateClientViaCertificate purely to keep that method's own
 // cognitive complexity manageable.
-func (s *Server) verifyClientCertificate(client storage.RegisteredClient, peerCert *x509.Certificate) *Error {
+func (s *Server) verifyClientCertificate(ctx context.Context, client storage.RegisteredClient, peerCert *x509.Certificate) *Error {
 	var lastErr *Error
 	for _, method := range client.ClientAuthMethods() {
-		err, certificateBased := s.verifyClientCertificateFor(method, client, peerCert)
+		err, certificateBased := s.verifyClientCertificateFor(ctx, method, client, peerCert)
 		if !certificateBased {
 			continue
 		}
@@ -164,7 +152,7 @@ func (s *Server) verifyClientCertificate(client storage.RegisteredClient, peerCe
 // registration for one certificate-based method, reporting false when
 // method isn't certificate-based. A client allowing several such methods
 // is authenticated when any one of them matches.
-func (s *Server) verifyClientCertificateFor(method storage.ClientAuthMethod, client storage.RegisteredClient, peerCert *x509.Certificate) (*Error, bool) {
+func (s *Server) verifyClientCertificateFor(ctx context.Context, method storage.ClientAuthMethod, client storage.RegisteredClient, peerCert *x509.Certificate) (*Error, bool) {
 	switch method {
 	case storage.ClientAuthMethodSelfSignedTLSClientAuth:
 		if !matchesRegisteredThumbprint(peerCert, client.ExpectedCertificateThumbprint()) {
@@ -172,15 +160,15 @@ func (s *Server) verifyClientCertificateFor(method storage.ClientAuthMethod, cli
 		}
 		return nil, true
 	case storage.ClientAuthMethodTLSClientAuth:
-		return s.verifyChainedFieldMatch(peerCert, matchesRegisteredSubjectDN(peerCert, client.ExpectedSubjectDN())), true
+		return s.verifyChainedFieldMatch(ctx, peerCert, matchesRegisteredSubjectDN(peerCert, client.ExpectedSubjectDN())), true
 	case storage.ClientAuthMethodTLSClientAuthSANDNS:
-		return s.verifyChainedFieldMatch(peerCert, matchesRegisteredSANDNS(peerCert, client.ExpectedSANDNS())), true
+		return s.verifyChainedFieldMatch(ctx, peerCert, matchesRegisteredSANDNS(peerCert, client.ExpectedSANDNS())), true
 	case storage.ClientAuthMethodTLSClientAuthSANURI:
-		return s.verifyChainedFieldMatch(peerCert, matchesRegisteredSANURI(peerCert, client.ExpectedSANURI())), true
+		return s.verifyChainedFieldMatch(ctx, peerCert, matchesRegisteredSANURI(peerCert, client.ExpectedSANURI())), true
 	case storage.ClientAuthMethodTLSClientAuthSANIP:
-		return s.verifyChainedFieldMatch(peerCert, matchesRegisteredSANIP(peerCert, client.ExpectedSANIP())), true
+		return s.verifyChainedFieldMatch(ctx, peerCert, matchesRegisteredSANIP(peerCert, client.ExpectedSANIP())), true
 	case storage.ClientAuthMethodTLSClientAuthSANEmail:
-		return s.verifyChainedFieldMatch(peerCert, matchesRegisteredSANEmail(peerCert, client.ExpectedSANEmail())), true
+		return s.verifyChainedFieldMatch(ctx, peerCert, matchesRegisteredSANEmail(peerCert, client.ExpectedSANEmail())), true
 	default:
 		return nil, false
 	}
@@ -191,8 +179,8 @@ func (s *Server) verifyClientCertificateFor(method storage.ClientAuthMethod, cli
 // Dependencies.ClientCertificateTrust (see checkChainsToRoot's own doc
 // comment), then fieldMatched, the case's own already-computed
 // registered-field comparison.
-func (s *Server) verifyChainedFieldMatch(peerCert *x509.Certificate, fieldMatched bool) *Error {
-	if chainErr := s.checkChainsToRoot(peerCert); chainErr != nil {
+func (s *Server) verifyChainedFieldMatch(ctx context.Context, peerCert *x509.Certificate, fieldMatched bool) *Error {
+	if chainErr := s.checkChainsToRoot(ctx, peerCert); chainErr != nil {
 		return chainErr
 	}
 	if !fieldMatched {
@@ -201,13 +189,10 @@ func (s *Server) verifyChainedFieldMatch(peerCert *x509.Certificate, fieldMatche
 	return nil
 }
 
-// checkChainsToRoot enforces Dependencies.ClientCertificateTrust — see
-// that field's own doc comment for why
-// ClientAuthMethodSelfSignedTLSClientAuth (checked before this is ever
-// called) needs no such check.
-func (s *Server) checkChainsToRoot(peerCert *x509.Certificate) *Error {
-	if !s.deps.ClientCertificateTrust.verifyChain(peerCert) {
-		return newError(ErrorInvalidClient, 401, "client certificate does not chain to a trusted root", nil)
-	}
-	return nil
+// checkChainsToRoot enforces Dependencies.ClientCertificateTrust, at
+// Dependencies.Clock's current time — see that field's own doc comment
+// for why ClientAuthMethodSelfSignedTLSClientAuth (checked before this
+// is ever called) needs no such check.
+func (s *Server) checkChainsToRoot(ctx context.Context, peerCert *x509.Certificate) *Error {
+	return s.deps.ClientCertificateTrust.verifyChain(ctx, peerCert, s.deps.Clock.Now())
 }

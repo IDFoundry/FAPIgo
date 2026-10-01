@@ -13,6 +13,58 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.42.0
+
+### `TrustedClientCAs` needs `Revocation` (server)
+
+**Affects:** a server whose `Dependencies.ClientCertificateTrust` is
+`server.TrustedClientCAs`. `NoClientCertificateChainTrust{}` is
+unaffected.
+
+**Why:** a client certificate's validity period alone can't stop a
+compromised key before it expires; revocation can, and many mTLS
+ecosystems require it. `TrustedClientCAs` had no way to check it, so a
+revoked certificate was accepted until it expired. Its new
+`Revocation` field is required, so a server built without a revocation
+check says so in its own code.
+
+`New` now also rejects a `TrustedClientCAs` with nil `Roots`: crypto/x509
+falls back to the system roots for a nil pool, which trusted every
+public CA to issue client certificates.
+
+**What to change:** set `Revocation` to one of:
+
+- `server.ClientCertificateCRLs{Lists: ...}`, which checks Certificate
+  Revocation Lists your `Lists` function returns. Keep them in memory
+  and refresh them before their nextUpdate; a missing or stale list
+  rejects the certificate.
+- your own `server.ClientCertificateRevocation`, for OCSP or another
+  revocation source.
+- `server.NoClientCertificateRevocationCheck{}` to keep the old
+  behaviour.
+
+```go
+// Before
+ClientCertificateTrust: server.TrustedClientCAs{Roots: pool},
+
+// After
+ClientCertificateTrust: server.TrustedClientCAs{
+	Roots:      pool,
+	Revocation: server.ClientCertificateCRLs{Lists: crlCache.Current},
+},
+```
+
+### Client certificates are checked at `Dependencies.Clock`'s time (server)
+
+**Affects:** a server using `server.TrustedClientCAs` with a
+`Dependencies.Clock` that isn't the wall clock, such as a fixed clock
+in tests.
+
+**Why:** a client certificate's validity period was checked against
+the wall clock, while everything else (tokens, assertions, attester
+certificates) uses `Dependencies.Clock`. A test with a fixed clock now
+needs client certificates valid at that clock's time.
+
 ## v0.41.0
 
 ### An invalid DPoP proof is invalid_dpop_proof

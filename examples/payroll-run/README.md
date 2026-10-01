@@ -6,9 +6,10 @@ one signs in, and no browser is part of the flow.
 
 - Ledgerline authenticates to the bank with a TLS client certificate
   the bank's client CA issued (mutual TLS, [RFC 8705](https://www.rfc-editor.org/rfc/rfc8705)
-  §2, `tls_client_auth`). The bank checks that the certificate chains to
-  that CA, that the CA hasn't revoked it, and that its subject is the one
-  registered for Ledgerline.
+  §2, `tls_client_auth`). The bank checks that the certificate chains
+  through that CA to its root CA, that neither the certificate nor the
+  CA has been revoked, and that its subject is the one registered for
+  Ledgerline.
 - It gets an access token through the client credentials grant, bound
   to that certificate (RFC 8705 §3, `cnf.x5t#S256`).
 - The token grants one payroll batch, as a [Rich Authorization Request
@@ -71,7 +72,7 @@ your system:
 one from your trust store if you'd trusted it. `-state` moves the
 directory.
 
-The client certificates are a different matter: Alder Bank's client CA
+The client certificates are a different matter: Alder Bank's own PKI
 issues them, in memory, every run. Your browser never sees them — the
 two hosts that ask for one are only ever called by Ledgerline.
 
@@ -88,6 +89,21 @@ two hosts that ask for one are only ever called by Ledgerline.
 Copperfield Payroll, a second payroll provider with a valid certificate
 of its own, is registered at the bank but has no pages: the attack lab
 borrows its certificate.
+
+### Alder Bank's PKI
+
+| CA | Signed by | Issues |
+|---|---|---|
+| Alder Bank root CA | itself | issuing CAs, and revokes them |
+| Alder Bank client CA 2 | the root | client certificates today: Ledgerline's and Copperfield's |
+| Alder Bank client CA 1 | the root | client certificates until its key leaked; the root has revoked it |
+
+The bank trusts the root in `TrustedClientCAs.Roots` and lists both
+issuing CAs in `Intermediates`. That split matters: a CA in `Roots` is a
+trust anchor, and nothing checks a trust anchor for revocation, so an
+issuing CA put there would stay trusted after the root revoked it.
+`ClientCertificateCRLs` gets a CRL from every CA in the chain: the root's
+revokes issuing CAs, and each issuing CA's revokes client certificates.
 
 ## What to try
 
@@ -116,11 +132,12 @@ attack at the token endpoint is refused with `invalid_client`:
 | Attack | What stops it |
 |---|---|
 | Ask for a token without a certificate | `tls_client_auth` needs one |
-| Present a self-signed certificate naming Ledgerline | Anyone can make one: it doesn't chain to the bank's client CA |
-| Present a certificate naming Ledgerline from another CA | That CA calls itself "Alder Bank client CA", but the bank trusts its own CA's key, not its name |
+| Present a self-signed certificate naming Ledgerline | Anyone can make one: it doesn't chain to the bank's root CA |
+| Present a certificate naming Ledgerline from another CA | That CA calls itself "Alder Bank client CA 2", but the bank trusts its own CAs' keys, not their names |
 | Present Ledgerline's expired certificate | Validity is checked at the server's clock |
-| Present Ledgerline's leaked, revoked certificate | A real certificate from the bank's CA, but its key leaked and the CA revoked it: it's on the CA's revocation list (`server.ClientCertificateCRLs`) |
-| Claim to be Ledgerline with Copperfield's certificate | A valid certificate from the bank's CA, but its subject isn't the one registered for Ledgerline |
+| Present Ledgerline's leaked, revoked certificate | A real certificate from the bank's client CA, but its key leaked and the CA revoked it: it's on the CA's revocation list (`server.ClientCertificateCRLs`) |
+| Present a certificate from Alder Bank's retired, revoked client CA | The bank's previous issuing CA leaked its key, and the attacker mints a fresh certificate naming Ledgerline with it. The certificate itself was never revoked, and it chains to the root — but the root has revoked the CA that issued it, and that CA is checked too because it's in `Intermediates`, not `Roots` |
+| Claim to be Ledgerline with Copperfield's certificate | A valid certificate from the bank's client CA, but its subject isn't the one registered for Ledgerline |
 
 **4. Exceed the mandate.** Two more token requests, with Ledgerline's
 real certificate, are refused with `invalid_authorization_details`:
@@ -144,14 +161,14 @@ Everything here uses FAPIgo's public API only.
 
 | Piece | FAPIgo |
 |---|---|
-| Alder Bank | `server.Server` with `ClientCredentialsGrant`, `OAuthOnly`, `MTLSEndpoints`, `Config.RAR` and `Dependencies.ClientCredentialsRARPolicy`; clients registered with `ClientAuthMethodTLSClientAuth` and `SenderConstrainMTLS`; `Dependencies.ClientCertificateTrust` set to `TrustedClientCAs` with `ClientCertificateCRLs` |
+| Alder Bank | `server.Server` with `ClientCredentialsGrant`, `OAuthOnly`, `MTLSEndpoints`, `Config.RAR` and `Dependencies.ClientCredentialsRARPolicy`; clients registered with `ClientAuthMethodTLSClientAuth` and `SenderConstrainMTLS`; `Dependencies.ClientCertificateTrust` set to `TrustedClientCAs` — the root CA in `Roots`, the issuing CAs in `Intermediates` — with `ClientCertificateCRLs` |
 | The payroll API | `serverresource.NewVerifier`, built from the bank's own server configuration, with `VerifyRequest.PeerCertificate`; the granted batch from the access token's `authorization_details` claim |
 | Ledgerline | `client.Discover`, `MTLSEndpointAliases.ApplyForClientAuth`, `client.NewFromDiscovery` with `ClientAuthMethodTLSClientAuth`, `SenderConstrainMTLS` and `OAuthOnly`; `RequestClientCredentialsToken` with `AuthorizationDetails`; `ClientCredentialsResource` for the API call. The certificate lives in the HTTP client's TLS configuration: FAPIgo never sees its key, and with nothing else to sign, Ledgerline has no `Dependencies.Keys` at all |
 
 The code:
 
 - [`payroll/bank.go`](payroll/bank.go) — Alder Bank's authorization server.
-- [`payroll/pki.go`](payroll/pki.go) — Alder Bank's client CA and its revocation list, and every certificate the demo uses.
+- [`payroll/pki.go`](payroll/pki.go) — Alder Bank's root and issuing CAs and their revocation lists, and every certificate the demo uses.
 - [`payroll/rar.go`](payroll/rar.go) — the `payroll_batch` detail type and the mandate policy.
 - [`payroll/api.go`](payroll/api.go) — the payroll API.
 - [`payroll/ledgerline.go`](payroll/ledgerline.go) — Ledgerline, the attack lab and the rotation panel.
@@ -160,8 +177,8 @@ The code:
 
 ## What's simplified
 
-- The bank's client CA runs in the same process, so the authorization
-  server reads its revocation list directly. A real deployment fetches
+- The bank's CAs run in the same process, so the authorization server
+  reads their revocation lists directly. A real deployment fetches
   and caches the CA's published CRL, refreshing it before its
   `nextUpdate` — `ClientCertificateCRLs` refuses a certificate whose
   issuer has no current list.

@@ -3,6 +3,7 @@ package payroll
 import (
 	"crypto"
 	"crypto/rand"
+	"crypto/x509"
 	"encoding/json"
 	"net/http"
 
@@ -141,10 +142,15 @@ func (w *World) newBank(certs certificates) (*bank, error) {
 		AccessTokens: accessTokens,
 		Revocation:   memstore.NewRevocationStore(),
 		// The bank checks every client certificate itself: that it
-		// chains to its client CA, and that the CA hasn't revoked it.
+		// chains to its root CA, and that neither the certificate nor the
+		// issuing CA has been revoked. The issuing CAs go in
+		// Intermediates, not Roots: a CA in Roots is a trust anchor,
+		// which nothing checks for revocation, so the retired CA would
+		// go on being trusted after the root revoked it.
 		ClientCertificateTrust: server.TrustedClientCAs{
-			Roots:      w.pki.pool,
-			Revocation: server.ClientCertificateCRLs{Lists: w.pki.currentCRLs},
+			Roots:         w.rootCA.pool,
+			Intermediates: intermediates(w.clientCA, w.retiredCA),
+			Revocation:    server.ClientCertificateCRLs{Lists: w.currentCRLs},
 		},
 		Clock:  server.SystemClock{},
 		Random: rand.Reader,
@@ -174,6 +180,15 @@ func (w *World) newBank(certs certificates) (*bank, error) {
 	mtls.HandleFunc("POST /token", b.token)
 	w.router[mtlsHost] = mtls
 	return b, nil
+}
+
+// intermediates is a pool of the issuing CAs' certificates.
+func intermediates(cas ...*pki) *x509.CertPool {
+	pool := x509.NewCertPool()
+	for _, ca := range cas {
+		pool.AddCert(ca.ca)
+	}
+	return pool
 }
 
 func (b *bank) discovery(w http.ResponseWriter, r *http.Request) {

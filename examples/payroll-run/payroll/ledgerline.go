@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -60,8 +61,8 @@ type ledgerline struct {
 	certs certificates
 	// client presents Ledgerline's current certificate. The others are
 	// the same client software presenting another certificate, or none.
-	client                                                 *lazyClient
-	noCert, selfSigned, impostor, expired, leaked, copperf *lazyClient
+	client                                                          *lazyClient
+	noCert, selfSigned, impostor, expired, leaked, retired, copperf *lazyClient
 
 	mu       sync.Mutex
 	current  *tls.Certificate // Ledgerline's certificate now
@@ -113,6 +114,7 @@ func (w *World) newLedgerline(certs certificates) *ledgerline {
 	l.impostor = fixed(certs.impostor)
 	l.expired = fixed(certs.expired)
 	l.leaked = fixed(certs.leaked)
+	l.retired = fixed(certs.retired)
 	l.copperf = fixed(certs.copperfield)
 
 	mux := http.NewServeMux()
@@ -322,6 +324,7 @@ var tokenAttacks = map[string]tokenAttack{
 	"impostor":      {"Present a certificate naming Ledgerline from another CA", func(l *ledgerline) *lazyClient { return l.impostor }, harbourIBAN, payrollTotal()},
 	"expired":       {"Present Ledgerline's expired certificate", func(l *ledgerline) *lazyClient { return l.expired }, harbourIBAN, payrollTotal()},
 	"revoked":       {"Present Ledgerline's leaked, revoked certificate", func(l *ledgerline) *lazyClient { return l.leaked }, harbourIBAN, payrollTotal()},
+	"retired-ca":    {"Present a certificate from Alder Bank's retired, revoked client CA", func(l *ledgerline) *lazyClient { return l.retired }, harbourIBAN, payrollTotal()},
 	"copperfield":   {"Claim to be Ledgerline with Copperfield's certificate", func(l *ledgerline) *lazyClient { return l.copperf }, harbourIBAN, payrollTotal()},
 	"other-account": {"Pay from Brightwater Bakery's account", func(l *ledgerline) *lazyClient { return l.client }, brightwaterIBAN, payrollTotal()},
 	"over-limit":    {"Pay a €40,000.00 batch", func(l *ledgerline) *lazyClient { return l.client }, harbourIBAN, 40_000_00},
@@ -410,7 +413,7 @@ func (l *ledgerline) rotate(w http.ResponseWriter, r *http.Request) {
 	step("Get a token with the old certificate", false, "Issued, bound to the old certificate:\n"+tokenBinding(token), before)
 
 	now := time.Now()
-	next, err := l.w.pki.issue(ledgerlineSubject, now.Add(-time.Minute), now.Add(certificateLifetime))
+	next, err := l.w.clientCA.issue(ledgerlineSubject, now.Add(-time.Minute), now.Add(certificateLifetime))
 	if err != nil {
 		l.w.renderError(w, ledgerlineHost, http.StatusInternalServerError, "Rotation failed", err.Error())
 		return
@@ -458,9 +461,29 @@ func tokenBinding(t client.ClientCredentialsTokenResult) string {
 	return `"cnf": ` + prettyJSON(payload.Cnf)
 }
 
-// certificateView is a certificate as the dashboard shows it.
+// certificateView is a certificate as the dashboard shows it. Chain is
+// set only where a page shows it.
 type certificateView struct {
-	Subject, Issuer, Serial, Thumbprint, Expires string
+	Subject, Issuer, Serial, Thumbprint, Expires, Chain string
+}
+
+// chain names the CAs from c up to Alder Bank's root, like
+// "ledgerline-payroll ← Alder Bank client CA 2 ← Alder Bank root CA",
+// or "" when c doesn't chain to it. It ignores revocation: it's for
+// showing, not deciding.
+func (w *World) chain(c *x509.Certificate) string {
+	chains, err := c.Verify(x509.VerifyOptions{
+		Roots: w.rootCA.pool, Intermediates: intermediates(w.clientCA, w.retiredCA),
+		CurrentTime: c.NotBefore.Add(time.Minute), KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+	})
+	if err != nil {
+		return ""
+	}
+	names := make([]string, len(chains[0]))
+	for i, cert := range chains[0] {
+		names[i] = cert.Subject.CommonName
+	}
+	return strings.Join(names, " ← ")
 }
 
 func describeCertificate(c *x509.Certificate) certificateView {
@@ -478,12 +501,14 @@ type staffRow struct{ Name, IBAN, Pay string }
 
 func (l *ledgerline) home(w http.ResponseWriter, _ *http.Request) {
 	l.mu.Lock()
+	current := l.current.Leaf
 	page := ledgerlinePage{
-		Page: l.w.page(ledgerlineName, ledgerlineHost), Certificate: describeCertificate(l.current.Leaf),
+		Page: l.w.page(ledgerlineName, ledgerlineHost), Certificate: describeCertificate(current),
 		Total: euros(payrollTotal()), Limit: euros(mandateLimit),
 		Attempts: append([]attempt(nil), l.attempts...), Rotation: l.rotation,
 	}
 	l.mu.Unlock()
+	page.Certificate.Chain = l.w.chain(current)
 	for _, e := range harbourStaff {
 		page.Staff = append(page.Staff, staffRow{Name: e.Name, IBAN: e.IBAN, Pay: euros(e.Pay)})
 	}
@@ -500,6 +525,7 @@ func (l *ledgerline) show(w http.ResponseWriter, r *http.Request) {
 	view := runView{ID: rn.ID, Status: rn.Status, Problem: rn.Problem, Payment: rn.Payment, Attempts: append([]attempt(nil), rn.Attempts...)}
 	if rn.boundTo != nil {
 		c := describeCertificate(rn.boundTo)
+		c.Chain = l.w.chain(rn.boundTo)
 		view.BoundTo = &c
 	}
 	l.mu.Unlock()

@@ -87,7 +87,7 @@ code { font-size: 12px; word-break: break-all; }
 <header><h1>{{.Title}}</h1><a href="{{.Console}}" target="_top">demo console</a></header>
 <main>{{end}}
 {{define "bottom"}}</main></body></html>{{end}}
-{{define "cert"}}<dl class="cert"><dt>Subject</dt><dd>{{.Subject}}</dd><dt>Issuer</dt><dd>{{.Issuer}}</dd><dt>Serial</dt><dd>{{.Serial}}</dd><dt>x5t#S256</dt><dd><code>{{.Thumbprint}}</code></dd><dt>Expires</dt><dd>{{.Expires}}</dd></dl>{{end}}
+{{define "cert"}}<dl class="cert"><dt>Subject</dt><dd>{{.Subject}}</dd><dt>Issuer</dt><dd>{{.Issuer}}</dd><dt>Serial</dt><dd>{{.Serial}}</dd><dt>x5t#S256</dt><dd><code>{{.Thumbprint}}</code></dd><dt>Expires</dt><dd>{{.Expires}}</dd>{{with .Chain}}<dt>Chain</dt><dd>{{.}}</dd>{{end}}</dl>{{end}}
 {{define "attempt"}}<div class="card"><p>{{if .Refused}}<span class="pill ok">refused</span>{{else}}<span class="pill bad">allowed</span>{{end}} {{.Title}}</p><pre>{{.Result}}</pre>
 {{range .Trace}}<details class="step"><summary>{{.Title}}</summary><pre>{{.Detail}}</pre></details>{{end}}</div>{{end}}`
 
@@ -111,7 +111,7 @@ var pageTemplates = map[string]string{
 <details class="wide"><summary class="muted">The staff list</summary><table><tr><th>Name</th><th>Account</th><th>Pay</th></tr>
 {{range .Staff}}<tr><td>{{.Name}}</td><td><code>{{.IBAN}}</code></td><td class="num">{{.Pay}}</td></tr>{{end}}</table></details></div>
 <h2>Ledgerline's certificate</h2>
-<div class="card">{{template "cert" .Certificate}}<p class="muted">Alder Bank registered Ledgerline by this subject, issued by its client CA. Ledgerline presents the certificate on every connection to the bank's mTLS hosts; its key never leaves Ledgerline.</p></div>
+<div class="card">{{template "cert" .Certificate}}<p class="muted">Alder Bank registered Ledgerline by this subject, issued by its client CA under its root CA. Ledgerline presents the certificate on every connection to the bank's mTLS hosts; its key never leaves Ledgerline.</p></div>
 <h2 id="attempts">Attack lab: at the token endpoint</h2>
 <div class="card">
 {{range attackTitles}}<form method="post" action="/attack" class="actions"><input type="hidden" name="kind" value="{{.Kind}}"><button class="attack">{{.Title}}</button></form>{{end}}
@@ -151,7 +151,7 @@ var pageTemplates = map[string]string{
 }
 
 // attackOrder is the order the token endpoint attacks are listed in.
-var attackOrder = []string{"no-cert", "self-signed", "impostor", "expired", "revoked", "copperfield", "other-account", "over-limit"}
+var attackOrder = []string{"no-cert", "self-signed", "impostor", "expired", "revoked", "retired-ca", "copperfield", "other-account", "over-limit"}
 
 var templates = func() map[string]*template.Template {
 	funcs := template.FuncMap{"attackTitles": func() []struct{ Kind, Title string } {

@@ -95,7 +95,8 @@ func TestRunPayroll(t *testing.T) {
 		t.Fatalf("the run landed on %s:\n%s", at, page)
 	}
 	mustContain(t, "the run", page, `pill ok">paid`, "€22,840.00", "Harbour Coffee ····4242", "&#34;payments&#34;: 12",
-		"Token request (client credentials)", "TLS client certificate:", "CN=ledgerline-payroll", "x5t#S256", "Payroll API call")
+		"Token request (client credentials)", "TLS client certificate:", "CN=ledgerline-payroll", "x5t#S256", "Payroll API call",
+		"ledgerline-payroll ← Alder Bank client CA 2 ← Alder Bank root CA")
 
 	id := regexp.MustCompile(`name="id" value="([A-Z0-9]+)"`).FindStringSubmatch(page)
 	if id == nil {
@@ -119,6 +120,7 @@ func TestTokenEndpointAttacks(t *testing.T) {
 		{"impostor", "does not chain to a trusted root"},
 		{"expired", "does not chain to a trusted root"},
 		{"revoked", "revoked"},
+		{"retired-ca", "revoked"},
 		{"copperfield", "does not match the registered subject"},
 		{"other-account", "invalid_authorization_details"},
 		{"over-limit", "invalid_authorization_details"},

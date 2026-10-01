@@ -110,6 +110,13 @@ started on another device, with CIBA and Rich Authorization Requests —
 the phone shows exactly what's being approved, and the bank's APIs allow
 exactly that.
 
+[examples/payroll-run](examples/payroll-run/README.md) is machine to
+machine: a payroll provider pays a company's staff through its bank's
+API with mutual TLS client authentication, certificate-bound tokens from
+the client credentials grant, certificate revocation and a Rich
+Authorization Request checked against a standing mandate, with an attack
+lab and a certificate rotation panel.
+
 `storage/memstore` and `keys/ephemeral` provide in-memory, non-durable
 implementations of every interface `server` needs (client repository,
 transaction/grant/replay/access-token stores, key manager, client key

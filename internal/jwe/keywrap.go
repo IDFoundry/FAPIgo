@@ -124,9 +124,11 @@ func aesKeyUnwrap(kek, ciphertext []byte) ([]byte, error) {
 		return nil, fmt.Errorf("jwe: key unwrap integrity check failed")
 	}
 
-	out := make([]byte, n*8)
-	for i, block := range r {
-		copy(out[i*8:], block[:])
+	// The unwrapped key is the ciphertext less its 8-byte integrity
+	// block: sized from the ciphertext itself, never computed.
+	out := make([]byte, 0, len(ciphertext))
+	for _, block := range r {
+		out = append(out, block[:]...)
 	}
 	return out, nil
 }

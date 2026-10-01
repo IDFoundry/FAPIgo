@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"crypto"
+	"errors"
 	"fmt"
 	"io"
 
@@ -40,11 +41,21 @@ func (s keyManagerSigner) Sign(_ io.Reader, digestOrMessage []byte, _ crypto.Sig
 	return sig.Value, nil
 }
 
+// errNoSigningKeys is newSigner's error for a client built without
+// Dependencies.Keys.
+var errNoSigningKeys = errors.New("client: no signing keys configured (dependencies.keys is nil)")
+
 // newSigner resolves the current public key for purpose/algorithm and
 // returns a crypto.Signer-shaped adapter over Dependencies.Keys, plus
 // its kid, for use with internal/jose-based signing (client assertions,
 // request objects, DPoP proofs).
 func (c *Client) newSigner(ctx context.Context, purpose keys.SigningPurpose, algorithm fapi.SignatureAlgorithm) (crypto.Signer, string, error) {
+	if c.deps.Keys == nil {
+		// New allows a nil Keys only for a configuration that never
+		// signs (keysNeeded), so this is unreachable; fail rather than
+		// panic all the same.
+		return nil, "", errNoSigningKeys
+	}
 	info, err := c.deps.Keys.PublicKey(ctx, purpose, algorithm)
 	if err != nil {
 		return nil, "", fmt.Errorf("resolve signing key: %w", err)

@@ -414,8 +414,8 @@ func validateSessionsDependency(cfg Config, deps Dependencies) error {
 // assurance, deps.Random and the custody of the keys deps.Keys and
 // deps.Decryption hold.
 func validateKeysDependency(cfg Config, deps Dependencies) error {
-	if deps.Keys == nil {
-		return fmt.Errorf("client: dependencies: keys is required")
+	if deps.Keys == nil && keysNeeded(cfg) {
+		return fmt.Errorf("client: dependencies: keys is required (it may be left nil only when this client signs nothing: certificate-based client authentication, mTLS-bound tokens, no request objects, no CIBA and no federation)")
 	}
 	if cfg.Assurance != AssuranceProduction {
 		return nil
@@ -423,13 +423,27 @@ func validateKeysDependency(cfg Config, deps Dependencies) error {
 	if err := checkRandom(deps.Random); err != nil {
 		return err
 	}
-	if err := checkKeyCustody("keys", deps.Keys); err != nil {
-		return err
+	if deps.Keys != nil {
+		if err := checkKeyCustody("keys", deps.Keys); err != nil {
+			return err
+		}
 	}
 	if deps.Decryption != nil {
 		return checkKeyCustody("decryption", deps.Decryption)
 	}
 	return nil
+}
+
+// keysNeeded reports whether cfg has this client sign anything with
+// Dependencies.Keys — see Dependencies.Keys.
+func keysNeeded(cfg Config) bool {
+	return cfg.ClientAuthMethod == storage.ClientAuthMethodPrivateKeyJWT ||
+		cfg.ClientAuthMethod == storage.ClientAuthMethodAttestation ||
+		cfg.SenderConstrain == storage.SenderConstrainDPoP ||
+		cfg.Profile == ProfileFAPISecurityWithMessageSigning ||
+		cfg.PushedRequestEncoding == PushedRequestEncodingRequestObject ||
+		!cfg.Endpoints.BackchannelAuthentication.IsZero() ||
+		cfg.Federation.EntityID != ""
 }
 
 // validateIssuerKeysDependency checks deps.IssuerKeys.

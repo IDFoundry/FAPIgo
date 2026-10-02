@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"unicode"
 )
 
 // Unmarshal is json.Unmarshal, after CheckFieldCase.
@@ -39,16 +40,46 @@ func CheckFieldCase(data []byte, v any) error {
 	if t == nil {
 		return nil
 	}
-	return check(data, t)
+	return check(data, t, false)
 }
 
-func check(raw []byte, t reflect.Type) error {
+// CheckTaggedFieldCase is CheckFieldCase for fields with an explicit
+// json tag only: a field without one has no spelling of its own on the
+// wire, so encoding/json's case-insensitive match to its Go name is
+// left alone. It is for types an application defines, which needn't tag
+// every field.
+func CheckTaggedFieldCase(data []byte, v any) error {
+	t := reflect.TypeOf(v)
+	if t == nil {
+		return nil
+	}
+	return check(data, t, true)
+}
+
+// FoldKey maps name to one spelling shared by every name it equals under
+// Unicode simple case folding (strings.EqualFold), as encoding/json
+// compares member names: each rune becomes the least of its fold orbit,
+// so "K", "k" and the Kelvin sign all map to "K", and "s" and "ſ" to
+// "S".
+func FoldKey(name string) string {
+	var b strings.Builder
+	for _, r := range name {
+		least := r
+		for f := unicode.SimpleFold(r); f != r; f = unicode.SimpleFold(f) {
+			least = min(least, f)
+		}
+		b.WriteRune(least)
+	}
+	return b.String()
+}
+
+func check(raw []byte, t reflect.Type, taggedOnly bool) error {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	switch t.Kind() {
 	case reflect.Struct:
-		return checkStruct(raw, t)
+		return checkStruct(raw, t, taggedOnly)
 	case reflect.Slice, reflect.Array:
 		if t.Elem().Kind() == reflect.Uint8 { // []byte decodes from a base64 string
 			return nil
@@ -58,7 +89,7 @@ func check(raw []byte, t reflect.Type) error {
 			return nil
 		}
 		for _, e := range elems {
-			if err := check(e, t.Elem()); err != nil {
+			if err := check(e, t.Elem(), taggedOnly); err != nil {
 				return err
 			}
 		}
@@ -68,7 +99,7 @@ func check(raw []byte, t reflect.Type) error {
 			return nil
 		}
 		for _, m := range members {
-			if err := check(m, t.Elem()); err != nil {
+			if err := check(m, t.Elem(), taggedOnly); err != nil {
 				return err
 			}
 		}
@@ -76,7 +107,7 @@ func check(raw []byte, t reflect.Type) error {
 	return nil
 }
 
-func checkStruct(raw []byte, t reflect.Type) error {
+func checkStruct(raw []byte, t reflect.Type, taggedOnly bool) error {
 	if t == reflect.TypeOf(json.RawMessage{}) {
 		return nil
 	}
@@ -90,27 +121,43 @@ func checkStruct(raw []byte, t reflect.Type) error {
 	fields := fieldTypes(t)
 	byFold := make(map[string]string, len(fields))
 	for name := range fields {
-		byFold[strings.ToLower(name)] = name
+		byFold[FoldKey(name)] = name
 	}
 	for name, value := range members {
-		if ft, ok := fields[name]; ok {
-			if err := check(value, ft); err != nil {
+		if f, ok := fields[name]; ok {
+			if err := check(value, f.typ, taggedOnly); err != nil {
 				return err
 			}
 			continue
 		}
-		if exact, ok := byFold[strings.ToLower(name)]; ok {
-			return fmt.Errorf("strictjson: member %q is not %q: JSON member names are case-sensitive", name, exact)
+		exact, ok := byFold[FoldKey(name)]
+		if !ok {
+			continue
 		}
+		if taggedOnly && !fields[exact].tagged {
+			// encoding/json decodes it into the untagged field: check
+			// what's inside.
+			if err := check(value, fields[exact].typ, taggedOnly); err != nil {
+				return err
+			}
+			continue
+		}
+		return fmt.Errorf("strictjson: member %q is not %q: JSON member names are case-sensitive", name, exact)
 	}
 	return nil
 }
 
+// field is a struct field as JSON sees it.
+type field struct {
+	typ    reflect.Type
+	tagged bool // named by a json tag, not by its Go name
+}
+
 // fieldTypes maps each JSON member name t decodes (following
 // encoding/json's naming, including promoted fields of embedded
-// structs) to its field type.
-func fieldTypes(t reflect.Type) map[string]reflect.Type {
-	out := map[string]reflect.Type{}
+// structs) to its field.
+func fieldTypes(t reflect.Type) map[string]field {
+	out := map[string]field{}
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
 		tag := f.Tag.Get("json")
@@ -125,10 +172,11 @@ func fieldTypes(t reflect.Type) map[string]reflect.Type {
 		if !f.IsExported() {
 			continue
 		}
-		if name == "" {
+		tagged := name != ""
+		if !tagged {
 			name = f.Name
 		}
-		out[name] = f.Type
+		out[name] = field{typ: f.Type, tagged: tagged}
 	}
 	return out
 }
@@ -148,7 +196,7 @@ func untaggedEmbeddedStruct(f reflect.StructField, name string) (reflect.Type, b
 }
 
 // addMissing adds to out each of from's members out doesn't already have.
-func addMissing(out, from map[string]reflect.Type) {
+func addMissing(out, from map[string]field) {
 	for k, v := range from {
 		if _, exists := out[k]; !exists {
 			out[k] = v

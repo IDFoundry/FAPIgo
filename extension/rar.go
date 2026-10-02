@@ -8,7 +8,8 @@ import (
 	"reflect"
 	"sort"
 	"strings"
-	"unicode"
+
+	"github.com/idfoundry/fapigo/internal/strictjson"
 )
 
 // RARDefinition captures the wire contract for one Rich Authorization
@@ -75,9 +76,15 @@ func (d RARDefinition[T]) decodeCheck(raw json.RawMessage) error {
 			return fmt.Errorf("extension: authorization_details type %q: malformed value: %w", d.Type, err)
 		}
 	}
+	// A member spelled other than its field's json tag — "ACTIONS" for
+	// "actions" — is one encoding/json reads and a case-sensitive reader
+	// of the issued token doesn't.
+	var v T
+	if err := strictjson.CheckTaggedFieldCase(raw, &v); err != nil {
+		return fmt.Errorf("extension: authorization_details type %q: malformed value: %w", d.Type, err)
+	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
-	var v T
 	if err := dec.Decode(&v); err != nil {
 		return fmt.Errorf("extension: authorization_details type %q: malformed value: %w", d.Type, err)
 	}
@@ -134,6 +141,9 @@ func RARGet[T any](values RARValues, def RARDefinition[T]) ([]RARDetail[T], erro
 	out := make([]RARDetail[T], 0, len(raws))
 	for _, raw := range raws {
 		var v T
+		if err := strictjson.CheckTaggedFieldCase(raw, &v); err != nil {
+			return nil, fmt.Errorf("extension: authorization_details type %q: %w", def.Type, err)
+		}
 		if err := json.Unmarshal(raw, &v); err != nil {
 			return nil, fmt.Errorf("extension: authorization_details type %q: %w", def.Type, err)
 		}
@@ -265,7 +275,7 @@ func (r *RARRegistry) Parse(raw json.RawMessage) (RARValues, error) {
 	values := RARValues{byType: make(map[string][]json.RawMessage)}
 	counts := make(map[string]int, len(r.byType))
 	for _, objRaw := range objects {
-		if err := checkNoDuplicateTopLevelKeys(objRaw); err != nil {
+		if err := checkMembers(objRaw); err != nil {
 			return RARValues{}, err
 		}
 
@@ -374,47 +384,34 @@ func checkJSONDepth(raw []byte, maxDepth int) error {
 	}
 }
 
-// checkNoDuplicateTopLevelKeys reports whether raw — expected to be a
-// JSON object — repeats a top-level member name, or spells "type" other
-// than exactly so. Names that differ only in case count as repeats:
-// encoding/json matches a member to a field case-insensitively, so of
-// {"amount":"1","AMOUNT":"1000"} it reads the last, where a
-// case-sensitive reader of the same issued token reads the first, and it
-// reads {"TYPE":"b"} as type "b" where that reader finds no type at all.
-// It does not recurse
-// into nested objects/arrays; encoding/json's own decode already applies
-// DisallowUnknownFields for whatever shape a RARDefinition's T declares,
-// so a duplicate nested member can only smuggle in a value the target
-// struct doesn't expose to begin with.
-// foldKey maps name to one spelling shared by every name it equals under
-// Unicode simple case folding (strings.EqualFold), as encoding/json
-// compares member names: each rune becomes the least of its fold orbit,
-// so "K", "k" and the Kelvin sign all map to "K".
-func foldKey(name string) string {
-	var b strings.Builder
-	for _, r := range name {
-		least := r
-		for f := unicode.SimpleFold(r); f != r; f = unicode.SimpleFold(f) {
-			least = min(least, f)
-		}
-		b.WriteRune(least)
-	}
-	return b.String()
-}
-
-func checkNoDuplicateTopLevelKeys(raw json.RawMessage) error {
+// checkMembers reports whether raw — expected to be a JSON object —
+// repeats a member name in any object at any depth, or spells its "type"
+// other than exactly so. Names that differ only in case count as
+// repeats: encoding/json matches a member to a field
+// case-insensitively, so of {"amount":"1","AMOUNT":"1000"} it reads the
+// last, where a case-sensitive reader of the same issued token reads the
+// first — nested as much as at the top, since DisallowUnknownFields
+// matches names the same way — and it reads {"TYPE":"b"} as type "b"
+// where that reader finds no type at all. A lone member spelled other
+// than its field's tag is RARDefinition.decodeCheck's to refuse, since
+// only the detail type knows its fields.
+func checkMembers(raw json.RawMessage) error {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	tok, err := dec.Token()
 	if err != nil {
 		return fmt.Errorf("extension: %w", err)
 	}
-	delim, ok := tok.(json.Delim)
-	if !ok || delim != '{' {
+	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
 		return fmt.Errorf("extension: authorization_details object must be a JSON object")
 	}
+	return checkObjectMembers(dec, true)
+}
 
-	seen := make(map[string]string) // by foldKey, the name as spelled
-	typeKey := foldKey("type")
+// checkObjectMembers checks the members of the object whose "{" dec has
+// just read, and everything inside them, through its "}".
+func checkObjectMembers(dec *json.Decoder, top bool) error {
+	seen := make(map[string]string) // by strictjson.FoldKey, the name as spelled
+	typeKey := strictjson.FoldKey("type")
 	for dec.More() {
 		keyTok, err := dec.Token()
 		if err != nil {
@@ -424,19 +421,40 @@ func checkNoDuplicateTopLevelKeys(raw json.RawMessage) error {
 		if !ok {
 			return fmt.Errorf("extension: malformed object key")
 		}
-		folded := foldKey(key)
+		folded := strictjson.FoldKey(key)
 		if first, dup := seen[folded]; dup {
 			return fmt.Errorf("%w: %q and %q", ErrDuplicateMember, first, key)
 		}
-		if folded == typeKey && key != "type" {
+		if top && folded == typeKey && key != "type" {
 			return fmt.Errorf("%w: %q is not \"type\"", ErrDuplicateMember, key)
 		}
 		seen[folded] = key
-
-		var skip json.RawMessage
-		if err := dec.Decode(&skip); err != nil {
-			return fmt.Errorf("extension: %w", err)
+		if err := checkValueMembers(dec); err != nil {
+			return err
 		}
+	}
+	_, err := dec.Token() // "}"
+	return err
+}
+
+// checkValueMembers checks the next value dec reads: any object in it,
+// at any depth.
+func checkValueMembers(dec *json.Decoder) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return fmt.Errorf("extension: %w", err)
+	}
+	switch tok {
+	case json.Delim('{'):
+		return checkObjectMembers(dec, false)
+	case json.Delim('['):
+		for dec.More() {
+			if err := checkValueMembers(dec); err != nil {
+				return err
+			}
+		}
+		_, err := dec.Token() // "]"
+		return err
 	}
 	return nil
 }

@@ -91,3 +91,31 @@ func TestUnmarshalLeavesMalformedJSONToDecoder(t *testing.T) {
 		t.Fatalf("mistyped containers: %v", err)
 	}
 }
+
+// TestCheckFieldCaseFoldsAsEncodingJSONDoes covers a member that only
+// Unicode case folding makes equal to a field — "ſ" (long s) for "s" —
+// which encoding/json matches and a lowercase comparison misses.
+func TestCheckFieldCaseFoldsAsEncodingJSONDoes(t *testing.T) {
+	var v struct {
+		Iss string `json:"iss"`
+	}
+	if err := CheckFieldCase([]byte("{\"iſſ\":\"https://evil.example\"}"), &v); err == nil {
+		t.Error("CheckFieldCase(\"iſſ\" for iss) = nil error")
+	}
+}
+
+func TestCheckTaggedFieldCase(t *testing.T) {
+	var v struct {
+		Tagged   string `json:"amount"`
+		Untagged string
+	}
+	if err := CheckTaggedFieldCase([]byte(`{"AMOUNT":"1"}`), &v); err == nil {
+		t.Error(`CheckTaggedFieldCase("AMOUNT" for a tagged field) = nil error`)
+	}
+	if err := CheckTaggedFieldCase([]byte(`{"amount":"1","untagged":"x"}`), &v); err != nil {
+		t.Errorf("CheckTaggedFieldCase(an untagged field in another case) = %v, want nil", err)
+	}
+	if err := CheckFieldCase([]byte(`{"untagged":"x"}`), &v); err == nil {
+		t.Error("CheckFieldCase(an untagged field in another case) = nil error: it checks every field")
+	}
+}

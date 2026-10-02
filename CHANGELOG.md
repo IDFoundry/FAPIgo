@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.42.0](https://github.com/IDFoundry/FAPIgo/compare/v0.41.0...v0.42.0) (2026-10-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* the server now rejects a malformed max_age at the pushed authorization request, and answers login_required when an application completes an authorization with an authentication older than the requested max_age. See UPGRADING.md for v0.42.0.
+* **resource:** resource.Verifier answers a Bearer request without a client certificate with 401 invalid_token instead of 400 invalid_request. See UPGRADING.md for v0.42.0.
+* **server:** server.TrustedClientCAs now requires Roots and Revocation, and checks certificate validity at Dependencies.Clock's time. See UPGRADING.md for v0.42.0.
+
+### Features
+
+* **client:** redeem refresh tokens with RefreshTokens ([7d07e5d](https://github.com/IDFoundry/FAPIgo/commit/7d07e5d89abf9ee93b5b8ebfd2f9181f63b65cbd))
+* **client:** return attestation headers for a request the embedder sends ([90ef3cf](https://github.com/IDFoundry/FAPIgo/commit/90ef3cfc4f6ff830e54de126777c4f586ba4def7))
+* **client:** serve client credentials clients that sign nothing ([03f951f](https://github.com/IDFoundry/FAPIgo/commit/03f951f6eba5f019da059de03bee53a2a152fd23))
+* **keys:** resolve client encryption keys from a JWK Set in keys/ephemeral ([a608414](https://github.com/IDFoundry/FAPIgo/commit/a60841455d462c43d29b18f8faf8d5736249e64a))
+* **server:** authenticate attested clients for grants the server doesn't serve ([b0f5b3f](https://github.com/IDFoundry/FAPIgo/commit/b0f5b3f058bc63e5b324c8d6c8e20f619f78beb8))
+* **server:** check client certificates for revocation ([d492fdf](https://github.com/IDFoundry/FAPIgo/commit/d492fdfc0dc32fab419236c2c121769e7e895cc9))
+* **server:** revoke a grant as a whole with RevokeGrant ([3eb5617](https://github.com/IDFoundry/FAPIgo/commit/3eb5617a94828d9ab77b456e0dd4e51988eba2f9))
+* **server:** serve an embedder's grant at the token endpoint with the server's own checks ([15fdae5](https://github.com/IDFoundry/FAPIgo/commit/15fdae5925f5346f83184c23a181e7e608e6d481))
+* surface acr_values and enforce max_age in the authorization code flow ([457532b](https://github.com/IDFoundry/FAPIgo/commit/457532b783a6d5a9aca45dd669e333d6e81db301))
+
+
+### Bug Fixes
+
+* **client,server:** close the pre-release security review's low findings ([0bfc9bc](https://github.com/IDFoundry/FAPIgo/commit/0bfc9bc3814b0290aa58a0313860e43c84cad570))
+* **client:** let NewFromDiscovery build an OAuthOnly client ([2f69f57](https://github.com/IDFoundry/FAPIgo/commit/2f69f57543969d9617584222e98d75d9e691bd38))
+* **resource:** answer an mTLS-bound token without a certificate with 401 invalid_token ([fbc7522](https://github.com/IDFoundry/FAPIgo/commit/fbc75223bef31a0cb30cf8f5705d895d76fc2ad4))
+* **server:** ask a client_id-only request for client authentication, not a certificate ([1b8bb7a](https://github.com/IDFoundry/FAPIgo/commit/1b8bb7acec781954cc53baeb6946ee9f0225af62))
+* **server:** check an intermediate CA's revocation through TrustedClientCAs.Intermediates ([4cfb6c1](https://github.com/IDFoundry/FAPIgo/commit/4cfb6c1c80305b6634fb18470cb6af509be5ed5a))
+
 ## [0.41.0](https://github.com/IDFoundry/FAPIgo/compare/v0.40.0...v0.41.0) (2026-09-30)
 
 

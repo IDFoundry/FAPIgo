@@ -75,6 +75,9 @@ func (a *api) pay(w http.ResponseWriter, r *http.Request) {
 		resource.WriteError(w, err)
 		return
 	}
+	// The client's next call carries a fresh DPoP nonce, when the
+	// verifier issues them.
+	authz.SetDPoPNonce(w.Header())
 	var order paymentOrder
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&order); err != nil {
 		resource.NewError(resource.ErrorInvalidRequest, http.StatusBadRequest, "malformed payment order").WriteJSON(w)

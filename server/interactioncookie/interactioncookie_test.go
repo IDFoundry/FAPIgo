@@ -261,7 +261,7 @@ func TestCookieExpiresWithTheInteraction(t *testing.T) {
 		t.Errorf("Read(at ExpiresAt) = %v, want ErrNoInteraction", err)
 	}
 
-	for name, expiresAt := range map[string]time.Time{"expired": now.Add(-time.Second), "unset": {}} {
+	for name, expiresAt := range map[string]time.Time{"expired": now.Add(-time.Second), "unset": {}, "under a second left": now.Add(500 * time.Millisecond)} {
 		a.ExpiresAt = expiresAt
 		if _, err := c.Set(httptest.NewRecorder(), a, now); err == nil {
 			t.Errorf("Set(%s interaction) = nil error", name)

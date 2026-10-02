@@ -346,15 +346,14 @@ func (p *identityProvider) authorize(w http.ResponseWriter, r *http.Request) {
 // decide completes the interaction with the citizen chosen and the
 // claims they agreed to share.
 func (p *identityProvider) decide(w http.ResponseWriter, r *http.Request) {
-	tag := r.PostFormValue(interactioncookie.FormField)
+	if err := r.ParseForm(); err != nil {
+		p.w.renderError(w, http.StatusBadRequest, "Malformed form", formUnreadable)
+		return
+	}
+	tag := r.PostForm.Get(interactioncookie.FormField)
 	handle, interaction, err := p.interaction.Read(r, time.Now(), tag)
 	if err != nil {
 		p.w.renderError(w, http.StatusBadRequest, "Session expired", "This browser has no sign-in in progress.")
-		return
-	}
-	p.interaction.Clear(w)
-	if err := r.ParseForm(); err != nil {
-		p.w.renderError(w, http.StatusBadRequest, "Malformed form", formUnreadable)
 		return
 	}
 
@@ -393,6 +392,7 @@ func (p *identityProvider) decide(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	p.interaction.Clear(w)
 	outcome, err := p.srv.CompleteAuthorization(r.Context(), server.CompleteAuthorizationRequest{Handle: handle, Result: result})
 	if err != nil {
 		p.w.renderError(w, http.StatusInternalServerError, signInFailed, publicMessage(err, "Something went wrong. Please try again."))

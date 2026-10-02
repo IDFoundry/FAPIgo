@@ -20,9 +20,8 @@ and `keys/ephemeral` needs only the steps not marked *production only*.
 ### Clients list the RAR types they may request (storage, server)
 
 **Affects:** a server using Rich Authorization Requests (`Config.RAR`),
-for every client that sends `authorization_details`; and
-`federation.AutomaticRegistrationConfig` for automatically registered
-clients that do.
+for every client that sends `authorization_details`, including clients
+registered automatically through OpenID Federation.
 
 **Why:** RFC 9396 §10 defines `authorization_details_types`, the types a
 client may use. The server now enforces it per client, before any
@@ -33,9 +32,13 @@ types. Before, any registered type reached the policy, which had to
 check the client itself.
 
 **What to change:** set `storage.RegisteredClientConfig.AuthorizationDetailsTypes`
-to the types each client may request (and
-`federation.AutomaticRegistrationConfig.AuthorizationDetailsTypes` for
-automatically registered clients). A `RARPolicy` that only checked
+to the types each client may request, and
+`server.Config.AutomaticRegistration.AuthorizationDetailsTypes` to the
+types every automatically registered client may (`New` refuses one
+`Config.RAR` doesn't register). If you build a
+`federation.NewAutomaticClientRepository` yourself rather than through
+`server.Config`, set `federation.AutomaticRegistrationConfig.AuthorizationDetailsTypes`
+there. A `RARPolicy` that only checked
 which types a client may use can then become
 `server.AllowRequestedAuthorizationDetails{}`; keep your own where it
 checks the details themselves. Note one difference from a policy that
@@ -51,8 +54,11 @@ your `ClientRepository`. A client that's missing them is refused at
 runtime, at PAR, CIBA or the token endpoint, with
 `invalid_authorization_details`; the error's cause, for your logs, reads
 `authorization_details type "…" is not registered for this client`.
-Grants made before the upgrade aren't checked again: a refresh keeps the
-authorization details the grant already holds.
+`Server.CheckClientRegistration(client)` catches a registration listing a
+type `Config.RAR` doesn't register (a typo, usually): call it when you
+register a client, or over every client at startup. Grants made before
+the upgrade aren't checked again: a refresh keeps the authorization
+details the grant already holds.
 
 ### Custom `SessionStore`s persist an opaque `Record` (client)
 

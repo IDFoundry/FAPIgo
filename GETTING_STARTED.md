@@ -259,13 +259,13 @@ browser, and `a.Interaction`. `server/interactioncookie` carries both in
 one encrypted cookie:
 
 ```go
-cookie, err := interactioncookie.New(keys, interactioncookie.Options{}) // once; keys shared by every instance
+cookie, err := interactioncookie.New(cookieKeys, interactioncookie.Options{}) // once; cookieKeys shared by every instance
 
 // GET /authorize, on server.InteractionRequired:
 tag, err := cookie.Set(w, a, now) // render tag in the form, as interactioncookie.FormField
 
-// POST, the form's submission (behind your CSRF protection):
-handle, interaction, err := cookie.Read(r, now, r.PostFormValue(interactioncookie.FormField))
+// POST, the form's submission (behind your CSRF protection), after r.ParseForm():
+handle, interaction, err := cookie.Read(r, now, r.PostForm.Get(interactioncookie.FormField))
 // ...CompleteAuthorization with handle, then cookie.Clear(w)
 ```
 

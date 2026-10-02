@@ -16,7 +16,13 @@
 // with it have expired. It is HttpOnly, Secure and SameSite=Lax — the
 // authorization response arrives as a top-level GET from the
 // authorization server, which Lax lets the cookie ride along on — with
-// the __Host- prefix by default.
+// the __Host- prefix by default. Give it keys of its own, apart from any
+// interactioncookie's or client.TokenSetSealer's.
+//
+// A browser keeps one cookie of a name, so a second authorization begun
+// in another tab replaces the first's cookie. The first tab's callback
+// then fails, as one that no longer matches the browser's session, and
+// the user starts again: that is the binding working, not a fault.
 package sessioncookie
 
 import (
@@ -46,11 +52,13 @@ var (
 
 // Options configures a Cookie.
 type Options struct {
-	// Name is the cookie's name: DefaultName if empty.
+	// Name is the cookie's name: DefaultName if empty. Keep the __Host-
+	// prefix: without it, a sibling subdomain can set the cookie in the
+	// victim's browser, with a value it got sealed for itself.
 	Name string
 
-	// Path is the cookie's path: "/" if empty. It must be "/" for a
-	// __Host- name.
+	// Path is the cookie's path: "/" if empty. New refuses another path
+	// for a __Host- name, which the prefix forbids.
 	Path string
 }
 

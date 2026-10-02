@@ -38,7 +38,9 @@
 // without interpreting it. Store it in any column type that returns
 // equivalent JSON (bytes, text, or a JSON/JSONB column; key order and
 // whitespace needn't be preserved). A server feature that changes what
-// a grant carries changes only that value, never a store.
+// a grant carries changes only that value, never a store. The client's
+// SessionStore follows the same rule: State and ExpiresAt, and the
+// client's opaque Record.
 //
 // Because a backend's atomicity/durability guarantees are self-asserted,
 // this package also defines a StoreAssurance.Capabilities interface

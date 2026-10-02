@@ -13,6 +13,51 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.43.0
+
+### Custom `SessionStore`s persist an opaque `Record` (client)
+
+**Affects:** a client whose `Dependencies.Sessions` is your own
+`storage.SessionStore`, not `memstore`.
+
+**Why:** the client now checks the ID token's `auth_time` against a
+requested `max_age` (OIDC Core §3.1.3.7), which means remembering
+`max_age` from `BeginAuthorization` to `ExchangeCode`. Rather than add
+another field every store has to learn — and that one which isn't
+updated would silently drop, skipping the check — `NewSession` now
+carries only `State`, `ExpiresAt` and one opaque, versioned `Record`
+the client owns, and `ConsumedSession` only `Record` and `ExpiresAt`,
+as the server's grant records do (v0.33.0). The nonce, PKCE verifier, expected issuer, redirect URI and
+response mode moved into it. A future client feature changes only the
+record.
+
+**What to change:** persist `NewSession.Record` as is and return it as
+`ConsumedSession.Record`, in any column type that returns equivalent
+JSON; drop the `Nonce`, `PKCEVerifier`, `ExpectedIssuer`,
+`ExpectedRedirectURI` and `ExpectedResponseMode` columns.
+`storage.TestSessionStoreContract` checks the round trip. A store that
+returns no record fails every callback with an internal error naming
+`NewSession.Record`, never silently.
+
+An authorization in progress when you deploy — its session written by
+the previous version — fails at the callback, and the user starts
+again; sessions last `Limits.SessionLifetime`.
+
+### `ExchangeCode` checks `auth_time` against `max_age` (client)
+
+**Affects:** a client that sets `BeginAuthorizationRequest.HasMaxAge`.
+
+**Why:** OIDC Core §2 makes `auth_time` REQUIRED in the ID token when
+the request carried `max_age`, and §3.1.3.7 has the client check it.
+This package used to leave that to the caller.
+
+**What to change:** nothing, unless you were relying on an
+authorization server that ignores `max_age`: `ExchangeCode` (and
+`CompleteAuthorization`) now fail with `invalid_response` when the ID
+token has no `auth_time`, or when it's older than `MaxAge` plus
+`Limits.MaxClockSkew`. Remove any check of your own, or keep it as a
+stricter policy.
+
 ## v0.42.0
 
 ### `TrustedClientCAs` needs `Revocation` (server)

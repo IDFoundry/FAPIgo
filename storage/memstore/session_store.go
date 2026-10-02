@@ -2,6 +2,7 @@ package memstore
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 
@@ -24,6 +25,8 @@ func NewSessionStore() *SessionStore {
 func (s *SessionStore) Create(_ context.Context, session storage.NewSession) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// A copy: the caller's slice must not alias what Consume returns.
+	session.Record = append(json.RawMessage(nil), session.Record...)
 	s.sessions[session.State] = session
 	return nil
 }
@@ -40,9 +43,5 @@ func (s *SessionStore) Consume(_ context.Context, consumption storage.SessionCon
 	if !ok {
 		return storage.ConsumedSession{}, fmt.Errorf("memstore: unknown or already-consumed state")
 	}
-	return storage.ConsumedSession{
-		Nonce: session.Nonce, PKCEVerifier: session.PKCEVerifier,
-		ExpectedIssuer: session.ExpectedIssuer, ExpectedRedirectURI: session.ExpectedRedirectURI,
-		ExpectedResponseMode: session.ExpectedResponseMode, ExpiresAt: session.ExpiresAt,
-	}, nil
+	return storage.ConsumedSession{Record: session.Record, ExpiresAt: session.ExpiresAt}, nil
 }

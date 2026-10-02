@@ -598,7 +598,8 @@ func TestReplayStoreContract(t *testing.T, factory func() ReplayStore) {
 // guarantees SessionStore's documentation promises: a session is
 // atomically single-use by State, stored fields round-trip faithfully,
 // and concurrent consumption of the same State has exactly one winner.
-// factory must return a fresh, empty SessionStore each call.
+// Record must come back as equivalent JSON: the client refuses a session
+// without it. factory must return a fresh, empty SessionStore each call.
 func TestSessionStoreContract(t *testing.T, factory func() SessionStore) {
 	t.Helper()
 
@@ -612,9 +613,9 @@ func testSessionStoreCreateAndConsume(t *testing.T, factory func() SessionStore)
 	store := factory()
 	ctx := context.Background()
 	want := NewSession{
-		State: "state-1", Nonce: "nonce-1", PKCEVerifier: "verifier-1",
-		ExpectedIssuer: "https://as.example", ExpectedRedirectURI: "https://rp.example/cb",
-		ExpectedResponseMode: "plain", ExpiresAt: time.Now().Add(time.Minute),
+		State:     "state-1",
+		Record:    json.RawMessage(`{"v":1,"nonce":"nonce-1","pkce_verifier":"verifier-1","issuer":"https://as.example","max_age":300}`),
+		ExpiresAt: time.Now().Add(time.Minute),
 	}
 	if err := store.Create(ctx, want); err != nil {
 		t.Fatalf("Create: %v", err)
@@ -623,10 +624,8 @@ func testSessionStoreCreateAndConsume(t *testing.T, factory func() SessionStore)
 	if err != nil {
 		t.Fatalf("Consume: %v", err)
 	}
-	if got.Nonce != want.Nonce || got.PKCEVerifier != want.PKCEVerifier ||
-		got.ExpectedIssuer != want.ExpectedIssuer || got.ExpectedRedirectURI != want.ExpectedRedirectURI ||
-		got.ExpectedResponseMode != want.ExpectedResponseMode || !got.ExpiresAt.Equal(want.ExpiresAt) {
-		t.Fatalf("Consume returned %+v, want fields matching %+v", got, want)
+	if !jsonEquivalent(got.Record, want.Record) || !got.ExpiresAt.Equal(want.ExpiresAt) {
+		t.Fatalf("Consume returned Record %s, ExpiresAt %v; want the Record and ExpiresAt Create persisted (%s, %v)", got.Record, got.ExpiresAt, want.Record, want.ExpiresAt)
 	}
 }
 

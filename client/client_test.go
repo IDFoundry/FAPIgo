@@ -141,11 +141,7 @@ func (f *fakeSessionStore) Consume(ctx context.Context, c storage.SessionConsump
 		return storage.ConsumedSession{}, fmt.Errorf("fakeSessionStore: unknown state")
 	}
 	delete(f.sessions, c.State)
-	return storage.ConsumedSession{
-		Nonce: s.Nonce, PKCEVerifier: s.PKCEVerifier, ExpectedIssuer: s.ExpectedIssuer,
-		ExpectedRedirectURI: s.ExpectedRedirectURI, ExpectedResponseMode: s.ExpectedResponseMode,
-		ExpiresAt: s.ExpiresAt,
-	}, nil
+	return storage.ConsumedSession{Record: s.Record, ExpiresAt: s.ExpiresAt}, nil
 }
 
 func mustParseEndpointURL(t *testing.T, raw string) fapi.URL {

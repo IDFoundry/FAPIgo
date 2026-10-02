@@ -199,10 +199,14 @@ func (b *bank) token(w http.ResponseWriter, r *http.Request) {
 // page. The interaction goes with the browser in a cookie the bank
 // signs, so any instance of the bank can finish it.
 func (b *bank) authorize(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	action, err := b.srv.BeginAuthorization(r.Context(), server.BeginAuthorizationRequest{
-		RequestURI: q.Get("request_uri"), ClientID: fapi.ClientID(q.Get("client_id")),
-	})
+	// Local, never a redirect: an unreadable request names no
+	// redirect URI it can be trusted with.
+	req, err := server.BeginAuthorizationRequestFromHTTP(r)
+	if err != nil {
+		b.w.renderError(w, bankHost, http.StatusBadRequest, "Sign-in could not start", publicMessage(err, "The sign-in request is malformed."))
+		return
+	}
+	action, err := b.srv.BeginAuthorization(r.Context(), req)
 	if err != nil {
 		b.w.renderError(w, bankHost, http.StatusInternalServerError, "Sign-in could not start", publicMessage(err, "Something went wrong. Please try again."))
 		return

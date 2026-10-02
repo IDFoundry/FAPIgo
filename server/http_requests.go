@@ -3,6 +3,9 @@ package server
 import (
 	"crypto/x509"
 	"net/http"
+	"net/url"
+
+	fapi "github.com/idfoundry/fapigo"
 )
 
 // httpRequestParts is what every client-authenticated endpoint request
@@ -110,4 +113,31 @@ func (t TokenEndpointRequest) ClientCredentials() ClientCredentialsTokenRequest 
 // ExchangeBackchannelAuthentication.
 func (t TokenEndpointRequest) BackchannelTokenExchange() BackchannelTokenExchangeRequest {
 	return BackchannelTokenExchangeRequest(t.parts)
+}
+
+// BeginAuthorizationRequestFromHTTP reads the authorization endpoint's
+// request from r's query string: the client_id and request_uri a client
+// sends the browser with after a pushed authorization request (RFC 9126
+// §4). r.URL.Query().Get would silently take the first of a repeated
+// parameter; RFC 6749 §3.1 says one "MUST NOT be included more than
+// once", so a repeated client_id or request_uri, or a malformed query,
+// is an invalid_request *Error. Render it locally: an authorization
+// endpoint never redirects for a request it can't attribute to a
+// client's registered redirect URI. A missing value is left empty for
+// BeginAuthorization to answer, as it does any request_uri or client_id
+// it doesn't accept.
+func BeginAuthorizationRequestFromHTTP(r *http.Request) (BeginAuthorizationRequest, error) {
+	query, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		return BeginAuthorizationRequest{}, newError(ErrorInvalidRequest, 400, "the authorization request's query is malformed", err)
+	}
+	for _, name := range []string{"client_id", "request_uri"} {
+		if len(query[name]) > 1 {
+			return BeginAuthorizationRequest{}, newError(ErrorInvalidRequest, 400, name+" is included more than once", nil)
+		}
+	}
+	return BeginAuthorizationRequest{
+		RequestURI: query.Get("request_uri"),
+		ClientID:   fapi.ClientID(query.Get("client_id")),
+	}, nil
 }

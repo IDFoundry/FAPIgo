@@ -40,6 +40,10 @@ type pocketwise struct {
 	// different app, with its own valid credentials and DPoP key.
 	client, thriftly *lazyClient
 
+	// tokenKey seals the link's tokens for storage (client.TokenSetSealer):
+	// every instance of Pocketwise would share it.
+	tokenKey []byte
+
 	mu       sync.Mutex
 	link     *link
 	log      []syncEntry
@@ -47,10 +51,13 @@ type pocketwise struct {
 	trace    *trace
 }
 
-// link is Pocketwise's connection to the customer's accounts: the
-// tokens the link and its last sync left it with.
+// link is Pocketwise's connection to the customer's accounts, as it
+// would keep it in its database: the tokens the link and its last sync
+// left it with, sealed for their owner (the customer), so a restart or
+// another instance can sync on.
 type link struct {
-	tokens   client.TokenSet
+	sealed   []byte
+	owner    string
 	linkedAt time.Time
 	// Accounts is what the last successful sync returned.
 	Accounts []accountView
@@ -68,8 +75,11 @@ type attempt struct {
 }
 
 func (w *World) newPocketwise(apps apps) *pocketwise {
+	tokenKey := make([]byte, 32)
+	_, _ = rand.Read(tokenKey) // never fails: it crashes the program instead (Go 1.24+)
 	p := &pocketwise{
 		w: w, keys: &rotatingDPoPKeys{base: apps.pocketwise.keys}, sessions: memstore.NewSessionStore(), trace: &trace{},
+		tokenKey: tokenKey,
 	}
 	p.client = &lazyClient{w: w, clientID: pocketwiseClientID, keys: p.keys, redirect: w.URL(pocketwiseHost, callbackPath), sessions: p.sessions}
 	p.thriftly = &lazyClient{w: w, clientID: thriftlyClientID, keys: apps.thriftly.keys, redirect: string(apps.thriftly.redirectURI(w)), sessions: memstore.NewSessionStore()}
@@ -204,8 +214,13 @@ func (p *pocketwise) callback(w http.ResponseWriter, r *http.Request) {
 	case client.CompletionDenied:
 		p.record("Link accounts", "Alder Bank answered "+res.Code+": "+res.Description, false)
 	case client.CompletionSuccess:
+		sealed, err := p.seal(ctx, res.Tokens, res.Tokens.Subject)
+		if err != nil {
+			p.fail(w, r, "link", err)
+			return
+		}
 		p.mu.Lock()
-		p.link = &link{tokens: res.Tokens, linkedAt: p.w.clock.Now()}
+		p.link = &link{sealed: sealed, owner: res.Tokens.Subject, linkedAt: p.w.clock.Now()}
 		p.mu.Unlock()
 		p.record("Link accounts", "Linked, with a refresh token valid for 90 days", true)
 		p.fetchAccounts(ctx, res.Tokens, "First sync")
@@ -233,15 +248,25 @@ func (p *pocketwise) sync(ctx context.Context) {
 		p.record("Sync", err.Error(), false)
 		return
 	}
-	refreshed, err := c.RefreshTokens(ctx, client.RefreshTokenRequest{Tokens: l.tokens})
+	tokens, err := p.open(ctx, l)
+	if err != nil {
+		p.record("Sync", describeError(err), false)
+		return
+	}
+	refreshed, err := c.RefreshTokens(ctx, client.RefreshTokenRequest{Tokens: tokens})
 	if err != nil {
 		p.record("Sync: refresh", describeError(err), false)
 		// The access token from before is all Pocketwise has left.
-		p.fetchAccounts(ctx, l.tokens, "Sync: the last access token")
+		p.fetchAccounts(ctx, tokens, "Sync: the last access token")
+		return
+	}
+	sealed, err := p.seal(ctx, refreshed, l.owner)
+	if err != nil {
+		p.record("Sync", describeError(err), false)
 		return
 	}
 	p.mu.Lock()
-	l.tokens = refreshed
+	l.sealed = sealed
 	p.mu.Unlock()
 	p.record("Sync: refresh", "New access token; the same refresh token, not rotated (FAPI 2.0)", true)
 	p.fetchAccounts(ctx, refreshed, "Sync: read accounts")
@@ -343,17 +368,22 @@ func (p *pocketwise) attack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := withTrace(r.Context(), &trace{}) // not the link's trace
+	tokens, err := p.open(ctx, l)
+	if err != nil {
+		p.w.renderError(w, pocketwiseHost, http.StatusInternalServerError, "The link's tokens", describeError(err))
+		return
+	}
 	var a attempt
 	switch r.FormValue("kind") {
 	case "thriftly":
-		a = p.refreshAttempt(ctx, "Redeem Pocketwise's refresh token as Thriftly", p.thriftly, l.tokens, nil)
+		a = p.refreshAttempt(ctx, "Redeem Pocketwise's refresh token as Thriftly", p.thriftly, tokens, nil)
 	case "no-client-auth":
-		a = p.refreshWithoutClientAuthentication(ctx, l.tokens)
+		a = p.refreshWithoutClientAuthentication(ctx, tokens)
 	case "widen":
-		a = p.refreshAttempt(ctx, "Refresh asking for a scope that was never granted", p.client, l.tokens, []string{"openid", "accounts", "offline_access", "payments"})
+		a = p.refreshAttempt(ctx, "Refresh asking for a scope that was never granted", p.client, tokens, []string{"openid", "accounts", "offline_access", "payments"})
 	case "other-key":
 		a = attempt{Title: "Use Pocketwise's access token with another app's DPoP key"}
-		accounts, status, err := p.callAPI(ctx, p.thriftly, l.tokens)
+		accounts, status, err := p.callAPI(ctx, p.thriftly, tokens)
 		switch {
 		case err != nil:
 			a.Refused, a.Result = true, err.Error()
@@ -422,4 +452,35 @@ func clearCookies(w http.ResponseWriter, names ...string) {
 	for _, name := range names {
 		http.SetCookie(w, &http.Cookie{Name: name, Path: "/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 	}
+}
+
+// seal seals tokens for owner with Pocketwise's own client, for storing
+// in the link.
+func (p *pocketwise) seal(ctx context.Context, tokens client.TokenSet, owner string) ([]byte, error) {
+	sealer, err := p.sealer(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return sealer.Seal(tokens, owner)
+}
+
+// open restores the tokens l holds.
+func (p *pocketwise) open(ctx context.Context, l *link) (client.TokenSet, error) {
+	sealer, err := p.sealer(ctx)
+	if err != nil {
+		return client.TokenSet{}, err
+	}
+	p.mu.Lock()
+	sealed := l.sealed
+	p.mu.Unlock()
+	tokens, _, err := sealer.Open(sealed, l.owner) // one key: nothing to reseal
+	return tokens, err
+}
+
+func (p *pocketwise) sealer(ctx context.Context) (*client.TokenSetSealer, error) {
+	c, err := p.client.get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return client.NewTokenSetSealer(c, [][]byte{p.tokenKey})
 }

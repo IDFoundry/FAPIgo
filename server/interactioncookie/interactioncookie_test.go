@@ -176,3 +176,23 @@ func TestNewRefuses(t *testing.T) {
 		t.Errorf("a non-__Host- name with a path: %v", err)
 	}
 }
+
+// TestSetAndReadRefuseWhatCantRoundTrip covers an interaction that can't
+// be encoded, refused by Set, and a sealed handle that isn't one, refused
+// by Read.
+func TestSetAndReadRefuseWhatCantRoundTrip(t *testing.T) {
+	c := newCookie(t, [][]byte{newKey(t)}, interactioncookie.Options{})
+	h, _ := interaction(t)
+	if err := c.Set(httptest.NewRecorder(), h, server.InteractionRequest{}, time.Now()); err == nil {
+		t.Error("Set(an interaction without a client) = nil error, want refusal")
+	}
+
+	_, in := interaction(t)
+	w := httptest.NewRecorder()
+	if err := c.Set(w, server.InteractionHandle{}, in, time.Now()); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if _, _, err := c.Read(requestWith(w.Result().Cookies()[0]), time.Now()); !errors.Is(err, interactioncookie.ErrNoInteraction) {
+		t.Errorf("Read(an empty handle) = %v, want ErrNoInteraction", err)
+	}
+}

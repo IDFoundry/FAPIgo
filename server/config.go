@@ -418,6 +418,16 @@ type Config struct {
 	// client to use it.
 	ClientCredentialsGrant bool
 
+	// AdditionalGrantTypes are grant types the embedder serves itself at
+	// Endpoints.Token, routing requests by grant_type — such as
+	// OpenID4VCI's urn:ietf:params:oauth:grant-type:pre-authorized_code.
+	// Metadata advertises them in grant_types_supported after this
+	// server's own. New refuses a grant type this package serves, one
+	// FAPI 2.0 forbids ("password", "implicit"), and duplicates. See
+	// TokenEndpointRequest.Parameters, AuthenticateAttestedClient and
+	// VerifyTokenRequestBinding for serving one.
+	AdditionalGrantTypes []string
+
 	// AttestationBasedClientAuthentication enables
 	// storage.ClientAuthMethodAttestation (OAuth 2.0 Attestation-Based
 	// Client Authentication draft-07) — false (the zero value/default)

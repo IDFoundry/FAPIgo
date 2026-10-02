@@ -295,6 +295,7 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 	if s.cfg.ClientCredentialsGrant {
 		md.GrantTypesSupported = append(md.GrantTypesSupported, "client_credentials")
 	}
+	md.GrantTypesSupported = append(md.GrantTypesSupported, s.cfg.AdditionalGrantTypes...)
 
 	if s.cfg.AttestationBasedClientAuthentication {
 		// Advertised alongside "private_key_jwt" (and, if configured,

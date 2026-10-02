@@ -114,6 +114,9 @@ func validateConfig(cfg Config) error {
 	if err := validateFederationConfig(cfg); err != nil {
 		return err
 	}
+	if err := validateAdditionalGrantTypes(cfg.AdditionalGrantTypes); err != nil {
+		return err
+	}
 	return validateAutomaticRegistration(cfg)
 }
 

@@ -89,9 +89,9 @@ The console's **Start here** panel walks through all of this in order.
 Bank**. Fernway's FAPIgo client pushes the request to the bank (PAR),
 with its `claims`, `acr_values` and `max_age`, and sends your browser
 there with only a `request_uri`. At the bank, sign in with the app and
-share everything. Fernway checks the ID token's `acr`, FAPIgo's client
-its `auth_time` against `max_age`, and Fernway fetches UserInfo with its DPoP-bound token, and shows what the bank
-confirmed. The **protocol trace** shows the ID token and UserInfo
+share everything. FAPIgo's client checks the ID token's `auth_time`
+against `max_age`; Fernway checks its `acr`, fetches UserInfo with its
+DPoP-bound token, and shows what the bank confirmed. The **protocol trace** shows the ID token and UserInfo
 response as they crossed the wire: encryption headers, and ciphertext.
 
 **2. Share less.** Start again and untick your address and phone number.

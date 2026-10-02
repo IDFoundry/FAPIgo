@@ -109,10 +109,12 @@ func withAuthorizationDetails(details json.RawMessage, base map[string]json.RawM
 //   - Dependencies.ClientCredentialsRARPolicy: RFC 9396 §6's "client's
 //     policy" check for the client_credentials grant, consulted at
 //     token-issuance time (RequestClientCredentialsToken). This grant
-//     has no resource owner at all, so this is the *only* entitlement
-//     check it ever gets.
+//     has no resource owner at all, so beyond the client's registered
+//     types this is the only entitlement check it gets: with
+//     AllowRequestedAuthorizationDetails here, a client is granted any
+//     content — any amount, any account — of the types it may request.
 //   - Dependencies.AuthorizationCodeRARPolicy / Dependencies.CIBARARPolicy: a
-//     defense-in-depth, request-time gate for the Authorization Code and
+//     request-time gate for the Authorization Code and
 //     CIBA grants respectively — two independent fields (not one shared
 //     between them, since neither checkExtensions nor
 //     checkBackchannelExtensions tells a RARPolicy which grant it's
@@ -129,14 +131,19 @@ func withAuthorizationDetails(details json.RawMessage, base map[string]json.RawM
 //     entitlement check either way — this is additional narrowing on
 //     top of it, not a replacement for it.
 //
+// Which types a client may request at all is decided before any policy
+// runs, by the client's registration
+// (storage.RegisteredClientConfig.AuthorizationDetailsTypes): a policy
+// only ever sees types the client is registered for. The policy then
+// decides on the details themselves.
+//
 // All three fields are optional, but none's absence is permissive: a
 // request naming authorization_details with no policy configured for
-// the applicable field is refused (applyRARPolicy), the same
-// "unconfigured is not the same as an empty registry accepting nothing
-// extra" stance Config.RAR itself takes — every registered RAR type is
-// available to be *requested* once Config.RAR is set, but nothing is
-// ever *entitled* to be granted, or even asked for, without an explicit
-// policy decision saying so.
+// the applicable field is refused (applyRARPolicy), even of a type the
+// client is registered for. A registration says which types a client
+// may ask for; nothing is granted, or even put to a resource owner,
+// without a policy decision saying so — AllowRequestedAuthorizationDetails
+// when the registration is the only rule.
 type RARPolicy interface {
 	// Authorize returns the subset of requested (each entry one of its
 	// already-validated — RARRegistry.Parse has run — detail objects)

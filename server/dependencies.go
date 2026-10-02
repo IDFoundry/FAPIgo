@@ -131,17 +131,19 @@ type Dependencies struct {
 
 	// AuthorizationCodeRARPolicy and CIBARARPolicy are the Authorization
 	// Code and CIBA grants' own request-time counterparts of
-	// ClientCredentialsRARPolicy — a defense-in-depth gate on which Rich
-	// Authorization Requests (RFC 9396) detail types a client may even
-	// *request* on each grant, consulted before the request is ever
-	// stored or shown to a resource owner. For Authorization Code, that
+	// ClientCredentialsRARPolicy — a gate on the Rich Authorization
+	// Requests (RFC 9396) details a client may put to a resource owner on
+	// each grant, consulted before the request is ever stored or shown to
+	// one. Which types it may request at all is its registration's
+	// (storage.RegisteredClientConfig.AuthorizationDetailsTypes), checked
+	// first. For Authorization Code, that
 	// means at PAR submission time (checkExtensions) — FAPI 2 makes PAR
 	// mandatory for this grant, so PAR is simply where its own request
 	// arrives, not a distinct grant of its own; the field is named for
 	// the grant it gates, not the endpoint. See RARPolicy's own doc
 	// comment for the full contract, including why an unconfigured
-	// policy refuses rather than falling back to "anything Config.RAR
-	// has registered is requestable" — the resource owner's own
+	// policy refuses rather than falling back to "anything the client is
+	// registered for is requestable" — the resource owner's own
 	// approval (GrantedAuthorization.AuthorizationDetails) remains the
 	// primary entitlement check for these two grants regardless of
 	// whether either field is set; this only narrows what a client may

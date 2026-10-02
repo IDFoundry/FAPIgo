@@ -131,8 +131,8 @@ Everything here uses FAPIgo's public API only.
 The code:
 
 - [`checkout/world.go`](checkout/world.go) — the parties, Sam and the accounts.
-- [`checkout/rar.go`](checkout/rar.go) — the two detail types and who may request which.
-- [`checkout/bank.go`](checkout/bank.go) — Alder Bank's authorization server.
+- [`checkout/rar.go`](checkout/rar.go) — the two detail types.
+- [`checkout/bank.go`](checkout/bank.go) — Alder Bank's authorization server, and which detail types each client may request.
 - [`checkout/phone.go`](checkout/phone.go) — the approval screens.
 - [`checkout/api.go`](checkout/api.go) — the payments and accounts APIs.
 - [`checkout/till.go`](checkout/till.go), [`checkout/pocketwise.go`](checkout/pocketwise.go) — the two clients.

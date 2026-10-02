@@ -398,7 +398,11 @@ type Config struct {
 	// default-reject stance Extensions takes for any parameter without a
 	// matching Definition. A registered RARRegistry's own bounds (total
 	// size, nesting depth, per-type object count and size) apply
-	// identically to both flows.
+	// identically to both flows. Each client requests only the types its
+	// registration lists (storage.RegisteredClientConfig.
+	// AuthorizationDetailsTypes; none if empty), and only through a
+	// RARPolicy (Dependencies.AuthorizationCodeRARPolicy, CIBARARPolicy,
+	// ClientCredentialsRARPolicy).
 	RAR *extension.RARRegistry
 
 	// ClientCredentialsGrant enables the RFC 6749 §4.4 client_credentials

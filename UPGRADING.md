@@ -6,7 +6,9 @@ listed. [CHANGELOG.md](CHANGELOG.md) has the full history.
 
 `New` fails at startup when a new requirement isn't met, and the error
 names the missing field, so a skipped step can't slip through to
-runtime. If you're several versions behind, work through the sections
+runtime. Where it can't — a requirement on stored data, such as a
+client's registration — the section says so, and what the failure looks
+like. If you're several versions behind, work through the sections
 from oldest to newest.
 
 Most production-assurance changes only affect `Config.Assurance =
@@ -39,6 +41,19 @@ which types a client may use can then become
 checks the details themselves. Note one difference from a policy that
 dropped disallowed details: the server refuses the whole request.
 
+The types list doesn't replace the policies:
+`Dependencies.AuthorizationCodeRARPolicy`, `CIBARARPolicy` and
+`ClientCredentialsRARPolicy` are still required for their grants, and a
+nil one still refuses every `authorization_details` request on it.
+
+`New` can't catch a client registered without its types: they live in
+your `ClientRepository`. A client that's missing them is refused at
+runtime, at PAR, CIBA or the token endpoint, with
+`invalid_authorization_details`; the error's cause, for your logs, reads
+`authorization_details type "…" is not registered for this client`.
+Grants made before the upgrade aren't checked again: a refresh keeps the
+authorization details the grant already holds.
+
 ### Custom `SessionStore`s persist an opaque `Record` (client)
 
 **Affects:** a client whose `Dependencies.Sessions` is your own
@@ -66,6 +81,14 @@ returns no record fails every callback with an internal error naming
 An authorization in progress when you deploy — its session written by
 the previous version — fails at the callback, and the user starts
 again; sessions last `Limits.SessionLifetime`.
+
+For a rolling deploy, where old and new instances share the store for a
+while: add the `Record` column first, keeping the old ones, and deploy.
+A callback that reaches the other version fails as above until every
+instance is new. Drop the old columns once `Limits.SessionLifetime` has
+passed since the last old instance stopped. Use a column type without a
+small length limit (text or JSON): the record holds the nonce, PKCE
+verifier, issuer and redirect URI.
 
 ### `ExchangeCode` checks `auth_time` against `max_age` (client)
 

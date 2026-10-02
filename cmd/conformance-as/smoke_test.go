@@ -103,11 +103,7 @@ func (s *memSessionStore) Consume(_ context.Context, c storage.SessionConsumptio
 		return storage.ConsumedSession{}, fmt.Errorf("unknown or already-consumed state")
 	}
 	delete(s.sessions, c.State)
-	return storage.ConsumedSession{
-		Nonce: session.Nonce, PKCEVerifier: session.PKCEVerifier,
-		ExpectedIssuer: session.ExpectedIssuer, ExpectedRedirectURI: session.ExpectedRedirectURI,
-		ExpectedResponseMode: session.ExpectedResponseMode, ExpiresAt: session.ExpiresAt,
-	}, nil
+	return storage.ConsumedSession{Record: session.Record, ExpiresAt: session.ExpiresAt}, nil
 }
 
 // smokeHarness bundles everything the smoke test's subtests share: the

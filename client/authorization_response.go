@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"time"
 
 	"github.com/idfoundry/fapigo/internal/jarm"
 	"github.com/idfoundry/fapigo/internal/par"
@@ -40,6 +41,10 @@ type ValidatedAuthorizationResponse struct {
 	redirectURI  string
 	pkceVerifier string
 	nonce        string
+	// maxAge is the max_age the authorization request carried, when
+	// hasMaxAge: ExchangeCode checks the ID token's auth_time against it.
+	maxAge    time.Duration
+	hasMaxAge bool
 }
 
 // CallbackResult is a closed sum type returned by
@@ -120,11 +125,14 @@ func (c *Client) HandleAuthorizationResponse(ctx context.Context, cb Authorizati
 		return nil, newError(ErrorInvalidResponse, "authorization response carries neither code nor error", nil)
 	}
 
+	maxAge, hasMaxAge := consumed.maxAge()
 	return CallbackSuccess{Response: ValidatedAuthorizationResponse{
 		code:         code,
-		redirectURI:  consumed.ExpectedRedirectURI,
+		redirectURI:  consumed.RedirectURI,
 		pkceVerifier: consumed.PKCEVerifier,
 		nonce:        consumed.Nonce,
+		maxAge:       maxAge,
+		hasMaxAge:    hasMaxAge,
 	}}, nil
 }
 
@@ -148,43 +156,48 @@ func (c *Client) checkAuthorizationResponseIss(params map[string]json.RawMessage
 }
 
 // consumeCallbackSession binds the callback to the user agent that
-// began the flow, then consumes that flow's session, checking it belongs
-// to this client, hasn't expired, and expected a response in respMode.
-func (c *Client) consumeCallbackSession(ctx context.Context, cb AuthorizationCallback, params map[string]json.RawMessage, respMode string) (storage.ConsumedSession, *Error) {
+// began the flow, then consumes that flow's session and returns its
+// record, checking it belongs to this client, hasn't expired, and
+// expected a response in respMode.
+func (c *Client) consumeCallbackSession(ctx context.Context, cb AuthorizationCallback, params map[string]json.RawMessage, respMode string) (sessionRecord, *Error) {
 	state, _ := paramString(params, "state")
 	if state == "" {
-		return storage.ConsumedSession{}, newError(ErrorInvalidRequest, "callback is missing state", nil)
+		return sessionRecord{}, newError(ErrorInvalidRequest, "callback is missing state", nil)
 	}
 	// Bind the callback to the user agent that began the flow (RFC 9700
 	// §4.7) before consuming anything: a mismatch leaves the session
 	// intact for its rightful browser.
 	if cb.Session.value == "" {
-		return storage.ConsumedSession{}, newError(ErrorInvalidRequest, "callback is not bound to a session: AuthorizationCallback.Session is required", nil)
+		return sessionRecord{}, newError(ErrorInvalidRequest, "callback is not bound to a session: AuthorizationCallback.Session is required", nil)
 	}
 	if subtle.ConstantTimeCompare([]byte(state), []byte(cb.Session.value)) != 1 {
-		return storage.ConsumedSession{}, newError(ErrorInvalidRequest, "callback state does not match this user agent's session", nil)
+		return sessionRecord{}, newError(ErrorInvalidRequest, "callback state does not match this user agent's session", nil)
 	}
 
 	consumed, consumeErr := c.deps.Sessions.Consume(ctx, storage.SessionConsumption{State: state})
 	if consumeErr != nil {
-		return storage.ConsumedSession{}, newError(ErrorInvalidRequest, "session is invalid, expired, or already used", consumeErr)
+		return sessionRecord{}, newError(ErrorInvalidRequest, "session is invalid, expired, or already used", consumeErr)
 	}
 	// A session belongs to the client that began it. An application
 	// running one client per issuer over a shared SessionStore routes
 	// each callback to a client itself; a callback routed to the wrong
 	// one must not complete another issuer's flow with that flow's PKCE
 	// verifier and nonce.
-	if consumed.ExpectedIssuer != c.cfg.Issuer.String() {
-		return storage.ConsumedSession{}, newError(ErrorInvalidRequest, "session was begun by a client for a different issuer", nil)
+	record, decodeErr := decodeSessionRecord(consumed.Record)
+	if decodeErr != nil {
+		return sessionRecord{}, newError(ErrorInternal, "session record is missing or unreadable", decodeErr)
+	}
+	if record.Issuer != c.cfg.Issuer.String() {
+		return sessionRecord{}, newError(ErrorInvalidRequest, "session was begun by a client for a different issuer", nil)
 	}
 	now := c.deps.Clock.Now()
 	if !now.Before(consumed.ExpiresAt) {
-		return storage.ConsumedSession{}, newError(ErrorInvalidRequest, "session has expired", nil)
+		return sessionRecord{}, newError(ErrorInvalidRequest, "session has expired", nil)
 	}
-	if respMode != consumed.ExpectedResponseMode {
-		return storage.ConsumedSession{}, newError(ErrorInvalidResponse, "authorization response arrived in an unexpected mode", nil)
+	if respMode != record.ResponseMode {
+		return sessionRecord{}, newError(ErrorInvalidResponse, "authorization response arrived in an unexpected mode", nil)
 	}
-	return consumed, nil
+	return record, nil
 }
 
 // callbackDenied returns the authorization server's error response, if

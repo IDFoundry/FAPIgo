@@ -38,9 +38,10 @@ type BeginAuthorizationRequest struct {
 	// authenticated at the authorization server, which must otherwise
 	// authenticate them again. It's sent in whole seconds, rounded down;
 	// HasMaxAge with a zero MaxAge asks for a fresh authentication every
-	// time. The ID token's auth_time (TokenSet.IDTokenClaims.AuthTime)
-	// says when the user authenticated: OIDC Core §3.1.3.7 has the
-	// client check it, and this package leaves that check to the caller.
+	// time. ExchangeCode then checks the ID token's auth_time
+	// (TokenSet.IDTokenClaims.AuthTime) against it, as OIDC Core
+	// §3.1.3.7 has the client do: a token without auth_time, or one
+	// further back than MaxAge (plus Limits.MaxClockSkew), is refused.
 	MaxAge    time.Duration
 	HasMaxAge bool
 
@@ -238,14 +239,20 @@ func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 	if c.cfg.Profile == ProfileFAPISecurityWithMessageSigning {
 		responseMode = responseModeJARM
 	}
+	record := sessionRecord{
+		Nonce: nonce, PKCEVerifier: verifier, Issuer: c.cfg.Issuer.String(),
+		RedirectURI: c.cfg.RedirectURI, ResponseMode: responseMode,
+	}
+	if req.HasMaxAge {
+		seconds := int64(req.MaxAge / time.Second) // as sent: whole seconds, rounded down
+		record.MaxAgeSeconds = &seconds
+	}
+	encoded, err := encodeSessionRecord(record)
+	if err != nil {
+		return AuthorizationSession{}, newError(ErrorInternal, "failed to encode session", err)
+	}
 	if err := c.deps.Sessions.Create(ctx, storage.NewSession{
-		State:                state,
-		Nonce:                nonce,
-		PKCEVerifier:         verifier,
-		ExpectedIssuer:       c.cfg.Issuer.String(),
-		ExpectedRedirectURI:  c.cfg.RedirectURI,
-		ExpectedResponseMode: responseMode,
-		ExpiresAt:            now.Add(c.cfg.Limits.SessionLifetime),
+		State: state, Record: encoded, ExpiresAt: now.Add(c.cfg.Limits.SessionLifetime),
 	}); err != nil {
 		return AuthorizationSession{}, newError(ErrorInternal, "failed to persist session", err)
 	}

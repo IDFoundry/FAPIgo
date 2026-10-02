@@ -170,7 +170,10 @@ func (c IDTokenClaims) AsMap() map[string]any {
 // ExchangeCode authenticates to the token endpoint, presents a DPoP
 // proof bound to this request, and redeems resp's authorization code for
 // an access token — validating any returned ID token before trusting its
-// subject claim.
+// subject claim. When the authorization request carried max_age
+// (BeginAuthorizationRequest.HasMaxAge), the ID token must carry
+// auth_time, no older than max_age allows (Limits.MaxClockSkew aside):
+// otherwise it fails with ErrorInvalidResponse.
 func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationResponse) (TokenSet, error) {
 	assertionSigner, assertionKID, dpopSigner, err := c.resolveClientAuthAndDPoPSigners(ctx)
 	if err != nil {
@@ -207,7 +210,27 @@ func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationRe
 	if idErr != nil {
 		return TokenSet{}, idErr
 	}
+	if result.HasIDToken && resp.hasMaxAge {
+		if ageErr := checkAuthenticationAge(result.IDTokenClaims.AuthTime, resp.maxAge, c.deps.Clock.Now(), c.cfg.Limits.MaxClockSkew); ageErr != nil {
+			return TokenSet{}, ageErr
+		}
+	}
 	return result, nil
+}
+
+// checkAuthenticationAge applies OIDC Core §3.1.3.7 rule 13 to an ID
+// token issued for a request that carried max_age: the token must say
+// when the user authenticated (auth_time, which §2 makes REQUIRED with
+// max_age), and that must be no longer than maxAge ago, allowing
+// maxClockSkew.
+func checkAuthenticationAge(authTime time.Time, maxAge time.Duration, now time.Time, maxClockSkew time.Duration) *Error {
+	if authTime.IsZero() {
+		return newError(ErrorInvalidResponse, "the ID token has no auth_time, which a request with max_age requires", nil)
+	}
+	if now.Sub(authTime) > maxAge+maxClockSkew {
+		return newError(ErrorInvalidResponse, "the user authenticated longer ago than the requested max_age allows", nil)
+	}
+	return nil
 }
 
 // tokenFormBuilder returns a function building the token request form

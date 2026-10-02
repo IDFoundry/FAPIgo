@@ -190,9 +190,13 @@ against `internal/dpop` itself.
 
 `storage.SessionStore.Create` / `Consume` — no `GetSession` /
 `DeleteSession`. `Consume` atomically looks up and retires a session by
-its `state`, returning the nonce, PKCE verifier, expected issuer,
-expected redirect URI, expected response mode and expiry recorded with
-it, in one step, to prevent callback replay and race conditions.
+its `state`, returning its expiry and the opaque, versioned `Record`
+the client wrote — the nonce, PKCE verifier, expected issuer, redirect
+URI and response mode, and any `max_age` — in one step, to prevent
+callback replay and race conditions. As with the server's grant
+records, a store never interprets the record, so a new client feature
+never needs a store change; the client refuses a session whose record
+is missing.
 
 ### 5. Keys are handles and operations, never raw private keys
 

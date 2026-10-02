@@ -433,14 +433,9 @@ verifier, err := resource.NewVerifier(cfg, deps)
 ### Verify a request
 
 ```go
-authCtx, err := verifier.Verify(ctx, resource.VerifyRequest{
-	Method:        r.Method,
-	URL:           protectedResourceURL, // this endpoint's own fixed external URL — see below, never r.URL
-	Authorization: r.Header.Get("Authorization"),
-	DPoPProofs:    r.Header.Values("DPoP"), // see below — never r.Header.Get("DPoP")
-	// The TLS client certificate, for an mTLS-bound access token.
-	PeerCertificate: resource.PeerCertificateFromHTTP(r),
-})
+// protectedResourceURL: this endpoint's own fixed external URL — see
+// below, never r.URL.
+authCtx, err := verifier.Verify(ctx, resource.VerifyRequestFromHTTP(r, protectedResourceURL))
 ```
 
 On success, `authCtx.Subject`/`ClientID`/`Scopes`/`Claims` are what your
@@ -458,25 +453,30 @@ if err != nil {
 }
 ```
 
-One easy-to-miss detail `cmd/conformance-as/resource.go` gets right
-that's worth copying: `URL` must be this endpoint's own fixed,
+`resource.VerifyRequestFromHTTP` fills in every field of the
+`VerifyRequest` from `r`: the method, the `Authorization` header, every
+`DPoP` header and the TLS client certificate. Building the struct by
+hand compiles just as well with a field left out, and then fails only
+for the clients that need it — which is why the constructor exists.
+
+The one thing it takes from you is the URL: this endpoint's own fixed,
 externally-visible URL (it's the DPoP proof's expected `htu`) — never
 inferred from the incoming request's `Host` header, the same reasoning
-`server.Endpoints` is never inferred from a request either.
+`server.Endpoints` is never inferred from a request either. For a route
+with path parameters, copy a fixed origin and set its `Path` from
+`r.URL.Path`.
 
-`DPoPProofs` takes every raw "DPoP" header value the request carried —
-pass `r.Header.Values("DPoP")` directly, never `r.Header.Get("DPoP")`,
+`DPoPProofs` carries every raw "DPoP" header value the request
+carried — `r.Header.Values("DPoP")`, never `r.Header.Get("DPoP")`,
 which silently returns only the first of several duplicate headers.
 `Verify` itself rejects a request that carried more than one (RFC 9449
-§7.1), so there's no adapter-side check to write here — unlike an
-older version of this library, which left that check to the caller.
+§7.1), so there's no adapter-side check to write here.
 
 `PeerCertificate` is the TLS client certificate the request arrived
 with: an access token bound to a certificate (RFC 8705) is refused
-without it. `resource.PeerCertificateFromHTTP(r)` reads it from `r.TLS`;
-behind a proxy that terminates TLS, set it from however the proxy
-forwards the certificate instead. Leave it out only if no client of
-this API uses mTLS-bound tokens.
+without it. The constructor reads it from `r.TLS`; behind a proxy that
+terminates TLS, set it afterwards from however the proxy forwards the
+certificate.
 
 That's the whole surface: `resource.Verifier` has no other public entry
 point. Everything above `Verify` — routing, and what the protected API

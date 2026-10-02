@@ -49,10 +49,7 @@ func (a *api) accounts(w http.ResponseWriter, r *http.Request) {
 		internalError(w, err)
 		return
 	}
-	authz, err := a.verifier.Verify(r.Context(), resource.VerifyRequest{
-		Method: r.Method, URL: target,
-		Authorization: r.Header.Get("Authorization"), DPoPProofs: r.Header.Values("DPoP"),
-	})
+	authz, err := a.verifier.Verify(r.Context(), resource.VerifyRequestFromHTTP(r, target))
 	if err != nil {
 		resource.WriteError(w, err)
 		return

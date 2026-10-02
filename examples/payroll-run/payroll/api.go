@@ -75,12 +75,7 @@ func (a *api) submit(w http.ResponseWriter, r *http.Request) {
 		internalError(w, err)
 		return
 	}
-	authz, err := a.verifier.Verify(r.Context(), resource.VerifyRequest{
-		Method: r.Method, URL: target, Authorization: r.Header.Get("Authorization"),
-		// RFC 8705 §3: the token's cnf.x5t#S256 must be this
-		// certificate's thumbprint.
-		PeerCertificate: resource.PeerCertificateFromHTTP(r),
-	})
+	authz, err := a.verifier.Verify(r.Context(), resource.VerifyRequestFromHTTP(r, target))
 	if err != nil {
 		resource.WriteError(w, err)
 		return

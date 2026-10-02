@@ -103,15 +103,18 @@ the user again.
 have passed since the user last actively authenticated, "the OP MUST
 attempt to actively re-authenticate the End-User". The server used to
 ignore `max_age`. It now validates it at the pushed authorization
-request (a malformed value is `invalid_request`), surfaces it as
+request (a value that isn't a whole number of seconds from 0 to 100
+years is `invalid_request`), surfaces it as
 `InteractionRequest.MaxAge`/`HasMaxAge`, and has `CompleteAuthorization`
 answer the client with `login_required` when the authentication time
-passed to `NewAuthenticationContext` is older than that.
+passed to `NewAuthenticationContext` is older than that, allowing
+`Limits.MaxClockSkew`.
 
 **What to change:** when `InteractionRequest.HasMaxAge` is set and your
 user's last authentication is older than `MaxAge`, authenticate them
-again before calling `Authorize`. A `max_age` of 0 asks for a fresh
-authentication every time. `InteractionRequest.ACRValues` now carries
+again before calling `Authorize`, and pass the time they actually
+authenticated, never `time.Now()` for an existing session. A `max_age`
+of 0 asks for a fresh authentication every time. `InteractionRequest.ACRValues` now carries
 the client's `acr_values` too, for deciding how strongly to
 authenticate. It's a request, not a requirement.
 

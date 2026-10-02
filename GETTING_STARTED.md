@@ -75,7 +75,7 @@ cfg := server.Config{
 	Profile:    server.ProfileFAPISecurity, // or ProfileFAPISecurityWithMessageSigning
 	Algorithms: server.RecommendedAlgorithms(),
 	Limits:     server.RecommendedLimits(),
-	Assurance: server.AssuranceDevelopment, // AssuranceProduction once your real deps are ready
+	Assurance:  server.AssuranceDevelopment, // AssuranceProduction once your real deps are ready
 }
 ```
 
@@ -143,9 +143,10 @@ deps := server.Dependencies{
 	AccessTokens: accessTokens,
 	// Lets this server revoke a token it already issued when it later
 	// detects the authorization code that produced it being reused
-	// (RFC 6749 §4.1.2). Pass server.NoRevocation{} instead to
-	// explicitly decline — see its doc comment for why declining must
-	// be a conscious choice, not a silent default.
+	// (RFC 6749 §4.1.2), and revoke a whole grant with RevokeGrant
+	// (step 5). Pass server.NoRevocation{} instead to explicitly
+	// decline — see its doc comment for why declining must be a
+	// conscious choice, not a silent default; RevokeGrant then refuses.
 	Revocation: memstore.NewRevocationStore(),
 	// Whether this package re-verifies an mTLS client certificate's
 	// chain itself. NoClientCertificateChainTrust{} declines — right when
@@ -195,9 +196,12 @@ switch a := action.(type) {
 case server.InteractionRequired:
 	// Render whatever UI you want here — a password form, an SSO
 	// redirect, WebAuthn, a magic link. a.Interaction carries the
-	// client ID, requested scope, and an unauthenticated login_hint
-	// to help pre-fill it. a.Handle must come back to
-	// CompleteAuthorization once the user is done.
+	// client ID, requested scope, an unauthenticated login_hint to
+	// help pre-fill it, and the client's authentication requirements:
+	// ACRValues (how strongly to authenticate) and, when HasMaxAge,
+	// MaxAge (how recent the authentication must be — re-authenticate
+	// a user whose existing session is older). a.Handle must come back
+	// to CompleteAuthorization once the user is done.
 case server.RedirectResponse:
 	// no interaction needed — redirect the browser to a.Destination
 case server.LocalErrorResponse:
@@ -211,7 +215,10 @@ verified their SSO assertion, whatever), conclude the interaction:
 ```go
 subjectID, _ := server.NewSubjectID(theRealAuthenticatedUserID)
 subject, _ := server.NewAuthenticatedSubject(subjectID)
-authCtx, _ := server.NewAuthenticationContext(time.Now(), acr, amr)
+// When the user actually authenticated — not time.Now() when you reuse
+// an existing session: CompleteAuthorization answers login_required
+// when this is older than the client's max_age.
+authCtx, _ := server.NewAuthenticationContext(userAuthenticatedAt, acr, amr)
 
 result := server.Authorize(subject, authCtx, server.GrantedAuthorization{
 	Scope: whateverScopesTheUserActuallyApproved,
@@ -223,6 +230,10 @@ result := server.Authorize(subject, authCtx, server.GrantedAuthorization{
 	// parameter (a.Interaction.RequestedClaims) that the user agreed to
 	// release. Nil releases none.
 	ApprovedIdentityClaims: whicheverRequestedClaimsTheUserApproved,
+	// Optional: your own ID for this grant, to withdraw it later with
+	// srv.RevokeGrant — for a "connected apps" page, say. It refuses
+	// the grant's refresh token and every access token issued from it.
+	GrantID: yourOwnIDForThisGrant,
 })
 // or: server.Deny("user declined") / server.AuthenticationFailed("bad credentials")
 
@@ -306,19 +317,32 @@ resolved there.
 `server.Server` has no built-in HTTP layer — every endpoint is a plain
 handler you write, calling the corresponding method
 (`PushAuthorizationRequest`, `ExchangeAuthorizationCode`,
-`RefreshAccessToken`, `Metadata`, `PublicJWKS`). `cmd/conformance-as/router.go`
+`RefreshAccessToken`, `Metadata`, `PublicJWKS`, and, when you enable
+them, `RequestClientCredentialsToken` and the CIBA methods). `cmd/conformance-as/router.go`
 shows the complete routing table on a bare `net/http.ServeMux` — no
 framework dependency required, though nothing here stops you from using
 one. `cmd/conformance-as/token.go`, `par.go`, `metadata.go` and
 `jwks.go` are the corresponding handler implementations to read
 alongside `authorize.go`.
 
+**Serving a grant this package doesn't.** To serve another grant type
+at the same token endpoint — OpenID4VCI's `pre-authorized_code`, say —
+read the request once with `server.TokenEndpointRequestFromHTTP` and
+switch on `GrantType()`. For your own grant, take its form with
+`Parameters()`, authenticate the client with `AuthenticateAttestedClient`
+(`req.AttestedClientAuthentication()`), and check its DPoP proof or
+client certificate with `VerifyTokenRequestBinding`: the same checks,
+and the same replay records, as this package's own grants. List the
+grant type in `Config.AdditionalGrantTypes` so `Metadata` advertises
+it. Whether the client may use the grant, and the grant itself, stay
+yours.
+
 ## 7. Wire the resource server: verifying access tokens
 
 `resource.Verifier` is FAPI 2.0's third role, a deliberately separate
 package from `server` rather than a mode of it — verifying a presented
 access token is inseparable from the HTTP request it arrived on, so
-`Verify(ctx, VerifyRequest{Method, URL, Authorization, DPoPProofs})` is
+`Verify(ctx, VerifyRequest{Method, URL, Authorization, DPoPProofs, PeerCertificate})` is
 the only entry point, never a bare `VerifyJWT`. In a real deployment
 this is usually a wholly separate service protecting its own API;
 `cmd/conformance-as` only co-locates it in the same binary because the
@@ -387,9 +411,9 @@ that AS's own metadata publishes them.
 
 `Dependencies.Revocation` needs the same care as the access-token
 format: if the AS revokes a token on detected authorization-code reuse
-(RFC 6749 §4.1.2 — step 4's `Revocation` field), this resource server
-must see that revocation too, or it will keep accepting a token the AS
-has already disowned. Wire it to the *same* `RevocationSink`/
+(RFC 6749 §4.1.2 — step 4's `Revocation` field), or revokes a whole
+grant with `RevokeGrant`, this resource server must see that revocation
+too, or it will keep accepting a token the AS has already disowned. Wire it to the *same* `RevocationSink`/
 `RevocationChecker` pair the AS uses — `memstore.NewRevocationStore()`
 already implements both, if co-located — or `resource.NoRevocation{}`
 to explicitly decline (matching `server.NoRevocation{}`'s own
@@ -414,6 +438,8 @@ authCtx, err := verifier.Verify(ctx, resource.VerifyRequest{
 	URL:           protectedResourceURL, // this endpoint's own fixed external URL — see below, never r.URL
 	Authorization: r.Header.Get("Authorization"),
 	DPoPProofs:    r.Header.Values("DPoP"), // see below — never r.Header.Get("DPoP")
+	// The TLS client certificate, for an mTLS-bound access token.
+	PeerCertificate: resource.PeerCertificateFromHTTP(r),
 })
 ```
 
@@ -444,6 +470,13 @@ which silently returns only the first of several duplicate headers.
 `Verify` itself rejects a request that carried more than one (RFC 9449
 §7.1), so there's no adapter-side check to write here — unlike an
 older version of this library, which left that check to the caller.
+
+`PeerCertificate` is the TLS client certificate the request arrived
+with: an access token bound to a certificate (RFC 8705) is refused
+without it. `resource.PeerCertificateFromHTTP(r)` reads it from `r.TLS`;
+behind a proxy that terminates TLS, set it from however the proxy
+forwards the certificate instead. Leave it out only if no client of
+this API uses mTLS-bound tokens.
 
 That's the whole surface: `resource.Verifier` has no other public entry
 point. Everything above `Verify` — routing, and what the protected API

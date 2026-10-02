@@ -36,8 +36,8 @@ window for the whole demo, and only for it: Chrome accepts that key for
 Chrome shows a banner about an unsupported command-line flag; that's
 expected. Ctrl-C stops the demo.
 
-It uses port 8644, so it can run alongside the
-[federated-union demo](../federated-union/README.md) (8643). `-port`
+It uses port 8644. Every demo has its own port, so they can all run at
+once; [the examples overview](../README.md#ports) lists them. `-port`
 changes it.
 
 ### Other browsers

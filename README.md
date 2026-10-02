@@ -44,6 +44,9 @@ variants and OAuth 2.0 attestation-based client authentication.
 - private_key_jwt client authentication
 - OAuth 2.0 Attestation-Based Client Authentication, including HAIP 1.0 x5c attester certificate chains
 - JAR / JARM · RAR (RFC 9396) · CIBA (poll & ping delivery)
+- Refresh tokens (not rotated, per FAPI 2.0) and whole-grant revocation
+- OpenID Connect: the `claims` parameter with per-claim consent, `acr_values` and enforced `max_age`, signed and encrypted ID tokens and UserInfo
+- Grants you serve yourself at the token endpoint (OpenID4VCI's `pre-authorized_code`, say), with the server's own client authentication and DPoP/mTLS checks
 - OpenID Federation 1.0 (trust chains, automatic client registration, trust marks)
 - OpenID Certified™ for OP, RP and FAPI-CIBA OP conformance profiles — see below
 
@@ -92,6 +95,10 @@ server that hosts its own protected endpoints.
 See [GETTING_STARTED.md](GETTING_STARTED.md) for a full walkthrough of
 standing up an authorization server and resource server end to end,
 including a runnable configuration you can start from.
+
+Six runnable demos show these end to end, each with a guided tour and an
+attack lab; [examples/README.md](examples/README.md) maps every capability
+to the demo that shows it.
 
 [examples/federated-union](examples/federated-union/README.md) is a
 runnable demo: three fictional countries' identity federations joined

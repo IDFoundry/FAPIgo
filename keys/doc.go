@@ -46,8 +46,10 @@
 // requires such a key source to declare KeySourceAssurance.
 //
 // The one exception to "production-suitable" above is keys/ephemeral,
-// an in-tree, in-memory KeyManager/Decrypter/ClientKeySource set that
-// always generates a fresh key rather than taking one — for local
+// an in-tree, in-memory KeyManager/Decrypter/ClientKeySource set whose
+// KeyManager and Decrypter always generate a fresh key rather than
+// taking one, and whose ClientKeySource reads clients' registered JWK
+// Sets — for local
 // development and testing only, never production — so integrating
 // server or client doesn't require writing key management from scratch
 // just to get something running; see its own package doc comment.

@@ -5,7 +5,7 @@
 // The package exposes workflow methods (BeginAuthorization,
 // HandleAuthorizationResponse, ExchangeCode, CompleteAuthorization, for
 // CIBA BeginBackchannelAuthentication and PollBackchannelAuthentication,
-// and RefreshTokens to redeem a refresh token either issued)
+// and RefreshTokens to redeem the refresh token either flow issued)
 // rather than low-level JWT, PAR or DPoP primitives — those live under internal/
 // and are composed here behind a state machine that a caller cannot drive
 // out of order. In particular, only this package may construct request
@@ -14,10 +14,11 @@
 //
 // OpenID Connect identity (an ID token, Subject, IDTokenClaims) is
 // entirely optional and driven purely by what the authorization server
-// actually granted, never assumed by this package: ExchangeCode and
-// PollBackchannelAuthentication populate TokenSet.IDToken/Subject/
-// IDTokenClaims only when the token response actually carried an
-// id_token (which, per the FAPI 2.0 authorization server this package
+// actually granted, never assumed by this package: ExchangeCode,
+// PollBackchannelAuthentication and RefreshTokens populate
+// TokenSet.IDToken/Subject/IDTokenClaims only when the token response
+// actually carried an id_token (RefreshTokens keeps the original's when
+// a refresh returns none) (which, per the FAPI 2.0 authorization server this package
 // targets, happens exactly when "openid" was included in the granted
 // scope — see server's own package doc comment for that side of the
 // contract) and leave TokenSet.HasIDToken false otherwise, which is a
@@ -53,7 +54,12 @@
 // embedder registering with an authorization server (out of band; this
 // package has no dynamic client registration flow) doesn't have to
 // hand-roll RFC 7517 JWK encoding for whatever it configured
-// Dependencies.Keys/Dependencies.Decryption with.
+// Dependencies.Keys/Dependencies.Decryption with. ClientAttestationHeaders,
+// likewise, hands an embedder the attestation-based client
+// authentication headers for a request it sends itself — OpenID4VCI's
+// pre-authorized_code token request, say — built by the same code as
+// this package's own requests, rather than a second copy of the PoP
+// format.
 //
 // client must not import server. Where both roles need the same wire
 // format or cryptographic operation, that logic belongs in internal/ and

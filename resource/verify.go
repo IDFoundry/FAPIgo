@@ -86,7 +86,8 @@ type AuthorizationContext struct {
 	// NextDPoPNonce is a freshly issued DPoP nonce the caller should set
 	// as this response's own DPoP-Nonce header, so its next call already
 	// carries a valid one instead of needing its own challenge/retry
-	// round trip (RFC 9449 §8's own proactive-refresh recommendation).
+	// round trip (RFC 9449 §8's own proactive-refresh recommendation):
+	// SetDPoPNonce does that.
 	// Always "" when Dependencies.Nonces is nil (nonce-challenge support
 	// disabled); otherwise always populated on a successful Verify.
 	NextDPoPNonce string

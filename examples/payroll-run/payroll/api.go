@@ -1,14 +1,17 @@
 package payroll
 
 import (
+	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
-	"sync"
+	"time"
 
 	"github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/serverresource"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // api is Alder Bank's payroll API. It accepts only access tokens the
@@ -19,8 +22,12 @@ type api struct {
 	w        *World
 	verifier *resource.Verifier
 
-	mu   sync.Mutex
-	paid map[string]bool // grants already used, by token
+	// replay is the bank's replay store, shared by every instance of the
+	// bank and its APIs: an approval is recorded there as used, so a
+	// second instance refuses it too.
+	replay storage.ReplayStore
+	// skew is the verifier's clock-skew allowance on token expiry.
+	skew time.Duration
 }
 
 const batchesPath = "/payroll-batches"
@@ -33,7 +40,7 @@ func (w *World) newAPI() (*api, error) {
 	if err != nil {
 		return nil, err
 	}
-	a := &api{w: w, verifier: verifier, paid: map[string]bool{}}
+	a := &api{w: w, verifier: verifier, replay: w.bank.deps.Replay, skew: w.bank.cfg.Limits.MaxClockSkew}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST "+batchesPath, a.submit)
 	w.router[apiHost] = mux
@@ -97,11 +104,7 @@ func (a *api) submit(w http.ResponseWriter, r *http.Request) {
 		resource.NewError(resource.ErrorInsufficientScope, http.StatusForbidden, problem).WriteJSON(w)
 		return
 	}
-	a.mu.Lock()
-	used := a.paid[authz.Key]
-	a.paid[authz.Key] = true
-	a.mu.Unlock()
-	if used {
+	if !a.useOnce(r.Context(), authz) {
 		resource.NewError(resource.ErrorInsufficientScope, http.StatusForbidden, "this token was for one payroll batch, and it has been paid").WriteJSON(w)
 		return
 	}
@@ -133,4 +136,21 @@ func withinGrant(details json.RawMessage, b batch, total int64) string {
 		return fmt.Sprintf("the token grants EUR %s in total, not EUR %s", g.TotalAmount.Amount, decimal(total))
 	}
 	return ""
+}
+
+// usedApprovalNamespace keeps this API's used approvals apart from the
+// server's own records in the shared replay store.
+const usedApprovalNamespace storage.ReplayNamespace = "example:payroll-run:batch"
+
+// useOnce records authz's approval as used, reporting whether this is
+// its first use. The shared store does the check and the record in one
+// atomic step, so two instances racing on the same approval can't both
+// proceed, and a store it can't reach refuses rather than allows. The
+// record lasts as long as the token can still be presented.
+func (a *api) useOnce(ctx context.Context, authz resource.AuthorizationContext) bool {
+	return a.replay.UseOnce(ctx, storage.ReplayUse{
+		Namespace: usedApprovalNamespace,
+		Digest:    sha256.Sum256([]byte(authz.Key)),
+		ExpiresAt: authz.ExpiresAt.Add(a.skew),
+	}) == nil
 }

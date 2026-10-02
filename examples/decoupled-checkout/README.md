@@ -92,7 +92,7 @@ refused:
 | Attack | What stops it |
 |---|---|
 | Charge €420 instead | The payments API executes only a payment matching the approved `authorization_details` |
-| Charge again | The approval is for one payment; the API won't execute it twice |
+| Charge again | The approval is for one payment; the API records it as used in the bank's shared replay store (`storage.ReplayStore.UseOnce`), so no instance executes it twice |
 | Use the token from another device | The token is DPoP-bound to the till's key; another device can't prove possession of it |
 | Reuse the `auth_req_id` | The bank issues tokens for a request once |
 

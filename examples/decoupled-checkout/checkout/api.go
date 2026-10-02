@@ -1,15 +1,18 @@
 package checkout
 
 import (
+	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"slices"
-	"sync"
+	"time"
 
 	"github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/serverresource"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // api is Alder Bank's payments and accounts APIs. They accept only
@@ -20,8 +23,12 @@ type api struct {
 	w        *World
 	verifier *resource.Verifier
 
-	mu       sync.Mutex
-	executed map[string]bool // payment consents already used, by token
+	// replay is the bank's replay store, shared by every instance of the
+	// bank and its APIs: an approval is recorded there as used, so a
+	// second instance refuses it too.
+	replay storage.ReplayStore
+	// skew is the verifier's clock-skew allowance on token expiry.
+	skew time.Duration
 }
 
 // Paths the APIs serve.
@@ -46,7 +53,7 @@ func (w *World) newAPI() (*api, error) {
 	if err != nil {
 		return nil, err
 	}
-	a := &api{w: w, verifier: verifier, executed: map[string]bool{}}
+	a := &api{w: w, verifier: verifier, replay: w.bank.deps.Replay, skew: w.bank.cfg.Limits.MaxClockSkew}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST "+paymentsPath, a.pay)
 	mux.HandleFunc("GET "+accountsPath+"{iban}/{what}", a.readAccount)
@@ -129,11 +136,7 @@ func (a *api) pay(w http.ResponseWriter, r *http.Request) {
 		forbidden(w, fmt.Sprintf("the customer didn't approve paying EUR %s to %s", order.InstructedAmount.Amount, order.CreditorAccount.IBAN))
 		return
 	}
-	a.mu.Lock()
-	used := a.executed[authz.Key]
-	a.executed[authz.Key] = true
-	a.mu.Unlock()
-	if used {
+	if !a.useOnce(r.Context(), authz) {
 		forbidden(w, "this approval was for one payment, and it has been made")
 		return
 	}
@@ -192,4 +195,21 @@ func sampleData(acct bankAccount, action string) []string {
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// usedApprovalNamespace keeps this API's used approvals apart from the
+// server's own records in the shared replay store.
+const usedApprovalNamespace storage.ReplayNamespace = "example:decoupled-checkout:approval"
+
+// useOnce records authz's approval as used, reporting whether this is
+// its first use. The shared store does the check and the record in one
+// atomic step, so two instances racing on the same approval can't both
+// proceed, and a store it can't reach refuses rather than allows. The
+// record lasts as long as the token can still be presented.
+func (a *api) useOnce(ctx context.Context, authz resource.AuthorizationContext) bool {
+	return a.replay.UseOnce(ctx, storage.ReplayUse{
+		Namespace: usedApprovalNamespace,
+		Digest:    sha256.Sum256([]byte(authz.Key)),
+		ExpiresAt: authz.ExpiresAt.Add(a.skew),
+	}) == nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -550,5 +551,71 @@ func TestStaticAttestation(t *testing.T) {
 	}
 	if _, err := client.StaticAttestation("").CurrentAttestation(context.Background()); err == nil {
 		t.Fatal("StaticAttestation(\"\").CurrentAttestation() = nil error, want error")
+	}
+}
+
+// TestClientAttestationHeaders covers the headers for a request the
+// embedder sends itself: the held attestation, and a PoP that verifies
+// against the instance key for this client and issuer — fresh each call,
+// with the attestation challenge when the source has one.
+func TestClientAttestationHeaders(t *testing.T) {
+	const wantChallenge = "server-issued-challenge-value"
+	c, as := newTestClientWithAttestationSource(t, fakeAttestationSourceWithChallenge{
+		fakeAttestationSource: fakeAttestationSource{attestation: testAttestationJWT},
+		challenge:             wantChallenge,
+	})
+	replay := &recordingPoPReplay{seen: map[string]bool{}}
+	for range 2 {
+		attestation, popCompact, err := c.ClientAttestationHeaders(context.Background())
+		if err != nil {
+			t.Fatalf("ClientAttestationHeaders: %v", err)
+		}
+		if attestation != testAttestationJWT {
+			t.Errorf("attestation = %q, want %q", attestation, testAttestationJWT)
+		}
+		pop, err := clientattestation.ParsePoP(popCompact)
+		if err != nil {
+			t.Fatalf("ParsePoP: %v", err)
+		}
+		// The replay check refuses a jti it has seen: a fresh PoP each
+		// call passes it both times.
+		if _, err := pop.Verify(context.Background(), as.confirmationJWK, clientattestation.PoPVerifyPolicy{
+			ExpectedIssuer: testClientID, ExpectedAudience: testIssuer, ExpectedChallenge: wantChallenge,
+			Now: time.Now(), MaxAge: time.Minute, Replay: replay,
+		}); err != nil {
+			t.Fatalf("Verify: %v", err)
+		}
+	}
+}
+
+// recordingPoPReplay refuses a PoP jti it has already seen.
+type recordingPoPReplay struct{ seen map[string]bool }
+
+func (r *recordingPoPReplay) UseOnce(_ context.Context, jti string, _ time.Time) error {
+	if r.seen[jti] {
+		return errors.New("jti reused")
+	}
+	r.seen[jti] = true
+	return nil
+}
+
+func TestClientAttestationHeadersRequiresAttestation(t *testing.T) {
+	c, err := client.New(validConfig(t), validDependencies(t))
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	_, _, err = c.ClientAttestationHeaders(context.Background())
+	var cerr *client.Error
+	if !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidRequest {
+		t.Fatalf("ClientAttestationHeaders(private_key_jwt client) = %v, want invalid_request", err)
+	}
+}
+
+func TestClientAttestationHeadersPropagatesSourceError(t *testing.T) {
+	c, _ := newTestClientWithAttestationSource(t, fakeAttestationSource{err: errors.New("attester unavailable")})
+	_, _, err := c.ClientAttestationHeaders(context.Background())
+	var cerr *client.Error
+	if !errors.As(err, &cerr) || cerr.Code() != client.ErrorInternal {
+		t.Fatalf("ClientAttestationHeaders(failing source) = %v, want internal", err)
 	}
 }

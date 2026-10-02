@@ -284,12 +284,8 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), refreshErr)
 	}
 
-	if s.deps.Nonces != nil && client.SenderConstrain() == storage.SenderConstrainDPoP {
-		nextNonce, err := s.issueDPoPNonce(ctx, now)
-		if err != nil {
-			return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to issue dpop nonce", err))
-		}
-		result.NextDPoPNonce = nextNonce
+	if nonceErr := s.addNextDPoPNonce(ctx, client, now, &result); nonceErr != nil {
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), nonceErr)
 	}
 
 	s.audit(ctx, AuditEventExchangeAuthorizationCode, client.ID(), AuditOutcomeSuccess, "")
@@ -354,6 +350,21 @@ func (s *Server) issueOptionalRefreshToken(ctx context.Context, client storage.R
 	_ = s.deps.Grants.RecordIssuedRefreshToken(ctx, codeHash, refreshTokenHash, now.Add(s.cfg.Limits.RefreshTokenLifetime))
 	result.RefreshToken = fapi.NewSecret(refreshToken)
 	result.HasRefreshToken = true
+	return nil
+}
+
+// addNextDPoPNonce issues the DPoP-Nonce a DPoP-bound client should use
+// next and records it onto result, when the server issues nonces — a
+// no-op otherwise.
+func (s *Server) addNextDPoPNonce(ctx context.Context, client storage.RegisteredClient, now time.Time, result *TokenResult) *Error {
+	if s.deps.Nonces == nil || client.SenderConstrain() != storage.SenderConstrainDPoP {
+		return nil
+	}
+	nextNonce, err := s.issueDPoPNonce(ctx, now)
+	if err != nil {
+		return newError(ErrorServerError, 500, "failed to issue dpop nonce", err)
+	}
+	result.NextDPoPNonce = nextNonce
 	return nil
 }
 

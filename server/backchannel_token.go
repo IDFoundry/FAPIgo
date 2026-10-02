@@ -92,19 +92,7 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 		Now:           now,
 	})
 	if err != nil {
-		var expired *storage.BackchannelAuthenticationExpiredError
-		if errors.As(err, &expired) {
-			return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorExpiredToken, 400, "auth_req_id has expired", err))
-		}
-		var slowDown *storage.BackchannelAuthenticationSlowDownError
-		if errors.As(err, &slowDown) {
-			return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorSlowDown, 400, "polled faster than the configured interval", err))
-		}
-		var alreadyRedeemed *storage.BackchannelAuthenticationAlreadyRedeemedError
-		if errors.As(err, &alreadyRedeemed) {
-			return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorInvalidGrant, 400, "auth_req_id has already been used", err))
-		}
-		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorInvalidGrant, 400, "auth_req_id is invalid or unknown", err))
+		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), backchannelPollError(err))
 	}
 
 	if polled.ClientID != client.ID() {
@@ -118,15 +106,8 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorInvalidGrant, 400, "DPoP proof key does not match the dpop_jkt bound to this backchannel authentication request", nil))
 	}
 
-	switch polled.Status {
-	case storage.BackchannelAuthenticationPending:
-		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorAuthorizationPending, 400, "the end user has not yet completed authentication", nil))
-	case storage.BackchannelAuthenticationDenied, storage.BackchannelAuthenticationAuthenticationFailed:
-		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorAccessDenied, 400, "the end user denied the request, or could not be authenticated", nil))
-	case storage.BackchannelAuthenticationApproved:
-		// fall through to issuance below
-	default:
-		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorServerError, 500, "unrecognized backchannel authentication status", nil))
+	if statusErr := backchannelStatusError(polled.Status); statusErr != nil {
+		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), statusErr)
 	}
 
 	grant, err := decodeGrantRecord(polled.Grant)
@@ -158,32 +139,72 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 		AuthorizationDetails: grant.AuthorizationDetails,
 	}
 
-	if containsScope(grant.Scope, "openid") {
-		idToken, idErr := s.issueIDTokenForGrant(ctx, client, grant, "", accessToken)
-		if idErr != nil {
-			return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), idErr)
-		}
-		result.IDToken = fapi.NewSecret(idToken)
-		result.HasIDToken = true
+	if issueErr := s.issueBackchannelOptionalTokens(ctx, client, grant, accessToken, thumbprint, &result); issueErr != nil {
+		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), issueErr)
 	}
 
-	if containsScope(grant.Scope, "offline_access") {
-		refreshToken, err := s.issueRefreshToken(ctx, client.ID(), grant, thumbprint)
-		if err != nil {
-			return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorServerError, 500, "failed to issue refresh token", err))
-		}
-		result.RefreshToken = fapi.NewSecret(refreshToken)
-		result.HasRefreshToken = true
-	}
-
-	if s.deps.Nonces != nil && client.SenderConstrain() == storage.SenderConstrainDPoP {
-		nextNonce, err := s.issueDPoPNonce(ctx, now)
-		if err != nil {
-			return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorServerError, 500, "failed to issue dpop nonce", err))
-		}
-		result.NextDPoPNonce = nextNonce
+	if nonceErr := s.addNextDPoPNonce(ctx, client, now, &result); nonceErr != nil {
+		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), nonceErr)
 	}
 
 	s.audit(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), AuditOutcomeSuccess, "")
 	return result, nil
+}
+
+// backchannelPollError is the token endpoint's answer when polling the
+// backchannel authentication request fails with err.
+func backchannelPollError(err error) *Error {
+	var expired *storage.BackchannelAuthenticationExpiredError
+	if errors.As(err, &expired) {
+		return newError(ErrorExpiredToken, 400, "auth_req_id has expired", err)
+	}
+	var slowDown *storage.BackchannelAuthenticationSlowDownError
+	if errors.As(err, &slowDown) {
+		return newError(ErrorSlowDown, 400, "polled faster than the configured interval", err)
+	}
+	var alreadyRedeemed *storage.BackchannelAuthenticationAlreadyRedeemedError
+	if errors.As(err, &alreadyRedeemed) {
+		return newError(ErrorInvalidGrant, 400, "auth_req_id has already been used", err)
+	}
+	return newError(ErrorInvalidGrant, 400, "auth_req_id is invalid or unknown", err)
+}
+
+// backchannelStatusError is the token endpoint's answer for a polled
+// request in status, or nil once it's approved and tokens can be issued.
+func backchannelStatusError(status storage.BackchannelAuthenticationStatus) *Error {
+	switch status {
+	case storage.BackchannelAuthenticationPending:
+		return newError(ErrorAuthorizationPending, 400, "the end user has not yet completed authentication", nil)
+	case storage.BackchannelAuthenticationDenied, storage.BackchannelAuthenticationAuthenticationFailed:
+		return newError(ErrorAccessDenied, 400, "the end user denied the request, or could not be authenticated", nil)
+	case storage.BackchannelAuthenticationApproved:
+		return nil
+	default:
+		return newError(ErrorServerError, 500, "unrecognized backchannel authentication status", nil)
+	}
+}
+
+// issueBackchannelOptionalTokens issues an ID token when grant's scope
+// includes "openid" and a refresh token when it includes
+// "offline_access", recording each onto result. Unlike the
+// authorization code flow's, the ID token carries no nonce: CIBA has
+// none.
+func (s *Server) issueBackchannelOptionalTokens(ctx context.Context, client storage.RegisteredClient, grant grantRecord, accessToken, thumbprint string, result *TokenResult) *Error {
+	if containsScope(grant.Scope, "openid") {
+		idToken, idErr := s.issueIDTokenForGrant(ctx, client, grant, "", accessToken)
+		if idErr != nil {
+			return idErr
+		}
+		result.IDToken = fapi.NewSecret(idToken)
+		result.HasIDToken = true
+	}
+	if containsScope(grant.Scope, "offline_access") {
+		refreshToken, err := s.issueRefreshToken(ctx, client.ID(), grant, thumbprint)
+		if err != nil {
+			return newError(ErrorServerError, 500, "failed to issue refresh token", err)
+		}
+		result.RefreshToken = fapi.NewSecret(refreshToken)
+		result.HasRefreshToken = true
+	}
+	return nil
 }

@@ -196,31 +196,47 @@ func Create(p CreateParams) (string, error) {
 		claims["constraints"] = constraintsWireValue(*p.Constraints)
 	}
 	if p.TrustMarks != nil {
-		trustMarks := make([]map[string]string, len(p.TrustMarks))
-		for i, tm := range p.TrustMarks {
-			trustMarks[i] = map[string]string{"trust_mark_type": tm.TrustMarkType, "trust_mark": tm.TrustMark}
-		}
-		claims["trust_marks"] = trustMarks
+		claims["trust_marks"] = trustMarksWireValue(p.TrustMarks)
 	}
 	if p.TrustMarkOwners != nil {
-		owners := make(map[string]map[string]any, len(p.TrustMarkOwners))
-		for trustMarkType, o := range p.TrustMarkOwners {
-			owners[trustMarkType] = map[string]any{"sub": o.Subject, "jwks": json.RawMessage(o.JWKS)}
-		}
-		claims["trust_mark_owners"] = owners
+		claims["trust_mark_owners"] = trustMarkOwnersWireValue(p.TrustMarkOwners)
 	}
 	if p.TrustMarkIssuers != nil {
-		issuers := make(map[string][]string, len(p.TrustMarkIssuers))
-		for trustMarkType, ids := range p.TrustMarkIssuers {
-			if ids == nil {
-				ids = []string{}
-			}
-			issuers[trustMarkType] = ids
-		}
-		claims["trust_mark_issuers"] = issuers
+		claims["trust_mark_issuers"] = trustMarkIssuersWireValue(p.TrustMarkIssuers)
 	}
 
 	return signClaims(p.Signer, p.Algorithm, p.KeyID, jwtType, claims)
+}
+
+// trustMarksWireValue is trust_marks' wire shape.
+func trustMarksWireValue(marks []RawTrustMark) []map[string]string {
+	out := make([]map[string]string, len(marks))
+	for i, tm := range marks {
+		out[i] = map[string]string{"trust_mark_type": tm.TrustMarkType, "trust_mark": tm.TrustMark}
+	}
+	return out
+}
+
+// trustMarkOwnersWireValue is trust_mark_owners' wire shape.
+func trustMarkOwnersWireValue(owners map[string]TrustMarkOwner) map[string]map[string]any {
+	out := make(map[string]map[string]any, len(owners))
+	for trustMarkType, o := range owners {
+		out[trustMarkType] = map[string]any{"sub": o.Subject, "jwks": json.RawMessage(o.JWKS)}
+	}
+	return out
+}
+
+// trustMarkIssuersWireValue is trust_mark_issuers' wire shape: a type
+// with no issuers listed is sent as [], not null.
+func trustMarkIssuersWireValue(issuers map[string][]string) map[string][]string {
+	out := make(map[string][]string, len(issuers))
+	for trustMarkType, ids := range issuers {
+		if ids == nil {
+			ids = []string{}
+		}
+		out[trustMarkType] = ids
+	}
+	return out
 }
 
 // constraintsWireValue builds the wire shape parseConstraints expects

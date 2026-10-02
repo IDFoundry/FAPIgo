@@ -589,40 +589,45 @@ func clientAssertionAlgorithms(cfg RegisteredClientConfig) ([]fapi.SignatureAlgo
 func validateClientAuthMethodFields(cfg RegisteredClientConfig, method ClientAuthMethod, algs []fapi.SignatureAlgorithm) error {
 	switch method {
 	case ClientAuthMethodPrivateKeyJWT:
-		if len(algs) == 0 {
-			return fmt.Errorf("storage: client %q has no valid client assertion algorithm", cfg.ID)
-		}
-		for _, a := range algs {
-			if !a.IsValid() {
-				return fmt.Errorf("storage: client %q has no valid client assertion algorithm", cfg.ID)
-			}
-		}
+		return validatePrivateKeyJWTAlgorithms(cfg.ID, algs)
 	case ClientAuthMethodSelfSignedTLSClientAuth:
-		if cfg.ExpectedCertificateThumbprint == "" {
-			return fmt.Errorf("storage: client %q must set ExpectedCertificateThumbprint for self_signed_tls_client_auth", cfg.ID)
-		}
+		return requireField(cfg.ID, cfg.ExpectedCertificateThumbprint, "ExpectedCertificateThumbprint", method)
 	case ClientAuthMethodTLSClientAuth:
-		if cfg.ExpectedSubjectDN == "" {
-			return fmt.Errorf("storage: client %q must set ExpectedSubjectDN for tls_client_auth", cfg.ID)
-		}
+		return requireField(cfg.ID, cfg.ExpectedSubjectDN, "ExpectedSubjectDN", method)
 	case ClientAuthMethodTLSClientAuthSANDNS:
-		if cfg.ExpectedSANDNS == "" {
-			return fmt.Errorf("storage: client %q must set ExpectedSANDNS for tls_client_auth_san_dns", cfg.ID)
-		}
+		return requireField(cfg.ID, cfg.ExpectedSANDNS, "ExpectedSANDNS", method)
 	case ClientAuthMethodTLSClientAuthSANURI:
-		if cfg.ExpectedSANURI == "" {
-			return fmt.Errorf("storage: client %q must set ExpectedSANURI for tls_client_auth_san_uri", cfg.ID)
-		}
+		return requireField(cfg.ID, cfg.ExpectedSANURI, "ExpectedSANURI", method)
 	case ClientAuthMethodTLSClientAuthSANIP:
 		return validateSANIPField(cfg)
 	case ClientAuthMethodTLSClientAuthSANEmail:
-		if cfg.ExpectedSANEmail == "" {
-			return fmt.Errorf("storage: client %q must set ExpectedSANEmail for tls_client_auth_san_email", cfg.ID)
-		}
+		return requireField(cfg.ID, cfg.ExpectedSANEmail, "ExpectedSANEmail", method)
 	case ClientAuthMethodAttestation:
 		return validateAttestationFields(cfg)
 	default:
 		return fmt.Errorf("storage: client %q has an invalid client auth method", cfg.ID)
+	}
+}
+
+// validatePrivateKeyJWTAlgorithms checks that a private_key_jwt client
+// has at least one client assertion algorithm, and only valid ones.
+func validatePrivateKeyJWTAlgorithms(id fapi.ClientID, algs []fapi.SignatureAlgorithm) error {
+	if len(algs) == 0 {
+		return fmt.Errorf("storage: client %q has no valid client assertion algorithm", id)
+	}
+	for _, a := range algs {
+		if !a.IsValid() {
+			return fmt.Errorf("storage: client %q has no valid client assertion algorithm", id)
+		}
+	}
+	return nil
+}
+
+// requireField checks that value, the field named field, is set, as
+// method requires.
+func requireField(id fapi.ClientID, value, field string, method ClientAuthMethod) error {
+	if value == "" {
+		return fmt.Errorf("storage: client %q must set %s for %s", id, field, method)
 	}
 	return nil
 }

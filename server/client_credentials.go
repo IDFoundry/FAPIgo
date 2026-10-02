@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	fapi "github.com/idfoundry/fapigo"
-	"github.com/idfoundry/fapigo/storage"
 )
 
 // ClientCredentialsTokenRequest is the input to
@@ -142,12 +141,8 @@ func (s *Server) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 		AuthorizationDetails: authorizationDetails,
 	}
 
-	if s.deps.Nonces != nil && client.SenderConstrain() == storage.SenderConstrainDPoP {
-		nextNonce, err := s.issueDPoPNonce(ctx, now)
-		if err != nil {
-			return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), newError(ErrorServerError, 500, "failed to issue dpop nonce", err))
-		}
-		result.NextDPoPNonce = nextNonce
+	if nonceErr := s.addNextDPoPNonce(ctx, client, now, &result); nonceErr != nil {
+		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), nonceErr)
 	}
 
 	s.audit(ctx, AuditEventRequestClientCredentialsToken, client.ID(), AuditOutcomeSuccess, "")

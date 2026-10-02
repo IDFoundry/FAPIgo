@@ -98,64 +98,21 @@ func (c *Client) HandleAuthorizationResponse(ctx context.Context, cb Authorizati
 	// Parameters entirely, so this check would otherwise always see it
 	// as "missing" for a JARM response, regardless of the actual token.
 	if respMode == responseModePlain {
-		// A present "iss" must equal this client's configured issuer
-		// exactly (simple string comparison, no normalization); an
-		// absent one is only an error when the server is known to
-		// support the parameter — this client can't tell that on its
-		// own, so the caller states it via
-		// Config.AuthorizationResponseIssPolicy.
-		if iss, ok := paramString(params, "iss"); ok {
-			if iss != c.cfg.Issuer.String() {
-				return nil, newError(ErrorInvalidResponse, "authorization response iss does not match expected issuer", nil)
-			}
-		} else if c.cfg.AuthorizationResponseIssPolicy == RequireAuthorizationResponseIss {
-			return nil, newError(ErrorInvalidResponse, "authorization response is missing iss", nil)
+		if err := c.checkAuthorizationResponseIss(params); err != nil {
+			return nil, err
 		}
 	}
 
-	state, _ := paramString(params, "state")
-	if state == "" {
-		return nil, newError(ErrorInvalidRequest, "callback is missing state", nil)
-	}
-	// Bind the callback to the user agent that began the flow (RFC 9700
-	// §4.7) before consuming anything: a mismatch leaves the session
-	// intact for its rightful browser.
-	if cb.Session.value == "" {
-		return nil, newError(ErrorInvalidRequest, "callback is not bound to a session: AuthorizationCallback.Session is required", nil)
-	}
-	if subtle.ConstantTimeCompare([]byte(state), []byte(cb.Session.value)) != 1 {
-		return nil, newError(ErrorInvalidRequest, "callback state does not match this user agent's session", nil)
+	consumed, err := c.consumeCallbackSession(ctx, cb, params, respMode)
+	if err != nil {
+		return nil, err
 	}
 
-	consumed, consumeErr := c.deps.Sessions.Consume(ctx, storage.SessionConsumption{State: state})
-	if consumeErr != nil {
-		return nil, newError(ErrorInvalidRequest, "session is invalid, expired, or already used", consumeErr)
-	}
-	// A session belongs to the client that began it. An application
-	// running one client per issuer over a shared SessionStore routes
-	// each callback to a client itself; a callback routed to the wrong
-	// one must not complete another issuer's flow with that flow's PKCE
-	// verifier and nonce.
-	if consumed.ExpectedIssuer != c.cfg.Issuer.String() {
-		return nil, newError(ErrorInvalidRequest, "session was begun by a client for a different issuer", nil)
-	}
-	now := c.deps.Clock.Now()
-	if !now.Before(consumed.ExpiresAt) {
-		return nil, newError(ErrorInvalidRequest, "session has expired", nil)
-	}
-	if respMode != consumed.ExpectedResponseMode {
-		return nil, newError(ErrorInvalidResponse, "authorization response arrived in an unexpected mode", nil)
-	}
-
-	if errCode, ok := paramString(params, "error"); ok && errCode != "" {
-		if !isErrorText(errCode) {
-			return nil, newError(ErrorInvalidResponse, "authorization error response has a malformed error code", nil)
+	if denied, ok, err := callbackDenied(params); ok {
+		if err != nil {
+			return nil, err
 		}
-		errDesc, _ := paramString(params, "error_description")
-		if !isErrorText(errDesc) {
-			errDesc = ""
-		}
-		return CallbackDenied{Code: errCode, Description: errDesc}, nil
+		return denied, nil
 	}
 
 	code, ok := paramString(params, "code")
@@ -169,6 +126,82 @@ func (c *Client) HandleAuthorizationResponse(ctx context.Context, cb Authorizati
 		pkceVerifier: consumed.PKCEVerifier,
 		nonce:        consumed.Nonce,
 	}}, nil
+}
+
+// checkAuthorizationResponseIss checks a plain-mode response's "iss"
+// parameter (RFC 9207 §2.4).
+func (c *Client) checkAuthorizationResponseIss(params map[string]json.RawMessage) *Error {
+	// A present "iss" must equal this client's configured issuer
+	// exactly (simple string comparison, no normalization); an
+	// absent one is only an error when the server is known to
+	// support the parameter — this client can't tell that on its
+	// own, so the caller states it via
+	// Config.AuthorizationResponseIssPolicy.
+	if iss, ok := paramString(params, "iss"); ok {
+		if iss != c.cfg.Issuer.String() {
+			return newError(ErrorInvalidResponse, "authorization response iss does not match expected issuer", nil)
+		}
+	} else if c.cfg.AuthorizationResponseIssPolicy == RequireAuthorizationResponseIss {
+		return newError(ErrorInvalidResponse, "authorization response is missing iss", nil)
+	}
+	return nil
+}
+
+// consumeCallbackSession binds the callback to the user agent that
+// began the flow, then consumes that flow's session, checking it belongs
+// to this client, hasn't expired, and expected a response in respMode.
+func (c *Client) consumeCallbackSession(ctx context.Context, cb AuthorizationCallback, params map[string]json.RawMessage, respMode string) (storage.ConsumedSession, *Error) {
+	state, _ := paramString(params, "state")
+	if state == "" {
+		return storage.ConsumedSession{}, newError(ErrorInvalidRequest, "callback is missing state", nil)
+	}
+	// Bind the callback to the user agent that began the flow (RFC 9700
+	// §4.7) before consuming anything: a mismatch leaves the session
+	// intact for its rightful browser.
+	if cb.Session.value == "" {
+		return storage.ConsumedSession{}, newError(ErrorInvalidRequest, "callback is not bound to a session: AuthorizationCallback.Session is required", nil)
+	}
+	if subtle.ConstantTimeCompare([]byte(state), []byte(cb.Session.value)) != 1 {
+		return storage.ConsumedSession{}, newError(ErrorInvalidRequest, "callback state does not match this user agent's session", nil)
+	}
+
+	consumed, consumeErr := c.deps.Sessions.Consume(ctx, storage.SessionConsumption{State: state})
+	if consumeErr != nil {
+		return storage.ConsumedSession{}, newError(ErrorInvalidRequest, "session is invalid, expired, or already used", consumeErr)
+	}
+	// A session belongs to the client that began it. An application
+	// running one client per issuer over a shared SessionStore routes
+	// each callback to a client itself; a callback routed to the wrong
+	// one must not complete another issuer's flow with that flow's PKCE
+	// verifier and nonce.
+	if consumed.ExpectedIssuer != c.cfg.Issuer.String() {
+		return storage.ConsumedSession{}, newError(ErrorInvalidRequest, "session was begun by a client for a different issuer", nil)
+	}
+	now := c.deps.Clock.Now()
+	if !now.Before(consumed.ExpiresAt) {
+		return storage.ConsumedSession{}, newError(ErrorInvalidRequest, "session has expired", nil)
+	}
+	if respMode != consumed.ExpectedResponseMode {
+		return storage.ConsumedSession{}, newError(ErrorInvalidResponse, "authorization response arrived in an unexpected mode", nil)
+	}
+	return consumed, nil
+}
+
+// callbackDenied returns the authorization server's error response, if
+// params is one (ok), and an error if its error code is malformed.
+func callbackDenied(params map[string]json.RawMessage) (CallbackResult, bool, *Error) {
+	errCode, ok := paramString(params, "error")
+	if !ok || errCode == "" {
+		return nil, false, nil
+	}
+	if !isErrorText(errCode) {
+		return nil, true, newError(ErrorInvalidResponse, "authorization error response has a malformed error code", nil)
+	}
+	errDesc, _ := paramString(params, "error_description")
+	if !isErrorText(errDesc) {
+		errDesc = ""
+	}
+	return CallbackDenied{Code: errCode, Description: errDesc}, true, nil
 }
 
 // parseCallbackParams extracts the authorization response parameters

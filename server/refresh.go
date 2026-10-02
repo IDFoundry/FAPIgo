@@ -170,12 +170,8 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 	result.RefreshToken = fapi.NewSecret(rawToken)
 	result.HasRefreshToken = true
 
-	if s.deps.Nonces != nil && client.SenderConstrain() == storage.SenderConstrainDPoP {
-		nextNonce, err := s.issueDPoPNonce(ctx, now)
-		if err != nil {
-			return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorServerError, 500, "failed to issue dpop nonce", err))
-		}
-		result.NextDPoPNonce = nextNonce
+	if nonceErr := s.addNextDPoPNonce(ctx, client, now, &result); nonceErr != nil {
+		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), nonceErr)
 	}
 
 	s.audit(ctx, AuditEventRefreshAccessToken, client.ID(), AuditOutcomeSuccess, "")

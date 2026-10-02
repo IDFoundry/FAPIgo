@@ -466,13 +466,8 @@ func validateRequiredDependencies(deps Dependencies) error {
 }
 
 func validateConditionalDependencies(cfg Config, deps Dependencies) error {
-	idTokenEncEnabled := len(cfg.Algorithms.IDTokenEncryptionKeyManagement) > 0 || len(cfg.Algorithms.IDTokenEncryptionContentEncryption) > 0
-	if idTokenEncEnabled && deps.ClientEncryptionKeys == nil {
-		return fmt.Errorf("server: dependencies: client encryption keys is required when algorithms.id_token_encryption_key_management/content_encryption are configured")
-	}
-	userInfoEncEnabled := len(cfg.Algorithms.UserInfoEncryptionKeyManagement) > 0 || len(cfg.Algorithms.UserInfoEncryptionContentEncryption) > 0
-	if userInfoEncEnabled && deps.ClientEncryptionKeys == nil {
-		return fmt.Errorf("server: dependencies: client encryption keys is required when algorithms.user_info_encryption_key_management/content_encryption are configured")
+	if err := validateEncryptionDependencies(cfg, deps); err != nil {
+		return err
 	}
 	if deps.Nonces != nil && cfg.Limits.DPoPNonceLifetime <= 0 {
 		return fmt.Errorf("server: config: limits.dpop_nonce_lifetime must be positive when dependencies.nonces is set")
@@ -485,10 +480,7 @@ func validateConditionalDependencies(cfg Config, deps Dependencies) error {
 		return fmt.Errorf("server: dependencies: backchannel notifier is required when endpoints.backchannel_authentication is set")
 	}
 	if cfg.AttestationBasedClientAuthentication {
-		if deps.AttesterTrust == nil {
-			return fmt.Errorf("server: dependencies: attester trust is required when attestation_based_client_authentication is set (pass X5CAttesterChain{...} or RegisteredAttesterKeys{})")
-		}
-		if err := deps.AttesterTrust.validate(); err != nil {
+		if err := validateAttesterTrust(deps.AttesterTrust); err != nil {
 			return err
 		}
 	}
@@ -496,6 +488,29 @@ func validateConditionalDependencies(cfg Config, deps Dependencies) error {
 		return fmt.Errorf("server: dependencies: federation_http is required when automatic_registration.trust_anchors is set")
 	}
 	return nil
+}
+
+// validateEncryptionDependencies requires ClientEncryptionKeys when the
+// server is configured to encrypt ID tokens or UserInfo responses.
+func validateEncryptionDependencies(cfg Config, deps Dependencies) error {
+	idTokenEncEnabled := len(cfg.Algorithms.IDTokenEncryptionKeyManagement) > 0 || len(cfg.Algorithms.IDTokenEncryptionContentEncryption) > 0
+	if idTokenEncEnabled && deps.ClientEncryptionKeys == nil {
+		return fmt.Errorf("server: dependencies: client encryption keys is required when algorithms.id_token_encryption_key_management/content_encryption are configured")
+	}
+	userInfoEncEnabled := len(cfg.Algorithms.UserInfoEncryptionKeyManagement) > 0 || len(cfg.Algorithms.UserInfoEncryptionContentEncryption) > 0
+	if userInfoEncEnabled && deps.ClientEncryptionKeys == nil {
+		return fmt.Errorf("server: dependencies: client encryption keys is required when algorithms.user_info_encryption_key_management/content_encryption are configured")
+	}
+	return nil
+}
+
+// validateAttesterTrust checks the AttesterTrust attestation-based
+// client authentication requires.
+func validateAttesterTrust(trust AttesterTrust) error {
+	if trust == nil {
+		return fmt.Errorf("server: dependencies: attester trust is required when attestation_based_client_authentication is set (pass X5CAttesterChain{...} or RegisteredAttesterKeys{})")
+	}
+	return trust.validate()
 }
 
 // validateProductionAssurance applies StoreAssurance/KeySourceAssurance

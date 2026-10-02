@@ -12,6 +12,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/client"
+	"github.com/idfoundry/fapigo/client/sessioncookie"
 	"github.com/idfoundry/fapigo/federation"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/keys/ephemeral"
@@ -36,12 +37,13 @@ type relyingParty struct {
 	authJWKS json.RawMessage
 	sessions storage.SessionStore
 	redirect string
+	// session binds a sign-in to the browser that began it: the session
+	// handle and the identity provider, in one encrypted cookie.
+	session *sessioncookie.Cookie
 }
 
 const (
-	noSignIn       = "No sign-in in progress"
-	sessionCookie  = "fu_session"
-	providerCookie = "fu_provider"
+	noSignIn = "No sign-in in progress"
 )
 
 func (w *World) newRelyingParty(s serviceSpec) (*relyingParty, error) {
@@ -76,9 +78,15 @@ func (w *World) newRelyingParty(s serviceSpec) (*relyingParty, error) {
 		return nil, err
 	}
 
+	sessionKey := make([]byte, 32)
+	_, _ = rand.Read(sessionKey) // never fails: it crashes the program instead (Go 1.24+)
+	session, err := sessioncookie.New([][]byte{sessionKey}, sessioncookie.Options{})
+	if err != nil {
+		return nil, err
+	}
 	rp := &relyingParty{
 		country: c, w: w, keys: manager, authJWKS: authKey.jwks,
-		sessions: memstore.NewSessionStore(),
+		sessions: memstore.NewSessionStore(), session: session,
 	}
 	rp.entity = &entity{
 		id: w.entityID(s.host), host: s.host, name: s.name, role: "service", country: c.key,
@@ -279,9 +287,12 @@ func (rp *relyingParty) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The session handle binds the callback to this browser (RFC 9700
-	// §4.7): the callback is only accepted alongside this cookie.
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: session.Handle().String(), Path: "/", HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
-	http.SetCookie(w, &http.Cookie{Name: providerCookie, Value: provider, Path: "/", HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+	// §4.7): the callback is only accepted alongside this cookie, which
+	// also names the identity provider.
+	if err := rp.session.Set(w, session, provider, time.Now()); err != nil {
+		rp.w.renderError(w, http.StatusInternalServerError, signInFailed, err.Error())
+		return
+	}
 	u := session.URL()
 	// Not an open redirect: provider must be one of the demo's own
 	// identity providers (idpByID above), and the URL is its
@@ -291,21 +302,16 @@ func (rp *relyingParty) login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (rp *relyingParty) callback(w http.ResponseWriter, r *http.Request) {
-	sessionC, err1 := r.Cookie(sessionCookie)
-	providerC, err2 := r.Cookie(providerCookie)
-	clearCookies(w, sessionCookie, providerCookie)
-	if err1 != nil || err2 != nil {
+	// The session is single-use — consumed by this callback whatever its
+	// outcome — so nothing should keep presenting it.
+	handle, provider, err := rp.session.Read(r, time.Now())
+	rp.session.Clear(w)
+	if err != nil {
 		rp.w.renderError(w, http.StatusBadRequest, noSignIn, "This browser didn't start a sign-in here.")
 		return
 	}
-	handle, err := client.ParseSessionHandle(sessionC.Value)
-	if err != nil {
-		rp.w.renderError(w, http.StatusBadRequest, noSignIn, notStartedHere)
-		return
-	}
-	// The provider cookie comes from the browser: only one of the
-	// demo's own identity providers is looked up.
-	idp := rp.w.idpByID(providerC.Value)
+	// Only one of the demo's own identity providers is looked up.
+	idp := rp.w.idpByID(provider)
 	if idp == nil {
 		rp.w.renderError(w, http.StatusBadRequest, noSignIn, "Unknown identity provider.")
 		return
@@ -382,13 +388,4 @@ func (w *World) displayName(id string) string {
 		}
 	}
 	return id
-}
-
-// clearCookies expires the callback's cookies. The session they carry is
-// single-use — consumed by this callback whatever its outcome — so
-// nothing should keep presenting it.
-func clearCookies(w http.ResponseWriter, names ...string) {
-	for _, name := range names {
-		http.SetCookie(w, &http.Cookie{Name: name, Path: "/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
-	}
 }

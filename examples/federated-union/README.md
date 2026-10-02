@@ -144,7 +144,7 @@ Everything here uses FAPIgo's public API only.
 | Accreditation offices | `federation.TrustMarkIssuer` |
 | Identity providers | `server.Server` with `Config.AutomaticRegistration` and `Config.Federation`; `Server.EntityConfiguration` publishing the Trust Mark; `GrantedAuthorization.ApprovedIdentityClaims` from the consent page; the pending sign-in kept in an encrypted cookie (`server/interactioncookie`) rather than in the process, as a provider running several instances would |
 | Services | `client.DiscoverViaFederation`, `client.NewFromDiscovery`, `BeginAuthorizationRequest.Claims`, `Resolver.VerifyTrustMark` with `RequireFederationAccreditation` |
-| Sign-in | PAR with a signed request object, PKCE, DPoP-bound tokens, and the session cookie binding (`client.ParseSessionHandle`) |
+| Sign-in | PAR with a signed request object, PKCE, DPoP-bound tokens, and the session cookie binding (`client/sessioncookie`, carrying the identity provider too) |
 
 The code:
 

@@ -246,7 +246,7 @@ func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 	q.Set("request_uri", result.RequestURI)
 	browserURL := c.cfg.Endpoints.Authorization.WithQuery(q)
 
-	return AuthorizationSession{url: browserURL, handle: SessionHandle{value: state}}, nil
+	return AuthorizationSession{url: browserURL, handle: SessionHandle{value: state}, expiresAt: now.Add(c.cfg.Limits.SessionLifetime)}, nil
 }
 
 // dpopKeyThumbprint returns the JWK SHA-256 thumbprint (RFC 7638) of

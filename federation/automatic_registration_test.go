@@ -362,6 +362,29 @@ func TestAutomaticClientRepositoryResolveClientFallsBackToFederation(t *testing.
 	if !got.AllowsScope("openid") {
 		t.Errorf("AllowsScope(openid) = false, want true (from AutomaticRegistrationConfig.AllowedScopes)")
 	}
+	if got.AllowsAuthorizationDetailsType("payment") {
+		t.Error("AllowsAuthorizationDetailsType(payment) = true with no AutomaticRegistrationConfig.AuthorizationDetailsTypes")
+	}
+}
+
+// TestAutomaticClientRepositoryAuthorizationDetailsTypesComeFromConfig
+// covers an automatically registered client's RAR types coming from the
+// operator's config, never the RP's own metadata.
+func TestAutomaticClientRepositoryAuthorizationDetailsTypesComeFromConfig(t *testing.T) {
+	f := setupAutomaticRegistrationFixture(t, rpMetadataBuilder(t))
+	cfg := validAutomaticRegistrationConfig()
+	cfg.AuthorizationDetailsTypes = []string{"payment"}
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, f.newResolver(t), f.fetcher, cfg, fixedClock{now: f.now})
+	if err != nil {
+		t.Fatalf("NewAutomaticClientRepository: %v", err)
+	}
+	got, err := repo.ResolveClient(context.Background(), fapi.ClientID(f.rpID))
+	if err != nil {
+		t.Fatalf("ResolveClient: %v", err)
+	}
+	if !got.AllowsAuthorizationDetailsType("payment") {
+		t.Error("AllowsAuthorizationDetailsType(payment) = false, want true from the config")
+	}
 }
 
 func TestAutomaticClientRepositoryResolveClientDoesNotAllowClientCredentialsByDefault(t *testing.T) {

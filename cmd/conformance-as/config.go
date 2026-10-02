@@ -505,6 +505,9 @@ func resolveClient(c ClientConfig) (storage.RegisteredClient, ephemeral.ClientKe
 		BackchannelTokenDeliveryMode:          backchannelTokenDeliveryMode,
 		BackchannelClientNotificationEndpoint: backchannelClientNotificationEndpoint,
 		AllowsClientCredentialsGrant:          c.AllowsClientCredentialsGrant,
+		// Every client of this test AS may request the one RAR type its
+		// sample registry defines (rar.go).
+		AuthorizationDetailsTypes: []string{sampleRARDefinition.Type},
 	})
 	if err != nil {
 		return storage.RegisteredClient{}, ephemeral.ClientKeySpec{}, err

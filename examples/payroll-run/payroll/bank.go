@@ -109,7 +109,10 @@ func (w *World) newBank(certs certificates) (*bank, error) {
 			SenderConstrain:              storage.SenderConstrainMTLS,
 			AllowsClientCredentialsGrant: true,
 			AllowedScopes:                []string{payrollScope},
-			Display:                      storage.ClientDisplay{Name: c.name},
+			// RFC 9396 §10: payroll batches only; the mandates policy
+			// then checks each batch against the company's mandate.
+			AuthorizationDetailsTypes: []string{payrollBatchType.Type},
+			Display:                   storage.ClientDisplay{Name: c.name},
 		})
 		if err != nil {
 			return nil, err

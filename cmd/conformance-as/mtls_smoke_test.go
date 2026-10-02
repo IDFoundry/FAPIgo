@@ -136,11 +136,12 @@ func TestSmokeMTLSFlow(t *testing.T) {
 	const testRedirectURI = "https://rp.smoketest.internal/callback"
 
 	registered, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
-		ID:                       testClientID,
-		RedirectURIs:             []fapi.RegisteredRedirectURI{testRedirectURI},
-		ClientAssertionAlgorithm: fapi.ES256,
-		AllowedScopes:            []string{"openid", "accounts"},
-		SenderConstrain:          storage.SenderConstrainMTLS,
+		ID:                        testClientID,
+		RedirectURIs:              []fapi.RegisteredRedirectURI{testRedirectURI},
+		ClientAssertionAlgorithm:  fapi.ES256,
+		AllowedScopes:             []string{"openid", "accounts"},
+		SenderConstrain:           storage.SenderConstrainMTLS,
+		AuthorizationDetailsTypes: []string{sampleRARDefinition.Type},
 	})
 	if err != nil {
 		t.Fatalf("build registered client: %v", err)

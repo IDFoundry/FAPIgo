@@ -15,6 +15,30 @@ and `keys/ephemeral` needs only the steps not marked *production only*.
 
 ## v0.43.0
 
+### Clients list the RAR types they may request (storage, server)
+
+**Affects:** a server using Rich Authorization Requests (`Config.RAR`),
+for every client that sends `authorization_details`; and
+`federation.AutomaticRegistrationConfig` for automatically registered
+clients that do.
+
+**Why:** RFC 9396 §10 defines `authorization_details_types`, the types a
+client may use. The server now enforces it per client, before any
+`RARPolicy`: a requested type the client isn't registered for is
+`invalid_authorization_details`. The default is the safe one — an empty
+list allows no type — so every client that requests RAR must list its
+types. Before, any registered type reached the policy, which had to
+check the client itself.
+
+**What to change:** set `storage.RegisteredClientConfig.AuthorizationDetailsTypes`
+to the types each client may request (and
+`federation.AutomaticRegistrationConfig.AuthorizationDetailsTypes` for
+automatically registered clients). A `RARPolicy` that only checked
+which types a client may use can then become
+`server.AllowRequestedAuthorizationDetails{}`; keep your own where it
+checks the details themselves. Note one difference from a policy that
+dropped disallowed details: the server refuses the whole request.
+
 ### Custom `SessionStore`s persist an opaque `Record` (client)
 
 **Affects:** a client whose `Dependencies.Sessions` is your own

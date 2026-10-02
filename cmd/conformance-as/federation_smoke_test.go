@@ -55,10 +55,11 @@ func TestSmokeFederationWellKnownEndpoint(t *testing.T) {
 	// live against the OIDF suite instead).
 	const testClientID = fapi.ClientID("federation-smoke-test-client")
 	registered, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
-		ID:                       testClientID,
-		RedirectURIs:             []fapi.RegisteredRedirectURI{"https://rp.smoketest.internal/callback"},
-		ClientAssertionAlgorithm: fapi.ES256,
-		AllowedScopes:            []string{"openid"},
+		ID:                        testClientID,
+		RedirectURIs:              []fapi.RegisteredRedirectURI{"https://rp.smoketest.internal/callback"},
+		ClientAssertionAlgorithm:  fapi.ES256,
+		AllowedScopes:             []string{"openid"},
+		AuthorizationDetailsTypes: []string{sampleRARDefinition.Type},
 	})
 	if err != nil {
 		t.Fatalf("build registered client: %v", err)
@@ -177,10 +178,11 @@ func minimalFederationResolvedConfig(t *testing.T) ResolvedConfig {
 	t.Helper()
 	const testClientID = fapi.ClientID("federation-unit-test-client")
 	registered, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
-		ID:                       testClientID,
-		RedirectURIs:             []fapi.RegisteredRedirectURI{"https://rp.unittest.internal/callback"},
-		ClientAssertionAlgorithm: fapi.ES256,
-		AllowedScopes:            []string{"openid"},
+		ID:                        testClientID,
+		RedirectURIs:              []fapi.RegisteredRedirectURI{"https://rp.unittest.internal/callback"},
+		ClientAssertionAlgorithm:  fapi.ES256,
+		AllowedScopes:             []string{"openid"},
+		AuthorizationDetailsTypes: []string{sampleRARDefinition.Type},
 	})
 	if err != nil {
 		t.Fatalf("build registered client: %v", err)

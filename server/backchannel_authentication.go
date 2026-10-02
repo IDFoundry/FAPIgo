@@ -320,7 +320,7 @@ func (s *Server) resolveBackchannelAuthenticationParameters(ctx context.Context,
 	if err != nil {
 		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "backchannel authentication request verification failed", err)
 	}
-	tokenClaims, checkErr := s.checkBackchannelExtensions(ctx, client.ID(), verified.Parameters)
+	tokenClaims, checkErr := s.checkBackchannelExtensions(ctx, client, verified.Parameters)
 	if checkErr != nil {
 		return verifiedBackchannelRequest{}, checkErr
 	}
@@ -332,7 +332,7 @@ func (s *Server) resolveBackchannelAuthenticationParameters(ctx context.Context,
 // and the same Dependencies.CIBARARPolicy narrowing (see
 // checkExtensions' own doc comment for the shared mechanism — params is
 // mutated in place the same way).
-func (s *Server) checkBackchannelExtensions(ctx context.Context, clientID fapi.ClientID, params map[string]json.RawMessage) (map[string]json.RawMessage, *Error) {
+func (s *Server) checkBackchannelExtensions(ctx context.Context, client storage.RegisteredClient, params map[string]json.RawMessage) (map[string]json.RawMessage, *Error) {
 	values, err := s.cfg.Extensions.Parse(params, coreBackchannelAuthenticationParameters, extension.SourceRequestObject)
 	if err != nil {
 		return nil, newError(ErrorInvalidRequest, 400, "request contains an invalid parameter", err)
@@ -342,7 +342,7 @@ func (s *Server) checkBackchannelExtensions(ctx context.Context, clientID fapi.C
 		return nil, newError(ErrorInvalidRequest, 400, "authorization_details is invalid", err)
 	}
 	if len(requestedAuthorizationDetails) > 0 {
-		granted, policyErr := s.applyRARPolicy(ctx, clientID, s.deps.CIBARARPolicy, requestedAuthorizationDetails)
+		granted, policyErr := s.applyRARPolicy(ctx, client, s.deps.CIBARARPolicy, requestedAuthorizationDetails)
 		if policyErr != nil {
 			return nil, newError(ErrorInvalidAuthorizationDetails, 400, "authorization_details is not permitted for this client", policyErr)
 		}

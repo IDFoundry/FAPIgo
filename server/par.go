@@ -496,7 +496,7 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 			return nil, nil, newError(ErrorInvalidRequest, 400, "a signed request object is required", nil)
 		}
 		plain := plainParamsToJSON(params)
-		tokenClaims, err := s.checkExtensions(ctx, client.ID(), plain, extension.SourcePlainParameter)
+		tokenClaims, err := s.checkExtensions(ctx, client, plain, extension.SourcePlainParameter)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -555,7 +555,7 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 	if _, hasRequestURI := verified.Parameters["request_uri"]; hasRequestURI {
 		return nil, nil, newError(ErrorInvalidRequestObject, 400, "request object must not contain request_uri", nil)
 	}
-	tokenClaims, checkErr := s.checkExtensions(ctx, client.ID(), verified.Parameters, extension.SourceRequestObject)
+	tokenClaims, checkErr := s.checkExtensions(ctx, client, verified.Parameters, extension.SourceRequestObject)
 	if checkErr != nil {
 		return nil, nil, checkErr
 	}
@@ -593,7 +593,7 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 // (resolveAuthorizationParameters) goes on to persist as this PAR
 // record's own Parameters, so this mutation is what makes the narrowed
 // value the one a resource owner is ever shown.
-func (s *Server) checkExtensions(ctx context.Context, clientID fapi.ClientID, params map[string]json.RawMessage, source extension.Source) (map[string]json.RawMessage, *Error) {
+func (s *Server) checkExtensions(ctx context.Context, client storage.RegisteredClient, params map[string]json.RawMessage, source extension.Source) (map[string]json.RawMessage, *Error) {
 	values, err := s.cfg.Extensions.Parse(params, coreAuthorizationParameters, source)
 	if err != nil {
 		code := ErrorInvalidRequest
@@ -611,7 +611,7 @@ func (s *Server) checkExtensions(ctx context.Context, clientID fapi.ClientID, pa
 		return nil, newError(code, 400, "authorization_details is invalid", err)
 	}
 	if len(requestedAuthorizationDetails) > 0 {
-		granted, policyErr := s.applyRARPolicy(ctx, clientID, s.deps.AuthorizationCodeRARPolicy, requestedAuthorizationDetails)
+		granted, policyErr := s.applyRARPolicy(ctx, client, s.deps.AuthorizationCodeRARPolicy, requestedAuthorizationDetails)
 		if policyErr != nil {
 			return nil, newError(ErrorInvalidAuthorizationDetails, 400, "authorization_details is not permitted for this client", policyErr)
 		}

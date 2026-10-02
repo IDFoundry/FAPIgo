@@ -1,14 +1,11 @@
 package checkout
 
 import (
-	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
 	"slices"
 
-	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/extension"
 )
 
@@ -101,29 +98,4 @@ var accountInformationType = extension.RARDefinition[accountInformation]{
 
 func newRARRegistry() (*extension.RARRegistry, error) {
 	return extension.NewRARRegistry(8192, 4, paymentInitiationType, accountInformationType)
-}
-
-// entitlements is which detail types each client may ask for at all:
-// Alder Bank's CIBARARPolicy, consulted before a request reaches the
-// user. A merchant till may initiate payments; a budgeting app may only
-// read accounts.
-type entitlements map[fapi.ClientID][]string
-
-// Authorize implements server.RARPolicy: it keeps the detail objects of
-// types clientID is entitled to, and drops the rest. If none remain,
-// the server refuses the request with invalid_authorization_details.
-func (e entitlements) Authorize(_ context.Context, clientID fapi.ClientID, requested []json.RawMessage) ([]json.RawMessage, error) {
-	var allowed []json.RawMessage
-	for _, raw := range requested {
-		var detail struct {
-			Type string `json:"type"`
-		}
-		if err := json.Unmarshal(raw, &detail); err != nil {
-			return nil, err
-		}
-		if slices.Contains(e[clientID], detail.Type) {
-			allowed = append(allowed, raw)
-		}
-	}
-	return allowed, nil
 }

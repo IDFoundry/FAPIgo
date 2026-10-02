@@ -276,10 +276,7 @@ func (b *bank) userinfo(w http.ResponseWriter, r *http.Request) {
 		internalError(w, err)
 		return
 	}
-	authz, err := b.verifier.Verify(r.Context(), resource.VerifyRequest{
-		Method: r.Method, URL: target,
-		Authorization: r.Header.Get("Authorization"), DPoPProofs: r.Header.Values("DPoP"),
-	})
+	authz, err := b.verifier.Verify(r.Context(), resource.VerifyRequestFromHTTP(r, target))
 	if err != nil {
 		resource.WriteError(w, err)
 		return

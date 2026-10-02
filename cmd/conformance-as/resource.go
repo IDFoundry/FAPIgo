@@ -58,13 +58,7 @@ func userinfoHandler(srv *server.Server, verifier *fapires.Verifier, userinfoURL
 		}
 		w.Header().Set(fapires.InteractionIDHeader, interactionID)
 
-		authCtx, err := verifier.Verify(r.Context(), fapires.VerifyRequest{
-			Method:          r.Method,
-			URL:             userinfoURL,
-			Authorization:   r.Header.Get("Authorization"),
-			DPoPProofs:      r.Header.Values("DPoP"),
-			PeerCertificate: fapires.PeerCertificateFromHTTP(r),
-		})
+		authCtx, err := verifier.Verify(r.Context(), fapires.VerifyRequestFromHTTP(r, userinfoURL))
 		if err != nil {
 			writeResourceError(w, err)
 			return
@@ -158,13 +152,7 @@ func accountsHandler(verifier *fapires.Verifier, accountsURL *url.URL) http.Hand
 		}
 		w.Header().Set(fapires.InteractionIDHeader, interactionID)
 
-		authCtx, err := verifier.Verify(r.Context(), fapires.VerifyRequest{
-			Method:          r.Method,
-			URL:             accountsURL,
-			Authorization:   r.Header.Get("Authorization"),
-			DPoPProofs:      r.Header.Values("DPoP"),
-			PeerCertificate: fapires.PeerCertificateFromHTTP(r),
-		})
+		authCtx, err := verifier.Verify(r.Context(), fapires.VerifyRequestFromHTTP(r, accountsURL))
 		if err != nil {
 			writeResourceError(w, err)
 			return

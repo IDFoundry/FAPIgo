@@ -69,10 +69,7 @@ func (a *api) verify(r *http.Request) (resource.AuthorizationContext, error) {
 	if err != nil {
 		return resource.AuthorizationContext{}, err
 	}
-	return a.verifier.Verify(r.Context(), resource.VerifyRequest{
-		Method: r.Method, URL: target,
-		Authorization: r.Header.Get("Authorization"), DPoPProofs: r.Header.Values("DPoP"),
-	})
+	return a.verifier.Verify(r.Context(), resource.VerifyRequestFromHTTP(r, target))
 }
 
 // forbidden is RFC 6750 §3.1's insufficient_scope: a valid token that

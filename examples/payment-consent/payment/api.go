@@ -10,6 +10,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/idfoundry/fapigo/extension"
 	"github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/serverresource"
 	"github.com/idfoundry/fapigo/storage"
@@ -79,17 +80,13 @@ func (a *api) pay(w http.ResponseWriter, r *http.Request) {
 		resource.NewError(resource.ErrorInvalidRequest, http.StatusBadRequest, "malformed payment order").WriteJSON(w)
 		return
 	}
-	var granted []paymentInitiation
-	var details []json.RawMessage
-	_ = json.Unmarshal(authz.Claims["authorization_details"], &details)
-	for _, raw := range details {
-		var p paymentInitiation
-		if json.Unmarshal(raw, &p) == nil {
-			granted = append(granted, p)
-		}
+	granted, err := grantedPayments(authz)
+	if err != nil {
+		resource.NewError(resource.ErrorInvalidToken, http.StatusUnauthorized, "the token's authorization details are malformed").WriteJSON(w)
+		return
 	}
-	if !slices.ContainsFunc(granted, func(p paymentInitiation) bool {
-		return p.InstructedAmount == order.InstructedAmount && p.CreditorAccount == order.CreditorAccount
+	if !slices.ContainsFunc(granted, func(p extension.RARDetail[paymentInitiation]) bool {
+		return p.Fields.InstructedAmount == order.InstructedAmount && p.Fields.CreditorAccount == order.CreditorAccount
 	}) {
 		// RFC 6750 §3: error_description is printable ASCII, so no "€".
 		resource.NewError(resource.ErrorInsufficientScope, http.StatusForbidden,
@@ -123,4 +120,13 @@ func (a *api) useOnce(ctx context.Context, authz resource.AuthorizationContext) 
 		Digest:    sha256.Sum256([]byte(authz.Key)),
 		ExpiresAt: authz.ExpiresAt.Add(a.skew),
 	}) == nil
+}
+
+// grantedPayments reads the payments authz's token was granted.
+func grantedPayments(authz resource.AuthorizationContext) ([]extension.RARDetail[paymentInitiation], error) {
+	granted, err := extension.ParseGrantedRAR(authz.Claims[extension.AuthorizationDetailsClaim])
+	if err != nil {
+		return nil, err
+	}
+	return extension.RARGet(granted, paymentInitiationType)
 }

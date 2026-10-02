@@ -121,7 +121,7 @@ Everything here uses FAPIgo's public API only.
 | Piece | FAPIgo |
 |---|---|
 | Alder Bank | `server.Server` with `Config.RAR`, both apps registered with `AuthorizationDetailsTypes` for `account_access`, and `Dependencies.AuthorizationCodeRARPolicy` set to `server.AllowRequestedAuthorizationDetails`; `Limits.RefreshTokenLifetime` of 90 days; the token endpoint serving `ExchangeAuthorizationCode` and `RefreshAccessToken`; the consent page answering with `GrantedAuthorization.AuthorizationDetails` (the chosen accounts) and `GrantID`; Connected apps calling `Server.RevokeGrant`; `Dependencies.Revocation` a `memstore.RevocationStore` the API reads too |
-| The account information API | `serverresource.NewVerifier`, which also refuses an access token whose grant was revoked; the shared accounts from the token's `authorization_details` claim |
+| The account information API | `serverresource.NewVerifier`, which also refuses an access token whose grant was revoked; the shared accounts from the token's `authorization_details` claim (`extension.ParseGrantedRAR`, `RARGet`) |
 | Pocketwise | `client.NewFromDiscovery`; `BeginAuthorization` with `offline_access` and `AuthorizationDetails`; `CompleteAuthorization`; `RefreshTokens` for every sync; `ProtectedResource` for the API |
 | The demo clock | one `Now()` behind `server.Dependencies.Clock` and `client.Dependencies.Clock` |
 

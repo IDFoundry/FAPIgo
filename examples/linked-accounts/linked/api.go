@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/idfoundry/fapigo/extension"
 	"github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/serverresource"
 )
@@ -54,21 +55,24 @@ func (a *api) accounts(w http.ResponseWriter, r *http.Request) {
 		resource.WriteError(w, err)
 		return
 	}
-	var details []accountAccess
-	_ = json.Unmarshal(authz.Claims["authorization_details"], &details)
+	details, err := grantedAccess(authz)
+	if err != nil {
+		resource.NewError(resource.ErrorInvalidToken, http.StatusUnauthorized, "the token's authorization details are malformed").WriteJSON(w)
+		return
+	}
 	if len(details) == 0 {
 		resource.NewError(resource.ErrorInsufficientScope, http.StatusForbidden, "the token grants no account access").WriteJSON(w)
 		return
 	}
 	c, _ := customerByName(authz.Subject)
 	out := []accountView{}
-	for _, iban := range details[0].Accounts {
+	for _, iban := range details[0].Fields.Accounts {
 		acct, ok := c.account(iban)
 		if !ok {
 			continue
 		}
 		view := accountView{IBAN: iban, Name: acct.Name}
-		for _, action := range details[0].Actions {
+		for _, action := range details[0].Fields.Actions {
 			switch action {
 			case "read_balances":
 				view.Balance = acct.Balance
@@ -80,4 +84,13 @@ func (a *api) accounts(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
+}
+
+// grantedAccess reads the account access authz's token was granted.
+func grantedAccess(authz resource.AuthorizationContext) ([]extension.RARDetail[accountAccess], error) {
+	granted, err := extension.ParseGrantedRAR(authz.Claims[extension.AuthorizationDetailsClaim])
+	if err != nil {
+		return nil, err
+	}
+	return extension.RARGet(granted, accountAccessType)
 }

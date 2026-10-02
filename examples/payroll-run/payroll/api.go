@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/idfoundry/fapigo/extension"
 	"github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/serverresource"
 	"github.com/idfoundry/fapigo/storage"
@@ -94,7 +95,7 @@ func (a *api) submit(w http.ResponseWriter, r *http.Request) {
 		}
 		total += c
 	}
-	if problem := withinGrant(authz.Claims["authorization_details"], b, total); problem != "" {
+	if problem := withinGrant(authz.Claims[extension.AuthorizationDetailsClaim], b, total); problem != "" {
 		// RFC 6750 §3: error_description is printable ASCII, so no "€".
 		resource.NewError(resource.ErrorInsufficientScope, http.StatusForbidden, problem).WriteJSON(w)
 		return
@@ -113,12 +114,18 @@ func (a *api) submit(w http.ResponseWriter, r *http.Request) {
 // withinGrant explains why b, paying total cents, isn't the batch the
 // token's granted authorization_details allow; "" if it is.
 func withinGrant(details json.RawMessage, b batch, total int64) string {
-	var granted []payrollBatch
-	_ = json.Unmarshal(details, &granted)
-	if len(granted) == 0 {
+	values, err := extension.ParseGrantedRAR(details)
+	if err != nil {
+		return "the token's payroll grant is malformed"
+	}
+	granted, err := extension.RARGet(values, payrollBatchType)
+	switch {
+	case err != nil:
+		return "the token's payroll grant is malformed"
+	case len(granted) == 0:
 		return "the token grants no payroll batch"
 	}
-	g := granted[0]
+	g := granted[0].Fields
 	limit, err := cents(g.TotalAmount.Amount)
 	switch {
 	case err != nil:

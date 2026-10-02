@@ -81,7 +81,9 @@ type envelope struct {
 // opened until expiresAt; it refuses a value already expired, and one
 // too large for a cookie (ErrTooLarge), setting nothing.
 func (j *Jar) Set(w http.ResponseWriter, value any, expiresAt, now time.Time) error {
-	if !now.Before(expiresAt) {
+	// Max-Age counts whole seconds, and 0 would make a session cookie:
+	// less than a second left is as good as expired.
+	if expiresAt.Sub(now) < time.Second {
 		return fmt.Errorf("%s: already expired", j.pkg)
 	}
 	encoded, err := json.Marshal(value)

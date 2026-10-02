@@ -19,8 +19,9 @@ func TestSmokeAuthorizeRefusesARepeatedParameter(t *testing.T) {
 	}
 	defer func() { _ = res.Body.Close() }()
 	body, _ := io.ReadAll(res.Body)
-	if res.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), "invalid_request") {
-		t.Fatalf("repeated request_uri = %d:\n%s\nwant a local 400 invalid_request", res.StatusCode, body)
+	// The repeat itself is refused, not the request_uri it names.
+	if res.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), "invalid_request") || !strings.Contains(string(body), "the authorization request is malformed") {
+		t.Fatalf("repeated request_uri = %d:\n%s\nwant a local 400 invalid_request for the malformed request", res.StatusCode, body)
 	}
 }
 

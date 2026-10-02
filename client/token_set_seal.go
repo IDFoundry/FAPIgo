@@ -66,14 +66,10 @@ func NewTokenSetSealer(c *Client, keys [][]byte) (*TokenSetSealer, error) {
 		if len(k) != 32 {
 			return nil, fmt.Errorf("client: token set key %d is %d bytes, want 32", i, len(k))
 		}
-		block, err := aes.NewCipher(k)
-		if err != nil {
-			return nil, err
-		}
-		aead, err := cipher.NewGCM(block)
-		if err != nil {
-			return nil, err
-		}
+		// A 32-byte key always makes an AES-256 block, and AES always
+		// makes a GCM.
+		block, _ := aes.NewCipher(k)
+		aead, _ := cipher.NewGCM(block)
 		sum := sha256.Sum256(k)
 		s.keys = append(s.keys, tokenSetKey{id: [4]byte(sum[:4]), aead: aead})
 	}
@@ -93,9 +89,7 @@ func (s *TokenSetSealer) Seal(t TokenSet, owner string) ([]byte, error) {
 	}
 	key := s.keys[0]
 	nonce := make([]byte, key.aead.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
-		return nil, newError(ErrorInternal, "failed to seal the token set", err)
-	}
+	_, _ = rand.Read(nonce) // never fails: it crashes the program instead (Go 1.24+)
 	out := append([]byte{tokenSetSealVersion}, key.id[:]...)
 	out = append(out, nonce...)
 	return key.aead.Seal(out, nonce, plaintext, s.additionalData(owner)), nil

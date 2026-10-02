@@ -205,3 +205,14 @@ func TestTokenSetSealerKnowsEveryField(t *testing.T) {
 		}
 	}
 }
+
+// TestTokenSetSealerRefusesUnencodableDetails covers a TokenSet built by
+// hand with authorization details that aren't JSON: Seal can't encode it.
+func TestTokenSetSealerRefusesUnencodableDetails(t *testing.T) {
+	tokens := fullTokenSet()
+	tokens.AuthorizationDetails = json.RawMessage(`[{"type":`)
+	var cerr *client.Error
+	if _, err := sealer(t, testClientID, sealKey(1)).Seal(tokens, "user-1"); !errors.As(err, &cerr) || cerr.Code() != client.ErrorInternal {
+		t.Errorf("Seal(malformed authorization details) = %v, want an internal *client.Error", err)
+	}
+}

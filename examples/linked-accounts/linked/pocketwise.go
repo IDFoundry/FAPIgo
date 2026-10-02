@@ -117,7 +117,7 @@ func (l *lazyClient) get(ctx context.Context) (*client.Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("discover Alder Bank: %w", err)
 	}
-	issuerKeys, err := keys.NewJWKSIssuerKeySource(fetcher, discovered.JWKSURI, 10*time.Minute)
+	issuerKeys, err := discovered.IssuerKeySource(fetcher, 10*time.Minute)
 	if err != nil {
 		return nil, err
 	}

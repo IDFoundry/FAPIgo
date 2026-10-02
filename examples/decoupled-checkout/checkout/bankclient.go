@@ -14,7 +14,6 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/client"
-	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
 	"github.com/idfoundry/fapigo/storage/memstore"
 )
@@ -51,7 +50,7 @@ func (b *bankClient) get(ctx context.Context) (*client.Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("discover Alder Bank: %w", err)
 	}
-	issuerKeys, err := keys.NewJWKSIssuerKeySource(fetcher, discovered.JWKSURI, 10*time.Minute)
+	issuerKeys, err := discovered.IssuerKeySource(fetcher, 10*time.Minute)
 	if err != nil {
 		return nil, err
 	}

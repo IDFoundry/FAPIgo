@@ -6,6 +6,9 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -570,5 +573,30 @@ func TestErrorAccessorsWithoutCause(t *testing.T) {
 	}
 	if rerr.Error() != "resource: invalid_request: method is required" {
 		t.Fatalf("Error() = %q, want %q", rerr.Error(), "resource: invalid_request: method is required")
+	}
+}
+
+// TestVerifyRefusesRepeatedAuthorization covers a request with two
+// Authorization headers, through VerifyRequestFromHTTP: refused as
+// invalid_request rather than verified on the first, while a proxy in
+// front might have acted on the other.
+func TestVerifyRefusesRepeatedAuthorization(t *testing.T) {
+	f := newFixture(t)
+	request := func(authorizations ...string) *http.Request {
+		r := httptest.NewRequest("GET", f.target.String(), nil)
+		for _, a := range authorizations {
+			r.Header.Add("Authorization", a)
+		}
+		r.Header.Set("DPoP", f.dpopProof)
+		return r
+	}
+
+	if _, err := f.verifier.Verify(context.Background(), resource.VerifyRequestFromHTTP(request("DPoP "+f.accessToken), f.target)); err != nil {
+		t.Fatalf("Verify(one Authorization header) = %v, want nil", err)
+	}
+	_, err := f.verifier.Verify(context.Background(), resource.VerifyRequestFromHTTP(request("DPoP "+f.accessToken, "Bearer other"), f.target))
+	var rerr *resource.Error
+	if !errors.As(err, &rerr) || rerr.Code() != resource.ErrorInvalidRequest || rerr.HTTPStatus() != http.StatusBadRequest {
+		t.Errorf("Verify(two Authorization headers) = %v, want a 400 invalid_request", err)
 	}
 }

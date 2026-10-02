@@ -26,8 +26,14 @@ import (
 // sender-constrained one way or the other; a bearer token presented
 // with neither a DPoP proof nor a client certificate is rejected.
 type VerifyRequest struct {
-	Method        string
-	URL           *url.URL
+	Method string
+	URL    *url.URL
+
+	// Authorization is the request's one Authorization header. A request
+	// with more than one is malformed (RFC 9110 §5.3: the field isn't a
+	// list): VerifyRequestFromHTTP marks it so for Verify to refuse, and
+	// an adapter filling this field itself refuses it first, rather than
+	// passing one of them on. A proxy in front might act on another.
 	Authorization string
 
 	// DPoPProofs is every "DPoP" header value the request carried, in
@@ -47,6 +53,10 @@ type VerifyRequest struct {
 	// one). An HTTP adapter reads this straight from the connection's
 	// own TLS state; this package never terminates TLS itself.
 	PeerCertificate *x509.Certificate
+
+	// repeatedAuthorization is VerifyRequestFromHTTP's mark of a request
+	// with more than one Authorization header.
+	repeatedAuthorization bool
 }
 
 // AuthorizationContext is what Verify returns for a successfully
@@ -191,6 +201,9 @@ func parseAuthorization(req VerifyRequest) (dpopProof, raw string, usedDPoP bool
 		return "", "", true, newError(ErrorInvalidDPoPProof, 401, "multiple DPoP proofs are not permitted", nil)
 	}
 
+	if req.repeatedAuthorization {
+		return "", "", false, newError(ErrorInvalidRequest, 400, "multiple Authorization headers are not permitted", nil)
+	}
 	if strings.TrimSpace(req.Authorization) == "" {
 		return "", "", false, noCredentials("no Authorization header")
 	}

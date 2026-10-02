@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"io"
+	"time"
 
 	fapi "github.com/idfoundry/fapigo"
 )
@@ -28,7 +29,9 @@ func generateRandomToken(random io.Reader) (string, error) {
 // it with that browser — an HttpOnly, Secure, SameSite=Lax cookie, set
 // when redirecting to AuthorizationSession.URL — and passes it back as
 // AuthorizationCallback.Session when the callback arrives, recovered
-// with ParseSessionHandle.
+// with ParseSessionHandle. Package client/sessioncookie does this, in an
+// encrypted cookie that can carry the application's own value for the
+// authorization (an order ID, say) alongside.
 //
 // That binding is required, not defense in depth: the callback's own
 // "state" only identifies a session, and anyone can deliver a callback
@@ -61,8 +64,9 @@ func ParseSessionHandle(s string) (SessionHandle, error) {
 // to redirect the user agent to, and an opaque handle for the caller's
 // own correlation purposes.
 type AuthorizationSession struct {
-	url    fapi.URL
-	handle SessionHandle
+	url       fapi.URL
+	handle    SessionHandle
+	expiresAt time.Time
 }
 
 // URL is the authorization URL to redirect the user agent to.
@@ -70,3 +74,9 @@ func (s AuthorizationSession) URL() fapi.URL { return s.url }
 
 // Handle is this session's opaque correlation handle.
 func (s AuthorizationSession) Handle() SessionHandle { return s.handle }
+
+// ExpiresAt is when the session expires (Limits.SessionLifetime from
+// BeginAuthorization, by Dependencies.Clock): a callback after that is
+// refused, so whatever binds the handle to the browser — a cookie — can
+// expire with it.
+func (s AuthorizationSession) ExpiresAt() time.Time { return s.expiresAt }

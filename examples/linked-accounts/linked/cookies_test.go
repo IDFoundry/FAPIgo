@@ -3,6 +3,8 @@ package linked_test
 import (
 	"net/url"
 	"testing"
+
+	"github.com/idfoundry/fapigo/client/sessioncookie"
 )
 
 // TestCallbackClearsTheSessionCookie covers the client session cookie
@@ -16,7 +18,7 @@ func TestCallbackClearsTheSessionCookie(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range d.http.Jar.Cookies(u) {
-		if c.Name == "pocketwise_session" {
+		if c.Name == sessioncookie.DefaultName {
 			t.Errorf("the browser still holds %s after the callback", c.Name)
 		}
 	}

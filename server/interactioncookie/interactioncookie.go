@@ -26,30 +26,21 @@
 package interactioncookie
 
 import (
-	"crypto/aes"
-	"crypto/cipher"
 	"crypto/rand"
-	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
+	"github.com/idfoundry/fapigo/internal/sealedcookie"
 	"github.com/idfoundry/fapigo/server"
 )
-
-// version prefixes every sealed value, so a later format can be told
-// apart.
-const version byte = 1
 
 // MaxValueBytes bounds a sealed cookie value. A browser stores about
 // 4096 bytes per cookie, its name and attributes included; Set refuses a
 // larger value with ErrTooLarge.
-const MaxValueBytes = 3800
+const MaxValueBytes = sealedcookie.MaxValueBytes
 
 // DefaultName is the cookie's name unless Options.Name sets another.
 // The __Host- prefix makes the browser accept it only Secure, for this
@@ -86,55 +77,28 @@ type Options struct {
 
 // Cookie seals interactions into a cookie, and opens them again.
 type Cookie struct {
-	name, path string
-	keys       []sealingKey // keys[0] seals
-}
-
-type sealingKey struct {
-	id   [4]byte
-	aead cipher.AEAD
+	jar *sealedcookie.Jar
 }
 
 // New returns a Cookie sealing with keys[0] and opening with any of keys,
 // each 32 random bytes (AES-256) shared by every instance of the server.
 func New(keys [][]byte, opts Options) (*Cookie, error) {
-	if len(keys) == 0 {
-		return nil, errors.New("interactioncookie: at least one key is required")
+	name := opts.Name
+	if name == "" {
+		name = DefaultName
 	}
-	c := &Cookie{name: opts.Name, path: opts.Path}
-	if c.name == "" {
-		c.name = DefaultName
+	jar, err := sealedcookie.New("interactioncookie", keys, name, opts.Path)
+	if err != nil {
+		return nil, err
 	}
-	if c.path == "" {
-		c.path = "/"
-	}
-	if strings.HasPrefix(c.name, "__Host-") && c.path != "/" {
-		return nil, errors.New("interactioncookie: a __Host- cookie must have Path /")
-	}
-	for i, k := range keys {
-		if len(k) != 32 {
-			return nil, fmt.Errorf("interactioncookie: key %d is %d bytes, want 32", i, len(k))
-		}
-		block, err := aes.NewCipher(k)
-		if err != nil {
-			return nil, err
-		}
-		aead, err := cipher.NewGCM(block)
-		if err != nil {
-			return nil, err
-		}
-		sum := sha256.Sum256(k)
-		c.keys = append(c.keys, sealingKey{id: [4]byte(sum[:4]), aead: aead})
-	}
-	return c, nil
+	return &Cookie{jar: jar}, nil
 }
 
-// sealed is the plaintext a cookie value encrypts.
+// sealed is what a cookie carries.
 type sealed struct {
-	ExpiresAt int64  `json:"exp"`
-	Tag       string `json:"tag"`
-	Handle    string `json:"handle"`
-	Request   string `json:"request"`
+	Tag     string `json:"tag"`
+	Handle  string `json:"handle"`
+	Request string `json:"request"`
 }
 
 // Set seals a — BeginAuthorization's InteractionRequired — as of now
@@ -145,28 +109,20 @@ type sealed struct {
 // (Dependencies.Clock). Set returns ErrTooLarge, setting nothing, when
 // the interaction doesn't fit.
 func (c *Cookie) Set(w http.ResponseWriter, a server.InteractionRequired, now time.Time) (string, error) {
-	if !now.Before(a.ExpiresAt) {
-		return "", errors.New("interactioncookie: the interaction has already expired")
-	}
 	encoded, err := a.Interaction.MarshalText()
 	if err != nil {
 		return "", err
 	}
-	key := c.keys[0]
-	// One read for the tag and the nonce: the tag's 16 bytes, then the
-	// nonce.
-	random := make([]byte, 16+key.aead.NonceSize())
+	random := make([]byte, 16)
 	_, _ = rand.Read(random) // never fails: it crashes the program instead (Go 1.24+)
-	tag, nonce := base64.RawURLEncoding.EncodeToString(random[:16]), random[16:]
-	// Strings and an integer: encoding can't fail.
-	plaintext, _ := json.Marshal(sealed{ExpiresAt: a.ExpiresAt.Unix(), Tag: tag, Handle: a.Handle.String(), Request: string(encoded)})
-	header := append([]byte{version}, key.id[:]...)
-	box := append(append(header, nonce...), key.aead.Seal(nil, nonce, plaintext, c.additionalData())...)
-	value := base64.RawURLEncoding.EncodeToString(box)
-	if len(value) > MaxValueBytes {
+	tag := base64.RawURLEncoding.EncodeToString(random)
+	err = c.jar.Set(w, sealed{Tag: tag, Handle: a.Handle.String(), Request: string(encoded)}, a.ExpiresAt, now)
+	if errors.Is(err, sealedcookie.ErrTooLarge) {
 		return "", ErrTooLarge
 	}
-	http.SetCookie(w, c.cookie(value, int(a.ExpiresAt.Sub(now)/time.Second)))
+	if err != nil {
+		return "", err
+	}
 	return tag, nil
 }
 
@@ -175,12 +131,8 @@ func (c *Cookie) Set(w http.ResponseWriter, a server.InteractionRequired, now ti
 // cookie, a key that doesn't open it, a tampered or expired value, or a
 // cookie for another interaction than tag's — is ErrNoInteraction.
 func (c *Cookie) Read(r *http.Request, now time.Time, tag string) (server.InteractionHandle, server.InteractionRequest, error) {
-	ck, err := r.Cookie(c.name)
-	if err != nil {
-		return server.InteractionHandle{}, server.InteractionRequest{}, ErrNoInteraction
-	}
-	s, ok := c.open(ck.Value, now)
-	if !ok || tag == "" || subtle.ConstantTimeCompare([]byte(s.Tag), []byte(tag)) != 1 {
+	var s sealed
+	if !c.jar.Open(r, now, &s) || tag == "" || subtle.ConstantTimeCompare([]byte(s.Tag), []byte(tag)) != 1 {
 		return server.InteractionHandle{}, server.InteractionRequest{}, ErrNoInteraction
 	}
 	handle, err := server.ParseInteractionHandle(s.Handle)
@@ -194,42 +146,8 @@ func (c *Cookie) Read(r *http.Request, now time.Time, tag string) (server.Intera
 	return handle, in, nil
 }
 
-func (c *Cookie) open(value string, now time.Time) (sealed, bool) {
-	box, err := base64.RawURLEncoding.DecodeString(value)
-	if err != nil || len(box) < 5 || box[0] != version {
-		return sealed{}, false
-	}
-	id, rest := [4]byte(box[1:5]), box[5:]
-	for _, key := range c.keys {
-		if key.id != id || len(rest) < key.aead.NonceSize() {
-			continue
-		}
-		nonce, ciphertext := rest[:key.aead.NonceSize()], rest[key.aead.NonceSize():]
-		plaintext, err := key.aead.Open(nil, nonce, ciphertext, c.additionalData())
-		if err != nil {
-			return sealed{}, false
-		}
-		var s sealed
-		if json.Unmarshal(plaintext, &s) != nil || !now.Before(time.Unix(s.ExpiresAt, 0)) {
-			return sealed{}, false
-		}
-		return s, true
-	}
-	return sealed{}, false
-}
-
 // Clear expires the cookie on w: call it once the interaction is
 // completed, whatever its outcome.
 func (c *Cookie) Clear(w http.ResponseWriter) {
-	http.SetCookie(w, c.cookie("", -1))
-}
-
-func (c *Cookie) cookie(value string, maxAge int) *http.Cookie {
-	return &http.Cookie{Name: c.name, Value: value, Path: c.path, MaxAge: maxAge, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode}
-}
-
-// additionalData binds a sealed value to this cookie's name and format,
-// so one sealed for another cookie, or another format, doesn't open.
-func (c *Cookie) additionalData() []byte {
-	return append([]byte(c.name), version)
+	c.jar.Clear(w)
 }

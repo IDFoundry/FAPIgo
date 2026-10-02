@@ -15,6 +15,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/client"
+	"github.com/idfoundry/fapigo/client/sessioncookie"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/keys/ephemeral"
 	"github.com/idfoundry/fapigo/storage"
@@ -22,9 +23,7 @@ import (
 )
 
 const (
-	callbackPath  = "/callback"
-	sessionCookie = "rp_session"
-	checkCookie   = "rp_check"
+	callbackPath = "/callback"
 )
 
 // rpSetup is what a relying party asks Alder Bank for.
@@ -74,6 +73,9 @@ type relyingParty struct {
 	// client software without its DPoP key: what someone who stole an
 	// access token could do with it.
 	client, thief *lazyClient
+	// session binds each check to the browser that began it: the session
+	// handle and the check, in one encrypted cookie.
+	session *sessioncookie.Cookie
 
 	mu     sync.Mutex
 	checks map[string]*check
@@ -135,7 +137,13 @@ func (w *World) newRelyingParty(setup rpSetup) (*relyingParty, error) {
 	if err != nil {
 		return nil, err
 	}
-	rp := &relyingParty{w: w, setup: setup, keys: km, jwks: jwks, sessions: memstore.NewSessionStore(), checks: map[string]*check{}}
+	sessionKey := make([]byte, 32)
+	_, _ = rand.Read(sessionKey) // never fails: it crashes the program instead (Go 1.24+)
+	session, err := sessioncookie.New([][]byte{sessionKey}, sessioncookie.Options{})
+	if err != nil {
+		return nil, err
+	}
+	rp := &relyingParty{w: w, setup: setup, keys: km, jwks: jwks, sessions: memstore.NewSessionStore(), checks: map[string]*check{}, session: session}
 	rp.client = &lazyClient{rp: rp, keys: km}
 	rp.thief = &lazyClient{rp: rp, keys: thiefKeys}
 
@@ -281,9 +289,11 @@ func (rp *relyingParty) start(w http.ResponseWriter, r *http.Request) {
 		})
 		if err == nil {
 			ck.session = session.Handle()
-			for name, value := range map[string]string{sessionCookie: session.Handle().String(), checkCookie: ck.ID} {
-				http.SetCookie(w, &http.Cookie{Name: name, Value: value, Path: "/", HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
-			}
+			// The callback is only accepted alongside this cookie (RFC
+			// 9700 §4.7), which also names the check.
+			err = rp.session.Set(w, session, ck.ID, time.Now())
+		}
+		if err == nil {
 			u := session.URL()
 			// Not an open redirect: Alder Bank's authorization endpoint,
 			// from its discovery metadata.
@@ -312,21 +322,17 @@ func (rp *relyingParty) finish(ck *check, status, problem string) {
 // for an ID token, checks how the customer signed in, and fetches the
 // approved UserInfo claims.
 func (rp *relyingParty) callback(w http.ResponseWriter, r *http.Request) {
-	sessionC, err1 := r.Cookie(sessionCookie)
-	checkC, err2 := r.Cookie(checkCookie)
-	clearCookies(w, sessionCookie, checkCookie)
+	// The session is single-use — consumed by this callback whatever its
+	// outcome — so nothing should keep presenting it.
+	handle, checkID, err := rp.session.Read(r, time.Now())
+	rp.session.Clear(w)
 	var ck *check
 	ok := false
-	if err2 == nil {
-		ck, ok = rp.lookup(checkC.Value)
+	if err == nil {
+		ck, ok = rp.lookup(checkID)
 	}
-	if err1 != nil || !ok {
+	if !ok {
 		rp.w.renderError(w, rp.setup.host, http.StatusBadRequest, "No identity check in progress", "This browser didn't start one here.")
-		return
-	}
-	handle, err := client.ParseSessionHandle(sessionC.Value)
-	if err != nil {
-		rp.w.renderError(w, rp.setup.host, http.StatusBadRequest, "No identity check in progress", notStartedHere)
 		return
 	}
 	rp.complete(r.Context(), ck, handle, r.URL.RawQuery)
@@ -443,13 +449,4 @@ func describeError(err error) string {
 		}
 	}
 	return err.Error()
-}
-
-// clearCookies expires the callback's cookies. The session they carry is
-// single-use — consumed by this callback whatever its outcome — so
-// nothing should keep presenting it.
-func clearCookies(w http.ResponseWriter, names ...string) {
-	for _, name := range names {
-		http.SetCookie(w, &http.Cookie{Name: name, Path: "/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
-	}
 }

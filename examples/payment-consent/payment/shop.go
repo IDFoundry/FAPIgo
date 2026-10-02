@@ -19,6 +19,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/client"
+	"github.com/idfoundry/fapigo/client/sessioncookie"
 	"github.com/idfoundry/fapigo/extension"
 	"github.com/idfoundry/fapigo/server/interactioncookie"
 	"github.com/idfoundry/fapigo/storage"
@@ -26,11 +27,9 @@ import (
 )
 
 const (
-	shopName      = "Northgate Outfitters"
-	callbackPath  = "/callback"
-	sessionCookie = "northgate_session"
-	orderCookie   = "northgate_order"
-	price         = "129.00"
+	shopName     = "Northgate Outfitters"
+	callbackPath = "/callback"
+	price        = "129.00"
 )
 
 // shop is Northgate Outfitters: it takes payment by bank through Alder
@@ -43,6 +42,9 @@ type shop struct {
 	// access token could do with it. misdirected registers a redirect
 	// URI Alder Bank never saw.
 	client, thief, misdirected *lazyClient
+	// session binds each checkout to the browser that began it: the
+	// session handle and the order, in one encrypted cookie.
+	session *sessioncookie.Cookie
 
 	mu     sync.Mutex
 	orders map[string]*order
@@ -85,7 +87,13 @@ func (w *World) newShop(k clientKeys) (*shop, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &shop{w: w, sessions: memstore.NewSessionStore(), orders: map[string]*order{}}
+	sessionKey := make([]byte, 32)
+	_, _ = rand.Read(sessionKey) // never fails: it crashes the program instead (Go 1.24+)
+	session, err := sessioncookie.New([][]byte{sessionKey}, sessioncookie.Options{})
+	if err != nil {
+		return nil, err
+	}
+	s := &shop{w: w, sessions: memstore.NewSessionStore(), orders: map[string]*order{}, session: session}
 	s.client = &lazyClient{w: w, keys: k, redirect: w.URL(shopHost, callbackPath), sessions: s.sessions}
 	s.thief = &lazyClient{w: w, keys: thiefKeys, redirect: w.URL(shopHost, callbackPath), sessions: s.sessions}
 	s.misdirected = &lazyClient{w: w, keys: k, redirect: "https://collect.example/callback", sessions: s.sessions}
@@ -230,7 +238,11 @@ func (s *shop) pay(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, orderURL(o.ID), http.StatusSeeOther)
 		return
 	}
-	s.startSession(w, o, session)
+	if err := s.startSession(w, o, session); err != nil {
+		o.Status, o.Problem = "failed", err.Error()
+		http.Redirect(w, r, orderURL(o.ID), http.StatusSeeOther)
+		return
+	}
 	u := session.URL()
 	// Not an open redirect: Alder Bank's authorization endpoint, from its
 	// discovery metadata.
@@ -238,31 +250,26 @@ func (s *shop) pay(w http.ResponseWriter, r *http.Request) {
 }
 
 // startSession binds the checkout to this browser: the callback is only
-// accepted alongside this session cookie (RFC 9700 §4.7).
-func (s *shop) startSession(w http.ResponseWriter, o *order, session client.AuthorizationSession) {
+// accepted alongside this session cookie (RFC 9700 §4.7), which also
+// names the order.
+func (s *shop) startSession(w http.ResponseWriter, o *order, session client.AuthorizationSession) error {
 	o.session = session.Handle()
-	for name, value := range map[string]string{sessionCookie: session.Handle().String(), orderCookie: o.ID} {
-		http.SetCookie(w, &http.Cookie{Name: name, Value: value, Path: "/", HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
-	}
+	return s.session.Set(w, session, o.ID, time.Now())
 }
 
 // callback receives Alder Bank's signed authorization response,
 // validates it, redeems the code and charges the approved payment.
 func (s *shop) callback(w http.ResponseWriter, r *http.Request) {
-	sessionC, err1 := r.Cookie(sessionCookie)
-	orderC, err2 := r.Cookie(orderCookie)
-	clearCookies(w, sessionCookie, orderCookie)
+	// The session is single-use — consumed by this callback whatever its
+	// outcome — so nothing should keep presenting it.
+	handle, orderID, err := s.session.Read(r, time.Now())
+	s.session.Clear(w)
 	o, ok := (*order)(nil), false
-	if err2 == nil {
-		o, ok = s.lookup(orderC.Value)
+	if err == nil {
+		o, ok = s.lookup(orderID)
 	}
-	if err1 != nil || !ok {
+	if !ok {
 		s.w.renderError(w, shopHost, http.StatusBadRequest, "No payment in progress", "This browser didn't start a checkout here.")
-		return
-	}
-	handle, err := client.ParseSessionHandle(sessionC.Value)
-	if err != nil {
-		s.w.renderError(w, shopHost, http.StatusBadRequest, "No payment in progress", notStartedHere)
 		return
 	}
 	s.mu.Lock()
@@ -382,7 +389,11 @@ func (s *shop) inject(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, orderURL(o.ID), http.StatusSeeOther)
 		return
 	}
-	s.startSession(w, o, session)
+	if err := s.startSession(w, o, session); err != nil {
+		o.Status, o.Problem = "failed", err.Error()
+		http.Redirect(w, r, orderURL(o.ID), http.StatusSeeOther)
+		return
+	}
 	attackerResponse, err := s.w.approveOnAnotherDevice(r.Context(), "alex", "1357")
 	if err != nil {
 		o.Status, o.Problem = "failed", "the attacker's approval failed: "+err.Error()
@@ -576,13 +587,4 @@ func randomCode(n int) string {
 		b[i] = alphabet[int(b[i])%len(alphabet)]
 	}
 	return string(b)
-}
-
-// clearCookies expires the callback's cookies. The session they carry is
-// single-use — consumed by this callback whatever its outcome — so
-// nothing should keep presenting it.
-func clearCookies(w http.ResponseWriter, names ...string) {
-	for _, name := range names {
-		http.SetCookie(w, &http.Cookie{Name: name, Path: "/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
-	}
 }

@@ -52,6 +52,7 @@ Concretely:
 ```text
 fapigo/                    // package fapi: shared value types only
 ├── client/                // RP public API
+│   └── sessioncookie/      // the session handle bound to the browser in one encrypted cookie
 ├── server/                // AS public API
 │   └── interactioncookie/  // an interaction carried in one encrypted browser cookie
 ├── resource/              // RS verification API
@@ -87,6 +88,7 @@ fapigo/                    // package fapi: shared value types only
 │   ├── grantrevocation/         // the grant_id claim and revocation key shared by server and resource
 │   ├── canonical/               // URL/JSON canonicalization
 │   ├── strictjson/              // case-sensitive JSON member names for JOSE/metadata decoding
+│   ├── sealedcookie/            // the encrypted cookie behind interactioncookie and sessioncookie
 │   └── validation/               // generic strict-parsing helpers
 ├── cmd/
 │   ├── conformance-as/             // the AS (and its RS) the OIDF suite tests, built on server/resource

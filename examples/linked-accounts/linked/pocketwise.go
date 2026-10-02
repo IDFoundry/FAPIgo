@@ -15,6 +15,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/client"
+	"github.com/idfoundry/fapigo/client/sessioncookie"
 	"github.com/idfoundry/fapigo/extension"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
@@ -22,8 +23,7 @@ import (
 )
 
 const (
-	callbackPath  = "/callback"
-	sessionCookie = "pocketwise_session"
+	callbackPath = "/callback"
 )
 
 // linkScope is what Pocketwise asks for: the account information API,
@@ -43,6 +43,9 @@ type pocketwise struct {
 	// tokenKey seals the link's tokens for storage (client.TokenSetSealer):
 	// every instance of Pocketwise would share it.
 	tokenKey []byte
+	// session binds a link in progress to the browser that began it, in
+	// an encrypted cookie.
+	session *sessioncookie.Cookie
 
 	mu       sync.Mutex
 	link     *link
@@ -77,9 +80,13 @@ type attempt struct {
 func (w *World) newPocketwise(apps apps) *pocketwise {
 	tokenKey := make([]byte, 32)
 	_, _ = rand.Read(tokenKey) // never fails: it crashes the program instead (Go 1.24+)
+	sessionKey := make([]byte, 32)
+	_, _ = rand.Read(sessionKey)
+	// One 32-byte key and the default name: New can't fail.
+	session, _ := sessioncookie.New([][]byte{sessionKey}, sessioncookie.Options{})
 	p := &pocketwise{
 		w: w, keys: &rotatingDPoPKeys{base: apps.pocketwise.keys}, sessions: memstore.NewSessionStore(), trace: &trace{},
-		tokenKey: tokenKey,
+		tokenKey: tokenKey, session: session,
 	}
 	p.client = &lazyClient{w: w, clientID: pocketwiseClientID, keys: p.keys, redirect: w.URL(pocketwiseHost, callbackPath), sessions: p.sessions}
 	p.thriftly = &lazyClient{w: w, clientID: thriftlyClientID, keys: apps.thriftly.keys, redirect: string(apps.thriftly.redirectURI(w)), sessions: memstore.NewSessionStore()}
@@ -178,7 +185,12 @@ func (p *pocketwise) start(w http.ResponseWriter, r *http.Request) {
 		p.fail(w, r, "link", err)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: session.Handle().String(), Path: "/", HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+	// The callback is only accepted alongside this cookie (RFC 9700 §4.7).
+	// The client runs on the demo's clock, so the cookie does too.
+	if err := p.session.Set(w, session, "", p.w.clock.Now()); err != nil {
+		p.fail(w, r, "link", err)
+		return
+	}
 	u := session.URL()
 	// Not an open redirect: Alder Bank's authorization endpoint, from its
 	// discovery metadata.
@@ -188,15 +200,12 @@ func (p *pocketwise) start(w http.ResponseWriter, r *http.Request) {
 // callback finishes linking: the code for tokens, including the refresh
 // token, then a first sync.
 func (p *pocketwise) callback(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie(sessionCookie)
-	clearCookies(w, sessionCookie)
+	// The session is single-use — consumed by this callback whatever its
+	// outcome — so nothing should keep presenting it.
+	handle, _, err := p.session.Read(r, p.w.clock.Now())
+	p.session.Clear(w)
 	if err != nil {
 		p.w.renderError(w, pocketwiseHost, http.StatusBadRequest, "No link in progress", "This browser didn't start linking here.")
-		return
-	}
-	handle, err := client.ParseSessionHandle(cookie.Value)
-	if err != nil {
-		p.w.renderError(w, pocketwiseHost, http.StatusBadRequest, "No link in progress", notStartedHere)
 		return
 	}
 	ctx := p.ctx(r.Context())
@@ -443,15 +452,6 @@ func describeError(err error) string {
 		}
 	}
 	return err.Error()
-}
-
-// clearCookies expires the callback's cookies. The session they carry is
-// single-use — consumed by this callback whatever its outcome — so
-// nothing should keep presenting it.
-func clearCookies(w http.ResponseWriter, names ...string) {
-	for _, name := range names {
-		http.SetCookie(w, &http.Cookie{Name: name, Path: "/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
-	}
 }
 
 // seal seals tokens for owner with Pocketwise's own client, for storing

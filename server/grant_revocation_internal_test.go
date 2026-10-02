@@ -54,3 +54,23 @@ func TestGrantRevocationFailsClosed(t *testing.T) {
 		t.Errorf("checkGrantNotRevoked(no grant ID) = %v, want nil", err)
 	}
 }
+
+// TestGrantRevocationHorizon covers RevokeGrant's record outlasting
+// whatever from the grant is still usable: the longest of a refresh
+// token, an unredeemed code and an approved auth_req_id, then an access
+// token issued just before, and the verifier's clock skew.
+func TestGrantRevocationHorizon(t *testing.T) {
+	for name, tc := range map[string]struct {
+		limits Limits
+		want   time.Duration
+	}{
+		"refresh token longest": {Limits{RefreshTokenLifetime: 24 * time.Hour, AuthorizationCodeLifetime: time.Minute, BackchannelAuthenticationRequestLifetime: 10 * time.Minute, AccessTokenLifetime: 5 * time.Minute, MaxClockSkew: 10 * time.Second}, 24*time.Hour + 5*time.Minute + 10*time.Second},
+		"auth_req_id longest":   {Limits{RefreshTokenLifetime: time.Minute, AuthorizationCodeLifetime: time.Minute, BackchannelAuthenticationRequestLifetime: time.Hour, AccessTokenLifetime: 5 * time.Minute, MaxClockSkew: 10 * time.Second}, time.Hour + 5*time.Minute + 10*time.Second},
+		"code longest":          {Limits{AuthorizationCodeLifetime: 2 * time.Hour, AccessTokenLifetime: 5 * time.Minute}, 2*time.Hour + 5*time.Minute},
+	} {
+		s := &Server{cfg: Config{Limits: tc.limits}}
+		if got := s.grantRevocationHorizon(); got != tc.want {
+			t.Errorf("%s: grantRevocationHorizon() = %v, want %v", name, got, tc.want)
+		}
+	}
+}

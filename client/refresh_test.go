@@ -72,3 +72,39 @@ func TestRefreshTokensWithoutSigningKeys(t *testing.T) {
 		t.Fatalf("RefreshTokens(no client authentication key) = %v, want an internal error", err)
 	}
 }
+
+// originalIDToken gives tokens an ID token for user-1 from this client's
+// issuer, as ExchangeCode would have validated it.
+func originalIDToken(tokens client.TokenSet, issuer string) client.TokenSet {
+	tokens.IDToken, tokens.HasIDToken, tokens.Subject = fapi.NewSecret("original-id-token"), true, "user-1"
+	tokens.IDTokenClaims = client.IDTokenClaims{Subject: "user-1", Issuer: issuer}
+	return tokens
+}
+
+// TestRefreshTokensKeepsTheIDTokenWhenNoneIsReturned covers a refresh
+// whose response has no ID token: the result keeps the original's, so a
+// later refresh from it still checks a refreshed ID token against it
+// (OIDC Core §12.2).
+func TestRefreshTokensKeepsTheIDTokenWhenNoneIsReturned(t *testing.T) {
+	c, tokens := refreshClient(t, `{"access_token":"at-2","token_type":"DPoP","expires_in":300}`, nil)
+	tokens = originalIDToken(tokens, testIssuer)
+	got, err := c.RefreshTokens(context.Background(), client.RefreshTokenRequest{Tokens: tokens})
+	if err != nil {
+		t.Fatalf("RefreshTokens: %v", err)
+	}
+	if !got.HasIDToken || got.IDToken.Reveal() != "original-id-token" || got.Subject != "user-1" || got.IDTokenClaims.Subject != "user-1" {
+		t.Errorf("got ID token %q (%v), subject %q / %q; want the original's kept", got.IDToken.Reveal(), got.HasIDToken, got.Subject, got.IDTokenClaims.Subject)
+	}
+}
+
+// TestRefreshTokensRefusesAnotherIssuersTokens covers a token set from a
+// different issuer: refused before its refresh token is sent anywhere.
+func TestRefreshTokensRefusesAnotherIssuersTokens(t *testing.T) {
+	c, tokens := refreshClient(t, `{"access_token":"at-2","token_type":"DPoP","expires_in":300}`, nil)
+	tokens = originalIDToken(tokens, "https://other-issuer.example.com")
+	_, err := c.RefreshTokens(context.Background(), client.RefreshTokenRequest{Tokens: tokens})
+	var cerr *client.Error
+	if !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidRequest {
+		t.Fatalf("RefreshTokens(another issuer's tokens) = %v, want invalid_request", err)
+	}
+}

@@ -3,15 +3,15 @@ package server
 import (
 	"encoding/json"
 	"errors"
-	"math"
 	"strconv"
 	"strings"
 	"time"
 )
 
-// maxMaxAge bounds "max_age" so a value converts to a time.Duration
-// without overflowing.
-const maxMaxAge = math.MaxInt64 / int64(time.Second)
+// maxMaxAge bounds "max_age" at 100 years: far beyond any real policy,
+// and small enough that the value as a time.Duration, less
+// Limits.MaxClockSkew, never overflows.
+const maxMaxAge = 100 * 366 * 24 * 60 * 60
 
 // requestedMaxAge parses the authorization request's "max_age" (OIDC Core
 // §3.1.2.1): a non-negative whole number of seconds. It arrives as a JSON

@@ -60,13 +60,13 @@ type Error struct {
 	dpopChallenge bool
 }
 
+// wwwAuthenticate is the challenge header (RFC 6750 §3, RFC 9449 §7.1).
+const wwwAuthenticate = "WWW-Authenticate"
+
 // noCredentials is the error for a request presenting no credentials
 // this verifier accepts: 401 with an empty Code, so WriteJSON sends a
 // challenge without error information (RFC 6750 §3.1). reason is for
 // logs only.
-// wwwAuthenticate is the challenge header (RFC 6750 §3, RFC 9449 §7.1).
-const wwwAuthenticate = "WWW-Authenticate"
-
 func noCredentials(reason string) *Error {
 	return &Error{httpStatus: 401, cause: errors.New(reason)}
 }

@@ -118,9 +118,10 @@ type InteractionRequest struct {
 	// actively authenticated. If the application's last authentication
 	// of this user is older, it must authenticate them again before
 	// authorizing. CompleteAuthorization enforces it: an Authorize whose
-	// authentication time is older answers the client with
-	// login_required. HasMaxAge distinguishes max_age=0, which asks for
-	// a fresh authentication every time, from no max_age at all.
+	// authentication time is older than MaxAge plus Limits.MaxClockSkew
+	// answers the client with login_required. HasMaxAge distinguishes
+	// max_age=0, which asks for a fresh authentication every time, from
+	// no max_age at all.
 	MaxAge    time.Duration
 	HasMaxAge bool
 

@@ -160,14 +160,10 @@ func (c *Cookie) Set(w http.ResponseWriter, handle server.InteractionHandle, in 
 	// One read for the tag and the nonce: the tag's 16 bytes, then the
 	// nonce.
 	random := make([]byte, 16+key.aead.NonceSize())
-	if _, err := rand.Read(random); err != nil {
-		return "", err
-	}
+	_, _ = rand.Read(random) // never fails: it crashes the program instead (Go 1.24+)
 	tag, nonce := base64.RawURLEncoding.EncodeToString(random[:16]), random[16:]
-	plaintext, err := json.Marshal(sealed{ExpiresAt: now.Add(c.lifetime).Unix(), Tag: tag, Handle: handle.String(), Request: string(encoded)})
-	if err != nil {
-		return "", err
-	}
+	// Strings and an integer: encoding can't fail.
+	plaintext, _ := json.Marshal(sealed{ExpiresAt: now.Add(c.lifetime).Unix(), Tag: tag, Handle: handle.String(), Request: string(encoded)})
 	header := append([]byte{version}, key.id[:]...)
 	box := append(append(header, nonce...), key.aead.Seal(nil, nonce, plaintext, c.additionalData())...)
 	value := base64.RawURLEncoding.EncodeToString(box)

@@ -23,7 +23,11 @@ import (
 	"github.com/idfoundry/fapigo/storage"
 )
 
-// TokenSet is returned by a successful ExchangeCode.
+// TokenSet is returned by a successful ExchangeCode,
+// PollBackchannelAuthentication or RefreshTokens. Its tokens are
+// fapi.Secret, which refuses to serialize: to keep a TokenSet across
+// restarts, or for another instance to refresh it, store what
+// Client.SealTokenSet returns and restore it with Client.OpenTokenSet.
 type TokenSet struct {
 	AccessToken fapi.Secret
 
@@ -51,6 +55,11 @@ type TokenSet struct {
 	// does not mean "expires immediately"; check HasExpiresIn first.
 	ExpiresIn    time.Duration
 	HasExpiresIn bool
+
+	// ObtainedAt is when this client received the token response, by
+	// Dependencies.Clock: with ExpiresIn, when the access token expires.
+	// SealTokenSet keeps it, so a restored set still knows.
+	ObtainedAt time.Time
 
 	// IDToken, Subject and IDTokenClaims are set only when the granted
 	// scope included "openid". Both Subject and IDTokenClaims come from
@@ -266,6 +275,7 @@ func (c *Client) tokenSetFromResponse(ctx context.Context, body []byte, nonce st
 		TokenType:            wantTokenType,
 		Scope:                raw.Scope,
 		AuthorizationDetails: raw.AuthorizationDetails,
+		ObtainedAt:           c.deps.Clock.Now(),
 	}
 	if raw.ExpiresIn > 0 {
 		result.ExpiresIn = time.Duration(raw.ExpiresIn) * time.Second

@@ -89,8 +89,8 @@ The console's **Start here** panel walks through all of this in order.
 Bank**. Fernway's FAPIgo client pushes the request to the bank (PAR),
 with its `claims`, `acr_values` and `max_age`, and sends your browser
 there with only a `request_uri`. At the bank, sign in with the app and
-share everything. Fernway checks the ID token's `acr` and `auth_time`,
-fetches UserInfo with its DPoP-bound token, and shows what the bank
+share everything. Fernway checks the ID token's `acr`, FAPIgo's client
+its `auth_time` against `max_age`, and Fernway fetches UserInfo with its DPoP-bound token, and shows what the bank
 confirmed. The **protocol trace** shows the ID token and UserInfo
 response as they crossed the wire: encryption headers, and ciphertext.
 
@@ -147,7 +147,8 @@ The code:
   supplies its own `keys.ClientKeySource` and
   `keys.ClientEncryptionKeySource`, for registered keys or a client's
   `jwks_uri`.
-- The OIDC Core §3.1.3.7 checks of `acr` and `auth_time` are Fernway's
-  own code: FAPIgo exposes both on `TokenSet.IDTokenClaims` and leaves
-  the decision to the relying party, while the bank enforces `max_age`
-  itself.
+- The OIDC Core §3.1.3.7 check of `acr` is Fernway's own code: FAPIgo
+  exposes it on `TokenSet.IDTokenClaims` and leaves the decision to the
+  relying party. `max_age` needs none: the bank enforces it, and
+  FAPIgo's `ExchangeCode` refuses an ID token whose `auth_time` is
+  missing or older.

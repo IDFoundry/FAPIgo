@@ -358,14 +358,11 @@ func (rp *relyingParty) complete(ctx context.Context, ck *check, handle client.S
 	// OIDC Core §3.1.3.7: the relying party decides whether the
 	// authentication it got is the one it asked for. acr_values is a
 	// request the bank may not meet, so the relying party checks the acr
-	// it was given; the bank enforces max_age, and the relying party
-	// checks auth_time too.
+	// it was given. max_age is checked twice without code here: the bank
+	// enforces it, and ExchangeCode refused an ID token whose auth_time
+	// is missing or older.
 	if rp.setup.acr != "" && idClaims.ACR != rp.setup.acr {
 		rp.finish(ck, "refused", fmt.Sprintf("%s needs a sign-in approved in the Alder Bank app (acr %s), and the ID token says acr %s", rp.setup.name, rp.setup.acr, idClaims.ACR))
-		return
-	}
-	if rp.setup.hasMaxAge && time.Since(idClaims.AuthTime) > rp.setup.maxAge+time.Minute {
-		rp.finish(ck, "refused", fmt.Sprintf("the sign-in was at %s, more than %s ago", idClaims.AuthTime.Format("15:04"), rp.setup.maxAge))
 		return
 	}
 	info, err := c.FetchUserInfo(ctx, tokens)

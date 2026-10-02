@@ -56,19 +56,20 @@ func (c *console) tour() []tourStep {
 	for _, row := range c.sceneRows() {
 		scenes[row.Key] = &row
 	}
+	openBank := tourLink{"Open the bank", bank}
 	return []tourStep{
 		{
 			Title: "Sign in across a border",
 			Do:    "Open Southport Savings Bank, choose EastID, and sign in as an Eastmark citizen.",
 			Notice: "Neither the bank nor EastID was ever told about the other. Each resolved the other's Trust Chain up to the Union on first contact " +
 				"— the requests appear under Recent federation traffic below.",
-			Links: []tourLink{{"Open the bank", bank}},
+			Links: []tourLink{openBank},
 		},
 		{
 			Title:  "Share only what you choose",
 			Do:     "Sign in again, and untick Home address on EastID's consent page.",
 			Notice: "Only what's ticked leaves EastID: the bank's page shows the address as not shared.",
-			Links:  []tourLink{{"Open the bank", bank}},
+			Links:  []tourLink{openBank},
 		},
 		{
 			Title: "See the Union's rules applied",
@@ -87,14 +88,14 @@ func (c *console) tour() []tourStep {
 			Title:  "A provider forges its mark",
 			Do:     "Turn the scene on, then open the bank and EastID's Trust Chain again.",
 			Notice: "The bank refuses EastID: the forged mark's signature is valid, but EastID isn't accredited to issue it.",
-			Links:  []tourLink{{"Open the bank", bank}, {"EastID's trust chain", resolve(countryHost("id", "eastmark"), "union")}},
+			Links:  []tourLink{openBank, {"EastID's trust chain", resolve(countryHost("id", "eastmark"), "union")}},
 			Scene:  scenes["forge"],
 		},
 		{
 			Title:  "Suspend a country",
 			Do:     "Turn off the forgery, turn this scene on, then sign in with EastID at the bank and at Eastmark Telecom.",
 			Notice: "The bank can no longer reach EastID through the Union. Eastmark Telecom still can: it also trusts Eastmark's own authority directly.",
-			Links:  []tourLink{{"Open the bank", bank}, {"Open the telecom", telco}},
+			Links:  []tourLink{openBank, {"Open the telecom", telco}},
 			Scene:  scenes["suspend"],
 		},
 		{

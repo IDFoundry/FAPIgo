@@ -105,7 +105,7 @@ func run(ctx context.Context, opts options) error {
 	case <-ctx.Done():
 	case err = <-failed:
 	}
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shutdownCtx)
 	return err

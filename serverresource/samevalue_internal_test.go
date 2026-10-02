@@ -21,11 +21,11 @@ func TestSameValue(t *testing.T) {
 	if sameValue(uncomparable, valueNonceStore{inner: map[string]int{}}) {
 		t.Error("sameValue(uncomparable values) = true, want false")
 	}
-	comparable := valueNonceStore{inner: "x"}
-	if !sameValue(comparable, comparable) {
+	comparableValue := valueNonceStore{inner: "x"}
+	if !sameValue(comparableValue, comparableValue) {
 		t.Error("sameValue(v, v) = false, want true")
 	}
-	if sameValue(comparable, nil) || sameValue(comparable, valueNonceStore{inner: "y"}) {
+	if sameValue(comparableValue, nil) || sameValue(comparableValue, valueNonceStore{inner: "y"}) {
 		t.Error("sameValue(different values) = true, want false")
 	}
 }

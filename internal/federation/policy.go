@@ -35,6 +35,10 @@ var operatorApplicationOrder = []string{opValue, opAdd, opDefault, opOneOf, opSu
 var ErrPolicyError = fmt.Errorf("federation: policy error")
 
 // policyError wraps a description into ErrPolicyError.
+// errEssentialNotBoolean is the error for an "essential" operator whose
+// value isn't a boolean.
+const errEssentialNotBoolean = "essential operator value must be a boolean: %v"
+
 func policyError(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrPolicyError, fmt.Sprintf(format, args...))
 }
@@ -177,10 +181,10 @@ func mergeOperatorValue(name string, current, next json.RawMessage) (json.RawMes
 		// Logical OR (§6.1.3.1.7).
 		var a, b bool
 		if err := json.Unmarshal(current, &a); err != nil {
-			return nil, policyError("essential operator value must be a boolean: %v", err)
+			return nil, policyError(errEssentialNotBoolean, err)
 		}
 		if err := json.Unmarshal(next, &b); err != nil {
-			return nil, policyError("essential operator value must be a boolean: %v", err)
+			return nil, policyError(errEssentialNotBoolean, err)
 		}
 		return json.Marshal(a || b)
 	default:
@@ -256,7 +260,7 @@ func validateOperandTypes(ops PolicyOperators) error {
 	if raw, ok := ops[opEssential]; ok {
 		var essential bool
 		if err := json.Unmarshal(raw, &essential); err != nil {
-			return policyError("essential operator value must be a boolean: %v", err)
+			return policyError(errEssentialNotBoolean, err)
 		}
 	}
 	if raw, ok := ops[opDefault]; ok && isJSONNull(raw) {

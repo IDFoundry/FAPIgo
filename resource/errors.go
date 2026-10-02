@@ -64,6 +64,9 @@ type Error struct {
 // this verifier accepts: 401 with an empty Code, so WriteJSON sends a
 // challenge without error information (RFC 6750 §3.1). reason is for
 // logs only.
+// wwwAuthenticate is the challenge header (RFC 6750 §3, RFC 9449 §7.1).
+const wwwAuthenticate = "WWW-Authenticate"
+
 func noCredentials(reason string) *Error {
 	return &Error{httpStatus: 401, cause: errors.New(reason)}
 }
@@ -140,13 +143,13 @@ func (e *Error) Unwrap() error { return e.cause }
 func (e *Error) WriteJSON(w http.ResponseWriter) {
 	switch {
 	case e.code == "":
-		w.Header().Set("WWW-Authenticate", `Bearer, DPoP algs="`+dpopAlgorithms+`"`)
+		w.Header().Set(wwwAuthenticate, `Bearer, DPoP algs="`+dpopAlgorithms+`"`)
 		w.WriteHeader(e.httpStatus)
 		return
 	case e.dpopChallenge || e.code == ErrorUseDPoPNonce || e.code == ErrorInvalidDPoPProof:
-		w.Header().Set("WWW-Authenticate", `DPoP error="`+string(e.code)+`", algs="`+dpopAlgorithms+`"`)
+		w.Header().Set(wwwAuthenticate, `DPoP error="`+string(e.code)+`", algs="`+dpopAlgorithms+`"`)
 	default:
-		w.Header().Set("WWW-Authenticate", `Bearer error="`+string(e.code)+`"`)
+		w.Header().Set(wwwAuthenticate, `Bearer error="`+string(e.code)+`"`)
 	}
 	httperror.WriteJSON(w, e.nonce, "", string(e.code), e.description, e.httpStatus)
 }

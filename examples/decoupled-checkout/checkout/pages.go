@@ -17,8 +17,11 @@ type Page struct {
 	Refresh bool
 }
 
+// bankColor is Alder Bank's: its site, its app and its API share it.
+const bankColor = "#0f766e"
+
 var hostColors = map[string]string{
-	bankHost: "#0f766e", phoneHost: "#0f766e", apiHost: "#0f766e",
+	bankHost: bankColor, phoneHost: bankColor, apiHost: bankColor,
 	tillHost: "#9a3412", pocketwiseHost: "#7c3aed", consoleHost: "#334155",
 }
 

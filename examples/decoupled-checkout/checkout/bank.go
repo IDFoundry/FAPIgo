@@ -173,7 +173,7 @@ func (w *World) registeredClients() ([]storage.RegisteredClient, error) {
 	var out []storage.RegisteredClient
 	for _, cfg := range []storage.RegisteredClientConfig{
 		{
-			ID: tillClientID, Display: storage.ClientDisplay{Name: "Harbour Coffee"},
+			ID: tillClientID, Display: storage.ClientDisplay{Name: tillName},
 			BackchannelTokenDeliveryMode: storage.BackchannelTokenDeliveryModePoll,
 		},
 		{

@@ -224,6 +224,8 @@ func TestMergeOperatorValuePerOperator(t *testing.T) {
 		{name: "one_of: empty intersection errors", op: opOneOf, current: `["a"]`, next: `["b"]`, wantErrLike: "intersection"},
 		{name: "essential: OR true/false", op: opEssential, current: `true`, next: `false`, want: `true`},
 		{name: "essential: OR false/false", op: opEssential, current: `false`, next: `false`, want: `false`},
+		{name: "essential: non-boolean current errors", op: opEssential, current: `"yes"`, next: `true`, wantErrLike: "must be a boolean"},
+		{name: "essential: non-boolean next errors", op: opEssential, current: `true`, next: `1`, wantErrLike: "must be a boolean"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

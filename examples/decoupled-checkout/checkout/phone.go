@@ -104,7 +104,7 @@ func (p *phone) request(w http.ResponseWriter, r *http.Request) {
 		interaction, err = p.w.bank.interaction(r.Context(), req)
 	}
 	if !ok || err != nil {
-		p.w.renderError(w, phoneHost, http.StatusNotFound, "Nothing to approve", "This request was already answered, or has expired.")
+		p.nothingToApprove(w)
 		return
 	}
 	page := approvalPage{
@@ -165,7 +165,7 @@ func (p *phone) decide(w http.ResponseWriter, r *http.Request) {
 		interaction, err = p.w.bank.interaction(r.Context(), req)
 	}
 	if !ok || err != nil {
-		p.w.renderError(w, phoneHost, http.StatusNotFound, "Nothing to approve", "This request was already answered, or has expired.")
+		p.nothingToApprove(w)
 		return
 	}
 	approve := r.PostForm.Get("decision") == "approve"
@@ -178,7 +178,7 @@ func (p *phone) decide(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req, ok = p.w.bank.take(p.owner, id); !ok { // answered meanwhile
-		p.w.renderError(w, phoneHost, http.StatusNotFound, "Nothing to approve", "This request was already answered, or has expired.")
+		p.nothingToApprove(w)
 		return
 	}
 	if err := p.w.bank.decide(r.Context(), req, interaction.Scope, approve, granted); err != nil {
@@ -230,3 +230,9 @@ type errorString string
 func (e errorString) Error() string { return string(e) }
 
 const errNothingTicked = errorString("tick at least one account and one thing Pocketwise may see, or deny the request")
+
+// nothingToApprove answers for a request that isn't waiting on the
+// customer any more.
+func (p *phone) nothingToApprove(w http.ResponseWriter) {
+	p.w.renderError(w, phoneHost, http.StatusNotFound, "Nothing to approve", "This request was already answered, or has expired.")
+}

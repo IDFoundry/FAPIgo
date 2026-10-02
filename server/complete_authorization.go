@@ -232,26 +232,37 @@ func (s *Server) buildAuthorizationResponse(ctx context.Context, clientID fapi.C
 		base.RawQuery = q.Encode()
 	}
 
-	destination, err := s.parseRedirectURI(base.String())
+	// The pushed authorization request already held redirect_uri to the
+	// client's registered type (parseRedirectURI); this parse only turns
+	// the stored value, with the response parameters added, into a URL.
+	destination, err := fapi.ParseRedirectURL(base.String(), fapi.AllowLoopbackHTTP(), fapi.AllowPrivateUseScheme())
 	if err != nil {
 		return fapi.URL{}, newError(ErrorServerError, 500, "failed to construct redirect destination", err)
 	}
 	return destination, nil
 }
 
-// parseRedirectURI validates raw as a redirect destination. FAPI 2.0
-// §5.3.2.2 forbids http redirect URIs except loopback redirection per
-// RFC 8252 §7.3; this server permits that exception only outside
-// AssuranceProduction, the same line validateAssurance draws for the
-// server's own endpoints. The pushed authorization request checks the
-// redirect_uri with this too, so an unacceptable one is refused there
-// as invalid_request rather than surfacing as a server_error once the
-// flow completes.
-func (s *Server) parseRedirectURI(raw string) (fapi.URL, error) {
-	if s.cfg.Assurance == AssuranceProduction {
-		return fapi.ParseEndpointURL(raw)
+// parseRedirectURI validates raw as a redirect destination for client,
+// at the pushed authorization request, so an unacceptable one is refused
+// there as invalid_request rather than once the flow completes. FAPI 2.0
+// §5.3.2.2 forbids http redirect URIs except a native client's loopback
+// redirection (RFC 8252 §7.3):
+//
+//   - a native app (storage.ApplicationTypeNative) may use the
+//     redirects RFC 8252 gives it — a private-use scheme, loopback http
+//     or https — in production too; NewRegisteredClient checked their
+//     forms;
+//   - a web application may use https, and loopback http only outside
+//     AssuranceProduction, the line validateAssurance draws for the
+//     server's own endpoints.
+func (s *Server) parseRedirectURI(client storage.RegisteredClient, raw string) (fapi.URL, error) {
+	if client.ApplicationType() == storage.ApplicationTypeNative {
+		return fapi.ParseRedirectURL(raw, fapi.AllowLoopbackHTTP(), fapi.AllowPrivateUseScheme())
 	}
-	return fapi.ParseEndpointURL(raw, fapi.AllowLoopbackHTTP())
+	if s.cfg.Assurance == AssuranceProduction {
+		return fapi.ParseRedirectURL(raw)
+	}
+	return fapi.ParseRedirectURL(raw, fapi.AllowLoopbackHTTP())
 }
 
 func validateGrantedScopeSubset(granted []string, requestedSpaceDelimited string) error {

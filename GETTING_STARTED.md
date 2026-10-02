@@ -110,6 +110,16 @@ that only needs access tokens — no identity layer — can drop `"openid"`
 from `AllowedScopes` entirely and run as plain OAuth 2.0 + FAPI 2.0;
 nothing else here changes.
 
+A mobile or desktop app — a wallet, say — registers with
+`ApplicationType: storage.ApplicationTypeNative`. It may then use the
+redirect URIs RFC 8252 gives native apps, in production too: a
+private-use scheme in reverse-domain form
+(`com.example.wallet:/callback`), or loopback http to `127.0.0.1` or
+`[::1]`, which matches on whatever port the app listens on. A web
+client can use neither. A native client still authenticates like any
+other: give each app instance its own credentials, as attestation-based
+client authentication does.
+
 ## 4. Wire `Dependencies` and construct the server
 
 ```go

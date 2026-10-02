@@ -486,6 +486,13 @@ func newHarness(t *testing.T, profile server.Profile, allowRequestObjects bool) 
 // exercising which redirect URIs each assurance level accepts.
 func newHarnessWithRedirectURI(t *testing.T, profile server.Profile, allowRequestObjects bool, redirectURI string, assurance server.AssuranceLevel) harness {
 	t.Helper()
+	return newHarnessWithApplicationType(t, profile, allowRequestObjects, redirectURI, assurance, storage.ApplicationTypeWeb)
+}
+
+// newHarnessWithApplicationType is newHarnessWithRedirectURI for a
+// client of the given application type.
+func newHarnessWithApplicationType(t *testing.T, profile server.Profile, allowRequestObjects bool, redirectURI string, assurance server.AssuranceLevel, appType storage.ApplicationType) harness {
+	t.Helper()
 	now := time.Now()
 	key := generateKey(t)
 	serverKey := generateKey(t)
@@ -500,6 +507,7 @@ func newHarnessWithRedirectURI(t *testing.T, profile server.Profile, allowReques
 		ClientAssertionAlgorithm: fapi.ES256,
 		RequestObjectAlgorithm:   reqObjAlg,
 		AllowedScopes:            []string{"openid", "accounts", "offline_access"},
+		ApplicationType:          appType,
 	})
 	if err != nil {
 		t.Fatalf("NewRegisteredClient: %v", err)

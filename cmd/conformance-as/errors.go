@@ -16,8 +16,8 @@ func writeOAuthJSONError(w http.ResponseWriter, err error) {
 }
 
 // writeRawOAuthError writes an OAuth JSON error response directly, for
-// failures detected before a *server.Error exists at all (e.g. a
-// malformed form body, or an unrecognized grant_type) — via
+// failures detected before a *server.Error exists at all (e.g. an
+// unrecognized grant_type) — via
 // server.NewError/*server.Error.WriteJSON, the same encoding every
 // *server.Error this binary ever receives already goes through.
 func writeRawOAuthError(w http.ResponseWriter, status int, code server.ErrorCode, description string) {

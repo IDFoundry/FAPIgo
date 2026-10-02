@@ -106,7 +106,9 @@ func (w *World) newBank(apps apps) (*bank, error) {
 			ClientAssertionAlgorithm: fapi.ES256,
 			SenderConstrain:          storage.SenderConstrainDPoP,
 			AllowedScopes:            []string{"openid", "accounts", "offline_access"},
-			Display:                  storage.ClientDisplay{Name: a.name},
+			// RFC 9396 §10: the apps may ask for account access only.
+			AuthorizationDetailsTypes: []string{accountAccessType.Type},
+			Display:                   storage.ClientDisplay{Name: a.name},
 		})
 		if err != nil {
 			return nil, err
@@ -149,9 +151,8 @@ func (w *World) newBank(apps apps) (*bank, error) {
 		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
 		Clock:                  w.clock,
 		Random:                 rand.Reader,
-		AuthorizationCodeRARPolicy: entitlements{
-			pocketwiseClientID: {accountAccessType.Type}, thriftlyClientID: {accountAccessType.Type},
-		},
+		// Each client's types are its registration's; no further rule.
+		AuthorizationCodeRARPolicy: server.AllowRequestedAuthorizationDetails{},
 	}
 	if b.srv, err = server.New(b.cfg, b.deps); err != nil {
 		return nil, err

@@ -39,6 +39,13 @@ type AutomaticRegistrationConfig struct {
 	// least one.
 	AllowedScopes []string
 
+	// AuthorizationDetailsTypes are the Rich Authorization Request types
+	// every automatically-registered client may request
+	// (storage.RegisteredClientConfig.AuthorizationDetailsTypes) — for
+	// the same reason as AllowedScopes, never an RP's own
+	// self-published authorization_details_types. Empty means none.
+	AuthorizationDetailsTypes []string
+
 	// MaxCacheAge bounds how long a resolved client's Trust Chain is
 	// reused before it is resolved again — the actual cache lifetime
 	// for a given client is min(MaxCacheAge, its own Trust Chain's
@@ -584,6 +591,7 @@ func (a *AutomaticClientRepository) registeredClientConfigFromMetadata(ctx conte
 		RequestObjectAlgorithm:          requestObjectAlg,
 		SenderConstrain:                 senderConstrain,
 		AllowedScopes:                   a.cfg.AllowedScopes,
+		AuthorizationDetailsTypes:       a.cfg.AuthorizationDetailsTypes,
 		AutomaticFederationRegistration: true,
 		AllowsClientCredentialsGrant:    a.cfg.AllowsClientCredentialsGrant,
 	}

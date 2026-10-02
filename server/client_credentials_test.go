@@ -160,6 +160,14 @@ func (p fakeRARPolicy) Authorize(_ context.Context, _ fapi.ClientID, requested [
 // store, request-object algorithms, etc.).
 func newHarnessWithClientCredentialsGrantAndRAR(t *testing.T, registry *extension.RARRegistry, policy server.RARPolicy) harness {
 	t.Helper()
+	return newHarnessWithClientCredentialsGrantAndRARTypes(t, registry, policy, []string{"payment"})
+}
+
+// newHarnessWithClientCredentialsGrantAndRARTypes is
+// newHarnessWithClientCredentialsGrantAndRAR with testClientID registered
+// for types instead of just "payment".
+func newHarnessWithClientCredentialsGrantAndRARTypes(t *testing.T, registry *extension.RARRegistry, policy server.RARPolicy, types []string) harness {
+	t.Helper()
 	now := time.Now()
 	key := generateKey(t)
 	serverKey := generateKey(t)
@@ -170,6 +178,7 @@ func newHarnessWithClientCredentialsGrantAndRAR(t *testing.T, registry *extensio
 		ClientAssertionAlgorithm:     fapi.ES256,
 		SenderConstrain:              storage.SenderConstrainDPoP,
 		AllowedScopes:                []string{"accounts"},
+		AuthorizationDetailsTypes:    types,
 		AllowsClientCredentialsGrant: true,
 	})
 	if err != nil {

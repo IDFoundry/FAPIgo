@@ -7,6 +7,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/extension"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // authorizationDetailsParameter is the RFC 9396 §5 wire name shared by PAR,
@@ -156,6 +157,20 @@ type RARPolicy interface {
 	Authorize(ctx context.Context, clientID fapi.ClientID, requested []json.RawMessage) ([]json.RawMessage, error)
 }
 
+// AllowRequestedAuthorizationDetails is a RARPolicy that grants every
+// detail requested, as requested. The server has already refused any
+// type the client isn't registered for
+// (storage.RegisteredClientConfig.AuthorizationDetailsTypes), so this
+// suits a deployment whose only rule is which types each client may use.
+// One that also checks the details themselves — a payment limit, a
+// standing mandate — supplies its own RARPolicy.
+type AllowRequestedAuthorizationDetails struct{}
+
+// Authorize implements RARPolicy.
+func (AllowRequestedAuthorizationDetails) Authorize(_ context.Context, _ fapi.ClientID, requested []json.RawMessage) ([]json.RawMessage, error) {
+	return requested, nil
+}
+
 // applyRARPolicy narrows requested (already structurally validated by
 // parseRequestedAuthorizationDetails — a registered type, correct
 // shape, within bounds) against policy — the shared implementation
@@ -169,7 +184,7 @@ type RARPolicy interface {
 // decide. Every caller wraps a non-nil error in
 // ErrorInvalidAuthorizationDetails (RFC 9396 §6's own dedicated code
 // for exactly this decision).
-func (s *Server) applyRARPolicy(ctx context.Context, clientID fapi.ClientID, policy RARPolicy, requested json.RawMessage) (json.RawMessage, error) {
+func (s *Server) applyRARPolicy(ctx context.Context, client storage.RegisteredClient, policy RARPolicy, requested json.RawMessage) (json.RawMessage, error) {
 	if len(requested) == 0 {
 		return nil, nil
 	}
@@ -180,7 +195,10 @@ func (s *Server) applyRARPolicy(ctx context.Context, clientID fapi.ClientID, pol
 	if err := json.Unmarshal(requested, &requestedObjects); err != nil {
 		return nil, fmt.Errorf("failed to decode validated authorization_details: %w", err)
 	}
-	granted, err := policy.Authorize(ctx, clientID, requestedObjects)
+	if err := checkAuthorizationDetailsTypes(client, requestedObjects); err != nil {
+		return nil, err
+	}
+	granted, err := policy.Authorize(ctx, client.ID(), requestedObjects)
 	if err != nil {
 		return nil, fmt.Errorf("authorization_details policy rejected the request: %w", err)
 	}
@@ -192,6 +210,26 @@ func (s *Server) applyRARPolicy(ctx context.Context, clientID fapi.ClientID, pol
 		return nil, fmt.Errorf("policy decision is not an acceptable narrowing of the request: %w", err)
 	}
 	return validated, nil
+}
+
+// checkAuthorizationDetailsTypes refuses a requested detail whose type
+// the client isn't registered for
+// (storage.RegisteredClientConfig.AuthorizationDetailsTypes, RFC 9396
+// §10). It runs before the RARPolicy, so a policy only ever sees types
+// the client may request at all.
+func checkAuthorizationDetailsTypes(client storage.RegisteredClient, details []json.RawMessage) error {
+	for _, d := range details {
+		var typed struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(d, &typed); err != nil {
+			return fmt.Errorf("failed to decode validated authorization_details: %w", err)
+		}
+		if !client.AllowsAuthorizationDetailsType(typed.Type) {
+			return fmt.Errorf("authorization_details type %q is not registered for this client", typed.Type)
+		}
+	}
+	return nil
 }
 
 // rarValuesFromStoredParameters best-effort re-parses an

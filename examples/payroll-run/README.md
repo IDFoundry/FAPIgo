@@ -159,7 +159,7 @@ Everything here uses FAPIgo's public API only.
 
 | Piece | FAPIgo |
 |---|---|
-| Alder Bank | `server.Server` with `ClientCredentialsGrant`, `OAuthOnly`, `MTLSEndpoints`, `Config.RAR` and `Dependencies.ClientCredentialsRARPolicy`; clients registered with `ClientAuthMethodTLSClientAuth` and `SenderConstrainMTLS`; `Dependencies.ClientCertificateTrust` set to `TrustedClientCAs` — the root CA in `Roots`, the issuing CAs in `Intermediates` — with `ClientCertificateCRLs` |
+| Alder Bank | `server.Server` with `ClientCredentialsGrant`, `OAuthOnly`, `MTLSEndpoints`, `Config.RAR`; clients registered with `AuthorizationDetailsTypes` for `payroll_batch`, and `Dependencies.ClientCredentialsRARPolicy` checking each batch against the company's mandate; clients registered with `ClientAuthMethodTLSClientAuth` and `SenderConstrainMTLS`; `Dependencies.ClientCertificateTrust` set to `TrustedClientCAs` — the root CA in `Roots`, the issuing CAs in `Intermediates` — with `ClientCertificateCRLs` |
 | The payroll API | `serverresource.NewVerifier`, built from the bank's own server configuration, with `VerifyRequest.PeerCertificate`; the granted batch from the access token's `authorization_details` claim |
 | Ledgerline | `client.Discover`, `MTLSEndpointAliases.ApplyForClientAuth`, `client.NewFromDiscovery` with `ClientAuthMethodTLSClientAuth`, `SenderConstrainMTLS` and `OAuthOnly`; `RequestClientCredentialsToken` with `AuthorizationDetails`; `ClientCredentialsResource` for the API call. The certificate lives in the HTTP client's TLS configuration: FAPIgo never sees its key, and with nothing else to sign, Ledgerline has no `Dependencies.Keys` at all |
 

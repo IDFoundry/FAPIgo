@@ -1,13 +1,9 @@
 package payment
 
 import (
-	"context"
-	"encoding/json"
 	"errors"
 	"regexp"
-	"slices"
 
-	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/extension"
 )
 
@@ -60,25 +56,4 @@ func paymentsOf(values extension.RARValues) []paymentInitiation {
 		out[i] = d.Fields
 	}
 	return out
-}
-
-// entitlements is which detail types each client may request: Alder
-// Bank's AuthorizationCodeRARPolicy.
-type entitlements map[fapi.ClientID][]string
-
-// Authorize implements server.RARPolicy.
-func (e entitlements) Authorize(_ context.Context, clientID fapi.ClientID, requested []json.RawMessage) ([]json.RawMessage, error) {
-	var allowed []json.RawMessage
-	for _, raw := range requested {
-		var detail struct {
-			Type string `json:"type"`
-		}
-		if err := json.Unmarshal(raw, &detail); err != nil {
-			return nil, err
-		}
-		if slices.Contains(e[clientID], detail.Type) {
-			allowed = append(allowed, raw)
-		}
-	}
-	return allowed, nil
 }

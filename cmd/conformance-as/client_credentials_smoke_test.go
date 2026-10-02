@@ -106,6 +106,7 @@ func newClientCredentialsSmokeServer(t *testing.T) clientCredentialsSmokeServer 
 		AllowedScopes:                []string{"accounts"},
 		SenderConstrain:              storage.SenderConstrainDPoP,
 		AllowsClientCredentialsGrant: true,
+		AuthorizationDetailsTypes:    []string{sampleRARDefinition.Type},
 	})
 	if err != nil {
 		t.Fatalf("build registered client: %v", err)

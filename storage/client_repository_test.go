@@ -634,3 +634,28 @@ func TestNewRegisteredClientRejectsInvalidBackchannelTokenDeliveryMode(t *testin
 		t.Fatalf("NewRegisteredClient(invalid backchannel token delivery mode) = nil error, want error")
 	}
 }
+
+func TestNewRegisteredClientAuthorizationDetailsTypes(t *testing.T) {
+	base := RegisteredClientConfig{
+		ID: "c", RedirectURIs: []fapi.RegisteredRedirectURI{"https://rp.example/cb"}, ClientAssertionAlgorithm: fapi.ES256,
+	}
+	none, err := NewRegisteredClient(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if none.AllowsAuthorizationDetailsType("payment") {
+		t.Error("a client registered for no types allows payment")
+	}
+	base.AuthorizationDetailsTypes = []string{"payment"}
+	some, err := NewRegisteredClient(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !some.AllowsAuthorizationDetailsType("payment") || some.AllowsAuthorizationDetailsType("account_information") {
+		t.Error("AllowsAuthorizationDetailsType doesn't follow the registered list")
+	}
+	base.AuthorizationDetailsTypes = []string{"payment", ""}
+	if _, err := NewRegisteredClient(base); err == nil {
+		t.Error("NewRegisteredClient accepted an empty authorization details type")
+	}
+}

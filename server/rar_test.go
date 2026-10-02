@@ -56,6 +56,13 @@ func newTestRARRegistry(t *testing.T) *extension.RARRegistry {
 // rejection.
 func newHarnessWithRAR(t *testing.T, profile server.Profile, registry *extension.RARRegistry, authCodePolicy, cibaPolicy server.RARPolicy) harness {
 	t.Helper()
+	return newHarnessWithRARTypes(t, profile, registry, authCodePolicy, cibaPolicy, []string{"payment"})
+}
+
+// newHarnessWithRARTypes is newHarnessWithRAR with testClientID
+// registered for types instead of just "payment".
+func newHarnessWithRARTypes(t *testing.T, profile server.Profile, registry *extension.RARRegistry, authCodePolicy, cibaPolicy server.RARPolicy, types []string) harness {
+	t.Helper()
 	now := time.Now()
 	key := generateKey(t)
 	serverKey := generateKey(t)
@@ -67,6 +74,7 @@ func newHarnessWithRAR(t *testing.T, profile server.Profile, registry *extension
 		RequestObjectAlgorithm:   fapi.ES256,
 		AllowedScopes:            []string{"openid", "accounts"},
 		BackchannelAuthenticationRequestAlgorithm: fapi.ES256,
+		AuthorizationDetailsTypes:                 types,
 	})
 	if err != nil {
 		t.Fatalf("NewRegisteredClient: %v", err)

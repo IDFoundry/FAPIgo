@@ -145,10 +145,8 @@ func (w *World) newBank(till, pocketwise clientKeys) (*bank, error) {
 		// A request naming no customer is refused with unknown_user_id
 		// before it's stored.
 		BackchannelHints: customerDirectory{},
-		CIBARARPolicy: entitlements{
-			tillClientID:       {paymentInitiationType.Type},
-			pocketwiseClientID: {accountInformationType.Type},
-		},
+		// Each client's types are its registration's; no further rule.
+		CIBARARPolicy: server.AllowRequestedAuthorizationDetails{},
 	}
 	if b.srv, err = server.New(b.cfg, b.deps); err != nil {
 		return nil, err
@@ -175,11 +173,15 @@ func (w *World) registeredClients() ([]storage.RegisteredClient, error) {
 		{
 			ID: tillClientID, Display: storage.ClientDisplay{Name: tillName},
 			BackchannelTokenDeliveryMode: storage.BackchannelTokenDeliveryModePoll,
+			// RFC 9396 §10: a merchant till may initiate payments only.
+			AuthorizationDetailsTypes: []string{paymentInitiationType.Type},
 		},
 		{
 			ID: pocketwiseClientID, Display: storage.ClientDisplay{Name: "Pocketwise"},
 			BackchannelTokenDeliveryMode:          storage.BackchannelTokenDeliveryModePing,
 			BackchannelClientNotificationEndpoint: notify,
+			// A budgeting app may only read accounts.
+			AuthorizationDetailsTypes: []string{accountInformationType.Type},
 		},
 	} {
 		// Registered only for CIBA, so no redirect URIs: neither client

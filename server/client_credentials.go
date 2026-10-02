@@ -99,7 +99,7 @@ func (s *Server) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), newError(ErrorInvalidAuthorizationDetails, 400, "authorization_details is invalid", err))
 	}
-	authorizationDetails, err := s.applyRARPolicy(ctx, client.ID(), s.deps.ClientCredentialsRARPolicy, authorizationDetailsRequested)
+	authorizationDetails, err := s.applyRARPolicy(ctx, client, s.deps.ClientCredentialsRARPolicy, authorizationDetailsRequested)
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), newError(ErrorInvalidAuthorizationDetails, 400, "authorization_details is not permitted for this client", err))
 	}

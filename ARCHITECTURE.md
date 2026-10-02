@@ -440,8 +440,11 @@ subset of what was requested), approved `AuthorizationDetails` (each an
 acceptable narrowing of a requested object, per
 `RARDefinition.ValidateGrant`), and extra ID-token claims (server-managed
 names rejected, total size bounded by `Limits.MaxIDTokenClaimsBytes`).
-An optional `RARPolicy` narrows what a client may request before a
-resource owner ever sees it. None of this can disable PAR, PKCE, sender
+A client may request only the RAR types it is registered for
+(`storage.RegisteredClientConfig.AuthorizationDetailsTypes`, RFC 9396
+§10's `authorization_details_types`; none by default), and an optional
+`RARPolicy` narrows what it may request before a resource owner ever
+sees it. None of this can disable PAR, PKCE, sender
 constraint, redirect URI validation, client authentication, replay
 protection, required signed request objects, or profile algorithm
 restrictions.
@@ -577,8 +580,14 @@ also user-involved), and client_credentials (RFC 6749 §4.4,
 machine-to-machine, no end user) — and `authorization_details` is
 structurally validated identically across all three: the same
 `RARDefinition`s, the same `parseRequestedAuthorizationDetails` helper
-(`server/rar.go`). The *entitlement* decision on top of that structural
-validation takes one of three shapes, all implementing the same
+(`server/rar.go`). Before any policy, every requested type must be one
+the client is registered for
+(`storage.RegisteredClientConfig.AuthorizationDetailsTypes`; an empty
+list allows none), or the request is refused with
+`ErrorInvalidAuthorizationDetails` — so a policy only ever sees types
+the client may use, and `server.AllowRequestedAuthorizationDetails` is
+enough where that is the only rule. The *entitlement* decision on top
+takes one of three shapes, all implementing the same
 `server.RARPolicy` interface, one per `Dependencies` field:
 
 - **Authorization Code** (`Dependencies.AuthorizationCodeRARPolicy`,

@@ -94,7 +94,9 @@ func (w *World) newBank(shop clientKeys) (*bank, error) {
 		RequestObjectAlgorithm:   fapi.ES256,
 		SenderConstrain:          storage.SenderConstrainDPoP,
 		AllowedScopes:            []string{"openid"},
-		Display:                  storage.ClientDisplay{Name: shopName},
+		// RFC 9396 §10: the shop may ask for payments, and nothing else.
+		AuthorizationDetailsTypes: []string{paymentInitiationType.Type},
+		Display:                   storage.ClientDisplay{Name: shopName},
 	})
 	if err != nil {
 		return nil, err
@@ -118,18 +120,19 @@ func (w *World) newBank(shop clientKeys) (*bank, error) {
 		Assurance: server.AssuranceDevelopment, RAR: registry,
 	}
 	b.deps = server.Dependencies{
-		Clients:                    memstore.NewClientRepository([]storage.RegisteredClient{shopClient}),
-		Transactions:               memstore.NewTransactionStore(),
-		Grants:                     memstore.NewGrantStore(),
-		Replay:                     memstore.NewReplayStore(),
-		ClientKeys:                 clientKeySource,
-		Keys:                       manager,
-		AccessTokens:               accessTokens,
-		Revocation:                 memstore.NewRevocationStore(),
-		ClientCertificateTrust:     server.NoClientCertificateChainTrust{},
-		Clock:                      server.SystemClock{},
-		Random:                     rand.Reader,
-		AuthorizationCodeRARPolicy: entitlements{shopClientID: {paymentInitiationType.Type}},
+		Clients:                memstore.NewClientRepository([]storage.RegisteredClient{shopClient}),
+		Transactions:           memstore.NewTransactionStore(),
+		Grants:                 memstore.NewGrantStore(),
+		Replay:                 memstore.NewReplayStore(),
+		ClientKeys:             clientKeySource,
+		Keys:                   manager,
+		AccessTokens:           accessTokens,
+		Revocation:             memstore.NewRevocationStore(),
+		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		Clock:                  server.SystemClock{},
+		Random:                 rand.Reader,
+		// Each client's types are its registration's; no further rule.
+		AuthorizationCodeRARPolicy: server.AllowRequestedAuthorizationDetails{},
 	}
 	if b.srv, err = server.New(b.cfg, b.deps); err != nil {
 		return nil, err

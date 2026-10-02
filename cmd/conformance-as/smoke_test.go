@@ -249,6 +249,7 @@ func newSmokeHarnessWithOptions(t *testing.T, format AccessTokenFormat, dpopNonc
 		ClientAssertionAlgorithm: fapi.ES256,
 		AllowedScopes:            []string{"openid", "accounts", "offline_access"},
 		BackchannelAuthenticationRequestAlgorithm: clientCIBAAlg,
+		AuthorizationDetailsTypes:                 []string{sampleRARDefinition.Type},
 	})
 	if err != nil {
 		t.Fatalf("build registered client: %v", err)

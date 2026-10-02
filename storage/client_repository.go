@@ -171,6 +171,7 @@ type RegisteredClient struct {
 	expectedAttesterIssuer        string
 	clientAttestationAlgorithm    fapi.SignatureAlgorithm
 	allowedScopes                 map[string]struct{}
+	authorizationDetailsTypes     map[string]struct{}
 
 	idTokenEncryptionKeyManagement     fapi.KeyManagementAlgorithm
 	idTokenEncryptionContentEncryption fapi.ContentEncryptionAlgorithm
@@ -348,6 +349,15 @@ type RegisteredClientConfig struct {
 
 	AllowedScopes []string
 
+	// AuthorizationDetailsTypes are the Rich Authorization Request types
+	// (RFC 9396 §2, the authorization_details "type" member) this client
+	// may request, its "authorization_details_types" client metadata
+	// (RFC 9396 §10). The server refuses any other type with
+	// invalid_authorization_details before consulting its RARPolicy. Empty
+	// means none: a client requesting authorization_details must list
+	// every type it uses.
+	AuthorizationDetailsTypes []string
+
 	// AllowsClientCredentialsGrant permits this client to use the RFC
 	// 6749 §4.4 client_credentials grant at the token endpoint —
 	// false (the zero value/default) means it cannot, the same
@@ -498,12 +508,13 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 		return RegisteredClient{}, err
 	}
 
-	scopes := make(map[string]struct{}, len(cfg.AllowedScopes))
-	for _, s := range cfg.AllowedScopes {
-		if s == "" {
-			return RegisteredClient{}, fmt.Errorf("storage: client %q has an empty allowed scope", cfg.ID)
-		}
-		scopes[s] = struct{}{}
+	scopes, err := stringSet(cfg.ID, "allowed scope", cfg.AllowedScopes)
+	if err != nil {
+		return RegisteredClient{}, err
+	}
+	rarTypes, err := stringSet(cfg.ID, "authorization details type", cfg.AuthorizationDetailsTypes)
+	if err != nil {
+		return RegisteredClient{}, err
 	}
 
 	redirectURIs := make([]fapi.RegisteredRedirectURI, len(cfg.RedirectURIs))
@@ -527,6 +538,7 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 		expectedAttesterIssuer:                    cfg.ExpectedAttesterIssuer,
 		clientAttestationAlgorithm:                cfg.ClientAttestationAlgorithm,
 		allowedScopes:                             scopes,
+		authorizationDetailsTypes:                 rarTypes,
 		idTokenEncryptionKeyManagement:            cfg.IDTokenEncryptionKeyManagement,
 		idTokenEncryptionContentEncryption:        cfg.IDTokenEncryptionContentEncryption,
 		userInfoEncryptionKeyManagement:           cfg.UserInfoEncryptionKeyManagement,
@@ -908,6 +920,27 @@ func (c RegisteredClient) Display() ClientDisplay { return c.display }
 func (c RegisteredClient) AllowsScope(scope string) bool {
 	_, ok := c.allowedScopes[scope]
 	return ok
+}
+
+// AllowsAuthorizationDetailsType reports whether typ is one of the Rich
+// Authorization Request types this client is registered for — see
+// RegisteredClientConfig.AuthorizationDetailsTypes.
+func (c RegisteredClient) AllowsAuthorizationDetailsType(typ string) bool {
+	_, ok := c.authorizationDetailsTypes[typ]
+	return ok
+}
+
+// stringSet builds the set values lists for client id, refusing an
+// empty entry, which what describes.
+func stringSet(id fapi.ClientID, what string, values []string) (map[string]struct{}, error) {
+	set := make(map[string]struct{}, len(values))
+	for _, v := range values {
+		if v == "" {
+			return nil, fmt.Errorf("storage: client %q has an empty %s", id, what)
+		}
+		set[v] = struct{}{}
+	}
+	return set, nil
 }
 
 // ClientRepository resolves a registered client by ID.

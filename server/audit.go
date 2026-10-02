@@ -53,6 +53,10 @@ const (
 	// AuditEventAuthenticateAttestedClient records the outcome of an
 	// AuthenticateAttestedClient call.
 	AuditEventAuthenticateAttestedClient
+
+	// AuditEventVerifyTokenRequestBinding records the outcome of a
+	// VerifyTokenRequestBinding call.
+	AuditEventVerifyTokenRequestBinding
 )
 
 // AuditOutcome is a closed set of outcomes for an AuditEvent.

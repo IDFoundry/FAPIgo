@@ -368,15 +368,25 @@ func (s *Server) issueOptionalRefreshToken(ctx context.Context, client storage.R
 // next and records it onto result, when the server issues nonces — a
 // no-op otherwise.
 func (s *Server) addNextDPoPNonce(ctx context.Context, client storage.RegisteredClient, now time.Time, result *TokenResult) *Error {
-	if s.deps.Nonces == nil || client.SenderConstrain() != storage.SenderConstrainDPoP {
-		return nil
-	}
-	nextNonce, err := s.issueDPoPNonce(ctx, now)
+	nextNonce, err := s.nextDPoPNonce(ctx, client, now)
 	if err != nil {
-		return newError(ErrorServerError, 500, "failed to issue dpop nonce", err)
+		return err
 	}
 	result.NextDPoPNonce = nextNonce
 	return nil
+}
+
+// nextDPoPNonce is the DPoP-Nonce a DPoP-bound client should use next,
+// or "" when the server doesn't issue nonces or client isn't DPoP-bound.
+func (s *Server) nextDPoPNonce(ctx context.Context, client storage.RegisteredClient, now time.Time) (string, *Error) {
+	if s.deps.Nonces == nil || client.SenderConstrain() != storage.SenderConstrainDPoP {
+		return "", nil
+	}
+	nextNonce, err := s.issueDPoPNonce(ctx, now)
+	if err != nil {
+		return "", newError(ErrorServerError, 500, "failed to issue dpop nonce", err)
+	}
+	return nextNonce, nil
 }
 
 // resolveDPoPProof reduces proofs — a request's own DPoPProofs field —

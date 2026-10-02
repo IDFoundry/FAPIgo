@@ -106,8 +106,9 @@ func newHarnessWithNonces(t *testing.T) (harness, *memstore.NonceStore) {
 	}
 	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
 	nonces := memstore.NewNonceStore()
+	clients := &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}}
 	deps := server.Dependencies{
-		Clients:      &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
+		Clients:      clients,
 		Transactions: &fakeTransactionStore{},
 		Grants:       &fakeGrantStore{},
 		Replay:       &fakeReplayStore{},
@@ -126,7 +127,7 @@ func newHarnessWithNonces(t *testing.T) (harness, *memstore.NonceStore) {
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
-	return harness{server: srv, key: key, serverKey: serverKey, now: now}, nonces
+	return harness{server: srv, clients: clients, key: key, serverKey: serverKey, now: now}, nonces
 }
 
 // exchangeWithDPoPNonce runs a full ExchangeAuthorizationCode attempt

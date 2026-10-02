@@ -162,8 +162,9 @@ func newAttestationHarness(t *testing.T, now time.Time, registeredKey *ecdsa.Pri
 	}
 
 	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
+	clients := &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}}
 	deps := server.Dependencies{
-		Clients:                &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
+		Clients:                clients,
 		Transactions:           &fakeTransactionStore{},
 		Grants:                 &fakeGrantStore{},
 		Replay:                 &fakeReplayStore{},
@@ -182,7 +183,7 @@ func newAttestationHarness(t *testing.T, now time.Time, registeredKey *ecdsa.Pri
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
-	return harness{server: srv, serverKey: serverKey, audit: audit, revocation: revocation, now: now}
+	return harness{server: srv, clients: clients, serverKey: serverKey, audit: audit, revocation: revocation, now: now}
 }
 
 func registeredAttesterKeys(key *ecdsa.PrivateKey) map[fapi.ClientID][]keys.VerificationKey {

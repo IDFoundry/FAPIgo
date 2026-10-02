@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.43.0](https://github.com/IDFoundry/FAPIgo/compare/v0.42.0...v0.43.0) (2026-10-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* a client that sends authorization_details must now be registered with every type it requests in storage.RegisteredClientConfig.AuthorizationDetailsTypes (or, for clients registered automatically through OpenID Federation, server.Config.AutomaticRegistration.AuthorizationDetailsTypes), or the request is refused with invalid_authorization_details. An empty list allows no type. See UPGRADING.md for v0.43.0.
+* **client:** custom storage.SessionStore implementations must persist NewSession.Record and return it as ConsumedSession.Record, in place of the Nonce, PKCEVerifier, ExpectedIssuer, ExpectedRedirectURI and ExpectedResponseMode fields, which are removed. A client requesting max_age now refuses an ID token without auth_time, or one older than max_age allows. See UPGRADING.md for v0.43.0.
+
+### Features
+
+* **client:** bind the session handle to the browser in an encrypted cookie ([6259639](https://github.com/IDFoundry/FAPIgo/commit/625963966ff659bfb699cc8584f0e29861bbe215))
+* **client:** check auth_time against max_age, with an opaque session record ([33d1a03](https://github.com/IDFoundry/FAPIgo/commit/33d1a035b97f6b6ec4e2f34fda4f4f3c1f3caaa5))
+* **client:** seal token sets with a TokenSetSealer bound to their owner ([6686ba5](https://github.com/IDFoundry/FAPIgo/commit/6686ba50dadf5bfd49edb114b5741ba48cd658d2))
+* **extension:** read the authorization details a token was granted ([fcaf31d](https://github.com/IDFoundry/FAPIgo/commit/fcaf31d7495239c5cf6c9cb940d6c9bbd85cf2c8))
+* register the RAR types each client may request ([e2db87d](https://github.com/IDFoundry/FAPIgo/commit/e2db87da6bb2ee5445a067b054e204baf2e38b97))
+* **resource,serverresource:** DPoP-Nonce and UserInfo response helpers ([b85f443](https://github.com/IDFoundry/FAPIgo/commit/b85f443e3c72eae38fcb8c90564e5589de6ab03d))
+* **resource:** build a VerifyRequest from an http.Request ([3d0574b](https://github.com/IDFoundry/FAPIgo/commit/3d0574b90650d4b4d4178302f1917c8f79c7099b))
+* **server:** carry an interaction in one encrypted cookie ([142c0b3](https://github.com/IDFoundry/FAPIgo/commit/142c0b3d1ec6c88f0cf274ce735b142776cf8068))
+* **server:** catch client RAR types Config.RAR doesn't register ([9299dde](https://github.com/IDFoundry/FAPIgo/commit/9299ddee5250ee9437cdff6b3c1766b8ba173fcb))
+* **server:** read the authorization endpoint's request strictly ([6ccec35](https://github.com/IDFoundry/FAPIgo/commit/6ccec35288f710672196085f36fef403cf090bf7))
+* **server:** say when an interaction expires, and expire its cookie then ([5d8794b](https://github.com/IDFoundry/FAPIgo/commit/5d8794b24e70b2e07105e9681461e951bc2d8a6f))
+
+
+### Bug Fixes
+
+* **client:** refuse a max_age over 100 years when the flow begins ([687e4b4](https://github.com/IDFoundry/FAPIgo/commit/687e4b4db7a4d99e32f9ede9345c9267122da81e))
+* **extension:** refuse RAR members that differ only in case ([252d5eb](https://github.com/IDFoundry/FAPIgo/commit/252d5ebf6ce4f59f322e14161c0fe1db09bd93cb))
+* **extension:** refuse RAR members that differ only in case at any depth ([99cad87](https://github.com/IDFoundry/FAPIgo/commit/99cad8720ea3fc47e44322126e4b13949bef62a6))
+* **resource:** refuse a request with more than one Authorization header ([17dc93b](https://github.com/IDFoundry/FAPIgo/commit/17dc93bf01528cde7d1921a35d995337585c6ce1))
+* **server:** answer an unreadable form body as invalid_request ([ee2f80a](https://github.com/IDFoundry/FAPIgo/commit/ee2f80a0a5f3749bb0fbf9732a0856f5c2bd7a6a))
+
 ## [0.42.0](https://github.com/IDFoundry/FAPIgo/compare/v0.41.0...v0.42.0) (2026-10-02)
 
 

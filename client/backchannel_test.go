@@ -7,6 +7,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -128,8 +129,9 @@ func (a *fakeCIBAAS) handleToken(w http.ResponseWriter, r *http.Request) {
 	}
 	a.lastPollForm = r.PostForm
 	a.lastPollDPoPProof = r.Header.Get("DPoP")
-	if r.PostForm.Get("grant_type") != "urn:openid:params:grant-type:ciba" {
-		a.t.Errorf("token: grant_type = %q, want CIBA grant type", r.PostForm.Get("grant_type"))
+	// The CIBA grant, or refreshing the tokens it issued.
+	if gt := r.PostForm.Get("grant_type"); gt != "urn:openid:params:grant-type:ciba" && gt != "refresh_token" {
+		a.t.Errorf("token: grant_type = %q, want the CIBA grant type or refresh_token", gt)
 	}
 	if r.PostForm.Get("client_assertion") == "" {
 		a.t.Errorf("token: missing client_assertion")
@@ -632,5 +634,39 @@ func TestPollBackchannelAuthenticationDeniedDropsMalformedDescription(t *testing
 	denied, ok := result.(client.BackchannelAuthenticationDenied)
 	if !ok || denied.Code != "access_denied" || denied.Description != "" {
 		t.Fatalf("result = %#v, want access_denied with the malformed description dropped", result)
+	}
+}
+
+// TestRefreshTokensRefusesAChangedSubject covers OIDC Core §12.2 end to
+// end: a refreshed ID token for a different end-user than the original
+// is refused, not returned.
+func TestRefreshTokensRefusesAChangedSubject(t *testing.T) {
+	c, as, _ := newTestClientWithCIBA(t)
+	session := beginTestBackchannelSession(t, c)
+	as.tokenResponses = []cibaTokenResponse{{status: http.StatusOK, body: map[string]any{
+		"access_token": "at-1", "token_type": "DPoP", "expires_in": 300, "scope": "openid accounts",
+		"id_token": newCIBAIDToken(t, as), "refresh_token": "rt-1",
+	}}}
+	result, err := c.PollBackchannelAuthentication(context.Background(), session)
+	if err != nil {
+		t.Fatalf("PollBackchannelAuthentication: %v", err)
+	}
+	tokens := result.(client.BackchannelAuthenticationApproved).Tokens
+
+	otherUser, err := token.IssueIDToken(token.IDTokenParams{
+		Signer: as.idTokenKey, Algorithm: fapi.ES256, KeyID: "as-id-kid",
+		Issuer: testIssuer, Subject: "end-user-2", Audience: testClientID,
+		Now: time.Now(), Lifetime: time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("issue id token: %v", err)
+	}
+	as.tokenResponses = []cibaTokenResponse{{status: http.StatusOK, body: map[string]any{
+		"access_token": "at-2", "token_type": "DPoP", "expires_in": 300, "id_token": otherUser,
+	}}}
+	_, err = c.RefreshTokens(context.Background(), client.RefreshTokenRequest{Tokens: tokens})
+	var cerr *client.Error
+	if !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidResponse {
+		t.Fatalf("RefreshTokens(ID token for another user) = %v, want invalid_response", err)
 	}
 }

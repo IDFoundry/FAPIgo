@@ -122,7 +122,7 @@ and the access token decoded.
 | Use the token without Ledgerline's certificate | The token is bound to a certificate, and the connection presents none |
 | Use the token with Copperfield's certificate | A valid certificate, but not the one the token's `cnf.x5t#S256` names |
 | Add €5,000.00 to the batch | The API pays only within the granted `authorization_details` |
-| Pay the batch again | The token was for one batch |
+| Pay the batch again | The token was for one batch; the API records it as used in the bank's shared replay store (`storage.ReplayStore.UseOnce`), so no instance pays it twice |
 
 **3. Get a token without Ledgerline's key.** On Ledgerline's page, each
 attack at the token endpoint is refused with `invalid_client`:

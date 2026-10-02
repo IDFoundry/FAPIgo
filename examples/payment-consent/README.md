@@ -94,7 +94,7 @@ refused:
 | Attack | What stops it |
 |---|---|
 | Charge €1,290.00 | The payments API executes only a payment matching the approved `authorization_details` |
-| Charge again | The approval is for one payment; the API won't execute it twice |
+| Charge again | The approval is for one payment; the API records it as used in the bank's shared replay store (`storage.ReplayStore.UseOnce`), so no instance executes it twice |
 | Use the token from another device | The token is DPoP-bound to the shop's key; another device can't prove possession of it |
 | Redeem the code again | The bank refuses a code redeemed twice, and revokes the token the first redemption issued — the API refuses that token from then on |
 | Replay the response | The checkout session it answered is already used |

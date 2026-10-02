@@ -102,6 +102,17 @@ func newHarnessWithAttesterTrustAt(t *testing.T, now time.Time, registeredKey *e
 // before either is built.
 func newAttestationHarness(t *testing.T, now time.Time, registeredKey *ecdsa.PrivateKey, trust server.AttesterTrust, tweak func(*server.Config, *storage.RegisteredClientConfig)) harness {
 	t.Helper()
+	h, err := newAttestationServer(t, now, registeredKey, trust, tweak)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+	return h
+}
+
+// newAttestationServer is newAttestationHarness, returning server.New's
+// error rather than failing t.
+func newAttestationServer(t *testing.T, now time.Time, registeredKey *ecdsa.PrivateKey, trust server.AttesterTrust, tweak func(*server.Config, *storage.RegisteredClientConfig)) (harness, error) {
+	t.Helper()
 	serverKey := generateKey(t)
 
 	clientConfig := storage.RegisteredClientConfig{
@@ -181,9 +192,9 @@ func newAttestationHarness(t *testing.T, now time.Time, registeredKey *ecdsa.Pri
 
 	srv, err := server.New(cfg, deps)
 	if err != nil {
-		t.Fatalf("server.New: %v", err)
+		return harness{}, err
 	}
-	return harness{server: srv, clients: clients, serverKey: serverKey, audit: audit, revocation: revocation, now: now}
+	return harness{server: srv, clients: clients, serverKey: serverKey, audit: audit, revocation: revocation, now: now}, nil
 }
 
 func registeredAttesterKeys(key *ecdsa.PrivateKey) map[fapi.ClientID][]keys.VerificationKey {

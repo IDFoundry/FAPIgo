@@ -186,7 +186,7 @@ func TestVerifyTokenRequestBindingSharesDPoPReplay(t *testing.T) {
 		ClientAttestationPoPs: []string{createAttestationPoPHeader(t, instanceKey, testClientID.String(), testIssuer, "jti-2", h.now)},
 		DPoPProofs:            []string{second},
 	})
-	if code := serverErrorCode(t, err); code != server.ErrorInvalidDPoPProof {
+	if serverErrorCode(t, err) != server.ErrorInvalidDPoPProof {
 		t.Fatalf("RequestClientCredentialsToken(proof used by the embedder's grant) = %v, want invalid_dpop_proof", err)
 	}
 }
@@ -252,5 +252,14 @@ func TestAdditionalGrantTypesAdvertised(t *testing.T) {
 	got := h.server.Metadata(context.Background()).GrantTypesSupported
 	if len(got) == 0 || got[len(got)-1] != preAuthorizedCodeGrant {
 		t.Errorf("grant_types_supported = %v, want %s after the server's own", got, preAuthorizedCodeGrant)
+	}
+}
+
+func TestNewRefusesInvalidAdditionalGrantTypes(t *testing.T) {
+	_, err := newAttestationServer(t, time.Now(), generateKey(t), server.RegisteredAttesterKeys{}, func(cfg *server.Config, _ *storage.RegisteredClientConfig) {
+		cfg.AdditionalGrantTypes = []string{"authorization_code"}
+	})
+	if err == nil || !strings.Contains(err.Error(), "additional_grant_types") {
+		t.Fatalf("New(AdditionalGrantTypes authorization_code) = %v, want refusal", err)
 	}
 }

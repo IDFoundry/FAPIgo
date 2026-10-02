@@ -46,7 +46,7 @@ type accountView struct {
 func (a *api) accounts(w http.ResponseWriter, r *http.Request) {
 	target, err := url.Parse(a.w.URL(apiHost, accountsPath))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		internalError(w, err)
 		return
 	}
 	authz, err := a.verifier.Verify(r.Context(), resource.VerifyRequest{

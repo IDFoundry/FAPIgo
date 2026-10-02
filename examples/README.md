@@ -49,6 +49,12 @@ built** table naming the FAPIgo API behind each piece.
   with the reason.
 - **A protocol trace** of each request and response, with the JWTs
   decoded (payment-consent, payroll-run, identity-check, linked-accounts).
+- **Errors shown at the right level.** What the bank, identity provider
+  and APIs send back carries only a FAPIgo error's public description,
+  or a fixed message, with the full error logged: `Error()` includes the
+  internal cause, which is for logs. The attack lab, protocol trace,
+  logs and the apps' own failure pages show full errors on purpose,
+  since explaining a refusal is what they're for.
 - **Only FAPIgo's public API.** CI checks that no demo imports
   `internal/`, so nothing a demo does is out of reach of your own code.
 - **Tests** that drive the whole demo end to end, attacks included.

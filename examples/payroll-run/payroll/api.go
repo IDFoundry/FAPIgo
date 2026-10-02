@@ -72,7 +72,7 @@ func (a *api) submit(w http.ResponseWriter, r *http.Request) {
 	// request describes.
 	target, err := url.Parse(a.w.URL(apiHost, batchesPath))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		internalError(w, err)
 		return
 	}
 	authz, err := a.verifier.Verify(r.Context(), resource.VerifyRequest{

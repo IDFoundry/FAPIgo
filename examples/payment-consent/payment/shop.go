@@ -212,7 +212,7 @@ func (s *shop) begin(ctx context.Context, o *order, lc *lazyClient, tamper bool)
 // tampered with or names a redirect URI the bank never registered.
 func (s *shop) pay(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		s.w.renderError(w, shopHost, http.StatusBadRequest, "Malformed form", err.Error())
+		s.w.renderError(w, shopHost, http.StatusBadRequest, "Malformed form", formUnreadable)
 		return
 	}
 	o := s.newOrder(r.PostForm.Get("scenario"))
@@ -257,7 +257,7 @@ func (s *shop) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	handle, err := client.ParseSessionHandle(sessionC.Value)
 	if err != nil {
-		s.w.renderError(w, shopHost, http.StatusBadRequest, "No payment in progress", err.Error())
+		s.w.renderError(w, shopHost, http.StatusBadRequest, "No payment in progress", notStartedHere)
 		return
 	}
 	s.mu.Lock()
@@ -432,7 +432,7 @@ func (w *World) approveOnAnotherDevice(ctx context.Context, username, pin string
 // real tokens or authorization response.
 func (s *shop) attack(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		s.w.renderError(w, shopHost, http.StatusBadRequest, "Malformed form", err.Error())
+		s.w.renderError(w, shopHost, http.StatusBadRequest, "Malformed form", formUnreadable)
 		return
 	}
 	o, ok := s.lookup(r.PostForm.Get("id"))

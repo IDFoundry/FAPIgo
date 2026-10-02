@@ -325,7 +325,7 @@ func (rp *relyingParty) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	handle, err := client.ParseSessionHandle(sessionC.Value)
 	if err != nil {
-		rp.w.renderError(w, rp.setup.host, http.StatusBadRequest, "No identity check in progress", err.Error())
+		rp.w.renderError(w, rp.setup.host, http.StatusBadRequest, "No identity check in progress", notStartedHere)
 		return
 	}
 	rp.complete(r.Context(), ck, handle, r.URL.RawQuery)

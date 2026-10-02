@@ -185,7 +185,7 @@ func (p *pocketwise) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	handle, err := client.ParseSessionHandle(cookie.Value)
 	if err != nil {
-		p.w.renderError(w, pocketwiseHost, http.StatusBadRequest, "No link in progress", err.Error())
+		p.w.renderError(w, pocketwiseHost, http.StatusBadRequest, "No link in progress", notStartedHere)
 		return
 	}
 	ctx := p.ctx(r.Context())

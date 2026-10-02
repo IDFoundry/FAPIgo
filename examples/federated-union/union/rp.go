@@ -286,7 +286,7 @@ func (rp *relyingParty) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	handle, err := client.ParseSessionHandle(sessionC.Value)
 	if err != nil {
-		rp.w.renderError(w, http.StatusBadRequest, noSignIn, err.Error())
+		rp.w.renderError(w, http.StatusBadRequest, noSignIn, notStartedHere)
 		return
 	}
 	rp.mu.Lock()

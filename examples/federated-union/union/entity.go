@@ -157,7 +157,7 @@ func (e *entity) EntityConfiguration(ctx context.Context) (string, error) {
 func (e *entity) serveEntityConfiguration(w http.ResponseWriter, r *http.Request) {
 	token, err := e.EntityConfiguration(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		internalError(w, err)
 		return
 	}
 	federation.WriteEntityStatement(w, token)
@@ -185,7 +185,7 @@ func (e *entity) serveFetch(w http.ResponseWriter, r *http.Request) {
 	}
 	token, ok, err := e.SubordinateStatement(sub)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		internalError(w, err)
 		return
 	}
 	if !ok {

@@ -320,6 +320,22 @@ both did, byte-for-byte, before this was centralized). A caller fronted
 by something other than `*http.Request` builds a `FormRequest` by hand
 instead.
 
+A `net/http` adapter rarely calls those helpers one by one. Each request
+type has a constructor that reads everything it needs from the
+`*http.Request` at once — the form, every DPoP header, the client
+attestation headers and the TLS client certificate:
+`server.PushAuthorizationRequestFromHTTP`, `TokenEndpointRequestFromHTTP`,
+`BeginBackchannelAuthenticationRequestFromHTTP`,
+`BeginAuthorizationRequestFromHTTP` and `resource.VerifyRequestFromHTTP`.
+Filling a request struct field by field compiles just as well with one
+left out, and then fails only for the clients that need it — typically
+those using mTLS or attestation — so the constructors are the
+recommended path; the fields stay public for adapters fronted by
+something else. A request they can't read (a malformed or oversized
+body, a repeated `client_id`) is a 400 `invalid_request` `*Error`,
+never a 500; more than one `Authorization` header is marked by
+`VerifyRequestFromHTTP` for `Verify` to refuse the same way.
+
 The same reasoning applies to the DPoP header specifically:
 `DPoPProofs []string` on every request type that accepts a DPoP proof
 (`server`'s six token/PAR/CIBA-begin request types, and
@@ -499,8 +515,12 @@ specific DCR plan) has no DCR module at all. If it is added:
 
 ### 8. Resource server verifies in HTTP context, not in isolation
 
-`Verifier.Verify(ctx, VerifyRequest{Method, URL, Authorization, DPoPProofs})`
-→ `AuthorizationContext{Subject, ClientID, Scopes, Claims}`. Token
+`Verifier.Verify(ctx, VerifyRequest{Method, URL, Authorization,
+DPoPProofs, PeerCertificate})` → `AuthorizationContext{Subject,
+ClientID, Scopes, Claims}`, with the request usually built by
+`resource.VerifyRequestFromHTTP(r, target)` — `target` being the
+endpoint's own fixed external URL, never one built from the `Host`
+header. Token
 verification is inseparable from method/URL/DPoP context, so there is no
 bare `VerifyJWT` entry point — and, symmetrically, no bare `VerifyDPoP`
 entry point either, since a DPoP proof can't be judged valid without the

@@ -253,6 +253,38 @@ case server.AuthorizationLocalError:
 }
 ```
 
+**Carry the interaction to the form's submission.** The consent form's
+submission needs two things from `/authorize`: the handle, bound to this
+browser, and `a.Interaction`. `server/interactioncookie` carries both in
+one encrypted cookie:
+
+```go
+cookie, err := interactioncookie.New(keys, interactioncookie.Options{}) // once; keys shared by every instance
+
+// GET /authorize, on server.InteractionRequired:
+tag, err := cookie.Set(w, a, now) // render tag in the form, as interactioncookie.FormField
+
+// POST, the form's submission (behind your CSRF protection):
+handle, interaction, err := cookie.Read(r, now, r.PostFormValue(interactioncookie.FormField))
+// ...CompleteAuthorization with handle, then cookie.Clear(w)
+```
+
+The cookie expires with the handle (`a.ExpiresAt`), so pass `now` from
+the clock the server uses. The tag matters because a browser holds one
+cookie of a name: a second authorization in the same browser — another
+tab, or a page that sends the browser to `/authorize` for a client of
+its own — replaces the first's cookie, and without the tag the first
+page's form would approve the second authorization. With it, that form
+gets `ErrNoInteraction` and the user starts again. It's AES-GCM under
+keys every instance shares (the first seals, all open, so keys rotate),
+with the `__Host-` prefix. An interaction too large for a cookie —
+large authorization details, say — gets `ErrTooLarge`: keep that one in
+a server-side session instead. It's no CSRF defence: the form still
+needs one. The demos under `examples/` use it.
+
+Keeping the interaction somewhere else — a server-side session — means
+doing yourself the two things the package does:
+
 **Bind the interaction handle to the browser.** `CompleteAuthorization`
 accepts a handle from whoever presents it, so a login UI that carries it
 in a form field and signs users in from an existing session cookie is
@@ -262,7 +294,10 @@ signed-in victim's browser approves it, sending that client a code for
 the victim's account. Set the handle (`a.Handle.String()`) in an
 HttpOnly, Secure, SameSite cookie when the browser reaches `/authorize`,
 read it back with `server.ParseInteractionHandle` when the form is
-submitted, and protect that form with your usual CSRF defence. See
+submitted, and protect that form with your usual CSRF defence. Tie the
+form to the handle it was rendered for, too, as the package's tag does:
+a second authorization in the same browser replaces the cookie, and the
+first page's form mustn't complete the second. See
 `server.InteractionHandle`'s doc comment.
 
 **Keep the interaction until the form comes back.** The submission
@@ -275,23 +310,6 @@ instance can handle the submission, not only the one that began the
 authorization. A modified copy can't widen the grant, since
 `CompleteAuthorization` checks it against the request the server
 stored.
-
-`server/interactioncookie` does both in one encrypted cookie:
-`Set(w, a, now)` at `/authorize` returns a tag for the form (a hidden
-`interactioncookie.FormField`), `Read(r, now, tag)` takes it back when
-the form comes back, and `Clear(w)` ends it. The cookie expires with the
-handle (`a.ExpiresAt`), so pass `now` from the clock the server uses.
-The tag matters because a browser holds one cookie of a name: a second
-authorization in the same browser — another tab, or a page that sends
-the browser to `/authorize` for a client of its own — replaces the
-first's cookie, and without the tag the first page's form would approve
-the second authorization. With it, that form gets `ErrNoInteraction`
-and the user starts again. It's AES-GCM
-under keys every instance shares (the first seals, all open, so keys
-rotate), with the `__Host-` prefix. An interaction too large for a
-cookie — large authorization details, say — gets `ErrTooLarge`: keep
-that one in a server-side session instead. It's no CSRF defence: the
-form still needs one. The demos under `examples/` use it.
 
 `cmd/conformance-as/authorize.go` is a complete, working version of
 exactly this — read it for the full picture of the GET (render the

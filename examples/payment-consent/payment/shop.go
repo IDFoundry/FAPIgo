@@ -246,6 +246,7 @@ func (s *shop) startSession(w http.ResponseWriter, o *order, session client.Auth
 func (s *shop) callback(w http.ResponseWriter, r *http.Request) {
 	sessionC, err1 := r.Cookie(sessionCookie)
 	orderC, err2 := r.Cookie(orderCookie)
+	clearCookies(w, sessionCookie, orderCookie)
 	o, ok := (*order)(nil), false
 	if err2 == nil {
 		o, ok = s.lookup(orderC.Value)
@@ -561,4 +562,13 @@ func randomCode(n int) string {
 		b[i] = alphabet[int(b[i])%len(alphabet)]
 	}
 	return string(b)
+}
+
+// clearCookies expires the callback's cookies. The session they carry is
+// single-use — consumed by this callback whatever its outcome — so
+// nothing should keep presenting it.
+func clearCookies(w http.ResponseWriter, names ...string) {
+	for _, name := range names {
+		http.SetCookie(w, &http.Cookie{Name: name, Path: "/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+	}
 }

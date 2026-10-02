@@ -5,16 +5,12 @@ import (
 	"crypto"
 	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"github.com/idfoundry/fapigo/server/interactioncookie"
 	"net/http"
 	"net/url"
 	"slices"
-	"strconv"
-	"strings"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -28,11 +24,10 @@ import (
 )
 
 const (
-	bankKeyID         = "alder-1"
-	authorizePath     = "/authorize"
-	userinfoPath      = "/userinfo"
-	interactionCookie = "alder_interaction"
-	approvalFailed    = "Approval failed"
+	bankKeyID      = "alder-1"
+	authorizePath  = "/authorize"
+	userinfoPath   = "/userinfo"
+	approvalFailed = "Approval failed"
 	// interactionLifetime is how long a consent page stays answerable.
 	interactionLifetime = 10 * time.Minute
 )
@@ -55,9 +50,9 @@ type bank struct {
 	srv      *server.Server
 	clients  storage.ClientRepository
 	verifier *resource.Verifier
-	// cookieKey signs the consent page's cookie: every instance of the
-	// bank would share it.
-	cookieKey []byte
+	// interaction carries the consent page's state in an encrypted
+	// cookie: every instance would share its key.
+	interaction *interactioncookie.Cookie
 }
 
 func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
@@ -129,6 +124,10 @@ func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
 	if _, err := rand.Read(cookieKey); err != nil {
 		return nil, err
 	}
+	interaction, err := interactioncookie.New([][]byte{cookieKey}, interactioncookie.Options{Lifetime: interactionLifetime})
+	if err != nil {
+		return nil, err
+	}
 
 	algs := server.RecommendedAlgorithms()
 	algs.UserInfo = fapi.ES256
@@ -137,7 +136,7 @@ func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
 	algs.UserInfoEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.ECDHESA256KW}
 	algs.UserInfoEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{fapi.A256GCM}
 
-	b := &bank{w: w, clients: memstore.NewClientRepository(registered), cookieKey: cookieKey}
+	b := &bank{w: w, clients: memstore.NewClientRepository(registered), interaction: interaction}
 	cfg := server.Config{
 		Issuer: issuer, Endpoints: endpoints, Profile: server.ProfileFAPISecurity,
 		Algorithms: algs, Limits: server.RecommendedLimits(), Assurance: server.AssuranceDevelopment,
@@ -336,15 +335,10 @@ func (b *bank) authorize(w http.ResponseWriter, r *http.Request) {
 	}
 	switch a := action.(type) {
 	case server.InteractionRequired:
-		sealed, err := b.seal(a.Handle, a.Interaction, time.Now())
-		if err != nil {
+		if err := b.interaction.Set(w, a.Handle, a.Interaction, time.Now()); err != nil {
 			b.w.renderError(w, bankHost, http.StatusInternalServerError, "Sign-in could not start", publicMessage(err, "Something went wrong. Please try again."))
 			return
 		}
-		http.SetCookie(w, &http.Cookie{
-			Name: interactionCookie, Value: sealed, Path: authorizePath, MaxAge: int(interactionLifetime / time.Second),
-			HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode,
-		})
 		b.w.render(w, "consent", b.consentPage(a.Interaction, ""))
 	case server.RedirectResponse:
 		http.Redirect(w, r, a.Destination.String(), http.StatusFound)
@@ -395,14 +389,9 @@ func (b *bank) consentPage(in server.InteractionRequest, problem string) consent
 // decide signs the customer in, the way they chose, and records which
 // claims they approved for release.
 func (b *bank) decide(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie(interactionCookie)
+	handle, in, err := b.interaction.Read(r, time.Now())
 	if err != nil {
 		b.w.renderError(w, bankHost, http.StatusBadRequest, "Session expired", "This browser has no sign-in in progress.")
-		return
-	}
-	handle, in, err := b.open(cookie.Value, time.Now())
-	if err != nil {
-		b.w.renderError(w, bankHost, http.StatusBadRequest, "Session expired", notStartedHere)
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -422,7 +411,7 @@ func (b *bank) decide(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	http.SetCookie(w, &http.Cookie{Name: interactionCookie, Path: authorizePath, MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+	b.interaction.Clear(w)
 	outcome, err := b.srv.CompleteAuthorization(r.Context(), server.CompleteAuthorizationRequest{Handle: handle, Result: result})
 	if err != nil {
 		b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, publicMessage(err, "Something went wrong. Please try again."))
@@ -469,49 +458,4 @@ func authorizeAs(c customer, method string, in server.InteractionRequest, approv
 		}
 	}
 	return server.Authorize(subject, auth, server.GrantedAuthorization{Scope: in.Scope, ApprovedIdentityClaims: release}), nil
-}
-
-// seal is the consent cookie for handle and in, issued at now: the
-// handle, the encoded interaction (InteractionRequest.MarshalText) and
-// the time, under an HMAC. The signature keeps the browser from
-// altering what the consent page shows; the server checks the grant
-// against the request it stored all the same.
-func (b *bank) seal(handle server.InteractionHandle, in server.InteractionRequest, now time.Time) (string, error) {
-	encoded, err := in.MarshalText()
-	if err != nil {
-		return "", err
-	}
-	payload := handle.String() + "~" + string(encoded) + "~" + strconv.FormatInt(now.Unix(), 10)
-	return payload + "~" + b.mac(payload), nil
-}
-
-// open checks a consent cookie's signature and age.
-func (b *bank) open(value string, now time.Time) (server.InteractionHandle, server.InteractionRequest, error) {
-	i := strings.LastIndex(value, "~")
-	if i < 0 || !hmac.Equal([]byte(value[i+1:]), []byte(b.mac(value[:i]))) {
-		return server.InteractionHandle{}, server.InteractionRequest{}, errors.New("the sign-in cookie isn't one Alder Bank issued")
-	}
-	parts := strings.Split(value[:i], "~")
-	if len(parts) != 3 {
-		return server.InteractionHandle{}, server.InteractionRequest{}, errors.New("malformed sign-in cookie")
-	}
-	issued, err := strconv.ParseInt(parts[2], 10, 64)
-	if err != nil || now.Sub(time.Unix(issued, 0)) > interactionLifetime {
-		return server.InteractionHandle{}, server.InteractionRequest{}, errors.New("the sign-in has expired")
-	}
-	handle, err := server.ParseInteractionHandle(parts[0])
-	if err != nil {
-		return server.InteractionHandle{}, server.InteractionRequest{}, err
-	}
-	in, err := server.ParseInteractionRequest(parts[1])
-	if err != nil {
-		return server.InteractionHandle{}, server.InteractionRequest{}, err
-	}
-	return handle, in, nil
-}
-
-func (b *bank) mac(payload string) string {
-	m := hmac.New(sha256.New, b.cookieKey)
-	m.Write([]byte(payload))
-	return base64.RawURLEncoding.EncodeToString(m.Sum(nil))
 }

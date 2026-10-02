@@ -53,6 +53,7 @@ Concretely:
 fapigo/                    // package fapi: shared value types only
 ├── client/                // RP public API
 ├── server/                // AS public API
+│   └── interactioncookie/  // an interaction carried in one encrypted browser cookie
 ├── resource/              // RS verification API
 ├── serverresource/        // a resource.Verifier matching a server in the same process
 ├── federation/            // OpenID Federation 1.0 leaf-entity primitives — a shared

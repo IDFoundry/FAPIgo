@@ -179,6 +179,7 @@ func (p *pocketwise) start(w http.ResponseWriter, r *http.Request) {
 // token, then a first sync.
 func (p *pocketwise) callback(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie(sessionCookie)
+	clearCookies(w, sessionCookie)
 	if err != nil {
 		p.w.renderError(w, pocketwiseHost, http.StatusBadRequest, "No link in progress", "This browser didn't start linking here.")
 		return
@@ -412,4 +413,13 @@ func describeError(err error) string {
 		}
 	}
 	return err.Error()
+}
+
+// clearCookies expires the callback's cookies. The session they carry is
+// single-use — consumed by this callback whatever its outcome — so
+// nothing should keep presenting it.
+func clearCookies(w http.ResponseWriter, names ...string) {
+	for _, name := range names {
+		http.SetCookie(w, &http.Cookie{Name: name, Path: "/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+	}
 }

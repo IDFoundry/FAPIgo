@@ -280,6 +280,7 @@ func (rp *relyingParty) login(w http.ResponseWriter, r *http.Request) {
 func (rp *relyingParty) callback(w http.ResponseWriter, r *http.Request) {
 	sessionC, err1 := r.Cookie(sessionCookie)
 	providerC, err2 := r.Cookie(providerCookie)
+	clearCookies(w, sessionCookie, providerCookie)
 	if err1 != nil || err2 != nil {
 		rp.w.renderError(w, http.StatusBadRequest, noSignIn, "This browser didn't start a sign-in here.")
 		return
@@ -364,4 +365,13 @@ func (w *World) displayName(id string) string {
 		}
 	}
 	return id
+}
+
+// clearCookies expires the callback's cookies. The session they carry is
+// single-use — consumed by this callback whatever its outcome — so
+// nothing should keep presenting it.
+func clearCookies(w http.ResponseWriter, names ...string) {
+	for _, name := range names {
+		http.SetCookie(w, &http.Cookie{Name: name, Path: "/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+	}
 }

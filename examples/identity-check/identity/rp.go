@@ -314,6 +314,7 @@ func (rp *relyingParty) finish(ck *check, status, problem string) {
 func (rp *relyingParty) callback(w http.ResponseWriter, r *http.Request) {
 	sessionC, err1 := r.Cookie(sessionCookie)
 	checkC, err2 := r.Cookie(checkCookie)
+	clearCookies(w, sessionCookie, checkCookie)
 	var ck *check
 	ok := false
 	if err2 == nil {
@@ -445,4 +446,13 @@ func describeError(err error) string {
 		}
 	}
 	return err.Error()
+}
+
+// clearCookies expires the callback's cookies. The session they carry is
+// single-use — consumed by this callback whatever its outcome — so
+// nothing should keep presenting it.
+func clearCookies(w http.ResponseWriter, names ...string) {
+	for _, name := range names {
+		http.SetCookie(w, &http.Cookie{Name: name, Path: "/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+	}
 }

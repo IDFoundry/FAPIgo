@@ -526,6 +526,21 @@ func validateProductionAssurance(cfg Config, deps Dependencies, cibaEnabled bool
 		return err
 	}
 	scaled := cfg.HorizontallyScaled
+	if err := checkProductionKeyCustody(deps, scaled); err != nil {
+		return err
+	}
+	if err := checkProductionClientSources(deps, scaled); err != nil {
+		return err
+	}
+	if err := checkProductionStateStores(deps, scaled, cibaEnabled); err != nil {
+		return err
+	}
+	return checkProductionTokenStores(deps, scaled)
+}
+
+// checkProductionKeyCustody checks the custody of the server's own
+// signing keys, and of the access token issuer's when it has its own.
+func checkProductionKeyCustody(deps Dependencies, scaled bool) error {
 	if err := checkKeyCustody("keys", deps.Keys, scaled); err != nil {
 		return err
 	}
@@ -534,6 +549,12 @@ func validateProductionAssurance(cfg Config, deps Dependencies, cibaEnabled bool
 			return err
 		}
 	}
+	return nil
+}
+
+// checkProductionClientSources checks the client registry and the
+// sources of clients' verification and encryption keys.
+func checkProductionClientSources(deps Dependencies, scaled bool) error {
 	if err := checkStoreAssurance("clients", deps.Clients, false, scaled); err != nil {
 		return err
 	}
@@ -541,10 +562,15 @@ func validateProductionAssurance(cfg Config, deps Dependencies, cibaEnabled bool
 		return err
 	}
 	if deps.ClientEncryptionKeys != nil {
-		if err := checkKeySourceAssurance("client_encryption_keys", deps.ClientEncryptionKeys); err != nil {
-			return err
-		}
+		return checkKeySourceAssurance("client_encryption_keys", deps.ClientEncryptionKeys)
 	}
+	return nil
+}
+
+// checkProductionStateStores checks the stores holding flow state:
+// transactions, grants, replay records, and the backchannel and nonce
+// stores when they're in use.
+func checkProductionStateStores(deps Dependencies, scaled, cibaEnabled bool) error {
 	if err := checkStoreAssurance("transactions", deps.Transactions, true, scaled); err != nil {
 		return err
 	}
@@ -560,19 +586,22 @@ func validateProductionAssurance(cfg Config, deps Dependencies, cibaEnabled bool
 		}
 	}
 	if deps.Nonces != nil {
-		if err := checkStoreAssurance("nonces", deps.Nonces, true, scaled); err != nil {
-			return err
-		}
+		return checkStoreAssurance("nonces", deps.Nonces, true, scaled)
 	}
+	return nil
+}
+
+// checkProductionTokenStores checks the opaque access token store, when
+// access tokens are opaque, and the revocation store, unless revocation
+// was declined.
+func checkProductionTokenStores(deps Dependencies, scaled bool) error {
 	if opaque, ok := deps.AccessTokens.(OpaqueAccessTokens); ok {
 		if err := checkStoreAssurance("access_tokens", opaque.Store, false, scaled); err != nil {
 			return err
 		}
 	}
 	if _, declinedRevocation := deps.Revocation.(NoRevocation); !declinedRevocation {
-		if err := checkStoreAssurance("revocation", deps.Revocation, false, scaled); err != nil {
-			return err
-		}
+		return checkStoreAssurance("revocation", deps.Revocation, false, scaled)
 	}
 	return nil
 }

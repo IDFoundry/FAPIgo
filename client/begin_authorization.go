@@ -42,6 +42,7 @@ type BeginAuthorizationRequest struct {
 	// (TokenSet.IDTokenClaims.AuthTime) against it, as OIDC Core
 	// §3.1.3.7 has the client do: a token without auth_time, or one
 	// further back than MaxAge (plus Limits.MaxClockSkew), is refused.
+	// MaxAge is at most 100 years, and never negative.
 	MaxAge    time.Duration
 	HasMaxAge bool
 
@@ -195,6 +196,9 @@ func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 	if req.HasMaxAge {
 		if req.MaxAge < 0 {
 			return AuthorizationSession{}, newError(ErrorInvalidRequest, "max_age must not be negative", nil)
+		}
+		if int64(req.MaxAge/time.Second) > maxSessionMaxAgeSeconds {
+			return AuthorizationSession{}, newError(ErrorInvalidRequest, "max_age must be at most 100 years", nil)
 		}
 		params[maxAgeParameter] = strconv.FormatInt(int64(req.MaxAge/time.Second), 10)
 	}

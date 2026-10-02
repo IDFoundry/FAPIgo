@@ -68,3 +68,18 @@ func TestBeginAuthorizationRejectsNegativeMaxAge(t *testing.T) {
 		t.Fatalf("error code = %q, want %q", code, client.ErrorInvalidRequest)
 	}
 }
+
+// TestBeginAuthorizationRejectsMaxAgeOver100Years covers a max_age the
+// session record couldn't hold: refused here, before anything is sent,
+// rather than failing the callback once the session is used up.
+func TestBeginAuthorizationRejectsMaxAgeOver100Years(t *testing.T) {
+	c, _, _ := newTestClient(t, false)
+	const year = 365 * 24 * time.Hour
+	_, err := c.BeginAuthorization(context.Background(), client.BeginAuthorizationRequest{Scope: []string{"openid"}, MaxAge: 101 * year, HasMaxAge: true})
+	if code := clientErrorCode(t, err); code != client.ErrorInvalidRequest {
+		t.Fatalf("error code = %q, want %q", code, client.ErrorInvalidRequest)
+	}
+	if _, err := c.BeginAuthorization(context.Background(), client.BeginAuthorizationRequest{Scope: []string{"openid"}, MaxAge: 99 * year, HasMaxAge: true}); err != nil {
+		t.Fatalf("BeginAuthorization(max_age 99 years) = %v, want nil", err)
+	}
+}

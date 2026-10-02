@@ -1,17 +1,21 @@
 package client_test
 
 import (
+	"github.com/idfoundry/fapigo/client"
 	"reflect"
 	"testing"
 )
 
-// FuzzOpenTokenSet covers OpenTokenSet on arbitrary stored bytes: it
+// FuzzOpenTokenSet covers TokenSetSealer.Open on arbitrary stored bytes: it
 // never panics, and anything it opens is the one set sealed under this
 // key. (Each fuzz worker seals afresh, with its own nonce, so the bytes
 // themselves can't be compared.)
 func FuzzOpenTokenSet(f *testing.F) {
-	c := sealingClient(&testing.T{}, testClientID)
-	sealed, err := c.SealTokenSet(fullTokenSet(), sealKey(1))
+	s, err := client.NewTokenSetSealer(sealingClient(&testing.T{}, testClientID), [][]byte{sealKey(1)})
+	if err != nil {
+		f.Fatal(err)
+	}
+	sealed, err := s.Seal(fullTokenSet(), "user-1")
 	if err != nil {
 		f.Fatal(err)
 	}
@@ -20,7 +24,7 @@ func FuzzOpenTokenSet(f *testing.F) {
 	f.Add([]byte{})
 
 	f.Fuzz(func(t *testing.T, b []byte) {
-		opened, err := c.OpenTokenSet(b, sealKey(1))
+		opened, _, err := s.Open(b, "user-1")
 		if err == nil && !reflect.DeepEqual(revealed(opened), revealed(fullTokenSet())) {
 			t.Fatalf("OpenTokenSet opened a set nobody sealed: %v", revealed(opened))
 		}

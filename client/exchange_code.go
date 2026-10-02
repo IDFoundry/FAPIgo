@@ -26,8 +26,8 @@ import (
 // TokenSet is returned by a successful ExchangeCode,
 // PollBackchannelAuthentication or RefreshTokens. Its tokens are
 // fapi.Secret, which refuses to serialize: to keep a TokenSet across
-// restarts, or for another instance to refresh it, store what
-// Client.SealTokenSet returns and restore it with Client.OpenTokenSet.
+// restarts, or for another instance to refresh it, seal it with a
+// TokenSetSealer and store the result.
 type TokenSet struct {
 	AccessToken fapi.Secret
 
@@ -58,7 +58,7 @@ type TokenSet struct {
 
 	// ObtainedAt is when this client received the token response, by
 	// Dependencies.Clock: with ExpiresIn, when the access token expires.
-	// SealTokenSet keeps it, so a restored set still knows.
+	// TokenSetSealer keeps it, so a restored set still knows.
 	ObtainedAt time.Time
 
 	// IDToken, Subject and IDTokenClaims are set only when the granted

@@ -60,24 +60,34 @@ func claimsWithUTC(c client.IDTokenClaims) client.IDTokenClaims {
 	return c
 }
 
-func TestSealTokenSetRoundTrips(t *testing.T) {
-	c := sealingClient(t, testClientID)
+// sealer is a TokenSetSealer for an OAuthOnly client with clientID.
+func sealer(t *testing.T, clientID fapi.ClientID, keys ...[]byte) *client.TokenSetSealer {
+	t.Helper()
+	s, err := client.NewTokenSetSealer(sealingClient(t, clientID), keys)
+	if err != nil {
+		t.Fatalf("NewTokenSetSealer: %v", err)
+	}
+	return s
+}
+
+func TestTokenSetSealerRoundTrips(t *testing.T) {
+	s := sealer(t, testClientID, sealKey(1))
 	for name, tokens := range map[string]client.TokenSet{
 		"every field":        fullTokenSet(),
 		"access token alone": {AccessToken: fapi.NewSecret("at-1"), TokenType: "DPoP"},
 	} {
-		sealed, err := c.SealTokenSet(tokens, sealKey(1))
+		sealed, err := s.Seal(tokens, "user-1")
 		if err != nil {
-			t.Fatalf("%s: SealTokenSet: %v", name, err)
+			t.Fatalf("%s: Seal: %v", name, err)
 		}
 		for _, secret := range []string{"at-1", "rt-1", "id-token-1", "sam@example.com"} {
 			if bytes.Contains(sealed, []byte(secret)) {
 				t.Errorf("%s: the sealed set shows %q in the clear", name, secret)
 			}
 		}
-		opened, err := c.OpenTokenSet(sealed, sealKey(1))
-		if err != nil {
-			t.Fatalf("%s: OpenTokenSet: %v", name, err)
+		opened, reseal, err := s.Open(sealed, "user-1")
+		if err != nil || reseal {
+			t.Fatalf("%s: Open = reseal %v, %v", name, reseal, err)
 		}
 		if got, want := revealed(opened), revealed(tokens); !reflect.DeepEqual(got, want) {
 			t.Errorf("%s: opened = %v\nwant %v", name, got, want)
@@ -85,25 +95,34 @@ func TestSealTokenSetRoundTrips(t *testing.T) {
 	}
 }
 
-// TestOpenTokenSetRotatesKeys covers a set sealed with an old key
-// opening while that key is still listed, and not once it's dropped.
-func TestOpenTokenSetRotatesKeys(t *testing.T) {
-	c := sealingClient(t, testClientID)
-	sealed, err := c.SealTokenSet(fullTokenSet(), sealKey(1))
+// TestTokenSetSealerRotatesKeys covers a set sealed with an old key:
+// it opens while that key is listed, Open asks for it to be sealed
+// again, and it doesn't open once the key is dropped.
+func TestTokenSetSealerRotatesKeys(t *testing.T) {
+	sealed, err := sealer(t, testClientID, sealKey(1)).Seal(fullTokenSet(), "user-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.OpenTokenSet(sealed, sealKey(2), sealKey(1)); err != nil {
-		t.Errorf("OpenTokenSet(new, old) = %v, want the old key to open it", err)
+	rotated := sealer(t, testClientID, sealKey(2), sealKey(1))
+	tokens, reseal, err := rotated.Open(sealed, "user-1")
+	if err != nil || !reseal {
+		t.Fatalf("Open(after rotation) = reseal %v, %v; want the old key to open it and ask for a reseal", reseal, err)
 	}
-	if _, err := c.OpenTokenSet(sealed, sealKey(2)); err == nil {
-		t.Error("OpenTokenSet(new) opened a set sealed with a dropped key")
+	resealed, err := rotated.Seal(tokens, "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, reseal, err := sealer(t, testClientID, sealKey(2)).Open(resealed, "user-1"); err != nil || reseal {
+		t.Errorf("Open(resealed, new key alone) = reseal %v, %v", reseal, err)
+	}
+	if _, _, err := sealer(t, testClientID, sealKey(2)).Open(sealed, "user-1"); err == nil {
+		t.Error("a set sealed with a dropped key still opens")
 	}
 }
 
-func TestOpenTokenSetRefuses(t *testing.T) {
-	c := sealingClient(t, testClientID)
-	sealed, err := c.SealTokenSet(fullTokenSet(), sealKey(1))
+func TestTokenSetSealerRefuses(t *testing.T) {
+	s := sealer(t, testClientID, sealKey(1))
+	sealed, err := s.Seal(fullTokenSet(), "user-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,41 +130,47 @@ func TestOpenTokenSetRefuses(t *testing.T) {
 	tampered[len(tampered)-1] ^= 1
 	otherVersion := bytes.Clone(sealed)
 	otherVersion[0] = 2
-
 	// Another client of the same issuer, sealing with the same key.
-	otherSealed, err := sealingClient(t, "client-2").SealTokenSet(fullTokenSet(), sealKey(1))
+	otherClients, err := sealer(t, "client-2", sealKey(1)).Seal(fullTokenSet(), "user-1")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	for name, b := range map[string][]byte{
-		"another client's": otherSealed,
-		"tampered":         tampered,
-		"other version":    otherVersion,
-		"too short":        sealed[:4],
-		"empty":            nil,
+	for name, tc := range map[string]struct {
+		sealed []byte
+		owner  string
+	}{
+		"another owner's":  {sealed, "user-2"},
+		"another client's": {otherClients, "user-1"},
+		"tampered":         {tampered, "user-1"},
+		"other version":    {otherVersion, "user-1"},
+		"too short":        {sealed[:4], "user-1"},
+		"empty":            {nil, "user-1"},
 	} {
-		if _, err := c.OpenTokenSet(b, sealKey(1)); err == nil {
-			t.Errorf("%s: OpenTokenSet = nil error, want refusal", name)
+		_, _, err := s.Open(tc.sealed, tc.owner)
+		var cerr *client.Error
+		if !errors.Is(err, client.ErrUnreadableTokenSet) || !errors.As(err, &cerr) {
+			t.Errorf("%s: Open = %v, want a *client.Error for ErrUnreadableTokenSet", name, err)
 		}
 	}
 }
 
-func TestSealTokenSetRefusesABadKey(t *testing.T) {
+func TestTokenSetSealerRefusesMisuse(t *testing.T) {
 	c := sealingClient(t, testClientID)
-	if _, err := c.SealTokenSet(fullTokenSet(), sealKey(1)[:16]); err == nil {
-		t.Error("SealTokenSet(16-byte key) = nil error")
+	for name, keys := range map[string][][]byte{
+		"no keys":     nil,
+		"16-byte key": {sealKey(1)[:16]},
+	} {
+		if _, err := client.NewTokenSetSealer(c, keys); err == nil {
+			t.Errorf("NewTokenSetSealer(%s) = nil error", name)
+		}
 	}
-	sealed, err := c.SealTokenSet(fullTokenSet(), sealKey(1))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := c.OpenTokenSet(sealed, sealKey(1)[:16]); err == nil {
-		t.Error("OpenTokenSet(16-byte key) = nil error")
+	if _, err := client.NewTokenSetSealer(nil, [][]byte{sealKey(1)}); err == nil {
+		t.Error("NewTokenSetSealer(nil client) = nil error")
 	}
 	var cerr *client.Error
-	if _, err := c.OpenTokenSet(nil, sealKey(1)); !errors.As(err, &cerr) {
-		t.Errorf("OpenTokenSet(nil) = %v, want a *client.Error", err)
+	if _, err := sealer(t, testClientID, sealKey(1)).Seal(fullTokenSet(), ""); !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidRequest {
+		t.Errorf("Seal(no owner) = %v, want an invalid_request *client.Error", err)
 	}
 }
 
@@ -164,5 +189,19 @@ func TestTokenSetRecordsWhenItWasObtained(t *testing.T) {
 	}
 	if !refreshed.ObtainedAt.Equal(at) {
 		t.Errorf("ObtainedAt = %v, want %v", refreshed.ObtainedAt, at)
+	}
+}
+
+// TestTokenSetSealerKnowsEveryField fails when TokenSet or IDTokenClaims
+// gains a field: add it to sealedTokenSet (token_set_seal.go), to
+// fullTokenSet and revealed, then update the counts here.
+func TestTokenSetSealerKnowsEveryField(t *testing.T) {
+	for typ, want := range map[reflect.Type]int{
+		reflect.TypeFor[client.TokenSet]():      13,
+		reflect.TypeFor[client.IDTokenClaims](): 11,
+	} {
+		if got := typ.NumField(); got != want {
+			t.Errorf("%s has %d fields, sealing knows %d: seal the new one", typ, got, want)
+		}
 	}
 }

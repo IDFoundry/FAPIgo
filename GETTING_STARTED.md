@@ -187,10 +187,13 @@ has been redeemed) returns one of three outcomes; the one that matters
 here is `InteractionRequired`:
 
 ```go
-action, err := srv.BeginAuthorization(ctx, server.BeginAuthorizationRequest{
-	RequestURI: requestURI, // from the incoming request_uri query parameter
-	ClientID:   clientID,
-})
+// The request's client_id and request_uri, refusing a repeated one:
+// render that error locally, never as a redirect.
+req, err := server.BeginAuthorizationRequestFromHTTP(r)
+if err != nil {
+	// render err locally
+}
+action, err := srv.BeginAuthorization(ctx, req)
 
 switch a := action.(type) {
 case server.InteractionRequired:

@@ -220,10 +220,14 @@ func (b *bank) par(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *bank) authorize(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	action, err := b.srv.BeginAuthorization(r.Context(), server.BeginAuthorizationRequest{
-		RequestURI: q.Get("request_uri"), ClientID: fapi.ClientID(q.Get("client_id")),
-	})
+	// Local, never a redirect: an unreadable request names no
+	// redirect URI it can be trusted with.
+	req, err := server.BeginAuthorizationRequestFromHTTP(r)
+	if err != nil {
+		http.Error(w, publicMessage(err, "The authorization request is malformed."), http.StatusBadRequest)
+		return
+	}
+	action, err := b.srv.BeginAuthorization(r.Context(), req)
 	if err != nil {
 		http.Error(w, publicMessage(err, "The authorization request is invalid."), http.StatusBadRequest)
 		return

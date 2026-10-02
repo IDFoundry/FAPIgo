@@ -306,10 +306,14 @@ func (p *identityProvider) token(w http.ResponseWriter, r *http.Request) {
 // cookie bound to this browser — never in the form — and renders the
 // sign-in and consent page.
 func (p *identityProvider) authorize(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	action, err := p.srv.BeginAuthorization(r.Context(), server.BeginAuthorizationRequest{
-		RequestURI: q.Get("request_uri"), ClientID: fapi.ClientID(q.Get("client_id")),
-	})
+	// Local, never a redirect: an unreadable request names no
+	// redirect URI it can be trusted with.
+	req, err := server.BeginAuthorizationRequestFromHTTP(r)
+	if err != nil {
+		p.w.renderError(w, http.StatusBadRequest, "Sign-in could not start", publicMessage(err, "The sign-in request is malformed."))
+		return
+	}
+	action, err := p.srv.BeginAuthorization(r.Context(), req)
 	if err != nil {
 		p.w.renderError(w, http.StatusInternalServerError, "Sign-in could not start", publicMessage(err, "Something went wrong. Please try again."))
 		return

@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"time"
 
-	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -69,11 +68,14 @@ func newConsentHandler(srv *server.Server, clients storage.ClientRepository, clo
 
 // handleBegin serves GET /authorize.
 func (h *consentHandler) handleBegin(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	action, err := h.srv.BeginAuthorization(r.Context(), server.BeginAuthorizationRequest{
-		RequestURI: q.Get("request_uri"),
-		ClientID:   fapi.ClientID(q.Get("client_id")),
-	})
+	req, err := server.BeginAuthorizationRequestFromHTTP(r)
+	if err != nil {
+		// Local, never a redirect: an unreadable request names no
+		// redirect URI it can be trusted with.
+		writeLocalHTMLErrorRaw(w, http.StatusBadRequest, "invalid_request", "the authorization request is malformed")
+		return
+	}
+	action, err := h.srv.BeginAuthorization(r.Context(), req)
 	if err != nil {
 		writeLocalHTMLErrorRaw(w, http.StatusInternalServerError, "server_error", "failed to begin authorization")
 		return
@@ -131,7 +133,8 @@ func (h *consentHandler) handleBegin(w http.ResponseWriter, r *http.Request) {
 		// gets a perfectly good, safe outcome either way — a rendered
 		// local page is fine for a human in a browser — this exists
 		// purely so the suite's own automated verification can run.
-		clientID := fapi.ClientID(q.Get("client_id"))
+		q := r.URL.Query()
+		clientID := req.ClientID
 		redirectURI := q.Get("redirect_uri")
 		if redirectURI != "" {
 			if client, resolveErr := h.clients.ResolveClient(r.Context(), clientID); resolveErr == nil && client.HasRedirectURI(redirectURI) {

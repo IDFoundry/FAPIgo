@@ -8,7 +8,9 @@ import (
 // VerifyRequestFromHTTP builds the VerifyRequest for r, an incoming
 // request to the protected resource whose external URL is target: its
 // method, Authorization header, every DPoP header (DPoPProofsFromHTTP)
-// and TLS client certificate (PeerCertificateFromHTTP). Filling the
+// and TLS client certificate (PeerCertificateFromHTTP). A request with
+// more than one Authorization header is marked for Verify to refuse as
+// invalid_request, as it refuses more than one DPoP header. Filling the
 // struct field by field compiles just as well with a field left out, and
 // then fails only for the clients that need it — a missing
 // PeerCertificate refuses every mTLS-bound token, a missing DPoPProofs
@@ -34,5 +36,7 @@ func VerifyRequestFromHTTP(r *http.Request, target *url.URL) VerifyRequest {
 		Authorization:   r.Header.Get("Authorization"),
 		DPoPProofs:      DPoPProofsFromHTTP(r),
 		PeerCertificate: PeerCertificateFromHTTP(r),
+
+		repeatedAuthorization: len(r.Header.Values("Authorization")) > 1,
 	}
 }

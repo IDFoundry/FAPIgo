@@ -429,6 +429,7 @@ func (c *Client) PollBackchannelAuthentication(ctx context.Context, session Back
 			TokenType:            wantTokenType,
 			Scope:                raw.Scope,
 			AuthorizationDetails: raw.AuthorizationDetails,
+			ObtainedAt:           c.deps.Clock.Now(),
 		}
 		if raw.ExpiresIn > 0 {
 			result.ExpiresIn = time.Duration(raw.ExpiresIn) * time.Second

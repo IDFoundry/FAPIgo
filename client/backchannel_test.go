@@ -489,6 +489,9 @@ func TestPollBackchannelAuthenticationApproved(t *testing.T) {
 	if approved.Tokens.AccessToken.Reveal() != "opaque-access-token" {
 		t.Errorf("AccessToken = %q", approved.Tokens.AccessToken.Reveal())
 	}
+	if approved.Tokens.ObtainedAt.IsZero() {
+		t.Error("ObtainedAt is unset")
+	}
 	if !approved.Tokens.HasIDToken {
 		t.Fatalf("HasIDToken = false, want true")
 	}

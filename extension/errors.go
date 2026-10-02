@@ -22,7 +22,9 @@ var (
 	ErrCardinalityMismatch = errors.New("extension: cardinality does not match the definition's type")
 
 	// ErrDuplicateMember indicates a RAR detail object had the same
-	// top-level JSON member name more than once.
+	// top-level JSON member name more than once, compared
+	// case-insensitively as encoding/json matches names, or spelled its
+	// "type" member other than exactly "type".
 	ErrDuplicateMember = errors.New("extension: duplicate JSON member")
 
 	// ErrRARTooLarge indicates an authorization_details array exceeded

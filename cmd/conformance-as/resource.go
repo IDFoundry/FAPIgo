@@ -8,6 +8,7 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	fapires "github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/server"
+	"github.com/idfoundry/fapigo/serverresource"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -63,50 +64,20 @@ func userinfoHandler(srv *server.Server, verifier *fapires.Verifier, userinfoURL
 			writeResourceError(w, err)
 			return
 		}
-		hasOpenIDScope := false
-		for _, scope := range authCtx.Scopes {
-			if scope == "openid" {
-				hasOpenIDScope = true
-				break
-			}
-		}
-		if !hasOpenIDScope {
-			writeResourceErrorRaw(w, http.StatusForbidden, "insufficient_scope", "access token was not granted the openid scope")
+		// Only the claims the authorization request's "claims" parameter
+		// asked for and the user approved, which the access token carries
+		// (server.RequestedUserinfoClaimsKey): a UserInfo call, arriving
+		// as a wholly separate later request, has no other way to know.
+		// Nothing requested means no identity claim at all, not
+		// everything this binary happens to know. A token without the
+		// openid scope gets 403 insufficient_scope.
+		body, err := serverresource.UserInfoClaims(r.Context(), authCtx, identityClaims)
+		if err != nil {
+			writeResourceError(w, err)
 			return
 		}
 
-		// requested_userinfo_claims (server.RequestedUserinfoClaimsKey) was
-		// embedded in this access token at issuance, carrying forward the
-		// authorization request's "claims" parameter — see that
-		// constant's doc comment for why a UserInfo call, arriving as a
-		// wholly separate later request, has no other way to know what
-		// was originally requested. No entry there means nothing was
-		// requested, and this endpoint must not return any identity claim
-		// in that case (not "return everything this binary happens to
-		// know" — that would leak data the client never asked for).
-		var requestedNames []string
-		if raw, ok := authCtx.Claims[server.RequestedUserinfoClaimsKey]; ok {
-			_ = json.Unmarshal(raw, &requestedNames)
-		}
-		claims, err := identityClaims.ResolveIdentityClaims(r.Context(), authCtx.Subject, requestedNames)
-		if err != nil {
-			writeResourceErrorRaw(w, http.StatusInternalServerError, "server_error", "failed to resolve identity claims")
-			return
-		}
-		subJSON, err := json.Marshal(authCtx.Subject)
-		if err != nil {
-			writeResourceErrorRaw(w, http.StatusInternalServerError, "server_error", "failed to encode subject")
-			return
-		}
-		body := make(map[string]json.RawMessage, len(claims))
-		for k, v := range claims {
-			body[k] = v
-		}
-		body["sub"] = subJSON
-
-		if authCtx.NextDPoPNonce != "" {
-			w.Header().Set("DPoP-Nonce", authCtx.NextDPoPNonce)
-		}
+		authCtx.SetDPoPNonce(w.Header())
 
 		if userinfoSigning {
 			client, err := clients.ResolveClient(r.Context(), fapi.ClientID(authCtx.ClientID))
@@ -157,9 +128,7 @@ func accountsHandler(verifier *fapires.Verifier, accountsURL *url.URL) http.Hand
 			writeResourceError(w, err)
 			return
 		}
-		if authCtx.NextDPoPNonce != "" {
-			w.Header().Set("DPoP-Nonce", authCtx.NextDPoPNonce)
-		}
+		authCtx.SetDPoPNonce(w.Header())
 		w.Header().Set(contentTypeHeader, "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"accounts": []string{}})
 	}

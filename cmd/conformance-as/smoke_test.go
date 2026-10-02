@@ -121,6 +121,7 @@ type smokeHarness struct {
 	authorize  string // base authorize endpoint URL, for building decision requests
 	token      string // base token endpoint URL, for tests that POST to it directly
 	par        string // base PAR endpoint URL, for tests that POST to it directly
+	userinfo   string // UserInfo endpoint URL, for tests that call it directly
 
 	// backchannelApprove is the base "/backchannel-approve" URL —
 	// populated only when newSmokeHarnessWithOptions was built with
@@ -365,6 +366,7 @@ func newSmokeHarnessWithOptions(t *testing.T, format AccessTokenFormat, dpopNonc
 		authorize:               endpoints.Authorization.String(),
 		token:                   endpoints.Token.String(),
 		par:                     endpoints.PushedAuthorizationRequest.String(),
+		userinfo:                userinfoURL.String(),
 		backchannelApprove:      backchannelApprove,
 		backchannelAuthenticate: backchannelAuthenticate,
 		cibaApproveUI:           cibaApproveUI,
@@ -997,5 +999,39 @@ func TestSmokeCIBADenied(t *testing.T) {
 	}
 	if denied.Code != "access_denied" {
 		t.Fatalf("denied.Code = %q, want %q", denied.Code, "access_denied")
+	}
+}
+
+// TestSmokeUserInfoRefusesATokenWithoutOpenID covers the UserInfo
+// endpoint's 403 insufficient_scope for an access token that wasn't
+// granted the openid scope (OIDC Core §5.3).
+func TestSmokeUserInfoRefusesATokenWithoutOpenID(t *testing.T) {
+	h := newSmokeHarness(t, AccessTokenFormatJWT)
+	ctx := context.Background()
+	scope := []string{"accounts"}
+
+	handle := h.runToConsent(ctx, scope)
+	rawQuery := h.submitDecision(ctx, handle, "approve", scope)
+	result, err := h.client.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: h.session})
+	if err != nil {
+		t.Fatalf("CompleteAuthorization: %v", err)
+	}
+	success, ok := result.(client.CompletionSuccess)
+	if !ok {
+		t.Fatalf("CompleteAuthorization result = %T, want client.CompletionSuccess", result)
+	}
+	// Called directly: FetchUserInfo itself refuses tokens without an ID
+	// token to check the response's subject against.
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, h.userinfo, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := h.client.ProtectedResource(success.Tokens).Do(ctx, req)
+	if err != nil {
+		t.Fatalf("GET userinfo: %v", err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusForbidden || !strings.Contains(res.Header.Get("WWW-Authenticate"), "insufficient_scope") {
+		t.Errorf("GET userinfo (no openid scope) = %d %q, want 403 insufficient_scope", res.StatusCode, res.Header.Get("WWW-Authenticate"))
 	}
 }

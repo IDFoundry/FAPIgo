@@ -43,7 +43,8 @@ type IdentityClaimsSource interface {
 // were actually requested: unlike the ID token (issued once, at the
 // same time the request is known), a UserInfo call is a wholly separate
 // later request carrying only the access token, with no other link back
-// to what was originally asked for.
+// to what was originally asked for. serverresource.UserInfoClaims reads
+// it and builds the response's claims from IdentityClaimsSource.
 const RequestedUserinfoClaimsKey = "requested_userinfo_claims"
 
 // requestedClaimsParameter is the OIDC Core §5.5 "claims" request

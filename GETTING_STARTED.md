@@ -476,7 +476,13 @@ authCtx, err := verifier.Verify(ctx, resource.VerifyRequestFromHTTP(r, protected
 ```
 
 On success, `authCtx.Subject`/`ClientID`/`Scopes`/`Claims` are what your
-API handler needs to authorize the call. On failure, `err` is always a
+API handler needs to authorize the call. Call
+`authCtx.SetDPoPNonce(w.Header())` on the response, so a client's next
+call already carries a fresh DPoP nonce when you've enabled them. A
+UserInfo endpoint hosted with the authorization server builds its
+response with `serverresource.UserInfoClaims(ctx, authCtx,
+identityClaims)`: only the claims the client requested and the user
+approved, plus `sub`. On failure, `err` is always a
 `*resource.Error`, and `resource.WriteError` sends it as the RFC 6750 /
 RFC 9449 response: the status, a `WWW-Authenticate` challenge in the
 scheme the request used, and the error body. A request with no

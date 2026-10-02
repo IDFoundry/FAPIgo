@@ -6,6 +6,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/idfoundry/fapigo/server/interactioncookie"
 	"net/http"
@@ -278,23 +279,19 @@ func (b *bank) userinfo(w http.ResponseWriter, r *http.Request) {
 		resource.WriteError(w, err)
 		return
 	}
-	if !slices.Contains(authz.Scopes, "openid") {
-		resource.NewError(resource.ErrorInsufficientScope, http.StatusForbidden, "the access token wasn't granted the openid scope").WriteJSON(w)
-		return
-	}
-	// The access token carries which UserInfo claims were requested and
-	// approved (server.RequestedUserinfoClaimsKey): a UserInfo call has
-	// no other link back to the authorization.
-	var names []string
-	_ = json.Unmarshal(authz.Claims[server.RequestedUserinfoClaimsKey], &names)
-	body := map[string]json.RawMessage{}
-	if len(names) > 0 {
-		if body, err = (customerClaims{}).ResolveIdentityClaims(r.Context(), authz.Subject, names); err != nil {
-			resource.NewError(resource.ErrorInvalidToken, http.StatusUnauthorized, "unknown customer").WriteJSON(w)
+	// Only the claims the client requested and the customer approved,
+	// which the access token carries: a UserInfo call has no other link
+	// back to the authorization.
+	body, err := serverresource.UserInfoClaims(r.Context(), authz, customerClaims{})
+	if err != nil {
+		var rerr *resource.Error
+		if errors.As(err, &rerr) {
+			resource.WriteError(w, rerr)
 			return
 		}
+		resource.NewError(resource.ErrorInvalidToken, http.StatusUnauthorized, "unknown customer").WriteJSON(w)
+		return
 	}
-	body["sub"], _ = json.Marshal(authz.Subject)
 	// A token for a client the bank no longer knows is the token's
 	// problem, not the bank's. The lookup error names the client from the
 	// token, so it isn't logged.
@@ -308,11 +305,9 @@ func (b *bank) userinfo(w http.ResponseWriter, r *http.Request) {
 		srvErr.WriteJSON(w)
 		return
 	}
-	if authz.NextDPoPNonce != "" {
-		w.Header().Set("DPoP-Nonce", authz.NextDPoPNonce)
-	}
+	authz.SetDPoPNonce(w.Header())
 	w.Header().Set("Content-Type", "application/jwt")
-	_, _ = w.Write([]byte(signed))
+	_, _ = w.Write([]byte(signed)) // #nosec G705 -- a signed compact JWT (application/jwt), never rendered as HTML
 }
 
 // authorize starts the interaction and shows the sign-in and consent

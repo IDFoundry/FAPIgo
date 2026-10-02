@@ -47,8 +47,9 @@ window for the whole demo, and only for it: Chrome accepts that key for
 Chrome shows a banner about an unsupported command-line flag; that's
 expected. Ctrl-C stops the demo.
 
-It uses port 8647, so it can run alongside the other demos (8643 to
-8646). `-port` changes it.
+It uses port 8647. Every demo has its own port, so they can all run at
+once; [the examples overview](../README.md#ports) lists them. `-port`
+changes it.
 
 ### Other browsers
 

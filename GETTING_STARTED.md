@@ -277,9 +277,10 @@ authorization. A modified copy can't widen the grant, since
 stored.
 
 `server/interactioncookie` does both in one encrypted cookie:
-`Set(w, a.Handle, a.Interaction, now)` at `/authorize` returns a tag
-for the form (a hidden `interactioncookie.FormField`), `Read(r, now,
-tag)` takes it back when the form comes back, and `Clear(w)` ends it.
+`Set(w, a, now)` at `/authorize` returns a tag for the form (a hidden
+`interactioncookie.FormField`), `Read(r, now, tag)` takes it back when
+the form comes back, and `Clear(w)` ends it. The cookie expires with the
+handle (`a.ExpiresAt`), so pass `now` from the clock the server uses.
 The tag matters because a browser holds one cookie of a name: a second
 authorization in the same browser — another tab, or a page that sends
 the browser to `/authorize` for a client of its own — replaces the

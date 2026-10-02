@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"time"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/par"
@@ -25,6 +26,12 @@ type AuthorizationAction interface {
 type InteractionRequired struct {
 	Handle      InteractionHandle
 	Interaction InteractionRequest
+
+	// ExpiresAt is when Handle expires (Limits.InteractionLifetime from
+	// now, by Dependencies.Clock): CompleteAuthorization refuses it after
+	// that, so whatever carries the interaction until then — a cookie, a
+	// session — can expire with it.
+	ExpiresAt time.Time
 }
 
 // Discriminator for AuthorizationAction — deliberately empty.
@@ -83,10 +90,11 @@ func (s *Server) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 	}
 
 	now := s.deps.Clock.Now()
+	handleExpiresAt := now.Add(s.cfg.Limits.InteractionLifetime)
 	pushed, err := s.deps.Transactions.BeginAuthorization(ctx, storage.BeginAuthorizationTransaction{
 		Reference:       reference,
 		Handle:          handle,
-		HandleExpiresAt: now.Add(s.cfg.Limits.InteractionLifetime),
+		HandleExpiresAt: handleExpiresAt,
 	})
 	if err != nil {
 		return s.beginFail(ctx, req.ClientID, newError(ErrorInvalidRequestURI, 400, "request_uri is invalid, expired, or already used", err)), nil
@@ -123,6 +131,7 @@ func (s *Server) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 	action := InteractionRequired{
 		Handle:      InteractionHandle{value: handle},
 		Interaction: interaction,
+		ExpiresAt:   handleExpiresAt,
 	}
 	s.audit(ctx, AuditEventBeginAuthorization, req.ClientID, AuditOutcomeSuccess, "")
 	return action, nil

@@ -58,6 +58,9 @@ func TestBeginAuthorizationSuccess(t *testing.T) {
 	if required.Interaction.Hints.LoginHint != "alice@example.com" {
 		t.Fatalf("Hints.LoginHint = %q, want %q", required.Interaction.Hints.LoginHint, "alice@example.com")
 	}
+	if want := h.now.Add(5 * time.Minute); !required.ExpiresAt.Equal(want) { // the harness's Limits.InteractionLifetime
+		t.Errorf("ExpiresAt = %v, want %v (Limits.InteractionLifetime from now)", required.ExpiresAt, want)
+	}
 }
 
 func TestBeginAuthorizationTwoHandlesAreDistinct(t *testing.T) {

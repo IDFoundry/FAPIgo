@@ -75,11 +75,6 @@ var (
 
 // Options configures a Cookie.
 type Options struct {
-	// Lifetime is how long a sealed interaction is accepted, and the
-	// cookie's Max-Age. Required: at most the server's
-	// Limits.InteractionLifetime, after which the handle is no use anyway.
-	Lifetime time.Duration
-
 	// Name is the cookie's name: DefaultName if empty. A name with the
 	// __Host- prefix gets Path=/, as the prefix requires.
 	Name string
@@ -92,7 +87,6 @@ type Options struct {
 // Cookie seals interactions into a cookie, and opens them again.
 type Cookie struct {
 	name, path string
-	lifetime   time.Duration
 	keys       []sealingKey // keys[0] seals
 }
 
@@ -107,10 +101,7 @@ func New(keys [][]byte, opts Options) (*Cookie, error) {
 	if len(keys) == 0 {
 		return nil, errors.New("interactioncookie: at least one key is required")
 	}
-	if opts.Lifetime <= 0 {
-		return nil, errors.New("interactioncookie: Options.Lifetime is required")
-	}
-	c := &Cookie{name: opts.Name, path: opts.Path, lifetime: opts.Lifetime}
+	c := &Cookie{name: opts.Name, path: opts.Path}
 	if c.name == "" {
 		c.name = DefaultName
 	}
@@ -146,13 +137,18 @@ type sealed struct {
 	Request   string `json:"request"`
 }
 
-// Set seals handle and in, as of now, into the cookie on w, and returns
-// the tag that names this interaction: render it into the consent form,
-// for Read. The tag isn't secret, and grants nothing without the cookie.
-// Set returns ErrTooLarge, setting nothing, when the interaction doesn't
-// fit.
-func (c *Cookie) Set(w http.ResponseWriter, handle server.InteractionHandle, in server.InteractionRequest, now time.Time) (string, error) {
-	encoded, err := in.MarshalText()
+// Set seals a — BeginAuthorization's InteractionRequired — as of now
+// into the cookie on w, and returns the tag that names this interaction:
+// render it into the consent form, for Read. The tag isn't secret, and
+// grants nothing without the cookie. The cookie expires with a's handle
+// (a.ExpiresAt), so now must be by the server's own clock
+// (Dependencies.Clock). Set returns ErrTooLarge, setting nothing, when
+// the interaction doesn't fit.
+func (c *Cookie) Set(w http.ResponseWriter, a server.InteractionRequired, now time.Time) (string, error) {
+	if !now.Before(a.ExpiresAt) {
+		return "", errors.New("interactioncookie: the interaction has already expired")
+	}
+	encoded, err := a.Interaction.MarshalText()
 	if err != nil {
 		return "", err
 	}
@@ -163,14 +159,14 @@ func (c *Cookie) Set(w http.ResponseWriter, handle server.InteractionHandle, in 
 	_, _ = rand.Read(random) // never fails: it crashes the program instead (Go 1.24+)
 	tag, nonce := base64.RawURLEncoding.EncodeToString(random[:16]), random[16:]
 	// Strings and an integer: encoding can't fail.
-	plaintext, _ := json.Marshal(sealed{ExpiresAt: now.Add(c.lifetime).Unix(), Tag: tag, Handle: handle.String(), Request: string(encoded)})
+	plaintext, _ := json.Marshal(sealed{ExpiresAt: a.ExpiresAt.Unix(), Tag: tag, Handle: a.Handle.String(), Request: string(encoded)})
 	header := append([]byte{version}, key.id[:]...)
 	box := append(append(header, nonce...), key.aead.Seal(nil, nonce, plaintext, c.additionalData())...)
 	value := base64.RawURLEncoding.EncodeToString(box)
 	if len(value) > MaxValueBytes {
 		return "", ErrTooLarge
 	}
-	http.SetCookie(w, c.cookie(value, int(c.lifetime/time.Second)))
+	http.SetCookie(w, c.cookie(value, int(a.ExpiresAt.Sub(now)/time.Second)))
 	return tag, nil
 }
 

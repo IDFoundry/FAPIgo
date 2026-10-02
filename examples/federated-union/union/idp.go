@@ -52,11 +52,6 @@ type identityProvider struct {
 	interaction *interactioncookie.Cookie
 }
 
-// pendingLifetime is how long a consent page stays answerable — the
-// server's own interaction lifetime (server.RecommendedLimits) is
-// shorter, so this only bounds how long a sign-in cookie is honoured.
-const pendingLifetime = 15 * time.Minute
-
 const (
 	authorizePath = "/authorize"
 	signInFailed  = "Sign-in failed"
@@ -153,7 +148,7 @@ func (w *World) newIdentityProvider(c country, ta *entity) (*identityProvider, e
 	if _, err := rand.Read(cookieKey); err != nil {
 		return nil, err
 	}
-	interaction, err := interactioncookie.New([][]byte{cookieKey}, interactioncookie.Options{Lifetime: pendingLifetime})
+	interaction, err := interactioncookie.New([][]byte{cookieKey}, interactioncookie.Options{})
 	if err != nil {
 		return nil, err
 	}
@@ -327,7 +322,7 @@ func (p *identityProvider) authorize(w http.ResponseWriter, r *http.Request) {
 		// The consent page's state goes with the browser, encrypted, not
 		// into this process; the page's form carries the tag that ties it
 		// to this interaction.
-		tag, err := p.interaction.Set(w, a.Handle, a.Interaction, time.Now())
+		tag, err := p.interaction.Set(w, a, time.Now())
 		if err != nil {
 			p.w.renderError(w, http.StatusInternalServerError, "Sign-in could not start", publicMessage(err, "Something went wrong. Please try again."))
 			return

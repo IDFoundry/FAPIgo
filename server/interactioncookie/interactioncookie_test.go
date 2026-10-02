@@ -25,9 +25,6 @@ func newKey(t *testing.T) []byte {
 
 func newCookie(t *testing.T, keys [][]byte, opts interactioncookie.Options) *interactioncookie.Cookie {
 	t.Helper()
-	if opts.Lifetime == 0 {
-		opts.Lifetime = 10 * time.Minute
-	}
 	c, err := interactioncookie.New(keys, opts)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -44,13 +41,19 @@ func interaction(t *testing.T) (server.InteractionHandle, server.InteractionRequ
 	return h, server.InteractionRequest{ClientID: "shop", Scope: []string{"openid", "payments"}, Hints: server.AuthenticationHints{LoginHint: "sam@example.com"}}
 }
 
+// required is BeginAuthorization's InteractionRequired for h and in,
+// expiring ten minutes after now.
+func required(h server.InteractionHandle, in server.InteractionRequest, now time.Time) server.InteractionRequired {
+	return server.InteractionRequired{Handle: h, Interaction: in, ExpiresAt: now.Add(10 * time.Minute)}
+}
+
 // set seals the interaction with c and returns the cookie it set and
 // the form's tag.
 func set(t *testing.T, c *interactioncookie.Cookie, now time.Time) (*http.Cookie, string) {
 	t.Helper()
 	h, in := interaction(t)
 	w := httptest.NewRecorder()
-	tag, err := c.Set(w, h, in, now)
+	tag, err := c.Set(w, required(h, in, now), now)
 	if err != nil {
 		t.Fatalf("Set: %v", err)
 	}
@@ -144,7 +147,7 @@ func TestSetRefusesTooLarge(t *testing.T) {
 	h, in := interaction(t)
 	in.Scope = []string{strings.Repeat("s", interactioncookie.MaxValueBytes)}
 	w := httptest.NewRecorder()
-	if _, err := c.Set(w, h, in, time.Now()); !errors.Is(err, interactioncookie.ErrTooLarge) {
+	if _, err := c.Set(w, required(h, in, time.Now()), time.Now()); !errors.Is(err, interactioncookie.ErrTooLarge) {
 		t.Fatalf("Set(large) = %v, want ErrTooLarge", err)
 	}
 	if len(w.Result().Cookies()) != 0 {
@@ -168,16 +171,15 @@ func TestNewRefuses(t *testing.T) {
 		keys [][]byte
 		opts interactioncookie.Options
 	}{
-		"no keys":             {nil, interactioncookie.Options{Lifetime: time.Minute}},
-		"short key":           {[][]byte{bytes.Repeat([]byte{1}, 16)}, interactioncookie.Options{Lifetime: time.Minute}},
-		"no lifetime":         {[][]byte{key}, interactioncookie.Options{}},
-		"__Host- with a path": {[][]byte{key}, interactioncookie.Options{Lifetime: time.Minute, Path: "/authorize"}},
+		"no keys":             {nil, interactioncookie.Options{}},
+		"short key":           {[][]byte{bytes.Repeat([]byte{1}, 16)}, interactioncookie.Options{}},
+		"__Host- with a path": {[][]byte{key}, interactioncookie.Options{Path: "/authorize"}},
 	} {
 		if _, err := interactioncookie.New(tc.keys, tc.opts); err == nil {
 			t.Errorf("%s: New = nil error, want refusal", name)
 		}
 	}
-	if _, err := interactioncookie.New([][]byte{key}, interactioncookie.Options{Lifetime: time.Minute, Name: "app_interaction", Path: "/authorize"}); err != nil {
+	if _, err := interactioncookie.New([][]byte{key}, interactioncookie.Options{Name: "app_interaction", Path: "/authorize"}); err != nil {
 		t.Errorf("a non-__Host- name with a path: %v", err)
 	}
 }
@@ -188,13 +190,13 @@ func TestNewRefuses(t *testing.T) {
 func TestSetAndReadRefuseWhatCantRoundTrip(t *testing.T) {
 	c := newCookie(t, [][]byte{newKey(t)}, interactioncookie.Options{})
 	h, _ := interaction(t)
-	if _, err := c.Set(httptest.NewRecorder(), h, server.InteractionRequest{}, time.Now()); err == nil {
+	if _, err := c.Set(httptest.NewRecorder(), required(h, server.InteractionRequest{}, time.Now()), time.Now()); err == nil {
 		t.Error("Set(an interaction without a client) = nil error, want refusal")
 	}
 
 	_, in := interaction(t)
 	w := httptest.NewRecorder()
-	tag, err := c.Set(w, server.InteractionHandle{}, in, time.Now())
+	tag, err := c.Set(w, required(server.InteractionHandle{}, in, time.Now()), time.Now())
 	if err != nil {
 		t.Fatalf("Set: %v", err)
 	}
@@ -216,7 +218,7 @@ func TestReadRefusesAReplacedInteraction(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := httptest.NewRecorder()
-	secondTag, err := c.Set(w, other, server.InteractionRequest{ClientID: "elsewhere"}, now)
+	secondTag, err := c.Set(w, required(other, server.InteractionRequest{ClientID: "elsewhere"}, now), now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,5 +233,38 @@ func TestReadRefusesAReplacedInteraction(t *testing.T) {
 	}
 	if firstTag == secondTag {
 		t.Error("two interactions got the same tag")
+	}
+}
+
+// TestCookieExpiresWithTheInteraction covers the cookie's lifetime: the
+// interaction's own (InteractionRequired.ExpiresAt), not one configured
+// apart from the server's.
+func TestCookieExpiresWithTheInteraction(t *testing.T) {
+	now := time.Now()
+	c := newCookie(t, [][]byte{newKey(t)}, interactioncookie.Options{})
+	h, in := interaction(t)
+	a := server.InteractionRequired{Handle: h, Interaction: in, ExpiresAt: now.Add(90 * time.Second)}
+
+	w := httptest.NewRecorder()
+	tag, err := c.Set(w, a, now)
+	if err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	ck := w.Result().Cookies()[0]
+	if ck.MaxAge != 90 {
+		t.Errorf("Max-Age = %d, want 90, the interaction's remaining life", ck.MaxAge)
+	}
+	if _, _, err := c.Read(requestWith(ck), now.Add(89*time.Second), tag); err != nil {
+		t.Errorf("Read(before ExpiresAt) = %v", err)
+	}
+	if _, _, err := c.Read(requestWith(ck), now.Add(90*time.Second), tag); !errors.Is(err, interactioncookie.ErrNoInteraction) {
+		t.Errorf("Read(at ExpiresAt) = %v, want ErrNoInteraction", err)
+	}
+
+	for name, expiresAt := range map[string]time.Time{"expired": now.Add(-time.Second), "unset": {}} {
+		a.ExpiresAt = expiresAt
+		if _, err := c.Set(httptest.NewRecorder(), a, now); err == nil {
+			t.Errorf("Set(%s interaction) = nil error", name)
+		}
 	}
 }

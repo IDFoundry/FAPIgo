@@ -26,6 +26,8 @@ func (w *World) page(title, host string) Page {
 
 type consentPage struct {
 	Page
+	// Interaction is interactioncookie\'s tag for this page\'s form.
+	Interaction         string
 	ClientName, Problem string
 	Payments            []consentView
 }
@@ -114,7 +116,7 @@ var pageTemplates = map[string]string{
 {{template "bottom" .}}`,
 
 	"consent": `{{template "top" .}}
-<form method="post" action="/authorize">
+<form method="post" action="/authorize"><input type="hidden" name="interaction" value="{{.Interaction}}">
 <p><strong>{{.ClientName}}</strong> asks you to approve a payment:</p>
 {{range .Payments}}<div class="card verified">
 <p class="muted">Payment — checked by Alder Bank</p>

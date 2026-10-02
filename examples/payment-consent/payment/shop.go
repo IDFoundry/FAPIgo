@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,7 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/client"
 	"github.com/idfoundry/fapigo/extension"
+	"github.com/idfoundry/fapigo/server/interactioncookie"
 	"github.com/idfoundry/fapigo/storage"
 	"github.com/idfoundry/fapigo/storage/memstore"
 )
@@ -72,6 +74,9 @@ type apiResponse struct {
 	Status int
 	Body   string
 }
+
+// consentFormTag finds the bank consent form's interactioncookie tag.
+var consentFormTag = regexp.MustCompile(`name="interaction" value="([^"]*)"`)
 
 func (r apiResponse) OK() bool { return r.Status/100 == 2 }
 
@@ -415,8 +420,17 @@ func (w *World) approveOnAnotherDevice(ctx context.Context, username, pin string
 	if err != nil {
 		return "", err
 	}
+	// The consent form's own field, as the attacker's browser submits
+	// it. A page without one leaves it empty, and the bank refuses.
+	consent, _ := io.ReadAll(res.Body)
 	_ = res.Body.Close()
-	res, err = post(w.URL(bankHost, authorizePath), url.Values{"username": {username}, "pin": {pin}, "decision": {"approve"}})
+	var tag string
+	if m := consentFormTag.FindSubmatch(consent); m != nil {
+		tag = string(m[1])
+	}
+	res, err = post(w.URL(bankHost, authorizePath), url.Values{
+		interactioncookie.FormField: {tag}, "username": {username}, "pin": {pin}, "decision": {"approve"},
+	})
 	if err != nil {
 		return "", err
 	}

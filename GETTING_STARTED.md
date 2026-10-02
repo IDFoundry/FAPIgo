@@ -277,8 +277,15 @@ authorization. A modified copy can't widen the grant, since
 stored.
 
 `server/interactioncookie` does both in one encrypted cookie:
-`Set(w, a.Handle, a.Interaction, now)` at `/authorize`, `Read(r, now)`
-when the form comes back, and `Clear(w)` once it's done. It's AES-GCM
+`Set(w, a.Handle, a.Interaction, now)` at `/authorize` returns a tag
+for the form (a hidden `interactioncookie.FormField`), `Read(r, now,
+tag)` takes it back when the form comes back, and `Clear(w)` ends it.
+The tag matters because a browser holds one cookie of a name: a second
+authorization in the same browser — another tab, or a page that sends
+the browser to `/authorize` for a client of its own — replaces the
+first's cookie, and without the tag the first page's form would approve
+the second authorization. With it, that form gets `ErrNoInteraction`
+and the user starts again. It's AES-GCM
 under keys every instance shares (the first seals, all open, so keys
 rotate), with the `__Host-` prefix. An interaction too large for a
 cookie — large authorization details, say — gets `ErrTooLarge`: keep

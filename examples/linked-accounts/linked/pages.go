@@ -24,6 +24,8 @@ func (w *World) page(title, host string) Page {
 
 type consentPage struct {
 	Page
+	// Interaction is interactioncookie\'s tag for this page\'s form.
+	Interaction                         string
 	ClientName, Problem, Actions, Until string
 	Accounts                            []bankAccount
 }
@@ -137,7 +139,7 @@ var pageTemplates = map[string]string{
 {{template "bottom" .}}`,
 
 	"consent": `{{template "top" .}}
-<form method="post" action="/authorize">
+<form method="post" action="/authorize"><input type="hidden" name="interaction" value="{{.Interaction}}">
 <p><strong>{{.ClientName}}</strong> asks to read your accounts — {{.Actions}} — until <strong>{{.Until}}</strong>, without asking you again.</p>
 <div class="card"><h2>Which accounts?</h2>
 {{range .Accounts}}<label class="row"><input type="checkbox" name="account" value="{{.IBAN}}" checked> {{.Name}} <span class="muted">{{.IBAN}}</span></label>{{end}}

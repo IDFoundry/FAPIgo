@@ -24,6 +24,8 @@ func (w *World) page(title, host string) Page {
 
 type consentPage struct {
 	Page
+	// Interaction is interactioncookie\'s tag for this page\'s form.
+	Interaction         string
 	ClientName, Problem string
 	Claims              []claimView
 	StrongRequested     bool
@@ -138,7 +140,7 @@ var pageTemplates = map[string]string{
 {{template "bottom" .}}`,
 
 	"consent": `{{template "top" .}}
-<form method="post" action="/authorize">
+<form method="post" action="/authorize"><input type="hidden" name="interaction" value="{{.Interaction}}">
 <p><strong>{{.ClientName}}</strong> asks Alder Bank to confirm who you are.</p>
 <div class="card"><h2>What it asks for</h2>
 <p class="muted">Untick anything you'd rather not share. Alder Bank sends only what you leave ticked, from its own records.</p>

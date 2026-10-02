@@ -13,6 +13,14 @@
 // seals new ones, so keys rotate by putting the new one first and
 // dropping the old one once cookies sealed with it have expired.
 //
+// A browser keeps one cookie of a name, so a second interaction in the
+// same browser replaces the first: another tab, or a page that sends the
+// browser to the authorization endpoint for a client of its own. The
+// consent form must not then complete the replacement in its place. Set
+// returns a tag for the page it renders, to put in the form (FormField),
+// and Read refuses a form whose tag isn't the cookie's: that page's
+// interaction is gone, and the user starts again.
+//
 // The cookie is not a CSRF defence. The consent form's submission still
 // needs one, such as net/http's CrossOriginProtection.
 package interactioncookie
@@ -22,6 +30,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -47,6 +56,10 @@ const MaxValueBytes = 3800
 // host alone and with Path=/.
 const DefaultName = "__Host-fapi-interaction"
 
+// FormField is a name for the form field that carries Set's tag back to
+// Read; any name will do.
+const FormField = "interaction"
+
 var (
 	// ErrTooLarge is Set's answer for an interaction too large for a
 	// cookie, such as one with large authorization details: keep that one
@@ -54,8 +67,9 @@ var (
 	ErrTooLarge = errors.New("interactioncookie: the interaction is too large for a cookie")
 
 	// ErrNoInteraction is Read's answer when the request carries no
-	// cookie, or one that doesn't open with any key, has expired, or is
-	// malformed: this browser has no interaction in progress here.
+	// cookie, or one that doesn't open with any key, has expired, is
+	// malformed, or is for another interaction than the form's tag names:
+	// this browser has no interaction in progress here for that form.
 	ErrNoInteraction = errors.New("interactioncookie: no interaction in progress")
 )
 
@@ -127,46 +141,50 @@ func New(keys [][]byte, opts Options) (*Cookie, error) {
 // sealed is the plaintext a cookie value encrypts.
 type sealed struct {
 	ExpiresAt int64  `json:"exp"`
+	Tag       string `json:"tag"`
 	Handle    string `json:"handle"`
 	Request   string `json:"request"`
 }
 
-// Set seals handle and in, as of now, into the cookie on w. It returns
-// ErrTooLarge, setting nothing, when they don't fit.
-func (c *Cookie) Set(w http.ResponseWriter, handle server.InteractionHandle, in server.InteractionRequest, now time.Time) error {
+// Set seals handle and in, as of now, into the cookie on w, and returns
+// the tag that names this interaction: render it into the consent form,
+// for Read. The tag isn't secret, and grants nothing without the cookie.
+// Set returns ErrTooLarge, setting nothing, when the interaction doesn't
+// fit.
+func (c *Cookie) Set(w http.ResponseWriter, handle server.InteractionHandle, in server.InteractionRequest, now time.Time) (string, error) {
 	encoded, err := in.MarshalText()
 	if err != nil {
-		return err
-	}
-	plaintext, err := json.Marshal(sealed{ExpiresAt: now.Add(c.lifetime).Unix(), Handle: handle.String(), Request: string(encoded)})
-	if err != nil {
-		return err
+		return "", err
 	}
 	key := c.keys[0]
-	nonce := make([]byte, key.aead.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
-		return err
-	}
+	// One read for the tag and the nonce: the tag's 16 bytes, then the
+	// nonce.
+	random := make([]byte, 16+key.aead.NonceSize())
+	_, _ = rand.Read(random) // never fails: it crashes the program instead (Go 1.24+)
+	tag, nonce := base64.RawURLEncoding.EncodeToString(random[:16]), random[16:]
+	// Strings and an integer: encoding can't fail.
+	plaintext, _ := json.Marshal(sealed{ExpiresAt: now.Add(c.lifetime).Unix(), Tag: tag, Handle: handle.String(), Request: string(encoded)})
 	header := append([]byte{version}, key.id[:]...)
 	box := append(append(header, nonce...), key.aead.Seal(nil, nonce, plaintext, c.additionalData())...)
 	value := base64.RawURLEncoding.EncodeToString(box)
 	if len(value) > MaxValueBytes {
-		return ErrTooLarge
+		return "", ErrTooLarge
 	}
 	http.SetCookie(w, c.cookie(value, int(c.lifetime/time.Second)))
-	return nil
+	return tag, nil
 }
 
-// Read opens the cookie r carries, as of now. Any failure — no cookie,
-// a key that doesn't open it, a tampered or expired value — is
-// ErrNoInteraction.
-func (c *Cookie) Read(r *http.Request, now time.Time) (server.InteractionHandle, server.InteractionRequest, error) {
+// Read opens the cookie r carries, as of now, for the form that sent tag
+// back (Set's result, from the page it rendered). Any failure — no
+// cookie, a key that doesn't open it, a tampered or expired value, or a
+// cookie for another interaction than tag's — is ErrNoInteraction.
+func (c *Cookie) Read(r *http.Request, now time.Time, tag string) (server.InteractionHandle, server.InteractionRequest, error) {
 	ck, err := r.Cookie(c.name)
 	if err != nil {
 		return server.InteractionHandle{}, server.InteractionRequest{}, ErrNoInteraction
 	}
 	s, ok := c.open(ck.Value, now)
-	if !ok {
+	if !ok || tag == "" || subtle.ConstantTimeCompare([]byte(s.Tag), []byte(tag)) != 1 {
 		return server.InteractionHandle{}, server.InteractionRequest{}, ErrNoInteraction
 	}
 	handle, err := server.ParseInteractionHandle(s.Handle)

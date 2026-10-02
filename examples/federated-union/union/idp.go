@@ -324,14 +324,17 @@ func (p *identityProvider) authorize(w http.ResponseWriter, r *http.Request) {
 	}
 	switch a := action.(type) {
 	case server.InteractionRequired:
-		// The consent page's state goes with the browser, signed, not
-		// into this process: see interaction_cookie.go.
-		if err := p.interaction.Set(w, a.Handle, a.Interaction, time.Now()); err != nil {
+		// The consent page's state goes with the browser, encrypted, not
+		// into this process; the page's form carries the tag that ties it
+		// to this interaction.
+		tag, err := p.interaction.Set(w, a.Handle, a.Interaction, time.Now())
+		if err != nil {
 			p.w.renderError(w, http.StatusInternalServerError, "Sign-in could not start", publicMessage(err, "Something went wrong. Please try again."))
 			return
 		}
 		p.w.render(w, "consent", consentPage{
-			Page: p.w.page(p.country.idpName, p.country), Provider: p.country.idpName,
+			Interaction: tag,
+			Page:        p.w.page(p.country.idpName, p.country), Provider: p.country.idpName,
 			// The name the service published about itself, from its Trust
 			// Chain; shown with its entity ID, since the service chose it.
 			Client: string(a.Interaction.ClientID), ClientName: clientName(a.Interaction),
@@ -348,7 +351,8 @@ func (p *identityProvider) authorize(w http.ResponseWriter, r *http.Request) {
 // decide completes the interaction with the citizen chosen and the
 // claims they agreed to share.
 func (p *identityProvider) decide(w http.ResponseWriter, r *http.Request) {
-	handle, interaction, err := p.interaction.Read(r, time.Now())
+	tag := r.PostFormValue(interactioncookie.FormField)
+	handle, interaction, err := p.interaction.Read(r, time.Now(), tag)
 	if err != nil {
 		p.w.renderError(w, http.StatusBadRequest, "Session expired", "This browser has no sign-in in progress.")
 		return

@@ -53,6 +53,8 @@ type servicePage struct {
 
 type consentPage struct {
 	Page
+	// Interaction is interactioncookie\'s tag for this page\'s form.
+	Interaction                  string
 	Provider, Client, ClientName string
 	Scope                        []string
 	Citizens                     []citizen
@@ -190,7 +192,7 @@ var pageTemplates = map[string]string{
 <div class="card">
 <p><strong>{{.ClientName}}</strong> wants you to sign in with {{.Provider}}.</p>
 <p class="muted"><code>{{.Client}}</code> — registered automatically through its Trust Chain, with no onboarding beforehand.</p>
-<form method="post" action="/authorize">
+<form method="post" action="/authorize"><input type="hidden" name="interaction" value="{{.Interaction}}">
 <h2>Who are you?</h2>
 {{range $i, $c := .Citizens}}<label class="row"><input type="radio" name="citizen" value="{{$c.Sub}}" {{if eq $i 0}}checked{{end}}> {{$c.Name}} <span class="muted">({{$c.Sub}})</span></label>{{end}}
 {{if .Claims}}<h2>What may {{.ClientName}} see?</h2>

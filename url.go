@@ -8,10 +8,11 @@ import (
 	"strings"
 )
 
-// URL is a validated, security-sensitive URL — an issuer identifier or
-// an endpoint. It can only be constructed via ParseIssuerURL or
-// ParseEndpointURL, which enforce: absolute, HTTPS (except an
-// explicitly enabled loopback development exception), no embedded
+// URL is a validated, security-sensitive URL — an issuer identifier, an
+// endpoint or a redirect destination. It can only be constructed via
+// ParseIssuerURL, ParseEndpointURL or ParseRedirectURL, which enforce:
+// absolute, HTTPS (except an explicitly enabled loopback exception, or a
+// native app's private-use scheme for a redirect), no embedded
 // credentials, no fragment, and a normalized (lowercased) scheme and
 // host.
 type URL struct {
@@ -19,7 +20,8 @@ type URL struct {
 }
 
 type urlOptions struct {
-	allowLoopbackHTTP bool
+	allowLoopbackHTTP     bool
+	allowPrivateUseScheme bool
 }
 
 // URLOption configures ParseIssuerURL or ParseEndpointURL.
@@ -31,6 +33,84 @@ type URLOption func(*urlOptions)
 // that could reach a production deployment by accident.
 func AllowLoopbackHTTP() URLOption {
 	return func(o *urlOptions) { o.allowLoopbackHTTP = true }
+}
+
+// AllowPrivateUseScheme permits, for ParseRedirectURL only, a native
+// app's private-use URI scheme redirect (RFC 8252 §7.1), such as
+// "com.example.app:/oauth2redirect": a scheme that is a domain name in
+// reverse order, so it contains a ".", followed by a path and no
+// authority, as RFC 8252 §7.1 writes it. Enable it only for a client
+// registered as a native app.
+func AllowPrivateUseScheme() URLOption {
+	return func(o *urlOptions) { o.allowPrivateUseScheme = true }
+}
+
+// ParseRedirectURL parses and validates raw as an OAuth redirect URI:
+// https, like ParseEndpointURL, unless an option admits loopback http
+// (AllowLoopbackHTTP) or a native app's private-use scheme
+// (AllowPrivateUseScheme).
+func ParseRedirectURL(raw string, opts ...URLOption) (URL, error) {
+	var o urlOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+	if o.allowPrivateUseScheme {
+		if parsed, err := url.Parse(raw); err == nil && parsed.Scheme != "http" && parsed.Scheme != "https" && parsed.Scheme != "" {
+			u, err := parsePrivateUseURL(parsed)
+			if err != nil {
+				return URL{}, fmt.Errorf("fapi: parse redirect URL: %w", err)
+			}
+			return u, nil
+		}
+	}
+	u, err := parseSecureURL(raw, opts)
+	if err != nil {
+		return URL{}, fmt.Errorf("fapi: parse redirect URL: %w", err)
+	}
+	return u, nil
+}
+
+// parsePrivateUseURL validates parsed as a private-use URI scheme
+// redirect (RFC 8252 §7.1, §8.4).
+func parsePrivateUseURL(parsed *url.URL) (URL, error) {
+	if !isReverseDomainScheme(parsed.Scheme) {
+		return URL{}, fmt.Errorf("private-use scheme %q must be a reverse-order domain name, such as com.example.app", parsed.Scheme)
+	}
+	if parsed.Opaque != "" || parsed.Host != "" || parsed.User != nil || !strings.HasPrefix(parsed.Path, "/") {
+		return URL{}, fmt.Errorf("private-use redirect URI must be scheme:/path, with no authority")
+	}
+	if parsed.Fragment != "" {
+		return URL{}, fmt.Errorf("URL must not contain a fragment")
+	}
+	return URL{value: *parsed}, nil
+}
+
+// isReverseDomainScheme reports whether scheme has the form RFC 8252
+// §7.1 requires of a private-use URI scheme: a domain name in reverse
+// order, at least two dot-separated labels, each of letters, digits and
+// "-", none empty. A scheme with no "." is the one RFC 8252 §8.4 says to
+// reject at a minimum.
+func isReverseDomainScheme(scheme string) bool {
+	labels := strings.Split(scheme, ".")
+	if len(labels) < 2 {
+		return false
+	}
+	for _, label := range labels {
+		if label == "" || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, r := range label {
+			if !isLabelRune(r) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// isLabelRune reports whether r may appear in a domain-name label.
+func isLabelRune(r rune) bool {
+	return 'a' <= r && r <= 'z' || 'A' <= r && r <= 'Z' || '0' <= r && r <= '9' || r == '-'
 }
 
 // ParseIssuerURL parses and validates raw as an issuer identifier.

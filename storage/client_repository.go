@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/url"
 	"slices"
+	"strconv"
+	"strings"
 	"unicode"
 	"unicode/utf8"
 
@@ -28,6 +31,36 @@ const (
 	// own — sender-constraining only compares thumbprints, it never
 	// authenticates the client by its certificate.
 	SenderConstrainMTLS
+)
+
+// ApplicationType is what kind of application a client is, which
+// decides the redirect URIs it may use (OpenID Connect Dynamic Client
+// Registration 1.0 §2's application_type; RFC 8252 §8.4 asks a server
+// to record it).
+type ApplicationType uint8
+
+const (
+	// ApplicationTypeWeb is a web application — the zero value, so every
+	// client registered before this field keeps behaving as it did. Its
+	// redirect URIs are https, plus loopback http under development
+	// assurance.
+	ApplicationTypeWeb ApplicationType = iota
+
+	// ApplicationTypeNative is a native app — a mobile or desktop
+	// wallet, say — which receives its authorization response at one of
+	// RFC 8252's native-app redirect URIs, in production as well:
+	//
+	//   - a private-use URI scheme (RFC 8252 §7.1), a domain name in
+	//     reverse order: com.example.app:/callback;
+	//   - loopback http (§7.3) to the IP literal 127.0.0.1 or [::1], never
+	//     "localhost" (§8.3), matched on any port at request time;
+	//   - a claimed https URI (§7.2), as for a web application.
+	//
+	// NewRegisteredClient refuses a native client's redirect URI of any
+	// other form. A native client still authenticates as every client
+	// here does: give each app instance credentials of its own, as
+	// attestation-based client authentication does.
+	ApplicationTypeNative
 )
 
 // ClientAuthMethod is the closed set of mechanisms a registered client
@@ -156,6 +189,7 @@ const (
 type RegisteredClient struct {
 	id                            fapi.ClientID
 	redirectURIs                  []fapi.RegisteredRedirectURI
+	applicationType               ApplicationType
 	clientAssertionAlgorithm      fapi.SignatureAlgorithm
 	clientAssertionAlgorithms     []fapi.SignatureAlgorithm
 	requestObjectAlgorithm        fapi.SignatureAlgorithm
@@ -200,6 +234,11 @@ type RegisteredClientConfig struct {
 	// empty, the client can't use the authorization code grant (see
 	// RegisteredClient.AllowsAuthorizationCodeGrant).
 	RedirectURIs []fapi.RegisteredRedirectURI
+
+	// ApplicationType is ApplicationTypeWeb (the zero value) or
+	// ApplicationTypeNative, which admits a native app's redirect URIs —
+	// see ApplicationTypeNative.
+	ApplicationType ApplicationType
 
 	// ClientAuthMethod selects how this client authenticates —
 	// ClientAuthMethodPrivateKeyJWT (the zero value/default),
@@ -517,12 +556,16 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 		return RegisteredClient{}, err
 	}
 
+	if err := checkApplicationType(cfg); err != nil {
+		return RegisteredClient{}, err
+	}
 	redirectURIs := make([]fapi.RegisteredRedirectURI, len(cfg.RedirectURIs))
 	copy(redirectURIs, cfg.RedirectURIs)
 
 	return RegisteredClient{
 		id:                                        cfg.ID,
 		redirectURIs:                              redirectURIs,
+		applicationType:                           cfg.ApplicationType,
 		clientAssertionAlgorithm:                  primaryAlg,
 		clientAssertionAlgorithms:                 algs,
 		requestObjectAlgorithm:                    cfg.RequestObjectAlgorithm,
@@ -754,8 +797,88 @@ func (c RegisteredClient) HasRedirectURI(candidate string) bool {
 		if u.Equal(candidate) {
 			return true
 		}
+		// RFC 8252 §7.3, §8.4: a native app's loopback redirect URI
+		// matches exactly except for the port, which the app picks when
+		// it starts listening.
+		if c.applicationType == ApplicationTypeNative && loopbackMatchesAnyPort(string(u), candidate) {
+			return true
+		}
 	}
 	return false
+}
+
+// ApplicationType returns whether this client is a web application or a
+// native app — see RegisteredClientConfig.ApplicationType.
+func (c RegisteredClient) ApplicationType() ApplicationType { return c.applicationType }
+
+// checkApplicationType refuses an unknown application type, and a native
+// client's redirect URI that isn't one of the forms ApplicationTypeNative
+// lists.
+func checkApplicationType(cfg RegisteredClientConfig) error {
+	switch cfg.ApplicationType {
+	case ApplicationTypeWeb:
+		return nil
+	case ApplicationTypeNative:
+	default:
+		return fmt.Errorf("storage: client %q has an unknown application type %d", cfg.ID, cfg.ApplicationType)
+	}
+	for _, uri := range cfg.RedirectURIs {
+		parsed, err := fapi.ParseRedirectURL(string(uri), fapi.AllowLoopbackHTTP(), fapi.AllowPrivateUseScheme())
+		if err != nil {
+			return fmt.Errorf("storage: client %q: native redirect URI %q: %w", cfg.ID, uri, err)
+		}
+		if u := parsed.URL(); u.Scheme == "http" {
+			if !isLoopbackLiteral(u.Hostname()) {
+				return fmt.Errorf("storage: client %q: native redirect URI %q: loopback redirects use the IP literal 127.0.0.1 or [::1], not a name (RFC 8252 §8.3)", cfg.ID, uri)
+			}
+		}
+	}
+	return nil
+}
+
+// isLoopbackLiteral reports whether host is the IP literal 127.0.0.1 or
+// ::1, the loopback addresses RFC 8252 §7.3 names.
+func isLoopbackLiteral(host string) bool {
+	ip := net.ParseIP(host)
+	return ip != nil && (ip.Equal(net.IPv4(127, 0, 0, 1)) || ip.Equal(net.IPv6loopback))
+}
+
+// loopbackMatchesAnyPort reports whether candidate is the loopback http
+// redirect URI registered, but for its port: the same string once the
+// port is taken out of each, and a candidate port, if any, between 1 and
+// 65535.
+func loopbackMatchesAnyPort(registered, candidate string) bool {
+	r, ok := withoutLoopbackPort(registered)
+	if !ok {
+		return false
+	}
+	c, ok := withoutLoopbackPort(candidate)
+	return ok && r == c
+}
+
+// withoutLoopbackPort returns uri without its port, if uri is an http
+// URI to a loopback IP literal, spelled exactly "http://".
+func withoutLoopbackPort(uri string) (string, bool) {
+	const prefix = "http://"
+	if !strings.HasPrefix(uri, prefix) {
+		return "", false
+	}
+	u, err := url.Parse(uri)
+	if err != nil || u.User != nil || u.Fragment != "" || !strings.HasPrefix(uri[len(prefix):], u.Host) {
+		return "", false
+	}
+	if ip := net.ParseIP(u.Hostname()); ip == nil || !ip.IsLoopback() {
+		return "", false
+	}
+	host := u.Host
+	if port := u.Port(); port != "" {
+		n, err := strconv.Atoi(port)
+		if err != nil || n < 1 || n > 65535 {
+			return "", false
+		}
+		host = strings.TrimSuffix(host, ":"+port)
+	}
+	return prefix + host + uri[len(prefix)+len(u.Host):], true
 }
 
 // ClientAssertionAlgorithm returns the first of the algorithms this

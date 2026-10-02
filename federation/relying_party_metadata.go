@@ -63,6 +63,10 @@ type OpenIDRelyingPartyMetadata struct {
 
 	// ApplicationType is OpenID Connect Dynamic Client Registration
 	// 1.0 §2's own "web" or "native" — OPTIONAL, "web" if omitted.
+	// Automatic registration doesn't act on it: an RP's own claim to be a
+	// native app, which would admit private-use and loopback redirect
+	// URIs, isn't one to take from its self-published metadata, so every
+	// automatically registered client is storage.ApplicationTypeWeb.
 	ApplicationType string `json:"application_type,omitempty"`
 
 	// TokenEndpointAuthMethod is this RP's own declared client

@@ -7,6 +7,7 @@ import (
 
 	"github.com/idfoundry/fapigo/internal/clientattestation"
 	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // AttestationSource supplies the pre-issued Client Attestation JWT this
@@ -117,4 +118,28 @@ func (c *Client) attestationHeaders(ctx context.Context) (map[string]string, err
 		attestationHeader:    attestation,
 		attestationPoPHeader: pop,
 	}, nil
+}
+
+// ClientAttestationHeaders returns the OAuth-Client-Attestation and a
+// fresh OAuth-Client-Attestation-PoP header values for a request this
+// client sends to the authorization server outside the flows it
+// implements — such as an OpenID4VCI pre-authorized_code token request —
+// built exactly as its own PAR and token requests build them: the
+// attestation from Dependencies.Attestation, and a single-use PoP signed
+// with the Client Instance Key (keys.ClientAttestationPoPSigning) for
+// this client's issuer, carrying an attestation challenge when
+// Dependencies.Attestation also implements ChallengeSource. Call it
+// again for every request, including retries.
+//
+// It requires Config.ClientAuthMethod to be
+// storage.ClientAuthMethodAttestation.
+func (c *Client) ClientAttestationHeaders(ctx context.Context) (attestation, pop string, err error) {
+	if c.cfg.ClientAuthMethod != storage.ClientAuthMethodAttestation {
+		return "", "", newError(ErrorInvalidRequest, "this client doesn't use attestation-based client authentication", nil)
+	}
+	headers, herr := c.attestationHeaders(ctx)
+	if herr != nil {
+		return "", "", newError(ErrorInternal, "failed to build the client attestation headers", herr)
+	}
+	return headers[attestationHeader], headers[attestationPoPHeader], nil
 }

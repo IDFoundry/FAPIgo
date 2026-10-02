@@ -23,16 +23,22 @@ const maxFormRequestBytes = 1 << 20
 // there's no reason for every adapter to reimplement it. A caller
 // fronted by something other than net/http.Request is free to build a
 // FormRequest by hand instead.
+//
+// A body it can't take — not form-encoded, unreadable, over 1 MiB, or
+// malformed — is an invalid_request *Error (400), so WriteError answers
+// it as the client's mistake, never a 500. The same goes for the
+// *FromHTTP constructors built on it (PushAuthorizationRequestFromHTTP,
+// TokenEndpointRequestFromHTTP, BeginBackchannelAuthenticationRequestFromHTTP).
 func FormRequestFromHTTP(r *http.Request) (FormRequest, error) {
 	if ct := r.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/x-www-form-urlencoded") {
-		return FormRequest{}, fmt.Errorf("server: unexpected content type %q", ct)
+		return FormRequest{}, newError(ErrorInvalidRequest, http.StatusBadRequest, "the request body must be application/x-www-form-urlencoded", fmt.Errorf("content type %q", ct))
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxFormRequestBytes+1))
 	if err != nil {
-		return FormRequest{}, fmt.Errorf("server: read body: %w", err)
+		return FormRequest{}, newError(ErrorInvalidRequest, http.StatusBadRequest, "the request body could not be read", err)
 	}
 	if len(body) > maxFormRequestBytes {
-		return FormRequest{}, fmt.Errorf("server: body exceeds %d bytes", maxFormRequestBytes)
+		return FormRequest{}, newError(ErrorInvalidRequest, http.StatusBadRequest, "the request body is too large", fmt.Errorf("body exceeds %d bytes", maxFormRequestBytes))
 	}
 
 	var params []FormParameter
@@ -43,11 +49,11 @@ func FormRequestFromHTTP(r *http.Request) (FormRequest, error) {
 		name, value, _ := strings.Cut(pair, "=")
 		decodedName, err := url.QueryUnescape(name)
 		if err != nil {
-			return FormRequest{}, fmt.Errorf("server: malformed parameter name: %w", err)
+			return FormRequest{}, newError(ErrorInvalidRequest, http.StatusBadRequest, "the request body is malformed", fmt.Errorf("parameter name: %w", err))
 		}
 		decodedValue, err := url.QueryUnescape(value)
 		if err != nil {
-			return FormRequest{}, fmt.Errorf("server: malformed parameter value: %w", err)
+			return FormRequest{}, newError(ErrorInvalidRequest, http.StatusBadRequest, "the request body is malformed", fmt.Errorf("parameter value: %w", err))
 		}
 		params = append(params, FormParameter{Name: decodedName, Value: decodedValue})
 	}

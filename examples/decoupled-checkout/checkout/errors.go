@@ -15,13 +15,6 @@ import (
 // logs show full errors on purpose: explaining a refusal is what they
 // are for.)
 
-// badRequest answers a request this package couldn't read, such as a
-// form a *FromHTTP constructor refused.
-func badRequest(w http.ResponseWriter, err error) {
-	log.Printf("bad request: %v", err)
-	server.NewError(server.ErrorInvalidRequest, http.StatusBadRequest, "the request is malformed").WriteJSON(w)
-}
-
 // internalError answers a request that failed on this side.
 func internalError(w http.ResponseWriter, err error) {
 	log.Printf("internal error: %v", err)

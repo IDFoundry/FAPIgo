@@ -10,7 +10,7 @@ func tokenHandler(srv *server.Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		req, err := server.TokenEndpointRequestFromHTTP(r)
 		if err != nil {
-			writeRawOAuthError(w, http.StatusBadRequest, server.ErrorInvalidRequest, err.Error())
+			writeOAuthJSONError(w, err)
 			return
 		}
 

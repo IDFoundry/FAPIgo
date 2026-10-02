@@ -202,7 +202,7 @@ func (b *bank) jwks(w http.ResponseWriter, r *http.Request) {
 func (b *bank) par(w http.ResponseWriter, r *http.Request) {
 	req, err := server.PushAuthorizationRequestFromHTTP(r)
 	if err != nil {
-		badRequest(w, err)
+		server.WriteError(w, err)
 		return
 	}
 	result, err := b.srv.PushAuthorizationRequest(r.Context(), req)
@@ -217,7 +217,7 @@ func (b *bank) par(w http.ResponseWriter, r *http.Request) {
 func (b *bank) token(w http.ResponseWriter, r *http.Request) {
 	req, err := server.TokenEndpointRequestFromHTTP(r)
 	if err != nil {
-		badRequest(w, err)
+		server.WriteError(w, err)
 		return
 	}
 	var result server.TokenResult

@@ -277,7 +277,7 @@ func (p *identityProvider) jwks(w http.ResponseWriter, r *http.Request) {
 func (p *identityProvider) par(w http.ResponseWriter, r *http.Request) {
 	req, err := server.PushAuthorizationRequestFromHTTP(r)
 	if err != nil {
-		badRequest(w, err)
+		server.WriteError(w, err)
 		return
 	}
 	result, err := p.srv.PushAuthorizationRequest(r.Context(), req)
@@ -291,7 +291,7 @@ func (p *identityProvider) par(w http.ResponseWriter, r *http.Request) {
 func (p *identityProvider) token(w http.ResponseWriter, r *http.Request) {
 	req, err := server.TokenEndpointRequestFromHTTP(r)
 	if err != nil {
-		badRequest(w, err)
+		server.WriteError(w, err)
 		return
 	}
 	if req.GrantType() != "authorization_code" {

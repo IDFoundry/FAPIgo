@@ -235,11 +235,7 @@ func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 		return AuthorizationSession{}, newError(ErrorInvalidResponse, "malformed pushed authorization request response", err)
 	}
 
-	responseMode := responseModePlain
-	if c.cfg.Profile == ProfileFAPISecurityWithMessageSigning {
-		responseMode = responseModeJARM
-	}
-	if sessionErr := c.createSession(ctx, state, c.newSessionRecord(req, nonce, verifier, responseMode), now); sessionErr != nil {
+	if sessionErr := c.createSession(ctx, state, c.newSessionRecord(req, nonce, verifier), now); sessionErr != nil {
 		return AuthorizationSession{}, sessionErr
 	}
 
@@ -546,8 +542,13 @@ func (c *Client) signPushedRequestForm(ctx context.Context, now time.Time, form,
 }
 
 // newSessionRecord is what this authorization attempt's session keeps
-// for the callback and the code exchange.
-func (c *Client) newSessionRecord(req BeginAuthorizationRequest, nonce, verifier, responseMode string) sessionRecord {
+// for the callback and the code exchange: under message signing, the
+// response must arrive as a signed JARM response.
+func (c *Client) newSessionRecord(req BeginAuthorizationRequest, nonce, verifier string) sessionRecord {
+	responseMode := responseModePlain
+	if c.cfg.Profile == ProfileFAPISecurityWithMessageSigning {
+		responseMode = responseModeJARM
+	}
 	record := sessionRecord{
 		Nonce: nonce, PKCEVerifier: verifier, Issuer: c.cfg.Issuer.String(),
 		RedirectURI: c.cfg.RedirectURI, ResponseMode: responseMode,

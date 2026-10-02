@@ -15,14 +15,14 @@ import (
 // ErrNoInteraction.
 func FuzzRead(f *testing.F) {
 	key := make([]byte, 32)
-	c, err := interactioncookie.New([][]byte{key}, interactioncookie.Options{Lifetime: time.Minute})
+	c, err := interactioncookie.New([][]byte{key}, interactioncookie.Options{})
 	if err != nil {
 		f.Fatal(err)
 	}
 	now := time.Unix(1_700_000_000, 0)
 	h, in := interaction(&testing.T{})
 	w := httptest.NewRecorder()
-	tag, err := c.Set(w, h, in, now)
+	tag, err := c.Set(w, required(h, in, now), now)
 	if err != nil {
 		f.Fatal(err)
 	}

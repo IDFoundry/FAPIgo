@@ -26,8 +26,6 @@ const (
 	bankKeyID      = "alder-1"
 	approvalFailed = "Approval failed"
 	authorizePath  = "/authorize"
-	// interactionLifetime is how long a consent page stays answerable.
-	interactionLifetime = 10 * time.Minute
 )
 
 // bank is Alder Bank's authorization server, with its own sign-in and
@@ -104,7 +102,7 @@ func (w *World) newBank(shop clientKeys) (*bank, error) {
 	if _, err := rand.Read(cookieKey); err != nil {
 		return nil, err
 	}
-	interaction, err := interactioncookie.New([][]byte{cookieKey}, interactioncookie.Options{Lifetime: interactionLifetime})
+	interaction, err := interactioncookie.New([][]byte{cookieKey}, interactioncookie.Options{})
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +214,7 @@ func (b *bank) authorize(w http.ResponseWriter, r *http.Request) {
 	}
 	switch a := action.(type) {
 	case server.InteractionRequired:
-		tag, err := b.interaction.Set(w, a.Handle, a.Interaction, time.Now())
+		tag, err := b.interaction.Set(w, a, time.Now())
 		if err != nil {
 			b.w.renderError(w, bankHost, http.StatusInternalServerError, "Sign-in could not start", publicMessage(err, "Something went wrong. Please try again."))
 			return

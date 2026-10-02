@@ -26,8 +26,6 @@ const (
 	authorizePath     = "/authorize"
 	connectedAppsPath = "/connected-apps"
 	approvalFailed    = "Approval failed"
-	// interactionLifetime is how long a consent page stays answerable.
-	interactionLifetime = 10 * time.Minute
 )
 
 // bank is Alder Bank's authorization server, with its own sign-in and
@@ -121,7 +119,7 @@ func (w *World) newBank(apps apps) (*bank, error) {
 	if _, err := rand.Read(cookieKey); err != nil {
 		return nil, err
 	}
-	interaction, err := interactioncookie.New([][]byte{cookieKey}, interactioncookie.Options{Lifetime: interactionLifetime})
+	interaction, err := interactioncookie.New([][]byte{cookieKey}, interactioncookie.Options{})
 	if err != nil {
 		return nil, err
 	}
@@ -256,7 +254,7 @@ func (b *bank) authorize(w http.ResponseWriter, r *http.Request) {
 	}
 	switch a := action.(type) {
 	case server.InteractionRequired:
-		tag, err := b.interaction.Set(w, a.Handle, a.Interaction, time.Now())
+		tag, err := b.interaction.Set(w, a, b.w.clock.Now())
 		if err != nil {
 			b.w.renderError(w, bankHost, http.StatusInternalServerError, "Sign-in could not start", publicMessage(err, "Something went wrong. Please try again."))
 			return
@@ -292,7 +290,7 @@ func (b *bank) consentPage(in server.InteractionRequest, tag, problem string) co
 // to share, under a grant ID the bank keeps on its Connected apps page.
 func (b *bank) decide(w http.ResponseWriter, r *http.Request) {
 	tag := r.PostFormValue(interactioncookie.FormField)
-	handle, in, err := b.interaction.Read(r, time.Now(), tag)
+	handle, in, err := b.interaction.Read(r, b.w.clock.Now(), tag)
 	if err != nil {
 		b.w.renderError(w, bankHost, http.StatusBadRequest, "Session expired", "This browser has no sign-in in progress.")
 		return

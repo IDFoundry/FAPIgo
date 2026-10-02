@@ -20,6 +20,8 @@ type demo struct {
 	t     *testing.T
 	world *identity.World
 	http  *http.Client
+	// interaction is the last consent form's interactioncookie tag.
+	interaction string
 }
 
 func start(t *testing.T) *demo {
@@ -52,16 +54,41 @@ func (d *demo) get(host, path string) string {
 	if err != nil {
 		d.t.Fatalf("GET %s%s: %v", host, path, err)
 	}
-	return readBody(d.t, res)
+	return d.page(res)
 }
 
 func (d *demo) post(host, path string, form url.Values) (string, string) {
 	d.t.Helper()
-	res, err := d.http.PostForm(d.world.URL(host, path), form)
+	res, err := d.http.PostForm(d.world.URL(host, path), withInteraction(path, d.interaction, form))
 	if err != nil {
 		d.t.Fatalf("POST %s%s: %v", host, path, err)
 	}
-	return readBody(d.t, res), res.Request.URL.String()
+	return d.page(res), res.Request.URL.String()
+}
+
+// interactionField finds the consent form's interactioncookie tag.
+var interactionField = regexp.MustCompile(`name="interaction" value="([^"]*)"`)
+
+// page reads res's body, remembering any consent form's tag in it.
+func (d *demo) page(res *http.Response) string {
+	body := readBody(d.t, res)
+	if m := interactionField.FindStringSubmatch(body); m != nil {
+		d.interaction = m[1]
+	}
+	return body
+}
+
+// withInteraction adds the last consent form's tag to a submission of
+// it, as a browser submitting that form would.
+func withInteraction(path, interaction string, form url.Values) url.Values {
+	if path != "/authorize" || form.Has("interaction") || interaction == "" {
+		return form
+	}
+	out := url.Values{"interaction": {interaction}}
+	for k, v := range form {
+		out[k] = v
+	}
+	return out
 }
 
 func readBody(t *testing.T, res *http.Response) string {

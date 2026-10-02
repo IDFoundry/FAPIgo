@@ -199,7 +199,8 @@ func (b *bank) token(w http.ResponseWriter, r *http.Request) {
 
 // authorize starts the interaction and shows the sign-in and consent
 // page. The interaction goes with the browser in a cookie the bank
-// signs, so any instance of the bank can finish it.
+// encrypts, so any instance of the bank can finish it, and the page's
+// form carries the tag that ties it to this interaction.
 func (b *bank) authorize(w http.ResponseWriter, r *http.Request) {
 	// Local, never a redirect: an unreadable request names no
 	// redirect URI it can be trusted with.
@@ -215,11 +216,12 @@ func (b *bank) authorize(w http.ResponseWriter, r *http.Request) {
 	}
 	switch a := action.(type) {
 	case server.InteractionRequired:
-		if err := b.interaction.Set(w, a.Handle, a.Interaction, time.Now()); err != nil {
+		tag, err := b.interaction.Set(w, a.Handle, a.Interaction, time.Now())
+		if err != nil {
 			b.w.renderError(w, bankHost, http.StatusInternalServerError, "Sign-in could not start", publicMessage(err, "Something went wrong. Please try again."))
 			return
 		}
-		b.w.render(w, "consent", b.consentPage(a.Interaction, ""))
+		b.w.render(w, "consent", b.consentPage(a.Interaction, tag, ""))
 	case server.RedirectResponse:
 		http.Redirect(w, r, a.Destination.String(), http.StatusFound)
 	case server.LocalErrorResponse:
@@ -235,8 +237,8 @@ type consentView struct {
 	PayeeVerified                                bool
 }
 
-func (b *bank) consentPage(in server.InteractionRequest, problem string) consentPage {
-	page := consentPage{Page: b.w.page("Alder Bank", bankHost), ClientName: in.ClientDisplay.Name, Problem: problem}
+func (b *bank) consentPage(in server.InteractionRequest, tag, problem string) consentPage {
+	page := consentPage{Interaction: tag, Page: b.w.page("Alder Bank", bankHost), ClientName: in.ClientDisplay.Name, Problem: problem}
 	if page.ClientName == "" {
 		page.ClientName = string(in.ClientID)
 	}
@@ -253,7 +255,8 @@ func (b *bank) consentPage(in server.InteractionRequest, problem string) consent
 // decide signs the customer in and records their decision. The payment
 // is granted exactly as asked: the server refuses anything else.
 func (b *bank) decide(w http.ResponseWriter, r *http.Request) {
-	handle, in, err := b.interaction.Read(r, time.Now())
+	tag := r.PostFormValue(interactioncookie.FormField)
+	handle, in, err := b.interaction.Read(r, time.Now(), tag)
 	if err != nil {
 		b.w.renderError(w, bankHost, http.StatusBadRequest, "Session expired", "This browser has no payment approval in progress.")
 		return
@@ -266,7 +269,7 @@ func (b *bank) decide(w http.ResponseWriter, r *http.Request) {
 	if r.PostForm.Get("decision") == "approve" {
 		c, ok := customerByName(r.PostForm.Get("username"))
 		if !ok || !hmac.Equal([]byte(c.pin), []byte(r.PostForm.Get("pin"))) {
-			b.w.render(w, "consent", b.consentPage(in, "That username and PIN don't match."))
+			b.w.render(w, "consent", b.consentPage(in, tag, "That username and PIN don't match."))
 			return
 		}
 		var granted []json.RawMessage

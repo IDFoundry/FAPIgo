@@ -20,6 +20,8 @@ type demo struct {
 	t     *testing.T
 	world *payment.World
 	http  *http.Client
+	// interaction is the last consent form's interactioncookie tag.
+	interaction string
 }
 
 func start(t *testing.T) *demo {
@@ -52,16 +54,41 @@ func (d *demo) get(rawURL string) (string, string) {
 	if err != nil {
 		d.t.Fatalf("GET %s: %v", rawURL, err)
 	}
-	return readBody(d.t, res), res.Request.URL.String()
+	return d.page(res), res.Request.URL.String()
 }
 
 func (d *demo) post(host, path string, form url.Values) (string, string) {
 	d.t.Helper()
-	res, err := d.http.PostForm(d.world.URL(host, path), form)
+	res, err := d.http.PostForm(d.world.URL(host, path), withInteraction(path, d.interaction, form))
 	if err != nil {
 		d.t.Fatalf("POST %s%s: %v", host, path, err)
 	}
-	return readBody(d.t, res), res.Request.URL.String()
+	return d.page(res), res.Request.URL.String()
+}
+
+// interactionField finds the consent form's interactioncookie tag.
+var interactionField = regexp.MustCompile(`name="interaction" value="([^"]*)"`)
+
+// page reads res's body, remembering any consent form's tag in it.
+func (d *demo) page(res *http.Response) string {
+	body := readBody(d.t, res)
+	if m := interactionField.FindStringSubmatch(body); m != nil {
+		d.interaction = m[1]
+	}
+	return body
+}
+
+// withInteraction adds the last consent form's tag to a submission of
+// it, as a browser submitting that form would.
+func withInteraction(path, interaction string, form url.Values) url.Values {
+	if path != "/authorize" || form.Has("interaction") || interaction == "" {
+		return form
+	}
+	out := url.Values{"interaction": {interaction}}
+	for k, v := range form {
+		out[k] = v
+	}
+	return out
 }
 
 func readBody(t *testing.T, res *http.Response) string {
@@ -187,5 +214,29 @@ func TestBankRefusesCrossSiteApproval(t *testing.T) {
 	_ = res.Body.Close()
 	if res.StatusCode != http.StatusForbidden {
 		t.Errorf("cross-site approval = %s, want 403", res.Status)
+	}
+}
+
+// TestAReplacedConsentPageApprovesNothing covers a second payment begun
+// in the same browser — another tab, or a page sending the browser to
+// the bank for a payment of its own — while the first consent page is
+// open: approving that first page approves neither payment, rather than
+// the second.
+func TestAReplacedConsentPageApprovesNothing(t *testing.T) {
+	d := start(t)
+	d.checkout()
+	first := d.interaction
+	d.checkout()
+	if d.interaction == first {
+		t.Fatal("the second consent page has the first's tag")
+	}
+
+	page, at := d.post("bank.localhost", "/authorize", url.Values{"interaction": {first}, "username": {"sam"}, "pin": {"2468"}, "decision": {"approve"}})
+	if !strings.Contains(at, "bank.localhost") || !strings.Contains(page, "no payment approval in progress") {
+		t.Fatalf("approving the replaced page landed on %s:\n%s", at, page)
+	}
+	order, at := d.approve("sam", "2468")
+	if !strings.Contains(at, "shop.localhost") {
+		t.Fatalf("approving the current page landed on %s:\n%s", at, order)
 	}
 }

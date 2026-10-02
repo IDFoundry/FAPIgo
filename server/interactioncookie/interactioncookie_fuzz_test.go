@@ -22,7 +22,8 @@ func FuzzRead(f *testing.F) {
 	now := time.Unix(1_700_000_000, 0)
 	h, in := interaction(&testing.T{})
 	w := httptest.NewRecorder()
-	if err := c.Set(w, h, in, now); err != nil {
+	tag, err := c.Set(w, h, in, now)
+	if err != nil {
 		f.Fatal(err)
 	}
 	f.Add(w.Result().Cookies()[0].Value)
@@ -33,7 +34,7 @@ func FuzzRead(f *testing.F) {
 	f.Fuzz(func(t *testing.T, value string) {
 		r := httptest.NewRequest("POST", "/authorize", nil)
 		r.AddCookie(&http.Cookie{Name: interactioncookie.DefaultName, Value: value})
-		if _, _, err := c.Read(r, now); err != nil && !errors.Is(err, interactioncookie.ErrNoInteraction) {
+		if _, _, err := c.Read(r, now, tag); err != nil && !errors.Is(err, interactioncookie.ErrNoInteraction) {
 			t.Fatalf("Read = %v, want nil or ErrNoInteraction", err)
 		}
 	})

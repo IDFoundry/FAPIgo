@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -39,6 +40,8 @@ func startUnion(t *testing.T) (*union.World, *demokit.Net) {
 type browser struct {
 	t *testing.T
 	c *http.Client
+	// interaction is the last consent form's interactioncookie tag.
+	interaction *string
 }
 
 func newBrowser(t *testing.T, n *demokit.Net) browser {
@@ -46,7 +49,7 @@ func newBrowser(t *testing.T, n *demokit.Net) browser {
 	if err != nil {
 		t.Fatalf("cookiejar: %v", err)
 	}
-	return browser{t: t, c: n.Browser(jar)}
+	return browser{t: t, c: n.Browser(jar), interaction: new(string)}
 }
 
 func (b browser) get(u string) (int, string, *url.URL) {
@@ -57,18 +60,40 @@ func (b browser) get(u string) (int, string, *url.URL) {
 	}
 	defer func() { _ = res.Body.Close() }()
 	body, _ := io.ReadAll(res.Body)
+	if m := interactionField.FindSubmatch(body); m != nil {
+		*b.interaction = string(m[1])
+	}
 	return res.StatusCode, string(body), res.Request.URL
 }
 
 func (b browser) post(u string, form url.Values) (int, string, *url.URL) {
 	b.t.Helper()
-	res, err := b.c.PostForm(u, form)
+	res, err := b.c.PostForm(u, b.withInteraction(u, form))
 	if err != nil {
 		b.t.Fatalf("POST %s: %v", u, err)
 	}
 	defer func() { _ = res.Body.Close() }()
 	body, _ := io.ReadAll(res.Body)
+	if m := interactionField.FindSubmatch(body); m != nil {
+		*b.interaction = string(m[1])
+	}
 	return res.StatusCode, string(body), res.Request.URL
+}
+
+// interactionField finds the consent form's interactioncookie tag.
+var interactionField = regexp.MustCompile(`name="interaction" value="([^"]*)"`)
+
+// withInteraction adds the last consent form's tag to a submission of
+// it, as a browser submitting that form would.
+func (b browser) withInteraction(u string, form url.Values) url.Values {
+	if !strings.HasSuffix(u, "/authorize") || form.Has("interaction") || *b.interaction == "" {
+		return form
+	}
+	out := url.Values{"interaction": {*b.interaction}}
+	for k, v := range form {
+		out[k] = v
+	}
+	return out
 }
 
 func mustContain(t *testing.T, body string, want ...string) {
@@ -218,7 +243,7 @@ func TestTourAndSceneReset(t *testing.T) {
 // postFrom is post as a browser would send it from a page at origin.
 func (b browser) postFrom(origin, u string, form url.Values) int {
 	b.t.Helper()
-	req, err := http.NewRequest(http.MethodPost, u, strings.NewReader(form.Encode()))
+	req, err := http.NewRequest(http.MethodPost, u, strings.NewReader(b.withInteraction(u, form).Encode()))
 	if err != nil {
 		b.t.Fatal(err)
 	}

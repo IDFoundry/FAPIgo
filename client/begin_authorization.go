@@ -194,13 +194,11 @@ func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 		params["acr_values"] = strings.Join(req.ACRValues, " ")
 	}
 	if req.HasMaxAge {
-		if req.MaxAge < 0 {
-			return AuthorizationSession{}, newError(ErrorInvalidRequest, "max_age must not be negative", nil)
+		seconds, err := maxAgeSeconds(req.MaxAge)
+		if err != nil {
+			return AuthorizationSession{}, err
 		}
-		if int64(req.MaxAge/time.Second) > maxSessionMaxAgeSeconds {
-			return AuthorizationSession{}, newError(ErrorInvalidRequest, "max_age must be at most 100 years", nil)
-		}
-		params[maxAgeParameter] = strconv.FormatInt(int64(req.MaxAge/time.Second), 10)
+		params[maxAgeParameter] = strconv.FormatInt(seconds, 10)
 	}
 	claims, err := req.Claims.encode()
 	if err != nil {
@@ -577,4 +575,17 @@ func (c *Client) createSession(ctx context.Context, state string, record session
 		return newError(ErrorInternal, "failed to persist session", err)
 	}
 	return nil
+}
+
+// maxAgeSeconds is the max_age parameter for maxAge, in whole seconds:
+// never negative, and at most the 100 years a session record holds.
+func maxAgeSeconds(maxAge time.Duration) (int64, *Error) {
+	if maxAge < 0 {
+		return 0, newError(ErrorInvalidRequest, "max_age must not be negative", nil)
+	}
+	seconds := int64(maxAge / time.Second)
+	if seconds > maxSessionMaxAgeSeconds {
+		return 0, newError(ErrorInvalidRequest, "max_age must be at most 100 years", nil)
+	}
+	return seconds, nil
 }

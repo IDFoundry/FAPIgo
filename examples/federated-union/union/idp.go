@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"github.com/idfoundry/fapigo/server/interactioncookie"
 	"log"
 	"net/http"
 	"slices"
@@ -46,9 +47,9 @@ type identityProvider struct {
 	forgedBy *federation.TrustMarkIssuer // EastID signing its own mark, for the forge scene
 	w        *World
 
-	// cookieKey signs the sign-in cookie (see interaction_cookie.go):
-	// every instance of this provider would share it.
-	cookieKey []byte
+	// interaction carries the consent page's state in an encrypted
+	// cookie: every instance would share its key.
+	interaction *interactioncookie.Cookie
 }
 
 // pendingLifetime is how long a consent page stays answerable — the
@@ -57,9 +58,8 @@ type identityProvider struct {
 const pendingLifetime = 15 * time.Minute
 
 const (
-	interactionCookie = "fu_interaction"
-	authorizePath     = "/authorize"
-	signInFailed      = "Sign-in failed"
+	authorizePath = "/authorize"
+	signInFailed  = "Sign-in failed"
 )
 
 func (w *World) newIdentityProvider(c country, ta *entity) (*identityProvider, error) {
@@ -153,7 +153,11 @@ func (w *World) newIdentityProvider(c country, ta *entity) (*identityProvider, e
 	if _, err := rand.Read(cookieKey); err != nil {
 		return nil, err
 	}
-	idp := &identityProvider{country: c, fedKey: fedKey, w: w, cookieKey: cookieKey}
+	interaction, err := interactioncookie.New([][]byte{cookieKey}, interactioncookie.Options{Lifetime: pendingLifetime})
+	if err != nil {
+		return nil, err
+	}
+	idp := &identityProvider{country: c, fedKey: fedKey, w: w, interaction: interaction}
 	deps := server.Dependencies{
 		Clients:                memstore.NewClientRepository(nil),
 		Transactions:           memstore.NewTransactionStore(),
@@ -322,15 +326,10 @@ func (p *identityProvider) authorize(w http.ResponseWriter, r *http.Request) {
 	case server.InteractionRequired:
 		// The consent page's state goes with the browser, signed, not
 		// into this process: see interaction_cookie.go.
-		sealed, err := p.sealInteraction(a.Handle, a.Interaction, time.Now())
-		if err != nil {
+		if err := p.interaction.Set(w, a.Handle, a.Interaction, time.Now()); err != nil {
 			p.w.renderError(w, http.StatusInternalServerError, "Sign-in could not start", publicMessage(err, "Something went wrong. Please try again."))
 			return
 		}
-		http.SetCookie(w, &http.Cookie{
-			Name: interactionCookie, Value: sealed, Path: authorizePath, MaxAge: int(pendingLifetime / time.Second),
-			HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode,
-		})
 		p.w.render(w, "consent", consentPage{
 			Page: p.w.page(p.country.idpName, p.country), Provider: p.country.idpName,
 			// The name the service published about itself, from its Trust
@@ -349,17 +348,12 @@ func (p *identityProvider) authorize(w http.ResponseWriter, r *http.Request) {
 // decide completes the interaction with the citizen chosen and the
 // claims they agreed to share.
 func (p *identityProvider) decide(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie(interactionCookie)
+	handle, interaction, err := p.interaction.Read(r, time.Now())
 	if err != nil {
 		p.w.renderError(w, http.StatusBadRequest, "Session expired", "This browser has no sign-in in progress.")
 		return
 	}
-	handle, interaction, err := p.openInteraction(cookie.Value, time.Now())
-	if err != nil {
-		p.w.renderError(w, http.StatusBadRequest, "Session expired", notStartedHere)
-		return
-	}
-	http.SetCookie(w, &http.Cookie{Name: interactionCookie, Path: authorizePath, MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+	p.interaction.Clear(w)
 	if err := r.ParseForm(); err != nil {
 		p.w.renderError(w, http.StatusBadRequest, "Malformed form", formUnreadable)
 		return

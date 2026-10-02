@@ -42,7 +42,9 @@ const interactionHandleSize = 32
 // endpoint, read it back from that cookie (ParseInteractionHandle) when
 // the login or consent form is submitted, and protect that form with
 // the application's usual CSRF defence. Never accept the handle from
-// a form field or query parameter alone.
+// a form field or query parameter alone. Package
+// server/interactioncookie does this, carrying the InteractionRequest
+// in the same encrypted cookie.
 type InteractionHandle struct {
 	value string
 }

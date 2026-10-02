@@ -27,14 +27,21 @@ func FuzzParse(f *testing.F) {
 			checkName(t, c.Scheme)
 			for name, value := range c.Params {
 				checkName(t, name)
-				for i := 0; i < len(value); i++ {
-					if ch := value[i]; ch != '\t' && (ch < 0x20 || ch > 0x7E) {
-						t.Fatalf("param %q value %q contains byte %#x", name, value, ch)
-					}
-				}
+				checkValue(t, name, value)
 			}
 		}
 	})
+}
+
+// checkValue fails t if value, parameter name's, contains a control
+// character other than tab, or a non-ASCII byte.
+func checkValue(t *testing.T, name, value string) {
+	t.Helper()
+	for i := 0; i < len(value); i++ {
+		if ch := value[i]; ch != '\t' && (ch < 0x20 || ch > 0x7E) {
+			t.Fatalf("param %q value %q contains byte %#x", name, value, ch)
+		}
+	}
 }
 
 func checkName(t *testing.T, name string) {

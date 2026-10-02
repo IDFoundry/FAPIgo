@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/idfoundry/fapigo/client"
 	"github.com/idfoundry/fapigo/fapitest"
 	"github.com/idfoundry/fapigo/server"
 )
@@ -32,18 +33,7 @@ func TestAuthorizationCodeFlowGrantedIDTokenClaims(t *testing.T) {
 			if err != nil {
 				t.Fatalf("RunAuthorizationCodeFlow: %v", err)
 			}
-			if !tokens.HasIDToken {
-				t.Fatalf("HasIDToken = false, want true")
-			}
-			if got := string(tokens.IDTokenClaims.Parameters["sub_type"]); got != `"user"` {
-				t.Errorf("ID token sub_type = %s, want %q", got, `"user"`)
-			}
-			var act struct {
-				Sub string `json:"sub"`
-			}
-			if err := json.Unmarshal(tokens.IDTokenClaims.Parameters["act"], &act); err != nil || act.Sub != "delegate-1" {
-				t.Errorf("ID token act = %s (%v), want sub delegate-1", tokens.IDTokenClaims.Parameters["act"], err)
-			}
+			checkGrantedIDTokenClaims(t, tokens)
 
 			authz := verifyAccessToken(t, h, tokens)
 			for name := range claims {
@@ -52,5 +42,23 @@ func TestAuthorizationCodeFlowGrantedIDTokenClaims(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// checkGrantedIDTokenClaims checks that tokens' ID token carries the
+// claims TestAuthorizationCodeFlowGrantedIDTokenClaims grants.
+func checkGrantedIDTokenClaims(t *testing.T, tokens client.TokenSet) {
+	t.Helper()
+	if !tokens.HasIDToken {
+		t.Fatalf("HasIDToken = false, want true")
+	}
+	if got := string(tokens.IDTokenClaims.Parameters["sub_type"]); got != `"user"` {
+		t.Errorf("ID token sub_type = %s, want %q", got, `"user"`)
+	}
+	var act struct {
+		Sub string `json:"sub"`
+	}
+	if err := json.Unmarshal(tokens.IDTokenClaims.Parameters["act"], &act); err != nil || act.Sub != "delegate-1" {
+		t.Errorf("ID token act = %s (%v), want sub delegate-1", tokens.IDTokenClaims.Parameters["act"], err)
 	}
 }

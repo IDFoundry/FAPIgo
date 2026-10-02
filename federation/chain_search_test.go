@@ -55,7 +55,18 @@ func newFederationGraph(t *testing.T, names ...string) *federationGraph {
 // name not in the graph points at an address nothing answers.
 func (g *federationGraph) link(hints map[string][]string) {
 	g.t.Helper()
-	subordinates := map[string]map[string]string{} // superior name -> subject id -> token
+	subordinates := g.subordinateStatements(hints)
+	for name, e := range g.entities {
+		g.serve(name, e, g.hintIDs(hints[name]), subordinates[name])
+	}
+}
+
+// subordinateStatements signs a Subordinate Statement from each superior
+// in hints (that's in the graph) about each of its subordinates, keyed
+// by superior name, then subject id.
+func (g *federationGraph) subordinateStatements(hints map[string][]string) map[string]map[string]string {
+	g.t.Helper()
+	subordinates := map[string]map[string]string{}
 	for sub, sups := range hints {
 		for _, sup := range sups {
 			superior, ok := g.entities[sup]
@@ -76,36 +87,46 @@ func (g *federationGraph) link(hints map[string][]string) {
 			subordinates[sup][g.entities[sub].id] = token
 		}
 	}
-	for name, e := range g.entities {
-		var hintIDs []string
-		for _, h := range hints[name] {
-			if sup, ok := g.entities[h]; ok {
-				hintIDs = append(hintIDs, sup.id)
-			} else {
-				hintIDs = append(hintIDs, "https://127.0.0.1:1/"+h) // unreachable
-			}
+	return subordinates
+}
+
+// hintIDs is names' Entity Identifiers, with an unreachable address for
+// a name not in the graph.
+func (g *federationGraph) hintIDs(names []string) []string {
+	var ids []string
+	for _, h := range names {
+		if sup, ok := g.entities[h]; ok {
+			ids = append(ids, sup.id)
+		} else {
+			ids = append(ids, "https://127.0.0.1:1/"+h) // unreachable
 		}
-		config, err := intfed.Create(intfed.CreateParams{
-			Signer: e.key, Algorithm: fapi.ES256, KeyID: name,
-			Issuer: e.id, Subject: e.id, Now: g.now, Lifetime: time.Hour, JWKS: e.jwks,
-			AuthorityHints: hintIDs,
-			Metadata:       federationEntityMetadata(g.t, e.id+"/fetch"),
-		})
-		if err != nil {
-			g.t.Fatalf("intfed.Create: %v", err)
-		}
-		mux := http.NewServeMux()
-		serveConfig := serveStatement(config)
-		entity := e
-		mux.HandleFunc("/.well-known/openid-federation", func(w http.ResponseWriter, r *http.Request) {
-			entity.mu.Lock()
-			entity.configFetches++
-			entity.mu.Unlock()
-			serveConfig(w, r)
-		})
-		mux.HandleFunc("/fetch", serveFetch(subordinates[name]))
-		e.server.Config.Handler = mux
 	}
+	return ids
+}
+
+// serve serves e's Entity Configuration, naming hintIDs as its authority
+// hints, and a fetch endpoint for its subordinates' statements.
+func (g *federationGraph) serve(name string, e *graphEntity, hintIDs []string, subordinates map[string]string) {
+	g.t.Helper()
+	config, err := intfed.Create(intfed.CreateParams{
+		Signer: e.key, Algorithm: fapi.ES256, KeyID: name,
+		Issuer: e.id, Subject: e.id, Now: g.now, Lifetime: time.Hour, JWKS: e.jwks,
+		AuthorityHints: hintIDs,
+		Metadata:       federationEntityMetadata(g.t, e.id+"/fetch"),
+	})
+	if err != nil {
+		g.t.Fatalf("intfed.Create: %v", err)
+	}
+	mux := http.NewServeMux()
+	serveConfig := serveStatement(config)
+	mux.HandleFunc("/.well-known/openid-federation", func(w http.ResponseWriter, r *http.Request) {
+		e.mu.Lock()
+		e.configFetches++
+		e.mu.Unlock()
+		serveConfig(w, r)
+	})
+	mux.HandleFunc("/fetch", serveFetch(subordinates))
+	e.server.Config.Handler = mux
 }
 
 func (g *federationGraph) resolver(maxPathLength, maxAuthorityHints int, anchors ...string) *federation.Resolver {

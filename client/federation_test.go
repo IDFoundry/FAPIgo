@@ -371,21 +371,7 @@ func TestDiscoverViaFederationClientRegistrationTypes(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			entityID, resolver := selfAnchoredOpenIDProvider(t, func(entityID string) map[string]json.RawMessage {
-				openIDProvider := map[string]json.RawMessage{
-					"issuer":                                mustMarshal(t, entityID),
-					"token_endpoint":                        mustMarshal(t, entityID+"/token"),
-					"jwks_uri":                              mustMarshal(t, entityID+"/jwks"),
-					"id_token_signing_alg_values_supported": mustMarshal(t, []string{"ES256"}),
-				}
-				if tc.types != nil {
-					openIDProvider["client_registration_types_supported"] = mustMarshal(t, tc.types)
-				}
-				if tc.variant != nil {
-					openIDProvider["Client_Registration_Types_Supported"] = mustMarshal(t, tc.variant)
-				}
-				return map[string]json.RawMessage{"openid_provider": mustMarshal(t, openIDProvider)}
-			})
+			entityID, resolver := selfAnchoredOpenIDProvider(t, registrationTypesMetadata(t, tc.types, tc.variant))
 			_, err := client.DiscoverViaFederation(context.Background(), resolver, entityID)
 			if tc.wantErr && err == nil {
 				t.Fatalf("DiscoverViaFederation(%s) = nil error, want error", name)
@@ -394,6 +380,27 @@ func TestDiscoverViaFederationClientRegistrationTypes(t *testing.T) {
 				t.Fatalf("DiscoverViaFederation(%s): %v", name, err)
 			}
 		})
+	}
+}
+
+// registrationTypesMetadata is an openid_provider's metadata listing
+// types as client_registration_types_supported and variant under a
+// case-variant of that member name, each only when non-nil.
+func registrationTypesMetadata(t *testing.T, types, variant any) func(entityID string) map[string]json.RawMessage {
+	return func(entityID string) map[string]json.RawMessage {
+		openIDProvider := map[string]json.RawMessage{
+			"issuer":                                mustMarshal(t, entityID),
+			"token_endpoint":                        mustMarshal(t, entityID+"/token"),
+			"jwks_uri":                              mustMarshal(t, entityID+"/jwks"),
+			"id_token_signing_alg_values_supported": mustMarshal(t, []string{"ES256"}),
+		}
+		if types != nil {
+			openIDProvider["client_registration_types_supported"] = mustMarshal(t, types)
+		}
+		if variant != nil {
+			openIDProvider["Client_Registration_Types_Supported"] = mustMarshal(t, variant)
+		}
+		return map[string]json.RawMessage{"openid_provider": mustMarshal(t, openIDProvider)}
 	}
 }
 

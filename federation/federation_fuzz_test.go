@@ -57,25 +57,13 @@ func FuzzRegisteredClientConfigFromMetadata(f *testing.F) {
 		if _, ok := members["jwks_uri"]; ok {
 			return
 		}
-		cfg := AutomaticRegistrationConfig{AllowedScopes: []string{"openid"}}
-		cfg.AllowsCIBA = flags&1 != 0
-		cfg.AllowsClientCredentialsGrant = flags&2 != 0
-		if flags&4 != 0 {
-			cfg.ClientAssertionAlgorithms = []fapi.SignatureAlgorithm{fapi.ES256, fapi.PS256}
-		}
-		if flags&8 != 0 {
-			cfg.AllowedClientAuthMethods = []storage.ClientAuthMethod{storage.ClientAuthMethodPrivateKeyJWT}
-		}
+		cfg := fuzzAutomaticRegistrationConfig(flags)
 		repo := &AutomaticClientRepository{cfg: cfg}
 
 		got, jwks, err := repo.registeredClientConfigFromMetadata(context.Background(), id, json.RawMessage(raw))
 
-		for member := range members {
-			for _, name := range names {
-				if member != name && strings.EqualFold(member, name) && err == nil {
-					t.Fatalf("member %q, a case variant of %q, was accepted", member, name)
-				}
-			}
+		if err == nil {
+			checkNoCaseVariantMember(t, members, names)
 		}
 		if err != nil {
 			return
@@ -83,21 +71,59 @@ func FuzzRegisteredClientConfigFromMetadata(f *testing.F) {
 		if got.ID != id || !got.AutomaticFederationRegistration || len(got.RedirectURIs) == 0 || len(jwks) == 0 {
 			t.Fatalf("accepted config %+v (jwks %d bytes) lacks its id, redirect URIs, jwks or federation marker", got, len(jwks))
 		}
-		if !slices.Equal(got.AllowedScopes, cfg.AllowedScopes) || got.AllowsClientCredentialsGrant != cfg.AllowsClientCredentialsGrant {
-			t.Fatalf("scopes %v / client_credentials %v came from somewhere other than the operator's config", got.AllowedScopes, got.AllowsClientCredentialsGrant)
-		}
-		if !cfg.AllowsCIBA && (got.BackchannelTokenDeliveryMode != 0 || got.BackchannelAuthenticationRequestAlgorithm != 0) {
-			t.Fatalf("CIBA configured (%v) although the operator doesn't allow it", got.BackchannelTokenDeliveryMode)
-		}
-		if len(cfg.AllowedClientAuthMethods) > 0 {
-			for _, m := range append(slices.Clone(got.ClientAuthMethods), got.ClientAuthMethod) {
-				if m != 0 && !slices.Contains(cfg.AllowedClientAuthMethods, m) {
-					t.Fatalf("registered method %v outside AllowedClientAuthMethods", m)
-				}
-			}
-		}
+		checkOperatorGrants(t, cfg, got)
 		_, _ = storage.NewRegisteredClient(got) // may refuse; must not panic
 	})
+}
+
+// fuzzAutomaticRegistrationConfig is the operator configuration flags'
+// bits select: CIBA, client_credentials, client assertion algorithms,
+// and a private_key_jwt-only method allowlist.
+func fuzzAutomaticRegistrationConfig(flags uint8) AutomaticRegistrationConfig {
+	cfg := AutomaticRegistrationConfig{AllowedScopes: []string{"openid"}}
+	cfg.AllowsCIBA = flags&1 != 0
+	cfg.AllowsClientCredentialsGrant = flags&2 != 0
+	if flags&4 != 0 {
+		cfg.ClientAssertionAlgorithms = []fapi.SignatureAlgorithm{fapi.ES256, fapi.PS256}
+	}
+	if flags&8 != 0 {
+		cfg.AllowedClientAuthMethods = []storage.ClientAuthMethod{storage.ClientAuthMethodPrivateKeyJWT}
+	}
+	return cfg
+}
+
+// checkNoCaseVariantMember fails t if accepted metadata had a member
+// naming one of names only in a different case.
+func checkNoCaseVariantMember(t *testing.T, members map[string]json.RawMessage, names []string) {
+	t.Helper()
+	for member := range members {
+		for _, name := range names {
+			if member != name && strings.EqualFold(member, name) {
+				t.Fatalf("member %q, a case variant of %q, was accepted", member, name)
+			}
+		}
+	}
+}
+
+// checkOperatorGrants fails t if what the operator grants in cfg — scopes,
+// client_credentials, CIBA, the allowed methods — came from anywhere but
+// cfg in got.
+func checkOperatorGrants(t *testing.T, cfg AutomaticRegistrationConfig, got storage.RegisteredClientConfig) {
+	t.Helper()
+	if !slices.Equal(got.AllowedScopes, cfg.AllowedScopes) || got.AllowsClientCredentialsGrant != cfg.AllowsClientCredentialsGrant {
+		t.Fatalf("scopes %v / client_credentials %v came from somewhere other than the operator's config", got.AllowedScopes, got.AllowsClientCredentialsGrant)
+	}
+	if !cfg.AllowsCIBA && (got.BackchannelTokenDeliveryMode != 0 || got.BackchannelAuthenticationRequestAlgorithm != 0) {
+		t.Fatalf("CIBA configured (%v) although the operator doesn't allow it", got.BackchannelTokenDeliveryMode)
+	}
+	if len(cfg.AllowedClientAuthMethods) == 0 {
+		return
+	}
+	for _, m := range append(slices.Clone(got.ClientAuthMethods), got.ClientAuthMethod) {
+		if m != 0 && !slices.Contains(cfg.AllowedClientAuthMethods, m) {
+			t.Fatalf("registered method %v outside AllowedClientAuthMethods", m)
+		}
+	}
 }
 
 // FuzzDomainNameConstraintMatches checks naming-constraint matching
@@ -117,12 +143,7 @@ func FuzzDomainNameConstraintMatches(f *testing.F) {
 		got := domainNameConstraintMatches(constraint, host)
 
 		if isASCII(constraint) && isASCII(host) {
-			c, h := strings.ToLower(constraint), strings.ToLower(host)
-			want := c == h
-			if strings.HasPrefix(c, ".") {
-				want = len(h) > len(c) && strings.HasSuffix(h, c)
-			}
-			if got != want {
+			if want := referenceDomainMatch(constraint, host); got != want {
 				t.Fatalf("domainNameConstraintMatches(%q, %q) = %v, want %v", constraint, host, got, want)
 			}
 		}
@@ -130,19 +151,40 @@ func FuzzDomainNameConstraintMatches(f *testing.F) {
 			t.Fatalf("subtree constraint %q matches its bare domain", constraint)
 		}
 
-		entityID := "https://" + host
-		if ValidEntityID(entityID) != nil {
-			return
-		}
-		nc := NamingConstraints{Permitted: []string{constraint}, Excluded: []string{constraint}}
-		if err := checkNamingConstraint(nc, entityID); got && err == nil {
-			t.Fatalf("entity %q both permitted and excluded by %q was accepted", entityID, constraint)
-		}
-		permitted := checkNamingConstraint(NamingConstraints{Permitted: []string{constraint}}, entityID) == nil
-		if u, _ := url.Parse(entityID); permitted != domainNameConstraintMatches(constraint, u.Hostname()) {
-			t.Fatalf("checkNamingConstraint(permitted %q, %q) = %v, disagreeing with the host match", constraint, entityID, permitted)
-		}
+		checkNamingConstraintAgrees(t, constraint, host, got)
 	})
+}
+
+// checkNamingConstraintAgrees fails t unless checkNamingConstraint, for
+// the Entity Identifier with host, agrees with got, the host match: an
+// entity both permitted and excluded is refused, and permission alone
+// follows the match. A host that makes no valid Entity Identifier is
+// skipped.
+func checkNamingConstraintAgrees(t *testing.T, constraint, host string, got bool) {
+	t.Helper()
+	entityID := "https://" + host
+	if ValidEntityID(entityID) != nil {
+		return
+	}
+	nc := NamingConstraints{Permitted: []string{constraint}, Excluded: []string{constraint}}
+	if err := checkNamingConstraint(nc, entityID); got && err == nil {
+		t.Fatalf("entity %q both permitted and excluded by %q was accepted", entityID, constraint)
+	}
+	permitted := checkNamingConstraint(NamingConstraints{Permitted: []string{constraint}}, entityID) == nil
+	if u, _ := url.Parse(entityID); permitted != domainNameConstraintMatches(constraint, u.Hostname()) {
+		t.Fatalf("checkNamingConstraint(permitted %q, %q) = %v, disagreeing with the host match", constraint, entityID, permitted)
+	}
+}
+
+// referenceDomainMatch is domainNameConstraintMatches' plain reference
+// for ASCII names: a "." constraint matches strict subdomains, any other
+// the name itself, case-insensitively.
+func referenceDomainMatch(constraint, host string) bool {
+	c, h := strings.ToLower(constraint), strings.ToLower(host)
+	if strings.HasPrefix(c, ".") {
+		return len(h) > len(c) && strings.HasSuffix(h, c)
+	}
+	return c == h
 }
 
 func isASCII(s string) bool {
@@ -185,42 +227,59 @@ func FuzzApplySuperiorMetadata(f *testing.F) {
 		if err != nil {
 			return
 		}
-		if len(out) != len(subject) {
-			t.Fatalf("result has %d entity types, subject %d", len(out), len(subject))
-		}
-		for entityType, raw := range subject {
-			result, ok := out[entityType]
-			if !ok {
-				t.Fatalf("entity type %q dropped", entityType)
-			}
-			override, overridden := superior[entityType]
-			if !overridden || len(superior) == 0 {
-				if string(result) != string(raw) {
-					t.Fatalf("%s changed without a superior value", entityType)
-				}
-				continue
-			}
-			var params, overrides, merged map[string]json.RawMessage
-			_ = json.Unmarshal(raw, &params)
-			_ = json.Unmarshal(override, &overrides)
-			if err := json.Unmarshal(result, &merged); err != nil {
-				t.Fatalf("%s result is not a JSON object: %v", entityType, err)
-			}
-			for name, value := range overrides {
-				if !jsonValuesEqual(t, merged[name], value) {
-					t.Fatalf("%s.%s = %s, want the superior's %s", entityType, name, merged[name], value)
-				}
-			}
-			for name, value := range params {
-				if _, set := overrides[name]; !set && !jsonValuesEqual(t, merged[name], value) {
-					t.Fatalf("%s.%s = %s, want the subject's %s", entityType, name, merged[name], value)
-				}
-			}
-			if len(merged) != len(params)+countNew(overrides, params) {
-				t.Fatalf("%s has %d parameters, want the subject's and the superior's", entityType, len(merged))
-			}
-		}
+		checkAppliedMetadata(t, subject, superior, out)
 	})
+}
+
+// checkAppliedMetadata fails t unless out, the superior's metadata
+// applied to subject's, has exactly subject's Entity Types, each
+// unchanged unless the superior sets it, and then merged.
+func checkAppliedMetadata(t *testing.T, subject, superior, out map[string]json.RawMessage) {
+	t.Helper()
+	if len(out) != len(subject) {
+		t.Fatalf("result has %d entity types, subject %d", len(out), len(subject))
+	}
+	for entityType, raw := range subject {
+		result, ok := out[entityType]
+		if !ok {
+			t.Fatalf("entity type %q dropped", entityType)
+		}
+		override, overridden := superior[entityType]
+		if !overridden || len(superior) == 0 {
+			if string(result) != string(raw) {
+				t.Fatalf("%s changed without a superior value", entityType)
+			}
+			continue
+		}
+		checkMergedEntityType(t, entityType, raw, override, result)
+	}
+}
+
+// checkMergedEntityType fails t unless result, entityType's metadata once
+// the superior's override is applied to the subject's raw, carries each
+// parameter the superior sets with the superior's value, every other
+// parameter with the subject's, and nothing else.
+func checkMergedEntityType(t *testing.T, entityType string, raw, override, result json.RawMessage) {
+	t.Helper()
+	var params, overrides, merged map[string]json.RawMessage
+	_ = json.Unmarshal(raw, &params)
+	_ = json.Unmarshal(override, &overrides)
+	if err := json.Unmarshal(result, &merged); err != nil {
+		t.Fatalf("%s result is not a JSON object: %v", entityType, err)
+	}
+	for name, value := range overrides {
+		if !jsonValuesEqual(t, merged[name], value) {
+			t.Fatalf("%s.%s = %s, want the superior's %s", entityType, name, merged[name], value)
+		}
+	}
+	for name, value := range params {
+		if _, set := overrides[name]; !set && !jsonValuesEqual(t, merged[name], value) {
+			t.Fatalf("%s.%s = %s, want the subject's %s", entityType, name, merged[name], value)
+		}
+	}
+	if len(merged) != len(params)+countNew(overrides, params) {
+		t.Fatalf("%s has %d parameters, want the subject's and the superior's", entityType, len(merged))
+	}
 }
 
 func countNew(overrides, params map[string]json.RawMessage) int {

@@ -5,7 +5,7 @@
 
 ### ⚠ BREAKING CHANGES
 
-* a client that sends authorization_details must now be registered with every type it requests in storage.RegisteredClientConfig.AuthorizationDetailsTypes, or the request is refused with invalid_authorization_details. An empty list allows no type. See UPGRADING.md for v0.43.0.
+* a client that sends authorization_details must now be registered with every type it requests in storage.RegisteredClientConfig.AuthorizationDetailsTypes (or, for clients registered automatically through OpenID Federation, server.Config.AutomaticRegistration.AuthorizationDetailsTypes), or the request is refused with invalid_authorization_details. An empty list allows no type. See UPGRADING.md for v0.43.0.
 * **client:** custom storage.SessionStore implementations must persist NewSession.Record and return it as ConsumedSession.Record, in place of the Nonce, PKCEVerifier, ExpectedIssuer, ExpectedRedirectURI and ExpectedResponseMode fields, which are removed. A client requesting max_age now refuses an ID token without auth_time, or one older than max_age allows. See UPGRADING.md for v0.43.0.
 
 ### Features
@@ -28,7 +28,6 @@
 * **client:** refuse a max_age over 100 years when the flow begins ([687e4b4](https://github.com/IDFoundry/FAPIgo/commit/687e4b4db7a4d99e32f9ede9345c9267122da81e))
 * **extension:** refuse RAR members that differ only in case ([252d5eb](https://github.com/IDFoundry/FAPIgo/commit/252d5ebf6ce4f59f322e14161c0fe1db09bd93cb))
 * **extension:** refuse RAR members that differ only in case at any depth ([99cad87](https://github.com/IDFoundry/FAPIgo/commit/99cad8720ea3fc47e44322126e4b13949bef62a6))
-* refuse a sealed cookie with under a second left ([88f67c7](https://github.com/IDFoundry/FAPIgo/commit/88f67c7e3405d177deb953ec7eb21f4890151c76))
 * **resource:** refuse a request with more than one Authorization header ([17dc93b](https://github.com/IDFoundry/FAPIgo/commit/17dc93bf01528cde7d1921a35d995337585c6ce1))
 * **server:** answer an unreadable form body as invalid_request ([ee2f80a](https://github.com/IDFoundry/FAPIgo/commit/ee2f80a0a5f3749bb0fbf9732a0856f5c2bd7a6a))
 

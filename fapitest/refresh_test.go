@@ -41,18 +41,7 @@ func TestRefreshTokens(t *testing.T) {
 			if err != nil {
 				t.Fatalf("RefreshTokens: %v", err)
 			}
-			if refreshed.AccessToken.Reveal() == "" || refreshed.AccessToken.Reveal() == first.AccessToken.Reveal() {
-				t.Error("RefreshTokens didn't return a new access token")
-			}
-			if !refreshed.HasRefreshToken || refreshed.RefreshToken.Reveal() != first.RefreshToken.Reveal() {
-				t.Error("RefreshTokens didn't return the same refresh token")
-			}
-			if !refreshed.HasIDToken || refreshed.Subject != first.Subject {
-				t.Errorf("refreshed ID token: HasIDToken %v, subject %q; want an ID token for %q", refreshed.HasIDToken, refreshed.Subject, first.Subject)
-			}
-			if !refreshed.IDTokenClaims.AuthTime.Equal(first.IDTokenClaims.AuthTime) {
-				t.Errorf("refreshed auth_time %v, want the original authentication's %v", refreshed.IDTokenClaims.AuthTime, first.IDTokenClaims.AuthTime)
-			}
+			checkRefreshedTokens(t, first, refreshed)
 			verifyBoundAccessToken(t, h, refreshed)
 
 			// And again, from the refreshed set: the refresh token keeps
@@ -61,6 +50,25 @@ func TestRefreshTokens(t *testing.T) {
 				t.Fatalf("second RefreshTokens: %v", err)
 			}
 		})
+	}
+}
+
+// checkRefreshedTokens checks refreshed, the result of refreshing
+// first: a new access token, the same refresh token, and an ID token for
+// the same subject and original authentication.
+func checkRefreshedTokens(t *testing.T, first, refreshed client.TokenSet) {
+	t.Helper()
+	if refreshed.AccessToken.Reveal() == "" || refreshed.AccessToken.Reveal() == first.AccessToken.Reveal() {
+		t.Error("RefreshTokens didn't return a new access token")
+	}
+	if !refreshed.HasRefreshToken || refreshed.RefreshToken.Reveal() != first.RefreshToken.Reveal() {
+		t.Error("RefreshTokens didn't return the same refresh token")
+	}
+	if !refreshed.HasIDToken || refreshed.Subject != first.Subject {
+		t.Errorf("refreshed ID token: HasIDToken %v, subject %q; want an ID token for %q", refreshed.HasIDToken, refreshed.Subject, first.Subject)
+	}
+	if !refreshed.IDTokenClaims.AuthTime.Equal(first.IDTokenClaims.AuthTime) {
+		t.Errorf("refreshed auth_time %v, want the original authentication's %v", refreshed.IDTokenClaims.AuthTime, first.IDTokenClaims.AuthTime)
 	}
 }
 

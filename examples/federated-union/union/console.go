@@ -95,7 +95,7 @@ func (c *console) home(w http.ResponseWriter, _ *http.Request) {
 // scene turns one scene on or off.
 func (c *console) scene(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, formUnreadable, http.StatusBadRequest)
 		return
 	}
 	back := "/"

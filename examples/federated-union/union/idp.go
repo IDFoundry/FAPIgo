@@ -264,7 +264,7 @@ func (p *identityProvider) ResolveIdentityClaims(_ context.Context, subject stri
 func (p *identityProvider) jwks(w http.ResponseWriter, r *http.Request) {
 	set, err := p.srv.PublicJWKS(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		internalError(w, err)
 		return
 	}
 	set.WriteJSON(w)
@@ -273,7 +273,7 @@ func (p *identityProvider) jwks(w http.ResponseWriter, r *http.Request) {
 func (p *identityProvider) par(w http.ResponseWriter, r *http.Request) {
 	req, err := server.PushAuthorizationRequestFromHTTP(r)
 	if err != nil {
-		server.NewError(server.ErrorInvalidRequest, http.StatusBadRequest, err.Error()).WriteJSON(w)
+		badRequest(w, err)
 		return
 	}
 	result, err := p.srv.PushAuthorizationRequest(r.Context(), req)
@@ -287,7 +287,7 @@ func (p *identityProvider) par(w http.ResponseWriter, r *http.Request) {
 func (p *identityProvider) token(w http.ResponseWriter, r *http.Request) {
 	req, err := server.TokenEndpointRequestFromHTTP(r)
 	if err != nil {
-		server.NewError(server.ErrorInvalidRequest, http.StatusBadRequest, err.Error()).WriteJSON(w)
+		badRequest(w, err)
 		return
 	}
 	if req.GrantType() != "authorization_code" {
@@ -311,7 +311,7 @@ func (p *identityProvider) authorize(w http.ResponseWriter, r *http.Request) {
 		RequestURI: q.Get("request_uri"), ClientID: fapi.ClientID(q.Get("client_id")),
 	})
 	if err != nil {
-		p.w.renderError(w, http.StatusInternalServerError, "Sign-in could not start", err.Error())
+		p.w.renderError(w, http.StatusInternalServerError, "Sign-in could not start", publicMessage(err, "Something went wrong. Please try again."))
 		return
 	}
 	switch a := action.(type) {
@@ -320,7 +320,7 @@ func (p *identityProvider) authorize(w http.ResponseWriter, r *http.Request) {
 		// into this process: see interaction_cookie.go.
 		sealed, err := p.sealInteraction(a.Handle, a.Interaction, time.Now())
 		if err != nil {
-			p.w.renderError(w, http.StatusInternalServerError, "Sign-in could not start", err.Error())
+			p.w.renderError(w, http.StatusInternalServerError, "Sign-in could not start", publicMessage(err, "Something went wrong. Please try again."))
 			return
 		}
 		http.SetCookie(w, &http.Cookie{
@@ -352,12 +352,12 @@ func (p *identityProvider) decide(w http.ResponseWriter, r *http.Request) {
 	}
 	handle, interaction, err := p.openInteraction(cookie.Value, time.Now())
 	if err != nil {
-		p.w.renderError(w, http.StatusBadRequest, "Session expired", err.Error())
+		p.w.renderError(w, http.StatusBadRequest, "Session expired", notStartedHere)
 		return
 	}
 	http.SetCookie(w, &http.Cookie{Name: interactionCookie, Path: authorizePath, MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 	if err := r.ParseForm(); err != nil {
-		p.w.renderError(w, http.StatusBadRequest, "Malformed form", err.Error())
+		p.w.renderError(w, http.StatusBadRequest, "Malformed form", formUnreadable)
 		return
 	}
 
@@ -372,17 +372,17 @@ func (p *identityProvider) decide(w http.ResponseWriter, r *http.Request) {
 		}
 		subjectID, err := server.NewSubjectID(sub)
 		if err != nil {
-			p.w.renderError(w, http.StatusBadRequest, "No citizen chosen", err.Error())
+			p.w.renderError(w, http.StatusBadRequest, "No citizen chosen", publicMessage(err, "Something went wrong. Please try again."))
 			return
 		}
 		subject, err := server.NewAuthenticatedSubject(subjectID)
 		if err != nil {
-			p.w.renderError(w, http.StatusInternalServerError, signInFailed, err.Error())
+			p.w.renderError(w, http.StatusInternalServerError, signInFailed, publicMessage(err, "Something went wrong. Please try again."))
 			return
 		}
 		authCtx, err := server.NewAuthenticationContext(time.Now(), p.w.loaHighType, []string{"hwk"})
 		if err != nil {
-			p.w.renderError(w, http.StatusInternalServerError, signInFailed, err.Error())
+			p.w.renderError(w, http.StatusInternalServerError, signInFailed, publicMessage(err, "Something went wrong. Please try again."))
 			return
 		}
 		var approved []string
@@ -398,7 +398,7 @@ func (p *identityProvider) decide(w http.ResponseWriter, r *http.Request) {
 
 	outcome, err := p.srv.CompleteAuthorization(r.Context(), server.CompleteAuthorizationRequest{Handle: handle, Result: result})
 	if err != nil {
-		p.w.renderError(w, http.StatusInternalServerError, signInFailed, err.Error())
+		p.w.renderError(w, http.StatusInternalServerError, signInFailed, publicMessage(err, "Something went wrong. Please try again."))
 		return
 	}
 	switch o := outcome.(type) {

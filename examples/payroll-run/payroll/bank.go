@@ -199,7 +199,7 @@ func (b *bank) discovery(w http.ResponseWriter, r *http.Request) {
 func (b *bank) jwks(w http.ResponseWriter, r *http.Request) {
 	set, err := b.srv.PublicJWKS(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		internalError(w, err)
 		return
 	}
 	set.WriteJSON(w)
@@ -208,7 +208,7 @@ func (b *bank) jwks(w http.ResponseWriter, r *http.Request) {
 func (b *bank) par(w http.ResponseWriter, r *http.Request) {
 	req, err := server.PushAuthorizationRequestFromHTTP(r)
 	if err != nil {
-		server.NewError(server.ErrorInvalidRequest, http.StatusBadRequest, err.Error()).WriteJSON(w)
+		badRequest(w, err)
 		return
 	}
 	result, err := b.srv.PushAuthorizationRequest(r.Context(), req)
@@ -225,7 +225,7 @@ func (b *bank) authorize(w http.ResponseWriter, r *http.Request) {
 		RequestURI: q.Get("request_uri"), ClientID: fapi.ClientID(q.Get("client_id")),
 	})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, publicMessage(err, "The authorization request is invalid."), http.StatusBadRequest)
 		return
 	}
 	switch a := action.(type) {
@@ -243,7 +243,7 @@ func (b *bank) authorize(w http.ResponseWriter, r *http.Request) {
 func (b *bank) token(w http.ResponseWriter, r *http.Request) {
 	req, err := server.TokenEndpointRequestFromHTTP(r)
 	if err != nil {
-		server.NewError(server.ErrorInvalidRequest, http.StatusBadRequest, err.Error()).WriteJSON(w)
+		badRequest(w, err)
 		return
 	}
 	if req.GrantType() != "client_credentials" {

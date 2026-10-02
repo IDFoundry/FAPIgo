@@ -84,7 +84,7 @@ func requested(c customer) accountInformation {
 
 func (p *pocketwise) start(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		p.w.renderError(w, pocketwiseHost, http.StatusBadRequest, "Malformed form", err.Error())
+		p.w.renderError(w, pocketwiseHost, http.StatusBadRequest, "Malformed form", formUnreadable)
 		return
 	}
 	hint := r.PostForm.Get("customer")

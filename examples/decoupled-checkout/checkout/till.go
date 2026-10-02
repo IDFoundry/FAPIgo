@@ -89,7 +89,7 @@ func (t *till) home(w http.ResponseWriter, _ *http.Request) {
 // customer by login hint, with the payment as authorization_details.
 func (t *till) pay(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		t.w.renderError(w, tillHost, http.StatusBadRequest, "Malformed form", err.Error())
+		t.w.renderError(w, tillHost, http.StatusBadRequest, "Malformed form", formUnreadable)
 		return
 	}
 	o := &order{ID: randomCode(8), Scenario: r.PostForm.Get("scenario"), Amount: "42.50", Status: "waiting"}
@@ -191,7 +191,7 @@ func (o *order) paymentOrder(amt string) paymentOrder {
 // real tokens.
 func (t *till) attack(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		t.w.renderError(w, tillHost, http.StatusBadRequest, "Malformed form", err.Error())
+		t.w.renderError(w, tillHost, http.StatusBadRequest, "Malformed form", formUnreadable)
 		return
 	}
 	o, ok := t.lookup(r.PostForm.Get("id"))

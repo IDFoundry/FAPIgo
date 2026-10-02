@@ -66,7 +66,7 @@ func (a *api) pay(w http.ResponseWriter, r *http.Request) {
 	// request describes.
 	target, err := url.Parse(a.w.URL(apiHost, paymentsPath))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		internalError(w, err)
 		return
 	}
 	authz, err := a.verifier.Verify(r.Context(), resource.VerifyRequest{

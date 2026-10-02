@@ -154,7 +154,7 @@ func (c customer) account(iban string) (bankAccount, bool) {
 // accounts and actions left ticked.
 func (p *phone) decide(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		p.w.renderError(w, phoneHost, http.StatusBadRequest, "Malformed form", err.Error())
+		p.w.renderError(w, phoneHost, http.StatusBadRequest, "Malformed form", formUnreadable)
 		return
 	}
 	id := r.PostForm.Get("id")
@@ -173,7 +173,7 @@ func (p *phone) decide(w http.ResponseWriter, r *http.Request) {
 	if approve {
 		var err error
 		if granted, err = grantFromForm(interaction, r.PostForm["account"], r.PostForm["action"]); err != nil {
-			p.w.renderError(w, phoneHost, http.StatusBadRequest, "Nothing approved", err.Error())
+			p.w.renderError(w, phoneHost, http.StatusBadRequest, "Nothing approved", publicMessage(err, "Something went wrong. Please try again."))
 			return
 		}
 	}
@@ -182,7 +182,7 @@ func (p *phone) decide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := p.w.bank.decide(r.Context(), req, interaction.Scope, approve, granted); err != nil {
-		p.w.renderError(w, phoneHost, http.StatusInternalServerError, "The bank couldn't record that", err.Error())
+		p.w.renderError(w, phoneHost, http.StatusInternalServerError, "The bank couldn't record that", publicMessage(err, "Something went wrong. Please try again."))
 		return
 	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)

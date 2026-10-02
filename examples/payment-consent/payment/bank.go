@@ -157,7 +157,7 @@ func (b *bank) discovery(w http.ResponseWriter, r *http.Request) {
 func (b *bank) jwks(w http.ResponseWriter, r *http.Request) {
 	set, err := b.srv.PublicJWKS(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		internalError(w, err)
 		return
 	}
 	set.WriteJSON(w)
@@ -166,7 +166,7 @@ func (b *bank) jwks(w http.ResponseWriter, r *http.Request) {
 func (b *bank) par(w http.ResponseWriter, r *http.Request) {
 	req, err := server.PushAuthorizationRequestFromHTTP(r)
 	if err != nil {
-		server.NewError(server.ErrorInvalidRequest, http.StatusBadRequest, err.Error()).WriteJSON(w)
+		badRequest(w, err)
 		return
 	}
 	result, err := b.srv.PushAuthorizationRequest(r.Context(), req)
@@ -180,7 +180,7 @@ func (b *bank) par(w http.ResponseWriter, r *http.Request) {
 func (b *bank) token(w http.ResponseWriter, r *http.Request) {
 	req, err := server.TokenEndpointRequestFromHTTP(r)
 	if err != nil {
-		server.NewError(server.ErrorInvalidRequest, http.StatusBadRequest, err.Error()).WriteJSON(w)
+		badRequest(w, err)
 		return
 	}
 	if req.GrantType() != "authorization_code" {
@@ -204,14 +204,14 @@ func (b *bank) authorize(w http.ResponseWriter, r *http.Request) {
 		RequestURI: q.Get("request_uri"), ClientID: fapi.ClientID(q.Get("client_id")),
 	})
 	if err != nil {
-		b.w.renderError(w, bankHost, http.StatusInternalServerError, "Sign-in could not start", err.Error())
+		b.w.renderError(w, bankHost, http.StatusInternalServerError, "Sign-in could not start", publicMessage(err, "Something went wrong. Please try again."))
 		return
 	}
 	switch a := action.(type) {
 	case server.InteractionRequired:
 		sealed, err := b.seal(a.Handle, a.Interaction, time.Now())
 		if err != nil {
-			b.w.renderError(w, bankHost, http.StatusInternalServerError, "Sign-in could not start", err.Error())
+			b.w.renderError(w, bankHost, http.StatusInternalServerError, "Sign-in could not start", publicMessage(err, "Something went wrong. Please try again."))
 			return
 		}
 		http.SetCookie(w, &http.Cookie{
@@ -259,11 +259,11 @@ func (b *bank) decide(w http.ResponseWriter, r *http.Request) {
 	}
 	handle, in, err := b.open(cookie.Value, time.Now())
 	if err != nil {
-		b.w.renderError(w, bankHost, http.StatusBadRequest, "Session expired", err.Error())
+		b.w.renderError(w, bankHost, http.StatusBadRequest, "Session expired", notStartedHere)
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		b.w.renderError(w, bankHost, http.StatusBadRequest, "Malformed form", err.Error())
+		b.w.renderError(w, bankHost, http.StatusBadRequest, "Malformed form", formUnreadable)
 		return
 	}
 	result := server.Deny("the customer declined")
@@ -277,24 +277,24 @@ func (b *bank) decide(w http.ResponseWriter, r *http.Request) {
 		for _, pay := range paymentsOf(in.AuthorizationDetails) {
 			raw, err := extension.RARSet(paymentInitiationType, pay)
 			if err != nil {
-				b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, err.Error())
+				b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, publicMessage(err, "Something went wrong. Please try again."))
 				return
 			}
 			granted = append(granted, raw)
 		}
 		subjectID, err := server.NewSubjectID(c.username)
 		if err != nil {
-			b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, err.Error())
+			b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, publicMessage(err, "Something went wrong. Please try again."))
 			return
 		}
 		subject, err := server.NewAuthenticatedSubject(subjectID)
 		if err != nil {
-			b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, err.Error())
+			b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, publicMessage(err, "Something went wrong. Please try again."))
 			return
 		}
 		auth, err := server.NewAuthenticationContext(time.Now(), "urn:alder-bank:acr:pin", []string{"pin"})
 		if err != nil {
-			b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, err.Error())
+			b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, publicMessage(err, "Something went wrong. Please try again."))
 			return
 		}
 		result = server.Authorize(subject, auth, server.GrantedAuthorization{Scope: in.Scope, AuthorizationDetails: granted})
@@ -302,7 +302,7 @@ func (b *bank) decide(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{Name: interactionCookie, Path: authorizePath, MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 	outcome, err := b.srv.CompleteAuthorization(r.Context(), server.CompleteAuthorizationRequest{Handle: handle, Result: result})
 	if err != nil {
-		b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, err.Error())
+		b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, publicMessage(err, "Something went wrong. Please try again."))
 		return
 	}
 	switch o := outcome.(type) {

@@ -521,6 +521,13 @@ type AutomaticRegistrationConfig struct {
 	// metadata. Required when TrustAnchors is set.
 	AllowedScopes []string
 
+	// AuthorizationDetailsTypes are the Rich Authorization Request types
+	// every automatically-registered client may request — see
+	// federation.AutomaticRegistrationConfig.AuthorizationDetailsTypes.
+	// Empty means none. Each must be registered in Config.RAR: New
+	// refuses one that isn't.
+	AuthorizationDetailsTypes []string
+
 	// MaxPathLength/MaxAuthorityHints/MaxStatementLifetime/MaxClockSkew
 	// bound Trust Chain resolution itself — see federation.Limits, which these configure
 	// directly. All required when TrustAnchors is set.

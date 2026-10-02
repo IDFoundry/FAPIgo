@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"slices"
 	"testing"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -653,6 +654,17 @@ func TestNewRegisteredClientAuthorizationDetailsTypes(t *testing.T) {
 	}
 	if !some.AllowsAuthorizationDetailsType("payment") || some.AllowsAuthorizationDetailsType("account_information") {
 		t.Error("AllowsAuthorizationDetailsType doesn't follow the registered list")
+	}
+	base.AuthorizationDetailsTypes = []string{"payment", "account_information"}
+	two, err := NewRegisteredClient(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := two.AuthorizationDetailsTypes(); !slices.Equal(got, []string{"account_information", "payment"}) {
+		t.Errorf("AuthorizationDetailsTypes() = %v, want both, sorted", got)
+	}
+	if got := none.AuthorizationDetailsTypes(); len(got) != 0 {
+		t.Errorf("AuthorizationDetailsTypes() = %v for a client registered for none", got)
 	}
 	base.AuthorizationDetailsTypes = []string{"payment", ""}
 	if _, err := NewRegisteredClient(base); err == nil {

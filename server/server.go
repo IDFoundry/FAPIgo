@@ -39,6 +39,9 @@ func New(cfg Config, deps Dependencies) (*Server, error) {
 	if err := checkExtensionClaimNames(cfg.Extensions); err != nil {
 		return nil, err
 	}
+	if unknown := unknownRARTypes(cfg.RAR, cfg.AutomaticRegistration.AuthorizationDetailsTypes); len(unknown) > 0 {
+		return nil, fmt.Errorf("server: config: automatic_registration: authorization_details_types %q aren't registered in Config.RAR", unknown)
+	}
 	if len(cfg.AutomaticRegistration.TrustAnchors) > 0 {
 		// Wraps deps.Clients/ClientKeys transparently — every other
 		// internal (PAR, the token endpoint, CIBA) keeps calling those
@@ -61,6 +64,7 @@ func New(cfg Config, deps Dependencies) (*Server, error) {
 		}
 		automaticClients, err := federation.NewAutomaticClientRepository(deps.Clients, resolver, deps.FederationHTTP, federation.AutomaticRegistrationConfig{
 			AllowedScopes:                cfg.AutomaticRegistration.AllowedScopes,
+			AuthorizationDetailsTypes:    cfg.AutomaticRegistration.AuthorizationDetailsTypes,
 			MaxCacheAge:                  cfg.AutomaticRegistration.MaxCacheAge,
 			AllowsClientCredentialsGrant: cfg.AutomaticRegistration.AllowsClientCredentialsGrant,
 			AllowsCIBA:                   cfg.AutomaticRegistration.AllowsCIBA,

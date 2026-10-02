@@ -165,6 +165,13 @@ func (w *World) newBank(certs certificates) (*bank, error) {
 	if b.srv, err = server.New(b.cfg, b.deps); err != nil {
 		return nil, err
 	}
+	// A registration naming a detail type the bank doesn't register (a
+	// typo, say) fails here, not at the first request for it.
+	for _, c := range clients {
+		if err := b.srv.CheckClientRegistration(c); err != nil {
+			return nil, err
+		}
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /.well-known/openid-configuration", b.discovery)

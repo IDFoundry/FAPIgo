@@ -930,6 +930,18 @@ func (c RegisteredClient) AllowsAuthorizationDetailsType(typ string) bool {
 	return ok
 }
 
+// AuthorizationDetailsTypes returns the Rich Authorization Request types
+// this client is registered for, sorted — see
+// RegisteredClientConfig.AuthorizationDetailsTypes.
+func (c RegisteredClient) AuthorizationDetailsTypes() []string {
+	types := make([]string, 0, len(c.authorizationDetailsTypes))
+	for typ := range c.authorizationDetailsTypes {
+		types = append(types, typ)
+	}
+	slices.Sort(types)
+	return types
+}
+
 // stringSet builds the set values lists for client id, refusing an
 // empty entry, which what describes.
 func stringSet(id fapi.ClientID, what string, values []string) (map[string]struct{}, error) {

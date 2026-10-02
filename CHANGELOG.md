@@ -12,7 +12,6 @@
 
 * **client:** bind the session handle to the browser in an encrypted cookie ([6259639](https://github.com/IDFoundry/FAPIgo/commit/625963966ff659bfb699cc8584f0e29861bbe215))
 * **client:** check auth_time against max_age, with an opaque session record ([33d1a03](https://github.com/IDFoundry/FAPIgo/commit/33d1a035b97f6b6ec4e2f34fda4f4f3c1f3caaa5))
-* **client:** seal a TokenSet for storage ([e290410](https://github.com/IDFoundry/FAPIgo/commit/e290410a8a942f78e64b4da2749863ab08b5eb08))
 * **client:** seal token sets with a TokenSetSealer bound to their owner ([6686ba5](https://github.com/IDFoundry/FAPIgo/commit/6686ba50dadf5bfd49edb114b5741ba48cd658d2))
 * **extension:** read the authorization details a token was granted ([fcaf31d](https://github.com/IDFoundry/FAPIgo/commit/fcaf31d7495239c5cf6c9cb940d6c9bbd85cf2c8))
 * register the RAR types each client may request ([e2db87d](https://github.com/IDFoundry/FAPIgo/commit/e2db87da6bb2ee5445a067b054e204baf2e38b97))
@@ -32,7 +31,6 @@
 * refuse a sealed cookie with under a second left ([88f67c7](https://github.com/IDFoundry/FAPIgo/commit/88f67c7e3405d177deb953ec7eb21f4890151c76))
 * **resource:** refuse a request with more than one Authorization header ([17dc93b](https://github.com/IDFoundry/FAPIgo/commit/17dc93bf01528cde7d1921a35d995337585c6ce1))
 * **server:** answer an unreadable form body as invalid_request ([ee2f80a](https://github.com/IDFoundry/FAPIgo/commit/ee2f80a0a5f3749bb0fbf9732a0856f5c2bd7a6a))
-* **server:** tie the consent form to its interaction cookie ([6e64c64](https://github.com/IDFoundry/FAPIgo/commit/6e64c6436be6749b050b6f15c5e7b844ca75d5e1))
 
 ## [0.42.0](https://github.com/IDFoundry/FAPIgo/compare/v0.41.0...v0.42.0) (2026-10-02)
 

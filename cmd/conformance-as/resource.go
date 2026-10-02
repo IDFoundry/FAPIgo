@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/url"
 
@@ -74,12 +73,7 @@ func userinfoHandler(srv *server.Server, verifier *fapires.Verifier, userinfoURL
 		// openid scope gets 403 insufficient_scope.
 		body, err := serverresource.UserInfoClaims(r.Context(), authCtx, identityClaims)
 		if err != nil {
-			var rerr *fapires.Error
-			if errors.As(err, &rerr) {
-				writeResourceError(w, rerr)
-				return
-			}
-			writeResourceErrorRaw(w, http.StatusInternalServerError, "server_error", "failed to resolve identity claims")
+			writeResourceError(w, err)
 			return
 		}
 

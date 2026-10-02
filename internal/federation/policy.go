@@ -34,11 +34,11 @@ var operatorApplicationOrder = []string{opValue, opAdd, opDefault, opOneOf, opSu
 // caller and only reports the failure itself.
 var ErrPolicyError = fmt.Errorf("federation: policy error")
 
-// policyError wraps a description into ErrPolicyError.
 // errEssentialNotBoolean is the error for an "essential" operator whose
 // value isn't a boolean.
 const errEssentialNotBoolean = "essential operator value must be a boolean: %v"
 
+// policyError wraps a description into ErrPolicyError.
 func policyError(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrPolicyError, fmt.Sprintf(format, args...))
 }

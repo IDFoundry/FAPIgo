@@ -74,9 +74,18 @@ func (s *Server) grantRevocationReader() (revocationReader, bool) {
 // a resource server must read the same revocation store the
 // authorization server writes, as it must for access token revocation
 // already. The record lasts as long as anything issued from the grant
-// can: Limits.RefreshTokenLifetime (the longest a refresh token from it
-// can still be valid) plus Limits.AccessTokenLifetime (the longest an
-// access token issued at that point can be).
+// can still be used: the longest of Limits.RefreshTokenLifetime,
+// Limits.AuthorizationCodeLifetime and
+// Limits.BackchannelAuthenticationRequestLifetime (a refresh token,
+// unredeemed code or approved auth_req_id already outstanding), plus
+// Limits.AccessTokenLifetime (an access token issued just before) and
+// Limits.MaxClockSkew (the leeway resource.Verifier allows on its
+// expiry).
+//
+// RevokeGrant doesn't check who is asking: the application must make
+// sure the user revoking a grant is the one it was granted by. A grant
+// ID is revoked for that whole period, so an application must not reuse
+// one for a later grant.
 //
 // It fails when Dependencies.Revocation is NoRevocation or can't be
 // checked, rather than revoking nothing.
@@ -119,7 +128,9 @@ func (s *Server) checkGrantNotRevoked(ctx context.Context, grant grantRecord) *E
 }
 
 // grantRevocationHorizon is how long after now anything issued from a
-// grant can still be valid — RevokeGrant's record lifetime.
+// grant can still be used — RevokeGrant's record lifetime.
 func (s *Server) grantRevocationHorizon() time.Duration {
-	return s.cfg.Limits.RefreshTokenLifetime + s.cfg.Limits.AccessTokenLifetime
+	l := s.cfg.Limits
+	return max(l.RefreshTokenLifetime, l.AuthorizationCodeLifetime, l.BackchannelAuthenticationRequestLifetime) +
+		l.AccessTokenLifetime + l.MaxClockSkew
 }

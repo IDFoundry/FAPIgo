@@ -93,7 +93,9 @@ func TestRequestObjectMaxAgeIsANumber(t *testing.T) {
 }
 
 func TestPushAuthorizationRequestRejectsMalformedMaxAge(t *testing.T) {
-	for _, value := range []string{"-1", "1.5", "five", "", "99999999999999999999"} {
+	// 3162240001 is one second over the 100-year cap; 9223372036, just
+	// under the old limit, once overflowed the skew subtraction.
+	for _, value := range []string{"-1", "1.5", "five", "", "99999999999999999999", "3162240001", "9223372036"} {
 		t.Run(value, func(t *testing.T) {
 			h := newHarness(t, server.ProfileFAPISecurity, true)
 			_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
@@ -140,6 +142,7 @@ func TestCompleteAuthorizationEnforcesMaxAge(t *testing.T) {
 		{"max_age=0, just authenticated", "0", 0, ""},
 		{"max_age=0, authenticated earlier", "0", time.Minute, "login_required"},
 		{"no max_age, long ago", "", 24 * time.Hour, ""},
+		{"largest max_age, just authenticated", "3162240000", 0, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t, server.ProfileFAPISecurity, true)

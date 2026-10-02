@@ -28,7 +28,13 @@ type RefreshTokenRequest struct {
 // The result's RefreshToken is the one the server returned or, when it
 // returned none, req.Tokens' own: under FAPI 2.0 the server doesn't
 // rotate refresh tokens, so the same one keeps working until it expires
-// or is revoked.
+// or is revoked. Likewise, when the server returned no ID token, the
+// result keeps req.Tokens' (IDToken, Subject and IDTokenClaims), so a
+// later refresh from it still has the original to check against.
+//
+// req.Tokens must have come from this client's issuer: when it has an ID
+// token, one from another issuer is refused before anything is sent, so
+// one issuer's refresh token is never presented to another.
 //
 // A returned ID token is validated as ExchangeCode validates one, and
 // checked against the original (OIDC Core §12.2): the same sub, the same
@@ -38,6 +44,9 @@ type RefreshTokenRequest struct {
 func (c *Client) RefreshTokens(ctx context.Context, req RefreshTokenRequest) (TokenSet, error) {
 	if !req.Tokens.HasRefreshToken || req.Tokens.RefreshToken.Reveal() == "" {
 		return TokenSet{}, newError(ErrorInvalidRequest, "the token set has no refresh token", nil)
+	}
+	if req.Tokens.HasIDToken && req.Tokens.IDTokenClaims.Issuer != c.cfg.Issuer.String() {
+		return TokenSet{}, newError(ErrorInvalidRequest, "the token set was issued by a different issuer than this client's", nil)
 	}
 	assertionSigner, assertionKID, dpopSigner, err := c.resolveClientAuthAndDPoPSigners(ctx)
 	if err != nil {
@@ -69,10 +78,13 @@ func (c *Client) RefreshTokens(ctx context.Context, req RefreshTokenRequest) (To
 	if !result.HasRefreshToken {
 		result.RefreshToken, result.HasRefreshToken = req.Tokens.RefreshToken, true
 	}
-	if result.HasIDToken {
-		if idErr := checkRefreshedIDToken(req.Tokens, result.IDTokenClaims); idErr != nil {
-			return TokenSet{}, idErr
-		}
+	if !result.HasIDToken {
+		result.IDToken, result.HasIDToken = req.Tokens.IDToken, req.Tokens.HasIDToken
+		result.Subject, result.IDTokenClaims = req.Tokens.Subject, req.Tokens.IDTokenClaims
+		return result, nil
+	}
+	if idErr := checkRefreshedIDToken(req.Tokens, result.IDTokenClaims); idErr != nil {
+		return TokenSet{}, idErr
 	}
 	return result, nil
 }

@@ -106,8 +106,9 @@ func TestRevokeGrantRecordsUntilEverythingFromTheGrantExpires(t *testing.T) {
 		t.Error("RevokeGrant(\"\") = nil error, want error")
 	}
 	// The harness's RefreshTokenLifetime and AccessTokenLifetime are 5
-	// minutes each.
-	if got, want := h.revocation.until["grant:grant-1"], h.now.Add(10*time.Minute); !got.Equal(want) {
+	// minutes each (longer than its code lifetime), and its
+	// MaxClockSkew 5 seconds.
+	if got, want := h.revocation.until["grant:grant-1"], h.now.Add(10*time.Minute+5*time.Second); !got.Equal(want) {
 		t.Errorf("revoked until %v, want %v", got, want)
 	}
 }

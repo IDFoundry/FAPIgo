@@ -55,6 +55,9 @@ type AttestedClient struct {
 //
 // It only authenticates the client. Whether that client may use the
 // grant, the grant itself, and any DPoP proof are the caller's to check.
+// The client is the one the attestation names: use AttestedClient.Client
+// for the grant, and refuse a request whose own client_id parameter, if
+// it has one, names a different client.
 // A request with no attestation headers at all is refused, like one with
 // more than one of either. Errors are *Error with ErrorInvalidClient
 // (401), as at a token endpoint; that includes a PoP whose use couldn't

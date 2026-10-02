@@ -235,26 +235,8 @@ func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 		return AuthorizationSession{}, newError(ErrorInvalidResponse, "malformed pushed authorization request response", err)
 	}
 
-	responseMode := responseModePlain
-	if c.cfg.Profile == ProfileFAPISecurityWithMessageSigning {
-		responseMode = responseModeJARM
-	}
-	record := sessionRecord{
-		Nonce: nonce, PKCEVerifier: verifier, Issuer: c.cfg.Issuer.String(),
-		RedirectURI: c.cfg.RedirectURI, ResponseMode: responseMode,
-	}
-	if req.HasMaxAge {
-		seconds := int64(req.MaxAge / time.Second) // as sent: whole seconds, rounded down
-		record.MaxAgeSeconds = &seconds
-	}
-	encoded, err := encodeSessionRecord(record)
-	if err != nil {
-		return AuthorizationSession{}, newError(ErrorInternal, "failed to encode session", err)
-	}
-	if err := c.deps.Sessions.Create(ctx, storage.NewSession{
-		State: state, Record: encoded, ExpiresAt: now.Add(c.cfg.Limits.SessionLifetime),
-	}); err != nil {
-		return AuthorizationSession{}, newError(ErrorInternal, "failed to persist session", err)
+	if sessionErr := c.createSession(ctx, state, c.newSessionRecord(req, nonce, verifier), now); sessionErr != nil {
+		return AuthorizationSession{}, sessionErr
 	}
 
 	q := url.Values{}
@@ -556,5 +538,39 @@ func (c *Client) signPushedRequestForm(ctx context.Context, now time.Time, form,
 		return newError(ErrorInternal, "failed to build request object", err)
 	}
 	form["request"] = object
+	return nil
+}
+
+// newSessionRecord is what this authorization attempt's session keeps
+// for the callback and the code exchange: under message signing, the
+// response must arrive as a signed JARM response.
+func (c *Client) newSessionRecord(req BeginAuthorizationRequest, nonce, verifier string) sessionRecord {
+	responseMode := responseModePlain
+	if c.cfg.Profile == ProfileFAPISecurityWithMessageSigning {
+		responseMode = responseModeJARM
+	}
+	record := sessionRecord{
+		Nonce: nonce, PKCEVerifier: verifier, Issuer: c.cfg.Issuer.String(),
+		RedirectURI: c.cfg.RedirectURI, ResponseMode: responseMode,
+	}
+	if req.HasMaxAge {
+		seconds := int64(req.MaxAge / time.Second) // as sent: whole seconds, rounded down
+		record.MaxAgeSeconds = &seconds
+	}
+	return record
+}
+
+// createSession persists record as the session for state, until
+// Limits.SessionLifetime after now.
+func (c *Client) createSession(ctx context.Context, state string, record sessionRecord, now time.Time) *Error {
+	encoded, err := encodeSessionRecord(record)
+	if err != nil {
+		return newError(ErrorInternal, "failed to encode session", err)
+	}
+	if err := c.deps.Sessions.Create(ctx, storage.NewSession{
+		State: state, Record: encoded, ExpiresAt: now.Add(c.cfg.Limits.SessionLifetime),
+	}); err != nil {
+		return newError(ErrorInternal, "failed to persist session", err)
+	}
 	return nil
 }

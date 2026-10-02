@@ -296,14 +296,14 @@ func (b *bank) consentPage(in server.InteractionRequest, tag, problem string) co
 // decide signs the customer in and records which accounts they chose
 // to share, under a grant ID the bank keeps on its Connected apps page.
 func (b *bank) decide(w http.ResponseWriter, r *http.Request) {
-	tag := r.PostFormValue(interactioncookie.FormField)
+	if err := r.ParseForm(); err != nil {
+		b.w.renderError(w, bankHost, http.StatusBadRequest, "Malformed form", formUnreadable)
+		return
+	}
+	tag := r.PostForm.Get(interactioncookie.FormField)
 	handle, in, err := b.interaction.Read(r, b.w.clock.Now(), tag)
 	if err != nil {
 		b.w.renderError(w, bankHost, http.StatusBadRequest, "Session expired", "This browser has no sign-in in progress.")
-		return
-	}
-	if err := r.ParseForm(); err != nil {
-		b.w.renderError(w, bankHost, http.StatusBadRequest, "Malformed form", formUnreadable)
 		return
 	}
 	result := server.Deny("the customer declined")

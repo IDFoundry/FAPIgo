@@ -81,6 +81,9 @@ func (a *api) submit(w http.ResponseWriter, r *http.Request) {
 		resource.WriteError(w, err)
 		return
 	}
+	// The client's next call carries a fresh DPoP nonce, when the
+	// verifier issues them.
+	authz.SetDPoPNonce(w.Header())
 	var b batch
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&b); err != nil {
 		resource.NewError(resource.ErrorInvalidRequest, http.StatusBadRequest, "malformed payroll batch").WriteJSON(w)

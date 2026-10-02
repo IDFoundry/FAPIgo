@@ -55,6 +55,9 @@ func (a *api) accounts(w http.ResponseWriter, r *http.Request) {
 		resource.WriteError(w, err)
 		return
 	}
+	// The client's next call carries a fresh DPoP nonce, when the
+	// verifier issues them.
+	authz.SetDPoPNonce(w.Header())
 	details, err := grantedAccess(authz)
 	if err != nil {
 		resource.NewError(resource.ErrorInvalidToken, http.StatusUnauthorized, "the token's authorization details are malformed").WriteJSON(w)

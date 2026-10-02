@@ -165,7 +165,8 @@ browser URL, and persists correlation state.
 
 `HandleAuthorizationResponse` internally validates: that the callback
 belongs to the user agent that began the flow — the caller passes back
-the `SessionHandle` it bound to that browser (an HttpOnly cookie), and a
+the `SessionHandle` it bound to that browser (an HttpOnly cookie;
+`client/sessioncookie` sets and reads one), and a
 callback whose `state` doesn't match it is rejected before anything is
 consumed, closing login CSRF ([RFC 9700 §4.7][bcp]) — then correlation
 state, issuer, JARM signature and claims, audience, expiry, response

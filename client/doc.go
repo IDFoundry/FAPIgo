@@ -71,7 +71,8 @@
 // ARCHITECTURE.md, "Design rules"): AuthorizationSession is opaque with
 // no public constructor, and a SessionHandle can only be recovered from
 // its own String form (ParseSessionHandle) — the caller stores it with
-// the user agent that began the flow, and HandleAuthorizationResponse
+// the user agent that began the flow (package client/sessioncookie does
+// this), and HandleAuthorizationResponse
 // rejects a callback that doesn't carry the matching one;
 // HandleAuthorizationResponse returns a closed sum type
 // rather than one struct with optional fields, so a caller can't assume

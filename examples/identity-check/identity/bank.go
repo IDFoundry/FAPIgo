@@ -384,14 +384,14 @@ func (b *bank) consentPage(in server.InteractionRequest, tag, problem string) co
 // decide signs the customer in, the way they chose, and records which
 // claims they approved for release.
 func (b *bank) decide(w http.ResponseWriter, r *http.Request) {
-	tag := r.PostFormValue(interactioncookie.FormField)
+	if err := r.ParseForm(); err != nil {
+		b.w.renderError(w, bankHost, http.StatusBadRequest, "Malformed form", formUnreadable)
+		return
+	}
+	tag := r.PostForm.Get(interactioncookie.FormField)
 	handle, in, err := b.interaction.Read(r, time.Now(), tag)
 	if err != nil {
 		b.w.renderError(w, bankHost, http.StatusBadRequest, "Session expired", "This browser has no sign-in in progress.")
-		return
-	}
-	if err := r.ParseForm(); err != nil {
-		b.w.renderError(w, bankHost, http.StatusBadRequest, "Malformed form", formUnreadable)
 		return
 	}
 	result := server.Deny("the customer declined")

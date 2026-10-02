@@ -21,6 +21,9 @@
 // and Read refuses a form whose tag isn't the cookie's: that page's
 // interaction is gone, and the user starts again.
 //
+// Give it keys of its own, apart from any client/sessioncookie's or
+// client.TokenSetSealer's.
+//
 // The cookie is not a CSRF defence. The consent form's submission still
 // needs one, such as net/http's CrossOriginProtection.
 package interactioncookie
@@ -66,12 +69,13 @@ var (
 
 // Options configures a Cookie.
 type Options struct {
-	// Name is the cookie's name: DefaultName if empty. A name with the
-	// __Host- prefix gets Path=/, as the prefix requires.
+	// Name is the cookie's name: DefaultName if empty. Keep the __Host-
+	// prefix: without it, a sibling subdomain can set the cookie in the
+	// victim's browser, with a value it got sealed for itself.
 	Name string
 
-	// Path is the cookie's path: "/" if empty. It must be "/" for a
-	// __Host- name.
+	// Path is the cookie's path: "/" if empty. New refuses another path
+	// for a __Host- name, which the prefix forbids.
 	Path string
 }
 

@@ -92,6 +92,22 @@ role-level types or behaviour. `serverresource` builds a `resource`
 verifier matching a `server` in the same process, for an authorization
 server that hosts its own protected endpoints.
 
+A few helpers cover what every deployment otherwise writes by hand, and
+gets wrong in the same ways:
+
+- `server/interactioncookie` carries a pending authorization from
+  `/authorize` to the consent form's submission in one encrypted cookie,
+  tied to the form that was shown.
+- `client/sessioncookie` binds a client's authorization to the browser
+  that began it (login CSRF, [RFC 9700 §4.7](https://www.rfc-editor.org/rfc/rfc9700#section-4.7)), with your own value
+  for it alongside.
+- `client.TokenSetSealer` keeps tokens at rest, encrypted and bound to
+  their owner, for a client that refreshes after a restart or on
+  another instance.
+- The `*FromHTTP` constructors (`server.PushAuthorizationRequestFromHTTP`,
+  `resource.VerifyRequestFromHTTP` and others) read every header and
+  certificate a request type needs from an `*http.Request` at once.
+
 See [GETTING_STARTED.md](GETTING_STARTED.md) for a full walkthrough of
 standing up an authorization server and resource server end to end,
 including a runnable configuration you can start from.

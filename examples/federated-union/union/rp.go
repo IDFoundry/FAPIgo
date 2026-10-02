@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
-	"sync"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -37,9 +36,6 @@ type relyingParty struct {
 	authJWKS json.RawMessage
 	sessions storage.SessionStore
 	redirect string
-
-	mu      sync.Mutex
-	clients map[string]*client.Client // by identity provider entity ID
 }
 
 const (
@@ -82,7 +78,7 @@ func (w *World) newRelyingParty(s serviceSpec) (*relyingParty, error) {
 
 	rp := &relyingParty{
 		country: c, w: w, keys: manager, authJWKS: authKey.jwks,
-		sessions: memstore.NewSessionStore(), clients: map[string]*client.Client{},
+		sessions: memstore.NewSessionStore(),
 	}
 	rp.entity = &entity{
 		id: w.entityID(s.host), host: s.host, name: s.name, role: "service", country: c.key,
@@ -228,9 +224,38 @@ func (rp *relyingParty) clientFor(provider string, discovered client.DiscoveredM
 	if err != nil {
 		return nil, err
 	}
-	rp.mu.Lock()
-	rp.clients[provider] = cl
-	rp.mu.Unlock()
+	return cl, nil
+}
+
+// signInRefusal is why a sign-in with a provider can't go ahead, as a
+// page shows it.
+type signInRefusal struct {
+	status        int
+	title, detail string
+}
+
+// discoverClient resolves idp through the federation — its Trust Chain
+// and its assurance Trust Marks — and builds a client for it. Login and
+// the callback both call it, so nothing about a sign-in lives only in
+// this instance's memory: a callback that reaches another instance of
+// the service builds the same client, after checking the provider is
+// still trusted. (Its session store is per instance here, being
+// memstore; a service running several instances shares one.)
+func (rp *relyingParty) discoverClient(ctx context.Context, idp *identityProvider) (*client.Client, *signInRefusal) {
+	// One Trust Chain resolution: discovery keeps the chain it resolved,
+	// and the assurance check reads the provider's Trust Marks from it.
+	discovered, err := client.DiscoverViaFederation(ctx, rp.resolver, idp.entity.id)
+	if err != nil {
+		return nil, &signInRefusal{http.StatusForbidden, idp.country.idpName + " is not trusted", err.Error()}
+	}
+	resolved, _ := discovered.ResolvedEntity()
+	if status := rp.checkAssurance(ctx, idp, resolved); !status.LoAHigh {
+		return nil, &signInRefusal{http.StatusForbidden, idp.country.idpName + " is not accredited at a high level of assurance", status.LoAProblem}
+	}
+	cl, err := rp.clientFor(idp.entity.id, discovered)
+	if err != nil {
+		return nil, &signInRefusal{http.StatusBadGateway, "Could not discover " + idp.country.idpName, err.Error()}
+	}
 	return cl, nil
 }
 
@@ -241,21 +266,9 @@ func (rp *relyingParty) login(w http.ResponseWriter, r *http.Request) {
 		rp.w.renderError(w, http.StatusBadRequest, "Unknown identity provider", provider)
 		return
 	}
-	// One Trust Chain resolution: discovery keeps the chain it resolved,
-	// and the assurance check reads the provider's Trust Marks from it.
-	discovered, err := client.DiscoverViaFederation(r.Context(), rp.resolver, provider)
-	if err != nil {
-		rp.w.renderError(w, http.StatusForbidden, idp.country.idpName+" is not trusted", err.Error())
-		return
-	}
-	resolved, _ := discovered.ResolvedEntity()
-	if status := rp.checkAssurance(r.Context(), idp, resolved); !status.LoAHigh {
-		rp.w.renderError(w, http.StatusForbidden, idp.country.idpName+" is not accredited at a high level of assurance", status.LoAProblem)
-		return
-	}
-	cl, err := rp.clientFor(provider, discovered)
-	if err != nil {
-		rp.w.renderError(w, http.StatusBadGateway, "Could not discover "+idp.country.idpName, err.Error())
+	cl, refusal := rp.discoverClient(r.Context(), idp)
+	if refusal != nil {
+		rp.w.renderError(w, refusal.status, refusal.title, refusal.detail)
 		return
 	}
 	session, err := cl.BeginAuthorization(r.Context(), client.BeginAuthorizationRequest{
@@ -290,11 +303,16 @@ func (rp *relyingParty) callback(w http.ResponseWriter, r *http.Request) {
 		rp.w.renderError(w, http.StatusBadRequest, noSignIn, notStartedHere)
 		return
 	}
-	rp.mu.Lock()
-	cl := rp.clients[providerC.Value]
-	rp.mu.Unlock()
-	if cl == nil {
+	// The provider cookie comes from the browser: only one of the
+	// demo's own identity providers is looked up.
+	idp := rp.w.idpByID(providerC.Value)
+	if idp == nil {
 		rp.w.renderError(w, http.StatusBadRequest, noSignIn, "Unknown identity provider.")
+		return
+	}
+	cl, refusal := rp.discoverClient(r.Context(), idp)
+	if refusal != nil {
+		rp.w.renderError(w, refusal.status, refusal.title, refusal.detail)
 		return
 	}
 	result, err := cl.CompleteAuthorization(r.Context(), client.AuthorizationCallback{RawQuery: r.URL.RawQuery, Session: handle})
@@ -302,7 +320,6 @@ func (rp *relyingParty) callback(w http.ResponseWriter, r *http.Request) {
 		rp.w.renderError(w, http.StatusBadGateway, signInFailed, err.Error())
 		return
 	}
-	idp := rp.w.idpByID(providerC.Value)
 	switch res := result.(type) {
 	case client.CompletionSuccess:
 		claims := res.Tokens.IDTokenClaims

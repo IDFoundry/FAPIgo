@@ -301,9 +301,12 @@ func (b *bank) userinfo(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	body["sub"], _ = json.Marshal(authz.Subject)
+	// A token for a client the bank no longer knows is the token's
+	// problem, not the bank's. The lookup error names the client from the
+	// token, so it isn't logged.
 	client, err := b.clients.ResolveClient(r.Context(), fapi.ClientID(authz.ClientID))
 	if err != nil {
-		internalError(w, err)
+		resource.NewError(resource.ErrorInvalidToken, http.StatusUnauthorized, "the access token's client is unknown").WriteJSON(w)
 		return
 	}
 	signed, srvErr := b.srv.SignUserInfoResponse(r.Context(), client, body)

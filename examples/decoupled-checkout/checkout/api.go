@@ -10,6 +10,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/idfoundry/fapigo/extension"
 	"github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/serverresource"
 	"github.com/idfoundry/fapigo/storage"
@@ -78,25 +79,19 @@ func forbidden(w http.ResponseWriter, description string) {
 	resource.NewError(resource.ErrorInsufficientScope, http.StatusForbidden, description).WriteJSON(w)
 }
 
-// grantedDetails decodes the token's authorization_details claim.
-func grantedDetails(ctx resource.AuthorizationContext) []json.RawMessage {
-	var details []json.RawMessage
-	_ = json.Unmarshal(ctx.Claims["authorization_details"], &details)
-	return details
+// granted reads the details of def's type authz's token was granted.
+func granted[T any](authz resource.AuthorizationContext, def extension.RARDefinition[T]) ([]extension.RARDetail[T], error) {
+	values, err := extension.ParseGrantedRAR(authz.Claims[extension.AuthorizationDetailsClaim])
+	if err != nil {
+		return nil, err
+	}
+	return extension.RARGet(values, def)
 }
 
-func detailsOfType[T any](details []json.RawMessage, typ string) []T {
-	var out []T
-	for _, raw := range details {
-		var head struct {
-			Type string `json:"type"`
-		}
-		var v T
-		if json.Unmarshal(raw, &head) == nil && head.Type == typ && json.Unmarshal(raw, &v) == nil {
-			out = append(out, v)
-		}
-	}
-	return out
+// malformedGrant answers a token whose authorization details can't be
+// read: not a grant to act on.
+func malformedGrant(w http.ResponseWriter) {
+	resource.NewError(resource.ErrorInvalidToken, http.StatusUnauthorized, "the token's authorization details are malformed").WriteJSON(w)
 }
 
 // paymentOrder is what a client asks the payments API to execute.
@@ -125,8 +120,13 @@ func (a *api) pay(w http.ResponseWriter, r *http.Request) {
 		resource.NewError(resource.ErrorInvalidRequest, http.StatusBadRequest, "malformed payment order").WriteJSON(w)
 		return
 	}
-	approved := slices.ContainsFunc(detailsOfType[paymentInitiation](grantedDetails(authz), paymentInitiationType.Type), func(p paymentInitiation) bool {
-		return p.InstructedAmount == order.InstructedAmount && p.CreditorAccount == order.CreditorAccount
+	payments, err := granted(authz, paymentInitiationType)
+	if err != nil {
+		malformedGrant(w)
+		return
+	}
+	approved := slices.ContainsFunc(payments, func(p extension.RARDetail[paymentInitiation]) bool {
+		return p.Fields.InstructedAmount == order.InstructedAmount && p.Fields.CreditorAccount == order.CreditorAccount
 	})
 	if !approved {
 		// RFC 6750 §3: error_description is printable ASCII, so no "€".
@@ -162,8 +162,13 @@ func (a *api) readAccount(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	approved := slices.ContainsFunc(detailsOfType[accountInformation](grantedDetails(authz), accountInformationType.Type), func(g accountInformation) bool {
-		return slices.Contains(g.Actions, action) && slices.Contains(g.Accounts, account{IBAN: iban})
+	reads, err := granted(authz, accountInformationType)
+	if err != nil {
+		malformedGrant(w)
+		return
+	}
+	approved := slices.ContainsFunc(reads, func(g extension.RARDetail[accountInformation]) bool {
+		return slices.Contains(g.Fields.Actions, action) && slices.Contains(g.Fields.Accounts, account{IBAN: iban})
 	})
 	if !approved {
 		forbidden(w, fmt.Sprintf("the customer didn't approve %s for %s", actionLabels[action], iban))

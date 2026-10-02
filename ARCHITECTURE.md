@@ -644,7 +644,9 @@ counterparts of `Get`/`Set` — a client builds one detail object with
 `extension.RARSet(Definition, value)`, which also stamps the
 definition's own `Type` into the result, so a caller's value type never
 needs its own redundant `Type` field; a server (or a consent UI) reads
-validated objects back out, typed, with `extension.RARGet`.
+validated objects back out, typed, with `extension.RARGet`, and a
+resource server reads what a token was granted the same way, after
+`extension.ParseGrantedRAR` on its `authorization_details` claim.
 
 ### 12. Configuration is per-role, not one shared struct
 

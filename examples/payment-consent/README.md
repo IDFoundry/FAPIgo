@@ -116,7 +116,7 @@ Everything here uses FAPIgo's public API only.
 | Piece | FAPIgo |
 |---|---|
 | Alder Bank | `server.Server` with `ProfileFAPISecurityWithMessageSigning` and `Config.RAR`; the shop registered with `AuthorizationDetailsTypes` for payments only, and `Dependencies.AuthorizationCodeRARPolicy` set to `server.AllowRequestedAuthorizationDetails`; the consent page's state in an encrypted cookie (`server/interactioncookie`) |
-| The payments API | `serverresource.NewVerifier`, built from the bank's own server configuration; the granted details from the access token's `authorization_details` claim; `resource.ErrorInsufficientScope` for anything else |
+| The payments API | `serverresource.NewVerifier`, built from the bank's own server configuration; the granted details from the access token's `authorization_details` claim (`extension.ParseGrantedRAR`, `RARGet`); `resource.ErrorInsufficientScope` for anything else |
 | Northgate Outfitters | `client.Discover`, `client.NewFromDiscovery` with `ProfileFAPISecurityWithMessageSigning`; `BeginAuthorization` with `AuthorizationDetails`; `HandleAuthorizationResponse` and `ExchangeCode`; `ProtectedResource` for the DPoP-bound API call |
 
 The code:

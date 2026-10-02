@@ -471,6 +471,22 @@ if err != nil {
 }
 ```
 
+With Rich Authorization Requests, the details the token was granted are
+in its `authorization_details` claim. Read them with the same
+`RARDefinition` the authorization server registered, rather than
+decoding the claim by hand:
+
+```go
+granted, err := extension.ParseGrantedRAR(authCtx.Claims[extension.AuthorizationDetailsClaim])
+// ...
+payments, err := extension.RARGet(granted, paymentInitiation) // []RARDetail[T], only this type
+```
+
+A token without the claim was granted nothing. A malformed one is an
+error, not an empty grant to wave through. Check the request against
+what's granted before acting on it, as `examples/payment-consent`'s
+payments API does.
+
 `resource.VerifyRequestFromHTTP` fills in every field of the
 `VerifyRequest` from `r`: the method, the `Authorization` header, every
 `DPoP` header and the TLS client certificate. Building the struct by

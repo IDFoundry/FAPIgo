@@ -156,18 +156,16 @@ func (c *Cookie) Set(w http.ResponseWriter, handle server.InteractionHandle, in 
 	if err != nil {
 		return "", err
 	}
-	random := make([]byte, 16)
+	key := c.keys[0]
+	// One read for the tag and the nonce: the tag's 16 bytes, then the
+	// nonce.
+	random := make([]byte, 16+key.aead.NonceSize())
 	if _, err := rand.Read(random); err != nil {
 		return "", err
 	}
-	tag := base64.RawURLEncoding.EncodeToString(random)
+	tag, nonce := base64.RawURLEncoding.EncodeToString(random[:16]), random[16:]
 	plaintext, err := json.Marshal(sealed{ExpiresAt: now.Add(c.lifetime).Unix(), Tag: tag, Handle: handle.String(), Request: string(encoded)})
 	if err != nil {
-		return "", err
-	}
-	key := c.keys[0]
-	nonce := make([]byte, key.aead.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
 		return "", err
 	}
 	header := append([]byte{version}, key.id[:]...)

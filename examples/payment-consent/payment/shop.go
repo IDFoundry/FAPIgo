@@ -420,18 +420,16 @@ func (w *World) approveOnAnotherDevice(ctx context.Context, username, pin string
 	if err != nil {
 		return "", err
 	}
-	consent, err := io.ReadAll(res.Body)
+	// The consent form's own field, as the attacker's browser submits
+	// it. A page without one leaves it empty, and the bank refuses.
+	consent, _ := io.ReadAll(res.Body)
 	_ = res.Body.Close()
-	if err != nil {
-		return "", err
-	}
-	// The consent form's own field, as the attacker's browser submits it.
-	tag := consentFormTag.FindSubmatch(consent)
-	if tag == nil {
-		return "", errors.New("no consent form")
+	var tag string
+	if m := consentFormTag.FindSubmatch(consent); m != nil {
+		tag = string(m[1])
 	}
 	res, err = post(w.URL(bankHost, authorizePath), url.Values{
-		interactioncookie.FormField: {string(tag[1])}, "username": {username}, "pin": {pin}, "decision": {"approve"},
+		interactioncookie.FormField: {tag}, "username": {username}, "pin": {pin}, "decision": {"approve"},
 	})
 	if err != nil {
 		return "", err

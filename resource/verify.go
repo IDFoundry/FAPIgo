@@ -120,30 +120,9 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (Authorization
 // verify is Verify, also reporting whether the request used the DPoP
 // scheme, which decides the challenge an error is sent with.
 func (v *Verifier) verify(ctx context.Context, req VerifyRequest) (AuthorizationContext, bool, error) {
-	if req.Method == "" {
-		return AuthorizationContext{}, false, newError(ErrorInvalidRequest, 400, "method is required", nil)
-	}
-	if req.URL == nil {
-		return AuthorizationContext{}, false, newError(ErrorInvalidRequest, 400, "url is required", nil)
-	}
-
-	dpopProof, dpopOK := dpop.ResolveHeaderValues(req.DPoPProofs)
-	if !dpopOK {
-		// RFC 9449 §4.3 check 1: a proof is valid only as the one DPoP
-		// header field.
-		return AuthorizationContext{}, true, newError(ErrorInvalidDPoPProof, 401, "multiple DPoP proofs are not permitted", nil)
-	}
-
-	if strings.TrimSpace(req.Authorization) == "" {
-		return AuthorizationContext{}, false, noCredentials("no Authorization header")
-	}
-	scheme, raw, _ := strings.Cut(req.Authorization, " ")
-	usedDPoP := strings.EqualFold(scheme, "DPoP")
-	if !usedDPoP && !strings.EqualFold(scheme, "Bearer") {
-		return AuthorizationContext{}, false, noCredentials("authorization scheme is neither DPoP nor Bearer")
-	}
-	if raw == "" {
-		return AuthorizationContext{}, usedDPoP, newError(ErrorInvalidRequest, 400, "authorization header has no access token", nil)
+	dpopProof, raw, usedDPoP, perr := parseAuthorization(req)
+	if perr != nil {
+		return AuthorizationContext{}, usedDPoP, perr
 	}
 
 	now := v.deps.Clock.Now()
@@ -153,59 +132,14 @@ func (v *Verifier) verify(ctx context.Context, req VerifyRequest) (Authorization
 		return AuthorizationContext{}, usedDPoP, verr
 	}
 
-	resolved, err := v.deps.AccessTokens.ResolveAccessToken(ctx, ResolveAccessTokenRequest{Raw: raw, Now: now})
-	if err != nil {
-		// A *Error carries its own exposure (see AccessTokenResolver's
-		// own doc comment on why that's the implementation's call, not
-		// this method's) — propagate it unchanged. A bare error (a
-		// third-party AccessTokenResolver that didn't follow that
-		// convention) falls back to the same invalid_token/401 every
-		// other rejection here defaults to.
-		if rerr, ok := err.(*Error); ok {
-			return AuthorizationContext{}, usedDPoP, rerr
-		}
-		return AuthorizationContext{}, usedDPoP, newError(ErrorInvalidToken, 401, "access token is invalid", err)
+	resolved, verr := v.resolveAccessToken(ctx, raw, now)
+	if verr != nil {
+		return AuthorizationContext{}, usedDPoP, verr
 	}
-
-	// A token bound one way can't be redeemed by presenting the other
-	// credential — checked explicitly, not left to an incidental
-	// thumbprint mismatch, since a DPoP JKT and an mTLS x5t#S256 live in
-	// unrelated value spaces and a caller shouldn't have to reason about
-	// whether they could ever collide.
-	if resolved.SenderConstrain != senderConstrain {
-		return AuthorizationContext{}, usedDPoP, newError(ErrorInvalidToken, 401, "access token is not bound via the presented credential's mechanism", nil)
+	if verr := v.checkBinding(resolved, senderConstrain, verifiedProof, certThumbprint, now); verr != nil {
+		return AuthorizationContext{}, usedDPoP, verr
 	}
-
-	// Sender-constraint binding and ordinary expiry are enforced here,
-	// once, uniformly for every AccessTokenResolver implementation —
-	// see that interface's own doc comment for why this moved out of
-	// each implementation. Constant-time: resolved.Thumbprint (from an
-	// implementation that never set it) is "", which always
-	// length-mismatches a real presented credential's own thumbprint
-	// encoding (never empty) and so always fails closed. The one empty
-	// presented value — a Bearer request with no client certificate —
-	// is refused explicitly, so it can never equal that "".
-	var presented string
-	if senderConstrain == storage.SenderConstrainMTLS {
-		presented = certThumbprint
-	} else {
-		presented = verifiedProof.Thumbprint.String()
-	}
-	if presented == "" || subtle.ConstantTimeCompare([]byte(resolved.Thumbprint), []byte(presented)) != 1 {
-		return AuthorizationContext{}, usedDPoP, newError(ErrorInvalidToken, 401, "access token is not bound to the presented credential", nil)
-	}
-	if now.After(resolved.ExpiresAt.Add(v.cfg.Limits.MaxClockSkew)) {
-		return AuthorizationContext{}, usedDPoP, newError(ErrorInvalidToken, 401, "access token has expired", nil)
-	}
-
-	revoked, err := v.deps.Revocation.IsRevoked(ctx, resolved.Key)
-	if err != nil {
-		return AuthorizationContext{}, usedDPoP, newError(ErrorServerError, 500, "failed to check token revocation", err)
-	}
-	if revoked {
-		return AuthorizationContext{}, usedDPoP, newError(ErrorInvalidToken, 401, "access token has been revoked", nil)
-	}
-	if verr := v.checkGrantNotRevoked(ctx, resolved.Claims); verr != nil {
+	if verr := v.checkNotRevoked(ctx, resolved); verr != nil {
 		return AuthorizationContext{}, usedDPoP, verr
 	}
 
@@ -217,6 +151,7 @@ func (v *Verifier) verify(ctx context.Context, req VerifyRequest) (Authorization
 
 	var nextNonce string
 	if v.deps.Nonces != nil && senderConstrain == storage.SenderConstrainDPoP {
+		var err error
 		nextNonce, err = v.issueDPoPNonce(ctx, now)
 		if err != nil {
 			return AuthorizationContext{}, usedDPoP, newError(ErrorServerError, 500, "failed to issue dpop nonce", err)
@@ -235,6 +170,106 @@ func (v *Verifier) verify(ctx context.Context, req VerifyRequest) (Authorization
 		IssuedAt:      resolved.IssuedAt,
 		NextDPoPNonce: nextNonce,
 	}, usedDPoP, nil
+}
+
+// parseAuthorization checks req's shape and splits its Authorization
+// header: the one DPoP proof, if any, the access token, and whether the
+// DPoP scheme was used. usedDPoP is set on error too, for the challenge
+// the error is sent with.
+func parseAuthorization(req VerifyRequest) (dpopProof, raw string, usedDPoP bool, err *Error) {
+	if req.Method == "" {
+		return "", "", false, newError(ErrorInvalidRequest, 400, "method is required", nil)
+	}
+	if req.URL == nil {
+		return "", "", false, newError(ErrorInvalidRequest, 400, "url is required", nil)
+	}
+
+	dpopProof, dpopOK := dpop.ResolveHeaderValues(req.DPoPProofs)
+	if !dpopOK {
+		// RFC 9449 §4.3 check 1: a proof is valid only as the one DPoP
+		// header field.
+		return "", "", true, newError(ErrorInvalidDPoPProof, 401, "multiple DPoP proofs are not permitted", nil)
+	}
+
+	if strings.TrimSpace(req.Authorization) == "" {
+		return "", "", false, noCredentials("no Authorization header")
+	}
+	scheme, raw, _ := strings.Cut(req.Authorization, " ")
+	usedDPoP = strings.EqualFold(scheme, "DPoP")
+	if !usedDPoP && !strings.EqualFold(scheme, "Bearer") {
+		return "", "", false, noCredentials("authorization scheme is neither DPoP nor Bearer")
+	}
+	if raw == "" {
+		return "", "", usedDPoP, newError(ErrorInvalidRequest, 400, "authorization header has no access token", nil)
+	}
+	return dpopProof, raw, usedDPoP, nil
+}
+
+// resolveAccessToken resolves raw through Dependencies.AccessTokens.
+func (v *Verifier) resolveAccessToken(ctx context.Context, raw string, now time.Time) (ResolvedAccessToken, *Error) {
+	resolved, err := v.deps.AccessTokens.ResolveAccessToken(ctx, ResolveAccessTokenRequest{Raw: raw, Now: now})
+	if err != nil {
+		// A *Error carries its own exposure (see AccessTokenResolver's
+		// own doc comment on why that's the implementation's call, not
+		// this method's) — propagate it unchanged. A bare error (a
+		// third-party AccessTokenResolver that didn't follow that
+		// convention) falls back to the same invalid_token/401 every
+		// other rejection here defaults to.
+		if rerr, ok := err.(*Error); ok {
+			return ResolvedAccessToken{}, rerr
+		}
+		return ResolvedAccessToken{}, newError(ErrorInvalidToken, 401, "access token is invalid", err)
+	}
+	return resolved, nil
+}
+
+// checkBinding checks that resolved is bound to the credential the
+// request presented, and hasn't expired.
+func (v *Verifier) checkBinding(resolved ResolvedAccessToken, senderConstrain storage.SenderConstrain, verifiedProof dpop.VerifiedProof, certThumbprint string, now time.Time) *Error {
+	// A token bound one way can't be redeemed by presenting the other
+	// credential — checked explicitly, not left to an incidental
+	// thumbprint mismatch, since a DPoP JKT and an mTLS x5t#S256 live in
+	// unrelated value spaces and a caller shouldn't have to reason about
+	// whether they could ever collide.
+	if resolved.SenderConstrain != senderConstrain {
+		return newError(ErrorInvalidToken, 401, "access token is not bound via the presented credential's mechanism", nil)
+	}
+
+	// Sender-constraint binding and ordinary expiry are enforced here,
+	// once, uniformly for every AccessTokenResolver implementation —
+	// see that interface's own doc comment for why this moved out of
+	// each implementation. Constant-time: resolved.Thumbprint (from an
+	// implementation that never set it) is "", which always
+	// length-mismatches a real presented credential's own thumbprint
+	// encoding (never empty) and so always fails closed. The one empty
+	// presented value — a Bearer request with no client certificate —
+	// is refused explicitly, so it can never equal that "".
+	var presented string
+	if senderConstrain == storage.SenderConstrainMTLS {
+		presented = certThumbprint
+	} else {
+		presented = verifiedProof.Thumbprint.String()
+	}
+	if presented == "" || subtle.ConstantTimeCompare([]byte(resolved.Thumbprint), []byte(presented)) != 1 {
+		return newError(ErrorInvalidToken, 401, "access token is not bound to the presented credential", nil)
+	}
+	if now.After(resolved.ExpiresAt.Add(v.cfg.Limits.MaxClockSkew)) {
+		return newError(ErrorInvalidToken, 401, "access token has expired", nil)
+	}
+	return nil
+}
+
+// checkNotRevoked checks that neither resolved itself nor the grant it
+// was issued from has been revoked.
+func (v *Verifier) checkNotRevoked(ctx context.Context, resolved ResolvedAccessToken) *Error {
+	revoked, err := v.deps.Revocation.IsRevoked(ctx, resolved.Key)
+	if err != nil {
+		return newError(ErrorServerError, 500, "failed to check token revocation", err)
+	}
+	if revoked {
+		return newError(ErrorInvalidToken, 401, "access token has been revoked", nil)
+	}
+	return v.checkGrantNotRevoked(ctx, resolved.Claims)
 }
 
 // resolveCredential verifies whichever sender-constraining credential

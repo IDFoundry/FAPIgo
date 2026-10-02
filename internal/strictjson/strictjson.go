@@ -118,19 +118,9 @@ func fieldTypes(t reflect.Type) map[string]reflect.Type {
 			continue
 		}
 		name, _, _ := strings.Cut(tag, ",")
-		if f.Anonymous && name == "" {
-			ft := f.Type
-			for ft.Kind() == reflect.Pointer {
-				ft = ft.Elem()
-			}
-			if ft.Kind() == reflect.Struct {
-				for k, v := range fieldTypes(ft) {
-					if _, exists := out[k]; !exists {
-						out[k] = v
-					}
-				}
-				continue
-			}
+		if embedded, ok := untaggedEmbeddedStruct(f, name); ok {
+			addMissing(out, fieldTypes(embedded))
+			continue
 		}
 		if !f.IsExported() {
 			continue
@@ -141,4 +131,27 @@ func fieldTypes(t reflect.Type) map[string]reflect.Type {
 		out[name] = f.Type
 	}
 	return out
+}
+
+// untaggedEmbeddedStruct returns the struct type f embeds, through any
+// pointers, when f is an embedded field with no JSON name: encoding/json
+// promotes such a struct's fields into the outer one.
+func untaggedEmbeddedStruct(f reflect.StructField, name string) (reflect.Type, bool) {
+	if !f.Anonymous || name != "" {
+		return nil, false
+	}
+	ft := f.Type
+	for ft.Kind() == reflect.Pointer {
+		ft = ft.Elem()
+	}
+	return ft, ft.Kind() == reflect.Struct
+}
+
+// addMissing adds to out each of from's members out doesn't already have.
+func addMissing(out, from map[string]reflect.Type) {
+	for k, v := range from {
+		if _, exists := out[k]; !exists {
+			out[k] = v
+		}
+	}
 }

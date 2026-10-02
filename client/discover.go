@@ -319,36 +319,25 @@ func buildDiscoveredMetadata(doc metadata.Document, opts ...fapi.URLOption) (Dis
 	// than failing; a present-but-malformed one still fails, matching
 	// UserInfo/BackchannelAuthentication's own "absent is fine, broken
 	// is not" convention below.
-	var authz, par fapi.URL
-	if doc.AuthorizationEndpoint != "" {
-		authz, err = fapi.ParseEndpointURL(doc.AuthorizationEndpoint, opts...)
-		if err != nil {
-			return DiscoveredMetadata{}, fmt.Errorf("client: discover: authorization_endpoint: %w", err)
-		}
+	authz, err := parseOptionalEndpoint(doc.AuthorizationEndpoint, "authorization_endpoint", opts...)
+	if err != nil {
+		return DiscoveredMetadata{}, err
 	}
-	if doc.PushedAuthorizationRequestEndpoint != "" {
-		par, err = fapi.ParseEndpointURL(doc.PushedAuthorizationRequestEndpoint, opts...)
-		if err != nil {
-			return DiscoveredMetadata{}, fmt.Errorf("client: discover: pushed_authorization_request_endpoint: %w", err)
-		}
+	par, err := parseOptionalEndpoint(doc.PushedAuthorizationRequestEndpoint, "pushed_authorization_request_endpoint", opts...)
+	if err != nil {
+		return DiscoveredMetadata{}, err
 	}
 	jwksURI, err := fapi.ParseEndpointURL(doc.JWKSURI, opts...)
 	if err != nil {
 		return DiscoveredMetadata{}, fmt.Errorf("client: discover: jwks_uri: %w", err)
 	}
-	var userinfo fapi.URL
-	if doc.UserinfoEndpoint != "" {
-		userinfo, err = fapi.ParseEndpointURL(doc.UserinfoEndpoint, opts...)
-		if err != nil {
-			return DiscoveredMetadata{}, fmt.Errorf("client: discover: userinfo_endpoint: %w", err)
-		}
+	userinfo, err := parseOptionalEndpoint(doc.UserinfoEndpoint, "userinfo_endpoint", opts...)
+	if err != nil {
+		return DiscoveredMetadata{}, err
 	}
-	var backchannelAuth fapi.URL
-	if doc.BackchannelAuthenticationEndpoint != "" {
-		backchannelAuth, err = fapi.ParseEndpointURL(doc.BackchannelAuthenticationEndpoint, opts...)
-		if err != nil {
-			return DiscoveredMetadata{}, fmt.Errorf("client: discover: backchannel_authentication_endpoint: %w", err)
-		}
+	backchannelAuth, err := parseOptionalEndpoint(doc.BackchannelAuthenticationEndpoint, "backchannel_authentication_endpoint", opts...)
+	if err != nil {
+		return DiscoveredMetadata{}, err
 	}
 
 	mtlsAliases, err := parseMTLSEndpointAliases(doc.MTLSEndpointAliases, opts...)
@@ -379,6 +368,19 @@ func buildDiscoveredMetadata(doc metadata.Document, opts ...fapi.URLOption) (Dis
 		AuthorizationResponseIssSupported:          doc.AuthorizationResponseIssParameterSupported,
 		issuer:                                     issuer,
 	}, nil
+}
+
+// parseOptionalEndpoint parses raw, the metadata field named name, as an
+// endpoint URL: an absent one is the zero URL, a malformed one an error.
+func parseOptionalEndpoint(raw, name string, opts ...fapi.URLOption) (fapi.URL, error) {
+	if raw == "" {
+		return fapi.URL{}, nil
+	}
+	u, err := fapi.ParseEndpointURL(raw, opts...)
+	if err != nil {
+		return fapi.URL{}, fmt.Errorf("client: discover: %s: %w", name, err)
+	}
+	return u, nil
 }
 
 // parseMTLSEndpointAliases parses raw (nil if the document never

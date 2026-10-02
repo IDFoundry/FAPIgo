@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"strings"
+	"time"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/storage"
@@ -88,26 +89,9 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), bindingErr)
 	}
 
-	redeemed, err := s.deps.Grants.RedeemRefreshToken(ctx, storage.RefreshTokenRedemption{
-		TokenHash: sha256.Sum256([]byte(rawToken)),
-	})
-	if err != nil {
-		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorInvalidGrant, 400, "refresh_token is invalid, expired, or already used", err))
-	}
-
-	now := s.deps.Clock.Now()
-	if !now.Before(redeemed.ExpiresAt) {
-		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorInvalidGrant, 400, "refresh_token has expired", nil))
-	}
-	if redeemed.ClientID != client.ID() {
-		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorInvalidGrant, 400, "refresh_token was not issued to this client", nil))
-	}
-	grant, err := decodeGrantRecord(redeemed.Grant)
-	if err != nil {
-		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorServerError, 500, "failed to decode refresh token grant", err))
-	}
-	if revErr := s.checkGrantNotRevoked(ctx, grant); revErr != nil {
-		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), revErr)
+	grant, now, grantErr := s.redeemRefreshGrant(ctx, client.ID(), rawToken)
+	if grantErr != nil {
+		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), grantErr)
 	}
 	// No DPoP-key match check against grant.Thumbprint here — see
 	// RefreshTokenRequest.DPoPProofs' doc comment. client.ID() above is
@@ -116,13 +100,9 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 	// 9449 §5 does not bind a confidential client's refresh token to a
 	// specific DPoP key at all.
 
-	scope := grant.Scope
-	if requestedScope, ok := params["scope"]; ok && requestedScope != "" {
-		narrowed := strings.Fields(requestedScope)
-		if err := validateGrantedScopeSubset(narrowed, strings.Join(grant.Scope, " ")); err != nil {
-			return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorInvalidScope, 400, "requested scope exceeds the original grant", err))
-		}
-		scope = narrowed
+	scope, scopeErr := refreshScope(params, grant)
+	if scopeErr != nil {
+		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), scopeErr)
 	}
 
 	accessTokenClaims, err := grant.accessTokenClaims()
@@ -170,14 +150,53 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 	result.RefreshToken = fapi.NewSecret(rawToken)
 	result.HasRefreshToken = true
 
-	if s.deps.Nonces != nil && client.SenderConstrain() == storage.SenderConstrainDPoP {
-		nextNonce, err := s.issueDPoPNonce(ctx, now)
-		if err != nil {
-			return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorServerError, 500, "failed to issue dpop nonce", err))
-		}
-		result.NextDPoPNonce = nextNonce
+	if nonceErr := s.addNextDPoPNonce(ctx, client, now, &result); nonceErr != nil {
+		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), nonceErr)
 	}
 
 	s.audit(ctx, AuditEventRefreshAccessToken, client.ID(), AuditOutcomeSuccess, "")
 	return result, nil
+}
+
+// redeemRefreshGrant looks up the grant rawToken, a refresh token
+// presented by clientID, was issued from, refusing one that has expired,
+// was issued to another client, or whose grant was revoked. It also
+// returns the time it judged expiry at.
+func (s *Server) redeemRefreshGrant(ctx context.Context, clientID fapi.ClientID, rawToken string) (grantRecord, time.Time, *Error) {
+	redeemed, err := s.deps.Grants.RedeemRefreshToken(ctx, storage.RefreshTokenRedemption{
+		TokenHash: sha256.Sum256([]byte(rawToken)),
+	})
+	if err != nil {
+		return grantRecord{}, time.Time{}, newError(ErrorInvalidGrant, 400, "refresh_token is invalid, expired, or already used", err)
+	}
+
+	now := s.deps.Clock.Now()
+	if !now.Before(redeemed.ExpiresAt) {
+		return grantRecord{}, time.Time{}, newError(ErrorInvalidGrant, 400, "refresh_token has expired", nil)
+	}
+	if redeemed.ClientID != clientID {
+		return grantRecord{}, time.Time{}, newError(ErrorInvalidGrant, 400, "refresh_token was not issued to this client", nil)
+	}
+	grant, err := decodeGrantRecord(redeemed.Grant)
+	if err != nil {
+		return grantRecord{}, time.Time{}, newError(ErrorServerError, 500, "failed to decode refresh token grant", err)
+	}
+	if revErr := s.checkGrantNotRevoked(ctx, grant); revErr != nil {
+		return grantRecord{}, time.Time{}, revErr
+	}
+	return grant, now, nil
+}
+
+// refreshScope is the scope a refresh request asks for: the grant's,
+// or a narrower one named by its scope parameter, never a wider one.
+func refreshScope(params map[string]string, grant grantRecord) ([]string, *Error) {
+	requestedScope, ok := params["scope"]
+	if !ok || requestedScope == "" {
+		return grant.Scope, nil
+	}
+	narrowed := strings.Fields(requestedScope)
+	if err := validateGrantedScopeSubset(narrowed, strings.Join(grant.Scope, " ")); err != nil {
+		return nil, newError(ErrorInvalidScope, 400, "requested scope exceeds the original grant", err)
+	}
+	return narrowed, nil
 }

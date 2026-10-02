@@ -193,23 +193,9 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, "", authErr)
 	}
 
-	code := params["code"]
-	if code == "" {
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorInvalidRequest, 400, "code is required", nil))
-	}
-	redirectURI := params["redirect_uri"]
-	if redirectURI == "" {
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorInvalidRequest, 400, "redirect_uri is required", nil))
-	}
-	codeVerifier := params["code_verifier"]
-	if codeVerifier == "" {
-		// invalid_grant, not invalid_request: RFC 7636 §4.6 treats a
-		// code_verifier problem as a grant-validity failure, not a
-		// malformed-request one — a missing verifier is judged the same
-		// way as a mismatched one (below), covering the case where PKCE
-		// was required for the authorization but the token request omits
-		// the verifier entirely.
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorInvalidGrant, 400, "code_verifier is required", nil))
+	code, redirectURI, codeVerifier, paramErr := codeExchangeParameters(params)
+	if paramErr != nil {
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), paramErr)
 	}
 
 	thumbprint, bindingErr := s.verifyTokenRequestBinding(ctx, client, dpopProof, req.PeerCertificate)
@@ -284,16 +270,37 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), refreshErr)
 	}
 
-	if s.deps.Nonces != nil && client.SenderConstrain() == storage.SenderConstrainDPoP {
-		nextNonce, err := s.issueDPoPNonce(ctx, now)
-		if err != nil {
-			return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to issue dpop nonce", err))
-		}
-		result.NextDPoPNonce = nextNonce
+	if nonceErr := s.addNextDPoPNonce(ctx, client, now, &result); nonceErr != nil {
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), nonceErr)
 	}
 
 	s.audit(ctx, AuditEventExchangeAuthorizationCode, client.ID(), AuditOutcomeSuccess, "")
 	return result, nil
+}
+
+// codeExchangeParameters returns the code, redirect_uri and
+// code_verifier an authorization code token request must carry.
+func codeExchangeParameters(params map[string]string) (code, redirectURI, codeVerifier string, err *Error) {
+	code = params["code"]
+	if code == "" {
+		return "", "", "", newError(ErrorInvalidRequest, 400, "code is required", nil)
+	}
+	redirectURI = params["redirect_uri"]
+	if redirectURI == "" {
+		return "", "", "", newError(ErrorInvalidRequest, 400, "redirect_uri is required", nil)
+	}
+	codeVerifier = params["code_verifier"]
+	if codeVerifier == "" {
+		// invalid_grant, not invalid_request: RFC 7636 §4.6 treats a
+		// code_verifier problem as a grant-validity failure, not a
+		// malformed-request one — a missing verifier is judged the same
+		// way as a mismatched one (in validateRedeemedAuthorizationCode),
+		// covering the case where PKCE was required for the
+		// authorization but the token request omits the verifier
+		// entirely.
+		return "", "", "", newError(ErrorInvalidGrant, 400, "code_verifier is required", nil)
+	}
+	return code, redirectURI, codeVerifier, nil
 }
 
 // revokeTokensForReusedCode best-effort revokes whatever was already
@@ -354,6 +361,21 @@ func (s *Server) issueOptionalRefreshToken(ctx context.Context, client storage.R
 	_ = s.deps.Grants.RecordIssuedRefreshToken(ctx, codeHash, refreshTokenHash, now.Add(s.cfg.Limits.RefreshTokenLifetime))
 	result.RefreshToken = fapi.NewSecret(refreshToken)
 	result.HasRefreshToken = true
+	return nil
+}
+
+// addNextDPoPNonce issues the DPoP-Nonce a DPoP-bound client should use
+// next and records it onto result, when the server issues nonces — a
+// no-op otherwise.
+func (s *Server) addNextDPoPNonce(ctx context.Context, client storage.RegisteredClient, now time.Time, result *TokenResult) *Error {
+	if s.deps.Nonces == nil || client.SenderConstrain() != storage.SenderConstrainDPoP {
+		return nil
+	}
+	nextNonce, err := s.issueDPoPNonce(ctx, now)
+	if err != nil {
+		return newError(ErrorServerError, 500, "failed to issue dpop nonce", err)
+	}
+	result.NextDPoPNonce = nextNonce
 	return nil
 }
 

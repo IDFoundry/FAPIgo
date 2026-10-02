@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -452,5 +453,43 @@ func TestDiscoverRejectsNilFetcher(t *testing.T) {
 	}
 	if _, err := client.Discover(context.Background(), nil, issuer); err == nil {
 		t.Fatalf("Discover(nil fetcher) = nil error, want error")
+	}
+}
+
+// TestDiscoverRejectsMalformedOptionalEndpoint covers each optional
+// endpoint the way TestDiscoverRejectsMalformedUserinfoEndpoint covers
+// userinfo_endpoint: absent is fine, malformed is an error naming it.
+func TestDiscoverRejectsMalformedOptionalEndpoint(t *testing.T) {
+	const malformed = "not-a-url://%zz"
+	for field, set := range map[string]func(*discoveryDoc){
+		"authorization_endpoint":                func(d *discoveryDoc) { d.AuthorizationEndpoint = malformed },
+		"pushed_authorization_request_endpoint": func(d *discoveryDoc) { d.PushedAuthorizationRequestEndpoint = malformed },
+		"backchannel_authentication_endpoint":   func(d *discoveryDoc) { d.BackchannelAuthenticationEndpoint = malformed },
+	} {
+		t.Run(field, func(t *testing.T) {
+			var ts *httptest.Server
+			ts = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				doc := discoveryDoc{
+					Issuer:                             ts.URL,
+					AuthorizationEndpoint:              ts.URL + "/authorize",
+					TokenEndpoint:                      ts.URL + "/token",
+					PushedAuthorizationRequestEndpoint: ts.URL + "/par",
+					JWKSURI:                            ts.URL + "/jwks",
+				}
+				set(&doc)
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(doc)
+			}))
+			defer ts.Close()
+
+			issuer, err := fapi.ParseIssuerURL(ts.URL, fapi.AllowLoopbackHTTP())
+			if err != nil {
+				t.Fatalf("ParseIssuerURL: %v", err)
+			}
+			_, err = client.Discover(context.Background(), newDiscoveryFetcher(t, ts), issuer, fapi.AllowLoopbackHTTP())
+			if err == nil || !strings.Contains(err.Error(), field) {
+				t.Fatalf("Discover(malformed %s) = %v, want an error naming it", field, err)
+			}
+		})
 	}
 }

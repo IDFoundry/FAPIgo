@@ -143,18 +143,7 @@ func (p *parser) token68() (string, bool) {
 func (p *parser) authParams() (map[string]string, error) {
 	params := map[string]string{}
 	for {
-		p.skipSpaces()
-		name := p.token()
-		if name == "" {
-			return nil, ErrMalformed
-		}
-		p.skipSpaces()
-		if p.done() || p.peek() != '=' {
-			return nil, ErrMalformed
-		}
-		p.pos++
-		p.skipSpaces()
-		value, err := p.paramValue()
+		name, value, err := p.authParam()
 		if err != nil {
 			return nil, err
 		}
@@ -163,25 +152,59 @@ func (p *parser) authParams() (map[string]string, error) {
 			return nil, ErrMalformed
 		}
 		params[key] = value
-		p.skipSpaces()
-		if p.done() {
-			return params, nil
+		more, err := p.afterParam()
+		if err != nil {
+			return nil, err
 		}
-		if p.peek() != ',' {
-			return nil, ErrMalformed
-		}
-		// A comma ends this parameter; it also ends the challenge if
-		// what follows is a new scheme rather than another parameter.
-		save := p.pos
-		p.skipListSeparators()
-		if p.done() {
-			return params, nil
-		}
-		if !p.nextIsParam() {
-			p.pos = save
+		if !more {
 			return params, nil
 		}
 	}
+}
+
+// authParam parses one "auth-param": token BWS "=" BWS ( token /
+// quoted-string ).
+func (p *parser) authParam() (name, value string, err error) {
+	p.skipSpaces()
+	name = p.token()
+	if name == "" {
+		return "", "", ErrMalformed
+	}
+	p.skipSpaces()
+	if p.done() || p.peek() != '=' {
+		return "", "", ErrMalformed
+	}
+	p.pos++
+	p.skipSpaces()
+	value, err = p.paramValue()
+	if err != nil {
+		return "", "", err
+	}
+	return name, value, nil
+}
+
+// afterParam consumes what follows a parameter, reporting whether
+// another parameter of the same challenge follows.
+func (p *parser) afterParam() (more bool, err error) {
+	p.skipSpaces()
+	if p.done() {
+		return false, nil
+	}
+	if p.peek() != ',' {
+		return false, ErrMalformed
+	}
+	// A comma ends this parameter; it also ends the challenge if
+	// what follows is a new scheme rather than another parameter.
+	save := p.pos
+	p.skipListSeparators()
+	if p.done() {
+		return false, nil
+	}
+	if !p.nextIsParam() {
+		p.pos = save
+		return false, nil
+	}
+	return true, nil
 }
 
 // nextIsParam reports whether the text at pos is "token BWS =".

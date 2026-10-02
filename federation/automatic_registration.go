@@ -790,31 +790,45 @@ func assertionAlgorithms(m relyingPartyMetadata, defaultAlgs []fapi.SignatureAlg
 	single := m.TokenEndpointAuthSigningAlg
 	list := m.TokenEndpointAuthSigningAlgValuesSupported
 	if single != "" {
-		if len(list) > 0 && !slices.Contains(list, single) {
-			return nil, fmt.Errorf("token_endpoint_auth_signing_alg %q is not among token_endpoint_auth_signing_alg_values_supported", single)
-		}
-		alg, err := fapi.ParseSignatureAlgorithm(single)
-		if err != nil {
-			return nil, fmt.Errorf("token_endpoint_auth_signing_alg: %w", err)
-		}
-		return []fapi.SignatureAlgorithm{alg}, nil
+		return declaredAssertionAlgorithm(single, list)
 	}
 	if len(list) > 0 {
-		var algs []fapi.SignatureAlgorithm
-		for _, name := range list {
-			if alg, err := fapi.ParseSignatureAlgorithm(name); err == nil && !slices.Contains(algs, alg) {
-				algs = append(algs, alg)
-			}
-		}
-		if len(algs) == 0 {
-			return nil, fmt.Errorf("none of token_endpoint_auth_signing_alg_values_supported %v is supported", list)
-		}
-		return algs, nil
+		return supportedAssertionAlgorithms(list)
 	}
 	if len(defaultAlgs) == 0 {
 		return nil, fmt.Errorf("token_endpoint_auth_signing_alg is required for private_key_jwt: no default algorithms are configured")
 	}
 	return slices.Clone(defaultAlgs), nil
+}
+
+// declaredAssertionAlgorithm is assertionAlgorithms' answer when the RP
+// declared token_endpoint_auth_signing_alg: that one algorithm, which
+// must be among list, its declared supported algorithms, when it
+// declared any.
+func declaredAssertionAlgorithm(single string, list []string) ([]fapi.SignatureAlgorithm, error) {
+	if len(list) > 0 && !slices.Contains(list, single) {
+		return nil, fmt.Errorf("token_endpoint_auth_signing_alg %q is not among token_endpoint_auth_signing_alg_values_supported", single)
+	}
+	alg, err := fapi.ParseSignatureAlgorithm(single)
+	if err != nil {
+		return nil, fmt.Errorf("token_endpoint_auth_signing_alg: %w", err)
+	}
+	return []fapi.SignatureAlgorithm{alg}, nil
+}
+
+// supportedAssertionAlgorithms is list's algorithms this package
+// implements, once each, in list's order.
+func supportedAssertionAlgorithms(list []string) ([]fapi.SignatureAlgorithm, error) {
+	var algs []fapi.SignatureAlgorithm
+	for _, name := range list {
+		if alg, err := fapi.ParseSignatureAlgorithm(name); err == nil && !slices.Contains(algs, alg) {
+			algs = append(algs, alg)
+		}
+	}
+	if len(algs) == 0 {
+		return nil, fmt.Errorf("none of token_endpoint_auth_signing_alg_values_supported %v is supported", list)
+	}
+	return algs, nil
 }
 
 // allowsClientAuthMethod reports whether method is permitted by

@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 // RARDefinition captures the wire contract for one Rich Authorization
@@ -374,11 +375,33 @@ func checkJSONDepth(raw []byte, maxDepth int) error {
 }
 
 // checkNoDuplicateTopLevelKeys reports whether raw — expected to be a
-// JSON object — repeats a top-level member name. It does not recurse
+// JSON object — repeats a top-level member name, or spells "type" other
+// than exactly so. Names that differ only in case count as repeats:
+// encoding/json matches a member to a field case-insensitively, so of
+// {"amount":"1","AMOUNT":"1000"} it reads the last, where a
+// case-sensitive reader of the same issued token reads the first, and it
+// reads {"TYPE":"b"} as type "b" where that reader finds no type at all.
+// It does not recurse
 // into nested objects/arrays; encoding/json's own decode already applies
 // DisallowUnknownFields for whatever shape a RARDefinition's T declares,
 // so a duplicate nested member can only smuggle in a value the target
 // struct doesn't expose to begin with.
+// foldKey maps name to one spelling shared by every name it equals under
+// Unicode simple case folding (strings.EqualFold), as encoding/json
+// compares member names: each rune becomes the least of its fold orbit,
+// so "K", "k" and the Kelvin sign all map to "K".
+func foldKey(name string) string {
+	var b strings.Builder
+	for _, r := range name {
+		least := r
+		for f := unicode.SimpleFold(r); f != r; f = unicode.SimpleFold(f) {
+			least = min(least, f)
+		}
+		b.WriteRune(least)
+	}
+	return b.String()
+}
+
 func checkNoDuplicateTopLevelKeys(raw json.RawMessage) error {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	tok, err := dec.Token()
@@ -390,7 +413,8 @@ func checkNoDuplicateTopLevelKeys(raw json.RawMessage) error {
 		return fmt.Errorf("extension: authorization_details object must be a JSON object")
 	}
 
-	seen := make(map[string]struct{})
+	seen := make(map[string]string) // by foldKey, the name as spelled
+	typeKey := foldKey("type")
 	for dec.More() {
 		keyTok, err := dec.Token()
 		if err != nil {
@@ -400,10 +424,14 @@ func checkNoDuplicateTopLevelKeys(raw json.RawMessage) error {
 		if !ok {
 			return fmt.Errorf("extension: malformed object key")
 		}
-		if _, dup := seen[key]; dup {
-			return fmt.Errorf("%w: %q", ErrDuplicateMember, key)
+		folded := foldKey(key)
+		if first, dup := seen[folded]; dup {
+			return fmt.Errorf("%w: %q and %q", ErrDuplicateMember, first, key)
 		}
-		seen[key] = struct{}{}
+		if folded == typeKey && key != "type" {
+			return fmt.Errorf("%w: %q is not \"type\"", ErrDuplicateMember, key)
+		}
+		seen[folded] = key
 
 		var skip json.RawMessage
 		if err := dec.Decode(&skip); err != nil {

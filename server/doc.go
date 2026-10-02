@@ -8,10 +8,16 @@
 // RefreshAccessToken, the CIBA methods BeginBackchannelAuthentication,
 // LookupBackchannelInteraction (which reads a pending request back),
 // CompleteBackchannelAuthentication and ExchangeBackchannelAuthentication,
-// RequestClientCredentialsToken, SignUserInfoResponse, Metadata,
-// PublicJWKS and (for OpenID Federation) EntityConfiguration — that
-// only ever consume client-generated artefacts and validate them
-// against server-held state and policy. Metadata and PublicJWKS are the
+// RequestClientCredentialsToken, RevokeGrant, BuildAuthorizationErrorRedirect,
+// SignUserInfoResponse, Metadata, PublicJWKS and (for OpenID Federation)
+// EntityConfiguration — that only ever consume client-generated
+// artefacts and validate them against server-held state and policy.
+// AuthenticateAttestedClient and VerifyTokenRequestBinding serve an
+// embedder's own grant at the token endpoint (Config.AdditionalGrantTypes)
+// — OpenID4VCI's pre-authorized_code, say — with exactly the checks,
+// and the replay records, this package's own grants use; they are
+// scoped to one endpoint's client authentication and sender-constraint
+// checks, not generic JWT primitives. Metadata and PublicJWKS are the
 // exceptions: Metadata describes the server itself rather than
 // processing a request, and is derived entirely from Config with no
 // dependency I/O; PublicJWKS reports this server's own current public
@@ -53,8 +59,13 @@
 //   - A grant can be revoked as a whole: an application that names it
 //     when authorizing (GrantedAuthorization.GrantID) can later call
 //     RevokeGrant, which stops its authorization code, its refresh
-//     token, and — at a resource.Verifier reading the same revocation
-//     store — every access token issued from it.
+//     token, an approved CIBA auth_req_id, and — at a resource.Verifier
+//     reading the same revocation store — every access token issued
+//     from it.
+//   - The client's authentication requirements reach the application
+//     (InteractionRequest.ACRValues, MaxAge and HasMaxAge), and max_age
+//     is enforced: CompleteAuthorization answers login_required when the
+//     authentication time the application reports is older.
 //   - AuthorizationAction (from BeginAuthorization) and AuthorizationResult
 //     (from CompleteAuthorization) are closed sum types, not structs with
 //     optional fields, so a caller can never mistake a local error for a

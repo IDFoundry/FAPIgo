@@ -54,6 +54,7 @@ fapigo/                    // package fapi: shared value types only
 ├── client/                // RP public API
 ├── server/                // AS public API
 ├── resource/              // RS verification API
+├── serverresource/        // a resource.Verifier matching a server in the same process
 ├── federation/            // OpenID Federation 1.0 leaf-entity primitives — a shared
 │                           // subsystem package like keys/storage, not a fourth role
 ├── extension/             // shared custom-parameter & RAR definitions
@@ -82,13 +83,20 @@ fapigo/                    // package fapi: shared value types only
 │   ├── httperror/               // shared error-type (server/resource/federation) mechanical bookkeeping
 │   ├── critical/                 // JWS/JWE "crit" header parameter check (RFC 7515/7516)
 │   ├── authchallenge/           // WWW-Authenticate challenge parsing (RFC 9110 §11)
+│   ├── grantrevocation/         // the grant_id claim and revocation key shared by server and resource
 │   ├── canonical/               // URL/JSON canonicalization
 │   ├── strictjson/              // case-sensitive JSON member names for JOSE/metadata decoding
 │   └── validation/               // generic strict-parsing helpers
-└── conformance/
-    ├── client/                  // OIDF RP/client test plan config + scripts
-    ├── server/                  // OIDF AS test plan config + scripts
-    └── resource/                 // RS verification test vectors (not covered by OIDF)
+├── cmd/
+│   ├── conformance-as/             // the AS (and its RS) the OIDF suite tests, built on server/resource
+│   ├── conformance-client/         // the RP the OIDF suite tests, built on client
+│   └── conformance-federation-trust-anchor/ // a Trust Anchor for the federation test plans
+├── conformance/
+│   ├── client/                  // OIDF RP/client test plan config + scripts
+│   ├── server/                  // OIDF AS test plan config + scripts
+│   └── resource/                 // RS verification test vectors (not covered by OIDF)
+└── examples/                    // runnable demos, each its own module, public API only (see examples/README.md)
+    └── internal/demokit/          // the demos' shared local TLS, CA and host routing
 ```
 
 ## Design rules
@@ -140,7 +148,10 @@ that operation.
 `BeginAuthorization` → `AuthorizationSession` (opaque, carries the
 authorization URL and a session handle) → `HandleAuthorizationResponse`
 → `ExchangeCode`, or the combined `CompleteAuthorization` so a caller
-cannot skip callback validation before exchanging a code. The
+cannot skip callback validation before exchanging a code; then
+`RefreshTokens` for a new access token from the same grant. CIBA
+(`BeginBackchannelAuthentication` → `PollBackchannelAuthentication`)
+and `RequestClientCredentialsToken` are the other two flows. The
 intermediate `ValidatedAuthorizationResponse` is opaque and can only be
 constructed by `HandleAuthorizationResponse`.
 
@@ -275,8 +286,13 @@ a PAR body or similar wire-level payload.
 ### 7. Server: a state machine over client-generated artefacts
 
 `PushAuthorizationRequest` → `BeginAuthorization` → `CompleteAuthorization`
-→ `ExchangeAuthorizationCode` → `RefreshAccessToken`, plus `Metadata` and
-`PublicJWKS`. The server only ever verifies; it must not expose
+→ `ExchangeAuthorizationCode` → `RefreshAccessToken`, plus `RevokeGrant`
+to withdraw a grant, the CIBA and client credentials grants, `Metadata`
+and `PublicJWKS`. `AuthenticateAttestedClient` and
+`VerifyTokenRequestBinding` let an embedder serve its own grant type at
+the same token endpoint; they fit this rule because each is one
+endpoint's own check, run exactly as the server's own grants run it,
+not a generic primitive. The server only ever verifies; it must not expose
 `client`'s request-building functionality, and it must not expose a
 generic `HandleRequest(map[string]any)` or bare `ValidateJWT(token
 string)` — which claims, algorithms, audiences, replay checks and key

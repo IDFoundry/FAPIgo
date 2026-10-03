@@ -23,6 +23,7 @@ func TestNativeRedirectURIsAtRegistration(t *testing.T) {
 		"myapp:/callback":                             false, // RFC 8252 §8.4: no "."
 		"http://localhost/callback":                   false, // §8.3: not a name
 		"http://127.0.0.2/callback":                   false,
+		"http://[::ffff:127.0.0.1]/callback":          false, // IPv4-mapped: not the literal
 		"http://wallet.example/callback":              false,
 		"com.example.app://host/callback":             false,
 	} {
@@ -75,5 +76,22 @@ func TestNativeLoopbackMatchesAnyPort(t *testing.T) {
 	}
 	if web.ApplicationType() != ApplicationTypeWeb || native.ApplicationType() != ApplicationTypeNative {
 		t.Error("ApplicationType() doesn't report the registration")
+	}
+}
+
+func TestApplicationTypeWireValues(t *testing.T) {
+	for _, typ := range []ApplicationType{ApplicationTypeWeb, ApplicationTypeNative} {
+		got, err := ParseApplicationType(typ.String())
+		if err != nil || got != typ || !typ.IsValid() {
+			t.Errorf("ParseApplicationType(%q) = %v, %v; want %v", typ.String(), got, err, typ)
+		}
+	}
+	for _, s := range []string{"", "Native", "mobile"} {
+		if _, err := ParseApplicationType(s); err == nil {
+			t.Errorf("ParseApplicationType(%q) = nil error", s)
+		}
+	}
+	if ApplicationType(9).IsValid() || ApplicationType(9).String() != "" {
+		t.Error("an unknown ApplicationType is valid, or has a wire value")
 	}
 }

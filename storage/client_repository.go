@@ -51,7 +51,8 @@ const (
 	// RFC 8252's native-app redirect URIs, in production as well:
 	//
 	//   - a private-use URI scheme (RFC 8252 §7.1), a domain name in
-	//     reverse order: com.example.app:/callback;
+	//     reverse order, then a single slash: com.example.app:/callback,
+	//     not com.example.app://callback;
 	//   - loopback http (§7.3) to the IP literal 127.0.0.1 or [::1], never
 	//     "localhost" (§8.3), matched on any port at request time;
 	//   - a claimed https URI (§7.2), as for a web application.
@@ -791,7 +792,8 @@ func (c RegisteredClient) AllowsAuthorizationCodeGrant() bool { return len(c.red
 
 // HasRedirectURI reports whether candidate is exactly one of this
 // client's registered redirect URIs (RegisteredRedirectURI.Equal
-// semantics — exact match, no normalization).
+// semantics — exact match, no normalization), but for a native client's
+// loopback redirect URI, which matches on any port (RFC 8252 §7.3).
 func (c RegisteredClient) HasRedirectURI(candidate string) bool {
 	for _, u := range c.redirectURIs {
 		if u.Equal(candidate) {
@@ -839,8 +841,9 @@ func checkApplicationType(cfg RegisteredClientConfig) error {
 // isLoopbackLiteral reports whether host is the IP literal 127.0.0.1 or
 // ::1, the loopback addresses RFC 8252 §7.3 names.
 func isLoopbackLiteral(host string) bool {
-	ip := net.ParseIP(host)
-	return ip != nil && (ip.Equal(net.IPv4(127, 0, 0, 1)) || ip.Equal(net.IPv6loopback))
+	// Spelled exactly: net.IP.Equal would also take the IPv4-mapped
+	// ::ffff:127.0.0.1.
+	return host == "127.0.0.1" || host == "::1"
 }
 
 // loopbackMatchesAnyPort reports whether candidate is the loopback http

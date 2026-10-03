@@ -135,9 +135,11 @@ type Config struct {
 
 	// RedirectURI, if set, replaces the package-level RedirectURI as the
 	// harness's client's registered and requested redirect URI — e.g. a
-	// loopback http one ("http://localhost:8080/callback"), which the
+	// loopback http one ("http://127.0.0.1:8080/callback"), which the
 	// harness's server (always AssuranceDevelopment) accepts per RFC 8252
-	// §7.3. The harness never dereferences it over the network; it only
+	// §7.3: matched exactly for a web client, on any port for a native
+	// one (ApplicationType), which must also use the IP literal rather
+	// than "localhost". The harness never dereferences it over the network; it only
 	// reads the query string back off the authorization endpoint's
 	// redirect, so it needn't be listening.
 	RedirectURI string

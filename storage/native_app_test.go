@@ -24,6 +24,11 @@ func TestNativeRedirectURIsAtRegistration(t *testing.T) {
 		"http://localhost/callback":                   false, // §8.3: not a name
 		"http://127.0.0.2/callback":                   false,
 		"http://[::ffff:127.0.0.1]/callback":          false, // IPv4-mapped: not the literal
+		"http://127.0.0.1:/callback":                  false, // an empty port: would never match
+		"http://[::1]:/callback":                      false,
+		"http://127.0.0.1:0/callback":                 false,
+		"http://127.0.0.1:99999/callback":             false,
+		"http://127.0.0.1:65535/callback":             true,
 		"http://wallet.example/callback":              false,
 		"com.example.app://host/callback":             false,
 	} {

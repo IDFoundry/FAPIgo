@@ -5,6 +5,7 @@ import (
 	"crypto"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -24,6 +25,16 @@ import (
 // BeginAuthorizationRequest is the input to Client.BeginAuthorization.
 type BeginAuthorizationRequest struct {
 	Scope []string
+
+	// RedirectPort, when not 0, is the port this authorization's
+	// response comes back on, in place of Config.RedirectURI's own: for a
+	// native app listening on loopback on a port the operating system
+	// picked for this flow (RFC 8252 §7.3), against a server that
+	// registered the client's loopback redirect URI to match any port.
+	// BeginAuthorization refuses it unless Config.RedirectURI is loopback
+	// http to the IP literal 127.0.0.1 or [::1]. The token request then
+	// names the same redirect URI, port and all.
+	RedirectPort uint16
 
 	// ACRValues optionally requests specific Authentication Context
 	// Class Reference values (OIDC Core §3.1.2.1), most-preferred first.
@@ -154,8 +165,9 @@ const errPushedAuthorizationRequestFailed = "pushed authorization request failed
 // pushed-authorization-request endpoint (RFC 9126), and persists
 // correlation state for the eventual callback.
 func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationRequest) (AuthorizationSession, error) {
-	if scopeErr := c.checkOAuthOnlyScope(req.Scope); scopeErr != nil {
-		return AuthorizationSession{}, scopeErr
+	redirectURI, reqErr := c.checkBeginRequest(req)
+	if reqErr != nil {
+		return AuthorizationSession{}, reqErr
 	}
 	state, err := generateRandomToken(c.deps.Random)
 	if err != nil {
@@ -183,7 +195,7 @@ func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 		// authorization request, not just a bare authentication call.
 		"client_id":             c.cfg.ClientID.String(),
 		"response_type":         "code",
-		"redirect_uri":          c.cfg.RedirectURI,
+		"redirect_uri":          redirectURI,
 		"scope":                 strings.Join(req.Scope, " "),
 		"state":                 state,
 		"nonce":                 nonce,
@@ -237,7 +249,7 @@ func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 		return AuthorizationSession{}, newError(ErrorInvalidResponse, "malformed pushed authorization request response", err)
 	}
 
-	if sessionErr := c.createSession(ctx, state, c.newSessionRecord(req, nonce, verifier), now); sessionErr != nil {
+	if sessionErr := c.createSession(ctx, state, c.newSessionRecord(req, redirectURI, nonce, verifier), now); sessionErr != nil {
 		return AuthorizationSession{}, sessionErr
 	}
 
@@ -546,14 +558,14 @@ func (c *Client) signPushedRequestForm(ctx context.Context, now time.Time, form,
 // newSessionRecord is what this authorization attempt's session keeps
 // for the callback and the code exchange: under message signing, the
 // response must arrive as a signed JARM response.
-func (c *Client) newSessionRecord(req BeginAuthorizationRequest, nonce, verifier string) sessionRecord {
+func (c *Client) newSessionRecord(req BeginAuthorizationRequest, redirectURI, nonce, verifier string) sessionRecord {
 	responseMode := responseModePlain
 	if c.cfg.Profile == ProfileFAPISecurityWithMessageSigning {
 		responseMode = responseModeJARM
 	}
 	record := sessionRecord{
 		Nonce: nonce, PKCEVerifier: verifier, Issuer: c.cfg.Issuer.String(),
-		RedirectURI: c.cfg.RedirectURI, ResponseMode: responseMode,
+		RedirectURI: redirectURI, ResponseMode: responseMode,
 	}
 	if req.HasMaxAge {
 		seconds := int64(req.MaxAge / time.Second) // as sent: whole seconds, rounded down
@@ -588,4 +600,26 @@ func maxAgeSeconds(maxAge time.Duration) (int64, *Error) {
 		return 0, newError(ErrorInvalidRequest, "max_age must be at most 100 years", nil)
 	}
 	return seconds, nil
+}
+
+// checkBeginRequest checks what BeginAuthorization can before it does
+// anything, and returns the redirect URI this authorization goes out
+// with: Config.RedirectURI, or that with req.RedirectPort.
+func (c *Client) checkBeginRequest(req BeginAuthorizationRequest) (string, *Error) {
+	if scopeErr := c.checkOAuthOnlyScope(req.Scope); scopeErr != nil {
+		return "", scopeErr
+	}
+	if req.RedirectPort == 0 {
+		return c.cfg.RedirectURI, nil
+	}
+	// The server matches a loopback redirect URI exactly but for its
+	// port, so only the port changes: the rest is spliced through as
+	// configured, never re-encoded.
+	const prefix = "http://"
+	u, err := url.Parse(c.cfg.RedirectURI)
+	if err != nil || !strings.HasPrefix(c.cfg.RedirectURI, prefix+u.Host) || u.User != nil || (u.Hostname() != "127.0.0.1" && u.Hostname() != "::1") {
+		return "", newError(ErrorInvalidRequest, "RedirectPort applies only to a loopback redirect URI, http://127.0.0.1/… or http://[::1]/…", nil)
+	}
+	host := net.JoinHostPort(u.Hostname(), strconv.Itoa(int(req.RedirectPort)))
+	return prefix + host + c.cfg.RedirectURI[len(prefix)+len(u.Host):], nil
 }

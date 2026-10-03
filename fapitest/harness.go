@@ -142,6 +142,12 @@ type Config struct {
 	// redirect, so it needn't be listening.
 	RedirectURI string
 
+	// ApplicationType registers the harness's client as a web
+	// application (storage.ApplicationTypeWeb, the zero value) or a
+	// native app (storage.ApplicationTypeNative), whose RedirectURI may
+	// be a private-use scheme, or loopback http matched on any port.
+	ApplicationType storage.ApplicationType
+
 	// IDTokenClaims, if set, is what the harness's auto-approving
 	// authorization endpoint grants as
 	// server.GrantedAuthorization.IDTokenClaims — application-supplied
@@ -528,6 +534,7 @@ func registeredClientConfig(cfg Config, sigAlg fapi.SignatureAlgorithm, contentE
 		ClientAssertionAlgorithm:     sigAlg,
 		RequestObjectAlgorithm:       sigAlg,
 		SenderConstrain:              cfg.SenderConstrain,
+		ApplicationType:              cfg.ApplicationType,
 		ClientAuthMethod:             cfg.ClientAuthMethod,
 		AllowedScopes:                []string{"openid", "accounts", "offline_access"},
 		AllowsClientCredentialsGrant: cfg.ClientCredentialsGrant,

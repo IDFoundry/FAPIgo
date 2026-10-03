@@ -76,7 +76,7 @@ func checkStoreAssurance(name string, store any) error {
 // checkRandom requires random to be crypto/rand.Reader itself.
 func checkRandom(random io.Reader) error {
 	if random != rand.Reader {
-		return fmt.Errorf("client: dependencies: random must be crypto/rand.Reader under AssuranceProduction")
+		return fmt.Errorf("client: dependencies: random must be crypto/rand.Reader itself under AssuranceProduction: pass it directly, not a wrapper, which nothing can verify reads a CSPRNG")
 	}
 	return nil
 }

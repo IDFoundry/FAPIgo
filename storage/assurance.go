@@ -36,7 +36,12 @@ type Capabilities struct {
 	// AtomicConsume means every Consume/Redeem/BeginAuthorization/
 	// CompleteAuthorization-style method is a single atomic
 	// check-and-retire operation: two concurrent calls for the same key
-	// can never both succeed.
+	// can never both succeed. For a store used by one process only — a
+	// native app's own session store — a mutex around the read and the
+	// delete gives that. A store other processes also open (an app
+	// extension or widget sharing the app's data container) needs what
+	// holds across processes: a file lock, or the database's own
+	// transaction.
 	AtomicConsume bool
 
 	// SerializableRedemption means concurrent operations on *different*

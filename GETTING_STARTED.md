@@ -115,8 +115,11 @@ A mobile or desktop app — a wallet, say — registers with
 redirect URIs RFC 8252 gives native apps, in production too: a
 private-use scheme in reverse-domain form
 (`com.example.wallet:/callback`), or loopback http to `127.0.0.1` or
-`[::1]`, which matches on whatever port the app listens on. A web
-client can use neither. A native client still authenticates like any
+`[::1]`, which matches on whatever port the app listens on. Write the
+private-use form with a single slash, as RFC 8252 §7.1 does:
+`com.example.wallet:/callback`, not `com.example.wallet://callback`. In
+production a web client can use neither; under development assurance
+it may use loopback http, matched exactly. A native client still authenticates like any
 other: give each app instance its own credentials, as attestation-based
 client authentication does.
 

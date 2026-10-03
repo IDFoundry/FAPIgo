@@ -381,6 +381,12 @@ type Config struct {
 	// names.
 	RedirectURI string
 
+	// CallbackBinding is how an authorization callback is tied to the
+	// user agent that began it (RFC 9700 §4.7) — see CallbackBinding.
+	// The zero value, CallbackBindingSessionHandle, is right for every
+	// browser-based client.
+	CallbackBinding CallbackBinding
+
 	Endpoints  Endpoints
 	Profile    Profile
 	Algorithms Algorithms
@@ -548,4 +554,43 @@ type FederationConfig struct {
 	// since a federation identity key is never reused as a protocol
 	// key. Required when EntityID is set.
 	Algorithm fapi.SignatureAlgorithm
+}
+
+// CallbackBinding is how HandleAuthorizationResponse ties a callback to
+// the user agent that began its authorization, against login CSRF (RFC
+// 9700 §4.7): the attacker starts a flow as themselves and delivers its
+// callback to a victim, whose user agent would complete it.
+type CallbackBinding uint8
+
+const (
+	// CallbackBindingSessionHandle requires AuthorizationCallback.Session:
+	// the SessionHandle the application kept with the user agent that
+	// began the flow (a cookie; client/sessioncookie). A callback whose
+	// state doesn't match it is refused. The zero value, and the only
+	// right choice wherever Dependencies.Sessions holds more than one
+	// user agent's sessions — any server-side store — since an attacker's
+	// own session is found there by its state too.
+	CallbackBindingSessionHandle CallbackBinding = iota
+
+	// CallbackBindingDeviceLocalStore is for a native app whose
+	// Dependencies.Sessions is its own storage on the device, which
+	// nothing but this app writes. A session found there by a callback's
+	// state was begun by this app, so AuthorizationCallback.Session may
+	// be left empty: the session is the callback's own state, taken from
+	// the verified signed response under Message Signing. That lets an
+	// app the operating system stopped mid-authorization complete it
+	// after relaunching, with no handle kept. (An app may instead save
+	// Handle().String() on the device and pass it back, as any client
+	// does.) A Session that is given is still compared. Any authorization
+	// still pending in the store can be completed this way, not only the
+	// latest, so keep Limits.SessionLifetime short. Never set it for a
+	// store a server shares between users: it would bring login CSRF
+	// back.
+	CallbackBindingDeviceLocalStore
+)
+
+// IsValid reports whether b is one of this package's CallbackBinding
+// values.
+func (b CallbackBinding) IsValid() bool {
+	return b == CallbackBindingSessionHandle || b == CallbackBindingDeviceLocalStore
 }

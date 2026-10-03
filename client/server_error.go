@@ -88,6 +88,12 @@ func parErrorFromResponse(status int, body []byte) *Error {
 	resp := newServerErrorResponse(status, errResp.Code, errResp.Description, errResp.URI)
 	code := errResp.Code
 	if resp.Code == "" {
+		// Quoted, and cut short: only bounded text from the server
+		// reaches Error().
+		const maxShown = 64
+		if len(code) > maxShown {
+			code = code[:maxShown] + "…"
+		}
 		code = strconv.Quote(code)
 	}
 	return newError(ErrorInvalidResponse, resp.Description, fmt.Errorf("authorization server error: %s", code)).

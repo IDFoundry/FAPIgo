@@ -301,3 +301,17 @@ func TestCallbackDeniedEnforcesErrorCharacterSet(t *testing.T) {
 		})
 	}
 }
+
+// TestPARErrorBoundsAMalformedCode covers an error code that isn't RFC
+// 6749 error text and is long: Error() shows only its first 64 bytes.
+func TestPARErrorBoundsAMalformedCode(t *testing.T) {
+	long := "bad\n" + strings.Repeat("x", 500)
+	c := newPARErrorTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": long})
+	})
+	if msg := beginAuthorizationError(t, c).Error(); strings.Contains(msg, strings.Repeat("x", 100)) || !strings.Contains(msg, "xxx") {
+		t.Errorf("Error() = %q, want the malformed code cut to 64 bytes", msg)
+	}
+}

@@ -41,9 +41,8 @@ func generateRandomToken(random io.Reader) (string, error) {
 // HandleAuthorizationResponse and CompleteAuthorization reject a
 // callback whose Session doesn't match its "state".
 //
-// A native app whose session store is its own on-device storage, and
-// declares storage.Capabilities.SingleUserAgent, has that binding
-// already: see AuthorizationCallback.Session.
+// A native app whose session store is its own on-device storage has that
+// binding already: see CallbackBindingDeviceLocalStore.
 type SessionHandle struct {
 	value string
 }

@@ -124,7 +124,10 @@ that listens on a port the operating system picks for each flow sets
 `Config.RedirectURI` to the port-less loopback URI and passes the port
 as `client.BeginAuthorizationRequest.RedirectPort`. A native client still authenticates like any
 other: give each app instance its own credentials, as attestation-based
-client authentication does.
+client authentication does. The rest of the native app's side — keys in
+the platform key store, an on-device session store, completing after
+the app is relaunched, token storage — is in `client`'s package doc,
+under "Native apps".
 
 ## 4. Wire `Dependencies` and construct the server
 

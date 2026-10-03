@@ -218,6 +218,9 @@ func validateAuthMethodAlgorithms(cfg Config) error {
 	// Algorithms.DPoP is required only under SenderConstrainDPoP (the
 	// default) — an mTLS-sender-constrained client never builds a DPoP
 	// proof at all, so it never needs a DPoP signing algorithm.
+	if !cfg.CallbackBinding.IsValid() {
+		return fmt.Errorf("client: config: callback_binding %d is not a CallbackBinding", cfg.CallbackBinding)
+	}
 	if cfg.SenderConstrain == storage.SenderConstrainDPoP && !cfg.Algorithms.DPoP.IsValid() {
 		return fmt.Errorf("client: config: algorithms.dpop is required when sender_constrain is SenderConstrainDPoP")
 	}

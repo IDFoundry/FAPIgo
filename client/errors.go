@@ -21,10 +21,13 @@ const (
 	ErrorResponseTooLarge ErrorCode = "response_too_large"
 )
 
-// Error is the error type every public Client method returns. Code and
-// PublicDescription are safe to surface to the embedding application
-// (e.g. in a UI message); the underlying cause (available via Unwrap,
-// and included in Error's own message) is for logs only.
+// Error is the error type every public Client method returns. Code is
+// safe to surface to the embedding application. PublicDescription is
+// this package's own text, or, when the error came from a server's error
+// response, that server's error_description (see ServerResponse): meant
+// for an operator, not shown to a user as is. The underlying cause
+// (available via Unwrap, and included in Error's own message) is for
+// logs only.
 type Error struct {
 	code        ErrorCode
 	description string
@@ -50,7 +53,8 @@ func (e *Error) PublicDescription() string { return e.description }
 // It never includes a response body. It may include text the remote
 // server wrote: an authorization server error response's
 // error_description (PublicDescription), limited to RFC 6749's printable
-// ASCII, and its error code — quoted, when it isn't RFC 6749 error text.
+// ASCII, and its error code — quoted, and cut to 64 bytes, when it isn't
+// RFC 6749 error text.
 // Where only this client's own words may be logged, log Code() and
 // ServerResponse()'s Code and HTTPStatus instead.
 func (e *Error) Error() string {

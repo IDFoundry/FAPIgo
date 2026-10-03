@@ -6,6 +6,7 @@
 ### Features
 
 * **client:** pick a loopback redirect port per authorization ([48bfaac](https://github.com/IDFoundry/FAPIgo/commit/48bfaac9263c43583b599f38b9b691089e2024ac))
+* **fapitest:** Config.ApplicationType, for tests against a client registered as a native app
 
 
 ### Bug Fixes

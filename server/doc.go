@@ -17,7 +17,10 @@
 // — OpenID4VCI's pre-authorized_code, say — with exactly the checks,
 // and the replay records, this package's own grants use; they are
 // scoped to one endpoint's client authentication and sender-constraint
-// checks, not generic JWT primitives. Metadata and PublicJWKS are the
+// checks, not generic JWT primitives. CheckClientRegistration checks a
+// client's registration against this server's configuration (a Rich
+// Authorization Request type Config.RAR doesn't register), for an
+// application to call when it registers a client. Metadata and PublicJWKS are the
 // exceptions: Metadata describes the server itself rather than
 // processing a request, and is derived entirely from Config with no
 // dependency I/O; PublicJWKS reports this server's own current public

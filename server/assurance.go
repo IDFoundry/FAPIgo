@@ -19,9 +19,11 @@ const (
 	// AssuranceDevelopment permits a configuration meant for local
 	// development only — most importantly, it does not require an
 	// AuditSink or a store that declares storage.StoreAssurance
-	// capabilities. It also accepts loopback http redirect URIs
-	// (RFC 8252 §7.3, e.g. "http://localhost:8080/callback"), which
-	// AssuranceProduction refuses at the pushed authorization request.
+	// capabilities. It also accepts a web client's loopback http redirect
+	// URIs (RFC 8252 §7.3, e.g. "http://localhost:8080/callback"), which
+	// AssuranceProduction refuses at the pushed authorization request. A
+	// client registered as storage.ApplicationTypeNative may use loopback
+	// http, and a private-use scheme, under either level.
 	AssuranceDevelopment
 
 	// AssuranceProduction rejects a configuration missing anything this
@@ -66,10 +68,11 @@ const (
 	// token, jti and DPoP nonce this server issues is only as
 	// unguessable as that reader, and nothing about an io.Reader says
 	// whether it is a CSPRNG.
-	// Unlike every check above, which New performs once, a client's
+	// Unlike every check above, which New performs once, a web client's
 	// loopback http redirect URI is refused per request, at the pushed
 	// authorization request, as invalid_request — redirect URIs belong
-	// to client registrations, which New never sees.
+	// to client registrations, which New never sees. A native client's
+	// (storage.ApplicationTypeNative) is accepted, as FAPI 2.0 allows.
 	AssuranceProduction
 )
 

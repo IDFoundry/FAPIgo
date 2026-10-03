@@ -134,12 +134,15 @@ identically:
   `MarshalText()` all redact; `Reveal()` is the only way to get the raw
   value out. `client.TokenSet`, `server.TokenResult` and any resource
   claim that carries a raw token value all use it.
-- **`URL`** (constructed via `ParseIssuerURL` / `ParseEndpointURL`, not a
-  bare `string`) — enforces absolute, HTTPS (except an explicitly
-  enabled loopback development mode), no fragment, no embedded
+- **`URL`** (constructed via `ParseIssuerURL` / `ParseEndpointURL` /
+  `ParseRedirectURL`, not a bare `string`) — enforces absolute, HTTPS
+  (except an explicitly enabled loopback exception, or, for a native
+  app's redirect, a private-use scheme), no fragment, no embedded
   credentials, normalized host. Registered redirect URIs are compared
   under OAuth registration semantics, never generic URL equivalence or
-  automatic normalization — see `fapi.RegisteredRedirectURI`.
+  automatic normalization — see `fapi.RegisteredRedirectURI` — but for
+  a native client's loopback redirect URI, which matches on any port
+  (RFC 8252 §7.3, §8.4).
 
 `SignatureAlgorithm` is a closed enum (`ES256`, `PS256`, ...), never a
 bare string accepted from a caller or read directly out of a JWT header

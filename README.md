@@ -46,6 +46,7 @@ variants and OAuth 2.0 attestation-based client authentication.
 - JAR / JARM · RAR (RFC 9396) · CIBA (poll & ping delivery)
 - Refresh tokens (not rotated, per FAPI 2.0) and whole-grant revocation
 - OpenID Connect: the `claims` parameter with per-claim consent, `acr_values` and enforced `max_age`, signed and encrypted ID tokens and UserInfo
+- Native apps (RFC 8252): private-use URI scheme and any-port loopback redirect URIs, for clients registered as native
 - Grants you serve yourself at the token endpoint (OpenID4VCI's `pre-authorized_code`, say), with the server's own client authentication and DPoP/mTLS checks
 - OpenID Federation 1.0 (trust chains, automatic client registration, trust marks)
 - OpenID Certified™ for OP, RP and FAPI-CIBA OP conformance profiles — see below
@@ -276,10 +277,12 @@ role is tested against the OpenID Foundation conformance suite.
 - [RFC 8705 — Mutual TLS Client Authentication and Certificate-Bound Access Tokens][mtls]
 - [OpenID Connect Client-Initiated Backchannel Authentication (CIBA) Core 1.0][ciba]
 - [RFC 9396 — Rich Authorization Requests][rar]
+- [RFC 8252 — OAuth 2.0 for Native Apps][native]
 
 [fapi2]: https://openid.net/specs/fapi-security-profile-2_0-final.html
 [fapi2-sign]: https://openid.net/specs/fapi-2_0-message-signing.html
 [par]: https://www.rfc-editor.org/info/rfc9126
+[native]: https://www.rfc-editor.org/info/rfc8252
 [dpop]: https://www.rfc-editor.org/info/rfc9449
 [mtls]: https://www.rfc-editor.org/info/rfc8705
 [ciba]: https://openid.net/specs/openid-client-initiated-backchannel-authentication-core-1_0.html

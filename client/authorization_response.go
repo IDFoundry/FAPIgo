@@ -24,9 +24,19 @@ type AuthorizationCallback struct {
 	// Session is the SessionHandle BeginAuthorization returned for this
 	// attempt, recovered from wherever the caller bound it to the user
 	// agent (see SessionHandle) — never from the callback itself.
-	// Required: a callback whose "state" doesn't match it is rejected
-	// before its session is consumed, so a callback URL delivered to a
-	// different browser can't complete someone else's flow.
+	// Required, unless Dependencies.Sessions declares
+	// storage.Capabilities.SingleUserAgent: a callback whose "state"
+	// doesn't match it is rejected before its session is consumed, so a
+	// callback URL delivered to a different browser can't complete
+	// someone else's flow.
+	//
+	// A native app whose session store is its own on-device storage —
+	// declaring SingleUserAgent — may leave it empty: the session is
+	// then the callback's own state, taken from the verified signed
+	// response under Message Signing. Nothing else writes that store, so
+	// a session found there was begun by this app. That is what lets an
+	// app the operating system stopped mid-authorization complete it
+	// after relaunching, with no handle kept in memory.
 	Session SessionHandle
 }
 
@@ -167,10 +177,16 @@ func (c *Client) consumeCallbackSession(ctx context.Context, cb AuthorizationCal
 	// Bind the callback to the user agent that began the flow (RFC 9700
 	// §4.7) before consuming anything: a mismatch leaves the session
 	// intact for its rightful browser.
-	if cb.Session.value == "" {
-		return sessionRecord{}, newError(ErrorInvalidRequest, "callback is not bound to a session: AuthorizationCallback.Session is required", nil)
+	session := cb.Session.value
+	if session == "" && c.sessionsSingleUserAgent() {
+		// The store holds only this user agent's sessions: one found by
+		// the callback's state is this user agent's.
+		session = state
 	}
-	if subtle.ConstantTimeCompare([]byte(state), []byte(cb.Session.value)) != 1 {
+	if session == "" {
+		return sessionRecord{}, newError(ErrorInvalidRequest, "callback is not bound to a session: AuthorizationCallback.Session is required unless Dependencies.Sessions declares storage.Capabilities.SingleUserAgent", nil)
+	}
+	if subtle.ConstantTimeCompare([]byte(state), []byte(session)) != 1 {
 		return sessionRecord{}, newError(ErrorInvalidRequest, "callback state does not match this user agent's session", nil)
 	}
 
@@ -289,4 +305,11 @@ func paramString(params map[string]json.RawMessage, key string) (string, bool) {
 		return "", false
 	}
 	return s, true
+}
+
+// sessionsSingleUserAgent reports whether Dependencies.Sessions declares
+// storage.Capabilities.SingleUserAgent.
+func (c *Client) sessionsSingleUserAgent() bool {
+	a, ok := c.deps.Sessions.(storage.StoreAssurance)
+	return ok && a.Capabilities().SingleUserAgent
 }

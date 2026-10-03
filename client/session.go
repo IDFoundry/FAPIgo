@@ -40,6 +40,10 @@ func generateRandomToken(random io.Reader) (string, error) {
 // CSRF, landing the victim in the attacker's account (RFC 9700 §4.7).
 // HandleAuthorizationResponse and CompleteAuthorization reject a
 // callback whose Session doesn't match its "state".
+//
+// A native app whose session store is its own on-device storage, and
+// declares storage.Capabilities.SingleUserAgent, has that binding
+// already: see AuthorizationCallback.Session.
 type SessionHandle struct {
 	value string
 }

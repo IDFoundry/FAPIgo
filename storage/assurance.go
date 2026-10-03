@@ -53,4 +53,17 @@ type Capabilities struct {
 
 	// EncryptedAtRest means persisted data is encrypted at rest.
 	EncryptedAtRest bool
+
+	// SingleUserAgent means a client.SessionStore holds only the
+	// authorizations begun by the one user agent it serves: a native
+	// app's own on-device storage, say, which nothing else writes. A
+	// session found by a callback's state was then begun by the user
+	// agent the callback reached, which is what binding the session
+	// handle to the user agent establishes (RFC 9700 §4.7), so the
+	// client may take the session from the callback itself
+	// (client.AuthorizationCallback.Session left empty). Never declare it
+	// for a store shared by many users' sessions — a web application's
+	// database, a server-side cache — where an attacker's own session is
+	// also found by its state, and the binding is what refuses it.
+	SingleUserAgent bool
 }

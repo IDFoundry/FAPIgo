@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.44.0](https://github.com/IDFoundry/FAPIgo/compare/v0.43.0...v0.44.0) (2026-10-03)
+
+
+### Features
+
+* **server:** accept native-app redirect URIs for clients registered as native ([d0fae2c](https://github.com/IDFoundry/FAPIgo/commit/d0fae2c377e43c20287eac5792708c0b912339e9))
+* **storage:** String, IsValid and ParseApplicationType ([cae4220](https://github.com/IDFoundry/FAPIgo/commit/cae42207065d5cbe538f20f7ee1b43b66332e605))
+
 ## [0.43.0](https://github.com/IDFoundry/FAPIgo/compare/v0.42.0...v0.43.0) (2026-10-02)
 
 

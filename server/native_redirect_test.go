@@ -2,7 +2,10 @@ package server_test
 
 import (
 	"context"
+	"strings"
 	"testing"
+
+	fapi "github.com/idfoundry/fapigo"
 
 	"github.com/idfoundry/fapigo/internal/clientassertion"
 	"github.com/idfoundry/fapigo/server"
@@ -117,5 +120,57 @@ func TestNativeClientPrivateUseRedirectWithJARM(t *testing.T) {
 	}
 	if q := assertRedirectsTo(t, result, testPrivateUseRedirectURI); len(q["response"]) != 1 {
 		t.Errorf("response query = %v, want a JARM response", q)
+	}
+}
+
+// TestBuildAuthorizationErrorRedirectHoldsTheRedirectPolicy covers the
+// error redirect a caller builds without a pushed authorization request:
+// it gets the same redirect policy PAR applies. Under production, a web
+// client's registered loopback or private-use URI is refused; a native
+// client's is accepted.
+func TestBuildAuthorizationErrorRedirectHoldsTheRedirectPolicy(t *testing.T) {
+	for name, tc := range map[string]struct {
+		uri     string
+		appType storage.ApplicationType
+		ok      bool
+	}{
+		"web, loopback":       {"http://127.0.0.1/callback", storage.ApplicationTypeWeb, false},
+		"web, localhost":      {"http://localhost/callback", storage.ApplicationTypeWeb, false},
+		"web, private-use":    {testPrivateUseRedirectURI, storage.ApplicationTypeWeb, false},
+		"native, private-use": {testPrivateUseRedirectURI, storage.ApplicationTypeNative, true},
+		"native, loopback":    {"http://127.0.0.1/callback", storage.ApplicationTypeNative, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarnessWithApplicationType(t, server.ProfileFAPISecurity, true, testRedirectURI, server.AssuranceProduction, storage.ApplicationTypeWeb)
+			client, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
+				ID: testClientID, RedirectURIs: []fapi.RegisteredRedirectURI{fapi.RegisteredRedirectURI(tc.uri)},
+				ClientAssertionAlgorithm: fapi.ES256, AllowedScopes: []string{"openid"}, ApplicationType: tc.appType,
+			})
+			if err != nil {
+				t.Fatalf("NewRegisteredClient: %v", err)
+			}
+			_, err = h.server.BuildAuthorizationErrorRedirect(context.Background(), client, tc.uri, "s", "access_denied", "")
+			if got := err == nil; got != tc.ok {
+				t.Errorf("BuildAuthorizationErrorRedirect(%q) = %v, want accepted %v", tc.uri, err, tc.ok)
+			}
+		})
+	}
+}
+
+// TestPARNamesTheNativeRegistration covers the refusal a native app's
+// integrator meets first — a native redirect URI on a client registered
+// as web — naming the registration that admits it, for the logs.
+func TestPARNamesTheNativeRegistration(t *testing.T) {
+	h := newHarnessWithApplicationType(t, server.ProfileFAPISecurity, true, testPrivateUseRedirectURI, server.AssuranceProduction, storage.ApplicationTypeWeb)
+	_, err := pushWithRedirectURI(t, h, testPrivateUseRedirectURI)
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequest)
+	}
+	if !strings.Contains(err.Error(), "ApplicationTypeNative") {
+		t.Errorf("cause = %v, want it to name ApplicationTypeNative", err)
+	}
+	h = newHarnessWithApplicationType(t, server.ProfileFAPISecurity, true, "http://rp.example/callback", server.AssuranceProduction, storage.ApplicationTypeWeb)
+	if _, err := pushWithRedirectURI(t, h, "http://rp.example/callback"); err == nil || strings.Contains(err.Error(), "ApplicationTypeNative") {
+		t.Errorf("cause = %v, want no native hint for a URI no registration admits", err)
 	}
 }

@@ -207,6 +207,11 @@ func (s *Server) BuildAuthorizationErrorRedirect(ctx context.Context, client sto
 	if !client.HasRedirectURI(redirectURI) {
 		return fapi.URL{}, newError(ErrorInvalidRequest, 400, "redirect_uri is not registered for this client", nil)
 	}
+	// What the pushed authorization request would have held it to: this
+	// redirect never went through one.
+	if _, err := s.parseRedirectURI(client, redirectURI); err != nil {
+		return fapi.URL{}, newError(ErrorInvalidRequest, 400, "redirect_uri is not an acceptable redirect destination", err)
+	}
 	dest, buildErr := s.buildAuthorizationResponse(ctx, client.ID(), redirectURI, map[string]string{
 		"error": errorCode, "state": state, "error_description": description,
 	})

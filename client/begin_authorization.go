@@ -615,9 +615,13 @@ func (c *Client) checkBeginRequest(req BeginAuthorizationRequest) (string, *Erro
 	// The server matches a loopback redirect URI exactly but for its
 	// port, so only the port changes: the rest is spliced through as
 	// configured, never re-encoded.
-	const prefix = "http://"
+	// Loopback redirects are http by definition (RFC 8252 §7.3, §8.3).
 	u, err := url.Parse(c.cfg.RedirectURI)
-	if err != nil || !strings.HasPrefix(c.cfg.RedirectURI, prefix+u.Host) || u.User != nil || (u.Hostname() != "127.0.0.1" && u.Hostname() != "::1") {
+	if err != nil || u.Scheme != "http" || u.User != nil || (u.Hostname() != "127.0.0.1" && u.Hostname() != "::1") {
+		return "", newError(ErrorInvalidRequest, "RedirectPort applies only to a loopback redirect URI, http://127.0.0.1/… or http://[::1]/…", nil)
+	}
+	prefix := u.Scheme + "://"
+	if !strings.HasPrefix(c.cfg.RedirectURI, prefix+u.Host) {
 		return "", newError(ErrorInvalidRequest, "RedirectPort applies only to a loopback redirect URI, http://127.0.0.1/… or http://[::1]/…", nil)
 	}
 	host := net.JoinHostPort(u.Hostname(), strconv.Itoa(int(req.RedirectPort)))

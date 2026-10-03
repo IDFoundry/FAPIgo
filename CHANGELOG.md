@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.45.0](https://github.com/IDFoundry/FAPIgo/compare/v0.44.0...v0.45.0) (2026-10-03)
+
+
+### Features
+
+* **client:** pick a loopback redirect port per authorization ([48bfaac](https://github.com/IDFoundry/FAPIgo/commit/48bfaac9263c43583b599f38b9b691089e2024ac))
+
+
+### Bug Fixes
+
+* **storage:** refuse a native loopback redirect URI with an unusable port ([541cde2](https://github.com/IDFoundry/FAPIgo/commit/541cde25d037413a393dd64fc2e2b502f5fbe878))
+
 ## [0.44.0](https://github.com/IDFoundry/FAPIgo/compare/v0.43.0...v0.44.0) (2026-10-03)
 
 

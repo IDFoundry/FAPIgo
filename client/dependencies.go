@@ -12,7 +12,11 @@ import (
 // nil value for any field — there is no implicit fallback (no default
 // clock, no silently-installed in-memory session store).
 type Dependencies struct {
-	// Sessions persists in-progress authorization-flow state.
+	// Sessions persists in-progress authorization-flow state, until
+	// Limits.SessionLifetime. Under AssuranceProduction it must declare
+	// Durable and AtomicConsume (storage.StoreAssurance). A native app's
+	// own on-device store: see "Native apps" in the package doc, and
+	// Config.CallbackBinding.
 	Sessions storage.SessionStore
 
 	// Keys performs this client's own signing operations: client

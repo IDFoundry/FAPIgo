@@ -17,10 +17,10 @@ type KeyCustody struct {
 	// For a client, it means a key outlives the process that made it
 	// until the client is done with it: an authorization in progress can
 	// be completed after a restart, and a DPoP-bound access or refresh
-	// token stays usable. A native app's keys created for one flow and
-	// deleted when it ends, but kept meanwhile in the platform's key
-	// store (the iOS Keychain or Secure Enclave, the Android Keystore),
-	// are Durable in this sense.
+	// token stays usable. A native app's keys created for one issuance,
+	// kept in the platform's key store (the iOS Keychain or Secure
+	// Enclave, the Android Keystore) and deleted only once the tokens
+	// bound to them are discarded, are Durable in this sense.
 	Durable bool
 
 	// CrossInstanceConsistent is true iff every instance of a

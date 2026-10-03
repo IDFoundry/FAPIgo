@@ -73,7 +73,9 @@
 // its own String form (ParseSessionHandle) — the caller stores it with
 // the user agent that began the flow (package client/sessioncookie does
 // this), and HandleAuthorizationResponse
-// rejects a callback that doesn't carry the matching one;
+// rejects a callback that doesn't carry the matching one — unless
+// Config.CallbackBinding is CallbackBindingDeviceLocalStore, for a
+// native app whose session store is its own (see "Native apps" below);
 // HandleAuthorizationResponse returns a closed sum type
 // rather than one struct with optional fields, so a caller can't assume
 // every callback carries a code; every DPoP proof, request-object
@@ -87,4 +89,43 @@
 // error response, when there was one, available through
 // Error.ServerResponse — not a bare error the caller has to
 // string-match.
+//
+// # Native apps
+//
+// A mobile or desktop app — a wallet, say — uses this package as any
+// client does, with these differences:
+//
+//   - Registration. The authorization server registers the client as a
+//     native app (storage.ApplicationTypeNative), so it may use a
+//     private-use scheme redirect, written with a single slash
+//     (com.example.wallet:/callback), or loopback http to 127.0.0.1 or
+//     [::1]. For loopback on a port the operating system picks per flow,
+//     set Config.RedirectURI without a port and pass the port as
+//     BeginAuthorizationRequest.RedirectPort. The app still
+//     authenticates: give each installation its own credentials, as
+//     attestation-based client authentication does.
+//   - Keys. Hold the DPoP and attestation keys in the platform's key
+//     store (the iOS Keychain or Secure Enclave, the Android Keystore)
+//     behind crypto.Signer, through keys.NewKeyManagerFromSigners with
+//     keys.DeclareCustody(keys.KeyCustody{Durable: true}) — see
+//     KeyCustody.Durable. Keep each key until the tokens bound to it are
+//     discarded. The Secure Enclave signs ES256 only.
+//   - Sessions. Dependencies.Sessions is the app's own durable storage
+//     (a file, SQLite) in its data container, declaring Durable and
+//     AtomicConsume (storage.Capabilities). A mutex makes Consume
+//     atomic for one process; an extension or widget sharing the
+//     container needs a file lock or a transaction.
+//   - Relaunch. If the operating system stops the app while the user is
+//     at the authorization server, the callback reaches a fresh process.
+//     Build the Client again from the same Config, keys and session
+//     store, and call CompleteAuthorization with the callback's
+//     RawQuery. Set Config.CallbackBinding to
+//     CallbackBindingDeviceLocalStore so it needs no SessionHandle, or
+//     save Handle().String() on the device when the flow begins and
+//     pass it back.
+//   - Tokens. Keep them between launches sealed, with a TokenSetSealer.
+//   - Errors. Error() may include text the authorization server wrote.
+//     An app that hands errors to platform code — gomobile turns a Go
+//     error into an NSError with Error() as its message — should map an
+//     *Error to Code() and ServerResponse() in its own Go layer instead.
 package client

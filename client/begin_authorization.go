@@ -142,7 +142,7 @@ func (r RequestedClaims) encode() (json.RawMessage, error) {
 // responseModePlain and responseModeJARM record how this session expects
 // its authorization response to arrive, so HandleAuthorizationResponse
 // can refuse a response that arrived a different way than requested —
-// see storage.NewSession.ExpectedResponseMode.
+// see sessionRecord.ResponseMode.
 const (
 	responseModePlain = "plain"
 	responseModeJARM  = "jarm"

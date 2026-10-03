@@ -309,12 +309,12 @@ func (p *identityProvider) authorize(w http.ResponseWriter, r *http.Request) {
 	// redirect URI it can be trusted with.
 	req, err := server.BeginAuthorizationRequestFromHTTP(r)
 	if err != nil {
-		p.w.renderError(w, http.StatusBadRequest, "Sign-in could not start", publicMessage(err, "The sign-in request is malformed."))
+		p.w.renderError(w, http.StatusBadRequest, signInFailedToStart, publicMessage(err, "The sign-in request is malformed."))
 		return
 	}
 	action, err := p.srv.BeginAuthorization(r.Context(), req)
 	if err != nil {
-		p.w.renderError(w, http.StatusInternalServerError, "Sign-in could not start", publicMessage(err, "Something went wrong. Please try again."))
+		p.w.renderError(w, http.StatusInternalServerError, signInFailedToStart, publicMessage(err, tryAgain))
 		return
 	}
 	switch a := action.(type) {
@@ -324,7 +324,7 @@ func (p *identityProvider) authorize(w http.ResponseWriter, r *http.Request) {
 		// to this interaction.
 		tag, err := p.interaction.Set(w, a, time.Now())
 		if err != nil {
-			p.w.renderError(w, http.StatusInternalServerError, "Sign-in could not start", publicMessage(err, "Something went wrong. Please try again."))
+			p.w.renderError(w, http.StatusInternalServerError, signInFailedToStart, publicMessage(err, tryAgain))
 			return
 		}
 		p.w.render(w, "consent", consentPage{
@@ -368,17 +368,17 @@ func (p *identityProvider) decide(w http.ResponseWriter, r *http.Request) {
 		}
 		subjectID, err := server.NewSubjectID(sub)
 		if err != nil {
-			p.w.renderError(w, http.StatusBadRequest, "No citizen chosen", publicMessage(err, "Something went wrong. Please try again."))
+			p.w.renderError(w, http.StatusBadRequest, "No citizen chosen", publicMessage(err, tryAgain))
 			return
 		}
 		subject, err := server.NewAuthenticatedSubject(subjectID)
 		if err != nil {
-			p.w.renderError(w, http.StatusInternalServerError, signInFailed, publicMessage(err, "Something went wrong. Please try again."))
+			p.w.renderError(w, http.StatusInternalServerError, signInFailed, publicMessage(err, tryAgain))
 			return
 		}
 		authCtx, err := server.NewAuthenticationContext(time.Now(), p.w.loaHighType, []string{"hwk"})
 		if err != nil {
-			p.w.renderError(w, http.StatusInternalServerError, signInFailed, publicMessage(err, "Something went wrong. Please try again."))
+			p.w.renderError(w, http.StatusInternalServerError, signInFailed, publicMessage(err, tryAgain))
 			return
 		}
 		var approved []string
@@ -395,7 +395,7 @@ func (p *identityProvider) decide(w http.ResponseWriter, r *http.Request) {
 	p.interaction.Clear(w)
 	outcome, err := p.srv.CompleteAuthorization(r.Context(), server.CompleteAuthorizationRequest{Handle: handle, Result: result})
 	if err != nil {
-		p.w.renderError(w, http.StatusInternalServerError, signInFailed, publicMessage(err, "Something went wrong. Please try again."))
+		p.w.renderError(w, http.StatusInternalServerError, signInFailed, publicMessage(err, tryAgain))
 		return
 	}
 	switch o := outcome.(type) {

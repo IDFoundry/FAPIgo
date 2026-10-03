@@ -27,8 +27,7 @@ func TestParseRedirectURL(t *testing.T) {
 		"http://rp.example/cb":                        false,
 		"":                                            false,
 	} {
-		_, err := fapi.ParseRedirectURL(raw, native...)
-		if got := err == nil; got != want {
+		if _, err := fapi.ParseRedirectURL(raw, native...); (err == nil) != want {
 			t.Errorf("ParseRedirectURL(%q, native) = %v, want accepted %v", raw, err, want)
 		}
 	}

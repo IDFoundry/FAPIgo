@@ -319,19 +319,19 @@ func (b *bank) authorize(w http.ResponseWriter, r *http.Request) {
 	// redirect URI it can be trusted with.
 	req, err := server.BeginAuthorizationRequestFromHTTP(r)
 	if err != nil {
-		b.w.renderError(w, bankHost, http.StatusBadRequest, "Sign-in could not start", publicMessage(err, "The sign-in request is malformed."))
+		b.w.renderError(w, bankHost, http.StatusBadRequest, signInFailedToStart, publicMessage(err, "The sign-in request is malformed."))
 		return
 	}
 	action, err := b.srv.BeginAuthorization(r.Context(), req)
 	if err != nil {
-		b.w.renderError(w, bankHost, http.StatusInternalServerError, "Sign-in could not start", publicMessage(err, "Something went wrong. Please try again."))
+		b.w.renderError(w, bankHost, http.StatusInternalServerError, signInFailedToStart, publicMessage(err, tryAgain))
 		return
 	}
 	switch a := action.(type) {
 	case server.InteractionRequired:
 		tag, err := b.interaction.Set(w, a, time.Now())
 		if err != nil {
-			b.w.renderError(w, bankHost, http.StatusInternalServerError, "Sign-in could not start", publicMessage(err, "Something went wrong. Please try again."))
+			b.w.renderError(w, bankHost, http.StatusInternalServerError, signInFailedToStart, publicMessage(err, tryAgain))
 			return
 		}
 		b.w.render(w, "consent", b.consentPage(a.Interaction, tag, ""))
@@ -403,14 +403,14 @@ func (b *bank) decide(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if result, err = authorizeAs(c, method, in, r.PostForm["claim"], time.Now()); err != nil {
-			b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, publicMessage(err, "Something went wrong. Please try again."))
+			b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, publicMessage(err, tryAgain))
 			return
 		}
 	}
 	b.interaction.Clear(w)
 	outcome, err := b.srv.CompleteAuthorization(r.Context(), server.CompleteAuthorizationRequest{Handle: handle, Result: result})
 	if err != nil {
-		b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, publicMessage(err, "Something went wrong. Please try again."))
+		b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, publicMessage(err, tryAgain))
 		return
 	}
 	switch o := outcome.(type) {

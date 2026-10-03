@@ -36,4 +36,6 @@ func publicMessage(err error, fallback string) string {
 const (
 	formUnreadable = "The form couldn't be read. Please go back and try again."
 	notStartedHere = "This browser didn't start this, or it has expired. Please start again."
+	// tryAgain is the public message for a failure on this side.
+	tryAgain = "Something went wrong. Please try again."
 )

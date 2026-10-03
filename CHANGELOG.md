@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.46.0](https://github.com/IDFoundry/FAPIgo/compare/v0.45.0...v0.46.0) (2026-10-03)
+
+
+### Features
+
+* **client:** complete an authorization from the callback alone in a native app whose session store is its own (Config.CallbackBinding: CallbackBindingDeviceLocalStore) ([c663cac](https://github.com/IDFoundry/FAPIgo/commit/c663cacacb84874430a884a9de42d91d0680f844))
+
+
+### Bug Fixes
+
+* **client:** cut a malformed error code to 64 bytes in Error() ([676ae3e](https://github.com/IDFoundry/FAPIgo/commit/676ae3e44a1d29f40d2011134591eefb4fc4243b))
+* **client:** keep an error response's body out of Error() ([d6644ee](https://github.com/IDFoundry/FAPIgo/commit/d6644ee050adf6d8c71475fa546777296f087887))
+
 ## [0.45.0](https://github.com/IDFoundry/FAPIgo/compare/v0.44.0...v0.45.0) (2026-10-03)
 
 

@@ -232,9 +232,10 @@ func (s *Server) buildAuthorizationResponse(ctx context.Context, clientID fapi.C
 		base.RawQuery = q.Encode()
 	}
 
-	// The pushed authorization request already held redirect_uri to the
-	// client's registered type (parseRedirectURI); this parse only turns
-	// the stored value, with the response parameters added, into a URL.
+	// The caller already held redirect_uri to the client's registered type
+	// (parseRedirectURI): the pushed authorization request, or
+	// BuildAuthorizationErrorRedirect. This parse only turns the value,
+	// with the response parameters added, into a URL.
 	destination, err := fapi.ParseRedirectURL(base.String(), fapi.AllowLoopbackHTTP(), fapi.AllowPrivateUseScheme())
 	if err != nil {
 		return fapi.URL{}, newError(ErrorServerError, 500, "failed to construct redirect destination", err)
@@ -259,10 +260,21 @@ func (s *Server) parseRedirectURI(client storage.RegisteredClient, raw string) (
 	if client.ApplicationType() == storage.ApplicationTypeNative {
 		return fapi.ParseRedirectURL(raw, fapi.AllowLoopbackHTTP(), fapi.AllowPrivateUseScheme())
 	}
+	var u fapi.URL
+	var err error
 	if s.cfg.Assurance == AssuranceProduction {
-		return fapi.ParseRedirectURL(raw)
+		u, err = fapi.ParseRedirectURL(raw)
+	} else {
+		u, err = fapi.ParseRedirectURL(raw, fapi.AllowLoopbackHTTP())
 	}
-	return fapi.ParseRedirectURL(raw, fapi.AllowLoopbackHTTP())
+	if err != nil {
+		if _, nativeErr := fapi.ParseRedirectURL(raw, fapi.AllowLoopbackHTTP(), fapi.AllowPrivateUseScheme()); nativeErr == nil {
+			// The mistake a native app's integrator makes first: say
+			// which registration would admit it.
+			return fapi.URL{}, fmt.Errorf("%w (a native app's redirect URI: acceptable for a client registered with ApplicationType storage.ApplicationTypeNative)", err)
+		}
+	}
+	return u, err
 }
 
 func validateGrantedScopeSubset(granted []string, requestedSpaceDelimited string) error {

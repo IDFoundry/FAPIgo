@@ -1,6 +1,7 @@
 package fapi_test
 
 import (
+	"strings"
 	"testing"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -17,6 +18,8 @@ func TestParseRedirectURL(t *testing.T) {
 		"myapp:/cb":                                   false, // not a reverse domain (RFC 8252 §8.4)
 		"com.example.app:cb":                          false, // opaque, no path
 		"com.example.app://host/cb":                   false, // an authority
+		"com.example.app:///cb":                       false, // an empty authority
+		"com.example.app:////evil.example/cb":         false,
 		"com..app:/cb":                                false,
 		"com.-example.app:/cb":                        false,
 		"com.example.app:/cb#frag":                    false,
@@ -57,4 +60,18 @@ func FuzzParseRedirectURL(f *testing.F) {
 			}
 		}
 	})
+}
+
+// TestParseRedirectURLSaysWhatToChange covers the two refusals an
+// integrator meets: the common two-slash form, and a private-use URI
+// passed without the option.
+func TestParseRedirectURLSaysWhatToChange(t *testing.T) {
+	_, err := fapi.ParseRedirectURL("com.example.app://callback", fapi.AllowPrivateUseScheme())
+	if err == nil || !strings.Contains(err.Error(), "com.example.app:/path") {
+		t.Errorf("ParseRedirectURL(two slashes) = %v, want it to show the single-slash form", err)
+	}
+	_, err = fapi.ParseRedirectURL("com.example.app:/callback")
+	if err == nil || strings.Contains(err.Error(), "must be absolute") {
+		t.Errorf("ParseRedirectURL(no host, no option) = %v, want it to say the host is missing, not that it isn't absolute", err)
+	}
 }

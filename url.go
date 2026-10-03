@@ -24,13 +24,17 @@ type urlOptions struct {
 	allowPrivateUseScheme bool
 }
 
-// URLOption configures ParseIssuerURL or ParseEndpointURL.
+// URLOption configures ParseIssuerURL, ParseEndpointURL or
+// ParseRedirectURL. AllowPrivateUseScheme applies to ParseRedirectURL
+// only; the other two ignore it, and still refuse a URI with no host.
 type URLOption func(*urlOptions)
 
 // AllowLoopbackHTTP permits an http:// scheme when the host is a
-// loopback address ("localhost", 127.0.0.0/8, or ::1). It exists for
-// local development only and must never be enabled from configuration
-// that could reach a production deployment by accident.
+// loopback address ("localhost", 127.0.0.0/8, or ::1). For an issuer or
+// endpoint it exists for local development only and must never be
+// enabled from configuration that could reach a production deployment
+// by accident. For a native app's redirect URI (RFC 8252 §7.3) it is
+// what FAPI 2.0 allows in production too.
 func AllowLoopbackHTTP() URLOption {
 	return func(o *urlOptions) { o.allowLoopbackHTTP = true }
 }
@@ -38,8 +42,9 @@ func AllowLoopbackHTTP() URLOption {
 // AllowPrivateUseScheme permits, for ParseRedirectURL only, a native
 // app's private-use URI scheme redirect (RFC 8252 §7.1), such as
 // "com.example.app:/oauth2redirect": a scheme that is a domain name in
-// reverse order, so it contains a ".", followed by a path and no
-// authority, as RFC 8252 §7.1 writes it. Enable it only for a client
+// reverse order, so it contains a ".", then a single slash and the path,
+// as RFC 8252 §7.1 writes it — not "com.example.app://oauth2redirect",
+// whose "oauth2redirect" would be an authority. Enable it only for a client
 // registered as a native app.
 func AllowPrivateUseScheme() URLOption {
 	return func(o *urlOptions) { o.allowPrivateUseScheme = true }
@@ -76,8 +81,11 @@ func parsePrivateUseURL(parsed *url.URL) (URL, error) {
 	if !isReverseDomainScheme(parsed.Scheme) {
 		return URL{}, fmt.Errorf("private-use scheme %q must be a reverse-order domain name, such as com.example.app", parsed.Scheme)
 	}
-	if parsed.Opaque != "" || parsed.Host != "" || parsed.User != nil || !strings.HasPrefix(parsed.Path, "/") {
-		return URL{}, fmt.Errorf("private-use redirect URI must be scheme:/path, with no authority")
+	// RFC 8252 §7.1: "only a single slash ("/") appears after the scheme
+	// component" — com.example.app:/callback, not
+	// com.example.app://callback, where "callback" would be an authority.
+	if parsed.Opaque != "" || parsed.Host != "" || parsed.User != nil || !strings.HasPrefix(parsed.Path, "/") || strings.HasPrefix(parsed.Path, "//") || strings.HasPrefix(parsed.String(), parsed.Scheme+"://") {
+		return URL{}, fmt.Errorf("private-use redirect URI must be %s:/path, with a single slash after the scheme (RFC 8252 §7.1), not %s://…", parsed.Scheme, parsed.Scheme)
 	}
 	if parsed.Fragment != "" {
 		return URL{}, fmt.Errorf("URL must not contain a fragment")
@@ -145,8 +153,11 @@ func parseSecureURL(raw string, opts []URLOption) (URL, error) {
 	if err != nil {
 		return URL{}, fmt.Errorf("invalid URL: %w", err)
 	}
-	if !parsed.IsAbs() || parsed.Host == "" {
+	if !parsed.IsAbs() {
 		return URL{}, fmt.Errorf("URL must be absolute")
+	}
+	if parsed.Host == "" {
+		return URL{}, fmt.Errorf("URL must have a host (scheme %q)", parsed.Scheme)
 	}
 	if parsed.User != nil {
 		return URL{}, fmt.Errorf("URL must not contain embedded credentials")

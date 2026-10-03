@@ -171,3 +171,38 @@ func ParseBackchannelTokenDeliveryMode(s string) (BackchannelTokenDeliveryMode, 
 		return 0, fmt.Errorf("storage: unrecognized backchannel token delivery mode %q", s)
 	}
 }
+
+// String returns the canonical wire value for t — OpenID Connect Dynamic
+// Client Registration's application_type, "web" or "native" — or "" if t
+// is not one of this package's recognized values.
+func (t ApplicationType) String() string {
+	switch t {
+	case ApplicationTypeWeb:
+		return "web"
+	case ApplicationTypeNative:
+		return "native"
+	default:
+		return ""
+	}
+}
+
+// IsValid reports whether t is one of this package's recognized
+// ApplicationType values, including the zero value ApplicationTypeWeb.
+func (t ApplicationType) IsValid() bool {
+	return t == ApplicationTypeWeb || t == ApplicationTypeNative
+}
+
+// ParseApplicationType maps a wire value (see String) to its
+// ApplicationType. It rejects every other string, including "": OpenID
+// Connect's own default when the field is absent is "web", but that is
+// the caller's decision, as for ParseClientAuthMethod.
+func ParseApplicationType(s string) (ApplicationType, error) {
+	switch s {
+	case "web":
+		return ApplicationTypeWeb, nil
+	case "native":
+		return ApplicationTypeNative, nil
+	default:
+		return 0, fmt.Errorf("storage: unrecognized application type %q", s)
+	}
+}

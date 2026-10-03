@@ -119,7 +119,10 @@ private-use scheme in reverse-domain form
 private-use form with a single slash, as RFC 8252 §7.1 does:
 `com.example.wallet:/callback`, not `com.example.wallet://callback`. In
 production a web client can use neither; under development assurance
-it may use loopback http, matched exactly. A native client still authenticates like any
+it may use loopback http, matched exactly. On the relying-party side, a desktop app
+that listens on a port the operating system picks for each flow sets
+`Config.RedirectURI` to the port-less loopback URI and passes the port
+as `client.BeginAuthorizationRequest.RedirectPort`. A native client still authenticates like any
 other: give each app instance its own credentials, as attestation-based
 client authentication does.
 

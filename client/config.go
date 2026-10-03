@@ -376,7 +376,9 @@ type Config struct {
 	ClientID fapi.ClientID
 
 	// RedirectURI is this client's registered redirect URI, sent on every
-	// authorization request exactly as registered.
+	// authorization request as is — or, for a native app's loopback
+	// redirect URI, with the port a BeginAuthorizationRequest.RedirectPort
+	// names.
 	RedirectURI string
 
 	Endpoints  Endpoints

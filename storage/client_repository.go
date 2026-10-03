@@ -833,9 +833,25 @@ func checkApplicationType(cfg RegisteredClientConfig) error {
 			if !isLoopbackLiteral(u.Hostname()) {
 				return fmt.Errorf("storage: client %q: native redirect URI %q: loopback redirects use the IP literal 127.0.0.1 or [::1], not a name (RFC 8252 §8.3)", cfg.ID, uri)
 			}
+			// Matched on any port, but the port written has to be one:
+			// an empty, 0 or out-of-range port would never match.
+			if !validRegisteredPort(u.Host, u.Port()) {
+				return fmt.Errorf("storage: client %q: native redirect URI %q: give a port from 1 to 65535, or none", cfg.ID, uri)
+			}
 		}
 	}
 	return nil
+}
+
+// validRegisteredPort reports whether a loopback redirect URI's host,
+// with port as url.URL.Port gives it, names no port or one from 1 to
+// 65535: "127.0.0.1:" names an empty one.
+func validRegisteredPort(host, port string) bool {
+	if port == "" {
+		return !strings.HasSuffix(host, ":")
+	}
+	n, err := strconv.Atoi(port)
+	return err == nil && n >= 1 && n <= 65535
 }
 
 // isLoopbackLiteral reports whether host is the IP literal 127.0.0.1 or

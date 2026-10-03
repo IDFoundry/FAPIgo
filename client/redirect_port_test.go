@@ -16,6 +16,7 @@ func TestBeginAuthorizationRedirectPort(t *testing.T) {
 		{"http://127.0.0.1/callback", "http://127.0.0.1:51004/callback"},
 		{"http://127.0.0.1:8400/callback?wallet=1", "http://127.0.0.1:51004/callback?wallet=1"},
 		{"http://[::1]/callback", "http://[::1]:51004/callback"},
+		{"http://[::1]:8400/callback", "http://[::1]:51004/callback"},
 	} {
 		t.Run(tc.configured, func(t *testing.T) {
 			c, as, _ := newTestClientWith(t, false, func(cfg *client.Config, _ *client.Dependencies) { cfg.RedirectURI = tc.configured })

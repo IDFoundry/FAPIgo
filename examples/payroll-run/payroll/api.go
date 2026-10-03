@@ -114,17 +114,20 @@ func (a *api) submit(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// malformedGrant is withinGrant's answer for a grant it can't read.
+const malformedGrant = "the token's payroll grant is malformed"
+
 // withinGrant explains why b, paying total cents, isn't the batch the
 // token's granted authorization_details allow; "" if it is.
 func withinGrant(details json.RawMessage, b batch, total int64) string {
 	values, err := extension.ParseGrantedRAR(details)
 	if err != nil {
-		return "the token's payroll grant is malformed"
+		return malformedGrant
 	}
 	granted, err := extension.RARGet(values, payrollBatchType)
 	switch {
 	case err != nil:
-		return "the token's payroll grant is malformed"
+		return malformedGrant
 	case len(granted) == 0:
 		return "the token grants no payroll batch"
 	}
@@ -132,7 +135,7 @@ func withinGrant(details json.RawMessage, b batch, total int64) string {
 	limit, err := cents(g.TotalAmount.Amount)
 	switch {
 	case err != nil:
-		return "the token's payroll grant is malformed"
+		return malformedGrant
 	case b.DebtorAccount != g.DebtorAccount:
 		return fmt.Sprintf("the token grants payments from %s, not %s", g.DebtorAccount.IBAN, b.DebtorAccount.IBAN)
 	case len(b.Payments) > g.NumberOfPayments:

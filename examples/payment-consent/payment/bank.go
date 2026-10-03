@@ -209,19 +209,19 @@ func (b *bank) authorize(w http.ResponseWriter, r *http.Request) {
 	// redirect URI it can be trusted with.
 	req, err := server.BeginAuthorizationRequestFromHTTP(r)
 	if err != nil {
-		b.w.renderError(w, bankHost, http.StatusBadRequest, "Sign-in could not start", publicMessage(err, "The sign-in request is malformed."))
+		b.w.renderError(w, bankHost, http.StatusBadRequest, signInFailedToStart, publicMessage(err, "The sign-in request is malformed."))
 		return
 	}
 	action, err := b.srv.BeginAuthorization(r.Context(), req)
 	if err != nil {
-		b.w.renderError(w, bankHost, http.StatusInternalServerError, "Sign-in could not start", publicMessage(err, "Something went wrong. Please try again."))
+		b.w.renderError(w, bankHost, http.StatusInternalServerError, signInFailedToStart, publicMessage(err, tryAgain))
 		return
 	}
 	switch a := action.(type) {
 	case server.InteractionRequired:
 		tag, err := b.interaction.Set(w, a, time.Now())
 		if err != nil {
-			b.w.renderError(w, bankHost, http.StatusInternalServerError, "Sign-in could not start", publicMessage(err, "Something went wrong. Please try again."))
+			b.w.renderError(w, bankHost, http.StatusInternalServerError, signInFailedToStart, publicMessage(err, tryAgain))
 			return
 		}
 		b.w.render(w, "consent", b.consentPage(a.Interaction, tag, ""))
@@ -279,24 +279,24 @@ func (b *bank) decide(w http.ResponseWriter, r *http.Request) {
 		for _, pay := range paymentsOf(in.AuthorizationDetails) {
 			raw, err := extension.RARSet(paymentInitiationType, pay)
 			if err != nil {
-				b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, publicMessage(err, "Something went wrong. Please try again."))
+				b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, publicMessage(err, tryAgain))
 				return
 			}
 			granted = append(granted, raw)
 		}
 		subjectID, err := server.NewSubjectID(c.username)
 		if err != nil {
-			b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, publicMessage(err, "Something went wrong. Please try again."))
+			b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, publicMessage(err, tryAgain))
 			return
 		}
 		subject, err := server.NewAuthenticatedSubject(subjectID)
 		if err != nil {
-			b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, publicMessage(err, "Something went wrong. Please try again."))
+			b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, publicMessage(err, tryAgain))
 			return
 		}
 		auth, err := server.NewAuthenticationContext(time.Now(), "urn:alder-bank:acr:pin", []string{"pin"})
 		if err != nil {
-			b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, publicMessage(err, "Something went wrong. Please try again."))
+			b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, publicMessage(err, tryAgain))
 			return
 		}
 		result = server.Authorize(subject, auth, server.GrantedAuthorization{Scope: in.Scope, AuthorizationDetails: granted})
@@ -304,7 +304,7 @@ func (b *bank) decide(w http.ResponseWriter, r *http.Request) {
 	b.interaction.Clear(w)
 	outcome, err := b.srv.CompleteAuthorization(r.Context(), server.CompleteAuthorizationRequest{Handle: handle, Result: result})
 	if err != nil {
-		b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, publicMessage(err, "Something went wrong. Please try again."))
+		b.w.renderError(w, bankHost, http.StatusInternalServerError, approvalFailed, publicMessage(err, tryAgain))
 		return
 	}
 	switch o := outcome.(type) {

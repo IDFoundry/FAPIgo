@@ -150,7 +150,7 @@ func TestBuildAuthorizationErrorRedirectHoldsTheRedirectPolicy(t *testing.T) {
 				t.Fatalf("NewRegisteredClient: %v", err)
 			}
 			_, err = h.server.BuildAuthorizationErrorRedirect(context.Background(), client, tc.uri, "s", "access_denied", "")
-			if got := err == nil; got != tc.ok {
+			if (err == nil) != tc.ok {
 				t.Errorf("BuildAuthorizationErrorRedirect(%q) = %v, want accepted %v", tc.uri, err, tc.ok)
 			}
 		})

@@ -27,8 +27,7 @@ func TestNativeRedirectURIsAtRegistration(t *testing.T) {
 		"http://wallet.example/callback":              false,
 		"com.example.app://host/callback":             false,
 	} {
-		_, err := nativeClient(t, uri)
-		if got := err == nil; got != want {
+		if _, err := nativeClient(t, uri); (err == nil) != want {
 			t.Errorf("native client with %q: %v, want accepted %v", uri, err, want)
 		}
 	}

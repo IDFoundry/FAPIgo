@@ -173,7 +173,7 @@ func (p *phone) decide(w http.ResponseWriter, r *http.Request) {
 	if approve {
 		var err error
 		if granted, err = grantFromForm(interaction, r.PostForm["account"], r.PostForm["action"]); err != nil {
-			p.w.renderError(w, phoneHost, http.StatusBadRequest, "Nothing approved", publicMessage(err, "Something went wrong. Please try again."))
+			p.w.renderError(w, phoneHost, http.StatusBadRequest, "Nothing approved", publicMessage(err, tryAgain))
 			return
 		}
 	}
@@ -182,7 +182,7 @@ func (p *phone) decide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := p.w.bank.decide(r.Context(), req, interaction.Scope, approve, granted); err != nil {
-		p.w.renderError(w, phoneHost, http.StatusInternalServerError, "The bank couldn't record that", publicMessage(err, "Something went wrong. Please try again."))
+		p.w.renderError(w, phoneHost, http.StatusInternalServerError, "The bank couldn't record that", publicMessage(err, tryAgain))
 		return
 	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)

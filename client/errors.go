@@ -47,6 +47,12 @@ func (e *Error) PublicDescription() string { return e.description }
 
 // Error implements the error interface. Its output includes the
 // internal cause and is meant for logs, not for a user-facing message.
+// It never includes a response body. It may include text the remote
+// server wrote: an authorization server error response's
+// error_description (PublicDescription), limited to RFC 6749's printable
+// ASCII, and its error code — quoted, when it isn't RFC 6749 error text.
+// Where only this client's own words may be logged, log Code() and
+// ServerResponse()'s Code and HTTPStatus instead.
 func (e *Error) Error() string {
 	if e.cause != nil {
 		return fmt.Sprintf("client: %s: %s: %v", e.code, e.description, e.cause)

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -87,11 +88,17 @@ func TestPARNonOAuthErrorBodyExposesStatusOnly(t *testing.T) {
 	c := newPARErrorTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(http.StatusBadGateway)
-		_, _ = w.Write([]byte("<html>502 Bad Gateway</html>"))
+		// A proxy's error page that echoes the request it refused.
+		_, _ = w.Write([]byte("<html>502 Bad Gateway: client_assertion=eyJSECRET</html>"))
 	})
-	got, ok := serverResponseOf(t, beginAuthorizationError(t, c))
+	err := beginAuthorizationError(t, c)
+	got, ok := serverResponseOf(t, err)
 	if !ok || got != (client.ServerErrorResponse{HTTPStatus: http.StatusBadGateway}) {
 		t.Fatalf("ServerResponse() = %+v, %v, want status 502 only", got, ok)
+	}
+	// The body never reaches Error(): it may echo the request's secrets.
+	if msg := err.Error(); strings.Contains(msg, "SECRET") || strings.Contains(msg, "html") || !strings.Contains(msg, "HTTP 502") {
+		t.Errorf("Error() = %q, want the status and no body", msg)
 	}
 }
 

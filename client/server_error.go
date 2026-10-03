@@ -77,7 +77,12 @@ func newServerErrorResponse(status int, code, description, uri string) ServerErr
 func parErrorFromResponse(status int, body []byte) *Error {
 	errResp, err := par.DecodeErrorResponse(body)
 	if err != nil {
-		return newError(ErrorInvalidResponse, "authorization server returned an error", fmt.Errorf("status body: %s", strconv.Quote(string(body)))).
+		// The body itself stays out: an HTML error page, or a proxy's
+		// echo of the request — the authorization code, the DPoP proof,
+		// the client's assertions — would otherwise reach every log the
+		// error does.
+		return newError(ErrorInvalidResponse, "authorization server returned an error",
+			fmt.Errorf("HTTP %d, with a %d-byte body that isn't an OAuth error response", status, len(body))).
 			withServerResponse(ServerErrorResponse{HTTPStatus: status})
 	}
 	resp := newServerErrorResponse(status, errResp.Code, errResp.Description, errResp.URI)

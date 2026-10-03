@@ -5,8 +5,7 @@
 
 ### Features
 
-* **client:** choose the callback binding in Config, not on the session store ([263f8df](https://github.com/IDFoundry/FAPIgo/commit/263f8df535e01548def463c19140216793e9e96a))
-* **client:** complete an authorization from the callback alone, for a device-local session store ([c663cac](https://github.com/IDFoundry/FAPIgo/commit/c663cacacb84874430a884a9de42d91d0680f844))
+* **client:** complete an authorization from the callback alone in a native app whose session store is its own (Config.CallbackBinding: CallbackBindingDeviceLocalStore) ([c663cac](https://github.com/IDFoundry/FAPIgo/commit/c663cacacb84874430a884a9de42d91d0680f844))
 
 
 ### Bug Fixes

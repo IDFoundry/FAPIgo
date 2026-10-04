@@ -397,6 +397,18 @@ the token as `refresh_token`: `RefreshAccessToken` then redeems it like
 its own, bound to the client's instance key. Such a grant may not
 include `openid`, since no user authenticated.
 
+**Letting clients revoke their refresh tokens.** Set
+`Config.Endpoints.Revocation` and serve it with `RevokeToken`, reading
+the request with `server.TokenRevocationRequestFromHTTP`: a nil error
+is a 200 with an empty body, otherwise write the `*Error`. `Metadata`
+then advertises `revocation_endpoint`, and a `client.Client` revokes
+with `RevokeToken`, which `Discover` wires up. A client can only revoke
+its own refresh tokens (and, when authenticated by Client Attestation,
+only its own installation's); revoking one also revokes its grant by
+`GrantID`, so give each grant its own ID. Access tokens are refused
+with `unsupported_token_type`: they expire on their own, and
+`RevokeGrant` ends them early.
+
 ## 7. Wire the resource server: verifying access tokens
 
 `resource.Verifier` is FAPI 2.0's third role, a deliberately separate

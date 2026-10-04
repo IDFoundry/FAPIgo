@@ -36,6 +36,10 @@ const gcmNonceSize = 12
 // CBC-HMAC content-encryption family: 128 bits.
 const cbcIVSize = 16
 
+// gcmTagSize is the authentication tag size for the AES-GCM family:
+// 128 bits (RFC 7518 §5.3).
+const gcmTagSize = 16
+
 // cbcHMACTagSize is T_LEN for AES_256_CBC_HMAC_SHA_512 (RFC 7518
 // §5.2.5): the authentication tag is the leftmost 32 octets (256 bits)
 // of the full HMAC-SHA-512 output, not the full 64-octet output.
@@ -67,6 +71,54 @@ func ivSizeFor(enc fapi.ContentEncryptionAlgorithm) (int, error) {
 	default:
 		return 0, fmt.Errorf("jwe: unsupported content encryption algorithm %v", enc)
 	}
+}
+
+// tagSizeFor returns the authentication tag size in bytes for enc.
+func tagSizeFor(enc fapi.ContentEncryptionAlgorithm) (int, error) {
+	switch enc {
+	case fapi.A256GCM:
+		return gcmTagSize, nil
+	case fapi.A256CBCHS512:
+		return cbcHMACTagSize, nil
+	default:
+		return 0, fmt.Errorf("jwe: unsupported content encryption algorithm %v", enc)
+	}
+}
+
+// checkSegmentLengths refuses an IV or tag of the wrong length for enc,
+// before either reaches the cipher: cipher.AEAD.Open panics on a nonce
+// of the wrong length, and the IV and tag are whatever the JWE's sender
+// wrote.
+func checkSegmentLengths(enc fapi.ContentEncryptionAlgorithm, iv, tag []byte) error {
+	ivSize, err := ivSizeFor(enc)
+	if err != nil {
+		return err
+	}
+	tagSize, err := tagSizeFor(enc)
+	if err != nil {
+		return err
+	}
+	if len(iv) != ivSize {
+		return fmt.Errorf("%w: iv must be %d bytes, got %d", ErrMalformed, ivSize, len(iv))
+	}
+	if len(tag) != tagSize {
+		return fmt.Errorf("%w: tag must be %d bytes, got %d", ErrMalformed, tagSize, len(tag))
+	}
+	return nil
+}
+
+// checkCEKLength refuses an unwrapped content-encryption key of the
+// wrong length for enc: AES would otherwise accept a 16- or 24-byte key
+// under A256GCM as AES-128 or AES-192, weaker than the header says.
+func checkCEKLength(enc fapi.ContentEncryptionAlgorithm, cek []byte) error {
+	size, err := cekSizeFor(enc)
+	if err != nil {
+		return err
+	}
+	if len(cek) != size {
+		return fmt.Errorf("%w: content encryption key must be %d bytes, got %d", ErrMalformed, size, len(cek))
+	}
+	return nil
 }
 
 // sealContent encrypts plaintext under cek and iv with enc, returning
@@ -386,6 +438,9 @@ func Decrypt(ctx context.Context, req DecryptRequest) (DecryptResult, error) {
 	if err != nil {
 		return DecryptResult{}, fmt.Errorf("%w: tag: %v", ErrMalformed, err)
 	}
+	if err := checkSegmentLengths(req.Encryption, iv, tag); err != nil {
+		return DecryptResult{}, err
+	}
 
 	var cek []byte
 	if unwrapper, ok := req.RecipientKey.(Unwrapper); ok {
@@ -400,6 +455,9 @@ func Decrypt(ctx context.Context, req DecryptRequest) (DecryptResult, error) {
 		}
 	}
 
+	if err := checkCEKLength(req.Encryption, cek); err != nil {
+		return DecryptResult{}, err
+	}
 	plaintext, err := openContent(req.Encryption, cek, iv, ciphertext, tag, []byte(parts[0]))
 	if err != nil {
 		return DecryptResult{}, err

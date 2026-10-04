@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.48.0](https://github.com/IDFoundry/FAPIgo/compare/v0.47.0...v0.48.0) (2026-10-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* **server:** Server.RevokeToken returns (TokenRevocationResult, error) instead of error. A handler that doesn't need the result discards it with a blank identifier. See UPGRADING.md for v0.48.0.
+
+### Features
+
+* **server:** RevokeToken reports the grant a revocation ended ([54f7355](https://github.com/IDFoundry/FAPIgo/commit/54f7355c8f21aa84556e447539a3e0a1d8bcab04))
+
 ## [0.47.0](https://github.com/IDFoundry/FAPIgo/compare/v0.46.0...v0.47.0) (2026-10-04)
 
 

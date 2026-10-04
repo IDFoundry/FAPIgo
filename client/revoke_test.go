@@ -90,3 +90,24 @@ func TestMTLSAliasesApplyToRevocation(t *testing.T) {
 		t.Errorf("Revocation = %q, want the mTLS alias %q", endpoints.Revocation.String(), alias.String())
 	}
 }
+
+// TestRevokeTokenTransportFailure covers a request that never gets a
+// response: ErrorInternal, not success.
+func TestRevokeTokenTransportFailure(t *testing.T) {
+	cfg := validConfig(t)
+	revokeURL, err := fapi.ParseEndpointURL("https://as.example/revoke")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Endpoints.Revocation = revokeURL
+	deps := validDependencies(t)
+	deps.HTTP = &failNthRequestHTTPClient{real: http.DefaultClient, pathSuffix: "/revoke", failOn: 1}
+	c, err := client.New(cfg, deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cerr *client.Error
+	if err := c.RevokeToken(context.Background(), fapi.NewSecret("rt-1")); !errors.As(err, &cerr) || cerr.Code() != client.ErrorInternal {
+		t.Fatalf("RevokeToken = %v, want ErrorInternal", err)
+	}
+}

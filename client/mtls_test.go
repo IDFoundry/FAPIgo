@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,6 +38,10 @@ type fakeMTLSAS struct {
 	// an unexpected one.
 	tokenTypeOverride string
 
+	// nonOAuthPath, if set, makes that endpoint ("/par" or "/token")
+	// answer with a body that isn't an OAuth error: a proxy's page.
+	nonOAuthPath string
+
 	lastPARForm   url.Values
 	lastTokenForm url.Values
 	lastNonce     string
@@ -49,6 +54,17 @@ func newFakeMTLSAS(t *testing.T, issuer string) *fakeMTLSAS {
 		t.Fatalf("generate id token key: %v", err)
 	}
 	return &fakeMTLSAS{t: t, idTokenKey: idKey, issuer: issuer}
+}
+
+// writeNonOAuth answers with a proxy's page if path is nonOAuthPath.
+func (a *fakeMTLSAS) writeNonOAuth(w http.ResponseWriter, path string) bool {
+	if a.nonOAuthPath != path {
+		return false
+	}
+	w.Header().Set("Content-Type", "text/html")
+	w.WriteHeader(http.StatusBadGateway)
+	_, _ = w.Write([]byte("<html>down</html>"))
+	return true
 }
 
 func (a *fakeMTLSAS) handler() http.Handler {
@@ -65,6 +81,9 @@ func (a *fakeMTLSAS) handlePAR(w http.ResponseWriter, r *http.Request) {
 	a.lastPARForm = r.PostForm
 	if r.Header.Get("DPoP") != "" {
 		a.t.Errorf("PAR: unexpected DPoP header presented by an mTLS-bound client")
+	}
+	if a.writeNonOAuth(w, "/par") {
+		return
 	}
 	if r.PostForm.Get("client_assertion") == "" {
 		a.t.Errorf("PAR: missing client_assertion")
@@ -89,6 +108,9 @@ func (a *fakeMTLSAS) handleToken(w http.ResponseWriter, r *http.Request) {
 	a.lastTokenForm = r.PostForm
 	if r.Header.Get("DPoP") != "" {
 		a.t.Errorf("token: unexpected DPoP header presented by an mTLS-bound client")
+	}
+	if a.writeNonOAuth(w, "/token") {
+		return
 	}
 	if r.PostForm.Get("client_assertion") == "" {
 		a.t.Errorf("token: missing client_assertion")
@@ -603,5 +625,36 @@ func TestExchangeCodeMTLSRejectsUnexpectedTokenType(t *testing.T) {
 
 	if _, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: rawQuery, Session: session.Handle()}); err == nil {
 		t.Fatalf("CompleteAuthorization(unexpected token_type) = nil error, want error")
+	}
+}
+
+// TestMTLSNonOAuthErrorNamesMediaType covers PAR and the token endpoint
+// under mTLS sender-constraint answering with something that isn't an
+// OAuth error: Error() names the media type, never the body.
+func TestMTLSNonOAuthErrorNamesMediaType(t *testing.T) {
+	for _, path := range []string{"/par", "/token"} {
+		t.Run(path, func(t *testing.T) {
+			c, as, _ := newTestClientWithMTLS(t)
+			ctx := context.Background()
+			if path == "/par" {
+				as.nonOAuthPath = path
+			}
+			session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid", "accounts"}})
+			if path == "/token" {
+				if err != nil {
+					t.Fatalf("BeginAuthorization: %v", err)
+				}
+				as.nonOAuthPath = path
+				_, err = c.CompleteAuthorization(ctx, client.AuthorizationCallback{
+					RawQuery: mtlsCallbackFor(testIssuer, session.Handle().String(), "auth-code-123"), Session: session.Handle(),
+				})
+			}
+			if err == nil {
+				t.Fatal("error = nil, want the endpoint's non-OAuth response")
+			}
+			if msg := err.Error(); !strings.Contains(msg, `HTTP 502, with a 17-byte "text/html" body`) || strings.Contains(msg, "<html>") {
+				t.Errorf("Error() = %q, want the status and media type and no body", msg)
+			}
+		})
 	}
 }

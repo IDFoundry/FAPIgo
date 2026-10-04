@@ -25,7 +25,7 @@ func serverResponseOf(t *testing.T, err error) (client.ServerErrorResponse, bool
 	return cerr.ServerResponse()
 }
 
-func newPARErrorTestClient(t *testing.T, handler http.HandlerFunc) *client.Client {
+func newPARErrorTestClient(t *testing.T, handler http.HandlerFunc, tweaks ...func(*client.Config)) *client.Client {
 	t.Helper()
 	ts := httptest.NewServer(handler)
 	t.Cleanup(ts.Close)
@@ -35,6 +35,9 @@ func newPARErrorTestClient(t *testing.T, handler http.HandlerFunc) *client.Clien
 		t.Fatalf("ParseEndpointURL(par): %v", err)
 	}
 	cfg.Endpoints.PushedAuthorizationRequest = parURL
+	for _, tweak := range tweaks {
+		tweak(&cfg)
+	}
 	deps := validDependencies(t)
 	deps.HTTP = ts.Client()
 	c, err := client.New(cfg, deps)
@@ -123,6 +126,22 @@ func TestPARNonOAuthErrorAfterDPoPNonceRetry(t *testing.T) {
 	msg := beginAuthorizationError(t, c).Error()
 	if attempts != 2 || !strings.Contains(msg, `HTTP 502, with a 17-byte "text/html" body`) {
 		t.Errorf("attempts = %d, Error() = %q, want a retry and the media type", attempts, msg)
+	}
+}
+
+// TestPARNonOAuthErrorUnderJKTBinding covers PAR committing to the DPoP
+// key with dpop_jkt (PARDPoPBindingJKT) instead of a proof.
+func TestPARNonOAuthErrorUnderJKTBinding(t *testing.T) {
+	c := newPARErrorTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil || r.PostForm.Get("dpop_jkt") == "" {
+			t.Errorf("PAR form has no dpop_jkt (%v)", err)
+		}
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("<html>down</html>"))
+	}, func(cfg *client.Config) { cfg.PARDPoPBinding = client.PARDPoPBindingJKT })
+	if msg := beginAuthorizationError(t, c).Error(); !strings.Contains(msg, `HTTP 502, with a 17-byte "text/html" body`) {
+		t.Errorf("Error() = %q, want the media type", msg)
 	}
 }
 

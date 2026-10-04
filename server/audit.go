@@ -57,6 +57,10 @@ const (
 	// AuditEventVerifyTokenRequestBinding records the outcome of a
 	// VerifyTokenRequestBinding call.
 	AuditEventVerifyTokenRequestBinding
+
+	// AuditEventIssueRefreshToken records the outcome of an
+	// IssueRefreshToken call.
+	AuditEventIssueRefreshToken
 )
 
 // AuditOutcome is a closed set of outcomes for an AuditEvent.

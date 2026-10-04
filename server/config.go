@@ -429,7 +429,8 @@ type Config struct {
 	// server's own. New refuses a grant type this package serves, one
 	// FAPI 2.0 forbids ("password", "implicit"), and duplicates. See
 	// TokenEndpointRequest.Parameters, AuthenticateAttestedClient and
-	// VerifyTokenRequestBinding for serving one.
+	// VerifyTokenRequestBinding for serving one, and IssueRefreshToken
+	// for a refresh token RefreshAccessToken redeems.
 	AdditionalGrantTypes []string
 
 	// AttestationBasedClientAuthentication enables

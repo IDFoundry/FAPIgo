@@ -391,7 +391,11 @@ client certificate with `VerifyTokenRequestBinding`: the same checks,
 and the same replay records, as this package's own grants. List the
 grant type in `Config.AdditionalGrantTypes` so `Metadata` advertises
 it. Whether the client may use the grant, and the grant itself, stay
-yours.
+yours. To let the client refresh what it was granted, pass the
+authenticated client and the binding to `IssueRefreshToken` and return
+the token as `refresh_token`: `RefreshAccessToken` then redeems it like
+its own, bound to the client's instance key. Such a grant may not
+include `openid`, since no user authenticated.
 
 ## 7. Wire the resource server: verifying access tokens
 

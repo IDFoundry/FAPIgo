@@ -87,8 +87,28 @@ jobs:
       # the ordinary human-readable output (including the per-package
       # coverage summary above) as JSON events instead, which would
       # make this job's own log far harder to skim.
+      #
+      # Its output goes only to report.json, so a test that fails here
+      # but passed in the run above (a flaky one) would otherwise fail
+      # the step without naming itself. On failure, name each failing
+      # test and package as an annotation and print their output.
       - name: go test (json, for SonarQube test reporting)
-        run: go test -race ./... -json > report.json
+        run: |
+          status=0
+          go test -race ./... -json > report.json || status=$?
+          if [ "$status" -ne 0 ]; then
+            jq -r 'select(.Action == "fail" and .Test != null) | "::error title=Test failed::\(.Package) \(.Test)"' report.json
+            jq -r 'select(.Action == "fail" and .Test == null and .Package != null) | "::error title=Package failed::\(.Package)"' report.json | sort -u
+            echo "::group::Output of the failing tests and packages"
+            jq -jrs '
+              [ .[] | select(.Action == "fail") | {p: .Package, t: (.Test // "")} ] as $failed
+              | .[]
+              | select((.Action == "output" and ({p: .Package, t: (.Test // "")} as $k | any($failed[]; . == $k)))
+                       or .Action == "build-output")
+              | .Output' report.json
+            echo "::endgroup::"
+          fi
+          exit "$status"
 
       # Config lives in sonar-project.properties (organization,
       # projectKey, sonar.go.coverage.reportPaths=coverage.out — the

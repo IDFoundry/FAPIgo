@@ -89,6 +89,11 @@ type Document struct {
 	// Config.SenderConstrain == SenderConstrainMTLS client to prefer
 	// over the plain Endpoints URLs.
 	MTLSEndpointAliases *MTLSEndpointAliases `json:"mtls_endpoint_aliases,omitempty"`
+
+	// RevocationEndpoint (RFC 7009, advertised per RFC 8414 §2) is
+	// OPTIONAL. client.Discover surfaces it as
+	// DiscoveredMetadata.Endpoints.Revocation.
+	RevocationEndpoint string `json:"revocation_endpoint,omitempty"`
 }
 
 // MTLSEndpointAliases is the RFC 8705 §5 "mtls_endpoint_aliases"
@@ -98,6 +103,7 @@ type MTLSEndpointAliases struct {
 	TokenEndpoint                      string `json:"token_endpoint,omitempty"`
 	PushedAuthorizationRequestEndpoint string `json:"pushed_authorization_request_endpoint,omitempty"`
 	BackchannelAuthenticationEndpoint  string `json:"backchannel_authentication_endpoint,omitempty"`
+	RevocationEndpoint                 string `json:"revocation_endpoint,omitempty"`
 }
 
 // ParseAndValidate parses body as a Document and checks it against

@@ -6,7 +6,8 @@
 // HandleAuthorizationResponse, ExchangeCode, CompleteAuthorization, for
 // CIBA BeginBackchannelAuthentication and PollBackchannelAuthentication,
 // and RefreshTokens to redeem the refresh token either flow issued,
-// with TokenSetSealer to keep the tokens between them, and, for OpenID
+// with TokenSetSealer to keep the tokens between them and RevokeToken to
+// tell the server when they're no longer needed, and, for OpenID
 // Federation, EntityConfiguration to publish this client's own signed
 // Entity Configuration)
 // rather than low-level JWT, PAR or DPoP primitives — those live under internal/
@@ -126,6 +127,10 @@
 //     save Handle().String() on the device when the flow begins and
 //     pass it back.
 //   - Tokens. Keep them between launches sealed, with a TokenSetSealer.
+//     When the app no longer needs a refresh token, call RevokeToken
+//     before deleting the key it is bound to, so the server ends the
+//     grant too; ErrorRevocationNotSupported means the server offers no
+//     revocation endpoint, and the token can only be forgotten.
 //   - Errors. Error() may include text the authorization server wrote.
 //     An app that hands errors to platform code — gomobile turns a Go
 //     error into an NSError with Error() as its message — should map an

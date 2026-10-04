@@ -44,7 +44,7 @@ variants and OAuth 2.0 attestation-based client authentication.
 - private_key_jwt client authentication
 - OAuth 2.0 Attestation-Based Client Authentication, including HAIP 1.0 x5c attester certificate chains
 - JAR / JARM · RAR (RFC 9396) · CIBA (poll & ping delivery)
-- Refresh tokens (not rotated, per FAPI 2.0) and whole-grant revocation
+- Refresh tokens (not rotated, per FAPI 2.0), whole-grant revocation, and token revocation (RFC 7009)
 - OpenID Connect: the `claims` parameter with per-claim consent, `acr_values` and enforced `max_age`, signed and encrypted ID tokens and UserInfo
 - Native apps (RFC 8252): private-use URI scheme and any-port loopback redirect URIs, for clients registered as native
 - Grants you serve yourself at the token endpoint (OpenID4VCI's `pre-authorized_code`, say), with the server's own client authentication and DPoP/mTLS checks

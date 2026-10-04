@@ -94,6 +94,8 @@ type fakeAttestationAuthAS struct {
 
 	lastPARForm, lastTokenForm, lastBCForm          url.Values
 	lastPARHeaders, lastTokenHeaders, lastBCHeaders http.Header
+	lastRevokeForm                                  url.Values
+	lastRevokeHeaders                               http.Header
 }
 
 func (a *fakeAttestationAuthAS) handler() http.Handler {
@@ -101,6 +103,7 @@ func (a *fakeAttestationAuthAS) handler() http.Handler {
 	mux.HandleFunc("/par", a.handlePAR)
 	mux.HandleFunc("/token", a.handleToken)
 	mux.HandleFunc("/backchannel-authenticate", a.handleBackchannel)
+	mux.HandleFunc("/revoke", a.handleRevoke)
 	return mux
 }
 
@@ -200,6 +203,16 @@ func (a *fakeAttestationAuthAS) handleBackchannel(w http.ResponseWriter, r *http
 	})
 }
 
+// handleRevoke answers an RFC 7009 revocation request with 200.
+func (a *fakeAttestationAuthAS) handleRevoke(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		a.t.Fatalf("revoke: parse form: %v", err)
+	}
+	a.lastRevokeForm, a.lastRevokeHeaders = r.PostForm, r.Header.Clone()
+	a.checkAttestationAuthShape(a.t, r.PostForm, r.Header, "revoke")
+	w.WriteHeader(http.StatusOK)
+}
+
 // newTestClientWithAttestationAuth builds a client configured for
 // ClientAuthMethodAttestation (browser flow only — authorization + PAR
 // + token, plus client_credentials since it shares the token
@@ -238,8 +251,13 @@ func newTestClientWithAttestationSource(t *testing.T, source client.AttestationS
 	if err != nil {
 		t.Fatalf("ParseEndpointURL(token): %v", err)
 	}
+	revokeURL, err := fapi.ParseEndpointURL(ts.URL+"/revoke", fapi.AllowLoopbackHTTP())
+	if err != nil {
+		t.Fatalf("ParseEndpointURL(revoke): %v", err)
+	}
 	cfg.Endpoints.PushedAuthorizationRequest = parURL
 	cfg.Endpoints.Token = tokenURL
+	cfg.Endpoints.Revocation = revokeURL
 
 	deps := validDependencies(t)
 	deps.HTTP = ts.Client()

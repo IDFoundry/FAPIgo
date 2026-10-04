@@ -81,6 +81,7 @@ func newAuthServer(t *testing.T, clock *manualClock, approve AutoApprove, tlsCli
 	mux.HandleFunc("/par", a.handlePAR)
 	mux.HandleFunc("/authorize", a.handleAuthorize)
 	mux.HandleFunc("/token", a.handleToken)
+	mux.HandleFunc("/revoke", a.handleRevoke)
 	mux.HandleFunc("/.well-known/openid-configuration", a.handleMetadata)
 	mux.HandleFunc("/jwks", a.handleJWKS)
 	mux.HandleFunc("/userinfo", a.handleUserInfo)
@@ -122,6 +123,9 @@ func (a *authServer) handleMetadata(w http.ResponseWriter, r *http.Request) {
 		RequirePushedAuthorizationRequests:         md.RequirePushedAuthorizationRequests,
 		RequireSignedRequestObject:                 md.RequireSignedRequestObject,
 		AuthorizationResponseIssParameterSupported: md.AuthorizationResponseIssParameterSupported,
+	}
+	if md.RevocationEndpoint != nil {
+		doc.RevocationEndpoint = md.RevocationEndpoint.String()
 	}
 	w.Header().Set(contentTypeHeader, contentTypeJSON)
 	if err := json.NewEncoder(w).Encode(doc); err != nil {
@@ -209,6 +213,20 @@ func (a *authServer) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		a.t.Fatalf("fapitest: CompleteAuthorization: %v", err)
 	}
 	a.writeAuthorizationResult(w, result)
+}
+
+// handleRevoke serves RFC 7009 token revocation: 200 with an empty body,
+// or the error.
+func (a *authServer) handleRevoke(w http.ResponseWriter, r *http.Request) {
+	req, err := server.TokenRevocationRequestFromHTTP(r)
+	if err == nil {
+		err = a.srv.RevokeToken(r.Context(), req)
+	}
+	if err != nil {
+		a.writeServerError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 func (a *authServer) handleToken(w http.ResponseWriter, r *http.Request) {

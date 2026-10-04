@@ -19,6 +19,11 @@ const (
 	// artifact, and the wrapped cause (Unwrap) carries the observed and
 	// allowed byte counts for logs.
 	ErrorResponseTooLarge ErrorCode = "response_too_large"
+
+	// ErrorRevocationNotSupported indicates RevokeToken was called with
+	// no Config.Endpoints.Revocation: the server offers no revocation
+	// endpoint, so the token can only be forgotten locally.
+	ErrorRevocationNotSupported ErrorCode = "revocation_not_supported"
 )
 
 // Error is the error type every public Client method returns. Code is

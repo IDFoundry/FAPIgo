@@ -8,7 +8,8 @@
 // RefreshAccessToken, the CIBA methods BeginBackchannelAuthentication,
 // LookupBackchannelInteraction (which reads a pending request back),
 // CompleteBackchannelAuthentication and ExchangeBackchannelAuthentication,
-// RequestClientCredentialsToken, RevokeGrant, BuildAuthorizationErrorRedirect,
+// RequestClientCredentialsToken, RevokeToken (RFC 7009 token revocation),
+// RevokeGrant, BuildAuthorizationErrorRedirect,
 // SignUserInfoResponse, Metadata, PublicJWKS and (for OpenID Federation)
 // EntityConfiguration — that only ever consume client-generated
 // artefacts and validate them against server-held state and policy.

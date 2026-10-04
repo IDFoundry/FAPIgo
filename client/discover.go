@@ -339,6 +339,10 @@ func buildDiscoveredMetadata(doc metadata.Document, opts ...fapi.URLOption) (Dis
 	if err != nil {
 		return DiscoveredMetadata{}, err
 	}
+	revocation, err := parseOptionalEndpoint(doc.RevocationEndpoint, "revocation_endpoint", opts...)
+	if err != nil {
+		return DiscoveredMetadata{}, err
+	}
 
 	mtlsAliases, err := parseMTLSEndpointAliases(doc.MTLSEndpointAliases, opts...)
 	if err != nil {
@@ -352,6 +356,7 @@ func buildDiscoveredMetadata(doc metadata.Document, opts ...fapi.URLOption) (Dis
 			PushedAuthorizationRequest: par,
 			UserInfo:                   userinfo,
 			BackchannelAuthentication:  backchannelAuth,
+			Revocation:                 revocation,
 		},
 		MTLSEndpointAliases:                        mtlsAliases,
 		JWKSURI:                                    jwksURI,
@@ -410,6 +415,12 @@ func parseMTLSEndpointAliases(raw *metadata.MTLSEndpointAliases, opts ...fapi.UR
 		out.BackchannelAuthentication, err = fapi.ParseEndpointURL(raw.BackchannelAuthenticationEndpoint, opts...)
 		if err != nil {
 			return nil, fmt.Errorf("client: discover: mtls_endpoint_aliases.backchannel_authentication_endpoint: %w", err)
+		}
+	}
+	if raw.RevocationEndpoint != "" {
+		out.Revocation, err = fapi.ParseEndpointURL(raw.RevocationEndpoint, opts...)
+		if err != nil {
+			return nil, fmt.Errorf("client: discover: mtls_endpoint_aliases.revocation_endpoint: %w", err)
 		}
 	}
 	return &out, nil

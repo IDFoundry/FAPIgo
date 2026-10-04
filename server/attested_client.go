@@ -30,6 +30,12 @@ type AttestedClient struct {
 	// AttestationExpiresAt is when the verified Client Attestation
 	// expires.
 	AttestationExpiresAt time.Time
+
+	// instanceKey is the RFC 7638 thumbprint of the Client Instance Key
+	// the attestation's PoP verified under: what IssueRefreshToken
+	// binds a refresh token to. Unexported, so only an AttestedClient
+	// this server authenticated carries one.
+	instanceKey string
 }
 
 // AuthenticateAttestedClient authenticates a client with a Client
@@ -78,5 +84,5 @@ func (s *Server) AuthenticateAttestedClient(ctx context.Context, req AttestedCli
 		return AttestedClient{}, err
 	}
 	s.audit(ctx, AuditEventAuthenticateAttestedClient, client.ID(), AuditOutcomeSuccess, "")
-	return AttestedClient{Client: client, AttestationExpiresAt: verified.ExpiresAt}, nil
+	return AttestedClient{Client: client, AttestationExpiresAt: verified.ExpiresAt, instanceKey: verified.InstanceKey}, nil
 }

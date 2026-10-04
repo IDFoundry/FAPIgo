@@ -15,7 +15,9 @@
 // AuthenticateAttestedClient and VerifyTokenRequestBinding serve an
 // embedder's own grant at the token endpoint (Config.AdditionalGrantTypes)
 // — OpenID4VCI's pre-authorized_code, say — with exactly the checks,
-// and the replay records, this package's own grants use; they are
+// and the replay records, this package's own grants use, and
+// IssueRefreshToken issues a refresh token for such a grant that
+// RefreshAccessToken redeems like its own; they are
 // scoped to one endpoint's client authentication and sender-constraint
 // checks, not generic JWT primitives. CheckClientRegistration checks a
 // client's registration against this server's configuration (a Rich

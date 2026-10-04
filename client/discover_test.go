@@ -57,6 +57,8 @@ type discoveryDoc struct {
 
 	MTLSEndpointAliases *discoveryMTLSEndpointAliases `json:"mtls_endpoint_aliases,omitempty"`
 
+	RevocationEndpoint string `json:"revocation_endpoint,omitempty"`
+
 	AuthorizationResponseIssParameterSupported bool `json:"authorization_response_iss_parameter_supported,omitempty"`
 }
 
@@ -64,6 +66,7 @@ type discoveryMTLSEndpointAliases struct {
 	TokenEndpoint                      string `json:"token_endpoint,omitempty"`
 	PushedAuthorizationRequestEndpoint string `json:"pushed_authorization_request_endpoint,omitempty"`
 	BackchannelAuthenticationEndpoint  string `json:"backchannel_authentication_endpoint,omitempty"`
+	RevocationEndpoint                 string `json:"revocation_endpoint,omitempty"`
 }
 
 func TestDiscoverAcceptsValidDocumentAtRoot(t *testing.T) {
@@ -389,6 +392,7 @@ func TestDiscoverPopulatesMTLSEndpointAliases(t *testing.T) {
 				TokenEndpoint:                      ts.URL + "/mtls/token",
 				PushedAuthorizationRequestEndpoint: ts.URL + "/mtls/par",
 				BackchannelAuthenticationEndpoint:  ts.URL + "/mtls/backchannel-authenticate",
+				RevocationEndpoint:                 ts.URL + "/mtls/revoke",
 			},
 		})
 	}))
@@ -413,6 +417,9 @@ func TestDiscoverPopulatesMTLSEndpointAliases(t *testing.T) {
 	}
 	if md.MTLSEndpointAliases.BackchannelAuthentication.String() != ts.URL+"/mtls/backchannel-authenticate" {
 		t.Errorf("MTLSEndpointAliases.BackchannelAuthentication = %q", md.MTLSEndpointAliases.BackchannelAuthentication.String())
+	}
+	if md.MTLSEndpointAliases.Revocation.String() != ts.URL+"/mtls/revoke" {
+		t.Errorf("MTLSEndpointAliases.Revocation = %q", md.MTLSEndpointAliases.Revocation.String())
 	}
 }
 
@@ -465,6 +472,10 @@ func TestDiscoverRejectsMalformedOptionalEndpoint(t *testing.T) {
 		"authorization_endpoint":                func(d *discoveryDoc) { d.AuthorizationEndpoint = malformed },
 		"pushed_authorization_request_endpoint": func(d *discoveryDoc) { d.PushedAuthorizationRequestEndpoint = malformed },
 		"backchannel_authentication_endpoint":   func(d *discoveryDoc) { d.BackchannelAuthenticationEndpoint = malformed },
+		"revocation_endpoint":                   func(d *discoveryDoc) { d.RevocationEndpoint = malformed },
+		"mtls_endpoint_aliases.revocation_endpoint": func(d *discoveryDoc) {
+			d.MTLSEndpointAliases = &discoveryMTLSEndpointAliases{RevocationEndpoint: malformed}
+		},
 	} {
 		t.Run(field, func(t *testing.T) {
 			var ts *httptest.Server

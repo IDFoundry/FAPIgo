@@ -116,6 +116,9 @@ func TestDiscoverEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
+	if got, want := discovered.Endpoints.Revocation, srvCfg.Endpoints.Revocation; got.String() != want.String() {
+		t.Errorf("Endpoints.Revocation = %q, want the advertised %q", got.String(), want.String())
+	}
 	if len(discovered.IDTokenAlgorithms) != 1 || discovered.IDTokenAlgorithms[0] != fapi.ES256 {
 		t.Fatalf("IDTokenAlgorithms = %v, want [ES256]", discovered.IDTokenAlgorithms)
 	}

@@ -341,6 +341,7 @@ func New(t *testing.T, cfg Config) *Harness {
 			Token:                      srvCfg.Endpoints.Token,
 			PushedAuthorizationRequest: srvCfg.Endpoints.PushedAuthorizationRequest,
 			UserInfo:                   userInfoURL,
+			Revocation:                 srvCfg.Endpoints.Revocation,
 		},
 		Profile:                        clientProfile,
 		Assurance:                      client.AssuranceDevelopment,
@@ -590,6 +591,7 @@ func loopbackEndpoints(base string) server.Endpoints {
 		Token:                      mustURL("/token"),
 		PushedAuthorizationRequest: mustURL("/par"),
 		JWKS:                       mustURL("/jwks"),
+		Revocation:                 mustURL("/revoke"),
 	}
 }
 

@@ -200,12 +200,19 @@ type Endpoints struct {
 	// automatically when the server advertises one; otherwise, set it
 	// from a deployment's own out-of-band knowledge of the server.
 	BackchannelAuthentication fapi.URL
+
+	// Revocation is the server's token revocation endpoint (RFC 7009),
+	// if this client calls RevokeToken. OPTIONAL — zero means the
+	// server offers none: RevokeToken then fails with
+	// ErrorRevocationNotSupported. Discover populates this automatically
+	// when the server advertises one.
+	Revocation fapi.URL
 }
 
 // isZero reports whether no endpoint is set at all.
 func (e Endpoints) isZero() bool {
 	return e.Authorization.IsZero() && e.Token.IsZero() && e.PushedAuthorizationRequest.IsZero() &&
-		e.UserInfo.IsZero() && e.BackchannelAuthentication.IsZero()
+		e.UserInfo.IsZero() && e.BackchannelAuthentication.IsZero() && e.Revocation.IsZero()
 }
 
 // MTLSEndpoints are the mTLS-requiring alternate URLs (RFC 8705 §5's
@@ -217,10 +224,12 @@ type MTLSEndpoints struct {
 	Token                      fapi.URL
 	PushedAuthorizationRequest fapi.URL
 	BackchannelAuthentication  fapi.URL
+	Revocation                 fapi.URL
 }
 
-// ApplyForSenderConstrain overrides endpoints' Token and
-// BackchannelAuthentication fields with m's own advertised aliases,
+// ApplyForSenderConstrain overrides endpoints' Token,
+// BackchannelAuthentication and Revocation fields with m's own
+// advertised aliases,
 // wherever m advertises one (RFC 8705 §5) — for a
 // Config.SenderConstrain == SenderConstrainMTLS client, whose
 // certificate-bound access tokens may need to be requested, and CIBA
@@ -240,6 +249,9 @@ func (m *MTLSEndpoints) ApplyForSenderConstrain(endpoints *Endpoints) bool {
 	}
 	if !m.BackchannelAuthentication.IsZero() {
 		endpoints.BackchannelAuthentication = m.BackchannelAuthentication
+	}
+	if !m.Revocation.IsZero() {
+		endpoints.Revocation = m.Revocation
 	}
 	return true
 }

@@ -191,6 +191,9 @@ type fakeGrantStore struct {
 	refreshTokens   []storage.NewRefreshToken
 	refreshByHash   map[[32]byte]storage.NewRefreshToken
 	refreshRevoked  map[[32]byte]bool
+
+	// failRevokeRefresh, if set, is what RevokeRefreshToken returns.
+	failRevokeRefresh error
 }
 
 func (f *fakeGrantStore) CreateAuthorizationCode(_ context.Context, code storage.NewAuthorizationCode) error {
@@ -263,6 +266,9 @@ func (f *fakeGrantStore) RecordIssuedRefreshToken(_ context.Context, codeHash [3
 func (f *fakeGrantStore) RevokeRefreshToken(_ context.Context, tokenHash [32]byte) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.failRevokeRefresh != nil {
+		return f.failRevokeRefresh
+	}
 	if f.refreshRevoked == nil {
 		f.refreshRevoked = make(map[[32]byte]bool)
 	}
@@ -362,11 +368,17 @@ type fakeRevocationSink struct {
 	mu      sync.Mutex
 	revoked []string
 	until   map[string]time.Time
+
+	// fail, if set, is what Revoke returns.
+	fail error
 }
 
 func (f *fakeRevocationSink) Revoke(_ context.Context, jti string, expiresAt time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.fail != nil {
+		return f.fail
+	}
 	f.revoked = append(f.revoked, jti)
 	if f.until == nil {
 		f.until = map[string]time.Time{}

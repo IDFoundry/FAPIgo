@@ -397,6 +397,7 @@ func TestNewRejectsLoopbackHTTPURLsUnderProduction(t *testing.T) {
 		"loopback token ep":         func(c *server.Config) { c.Endpoints.Token = loopbackEndpoint },
 		"loopback par ep":           func(c *server.Config) { c.Endpoints.PushedAuthorizationRequest = loopbackEndpoint },
 		"loopback jwks ep":          func(c *server.Config) { c.Endpoints.JWKS = loopbackEndpoint },
+		"loopback revocation ep":    func(c *server.Config) { c.Endpoints.Revocation = loopbackEndpoint },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {

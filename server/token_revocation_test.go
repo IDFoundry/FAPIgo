@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -198,5 +199,41 @@ func TestTokenRevocationRequestFromHTTP(t *testing.T) {
 	}
 	if req.HTTP.Get("token") != "rt-1" || len(req.ClientAttestations) != 1 || len(req.ClientAttestationPoPs) != 1 {
 		t.Errorf("request = %+v, want the form and attestation headers", req)
+	}
+}
+
+// TestRevokeTokenFaults covers the server's own failures, which are
+// reported rather than answered 200: a stored grant that won't decode,
+// and a store that fails to revoke the token or the grant.
+func TestRevokeTokenFaults(t *testing.T) {
+	storeDown := errors.New("store unavailable")
+	for name, tc := range map[string]struct {
+		grantID string
+		break_  func(h harness)
+	}{
+		"grant won't decode": {"", func(h harness) { h.grants.corruptAll() }},
+		"token revoke fails": {"", func(h harness) { h.grants.failRevokeRefresh = storeDown }},
+		"grant revoke fails": {"grant-1", func(h harness) { h.revocation.fail = storeDown }},
+	} {
+		t.Run(name, func(t *testing.T) {
+			attesterKey := generateKey(t)
+			h := newRevocationHarness(t, attesterKey)
+			owner := &attestedInstance{t: t, h: h, attesterKey: attesterKey, instanceKey: generateKey(t)}
+			attested, binding := embedderTokenRequest(t, owner)
+			refreshToken, err := h.server.IssueRefreshToken(context.Background(), server.IssueRefreshTokenRequest{
+				GrantType: preAuthorizedCodeGrant, Client: attested, Binding: binding,
+				Subject: mustSubjectID(t, "holder-1"), Scope: []string{"accounts"}, GrantID: tc.grantID,
+			})
+			if err != nil {
+				t.Fatalf("IssueRefreshToken: %v", err)
+			}
+			tc.break_(h)
+			if code := serverErrorCode(t, owner.revoke(formParam("token", refreshToken.Reveal()))); code != server.ErrorServerError {
+				t.Fatalf("RevokeToken = code %q, want server_error", code)
+			}
+			if last := lastAudit(t, h); last.Type != server.AuditEventRevokeToken || last.Outcome != server.AuditOutcomeFailure {
+				t.Errorf("last audit event = %+v, want a RevokeToken failure", last)
+			}
+		})
 	}
 }

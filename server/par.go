@@ -768,16 +768,16 @@ func (s *Server) validateScope(scope string, client storage.RegisteredClient) er
 	return nil
 }
 
-// clientAllowsScope is the single choke point every grant's own scope
-// check (PAR, CIBA, client_credentials) funnels through: client's own
-// AllowedScopes, narrowed further by Config.OAuthOnly refusing "openid"
-// universally — see its own doc comment. Because every scope a request
-// or a resource owner's grant can ever carry traces back to one of
-// these checks (a refresh or CIBA-notified poll only ever narrows an
-// already-validated grant, never adds to it), this is also what
-// guarantees the openid-gated branches in token.go/refresh.go/
-// backchannel_token.go (and Metadata's own OIDC fields) can never
-// disagree with what OAuthOnly actually allowed through.
+// clientAllowsScope is the single choke point every scope check funnels
+// through: client's own AllowedScopes, narrowed further by
+// Config.OAuthOnly refusing "openid" universally — see its own doc
+// comment. It runs where a grant is made (PAR, CIBA, client_credentials,
+// IssueRefreshToken) and again where tokens are later issued from a
+// stored grant (refresh, the CIBA token exchange; see
+// checkGrantStillAllowed), since a registration or OAuthOnly can change
+// in between. That's what keeps the openid-gated branches in token.go,
+// refresh.go and backchannel_token.go from issuing an ID token or scope
+// the current configuration no longer allows.
 func (s *Server) clientAllowsScope(client storage.RegisteredClient, scope string) bool {
 	if s.cfg.OAuthOnly && scope == "openid" {
 		return false

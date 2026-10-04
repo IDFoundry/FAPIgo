@@ -51,7 +51,10 @@ type BackchannelTokenExchangeRequest struct {
 // approved, it issues an access token bound to the DPoP key (plus an ID
 // token when the granted scope included "openid" and a refresh token
 // when it included "offline_access") — exactly once, mirroring
-// ExchangeAuthorizationCode's single-issuance guarantee.
+// ExchangeAuthorizationCode's single-issuance guarantee. An approved
+// grant is checked against the client's current registration first, as
+// RefreshAccessToken does: a scope or authorization_details type the
+// client may no longer use is refused (invalid_scope, invalid_grant).
 func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req BackchannelTokenExchangeRequest) (TokenResult, error) {
 	params, err := formParametersToMap(req.HTTP.Parameters)
 	if err != nil {
@@ -114,8 +117,8 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorServerError, 500, "failed to decode backchannel authentication grant", err))
 	}
-	if revErr := s.checkGrantNotRevoked(ctx, grant); revErr != nil {
-		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), revErr)
+	if usableErr := s.checkGrantUsable(ctx, client, grant); usableErr != nil {
+		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), usableErr)
 	}
 	accessTokenClaims, err := grant.accessTokenClaims()
 	if err != nil {

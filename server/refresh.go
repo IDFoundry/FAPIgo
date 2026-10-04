@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/x509"
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -65,6 +66,14 @@ type RefreshTokenRequest struct {
 // refresh too — see storage.GrantStore.RedeemRefreshToken's doc
 // comment. A requested scope may narrow, but never widen, the token's
 // original grant.
+//
+// The grant is checked against the client's current registration, not
+// only the one it was issued under: a scope the client may no longer use
+// (removed from AllowedScopes, or openid under Config.OAuthOnly) is
+// refused with invalid_scope, and the client can still refresh by
+// requesting a narrower scope without it; authorization_details of a
+// type the client or Config.RAR no longer allows are refused with
+// invalid_grant, and the client must authorize again.
 func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest) (TokenResult, error) {
 	params, err := formParametersToMap(req.HTTP.Parameters)
 	if err != nil {
@@ -105,6 +114,9 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 	scope, scopeErr := refreshScope(params, grant)
 	if scopeErr != nil {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), scopeErr)
+	}
+	if allowedErr := s.checkGrantStillAllowed(client, scope, grant.AuthorizationDetails); allowedErr != nil {
+		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), allowedErr)
 	}
 
 	accessTokenClaims, err := grant.accessTokenClaims()
@@ -196,6 +208,55 @@ func (s *Server) redeemRefreshGrant(ctx context.Context, clientID fapi.ClientID,
 		return grantRecord{}, time.Time{}, revErr
 	}
 	return grant, now, nil
+}
+
+// checkGrantStillAllowed refuses to issue tokens for scope and
+// authorizationDetails that the client's current registration no longer
+// allows. A grant was checked when it was made, but a registration can
+// change afterwards: a scope removed from AllowedScopes, Config.OAuthOnly
+// turned on, a Rich Authorization Request type removed from
+// AuthorizationDetailsTypes or from Config.RAR, or a federation policy
+// narrowing an automatically registered client.
+//
+// It refuses rather than narrowing silently. A scope fails with
+// invalid_scope, and the client can still refresh by asking for a
+// narrower scope that leaves it out. Authorization details have no
+// refresh-time narrowing, so a type the client may no longer request
+// fails with invalid_grant, and the client must authorize again.
+func (s *Server) checkGrantStillAllowed(client storage.RegisteredClient, scope []string, authorizationDetails json.RawMessage) *Error {
+	for _, sc := range scope {
+		if !s.clientAllowsScope(client, sc) {
+			return newError(ErrorInvalidScope, 400, "the grant includes a scope this client may no longer use", nil)
+		}
+	}
+	if len(authorizationDetails) == 0 {
+		return nil
+	}
+	if s.cfg.RAR == nil {
+		return newError(ErrorInvalidGrant, 400, "the grant has authorization_details, which this server no longer supports", nil)
+	}
+	// Parse refuses a type Config.RAR no longer registers, and checks each
+	// detail against the current definitions.
+	if _, err := s.cfg.RAR.Parse(authorizationDetails); err != nil {
+		return newError(ErrorInvalidGrant, 400, "the grant's authorization_details are no longer valid on this server", err)
+	}
+	var details []json.RawMessage
+	if err := json.Unmarshal(authorizationDetails, &details); err != nil {
+		return newError(ErrorServerError, 500, "failed to decode the grant's authorization_details", err)
+	}
+	if err := checkAuthorizationDetailsTypes(client, details); err != nil {
+		return newError(ErrorInvalidGrant, 400, "the grant's authorization_details include a type this client may no longer request", err)
+	}
+	return nil
+}
+
+// checkGrantUsable is checkGrantNotRevoked and checkGrantStillAllowed
+// together, for a grant issued in full (the CIBA token exchange).
+func (s *Server) checkGrantUsable(ctx context.Context, client storage.RegisteredClient, grant grantRecord) *Error {
+	if revErr := s.checkGrantNotRevoked(ctx, grant); revErr != nil {
+		return revErr
+	}
+	return s.checkGrantStillAllowed(client, grant.Scope, grant.AuthorizationDetails)
 }
 
 // refreshScope is the scope a refresh request asks for: the grant's,

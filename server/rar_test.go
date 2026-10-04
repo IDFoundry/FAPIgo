@@ -122,8 +122,9 @@ func newHarnessWithRARTypes(t *testing.T, profile server.Profile, registry *exte
 		RAR:       registry,
 	}
 	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
+	clients := &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}}
 	deps := server.Dependencies{
-		Clients:      &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
+		Clients:      clients,
 		Transactions: &fakeTransactionStore{},
 		Grants:       &fakeGrantStore{},
 		Replay:       &fakeReplayStore{},
@@ -145,7 +146,7 @@ func newHarnessWithRARTypes(t *testing.T, profile server.Profile, registry *exte
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
-	return harness{server: srv, key: key, serverKey: serverKey, now: now}
+	return harness{server: srv, clients: clients, key: key, serverKey: serverKey, now: now, cfg: cfg, deps: deps}
 }
 
 func rarSubjectAndAuthCtx(t *testing.T, now time.Time) (server.AuthenticatedSubject, server.AuthenticationContext) {

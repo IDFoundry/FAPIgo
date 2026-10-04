@@ -49,7 +49,9 @@ type Dependencies struct {
 
 	// AccessTokens issues this server's access tokens. Required — pass
 	// JWTAccessTokens{...} (the default), OpaqueAccessTokens{...}, or
-	// your own AccessTokenIssuer.
+	// your own AccessTokenIssuer. Under AssuranceProduction, your own
+	// issuer must implement AccessTokenIssuerAssurance, so New can check
+	// its signing keys and store as it checks the built-in issuers'.
 	AccessTokens AccessTokenIssuer
 
 	// Audit records security-significant events. Required when

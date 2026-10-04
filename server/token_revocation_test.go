@@ -37,6 +37,12 @@ func newRevocationHarness(t *testing.T, attesterKey *ecdsa.PrivateKey) harness {
 // revoke asks the revocation endpoint to revoke token, authenticated as
 // instance.
 func (i *attestedInstance) revoke(params ...server.FormParameter) error {
+	_, err := i.revokeResult(params...)
+	return err
+}
+
+// revokeResult is revoke, with what RevokeToken reports it revoked.
+func (i *attestedInstance) revokeResult(params ...server.FormParameter) (server.TokenRevocationResult, error) {
 	attestations, pops := i.headers()
 	return i.h.server.RevokeToken(context.Background(), server.TokenRevocationRequest{
 		HTTP:               server.FormRequest{Parameters: append([]server.FormParameter{formParam("client_id", testClientID.String())}, params...)},
@@ -140,7 +146,8 @@ func TestRevokeTokenRefusals(t *testing.T) {
 			return owner.revoke(formParam("token", "a"), formParam("token", "b"))
 		}, server.ErrorInvalidRequest},
 		"no client authentication": {func() error {
-			return h.server.RevokeToken(ctx, server.TokenRevocationRequest{HTTP: server.FormRequest{Parameters: []server.FormParameter{formParam("token", "x")}}})
+			_, err := h.server.RevokeToken(ctx, server.TokenRevocationRequest{HTTP: server.FormRequest{Parameters: []server.FormParameter{formParam("token", "x")}}})
+			return err
 		}, server.ErrorInvalidClient},
 	}
 	for name, tc := range cases {
@@ -270,5 +277,58 @@ func TestRevokeTokenRevokesEveryGrantSharingItsGrantID(t *testing.T) {
 	}
 	if _, err := b.refresh(tokenB); serverErrorCode(t, err) != server.ErrorInvalidGrant {
 		t.Fatalf("refresh of the other grant sharing the ID: %v, want invalid_grant", err)
+	}
+}
+
+// TestRevokeTokenReportsTheGrantItEnded covers TokenRevocationResult: it
+// names the grant a revocation ended, so the embedder can delete what it
+// kept for it, and reports nothing when nothing was revoked.
+func TestRevokeTokenReportsTheGrantItEnded(t *testing.T) {
+	attesterKey := generateKey(t)
+	h := newRevocationHarness(t, attesterKey)
+	owner := &attestedInstance{t: t, h: h, attesterKey: attesterKey, instanceKey: generateKey(t)}
+	other := &attestedInstance{t: t, h: h, attesterKey: attesterKey, instanceKey: generateKey(t)}
+	issue := func(grantID string) string {
+		attested, binding := embedderTokenRequest(t, owner)
+		rt, err := h.server.IssueRefreshToken(context.Background(), server.IssueRefreshTokenRequest{
+			GrantType: preAuthorizedCodeGrant, Client: attested, Binding: binding,
+			Subject: mustSubjectID(t, "holder-1"), Scope: []string{"accounts"}, GrantID: grantID,
+		})
+		if err != nil {
+			t.Fatalf("IssueRefreshToken: %v", err)
+		}
+		return rt.Reveal()
+	}
+	withGrant, withoutGrant := issue("passport-grant-1"), issue("")
+
+	for name, tc := range map[string]struct {
+		revoke func() (server.TokenRevocationResult, error)
+		want   server.TokenRevocationResult
+	}{
+		"another installation's token": {func() (server.TokenRevocationResult, error) {
+			return other.revokeResult(formParam("token", withGrant))
+		}, server.TokenRevocationResult{}},
+		"unknown token": {func() (server.TokenRevocationResult, error) {
+			return owner.revokeResult(formParam("token", "unknown-token"))
+		}, server.TokenRevocationResult{}},
+		"token without a grant ID": {func() (server.TokenRevocationResult, error) {
+			return owner.revokeResult(formParam("token", withoutGrant))
+		}, server.TokenRevocationResult{Revoked: true}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := tc.revoke()
+			if err != nil || got != tc.want {
+				t.Fatalf("RevokeToken = %+v, %v; want %+v", got, err, tc.want)
+			}
+		})
+	}
+
+	// Ordered: the owner revokes the grant's token, then again.
+	got, err := owner.revokeResult(formParam("token", withGrant))
+	if err != nil || got != (server.TokenRevocationResult{Revoked: true, GrantID: "passport-grant-1"}) {
+		t.Fatalf("RevokeToken(owner) = %+v, %v; want the grant passport-grant-1 revoked", got, err)
+	}
+	if got, err := owner.revokeResult(formParam("token", withGrant)); err != nil || got != (server.TokenRevocationResult{}) {
+		t.Fatalf("RevokeToken(already revoked) = %+v, %v; want nothing revoked", got, err)
 	}
 }

@@ -220,7 +220,7 @@ func (a *authServer) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 func (a *authServer) handleRevoke(w http.ResponseWriter, r *http.Request) {
 	req, err := server.TokenRevocationRequestFromHTTP(r)
 	if err == nil {
-		err = a.srv.RevokeToken(r.Context(), req)
+		_, err = a.srv.RevokeToken(r.Context(), req)
 	}
 	if err != nil {
 		a.writeServerError(w, err)

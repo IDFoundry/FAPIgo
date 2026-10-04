@@ -71,7 +71,7 @@ func (s *Server) IssueRefreshToken(ctx context.Context, req IssueRefreshTokenReq
 		s.audit(ctx, AuditEventIssueRefreshToken, client.ID(), AuditOutcomeFailure, string(err.Code()))
 		return fapi.Secret{}, err
 	}
-	raw, issueErr := s.issueRefreshToken(ctx, client.ID(), grant, req.Binding.Thumbprint, req.Client.instanceKey)
+	raw, issueErr := s.issueRefreshToken(ctx, client.ID(), grant, refreshBinding{Thumbprint: req.Binding.Thumbprint, InstanceKey: req.Client.instanceKey})
 	if issueErr != nil {
 		err := newError(ErrorServerError, 500, "failed to issue refresh token", issueErr)
 		s.audit(ctx, AuditEventIssueRefreshToken, client.ID(), AuditOutcomeFailure, string(err.Code()))

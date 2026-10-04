@@ -104,15 +104,24 @@ type grantRecord struct {
 	GrantID string `json:"grant_id,omitempty"`
 }
 
+// refreshBinding is what a refresh token is issued against: the DPoP key
+// or client certificate thumbprint the token request presented
+// (recorded for reference only — see grantRecord.Thumbprint), and the
+// Client Instance Key it's bound to when the client authenticated by
+// Client Attestation (grantRecord.ClientInstanceKey).
+type refreshBinding struct {
+	Thumbprint  string
+	InstanceKey string
+}
+
 // forRefreshToken returns g as a refresh token carries it forward:
-// without the code-exchange-only fields, recording thumbprint, and
-// bound to instanceKey (see ClientInstanceKey).
-func (g grantRecord) forRefreshToken(thumbprint, instanceKey string) grantRecord {
+// without the code-exchange-only fields, and recording binding.
+func (g grantRecord) forRefreshToken(binding refreshBinding) grantRecord {
 	g.RedirectURI = ""
 	g.CodeChallenge = ""
 	g.Nonce = ""
-	g.Thumbprint = thumbprint
-	g.ClientInstanceKey = instanceKey
+	g.Thumbprint = binding.Thumbprint
+	g.ClientInstanceKey = binding.InstanceKey
 	return g
 }
 

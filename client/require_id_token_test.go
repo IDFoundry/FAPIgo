@@ -25,7 +25,6 @@ func TestCompleteAuthorizationRequiresIDTokenForOpenID(t *testing.T) {
 	}{
 		{name: "openid, no ID token", scope: []string{"openid", "accounts"}, omit: true, wantErr: true},
 		{name: "openid and max_age, no ID token", scope: []string{"openid", "accounts"}, hasMaxAge: true, omit: true, wantErr: true},
-		{name: "max_age without openid, no ID token", scope: []string{"accounts"}, hasMaxAge: true, omit: true, wantErr: true},
 		{name: "no openid, no ID token", scope: []string{"accounts"}, omit: true},
 		{name: "openid, ID token", scope: []string{"openid", "accounts"}},
 	} {
@@ -109,5 +108,24 @@ func TestBackchannelSessionEncodedBeforeOpenIDFlag(t *testing.T) {
 	const old = "v1.eyJhIjoicmVxLTEiLCJpIjo1MDAwLCJlIjoiMjAzMC0wMS0wMVQwMDowMDowMFoifQ"
 	if _, err := client.ParseBackchannelAuthenticationSession(old); err != nil {
 		t.Fatalf("ParseBackchannelAuthenticationSession(old) = %v", err)
+	}
+}
+
+// TestBeginAuthorizationRefusesMaxAgeWithoutOpenID covers max_age's
+// requirement up front: only an ID token's auth_time can meet it, so a
+// request without "openid" is refused before the user reaches the
+// authorization server.
+func TestBeginAuthorizationRefusesMaxAgeWithoutOpenID(t *testing.T) {
+	c, as, _ := newTestClient(t, false)
+	_, err := c.BeginAuthorization(context.Background(), client.BeginAuthorizationRequest{Scope: []string{"accounts"}, HasMaxAge: true})
+	var cerr *client.Error
+	if !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidRequest {
+		t.Fatalf("BeginAuthorization(max_age, no openid) = %v, want invalid_request", err)
+	}
+	if as.lastPARForm != nil {
+		t.Error("the request was pushed anyway")
+	}
+	if _, err := c.BeginAuthorization(context.Background(), client.BeginAuthorizationRequest{Scope: []string{"openid"}, HasMaxAge: true}); err != nil {
+		t.Fatalf("BeginAuthorization(max_age, openid): %v", err)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -34,8 +35,11 @@ type AttestedClient struct {
 	// instanceKey is the RFC 7638 thumbprint of the Client Instance Key
 	// the attestation's PoP verified under: what IssueRefreshToken
 	// binds a refresh token to. Unexported, so only an AttestedClient
-	// this server authenticated carries one.
-	instanceKey string
+	// this server authenticated carries one. authenticatedID is the
+	// client it was verified for: IssueRefreshToken refuses a Client
+	// changed since, so the key can't be attached to another client.
+	instanceKey     string
+	authenticatedID fapi.ClientID
 }
 
 // AuthenticateAttestedClient authenticates a client with a Client
@@ -84,5 +88,5 @@ func (s *Server) AuthenticateAttestedClient(ctx context.Context, req AttestedCli
 		return AttestedClient{}, err
 	}
 	s.audit(ctx, AuditEventAuthenticateAttestedClient, client.ID(), AuditOutcomeSuccess, "")
-	return AttestedClient{Client: client, AttestationExpiresAt: verified.ExpiresAt, instanceKey: verified.InstanceKey}, nil
+	return AttestedClient{Client: client, AttestationExpiresAt: verified.ExpiresAt, instanceKey: verified.InstanceKey, authenticatedID: client.ID()}, nil
 }

@@ -5,9 +5,7 @@
 
 ### Bug Fixes
 
-* **client:** apply every mTLS endpoint alias, whatever the reason for mutual TLS ([d8b4e79](https://github.com/IDFoundry/FAPIgo/commit/d8b4e797ae4a59e4ebe6afb467469780052fd3a2))
-* **client:** apply the mTLS alias for revocation under certificate client auth ([d72fdc0](https://github.com/IDFoundry/FAPIgo/commit/d72fdc06e3231b887aadec56e433779e72525264))
-* **client:** keep PAR off the mTLS alias for certificate-bound tokens alone ([9a0e000](https://github.com/IDFoundry/FAPIgo/commit/9a0e000b0e9fb5bd075a398f6441398fee810d45))
+* **client:** a client authenticating with its TLS certificate now also uses the server's mTLS endpoint aliases for token revocation and the CIBA backchannel authentication endpoint (`MTLSEndpoints.ApplyForClientAuth`, RFC 8705 §5); `ApplyForSenderConstrain` is unchanged ([9a0e000](https://github.com/IDFoundry/FAPIgo/commit/9a0e000b0e9fb5bd075a398f6441398fee810d45))
 
 ## [0.48.0](https://github.com/IDFoundry/FAPIgo/compare/v0.47.0...v0.48.0) (2026-10-04)
 

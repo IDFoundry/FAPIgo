@@ -505,3 +505,42 @@ func assertMetadataEqual(t *testing.T, got, want map[string]json.RawMessage) {
 		}
 	}
 }
+
+// TestApplyPolicyOnlyToPresentEntityTypes covers OpenID Federation 1.0
+// §6.1.4.2: operators apply to the Entity Types the metadata has. A
+// policy for any other type creates nothing and checks nothing, so it
+// can't give an entity metadata it never declared, and an "essential"
+// for an absent type isn't a failure.
+func TestApplyPolicyOnlyToPresentEntityTypes(t *testing.T) {
+	policy := mustPolicy(t, `{
+		"openid_relying_party": {
+			"redirect_uris": {"value": ["https://attacker.example/cb"]},
+			"contacts": {"essential": true}
+		},
+		"openid_provider": {"issuer": {"essential": true}}
+	}`)
+	resolved, err := ApplyPolicy(policy, nil, map[string]json.RawMessage{
+		"openid_provider": json.RawMessage(`{"issuer":"https://op.example"}`),
+	})
+	if err != nil {
+		t.Fatalf("ApplyPolicy: %v", err)
+	}
+	if rp, ok := resolved["openid_relying_party"]; ok {
+		t.Errorf("ApplyPolicy created openid_relying_party %s for metadata without it", rp)
+	}
+	if string(resolved["openid_provider"]) != `{"issuer":"https://op.example"}` {
+		t.Errorf("openid_provider = %s, want it unchanged", resolved["openid_provider"])
+	}
+
+	empty, err := ApplyPolicy(policy, nil, nil)
+	if err != nil || len(empty) != 0 {
+		t.Errorf("ApplyPolicy(nil metadata) = %v, %v; want empty, no error", empty, err)
+	}
+
+	// A present type still gets its policy, essential included.
+	if _, err := ApplyPolicy(policy, nil, map[string]json.RawMessage{
+		"openid_relying_party": json.RawMessage(`{"redirect_uris":["https://le.example/cb"]}`),
+	}); err == nil {
+		t.Error("ApplyPolicy with an essential claim missing from present metadata = nil error, want error")
+	}
+}

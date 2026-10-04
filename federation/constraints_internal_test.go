@@ -224,3 +224,15 @@ func TestFilterAllowedEntityTypesAlwaysKeepsFederationEntity(t *testing.T) {
 		t.Errorf("openid_relying_party present, want it removed (empty allowed_entity_types allows only federation_entity)")
 	}
 }
+
+// TestCheckNamingConstraintExcludedCatchesTrailingDot covers a host
+// ending in "." reaching the check: it names the same host, so an
+// excluded constraint still refuses it.
+func TestCheckNamingConstraintExcludedCatchesTrailingDot(t *testing.T) {
+	nc := intfed.NamingConstraints{Excluded: []string{"bad.example.com", ".evil.example.com"}}
+	for _, id := range []string{"https://bad.example.com.", "https://x.evil.example.com."} {
+		if err := checkNamingConstraint(nc, id); err == nil {
+			t.Errorf("checkNamingConstraint(%q) = nil error, want it excluded", id)
+		}
+	}
+}

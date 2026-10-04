@@ -394,9 +394,14 @@ func isStandardOperator(name string) bool {
 // metadata policy, e.g. MergePolicy's own result — to metadata (both
 // keyed by Entity Type identifier, e.g. "openid_relying_party"),
 // returning the Resolved Metadata (OpenID Federation 1.0 §6.1.4.2).
-// metadata may be nil (an Entity Configuration that declared no
-// metadata at all still receives whatever default/add/value operators
-// supply).
+// The policy applies to the Entity Types metadata has, and only those:
+// §6.1.4.2 applies operators "for every Entity Type metadata ... for
+// which a corresponding metadata parameter policy is present", and
+// §6.1.2 scopes a policy to "Subordinate Entities of that type". A
+// policy for an Entity Type metadata lacks creates nothing and checks
+// nothing — not even "essential" — so it can't give an entity metadata
+// it never declared, including a type allowed_entity_types removed
+// (§6.2.3). metadata may be nil; the result is then empty.
 //
 // Only the seven standard operators (§6.1.3.1) are understood and
 // acted on; a non-standard operator (§6.1.3.2) is ignored during
@@ -413,23 +418,11 @@ func ApplyPolicy(policy MetadataPolicy, critNames []string, metadata map[string]
 	if err := validatePolicy(policy, crit); err != nil {
 		return nil, err
 	}
-	// Capacity is only a hint; see mergeOperators' own doc comment on
-	// why this drops the addition rather than sum the two lengths.
-	entityTypes := make(map[string]bool, len(policy))
-	for entityType := range policy {
-		entityTypes[entityType] = true
-	}
-	for entityType := range metadata {
-		entityTypes[entityType] = true
-	}
-
-	resolved := make(map[string]json.RawMessage, len(entityTypes))
-	for entityType := range entityTypes {
+	resolved := make(map[string]json.RawMessage, len(metadata))
+	for entityType, raw := range metadata {
 		var current map[string]json.RawMessage
-		if raw, ok := metadata[entityType]; ok {
-			if err := json.Unmarshal(raw, &current); err != nil {
-				return nil, policyError("metadata.%s is not a JSON object: %v", entityType, err)
-			}
+		if err := json.Unmarshal(raw, &current); err != nil {
+			return nil, policyError("metadata.%s is not a JSON object: %v", entityType, err)
 		}
 		result, err := applyEntityTypePolicy(policy[entityType], crit, current)
 		if err != nil {

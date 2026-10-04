@@ -47,7 +47,28 @@ type constrainedFederation struct {
 // to give LE more than one metadata Entity Type to filter between.
 func setupConstrainedFederation(t *testing.T, constraints *intfed.Constraints, leMetadata map[string]json.RawMessage) *constrainedFederation {
 	t.Helper()
+	return setupConstrainedFederationWith(t, constrainedFederationParams{constraints: constraints, leMetadata: leMetadata})
+}
+
+// constrainedFederationParams parameterises setupConstrainedFederationWith:
+// constraints and policy go in TA's own Subordinate Statement about LE,
+// which lasts aboutLELifetime (an hour when zero); leMetadata is as for
+// setupConstrainedFederation.
+type constrainedFederationParams struct {
+	constraints     *intfed.Constraints
+	policy          intfed.MetadataPolicy
+	leMetadata      map[string]json.RawMessage
+	aboutLELifetime time.Duration
+}
+
+func setupConstrainedFederationWith(t *testing.T, p constrainedFederationParams) *constrainedFederation {
+	t.Helper()
 	now := time.Now()
+	constraints, leMetadata := p.constraints, p.leMetadata
+	aboutLELifetime := p.aboutLELifetime
+	if aboutLELifetime == 0 {
+		aboutLELifetime = time.Hour
+	}
 
 	taKey, leKey := generateKey(t), generateKey(t)
 	taJWKS, leJWKS := jwksFor(t, "ta", taKey), jwksFor(t, "le", leKey)
@@ -77,8 +98,8 @@ func setupConstrainedFederation(t *testing.T, constraints *intfed.Constraints, l
 	})
 	taAboutLE := sign(intfed.CreateParams{
 		Signer: taKey, Algorithm: fapi.ES256, KeyID: "ta",
-		Issuer: taID, Subject: leID, Now: now, Lifetime: time.Hour, JWKS: leJWKS,
-		Constraints: constraints,
+		Issuer: taID, Subject: leID, Now: now, Lifetime: aboutLELifetime, JWKS: leJWKS,
+		Constraints: constraints, MetadataPolicy: p.policy,
 	})
 	if leMetadata == nil {
 		leMetadata = map[string]json.RawMessage{

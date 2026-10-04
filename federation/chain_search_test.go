@@ -34,6 +34,10 @@ type federationGraph struct {
 	t        *testing.T
 	now      time.Time
 	entities map[string]*graphEntity
+
+	// lifetimes, keyed "superior>subject", overrides the hour a
+	// Subordinate Statement otherwise lasts.
+	lifetimes map[string]time.Duration
 }
 
 func newFederationGraph(t *testing.T, names ...string) *federationGraph {
@@ -73,9 +77,13 @@ func (g *federationGraph) subordinateStatements(hints map[string][]string) map[s
 			if !ok {
 				continue
 			}
+			lifetime := time.Hour
+			if l, ok := g.lifetimes[sup+">"+sub]; ok {
+				lifetime = l
+			}
 			token, err := intfed.Create(intfed.CreateParams{
 				Signer: superior.key, Algorithm: fapi.ES256, KeyID: sup,
-				Issuer: superior.id, Subject: g.entities[sub].id, Now: g.now, Lifetime: time.Hour,
+				Issuer: superior.id, Subject: g.entities[sub].id, Now: g.now, Lifetime: lifetime,
 				JWKS: g.entities[sub].jwks,
 			})
 			if err != nil {

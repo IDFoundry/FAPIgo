@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.48.1](https://github.com/IDFoundry/FAPIgo/compare/v0.48.0...v0.48.1) (2026-10-04)
+
+
+### Bug Fixes
+
+* **client:** a client authenticating with its TLS certificate now also uses the server's mTLS endpoint aliases for token revocation and the CIBA backchannel authentication endpoint (`MTLSEndpoints.ApplyForClientAuth`, RFC 8705 §5); `ApplyForSenderConstrain` is unchanged ([9a0e000](https://github.com/IDFoundry/FAPIgo/commit/9a0e000b0e9fb5bd075a398f6441398fee810d45))
+
 ## [0.48.0](https://github.com/IDFoundry/FAPIgo/compare/v0.47.0...v0.48.0) (2026-10-04)
 
 

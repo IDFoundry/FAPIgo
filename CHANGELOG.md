@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.47.0](https://github.com/IDFoundry/FAPIgo/compare/v0.46.0...v0.47.0) (2026-10-04)
+
+
+### Features
+
+* **client:** revoke a refresh token (RFC 7009) ([0398aa2](https://github.com/IDFoundry/FAPIgo/commit/0398aa2bf7162a89be63728f3bc96178427d33c2))
+* **server:** refresh tokens for grants the embedder serves itself ([83a78e4](https://github.com/IDFoundry/FAPIgo/commit/83a78e458f065aa804a86a0b6467bf4a1e146bec))
+* **server:** token revocation endpoint for refresh tokens (RFC 7009) ([2868eae](https://github.com/IDFoundry/FAPIgo/commit/2868eaee5bb02fa812c93c4b086f687d4e9d4c6d))
+
+
+### Bug Fixes
+
+* **client:** name the media type of a non-OAuth error response ([943e4e3](https://github.com/IDFoundry/FAPIgo/commit/943e4e397bc415bc143d6199d599efdfac21173b))
+* **server:** bind attested clients' refresh tokens to the instance key ([f3a90c4](https://github.com/IDFoundry/FAPIgo/commit/f3a90c49a7144fb553bef8f77ae68f020f70f173))
+* **server:** require one grant per GrantID, and audit no-op revocations ([4111cfd](https://github.com/IDFoundry/FAPIgo/commit/4111cfd1ad5a2ee1ce0bba5fdafdddb93f15e68f))
+* **server:** tie an AttestedClient's instance key to its client ([05ce5bb](https://github.com/IDFoundry/FAPIgo/commit/05ce5bb1f3ef1f794884cfc331f0a467b63414bf))
+
 ## [0.46.0](https://github.com/IDFoundry/FAPIgo/compare/v0.45.0...v0.46.0) (2026-10-03)
 
 

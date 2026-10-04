@@ -184,6 +184,12 @@ type Harness struct {
 	httpClient         *http.Client
 	clientKeys         keys.KeyManager
 	signatureAlgorithm fapi.SignatureAlgorithm
+
+	// clientConfig and clientDeps built Client: a test rebuilds a
+	// client from them to stand in for an app relaunched with the same
+	// on-device storage.
+	clientConfig client.Config
+	clientDeps   client.Dependencies
 }
 
 // New builds a Harness: an in-memory-backed server.Server exposed over a
@@ -400,6 +406,7 @@ func New(t *testing.T, cfg Config) *Harness {
 	return &Harness{
 		t: t, Client: c, Resource: rs, Clock: clock, authServer: as, httpClient: httpClient,
 		clientKeys: clientKeys, signatureAlgorithm: sigAlg, MTLSCertificate: mtlsCert,
+		clientConfig: clientCfg, clientDeps: clientDeps,
 	}
 }
 

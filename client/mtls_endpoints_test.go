@@ -16,15 +16,22 @@ func mustEndpointURL(t *testing.T, raw string) fapi.URL {
 	return u
 }
 
-// TestMTLSEndpointsApplyEveryAdvertisedAlias covers RFC 8705 §5: a client
-// doing mutual TLS, for client authentication or for certificate-bound
-// tokens alike, uses every alias the server advertises for an endpoint it
-// calls directly. Authorization, which the user agent calls, is never
-// aliased.
-func TestMTLSEndpointsApplyEveryAdvertisedAlias(t *testing.T) {
-	for name, apply := range map[string]func(*client.MTLSEndpoints, *client.Endpoints) bool{
-		"ApplyForSenderConstrain": (*client.MTLSEndpoints).ApplyForSenderConstrain,
-		"ApplyForClientAuth":      (*client.MTLSEndpoints).ApplyForClientAuth,
+// TestMTLSEndpointsApplyAliasesPerRequest covers which aliases each helper
+// applies: an alias applies to a request that itself does mutual TLS.
+// A certificate-authenticated client does it at every request that
+// authenticates it, PAR and CIBA included. A client using mutual TLS only
+// for certificate-bound tokens keeps PAR at the conventional endpoint:
+// FAPI 2.0 conformance testing refuses its PAR request over mutual TLS
+// ("The PAR endpoint was called over an mTLS secured connection, but this
+// is not expected when using private_key_jwt client authentication").
+// Authorization, which the user agent calls, is never aliased.
+func TestMTLSEndpointsApplyAliasesPerRequest(t *testing.T) {
+	for name, tc := range map[string]struct {
+		apply   func(*client.MTLSEndpoints, *client.Endpoints) bool
+		wantPAR bool
+	}{
+		"ApplyForSenderConstrain": {(*client.MTLSEndpoints).ApplyForSenderConstrain, false},
+		"ApplyForClientAuth":      {(*client.MTLSEndpoints).ApplyForClientAuth, true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			aliases := &client.MTLSEndpoints{
@@ -40,14 +47,18 @@ func TestMTLSEndpointsApplyEveryAdvertisedAlias(t *testing.T) {
 				BackchannelAuthentication:  mustEndpointURL(t, "https://as.example.com/backchannel"),
 				Revocation:                 mustEndpointURL(t, "https://as.example.com/revoke"),
 			}
-			if !apply(aliases, &endpoints) {
+			if !tc.apply(aliases, &endpoints) {
 				t.Fatalf("%s() = false, want true", name)
+			}
+			wantPAR := "https://as.example.com/par"
+			if tc.wantPAR {
+				wantPAR = aliases.PushedAuthorizationRequest.String()
 			}
 			for field, got := range map[string][2]string{
 				"Token":                      {endpoints.Token.String(), aliases.Token.String()},
-				"PushedAuthorizationRequest": {endpoints.PushedAuthorizationRequest.String(), aliases.PushedAuthorizationRequest.String()},
 				"BackchannelAuthentication":  {endpoints.BackchannelAuthentication.String(), aliases.BackchannelAuthentication.String()},
 				"Revocation":                 {endpoints.Revocation.String(), aliases.Revocation.String()},
+				"PushedAuthorizationRequest": {endpoints.PushedAuthorizationRequest.String(), wantPAR},
 				"Authorization":              {endpoints.Authorization.String(), "https://as.example.com/authorize"},
 			} {
 				if got[0] != got[1] {

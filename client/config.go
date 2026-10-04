@@ -227,54 +227,66 @@ type MTLSEndpoints struct {
 	Revocation                 fapi.URL
 }
 
-// ApplyForSenderConstrain overrides endpoints with every alias m
-// advertises, for a Config.SenderConstrain == SenderConstrainMTLS client.
-// RFC 8705 §5: a client "intending to do mutual TLS (for OAuth client
-// authentication and/or to acquire or use certificate-bound tokens) when
-// making a request directly to the authorization server MUST use the
-// alias URL of the endpoint", for whichever of its endpoints m advertises
-// one: Token, PushedAuthorizationRequest, BackchannelAuthentication and
-// Revocation. Authorization is never aliased: the user agent, not the
-// client, makes that request.
+// ApplyForSenderConstrain overrides endpoints' Token,
+// BackchannelAuthentication and Revocation fields with m's own advertised
+// aliases, wherever m advertises one, for a Config.SenderConstrain ==
+// SenderConstrainMTLS client (RFC 8705 §5).
+//
+// An alias applies to a request that itself does mutual TLS: here, the
+// requests that bind or use a certificate-bound token. PAR is left at
+// the conventional endpoint: a client that doesn't authenticate with its
+// certificate does no mutual TLS there (certificate binding has no
+// PAR-time step, RFC 8705 §3), and FAPI 2.0 conformance testing refuses
+// a private_key_jwt client's PAR request over mutual TLS. A client that
+// also authenticates with its certificate uses ApplyForClientAuth, which
+// covers every endpoint this one does.
 //
 // m may be nil (the server never advertised mtls_endpoint_aliases at
 // all); ApplyForSenderConstrain then leaves endpoints untouched and
 // reports false. That's not an error: the aliases are optional, and a
 // server that advertises none accepts mutual TLS at its ordinary
-// endpoints. ApplyForClientAuth does exactly the same: §5 doesn't
-// distinguish the two reasons for doing mutual TLS.
+// endpoints.
 func (m *MTLSEndpoints) ApplyForSenderConstrain(endpoints *Endpoints) bool {
-	return m.apply(endpoints)
+	return m.apply(endpoints, false)
 }
 
-// ApplyForClientAuth is ApplyForSenderConstrain, for a client that
-// authenticates with its certificate (Config.ClientAuthMethod ==
-// ClientAuthMethodSelfSignedTLSClientAuth or ClientAuthMethodTLSClientAuth,
-// RFC 8705 §2): it overrides endpoints with every alias m advertises, and
-// reports false for a nil m. The two are the same because RFC 8705 §5
-// applies to a client doing mutual TLS for either reason; a client doing
-// both needs only one call.
+// ApplyForClientAuth is ApplyForSenderConstrain's counterpart for a
+// client that authenticates with its certificate (Config.ClientAuthMethod
+// == ClientAuthMethodSelfSignedTLSClientAuth or ClientAuthMethodTLSClientAuth,
+// RFC 8705 §2). Such a client does mutual TLS at every request that
+// authenticates it, so ApplyForClientAuth overrides Token,
+// PushedAuthorizationRequest, BackchannelAuthentication (where CIBA Core
+// §7.1 requires the client to authenticate) and Revocation, wherever m
+// advertises an alias. It covers every endpoint ApplyForSenderConstrain
+// does, so a client doing both needs only this call. A nil m leaves
+// endpoints untouched and reports false.
 func (m *MTLSEndpoints) ApplyForClientAuth(endpoints *Endpoints) bool {
-	return m.apply(endpoints)
+	return m.apply(endpoints, true)
 }
 
-// apply overrides each endpoint m advertises an alias for — see
-// ApplyForSenderConstrain.
-func (m *MTLSEndpoints) apply(endpoints *Endpoints) bool {
+// apply overrides each endpoint m advertises an alias for — PAR only
+// when par is set; see ApplyForSenderConstrain.
+func (m *MTLSEndpoints) apply(endpoints *Endpoints, par bool) bool {
 	if m == nil {
 		return false
 	}
-	for _, f := range []struct {
+	aliases := []struct {
 		alias  fapi.URL
 		target *fapi.URL
 	}{
 		{m.Token, &endpoints.Token},
-		{m.PushedAuthorizationRequest, &endpoints.PushedAuthorizationRequest},
 		{m.BackchannelAuthentication, &endpoints.BackchannelAuthentication},
 		{m.Revocation, &endpoints.Revocation},
-	} {
-		if !f.alias.IsZero() {
-			*f.target = f.alias
+	}
+	if par {
+		aliases = append(aliases, struct {
+			alias  fapi.URL
+			target *fapi.URL
+		}{m.PushedAuthorizationRequest, &endpoints.PushedAuthorizationRequest})
+	}
+	for _, a := range aliases {
+		if !a.alias.IsZero() {
+			*a.target = a.alias
 		}
 	}
 	return true

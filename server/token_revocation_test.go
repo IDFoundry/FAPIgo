@@ -64,6 +64,9 @@ func TestRevokeTokenRevokesOnlyTheOwnersRefreshToken(t *testing.T) {
 	if err := other.revoke(formParam("token", refreshToken), formParam("token_type_hint", "refresh_token")); err != nil {
 		t.Fatalf("revoke by another instance: %v, want 200", err)
 	}
+	if last := lastAudit(t, h); last.Outcome != server.AuditOutcomeSuccess || last.Description != "not revoked" {
+		t.Errorf("audit for another instance's request = %+v, want a success described as not revoked", last)
+	}
 	if _, err := owner.refresh(refreshToken); err != nil {
 		t.Fatalf("refresh after another instance's revocation: %v, want the token still live", err)
 	}
@@ -71,8 +74,8 @@ func TestRevokeTokenRevokesOnlyTheOwnersRefreshToken(t *testing.T) {
 	if err := owner.revoke(formParam("token", refreshToken)); err != nil {
 		t.Fatalf("revoke by the owner: %v", err)
 	}
-	if last := lastAudit(t, h); last.Type != server.AuditEventRevokeToken || last.Outcome != server.AuditOutcomeSuccess {
-		t.Errorf("last audit event = %+v, want a RevokeToken success", last)
+	if last := lastAudit(t, h); last.Type != server.AuditEventRevokeToken || last.Outcome != server.AuditOutcomeSuccess || last.Description != "" {
+		t.Errorf("last audit event = %+v, want a RevokeToken success that revoked the token", last)
 	}
 	if _, err := owner.refresh(refreshToken); serverErrorCode(t, err) != server.ErrorInvalidGrant {
 		t.Fatalf("refresh after revocation: %v, want invalid_grant", err)
@@ -82,6 +85,9 @@ func TestRevokeTokenRevokesOnlyTheOwnersRefreshToken(t *testing.T) {
 	}
 	if err := owner.revoke(formParam("token", "unknown-token")); err != nil {
 		t.Fatalf("revoking an unknown token: %v, want 200", err)
+	}
+	if last := lastAudit(t, h); last.Description != "not revoked" {
+		t.Errorf("audit for an unknown token = %+v, want it described as not revoked", last)
 	}
 }
 
@@ -235,5 +241,34 @@ func TestRevokeTokenFaults(t *testing.T) {
 				t.Errorf("last audit event = %+v, want a RevokeToken failure", last)
 			}
 		})
+	}
+}
+
+// TestRevokeTokenRevokesEveryGrantSharingItsGrantID pins what
+// GrantedAuthorization.GrantID's doc warns about: revoking a refresh
+// token revokes its grant by ID, so a grant ID shared by two grants
+// would let one client end the other's. Each grant needs its own.
+func TestRevokeTokenRevokesEveryGrantSharingItsGrantID(t *testing.T) {
+	attesterKey := generateKey(t)
+	h := newRevocationHarness(t, attesterKey)
+	a := &attestedInstance{t: t, h: h, attesterKey: attesterKey, instanceKey: generateKey(t)}
+	b := &attestedInstance{t: t, h: h, attesterKey: attesterKey, instanceKey: generateKey(t)}
+	issue := func(i *attestedInstance) string {
+		attested, binding := embedderTokenRequest(t, i)
+		rt, err := h.server.IssueRefreshToken(context.Background(), server.IssueRefreshTokenRequest{
+			GrantType: preAuthorizedCodeGrant, Client: attested, Binding: binding,
+			Subject: mustSubjectID(t, "holder-1"), Scope: []string{"accounts"}, GrantID: "shared-id",
+		})
+		if err != nil {
+			t.Fatalf("IssueRefreshToken: %v", err)
+		}
+		return rt.Reveal()
+	}
+	tokenA, tokenB := issue(a), issue(b)
+	if err := a.revoke(formParam("token", tokenA)); err != nil {
+		t.Fatalf("RevokeToken: %v", err)
+	}
+	if _, err := b.refresh(tokenB); serverErrorCode(t, err) != server.ErrorInvalidGrant {
+		t.Fatalf("refresh of the other grant sharing the ID: %v, want invalid_grant", err)
 	}
 }

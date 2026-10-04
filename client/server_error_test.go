@@ -103,6 +103,29 @@ func TestPARNonOAuthErrorBodyExposesStatusOnly(t *testing.T) {
 	}
 }
 
+// TestPARNonOAuthErrorAfterDPoPNonceRetry covers the PAR endpoint
+// answering a DPoP-nonce retry with something that isn't an OAuth error.
+func TestPARNonOAuthErrorAfterDPoPNonceRetry(t *testing.T) {
+	attempts := 0
+	c := newPARErrorTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		attempts++
+		if attempts == 1 {
+			w.Header().Set("DPoP-Nonce", "server-nonce-1")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"use_dpop_nonce"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("<html>down</html>"))
+	})
+	msg := beginAuthorizationError(t, c).Error()
+	if attempts != 2 || !strings.Contains(msg, `HTTP 502, with a 17-byte "text/html" body`) {
+		t.Errorf("attempts = %d, Error() = %q, want a retry and the media type", attempts, msg)
+	}
+}
+
 func TestPARNonOAuthErrorNamesOnlyBoundedMediaType(t *testing.T) {
 	long := "application/" + strings.Repeat("x", 100)
 	cases := map[string]struct{ contentType, want string }{

@@ -54,7 +54,10 @@ type BeginAuthorizationRequest struct {
 	// (TokenSet.IDTokenClaims.AuthTime) against it, as OIDC Core
 	// §3.1.3.7 has the client do: a token without auth_time, or one
 	// further back than MaxAge (plus Limits.MaxClockSkew), is refused.
-	// MaxAge is at most 100 years, and never negative.
+	// MaxAge is at most 100 years, and never negative. HasMaxAge
+	// requires "openid" in Scope, since only an ID token's auth_time can
+	// meet it: BeginAuthorization refuses it otherwise, and always under
+	// Config.OAuthOnly.
 	MaxAge    time.Duration
 	HasMaxAge bool
 
@@ -610,6 +613,9 @@ func maxAgeSeconds(maxAge time.Duration) (int64, *Error) {
 func (c *Client) checkBeginRequest(req BeginAuthorizationRequest) (string, *Error) {
 	if scopeErr := c.checkOAuthOnlyScope(req.Scope); scopeErr != nil {
 		return "", scopeErr
+	}
+	if req.HasMaxAge && !slices.Contains(req.Scope, "openid") {
+		return "", newError(ErrorInvalidRequest, `max_age requires "openid" in Scope: only an ID token's auth_time can meet it`, nil)
 	}
 	if req.RedirectPort == 0 {
 		return c.cfg.RedirectURI, nil

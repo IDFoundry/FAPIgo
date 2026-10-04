@@ -63,3 +63,23 @@ func TestSessionRecordWithoutOpenIDField(t *testing.T) {
 		t.Fatalf("decodeSessionRecord(old) = %+v, %v; want OpenID false", r, err)
 	}
 }
+
+// TestRequireIDToken covers every case requireIDToken decides, including
+// max_age without openid, which only a session record from before
+// BeginAuthorization refused it can still carry.
+func TestRequireIDToken(t *testing.T) {
+	for _, tc := range []struct {
+		hasIDToken, openID, hasMaxAge, wantErr bool
+	}{
+		{false, true, false, true},
+		{false, false, true, true},
+		{false, true, true, true},
+		{false, false, false, false},
+		{true, true, true, false},
+		{true, false, false, false},
+	} {
+		if err := requireIDToken(tc.hasIDToken, tc.openID, tc.hasMaxAge); (err != nil) != tc.wantErr {
+			t.Errorf("requireIDToken(%v, %v, %v) = %v, want error %v", tc.hasIDToken, tc.openID, tc.hasMaxAge, err, tc.wantErr)
+		}
+	}
+}

@@ -222,10 +222,8 @@ func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationRe
 	if idErr != nil {
 		return TokenSet{}, idErr
 	}
-	// OIDC Core §3.1.3.3: a request for "openid" gets an ID token, and
-	// max_age is only met by one proving when the user authenticated.
-	if !result.HasIDToken && (resp.openID || resp.hasMaxAge) {
-		return TokenSet{}, newError(ErrorInvalidResponse, "the token response has no ID token, which an openid request requires", nil)
+	if idErr := requireIDToken(result.HasIDToken, resp.openID, resp.hasMaxAge); idErr != nil {
+		return TokenSet{}, idErr
 	}
 	if result.HasIDToken && resp.hasMaxAge {
 		if ageErr := checkAuthenticationAge(result.IDTokenClaims.AuthTime, resp.maxAge, c.deps.Clock.Now(), c.cfg.Limits.MaxClockSkew); ageErr != nil {
@@ -233,6 +231,18 @@ func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationRe
 		}
 	}
 	return result, nil
+}
+
+// requireIDToken refuses a token response without an ID token for a
+// request that needs one (OIDC Core §3.1.3.3): one for "openid", or one
+// with max_age, which only an ID token's auth_time can meet.
+// BeginAuthorization refuses max_age without "openid", so the second
+// case is a session record written before it did.
+func requireIDToken(hasIDToken, openID, hasMaxAge bool) *Error {
+	if !hasIDToken && (openID || hasMaxAge) {
+		return newError(ErrorInvalidResponse, "the token response has no ID token, which an openid request requires", nil)
+	}
+	return nil
 }
 
 // checkAuthenticationAge applies OIDC Core §3.1.3.7 rule 13 to an ID

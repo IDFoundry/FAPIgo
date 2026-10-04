@@ -578,10 +578,9 @@ func buildModuleClient(ctx context.Context, d moduleDriver, module suiteModule) 
 	}
 	if d.ClientAuthMTLS {
 		cfg.ClientAuthMethod = storage.ClientAuthMethodSelfSignedTLSClientAuth
-		// Covers Token+PAR — a superset of what sender-constrain-only
-		// needs (Token only; RFC 8705 §3 has no PAR-time
-		// pre-commitment concept), so the MTLS+MTLS combo is correctly
-		// handled by this branch alone.
+		// Applies every advertised alias (RFC 8705 §5), as
+		// ApplyForSenderConstrain does, so the MTLS+MTLS combination
+		// needs only this call.
 		// Without mtls_endpoint_aliases (optional, RFC 8705 §5) the
 		// ordinary endpoints take mutual TLS — the suite's
 		// *-happy-path-no-mtls-endpoint-aliases modules check exactly

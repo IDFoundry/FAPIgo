@@ -25,9 +25,10 @@ the `*http.Client` you pass as `Dependencies.HTTP`:
 
 ```go
 endpoints := discovered.Endpoints
-// RFC 8705 §5: send certificate-carrying requests to the mTLS aliases.
-discovered.MTLSEndpointAliases.ApplyForClientAuth(&endpoints)      // PAR and token
-discovered.MTLSEndpointAliases.ApplyForSenderConstrain(&endpoints) // token, CIBA, revocation
+// RFC 8705 §5: a client doing mutual TLS sends every request it makes
+// directly (PAR, token, CIBA, revocation) to the mTLS aliases, when the
+// server advertises them. ApplyForSenderConstrain does the same.
+discovered.MTLSEndpointAliases.ApplyForClientAuth(&endpoints)
 
 c, err := client.NewFromDiscovery(discovered, client.Config{
 	// ClientID, Profile, Limits ...

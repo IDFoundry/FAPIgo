@@ -43,6 +43,12 @@ type sessionRecord struct {
 	// seconds, or nil for none: ExchangeCode checks the ID token's
 	// auth_time against it.
 	MaxAgeSeconds *int64 `json:"max_age,omitempty"`
+
+	// OpenID records that the request's scope included "openid":
+	// ExchangeCode then requires an ID token in the token response (OIDC
+	// Core §3.1.3.3). A record written before this field existed reads
+	// as false.
+	OpenID bool `json:"openid,omitempty"`
 }
 
 // maxAge is r's max_age, and whether the request carried one.

@@ -48,6 +48,9 @@ type ValidatedAuthorizationResponse struct {
 	// hasMaxAge: ExchangeCode checks the ID token's auth_time against it.
 	maxAge    time.Duration
 	hasMaxAge bool
+	// openID is whether the request's scope included "openid": the
+	// token response must then carry an ID token.
+	openID bool
 }
 
 // CallbackResult is a closed sum type returned by
@@ -136,6 +139,7 @@ func (c *Client) HandleAuthorizationResponse(ctx context.Context, cb Authorizati
 		nonce:        consumed.Nonce,
 		maxAge:       maxAge,
 		hasMaxAge:    hasMaxAge,
+		openID:       consumed.OpenID,
 	}}, nil
 }
 

@@ -333,7 +333,7 @@ func TestBeginBackchannelAuthenticationAndPollMTLSSendNoDPoPHeader(t *testing.T)
 
 	ctx := context.Background()
 	session, err := c.BeginBackchannelAuthentication(ctx, client.BeginBackchannelAuthenticationRequest{
-		Scope: []string{"openid", "accounts"}, LoginHint: "user@example.com",
+		Scope: []string{"accounts"} /* no openid: this fixture returns no ID token */, LoginHint: "user@example.com",
 	})
 	if err != nil {
 		t.Fatalf("BeginBackchannelAuthentication: %v", err)

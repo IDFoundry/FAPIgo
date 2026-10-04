@@ -16,15 +16,19 @@ type IssueRefreshTokenRequest struct {
 	// urn:ietf:params:oauth:grant-type:pre-authorized_code.
 	GrantType string
 
-	// Client is the client the token request authenticated as, from
-	// AuthenticateAttestedClient. The refresh token is bound to its
+	// Client is the client the token request authenticated as, exactly
+	// as AuthenticateAttestedClient returned it for this request: one
+	// whose Client was changed is refused. The refresh token is bound to its
 	// Client Instance Key (draft-ietf-oauth-attestation-based-client-auth-07
 	// §10.3): RefreshAccessToken redeems it only with an attestation for
 	// that same key.
 	Client AttestedClient
 
 	// Binding is the token request's sender-constraining credential,
-	// from VerifyTokenRequestBinding for Client.
+	// from VerifyTokenRequestBinding for Client. It must name a
+	// credential of the client's registered kind; its thumbprint is
+	// recorded with the grant for reference only, since a refresh binds
+	// its access token to whichever key that request presents.
 	Binding TokenBinding
 
 	// Subject is the sub of every access token a refresh issues.
@@ -82,10 +86,10 @@ func (s *Server) embedderRefreshGrant(req IssueRefreshTokenRequest) (grantRecord
 	switch {
 	case !slices.Contains(s.cfg.AdditionalGrantTypes, req.GrantType):
 		return grantRecord{}, newError(ErrorServerError, 500, "GrantType is not one of Config.AdditionalGrantTypes", nil)
-	case req.Client.instanceKey == "":
-		return grantRecord{}, newError(ErrorServerError, 500, "Client must come from AuthenticateAttestedClient", nil)
+	case req.Client.instanceKey == "" || req.Client.authenticatedID != client.ID():
+		return grantRecord{}, newError(ErrorServerError, 500, "Client must be as AuthenticateAttestedClient returned it", nil)
 	case req.Binding.Thumbprint == "" || req.Binding.SenderConstrain != client.SenderConstrain():
-		return grantRecord{}, newError(ErrorServerError, 500, "Binding must come from VerifyTokenRequestBinding for Client", nil)
+		return grantRecord{}, newError(ErrorServerError, 500, "Binding must name a credential of the client's registered sender constraint", nil)
 	case req.Subject.String() == "":
 		return grantRecord{}, newError(ErrorServerError, 500, "Subject is required", nil)
 	case len(req.Scope) == 0 && len(req.AuthorizationDetails) == 0:

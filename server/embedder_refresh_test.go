@@ -160,6 +160,14 @@ func TestIssueRefreshTokenRefusals(t *testing.T) {
 	h := newEmbedderRefreshHarness(t, attesterKey)
 	instance := &attestedInstance{t: t, h: h, attesterKey: attesterKey, instanceKey: generateKey(t)}
 	attested, binding := embedderTokenRequest(t, instance)
+	otherClient, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
+		ID: "other-client", RedirectURIs: []fapi.RegisteredRedirectURI{testRedirectURI},
+		ClientAuthMethod: storage.ClientAuthMethodAttestation, ExpectedAttesterIssuer: testAttesterIssuer,
+		ClientAttestationAlgorithm: fapi.ES256, AllowedScopes: []string{"accounts"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	valid := func() server.IssueRefreshTokenRequest {
 		return server.IssueRefreshTokenRequest{
 			GrantType: preAuthorizedCodeGrant, Client: attested, Binding: binding,
@@ -170,14 +178,15 @@ func TestIssueRefreshTokenRefusals(t *testing.T) {
 		mutate func(*server.IssueRefreshTokenRequest)
 		want   server.ErrorCode
 	}{
-		"grant type not configured":  {func(r *server.IssueRefreshTokenRequest) { r.GrantType = "authorization_code" }, server.ErrorServerError},
-		"client not authenticated":   {func(r *server.IssueRefreshTokenRequest) { r.Client = server.AttestedClient{Client: attested.Client} }, server.ErrorServerError},
-		"no binding":                 {func(r *server.IssueRefreshTokenRequest) { r.Binding = server.TokenBinding{} }, server.ErrorServerError},
-		"binding for another client": {func(r *server.IssueRefreshTokenRequest) { r.Binding.SenderConstrain = storage.SenderConstrainMTLS }, server.ErrorServerError},
-		"no subject":                 {func(r *server.IssueRefreshTokenRequest) { r.Subject = server.SubjectID{} }, server.ErrorServerError},
-		"nothing granted":            {func(r *server.IssueRefreshTokenRequest) { r.Scope = nil }, server.ErrorServerError},
-		"openid":                     {func(r *server.IssueRefreshTokenRequest) { r.Scope = []string{"openid", "accounts"} }, server.ErrorInvalidScope},
-		"scope not allowed":          {func(r *server.IssueRefreshTokenRequest) { r.Scope = []string{"payments"} }, server.ErrorInvalidScope},
+		"grant type not configured":           {func(r *server.IssueRefreshTokenRequest) { r.GrantType = "authorization_code" }, server.ErrorServerError},
+		"client not authenticated":            {func(r *server.IssueRefreshTokenRequest) { r.Client = server.AttestedClient{Client: attested.Client} }, server.ErrorServerError},
+		"client swapped after authentication": {func(r *server.IssueRefreshTokenRequest) { r.Client.Client = otherClient }, server.ErrorServerError},
+		"no binding":                          {func(r *server.IssueRefreshTokenRequest) { r.Binding = server.TokenBinding{} }, server.ErrorServerError},
+		"binding for another client":          {func(r *server.IssueRefreshTokenRequest) { r.Binding.SenderConstrain = storage.SenderConstrainMTLS }, server.ErrorServerError},
+		"no subject":                          {func(r *server.IssueRefreshTokenRequest) { r.Subject = server.SubjectID{} }, server.ErrorServerError},
+		"nothing granted":                     {func(r *server.IssueRefreshTokenRequest) { r.Scope = nil }, server.ErrorServerError},
+		"openid":                              {func(r *server.IssueRefreshTokenRequest) { r.Scope = []string{"openid", "accounts"} }, server.ErrorInvalidScope},
+		"scope not allowed":                   {func(r *server.IssueRefreshTokenRequest) { r.Scope = []string{"payments"} }, server.ErrorInvalidScope},
 		"unregistered detail type": {func(r *server.IssueRefreshTokenRequest) {
 			r.AuthorizationDetails = []json.RawMessage{json.RawMessage(`{"type":"unknown"}`)}
 		}, server.ErrorInvalidAuthorizationDetails},

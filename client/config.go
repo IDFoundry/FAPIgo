@@ -259,11 +259,12 @@ func (m *MTLSEndpoints) ApplyForSenderConstrain(endpoints *Endpoints) bool {
 // ApplyForClientAuth is ApplyForSenderConstrain's own counterpart for
 // RFC 8705 §2 client authentication
 // (Config.ClientAuthMethod == ClientAuthMethodSelfSignedTLSClientAuth
-// or ClientAuthMethodTLSClientAuth): overrides endpoints' Token and
-// PushedAuthorizationRequest fields, since a certificate-authenticated
-// client must present its certificate at PAR too, not just at the
-// token endpoint — the same asymmetry a server's own client
-// authentication enforces. m may be nil, in which case
+// or ClientAuthMethodTLSClientAuth): overrides endpoints' Token,
+// PushedAuthorizationRequest and Revocation fields, since a
+// certificate-authenticated client must present its certificate at PAR
+// and token revocation (RevokeToken) too, not just at the token
+// endpoint — the same asymmetry a server's own client authentication
+// enforces. m may be nil, in which case
 // ApplyForClientAuth leaves endpoints untouched and reports false, for
 // the same reason ApplyForSenderConstrain does.
 func (m *MTLSEndpoints) ApplyForClientAuth(endpoints *Endpoints) bool {
@@ -275,6 +276,9 @@ func (m *MTLSEndpoints) ApplyForClientAuth(endpoints *Endpoints) bool {
 	}
 	if !m.PushedAuthorizationRequest.IsZero() {
 		endpoints.PushedAuthorizationRequest = m.PushedAuthorizationRequest
+	}
+	if !m.Revocation.IsZero() {
+		endpoints.Revocation = m.Revocation
 	}
 	return true
 }

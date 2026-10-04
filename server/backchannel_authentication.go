@@ -150,7 +150,7 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	// Backchannel Authentication Endpoint URL" — confirmed live via the
 	// OIDF conformance suite's own fapi-ciba-id1/-refresh-token modules,
 	// which deliberately sign "aud" as the token endpoint's URL here.
-	client, dpopProof, authErr := s.authenticateRequest(ctx, params, requestCredentials{
+	client, dpopProof, _, authErr := s.authenticateRequest(ctx, params, requestCredentials{
 		PeerCertificate: req.PeerCertificate, DPoPProofs: req.DPoPProofs, ClientAttestations: req.ClientAttestations, ClientAttestationPoPs: req.ClientAttestationPoPs,
 	},
 		[]fapi.URL{s.cfg.Endpoints.BackchannelAuthentication, s.cfg.Endpoints.Token},

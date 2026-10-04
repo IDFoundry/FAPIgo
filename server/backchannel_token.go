@@ -69,7 +69,7 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 	// client can hold an auth_req_id, and such a client keeps CIBA Core
 	// §7.1's endpoint-URL audiences — see
 	// acceptableClientAssertionAudiences.
-	client, dpopProof, authErr := s.authenticateRequest(ctx, params, requestCredentials{
+	client, dpopProof, authn, authErr := s.authenticateRequest(ctx, params, requestCredentials{
 		PeerCertificate: req.PeerCertificate, DPoPProofs: req.DPoPProofs, ClientAttestations: req.ClientAttestations, ClientAttestationPoPs: req.ClientAttestationPoPs,
 	}, []fapi.URL{s.cfg.Endpoints.Token}, []fapi.URL{s.cfg.MTLSEndpoints.Token})
 	if authErr != nil {
@@ -139,7 +139,7 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 		AuthorizationDetails: grant.AuthorizationDetails,
 	}
 
-	if issueErr := s.issueBackchannelOptionalTokens(ctx, client, grant, accessToken, thumbprint, &result); issueErr != nil {
+	if issueErr := s.issueBackchannelOptionalTokens(ctx, client, grant, accessToken, thumbprint, authn.InstanceKey, &result); issueErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), issueErr)
 	}
 
@@ -189,7 +189,7 @@ func backchannelStatusError(status storage.BackchannelAuthenticationStatus) *Err
 // "offline_access", recording each onto result. Unlike the
 // authorization code flow's, the ID token carries no nonce: CIBA has
 // none.
-func (s *Server) issueBackchannelOptionalTokens(ctx context.Context, client storage.RegisteredClient, grant grantRecord, accessToken, thumbprint string, result *TokenResult) *Error {
+func (s *Server) issueBackchannelOptionalTokens(ctx context.Context, client storage.RegisteredClient, grant grantRecord, accessToken, thumbprint, instanceKey string, result *TokenResult) *Error {
 	if containsScope(grant.Scope, "openid") {
 		idToken, idErr := s.issueIDTokenForGrant(ctx, client, grant, "", accessToken)
 		if idErr != nil {
@@ -199,7 +199,7 @@ func (s *Server) issueBackchannelOptionalTokens(ctx context.Context, client stor
 		result.HasIDToken = true
 	}
 	if containsScope(grant.Scope, "offline_access") {
-		refreshToken, err := s.issueRefreshToken(ctx, client.ID(), grant, thumbprint)
+		refreshToken, err := s.issueRefreshToken(ctx, client.ID(), grant, thumbprint, instanceKey)
 		if err != nil {
 			return newError(ErrorServerError, 500, "failed to issue refresh token", err)
 		}

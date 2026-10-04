@@ -210,7 +210,7 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 	// PAR accepts no endpoint-URL audience at all — only the issuer
 	// identifier — see acceptableClientAssertionAudiences's own doc
 	// comment for why.
-	client, dpopProof, authErr := s.authenticateRequest(ctx, params, requestCredentials{
+	client, dpopProof, _, authErr := s.authenticateRequest(ctx, params, requestCredentials{
 		PeerCertificate: req.PeerCertificate, DPoPProofs: req.DPoPProofs, ClientAttestations: req.ClientAttestations, ClientAttestationPoPs: req.ClientAttestationPoPs,
 	}, nil, nil)
 	if authErr != nil {
@@ -330,20 +330,24 @@ type requestCredentials struct {
 // one error check) at each call site, instead of three, is what keeps
 // endpoint methods like RefreshAccessToken from tripping a cognitive-
 // complexity limit on their own sequential guard clauses.
-func (s *Server) authenticateRequest(ctx context.Context, params map[string]string, creds requestCredentials, endpoints, mtlsEndpoints []fapi.URL) (storage.RegisteredClient, string, *Error) {
+//
+// It returns the client, the request's DPoP proof, and the client's
+// authentication: its InstanceKey is what a refresh token issued to a
+// client authenticated by Client Attestation is bound to.
+func (s *Server) authenticateRequest(ctx context.Context, params map[string]string, creds requestCredentials, endpoints, mtlsEndpoints []fapi.URL) (storage.RegisteredClient, string, clientassertion.VerifiedAssertion, *Error) {
 	dpopProof, dpopErr := resolveDPoPProof(creds.DPoPProofs)
 	if dpopErr != nil {
-		return storage.RegisteredClient{}, "", dpopErr
+		return storage.RegisteredClient{}, "", clientassertion.VerifiedAssertion{}, dpopErr
 	}
 	attestation, attestationPoP, attErr := resolveAttestationHeaders(creds.ClientAttestations, creds.ClientAttestationPoPs)
 	if attErr != nil {
-		return storage.RegisteredClient{}, "", attErr
+		return storage.RegisteredClient{}, "", clientassertion.VerifiedAssertion{}, attErr
 	}
-	client, _, authErr := s.authenticateClient(ctx, params, creds.PeerCertificate, attestation, attestationPoP, endpoints, mtlsEndpoints)
+	client, verified, authErr := s.authenticateClient(ctx, params, creds.PeerCertificate, attestation, attestationPoP, endpoints, mtlsEndpoints)
 	if authErr != nil {
-		return storage.RegisteredClient{}, "", authErr
+		return storage.RegisteredClient{}, "", clientassertion.VerifiedAssertion{}, authErr
 	}
-	return client, dpopProof, nil
+	return client, dpopProof, verified, nil
 }
 
 // authenticateClientViaAssertion verifies the request's client_assertion

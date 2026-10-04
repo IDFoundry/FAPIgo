@@ -36,10 +36,12 @@ type RefreshTokenRequest struct {
 	// ClientAttestations/ClientAttestationPoPs mirror
 	// AuthorizationCodeExchangeRequest's own fields — see its doc
 	// comment. draft-ietf-oauth-attestation-based-client-auth-07 §10.3
-	// requires a client using this mechanism to present a fresh PoP
-	// (over the same Client Instance Key the refresh token was
-	// originally bound to) on every refresh, not just at initial
-	// issuance.
+	// binds a refresh token issued to a client authenticated this way
+	// to its Client Instance Key: a refresh must present an attestation
+	// whose cnf key is the one presented when the token was issued, or
+	// it fails with invalid_grant. Every installation of a wallet app
+	// shares one client_id, so this is what stops one installation
+	// redeeming another's refresh token.
 	ClientAttestations    []string
 	ClientAttestationPoPs []string
 
@@ -72,7 +74,7 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, "", newError(ErrorUnsupportedGrantType, 400, "grant_type must be refresh_token", nil))
 	}
 
-	client, dpopProof, authErr := s.authenticateRequest(ctx, params, requestCredentials{
+	client, dpopProof, authn, authErr := s.authenticateRequest(ctx, params, requestCredentials{
 		PeerCertificate: req.PeerCertificate, DPoPProofs: req.DPoPProofs, ClientAttestations: req.ClientAttestations, ClientAttestationPoPs: req.ClientAttestationPoPs,
 	}, []fapi.URL{s.cfg.Endpoints.Token}, []fapi.URL{s.cfg.MTLSEndpoints.Token})
 	if authErr != nil {
@@ -89,7 +91,7 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), bindingErr)
 	}
 
-	grant, now, grantErr := s.redeemRefreshGrant(ctx, client.ID(), rawToken)
+	grant, now, grantErr := s.redeemRefreshGrant(ctx, client.ID(), authn.InstanceKey, rawToken)
 	if grantErr != nil {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), grantErr)
 	}
@@ -160,9 +162,15 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 
 // redeemRefreshGrant looks up the grant rawToken, a refresh token
 // presented by clientID, was issued from, refusing one that has expired,
-// was issued to another client, or whose grant was revoked. It also
-// returns the time it judged expiry at.
-func (s *Server) redeemRefreshGrant(ctx context.Context, clientID fapi.ClientID, rawToken string) (grantRecord, time.Time, *Error) {
+// was issued to another client or another client instance, or whose
+// grant was revoked. It also returns the time it judged expiry at.
+//
+// instanceKey is the presenting client's Client Instance Key thumbprint
+// (empty unless it authenticated by Client Attestation). A grant bound
+// to an instance key is redeemed only with that key (draft-07 §10.3):
+// every installation of a wallet app shares one client_id, so client_id
+// alone would let one installation use another's refresh token.
+func (s *Server) redeemRefreshGrant(ctx context.Context, clientID fapi.ClientID, instanceKey, rawToken string) (grantRecord, time.Time, *Error) {
 	redeemed, err := s.deps.Grants.RedeemRefreshToken(ctx, storage.RefreshTokenRedemption{
 		TokenHash: sha256.Sum256([]byte(rawToken)),
 	})
@@ -180,6 +188,9 @@ func (s *Server) redeemRefreshGrant(ctx context.Context, clientID fapi.ClientID,
 	grant, err := decodeGrantRecord(redeemed.Grant)
 	if err != nil {
 		return grantRecord{}, time.Time{}, newError(ErrorServerError, 500, "failed to decode refresh token grant", err)
+	}
+	if grant.ClientInstanceKey != "" && grant.ClientInstanceKey != instanceKey {
+		return grantRecord{}, time.Time{}, newError(ErrorInvalidGrant, 400, "refresh_token was issued to another client instance", nil)
 	}
 	if revErr := s.checkGrantNotRevoked(ctx, grant); revErr != nil {
 		return grantRecord{}, time.Time{}, revErr

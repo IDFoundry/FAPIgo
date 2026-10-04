@@ -94,6 +94,10 @@ type PoPVerifyPolicy struct {
 type VerifiedPoP struct {
 	ClientID string
 	IssuedAt time.Time
+	// InstanceKey is the RFC 7638 thumbprint of the Client Instance Key
+	// the PoP verified under: what a refresh token issued to this
+	// instance is bound to (draft-07 §10.3).
+	InstanceKey jose.Thumbprint
 }
 
 // Verify checks p's signature against the Client Instance Key found in
@@ -165,5 +169,9 @@ func (p PoP) Verify(ctx context.Context, confirmationJWK []byte, policy PoPVerif
 		}
 	}
 
-	return VerifiedPoP{ClientID: c.Issuer, IssuedAt: iat}, nil
+	instanceKey, err := jwk.Thumbprint()
+	if err != nil {
+		return VerifiedPoP{}, fmt.Errorf("clientattestation: confirmation key thumbprint: %w", err)
+	}
+	return VerifiedPoP{ClientID: c.Issuer, IssuedAt: iat, InstanceKey: instanceKey}, nil
 }

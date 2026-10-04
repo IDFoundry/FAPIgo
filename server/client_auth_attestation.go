@@ -106,7 +106,8 @@ func (s *Server) authenticateClientViaAttestation(ctx context.Context, attestati
 	}
 
 	return client, clientassertion.VerifiedAssertion{
-		ClientID:  verifiedPoP.ClientID,
-		ExpiresAt: verifiedAttestation.ExpiresAt,
+		ClientID:    verifiedPoP.ClientID,
+		ExpiresAt:   verifiedAttestation.ExpiresAt,
+		InstanceKey: verifiedPoP.InstanceKey.String(),
 	}, nil
 }

@@ -186,7 +186,7 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, "", newError(ErrorUnsupportedGrantType, 400, "grant_type must be authorization_code", nil))
 	}
 
-	client, dpopProof, authErr := s.authenticateRequest(ctx, params, requestCredentials{
+	client, dpopProof, authn, authErr := s.authenticateRequest(ctx, params, requestCredentials{
 		PeerCertificate: req.PeerCertificate, DPoPProofs: req.DPoPProofs, ClientAttestations: req.ClientAttestations, ClientAttestationPoPs: req.ClientAttestationPoPs,
 	}, []fapi.URL{s.cfg.Endpoints.Token}, []fapi.URL{s.cfg.MTLSEndpoints.Token})
 	if authErr != nil {
@@ -266,7 +266,7 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), idErr)
 	}
 
-	if refreshErr := s.issueOptionalRefreshToken(ctx, client, grant, thumbprint, codeHash, now, &result); refreshErr != nil {
+	if refreshErr := s.issueOptionalRefreshToken(ctx, client, grant, thumbprint, authn.InstanceKey, codeHash, now, &result); refreshErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), refreshErr)
 	}
 
@@ -344,11 +344,11 @@ func (s *Server) issueOptionalIDToken(ctx context.Context, client storage.Regist
 // result when redeemed's granted scope includes "offline_access" — a
 // no-op otherwise. Split out of ExchangeAuthorizationCode for the same
 // reason issueOptionalIDToken is.
-func (s *Server) issueOptionalRefreshToken(ctx context.Context, client storage.RegisteredClient, grant grantRecord, thumbprint string, codeHash [32]byte, now time.Time, result *TokenResult) *Error {
+func (s *Server) issueOptionalRefreshToken(ctx context.Context, client storage.RegisteredClient, grant grantRecord, thumbprint, instanceKey string, codeHash [32]byte, now time.Time, result *TokenResult) *Error {
 	if !containsScope(grant.Scope, "offline_access") {
 		return nil
 	}
-	refreshToken, err := s.issueRefreshToken(ctx, client.ID(), grant, thumbprint)
+	refreshToken, err := s.issueRefreshToken(ctx, client.ID(), grant, thumbprint, instanceKey)
 	if err != nil {
 		return newError(ErrorServerError, 500, "failed to issue refresh token", err)
 	}
@@ -613,13 +613,14 @@ func (s *Server) issueIDToken(ctx context.Context, client storage.RegisteredClie
 // value. The grant's AuthorizationDetails carry forward unchanged —
 // RefreshAccessToken re-embeds them on every refresh, since RFC 9396
 // defines no refresh-time narrowing parameter the way RFC 6749 §6 does
-// for scope.
-func (s *Server) issueRefreshToken(ctx context.Context, clientID fapi.ClientID, grant grantRecord, thumbprint string) (string, error) {
+// for scope. instanceKey binds the token to a Client Instance Key — see
+// grantRecord.ClientInstanceKey.
+func (s *Server) issueRefreshToken(ctx context.Context, clientID fapi.ClientID, grant grantRecord, thumbprint, instanceKey string) (string, error) {
 	raw, err := generateRefreshToken(s.deps.Random)
 	if err != nil {
 		return "", err
 	}
-	encoded, err := encodeGrantRecord(grant.forRefreshToken(thumbprint))
+	encoded, err := encodeGrantRecord(grant.forRefreshToken(thumbprint, instanceKey))
 	if err != nil {
 		return "", err
 	}

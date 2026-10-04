@@ -88,7 +88,7 @@ func TestGrantRecordForRefreshTokenDropsCodeOnlyFields(t *testing.T) {
 		RedirectURI: "https://rp.example/cb", CodeChallenge: "challenge", Nonce: "n",
 		DPoPJKT: "jkt", Subject: "user-1", Scope: []string{"openid", "offline_access"},
 	}
-	got := g.forRefreshToken("thumb-1", "instance-1")
+	got := g.forRefreshToken(refreshBinding{Thumbprint: "thumb-1", InstanceKey: "instance-1"})
 	if got.RedirectURI != "" || got.CodeChallenge != "" || got.Nonce != "" {
 		t.Fatalf("forRefreshToken kept code-only fields: %+v", got)
 	}

@@ -113,6 +113,11 @@ See [GETTING_STARTED.md](GETTING_STARTED.md) for a full walkthrough of
 standing up an authorization server and resource server end to end,
 including a runnable configuration you can start from.
 
+For one mechanism at a time, [docs/guides](docs/guides/README.md) has
+short guides to [DPoP](docs/guides/dpop.md),
+[PAR](docs/guides/par.md) and [building a wallet or other native app
+client](docs/guides/native-wallet.md).
+
 Six runnable demos show these end to end, each with a guided tour and an
 attack lab; [examples/README.md](examples/README.md) maps every capability
 to the demo that shows it.

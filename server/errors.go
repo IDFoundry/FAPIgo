@@ -30,6 +30,10 @@ const (
 	// storage.RegisteredClient.AllowsClientCredentialsGrant() is false.
 	ErrorUnauthorizedClient ErrorCode = "unauthorized_client"
 
+	// ErrorUnsupportedTokenType is RFC 7009 §2.2.1's error code for a
+	// token RevokeToken can't revoke: an access token.
+	ErrorUnsupportedTokenType ErrorCode = "unsupported_token_type"
+
 	// ErrorInvalidRequestURI is RFC 9126 §2.3's dedicated error code for
 	// a request_uri the authorization endpoint cannot use — unknown,
 	// already consumed by a completed interaction, expired, or pushed

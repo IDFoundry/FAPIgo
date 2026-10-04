@@ -183,6 +183,11 @@ type Endpoints struct {
 	// disables the feature" precedent client.Config.Endpoints.UserInfo
 	// already uses.
 	BackchannelAuthentication fapi.URL
+
+	// Revocation is this server's token revocation endpoint (RFC 7009),
+	// served by RevokeToken. Optional — zero disables it: RevokeToken
+	// then always fails, and Metadata omits revocation_endpoint.
+	Revocation fapi.URL
 }
 
 // MTLSEndpoints are the mTLS-requiring alternate URLs (RFC 8705 §5's
@@ -204,12 +209,13 @@ type MTLSEndpoints struct {
 	Token                      fapi.URL
 	PushedAuthorizationRequest fapi.URL
 	BackchannelAuthentication  fapi.URL
+	Revocation                 fapi.URL
 }
 
 // IsZero reports whether every field of e is zero — Metadata uses this
 // to decide whether to advertise mtls_endpoint_aliases at all.
 func (e MTLSEndpoints) IsZero() bool {
-	return e.Token.IsZero() && e.PushedAuthorizationRequest.IsZero() && e.BackchannelAuthentication.IsZero()
+	return e.Token.IsZero() && e.PushedAuthorizationRequest.IsZero() && e.BackchannelAuthentication.IsZero() && e.Revocation.IsZero()
 }
 
 // Limits bounds the lifetimes, clock tolerances and sizes this server

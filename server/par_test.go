@@ -486,6 +486,11 @@ type harness struct {
 	audit        *fakeAuditSink
 	revocation   *fakeRevocationSink
 	now          time.Time
+
+	// cfg and deps built server, when the constructor keeps them: a test
+	// builds a second server over the same stores with a changed config.
+	cfg  server.Config
+	deps server.Dependencies
 }
 
 func newHarness(t *testing.T, profile server.Profile, allowRequestObjects bool) harness {
@@ -584,7 +589,7 @@ func newHarnessWithApplicationType(t *testing.T, profile server.Profile, allowRe
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
-	return harness{server: srv, clients: clients, key: key, serverKey: serverKey, transactions: transactions, grants: grants, audit: audit, revocation: revocation, now: now}
+	return harness{server: srv, clients: clients, key: key, serverKey: serverKey, transactions: transactions, grants: grants, audit: audit, revocation: revocation, now: now, cfg: cfg, deps: deps}
 }
 
 // newHarnessOAuthOnly mirrors newHarness (baseline profile, request

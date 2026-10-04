@@ -114,9 +114,12 @@ standing up an authorization server and resource server end to end,
 including a runnable configuration you can start from.
 
 For one mechanism at a time, [docs/guides](docs/guides/README.md) has
-short guides to [DPoP](docs/guides/dpop.md),
-[PAR](docs/guides/par.md) and [building a wallet or other native app
-client](docs/guides/native-wallet.md).
+short guides to [DPoP](docs/guides/dpop.md), [mutual
+TLS](docs/guides/mtls.md), [PAR](docs/guides/par.md), [Message
+Signing](docs/guides/message-signing.md), [CIBA](docs/guides/ciba.md),
+[Rich Authorization Requests](docs/guides/rar.md), [OpenID
+Federation](docs/guides/openid-federation.md), and [building a wallet or
+other native app client](docs/guides/native-wallet.md).
 
 Six runnable demos show these end to end, each with a guided tour and an
 attack lab; [examples/README.md](examples/README.md) maps every capability

@@ -15,6 +15,39 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.49.0
+
+### A custom access token issuer declares what it relies on (server, *production only*)
+
+**Affects:** a server under `Config.Assurance = AssuranceProduction`
+whose `Dependencies.AccessTokens` is its own `AccessTokenIssuer`, not
+`JWTAccessTokens` or `OpaqueAccessTokens` (or a type embedding
+`JWTAccessTokens`).
+
+**Why:** under production assurance, `New` checks the custody of the
+keys that sign access tokens and the capabilities of the store that
+keeps opaque ones. It could only see into `JWTAccessTokens` and
+`OpaqueAccessTokens` values, so a custom issuer, and a pointer
+`*OpaqueAccessTokens`, skipped those checks entirely: a production
+server could run on ephemeral signing keys or an in-memory token
+store without being told. `New` now checks pointers too, and refuses
+an issuer it can't see into.
+
+**What to change:** implement `server.AccessTokenIssuerAssurance` on
+your issuer, returning an `AccessTokenAssurance` that names what it
+relies on: `SigningKeys`, the `keys.KeyManager` that signs the tokens,
+and/or `Store`, where it keeps them. Those are then checked as
+`JWTAccessTokens`' keys and `OpaqueAccessTokens`' store are:
+
+```go
+func (i myIssuer) AccessTokenAssurance() server.AccessTokenAssurance {
+	return server.AccessTokenAssurance{SigningKeys: i.keys}
+}
+```
+
+An issuer that embeds `JWTAccessTokens` needs nothing: its keys are
+checked as before. Development assurance is unchanged.
+
 ## v0.48.0
 
 ### `Server.RevokeToken` returns what it revoked (server)

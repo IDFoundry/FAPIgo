@@ -551,15 +551,17 @@ func validateProductionAssurance(cfg Config, deps Dependencies, cibaEnabled bool
 }
 
 // checkProductionKeyCustody checks the custody of the server's own
-// signing keys, and of the access token issuer's when it has its own.
+// signing keys, and of the access token issuer's when it signs tokens.
 func checkProductionKeyCustody(deps Dependencies, scaled bool) error {
 	if err := checkKeyCustody("keys", deps.Keys, scaled); err != nil {
 		return err
 	}
-	if publisher, ok := deps.AccessTokens.(accessTokenKeyPublisher); ok {
-		if err := checkKeyCustody("access_tokens keys", publisher.accessTokenSigningKeyUse().Manager, scaled); err != nil {
-			return err
-		}
+	issuer, err := productionAccessTokenAssurance(deps.AccessTokens)
+	if err != nil {
+		return err
+	}
+	if issuer.SigningKeys != nil {
+		return checkKeyCustody("access_tokens keys", issuer.SigningKeys, scaled)
 	}
 	return nil
 }
@@ -603,17 +605,31 @@ func checkProductionStateStores(deps Dependencies, scaled, cibaEnabled bool) err
 	return nil
 }
 
-// checkProductionTokenStores checks the opaque access token store, when
-// access tokens are opaque, and the revocation store, unless revocation
-// was declined.
+// checkProductionTokenStores checks the access token issuer's store,
+// when it keeps tokens (opaque tokens), and the revocation store, unless
+// revocation was declined.
 func checkProductionTokenStores(deps Dependencies, scaled bool) error {
-	if opaque, ok := deps.AccessTokens.(OpaqueAccessTokens); ok {
-		if err := checkStoreAssurance("access_tokens", opaque.Store, false, scaled); err != nil {
+	issuer, err := productionAccessTokenAssurance(deps.AccessTokens)
+	if err != nil {
+		return err
+	}
+	if issuer.Store != nil {
+		if err := checkStoreAssurance("access_tokens", issuer.Store, false, scaled); err != nil {
 			return err
 		}
 	}
-	if _, declinedRevocation := deps.Revocation.(NoRevocation); !declinedRevocation {
+	if !declinedRevocation(deps.Revocation) {
 		return checkStoreAssurance("revocation", deps.Revocation, false, scaled)
 	}
 	return nil
+}
+
+// declinedRevocation reports whether revocation is NoRevocation, by
+// value or pointer.
+func declinedRevocation(revocation RevocationSink) bool {
+	switch revocation.(type) {
+	case NoRevocation, *NoRevocation:
+		return true
+	}
+	return false
 }

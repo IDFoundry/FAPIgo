@@ -136,3 +136,64 @@ func checkKeySourceAssurance(name string, source any) error {
 	}
 	return nil
 }
+
+// AccessTokenIssuerAssurance is implemented by an AccessTokenIssuer of
+// the application's own to declare, under AssuranceProduction, what it
+// relies on, so New can check it the way it checks JWTAccessTokens and
+// OpaqueAccessTokens. New refuses any other AccessTokenIssuer under
+// AssuranceProduction: an issuer it can't see into would otherwise skip
+// the key custody and store checks entirely. A type embedding
+// JWTAccessTokens needn't implement it; its keys are checked as
+// JWTAccessTokens' are.
+type AccessTokenIssuerAssurance interface {
+	AccessTokenAssurance() AccessTokenAssurance
+}
+
+// AccessTokenAssurance is what a custom AccessTokenIssuer relies on. At
+// least one field must be set.
+type AccessTokenAssurance struct {
+	// SigningKeys signs the access tokens, if they're signed. Under
+	// AssuranceProduction it must implement keys.KeyCustodyAssurance and
+	// declare Durable key custody (and CrossInstanceConsistent with
+	// HorizontallyScaled), as Dependencies.Keys must.
+	SigningKeys keys.KeyManager
+
+	// Store keeps the access tokens, if they're kept (opaque tokens).
+	// Under AssuranceProduction it must implement storage.StoreAssurance
+	// and declare Durable (and CrossInstanceConsistent with
+	// HorizontallyScaled), as OpaqueAccessTokens.Store must.
+	Store any
+}
+
+// productionAccessTokenAssurance returns what issuer relies on, for the
+// AssuranceProduction checks: JWTAccessTokens' signing keys and
+// OpaqueAccessTokens' store, by value or pointer; the signing keys of a
+// type embedding JWTAccessTokens; or a custom issuer's own
+// AccessTokenIssuerAssurance declaration. Any other issuer is refused.
+func productionAccessTokenAssurance(issuer AccessTokenIssuer) (AccessTokenAssurance, error) {
+	switch t := issuer.(type) {
+	case JWTAccessTokens:
+		return AccessTokenAssurance{SigningKeys: t.Keys}, nil
+	case *JWTAccessTokens:
+		if t == nil {
+			return AccessTokenAssurance{}, fmt.Errorf("server: dependencies: access_tokens is a nil *JWTAccessTokens")
+		}
+		return AccessTokenAssurance{SigningKeys: t.Keys}, nil
+	case OpaqueAccessTokens:
+		return AccessTokenAssurance{Store: t.Store}, nil
+	case *OpaqueAccessTokens:
+		if t == nil {
+			return AccessTokenAssurance{}, fmt.Errorf("server: dependencies: access_tokens is a nil *OpaqueAccessTokens")
+		}
+		return AccessTokenAssurance{Store: t.Store}, nil
+	case AccessTokenIssuerAssurance:
+		declared := t.AccessTokenAssurance()
+		if declared.SigningKeys == nil && declared.Store == nil {
+			return AccessTokenAssurance{}, fmt.Errorf("server: dependencies: access_tokens' AccessTokenAssurance must name its SigningKeys or Store under AssuranceProduction")
+		}
+		return declared, nil
+	case accessTokenKeyPublisher:
+		return AccessTokenAssurance{SigningKeys: t.accessTokenSigningKeyUse().Manager}, nil
+	}
+	return AccessTokenAssurance{}, fmt.Errorf("server: dependencies: access_tokens must be JWTAccessTokens, OpaqueAccessTokens, or implement server.AccessTokenIssuerAssurance under AssuranceProduction")
+}

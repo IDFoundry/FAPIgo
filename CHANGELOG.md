@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.49.0](https://github.com/IDFoundry/FAPIgo/compare/v0.48.1...v0.49.0) (2026-10-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* **server:** under AssuranceProduction, a custom AccessTokenIssuer must implement server.AccessTokenIssuerAssurance, naming its signing keys or token store, or New refuses it. Development assurance, JWTAccessTokens, OpaqueAccessTokens and types embedding JWTAccessTokens are unaffected. See UPGRADING.md for v0.49.0.
+
+### Bug Fixes
+
+* **client:** refuse max_age without openid when the authorization begins ([6ca20ba](https://github.com/IDFoundry/FAPIgo/commit/6ca20ba99e6f9244f0376d5c1a929e55ff080994))
+* **client:** reject malformed JWE lengths instead of panicking ([8d3c92f](https://github.com/IDFoundry/FAPIgo/commit/8d3c92f8999c5db64ff052d923eb90bb29df2e8a))
+* **client:** require an ID token when openid was requested ([81d2cdd](https://github.com/IDFoundry/FAPIgo/commit/81d2cddfe5d3dc071510a75dd5fd1283231d1ff2))
+* **federation:** keep metadata policy, expiry and naming constraints to the chain ([c26a2c8](https://github.com/IDFoundry/FAPIgo/commit/c26a2c8eac8862b6deba2905b6ed353c13425c05))
+* **server:** production assurance checks every access token issuer ([a561ff6](https://github.com/IDFoundry/FAPIgo/commit/a561ff6ee1cf0e1f7aa668a7556ff39ef0ef5674))
+* **server:** re-check the client's registration at refresh and CIBA token exchange ([b08e6af](https://github.com/IDFoundry/FAPIgo/commit/b08e6afc40ab9003f710b82ef5dde532e3fe9961))
+
 ## [0.48.1](https://github.com/IDFoundry/FAPIgo/compare/v0.48.0...v0.48.1) (2026-10-04)
 
 

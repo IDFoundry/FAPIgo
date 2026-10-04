@@ -544,3 +544,14 @@ func TestApplyPolicyOnlyToPresentEntityTypes(t *testing.T) {
 		t.Error("ApplyPolicy with an essential claim missing from present metadata = nil error, want error")
 	}
 }
+
+// TestApplyPolicyRefusesNonObjectMetadata covers an Entity Type whose
+// metadata isn't a JSON object: refused, whether or not a policy names
+// that type.
+func TestApplyPolicyRefusesNonObjectMetadata(t *testing.T) {
+	metadata := map[string]json.RawMessage{"openid_relying_party": json.RawMessage(`["not", "an", "object"]`)}
+	_, err := ApplyPolicy(nil, nil, metadata)
+	if err == nil || !strings.Contains(err.Error(), "metadata.openid_relying_party is not a JSON object") {
+		t.Fatalf("ApplyPolicy(non-object metadata) = %v, want a refusal naming the entity type", err)
+	}
+}

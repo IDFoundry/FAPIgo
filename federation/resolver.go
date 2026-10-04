@@ -300,10 +300,12 @@ func newChainWalkState(subjectID string, leafStmt intfed.Statement, leafToken st
 // Resolve resolves subjectID's Trust Chain against one of
 // Config.TrustAnchors and returns its Resolved Metadata, enforcing
 // every Subordinate Statement's own max_path_length, naming_constraints
-// and allowed_entity_types constraints along the way. See doc.go for
-// this release's scope (leaf-entity resolution only, automatic
-// registration's own trust model — no server-side federation endpoints
-// of this Resolver's own, no trust marks).
+// and allowed_entity_types constraints along the way. It resolves a
+// leaf entity for automatic registration's trust model. The Trust Marks
+// the entity declares come back unverified in ResolvedEntity.TrustMarks,
+// for VerifyTrustMark; issuing statements and serving federation
+// endpoints is SelfIssuer's and SubordinateIssuer's job, not a
+// Resolver's. See doc.go for the package's scope.
 func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntity, error) {
 	if subjectID == "" {
 		return ResolvedEntity{}, fmt.Errorf("federation: subject entity ID is empty")

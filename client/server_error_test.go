@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -97,8 +98,31 @@ func TestPARNonOAuthErrorBodyExposesStatusOnly(t *testing.T) {
 		t.Fatalf("ServerResponse() = %+v, %v, want status 502 only", got, ok)
 	}
 	// The body never reaches Error(): it may echo the request's secrets.
-	if msg := err.Error(); strings.Contains(msg, "SECRET") || strings.Contains(msg, "html") || !strings.Contains(msg, "HTTP 502") {
-		t.Errorf("Error() = %q, want the status and no body", msg)
+	if msg := err.Error(); strings.Contains(msg, "SECRET") || strings.Contains(msg, "<html>") || !strings.Contains(msg, `HTTP 502, with a 56-byte "text/html" body`) {
+		t.Errorf("Error() = %q, want the status and media type and no body", msg)
+	}
+}
+
+func TestPARNonOAuthErrorNamesOnlyBoundedMediaType(t *testing.T) {
+	long := "application/" + strings.Repeat("x", 100)
+	cases := map[string]struct{ contentType, want string }{
+		"parameters dropped": {"text/HTML; charset=utf-8; secret=eyJSECRET", `"text/html" body`},
+		"missing":            {"", "(no Content-Type) body"},
+		"malformed":          {"text/html; \"eyJSECRET", "(malformed Content-Type) body"},
+		"long":               {long, strconv.Quote(long[:64] + "…")},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			c := newPARErrorTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+				w.Header()["Content-Type"] = []string{tc.contentType}
+				w.WriteHeader(http.StatusBadGateway)
+				_, _ = w.Write([]byte("gateway down"))
+			})
+			msg := beginAuthorizationError(t, c).Error()
+			if !strings.Contains(msg, tc.want) || strings.Contains(msg, "SECRET") {
+				t.Errorf("Error() = %q, want it to contain %q", msg, tc.want)
+			}
+		})
 	}
 }
 

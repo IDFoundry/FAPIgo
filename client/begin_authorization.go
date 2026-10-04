@@ -297,12 +297,12 @@ func (c *Client) pushAuthorizationRequestPlain(ctx context.Context, params map[s
 	if buildErr != nil {
 		return nil, buildErr
 	}
-	body, status, _, err := c.postForm(ctx, c.cfg.Endpoints.PushedAuthorizationRequest.String(), par.EncodeForm(formParams), headers)
+	body, status, header, err := c.postForm(ctx, c.cfg.Endpoints.PushedAuthorizationRequest.String(), par.EncodeForm(formParams), headers)
 	if err != nil {
 		return nil, newError(ErrorInternal, errPushedAuthorizationRequestFailed, err)
 	}
 	if status != http.StatusCreated && status != http.StatusOK {
-		return nil, parErrorFromResponse(status, body)
+		return nil, parErrorFromResponse(status, header, body)
 	}
 	return body, nil
 }
@@ -324,12 +324,12 @@ func (c *Client) pushAuthorizationRequestWithJKT(ctx context.Context, params map
 	if buildErr != nil {
 		return nil, buildErr
 	}
-	body, status, _, err := c.postForm(ctx, c.cfg.Endpoints.PushedAuthorizationRequest.String(), par.EncodeForm(formParams), headers)
+	body, status, header, err := c.postForm(ctx, c.cfg.Endpoints.PushedAuthorizationRequest.String(), par.EncodeForm(formParams), headers)
 	if err != nil {
 		return nil, newError(ErrorInternal, errPushedAuthorizationRequestFailed, err)
 	}
 	if status != http.StatusCreated && status != http.StatusOK {
-		return nil, parErrorFromResponse(status, body)
+		return nil, parErrorFromResponse(status, header, body)
 	}
 	return body, nil
 }
@@ -375,7 +375,7 @@ func (c *Client) pushAuthorizationRequestWithDPoPProof(ctx context.Context, para
 	}
 
 	if nextNonce == "" || !isDPoPNonceError(body) {
-		return nil, parErrorFromResponse(status, body)
+		return nil, parErrorFromResponse(status, header, body)
 	}
 	retryForm, retryHeaders, buildErr := buildParForm()
 	if buildErr != nil {
@@ -387,7 +387,7 @@ func (c *Client) pushAuthorizationRequestWithDPoPProof(ctx context.Context, para
 	}
 	c.cacheDPoPNonce(ctx, asNonceScope, header.Get(dpopNonceHeader))
 	if status != http.StatusCreated && status != http.StatusOK {
-		return nil, parErrorFromResponse(status, body)
+		return nil, parErrorFromResponse(status, header, body)
 	}
 	return body, nil
 }

@@ -103,3 +103,19 @@ func TestDecryptRejectsWrongCEKLength(t *testing.T) {
 		t.Fatalf("Decrypt(16-byte CEK under A256GCM) = %v, want ErrMalformed", err)
 	}
 }
+
+// TestLengthChecksRefuseUnsupportedEncryption covers the length helpers'
+// own refusal of an algorithm they have no size for. Decrypt rules such an
+// algorithm out before reaching them, so this only runs them directly.
+func TestLengthChecksRefuseUnsupportedEncryption(t *testing.T) {
+	const unsupported = fapi.ContentEncryptionAlgorithm(255)
+	if _, err := tagSizeFor(unsupported); err == nil {
+		t.Error("tagSizeFor(unsupported) = nil error")
+	}
+	if err := checkSegmentLengths(unsupported, make([]byte, gcmNonceSize), make([]byte, gcmTagSize)); err == nil {
+		t.Error("checkSegmentLengths(unsupported) = nil error")
+	}
+	if err := checkCEKLength(unsupported, make([]byte, 32)); err == nil {
+		t.Error("checkCEKLength(unsupported) = nil error")
+	}
+}

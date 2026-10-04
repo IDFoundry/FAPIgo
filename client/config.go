@@ -227,58 +227,55 @@ type MTLSEndpoints struct {
 	Revocation                 fapi.URL
 }
 
-// ApplyForSenderConstrain overrides endpoints' Token,
-// BackchannelAuthentication and Revocation fields with m's own
-// advertised aliases,
-// wherever m advertises one (RFC 8705 §5) — for a
-// Config.SenderConstrain == SenderConstrainMTLS client, whose
-// certificate-bound access tokens may need to be requested, and CIBA
-// polls sent, on a separate mTLS-only origin than the server's plain
-// endpoints. m may be nil (the server never advertised
-// mtls_endpoint_aliases at all); ApplyForSenderConstrain then leaves
-// endpoints untouched and reports false. That's not an error: the
-// aliases are optional (RFC 8705 §5), and a server that advertises none
-// accepts mutual TLS at its ordinary endpoints, which is where a
-// SenderConstrainMTLS client then sends these calls.
+// ApplyForSenderConstrain overrides endpoints with every alias m
+// advertises, for a Config.SenderConstrain == SenderConstrainMTLS client.
+// RFC 8705 §5: a client "intending to do mutual TLS (for OAuth client
+// authentication and/or to acquire or use certificate-bound tokens) when
+// making a request directly to the authorization server MUST use the
+// alias URL of the endpoint", for whichever of its endpoints m advertises
+// one: Token, PushedAuthorizationRequest, BackchannelAuthentication and
+// Revocation. Authorization is never aliased: the user agent, not the
+// client, makes that request.
+//
+// m may be nil (the server never advertised mtls_endpoint_aliases at
+// all); ApplyForSenderConstrain then leaves endpoints untouched and
+// reports false. That's not an error: the aliases are optional, and a
+// server that advertises none accepts mutual TLS at its ordinary
+// endpoints. ApplyForClientAuth does exactly the same: §5 doesn't
+// distinguish the two reasons for doing mutual TLS.
 func (m *MTLSEndpoints) ApplyForSenderConstrain(endpoints *Endpoints) bool {
-	if m == nil {
-		return false
-	}
-	if !m.Token.IsZero() {
-		endpoints.Token = m.Token
-	}
-	if !m.BackchannelAuthentication.IsZero() {
-		endpoints.BackchannelAuthentication = m.BackchannelAuthentication
-	}
-	if !m.Revocation.IsZero() {
-		endpoints.Revocation = m.Revocation
-	}
-	return true
+	return m.apply(endpoints)
 }
 
-// ApplyForClientAuth is ApplyForSenderConstrain's own counterpart for
-// RFC 8705 §2 client authentication
-// (Config.ClientAuthMethod == ClientAuthMethodSelfSignedTLSClientAuth
-// or ClientAuthMethodTLSClientAuth): overrides endpoints' Token,
-// PushedAuthorizationRequest and Revocation fields, since a
-// certificate-authenticated client must present its certificate at PAR
-// and token revocation (RevokeToken) too, not just at the token
-// endpoint — the same asymmetry a server's own client authentication
-// enforces. m may be nil, in which case
-// ApplyForClientAuth leaves endpoints untouched and reports false, for
-// the same reason ApplyForSenderConstrain does.
+// ApplyForClientAuth is ApplyForSenderConstrain, for a client that
+// authenticates with its certificate (Config.ClientAuthMethod ==
+// ClientAuthMethodSelfSignedTLSClientAuth or ClientAuthMethodTLSClientAuth,
+// RFC 8705 §2): it overrides endpoints with every alias m advertises, and
+// reports false for a nil m. The two are the same because RFC 8705 §5
+// applies to a client doing mutual TLS for either reason; a client doing
+// both needs only one call.
 func (m *MTLSEndpoints) ApplyForClientAuth(endpoints *Endpoints) bool {
+	return m.apply(endpoints)
+}
+
+// apply overrides each endpoint m advertises an alias for — see
+// ApplyForSenderConstrain.
+func (m *MTLSEndpoints) apply(endpoints *Endpoints) bool {
 	if m == nil {
 		return false
 	}
-	if !m.Token.IsZero() {
-		endpoints.Token = m.Token
-	}
-	if !m.PushedAuthorizationRequest.IsZero() {
-		endpoints.PushedAuthorizationRequest = m.PushedAuthorizationRequest
-	}
-	if !m.Revocation.IsZero() {
-		endpoints.Revocation = m.Revocation
+	for _, f := range []struct {
+		alias  fapi.URL
+		target *fapi.URL
+	}{
+		{m.Token, &endpoints.Token},
+		{m.PushedAuthorizationRequest, &endpoints.PushedAuthorizationRequest},
+		{m.BackchannelAuthentication, &endpoints.BackchannelAuthentication},
+		{m.Revocation, &endpoints.Revocation},
+	} {
+		if !f.alias.IsZero() {
+			*f.target = f.alias
+		}
 	}
 	return true
 }

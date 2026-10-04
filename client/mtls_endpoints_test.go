@@ -16,71 +16,45 @@ func mustEndpointURL(t *testing.T, raw string) fapi.URL {
 	return u
 }
 
-// TestMTLSEndpointsApplyForSenderConstrainOverridesTokenAndBackchannel
-// covers ApplyForSenderConstrain's own field selection: Token and
-// BackchannelAuthentication move to their mTLS alias; every other
-// endpoint (Authorization, PushedAuthorizationRequest) is untouched.
-func TestMTLSEndpointsApplyForSenderConstrainOverridesTokenAndBackchannel(t *testing.T) {
-	aliases := &client.MTLSEndpoints{
-		Token:                     mustEndpointURL(t, "https://mtls.example.com/token"),
-		BackchannelAuthentication: mustEndpointURL(t, "https://mtls.example.com/backchannel"),
-	}
-	endpoints := client.Endpoints{
-		Authorization:              mustEndpointURL(t, "https://as.example.com/authorize"),
-		Token:                      mustEndpointURL(t, "https://as.example.com/token"),
-		PushedAuthorizationRequest: mustEndpointURL(t, "https://as.example.com/par"),
-		BackchannelAuthentication:  mustEndpointURL(t, "https://as.example.com/backchannel"),
-	}
-
-	if !aliases.ApplyForSenderConstrain(&endpoints) {
-		t.Fatal("ApplyForSenderConstrain() = false, want true")
-	}
-	if got, want := endpoints.Token.String(), aliases.Token.String(); got != want {
-		t.Errorf("Token = %s, want alias %s", got, want)
-	}
-	if got, want := endpoints.BackchannelAuthentication.String(), aliases.BackchannelAuthentication.String(); got != want {
-		t.Errorf("BackchannelAuthentication = %s, want alias %s", got, want)
-	}
-	if got, want := endpoints.Authorization.String(), "https://as.example.com/authorize"; got != want {
-		t.Errorf("Authorization = %s, want untouched %s", got, want)
-	}
-	if got, want := endpoints.PushedAuthorizationRequest.String(), "https://as.example.com/par"; got != want {
-		t.Errorf("PushedAuthorizationRequest = %s, want untouched %s", got, want)
-	}
-}
-
-// TestMTLSEndpointsApplyForClientAuthOverridesTokenAndPAR covers
-// ApplyForClientAuth's own field selection: Token,
-// PushedAuthorizationRequest and Revocation move to their mTLS alias;
-// BackchannelAuthentication is untouched (only ApplyForSenderConstrain
-// ever moves it).
-func TestMTLSEndpointsApplyForClientAuthOverridesTokenAndPAR(t *testing.T) {
-	aliases := &client.MTLSEndpoints{
-		Token:                      mustEndpointURL(t, "https://mtls.example.com/token"),
-		PushedAuthorizationRequest: mustEndpointURL(t, "https://mtls.example.com/par"),
-		Revocation:                 mustEndpointURL(t, "https://mtls.example.com/revoke"),
-	}
-	endpoints := client.Endpoints{
-		Token:                      mustEndpointURL(t, "https://as.example.com/token"),
-		PushedAuthorizationRequest: mustEndpointURL(t, "https://as.example.com/par"),
-		BackchannelAuthentication:  mustEndpointURL(t, "https://as.example.com/backchannel"),
-		Revocation:                 mustEndpointURL(t, "https://as.example.com/revoke"),
-	}
-
-	if !aliases.ApplyForClientAuth(&endpoints) {
-		t.Fatal("ApplyForClientAuth() = false, want true")
-	}
-	if got, want := endpoints.Token.String(), aliases.Token.String(); got != want {
-		t.Errorf("Token = %s, want alias %s", got, want)
-	}
-	if got, want := endpoints.PushedAuthorizationRequest.String(), aliases.PushedAuthorizationRequest.String(); got != want {
-		t.Errorf("PushedAuthorizationRequest = %s, want alias %s", got, want)
-	}
-	if got, want := endpoints.Revocation.String(), aliases.Revocation.String(); got != want {
-		t.Errorf("Revocation = %s, want alias %s", got, want)
-	}
-	if got, want := endpoints.BackchannelAuthentication.String(), "https://as.example.com/backchannel"; got != want {
-		t.Errorf("BackchannelAuthentication = %s, want untouched %s", got, want)
+// TestMTLSEndpointsApplyEveryAdvertisedAlias covers RFC 8705 §5: a client
+// doing mutual TLS, for client authentication or for certificate-bound
+// tokens alike, uses every alias the server advertises for an endpoint it
+// calls directly. Authorization, which the user agent calls, is never
+// aliased.
+func TestMTLSEndpointsApplyEveryAdvertisedAlias(t *testing.T) {
+	for name, apply := range map[string]func(*client.MTLSEndpoints, *client.Endpoints) bool{
+		"ApplyForSenderConstrain": (*client.MTLSEndpoints).ApplyForSenderConstrain,
+		"ApplyForClientAuth":      (*client.MTLSEndpoints).ApplyForClientAuth,
+	} {
+		t.Run(name, func(t *testing.T) {
+			aliases := &client.MTLSEndpoints{
+				Token:                      mustEndpointURL(t, "https://mtls.example.com/token"),
+				PushedAuthorizationRequest: mustEndpointURL(t, "https://mtls.example.com/par"),
+				BackchannelAuthentication:  mustEndpointURL(t, "https://mtls.example.com/backchannel"),
+				Revocation:                 mustEndpointURL(t, "https://mtls.example.com/revoke"),
+			}
+			endpoints := client.Endpoints{
+				Authorization:              mustEndpointURL(t, "https://as.example.com/authorize"),
+				Token:                      mustEndpointURL(t, "https://as.example.com/token"),
+				PushedAuthorizationRequest: mustEndpointURL(t, "https://as.example.com/par"),
+				BackchannelAuthentication:  mustEndpointURL(t, "https://as.example.com/backchannel"),
+				Revocation:                 mustEndpointURL(t, "https://as.example.com/revoke"),
+			}
+			if !apply(aliases, &endpoints) {
+				t.Fatalf("%s() = false, want true", name)
+			}
+			for field, got := range map[string][2]string{
+				"Token":                      {endpoints.Token.String(), aliases.Token.String()},
+				"PushedAuthorizationRequest": {endpoints.PushedAuthorizationRequest.String(), aliases.PushedAuthorizationRequest.String()},
+				"BackchannelAuthentication":  {endpoints.BackchannelAuthentication.String(), aliases.BackchannelAuthentication.String()},
+				"Revocation":                 {endpoints.Revocation.String(), aliases.Revocation.String()},
+				"Authorization":              {endpoints.Authorization.String(), "https://as.example.com/authorize"},
+			} {
+				if got[0] != got[1] {
+					t.Errorf("%s = %s, want %s", field, got[0], got[1])
+				}
+			}
+		})
 	}
 }
 

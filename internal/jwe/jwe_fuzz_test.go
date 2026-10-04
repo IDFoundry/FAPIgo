@@ -5,6 +5,9 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/rsa"
+	"encoding/base64"
+	"slices"
+	"strings"
 	"testing"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -55,6 +58,16 @@ func FuzzDecrypt(f *testing.F) {
 			f.Fatalf("Encrypt(%v/%v): %v", c.alg, c.enc, err)
 		}
 		f.Add(token)
+		// The same token with the IV, then the tag, cut short and
+		// lengthened: lengths the cipher must never see.
+		parts := strings.Split(token, ".")
+		for _, i := range []int{2, 4} {
+			for _, n := range []int{1, 11, 13, 15, 17, 31, 33} {
+				mutated := slices.Clone(parts)
+				mutated[i] = base64.RawURLEncoding.EncodeToString(make([]byte, n))
+				f.Add(strings.Join(mutated, "."))
+			}
+		}
 	}
 	f.Add("")
 	f.Add(".")

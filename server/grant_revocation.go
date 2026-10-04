@@ -64,7 +64,9 @@ func (s *Server) grantRevocationReader() (revocationReader, bool) {
 // authorized it (GrantedAuthorization.GrantID): its authorization code,
 // if not yet redeemed, its refresh token, and every access token issued
 // from it — for a "connected apps" page where a customer withdraws a
-// client's access, for example. Grants without that grant ID are
+// client's access, for example. Every grant carrying the ID is revoked;
+// RevokeToken calls this for the client a grant was issued to, so a grant
+// ID must name one grant only. Grants without that grant ID are
 // unaffected.
 //
 // It records grantID as revoked in Dependencies.Revocation, which every

@@ -51,7 +51,8 @@ func TokenRevocationRequestFromHTTP(r *http.Request) (TokenRevocationRequest, er
 // RefreshAccessToken requires — draft-ietf-oauth-attestation-based-client-auth-07
 // §10.3). Revoking a refresh token whose grant has a GrantID also
 // revokes the grant (RevokeGrant), so its access tokens stop working too
-// (RFC 7009 §2.1).
+// (RFC 7009 §2.1) — which is why a GrantID must name one grant only
+// (GrantedAuthorization.GrantID).
 //
 // A token that is unknown, expired, already revoked, or another
 // client's or client instance's is answered 200 and left as it is: RFC
@@ -86,37 +87,46 @@ func (s *Server) RevokeToken(ctx context.Context, req TokenRevocationRequest) er
 	if params["token_type_hint"] == "access_token" || strings.Contains(token, ".") {
 		return s.revocationFail(ctx, client.ID(), newError(ErrorUnsupportedTokenType, 400, "only refresh tokens can be revoked", nil))
 	}
-	if revokeErr := s.revokeRefreshToken(ctx, client.ID(), authn.InstanceKey, token); revokeErr != nil {
+	revoked, revokeErr := s.revokeRefreshToken(ctx, client.ID(), authn.InstanceKey, token)
+	if revokeErr != nil {
 		return s.revocationFail(ctx, client.ID(), revokeErr)
 	}
-	s.audit(ctx, AuditEventRevokeToken, client.ID(), AuditOutcomeSuccess, "")
+	// The client gets the same 200 either way; the audit record says
+	// whether anything was revoked, so an operator can see requests for
+	// tokens that are unknown or not the client's.
+	description := ""
+	if !revoked {
+		description = "not revoked"
+	}
+	s.audit(ctx, AuditEventRevokeToken, client.ID(), AuditOutcomeSuccess, description)
 	return nil
 }
 
 // revokeRefreshToken revokes rawToken if it is a live refresh token
 // clientID (and, when set, the client instance holding instanceKey) may
-// revoke, and does nothing otherwise — see RevokeToken.
-func (s *Server) revokeRefreshToken(ctx context.Context, clientID fapi.ClientID, instanceKey, rawToken string) *Error {
+// revoke, and does nothing otherwise — see RevokeToken. It reports
+// whether it revoked anything.
+func (s *Server) revokeRefreshToken(ctx context.Context, clientID fapi.ClientID, instanceKey, rawToken string) (bool, *Error) {
 	grant, _, grantErr := s.redeemRefreshGrant(ctx, clientID, instanceKey, rawToken)
 	if grantErr != nil {
 		if grantErr.Code() == ErrorServerError {
 			// A stored grant that won't decode, or a revocation check
 			// that failed: a fault, not a token this client can't revoke.
-			return grantErr
+			return false, grantErr
 		}
 		// Unknown, expired, revoked, another client's or instance's, or
 		// its grant already revoked: nothing this client may revoke.
-		return nil
+		return false, nil
 	}
 	if err := s.deps.Grants.RevokeRefreshToken(ctx, sha256.Sum256([]byte(rawToken))); err != nil {
-		return newError(ErrorServerError, 500, "failed to revoke the refresh token", err)
+		return false, newError(ErrorServerError, 500, "failed to revoke the refresh token", err)
 	}
 	if grant.GrantID != "" {
 		if err := s.RevokeGrant(ctx, grant.GrantID); err != nil {
-			return newError(ErrorServerError, 500, "failed to revoke the refresh token's grant", err)
+			return false, newError(ErrorServerError, 500, "failed to revoke the refresh token's grant", err)
 		}
 	}
-	return nil
+	return true, nil
 }
 
 func (s *Server) revocationFail(ctx context.Context, clientID fapi.ClientID, err *Error) error {

@@ -136,8 +136,13 @@ type GrantedAuthorization struct {
 	// later with Server.RevokeGrant — its authorization code, refresh
 	// token and every access token issued from it — for a "connected
 	// apps" page, for example. The application chooses it, typically a
-	// random identifier keying its own record of what was approved; it
-	// is carried in every access token from the grant (as "grant_id"),
+	// random identifier keying its own record of what was approved. Give
+	// each grant its own: RevokeGrant revokes every grant carrying the
+	// ID, and the client a grant was issued to can trigger that through
+	// RevokeToken, so an ID shared by several grants would let one
+	// client end the others. To revoke everything for one user, keep
+	// their grant IDs and call RevokeGrant for each. The ID is
+	// carried in every access token from the grant (as "grant_id"),
 	// so it mustn't be personal data. 1 to 128 characters from A-Z,
 	// a-z, 0-9, '.', '_', '~' and '-'. Empty leaves the grant revocable
 	// only token by token.

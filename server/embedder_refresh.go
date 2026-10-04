@@ -46,7 +46,8 @@ type IssueRefreshTokenRequest struct {
 	AuthorizationDetails []json.RawMessage
 
 	// GrantID, if set, names the grant so RevokeGrant can revoke it, as
-	// GrantedAuthorization.GrantID does.
+	// GrantedAuthorization.GrantID does — and, like it, must name this
+	// grant only.
 	GrantID string
 }
 

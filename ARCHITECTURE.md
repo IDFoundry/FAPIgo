@@ -155,7 +155,8 @@ that operation.
 authorization URL and a session handle) → `HandleAuthorizationResponse`
 → `ExchangeCode`, or the combined `CompleteAuthorization` so a caller
 cannot skip callback validation before exchanging a code; then
-`RefreshTokens` for a new access token from the same grant. CIBA
+`RefreshTokens` for a new access token from the same grant, and
+`RevokeToken` to tell the server it's no longer needed (RFC 7009). CIBA
 (`BeginBackchannelAuthentication` → `PollBackchannelAuthentication`)
 and `RequestClientCredentialsToken` are the other two flows. The
 intermediate `ValidatedAuthorizationResponse` is opaque and can only be
@@ -302,12 +303,14 @@ a PAR body or similar wire-level payload.
 
 `PushAuthorizationRequest` → `BeginAuthorization` → `CompleteAuthorization`
 → `ExchangeAuthorizationCode` → `RefreshAccessToken`, plus `RevokeGrant`
-to withdraw a grant, the CIBA and client credentials grants, `Metadata`
-and `PublicJWKS`. `AuthenticateAttestedClient` and
+to withdraw a grant, `RevokeToken` for a client to revoke its own
+refresh token (RFC 7009), the CIBA and client credentials grants,
+`Metadata` and `PublicJWKS`. `AuthenticateAttestedClient` and
 `VerifyTokenRequestBinding` let an embedder serve its own grant type at
 the same token endpoint; they fit this rule because each is one
 endpoint's own check, run exactly as the server's own grants run it,
-not a generic primitive. The server only ever verifies; it must not expose
+not a generic primitive. `IssueRefreshToken` then issues a refresh token
+for such a grant, which `RefreshAccessToken` redeems as it does its own. The server only ever verifies; it must not expose
 `client`'s request-building functionality, and it must not expose a
 generic `HandleRequest(map[string]any)` or bare `ValidateJWT(token
 string)` — which claims, algorithms, audiences, replay checks and key

@@ -112,7 +112,16 @@ func TestReadRefuses(t *testing.T) {
 	c := newCookie(t, key)
 	ck := set(t, c, session, "order-42", now)
 	tampered := *ck
-	tampered.Value = ck.Value[:len(ck.Value)-2] + "AA"
+	// Change a character in the middle of the value, where every bit is
+	// significant: replacing the last characters can leave the decoded
+	// bytes unchanged, because unpadded base64's final character carries
+	// unused bits (and they may already be the replacement).
+	mid := len(ck.Value) / 2
+	replacement := byte('A')
+	if ck.Value[mid] == replacement {
+		replacement = 'B'
+	}
+	tampered.Value = ck.Value[:mid] + string(replacement) + ck.Value[mid+1:]
 	otherName, err := sessioncookie.New([][]byte{key}, sessioncookie.Options{Name: "__Host-other"})
 	if err != nil {
 		t.Fatal(err)

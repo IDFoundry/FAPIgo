@@ -61,6 +61,9 @@ const (
 	// AuditEventIssueRefreshToken records the outcome of an
 	// IssueRefreshToken call.
 	AuditEventIssueRefreshToken
+
+	// AuditEventRevokeToken records the outcome of a RevokeToken call.
+	AuditEventRevokeToken
 )
 
 // AuditOutcome is a closed set of outcomes for an AuditEvent.

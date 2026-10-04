@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"slices"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/storage"
@@ -111,6 +112,13 @@ type Metadata struct {
 	BackchannelTokenDeliveryModesSupported                    []string  `json:"backchannel_token_delivery_modes_supported,omitempty"`
 	BackchannelAuthenticationRequestSigningAlgValuesSupported []string  `json:"backchannel_authentication_request_signing_alg_values_supported,omitempty"`
 
+	// RevocationEndpoint (RFC 8414 §2) is set only when
+	// Config.Endpoints.Revocation is: RevokeToken serves it.
+	// RevocationEndpointAuthMethodsSupported then lists the same client
+	// authentication methods as TokenEndpointAuthMethodsSupported.
+	RevocationEndpoint                     *fapi.URL `json:"revocation_endpoint,omitempty"`
+	RevocationEndpointAuthMethodsSupported []string  `json:"revocation_endpoint_auth_methods_supported,omitempty"`
+
 	// MTLSEndpointAliases (RFC 8705 §5) is set only when
 	// Config.MTLSEndpoints is non-zero — most deployments never offer
 	// an mTLS-requiring alternate listener at all.
@@ -193,6 +201,7 @@ type MTLSEndpointAliases struct {
 	TokenEndpoint                      *fapi.URL `json:"token_endpoint,omitempty"`
 	PushedAuthorizationRequestEndpoint *fapi.URL `json:"pushed_authorization_request_endpoint,omitempty"`
 	BackchannelAuthenticationEndpoint  *fapi.URL `json:"backchannel_authentication_endpoint,omitempty"`
+	RevocationEndpoint                 *fapi.URL `json:"revocation_endpoint,omitempty"`
 }
 
 // Metadata returns this server's metadata document.
@@ -262,6 +271,7 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 			TokenEndpoint:                      urlOrNil(s.cfg.MTLSEndpoints.Token),
 			PushedAuthorizationRequestEndpoint: urlOrNil(s.cfg.MTLSEndpoints.PushedAuthorizationRequest),
 			BackchannelAuthenticationEndpoint:  urlOrNil(s.cfg.MTLSEndpoints.BackchannelAuthentication),
+			RevocationEndpoint:                 urlOrNil(s.cfg.MTLSEndpoints.Revocation),
 		}
 		md.TLSClientCertificateBoundAccessTokens = true
 		// The two RFC 8705 §2 client-authentication methods
@@ -307,6 +317,13 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 			storage.ClientAuthMethodAttestation.String())
 		md.ClientAttestationSigningAlgValuesSupported = s.cfg.Algorithms.ClientAttestation.Strings()
 		md.ClientAttestationPoPSigningAlgValuesSupported = s.cfg.Algorithms.ClientAttestationPoP.Strings()
+	}
+
+	if !s.cfg.Endpoints.Revocation.IsZero() {
+		md.RevocationEndpoint = urlOrNil(s.cfg.Endpoints.Revocation)
+		// RevokeToken authenticates a client exactly as the token
+		// endpoint does.
+		md.RevocationEndpointAuthMethodsSupported = slices.Clone(md.TokenEndpointAuthMethodsSupported)
 	}
 
 	return md

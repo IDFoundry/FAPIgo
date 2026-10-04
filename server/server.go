@@ -350,6 +350,11 @@ func validateAssurance(cfg Config, cibaEnabled bool) error {
 			return err
 		}
 	}
+	if !cfg.Endpoints.Revocation.IsZero() {
+		if err := rejectLoopbackURL("endpoints.revocation", cfg.Endpoints.Revocation); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

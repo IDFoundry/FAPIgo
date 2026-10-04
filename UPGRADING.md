@@ -15,6 +15,34 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.48.0
+
+### `Server.RevokeToken` returns what it revoked (server)
+
+**Affects:** a server serving the token revocation endpoint added in
+v0.47.0 (`Config.Endpoints.Revocation`).
+
+**Why:** an application that keeps data for a grant (keyed by its
+`GrantID`) had no way to learn that a client had just ended that grant
+through the revocation endpoint, so it couldn't delete the data until
+its own deadline. `RevokeToken` now returns a `TokenRevocationResult`:
+`Revoked` reports that the call revoked a live refresh token, and
+`GrantID` names its grant when it had one.
+
+**What to change:** `RevokeToken` returns `(TokenRevocationResult,
+error)` instead of `error`. A handler that doesn't need the result
+discards it:
+
+```go
+_, err = srv.RevokeToken(r.Context(), req)
+```
+
+The endpoint's response is unchanged: write a 200 with an empty body on
+a nil error, whatever the result says. The result is for the
+application only — never put it in the response — and two concurrent
+revocations of one token can both report it, so act on it
+idempotently.
+
 ## v0.43.0
 
 ### Clients list the RAR types they may request (storage, server)

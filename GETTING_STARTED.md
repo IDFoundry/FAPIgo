@@ -405,9 +405,12 @@ then advertises `revocation_endpoint`, and a `client.Client` revokes
 with `RevokeToken`, which `Discover` wires up. A client can only revoke
 its own refresh tokens (and, when authenticated by Client Attestation,
 only its own installation's); revoking one also revokes its grant by
-`GrantID`, so give each grant its own ID. Access tokens are refused
-with `unsupported_token_type`: they expire on their own, and
-`RevokeGrant` ends them early.
+`GrantID`, so give each grant its own ID. The `TokenRevocationResult`
+`RevokeToken` returns names that grant when a client ends it, so you can
+delete anything you kept for it at once; it's for you only, and the
+response stays the same empty 200. Access tokens are refused with
+`unsupported_token_type`: they expire on their own, and `RevokeGrant`
+ends them early.
 
 ## 7. Wire the resource server: verifying access tokens
 

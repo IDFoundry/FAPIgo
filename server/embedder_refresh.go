@@ -47,7 +47,8 @@ type IssueRefreshTokenRequest struct {
 
 	// GrantID, if set, names the grant so RevokeGrant can revoke it, as
 	// GrantedAuthorization.GrantID does — and, like it, must name this
-	// grant only.
+	// grant only. RevokeToken's TokenRevocationResult names it when the
+	// client ends the grant.
 	GrantID string
 }
 

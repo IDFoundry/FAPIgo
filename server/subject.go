@@ -141,7 +141,10 @@ type GrantedAuthorization struct {
 	// ID, and the client a grant was issued to can trigger that through
 	// RevokeToken, so an ID shared by several grants would let one
 	// client end the others. To revoke everything for one user, keep
-	// their grant IDs and call RevokeGrant for each. The ID is
+	// their grant IDs and call RevokeGrant for each. When a client ends
+	// its grant through RevokeToken, the TokenRevocationResult names
+	// this ID, so the application can delete what it kept for the grant
+	// at once. The ID is
 	// carried in every access token from the grant (as "grant_id"),
 	// so it mustn't be personal data. 1 to 128 characters from A-Z,
 	// a-z, 0-9, '.', '_', '~' and '-'. Empty leaves the grant revocable

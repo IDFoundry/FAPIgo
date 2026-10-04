@@ -110,6 +110,10 @@ type VerifyPolicy struct {
 type VerifiedAssertion struct {
 	ClientID  string
 	ExpiresAt time.Time
+	// InstanceKey, for a client authenticated by Client Attestation, is
+	// the base64url RFC 7638 thumbprint of its Client Instance Key;
+	// empty for every other method.
+	InstanceKey string
 }
 
 // Verify checks a's signature against pub and its claims against policy.

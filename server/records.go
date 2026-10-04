@@ -70,6 +70,14 @@ type grantRecord struct {
 	// RefreshAccessToken.
 	Thumbprint string `json:"thumbprint,omitempty"`
 
+	// ClientInstanceKey is the RFC 7638 thumbprint of the Client
+	// Instance Key a client authenticated by Client Attestation used
+	// when its refresh token was issued; RefreshAccessToken redeems the
+	// token only with an attestation for that same key
+	// (draft-ietf-oauth-attestation-based-client-auth-07 §10.3). Empty
+	// for any other client authentication.
+	ClientInstanceKey string `json:"client_instance_jkt,omitempty"`
+
 	Subject              string          `json:"sub"`
 	Scope                []string        `json:"scope,omitempty"`
 	AuthTime             time.Time       `json:"auth_time"`
@@ -97,12 +105,14 @@ type grantRecord struct {
 }
 
 // forRefreshToken returns g as a refresh token carries it forward:
-// without the code-exchange-only fields, and recording thumbprint.
-func (g grantRecord) forRefreshToken(thumbprint string) grantRecord {
+// without the code-exchange-only fields, recording thumbprint, and
+// bound to instanceKey (see ClientInstanceKey).
+func (g grantRecord) forRefreshToken(thumbprint, instanceKey string) grantRecord {
 	g.RedirectURI = ""
 	g.CodeChallenge = ""
 	g.Nonce = ""
 	g.Thumbprint = thumbprint
+	g.ClientInstanceKey = instanceKey
 	return g
 }
 

@@ -131,6 +131,7 @@ func newAttestationServer(t *testing.T, now time.Time, registeredKey *ecdsa.Priv
 
 	audit := &fakeAuditSink{}
 	revocation := &fakeRevocationSink{}
+	grants := &fakeGrantStore{}
 
 	cfg := server.Config{
 		Issuer:    issuer,
@@ -177,7 +178,7 @@ func newAttestationServer(t *testing.T, now time.Time, registeredKey *ecdsa.Priv
 	deps := server.Dependencies{
 		Clients:                clients,
 		Transactions:           &fakeTransactionStore{},
-		Grants:                 &fakeGrantStore{},
+		Grants:                 grants,
 		Replay:                 &fakeReplayStore{},
 		ClientKeys:             &fakeClientKeySource{keysByClient: registeredAttesterKeys(registeredKey)},
 		Keys:                   serverKeyManager,
@@ -194,7 +195,7 @@ func newAttestationServer(t *testing.T, now time.Time, registeredKey *ecdsa.Priv
 	if err != nil {
 		return harness{}, err
 	}
-	return harness{server: srv, clients: clients, serverKey: serverKey, audit: audit, revocation: revocation, now: now}, nil
+	return harness{server: srv, clients: clients, serverKey: serverKey, grants: grants, audit: audit, revocation: revocation, now: now}, nil
 }
 
 func registeredAttesterKeys(key *ecdsa.PrivateKey) map[fapi.ClientID][]keys.VerificationKey {

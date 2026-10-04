@@ -88,12 +88,12 @@ func TestGrantRecordForRefreshTokenDropsCodeOnlyFields(t *testing.T) {
 		RedirectURI: "https://rp.example/cb", CodeChallenge: "challenge", Nonce: "n",
 		DPoPJKT: "jkt", Subject: "user-1", Scope: []string{"openid", "offline_access"},
 	}
-	got := g.forRefreshToken("thumb-1")
+	got := g.forRefreshToken("thumb-1", "instance-1")
 	if got.RedirectURI != "" || got.CodeChallenge != "" || got.Nonce != "" {
 		t.Fatalf("forRefreshToken kept code-only fields: %+v", got)
 	}
-	if got.Thumbprint != "thumb-1" || got.Subject != "user-1" || got.DPoPJKT != "jkt" || len(got.Scope) != 2 {
-		t.Fatalf("forRefreshToken = %+v, want grant carried forward with thumbprint", got)
+	if got.Thumbprint != "thumb-1" || got.ClientInstanceKey != "instance-1" || got.Subject != "user-1" || got.DPoPJKT != "jkt" || len(got.Scope) != 2 {
+		t.Fatalf("forRefreshToken = %+v, want grant carried forward with thumbprint and instance key", got)
 	}
 }
 

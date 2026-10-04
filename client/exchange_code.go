@@ -310,12 +310,12 @@ func (c *Client) tokenSetFromResponse(ctx context.Context, body []byte, nonce st
 // no equivalent nonce-challenge/retry concept.
 func (c *Client) sendTokenRequest(ctx context.Context, dpopSigner crypto.Signer, tokenURL *url.URL, buildTokenForm func() ([]byte, map[string]string, error), form []byte, headers map[string]string) ([]byte, *Error) {
 	if c.cfg.SenderConstrain == storage.SenderConstrainMTLS {
-		body, status, _, err := c.postForm(ctx, tokenURL.String(), form, headers)
+		body, status, header, err := c.postForm(ctx, tokenURL.String(), form, headers)
 		if err != nil {
 			return nil, newError(ErrorInternal, errTokenRequestFailed, err)
 		}
 		if status != http.StatusOK {
-			return nil, parErrorFromResponse(status, body)
+			return nil, parErrorFromResponse(status, header, body)
 		}
 		return body, nil
 	}
@@ -330,7 +330,7 @@ func (c *Client) sendTokenRequest(ctx context.Context, dpopSigner crypto.Signer,
 	}
 
 	if nextNonce == "" || !isDPoPNonceError(body) {
-		return nil, parErrorFromResponse(status, body)
+		return nil, parErrorFromResponse(status, header, body)
 	}
 	retryForm, retryHeaders, buildErr := buildTokenForm()
 	if buildErr != nil {
@@ -342,7 +342,7 @@ func (c *Client) sendTokenRequest(ctx context.Context, dpopSigner crypto.Signer,
 	}
 	c.cacheDPoPNonce(ctx, asNonceScope, header.Get(dpopNonceHeader))
 	if status != http.StatusOK {
-		return nil, parErrorFromResponse(status, body)
+		return nil, parErrorFromResponse(status, header, body)
 	}
 	return body, nil
 }

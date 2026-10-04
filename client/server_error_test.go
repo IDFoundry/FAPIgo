@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -24,7 +25,7 @@ func serverResponseOf(t *testing.T, err error) (client.ServerErrorResponse, bool
 	return cerr.ServerResponse()
 }
 
-func newPARErrorTestClient(t *testing.T, handler http.HandlerFunc) *client.Client {
+func newPARErrorTestClient(t *testing.T, handler http.HandlerFunc, tweaks ...func(*client.Config)) *client.Client {
 	t.Helper()
 	ts := httptest.NewServer(handler)
 	t.Cleanup(ts.Close)
@@ -34,6 +35,9 @@ func newPARErrorTestClient(t *testing.T, handler http.HandlerFunc) *client.Clien
 		t.Fatalf("ParseEndpointURL(par): %v", err)
 	}
 	cfg.Endpoints.PushedAuthorizationRequest = parURL
+	for _, tweak := range tweaks {
+		tweak(&cfg)
+	}
 	deps := validDependencies(t)
 	deps.HTTP = ts.Client()
 	c, err := client.New(cfg, deps)
@@ -97,8 +101,70 @@ func TestPARNonOAuthErrorBodyExposesStatusOnly(t *testing.T) {
 		t.Fatalf("ServerResponse() = %+v, %v, want status 502 only", got, ok)
 	}
 	// The body never reaches Error(): it may echo the request's secrets.
-	if msg := err.Error(); strings.Contains(msg, "SECRET") || strings.Contains(msg, "html") || !strings.Contains(msg, "HTTP 502") {
-		t.Errorf("Error() = %q, want the status and no body", msg)
+	if msg := err.Error(); strings.Contains(msg, "SECRET") || strings.Contains(msg, "<html>") || !strings.Contains(msg, `HTTP 502, with a 56-byte "text/html" body`) {
+		t.Errorf("Error() = %q, want the status and media type and no body", msg)
+	}
+}
+
+// TestPARNonOAuthErrorAfterDPoPNonceRetry covers the PAR endpoint
+// answering a DPoP-nonce retry with something that isn't an OAuth error.
+func TestPARNonOAuthErrorAfterDPoPNonceRetry(t *testing.T) {
+	attempts := 0
+	c := newPARErrorTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		attempts++
+		if attempts == 1 {
+			w.Header().Set("DPoP-Nonce", "server-nonce-1")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"use_dpop_nonce"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("<html>down</html>"))
+	})
+	msg := beginAuthorizationError(t, c).Error()
+	if attempts != 2 || !strings.Contains(msg, `HTTP 502, with a 17-byte "text/html" body`) {
+		t.Errorf("attempts = %d, Error() = %q, want a retry and the media type", attempts, msg)
+	}
+}
+
+// TestPARNonOAuthErrorUnderJKTBinding covers PAR committing to the DPoP
+// key with dpop_jkt (PARDPoPBindingJKT) instead of a proof.
+func TestPARNonOAuthErrorUnderJKTBinding(t *testing.T) {
+	c := newPARErrorTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil || r.PostForm.Get("dpop_jkt") == "" {
+			t.Errorf("PAR form has no dpop_jkt (%v)", err)
+		}
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("<html>down</html>"))
+	}, func(cfg *client.Config) { cfg.PARDPoPBinding = client.PARDPoPBindingJKT })
+	if msg := beginAuthorizationError(t, c).Error(); !strings.Contains(msg, `HTTP 502, with a 17-byte "text/html" body`) {
+		t.Errorf("Error() = %q, want the media type", msg)
+	}
+}
+
+func TestPARNonOAuthErrorNamesOnlyBoundedMediaType(t *testing.T) {
+	long := "application/" + strings.Repeat("x", 100)
+	cases := map[string]struct{ contentType, want string }{
+		"parameters dropped": {"text/HTML; charset=utf-8; secret=eyJSECRET", `"text/html" body`},
+		"missing":            {"", "(no Content-Type) body"},
+		"malformed":          {"text/html; \"eyJSECRET", "(malformed Content-Type) body"},
+		"long":               {long, strconv.Quote(long[:64] + "…")},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			c := newPARErrorTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+				w.Header()["Content-Type"] = []string{tc.contentType}
+				w.WriteHeader(http.StatusBadGateway)
+				_, _ = w.Write([]byte("gateway down"))
+			})
+			msg := beginAuthorizationError(t, c).Error()
+			if !strings.Contains(msg, tc.want) || strings.Contains(msg, "SECRET") {
+				t.Errorf("Error() = %q, want it to contain %q", msg, tc.want)
+			}
+		})
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -50,6 +51,11 @@ type fakeCIBAAS struct {
 	// path, as opposed to challengeBCDPoPNonce's challenge/retry path.
 	rejectBCRequestPlain bool
 
+	// bcNonOAuthContentType, if non-empty, makes handleBackchannelAuth
+	// answer, once past any DPoP-nonce challenge, with a body that
+	// isn't an OAuth error, under this Content-Type: a proxy's page.
+	bcNonOAuthContentType string
+
 	// tokenResponses is a queue of canned responses handleToken pops
 	// from, in order — lets a test script a sequence of polls (e.g.
 	// pending, then approved) across successive
@@ -60,6 +66,12 @@ type fakeCIBAAS struct {
 type cibaTokenResponse struct {
 	status int
 	body   map[string]any
+	// contentType and raw, if set, replace body: a response that isn't
+	// JSON at all.
+	contentType string
+	raw         string
+	// nonce, if set, is sent as the DPoP-Nonce header.
+	nonce string
 }
 
 func newFakeCIBAAS(t *testing.T) *fakeCIBAAS {
@@ -114,6 +126,13 @@ func (a *fakeCIBAAS) handleBackchannelAuth(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	if a.bcNonOAuthContentType != "" {
+		w.Header().Set("Content-Type", a.bcNonOAuthContentType)
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("<html>502 Bad Gateway</html>"))
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]any{
@@ -146,6 +165,15 @@ func (a *fakeCIBAAS) handleToken(w http.ResponseWriter, r *http.Request) {
 	resp := a.tokenResponses[0]
 	a.tokenResponses = a.tokenResponses[1:]
 
+	if resp.nonce != "" {
+		w.Header().Set("DPoP-Nonce", resp.nonce)
+	}
+	if resp.raw != "" {
+		w.Header().Set("Content-Type", resp.contentType)
+		w.WriteHeader(resp.status)
+		_, _ = w.Write([]byte(resp.raw))
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.status)
 	json.NewEncoder(w).Encode(resp.body)
@@ -671,5 +699,57 @@ func TestRefreshTokensRefusesAChangedSubject(t *testing.T) {
 	var cerr *client.Error
 	if !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidResponse {
 		t.Fatalf("RefreshTokens(ID token for another user) = %v, want invalid_response", err)
+	}
+}
+
+// TestBeginBackchannelAuthenticationNamesNonOAuthMediaType covers the
+// backchannel authentication endpoint answering with something that
+// isn't an OAuth error, on the first attempt and after a DPoP-nonce
+// retry: Error() names the media type, never the body.
+func TestBeginBackchannelAuthenticationNamesNonOAuthMediaType(t *testing.T) {
+	for name, nonceChallenge := range map[string]string{"first attempt": "", "after DPoP-nonce retry": "server-nonce-1"} {
+		t.Run(name, func(t *testing.T) {
+			c, as, _ := newTestClientWithCIBA(t)
+			as.challengeBCDPoPNonce = nonceChallenge
+			as.bcNonOAuthContentType = "text/html; charset=utf-8"
+
+			_, err := c.BeginBackchannelAuthentication(context.Background(), client.BeginBackchannelAuthenticationRequest{
+				Scope: []string{"openid"}, LoginHint: "user@example.com",
+			})
+			if err == nil {
+				t.Fatal("BeginBackchannelAuthentication = nil error, want error")
+			}
+			if msg := err.Error(); !strings.Contains(msg, `HTTP 502, with a 28-byte "text/html" body`) || strings.Contains(msg, "<html>") {
+				t.Errorf("Error() = %q, want the status and media type and no body", msg)
+			}
+		})
+	}
+}
+
+// TestPollBackchannelAuthenticationNamesNonOAuthMediaType is
+// TestBeginBackchannelAuthenticationNamesNonOAuthMediaType for a poll.
+func TestPollBackchannelAuthenticationNamesNonOAuthMediaType(t *testing.T) {
+	unavailable := cibaTokenResponse{status: http.StatusServiceUnavailable, contentType: "text/plain", raw: "upstream unavailable"}
+	challenge := cibaTokenResponse{status: http.StatusBadRequest, nonce: "server-nonce-1", body: map[string]any{"error": "use_dpop_nonce"}}
+	for name, responses := range map[string][]cibaTokenResponse{
+		"first attempt":          {unavailable},
+		"after DPoP-nonce retry": {challenge, unavailable},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, as, _ := newTestClientWithCIBA(t)
+			session := beginTestBackchannelSession(t, c)
+			as.tokenResponses = responses
+
+			_, err := c.PollBackchannelAuthentication(context.Background(), session)
+			if err == nil {
+				t.Fatal("PollBackchannelAuthentication = nil error, want error")
+			}
+			if msg := err.Error(); !strings.Contains(msg, `HTTP 503, with a 20-byte "text/plain" body`) || strings.Contains(msg, "upstream") {
+				t.Errorf("Error() = %q, want the status and media type and no body", msg)
+			}
+			if len(as.tokenResponses) != 0 {
+				t.Errorf("%d queued responses unused", len(as.tokenResponses))
+			}
+		})
 	}
 }

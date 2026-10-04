@@ -2,6 +2,7 @@ package client
 
 import (
 	"fmt"
+	"mime"
 	"net/http"
 	"strconv"
 
@@ -74,15 +75,16 @@ func newServerErrorResponse(status int, code, description, uri string) ServerErr
 // token or backchannel authentication HTTP response to a typed Error,
 // falling back to a generic message if the body isn't a well-formed
 // OAuth error response.
-func parErrorFromResponse(status int, body []byte) *Error {
+func parErrorFromResponse(status int, header http.Header, body []byte) *Error {
 	errResp, err := par.DecodeErrorResponse(body)
 	if err != nil {
 		// The body itself stays out: an HTML error page, or a proxy's
 		// echo of the request — the authorization code, the DPoP proof,
 		// the client's assertions — would otherwise reach every log the
-		// error does.
+		// error does. Its media type is enough to tell a proxy's HTML
+		// page from a gateway's plain text.
 		return newError(ErrorInvalidResponse, "authorization server returned an error",
-			fmt.Errorf("HTTP %d, with a %d-byte body that isn't an OAuth error response", status, len(body))).
+			fmt.Errorf("HTTP %d, with a %d-byte %s body that isn't an OAuth error response", status, len(body), describeContentType(header))).
 			withServerResponse(ServerErrorResponse{HTTPStatus: status})
 	}
 	resp := newServerErrorResponse(status, errResp.Code, errResp.Description, errResp.URI)
@@ -98,6 +100,25 @@ func parErrorFromResponse(status int, body []byte) *Error {
 	}
 	return newError(ErrorInvalidResponse, resp.Description, fmt.Errorf("authorization server error: %s", code)).
 		withServerResponse(resp)
+}
+
+// describeContentType names a response's media type for Error(),
+// without its parameters, quoted and cut short like a malformed error
+// code: the header is the server's text.
+func describeContentType(header http.Header) string {
+	value := header.Get("Content-Type")
+	if value == "" {
+		return "(no Content-Type)"
+	}
+	mediaType, _, err := mime.ParseMediaType(value)
+	if err != nil {
+		return "(malformed Content-Type)"
+	}
+	const maxShown = 64
+	if len(mediaType) > maxShown {
+		mediaType = mediaType[:maxShown] + "…"
+	}
+	return strconv.Quote(mediaType)
 }
 
 // resourceErrorResponse reads a protected resource's error response:

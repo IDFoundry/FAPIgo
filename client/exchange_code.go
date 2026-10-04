@@ -61,8 +61,11 @@ type TokenSet struct {
 	// TokenSetSealer keeps it, so a restored set still knows.
 	ObtainedAt time.Time
 
-	// IDToken, Subject and IDTokenClaims are set only when the granted
-	// scope included "openid". Both Subject and IDTokenClaims come from
+	// IDToken, Subject and IDTokenClaims are set when the token response
+	// carried an ID token (HasIDToken). ExchangeCode and
+	// PollBackchannelAuthentication refuse a response without one when
+	// "openid" was requested; RefreshTokens keeps the original's when a
+	// refresh returns none. Both Subject and IDTokenClaims come from
 	// the same validated ID token, never from an unverified claim.
 	// Subject is kept as its own field for backward compatibility;
 	// IDTokenClaims.Subject carries the identical value.
@@ -218,6 +221,11 @@ func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationRe
 	result, idErr := c.tokenSetFromResponse(ctx, body, resp.nonce)
 	if idErr != nil {
 		return TokenSet{}, idErr
+	}
+	// OIDC Core §3.1.3.3: a request for "openid" gets an ID token, and
+	// max_age is only met by one proving when the user authenticated.
+	if !result.HasIDToken && (resp.openID || resp.hasMaxAge) {
+		return TokenSet{}, newError(ErrorInvalidResponse, "the token response has no ID token, which an openid request requires", nil)
 	}
 	if result.HasIDToken && resp.hasMaxAge {
 		if ageErr := checkAuthenticationAge(result.IDTokenClaims.AuthTime, resp.maxAge, c.deps.Clock.Now(), c.cfg.Limits.MaxClockSkew); ageErr != nil {

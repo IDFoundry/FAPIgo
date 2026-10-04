@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -91,6 +92,9 @@ type BackchannelAuthenticationSession struct {
 	interval          time.Duration
 	expiresAt         time.Time
 	notificationToken string
+	// openID is whether the request's scope included "openid": an
+	// approval must then carry an ID token.
+	openID bool
 }
 
 // AuthReqID is the auth_req_id the authorization server issued.
@@ -247,6 +251,7 @@ func (c *Client) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		interval:          interval,
 		expiresAt:         c.deps.Clock.Now().Add(time.Duration(raw.ExpiresIn) * time.Second),
 		notificationToken: notificationToken,
+		openID:            slices.Contains(req.Scope, "openid"),
 	}, nil
 }
 
@@ -441,6 +446,9 @@ func (c *Client) PollBackchannelAuthentication(ctx context.Context, session Back
 		// own ID token with an empty nonce (server/backchannel_token.go).
 		if idErr := c.populateIDToken(ctx, &result, raw, ""); idErr != nil {
 			return nil, idErr
+		}
+		if session.openID && !result.HasIDToken {
+			return nil, newError(ErrorInvalidResponse, "the token response has no ID token, which an openid request requires", nil)
 		}
 		if raw.RefreshToken != "" {
 			result.RefreshToken = fapi.NewSecret(raw.RefreshToken)

@@ -54,3 +54,12 @@ func TestCheckAuthenticationAge(t *testing.T) {
 		t.Error("past max_age and the skew: nil error, want refusal")
 	}
 }
+
+// TestSessionRecordWithoutOpenIDField covers a record written before the
+// openid field existed: it decodes, and doesn't require an ID token.
+func TestSessionRecordWithoutOpenIDField(t *testing.T) {
+	r, err := decodeSessionRecord([]byte(`{"v":1,"pkce_verifier":"v","issuer":"https://as.example","redirect_uri":"https://rp.example/cb","response_mode":"plain"}`))
+	if err != nil || r.OpenID {
+		t.Fatalf("decodeSessionRecord(old) = %+v, %v; want OpenID false", r, err)
+	}
+}

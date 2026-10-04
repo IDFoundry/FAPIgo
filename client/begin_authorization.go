@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -566,6 +567,7 @@ func (c *Client) newSessionRecord(req BeginAuthorizationRequest, redirectURI, no
 	record := sessionRecord{
 		Nonce: nonce, PKCEVerifier: verifier, Issuer: c.cfg.Issuer.String(),
 		RedirectURI: redirectURI, ResponseMode: responseMode,
+		OpenID: slices.Contains(req.Scope, "openid"),
 	}
 	if req.HasMaxAge {
 		seconds := int64(req.MaxAge / time.Second) // as sent: whole seconds, rounded down

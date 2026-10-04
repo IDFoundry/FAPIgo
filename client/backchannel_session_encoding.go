@@ -23,6 +23,9 @@ type encodedBackchannelSession struct {
 	IntervalMillis    int64     `json:"i"`
 	ExpiresAt         time.Time `json:"e"`
 	NotificationToken string    `json:"n,omitempty"`
+	// OpenID: whether the request's scope included "openid". Absent in a
+	// session encoded before it existed, which then reads as false.
+	OpenID bool `json:"o,omitempty"`
 }
 
 // MarshalText encodes s for storage, so a session begun on one instance
@@ -43,6 +46,7 @@ func (s BackchannelAuthenticationSession) MarshalText() ([]byte, error) {
 	raw, err := json.Marshal(encodedBackchannelSession{
 		AuthReqID: s.authReqID, IntervalMillis: s.interval.Milliseconds(),
 		ExpiresAt: s.expiresAt.UTC(), NotificationToken: s.notificationToken,
+		OpenID: s.openID,
 	})
 	if err != nil {
 		return nil, newError(ErrorInternal, "failed to encode the backchannel authentication session", err)
@@ -93,5 +97,6 @@ func ParseBackchannelAuthenticationSession(text string) (BackchannelAuthenticati
 	return BackchannelAuthenticationSession{
 		authReqID: e.AuthReqID, interval: time.Duration(e.IntervalMillis) * time.Millisecond,
 		expiresAt: e.ExpiresAt, notificationToken: e.NotificationToken,
+		openID: e.OpenID,
 	}, nil
 }

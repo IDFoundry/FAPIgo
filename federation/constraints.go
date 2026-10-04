@@ -106,7 +106,10 @@ func entityIDHost(entityID string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("federation: invalid entity identifier %q: %w", entityID, err)
 	}
-	return u.Hostname(), nil
+	// Defence in depth: ValidEntityID already refuses a trailing dot,
+	// which would otherwise name the same host but escape an excluded
+	// constraint by comparing differently.
+	return strings.TrimSuffix(u.Hostname(), "."), nil
 }
 
 // domainNameConstraintMatches reports whether host satisfies constraint,

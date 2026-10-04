@@ -230,6 +230,16 @@ type ResolvedEntity struct {
 // field here is exactly one of the loop-scoped variables the original,
 // unsplit Resolve tracked directly; see each helper's own doc comment
 // for how and when it reads or mutates one.
+// foldExpiry lowers st.minExpiry to exp when exp is earlier: the Trust
+// Chain expires when the first of its statements does (OpenID Federation
+// 1.0 §10.4), Subordinate Statements included, since a superior stops
+// vouching for an entity by letting its statement about it expire.
+func (st *chainWalkState) foldExpiry(exp time.Time) {
+	if exp.Before(st.minExpiry) {
+		st.minExpiry = exp
+	}
+}
+
 type chainWalkState struct {
 	subjectID  string
 	leafClaims intfed.Claims
@@ -589,9 +599,12 @@ func (r *Resolver) finalizeTrustChain(st *chainWalkState, hop int, sup hopSuperi
 	if err != nil {
 		return ResolvedEntity{}, fmt.Errorf("federation: subordinate statement about %q from trust anchor %q: %w", st.entityAt, sup.id, err)
 	}
-	if _, err := r.verifyAgainstJWKS(st.belowStmt, aboveClaims.JWKS, st.belowIssuer, st.belowSubject, st.belowStmt.Algorithm(), now); err != nil {
+	belowClaims, err := r.verifyAgainstJWKS(st.belowStmt, aboveClaims.JWKS, st.belowIssuer, st.belowSubject, st.belowStmt.Algorithm(), now)
+	if err != nil {
 		return ResolvedEntity{}, fmt.Errorf("federation: %q's statement (issued by %q) does not match the keys vouched for it by %q: %w", st.belowSubject, st.belowIssuer, sup.id, err)
 	}
+	st.foldExpiry(aboveClaims.ExpiresAt)
+	st.foldExpiry(belowClaims.ExpiresAt)
 	if hop == 0 {
 		st.subjectJWKS = aboveClaims.JWKS
 		st.superiorMetadata = aboveClaims.Metadata
@@ -639,9 +652,11 @@ func (r *Resolver) finalizeTrustChain(st *chainWalkState, hop int, sup hopSuperi
 // (issued by sup.id, about st.entityAt) is exactly "the statement about
 // st.entityAt" that belowStmt's own verification rule calls for.
 func (r *Resolver) advanceIntermediateHop(st *chainWalkState, hop int, sup hopSuperior, now time.Time) error {
-	if _, err := r.verifyAgainstJWKS(st.belowStmt, sup.aboveStmt.ClaimedJWKS(), st.belowIssuer, st.belowSubject, st.belowStmt.Algorithm(), now); err != nil {
+	belowClaims, err := r.verifyAgainstJWKS(st.belowStmt, sup.aboveStmt.ClaimedJWKS(), st.belowIssuer, st.belowSubject, st.belowStmt.Algorithm(), now)
+	if err != nil {
 		return fmt.Errorf("federation: %q's statement (issued by %q) does not match the keys vouched for it by %q: %w", st.belowSubject, st.belowIssuer, sup.id, err)
 	}
+	st.foldExpiry(belowClaims.ExpiresAt)
 	if hop == 0 {
 		// Unverified until the next iteration verifies sup.aboveStmt's
 		// signature (as the new belowStmt) — safe to capture now for

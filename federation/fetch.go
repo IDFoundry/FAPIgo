@@ -73,6 +73,13 @@ func wellKnownURL(entityID string) (*url.URL, error) {
 	if u.User != nil {
 		return nil, fmt.Errorf("federation: entity identifier %q must not have userinfo", entityID)
 	}
+	// A host ending in "." names the same host to DNS and TLS as one
+	// without, but compares differently as a string, which would let it
+	// slip past an "excluded" naming constraint (§6.2.2) written for the
+	// usual form.
+	if strings.HasSuffix(u.Hostname(), ".") {
+		return nil, fmt.Errorf("federation: entity identifier %q must not end its host with a dot", entityID)
+	}
 	out := *u
 	out.Path = strings.TrimSuffix(u.Path, "/") + WellKnownPath
 	return &out, nil
@@ -80,7 +87,8 @@ func wellKnownURL(entityID string) (*url.URL, error) {
 
 // ValidEntityID reports whether id is a well-formed OpenID Federation
 // 1.0 §1.2 Entity Identifier — an https URL with a host, optionally a
-// port and path, and no query, fragment or userinfo. NewSelfIssuer and Resolver.Resolve both enforce this same
+// port and path, and no query, fragment, userinfo or trailing dot on the
+// host. NewSelfIssuer and Resolver.Resolve both enforce this same
 // rule on every entity ID they're given; exported so a caller
 // validating its own configured entity ID eagerly (e.g. client.Config's
 // or server.Config's own construction-time validation) can reuse the

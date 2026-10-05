@@ -89,6 +89,25 @@ attester, which client registrations never feed.
 
 `X5CAttesterChain` is unchanged.
 
+### Loopback http issuers and endpoints are refused in production (client, server, *production only*)
+
+**Affects:** a client under `Config.Assurance = AssuranceProduction`
+whose issuer or any endpoint was parsed with `fapi.AllowLoopbackHTTP`
+(plain http to 127.0.0.1, [::1] or localhost), and a server under
+production whose `Config.MTLSEndpoints` has such a URL.
+
+**Why:** `fapi.AllowLoopbackHTTP` exists for a local development
+authorization server. `server.New` already refused it under production
+for its issuer and `Config.Endpoints`, but not for the
+`mtls_endpoint_aliases` it advertises to mTLS clients, and `client.New`
+didn't apply the rule at all, so a production client could talk to its
+authorization server over plain http.
+
+**What to change:** use https issuers and endpoints in production, and
+keep `fapi.AllowLoopbackHTTP` for development configurations. A native
+app's loopback redirect URI (`Config.RedirectURI`, RFC 8252 §7.3) is
+unaffected.
+
 ## v0.49.0
 
 ### A custom access token issuer declares what it relies on (server, *production only*)

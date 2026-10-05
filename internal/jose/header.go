@@ -17,10 +17,11 @@ import (
 // "x5c", "cty") to be ignored, not rejected — the header is entirely
 // signature-covered, so an unrecognized informational member can't
 // weaken what Verify checks. The one member enforced beyond what's
-// modeled here is "crit" (RFC 7515 §4.1.11): every name it lists must
-// be one this parser actually understands and processes, or parsing
-// fails outright — an issuer marking something critical that this
-// package doesn't act on is exactly the case "crit" exists to catch.
+// modeled here is "crit" (RFC 7515 §4.1.11): this parser processes no
+// extension parameters, so a header carrying "crit" at all fails to
+// parse (see internal/critical) — an issuer marking something critical
+// that this package doesn't act on is exactly the case "crit" exists
+// to catch.
 type Header struct {
 	Algorithm fapi.SignatureAlgorithm
 	Type      string // "typ", optional
@@ -42,18 +43,14 @@ type rawHeader struct {
 	Kid  string          `json:"kid,omitempty"`
 	Jwk  json.RawMessage `json:"jwk,omitempty"`
 	X5C  json.RawMessage `json:"x5c,omitempty"`
-	Crit []string        `json:"crit,omitempty"`
+	Crit json.RawMessage `json:"crit,omitempty"`
 }
 
-// understoodHeaderParams is every JWS Header Parameter name this
-// package's Header type models and processes — the set a "crit" list
-// (RFC 7515 §4.1.11) is checked against. A name here is deliberately
-// not the same thing as "every registered JWS header parameter": this
-// package only claims to understand what it actually parses and acts
-// on above.
-var understoodHeaderParams = map[string]bool{
-	"alg": true, "typ": true, "kid": true, "jwk": true, "crit": true,
-}
+// understoodExtensionParams is every extension Header Parameter this
+// package processes — the set a "crit" list (RFC 7515 §4.1.11) may
+// name. There are none (no "b64", for one): every member Header models
+// is registered, and a registered name is never a valid "crit" entry.
+var understoodExtensionParams = map[string]bool{}
 
 func marshalHeader(h Header) ([]byte, error) {
 	if !h.Algorithm.IsValid() {
@@ -79,7 +76,7 @@ func parseHeader(data []byte) (Header, error) {
 	if err := dec.Decode(&raw); err != nil {
 		return Header{}, fmt.Errorf("jose: parse header: %w", err)
 	}
-	if err := critical.Check(raw.Crit, understoodHeaderParams); err != nil {
+	if err := critical.Check(raw.Crit, understoodExtensionParams); err != nil {
 		return Header{}, fmt.Errorf("jose: parse header: %w", err)
 	}
 	alg, err := fapi.ParseSignatureAlgorithm(raw.Alg)

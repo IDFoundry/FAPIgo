@@ -10,6 +10,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/critical"
+	"github.com/idfoundry/fapigo/internal/strictb64"
 	"github.com/idfoundry/fapigo/internal/strictjson"
 )
 
@@ -26,9 +27,9 @@ const p256CoordinateSize = 32
 // is authenticated as JWE AAD either way, so an unrecognized
 // informational member can't weaken what Decrypt checks. The one
 // member enforced beyond what's modeled here is "crit" (RFC 7516
-// §4.1.13, which inherits RFC 7515 §4.1.11's rule): every name it
-// lists must be one this parser actually understands and processes,
-// or parsing fails outright.
+// §4.1.13, which inherits RFC 7515 §4.1.11's rule): this parser
+// processes no extension parameters, so a header carrying "crit" at
+// all fails to parse (see internal/critical).
 type Header struct {
 	Algorithm   fapi.KeyManagementAlgorithm
 	Encryption  fapi.ContentEncryptionAlgorithm
@@ -43,20 +44,19 @@ type Header struct {
 }
 
 type rawHeader struct {
-	Alg  string   `json:"alg"`
-	Enc  string   `json:"enc"`
-	Cty  string   `json:"cty,omitempty"`
-	Kid  string   `json:"kid,omitempty"`
-	Epk  *rawEPK  `json:"epk,omitempty"`
-	Crit []string `json:"crit,omitempty"`
+	Alg  string          `json:"alg"`
+	Enc  string          `json:"enc"`
+	Cty  string          `json:"cty,omitempty"`
+	Kid  string          `json:"kid,omitempty"`
+	Epk  *rawEPK         `json:"epk,omitempty"`
+	Crit json.RawMessage `json:"crit,omitempty"`
 }
 
-// understoodHeaderParams is every JWE Header Parameter name this
-// package's Header type models and processes — the set a "crit" list
-// (RFC 7516 §4.1.13) is checked against.
-var understoodHeaderParams = map[string]bool{
-	"alg": true, "enc": true, "cty": true, "kid": true, "epk": true, "crit": true,
-}
+// understoodExtensionParams is every extension Header Parameter this
+// package processes — the set a "crit" list (RFC 7516 §4.1.13) may
+// name. There are none: every member Header models is registered, and
+// a registered name is never a valid "crit" entry.
+var understoodExtensionParams = map[string]bool{}
 
 // rawEPK is the wire representation of an ephemeral EC public key (RFC
 // 7518 §4.6.1.1) — kty/crv/x/y only. It carries no "use", "alg" or
@@ -92,7 +92,7 @@ func parseHeader(data []byte) (Header, error) {
 	if err := dec.Decode(&raw); err != nil {
 		return Header{}, fmt.Errorf("jwe: parse header: %w", err)
 	}
-	if err := critical.Check(raw.Crit, understoodHeaderParams); err != nil {
+	if err := critical.Check(raw.Crit, understoodExtensionParams); err != nil {
 		return Header{}, fmt.Errorf("jwe: parse header: %w", err)
 	}
 	alg, err := fapi.ParseKeyManagementAlgorithm(raw.Alg)
@@ -163,7 +163,7 @@ func decodeCoordinate(s string) (*big.Int, error) {
 	if s == "" {
 		return nil, fmt.Errorf("empty value")
 	}
-	b, err := base64.RawURLEncoding.DecodeString(s)
+	b, err := strictb64.URL(s)
 	if err != nil {
 		return nil, err
 	}

@@ -3,11 +3,11 @@ package jose
 import (
 	"bytes"
 	"crypto"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/strictb64"
 	"github.com/idfoundry/fapigo/internal/strictjson"
 )
 
@@ -118,7 +118,7 @@ func decodeX5C(x5c []string) [][]byte {
 	}
 	var out [][]byte
 	for _, entry := range x5c {
-		der, err := base64.StdEncoding.DecodeString(entry)
+		der, err := strictb64.Std(entry)
 		if err != nil {
 			continue
 		}

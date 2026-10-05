@@ -78,18 +78,24 @@ func TestParseHeaderRejectsUnknownCriticalField(t *testing.T) {
 	}
 }
 
-// TestParseHeaderAcceptsUnderstoodCriticalField confirms a "crit" list
-// naming only parameters this package does understand doesn't reject —
-// crit's job is to catch what would otherwise be silently ignored, not
-// to reject a header for expressing normal requirements.
-func TestParseHeaderAcceptsUnderstoodCriticalField(t *testing.T) {
-	data := []byte(`{"alg":"RSA-OAEP-256","enc":"A256GCM","kid":"key-1","crit":["kid"]}`)
-	h, err := parseHeader(data)
-	if err != nil {
-		t.Fatalf("parseHeader(understood crit field) = %v, want nil error", err)
-	}
-	if h.KeyID != "key-1" {
-		t.Fatalf("KeyID = %q, want %q", h.KeyID, "key-1")
+// TestParseHeaderRefusesMalformedCriticalField covers the rest of RFC
+// 7515 §4.1.11 (inherited by RFC 7516 §4.1.13): "crit" must be a
+// non-empty list of distinct extension parameter names, and the
+// registered parameters this package does process are never valid
+// entries.
+func TestParseHeaderRefusesMalformedCriticalField(t *testing.T) {
+	for name, data := range map[string]string{
+		"registered kid": `{"alg":"RSA-OAEP-256","enc":"A256GCM","kid":"key-1","crit":["kid"]}`,
+		"registered enc": `{"alg":"RSA-OAEP-256","enc":"A256GCM","crit":["enc"]}`,
+		"empty":          `{"alg":"RSA-OAEP-256","enc":"A256GCM","crit":[]}`,
+		"null":           `{"alg":"RSA-OAEP-256","enc":"A256GCM","crit":null}`,
+		"duplicate":      `{"alg":"RSA-OAEP-256","enc":"A256GCM","crit":["x","x"]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parseHeader([]byte(data)); err == nil {
+				t.Fatalf("parseHeader(%s) = nil error, want error", data)
+			}
+		})
 	}
 }
 

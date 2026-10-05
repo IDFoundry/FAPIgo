@@ -71,7 +71,7 @@ func ParseResolveResponse(token string) (ResolveResponse, error) {
 	if err != nil {
 		return ResolveResponse{}, fmt.Errorf("federation: %w", err)
 	}
-	if compact.Header.Type != resolveResponseJWTType {
+	if !jose.TypeIs(compact.Header.Type, resolveResponseJWTType) {
 		return ResolveResponse{}, ErrResolveResponseWrongType
 	}
 	claims, err := parseResolveResponseClaims(compact.Payload)

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/strictb64"
 )
 
 // DefaultMaxCompactBytes bounds how large a compact serialization
@@ -107,7 +108,7 @@ func ParseCompactMax(s string, maxBytes int) (Compact, error) {
 		return Compact{}, ErrMalformed
 	}
 
-	headerJSON, err := base64.RawURLEncoding.DecodeString(headerB64)
+	headerJSON, err := strictb64.URL(headerB64)
 	if err != nil {
 		return Compact{}, fmt.Errorf("%w: header: %v", ErrMalformed, err)
 	}
@@ -115,11 +116,11 @@ func ParseCompactMax(s string, maxBytes int) (Compact, error) {
 	if err != nil {
 		return Compact{}, err
 	}
-	payload, err := base64.RawURLEncoding.DecodeString(payloadB64)
+	payload, err := strictb64.URL(payloadB64)
 	if err != nil {
 		return Compact{}, fmt.Errorf("%w: payload: %v", ErrMalformed, err)
 	}
-	sig, err := base64.RawURLEncoding.DecodeString(sigB64)
+	sig, err := strictb64.URL(sigB64)
 	if err != nil {
 		return Compact{}, fmt.Errorf("%w: signature: %v", ErrMalformed, err)
 	}

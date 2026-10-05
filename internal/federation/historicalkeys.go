@@ -111,7 +111,7 @@ func ParseHistoricalKeysResponse(token string) (HistoricalKeysResponse, error) {
 	if err != nil {
 		return HistoricalKeysResponse{}, fmt.Errorf("federation: %w", err)
 	}
-	if compact.Header.Type != historicalKeysJWTType {
+	if !jose.TypeIs(compact.Header.Type, historicalKeysJWTType) {
 		return HistoricalKeysResponse{}, ErrHistoricalKeysWrongType
 	}
 	claims, err := parseHistoricalKeysClaims(compact.Payload)

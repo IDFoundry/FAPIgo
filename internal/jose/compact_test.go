@@ -211,24 +211,27 @@ func TestParseCompactIgnoresUnknownNonCriticalHeaderField(t *testing.T) {
 	}
 }
 
-// TestParseCompactAcceptsUnderstoodCriticalHeaderField confirms a
-// "crit" list naming only parameters this package does understand
-// doesn't reject — crit's job is to catch what would otherwise be
-// silently ignored, not to reject a header for expressing normal
-// requirements.
-func TestParseCompactAcceptsUnderstoodCriticalHeaderField(t *testing.T) {
-	// {"alg":"ES256","kid":"key-1","crit":["kid"]}
-	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256","kid":"key-1","crit":["kid"]}`))
-	payload := base64.RawURLEncoding.EncodeToString([]byte(`{}`))
-	sig := base64.RawURLEncoding.EncodeToString(make([]byte, 64))
-	token := header + "." + payload + "." + sig
-
-	compact, err := ParseCompact(token)
-	if err != nil {
-		t.Fatalf("ParseCompact with understood critical header field = %v, want nil error", err)
-	}
-	if compact.Header.KeyID != "key-1" {
-		t.Fatalf("Header.KeyID = %q, want %q", compact.Header.KeyID, "key-1")
+// TestParseCompactRefusesMalformedCriticalHeader covers the rest of RFC
+// 7515 §4.1.11 beyond unknown names: "crit" must be a non-empty list of
+// distinct extension parameter names, and the registered parameters
+// this package does process are never valid entries.
+func TestParseCompactRefusesMalformedCriticalHeader(t *testing.T) {
+	for name, header := range map[string]string{
+		"registered kid":  `{"alg":"ES256","kid":"key-1","crit":["kid"]}`,
+		"registered crit": `{"alg":"ES256","crit":["crit"]}`,
+		"empty":           `{"alg":"ES256","crit":[]}`,
+		"null":            `{"alg":"ES256","crit":null}`,
+		"duplicate":       `{"alg":"ES256","crit":["foo","foo"]}`,
+		"not an array":    `{"alg":"ES256","crit":"foo"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			token := base64.RawURLEncoding.EncodeToString([]byte(header)) + "." +
+				base64.RawURLEncoding.EncodeToString([]byte(`{}`)) + "." +
+				base64.RawURLEncoding.EncodeToString(make([]byte, 64))
+			if _, err := ParseCompact(token); err == nil {
+				t.Fatalf("ParseCompact(%s) = nil error, want error", header)
+			}
+		})
 	}
 }
 

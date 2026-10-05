@@ -6,6 +6,7 @@ import (
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -231,5 +232,37 @@ func TestParseJWKSetSkipsMalformedX5CEntry(t *testing.T) {
 	}
 	if parsed[0].Certificates != nil {
 		t.Errorf("Certificates = %v, want nil (malformed entry skipped)", parsed[0].Certificates)
+	}
+}
+
+// TestParseJWKSetSkipsNonCanonicalX5CEntry: an x5c entry is decoded
+// canonically too — one carrying a line break or non-zero unused bits,
+// which a lenient decoder would accept, is skipped like any other
+// malformed entry, while the canonical entries beside it are kept.
+func TestParseJWKSetSkipsNonCanonicalX5CEntry(t *testing.T) {
+	priv := generateEC(t)
+	jwk, err := NewJWK(&priv.PublicKey, fapi.ES256)
+	if err != nil {
+		t.Fatalf("NewJWK: %v", err)
+	}
+	certDER := []byte("stand-in DER bytes, not a real certificat") // 41 bytes: leaves unused bits
+	canonical := base64.StdEncoding.EncodeToString(certDER)
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+	unpadded := strings.TrimRight(canonical, "=")
+	if len(unpadded)%4 == 0 {
+		t.Fatalf("premise: %d-byte DER leaves no unused bits", len(certDER))
+	}
+	last := strings.IndexByte(alphabet, unpadded[len(unpadded)-1])
+	trailingBits := unpadded[:len(unpadded)-1] + string(alphabet[last|1]) + canonical[len(unpadded):]
+
+	entry := rawKeySetEntry(t, jwk.WithKeyID("ec-kid"), map[string]any{
+		"x5c": []string{canonical[:8] + "\n" + canonical[8:], trailingBits, canonical},
+	})
+	parsed, err := ParseJWKSet(jwkSetBody(t, entry))
+	if err != nil {
+		t.Fatalf("ParseJWKSet: %v", err)
+	}
+	if len(parsed) != 1 || len(parsed[0].Certificates) != 1 || string(parsed[0].Certificates[0]) != string(certDER) {
+		t.Fatalf("Certificates = %q, want only the canonical entry", parsed[0].Certificates)
 	}
 }

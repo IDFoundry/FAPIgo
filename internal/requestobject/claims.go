@@ -3,8 +3,9 @@ package requestobject
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
+
+	"github.com/idfoundry/fapigo/internal/jose"
 )
 
 // jwtType is the JWS "typ" header value Create always sets on a request
@@ -30,8 +31,7 @@ const jwtType = "oauth-authz-req+jwt"
 // randomized-case "typ" for exactly this reason (JAR-4) — a naive exact
 // comparison rejects a spec-compliant request object.
 func isRequestObjectType(typ string) bool {
-	typ = strings.TrimPrefix(strings.ToLower(typ), "application/")
-	return typ == jwtType
+	return jose.TypeIs(typ, jwtType)
 }
 
 // Claims is a parsed request object payload. iss, aud and exp are the

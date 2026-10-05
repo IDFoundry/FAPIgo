@@ -29,6 +29,9 @@ func Parse(token string) (Response, error) {
 	if err != nil {
 		return Response{}, fmt.Errorf("jarm: %w", err)
 	}
+	if err := jose.RefuseOtherExplicitType(compact.Header.Type); err != nil {
+		return Response{}, fmt.Errorf("jarm: %w", err)
+	}
 	claims, err := parseClaims(compact.Payload)
 	if err != nil {
 		return Response{}, err

@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/strictb64"
 )
 
 // cekSizeA256GCM is the content-encryption key size in bytes for
@@ -410,7 +411,7 @@ func Decrypt(ctx context.Context, req DecryptRequest) (DecryptResult, error) {
 		}
 	}
 
-	headerJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
+	headerJSON, err := strictb64.URL(parts[0])
 	if err != nil {
 		return DecryptResult{}, fmt.Errorf("%w: header: %v", ErrMalformed, err)
 	}
@@ -422,19 +423,19 @@ func Decrypt(ctx context.Context, req DecryptRequest) (DecryptResult, error) {
 		return DecryptResult{}, ErrAlgorithmMismatch
 	}
 
-	encryptedKey, err := base64.RawURLEncoding.DecodeString(parts[1])
+	encryptedKey, err := strictb64.URL(parts[1])
 	if err != nil {
 		return DecryptResult{}, fmt.Errorf("%w: encrypted key: %v", ErrMalformed, err)
 	}
-	iv, err := base64.RawURLEncoding.DecodeString(parts[2])
+	iv, err := strictb64.URL(parts[2])
 	if err != nil {
 		return DecryptResult{}, fmt.Errorf("%w: iv: %v", ErrMalformed, err)
 	}
-	ciphertext, err := base64.RawURLEncoding.DecodeString(parts[3])
+	ciphertext, err := strictb64.URL(parts[3])
 	if err != nil {
 		return DecryptResult{}, fmt.Errorf("%w: ciphertext: %v", ErrMalformed, err)
 	}
-	tag, err := base64.RawURLEncoding.DecodeString(parts[4])
+	tag, err := strictb64.URL(parts[4])
 	if err != nil {
 		return DecryptResult{}, fmt.Errorf("%w: tag: %v", ErrMalformed, err)
 	}

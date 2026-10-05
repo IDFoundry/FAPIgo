@@ -63,7 +63,7 @@ func ParseTrustMarkStatusResponse(token string) (TrustMarkStatusResponse, error)
 	if err != nil {
 		return TrustMarkStatusResponse{}, fmt.Errorf("federation: %w", err)
 	}
-	if compact.Header.Type != trustMarkStatusResponseJWTType {
+	if !jose.TypeIs(compact.Header.Type, trustMarkStatusResponseJWTType) {
 		return TrustMarkStatusResponse{}, ErrTrustMarkStatusResponseWrongType
 	}
 	claims, err := parseTrustMarkStatusResponseClaims(compact.Payload)

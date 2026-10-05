@@ -110,6 +110,15 @@ keep `fapi.AllowLoopbackHTTP` for development configurations. A native
 app's loopback redirect URI (`Config.RedirectURI`, RFC 8252 §7.3) is
 unaffected.
 
+The same goes for `fapihttp`'s loopback exceptions (`AllowLoopbackHosts`,
+`AllowLoopbackHTTP`, `AllowedLoopbackHosts`, reported by their configs'
+`AllowsLoopback`): a `keys.JWKSIssuerKeySource` whose `*fapihttp.Client`
+grants one no longer declares `LiveFetchHardened`, a
+`backchannelhttp.Notifier` whose `Config.Transport` grants one no longer
+declares `OutboundHardened`, and `server.New` refuses a
+`Dependencies.FederationHTTP` with one — each under production only.
+`AllowedPrivateHosts` is unaffected.
+
 ### A CIBA notifier declares how it sends (server, *production only*)
 
 **Affects:** a server under `Config.Assurance = AssuranceProduction`
@@ -125,7 +134,8 @@ follow redirects, or hang. `New` checked every other outbound extension
 point under production, but couldn't see how a notifier sends.
 
 **What to change:** use `backchannelhttp.New`, which sends through
-`fapihttp`'s guarded client. Or implement
+`fapihttp`'s guarded client (with no loopback exception in its
+`Config.Transport`). Or implement
 `server.BackchannelNotifierAssurance` on your notifier and declare
 `OutboundHardened`, which promises it sends the same way: a dialer that
 refuses non-public addresses, no redirects, https, timeouts and a
@@ -166,7 +176,8 @@ fetch issuer keys through an unhardened source, and nothing said so.
 - *Production only:* `resource.AssuranceProduction` requires:
   - the issuer key source of `resource.JWTAccessTokens` to implement
     `keys.KeySourceAssurance` and declare `LiveFetchHardened`.
-    `keys.JWKSIssuerKeySource` and `keys.LocalIssuerKeys` do.
+    `keys.JWKSIssuerKeySource` (on a `fapihttp` client without a loopback
+    exception) and `keys.LocalIssuerKeys` do.
   - the `resource.OpaqueAccessTokens` store and the revocation checker
     to implement `storage.StoreAssurance` and declare `Durable`. Pass
     `resource.NoRevocation{}` to decline revocation explicitly instead.

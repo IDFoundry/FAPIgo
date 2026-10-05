@@ -76,27 +76,39 @@ func TestJWKSIssuerKeySourceResolvesKeyByAlgorithm(t *testing.T) {
 
 // TestJWKSIssuerKeySourceDeclaresLiveFetchHardened covers
 // JWKSIssuerKeySource's own keys.KeySourceAssurance implementation:
-// NewJWKSIssuerKeySource requires a non-nil fetcher (*fapihttp.Client),
-// so every live fetch this type performs is unconditionally hardened —
-// Capabilities() must say so unconditionally too.
+// every live fetch goes through its *fapihttp.Client, so it declares
+// LiveFetchHardened — unless that client grants a loopback exception,
+// which is for local development only. AllowedPrivateHosts names an
+// operator's own hosts and doesn't count.
 func TestJWKSIssuerKeySourceDeclaresLiveFetchHardened(t *testing.T) {
-	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"keys":[]}`)
-	}))
-	defer ts.Close()
-
-	jwksURI, err := fapi.ParseEndpointURL(ts.URL + "/jwks")
+	jwksURI, err := fapi.ParseEndpointURL("https://issuer.example.com/jwks")
 	if err != nil {
 		t.Fatalf("ParseEndpointURL: %v", err)
 	}
-	src, err := keys.NewJWKSIssuerKeySource(newTestFetcherTLS(t, ts), jwksURI, time.Minute)
-	if err != nil {
-		t.Fatalf("NewJWKSIssuerKeySource: %v", err)
-	}
-
-	if got := src.Capabilities(); !got.LiveFetchHardened {
-		t.Errorf("Capabilities() = %+v, want LiveFetchHardened", got)
+	for name, tc := range map[string]struct {
+		cfg  fapihttp.Config
+		want bool
+	}{
+		"no exceptions":          {fapihttp.Config{}, true},
+		"allowed private hosts":  {fapihttp.Config{AllowedPrivateHosts: []string{"keys.internal"}}, true},
+		"allow loopback hosts":   {fapihttp.Config{AllowLoopbackHosts: true}, false},
+		"allow loopback http":    {fapihttp.Config{AllowLoopbackHTTP: true}, false},
+		"allowed loopback hosts": {fapihttp.Config{AllowedLoopbackHosts: []string{"suite.example.com"}}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tc.cfg.MaxResponseBytes, tc.cfg.RequestTimeout = 1<<16, time.Second
+			fetcher, err := fapihttp.New(&http.Client{}, tc.cfg)
+			if err != nil {
+				t.Fatalf("fapihttp.New: %v", err)
+			}
+			src, err := keys.NewJWKSIssuerKeySource(fetcher, jwksURI, time.Minute)
+			if err != nil {
+				t.Fatalf("NewJWKSIssuerKeySource: %v", err)
+			}
+			if got := src.Capabilities().LiveFetchHardened; got != tc.want {
+				t.Fatalf("Capabilities().LiveFetchHardened = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

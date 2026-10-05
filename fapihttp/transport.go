@@ -38,6 +38,13 @@ type TransportConfig struct {
 	AllowedPrivateHosts []string
 }
 
+// AllowsLoopback reports whether c grants any of its loopback
+// exceptions — AllowLoopbackHosts, AllowLoopbackHTTP or a non-empty
+// AllowedLoopbackHosts — the same rule as Config.AllowsLoopback.
+func (c TransportConfig) AllowsLoopback() bool {
+	return c.AllowLoopbackHosts || c.AllowLoopbackHTTP || len(c.AllowedLoopbackHosts) > 0
+}
+
 // NewClient builds an *http.Client whose Transport resolves each host
 // itself and validates every candidate address before dialing it —
 // rejecting loopback (unless the loopback fields permit the host), private, link-local,

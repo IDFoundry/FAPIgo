@@ -31,6 +31,15 @@ type AuthorizationCodeAlreadyRedeemedError struct {
 	// "offline_access") and RecordIssuedRefreshToken was called for it
 	// — nil otherwise.
 	IssuedRefreshTokenHash *[32]byte
+
+	// ClientID is the client the code was issued to
+	// (NewAuthorizationCode.ClientID). The server revokes the original
+	// redemption's tokens only when the client presenting the code again
+	// is that client: a different client holding a leaked code must not
+	// be able to revoke another client's tokens. Set it; a store that
+	// leaves it empty gets the old behaviour, revoking whoever presents
+	// the code.
+	ClientID fapi.ClientID
 }
 
 func (e *AuthorizationCodeAlreadyRedeemedError) Error() string {

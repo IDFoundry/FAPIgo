@@ -2,6 +2,8 @@ package memstore
 
 import (
 	"context"
+	"crypto/sha256"
+	"errors"
 	"testing"
 	"time"
 
@@ -127,5 +129,27 @@ func TestClientRepositoryEmpty(t *testing.T) {
 
 	if _, err := repo.ResolveClient(context.Background(), "client-1"); err == nil {
 		t.Fatal("ResolveClient on empty repository = nil error, want error")
+	}
+}
+
+// TestGrantStoreReportsTheReusedCodesClient covers ClientID on
+// AuthorizationCodeAlreadyRedeemedError, which the server uses to revoke
+// only when the code's own client reuses it.
+func TestGrantStoreReportsTheReusedCodesClient(t *testing.T) {
+	store := NewGrantStore()
+	ctx := context.Background()
+	hash := sha256.Sum256([]byte("code"))
+	if err := store.CreateAuthorizationCode(ctx, storage.NewAuthorizationCode{
+		CodeHash: hash, ClientID: "client-1", ExpiresAt: time.Now().Add(time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.RedeemAuthorizationCode(ctx, storage.AuthorizationCodeRedemption{CodeHash: hash}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := store.RedeemAuthorizationCode(ctx, storage.AuthorizationCodeRedemption{CodeHash: hash})
+	var reused *storage.AuthorizationCodeAlreadyRedeemedError
+	if !errors.As(err, &reused) || reused.ClientID != "client-1" {
+		t.Fatalf("reuse error = %v, want ClientID client-1", err)
 	}
 }

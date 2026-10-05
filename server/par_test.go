@@ -194,6 +194,10 @@ type fakeGrantStore struct {
 
 	// failRevokeRefresh, if set, is what RevokeRefreshToken returns.
 	failRevokeRefresh error
+
+	// omitReuseClientID leaves AuthorizationCodeAlreadyRedeemedError's
+	// ClientID empty, as a store that doesn't set it would.
+	omitReuseClientID bool
 }
 
 func (f *fakeGrantStore) CreateAuthorizationCode(_ context.Context, code storage.NewAuthorizationCode) error {
@@ -216,6 +220,10 @@ func (f *fakeGrantStore) RedeemAuthorizationCode(_ context.Context, redemption s
 	if f.redeemed[redemption.CodeHash] {
 		err := &storage.AuthorizationCodeAlreadyRedeemedError{
 			IssuedAccessTokenKey: f.codeAccessKey[redemption.CodeHash],
+			ClientID:             f.byHash[redemption.CodeHash].ClientID,
+		}
+		if f.omitReuseClientID {
+			err.ClientID = ""
 		}
 		if hash, ok := f.codeRefreshHash[redemption.CodeHash]; ok {
 			h := hash

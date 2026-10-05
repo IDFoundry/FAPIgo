@@ -216,9 +216,15 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		// only has something to act on if RecordIssuedAccessToken/
 		// RecordIssuedRefreshToken were actually called for the
 		// original redemption — see AuthorizationCodeAlreadyRedeemedError's
-		// own doc comment for when that's the case.
-		s.revokeTokensForReusedCode(ctx, err)
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorInvalidGrant, 400, "code is invalid, expired, or already used", err))
+		// own doc comment for when that's the case. Only the client the
+		// code was issued to triggers the revocation: another client
+		// holding a leaked code must not be able to end its tokens.
+		invalidErr := newError(ErrorInvalidGrant, 400, "code is invalid, expired, or already used", err)
+		if s.revokeTokensForReusedCode(ctx, err, client.ID()) {
+			s.audit(ctx, AuditEventExchangeAuthorizationCode, client.ID(), AuditOutcomeFailure, "code reused by another client")
+			return TokenResult{}, invalidErr
+		}
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), invalidErr)
 	}
 
 	grant, err := decodeGrantRecord(redeemed.Grant)
@@ -310,10 +316,18 @@ func codeExchangeParameters(params map[string]string) (code, redirectURI, codeVe
 // storage.AuthorizationCodeAlreadyRedeemedError; a no-op for any other
 // error. Split out of ExchangeAuthorizationCode purely to keep that
 // method's own cognitive complexity manageable.
-func (s *Server) revokeTokensForReusedCode(ctx context.Context, err error) {
+//
+// It revokes only when presentedBy is the client the code was issued to,
+// or the store didn't say which client that was (an empty ClientID),
+// and reports true when it declined because another client presented
+// the code.
+func (s *Server) revokeTokensForReusedCode(ctx context.Context, err error, presentedBy fapi.ClientID) (crossClient bool) {
 	var alreadyRedeemed *storage.AuthorizationCodeAlreadyRedeemedError
 	if !errors.As(err, &alreadyRedeemed) {
-		return
+		return false
+	}
+	if alreadyRedeemed.ClientID != "" && alreadyRedeemed.ClientID != presentedBy {
+		return true
 	}
 	if alreadyRedeemed.IssuedAccessTokenKey != "" {
 		_ = s.deps.Revocation.Revoke(ctx, alreadyRedeemed.IssuedAccessTokenKey, s.deps.Clock.Now().Add(s.cfg.Limits.AccessTokenLifetime))
@@ -321,6 +335,7 @@ func (s *Server) revokeTokensForReusedCode(ctx context.Context, err error) {
 	if alreadyRedeemed.IssuedRefreshTokenHash != nil {
 		_ = s.deps.Grants.RevokeRefreshToken(ctx, *alreadyRedeemed.IssuedRefreshTokenHash)
 	}
+	return false
 }
 
 // issueOptionalIDToken issues an ID token and records it onto result

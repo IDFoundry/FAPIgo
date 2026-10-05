@@ -132,7 +132,7 @@ func (s *memGrantStore) RedeemAuthorizationCode(_ context.Context, redemption st
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.codeRedeemed[redemption.CodeHash] {
-		err := &storage.AuthorizationCodeAlreadyRedeemedError{IssuedAccessTokenKey: s.codeAccessKey[redemption.CodeHash]}
+		err := &storage.AuthorizationCodeAlreadyRedeemedError{IssuedAccessTokenKey: s.codeAccessKey[redemption.CodeHash], ClientID: s.codes[redemption.CodeHash].ClientID}
 		if hash, ok := s.codeRefreshHash[redemption.CodeHash]; ok {
 			h := hash
 			err.IssuedRefreshTokenHash = &h

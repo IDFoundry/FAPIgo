@@ -231,6 +231,15 @@ case server.LocalErrorResponse:
 }
 ```
 
+Treat the request_uri in the authorization URL as a bearer value
+until the interaction completes: whoever holds it can begin the
+client's authorization, and complete it as themselves (FAPI 2.0
+Security Profile §6.4). `BeginAuthorization` accepts it more than once,
+so a reload or a browser's prefetch doesn't use it up, but only one
+interaction for it can complete. Serve the login page with
+`Referrer-Policy: no-referrer` and no third-party scripts or images,
+and don't log full `/authorize` URLs.
+
 Once you've actually authenticated the user (checked their password,
 verified their SSO assertion, whatever), conclude the interaction:
 

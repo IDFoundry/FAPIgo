@@ -250,7 +250,7 @@ func New(t *testing.T, cfg Config) *Harness {
 		t.Fatalf("fapitest: NewRegisteredClient: %v", err)
 	}
 
-	replay := newMemReplayStore()
+	replay := memstore.NewReplayStore()
 
 	// Start the HTTP listener before building server.Config: its endpoint
 	// URLs must be the httptest.Server's real, assigned-port URL (DPoP's
@@ -291,15 +291,15 @@ func New(t *testing.T, cfg Config) *Harness {
 		OAuthOnly:              cfg.OAuthOnly,
 	}
 	applyServerIDTokenOptions(&srvCfg, cfg, contentEncryption)
-	revocation := newMemRevocationStore()
+	revocation := memstore.NewRevocationStore()
 	jwtAccessTokens, err := server.NewJWTAccessTokens(asKeys, sigAlg)
 	if err != nil {
 		t.Fatalf("fapitest: server.NewJWTAccessTokens: %v", err)
 	}
 	srvDeps := server.Dependencies{
 		Clients:                &memClientRepository{client: registeredClient},
-		Transactions:           newMemTransactionStore(),
-		Grants:                 newMemGrantStore(),
+		Transactions:           memstore.NewTransactionStore(),
+		Grants:                 memstore.NewGrantStore(),
 		Replay:                 replay,
 		ClientKeys:             &memClientKeySource{clientID: ClientID, manager: clientKeys},
 		Keys:                   asKeys,

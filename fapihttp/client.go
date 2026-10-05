@@ -104,6 +104,17 @@ type Config struct {
 	AllowedPrivateHosts []string
 }
 
+// AllowsLoopback reports whether c grants any of its loopback
+// exceptions — AllowLoopbackHosts, AllowLoopbackHTTP or a non-empty
+// AllowedLoopbackHosts — which are for local development only. A
+// source that fetches through a Client with one of them must not
+// declare itself hardened for production (see keys.KeySourceCapabilities'
+// LiveFetchHardened). AllowedPrivateHosts is not counted: it names an
+// operator's own fixed hosts and keeps every other address check.
+func (c Config) AllowsLoopback() bool {
+	return c.AllowLoopbackHosts || c.AllowLoopbackHTTP || len(c.AllowedLoopbackHosts) > 0
+}
+
 // Client performs hardened GET fetches for discovery documents, JWKS
 // documents, and similar security-sensitive resources — the recommended
 // building block for an embedder's own ClientKeySource or
@@ -381,6 +392,12 @@ func (c *Client) resolveRedirect(ctx context.Context, current *url.URL, location
 		return nil, err
 	}
 	return next, nil
+}
+
+// AllowsLoopback reports whether c was built with a loopback exception
+// in its Config (see Config.AllowsLoopback).
+func (c *Client) AllowsLoopback() bool {
+	return c.cfg.AllowsLoopback()
 }
 
 // validateFetchURL checks u's scheme/host shape and makes a best-effort

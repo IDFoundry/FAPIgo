@@ -614,7 +614,12 @@ func checkProductionClientSources(deps Dependencies, scaled, attestation bool) e
 		}
 	}
 	if attesterKeys := registeredAttesterKeySource(deps.AttesterTrust); attestation && attesterKeys != nil {
-		return checkKeySourceAssurance("attester_trust keys", attesterKeys)
+		if err := checkKeySourceAssurance("attester_trust keys", attesterKeys); err != nil {
+			return err
+		}
+	}
+	if deps.FederationHTTP != nil && deps.FederationHTTP.AllowsLoopback() {
+		return fmt.Errorf("server: dependencies: federation_http must not grant a loopback exception under AssuranceProduction")
 	}
 	return nil
 }

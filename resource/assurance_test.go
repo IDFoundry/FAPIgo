@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/fapihttp"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/storage"
@@ -267,6 +269,46 @@ func TestNewVerifierProductionRefuses(t *testing.T) {
 			_, err := resource.NewVerifier(cfg, deps)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("NewVerifier = %v, want an error containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestNewVerifierProductionRefusesLoopbackJWKSFetcher: a
+// keys.JWKSIssuerKeySource fetching through a fapihttp client with a
+// loopback exception doesn't declare LiveFetchHardened, so production
+// refuses it; the same source without one passes.
+func TestNewVerifierProductionRefusesLoopbackJWKSFetcher(t *testing.T) {
+	for name, tc := range map[string]struct {
+		cfg     fapihttp.Config
+		refused bool
+	}{
+		"no exceptions":       {fapihttp.Config{}, false},
+		"allow loopback http": {fapihttp.Config{AllowLoopbackHTTP: true}, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tc.cfg.MaxResponseBytes, tc.cfg.RequestTimeout = 1<<16, time.Second
+			fetcher, err := fapihttp.New(&http.Client{}, tc.cfg)
+			if err != nil {
+				t.Fatalf("fapihttp.New: %v", err)
+			}
+			jwksURI, err := fapi.ParseEndpointURL("https://issuer.example.com/jwks")
+			if err != nil {
+				t.Fatalf("ParseEndpointURL: %v", err)
+			}
+			source, err := keys.NewJWKSIssuerKeySource(fetcher, jwksURI, time.Minute)
+			if err != nil {
+				t.Fatalf("NewJWKSIssuerKeySource: %v", err)
+			}
+			cfg, deps := productionSetup(t)
+			deps.AccessTokens = jwtResolver(t, source)
+			_, err = resource.NewVerifier(cfg, deps)
+			if tc.refused {
+				if err == nil || !strings.Contains(err.Error(), "LiveFetchHardened") {
+					t.Fatalf("NewVerifier(production, JWKS source with %s) error = %v, want it refused", name, err)
+				}
+			} else if err != nil {
+				t.Fatalf("NewVerifier(production, JWKS source with %s): %v", name, err)
 			}
 		})
 	}

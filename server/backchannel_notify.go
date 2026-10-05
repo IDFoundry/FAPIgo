@@ -131,8 +131,9 @@ type BackchannelNotifierCapabilities struct {
 	// rebinding can't get around it), that never follows a redirect,
 	// requires https, bounds the dial, TLS handshake and whole call with
 	// timeouts, and reads at most a bounded amount of the response body.
-	// fapihttp.NewClient builds such a client; any loopback or
-	// private-host exception its TransportConfig grants is the
+	// fapihttp.NewClient builds such a client; one whose
+	// TransportConfig grants a loopback exception (AllowsLoopback) is
+	// not hardened, while an AllowedPrivateHosts entry is the
 	// deployment's own explicit choice.
 	OutboundHardened bool
 }

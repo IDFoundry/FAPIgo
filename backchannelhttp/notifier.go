@@ -45,8 +45,9 @@ type Config struct {
 // Notifier is a server.BackchannelNotifier that sends every notification
 // through an http-supplied transport. Construct one with New.
 type Notifier struct {
-	http    fapihttp.HTTPClient
-	timeout time.Duration
+	http     fapihttp.HTTPClient
+	timeout  time.Duration
+	hardened bool
 }
 
 // New returns a Notifier that sends every notification through an
@@ -60,22 +61,29 @@ func New(cfg Config) (*Notifier, error) {
 	if err != nil {
 		return nil, fmt.Errorf("backchannelhttp: config: %w", err)
 	}
-	return newWithClient(client, cfg.Timeout), nil
+	n := newWithClient(client, cfg.Timeout)
+	n.hardened = !cfg.Transport.AllowsLoopback()
+	return n, nil
 }
 
+// newWithClient returns a Notifier over an arbitrary client, which it
+// can't vouch for: it doesn't declare OutboundHardened.
 func newWithClient(client fapihttp.HTTPClient, timeout time.Duration) *Notifier {
 	return &Notifier{http: client, timeout: timeout}
 }
 
 // BackchannelNotifierCapabilities implements
-// server.BackchannelNotifierAssurance: a Notifier always sends through
-// the fapihttp client New builds from Config.Transport (SSRF-guarded
-// dialing, no redirects, https, dial and handshake timeouts, with only
-// the loopback and private-host exceptions Config.Transport grants),
-// bounded by Config.Timeout, and drains at most a bounded amount of
-// the response body.
-func (*Notifier) BackchannelNotifierCapabilities() server.BackchannelNotifierCapabilities {
-	return server.BackchannelNotifierCapabilities{OutboundHardened: true}
+// server.BackchannelNotifierAssurance: a Notifier sends through the
+// fapihttp client New builds from Config.Transport (SSRF-guarded
+// dialing, no redirects, https, dial and handshake timeouts), bounded
+// by Config.Timeout, and drains at most a bounded amount of the
+// response body. It declares OutboundHardened unless Config.Transport
+// grants a loopback exception (fapihttp.TransportConfig's
+// AllowsLoopback), which is for local development only: a client
+// registers its own notification endpoint. AllowedPrivateHosts doesn't
+// count — it names the operator's own fixed hosts.
+func (n *Notifier) BackchannelNotifierCapabilities() server.BackchannelNotifierCapabilities {
+	return server.BackchannelNotifierCapabilities{OutboundHardened: n.hardened}
 }
 
 // Notify implements server.BackchannelNotifier: it builds the request via

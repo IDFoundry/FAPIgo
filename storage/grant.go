@@ -134,16 +134,17 @@ type GrantStore interface {
 	// which token was issued the first time (RFC 6749 §4.1.2). Called
 	// once, right after a successful redemption issues its access
 	// token. A no-op implementation (return nil, remember nothing) is
-	// entirely valid for a deployment that doesn't support revocation
-	// — costs nothing to implement, and RedeemAuthorizationCode's
-	// reuse error just always carries an empty IssuedAccessTokenKey in
-	// that case.
+	// tolerated: RedeemAuthorizationCode's reuse error then always
+	// carries an empty IssuedAccessTokenKey, the reused code is still
+	// refused, but the tokens its first redemption issued can't be
+	// revoked (RFC 6749 §4.1.2 says they should be).
 	RecordIssuedAccessToken(ctx context.Context, codeHash [32]byte, key string, expiresAt time.Time) error
 
 	// RecordIssuedRefreshToken is RecordIssuedAccessToken's counterpart
 	// for the refresh token issued alongside it, when one is (the
-	// authorization included "offline_access"). Same no-op-able
-	// contract.
+	// authorization included "offline_access"). Same contract: a no-op
+	// is tolerated, at the cost of a reused code's refresh token
+	// staying usable.
 	RecordIssuedRefreshToken(ctx context.Context, codeHash [32]byte, refreshTokenHash [32]byte, expiresAt time.Time) error
 
 	CreateRefreshToken(ctx context.Context, token NewRefreshToken) error
@@ -165,10 +166,13 @@ type GrantStore interface {
 
 	// RevokeRefreshToken marks a previously-created refresh token (by
 	// the same hash CreateRefreshToken stored it under) as no longer
-	// redeemable — used when its originating authorization code is
-	// detected being reused (RFC 6749 §4.1.2's "all tokens"). A
-	// subsequent RedeemRefreshToken for tokenHash must fail. A no-op
-	// implementation is valid for a deployment that doesn't support
-	// revocation, the same as RecordIssuedAccessToken.
+	// redeemable. The server relies on it when its originating
+	// authorization code is detected being reused (RFC 6749 §4.1.2's
+	// "all tokens") and in Server.RevokeToken (RFC 7009), which reports
+	// the token revoked once this returns nil. A subsequent
+	// RedeemRefreshToken for tokenHash must fail; a no-op
+	// implementation is NOT valid — it would let RevokeToken report a
+	// token revoked that still works. Return an error if the
+	// revocation can't be recorded.
 	RevokeRefreshToken(ctx context.Context, tokenHash [32]byte) error
 }

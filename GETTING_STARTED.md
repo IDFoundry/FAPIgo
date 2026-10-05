@@ -582,7 +582,11 @@ which silently returns only the first of several duplicate headers.
 with: an access token bound to a certificate (RFC 8705) is refused
 without it. The constructor reads it from `r.TLS`; behind a proxy that
 terminates TLS, set it afterwards from however the proxy forwards the
-certificate.
+certificate. Take it only from your own proxy, over a hop clients can't
+reach, and have the proxy remove any copy of that header a client sent: a
+certificate is public, and only the TLS handshake proves the client holds
+its key, so a header a client can set lets anyone present a stolen
+certificate-bound token.
 
 That's the whole surface: `resource.Verifier` has no other public entry
 point. Everything above `Verify` — routing, and what the protected API

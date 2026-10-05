@@ -31,6 +31,57 @@ func Message(pkg, code, description string, cause error) string {
 	return fmt.Sprintf("%s: %s: %s", pkg, code, description)
 }
 
+// IsErrorText reports whether s is 1*NQSCHAR, the grammar RFC 6749
+// §5.2 (and RFC 6750 §3) gives "error" and "error_description":
+// %x20-21 / %x23-5B / %x5D-7E.
+func IsErrorText(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c < 0x20 || c == 0x22 || c == 0x5C || c > 0x7E {
+			return false
+		}
+	}
+	return true
+}
+
+// IsErrorStatus reports whether status is a 4xx or 5xx HTTP status,
+// the only kind an error response may carry.
+func IsErrorStatus(status int) bool {
+	return status >= 400 && status <= 599
+}
+
+// Normalize is the validation behind a role's exported NewError: an
+// error code outside RFC 6749 §5.2's character set (or empty, unless
+// allowEmptyCode) or a status that isn't 4xx/5xx makes the error a 500
+// server_error, so a caller's mistake can neither inject into a
+// WWW-Authenticate challenge nor panic in http.ResponseWriter's
+// WriteHeader; a description outside the same character set is
+// dropped.
+func Normalize(code string, status int, description string, allowEmptyCode bool) (string, int, string) {
+	if description != "" && !IsErrorText(description) {
+		description = ""
+	}
+	codeOK := IsErrorText(code) || (code == "" && allowEmptyCode)
+	if !codeOK || !IsErrorStatus(status) {
+		return "server_error", 500, description
+	}
+	return code, status, description
+}
+
+// Status returns status, or 500 if it isn't a 4xx/5xx error status —
+// so an *Error that never went through a validating constructor (a
+// zero value) still writes a response instead of panicking in
+// WriteHeader.
+func Status(status int) int {
+	if !IsErrorStatus(status) {
+		return 500
+	}
+	return status
+}
+
 // WriteJSON writes a role's own error as a complete JSON error response
 // to w: the DPoP-Nonce header when nonce is non-empty (RFC 9449 §8),
 // the WWW-Authenticate header when challengeScheme is non-empty (RFC
@@ -50,7 +101,7 @@ func WriteJSON(w http.ResponseWriter, nonce, challengeScheme, code, description 
 		w.Header().Set("WWW-Authenticate", challengeScheme+` error="`+code+`"`)
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(httpStatus)
+	w.WriteHeader(Status(httpStatus))
 	// Encoding two plain strings cannot fail.
 	_ = json.NewEncoder(w).Encode(struct {
 		Error            string `json:"error"`

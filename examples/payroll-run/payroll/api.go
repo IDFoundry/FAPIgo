@@ -100,11 +100,11 @@ func (a *api) submit(w http.ResponseWriter, r *http.Request) {
 	}
 	if problem := withinGrant(authz.Claims[extension.AuthorizationDetailsClaim], b, total); problem != "" {
 		// RFC 6750 §3: error_description is printable ASCII, so no "€".
-		resource.NewError(resource.ErrorInsufficientScope, http.StatusForbidden, problem).WriteJSON(w)
+		resource.NewInsufficientScopeError(authz, problem).WriteJSON(w)
 		return
 	}
 	if !a.useOnce(r.Context(), authz) {
-		resource.NewError(resource.ErrorInsufficientScope, http.StatusForbidden, "this token was for one payroll batch, and it has been paid").WriteJSON(w)
+		resource.NewInsufficientScopeError(authz, "this token was for one payroll batch, and it has been paid").WriteJSON(w)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

@@ -149,8 +149,15 @@ func newError(code ErrorCode, httpStatus int, description string, cause error) *
 // itself uses — there is no underlying error to wrap for a failure the
 // caller diagnosed directly, and Error's own doc comment already
 // forbids putting anything but PublicDescription in a response body.
+//
+// code must be RFC 6749 §5.2 error text (printable ASCII without a
+// double quote or backslash) and httpStatus a 4xx or 5xx status; otherwise the result is
+// a 500 server_error instead, so a mistake here can't produce a
+// malformed response or panic when written. A description outside the
+// same character set is dropped.
 func NewError(code ErrorCode, httpStatus int, description string) *Error {
-	return &Error{code: code, httpStatus: httpStatus, description: description}
+	c, status, desc := httperror.Normalize(string(code), httpStatus, description, false)
+	return &Error{code: ErrorCode(c), httpStatus: status, description: desc}
 }
 
 // Code returns the OAuth error code.

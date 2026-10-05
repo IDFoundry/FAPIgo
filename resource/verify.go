@@ -100,6 +100,10 @@ type AuthorizationContext struct {
 	// Always "" when Dependencies.Nonces is nil (nonce-challenge support
 	// disabled); otherwise always populated on a successful Verify.
 	NextDPoPNonce string
+
+	// usedDPoP records that the request presented its token with the
+	// DPoP scheme, so NewInsufficientScopeError can answer in kind.
+	usedDPoP bool
 }
 
 // Verify checks req's Authorization header and its sender-constraining
@@ -189,6 +193,7 @@ func (v *Verifier) verify(ctx context.Context, req VerifyRequest) (Authorization
 		Audience:      resolved.Audience,
 		IssuedAt:      resolved.IssuedAt,
 		NextDPoPNonce: nextNonce,
+		usedDPoP:      usedDPoP,
 	}, usedDPoP, nil
 }
 
@@ -237,11 +242,12 @@ func (v *Verifier) resolveAccessToken(ctx context.Context, raw string, now time.
 		// this method's) — propagate it unchanged. A bare error (a
 		// third-party AccessTokenResolver that didn't follow that
 		// convention) falls back to the same invalid_token/401 every
-		// other rejection here defaults to.
+		// other rejection here defaults to, except a cancelled or
+		// timed-out context, which is a 500 (see lookupError).
 		if rerr, ok := err.(*Error); ok {
 			return ResolvedAccessToken{}, rerr
 		}
-		return ResolvedAccessToken{}, newError(ErrorInvalidToken, 401, "access token is invalid", err)
+		return ResolvedAccessToken{}, lookupError(err)
 	}
 	return resolved, nil
 }

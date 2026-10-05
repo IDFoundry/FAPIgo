@@ -78,3 +78,48 @@ func TestWriteJSONOmitsEmptyDescription(t *testing.T) {
 		t.Fatalf("body = %s, want no error_description member for an empty description", rec.Body.Bytes())
 	}
 }
+
+func TestIsErrorText(t *testing.T) {
+	for s, want := range map[string]bool{
+		"invalid_request": true, " !#[]~": true,
+		"": false, `a"b`: false, `a\b`: false, "a\x1fb": false, "a\x7fb": false, "é": false,
+	} {
+		if got := httperror.IsErrorText(s); got != want {
+			t.Errorf("IsErrorText(%q) = %v, want %v", s, got, want)
+		}
+	}
+}
+
+func TestNormalize(t *testing.T) {
+	for _, tc := range []struct {
+		code, description string
+		status            int
+		allowEmpty        bool
+		wantCode          string
+		wantStatus        int
+		wantDescription   string
+	}{
+		{"invalid_request", "d", 400, false, "invalid_request", 400, "d"},
+		{"invalid_request", "d", 599, false, "invalid_request", 599, "d"},
+		{"invalid_request", "d", 399, false, "server_error", 500, "d"},
+		{"invalid_request", "d", 600, false, "server_error", 500, "d"},
+		{"", "d", 401, false, "server_error", 500, "d"},
+		{"", "d", 401, true, "", 401, "d"},
+		{"", "", 0, true, "server_error", 500, ""},
+		{`x"`, "d", 400, true, "server_error", 500, "d"},
+		{"invalid_request", "\n", 400, false, "invalid_request", 400, ""},
+	} {
+		code, status, desc := httperror.Normalize(tc.code, tc.status, tc.description, tc.allowEmpty)
+		if code != tc.wantCode || status != tc.wantStatus || desc != tc.wantDescription {
+			t.Errorf("Normalize(%q, %d, %q, %v) = %q/%d/%q, want %q/%d/%q", tc.code, tc.status, tc.description, tc.allowEmpty, code, status, desc, tc.wantCode, tc.wantStatus, tc.wantDescription)
+		}
+	}
+}
+
+func TestStatus(t *testing.T) {
+	for in, want := range map[int]int{0: 500, 200: 500, 399: 500, 400: 400, 599: 599, 600: 500} {
+		if got := httperror.Status(in); got != want {
+			t.Errorf("Status(%d) = %d, want %d", in, got, want)
+		}
+	}
+}

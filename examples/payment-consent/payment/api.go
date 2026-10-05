@@ -92,12 +92,12 @@ func (a *api) pay(w http.ResponseWriter, r *http.Request) {
 		return p.Fields.InstructedAmount == order.InstructedAmount && p.Fields.CreditorAccount == order.CreditorAccount
 	}) {
 		// RFC 6750 §3: error_description is printable ASCII, so no "€".
-		resource.NewError(resource.ErrorInsufficientScope, http.StatusForbidden,
+		resource.NewInsufficientScopeError(authz,
 			fmt.Sprintf("the customer didn't approve paying EUR %s to %s", order.InstructedAmount.Amount, order.CreditorAccount.IBAN)).WriteJSON(w)
 		return
 	}
 	if !a.useOnce(r.Context(), authz) {
-		resource.NewError(resource.ErrorInsufficientScope, http.StatusForbidden, "this approval was for one payment, and it has been made").WriteJSON(w)
+		resource.NewInsufficientScopeError(authz, "this approval was for one payment, and it has been made").WriteJSON(w)
 		return
 	}
 	c, _ := customerByName(authz.Subject)

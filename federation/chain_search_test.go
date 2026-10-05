@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -368,5 +370,37 @@ func TestResolveErrorDoesNotRepeatAuthorityHints(t *testing.T) {
 		if got := strings.Count(msg, long(n)); got == 0 || got > 3 {
 			t.Errorf("hint %d appears %d times in the error, want at most 3 (its own branch only)", n, got)
 		}
+	}
+}
+
+// TestResolveRefusesACycleOfAuthorityHints: an Intermediate whose only
+// authority hint leads back to an entity already on the path has no
+// unvisited superior, and resolution says so rather than looping.
+func TestResolveRefusesACycleOfAuthorityHints(t *testing.T) {
+	g := newFederationGraph(t, "leaf", "a", "ta")
+	g.link(map[string][]string{
+		"leaf": {"a"},
+		"a":    {"leaf"},
+		"ta":   nil,
+	})
+	_, err := g.resolver(5, 5, "ta").Resolve(context.Background(), g.entities["leaf"].id)
+	if err == nil || !strings.Contains(err.Error(), "no unvisited superior among its 1 authority_hints") {
+		t.Fatalf("Resolve = %v, want the no unvisited superior refusal", err)
+	}
+}
+
+// TestResolveNoPathKeepsEachBranchErrorReachable: the no-path error
+// formats each branch's reason itself, but still unwraps to the branch
+// errors, so errors.As finds the underlying fetch failure.
+func TestResolveNoPathKeepsEachBranchErrorReachable(t *testing.T) {
+	g := newFederationGraph(t, "leaf", "ta")
+	g.link(map[string][]string{
+		"leaf": {"unreachable"},
+		"ta":   nil,
+	})
+	_, err := g.resolver(5, 5, "ta").Resolve(context.Background(), g.entities["leaf"].id)
+	var urlErr *url.Error
+	if !errors.As(err, &urlErr) {
+		t.Fatalf("Resolve = %v, want it to unwrap to the unreachable hint's *url.Error", err)
 	}
 }

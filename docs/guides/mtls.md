@@ -86,7 +86,12 @@ srv, err := server.New(server.Config{
   the request's own TLS connection (`PeerCertificateFromHTTP`). Behind a
   proxy that terminates TLS, set it yourself, with
   `TokenEndpointRequest.SetPeerCertificate` or the `PeerCertificate`
-  field of the other request types.
+  field of the other request types — but only from your own proxy, over
+  a hop clients can't reach, with the proxy removing any copy of its
+  forwarding header a client sent. A certificate is public (a self-signed
+  one is in the client's registered JWKS); only the TLS handshake proves
+  the client holds its key, so a header a client can set lets anyone
+  authenticate as any mTLS client.
 - **Metadata** advertises `mtls_endpoint_aliases`,
   `tls_client_certificate_bound_access_tokens`, and the mTLS
   authentication methods, once `MTLSEndpoints` is set.
@@ -95,7 +100,8 @@ srv, err := server.New(server.Config{
 
 `resource.Verifier` checks that the certificate on the request matches
 the token's `cnf.x5t#S256`. `resource.VerifyRequestFromHTTP` reads it
-from the connection; behind a proxy, set `VerifyRequest.PeerCertificate`.
+from the connection; behind a proxy, set `VerifyRequest.PeerCertificate`,
+under the same rule: only from your own proxy's forwarding.
 The resource server checks the binding, not revocation, so keep
 `Limits.AccessTokenLifetime` short.
 

@@ -52,6 +52,15 @@ type VerifyRequest struct {
 	// there is no additional signed proof artifact the way DPoP has
 	// one). An HTTP adapter reads this straight from the connection's
 	// own TLS state; this package never terminates TLS itself.
+	//
+	// Behind a proxy that terminates TLS, set it from however the proxy
+	// forwards the certificate — but only from your own proxy, over a
+	// hop the client can't reach or forge, with the proxy removing any
+	// copy of its forwarding header the client sent. A certificate is
+	// public, so having one proves nothing; only the TLS handshake
+	// proves the client holds its private key. A certificate taken
+	// from anything the client controls lets anyone present a stolen
+	// certificate-bound token.
 	PeerCertificate *x509.Certificate
 
 	// repeatedAuthorization is VerifyRequestFromHTTP's mark of a request

@@ -53,6 +53,15 @@ func readHTTPRequestParts(r *http.Request) (httpRequestParts, error) {
 //
 // Behind a proxy that terminates TLS, r carries no client certificate:
 // set PeerCertificate afterwards from however the proxy forwards it.
+// A certificate is public — the client presents it in every handshake,
+// and a self-signed one is published in its registered JWKS — so having
+// one proves nothing; only the TLS handshake proves the client holds its
+// private key. Trust a forwarded certificate only from your own proxy,
+// over a hop the client can't reach or forge (a private network or an
+// authenticated connection), and have the proxy remove any copy of its
+// forwarding header the client sent. Otherwise anyone can claim any
+// client's certificate, authenticating as that client and presenting its
+// certificate-bound tokens.
 func PushAuthorizationRequestFromHTTP(r *http.Request) (PushAuthorizationRequest, error) {
 	parts, err := readHTTPRequestParts(r)
 	return PushAuthorizationRequest(parts), err
@@ -90,6 +99,8 @@ func (t TokenEndpointRequest) GrantType() string { return t.parts.HTTP.Get("gran
 
 // SetPeerCertificate sets the TLS client certificate, for a server
 // behind a proxy that terminates TLS and forwards the certificate itself.
+// Set it only from your own proxy's forwarding, never from anything the
+// client can send directly — see PushAuthorizationRequestFromHTTP.
 func (t *TokenEndpointRequest) SetPeerCertificate(cert *x509.Certificate) {
 	t.parts.PeerCertificate = cert
 }

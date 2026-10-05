@@ -28,6 +28,12 @@ type ReplayUse struct {
 // Only a digest is stored, never the value it was derived from — a
 // complete client assertion, DPoP proof or request object must not be
 // persisted just to detect its reuse.
+//
+// A recorded digest must be retained until at least its ExpiresAt: the
+// server accepts the value it came from until then, so a store that
+// forgets it earlier (an LRU, a size cap, a TTL shorter than
+// ExpiresAt) lets the same value be replayed. A store may drop entries
+// once ExpiresAt has passed.
 type ReplayStore interface {
 	UseOnce(ctx context.Context, use ReplayUse) error
 }

@@ -17,11 +17,25 @@ const ResolveResponseContentType = "application/resolve-response+jwt"
 // ResolveRequest describes one Resolve Request (OpenID Federation 1.0
 // §8.3.1) to make against a resolve endpoint.
 type ResolveRequest struct {
-	// Endpoint is the resolve endpoint URL to query — typically read
-	// from a peer's own federation_entity metadata
-	// (federation_resolve_endpoint), out of band or from a prior
-	// Resolve call's own ResolvedEntity.Metadata. Required.
+	// Endpoint is the resolve endpoint URL to query: the
+	// federation_resolve_endpoint of the resolver named by
+	// ExpectedIssuer, from its federation_entity metadata or out of
+	// band. Required. Where the URL came from doesn't decide whom the
+	// response is trusted from: ExpectedIssuer does.
 	Endpoint string
+
+	// ExpectedIssuer is the Entity Identifier of the resolver this
+	// caller trusts to answer: the Resolve Response must be issued
+	// ("iss") and signed by exactly this entity, or ResolveViaEndpoint
+	// refuses it. Required. OpenID Federation 1.0 lets any Federation
+	// Entity run a resolve endpoint and leaves choosing a trusted
+	// resolver to the caller (§11); the resolver answers for the
+	// subject's Resolved Metadata, so it must be one the caller trusts,
+	// typically the Trust Anchor itself (§17: "that entity should be
+	// both Trust Anchor and Resolver"). Without it, any member of the
+	// federation could sign a response about any subject, with
+	// metadata of its choosing.
+	ExpectedIssuer string
 
 	// Subject is the "sub" query parameter — the Entity Identifier being
 	// resolved. Required.
@@ -53,14 +67,14 @@ type ResolveRequest struct {
 // federation_resolve_endpoint") and returns its own, already-resolved
 // answer as a signed Resolve Response.
 //
-// Trust in the response rests on the exact same "resolve the issuer as
-// its own peer, cryptographically, before trusting its signature"
-// pattern VerifyTrustMark and CheckTrustMarkStatus already establish:
-// the response's own "iss" claim (the entity operating the resolve
-// endpoint) is resolved as a fresh Trust Chain against this Resolver's
-// own Config.TrustAnchors before its signature is ever checked, using
-// that resolution's own ResolvedEntity.JWKS — never a key the response
-// itself merely claims to hold. This package does not additionally
+// Trust in the response rests on two checks. First, its "iss" must be
+// req.ExpectedIssuer, the resolver the caller chose to trust, checked
+// before anything else is fetched. Second, that issuer is resolved as a
+// fresh Trust Chain against this Resolver's own Config.TrustAnchors,
+// and the response's signature checked against that resolution's own
+// ResolvedEntity.JWKS — never a key the response itself merely claims
+// to hold — the same pattern VerifyTrustMark and CheckTrustMarkStatus
+// use. This package does not additionally
 // re-verify each entry of the response's own TrustChain claim — doing
 // so unconditionally would defeat the purpose of a resolve endpoint at
 // all, which exists precisely so a caller doesn't have to perform that
@@ -79,6 +93,9 @@ func (r *Resolver) ResolveViaEndpoint(ctx context.Context, req ResolveRequest) (
 	}
 	if req.TrustAnchor == "" {
 		return ResolveResponseClaims{}, fmt.Errorf("federation: trust anchor is empty")
+	}
+	if err := ValidEntityID(req.ExpectedIssuer); err != nil {
+		return ResolveResponseClaims{}, fmt.Errorf("federation: expected resolver issuer: %w", err)
 	}
 
 	target, err := url.Parse(req.Endpoint)
@@ -105,15 +122,22 @@ func (r *Resolver) ResolveViaEndpoint(ctx context.Context, req ResolveRequest) (
 		return ResolveResponseClaims{}, fmt.Errorf("federation: parse resolve response: %w", err)
 	}
 
-	issuer, err := r.Resolve(ctx, resp.ClaimedIssuer())
+	// Checked before the issuer is resolved, so a response naming some
+	// other issuer neither gets trusted nor makes this Resolver fetch
+	// that issuer's Trust Chain.
+	if resp.ClaimedIssuer() != req.ExpectedIssuer {
+		return ResolveResponseClaims{}, fmt.Errorf("federation: resolve response is issued by %q, not the expected resolver %q", resp.ClaimedIssuer(), req.ExpectedIssuer)
+	}
+
+	issuer, err := r.Resolve(ctx, req.ExpectedIssuer)
 	if err != nil {
-		return ResolveResponseClaims{}, fmt.Errorf("federation: resolve resolve-response issuer %q: %w", resp.ClaimedIssuer(), err)
+		return ResolveResponseClaims{}, fmt.Errorf("federation: resolve resolve-response issuer %q: %w", req.ExpectedIssuer, err)
 	}
 
 	now := r.deps.Clock.Now()
 	claims, err := verifyAgainstCandidateKeys(issuer.JWKS, resp.KeyID(), resp.Algorithm(), func(pub crypto.PublicKey) (ResolveResponseClaims, error) {
 		return resp.Verify(pub, intfed.ResolveResponseVerifyPolicy{
-			ExpectedIssuer: resp.ClaimedIssuer(), ExpectedSubject: req.Subject,
+			ExpectedIssuer: req.ExpectedIssuer, ExpectedSubject: req.Subject,
 			Algorithm: resp.Algorithm(), Now: now, MaxClockSkew: r.cfg.Limits.MaxClockSkew,
 		})
 	})

@@ -121,9 +121,11 @@
 // Mark's actual standing.
 //
 // The Resolve endpoint (§8.3) is covered on the consumer side only:
-// Resolver.ResolveViaEndpoint queries a peer's resolve endpoint instead
-// of walking a Trust Chain hop by hop itself, trusting the response by
-// resolving its own issuer as a fresh Trust Chain first — the same
+// Resolver.ResolveViaEndpoint queries the resolve endpoint of a resolver
+// the caller trusts (ResolveRequest.ExpectedIssuer, typically the Trust
+// Anchor) instead of walking a Trust Chain hop by hop itself, refusing a
+// response issued by anyone else, and trusting it by resolving that
+// issuer as a fresh Trust Chain first — the same
 // "establish trust in the issuer before trusting its signature" pattern
 // VerifyTrustMark/CheckTrustMarkStatus already use — then verifying the
 // signature against that issuer's own vouched-for key, never a key the

@@ -15,6 +15,36 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.50.0
+
+### `ResolveViaEndpoint` names the resolver it trusts (federation)
+
+**Affects:** a caller of `federation.Resolver.ResolveViaEndpoint`.
+
+**Why:** OpenID Federation 1.0 lets any Federation Entity run a resolve
+endpoint, and leaves choosing a trusted resolver to the caller (§11).
+`ResolveViaEndpoint` trusted a Resolve Response signed by any entity it
+could resolve, so any member of the federation, a leaf included, could
+sign a response about any subject, with Resolved Metadata of its
+choosing (an attacker's `jwks_uri`, say), and it was accepted.
+
+**What to change:** set `ResolveRequest.ExpectedIssuer` to the Entity
+Identifier of the resolver you trust, typically the Trust Anchor
+(§17 recommends the Trust Anchor also serve as the resolver), and point
+`Endpoint` at that resolver's `federation_resolve_endpoint`:
+
+```go
+claims, err := resolver.ResolveViaEndpoint(ctx, federation.ResolveRequest{
+	Endpoint:       "https://ta.example.org/resolve",
+	ExpectedIssuer: "https://ta.example.org",
+	Subject:        "https://op.example.org",
+	TrustAnchor:    "https://ta.example.org",
+})
+```
+
+A response issued by anyone else is refused, before its issuer is
+resolved. An empty or invalid `ExpectedIssuer` is refused at the call.
+
 ## v0.49.0
 
 ### A custom access token issuer declares what it relies on (server, *production only*)

@@ -16,15 +16,11 @@ import (
 )
 
 // UserInfo is the validated set of OIDC UserInfo claims (OIDC Core
-// §5.3). Subject is always the ID token's own already-verified
-// subject, not necessarily the UserInfo response's own sub claim
-// verbatim — the two normally carry the same value (FetchUserInfo has
-// already checked that), but see
-// Config.TolerateUserInfoSubjectEqualsClientID for the one narrow case
-// where they're allowed to differ, in which this is still the trusted
-// value, never the client_id. Parameters holds every other claim the
-// response carried (profile-defined claims such as name or email, or
-// any deployment-specific extension claim).
+// §5.3). Subject is the ID token's own already-verified subject, which
+// FetchUserInfo has checked the response's sub claim exactly matches.
+// Parameters holds every other claim the response carried
+// (profile-defined claims such as name or email, or any
+// deployment-specific extension claim).
 type UserInfo struct {
 	Subject    string
 	Parameters map[string]json.RawMessage
@@ -305,8 +301,7 @@ func containsAudience(audiences []string, want string) bool {
 // sub Claim in the ID Token" — the check that stops a resource server
 // (or a network attacker sitting in front of it) from substituting
 // another subject's claims into a response this flow would otherwise
-// trust. See Config.TolerateUserInfoSubjectEqualsClientID's own doc
-// comment for the one narrow, opt-in exception to that exact match.
+// trust. There is no exception to that exact match.
 func (c *Client) checkUserInfoSubject(claims map[string]json.RawMessage, tokens TokenSet) (UserInfo, error) {
 	subRaw, ok := claims["sub"]
 	if !ok {
@@ -317,9 +312,7 @@ func (c *Client) checkUserInfoSubject(claims map[string]json.RawMessage, tokens 
 		return UserInfo{}, newError(ErrorInvalidResponse, "UserInfo response sub claim is malformed", err)
 	}
 	if sub != tokens.IDTokenClaims.Subject {
-		if !c.cfg.TolerateUserInfoSubjectEqualsClientID || sub != c.cfg.ClientID.String() {
-			return UserInfo{}, newError(ErrorInvalidResponse, "UserInfo response sub does not match the ID token's sub", nil)
-		}
+		return UserInfo{}, newError(ErrorInvalidResponse, "UserInfo response sub does not match the ID token's sub", nil)
 	}
 
 	params := make(map[string]json.RawMessage, len(claims))
@@ -329,10 +322,5 @@ func (c *Client) checkUserInfoSubject(claims map[string]json.RawMessage, tokens 
 		}
 		params[k] = v
 	}
-	// Always the ID token's own already-verified subject, never the
-	// UserInfo response's "sub" value verbatim — when
-	// TolerateUserInfoSubjectEqualsClientID accepted a mismatched sub
-	// above, that value is the client_id, not the end-user, and would
-	// be actively wrong to surface as this UserInfo's Subject.
 	return UserInfo{Subject: tokens.IDTokenClaims.Subject, Parameters: params}, nil
 }

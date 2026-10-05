@@ -217,6 +217,24 @@ and consent, or complete with the new `server.InteractionNeeded`
 result, which answers `login_required`, `consent_required`,
 `account_selection_required` or `interaction_required`.
 
+### `TolerateUserInfoSubjectEqualsClientID` is removed (client)
+
+**Affects:** a client that set `client.Config.TolerateUserInfoSubjectEqualsClientID`.
+
+**Why:** it worked around an authorization server defect, a UserInfo
+response whose `sub` was the client's own `client_id` instead of the
+end-user's subject. Accepting that meant the client could no longer
+tell one user's UserInfo claims from another's for that server, the
+substitution OIDC Core §5.3.2's exact `sub` match exists to catch. The
+server it was added for has been fixed.
+
+**What to change:** remove the field from your `client.Config`.
+`FetchUserInfo` now always requires the UserInfo response's `sub` to
+exactly match the ID token's `sub`, and refuses anything else with
+`invalid_response`. If an authorization server you use still returns
+its client's `client_id` as `sub`, that server needs fixing; there is
+no client-side workaround.
+
 ### Records written before upgrading keep their old limits (server)
 
 **Affects:** a server upgraded with codes, CIBA requests or refresh

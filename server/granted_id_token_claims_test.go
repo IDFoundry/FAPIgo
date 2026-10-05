@@ -154,6 +154,12 @@ func invalidGrantedIDTokenClaims() map[string]map[string]json.RawMessage {
 		"jti":                {"jti": json.RawMessage(`"j"`)},
 		"c_hash":             {"c_hash": json.RawMessage(`"h"`)},
 		"s_hash":             {"s_hash": json.RawMessage(`"h"`)},
+		"nbf":                {"nbf": json.RawMessage(`1`)},
+		"cnf":                {"cnf": json.RawMessage(`{"jkt":"x"}`)},
+		"_claim_names":       {"_claim_names": json.RawMessage(`{"email":"src1"}`)},
+		"_claim_sources":     {"_claim_sources": json.RawMessage(`{"src1":{"endpoint":"https://evil.example"}}`)},
+		"sub_jwk":            {"sub_jwk": json.RawMessage(`{"kty":"EC"}`)},
+		"events":             {"events": json.RawMessage(`{"http://schemas.openid.net/event/backchannel-logout":{}}`)},
 		"empty name":         {"": json.RawMessage(`"x"`)},
 		"invalid UTF-8 name": {"name\xff": json.RawMessage(`"x"`)},
 		// newHarness sets Limits.MaxIDTokenClaimsBytes to 4096.

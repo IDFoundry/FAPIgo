@@ -30,6 +30,11 @@ type IdentityClaimsSource interface {
 	// value for any of these", not "return everything". Each value is
 	// already JSON-encoded. A name this source has no value for is
 	// simply absent from the result — that is not an error condition.
+	//
+	// The server enforces the restriction too: it puts only names into
+	// an ID token or UserInfo response, whatever this returns, and never
+	// a value for a claim it sets itself — "sub", "acr", "auth_time" and
+	// the like, which a client may request but the server answers.
 	ResolveIdentityClaims(ctx context.Context, subject string, names []string) (map[string]json.RawMessage, error)
 }
 

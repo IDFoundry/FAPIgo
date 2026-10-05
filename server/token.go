@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -523,6 +524,15 @@ func verifyDPoPAtEitherEndpoint(ctx context.Context, req dpop.VerifyRequest, pri
 // overridable by a client-influenced protocol-extension claim of the
 // same name in base). A nil IdentityClaims is not an error; it just
 // means no identity claims are added.
+//
+// Only names are added, whatever the source returns — the same rule
+// serverresource.UserInfoClaims applies — so a source that ignores
+// IdentityClaimsSource's contract can't put a claim nobody requested
+// and approved into the ID token. A name the server sets in the ID
+// token itself (isServerManagedIDTokenClaim: "sub", "acr", "auth_time"
+// and the like, which a client may ask for through the "claims"
+// parameter, OIDC Core §5.5.1.1) keeps the server's value: the source's
+// is dropped rather than failing issuance or overriding it.
 func (s *Server) withIdentityClaims(ctx context.Context, subject string, names []string, base map[string]json.RawMessage) (map[string]json.RawMessage, error) {
 	if s.deps.IdentityClaims == nil || len(names) == 0 {
 		return base, nil
@@ -539,7 +549,9 @@ func (s *Server) withIdentityClaims(ctx context.Context, subject string, names [
 		merged[k] = v
 	}
 	for k, v := range identity {
-		merged[k] = v
+		if slices.Contains(names, k) && !isServerManagedIDTokenClaim(k) {
+			merged[k] = v
+		}
 	}
 	return merged, nil
 }

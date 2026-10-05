@@ -9,6 +9,7 @@ import (
 	"crypto/rsa"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -191,4 +192,67 @@ func TestPublicJWKSRejectsEmptyKeyID(t *testing.T) {
 	}, nil); err == nil {
 		t.Fatal("PublicJWKS(empty kid) = nil error, want error")
 	}
+}
+
+// TestPublicJWKSRejectsOneKidForTwoKeys: a kid naming two different keys
+// — two signing keys, or a signing and an encryption key — would make a
+// verifier's kid-based key selection ambiguous, so the set is refused
+// rather than one of them silently left out.
+func TestPublicJWKSRejectsOneKidForTwoKeys(t *testing.T) {
+	newSigner := func() crypto.Signer {
+		t.Helper()
+		priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			t.Fatalf("generate ecdsa key: %v", err)
+		}
+		return priv
+	}
+
+	t.Run("two signing keys", func(t *testing.T) {
+		km, err := keys.NewKeyManagerFromSigners(
+			map[keys.SigningPurpose]crypto.Signer{keys.ClientAuthentication: newSigner(), keys.RequestObjectSigning: newSigner()},
+			map[keys.SigningPurpose]fapi.SignatureAlgorithm{keys.ClientAuthentication: fapi.ES256, keys.RequestObjectSigning: fapi.ES256},
+			map[keys.SigningPurpose]string{keys.ClientAuthentication: "same-kid", keys.RequestObjectSigning: "same-kid"},
+		)
+		if err != nil {
+			t.Fatalf("NewKeyManagerFromSigners: %v", err)
+		}
+		_, err = keys.PublicJWKS(context.Background(), []keys.SigningKeyUse{
+			{Manager: km, Purpose: keys.ClientAuthentication, Algorithm: fapi.ES256},
+			{Manager: km, Purpose: keys.RequestObjectSigning, Algorithm: fapi.ES256},
+		}, nil)
+		if err == nil || !strings.Contains(err.Error(), `kid "same-kid" names two different keys`) {
+			t.Fatalf("PublicJWKS(two keys, one kid) error = %v, want it refused", err)
+		}
+	})
+
+	t.Run("signing and encryption keys", func(t *testing.T) {
+		km, err := keys.NewKeyManagerFromSigners(
+			map[keys.SigningPurpose]crypto.Signer{keys.ClientAuthentication: newSigner()},
+			map[keys.SigningPurpose]fapi.SignatureAlgorithm{keys.ClientAuthentication: fapi.ES256},
+			map[keys.SigningPurpose]string{keys.ClientAuthentication: "shared-kid"},
+		)
+		if err != nil {
+			t.Fatalf("NewKeyManagerFromSigners: %v", err)
+		}
+		priv, err := rsa.GenerateKey(rand.Reader, 2048)
+		if err != nil {
+			t.Fatalf("generate rsa key: %v", err)
+		}
+		backend, err := keys.NewInMemoryRSA(priv, "shared-kid")
+		if err != nil {
+			t.Fatalf("NewInMemoryRSA: %v", err)
+		}
+		dec, err := keys.NewSingleKeyDecrypter(backend)
+		if err != nil {
+			t.Fatalf("NewSingleKeyDecrypter: %v", err)
+		}
+		_, err = keys.PublicJWKS(context.Background(),
+			[]keys.SigningKeyUse{{Manager: km, Purpose: keys.ClientAuthentication, Algorithm: fapi.ES256}},
+			[]keys.EncryptionKeyUse{{Decrypter: dec, Purpose: keys.IDTokenDecryption, Algorithm: fapi.RSAOAEP256}},
+		)
+		if err == nil || !strings.Contains(err.Error(), `kid "shared-kid" names two different keys`) {
+			t.Fatalf("PublicJWKS(signing and encryption keys, one kid) error = %v, want it refused", err)
+		}
+	})
 }

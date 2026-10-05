@@ -1,6 +1,7 @@
 package keys
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -77,8 +78,8 @@ type EncryptionKeyUse struct {
 }
 
 // PublicJWKS resolves every use in signing and encryption into a single
-// JWK Set, deduplicated by kid. It has no profile or role logic of its
-// own — the caller decides which purposes belong in the set — which is
+// JWK Set. It has no profile or role logic of its own — the caller
+// decides which purposes belong in the set — which is
 // what lets client.PublicJWKS and server.PublicJWKS both be thin
 // callers over this, and lets any other caller assemble a JWKS from key
 // material and a declared algorithm alone, before either role's engine
@@ -91,8 +92,16 @@ type EncryptionKeyUse struct {
 // rotation's cutover stays verifiable through the rotation's overlap
 // window (see RotatingKeyManager's own doc comment). A plain KeyManager
 // publishes exactly the one key PublicKey returns, as before.
+//
+// A key several uses share — the same kid with an identical JWK, e.g.
+// one key signing both ID tokens and JARM responses — is published
+// once. A kid naming two different JWKs is refused instead: a verifier
+// selects a key by kid (and algorithm), so publishing both would make
+// that choice ambiguous, and publishing only one would leave signatures
+// made with the other unverifiable (RFC 7517 §4.5: different keys
+// within a JWK Set SHOULD use distinct kid values).
 func PublicJWKS(ctx context.Context, signing []SigningKeyUse, encryption []EncryptionKeyUse) (PublicKeySet, error) {
-	seen := make(map[string]bool, len(signing)+len(encryption))
+	seen := make(map[string][]byte, len(signing)+len(encryption))
 	var result PublicKeySet
 
 	for _, use := range signing {
@@ -130,24 +139,34 @@ func PublicJWKS(ctx context.Context, signing []SigningKeyUse, encryption []Encry
 	return result, nil
 }
 
-// appendPublicJWK dedupes by keyID (a no-op, not an error, if already
-// seen) then builds and appends the JWK via build — the shared
-// "validate kid, dedup, build, append" tail PublicJWKS's signing and
+// appendPublicJWK builds the JWK via build and appends it, unless keyID
+// was already published: a no-op when it was published with an
+// identical JWK, an error when with a different one. It's the shared
+// "validate kid, build, dedup, append" tail PublicJWKS's signing and
 // encryption loops both need, identically apart from which jose
-// constructor builds the JWK.
-func appendPublicJWK(result *PublicKeySet, seen map[string]bool, keyID string, emptyKidMsg string, build func() (jose.JWK, error)) error {
+// constructor builds the JWK. seen holds each published kid's encoded
+// JWK.
+func appendPublicJWK(result *PublicKeySet, seen map[string][]byte, keyID string, emptyKidMsg string, build func() (jose.JWK, error)) error {
 	if keyID == "" {
 		return fmt.Errorf("keys: %s", emptyKidMsg)
 	}
-	if seen[keyID] {
-		return nil
-	}
-	seen[keyID] = true
 	jwk, err := build()
 	if err != nil {
 		return fmt.Errorf("keys: build jwk: %w", err)
 	}
-	result.Keys = append(result.Keys, PublicJWK{jwk: jwk.WithKeyID(keyID), keyID: keyID})
+	jwk = jwk.WithKeyID(keyID)
+	encoded, err := jwk.MarshalJSON()
+	if err != nil {
+		return fmt.Errorf("keys: encode jwk: %w", err)
+	}
+	if published, ok := seen[keyID]; ok {
+		if bytes.Equal(published, encoded) {
+			return nil
+		}
+		return fmt.Errorf("keys: PublicJWKS: kid %q names two different keys; give each key its own kid", keyID)
+	}
+	seen[keyID] = encoded
+	result.Keys = append(result.Keys, PublicJWK{jwk: jwk, keyID: keyID})
 	return nil
 }
 

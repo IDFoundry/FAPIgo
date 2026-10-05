@@ -39,12 +39,20 @@ type TrustAnchor struct {
 // Limits bounds how far a Resolve call is willing to go. None of these
 // have an implicit default — NewResolver rejects a zero value.
 type Limits struct {
-	// MaxPathLength bounds how many Intermediate Entities Resolve will
-	// walk through before giving up — a hard, resolver-wide ceiling
-	// enforced regardless of what any individual Subordinate
-	// Statement's own "constraints" claim (OpenID Federation 1.0 §6.2)
-	// says, so a misbehaving or malicious federation member can't send
-	// Resolve down an unbounded (or merely very long) chain. Resolve
+	// MaxPathLength bounds how many superiors a Trust Chain may climb
+	// through: the Intermediate Entities plus the Trust Anchor above
+	// them, so a chain may have at most MaxPathLength-1 Intermediates (1
+	// allows only a subject whose immediate superior is a Trust Anchor).
+	// Each superior is one hop's worth of fetches, which is what the
+	// fetch bound below counts. A Subordinate Statement's own
+	// max_path_length counts Intermediates only, so its 0 corresponds
+	// to a MaxPathLength of 1.
+	//
+	// It is a hard, resolver-wide ceiling, enforced regardless of what
+	// any individual Subordinate Statement's own "constraints" claim
+	// (OpenID Federation 1.0 §6.2) says, so a misbehaving or malicious
+	// federation member can't send Resolve down an unbounded (or merely
+	// very long) chain. Resolve
 	// separately enforces each Subordinate Statement's own
 	// max_path_length (§6.2.1), naming_constraints (§6.2.2) and
 	// allowed_entity_types (§6.2.3) constraints — this field is this
@@ -374,7 +382,7 @@ func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntit
 // budget of them), not just the last one tried.
 func (r *Resolver) walk(ctx context.Context, st *chainWalkState, hop int, budget *int, now time.Time) (ResolvedEntity, error) {
 	if hop >= r.cfg.Limits.MaxPathLength {
-		return ResolvedEntity{}, fmt.Errorf("federation: trust chain for %q exceeds the configured max path length (%d)", st.subjectID, r.cfg.Limits.MaxPathLength)
+		return ResolvedEntity{}, fmt.Errorf("federation: trust chain for %q exceeds the configured max path length (%d superiors, Intermediates plus the Trust Anchor)", st.subjectID, r.cfg.Limits.MaxPathLength)
 	}
 	hints := r.selfClaimsForHop(st).AuthorityHints
 	if len(hints) == 0 {

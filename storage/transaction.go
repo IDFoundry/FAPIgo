@@ -89,6 +89,11 @@ type TransactionStore interface {
 	// It returns an error if Reference is unknown, already consumed by
 	// a completed interaction, or its own expiry
 	// (NewPARRecord.ExpiresAt) has passed.
+	//
+	// Because a Reference can be begun again until it's consumed, its
+	// request_uri is a bearer value while it's live: whoever presents it
+	// can begin (and complete) an interaction for it — see
+	// server.Server.BeginAuthorization.
 	BeginAuthorization(ctx context.Context, txn BeginAuthorizationTransaction) (PushedAuthorizationRequest, error)
 
 	// CompleteAuthorization atomically retrieves and consumes both the

@@ -75,6 +75,17 @@ type BeginAuthorizationRequest struct {
 // for — is represented in the returned AuthorizationAction; the error
 // return is reserved for failures outside the request itself (e.g.
 // context cancellation propagating from a dependency).
+//
+// The request_uri is a bearer value in the front channel until the
+// interaction completes: anyone who holds it while it's live can begin
+// an interaction for the client's pushed request, and complete it as
+// themselves (FAPI 2.0 Security Profile §6.4). BeginAuthorization
+// accepts a request_uri more than once — a browser reloading or
+// prefetching the page must not use it up (§5.3.2.2 Note 3) — but only
+// one interaction for it can ever complete. Keep it out of anything a
+// third party can read: serve the login page with
+// "Referrer-Policy: no-referrer" and no third-party resources, and don't
+// log full authorization request URLs.
 func (s *Server) BeginAuthorization(ctx context.Context, req BeginAuthorizationRequest) (AuthorizationAction, error) {
 	reference, ok := par.SplitRequestURI(req.RequestURI)
 	if !ok {

@@ -61,7 +61,7 @@ type AutomaticRegistrationConfig struct {
 	// DefaultFailureCacheAge; negative is invalid. Keep it short: a
 	// failure can be transient (OpenID Federation 1.0 §10.5), and a
 	// client whose Trust Chain starts resolving waits up to this long.
-	// At most maxFailedResolutions failures are remembered at once.
+	// At most 4096 failures are remembered at once.
 	FailureCacheAge time.Duration
 
 	// AllowsClientCredentialsGrant permits every automatically-registered

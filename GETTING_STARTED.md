@@ -222,8 +222,13 @@ case server.InteractionRequired:
 	// help pre-fill it, and the client's authentication requirements:
 	// ACRValues (how strongly to authenticate) and, when HasMaxAge,
 	// MaxAge (how recent the authentication must be — re-authenticate
-	// a user whose existing session is older). a.Handle must come back
-	// to CompleteAuthorization once the user is done.
+	// a user whose existing session is older). a.Interaction.Prompt is
+	// the client's "prompt": for server.PromptLogin, authenticate the
+	// user again even if they have a session; for server.PromptNone,
+	// show nothing, and if you'd need to, complete with
+	// server.InteractionNeeded(server.NeedLogin, ...) (or NeedConsent,
+	// NeedAccountSelection, NeedInteraction). a.Handle must come back to
+	// CompleteAuthorization once the user is done.
 case server.RedirectResponse:
 	// no interaction needed — redirect the browser to a.Destination
 case server.LocalErrorResponse:
@@ -248,7 +253,8 @@ subjectID, _ := server.NewSubjectID(theRealAuthenticatedUserID)
 subject, _ := server.NewAuthenticatedSubject(subjectID)
 // When the user actually authenticated — not time.Now() when you reuse
 // an existing session: CompleteAuthorization answers login_required
-// when this is older than the client's max_age.
+// when this is older than the client's max_age, or, for prompt=login,
+// earlier than the request itself.
 authCtx, _ := server.NewAuthenticationContext(userAuthenticatedAt, acr, amr)
 
 result := server.Authorize(subject, authCtx, server.GrantedAuthorization{
@@ -570,7 +576,10 @@ payments, err := extension.RARGet(granted, paymentInitiation) // []RARDetail[T],
 A token without the claim was granted nothing. A malformed one is an
 error, not an empty grant to wave through. Check the request against
 what's granted before acting on it, as `examples/payment-consent`'s
-payments API does.
+payments API does, and refuse one the grant doesn't cover with
+`resource.WriteError(w, resource.NewInsufficientScopeError(authCtx,
+"..."))`: a 403 `insufficient_scope` whose challenge uses the scheme
+the token was presented with (DPoP or Bearer).
 
 `resource.VerifyRequestFromHTTP` fills in every field of the
 `VerifyRequest` from `r`: the method, the `Authorization` header, every

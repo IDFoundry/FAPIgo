@@ -27,7 +27,14 @@
 // UseOnce), and redemption-style operations verify and consume state
 // atomically in one call rather than as separate check-then-act steps.
 // ReplayStore persists only a digest and expiry per use, never a
-// complete client assertion or DPoP proof.
+// complete client assertion or DPoP proof, and must keep each until at
+// least that expiry: one forgotten sooner can be replayed.
+//
+// An error from a store means what its method's contract says (unknown,
+// already used, refused). A store that couldn't answer at all — its
+// backend unreachable, a timeout — may wrap ErrStoreUnavailable to say
+// so, and a resource server then answers 500 rather than telling the
+// client its token or DPoP proof is invalid.
 //
 // Records keep as explicit fields only what a store itself acts on — a
 // lookup hash, ClientID, ExpiresAt, and for CIBA the decision status and
@@ -45,8 +52,9 @@
 // Because a backend's atomicity/durability guarantees are self-asserted,
 // this package also defines a StoreAssurance.Capabilities interface
 // (durable, atomic-consume, serializable-redemption,
-// cross-instance-consistent, encrypted-at-rest) that server checks at
-// construction time under its production assurance level, plus a
+// cross-instance-consistent, encrypted-at-rest) that server, client and
+// resource check at construction time under their production assurance
+// levels, plus a
 // reusable contract test suite (e.g. TestGrantStoreContract(t, factory))
 // that exercises single-use redemption and its exactly-one-winner
 // behavior under in-process concurrency, field round-tripping,

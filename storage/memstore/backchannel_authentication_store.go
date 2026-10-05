@@ -130,6 +130,9 @@ func (s *BackchannelAuthenticationStore) PollBackchannelAuthentication(_ context
 	if !ok {
 		return storage.PolledBackchannelAuthentication{}, fmt.Errorf("memstore: no such auth_req_id")
 	}
+	if poll.ClientID != "" && poll.ClientID != rec.clientID {
+		return storage.PolledBackchannelAuthentication{}, fmt.Errorf("memstore: auth_req_id belongs to another client")
+	}
 	if rec.redeemed {
 		return storage.PolledBackchannelAuthentication{}, &storage.BackchannelAuthenticationAlreadyRedeemedError{}
 	}

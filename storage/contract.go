@@ -893,6 +893,9 @@ func TestBackchannelAuthenticationStoreContract(t *testing.T, factory func() Bac
 	})
 	t.Run("PollAfterDeniedIsRepeatable", func(t *testing.T) { testBackchannelAuthenticationStorePollAfterDeniedIsRepeatable(t, factory) })
 	t.Run("PollAfterApprovedIsSingleUse", func(t *testing.T) { testBackchannelAuthenticationStorePollAfterApprovedIsSingleUse(t, factory) })
+	t.Run("PollByAnotherClientLeavesTheRecordUnchanged", func(t *testing.T) {
+		testBackchannelAuthenticationStorePollByAnotherClientLeavesTheRecordUnchanged(t, factory)
+	})
 	t.Run("ConcurrentPollAfterApprovedHasExactlyOneWinner", func(t *testing.T) {
 		testBackchannelAuthenticationStoreConcurrentPollAfterApprovedHasExactlyOneWinner(t, factory)
 	})
@@ -1140,6 +1143,43 @@ func testBackchannelAuthenticationStorePollAfterDeniedIsRepeatable(t *testing.T,
 		if got.Status != BackchannelAuthenticationDenied || got.Reason != "user declined" {
 			t.Fatalf("poll %d returned %+v, want Denied/%q", i, got, "user declined")
 		}
+	}
+}
+
+// testBackchannelAuthenticationStorePollByAnotherClientLeavesTheRecordUnchanged
+// covers PollBackchannelAuthentication.ClientID: a store that checks it
+// refuses another client's poll of an approved record without spending
+// the approval or recording the poll, so the owning client's poll at the
+// same instant still succeeds (no slow_down) and observes Approved. A
+// store that ignores the field (an empty ClientID's behavior) skips this
+// subtest: the server refuses another client's record after the poll
+// anyway, so ignoring it stays safe, if less protective.
+func testBackchannelAuthenticationStorePollByAnotherClientLeavesTheRecordUnchanged(t *testing.T, factory func() BackchannelAuthenticationStore) {
+	store := factory()
+	ctx := context.Background()
+	record := newBackchannelAuthenticationRecord("auth-req-other", "handle-other")
+	if err := store.CreateBackchannelAuthentication(ctx, record); err != nil {
+		t.Fatalf("CreateBackchannelAuthentication: %v", err)
+	}
+	if _, err := store.DecideBackchannelAuthentication(ctx, DecideBackchannelAuthentication{
+		HandleHash: record.HandleHash, Status: BackchannelAuthenticationApproved, Grant: contractPayload,
+	}); err != nil {
+		t.Fatalf("DecideBackchannelAuthentication: %v", err)
+	}
+	now := time.Now()
+	if _, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
+		AuthReqIDHash: record.AuthReqIDHash, Now: now, ClientID: "client-2",
+	}); err == nil {
+		t.Skip("the store ignores PollBackchannelAuthentication.ClientID")
+	}
+	got, err := store.PollBackchannelAuthentication(ctx, PollBackchannelAuthentication{
+		AuthReqIDHash: record.AuthReqIDHash, Now: now, ClientID: record.ClientID,
+	})
+	if err != nil {
+		t.Fatalf("owning client's poll after another client's was refused: %v, want the approval unspent and the refused poll unrecorded", err)
+	}
+	if got.Status != BackchannelAuthenticationApproved {
+		t.Fatalf("owning client's poll status = %v, want Approved", got.Status)
 	}
 }
 

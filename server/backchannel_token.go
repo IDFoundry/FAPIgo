@@ -93,6 +93,7 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 	polled, err := s.deps.Backchannel.PollBackchannelAuthentication(ctx, storage.PollBackchannelAuthentication{
 		AuthReqIDHash: sha256.Sum256([]byte(authReqID)),
 		Now:           now,
+		ClientID:      client.ID(),
 	})
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), backchannelPollError(err))

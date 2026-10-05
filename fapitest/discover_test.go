@@ -84,9 +84,9 @@ func TestDiscoverEndToEnd(t *testing.T) {
 	}
 	srvDeps := server.Dependencies{
 		Clients:                &memClientRepository{client: registeredClient},
-		Transactions:           newMemTransactionStore(),
-		Grants:                 newMemGrantStore(),
-		Replay:                 newMemReplayStore(),
+		Transactions:           memstore.NewTransactionStore(),
+		Grants:                 memstore.NewGrantStore(),
+		Replay:                 memstore.NewReplayStore(),
 		ClientKeys:             &memClientKeySource{clientID: ClientID, manager: clientKeys},
 		Keys:                   asKeys,
 		AccessTokens:           jwtAccessTokens,

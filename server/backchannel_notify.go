@@ -99,3 +99,40 @@ type NoBackchannelNotifications struct{}
 func (NoBackchannelNotifications) Notify(context.Context, BackchannelNotification) error {
 	return nil
 }
+
+// BackchannelNotifierCapabilities implements BackchannelNotifierAssurance:
+// NoBackchannelNotifications sends nothing, so it opens no connection to
+// harden.
+func (NoBackchannelNotifications) BackchannelNotifierCapabilities() BackchannelNotifierCapabilities {
+	return BackchannelNotifierCapabilities{OutboundHardened: true}
+}
+
+// BackchannelNotifierAssurance is implemented by a BackchannelNotifier to
+// declare, under AssuranceProduction, how it sends notifications. New
+// refuses a notifier that doesn't implement it, or doesn't declare
+// OutboundHardened, once CIBA is configured: a client's
+// client_notification_endpoint comes from its registration, which under
+// OpenID Federation automatic registration is the relying party's own
+// metadata, so an unguarded HTTP client sending to it is a server-side
+// request forgery vector this package can't otherwise see.
+// backchannelhttp.Notifier and NoBackchannelNotifications declare it.
+type BackchannelNotifierAssurance interface {
+	BackchannelNotifierCapabilities() BackchannelNotifierCapabilities
+}
+
+// BackchannelNotifierCapabilities is what a BackchannelNotifier declares
+// through BackchannelNotifierAssurance. Nothing here is verified: the
+// declaration is the notifier author's promise.
+type BackchannelNotifierCapabilities struct {
+	// OutboundHardened promises that every notification is sent the way
+	// backchannelhttp.Notifier sends it: through a client whose dialer
+	// refuses loopback, private, link-local and other non-public
+	// addresses (checked on the address actually dialed, so DNS
+	// rebinding can't get around it), that never follows a redirect,
+	// requires https, bounds the dial, TLS handshake and whole call with
+	// timeouts, and reads at most a bounded amount of the response body.
+	// fapihttp.NewClient builds such a client; any loopback or
+	// private-host exception its TransportConfig grants is the
+	// deployment's own explicit choice.
+	OutboundHardened bool
+}

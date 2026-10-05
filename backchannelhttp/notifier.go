@@ -67,6 +67,17 @@ func newWithClient(client fapihttp.HTTPClient, timeout time.Duration) *Notifier 
 	return &Notifier{http: client, timeout: timeout}
 }
 
+// BackchannelNotifierCapabilities implements
+// server.BackchannelNotifierAssurance: a Notifier always sends through
+// the fapihttp client New builds from Config.Transport (SSRF-guarded
+// dialing, no redirects, https, dial and handshake timeouts, with only
+// the loopback and private-host exceptions Config.Transport grants),
+// bounded by Config.Timeout, and drains at most a bounded amount of
+// the response body.
+func (*Notifier) BackchannelNotifierCapabilities() server.BackchannelNotifierCapabilities {
+	return server.BackchannelNotifierCapabilities{OutboundHardened: true}
+}
+
 // Notify implements server.BackchannelNotifier: it builds the request via
 // server.NewBackchannelNotificationRequest and sends it through n's own
 // HTTPClient, treating any 2xx response as success and anything else —

@@ -649,6 +649,9 @@ func checkProductionStateStores(deps Dependencies, scaled, cibaEnabled bool) err
 		if err := checkStoreAssurance("backchannel", deps.Backchannel, true, scaled); err != nil {
 			return err
 		}
+		if err := checkNotifierAssurance(deps.BackchannelNotifier); err != nil {
+			return err
+		}
 	}
 	if deps.Nonces != nil {
 		return checkStoreAssurance("nonces", deps.Nonces, true, scaled)

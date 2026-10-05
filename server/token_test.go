@@ -723,7 +723,8 @@ func TestExchangeAuthorizationCodeReuseRevokesOpaqueAccessToken(t *testing.T) {
 		t.Fatalf("parse target url: %v", err)
 	}
 	verifier, err := resource.NewVerifier(resource.Config{
-		Limits: resource.Limits{MaxDPoPProofAge: time.Minute, MaxClockSkew: 5 * time.Second},
+		Limits:    resource.Limits{MaxDPoPProofAge: time.Minute, MaxClockSkew: 5 * time.Second},
+		Assurance: resource.AssuranceDevelopment,
 	}, resource.Dependencies{
 		AccessTokens: resource.OpaqueAccessTokens{Store: store},
 		Replay:       memstore.NewReplayStore(),

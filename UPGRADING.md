@@ -138,6 +138,46 @@ func (n myNotifier) BackchannelNotifierCapabilities() server.BackchannelNotifier
 `NoBackchannelNotifications` needs nothing. Development assurance is
 unchanged.
 
+### A resource server declares its assurance level (resource)
+
+**Affects:** every `resource.NewVerifier` call. A verifier built with
+`serverresource.NewVerifier` is unaffected: it takes the server's own
+`Assurance` and `HorizontallyScaled`.
+
+**Why:** the server and client refuse a production deployment built on
+stores and key sources that declare no capabilities, but the resource
+server accepted anything. A production resource server could check DPoP
+replay against an in-memory store each instance keeps for itself, or
+fetch issuer keys through an unhardened source, and nothing said so.
+
+**What to change:**
+
+- Set `resource.Config.Assurance`. `NewVerifier` refuses the zero value:
+
+  ```go
+  cfg := resource.Config{
+  	Limits:    resource.Limits{MaxDPoPProofAge: time.Minute, MaxClockSkew: 5 * time.Second},
+  	Assurance: resource.AssuranceProduction, // or AssuranceDevelopment with memstore and keys/ephemeral
+  }
+  ```
+
+- *Production only:* `resource.AssuranceProduction` requires:
+  - the issuer key source of `resource.JWTAccessTokens` to implement
+    `keys.KeySourceAssurance` and declare `LiveFetchHardened`.
+    `keys.JWKSIssuerKeySource` and `keys.LocalIssuerKeys` do.
+  - the `resource.OpaqueAccessTokens` store and the revocation checker
+    to implement `storage.StoreAssurance` and declare `Durable`. Pass
+    `resource.NoRevocation{}` to decline revocation explicitly instead.
+  - `Replay`, and `Nonces` when set, to declare `Durable` and
+    `AtomicConsume`.
+  - `Random` to be `crypto/rand.Reader` itself when `Nonces` is set.
+  - with `Config.HorizontallyScaled`, every store above to also declare
+    `CrossInstanceConsistent`.
+- *Production only:* an `AccessTokenResolver` of your own must
+  implement `resource.AccessTokenResolverAssurance`, naming the issuer
+  key source or store it relies on, as a custom
+  `server.AccessTokenIssuer` does.
+
 ## v0.49.0
 
 ### A custom access token issuer declares what it relies on (server, *production only*)

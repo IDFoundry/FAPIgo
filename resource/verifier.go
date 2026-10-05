@@ -21,6 +21,9 @@ func NewVerifier(cfg Config, deps Dependencies) (*Verifier, error) {
 	if err := validateDependencies(deps); err != nil {
 		return nil, err
 	}
+	if err := validateAssurance(cfg, deps); err != nil {
+		return nil, err
+	}
 	return &Verifier{cfg: cfg, deps: deps}, nil
 }
 

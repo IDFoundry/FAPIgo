@@ -67,6 +67,10 @@ type Options struct {
 //     server.NoRevocation becomes resource.NoRevocation.
 //   - deps.Replay, deps.Clock, and cfg.Limits.MaxDPoPProofAge and
 //     MaxClockSkew, as they are.
+//   - cfg.Assurance and cfg.HorizontallyScaled, as the verifier's own
+//     resource.Config.Assurance and HorizontallyScaled: a production
+//     server gets a production verifier, which also checks
+//     Options.Nonces.
 //
 // Any other access-token issuer or revocation sink is an error rather
 // than a guess: build the resource.Verifier directly for those.
@@ -80,10 +84,18 @@ func NewVerifier(cfg server.Config, deps server.Dependencies, opts Options) (*re
 		return nil, err
 	}
 
-	rcfg := resource.Config{Limits: resource.Limits{
-		MaxDPoPProofAge: cfg.Limits.MaxDPoPProofAge,
-		MaxClockSkew:    cfg.Limits.MaxClockSkew,
-	}}
+	assurance, err := resourceAssurance(cfg.Assurance)
+	if err != nil {
+		return nil, err
+	}
+	rcfg := resource.Config{
+		Limits: resource.Limits{
+			MaxDPoPProofAge: cfg.Limits.MaxDPoPProofAge,
+			MaxClockSkew:    cfg.Limits.MaxClockSkew,
+		},
+		Assurance:          assurance,
+		HorizontallyScaled: cfg.HorizontallyScaled,
+	}
 	rdeps := resource.Dependencies{
 		AccessTokens: accessTokens,
 		Replay:       deps.Replay,
@@ -103,6 +115,18 @@ func NewVerifier(cfg server.Config, deps server.Dependencies, opts Options) (*re
 		return nil, fmt.Errorf("serverresource: %w", err)
 	}
 	return v, nil
+}
+
+// resourceAssurance maps the server's assurance level to the
+// verifier's.
+func resourceAssurance(level server.AssuranceLevel) (resource.AssuranceLevel, error) {
+	switch level {
+	case server.AssuranceDevelopment:
+		return resource.AssuranceDevelopment, nil
+	case server.AssuranceProduction:
+		return resource.AssuranceProduction, nil
+	}
+	return 0, errors.New("serverresource: the server's assurance level is invalid")
 }
 
 func accessTokenResolver(cfg server.Config, issuer server.AccessTokenIssuer) (resource.AccessTokenResolver, error) {

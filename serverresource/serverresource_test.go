@@ -36,8 +36,9 @@ func serverConfig(t *testing.T) server.Config {
 		t.Fatal(err)
 	}
 	return server.Config{
-		Issuer: issuer,
-		Limits: server.Limits{AccessTokenLifetime: 5 * time.Minute, MaxDPoPProofAge: time.Minute, MaxClockSkew: 5 * time.Second},
+		Issuer:    issuer,
+		Limits:    server.Limits{AccessTokenLifetime: 5 * time.Minute, MaxDPoPProofAge: time.Minute, MaxClockSkew: 5 * time.Second},
+		Assurance: server.AssuranceDevelopment,
 	}
 }
 
@@ -204,4 +205,65 @@ func TestNewVerifierAccepts(t *testing.T) {
 			}
 		})
 	}
+}
+
+type declaredReplay struct {
+	*memstore.ReplayStore
+}
+
+func (declaredReplay) Capabilities() storage.Capabilities {
+	return storage.Capabilities{Durable: true, AtomicConsume: true}
+}
+
+// TestNewVerifierInheritsAssurance: the verifier is checked at the
+// server's own assurance level, so a production server's verifier
+// refuses what resource.AssuranceProduction refuses.
+func TestNewVerifierInheritsAssurance(t *testing.T) {
+	now := time.Now()
+	jwt := jwtAccessTokens(t)
+	production := serverConfig(t)
+	production.Assurance = server.AssuranceProduction
+
+	t.Run("production refuses an undeclared replay store", func(t *testing.T) {
+		_, err := serverresource.NewVerifier(production, serverDependencies(t, jwt, now), serverresource.Options{})
+		if err == nil || !strings.Contains(err.Error(), "resource: dependencies: replay must implement storage.StoreAssurance under AssuranceProduction") {
+			t.Fatalf("NewVerifier = %v, want the production replay check", err)
+		}
+	})
+	t.Run("production refuses undeclared nonces", func(t *testing.T) {
+		deps := serverDependencies(t, jwt, now)
+		deps.Replay = declaredReplay{memstore.NewReplayStore()}
+		deps.Revocation = server.NoRevocation{}
+		_, err := serverresource.NewVerifier(production, deps, serverresource.Options{Nonces: memstore.NewNonceStore(), NonceLifetime: time.Minute})
+		if err == nil || !strings.Contains(err.Error(), "resource: dependencies: nonces must implement storage.StoreAssurance") {
+			t.Fatalf("NewVerifier = %v, want the production nonces check", err)
+		}
+	})
+	t.Run("production accepts declared stores", func(t *testing.T) {
+		deps := serverDependencies(t, jwt, now)
+		deps.Replay = declaredReplay{memstore.NewReplayStore()}
+		deps.Revocation = server.NoRevocation{}
+		if _, err := serverresource.NewVerifier(production, deps, serverresource.Options{}); err != nil {
+			t.Fatalf("NewVerifier = %v, want accepted", err)
+		}
+	})
+	t.Run("production with HorizontallyScaled requires CrossInstanceConsistent", func(t *testing.T) {
+		scaled := production
+		scaled.HorizontallyScaled = true
+		deps := serverDependencies(t, jwt, now)
+		deps.Replay = declaredReplay{memstore.NewReplayStore()}
+		deps.Revocation = server.NoRevocation{}
+		_, err := serverresource.NewVerifier(scaled, deps, serverresource.Options{})
+		if err == nil || !strings.Contains(err.Error(), "replay must declare CrossInstanceConsistent") {
+			t.Fatalf("NewVerifier = %v, want the HorizontallyScaled check", err)
+		}
+	})
+	t.Run("invalid server level", func(t *testing.T) {
+		invalid := serverConfig(t)
+		invalid.Assurance = 0
+		_, err := serverresource.NewVerifier(invalid, serverDependencies(t, jwt, now), serverresource.Options{})
+		if err == nil || !strings.Contains(err.Error(), "assurance level is invalid") {
+			t.Fatalf("NewVerifier = %v, want the level refused", err)
+		}
+	})
 }

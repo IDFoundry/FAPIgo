@@ -460,7 +460,9 @@ consistent under `HorizontallyScaled` — plus an audit sink and
 can't declare that it is a CSPRNG), and rejects loopback `http` issuer
 and endpoint URLs. The assurance level is itself a
 required `Config.Assurance` choice with no default, so a caller can never
-end up on the development level by omission.
+end up on the development level by omission. `resource.NewVerifier`
+applies the same rule to the resource server's own key source and
+stores (`serverresource.NewVerifier` takes the server's level).
 
 **Policy is a bounded deployment decision, not a bypass.** The
 application's decision is a `GrantedAuthorization` passed to

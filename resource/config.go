@@ -33,4 +33,15 @@ type Limits struct {
 // effect.
 type Config struct {
 	Limits Limits
+
+	// Assurance is how strictly NewVerifier checks Dependencies; see
+	// AssuranceLevel. Required: the zero value is refused.
+	Assurance AssuranceLevel
+
+	// HorizontallyScaled declares that this verifier runs as more than
+	// one process/instance sharing the same storage tier. Under
+	// AssuranceProduction, every store AssuranceProduction checks must
+	// then also declare storage.Capabilities.CrossInstanceConsistent.
+	// Ignored under AssuranceDevelopment.
+	HorizontallyScaled bool
 }

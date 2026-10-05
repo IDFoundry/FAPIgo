@@ -71,7 +71,7 @@ func FuzzVerifyResourceRequest(f *testing.F) {
 		f.Fatalf("NewJWTAccessTokens: %v", err)
 	}
 	v, err := resource.NewVerifier(
-		resource.Config{Limits: resource.Limits{MaxDPoPProofAge: time.Minute, MaxClockSkew: 5 * time.Second}},
+		resource.Config{Limits: resource.Limits{MaxDPoPProofAge: time.Minute, MaxClockSkew: 5 * time.Second}, Assurance: resource.AssuranceDevelopment},
 		resource.Dependencies{
 			AccessTokens: jwtAccessTokens,
 			Replay:       memstore.NewReplayStore(),

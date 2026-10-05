@@ -36,7 +36,13 @@ A native client may use a private-use scheme in reverse-domain form,
 written with a single slash (`com.example.wallet:/callback`), or loopback
 `http` to `127.0.0.1` or `[::1]`, matched on any port. The server also
 needs `Config.AttestationBasedClientAuthentication` and an
-`AttesterTrust` (registered keys, or the attester's `x5c` chain).
+`AttesterTrust`: `server.RegisteredAttesterKeys` with the attesters'
+own keys, by issuer (a `keys.AttesterKeySource` such as
+`keys.StaticAttesterKeys` — never the clients' keys), or
+`server.X5CAttesterChain` to verify the attestation's `x5c` chain. With
+a trust list shared by several attesters, use its
+`AttesterIssuerBoundToAnchor` binding, so each anchor vouches only for
+the attesters it's bound to.
 
 ## Client: keys from the platform, attestation, and the redirect
 

@@ -94,8 +94,10 @@
 //     additionally requires an AuditSink, stores and key sources that
 //     declare production capabilities (storage.StoreAssurance,
 //     keys.KeySourceAssurance), signing and decryption keys with declared
-//     durable custody (keys.KeyCustodyAssurance), and crypto/rand.Reader
-//     as Dependencies.Random — see AssuranceProduction.
+//     durable custody (keys.KeyCustodyAssurance), crypto/rand.Reader
+//     as Dependencies.Random, a hardened CIBA notifier
+//     (BackchannelNotifierAssurance) when CIBA is configured, and https
+//     issuer, endpoint and mTLS alias URLs — see AssuranceProduction.
 //   - Every access token this server issues is sender-constrained,
 //     either by DPoP (RFC 9449) or by the client's mTLS certificate (RFC
 //     8705 §3), per the client's registered SenderConstrain. Under DPoP,

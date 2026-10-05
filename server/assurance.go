@@ -73,6 +73,9 @@ const (
 	// token, jti and DPoP nonce this server issues is only as
 	// unguessable as that reader, and nothing about an io.Reader says
 	// whether it is a CSPRNG.
+	// The issuer, every Endpoints URL and every Config.MTLSEndpoints
+	// alias must be https: one parsed with fapi.AllowLoopbackHTTP is
+	// refused.
 	// Unlike every check above, which New performs once, a web client's
 	// loopback http redirect URI is refused per request, at the pushed
 	// authorization request, as invalid_request — redirect URIs belong

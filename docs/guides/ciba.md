@@ -99,7 +99,8 @@ func backchannelAuthentication(w http.ResponseWriter, r *http.Request) {
    binding message and any Rich Authorization Request details.
    `LookupBackchannelInteraction` reads it back by handle later.
 2. **`CompleteBackchannelAuthentication`** records the user's decision
-   (`server.Authorize(...)` or a denial) against the handle, once. For a
+   (`server.Authorize(...)` or a denial) against the handle, once, and
+   refuses one made after the request expired (`expired_token`). For a
    ping client it then calls `Dependencies.BackchannelNotifier`.
 3. **`ExchangeBackchannelAuthentication`** serves the token endpoint's
    CIBA grant (`TokenEndpointRequest.BackchannelTokenExchange()`):
@@ -107,12 +108,20 @@ func backchannelAuthentication(w http.ResponseWriter, r *http.Request) {
    sooner than `Limits.BackchannelAuthenticationPollInterval`,
    `access_denied`, `expired_token` after
    `Limits.BackchannelAuthenticationRequestLifetime`, and on approval
-   sender-constrained tokens, issued exactly once.
+   sender-constrained tokens, issued exactly once. Another client
+   presenting the `auth_req_id` is refused without spending the
+   approval, as long as the store honours the poll's `ClientID` (the
+   bundled `memstore` does).
 
 Set `Dependencies.Backchannel` (`memstore.NewBackchannelAuthenticationStore()`
 to start) and `Dependencies.BackchannelNotifier`: `backchannelhttp.New`
 sends pings through a hardened HTTP client, and `NoBackchannelNotifications{}`
-declines them for a poll-only deployment. `Dependencies.BackchannelHints`
+declines them for a poll-only deployment. The notification endpoint is
+whatever the client registered, so under `AssuranceProduction` a
+notifier of your own must implement `server.BackchannelNotifierAssurance`
+and declare `OutboundHardened` — a promise to send as `backchannelhttp`
+does (refusing non-public addresses, following no redirects, with
+timeouts and a bounded response read) — or `server.New` refuses it. `Dependencies.BackchannelHints`
 can refuse a hint naming nobody (`unknown_user_id`) before the request is
 stored. A hint only says whose device to ask: the user's approval there
 is what authenticates them. The binding message is free text the client

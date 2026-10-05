@@ -100,7 +100,10 @@ payments, err := extension.RARGet(granted, paymentType)
 ```
 
 A token without the claim was granted none: the result is empty, never
-an error read as "nothing to check".
+an error read as "nothing to check". Refuse a request the granted
+details don't cover with `resource.NewInsufficientScopeError(authz,
+"...")`, sent with `resource.WriteError`: a 403 whose challenge uses
+the scheme the token was presented with.
 
 ## Checked for you
 

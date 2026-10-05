@@ -33,7 +33,10 @@ res, err := c.ProtectedResource(tokens).Do(ctx, req)
 
 `Do` sets `Authorization: DPoP <token>` and a fresh proof bound to the
 token (its `ath` claim), and retries once if the resource server
-challenges for a nonce.
+challenges for a nonce. It requires an `https` URL (loopback `http`
+only under `AssuranceDevelopment`) and never follows a redirect: a 3xx
+comes back as the response, so the token and proof are only ever sent
+to the URL you gave.
 
 ## Authorization server: verified for you
 

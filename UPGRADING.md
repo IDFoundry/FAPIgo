@@ -93,8 +93,10 @@ attester, which client registrations never feed.
 
 **Affects:** a client under `Config.Assurance = AssuranceProduction`
 whose issuer or any endpoint was parsed with `fapi.AllowLoopbackHTTP`
-(plain http to 127.0.0.1, [::1] or localhost), and a server under
-production whose `Config.MTLSEndpoints` has such a URL.
+(plain http to 127.0.0.1, [::1] or localhost), or that calls a
+protected resource (`ProtectedResource(...).Do`) at a loopback http URL,
+and a server under production whose `Config.MTLSEndpoints` has such a
+URL.
 
 **Why:** `fapi.AllowLoopbackHTTP` exists for a local development
 authorization server. `server.New` already refused it under production

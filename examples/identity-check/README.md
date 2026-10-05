@@ -127,7 +127,7 @@ Everything here uses FAPIgo's public API only.
 | Piece | FAPIgo |
 |---|---|
 | Alder Bank | `server.Server` with `Dependencies.IdentityClaims` (its customers' verified claims), `Dependencies.ClientKeys` and `Dependencies.ClientEncryptionKeys` both set to an `ephemeral.ClientKeySource` holding each client's registered JWK Set (its client-assertion key and the keys to encrypt to it), and `Algorithms.UserInfo` and the ID token and UserInfo encryption algorithms; clients registered for encrypted ID tokens and UserInfo responses; the consent page reading `InteractionRequest.RequestedClaims`, `ACRValues` and `MaxAge`, and answering with `GrantedAuthorization.ApprovedIdentityClaims` and `NewAuthenticationContext`'s `acr` and authentication time; discovery from `server.Metadata` plus `userinfo_endpoint` and `claims_supported` |
-| The UserInfo endpoint | `serverresource.NewVerifier`; the approved claim names from the access token's `server.RequestedUserinfoClaimsKey`; `Server.SignUserInfoResponse`, which signs and, for a client that registered for it, encrypts |
+| The UserInfo endpoint | `serverresource.NewVerifier`; the approved claim names from the access token's `server.RequestedUserinfoClaimsKey`; `serverresource.SignUserInfoResponse`, which signs for the access token's own client and, if it registered for it, encrypts |
 | Fernway, Brightline | `client.NewFromDiscovery`; `BeginAuthorization` with `Claims`, `ACRValues` and `MaxAge`; `ExchangeCode`, with `Dependencies.Decryption` for the encrypted ID token; `TokenSet.IDTokenClaims` (`ACR`, `AuthTime`, the claims); `FetchUserInfo` |
 
 The code:

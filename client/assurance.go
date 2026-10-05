@@ -50,6 +50,10 @@ const (
 	// nonce, PKCE verifiers and every jti this client signs are only as
 	// unguessable as that reader, and nothing about an io.Reader says
 	// whether it is a CSPRNG.
+	// The issuer and every Endpoints URL must be https (one parsed with
+	// fapi.AllowLoopbackHTTP is refused), and ProtectedResource's Do
+	// refuses a loopback http resource URL before sending anything. A
+	// native app's loopback redirect URI is unaffected.
 	AssuranceProduction
 )
 

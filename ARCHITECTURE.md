@@ -192,7 +192,9 @@ any `*http.Request` and sender-constrains it — a fresh DPoP proof plus
 the RFC 9449 §9 nonce-challenge retry under `SenderConstrainDPoP`, or a
 plain Bearer credential under `SenderConstrainMTLS` — entirely from
 `Config.SenderConstrain`, with no caller branching on which mode is
-active. `FetchUserInfo` is just this method's first caller, not a
+active. It sends only to an `https` URL (loopback `http` only under
+`AssuranceDevelopment`) and follows no redirect, so the credential never
+reaches an origin the caller didn't name. `FetchUserInfo` is just this method's first caller, not a
 special path: it builds a `GET Config.Endpoints.UserInfo` request and
 hands it to the same `Do`. A caller with its own protected resource
 (a FAPI 2.0 "accounts" endpoint, for instance) reuses `ProtectedResource(tokens).Do`
@@ -295,7 +297,9 @@ first.
 
 Callers supply a `Do(*http.Request) (*http.Response, error)`;
 `fapihttp` wraps it with strict TLS verification, response-size limits,
-bounded/no redirects, endpoint origin validation, timeouts, body-read
+bounded/no redirects (an `*http.Client` is copied with its own redirect
+following turned off, and a redirect another client followed itself is
+refused), endpoint origin validation, timeouts, body-read
 deadlines, SSRF restrictions on discovery/JWKS fetches, and
 content-type checks. The public API never asks a caller to hand-build
 a PAR body or similar wire-level payload.
@@ -456,10 +460,11 @@ consuming (`storage.StoreAssurance`), key sources with hardened live
 fetches (`keys.KeySourceAssurance`), signing keys and decryption keys
 held durably (`keys.KeyCustodyAssurance`; an HSM or KMS is not required,
 only that the keys survive a restart), each also cross-instance
-consistent under `HorizontallyScaled` — plus an audit sink and
+consistent under `HorizontallyScaled` — plus an audit sink,
 `crypto/rand.Reader` itself as `Dependencies.Random` (an `io.Reader`
-can't declare that it is a CSPRNG), and rejects loopback `http` issuer
-and endpoint URLs. The assurance level is itself a
+can't declare that it is a CSPRNG) and, with CIBA, a ping notifier
+declaring hardened outbound sending (`server.BackchannelNotifierAssurance`),
+and rejects loopback `http` issuer and endpoint URLs. The assurance level is itself a
 required `Config.Assurance` choice with no default, so a caller can never
 end up on the development level by omission. `resource.NewVerifier`
 applies the same rule to the resource server's own key source and
@@ -708,7 +713,8 @@ context and claims — is one opaque, versioned JSON value (`Request` or
 feature that changes what a grant carries never changes a store.
 `storage.ReplayStore` stores only a digest and expiry per use (`ReplayUse{Namespace, Digest,
 ExpiresAt}`) — never a complete client assertion, DPoP proof or other
-sensitive payload — and callers must assign it a namespaced identifier
+sensitive payload — and must keep each until at least that expiry (one
+forgotten sooner can be replayed); callers must assign it a namespaced identifier
 per role/subsystem (`server:client-assertion`, `server:request-object`,
 `server:dpop`, `resource:dpop`, ...) so different subsystems can never
 collide on the same use-once token.
@@ -716,8 +722,9 @@ collide on the same use-once token.
 Because a storage backend's atomicity/durability guarantees are
 self-asserted, `storage` also defines a `StoreAssurance.Capabilities`
 interface (durable, atomic-consume, serializable-redemption,
-cross-instance-consistent, encrypted-at-rest) that `server`'s
-`AssuranceProduction` mode checks at construction time, and a reusable
+cross-instance-consistent, encrypted-at-rest) that the `server`,
+`client` and `resource` `AssuranceProduction` levels check at
+construction time, and a reusable
 contract test suite (e.g. a `storage.TestGrantStoreContract(t,
 factory)` helper) that any storage implementation — first-party or
 downstream — runs for single-use redemption under concurrency, field

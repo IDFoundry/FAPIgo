@@ -15,6 +15,12 @@
 // resource server deployed separately builds its resource.Verifier
 // directly, against backends shared with the authorization server.
 //
+// For a UserInfo endpoint, UserInfoClaims narrows the identity claims to
+// those the access token's client requested and was granted, and
+// SignUserInfoResponse signs them (encrypting them for a client that
+// registered for it) for the client the access token was issued to, and
+// for its subject only.
+//
 // server and resource never import each other (ARCHITECTURE.md design
 // rule 14); this package imports both, so neither has to.
 package serverresource

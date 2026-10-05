@@ -76,7 +76,12 @@ callback, so a plain response can't stand in for a signed one.
 Signed UserInfo responses are opt-in under either profile. On the
 server, set `Algorithms.UserInfo` and `SignUserInfoResponse` signs the
 claims your UserInfo handler serves, always adding `iss` and `aud`, and
-encrypts them too for a client registered for encrypted UserInfo.
+encrypts them too for a client registered for encrypted UserInfo. In a
+UserInfo handler, call `serverresource.SignUserInfoResponse` with the
+verified access token's `resource.AuthorizationContext`: it resolves
+the client the token was issued to, so the response can only be
+addressed to that client, and refuses claims whose `sub` isn't the
+token's subject.
 On the client, setting `Algorithms.UserInfo` makes `FetchUserInfo`
 verify the response; `VerifyIssuerJWS` verifies any other
 issuer-signed artifact with the same keys.

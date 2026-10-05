@@ -42,10 +42,10 @@ variants and OAuth 2.0 attestation-based client authentication.
 - FAPI 2.0 Security Profile Final + Message Signing Final
 - PAR (RFC 9126) · DPoP (RFC 9449) · mTLS client auth & cert-bound tokens (RFC 8705), with CRL revocation checking
 - private_key_jwt client authentication
-- OAuth 2.0 Attestation-Based Client Authentication, including HAIP 1.0 x5c attester certificate chains
+- OAuth 2.0 Attestation-Based Client Authentication, including HAIP 1.0 x5c attester certificate chains, optionally binding each trust anchor to the attesters it may vouch for
 - JAR / JARM · RAR (RFC 9396) · CIBA (poll & ping delivery)
 - Refresh tokens (not rotated, per FAPI 2.0), whole-grant revocation, and token revocation (RFC 7009)
-- OpenID Connect: the `claims` parameter with per-claim consent, `acr_values` and enforced `max_age`, signed and encrypted ID tokens and UserInfo
+- OpenID Connect: the `claims` parameter with per-claim consent, `acr_values`, enforced `max_age` and `prompt` (`none` answered without UI, `login` enforced), signed and encrypted ID tokens and UserInfo
 - Native apps (RFC 8252): private-use URI scheme and any-port loopback redirect URIs, for clients registered as native
 - Grants you serve yourself at the token endpoint (OpenID4VCI's `pre-authorized_code`, say), with the server's own client authentication and DPoP/mTLS checks
 - OpenID Federation 1.0 (trust chains, automatic client registration, trust marks)

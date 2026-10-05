@@ -31,7 +31,12 @@ const contentTypeHeader = "Content-Type"
 // not at all (Post), so the HTTPClient must not follow one on its own:
 // New uses a copy of an *http.Client whose CheckRedirect never follows,
 // and a response from any other HTTPClient that did follow one is
-// refused with ErrRedirectFollowed.
+// refused with ErrRedirectFollowed. That copy can't be made of an
+// HTTPClient that isn't an *http.Client, such as a wrapper around one,
+// so Post sends such an HTTPClient its body once: an *http.Client inside
+// the wrapper fails a 307 or 308 rather than resend the body. A wrapper that follows a redirect of a Fetch, or a 301, 302
+// or 303 of a Post (which net/http turns into a body-less GET), still
+// sends that hop the request's headers before the response is refused.
 //
 // Strongly prefer an *http.Client built by NewClient. Its transport
 // resolves each host itself, validates every candidate address before
@@ -347,6 +352,10 @@ func (c *Client) doRoundTrip(ctx context.Context, method string, target *url.URL
 	if contentType != "" {
 		httpReq.Header.Set(contentTypeHeader, contentType)
 	}
+	// Post's body is sent once, to the target validated above: never
+	// resent to a 307/308 redirect target by an HTTPClient that would
+	// follow one (see HTTPClient).
+	nofollow.SendOnce(c.http, httpReq)
 	res, err := c.http.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("fapihttp: %w", err)

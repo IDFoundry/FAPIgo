@@ -46,6 +46,19 @@ type Dependencies struct {
 	// or DPoP proof to a target this client never chose — so New uses a
 	// copy of an *http.Client whose CheckRedirect never follows, and a
 	// response from any other HTTPClient that followed one is refused.
+	//
+	// That copy can't be made of an HTTPClient that isn't an
+	// *http.Client (a metrics or tracing wrapper around one, say), so
+	// the client sends such an HTTPClient every request body once: an
+	// *http.Client inside the wrapper can't resend a POST body — the
+	// client assertion, a code and its PKCE verifier — across a 307 or
+	// 308, and the call fails instead. A wrapper can still follow a redirect of a
+	// body-less request (a ResourceClient GET), or a 301, 302 or 303,
+	// which net/http turns into a body-less GET: that hop receives the
+	// request's headers, and the response is then refused. net/http
+	// drops Authorization for a hop to a host that isn't the original
+	// or a subdomain of it, but not the DPoP header. Prefer an
+	// *http.Client, or a wrapper whose own *http.Client never follows.
 	HTTP fapihttp.HTTPClient
 
 	// Clock supplies the current time.

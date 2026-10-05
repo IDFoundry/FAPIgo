@@ -63,6 +63,11 @@ func (c *Client) postForm(ctx context.Context, url string, body []byte, extraHea
 		req.Header.Set(k, v)
 	}
 
+	// The body carries the client assertion (and, for a code exchange,
+	// the code and PKCE verifier): sent once, never resent to a redirect
+	// target. A DPoP nonce retry builds a new request from body itself.
+	nofollow.SendOnce(c.deps.HTTP, req)
+
 	res, err := c.deps.HTTP.Do(req)
 	if err != nil {
 		return nil, 0, nil, fmt.Errorf("client: %w", err)

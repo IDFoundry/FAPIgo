@@ -114,3 +114,33 @@ func TestFetchAndPostRefuseAClientThatFollowedARedirect(t *testing.T) {
 		t.Fatalf("Post = %v, want ErrRedirectFollowed", err)
 	}
 }
+
+// wrappedClient is a metrics or tracing HTTPClient around an
+// *http.Client that follows redirects: New can't stop it following one.
+type wrappedClient struct{ c *http.Client }
+
+func (w wrappedClient) Do(req *http.Request) (*http.Response, error) { return w.c.Do(req) }
+
+// Post's body isn't resent across a 307 or 308 even through a wrapper
+// New couldn't make non-following.
+func TestPostBodyIsNotResentThroughAWrappingHTTPClient(t *testing.T) {
+	for _, status := range []int{http.StatusTemporaryRedirect, http.StatusPermanentRedirect} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			ts, hits := redirectServer(t, status)
+			c, err := fapihttp.New(wrappedClient{c: ts.Client()}, validLoopbackConfig())
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			_, err = c.Post(context.Background(), fapihttp.PostRequest{
+				URL: mustParseURL(t, ts.URL), Body: []byte("secret=1"),
+				ContentType: "application/x-www-form-urlencoded", ExpectedContentType: "application/json",
+			})
+			if err == nil || !strings.Contains(err.Error(), "never resent") {
+				t.Fatalf("Post(%d) = %v, want the body-not-resent refusal", status, err)
+			}
+			if n := hits.Load(); n != 0 {
+				t.Fatalf("redirect target was hit %d times, want 0", n)
+			}
+		})
+	}
+}

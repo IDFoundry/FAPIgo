@@ -58,6 +58,9 @@ func (s *refGrantStore) RedeemAuthorizationCode(_ context.Context, r storage.Aut
 	if !ok {
 		return storage.RedeemedAuthorizationCode{}, fmt.Errorf("unknown code")
 	}
+	if r.ClientID != "" && r.ClientID != code.ClientID {
+		return storage.RedeemedAuthorizationCode{}, fmt.Errorf("code was issued to another client")
+	}
 	s.redeemed[r.CodeHash] = true
 	return storage.RedeemedAuthorizationCode{
 		ClientID: code.ClientID, Grant: code.Grant, ExpiresAt: code.ExpiresAt,
@@ -441,5 +444,22 @@ func TestReferenceBackchannelStoreRefusesAnotherClientsPoll(t *testing.T) {
 		AuthReqIDHash: authReqIDHash, Now: time.Now(), ClientID: "client-2",
 	}); err == nil {
 		t.Fatal("poll by another client = nil error, want refused")
+	}
+}
+
+// TestReferenceGrantStoreRefusesAnotherClientsCode pins that the
+// reference store checks AuthorizationCodeRedemption.ClientID, so the
+// contract's subtest for it runs rather than skips against it.
+func TestReferenceGrantStoreRefusesAnotherClientsCode(t *testing.T) {
+	store := newRefGrantStore()
+	ctx := context.Background()
+	hash := sha256.Sum256([]byte("code"))
+	if err := store.CreateAuthorizationCode(ctx, storage.NewAuthorizationCode{
+		CodeHash: hash, ClientID: "client-1", ExpiresAt: time.Now().Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateAuthorizationCode: %v", err)
+	}
+	if _, err := store.RedeemAuthorizationCode(ctx, storage.AuthorizationCodeRedemption{CodeHash: hash, ClientID: "client-2"}); err == nil {
+		t.Fatal("redemption by another client = nil error, want refused")
 	}
 }

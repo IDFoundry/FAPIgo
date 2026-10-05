@@ -207,6 +207,7 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	codeHash := sha256.Sum256([]byte(code))
 	redeemed, err := s.deps.Grants.RedeemAuthorizationCode(ctx, storage.AuthorizationCodeRedemption{
 		CodeHash: codeHash,
+		ClientID: client.ID(),
 	})
 	if err != nil {
 		// RFC 6749 §4.1.2: "If an authorization code is used more than

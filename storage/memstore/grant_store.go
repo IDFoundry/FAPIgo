@@ -61,6 +61,9 @@ func (s *GrantStore) RedeemAuthorizationCode(_ context.Context, redemption stora
 	if !ok {
 		return storage.RedeemedAuthorizationCode{}, fmt.Errorf("memstore: unknown code")
 	}
+	if redemption.ClientID != "" && redemption.ClientID != code.ClientID {
+		return storage.RedeemedAuthorizationCode{}, fmt.Errorf("memstore: code was issued to another client")
+	}
 	s.codeRedeemed[redemption.CodeHash] = true
 	return storage.RedeemedAuthorizationCode{
 		ClientID: code.ClientID, Grant: cloneRawMessage(code.Grant), ExpiresAt: code.ExpiresAt,

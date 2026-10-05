@@ -70,6 +70,19 @@ type AuthorizationCodeRedemption struct {
 	// CodeHash is the SHA-256 digest of the presented code value — the
 	// same digest CreateAuthorizationCode stored it under.
 	CodeHash [32]byte
+
+	// ClientID is the authenticated client presenting the code. When it
+	// is set, a store must refuse a not-yet-redeemed code that was
+	// issued to another client (NewAuthorizationCode.ClientID) with an
+	// error, without consuming the code or otherwise changing it, so a
+	// client holding a leaked code can't spend another client's
+	// authorization. A code that was already redeemed is still reported
+	// with *AuthorizationCodeAlreadyRedeemedError whoever presents it:
+	// its ClientID tells the server whether to revoke. Empty means no
+	// such check, as before. A store that ignores it stays safe: the
+	// server refuses another client's code after redemption anyway, but
+	// by then the code has been spent.
+	ClientID fapi.ClientID
 }
 
 // RedeemedAuthorizationCode is what RedeemAuthorizationCode returns for
@@ -124,7 +137,9 @@ type GrantStore interface {
 	// BeginAuthorization and CompleteAuthorization do. On a repeat call
 	// specifically (as opposed to an unknown code), the returned error
 	// must satisfy errors.As into *AuthorizationCodeAlreadyRedeemedError
-	// — see its own doc comment.
+	// — see its own doc comment. A code issued to a client other than a
+	// non-empty AuthorizationCodeRedemption.ClientID is refused without
+	// being consumed — see that field's doc comment.
 	RedeemAuthorizationCode(ctx context.Context, redemption AuthorizationCodeRedemption) (RedeemedAuthorizationCode, error)
 
 	// RecordIssuedAccessToken associates the access token's

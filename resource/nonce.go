@@ -58,6 +58,9 @@ func (v *Verifier) checkDPoPNonce(ctx context.Context, presented string, now tim
 	valid := false
 	if presented != "" {
 		record, err := v.deps.Nonces.Consume(ctx, storage.NonceConsumption{Nonce: presented})
+		if err != nil && storeUnavailable(err) {
+			return newError(ErrorServerError, 500, "failed to check dpop nonce", err)
+		}
 		valid = err == nil && !now.After(record.ExpiresAt)
 	}
 	if valid {

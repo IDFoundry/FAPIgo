@@ -34,6 +34,12 @@ type ReplayUse struct {
 // forgets it earlier (an LRU, a size cap, a TTL shorter than
 // ExpiresAt) lets the same value be replayed. A store may drop entries
 // once ExpiresAt has passed.
+//
+// UseOnce's error means the digest was already recorded, unless it
+// wraps ErrStoreUnavailable (the store couldn't answer at all), or
+// context.Canceled or context.DeadlineExceeded; a resource server
+// answers those with 500 server_error rather than refusing the DPoP
+// proof as replayed.
 type ReplayStore interface {
 	UseOnce(ctx context.Context, use ReplayUse) error
 }

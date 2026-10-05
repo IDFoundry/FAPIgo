@@ -80,7 +80,8 @@ type AccessTokenStore interface {
 	// same way every other *Redeemed/LookedUp* type in this package is
 	// checked by its caller. resource.OpaqueAccessTokens answers any
 	// error with 401 invalid_token, except one wrapping
-	// context.Canceled or context.DeadlineExceeded, which it answers
-	// with 500 server_error.
+	// ErrStoreUnavailable, context.Canceled or context.DeadlineExceeded,
+	// which it answers with 500 server_error: wrap ErrStoreUnavailable
+	// when the store couldn't answer at all.
 	LookupAccessToken(ctx context.Context, lookup AccessTokenLookup) (LookedUpAccessToken, error)
 }

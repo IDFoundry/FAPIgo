@@ -146,6 +146,7 @@ func TestAccessTokenLookupFailureClassification(t *testing.T) {
 		{"unknown token", errors.New("not found"), resource.ErrorInvalidToken, 401},
 		{"deadline exceeded", fmt.Errorf("db: %w", context.DeadlineExceeded), resource.ErrorServerError, 500},
 		{"cancelled", fmt.Errorf("db: %w", context.Canceled), resource.ErrorServerError, 500},
+		{"store unavailable", fmt.Errorf("db: %w", storage.ErrStoreUnavailable), resource.ErrorServerError, 500},
 	} {
 		t.Run("opaque "+tc.name, func(t *testing.T) {
 			_, err := resource.OpaqueAccessTokens{Store: failingAccessTokenStore{err: tc.err}}.ResolveAccessToken(context.Background(), resource.ResolveAccessTokenRequest{Raw: "tok"})
@@ -184,4 +185,65 @@ func assertResourceError(t *testing.T, err error, wantCode resource.ErrorCode, w
 	if !errors.Is(err, wantCause) {
 		t.Errorf("err doesn't wrap the store's error %v", wantCause)
 	}
+}
+
+// TestDPoPStoreUnavailable: a replay or nonce store that couldn't
+// answer (wrapping storage.ErrStoreUnavailable, or a cancelled or
+// timed-out context) is a 500 server_error, not a refused DPoP proof
+// or a fresh nonce challenge; any other error keeps today's answer.
+func TestDPoPStoreUnavailable(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		err        error
+		wantCode   resource.ErrorCode
+		wantStatus int
+	}{
+		{"store unavailable", fmt.Errorf("redis: %w", storage.ErrStoreUnavailable), resource.ErrorServerError, 500},
+		{"deadline exceeded", fmt.Errorf("redis: %w", context.DeadlineExceeded), resource.ErrorServerError, 500},
+		{"cancelled", fmt.Errorf("redis: %w", context.Canceled), resource.ErrorServerError, 500},
+	} {
+		t.Run("replay "+tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			f.replay.err = tc.err
+			_, err := f.verifier.Verify(context.Background(), resource.VerifyRequest{
+				Method: "GET", URL: f.target,
+				Authorization: "DPoP " + f.accessToken,
+				DPoPProofs:    []string{f.dpopProof},
+			})
+			assertResourceError(t, err, tc.wantCode, tc.wantStatus, tc.err)
+		})
+		t.Run("nonce "+tc.name, func(t *testing.T) {
+			f := newNonceFixture(t, "presented-nonce", failingNonceStore{err: tc.err})
+			_, err := f.verify(t)
+			assertResourceError(t, err, tc.wantCode, tc.wantStatus, tc.err)
+		})
+	}
+
+	t.Run("replay already used", func(t *testing.T) {
+		f := newFixture(t)
+		f.replay.err = errors.New("already used")
+		_, err := f.verifier.Verify(context.Background(), resource.VerifyRequest{
+			Method: "GET", URL: f.target,
+			Authorization: "DPoP " + f.accessToken,
+			DPoPProofs:    []string{f.dpopProof},
+		})
+		assertResourceError(t, err, resource.ErrorInvalidDPoPProof, 401, f.replay.err)
+	})
+	t.Run("nonce unknown", func(t *testing.T) {
+		f := newNonceFixture(t, "presented-nonce", failingNonceStore{err: errors.New("unknown nonce")})
+		_, err := f.verify(t)
+		var rerr *resource.Error
+		if !errors.As(err, &rerr) || rerr.Code() != resource.ErrorUseDPoPNonce || rerr.HTTPStatus() != 401 {
+			t.Fatalf("err = %v, want a 401 use_dpop_nonce challenge", err)
+		}
+	})
+}
+
+// failingNonceStore issues nonces but fails every Consume with err.
+type failingNonceStore struct{ err error }
+
+func (failingNonceStore) Issue(context.Context, storage.NonceIssuance) error { return nil }
+
+func (s failingNonceStore) Consume(context.Context, storage.NonceConsumption) (storage.NonceRecord, error) {
+	return storage.NonceRecord{}, s.err
 }

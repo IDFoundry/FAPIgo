@@ -359,6 +359,9 @@ func (v *Verifier) consumeDPoPProof(ctx context.Context, proof dpop.VerifiedProo
 		}
 	}
 	if err := v.dpopReplayChecker().UseOnce(ctx, proof.JTI, proof.IssuedAt.Add(v.cfg.Limits.MaxDPoPProofAge)); err != nil {
+		if storeUnavailable(err) {
+			return newError(ErrorServerError, 500, "failed to check DPoP proof replay", err)
+		}
 		return newError(ErrorInvalidDPoPProof, 401, "DPoP proof verification failed", fmt.Errorf("dpop: replay check: %w", err))
 	}
 	return nil

@@ -41,6 +41,10 @@ type NonceStore interface {
 	// exactly like SessionStore.Consume, so a captured nonce can never
 	// be presented twice. It returns an error if the nonce is unknown or
 	// already consumed; the caller checks the returned record's own
-	// expiry (ExpiresAt) against the time it's verifying at.
+	// expiry (ExpiresAt) against the time it's verifying at. An error
+	// wrapping ErrStoreUnavailable (the store couldn't answer at all),
+	// context.Canceled or context.DeadlineExceeded is answered by a
+	// resource server with 500 server_error instead of a fresh
+	// use_dpop_nonce challenge.
 	Consume(ctx context.Context, consumption NonceConsumption) (NonceRecord, error)
 }

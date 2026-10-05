@@ -29,14 +29,14 @@ import (
 // fresh, empty one.
 type nonceFixture struct {
 	verifier    *resource.Verifier
-	nonces      *memstore.NonceStore
+	nonces      storage.NonceStore
 	replay      *fakeReplayStore
 	accessToken string
 	dpopProof   string
 	target      *url.URL
 }
 
-func newNonceFixture(t *testing.T, proofNonce string, nonces *memstore.NonceStore) nonceFixture {
+func newNonceFixture(t *testing.T, proofNonce string, nonces storage.NonceStore) nonceFixture {
 	t.Helper()
 
 	issuerKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

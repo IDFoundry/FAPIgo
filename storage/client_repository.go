@@ -280,11 +280,23 @@ type RegisteredClientConfig struct {
 	ExpectedCertificateThumbprint string
 
 	// ExpectedSubjectDN is the exact string this client's certificate's
-	// subject must match, via Go's own pkix.Name.String() serialization
-	// (crypto/x509.Certificate.Subject.String()) — not full RFC 4514
-	// canonicalization, so this comparison is case-sensitive and
-	// attribute-order-sensitive; register the DN exactly as Go
-	// serializes the client's actual certificate. Required only when
+	// subject must match. Either of two forms matches:
+	//
+	//   - the RFC 4514 string of the certificate's subject as encoded
+	//     (pkix.RDNSequence.String() of the certificate's RawSubject),
+	//     which keeps every attribute, its order and its RDN grouping.
+	//     Prefer this form;
+	//   - Go's pkix.Name.String() serialization
+	//     (crypto/x509.Certificate.Subject.String()), which rebuilds the
+	//     subject in Go's own attribute order and groups repeated
+	//     attributes into one RDN, so it doesn't tell apart subjects
+	//     that differ only in attribute order or grouping. It keeps one
+	//     CN and one serialNumber, so a subject with more than one of
+	//     either never matches in this form.
+	//
+	// Neither is RFC 4514 canonicalization: the comparison is
+	// case-sensitive, and the string must be registered exactly as the
+	// client's actual certificate serializes. Required only when
 	// ClientAuthMethod is ClientAuthMethodTLSClientAuth.
 	ExpectedSubjectDN string
 

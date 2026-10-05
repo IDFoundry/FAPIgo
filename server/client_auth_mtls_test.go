@@ -475,17 +475,15 @@ func TestPushAuthorizationRequestTLSClientAuthSuccess(t *testing.T) {
 }
 
 func TestPushAuthorizationRequestTLSClientAuthRejectsMismatchedSubject(t *testing.T) {
-	h, cert := newHarnessWithClientAuthTLSSubjectDN(t)
-	// selfSignedTestClientCert always uses the same CommonName, so a
-	// second call wouldn't actually differ in Subject — mutate a copy of
-	// the registered cert's own Subject instead, to guarantee a genuine
-	// mismatch while everything else about the certificate (and
-	// therefore its thumbprint, irrelevant here) stays realistic.
-	wrongCert := *cert
-	wrongCert.Subject.CommonName = "someone-else"
+	// The client is registered for another subject; the certificate it
+	// presents is its own, trusted, and genuinely names a different one
+	// (editing a parsed certificate's Subject field would leave the
+	// signed RawSubject, which the match also reads, unchanged).
+	cert := selfSignedTestClientCert(t)
+	h := newHarnessWithClientAuthTLSSubjectDNValue(t, cert, "CN=someone-else")
 	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
 		HTTP:            server.FormRequest{Parameters: certFormParameters(nil)},
-		PeerCertificate: &wrongCert,
+		PeerCertificate: cert,
 	})
 	if err == nil {
 		t.Fatalf("PushAuthorizationRequest(mismatched subject) = nil error, want error")

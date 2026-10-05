@@ -148,6 +148,16 @@ type DecidedBackchannelAuthentication struct {
 type PollBackchannelAuthentication struct {
 	AuthReqIDHash [32]byte
 	Now           time.Time
+
+	// ClientID is the authenticated client polling. When it is set, a
+	// store must refuse a record that belongs to another client with an
+	// error, without consuming the record or otherwise changing it (not
+	// even its last-poll time), so a client holding a leaked auth_req_id
+	// can't spend someone else's approval. Empty means no such check,
+	// as before. A store that ignores it stays safe: the server refuses
+	// another client's record after the poll anyway, but by then an
+	// approval has been spent.
+	ClientID fapi.ClientID
 }
 
 // PolledBackchannelAuthentication is what a successful
@@ -241,6 +251,16 @@ type BackchannelAuthenticationStore interface {
 	//     *BackchannelAuthenticationAlreadyRedeemedError — an approved
 	//     auth_req_id issues tokens exactly once (CIBA §10.3), the same
 	//     single-use guarantee RedeemAuthorizationCode has.
-	// It returns a plain error if AuthReqIDHash is unknown.
+	// It returns a plain error if AuthReqIDHash is unknown, and, before
+	// any of the above, a plain error that leaves the record unchanged
+	// if poll.ClientID is set and the record belongs to another client
+	// (see PollBackchannelAuthentication.ClientID).
+	//
+	// An approval is spent by the poll that observes it, before tokens
+	// are issued: a failure after that (the client's DPoP key doesn't
+	// match the request's binding, its registration no longer allows
+	// the grant, or token issuance fails) leaves it spent, as a failed
+	// exchange spends an authorization code. The client starts a new
+	// request.
 	PollBackchannelAuthentication(ctx context.Context, poll PollBackchannelAuthentication) (PolledBackchannelAuthentication, error)
 }

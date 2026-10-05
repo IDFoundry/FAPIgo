@@ -153,3 +153,23 @@ func TestGrantStoreReportsTheReusedCodesClient(t *testing.T) {
 		t.Fatalf("reuse error = %v, want ClientID client-1", err)
 	}
 }
+
+// TestBackchannelAuthenticationStoreRefusesAnotherClientsPoll pins that
+// memstore checks PollBackchannelAuthentication.ClientID, so the
+// contract's subtest for it runs rather than skips here.
+func TestBackchannelAuthenticationStoreRefusesAnotherClientsPoll(t *testing.T) {
+	store := NewBackchannelAuthenticationStore()
+	ctx := context.Background()
+	authReqIDHash := sha256.Sum256([]byte("auth-req"))
+	if err := store.CreateBackchannelAuthentication(ctx, storage.NewBackchannelAuthentication{
+		AuthReqIDHash: authReqIDHash, HandleHash: sha256.Sum256([]byte("handle")), ClientID: "client-1",
+		DeliveryMode: "poll", PollInterval: time.Second, ExpiresAt: time.Now().Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateBackchannelAuthentication: %v", err)
+	}
+	if _, err := store.PollBackchannelAuthentication(ctx, storage.PollBackchannelAuthentication{
+		AuthReqIDHash: authReqIDHash, Now: time.Now(), ClientID: "client-2",
+	}); err == nil {
+		t.Fatal("poll by another client = nil error, want refused")
+	}
+}

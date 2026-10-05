@@ -44,6 +44,12 @@ type requestRecord struct {
 	// they were validated (see Server.interactionExtensions). Zero in a
 	// record written before this field existed.
 	ExtensionSource extension.Source `json:"extension_source,omitempty"`
+
+	// ExpiresAt is when a CIBA request expires, so a decision recorded
+	// after it can be refused (the store's own expiry check only runs
+	// when the client polls). Nil for a pushed authorization request,
+	// and in a CIBA record written before this field existed.
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
 // grantRecord is what an authorization code, refresh token or approved

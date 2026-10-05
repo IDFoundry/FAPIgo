@@ -31,7 +31,10 @@ type CompleteBackchannelAuthenticationRequest struct {
 // embedder's own out-of-band authentication component has a decision:
 // it records Result against Handle (single-use — a second call with the
 // same handle fails), for a subsequent ExchangeBackchannelAuthentication
-// poll to observe. Unlike CompleteAuthorization, there is no redirect to
+// poll to observe. A decision of any kind made once the request's
+// lifetime has passed is refused with ErrorExpiredToken and not
+// recorded, so a ping client is never notified about a request it can
+// no longer redeem. Unlike CompleteAuthorization, there is no redirect to
 // assemble here, so a nil return means success — there is no
 // AuthorizationResult-style sum type to build, since CIBA has nothing
 // to redirect to. A non-nil return is always a *Error (satisfying this
@@ -43,6 +46,28 @@ func (s *Server) CompleteBackchannelAuthentication(ctx context.Context, req Comp
 		HandleHash: handleHash,
 	}
 
+	// Looked up for every outcome: an approval's granted scope and
+	// details are validated against the original request (mirroring
+	// completeAuthorize's identical check for the PAR flow), and no
+	// decision of any kind is recorded once the request has expired.
+	pending, lookupErr := s.deps.Backchannel.LookupBackchannelAuthentication(ctx, handleHash)
+	if lookupErr != nil {
+		wrapped := newError(ErrorInvalidRequest, 400, "backchannel authentication handle is invalid, expired, or already decided", lookupErr)
+		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, "", AuditOutcomeFailure, string(wrapped.Code()))
+		return wrapped
+	}
+	request, decodeErr := decodeRequestRecord(pending.Request)
+	if decodeErr != nil {
+		wrapped := newError(ErrorServerError, 500, "failed to decode backchannel authentication request", decodeErr)
+		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, pending.ClientID, AuditOutcomeFailure, string(wrapped.Code()))
+		return wrapped
+	}
+	if request.ExpiresAt != nil && !s.deps.Clock.Now().Before(*request.ExpiresAt) {
+		wrapped := newError(ErrorExpiredToken, 400, "backchannel authentication request has expired", nil)
+		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, pending.ClientID, AuditOutcomeFailure, string(wrapped.Code()))
+		return wrapped
+	}
+
 	switch result := req.Result.(type) {
 	case authorizeResult:
 		if result.subject.id.value == "" {
@@ -51,22 +76,6 @@ func (s *Server) CompleteBackchannelAuthentication(ctx context.Context, req Comp
 			return err
 		}
 
-		// Looked up unconditionally (not just when authorization_details
-		// is granted, as before) — granted scope must be validated
-		// against the original request's own scope on every approval,
-		// mirroring completeAuthorize's identical check for the PAR flow.
-		pending, lookupErr := s.deps.Backchannel.LookupBackchannelAuthentication(ctx, handleHash)
-		if lookupErr != nil {
-			wrapped := newError(ErrorInvalidRequest, 400, "backchannel authentication handle is invalid, expired, or already decided", lookupErr)
-			s.audit(ctx, AuditEventCompleteBackchannelAuthentication, "", AuditOutcomeFailure, string(wrapped.Code()))
-			return wrapped
-		}
-		request, decodeErr := decodeRequestRecord(pending.Request)
-		if decodeErr != nil {
-			wrapped := newError(ErrorServerError, 500, "failed to decode backchannel authentication request", decodeErr)
-			s.audit(ctx, AuditEventCompleteBackchannelAuthentication, pending.ClientID, AuditOutcomeFailure, string(wrapped.Code()))
-			return wrapped
-		}
 		requestedScope, _ := jsonString(request.Parameters, "scope")
 		if scopeErr := validateGrantedScopeSubset(result.grant.Scope, requestedScope); scopeErr != nil {
 			wrapped := newError(ErrorInvalidRequest, 400, "granted scope exceeds requested scope", scopeErr)

@@ -2,6 +2,7 @@ package storage_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -393,6 +394,9 @@ func (s *refBackchannelAuthenticationStore) PollBackchannelAuthentication(_ cont
 	if !ok {
 		return storage.PolledBackchannelAuthentication{}, fmt.Errorf("unknown auth_req_id")
 	}
+	if poll.ClientID != "" && poll.ClientID != rec.record.ClientID {
+		return storage.PolledBackchannelAuthentication{}, fmt.Errorf("reference store: auth_req_id belongs to another client")
+	}
 	if rec.redeemed {
 		return storage.PolledBackchannelAuthentication{}, &storage.BackchannelAuthenticationAlreadyRedeemedError{}
 	}
@@ -418,4 +422,24 @@ func TestBackchannelAuthenticationStoreContractAgainstReference(t *testing.T) {
 	storage.TestBackchannelAuthenticationStoreContract(t, func() storage.BackchannelAuthenticationStore {
 		return newRefBackchannelAuthenticationStore()
 	})
+}
+
+// TestReferenceBackchannelStoreRefusesAnotherClientsPoll pins that the
+// reference store checks PollBackchannelAuthentication.ClientID, so the
+// contract's subtest for it runs rather than skips against it.
+func TestReferenceBackchannelStoreRefusesAnotherClientsPoll(t *testing.T) {
+	store := newRefBackchannelAuthenticationStore()
+	ctx := context.Background()
+	authReqIDHash := sha256.Sum256([]byte("auth-req"))
+	if err := store.CreateBackchannelAuthentication(ctx, storage.NewBackchannelAuthentication{
+		AuthReqIDHash: authReqIDHash, HandleHash: sha256.Sum256([]byte("handle")), ClientID: "client-1",
+		DeliveryMode: "poll", PollInterval: time.Second, ExpiresAt: time.Now().Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateBackchannelAuthentication: %v", err)
+	}
+	if _, err := store.PollBackchannelAuthentication(ctx, storage.PollBackchannelAuthentication{
+		AuthReqIDHash: authReqIDHash, Now: time.Now(), ClientID: "client-2",
+	}); err == nil {
+		t.Fatal("poll by another client = nil error, want refused")
+	}
 }

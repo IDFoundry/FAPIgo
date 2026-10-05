@@ -40,7 +40,9 @@ type ClientCredentialsTokenRequest struct {
 // whatever subset of the client's own registered scopes it explicitly
 // requests. There is no authorization code to redeem and no end user —
 // no ID token, no refresh token (RFC 6749 §4.4.3 says a refresh token
-// "SHOULD NOT" be included), no PAR/redirect_uri/PKCE at all. Disabled
+// "SHOULD NOT" be included), no PAR/redirect_uri/PKCE at all; a request
+// for the "openid" or "offline_access" scope is refused with
+// ErrorInvalidScope, even from a client registered for them. Disabled
 // entirely unless both Config.ClientCredentialsGrant is set and the
 // authenticated client's own AllowsClientCredentialsGrant() is true —
 // see both fields' own doc comments for why this needs two separate
@@ -81,6 +83,14 @@ func (s *Server) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), newError(ErrorInvalidScope, 400, "scope is required", nil))
 	}
 	for _, tok := range scopeTokens {
+		// No end user takes part, so there is no identity to request
+		// (an access token scoped to openid would carry the client's
+		// own ID as its subject, which a UserInfo endpoint would serve
+		// as a user's) and no refresh token to ask for: refuse both
+		// rather than issue a token whose scope claims either.
+		if tok == "openid" || tok == "offline_access" {
+			return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), newError(ErrorInvalidScope, 400, "the client_credentials grant has no end user: "+tok+" cannot be requested", nil))
+		}
 		if !s.clientAllowsScope(client, tok) {
 			return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), newError(ErrorInvalidScope, 400, "scope is not valid for this client", nil))
 		}

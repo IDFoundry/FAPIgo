@@ -151,6 +151,12 @@ func testGrantStoreRedeemAuthorizationCodeReuseReportsIssuedTokens(t *testing.T,
 	if alreadyRedeemed.IssuedRefreshTokenHash == nil || *alreadyRedeemed.IssuedRefreshTokenHash != refreshHash {
 		t.Fatalf("IssuedRefreshTokenHash = %v, want %v", alreadyRedeemed.IssuedRefreshTokenHash, refreshHash)
 	}
+	// ClientID may be left empty (the server then revokes whoever
+	// presents the code), but a store that sets it must name the client
+	// the code was issued to.
+	if alreadyRedeemed.ClientID != "" && alreadyRedeemed.ClientID != "client-1" {
+		t.Fatalf("ClientID = %q, want %q (the code's client) or empty", alreadyRedeemed.ClientID, "client-1")
+	}
 }
 
 // testGrantStoreRedeemAuthorizationCodeReuseWithoutRecordingReportsEmpty

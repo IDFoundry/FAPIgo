@@ -49,6 +49,7 @@ func (s *GrantStore) RedeemAuthorizationCode(_ context.Context, redemption stora
 	if s.codeRedeemed[redemption.CodeHash] {
 		err := &storage.AuthorizationCodeAlreadyRedeemedError{
 			IssuedAccessTokenKey: s.codeAccessKey[redemption.CodeHash],
+			ClientID:             s.codes[redemption.CodeHash].ClientID,
 		}
 		if hash, ok := s.codeRefreshHash[redemption.CodeHash]; ok {
 			h := hash

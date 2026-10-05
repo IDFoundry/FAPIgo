@@ -46,7 +46,7 @@ func (s *refGrantStore) RedeemAuthorizationCode(_ context.Context, r storage.Aut
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.redeemed[r.CodeHash] {
-		err := &storage.AuthorizationCodeAlreadyRedeemedError{IssuedAccessTokenKey: s.codeAccessKey[r.CodeHash]}
+		err := &storage.AuthorizationCodeAlreadyRedeemedError{IssuedAccessTokenKey: s.codeAccessKey[r.CodeHash], ClientID: s.codes[r.CodeHash].ClientID}
 		if hash, ok := s.codeRefreshHash[r.CodeHash]; ok {
 			h := hash
 			err.IssuedRefreshTokenHash = &h

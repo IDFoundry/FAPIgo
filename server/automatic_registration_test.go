@@ -189,8 +189,11 @@ func TestNewRejectsInvalidAutomaticRegistrationConfig(t *testing.T) {
 	validDeps.Clock = fixedClock{now: f.now}
 
 	cases := map[string]func(*server.Config, *server.Dependencies){
-		"empty allowed scopes":     func(c *server.Config, d *server.Dependencies) { c.AutomaticRegistration.AllowedScopes = nil },
-		"zero max cache age":       func(c *server.Config, d *server.Dependencies) { c.AutomaticRegistration.MaxCacheAge = 0 },
+		"empty allowed scopes": func(c *server.Config, d *server.Dependencies) { c.AutomaticRegistration.AllowedScopes = nil },
+		"zero max cache age":   func(c *server.Config, d *server.Dependencies) { c.AutomaticRegistration.MaxCacheAge = 0 },
+		"negative failure cache age": func(c *server.Config, d *server.Dependencies) {
+			c.AutomaticRegistration.FailureCacheAge = -time.Second
+		},
 		"zero max path length":     func(c *server.Config, d *server.Dependencies) { c.AutomaticRegistration.MaxPathLength = 0 },
 		"zero max authority hints": func(c *server.Config, d *server.Dependencies) { c.AutomaticRegistration.MaxAuthorityHints = 0 },
 		"nil federation http":      func(c *server.Config, d *server.Dependencies) { d.FederationHTTP = nil },

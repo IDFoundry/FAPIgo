@@ -549,6 +549,13 @@ type AutomaticRegistrationConfig struct {
 	// TrustAnchors is set.
 	MaxCacheAge time.Duration
 
+	// FailureCacheAge is how long a failed automatic registration is
+	// remembered for the same client_id, so repeated requests naming it
+	// don't each repeat the Trust Chain resolution — see
+	// federation.AutomaticRegistrationConfig.FailureCacheAge. Zero means
+	// federation.DefaultFailureCacheAge.
+	FailureCacheAge time.Duration
+
 	// AllowsClientCredentialsGrant permits every automatically-registered
 	// client to use the client_credentials grant — see
 	// federation.AutomaticRegistrationConfig.AllowsClientCredentialsGrant

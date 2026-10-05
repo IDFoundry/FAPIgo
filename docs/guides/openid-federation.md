@@ -59,8 +59,11 @@ beyond the authorization code flow is your grant, never its own metadata's:
 `AllowedScopes`, `AllowsClientCredentialsGrant`, `AllowsCIBA` and
 `AllowedClientAuthMethods`. A resolved registration is cached for at most
 `MaxCacheAge`, so a superior that stops vouching for a client takes
-effect within that time. `OnResolutionFailure` tells your operator why a
-client was refused; the client itself only sees `invalid_client`.
+effect within that time. A failed one is remembered for `FailureCacheAge`
+(10 seconds by default), so requests repeating a client_id that doesn't
+resolve don't each repeat the outbound fetches. `OnResolutionFailure` tells
+your operator why a client was refused, once per resolution attempted; the
+client itself only sees `invalid_client`.
 
 ## Relying party: be resolvable, and find providers
 

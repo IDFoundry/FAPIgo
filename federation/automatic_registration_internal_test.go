@@ -10,6 +10,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -641,4 +642,45 @@ func testFetcher(t *testing.T, servers ...*httptest.Server) *fapihttp.Client {
 		t.Fatalf("fapihttp.New: %v", err)
 	}
 	return fetcher
+}
+
+// TestRememberFailureStaysWithinItsCap: client_ids cost an attacker
+// nothing, so the failure cache never grows past maxFailedResolutions —
+// a full cache drops expired entries first, and otherwise leaves a new
+// failure unremembered rather than growing.
+func TestRememberFailureStaysWithinItsCap(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	repo := &AutomaticClientRepository{
+		cfg:      AutomaticRegistrationConfig{FailureCacheAge: time.Minute},
+		failures: make(map[fapi.ClientID]failedResolution),
+	}
+	failed := context.DeadlineExceeded // any error
+	for i := range maxFailedResolutions {
+		repo.rememberFailure(fapi.ClientID(fmt.Sprintf("https://rp%d.example", i)), failed, now)
+	}
+	if len(repo.failures) != maxFailedResolutions {
+		t.Fatalf("failures = %d, want the cap %d", len(repo.failures), maxFailedResolutions)
+	}
+
+	// Full, nothing expired: a new failure isn't remembered.
+	repo.rememberFailure("https://new.example", failed, now.Add(time.Second))
+	if _, ok := repo.failures["https://new.example"]; ok || len(repo.failures) != maxFailedResolutions {
+		t.Fatalf("full cache with nothing expired remembered a new failure (len %d)", len(repo.failures))
+	}
+
+	// An already-remembered client_id is still refreshed when full.
+	repo.rememberFailure("https://rp0.example", failed, now.Add(time.Second))
+	if got := repo.failures["https://rp0.example"].expiresAt; !got.Equal(now.Add(time.Second + time.Minute)) {
+		t.Fatalf("refreshed failure expires at %v, want %v", got, now.Add(time.Second+time.Minute))
+	}
+
+	// Once entries have expired, a new failure evicts them.
+	later := now.Add(2 * time.Minute)
+	repo.rememberFailure("https://new.example", failed, later)
+	if _, ok := repo.failures["https://new.example"]; !ok {
+		t.Fatal("failure not remembered after expired entries could be dropped")
+	}
+	if len(repo.failures) != 1 {
+		t.Fatalf("failures after eviction = %d, want 1 (every earlier entry had expired)", len(repo.failures))
+	}
 }

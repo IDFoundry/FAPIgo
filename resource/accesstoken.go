@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -271,7 +272,7 @@ func (o OpaqueAccessTokens) ResolveAccessToken(ctx context.Context, req ResolveA
 	hash := sha256.Sum256([]byte(req.Raw))
 	looked, err := o.Store.LookupAccessToken(ctx, storage.AccessTokenLookup{TokenHash: hash})
 	if err != nil {
-		return ResolvedAccessToken{}, newError(ErrorInvalidToken, 401, "access token is invalid", err)
+		return ResolvedAccessToken{}, lookupError(err)
 	}
 	return ResolvedAccessToken{
 		Subject:         looked.Subject,
@@ -283,4 +284,23 @@ func (o OpaqueAccessTokens) ResolveAccessToken(ctx context.Context, req ResolveA
 		SenderConstrain: looked.SenderConstrain,
 		Key:             hex.EncodeToString(hash[:]),
 	}, nil
+}
+
+// lookupError classifies an error resolving an access token. A store
+// that couldn't answer (see storeUnavailable) says nothing about the
+// token, so it is a 500 server_error rather than telling the client its
+// token is invalid; any other error means the token is unknown (see
+// storage.AccessTokenStore's LookupAccessToken), a 401 invalid_token.
+func lookupError(err error) *Error {
+	if storeUnavailable(err) {
+		return newError(ErrorServerError, 500, "failed to look up the access token", err)
+	}
+	return newError(ErrorInvalidToken, 401, "access token is invalid", err)
+}
+
+// storeUnavailable reports whether err is a store failing to answer
+// rather than answering no: it wraps storage.ErrStoreUnavailable, or a
+// cancelled or timed-out context.
+func storeUnavailable(err error) bool {
+	return errors.Is(err, storage.ErrStoreUnavailable) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }

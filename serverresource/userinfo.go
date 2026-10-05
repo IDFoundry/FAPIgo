@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"slices"
 
 	"github.com/idfoundry/fapigo/resource"
@@ -32,7 +31,7 @@ import (
 // signed UserInfo, or write it as JSON.
 func UserInfoClaims(ctx context.Context, authz resource.AuthorizationContext, source server.IdentityClaimsSource) (map[string]json.RawMessage, error) {
 	if !slices.Contains(authz.Scopes, "openid") {
-		return nil, resource.NewError(resource.ErrorInsufficientScope, http.StatusForbidden, "the access token wasn't granted the openid scope")
+		return nil, resource.NewInsufficientScopeError(authz, "the access token wasn't granted the openid scope")
 	}
 	var names []string
 	if raw, ok := authz.Claims[server.RequestedUserinfoClaimsKey]; ok {

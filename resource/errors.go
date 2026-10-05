@@ -40,7 +40,8 @@ const (
 	// is valid, and only the protected resource knows whether it covers
 	// the request — its scope, or its granted authorization_details
 	// (RFC 9396). An adapter reports that with
-	// NewError(ErrorInsufficientScope, http.StatusForbidden, ...).
+	// NewInsufficientScopeError, which sends it with a challenge in the
+	// scheme the token was presented with.
 	ErrorInsufficientScope ErrorCode = "insufficient_scope"
 )
 
@@ -84,8 +85,33 @@ func newError(code ErrorCode, httpStatus int, description string, cause error) *
 // routing rejecting something before it ever calls Verify (a malformed
 // Authorization header, more than one DPoP header — see
 // dpop.ResolveHeaderValues). Mirrors server.NewError.
+//
+// code must be RFC 6750 §3 error text (printable ASCII without a double
+// quote or backslash), or empty for a request presenting no credentials
+// (see Code), and httpStatus a 4xx or 5xx status; otherwise the result
+// is a 500 server_error instead, so a mistake here can't inject into
+// the WWW-Authenticate challenge or panic when written. A description
+// outside the same character set is dropped.
+//
+// An error built here is sent with a Bearer challenge. To refuse a
+// verified token for the request it was presented with — a scope or
+// authorization_details it doesn't cover — use NewInsufficientScopeError,
+// which matches the challenge to the token's scheme.
 func NewError(code ErrorCode, httpStatus int, description string) *Error {
-	return &Error{code: code, httpStatus: httpStatus, description: description}
+	c, status, desc := httperror.Normalize(string(code), httpStatus, description, true)
+	return &Error{code: ErrorCode(c), httpStatus: status, description: desc}
+}
+
+// NewInsufficientScopeError builds the 403 insufficient_scope error
+// (RFC 6750 §3.1) for a request Verify accepted as authz but whose
+// token doesn't cover what it asks for. Its challenge uses the scheme
+// the request presented the token with, as RFC 9449 §7.1 asks: DPoP for
+// a DPoP-bound token, Bearer otherwise. description follows NewError's
+// rules.
+func NewInsufficientScopeError(authz AuthorizationContext, description string) *Error {
+	e := NewError(ErrorInsufficientScope, http.StatusForbidden, description)
+	e.dpopChallenge = authz.usedDPoP
+	return e
 }
 
 // Code returns the error code — empty for a request that presented no
@@ -134,6 +160,8 @@ func (e *Error) Unwrap() error { return e.cause }
 //   - An error for a request that used the DPoP scheme, and
 //     ErrorUseDPoPNonce and ErrorInvalidDPoPProof, gets a DPoP challenge
 //     with the error and algs.
+//   - NewInsufficientScopeError's error for a DPoP-bound token gets a
+//     DPoP challenge with the error and algs.
 //   - Anything else, including every error built with NewError, gets a
 //     Bearer challenge with the error.
 //
@@ -144,7 +172,7 @@ func (e *Error) WriteJSON(w http.ResponseWriter) {
 	switch {
 	case e.code == "":
 		w.Header().Set(wwwAuthenticate, `Bearer, DPoP algs="`+dpopAlgorithms+`"`)
-		w.WriteHeader(e.httpStatus)
+		w.WriteHeader(httperror.Status(e.httpStatus))
 		return
 	case e.dpopChallenge || e.code == ErrorUseDPoPNonce || e.code == ErrorInvalidDPoPProof:
 		w.Header().Set(wwwAuthenticate, `DPoP error="`+string(e.code)+`", algs="`+dpopAlgorithms+`"`)

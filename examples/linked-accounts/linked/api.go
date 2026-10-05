@@ -64,7 +64,7 @@ func (a *api) accounts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(details) == 0 {
-		resource.NewError(resource.ErrorInsufficientScope, http.StatusForbidden, "the token grants no account access").WriteJSON(w)
+		resource.NewInsufficientScopeError(authz, "the token grants no account access").WriteJSON(w)
 		return
 	}
 	c, _ := customerByName(authz.Subject)

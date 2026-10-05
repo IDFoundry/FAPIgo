@@ -75,8 +75,8 @@ func (a *api) verify(r *http.Request) (resource.AuthorizationContext, error) {
 
 // forbidden is RFC 6750 §3.1's insufficient_scope: a valid token that
 // doesn't cover this request.
-func forbidden(w http.ResponseWriter, description string) {
-	resource.NewError(resource.ErrorInsufficientScope, http.StatusForbidden, description).WriteJSON(w)
+func forbidden(w http.ResponseWriter, authz resource.AuthorizationContext, description string) {
+	resource.NewInsufficientScopeError(authz, description).WriteJSON(w)
 }
 
 // granted reads the details of def's type authz's token was granted.
@@ -133,11 +133,11 @@ func (a *api) pay(w http.ResponseWriter, r *http.Request) {
 	})
 	if !approved {
 		// RFC 6750 §3: error_description is printable ASCII, so no "€".
-		forbidden(w, fmt.Sprintf("the customer didn't approve paying EUR %s to %s", order.InstructedAmount.Amount, order.CreditorAccount.IBAN))
+		forbidden(w, authz, fmt.Sprintf("the customer didn't approve paying EUR %s to %s", order.InstructedAmount.Amount, order.CreditorAccount.IBAN))
 		return
 	}
 	if !a.useOnce(r.Context(), authz) {
-		forbidden(w, "this approval was for one payment, and it has been made")
+		forbidden(w, authz, "this approval was for one payment, and it has been made")
 		return
 	}
 	c, _ := customerByHint(authz.Subject)
@@ -177,7 +177,7 @@ func (a *api) readAccount(w http.ResponseWriter, r *http.Request) {
 		return slices.Contains(g.Fields.Actions, action) && slices.Contains(g.Fields.Accounts, account{IBAN: iban})
 	})
 	if !approved {
-		forbidden(w, fmt.Sprintf("the customer didn't approve %s for %s", actionLabels[action], iban))
+		forbidden(w, authz, fmt.Sprintf("the customer didn't approve %s for %s", actionLabels[action], iban))
 		return
 	}
 	c, _ := customerByHint(authz.Subject)

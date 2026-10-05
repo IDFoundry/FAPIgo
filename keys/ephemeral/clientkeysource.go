@@ -280,8 +280,15 @@ func (s *ClientKeySource) cachedOrRateLimited(entry *clientKeyEntry, wantKeyID s
 	return clientKeys{}, false, nil
 }
 
+// refetch fetches entry's JWKS and records the outcome for every caller
+// of that client. The fetch is detached from ctx's cancellation, as
+// keys.JWKSIssuerKeySource's is: fapihttp.Client.Fetch applies its own
+// RequestTimeout, so it still can't hang, but one caller giving up (a
+// client disconnecting mid-request) can't be recorded as the client's
+// fetch failure and refuse everyone else's requests for refreshBackoff.
+// The caller still gets its own ctx's error once the fetch is done.
 func (s *ClientKeySource) refetch(ctx context.Context, entry *clientKeyEntry) (clientKeys, error) {
-	parsed, err := s.fetch(ctx, entry)
+	parsed, err := s.fetch(context.WithoutCancel(ctx), entry)
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
 	entry.lastAttempt = s.now()
@@ -291,6 +298,9 @@ func (s *ClientKeySource) refetch(ctx context.Context, entry *clientKeyEntry) (c
 	}
 	entry.cached = &parsed
 	entry.cachedAt = entry.lastAttempt
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return clientKeys{}, ctxErr
+	}
 	return parsed, nil
 }
 

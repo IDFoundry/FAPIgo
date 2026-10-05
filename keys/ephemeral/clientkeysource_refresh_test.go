@@ -192,3 +192,28 @@ func TestClientKeySourceMinRefreshIntervalDefaultsToCacheTTL(t *testing.T) {
 		t.Fatalf("fetches = %d once the cache TTL has passed, want 2", got)
 	}
 }
+
+// TestClientKeySourceCallerCancellationDoesNotFailOthers: a caller
+// giving up mid-request (its context cancelled) mustn't be recorded as
+// the client's fetch failure, which would refuse every other request
+// for that client for the backoff without fetching.
+func TestClientKeySourceCallerCancellationDoesNotFailOthers(t *testing.T) {
+	h := newRefreshHarness(t)
+	if _, err := h.resolve("kid-1"); err != nil {
+		t.Fatalf("resolve(kid-1): %v", err)
+	}
+	*h.now = h.now.Add(2 * time.Minute) // past the cache TTL
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := h.src.ResolveVerificationKeys(cancelled, keys.ClientKeyRequest{
+		ClientID: "client-1", Algorithm: fapi.ES256, KeyID: "kid-1",
+	}); err == nil {
+		t.Fatal("resolve with a cancelled context = nil error, want the context's error")
+	}
+
+	set, err := h.resolve("kid-1")
+	if err != nil || len(set.Keys) != 1 {
+		t.Fatalf("resolve(kid-1) after another caller cancelled = %+v, %v; want the key", set.Keys, err)
+	}
+}

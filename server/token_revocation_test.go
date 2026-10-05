@@ -332,3 +332,80 @@ func TestRevokeTokenReportsTheGrantItEnded(t *testing.T) {
 		t.Fatalf("RevokeToken(already revoked) = %+v, %v; want nothing revoked", got, err)
 	}
 }
+
+// TestRevokeTokenFailsClosed covers a failure part way through revoking
+// a refresh token whose grant has a GrantID. The grant is revoked
+// first: if that fails, the refresh token is left for a retry to find
+// and finish; if deleting the token fails after it, the grant is
+// already revoked, so the token is refused with it.
+func TestRevokeTokenFailsClosed(t *testing.T) {
+	storeDown := errors.New("store unavailable")
+	issue := func(t *testing.T) (harness, *attestedInstance, string) {
+		attesterKey := generateKey(t)
+		h := newRevocationHarness(t, attesterKey)
+		owner := &attestedInstance{t: t, h: h, attesterKey: attesterKey, instanceKey: generateKey(t)}
+		attested, binding := embedderTokenRequest(t, owner)
+		rt, err := h.server.IssueRefreshToken(context.Background(), server.IssueRefreshTokenRequest{
+			GrantType: preAuthorizedCodeGrant, Client: attested, Binding: binding,
+			Subject: mustSubjectID(t, "holder-1"), Scope: []string{"accounts"}, GrantID: "grant-1",
+		})
+		if err != nil {
+			t.Fatalf("IssueRefreshToken: %v", err)
+		}
+		return h, owner, rt.Reveal()
+	}
+
+	t.Run("grant revocation fails", func(t *testing.T) {
+		h, owner, refreshToken := issue(t)
+		h.revocation.fail = storeDown
+		if code := serverErrorCode(t, owner.revoke(formParam("token", refreshToken))); code != server.ErrorServerError {
+			t.Fatalf("RevokeToken = code %q, want server_error", code)
+		}
+		h.revocation.fail = nil
+		result, err := owner.revokeResult(formParam("token", refreshToken))
+		if err != nil || !result.Revoked || result.GrantID != "grant-1" {
+			t.Fatalf("retry = %+v, %v; want the token found and grant-1 revoked", result, err)
+		}
+	})
+
+	t.Run("token deletion fails", func(t *testing.T) {
+		h, owner, refreshToken := issue(t)
+		h.grants.failRevokeRefresh = storeDown
+		if code := serverErrorCode(t, owner.revoke(formParam("token", refreshToken))); code != server.ErrorServerError {
+			t.Fatalf("RevokeToken = code %q, want server_error", code)
+		}
+		h.grants.failRevokeRefresh = nil
+		h.revocation.mu.Lock()
+		_, revoked := h.revocation.until["grant:grant-1"]
+		h.revocation.mu.Unlock()
+		if !revoked {
+			t.Fatal("the grant wasn't revoked before the token deletion failed")
+		}
+		if _, err := owner.refresh(refreshToken); serverErrorCode(t, err) != server.ErrorInvalidGrant {
+			t.Fatalf("refresh after the partial revocation: %v, want invalid_grant", err)
+		}
+	})
+}
+
+// TestRevokeTokenSearchesPastTheHint covers RFC 7009 §2.1's "the hint
+// is only a hint": a refresh token sent with token_type_hint
+// access_token is still revoked, while a token that isn't one is
+// answered unsupported_token_type, as the access token it was said to
+// be.
+func TestRevokeTokenSearchesPastTheHint(t *testing.T) {
+	attesterKey := generateKey(t)
+	h := newRevocationHarness(t, attesterKey)
+	owner := &attestedInstance{t: t, h: h, attesterKey: attesterKey, instanceKey: generateKey(t)}
+	refreshToken := owner.issueRefreshToken()
+
+	result, err := owner.revokeResult(formParam("token", refreshToken), formParam("token_type_hint", "access_token"))
+	if err != nil || !result.Revoked {
+		t.Fatalf("revoking a refresh token hinted as an access token = %+v, %v; want it revoked", result, err)
+	}
+	if _, err := owner.refresh(refreshToken); serverErrorCode(t, err) != server.ErrorInvalidGrant {
+		t.Fatalf("refresh after revocation: %v, want invalid_grant", err)
+	}
+	if code := serverErrorCode(t, owner.revoke(formParam("token", "opaque-access-token"), formParam("token_type_hint", "access_token"))); code != server.ErrorUnsupportedTokenType {
+		t.Fatalf("revoking an unknown token hinted as an access token = code %q, want unsupported_token_type", code)
+	}
+}

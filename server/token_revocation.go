@@ -76,11 +76,18 @@ type TokenRevocationResult struct {
 // 7009 §2.2 answers an invalid token that way, and a response that told
 // these apart would confirm the token exists to whoever presented it.
 //
-// Only refresh tokens can be revoked. An access token — token_type_hint
-// "access_token", or a token in JWT form — is refused with
-// unsupported_token_type (RFC 7009 §2.2.1): access tokens are
-// short-lived, and revoking one would need every resource server to
-// check a per-token record. Revoke the grant instead (RevokeGrant).
+// Only refresh tokens can be revoked. A token in JWT form, or one sent
+// with token_type_hint "access_token" that isn't a refresh token this
+// client may revoke, is refused with unsupported_token_type (RFC 7009
+// §2.2.1): access tokens are short-lived, and revoking one would need
+// every resource server to check a per-token record. Revoke the grant
+// instead (RevokeGrant). The hint is only a hint (RFC 7009 §2.1): a
+// refresh token sent as "access_token" is still revoked.
+//
+// A grant is revoked before its refresh token is deleted, so a failure
+// part way (answered server_error) never leaves the grant's access
+// tokens working with the refresh token gone: a retry finds the token
+// and finishes, or the grant is already revoked and the token with it.
 //
 // Every call records an AuditEventRevokeToken.
 func (s *Server) RevokeToken(ctx context.Context, req TokenRevocationRequest) (TokenRevocationResult, error) {
@@ -101,12 +108,20 @@ func (s *Server) RevokeToken(ctx context.Context, req TokenRevocationRequest) (T
 	if token == "" {
 		return TokenRevocationResult{}, s.revocationFail(ctx, client.ID(), newError(ErrorInvalidRequest, 400, "token is required", nil))
 	}
-	if params["token_type_hint"] == "access_token" || strings.Contains(token, ".") {
-		return TokenRevocationResult{}, s.revocationFail(ctx, client.ID(), newError(ErrorUnsupportedTokenType, 400, "only refresh tokens can be revoked", nil))
+	unsupported := newError(ErrorUnsupportedTokenType, 400, "only refresh tokens can be revoked", nil)
+	if strings.Contains(token, ".") {
+		return TokenRevocationResult{}, s.revocationFail(ctx, client.ID(), unsupported)
 	}
 	result, revokeErr := s.revokeRefreshToken(ctx, client.ID(), authn.InstanceKey, token)
 	if revokeErr != nil {
 		return TokenRevocationResult{}, s.revocationFail(ctx, client.ID(), revokeErr)
+	}
+	// The hint only orders the search (RFC 7009 §2.1), so a refresh
+	// token sent as "access_token" is still revoked above. One that
+	// isn't a refresh token this client may revoke is answered as the
+	// access token it was said to be, which this server can't revoke.
+	if !result.Revoked && params["token_type_hint"] == "access_token" {
+		return TokenRevocationResult{}, s.revocationFail(ctx, client.ID(), unsupported)
 	}
 	// The client gets the same 200 either way; the audit record says
 	// whether anything was revoked, so an operator can see requests for
@@ -135,13 +150,18 @@ func (s *Server) revokeRefreshToken(ctx context.Context, clientID fapi.ClientID,
 		// its grant already revoked: nothing this client may revoke.
 		return TokenRevocationResult{}, nil
 	}
-	if err := s.deps.Grants.RevokeRefreshToken(ctx, sha256.Sum256([]byte(rawToken))); err != nil {
-		return TokenRevocationResult{}, newError(ErrorServerError, 500, "failed to revoke the refresh token", err)
-	}
+	// The grant goes first: if that fails, the refresh token is still
+	// there for the client to revoke again, and once it succeeds the
+	// token is refused with its grant even if deleting it then fails.
+	// The other order could leave the token deleted but the grant's
+	// access tokens working, with a retry answered "not revoked".
 	if grant.GrantID != "" {
 		if err := s.RevokeGrant(ctx, grant.GrantID); err != nil {
 			return TokenRevocationResult{}, newError(ErrorServerError, 500, "failed to revoke the refresh token's grant", err)
 		}
+	}
+	if err := s.deps.Grants.RevokeRefreshToken(ctx, sha256.Sum256([]byte(rawToken))); err != nil {
+		return TokenRevocationResult{}, newError(ErrorServerError, 500, "failed to revoke the refresh token", err)
 	}
 	return TokenRevocationResult{Revoked: true, GrantID: grant.GrantID}, nil
 }

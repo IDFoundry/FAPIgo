@@ -1,8 +1,10 @@
 package nofollow_test
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/idfoundry/fapigo/internal/nofollow"
@@ -92,5 +94,44 @@ func TestFollowedWithoutURLs(t *testing.T) {
 				t.Fatal("Followed = true without both URLs")
 			}
 		})
+	}
+}
+
+// wrapper is a Doer that isn't an *http.Client.
+type wrapper struct{ c *http.Client }
+
+func (w wrapper) Do(req *http.Request) (*http.Response, error) { return w.c.Do(req) }
+
+func TestSendOnce(t *testing.T) {
+	newPost := func() *http.Request {
+		req, err := http.NewRequest(http.MethodPost, "https://as.example.com/token", strings.NewReader("a=1"))
+		if err != nil {
+			t.Fatalf("NewRequest: %v", err)
+		}
+		return req
+	}
+
+	req := newPost()
+	nofollow.SendOnce(wrapper{c: &http.Client{}}, req)
+	if req.GetBody == nil {
+		t.Fatal("SendOnce left GetBody nil; net/http's unwritten-request retry needs it set")
+	}
+	if body, err := req.GetBody(); body != nil || !errors.Is(err, nofollow.ErrBodyNotResent) {
+		t.Fatalf("GetBody() = %v, %v; want nil, ErrBodyNotResent", body, err)
+	}
+
+	own := newPost()
+	nofollow.SendOnce(nofollow.Client(&http.Client{}), own)
+	if body, err := own.GetBody(); err != nil || body == nil {
+		t.Fatalf("SendOnce changed an *http.Client's GetBody: %v, %v", body, err)
+	}
+
+	get, err := http.NewRequest(http.MethodGet, "https://rs.example.com/accounts", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	nofollow.SendOnce(wrapper{c: &http.Client{}}, get)
+	if get.GetBody != nil {
+		t.Fatal("SendOnce set GetBody on a body-less request")
 	}
 }

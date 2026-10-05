@@ -188,7 +188,13 @@ func (rc *ResourceClient) send(ctx context.Context, signer crypto.Signer, req *h
 // didn't arrive over TLS — the checks postForm applies to this client's
 // own calls.
 func (rc *ResourceClient) do(req *http.Request) (*http.Response, error) {
-	res, err := rc.client.deps.HTTP.Do(req)
+	// Hand Dependencies.HTTP a copy whose body is sent once: the
+	// caller's own GetBody stays on req for this client's DPoP nonce
+	// retry (rebuildRequestBody), but the HTTPClient never gets to
+	// resend the body to a redirect target.
+	sent := req.Clone(req.Context())
+	nofollow.SendOnce(rc.client.deps.HTTP, sent)
+	res, err := rc.client.deps.HTTP.Do(sent)
 	if err != nil {
 		return nil, err
 	}

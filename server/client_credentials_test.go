@@ -49,6 +49,7 @@ func newHarnessWithClientCredentialsGrant(t *testing.T, senderConstrain storage.
 		t.Fatalf("ParseIssuerURL: %v", err)
 	}
 
+	clients := &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}}
 	transactions := &fakeTransactionStore{}
 	grants := &fakeGrantStore{}
 	audit := &fakeAuditSink{}
@@ -83,7 +84,7 @@ func newHarnessWithClientCredentialsGrant(t *testing.T, senderConstrain storage.
 	}
 	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
 	deps := server.Dependencies{
-		Clients:      &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
+		Clients:      clients,
 		Transactions: transactions,
 		Grants:       grants,
 		Replay:       &fakeReplayStore{},
@@ -103,7 +104,7 @@ func newHarnessWithClientCredentialsGrant(t *testing.T, senderConstrain storage.
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
-	return harness{server: srv, key: key, serverKey: serverKey, transactions: transactions, grants: grants, audit: audit, revocation: revocation, now: now}
+	return harness{server: srv, clients: clients, key: key, serverKey: serverKey, transactions: transactions, grants: grants, audit: audit, revocation: revocation, now: now}
 }
 
 func clientCredentialsFormParams(assertion, scope string) []server.FormParameter {
@@ -684,5 +685,46 @@ func TestRequestClientCredentialsTokenAuditsOutcomes(t *testing.T) {
 	}
 	if h.audit.events[1].Type != server.AuditEventRequestClientCredentialsToken || h.audit.events[1].Outcome != server.AuditOutcomeSuccess {
 		t.Fatalf("second event = %+v, want RequestClientCredentialsToken/Success", h.audit.events[1])
+	}
+}
+
+// TestRequestClientCredentialsTokenRefusesEndUserScopes covers a client
+// registered for openid and offline_access (as one also used for the
+// authorization code flow would be): the client_credentials grant has no
+// end user, so either scope is refused with invalid_scope, alone or
+// alongside an ordinary scope, and an ordinary scope alone still works.
+func TestRequestClientCredentialsTokenRefusesEndUserScopes(t *testing.T) {
+	h := newHarnessWithClientCredentialsGrant(t, storage.SenderConstrainDPoP, true)
+	client, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
+		ID:                           testClientID,
+		RedirectURIs:                 []fapi.RegisteredRedirectURI{testRedirectURI},
+		ClientAssertionAlgorithm:     fapi.ES256,
+		SenderConstrain:              storage.SenderConstrainDPoP,
+		AllowedScopes:                []string{"openid", "offline_access", "accounts"},
+		AllowsClientCredentialsGrant: true,
+	})
+	if err != nil {
+		t.Fatalf("NewRegisteredClient: %v", err)
+	}
+	h.clients.clients[testClientID] = client
+
+	for _, scope := range []string{"openid", "offline_access", "accounts openid", "offline_access accounts"} {
+		_, err := h.server.RequestClientCredentialsToken(context.Background(), server.ClientCredentialsTokenRequest{
+			HTTP:       server.FormRequest{Parameters: clientCredentialsFormParams(h.clientAssertion(t), scope)},
+			DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
+		})
+		if serverErrorCode(t, err) != server.ErrorInvalidScope {
+			t.Fatalf("scope %q: %v, want invalid_scope", scope, err)
+		}
+	}
+	result, err := h.server.RequestClientCredentialsToken(context.Background(), server.ClientCredentialsTokenRequest{
+		HTTP:       server.FormRequest{Parameters: clientCredentialsFormParams(h.clientAssertion(t), "accounts")},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
+	})
+	if err != nil {
+		t.Fatalf("scope accounts: %v", err)
+	}
+	if result.IDToken.Reveal() != "" || result.RefreshToken.Reveal() != "" {
+		t.Fatalf("client_credentials result carries an ID token or refresh token")
 	}
 }

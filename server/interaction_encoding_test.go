@@ -156,6 +156,7 @@ func TestInteractionRequestFullRoundTrip(t *testing.T) {
 	in := server.InteractionRequest{
 		ClientID: testClientID, Scope: []string{"openid", "accounts"},
 		Hints:           server.AuthenticationHints{LoginHint: "alice"},
+		Prompt:          server.Prompt{server.PromptLogin, server.PromptConsent},
 		ClientDisplay:   storage.ClientDisplay{Name: "RP", LogoURI: logo, PolicyURI: policy, TermsOfServiceURI: tos},
 		RequestedClaims: server.RequestedClaims{IDToken: []string{"email"}, UserInfo: []string{"name"}},
 		Extensions:      extensions,

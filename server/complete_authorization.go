@@ -90,6 +90,12 @@ func (s *Server) CompleteAuthorization(ctx context.Context, req CompleteAuthoriz
 		return s.completeErrorRedirect(ctx, completed.ClientID, redirectURI, state, "access_denied", result.reason, AuditOutcomeFailure)
 	case authenticationFailedResult:
 		return s.completeErrorRedirect(ctx, completed.ClientID, redirectURI, state, "login_required", result.reason, AuditOutcomeFailure)
+	case interactionNeededResult:
+		code := result.need.errorCode()
+		if code == "" {
+			return s.completeLocalFail(ctx, completed.ClientID, newError(ErrorServerError, 500, "unrecognized interaction need", nil)), nil
+		}
+		return s.completeErrorRedirect(ctx, completed.ClientID, redirectURI, state, code, result.reason, AuditOutcomeFailure)
 	default:
 		return s.completeLocalFail(ctx, completed.ClientID, newError(ErrorServerError, 500, "unrecognized interaction result", nil)), nil
 	}

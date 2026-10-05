@@ -108,7 +108,7 @@ func (rc *ResourceClient) Do(ctx context.Context, req *http.Request) (*http.Resp
 	if req == nil {
 		return nil, newError(ErrorInvalidRequest, "request is nil", nil)
 	}
-	if err := checkResourceURL(req.URL); err != nil {
+	if err := checkResourceURL(rc.client.cfg.Assurance, req.URL); err != nil {
 		return nil, newError(ErrorInvalidRequest, "protected resource URL is not allowed", err)
 	}
 	c := rc.client
@@ -205,15 +205,20 @@ func (rc *ResourceClient) do(req *http.Request) (*http.Response, error) {
 
 // checkResourceURL applies fapi.ParseEndpointURL's rules, with loopback
 // http allowed, to a protected resource request's URL — ignoring a
-// fragment, which is never sent.
-func checkResourceURL(u *url.URL) error {
+// fragment, which is never sent — and then checkProductionScheme's, so
+// loopback http is refused under AssuranceProduction as it is for the
+// client's own endpoints.
+func checkResourceURL(assurance AssuranceLevel, u *url.URL) error {
 	if u == nil {
 		return errors.New("request has no URL")
 	}
 	target := *u
 	target.Fragment, target.RawFragment = "", ""
-	_, err := fapi.ParseEndpointURL(target.String(), fapi.AllowLoopbackHTTP())
-	return err
+	parsed, err := fapi.ParseEndpointURL(target.String(), fapi.AllowLoopbackHTTP())
+	if err != nil {
+		return err
+	}
+	return checkProductionScheme(assurance, "protected resource URL", parsed.URL())
 }
 
 // isResourceDPoPNonceChallenge reports whether status/header is a

@@ -1,6 +1,10 @@
 package client_test
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -63,4 +67,53 @@ func TestNewRejectsLoopbackHTTPURLsUnderProduction(t *testing.T) {
 			t.Fatalf("New(production, loopback redirect URI): %v", err)
 		}
 	})
+}
+
+// countingHTTP records whether a request was sent at all.
+type countingHTTP struct{ calls *int }
+
+func (c countingHTTP) Do(*http.Request) (*http.Response, error) {
+	*c.calls++
+	return nil, errors.New("countingHTTP: no response")
+}
+
+func TestProtectedResourceDoRejectsLoopbackHTTPUnderProduction(t *testing.T) {
+	for _, tc := range []struct {
+		assurance client.AssuranceLevel
+		refused   bool
+	}{
+		{client.AssuranceProduction, true},
+		{client.AssuranceDevelopment, false},
+	} {
+		t.Run(fmt.Sprint(tc.assurance), func(t *testing.T) {
+			cfg := validConfig(t)
+			cfg.Assurance = tc.assurance
+			deps := validDependencies(t)
+			if tc.assurance == client.AssuranceProduction {
+				deps = productionDeps(t)
+			}
+			var calls int
+			deps.HTTP = countingHTTP{calls: &calls}
+			c, err := client.New(cfg, deps)
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			rc := c.ProtectedResource(client.TokenSet{AccessToken: fapi.NewSecret("test-access-token")})
+			req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://127.0.0.1:9999/accounts", nil)
+			if err != nil {
+				t.Fatalf("NewRequestWithContext: %v", err)
+			}
+			_, err = rc.Do(context.Background(), req)
+			refused := err != nil && strings.Contains(err.Error(), "protected resource URL was parsed with fapi.AllowLoopbackHTTP")
+			if refused != tc.refused {
+				t.Fatalf("Do(loopback http) error = %v, want refused = %v", err, tc.refused)
+			}
+			if tc.refused && calls != 0 {
+				t.Fatalf("Do sent %d request(s), want none", calls)
+			}
+			if !tc.refused && calls != 1 {
+				t.Fatalf("Do sent %d request(s), want 1", calls)
+			}
+		})
+	}
 }

@@ -38,10 +38,11 @@ import (
 //
 // A deployment customises which anchors to trust — per client, from a
 // trust list, refreshed however it likes — through X5CAttesterChain's
-// AttesterTrustAnchors (or AttesterAnchorSource, which also binds each
-// anchor to the attesters it may vouch for), never by resolving keys
-// itself, so certificate path validation always happens here rather
-// than in code that could forget to do it.
+// TrustAnchors (an AttesterTrustAnchors) or, under
+// AttesterIssuerBoundToAnchor, its Anchors (an AttesterAnchorSource,
+// which also binds each anchor to the attesters it may vouch for),
+// never by resolving keys itself, so certificate path validation always
+// happens here rather than in code that could forget to do it.
 type AttesterTrust interface {
 	attesterKey(ctx context.Context, s *Server, client storage.RegisteredClient, attestation clientattestation.Attestation) (crypto.PublicKey, error)
 	validate() error
@@ -98,8 +99,16 @@ func (RegisteredAttesterKeys) validate() error { return nil }
 // client's attester instead; see AttesterIssuerBinding.
 type X5CAttesterChain struct {
 	// TrustAnchors supplies the anchors a client's attestation chain
-	// must verify against. Required.
+	// must verify against, under AttesterIssuerInCertificate and
+	// AttesterIssuerByTrustAnchors. Required for those modes, and must be
+	// nil under AttesterIssuerBoundToAnchor, which reads Anchors instead.
 	TrustAnchors AttesterTrustAnchors
+
+	// Anchors supplies the anchors, each bound to the attesters it may
+	// vouch for, under AttesterIssuerBoundToAnchor. Required for that
+	// mode, and must be nil under the others — New refuses a
+	// configuration where it's unclear which field applies.
+	Anchors AttesterAnchorSource
 
 	// IssuerBinding decides what ties the signing certificate to the
 	// client's registered attester. Required, with no default — see
@@ -150,9 +159,10 @@ const (
 	// attester identifiers it may vouch for (AttesterAnchor), so a CA
 	// under attester A's anchor can't issue a certificate that
 	// authenticates attester B's clients, even in a pool shared by every
-	// attester. TrustAnchors must implement AttesterAnchorSource, as
-	// StaticAttesterAnchors does. Choose it for a trust list of several
-	// attesters' own CAs.
+	// attester. Configure the anchors through X5CAttesterChain.Anchors
+	// (StaticAttesterAnchors, or an AttesterAnchorSource of your own),
+	// not TrustAnchors. Choose it for a trust list of several attesters'
+	// own CAs.
 	AttesterIssuerBoundToAnchor
 )
 
@@ -162,18 +172,36 @@ func (c X5CAttesterChain) validate() error {
 	default:
 		return fmt.Errorf("server: dependencies: attester_trust: X5CAttesterChain.IssuerBinding is required (AttesterIssuerInCertificate, AttesterIssuerByTrustAnchors or AttesterIssuerBoundToAnchor)")
 	}
+	if c.IssuerBinding == AttesterIssuerBoundToAnchor {
+		return c.validateBoundAnchors()
+	}
+	if c.Anchors != nil {
+		return fmt.Errorf("server: dependencies: attester_trust: X5CAttesterChain.Anchors applies only to AttesterIssuerBoundToAnchor; use TrustAnchors")
+	}
 	if c.TrustAnchors == nil {
 		return fmt.Errorf("server: dependencies: attester_trust: X5CAttesterChain.TrustAnchors is required")
 	}
 	if static, ok := c.TrustAnchors.(StaticAttesterTrustAnchors); ok && static.Roots == nil {
 		return fmt.Errorf("server: dependencies: attester_trust: StaticAttesterTrustAnchors.Roots is required")
 	}
-	if c.IssuerBinding == AttesterIssuerBoundToAnchor {
-		if _, ok := c.TrustAnchors.(AttesterAnchorSource); !ok {
-			return fmt.Errorf("server: dependencies: attester_trust: AttesterIssuerBoundToAnchor needs TrustAnchors to implement AttesterAnchorSource, as StaticAttesterAnchors does")
+	if static, ok := c.TrustAnchors.(StaticAttesterAnchors); ok {
+		if err := checkAttesterAnchors(static); err != nil {
+			return fmt.Errorf("server: dependencies: attester_trust: StaticAttesterAnchors: %w", err)
 		}
 	}
-	if static, ok := c.TrustAnchors.(StaticAttesterAnchors); ok {
+	return nil
+}
+
+// validateBoundAnchors checks an AttesterIssuerBoundToAnchor
+// configuration: Anchors set, TrustAnchors not, and static anchors usable.
+func (c X5CAttesterChain) validateBoundAnchors() error {
+	if c.TrustAnchors != nil {
+		return fmt.Errorf("server: dependencies: attester_trust: AttesterIssuerBoundToAnchor reads X5CAttesterChain.Anchors; leave TrustAnchors nil")
+	}
+	if c.Anchors == nil {
+		return fmt.Errorf("server: dependencies: attester_trust: AttesterIssuerBoundToAnchor needs X5CAttesterChain.Anchors")
+	}
+	if static, ok := c.Anchors.(StaticAttesterAnchors); ok {
 		if err := checkAttesterAnchors(static); err != nil {
 			return fmt.Errorf("server: dependencies: attester_trust: StaticAttesterAnchors: %w", err)
 		}
@@ -215,11 +243,7 @@ func (c X5CAttesterChain) attesterKey(ctx context.Context, s *Server, client sto
 // anchors it was built from.
 func (c X5CAttesterChain) resolveAnchors(ctx context.Context, client storage.RegisteredClient) (*x509.CertPool, []AttesterAnchor, error) {
 	if c.IssuerBinding == AttesterIssuerBoundToAnchor {
-		source, ok := c.TrustAnchors.(AttesterAnchorSource)
-		if !ok {
-			return nil, nil, errors.New("attester trust anchors are not bound to attesters (AttesterAnchorSource)")
-		}
-		anchors, err := source.AttesterAnchors(ctx, client)
+		anchors, err := c.Anchors.AttesterAnchors(ctx, client)
 		if err != nil {
 			return nil, nil, fmt.Errorf("resolve attester trust anchors: %w", err)
 		}
@@ -308,11 +332,12 @@ type AttesterAnchorSource interface {
 }
 
 // StaticAttesterAnchors trusts the same bound anchors for every client,
-// for AttesterIssuerBoundToAnchor: a trust list of several attesters'
-// own CAs, each bound to the attesters it certifies. It also implements
-// AttesterTrustAnchors, returning every anchor as one pool. New refuses
-// an empty list, an anchor without a certificate, and an anchor bound to
-// no attester.
+// for X5CAttesterChain.Anchors under AttesterIssuerBoundToAnchor: a
+// trust list of several attesters' own CAs, each bound to the attesters
+// it certifies. It also implements AttesterTrustAnchors, returning every
+// anchor as one pool without the bindings, for the other modes. New
+// refuses an empty list, an anchor without a certificate, and an anchor
+// bound to no attester.
 type StaticAttesterAnchors []AttesterAnchor
 
 // AttesterAnchors implements AttesterAnchorSource.
@@ -321,7 +346,8 @@ func (a StaticAttesterAnchors) AttesterAnchors(context.Context, storage.Register
 }
 
 // TrustAnchors implements AttesterTrustAnchors: every anchor, as one
-// pool, without the bindings — use it with AttesterIssuerBoundToAnchor.
+// pool, without the bindings. AttesterIssuerBoundToAnchor reads
+// AttesterAnchors through X5CAttesterChain.Anchors instead.
 func (a StaticAttesterAnchors) TrustAnchors(context.Context, storage.RegisteredClient) (*x509.CertPool, error) {
 	pool := x509.NewCertPool()
 	for _, anchor := range a {

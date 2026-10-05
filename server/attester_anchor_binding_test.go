@@ -2,7 +2,6 @@ package server_test
 
 import (
 	"context"
-	"crypto/x509"
 	"errors"
 	"testing"
 
@@ -15,7 +14,7 @@ const otherAttesterIssuer = "https://attester-a.example.com"
 // boundChain is X5CAttesterChain with AttesterIssuerBoundToAnchor over
 // anchors.
 func boundChain(anchors server.StaticAttesterAnchors) server.X5CAttesterChain {
-	return server.X5CAttesterChain{TrustAnchors: anchors, IssuerBinding: server.AttesterIssuerBoundToAnchor}
+	return server.X5CAttesterChain{Anchors: anchors, IssuerBinding: server.AttesterIssuerBoundToAnchor}
 }
 
 // TestCrossAttesterViaOwnCA is the case AttesterIssuerBoundToAnchor
@@ -119,19 +118,30 @@ func TestAttesterIssuerBoundToAnchor(t *testing.T) {
 	}
 }
 
-// failingAnchors is an AttesterAnchorSource that fails, or returns
-// anchors the server must refuse.
-type failingAnchors struct {
+// anchorSource is a custom AttesterAnchorSource, implementing only that
+// interface: it returns anchors, or fails.
+type anchorSource struct {
 	anchors []server.AttesterAnchor
 	err     error
 }
 
-func (f failingAnchors) AttesterAnchors(context.Context, storage.RegisteredClient) ([]server.AttesterAnchor, error) {
+func (f anchorSource) AttesterAnchors(context.Context, storage.RegisteredClient) ([]server.AttesterAnchor, error) {
 	return f.anchors, f.err
 }
 
-func (f failingAnchors) TrustAnchors(context.Context, storage.RegisteredClient) (*x509.CertPool, error) {
-	return x509.NewCertPool(), nil
+// TestCustomAttesterAnchorSource covers a source of the application's
+// own, implementing only AttesterAnchorSource.
+func TestCustomAttesterAnchorSource(t *testing.T) {
+	rootB := newTestCert(t, "attester B CA", certOptions{isCA: true})
+	leaf := newTestCert(t, "B", certOptions{parent: &rootB, uris: []string{testAttesterIssuer}})
+	h := newHarnessWithAttesterTrust(t, nil, server.X5CAttesterChain{
+		Anchors:       anchorSource{anchors: []server.AttesterAnchor{{Certificate: rootB.cert, Issuers: []string{testAttesterIssuer}}}},
+		IssuerBinding: server.AttesterIssuerBoundToAnchor,
+	})
+	instanceKey := generateKey(t)
+	if err := requestWithAttestation(t, h, createX5CAttestation(t, leaf.key, x5cOf(leaf), "", &instanceKey.PublicKey, h.now), instanceKey); err != nil {
+		t.Fatalf("RequestClientCredentialsToken: %v", err)
+	}
 }
 
 // TestAttesterAnchorSourceFailures covers a dynamic source that errors,
@@ -140,7 +150,7 @@ func (f failingAnchors) TrustAnchors(context.Context, storage.RegisteredClient) 
 func TestAttesterAnchorSourceFailures(t *testing.T) {
 	rootB := newTestCert(t, "attester B CA", certOptions{isCA: true})
 	leaf := newTestCert(t, "B", certOptions{parent: &rootB, uris: []string{testAttesterIssuer}})
-	for name, source := range map[string]failingAnchors{
+	for name, source := range map[string]anchorSource{
 		"error":            {err: errors.New("trust list unavailable")},
 		"no anchors":       {},
 		"anchor unbound":   {anchors: []server.AttesterAnchor{{Certificate: rootB.cert}}},
@@ -148,7 +158,7 @@ func TestAttesterAnchorSourceFailures(t *testing.T) {
 		"empty identifier": {anchors: []server.AttesterAnchor{{Certificate: rootB.cert, Issuers: []string{""}}}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			h := newHarnessWithAttesterTrust(t, nil, server.X5CAttesterChain{TrustAnchors: source, IssuerBinding: server.AttesterIssuerBoundToAnchor})
+			h := newHarnessWithAttesterTrust(t, nil, server.X5CAttesterChain{Anchors: source, IssuerBinding: server.AttesterIssuerBoundToAnchor})
 			instanceKey := generateKey(t)
 			err := requestWithAttestation(t, h, createX5CAttestation(t, leaf.key, x5cOf(leaf), "", &instanceKey.PublicKey, h.now), instanceKey)
 			if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
@@ -159,16 +169,34 @@ func TestAttesterAnchorSourceFailures(t *testing.T) {
 }
 
 // TestNewAttesterAnchorBindingRequirements covers New's checks for the
-// mode: it needs an AttesterAnchorSource, and StaticAttesterAnchors must
-// be usable.
+// mode: Anchors and only Anchors under AttesterIssuerBoundToAnchor,
+// TrustAnchors and only TrustAnchors otherwise, and usable static
+// anchors.
 func TestNewAttesterAnchorBindingRequirements(t *testing.T) {
 	root := newTestCert(t, "attester CA", certOptions{isCA: true})
 	cases := map[string]struct {
 		trust   server.AttesterTrust
 		wantErr bool
 	}{
-		"static bound anchors":            {boundChain(server.StaticAttesterAnchors{{Certificate: root.cert, Issuers: []string{testAttesterIssuer}}}), false},
-		"plain pool can't bind":           {server.X5CAttesterChain{TrustAnchors: server.StaticAttesterTrustAnchors{Roots: poolOf(root)}, IssuerBinding: server.AttesterIssuerBoundToAnchor}, true},
+		"static bound anchors":         {boundChain(server.StaticAttesterAnchors{{Certificate: root.cert, Issuers: []string{testAttesterIssuer}}}), false},
+		"bound mode without Anchors":   {server.X5CAttesterChain{IssuerBinding: server.AttesterIssuerBoundToAnchor}, true},
+		"bound mode with TrustAnchors": {server.X5CAttesterChain{TrustAnchors: server.StaticAttesterTrustAnchors{Roots: poolOf(root)}, IssuerBinding: server.AttesterIssuerBoundToAnchor}, true},
+		"bound mode with both fields": {server.X5CAttesterChain{
+			Anchors:       server.StaticAttesterAnchors{{Certificate: root.cert, Issuers: []string{testAttesterIssuer}}},
+			TrustAnchors:  server.StaticAttesterTrustAnchors{Roots: poolOf(root)},
+			IssuerBinding: server.AttesterIssuerBoundToAnchor,
+		}, true},
+		"custom source": {server.X5CAttesterChain{Anchors: anchorSource{}, IssuerBinding: server.AttesterIssuerBoundToAnchor}, false},
+		"Anchors under issuer in certificate": {server.X5CAttesterChain{
+			Anchors:       server.StaticAttesterAnchors{{Certificate: root.cert, Issuers: []string{testAttesterIssuer}}},
+			TrustAnchors:  server.StaticAttesterTrustAnchors{Roots: poolOf(root)},
+			IssuerBinding: server.AttesterIssuerInCertificate,
+		}, true},
+		"Anchors under trust-anchor binding": {server.X5CAttesterChain{
+			Anchors:       server.StaticAttesterAnchors{{Certificate: root.cert, Issuers: []string{testAttesterIssuer}}},
+			TrustAnchors:  server.StaticAttesterTrustAnchors{Roots: poolOf(root)},
+			IssuerBinding: server.AttesterIssuerByTrustAnchors,
+		}, true},
 		"empty static anchors":            {boundChain(server.StaticAttesterAnchors{}), true},
 		"anchor bound to no attester":     {boundChain(server.StaticAttesterAnchors{{Certificate: root.cert}}), true},
 		"anchor without a certificate":    {boundChain(server.StaticAttesterAnchors{{Issuers: []string{testAttesterIssuer}}}), true},

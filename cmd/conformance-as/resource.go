@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/url"
 
-	fapi "github.com/idfoundry/fapigo"
 	fapires "github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/serverresource"
@@ -80,13 +79,8 @@ func userinfoHandler(srv *server.Server, verifier *fapires.Verifier, userinfoURL
 		authCtx.SetDPoPNonce(w.Header())
 
 		if userinfoSigning {
-			client, err := clients.ResolveClient(r.Context(), fapi.ClientID(authCtx.ClientID))
+			signed, err := serverresource.SignUserInfoResponse(r.Context(), srv, clients, authCtx, body)
 			if err != nil {
-				writeResourceErrorRaw(w, http.StatusInternalServerError, "server_error", "failed to resolve client")
-				return
-			}
-			signed, srvErr := srv.SignUserInfoResponse(r.Context(), client, body)
-			if srvErr != nil {
 				writeResourceErrorRaw(w, http.StatusInternalServerError, "server_error", "failed to sign userinfo response")
 				return
 			}

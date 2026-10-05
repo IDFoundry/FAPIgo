@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -312,6 +313,60 @@ func TestResolveMaxPathLengthCountsSuperiors(t *testing.T) {
 			}
 		} else if err != nil {
 			t.Errorf("MaxPathLength=%d, 2 intermediates: Resolve = %v, want success", tc.maxPathLength, err)
+		}
+	}
+}
+
+// TestResolveBudgetErrorKeepsEarlierBranches: when the search budget
+// runs out, the error still names the branches already tried and why
+// each failed, not only that the budget ran out.
+func TestResolveBudgetErrorKeepsEarlierBranches(t *testing.T) {
+	g := newFederationGraph(t, "leaf", "a", "b", "a1", "a2", "ta")
+	g.link(map[string][]string{
+		"leaf": {"a", "b"},
+		"a":    {"a1", "a2"},
+		"a1":   {"x1", "x2"},
+		"a2":   {"x3", "x4"},
+	})
+	_, err := g.resolver(3, 2, "ta").Resolve(context.Background(), g.entities["leaf"].id)
+	if err == nil {
+		t.Fatal("Resolve = nil error, want the search stopped")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"stopped after trying 6 superiors",
+		"via \"" + g.entities["a"].id + "\"",
+		"via \"" + g.entities["a1"].id + "\"",
+		"via \"https://127.0.0.1:1/x1\"",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("Resolve error = %q, want it to contain %q", msg, want)
+		}
+	}
+}
+
+// TestResolveErrorDoesNotRepeatAuthorityHints: an entity's authority
+// hints are its own choice, so the error names each one only for the
+// branch that tried it (and that branch's own failure), never as a whole
+// list again at every level.
+func TestResolveErrorDoesNotRepeatAuthorityHints(t *testing.T) {
+	long := func(n int) string { return fmt.Sprintf("h%d-%s", n, strings.Repeat("x", 2000)) }
+	g := newFederationGraph(t, "leaf", "i1", "i2", "ta")
+	g.link(map[string][]string{
+		"leaf": {"i1", long(1), long(2)},
+		"i1":   {"i2", long(3), long(4)},
+		"i2":   {long(5), long(6)},
+	})
+	_, err := g.resolver(5, 5, "ta").Resolve(context.Background(), g.entities["leaf"].id)
+	if err == nil {
+		t.Fatal("Resolve = nil error, want no path")
+	}
+	msg := err.Error()
+	for n := 1; n <= 6; n++ {
+		// Only within its own branch: the branch's "via", and its fetch
+		// failure, which names the entity and the URL it couldn't reach.
+		if got := strings.Count(msg, long(n)); got == 0 || got > 3 {
+			t.Errorf("hint %d appears %d times in the error, want at most 3 (its own branch only)", n, got)
 		}
 	}
 }

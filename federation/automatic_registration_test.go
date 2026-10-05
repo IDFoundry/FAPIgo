@@ -895,9 +895,10 @@ func TestAutomaticClientRepositoryReportsResolutionFailure(t *testing.T) {
 	if err1 == nil || err2 == nil {
 		t.Fatalf("ResolveClient = %v, %v, want errors", err1, err2)
 	}
-	// The failure is remembered: the second request gets the same error
+	// The failure is remembered: the second request gets the same
+	// message (the cache keeps a bounded copy, not the error itself)
 	// without a second resolution or report.
-	if err2 != err1 {
+	if err2.Error() != err1.Error() {
 		t.Errorf("second ResolveClient error = %v, want the remembered %v", err2, err1)
 	}
 	if len(failures.ids) != 1 {
@@ -1236,5 +1237,78 @@ func TestAutomaticClientRepositoryDoesNotRememberCancelledResolution(t *testing.
 	}
 	if _, err := repo.ResolveClient(context.Background(), fapi.ClientID(f.rpID)); err != nil {
 		t.Fatalf("ResolveClient after a cancelled attempt: %v, want the client resolved afresh", err)
+	}
+}
+
+// jumpClock answers start to its first Now and start+jump to every later
+// one: the time a slow resolution has taken by the time its outcome is
+// known, with resolve's own lookup at the start.
+type jumpClock struct {
+	mu    sync.Mutex
+	start time.Time
+	jump  time.Duration
+	calls int
+}
+
+func (c *jumpClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.calls++
+	if c.calls == 1 {
+		return c.start
+	}
+	return c.start.Add(c.jump)
+}
+
+// TestAutomaticClientRepositoryRemembersASlowFailure: a failure is
+// remembered for FailureCacheAge from when it failed, not when its
+// resolution started — an RP whose statements answer slowly mustn't be
+// able to fail outside the cache.
+func TestAutomaticClientRepositoryRemembersASlowFailure(t *testing.T) {
+	f := setupAutomaticRegistrationFixture(t, func(rpID string, rpOIDCKey *ecdsa.PrivateKey) json.RawMessage {
+		raw, err := json.Marshal(map[string]any{
+			"redirect_uris":              []string{rpID + "/cb"},
+			"token_endpoint_auth_method": "private_key_jwt",
+			"jwks":                       json.RawMessage(jwksFor(t, "rp-oidc", rpOIDCKey)),
+		})
+		if err != nil {
+			t.Fatalf("marshal openid_relying_party metadata: %v", err)
+		}
+		return raw
+	})
+	clock := &jumpClock{start: f.now, jump: federation.DefaultFailureCacheAge + 5*time.Second}
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, f.newResolver(t), f.fetcher, validAutomaticRegistrationConfig(), clock)
+	if err != nil {
+		t.Fatalf("NewAutomaticClientRepository: %v", err)
+	}
+	for range 3 {
+		if _, err := repo.ResolveClient(context.Background(), fapi.ClientID(f.rpID)); err == nil {
+			t.Fatal("ResolveClient = nil error, want the registration failure")
+		}
+	}
+	if calls := atomic.LoadInt32(f.rpConfigCalls); calls != 1 {
+		t.Errorf("RP's own well-known endpoint was fetched %d times, want 1 — a failure slower than FailureCacheAge wasn't remembered", calls)
+	}
+}
+
+// TestAutomaticClientRepositoryCachesASlowRegistration: likewise, a
+// registration is cached for MaxCacheAge from when it was built, so a
+// resolution slower than MaxCacheAge isn't repeated by the next request.
+func TestAutomaticClientRepositoryCachesASlowRegistration(t *testing.T) {
+	f := setupAutomaticRegistrationFixture(t, rpMetadataBuilder(t))
+	cfg := validAutomaticRegistrationConfig()
+	cfg.MaxCacheAge = time.Minute
+	clock := &jumpClock{start: f.now, jump: 2 * time.Minute}
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, f.newResolver(t), f.fetcher, cfg, clock)
+	if err != nil {
+		t.Fatalf("NewAutomaticClientRepository: %v", err)
+	}
+	for range 2 {
+		if _, err := repo.ResolveClient(context.Background(), fapi.ClientID(f.rpID)); err != nil {
+			t.Fatalf("ResolveClient: %v", err)
+		}
+	}
+	if calls := atomic.LoadInt32(f.rpConfigCalls); calls != 1 {
+		t.Errorf("RP's own well-known endpoint was fetched %d times, want 1 — a registration slower than MaxCacheAge wasn't cached", calls)
 	}
 }

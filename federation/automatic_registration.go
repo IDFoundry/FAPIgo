@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"net/url"
 	"slices"
+	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/fapihttp"
@@ -142,7 +144,8 @@ type AutomaticRegistrationConfig struct {
 	// for the same client_id share that one call — so it must not
 	// block. A failure is remembered for FailureCacheAge, so an RP that
 	// keeps retrying is reported once per resolution attempted, not once
-	// per request. Optional.
+	// per request; the requests answered from that memory get the
+	// failure's message only, cut to its first KiB. Optional.
 	OnResolutionFailure func(ctx context.Context, clientID fapi.ClientID, err error)
 }
 
@@ -156,7 +159,10 @@ type cachedClient struct {
 }
 
 // DefaultFailureCacheAge is AutomaticRegistrationConfig.FailureCacheAge
-// when it is zero.
+// when it is zero. Failure caching can be shortened but not turned off:
+// there is no FailureCacheAge value that disables it, since without it
+// every request naming a failing client_id repeats the whole Trust Chain
+// resolution.
 const DefaultFailureCacheAge = 10 * time.Second
 
 // maxFailedResolutions bounds how many failed registrations
@@ -166,11 +172,40 @@ const DefaultFailureCacheAge = 10 * time.Second
 // simply isn't remembered — the same as before failures were cached.
 const maxFailedResolutions = 4096
 
+// maxRememberedFailureBytes bounds the message a remembered failure
+// keeps. A failed Trust Chain resolution's error names every branch tried
+// and echoes the RP's and its superiors' own claims, so its length is
+// partly the attacker's choice; the failure cache keeps at most this much
+// of it per client_id.
+const maxRememberedFailureBytes = 1024
+
 // failedResolution is one remembered registration failure, returned for
 // its client_id until expiresAt.
 type failedResolution struct {
 	err       error
 	expiresAt time.Time
+}
+
+// rememberedFailure is a failed registration as the failure cache keeps
+// it: only its message, cut to maxRememberedFailureBytes and copied, so
+// it holds neither the original error's chain nor the rest of its text.
+// The full error goes to AutomaticRegistrationConfig.OnResolutionFailure
+// and to the request whose resolution failed.
+type rememberedFailure struct{ msg string }
+
+func (e *rememberedFailure) Error() string { return e.msg }
+
+// newRememberedFailure returns err's message as a rememberedFailure.
+func newRememberedFailure(err error) error {
+	msg := err.Error()
+	if len(msg) <= maxRememberedFailureBytes {
+		return &rememberedFailure{msg: strings.Clone(msg)}
+	}
+	cut := maxRememberedFailureBytes
+	for cut > 0 && !utf8.RuneStart(msg[cut]) {
+		cut--
+	}
+	return &rememberedFailure{msg: strings.Clone(msg[:cut]) + " ... (truncated)"}
 }
 
 // AutomaticClientRepository implements storage.ClientRepository via
@@ -364,7 +399,7 @@ func (a *AutomaticClientRepository) resolve(ctx context.Context, id fapi.ClientI
 	a.inflight[id] = call
 	a.mu.Unlock()
 
-	call.entry, call.err = a.resolveUncached(ctx, id, now)
+	call.entry, call.err = a.resolveUncached(ctx, id)
 	a.mu.Lock()
 	delete(a.inflight, id)
 	a.mu.Unlock()
@@ -376,22 +411,24 @@ func (a *AutomaticClientRepository) resolve(ctx context.Context, id fapi.ClientI
 // caching a success and reporting a failure to
 // AutomaticRegistrationConfig.OnResolutionFailure. resolve runs at most
 // one at a time per client_id.
-func (a *AutomaticClientRepository) resolveUncached(ctx context.Context, id fapi.ClientID, now time.Time) (cachedClient, error) {
+func (a *AutomaticClientRepository) resolveUncached(ctx context.Context, id fapi.ClientID) (cachedClient, error) {
 	if err := ValidEntityID(string(id)); err != nil {
 		// Not a federation client_id at all — an ordinary unknown
 		// client, so nothing for OnResolutionFailure to report.
 		return cachedClient{}, fmt.Errorf("federation: %q is not a registered client and not a valid federation entity ID: %w", id, err)
 	}
-	entry, err := a.register(ctx, id, now)
+	entry, err := a.register(ctx, id)
 	if err != nil {
 		if a.cfg.OnResolutionFailure != nil {
 			a.cfg.OnResolutionFailure(ctx, id, err)
 		}
 		// A request cancelled or timed out by its own caller says nothing
 		// about the client_id, so only a resolution that ran its course
-		// is remembered.
+		// is remembered — from when it failed, not when it started, so
+		// a resolution slower than FailureCacheAge (an RP or superior
+		// answering slowly is the RP's own choice) is still remembered.
 		if ctx.Err() == nil {
-			a.rememberFailure(id, err, now)
+			a.rememberFailure(id, err, a.clock.Now())
 		}
 		return cachedClient{}, err
 	}
@@ -403,7 +440,8 @@ func (a *AutomaticClientRepository) resolveUncached(ctx context.Context, id fapi
 }
 
 // rememberFailure records err as id's registration failure until
-// FailureCacheAge after now, within maxFailedResolutions.
+// FailureCacheAge after now, within maxFailedResolutions, keeping only
+// its bounded message (see rememberedFailure).
 func (a *AutomaticClientRepository) rememberFailure(id fapi.ClientID, err error, now time.Time) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -417,12 +455,13 @@ func (a *AutomaticClientRepository) rememberFailure(id fapi.ClientID, err error,
 			return
 		}
 	}
-	a.failures[id] = failedResolution{err: err, expiresAt: now.Add(a.cfg.FailureCacheAge)}
+	a.failures[id] = failedResolution{err: newRememberedFailure(err), expiresAt: now.Add(a.cfg.FailureCacheAge)}
 }
 
 // register resolves the Entity Identifier id's Trust Chain and builds
-// its registration from the resolved openid_relying_party metadata.
-func (a *AutomaticClientRepository) register(ctx context.Context, id fapi.ClientID, now time.Time) (cachedClient, error) {
+// its registration from the resolved openid_relying_party metadata,
+// cached for MaxCacheAge from when the registration was built.
+func (a *AutomaticClientRepository) register(ctx context.Context, id fapi.ClientID) (cachedClient, error) {
 	resolved, err := a.resolver.Resolve(ctx, string(id))
 	if err != nil {
 		return cachedClient{}, fmt.Errorf("federation: resolve client %q: %w", id, err)
@@ -441,7 +480,7 @@ func (a *AutomaticClientRepository) register(ctx context.Context, id fapi.Client
 	}
 
 	expiresAt := resolved.ExpiresAt
-	if maxAge := now.Add(a.cfg.MaxCacheAge); maxAge.Before(expiresAt) {
+	if maxAge := a.clock.Now().Add(a.cfg.MaxCacheAge); maxAge.Before(expiresAt) {
 		expiresAt = maxAge
 	}
 	return cachedClient{client: client, jwks: jwks, expiresAt: expiresAt}, nil

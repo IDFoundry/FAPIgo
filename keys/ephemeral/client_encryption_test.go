@@ -89,7 +89,8 @@ func TestClientKeySourceResolvesEncryptionKeys(t *testing.T) {
 
 // TestClientKeySourceFetchesEncryptionKeys covers a jwks_uri: encryption
 // keys come from the same fetched, cached JWK Set, and a pinned kid the
-// cache lacks forces a refetch.
+// cache lacks forces a refetch once the minimum refresh interval has
+// passed.
 func TestClientKeySourceFetchesEncryptionKeys(t *testing.T) {
 	km, jwks := clientWithEncryptionKeys(t, map[keys.DecryptionPurpose]fapi.KeyManagementAlgorithm{keys.IDTokenDecryption: fapi.RSAOAEP256})
 	var fetches atomic.Int32
@@ -106,10 +107,13 @@ func TestClientKeySourceFetchesEncryptionKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fapihttp.New: %v", err)
 	}
-	src, err := NewClientKeySource(fetcher, []ClientKeySpec{{ClientID: "client-1", JWKSURI: ts.URL + "/jwks"}}, WithCacheTTL(time.Minute))
+	src, err := NewClientKeySource(fetcher, []ClientKeySpec{{ClientID: "client-1", JWKSURI: ts.URL + "/jwks"}},
+		WithCacheTTL(time.Minute), WithMinRefreshInterval(10*time.Second))
 	if err != nil {
 		t.Fatalf("NewClientKeySource: %v", err)
 	}
+	now := time.Now()
+	src.now = func() time.Time { return now }
 	ctx := context.Background()
 	want, err := km.EncryptionPublicKey(ctx, keys.IDTokenDecryption, fapi.RSAOAEP256)
 	if err != nil {
@@ -125,9 +129,18 @@ func TestClientKeySourceFetchesEncryptionKeys(t *testing.T) {
 	if got := fetches.Load(); got != 1 {
 		t.Errorf("fetched %d times for two lookups within the TTL, want 1", got)
 	}
-	if _, err := src.ResolveEncryptionKeys(ctx, keys.ClientEncryptionKeyRequest{ClientID: "client-1", Algorithm: fapi.RSAOAEP256, KeyID: "rotated-in"}); err != nil {
-		t.Fatalf("ResolveEncryptionKeys(pinned kid): %v", err)
+	pinned := func() {
+		t.Helper()
+		if _, err := src.ResolveEncryptionKeys(ctx, keys.ClientEncryptionKeyRequest{ClientID: "client-1", Algorithm: fapi.RSAOAEP256, KeyID: "rotated-in"}); err != nil {
+			t.Fatalf("ResolveEncryptionKeys(pinned kid): %v", err)
+		}
 	}
+	pinned()
+	if got := fetches.Load(); got != 1 {
+		t.Errorf("fetched %d times after a pinned kid the cache lacked, within the minimum refresh interval, want 1", got)
+	}
+	now = now.Add(11 * time.Second)
+	pinned()
 	if got := fetches.Load(); got != 2 {
 		t.Errorf("fetched %d times after a pinned kid the cache lacked, want 2", got)
 	}

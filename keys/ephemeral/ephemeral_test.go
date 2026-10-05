@@ -262,9 +262,10 @@ func TestClientKeySourceCachesWithinTTL(t *testing.T) {
 }
 
 // TestClientKeySourceRefetchesOnUnknownKeyIDEvenWhenCacheFresh covers
-// currentFetchedKeys' stale-key handling: a client that has rotated
-// keys since the last fetch must not be stuck with a cached set that
-// never contains the newly requested kid until the TTL expires.
+// current's stale-key handling: a client that has rotated keys since the
+// last fetch isn't stuck with a cached set that lacks the newly
+// requested kid until the TTL expires — it is refetched once the minimum
+// refresh interval has passed, and not before.
 func TestClientKeySourceRefetchesOnUnknownKeyIDEvenWhenCacheFresh(t *testing.T) {
 	priv1, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -303,10 +304,13 @@ func TestClientKeySourceRefetchesOnUnknownKeyIDEvenWhenCacheFresh(t *testing.T) 
 		t.Fatalf("fapihttp.New: %v", err)
 	}
 
-	src, err := NewClientKeySource(fetcher, []ClientKeySpec{{ClientID: "client-1", JWKSURI: ts.URL + "/jwks"}}, WithCacheTTL(time.Minute))
+	src, err := NewClientKeySource(fetcher, []ClientKeySpec{{ClientID: "client-1", JWKSURI: ts.URL + "/jwks"}},
+		WithCacheTTL(time.Minute), WithMinRefreshInterval(10*time.Second))
 	if err != nil {
 		t.Fatalf("NewClientKeySource: %v", err)
 	}
+	now := time.Now()
+	src.now = func() time.Time { return now }
 
 	if _, err := src.ResolveVerificationKeys(context.Background(), keys.ClientKeyRequest{
 		ClientID: "client-1", Algorithm: fapi.ES256, KeyID: "kid-1",
@@ -317,18 +321,28 @@ func TestClientKeySourceRefetchesOnUnknownKeyIDEvenWhenCacheFresh(t *testing.T) 
 	mu.Lock()
 	rotated = true
 	mu.Unlock()
-
-	set, err := src.ResolveVerificationKeys(context.Background(), keys.ClientKeyRequest{
-		ClientID: "client-1", Algorithm: fapi.ES256, KeyID: "kid-2",
-	})
-	if err != nil {
-		t.Fatalf("ResolveVerificationKeys(kid-2): %v", err)
+	resolveKid2 := func() keys.VerificationKeySet {
+		t.Helper()
+		set, err := src.ResolveVerificationKeys(context.Background(), keys.ClientKeyRequest{
+			ClientID: "client-1", Algorithm: fapi.ES256, KeyID: "kid-2",
+		})
+		if err != nil {
+			t.Fatalf("ResolveVerificationKeys(kid-2): %v", err)
+		}
+		return set
 	}
-	if len(set.Keys) != 1 || set.Keys[0].KeyID != "kid-2" {
+
+	now = now.Add(5 * time.Second)
+	if set := resolveKid2(); len(set.Keys) != 0 || fetches != 1 {
+		t.Fatalf("within the minimum refresh interval: keys = %+v, fetches = %d; want none and 1", set.Keys, fetches)
+	}
+
+	now = now.Add(6 * time.Second)
+	if set := resolveKid2(); len(set.Keys) != 1 || set.Keys[0].KeyID != "kid-2" {
 		t.Fatalf("Keys = %+v, want one key with kid-2 (rotation should force a refetch)", set.Keys)
 	}
 	if fetches != 2 {
-		t.Fatalf("fetches = %d, want 2 (requesting an unknown kid must force a refetch even within TTL)", fetches)
+		t.Fatalf("fetches = %d, want 2 (an unknown kid forces a refetch within TTL once the interval has passed)", fetches)
 	}
 }
 

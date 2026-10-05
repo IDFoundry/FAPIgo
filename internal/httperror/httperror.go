@@ -55,7 +55,9 @@ func IsErrorStatus(status int) bool {
 
 // Normalize is the validation behind a role's exported NewError: an
 // error code outside RFC 6749 §5.2's character set (or empty, unless
-// allowEmptyCode) or a status that isn't 4xx/5xx makes the error a 500
+// allowEmptyCode and the status is 401 — the no-credentials answer of
+// RFC 6750 §3.1, the only one without a code) or a status that isn't
+// 4xx/5xx makes the error a 500
 // server_error, so a caller's mistake can neither inject into a
 // WWW-Authenticate challenge nor panic in http.ResponseWriter's
 // WriteHeader; a description outside the same character set is
@@ -64,7 +66,7 @@ func Normalize(code string, status int, description string, allowEmptyCode bool)
 	if description != "" && !IsErrorText(description) {
 		description = ""
 	}
-	codeOK := IsErrorText(code) || (code == "" && allowEmptyCode)
+	codeOK := IsErrorText(code) || (code == "" && allowEmptyCode && status == 401)
 	if !codeOK || !IsErrorStatus(status) {
 		return "server_error", 500, description
 	}

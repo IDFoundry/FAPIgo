@@ -11,6 +11,7 @@ import (
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/resourceerr"
 	"github.com/idfoundry/fapigo/internal/token"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
@@ -141,29 +142,36 @@ type JWTAccessTokens struct {
 // but mirrors this module's other validate-at-construction
 // constructors for callers who want it.
 func NewJWTAccessTokens(issuerKeys keys.IssuerKeySource, issuer fapi.URL, audience string, algorithm fapi.SignatureAlgorithm, maxTokenLifetime time.Duration, maxKeyCandidates int) (JWTAccessTokens, error) {
-	if issuerKeys == nil {
-		return JWTAccessTokens{}, fmt.Errorf("resource: JWTAccessTokens: issuer keys is required")
-	}
-	if issuer.IsZero() {
-		return JWTAccessTokens{}, fmt.Errorf("resource: JWTAccessTokens: issuer is required")
-	}
-	if audience == "" {
-		return JWTAccessTokens{}, fmt.Errorf("resource: JWTAccessTokens: audience is required")
-	}
-	if !algorithm.IsValid() {
-		return JWTAccessTokens{}, fmt.Errorf("resource: JWTAccessTokens: algorithm is invalid")
-	}
-	if maxTokenLifetime <= 0 {
-		return JWTAccessTokens{}, fmt.Errorf("resource: JWTAccessTokens: max token lifetime must be positive")
-	}
-	if maxKeyCandidates <= 0 {
-		return JWTAccessTokens{}, fmt.Errorf("resource: JWTAccessTokens: max key candidates must be positive")
-	}
-	return JWTAccessTokens{
+	j := JWTAccessTokens{
 		IssuerKeys: issuerKeys, Issuer: issuer, Audience: audience,
 		Algorithm: algorithm, MaxTokenLifetime: maxTokenLifetime,
 		MaxKeyCandidates: maxKeyCandidates,
-	}, nil
+	}
+	if err := j.validate(); err != nil {
+		return JWTAccessTokens{}, fmt.Errorf("resource: JWTAccessTokens: %w", err)
+	}
+	return j, nil
+}
+
+// validate checks every field, for NewJWTAccessTokens and for
+// NewVerifier, which refuses a JWTAccessTokens{...} literal it would
+// fail (or, for a nil IssuerKeys, panic) on every request.
+func (j JWTAccessTokens) validate() error {
+	switch {
+	case j.IssuerKeys == nil:
+		return errors.New("issuer keys is required")
+	case j.Issuer.IsZero():
+		return errors.New("issuer is required")
+	case j.Audience == "":
+		return errors.New("audience is required")
+	case !j.Algorithm.IsValid():
+		return errors.New("algorithm is invalid")
+	case j.MaxTokenLifetime <= 0:
+		return errors.New("max token lifetime must be positive")
+	case j.MaxKeyCandidates <= 0:
+		return errors.New("max key candidates must be positive")
+	}
+	return nil
 }
 
 // ResolveAccessToken implements AccessTokenResolver.
@@ -261,10 +269,21 @@ type OpaqueAccessTokens struct {
 // NewOpaqueAccessTokens validates store is non-nil and returns an
 // OpaqueAccessTokens.
 func NewOpaqueAccessTokens(store storage.AccessTokenStore) (OpaqueAccessTokens, error) {
-	if store == nil {
-		return OpaqueAccessTokens{}, fmt.Errorf("resource: OpaqueAccessTokens: store is required")
+	o := OpaqueAccessTokens{Store: store}
+	if err := o.validate(); err != nil {
+		return OpaqueAccessTokens{}, fmt.Errorf("resource: OpaqueAccessTokens: %w", err)
 	}
-	return OpaqueAccessTokens{Store: store}, nil
+	return o, nil
+}
+
+// validate checks Store, for NewOpaqueAccessTokens and for NewVerifier,
+// which refuses an OpaqueAccessTokens{} literal that would panic on
+// every request.
+func (o OpaqueAccessTokens) validate() error {
+	if o.Store == nil {
+		return errors.New("store is required")
+	}
+	return nil
 }
 
 // ResolveAccessToken implements AccessTokenResolver.
@@ -302,5 +321,5 @@ func lookupError(err error) *Error {
 // rather than answering no: it wraps storage.ErrStoreUnavailable, or a
 // cancelled or timed-out context.
 func storeUnavailable(err error) bool {
-	return errors.Is(err, storage.ErrStoreUnavailable) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+	return resourceerr.StoreUnavailable(err)
 }

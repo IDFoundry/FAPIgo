@@ -105,6 +105,8 @@ func TestNormalize(t *testing.T) {
 		{"invalid_request", "d", 600, false, "server_error", 500, "d"},
 		{"", "d", 401, false, "server_error", 500, "d"},
 		{"", "d", 401, true, "", 401, "d"},
+		{"", "d", 403, true, "server_error", 500, "d"},
+		{"", "d", 500, true, "server_error", 500, "d"},
 		{"", "", 0, true, "server_error", 500, ""},
 		{`x"`, "d", 400, true, "server_error", 500, "d"},
 		{"invalid_request", "\n", 400, false, "invalid_request", 400, ""},

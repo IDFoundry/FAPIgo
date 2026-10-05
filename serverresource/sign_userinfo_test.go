@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -20,6 +21,18 @@ import (
 	"github.com/idfoundry/fapigo/storage"
 	"github.com/idfoundry/fapigo/storage/memstore"
 )
+
+// errNoSuchClient is a client repository's answer for a client it
+// doesn't know.
+var errNoSuchClient = errors.New("no such client")
+
+// failingClients is a client repository that answers every lookup with
+// err.
+type failingClients struct{ err error }
+
+func (f failingClients) ResolveClient(context.Context, fapi.ClientID) (storage.RegisteredClient, error) {
+	return storage.RegisteredClient{}, f.err
+}
 
 // noClientKeys resolves no client keys: signing a UserInfo response
 // never needs one.
@@ -157,6 +170,30 @@ func TestSignUserInfoResponseIsForTheTokensClient(t *testing.T) {
 			t.Fatalf("SignUserInfoResponse(unknown client) error = %v, want 401 invalid_token", err)
 		}
 	})
+
+	t.Run("unknown client keeps the repository's error", func(t *testing.T) {
+		unknown := authz
+		unknown.ClientID = "rp-gone"
+		_, err := serverresource.SignUserInfoResponse(context.Background(), srv, failingClients{err: errNoSuchClient}, unknown, claims)
+		var rerr *resource.Error
+		if !errors.As(err, &rerr) || rerr.HTTPStatus() != http.StatusUnauthorized || !errors.Is(err, errNoSuchClient) {
+			t.Fatalf("SignUserInfoResponse(unknown client) error = %v, want 401 keeping the repository's error", err)
+		}
+	})
+
+	for name, repoErr := range map[string]error{
+		"store unavailable": fmt.Errorf("db: %w", storage.ErrStoreUnavailable),
+		"context cancelled": fmt.Errorf("db: %w", context.Canceled),
+		"deadline exceeded": fmt.Errorf("db: %w", context.DeadlineExceeded),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := serverresource.SignUserInfoResponse(context.Background(), srv, failingClients{err: repoErr}, authz, claims)
+			var rerr *resource.Error
+			if !errors.As(err, &rerr) || rerr.Code() != resource.ErrorServerError || rerr.HTTPStatus() != http.StatusInternalServerError || !errors.Is(err, repoErr) {
+				t.Fatalf("SignUserInfoResponse(%s) error = %v, want 500 server_error keeping the repository's error", name, err)
+			}
+		})
+	}
 
 	t.Run("signing failure", func(t *testing.T) {
 		reserved := map[string]json.RawMessage{"sub": json.RawMessage(`"user-1"`), "aud": json.RawMessage(`"rp-1"`)}

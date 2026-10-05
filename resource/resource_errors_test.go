@@ -86,6 +86,8 @@ func TestNewErrorNormalizesInvalidInput(t *testing.T) {
 		{"success status", resource.ErrorInvalidRequest, 200, "", resource.ErrorServerError, 500, "", `Bearer error="server_error"`},
 		{"description outside the character set", resource.ErrorInvalidRequest, 400, "costs €5", resource.ErrorInvalidRequest, 400, "", `Bearer error="invalid_request"`},
 		{"no credentials", "", 401, "", "", 401, "", `Bearer, DPoP algs="ES256 PS256 EdDSA"`},
+		{"no code with another status", "", 403, "", resource.ErrorServerError, 500, "", `Bearer error="server_error"`},
+		{"no code with a 500", "", 500, "", resource.ErrorServerError, 500, "", `Bearer error="server_error"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := resource.NewError(tc.code, tc.status, tc.description)

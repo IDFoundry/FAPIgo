@@ -286,6 +286,11 @@ func TestNewAutomaticClientRepositoryRejectsInvalidConfig(t *testing.T) {
 			cfg.MaxCacheAge = 0
 			return alwaysFailsRepository{}, resolver, f.fetcher, cfg, fixedClock{now: f.now}
 		},
+		"negative failure cache age": func() (storage.ClientRepository, *federation.Resolver, *fapihttp.Client, federation.AutomaticRegistrationConfig, federation.Clock) {
+			cfg := validAutomaticRegistrationConfig()
+			cfg.FailureCacheAge = -time.Second
+			return alwaysFailsRepository{}, resolver, f.fetcher, cfg, fixedClock{now: f.now}
+		},
 		"invalid allowed client auth method": func() (storage.ClientRepository, *federation.Resolver, *fapihttp.Client, federation.AutomaticRegistrationConfig, federation.Clock) {
 			cfg := validAutomaticRegistrationConfig()
 			cfg.AllowedClientAuthMethods = []storage.ClientAuthMethod{storage.ClientAuthMethod(255)}
@@ -879,7 +884,8 @@ func TestAutomaticClientRepositoryReportsResolutionFailure(t *testing.T) {
 	var failures resolutionFailures
 	cfg := validAutomaticRegistrationConfig()
 	cfg.OnResolutionFailure = failures.record
-	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, f.newResolver(t), f.fetcher, cfg, fixedClock{now: f.now})
+	clock := &steppingClock{now: f.now}
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, f.newResolver(t), f.fetcher, cfg, clock)
 	if err != nil {
 		t.Fatalf("NewAutomaticClientRepository: %v", err)
 	}
@@ -889,9 +895,24 @@ func TestAutomaticClientRepositoryReportsResolutionFailure(t *testing.T) {
 	if err1 == nil || err2 == nil {
 		t.Fatalf("ResolveClient = %v, %v, want errors", err1, err2)
 	}
-	// Failures aren't cached, so each attempt is reported.
+	// The failure is remembered: the second request gets the same error
+	// without a second resolution or report.
+	if err2 != err1 {
+		t.Errorf("second ResolveClient error = %v, want the remembered %v", err2, err1)
+	}
+	if len(failures.ids) != 1 {
+		t.Fatalf("OnResolutionFailure called %d times, want 1", len(failures.ids))
+	}
+	if calls := atomic.LoadInt32(f.rpConfigCalls); calls != 1 {
+		t.Errorf("RP's own well-known endpoint was fetched %d times within FailureCacheAge, want 1", calls)
+	}
+	// Once it lapses, the next request resolves (and reports) again.
+	clock.now = clock.now.Add(federation.DefaultFailureCacheAge)
+	if _, err := repo.ResolveClient(context.Background(), fapi.ClientID(f.rpID)); err == nil {
+		t.Fatalf("ResolveClient after FailureCacheAge = nil error, want error")
+	}
 	if len(failures.ids) != 2 {
-		t.Fatalf("OnResolutionFailure called %d times, want 2", len(failures.ids))
+		t.Fatalf("OnResolutionFailure called %d times after FailureCacheAge, want 2", len(failures.ids))
 	}
 	if failures.ids[0] != fapi.ClientID(f.rpID) {
 		t.Errorf("OnResolutionFailure clientID = %q, want %q", failures.ids[0], f.rpID)
@@ -1158,5 +1179,62 @@ func TestAutomaticRegistrationRejectsCaseVariantMemberNames(t *testing.T) {
 				t.Fatalf("ResolveClient = %v, nil error; want the case-variant member refused", client.ClientAuthMethods())
 			}
 		})
+	}
+}
+
+// steppingClock is a federation.Clock a test can move forward.
+type steppingClock struct{ now time.Time }
+
+func (c *steppingClock) Now() time.Time { return c.now }
+
+// TestAutomaticClientRepositoryHonoursFailureCacheAge: a configured
+// FailureCacheAge, not the default, decides how long a failure is
+// remembered.
+func TestAutomaticClientRepositoryHonoursFailureCacheAge(t *testing.T) {
+	f := setupAutomaticRegistrationFixture(t, nil)
+	cfg := validAutomaticRegistrationConfig()
+	cfg.FailureCacheAge = time.Minute
+	clock := &steppingClock{now: f.now}
+	var failures resolutionFailures
+	cfg.OnResolutionFailure = failures.record
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, f.newResolver(t), f.fetcher, cfg, clock)
+	if err != nil {
+		t.Fatalf("NewAutomaticClientRepository: %v", err)
+	}
+	const id = "https://nonexistent-rp-host.example.invalid"
+	for _, after := range []time.Duration{0, federation.DefaultFailureCacheAge, time.Minute - time.Nanosecond} {
+		clock.now = f.now.Add(after)
+		if _, err := repo.ResolveClient(context.Background(), id); err == nil {
+			t.Fatalf("ResolveClient at +%v = nil error, want error", after)
+		}
+	}
+	if len(failures.ids) != 1 {
+		t.Fatalf("OnResolutionFailure called %d times within a one-minute FailureCacheAge, want 1", len(failures.ids))
+	}
+	clock.now = f.now.Add(time.Minute)
+	if _, err := repo.ResolveClient(context.Background(), id); err == nil {
+		t.Fatal("ResolveClient after FailureCacheAge = nil error, want error")
+	}
+	if len(failures.ids) != 2 {
+		t.Fatalf("OnResolutionFailure called %d times after FailureCacheAge, want 2", len(failures.ids))
+	}
+}
+
+// TestAutomaticClientRepositoryDoesNotRememberCancelledResolution: a
+// resolution its caller cancelled says nothing about the client_id, so
+// the next request resolves it afresh.
+func TestAutomaticClientRepositoryDoesNotRememberCancelledResolution(t *testing.T) {
+	f := setupAutomaticRegistrationFixture(t, rpMetadataBuilder(t))
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, f.newResolver(t), f.fetcher, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
+	if err != nil {
+		t.Fatalf("NewAutomaticClientRepository: %v", err)
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := repo.ResolveClient(cancelled, fapi.ClientID(f.rpID)); err == nil {
+		t.Fatal("ResolveClient(cancelled) = nil error, want error")
+	}
+	if _, err := repo.ResolveClient(context.Background(), fapi.ClientID(f.rpID)); err != nil {
+		t.Fatalf("ResolveClient after a cancelled attempt: %v, want the client resolved afresh", err)
 	}
 }

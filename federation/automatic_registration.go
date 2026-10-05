@@ -53,6 +53,17 @@ type AutomaticRegistrationConfig struct {
 	// remains valid. Required — must be positive.
 	MaxCacheAge time.Duration
 
+	// FailureCacheAge is how long a failed automatic registration is
+	// remembered for the same client_id: until it lapses, another
+	// request naming that client_id gets the same error without a new
+	// Trust Chain resolution, so a client_id whose resolution fails
+	// can't make every request repeat the outbound fetches. Zero means
+	// DefaultFailureCacheAge; negative is invalid. Keep it short: a
+	// failure can be transient (OpenID Federation 1.0 §10.5), and a
+	// client whose Trust Chain starts resolving waits up to this long.
+	// At most maxFailedResolutions failures are remembered at once.
+	FailureCacheAge time.Duration
+
 	// AllowsClientCredentialsGrant permits every automatically-registered
 	// client to use the RFC 6749 §4.4 client_credentials grant —
 	// uniformly, exactly like AllowedScopes, and for the identical
@@ -129,8 +140,9 @@ type AutomaticRegistrationConfig struct {
 	// it, never return it to the client. It is called synchronously, on
 	// the request that triggered the resolution — concurrent requests
 	// for the same client_id share that one call — so it must not
-	// block. Failures aren't cached: an RP that keeps retrying is
-	// reported once per attempt. Optional.
+	// block. A failure is remembered for FailureCacheAge, so an RP that
+	// keeps retrying is reported once per resolution attempted, not once
+	// per request. Optional.
 	OnResolutionFailure func(ctx context.Context, clientID fapi.ClientID, err error)
 }
 
@@ -140,6 +152,24 @@ type AutomaticRegistrationConfig struct {
 type cachedClient struct {
 	client    storage.RegisteredClient
 	jwks      json.RawMessage
+	expiresAt time.Time
+}
+
+// DefaultFailureCacheAge is AutomaticRegistrationConfig.FailureCacheAge
+// when it is zero.
+const DefaultFailureCacheAge = 10 * time.Second
+
+// maxFailedResolutions bounds how many failed registrations
+// AutomaticClientRepository remembers at once: client_ids cost an
+// attacker nothing, so the cache must not grow with them. Once full,
+// expired entries are dropped, and if none has expired a new failure
+// simply isn't remembered — the same as before failures were cached.
+const maxFailedResolutions = 4096
+
+// failedResolution is one remembered registration failure, returned for
+// its client_id until expiresAt.
+type failedResolution struct {
+	err       error
 	expiresAt time.Time
 }
 
@@ -195,6 +225,10 @@ type AutomaticClientRepository struct {
 
 	mu    sync.Mutex
 	cache map[fapi.ClientID]cachedClient
+	// failures holds recent registration failures (see
+	// AutomaticRegistrationConfig.FailureCacheAge), at most
+	// maxFailedResolutions of them.
+	failures map[fapi.ClientID]failedResolution
 	// inflight holds the resolution currently running for each
 	// client_id, so concurrent requests naming the same unknown
 	// client_id share one Trust Chain resolution rather than each
@@ -237,6 +271,12 @@ func NewAutomaticClientRepository(underlying storage.ClientRepository, resolver 
 	if cfg.MaxCacheAge <= 0 {
 		return nil, fmt.Errorf("federation: config: max_cache_age must be positive")
 	}
+	if cfg.FailureCacheAge < 0 {
+		return nil, fmt.Errorf("federation: config: failure_cache_age must not be negative")
+	}
+	if cfg.FailureCacheAge == 0 {
+		cfg.FailureCacheAge = DefaultFailureCacheAge
+	}
 	for _, method := range cfg.AllowedClientAuthMethods {
 		if !method.IsValid() {
 			return nil, fmt.Errorf("federation: config: allowed_client_auth_methods: invalid client auth method %v", method)
@@ -253,6 +293,7 @@ func NewAutomaticClientRepository(underlying storage.ClientRepository, resolver 
 	return &AutomaticClientRepository{
 		underlying: underlying, resolver: resolver, fetcher: fetcher, cfg: cfg, clock: clock,
 		cache:    make(map[fapi.ClientID]cachedClient),
+		failures: make(map[fapi.ClientID]failedResolution),
 		inflight: make(map[fapi.ClientID]*inflightResolution),
 	}, nil
 }
@@ -306,6 +347,10 @@ func (a *AutomaticClientRepository) resolve(ctx context.Context, id fapi.ClientI
 		a.mu.Unlock()
 		return entry, nil
 	}
+	if failed, ok := a.failures[id]; ok && now.Before(failed.expiresAt) {
+		a.mu.Unlock()
+		return cachedClient{}, failed.err
+	}
 	if call, ok := a.inflight[id]; ok {
 		a.mu.Unlock()
 		select {
@@ -342,12 +387,37 @@ func (a *AutomaticClientRepository) resolveUncached(ctx context.Context, id fapi
 		if a.cfg.OnResolutionFailure != nil {
 			a.cfg.OnResolutionFailure(ctx, id, err)
 		}
+		// A request cancelled or timed out by its own caller says nothing
+		// about the client_id, so only a resolution that ran its course
+		// is remembered.
+		if ctx.Err() == nil {
+			a.rememberFailure(id, err, now)
+		}
 		return cachedClient{}, err
 	}
 	a.mu.Lock()
 	a.cache[id] = entry
+	delete(a.failures, id)
 	a.mu.Unlock()
 	return entry, nil
+}
+
+// rememberFailure records err as id's registration failure until
+// FailureCacheAge after now, within maxFailedResolutions.
+func (a *AutomaticClientRepository) rememberFailure(id fapi.ClientID, err error, now time.Time) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if _, ok := a.failures[id]; !ok && len(a.failures) >= maxFailedResolutions {
+		for k, f := range a.failures {
+			if !now.Before(f.expiresAt) {
+				delete(a.failures, k)
+			}
+		}
+		if len(a.failures) >= maxFailedResolutions {
+			return
+		}
+	}
+	a.failures[id] = failedResolution{err: err, expiresAt: now.Add(a.cfg.FailureCacheAge)}
 }
 
 // register resolves the Entity Identifier id's Trust Chain and builds

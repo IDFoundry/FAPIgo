@@ -67,6 +67,7 @@ func New(cfg Config, deps Dependencies) (*Server, error) {
 			AllowedScopes:                cfg.AutomaticRegistration.AllowedScopes,
 			AuthorizationDetailsTypes:    cfg.AutomaticRegistration.AuthorizationDetailsTypes,
 			MaxCacheAge:                  cfg.AutomaticRegistration.MaxCacheAge,
+			FailureCacheAge:              cfg.AutomaticRegistration.FailureCacheAge,
 			AllowsClientCredentialsGrant: cfg.AutomaticRegistration.AllowsClientCredentialsGrant,
 			AllowsCIBA:                   cfg.AutomaticRegistration.AllowsCIBA,
 			AllowedClientAuthMethods:     cfg.AutomaticRegistration.AllowedClientAuthMethods,

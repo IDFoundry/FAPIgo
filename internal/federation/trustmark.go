@@ -55,7 +55,7 @@ func ParseTrustMark(token string) (TrustMark, error) {
 	if err != nil {
 		return TrustMark{}, fmt.Errorf("federation: %w", err)
 	}
-	if compact.Header.Type != trustMarkJWTType {
+	if !jose.TypeIs(compact.Header.Type, trustMarkJWTType) {
 		return TrustMark{}, ErrTrustMarkWrongType
 	}
 	claims, err := parseTrustMarkClaims(compact.Payload)
@@ -369,7 +369,7 @@ func ParseTrustMarkDelegation(token string) (TrustMarkDelegation, error) {
 	if err != nil {
 		return TrustMarkDelegation{}, fmt.Errorf("federation: %w", err)
 	}
-	if compact.Header.Type != trustMarkDelegationJWTType {
+	if !jose.TypeIs(compact.Header.Type, trustMarkDelegationJWTType) {
 		return TrustMarkDelegation{}, ErrTrustMarkDelegationWrongType
 	}
 	claims, err := parseTrustMarkDelegationClaims(compact.Payload)

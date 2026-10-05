@@ -2,13 +2,13 @@ package clientattestation
 
 import (
 	"crypto"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/jose"
+	"github.com/idfoundry/fapigo/internal/strictb64"
 )
 
 // TypHeader is the required JOSE "typ" header of a Client Attestation
@@ -84,7 +84,7 @@ func (a Attestation) CertificateChain() (ders [][]byte, present bool, err error)
 	}
 	ders = make([][]byte, len(entries))
 	for i, e := range entries {
-		der, err := base64.StdEncoding.DecodeString(e)
+		der, err := strictb64.Std(e)
 		if err != nil || len(der) == 0 {
 			return nil, true, fmt.Errorf("clientattestation: x5c entry %d is not standard base64 DER", i)
 		}
@@ -170,7 +170,7 @@ func (a Attestation) Verify(pub crypto.PublicKey, policy VerifyPolicy) (Verified
 		return VerifiedAttestation{}, fmt.Errorf("clientattestation: MaxLifetime must be positive")
 	}
 
-	if a.compact.Header.Type != TypHeader {
+	if !jose.TypeIs(a.compact.Header.Type, TypHeader) {
 		return VerifiedAttestation{}, fmt.Errorf("%w: got %q, want %q", ErrTypMismatch, a.compact.Header.Type, TypHeader)
 	}
 	if err := a.compact.Verify(pub, policy.Algorithm); err != nil {

@@ -39,6 +39,9 @@ func Parse(assertion string) (Assertion, error) {
 	if err != nil {
 		return Assertion{}, fmt.Errorf("clientassertion: %w", err)
 	}
+	if err := jose.RefuseOtherExplicitType(compact.Header.Type, clientAuthenticationJWTType); err != nil {
+		return Assertion{}, fmt.Errorf("clientassertion: %w", err)
+	}
 	c, err := parseClaims(compact.Payload)
 	if err != nil {
 		return Assertion{}, err

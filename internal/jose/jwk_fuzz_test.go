@@ -66,6 +66,8 @@ func FuzzParseJWK(f *testing.F) {
 	f.Add([]byte(`{"kty":"EC","crv":"P-256","x":"","y":""}`))
 	f.Add([]byte(`{"kty":"RSA","n":"AQ","e":"AQ"}`))
 	f.Add([]byte(`{"kty":"OKP","crv":"Ed25519","x":"AQ"}`))
+	f.Add([]byte(`{"kty":"OKP","crv":"Ed25519","x":"AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}`)) // the identity point
+	f.Add([]byte(`{"kty":"OKP","crv":"Ed25519","x":"7f_______________________________________38"}`)) // y = p, non-canonical
 	f.Add([]byte(`{"kty":"RSA","n":"AQAB","e":"AQAB","d":"AQAB"}`))
 
 	f.Fuzz(func(t *testing.T, data []byte) {

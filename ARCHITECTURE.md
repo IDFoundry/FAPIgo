@@ -87,6 +87,7 @@ fapigo/                    // package fapi: shared value types only
 │   ├── authchallenge/           // WWW-Authenticate challenge parsing (RFC 9110 §11)
 │   ├── grantrevocation/         // the grant_id claim and revocation key shared by server and resource
 │   ├── canonical/               // URL/JSON canonicalization
+│   ├── strictb64/               // canonical base64 decoding for JOSE segments, JWK members and x5c
 │   ├── strictjson/              // case-sensitive JSON member names for JOSE/metadata decoding
 │   ├── sealedcookie/            // the encrypted cookie behind interactioncookie and sessioncookie
 │   └── validation/               // generic strict-parsing helpers

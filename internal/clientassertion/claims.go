@@ -13,6 +13,11 @@ import (
 // before attempting to parse client_assertion as an assertion at all.
 const AssertionType = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
 
+// clientAuthenticationJWTType is the explicit "typ" draft-ietf-oauth-
+// rfc7523bis gives a client authentication assertion: accepted, like a
+// missing or generic typ, while another kind's explicit typ isn't.
+const clientAuthenticationJWTType = "client-authentication+jwt"
+
 // claims is a client assertion payload (RFC 7523 §3). Fields beyond the
 // ones defined here are rejected on parse. aud is required to be a
 // single JSON string; this package does not accept a JSON array for aud,

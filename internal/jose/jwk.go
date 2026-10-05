@@ -15,6 +15,7 @@ import (
 	"math/big"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/strictb64"
 	"github.com/idfoundry/fapigo/internal/strictjson"
 )
 
@@ -288,12 +289,15 @@ func parseOKPPublicKey(raw rawJWK) (crypto.PublicKey, error) {
 	if raw.X == "" {
 		return nil, fmt.Errorf("jose: jwk x is required")
 	}
-	x, err := base64.RawURLEncoding.DecodeString(raw.X)
+	x, err := strictb64.URL(raw.X)
 	if err != nil {
 		return nil, fmt.Errorf("jose: decode jwk x: %w", err)
 	}
 	if len(x) != ed25519.PublicKeySize {
 		return nil, fmt.Errorf("jose: jwk x must be %d bytes for Ed25519, got %d", ed25519.PublicKeySize, len(x))
+	}
+	if err := checkEd25519PublicKey(x); err != nil {
+		return nil, fmt.Errorf("jose: jwk x: %w", err)
 	}
 	return ed25519.PublicKey(x), nil
 }
@@ -424,7 +428,7 @@ func decodeCoordinate(s string) (*big.Int, error) {
 	if s == "" {
 		return nil, fmt.Errorf("empty value")
 	}
-	b, err := base64.RawURLEncoding.DecodeString(s)
+	b, err := strictb64.URL(s)
 	if err != nil {
 		return nil, err
 	}

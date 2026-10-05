@@ -126,7 +126,7 @@ func (p PoP) Verify(ctx context.Context, confirmationJWK []byte, policy PoPVerif
 		return VerifiedPoP{}, fmt.Errorf("clientattestation: MaxAge must be positive")
 	}
 
-	if p.compact.Header.Type != PoPTypHeader {
+	if !jose.TypeIs(p.compact.Header.Type, PoPTypHeader) {
 		return VerifiedPoP{}, fmt.Errorf("%w: got %q, want %q", ErrTypMismatch, p.compact.Header.Type, PoPTypHeader)
 	}
 

@@ -105,7 +105,7 @@ func Verify(ctx context.Context, req VerifyRequest) (VerifiedProof, error) {
 	if err != nil {
 		return VerifiedProof{}, fmt.Errorf("dpop: %w", err)
 	}
-	if compact.Header.Type != jwtType {
+	if !jose.TypeIs(compact.Header.Type, jwtType) {
 		return VerifiedProof{}, ErrWrongType
 	}
 	if compact.Header.JWK == nil {

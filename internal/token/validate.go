@@ -34,7 +34,7 @@ func ParseAccessToken(tok string) (AccessToken, error) {
 	if err != nil {
 		return AccessToken{}, fmt.Errorf("token: %w", err)
 	}
-	if compact.Header.Type != atJWTType {
+	if !jose.TypeIs(compact.Header.Type, atJWTType) {
 		return AccessToken{}, ErrWrongType
 	}
 	claims, err := parseAccessTokenClaims(compact.Payload)
@@ -223,6 +223,9 @@ func ParseIDTokenMax(tok string, maxBytes int) (IDToken, error) {
 	compact, err := jose.ParseCompactMax(tok, maxBytes)
 	if err != nil {
 		return IDToken{}, fmt.Errorf("token: %w", err)
+	}
+	if err := jose.RefuseOtherExplicitType(compact.Header.Type); err != nil {
+		return IDToken{}, fmt.Errorf("token: ID token: %w", err)
 	}
 	claims, err := parseIDTokenClaims(compact.Payload)
 	if err != nil {

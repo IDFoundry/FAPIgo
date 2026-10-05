@@ -757,6 +757,9 @@ func TestCertificateChain(t *testing.T) {
 		"non-string entry":  `[1]`,
 		"not base64":        `["!!"]`,
 		"url-safe base64":   `["-_-_"]`,
+		"line feed":         `["AQ\nID"]`,
+		"trailing bits":     `["BAV="]`,
+		"missing padding":   `["BAU"]`,
 		"empty certificate": `[""]`,
 		"over the limit":    tooMany,
 	} {

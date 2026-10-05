@@ -30,7 +30,7 @@ func Parse(token string) (Statement, error) {
 	if err != nil {
 		return Statement{}, fmt.Errorf("federation: %w", err)
 	}
-	if compact.Header.Type != jwtType {
+	if !jose.TypeIs(compact.Header.Type, jwtType) {
 		return Statement{}, ErrWrongType
 	}
 	if compact.Header.KeyID == "" {

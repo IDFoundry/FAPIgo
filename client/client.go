@@ -5,6 +5,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/federation"
+	"github.com/idfoundry/fapigo/internal/nofollow"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -25,6 +26,7 @@ func New(cfg Config, deps Dependencies) (*Client, error) {
 	if err := validateDependencies(cfg, deps); err != nil {
 		return nil, err
 	}
+	deps.HTTP = nofollow.Client(deps.HTTP)
 	return &Client{cfg: cfg, deps: deps}, nil
 }
 

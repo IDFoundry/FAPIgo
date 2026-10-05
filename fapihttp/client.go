@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/idfoundry/fapigo/internal/nofollow"
 )
 
 // contentTypeHeader is the one HTTP header name this package ever sets
@@ -24,6 +26,12 @@ const contentTypeHeader = "Content-Type"
 // *http.Client (ideally one built by NewClient) or a purpose-built
 // implementation, e.g. one that adds mTLS client certificates or routes
 // through a corporate proxy.
+//
+// Client follows redirects itself (Fetch, bounded and same-origin) or
+// not at all (Post), so the HTTPClient must not follow one on its own:
+// New uses a copy of an *http.Client whose CheckRedirect never follows,
+// and a response from any other HTTPClient that did follow one is
+// refused with ErrRedirectFollowed.
 //
 // Strongly prefer an *http.Client built by NewClient. Its transport
 // resolves each host itself, validates every candidate address before
@@ -108,7 +116,10 @@ type Client struct {
 	resolveIPs func(ctx context.Context, host string) ([]net.IP, error)
 }
 
-// New validates cfg and returns a Client wrapping http.
+// New validates cfg and returns a Client wrapping http. An *http.Client
+// is copied with its CheckRedirect replaced by one that never follows a
+// redirect (see HTTPClient), so the caller's own value is unchanged and
+// later changes to it don't reach the Client.
 func New(http HTTPClient, cfg Config) (*Client, error) {
 	if http == nil {
 		return nil, fmt.Errorf("fapihttp: http client is required")
@@ -122,7 +133,7 @@ func New(http HTTPClient, cfg Config) (*Client, error) {
 	if cfg.MaxRedirects < 0 {
 		return nil, fmt.Errorf("fapihttp: config: max redirects must not be negative")
 	}
-	return &Client{http: http, cfg: cfg, resolveIPs: defaultResolveIPs}, nil
+	return &Client{http: nofollow.Client(http), cfg: cfg, resolveIPs: defaultResolveIPs}, nil
 }
 
 // defaultResolveIPs resolves host via the system resolver.
@@ -154,9 +165,9 @@ type FetchRequest struct {
 	// IP-level SSRF protection, including under DNS rebinding, is
 	// provided only by the transport NewClient builds (see HTTPClient
 	// and NewClient's doc comments). Passing any other HTTPClient —
-	// including http.DefaultClient — disables that protection and, if it
-	// follows redirects itself, also bypasses Fetch's bounded
-	// same-origin redirect handling.
+	// including http.DefaultClient — disables that protection. Redirects
+	// are followed only by Fetch's own bounded, same-origin handling,
+	// whatever HTTPClient is passed (see HTTPClient).
 	URL *url.URL
 
 	// ExpectedContentType is the media type (ignoring parameters such as
@@ -328,6 +339,10 @@ func (c *Client) doRoundTrip(ctx context.Context, method string, target *url.URL
 	res, err := c.http.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("fapihttp: %w", err)
+	}
+	if nofollow.Followed(httpReq, res) {
+		_ = res.Body.Close()
+		return nil, ErrRedirectFollowed
 	}
 	if target.Scheme == "https" && res.TLS == nil {
 		_ = res.Body.Close()

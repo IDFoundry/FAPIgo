@@ -40,7 +40,12 @@ type Dependencies struct {
 	// JARM nor signed UserInfo leaves it nil — see Config.OAuthOnly.
 	IssuerKeys keys.IssuerKeySource
 
-	// HTTP performs this client's PAR and token-endpoint calls.
+	// HTTP performs this client's PAR, token-endpoint and other POST
+	// calls, and ResourceClient's requests. It must not follow redirects
+	// itself — a redirect would resend a client assertion, access token
+	// or DPoP proof to a target this client never chose — so New uses a
+	// copy of an *http.Client whose CheckRedirect never follows, and a
+	// response from any other HTTPClient that followed one is refused.
 	HTTP fapihttp.HTTPClient
 
 	// Clock supplies the current time.

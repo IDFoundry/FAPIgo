@@ -7,9 +7,13 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 
+	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/fapihttp"
 	"github.com/idfoundry/fapigo/internal/authchallenge"
 	"github.com/idfoundry/fapigo/internal/dpop"
+	"github.com/idfoundry/fapigo/internal/nofollow"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -87,6 +91,14 @@ func (c *Client) ClientCredentialsResource(result ClientCredentialsTokenResult) 
 // derived purely from Dependencies.HTTP's own configured TLS
 // transport.
 //
+// req's URL must be https, or http to a loopback host ("localhost",
+// 127.0.0.0/8 or ::1) — the rule fapi.AllowLoopbackHTTP applies to this
+// client's own endpoints — and without embedded credentials; an https
+// response must arrive over TLS (fapihttp.ErrMissingTLS otherwise).
+// A redirect is returned as the response, never followed: following it
+// would send the access token, and under DPoP the proof, to wherever
+// the resource server pointed (see Dependencies.HTTP).
+//
 // req's body, if any, must be replayable — Do may send it twice under
 // SenderConstrainDPoP's own nonce retry — so req.GetBody must be set;
 // http.NewRequestWithContext sets it automatically for the body types
@@ -95,6 +107,9 @@ func (c *Client) ClientCredentialsResource(result ClientCredentialsTokenResult) 
 func (rc *ResourceClient) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
 	if req == nil {
 		return nil, newError(ErrorInvalidRequest, "request is nil", nil)
+	}
+	if err := checkResourceURL(req.URL); err != nil {
+		return nil, newError(ErrorInvalidRequest, "protected resource URL is not allowed", err)
 	}
 	c := rc.client
 
@@ -146,7 +161,7 @@ func (rc *ResourceClient) Do(ctx context.Context, req *http.Request) (*http.Resp
 func (rc *ResourceClient) sendBearer(ctx context.Context, req *http.Request) (*http.Response, error) {
 	req = req.WithContext(ctx)
 	req.Header.Set("Authorization", "Bearer "+rc.token)
-	return rc.client.deps.HTTP.Do(req)
+	return rc.do(req)
 }
 
 // send signs a fresh DPoP proof (new iat and jti — reusing one across
@@ -165,7 +180,40 @@ func (rc *ResourceClient) send(ctx context.Context, signer crypto.Signer, req *h
 	req = req.WithContext(ctx)
 	req.Header.Set("Authorization", "DPoP "+rc.token)
 	req.Header.Set("DPoP", proof)
-	return rc.client.deps.HTTP.Do(req)
+	return rc.do(req)
+}
+
+// do performs req with Dependencies.HTTP, refusing a response to a
+// redirect the HTTPClient followed itself, and an https response that
+// didn't arrive over TLS — the checks postForm applies to this client's
+// own calls.
+func (rc *ResourceClient) do(req *http.Request) (*http.Response, error) {
+	res, err := rc.client.deps.HTTP.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if nofollow.Followed(req, res) {
+		_ = res.Body.Close()
+		return nil, fapihttp.ErrRedirectFollowed
+	}
+	if req.URL.Scheme == "https" && res.TLS == nil {
+		_ = res.Body.Close()
+		return nil, fapihttp.ErrMissingTLS
+	}
+	return res, nil
+}
+
+// checkResourceURL applies fapi.ParseEndpointURL's rules, with loopback
+// http allowed, to a protected resource request's URL — ignoring a
+// fragment, which is never sent.
+func checkResourceURL(u *url.URL) error {
+	if u == nil {
+		return errors.New("request has no URL")
+	}
+	target := *u
+	target.Fragment, target.RawFragment = "", ""
+	_, err := fapi.ParseEndpointURL(target.String(), fapi.AllowLoopbackHTTP())
+	return err
 }
 
 // isResourceDPoPNonceChallenge reports whether status/header is a

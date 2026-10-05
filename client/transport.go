@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/idfoundry/fapigo/fapihttp"
+	"github.com/idfoundry/fapigo/internal/nofollow"
 )
 
 // errTokenRequestFailed is the shared newError description both
@@ -67,6 +68,10 @@ func (c *Client) postForm(ctx context.Context, url string, body []byte, extraHea
 		return nil, 0, nil, fmt.Errorf("client: %w", err)
 	}
 	defer func() { _ = res.Body.Close() }()
+
+	if nofollow.Followed(req, res) {
+		return nil, 0, nil, fapihttp.ErrRedirectFollowed
+	}
 
 	// Dependencies.HTTP is a fully-trusted collaborator (any
 	// http.Client-shaped value satisfies it) — unlike Discover's own

@@ -43,13 +43,9 @@ func mustParseURL(t *testing.T, raw string) *url.URL {
 }
 
 // noRedirectClient returns ts.Client() with automatic redirect-following
-// disabled. A caller of fapihttp.New is documented to supply a client
-// shaped like this (see Client's doc comment and NewClient, which always
-// sets this same policy) precisely so Client.Fetch's own bounded,
-// origin-checked redirect handling is the only place a redirect is ever
-// followed — using ts.Client() directly here would let the stdlib
-// silently follow the redirect before Fetch's loop ever saw the 3xx
-// status, testing net/http's redirect behavior instead of fapihttp's.
+// disabled, the policy NewClient always sets. New applies it to any
+// *http.Client it's given (see redirect_test.go), so this only keeps
+// the tests below independent of that.
 func noRedirectClient(ts *httptest.Server) *http.Client {
 	c := ts.Client()
 	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }

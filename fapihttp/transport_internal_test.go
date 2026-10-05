@@ -54,6 +54,19 @@ func TestDisallowedIP(t *testing.T) {
 		{"Teredo -> link-local (cloud metadata)", "2001:0:0:0:0:0:5601:5601", false, false, true},
 		{"IPv4-compatible -> link-local (cloud metadata)", "::a9fe:a9fe", false, false, true},
 		{"ordinary global-unicast IPv6, unaffected", "2606:4700:4700::1111", false, false, false},
+		// SIIT IPv4-translated ::ffff:0:a.b.c.d (RFC 2765), unlike the
+		// IPv4-mapped ::ffff:a.b.c.d above, isn't an IPv4 address to
+		// net.IP.To4.
+		{"IPv4-translated -> link-local (cloud metadata)", "::ffff:0:a9fe:a9fe", false, false, true},
+		{"IPv4-translated -> loopback", "::ffff:0:7f00:1", false, false, true},
+		{"IPv4-translated -> private", "::ffff:0:a00:1", false, false, true},
+		{"IPv4-translated -> public, stays allowed", "::ffff:0:808:808", false, false, false},
+
+		// RFC 3879 deprecated site-local unicast.
+		{"site-local fec0::/10", "fec0::1", false, false, true},
+		{"site-local, top of fec0::/10", "feff:ffff::1", false, false, true},
+		{"site-local, allowPrivate does not except it", "fec0::1", false, true, true},
+		{"just below site-local (link-local fe80::/10)", "febf::1", false, false, true},
 
 		// ISATAP (RFC 5214): identified by the 0000:5efe/0200:5efe
 		// interface-ID marker, not by prefix.
@@ -133,6 +146,8 @@ func TestEmbeddedIPv4(t *testing.T) {
 		{"IPv4-compatible", "::102:304", "1.2.3.4"},
 		{"plain IPv4, not applicable", "8.8.8.8", ""},
 		{"IPv4-mapped, not applicable", "::ffff:8.8.8.8", ""},
+		{"IPv4-translated", "::ffff:0:102:304", "1.2.3.4"},
+		{"::ffff:0 prefix with a non-zero byte after it, not applicable", "::ffff:1:102:304", ""},
 		// ::1 and :: technically match the IPv4-compatible ::a.b.c.d
 		// pattern this helper decodes (their low 32 bits are 0.0.0.1
 		// and 0.0.0.0 respectively) — disallowedIP never actually

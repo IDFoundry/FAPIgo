@@ -182,7 +182,7 @@ func TestCIBARefreshTokenBoundToClientInstanceKey(t *testing.T) {
 		// The fake key source serves one key for every purpose: the
 		// attester's, which also signs the CIBA request object below.
 		deps.ClientKeys = &fakeClientKeySource{keysByClient: registeredAttesterKeys(attesterKey)}
-		deps.AttesterTrust = server.RegisteredAttesterKeys{}
+		deps.AttesterTrust = registeredAttesterTrust(fapi.ES256, &attesterKey.PublicKey)
 	})
 	h.key = attesterKey
 	issuing := &attestedInstance{t: t, h: h, attesterKey: attesterKey, instanceKey: generateKey(t)}

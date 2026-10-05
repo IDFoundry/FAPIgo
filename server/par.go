@@ -633,6 +633,12 @@ func (s *Server) resolveClientKey(ctx context.Context, id fapi.ClientID, purpose
 	if err != nil {
 		return nil, err
 	}
+	return selectVerificationKey(set, alg, kid)
+}
+
+// selectVerificationKey returns the first key in set with algorithm alg
+// and, when kid is set, that key ID.
+func selectVerificationKey(set keys.VerificationKeySet, alg fapi.SignatureAlgorithm, kid string) (crypto.PublicKey, error) {
 	for _, k := range set.Keys {
 		if kid != "" && k.KeyID != kid {
 			continue

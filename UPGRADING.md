@@ -45,6 +45,50 @@ claims, err := resolver.ResolveViaEndpoint(ctx, federation.ResolveRequest{
 A response issued by anyone else is refused, before its issuer is
 resolved. An empty or invalid `ExpectedIssuer` is refused at the call.
 
+### Registered attester keys come from their own key source (server, keys)
+
+**Affects:** a server with `Config.AttestationBasedClientAuthentication`
+whose `Dependencies.AttesterTrust` is `server.RegisteredAttesterKeys{}`,
+and any `keys.ClientKeySource` that answered
+`keys.AttestationVerification` requests.
+
+**Why:** `RegisteredAttesterKeys` looked the attester's key up in
+`Dependencies.ClientKeys`, by client ID. A key source that answers by
+client returns the client's own keys: `keys/ephemeral` returns the
+client's registered JWKS whatever the purpose, and federation automatic
+registration returns the relying party's own published keys. A client
+could then sign its own client attestation with its own key and pass
+attestation-based client authentication without any attester vouching
+for it. An attester's keys now come from a source keyed by the
+attester, which client registrations never feed.
+
+**What to change:**
+
+- Give `RegisteredAttesterKeys` a `Keys` source holding each trusted
+  attester's keys, by the issuer clients are registered with
+  (`ExpectedAttesterIssuer`):
+
+  ```go
+  deps.AttesterTrust = server.RegisteredAttesterKeys{
+  	Keys: keys.StaticAttesterKeys{
+  		"https://attester.example.com": {
+  			{KeyID: "attester-1", Algorithm: fapi.ES256, PublicKey: attesterPublicKey},
+  		},
+  	},
+  }
+  ```
+
+  Or implement `keys.AttesterKeySource` yourself. `New` refuses a
+  `RegisteredAttesterKeys` without `Keys`.
+- *Production only:* the source must implement
+  `keys.KeySourceAssurance`, as `ClientKeys` must. `StaticAttesterKeys`
+  does.
+- `keys.AttestationVerification` is removed. Delete any case for it in
+  your `ClientKeySource`, and move the keys it returned into the
+  attester key source.
+
+`X5CAttesterChain` is unchanged.
+
 ## v0.49.0
 
 ### A custom access token issuer declares what it relies on (server, *production only*)

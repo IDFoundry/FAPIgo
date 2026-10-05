@@ -33,8 +33,8 @@ import (
 //
 //   - X5CAttesterChain verifies the attestation's "x5c" certificate
 //     chain against trust anchors — what HAIP 1.0 §4.4.1 expects;
-//   - RegisteredAttesterKeys looks the key up in Dependencies.ClientKeys
-//     by "kid", ignoring any "x5c".
+//   - RegisteredAttesterKeys looks the key up in an AttesterKeySource by
+//     the client's registered attester and "kid", ignoring any "x5c".
 //
 // A deployment customises which anchors to trust — per client, from a
 // trust list, refreshed however it likes — through X5CAttesterChain's
@@ -49,20 +49,44 @@ type AttesterTrust interface {
 }
 
 // RegisteredAttesterKeys verifies a client's attestation with a key
-// Dependencies.ClientKeys returns for keys.AttestationVerification,
-// selected by the attestation's "kid" (any key with the client's
-// registered attestation algorithm when there is no "kid"). Any "x5c"
-// header is ignored, not validated — so rotating an Attester's signing
-// key means re-registering it, and a certificate's expiry or trust
-// status plays no part. Use X5CAttesterChain for HAIP's certificate-
-// based trust.
-type RegisteredAttesterKeys struct{}
-
-func (RegisteredAttesterKeys) attesterKey(ctx context.Context, s *Server, client storage.RegisteredClient, attestation clientattestation.Attestation) (crypto.PublicKey, error) {
-	return s.resolveClientKey(ctx, client.ID(), keys.AttestationVerification, client.ClientAttestationAlgorithm(), attestation.KeyID())
+// Keys returns for the client's registered attester
+// (storage.RegisteredClient.ExpectedAttesterIssuer), selected by the
+// attestation's "kid" (any key with the client's registered attestation
+// algorithm when there is no "kid"). Any "x5c" header is ignored, not
+// validated — so rotating an Attester's signing key means
+// re-registering it, and a certificate's expiry or trust status plays
+// no part. Use X5CAttesterChain for HAIP's certificate-based trust.
+//
+// Attester keys come from their own source, keyed by attester, never
+// from Dependencies.ClientKeys: a key source that answers by client
+// (keys/ephemeral's, or federation's, which returns a relying party's
+// own published keys) would hand back a client's own key, and the
+// client could attest for itself.
+type RegisteredAttesterKeys struct {
+	// Keys resolves each attester's verification keys, by its issuer —
+	// keys.StaticAttesterKeys, or your own keys.AttesterKeySource.
+	// Required; under AssuranceProduction it must declare
+	// keys.KeySourceAssurance, as Dependencies.ClientKeys must.
+	Keys keys.AttesterKeySource
 }
 
-func (RegisteredAttesterKeys) validate() error { return nil }
+func (r RegisteredAttesterKeys) attesterKey(ctx context.Context, _ *Server, client storage.RegisteredClient, attestation clientattestation.Attestation) (crypto.PublicKey, error) {
+	alg, kid := client.ClientAttestationAlgorithm(), attestation.KeyID()
+	set, err := r.Keys.ResolveAttesterKeys(ctx, keys.AttesterKeyRequest{
+		Issuer: client.ExpectedAttesterIssuer(), Algorithm: alg, KeyID: kid,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return selectVerificationKey(set, alg, kid)
+}
+
+func (r RegisteredAttesterKeys) validate() error {
+	if r.Keys == nil {
+		return errors.New("server: dependencies: attester trust: RegisteredAttesterKeys needs Keys, the attesters' own key source (e.g. keys.StaticAttesterKeys)")
+	}
+	return nil
+}
 
 // X5CAttesterChain verifies a client's attestation with the key of the
 // certificate in its "x5c" header (HAIP 1.0 §4.4.1), after verifying

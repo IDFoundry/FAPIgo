@@ -108,6 +108,36 @@ keep `fapi.AllowLoopbackHTTP` for development configurations. A native
 app's loopback redirect URI (`Config.RedirectURI`, RFC 8252 §7.3) is
 unaffected.
 
+### A CIBA notifier declares how it sends (server, *production only*)
+
+**Affects:** a server under `Config.Assurance = AssuranceProduction`
+with CIBA configured (`Endpoints.BackchannelAuthentication` set) whose
+`Dependencies.BackchannelNotifier` is its own type, not
+`backchannelhttp.Notifier` or `server.NoBackchannelNotifications`.
+
+**Why:** a ping notification goes to the client's registered
+`client_notification_endpoint`, which under OpenID Federation automatic
+registration is the relying party's own metadata. A notifier sending
+through an ordinary HTTP client can be pointed at internal addresses,
+follow redirects, or hang. `New` checked every other outbound extension
+point under production, but couldn't see how a notifier sends.
+
+**What to change:** use `backchannelhttp.New`, which sends through
+`fapihttp`'s guarded client. Or implement
+`server.BackchannelNotifierAssurance` on your notifier and declare
+`OutboundHardened`, which promises it sends the same way: a dialer that
+refuses non-public addresses, no redirects, https, timeouts and a
+bounded response read (`fapihttp.NewClient` builds such a client):
+
+```go
+func (n myNotifier) BackchannelNotifierCapabilities() server.BackchannelNotifierCapabilities {
+	return server.BackchannelNotifierCapabilities{OutboundHardened: true}
+}
+```
+
+`NoBackchannelNotifications` needs nothing. Development assurance is
+unchanged.
+
 ## v0.49.0
 
 ### A custom access token issuer declares what it relies on (server, *production only*)

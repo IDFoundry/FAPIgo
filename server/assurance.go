@@ -63,6 +63,11 @@ const (
 	// in-memory keys, regenerated on every restart, never qualify. An
 	// HSM or KMS is not required — durable keys a deployment loads from
 	// its own storage qualify too — only that the declaration is made.
+	// With CIBA configured, Dependencies.BackchannelNotifier must
+	// implement BackchannelNotifierAssurance and declare
+	// OutboundHardened (backchannelhttp.Notifier and
+	// NoBackchannelNotifications do), since it sends to client-supplied
+	// notification endpoints.
 	// Dependencies.Random must be crypto/rand.Reader itself: every
 	// request_uri, authorization code, refresh token, opaque access
 	// token, jti and DPoP nonce this server issues is only as
@@ -133,6 +138,19 @@ func checkKeySourceAssurance(name string, source any) error {
 	}
 	if !asserter.Capabilities().LiveFetchHardened {
 		return fmt.Errorf("server: dependencies: %s must declare LiveFetchHardened capability under AssuranceProduction", name)
+	}
+	return nil
+}
+
+// checkNotifierAssurance requires notifier to implement
+// BackchannelNotifierAssurance and to declare OutboundHardened.
+func checkNotifierAssurance(notifier BackchannelNotifier) error {
+	asserter, ok := notifier.(BackchannelNotifierAssurance)
+	if !ok {
+		return fmt.Errorf("server: dependencies: backchannel notifier must implement server.BackchannelNotifierAssurance under AssuranceProduction (backchannelhttp.Notifier does)")
+	}
+	if !asserter.BackchannelNotifierCapabilities().OutboundHardened {
+		return fmt.Errorf("server: dependencies: backchannel notifier must declare OutboundHardened capability under AssuranceProduction")
 	}
 	return nil
 }

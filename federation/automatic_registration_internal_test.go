@@ -10,12 +10,16 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
+	"unsafe"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/fapihttp"
@@ -682,5 +686,38 @@ func TestRememberFailureStaysWithinItsCap(t *testing.T) {
 	}
 	if len(repo.failures) != 1 {
 		t.Fatalf("failures after eviction = %d, want 1 (every earlier entry had expired)", len(repo.failures))
+	}
+}
+
+// TestRememberFailureKeepsABoundedCopy: the failure cache keeps at most
+// maxRememberedFailureBytes of a failure's message, copied out of the
+// original, and a short message unchanged.
+func TestRememberFailureKeepsABoundedCopy(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	repo := &AutomaticClientRepository{
+		cfg:      AutomaticRegistrationConfig{FailureCacheAge: time.Minute},
+		failures: make(map[fapi.ClientID]failedResolution),
+	}
+
+	long := errors.New("federation:" + strings.Repeat("é", 100_000)) // multi-byte, with the cut landing mid-rune
+	repo.rememberFailure("https://long.example", long, now)
+	got := repo.failures["https://long.example"].err.Error()
+	if len(got) > maxRememberedFailureBytes+len(" ... (truncated)") {
+		t.Fatalf("remembered message is %d bytes, want at most %d plus the marker", len(got), maxRememberedFailureBytes)
+	}
+	if !utf8.ValidString(got) || !strings.HasSuffix(got, " ... (truncated)") || !strings.HasPrefix(long.Error(), strings.TrimSuffix(got, " ... (truncated)")) {
+		t.Fatalf("remembered message = %.60q..., want a valid prefix of the original and the truncation marker", got)
+	}
+	if unsafe.StringData(got) == unsafe.StringData(long.Error()) {
+		t.Fatal("remembered message shares the original's memory, want a copy")
+	}
+	if errors.Unwrap(repo.failures["https://long.example"].err) != nil {
+		t.Fatal("remembered failure keeps the original error chain, want only its message")
+	}
+
+	short := errors.New("federation: no path")
+	repo.rememberFailure("https://short.example", short, now)
+	if got := repo.failures["https://short.example"].err.Error(); got != short.Error() {
+		t.Fatalf("remembered short message = %q, want %q", got, short.Error())
 	}
 }

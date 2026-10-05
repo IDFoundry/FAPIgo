@@ -3,10 +3,10 @@ package federation
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -378,8 +378,9 @@ func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntit
 // Chain independently and accepts any valid one, and every branch is
 // verified from its own superior's statements on a copy of st, so one
 // branch's failure never counts towards another's success. When no
-// branch succeeds, the error carries every branch's reason (at most
-// budget of them), not just the last one tried.
+// branch succeeds, or the budget runs out first, the error (a
+// *noPathError) carries every branch tried so far and its reason (at
+// most budget of them), not just the last one tried.
 func (r *Resolver) walk(ctx context.Context, st *chainWalkState, hop int, budget *int, now time.Time) (ResolvedEntity, error) {
 	if hop >= r.cfg.Limits.MaxPathLength {
 		return ResolvedEntity{}, fmt.Errorf("federation: trust chain for %q exceeds the configured max path length (%d superiors, Intermediates plus the Trust Anchor)", st.subjectID, r.cfg.Limits.MaxPathLength)
@@ -392,25 +393,70 @@ func (r *Resolver) walk(ctx context.Context, st *chainWalkState, hop int, budget
 		return ResolvedEntity{}, fmt.Errorf("federation: %q lists %d authority_hints, more than the configured limit (%d)", st.entityAt, len(hints), r.cfg.Limits.MaxAuthorityHints)
 	}
 
-	var errs []error
+	var branches []branchError
 	for _, hint := range r.trustAnchorsFirst(hints) {
 		if st.visited[hint] {
 			continue
 		}
 		if *budget <= 0 {
-			return ResolvedEntity{}, fmt.Errorf("federation: trust chain for %q: stopped after trying %d superiors (MaxPathLength × MaxAuthorityHints)", st.subjectID, r.cfg.Limits.MaxPathLength*r.cfg.Limits.MaxAuthorityHints)
+			return ResolvedEntity{}, &noPathError{
+				entity:   st.entityAt,
+				reason:   fmt.Sprintf("trust chain for %q stopped after trying %d superiors (MaxPathLength × MaxAuthorityHints)", st.subjectID, r.cfg.Limits.MaxPathLength*r.cfg.Limits.MaxAuthorityHints),
+				branches: branches,
+			}
 		}
 		*budget--
 		result, err := r.tryHint(ctx, st, hop, hint, budget, now)
 		if err == nil {
 			return result, nil
 		}
-		errs = append(errs, fmt.Errorf("via %q: %w", hint, err))
+		branches = append(branches, branchError{hint: hint, err: err})
 	}
-	if len(errs) == 0 {
-		return ResolvedEntity{}, fmt.Errorf("federation: %q: no unvisited superior among %v", st.entityAt, hints)
+	if len(branches) == 0 {
+		return ResolvedEntity{}, fmt.Errorf("federation: %q: no unvisited superior among its %d authority_hints", st.entityAt, len(hints))
 	}
-	return ResolvedEntity{}, fmt.Errorf("federation: %q: no path to a configured trust anchor through %v: %w", st.entityAt, hints, errors.Join(errs...))
+	return ResolvedEntity{}, &noPathError{
+		entity:   st.entityAt,
+		reason:   fmt.Sprintf("no path to a configured trust anchor through its %d authority_hints", len(hints)),
+		branches: branches,
+	}
+}
+
+// branchError is one authority hint walk tried and why it failed.
+type branchError struct {
+	hint string
+	err  error
+}
+
+// noPathError is walk's error when none of entity's authority hints led
+// to a configured Trust Anchor: why the search stopped, then each branch
+// tried and its reason. Its message is built only when asked for, so a
+// branch's text isn't copied into every enclosing level of a deep search
+// (a nested walk's own noPathError is one of its branches), and the
+// authority hints themselves, which the entity chose, are counted rather
+// than listed.
+type noPathError struct {
+	entity   string
+	reason   string
+	branches []branchError
+}
+
+func (e *noPathError) Error() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "federation: %q: %s", e.entity, e.reason)
+	for _, br := range e.branches {
+		fmt.Fprintf(&b, "\nvia %q: %s", br.hint, br.err.Error())
+	}
+	return b.String()
+}
+
+// Unwrap returns each branch's own error, for errors.Is and errors.As.
+func (e *noPathError) Unwrap() []error {
+	errs := make([]error, len(e.branches))
+	for i, br := range e.branches {
+		errs[i] = br.err
+	}
+	return errs
 }
 
 // tryHint extends a copy of st through the superior hint — its Entity

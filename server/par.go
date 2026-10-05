@@ -48,15 +48,14 @@ var coreAuthorizationParameters = map[string]struct{}{
 	"claims": {},
 
 	// prompt (OIDC Core §3.1.2.1) lets a client request specific
-	// re-authentication/consent behavior — most commonly "consent", to
-	// force a fresh consent screen when requesting offline_access, so a
-	// refresh token is guaranteed to be (re-)issued rather than silently
-	// reusing an existing grant. This package doesn't need to act on its
-	// value: BeginAuthorization always produces InteractionRequired and
-	// there is no "remembered consent" fast path that ever skips
-	// rendering consent, so prompt's behavioral requirements are already
-	// satisfied unconditionally. It only needs to not be rejected as an
-	// unregistered parameter.
+	// re-authentication/consent behavior — "none" (no UI at all),
+	// "login" (authenticate again), "consent" (ask again, most commonly
+	// with offline_access), "select_account". BeginAuthorization always
+	// produces InteractionRequired, so what to show is the application's
+	// decision: it reads the values in InteractionRequest.Prompt, and
+	// answers a "none" it can't satisfy with InteractionNeeded. The
+	// pushed authorization request only checks its form (see
+	// requestedPrompt).
 	"prompt": {},
 
 	// authorization_details (Rich Authorization Requests, RFC 9396 §5) is
@@ -246,7 +245,7 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 	if _, hasRequestObject := params["request"]; hasRequestObject {
 		source = extension.SourceRequestObject
 	}
-	request, err := encodeRequestRecord(requestRecord{Parameters: validated, TokenClaims: tokenClaims, ExtensionSource: source})
+	request, err := encodeRequestRecord(requestRecord{Parameters: validated, TokenClaims: tokenClaims, ExtensionSource: source, PushedAt: &now})
 	if err != nil {
 		return s.parFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to encode pushed authorization request", err))
 	}
@@ -695,6 +694,9 @@ func (s *Server) validateAuthorizationParameters(params map[string]json.RawMessa
 
 	if _, _, err := requestedMaxAge(params); err != nil {
 		return nil, newError(ErrorInvalidRequest, 400, "max_age must be a non-negative whole number of seconds", err)
+	}
+	if _, err := requestedPrompt(params); err != nil {
+		return nil, newError(ErrorInvalidRequest, 400, err.Error(), nil)
 	}
 
 	if scopeRaw, ok := params["scope"]; ok {

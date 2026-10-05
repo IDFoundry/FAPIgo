@@ -69,15 +69,18 @@
 //     reading the same revocation store — every access token issued
 //     from it.
 //   - The client's authentication requirements reach the application
-//     (InteractionRequest.ACRValues, MaxAge and HasMaxAge), and max_age
-//     is enforced: CompleteAuthorization answers login_required when the
-//     authentication time the application reports is older.
+//     (InteractionRequest.ACRValues, MaxAge, HasMaxAge and Prompt), and
+//     max_age and prompt=login are enforced: CompleteAuthorization
+//     answers login_required when the authentication time the
+//     application reports is older than max_age allows, or, for
+//     prompt=login, earlier than the request.
 //   - AuthorizationAction (from BeginAuthorization) and AuthorizationResult
 //     (from CompleteAuthorization) are closed sum types, not structs with
 //     optional fields, so a caller can never mistake a local error for a
 //     safe redirect. InteractionResult (the input to CompleteAuthorization)
-//     is likewise closed, buildable only via Authorize, Deny or
-//     AuthenticationFailed — never assembled field-by-field.
+//     is likewise closed, buildable only via Authorize, Deny,
+//     AuthenticationFailed or InteractionNeeded — never assembled
+//     field-by-field.
 //   - Error carries an OAuth ErrorCode and an HTTP status alongside a
 //     PublicDescription safe to put in a response body; the underlying
 //     cause is available via Unwrap for logs only.

@@ -43,6 +43,13 @@ func NewInteractionID(random io.Reader) (string, error) {
 // this request produces (including every error path) — this package's
 // Verify never touches this header itself, since the value depends on
 // nothing Verify computes, only on the raw incoming request.
+//
+// A presented value is echoed verbatim, as §6.2.1 requires, so it is
+// whatever the caller sent: unauthenticated, not necessarily a UUID
+// (§6.2.2 asks clients for one but nothing enforces it), and as long as
+// the HTTP server's header limit allows. Treat it as untrusted input —
+// quote or escape it in logs, and don't use it as a key into anything
+// of the application's own.
 func ResolveInteractionID(presented string, random io.Reader) (string, error) {
 	if presented != "" {
 		return presented, nil

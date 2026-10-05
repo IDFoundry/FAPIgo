@@ -127,6 +127,32 @@ type InteractionRequest struct {
 	MaxAge    time.Duration
 	HasMaxAge bool
 
+	// Prompt is the client's "prompt" (OIDC Core §3.1.2.1): how the
+	// application should interact with the end user. The server can't
+	// tell what the application showed, so honouring it is the
+	// application's job:
+	//
+	//   - PromptNone: show no authentication or consent page. Complete
+	//     with Authorize only if the end user already has a session and
+	//     has already consented to this; otherwise complete with
+	//     InteractionNeeded (NeedLogin, NeedConsent, NeedAccountSelection
+	//     or NeedInteraction), which answers the client with the matching
+	//     error. A pushed request combining "none" with another value is
+	//     refused, so it never reaches here.
+	//   - PromptLogin: authenticate the end user again even if they have
+	//     a session, and report that authentication's time in
+	//     NewAuthenticationContext; if they can't be, complete with
+	//     AuthenticationFailed (login_required). CompleteAuthorization
+	//     enforces it: an Authorize whose authentication time is earlier
+	//     than when the request was pushed, less Limits.MaxClockSkew,
+	//     answers the client with login_required, as an existing
+	//     session's time would.
+	//   - PromptConsent: ask for consent even if it was given before.
+	//   - PromptSelectAccount: let the end user choose an account.
+	//
+	// Values another specification defines arrive as sent.
+	Prompt Prompt
+
 	// ClientDisplay is what the consent screen can show about the client
 	// (name, logo, policy and terms links) — from its registration, or,
 	// for a client registered automatically through OpenID Federation,

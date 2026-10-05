@@ -292,17 +292,21 @@ func (b *bank) userinfo(w http.ResponseWriter, r *http.Request) {
 		resource.NewError(resource.ErrorInvalidToken, http.StatusUnauthorized, "unknown customer").WriteJSON(w)
 		return
 	}
-	// A token for a client the bank no longer knows is the token's
-	// problem, not the bank's. The lookup error names the client from the
-	// token, so it isn't logged.
-	client, err := b.clients.ResolveClient(r.Context(), fapi.ClientID(authz.ClientID))
+	// Signed for the token's own client and subject: a token for a client
+	// the bank no longer knows is a 401, the token's problem, not the
+	// bank's.
+	signed, err := serverresource.SignUserInfoResponse(r.Context(), b.srv, b.clients, authz, body)
 	if err != nil {
-		resource.NewError(resource.ErrorInvalidToken, http.StatusUnauthorized, "the access token's client is unknown").WriteJSON(w)
-		return
-	}
-	signed, srvErr := b.srv.SignUserInfoResponse(r.Context(), client, body)
-	if srvErr != nil {
-		srvErr.WriteJSON(w)
+		var rerr *resource.Error
+		var srvErr *server.Error
+		switch {
+		case errors.As(err, &rerr):
+			resource.WriteError(w, rerr)
+		case errors.As(err, &srvErr):
+			srvErr.WriteJSON(w)
+		default:
+			resource.NewError(resource.ErrorServerError, http.StatusInternalServerError, "failed to sign the UserInfo response").WriteJSON(w)
+		}
 		return
 	}
 	authz.SetDPoPNonce(w.Header())

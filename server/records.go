@@ -50,6 +50,14 @@ type requestRecord struct {
 	// when the client polls). Nil for a pushed authorization request,
 	// and in a CIBA record written before this field existed.
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+
+	// PushedAt is when a pushed authorization request was accepted, so
+	// a prompt=login completion can be refused when the user's
+	// authentication isn't later than it (see
+	// Server.completeAuthorize). Nil for a CIBA request, and in a
+	// record written before this field existed; such a record isn't
+	// checked against prompt=login.
+	PushedAt *time.Time `json:"pushed_at,omitempty"`
 }
 
 // grantRecord is what an authorization code, refresh token or approved

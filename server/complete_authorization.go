@@ -90,6 +90,12 @@ func (s *Server) CompleteAuthorization(ctx context.Context, req CompleteAuthoriz
 		return s.completeErrorRedirect(ctx, completed.ClientID, redirectURI, state, "access_denied", result.reason, AuditOutcomeFailure)
 	case authenticationFailedResult:
 		return s.completeErrorRedirect(ctx, completed.ClientID, redirectURI, state, "login_required", result.reason, AuditOutcomeFailure)
+	case interactionNeededResult:
+		code := result.need.errorCode()
+		if code == "" {
+			return s.completeLocalFail(ctx, completed.ClientID, newError(ErrorServerError, 500, "unrecognized interaction need", nil)), nil
+		}
+		return s.completeErrorRedirect(ctx, completed.ClientID, redirectURI, state, code, result.reason, AuditOutcomeFailure)
 	default:
 		return s.completeLocalFail(ctx, completed.ClientID, newError(ErrorServerError, 500, "unrecognized interaction result", nil)), nil
 	}
@@ -107,6 +113,18 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 		oldest := s.deps.Clock.Now().Add(-maxAge - s.cfg.Limits.MaxClockSkew)
 		if result.auth.authTime.Before(oldest) {
 			return s.completeErrorRedirect(ctx, clientID, redirectURI, state, "login_required", "the user's authentication is older than the requested max_age", AuditOutcomeFailure)
+		}
+	}
+
+	// OIDC Core §3.1.2.1: prompt=login asks the OP to "reauthenticate the
+	// End-User even if the End-User is already authenticated", and if it
+	// can't, to return login_required. An authentication from before the
+	// request was pushed, allowing the same clock skew as max_age, didn't
+	// happen for this request. A record without PushedAt (written before
+	// it existed) isn't checked.
+	if prompt, _ := requestedPrompt(request.Parameters); prompt.Has(PromptLogin) && request.PushedAt != nil {
+		if result.auth.authTime.Before(request.PushedAt.Add(-s.cfg.Limits.MaxClockSkew)) {
+			return s.completeErrorRedirect(ctx, clientID, redirectURI, state, "login_required", "the user didn't authenticate again for prompt=login", AuditOutcomeFailure)
 		}
 	}
 

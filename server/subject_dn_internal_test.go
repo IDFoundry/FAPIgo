@@ -37,7 +37,15 @@ func dnAttr(oid asn1.ObjectIdentifier, value string) pkix.AttributeTypeAndValue 
 	return pkix.AttributeTypeAndValue{Type: oid, Value: value}
 }
 
-var oidOrganization = asn1.ObjectIdentifier{2, 5, 4, 10}
+var (
+	oidOrganization       = asn1.ObjectIdentifier{2, 5, 4, 10}
+	oidOrganizationalUnit = asn1.ObjectIdentifier{2, 5, 4, 11}
+)
+
+// intAttr is an attribute whose value is an INTEGER rather than a string.
+func intAttr(oid asn1.ObjectIdentifier, value int) pkix.AttributeTypeAndValue {
+	return pkix.AttributeTypeAndValue{Type: oid, Value: value}
+}
 
 func TestMatchesRegisteredSubjectDN(t *testing.T) {
 	cases := []struct {
@@ -57,6 +65,10 @@ func TestMatchesRegisteredSubjectDN(t *testing.T) {
 		{"second CN hidden by Go form", pkix.RDNSequence{{dnAttr(oidOrganization, "Bank")}, {dnAttr(oidCommonName, "attacker")}, {dnAttr(oidCommonName, "client")}}, "CN=client,O=Bank", false},
 		{"second CN, exact form", pkix.RDNSequence{{dnAttr(oidOrganization, "Bank")}, {dnAttr(oidCommonName, "attacker")}, {dnAttr(oidCommonName, "client")}}, "CN=client,CN=attacker,O=Bank", true},
 		{"second serialNumber hidden by Go form", pkix.RDNSequence{{dnAttr(oidSerialNumber, "1")}, {dnAttr(oidSerialNumber, "2")}, {dnAttr(oidCommonName, "client")}}, "SERIALNUMBER=2,CN=client", false},
+		// An OU whose value isn't a string: pkix.Name skips it, so Go's
+		// form would render exactly as the registered DN.
+		{"non-string attribute hidden by Go form", pkix.RDNSequence{{dnAttr(oidOrganization, "Bank")}, {intAttr(oidOrganizationalUnit, 7)}, {dnAttr(oidCommonName, "client")}}, "CN=client,O=Bank", false},
+		{"non-string attribute, exact form", pkix.RDNSequence{{dnAttr(oidOrganization, "Bank")}, {intAttr(oidOrganizationalUnit, 7)}, {dnAttr(oidCommonName, "client")}}, "CN=client,OU=7,O=Bank", true},
 		{"different CN", pkix.RDNSequence{{dnAttr(oidOrganization, "Bank")}, {dnAttr(oidCommonName, "other")}}, "CN=client,O=Bank", false},
 		{"empty registration", pkix.RDNSequence{{dnAttr(oidCommonName, "client")}}, "", false},
 	}

@@ -291,8 +291,9 @@ type RegisteredClientConfig struct {
 	//     subject in Go's own attribute order and groups repeated
 	//     attributes into one RDN, so it doesn't tell apart subjects
 	//     that differ only in attribute order or grouping. It keeps one
-	//     CN and one serialNumber, so a subject with more than one of
-	//     either never matches in this form.
+	//     CN and one serialNumber, and skips an attribute whose value
+	//     isn't a string, so a subject with more than one of either, or
+	//     with any non-string value, never matches in this form.
 	//
 	// Neither is RFC 4514 canonicalization: the comparison is
 	// case-sensitive, and the string must be registered exactly as the

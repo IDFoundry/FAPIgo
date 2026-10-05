@@ -19,6 +19,11 @@
 // expose in a response, matching the pattern used by client and server —
 // see ARCHITECTURE.md, "Design rules".
 //
+// Config.Assurance is required, as server.Config.Assurance is:
+// AssuranceDevelopment accepts in-memory stores and key sources, and
+// AssuranceProduction requires every store and key source the verifier
+// relies on to declare its capabilities (see AssuranceProduction).
+//
 // A verifier for endpoints hosted in the authorization server's own
 // process can be built from that server's configuration with
 // serverresource.NewVerifier instead, so its access-token format and

@@ -79,6 +79,7 @@ func validConfig(t *testing.T) resource.Config {
 			MaxDPoPProofAge: time.Minute,
 			MaxClockSkew:    5 * time.Second,
 		},
+		Assurance: resource.AssuranceDevelopment,
 	}
 }
 

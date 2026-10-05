@@ -143,6 +143,11 @@ var extraBlockedCIDRs = func() []*net.IPNet {
 		// address sits, so embeddedIPv4 can't decode it; and being
 		// local-use it never leads anywhere public, so block it whole.
 		"64:ff9b:1::/48",
+		// RFC 3879 deprecated site-local unicast: the IPv6 counterpart
+		// of the private IPv4 ranges, still routed internally on some
+		// networks, and neither IsPrivate (fc00::/7) nor IsLinkLocal*
+		// covers it.
+		"fec0::/10",
 	}
 	out := make([]*net.IPNet, 0, len(cidrs))
 	for _, c := range cidrs {
@@ -199,9 +204,11 @@ func disallowedIP(ip net.IP, allowLoopback, allowPrivate bool) bool {
 
 // embeddedIPv4 returns the IPv4 address carried inside an IPv6
 // transition address (NAT64 64:ff9b::/96, 6to4 2002::/16, Teredo
-// 2001:0000::/32, ISATAP's 0000:5efe/0200:5efe interface identifier, or
-// the deprecated IPv4-compatible ::a.b.c.d), or nil if ip is not one of
-// those forms. These formats tunnel an IPv4 destination inside a
+// 2001:0000::/32, ISATAP's 0000:5efe/0200:5efe interface identifier,
+// the deprecated IPv4-compatible ::a.b.c.d, or the SIIT IPv4-translated
+// ::ffff:0:a.b.c.d), or nil if ip is not one of those forms. The
+// IPv4-mapped ::ffff:a.b.c.d isn't among them: net.IP.To4 already
+// returns its IPv4 address, which disallowedIP checks directly. These formats tunnel an IPv4 destination inside a
 // global-unicast-looking IPv6 address, so on a host with the matching
 // tunnel routing configured they can reach an internal IPv4 target that
 // the plain IPv6 checks (IsPrivate/IsLinkLocal*/...) never flag. The
@@ -229,6 +236,10 @@ func embeddedIPv4(ip net.IP) net.IP {
 		// interface ID is fixed. Embeds the tunneled v4 in bytes 12-15.
 		return net.IPv4(b[12], b[13], b[14], b[15])
 	case isZero(b[0:12]): // deprecated IPv4-compatible ::a.b.c.d (::/96); ::  and ::1 are already handled by the caller
+		return net.IPv4(b[12], b[13], b[14], b[15])
+	case isZero(b[0:8]) && b[8] == 0xff && b[9] == 0xff && isZero(b[10:12]):
+		// SIIT IPv4-translated ::ffff:0:a.b.c.d (::ffff:0:0/96, RFC 2765
+		// §2.1): a stateless translator delivers it to a.b.c.d.
 		return net.IPv4(b[12], b[13], b[14], b[15])
 	}
 	return nil

@@ -38,4 +38,10 @@ var (
 	// connection state — a defense-in-depth check against a supplied
 	// HTTPClient that silently downgraded or proxied the connection.
 	ErrMissingTLS = errors.New("fapihttp: https response was not delivered over a verified TLS connection")
+
+	// ErrRedirectFollowed indicates the supplied HTTPClient followed a
+	// redirect itself, so the response answers a request to a target
+	// this package never validated. New stops an *http.Client from doing
+	// so; this catches any other HTTPClient that does.
+	ErrRedirectFollowed = errors.New("fapihttp: the http client followed a redirect itself")
 )

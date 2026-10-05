@@ -28,16 +28,40 @@ func subjectCert(t *testing.T, rdns pkix.RDNSequence) *x509.Certificate {
 	}
 	cert, err := x509.ParseCertificate(der)
 	if err != nil {
+		if hasNonStringValue(rdns) {
+			// Go before 1.27 refuses such a certificate outright, so on
+			// this toolchain the case can't reach the matcher at all.
+			t.Skipf("this Go's x509 refuses a subject with a non-string attribute value: %v", err)
+		}
 		t.Fatalf("ParseCertificate: %v", err)
 	}
 	return cert
+}
+
+func hasNonStringValue(rdns pkix.RDNSequence) bool {
+	for _, rdn := range rdns {
+		for _, atv := range rdn {
+			if _, ok := atv.Value.(string); !ok {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func dnAttr(oid asn1.ObjectIdentifier, value string) pkix.AttributeTypeAndValue {
 	return pkix.AttributeTypeAndValue{Type: oid, Value: value}
 }
 
-var oidOrganization = asn1.ObjectIdentifier{2, 5, 4, 10}
+var (
+	oidOrganization       = asn1.ObjectIdentifier{2, 5, 4, 10}
+	oidOrganizationalUnit = asn1.ObjectIdentifier{2, 5, 4, 11}
+)
+
+// intAttr is an attribute whose value is an INTEGER rather than a string.
+func intAttr(oid asn1.ObjectIdentifier, value int) pkix.AttributeTypeAndValue {
+	return pkix.AttributeTypeAndValue{Type: oid, Value: value}
+}
 
 func TestMatchesRegisteredSubjectDN(t *testing.T) {
 	cases := []struct {
@@ -57,6 +81,10 @@ func TestMatchesRegisteredSubjectDN(t *testing.T) {
 		{"second CN hidden by Go form", pkix.RDNSequence{{dnAttr(oidOrganization, "Bank")}, {dnAttr(oidCommonName, "attacker")}, {dnAttr(oidCommonName, "client")}}, "CN=client,O=Bank", false},
 		{"second CN, exact form", pkix.RDNSequence{{dnAttr(oidOrganization, "Bank")}, {dnAttr(oidCommonName, "attacker")}, {dnAttr(oidCommonName, "client")}}, "CN=client,CN=attacker,O=Bank", true},
 		{"second serialNumber hidden by Go form", pkix.RDNSequence{{dnAttr(oidSerialNumber, "1")}, {dnAttr(oidSerialNumber, "2")}, {dnAttr(oidCommonName, "client")}}, "SERIALNUMBER=2,CN=client", false},
+		// An OU whose value isn't a string: pkix.Name skips it, so Go's
+		// form would render exactly as the registered DN.
+		{"non-string attribute hidden by Go form", pkix.RDNSequence{{dnAttr(oidOrganization, "Bank")}, {intAttr(oidOrganizationalUnit, 7)}, {dnAttr(oidCommonName, "client")}}, "CN=client,O=Bank", false},
+		{"non-string attribute, exact form", pkix.RDNSequence{{dnAttr(oidOrganization, "Bank")}, {intAttr(oidOrganizationalUnit, 7)}, {dnAttr(oidCommonName, "client")}}, "CN=client,OU=7,O=Bank", true},
 		{"different CN", pkix.RDNSequence{{dnAttr(oidOrganization, "Bank")}, {dnAttr(oidCommonName, "other")}}, "CN=client,O=Bank", false},
 		{"empty registration", pkix.RDNSequence{{dnAttr(oidCommonName, "client")}}, "", false},
 	}

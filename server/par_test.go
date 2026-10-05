@@ -235,6 +235,9 @@ func (f *fakeGrantStore) RedeemAuthorizationCode(_ context.Context, redemption s
 	if !ok {
 		return storage.RedeemedAuthorizationCode{}, fmt.Errorf("no such code")
 	}
+	if redemption.ClientID != "" && redemption.ClientID != code.ClientID {
+		return storage.RedeemedAuthorizationCode{}, fmt.Errorf("code was issued to another client")
+	}
 	f.redeemed[redemption.CodeHash] = true
 	return storage.RedeemedAuthorizationCode{
 		ClientID:  code.ClientID,

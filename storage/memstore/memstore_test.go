@@ -173,3 +173,20 @@ func TestBackchannelAuthenticationStoreRefusesAnotherClientsPoll(t *testing.T) {
 		t.Fatal("poll by another client = nil error, want refused")
 	}
 }
+
+// TestGrantStoreRefusesAnotherClientsCode pins that memstore checks
+// AuthorizationCodeRedemption.ClientID, so the contract's subtest for it
+// runs rather than skips here.
+func TestGrantStoreRefusesAnotherClientsCode(t *testing.T) {
+	store := NewGrantStore()
+	ctx := context.Background()
+	hash := sha256.Sum256([]byte("code"))
+	if err := store.CreateAuthorizationCode(ctx, storage.NewAuthorizationCode{
+		CodeHash: hash, ClientID: "client-1", ExpiresAt: time.Now().Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateAuthorizationCode: %v", err)
+	}
+	if _, err := store.RedeemAuthorizationCode(ctx, storage.AuthorizationCodeRedemption{CodeHash: hash, ClientID: "client-2"}); err == nil {
+		t.Fatal("redemption by another client = nil error, want refused")
+	}
+}

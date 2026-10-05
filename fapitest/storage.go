@@ -143,6 +143,9 @@ func (s *memGrantStore) RedeemAuthorizationCode(_ context.Context, redemption st
 	if !ok {
 		return storage.RedeemedAuthorizationCode{}, fmt.Errorf("fapitest: unknown code")
 	}
+	if redemption.ClientID != "" && redemption.ClientID != code.ClientID {
+		return storage.RedeemedAuthorizationCode{}, fmt.Errorf("fapitest: code was issued to another client")
+	}
 	s.codeRedeemed[redemption.CodeHash] = true
 	return storage.RedeemedAuthorizationCode{
 		ClientID: code.ClientID, Grant: code.Grant, ExpiresAt: code.ExpiresAt,

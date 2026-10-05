@@ -55,6 +55,9 @@ func TestGrantStoreContract(t *testing.T, factory func() GrantStore) {
 
 	t.Run("CreateAndRedeemAuthorizationCode", func(t *testing.T) { testGrantStoreCreateAndRedeemAuthorizationCode(t, factory) })
 	t.Run("RedeemAuthorizationCodeIsSingleUse", func(t *testing.T) { testGrantStoreRedeemAuthorizationCodeIsSingleUse(t, factory) })
+	t.Run("RedeemAuthorizationCodeByAnotherClientLeavesItUnredeemed", func(t *testing.T) {
+		testGrantStoreRedeemAuthorizationCodeByAnotherClientLeavesItUnredeemed(t, factory)
+	})
 	t.Run("RedeemAuthorizationCodeReuseReportsIssuedTokens", func(t *testing.T) {
 		testGrantStoreRedeemAuthorizationCodeReuseReportsIssuedTokens(t, factory)
 	})
@@ -108,6 +111,41 @@ func testGrantStoreRedeemAuthorizationCodeIsSingleUse(t *testing.T, factory func
 	}
 	if _, err := store.RedeemAuthorizationCode(ctx, AuthorizationCodeRedemption{CodeHash: hash}); err == nil {
 		t.Fatalf("second RedeemAuthorizationCode = nil error, want error")
+	}
+}
+
+// testGrantStoreRedeemAuthorizationCodeByAnotherClientLeavesItUnredeemed
+// covers AuthorizationCodeRedemption.ClientID: a store that checks it
+// refuses another client's redemption of a fresh code without consuming
+// it, so the client the code was issued to can still redeem it, and
+// still reports a code that was already redeemed as
+// *AuthorizationCodeAlreadyRedeemedError when another client presents
+// it. A store that ignores the field (an empty ClientID's behavior)
+// skips this subtest: the server refuses another client's code after
+// redemption anyway, so ignoring it stays safe, if less protective.
+func testGrantStoreRedeemAuthorizationCodeByAnotherClientLeavesItUnredeemed(t *testing.T, factory func() GrantStore) {
+	store := factory()
+	ctx := context.Background()
+	hash := sha256.Sum256([]byte("other-client-code"))
+	if err := store.CreateAuthorizationCode(ctx, NewAuthorizationCode{
+		CodeHash: hash, ClientID: "client-1", Grant: contractPayload, ExpiresAt: time.Now().Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateAuthorizationCode: %v", err)
+	}
+	if _, err := store.RedeemAuthorizationCode(ctx, AuthorizationCodeRedemption{CodeHash: hash, ClientID: "client-2"}); err == nil {
+		t.Skip("the store ignores AuthorizationCodeRedemption.ClientID")
+	}
+	got, err := store.RedeemAuthorizationCode(ctx, AuthorizationCodeRedemption{CodeHash: hash, ClientID: "client-1"})
+	if err != nil {
+		t.Fatalf("owning client's redemption after another client's was refused: %v, want the code unspent", err)
+	}
+	if got.ClientID != "client-1" {
+		t.Fatalf("redeemed ClientID = %q, want client-1", got.ClientID)
+	}
+	_, err = store.RedeemAuthorizationCode(ctx, AuthorizationCodeRedemption{CodeHash: hash, ClientID: "client-2"})
+	var alreadyRedeemed *AuthorizationCodeAlreadyRedeemedError
+	if !errors.As(err, &alreadyRedeemed) {
+		t.Fatalf("another client presenting a redeemed code: error = %v, want *AuthorizationCodeAlreadyRedeemedError", err)
 	}
 }
 

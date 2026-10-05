@@ -94,3 +94,28 @@ func TestCodeReuseRevokesWhenTheStoreNamesNoClient(t *testing.T) {
 		t.Fatal("a reuse the store attributed to no client didn't revoke the refresh token")
 	}
 }
+
+// TestCodeByAnotherClientLeavesItForItsOwnClient covers a leaked code
+// that hasn't been redeemed yet, presented by a different client:
+// refused, without spending it, so the client it was issued to can still
+// exchange it. The server tells the store which client is redeeming
+// (AuthorizationCodeRedemption.ClientID) so the store can refuse before
+// consuming the code.
+func TestCodeByAnotherClientLeavesItForItsOwnClient(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	ctx := context.Background()
+	otherAssertion := registerOtherClient(t, h)
+	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
+	if _, err := h.server.ExchangeAuthorizationCode(ctx, server.AuthorizationCodeExchangeRequest{
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(otherAssertion, code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
+	}); serverErrorCode(t, err) != server.ErrorInvalidGrant {
+		t.Fatalf("the other client's exchange = %v, want invalid_grant", err)
+	}
+	if _, err := h.server.ExchangeAuthorizationCode(ctx, server.AuthorizationCodeExchangeRequest{
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
+	}); err != nil {
+		t.Fatalf("the code's own client's exchange after another client's = %v, want success", err)
+	}
+}

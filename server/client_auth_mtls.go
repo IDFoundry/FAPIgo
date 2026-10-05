@@ -32,10 +32,11 @@ func matchesRegisteredThumbprint(cert *x509.Certificate, expected string) bool {
 //     every attribute, its order and its RDN grouping;
 //   - Go's pkix.Name.String() serialization (crypto/x509.Certificate's
 //     Subject.String()), the form earlier versions compared. pkix.Name
-//     keeps a single CommonName and SerialNumber, so a subject carrying
-//     either more than once renders without the others; this form is
-//     refused for such a subject rather than matching on a DN that
-//     isn't the certificate's.
+//     keeps a single CommonName and SerialNumber, and skips a standard
+//     attribute whose value isn't a string, so a subject carrying either
+//     more than once, or any non-string value, renders without the
+//     others; this form is refused for such a subject rather than
+//     matching on a DN that isn't the certificate's.
 //
 // See storage.RegisteredClientConfig.ExpectedSubjectDN's own doc comment
 // for what each form compares.
@@ -58,10 +59,15 @@ var (
 // subjectStringDropsAttributes reports whether name.String() leaves out
 // attributes of the subject it was parsed from: pkix.Name holds one
 // CommonName and one SerialNumber (the last of each), and String renders
-// those fields rather than every parsed value.
+// those fields rather than every parsed value; it also skips a standard
+// attribute whose value isn't a string (e.g. an OU encoded as an
+// INTEGER).
 func subjectStringDropsAttributes(name pkix.Name) bool {
 	var commonNames, serialNumbers int
 	for _, atv := range name.Names {
+		if _, ok := atv.Value.(string); !ok {
+			return true
+		}
 		switch {
 		case atv.Type.Equal(oidCommonName):
 			commonNames++

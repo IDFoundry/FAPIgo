@@ -356,6 +356,27 @@ func validateAssurance(cfg Config, cibaEnabled bool) error {
 			return err
 		}
 	}
+	return rejectLoopbackMTLSEndpoints(cfg.MTLSEndpoints)
+}
+
+// rejectLoopbackMTLSEndpoints applies rejectLoopbackURL to each
+// mtls_endpoint_aliases URL (an unset one has no scheme and passes): an alias is advertised in
+// Metadata and used by mTLS clients just as Config.Endpoints are.
+func rejectLoopbackMTLSEndpoints(e MTLSEndpoints) error {
+	aliases := []struct {
+		name string
+		u    fapi.URL
+	}{
+		{"mtls_endpoints.token", e.Token},
+		{"mtls_endpoints.pushed_authorization_request", e.PushedAuthorizationRequest},
+		{"mtls_endpoints.backchannel_authentication", e.BackchannelAuthentication},
+		{"mtls_endpoints.revocation", e.Revocation},
+	}
+	for _, a := range aliases {
+		if err := rejectLoopbackURL(a.name, a.u); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

@@ -2,6 +2,7 @@ package client
 
 import (
 	"fmt"
+	"net/url"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/federation"
@@ -107,6 +108,9 @@ func validateConfig(cfg Config) error {
 	if err := validateRequiredConfig(cfg); err != nil {
 		return err
 	}
+	if err := validateProductionURLs(cfg); err != nil {
+		return err
+	}
 	if authorizationFlowConfigured != parConfigured {
 		return fmt.Errorf("client: config: endpoints.authorization and endpoints.pushed_authorization_request must both be set, or both left zero")
 	}
@@ -161,6 +165,44 @@ func validateRequiredConfig(cfg Config) error {
 	}
 	if cfg.Assurance != AssuranceDevelopment && cfg.Assurance != AssuranceProduction {
 		return fmt.Errorf("client: config: assurance is invalid")
+	}
+	return nil
+}
+
+// validateProductionURLs refuses, under AssuranceProduction, an issuer
+// or endpoint parsed with fapi.AllowLoopbackHTTP: see
+// checkProductionScheme. RedirectURI is not checked: a native app's
+// loopback redirect (RFC 8252 §7.3) is http by definition and
+// legitimate in production.
+func validateProductionURLs(cfg Config) error {
+	urls := []struct {
+		name string
+		u    fapi.URL
+	}{
+		{"issuer", cfg.Issuer},
+		{"endpoints.authorization", cfg.Endpoints.Authorization},
+		{"endpoints.token", cfg.Endpoints.Token},
+		{"endpoints.pushed_authorization_request", cfg.Endpoints.PushedAuthorizationRequest},
+		{"endpoints.userinfo", cfg.Endpoints.UserInfo},
+		{"endpoints.backchannel_authentication", cfg.Endpoints.BackchannelAuthentication},
+		{"endpoints.revocation", cfg.Endpoints.Revocation},
+	}
+	for _, e := range urls {
+		if err := checkProductionScheme(cfg.Assurance, "config: "+e.name, e.u.URL()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkProductionScheme is this client's rule for plain http, which
+// fapi.AllowLoopbackHTTP permits only to a loopback host: a development
+// convenience, refused under AssuranceProduction, the same rule
+// server.New applies to its own issuer and endpoints. name identifies
+// the URL in the error. An unset URL has no scheme and passes.
+func checkProductionScheme(assurance AssuranceLevel, name string, u url.URL) error {
+	if assurance == AssuranceProduction && u.Scheme == "http" {
+		return fmt.Errorf("client: %s was parsed with fapi.AllowLoopbackHTTP, which is not permitted under AssuranceProduction", name)
 	}
 	return nil
 }

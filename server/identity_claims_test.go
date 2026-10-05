@@ -590,3 +590,88 @@ func TestCIBAIdentityClaimsRequireApproval(t *testing.T) {
 		t.Fatalf("CompleteBackchannelAuthentication(requested claim approved): %v", err)
 	}
 }
+
+// overSharingIdentityClaims ignores IdentityClaimsSource's contract: it
+// returns every claim it holds, whatever names asked for.
+type overSharingIdentityClaims map[string]json.RawMessage
+
+func (o overSharingIdentityClaims) ResolveIdentityClaims(context.Context, string, []string) (map[string]json.RawMessage, error) {
+	return o, nil
+}
+
+func exchangeForValidatedIDToken(t *testing.T, h harness, code string) token.ValidatedIDToken {
+	t.Helper()
+	result, err := h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
+	})
+	if err != nil {
+		t.Fatalf("ExchangeAuthorizationCode: %v", err)
+	}
+	if !result.HasIDToken {
+		t.Fatalf("HasIDToken = false, want true")
+	}
+	return validateIDToken(t, h, result.IDToken.Reveal(), result.AccessToken.Reveal())
+}
+
+// A source that returns more than it was asked for doesn't widen the ID
+// token: only the requested and approved names reach it, as with
+// serverresource.UserInfoClaims.
+func TestIDTokenCarriesOnlyRequestedIdentityClaimsWhateverTheSourceReturns(t *testing.T) {
+	h := newHarnessWithIdentityClaims(t, overSharingIdentityClaims{
+		"name":         json.RawMessage(`"Test User"`),
+		"email":        json.RawMessage(`"user@example.com"`),
+		"phone_number": json.RawMessage(`"+44 20 7946 0000"`),
+	})
+	code := completeAuthorizationWithClaims(t, h, `{"id_token":{"name":null},"userinfo":{"email":null}}`)
+
+	params := exchangeForValidatedIDToken(t, h, code).Parameters
+	if name, err := jsonStringParam(params, "name"); err != nil || name != "Test User" {
+		t.Fatalf("name = %q, %v; want %q", name, err, "Test User")
+	}
+	for _, unrequested := range []string{"email", "phone_number"} {
+		if _, ok := params[unrequested]; ok {
+			t.Fatalf("ID token carries %q, which wasn't requested for it", unrequested)
+		}
+	}
+}
+
+// A client may request claims the server sets itself through the
+// "claims" parameter (OIDC Core §5.5.1.1 names sub, acr and auth_time).
+// The ID token keeps the server's values, and a value the source
+// returns for one of them — or for a claim the server never lets
+// anything else set — is dropped instead of failing issuance or
+// reaching the token.
+func TestIDTokenKeepsServerManagedClaimsRequestedThroughClaimsParameter(t *testing.T) {
+	h := newHarnessWithIdentityClaims(t, fakeIdentityClaims{
+		subject: "user-1",
+		claims: map[string]json.RawMessage{
+			"name":      json.RawMessage(`"Test User"`),
+			"sub":       json.RawMessage(`"someone-else"`),
+			"acr":       json.RawMessage(`"urn:example:forged"`),
+			"auth_time": json.RawMessage(`1`),
+			"cnf":       json.RawMessage(`{"jkt":"attacker"}`),
+			"events":    json.RawMessage(`{"http://schemas.openid.net/event/backchannel-logout":{}}`),
+		},
+	})
+	code := completeAuthorizationWithClaims(t, h, `{"id_token":{"name":null,"sub":null,"acr":{"essential":true},"auth_time":{"essential":true},"cnf":null,"events":null}}`)
+
+	validated := exchangeForValidatedIDToken(t, h, code)
+	if validated.Subject != "user-1" {
+		t.Fatalf("sub = %q, want user-1", validated.Subject)
+	}
+	if validated.ACR != "urn:mace:incommon:iap:silver" {
+		t.Fatalf("acr = %q, want the authentication context's", validated.ACR)
+	}
+	if validated.AuthTime.Unix() == 1 {
+		t.Fatalf("auth_time is the source's value, not the authentication's")
+	}
+	if name, err := jsonStringParam(validated.Parameters, "name"); err != nil || name != "Test User" {
+		t.Fatalf("name = %q, %v; want %q", name, err, "Test User")
+	}
+	for _, managed := range []string{"cnf", "events"} {
+		if _, ok := validated.Parameters[managed]; ok {
+			t.Fatalf("ID token carries the source's %q", managed)
+		}
+	}
+}

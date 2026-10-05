@@ -233,6 +233,9 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	}
 
 	now := s.deps.Clock.Now()
+	if !issuedWithin(grant.IssuedAt, s.cfg.Limits.AuthorizationCodeLifetime, now) {
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorInvalidGrant, 400, "code has expired", nil))
+	}
 	if valErr := validateRedeemedAuthorizationCode(redeemed, grant, client.ID(), redirectURI, thumbprint, codeVerifier, now); valErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), valErr)
 	}
@@ -635,11 +638,11 @@ func (s *Server) issueRefreshToken(ctx context.Context, clientID fapi.ClientID, 
 	if err != nil {
 		return "", err
 	}
-	encoded, err := encodeGrantRecord(grant.forRefreshToken(binding))
+	now := s.deps.Clock.Now()
+	encoded, err := encodeGrantRecord(grant.forRefreshToken(binding, now))
 	if err != nil {
 		return "", err
 	}
-	now := s.deps.Clock.Now()
 	if err := s.deps.Grants.CreateRefreshToken(ctx, storage.NewRefreshToken{
 		TokenHash: sha256.Sum256([]byte(raw)),
 		ClientID:  clientID,

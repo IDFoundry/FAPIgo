@@ -201,6 +201,9 @@ func (s *Server) redeemRefreshGrant(ctx context.Context, clientID fapi.ClientID,
 	if err != nil {
 		return grantRecord{}, time.Time{}, newError(ErrorServerError, 500, "failed to decode refresh token grant", err)
 	}
+	if !issuedWithin(grant.IssuedAt, s.cfg.Limits.RefreshTokenLifetime, now) {
+		return grantRecord{}, time.Time{}, newError(ErrorInvalidGrant, 400, "refresh_token has expired", nil)
+	}
 	if grant.ClientInstanceKey != "" && grant.ClientInstanceKey != instanceKey {
 		return grantRecord{}, time.Time{}, newError(ErrorInvalidGrant, 400, "refresh_token was issued to another client instance", nil)
 	}
@@ -251,8 +254,14 @@ func (s *Server) checkGrantStillAllowed(client storage.RegisteredClient, scope [
 }
 
 // checkGrantUsable is checkGrantNotRevoked and checkGrantStillAllowed
-// together, for a grant issued in full (the CIBA token exchange).
+// together, for a grant issued in full (the CIBA token exchange), after
+// refusing a decision older than the current
+// Limits.BackchannelAuthenticationRequestLifetime (see
+// grantRecord.IssuedAt).
 func (s *Server) checkGrantUsable(ctx context.Context, client storage.RegisteredClient, grant grantRecord) *Error {
+	if !issuedWithin(grant.IssuedAt, s.cfg.Limits.BackchannelAuthenticationRequestLifetime, s.deps.Clock.Now()) {
+		return newError(ErrorExpiredToken, 400, "auth_req_id has expired", nil)
+	}
 	if revErr := s.checkGrantNotRevoked(ctx, grant); revErr != nil {
 		return revErr
 	}

@@ -9,6 +9,7 @@ import (
 	"slices"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/resourceerr"
 	"github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
@@ -70,8 +71,12 @@ func UserInfoClaims(ctx context.Context, authz resource.AuthorizationContext, so
 // as UserInfoClaims' result does; a "sub" for anyone else, or none, is
 // refused, so the response can't vouch for another end user either. A
 // client clients can't resolve is a 401 invalid_token *resource.Error:
-// the token is for a client this server no longer knows. A signing
-// failure is srv's *server.Error.
+// the token is for a client this server no longer knows — unless the
+// repository couldn't answer at all (its error wraps
+// storage.ErrStoreUnavailable, or the context was cancelled or timed
+// out), which is a 500 server_error *resource.Error instead. Either
+// keeps the repository's error as its cause. A signing failure is srv's
+// *server.Error.
 func SignUserInfoResponse(ctx context.Context, srv *server.Server, clients storage.ClientRepository, authz resource.AuthorizationContext, claims map[string]json.RawMessage) (string, error) {
 	var sub string
 	if raw, ok := claims["sub"]; !ok || json.Unmarshal(raw, &sub) != nil || sub != authz.Subject || sub == "" {
@@ -79,7 +84,10 @@ func SignUserInfoResponse(ctx context.Context, srv *server.Server, clients stora
 	}
 	client, err := clients.ResolveClient(ctx, fapi.ClientID(authz.ClientID))
 	if err != nil {
-		return "", resource.NewError(resource.ErrorInvalidToken, http.StatusUnauthorized, "the access token's client is unknown")
+		if resourceerr.StoreUnavailable(err) {
+			return "", resourceerr.NewWithCause(string(resource.ErrorServerError), http.StatusInternalServerError, "failed to look up the access token's client", err)
+		}
+		return "", resourceerr.NewWithCause(string(resource.ErrorInvalidToken), http.StatusUnauthorized, "the access token's client is unknown", err)
 	}
 	signed, srvErr := srv.SignUserInfoResponse(ctx, client, claims)
 	if srvErr != nil {

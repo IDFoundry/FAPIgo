@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/idfoundry/fapigo/internal/httperror"
+	"github.com/idfoundry/fapigo/internal/resourceerr"
 )
 
 // ErrorCode is a closed set of error codes, matching the "error" values
@@ -80,6 +81,13 @@ func newError(code ErrorCode, httpStatus int, description string, cause error) *
 	return &Error{code: code, httpStatus: httpStatus, description: description, cause: cause}
 }
 
+func init() {
+	resourceerr.NewWithCause = func(code string, httpStatus int, description string, cause error) error {
+		c, status, desc := httperror.Normalize(code, httpStatus, description, false)
+		return newError(ErrorCode(c), status, desc, cause)
+	}
+}
+
 // NewError builds an *Error for a caller reporting an RFC 6750/RFC 9449
 // -shaped failure it detected itself — an HTTP adapter's own request
 // routing rejecting something before it ever calls Verify (a malformed
@@ -88,7 +96,8 @@ func newError(code ErrorCode, httpStatus int, description string, cause error) *
 //
 // code must be RFC 6750 §3 error text (printable ASCII without a double
 // quote or backslash), or empty for a request presenting no credentials
-// (see Code), and httpStatus a 4xx or 5xx status; otherwise the result
+// (see Code) — which is only ever a 401 — and httpStatus a 4xx or 5xx
+// status; otherwise the result
 // is a 500 server_error instead, so a mistake here can't inject into
 // the WWW-Authenticate challenge or panic when written. A description
 // outside the same character set is dropped.

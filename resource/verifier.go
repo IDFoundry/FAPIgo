@@ -44,6 +44,9 @@ func validateDependencies(deps Dependencies) error {
 	if deps.AccessTokens == nil {
 		return fmt.Errorf("resource: dependencies: access tokens is required (pass JWTAccessTokens{...} or OpaqueAccessTokens{...})")
 	}
+	if err := validateBundledResolver(deps.AccessTokens); err != nil {
+		return err
+	}
 	if deps.Replay == nil {
 		return fmt.Errorf("resource: dependencies: replay is required")
 	}
@@ -55,6 +58,36 @@ func validateDependencies(deps Dependencies) error {
 	}
 	if deps.Nonces != nil && deps.Random == nil {
 		return fmt.Errorf("resource: dependencies: random is required when nonces is set")
+	}
+	return nil
+}
+
+// validateBundledResolver checks a JWTAccessTokens or OpaqueAccessTokens
+// (or a pointer to one) the way its constructor does, so a literal
+// missing a field is refused here rather than failing — or, for a nil
+// key source or store, panicking — on every request. Any other
+// AccessTokenResolver is the application's own to validate.
+func validateBundledResolver(r AccessTokenResolver) error {
+	var name string
+	var err error
+	switch t := r.(type) {
+	case JWTAccessTokens:
+		name, err = "JWTAccessTokens", t.validate()
+	case *JWTAccessTokens:
+		if t == nil {
+			return fmt.Errorf("resource: dependencies: access_tokens is a nil *JWTAccessTokens")
+		}
+		name, err = "JWTAccessTokens", t.validate()
+	case OpaqueAccessTokens:
+		name, err = "OpaqueAccessTokens", t.validate()
+	case *OpaqueAccessTokens:
+		if t == nil {
+			return fmt.Errorf("resource: dependencies: access_tokens is a nil *OpaqueAccessTokens")
+		}
+		name, err = "OpaqueAccessTokens", t.validate()
+	}
+	if err != nil {
+		return fmt.Errorf("resource: dependencies: access_tokens (%s): %w", name, err)
 	}
 	return nil
 }

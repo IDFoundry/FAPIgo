@@ -21,6 +21,13 @@ func (authorizeResult) interactionResult() {}
 
 // Authorize records that subject authenticated (per auth) and the
 // application approved grant.
+//
+// auth's time must be when the user actually authenticated, never
+// time.Now() for an existing session: CompleteAuthorization answers the
+// client with login_required instead of a code when it's older than the
+// request's max_age (InteractionRequest.MaxAge), or, when the request's
+// prompt has PromptLogin, earlier than the request itself — both
+// allowing Limits.MaxClockSkew.
 func Authorize(subject AuthenticatedSubject, auth AuthenticationContext, grant GrantedAuthorization) InteractionResult {
 	return authorizeResult{subject: subject, auth: auth, grant: grant}
 }

@@ -142,7 +142,11 @@ type InteractionRequest struct {
 	//   - PromptLogin: authenticate the end user again even if they have
 	//     a session, and report that authentication's time in
 	//     NewAuthenticationContext; if they can't be, complete with
-	//     AuthenticationFailed (login_required).
+	//     AuthenticationFailed (login_required). CompleteAuthorization
+	//     enforces it: an Authorize whose authentication time is earlier
+	//     than when the request was pushed, less Limits.MaxClockSkew,
+	//     answers the client with login_required, as an existing
+	//     session's time would.
 	//   - PromptConsent: ask for consent even if it was given before.
 	//   - PromptSelectAccount: let the end user choose an account.
 	//

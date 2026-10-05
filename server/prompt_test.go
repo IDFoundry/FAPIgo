@@ -2,8 +2,10 @@ package server_test
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/idfoundry/fapigo/server"
 )
@@ -124,4 +126,95 @@ func TestCompleteAuthorizationInteractionNeeded(t *testing.T) {
 			t.Fatalf("result = %#v, want a server_error AuthorizationLocalError", result)
 		}
 	})
+}
+
+// forgetPushedAt rewrites every pending interaction's stored request
+// without pushed_at, as a record written before it existed is.
+func forgetPushedAt(t *testing.T, h harness) {
+	t.Helper()
+	h.transactions.mu.Lock()
+	defer h.transactions.mu.Unlock()
+	if len(h.transactions.byHandle) == 0 {
+		t.Fatal("no pending interaction to rewrite")
+	}
+	for handle, pending := range h.transactions.byHandle {
+		var record map[string]json.RawMessage
+		if err := json.Unmarshal(pending.interaction.Request, &record); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := record["pushed_at"]; !ok {
+			t.Fatal("the stored request has no pushed_at to forget")
+		}
+		delete(record, "pushed_at")
+		raw, err := json.Marshal(record)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pending.interaction.Request = raw
+		h.transactions.byHandle[handle] = pending
+	}
+}
+
+// TestCompleteAuthorizationEnforcesPromptLogin covers OIDC Core
+// §3.1.2.1's prompt=login: an authentication from before the request
+// was pushed (less Limits.MaxClockSkew, 5s in the harness) answers the
+// client with login_required rather than a code; other prompts and a
+// record written before the push time was kept aren't checked.
+func TestCompleteAuthorizationEnforcesPromptLogin(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		prompt    string
+		authAgo   time.Duration
+		legacy    bool
+		zeroAuth  bool
+		wantError string
+	}{
+		{name: "authenticated for the request", prompt: "login", authAgo: 0},
+		{name: "authenticated within the skew", prompt: "login", authAgo: 4 * time.Second},
+		{name: "existing session", prompt: "login", authAgo: time.Minute, wantError: "login_required"},
+		{name: "just past the skew", prompt: "login", authAgo: 6 * time.Second, wantError: "login_required"},
+		{name: "with consent too", prompt: "consent login", authAgo: time.Hour, wantError: "login_required"},
+		{name: "no authentication time", prompt: "login", zeroAuth: true, wantError: "login_required"},
+		{name: "record without push time", prompt: "login", authAgo: time.Hour, legacy: true},
+		{name: "prompt=consent", prompt: "consent", authAgo: time.Hour},
+		{name: "prompt=none", prompt: "none", authAgo: time.Hour},
+		{name: "no prompt", authAgo: time.Hour},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, server.ProfileFAPISecurity, true)
+			extra := map[string]string{}
+			if tc.prompt != "" {
+				extra["prompt"] = tc.prompt
+			}
+			handle := interactionFor(t, h, extra).Handle
+			if tc.legacy {
+				forgetPushedAt(t, h)
+			}
+			result := authorizedAt(t, h.now.Add(-tc.authAgo))
+			if tc.zeroAuth {
+				subjectID, _ := server.NewSubjectID("user-1")
+				subject, _ := server.NewAuthenticatedSubject(subjectID)
+				result = server.Authorize(subject, server.AuthenticationContext{}, server.GrantedAuthorization{Scope: []string{"openid", "accounts"}})
+			}
+			completed, err := h.server.CompleteAuthorization(context.Background(), server.CompleteAuthorizationRequest{Handle: handle, Result: result})
+			if err != nil {
+				t.Fatalf("CompleteAuthorization: %v", err)
+			}
+			redirect, ok := completed.(server.AuthorizationRedirect)
+			if !ok {
+				t.Fatalf("result = %T, want a redirect", completed)
+			}
+			dest := redirect.Destination().URL()
+			q := dest.Query()
+			if q.Get("error") != tc.wantError {
+				t.Errorf("error = %q (%s), want %q", q.Get("error"), q.Get("error_description"), tc.wantError)
+			}
+			if (q.Get("code") != "") != (tc.wantError == "") {
+				t.Errorf("code present = %v, want %v", q.Get("code") != "", tc.wantError == "")
+			}
+			if tc.wantError != "" && len(h.grants.all()) != 0 {
+				t.Error("a code was stored for a refused completion")
+			}
+		})
+	}
 }

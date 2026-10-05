@@ -116,6 +116,18 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 		}
 	}
 
+	// OIDC Core §3.1.2.1: prompt=login asks the OP to "reauthenticate the
+	// End-User even if the End-User is already authenticated", and if it
+	// can't, to return login_required. An authentication from before the
+	// request was pushed, allowing the same clock skew as max_age, didn't
+	// happen for this request. A record without PushedAt (written before
+	// it existed) isn't checked.
+	if prompt, _ := requestedPrompt(request.Parameters); prompt.Has(PromptLogin) && request.PushedAt != nil {
+		if result.auth.authTime.Before(request.PushedAt.Add(-s.cfg.Limits.MaxClockSkew)) {
+			return s.completeErrorRedirect(ctx, clientID, redirectURI, state, "login_required", "the user didn't authenticate again for prompt=login", AuditOutcomeFailure)
+		}
+	}
+
 	requestedScope, _ := jsonString(request.Parameters, "scope")
 	if err := validateGrantedScopeSubset(result.grant.Scope, requestedScope); err != nil {
 		return s.completeLocalFail(ctx, clientID, newError(ErrorInvalidRequest, 400, "granted scope exceeds requested scope", err)), nil

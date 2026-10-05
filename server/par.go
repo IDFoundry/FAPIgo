@@ -245,7 +245,7 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 	if _, hasRequestObject := params["request"]; hasRequestObject {
 		source = extension.SourceRequestObject
 	}
-	request, err := encodeRequestRecord(requestRecord{Parameters: validated, TokenClaims: tokenClaims, ExtensionSource: source})
+	request, err := encodeRequestRecord(requestRecord{Parameters: validated, TokenClaims: tokenClaims, ExtensionSource: source, PushedAt: &now})
 	if err != nil {
 		return s.parFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to encode pushed authorization request", err))
 	}

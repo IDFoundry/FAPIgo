@@ -178,6 +178,32 @@ fetch issuer keys through an unhardened source, and nothing said so.
   key source or store it relies on, as a custom
   `server.AccessTokenIssuer` does.
 
+### `prompt=login` is enforced (server)
+
+**Affects:** a server whose clients send `prompt=login`, and whose
+application completes such an authorization with an existing session's
+authentication time rather than authenticating the user again.
+
+**Why:** OIDC Core §3.1.2.1 says `prompt=login` asks the authorization
+server to "reauthenticate the End-User even if the End-User is already
+authenticated", and to return `login_required` if it can't. The server
+used to leave this to the application without checking. It now surfaces
+the request's prompt as `InteractionRequest.Prompt`, and
+`CompleteAuthorization` answers the client with `login_required`, and
+no code, when the request carried `prompt=login` and the authentication
+time passed to `NewAuthenticationContext` is earlier than when the
+request was pushed, allowing `Limits.MaxClockSkew`. A pushed request
+combining `prompt=none` with another value is now `invalid_request`.
+Requests pushed before upgrading aren't checked.
+
+**What to change:** when `InteractionRequest.Prompt.Has(server.PromptLogin)`,
+authenticate the user again before calling `Authorize`, and pass the
+time they actually authenticated, never an earlier session's. For
+`server.PromptNone`, show nothing: authorize from an existing session
+and consent, or complete with the new `server.InteractionNeeded`
+result, which answers `login_required`, `consent_required`,
+`account_selection_required` or `interaction_required`.
+
 ## v0.49.0
 
 ### A custom access token issuer declares what it relies on (server, *production only*)

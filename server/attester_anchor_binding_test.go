@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"context"
+	"crypto/x509"
 	"errors"
 	"testing"
 
@@ -129,6 +130,21 @@ func (f anchorSource) AttesterAnchors(context.Context, storage.RegisteredClient)
 	return f.anchors, f.err
 }
 
+// boundTrustAnchors implements both AttesterTrustAnchors and
+// AttesterAnchorSource: a type whose bindings TrustAnchors would drop,
+// which New refuses as TrustAnchors.
+type boundTrustAnchors struct{ cert *x509.Certificate }
+
+func (b boundTrustAnchors) TrustAnchors(context.Context, storage.RegisteredClient) (*x509.CertPool, error) {
+	pool := x509.NewCertPool()
+	pool.AddCert(b.cert)
+	return pool, nil
+}
+
+func (b boundTrustAnchors) AttesterAnchors(context.Context, storage.RegisteredClient) ([]server.AttesterAnchor, error) {
+	return []server.AttesterAnchor{{Certificate: b.cert, Issuers: []string{testAttesterIssuer}}}, nil
+}
+
 // TestCustomAttesterAnchorSource covers a source of the application's
 // own, implementing only AttesterAnchorSource.
 func TestCustomAttesterAnchorSource(t *testing.T) {
@@ -197,11 +213,12 @@ func TestNewAttesterAnchorBindingRequirements(t *testing.T) {
 			TrustAnchors:  server.StaticAttesterTrustAnchors{Roots: poolOf(root)},
 			IssuerBinding: server.AttesterIssuerByTrustAnchors,
 		}, true},
-		"empty static anchors":            {boundChain(server.StaticAttesterAnchors{}), true},
-		"anchor bound to no attester":     {boundChain(server.StaticAttesterAnchors{{Certificate: root.cert}}), true},
-		"anchor without a certificate":    {boundChain(server.StaticAttesterAnchors{{Issuers: []string{testAttesterIssuer}}}), true},
-		"empty attester identifier":       {boundChain(server.StaticAttesterAnchors{{Certificate: root.cert, Issuers: []string{""}}}), true},
-		"bound anchors with another mode": {server.X5CAttesterChain{TrustAnchors: server.StaticAttesterAnchors{{Certificate: root.cert, Issuers: []string{testAttesterIssuer}}}, IssuerBinding: server.AttesterIssuerInCertificate}, false},
+		"empty static anchors":                                 {boundChain(server.StaticAttesterAnchors{}), true},
+		"anchor bound to no attester":                          {boundChain(server.StaticAttesterAnchors{{Certificate: root.cert}}), true},
+		"anchor without a certificate":                         {boundChain(server.StaticAttesterAnchors{{Issuers: []string{testAttesterIssuer}}}), true},
+		"empty attester identifier":                            {boundChain(server.StaticAttesterAnchors{{Certificate: root.cert, Issuers: []string{""}}}), true},
+		"bound anchors as TrustAnchors, issuer in certificate": {server.X5CAttesterChain{TrustAnchors: boundTrustAnchors{root.cert}, IssuerBinding: server.AttesterIssuerInCertificate}, true},
+		"bound anchors as TrustAnchors, by trust anchors":      {server.X5CAttesterChain{TrustAnchors: boundTrustAnchors{root.cert}, IssuerBinding: server.AttesterIssuerByTrustAnchors}, true},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -212,5 +229,16 @@ func TestNewAttesterAnchorBindingRequirements(t *testing.T) {
 				t.Fatalf("New() error = %v, wantErr %v", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+// TestStaticAttesterAnchorsIsNotTrustAnchors pins that bound anchors
+// can't be set as X5CAttesterChain.TrustAnchors, where their attester
+// bindings would be dropped and every anchor would vouch for every
+// attester.
+func TestStaticAttesterAnchorsIsNotTrustAnchors(t *testing.T) {
+	var anchors any = server.StaticAttesterAnchors{}
+	if _, ok := anchors.(server.AttesterTrustAnchors); ok {
+		t.Fatal("StaticAttesterAnchors implements AttesterTrustAnchors; its bindings would be ignored there")
 	}
 }

@@ -291,3 +291,27 @@ func TestResolveReportsEveryFailedBranch(t *testing.T) {
 		}
 	}
 }
+
+// TestResolveMaxPathLengthCountsSuperiors pins what Limits.MaxPathLength
+// counts: superiors (the Intermediates plus the Trust Anchor), so
+// leaf>i1>i2>ta needs 3 and is refused at 2.
+func TestResolveMaxPathLengthCountsSuperiors(t *testing.T) {
+	for _, tc := range []struct {
+		maxPathLength int
+		wantErr       bool
+	}{
+		{2, true},
+		{3, false},
+	} {
+		g := newFederationGraph(t, "leaf", "i1", "i2", "ta")
+		g.link(map[string][]string{"leaf": {"i1"}, "i1": {"i2"}, "i2": {"ta"}})
+		_, err := g.resolver(tc.maxPathLength, 5, "ta").Resolve(context.Background(), g.entities["leaf"].id)
+		if tc.wantErr {
+			if err == nil || !strings.Contains(err.Error(), "max path length (2 superiors") {
+				t.Errorf("MaxPathLength=%d, 2 intermediates: Resolve = %v, want the max path length refusal", tc.maxPathLength, err)
+			}
+		} else if err != nil {
+			t.Errorf("MaxPathLength=%d, 2 intermediates: Resolve = %v, want success", tc.maxPathLength, err)
+		}
+	}
+}

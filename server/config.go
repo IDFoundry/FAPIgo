@@ -459,8 +459,8 @@ type Config struct {
 	// configure. Enabling it also requires Dependencies.AttesterTrust,
 	// which decides how the attesting key is trusted: by the
 	// attestation's "x5c" certificate chain to trust anchors (HAIP 1.0
-	// §4.4.1 — X5CAttesterChain) or by keys registered through
-	// Dependencies.ClientKeys (RegisteredAttesterKeys).
+	// §4.4.1 — X5CAttesterChain) or by keys registered for each
+	// attester (RegisteredAttesterKeys).
 	AttestationBasedClientAuthentication bool
 
 	// OAuthOnly, if set, makes this server a pure OAuth 2.0 + FAPI 2.0

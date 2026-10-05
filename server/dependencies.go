@@ -195,7 +195,7 @@ type Dependencies struct {
 	// attestation's "x5c" certificate chain against trust anchors (HAIP
 	// 1.0 §4.4.1) — choosing its IssuerBinding, which decides what ties
 	// the certificate to the client's attester — or
-	// RegisteredAttesterKeys{} to use keys registered through ClientKeys.
-	// See both types' own doc comments.
+	// RegisteredAttesterKeys{Keys: ...} to use keys registered for each
+	// attester, never ClientKeys. See both types' own doc comments.
 	AttesterTrust AttesterTrust
 }

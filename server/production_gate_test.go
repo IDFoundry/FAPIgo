@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
 	"github.com/idfoundry/fapigo/storage/memstore"
@@ -100,5 +101,51 @@ func TestProductionChecksCustomAccessTokenIssuers(t *testing.T) {
 func TestProductionAcceptsPointerNoRevocation(t *testing.T) {
 	if err := productionNew(t, func(d *server.Dependencies) { d.Revocation = &server.NoRevocation{} }); err != nil {
 		t.Fatalf("New(production, &NoRevocation{}): %v", err)
+	}
+}
+
+// bareAttesterKeys is an AttesterKeySource declaring no
+// KeySourceAssurance.
+type bareAttesterKeys struct{}
+
+func (bareAttesterKeys) ResolveAttesterKeys(context.Context, keys.AttesterKeyRequest) (keys.VerificationKeySet, error) {
+	return keys.VerificationKeySet{}, nil
+}
+
+// TestProductionChecksAttesterKeySource covers RegisteredAttesterKeys'
+// key source getting the same KeySourceAssurance check as ClientKeys
+// when attestation is enabled, by value or pointer.
+func TestProductionChecksAttesterKeySource(t *testing.T) {
+	for name, tc := range map[string]struct {
+		trust   server.AttesterTrust
+		wantErr bool
+	}{
+		"static keys":            {server.RegisteredAttesterKeys{Keys: keys.StaticAttesterKeys{}}, false},
+		"undeclared":             {server.RegisteredAttesterKeys{Keys: bareAttesterKeys{}}, true},
+		"undeclared, by pointer": {&server.RegisteredAttesterKeys{Keys: bareAttesterKeys{}}, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := validAttestationConfig(t)
+			cfg.Assurance = server.AssuranceProduction
+			deps := validDependencies()
+			deps.Audit = &fakeAuditSink{}
+			deps.AttesterTrust = tc.trust
+			_, err := server.New(cfg, deps)
+			if !tc.wantErr {
+				if err != nil {
+					t.Fatalf("New: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), "attester_trust keys") {
+				t.Fatalf("New error = %v, want the attester key source refused", err)
+			}
+		})
+	}
+	// With attestation disabled, AttesterTrust plays no part.
+	if err := productionNew(t, func(d *server.Dependencies) {
+		d.AttesterTrust = server.RegisteredAttesterKeys{Keys: bareAttesterKeys{}}
+	}); err != nil {
+		t.Fatalf("New(production, attestation disabled): %v", err)
 	}
 }

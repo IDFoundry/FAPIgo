@@ -6,6 +6,7 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/extension"
 	"github.com/idfoundry/fapigo/federation"
+	"github.com/idfoundry/fapigo/keys"
 )
 
 // Server is a FAPI 2.0 authorization-server engine. It is entirely
@@ -519,8 +520,17 @@ func validateEncryptionDependencies(cfg Config, deps Dependencies) error {
 // validateAttesterTrust checks the AttesterTrust attestation-based
 // client authentication requires.
 func validateAttesterTrust(trust AttesterTrust) error {
-	if trust == nil {
-		return fmt.Errorf("server: dependencies: attester trust is required when attestation_based_client_authentication is set (pass X5CAttesterChain{...} or RegisteredAttesterKeys{})")
+	switch t := trust.(type) {
+	case nil:
+		return fmt.Errorf("server: dependencies: attester trust is required when attestation_based_client_authentication is set (pass X5CAttesterChain{...} or RegisteredAttesterKeys{Keys: ...})")
+	case *RegisteredAttesterKeys:
+		if t == nil {
+			return fmt.Errorf("server: dependencies: attester trust is a nil *RegisteredAttesterKeys")
+		}
+	case *X5CAttesterChain:
+		if t == nil {
+			return fmt.Errorf("server: dependencies: attester trust is a nil *X5CAttesterChain")
+		}
 	}
 	return trust.validate()
 }
@@ -541,7 +551,7 @@ func validateProductionAssurance(cfg Config, deps Dependencies, cibaEnabled bool
 	if err := checkProductionKeyCustody(deps, scaled); err != nil {
 		return err
 	}
-	if err := checkProductionClientSources(deps, scaled); err != nil {
+	if err := checkProductionClientSources(deps, scaled, cfg.AttestationBasedClientAuthentication); err != nil {
 		return err
 	}
 	if err := checkProductionStateStores(deps, scaled, cibaEnabled); err != nil {
@@ -566,9 +576,10 @@ func checkProductionKeyCustody(deps Dependencies, scaled bool) error {
 	return nil
 }
 
-// checkProductionClientSources checks the client registry and the
-// sources of clients' verification and encryption keys.
-func checkProductionClientSources(deps Dependencies, scaled bool) error {
+// checkProductionClientSources checks the client registry, the sources
+// of clients' verification and encryption keys, and, when attestation
+// is enabled, RegisteredAttesterKeys' attester key source.
+func checkProductionClientSources(deps Dependencies, scaled, attestation bool) error {
 	if err := checkStoreAssurance("clients", deps.Clients, false, scaled); err != nil {
 		return err
 	}
@@ -576,7 +587,26 @@ func checkProductionClientSources(deps Dependencies, scaled bool) error {
 		return err
 	}
 	if deps.ClientEncryptionKeys != nil {
-		return checkKeySourceAssurance("client_encryption_keys", deps.ClientEncryptionKeys)
+		if err := checkKeySourceAssurance("client_encryption_keys", deps.ClientEncryptionKeys); err != nil {
+			return err
+		}
+	}
+	if attesterKeys := registeredAttesterKeySource(deps.AttesterTrust); attestation && attesterKeys != nil {
+		return checkKeySourceAssurance("attester_trust keys", attesterKeys)
+	}
+	return nil
+}
+
+// registeredAttesterKeySource returns RegisteredAttesterKeys' key
+// source, by value or pointer, or nil for any other AttesterTrust.
+func registeredAttesterKeySource(trust AttesterTrust) keys.AttesterKeySource {
+	switch t := trust.(type) {
+	case RegisteredAttesterKeys:
+		return t.Keys
+	case *RegisteredAttesterKeys:
+		if t != nil {
+			return t.Keys
+		}
 	}
 	return nil
 }

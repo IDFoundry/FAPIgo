@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"context"
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -113,6 +114,11 @@ func newAttestationHarness(t *testing.T, now time.Time, registeredKey *ecdsa.Pri
 // error rather than failing t.
 func newAttestationServer(t *testing.T, now time.Time, registeredKey *ecdsa.PrivateKey, trust server.AttesterTrust, tweak func(*server.Config, *storage.RegisteredClientConfig)) (harness, error) {
 	t.Helper()
+	// A zero RegisteredAttesterKeys means "trust registeredKey as the
+	// test attester's key", so tests needn't build the source each time.
+	if registered, ok := trust.(server.RegisteredAttesterKeys); ok && registered.Keys == nil && registeredKey != nil {
+		trust = registeredAttesterTrust(fapi.ES256, &registeredKey.PublicKey)
+	}
 	serverKey := generateKey(t)
 
 	clientConfig := storage.RegisteredClientConfig{
@@ -196,6 +202,14 @@ func newAttestationServer(t *testing.T, now time.Time, registeredKey *ecdsa.Priv
 		return harness{}, err
 	}
 	return harness{server: srv, clients: clients, serverKey: serverKey, grants: grants, audit: audit, revocation: revocation, now: now}, nil
+}
+
+// registeredAttesterTrust is RegisteredAttesterKeys trusting pub, with
+// algorithm alg, as testAttesterIssuer's key.
+func registeredAttesterTrust(alg fapi.SignatureAlgorithm, pub crypto.PublicKey) server.RegisteredAttesterKeys {
+	return server.RegisteredAttesterKeys{Keys: keys.StaticAttesterKeys{
+		testAttesterIssuer: {{Algorithm: alg, PublicKey: pub}},
+	}}
 }
 
 func registeredAttesterKeys(key *ecdsa.PrivateKey) map[fapi.ClientID][]keys.VerificationKey {
@@ -295,7 +309,7 @@ func TestRequestClientCredentialsToken_AttestationRejectsWhenDisabled(t *testing
 		Keys: serverKeyManager, AccessTokens: server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
 		Revocation: &fakeRevocationSink{}, Audit: &fakeAuditSink{}, Clock: fixedClock{now: h.now}, Random: rand.Reader,
 		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
-		AttesterTrust:          server.RegisteredAttesterKeys{},
+		AttesterTrust:          registeredAttesterTrust(fapi.ES256, &attesterKey.PublicKey),
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {
@@ -618,7 +632,7 @@ func TestRequestClientCredentialsToken_AttestationRejectsClientNotRegisteredForI
 		Keys: serverKeyManager, AccessTokens: server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
 		Revocation: &fakeRevocationSink{}, Audit: &fakeAuditSink{}, Clock: fixedClock{now: now}, Random: rand.Reader,
 		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
-		AttesterTrust:          server.RegisteredAttesterKeys{},
+		AttesterTrust:          registeredAttesterTrust(fapi.ES256, &attesterKey.PublicKey),
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {
@@ -692,7 +706,7 @@ func TestRequestClientCredentialsToken_AttestationRejectsDisallowedAttestationAl
 		Keys: serverKeyManager, AccessTokens: server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
 		Revocation: &fakeRevocationSink{}, Audit: &fakeAuditSink{}, Clock: fixedClock{now: now}, Random: rand.Reader,
 		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
-		AttesterTrust:          server.RegisteredAttesterKeys{},
+		AttesterTrust:          registeredAttesterTrust(fapi.EdDSA, &attesterKey.PublicKey),
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {
@@ -788,7 +802,7 @@ func TestRequestClientCredentialsToken_AttestationRejectsNoAttesterKeyRegistered
 		Keys:       serverKeyManager, AccessTokens: server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
 		Revocation: &fakeRevocationSink{}, Audit: &fakeAuditSink{}, Clock: fixedClock{now: now}, Random: rand.Reader,
 		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
-		AttesterTrust:          server.RegisteredAttesterKeys{},
+		AttesterTrust:          server.RegisteredAttesterKeys{Keys: keys.StaticAttesterKeys{}},
 	}
 	srv, err := server.New(cfg, deps)
 	if err != nil {

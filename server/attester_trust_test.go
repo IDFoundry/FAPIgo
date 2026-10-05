@@ -21,6 +21,7 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/clientattestation"
 	"github.com/idfoundry/fapigo/internal/jose"
+	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -335,7 +336,11 @@ func TestNewAttesterTrustRequirements(t *testing.T) {
 	}{
 		"required when attestation enabled":     {true, nil, true},
 		"not required when disabled":            {false, nil, false},
-		"registered keys":                       {true, server.RegisteredAttesterKeys{}, false},
+		"registered keys":                       {true, server.RegisteredAttesterKeys{Keys: keys.StaticAttesterKeys{}}, false},
+		"registered keys by pointer":            {true, &server.RegisteredAttesterKeys{Keys: keys.StaticAttesterKeys{}}, false},
+		"registered keys without a key source":  {true, server.RegisteredAttesterKeys{}, true},
+		"nil registered keys pointer":           {true, (*server.RegisteredAttesterKeys)(nil), true},
+		"nil x5c chain pointer":                 {true, (*server.X5CAttesterChain)(nil), true},
 		"x5c chain, issuer in certificate":      {true, server.X5CAttesterChain{TrustAnchors: server.StaticAttesterTrustAnchors{Roots: x509.NewCertPool()}, IssuerBinding: server.AttesterIssuerInCertificate}, false},
 		"x5c chain, bound by trust anchors":     {true, server.X5CAttesterChain{TrustAnchors: server.StaticAttesterTrustAnchors{Roots: x509.NewCertPool()}, IssuerBinding: server.AttesterIssuerByTrustAnchors}, false},
 		"x5c chain without issuer binding":      {true, server.X5CAttesterChain{TrustAnchors: server.StaticAttesterTrustAnchors{Roots: x509.NewCertPool()}}, true},
@@ -410,5 +415,59 @@ func TestX5CAttesterChainIssuerInCertificate(t *testing.T) {
 				t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidClient)
 			}
 		})
+	}
+}
+
+// TestRegisteredAttesterKeysIgnoresClientKeys proves an attestation
+// verifies only against the attester's own key source: a client whose
+// own key is in Dependencies.ClientKeys — as keys/ephemeral or
+// federation automatic registration put it there — can't sign its own
+// attestation with that key.
+func TestRegisteredAttesterKeysIgnoresClientKeys(t *testing.T) {
+	now := time.Now()
+	clientOwnKey, attesterKey, instanceKey := generateKey(t), generateKey(t), generateKey(t)
+	pop := createAttestationPoPHeader(t, instanceKey, testClientID.String(), testIssuer, "jti-1", now)
+	for name, tc := range map[string]struct {
+		signer  *ecdsa.PrivateKey
+		wantErr bool
+	}{
+		"signed with the client's own key": {clientOwnKey, true},
+		"signed with the attester's key":   {attesterKey, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			// ClientKeys holds clientOwnKey for testClientID.
+			h := newAttestationHarness(t, now, clientOwnKey, registeredAttesterTrust(fapi.ES256, &attesterKey.PublicKey), nil)
+			_, err := h.server.AuthenticateAttestedClient(context.Background(), server.AttestedClientAuthenticationRequest{
+				ClientAttestations:    []string{createAttestationHeader(t, tc.signer, testClientID.String(), &instanceKey.PublicKey, now, time.Hour)},
+				ClientAttestationPoPs: []string{pop},
+			})
+			if !tc.wantErr {
+				if err != nil {
+					t.Fatalf("AuthenticateAttestedClient: %v", err)
+				}
+				return
+			}
+			if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
+				t.Fatalf("error code = %q, want %q (err %v)", code, server.ErrorInvalidClient, err)
+			}
+		})
+	}
+}
+
+// TestRegisteredAttesterKeysUnknownAttester covers a client registered
+// with an attester the key source has no keys for.
+func TestRegisteredAttesterKeysUnknownAttester(t *testing.T) {
+	now := time.Now()
+	attesterKey, instanceKey := generateKey(t), generateKey(t)
+	trust := server.RegisteredAttesterKeys{Keys: keys.StaticAttesterKeys{
+		"https://another-attester.example.com": {{Algorithm: fapi.ES256, PublicKey: &attesterKey.PublicKey}},
+	}}
+	h := newAttestationHarness(t, now, attesterKey, trust, nil)
+	_, err := h.server.AuthenticateAttestedClient(context.Background(), server.AttestedClientAuthenticationRequest{
+		ClientAttestations:    []string{createAttestationHeader(t, attesterKey, testClientID.String(), &instanceKey.PublicKey, now, time.Hour)},
+		ClientAttestationPoPs: []string{createAttestationPoPHeader(t, instanceKey, testClientID.String(), testIssuer, "jti-1", now)},
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
+		t.Fatalf("error code = %q, want %q (err %v)", code, server.ErrorInvalidClient, err)
 	}
 }

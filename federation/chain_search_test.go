@@ -264,3 +264,30 @@ func TestResolveSearchIsBounded(t *testing.T) {
 		t.Errorf("fetched %d Entity Configurations, want at most 7", total)
 	}
 }
+
+// TestResolveReportsEveryFailedBranch: when no authority hint leads to a
+// configured Trust Anchor, the error gives each branch's own reason, not
+// only the last one tried.
+func TestResolveReportsEveryFailedBranch(t *testing.T) {
+	g := newFederationGraph(t, "leaf", "a", "untrusted", "b", "ta")
+	g.link(map[string][]string{
+		"leaf": {"a", "b"},
+		"a":    {"untrusted"},
+		"b":    {"unreachable"},
+		"ta":   nil,
+	})
+	_, err := g.resolver(5, 5, "ta").Resolve(context.Background(), g.entities["leaf"].id)
+	if err == nil {
+		t.Fatal("Resolve = nil error, want no path")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"via \"" + g.entities["a"].id + "\"",
+		"via \"" + g.entities["b"].id + "\"",
+		g.entities["untrusted"].id + "\" has no authority_hints",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("Resolve error = %q, want it to contain %q", msg, want)
+		}
+	}
+}

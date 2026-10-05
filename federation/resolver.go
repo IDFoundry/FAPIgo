@@ -3,6 +3,7 @@ package federation
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -363,6 +364,14 @@ func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntit
 // superiors tried — the most a single first-reachable walk could already
 // fetch — so backtracking adds no amplification an entity's authority
 // hints could exploit (§18.1).
+//
+// A branch that fails any check, a signature or a policy as much as a
+// fetch, is abandoned and the next hint tried: §10 validates each Trust
+// Chain independently and accepts any valid one, and every branch is
+// verified from its own superior's statements on a copy of st, so one
+// branch's failure never counts towards another's success. When no
+// branch succeeds, the error carries every branch's reason (at most
+// budget of them), not just the last one tried.
 func (r *Resolver) walk(ctx context.Context, st *chainWalkState, hop int, budget *int, now time.Time) (ResolvedEntity, error) {
 	if hop >= r.cfg.Limits.MaxPathLength {
 		return ResolvedEntity{}, fmt.Errorf("federation: trust chain for %q exceeds the configured max path length (%d)", st.subjectID, r.cfg.Limits.MaxPathLength)
@@ -375,7 +384,7 @@ func (r *Resolver) walk(ctx context.Context, st *chainWalkState, hop int, budget
 		return ResolvedEntity{}, fmt.Errorf("federation: %q lists %d authority_hints, more than the configured limit (%d)", st.entityAt, len(hints), r.cfg.Limits.MaxAuthorityHints)
 	}
 
-	var lastErr error
+	var errs []error
 	for _, hint := range r.trustAnchorsFirst(hints) {
 		if st.visited[hint] {
 			continue
@@ -388,12 +397,12 @@ func (r *Resolver) walk(ctx context.Context, st *chainWalkState, hop int, budget
 		if err == nil {
 			return result, nil
 		}
-		lastErr = err
+		errs = append(errs, fmt.Errorf("via %q: %w", hint, err))
 	}
-	if lastErr == nil {
+	if len(errs) == 0 {
 		return ResolvedEntity{}, fmt.Errorf("federation: %q: no unvisited superior among %v", st.entityAt, hints)
 	}
-	return ResolvedEntity{}, fmt.Errorf("federation: %q: no path to a configured trust anchor through %v (last error: %w)", st.entityAt, hints, lastErr)
+	return ResolvedEntity{}, fmt.Errorf("federation: %q: no path to a configured trust anchor through %v: %w", st.entityAt, hints, errors.Join(errs...))
 }
 
 // tryHint extends a copy of st through the superior hint — its Entity

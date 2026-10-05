@@ -102,6 +102,16 @@ type grantRecord struct {
 	// GrantID is GrantedAuthorization.GrantID: carried into every access
 	// token from the grant, and checked against RevokeGrant.
 	GrantID string `json:"grant_id,omitempty"`
+
+	// IssuedAt is when this record was issued: an authorization code,
+	// a decided CIBA request, or a refresh token (forRefreshToken resets
+	// it). A redemption refuses a record older than the current
+	// Limits lifetime for its kind, whatever its stored expiry, so
+	// shortening a lifetime also shortens what was issued before; that
+	// keeps everything issued from a grant inside RevokeGrant's record
+	// lifetime, which is computed from the current Limits. Nil in records
+	// written before it existed; those keep their stored expiry only.
+	IssuedAt *time.Time `json:"issued_at,omitempty"`
 }
 
 // refreshBinding is what a refresh token is issued against: the DPoP key
@@ -115,14 +125,23 @@ type refreshBinding struct {
 }
 
 // forRefreshToken returns g as a refresh token carries it forward:
-// without the code-exchange-only fields, and recording binding.
-func (g grantRecord) forRefreshToken(binding refreshBinding) grantRecord {
+// without the code-exchange-only fields, recording binding, and issued
+// at issuedAt.
+func (g grantRecord) forRefreshToken(binding refreshBinding, issuedAt time.Time) grantRecord {
 	g.RedirectURI = ""
 	g.CodeChallenge = ""
 	g.Nonce = ""
 	g.Thumbprint = binding.Thumbprint
 	g.ClientInstanceKey = binding.InstanceKey
+	g.IssuedAt = &issuedAt
 	return g
+}
+
+// issuedWithin reports whether a record issued at issuedAt is still
+// within lifetime at now. A record without IssuedAt (written before it
+// existed) is judged only by its stored expiry, so it passes here.
+func issuedWithin(issuedAt *time.Time, lifetime time.Duration, now time.Time) bool {
+	return issuedAt == nil || now.Before(issuedAt.Add(lifetime))
 }
 
 // accessTokenClaims returns the non-standard claims for an access token

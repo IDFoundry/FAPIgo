@@ -101,7 +101,9 @@ func (s *Server) CompleteBackchannelAuthentication(ctx context.Context, req Comp
 			s.audit(ctx, AuditEventCompleteBackchannelAuthentication, pending.ClientID, AuditOutcomeFailure, string(wrapped.Code()))
 			return wrapped
 		}
+		decidedAt := s.deps.Clock.Now()
 		grant, encodeErr := encodeGrantRecord(grantRecord{
+			IssuedAt:                &decidedAt,
 			DPoPJKT:                 request.DPoPJKT,
 			Subject:                 result.subject.ID().String(),
 			Scope:                   result.grant.Scope,

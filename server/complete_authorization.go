@@ -144,7 +144,9 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 	nonce, _ := jsonString(request.Parameters, "nonce")
 	dpopJKT, _ := jsonString(request.Parameters, "dpop_jkt") // optional, RFC 9449 §10
 
+	now := s.deps.Clock.Now()
 	grant, err := encodeGrantRecord(grantRecord{
+		IssuedAt:                &now,
 		RedirectURI:             redirectURI,
 		CodeChallenge:           codeChallenge,
 		Nonce:                   nonce,
@@ -165,7 +167,6 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 		return s.completeLocalFail(ctx, clientID, newError(ErrorServerError, 500, "failed to encode authorization code grant", err)), nil
 	}
 
-	now := s.deps.Clock.Now()
 	if err := s.deps.Grants.CreateAuthorizationCode(ctx, storage.NewAuthorizationCode{
 		CodeHash:  sha256.Sum256([]byte(code)),
 		ClientID:  clientID,

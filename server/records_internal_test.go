@@ -88,9 +88,13 @@ func TestGrantRecordForRefreshTokenDropsCodeOnlyFields(t *testing.T) {
 		RedirectURI: "https://rp.example/cb", CodeChallenge: "challenge", Nonce: "n",
 		DPoPJKT: "jkt", Subject: "user-1", Scope: []string{"openid", "offline_access"},
 	}
-	got := g.forRefreshToken(refreshBinding{Thumbprint: "thumb-1", InstanceKey: "instance-1"})
+	issued := time.Date(2026, 10, 5, 9, 0, 0, 0, time.UTC)
+	got := g.forRefreshToken(refreshBinding{Thumbprint: "thumb-1", InstanceKey: "instance-1"}, issued)
 	if got.RedirectURI != "" || got.CodeChallenge != "" || got.Nonce != "" {
 		t.Fatalf("forRefreshToken kept code-only fields: %+v", got)
+	}
+	if got.IssuedAt == nil || !got.IssuedAt.Equal(issued) {
+		t.Fatalf("forRefreshToken IssuedAt = %v, want %v", got.IssuedAt, issued)
 	}
 	if got.Thumbprint != "thumb-1" || got.ClientInstanceKey != "instance-1" || got.Subject != "user-1" || got.DPoPJKT != "jkt" || len(got.Scope) != 2 {
 		t.Fatalf("forRefreshToken = %+v, want grant carried forward with thumbprint and instance key", got)
@@ -115,5 +119,23 @@ func TestEncodeRecordsRejectInvalidUTF8(t *testing.T) {
 	}
 	if _, err := encodeRequestRecord(requestRecord{Parameters: map[string]json.RawMessage{"p\xff": json.RawMessage(`"x"`)}}); err == nil {
 		t.Errorf("encodeRequestRecord(invalid UTF-8 parameter name) = nil error, want error")
+	}
+}
+
+func TestIssuedWithin(t *testing.T) {
+	issued := time.Date(2026, 10, 5, 9, 0, 0, 0, time.UTC)
+	for name, tc := range map[string]struct {
+		issuedAt *time.Time
+		now      time.Time
+		want     bool
+	}{
+		"inside the lifetime":             {&issued, issued.Add(9 * time.Minute), true},
+		"at the end of the lifetime":      {&issued, issued.Add(10 * time.Minute), false},
+		"past it":                         {&issued, issued.Add(time.Hour), false},
+		"no issue time (an older record)": {nil, issued.Add(time.Hour), true},
+	} {
+		if got := issuedWithin(tc.issuedAt, 10*time.Minute, tc.now); got != tc.want {
+			t.Errorf("%s: issuedWithin = %v, want %v", name, got, tc.want)
+		}
 	}
 }

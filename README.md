@@ -261,7 +261,7 @@ role is tested against the OpenID Foundation conformance suite.
 > and live status queries (§8, `Resolver.CheckTrustMarkStatus`) — plus
 > Trust Marked Entities Listing request validation (§9), the Resolve
 > endpoint (§8.3, `Resolver.ResolveViaEndpoint`/`ResolveIssuer`) — both
-> sides: querying a peer's resolve-as-a-service endpoint instead of
+> sides: querying a trusted resolver's resolve-as-a-service endpoint instead of
 > walking its Trust Chain hop by hop, and signing a response for an
 > embedder's own already-resolved result — and the Federation Historical
 > Keys endpoint (§8.7, `Resolver.FetchHistoricalKeys`), querying side:

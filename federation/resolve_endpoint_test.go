@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -78,7 +79,7 @@ func TestResolveViaEndpoint(t *testing.T) {
 	entityID, resolveEndpoint, resolver, _ := selfAnchoredResolveEndpoint(t, "https://op.example.org", metadata)
 
 	claims, err := resolver.ResolveViaEndpoint(context.Background(), federation.ResolveRequest{
-		Endpoint: resolveEndpoint, Subject: "https://op.example.org", TrustAnchor: entityID,
+		Endpoint: resolveEndpoint, Subject: "https://op.example.org", TrustAnchor: entityID, ExpectedIssuer: entityID,
 	})
 	if err != nil {
 		t.Fatalf("ResolveViaEndpoint: %v", err)
@@ -108,7 +109,7 @@ func TestResolveViaEndpointRejectsUnresolvableIssuer(t *testing.T) {
 		t.Fatalf("NewResolver: %v", err)
 	}
 	if _, err := otherResolver.ResolveViaEndpoint(context.Background(), federation.ResolveRequest{
-		Endpoint: resolveEndpoint, Subject: "https://op.example.org", TrustAnchor: "https://unrelated.example.org",
+		Endpoint: resolveEndpoint, Subject: "https://op.example.org", TrustAnchor: "https://unrelated.example.org", ExpectedIssuer: server.URL,
 	}); err == nil {
 		t.Fatalf("ResolveViaEndpoint(untrusted resolver) = nil error, want error")
 	}
@@ -118,7 +119,7 @@ func TestResolveViaEndpointRejectsNonHTTPSEndpoint(t *testing.T) {
 	metadata := map[string]json.RawMessage{"openid_provider": json.RawMessage(`{}`)}
 	entityID, _, resolver, _ := selfAnchoredResolveEndpoint(t, "https://op.example.org", metadata)
 	if _, err := resolver.ResolveViaEndpoint(context.Background(), federation.ResolveRequest{
-		Endpoint: "http://not-https.example.org/resolve", Subject: "https://op.example.org", TrustAnchor: entityID,
+		Endpoint: "http://not-https.example.org/resolve", Subject: "https://op.example.org", TrustAnchor: entityID, ExpectedIssuer: entityID,
 	}); err == nil {
 		t.Fatalf("ResolveViaEndpoint(non-https endpoint) = nil error, want error")
 	}
@@ -130,7 +131,7 @@ func TestResolveViaEndpointRejectsFetchFailure(t *testing.T) {
 	// The fixture's own /resolve handler 404s for any subject other than
 	// the one it was configured to answer about.
 	if _, err := resolver.ResolveViaEndpoint(context.Background(), federation.ResolveRequest{
-		Endpoint: resolveEndpoint, Subject: "https://someone-else.example.org", TrustAnchor: entityID,
+		Endpoint: resolveEndpoint, Subject: "https://someone-else.example.org", TrustAnchor: entityID, ExpectedIssuer: entityID,
 	}); err == nil {
 		t.Fatalf("ResolveViaEndpoint(fetch failure) = nil error, want error")
 	}
@@ -165,7 +166,7 @@ func TestResolveViaEndpointRejectsMalformedResponseBody(t *testing.T) {
 		t.Fatalf("NewResolver: %v", err)
 	}
 	if _, err := resolver.ResolveViaEndpoint(context.Background(), federation.ResolveRequest{
-		Endpoint: entityID + "/resolve", Subject: "https://op.example.org", TrustAnchor: entityID,
+		Endpoint: entityID + "/resolve", Subject: "https://op.example.org", TrustAnchor: entityID, ExpectedIssuer: entityID,
 	}); err == nil {
 		t.Fatalf("ResolveViaEndpoint(malformed response body) = nil error, want error")
 	}
@@ -217,7 +218,7 @@ func TestResolveViaEndpointRejectsSignatureMismatch(t *testing.T) {
 		t.Fatalf("NewResolver: %v", err)
 	}
 	if _, err := resolver.ResolveViaEndpoint(context.Background(), federation.ResolveRequest{
-		Endpoint: entityID + "/resolve", Subject: "https://op.example.org", TrustAnchor: entityID,
+		Endpoint: entityID + "/resolve", Subject: "https://op.example.org", TrustAnchor: entityID, ExpectedIssuer: entityID,
 	}); err == nil {
 		t.Fatalf("ResolveViaEndpoint(signature mismatch) = nil error, want error")
 	}
@@ -228,15 +229,47 @@ func TestResolveViaEndpointRequiresFields(t *testing.T) {
 	entityID, resolveEndpoint, resolver, _ := selfAnchoredResolveEndpoint(t, "https://op.example.org", metadata)
 
 	cases := map[string]federation.ResolveRequest{
-		"no endpoint":     {Subject: "https://op.example.org", TrustAnchor: entityID},
-		"no subject":      {Endpoint: resolveEndpoint, TrustAnchor: entityID},
-		"no trust anchor": {Endpoint: resolveEndpoint, Subject: "https://op.example.org"},
+		"no endpoint":                {Subject: "https://op.example.org", TrustAnchor: entityID, ExpectedIssuer: entityID},
+		"no subject":                 {Endpoint: resolveEndpoint, TrustAnchor: entityID, ExpectedIssuer: entityID},
+		"no trust anchor":            {Endpoint: resolveEndpoint, Subject: "https://op.example.org", ExpectedIssuer: entityID},
+		"no expected issuer":         {Endpoint: resolveEndpoint, Subject: "https://op.example.org", TrustAnchor: entityID},
+		"expected issuer not an id":  {Endpoint: resolveEndpoint, Subject: "https://op.example.org", TrustAnchor: entityID, ExpectedIssuer: "http://op.example.org"},
+		"expected issuer with query": {Endpoint: resolveEndpoint, Subject: "https://op.example.org", TrustAnchor: entityID, ExpectedIssuer: entityID + "?x=1"},
 	}
 	for name, req := range cases {
 		t.Run(name, func(t *testing.T) {
-			if _, err := resolver.ResolveViaEndpoint(context.Background(), req); err == nil {
+			_, err := resolver.ResolveViaEndpoint(context.Background(), req)
+			if err == nil {
 				t.Fatalf("ResolveViaEndpoint(%s) = nil error, want error", name)
 			}
+			// The expected-issuer cases must be refused by its own
+			// validation, before anything is fetched.
+			if strings.HasPrefix(name, "no expected issuer") || strings.HasPrefix(name, "expected issuer") {
+				if !strings.Contains(err.Error(), "expected resolver issuer") {
+					t.Errorf("ResolveViaEndpoint(%s) = %v, want the expected issuer refused as such", name, err)
+				}
+			}
 		})
+	}
+}
+
+// TestResolveViaEndpointRefusesAnotherIssuer covers a Resolve Response
+// issued by an entity other than the resolver the caller named. Any
+// federation member can run a resolve endpoint and sign a response about
+// any subject (here, one this Resolver can resolve and verify), so the
+// response must come from ExpectedIssuer, checked before that other
+// issuer is resolved at all.
+func TestResolveViaEndpointRefusesAnotherIssuer(t *testing.T) {
+	metadata := map[string]json.RawMessage{
+		"openid_provider": json.RawMessage(`{"issuer":"https://op.example.org","jwks_uri":"https://attacker.example.org/jwks"}`),
+	}
+	entityID, resolveEndpoint, resolver, _ := selfAnchoredResolveEndpoint(t, "https://op.example.org", metadata)
+
+	_, err := resolver.ResolveViaEndpoint(context.Background(), federation.ResolveRequest{
+		Endpoint: resolveEndpoint, Subject: "https://op.example.org", TrustAnchor: entityID,
+		ExpectedIssuer: "https://trusted-resolver.example.org",
+	})
+	if err == nil || !strings.Contains(err.Error(), "not the expected resolver") {
+		t.Fatalf("ResolveViaEndpoint(response from another issuer) = %v, want refusal before resolving that issuer", err)
 	}
 }

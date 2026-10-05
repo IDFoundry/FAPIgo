@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/asn1"
 	"net"
 	"slices"
 
@@ -20,15 +22,54 @@ func matchesRegisteredThumbprint(cert *x509.Certificate, expected string) bool {
 	return expected != "" && mtls.Thumbprint(cert) == expected
 }
 
-// matchesRegisteredSubjectDN reports whether cert's subject, serialized
-// via crypto/x509.Certificate.Subject.String() (Go's own RFC 2253-ish
-// serialization), exactly equals a client's registered ExpectedSubjectDN
-// (ClientAuthMethodTLSClientAuth, RFC 8705 §2.1's
-// "tls_client_auth_subject_dn"). See
-// storage.RegisteredClientConfig.ExpectedSubjectDN's own doc comment for
-// the case-sensitivity/attribute-ordering limitation this implies.
+// matchesRegisteredSubjectDN reports whether cert's subject equals a
+// client's registered ExpectedSubjectDN (ClientAuthMethodTLSClientAuth,
+// RFC 8705 §2.1's "tls_client_auth_subject_dn"), in either of two
+// forms:
+//
+//   - the RFC 4514 string of the certificate's own RDN sequence, as
+//     encoded (pkix.RDNSequence.String() of RawSubject): exact, keeping
+//     every attribute, its order and its RDN grouping;
+//   - Go's pkix.Name.String() serialization (crypto/x509.Certificate's
+//     Subject.String()), the form earlier versions compared. pkix.Name
+//     keeps a single CommonName and SerialNumber, so a subject carrying
+//     either more than once renders without the others; this form is
+//     refused for such a subject rather than matching on a DN that
+//     isn't the certificate's.
+//
+// See storage.RegisteredClientConfig.ExpectedSubjectDN's own doc comment
+// for what each form compares.
 func matchesRegisteredSubjectDN(cert *x509.Certificate, expected string) bool {
-	return expected != "" && cert.Subject.String() == expected
+	if expected == "" {
+		return false
+	}
+	var rdns pkix.RDNSequence
+	if rest, err := asn1.Unmarshal(cert.RawSubject, &rdns); err == nil && len(rest) == 0 && rdns.String() == expected {
+		return true
+	}
+	return cert.Subject.String() == expected && !subjectStringDropsAttributes(cert.Subject)
+}
+
+var (
+	oidCommonName   = asn1.ObjectIdentifier{2, 5, 4, 3}
+	oidSerialNumber = asn1.ObjectIdentifier{2, 5, 4, 5}
+)
+
+// subjectStringDropsAttributes reports whether name.String() leaves out
+// attributes of the subject it was parsed from: pkix.Name holds one
+// CommonName and one SerialNumber (the last of each), and String renders
+// those fields rather than every parsed value.
+func subjectStringDropsAttributes(name pkix.Name) bool {
+	var commonNames, serialNumbers int
+	for _, atv := range name.Names {
+		switch {
+		case atv.Type.Equal(oidCommonName):
+			commonNames++
+		case atv.Type.Equal(oidSerialNumber):
+			serialNumbers++
+		}
+	}
+	return commonNames > 1 || serialNumbers > 1
 }
 
 // matchesRegisteredSANDNS reports whether one of cert's subjectAltName

@@ -217,6 +217,27 @@ and consent, or complete with the new `server.InteractionNeeded`
 result, which answers `login_required`, `consent_required`,
 `account_selection_required` or `interaction_required`.
 
+### Records written before upgrading keep their old limits (server)
+
+**Affects:** a server upgraded with codes, CIBA requests or refresh
+tokens still outstanding, or deployed as a rolling update.
+
+**Why:** v0.50.0 records when each code, CIBA decision, refresh token
+and pushed request was issued, and checks that time against the current
+`Limits` (a shortened lifetime now also shortens what was already
+issued), against `prompt=login` and against the CIBA request's own
+expiry. Records written before the upgrade, or by an instance still on
+v0.49 during a rolling deploy, don't carry those times and are judged
+only as before, by the expiry stored with them. Codes and CIBA requests
+are short-lived, so this passes within minutes; a refresh token isn't
+rotated, so one issued before the upgrade keeps its original lifetime
+for as long as it lasts.
+
+**What to change:** nothing, unless you shorten
+`Limits.RefreshTokenLifetime` and need it to apply to refresh tokens
+issued before the upgrade: revoke those grants (`Server.RevokeGrant`)
+instead.
+
 ## v0.49.0
 
 ### A custom access token issuer declares what it relies on (server, *production only*)

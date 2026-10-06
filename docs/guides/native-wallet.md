@@ -33,8 +33,10 @@ wallet, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
 ```
 
 A native client may use a private-use scheme in reverse-domain form,
-written with a single slash (`com.example.wallet:/callback`), or loopback
-`http` to `127.0.0.1` or `[::1]`, matched on any port. The server also
+written with a single slash (`com.example.wallet:/callback`), loopback
+`http` to `127.0.0.1` or `[::1]` (never `localhost`, RFC 8252 §8.3),
+matched on any port, or a claimed `https` URI, in production as well;
+`NewRegisteredClient` refuses any other form. The server also
 needs `Config.AttestationBasedClientAuthentication` and an
 `AttesterTrust`: `server.RegisteredAttesterKeys` with the attesters'
 own keys, by issuer (a `keys.AttesterKeySource` such as
@@ -83,6 +85,12 @@ c, err := client.New(client.Config{
 - **Loopback.** A desktop app on a port the OS picks per flow sets
   `RedirectURI` to the port-less `http://127.0.0.1/callback` and passes
   each flow's port as `BeginAuthorizationRequest.RedirectPort`.
+- **Production.** Under `client.AssuranceProduction`, `client.New`
+  requires the session store to declare `Durable` and `AtomicConsume`,
+  the keys to declare custody (`DeclareCustody`, as above), a hardened
+  `IssuerKeys`, `Random` to be `crypto/rand.Reader`, and an https issuer
+  and endpoints. A loopback redirect URI is still fine; a plain-http
+  loopback authorization server, as in local testing, is not.
 
 ## Completing after a relaunch
 
@@ -123,7 +131,8 @@ pre-authorized code, at the token endpoint uses
 `AuthenticateAttestedClient` and `VerifyTokenRequestBinding` for the
 client and its DPoP proof, then `IssueRefreshToken` so the wallet can
 refresh, bound to the same instance key. See "Serving a grant this
-package doesn't" in [GETTING_STARTED](../../GETTING_STARTED.md).
+package doesn't" in
+[GETTING_STARTED §6](../../GETTING_STARTED.md#6-the-rest-of-the-http-surface).
 
 ## Further reading
 

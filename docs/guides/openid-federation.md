@@ -56,8 +56,8 @@ Outbound fetches go through `Dependencies.FederationHTTP`, which `New`
 requires once trust anchors are set. Statically registered clients
 always take priority. What a client may do
 beyond the authorization code flow is your grant, never its own metadata's:
-`AllowedScopes`, `AllowsClientCredentialsGrant`, `AllowsCIBA` and
-`AllowedClientAuthMethods`. A resolved registration is cached for at most
+`AllowedScopes`, `AuthorizationDetailsTypes`, `AllowsClientCredentialsGrant`,
+`AllowsCIBA` and `AllowedClientAuthMethods`. A resolved registration is cached for at most
 `MaxCacheAge`, so a superior that stops vouching for a client takes
 effect within that time. A failed one is remembered for `FailureCacheAge`
 (10 seconds by default), so requests repeating a client_id that doesn't
@@ -116,6 +116,15 @@ func fetch(w http.ResponseWriter, r *http.Request) {
 You keep the list of subordinates: the package signs statements, but
 doesn't store who your subordinates are.
 
+A Trust Anchor can also serve a resolve endpoint (§8.3), answering with
+the resolved metadata of an entity on its callers' behalf:
+`federation.ResolveRequestFromHTTP` reads the request, a `Resolver`
+resolves the subject, and `ResolveIssuer.Response` signs the answer. To
+use someone's resolve endpoint, call `Resolver.ResolveViaEndpoint` with
+`ExpectedIssuer` naming the resolver you trust, typically the Trust
+Anchor (§17.3): a response issued by anyone else is refused before any
+fetch.
+
 ## What's checked for you
 
 `federation.Resolver` validates every statement's signature and expiry at
@@ -133,6 +142,11 @@ each hop, and applies:
 - **Strict JSON**: entity metadata and keys are decoded case-sensitively,
   so a member that differs only in case (`REDIRECT_URIS`) can't slip past
   a policy written for the real one.
+- **Trust Marks**, when you ask: `Resolver.VerifyTrustMark` checks a
+  mark's signature against its issuer's own resolved Trust Chain, and with
+  `federation.RequireFederationAccreditation` also requires the Trust
+  Anchor to list the issuer in its `trust_mark_issuers`. A
+  federation-member signature alone isn't accreditation.
 
 ## See it running
 

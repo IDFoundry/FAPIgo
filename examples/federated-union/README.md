@@ -123,8 +123,11 @@ Then the console's scenes:
 | **Suspend Eastmark** | The Union stops vouching for Eastmark's authority | Cross-border sign-ins with EastID fail; Eastmark Telecom, which also trusts Eastmark's authority directly, keeps working |
 | **Eastmark's authority is compromised** | Eastmark's authority vouches for an impostor claiming a Northland host | The Union's naming constraints confine Eastmark to `*.eastmark.localhost`: the impostor resolves through Eastmark alone, but not through the Union. That protects only parties relying on the Union: EastID, which trusts Eastmark's authority directly, would still accept the impostor |
 
-Identity providers cache a service's registration for 10 seconds, so a
-scene can take that long to affect a sign-in already in progress.
+Identity providers cache a service's registration for 10 seconds, and
+remember a registration that failed for 10 seconds too (FAPIgo's
+default, so repeated requests can't each trigger a fresh resolution),
+so a scene can take that long to affect a sign-in, or to stop
+affecting one once it's turned off.
 Everything else here resolves Trust Chains afresh, which is why
 suspension is near-instant. In a real federation, a Subordinate
 Statement stays valid until it expires (24 hours in this demo), so a

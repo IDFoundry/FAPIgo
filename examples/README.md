@@ -20,9 +20,9 @@ break what it shows.
 | Capability | Spec | federated-union | decoupled-checkout | payment-consent | payroll-run | identity-check | linked-accounts |
 |---|---|:-:|:-:|:-:|:-:|:-:|:-:|
 | Pushed authorization requests and the authorization code flow | [RFC 9126](https://www.rfc-editor.org/rfc/rfc9126) | ● | | ● | | ● | ● |
-| Signed request objects and JARM (FAPI 2.0 Message Signing) | [FAPI 2.0 Message Signing](https://openid.net/specs/fapi-2_0-message-signing.html) | | | ● | | | |
+| Signed request objects and JARM (FAPI 2.0 Message Signing) | [FAPI 2.0 Message Signing](https://openid.net/specs/fapi-message-signing-2_0-final.html) | | | ● | | | |
 | DPoP-bound access tokens | [RFC 9449](https://www.rfc-editor.org/rfc/rfc9449) | ● | ● | ● | | ● | ● |
-| `private_key_jwt` client authentication | [OIDC Core §9](https://openid.net/specs/openid-connect-core-1_0.html#ClientAuthentication) | | ● | ● | | ● | ● |
+| `private_key_jwt` client authentication | [OIDC Core §9](https://openid.net/specs/openid-connect-core-1_0.html#ClientAuthentication) | ● | ● | ● | | ● | ● |
 | mTLS client authentication and certificate-bound tokens | [RFC 8705](https://www.rfc-editor.org/rfc/rfc8705) | | | | ● | | |
 | Client certificate revocation (CRLs, intermediate CAs) | [RFC 5280](https://www.rfc-editor.org/rfc/rfc5280) | | | | ● | | |
 | Rich Authorization Requests | [RFC 9396](https://www.rfc-editor.org/rfc/rfc9396) | | ● | ● | ● | | ● |

@@ -36,15 +36,20 @@ case client.BackchannelAuthenticationExpired:
 }
 ```
 
-`BeginBackchannelAuthentication` signs the request, authenticates as
-the client and sends it. `PollBackchannelAuthentication` makes exactly
-one attempt, so you poll on your own schedule (a job queue, a ticker)
-rather than blocking a goroutine while a person decides. The session
-survives restarts: `MarshalText` and `UnmarshalText` store it.
+Set `Config.Endpoints.BackchannelAuthentication` to the server's
+backchannel authentication endpoint. `BeginBackchannelAuthentication`
+signs the request, authenticates as the client and sends it, after
+checking locally that exactly one hint is set. `PollBackchannelAuthentication`
+makes exactly one attempt, so you poll on your own schedule (a job
+queue, a ticker) rather than blocking a goroutine while a person
+decides. The session survives restarts: store it with `MarshalText`,
+and restore it with `UnmarshalText` or
+`client.ParseBackchannelAuthenticationSession`, on any instance.
 
 For ping delivery, set `Config.BackchannelTokenDeliveryMode` to
-`storage.BackchannelTokenDeliveryModePing`. The server then calls your
-notification endpoint once the user decides:
+`storage.BackchannelTokenDeliveryModePing`, and register your
+notification endpoint with the server (below). The server then calls it
+once the user decides:
 
 ```go
 func notify(w http.ResponseWriter, r *http.Request) {
@@ -68,6 +73,20 @@ func notify(w http.ResponseWriter, r *http.Request) {
 requires that before a ping is trusted.
 
 ## Authorization server: three calls around your user's decision
+
+Setting `Config.Endpoints.BackchannelAuthentication` turns CIBA on, and
+`server.New` then requires `Dependencies.Backchannel` and
+`Dependencies.BackchannelNotifier` (below). A client may use CIBA only
+if its registration says so:
+
+- `storage.RegisteredClientConfig.BackchannelAuthenticationRequestAlgorithm`,
+  the algorithm its signed requests use, is the opt-in. Left zero, the
+  client is refused with `unauthorized_client`.
+- `BackchannelTokenDeliveryMode` is poll (the default) or ping; a ping
+  client also needs `BackchannelClientNotificationEndpoint`, which a poll
+  client must leave unset.
+- An automatically registered OpenID Federation client may use CIBA only
+  with `AutomaticRegistration.AllowsCIBA`.
 
 ```go
 func backchannelAuthentication(w http.ResponseWriter, r *http.Request) {
@@ -99,9 +118,12 @@ func backchannelAuthentication(w http.ResponseWriter, r *http.Request) {
    binding message and any Rich Authorization Request details.
    `LookupBackchannelInteraction` reads it back by handle later.
 2. **`CompleteBackchannelAuthentication`** records the user's decision
-   (`server.Authorize(...)` or a denial) against the handle, once, and
-   refuses one made after the request expired (`expired_token`). For a
-   ping client it then calls `Dependencies.BackchannelNotifier`.
+   (`server.Authorize(...)`, `server.Deny(...)`, or
+   `server.AuthenticationFailed(...)`, which the client sees as
+   `access_denied`) against the handle, once, and refuses one made after
+   the request expired (`expired_token`). `server.InteractionNeeded`
+   answers a redirect's `prompt=none` only; CIBA refuses it. For a ping
+   client it then calls `Dependencies.BackchannelNotifier`.
 3. **`ExchangeBackchannelAuthentication`** serves the token endpoint's
    CIBA grant (`TokenEndpointRequest.BackchannelTokenExchange()`):
    `authorization_pending` until a decision, `slow_down` for a poll
@@ -121,7 +143,9 @@ whatever the client registered, so under `AssuranceProduction` a
 notifier of your own must implement `server.BackchannelNotifierAssurance`
 and declare `OutboundHardened` — a promise to send as `backchannelhttp`
 does (refusing non-public addresses, following no redirects, with
-timeouts and a bounded response read) — or `server.New` refuses it. `Dependencies.BackchannelHints`
+timeouts and a bounded response read) — or `server.New` refuses it.
+`backchannelhttp.New` declares it only when its `Config.Transport` grants
+no loopback exception (`AllowsLoopback`). `Dependencies.BackchannelHints`
 can refuse a hint naming nobody (`unknown_user_id`) before the request is
 stored. A hint only says whose device to ask: the user's approval there
 is what authenticates them. The binding message is free text the client

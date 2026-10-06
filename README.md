@@ -44,10 +44,10 @@ variants and OAuth 2.0 attestation-based client authentication.
 - private_key_jwt client authentication
 - OAuth 2.0 Attestation-Based Client Authentication, including HAIP 1.0 x5c attester certificate chains, optionally binding each trust anchor to the attesters it may vouch for
 - JAR / JARM · RAR (RFC 9396) · CIBA (poll & ping delivery)
-- Refresh tokens (not rotated, per FAPI 2.0), whole-grant revocation, and token revocation (RFC 7009)
+- Refresh tokens (not rotated, per FAPI 2.0), whole-grant revocation, and refresh-token revocation (RFC 7009)
 - OpenID Connect: the `claims` parameter with per-claim consent, `acr_values`, enforced `max_age` and `prompt` (`none` answered without UI, `login` enforced), signed and encrypted ID tokens and UserInfo
 - Native apps (RFC 8252): private-use URI scheme and any-port loopback redirect URIs, for clients registered as native
-- Grants you serve yourself at the token endpoint (OpenID4VCI's `pre-authorized_code`, say), with the server's own client authentication and DPoP/mTLS checks
+- Grants you serve yourself at the token endpoint (OpenID4VCI's `pre-authorized_code`, say), with the server's own attestation-based client authentication and DPoP/mTLS checks
 - OpenID Federation 1.0 (trust chains, automatic client registration, trust marks)
 - OpenID Certified™ for OP, RP and FAPI-CIBA OP conformance profiles — see below
 
@@ -162,9 +162,10 @@ whole grant from the bank's Connected apps page, with a demo clock and
 an attack lab.
 
 `storage/memstore` and `keys/ephemeral` provide in-memory, non-durable
-implementations of every interface `server` needs (client repository,
-transaction/grant/replay/access-token stores, key manager, client key
-source) — for local development and testing only, never production —
+implementations of every interface `server` needs (client repository;
+transaction, grant, replay, revocation, access-token, CIBA and DPoP-nonce
+stores; key manager; client key source), and `client`'s session store —
+for local development and testing only, never production —
 so integrating `server` doesn't require writing real persistence and
 key management from scratch just to see it run. `server.RecommendedLimits()`
 and `server.RecommendedAlgorithms()` do the same for `Config`'s algorithm
@@ -256,10 +257,11 @@ role is tested against the OpenID Foundation conformance suite.
 > the same `DiscoveredMetadata` `client.Discover` produces, sourced from
 > a Trust-Chain-verified `openid_provider` object instead of a live
 > `.well-known/openid-configuration` fetch), acting as
-> a Trust Anchor or Intermediate (`SubordinateIssuer`, §3.2), and Trust
-> Marks end to end — verification (§7), issuance (`TrustMarkIssuer`),
-> and live status queries (§8, `Resolver.CheckTrustMarkStatus`) — plus
-> Trust Marked Entities Listing request validation (§9), the Resolve
+> a Trust Anchor or Intermediate (`SubordinateIssuer`, signing the
+> Subordinate Statements §8.1's fetch endpoint serves), and Trust Marks
+> end to end — verification (§7), issuance (`TrustMarkIssuer`), and live
+> status queries (§8.4, `Resolver.CheckTrustMarkStatus`) — plus Trust
+> Marked Entities Listing request validation (§8.5), the Resolve
 > endpoint (§8.3, `Resolver.ResolveViaEndpoint`/`ResolveIssuer`) — both
 > sides: querying a trusted resolver's resolve-as-a-service endpoint instead of
 > walking its Trust Chain hop by hop, and signing a response for an
@@ -288,7 +290,7 @@ role is tested against the OpenID Foundation conformance suite.
 - [RFC 8252 — OAuth 2.0 for Native Apps][native]
 
 [fapi2]: https://openid.net/specs/fapi-security-profile-2_0-final.html
-[fapi2-sign]: https://openid.net/specs/fapi-2_0-message-signing.html
+[fapi2-sign]: https://openid.net/specs/fapi-message-signing-2_0-final.html
 [par]: https://www.rfc-editor.org/info/rfc9126
 [native]: https://www.rfc-editor.org/info/rfc8252
 [dpop]: https://www.rfc-editor.org/info/rfc9449

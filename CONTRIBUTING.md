@@ -30,6 +30,9 @@ the fact.
   [conformance/README.md](conformance/README.md) and
   [GETTING_STARTED.md](GETTING_STARTED.md). "It passes the Go test
   suite" isn't the same claim as "it's still FAPI 2.0 conformant."
+  CI runs the full suite (`.github/workflows/conformance.yml`) daily on
+  `main`, and a maintainer can run it against a PR's branch
+  (`gh workflow run conformance.yml --ref <branch>`).
 
 ## Commit messages
 
@@ -57,6 +60,17 @@ decision, not something a commit message alone should trigger.
   a `govulncheck` finding is almost always a standard-library CVE fixed
   in a newer Go patch release, not something to fix in this repo's own
   code — bump the toolchain instead.
+- CI runs the tests under the minimum Go version in `go.mod` and again
+  under the latest stable release, and the standard library can behave
+  differently between them. If your local toolchain is newer than
+  `go.mod`'s, also run the tests under the minimum:
+  `GOTOOLCHAIN=go<version from go.mod> go test ./...`.
+- Each demo under `examples/` (and `examples/internal/demokit`) is its
+  own Go module, so the commands above, run at the repository root,
+  don't cover them. The demos build against this checkout (a `replace`
+  to the root module), so a change to the library can break one. CI
+  vets, tests (`-race`) and lints every one; run `go vet ./...` and
+  `go test -race ./...` in each demo your change could affect.
 - A breaking change (`feat!:`/`fix!:`) adds its own section to
   [UPGRADING.md](UPGRADING.md), under the version it will ship in:
   who's affected, why, and what to change.

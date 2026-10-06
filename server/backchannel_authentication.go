@@ -35,7 +35,7 @@ var coreBackchannelAuthenticationParameters = map[string]struct{}{
 	// BeginBackchannelAuthentication's own use of parseRequestedClaimNames.
 	"claims": {},
 
-	// authorization_details (RFC 9396 §5) mirrors coreAuthorizationParameters'
+	// authorization_details (RFC 9396 §2) mirrors coreAuthorizationParameters'
 	// handling of the same parameter for PAR — see checkBackchannelExtensions'
 	// own use of parseRequestedAuthorizationDetails.
 	"authorization_details": {},

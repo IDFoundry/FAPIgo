@@ -14,7 +14,8 @@ import (
 // OIDC discovery at all) and, when present, presents tokens' access
 // token to it via cl.ProtectedResource(tokens).Do — which picks a DPoP
 // proof plus RFC 9449 §9 nonce-challenge retry, or a plain Bearer
-// credential under mTLS sender-constraining (RFC 8705 §3.4), entirely
+// credential under mTLS sender-constraining (RFC 8705 §3, over the
+// same mutually authenticated TLS connection), entirely
 // on its own from cl's own Config.SenderConstrain, the same binding
 // this module's token exchange already used.
 func callAccountsEndpoint(ctx context.Context, cl *client.Client, rawHTTP *http.Client, apiBase, moduleID string, tokens client.TokenSet) error {

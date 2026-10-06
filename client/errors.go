@@ -20,6 +20,14 @@ const (
 	// ErrorAuthorizationDenied is not returned by this package: a user or
 	// server declining a request is a result, not an error
 	// (CallbackDenied, CompletionDenied, BackchannelAuthenticationDenied).
+	//
+	// Deprecated: no function in this package returns this code, so
+	// checking for it never matches. Check the result instead: a
+	// CompletionDenied from CompleteAuthorization, a CallbackDenied from
+	// HandleAuthorizationResponse, or a BackchannelAuthenticationDenied
+	// from PollBackchannelAuthentication, each carrying the server's
+	// error Code (such as "access_denied") and Description. This
+	// constant will be removed in the next breaking release.
 	ErrorAuthorizationDenied ErrorCode = "authorization_denied"
 
 	// ErrorInternal indicates a failure on this client's own side: a key,

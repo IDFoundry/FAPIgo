@@ -45,8 +45,9 @@ func (u UserInfo) AsMap() map[string]any {
 	return out
 }
 
-// FetchUserInfo calls Config.Endpoints.UserInfo with tokens' DPoP-bound
-// access token (via ProtectedResource) and returns the validated
+// FetchUserInfo calls Config.Endpoints.UserInfo with tokens'
+// sender-constrained access token (via ProtectedResource, so DPoP- or
+// mTLS-bound as Config.SenderConstrain says) and returns the validated
 // claims. The response may be plain JSON, a signed-only JWT, or a
 // signed-then-encrypted nested JWT (OIDC Core §5.3.2) — dispatched on
 // the response's own Content-Type header, never guessed from its

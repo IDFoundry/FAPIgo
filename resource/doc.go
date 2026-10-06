@@ -14,10 +14,11 @@
 // validation, ath, method/URI binding, replay detection, and cnf
 // binding (a DPoP key's jkt, or an mTLS certificate's x5t#S256).
 //
-// AuthorizationContext.Claims uses fapi.Secret for any raw token value it
-// carries, and Verify returns a typed Error tagged with what's safe to
-// expose in a response, matching the pattern used by client and server —
-// see ARCHITECTURE.md, "Design rules".
+// AuthorizationContext carries no raw token value — only what the
+// verified token says, and its revocation key — so it can't leak a
+// usable token into a log line, and Verify returns a typed Error tagged
+// with what's safe to expose in a response, matching the pattern used by
+// client and server — see ARCHITECTURE.md, "Design rules".
 //
 // Config.Assurance is required, as server.Config.Assurance is:
 // AssuranceDevelopment accepts in-memory stores and key sources, and

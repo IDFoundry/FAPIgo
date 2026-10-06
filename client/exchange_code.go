@@ -32,7 +32,8 @@ type TokenSet struct {
 	AccessToken fapi.Secret
 
 	// TokenType is "DPoP" under SenderConstrainDPoP (the default) or
-	// "Bearer" under SenderConstrainMTLS (RFC 8705 §3.4) — see
+	// "Bearer" under SenderConstrainMTLS (RFC 8705 §3 uses RFC 6750's
+	// Bearer scheme for an mTLS-bound token) — see
 	// tokenTypeFor's own doc comment. Always this canonical casing,
 	// regardless of the casing the server responded with (RFC 6749
 	// §7.1: token_type is case insensitive).
@@ -41,7 +42,7 @@ type TokenSet struct {
 
 	// AuthorizationDetails is the resource owner's granted Rich
 	// Authorization Requests (RFC 9396) detail array, echoed back on the
-	// token response (RFC 9396 §5) — nil if the authorization carried no
+	// token response (RFC 9396 §7) — nil if the authorization carried no
 	// authorization_details, or the server granted none of it. Parse it
 	// with your own extension.RARRegistry.Parse (the same one the
 	// authorization request was built against) and read a specific type
@@ -180,12 +181,16 @@ func (c IDTokenClaims) AsMap() map[string]any {
 }
 
 // ExchangeCode authenticates to the token endpoint, presents a DPoP
-// proof bound to this request, and redeems resp's authorization code for
-// an access token — validating any returned ID token before trusting its
-// subject claim. When the authorization request carried max_age
-// (BeginAuthorizationRequest.HasMaxAge), the ID token must carry
-// auth_time, no older than max_age allows (Limits.MaxClockSkew aside):
-// otherwise it fails with ErrorInvalidResponse.
+// proof bound to this request (under SenderConstrainDPoP; under
+// SenderConstrainMTLS the TLS client certificate binds the token
+// instead), and redeems resp's authorization code for an access token —
+// validating any returned ID token before trusting its subject claim.
+// When the authorization request asked for "openid", a token response
+// without an ID token fails with ErrorInvalidResponse (OIDC Core
+// §3.1.3.3). When it carried max_age (BeginAuthorizationRequest.HasMaxAge),
+// the ID token must carry auth_time, no older than max_age allows
+// (Limits.MaxClockSkew aside): otherwise it fails with
+// ErrorInvalidResponse.
 func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationResponse) (TokenSet, error) {
 	assertionSigner, assertionKID, dpopSigner, err := c.resolveClientAuthAndDPoPSigners(ctx)
 	if err != nil {
@@ -400,7 +405,8 @@ func (c *Client) populateIDToken(ctx context.Context, result *TokenSet, raw rawT
 // tokenTypeFor returns the token_type value (RFC 6749 §7.1) this
 // client expects a token response to declare — "DPoP" under
 // SenderConstrainDPoP, or "Bearer" under SenderConstrainMTLS (RFC 8705
-// §3.4), mirroring server.tokenTypeFor's identical contract on the
+// §3 uses RFC 6750's Bearer scheme), mirroring server.tokenTypeFor's
+// identical contract on the
 // issuing side.
 func tokenTypeFor(senderConstrain storage.SenderConstrain) string {
 	if senderConstrain == storage.SenderConstrainMTLS {

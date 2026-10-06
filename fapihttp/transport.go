@@ -9,8 +9,10 @@ import (
 	"time"
 )
 
-// TransportConfig bounds the hardened transport NewClient builds. None
-// of these have an implicit default — NewClient rejects a zero value.
+// TransportConfig bounds the hardened transport NewClient builds. Its
+// timeouts have no implicit default — NewClient rejects a zero
+// DialTimeout or TLSHandshakeTimeout; the host exceptions are all off at
+// their zero value.
 type TransportConfig struct {
 	// DialTimeout bounds how long a single TCP connection attempt may
 	// take.

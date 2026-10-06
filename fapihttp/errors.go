@@ -8,10 +8,16 @@ var (
 	// not except its host.
 	ErrInsecureURL = errors.New("fapihttp: url must use https")
 
-	// ErrSSRFBlocked indicates every address a fetch target's host
-	// resolved to was loopback, private, link-local, unspecified or
-	// multicast, and the loopback fields (AllowLoopbackHosts,
-	// AllowLoopbackHTTP, AllowedLoopbackHosts) did not except its host.
+	// ErrSSRFBlocked indicates a fetch target's host resolved to an
+	// address that isn't allowed — loopback, private, link-local,
+	// unspecified, multicast, another reserved range (carrier-grade NAT,
+	// documentation and benchmarking space, local-use NAT64), or an IPv6
+	// transition address carrying one of those — and neither the loopback
+	// fields
+	// (AllowLoopbackHosts, AllowLoopbackHTTP, AllowedLoopbackHosts) nor
+	// AllowedPrivateHosts excepted it. Fetch and Post refuse a host with
+	// any such address before connecting; NewClient's transport skips
+	// such addresses when dialing, and fails only when none is left.
 	ErrSSRFBlocked = errors.New("fapihttp: target address is not allowed")
 
 	// ErrTooManyRedirects indicates a fetch followed Config.MaxRedirects

@@ -217,8 +217,10 @@ func (e Endpoints) isZero() bool {
 
 // MTLSEndpoints are the mTLS-requiring alternate URLs (RFC 8705 §5's
 // "mtls_endpoint_aliases") a server may advertise for whichever of its
-// own endpoints need one — only relevant to a
-// Config.SenderConstrain == SenderConstrainMTLS client;
+// own endpoints need one — only relevant to a client that does mutual
+// TLS: one with Config.SenderConstrain == SenderConstrainMTLS
+// (ApplyForSenderConstrain), or one authenticating with its
+// certificate (ApplyForClientAuth).
 // DiscoveredMetadata.MTLSEndpointAliases surfaces this from discovery.
 type MTLSEndpoints struct {
 	Token                      fapi.URL
@@ -252,8 +254,9 @@ func (m *MTLSEndpoints) ApplyForSenderConstrain(endpoints *Endpoints) bool {
 
 // ApplyForClientAuth is ApplyForSenderConstrain's counterpart for a
 // client that authenticates with its certificate (Config.ClientAuthMethod
-// == ClientAuthMethodSelfSignedTLSClientAuth or ClientAuthMethodTLSClientAuth,
-// RFC 8705 §2). Such a client does mutual TLS at every request that
+// is storage.ClientAuthMethodSelfSignedTLSClientAuth,
+// ClientAuthMethodTLSClientAuth or one of its SAN variants, RFC 8705
+// §2). Such a client does mutual TLS at every request that
 // authenticates it, so ApplyForClientAuth overrides Token,
 // PushedAuthorizationRequest, BackchannelAuthentication (where CIBA Core
 // §7.1 requires the client to authenticate) and Revocation, wherever m
@@ -293,11 +296,15 @@ func (m *MTLSEndpoints) apply(endpoints *Endpoints, par bool) bool {
 }
 
 // Limits bounds the lifetimes and clock tolerances this client enforces
-// or sets. None of these have an implicit default — New rejects a zero
-// (or, for MaxClockSkew, negative) value.
+// or sets. None of these have an implicit default: New rejects a zero
+// (or, for MaxClockSkew, negative) value for each limit the Config
+// uses — every one without a "Required only when" in its own doc, and
+// each of the others when its condition holds.
 type Limits struct {
 	// ClientAssertionLifetime is how long a client assertion this client
 	// signs remains valid for (exp = Now + ClientAssertionLifetime).
+	// Required only when ClientAuthMethod is
+	// storage.ClientAuthMethodPrivateKeyJWT.
 	ClientAssertionLifetime time.Duration
 
 	// RequestObjectLifetime is how long a signed request object this
@@ -334,12 +341,13 @@ type Limits struct {
 	// means no tolerance.
 	MaxClockSkew time.Duration
 
-	// HTTPTimeout bounds how long a single PAR or token-endpoint call may
-	// take.
+	// HTTPTimeout bounds how long a single call this client makes may
+	// take: a PAR, token, CIBA or revocation request, or a
+	// ResourceClient.Do (FetchUserInfo's included).
 	HTTPTimeout time.Duration
 
-	// MaxHTTPResponseBytes bounds how much of a PAR or token-endpoint
-	// response body this client reads before failing.
+	// MaxHTTPResponseBytes bounds how much of a response body this
+	// client reads before failing, for the same calls as HTTPTimeout.
 	MaxHTTPResponseBytes int64
 
 	// MaxJOSECompactBytes bounds how large a JOSE compact serialization
@@ -398,6 +406,8 @@ type Config struct {
 	// from.
 	Issuer fapi.URL
 
+	// ClientID is this client's identifier at the authorization server:
+	// the client_id it sends, and the audience its ID tokens must name.
 	ClientID fapi.ClientID
 
 	// RedirectURI is this client's registered redirect URI, sent on every
@@ -416,7 +426,10 @@ type Config struct {
 	Profile    Profile
 	Algorithms Algorithms
 	Limits     Limits
-	Assurance  AssuranceLevel
+
+	// Assurance selects how strictly New checks Dependencies and this
+	// Config — see AssuranceLevel. Required: New refuses the zero value.
+	Assurance AssuranceLevel
 
 	// AuthorizationResponseIssPolicy has no default — see its own type
 	// doc comment for why.
@@ -469,13 +482,18 @@ type Config struct {
 	// the authorization server — storage.ClientAuthMethodPrivateKeyJWT
 	// (the default, zero value) signs and sends a client_assertion on
 	// every client-authenticated call, exactly as this package has
-	// always done. Every other value (storage.ClientAuthMethodSelfSignedTLSClientAuth,
+	// always done. The certificate-based values
+	// (storage.ClientAuthMethodSelfSignedTLSClientAuth,
 	// storage.ClientAuthMethodTLSClientAuth, and the four
 	// storage.ClientAuthMethodTLSClientAuthSAN* variants — RFC 8705 §2)
 	// instead send a plain client_id form parameter and no assertion at
 	// all — the TLS client certificate Dependencies.HTTP's own transport
 	// presents on the connection (see SenderConstrain's own doc comment
-	// for how that certificate gets there) is the credential. Reuses
+	// for how that certificate gets there) is the credential.
+	// storage.ClientAuthMethodAttestation sends the Client Attestation
+	// from Dependencies.Attestation and a fresh Client Attestation PoP
+	// signed with Dependencies.Keys
+	// (draft-ietf-oauth-attestation-based-client-auth). Reuses
 	// storage's enum type directly rather than duplicating it, the same
 	// precedent SenderConstrain itself establishes.
 	ClientAuthMethod storage.ClientAuthMethod
@@ -523,8 +541,9 @@ type Config struct {
 	//     FetchUserInfo's signed responses (Algorithms.UserInfo).
 	//     Otherwise leave it nil.
 	//
-	// False (the default) keeps ID token handling driven purely by what
-	// the authorization server grants, as before.
+	// False (the default) handles an ID token whenever the token
+	// response carries one, and requires one for a request that asked
+	// for "openid" (see the package doc).
 	OAuthOnly bool
 }
 

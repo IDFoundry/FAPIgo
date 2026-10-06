@@ -8,12 +8,15 @@ import (
 	"github.com/idfoundry/fapigo/storage"
 )
 
-// Dependencies are this client's injected collaborators. New rejects a
-// nil value for any field — there is no implicit fallback (no default
-// clock, no silently-installed in-memory session store).
+// Dependencies are this client's injected collaborators. New always
+// requires HTTP, Clock and Random, and each other field when the Config
+// uses what it's for (see each field) — there is no implicit fallback
+// (no default clock, no silently-installed in-memory session store).
 type Dependencies struct {
 	// Sessions persists in-progress authorization-flow state, until
-	// Limits.SessionLifetime. Under AssuranceProduction it must declare
+	// Limits.SessionLifetime. Required when Endpoints.Authorization is
+	// set; a client that only uses CIBA or client credentials may leave
+	// it nil. Under AssuranceProduction it must declare
 	// Durable and AtomicConsume (storage.StoreAssurance). A native app's
 	// own on-device store: see "Native apps" in the package doc, and
 	// Config.CallbackBinding.
@@ -70,8 +73,10 @@ type Dependencies struct {
 	Random io.Reader
 
 	// Decryption recovers the content-encryption key of an encrypted ID
-	// token, using the keys.IDTokenDecryption purpose. Required exactly
-	// when Config.Algorithms.IDTokenKeyManagement is set; nil otherwise
+	// token (the keys.IDTokenDecryption purpose) or UserInfo response
+	// (keys.UserInfoDecryption). Required exactly when
+	// Config.Algorithms.IDTokenKeyManagement or
+	// Config.Algorithms.UserInfoKeyManagement is set; nil otherwise
 	// — most deployments never register for encrypted ID tokens, so
 	// this stays an opt-in dependency rather than a mandatory one every
 	// embedder has to wire up.

@@ -23,7 +23,9 @@ import (
 // that can receive ID tokens (the browser flow or CIBA, without
 // Config.OAuthOnly), so such a caller must set this one field
 // themselves; a client_credentials-only or OAuthOnly client can leave
-// it zero.
+// it zero. BackchannelAuthenticationRequestLifetime is left at zero
+// too: a CIBA client (Endpoints.BackchannelAuthentication set) must set
+// it, and every other client can leave it zero.
 func RecommendedLimits() Limits {
 	return Limits{
 		// Not spec-mandated — mirrors server.RecommendedLimits'
@@ -59,7 +61,7 @@ func RecommendedLimits() Limits {
 		MaxClockSkew: 10 * time.Second,
 
 		// Not spec-mandated — an ordinary HTTP client timeout for a
-		// single PAR or token-endpoint call.
+		// single call (see Limits.HTTPTimeout).
 		HTTPTimeout: 10 * time.Second,
 
 		// Not spec-mandated — PAR and token-endpoint responses are
@@ -83,11 +85,15 @@ func RecommendedLimits() Limits {
 // this client's own signing (ClientAuthentication, DPoP) — the same
 // mature, widely-interoperable choice server.RecommendedAlgorithms
 // makes for its own signing. Every other field is left zero
-// deliberately: IDToken, RequestObject, JARM and UserInfo are
-// algorithms this client only ever verifies, never produces, so which
-// one to expect is a property of the specific authorization server
-// it's configured against — discovered via Discover, not something
-// this module can recommend independent of who it's talking to. The
+// deliberately. IDToken, JARM and UserInfo are algorithms this client
+// only ever verifies, never produces, so which one to expect is a
+// property of the specific authorization server it's configured
+// against — discovered via Discover, not something this module can
+// recommend independent of who it's talking to. RequestObject,
+// BackchannelAuthenticationRequest and ClientAttestationPoP are ones
+// this client signs with, but only for a request object, CIBA or
+// attestation-based client authentication, so a client using one sets
+// it (to an algorithm the server accepts and its key supports). The
 // *KeyManagement/*ContentEncryption fields are left zero for the same
 // reason encrypted ID token/UserInfo support is opt-in everywhere else
 // in this module: most deployments never register for it.

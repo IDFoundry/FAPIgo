@@ -29,7 +29,7 @@ type ClientCredentialsTokenRequest struct {
 	// AuthorizationDetails carries Rich Authorization Requests (RFC 9396)
 	// detail objects for this request — see BeginAuthorizationRequest's
 	// field of the same name for how to build one. Always sent as native
-	// JSON array text (RFC 9396 §5), the same as a plain-parameter
+	// JSON array text (RFC 9396 §2), the same as a plain-parameter
 	// authorization request: this grant has no signed-request-object
 	// concept for Config.Profile to matter to.
 	AuthorizationDetails []json.RawMessage
@@ -54,7 +54,7 @@ type ClientCredentialsTokenResult struct {
 	HasExpiresIn bool
 
 	// AuthorizationDetails is the server's granted Rich Authorization
-	// Requests detail array (RFC 9396 §5), nil if the request carried
+	// Requests detail array (RFC 9396 §7), nil if the request carried
 	// none or the server granted none of it.
 	AuthorizationDetails json.RawMessage
 }

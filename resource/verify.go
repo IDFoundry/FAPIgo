@@ -19,15 +19,21 @@ import (
 
 // VerifyRequest describes one incoming request to verify: the HTTP
 // method and target URL it was made against, its raw Authorization
-// header value, and either its raw DPoP header value or the TLS client
+// header value, and either its DPoP header values or the TLS client
 // certificate presented on the connection it arrived on — whichever
 // the resolved access token turns out to actually need (see Verify's
 // own doc comment). Every access token this package accepts is
 // sender-constrained one way or the other; a bearer token presented
 // with neither a DPoP proof nor a client certificate is rejected.
 type VerifyRequest struct {
+	// Method is the request's HTTP method, which a DPoP proof's htm must
+	// name.
 	Method string
-	URL    *url.URL
+
+	// URL is this endpoint's own externally visible URL, which a DPoP
+	// proof's htu must name — never one built from the request's Host
+	// header (see VerifyRequestFromHTTP's target).
+	URL *url.URL
 
 	// Authorization is the request's one Authorization header. A request
 	// with more than one is malformed (RFC 9110 §5.3: the field isn't a
@@ -40,17 +46,17 @@ type VerifyRequest struct {
 	// receipt order — pass net/http's own Header.Values("DPoP")
 	// directly, not Header.Get, which silently collapses multiple
 	// values down to the first instead of letting Verify reject the
-	// request as RFC 9449 §7.1 requires. Empty means no DPoP header was
+	// request as RFC 9449 §4.3 requires. Empty means no DPoP header was
 	// present at all. Only relevant when Authorization uses the "DPoP"
 	// scheme.
 	DPoPProofs []string
 
 	// PeerCertificate is the TLS client certificate presented on the
 	// connection this request arrived on, if any. Only relevant when
-	// Authorization uses the "Bearer" scheme (RFC 8705 §3.4 — an
-	// mTLS-bound access token is presented as an ordinary Bearer token;
-	// there is no additional signed proof artifact the way DPoP has
-	// one). An HTTP adapter reads this straight from the connection's
+	// Authorization uses the "Bearer" scheme (RFC 8705 §3: an mTLS-bound
+	// access token is presented "as described in [RFC6750]", an ordinary
+	// Bearer token; there is no additional signed proof artifact the way
+	// DPoP has one). An HTTP adapter reads this straight from the connection's
 	// own TLS state; this package never terminates TLS itself.
 	//
 	// Behind a proxy that terminates TLS, set it from however the proxy
@@ -112,8 +118,8 @@ type AuthorizationContext struct {
 // context, so there is no bare VerifyJWT or VerifyDPoP entry point; see
 // ARCHITECTURE.md, "Resource server verifies in HTTP context, not in
 // isolation". Which credential is expected is driven by the
-// Authorization scheme on the wire ("DPoP" or "Bearer" — RFC 8705
-// §3.4's own convention for mTLS-bound tokens), then cross-checked
+// Authorization scheme on the wire ("DPoP" or "Bearer" — RFC 8705 §3
+// presents an mTLS-bound token as RFC 6750 does), then cross-checked
 // against the resolved access token's own SenderConstrain once
 // resolved, so a token bound one way can never be redeemed by
 // presenting the other credential. On success it returns the
@@ -242,7 +248,8 @@ func (v *Verifier) resolveAccessToken(ctx context.Context, raw string, now time.
 		// this method's) — propagate it unchanged. A bare error (a
 		// third-party AccessTokenResolver that didn't follow that
 		// convention) falls back to the same invalid_token/401 every
-		// other rejection here defaults to, except a cancelled or
+		// other rejection here defaults to, except a store that couldn't
+		// answer (storage.ErrStoreUnavailable) or a cancelled or
 		// timed-out context, which is a 500 (see lookupError).
 		if rerr, ok := err.(*Error); ok {
 			return ResolvedAccessToken{}, rerr
@@ -303,7 +310,7 @@ func (v *Verifier) checkNotRevoked(ctx context.Context, resolved ResolvedAccessT
 
 // resolveCredential verifies whichever sender-constraining credential
 // scheme (the Authorization header's own DPoP/Bearer distinction —
-// RFC 8705 §3.4's convention for mTLS-bound tokens) demands, and
+// RFC 8705 §3 presents an mTLS-bound token as RFC 6750 does) demands, and
 // reports back which SenderConstrain the caller must now cross-check
 // the resolved access token against. Split out of Verify purely to keep
 // that method's own token-resolution/binding/revocation pipeline
@@ -332,7 +339,7 @@ func (v *Verifier) resolveCredential(ctx context.Context, req VerifyRequest, dpo
 		}
 		return storage.SenderConstrainDPoP, verifiedProof, "", nil
 	}
-	// Bearer: RFC 8705 §3.4's presentation of an mTLS-bound token. With
+	// Bearer: RFC 8705 §3's presentation of an mTLS-bound token. With
 	// no certificate on the connection the thumbprint stays "", and the
 	// request is refused once the token is resolved: RFC 8705 §3 answers
 	// a certificate that doesn't match the token's with 401

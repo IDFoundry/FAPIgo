@@ -269,7 +269,9 @@ func (d DiscoveredMetadata) IssuerKeySource(fetcher *fapihttp.Client, cacheTTL t
 //
 // opts is forwarded to the fapi.URL parse of every discovered endpoint —
 // pass fapi.AllowLoopbackHTTP() for a local development authorization
-// server, exactly as when parsing an endpoint URL by hand.
+// server, exactly as when parsing an endpoint URL by hand. A client
+// built from such endpoints needs AssuranceDevelopment: New refuses a
+// loopback http issuer or endpoint under AssuranceProduction.
 func Discover(ctx context.Context, fetcher *fapihttp.Client, issuer fapi.URL, opts ...fapi.URLOption) (DiscoveredMetadata, error) {
 	if fetcher == nil {
 		return DiscoveredMetadata{}, fmt.Errorf("client: discover: fetcher is required")

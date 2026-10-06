@@ -51,9 +51,10 @@ type HTTPClient interface {
 	Do(*http.Request) (*http.Response, error)
 }
 
-// Config bounds every fetch a Client performs. None of these have an
-// implicit default — New rejects a zero (or, for MaxRedirects, negative)
-// value.
+// Config bounds every fetch a Client performs. Its limits have no
+// implicit default: New rejects a zero MaxResponseBytes or
+// RequestTimeout, and a negative MaxRedirects (zero follows none). The
+// host exceptions are all off at their zero value.
 type Config struct {
 	// MaxResponseBytes bounds how much of a response body Fetch reads
 	// before failing — applied regardless of any Content-Length header,

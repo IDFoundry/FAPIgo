@@ -100,7 +100,7 @@ type BackchannelAuthenticationSession struct {
 // AuthReqID is the auth_req_id the authorization server issued.
 func (s BackchannelAuthenticationSession) AuthReqID() string { return s.authReqID }
 
-// Interval is the minimum time to wait between polls (CIBA §10.3's
+// Interval is the minimum time to wait between polls (CIBA §7.3's
 // "interval") — defaultBackchannelAuthenticationPollInterval if the
 // server's response omitted one.
 func (s BackchannelAuthenticationSession) Interval() time.Duration { return s.interval }
@@ -121,9 +121,9 @@ func (s BackchannelAuthenticationSession) NotificationToken() string { return s.
 // BeginBackchannelAuthentication builds and signs a CIBA backchannel
 // authentication request (FAPI-CIBA always requires a signed request —
 // there is no plain-parameter path, unlike PAR under the baseline
-// profile), authenticates with a client assertion, presents a DPoP
-// proof bound to the request, and returns the resulting
-// BackchannelAuthenticationSession for the caller to poll.
+// profile), authenticates as Config.ClientAuthMethod says, presents a
+// DPoP proof bound to the request under SenderConstrainDPoP, and returns
+// the resulting BackchannelAuthenticationSession for the caller to poll.
 func (c *Client) BeginBackchannelAuthentication(ctx context.Context, req BeginBackchannelAuthenticationRequest) (BackchannelAuthenticationSession, error) {
 	if scopeErr := c.checkOAuthOnlyScope(req.Scope); scopeErr != nil {
 		return BackchannelAuthenticationSession{}, scopeErr
@@ -353,7 +353,7 @@ type BackchannelAuthenticationResult interface {
 
 // BackchannelAuthenticationPending means no decision has been made
 // yet. SlowDown reports whether this specific poll was rejected for
-// being too fast (CIBA §10.3's slow_down) rather than merely still
+// being too fast (CIBA §11's slow_down) rather than merely still
 // pending — RFC 8628's own convention is for the caller to widen its
 // own interval by 5s when this is true, but this package leaves that
 // policy decision to the caller rather than picking one on its
@@ -364,7 +364,8 @@ type BackchannelAuthenticationPending struct{ SlowDown bool }
 func (BackchannelAuthenticationPending) backchannelAuthenticationResult() {}
 
 // BackchannelAuthenticationDenied means the end user (or the
-// authorization server on their behalf) declined the request.
+// authorization server on their behalf) declined the request: the
+// server answered access_denied.
 // Description is dropped if it falls outside RFC 6749 §5.2's character
 // set; see ServerErrorResponse.
 type BackchannelAuthenticationDenied struct{ Code, Description string }
@@ -387,11 +388,18 @@ type BackchannelAuthenticationApproved struct{ Tokens TokenSet }
 func (BackchannelAuthenticationApproved) backchannelAuthenticationResult() {}
 
 // PollBackchannelAuthentication performs a single token-endpoint poll
-// for session's auth_req_id (CIBA §10.1/§10.3). It makes exactly one
-// attempt — no blocking sleep-loop — so an embedder driving CIBA from a
-// job queue, cron, or event loop calls this on its own schedule rather
-// than having the calling goroutine block for however long a human
-// takes to approve an out-of-band request.
+// for session's auth_req_id (CIBA §10.1, with §11's error responses).
+// It makes exactly one attempt — no blocking sleep-loop — so an
+// embedder driving CIBA from a job queue, cron, or event loop calls this
+// on its own schedule rather than having the calling goroutine block for
+// however long a human takes to approve an out-of-band request.
+//
+// authorization_pending and slow_down are BackchannelAuthenticationPending,
+// access_denied is BackchannelAuthenticationDenied and expired_token is
+// BackchannelAuthenticationExpired; any other error response is an
+// *Error. When the request asked for "openid", an approval whose token
+// response has no ID token fails with ErrorInvalidResponse (OIDC Core
+// §3.1.3.3), as ExchangeCode does.
 func (c *Client) PollBackchannelAuthentication(ctx context.Context, session BackchannelAuthenticationSession) (BackchannelAuthenticationResult, error) {
 	assertionSigner, assertionKID, dpopSigner, err := c.resolveClientAuthAndDPoPSigners(ctx)
 	if err != nil {

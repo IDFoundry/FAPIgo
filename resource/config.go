@@ -9,7 +9,8 @@ import (
 // concerns (issuer, audience, algorithm, max token lifetime) that
 // moved into JWTAccessTokens itself; see its own doc comment. None of
 // these have an implicit default — NewVerifier rejects a zero (or, for
-// MaxClockSkew, negative) value.
+// MaxClockSkew, negative) value, and a zero DPoPNonceLifetime when
+// Dependencies.Nonces is set.
 type Limits struct {
 	// MaxDPoPProofAge bounds how old (relative to verification time) a
 	// DPoP proof's iat claim may be.

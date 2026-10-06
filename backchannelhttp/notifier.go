@@ -43,7 +43,7 @@ type Config struct {
 }
 
 // Notifier is a server.BackchannelNotifier that sends every notification
-// through an http-supplied transport. Construct one with New.
+// through the SSRF-guarded client New builds. Construct one with New.
 type Notifier struct {
 	http     fapihttp.HTTPClient
 	timeout  time.Duration

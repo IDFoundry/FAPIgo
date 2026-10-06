@@ -18,8 +18,9 @@ type Client struct {
 }
 
 // New validates cfg and deps and returns a Client. Construction fails
-// unless every configuration value and dependency Config.Profile
-// requires is present and valid.
+// unless every configuration value and dependency cfg requires — for
+// its Profile, the flows its Endpoints enable, its ClientAuthMethod and
+// SenderConstrain, and its Assurance level — is present and valid.
 func New(cfg Config, deps Dependencies) (*Client, error) {
 	if err := validateConfig(cfg); err != nil {
 		return nil, err

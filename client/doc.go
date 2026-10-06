@@ -17,17 +17,19 @@
 // responsibility.
 //
 // OpenID Connect identity (an ID token, Subject, IDTokenClaims) is
-// entirely optional and driven purely by what the authorization server
-// actually granted, never assumed by this package: ExchangeCode,
+// optional, and follows what the client asked for: ExchangeCode,
 // PollBackchannelAuthentication and RefreshTokens populate
 // TokenSet.IDToken/Subject/IDTokenClaims only when the token response
 // actually carried an id_token (RefreshTokens keeps the original's when
-// a refresh returns none) (which, per the FAPI 2.0 authorization server this package
-// targets, happens exactly when "openid" was included in the granted
-// scope — see server's own package doc comment for that side of the
-// contract) and leave TokenSet.HasIDToken false otherwise, which is a
-// normal outcome, not an error. A caller that only needs access
-// tokens — no identity layer at all — can omit "openid" from
+// a refresh returns none). For a request without "openid", no ID token
+// is a normal outcome, not an error, and TokenSet.HasIDToken is false.
+// For one that asked for "openid" (or set max_age, which only an ID
+// token's auth_time can satisfy, and which BeginAuthorization refuses
+// without "openid"), ExchangeCode and PollBackchannelAuthentication
+// refuse a token response without an ID token, as OIDC Core §3.1.3.3
+// requires — see server's own package doc comment for the server side
+// of that contract. A caller that only needs access tokens — no
+// identity layer at all — can omit "openid" from
 // BeginAuthorizationRequest.Scope entirely and use this package as a
 // plain OAuth 2.0 + FAPI 2.0 client; setting Config.OAuthOnly makes
 // that a checked configuration rather than a convention, and lets such

@@ -7,10 +7,24 @@ import "fmt"
 type ErrorCode string
 
 const (
-	ErrorInvalidRequest      ErrorCode = "invalid_request"
-	ErrorInvalidResponse     ErrorCode = "invalid_response"
+	// ErrorInvalidRequest indicates input was refused before anything
+	// was sent: a malformed argument, a request this Config doesn't
+	// allow, or (ParseBackchannelNotification) a malformed CIBA ping.
+	ErrorInvalidRequest ErrorCode = "invalid_request"
+
+	// ErrorInvalidResponse indicates the authorization server's (or a
+	// resource's) response was refused: an error response from it (see
+	// Error.ServerResponse), or one that failed validation.
+	ErrorInvalidResponse ErrorCode = "invalid_response"
+
+	// ErrorAuthorizationDenied is not returned by this package: a user or
+	// server declining a request is a result, not an error
+	// (CallbackDenied, CompletionDenied, BackchannelAuthenticationDenied).
 	ErrorAuthorizationDenied ErrorCode = "authorization_denied"
-	ErrorInternal            ErrorCode = "internal"
+
+	// ErrorInternal indicates a failure on this client's own side: a key,
+	// store or transport error, or a request that couldn't be sent.
+	ErrorInternal ErrorCode = "internal"
 
 	// ErrorResponseTooLarge indicates an ID token or UserInfo response
 	// exceeded Config.Limits.MaxJOSECompactBytes — distinct from

@@ -91,13 +91,17 @@ func (c *Client) ClientCredentialsResource(result ClientCredentialsTokenResult) 
 // derived purely from Dependencies.HTTP's own configured TLS
 // transport.
 //
-// req's URL must be https, or http to a loopback host ("localhost",
-// 127.0.0.0/8 or ::1) — the rule fapi.AllowLoopbackHTTP applies to this
-// client's own endpoints — and without embedded credentials; an https
-// response must arrive over TLS (fapihttp.ErrMissingTLS otherwise).
-// A redirect is returned as the response, never followed: following it
-// would send the access token, and under DPoP the proof, to wherever
-// the resource server pointed (see Dependencies.HTTP).
+// req's URL must be https, or, under AssuranceDevelopment only, http to
+// a loopback host ("localhost", 127.0.0.0/8 or ::1) — the rule
+// fapi.AllowLoopbackHTTP and Config.Assurance apply to this client's
+// own endpoints — and without embedded credentials; an https response
+// must arrive over TLS (fapihttp.ErrMissingTLS otherwise). A redirect
+// is returned as the response, never followed: following it would send
+// the access token, and under DPoP the proof, to wherever the resource
+// server pointed (see Dependencies.HTTP). If Dependencies.HTTP follows
+// one itself anyway (a wrapper this client can't configure), Do fails
+// with fapihttp.ErrRedirectFollowed, and a request body is never sent
+// to the redirect's target.
 //
 // req's body, if any, must be replayable — Do may send it twice under
 // SenderConstrainDPoP's own nonce retry — so req.GetBody must be set;

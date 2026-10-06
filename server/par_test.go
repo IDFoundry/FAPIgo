@@ -29,9 +29,15 @@ import (
 
 type fakeClientRepository struct {
 	clients map[fapi.ClientID]storage.RegisteredClient
+	// err, when set, is returned for every lookup — a store that can't
+	// answer.
+	err error
 }
 
 func (f *fakeClientRepository) ResolveClient(_ context.Context, id fapi.ClientID) (storage.RegisteredClient, error) {
+	if f.err != nil {
+		return storage.RegisteredClient{}, f.err
+	}
 	c, ok := f.clients[id]
 	if !ok {
 		return storage.RegisteredClient{}, fmt.Errorf("no such client %q", id)

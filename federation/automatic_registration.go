@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"slices"
@@ -335,8 +336,15 @@ func NewAutomaticClientRepository(underlying storage.ClientRepository, resolver 
 
 // ResolveClient implements storage.ClientRepository.
 func (a *AutomaticClientRepository) ResolveClient(ctx context.Context, id fapi.ClientID) (storage.RegisteredClient, error) {
-	if client, err := a.underlying.ResolveClient(ctx, id); err == nil {
+	client, err := a.underlying.ResolveClient(ctx, id)
+	if err == nil {
 		return client, nil
+	}
+	// A store that couldn't answer says nothing about whether id is
+	// registered there, so it isn't treated as "not registered": falling
+	// back to federation would turn an outage into an unknown client.
+	if errors.Is(err, storage.ErrStoreUnavailable) {
+		return storage.RegisteredClient{}, err
 	}
 	entry, err := a.resolve(ctx, id)
 	if err != nil {

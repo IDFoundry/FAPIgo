@@ -376,8 +376,7 @@ func (s *Server) authenticateClientViaAssertion(ctx context.Context, params map[
 
 	client, err := s.deps.Clients.ResolveClient(ctx, fapi.ClientID(assertion.ClaimedSubject()))
 	if err != nil {
-		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
-			newError(ErrorInvalidClient, 401, "unknown client", err)
+		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{}, unresolvedClientError(ctx, err)
 	}
 
 	// A client registered for certificate-based authentication must not

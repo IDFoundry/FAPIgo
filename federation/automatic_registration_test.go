@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -369,6 +370,35 @@ func TestAutomaticClientRepositoryResolveClientFallsBackToFederation(t *testing.
 	}
 	if got.AllowsAuthorizationDetailsType("payment") {
 		t.Error("AllowsAuthorizationDetailsType(payment) = true with no AutomaticRegistrationConfig.AuthorizationDetailsTypes")
+	}
+}
+
+// unavailableRepository is a storage.ClientRepository whose backend
+// can't answer.
+type unavailableRepository struct{}
+
+func (unavailableRepository) ResolveClient(context.Context, fapi.ClientID) (storage.RegisteredClient, error) {
+	return storage.RegisteredClient{}, fmt.Errorf("db down: %w", storage.ErrStoreUnavailable)
+}
+
+// TestAutomaticClientRepositoryDoesNotMaskAnUnavailableStore: an
+// underlying store that couldn't answer isn't read as "not registered
+// here", so the repository returns its error instead of resolving the
+// client through federation — which would turn an outage into an
+// unknown client, or register a statically registered client's ID
+// automatically.
+func TestAutomaticClientRepositoryDoesNotMaskAnUnavailableStore(t *testing.T) {
+	f := setupAutomaticRegistrationFixture(t, rpMetadataBuilder(t))
+	repo, err := federation.NewAutomaticClientRepository(unavailableRepository{}, f.newResolver(t), f.fetcher, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
+	if err != nil {
+		t.Fatalf("NewAutomaticClientRepository: %v", err)
+	}
+	_, err = repo.ResolveClient(context.Background(), fapi.ClientID(f.rpID))
+	if !errors.Is(err, storage.ErrStoreUnavailable) {
+		t.Fatalf("ResolveClient = %v, want the store's ErrStoreUnavailable", err)
+	}
+	if calls := atomic.LoadInt32(f.rpConfigCalls); calls != 0 {
+		t.Errorf("RP's own well-known endpoint was fetched %d times, want 0", calls)
 	}
 }
 

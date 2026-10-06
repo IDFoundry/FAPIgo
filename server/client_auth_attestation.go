@@ -55,8 +55,7 @@ func (s *Server) authenticateClientViaAttestation(ctx context.Context, attestati
 
 	client, err := s.deps.Clients.ResolveClient(ctx, fapi.ClientID(parsedAttestation.ClaimedSubject()))
 	if err != nil {
-		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
-			newError(ErrorInvalidClient, 401, "unknown client", err)
+		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{}, unresolvedClientError(ctx, err)
 	}
 	if !client.AllowsClientAuthMethod(storage.ClientAuthMethodAttestation) {
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},

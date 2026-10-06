@@ -9,9 +9,17 @@ import (
 // RecommendedLimits returns a Limits value grounded in the FAPI 2.0
 // Security Profile Final (https://openid.net/specs/fapi-security-profile-2_0-final.html)
 // and RFC 9449 (DPoP), for a caller who wants a defensible starting
-// point rather than researching nine duration values from scratch.
-// Config still has no implicit defaults — New never reaches for this on
-// its own; calling it is as deliberate a choice as SystemClock is.
+// point rather than researching each lifetime from scratch. Config
+// still has no implicit defaults — New never reaches for this on its
+// own; calling it is as deliberate a choice as SystemClock is.
+//
+// It covers the limits every server needs. The ones only an optional
+// feature needs are left zero, and New refuses that zero once the
+// feature is enabled, so set them yourself: DPoPNonceLifetime
+// (Dependencies.Nonces), the three BackchannelAuthentication limits
+// (Endpoints.BackchannelAuthentication), and MaxClientAttestationLifetime
+// and MaxClientAttestationPoPAge
+// (Config.AttestationBasedClientAuthentication).
 //
 // Every field below is documented with exactly how grounded it is.
 // Three are direct spec requirements; the rest are this module's own
@@ -31,7 +39,7 @@ func RecommendedLimits() Limits {
 		// /authorize), short enough to keep the replay window small.
 		PushedRequestLifetime: 90 * time.Second,
 
-		// Not directly spec-numbered — §5.3.2.1 item 13 governs iat/nbf
+		// Not directly spec-numbered — §5.3.2.1 item 15 governs iat/nbf
 		// clock-skew tolerance for these same artifact types (mapped to
 		// MaxClockSkew below), not how far exp may sit in the future.
 		// 60s applies the same short-lived-artifact principle the spec
@@ -51,7 +59,7 @@ func RecommendedLimits() Limits {
 		// own login flow's actual expected duration.
 		InteractionLifetime: 5 * time.Minute,
 
-		// Spec: FAPI 2.0 Security Profile Final §5.3.2.1 item 11 —
+		// Spec: FAPI 2.0 Security Profile Final §5.3.2.1 item 13 —
 		// "shall issue authorization codes with a maximum lifetime of
 		// 60 seconds." This is the spec's own ceiling, used directly:
 		// a code is exchanged immediately after redirect in a normal
@@ -98,7 +106,7 @@ func RecommendedLimits() Limits {
 		// guidance, not a value RFC 9449 itself specifies.
 		MaxDPoPProofAge: 60 * time.Second,
 
-		// Spec: FAPI 2.0 Security Profile Final §5.3.2.1 item 13 —
+		// Spec: FAPI 2.0 Security Profile Final §5.3.2.1 item 15 —
 		// "to accommodate clock offsets, shall accept JWTs with an
 		// iat or nbf timestamp between 0 and 10 seconds in the
 		// future" (client assertions and request objects). This is

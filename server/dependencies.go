@@ -21,11 +21,12 @@ type Dependencies struct {
 	// interaction state.
 	Transactions storage.TransactionStore
 
-	// Grants persists issued authorization codes.
+	// Grants persists issued authorization codes and refresh tokens.
 	Grants storage.GrantStore
 
-	// Replay detects reuse of a client assertion's, request object's or
-	// DPoP proof's jti.
+	// Replay detects reuse of a client assertion's, request object's,
+	// signed backchannel authentication request's, Client Attestation
+	// PoP's or DPoP proof's jti.
 	Replay storage.ReplayStore
 
 	// ClientKeys resolves a registered client's verification keys.
@@ -41,8 +42,10 @@ type Dependencies struct {
 	ClientEncryptionKeys keys.ClientEncryptionKeySource
 
 	// Keys performs this server's own signing operations: JARM response
-	// signing (when Config.Profile requires it), and ID token signing
-	// (always). Access-token signing, when AccessTokens is
+	// signing (when Config.Profile requires it), ID token signing (unless
+	// Config.OAuthOnly), signed UserInfo responses (SignUserInfoResponse)
+	// and, with Config.Federation, its Entity Configuration. Access-token
+	// signing, when AccessTokens is
 	// JWTAccessTokens, is that type's own concern — see its doc
 	// comment.
 	Keys keys.KeyManager
@@ -59,10 +62,12 @@ type Dependencies struct {
 	Audit AuditSink
 
 	// Revocation lets this server revoke an access token it already
-	// issued, on detected authorization-code reuse (RFC 6749 §4.1.2).
-	// Required, like every field above except Audit/IdentityClaims —
-	// pass a real RevocationSink, or NoRevocation{} to explicitly
-	// decline (see NoRevocation's own doc comment for why).
+	// issued, on detected authorization-code reuse (RFC 6749 §4.1.2),
+	// and records the grants RevokeGrant revokes, which RevokeGrant needs
+	// to be able to read back. Required, like every field above except
+	// ClientEncryptionKeys and Audit — pass a real RevocationSink, or
+	// NoRevocation{} to explicitly decline (see NoRevocation's own doc
+	// comment for why; RevokeGrant then fails).
 	Revocation RevocationSink
 
 	// Clock supplies the current time.

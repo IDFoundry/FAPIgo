@@ -56,10 +56,11 @@ type RefreshTokenRequest struct {
 	PeerCertificate *x509.Certificate
 }
 
-// RefreshAccessToken authenticates the client, verifies its DPoP proof,
+// RefreshAccessToken authenticates the client, verifies its
+// sender-constraining binding (a DPoP proof or its mTLS certificate),
 // and redeems the refresh token to issue a new access token (and ID
 // token, if the granted scope includes openid). It does not rotate the
-// refresh token: FAPI2-SP-FINAL requirement 5.3.2.1-9 says an
+// refresh token: FAPI2-SP-FINAL requirement 5.3.2.1-11 says an
 // authorization server "shall not use refresh token rotation except in
 // extraordinary circumstances", so the presented token is returned
 // unchanged in the response and remains valid for the caller's next
@@ -124,7 +125,7 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorServerError, 500, "failed to encode requested userinfo claims", err))
 	}
 	// Revocation-lookup key discarded — refresh-token redemption is
-	// deliberately not single-use (FAPI2-SP-FINAL 5.3.2.1-9), so
+	// deliberately not single-use (FAPI2-SP-FINAL 5.3.2.1-11), so
 	// there's no "reuse" event on this path to revoke an access token
 	// against; that tracking is specific to authorization-code reuse
 	// (see ExchangeAuthorizationCode).

@@ -288,7 +288,7 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 
 	if !s.cfg.Endpoints.BackchannelAuthentication.IsZero() {
 		md.BackchannelAuthenticationEndpoint = urlOrNil(s.cfg.Endpoints.BackchannelAuthentication)
-		// Both poll (CIBA §10.3) and ping (CIBA §10.2) — push is not
+		// Both poll (CIBA §10.1) and ping (CIBA §10.2) — push is not
 		// implemented (storage.BackchannelTokenDeliveryMode has no value
 		// for it). Unconditional on any specific client's own
 		// registration, the same way TokenEndpointAuthMethodsSupported's

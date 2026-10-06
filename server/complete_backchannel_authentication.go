@@ -155,9 +155,10 @@ func (s *Server) CompleteBackchannelAuthentication(ctx context.Context, req Comp
 	// Ping notification dispatch is unconditional on Status — a client
 	// registered for ping delivery needs to know "go poll now"
 	// regardless of whether the decision was Approved, Denied or
-	// AuthenticationFailed, and best-effort: CIBA §10.3's backup-polling
-	// guarantee means a missed or failed notification never leaves the
-	// client stuck, so its error is never allowed to fail this call
+	// AuthenticationFailed, and best-effort: a ping client may also poll
+	// the token endpoint (CIBA §10.1), so a missed or failed notification
+	// doesn't leave it stuck, and its error is never allowed to fail this
+	// call
 	// (mirrors the existing _ = s.deps.Revocation.Revoke(...) precedent
 	// in server/token.go).
 	if decided.DeliveryMode == "ping" {

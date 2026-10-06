@@ -58,7 +58,7 @@ type BackchannelInteractionRequired struct {
 	ExpiresIn time.Duration
 
 	// Interval is the minimum time the client must wait between token
-	// endpoint polls (CIBA §10.3's "interval").
+	// endpoint polls (CIBA §7.3's "interval").
 	Interval time.Duration
 
 	Interaction BackchannelInteractionRequest
@@ -67,8 +67,9 @@ type BackchannelInteractionRequired struct {
 // Discriminator for BackchannelAuthenticationAction — deliberately empty.
 func (BackchannelInteractionRequired) backchannelAuthenticationAction() {}
 
-// WriteJSON writes a as a complete CIBA §10.2/§10.3 backchannel
-// authentication response to w: the "application/json" Content-Type,
+// WriteJSON writes a as a complete CIBA §7.3 backchannel
+// authentication response (the successful authentication request
+// acknowledgement) to w: the "application/json" Content-Type,
 // HTTP 200, and a {"auth_req_id": ..., "expires_in": ..., "interval": ...}
 // body. Every a BeginBackchannelAuthentication returns as this
 // action is safe to pass here.

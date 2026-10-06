@@ -56,9 +56,13 @@ type CompleteAuthorizationRequest struct {
 // BeginAuthorization: it redeems Handle (single-use — a second call
 // with the same handle fails), and, depending on Result, either mints an
 // authorization code and returns a success redirect, or returns an
-// error redirect. Every outcome is represented in the returned
-// AuthorizationResult; the error return is reserved for failures
-// outside the request itself.
+// error redirect: access_denied for Deny, login_required for
+// AuthenticationFailed or for an Authorize that fails the request's
+// max_age or prompt=login, and InteractionNeeded's own code. A handle
+// that is unknown, used or expired, or a grant exceeding what was
+// requested, is an AuthorizationLocalError instead — never a redirect.
+// Every outcome is represented in the returned AuthorizationResult; the
+// error return is reserved for failures outside the request itself.
 func (s *Server) CompleteAuthorization(ctx context.Context, req CompleteAuthorizationRequest) (AuthorizationResult, error) {
 	completed, err := s.deps.Transactions.CompleteAuthorization(ctx, storage.CompleteAuthorizationTransaction{
 		Handle: req.Handle.String(),

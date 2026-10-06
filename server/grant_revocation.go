@@ -85,8 +85,12 @@ func (s *Server) grantRevocationReader() (revocationReader, bool) {
 // expiry). Those are the current Limits: a refresh token, code or CIBA
 // decision issued under a longer lifetime than today's expires at its
 // issue time plus today's lifetime, whatever its stored expiry, so
-// shortening a lifetime can't let one outlive the record. An access
-// token keeps the exp it was issued with; one issued under a longer
+// shortening a lifetime can't let one outlive the record — except one
+// written before that issue time was recorded: a refresh token issued
+// before v0.50.0 keeps its stored expiry, so after shortening
+// Limits.RefreshTokenLifetime it can outlive this record. Until those
+// have expired, revoke such a refresh token itself (RevokeToken) rather
+// than relying on its grant's record. An access token keeps the exp it was issued with; one issued under a longer
 // Limits.AccessTokenLifetime stays covered while that old lifetime is no
 // longer than the current record lifetime. To cut such tokens off as
 // soon as you shorten Limits.AccessTokenLifetime, lower the resource

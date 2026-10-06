@@ -175,7 +175,8 @@ func validateRedeemedAuthorizationCode(redeemed storage.RedeemedAuthorizationCod
 // ExchangeAuthorizationCode authenticates the client, verifies its DPoP
 // proof, redeems the authorization code (single-use — a second exchange
 // with the same code fails), checks PKCE and redirect_uri, and issues an
-// access token bound to the DPoP key, plus an ID token when the granted
+// access token bound to the client's DPoP key or mTLS certificate (its
+// registered SenderConstrain), plus an ID token when the granted
 // scope included "openid" and a refresh token when it included
 // "offline_access".
 func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req AuthorizationCodeExchangeRequest) (TokenResult, error) {

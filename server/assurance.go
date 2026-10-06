@@ -55,7 +55,11 @@ const (
 	// keys.KeySourceAssurance and declare LiveFetchHardened — see that
 	// interface's own doc comment for why a plain ClientKeySource/
 	// ClientEncryptionKeySource has no structural way to tell a hardened
-	// implementation from a naive one apart from this declaration.
+	// implementation from a naive one apart from this declaration. The
+	// same applies to RegisteredAttesterKeys.Keys when
+	// Config.AttestationBasedClientAuthentication is set, and
+	// Dependencies.FederationHTTP, when set, must not grant a loopback
+	// exception (fapihttp's AllowsLoopback).
 	// Likewise the keys this server signs with — Dependencies.Keys, and
 	// JWTAccessTokens.Keys when access tokens are JWTs — must implement
 	// keys.KeyCustodyAssurance and declare Durable (and
@@ -63,6 +67,9 @@ const (
 	// in-memory keys, regenerated on every restart, never qualify. An
 	// HSM or KMS is not required — durable keys a deployment loads from
 	// its own storage qualify too — only that the declaration is made.
+	// A custom AccessTokenIssuer (neither JWTAccessTokens nor
+	// OpaqueAccessTokens) must implement AccessTokenIssuerAssurance,
+	// naming the signing keys or store these checks then apply to.
 	// With CIBA configured, Dependencies.BackchannelNotifier must
 	// implement BackchannelNotifierAssurance and declare
 	// OutboundHardened (backchannelhttp.Notifier and

@@ -253,8 +253,13 @@ for as long as it lasts.
 
 **What to change:** nothing, unless you shorten
 `Limits.RefreshTokenLifetime` and need it to apply to refresh tokens
-issued before the upgrade: revoke those grants (`Server.RevokeGrant`)
-instead.
+issued before the upgrade. Then revoke those grants with
+`Server.RevokeGrant` *before* shortening it: a revocation record lasts
+as long as the `Limits` in force when it's written allow, so one written
+after shortening can lapse while such a token, still judged by its
+original expiry, works again. Or wait until refresh tokens issued
+before the upgrade have expired. `Server.RevokeToken` also works, given
+the token itself.
 
 ## v0.49.0
 

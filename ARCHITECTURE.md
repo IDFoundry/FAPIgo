@@ -100,7 +100,7 @@ fapigo/                    // package fapi: shared value types only
 ├── conformance/
 │   ├── client/                  // OIDF RP/client test plan config + scripts
 │   ├── server/                  // OIDF AS test plan config + scripts
-│   ├── resource/                 // RS verification test vectors (not covered by OIDF)
+│   ├── resource/                 // placeholder: the RS is tested by the resource package's own tests (not covered by OIDF)
 │   └── scripts/                  // run-all.sh: every AS, RP and federation plan in one run
 └── examples/                    // runnable demos, each its own module, public API only (see examples/README.md)
     └── internal/demokit/          // the demos' shared local TLS, CA and host routing
@@ -819,8 +819,10 @@ leaving to the embedding application.
 
 Certification is tracked separately per role under `conformance/`. The
 server runs the OIDF AS test plan; the client runs the applicable
-RP/client tests; the resource server is verified against test vectors
-maintained in this repo, since OIDF does not cover that role. One role
+RP/client tests; the resource server is verified by the `resource`
+package's own tests (valid and invalid DPoP proofs, replay, method/URL
+and `cnf` binding, mTLS, revocation, and a fuzz target), since OIDF
+does not cover that role. One role
 passing its suite is not evidence the other role conforms, even where
 both share internal JOSE code — protocol behaviour and negative-test
 expectations differ per role.
@@ -1383,8 +1385,7 @@ and contract test suite, `keys`, `fapihttp`, `backchannelhttp`,
 `federation`, and the root `fapi` package's value types): strict
 parsers, canonicalization rules, JOSE implementation, algorithm policy
 primitives, `Secret`, typed `URL`, key representations, extension/RAR
-definitions, replay machinery, storage contract tests, conformance test
-vectors, OpenID Federation 1.0 Trust Chain resolution and self-issuance
+definitions, replay machinery, storage contract tests, OpenID Federation 1.0 Trust Chain resolution and self-issuance
 (`federation` — a shared subsystem package like `keys`/`storage`, not a
 fourth role: see `federation/doc.go`), CIBA ping-delivery notification
 (`backchannelhttp`).

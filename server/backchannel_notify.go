@@ -50,9 +50,10 @@ type BackchannelNotifier interface {
 	// required shape, confirmed against the OIDF conformance suite's own
 	// verification (it rejects any other field being present) — see
 	// NewBackchannelNotificationRequest, which builds exactly this
-	// *http.Request. A CIBA client is required to keep polling
-	// regardless of whether — or how — this call actually lands (CIBA
-	// §10.3's backup-polling guarantee), so this server treats any error
+	// *http.Request. A client registered for ping may also poll the token
+	// endpoint (CIBA §10.1), and knows the request's lifetime from its
+	// expires_in, so a notification that never lands doesn't strand it;
+	// this server therefore treats any error
 	// Notify returns as best-effort informational only: it is never
 	// allowed to fail the decision that triggered it.
 	Notify(ctx context.Context, notification BackchannelNotification) error

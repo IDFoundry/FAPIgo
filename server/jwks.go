@@ -32,8 +32,9 @@ func (j JWTAccessTokens) accessTokenSigningKeyUse() keys.SigningKeyUse {
 	return keys.SigningKeyUse{Manager: j.Keys, Purpose: keys.AccessTokenSigning, Algorithm: j.Algorithm}
 }
 
-// PublicJWKS returns this server's current public keys: the union,
-// deduplicated by kid, of whatever key manager(s) are active for every
+// PublicJWKS returns this server's current public keys: the union (one
+// key published for several purposes appears once, and a kid naming
+// two different keys is an error) of whatever key manager(s) are active for every
 // signing purpose Config/Dependencies declares in use — ID token
 // (unless Config.OAuthOnly is set — this server never signs one),
 // (under ProfileFAPISecurityWithMessageSigning) JARM, and (when

@@ -197,10 +197,12 @@ func (s *Server) beginFail(ctx context.Context, clientID fapi.ClientID, err *Err
 // redirectURI the caller obtained some other way — so it checks
 // redirectURI against client.HasRedirectURI itself (a client may have
 // more than one registered redirect URI; any exact match is accepted)
-// and returns ErrRedirectURINotRegistered rather than building a
-// destination if it isn't one of client's own — returning *Error with
-// ErrorInvalidRequest, the same code an OAuth redirect_uri validation
-// failure earlier in the flow would carry, even though this error never
+// and, if it isn't one of client's own (or isn't an acceptable redirect
+// destination for this client, as a pushed authorization request would
+// have required), returns an *Error with ErrorInvalidRequest rather
+// than building a destination — the same code an OAuth redirect_uri
+// validation failure earlier in the flow would carry, even though this
+// error never
 // itself reaches the client (the caller renders a local error page
 // instead; see below). That check is what makes this method safe to
 // call at all: without it, it would hand back a signed or

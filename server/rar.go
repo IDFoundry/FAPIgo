@@ -11,7 +11,7 @@ import (
 	"github.com/idfoundry/fapigo/storage"
 )
 
-// authorizationDetailsParameter is the RFC 9396 §5 wire name shared by PAR,
+// authorizationDetailsParameter is the RFC 9396 §2 wire name shared by PAR,
 // CIBA backchannel authentication requests, and client_credentials token
 // requests (RFC 9396 §6) — structurally distinct from an ordinary
 // extension.Definition-backed parameter (it's a bounded array of typed

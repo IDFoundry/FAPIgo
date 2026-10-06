@@ -468,11 +468,12 @@ type Config struct {
 	// advertises OIDC-only Metadata fields (subject_types_supported,
 	// id_token_signing_alg_values_supported), regardless of what an
 	// individual RegisteredClient's own AllowedScopes says. "openid" is
-	// refused as a requested scope at PAR, CIBA and client_credentials
-	// alike — see checkScope — so a client can never end up with
-	// "openid" in a granted scope for containsScope's own
-	// openid-gated branches (issueIDToken and friends) to act on in the
-	// first place; this is what lets Metadata's own claims and this
+	// refused as a requested scope at PAR and CIBA (client_credentials
+	// and IssueRefreshToken refuse it whatever this says), and checked
+	// again when a refresh or the CIBA token exchange issues tokens from
+	// a stored grant, so a client can never end up with "openid" in a
+	// granted scope for the openid-gated branches (ID token issuance and
+	// friends) to act on; this is what lets Metadata's own claims and this
 	// server's actual behavior never diverge. False (the default)
 	// preserves this package's original behavior exactly: ID token
 	// issuance remains driven purely by whether a request's granted

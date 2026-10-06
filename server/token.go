@@ -74,8 +74,8 @@ type TokenResult struct {
 	Scope     string
 
 	// AuthorizationDetails is the resource owner's granted Rich
-	// Authorization Requests (RFC 9396) detail array — RFC 9396 §5's own
-	// response echo, reflecting exactly what the issued access token's
+	// Authorization Requests (RFC 9396) detail array — RFC 9396 §7's own
+	// token response echo, reflecting exactly what the issued access token's
 	// own "authorization_details" claim carries. Nil if the authorization
 	// carried no authorization_details, or none of it was granted.
 	AuthorizationDetails json.RawMessage
@@ -175,7 +175,8 @@ func validateRedeemedAuthorizationCode(redeemed storage.RedeemedAuthorizationCod
 // ExchangeAuthorizationCode authenticates the client, verifies its DPoP
 // proof, redeems the authorization code (single-use — a second exchange
 // with the same code fails), checks PKCE and redirect_uri, and issues an
-// access token bound to the DPoP key, plus an ID token when the granted
+// access token bound to the client's DPoP key or mTLS certificate (its
+// registered SenderConstrain), plus an ID token when the granted
 // scope included "openid" and a refresh token when it included
 // "offline_access".
 func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req AuthorizationCodeExchangeRequest) (TokenResult, error) {
@@ -452,10 +453,11 @@ func (s *Server) verifyTokenRequestBinding(ctx context.Context, client storage.R
 
 // tokenTypeFor returns the token_type value (RFC 6749 §7.1) this
 // server's own issued tokens declare — "DPoP" for a
-// DPoP-sender-constrained client, or "Bearer" for an mTLS-bound one
-// (RFC 8705 §3.4: "the authorization server MUST include the
-// token_type value of Bearer... in the token response" for mTLS-bound
-// tokens, even though the token is still sender-constrained).
+// DPoP-sender-constrained client, or "Bearer" for an mTLS-bound one.
+// RFC 8705 defines no token type of its own: a certificate-bound token
+// is used as RFC 6750 describes (§3: "as described in [RFC6750]"), over
+// a mutually authenticated TLS connection, so it is a Bearer token in
+// form even though the certificate binding still constrains it.
 func tokenTypeFor(senderConstrain storage.SenderConstrain) string {
 	if senderConstrain == storage.SenderConstrainMTLS {
 		return "Bearer"

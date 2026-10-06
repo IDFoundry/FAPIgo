@@ -58,7 +58,7 @@ var coreAuthorizationParameters = map[string]struct{}{
 	// requestedPrompt).
 	"prompt": {},
 
-	// authorization_details (Rich Authorization Requests, RFC 9396 §5) is
+	// authorization_details (Rich Authorization Requests, RFC 9396 §2) is
 	// excluded here for the same reason as "claims": this package doesn't
 	// treat it as an ordinary extension.Definition-backed parameter — it's
 	// validated against Config.RAR, a structurally distinct registry for
@@ -836,7 +836,7 @@ func plainParamsToJSON(params map[string]string) map[string]json.RawMessage {
 			continue
 		}
 		if k == authorizationDetailsParameter {
-			// RFC 9396 §5: a plain "authorization_details" parameter's
+			// RFC 9396 §2: a plain "authorization_details" parameter's
 			// value is itself JSON array text, unlike every other plain
 			// parameter here, which is a bare string re-wrapped as a JSON
 			// string claim below. Storing it as a raw message keeps its

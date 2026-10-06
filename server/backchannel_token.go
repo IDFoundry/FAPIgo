@@ -44,15 +44,22 @@ type BackchannelTokenExchangeRequest struct {
 }
 
 // ExchangeBackchannelAuthentication authenticates the client, verifies
-// its DPoP proof, and polls the pending backchannel authentication
+// its sender-constraining binding (a DPoP proof or its mTLS
+// certificate), and polls the pending backchannel authentication
 // request identified by auth_req_id: if no decision has been recorded
-// yet, it fails with ErrorAuthorizationPending; once denied or the end
-// user failed to authenticate, it fails with ErrorAccessDenied; once
-// approved, it issues an access token bound to the DPoP key (plus an ID
-// token when the granted scope included "openid" and a refresh token
-// when it included "offline_access") — exactly once, mirroring
-// ExchangeAuthorizationCode's single-issuance guarantee. An approved
-// grant is checked against the client's current registration first, as
+// yet, it fails with ErrorAuthorizationPending (or ErrorSlowDown when
+// polled sooner than Limits.BackchannelAuthenticationPollInterval);
+// once denied or the end user failed to authenticate, it fails with
+// ErrorAccessDenied; once expired, with ErrorExpiredToken; once
+// approved, it issues an access token bound to the client's DPoP key or
+// mTLS certificate (plus an ID token when the granted scope included
+// "openid" and a refresh token when it included "offline_access") —
+// exactly once, mirroring ExchangeAuthorizationCode's single-issuance
+// guarantee: a later poll fails with ErrorInvalidGrant. An auth_req_id
+// issued to another client is refused with ErrorInvalidGrant; a store
+// that honours storage.PollBackchannelAuthentication.ClientID refuses
+// it without spending the approval. An approved grant is checked
+// against the client's current registration first, as
 // RefreshAccessToken does: a scope or authorization_details type the
 // client may no longer use is refused (invalid_scope, invalid_grant).
 func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req BackchannelTokenExchangeRequest) (TokenResult, error) {

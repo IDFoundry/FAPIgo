@@ -51,9 +51,13 @@
 //     (ordered FormParameter list, not url.Values), so the server — not
 //     an HTTP adapter — detects duplicate parameters.
 //   - RequestURI and InteractionHandle are opaque: no public
-//     constructor, only Server can produce one, and each is single-use —
-//     a second BeginAuthorization with the same request_uri, or a second
-//     CompleteAuthorization with the same handle, fails. An authorization
+//     constructor, only Server can produce one. An InteractionHandle is
+//     single-use — a second CompleteAuthorization with the same handle
+//     fails — and a request_uri is single-use at the point of
+//     authorization (FAPI 2.0 Security Profile §5.3.2.2 note 3):
+//     BeginAuthorization may be called with it again, for a reload,
+//     until one interaction begun from it completes, after which it
+//     fails. Until then it is a bearer value; see BeginAuthorization. An authorization
 //     code is likewise single-use: a second ExchangeAuthorizationCode
 //     with the same code fails. A refresh token is deliberately not
 //     rotated — FAPI 2.0 Security Profile Final §5.3.2.1 says an
@@ -93,11 +97,15 @@
 //     ProfileFAPISecurityWithMessageSigning. AssuranceProduction
 //     additionally requires an AuditSink, stores and key sources that
 //     declare production capabilities (storage.StoreAssurance,
-//     keys.KeySourceAssurance), signing and decryption keys with declared
-//     durable custody (keys.KeyCustodyAssurance), crypto/rand.Reader
-//     as Dependencies.Random, a hardened CIBA notifier
-//     (BackchannelNotifierAssurance) when CIBA is configured, and https
-//     issuer, endpoint and mTLS alias URLs — see AssuranceProduction.
+//     keys.KeySourceAssurance, including the attester key source of
+//     RegisteredAttesterKeys), signing and decryption keys with declared
+//     durable custody (keys.KeyCustodyAssurance), a custom
+//     AccessTokenIssuer that declares what it relies on
+//     (AccessTokenIssuerAssurance), crypto/rand.Reader as
+//     Dependencies.Random, a hardened CIBA notifier
+//     (BackchannelNotifierAssurance) when CIBA is configured, no loopback
+//     exception on Dependencies.FederationHTTP, and https issuer, endpoint
+//     and mTLS alias URLs — see AssuranceProduction.
 //   - Every access token this server issues is sender-constrained,
 //     either by DPoP (RFC 9449) or by the client's mTLS certificate (RFC
 //     8705 §3), per the client's registered SenderConstrain. Under DPoP,
@@ -154,7 +162,9 @@
 //     ProfileFAPISecurityWithMessageSigning, matching what
 //     PushAuthorizationRequest and CompleteAuthorization actually do
 //     for the configured profile.
-//   - PublicJWKS returns the union, deduplicated by kid, of
+//   - PublicJWKS returns the union (a key published for several
+//     purposes appears once; a kid naming two different keys is an
+//     error) of
 //     Dependencies.Keys' current public key for every signing purpose
 //     Config declares active, plus an access-token signing key from
 //     Dependencies.AccessTokens if it has one to publish (JWTAccessTokens

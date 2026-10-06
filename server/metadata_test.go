@@ -276,11 +276,11 @@ func TestMetadataMarshalJSONUsesDiscoveryFieldNames(t *testing.T) {
 }
 
 // TestMetadataOAuthOnlyOmitsOIDCOnlyFields confirms Config.OAuthOnly
-// stops Metadata from claiming ID token support it can never provide —
-// subject_types_supported and id_token_signing_alg_values_supported are
-// the only two fields with no RFC 8414 counterpart that this package
-// used to emit unconditionally (every other OIDC-only field was already
-// gated on its own algorithm being configured).
+// stops Metadata from claiming ID token support it can never provide:
+// subject_types_supported and id_token_signing_alg_values_supported,
+// the two OIDC-only fields this package otherwise emits unconditionally.
+// TestMetadataOAuthOnlyOmitsConfiguredOIDCAlgorithms covers the ones
+// gated on configuration.
 func TestMetadataOAuthOnlyOmitsOIDCOnlyFields(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.OAuthOnly = true
@@ -306,6 +306,48 @@ func TestMetadataOAuthOnlyOmitsOIDCOnlyFields(t *testing.T) {
 	}
 	if !containsString(md.GrantTypesSupported, "authorization_code") {
 		t.Fatalf("GrantTypesSupported = %v, want to still contain authorization_code", md.GrantTypesSupported)
+	}
+}
+
+// TestMetadataOAuthOnlyOmitsConfiguredOIDCAlgorithms: under
+// Config.OAuthOnly the ID token encryption and UserInfo algorithm
+// fields, and claims_parameter_supported, are left out even when
+// Config.Algorithms and Dependencies.IdentityClaims would otherwise
+// advertise them — such a server never issues an ID token or answers
+// UserInfo.
+func TestMetadataOAuthOnlyOmitsConfiguredOIDCAlgorithms(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.OAuthOnly = true
+	cfg.Algorithms.IDToken = 0
+	cfg.Limits.IDTokenLifetime = 0
+	cfg.Algorithms.IDTokenEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.RSAOAEP256}
+	cfg.Algorithms.IDTokenEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{fapi.A256GCM}
+	cfg.Algorithms.UserInfo = fapi.ES256
+	cfg.Algorithms.UserInfoEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.RSAOAEP256}
+	cfg.Algorithms.UserInfoEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{fapi.A256GCM}
+	deps := validDependencies()
+	deps.ClientEncryptionKeys = fakeClientEncryptionKeySource{}
+	deps.IdentityClaims = fakeIdentityClaims{}
+
+	srv, err := server.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	md := srv.Metadata(context.Background())
+
+	for name, got := range map[string][]string{
+		"IDTokenEncryptionAlgValuesSupported":  md.IDTokenEncryptionAlgValuesSupported,
+		"IDTokenEncryptionEncValuesSupported":  md.IDTokenEncryptionEncValuesSupported,
+		"UserinfoSigningAlgValuesSupported":    md.UserinfoSigningAlgValuesSupported,
+		"UserinfoEncryptionAlgValuesSupported": md.UserinfoEncryptionAlgValuesSupported,
+		"UserinfoEncryptionEncValuesSupported": md.UserinfoEncryptionEncValuesSupported,
+	} {
+		if len(got) != 0 {
+			t.Errorf("%s = %v, want empty under OAuthOnly", name, got)
+		}
+	}
+	if md.ClaimsParameterSupported {
+		t.Errorf("ClaimsParameterSupported = true, want false under OAuthOnly")
 	}
 }
 

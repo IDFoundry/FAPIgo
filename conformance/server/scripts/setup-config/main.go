@@ -49,6 +49,10 @@
 //
 //	go run ./conformance/server/scripts/setup-config
 //
+// It takes no arguments. -h or --help prints what it writes and exits
+// without writing anything; so does any unknown flag or argument, with
+// exit status 2.
+//
 // Doesn't touch TLS certs (conformance/server/certs/) — run
 // conformance/server/scripts/generate-server-cert.sh for those; that
 // script is already a one-line, already-idempotent shell script and
@@ -66,6 +70,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"flag"
 	"fmt"
 	"log"
 	"math/big"
@@ -182,7 +187,41 @@ func mtlsURL(host, path string) string {
 	return "https://" + host + ":8444" + path
 }
 
+// usage describes what a run writes. flag.Parse prints it, before
+// anything is written, for -h, --help or an unknown flag.
+func usage() {
+	fmt.Fprint(flag.CommandLine.Output(), `Usage: go run ./conformance/server/scripts/setup-config
+
+Bootstraps the AS-side conformance profiles' test clients. Run it from the
+repository root (or from this directory). It takes no arguments and reads
+no environment variables.
+
+For each profile, under conformance/server/oidf-config/, it writes:
+  <profile>-plan.json    the OIDF suite's plan config (gitignored): the test
+                         clients' private keys and mTLS certificates,
+                         generated once and kept on later runs
+  <profile>.config.json  the conformance AS's config (committed): re-patched
+                         on every run with those clients' public keys or
+                         certificate thumbprints, so the two stay in sync
+
+Expect it to modify these committed files: baseline, ciba, ciba-mtls,
+client-auth-mtls, client-auth-mtls-and-mtls, message-signing,
+message-signing-mtls and mtls .config.json.
+
+It doesn't touch TLS certificates (conformance/server/certs/); run
+conformance/server/scripts/generate-server-cert.sh for those.
+`)
+}
+
 func main() {
+	flag.Usage = usage
+	flag.Parse()
+	if flag.NArg() > 0 {
+		fmt.Fprintf(flag.CommandLine.Output(), "setup-config: unexpected argument %q\n\n", flag.Arg(0))
+		flag.Usage()
+		os.Exit(2)
+	}
+
 	dir, err := oidfConfigDir()
 	if err != nil {
 		log.Fatal(err)

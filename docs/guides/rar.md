@@ -72,7 +72,11 @@ result := server.Authorize(subject, authCtx, server.GrantedAuthorization{
 
 `CompleteAuthorization` refuses a granted object that isn't an
 acceptable narrowing of one that was requested (per `ValidateGrant`),
-just as it refuses a scope that wasn't requested.
+just as it refuses a scope that wasn't requested. CIBA works the same
+way: `BackchannelInteractionRequest.AuthorizationDetails` holds the
+request, and `CompleteBackchannelAuthentication` applies the same check.
+The client credentials grant has no one to approve, so what the
+`ClientCredentialsRARPolicy` returns is what's granted.
 
 ## Client: ask with the same definition
 
@@ -87,7 +91,10 @@ session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{
 
 `RARSet` stamps the definition's `type` into each object, so your Go
 type needn't carry one. The token response's granted details come back
-as `TokenSet.AuthorizationDetails`.
+as `TokenSet.AuthorizationDetails`. The same `AuthorizationDetails`
+field is on `client.BeginBackchannelAuthenticationRequest`, for CIBA, and
+on `client.ClientCredentialsTokenRequest`, whose result reports the
+granted details as `ClientCredentialsTokenResult.AuthorizationDetails`.
 
 ## Resource server: read what was granted
 
@@ -128,5 +135,10 @@ the scheme the token was presented with.
   [`linked/rar.go`](../../examples/linked-accounts/linked/rar.go).
 - [decoupled-checkout](../../examples/decoupled-checkout/README.md): the
   same over CIBA, approved on the customer's phone.
+- [payroll-run](../../examples/payroll-run/README.md): a `payroll_batch`
+  requested through the client credentials grant, with no one to approve
+  it: the bank's `ClientCredentialsRARPolicy` checks it against the
+  company's mandate, in
+  [`payroll/rar.go`](../../examples/payroll-run/payroll/rar.go).
 
 [RFC 9396]: https://www.rfc-editor.org/rfc/rfc9396

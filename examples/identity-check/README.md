@@ -112,7 +112,7 @@ you approved, so asking again gets nothing more.
 | Read the claims off the wire | The ID token and UserInfo response are encrypted to Fernway (JWE): an observer sees only their headers |
 | Swap in Alex's ID token | A genuine ID token from the bank, for Fernway, but from Alex's sign-in: its `nonce` isn't this sign-in's |
 | Swap in Brightline's ID token | A genuine ID token from the bank, but Brightline's, and not encrypted, though Fernway registered for encrypted ID tokens |
-| Swap in Alex's UserInfo response | Genuine and encrypted to Fernway, but its `sub` isn't the ID token's (OIDC Core §5.3.4) |
+| Swap in Alex's UserInfo response | Genuine and encrypted to Fernway, but its `sub` isn't the ID token's (OIDC Core §5.3.2) |
 | Tamper with the UserInfo response | It no longer decrypts |
 | Use the access token from another device | The token is DPoP-bound to Fernway's key |
 

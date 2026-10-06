@@ -26,7 +26,7 @@ import (
 // SenderConstrain-conditional branches throughout fakeAS itself, which
 // every other flow_test.go test also relies on. It asserts no DPoP
 // header is ever presented (the whole point of SenderConstrainMTLS)
-// and returns "token_type": "Bearer" (RFC 8705 §3.4) unless
+// and returns "token_type": "Bearer" (RFC 8705 §3) unless
 // tokenTypeOverride says otherwise.
 type fakeMTLSAS struct {
 	t          *testing.T

@@ -204,7 +204,7 @@ func TestVerifyRejectsReplayedDPoPProof(t *testing.T) {
 }
 
 // TestVerifyRejectsBearerSchemeWithoutCertificate covers a DPoP-bound
-// token presented with the "Bearer" scheme (RFC 8705 §3.4's
+// token presented with the "Bearer" scheme (RFC 8705 §3's
 // presentation of an mTLS-bound token) and no certificate: the token
 // isn't bound to the credential presented, so it's invalid_token —
 // see TestVerifyRejectsMTLSBoundTokenWithoutCertificate for an

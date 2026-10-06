@@ -39,7 +39,7 @@ func TestAuthorizationCodeFlowMTLSBinding(t *testing.T) {
 		t.Fatalf("AccessToken is empty")
 	}
 	if tokens.TokenType != "Bearer" {
-		t.Errorf("TokenType = %q, want Bearer (RFC 8705 §3.4)", tokens.TokenType)
+		t.Errorf("TokenType = %q, want Bearer (RFC 8705 §3)", tokens.TokenType)
 	}
 	if !tokens.HasIDToken || tokens.Subject != fapitest.Subject {
 		t.Errorf("HasIDToken=%v Subject=%q, want true/%q", tokens.HasIDToken, tokens.Subject, fapitest.Subject)

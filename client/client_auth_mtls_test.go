@@ -75,7 +75,7 @@ func (a *fakeCertAuthAS) handleToken(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	// ClientAuthMethod and SenderConstrain are independent — these test
 	// clients leave SenderConstrain at its default (DPoP), so the
-	// expected token_type is "DPoP", not "Bearer" (RFC 8705 §3.4's
+	// expected token_type is "DPoP", not "Bearer" (RFC 8705 §3's
 	// "Bearer" applies only under SenderConstrainMTLS, covered instead
 	// by mtls_test.go's fakeMTLSAS).
 	_ = json.NewEncoder(w).Encode(map[string]any{

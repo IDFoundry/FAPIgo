@@ -59,8 +59,9 @@ behaviour and negative-test expectations differ. See
   locally running suite and prints
   one combined summary. See the script's own header comment for
   prerequisites and env vars.
-- `resource/` — resource-server verification test vectors (DPoP proof
-  validation, access-token binding checks) used outside the OIDF suite.
+- `resource/` — reserved for resource-server verification test vectors;
+  it holds none today, and the `resource` package's own tests cover that
+  role instead (see [`resource/vectors/README.md`](resource/vectors/README.md)).
   The suite doesn't run its own dedicated resource-server conformance
   plan against this role, but the AS test plan's happy-flow module does
   call a real protected-resource endpoint with the token it just
@@ -144,7 +145,8 @@ into `scripts/run-all.sh` as its own "RP ciba-mtls" leg. See
 [`client/scripts/README.md`](client/scripts/README.md#ciba--profileciba)
 for the full breakdown, including the four fixes (three driver-side,
 one genuine `client`/`internal/token` gap) that took the `-mtls`
-re-attempt from its first partial result to a clean 22/22.
+re-attempt from its first partial result to a clean 22/22 (the suite has
+since added a module; the run for v0.50.0 passed all 23).
 
 ## RAR
 

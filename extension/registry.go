@@ -13,9 +13,9 @@ type Registry struct {
 	byName map[string]Registered
 }
 
-// NewRegistry validates and indexes defs. It fails if two Definitions
-// share a wire name, or if any Definition's declared Cardinality does
-// not match its Go type.
+// NewRegistry validates and indexes defs. It fails if any Definition
+// has an empty wire name, if two Definitions share a wire name, or if
+// any Definition's declared Cardinality does not match its Go type.
 func NewRegistry(defs ...Registered) (*Registry, error) {
 	byName := make(map[string]Registered, len(defs))
 	for _, d := range defs {

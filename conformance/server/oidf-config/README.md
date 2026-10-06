@@ -3,6 +3,13 @@
 OpenID Foundation conformance suite configuration for the FAPI 2.0
 authorization-server test plan.
 
+Pass counts quoted per profile below ("Confirmed live: N/N", "Result of
+a live run") record that profile's first live confirmation; the suite
+adds modules over time, so later runs can run more. For current counts,
+see the latest run's summary (the `report.md` that
+[`conformance/scripts/run-all.sh`](../../scripts/run-all.sh) writes, and
+the GitHub Actions job summary).
+
 `conformance-as` supports exactly one `Profile` per process, so each
 FAPI 2.0 variant gets its own config file here:
 

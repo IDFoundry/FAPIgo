@@ -29,9 +29,9 @@ type ResolveRequest struct {
 	// ("iss") and signed by exactly this entity, or ResolveViaEndpoint
 	// refuses it. Required. OpenID Federation 1.0 lets any Federation
 	// Entity run a resolve endpoint and leaves choosing a trusted
-	// resolver to the caller (§11); the resolver answers for the
+	// resolver to the caller (§8.3.3, §17.2.3); the resolver answers for the
 	// subject's Resolved Metadata, so it must be one the caller trusts,
-	// typically the Trust Anchor itself (§17: "that entity should be
+	// typically the Trust Anchor itself (§17.3: "that entity should be
 	// both Trust Anchor and Resolver"). Without it, any member of the
 	// federation could sign a response about any subject, with
 	// metadata of its choosing.

@@ -13,14 +13,14 @@ import (
 var listingFilterParams = []string{"entity_type", "trust_marked", "trust_mark_type", "intermediate"}
 
 // SubjectFromFetchRequest extracts and validates the "sub" query
-// parameter from an OpenID Federation 1.0 §9 Fetch Subordinate
+// parameter from an OpenID Federation 1.0 §8.1.1 Fetch Subordinate
 // Statement Request — REQUIRED, and (implicitly, since it names an
 // Entity Identifier) syntactically valid. Returns a *Error
 // (ErrorInvalidRequest, HTTP 400, ready to pass to WriteJSON) when
 // absent or malformed.
 //
 // Only GET requests with "sub" as a query parameter are supported —
-// this package's own §9 text notes client-authenticated fetch requests
+// OpenID Federation 1.0 §8.1.1 has client-authenticated fetch requests
 // use POST with the parameter in the body instead, which this helper
 // does not parse; an embedder needing that variant reads r.PostForm's
 // own "sub" value directly.
@@ -212,12 +212,12 @@ func parseListingFilterBool(name, raw string) (bool, error) {
 }
 
 // TrustMarkFromStatusRequest extracts and validates the "trust_mark"
-// POST form parameter from an OpenID Federation 1.0 §8 Trust Mark
+// POST form parameter from an OpenID Federation 1.0 §8.4.1 Trust Mark
 // Status Request — REQUIRED. Returns a *Error (ErrorInvalidRequest,
 // HTTP 400, ready to pass to WriteJSON) when absent.
 //
 // Only the no-client-authentication shape (POST, parameters in the
-// body) is covered — §8's client-authenticated variant is POST too, so
+// body) is covered — §8.4.1's client-authenticated variant is POST too, so
 // r.PostFormValue already handles both; there is no GET variant to
 // additionally support the way Fetch has one.
 func TrustMarkFromStatusRequest(r *http.Request) (string, error) {
@@ -229,7 +229,7 @@ func TrustMarkFromStatusRequest(r *http.Request) (string, error) {
 }
 
 // TrustMarkListingFilters extracts and validates the query parameters
-// of an OpenID Federation 1.0 §9 Trust Marked Entities Listing Request:
+// of an OpenID Federation 1.0 §8.5.1 Trust Marked Entities Listing Request:
 // "trust_mark_type" (REQUIRED) and "sub" (OPTIONAL, validated as an
 // Entity Identifier when present). Returns a *Error (ErrorInvalidRequest,
 // HTTP 400, ready to pass to WriteJSON) when trust_mark_type is absent

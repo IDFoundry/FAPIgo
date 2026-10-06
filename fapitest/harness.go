@@ -28,11 +28,23 @@ import (
 	"github.com/idfoundry/fapigo/storage/memstore"
 )
 
+// Fixed identities the harness wires in, for a test to assert against.
 const (
-	Issuer      = "https://as.fapitest.internal"
-	ClientID    = fapi.ClientID("fapitest-client")
+	// Issuer is the harness server's issuer identifier, the "iss" of
+	// everything it signs. Its endpoints are served at the
+	// httptest.Server's own loopback address instead.
+	Issuer = "https://as.fapitest.internal"
+
+	// ClientID is the one client the harness registers and its client
+	// authenticates as.
+	ClientID = fapi.ClientID("fapitest-client")
+
+	// RedirectURI is the client's redirect URI when Config.RedirectURI is
+	// empty.
 	RedirectURI = "https://rp.fapitest.internal/callback"
-	Subject     = "end-user-1"
+
+	// Subject is the end-user every authorization is approved for.
+	Subject = "end-user-1"
 )
 
 // Config selects which FAPI 2.0 profile the harness's client and server

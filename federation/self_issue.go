@@ -34,7 +34,7 @@ type SelfIssueConfig struct {
 	AuthorityHints []string
 
 	// TrustMarkIssuers is the "trust_mark_issuers" claim (OpenID
-	// Federation 1.0 §3.1.1) a Trust Anchor publishes: for each Trust
+	// Federation 1.0 §3.1.2) a Trust Anchor publishes: for each Trust
 	// Mark type, the Entity Identifiers accredited to issue it, or an
 	// empty list if anyone may. Resolver.VerifyTrustMark enforces it
 	// under RequireFederationAccreditation. Nil for any entity that

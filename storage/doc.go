@@ -5,10 +5,10 @@
 // collapsed into one generic CRUD interface: client_repository.go
 // defines the server's registered-client lookup, transaction.go defines
 // the server's PAR transaction store — CreatePAR persists a pushed
-// authorization request, BeginAuthorization atomically retrieves and
-// consumes one and associates it with a new interaction handle, and
-// CompleteAuthorization atomically retrieves and consumes that
-// interaction — grant.go defines the server's authorization-code and
+// authorization request, BeginAuthorization retrieves one (repeatably,
+// until an interaction for it completes) and associates it with a new
+// interaction handle, and CompleteAuthorization atomically retrieves and
+// consumes that interaction and, with it, the request — grant.go defines the server's authorization-code and
 // refresh-token store — CreateAuthorizationCode/CreateRefreshToken each
 // persist one, RedeemAuthorizationCode/RedeemRefreshToken each
 // retrieve one (an authorization code single-use, a refresh token
@@ -23,9 +23,10 @@
 // nonce.go the DPoP NonceStore, and backchannel.go the server's CIBA
 // BackchannelAuthenticationStore, on the same per-role pattern. No
 // interface here exposes GetX/UpdateX/DeleteX-style CRUD —
-// every method is a named security operation (Create, Consume, Redeem,
-// UseOnce), and redemption-style operations verify and consume state
-// atomically in one call rather than as separate check-then-act steps.
+// every method is a named operation (Create, Resolve, Lookup, Consume,
+// Redeem, Decide, Poll, Revoke, UseOnce), and redemption-style
+// operations verify and consume state atomically in one call rather
+// than as separate check-then-act steps.
 // ReplayStore persists only a digest and expiry per use, never a
 // complete client assertion or DPoP proof, and must keep each until at
 // least that expiry: one forgotten sooner can be replayed.
@@ -34,7 +35,9 @@
 // already used, refused). A store that couldn't answer at all — its
 // backend unreachable, a timeout — may wrap ErrStoreUnavailable to say
 // so, and a resource server then answers 500 rather than telling the
-// client its token or DPoP proof is invalid.
+// client its token or DPoP proof is invalid. The authorization server
+// doesn't distinguish it: there, any ClientRepository error reads as an
+// unknown client, and any other store error fails the request.
 //
 // Records keep as explicit fields only what a store itself acts on — a
 // lookup hash, ClientID, ExpiresAt, and for CIBA the decision status and
@@ -58,8 +61,13 @@
 // reusable contract test suite (e.g. TestGrantStoreContract(t, factory))
 // that exercises single-use redemption and its exactly-one-winner
 // behavior under in-process concurrency, field round-tripping,
-// unknown-key handling, and revocation, against any implementation —
-// first-party or downstream. The suite runs one store instance in one
+// unknown-key handling, revocation, and refusing another client's code
+// or CIBA request without spending it, against any implementation —
+// first-party or downstream. There is one per interface:
+// TestTransactionStoreContract, TestGrantStoreContract,
+// TestReplayStoreContract, TestSessionStoreContract,
+// TestNonceStoreContract, TestAccessTokenStoreContract and
+// TestBackchannelAuthenticationStoreContract. The suite runs one store instance in one
 // process against context.Background(); it deliberately does not
 // verify cross-instance/cross-connection atomicity, ExpiresAt-driven
 // eviction, context-cancellation, or that the store deep-copies

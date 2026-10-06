@@ -31,10 +31,12 @@ import (
 // Mark's own type in its own "trust_mark_owners" claim (§7.2), a
 // "delegation" claim proving the issuer was actually authorized by that
 // type's real owner is additionally required and checked — see
-// checkTrustMarkDelegation. This first version does not implement the
-// Trust Mark Status or Trust Marked Entities Listing endpoints (§8/§9)
-// — see internal/federation's own doc.go for exactly what is and is
-// not covered.
+// checkTrustMarkDelegation. VerifyTrustMark checks the mark and its
+// issuer only: it never queries the issuer's Trust Mark Status endpoint
+// (§8.4) to learn whether the mark is still active — call
+// CheckTrustMarkStatus for that. See the package doc for the Trust Mark
+// Status and Trust Marked Entities Listing (§8.5) support this package
+// has.
 func (r *Resolver) VerifyTrustMark(ctx context.Context, subjectID string, raw RawTrustMark, accreditation TrustMarkAccreditation) (TrustMarkClaims, error) {
 	if subjectID == "" {
 		return TrustMarkClaims{}, fmt.Errorf("federation: subject entity ID is empty")
@@ -81,7 +83,7 @@ func (r *Resolver) VerifyTrustMark(ctx context.Context, subjectID string, raw Ra
 // issuer is some member of the federation — any member, including the
 // entity the mark is about, can sign one of any type. Whether that
 // issuer is recognised for the mark's type is the Trust Anchor's
-// "trust_mark_issuers" claim, a federation policy (§17.6) this choice
+// "trust_mark_issuers" claim, a federation policy (§17.5) this choice
 // decides whether to apply. There is no default.
 type TrustMarkAccreditation uint8
 
@@ -97,7 +99,7 @@ const (
 	// AcceptAnyFederationIssuer accepts a Trust Mark from any issuer
 	// with a valid Trust Chain, leaving accreditation to the caller —
 	// for a mark whose accreditation authority is established out of
-	// band (§17.6). Check TrustMarkClaims.Issuer yourself before
+	// band (§17.5). Check TrustMarkClaims.Issuer yourself before
 	// relying on it.
 	AcceptAnyFederationIssuer
 )
@@ -198,8 +200,8 @@ func (r *Resolver) verifyTrustMarkDelegationAgainstJWKS(d intfed.TrustMarkDelega
 }
 
 // CheckTrustMarkStatus queries trustMarkToken's own issuer for its
-// current status (OpenID Federation 1.0 §8) and returns the verified
-// response claims. §8: "The query MUST be sent to the Trust Mark
+// current status (OpenID Federation 1.0 §8.4) and returns the verified
+// response claims. §8.4: "The query MUST be sent to the Trust Mark
 // Issuer" — trustMarkToken's own unverified "iss" claim names it, and
 // that issuer is resolved as a fresh Trust Chain (the same way
 // VerifyTrustMark already establishes trust in a Trust Mark's issuer)
@@ -207,7 +209,7 @@ func (r *Resolver) verifyTrustMarkDelegationAgainstJWKS(d intfed.TrustMarkDelega
 // queried or its response ever trusted.
 //
 // A Trust Mark Issuer that answers with HTTP 404 for an unknown Trust
-// Mark (§8's own "MUST respond with 404") surfaces here as
+// Mark (§8.4.2's own "MUST respond with an HTTP status code 404") surfaces here as
 // fapihttp.ErrUnexpectedStatus wrapping that status code — the same as
 // any other unexpected status from a Fetch/Post call, not a dedicated
 // typed error in this first version.

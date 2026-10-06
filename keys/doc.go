@@ -7,7 +7,9 @@
 // signing, ID token and access token signing, client assertions,
 // request objects, DPoP proofs); verification.go defines the
 // corresponding public-key resolution used to check signatures against
-// a known or discovered JWK. decryption.go defines Decrypter, the
+// a known or discovered JWK, and attester.go the separate
+// AttesterKeySource that resolves a client attestation's keys by the
+// Attester that vouches for the client, never by the client itself. decryption.go defines Decrypter, the
 // decryption-side counterpart: recovering the content-encryption key of
 // an encrypted ID token or UserInfo response without ever exposing the
 // recipient's private key to this module or its caller.
@@ -41,7 +43,8 @@
 // production assurance require every signing KeyManager and Decrypter
 // to declare durable KeyCustody through KeyCustodyAssurance. Remote
 // verification keys come from JWKSIssuerKeySource (a live, fapihttp-
-// hardened JWKS fetch) or LocalIssuerKeys (an authorization server's own
+// hardened JWKS fetch, declared hardened only while its fapihttp.Client
+// grants no loopback exception) or LocalIssuerKeys (an authorization server's own
 // KeyManager, for a verifier in the same process); production assurance
 // requires such a key source to declare KeySourceAssurance.
 //

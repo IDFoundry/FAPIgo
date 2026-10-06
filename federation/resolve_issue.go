@@ -17,7 +17,7 @@ type ResolveIssueConfig struct {
 	// EntityID is this entity's own Entity Identifier — the "iss" every
 	// Resolve Response it signs carries: the entity operating the
 	// resolve endpoint, not necessarily (though commonly) a Trust
-	// Anchor — OpenID Federation 1.0 §8.7's own "Any Federation Entity
+	// Anchor — OpenID Federation 1.0 §5.1.1's own "Any Federation Entity
 	// MAY publish a federation_resolve_endpoint" applies identically
 	// here (§8.3). Required.
 	EntityID string

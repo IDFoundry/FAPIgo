@@ -59,7 +59,7 @@ type SubordinateIssueDependencies struct {
 //
 // Like every other type in this package, SubordinateIssuer is
 // transport-agnostic: it signs and returns a token; serving it over
-// HTTP at a federation_fetch_endpoint (OpenID Federation 1.0 §9,
+// HTTP at a federation_fetch_endpoint (OpenID Federation 1.0 §8.1,
 // SubjectFromFetchRequest's own doc comment) is the caller's own
 // responsibility, matching how SelfIssuer's own output is served at
 // WellKnownPath.
@@ -106,7 +106,7 @@ type SubordinateStatementParams struct {
 	// Subject is the immediate subordinate's own Entity Identifier —
 	// the "sub" claim. Required; must not equal
 	// SubordinateIssueConfig.EntityID (SubordinateStatement rejects that
-	// itself — OpenID Federation 1.0 §9 recommends invalid_request when
+	// itself — OpenID Federation 1.0 §8.1.2 recommends invalid_request when
 	// a fetch request's own "sub" names the issuing entity itself).
 	Subject string
 

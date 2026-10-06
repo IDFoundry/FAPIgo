@@ -34,6 +34,8 @@ type NonceRecord struct {
 // Consume is the only way to check a nonce, and it always retires the
 // record it returns.
 type NonceStore interface {
+	// Issue persists issuance under its Nonce until at least its
+	// ExpiresAt, so Consume can find it.
 	Issue(ctx context.Context, issuance NonceIssuance) error
 
 	// Consume atomically retrieves and retires the nonce identified by

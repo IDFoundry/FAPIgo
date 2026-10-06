@@ -40,7 +40,7 @@
 // Entity Configuration. Like every other type in this package, it is
 // transport-agnostic: SubjectFromFetchRequest and
 // RejectUnsupportedListingFilters are small net/http adapter helpers
-// for the request-shape checks OpenID Federation 1.0 §9/§8.2 require of
+// for the request-shape checks OpenID Federation 1.0 §8.1/§8.2 require of
 // a federation_fetch_endpoint/federation_list_endpoint, but this
 // package still does not itself serve HTTP — an embedder wires
 // SubordinateIssuer and these helpers into its own http.Handler, the
@@ -94,7 +94,7 @@
 // §7's two live-query companions are both covered too.
 // Resolver.CheckTrustMarkStatus is a real network call (like Resolve
 // itself) — it queries a Trust Mark's own issuer's Trust Mark Status
-// endpoint (§8, POST-only, hence fapihttp.Client.Post) and verifies the
+// endpoint (§8.4, POST-only, hence fapihttp.Client.Post) and verifies the
 // signed response the same "resolve the issuer's Trust Chain first"
 // way VerifyTrustMark does. TrustMarkIssuer.StatusResponse and
 // TrustMarkFromStatusRequest are the producer-side counterpart — sign
@@ -120,7 +120,7 @@
 // exist to move the wire format, never to decide or record a Trust
 // Mark's actual standing.
 //
-// The Resolve endpoint (§8.3) is covered on the consumer side only:
+// The Resolve endpoint (§8.3) is covered on both sides. As a consumer,
 // Resolver.ResolveViaEndpoint queries the resolve endpoint of a resolver
 // the caller trusts (ResolveRequest.ExpectedIssuer, typically the Trust
 // Anchor) instead of walking a Trust Chain hop by hop itself, refusing a
@@ -179,7 +179,11 @@
 // yet implemented: Explicit Registration (§12.2, not implemented by
 // this package at all). Metadata member names are matched exactly, as
 // metadata policy matches them: a member naming a known parameter in a
-// different case is rejected, never read as that parameter.
+// different case is rejected, never read as that parameter. A client_id
+// whose resolution fails is remembered as failed for
+// AutomaticRegistrationConfig.FailureCacheAge (DefaultFailureCacheAge
+// when unset), so a repeating unresolvable client_id doesn't cost a full
+// resolution on every request.
 // §12.1.1's own aud/sub/jti Request Object rules are enforced by the
 // server package via storage.RegisteredClientConfig's own
 // AutomaticFederationRegistration field, not by this package — a

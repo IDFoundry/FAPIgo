@@ -54,7 +54,7 @@ type TrustMarkIssueDependencies struct {
 const TrustMarkContentType = "application/trust-mark+jwt"
 
 // TrustMarkIssuer signs Trust Marks (OpenID Federation 1.0 §7.1), Trust
-// Mark Delegations (§7.2), and Trust Mark Status Responses (§8).
+// Mark Delegations (§7.2), and Trust Mark Status Responses (§8.4.2).
 // Construct one with NewTrustMarkIssuer.
 //
 // Like every other type in this package, TrustMarkIssuer is
@@ -62,7 +62,7 @@ const TrustMarkContentType = "application/trust-mark+jwt"
 // HTTP itself. TrustMark and Delegation answer to no federation-defined
 // HTTP endpoint at all: issuance is an out-of-band administrative act
 // (an entity applies for certification, an operator decides to grant
-// it). StatusResponse is different — the Status endpoint (§8) IS a
+// it). StatusResponse is different — the Status endpoint (§8.4) IS a
 // real, request-driven endpoint — but the request-shape validation for
 // it (TrustMarkFromStatusRequest) is still a separate, small net/http
 // helper, the same division SubordinateIssuer/SubjectFromFetchRequest
@@ -221,7 +221,7 @@ type StatusResponseParams struct {
 }
 
 // StatusResponse signs and returns a Trust Mark Status Response
-// (OpenID Federation 1.0 §8: iss == Config.EntityID) for p. The
+// (OpenID Federation 1.0 §8.4.2: iss == Config.EntityID) for p. The
 // returned token is a trust-mark-status-response+jwt compact
 // serialization, meant to be served verbatim, with Content-Type
 // "application/trust-mark-status-response+jwt", from this entity's own

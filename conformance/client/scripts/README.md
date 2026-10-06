@@ -21,6 +21,13 @@ This is the architectural inverse of `conformance/server`'s setup: there,
 the suite drives requests at this repo's hosted AS; here, this repo's
 own driver drives requests at the suite's mock AS.
 
+Pass counts quoted per profile below ("Confirmed live: N/N", "Result of
+a live run") record that profile's first live confirmation; the suite
+adds modules over time, so later runs can run more. For current counts,
+see the latest run's summary (the `report.md` that
+[`conformance/scripts/run-all.sh`](../../scripts/run-all.sh) writes, and
+the GitHub Actions job summary).
+
 ## Running it
 
 The suite must already be running locally (see

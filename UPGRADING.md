@@ -22,7 +22,7 @@ and `keys/ephemeral` needs only the steps not marked *production only*.
 **Affects:** a caller of `federation.Resolver.ResolveViaEndpoint`.
 
 **Why:** OpenID Federation 1.0 lets any Federation Entity run a resolve
-endpoint, and leaves choosing a trusted resolver to the caller (§11).
+endpoint, and leaves choosing a trusted resolver to the caller (§17.2.3).
 `ResolveViaEndpoint` trusted a Resolve Response signed by any entity it
 could resolve, so any member of the federation, a leaf included, could
 sign a response about any subject, with Resolved Metadata of its
@@ -30,7 +30,7 @@ choosing (an attacker's `jwks_uri`, say), and it was accepted.
 
 **What to change:** set `ResolveRequest.ExpectedIssuer` to the Entity
 Identifier of the resolver you trust, typically the Trust Anchor
-(§17 recommends the Trust Anchor also serve as the resolver), and point
+(§17.3 recommends the Trust Anchor also serve as the resolver), and point
 `Endpoint` at that resolver's `federation_resolve_endpoint`:
 
 ```go
@@ -672,6 +672,8 @@ Chain that used to resolve now fails with a `policy error`, the error
 names the entity type, parameter and rule; the federation's policy needs
 correcting — don't work around it.
 
+
+## v0.40.0
 
 ### `fapihttp`'s loopback settings: literal hosts only, split from http
 

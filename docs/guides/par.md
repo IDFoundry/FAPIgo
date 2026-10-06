@@ -58,8 +58,8 @@ a `request_uri` this server issued, to the client it was issued to,
 before it expires. A plain authorization request without one is
 refused. A reload can begin the same `request_uri` again, but only one
 interaction for it can complete, so treat it as a bearer value until
-then: serve the login page with `Referrer-Policy: no-referrer` (FAPI 2.0
-Security Profile §6.4).
+then: serve the login page with `Referrer-Policy: no-referrer`, so it
+can't leak into the CSRF FAPI 2.0 Security Profile §6.4 describes.
 
 Unregistered parameters are ignored rather than echoed into the grant,
 and a PAR request that itself carries a `request_uri` is refused.

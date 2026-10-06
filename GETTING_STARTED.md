@@ -24,7 +24,10 @@ specifically so you don't have to do it before you can run anything:
 
 - **`storage/memstore`** — in-memory `ClientRepository`, `TransactionStore`,
   `GrantStore`, `ReplayStore`, `RevocationStore`, and `AccessTokenStore`
-  (only needed for opaque access tokens — see step 4).
+  (only needed for opaque access tokens — see step 4), plus the stores
+  for features you turn on later: `BackchannelAuthenticationStore` (CIBA),
+  `NonceStore` (DPoP nonces) and, on the relying-party side,
+  `SessionStore`.
 - **`keys/ephemeral`** — in-memory `KeyManager` and `ClientKeySource`.
 
 **Both are development/testing only. Never production** — see each
@@ -117,7 +120,8 @@ private-use scheme in reverse-domain form
 (`com.example.wallet:/callback`), or loopback http to `127.0.0.1` or
 `[::1]`, which matches on whatever port the app listens on. Write the
 private-use form with a single slash, as RFC 8252 §7.1 does:
-`com.example.wallet:/callback`, not `com.example.wallet://callback`. In
+`com.example.wallet:/callback`, not `com.example.wallet://callback`,
+which is refused. In
 production a web client can use neither; under development assurance
 it may use loopback http, matched exactly. On the relying-party side, a desktop app
 that listens on a port the operating system picks for each flow sets
@@ -371,7 +375,11 @@ decides and where the claim lands, so pick by what you need:
 
 `IDTokenClaims` values are JSON-encoded, and server-managed names
 (`iss`, `sub`, `aud`, `exp`, `iat`, `nonce`, `auth_time`, `acr`, `amr`,
-`at_hash`, `azp`, `c_hash`, `s_hash`, `jti`, `nbf`, `cnf`) are rejected. On a name
+`at_hash`, `azp`, `c_hash`, `s_hash`, `jti`, `nbf`, `cnf`), along with
+names that change how a relying party processes the token
+(`_claim_names`, `_claim_sources`, `sub_jwk`, `events`), are rejected.
+Identity claims only ever add the names the client requested and the
+user approved, never a server-managed one. On a name
 collision the more specific source wins: `IDTokenClaims` over identity
 claims over extension claims. All three are carried forward to ID
 tokens re-issued on refresh, with no storage change on your side.
@@ -401,7 +409,9 @@ at the same token endpoint — OpenID4VCI's `pre-authorized_code`, say —
 read the request once with `server.TokenEndpointRequestFromHTTP` and
 switch on `GrantType()`. For your own grant, take its form with
 `Parameters()`, authenticate the client with `AuthenticateAttestedClient`
-(`req.AttestedClientAuthentication()`), and check its DPoP proof or
+(`req.AttestedClientAuthentication()`) — the only client authentication
+offered for a grant you serve, so its clients register for
+attestation-based client authentication — and check its DPoP proof or
 client certificate with `VerifyTokenRequestBinding`: the same checks,
 and the same replay records, as this package's own grants. List the
 grant type in `Config.AdditionalGrantTypes` so `Metadata` advertises
@@ -423,9 +433,12 @@ only its own installation's); revoking one also revokes its grant by
 `GrantID`, so give each grant its own ID. The `TokenRevocationResult`
 `RevokeToken` returns names that grant when a client ends it, so you can
 delete anything you kept for it at once; it's for you only, and the
-response stays the same empty 200. Access tokens are refused with
-`unsupported_token_type`: they expire on their own, and `RevokeGrant`
-ends them early.
+response stays the same empty 200. Access tokens can't be revoked: one
+in JWT form, or a token sent with `token_type_hint=access_token` that
+isn't one of the client's refresh tokens, gets `unsupported_token_type`
+(an opaque access token sent without a hint is answered like any other
+unknown token, with the same empty 200). They expire on their own, and
+`RevokeGrant` ends them early.
 
 ## 7. Wire the resource server: verifying access tokens
 
@@ -456,8 +469,9 @@ a negative `MaxClockSkew` or a zero `Assurance`, the same "no implicit
 default" discipline `server.Config` follows. As with the server,
 `resource.AssuranceProduction` refuses `memstore`'s stores and
 `keys/ephemeral`'s key sources: it requires the issuer key source to
-declare `keys.KeySourceAssurance` (`keys.JWKSIssuerKeySource` and
-`keys.LocalIssuerKeys` do), the opaque-token, replay, nonce and
+declare `keys.KeySourceAssurance` (`keys.LocalIssuerKeys` does, and so
+does `keys.JWKSIssuerKeySource` on a `fapihttp` client without a loopback
+exception), the opaque-token, replay, nonce and
 revocation stores to declare `storage.StoreAssurance` (unless revocation
 is `resource.NoRevocation{}`), and `crypto/rand.Reader` when DPoP
 nonces are on. Set `HorizontallyScaled` when more than one instance
@@ -598,7 +612,8 @@ with path parameters, copy a fixed origin and set its `Path` from
 carried — `r.Header.Values("DPoP")`, never `r.Header.Get("DPoP")`,
 which silently returns only the first of several duplicate headers.
 `Verify` itself rejects a request that carried more than one (RFC 9449
-§7.1), so there's no adapter-side check to write here.
+§4.3, which §7.1 applies to resource servers), so there's no
+adapter-side check to write here.
 
 `PeerCertificate` is the TLS client certificate the request arrived
 with: an access token bound to a certificate (RFC 8705) is refused
@@ -621,14 +636,24 @@ yours to build for `server`.
 runnable directly:
 
 ```sh
-go run ./conformance/server/scripts/setup-config   # generates a throwaway local config + keys
-./conformance/server/scripts/generate-server-cert.sh
-go run ./cmd/conformance-as -config <path> -cert <path> -key <path>
+./conformance/server/scripts/generate-server-cert.sh   # a throwaway TLS cert/key in conformance/server/certs/ (gitignored)
+go run ./cmd/conformance-as \
+	-config conformance/server/oidf-config/baseline.config.json \
+	-cert conformance/server/certs/server.crt \
+	-key conformance/server/certs/server.key
 ```
 
-See `conformance/server/scripts/README.md` for the full local setup
-procedure (it's written for conformance-suite testing, but the binary
-it runs is the same one this guide has been describing).
+It listens on the config's `listen_addr` (`-listen` overrides it) and
+serves its discovery document at `/.well-known/openid-configuration`.
+The other `conformance/server/oidf-config/*.config.json` files are the
+other profiles (message signing, mTLS, CIBA, ...). `go run
+./conformance/server/scripts/setup-config` regenerates those files'
+client keys and the conformance-suite plans that go with them; it
+rewrites the tracked files in place, so run it only when you're driving
+the conformance suite. See `conformance/server/scripts/README.md` for
+the full local setup procedure (it's written for conformance-suite
+testing, but the binary it runs is the same one this guide has been
+describing).
 
 ## 9. Rotating a signing key
 
@@ -649,8 +674,10 @@ in the right order:
    consumer's JWKS cache catch up before it matters."
 3. Wait out whatever cache TTL the parties verifying your tokens use
    for your JWKS — this module's own `keys.NewJWKSIssuerKeySource` (a
-   client resolving your keys) refetches promptly on an unrecognized
-   kid, but you may have consumers you don't control caching longer.
+   client resolving your keys) refetches on an unrecognized kid at most
+   once per its minimum refresh interval (`keys.WithMinRefreshInterval`,
+   by default its cache TTL), so it picks up a new key within one TTL,
+   and you may have consumers you don't control caching longer.
    When in doubt, wait longer than you think you need to; this step
    costs nothing but time.
 4. Cut `Sign`/`PublicKey` over to the new key. New ID tokens, JWT

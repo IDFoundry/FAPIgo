@@ -12,12 +12,12 @@ import (
 
 // trustMarkStatusResponseJWTType is the JWS "typ" header value every
 // Trust Mark Status Response JWT MUST carry (OpenID Federation 1.0
-// §8: "explicitly typed by setting the typ header parameter to
+// §8.4.2: "explicitly typed by setting the typ header parameter to
 // trust-mark-status-response+jwt").
 const trustMarkStatusResponseJWTType = "trust-mark-status-response+jwt"
 
 // TrustMarkStatus is the "status" claim of a Trust Mark Status
-// Response (OpenID Federation 1.0 §8) — a defined string type rather
+// Response (OpenID Federation 1.0 §8.4.2) — a defined string type rather
 // than a closed Go enum, since the spec explicitly allows more values
 // than the four it defines ("Additional status values MAY be defined
 // and used in addition to those above").
@@ -39,7 +39,7 @@ const (
 )
 
 // TrustMarkStatusResponseClaims is a parsed Trust Mark Status Response
-// JWT payload (OpenID Federation 1.0 §8).
+// JWT payload (OpenID Federation 1.0 §8.4.2).
 type TrustMarkStatusResponseClaims struct {
 	Issuer    string
 	IssuedAt  time.Time
@@ -97,7 +97,7 @@ func (r TrustMarkStatusResponse) ClaimedTrustMark() string { return r.claims.Tru
 // enforces against a TrustMarkStatusResponse.
 type TrustMarkStatusResponseVerifyPolicy struct {
 	// ExpectedIssuer is the Trust Mark Issuer the caller queried — the
-	// response's iss claim must equal it exactly. §8: "The query MUST
+	// response's iss claim must equal it exactly. §8.4: "The query MUST
 	// be sent to the Trust Mark Issuer," so the entity answering is
 	// always known before the response is ever parsed.
 	ExpectedIssuer string
@@ -116,7 +116,7 @@ type TrustMarkStatusResponseVerifyPolicy struct {
 	Algorithm fapi.SignatureAlgorithm
 
 	// Now is the time to validate iat against. There is no exp claim to
-	// also check — §8 defines no expiry for a Trust Mark Status
+	// also check — §8.4.2 defines no expiry for a Trust Mark Status
 	// Response itself; it's a point-in-time answer, not a credential
 	// with its own validity window.
 	Now time.Time
@@ -187,7 +187,7 @@ func parseTrustMarkStatusResponseClaims(payload []byte) (TrustMarkStatusResponse
 }
 
 // CreateTrustMarkStatusResponseParams describes one Trust Mark Status
-// Response to create (OpenID Federation 1.0 §8).
+// Response to create (OpenID Federation 1.0 §8.4.2).
 type CreateTrustMarkStatusResponseParams struct {
 	// Signer produces the response's signature — the Trust Mark
 	// Issuer's own federation key (the same one that signed the Trust
@@ -199,7 +199,7 @@ type CreateTrustMarkStatusResponseParams struct {
 	Algorithm fapi.SignatureAlgorithm
 
 	// KeyID is recorded in the response's "kid" header. Required —
-	// OpenID Federation 1.0 §8: "The Trust Mark Status Response JWT
+	// OpenID Federation 1.0 §8.4.2: "The Trust Mark Status Response JWT
 	// MUST include the kid header parameter."
 	KeyID string
 

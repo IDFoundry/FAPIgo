@@ -98,7 +98,7 @@ type CreateParams struct {
 	TrustMarkOwners map[string]TrustMarkOwner
 
 	// TrustMarkIssuers is the "trust_mark_issuers" claim (OpenID
-	// Federation 1.0 §3.1.1), keyed by trust_mark_type — set only by a
+	// Federation 1.0 §3.1.2), keyed by trust_mark_type — set only by a
 	// Trust Anchor, naming the Entity Identifiers accredited to issue
 	// each type (an empty list: anyone may). Only accepted when Subject
 	// equals Issuer (an Entity Configuration).

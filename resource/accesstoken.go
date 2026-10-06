@@ -102,8 +102,9 @@ type ResolvedAccessToken struct {
 // (500, e.g. IssuerKeys unreachable) is a distinction each
 // AccessTokenResolver implementation is best placed to make, not
 // something Verify() should collapse into one status for every failure
-// reason. Verify() propagates a *Error returned as is (not wrapped)
-// unchanged. Any other error falls back to ErrorInvalidToken/401,
+// reason. Verify() propagates a *Error unchanged, whether returned as
+// is or wrapped (errors.As). Any other error falls back to
+// ErrorInvalidToken/401,
 // except one wrapping storage.ErrStoreUnavailable or a cancelled or
 // timed-out context, which is ErrorServerError/500.
 type AccessTokenResolver interface {

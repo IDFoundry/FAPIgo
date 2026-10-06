@@ -175,6 +175,39 @@ func TestAccessTokenLookupFailureClassification(t *testing.T) {
 	}
 }
 
+// TestVerifyPropagatesAWrappedResolverError: a resolver's own *Error
+// carries its exposure even when the resolver wraps it, rather than
+// falling back to invalid_token.
+func TestVerifyPropagatesAWrappedResolverError(t *testing.T) {
+	own := resource.NewError(resource.ErrorServerError, 503, "issuer keys unreachable")
+	for name, err := range map[string]error{
+		"as is":   own,
+		"wrapped": fmt.Errorf("resolve: %w", own),
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newOpaqueFixture(t, time.Minute)
+			v, verr := resource.NewVerifier(validConfig(t), resource.Dependencies{
+				AccessTokens: bareErrorResolver{err: err},
+				Replay:       &fakeReplayStore{},
+				Revocation:   &fakeRevocationChecker{},
+				Clock:        fixedClock{now: f.now},
+			})
+			if verr != nil {
+				t.Fatalf("NewVerifier: %v", verr)
+			}
+			_, got := v.Verify(context.Background(), resource.VerifyRequest{
+				Method: "GET", URL: f.target,
+				Authorization: "DPoP " + f.rawToken,
+				DPoPProofs:    []string{f.proof(t, f.dpopKey)},
+			})
+			var rerr *resource.Error
+			if !errors.As(got, &rerr) || rerr.Code() != resource.ErrorServerError || rerr.HTTPStatus() != 503 {
+				t.Fatalf("Verify = %v, want the resolver's own server_error 503", got)
+			}
+		})
+	}
+}
+
 func assertResourceError(t *testing.T, err error, wantCode resource.ErrorCode, wantStatus int, wantCause error) {
 	t.Helper()
 	var rerr *resource.Error

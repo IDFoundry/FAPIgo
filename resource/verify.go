@@ -243,15 +243,17 @@ func parseAuthorization(req VerifyRequest) (dpopProof, raw string, usedDPoP bool
 func (v *Verifier) resolveAccessToken(ctx context.Context, raw string, now time.Time) (ResolvedAccessToken, *Error) {
 	resolved, err := v.deps.AccessTokens.ResolveAccessToken(ctx, ResolveAccessTokenRequest{Raw: raw, Now: now})
 	if err != nil {
-		// A *Error carries its own exposure (see AccessTokenResolver's
-		// own doc comment on why that's the implementation's call, not
-		// this method's) — propagate it unchanged. A bare error (a
-		// third-party AccessTokenResolver that didn't follow that
-		// convention) falls back to the same invalid_token/401 every
-		// other rejection here defaults to, except a store that couldn't
-		// answer (storage.ErrStoreUnavailable) or a cancelled or
-		// timed-out context, which is a 500 (see lookupError).
-		if rerr, ok := err.(*Error); ok {
+		// A *Error, returned as is or wrapped, carries its own exposure
+		// (see AccessTokenResolver's own doc comment on why that's the
+		// implementation's call, not this method's) — propagate it
+		// unchanged. Any other error (a third-party AccessTokenResolver
+		// that didn't follow that convention) falls back to the same
+		// invalid_token/401 every other rejection here defaults to,
+		// except a store that couldn't answer
+		// (storage.ErrStoreUnavailable) or a cancelled or timed-out
+		// context, which is a 500 (see lookupError).
+		var rerr *Error
+		if errors.As(err, &rerr) {
 			return ResolvedAccessToken{}, rerr
 		}
 		return ResolvedAccessToken{}, lookupError(err)

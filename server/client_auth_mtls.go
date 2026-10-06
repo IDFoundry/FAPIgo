@@ -171,8 +171,7 @@ func isCertificateAuthMethod(method storage.ClientAuthMethod) bool {
 func (s *Server) authenticateClientViaCertificate(ctx context.Context, clientID fapi.ClientID, peerCert *x509.Certificate) (storage.RegisteredClient, clientassertion.VerifiedAssertion, *Error) {
 	client, err := s.deps.Clients.ResolveClient(ctx, clientID)
 	if err != nil {
-		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
-			newError(ErrorInvalidClient, 401, "unknown client", err)
+		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{}, unresolvedClientError(ctx, err)
 	}
 	// A client_id with no other credential is certificate
 	// authentication only for a client registered for it. For any other

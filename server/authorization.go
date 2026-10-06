@@ -123,6 +123,9 @@ func (s *Server) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 	// no longer holds) shouldn't be consented to.
 	client, err := s.deps.Clients.ResolveClient(ctx, req.ClientID)
 	if err != nil {
+		if clientStoreUnavailable(ctx, err) {
+			return s.beginFail(ctx, req.ClientID, newError(ErrorServerError, 500, "failed to look up the client", err)), nil
+		}
 		return s.beginFail(ctx, req.ClientID, newError(ErrorUnauthorizedClient, 400, "client is no longer registered", err)), nil
 	}
 

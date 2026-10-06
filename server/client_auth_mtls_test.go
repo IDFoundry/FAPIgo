@@ -79,8 +79,9 @@ func newHarnessWithClientAuthSelfSignedTLS(t *testing.T) (harness, *x509.Certifi
 		Assurance: server.AssuranceDevelopment,
 	}
 	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
+	clients := &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}}
 	deps := server.Dependencies{
-		Clients:                &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}},
+		Clients:                clients,
 		Transactions:           &fakeTransactionStore{},
 		Grants:                 &fakeGrantStore{},
 		Replay:                 &fakeReplayStore{},
@@ -97,7 +98,7 @@ func newHarnessWithClientAuthSelfSignedTLS(t *testing.T) (harness, *x509.Certifi
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
-	return harness{server: srv, serverKey: serverKey, now: now}, cert
+	return harness{server: srv, clients: clients, serverKey: serverKey, now: now}, cert
 }
 
 // newHarnessWithClientAuthTLSSubjectDN mirrors

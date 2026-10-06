@@ -1114,10 +1114,15 @@ func stringSet(id fapi.ClientID, what string, values []string) (map[string]struc
 // ClientRepository resolves a registered client by ID.
 type ClientRepository interface {
 	// ResolveClient returns the client registered as id, or an error if
-	// there is none (or it's no longer registered). The server reads any
-	// error as an unknown client: invalid_client at the token, PAR and
-	// CIBA endpoints, unauthorized_client when an authorization begins.
-	// serverresource.SignUserInfoResponse answers an error wrapping
-	// ErrStoreUnavailable with 500 server_error instead.
+	// there is none (or it's no longer registered). The server reads an
+	// error as an unknown client: invalid_client at the token, PAR,
+	// CIBA and revocation endpoints and in
+	// Server.AuthenticateAttestedClient, unauthorized_client when an
+	// authorization begins. An error wrapping ErrStoreUnavailable, or
+	// one returned after the request's context ended, means the store
+	// couldn't answer, and is answered with 500 server_error instead —
+	// at those endpoints, and in serverresource.SignUserInfoResponse.
+	// Return ErrStoreUnavailable (wrapped) for an outage, so a client
+	// isn't told its credentials are wrong.
 	ResolveClient(ctx context.Context, id fapi.ClientID) (RegisteredClient, error)
 }

@@ -71,7 +71,8 @@ type Metadata struct {
 	// are set only when Config.Algorithms.IDTokenEncryptionKeyManagement/
 	// IDTokenEncryptionContentEncryption are non-empty — most servers
 	// never encrypt ID tokens, and OIDC Discovery 1.0 §3 leaves both
-	// fields optional/absent in that case.
+	// fields optional/absent in that case. Omitted under
+	// Config.OAuthOnly, whatever is configured.
 	IDTokenEncryptionAlgValuesSupported []string `json:"id_token_encryption_alg_values_supported,omitempty"`
 	IDTokenEncryptionEncValuesSupported []string `json:"id_token_encryption_enc_values_supported,omitempty"`
 
@@ -83,7 +84,10 @@ type Metadata struct {
 	// responses, and OIDC Discovery leaves all three optional/absent in
 	// that case. Unlike the URL of the UserInfo endpoint itself, these
 	// are this server's own algorithm capabilities, so Metadata does
-	// carry them even though it doesn't implement the endpoint.
+	// carry them even though it doesn't implement the endpoint — except
+	// under Config.OAuthOnly, where they're omitted whatever is
+	// configured: UserInfo needs an "openid" grant, which such a server
+	// never makes.
 	UserinfoSigningAlgValuesSupported    []string `json:"userinfo_signing_alg_values_supported,omitempty"`
 	UserinfoEncryptionAlgValuesSupported []string `json:"userinfo_encryption_alg_values_supported,omitempty"`
 	UserinfoEncryptionEncValuesSupported []string `json:"userinfo_encryption_enc_values_supported,omitempty"`
@@ -151,7 +155,8 @@ type Metadata struct {
 	// when Dependencies.IdentityClaims is set. The "claims" request
 	// parameter (OIDC Core §5.5) is always accepted, but without an
 	// IdentityClaimsSource it can never change what a token contains, so
-	// advertising it then would mislead a client.
+	// advertising it then would mislead a client. Always false under
+	// Config.OAuthOnly.
 	ClaimsParameterSupported bool `json:"claims_parameter_supported,omitempty"`
 
 	// ClientRegistrationTypesSupported (OpenID Federation 1.0 §5.1.3) is
@@ -233,10 +238,31 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 		md.AuthorizationDetailsTypesSupported = s.cfg.RAR.Types()
 	}
 
+	// The OpenID Connect Discovery 1.0 fields that only mean something
+	// with ID tokens or UserInfo — not RFC 8414 OAuth metadata — are
+	// left out of an OAuthOnly server's metadata, whatever algorithms
+	// are configured: it never issues an ID token and serves no
+	// UserInfo, so advertising them would describe capabilities it
+	// doesn't have.
 	if !s.cfg.OAuthOnly {
 		md.SubjectTypesSupported = []string{"public"}
 		md.IDTokenSigningAlgValuesSupported = []string{s.cfg.Algorithms.IDToken.String()}
 		md.ClaimsParameterSupported = s.deps.IdentityClaims != nil
+		if len(s.cfg.Algorithms.IDTokenEncryptionKeyManagement) > 0 {
+			md.IDTokenEncryptionAlgValuesSupported = s.cfg.Algorithms.IDTokenEncryptionKeyManagement.Strings()
+		}
+		if len(s.cfg.Algorithms.IDTokenEncryptionContentEncryption) > 0 {
+			md.IDTokenEncryptionEncValuesSupported = s.cfg.Algorithms.IDTokenEncryptionContentEncryption.Strings()
+		}
+		if s.cfg.Algorithms.UserInfo != 0 {
+			md.UserinfoSigningAlgValuesSupported = []string{s.cfg.Algorithms.UserInfo.String()}
+		}
+		if len(s.cfg.Algorithms.UserInfoEncryptionKeyManagement) > 0 {
+			md.UserinfoEncryptionAlgValuesSupported = s.cfg.Algorithms.UserInfoEncryptionKeyManagement.Strings()
+		}
+		if len(s.cfg.Algorithms.UserInfoEncryptionContentEncryption) > 0 {
+			md.UserinfoEncryptionEncValuesSupported = s.cfg.Algorithms.UserInfoEncryptionContentEncryption.Strings()
+		}
 	}
 
 	if len(s.cfg.AutomaticRegistration.TrustAnchors) > 0 {
@@ -251,21 +277,6 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 		md.ResponseModesSupported = []string{"query"}
 	}
 
-	if len(s.cfg.Algorithms.IDTokenEncryptionKeyManagement) > 0 {
-		md.IDTokenEncryptionAlgValuesSupported = s.cfg.Algorithms.IDTokenEncryptionKeyManagement.Strings()
-	}
-	if len(s.cfg.Algorithms.IDTokenEncryptionContentEncryption) > 0 {
-		md.IDTokenEncryptionEncValuesSupported = s.cfg.Algorithms.IDTokenEncryptionContentEncryption.Strings()
-	}
-	if s.cfg.Algorithms.UserInfo != 0 {
-		md.UserinfoSigningAlgValuesSupported = []string{s.cfg.Algorithms.UserInfo.String()}
-	}
-	if len(s.cfg.Algorithms.UserInfoEncryptionKeyManagement) > 0 {
-		md.UserinfoEncryptionAlgValuesSupported = s.cfg.Algorithms.UserInfoEncryptionKeyManagement.Strings()
-	}
-	if len(s.cfg.Algorithms.UserInfoEncryptionContentEncryption) > 0 {
-		md.UserinfoEncryptionEncValuesSupported = s.cfg.Algorithms.UserInfoEncryptionContentEncryption.Strings()
-	}
 	if !s.cfg.MTLSEndpoints.IsZero() {
 		md.MTLSEndpointAliases = &MTLSEndpointAliases{
 			TokenEndpoint:                      urlOrNil(s.cfg.MTLSEndpoints.Token),

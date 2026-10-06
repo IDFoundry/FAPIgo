@@ -466,7 +466,12 @@ type Config struct {
 	// OAuthOnly, if set, makes this server a pure OAuth 2.0 + FAPI 2.0
 	// authorization server: it never issues an ID token and never
 	// advertises OIDC-only Metadata fields (subject_types_supported,
-	// id_token_signing_alg_values_supported), regardless of what an
+	// id_token_signing_alg_values_supported,
+	// id_token_encryption_alg_values_supported and _enc_values_supported,
+	// userinfo_signing_alg_values_supported,
+	// userinfo_encryption_alg_values_supported and _enc_values_supported,
+	// claims_parameter_supported) — even when Algorithms configures the
+	// ID token or UserInfo ones — regardless of what an
 	// individual RegisteredClient's own AllowedScopes says. "openid" is
 	// refused as a requested scope at PAR and CIBA (client_credentials
 	// and IssueRefreshToken refuse it whatever this says), and checked

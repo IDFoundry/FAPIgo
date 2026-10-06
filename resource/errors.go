@@ -90,9 +90,10 @@ func init() {
 
 // NewError builds an *Error for a caller reporting an RFC 6750/RFC 9449
 // -shaped failure it detected itself — an HTTP adapter's own request
-// routing rejecting something before it ever calls Verify (a malformed
-// Authorization header, more than one DPoP header — see
-// dpop.ResolveHeaderValues). Mirrors server.NewError.
+// routing rejecting something before it ever calls Verify. Verify
+// itself already refuses a malformed Authorization header, and more
+// than one DPoP header when VerifyRequest.DPoPProofs carries them all
+// (DPoPProofsFromHTTP). Mirrors server.NewError.
 //
 // code must be RFC 6750 §3 error text (printable ASCII without a double
 // quote or backslash), or empty for a request presenting no credentials
@@ -161,7 +162,7 @@ func (e *Error) Unwrap() error { return e.cause }
 //
 // The challenge follows RFC 9449 §7.2, for a verifier accepting both
 // DPoP-bound and mTLS-bound tokens (the latter presented with the Bearer
-// scheme, RFC 8705 §3.4):
+// scheme, RFC 8705 §3):
 //
 //   - An Error with an empty Code — the request presented no credentials
 //     this verifier accepts — gets "Bearer, DPoP algs=..." with no error
@@ -192,9 +193,10 @@ func (e *Error) WriteJSON(w http.ResponseWriter) {
 }
 
 // WriteError writes err to w: err's own WriteJSON if err is a *Error
-// (as every error Verify returns is), or a generic 500 otherwise —
-// the one case this package can't itself produce a *Error for, e.g. a
-// context cancellation surfacing from a dependency. Saves every HTTP
+// (as every error Verify returns is, a dependency's failure or a
+// cancelled context included), or a generic 500 otherwise — an error
+// from the adapter's own code, which this package didn't produce. Saves
+// every HTTP
 // adapter from reimplementing this same errors.As-or-fallback dance
 // itself.
 func WriteError(w http.ResponseWriter, err error) {

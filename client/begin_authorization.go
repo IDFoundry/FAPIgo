@@ -81,7 +81,7 @@ type BeginAuthorizationRequest struct {
 	// definition's own "type" discriminator into the result, so a
 	// caller's value type never needs its own redundant Type field.
 	// Unlike Extensions, this is always sent as native JSON array text
-	// under every profile (RFC 9396 §5's own form-encoding: a plain
+	// under every profile (RFC 9396 §2's own form-encoding: a plain
 	// "authorization_details" parameter's value is itself JSON array
 	// text, not a bare string), so it works under the baseline profile
 	// too, not just ProfileFAPISecurityWithMessageSigning.
@@ -152,7 +152,7 @@ const (
 	responseModeJARM  = "jarm"
 )
 
-// authorizationDetailsParameter is the RFC 9396 §5 wire name — mirrors
+// authorizationDetailsParameter is the RFC 9396 §2 wire name — mirrors
 // server.authorizationDetailsParameter (an unexported constant in a
 // different package, so not literally shared, just the same string).
 const authorizationDetailsParameter = "authorization_details"
@@ -165,7 +165,8 @@ const errPushedAuthorizationRequestFailed = "pushed authorization request failed
 
 // BeginAuthorization starts a new authorization attempt: it generates
 // state, nonce and a PKCE verifier, builds and signs a request object
-// when Config.Profile requires one, authenticates to and calls the
+// when Config.Profile or Config.PushedRequestEncoding requires one,
+// authenticates to and calls the
 // pushed-authorization-request endpoint (RFC 9126), and persists
 // correlation state for the eventual callback.
 func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationRequest) (AuthorizationSession, error) {
@@ -502,7 +503,7 @@ func populatePlainPushedRequestForm(form, params map[string]string, snapshot map
 		form[name] = value
 	}
 	if authorizationDetailsRaw != nil {
-		// RFC 9396 §5: unlike an extension.Definition value, a plain
+		// RFC 9396 §2: unlike an extension.Definition value, a plain
 		// "authorization_details" parameter's value is itself JSON
 		// array text — this is the one plain parameter this package
 		// sends un-stringified, so it round-trips through

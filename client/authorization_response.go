@@ -19,6 +19,9 @@ import (
 // detects a duplicated parameter, the same raw-request-boundary
 // discipline server's FormRequest applies; see internal/par.DecodeForm.
 type AuthorizationCallback struct {
+	// RawQuery is the redirect URI request's query string, exactly as
+	// received (net/http's r.URL.RawQuery): the authorization response's
+	// own parameters, or, for a JARM response, its "response" parameter.
 	RawQuery string
 
 	// Session is the SessionHandle BeginAuthorization returned for this

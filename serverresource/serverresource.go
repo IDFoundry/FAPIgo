@@ -5,8 +5,9 @@
 //
 // Wiring such a verifier by hand has one mistake nothing reports: the
 // verifier must check revocation against the same store the server
-// revokes into (on authorization code reuse, RFC 6749 §4.1.2), or a
-// revoked access token keeps working at the protected endpoints.
+// revokes into (on authorization code reuse, RFC 6749 §4.1.2, and on
+// Server.RevokeGrant), or a revoked access token keeps working at the
+// protected endpoints.
 // NewVerifier takes that store, the access-token format, the replay
 // store, the clock and the DPoP limits from the server's own, so they
 // always match.

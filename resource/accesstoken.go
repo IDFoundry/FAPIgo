@@ -95,16 +95,17 @@ type ResolvedAccessToken struct {
 // Required — pass JWTAccessTokens{...} (the default),
 // OpaqueAccessTokens{...}, or your own.
 //
-// A returned error should be a *Error (via this package's own
-// newError, unexported but reachable from another file in this
-// package) rather than a bare error — see ARCHITECTURE.md design rule
-// 16, "Errors carry their own exposure": whether a failure is a
-// client-facing invalid_token (401) or an operational server_error
+// A returned error should be a *Error (NewError, or this package's own
+// resolvers' errors) rather than a bare error — see ARCHITECTURE.md
+// design rule 16, "Errors carry their own exposure": whether a failure
+// is a client-facing invalid_token (401) or an operational server_error
 // (500, e.g. IssuerKeys unreachable) is a distinction each
 // AccessTokenResolver implementation is best placed to make, not
-// something Verify() should collapse into one status for every
-// failure reason. Verify() propagates a *Error unchanged; a bare error
-// falls back to ErrorInvalidToken/401.
+// something Verify() should collapse into one status for every failure
+// reason. Verify() propagates a *Error returned as is (not wrapped)
+// unchanged. Any other error falls back to ErrorInvalidToken/401,
+// except one wrapping storage.ErrStoreUnavailable or a cancelled or
+// timed-out context, which is ErrorServerError/500.
 type AccessTokenResolver interface {
 	ResolveAccessToken(ctx context.Context, req ResolveAccessTokenRequest) (ResolvedAccessToken, error)
 }

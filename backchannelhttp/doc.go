@@ -3,10 +3,10 @@
 // Client-Initiated Backchannel Authentication) §10.2 ping-delivery deployment
 // doesn't have to hand-wire its own SSRF/DNS-rebinding-safe HTTP client just
 // to dispatch a notification —
-// server itself never terminates or originates a TLS connection (see
-// ARCHITECTURE.md design rule 6 and server.BackchannelNotifier's own doc
-// comment), the same reason fapihttp lives outside client/server/resource
-// rather than inside any one of them.
+// server itself never builds an HTTP client of its own: it sends through
+// whatever its Dependencies supply (see ARCHITECTURE.md design rule 6 and
+// server.BackchannelNotifier's own doc comment), the same reason fapihttp
+// lives outside client/server/resource rather than inside any one of them.
 //
 // New always sends through a client it builds itself with
 // fapihttp.NewClient, from Config.Transport, rather than accepting one:

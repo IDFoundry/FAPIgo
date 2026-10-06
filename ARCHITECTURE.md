@@ -83,6 +83,8 @@ fapigo/                    // package fapi: shared value types only
 │   ├── token/                 // token issue (server) / validate (client, resource)
 │   ├── metadata/               // AS/client metadata parsing
 │   ├── httperror/               // shared error-type (server/resource/federation) mechanical bookkeeping
+│   ├── resourceerr/             // the store-outage check and error builder resource and serverresource share
+│   ├── nofollow/                // outbound requests that never follow a redirect or resend a body
 │   ├── critical/                 // JWS/JWE "crit" header parameter check (RFC 7515/7516)
 │   ├── authchallenge/           // WWW-Authenticate challenge parsing (RFC 9110 §11)
 │   ├── grantrevocation/         // the grant_id claim and revocation key shared by server and resource
@@ -98,7 +100,8 @@ fapigo/                    // package fapi: shared value types only
 ├── conformance/
 │   ├── client/                  // OIDF RP/client test plan config + scripts
 │   ├── server/                  // OIDF AS test plan config + scripts
-│   └── resource/                 // RS verification test vectors (not covered by OIDF)
+│   ├── resource/                 // RS verification test vectors (not covered by OIDF)
+│   └── scripts/                  // run-all.sh: every AS, RP and federation plan in one run
 └── examples/                    // runnable demos, each its own module, public API only (see examples/README.md)
     └── internal/demokit/          // the demos' shared local TLS, CA and host routing
 ```
@@ -133,8 +136,9 @@ identically:
 - **`Secret`** — wraps any token, code or credential value that could
   end up in a log line by accident. `String()`, `GoString()` and
   `MarshalText()` all redact; `Reveal()` is the only way to get the raw
-  value out. `client.TokenSet`, `server.TokenResult` and any resource
-  claim that carries a raw token value all use it.
+  value out. `client.TokenSet` and `server.TokenResult` use it for every
+  token they carry; `resource.AuthorizationContext` carries no raw token
+  value at all.
 - **`URL`** (constructed via `ParseIssuerURL` / `ParseEndpointURL` /
   `ParseRedirectURL`, not a bare `string`) — enforces absolute, HTTPS
   (except an explicitly enabled loopback exception, or, for a native
@@ -280,7 +284,8 @@ A JWK Set's wire shape (RFC 7517) genuinely doesn't differ by who's
 publishing it, unlike a session handle or a verification request — so
 sharing the type here removes real duplication (`keys.PublicJWKS`
 resolves every `keys.SigningKeyUse`/`keys.EncryptionKeyUse` it's given,
-honoring `RotatingKeyManager`, deduplicated by kid — logic `client` and
+honoring `RotatingKeyManager`, publishing a key several uses share once
+and refusing a kid that names two different keys — logic `client` and
 `server` had each independently written once already) without
 reintroducing a generic cross-role API: the caller still decides which
 purposes belong in the set, so all the role-specific business logic
@@ -298,8 +303,9 @@ first.
 Callers supply a `Do(*http.Request) (*http.Response, error)`;
 `fapihttp` wraps it with strict TLS verification, response-size limits,
 bounded/no redirects (an `*http.Client` is copied with its own redirect
-following turned off, and a redirect another client followed itself is
-refused), endpoint origin validation, timeouts, body-read
+following turned off, a redirect another client followed itself is
+refused, and a request body is never handed over in a form any client
+could resend across a 307/308), endpoint origin validation, timeouts, body-read
 deadlines, SSRF restrictions on discovery/JWKS fetches, and
 content-type checks. The public API never asks a caller to hand-build
 a PAR body or similar wire-level payload.
@@ -441,8 +447,10 @@ looks like a normal redirect:
   edit a JARM response, change the redirect URI, or leak a code into logs.
 - `InteractionResult` — built only via constructor functions
   (`Authorize(subject, authContext, grant)`, `Deny(reason)`,
-  `AuthenticationFailed(reason)`) passed to `CompleteAuthorization`, so
-  invalid combinations of subject/grant/denial can't be constructed.
+  `AuthenticationFailed(reason)`, and `InteractionNeeded(need, reason)`
+  for a `prompt=none` request the application can't complete without
+  showing a page) passed to `CompleteAuthorization`, so invalid
+  combinations of subject/grant/denial can't be constructed.
 
 Untrusted hints stay untrusted: `AuthenticationHints.LoginHint` is a
 plain string-wrapping type, never a `SubjectID` — only the
@@ -546,8 +554,8 @@ verification is inseparable from method/URL/DPoP context, so there is no
 bare `VerifyJWT` entry point — and, symmetrically, no bare `VerifyDPoP`
 entry point either, since a DPoP proof can't be judged valid without the
 HTTP method, target URI, access-token hash, expected nonce and JTI
-replay state alongside it. `AuthorizationContext.Claims` uses `Secret`
-for any raw token value it carries, and a verification failure is a
+replay state alongside it. `AuthorizationContext` carries the token's
+validated claims, never the raw token itself, and a verification failure is a
 typed `Error` (see rule 16), not a bare `error` the caller has to
 string-match.
 
@@ -573,8 +581,8 @@ needing to anticipate how it'll be used.
 
 ### 9. Internal protocol core is organized around asymmetric operations
 
-See the `internal/` table above — `sign.go`/`verify.go` or
-`create.go`/`verify.go` pairs per concern, each side used by exactly the
+See the `internal/` tree above — `create.go`/`verify.go` (or, for
+tokens, `issue.go`/`validate.go`) pairs per concern, each side used by exactly the
 role(s) that need it, sharing JOSE encoding but not signing/verification
 policy.
 
@@ -704,7 +712,11 @@ role-conditional fields.
 security operation. `GrantStore.RedeemAuthorizationCode` in particular
 must atomically look up and consume a code by its hash, in one step;
 `server` then checks client ID, expiry, redirect URI, PKCE verifier and
-sender-binding against what it returns. A store only understands the
+sender-binding against what it returns. A store given the presenting
+client's ID (`AuthorizationCodeRedemption.ClientID`, and likewise
+`PollBackchannelAuthentication.ClientID` for CIBA) refuses another
+client's record without consuming it, so a leaked code or `auth_req_id`
+can't be spent by someone else. A store only understands the
 fields it acts on (lookup hash, `ClientID`, `ExpiresAt`, and CIBA's
 decision and delivery state): everything else `server` needs later —
 the request's parameters, the granted scope, subject, authentication
@@ -813,15 +825,16 @@ passing its suite is not evidence the other role conforms, even where
 both share internal JOSE code — protocol behaviour and negative-test
 expectations differ per role.
 
-**Current results.** `conformance/scripts/run-all.sh` runs 22 test
+**Current results.** `conformance/scripts/run-all.sh` runs 23 test
 configurations, and the daily `conformance.yml` run executes all of
-them. As of the 2026-09-27 run, all 14 AS configurations (baseline,
+them. As of the 2026-10-05 run (v0.50.0), all 14 AS configurations (baseline,
 message-signing, mtls, message-signing-mtls, client-auth-mtls,
 client-auth-mtls-and-mtls, four CIBA poll/ping variants, and four
 client-credentials variants) pass with 0 failures and 0 warnings; all 6
 FAPI RP configurations pass every module; the federation RP plan passes
 6/10, exactly matching its list of known suite-side failures; and the
-federation deployed-entity plan passes 5/5. The per-profile counts in
+federation deployed-entity plan passes 5/5 against both the
+automatic-registration AS and the Trust Anchor. The per-profile counts in
 the history below are from each profile's first clean run; the suite
 has added modules since, so the daily run's own report is the source of
 truth for today's numbers.
@@ -1012,7 +1025,7 @@ CIBA §10.2 ping delivery mode (`storage.BackchannelTokenDeliveryModePing`,
 `server.BackchannelNotifier`) followed the same library-then-conformance
 pattern: implemented and unit-tested first, then given its own AS-side
 conformance re-attempt (`conformance/server/oidf-config/ciba-ping-plan.json`,
-two extra clients on the same `conformance-as-ciba-mtls` container as
+generated by `setup-config`, two extra clients on the same `conformance-as-ciba-mtls` container as
 AS ciba-mtls). This surfaced two more real bugs no amount of
 unit-testing against this module's own mocked notifier would have
 caught: a client's poll immediately following a ping notification was
@@ -1075,7 +1088,11 @@ unchanged, plus one addition —
 `applyMTLSEndpointAliasesForClientAuth` overrides the
 `PushedAuthorizationRequest` alias too, not just `Token`, since
 certificate-based client authentication (unlike sender-constraining) is
-checked at PAR as well. Full breakdown in
+checked at PAR as well. (That driver helper, and the
+`applyMTLSEndpointAliases` and `callProtectedResourceBearer` helpers
+mentioned below, have since become the library's own
+`client.MTLSEndpoints.ApplyForClientAuth`/`ApplyForSenderConstrain`
+and `Client.ProtectedResource`.) Full breakdown in
 `conformance/client/scripts/README.md`'s own client-authentication mTLS
 section. Wired into `run-all.sh` as "RP client-auth-mtls" (no separate
 container — a driver flag, like RP ciba-mtls).
@@ -1228,7 +1245,8 @@ everything above. `server.RequestClientCredentialsToken`
 built: client authentication (every `ClientAuthMethod`), sender
 -constrain binding (`verifyTokenRequestBinding`, unchanged), scope
 authorization (`RegisteredClient.AllowsScope`, the same check PAR
-already runs), and `AccessTokenIssuer.IssueAccessToken` — with
+already runs, plus a refusal of `openid` and `offline_access`, which
+this grant can never honour), and `AccessTokenIssuer.IssueAccessToken` — with
 `Subject` set to the client's own ID (RFC 9068 §2.2 requires a `sub`
 claim; there's no end user for this grant to name instead). No PAR, no
 `storage.GrantStore` redemption call (there's no grant to redeem — a
@@ -1389,7 +1407,12 @@ check. Everything JOSE-shaped stays under `internal/jose` (plus
 `internal/clientattestation`, `internal/federation`, `internal/token`);
 the public surface is limited to `keys.KeyManager`, registered public
 key types, the closed `SignatureAlgorithm` enum, and each role's own
-signed protocol outputs.
+signed protocol outputs. The one narrow exception is
+`client.Client.VerifyIssuerJWS`: it checks only that this client's own
+configured authorization server signed a compact JWS, with the client's
+issuer key source and its configured `Algorithms.UserInfo` (never the
+header's `alg`), and hands back the payload for the caller's own claim
+checks.
 
 [fapi2]: https://openid.net/specs/fapi-security-profile-2_0-final.html
 [attacker]: https://openid.net/specs/fapi-attacker-model-2_0-final.html

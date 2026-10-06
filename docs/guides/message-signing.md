@@ -48,7 +48,10 @@ object and JARM algorithms and lifetimes.
 nothing else to call. `PushedRequestEncoding` follows the profile by
 default, and `PushedRequestEncodingRequestObject` sends a signed request
 object under the Security Profile too, without switching responses to
-JARM.
+JARM. That needs `Algorithms.RequestObject` and
+`Limits.RequestObjectLifetime` on the client, and the client registered
+with its `RequestObjectAlgorithm` on the server, which accepts a signed
+request object under either profile.
 
 `CompleteAuthorization` (or `HandleAuthorizationResponse`) then expects
 the callback's `response` parameter, and verifies it before reading

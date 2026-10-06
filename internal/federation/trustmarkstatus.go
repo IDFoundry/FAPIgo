@@ -228,7 +228,7 @@ func CreateTrustMarkStatusResponse(p CreateTrustMarkStatusResponseParams) (strin
 		return "", fmt.Errorf("federation: invalid algorithm %v", p.Algorithm)
 	}
 	if p.KeyID == "" {
-		return "", fmt.Errorf(`federation: key id is required (OpenID Federation 1.0 §8: "The Trust Mark Status Response JWT MUST include the kid header parameter")`)
+		return "", fmt.Errorf(`federation: key id is required (OpenID Federation 1.0 §8.4.2: "The Trust Mark Status Response JWT MUST include the kid header parameter")`)
 	}
 	if p.Issuer == "" {
 		return "", fmt.Errorf("federation: issuer is empty")

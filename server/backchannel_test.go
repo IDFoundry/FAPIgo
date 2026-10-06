@@ -1513,7 +1513,7 @@ func TestCIBAFullFlowApprovedWithMTLSBinding(t *testing.T) {
 		t.Fatalf("ExchangeBackchannelAuthentication: %v", err)
 	}
 	if result.TokenType != "Bearer" {
-		t.Fatalf("TokenType = %q, want %q (RFC 8705 §3.4)", result.TokenType, "Bearer")
+		t.Fatalf("TokenType = %q, want %q (RFC 8705 §3)", result.TokenType, "Bearer")
 	}
 
 	parsedAT, err := token.ParseAccessToken(result.AccessToken.Reveal())

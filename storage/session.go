@@ -45,6 +45,8 @@ type ConsumedSession struct {
 // CRUD (no GetSession, no DeleteSession) — Consume is the only way to
 // retrieve a session, and it always retires the record it returns.
 type SessionStore interface {
+	// Create persists session under its State until at least its
+	// ExpiresAt. An error fails BeginAuthorization.
 	Create(ctx context.Context, session NewSession) error
 
 	// Consume atomically retrieves and retires the session identified by

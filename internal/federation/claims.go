@@ -52,7 +52,7 @@ type Claims struct {
 	// §5) — the issuer's own published federation signing keys, unless
 	// this is an Explicit Registration Response (not modeled by this
 	// package yet; see doc.go), the one case OpenID Federation 1.0
-	// §3.4 lets it be absent. Use jose.ParseJWKSet to resolve it into
+	// §3.1.1 lets it be absent (§12.2.3). Use jose.ParseJWKSet to resolve it into
 	// usable keys; kept raw here rather than pre-parsed so a malformed
 	// or unsupported entry in the set doesn't fail claims parsing
 	// itself, mirroring jose.ParseJWKSet's own "one bad entry doesn't
@@ -117,7 +117,7 @@ type Claims struct {
 	TrustMarkOwners map[string]TrustMarkOwner
 
 	// TrustMarkIssuers is an Entity Configuration's own
-	// "trust_mark_issuers" claim (OpenID Federation 1.0 §3.1.1), keyed by
+	// "trust_mark_issuers" claim (OpenID Federation 1.0 §3.1.2), keyed by
 	// trust_mark_type, each value the Entity Identifiers accredited to
 	// issue Trust Marks of that type — an empty list meaning anyone may.
 	// Only meaningful for a Trust Anchor; nil when the claim is absent.

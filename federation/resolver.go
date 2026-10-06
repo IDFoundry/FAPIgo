@@ -61,7 +61,7 @@ type Limits struct {
 	MaxPathLength int
 
 	// MaxAuthorityHints bounds how many "authority_hints" (OpenID
-	// Federation 1.0 §3.1.1) any one Entity Configuration on the path
+	// Federation 1.0 §3.1.2) any one Entity Configuration on the path
 	// may list: Resolve rejects one that lists more, rather than trying
 	// only some of them. Resolve fetches each listed superior's Entity
 	// Configuration in turn until one validates, and the subject entity
@@ -71,7 +71,11 @@ type Limits struct {
 	// Entity Configuration listing thousands of hints would turn a
 	// single Resolve call into thousands of outbound fetches. Together
 	// with MaxPathLength it caps one Resolve call at
-	// MaxPathLength × (MaxAuthorityHints + 2) + 1 fetches. Real Entity
+	// 2 × MaxPathLength × MaxAuthorityHints + 1 fetches: the subject's
+	// own Entity Configuration, then at most MaxPathLength ×
+	// MaxAuthorityHints superiors tried across every branch searched,
+	// each costing its Entity Configuration and one Subordinate
+	// Statement. Real Entity
 	// Configurations list one hint, or a handful for an entity in
 	// several federations.
 	MaxAuthorityHints int
@@ -204,7 +208,7 @@ type ResolvedEntity struct {
 	TrustMarkOwners map[string]TrustMarkOwner
 
 	// TrustMarkIssuers is EntityID's own "trust_mark_issuers" claim
-	// (OpenID Federation 1.0 §3.1.1), exactly as
+	// (OpenID Federation 1.0 §3.1.2), exactly as
 	// intfed.Claims.TrustMarkIssuers describes — nil if EntityID declared
 	// none. Only meaningful when EntityID is a Trust Anchor:
 	// VerifyTrustMark reads it (from the Trust Anchor used to establish
@@ -369,9 +373,11 @@ func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntit
 // trusted while another reaches a configured Trust Anchor.
 //
 // budget bounds the whole search to MaxPathLength × MaxAuthorityHints
-// superiors tried — the most a single first-reachable walk could already
-// fetch — so backtracking adds no amplification an entity's authority
-// hints could exploit (§18.1).
+// superiors tried — as many Entity Configurations as a single
+// first-reachable walk could already fetch — so backtracking adds at
+// most one Subordinate Statement fetch per superior tried, a fixed
+// bound an entity's authority hints can't grow (§18.1; see
+// Limits.MaxAuthorityHints for the whole cap).
 //
 // A branch that fails any check, a signature or a policy as much as a
 // fetch, is abandoned and the next hint tried: §10 validates each Trust

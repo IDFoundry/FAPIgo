@@ -68,6 +68,9 @@ type CompleteAuthorizationTransaction struct {
 
 // TransactionStore persists server-side authorization-flow state.
 type TransactionStore interface {
+	// CreatePAR persists record under its Reference, which the server
+	// generates at random, until at least its ExpiresAt. An error fails
+	// the pushed authorization request.
 	CreatePAR(ctx context.Context, record NewPARRecord) error
 
 	// BeginAuthorization retrieves the pushed authorization request

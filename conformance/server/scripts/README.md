@@ -29,10 +29,11 @@ Foundation conformance suite and collect results.
   each is entirely a suite-internal race, never traced to cmd/conformance-as.
 
 Everything runs via `../docker-compose.yml`, entirely locally — no
-tunnel (ngrok etc.) required. That also makes this the same shape a
-GitHub Actions job would use: bring up the suite and `conformance-as` as
-containers on one Docker network, no external dependency or secret in
-the loop.
+tunnel (ngrok etc.) required. That's also the shape the repo's own
+daily GitHub Actions run
+([`../../../.github/workflows/conformance.yml`](../../../.github/workflows/conformance.yml))
+uses: it brings up the suite and `conformance-as` as containers on one
+Docker network, with no external dependency or secret in the loop.
 
 **After every code change**, rebuild with `--no-cache` before trusting a
 retest — `docker compose up -d --build --force-recreate <service>` has
@@ -540,6 +541,8 @@ already believed clean on their own — e.g. right before merging, or as
 a periodic full-suite gate.
 
 The docker-compose setup is deliberately shaped so a GitHub Actions job
-can reuse this directly — same containers, same network-attach pattern,
-`SUITE_NETWORK` and the client key/config just need to be generated in
-the job instead of by hand.
+can reuse it directly, and
+[`../../../.github/workflows/conformance.yml`](../../../.github/workflows/conformance.yml)
+does: same containers, same network-attach pattern, with the client
+keys and config generated in the job (`setup-config`) and every plan
+run through `conformance/scripts/run-all.sh`.

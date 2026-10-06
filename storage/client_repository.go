@@ -82,7 +82,8 @@ const (
 	ClientAuthMethodSelfSignedTLSClientAuth
 
 	// ClientAuthMethodTLSClientAuth authenticates by exact string match
-	// of the presented certificate's subject DN against ExpectedSubjectDN
+	// of the presented certificate's subject DN against ExpectedSubjectDN,
+	// in either of the two forms that field's doc comment describes
 	// — RFC 8705 §2.1's "tls_client_auth_subject_dn", one of the five
 	// subject-matching rules §2.1 defines (see the four
 	// ClientAuthMethodTLSClientAuthSAN* values below for the others).
@@ -1112,5 +1113,11 @@ func stringSet(id fapi.ClientID, what string, values []string) (map[string]struc
 
 // ClientRepository resolves a registered client by ID.
 type ClientRepository interface {
+	// ResolveClient returns the client registered as id, or an error if
+	// there is none (or it's no longer registered). The server reads any
+	// error as an unknown client: invalid_client at the token, PAR and
+	// CIBA endpoints, unauthorized_client when an authorization begins.
+	// serverresource.SignUserInfoResponse answers an error wrapping
+	// ErrStoreUnavailable with 500 server_error instead.
 	ResolveClient(ctx context.Context, id fapi.ClientID) (RegisteredClient, error)
 }

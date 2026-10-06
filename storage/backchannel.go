@@ -210,6 +210,12 @@ func (e *BackchannelAuthenticationSlowDownError) Error() string {
 // authentication requests: creation, the out-of-band decision, and
 // client polling for that decision.
 type BackchannelAuthenticationStore interface {
+	// CreateBackchannelAuthentication persists record, pending, until at
+	// least its ExpiresAt, findable both by its AuthReqIDHash (for
+	// PollBackchannelAuthentication) and its HandleHash (for
+	// LookupBackchannelAuthentication and
+	// DecideBackchannelAuthentication). An error fails the
+	// backchannel authentication request.
 	CreateBackchannelAuthentication(ctx context.Context, record NewBackchannelAuthentication) error
 
 	// LookupBackchannelAuthentication returns the pending request
@@ -227,7 +233,12 @@ type BackchannelAuthenticationStore interface {
 	// returning DecidedBackchannelAuthentication (see its own doc
 	// comment). A second call for the same HandleHash must fail —
 	// exactly one decision may ever be recorded, the same way
-	// CompleteAuthorization's interaction handle is single-use.
+	// CompleteAuthorization's interaction handle is single-use. For a
+	// request whose DeliveryMode is "ping", recording the decision also
+	// exempts the client's next PollBackchannelAuthentication from the
+	// PollInterval check: the ping notification is its signal to fetch
+	// the tokens at once (CIBA Core §10.2), so that poll must not get
+	// slow_down.
 	DecideBackchannelAuthentication(ctx context.Context, decision DecideBackchannelAuthentication) (DecidedBackchannelAuthentication, error)
 
 	// PollBackchannelAuthentication atomically:
@@ -238,7 +249,8 @@ type BackchannelAuthenticationStore interface {
 	//     this AuthReqIDHash (the interval is tracked internally — the
 	//     caller supplies no interval of its own, only Now, so the
 	//     check-and-record-last-poll-time step stays atomic rather than
-	//     a check-then-act race);
+	//     a check-then-act race), except the first poll after a ping
+	//     request's decision (see DecideBackchannelAuthentication);
 	//   - returns Status Pending, unconsumed, on every poll before a
 	//     decision has been recorded;
 	//   - returns Status Denied or AuthenticationFailed, unconsumed and

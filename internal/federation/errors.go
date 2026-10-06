@@ -102,7 +102,7 @@ var (
 
 	// ErrTrustMarkStatusResponseWrongType indicates a Trust Mark Status
 	// Response JWT's "typ" header was not
-	// "trust-mark-status-response+jwt" (OpenID Federation 1.0 §8's own
+	// "trust-mark-status-response+jwt" (OpenID Federation 1.0 §8.4.2's own
 	// "Trust Mark Status Responses without a typ header parameter or
 	// with a different typ value MUST be rejected").
 	ErrTrustMarkStatusResponseWrongType = errors.New("federation: trust mark status response header typ is not trust-mark-status-response+jwt")

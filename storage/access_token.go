@@ -72,10 +72,13 @@ type LookedUpAccessToken struct {
 // needs to answer "does this exist and what does it mean" — existence
 // and expiry, nothing else.
 type AccessTokenStore interface {
+	// CreateAccessToken persists tok under its TokenHash until at least
+	// its ExpiresAt. An error fails the token request that issued it.
 	CreateAccessToken(ctx context.Context, tok NewAccessToken) error
 
 	// LookupAccessToken returns the stored record for lookup.TokenHash.
-	// It returns an error only if the hash is unknown; the caller
+	// It returns an error if the hash is unknown (or, wrapping
+	// ErrStoreUnavailable, if the store couldn't answer); the caller
 	// checks the returned record's own expiry (ExpiresAt) itself, the
 	// same way every other *Redeemed/LookedUp* type in this package is
 	// checked by its caller. resource.OpaqueAccessTokens answers any

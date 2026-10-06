@@ -2,17 +2,21 @@ package storage
 
 // StoreAssurance is a self-asserted declaration of a storage backend's
 // operational guarantees. A storage implementation (ClientRepository,
-// TransactionStore, GrantStore, ReplayStore, SessionStore) optionally
-// implements it by exposing a Capabilities method; server checks it
-// under AssuranceProduction rather than trusting that a store meant for
-// a quick prototype (e.g. an in-memory map) is safe to run in
-// production.
+// TransactionStore, GrantStore, ReplayStore, SessionStore, NonceStore,
+// AccessTokenStore, BackchannelAuthenticationStore) optionally
+// implements it by exposing a Capabilities method; server, client and
+// resource each check the stores they're given under their production
+// assurance level rather than trusting that a store meant for a quick
+// prototype (e.g. an in-memory map) is safe to run in production.
 //
 // Because these properties are self-asserted, not verified, a
 // downstream (or first-party) implementation should also run the
-// reusable contract test suite this package provides — TestGrantStoreContract,
-// TestTransactionStoreContract, TestReplayStoreContract and
-// TestSessionStoreContract — against its own factory, rather than
+// reusable contract test suite this package provides — the
+// Test*Contract function for its interface (TestGrantStoreContract,
+// TestTransactionStoreContract, TestReplayStoreContract,
+// TestSessionStoreContract, TestNonceStoreContract,
+// TestAccessTokenStoreContract, TestBackchannelAuthenticationStoreContract)
+// — against its own factory, rather than
 // relying on the capability declaration alone. The contract suite
 // verifies what's observable through the public interface (the
 // single-use/atomic-consume guarantee under concurrency, faithful
@@ -33,10 +37,12 @@ type Capabilities struct {
 	// is not durable.
 	Durable bool
 
-	// AtomicConsume means every Consume/Redeem/BeginAuthorization/
-	// CompleteAuthorization-style method is a single atomic
+	// AtomicConsume means every Consume/Redeem/CompleteAuthorization/
+	// UseOnce-style method (and DecideBackchannelAuthentication and an
+	// approved PollBackchannelAuthentication) is a single atomic
 	// check-and-retire operation: two concurrent calls for the same key
-	// can never both succeed. For a store used by one process only — a
+	// can never both succeed. BeginAuthorization isn't one: it's
+	// repeatable until an interaction completes. For a store used by one process only — a
 	// native app's own session store — a mutex around the read and the
 	// delete gives that. A store other processes also open (an app
 	// extension or widget sharing the app's data container) needs what

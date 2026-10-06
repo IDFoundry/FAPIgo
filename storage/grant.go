@@ -127,6 +127,9 @@ type RedeemedRefreshToken struct {
 
 // GrantStore persists issued authorization codes and refresh tokens.
 type GrantStore interface {
+	// CreateAuthorizationCode persists code under its CodeHash until at
+	// least its ExpiresAt, unredeemed. An error fails the authorization
+	// it was issued for.
 	CreateAuthorizationCode(ctx context.Context, code NewAuthorizationCode) error
 
 	// RedeemAuthorizationCode atomically retrieves and consumes the
@@ -162,6 +165,9 @@ type GrantStore interface {
 	// staying usable.
 	RecordIssuedRefreshToken(ctx context.Context, codeHash [32]byte, refreshTokenHash [32]byte, expiresAt time.Time) error
 
+	// CreateRefreshToken persists token under its TokenHash until at
+	// least its ExpiresAt. An error fails the token request that issued
+	// it.
 	CreateRefreshToken(ctx context.Context, token NewRefreshToken) error
 
 	// RedeemRefreshToken retrieves the refresh token identified by

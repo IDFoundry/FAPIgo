@@ -39,7 +39,8 @@ type ClientKeySpec struct {
 type Option func(*ClientKeySource)
 
 // WithCacheTTL overrides how long a fetched client JWKS is trusted
-// before being re-fetched. Defaults to 5 minutes.
+// before being re-fetched. Defaults to 5 minutes; NewClientKeySource
+// refuses a zero or negative duration.
 func WithCacheTTL(d time.Duration) Option {
 	return func(s *ClientKeySource) { s.cacheTTL = d }
 }
@@ -50,7 +51,7 @@ func WithCacheTTL(d time.Duration) Option {
 // option does: a rotated key is still picked up within one TTL, while a
 // caller sending distinct unknown kids (taken from an unverified JWT
 // header, so attacker-controlled) forces at most one fetch per client
-// per interval.
+// per interval. A zero or negative duration means that default.
 func WithMinRefreshInterval(d time.Duration) Option {
 	return func(s *ClientKeySource) { s.minRefreshInterval = d }
 }

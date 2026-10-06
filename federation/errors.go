@@ -21,7 +21,7 @@ const (
 
 	// ErrorNotFound is §8.9's "the endpoint cannot serve the requested
 	// subject" code — HTTP 404. Only ever built with NewError: whether a
-	// "sub" is actually a known subordinate (Fetch, §9), or actually
+	// "sub" is actually a known subordinate (Fetch, §8.1.2), or actually
 	// holds the requested Trust Mark (§8.6.2's own "If the specified
 	// Entity does not have the specified Trust Mark... MUST use the HTTP
 	// status code 404"), is a lookup only the caller's own storage can

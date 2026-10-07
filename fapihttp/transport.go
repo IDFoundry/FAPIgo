@@ -38,6 +38,13 @@ type TransportConfig struct {
 	// wanting both layers to honor the same allow-list sets this to the
 	// same value passed to Config.
 	AllowedPrivateHosts []string
+
+	// VerifyConnection, if set, becomes the TLS configuration's
+	// VerifyConnection: it runs after each handshake, once the server's
+	// certificate chain has verified, and a non-nil error fails the
+	// handshake. It adds checks, such as certificate pinning over
+	// ConnectionState.VerifiedChains; it can't loosen verification.
+	VerifyConnection func(tls.ConnectionState) error
 }
 
 // AllowsLoopback reports whether c grants any of its loopback
@@ -78,7 +85,7 @@ func NewClient(cfg TransportConfig) (*http.Client, error) {
 			named:        cfg.AllowedLoopbackHosts,
 		}, cfg.AllowedPrivateHosts),
 		TLSHandshakeTimeout: cfg.TLSHandshakeTimeout,
-		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
+		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12, VerifyConnection: cfg.VerifyConnection},
 		ForceAttemptHTTP2:   true,
 	}
 	return &http.Client{

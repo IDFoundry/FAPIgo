@@ -190,7 +190,7 @@ func mtlsURL(host, path string) string {
 // usage describes what a run writes. flag.Parse prints it, before
 // anything is written, for -h, --help or an unknown flag.
 func usage() {
-	fmt.Fprint(flag.CommandLine.Output(), `Usage: go run ./conformance/server/scripts/setup-config
+	_, _ = fmt.Fprint(flag.CommandLine.Output(), `Usage: go run ./conformance/server/scripts/setup-config
 
 Bootstraps the AS-side conformance profiles' test clients. Run it from the
 repository root (or from this directory). It takes no arguments and reads
@@ -217,7 +217,7 @@ func main() {
 	flag.Usage = usage
 	flag.Parse()
 	if flag.NArg() > 0 {
-		fmt.Fprintf(flag.CommandLine.Output(), "setup-config: unexpected argument %q\n\n", flag.Arg(0))
+		_, _ = fmt.Fprintf(flag.CommandLine.Output(), "setup-config: unexpected argument %q\n\n", flag.Arg(0))
 		flag.Usage()
 		os.Exit(2)
 	}

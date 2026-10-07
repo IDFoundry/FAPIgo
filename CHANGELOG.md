@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.50.1](https://github.com/IDFoundry/FAPIgo/compare/v0.50.0...v0.50.1) (2026-10-07)
+
+
+### Bug Fixes
+
+* cite the sections RFC 8705 and OpenID Federation define ([47ae458](https://github.com/IDFoundry/FAPIgo/commit/47ae458b9248b9455d831a0114d66d5d5e9ad306))
+* **conformance:** check setup-config's usage output errors ([c346841](https://github.com/IDFoundry/FAPIgo/commit/c34684131cf236940773314f0122c93af4d918c4))
+* **conformance:** make setup-config print usage on -h instead of rewriting configs ([e338f89](https://github.com/IDFoundry/FAPIgo/commit/e338f895bb5ff874c559dcf8cd5f96ae8d2f31fa))
+* **resource:** honour a resolver's wrapped *Error ([79075d5](https://github.com/IDFoundry/FAPIgo/commit/79075d502178810e8e5a2e802bc895d777783f73))
+* **server:** answer a client-store outage with 500, not invalid_client ([dd84b1c](https://github.com/IDFoundry/FAPIgo/commit/dd84b1c7499c9fbd48dd8c0e9f5a3cae70d2adbd))
+* **server:** leave ID token and UserInfo metadata out of an OAuthOnly server ([1d1744b](https://github.com/IDFoundry/FAPIgo/commit/1d1744b9c383e3b08554d5fa5b467e7c90c60141))
+
 ## [0.50.0](https://github.com/IDFoundry/FAPIgo/compare/v0.49.0...v0.50.0) (2026-10-05)
 
 

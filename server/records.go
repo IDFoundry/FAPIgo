@@ -124,6 +124,13 @@ type grantRecord struct {
 	// GrantID is GrantedAuthorization.GrantID: carried into every access
 	// token from the grant, and checked against RevokeGrant.
 	GrantID string `json:"grant_id,omitempty"`
+	// CodeGrantID is the grant's code grant ID
+	// (grantrevocation.CodeGrantID), set at the authorization code
+	// exchange when grants can be revoked: carried into every access
+	// token from the grant and its refresh token, so a reuse of the code
+	// revokes them all (RFC 6749 §4.1.2). Empty for grants that didn't
+	// come from a code, and for records written before it existed.
+	CodeGrantID string `json:"code_grant_id,omitempty"`
 
 	// IssuedAt is when this record was issued: an authorization code,
 	// a decided CIBA request, or a refresh token (forRefreshToken resets
@@ -182,6 +189,12 @@ func (g grantRecord) accessTokenClaims() (map[string]json.RawMessage, error) {
 		withGrant := map[string]json.RawMessage{grantrevocation.Claim: raw}
 		maps.Copy(withGrant, claims) // grant_id is managed, so never among claims
 		claims = withGrant
+	}
+	if g.CodeGrantID != "" {
+		raw, _ := json.Marshal(g.CodeGrantID)
+		withCode := map[string]json.RawMessage{grantrevocation.CodeClaim: raw}
+		maps.Copy(withCode, claims) // code_grant_id is managed, so never among claims
+		claims = withCode
 	}
 	return claims, nil
 }

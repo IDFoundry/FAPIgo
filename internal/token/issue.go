@@ -294,3 +294,13 @@ func randomJTI(r io.Reader) (string, error) {
 	}
 	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
+
+// GrantTypeClaim is the access token claim the server sets to
+// ClientCredentialsGrantType on a token issued by the client credentials
+// grant, whose "sub" is the client's own client_id rather than an end
+// user's (RFC 9068 §5): a resource server reads it to tell the two
+// apart. Tokens from every other grant don't carry it.
+const GrantTypeClaim = "grant_type"
+
+// ClientCredentialsGrantType is GrantTypeClaim's one value.
+const ClientCredentialsGrantType = "client_credentials"

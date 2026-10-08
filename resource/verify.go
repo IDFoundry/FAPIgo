@@ -14,6 +14,7 @@ import (
 	"github.com/idfoundry/fapigo/internal/dpop"
 	"github.com/idfoundry/fapigo/internal/grantrevocation"
 	"github.com/idfoundry/fapigo/internal/mtls"
+	"github.com/idfoundry/fapigo/internal/token"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -74,16 +75,42 @@ type VerifyRequest struct {
 	repeatedAuthorization bool
 }
 
+// SubjectKind says what an access token's subject is: an end user, or
+// the client itself.
+type SubjectKind int
+
+const (
+	// SubjectEndUser: the token was issued for an end user (an
+	// authorization code, refresh or CIBA grant); Subject is that user's
+	// identifier.
+	SubjectEndUser SubjectKind = iota + 1
+	// SubjectClient: the token was issued by the client credentials
+	// grant, for the client acting on its own behalf; Subject is the
+	// client's own client_id and there is no end user.
+	SubjectClient
+)
+
 // AuthorizationContext is what Verify returns for a successfully
-// verified request: who is acting (Subject), on behalf of which client
-// (ClientID), with what granted scope, and any additional claims the
-// access token carried.
+// verified request: who is acting (Subject, and SubjectKind for what it
+// is), on behalf of which client (ClientID), with what granted scope,
+// and any additional claims the access token carried.
 type AuthorizationContext struct {
-	Subject   string
-	ClientID  string
-	Scopes    []string
-	Claims    map[string]json.RawMessage
-	ExpiresAt time.Time
+	// Subject is the token's subject: an end user's identifier, or, for
+	// a client credentials token, the client's own client_id. Check
+	// SubjectKind before authorizing by Subject: a client registered
+	// with a client_id it chose (automatically through OpenID
+	// Federation, for one) could otherwise present a client credentials
+	// token whose Subject equals an end user's (RFC 9068 §5).
+	Subject string
+	// SubjectKind is what Subject names. A token from the client
+	// credentials grant carries a "grant_type" claim saying so
+	// (SubjectClient); any other is SubjectEndUser. Zero only in an
+	// AuthorizationContext built by hand.
+	SubjectKind SubjectKind
+	ClientID    string
+	Scopes      []string
+	Claims      map[string]json.RawMessage
+	ExpiresAt   time.Time
 
 	// Key is the access token's revocation-lookup identifier (see
 	// ResolvedAccessToken.Key), exposed for a caller's own audit
@@ -172,6 +199,10 @@ func (v *Verifier) verify(ctx context.Context, req VerifyRequest) (Authorization
 	if verr := v.checkNotRevoked(ctx, resolved); verr != nil {
 		return AuthorizationContext{}, usedDPoP, verr
 	}
+	kind, verr := subjectKindOf(resolved.Claims)
+	if verr != nil {
+		return AuthorizationContext{}, usedDPoP, verr
+	}
 
 	if senderConstrain == storage.SenderConstrainDPoP {
 		if verr := v.consumeDPoPProof(ctx, verifiedProof, now); verr != nil {
@@ -190,6 +221,7 @@ func (v *Verifier) verify(ctx context.Context, req VerifyRequest) (Authorization
 
 	return AuthorizationContext{
 		Subject:       resolved.Subject,
+		SubjectKind:   kind,
 		ClientID:      resolved.ClientID,
 		Scopes:        resolved.Scopes,
 		Claims:        resolved.Claims,
@@ -377,24 +409,50 @@ func (v *Verifier) consumeDPoPProof(ctx context.Context, proof dpop.VerifiedProo
 }
 
 // checkGrantNotRevoked refuses an access token whose grant has been
-// revoked (server.RevokeGrant): one carrying a grant_id claim the
-// revocation store records as revoked. A token without one is
-// unaffected — its grant has no ID to revoke it by.
+// revoked: one carrying a grant_id claim the revocation store records as
+// revoked (server.RevokeGrant), or a code_grant_id claim it records as
+// revoked (the server revokes it when the authorization code the grant
+// came from is reused). A token without either is unaffected — its
+// grant has no ID to revoke it by.
 func (v *Verifier) checkGrantNotRevoked(ctx context.Context, claims map[string]json.RawMessage) *Error {
-	raw, ok := claims[grantrevocation.Claim]
-	if !ok {
-		return nil
-	}
-	var grantID string
-	if err := json.Unmarshal(raw, &grantID); err != nil || grantID == "" {
-		return newError(ErrorInvalidToken, 401, "access token's grant_id is malformed", err)
-	}
-	revoked, err := v.deps.Revocation.IsRevoked(ctx, grantrevocation.Key(grantID))
-	if err != nil {
-		return newError(ErrorServerError, 500, "failed to check grant revocation", err)
-	}
-	if revoked {
-		return newError(ErrorInvalidToken, 401, "access token's grant has been revoked", nil)
+	for _, c := range []struct {
+		claim string
+		key   func(string) string
+	}{
+		{grantrevocation.Claim, grantrevocation.Key},
+		{grantrevocation.CodeClaim, grantrevocation.CodeKey},
+	} {
+		raw, ok := claims[c.claim]
+		if !ok {
+			continue
+		}
+		var id string
+		if err := json.Unmarshal(raw, &id); err != nil || id == "" {
+			return newError(ErrorInvalidToken, 401, "access token's "+c.claim+" is malformed", err)
+		}
+		revoked, err := v.deps.Revocation.IsRevoked(ctx, c.key(id))
+		if err != nil {
+			return newError(ErrorServerError, 500, "failed to check grant revocation", err)
+		}
+		if revoked {
+			return newError(ErrorInvalidToken, 401, "access token's grant has been revoked", nil)
+		}
 	}
 	return nil
+}
+
+// subjectKindOf reads what an access token's subject is from its
+// "grant_type" claim, which the authorization server sets on client
+// credentials tokens only. Any other value fails closed: the claim is
+// the server's own, so one it didn't set means a token it didn't issue.
+func subjectKindOf(claims map[string]json.RawMessage) (SubjectKind, *Error) {
+	raw, ok := claims[token.GrantTypeClaim]
+	if !ok {
+		return SubjectEndUser, nil
+	}
+	var grantType string
+	if err := json.Unmarshal(raw, &grantType); err != nil || grantType != token.ClientCredentialsGrantType {
+		return 0, newError(ErrorInvalidToken, 401, "access token's grant_type is malformed", err)
+	}
+	return SubjectClient, nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/idfoundry/fapigo/internal/grantrevocation"
@@ -122,30 +123,53 @@ func (s *Server) RevokeGrant(ctx context.Context, grantID string) error {
 // RevokeGrant: invalid_grant, as for any other authorization grant that
 // is no longer valid (RFC 6749 §5.2).
 func (s *Server) checkGrantNotRevoked(ctx context.Context, grant grantRecord) *Error {
-	if grant.GrantID == "" {
+	var keys []string
+	if grant.GrantID != "" {
+		keys = append(keys, grantrevocation.Key(grant.GrantID))
+	}
+	if grant.CodeGrantID != "" {
+		// Revoked when the code it came from was reused.
+		keys = append(keys, grantrevocation.CodeKey(grant.CodeGrantID))
+	}
+	if len(keys) == 0 {
 		return nil
 	}
 	reader, ok := s.grantRevocationReader()
 	if !ok {
-		// CompleteAuthorization only sets a grant ID with a checkable
-		// store, so this is a deployment that has since changed its
+		// A grant or code grant ID is only set with a checkable store, so
+		// this is a deployment that has since changed its
 		// Dependencies.Revocation: fail closed.
 		return newError(ErrorServerError, 500, "the grant's revocation can't be checked", nil)
 	}
-	revoked, err := reader.IsRevoked(ctx, grantrevocation.Key(grant.GrantID))
-	if err != nil {
-		return newError(ErrorServerError, 500, "failed to check the grant's revocation", err)
-	}
-	if revoked {
-		return newError(ErrorInvalidGrant, 400, "the grant has been revoked", nil)
+	for _, key := range keys {
+		revoked, err := reader.IsRevoked(ctx, key)
+		if err != nil {
+			return newError(ErrorServerError, 500, "failed to check the grant's revocation", err)
+		}
+		if revoked {
+			return newError(ErrorInvalidGrant, 400, "the grant has been revoked", nil)
+		}
 	}
 	return nil
 }
 
 // grantRevocationHorizon is how long after now anything issued from a
 // grant can still be used — RevokeGrant's record lifetime.
+//
+// The sum saturates at the largest Duration rather than wrapping, so
+// lifetimes configured absurdly long still give a record that outlasts
+// them instead of one that has already expired.
 func (s *Server) grantRevocationHorizon() time.Duration {
 	l := s.cfg.Limits
-	return max(l.RefreshTokenLifetime, l.AuthorizationCodeLifetime, l.BackchannelAuthenticationRequestLifetime) +
-		l.AccessTokenLifetime + l.MaxClockSkew
+	return saturatingAdd(saturatingAdd(max(l.RefreshTokenLifetime, l.AuthorizationCodeLifetime, l.BackchannelAuthenticationRequestLifetime),
+		l.AccessTokenLifetime), l.MaxClockSkew)
+}
+
+// saturatingAdd is a+b for non-negative durations, capped at the largest
+// Duration instead of overflowing.
+func saturatingAdd(a, b time.Duration) time.Duration {
+	if b > 0 && a > math.MaxInt64-b {
+		return math.MaxInt64
+	}
+	return a + b
 }

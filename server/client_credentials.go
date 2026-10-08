@@ -3,9 +3,11 @@ package server
 import (
 	"context"
 	"crypto/x509"
+	"encoding/json"
 	"strings"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/token"
 )
 
 // ClientCredentialsTokenRequest is the input to
@@ -132,7 +134,14 @@ func (s *Server) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 	// so a *second* redemption of that same code can revoke the first
 	// issuance (RFC 6749 §4.1.2). There is no code (or any other
 	// redeemable grant) here to ever be replayed against.
-	accessTokenClaims := withAuthorizationDetails(authorizationDetails, nil)
+	// grant_type marks the token as the client's own, not an end user's,
+	// so a resource server can tell a client_credentials token for a
+	// client from a user token whose subject happens to equal that
+	// client_id (RFC 9068 §5): a client registered automatically through
+	// OpenID Federation chooses its own client_id.
+	accessTokenClaims := withAuthorizationDetails(authorizationDetails, map[string]json.RawMessage{
+		token.GrantTypeClaim: json.RawMessage(`"` + token.ClientCredentialsGrantType + `"`),
+	})
 	accessToken, _, err := s.deps.AccessTokens.IssueAccessToken(ctx, AccessTokenParams{
 		ClientID: client.ID(), Subject: client.ID().String(), Scope: scopeTokens,
 		Thumbprint: thumbprint, SenderConstrain: client.SenderConstrain(), Claims: accessTokenClaims,

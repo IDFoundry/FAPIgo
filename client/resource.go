@@ -163,7 +163,10 @@ func (rc *ResourceClient) Do(ctx context.Context, req *http.Request) (*http.Resp
 // SenderConstrainMTLS — see Do's own doc comment for why no proof or
 // nonce handling applies here.
 func (rc *ResourceClient) sendBearer(ctx context.Context, req *http.Request) (*http.Response, error) {
-	req = req.WithContext(ctx)
+	// A deep copy: setting the token on req itself would leave it on the
+	// caller's request (and race when one request is a template shared
+	// across goroutines).
+	req = req.Clone(ctx)
 	req.Header.Set("Authorization", "Bearer "+rc.token)
 	return rc.do(req)
 }
@@ -181,7 +184,7 @@ func (rc *ResourceClient) send(ctx context.Context, signer crypto.Signer, req *h
 	if err != nil {
 		return nil, err
 	}
-	req = req.WithContext(ctx)
+	req = req.Clone(ctx) // never the caller's request; see sendBearer
 	req.Header.Set("Authorization", "DPoP "+rc.token)
 	req.Header.Set("DPoP", proof)
 	return rc.do(req)

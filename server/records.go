@@ -58,6 +58,14 @@ type requestRecord struct {
 	// record written before this field existed; such a record isn't
 	// checked against prompt=login.
 	PushedAt *time.Time `json:"pushed_at,omitempty"`
+
+	// EssentialACRValues are the Authentication Context Class
+	// References an essential "acr" request for the ID token named
+	// (OIDC Core §5.5.1.1; see essentialACRValues), so a completion
+	// whose authentication used none of them is refused. Empty when the
+	// request made no such demand, and in a record written before this
+	// field existed; neither is checked.
+	EssentialACRValues []string `json:"essential_acr_values,omitempty"`
 }
 
 // grantRecord is what an authorization code, refresh token or approved

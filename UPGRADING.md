@@ -15,6 +15,40 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.52.0
+
+### An essential `acr` request is enforced (server)
+
+**Affects:** a server whose clients send the `claims` parameter with an
+essential `acr` request for the ID token, such as
+`{"id_token":{"acr":{"essential":true,"values":["urn:example:gold"]}}}`,
+and whose application completes such a request with an authentication
+at a different class.
+
+**Why:** OIDC Core §5.5.1.1 says that when `acr` is requested as an
+Essential Claim with a value or values, the authorization server MUST
+return an `acr` matching one of them, or treat the outcome as a failed
+authentication. The server kept only the requested claim names, so the
+values never reached the application, and an ID token could carry a
+lower `acr` than the relying party required for step-up. It now
+surfaces them as `InteractionRequest.EssentialACRValues` (and
+`BackchannelInteractionRequest.EssentialACRValues` for CIBA), and
+refuses a completion whose `acr` isn't one of them:
+`CompleteAuthorization` answers the client with `login_required` and no
+code, and `CompleteBackchannelAuthentication` records a failed
+authentication, so the client's poll gets `access_denied` and no
+tokens. A pushed or backchannel request whose id_token `acr` entry is
+malformed (not an object, or an `essential`, `value` or `values` of the
+wrong type) is now `invalid_request`. A voluntary `acr` request, and
+`acr_values`, remain the client's preference only. Requests made before
+upgrading aren't checked.
+
+**What to change:** when `EssentialACRValues` isn't empty, authenticate
+the user at one of those classes and pass it as the `acr` of
+`NewAuthenticationContext`. If you can't, complete with
+`AuthenticationFailed` (or `InteractionNeeded` for `prompt=none`), as
+the relying party asked for an authentication you can't provide.
+
 ## v0.50.0
 
 ### `ResolveViaEndpoint` names the resolver it trusts (federation)

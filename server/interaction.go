@@ -115,6 +115,18 @@ type InteractionRequest struct {
 	// acr of NewAuthenticationContext, which the ID token carries.
 	ACRValues []string
 
+	// EssentialACRValues are the Authentication Context Class
+	// References the client requested as an essential "acr" claim for
+	// the ID token, through the "claims" parameter (OIDC Core
+	// §5.5.1.1), most preferred first. Unlike ACRValues they are a
+	// requirement: authenticate the user at one of these classes and
+	// report it as NewAuthenticationContext's acr. CompleteAuthorization
+	// enforces it: an Authorize whose acr isn't one of them answers the
+	// client with login_required, the failed authentication OIDC Core
+	// §5.5.1.1 calls for, and issues no code. Nil when the request made
+	// no such demand.
+	EssentialACRValues []string
+
 	// MaxAge is the client's "max_age" (OIDC Core §3.1.2.1), when
 	// HasMaxAge: the most time that may have passed since the user last
 	// actively authenticated. If the application's last authentication

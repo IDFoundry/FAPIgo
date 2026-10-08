@@ -99,10 +99,18 @@ type BackchannelAuthenticationHints struct {
 // to authenticate/consent the end user out-of-band for a pending CIBA
 // request — mirroring InteractionRequest for the browser flow.
 type BackchannelInteractionRequest struct {
-	ClientID       fapi.ClientID
-	Scope          []string
-	Hints          BackchannelAuthenticationHints
-	ACRValues      []string
+	ClientID  fapi.ClientID
+	Scope     []string
+	Hints     BackchannelAuthenticationHints
+	ACRValues []string
+
+	// EssentialACRValues mirrors InteractionRequest.EssentialACRValues
+	// for the CIBA flow: authenticate the user at one of these classes.
+	// CompleteBackchannelAuthentication records an Authorize whose acr
+	// isn't one of them as a failed authentication, so the client's
+	// poll gets the same answer as AuthenticationFailed and no tokens.
+	EssentialACRValues []string
+
 	BindingMessage string
 
 	// ClientDisplay mirrors InteractionRequest.ClientDisplay, for the

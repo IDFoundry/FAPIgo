@@ -55,11 +55,12 @@ const RequestedUserinfoClaimsKey = "requested_userinfo_claims"
 // requestedClaimsParameter is the OIDC Core §5.5 "claims" request
 // parameter's shape, trimmed to the one thing this package acts on:
 // which claim names were asked for, per delivery location. Everything
-// else about each entry (essential/value/values) is intentionally
-// ignored — OIDC Core §5.5 permits a server to honor as much or as
-// little of a claims request as it wants; this package's contract is
-// simply "never return what wasn't asked for", not "honor every nuance
-// of the request".
+// else about each entry (essential/value/values) is ignored here — OIDC
+// Core §5.5 permits a server to honor as much or as little of a claims
+// request as it wants, and this package's contract is "never return
+// what wasn't asked for". The one exception is an essential "acr"
+// request with values, which §5.5.1.1 makes a requirement: see
+// essentialACRValues.
 type requestedClaimsParameter struct {
 	UserInfo map[string]json.RawMessage `json:"userinfo"`
 	IDToken  map[string]json.RawMessage `json:"id_token"`

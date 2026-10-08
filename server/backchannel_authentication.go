@@ -216,7 +216,8 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		authReqIDForNotification = authReqIDRaw
 	}
 
-	request, err := encodeRequestRecord(requestRecord{Parameters: validated.params, TokenClaims: validated.tokenClaims, DPoPJKT: dpopJKT, ExpiresAt: &expiresAt})
+	essentialACR, _ := essentialACRValues(validated.params)
+	request, err := encodeRequestRecord(requestRecord{Parameters: validated.params, TokenClaims: validated.tokenClaims, DPoPJKT: dpopJKT, ExpiresAt: &expiresAt, EssentialACRValues: essentialACR})
 	if err != nil {
 		return s.backchannelBeginFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to encode backchannel authentication request", err)), nil
 	}
@@ -384,6 +385,9 @@ func (s *Server) validateBackchannelAuthenticationParameters(verified verifiedBa
 	if validateErr := validateClientNotificationToken(params, client); validateErr != nil {
 		return verifiedBackchannelRequest{}, validateErr
 	}
+	if _, err := essentialACRValues(params); err != nil {
+		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, err.Error(), nil)
+	}
 
 	if raw, ok := params["binding_message"]; ok {
 		bindingMessage, err := jsonStringValue(raw)
@@ -550,10 +554,12 @@ func (s *Server) backchannelInteractionRequestFrom(clientID fapi.ClientID, param
 		acrValues = strings.Fields(v)
 	}
 	bindingMessage, _ := jsonString(params, "binding_message")
+	// Validated when the request was made, so an error here can't happen.
+	essentialACR, _ := essentialACRValues(params)
 
 	return BackchannelInteractionRequest{
 		ClientID: clientID, Scope: scopes, Hints: hints,
-		ACRValues: acrValues, BindingMessage: bindingMessage,
+		ACRValues: acrValues, EssentialACRValues: essentialACR, BindingMessage: bindingMessage,
 		AuthorizationDetails: rarValuesFromStoredParameters(s.cfg.RAR, params),
 		RequestedClaims:      requestedClaimsFrom(params),
 	}

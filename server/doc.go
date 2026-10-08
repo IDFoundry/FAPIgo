@@ -73,11 +73,14 @@
 //     reading the same revocation store — every access token issued
 //     from it.
 //   - The client's authentication requirements reach the application
-//     (InteractionRequest.ACRValues, MaxAge, HasMaxAge and Prompt), and
-//     max_age and prompt=login are enforced: CompleteAuthorization
-//     answers login_required when the authentication time the
-//     application reports is older than max_age allows, or, for
-//     prompt=login, earlier than the request.
+//     (InteractionRequest.ACRValues, EssentialACRValues, MaxAge,
+//     HasMaxAge and Prompt), and max_age, prompt=login and an essential
+//     acr request are enforced: CompleteAuthorization answers
+//     login_required when the authentication time the application
+//     reports is older than max_age allows, or, for prompt=login,
+//     earlier than the request, or when its acr isn't one of the
+//     essential values requested through the "claims" parameter (OIDC
+//     Core §5.5.1.1).
 //   - AuthorizationAction (from BeginAuthorization) and AuthorizationResult
 //     (from CompleteAuthorization) are closed sum types, not structs with
 //     optional fields, so a caller can never mistake a local error for a

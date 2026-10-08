@@ -245,7 +245,8 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 	if _, hasRequestObject := params["request"]; hasRequestObject {
 		source = extension.SourceRequestObject
 	}
-	request, err := encodeRequestRecord(requestRecord{Parameters: validated, TokenClaims: tokenClaims, ExtensionSource: source, PushedAt: &now})
+	essentialACR, _ := essentialACRValues(validated)
+	request, err := encodeRequestRecord(requestRecord{Parameters: validated, TokenClaims: tokenClaims, ExtensionSource: source, PushedAt: &now, EssentialACRValues: essentialACR})
 	if err != nil {
 		return s.parFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to encode pushed authorization request", err))
 	}
@@ -695,6 +696,9 @@ func (s *Server) validateAuthorizationParameters(params map[string]json.RawMessa
 		return nil, newError(ErrorInvalidRequest, 400, "max_age must be a non-negative whole number of seconds", err)
 	}
 	if _, err := requestedPrompt(params); err != nil {
+		return nil, newError(ErrorInvalidRequest, 400, err.Error(), nil)
+	}
+	if _, err := essentialACRValues(params); err != nil {
 		return nil, newError(ErrorInvalidRequest, 400, err.Error(), nil)
 	}
 

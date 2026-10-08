@@ -81,6 +81,8 @@ func (c tracingClient) Do(req *http.Request) (*http.Response, error) {
 	req.ContentLength = int64(len(reqBody))
 	res, err := c.next.Do(req) //nolint:gosec // G704: see tracingClient
 	if err != nil {
+		// The protocol trace is shown in the browser, error included; a
+		// real deployment keeps internal errors out of what users see.
 		opts.trace.add(title, detail+"\n\n→ "+err.Error())
 		return nil, err
 	}

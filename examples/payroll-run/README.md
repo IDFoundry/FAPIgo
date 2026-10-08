@@ -185,3 +185,6 @@ The code:
   until it expires, so keep access tokens short-lived.
 - One process plays every party, so the bank and its API share their
   stores directly. Separate services would share a database instead.
+- The pages show the library's own error messages, so you can see why
+  each attack was refused. A real deployment must not send internal
+  errors to the browser: log them, and show the user a generic message.

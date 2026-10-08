@@ -151,7 +151,7 @@ func (c *Client) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 		AuthorizationDetails: raw.AuthorizationDetails,
 	}
 	if raw.ExpiresIn > 0 {
-		result.ExpiresIn = time.Duration(raw.ExpiresIn) * time.Second
+		result.ExpiresIn = expiresInDuration(raw.ExpiresIn)
 		result.HasExpiresIn = true
 	}
 	return result, nil

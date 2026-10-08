@@ -120,6 +120,9 @@ func validateConfig(cfg Config) error {
 	if authorizationFlowConfigured && cfg.RedirectURI == "" {
 		return fmt.Errorf("client: config: redirect_uri is required when endpoints.authorization is set")
 	}
+	if err := validateRedirectURI(cfg); err != nil {
+		return err
+	}
 	if err := validateEnumFields(cfg); err != nil {
 		return err
 	}
@@ -549,4 +552,30 @@ func (c *Client) checkOAuthOnlyScope(scope []string) *Error {
 // of a client that can't use it.
 func idTokensPossible(cfg Config) bool {
 	return !cfg.OAuthOnly && (!cfg.Endpoints.Authorization.IsZero() || !cfg.Endpoints.BackchannelAuthentication.IsZero())
+}
+
+// validateRedirectURI refuses a Config.RedirectURI no authorization
+// server following FAPI 2.0 §5.3.2.2 would accept, so the mistake shows
+// at New rather than as an invalid_request from the server's pushed
+// authorization endpoint: it must be https, a native app's loopback http
+// (RFC 8252 §7.3) or a private-use scheme (§7.1), with no fragment or
+// credentials. This client doesn't know whether it's a native app, so
+// all three forms pass; under AssuranceProduction a loopback redirect
+// must name the IP literal 127.0.0.1 or [::1], not localhost, as RFC
+// 8252 §8.3 recommends and a server's native client registration
+// requires.
+func validateRedirectURI(cfg Config) error {
+	if cfg.RedirectURI == "" {
+		return nil
+	}
+	if _, err := fapi.ParseRedirectURL(cfg.RedirectURI, fapi.AllowLoopbackHTTP(), fapi.AllowPrivateUseScheme()); err != nil {
+		return fmt.Errorf("client: config: redirect_uri: %w", err)
+	}
+	if cfg.Assurance != AssuranceProduction {
+		return nil
+	}
+	if u, err := url.Parse(cfg.RedirectURI); err == nil && u.Scheme == "http" && u.Hostname() != "127.0.0.1" && u.Hostname() != "::1" {
+		return fmt.Errorf("client: config: redirect_uri: a loopback redirect URI uses the IP literal 127.0.0.1 or [::1], not a name, under AssuranceProduction (RFC 8252 §8.3)")
+	}
+	return nil
 }

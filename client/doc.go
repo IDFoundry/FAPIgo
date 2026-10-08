@@ -6,7 +6,8 @@
 // HandleAuthorizationResponse, ExchangeCode, CompleteAuthorization, for
 // CIBA BeginBackchannelAuthentication and PollBackchannelAuthentication,
 // and RefreshTokens to redeem the refresh token either flow issued,
-// with TokenSetSealer to keep the tokens between them and RevokeToken to
+// with TokenSetSealer to keep the tokens between them,
+// BackchannelSessionSealer to keep a CIBA session between polls, and RevokeToken to
 // tell the server when they're no longer needed, and, for OpenID
 // Federation, EntityConfiguration to publish this client's own signed
 // Entity Configuration)
@@ -15,6 +16,13 @@
 // out of order. In particular, only this package may construct request
 // objects and PAR submissions; verifying them is the server package's
 // responsibility.
+//
+// Give Dependencies.HTTP a client from fapihttp.NewClient: the
+// endpoints this client calls can come from metadata it fetched
+// (NewFromDiscovery, DiscoverViaFederation) rather than from you, and
+// fapihttp's transport refuses private, loopback and link-local
+// addresses at dial time, so a hostile or compromised metadata document
+// can't point this client's requests at internal hosts.
 //
 // OpenID Connect identity (an ID token, Subject, IDTokenClaims) is
 // optional, and follows what the client asked for: ExchangeCode,

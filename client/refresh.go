@@ -2,7 +2,9 @@ package client
 
 import (
 	"context"
+	"math"
 	"strings"
+	"time"
 )
 
 // RefreshTokenRequest is the input to Client.RefreshTokens.
@@ -32,9 +34,10 @@ type RefreshTokenRequest struct {
 // result keeps req.Tokens' (IDToken, Subject and IDTokenClaims), so a
 // later refresh from it still has the original to check against.
 //
-// req.Tokens must have come from this client's issuer: when it has an ID
-// token, one from another issuer is refused before anything is sent, so
-// one issuer's refresh token is never presented to another.
+// req.Tokens must have come from this client's issuer (TokenSet.Issuer,
+// or for a set without one, its ID token's iss): a set from another
+// issuer, or one recording no issuer at all, is refused before anything
+// is sent, so one issuer's refresh token is never presented to another.
 //
 // A returned ID token is validated as ExchangeCode validates one, and
 // checked against the original (OIDC Core §12.2): the same sub, the same
@@ -45,8 +48,14 @@ func (c *Client) RefreshTokens(ctx context.Context, req RefreshTokenRequest) (To
 	if !req.Tokens.HasRefreshToken || req.Tokens.RefreshToken.Reveal() == "" {
 		return TokenSet{}, newError(ErrorInvalidRequest, "the token set has no refresh token", nil)
 	}
-	if req.Tokens.HasIDToken && req.Tokens.IDTokenClaims.Issuer != c.cfg.Issuer.String() {
+	if iss := tokenSetIssuer(req.Tokens); iss != c.cfg.Issuer.String() {
+		if iss == "" {
+			return TokenSet{}, newError(ErrorInvalidRequest, "the token set doesn't record its issuer (TokenSet.Issuer)", nil)
+		}
 		return TokenSet{}, newError(ErrorInvalidRequest, "the token set was issued by a different issuer than this client's", nil)
+	}
+	if req.Tokens.HasIDToken && req.Tokens.IDTokenClaims.Issuer != c.cfg.Issuer.String() {
+		return TokenSet{}, newError(ErrorInvalidRequest, "the token set's ID token was issued by a different issuer than this client's", nil)
 	}
 	assertionSigner, assertionKID, dpopSigner, err := c.resolveClientAuthAndDPoPSigners(ctx)
 	if err != nil {
@@ -108,4 +117,31 @@ func checkRefreshedIDToken(original TokenSet, refreshed IDTokenClaims) *Error {
 		return newError(ErrorInvalidResponse, "refreshed ID token's azp differs from the original ID token's", nil)
 	}
 	return nil
+}
+
+// tokenSetIssuer is the issuer t came from: its Issuer, or, for a set
+// that doesn't record one (built by hand, or kept from before the field
+// existed), its ID token's verified iss; "" when it has neither.
+func tokenSetIssuer(t TokenSet) string {
+	if t.Issuer != "" {
+		return t.Issuer
+	}
+	if t.HasIDToken {
+		return t.IDTokenClaims.Issuer
+	}
+	return ""
+}
+
+// maxExpiresInSeconds is the largest expires_in, in seconds, that fits
+// a time.Duration.
+const maxExpiresInSeconds = int64(math.MaxInt64 / int64(time.Second))
+
+// expiresInDuration converts a token response's positive expires_in, in
+// seconds, to a Duration, clamping a value too large to represent
+// rather than letting it overflow into a negative or small one.
+func expiresInDuration(seconds int64) time.Duration {
+	if seconds > maxExpiresInSeconds {
+		return time.Duration(maxExpiresInSeconds) * time.Second
+	}
+	return time.Duration(seconds) * time.Second
 }

@@ -42,9 +42,13 @@ signs the request, authenticates as the client and sends it, after
 checking locally that exactly one hint is set. `PollBackchannelAuthentication`
 makes exactly one attempt, so you poll on your own schedule (a job
 queue, a ticker) rather than blocking a goroutine while a person
-decides. The session survives restarts: store it with `MarshalText`,
-and restore it with `UnmarshalText` or
-`client.ParseBackchannelAuthenticationSession`, on any instance.
+decides. The session survives restarts: seal it with a
+`client.BackchannelSessionSealer` (`NewBackchannelSessionSealer(c, keys)`,
+then `Seal`), store the result keyed by its `AuthReqID`, and `Open` it on
+any instance. The sealing is AES-256-GCM, bound to the client's issuer
+and client ID, so a stored session can't be edited: it records whether
+the request asked for `openid`, which decides whether an approval
+without an ID token is refused.
 
 For ping delivery, set `Config.BackchannelTokenDeliveryMode` to
 `storage.BackchannelTokenDeliveryModePing`, and register your

@@ -117,3 +117,43 @@ func TestProtectedResourceDoRejectsLoopbackHTTPUnderProduction(t *testing.T) {
 		})
 	}
 }
+
+// TestNewValidatesRedirectURI: Config.RedirectURI must be one an
+// authorization server following FAPI 2.0 would accept — https, a
+// native app's loopback http or a private-use scheme — checked at New;
+// under production a loopback redirect names the IP literal, not
+// localhost.
+func TestNewValidatesRedirectURI(t *testing.T) {
+	for name, tc := range map[string]struct {
+		uri        string
+		production bool
+		ok         bool
+	}{
+		"https":                       {"https://rp.example.com/cb", true, true},
+		"loopback IP literal":         {"http://127.0.0.1/cb", true, true},
+		"loopback IPv6 literal":       {"http://[::1]:8400/cb", true, true},
+		"private-use scheme":          {"com.example.wallet:/cb", true, true},
+		"localhost, development":      {"http://localhost/cb", false, true},
+		"localhost, production":       {"http://localhost/cb", true, false},
+		"http to a non-loopback host": {"http://rp.example.com/cb", false, false},
+		"fragment":                    {"https://rp.example.com/cb#x", false, false},
+		"credentials":                 {"http://user@127.0.0.1/cb", false, false},
+		"private-use with //":         {"com.example.wallet://cb", false, false},
+		"not absolute":                {"/cb", false, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg, deps := validConfig(t), validDependencies(t)
+			if tc.production {
+				cfg.Assurance, deps = client.AssuranceProduction, productionDeps(t)
+			}
+			cfg.RedirectURI = tc.uri
+			_, err := client.New(cfg, deps)
+			if tc.ok && err != nil {
+				t.Fatalf("New(%q) = %v, want accepted", tc.uri, err)
+			}
+			if !tc.ok && (err == nil || !strings.Contains(err.Error(), "redirect_uri")) {
+				t.Fatalf("New(%q) = %v, want a redirect_uri refusal", tc.uri, err)
+			}
+		})
+	}
+}

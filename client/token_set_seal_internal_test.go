@@ -14,10 +14,7 @@ func TestTokenSetSealerOpenRefusesNonJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	key := sealer.keys[0]
-	nonce := make([]byte, key.aead.NonceSize())
-	sealed := append(append([]byte{tokenSetSealVersion}, key.id[:]...), nonce...)
-	sealed = key.aead.Seal(sealed, nonce, []byte("not json"), sealer.additionalData("user-1"))
+	sealed := sealer.keys.seal(tokenSetSealVersion, []byte("not json"), sealer.additionalData("user-1"))
 
 	if _, _, err := sealer.Open(sealed, "user-1"); !errors.Is(err, ErrUnreadableTokenSet) {
 		t.Errorf("Open(non-JSON plaintext) = %v, want ErrUnreadableTokenSet", err)

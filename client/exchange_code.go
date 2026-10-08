@@ -78,6 +78,15 @@ type TokenSet struct {
 	// RefreshToken is set only when the authorization server issued one.
 	RefreshToken    fapi.Secret
 	HasRefreshToken bool
+
+	// Issuer is the authorization server these tokens came from: this
+	// client's Config.Issuer when it obtained them, and the issuer
+	// TokenSetSealer.Open binds a sealed set to. RefreshTokens refuses
+	// a set whose Issuer isn't this client's, so one issuer's refresh
+	// token is never sent to another's token endpoint. A set built by
+	// hand must set it; one without it falls back to its ID token's
+	// verified iss, and is refused if it has no ID token either.
+	Issuer string
 }
 
 // IDTokenClaims is the validated set of standard ID token claims beyond
@@ -299,9 +308,10 @@ func (c *Client) tokenSetFromResponse(ctx context.Context, body []byte, nonce st
 		Scope:                raw.Scope,
 		AuthorizationDetails: raw.AuthorizationDetails,
 		ObtainedAt:           c.deps.Clock.Now(),
+		Issuer:               c.cfg.Issuer.String(),
 	}
 	if raw.ExpiresIn > 0 {
-		result.ExpiresIn = time.Duration(raw.ExpiresIn) * time.Second
+		result.ExpiresIn = expiresInDuration(raw.ExpiresIn)
 		result.HasExpiresIn = true
 	}
 
@@ -342,12 +352,12 @@ func (c *Client) sendTokenRequest(ctx context.Context, dpopSigner crypto.Signer,
 		}
 		return body, nil
 	}
-	body, status, header, err := c.postTokenRequestWithDPoP(ctx, dpopSigner, tokenURL, form, c.cachedDPoPNonce(ctx, asNonceScope), headers)
+	body, status, header, err := c.postTokenRequestWithDPoP(ctx, dpopSigner, tokenURL, form, c.cachedDPoPNonce(ctx, c.asNonceScope()), headers)
 	if err != nil {
 		return nil, newError(ErrorInternal, errTokenRequestFailed, err)
 	}
 	nextNonce := header.Get(dpopNonceHeader)
-	c.cacheDPoPNonce(ctx, asNonceScope, nextNonce)
+	c.cacheDPoPNonce(ctx, c.asNonceScope(), nextNonce)
 	if status == http.StatusOK {
 		return body, nil
 	}
@@ -363,7 +373,7 @@ func (c *Client) sendTokenRequest(ctx context.Context, dpopSigner crypto.Signer,
 	if err != nil {
 		return nil, newError(ErrorInternal, errTokenRequestFailed, err)
 	}
-	c.cacheDPoPNonce(ctx, asNonceScope, header.Get(dpopNonceHeader))
+	c.cacheDPoPNonce(ctx, c.asNonceScope(), header.Get(dpopNonceHeader))
 	if status != http.StatusOK {
 		return nil, parErrorFromResponse(status, header, body)
 	}

@@ -6,12 +6,15 @@ import (
 	"sync"
 )
 
-// asNonceScope is the DPoPNonceCache key shared by the token endpoint
-// and PAR — a Client is already bound to exactly one issuer, and
-// server's own Dependencies.Nonces treats PAR and the token endpoint as
-// one shared nonce space (RFC 9449 §8), so a nonce obtained from either
-// is valid to present to either.
-const asNonceScope = "as"
+// asNonceScope is the DPoPNonceCache key shared by the token endpoint,
+// PAR and the backchannel authentication endpoint: server's own
+// Dependencies.Nonces treats them as one shared nonce space (RFC 9449
+// §8), so a nonce obtained from one is valid to present to another. It
+// names this client's issuer, so one cache shared by clients for
+// different issuers keeps their nonces apart.
+func (c *Client) asNonceScope() string {
+	return "as " + c.cfg.Issuer.String()
+}
 
 // dpopNonceHeader is RFC 9449 §8's "DPoP-Nonce" response header —
 // shared by every call site that reads or writes it (a typo here would

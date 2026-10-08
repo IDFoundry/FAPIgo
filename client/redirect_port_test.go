@@ -58,7 +58,6 @@ func TestBeginAuthorizationRedirectPortRefusesNonLoopback(t *testing.T) {
 		"http://localhost/callback",
 		"http://127.0.0.2/callback",
 		"com.example.wallet:/callback",
-		"http://user@127.0.0.1/callback",
 	} {
 		t.Run(configured, func(t *testing.T) {
 			c, as, _ := newTestClientWith(t, false, func(cfg *client.Config, _ *client.Dependencies) { cfg.RedirectURI = configured })

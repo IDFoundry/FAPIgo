@@ -84,9 +84,9 @@ type BeginBackchannelAuthenticationRequest struct {
 // string accessor, the same relationship RequestURI already has to its
 // own wire value.
 //
-// A session can be stored and restored — MarshalText, and
-// ParseBackchannelAuthenticationSession — so another instance can poll
-// for it, or authenticate its ping callback.
+// A session can be stored and restored with a BackchannelSessionSealer,
+// so another instance can poll for it, or authenticate its ping
+// callback; the sealing keeps a stored session from being edited.
 type BackchannelAuthenticationSession struct {
 	authReqID         string
 	interval          time.Duration
@@ -249,7 +249,7 @@ func (c *Client) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	return BackchannelAuthenticationSession{
 		authReqID:         raw.AuthReqID,
 		interval:          interval,
-		expiresAt:         c.deps.Clock.Now().Add(time.Duration(raw.ExpiresIn) * time.Second),
+		expiresAt:         c.deps.Clock.Now().Add(expiresInDuration(raw.ExpiresIn)),
 		notificationToken: notificationToken,
 		openID:            slices.Contains(req.Scope, "openid"),
 	}, nil
@@ -289,12 +289,12 @@ func (c *Client) sendBackchannelAuthenticationRequest(ctx context.Context, dpopS
 		}
 		return body, nil
 	}
-	body, status, header, err := c.postBackchannelAuthenticationRequestWithDPoP(ctx, dpopSigner, endpointURL, form, c.cachedDPoPNonce(ctx, asNonceScope), headers)
+	body, status, header, err := c.postBackchannelAuthenticationRequestWithDPoP(ctx, dpopSigner, endpointURL, form, c.cachedDPoPNonce(ctx, c.asNonceScope()), headers)
 	if err != nil {
 		return nil, newError(ErrorInternal, errBackchannelAuthenticationRequestFailed, err)
 	}
 	nextNonce := header.Get(dpopNonceHeader)
-	c.cacheDPoPNonce(ctx, asNonceScope, nextNonce)
+	c.cacheDPoPNonce(ctx, c.asNonceScope(), nextNonce)
 	if status == http.StatusOK {
 		return body, nil
 	}
@@ -309,7 +309,7 @@ func (c *Client) sendBackchannelAuthenticationRequest(ctx context.Context, dpopS
 	if err != nil {
 		return nil, newError(ErrorInternal, errBackchannelAuthenticationRequestFailed, err)
 	}
-	c.cacheDPoPNonce(ctx, asNonceScope, header.Get(dpopNonceHeader))
+	c.cacheDPoPNonce(ctx, c.asNonceScope(), header.Get(dpopNonceHeader))
 	if status != http.StatusOK {
 		return nil, parErrorFromResponse(status, header, body)
 	}
@@ -443,9 +443,10 @@ func (c *Client) PollBackchannelAuthentication(ctx context.Context, session Back
 			Scope:                raw.Scope,
 			AuthorizationDetails: raw.AuthorizationDetails,
 			ObtainedAt:           c.deps.Clock.Now(),
+			Issuer:               c.cfg.Issuer.String(),
 		}
 		if raw.ExpiresIn > 0 {
-			result.ExpiresIn = time.Duration(raw.ExpiresIn) * time.Second
+			result.ExpiresIn = expiresInDuration(raw.ExpiresIn)
 			result.HasExpiresIn = true
 		}
 		// CIBA has no browser round trip, so there is no "nonce"
@@ -502,12 +503,12 @@ func (c *Client) pollBackchannelAuthenticationOnce(ctx context.Context, dpopSign
 		}
 		return body, status, header, nil
 	}
-	body, status, header, err := c.postTokenRequestWithDPoP(ctx, dpopSigner, tokenURL, form, c.cachedDPoPNonce(ctx, asNonceScope), headers)
+	body, status, header, err := c.postTokenRequestWithDPoP(ctx, dpopSigner, tokenURL, form, c.cachedDPoPNonce(ctx, c.asNonceScope()), headers)
 	if err != nil {
 		return nil, 0, nil, newError(ErrorInternal, errTokenRequestFailed, err)
 	}
 	nextNonce := header.Get(dpopNonceHeader)
-	c.cacheDPoPNonce(ctx, asNonceScope, nextNonce)
+	c.cacheDPoPNonce(ctx, c.asNonceScope(), nextNonce)
 	if status == http.StatusOK || nextNonce == "" || !isDPoPNonceError(body) {
 		return body, status, header, nil
 	}
@@ -519,7 +520,7 @@ func (c *Client) pollBackchannelAuthenticationOnce(ctx context.Context, dpopSign
 	if err != nil {
 		return nil, 0, nil, newError(ErrorInternal, errTokenRequestFailed, err)
 	}
-	c.cacheDPoPNonce(ctx, asNonceScope, header.Get(dpopNonceHeader))
+	c.cacheDPoPNonce(ctx, c.asNonceScope(), header.Get(dpopNonceHeader))
 	return body, status, header, nil
 }
 

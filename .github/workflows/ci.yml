@@ -153,6 +153,29 @@ jobs:
       - name: go test (race)
         run: go test -race ./...
 
+  # 32-bit platforms, where int is 32 bits: a constant or a conversion
+  # that assumes 64-bit int (math.MaxUint32 compared with an int, say)
+  # doesn't even compile there, and every 64-bit job would miss it. Go
+  # builds for 32-bit Android (armeabi-v7a, x86) depend on this module.
+  # 386 runs natively on the runner, so its tests run; arm is vetted
+  # (which builds every package, tests included).
+  test-32-bit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache-dependency-path: go.mod
+
+      - name: go vet (GOARCH=arm)
+        run: GOARCH=arm go vet ./...
+
+      - name: go test (GOARCH=386)
+        run: GOARCH=386 go test ./...
+
   lint:
     runs-on: ubuntu-latest
     steps:

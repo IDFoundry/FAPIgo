@@ -1,6 +1,7 @@
 package client_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/http"
@@ -74,11 +75,15 @@ func TestPollBackchannelAuthenticationRequiresIDTokenForOpenID(t *testing.T) {
 				t.Fatalf("BeginBackchannelAuthentication: %v", err)
 			}
 			// The session survives a restart with its requirement intact.
-			text, err := session.MarshalText()
+			sealer, err := client.NewBackchannelSessionSealer(c, [][]byte{bytes.Repeat([]byte{7}, 32)})
 			if err != nil {
 				t.Fatal(err)
 			}
-			restored, err := client.ParseBackchannelAuthenticationSession(string(text))
+			sealed, err := sealer.Seal(session)
+			if err != nil {
+				t.Fatal(err)
+			}
+			restored, _, err := sealer.Open(sealed)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -97,17 +102,6 @@ func TestPollBackchannelAuthenticationRequiresIDTokenForOpenID(t *testing.T) {
 				t.Fatalf("PollBackchannelAuthentication = %T, %v; want approved", result, err)
 			}
 		})
-	}
-}
-
-// TestBackchannelSessionEncodedBeforeOpenIDFlag covers a session encoded
-// by a version without the openid flag: it still decodes, and reads as
-// not requiring an ID token.
-func TestBackchannelSessionEncodedBeforeOpenIDFlag(t *testing.T) {
-	// {"a":"req-1","i":5000,"e":"2030-01-01T00:00:00Z"}
-	const old = "v1.eyJhIjoicmVxLTEiLCJpIjo1MDAwLCJlIjoiMjAzMC0wMS0wMVQwMDowMDowMFoifQ"
-	if _, err := client.ParseBackchannelAuthenticationSession(old); err != nil {
-		t.Fatalf("ParseBackchannelAuthenticationSession(old) = %v", err)
 	}
 }
 

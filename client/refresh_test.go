@@ -39,7 +39,7 @@ func refreshClient(t *testing.T, body string, deps func(*client.Dependencies)) (
 	if err != nil {
 		t.Fatalf("client.New: %v", err)
 	}
-	return c, client.TokenSet{RefreshToken: fapi.NewSecret("rt-1"), HasRefreshToken: true}
+	return c, client.TokenSet{RefreshToken: fapi.NewSecret("rt-1"), HasRefreshToken: true, Issuer: cfg.Issuer.String()}
 }
 
 func TestRefreshTokensKeepsTheRefreshTokenWhenNoneIsReturned(t *testing.T) {
@@ -106,5 +106,47 @@ func TestRefreshTokensRefusesAnotherIssuersTokens(t *testing.T) {
 	var cerr *client.Error
 	if !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidRequest {
 		t.Fatalf("RefreshTokens(another issuer's tokens) = %v, want invalid_request", err)
+	}
+}
+
+// TestRefreshTokensChecksTheTokenSetsIssuer: a set from another issuer,
+// or one recording no issuer at all, is refused before anything is
+// sent; a set without Issuer but with an ID token falls back to its iss.
+func TestRefreshTokensChecksTheTokenSetsIssuer(t *testing.T) {
+	c, base := refreshClient(t, `{"access_token":"at-2","token_type":"DPoP","expires_in":300}`, nil)
+	for name, tc := range map[string]struct {
+		mutate  func(*client.TokenSet)
+		refused bool
+	}{
+		"this issuer":    {func(*client.TokenSet) {}, false},
+		"another issuer": {func(s *client.TokenSet) { s.Issuer = "https://other.example.com" }, true},
+		"no issuer":      {func(s *client.TokenSet) { s.Issuer = "" }, true},
+		"legacy, ID token": {func(s *client.TokenSet) {
+			s.Issuer = ""
+			s.HasIDToken, s.IDTokenClaims.Issuer = true, base.Issuer
+		}, false},
+		"legacy, foreign ID token": {func(s *client.TokenSet) {
+			s.Issuer = ""
+			s.HasIDToken, s.IDTokenClaims.Issuer = true, "https://other.example.com"
+		}, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tokens := base
+			tc.mutate(&tokens)
+			got, err := c.RefreshTokens(context.Background(), client.RefreshTokenRequest{Tokens: tokens})
+			var cerr *client.Error
+			if tc.refused {
+				if !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidRequest {
+					t.Fatalf("RefreshTokens = %v, want invalid_request", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("RefreshTokens: %v", err)
+			}
+			if got.Issuer != base.Issuer {
+				t.Errorf("refreshed Issuer = %q, want %q", got.Issuer, base.Issuer)
+			}
+		})
 	}
 }

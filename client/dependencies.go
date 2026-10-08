@@ -62,6 +62,12 @@ type Dependencies struct {
 	// drops Authorization for a hop to a host that isn't the original
 	// or a subdomain of it, but not the DPoP header. Prefer an
 	// *http.Client, or a wrapper whose own *http.Client never follows.
+	//
+	// Use one from fapihttp.NewClient: endpoints can come from fetched
+	// metadata (NewFromDiscovery, DiscoverViaFederation), and its
+	// transport refuses private, loopback and link-local addresses when
+	// it dials, so that metadata can't aim this client at internal
+	// hosts. A plain http.Client has no such guard.
 	HTTP fapihttp.HTTPClient
 
 	// Clock supplies the current time.

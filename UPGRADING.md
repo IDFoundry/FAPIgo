@@ -159,6 +159,78 @@ definition left it out could reach logs and error messages.
 used to leave the field out. `NewRegistry` refuses a definition without
 one.
 
+### A stored CIBA session is sealed (client)
+
+**Affects:** a client that stores a `BackchannelAuthenticationSession`
+with `MarshalText` and restores it with `UnmarshalText` or
+`client.ParseBackchannelAuthenticationSession`.
+
+**Why:** the stored session records whether the request asked for
+`openid`, which decides whether an approval without an ID token is
+refused, and which of the client's requests to poll. It was stored
+without integrity protection, so anyone who could edit it could turn
+that check off.
+
+**What to change:** seal the session instead, with 32 random bytes the
+application keeps secret:
+
+```go
+sealer, err := client.NewBackchannelSessionSealer(c, [][]byte{key})
+sealed, err := sealer.Seal(session)            // store this, keyed by session.AuthReqID()
+session, reseal, err := sealer.Open(sealed)    // on any instance
+```
+
+`MarshalText`, `UnmarshalText` and `ParseBackchannelAuthenticationSession`
+are removed. A session stored by v0.51 or earlier doesn't open (the
+error wraps `client.ErrUnreadableBackchannelSession`): begin the
+backchannel authentication again. Sessions last minutes, so draining
+in-flight ones before upgrading avoids that.
+
+### `TokenSet.Issuer` (client)
+
+**Affects:** a client that builds a `TokenSet` by hand (rather than
+getting one from the client or `TokenSetSealer.Open`) and refreshes it
+with `RefreshTokens`, or seals another issuer's set.
+
+**Why:** a set without an ID token wasn't tied to its issuer, so
+refreshing it on another issuer's `Client` sent its refresh token to
+that issuer's token endpoint.
+
+**What to change:** every `TokenSet` the client returns now records
+`Issuer`, and `TokenSetSealer.Open` restores it. `RefreshTokens` refuses
+a set whose `Issuer` isn't this client's, and one recording no issuer
+unless its ID token's `iss` is this client's issuer.
+`TokenSetSealer.Seal` refuses a set from another issuer. A set you
+build by hand sets `Issuer` to the issuer it came from.
+
+### `Config.RedirectURI` is checked at `New` (client)
+
+**Affects:** a client whose `Config.RedirectURI` isn't one a FAPI 2.0
+authorization server would accept.
+
+**Why:** an unacceptable redirect URI only failed at the server's
+pushed authorization endpoint.
+
+**What to change:** `client.New` now refuses a redirect URI that isn't
+https, a loopback http URI or a private-use scheme (RFC 8252 §7.1,
+§7.3), or that carries a fragment or credentials. Under
+`AssuranceProduction`, a loopback redirect names the IP literal
+`127.0.0.1` or `[::1]`, not `localhost` (RFC 8252 §8.3).
+
+### `client.ErrorAuthorizationDenied` is removed (client)
+
+**Affects:** code that compares an error's code with
+`client.ErrorAuthorizationDenied`.
+
+**Why:** no function returned it: a denial is a result, not an error.
+It was deprecated in v0.50.1.
+
+**What to change:** check the result instead: `CompletionDenied` from
+`CompleteAuthorization`, `CallbackDenied` from
+`HandleAuthorizationResponse`, or `BackchannelAuthenticationDenied` from
+`PollBackchannelAuthentication`, each carrying the server's error `Code`
+and `Description`.
+
 ## v0.50.0
 
 ### `ResolveViaEndpoint` names the resolver it trusts (federation)

@@ -1,14 +1,8 @@
 package client
 
 import (
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -41,12 +35,7 @@ var ErrUnreadableTokenSet = errors.New("client: the sealed token set doesn't ope
 // refresh first.
 type TokenSetSealer struct {
 	client *Client
-	keys   []tokenSetKey // keys[0] seals
-}
-
-type tokenSetKey struct {
-	id   [4]byte
-	aead cipher.AEAD
+	keys   sealKeyring
 }
 
 // NewTokenSetSealer returns a TokenSetSealer for c that seals with
@@ -58,41 +47,34 @@ func NewTokenSetSealer(c *Client, keys [][]byte) (*TokenSetSealer, error) {
 	if c == nil {
 		return nil, errors.New("client: NewTokenSetSealer needs a Client")
 	}
-	if len(keys) == 0 {
-		return nil, errors.New("client: NewTokenSetSealer needs at least one key")
+	ring, err := newSealKeyring("token set", keys)
+	if err != nil {
+		return nil, err
 	}
-	s := &TokenSetSealer{client: c}
-	for i, k := range keys {
-		if len(k) != 32 {
-			return nil, fmt.Errorf("client: token set key %d is %d bytes, want 32", i, len(k))
-		}
-		// A 32-byte key always makes an AES-256 block, and AES always
-		// makes a GCM.
-		block, _ := aes.NewCipher(k)
-		aead, _ := cipher.NewGCM(block)
-		sum := sha256.Sum256(k)
-		s.keys = append(s.keys, tokenSetKey{id: [4]byte(sum[:4]), aead: aead})
-	}
-	return s, nil
+	return &TokenSetSealer{client: c, keys: ring}, nil
 }
 
 // Seal encrypts t, its tokens and validated ID token claims included,
 // for owner: whatever names whose tokens these are, such as a user or
 // connection ID, and must be given to Open again. owner is required.
+// The sealed set is bound to this client's issuer, which Open restores
+// as TokenSet.Issuer, so a set from another issuer (by its Issuer, or
+// its ID token's iss) is refused rather than relabelled.
 func (s *TokenSetSealer) Seal(t TokenSet, owner string) ([]byte, error) {
 	if owner == "" {
 		return nil, newError(ErrorInvalidRequest, "a token set is sealed for an owner", nil)
+	}
+	if iss := tokenSetIssuer(t); iss != "" && iss != s.client.cfg.Issuer.String() {
+		return nil, newError(ErrorInvalidRequest, "the token set was issued by a different issuer than this client's", nil)
+	}
+	if t.HasIDToken && t.IDTokenClaims.Issuer != "" && t.IDTokenClaims.Issuer != s.client.cfg.Issuer.String() {
+		return nil, newError(ErrorInvalidRequest, "the token set's ID token was issued by a different issuer than this client's", nil)
 	}
 	plaintext, err := json.Marshal(sealedTokenSetOf(t)) //nolint:gosec // G117: the tokens are what is sealed; this plaintext is encrypted below and never leaves
 	if err != nil {
 		return nil, newError(ErrorInternal, "failed to encode the token set", err)
 	}
-	key := s.keys[0]
-	nonce := make([]byte, key.aead.NonceSize())
-	_, _ = rand.Read(nonce) // never fails: it crashes the program instead (Go 1.24+)
-	out := append([]byte{tokenSetSealVersion}, key.id[:]...)
-	out = append(out, nonce...)
-	return key.aead.Seal(out, nonce, plaintext, s.additionalData(owner)), nil
+	return s.keys.seal(tokenSetSealVersion, plaintext, s.additionalData(owner)), nil
 }
 
 // Open decrypts a set Seal sealed for owner. The ID token claims come
@@ -102,25 +84,18 @@ func (s *TokenSetSealer) Seal(t TokenSet, owner string) ([]byte, error) {
 // old key can go. Any failure to open is an *Error whose cause is
 // ErrUnreadableTokenSet.
 func (s *TokenSetSealer) Open(sealed []byte, owner string) (t TokenSet, reseal bool, err error) {
-	if len(sealed) < 5 || sealed[0] != tokenSetSealVersion {
+	plaintext, keyIndex, ok := s.keys.open(tokenSetSealVersion, sealed, s.additionalData(owner))
+	if !ok {
 		return TokenSet{}, false, errUnreadableTokenSet()
 	}
-	id, rest := [4]byte(sealed[1:5]), sealed[5:]
-	for i, key := range s.keys {
-		if key.id != id || len(rest) < key.aead.NonceSize() {
-			continue
-		}
-		plaintext, err := key.aead.Open(nil, rest[:key.aead.NonceSize()], rest[key.aead.NonceSize():], s.additionalData(owner))
-		if err != nil {
-			return TokenSet{}, false, errUnreadableTokenSet()
-		}
-		var st sealedTokenSet
-		if err := json.Unmarshal(plaintext, &st); err != nil {
-			return TokenSet{}, false, errUnreadableTokenSet()
-		}
-		return st.tokenSet(), i > 0, nil
+	var st sealedTokenSet
+	if err := json.Unmarshal(plaintext, &st); err != nil {
+		return TokenSet{}, false, errUnreadableTokenSet()
 	}
-	return TokenSet{}, false, errUnreadableTokenSet()
+	t = st.tokenSet()
+	// The additional data bound the set to this issuer.
+	t.Issuer = s.client.cfg.Issuer.String()
+	return t, keyIndex > 0, nil
 }
 
 func errUnreadableTokenSet() *Error {
@@ -131,12 +106,7 @@ func errUnreadableTokenSet() *Error {
 // and client ID, and owner, each length-prefixed so no two differ only
 // in where one ends.
 func (s *TokenSetSealer) additionalData(owner string) []byte {
-	ad := append([]byte("fapigo token set"), tokenSetSealVersion)
-	for _, part := range []string{s.client.cfg.Issuer.String(), s.client.cfg.ClientID.String(), owner} {
-		ad = binary.BigEndian.AppendUint32(ad, uint32(len(part))) //nolint:gosec // G115: lengths of in-memory strings
-		ad = append(ad, part...)
-	}
-	return ad
+	return sealAdditionalData("fapigo token set", tokenSetSealVersion, s.client.cfg.Issuer.String(), s.client.cfg.ClientID.String(), owner)
 }
 
 // sealedTokenSet is the JSON a sealed TokenSet encrypts.

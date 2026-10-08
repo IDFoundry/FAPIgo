@@ -42,6 +42,7 @@ func fullTokenSet() client.TokenSet {
 			ExpiresAt:  at.Add(time.Hour), IssuedAt: at, Issuer: testIssuer, Audience: []string{"client-1"}, Nonce: "n-1", AZP: "client-1",
 		},
 		RefreshToken: fapi.NewSecret("rt-1"), HasRefreshToken: true,
+		Issuer: testIssuer,
 	}
 }
 
@@ -51,7 +52,7 @@ func revealed(t client.TokenSet) map[string]any {
 		"access": t.AccessToken.Reveal(), "type": t.TokenType, "scope": t.Scope, "details": string(t.AuthorizationDetails),
 		"expiresIn": t.ExpiresIn, "hasExpiresIn": t.HasExpiresIn, "obtainedAt": t.ObtainedAt.UTC(),
 		"id": t.IDToken.Reveal(), "hasID": t.HasIDToken, "sub": t.Subject, "claims": claimsWithUTC(t.IDTokenClaims),
-		"refresh": t.RefreshToken.Reveal(), "hasRefresh": t.HasRefreshToken,
+		"refresh": t.RefreshToken.Reveal(), "hasRefresh": t.HasRefreshToken, "issuer": t.Issuer,
 	}
 }
 
@@ -74,7 +75,7 @@ func TestTokenSetSealerRoundTrips(t *testing.T) {
 	s := sealer(t, testClientID, sealKey(1))
 	for name, tokens := range map[string]client.TokenSet{
 		"every field":        fullTokenSet(),
-		"access token alone": {AccessToken: fapi.NewSecret("at-1"), TokenType: "DPoP"},
+		"access token alone": {AccessToken: fapi.NewSecret("at-1"), TokenType: "DPoP", Issuer: testIssuer},
 	} {
 		sealed, err := s.Seal(tokens, "user-1")
 		if err != nil {
@@ -194,10 +195,12 @@ func TestTokenSetRecordsWhenItWasObtained(t *testing.T) {
 
 // TestTokenSetSealerKnowsEveryField fails when TokenSet or IDTokenClaims
 // gains a field: add it to sealedTokenSet (token_set_seal.go), to
-// fullTokenSet and revealed, then update the counts here.
+// fullTokenSet and revealed, then update the counts here. (Issuer isn't
+// in sealedTokenSet: the sealer's additional data binds it, and Open
+// restores it.)
 func TestTokenSetSealerKnowsEveryField(t *testing.T) {
 	for typ, want := range map[reflect.Type]int{
-		reflect.TypeFor[client.TokenSet]():      13,
+		reflect.TypeFor[client.TokenSet]():      14,
 		reflect.TypeFor[client.IDTokenClaims](): 11,
 	} {
 		if got := typ.NumField(); got != want {
@@ -214,5 +217,31 @@ func TestTokenSetSealerRefusesUnencodableDetails(t *testing.T) {
 	var cerr *client.Error
 	if _, err := sealer(t, testClientID, sealKey(1)).Seal(tokens, "user-1"); !errors.As(err, &cerr) || cerr.Code() != client.ErrorInternal {
 		t.Errorf("Seal(malformed authorization details) = %v, want an internal *client.Error", err)
+	}
+}
+
+// TestTokenSetSealerBindsTheIssuer: Open restores the sealer's issuer
+// as Issuer, even for a set that didn't record one, and Seal refuses a
+// set from another issuer rather than relabelling it.
+func TestTokenSetSealerBindsTheIssuer(t *testing.T) {
+	s := sealer(t, testClientID, sealKey(1))
+	sealed, err := s.Seal(client.TokenSet{AccessToken: fapi.NewSecret("at-1"), TokenType: "DPoP"}, "user-1")
+	if err != nil {
+		t.Fatalf("Seal(no issuer): %v", err)
+	}
+	opened, _, err := s.Open(sealed, "user-1")
+	if err != nil || opened.Issuer != testIssuer {
+		t.Fatalf("Open = Issuer %q, %v; want %q", opened.Issuer, err, testIssuer)
+	}
+	for name, mutate := range map[string]func(*client.TokenSet){
+		"another Issuer":       func(t *client.TokenSet) { t.Issuer = "https://other.example.com" },
+		"another ID token iss": func(t *client.TokenSet) { t.IDTokenClaims.Issuer = "https://other.example.com" },
+	} {
+		tokens := fullTokenSet()
+		mutate(&tokens)
+		var cerr *client.Error
+		if _, err := s.Seal(tokens, "user-1"); !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidRequest {
+			t.Errorf("Seal(%s) = %v, want invalid_request", name, err)
+		}
 	}
 }

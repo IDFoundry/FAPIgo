@@ -55,7 +55,8 @@ func main() {
 	cibaApprovalUIToken := flag.String("ciba-approval-ui-token", "", "if set, serve a token-gated manual approve/deny page at GET/POST /ciba-approve?token=<value> for driving pending CIBA backchannel authentication requests by hand — off by default; see backchannel_ui.go's own doc comment for why this needs its own token instead of relying on /backchannel-approve's existing (deliberately unauthenticated) JSON endpoint")
 	mtls := flag.Bool("mtls", false, "enable a second TLS listener (mtls_listen_addr in the config file, or -mtls-listen) that requests but does not require a client certificate, advertised via mtls_endpoint_aliases (RFC 8705 §5) for a client registered sender_constrain=mtls — off by default; requires real TLS, incompatible with -insecure-http")
 	mtlsListenOverride := flag.String("mtls-listen", "", "override mtls_listen_addr from the config file")
-	federationTrustAnchorAdmin := flag.Bool("federation-trust-anchor-admin", false, "serve POST /internal/federation/trust-anchors, letting a caller add a Trust Anchor to this binary's own federation.Resolver at runtime without restarting — off by default; see dynamicFederationClients' own doc comment (federation_trust_anchor_admin.go) for why this exists and its security posture. Requires -config to set federation")
+	federationTrustAnchorAdmin := flag.Bool("federation-trust-anchor-admin", false, "serve POST /internal/federation/trust-anchors, letting a caller add a Trust Anchor to this binary's own federation.Resolver at runtime without restarting — off by default; see dynamicFederationClients' own doc comment (federation_trust_anchor_admin.go) for why this exists and its security posture. Requires -config to set federation, and -federation-trust-anchor-admin-token")
+	federationTrustAnchorAdminToken := flag.String("federation-trust-anchor-admin-token", "", "the bearer token POST /internal/federation/trust-anchors requires (\"Authorization: Bearer <token>\"); required with -federation-trust-anchor-admin, which is refused without it")
 	flag.Parse()
 
 	if *configPath == "" {
@@ -96,8 +97,17 @@ func main() {
 	if *federationTrustAnchorAdmin && resolved.Federation == nil {
 		log.Fatal("conformance-as: -federation-trust-anchor-admin requires the config file to set federation")
 	}
+	adminToken := ""
+	switch {
+	case *federationTrustAnchorAdmin && *federationTrustAnchorAdminToken == "":
+		log.Fatal("conformance-as: -federation-trust-anchor-admin requires -federation-trust-anchor-admin-token (docker-compose passes $FEDERATION_TRUST_ANCHOR_ADMIN_TOKEN; set it, e.g. to a random value)")
+	case !*federationTrustAnchorAdmin && *federationTrustAnchorAdminToken != "":
+		log.Fatal("conformance-as: -federation-trust-anchor-admin-token is set but -federation-trust-anchor-admin isn't")
+	case *federationTrustAnchorAdmin:
+		adminToken = *federationTrustAnchorAdminToken
+	}
 
-	mux, err := newServerMux(resolved, *insecureHTTP, *dpopNonceChallenge, *userinfoSigning, *ciba, *clientCredentialsGrant, *cibaApprovalUIToken, *federationTrustAnchorAdmin)
+	mux, err := newServerMux(resolved, *insecureHTTP, *dpopNonceChallenge, *userinfoSigning, *ciba, *clientCredentialsGrant, *cibaApprovalUIToken, adminToken)
 	if err != nil {
 		log.Fatalf("conformance-as: %v", err)
 	}

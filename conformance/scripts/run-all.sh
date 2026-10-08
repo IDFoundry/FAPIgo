@@ -541,6 +541,14 @@ run_federation_plan() {
 	local subordinates="$WORKDIR/federation-trust-anchor-subordinates.json"
 	cp "$FEDERATION_TA_SUBORDINATES_CONFIG" "$subordinates"
 	export FEDERATION_TA_SUBORDINATES_FILE="$subordinates"
+	# conformance-as-federation's trust-anchor admin endpoint needs a
+	# bearer token (docker-compose.yml passes this variable). Random per
+	# run unless the caller set one, since its port is published on
+	# every interface.
+	if [ -z "${FEDERATION_TRUST_ANCHOR_ADMIN_TOKEN:-}" ]; then
+		FEDERATION_TRUST_ANCHOR_ADMIN_TOKEN="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+	fi
+	export FEDERATION_TRUST_ANCHOR_ADMIN_TOKEN
 
 	log "Federation: bringing up conformance-as-federation, conformance-federation-trust-anchor"
 	(cd "$SERVER_DIR" && docker compose up -d --build conformance-as-federation conformance-federation-trust-anchor) >"$WORKDIR/docker-compose-federation.log" 2>&1

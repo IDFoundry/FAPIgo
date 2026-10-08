@@ -190,3 +190,13 @@ func TestGrantStoreRefusesAnotherClientsCode(t *testing.T) {
 		t.Fatal("redemption by another client = nil error, want refused")
 	}
 }
+
+func TestRevocationStoreContract(t *testing.T) {
+	storage.TestRevocationStoreContract(t, func() storage.RevocationStore { return NewRevocationStore() })
+}
+
+func TestClientRepositoryContract(t *testing.T) {
+	storage.TestClientRepositoryContract(t, func(clients []storage.RegisteredClient) storage.ClientRepository {
+		return NewClientRepository(clients)
+	})
+}

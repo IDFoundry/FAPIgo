@@ -1123,6 +1123,8 @@ type ClientRepository interface {
 	// couldn't answer, and is answered with 500 server_error instead —
 	// at those endpoints, and in serverresource.SignUserInfoResponse.
 	// Return ErrStoreUnavailable (wrapped) for an outage, so a client
-	// isn't told its credentials are wrong.
+	// isn't told its credentials are wrong. The client returned must be
+	// the one registered under exactly id, never another: run
+	// TestClientRepositoryContract against an implementation.
 	ResolveClient(ctx context.Context, id fapi.ClientID) (RegisteredClient, error)
 }

@@ -71,13 +71,13 @@ func TestNewProductionRequiresKeyCustody(t *testing.T) {
 		}, ""},
 		"ephemeral keys": {false, func(_ *testing.T, d *server.Dependencies) { d.Keys = ephemeralKeys }, "dependencies: keys must implement keys.KeyCustodyAssurance"},
 		"undeclared access token keys": {false, func(_ *testing.T, d *server.Dependencies) {
-			d.AccessTokens = server.JWTAccessTokens{Keys: undeclaredKeyManager{&fakeKeyManager{}}, Algorithm: fapi.ES256}
+			d.AccessTokens = server.JWTAccessTokens{Keys: undeclaredKeyManager{newTestKeyManager()}, Algorithm: fapi.ES256}
 		}, "access_tokens keys must implement keys.KeyCustodyAssurance"},
 		"keys declared not durable": {false, func(_ *testing.T, d *server.Dependencies) {
-			d.Keys = custodyKeyManager{&fakeKeyManager{}, keys.KeyCustody{}}
+			d.Keys = custodyKeyManager{newTestKeyManager(), keys.KeyCustody{}}
 		}, "keys must declare Durable"},
 		"scaled, keys not cross-instance consistent": {true, func(_ *testing.T, d *server.Dependencies) {
-			d.Keys = custodyKeyManager{&fakeKeyManager{}, durable}
+			d.Keys = custodyKeyManager{newTestKeyManager(), durable}
 		}, "keys must declare CrossInstanceConsistent"},
 		"scaled, keys cross-instance consistent": {true, func(t *testing.T, d *server.Dependencies) {
 			km := declaredSignerKeys(t, keys.KeyCustody{Durable: true, CrossInstanceConsistent: true})

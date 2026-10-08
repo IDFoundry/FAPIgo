@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"github.com/idfoundry/fapigo/keys"
 )
@@ -54,18 +56,68 @@ func (j JWTAccessTokens) accessTokenSigningKeyUse() keys.SigningKeyUse {
 // publishes exactly the one key PublicKey returns, as before. See
 // keys.PublicJWKS for the shared implementation.
 func (s *Server) PublicJWKS(ctx context.Context) (PublicKeySet, error) {
-	var active []keys.SigningKeyUse
-	if !s.cfg.OAuthOnly {
-		active = append(active, keys.SigningKeyUse{Manager: s.deps.Keys, Purpose: keys.IDTokenSigning, Algorithm: s.cfg.Algorithms.IDToken})
-	}
-	if s.cfg.Profile == ProfileFAPISecurityWithMessageSigning {
-		active = append(active, keys.SigningKeyUse{Manager: s.deps.Keys, Purpose: keys.JARMSigning, Algorithm: s.cfg.Algorithms.JARM})
-	}
-	if s.cfg.Algorithms.UserInfo != 0 {
-		active = append(active, keys.SigningKeyUse{Manager: s.deps.Keys, Purpose: keys.UserInfoSigning, Algorithm: s.cfg.Algorithms.UserInfo})
-	}
-	if publisher, ok := s.deps.AccessTokens.(accessTokenKeyPublisher); ok {
-		active = append(active, publisher.accessTokenSigningKeyUse())
+	active := make([]keys.SigningKeyUse, 0, 4)
+	for _, use := range s.publishedSigningKeys() {
+		active = append(active, use.SigningKeyUse)
 	}
 	return keys.PublicJWKS(ctx, active, nil)
+}
+
+// namedSigningKeyUse is a keys.SigningKeyUse with the Dependencies
+// field its Manager came from, for New's error messages.
+type namedSigningKeyUse struct {
+	keys.SigningKeyUse
+	field string
+}
+
+// publishedSigningKeys lists the signing keys PublicJWKS publishes —
+// every purpose Config/Dependencies declares in use; see PublicJWKS.
+func (s *Server) publishedSigningKeys() []namedSigningKeyUse {
+	var active []namedSigningKeyUse
+	if !s.cfg.OAuthOnly {
+		active = append(active, namedSigningKeyUse{keys.SigningKeyUse{Manager: s.deps.Keys, Purpose: keys.IDTokenSigning, Algorithm: s.cfg.Algorithms.IDToken}, "keys"})
+	}
+	if s.cfg.Profile == ProfileFAPISecurityWithMessageSigning {
+		active = append(active, namedSigningKeyUse{keys.SigningKeyUse{Manager: s.deps.Keys, Purpose: keys.JARMSigning, Algorithm: s.cfg.Algorithms.JARM}, "keys"})
+	}
+	if s.cfg.Algorithms.UserInfo != 0 {
+		active = append(active, namedSigningKeyUse{keys.SigningKeyUse{Manager: s.deps.Keys, Purpose: keys.UserInfoSigning, Algorithm: s.cfg.Algorithms.UserInfo}, "keys"})
+	}
+	if publisher, ok := s.deps.AccessTokens.(accessTokenKeyPublisher); ok {
+		active = append(active, namedSigningKeyUse{publisher.accessTokenSigningKeyUse(), "access_tokens keys"})
+	}
+	return active
+}
+
+// keyCheckTimeout bounds New's check of the server's signing keys (see
+// checkSigningKeys): a KeyManager backed by a remote KMS answers
+// PublicKey over the network, and New has no context of its own.
+const keyCheckTimeout = 10 * time.Second
+
+// checkSigningKeys resolves, at New, every signing key the server will
+// use — each key PublicJWKS publishes, and the federation signing key
+// when Config.Federation.EntityID is set — so a KeyManager missing a
+// purpose, holding a key that doesn't suit the configured algorithm, or
+// reporting an empty kid fails at startup, naming the purpose and
+// algorithm, instead of as a server_error at the first token request or
+// a failing /jwks. It then builds the whole published JWK Set once, so
+// a kid naming two different keys across purposes or managers is
+// refused too.
+func (s *Server) checkSigningKeys() error {
+	ctx, cancel := context.WithTimeout(context.Background(), keyCheckTimeout)
+	defer cancel()
+	published := s.publishedSigningKeys()
+	uses := published
+	if s.cfg.Federation.EntityID != "" {
+		uses = append(uses[:len(uses):len(uses)], namedSigningKeyUse{keys.SigningKeyUse{Manager: s.deps.Keys, Purpose: keys.FederationEntitySigning, Algorithm: s.cfg.Federation.Algorithm}, "keys"})
+	}
+	for _, use := range uses {
+		if _, err := keys.PublicJWKS(ctx, []keys.SigningKeyUse{use.SigningKeyUse}, nil); err != nil {
+			return fmt.Errorf("server: dependencies: %s has no usable %v key for %v: %w", use.field, use.Purpose, use.Algorithm, err)
+		}
+	}
+	if _, err := s.PublicJWKS(ctx); err != nil {
+		return fmt.Errorf("server: dependencies: the JWK Set at endpoints.jwks can't be built: %w", err)
+	}
+	return nil
 }

@@ -71,8 +71,8 @@ func TestProductionChecksPointerOpaqueAccessTokens(t *testing.T) {
 // server can't see into: refused under production unless it declares
 // what it relies on, which is then checked.
 func TestProductionChecksCustomAccessTokenIssuers(t *testing.T) {
-	jwt := server.JWTAccessTokens{Keys: &fakeKeyManager{}, Algorithm: fapi.ES256}
-	undeclaredKeys := server.JWTAccessTokens{Keys: undeclaredKeyManager{inner: &fakeKeyManager{}}, Algorithm: fapi.ES256}
+	jwt := server.JWTAccessTokens{Keys: newTestKeyManager(), Algorithm: fapi.ES256}
+	undeclaredKeys := server.JWTAccessTokens{Keys: undeclaredKeyManager{inner: newTestKeyManager()}, Algorithm: fapi.ES256}
 	for name, tc := range map[string]struct {
 		issuer  server.AccessTokenIssuer
 		wantErr bool

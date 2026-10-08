@@ -21,11 +21,23 @@ type Client struct {
 // unless every configuration value and dependency cfg requires — for
 // its Profile, the flows its Endpoints enable, its ClientAuthMethod and
 // SenderConstrain, and its Assurance level — is present and valid.
+//
+// New also resolves each key of the client's own cfg calls for — the
+// client authentication, attestation PoP, DPoP, request object, CIBA
+// request and federation signing keys from deps.Keys, and the ID token
+// and UserInfo decryption keys from deps.Decryption — so a missing
+// purpose or a key that doesn't suit the configured algorithm fails
+// here rather than at the first request needing it. A KeyManager or
+// Decrypter backed by a remote KMS is asked over the network: New
+// allows that 10 seconds.
 func New(cfg Config, deps Dependencies) (*Client, error) {
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
 	}
 	if err := validateDependencies(cfg, deps); err != nil {
+		return nil, err
+	}
+	if err := checkOwnKeys(cfg, deps); err != nil {
 		return nil, err
 	}
 	deps.HTTP = nofollow.Client(deps.HTTP)

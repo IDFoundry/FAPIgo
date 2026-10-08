@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -292,6 +293,8 @@ func TestPublicJWKSRejectsEmptyKeyIDFromKeyManager(t *testing.T) {
 	}
 	cfg := validConfig(t)
 	cfg.Algorithms.ClientAuthentication = fapi.PS256
+	cfg.Algorithms.DPoP = fapi.PS256
+	cfg.Algorithms.RequestObject = fapi.PS256
 	deps := validDependencies(t)
 	deps.Keys = emptyKIDKeyManager{pub: &priv.PublicKey}
 
@@ -344,7 +347,7 @@ func TestPublicJWKSPublishesRotatingSigningKeySet(t *testing.T) {
 	deps := validDependencies(t)
 	deps.Keys = &rotatingClientKeyManager{
 		outgoing: newFakeKeyManager(t, keys.ClientAuthentication),
-		newest:   newFakeKeyManager(t, keys.ClientAuthentication),
+		newest:   newFakeKeyManager(t, keys.ClientAuthentication, keys.RequestObjectSigning, keys.DPoPProofSigning),
 	}
 
 	c, err := client.New(cfg, deps)
@@ -379,11 +382,9 @@ func TestPublicJWKSPropagatesKeyManagerError(t *testing.T) {
 	deps := validDependencies(t)
 	deps.Keys = erroringClientKeyManager{}
 
-	c, err := client.New(cfg, deps)
-	if err != nil {
-		t.Fatalf("client.New: %v", err)
-	}
-	if _, err := c.PublicJWKS(context.Background()); err == nil {
-		t.Fatal("PublicJWKS(erroring key manager) = nil error, want error")
+	// New resolves the keys PublicJWKS would publish, so the error
+	// surfaces there, at startup.
+	if _, err := client.New(cfg, deps); err == nil || !errors.Is(err, errPublicJWKSKeyManagerUnavailable) {
+		t.Fatalf("client.New(erroring key manager) = %v, want it to carry the key manager's error", err)
 	}
 }

@@ -20,6 +20,14 @@ type Server struct {
 // unless every security-critical configuration value and dependency is
 // present and valid; see Config, Limits and Dependencies for what "no
 // implicit fallback" means for each field.
+//
+// New also resolves every signing key the server will use from its
+// KeyManager(s) — ID token, JARM, UserInfo, access token and federation
+// signing, as configured — and builds its published JWK Set once, so a
+// missing purpose, a key that doesn't suit the configured algorithm, an
+// empty kid or a kid naming two keys fails here rather than at the first
+// request. A KeyManager backed by a remote KMS is asked over the
+// network: New allows that 10 seconds.
 func New(cfg Config, deps Dependencies) (*Server, error) {
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
@@ -84,7 +92,11 @@ func New(cfg Config, deps Dependencies) (*Server, error) {
 		deps.Clients = automaticClients
 		deps.ClientKeys = automaticClientKeys
 	}
-	return &Server{cfg: cfg, deps: deps}, nil
+	s := &Server{cfg: cfg, deps: deps}
+	if err := s.checkSigningKeys(); err != nil {
+		return nil, err
+	}
+	return s, nil
 }
 
 // validateConfig checks cfg as a whole. Each thematic group of checks

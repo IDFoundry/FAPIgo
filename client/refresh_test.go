@@ -3,6 +3,7 @@ package client_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -62,9 +63,17 @@ func TestRefreshTokensRejectsMalformedResponse(t *testing.T) {
 	}
 }
 
+// signFailsKeyManager resolves its keys, so New accepts it, but fails
+// to sign — a KMS that's down by the time a request needs it.
+type signFailsKeyManager struct{ keys.KeyManager }
+
+func (signFailsKeyManager) Sign(context.Context, keys.SigningRequest) (keys.Signature, error) {
+	return keys.Signature{}, fmt.Errorf("signFailsKeyManager: key unavailable")
+}
+
 func TestRefreshTokensWithoutSigningKeys(t *testing.T) {
 	c, tokens := refreshClient(t, `{}`, func(d *client.Dependencies) {
-		d.Keys = newFakeKeyManager(t, keys.DPoPProofSigning) // no client authentication key
+		d.Keys = signFailsKeyManager{d.Keys}
 	})
 	_, err := c.RefreshTokens(context.Background(), client.RefreshTokenRequest{Tokens: tokens})
 	var cerr *client.Error

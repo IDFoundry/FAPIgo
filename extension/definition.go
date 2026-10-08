@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+
+	"github.com/idfoundry/fapigo/internal/strictjson"
 )
 
 // Definition captures the complete wire contract for one custom
@@ -83,9 +85,21 @@ func (d Definition[T]) validate(raw json.RawMessage, source Source, out *Values)
 		return fmt.Errorf("%w: %q", ErrValueTooLarge, d.Name)
 	}
 
+	// encoding/json matches members to fields case-insensitively and
+	// keeps the last of any repeat, while raw itself is what's stored and
+	// may be copied into a token (ReturnInTokenClaims): of
+	// {"amount":10,"AMOUNT":1000000} Validate would see 10 and a
+	// case-sensitive reader of the token 1000000. Refuse both shapes, as
+	// RARDefinition does.
+	if err := checkDuplicateMembers(raw); err != nil {
+		return fmt.Errorf("extension: %q: malformed value: %w", d.Name, err)
+	}
+	var v T
+	if err := strictjson.CheckTaggedFieldCase(raw, &v); err != nil {
+		return fmt.Errorf("extension: %q: malformed value: %w", d.Name, err)
+	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
-	var v T
 	if err := dec.Decode(&v); err != nil {
 		return fmt.Errorf("extension: %q: malformed value: %w", d.Name, err)
 	}
@@ -127,6 +141,10 @@ func Set[T any](values *Values, def Definition[T], v T) error {
 	}
 	if def.MaxBytes <= 0 || len(encoded) > def.MaxBytes {
 		return fmt.Errorf("%w: %q", ErrValueTooLarge, def.Name)
+	}
+	// A T with its own MarshalJSON could still emit a repeated member.
+	if err := checkDuplicateMembers(encoded); err != nil {
+		return fmt.Errorf("extension: %q: %w", def.Name, err)
 	}
 	if values.raw == nil {
 		values.raw = make(map[string]json.RawMessage)
@@ -211,4 +229,11 @@ func (values *Values) UnmarshalJSON(data []byte) error {
 	}
 	values.raw = raw
 	return nil
+}
+
+// checkDuplicateMembers reports whether raw, a JSON value of any kind,
+// repeats a member name in any object at any depth, counting names that
+// differ only in case as repeats (see checkMembers).
+func checkDuplicateMembers(raw json.RawMessage) error {
+	return checkValueMembers(json.NewDecoder(bytes.NewReader(raw)))
 }

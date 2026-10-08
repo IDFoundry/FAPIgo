@@ -332,6 +332,12 @@ func (v *Verifier) checkBinding(resolved ResolvedAccessToken, senderConstrain st
 // checkNotRevoked checks that neither resolved itself nor the grant it
 // was issued from has been revoked.
 func (v *Verifier) checkNotRevoked(ctx context.Context, resolved ResolvedAccessToken) *Error {
+	// An empty Key is a resolver bug, not a token without a revocation
+	// identity: asked about "", IsRevoked would never report the token
+	// revoked, so revocation would silently stop applying to it.
+	if resolved.Key == "" {
+		return newError(ErrorServerError, 500, "access token resolver returned no revocation key", nil)
+	}
 	revoked, err := v.deps.Revocation.IsRevoked(ctx, resolved.Key)
 	if err != nil {
 		return newError(ErrorServerError, 500, "failed to check token revocation", err)

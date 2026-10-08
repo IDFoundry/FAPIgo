@@ -20,6 +20,14 @@
 // with what's safe to expose in a response, matching the pattern used by
 // client and server — see ARCHITECTURE.md, "Design rules".
 //
+// A FAPIgo authorization server's access tokens are addressed to the
+// authorization server itself ("aud" is its issuer identifier), not to
+// one resource server, so every resource server verifying its tokens
+// accepts every one of them: decide what a token may do at an endpoint
+// from its scope, authorization_details and claims, never from the
+// token's validity alone. Audience-restricted tokens (RFC 8707 resource
+// indicators) are not implemented.
+//
 // Config.Assurance is required, as server.Config.Assurance is:
 // AssuranceDevelopment accepts in-memory stores and key sources, and
 // AssuranceProduction requires every store and key source the verifier

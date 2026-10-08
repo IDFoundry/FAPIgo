@@ -26,6 +26,16 @@ type accreditationFederation struct {
 	byTA, selfIssued, withoutKeyID intfed.RawTrustMark
 }
 
+// subject resolves the federation's leaf, the subject of its Trust Marks.
+func (f accreditationFederation) subject(t *testing.T) federation.ResolvedEntity {
+	t.Helper()
+	resolved, err := f.resolver.Resolve(context.Background(), f.leID)
+	if err != nil {
+		t.Fatalf("Resolve(subject): %v", err)
+	}
+	return resolved
+}
+
 func setupAccreditationFederation(t *testing.T, trustMarkIssuers func(taID, leID string) map[string][]string) accreditationFederation {
 	t.Helper()
 	now := time.Now()
@@ -102,13 +112,13 @@ func TestVerifyTrustMarkAccreditation(t *testing.T) {
 		return map[string][]string{testTrustMarkType: {taID}}
 	})
 
-	if _, err := onlyTA.resolver.VerifyTrustMark(ctx, onlyTA.leID, onlyTA.byTA, federation.RequireFederationAccreditation); err != nil {
+	if _, err := onlyTA.resolver.VerifyTrustMark(ctx, onlyTA.subject(t), onlyTA.byTA, federation.RequireFederationAccreditation); err != nil {
 		t.Fatalf("VerifyTrustMark(accredited issuer): %v", err)
 	}
-	if _, err := onlyTA.resolver.VerifyTrustMark(ctx, onlyTA.leID, onlyTA.selfIssued, federation.RequireFederationAccreditation); err == nil || !strings.Contains(err.Error(), "does not accredit") {
+	if _, err := onlyTA.resolver.VerifyTrustMark(ctx, onlyTA.subject(t), onlyTA.selfIssued, federation.RequireFederationAccreditation); err == nil || !strings.Contains(err.Error(), "does not accredit") {
 		t.Fatalf("VerifyTrustMark(self-issued, require) = %v, want an accreditation error", err)
 	}
-	claims, err := onlyTA.resolver.VerifyTrustMark(ctx, onlyTA.leID, onlyTA.selfIssued, federation.AcceptAnyFederationIssuer)
+	claims, err := onlyTA.resolver.VerifyTrustMark(ctx, onlyTA.subject(t), onlyTA.selfIssued, federation.AcceptAnyFederationIssuer)
 	if err != nil || claims.Issuer != onlyTA.leID {
 		t.Fatalf("VerifyTrustMark(self-issued, accept any) = %+v, %v; want accepted with the entity itself as issuer", claims, err)
 	}
@@ -116,16 +126,16 @@ func TestVerifyTrustMarkAccreditation(t *testing.T) {
 	anyone := setupAccreditationFederation(t, func(string, string) map[string][]string {
 		return map[string][]string{testTrustMarkType: {}}
 	})
-	if _, err := anyone.resolver.VerifyTrustMark(ctx, anyone.leID, anyone.selfIssued, federation.RequireFederationAccreditation); err != nil {
+	if _, err := anyone.resolver.VerifyTrustMark(ctx, anyone.subject(t), anyone.selfIssued, federation.RequireFederationAccreditation); err != nil {
 		t.Fatalf("VerifyTrustMark(self-issued, type open to anyone): %v", err)
 	}
 
 	unlisted := setupAccreditationFederation(t, func(string, string) map[string][]string { return nil })
-	if _, err := unlisted.resolver.VerifyTrustMark(ctx, unlisted.leID, unlisted.byTA, federation.RequireFederationAccreditation); err == nil || !strings.Contains(err.Error(), "not in trust anchor") {
+	if _, err := unlisted.resolver.VerifyTrustMark(ctx, unlisted.subject(t), unlisted.byTA, federation.RequireFederationAccreditation); err == nil || !strings.Contains(err.Error(), "not in trust anchor") {
 		t.Fatalf("VerifyTrustMark(type not listed) = %v, want an accreditation error", err)
 	}
 
-	if _, err := onlyTA.resolver.VerifyTrustMark(ctx, onlyTA.leID, onlyTA.byTA, federation.TrustMarkAccreditation(0)); err == nil {
+	if _, err := onlyTA.resolver.VerifyTrustMark(ctx, onlyTA.subject(t), onlyTA.byTA, federation.TrustMarkAccreditation(0)); err == nil {
 		t.Fatal("VerifyTrustMark(zero accreditation) = nil error, want the explicit choice required")
 	}
 }
@@ -136,7 +146,7 @@ func TestVerifyTrustMarkRequiresKeyID(t *testing.T) {
 	f := setupAccreditationFederation(t, func(taID, _ string) map[string][]string {
 		return map[string][]string{testTrustMarkType: {taID}}
 	})
-	_, err := f.resolver.VerifyTrustMark(context.Background(), f.leID, f.withoutKeyID, federation.AcceptAnyFederationIssuer)
+	_, err := f.resolver.VerifyTrustMark(context.Background(), f.subject(t), f.withoutKeyID, federation.AcceptAnyFederationIssuer)
 	if err == nil || !strings.Contains(err.Error(), "no kid") {
 		t.Fatalf("VerifyTrustMark(no kid) = %v, want a kid error", err)
 	}

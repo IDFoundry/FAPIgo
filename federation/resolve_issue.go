@@ -115,8 +115,8 @@ type VerifiedTrustMark struct {
 // Response never verifies a Trust Mark itself: §8.3's own "The response
 // set MUST include only verified Trust Marks" is the caller's own
 // responsibility to uphold before calling Response, typically by
-// looping over resolved.TrustMarks, calling Resolver.VerifyTrustMark on
-// each, and passing through only the ones that verify — the identical
+// looping over resolved.TrustMarks, calling Resolver.VerifyTrustMark
+// with resolved on each, and passing through only the ones that verify — the identical
 // "caller resolves, Response only signs" division Response already
 // applies to resolved itself.
 //

@@ -202,18 +202,18 @@ type ResolvedEntity struct {
 	// (OpenID Federation 1.0 §7.2), exactly as
 	// intfed.Claims.TrustMarkOwners describes — nil if EntityID declared
 	// none. Only meaningful when EntityID is a Trust Anchor;
-	// VerifyTrustMark reads this (from the Trust Anchor actually used to
-	// establish trust in a Trust Mark's own issuer) to decide whether
-	// that Trust Mark's type requires a "delegation" claim at all.
+	// VerifyTrustMark reads this (from the Trust Anchor the mark's
+	// subject was resolved through, which its issuer must be trusted
+	// through too) to decide whether that Trust Mark's type requires a
+	// "delegation" claim at all.
 	TrustMarkOwners map[string]TrustMarkOwner
 
 	// TrustMarkIssuers is EntityID's own "trust_mark_issuers" claim
 	// (OpenID Federation 1.0 §3.1.2), exactly as
 	// intfed.Claims.TrustMarkIssuers describes — nil if EntityID declared
 	// none. Only meaningful when EntityID is a Trust Anchor:
-	// VerifyTrustMark reads it (from the Trust Anchor used to establish
-	// trust in a Trust Mark's issuer) under
-	// RequireFederationAccreditation.
+	// VerifyTrustMark reads it (from the Trust Anchor the mark's subject
+	// was resolved through) under RequireFederationAccreditation.
 	TrustMarkIssuers map[string][]string
 
 	// Tokens is the raw compact-serialized Entity Statement JWTs

@@ -245,6 +245,15 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	if revErr := s.checkGrantNotRevoked(ctx, grant); revErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), revErr)
 	}
+	// The registration may have changed since the code was issued (a
+	// scope or RAR type removed, Config.OAuthOnly turned on, the client's
+	// redirect URIs removed), as at refresh and the CIBA token exchange.
+	if !client.AllowsAuthorizationCodeGrant() {
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorUnauthorizedClient, 400, "the client is no longer registered for the authorization code grant", nil))
+	}
+	if allowedErr := s.checkGrantStillAllowed(client, grant.Scope, grant.AuthorizationDetails); allowedErr != nil {
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), allowedErr)
+	}
 
 	accessTokenClaims, err := grant.accessTokenClaims()
 	if err != nil {

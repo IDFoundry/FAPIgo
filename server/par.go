@@ -784,9 +784,9 @@ func (s *Server) validateScope(scope string, client storage.RegisteredClient) er
 // Config.OAuthOnly refusing "openid" universally — see its own doc
 // comment. It runs where a grant is made (PAR, CIBA, client_credentials,
 // IssueRefreshToken) and again where tokens are later issued from a
-// stored grant (refresh, the CIBA token exchange; see
-// checkGrantStillAllowed), since a registration or OAuthOnly can change
-// in between. That's what keeps the openid-gated branches in token.go,
+// stored grant (the authorization code exchange, refresh, the CIBA token
+// exchange; see checkGrantStillAllowed), since a registration or
+// OAuthOnly can change in between. That's what keeps the openid-gated branches in token.go,
 // refresh.go and backchannel_token.go from issuing an ID token or scope
 // the current configuration no longer allows.
 func (s *Server) clientAllowsScope(client storage.RegisteredClient, scope string) bool {

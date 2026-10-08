@@ -7,6 +7,7 @@ import (
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/httperror"
 	"github.com/idfoundry/fapigo/internal/par"
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -236,9 +237,16 @@ func (s *Server) BuildAuthorizationErrorRedirect(ctx context.Context, client sto
 	if _, err := s.parseRedirectURI(client, redirectURI); err != nil {
 		return fapi.URL{}, newError(ErrorInvalidRequest, 400, "redirect_uri is not an acceptable redirect destination", err)
 	}
-	dest, buildErr := s.buildAuthorizationResponse(ctx, client.ID(), redirectURI, map[string]string{
-		"error": errorCode, "state": state, "error_description": description,
-	})
+	if !httperror.IsErrorText(errorCode) {
+		return fapi.URL{}, newError(ErrorServerError, 500, "errorCode is not RFC 6749 error text", nil)
+	}
+	params := map[string]string{"error": errorCode, "state": state}
+	// Dropped, as NewError drops one, when outside RFC 6749 §4.1.2.1's
+	// error_description characters.
+	if httperror.IsErrorText(description) {
+		params["error_description"] = description
+	}
+	dest, buildErr := s.buildAuthorizationResponse(ctx, client.ID(), redirectURI, params)
 	if buildErr != nil {
 		return fapi.URL{}, buildErr
 	}

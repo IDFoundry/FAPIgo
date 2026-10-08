@@ -65,6 +65,13 @@ decision, not something a commit message alone should trigger.
   differently between them. If your local toolchain is newer than
   `go.mod`'s, also run the tests under the minimum:
   `GOTOOLCHAIN=go<version from go.mod> go test ./...`.
+- CI also builds for 32-bit platforms, where `int` is 32 bits, so code
+  that assumes a 64-bit `int` (comparing one with `math.MaxUint32`,
+  say) doesn't compile: it vets every package, tests included, for
+  `GOARCH=arm`, and runs the tests for `GOARCH=386`. Check the first
+  anywhere with `GOOS=linux GOARCH=arm go vet ./...`; the second,
+  `GOARCH=386 go test ./...`, runs only on an x86 Linux or Windows
+  machine.
 - Each demo under `examples/` (and `examples/internal/demokit`) is its
   own Go module, so the commands above, run at the repository root,
   don't cover them. The demos build against this checkout (a `replace`

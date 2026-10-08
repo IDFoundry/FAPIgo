@@ -2,7 +2,6 @@ package server_test
 
 import (
 	"context"
-	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -43,13 +42,11 @@ func declaredSignerKeys(t *testing.T, custody keys.KeyCustody) keys.KeyManager {
 		t.Fatalf("generate key: %v", err)
 	}
 	purposes := []keys.SigningPurpose{keys.IDTokenSigning, keys.JARMSigning, keys.AccessTokenSigning}
-	signers := map[keys.SigningPurpose]crypto.Signer{}
-	algs := map[keys.SigningPurpose]fapi.SignatureAlgorithm{}
+	specs := make([]keys.SignerSpec, 0, len(purposes))
 	for _, p := range purposes {
-		signers[p] = priv
-		algs[p] = fapi.ES256
+		specs = append(specs, keys.SignerSpec{Purpose: p, Algorithm: fapi.ES256, Signer: priv})
 	}
-	km, err := keys.NewKeyManagerFromSigners(signers, algs, nil, keys.DeclareCustody(custody))
+	km, err := keys.NewKeyManagerFromSigners(specs, keys.DeclareCustody(custody))
 	if err != nil {
 		t.Fatalf("NewKeyManagerFromSigners: %v", err)
 	}

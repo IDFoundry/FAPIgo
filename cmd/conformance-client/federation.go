@@ -38,7 +38,6 @@ package main
 
 import (
 	"context"
-	"crypto"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -219,25 +218,14 @@ func runFederationRP(apiBase, evidenceDir, expectedFailuresFile string) error {
 	if err != nil {
 		return fmt.Errorf("generate dpop key: %w", err)
 	}
-	keyMgr, err := keys.NewKeyManagerFromSigners(
+	keyMgr, err := keys.NewKeyManagerFromSigners([]keys.SignerSpec{
 		// The request object is signed with the same published RP key
 		// as the client assertion — OpenID Federation 1.0 §12.1.1.1
 		// only requires it to be a key in the RP's own JWK Set.
-		map[keys.SigningPurpose]crypto.Signer{
-			keys.ClientAuthentication: rpClientAuthPriv,
-			keys.RequestObjectSigning: rpClientAuthPriv,
-			keys.DPoPProofSigning:     dpopSigner,
-		},
-		map[keys.SigningPurpose]fapi.SignatureAlgorithm{
-			keys.ClientAuthentication: fapi.ES256,
-			keys.RequestObjectSigning: fapi.ES256,
-			keys.DPoPProofSigning:     fapi.ES256,
-		},
-		map[keys.SigningPurpose]string{
-			keys.ClientAuthentication: "rp-client-key1",
-			keys.RequestObjectSigning: "rp-client-key1",
-		},
-	)
+		{Purpose: keys.ClientAuthentication, Algorithm: fapi.ES256, Signer: rpClientAuthPriv, KeyID: "rp-client-key1"},
+		{Purpose: keys.RequestObjectSigning, Algorithm: fapi.ES256, Signer: rpClientAuthPriv, KeyID: "rp-client-key1"},
+		{Purpose: keys.DPoPProofSigning, Algorithm: fapi.ES256, Signer: dpopSigner},
+	})
 	if err != nil {
 		return fmt.Errorf("build key manager: %w", err)
 	}

@@ -2,7 +2,6 @@ package identity
 
 import (
 	"context"
-	"crypto"
 	"crypto/hmac"
 	"crypto/rand"
 	"encoding/json"
@@ -76,11 +75,11 @@ func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
 		return nil, err
 	}
 	purposes := []keys.SigningPurpose{keys.IDTokenSigning, keys.AccessTokenSigning, keys.UserInfoSigning}
-	signers, algorithms, kids := map[keys.SigningPurpose]crypto.Signer{}, map[keys.SigningPurpose]fapi.SignatureAlgorithm{}, map[keys.SigningPurpose]string{}
+	specs := make([]keys.SignerSpec, 0, len(purposes))
 	for _, p := range purposes {
-		signers[p], algorithms[p], kids[p] = signer, fapi.ES256, bankKeyID
+		specs = append(specs, keys.SignerSpec{Purpose: p, Algorithm: fapi.ES256, Signer: signer, KeyID: bankKeyID})
 	}
-	manager, err := keys.NewKeyManagerFromSigners(signers, algorithms, kids)
+	manager, err := keys.NewKeyManagerFromSigners(specs)
 	if err != nil {
 		return nil, err
 	}

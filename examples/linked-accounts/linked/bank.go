@@ -1,7 +1,6 @@
 package linked
 
 import (
-	"crypto"
 	"crypto/hmac"
 	"crypto/rand"
 	"encoding/json"
@@ -76,9 +75,10 @@ func (w *World) newBank(apps apps) (*bank, error) {
 		return nil, err
 	}
 	manager, err := keys.NewKeyManagerFromSigners(
-		map[keys.SigningPurpose]crypto.Signer{keys.IDTokenSigning: signer, keys.AccessTokenSigning: signer},
-		map[keys.SigningPurpose]fapi.SignatureAlgorithm{keys.IDTokenSigning: fapi.ES256, keys.AccessTokenSigning: fapi.ES256},
-		map[keys.SigningPurpose]string{keys.IDTokenSigning: bankKeyID, keys.AccessTokenSigning: bankKeyID},
+		[]keys.SignerSpec{
+			{Purpose: keys.IDTokenSigning, Algorithm: fapi.ES256, Signer: signer, KeyID: bankKeyID},
+			{Purpose: keys.AccessTokenSigning, Algorithm: fapi.ES256, Signer: signer, KeyID: bankKeyID},
+		},
 	)
 	if err != nil {
 		return nil, err

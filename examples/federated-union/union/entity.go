@@ -33,9 +33,9 @@ func newSigningKey(kid string, purpose keys.SigningPurpose) (signingKey, error) 
 		return signingKey{}, err
 	}
 	manager, err := keys.NewKeyManagerFromSigners(
-		map[keys.SigningPurpose]crypto.Signer{purpose: signer},
-		map[keys.SigningPurpose]fapi.SignatureAlgorithm{purpose: fapi.ES256},
-		map[keys.SigningPurpose]string{purpose: kid},
+		[]keys.SignerSpec{
+			{Purpose: purpose, Algorithm: fapi.ES256, Signer: signer, KeyID: kid},
+		},
 	)
 	if err != nil {
 		return signingKey{}, err

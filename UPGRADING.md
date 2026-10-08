@@ -231,6 +231,40 @@ It was deprecated in v0.50.1.
 `PollBackchannelAuthentication`, each carrying the server's error `Code`
 and `Description`.
 
+### `keys.NewKeyManagerFromSigners` takes one `SignerSpec` per purpose (keys)
+
+**Affects:** every call to `keys.NewKeyManagerFromSigners`.
+
+**Why:** it took three parallel maps — signers, algorithms and kids,
+each keyed by purpose — so a purpose present in one map and missing from
+another compiled, and a kid map entry for a purpose with no signer was
+silently ignored. One value per purpose can't drift that way. The
+manager it returns is now a `keys.RotatingKeyManager`, so publishing an
+outgoing key through a rotation's overlap window no longer needs a
+KeyManager of your own.
+
+**What to change:** pass a `[]keys.SignerSpec`, one per purpose, with
+the options as before:
+
+```go
+km, err := keys.NewKeyManagerFromSigners([]keys.SignerSpec{
+	{Purpose: keys.IDTokenSigning, Algorithm: fapi.ES256, Signer: signer, KeyID: "as-key-1"},
+	{Purpose: keys.AccessTokenSigning, Algorithm: fapi.ES256, Signer: signer, KeyID: "as-key-1"},
+}, keys.DeclareCustody(keys.KeyCustody{Durable: true}))
+```
+
+- An empty `KeyID` is no longer published as an empty kid (which
+  `/jwks` refused): it's derived from the key's RFC 7638 thumbprint.
+  Keep setting `KeyID` if clients or resource servers already pin your
+  current kid.
+- To rotate, build the manager with the incoming key as `Signer` and
+  the outgoing key's public half in `Previous`
+  (`[]keys.PublicKeyInfo{{KeyID: "as-key-1", PublicKey: old.Public()}}`);
+  both are published until you drop it from `Previous`.
+- It refuses what used to fail later: the same purpose twice, a spec
+  without a purpose or algorithm, a kid naming two different keys, and
+  a previous key that doesn't suit the purpose's algorithm.
+
 ## v0.50.0
 
 ### `ResolveViaEndpoint` names the resolver it trusts (federation)

@@ -35,7 +35,11 @@
 //     implement — into a KeyManager, covering both a static in-memory
 //     key (*ecdsa.PrivateKey, *rsa.PrivateKey, and ed25519.PrivateKey
 //     all satisfy crypto.Signer directly) and an arbitrary KMS/HSM
-//     backend, with no FAPIgo-specific glue code in either case.
+//     backend, with no FAPIgo-specific glue code in either case. It
+//     takes one SignerSpec per purpose (purpose, algorithm, signer,
+//     kid, and any previous keys still published during a rotation),
+//     derives a missing kid from the key's RFC 7638 thumbprint, and
+//     returns a RotatingKeyManager.
 //
 // Only the caller knows how the keys behind NewKeyManagerFromSigners,
 // NewDecrypter and NewSingleKeyDecrypter are held, so each takes a

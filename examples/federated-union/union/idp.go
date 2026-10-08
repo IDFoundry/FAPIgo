@@ -2,7 +2,6 @@ package union
 
 import (
 	"context"
-	"crypto"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -91,14 +90,10 @@ func (w *World) newIdentityProvider(c country, ta *entity) (*identityProvider, e
 		return nil, err
 	}
 	manager, err := keys.NewKeyManagerFromSigners(
-		map[keys.SigningPurpose]crypto.Signer{
-			keys.FederationEntitySigning: fedKey.signer, keys.IDTokenSigning: tokenSigner, keys.AccessTokenSigning: tokenSigner,
-		},
-		map[keys.SigningPurpose]fapi.SignatureAlgorithm{
-			keys.FederationEntitySigning: fapi.ES256, keys.IDTokenSigning: fapi.ES256, keys.AccessTokenSigning: fapi.ES256,
-		},
-		map[keys.SigningPurpose]string{
-			keys.FederationEntitySigning: fedKey.kid, keys.IDTokenSigning: c.key + "-id-token-1", keys.AccessTokenSigning: c.key + "-id-token-1",
+		[]keys.SignerSpec{
+			{Purpose: keys.FederationEntitySigning, Algorithm: fapi.ES256, Signer: fedKey.signer, KeyID: fedKey.kid},
+			{Purpose: keys.IDTokenSigning, Algorithm: fapi.ES256, Signer: tokenSigner, KeyID: c.key + "-id-token-1"},
+			{Purpose: keys.AccessTokenSigning, Algorithm: fapi.ES256, Signer: tokenSigner, KeyID: c.key + "-id-token-1"},
 		},
 	)
 	if err != nil {

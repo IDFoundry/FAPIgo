@@ -12,7 +12,6 @@ package payment
 
 import (
 	"context"
-	"crypto"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -141,13 +140,11 @@ func newClientKeys(kid string) (clientKeys, error) {
 		return clientKeys{}, err
 	}
 	manager, err := keys.NewKeyManagerFromSigners(
-		map[keys.SigningPurpose]crypto.Signer{
-			keys.ClientAuthentication: auth, keys.RequestObjectSigning: auth, keys.DPoPProofSigning: dpop,
+		[]keys.SignerSpec{
+			{Purpose: keys.ClientAuthentication, Algorithm: fapi.ES256, Signer: auth, KeyID: kid},
+			{Purpose: keys.RequestObjectSigning, Algorithm: fapi.ES256, Signer: auth, KeyID: kid},
+			{Purpose: keys.DPoPProofSigning, Algorithm: fapi.ES256, Signer: dpop},
 		},
-		map[keys.SigningPurpose]fapi.SignatureAlgorithm{
-			keys.ClientAuthentication: fapi.ES256, keys.RequestObjectSigning: fapi.ES256, keys.DPoPProofSigning: fapi.ES256,
-		},
-		map[keys.SigningPurpose]string{keys.ClientAuthentication: kid, keys.RequestObjectSigning: kid},
 	)
 	if err != nil {
 		return clientKeys{}, err

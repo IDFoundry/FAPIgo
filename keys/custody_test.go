@@ -2,7 +2,6 @@ package keys_test
 
 import (
 	"context"
-	"crypto"
 	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -27,11 +26,9 @@ func TestNewKeyManagerFromSignersDeclaresCustodyOnlyWhenAsked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}
-	signers := map[keys.SigningPurpose]crypto.Signer{keys.IDTokenSigning: priv}
-	algs := map[keys.SigningPurpose]fapi.SignatureAlgorithm{keys.IDTokenSigning: fapi.ES256}
-	kids := map[keys.SigningPurpose]string{keys.IDTokenSigning: "k1"}
+	specs := []keys.SignerSpec{{Purpose: keys.IDTokenSigning, Algorithm: fapi.ES256, Signer: priv, KeyID: "k1"}}
 
-	plain, err := keys.NewKeyManagerFromSigners(signers, algs, kids)
+	plain, err := keys.NewKeyManagerFromSigners(specs)
 	if err != nil {
 		t.Fatalf("NewKeyManagerFromSigners: %v", err)
 	}
@@ -40,7 +37,7 @@ func TestNewKeyManagerFromSignersDeclaresCustodyOnlyWhenAsked(t *testing.T) {
 	}
 
 	want := keys.KeyCustody{Durable: true, CrossInstanceConsistent: true}
-	declared, err := keys.NewKeyManagerFromSigners(signers, algs, kids, keys.DeclareCustody(want))
+	declared, err := keys.NewKeyManagerFromSigners(specs, keys.DeclareCustody(want))
 	if err != nil {
 		t.Fatalf("NewKeyManagerFromSigners(DeclareCustody): %v", err)
 	}

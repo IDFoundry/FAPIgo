@@ -51,15 +51,10 @@ the attesters it's bound to.
 ```go
 // Signers backed by the Secure Enclave or Android Keystore.
 km, err := keys.NewKeyManagerFromSigners(
-	map[keys.SigningPurpose]crypto.Signer{
-		keys.DPoPProofSigning:            dpopKey,
-		keys.ClientAttestationPoPSigning: instanceKey,
+	[]keys.SignerSpec{
+		{Purpose: keys.DPoPProofSigning, Algorithm: fapi.ES256, Signer: dpopKey},
+		{Purpose: keys.ClientAttestationPoPSigning, Algorithm: fapi.ES256, Signer: instanceKey},
 	},
-	map[keys.SigningPurpose]fapi.SignatureAlgorithm{
-		keys.DPoPProofSigning:            fapi.ES256,
-		keys.ClientAttestationPoPSigning: fapi.ES256,
-	},
-	nil,
 	keys.DeclareCustody(keys.KeyCustody{Durable: true}),
 )
 

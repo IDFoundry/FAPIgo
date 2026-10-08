@@ -374,9 +374,18 @@ func (s *Server) validateBackchannelAuthenticationParameters(verified verifiedBa
 
 	hints := 0
 	for _, name := range [...]string{"login_hint", "login_hint_token", "id_token_hint"} {
-		if _, ok := params[name]; ok {
-			hints++
+		raw, ok := params[name]
+		if !ok {
+			continue
 		}
+		// The hint must be a non-empty string: one that isn't (a number,
+		// an object, "") would otherwise count as the one hint here but
+		// reach the application as no hint at all
+		// (backchannelInteractionRequestFrom keeps only string values).
+		if v, err := jsonStringValue(raw); err != nil || v == "" {
+			return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, name+" must be a non-empty string", err)
+		}
+		hints++
 	}
 	if hints != 1 {
 		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "exactly one of login_hint, login_hint_token, or id_token_hint is required", nil)

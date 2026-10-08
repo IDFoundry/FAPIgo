@@ -1773,3 +1773,46 @@ func TestMetadataAdvertisesBackchannelAuthenticationWhenConfigured(t *testing.T)
 		t.Fatalf("GrantTypesSupported = %v, want to contain %q", md.GrantTypesSupported, server.CIBAGrantType)
 	}
 }
+
+// TestBeginBackchannelAuthenticationRequiresStringHint: the one identity
+// hint must be a non-empty JSON string. A number, an object, an array or
+// "" would otherwise count as the hint but reach the application as no
+// hint at all.
+func TestBeginBackchannelAuthenticationRequiresStringHint(t *testing.T) {
+	for name, hint := range map[string]map[string]json.RawMessage{
+		"login_hint number":     {"login_hint": jsonRaw(t, 12345)},
+		"login_hint object":     {"login_hint": jsonRaw(t, map[string]string{"sub": "victim"})},
+		"login_hint empty":      {"login_hint": jsonRaw(t, "")},
+		"id_token_hint array":   {"id_token_hint": jsonRaw(t, []string{"x"})},
+		"login_hint_token null": {"login_hint_token": json.RawMessage("null")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h, _ := newHarnessWithBackchannel(t)
+			params := map[string]json.RawMessage{"scope": jsonRaw(t, "openid accounts")}
+			for k, v := range hint {
+				params[k] = v
+			}
+			action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+				HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), h.backchannelRequestObject(t, params))},
+			})
+			if err != nil {
+				t.Fatalf("BeginBackchannelAuthentication: %v", err)
+			}
+			localErr, ok := action.(server.BackchannelAuthenticationLocalError)
+			if !ok {
+				t.Fatalf("action = %T, want server.BackchannelAuthenticationLocalError", action)
+			}
+			if localErr.Error.Code() != server.ErrorInvalidRequest {
+				t.Fatalf("Code = %q, want invalid_request", localErr.Error.Code())
+			}
+		})
+	}
+
+	t.Run("string hint reaches the application", func(t *testing.T) {
+		h, _ := newHarnessWithBackchannel(t)
+		required := beginBackchannel(t, h, standardBackchannelParams(t))
+		if required.Interaction.Hints.LoginHint != "user-1" {
+			t.Fatalf("Hints.LoginHint = %q, want user-1", required.Interaction.Hints.LoginHint)
+		}
+	})
+}

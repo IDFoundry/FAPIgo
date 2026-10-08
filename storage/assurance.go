@@ -15,7 +15,8 @@ package storage
 // Test*Contract function for its interface (TestGrantStoreContract,
 // TestTransactionStoreContract, TestReplayStoreContract,
 // TestSessionStoreContract, TestNonceStoreContract,
-// TestAccessTokenStoreContract, TestBackchannelAuthenticationStoreContract)
+// TestAccessTokenStoreContract, TestBackchannelAuthenticationStoreContract,
+// TestRevocationStoreContract, TestClientRepositoryContract)
 // — against its own factory, rather than
 // relying on the capability declaration alone. The contract suite
 // verifies what's observable through the public interface (the

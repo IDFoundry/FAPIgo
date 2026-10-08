@@ -66,8 +66,11 @@
 // first-party or downstream. There is one per interface:
 // TestTransactionStoreContract, TestGrantStoreContract,
 // TestReplayStoreContract, TestSessionStoreContract,
-// TestNonceStoreContract, TestAccessTokenStoreContract and
-// TestBackchannelAuthenticationStoreContract. The suite runs one store instance in one
+// TestNonceStoreContract, TestAccessTokenStoreContract,
+// TestBackchannelAuthenticationStoreContract, TestRevocationStoreContract
+// (for the revocation store server.RevocationSink and
+// resource.RevocationChecker share — see RevocationStore) and
+// TestClientRepositoryContract. The suite runs one store instance in one
 // process against context.Background(); it deliberately does not
 // verify cross-instance/cross-connection atomicity, ExpiresAt-driven
 // eviction, context-cancellation, or that the store deep-copies

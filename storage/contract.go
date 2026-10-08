@@ -1429,3 +1429,123 @@ func jsonEquivalent(a, b json.RawMessage) bool {
 	}
 	return reflect.DeepEqual(av, bv)
 }
+
+// TestRevocationStoreContract exercises the security-critical behaviour
+// of a RevocationStore implementation: a revoked key reads as revoked,
+// keys are compared exactly (an access token's key, a grant's "grant:"
+// key and a reused code's "code-grant:" key never answer for each
+// other), revoking again is harmless, and concurrent revocations all
+// land. A store failing any of these lets a revoked token or grant keep
+// working.
+func TestRevocationStoreContract(t *testing.T, factory func() RevocationStore) {
+	t.Helper()
+	ctx := context.Background()
+	later := time.Now().Add(time.Hour)
+
+	t.Run("UnknownKeyIsNotRevoked", func(t *testing.T) {
+		revoked, err := factory().IsRevoked(ctx, "never-revoked")
+		if err != nil || revoked {
+			t.Fatalf("IsRevoked(unknown) = %v, %v, want false, nil", revoked, err)
+		}
+	})
+	t.Run("RevokedKeyIsRevoked", func(t *testing.T) {
+		s := factory()
+		if err := s.Revoke(ctx, "jti-1", later); err != nil {
+			t.Fatalf("Revoke: %v", err)
+		}
+		if revoked, err := s.IsRevoked(ctx, "jti-1"); err != nil || !revoked {
+			t.Fatalf("IsRevoked(revoked) = %v, %v, want true, nil", revoked, err)
+		}
+	})
+	t.Run("KeysAreExact", func(t *testing.T) {
+		s := factory()
+		for _, key := range []string{"grant:g1", "abc"} {
+			if err := s.Revoke(ctx, key, later); err != nil {
+				t.Fatalf("Revoke(%q): %v", key, err)
+			}
+		}
+		for _, key := range []string{"g1", "code-grant:g1", "grant:g", "grant:g1 ", "GRANT:g1", "ABC", "abc ", "grant:abc", ""} {
+			if revoked, err := s.IsRevoked(ctx, key); err != nil || revoked {
+				t.Fatalf("IsRevoked(%q) = %v, %v, want false, nil: only exactly the revoked keys are revoked", key, revoked, err)
+			}
+		}
+	})
+	t.Run("RevokeAgainKeepsItRevoked", func(t *testing.T) {
+		s := factory()
+		for _, expiresAt := range []time.Time{later, later.Add(time.Hour), later} {
+			if err := s.Revoke(ctx, "jti-2", expiresAt); err != nil {
+				t.Fatalf("Revoke again: %v", err)
+			}
+		}
+		if revoked, err := s.IsRevoked(ctx, "jti-2"); err != nil || !revoked {
+			t.Fatalf("IsRevoked after revoking again = %v, %v, want true, nil", revoked, err)
+		}
+	})
+	t.Run("ConcurrentRevokesAllLand", func(t *testing.T) {
+		s := factory()
+		var n int
+		var mu sync.Mutex
+		runConcurrently(contractConcurrentAttempts, func() bool {
+			mu.Lock()
+			key := fmt.Sprintf("concurrent-%d", n)
+			n++
+			mu.Unlock()
+			return s.Revoke(ctx, key, later) == nil
+		})
+		for i := 0; i < contractConcurrentAttempts; i++ {
+			key := fmt.Sprintf("concurrent-%d", i)
+			if revoked, err := s.IsRevoked(ctx, key); err != nil || !revoked {
+				t.Fatalf("IsRevoked(%q) = %v, %v, want true, nil", key, revoked, err)
+			}
+		}
+	})
+}
+
+// TestClientRepositoryContract exercises the security-critical behaviour
+// of a ClientRepository implementation, given a factory returning one
+// holding exactly the clients passed: ResolveClient returns the client
+// registered under exactly the requested ID — never another — and an
+// unknown ID is an error that isn't ErrStoreUnavailable, so the server
+// answers it as an unknown client rather than an outage.
+func TestClientRepositoryContract(t *testing.T, factory func(clients []RegisteredClient) ClientRepository) {
+	t.Helper()
+	ctx := context.Background()
+	newClient := func(t *testing.T, id fapi.ClientID) RegisteredClient {
+		t.Helper()
+		c, err := NewRegisteredClient(RegisteredClientConfig{
+			ID:                       id,
+			RedirectURIs:             []fapi.RegisteredRedirectURI{"https://rp.example/callback"},
+			ClientAssertionAlgorithm: fapi.ES256,
+			AllowedScopes:            []string{"accounts"},
+		})
+		if err != nil {
+			t.Fatalf("NewRegisteredClient(%q): %v", id, err)
+		}
+		return c
+	}
+
+	t.Run("ResolvesExactlyTheRequestedClient", func(t *testing.T) {
+		repo := factory([]RegisteredClient{newClient(t, "client-1"), newClient(t, "client-2")})
+		for _, id := range []fapi.ClientID{"client-1", "client-2"} {
+			c, err := repo.ResolveClient(ctx, id)
+			if err != nil {
+				t.Fatalf("ResolveClient(%q): %v", id, err)
+			}
+			if c.ID() != id {
+				t.Fatalf("ResolveClient(%q) returned client %q", id, c.ID())
+			}
+		}
+	})
+	t.Run("UnknownClientIsAnErrorNotAnOutage", func(t *testing.T) {
+		repo := factory([]RegisteredClient{newClient(t, "client-1")})
+		for _, id := range []fapi.ClientID{"client-3", "CLIENT-1", "client-1 ", "client-", "client-10", ""} {
+			_, err := repo.ResolveClient(ctx, id)
+			if err == nil {
+				t.Fatalf("ResolveClient(%q) = nil error, want an unknown client", id)
+			}
+			if errors.Is(err, ErrStoreUnavailable) {
+				t.Fatalf("ResolveClient(%q) = %v, which wraps ErrStoreUnavailable; an unknown client isn't an outage", id, err)
+			}
+		}
+	})
+}

@@ -87,17 +87,21 @@ type BeginAuthorizationRequest struct {
 // "Referrer-Policy: no-referrer" and no third-party resources, and don't
 // log full authorization request URLs.
 func (s *Server) BeginAuthorization(ctx context.Context, req BeginAuthorizationRequest) (AuthorizationAction, error) {
+	// Until it matches the client that pushed the request (below), the
+	// query's client_id is only what the browser claims: those failures
+	// are audited with no client (AuditEvent.ClientID), never with this
+	// unverified value, which could carry anything into an audit log.
 	reference, ok := par.SplitRequestURI(req.RequestURI)
 	if !ok {
-		return s.beginFail(ctx, req.ClientID, newError(ErrorInvalidRequest, 400, "request_uri is not recognized", nil)), nil
+		return s.beginFail(ctx, "", newError(ErrorInvalidRequest, 400, "request_uri is not recognized", nil)), nil
 	}
 	if req.ClientID == "" {
-		return s.beginFail(ctx, req.ClientID, newError(ErrorInvalidRequest, 400, "client_id is required", nil)), nil
+		return s.beginFail(ctx, "", newError(ErrorInvalidRequest, 400, "client_id is required", nil)), nil
 	}
 
 	handle, err := generateInteractionHandle(s.deps.Random)
 	if err != nil {
-		return s.beginFail(ctx, req.ClientID, newError(ErrorServerError, 500, "failed to generate interaction handle", err)), nil
+		return s.beginFail(ctx, "", newError(ErrorServerError, 500, "failed to generate interaction handle", err)), nil
 	}
 
 	now := s.deps.Clock.Now()
@@ -108,11 +112,11 @@ func (s *Server) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 		HandleExpiresAt: handleExpiresAt,
 	})
 	if err != nil {
-		return s.beginFail(ctx, req.ClientID, newError(ErrorInvalidRequestURI, 400, "request_uri is invalid, expired, or already used", err)), nil
+		return s.beginFail(ctx, "", newError(ErrorInvalidRequestURI, 400, "request_uri is invalid, expired, or already used", err)), nil
 	}
 
 	if pushed.ClientID != req.ClientID {
-		return s.beginFail(ctx, req.ClientID, newError(ErrorInvalidRequestURI, 400, "client_id does not match the pushed authorization request", nil)), nil
+		return s.beginFail(ctx, "", newError(ErrorInvalidRequestURI, 400, "client_id does not match the pushed authorization request", nil)), nil
 	}
 	if !now.Before(pushed.ExpiresAt) {
 		return s.beginFail(ctx, req.ClientID, newError(ErrorInvalidRequestURI, 400, "request_uri has expired", nil)), nil

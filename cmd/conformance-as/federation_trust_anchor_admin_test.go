@@ -188,13 +188,14 @@ func TestDynamicFederationClientsAddTrustAnchorIsIdempotent(t *testing.T) {
 
 func TestFederationTrustAnchorAdminHandler(t *testing.T) {
 	d := newTestDynamicFederationClients(t)
-	handler := federationTrustAnchorAdminHandler(d)
+	handler := federationTrustAnchorAdminHandler(d, testAdminToken)
 
 	body, err := json.Marshal(addTrustAnchorRequest{EntityID: "https://ta.example.org", JWKS: testTrustAnchorJWKS(t)})
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/internal/federation/trust-anchors", strings.NewReader(string(body)))
+	req.Header.Set("Authorization", "Bearer "+testAdminToken)
 	rec := httptest.NewRecorder()
 	handler(rec, req)
 
@@ -215,13 +216,72 @@ func TestFederationTrustAnchorAdminHandlerRejectsInvalidRequests(t *testing.T) {
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
 			d := newTestDynamicFederationClients(t)
-			handler := federationTrustAnchorAdminHandler(d)
+			handler := federationTrustAnchorAdminHandler(d, testAdminToken)
 			req := httptest.NewRequest(http.MethodPost, "/internal/federation/trust-anchors", strings.NewReader(body))
+			req.Header.Set("Authorization", "Bearer "+testAdminToken)
 			rec := httptest.NewRecorder()
 			handler(rec, req)
 			if rec.Code != http.StatusBadRequest {
 				t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
 			}
 		})
+	}
+}
+
+const testAdminToken = "test-admin-token"
+
+// TestFederationTrustAnchorAdminHandlerRequiresToken: without the
+// configured bearer token the endpoint answers 404 and adds nothing.
+func TestFederationTrustAnchorAdminHandlerRequiresToken(t *testing.T) {
+	body, err := json.Marshal(addTrustAnchorRequest{EntityID: "https://ta.example.org", JWKS: testTrustAnchorJWKS(t)})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	for name, tc := range map[string]struct {
+		configured, authorization string
+	}{
+		"no header":            {testAdminToken, ""},
+		"wrong token":          {testAdminToken, "Bearer not-the-token"},
+		"token without Bearer": {testAdminToken, testAdminToken},
+		"other scheme":         {testAdminToken, "Basic " + testAdminToken},
+		"empty bearer":         {testAdminToken, "Bearer "},
+		"nothing configured":   {"", "Bearer "},
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := newTestDynamicFederationClients(t)
+			handler := federationTrustAnchorAdminHandler(d, tc.configured)
+			req := httptest.NewRequest(http.MethodPost, "/internal/federation/trust-anchors", strings.NewReader(string(body)))
+			if tc.authorization != "" {
+				req.Header.Set("Authorization", tc.authorization)
+			}
+			rec := httptest.NewRecorder()
+			handler(rec, req)
+			if rec.Code != http.StatusNotFound {
+				t.Errorf("status = %d, want %d", rec.Code, http.StatusNotFound)
+			}
+			if len(d.trustAnchors) != 1 {
+				t.Errorf("trustAnchors = %v, want only the seed anchor", d.trustAnchors)
+			}
+		})
+	}
+}
+
+// TestFederationTrustAnchorAdminHandlerBoundsBody: a body larger than
+// maxAddTrustAnchorBody is refused without being read in full.
+func TestFederationTrustAnchorAdminHandlerBoundsBody(t *testing.T) {
+	d := newTestDynamicFederationClients(t)
+	handler := federationTrustAnchorAdminHandler(d, testAdminToken)
+	// A valid request, padded with a field the decoder ignores: only the
+	// size bound can refuse it.
+	big := `{"entity_id":"https://ta.example.org","jwks":` + string(testTrustAnchorJWKS(t)) + `,"pad":"` + strings.Repeat("a", maxAddTrustAnchorBody) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/internal/federation/trust-anchors", strings.NewReader(big))
+	req.Header.Set("Authorization", "Bearer "+testAdminToken)
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	if len(d.trustAnchors) != 1 {
+		t.Errorf("trustAnchors = %v, want only the seed anchor", d.trustAnchors)
 	}
 }

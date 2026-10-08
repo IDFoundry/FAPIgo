@@ -115,7 +115,10 @@ func buildFederationFetcher(resolved ResolvedConfig, allowLoopbackHTTP, federati
 // Factored out so the end-to-end smoke test can stand up the exact same
 // wiring main.go uses, against its own TLS listener, without going
 // through flags or a config file on disk.
-func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChallenge bool, userinfoSigning bool, ciba bool, clientCredentialsGrant bool, cibaApprovalUIToken string, federationTrustAnchorAdmin bool) (*http.ServeMux, error) {
+func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChallenge bool, userinfoSigning bool, ciba bool, clientCredentialsGrant bool, cibaApprovalUIToken string, federationTrustAnchorAdminToken string) (*http.ServeMux, error) {
+	// The admin endpoint is on exactly when it has a token to check —
+	// see federationTrustAnchorAdminHandler.
+	federationTrustAnchorAdmin := federationTrustAnchorAdminToken != ""
 	endpoints, err := buildEndpoints(resolved.Issuer, allowLoopbackHTTP)
 	if err != nil {
 		return nil, err
@@ -423,5 +426,5 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 	backchannel := newBackchannelHandler(srv, server.SystemClock{}, resolved.DefaultSubject)
 	userinfoURLValue := userinfoURL.URL()
 	accountsURLValue := accountsURL.URL()
-	return newRouter(srv, consent, backchannel, resolved.AdvertisedScopes, resourceVerifier, &userinfoURLValue, mtlsUserinfoURL, &accountsURLValue, identityClaims, clientRepo, userinfoSigning, cibaApprovalUIToken, resolved.Federation != nil, dynClients), nil
+	return newRouter(srv, consent, backchannel, resolved.AdvertisedScopes, resourceVerifier, &userinfoURLValue, mtlsUserinfoURL, &accountsURLValue, identityClaims, clientRepo, userinfoSigning, cibaApprovalUIToken, resolved.Federation != nil, dynClients, federationTrustAnchorAdminToken), nil
 }

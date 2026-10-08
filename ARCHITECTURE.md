@@ -1318,7 +1318,8 @@ advance) and this AS's own outbound federation fetcher lacked
 `fapihttp.Config.AllowedPrivateHosts`/TLS peer trust for reaching it.
 Both fixed (`cmd/conformance-as -federation-trust-anchor-admin`, a
 runtime `POST /internal/federation/trust-anchors` admin endpoint —
-explicitly gated behind that flag and never appropriate outside a
+gated behind that flag and a bearer token,
+`-federation-trust-anchor-admin-token`, and never appropriate outside a
 conformance run, see `dynamicFederationClients`'s own doc comment) and
 driven all the way to a real PAR call every time. The plan's actual
 blocker is that the suite's RP is a plain OpenID Connect client, not a

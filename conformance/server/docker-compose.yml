@@ -234,8 +234,13 @@ services:
       # the OIDF suite's own self-hosted, per-test-run Trust Anchor at
       # runtime — see cmd/conformance-as/federation_trust_anchor_admin.go's
       # own doc comment for why this is the only conformance-as variant
-      # that needs it.
+      # that needs it. The endpoint requires this bearer token, and the
+      # binary refuses to start without one: run-all.sh sets a random
+      # value per run; set FEDERATION_TRUST_ANCHOR_ADMIN_TOKEN yourself
+      # when starting this service by hand, and pass the same value to
+      # run-federation-op-plan.py.
       - -federation-trust-anchor-admin
+      - -federation-trust-anchor-admin-token=${FEDERATION_TRUST_ANCHOR_ADMIN_TOKEN:-}
 
   # A minimal, standing OpenID Federation 1.0 Trust Anchor — see
   # cmd/conformance-federation-trust-anchor's own doc comment for why

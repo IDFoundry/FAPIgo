@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -200,16 +202,28 @@ type addTrustAnchorRequest struct {
 	JWKS     json.RawMessage `json:"jwks"`
 }
 
+// maxAddTrustAnchorBody bounds POST /internal/federation/trust-anchors'
+// body: an Entity Identifier and a small JWKS.
+const maxAddTrustAnchorBody = 64 << 10
+
 // federationTrustAnchorAdminHandler serves POST /internal/federation/trust-anchors
 // — see dynamicFederationClients' own doc comment for why this exists
-// and when. Deliberately unauthenticated: gated entirely behind
-// -federation-trust-anchor-admin, itself meant only for a trusted
-// conformance-run orchestration script reaching this binary over the
-// same docker-compose network, never exposed to the internet — the
-// same posture -ciba-approval-ui-token's own doc comment describes for
-// a differently-shaped debug endpoint.
-func federationTrustAnchorAdminHandler(clients *dynamicFederationClients) http.HandlerFunc {
+// and when. It's token-gated: a caller must send
+// "Authorization: Bearer <token>" with -federation-trust-anchor-admin-token's
+// value, compared in constant time, or gets a plain 404 and changes
+// nothing. An anchor added here is trusted for automatic registration,
+// and its host joins the fetcher's private-host and TLS exceptions, so
+// whoever can call this decides whom the server trusts and which
+// internal hosts it fetches from. The token keeps that to the
+// orchestration script even though the docker-compose port is
+// published on every interface.
+func federationTrustAnchorAdminHandler(clients *dynamicFederationClients, configuredToken string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if !validTrustAnchorAdminToken(configuredToken, r.Header.Get("Authorization")) {
+			http.NotFound(w, r)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, maxAddTrustAnchorBody)
 		var req addTrustAnchorRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, fmt.Sprintf("invalid JSON body: %v", err), http.StatusBadRequest)
@@ -229,4 +243,15 @@ func federationTrustAnchorAdminHandler(clients *dynamicFederationClients) http.H
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}
+}
+
+// validTrustAnchorAdminToken reports whether authorization is
+// "Bearer <configured>", comparing the token in constant time. An empty
+// configured token never matches.
+func validTrustAnchorAdminToken(configured, authorization string) bool {
+	supplied, ok := strings.CutPrefix(authorization, "Bearer ")
+	if configured == "" || !ok || supplied == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(configured), []byte(supplied)) == 1
 }

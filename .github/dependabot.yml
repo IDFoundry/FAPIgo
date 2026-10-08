@@ -9,11 +9,11 @@ updates:
     schedule:
       interval: weekly
 
-  # Keeps the pinned actions/checkout, actions/setup-go,
-  # actions/setup-python, actions/upload-artifact, golang/govulncheck-action,
-  # golangci/golangci-lint-action and googleapis/release-please-action
-  # versions across ci.yml, conformance.yml and release-please.yml
-  # current — the one real dependency surface this repo has.
+  # Keeps every action the workflows use current — the one real
+  # dependency surface this repo has. Each is pinned to a full commit
+  # SHA with its version as a trailing comment (`@<sha> # vX.Y.Z`),
+  # GitHub's own actions included, so a moved tag can't change what
+  # runs; Dependabot updates the SHA and the comment together.
   - package-ecosystem: github-actions
     directory: /
     schedule:

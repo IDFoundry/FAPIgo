@@ -329,6 +329,13 @@ func hasURIName(cert *x509.Certificate, uri string) bool {
 // server, and can scope anchors per client (e.g. the Wallet Providers
 // accepted for that client's wallet type). Returning a nil pool
 // rejects the attestation.
+//
+// Under AssuranceProduction it must also implement
+// keys.KeySourceAssurance and declare LiveFetchHardened: true when it
+// fetches anchors only through fapihttp with no loopback exception, or
+// fetches nothing (StaticAttesterTrustAnchors). A trust list fetched
+// some other way can't be told apart from a hardened one, so New
+// refuses a source that declares nothing.
 type AttesterTrustAnchors interface {
 	TrustAnchors(ctx context.Context, client storage.RegisteredClient) (*x509.CertPool, error)
 }
@@ -353,6 +360,10 @@ type AttesterAnchor struct {
 // AttesterTrustAnchors, it is consulted on every attestation, so a
 // trust-list-backed implementation can refresh or withdraw anchors.
 // Returning no anchors rejects the attestation.
+//
+// Under AssuranceProduction it must also implement
+// keys.KeySourceAssurance and declare LiveFetchHardened, as
+// AttesterTrustAnchors must; StaticAttesterAnchors does.
 type AttesterAnchorSource interface {
 	AttesterAnchors(ctx context.Context, client storage.RegisteredClient) ([]AttesterAnchor, error)
 }
@@ -369,6 +380,13 @@ type StaticAttesterAnchors []AttesterAnchor
 // AttesterAnchors implements AttesterAnchorSource.
 func (a StaticAttesterAnchors) AttesterAnchors(context.Context, storage.RegisteredClient) ([]AttesterAnchor, error) {
 	return a, nil
+}
+
+// Capabilities implements keys.KeySourceAssurance: StaticAttesterAnchors
+// fetches nothing, so it declares LiveFetchHardened, as
+// AssuranceProduction requires of X5CAttesterChain's anchor source.
+func (StaticAttesterAnchors) Capabilities() keys.KeySourceCapabilities {
+	return keys.KeySourceCapabilities{LiveFetchHardened: true}
 }
 
 // checkAttesterAnchors refuses an empty anchor list, an anchor without a
@@ -404,6 +422,14 @@ type StaticAttesterTrustAnchors struct {
 // TrustAnchors implements AttesterTrustAnchors.
 func (a StaticAttesterTrustAnchors) TrustAnchors(context.Context, storage.RegisteredClient) (*x509.CertPool, error) {
 	return a.Roots, nil
+}
+
+// Capabilities implements keys.KeySourceAssurance:
+// StaticAttesterTrustAnchors fetches nothing, so it declares
+// LiveFetchHardened, as AssuranceProduction requires of
+// X5CAttesterChain's trust-anchor source.
+func (StaticAttesterTrustAnchors) Capabilities() keys.KeySourceCapabilities {
+	return keys.KeySourceCapabilities{LiveFetchHardened: true}
 }
 
 // verifyAttesterChain parses ders (leaf first) and verifies the leaf

@@ -56,10 +56,13 @@ const (
 	// interface's own doc comment for why a plain ClientKeySource/
 	// ClientEncryptionKeySource has no structural way to tell a hardened
 	// implementation from a naive one apart from this declaration. The
-	// same applies to RegisteredAttesterKeys.Keys when
-	// Config.AttestationBasedClientAuthentication is set, and
-	// Dependencies.FederationHTTP, when set, must not grant a loopback
-	// exception (fapihttp's AllowsLoopback).
+	// same applies, when Config.AttestationBasedClientAuthentication is
+	// set, to the attester trust's own source — RegisteredAttesterKeys.Keys,
+	// or X5CAttesterChain's TrustAnchors or Anchors
+	// (StaticAttesterTrustAnchors and StaticAttesterAnchors declare it) —
+	// and Dependencies.FederationHTTP, when set, must not grant a loopback
+	// exception (fapihttp's AllowsLoopback). New reports every
+	// declaration that falls short at once, joined.
 	// Likewise the keys this server signs with — Dependencies.Keys, and
 	// JWTAccessTokens.Keys when access tokens are JWTs — must implement
 	// keys.KeyCustodyAssurance and declare Durable (and

@@ -625,7 +625,7 @@ func checkProductionKeyCustody(deps Dependencies, issuer AccessTokenAssurance, s
 
 // checkProductionClientSources checks the client registry, the sources
 // of clients' verification and encryption keys, and, when attestation
-// is enabled, RegisteredAttesterKeys' attester key source.
+// is enabled, the attester trust's key or trust-anchor source.
 func checkProductionClientSources(deps Dependencies, scaled, attestation bool) []error {
 	errs := []error{
 		checkStoreAssurance("clients", deps.Clients, false, scaled),
@@ -653,8 +653,9 @@ type namedSource struct {
 }
 
 // attesterTrustSources returns the sources trust, by value or pointer,
-// draws its trust from: RegisteredAttesterKeys' key source. Nil for any
-// other trust.
+// draws its trust from: RegisteredAttesterKeys' key source, or
+// X5CAttesterChain's trust-anchor source (TrustAnchors or Anchors,
+// whichever is set). Nil for a nil trust.
 func attesterTrustSources(trust AttesterTrust) []namedSource {
 	switch t := trust.(type) {
 	case RegisteredAttesterKeys:
@@ -663,8 +664,26 @@ func attesterTrustSources(trust AttesterTrust) []namedSource {
 		if t != nil {
 			return []namedSource{{"attester_trust keys", t.Keys}}
 		}
+	case X5CAttesterChain:
+		return x5cAttesterTrustSources(t)
+	case *X5CAttesterChain:
+		if t != nil {
+			return x5cAttesterTrustSources(*t)
+		}
 	}
 	return nil
+}
+
+// x5cAttesterTrustSources returns c's trust-anchor sources.
+func x5cAttesterTrustSources(c X5CAttesterChain) []namedSource {
+	var sources []namedSource
+	if c.TrustAnchors != nil {
+		sources = append(sources, namedSource{"attester_trust trust_anchors", c.TrustAnchors})
+	}
+	if c.Anchors != nil {
+		sources = append(sources, namedSource{"attester_trust anchors", c.Anchors})
+	}
+	return sources
 }
 
 // checkProductionStateStores checks the stores holding flow state:

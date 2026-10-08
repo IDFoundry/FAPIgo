@@ -265,6 +265,36 @@ km, err := keys.NewKeyManagerFromSigners([]keys.SignerSpec{
   without a purpose or algorithm, a kid naming two different keys, and
   a previous key that doesn't suit the purpose's algorithm.
 
+### An attester trust-anchor source declares its hardening (server, *production only*)
+
+**Affects:** a server under `AssuranceProduction` with
+`Config.AttestationBasedClientAuthentication`, whose
+`Dependencies.AttesterTrust` is an `X5CAttesterChain` with a
+`TrustAnchors` or `Anchors` source of your own.
+
+**Why:** the anchors an attestation chain must end at decide which
+attesters this server trusts. `RegisteredAttesterKeys`' key source
+already had to declare `keys.KeySourceAssurance` under production, but
+`X5CAttesterChain`'s anchor source didn't, so a trust list fetched
+without fapihttp's SSRF and size protections passed unnoticed.
+
+**What to change:**
+
+- `StaticAttesterTrustAnchors` and `StaticAttesterAnchors` declare it
+  already: nothing to change.
+- A source of your own implements `keys.KeySourceAssurance`, declaring
+  `LiveFetchHardened` only when it fetches nothing, or fetches only
+  through a `fapihttp` client with no loopback exception:
+
+  ```go
+  func (l *TrustList) Capabilities() keys.KeySourceCapabilities {
+  	return keys.KeySourceCapabilities{LiveFetchHardened: true}
+  }
+  ```
+
+  Without it, `New` refuses the configuration, naming
+  `attester_trust trust_anchors` or `attester_trust anchors`.
+
 ## v0.50.0
 
 ### `ResolveViaEndpoint` names the resolver it trusts (federation)

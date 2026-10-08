@@ -1,8 +1,10 @@
 package keys
 
 // KeySourceCapabilities is what a ClientKeySource, IssuerKeySource,
-// ClientEncryptionKeySource or AttesterKeySource implementation
-// self-declares about its own safety properties — checked under
+// ClientEncryptionKeySource or AttesterKeySource implementation — or a
+// server.AttesterTrustAnchors/AttesterAnchorSource, which supplies
+// attester trust anchors rather than keys — self-declares about its own
+// safety properties — checked under
 // server.AssuranceProduction, client.AssuranceProduction and
 // resource.AssuranceProduction the same way storage.StoreAssurance is
 // checked for a store, and for the same reason: each of these

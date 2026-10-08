@@ -23,7 +23,7 @@ import (
 // POST, and an OIDF suite plan config's resource.resourceMethod is a
 // free-form per-run choice for the generic-resource role this endpoint
 // also plays — nothing here depends on which method the suite picks.
-func newRouter(srv *server.Server, consent *consentHandler, backchannel *backchannelHandler, advertisedScopes []string, resourceVerifier *fapires.Verifier, userinfoURL *url.URL, mtlsUserinfoURL *fapi.URL, accountsURL *url.URL, identityClaims staticIdentityClaims, clients storage.ClientRepository, userinfoSigning bool, cibaApprovalUIToken string, federationEnabled bool, dynFederationClients *dynamicFederationClients) *http.ServeMux {
+func newRouter(srv *server.Server, consent *consentHandler, backchannel *backchannelHandler, advertisedScopes []string, resourceVerifier *fapires.Verifier, userinfoURL *url.URL, mtlsUserinfoURL *fapi.URL, accountsURL *url.URL, identityClaims staticIdentityClaims, clients storage.ClientRepository, userinfoSigning bool, cibaApprovalUIToken string, federationEnabled bool, dynFederationClients *dynamicFederationClients, federationTrustAnchorAdminToken string) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /.well-known/openid-configuration", metadataHandler(srv, advertisedScopes, userinfoURL, mtlsUserinfoURL))
 	// Off by default (Config.Federation unset) — see federation.go's own
@@ -59,7 +59,7 @@ func newRouter(srv *server.Server, consent *consentHandler, backchannel *backcha
 	// (dynFederationClients non-nil then, see wiring.go) — see
 	// dynamicFederationClients' own doc comment for what this is for.
 	if dynFederationClients != nil {
-		mux.HandleFunc("POST /internal/federation/trust-anchors", federationTrustAnchorAdminHandler(dynFederationClients))
+		mux.HandleFunc("POST /internal/federation/trust-anchors", federationTrustAnchorAdminHandler(dynFederationClients, federationTrustAnchorAdminToken))
 	}
 	return mux
 }

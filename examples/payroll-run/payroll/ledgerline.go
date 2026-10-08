@@ -277,6 +277,9 @@ func (l *ledgerline) runPayroll(w http.ResponseWriter, r *http.Request) {
 	cert := l.currentCertificate()
 	token, err := requestToken(ctx, l.client, harbourIBAN, payrollTotal())
 	if err != nil {
+		// This demo shows err.Error() to the browser, here and below, so
+		// each refusal is visible. A real deployment logs internal errors
+		// and shows a generic message.
 		l.finish(rn, "failed", err.Error(), nil)
 		http.Redirect(w, r, runURL(rn.ID), http.StatusSeeOther)
 		return

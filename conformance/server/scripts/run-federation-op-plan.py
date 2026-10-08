@@ -77,8 +77,9 @@ error, one real fix at a time. This is a gap in the suite's own test
 module, not this AS: revisit once/if the suite ships a fix, or a
 configuration surface for it.
 
-Usage:
-    run-federation-op-plan.py \
+Usage (FEDERATION_TRUST_ANCHOR_ADMIN_TOKEN is the token the AS was
+started with; see docker-compose.yml's conformance-as-federation):
+    FEDERATION_TRUST_ANCHOR_ADMIN_TOKEN=<token> run-federation-op-plan.py \
         --entity-identifier https://conformance-as-federation:8443 \
         --as-admin-url https://127.0.0.1:18456
 """
@@ -167,9 +168,10 @@ class KeepAliveClient:
                 if attempt == 1:
                     raise
 
-    def post_json(self, path, payload=None, expect=(200, 201)):
+    def post_json(self, path, payload=None, expect=(200, 201), extra_headers=None):
         body = None if payload is None else json.dumps(payload).encode("utf-8")
         headers = {} if payload is None else {"Content-Type": "application/json"}
+        headers.update(extra_headers or {})
         for attempt in range(2):
             try:
                 self._ensure()
@@ -228,7 +230,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--entity-identifier", required=True, help="this AS's own Entity Identifier, e.g. https://conformance-as-federation:8443")
     parser.add_argument("--as-admin-url", required=True, help="this AS's own base URL as reachable from where this script runs, e.g. https://127.0.0.1:18456 (the docker-compose-exposed port, not the in-network hostname)")
+    parser.add_argument("--as-admin-token", default=os.environ.get("FEDERATION_TRUST_ANCHOR_ADMIN_TOKEN", ""), help="the AS's -federation-trust-anchor-admin-token value (default: $FEDERATION_TRUST_ANCHOR_ADMIN_TOKEN, the variable docker-compose.yml passes to the AS)")
     args = parser.parse_args()
+    if not args.as_admin_token:
+        parser.error("--as-admin-token (or $FEDERATION_TRUST_ANCHOR_ADMIN_TOKEN) is required: the AS's trust-anchor admin endpoint is token-gated")
 
     admin = urlsplit(args.as_admin_url)
     suite = KeepAliveClient(SUITE_HOST, SUITE_PORT, local_only_ssl_context(SUITE_HOST))
@@ -249,6 +254,7 @@ def main():
         "/internal/federation/trust-anchors",
         {"entity_id": trust_anchor_entity_id, "jwks": public_jwks(trust_anchor_jwks)},
         expect=(204,),
+        extra_headers={"Authorization": f"Bearer {args.as_admin_token}"},
     )
 
     print(f"creating plan against entity_identifier={args.entity_identifier}", flush=True)

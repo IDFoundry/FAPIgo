@@ -239,6 +239,9 @@ func (s *shop) pay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.startSession(w, o, session); err != nil {
+		// This demo shows err.Error() to the browser, here and below, so
+		// the attack lab can show why each attempt was refused. A real
+		// deployment logs internal errors and shows a generic message.
 		o.Status, o.Problem = "failed", err.Error()
 		http.Redirect(w, r, orderURL(o.ID), http.StatusSeeOther)
 		return

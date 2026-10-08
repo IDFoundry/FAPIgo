@@ -14,6 +14,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/dpop"
+	"github.com/idfoundry/fapigo/internal/grantrevocation"
 	"github.com/idfoundry/fapigo/internal/mtls"
 	"github.com/idfoundry/fapigo/internal/pkce"
 	"github.com/idfoundry/fapigo/internal/token"
@@ -223,7 +224,7 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		// code was issued to triggers the revocation: another client
 		// holding a leaked code must not be able to end its tokens.
 		invalidErr := newError(ErrorInvalidGrant, 400, "code is invalid, expired, or already used", err)
-		if s.revokeTokensForReusedCode(ctx, err, client.ID()) {
+		if s.revokeTokensForReusedCode(ctx, err, client.ID(), codeHash) {
 			s.audit(ctx, AuditEventExchangeAuthorizationCode, client.ID(), AuditOutcomeFailure, "code reused by another client")
 			return TokenResult{}, invalidErr
 		}
@@ -233,6 +234,12 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	grant, err := decodeGrantRecord(redeemed.Grant)
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to decode authorization code grant", err))
+	}
+	if _, ok := s.grantRevocationReader(); ok {
+		// Named after the code, so a reuse of it can revoke whatever this
+		// exchange issues — refresh tokens included, which carry the
+		// grant forward — without the store remembering the name.
+		grant.CodeGrantID = grantrevocation.CodeGrantID(codeHash)
 	}
 
 	now := s.deps.Clock.Now()
@@ -336,7 +343,13 @@ func codeExchangeParameters(params map[string]string) (code, redirectURI, codeVe
 // or the store didn't say which client that was (an empty ClientID),
 // and reports true when it declined because another client presented
 // the code.
-func (s *Server) revokeTokensForReusedCode(ctx context.Context, err error, presentedBy fapi.ClientID) (crossClient bool) {
+//
+// Besides the first access token and refresh token the store recorded,
+// it revokes the code's grant (grantrevocation.CodeGrantID of codeHash),
+// which every access token issued from the code or its refresh token
+// carries, when grants can be revoked: an access token the client
+// already minted from the refresh token is refused too.
+func (s *Server) revokeTokensForReusedCode(ctx context.Context, err error, presentedBy fapi.ClientID, codeHash [32]byte) (crossClient bool) {
 	var alreadyRedeemed *storage.AuthorizationCodeAlreadyRedeemedError
 	if !errors.As(err, &alreadyRedeemed) {
 		return false
@@ -349,6 +362,10 @@ func (s *Server) revokeTokensForReusedCode(ctx context.Context, err error, prese
 	}
 	if alreadyRedeemed.IssuedRefreshTokenHash != nil {
 		_ = s.deps.Grants.RevokeRefreshToken(ctx, *alreadyRedeemed.IssuedRefreshTokenHash)
+	}
+	if _, ok := s.grantRevocationReader(); ok {
+		until := s.deps.Clock.Now().Add(s.grantRevocationHorizon())
+		_ = s.deps.Revocation.Revoke(ctx, grantrevocation.CodeKey(grantrevocation.CodeGrantID(codeHash)), until)
 	}
 	return false
 }

@@ -26,6 +26,14 @@ type RevocationSink interface {
 	// still existing. A backend without TTL support can ignore it —
 	// storage/memstore.RevocationStore, this module's own reference
 	// implementation, does exactly that; see its doc comment for why.
+	//
+	// The same store also records revoked grants, under keys of their
+	// own: "grant:" and the grant ID (RevokeGrant), and "code-grant:"
+	// and an ID the server derives from an authorization code, when
+	// that code is reused. For those, expiresAt is when nothing issued
+	// from the grant can still be used. Keys must be compared exactly,
+	// and a key kept revoked until at least its expiresAt: run
+	// storage.TestRevocationStoreContract against an implementation.
 	Revoke(ctx context.Context, key string, expiresAt time.Time) error
 }
 

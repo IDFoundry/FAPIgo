@@ -19,7 +19,11 @@ type RevocationChecker interface {
 	// server recorded: the token's own key (ResolvedAccessToken.Key —
 	// a JWT's jti claim for JWTAccessTokens, an opaque token's own hash
 	// for OpaqueAccessTokens), and, for a token carrying a grant_id
-	// claim, the key server.Server.RevokeGrant records that grant under.
+	// claim, the key server.Server.RevokeGrant records that grant under,
+	// and for one carrying a code_grant_id claim, the key the server
+	// records when the authorization code the token's grant came from
+	// is reused. Run storage.TestRevocationStoreContract against an
+	// implementation.
 	IsRevoked(ctx context.Context, key string) (bool, error)
 }
 

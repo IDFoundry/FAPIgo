@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -522,9 +523,11 @@ func TestExchangeAuthorizationCodeReuseRevokesAccessToken(t *testing.T) {
 		t.Fatalf("second ExchangeAuthorizationCode (replayed code) = nil error, want error")
 	}
 
+	// The first access token, and the code's grant (whatever else was
+	// issued from it).
 	revoked := h.revocation.all()
-	if len(revoked) != 1 || revoked[0] != validatedAT.JTI {
-		t.Fatalf("Revoke calls = %v, want exactly [%q]", revoked, validatedAT.JTI)
+	if len(revoked) != 2 || revoked[0] != validatedAT.JTI || !strings.HasPrefix(revoked[1], "code-grant:") {
+		t.Fatalf("Revoke calls = %v, want [%q code-grant:...]", revoked, validatedAT.JTI)
 	}
 }
 
@@ -767,8 +770,8 @@ func TestExchangeAuthorizationCodeReuseRevokesOpaqueAccessToken(t *testing.T) {
 
 	wantKey := hex.EncodeToString(tokenHash[:])
 	revoked := h.revocation.all()
-	if len(revoked) != 1 || revoked[0] != wantKey {
-		t.Fatalf("Revoke calls = %v, want exactly [%q]", revoked, wantKey)
+	if len(revoked) != 2 || revoked[0] != wantKey || !strings.HasPrefix(revoked[1], "code-grant:") {
+		t.Fatalf("Revoke calls = %v, want [%q code-grant:...]", revoked, wantKey)
 	}
 
 	// ... and confirm the exact same verifier now rejects it (a fresh

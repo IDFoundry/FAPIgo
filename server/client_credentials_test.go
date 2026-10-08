@@ -468,6 +468,11 @@ func TestRequestClientCredentialsTokenSuccessDPoP(t *testing.T) {
 	if validatedAT.ClientID != testClientID.String() {
 		t.Fatalf("access token ClientID = %q, want %q", validatedAT.ClientID, testClientID)
 	}
+	// RFC 9068 §5: marked as the client's own token, so a resource
+	// server can tell it from a user token with the same subject.
+	if got := string(validatedAT.Parameters["grant_type"]); got != `"client_credentials"` {
+		t.Fatalf("access token grant_type = %s, want \"client_credentials\"", got)
+	}
 }
 
 func TestRequestClientCredentialsTokenSuccessMTLS(t *testing.T) {

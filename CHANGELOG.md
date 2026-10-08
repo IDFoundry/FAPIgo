@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.51.0](https://github.com/IDFoundry/FAPIgo/compare/v0.50.1...v0.51.0) (2026-10-08)
+
+
+### Features
+
+* **fapihttp:** TransportConfig.VerifyConnection, for checks after the TLS handshake ([3377a3f](https://github.com/IDFoundry/FAPIgo/commit/3377a3fb2418323cfbd290ceb01eb01009db72ac))
+
+
+### Bug Fixes
+
+* **jwe:** build on 32-bit platforms ([#602](https://github.com/IDFoundry/FAPIgo/issues/602)) ([40885c7](https://github.com/IDFoundry/FAPIgo/commit/40885c78070fd20814170763b05add0aec3b4437))
+
 ## [0.50.1](https://github.com/IDFoundry/FAPIgo/compare/v0.50.0...v0.50.1) (2026-10-07)
 
 

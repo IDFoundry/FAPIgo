@@ -44,7 +44,9 @@ func concatKDF(z []byte, keyDataLenBits int, otherInfo []byte) []byte {
 // is the length, in bits, of the key material being derived — the same
 // value passed to concatKDF.
 func otherInfo(algorithmID string, apu, apv []byte, keyDataLenBits int) ([]byte, error) {
-	if keyDataLenBits < 0 || keyDataLenBits > math.MaxUint32 {
+	// In uint64, so the bound compiles where int is 32 bits (and always
+	// holds there).
+	if keyDataLenBits < 0 || uint64(keyDataLenBits) > math.MaxUint32 {
 		return nil, fmt.Errorf("jwe: key data length %d bits out of range", keyDataLenBits)
 	}
 	algID, err := lengthPrefixed([]byte(algorithmID))
@@ -77,7 +79,7 @@ func otherInfo(algorithmID string, apu, apv []byte, keyDataLenBits int) ([]byte,
 // length, but the bound is checked explicitly rather than assumed.
 func lengthPrefixed(b []byte) ([]byte, error) {
 	n := len(b)
-	if n < 0 || n > math.MaxUint32 {
+	if n < 0 || uint64(n) > math.MaxUint32 {
 		return nil, fmt.Errorf("jwe: value of length %d exceeds maximum encodable length", n)
 	}
 	out := make([]byte, 4+n)

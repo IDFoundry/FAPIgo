@@ -117,9 +117,14 @@ jobs:
       # this repo's tests, so it can't see coverage at all; that's the
       # whole reason this step exists.
       - name: SonarQube Scan
-        uses: SonarSource/sonarqube-scan-action@ba9859eae8dd6bd29e412f25ddbbef3d032000f4 # v8.2.2
+        uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        # GitHub gives a pull request from a fork no secrets, so the
+        # scan can only fail there ("Not authorized") and would fail
+        # this required job on every outside contribution. Skip it for
+        # those; pushes, internal and Dependabot pull requests still scan.
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
 
   # Every other job runs go.mod's own minimum Go version (exactly, via
   # go-version-file), which is what keeps that minimum honest — but it
@@ -152,6 +157,29 @@ jobs:
 
       - name: go test (race)
         run: go test -race ./...
+
+  # 32-bit platforms, where int is 32 bits: a constant or a conversion
+  # that assumes 64-bit int (math.MaxUint32 compared with an int, say)
+  # doesn't even compile there, and every 64-bit job would miss it. Go
+  # builds for 32-bit Android (armeabi-v7a, x86) depend on this module.
+  # 386 runs natively on the runner, so its tests run; arm is vetted
+  # (which builds every package, tests included).
+  test-32-bit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache-dependency-path: go.mod
+
+      - name: go vet (GOARCH=arm)
+        run: GOARCH=arm go vet ./...
+
+      - name: go test (GOARCH=386)
+        run: GOARCH=386 go test ./...
 
   lint:
     runs-on: ubuntu-latest

@@ -3,6 +3,7 @@ package federation
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -80,15 +81,51 @@ func wellKnownURL(entityID string) (*url.URL, error) {
 	if strings.HasSuffix(u.Hostname(), ".") {
 		return nil, fmt.Errorf("federation: entity identifier %q must not end its host with a dot", entityID)
 	}
+	// A host outside ASCII letters, digits, hyphens and dots (or an IP
+	// literal) can name the same host as an ASCII one once IDNA maps it
+	// — U+3002 and U+FF0E become "." — while comparing differently as a
+	// string, so it too could slip past an "excluded" naming constraint.
+	// The A-label (punycode) form is the one an Entity Identifier uses.
+	if !asciiHost(u) {
+		return nil, fmt.Errorf("federation: entity identifier %q must have an ASCII host (letters, digits, hyphens and dots, the A-label form of an internationalized name), or an IP address", entityID)
+	}
 	out := *u
 	out.Path = strings.TrimSuffix(u.Path, "/") + WellKnownPath
 	return &out, nil
 }
 
+// asciiHost reports whether u's host is an IP literal (without an IPv6
+// zone) or consists only of ASCII letters, digits, hyphens and dots.
+// url.Parse already refuses a percent-escape anywhere in a host but an
+// IPv6 zone, which this refuses too.
+func asciiHost(u *url.URL) bool {
+	host := u.Hostname()
+	if net.ParseIP(host) != nil {
+		return true
+	}
+	for i := 0; i < len(host); i++ {
+		if !hostNameByte(host[i]) {
+			return false
+		}
+	}
+	return host != ""
+}
+
+// hostNameByte reports whether c is an ASCII letter, digit, hyphen or dot.
+func hostNameByte(c byte) bool {
+	switch {
+	case 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z', '0' <= c && c <= '9':
+		return true
+	default:
+		return c == '-' || c == '.'
+	}
+}
+
 // ValidEntityID reports whether id is a well-formed OpenID Federation
 // 1.0 §1.2 Entity Identifier — an https URL with a host, optionally a
 // port and path, and no query, fragment, userinfo or trailing dot on the
-// host. NewSelfIssuer and Resolver.Resolve both enforce this same
+// host, whose host is ASCII: an IP address, or letters, digits, hyphens
+// and dots (an internationalized name in its A-label form). NewSelfIssuer and Resolver.Resolve both enforce this same
 // rule on every entity ID they're given; exported so a caller
 // validating its own configured entity ID eagerly (e.g. client.Config's
 // or server.Config's own construction-time validation) can reuse the

@@ -1,6 +1,7 @@
 package client
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 
@@ -454,7 +455,37 @@ func validateDependencies(cfg Config, deps Dependencies) error {
 	if deps.Random == nil {
 		return fmt.Errorf("client: dependencies: random is required")
 	}
-	return validateConfigDrivenDependencies(cfg, deps)
+	if err := validateConfigDrivenDependencies(cfg, deps); err != nil {
+		return err
+	}
+	if cfg.Assurance == AssuranceProduction {
+		return validateProductionDependencies(deps)
+	}
+	return nil
+}
+
+// validateProductionDependencies applies AssuranceProduction's checks to
+// deps: the sessions store's capabilities, crypto/rand as the random
+// source, the custody of the keys deps.Keys and deps.Decryption hold, and
+// the issuer key source's hardening. It reports every one that falls
+// short, joined (errors.Join), rather than only the first, so a
+// deployment moving to production sees the whole list in one restart.
+func validateProductionDependencies(deps Dependencies) error {
+	var errs []error
+	if deps.Sessions != nil {
+		errs = append(errs, checkStoreAssurance("sessions", deps.Sessions))
+	}
+	errs = append(errs, checkRandom(deps.Random))
+	if deps.Keys != nil {
+		errs = append(errs, checkKeyCustody("keys", deps.Keys))
+	}
+	if deps.Decryption != nil {
+		errs = append(errs, checkKeyCustody("decryption", deps.Decryption))
+	}
+	if deps.IssuerKeys != nil {
+		errs = append(errs, checkKeySourceAssurance("issuer_keys", deps.IssuerKeys))
+	}
+	return errors.Join(errs...)
 }
 
 // validateSessionsDependency checks deps.Sessions. It is only ever
@@ -467,32 +498,14 @@ func validateSessionsDependency(cfg Config, deps Dependencies) error {
 	if !cfg.Endpoints.Authorization.IsZero() && deps.Sessions == nil {
 		return fmt.Errorf("client: dependencies: sessions is required when endpoints.authorization is set")
 	}
-	if cfg.Assurance == AssuranceProduction && deps.Sessions != nil {
-		return checkStoreAssurance("sessions", deps.Sessions)
-	}
 	return nil
 }
 
-// validateKeysDependency checks deps.Keys and, under production
-// assurance, deps.Random and the custody of the keys deps.Keys and
-// deps.Decryption hold.
+// validateKeysDependency checks deps.Keys is set when cfg has this
+// client sign anything.
 func validateKeysDependency(cfg Config, deps Dependencies) error {
 	if deps.Keys == nil && keysNeeded(cfg) {
 		return fmt.Errorf("client: dependencies: keys is required (it may be left nil only when this client signs nothing: certificate-based client authentication, mTLS-bound tokens, no request objects, no CIBA and no federation)")
-	}
-	if cfg.Assurance != AssuranceProduction {
-		return nil
-	}
-	if err := checkRandom(deps.Random); err != nil {
-		return err
-	}
-	if deps.Keys != nil {
-		if err := checkKeyCustody("keys", deps.Keys); err != nil {
-			return err
-		}
-	}
-	if deps.Decryption != nil {
-		return checkKeyCustody("decryption", deps.Decryption)
 	}
 	return nil
 }
@@ -513,9 +526,6 @@ func keysNeeded(cfg Config) bool {
 func validateIssuerKeysDependency(cfg Config, deps Dependencies) error {
 	if deps.IssuerKeys == nil && issuerKeysNeeded(cfg) {
 		return fmt.Errorf("client: dependencies: issuer keys is required (it may be left nil only when oauth_only is set and neither a JARM response nor a signed UserInfo response is verified)")
-	}
-	if cfg.Assurance == AssuranceProduction && deps.IssuerKeys != nil {
-		return checkKeySourceAssurance("issuer_keys", deps.IssuerKeys)
 	}
 	return nil
 }

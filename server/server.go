@@ -1,12 +1,12 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/extension"
 	"github.com/idfoundry/fapigo/federation"
-	"github.com/idfoundry/fapigo/keys"
 )
 
 // Server is a FAPI 2.0 authorization-server engine. It is entirely
@@ -593,77 +593,75 @@ func validateAttesterTrust(trust AttesterTrust) error {
 // validateDependencies purely to keep that function's own cognitive
 // complexity manageable. Only ever called once cfg.Assurance is
 // already known to be AssuranceProduction.
+//
+// It reports every dependency that falls short, joined (errors.Join),
+// rather than only the first, so a deployment moving to production
+// sees the whole list in one restart.
 func validateProductionAssurance(cfg Config, deps Dependencies, cibaEnabled bool) error {
+	var errs []error
 	if deps.Audit == nil {
-		return fmt.Errorf("server: dependencies: audit is required under AssuranceProduction")
+		errs = append(errs, fmt.Errorf("server: dependencies: audit is required under AssuranceProduction"))
 	}
-	if err := checkRandom(deps.Random); err != nil {
-		return err
-	}
+	errs = append(errs, checkRandom(deps.Random))
 	scaled := cfg.Deployment == DeploymentHorizontallyScaled
-	if err := checkProductionKeyCustody(deps, scaled); err != nil {
-		return err
-	}
-	if err := checkProductionClientSources(deps, scaled, cfg.AttestationBasedClientAuthentication); err != nil {
-		return err
-	}
-	if err := checkProductionStateStores(deps, scaled, cibaEnabled); err != nil {
-		return err
-	}
-	return checkProductionTokenStores(deps, scaled)
+	issuer, err := productionAccessTokenAssurance(deps.AccessTokens)
+	errs = append(errs, err)
+	errs = append(errs, checkProductionKeyCustody(deps, issuer, scaled)...)
+	errs = append(errs, checkProductionClientSources(deps, scaled, cfg.AttestationBasedClientAuthentication)...)
+	errs = append(errs, checkProductionStateStores(deps, scaled, cibaEnabled)...)
+	errs = append(errs, checkProductionTokenStores(deps, issuer, scaled)...)
+	return errors.Join(errs...)
 }
 
 // checkProductionKeyCustody checks the custody of the server's own
 // signing keys, and of the access token issuer's when it signs tokens.
-func checkProductionKeyCustody(deps Dependencies, scaled bool) error {
-	if err := checkKeyCustody("keys", deps.Keys, scaled); err != nil {
-		return err
-	}
-	issuer, err := productionAccessTokenAssurance(deps.AccessTokens)
-	if err != nil {
-		return err
-	}
+func checkProductionKeyCustody(deps Dependencies, issuer AccessTokenAssurance, scaled bool) []error {
+	errs := []error{checkKeyCustody("keys", deps.Keys, scaled)}
 	if issuer.SigningKeys != nil {
-		return checkKeyCustody("access_tokens keys", issuer.SigningKeys, scaled)
+		errs = append(errs, checkKeyCustody("access_tokens keys", issuer.SigningKeys, scaled))
 	}
-	return nil
+	return errs
 }
 
 // checkProductionClientSources checks the client registry, the sources
 // of clients' verification and encryption keys, and, when attestation
 // is enabled, RegisteredAttesterKeys' attester key source.
-func checkProductionClientSources(deps Dependencies, scaled, attestation bool) error {
-	if err := checkStoreAssurance("clients", deps.Clients, false, scaled); err != nil {
-		return err
-	}
-	if err := checkKeySourceAssurance("client_keys", deps.ClientKeys); err != nil {
-		return err
+func checkProductionClientSources(deps Dependencies, scaled, attestation bool) []error {
+	errs := []error{
+		checkStoreAssurance("clients", deps.Clients, false, scaled),
+		checkKeySourceAssurance("client_keys", deps.ClientKeys),
 	}
 	if deps.ClientEncryptionKeys != nil {
-		if err := checkKeySourceAssurance("client_encryption_keys", deps.ClientEncryptionKeys); err != nil {
-			return err
-		}
+		errs = append(errs, checkKeySourceAssurance("client_encryption_keys", deps.ClientEncryptionKeys))
 	}
-	if attesterKeys := registeredAttesterKeySource(deps.AttesterTrust); attestation && attesterKeys != nil {
-		if err := checkKeySourceAssurance("attester_trust keys", attesterKeys); err != nil {
-			return err
+	if attestation {
+		for _, source := range attesterTrustSources(deps.AttesterTrust) {
+			errs = append(errs, checkKeySourceAssurance(source.name, source.source))
 		}
 	}
 	if deps.FederationHTTP != nil && deps.FederationHTTP.AllowsLoopback() {
-		return fmt.Errorf("server: dependencies: federation_http must not grant a loopback exception under AssuranceProduction")
+		errs = append(errs, fmt.Errorf("server: dependencies: federation_http must not grant a loopback exception under AssuranceProduction"))
 	}
-	return nil
+	return errs
 }
 
-// registeredAttesterKeySource returns RegisteredAttesterKeys' key
-// source, by value or pointer, or nil for any other AttesterTrust.
-func registeredAttesterKeySource(trust AttesterTrust) keys.AttesterKeySource {
+// namedSource is a dependency AssuranceProduction checks, with the name
+// its error messages use.
+type namedSource struct {
+	name   string
+	source any
+}
+
+// attesterTrustSources returns the sources trust, by value or pointer,
+// draws its trust from: RegisteredAttesterKeys' key source. Nil for any
+// other trust.
+func attesterTrustSources(trust AttesterTrust) []namedSource {
 	switch t := trust.(type) {
 	case RegisteredAttesterKeys:
-		return t.Keys
+		return []namedSource{{"attester_trust keys", t.Keys}}
 	case *RegisteredAttesterKeys:
 		if t != nil {
-			return t.Keys
+			return []namedSource{{"attester_trust keys", t.Keys}}
 		}
 	}
 	return nil
@@ -672,47 +670,35 @@ func registeredAttesterKeySource(trust AttesterTrust) keys.AttesterKeySource {
 // checkProductionStateStores checks the stores holding flow state:
 // transactions, grants, replay records, and the backchannel and nonce
 // stores when they're in use.
-func checkProductionStateStores(deps Dependencies, scaled, cibaEnabled bool) error {
-	if err := checkStoreAssurance("transactions", deps.Transactions, true, scaled); err != nil {
-		return err
-	}
-	if err := checkStoreAssurance("grants", deps.Grants, true, scaled); err != nil {
-		return err
-	}
-	if err := checkStoreAssurance("replay", deps.Replay, true, scaled); err != nil {
-		return err
+func checkProductionStateStores(deps Dependencies, scaled, cibaEnabled bool) []error {
+	errs := []error{
+		checkStoreAssurance("transactions", deps.Transactions, true, scaled),
+		checkStoreAssurance("grants", deps.Grants, true, scaled),
+		checkStoreAssurance("replay", deps.Replay, true, scaled),
 	}
 	if cibaEnabled {
-		if err := checkStoreAssurance("backchannel", deps.Backchannel, true, scaled); err != nil {
-			return err
-		}
-		if err := checkNotifierAssurance(deps.BackchannelNotifier); err != nil {
-			return err
-		}
+		errs = append(errs,
+			checkStoreAssurance("backchannel", deps.Backchannel, true, scaled),
+			checkNotifierAssurance(deps.BackchannelNotifier))
 	}
 	if deps.Nonces != nil {
-		return checkStoreAssurance("nonces", deps.Nonces, true, scaled)
+		errs = append(errs, checkStoreAssurance("nonces", deps.Nonces, true, scaled))
 	}
-	return nil
+	return errs
 }
 
 // checkProductionTokenStores checks the access token issuer's store,
 // when it keeps tokens (opaque tokens), and the revocation store, unless
 // revocation was declined.
-func checkProductionTokenStores(deps Dependencies, scaled bool) error {
-	issuer, err := productionAccessTokenAssurance(deps.AccessTokens)
-	if err != nil {
-		return err
-	}
+func checkProductionTokenStores(deps Dependencies, issuer AccessTokenAssurance, scaled bool) []error {
+	var errs []error
 	if issuer.Store != nil {
-		if err := checkStoreAssurance("access_tokens", issuer.Store, false, scaled); err != nil {
-			return err
-		}
+		errs = append(errs, checkStoreAssurance("access_tokens", issuer.Store, false, scaled))
 	}
 	if !declinedRevocation(deps.Revocation) {
-		return checkStoreAssurance("revocation", deps.Revocation, false, scaled)
+		errs = append(errs, checkStoreAssurance("revocation", deps.Revocation, false, scaled))
 	}
-	return nil
+	return errs
 }
 
 // declinedRevocation reports whether revocation is NoRevocation, by

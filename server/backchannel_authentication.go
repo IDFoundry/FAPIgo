@@ -407,6 +407,9 @@ func (s *Server) validateBackchannelAuthenticationParameters(verified verifiedBa
 			return verifiedBackchannelRequest{}, newError(ErrorInvalidBindingMessage, 400, "binding_message is not acceptable", nil)
 		}
 	}
+	if err := validateClaimsParameter(params); err != nil {
+		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, err.Error(), nil)
+	}
 
 	return verified, nil
 }

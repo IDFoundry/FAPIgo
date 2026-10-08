@@ -698,6 +698,9 @@ func (s *Server) validateAuthorizationParameters(params map[string]json.RawMessa
 	if _, err := requestedPrompt(params); err != nil {
 		return nil, newError(ErrorInvalidRequest, 400, err.Error(), nil)
 	}
+	if err := validateClaimsParameter(params); err != nil {
+		return nil, newError(ErrorInvalidRequest, 400, err.Error(), nil)
+	}
 	if _, err := essentialACRValues(params); err != nil {
 		return nil, newError(ErrorInvalidRequest, 400, err.Error(), nil)
 	}

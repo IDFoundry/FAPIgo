@@ -170,7 +170,7 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		return s.backchannelBeginFail(ctx, client.ID(), validateErr), nil
 	}
 
-	dpopJKT, dpopErr := s.reconcileBackchannelDPoPBinding(ctx, dpopProof)
+	dpopJKT, dpopErr := s.reconcileBackchannelDPoPBinding(ctx, dpopProof, validated.params)
 	if dpopErr != nil {
 		return s.backchannelBeginFail(ctx, client.ID(), dpopErr), nil
 	}
@@ -469,10 +469,22 @@ func isAcceptableBindingMessage(msg string) bool {
 // counterpart: a DPoP proof at the backchannel authentication endpoint
 // is optional, exactly like PAR — see Open Question 1 in this feature's
 // design plan for why this mirrors PAR rather than the token endpoint's
-// always-required proof.
-func (s *Server) reconcileBackchannelDPoPBinding(ctx context.Context, proof string) (string, *Error) {
+// always-required proof. It returns the key thumbprint the request is
+// bound to, which the token exchange then requires its DPoP proof's key
+// to match: the proof's key, or an explicit dpop_jkt parameter (RFC 9449
+// §10, applied here as at PAR) when there's no proof. A dpop_jkt that
+// isn't a string, or doesn't match a proof sent with it, is refused.
+func (s *Server) reconcileBackchannelDPoPBinding(ctx context.Context, proof string, params map[string]json.RawMessage) (string, *Error) {
+	var declared string
+	if _, ok := params["dpop_jkt"]; ok {
+		v, err := jsonString(params, "dpop_jkt")
+		if err != nil {
+			return "", newError(ErrorInvalidRequest, 400, "dpop_jkt must be a string", err)
+		}
+		declared = v
+	}
 	if proof == "" {
-		return "", nil
+		return declared, nil
 	}
 	endpoint := s.cfg.Endpoints.BackchannelAuthentication.URL()
 	verified, err := dpop.Verify(ctx, dpop.VerifyRequest{
@@ -492,7 +504,11 @@ func (s *Server) reconcileBackchannelDPoPBinding(ctx context.Context, proof stri
 			return "", challenge
 		}
 	}
-	return verified.Thumbprint.String(), nil
+	thumbprint := verified.Thumbprint.String()
+	if declared != "" && declared != thumbprint {
+		return "", newError(ErrorInvalidRequest, 400, "dpop_jkt does not match the DPoP proof presented to the backchannel authentication endpoint", nil)
+	}
+	return thumbprint, nil
 }
 
 // backchannelAuthenticationLifetime returns how long a newly created

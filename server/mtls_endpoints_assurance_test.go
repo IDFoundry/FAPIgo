@@ -27,6 +27,7 @@ func TestNewRejectsLoopbackHTTPMTLSEndpointsUnderProduction(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			cfg := validConfig(t)
 			cfg.Assurance = server.AssuranceProduction
+			cfg.Deployment = server.DeploymentSingleInstance
 			cfg.MTLSEndpoints = productionMTLSEndpoints(t)
 			mutate(&cfg.MTLSEndpoints)
 			deps := validDependencies()
@@ -41,6 +42,7 @@ func TestNewRejectsLoopbackHTTPMTLSEndpointsUnderProduction(t *testing.T) {
 	t.Run("https aliases accepted", func(t *testing.T) {
 		cfg := validConfig(t)
 		cfg.Assurance = server.AssuranceProduction
+		cfg.Deployment = server.DeploymentSingleInstance
 		cfg.MTLSEndpoints = productionMTLSEndpoints(t)
 		deps := validDependencies()
 		deps.Audit = &fakeAuditSink{}

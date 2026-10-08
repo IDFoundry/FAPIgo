@@ -325,9 +325,28 @@ func validateAttestationLimits(cfg Config) error {
 	return nil
 }
 
+// validateDeployment refuses a Deployment that isn't one of the two
+// defined, and the zero value under AssuranceProduction, where it decides
+// which stores must be consistent across instances.
+func validateDeployment(cfg Config) error {
+	switch cfg.Deployment {
+	case DeploymentSingleInstance, DeploymentHorizontallyScaled:
+		return nil
+	case 0:
+		if cfg.Assurance != AssuranceProduction {
+			return nil
+		}
+		return fmt.Errorf("server: config: deployment is required under AssuranceProduction (DeploymentSingleInstance or DeploymentHorizontallyScaled)")
+	}
+	return fmt.Errorf("server: config: deployment is invalid")
+}
+
 func validateAssurance(cfg Config, cibaEnabled bool) error {
 	if cfg.Assurance != AssuranceDevelopment && cfg.Assurance != AssuranceProduction {
 		return fmt.Errorf("server: config: assurance level is invalid")
+	}
+	if err := validateDeployment(cfg); err != nil {
+		return err
 	}
 	if cfg.Assurance != AssuranceProduction {
 		return nil
@@ -569,7 +588,7 @@ func validateProductionAssurance(cfg Config, deps Dependencies, cibaEnabled bool
 	if err := checkRandom(deps.Random); err != nil {
 		return err
 	}
-	scaled := cfg.HorizontallyScaled
+	scaled := cfg.Deployment == DeploymentHorizontallyScaled
 	if err := checkProductionKeyCustody(deps, scaled); err != nil {
 		return err
 	}

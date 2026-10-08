@@ -79,6 +79,7 @@ cfg := server.Config{
 	Algorithms: server.RecommendedAlgorithms(),
 	Limits:     server.RecommendedLimits(),
 	Assurance:  server.AssuranceDevelopment, // AssuranceProduction once your real deps are ready
+	// Deployment: server.DeploymentSingleInstance, // required under AssuranceProduction: or DeploymentHorizontallyScaled for a fleet
 }
 ```
 
@@ -461,6 +462,7 @@ cfg := resource.Config{
 		MaxClockSkew:    5 * time.Second, // tolerance either direction
 	},
 	Assurance: resource.AssuranceDevelopment, // AssuranceProduction once your real deps are ready
+	// Deployment: resource.DeploymentSingleInstance, // required under AssuranceProduction: or DeploymentHorizontallyScaled for a fleet
 }
 ```
 
@@ -474,8 +476,11 @@ does `keys.JWKSIssuerKeySource` on a `fapihttp` client without a loopback
 exception), the opaque-token, replay, nonce and
 revocation stores to declare `storage.StoreAssurance` (unless revocation
 is `resource.NoRevocation{}`), and `crypto/rand.Reader` when DPoP
-nonces are on. Set `HorizontallyScaled` when more than one instance
-shares the stores.
+nonces are on. It also requires `Deployment`:
+`resource.DeploymentSingleInstance`, or
+`resource.DeploymentHorizontallyScaled` when more than one instance
+shares the stores, which then must also declare
+`CrossInstanceConsistent`.
 
 ### Wire `Dependencies`
 
@@ -493,8 +498,7 @@ verifier, err := serverresource.NewVerifier(cfg, deps, serverresource.Options{})
 ```
 
 It checks the verifier at the server's own `Assurance` and
-`HorizontallyScaled`, so a production server gets a production
-verifier.
+`Deployment`, so a production server gets a production verifier.
 
 A resource server deployed on its own wires `Dependencies` itself:
 

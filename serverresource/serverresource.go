@@ -74,8 +74,8 @@ type Options struct {
 //     server.NoRevocation becomes resource.NoRevocation.
 //   - deps.Replay, deps.Clock, and cfg.Limits.MaxDPoPProofAge and
 //     MaxClockSkew, as they are.
-//   - cfg.Assurance and cfg.HorizontallyScaled, as the verifier's own
-//     resource.Config.Assurance and HorizontallyScaled: a production
+//   - cfg.Assurance and cfg.Deployment, as the verifier's own
+//     resource.Config.Assurance and Deployment: a production
 //     server gets a production verifier, which also checks
 //     Options.Nonces.
 //
@@ -95,13 +95,17 @@ func NewVerifier(cfg server.Config, deps server.Dependencies, opts Options) (*re
 	if err != nil {
 		return nil, err
 	}
+	deployment, err := resourceDeployment(cfg.Deployment)
+	if err != nil {
+		return nil, err
+	}
 	rcfg := resource.Config{
 		Limits: resource.Limits{
 			MaxDPoPProofAge: cfg.Limits.MaxDPoPProofAge,
 			MaxClockSkew:    cfg.Limits.MaxClockSkew,
 		},
-		Assurance:          assurance,
-		HorizontallyScaled: cfg.HorizontallyScaled,
+		Assurance:  assurance,
+		Deployment: deployment,
 	}
 	rdeps := resource.Dependencies{
 		AccessTokens: accessTokens,
@@ -201,4 +205,19 @@ func sameValue(a, b any) (same bool) {
 		}
 	}()
 	return a == b
+}
+
+// resourceDeployment maps the server's Deployment to the verifier's.
+// The zero value maps to zero, which resource.NewVerifier refuses under
+// AssuranceProduction as server.New does.
+func resourceDeployment(d server.Deployment) (resource.Deployment, error) {
+	switch d {
+	case 0:
+		return 0, nil
+	case server.DeploymentSingleInstance:
+		return resource.DeploymentSingleInstance, nil
+	case server.DeploymentHorizontallyScaled:
+		return resource.DeploymentHorizontallyScaled, nil
+	}
+	return 0, errors.New("serverresource: the server's deployment is invalid")
 }

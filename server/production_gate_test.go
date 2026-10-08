@@ -37,6 +37,7 @@ func productionNew(t *testing.T, mutate func(*server.Dependencies)) error {
 	t.Helper()
 	cfg := validConfig(t)
 	cfg.Assurance = server.AssuranceProduction
+	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
 	mutate(&deps)
@@ -127,6 +128,7 @@ func TestProductionChecksAttesterKeySource(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			cfg := validAttestationConfig(t)
 			cfg.Assurance = server.AssuranceProduction
+			cfg.Deployment = server.DeploymentSingleInstance
 			deps := validDependencies()
 			deps.Audit = &fakeAuditSink{}
 			deps.AttesterTrust = tc.trust

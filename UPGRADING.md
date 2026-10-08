@@ -121,6 +121,29 @@ Client credentials tokens issued before the upgrade carry no
 `grant_type`, so they read as `SubjectEndUser` until they expire, at
 most `Limits.AccessTokenLifetime` after the upgrade.
 
+### `HorizontallyScaled` becomes a required `Deployment` (server, resource, *production only*)
+
+**Affects:** a server or resource server that set
+`server.Config.HorizontallyScaled` or `resource.Config.HorizontallyScaled`,
+and any configuration under `AssuranceProduction`.
+
+**Why:** a forgotten `HorizontallyScaled: true` on a fleet silently
+dropped the requirement that stores, and key custody, be consistent
+across instances: the fleet was checked as one instance, and nothing
+said so. Production now has to say which it is.
+
+**What to change:**
+
+- Replace the field with `Deployment`: `HorizontallyScaled: true`
+  becomes `Deployment: server.DeploymentHorizontallyScaled` (or
+  `resource.DeploymentHorizontallyScaled`), and `false`, or leaving it
+  out, becomes `DeploymentSingleInstance`.
+- *Production only:* `server.New` and `resource.NewVerifier` refuse a
+  zero `Deployment` under `AssuranceProduction`, naming both values. Under
+  `AssuranceDevelopment` it may stay unset.
+- `serverresource.NewVerifier` takes the server's `Deployment`, as it
+  took `HorizontallyScaled`.
+
 ## v0.50.0
 
 ### `ResolveViaEndpoint` names the resolver it trusts (federation)

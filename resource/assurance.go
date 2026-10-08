@@ -44,13 +44,34 @@ const (
 	//     crypto/rand.Reader itself: every DPoP nonce this verifier
 	//     issues is only as unguessable as that reader.
 	//
-	// With Config.HorizontallyScaled, every store checked above must
-	// also declare CrossInstanceConsistent. As with server.New, a store
+	// Config.Deployment is required: with DeploymentHorizontallyScaled,
+	// every store checked above must also declare CrossInstanceConsistent. As with server.New, a store
 	// that doesn't implement storage.StoreAssurance at all is refused
 	// rather than assumed adequate, and nothing verifies a declaration:
 	// a store should also run the storage package's contract tests
 	// against itself.
 	AssuranceProduction
+)
+
+// Deployment says whether one verifier instance, or a fleet of them,
+// uses the storage tier. It's required under AssuranceProduction, where
+// it decides whether every store AssuranceProduction checks must also
+// declare CrossInstanceConsistent: the zero value is refused there, so a
+// fleet can't forget to say so and be checked as a single instance.
+// Under AssuranceDevelopment it may be left zero, and is ignored.
+type Deployment uint8
+
+const (
+	_ Deployment = iota
+
+	// DeploymentSingleInstance is one process using the storage tier:
+	// stores needn't be consistent across instances.
+	DeploymentSingleInstance
+
+	// DeploymentHorizontallyScaled is more than one process sharing the
+	// storage tier. Under AssuranceProduction, every store checked must
+	// also declare CrossInstanceConsistent.
+	DeploymentHorizontallyScaled
 )
 
 // AccessTokenResolverAssurance is implemented by an AccessTokenResolver
@@ -75,7 +96,7 @@ type AccessTokenAssurance struct {
 	// Store looks the access tokens up, if they're kept (opaque
 	// tokens). Under AssuranceProduction it must implement
 	// storage.StoreAssurance and declare Durable (and
-	// CrossInstanceConsistent with HorizontallyScaled), as
+	// CrossInstanceConsistent with DeploymentHorizontallyScaled), as
 	// OpaqueAccessTokens.Store must.
 	Store any
 }
@@ -86,10 +107,19 @@ func validateAssurance(cfg Config, deps Dependencies) error {
 	if cfg.Assurance != AssuranceDevelopment && cfg.Assurance != AssuranceProduction {
 		return fmt.Errorf("resource: config: assurance level is invalid")
 	}
+	switch cfg.Deployment {
+	case DeploymentSingleInstance, DeploymentHorizontallyScaled:
+	case 0:
+		if cfg.Assurance == AssuranceProduction {
+			return fmt.Errorf("resource: config: deployment is required under AssuranceProduction (DeploymentSingleInstance or DeploymentHorizontallyScaled)")
+		}
+	default:
+		return fmt.Errorf("resource: config: deployment is invalid")
+	}
 	if cfg.Assurance != AssuranceProduction {
 		return nil
 	}
-	scaled := cfg.HorizontallyScaled
+	scaled := cfg.Deployment == DeploymentHorizontallyScaled
 	if err := checkProductionAccessTokens(deps.AccessTokens, scaled); err != nil {
 		return err
 	}
@@ -161,7 +191,7 @@ func productionAccessTokenAssurance(resolver AccessTokenResolver) (AccessTokenAs
 // checkStoreAssurance requires store to implement storage.StoreAssurance
 // and to assert Durable (always), AtomicConsume (when
 // requireAtomicConsume), and CrossInstanceConsistent (when
-// requireCrossInstanceConsistent — Config.HorizontallyScaled).
+// requireCrossInstanceConsistent — Config.Deployment is DeploymentHorizontallyScaled).
 func checkStoreAssurance(name string, store any, requireAtomicConsume, requireCrossInstanceConsistent bool) error {
 	asserter, ok := store.(storage.StoreAssurance)
 	if !ok {
@@ -175,7 +205,7 @@ func checkStoreAssurance(name string, store any, requireAtomicConsume, requireCr
 		return fmt.Errorf("resource: dependencies: %s must declare AtomicConsume capability under AssuranceProduction", name)
 	}
 	if requireCrossInstanceConsistent && !caps.CrossInstanceConsistent {
-		return fmt.Errorf("resource: dependencies: %s must declare CrossInstanceConsistent capability under AssuranceProduction with HorizontallyScaled", name)
+		return fmt.Errorf("resource: dependencies: %s must declare CrossInstanceConsistent capability under AssuranceProduction with DeploymentHorizontallyScaled", name)
 	}
 	return nil
 }

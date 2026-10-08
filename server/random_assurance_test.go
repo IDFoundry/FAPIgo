@@ -23,6 +23,7 @@ func TestNewProductionRequiresCryptoRandReader(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			cfg := validConfig(t)
 			cfg.Assurance = server.AssuranceProduction
+			cfg.Deployment = server.DeploymentSingleInstance
 			deps := validDependencies()
 			deps.Audit = &fakeAuditSink{}
 			deps.Random = tc.random

@@ -581,7 +581,8 @@ func newHarnessWithApplicationType(t *testing.T, profile server.Profile, allowRe
 			MaxDPoPProofAge:            time.Minute,
 			MaxClockSkew:               5 * time.Second,
 		},
-		Assurance: assurance,
+		Assurance:  assurance,
+		Deployment: server.DeploymentSingleInstance,
 	}
 	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
 	clients := &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}}

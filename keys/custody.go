@@ -27,7 +27,7 @@ type KeyCustody struct {
 	// horizontally scaled deployment uses the same keys, so an artifact
 	// one instance signs verifies against the JWKS another serves.
 	// Required by server.AssuranceProduction only with
-	// server.Config.HorizontallyScaled, as for stores.
+	// server.Config.Deployment is DeploymentHorizontallyScaled, as for stores.
 	CrossInstanceConsistent bool
 }
 

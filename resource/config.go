@@ -39,10 +39,11 @@ type Config struct {
 	// AssuranceLevel. Required: the zero value is refused.
 	Assurance AssuranceLevel
 
-	// HorizontallyScaled declares that this verifier runs as more than
-	// one process/instance sharing the same storage tier. Under
-	// AssuranceProduction, every store AssuranceProduction checks must
-	// then also declare storage.Capabilities.CrossInstanceConsistent.
-	// Ignored under AssuranceDevelopment.
-	HorizontallyScaled bool
+	// Deployment says whether this verifier runs as one instance or as
+	// a fleet sharing the storage tier; see Deployment. Required under
+	// AssuranceProduction, where DeploymentHorizontallyScaled also
+	// requires every store AssuranceProduction checks to declare
+	// storage.Capabilities.CrossInstanceConsistent. May be left zero
+	// under AssuranceDevelopment, where it's ignored.
+	Deployment Deployment
 }

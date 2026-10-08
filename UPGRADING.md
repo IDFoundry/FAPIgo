@@ -144,6 +144,21 @@ said so. Production now has to say which it is.
 - `serverresource.NewVerifier` takes the server's `Deployment`, as it
   took `HorizontallyScaled`.
 
+### Extension definitions declare a `Sensitivity` (extension)
+
+**Affects:** every `extension.Definition[T]` registered with
+`extension.NewRegistry`.
+
+**Why:** `Definition.Sensitive` was a bool whose zero value, "may be
+logged", was also what forgetting it gave, so a secret parameter whose
+definition left it out could reach logs and error messages.
+
+**What to change:** replace `Sensitive: true` with
+`Sensitivity: extension.Sensitive`, and set
+`Sensitivity: extension.NotSensitive` on every other definition, which
+used to leave the field out. `NewRegistry` refuses a definition without
+one.
+
 ## v0.50.0
 
 ### `ResolveViaEndpoint` names the resolver it trusts (federation)

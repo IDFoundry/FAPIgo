@@ -15,7 +15,8 @@ import (
 // either source, and deliberately not ReturnInTokenClaims — reading it
 // at the interaction step mustn't depend on token-claim opt-in.
 var issuerStateDef = extension.Definition[string]{
-	Name: "issuer_state", Cardinality: extension.Single,
+	Sensitivity: extension.NotSensitive,
+	Name:        "issuer_state", Cardinality: extension.Single,
 	AllowedSources: extension.SourcePlainParameter | extension.SourceRequestObject,
 	MaxBytes:       256,
 }
@@ -26,7 +27,8 @@ type issuanceRef struct {
 
 // issuanceDef is a structured, request-object-only extension.
 var issuanceDef = extension.Definition[issuanceRef]{
-	Name: "x_issuance", Cardinality: extension.Single,
+	Sensitivity: extension.NotSensitive,
+	Name:        "x_issuance", Cardinality: extension.Single,
 	AllowedSources: extension.SourceRequestObject,
 	MaxBytes:       256,
 }

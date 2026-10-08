@@ -149,7 +149,7 @@ func TestInteractionRequestFullRoundTrip(t *testing.T) {
 	policy, _ := fapi.ParseEndpointURL("https://rp.example/privacy")
 	tos, _ := fapi.ParseEndpointURL("https://rp.example/terms")
 	var extensions extension.Values
-	def := extension.Definition[string]{Name: "issuer_state", Cardinality: extension.Single, AllowedSources: extension.SourcePlainParameter, MaxBytes: 64}
+	def := extension.Definition[string]{Sensitivity: extension.NotSensitive, Name: "issuer_state", Cardinality: extension.Single, AllowedSources: extension.SourcePlainParameter, MaxBytes: 64}
 	if err := extension.Set(&extensions, def, "state-1"); err != nil {
 		t.Fatal(err)
 	}

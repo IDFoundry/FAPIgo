@@ -18,6 +18,7 @@ type paymentLimit struct {
 // cappedLimitDef caps amount at 100 in Validate: the value a token
 // reader sees must be the value Validate approved.
 var cappedLimitDef = extension.Definition[paymentLimit]{
+	Sensitivity:    extension.NotSensitive,
 	Name:           "x_payment_limit",
 	Cardinality:    extension.Single,
 	AllowedSources: extension.SourcePlainParameter,
@@ -79,7 +80,8 @@ func (repeatingMarshaler) MarshalJSON() ([]byte, error) {
 
 func TestSetRefusesRepeatedMembersFromMarshalJSON(t *testing.T) {
 	def := extension.Definition[repeatingMarshaler]{
-		Name: "x_repeating", Cardinality: extension.Single,
+		Sensitivity: extension.NotSensitive,
+		Name:        "x_repeating", Cardinality: extension.Single,
 		AllowedSources: extension.SourcePlainParameter, MaxBytes: 64,
 	}
 	var values extension.Values

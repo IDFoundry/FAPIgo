@@ -18,7 +18,8 @@ import (
 // plain-parameter path always represents a value as a form-encoded
 // string.
 var accountHintExtensionDef = extension.Definition[string]{
-	Name: "x_account_hint", Cardinality: extension.Single,
+	Sensitivity: extension.NotSensitive,
+	Name:        "x_account_hint", Cardinality: extension.Single,
 	AllowedSources: extension.SourcePlainParameter, MaxBytes: 64,
 	ReturnInTokenClaims: true,
 }

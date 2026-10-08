@@ -1652,7 +1652,8 @@ func TestPushAuthorizationRequestIgnoresMultipleUnregisteredExtensionParameters(
 // still rejected — for the invalid one, not the unrecognized one.
 func TestPushAuthorizationRequestRejectsInvalidRegisteredParameterAlongsideUnregisteredOne(t *testing.T) {
 	def := extension.Definition[string]{
-		Name: "x_custom", Cardinality: extension.Single,
+		Sensitivity: extension.NotSensitive,
+		Name:        "x_custom", Cardinality: extension.Single,
 		AllowedSources: extension.SourcePlainParameter, MaxBytes: 4,
 	}
 	registry, err := extension.NewRegistry(def)
@@ -1711,7 +1712,8 @@ func TestPushAuthorizationRequestAcceptsResponseModeParameter(t *testing.T) {
 
 func TestPushAuthorizationRequestAcceptsRegisteredExtensionParameter(t *testing.T) {
 	def := extension.Definition[string]{
-		Name: "x_custom", Cardinality: extension.Single,
+		Sensitivity: extension.NotSensitive,
+		Name:        "x_custom", Cardinality: extension.Single,
 		AllowedSources: extension.SourcePlainParameter, MaxBytes: 64,
 	}
 	registry, err := extension.NewRegistry(def)

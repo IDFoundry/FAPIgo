@@ -14,6 +14,24 @@ const (
 	Multiple
 )
 
+// Sensitivity is a closed set describing whether a Definition's value
+// may be copied into a log line or an error message. It has no valid
+// zero value, so a Definition can't be registered without saying which.
+type Sensitivity uint8
+
+const (
+	_ Sensitivity = iota
+
+	// NotSensitive means the value may appear in logs and error
+	// messages.
+	NotSensitive
+
+	// Sensitive means the value must never be copied into a log line or
+	// error message: a caller reading it back via Get applies the same
+	// care it would to a fapi.Secret.
+	Sensitive
+)
+
 // Source is a bitmask of where a Definition's value may legitimately
 // originate on an authorization request. A Definition must permit at
 // least one.

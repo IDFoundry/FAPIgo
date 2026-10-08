@@ -31,10 +31,12 @@ type Definition[T any] struct {
 	// Required — there is no implicit default; zero rejects every value.
 	MaxBytes int
 
-	// Sensitive marks a value that must never be copied into a log line
-	// or error message — a caller reading it back via Get is expected to
-	// apply the same care it would to a fapi.Secret.
-	Sensitive bool
+	// Sensitivity is whether the value may be copied into a log line or
+	// error message: Sensitive, for one a caller reading it back via Get
+	// must treat as it would a fapi.Secret, or NotSensitive. Required —
+	// NewRegistry refuses the zero value, so a secret parameter can't be
+	// logged because its Definition forgot to say so.
+	Sensitivity Sensitivity
 
 	// ReturnInTokenClaims, if true, means a validated value should be
 	// copied into the token claims an authorization server issues
@@ -57,6 +59,7 @@ type Definition[T any] struct {
 type Registered interface {
 	name() string
 	cardinalityOK() bool
+	sensitivityOK() bool
 	returnInTokenClaims() bool
 	validate(raw json.RawMessage, source Source, out *Values) error
 }
@@ -64,6 +67,10 @@ type Registered interface {
 func (d Definition[T]) name() string { return d.Name }
 
 func (d Definition[T]) returnInTokenClaims() bool { return d.ReturnInTokenClaims }
+
+func (d Definition[T]) sensitivityOK() bool {
+	return d.Sensitivity == NotSensitive || d.Sensitivity == Sensitive
+}
 
 func (d Definition[T]) cardinalityOK() bool {
 	isSlice := reflect.TypeFor[T]().Kind() == reflect.Slice

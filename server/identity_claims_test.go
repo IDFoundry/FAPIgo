@@ -197,7 +197,8 @@ func TestNewRejectsExtensionClaimShadowingManagedClaim(t *testing.T) {
 	for _, name := range []string{"email", "acr", "requested_userinfo_claims", "grant_id", "code_grant_id", "grant_type"} {
 		t.Run(name, func(t *testing.T) {
 			registry, err := extension.NewRegistry(extension.Definition[string]{
-				Name: name, Cardinality: extension.Single,
+				Sensitivity: extension.NotSensitive,
+				Name:        name, Cardinality: extension.Single,
 				AllowedSources: extension.SourcePlainParameter, MaxBytes: 64,
 				ReturnInTokenClaims: true,
 			})
@@ -215,7 +216,8 @@ func TestNewRejectsExtensionClaimShadowingManagedClaim(t *testing.T) {
 	// The same name without ReturnInTokenClaims never reaches a token,
 	// so it's fine.
 	registry, err := extension.NewRegistry(extension.Definition[string]{
-		Name: "email", Cardinality: extension.Single,
+		Sensitivity: extension.NotSensitive,
+		Name:        "email", Cardinality: extension.Single,
 		AllowedSources: extension.SourcePlainParameter, MaxBytes: 64,
 	})
 	if err != nil {

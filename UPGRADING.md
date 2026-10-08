@@ -82,6 +82,45 @@ configured on the same `Resolver` is now refused even under
 the subject's Trust Anchor. With a single Trust Anchor nothing else
 changes.
 
+### Client credentials tokens say so, and two token claims are reserved (server, resource)
+
+**Affects:**
+- a resource server that authorizes by `resource.AuthorizationContext.Subject` while its authorization server issues client credentials tokens;
+- a server whose extension returns a `grant_type` or `code_grant_id` claim in tokens (`ReturnInTokenClaims`);
+- a custom `resource.AccessTokenResolver` whose tokens carry a `grant_type` claim.
+
+**Why:** a client credentials token's `sub` is the client's own
+`client_id`, so a resource server couldn't tell it from an end user's
+token with the same identifier (RFC 9068 §5). A client registered
+automatically through OpenID Federation chooses its own `client_id`, so
+it could pick one equal to a privileged user's subject. Client
+credentials tokens now carry `grant_type: "client_credentials"`, and
+every access token from an authorization code carries `code_grant_id`,
+which lets a reused code revoke everything issued from it. The server
+sets both claims itself.
+
+**What to change:**
+
+- Where both kinds of token reach a resource server, check
+  `AuthorizationContext.SubjectKind` before authorizing by `Subject`:
+
+  ```go
+  if authz.SubjectKind != resource.SubjectEndUser {
+  	return resource.NewInsufficientScopeError(authz, "this endpoint needs an end user's token")
+  }
+  ```
+
+  `SubjectClient` means `Subject` is the client's own `client_id`.
+- Rename any extension returning `grant_type` or `code_grant_id` in
+  token claims: `server.New` now refuses one.
+- A token whose `grant_type` claim is anything but `client_credentials`
+  is now refused with `invalid_token`. A custom resolver must not pass
+  through a `grant_type` claim of its own.
+
+Client credentials tokens issued before the upgrade carry no
+`grant_type`, so they read as `SubjectEndUser` until they expire, at
+most `Limits.AccessTokenLifetime` after the upgrade.
+
 ## v0.50.0
 
 ### `ResolveViaEndpoint` names the resolver it trusts (federation)

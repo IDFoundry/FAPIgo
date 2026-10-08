@@ -307,7 +307,7 @@ func (s *Server) resolveBackchannelAuthenticationParameters(ctx context.Context,
 		Now:              s.deps.Clock.Now(),
 		MaxLifetime:      s.cfg.Limits.MaxBackchannelAuthenticationRequestLifetime,
 		MaxClockSkew:     s.cfg.Limits.MaxClockSkew,
-		Replay:           s.backchannelAuthenticationRequestReplayChecker(),
+		Replay:           s.backchannelAuthenticationRequestReplayChecker(client.ID()),
 		// Unlike PAR's request object (single-use via its own
 		// request_uri wrapper — see requestobject.VerifyPolicy.Replay's
 		// own doc comment for why nbf/jti are optional there), a CIBA

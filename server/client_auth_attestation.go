@@ -97,7 +97,7 @@ func (s *Server) authenticateClientViaAttestation(ctx context.Context, attestati
 		Now:              s.deps.Clock.Now(),
 		MaxAge:           s.cfg.Limits.MaxClientAttestationPoPAge,
 		MaxClockSkew:     s.cfg.Limits.MaxClockSkew,
-		Replay:           s.clientAttestationPoPReplayChecker(),
+		Replay:           s.clientAttestationPoPReplayChecker(client.ID()),
 	})
 	if err != nil {
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},

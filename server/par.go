@@ -412,7 +412,7 @@ func (s *Server) authenticateClientViaAssertion(ctx context.Context, params map[
 		Now:               s.deps.Clock.Now(),
 		MaxLifetime:       s.cfg.Limits.MaxClientAssertionLifetime,
 		MaxClockSkew:      s.cfg.Limits.MaxClockSkew,
-		Replay:            s.clientAssertionReplayChecker(),
+		Replay:            s.clientAssertionReplayChecker(client.ID()),
 	})
 	if err != nil {
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
@@ -531,7 +531,7 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 		Now:              s.deps.Clock.Now(),
 		MaxLifetime:      s.cfg.Limits.MaxRequestObjectLifetime,
 		MaxClockSkew:     s.cfg.Limits.MaxClockSkew,
-		Replay:           s.requestObjectReplayChecker(),
+		Replay:           s.requestObjectReplayChecker(client.ID()),
 		// FAPI 2.0 Message Signing Final §5.3.1 mandates nbf on a
 		// request object; the base FAPI 2.0 Security Profile does not —
 		// see requestobject.VerifyPolicy.RequireNotBefore's doc comment.

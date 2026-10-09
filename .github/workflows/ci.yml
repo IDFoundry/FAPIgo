@@ -270,7 +270,7 @@ jobs:
       - name: Latest stable Go
         id: go
         run: |
-          version="$(curl -fsSL 'https://go.dev/dl/?mode=json' | jq -er '[.[] | select(.stable)][0].version | ltrimstr("go")')"
+          version="$(curl -fsSL --proto '=https' --tlsv1.2 'https://go.dev/dl/?mode=json' | jq -er '[.[] | select(.stable)][0].version | ltrimstr("go")')"
           echo "Scanning under Go ${version}"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 

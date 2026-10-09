@@ -18,6 +18,9 @@ import (
 // redirect Destination — so an embedding application cannot replace
 // state, edit a JARM response, change the redirect URI, or leak a code
 // into logs by handling it directly.
+//
+// Its variants are AuthorizationRedirect and AuthorizationLocalError;
+// switch on the concrete type.
 type AuthorizationResult interface {
 	authorizationResult()
 }

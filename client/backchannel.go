@@ -347,6 +347,10 @@ func decodeBackchannelAuthenticationResponse(body []byte) (rawBackchannelAuthent
 // BackchannelAuthenticationResult is a closed sum type returned by
 // PollBackchannelAuthentication, mirroring CompletionResult's own
 // shape for the browser flow.
+//
+// Its variants are BackchannelAuthenticationApproved,
+// BackchannelAuthenticationPending, BackchannelAuthenticationDenied and
+// BackchannelAuthenticationExpired; switch on the concrete type.
 type BackchannelAuthenticationResult interface {
 	backchannelAuthenticationResult()
 }

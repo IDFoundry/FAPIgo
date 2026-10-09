@@ -44,6 +44,9 @@ var coreBackchannelAuthenticationParameters = map[string]struct{}{
 // BackchannelAuthenticationAction is a closed sum type returned by
 // BeginBackchannelAuthentication, mirroring AuthorizationAction for the
 // browser-based flow.
+//
+// Its variants are BackchannelInteractionRequired and
+// BackchannelAuthenticationLocalError; switch on the concrete type.
 type BackchannelAuthenticationAction interface {
 	backchannelAuthenticationAction()
 }

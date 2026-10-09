@@ -3,6 +3,9 @@ package client
 import "context"
 
 // CompletionResult is a closed sum type returned by CompleteAuthorization.
+//
+// Its variants are CompletionSuccess and CompletionDenied; switch on the
+// concrete type.
 type CompletionResult interface {
 	completionResult()
 }

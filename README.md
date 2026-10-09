@@ -110,8 +110,8 @@ gets wrong in the same ways:
   certificate a request type needs from an `*http.Request` at once.
 
 See [GETTING_STARTED.md](GETTING_STARTED.md) for a full walkthrough of
-standing up an authorization server and resource server end to end,
-including a runnable configuration you can start from.
+standing up an authorization server, resource server and client end to
+end, including a runnable configuration you can start from.
 
 For one mechanism at a time, [docs/guides](docs/guides/README.md) has
 short guides to [DPoP](docs/guides/dpop.md), [mutual

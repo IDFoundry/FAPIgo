@@ -128,9 +128,7 @@ func signedPayload(t *testing.T, compact string) map[string]any {
 // client the token was issued to, about the token's subject, and
 // refused for any other subject or for a client no longer registered.
 func TestSignUserInfoResponseIsForTheTokensClient(t *testing.T) {
-	srv, clients := userInfoServer(t)
-	authz := resource.AuthorizationContext{Subject: "user-1", ClientID: "rp-2", Scopes: []string{"openid"}}
-	claims := map[string]json.RawMessage{"sub": json.RawMessage(`"user-1"`), "email": json.RawMessage(`"sam@example.com"`)}
+	srv, clients, authz, claims := signUserInfoFixture(t)
 
 	signed, err := serverresource.SignUserInfoResponse(context.Background(), srv, clients, authz, claims)
 	if err != nil {
@@ -160,6 +158,16 @@ func TestSignUserInfoResponseIsForTheTokensClient(t *testing.T) {
 			t.Fatal("SignUserInfoResponse(empty subject) succeeded")
 		}
 	})
+
+}
+
+// TestSignUserInfoResponseReportsLookupAndSigningFailures covers how
+// SignUserInfoResponse reports a client it can't resolve, an
+// unavailable client repository, and a failure to sign: an unknown
+// client is 401 invalid_token, an outage 500 server_error, both keeping
+// the repository's error, and a signing failure the server's own error.
+func TestSignUserInfoResponseReportsLookupAndSigningFailures(t *testing.T) {
+	srv, clients, authz, claims := signUserInfoFixture(t)
 
 	t.Run("unknown client", func(t *testing.T) {
 		unknown := authz
@@ -203,4 +211,15 @@ func TestSignUserInfoResponseIsForTheTokensClient(t *testing.T) {
 			t.Fatalf("SignUserInfoResponse(reserved aud) error = %v, want the server's error", err)
 		}
 	})
+}
+
+// signUserInfoFixture returns a server, its client repository, the
+// authorization context of an openid access token for user-1 issued to
+// rp-2, and UserInfo claims about user-1.
+func signUserInfoFixture(t *testing.T) (*server.Server, storage.ClientRepository, resource.AuthorizationContext, map[string]json.RawMessage) {
+	t.Helper()
+	srv, clients := userInfoServer(t)
+	authz := resource.AuthorizationContext{Subject: "user-1", ClientID: "rp-2", Scopes: []string{"openid"}}
+	claims := map[string]json.RawMessage{"sub": json.RawMessage(`"user-1"`), "email": json.RawMessage(`"sam@example.com"`)}
+	return srv, clients, authz, claims
 }

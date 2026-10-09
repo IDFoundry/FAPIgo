@@ -1,5 +1,54 @@
 # Changelog
 
+## [0.52.0](https://github.com/IDFoundry/FAPIgo/compare/v0.51.0...v0.52.0) (2026-10-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* **server:** under production assurance with attestation-based client authentication, server.New refuses an X5CAttesterChain whose TrustAnchors or Anchors source does not implement keys.KeySourceAssurance declaring LiveFetchHardened. StaticAttesterTrustAnchors and StaticAttesterAnchors already do. See UPGRADING.md for v0.52.0.
+* **keys:** keys.NewKeyManagerFromSigners takes a []keys.SignerSpec and options instead of separate signer, algorithm and kid maps. See UPGRADING.md for v0.52.0.
+* **client:** BackchannelAuthenticationSession's MarshalText and UnmarshalText and client.ParseBackchannelAuthenticationSession are removed in favour of client.BackchannelSessionSealer, and sessions stored by earlier versions don't open. RefreshTokens refuses a TokenSet from another issuer and one recording no issuer without a matching ID token, and TokenSetSealer.Seal refuses a set from another issuer. client.New refuses an unacceptable Config.RedirectURI. client.ErrorAuthorizationDenied is removed. See UPGRADING.md for v0.52.0.
+* **extension:** extension.Definition's Sensitive bool is replaced by a Sensitivity field (NotSensitive or Sensitive), and NewRegistry refuses a definition that leaves it unset. See UPGRADING.md for v0.52.0.
+* server.Config.HorizontallyScaled and resource.Config.HorizontallyScaled are replaced by a Deployment field (DeploymentSingleInstance or DeploymentHorizontallyScaled), and under AssuranceProduction server.New and resource.NewVerifier refuse a configuration that leaves it unset. See UPGRADING.md for v0.52.0.
+* **server:** server.New refuses an extension returning a grant_type or code_grant_id claim in tokens, and resource.Verifier refuses a token whose grant_type claim is anything other than client_credentials. A resource server serving both end-user and client credentials tokens should authorize by AuthorizationContext.SubjectKind as well as Subject. See UPGRADING.md for v0.52.0.
+* **federation:** federation.Resolver.VerifyTrustMark takes the subject's ResolvedEntity, as Resolve returned it, in place of its Entity Identifier, and refuses a Trust Mark whose issuer can't be trusted through the subject's own Trust Anchor. See UPGRADING.md for v0.52.0.
+* **server:** a request whose claims parameter asks for the ID token's acr as an Essential Claim with values now fails when the application completes it at another class: login_required for the redirect flow, access_denied at the CIBA poll. Authenticate at one of InteractionRequest.EssentialACRValues, or complete with AuthenticationFailed. A malformed id_token acr entry is refused as invalid_request. See UPGRADING.md for v0.52.0.
+
+### Features
+
+* **extension:** require each extension definition to declare its Sensitivity ([9de5ead](https://github.com/IDFoundry/FAPIgo/commit/9de5ead259f18bcd5a09e9fdcbdbcd100bbff5c1))
+* **fapihttp:** RecommendedTransportConfig and RecommendedConfig ([c7354fd](https://github.com/IDFoundry/FAPIgo/commit/c7354fd7ede75ecec88785b05b60a867fe837cc1))
+* **keys:** build signer key managers from one SignerSpec per purpose ([42ead83](https://github.com/IDFoundry/FAPIgo/commit/42ead839a5b6c4052d9e1375a9cefc7cdf3941cf))
+* replace HorizontallyScaled with a required Deployment ([f4fefc0](https://github.com/IDFoundry/FAPIgo/commit/f4fefc0a49f60fa0e67e0868ce4f98d3592fbe18))
+* **server:** Metadata.WriteJSON ([792ccd6](https://github.com/IDFoundry/FAPIgo/commit/792ccd674ebdb91264691b27dd29bf61302eac9d))
+* **storage:** contract suites for the revocation store and client repository ([aa95069](https://github.com/IDFoundry/FAPIgo/commit/aa950699051d7de7b0aeb2c69e828921f82ae526))
+
+
+### Bug Fixes
+
+* bump Go toolchain to 1.26.9 for GO-2026-6617 ([6bec8b9](https://github.com/IDFoundry/FAPIgo/commit/6bec8b92fd0bd9f346b0995bddca245b902521bb))
+* **client:** keep ResourceClient.Do off the caller's request ([31134b5](https://github.com/IDFoundry/FAPIgo/commit/31134b5ddcaef67faefaf05743730117d663f9cc))
+* **client:** seal stored CIBA sessions, bind token sets to their issuer, check the redirect URI at New ([26552a0](https://github.com/IDFoundry/FAPIgo/commit/26552a0f92604ae4901a25ec3b6ec2150aadc778))
+* **conformance:** require a bearer token for the trust-anchor admin endpoint ([c740cfb](https://github.com/IDFoundry/FAPIgo/commit/c740cfb14db7ae7a2b51cac18ffdff0ee2b1260d))
+* **extension:** refuse repeated and miscased members in extension values ([5cb6eaa](https://github.com/IDFoundry/FAPIgo/commit/5cb6eaa792f9d3ff8e21e789d1da234d6b1753ea))
+* **federation:** bound the automatic registration cache ([f4f344f](https://github.com/IDFoundry/FAPIgo/commit/f4f344fd5d3a9c123b25a8f6a7e380375edd7f26))
+* **federation:** judge a Trust Mark by its subject's Trust Anchor ([5f16450](https://github.com/IDFoundry/FAPIgo/commit/5f164504ae8a2b2deeec314a23fd5d5c1114caa8))
+* **federation:** require an ASCII host in an Entity Identifier ([01d437d](https://github.com/IDFoundry/FAPIgo/commit/01d437de08516d26055cf08f984b1e8f36457844))
+* report every production assurance refusal at once ([778e6ce](https://github.com/IDFoundry/FAPIgo/commit/778e6ce959a771bc99217191895b84696a1df822))
+* resolve every signing key at New, not at first use ([ac294b7](https://github.com/IDFoundry/FAPIgo/commit/ac294b789c1a3bcaaf5c81508ccd2d6fec4f5688))
+* **resource:** refuse a resolved access token with no revocation key ([3aba5e2](https://github.com/IDFoundry/FAPIgo/commit/3aba5e253ed44e54547b558d3ed7904c96ffa139))
+* revoke everything issued from a reused code, and mark client credentials tokens ([4c3d1d3](https://github.com/IDFoundry/FAPIgo/commit/4c3d1d3ec0458aa9e5655aadb374f46890663a28))
+* **server:** audit an unverified client_id at the authorization endpoint as no client ([8e0396b](https://github.com/IDFoundry/FAPIgo/commit/8e0396b42722de169b5acb0d2ec8713c03f74953))
+* **server:** enforce an essential acr request ([#609](https://github.com/IDFoundry/FAPIgo/issues/609)) ([35a44b4](https://github.com/IDFoundry/FAPIgo/commit/35a44b4489abeb04e70071b112685320ebca835a))
+* **server:** honour dpop_jkt in a CIBA backchannel authentication request ([ac5429f](https://github.com/IDFoundry/FAPIgo/commit/ac5429f7f4cad259b63b463d12d20a83d20f18d0))
+* **server:** re-check the client's registration at the code exchange ([a4c0407](https://github.com/IDFoundry/FAPIgo/commit/a4c04075345f4d9ae208954d467097bb83473c2b))
+* **server:** refuse a malformed claims parameter instead of ignoring it ([9c0b330](https://github.com/IDFoundry/FAPIgo/commit/9c0b33062dbf6e4afb890c2f023966c487cc3a44))
+* **server:** require a hardened attester trust-anchor source in production ([ac08345](https://github.com/IDFoundry/FAPIgo/commit/ac0834513cfb0950221c516a91524f4836238ac9))
+* **server:** require the CIBA identity hint to be a non-empty string ([93e4045](https://github.com/IDFoundry/FAPIgo/commit/93e404574a68e41f2d5109c00c139d632d4094d8))
+* **server:** reserve the grant_type and code_grant_id token claims ([52dd7e4](https://github.com/IDFoundry/FAPIgo/commit/52dd7e4e8271c2cfa5bc6a0482fbfc861a37af09))
+* **server:** scope replay records to the client or DPoP key that used them ([5f4d047](https://github.com/IDFoundry/FAPIgo/commit/5f4d047eeda41ea8b927af595cd6d366b04c78fc))
+* **server:** send an application's reason as error_description only when it's error text ([bd81630](https://github.com/IDFoundry/FAPIgo/commit/bd816306a25c6c1a433d73ed11e1ef7d11f9c877))
+
 ## [0.51.0](https://github.com/IDFoundry/FAPIgo/compare/v0.50.1...v0.51.0) (2026-10-08)
 
 

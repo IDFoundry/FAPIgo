@@ -18,8 +18,8 @@ const maxSealedBackchannelSession = 4096
 
 // ErrUnreadableBackchannelSession is the cause, for errors.Is, of a
 // BackchannelSessionSealer.Open failure on a session that doesn't open:
-// sealed with no key it has, for another issuer or client, tampered
-// with, or stored by a version before the sessions were sealed. There
+// sealed with no key it has, for another issuer, client or owner,
+// tampered with, or stored by a version before the sessions were sealed. There
 // is nothing to recover: begin the backchannel authentication again.
 var ErrUnreadableBackchannelSession = errors.New("client: the sealed backchannel authentication session doesn't open")
 
@@ -41,7 +41,11 @@ type sealedBackchannelSession struct {
 // needed.
 //
 // A sealed session is AES-256-GCM, bound to this client's issuer and
-// client ID. Sealing matters: the session records whether the request
+// client ID and to an owner the caller names (the user, account or
+// connection the request is for), so it opens only for the owner it was
+// sealed for: a sealed session leaked from one user, through a log, a
+// misrouted cookie or shared storage, doesn't open under another's.
+// Sealing matters: the session records whether the request
 // asked for "openid", which decides whether an approval without an ID
 // token is refused, and which of this client's requests to poll, so a
 // stored session that could be edited could turn that check off.
@@ -71,8 +75,13 @@ func NewBackchannelSessionSealer(c *Client, keys [][]byte) (*BackchannelSessionS
 	return &BackchannelSessionSealer{client: c, keys: ring}, nil
 }
 
-// Seal encrypts session for storage.
-func (s *BackchannelSessionSealer) Seal(session BackchannelAuthenticationSession) ([]byte, error) {
+// Seal encrypts session for storage, for owner: whatever names whose
+// request this is, such as a user or connection ID, and must be given to
+// Open again. owner is required.
+func (s *BackchannelSessionSealer) Seal(session BackchannelAuthenticationSession, owner string) ([]byte, error) {
+	if owner == "" {
+		return nil, newError(ErrorInvalidRequest, "a backchannel authentication session is sealed for an owner", nil)
+	}
 	if session.authReqID == "" {
 		return nil, newError(ErrorInvalidRequest, "a backchannel authentication session without an auth_req_id can't be sealed", nil)
 	}
@@ -84,19 +93,19 @@ func (s *BackchannelSessionSealer) Seal(session BackchannelAuthenticationSession
 	if err != nil {
 		return nil, newError(ErrorInternal, "failed to encode the backchannel authentication session", err)
 	}
-	return s.keys.seal(backchannelSessionSealVersion, plaintext, s.additionalData()), nil
+	return s.keys.seal(backchannelSessionSealVersion, plaintext, s.additionalData(owner)), nil
 }
 
-// Open decrypts a session Seal sealed, for PollBackchannelAuthentication
+// Open decrypts a session Seal sealed for owner, for PollBackchannelAuthentication
 // or BackchannelNotification.Authenticates. reseal reports a session
 // sealed with a key other than the first. Any failure to open is an
 // ErrorInvalidRequest *Error whose cause is
 // ErrUnreadableBackchannelSession.
-func (s *BackchannelSessionSealer) Open(sealed []byte) (session BackchannelAuthenticationSession, reseal bool, err error) {
+func (s *BackchannelSessionSealer) Open(sealed []byte, owner string) (session BackchannelAuthenticationSession, reseal bool, err error) {
 	if len(sealed) > maxSealedBackchannelSession {
 		return BackchannelAuthenticationSession{}, false, errUnreadableBackchannelSession()
 	}
-	plaintext, keyIndex, ok := s.keys.open(backchannelSessionSealVersion, sealed, s.additionalData())
+	plaintext, keyIndex, ok := s.keys.open(backchannelSessionSealVersion, sealed, s.additionalData(owner))
 	if !ok {
 		return BackchannelAuthenticationSession{}, false, errUnreadableBackchannelSession()
 	}
@@ -118,7 +127,8 @@ func errUnreadableBackchannelSession() *Error {
 }
 
 // additionalData binds a sealed session to the format, this client's
-// issuer and client ID.
-func (s *BackchannelSessionSealer) additionalData() []byte {
-	return sealAdditionalData("fapigo backchannel session", backchannelSessionSealVersion, s.client.cfg.Issuer.String(), s.client.cfg.ClientID.String())
+// issuer and client ID, and owner, each length-prefixed so no two differ
+// only in where one ends and the next begins.
+func (s *BackchannelSessionSealer) additionalData(owner string) []byte {
+	return sealAdditionalData("fapigo backchannel session", backchannelSessionSealVersion, s.client.cfg.Issuer.String(), s.client.cfg.ClientID.String(), owner)
 }

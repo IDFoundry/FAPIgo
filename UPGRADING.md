@@ -172,13 +172,17 @@ without integrity protection, so anyone who could edit it could turn
 that check off.
 
 **What to change:** seal the session instead, with 32 random bytes the
-application keeps secret:
+application keeps secret, for the owner the request is for (a user,
+account or connection ID), as `TokenSetSealer` does:
 
 ```go
 sealer, err := client.NewBackchannelSessionSealer(c, [][]byte{key})
-sealed, err := sealer.Seal(session)            // store this, keyed by session.AuthReqID()
-session, reseal, err := sealer.Open(sealed)    // on any instance
+sealed, err := sealer.Seal(session, userID)          // store this, keyed by session.AuthReqID()
+session, reseal, err := sealer.Open(sealed, userID)  // on any instance, for the same owner
 ```
+
+A sealed session opens only for the owner it was sealed for, so one
+leaked from another user's storage doesn't open under this user's.
 
 `MarshalText`, `UnmarshalText` and `ParseBackchannelAuthenticationSession`
 are removed. A session stored by v0.51 or earlier doesn't open (the

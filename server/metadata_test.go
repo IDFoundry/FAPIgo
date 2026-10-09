@@ -3,6 +3,8 @@ package server_test
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -429,5 +431,28 @@ func TestMetadataClientRegistrationTypesSupported(t *testing.T) {
 	}
 	if string(wire["client_registration_types_supported"]) != `["automatic"]` {
 		t.Errorf("client_registration_types_supported = %s, want [\"automatic\"]", wire["client_registration_types_supported"])
+	}
+}
+
+// TestMetadataWriteJSON: Metadata.WriteJSON writes the document as a 200
+// JSON response that decodes back to the same metadata.
+func TestMetadataWriteJSON(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	md := h.server.Metadata(context.Background())
+
+	rec := httptest.NewRecorder()
+	md.WriteJSON(rec)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", ct)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("body isn't JSON: %v", err)
+	}
+	if got["issuer"] != testIssuer || got["token_endpoint"] != testTokenEndpoint {
+		t.Fatalf("issuer, token_endpoint = %v, %v; want %q, %q", got["issuer"], got["token_endpoint"], testIssuer, testTokenEndpoint)
 	}
 }

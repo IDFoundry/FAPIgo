@@ -59,6 +59,9 @@ type ValidatedAuthorizationResponse struct {
 // CallbackResult is a closed sum type returned by
 // HandleAuthorizationResponse, so a caller can't assume every callback
 // carries a code and can't forget to branch on the error case.
+//
+// Its variants are CallbackSuccess and CallbackDenied; switch on the
+// concrete type.
 type CallbackResult interface {
 	callbackResult()
 }

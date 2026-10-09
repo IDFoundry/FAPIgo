@@ -19,6 +19,9 @@ import (
 // unaffected either way: its thumbprint match already cryptographically
 // binds the exact certificate, so it needs no chain trust to begin
 // with.
+//
+// Its implementations are TrustedClientCAs and
+// NoClientCertificateChainTrust.
 type ClientCertificateTrust interface {
 	verifyChain(ctx context.Context, cert *x509.Certificate, now time.Time) *Error
 	validate() error

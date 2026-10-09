@@ -38,6 +38,10 @@ type KeyCustody struct {
 // KeySourceAssurance and storage.StoreAssurance take. Its method is
 // named KeyCustody, not Capabilities, so a type that is also a key
 // source can implement both.
+//
+// A declaration is the operator's promise about the implementation, not
+// something this library verifies: production assurance trusts it, so
+// declare only what the implementation actually provides.
 type KeyCustodyAssurance interface {
 	KeyCustody() KeyCustody
 }

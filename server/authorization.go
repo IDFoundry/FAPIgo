@@ -16,6 +16,9 @@ import (
 // so a caller can never mistake one outcome for another — in particular,
 // an unvalidated redirect_uri or an unrecognized request_uri produces a
 // LocalErrorResponse, never something that looks like a normal redirect.
+//
+// Its variants are InteractionRequired, RedirectResponse and
+// LocalErrorResponse; switch on the concrete type.
 type AuthorizationAction interface {
 	authorizationAction()
 }

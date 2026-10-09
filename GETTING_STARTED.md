@@ -1,14 +1,15 @@
-# Getting started: standing up an authorization server and resource server
+# Getting started: standing up an authorization server, resource server and client
 
 This walks through wiring `server.Server` end to end — configuration,
 dependencies, client registration, and the one piece every integration
 has to build itself: the login/consent flow — then through wiring
 `resource.Verifier`, the separate role that actually verifies a
-presented access token against a protected API (step 7). `cmd/conformance-as`
+presented access token against a protected API (step 7), and finally a
+`client.Client` that calls them (step 10). `cmd/conformance-as`
 is a complete, working reference implementing every piece described
-here (plus the full HTTP surface — PAR, token, JWKS, metadata — which
-this guide doesn't reproduce); read it alongside this doc, or just
-study it directly and treat this as the map.
+here (step 6 shows a minimal HTTP surface — PAR, authorize, token,
+JWKS, metadata — and it has the full one); read it alongside this doc,
+or just study it directly and treat this as the map.
 
 ## 1. Dependencies: use the reference implementations to start
 
@@ -190,7 +191,10 @@ srv, err := server.New(cfg, deps)
 
 (`fetcher` is a `*fapihttp.Client` — only needed if any client's keys
 are fetched live via `JWKSURI` rather than supplied inline; pass `nil`
-if every client uses inline `JWKS`.)
+if every client uses inline `JWKS`. Build one with
+`fapihttp.New(transport, fapihttp.RecommendedConfig())`, where
+`transport` comes from
+`fapihttp.NewClient(fapihttp.RecommendedTransportConfig())`.)
 
 **Whichever access-token format you pick here, the resource server that
 verifies these tokens must be wired to match** — `resource.JWTAccessTokens`
@@ -406,6 +410,93 @@ framework dependency required, though nothing here stops you from using
 one. `cmd/conformance-as/token.go`, `par.go`, `metadata.go` and
 `jwks.go` are the corresponding handler implementations to read
 alongside `authorize.go`.
+
+A minimal version, for a server whose `Config.Endpoints` use these
+paths — every handler reads its request with a `*FromHTTP` constructor
+and writes its response with the result's own `WriteJSON` (or
+`server.WriteError`):
+
+```go
+func routes(srv *server.Server, login func(http.ResponseWriter, *http.Request, server.InteractionRequired)) *http.ServeMux {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("POST /par", func(w http.ResponseWriter, r *http.Request) {
+		req, err := server.PushAuthorizationRequestFromHTTP(r)
+		if err != nil {
+			server.WriteError(w, err)
+			return
+		}
+		result, err := srv.PushAuthorizationRequest(r.Context(), req)
+		if err != nil {
+			server.WriteError(w, err)
+			return
+		}
+		result.WriteJSON(w) // 201 with request_uri and expires_in
+	})
+
+	mux.HandleFunc("GET /authorize", func(w http.ResponseWriter, r *http.Request) {
+		req, err := server.BeginAuthorizationRequestFromHTTP(r)
+		if err != nil {
+			http.Error(w, "invalid authorization request", http.StatusBadRequest) // a local page, never a redirect
+			return
+		}
+		action, err := srv.BeginAuthorization(r.Context(), req)
+		if err != nil {
+			http.Error(w, "server error", http.StatusInternalServerError)
+			return
+		}
+		switch a := action.(type) {
+		case server.InteractionRequired:
+			login(w, r, a) // step 5: authenticate, then CompleteAuthorization(a.Handle, ...)
+		case server.RedirectResponse:
+			http.Redirect(w, r, a.Destination.String(), http.StatusFound)
+		case server.LocalErrorResponse:
+			http.Error(w, a.Error.Error(), http.StatusBadRequest) // render locally; nothing here is safe to redirect to
+		}
+	})
+
+	mux.HandleFunc("POST /token", func(w http.ResponseWriter, r *http.Request) {
+		req, err := server.TokenEndpointRequestFromHTTP(r)
+		if err != nil {
+			server.WriteError(w, err)
+			return
+		}
+		var result server.TokenResult
+		switch req.GrantType() {
+		case "authorization_code":
+			result, err = srv.ExchangeAuthorizationCode(r.Context(), req.AuthorizationCodeExchange())
+		case "refresh_token":
+			result, err = srv.RefreshAccessToken(r.Context(), req.RefreshToken())
+		default:
+			err = server.NewError(server.ErrorUnsupportedGrantType, http.StatusBadRequest, "")
+		}
+		if err != nil {
+			server.WriteError(w, err)
+			return
+		}
+		result.WriteJSON(w)
+	})
+
+	mux.HandleFunc("GET /jwks", func(w http.ResponseWriter, r *http.Request) {
+		set, err := srv.PublicJWKS(r.Context())
+		if err != nil {
+			server.WriteError(w, err)
+			return
+		}
+		set.WriteJSON(w)
+	})
+
+	// Where client.Discover looks: the issuer plus this suffix.
+	mux.HandleFunc("GET /.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		srv.Metadata(r.Context()).WriteJSON(w)
+	})
+	return mux
+}
+```
+
+Add `POST /authorize/complete` (or wherever your login page posts) for
+`CompleteAuthorization` from step 5, and the CIBA, client credentials and
+revocation routes when you enable them.
 
 **Serving a grant this package doesn't.** To serve another grant type
 at the same token endpoint — OpenID4VCI's `pre-authorized_code`, say —
@@ -720,3 +811,125 @@ its outgoing key (a backend that selects by the `keyID`
 `UnwrapRequest` carries) for as long as it's willing to assume some AS
 might still hold a stale cached copy of its JWKS — inherently a guess,
 not a number this module can compute for you.
+
+## 10. The client side: calling a FAPI 2.0 authorization server
+
+The steps above build an authorization server and a resource server.
+The `client` package is the other end — a relying party that pushes an
+authorization request, handles the callback, exchanges the code and
+calls protected resources, with PAR, PKCE, DPoP (or mTLS) and
+`private_key_jwt` throughout. A minimal web client, discovering its
+authorization server and keeping its sessions in `memstore` (a durable
+store in production):
+
+```go
+// Two HTTP types: the transport (an *http.Client that refuses private
+// and loopback addresses when it dials) for the client's own requests,
+// and a fetcher wrapping it for discovery and the issuer's JWKS.
+transport, err := fapihttp.NewClient(fapihttp.RecommendedTransportConfig())
+if err != nil {
+	return err
+}
+fetcher, err := fapihttp.New(transport, fapihttp.RecommendedConfig())
+if err != nil {
+	return err
+}
+
+issuer, err := fapi.ParseIssuerURL("https://as.example.com")
+if err != nil {
+	return err
+}
+discovered, err := client.Discover(ctx, fetcher, issuer)
+if err != nil {
+	return err
+}
+issuerKeys, err := discovered.IssuerKeySource(fetcher, 10*time.Minute)
+if err != nil {
+	return err
+}
+
+c, err := client.NewFromDiscovery(discovered, client.Config{
+	ClientID:                       "my-client",
+	RedirectURI:                    "https://rp.example.com/callback", // checked at New
+	Profile:                        client.ProfileFAPISecurity,
+	Algorithms:                     client.RecommendedAlgorithms(),
+	Limits:                         client.RecommendedLimits(),
+	Assurance:                      client.AssuranceProduction,
+	AuthorizationResponseIssPolicy: client.RequireAuthorizationResponseIss,
+	SenderConstrain:                storage.SenderConstrainDPoP,
+	ClientAuthMethod:               storage.ClientAuthMethodPrivateKeyJWT,
+}, client.Dependencies{
+	Sessions:   sessions,   // storage.SessionStore
+	Keys:       clientKeys, // keys.KeyManager: client authentication and DPoP keys
+	IssuerKeys: issuerKeys,
+	HTTP:       transport,
+	Clock:      client.SystemClock{},
+	Random:     rand.Reader, // crypto/rand
+})
+if err != nil {
+	return err
+}
+```
+
+`NewFromDiscovery` fills in the issuer and endpoints from the discovered
+metadata and checks them against your `Config`; `New` takes them
+explicitly instead. Then, in your handlers:
+
+```go
+// 1. Start: push the request, remember the session, send the browser on.
+session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{Scope: []string{"openid", "accounts"}})
+if err != nil {
+	return err
+}
+setSessionCookie(w, session.Handle().String()) // e.g. client/sessioncookie
+http.Redirect(w, r, session.URL().String(), http.StatusFound)
+
+// 2. Callback: validate the response and exchange the code in one call.
+handle, err := client.ParseSessionHandle(sessionCookie(r))
+if err != nil {
+	return err
+}
+result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{RawQuery: r.URL.RawQuery, Session: handle})
+if err != nil {
+	return err // a refused response: forged, replayed, or for another session
+}
+var tokens client.TokenSet
+switch v := result.(type) {
+case client.CompletionSuccess:
+	tokens = v.Tokens // tokens.Issuer records who issued them
+case client.CompletionDenied:
+	return fmt.Errorf("authorization denied: %s", v.Code) // e.g. access_denied
+}
+
+// 3. Call a protected resource: Do adds the access token and a DPoP
+// proof, retries once on a use_dpop_nonce challenge, and never follows
+// a redirect.
+req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.example.com/accounts", nil)
+if err != nil {
+	return err
+}
+res, err := c.ProtectedResource(tokens).Do(ctx, req)
+if err != nil {
+	return err
+}
+defer res.Body.Close()
+
+// 4. Later: refresh, and keep token sets at rest only sealed.
+tokens, err = c.RefreshTokens(ctx, client.RefreshTokenRequest{Tokens: tokens})
+if err != nil {
+	return err
+}
+sealer, err := client.NewTokenSetSealer(c, [][]byte{sealingKey}) // a 32-byte key; rotate by prepending
+if err != nil {
+	return err
+}
+sealed, err := sealer.Seal(tokens, userID)
+```
+
+`HandleAuthorizationResponse` followed by `ExchangeCode` is the same
+flow in two steps, for when you want the validated response before
+redeeming the code; its result is a `CallbackSuccess` or a
+`CallbackDenied`. For a native app, see the
+[native wallet guide](docs/guides/native-wallet.md); for CIBA, the
+[CIBA guide](docs/guides/ciba.md), whose stored sessions are sealed with
+`client.NewBackchannelSessionSealer`.

@@ -68,6 +68,8 @@ type Dependencies struct {
 	// transport refuses private, loopback and link-local addresses when
 	// it dials, so that metadata can't aim this client at internal
 	// hosts. A plain http.Client has no such guard.
+	// This is the transport NewClient returns, not the *fapihttp.Client
+	// fetcher fapihttp.New builds (which Discover takes).
 	HTTP fapihttp.HTTPClient
 
 	// Clock supplies the current time.

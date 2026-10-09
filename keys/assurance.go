@@ -38,6 +38,10 @@ type KeySourceCapabilities struct {
 // keeping it correctly rejected under AssuranceProduction rather than
 // accidentally passing because its live fetch happens to also go
 // through fapihttp.
+//
+// A declaration is the operator's promise about the implementation, not
+// something this library verifies: production assurance trusts it, so
+// declare only what the implementation actually provides.
 type KeySourceAssurance interface {
 	Capabilities() KeySourceCapabilities
 }

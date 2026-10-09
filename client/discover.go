@@ -272,6 +272,10 @@ func (d DiscoveredMetadata) IssuerKeySource(fetcher *fapihttp.Client, cacheTTL t
 // server, exactly as when parsing an endpoint URL by hand. A client
 // built from such endpoints needs AssuranceDevelopment: New refuses a
 // loopback http issuer or endpoint under AssuranceProduction.
+//
+// fetcher is a *fapihttp.Client from fapihttp.New — usually wrapping
+// fapihttp.NewClient's transport — not the *http.Client that
+// Dependencies.HTTP takes.
 func Discover(ctx context.Context, fetcher *fapihttp.Client, issuer fapi.URL, opts ...fapi.URLOption) (DiscoveredMetadata, error) {
 	if fetcher == nil {
 		return DiscoveredMetadata{}, fmt.Errorf("client: discover: fetcher is required")

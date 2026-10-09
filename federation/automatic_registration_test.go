@@ -356,6 +356,12 @@ func TestAutomaticClientRepositoryResolveClientFallsBackToFederation(t *testing.
 	if err != nil {
 		t.Fatalf("ResolveClient: %v", err)
 	}
+	// The registration is cached against where it sits in its Trust
+	// Chain: directly under the Trust Anchor, so the Trust Anchor is its
+	// superior and it has no branch.
+	if sup, branch, ok := federation.CachedChainPosition(repo, fapi.ClientID(f.rpID)); !ok || sup != f.taID || branch != "" {
+		t.Errorf("cached chain position = %q, %q (cached %v), want %q, \"\"", sup, branch, ok, f.taID)
+	}
 	if got.ID() != fapi.ClientID(f.rpID) {
 		t.Errorf("ID() = %q, want %q", got.ID(), f.rpID)
 	}

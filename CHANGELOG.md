@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.52.1](https://github.com/IDFoundry/FAPIgo/compare/v0.52.0...v0.52.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* **federation:** share the registration cache fairly between superiors ([e239dd6](https://github.com/IDFoundry/FAPIgo/commit/e239dd6be53050bfe5700736cebe6c56a7c2dcb4))
+
 ## [0.52.0](https://github.com/IDFoundry/FAPIgo/compare/v0.51.0...v0.52.0) (2026-10-09)
 
 

@@ -24,6 +24,28 @@ import (
 // parseRequestedClaimNames). A "claims" value that is neither is left
 // to the claims parameter's own handling.
 func essentialACRValues(params map[string]json.RawMessage) ([]string, error) {
+	entry, err := idTokenACREntry(params)
+	if entry == nil || err != nil {
+		return nil, err
+	}
+	essential, err := acrEntryEssential(entry)
+	if err != nil {
+		return nil, err
+	}
+	values, err := acrEntryValues(entry)
+	if err != nil {
+		return nil, err
+	}
+	if !essential || len(values) == 0 {
+		return nil, nil
+	}
+	return dedupeStrings(values), nil
+}
+
+// idTokenACREntry returns the "claims" parameter's id_token "acr" entry
+// with its member names checked: nil, with no error, when there is no
+// such entry or it's null.
+func idTokenACREntry(params map[string]json.RawMessage) (map[string]json.RawMessage, error) {
 	idToken, ok := claimsIDTokenMembers(params["claims"])
 	if !ok {
 		return nil, nil
@@ -39,13 +61,24 @@ func essentialACRValues(params map[string]json.RawMessage) ([]string, error) {
 	if err := checkMemberCase(entry, `claims: the id_token "acr" entry's`, "essential", "value", "values"); err != nil {
 		return nil, err
 	}
+	return entry, nil
+}
 
+// acrEntryEssential reads the "acr" entry's "essential" member, false
+// when absent.
+func acrEntryEssential(entry map[string]json.RawMessage) (bool, error) {
 	essential := false
 	if v, ok := entry["essential"]; ok {
 		if err := json.Unmarshal(v, &essential); err != nil {
-			return nil, errors.New(`claims: the id_token "acr" entry's "essential" must be a boolean`)
+			return false, errors.New(`claims: the id_token "acr" entry's "essential" must be a boolean`)
 		}
 	}
+	return essential, nil
+}
+
+// acrEntryValues reads the "acr" entry's "value" and then "values"
+// members, in that order.
+func acrEntryValues(entry map[string]json.RawMessage) ([]string, error) {
 	var values []string
 	if v, ok := entry["value"]; ok {
 		var value string
@@ -61,16 +94,18 @@ func essentialACRValues(params map[string]json.RawMessage) ([]string, error) {
 		}
 		values = append(values, list...)
 	}
-	if !essential || len(values) == 0 {
-		return nil, nil
-	}
+	return values, nil
+}
+
+// dedupeStrings returns values without repeats, in first-seen order.
+func dedupeStrings(values []string) []string {
 	out := make([]string, 0, len(values))
 	for _, v := range values {
 		if !slices.Contains(out, v) {
 			out = append(out, v)
 		}
 	}
-	return out, nil
+	return out
 }
 
 // claimsIDTokenMembers returns the "claims" parameter's id_token

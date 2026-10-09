@@ -73,7 +73,7 @@ func TestClientNil(t *testing.T) {
 		t.Fatalf("Client(nil) = %v, want nil", got)
 	}
 	var typedNil *http.Client
-	if got := nofollow.Client(typedNil); got != nofollow.Doer(typedNil) {
+	if nofollow.Client(typedNil) != nofollow.Doer(typedNil) {
 		t.Fatal("Client(typed nil) should return it unchanged")
 	}
 }

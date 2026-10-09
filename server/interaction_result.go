@@ -110,7 +110,10 @@ type interactionNeededResult struct {
 }
 
 // Discriminator for InteractionResult — deliberately empty.
-func (interactionNeededResult) interactionResult() {}
+func (interactionNeededResult) interactionResult() {
+	// Marks interactionNeededResult as an InteractionResult; it has no
+	// behaviour of its own.
+}
 
 // InteractionNeeded records that the interaction couldn't be concluded
 // without showing the end user something it wasn't allowed to show:

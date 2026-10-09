@@ -50,7 +50,7 @@ func TestRefuseOtherExplicitType(t *testing.T) {
 		{"at+jwt", []string{"client-authentication+jwt"}, true},
 	} {
 		err := RefuseOtherExplicitType(tc.typ, tc.own...)
-		if refused := errors.Is(err, ErrOtherExplicitType); refused != tc.refused {
+		if errors.Is(err, ErrOtherExplicitType) != tc.refused {
 			t.Errorf("RefuseOtherExplicitType(%q, %v) = %v, want refused = %v", tc.typ, tc.own, err, tc.refused)
 		}
 	}

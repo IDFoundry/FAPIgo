@@ -134,7 +134,7 @@ func TestCIBAExchangeRechecksClient(t *testing.T) {
 				}},
 				DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 			})
-			if code := serverErrorCode(t, err); code != tc.want {
+			if serverErrorCode(t, err) != tc.want {
 				t.Fatalf("ExchangeBackchannelAuthentication after re-registration: %v, want %s", err, tc.want)
 			}
 		})
@@ -222,7 +222,7 @@ func TestCIBAExchangeRechecksServerRARRegistry(t *testing.T) {
 				}},
 				DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
 			})
-			if code := serverErrorCode(t, err); code != server.ErrorInvalidGrant {
+			if serverErrorCode(t, err) != server.ErrorInvalidGrant {
 				t.Fatalf("ExchangeBackchannelAuthentication after the registry changed: %v, want invalid_grant", err)
 			}
 		})

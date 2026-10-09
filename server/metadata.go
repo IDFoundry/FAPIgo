@@ -268,24 +268,7 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 	// UserInfo, so advertising them would describe capabilities it
 	// doesn't have.
 	if !s.cfg.OAuthOnly {
-		md.SubjectTypesSupported = []string{"public"}
-		md.IDTokenSigningAlgValuesSupported = []string{s.cfg.Algorithms.IDToken.String()}
-		md.ClaimsParameterSupported = s.deps.IdentityClaims != nil
-		if len(s.cfg.Algorithms.IDTokenEncryptionKeyManagement) > 0 {
-			md.IDTokenEncryptionAlgValuesSupported = s.cfg.Algorithms.IDTokenEncryptionKeyManagement.Strings()
-		}
-		if len(s.cfg.Algorithms.IDTokenEncryptionContentEncryption) > 0 {
-			md.IDTokenEncryptionEncValuesSupported = s.cfg.Algorithms.IDTokenEncryptionContentEncryption.Strings()
-		}
-		if s.cfg.Algorithms.UserInfo != 0 {
-			md.UserinfoSigningAlgValuesSupported = []string{s.cfg.Algorithms.UserInfo.String()}
-		}
-		if len(s.cfg.Algorithms.UserInfoEncryptionKeyManagement) > 0 {
-			md.UserinfoEncryptionAlgValuesSupported = s.cfg.Algorithms.UserInfoEncryptionKeyManagement.Strings()
-		}
-		if len(s.cfg.Algorithms.UserInfoEncryptionContentEncryption) > 0 {
-			md.UserinfoEncryptionEncValuesSupported = s.cfg.Algorithms.UserInfoEncryptionContentEncryption.Strings()
-		}
+		s.addOIDCMetadata(&md)
 	}
 
 	if len(s.cfg.AutomaticRegistration.TrustAnchors) > 0 {
@@ -361,6 +344,30 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 	}
 
 	return md
+}
+
+// addOIDCMetadata sets the OpenID Connect Discovery 1.0 fields: the
+// ones that only mean something with ID tokens or UserInfo, which an
+// OAuthOnly server leaves out (see Metadata).
+func (s *Server) addOIDCMetadata(md *Metadata) {
+	md.SubjectTypesSupported = []string{"public"}
+	md.IDTokenSigningAlgValuesSupported = []string{s.cfg.Algorithms.IDToken.String()}
+	md.ClaimsParameterSupported = s.deps.IdentityClaims != nil
+	if len(s.cfg.Algorithms.IDTokenEncryptionKeyManagement) > 0 {
+		md.IDTokenEncryptionAlgValuesSupported = s.cfg.Algorithms.IDTokenEncryptionKeyManagement.Strings()
+	}
+	if len(s.cfg.Algorithms.IDTokenEncryptionContentEncryption) > 0 {
+		md.IDTokenEncryptionEncValuesSupported = s.cfg.Algorithms.IDTokenEncryptionContentEncryption.Strings()
+	}
+	if s.cfg.Algorithms.UserInfo != 0 {
+		md.UserinfoSigningAlgValuesSupported = []string{s.cfg.Algorithms.UserInfo.String()}
+	}
+	if len(s.cfg.Algorithms.UserInfoEncryptionKeyManagement) > 0 {
+		md.UserinfoEncryptionAlgValuesSupported = s.cfg.Algorithms.UserInfoEncryptionKeyManagement.Strings()
+	}
+	if len(s.cfg.Algorithms.UserInfoEncryptionContentEncryption) > 0 {
+		md.UserinfoEncryptionEncValuesSupported = s.cfg.Algorithms.UserInfoEncryptionContentEncryption.Strings()
+	}
 }
 
 // urlOrNil returns nil for u's zero value, and a pointer to u otherwise

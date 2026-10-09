@@ -86,36 +86,46 @@ func TestProtectedResourceDoRejectsLoopbackHTTPUnderProduction(t *testing.T) {
 		{client.AssuranceDevelopment, false},
 	} {
 		t.Run(fmt.Sprint(tc.assurance), func(t *testing.T) {
-			cfg := validConfig(t)
-			cfg.Assurance = tc.assurance
-			deps := validDependencies(t)
-			if tc.assurance == client.AssuranceProduction {
-				deps = productionDeps(t)
-			}
-			var calls int
-			deps.HTTP = countingHTTP{calls: &calls}
-			c, err := client.New(cfg, deps)
-			if err != nil {
-				t.Fatalf("New: %v", err)
-			}
-			rc := c.ProtectedResource(client.TokenSet{AccessToken: fapi.NewSecret("test-access-token")})
-			req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://127.0.0.1:9999/accounts", nil)
-			if err != nil {
-				t.Fatalf("NewRequestWithContext: %v", err)
-			}
-			_, err = rc.Do(context.Background(), req)
+			calls, err := doLoopbackResourceRequest(t, tc.assurance)
 			refused := err != nil && strings.Contains(err.Error(), "protected resource URL was parsed with fapi.AllowLoopbackHTTP")
 			if refused != tc.refused {
 				t.Fatalf("Do(loopback http) error = %v, want refused = %v", err, tc.refused)
 			}
-			if tc.refused && calls != 0 {
-				t.Fatalf("Do sent %d request(s), want none", calls)
+			wantCalls := 1
+			if tc.refused {
+				wantCalls = 0
 			}
-			if !tc.refused && calls != 1 {
-				t.Fatalf("Do sent %d request(s), want 1", calls)
+			if calls != wantCalls {
+				t.Fatalf("Do sent %d request(s), want %d", calls, wantCalls)
 			}
 		})
 	}
+}
+
+// doLoopbackResourceRequest builds a client at assurance and sends a
+// protected resource request to a loopback http URL through it,
+// returning how many requests reached the HTTP client and Do's error.
+func doLoopbackResourceRequest(t *testing.T, assurance client.AssuranceLevel) (int, error) {
+	t.Helper()
+	cfg := validConfig(t)
+	cfg.Assurance = assurance
+	deps := validDependencies(t)
+	if assurance == client.AssuranceProduction {
+		deps = productionDeps(t)
+	}
+	var calls int
+	deps.HTTP = countingHTTP{calls: &calls}
+	c, err := client.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	rc := c.ProtectedResource(client.TokenSet{AccessToken: fapi.NewSecret("test-access-token")})
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://127.0.0.1:9999/accounts", nil)
+	if err != nil {
+		t.Fatalf("NewRequestWithContext: %v", err)
+	}
+	_, err = rc.Do(context.Background(), req)
+	return calls, err
 }
 
 // TestNewValidatesRedirectURI: Config.RedirectURI must be one an

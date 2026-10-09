@@ -65,15 +65,7 @@ func forgetEssentialACR(t *testing.T, h harness) {
 // a voluntary request, acr_values, and a record written before the
 // requirement was kept aren't enforced.
 func TestCompleteAuthorizationEnforcesEssentialACR(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		claims     string
-		acrValues  string
-		acr        string
-		legacy     bool
-		wantError  string
-		wantValues []string
-	}{
+	for _, tc := range []essentialACRCase{
 		{name: "values, met", claims: acrClaims(`{"essential":true,"values":["urn:gold","urn:silver"]}`), acr: "urn:silver", wantValues: []string{"urn:gold", "urn:silver"}},
 		{name: "values, not met", claims: acrClaims(`{"essential":true,"values":["urn:gold"]}`), acr: "urn:silver", wantError: "login_required", wantValues: []string{"urn:gold"}},
 		{name: "single value, met", claims: acrClaims(`{"essential":true,"value":"urn:gold"}`), acr: "urn:gold", wantValues: []string{"urn:gold"}},
@@ -85,42 +77,58 @@ func TestCompleteAuthorizationEnforcesEssentialACR(t *testing.T) {
 		{name: "acr_values only", acrValues: "urn:gold", acr: "urn:bronze"},
 		{name: "record without the requirement", claims: acrClaims(`{"essential":true,"value":"urn:gold"}`), acr: "urn:bronze", legacy: true, wantValues: []string{"urn:gold"}},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			h := newHarness(t, server.ProfileFAPISecurity, true)
-			extra := map[string]string{}
-			if tc.claims != "" {
-				extra["claims"] = tc.claims
-			}
-			if tc.acrValues != "" {
-				extra["acr_values"] = tc.acrValues
-			}
-			required := interactionFor(t, h, extra)
-			if !slices.Equal(required.Interaction.EssentialACRValues, tc.wantValues) {
-				t.Errorf("EssentialACRValues = %q, want %q", required.Interaction.EssentialACRValues, tc.wantValues)
-			}
-			if tc.legacy {
-				forgetEssentialACR(t, h)
-			}
-			completed, err := h.server.CompleteAuthorization(context.Background(), server.CompleteAuthorizationRequest{Handle: required.Handle, Result: authorizedWithACR(t, h, tc.acr)})
-			if err != nil {
-				t.Fatalf("CompleteAuthorization: %v", err)
-			}
-			redirect, ok := completed.(server.AuthorizationRedirect)
-			if !ok {
-				t.Fatalf("result = %T, want a redirect", completed)
-			}
-			dest := redirect.Destination().URL()
-			q := dest.Query()
-			if q.Get("error") != tc.wantError {
-				t.Errorf("error = %q (%s), want %q", q.Get("error"), q.Get("error_description"), tc.wantError)
-			}
-			if (q.Get("code") != "") != (tc.wantError == "") {
-				t.Errorf("code present = %v, want %v", q.Get("code") != "", tc.wantError == "")
-			}
-			if tc.wantError != "" && len(h.grants.all()) != 0 {
-				t.Error("a code was stored for a refused completion")
-			}
-		})
+		t.Run(tc.name, func(t *testing.T) { runEssentialACRCase(t, tc) })
+	}
+}
+
+// essentialACRCase is one TestCompleteAuthorizationEnforcesEssentialACR
+// case.
+type essentialACRCase struct {
+	name       string
+	claims     string
+	acrValues  string
+	acr        string
+	legacy     bool
+	wantError  string
+	wantValues []string
+}
+
+// runEssentialACRCase pushes tc's request, checks the interaction's
+// EssentialACRValues, completes it with tc.acr and checks the redirect.
+func runEssentialACRCase(t *testing.T, tc essentialACRCase) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	extra := map[string]string{}
+	if tc.claims != "" {
+		extra["claims"] = tc.claims
+	}
+	if tc.acrValues != "" {
+		extra["acr_values"] = tc.acrValues
+	}
+	required := interactionFor(t, h, extra)
+	if !slices.Equal(required.Interaction.EssentialACRValues, tc.wantValues) {
+		t.Errorf("EssentialACRValues = %q, want %q", required.Interaction.EssentialACRValues, tc.wantValues)
+	}
+	if tc.legacy {
+		forgetEssentialACR(t, h)
+	}
+	completed, err := h.server.CompleteAuthorization(context.Background(), server.CompleteAuthorizationRequest{Handle: required.Handle, Result: authorizedWithACR(t, h, tc.acr)})
+	if err != nil {
+		t.Fatalf("CompleteAuthorization: %v", err)
+	}
+	redirect, ok := completed.(server.AuthorizationRedirect)
+	if !ok {
+		t.Fatalf("result = %T, want a redirect", completed)
+	}
+	dest := redirect.Destination().URL()
+	q := dest.Query()
+	if q.Get("error") != tc.wantError {
+		t.Errorf("error = %q (%s), want %q", q.Get("error"), q.Get("error_description"), tc.wantError)
+	}
+	if (q.Get("code") != "") != (tc.wantError == "") {
+		t.Errorf("code present = %v, want %v", q.Get("code") != "", tc.wantError == "")
+	}
+	if tc.wantError != "" && len(h.grants.all()) != 0 {
+		t.Error("a code was stored for a refused completion")
 	}
 }
 

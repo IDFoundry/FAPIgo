@@ -28,12 +28,7 @@ func TestNewVerifierRefusesIncompleteBundledResolvers(t *testing.T) {
 		mutate(&j)
 		for form, resolver := range map[string]resource.AccessTokenResolver{"value": j, "pointer": &j} {
 			t.Run("JWTAccessTokens "+form+" "+want, func(t *testing.T) {
-				deps := validDependencies(t)
-				deps.AccessTokens = resolver
-				_, err := resource.NewVerifier(validConfig(t), deps)
-				if err == nil || !strings.Contains(err.Error(), "access_tokens (JWTAccessTokens): "+want) {
-					t.Fatalf("NewVerifier = %v, want %q", err, want)
-				}
+				expectResolverRefused(t, resolver, "access_tokens (JWTAccessTokens): "+want)
 			})
 		}
 	}
@@ -43,12 +38,7 @@ func TestNewVerifierRefusesIncompleteBundledResolvers(t *testing.T) {
 		"pointer": &resource.OpaqueAccessTokens{},
 	} {
 		t.Run("OpaqueAccessTokens "+form+" without a store", func(t *testing.T) {
-			deps := validDependencies(t)
-			deps.AccessTokens = resolver
-			_, err := resource.NewVerifier(validConfig(t), deps)
-			if err == nil || !strings.Contains(err.Error(), "access_tokens (OpaqueAccessTokens): store is required") {
-				t.Fatalf("NewVerifier = %v, want the store required", err)
-			}
+			expectResolverRefused(t, resolver, "access_tokens (OpaqueAccessTokens): store is required")
 		})
 	}
 
@@ -57,11 +47,7 @@ func TestNewVerifierRefusesIncompleteBundledResolvers(t *testing.T) {
 		"nil *OpaqueAccessTokens": (*resource.OpaqueAccessTokens)(nil),
 	} {
 		t.Run(name, func(t *testing.T) {
-			deps := validDependencies(t)
-			deps.AccessTokens = resolver
-			if _, err := resource.NewVerifier(validConfig(t), deps); err == nil || !strings.Contains(err.Error(), "is a "+name) {
-				t.Fatalf("NewVerifier = %v, want %s refused", err, name)
-			}
+			expectResolverRefused(t, resolver, "is a "+name)
 		})
 	}
 
@@ -79,4 +65,15 @@ func TestNewVerifierRefusesIncompleteBundledResolvers(t *testing.T) {
 			}
 		}
 	})
+}
+
+// expectResolverRefused checks that NewVerifier refuses resolver as its
+// access token resolver with an error containing want.
+func expectResolverRefused(t *testing.T, resolver resource.AccessTokenResolver, want string) {
+	t.Helper()
+	deps := validDependencies(t)
+	deps.AccessTokens = resolver
+	if _, err := resource.NewVerifier(validConfig(t), deps); err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("NewVerifier = %v, want an error containing %q", err, want)
+	}
 }

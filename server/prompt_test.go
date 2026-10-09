@@ -85,31 +85,7 @@ func TestCompleteAuthorizationInteractionNeeded(t *testing.T) {
 		server.NeedAccountSelection: "account_selection_required",
 		server.NeedInteraction:      "interaction_required",
 	} {
-		t.Run(code, func(t *testing.T) {
-			h := newHarness(t, server.ProfileFAPISecurity, true)
-			handle := beginInteraction(t, h)
-			result, err := h.server.CompleteAuthorization(context.Background(), server.CompleteAuthorizationRequest{
-				Handle: handle, Result: server.InteractionNeeded(need, "no session"),
-			})
-			if err != nil {
-				t.Fatalf("CompleteAuthorization: %v", err)
-			}
-			redirect, ok := result.(server.AuthorizationRedirect)
-			if !ok {
-				t.Fatalf("result = %T, want server.AuthorizationRedirect", result)
-			}
-			dest := redirect.Destination().URL()
-			query := dest.Query()
-			if got := query.Get("error"); got != code {
-				t.Fatalf("error = %q, want %q", got, code)
-			}
-			if got := query.Get("error_description"); got != "no session" {
-				t.Errorf("error_description = %q, want the reason", got)
-			}
-			if query.Has("code") || len(h.grants.all()) != 0 {
-				t.Fatalf("a code was issued for %s", code)
-			}
-		})
+		t.Run(code, func(t *testing.T) { runInteractionNeededCase(t, need, code) })
 	}
 
 	t.Run("not an InteractionNeed", func(t *testing.T) {
@@ -126,6 +102,35 @@ func TestCompleteAuthorizationInteractionNeeded(t *testing.T) {
 			t.Fatalf("result = %#v, want a server_error AuthorizationLocalError", result)
 		}
 	})
+}
+
+// runInteractionNeededCase completes an interaction with
+// InteractionNeeded(need) and checks the client is sent code, with the
+// reason and no authorization code.
+func runInteractionNeededCase(t *testing.T, need server.InteractionNeed, code string) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	handle := beginInteraction(t, h)
+	result, err := h.server.CompleteAuthorization(context.Background(), server.CompleteAuthorizationRequest{
+		Handle: handle, Result: server.InteractionNeeded(need, "no session"),
+	})
+	if err != nil {
+		t.Fatalf("CompleteAuthorization: %v", err)
+	}
+	redirect, ok := result.(server.AuthorizationRedirect)
+	if !ok {
+		t.Fatalf("result = %T, want server.AuthorizationRedirect", result)
+	}
+	dest := redirect.Destination().URL()
+	query := dest.Query()
+	if got := query.Get("error"); got != code {
+		t.Fatalf("error = %q, want %q", got, code)
+	}
+	if got := query.Get("error_description"); got != "no session" {
+		t.Errorf("error_description = %q, want the reason", got)
+	}
+	if query.Has("code") || len(h.grants.all()) != 0 {
+		t.Fatalf("a code was issued for %s", code)
+	}
 }
 
 // forgetPushedAt rewrites every pending interaction's stored request
@@ -161,14 +166,7 @@ func forgetPushedAt(t *testing.T, h harness) {
 // client with login_required rather than a code; other prompts and a
 // record written before the push time was kept aren't checked.
 func TestCompleteAuthorizationEnforcesPromptLogin(t *testing.T) {
-	for _, tc := range []struct {
-		name      string
-		prompt    string
-		authAgo   time.Duration
-		legacy    bool
-		zeroAuth  bool
-		wantError string
-	}{
+	for _, tc := range []promptLoginCase{
 		{name: "authenticated for the request", prompt: "login", authAgo: 0},
 		{name: "authenticated within the skew", prompt: "login", authAgo: 4 * time.Second},
 		{name: "existing session", prompt: "login", authAgo: time.Minute, wantError: "login_required"},
@@ -180,41 +178,56 @@ func TestCompleteAuthorizationEnforcesPromptLogin(t *testing.T) {
 		{name: "prompt=none", prompt: "none", authAgo: time.Hour},
 		{name: "no prompt", authAgo: time.Hour},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			h := newHarness(t, server.ProfileFAPISecurity, true)
-			extra := map[string]string{}
-			if tc.prompt != "" {
-				extra["prompt"] = tc.prompt
-			}
-			handle := interactionFor(t, h, extra).Handle
-			if tc.legacy {
-				forgetPushedAt(t, h)
-			}
-			result := authorizedAt(t, h.now.Add(-tc.authAgo))
-			if tc.zeroAuth {
-				subjectID, _ := server.NewSubjectID("user-1")
-				subject, _ := server.NewAuthenticatedSubject(subjectID)
-				result = server.Authorize(subject, server.AuthenticationContext{}, server.GrantedAuthorization{Scope: []string{"openid", "accounts"}})
-			}
-			completed, err := h.server.CompleteAuthorization(context.Background(), server.CompleteAuthorizationRequest{Handle: handle, Result: result})
-			if err != nil {
-				t.Fatalf("CompleteAuthorization: %v", err)
-			}
-			redirect, ok := completed.(server.AuthorizationRedirect)
-			if !ok {
-				t.Fatalf("result = %T, want a redirect", completed)
-			}
-			dest := redirect.Destination().URL()
-			q := dest.Query()
-			if q.Get("error") != tc.wantError {
-				t.Errorf("error = %q (%s), want %q", q.Get("error"), q.Get("error_description"), tc.wantError)
-			}
-			if (q.Get("code") != "") != (tc.wantError == "") {
-				t.Errorf("code present = %v, want %v", q.Get("code") != "", tc.wantError == "")
-			}
-			if tc.wantError != "" && len(h.grants.all()) != 0 {
-				t.Error("a code was stored for a refused completion")
-			}
-		})
+		t.Run(tc.name, func(t *testing.T) { runPromptLoginCase(t, tc) })
+	}
+}
+
+// promptLoginCase is one TestCompleteAuthorizationEnforcesPromptLogin
+// case.
+type promptLoginCase struct {
+	name      string
+	prompt    string
+	authAgo   time.Duration
+	legacy    bool
+	zeroAuth  bool
+	wantError string
+}
+
+// runPromptLoginCase pushes tc's request, completes it with an
+// authentication tc.authAgo before now and checks the redirect.
+func runPromptLoginCase(t *testing.T, tc promptLoginCase) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	extra := map[string]string{}
+	if tc.prompt != "" {
+		extra["prompt"] = tc.prompt
+	}
+	handle := interactionFor(t, h, extra).Handle
+	if tc.legacy {
+		forgetPushedAt(t, h)
+	}
+	result := authorizedAt(t, h.now.Add(-tc.authAgo))
+	if tc.zeroAuth {
+		subjectID, _ := server.NewSubjectID("user-1")
+		subject, _ := server.NewAuthenticatedSubject(subjectID)
+		result = server.Authorize(subject, server.AuthenticationContext{}, server.GrantedAuthorization{Scope: []string{"openid", "accounts"}})
+	}
+	completed, err := h.server.CompleteAuthorization(context.Background(), server.CompleteAuthorizationRequest{Handle: handle, Result: result})
+	if err != nil {
+		t.Fatalf("CompleteAuthorization: %v", err)
+	}
+	redirect, ok := completed.(server.AuthorizationRedirect)
+	if !ok {
+		t.Fatalf("result = %T, want a redirect", completed)
+	}
+	dest := redirect.Destination().URL()
+	q := dest.Query()
+	if q.Get("error") != tc.wantError {
+		t.Errorf("error = %q (%s), want %q", q.Get("error"), q.Get("error_description"), tc.wantError)
+	}
+	if (q.Get("code") != "") != (tc.wantError == "") {
+		t.Errorf("code present = %v, want %v", q.Get("code") != "", tc.wantError == "")
+	}
+	if tc.wantError != "" && len(h.grants.all()) != 0 {
+		t.Error("a code was stored for a refused completion")
 	}
 }

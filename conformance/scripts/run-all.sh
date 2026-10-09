@@ -545,7 +545,7 @@ run_federation_plan() {
 	# bearer token (docker-compose.yml passes this variable). Random per
 	# run unless the caller set one, since its port is published on
 	# every interface.
-	if [ -z "${FEDERATION_TRUST_ANCHOR_ADMIN_TOKEN:-}" ]; then
+	if [[ -z "${FEDERATION_TRUST_ANCHOR_ADMIN_TOKEN:-}" ]]; then
 		FEDERATION_TRUST_ANCHOR_ADMIN_TOKEN="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
 	fi
 	export FEDERATION_TRUST_ANCHOR_ADMIN_TOKEN

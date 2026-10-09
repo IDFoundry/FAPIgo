@@ -37,7 +37,7 @@ func TestParseIDTokenRefusesOtherExplicitTypes(t *testing.T) {
 	} {
 		t.Run(typ, func(t *testing.T) {
 			_, err := ParseIDToken(unsignedCompact(typHeader(typ), payload))
-			if got := errors.Is(err, jose.ErrOtherExplicitType); got != refused {
+			if errors.Is(err, jose.ErrOtherExplicitType) != refused {
 				t.Fatalf("ParseIDToken(typ %q) error = %v, want refused = %v", typ, err, refused)
 			}
 			if !refused && err != nil {

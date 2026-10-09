@@ -33,14 +33,24 @@ func validateClaimsParameter(params map[string]json.RawMessage) error {
 		if !ok || isJSONNull(value) {
 			continue
 		}
-		var requests map[string]json.RawMessage
-		if trimmed := bytes.TrimSpace(value); len(trimmed) == 0 || trimmed[0] != '{' || json.Unmarshal(trimmed, &requests) != nil {
-			return fmt.Errorf("claims.%s must be a JSON object", member)
+		if err := validateClaimsLocationValue(member, value); err != nil {
+			return err
 		}
-		for name, request := range requests {
-			if trimmed := bytes.TrimSpace(request); !isJSONNull(trimmed) && (len(trimmed) == 0 || trimmed[0] != '{') {
-				return fmt.Errorf("claims.%s.%s must be null or a JSON object", member, name)
-			}
+	}
+	return nil
+}
+
+// validateClaimsLocationValue checks one present, non-null location
+// member of the "claims" parameter ("id_token" or "userinfo"): it must
+// be a JSON object mapping each claim name to null or an object.
+func validateClaimsLocationValue(member string, value json.RawMessage) error {
+	var requests map[string]json.RawMessage
+	if trimmed := bytes.TrimSpace(value); len(trimmed) == 0 || trimmed[0] != '{' || json.Unmarshal(trimmed, &requests) != nil {
+		return fmt.Errorf("claims.%s must be a JSON object", member)
+	}
+	for name, request := range requests {
+		if trimmed := bytes.TrimSpace(request); !isJSONNull(trimmed) && (len(trimmed) == 0 || trimmed[0] != '{') {
+			return fmt.Errorf("claims.%s.%s must be null or a JSON object", member, name)
 		}
 	}
 	return nil

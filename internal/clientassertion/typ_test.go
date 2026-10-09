@@ -28,7 +28,7 @@ func TestParseRefusesOtherExplicitTypes(t *testing.T) {
 				header = fmt.Sprintf(`{"alg":"ES256","typ":%q}`, typ)
 			}
 			_, err := Parse(enc([]byte(header)) + "." + enc([]byte(payload)) + "." + enc(make([]byte, 64)))
-			if got := errors.Is(err, jose.ErrOtherExplicitType); got != refused {
+			if errors.Is(err, jose.ErrOtherExplicitType) != refused {
 				t.Fatalf("Parse(typ %q) error = %v, want refused = %v", typ, err, refused)
 			}
 			if !refused && err != nil {

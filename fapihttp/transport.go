@@ -70,6 +70,12 @@ func (c TransportConfig) AllowsLoopback() bool {
 // by resolving once, validating every candidate address, and dialing
 // only an address it already validated — never re-resolving the
 // hostname at connect time.
+//
+// NewClient returns the transport: the *http.Client that
+// client.Dependencies.HTTP takes directly, and that New wraps into a
+// *Client, the fetcher client.Discover, keys.NewJWKSIssuerKeySource and
+// the federation package take. RecommendedTransportConfig gives a cfg to
+// start from.
 func NewClient(cfg TransportConfig) (*http.Client, error) {
 	if cfg.DialTimeout <= 0 {
 		return nil, fmt.Errorf("fapihttp: transport config: dial timeout must be positive")

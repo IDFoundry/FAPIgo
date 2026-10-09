@@ -137,6 +137,17 @@ type Client struct {
 // is copied with its CheckRedirect replaced by one that never follows a
 // redirect (see HTTPClient), so the caller's own value is unchanged and
 // later changes to it don't reach the Client.
+//
+// New returns the fetcher, distinct from NewClient's *http.Client
+// transport, which it usually wraps:
+//
+//	transport, err := fapihttp.NewClient(fapihttp.RecommendedTransportConfig())
+//	...
+//	fetcher, err := fapihttp.New(transport, fapihttp.RecommendedConfig())
+//
+// client.Discover, keys.NewJWKSIssuerKeySource and the federation
+// package take the fetcher; client.Dependencies.HTTP takes the
+// transport.
 func New(http HTTPClient, cfg Config) (*Client, error) {
 	if http == nil {
 		return nil, fmt.Errorf("fapihttp: http client is required")

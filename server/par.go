@@ -412,7 +412,7 @@ func (s *Server) authenticateClientViaAssertion(ctx context.Context, params map[
 		Now:               s.deps.Clock.Now(),
 		MaxLifetime:       s.cfg.Limits.MaxClientAssertionLifetime,
 		MaxClockSkew:      s.cfg.Limits.MaxClockSkew,
-		Replay:            s.clientAssertionReplayChecker(),
+		Replay:            s.clientAssertionReplayChecker(client.ID()),
 	})
 	if err != nil {
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
@@ -531,7 +531,7 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 		Now:              s.deps.Clock.Now(),
 		MaxLifetime:      s.cfg.Limits.MaxRequestObjectLifetime,
 		MaxClockSkew:     s.cfg.Limits.MaxClockSkew,
-		Replay:           s.requestObjectReplayChecker(),
+		Replay:           s.requestObjectReplayChecker(client.ID()),
 		// FAPI 2.0 Message Signing Final §5.3.1 mandates nbf on a
 		// request object; the base FAPI 2.0 Security Profile does not —
 		// see requestobject.VerifyPolicy.RequireNotBefore's doc comment.
@@ -698,6 +698,9 @@ func (s *Server) validateAuthorizationParameters(params map[string]json.RawMessa
 	if _, err := requestedPrompt(params); err != nil {
 		return nil, newError(ErrorInvalidRequest, 400, err.Error(), nil)
 	}
+	if err := validateClaimsParameter(params); err != nil {
+		return nil, newError(ErrorInvalidRequest, 400, err.Error(), nil)
+	}
 	if _, err := essentialACRValues(params); err != nil {
 		return nil, newError(ErrorInvalidRequest, 400, err.Error(), nil)
 	}
@@ -784,9 +787,9 @@ func (s *Server) validateScope(scope string, client storage.RegisteredClient) er
 // Config.OAuthOnly refusing "openid" universally — see its own doc
 // comment. It runs where a grant is made (PAR, CIBA, client_credentials,
 // IssueRefreshToken) and again where tokens are later issued from a
-// stored grant (refresh, the CIBA token exchange; see
-// checkGrantStillAllowed), since a registration or OAuthOnly can change
-// in between. That's what keeps the openid-gated branches in token.go,
+// stored grant (the authorization code exchange, refresh, the CIBA token
+// exchange; see checkGrantStillAllowed), since a registration or
+// OAuthOnly can change in between. That's what keeps the openid-gated branches in token.go,
 // refresh.go and backchannel_token.go from issuing an ID token or scope
 // the current configuration no longer allows.
 func (s *Server) clientAllowsScope(client storage.RegisteredClient, scope string) bool {

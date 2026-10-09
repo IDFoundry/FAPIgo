@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/httperror"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -217,7 +218,11 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 
 func (s *Server) completeErrorRedirect(ctx context.Context, clientID fapi.ClientID, redirectURI, state, errorCode, description string, outcome AuditOutcome) (AuthorizationResult, error) {
 	params := map[string]string{"error": errorCode, "state": state}
-	if description != "" {
+	// description may be the application's own reason (Deny,
+	// AuthenticationFailed, InteractionNeeded): one outside RFC 6749
+	// §4.1.2.1's error_description characters is dropped, as NewError
+	// drops one.
+	if httperror.IsErrorText(description) {
 		params["error_description"] = description
 	}
 	destination, buildErr := s.buildAuthorizationResponse(ctx, clientID, redirectURI, params)

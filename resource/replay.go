@@ -2,9 +2,10 @@ package resource
 
 import (
 	"context"
-	"crypto/sha256"
 	"time"
 
+	"github.com/idfoundry/fapigo/internal/jose"
+	"github.com/idfoundry/fapigo/internal/replaykey"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -13,19 +14,18 @@ import (
 // tokens in a shared storage.ReplayStore — see storage.ReplayNamespace.
 const dpopReplayNamespace storage.ReplayNamespace = "resource:dpop"
 
-// replayChecker adapts storage.ReplayStore — which is keyed by a
-// namespaced digest — to the narrow, jti-string-keyed ReplayChecker
-// interface internal/dpop defines. It hashes jti itself so internal/dpop
-// never sees storage.ReplayStore's shape.
+// replayChecker records a DPoP proof's jti in storage.ReplayStore,
+// scoped to the key that signed the proof (replaykey.Digest), so a proof
+// signed with one key can't use up a jti another key will send.
 type replayChecker struct {
 	store     storage.ReplayStore
 	namespace storage.ReplayNamespace
 }
 
-func (r replayChecker) UseOnce(ctx context.Context, jti string, expiresAt time.Time) error {
+func (r replayChecker) UseOnce(ctx context.Context, key jose.Thumbprint, jti string, expiresAt time.Time) error {
 	return r.store.UseOnce(ctx, storage.ReplayUse{
 		Namespace: r.namespace,
-		Digest:    sha256.Sum256([]byte(jti)),
+		Digest:    replaykey.Digest(key.String(), jti),
 		ExpiresAt: expiresAt,
 	})
 }

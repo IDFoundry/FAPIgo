@@ -12,14 +12,16 @@ import (
 	"github.com/idfoundry/fapigo/internal/jose"
 )
 
-// ReplayChecker records that a DPoP proof's "jti" has been used, failing
-// if it has been seen before. Implementations are expected to key
-// storage by a namespaced digest of jti, not the raw value — see
-// storage.ReplayStore — but that adaptation is the caller's
-// responsibility so this package stays decoupled from a specific storage
-// contract.
+// ReplayChecker records that a DPoP proof's "jti" has been used by the
+// key the proof was signed with, failing if that key has used it
+// before. key is that key's JWK thumbprint: scoping by it means a proof
+// signed with one key can't use up a jti another key will send.
+// Implementations are expected to key storage by a namespaced digest of
+// key and jti, not the raw values — see storage.ReplayStore — but that
+// adaptation is the caller's responsibility so this package stays
+// decoupled from a specific storage contract.
 type ReplayChecker interface {
-	UseOnce(ctx context.Context, jti string, expiresAt time.Time) error
+	UseOnce(ctx context.Context, key jose.Thumbprint, jti string, expiresAt time.Time) error
 }
 
 // VerifyRequest describes one DPoP proof to verify.
@@ -125,15 +127,15 @@ func Verify(ctx context.Context, req VerifyRequest) (VerifiedProof, error) {
 		return VerifiedProof{}, err
 	}
 
-	if req.Replay != nil {
-		if err := req.Replay.UseOnce(ctx, c.JTI, iat.Add(req.MaxProofAge)); err != nil {
-			return VerifiedProof{}, fmt.Errorf("dpop: replay check: %w", err)
-		}
-	}
-
 	thumbprint, err := compact.Header.JWK.Thumbprint()
 	if err != nil {
 		return VerifiedProof{}, fmt.Errorf("dpop: %w", err)
+	}
+
+	if req.Replay != nil {
+		if err := req.Replay.UseOnce(ctx, thumbprint, c.JTI, iat.Add(req.MaxProofAge)); err != nil {
+			return VerifiedProof{}, fmt.Errorf("dpop: replay check: %w", err)
+		}
 	}
 	return VerifiedProof{Thumbprint: thumbprint, IssuedAt: iat, Nonce: c.Nonce, JTI: c.JTI}, nil
 }

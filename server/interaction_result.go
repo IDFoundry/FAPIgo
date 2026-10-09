@@ -42,7 +42,9 @@ func (denyResult) interactionResult() {}
 // Deny records that the resource owner (or the application, on their
 // behalf) declined to authorize the request. reason is an optional,
 // human-readable explanation the caller controls — it is not internal
-// diagnostic detail, and may be surfaced to the client.
+// diagnostic detail, and may be surfaced to the client as
+// error_description, which allows only printable ASCII other than '"'
+// and '\' (RFC 6749 §4.1.2.1); a reason outside that is dropped.
 func Deny(reason string) InteractionResult {
 	return denyResult{reason: reason}
 }
@@ -57,7 +59,8 @@ func (authenticationFailedResult) interactionResult() {}
 // AuthenticationFailed records that the resource owner could not be
 // authenticated at all (as distinct from authenticating and then
 // declining to authorize). reason is an optional, human-readable
-// explanation the caller controls.
+// explanation the caller controls, sent as error_description under
+// Deny's rule.
 func AuthenticationFailed(reason string) InteractionResult {
 	return authenticationFailedResult{reason: reason}
 }
@@ -116,7 +119,8 @@ func (interactionNeededResult) interactionResult() {}
 // CompleteAuthorization answers the client with need's error
 // (login_required, consent_required, account_selection_required or
 // interaction_required). reason is an optional, human-readable
-// explanation the caller controls.
+// explanation the caller controls, sent as error_description under
+// Deny's rule.
 //
 // It answers a redirect-based authorization only: a backchannel
 // authentication request carries no prompt, and

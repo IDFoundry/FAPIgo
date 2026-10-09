@@ -16,20 +16,25 @@ import (
 	"github.com/idfoundry/fapigo/internal/jose"
 )
 
-// memoryReplayChecker is a minimal in-memory ReplayChecker for tests.
+// memoryReplayChecker is a minimal in-memory ReplayChecker for tests,
+// keyed by the signing key and jti as ReplayChecker's doc asks. keys
+// records which key each call named.
 type memoryReplayChecker struct {
 	seen map[string]bool
+	keys []jose.Thumbprint
 }
 
 func newMemoryReplayChecker() *memoryReplayChecker {
 	return &memoryReplayChecker{seen: make(map[string]bool)}
 }
 
-func (m *memoryReplayChecker) UseOnce(_ context.Context, jti string, _ time.Time) error {
-	if m.seen[jti] {
+func (m *memoryReplayChecker) UseOnce(_ context.Context, key jose.Thumbprint, jti string, _ time.Time) error {
+	m.keys = append(m.keys, key)
+	k := key.String() + " " + jti
+	if m.seen[k] {
 		return errReplayed
 	}
-	m.seen[jti] = true
+	m.seen[k] = true
 	return nil
 }
 
@@ -109,6 +114,29 @@ func TestVerifyDetectsReplay(t *testing.T) {
 	}
 	if _, err := Verify(context.Background(), req); err == nil {
 		t.Fatalf("second Verify (replay) = nil error, want error")
+	}
+}
+
+// TestVerifyScopesReplayToTheProofKey: the replay checker is told the
+// thumbprint of the key that signed the proof, so a store can keep one
+// key's jtis apart from another's.
+func TestVerifyScopesReplayToTheProofKey(t *testing.T) {
+	now := time.Now()
+	target := mustURL(t, "https://as.example/token")
+	replay := newMemoryReplayChecker()
+	verify := func(proof string) (VerifiedProof, error) {
+		return Verify(context.Background(), VerifyRequest{Proof: proof, Method: "POST", URL: target, Now: now, MaxProofAge: time.Minute, Replay: replay})
+	}
+	proof, err := CreateProof(ProofRequest{Signer: generateKey(t), Algorithm: fapi.ES256, Method: "POST", URL: target, Now: now})
+	if err != nil {
+		t.Fatalf("CreateProof: %v", err)
+	}
+	verified, err := verify(proof)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if len(replay.keys) != 1 || replay.keys[0] != verified.Thumbprint {
+		t.Fatalf("replay checker keys = %v, want [%v]", replay.keys, verified.Thumbprint)
 	}
 }
 

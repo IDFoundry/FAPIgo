@@ -7,6 +7,7 @@ import (
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/httperror"
 	"github.com/idfoundry/fapigo/internal/par"
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -87,17 +88,21 @@ type BeginAuthorizationRequest struct {
 // "Referrer-Policy: no-referrer" and no third-party resources, and don't
 // log full authorization request URLs.
 func (s *Server) BeginAuthorization(ctx context.Context, req BeginAuthorizationRequest) (AuthorizationAction, error) {
+	// Until it matches the client that pushed the request (below), the
+	// query's client_id is only what the browser claims: those failures
+	// are audited with no client (AuditEvent.ClientID), never with this
+	// unverified value, which could carry anything into an audit log.
 	reference, ok := par.SplitRequestURI(req.RequestURI)
 	if !ok {
-		return s.beginFail(ctx, req.ClientID, newError(ErrorInvalidRequest, 400, "request_uri is not recognized", nil)), nil
+		return s.beginFail(ctx, "", newError(ErrorInvalidRequest, 400, "request_uri is not recognized", nil)), nil
 	}
 	if req.ClientID == "" {
-		return s.beginFail(ctx, req.ClientID, newError(ErrorInvalidRequest, 400, "client_id is required", nil)), nil
+		return s.beginFail(ctx, "", newError(ErrorInvalidRequest, 400, "client_id is required", nil)), nil
 	}
 
 	handle, err := generateInteractionHandle(s.deps.Random)
 	if err != nil {
-		return s.beginFail(ctx, req.ClientID, newError(ErrorServerError, 500, "failed to generate interaction handle", err)), nil
+		return s.beginFail(ctx, "", newError(ErrorServerError, 500, "failed to generate interaction handle", err)), nil
 	}
 
 	now := s.deps.Clock.Now()
@@ -108,11 +113,11 @@ func (s *Server) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 		HandleExpiresAt: handleExpiresAt,
 	})
 	if err != nil {
-		return s.beginFail(ctx, req.ClientID, newError(ErrorInvalidRequestURI, 400, "request_uri is invalid, expired, or already used", err)), nil
+		return s.beginFail(ctx, "", newError(ErrorInvalidRequestURI, 400, "request_uri is invalid, expired, or already used", err)), nil
 	}
 
 	if pushed.ClientID != req.ClientID {
-		return s.beginFail(ctx, req.ClientID, newError(ErrorInvalidRequestURI, 400, "client_id does not match the pushed authorization request", nil)), nil
+		return s.beginFail(ctx, "", newError(ErrorInvalidRequestURI, 400, "client_id does not match the pushed authorization request", nil)), nil
 	}
 	if !now.Before(pushed.ExpiresAt) {
 		return s.beginFail(ctx, req.ClientID, newError(ErrorInvalidRequestURI, 400, "request_uri has expired", nil)), nil
@@ -232,9 +237,16 @@ func (s *Server) BuildAuthorizationErrorRedirect(ctx context.Context, client sto
 	if _, err := s.parseRedirectURI(client, redirectURI); err != nil {
 		return fapi.URL{}, newError(ErrorInvalidRequest, 400, "redirect_uri is not an acceptable redirect destination", err)
 	}
-	dest, buildErr := s.buildAuthorizationResponse(ctx, client.ID(), redirectURI, map[string]string{
-		"error": errorCode, "state": state, "error_description": description,
-	})
+	if !httperror.IsErrorText(errorCode) {
+		return fapi.URL{}, newError(ErrorServerError, 500, "errorCode is not RFC 6749 error text", nil)
+	}
+	params := map[string]string{"error": errorCode, "state": state}
+	// Dropped, as NewError drops one, when outside RFC 6749 §4.1.2.1's
+	// error_description characters.
+	if httperror.IsErrorText(description) {
+		params["error_description"] = description
+	}
+	dest, buildErr := s.buildAuthorizationResponse(ctx, client.ID(), redirectURI, params)
 	if buildErr != nil {
 		return fapi.URL{}, buildErr
 	}

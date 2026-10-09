@@ -228,3 +228,72 @@ func TestCIBAExchangeRechecksServerRARRegistry(t *testing.T) {
 		})
 	}
 }
+
+// TestCodeExchangeRechecksClient covers the registration changing between
+// the authorization and the code exchange: a scope removed, OAuthOnly
+// turned on, or the client's redirect URIs removed. The exchange refuses
+// the grant rather than issuing what the client may no longer have.
+func TestCodeExchangeRechecksClient(t *testing.T) {
+	exchange := func(t *testing.T, h harness, code string) (server.TokenResult, error) {
+		t.Helper()
+		return h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
+			HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+			DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
+		})
+	}
+
+	t.Run("scope removed", func(t *testing.T) {
+		h := newHarness(t, server.ProfileFAPISecurity, true)
+		code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
+		reregister(t, h, []string{"openid"}, nil, false)
+		if _, err := exchange(t, h, code); serverErrorCode(t, err) != server.ErrorInvalidScope {
+			t.Fatalf("exchange after de-scoping: %v, want invalid_scope", err)
+		}
+	})
+
+	t.Run("OAuthOnly turned on", func(t *testing.T) {
+		h := newHarness(t, server.ProfileFAPISecurity, true)
+		code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
+		cfg := h.cfg
+		cfg.OAuthOnly = true
+		srv, err := server.New(cfg, h.deps)
+		if err != nil {
+			t.Fatalf("server.New(OAuthOnly): %v", err)
+		}
+		h.server = srv
+		result, err := exchange(t, h, code)
+		if serverErrorCode(t, err) != server.ErrorInvalidScope {
+			t.Fatalf("exchange of an openid grant under OAuthOnly: %v, want invalid_scope", err)
+		}
+		if result.HasIDToken {
+			t.Error("exchange under OAuthOnly issued an ID token")
+		}
+	})
+
+	t.Run("redirect URIs removed", func(t *testing.T) {
+		h := newHarness(t, server.ProfileFAPISecurity, true)
+		code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
+		client, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
+			ID:                           testClientID,
+			ClientAssertionAlgorithm:     fapi.ES256,
+			RequestObjectAlgorithm:       fapi.ES256,
+			AllowedScopes:                []string{"openid", "accounts"},
+			AllowsClientCredentialsGrant: true,
+		})
+		if err != nil {
+			t.Fatalf("NewRegisteredClient: %v", err)
+		}
+		h.clients.clients[testClientID] = client
+		if _, err := exchange(t, h, code); serverErrorCode(t, err) != server.ErrorUnauthorizedClient {
+			t.Fatalf("exchange after redirect URIs removed: %v, want unauthorized_client", err)
+		}
+	})
+
+	t.Run("unchanged registration still succeeds", func(t *testing.T) {
+		h := newHarness(t, server.ProfileFAPISecurity, true)
+		code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
+		if _, err := exchange(t, h, code); err != nil {
+			t.Fatalf("exchange: %v", err)
+		}
+	})
+}

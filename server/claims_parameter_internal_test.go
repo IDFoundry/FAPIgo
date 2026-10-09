@@ -24,6 +24,13 @@ func TestValidateClaimsParameter(t *testing.T) {
 		"userinfo an array":                {json.RawMessage(`{"userinfo":["email"]}`), false},
 		"claim request a string":           {json.RawMessage(`{"id_token":{"email":"yes"}}`), false},
 		"claim request true":               {json.RawMessage(`{"id_token":{"email":true}}`), false},
+		// Members are case-sensitive: a case variant of id_token or
+		// userinfo, which encoding/json's struct decoding would match,
+		// is refused rather than silently honoured or ignored.
+		"ID_TOKEN with an essential acr": {json.RawMessage(`{"ID_TOKEN":{"acr":{"essential":true,"values":["gold"]}}}`), false},
+		"ID_TOKEN not an object":         {json.RawMessage(`{"ID_TOKEN":5}`), false},
+		"UserInfo":                       {json.RawMessage(`{"UserInfo":{"name":null}}`), false},
+		"Id_Token as a form string":      {str(`{"Id_Token":{"email":null}}`), false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := validateClaimsParameter(map[string]json.RawMessage{"claims": tc.raw})
@@ -34,5 +41,19 @@ func TestValidateClaimsParameter(t *testing.T) {
 	}
 	if err := validateClaimsParameter(map[string]json.RawMessage{}); err != nil {
 		t.Fatalf("no claims parameter: %v", err)
+	}
+}
+
+// TestRequestedClaimNamesReadExactMembers: the claim-name reader sees
+// the same members validation does, so a case variant validation would
+// refuse is never read as a request for claims.
+func TestRequestedClaimNamesReadExactMembers(t *testing.T) {
+	idToken, userinfo := parseRequestedClaimNames(json.RawMessage(`{"ID_TOKEN":{"email":null},"UserInfo":{"name":null}}`))
+	if idToken != nil || userinfo != nil {
+		t.Fatalf("parseRequestedClaimNames(case variants) = %q, %q; want no claims", idToken, userinfo)
+	}
+	idToken, userinfo = parseRequestedClaimNames(json.RawMessage(`{"id_token":{"email":null},"userinfo":{"name":null}}`))
+	if len(idToken) != 1 || idToken[0] != "email" || len(userinfo) != 1 || userinfo[0] != "name" {
+		t.Fatalf("parseRequestedClaimNames(exact) = %q, %q; want [email], [name]", idToken, userinfo)
 	}
 }

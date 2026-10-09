@@ -79,11 +79,11 @@ func TestPollBackchannelAuthenticationRequiresIDTokenForOpenID(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			sealed, err := sealer.Seal(session)
+			sealed, err := sealer.Seal(session, "user-1")
 			if err != nil {
 				t.Fatal(err)
 			}
-			restored, _, err := sealer.Open(sealed)
+			restored, _, err := sealer.Open(sealed, "user-1")
 			if err != nil {
 				t.Fatal(err)
 			}

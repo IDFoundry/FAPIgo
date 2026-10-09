@@ -44,11 +44,13 @@ makes exactly one attempt, so you poll on your own schedule (a job
 queue, a ticker) rather than blocking a goroutine while a person
 decides. The session survives restarts: seal it with a
 `client.BackchannelSessionSealer` (`NewBackchannelSessionSealer(c, keys)`,
-then `Seal`), store the result keyed by its `AuthReqID`, and `Open` it on
-any instance. The sealing is AES-256-GCM, bound to the client's issuer
-and client ID, so a stored session can't be edited: it records whether
-the request asked for `openid`, which decides whether an approval
-without an ID token is refused.
+then `Seal(session, owner)`), store the result keyed by its `AuthReqID`,
+and `Open(sealed, owner)` it on any instance. The sealing is AES-256-GCM,
+bound to the client's issuer and client ID and to the owner you name
+(the user, account or connection the request is for), so a stored
+session can't be edited, and one leaked from another user doesn't open
+under this one's: it records whether the request asked for `openid`,
+which decides whether an approval without an ID token is refused.
 
 For ping delivery, set `Config.BackchannelTokenDeliveryMode` to
 `storage.BackchannelTokenDeliveryModePing`, and register your

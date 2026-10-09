@@ -86,7 +86,8 @@ type BeginBackchannelAuthenticationRequest struct {
 //
 // A session can be stored and restored with a BackchannelSessionSealer,
 // so another instance can poll for it, or authenticate its ping
-// callback; the sealing keeps a stored session from being edited.
+// callback; the sealing keeps a stored session from being edited, and
+// binds it to the owner it was sealed for.
 type BackchannelAuthenticationSession struct {
 	authReqID         string
 	interval          time.Duration

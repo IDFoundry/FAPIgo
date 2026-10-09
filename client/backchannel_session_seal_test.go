@@ -38,14 +38,14 @@ func TestBackchannelSessionSealRoundTrip(t *testing.T) {
 		"openid": {authReqID: "req-3", interval: time.Second, expiresAt: expires, openID: true},
 	} {
 		t.Run(name, func(t *testing.T) {
-			sealed, err := s.Seal(session)
+			sealed, err := s.Seal(session, "user-1")
 			if err != nil {
 				t.Fatalf("Seal: %v", err)
 			}
 			if bytes.Contains(sealed, []byte(session.authReqID)) || (session.notificationToken != "" && bytes.Contains(sealed, []byte(session.notificationToken))) {
 				t.Errorf("sealed session %q isn't opaque", sealed)
 			}
-			got, reseal, err := s.Open(sealed)
+			got, reseal, err := s.Open(sealed, "user-1")
 			if err != nil || reseal {
 				t.Fatalf("Open = reseal %v, %v", reseal, err)
 			}
@@ -62,11 +62,11 @@ func TestBackchannelSessionSealRoundTrip(t *testing.T) {
 func TestOpenedSessionAuthenticatesPing(t *testing.T) {
 	s := sessionSealer(t, "https://as.example.com", sessionSealKey(1))
 	begun := BackchannelAuthenticationSession{authReqID: "req-1", interval: time.Second, expiresAt: time.Now().Add(time.Minute), notificationToken: "notify-token"}
-	sealed, err := s.Seal(begun)
+	sealed, err := s.Seal(begun, "user-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	restored, _, err := s.Open(sealed)
+	restored, _, err := s.Open(sealed, "user-1")
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -84,21 +84,21 @@ func TestOpenedSessionAuthenticatesPing(t *testing.T) {
 // again; once the key is gone, it doesn't open.
 func TestBackchannelSessionSealerRotatesKeys(t *testing.T) {
 	session := BackchannelAuthenticationSession{authReqID: "req-1", interval: time.Second, expiresAt: time.Now().Add(time.Minute)}
-	sealed, err := sessionSealer(t, "https://as.example.com", sessionSealKey(1)).Seal(session)
+	sealed, err := sessionSealer(t, "https://as.example.com", sessionSealKey(1)).Seal(session, "user-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, reseal, err := sessionSealer(t, "https://as.example.com", sessionSealKey(2), sessionSealKey(1)).Open(sealed); err != nil || !reseal {
+	if _, reseal, err := sessionSealer(t, "https://as.example.com", sessionSealKey(2), sessionSealKey(1)).Open(sealed, "user-1"); err != nil || !reseal {
 		t.Errorf("Open(old key, still listed) = reseal %v, %v; want reseal", reseal, err)
 	}
-	if _, _, err := sessionSealer(t, "https://as.example.com", sessionSealKey(2)).Open(sealed); !errors.Is(err, ErrUnreadableBackchannelSession) {
+	if _, _, err := sessionSealer(t, "https://as.example.com", sessionSealKey(2)).Open(sealed, "user-1"); !errors.Is(err, ErrUnreadableBackchannelSession) {
 		t.Errorf("Open(old key, gone) = %v, want ErrUnreadableBackchannelSession", err)
 	}
 }
 
 func TestBackchannelSessionSealerRefuses(t *testing.T) {
 	s := sessionSealer(t, "https://as.example.com", sessionSealKey(1))
-	good, err := s.Seal(BackchannelAuthenticationSession{authReqID: "req-1", interval: time.Second, expiresAt: time.Now().Add(time.Minute), openID: true})
+	good, err := s.Seal(BackchannelAuthenticationSession{authReqID: "req-1", interval: time.Second, expiresAt: time.Now().Add(time.Minute), openID: true}, "user-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,10 +106,10 @@ func TestBackchannelSessionSealerRefuses(t *testing.T) {
 	tampered[len(tampered)/2] ^= 1
 	sealPlain := func(v any) []byte {
 		raw, _ := json.Marshal(v)
-		return s.keys.seal(backchannelSessionSealVersion, raw, s.additionalData())
+		return s.keys.seal(backchannelSessionSealVersion, raw, s.additionalData("user-1"))
 	}
 	other := func(issuer string, key []byte) []byte {
-		b, err := sessionSealer(t, issuer, key).Seal(BackchannelAuthenticationSession{authReqID: "req-1", interval: time.Second, expiresAt: time.Now()})
+		b, err := sessionSealer(t, issuer, key).Seal(BackchannelAuthenticationSession{authReqID: "req-1", interval: time.Second, expiresAt: time.Now()}, "user-1")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -126,13 +126,13 @@ func TestBackchannelSessionSealerRefuses(t *testing.T) {
 		"another issuer": other("https://other.example.com", sessionSealKey(1)),
 		"unknown key":    other("https://as.example.com", sessionSealKey(9)),
 		"too long":       bytes.Repeat([]byte{backchannelSessionSealVersion}, maxSealedBackchannelSession+1),
-		"not JSON":       s.keys.seal(backchannelSessionSealVersion, []byte("x"), s.additionalData()),
+		"not JSON":       s.keys.seal(backchannelSessionSealVersion, []byte("x"), s.additionalData("user-1")),
 		"unknown member": sealPlain(map[string]any{"a": "x", "i": 1000, "e": "2026-10-01T00:00:00Z", "z": 1}),
 		"no auth_req_id": sealPlain(map[string]any{"i": 1000, "e": "2026-10-01T00:00:00Z"}),
 		"no interval":    sealPlain(map[string]any{"a": "x", "e": "2026-10-01T00:00:00Z"}),
 		"no expiry":      sealPlain(map[string]any{"a": "x", "i": 1000}),
 	} {
-		_, _, err := s.Open(sealed)
+		_, _, err := s.Open(sealed, "user-1")
 		var ce *Error
 		if !errors.As(err, &ce) || ce.Code() != ErrorInvalidRequest || !errors.Is(err, ErrUnreadableBackchannelSession) {
 			t.Errorf("Open(%s) = %v, want ErrorInvalidRequest wrapping ErrUnreadableBackchannelSession", name, err)
@@ -141,7 +141,7 @@ func TestBackchannelSessionSealerRefuses(t *testing.T) {
 }
 
 func TestSealEmptyBackchannelSession(t *testing.T) {
-	if _, err := sessionSealer(t, "https://as.example.com", sessionSealKey(1)).Seal(BackchannelAuthenticationSession{}); err == nil {
+	if _, err := sessionSealer(t, "https://as.example.com", sessionSealKey(1)).Seal(BackchannelAuthenticationSession{}, "user-1"); err == nil {
 		t.Error("Seal(zero session) = nil error, want error")
 	}
 }
@@ -151,7 +151,7 @@ func TestSealEmptyBackchannelSession(t *testing.T) {
 // could produce one.
 func TestSealBackchannelSessionFarFuture(t *testing.T) {
 	s := BackchannelAuthenticationSession{authReqID: "req-1", interval: time.Second, expiresAt: time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)}
-	if _, err := sessionSealer(t, "https://as.example.com", sessionSealKey(1)).Seal(s); err == nil {
+	if _, err := sessionSealer(t, "https://as.example.com", sessionSealKey(1)).Seal(s, "user-1"); err == nil {
 		t.Error("Seal(year 10000) = nil error, want error")
 	}
 }
@@ -167,5 +167,28 @@ func TestNewBackchannelSessionSealerRefuses(t *testing.T) {
 	}
 	if _, err := NewBackchannelSessionSealer(nil, [][]byte{sessionSealKey(1)}); err == nil {
 		t.Error("NewBackchannelSessionSealer(nil client) = nil error, want error")
+	}
+}
+
+// TestBackchannelSessionSealerBindsOwner: a session opens only for the
+// owner it was sealed for, so one leaked from another user's storage
+// doesn't open under this user's; and an owner is required to seal.
+func TestBackchannelSessionSealerBindsOwner(t *testing.T) {
+	s := sessionSealer(t, "https://as.example.com", sessionSealKey(1))
+	session := BackchannelAuthenticationSession{authReqID: "req-1", interval: time.Second, expiresAt: time.Now().Add(time.Minute)}
+	sealed, err := s.Seal(session, "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _, err := s.Open(sealed, "user-1"); err != nil || got.authReqID != "req-1" {
+		t.Fatalf("Open(same owner) = %+v, %v; want the session", got, err)
+	}
+	for _, owner := range []string{"user-2", "", "user-1 "} {
+		if _, _, err := s.Open(sealed, owner); !errors.Is(err, ErrUnreadableBackchannelSession) {
+			t.Errorf("Open(owner %q) = %v, want ErrUnreadableBackchannelSession", owner, err)
+		}
+	}
+	if _, err := s.Seal(session, ""); err == nil {
+		t.Error("Seal(no owner) = nil error, want error")
 	}
 }

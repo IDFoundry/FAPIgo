@@ -22,6 +22,12 @@ import (
 // it from this Resolver: the Trust Mark is judged by the federation the
 // subject was trusted through, subject.TrustAnchor.
 //
+// VerifyTrustMark trusts subject as given and doesn't resolve it again,
+// so pass the ResolvedEntity Resolve returned for the subject, never one
+// built by hand or deserialized from storage you don't control: a
+// subject claiming a Trust Anchor it was never resolved through would
+// have its Trust Mark judged by that federation's accreditation instead.
+//
 // OpenID Federation 1.0 §7.3's "the trust in the Trust Mark Issuer
 // comes before the trust in the trust mark" is implemented literally:
 // raw.TrustMark's own unverified "iss" claim is resolved as a fresh

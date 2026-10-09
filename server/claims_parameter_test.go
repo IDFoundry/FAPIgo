@@ -11,15 +11,23 @@ import (
 // JSON object is invalid_request at PAR and at the backchannel
 // authentication endpoint, rather than read as no claims at all.
 func TestMalformedClaimsParameterIsRefused(t *testing.T) {
-	t.Run("PAR", func(t *testing.T) {
-		h := newHarness(t, server.ProfileFAPISecurity, true)
-		_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
-			HTTP: server.FormRequest{Parameters: plainFormParameters(t, h.clientAssertion(t), map[string]string{"claims": `{"id_token":`})},
+	for name, claims := range map[string]string{
+		"not JSON": `{"id_token":`,
+		// A case variant of a member: its members are case-sensitive,
+		// so it's refused rather than silently honoured or ignored.
+		"ID_TOKEN":  `{"ID_TOKEN":{"acr":{"essential":true,"values":["gold"]}}}`,
+		"Essential": `{"id_token":{"acr":{"Essential":true,"values":["gold"]}}}`,
+	} {
+		t.Run("PAR "+name, func(t *testing.T) {
+			h := newHarness(t, server.ProfileFAPISecurity, true)
+			_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+				HTTP: server.FormRequest{Parameters: plainFormParameters(t, h.clientAssertion(t), map[string]string{"claims": claims})},
+			})
+			if serverErrorCode(t, err) != server.ErrorInvalidRequest {
+				t.Fatalf("PAR with claims %s: %v, want invalid_request", claims, err)
+			}
 		})
-		if serverErrorCode(t, err) != server.ErrorInvalidRequest {
-			t.Fatalf("PAR with a malformed claims parameter: %v, want invalid_request", err)
-		}
-	})
+	}
 	t.Run("CIBA", func(t *testing.T) {
 		h, _ := newHarnessWithBackchannel(t)
 		params := standardBackchannelParams(t)

@@ -161,7 +161,10 @@ func NewResolver(cfg Config, deps Dependencies) (*Resolver, error) {
 }
 
 // ResolvedEntity is a successfully resolved Trust Chain and its
-// subject's Resolved Metadata.
+// subject's Resolved Metadata. Its fields are exported so it can be
+// read, but only one Resolve returned has been verified: the library
+// trusts a ResolvedEntity passed back to it (as VerifyTrustMark's
+// subject, say) as given, so never pass one built by hand.
 type ResolvedEntity struct {
 	EntityID    string
 	TrustAnchor string

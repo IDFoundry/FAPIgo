@@ -76,6 +76,15 @@ func (s *Server) CompleteBackchannelAuthentication(ctx context.Context, req Comp
 			return err
 		}
 
+		// OIDC Core §5.5.1.1: an essential "acr" request with values that
+		// the authentication doesn't meet is a failed authentication, so
+		// record it as one and issue nothing.
+		if !meetsEssentialACR(request.EssentialACRValues, result.auth.acr) {
+			decision.Status = storage.BackchannelAuthenticationAuthenticationFailed
+			decision.Reason = "the user's authentication doesn't meet the requested essential acr"
+			break
+		}
+
 		requestedScope, _ := jsonString(request.Parameters, "scope")
 		if scopeErr := validateGrantedScopeSubset(result.grant.Scope, requestedScope); scopeErr != nil {
 			wrapped := newError(ErrorInvalidRequest, 400, "granted scope exceeds requested scope", scopeErr)

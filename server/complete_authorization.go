@@ -132,6 +132,12 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 		}
 	}
 
+	// OIDC Core §5.5.1.1: an essential "acr" request with values must be
+	// met, or the outcome treated as a failed authentication.
+	if !meetsEssentialACR(request.EssentialACRValues, result.auth.acr) {
+		return s.completeErrorRedirect(ctx, clientID, redirectURI, state, "login_required", "the user's authentication doesn't meet the requested essential acr", AuditOutcomeFailure)
+	}
+
 	requestedScope, _ := jsonString(request.Parameters, "scope")
 	if err := validateGrantedScopeSubset(result.grant.Scope, requestedScope); err != nil {
 		return s.completeLocalFail(ctx, clientID, newError(ErrorInvalidRequest, 400, "granted scope exceeds requested scope", err)), nil

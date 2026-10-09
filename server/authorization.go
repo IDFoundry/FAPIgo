@@ -168,12 +168,14 @@ func (s *Server) interactionRequestFrom(clientID fapi.ClientID, params map[strin
 	// can't happen; ignoring it leaves HasMaxAge false.
 	maxAge, hasMaxAge, _ := requestedMaxAge(params)
 	prompt, _ := requestedPrompt(params)
+	essentialACR, _ := essentialACRValues(params)
 
 	return InteractionRequest{
 		ClientID:             clientID,
 		Scope:                scopes,
 		Hints:                AuthenticationHints{LoginHint: hint},
 		ACRValues:            requestedACRValues(params),
+		EssentialACRValues:   essentialACR,
 		MaxAge:               maxAge,
 		HasMaxAge:            hasMaxAge,
 		Prompt:               prompt,

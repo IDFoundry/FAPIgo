@@ -2,6 +2,7 @@ package resource
 
 import (
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"io"
 
@@ -102,7 +103,10 @@ type AccessTokenAssurance struct {
 }
 
 // validateAssurance checks the assurance level is one of the two
-// defined, and applies AssuranceProduction's checks.
+// defined, and applies AssuranceProduction's checks — reporting every
+// dependency that falls short, joined (errors.Join), rather than only
+// the first, so a deployment moving to production sees the whole list
+// in one restart.
 func validateAssurance(cfg Config, deps Dependencies) error {
 	if cfg.Assurance != AssuranceDevelopment && cfg.Assurance != AssuranceProduction {
 		return fmt.Errorf("resource: config: assurance level is invalid")
@@ -120,42 +124,32 @@ func validateAssurance(cfg Config, deps Dependencies) error {
 		return nil
 	}
 	scaled := cfg.Deployment == DeploymentHorizontallyScaled
-	if err := checkProductionAccessTokens(deps.AccessTokens, scaled); err != nil {
-		return err
-	}
-	if err := checkStoreAssurance("replay", deps.Replay, true, scaled); err != nil {
-		return err
-	}
+	errs := checkProductionAccessTokens(deps.AccessTokens, scaled)
+	errs = append(errs, checkStoreAssurance("replay", deps.Replay, true, scaled))
 	if deps.Nonces != nil {
-		if err := checkStoreAssurance("nonces", deps.Nonces, true, scaled); err != nil {
-			return err
-		}
-		if err := checkRandom(deps.Random); err != nil {
-			return err
-		}
+		errs = append(errs, checkStoreAssurance("nonces", deps.Nonces, true, scaled), checkRandom(deps.Random))
 	}
 	if !declinedRevocation(deps.Revocation) {
-		return checkStoreAssurance("revocation", deps.Revocation, false, scaled)
+		errs = append(errs, checkStoreAssurance("revocation", deps.Revocation, false, scaled))
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // checkProductionAccessTokens checks what resolver relies on: the
 // issuer key source and the token store it names.
-func checkProductionAccessTokens(resolver AccessTokenResolver, scaled bool) error {
+func checkProductionAccessTokens(resolver AccessTokenResolver, scaled bool) []error {
 	declared, err := productionAccessTokenAssurance(resolver)
 	if err != nil {
-		return err
+		return []error{err}
 	}
+	var errs []error
 	if declared.IssuerKeys != nil {
-		if err := checkKeySourceAssurance("access_tokens issuer keys", declared.IssuerKeys); err != nil {
-			return err
-		}
+		errs = append(errs, checkKeySourceAssurance("access_tokens issuer keys", declared.IssuerKeys))
 	}
 	if declared.Store != nil {
-		return checkStoreAssurance("access_tokens", declared.Store, false, scaled)
+		errs = append(errs, checkStoreAssurance("access_tokens", declared.Store, false, scaled))
 	}
-	return nil
+	return errs
 }
 
 // productionAccessTokenAssurance returns what resolver relies on:

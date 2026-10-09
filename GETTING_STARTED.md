@@ -45,7 +45,9 @@ persistence and a real key store (KMS/HSM), and swap them in — nothing
 else in this guide changes. For `keys.KeyManager` specifically, you may
 not need to implement anything at all: `keys.NewKeyManagerFromSigners`
 adapts any `crypto.Signer` — what most HSM/KMS Go client wrappers
-already implement — directly into a `KeyManager`; see `keys/doc.go`.
+already implement — directly into a `KeyManager`, one `keys.SignerSpec`
+per signing purpose (its algorithm, signer and kid, and any previous
+keys still to be published during a rotation); see `keys/doc.go`.
 Pass it `keys.DeclareCustody(keys.KeyCustody{Durable: true})` (plus
 `CrossInstanceConsistent` if every instance shares the keys) to state
 how those keys are held — production assurance requires the

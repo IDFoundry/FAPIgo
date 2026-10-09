@@ -6,6 +6,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"fmt"
 	"net/http"
 	"strings"
@@ -201,7 +202,9 @@ func validDependencies(t *testing.T) client.Dependencies {
 	return client.Dependencies{
 		Sessions: newFakeSessionStore(),
 		Keys: newFakeKeyManager(t,
-			keys.ClientAuthentication, keys.RequestObjectSigning, keys.DPoPProofSigning),
+			keys.ClientAuthentication, keys.RequestObjectSigning, keys.DPoPProofSigning,
+			keys.ClientAttestationPoPSigning, keys.BackchannelAuthenticationRequestSigning,
+			keys.FederationEntitySigning),
 		IssuerKeys: &fakeIssuerKeySource{keys: map[keys.IssuerVerificationPurpose]crypto.PublicKey{}},
 		HTTP:       noopHTTPClient{},
 		// A live clock, not a value frozen at this call's return time:
@@ -492,9 +495,19 @@ func (fakeDecrypter) UnwrapContentEncryptionKey(context.Context, keys.UnwrapRequ
 	return nil, fmt.Errorf("fakeDecrypter: not implemented")
 }
 
+// EncryptionPublicKey returns fakeDecrypterKey: New resolves each
+// decryption key the configuration calls for.
 func (fakeDecrypter) EncryptionPublicKey(context.Context, keys.DecryptionPurpose, fapi.KeyManagementAlgorithm) (keys.PublicKeyInfo, error) {
-	return keys.PublicKeyInfo{}, fmt.Errorf("fakeDecrypter: not implemented")
+	return keys.PublicKeyInfo{KeyID: "client-enc-1", PublicKey: &fakeDecrypterKey.PublicKey}, nil
 }
+
+var fakeDecrypterKey = func() *rsa.PrivateKey {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		panic(err)
+	}
+	return key
+}()
 
 func TestNewRequiresDecryptionDependencyWhenIDTokenEncryptionConfigured(t *testing.T) {
 	cfg := validConfig(t)

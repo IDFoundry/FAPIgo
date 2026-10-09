@@ -28,9 +28,9 @@ func TestPublicJWKSWorksWithNoEngineAtAll(t *testing.T) {
 		t.Fatalf("generate ecdsa key: %v", err)
 	}
 	km, err := keys.NewKeyManagerFromSigners(
-		map[keys.SigningPurpose]crypto.Signer{keys.ClientAuthentication: priv},
-		map[keys.SigningPurpose]fapi.SignatureAlgorithm{keys.ClientAuthentication: fapi.ES256},
-		map[keys.SigningPurpose]string{keys.ClientAuthentication: "onboarding-kid"},
+		[]keys.SignerSpec{
+			{Purpose: keys.ClientAuthentication, Algorithm: fapi.ES256, Signer: priv, KeyID: "onboarding-kid"},
+		},
 	)
 	if err != nil {
 		t.Fatalf("NewKeyManagerFromSigners: %v", err)
@@ -92,9 +92,10 @@ func TestPublicJWKSDedupesAcrossUses(t *testing.T) {
 		t.Fatalf("generate ecdsa key: %v", err)
 	}
 	km, err := keys.NewKeyManagerFromSigners(
-		map[keys.SigningPurpose]crypto.Signer{keys.ClientAuthentication: priv, keys.RequestObjectSigning: priv},
-		map[keys.SigningPurpose]fapi.SignatureAlgorithm{keys.ClientAuthentication: fapi.ES256, keys.RequestObjectSigning: fapi.ES256},
-		map[keys.SigningPurpose]string{keys.ClientAuthentication: "same-kid", keys.RequestObjectSigning: "same-kid"},
+		[]keys.SignerSpec{
+			{Purpose: keys.ClientAuthentication, Algorithm: fapi.ES256, Signer: priv, KeyID: "same-kid"},
+			{Purpose: keys.RequestObjectSigning, Algorithm: fapi.ES256, Signer: priv, KeyID: "same-kid"},
+		},
 	)
 	if err != nil {
 		t.Fatalf("NewKeyManagerFromSigners: %v", err)
@@ -180,18 +181,29 @@ func TestPublicJWKSRejectsEmptyKeyID(t *testing.T) {
 		t.Fatalf("generate ecdsa key: %v", err)
 	}
 	km, err := keys.NewKeyManagerFromSigners(
-		map[keys.SigningPurpose]crypto.Signer{keys.ClientAuthentication: priv},
-		map[keys.SigningPurpose]fapi.SignatureAlgorithm{keys.ClientAuthentication: fapi.ES256},
-		nil, // no kid supplied
+		[]keys.SignerSpec{
+			{Purpose: keys.ClientAuthentication, Algorithm: fapi.ES256, Signer: priv},
+		},
 	)
 	if err != nil {
 		t.Fatalf("NewKeyManagerFromSigners: %v", err)
 	}
+	// NewKeyManagerFromSigners derives a kid when none is given, so an
+	// empty one can only come from a KeyManager of the caller's own.
 	if _, err := keys.PublicJWKS(context.Background(), []keys.SigningKeyUse{
-		{Manager: km, Purpose: keys.ClientAuthentication, Algorithm: fapi.ES256},
+		{Manager: emptyKeyIDManager{km}, Purpose: keys.ClientAuthentication, Algorithm: fapi.ES256},
 	}, nil); err == nil {
 		t.Fatal("PublicJWKS(empty kid) = nil error, want error")
 	}
+}
+
+// emptyKeyIDManager reports every key with an empty kid.
+type emptyKeyIDManager struct{ keys.KeyManager }
+
+func (m emptyKeyIDManager) PublicKey(ctx context.Context, purpose keys.SigningPurpose, alg fapi.SignatureAlgorithm) (keys.PublicKeyInfo, error) {
+	info, err := m.KeyManager.PublicKey(ctx, purpose, alg)
+	info.KeyID = ""
+	return info, err
 }
 
 // TestPublicJWKSRejectsOneKidForTwoKeys: a kid naming two different keys
@@ -209,17 +221,24 @@ func TestPublicJWKSRejectsOneKidForTwoKeys(t *testing.T) {
 	}
 
 	t.Run("two signing keys", func(t *testing.T) {
-		km, err := keys.NewKeyManagerFromSigners(
-			map[keys.SigningPurpose]crypto.Signer{keys.ClientAuthentication: newSigner(), keys.RequestObjectSigning: newSigner()},
-			map[keys.SigningPurpose]fapi.SignatureAlgorithm{keys.ClientAuthentication: fapi.ES256, keys.RequestObjectSigning: fapi.ES256},
-			map[keys.SigningPurpose]string{keys.ClientAuthentication: "same-kid", keys.RequestObjectSigning: "same-kid"},
-		)
+		// NewKeyManagerFromSigners refuses this within one manager, so the
+		// two keys come from two managers, as an access-token issuer's own
+		// manager and the server's would.
+		first, err := keys.NewKeyManagerFromSigners([]keys.SignerSpec{
+			{Purpose: keys.ClientAuthentication, Algorithm: fapi.ES256, Signer: newSigner(), KeyID: "same-kid"},
+		})
+		if err != nil {
+			t.Fatalf("NewKeyManagerFromSigners: %v", err)
+		}
+		second, err := keys.NewKeyManagerFromSigners([]keys.SignerSpec{
+			{Purpose: keys.RequestObjectSigning, Algorithm: fapi.ES256, Signer: newSigner(), KeyID: "same-kid"},
+		})
 		if err != nil {
 			t.Fatalf("NewKeyManagerFromSigners: %v", err)
 		}
 		_, err = keys.PublicJWKS(context.Background(), []keys.SigningKeyUse{
-			{Manager: km, Purpose: keys.ClientAuthentication, Algorithm: fapi.ES256},
-			{Manager: km, Purpose: keys.RequestObjectSigning, Algorithm: fapi.ES256},
+			{Manager: first, Purpose: keys.ClientAuthentication, Algorithm: fapi.ES256},
+			{Manager: second, Purpose: keys.RequestObjectSigning, Algorithm: fapi.ES256},
 		}, nil)
 		if err == nil || !strings.Contains(err.Error(), `kid "same-kid" names two different keys`) {
 			t.Fatalf("PublicJWKS(two keys, one kid) error = %v, want it refused", err)
@@ -228,9 +247,9 @@ func TestPublicJWKSRejectsOneKidForTwoKeys(t *testing.T) {
 
 	t.Run("signing and encryption keys", func(t *testing.T) {
 		km, err := keys.NewKeyManagerFromSigners(
-			map[keys.SigningPurpose]crypto.Signer{keys.ClientAuthentication: newSigner()},
-			map[keys.SigningPurpose]fapi.SignatureAlgorithm{keys.ClientAuthentication: fapi.ES256},
-			map[keys.SigningPurpose]string{keys.ClientAuthentication: "shared-kid"},
+			[]keys.SignerSpec{
+				{Purpose: keys.ClientAuthentication, Algorithm: fapi.ES256, Signer: newSigner(), KeyID: "shared-kid"},
+			},
 		)
 		if err != nil {
 			t.Fatalf("NewKeyManagerFromSigners: %v", err)

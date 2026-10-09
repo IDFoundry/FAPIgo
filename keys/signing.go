@@ -3,6 +3,7 @@ package keys
 import (
 	"context"
 	"crypto"
+	"fmt"
 
 	fapi "github.com/idfoundry/fapigo"
 )
@@ -71,6 +72,35 @@ const (
 	// identical way.
 	FederationEntitySigning
 )
+
+// String returns purpose's name, as used in this module's error
+// messages (e.g. "id_token_signing"), or "signing_purpose(N)" for a
+// value outside the defined set.
+func (p SigningPurpose) String() string {
+	switch p {
+	case JARMSigning:
+		return "jarm_signing"
+	case AccessTokenSigning:
+		return "access_token_signing"
+	case IDTokenSigning:
+		return "id_token_signing"
+	case UserInfoSigning:
+		return "userinfo_signing"
+	case ClientAuthentication:
+		return "client_authentication"
+	case RequestObjectSigning:
+		return "request_object_signing"
+	case DPoPProofSigning:
+		return "dpop_proof_signing"
+	case BackchannelAuthenticationRequestSigning:
+		return "backchannel_authentication_request_signing"
+	case ClientAttestationPoPSigning:
+		return "client_attestation_pop_signing"
+	case FederationEntitySigning:
+		return "federation_entity_signing"
+	}
+	return fmt.Sprintf("signing_purpose(%d)", uint8(p))
+}
 
 // SigningRequest describes one signature to produce. Exactly one of
 // Digest or SigningInput is populated, chosen by Algorithm — never
@@ -174,10 +204,11 @@ type SigningKeySet struct {
 // always signs with whatever single key the implementation currently
 // considers active; only publication needs the wider set, so this is
 // additive to KeyManager, never a replacement for anything KeyManager
-// itself declares. A KeyManager that only ever has one key per purpose
-// (keys/ephemeral, NewKeyManagerFromSigners) has no reason to implement
-// this — server.PublicJWKS falls back to PublicKey when it isn't
-// implemented.
+// itself declares. NewKeyManagerFromSigners' KeyManager implements it,
+// publishing each purpose's SignerSpec.Previous keys after its current
+// one. A KeyManager that only ever has one key per purpose
+// (keys/ephemeral) has no reason to implement this — server.PublicJWKS
+// falls back to PublicKey when it isn't implemented.
 type RotatingKeyManager interface {
 	KeyManager
 

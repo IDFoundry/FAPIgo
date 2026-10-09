@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -118,12 +119,11 @@ func TestServerEntityConfigurationRejectsMissingSigningKey(t *testing.T) {
 	deps := validDependencies()
 	deps.Keys = brokenKeyManager{}
 
-	srv, err := server.New(cfg, deps)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	if _, err := srv.EntityConfiguration(context.Background(), nil); err == nil {
-		t.Fatalf("EntityConfiguration(key manager fails) = nil error, want error")
+	// New resolves every signing key the server will use, the federation
+	// key included, so a key manager that can't produce it is refused at
+	// startup rather than at the first EntityConfiguration.
+	if _, err := server.New(cfg, deps); err == nil {
+		t.Fatalf("New(key manager fails) = nil error, want error")
 	}
 }
 
@@ -159,12 +159,8 @@ func TestServerEntityConfigurationRejectsEmptyKeyID(t *testing.T) {
 	deps := validDependencies()
 	deps.Keys = emptyKidKeyManager{&fakeKeyManager{key: generateKey(t), keyID: "as-fed-kid"}}
 
-	srv, err := server.New(cfg, deps)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	if _, err := srv.EntityConfiguration(context.Background(), nil); err == nil {
-		t.Fatalf("EntityConfiguration(key manager returns empty kid) = nil error, want error")
+	if _, err := server.New(cfg, deps); err == nil || !strings.Contains(err.Error(), "empty kid") {
+		t.Fatalf("New(key manager returns empty kid) = %v, want it refused", err)
 	}
 }
 
@@ -196,5 +192,23 @@ func TestServerEntityConfigurationPublishesTrustMarks(t *testing.T) {
 	}
 	if len(claims.TrustMarks) != 1 || claims.TrustMarks[0] != mark {
 		t.Fatalf("TrustMarks = %v, want [%v]", claims.TrustMarks, mark)
+	}
+}
+
+// TestNewRejectsMissingFederationSigningKey: a key manager serving every
+// other purpose but not federation signing is refused at New, naming the
+// purpose, when federation self-issuance is configured.
+func TestNewRejectsMissingFederationSigningKey(t *testing.T) {
+	cfg := federationConfiguredConfig(t)
+	deps := validDependencies()
+	km, err := keys.NewKeyManagerFromSigners([]keys.SignerSpec{
+		{Purpose: keys.IDTokenSigning, Algorithm: fapi.ES256, Signer: sharedTestKey, KeyID: "as-key-1"},
+	})
+	if err != nil {
+		t.Fatalf("NewKeyManagerFromSigners: %v", err)
+	}
+	deps.Keys = km
+	if _, err := server.New(cfg, deps); err == nil || !strings.Contains(err.Error(), "federation_entity_signing") {
+		t.Fatalf("New(no federation signing key) = %v, want it refused naming federation_entity_signing", err)
 	}
 }

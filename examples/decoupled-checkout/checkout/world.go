@@ -11,7 +11,6 @@ package checkout
 
 import (
 	"context"
-	"crypto"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -156,13 +155,11 @@ func newClientKeys(kid string) (clientKeys, error) {
 		return clientKeys{}, err
 	}
 	manager, err := keys.NewKeyManagerFromSigners(
-		map[keys.SigningPurpose]crypto.Signer{
-			keys.ClientAuthentication: auth, keys.BackchannelAuthenticationRequestSigning: auth, keys.DPoPProofSigning: dpop,
+		[]keys.SignerSpec{
+			{Purpose: keys.ClientAuthentication, Algorithm: fapi.ES256, Signer: auth, KeyID: kid},
+			{Purpose: keys.BackchannelAuthenticationRequestSigning, Algorithm: fapi.ES256, Signer: auth, KeyID: kid},
+			{Purpose: keys.DPoPProofSigning, Algorithm: fapi.ES256, Signer: dpop},
 		},
-		map[keys.SigningPurpose]fapi.SignatureAlgorithm{
-			keys.ClientAuthentication: fapi.ES256, keys.BackchannelAuthenticationRequestSigning: fapi.ES256, keys.DPoPProofSigning: fapi.ES256,
-		},
-		map[keys.SigningPurpose]string{keys.ClientAuthentication: kid, keys.BackchannelAuthenticationRequestSigning: kid},
 	)
 	if err != nil {
 		return clientKeys{}, err

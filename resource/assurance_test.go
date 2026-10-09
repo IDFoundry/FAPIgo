@@ -15,6 +15,7 @@ import (
 	"github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/storage"
 	"github.com/idfoundry/fapigo/storage/memstore"
+	"io"
 )
 
 // fullCaps is what a production store declares when it is shared across
@@ -335,5 +336,28 @@ func TestNewVerifierRequiresDeploymentUnderProduction(t *testing.T) {
 	dev.Deployment = resource.DeploymentHorizontallyScaled + 1
 	if _, err := resource.NewVerifier(dev, validDependencies(t)); err == nil || !strings.Contains(err.Error(), "deployment is invalid") {
 		t.Fatalf("NewVerifier(out-of-range deployment) = %v, want the invalid refusal", err)
+	}
+}
+
+// TestNewVerifierReportsEveryProductionRefusal: NewVerifier reports
+// every dependency production assurance refuses, not just the first.
+func TestNewVerifierReportsEveryProductionRefusal(t *testing.T) {
+	cfg, deps := productionSetup(t)
+	deps.AccessTokens = jwtResolver(t, &declaredKeys{hardened: false})
+	deps.Replay = &declaredReplay{caps: storage.Capabilities{Durable: true}}
+	deps.Random = io.MultiReader(rand.Reader)
+
+	_, err := resource.NewVerifier(cfg, deps)
+	if err == nil {
+		t.Fatal("NewVerifier(production, three refusals) = nil error, want error")
+	}
+	for _, want := range []string{
+		"access_tokens issuer keys must declare LiveFetchHardened",
+		"replay must declare AtomicConsume",
+		"random must be crypto/rand.Reader",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("NewVerifier error = %q, want it to contain %q", err, want)
+		}
 	}
 }

@@ -14,7 +14,6 @@
 package main
 
 import (
-	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"encoding/base64"
@@ -138,14 +137,10 @@ func buildFixedClientKeyManager(jwksFile string, purposes map[keys.SigningPurpos
 	}
 
 	anyFixed := false
-	signers := make(map[keys.SigningPurpose]crypto.Signer, len(purposes))
-	algorithms := make(map[keys.SigningPurpose]fapi.SignatureAlgorithm, len(purposes))
-	kids := make(map[keys.SigningPurpose]string, len(purposes))
+	specs := make([]keys.SignerSpec, 0, len(purposes))
 	for purpose, alg := range purposes {
-		algorithms[purpose] = alg
 		if isFixedPurpose[purpose] {
-			signers[purpose] = fixedSigner
-			kids[purpose] = kid
+			specs = append(specs, keys.SignerSpec{Purpose: purpose, Algorithm: alg, Signer: fixedSigner, KeyID: kid})
 			anyFixed = true
 			continue
 		}
@@ -153,12 +148,12 @@ func buildFixedClientKeyManager(jwksFile string, purposes map[keys.SigningPurpos
 		if err != nil {
 			return nil, fmt.Errorf("generate ephemeral key for purpose %v: %w", purpose, err)
 		}
-		signers[purpose] = signer
+		specs = append(specs, keys.SignerSpec{Purpose: purpose, Algorithm: alg, Signer: signer})
 	}
 	if !anyFixed {
 		return nil, fmt.Errorf("-client-jwks given but this run has no client-assertion or request-object " +
 			"signing purpose active (client_auth_type=mtls without a signed request object needs no client " +
 			"JWKS at all — drop -client-jwks)")
 	}
-	return keys.NewKeyManagerFromSigners(signers, algorithms, kids)
+	return keys.NewKeyManagerFromSigners(specs)
 }

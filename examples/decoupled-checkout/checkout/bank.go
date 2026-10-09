@@ -2,7 +2,6 @@ package checkout
 
 import (
 	"context"
-	"crypto"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -88,9 +87,10 @@ func (w *World) newBank(till, pocketwise clientKeys) (*bank, error) {
 		return nil, err
 	}
 	manager, err := keys.NewKeyManagerFromSigners(
-		map[keys.SigningPurpose]crypto.Signer{keys.IDTokenSigning: signer, keys.AccessTokenSigning: signer},
-		map[keys.SigningPurpose]fapi.SignatureAlgorithm{keys.IDTokenSigning: fapi.ES256, keys.AccessTokenSigning: fapi.ES256},
-		map[keys.SigningPurpose]string{keys.IDTokenSigning: "alder-1", keys.AccessTokenSigning: "alder-1"},
+		[]keys.SignerSpec{
+			{Purpose: keys.IDTokenSigning, Algorithm: fapi.ES256, Signer: signer, KeyID: "alder-1"},
+			{Purpose: keys.AccessTokenSigning, Algorithm: fapi.ES256, Signer: signer, KeyID: "alder-1"},
+		},
 	)
 	if err != nil {
 		return nil, err

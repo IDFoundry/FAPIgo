@@ -4,6 +4,7 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"github.com/idfoundry/fapigo/keys/ephemeral"
+	"io"
 	"strings"
 	"testing"
 
@@ -324,5 +325,29 @@ func TestNewProductionRequiresDecryptionKeyCustody(t *testing.T) {
 	deps.Decryption = declared
 	if _, err := client.New(cfg, deps); err != nil {
 		t.Fatalf("New(production, declared decryption): %v", err)
+	}
+}
+
+// TestNewReportsEveryProductionRefusal: New reports every dependency
+// production assurance refuses, not just the first.
+func TestNewReportsEveryProductionRefusal(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = client.AssuranceProduction
+	deps := validDependencies(t) // an undeclared sessions store
+	deps.Keys = undeclaredClientKeys{deps.Keys}
+	deps.Random = io.MultiReader(rand.Reader) // a wrapper, not crypto/rand.Reader itself
+
+	_, err := client.New(cfg, deps)
+	if err == nil {
+		t.Fatal("New(production, three refusals) = nil error, want error")
+	}
+	for _, want := range []string{
+		"sessions must implement storage.StoreAssurance",
+		"keys must implement keys.KeyCustodyAssurance",
+		"random must be crypto/rand.Reader itself",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("New error = %q, want it to contain %q", err, want)
+		}
 	}
 }

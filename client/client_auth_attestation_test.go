@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -406,14 +407,13 @@ func TestRequestClientCredentialsTokenAttestationPropagatesInstanceKeyError(t *t
 
 	deps := validDependencies(t)
 	// deps.Keys carries no keys.ClientAttestationPoPSigning key at all.
+	deps.Keys = newFakeKeyManager(t, keys.DPoPProofSigning)
 	deps.Attestation = fakeAttestationSource{attestation: testAttestationJWT}
 
-	c, err := client.New(cfg, deps)
-	if err != nil {
-		t.Fatalf("client.New: %v", err)
-	}
-	if _, err := c.RequestClientCredentialsToken(context.Background(), client.ClientCredentialsTokenRequest{Scope: []string{"accounts"}}); err == nil {
-		t.Fatalf("RequestClientCredentialsToken(no Client Instance Key) = nil error, want error")
+	// New resolves the Client Instance Key, so its absence is refused at
+	// startup rather than at the first token request.
+	if _, err := client.New(cfg, deps); err == nil || !strings.Contains(err.Error(), "client_attestation_pop_signing") {
+		t.Fatalf("client.New(no Client Instance Key) = %v, want it refused naming client_attestation_pop_signing", err)
 	}
 }
 

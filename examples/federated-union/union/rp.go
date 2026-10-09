@@ -2,7 +2,6 @@ package union
 
 import (
 	"context"
-	"crypto"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -60,20 +59,14 @@ func (w *World) newRelyingParty(s serviceSpec) (*relyingParty, error) {
 	if err != nil {
 		return nil, err
 	}
-	manager, err := keys.NewKeyManagerFromSigners(
+	manager, err := keys.NewKeyManagerFromSigners([]keys.SignerSpec{
 		// OpenID Federation 1.0 §12.1.1.1: the request object is signed
 		// with a key from the RP's own published JWK Set, the same one
 		// its client assertions use.
-		map[keys.SigningPurpose]crypto.Signer{
-			keys.ClientAuthentication: authKey.signer, keys.RequestObjectSigning: authKey.signer, keys.DPoPProofSigning: dpop,
-		},
-		map[keys.SigningPurpose]fapi.SignatureAlgorithm{
-			keys.ClientAuthentication: fapi.ES256, keys.RequestObjectSigning: fapi.ES256, keys.DPoPProofSigning: fapi.ES256,
-		},
-		map[keys.SigningPurpose]string{
-			keys.ClientAuthentication: authKey.kid, keys.RequestObjectSigning: authKey.kid,
-		},
-	)
+		{Purpose: keys.ClientAuthentication, Algorithm: fapi.ES256, Signer: authKey.signer, KeyID: authKey.kid},
+		{Purpose: keys.RequestObjectSigning, Algorithm: fapi.ES256, Signer: authKey.signer, KeyID: authKey.kid},
+		{Purpose: keys.DPoPProofSigning, Algorithm: fapi.ES256, Signer: dpop},
+	})
 	if err != nil {
 		return nil, err
 	}

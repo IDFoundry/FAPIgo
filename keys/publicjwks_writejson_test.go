@@ -2,7 +2,6 @@ package keys_test
 
 import (
 	"context"
-	"crypto"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -19,9 +18,9 @@ func TestPublicKeySetWriteJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	manager, err := keys.NewKeyManagerFromSigners(
-		map[keys.SigningPurpose]crypto.Signer{keys.IDTokenSigning: signer},
-		map[keys.SigningPurpose]fapi.SignatureAlgorithm{keys.IDTokenSigning: fapi.ES256},
-		map[keys.SigningPurpose]string{keys.IDTokenSigning: "kid-1"},
+		[]keys.SignerSpec{
+			{Purpose: keys.IDTokenSigning, Algorithm: fapi.ES256, Signer: signer, KeyID: "kid-1"},
+		},
 	)
 	if err != nil {
 		t.Fatal(err)

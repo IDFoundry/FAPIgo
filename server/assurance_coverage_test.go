@@ -454,3 +454,31 @@ func TestNewRequiresDeploymentUnderProduction(t *testing.T) {
 		})
 	}
 }
+
+// TestNewReportsEveryProductionRefusal: New reports every dependency
+// production assurance refuses, not just the first, so moving a
+// deployment to production takes one restart rather than one per
+// missing declaration.
+func TestNewReportsEveryProductionRefusal(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = server.AssuranceProduction
+	cfg.Deployment = server.DeploymentSingleInstance
+	deps := validDependencies()
+	deps.Audit = nil
+	deps.Transactions = bareTransactionStore{deps.Transactions}
+	deps.Keys = undeclaredKeyManager{inner: newTestKeyManager()}
+
+	_, err := server.New(cfg, deps)
+	if err == nil {
+		t.Fatal("New(production, three refusals) = nil error, want error")
+	}
+	for _, want := range []string{
+		"audit is required under AssuranceProduction",
+		"transactions must implement storage.StoreAssurance",
+		"keys must implement keys.KeyCustodyAssurance",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("New error = %q, want it to contain %q", err, want)
+		}
+	}
+}

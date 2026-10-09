@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -392,11 +393,15 @@ func newServerWithKeyManagerAndUserInfo(t *testing.T, profile server.Profile, km
 	return srv
 }
 
-func TestPublicJWKSRejectsEmptyKeyID(t *testing.T) {
-	srv := newServerWithKeyManager(t, server.ProfileFAPISecurity, &fakeKeyManager{key: generateKey(t), keyID: ""})
+// TestNewRejectsEmptyKeyID: a key published with an empty kid would make
+// /jwks fail, so New refuses it, naming the purpose and algorithm.
+func TestNewRejectsEmptyKeyID(t *testing.T) {
+	deps := validDependencies()
+	deps.Keys = &fakeKeyManager{key: generateKey(t), keyID: ""}
 
-	if _, err := srv.PublicJWKS(context.Background()); err == nil {
-		t.Fatalf("PublicJWKS(empty kid) = nil error, want error")
+	_, err := server.New(validConfig(t), deps)
+	if err == nil || !strings.Contains(err.Error(), "keys has no usable id_token_signing key for ES256") || !strings.Contains(err.Error(), "empty kid") {
+		t.Fatalf("New(empty kid) = %v, want it refused naming id_token_signing and ES256", err)
 	}
 }
 
@@ -489,10 +494,76 @@ func (erroringKeyManager) PublicKey(context.Context, keys.SigningPurpose, fapi.S
 
 var errKeyManagerUnavailable = errors.New("key manager unavailable")
 
-func TestPublicJWKSPropagatesKeyManagerError(t *testing.T) {
-	srv := newServerWithKeyManager(t, server.ProfileFAPISecurity, erroringKeyManager{})
+func TestNewRejectsErroringKeyManager(t *testing.T) {
+	deps := validDependencies()
+	deps.Keys = erroringKeyManager{}
 
-	if _, err := srv.PublicJWKS(context.Background()); err == nil {
-		t.Fatalf("PublicJWKS(erroring key manager) = nil error, want error")
+	if _, err := server.New(validConfig(t), deps); err == nil {
+		t.Fatalf("New(erroring key manager) = nil error, want error")
 	}
+}
+
+// TestNewChecksSigningKeysAtStartup: a KeyManager missing a purpose the
+// configuration needs, or holding a key that doesn't suit the configured
+// algorithm, or two managers publishing different keys under one kid,
+// is refused by New — each used to surface as a server_error at the
+// first token request, or a failing /jwks.
+func TestNewChecksSigningKeysAtStartup(t *testing.T) {
+	es256, err := keys.NewKeyManagerFromSigners([]keys.SignerSpec{
+		{Purpose: keys.AccessTokenSigning, Algorithm: fapi.ES256, Signer: generateKey(t), KeyID: "at-1"},
+	})
+	if err != nil {
+		t.Fatalf("NewKeyManagerFromSigners: %v", err)
+	}
+	for name, tc := range map[string]struct {
+		mutate func(*server.Config, *server.Dependencies)
+		want   string
+	}{
+		"no id token key": {
+			func(_ *server.Config, d *server.Dependencies) { d.Keys = es256 },
+			"keys has no usable id_token_signing key for ES256",
+		},
+		"access tokens over a key of another algorithm": {
+			func(_ *server.Config, d *server.Dependencies) {
+				d.AccessTokens = server.JWTAccessTokens{Keys: newTestKeyManager(), Algorithm: fapi.PS256}
+			},
+			"access_tokens keys has no usable access_token_signing key for PS256",
+		},
+		"one kid for two keys across managers": {
+			func(_ *server.Config, d *server.Dependencies) {
+				d.AccessTokens = server.JWTAccessTokens{Keys: &fakeKeyManager{key: generateKey(t), keyID: "as-key-1"}, Algorithm: fapi.ES256}
+			},
+			`kid "as-key-1" names two different keys`,
+		},
+		"jarm under message signing": {
+			func(c *server.Config, d *server.Dependencies) {
+				c.Profile = server.ProfileFAPISecurityWithMessageSigning
+				c.Algorithms.JARM = fapi.PS256
+				c.Limits.JARMResponseLifetime = time.Minute
+			},
+			"keys has no usable jarm_signing key for PS256",
+		},
+		"userinfo signing": {
+			func(c *server.Config, d *server.Dependencies) { c.Algorithms.UserInfo = fapi.EdDSA },
+			"keys has no usable userinfo_signing key for EdDSA",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg, deps := validConfig(t), validDependencies()
+			tc.mutate(&cfg, &deps)
+			if _, err := server.New(cfg, deps); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("New = %v, want an error containing %q", err, tc.want)
+			}
+		})
+	}
+
+	t.Run("OAuthOnly needs no id token key", func(t *testing.T) {
+		cfg, deps := validConfig(t), validDependencies()
+		cfg.OAuthOnly = true
+		deps.Keys = es256
+		deps.AccessTokens = server.JWTAccessTokens{Keys: es256, Algorithm: fapi.ES256}
+		if _, err := server.New(cfg, deps); err != nil {
+			t.Fatalf("New(OAuthOnly, no id token key) = %v, want nil", err)
+		}
+	})
 }

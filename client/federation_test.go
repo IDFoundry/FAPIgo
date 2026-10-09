@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -82,12 +83,8 @@ func TestClientEntityConfigurationRejectsMissingSigningKey(t *testing.T) {
 	// deployment that enables Config.Federation without actually
 	// provisioning one.
 	deps.Keys = newFakeKeyManager(t, keys.ClientAuthentication, keys.RequestObjectSigning, keys.DPoPProofSigning)
-	c, err := client.New(cfg, deps)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	if _, err := c.EntityConfiguration(context.Background(), nil); err == nil {
-		t.Fatalf("EntityConfiguration(no federation signing key registered) = nil error, want error")
+	if _, err := client.New(cfg, deps); err == nil || !strings.Contains(err.Error(), "federation_entity_signing") {
+		t.Fatalf("New(no federation signing key registered) = %v, want it refused naming federation_entity_signing", err)
 	}
 }
 
@@ -109,13 +106,9 @@ func (m emptyKidKeyManager) PublicKey(ctx context.Context, purpose keys.SigningP
 func TestClientEntityConfigurationRejectsEmptyKeyID(t *testing.T) {
 	cfg := federationConfiguredConfig(t)
 	deps := validDependencies(t)
-	deps.Keys = emptyKidKeyManager{newFakeKeyManager(t, keys.FederationEntitySigning)}
-	c, err := client.New(cfg, deps)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	if _, err := c.EntityConfiguration(context.Background(), nil); err == nil {
-		t.Fatalf("EntityConfiguration(key manager returns empty kid) = nil error, want error")
+	deps.Keys = emptyKidKeyManager{newFakeKeyManager(t, keys.ClientAuthentication, keys.RequestObjectSigning, keys.DPoPProofSigning, keys.FederationEntitySigning)}
+	if _, err := client.New(cfg, deps); err == nil || !strings.Contains(err.Error(), "empty kid") {
+		t.Fatalf("New(key manager returns empty kid) = %v, want it refused", err)
 	}
 }
 

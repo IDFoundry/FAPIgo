@@ -2,6 +2,8 @@ package server_test
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"testing"
 	"time"
@@ -54,6 +56,22 @@ func validConfig(t *testing.T) server.Config {
 	}
 }
 
+// sharedTestKey is the key validDependencies' key managers sign with:
+// New resolves every signing key it will use, so a fake with no key
+// isn't a valid dependency.
+var sharedTestKey = func() *ecdsa.PrivateKey {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		panic(err)
+	}
+	return key
+}()
+
+// newTestKeyManager returns a fakeKeyManager over sharedTestKey.
+func newTestKeyManager() *fakeKeyManager {
+	return &fakeKeyManager{key: sharedTestKey, keyID: "as-key-1"}
+}
+
 func validDependencies() server.Dependencies {
 	return server.Dependencies{
 		Clients:                &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{}},
@@ -61,8 +79,8 @@ func validDependencies() server.Dependencies {
 		Grants:                 &fakeGrantStore{},
 		Replay:                 &fakeReplayStore{},
 		ClientKeys:             &fakeClientKeySource{},
-		Keys:                   &fakeKeyManager{},
-		AccessTokens:           server.JWTAccessTokens{Keys: &fakeKeyManager{}, Algorithm: fapi.ES256},
+		Keys:                   newTestKeyManager(),
+		AccessTokens:           server.JWTAccessTokens{Keys: newTestKeyManager(), Algorithm: fapi.ES256},
 		Revocation:             server.NoRevocation{},
 		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
 		AttesterTrust:          server.RegisteredAttesterKeys{Keys: keys.StaticAttesterKeys{}},
@@ -120,7 +138,7 @@ func TestNewJWTAccessTokensRejectsInvalid(t *testing.T) {
 	if _, err := server.NewJWTAccessTokens(nil, fapi.ES256); err == nil {
 		t.Fatalf("NewJWTAccessTokens(nil keys) = nil error, want error")
 	}
-	if _, err := server.NewJWTAccessTokens(&fakeKeyManager{}, 0); err == nil {
+	if _, err := server.NewJWTAccessTokens(newTestKeyManager(), 0); err == nil {
 		t.Fatalf("NewJWTAccessTokens(invalid algorithm) = nil error, want error")
 	}
 }

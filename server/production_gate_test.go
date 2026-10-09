@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"context"
+	"crypto/x509"
 	"strings"
 	"testing"
 
@@ -71,8 +72,8 @@ func TestProductionChecksPointerOpaqueAccessTokens(t *testing.T) {
 // server can't see into: refused under production unless it declares
 // what it relies on, which is then checked.
 func TestProductionChecksCustomAccessTokenIssuers(t *testing.T) {
-	jwt := server.JWTAccessTokens{Keys: &fakeKeyManager{}, Algorithm: fapi.ES256}
-	undeclaredKeys := server.JWTAccessTokens{Keys: undeclaredKeyManager{inner: &fakeKeyManager{}}, Algorithm: fapi.ES256}
+	jwt := server.JWTAccessTokens{Keys: newTestKeyManager(), Algorithm: fapi.ES256}
+	undeclaredKeys := server.JWTAccessTokens{Keys: undeclaredKeyManager{inner: newTestKeyManager()}, Algorithm: fapi.ES256}
 	for name, tc := range map[string]struct {
 		issuer  server.AccessTokenIssuer
 		wantErr bool
@@ -150,4 +151,85 @@ func TestProductionChecksAttesterKeySource(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("New(production, attestation disabled): %v", err)
 	}
+}
+
+// bareTrustAnchors and bareAnchorSource are attester trust-anchor
+// sources declaring no KeySourceAssurance, as a custom trust list
+// fetched by the application's own code would.
+type bareTrustAnchors struct{}
+
+func (bareTrustAnchors) TrustAnchors(context.Context, storage.RegisteredClient) (*x509.CertPool, error) {
+	return x509.NewCertPool(), nil
+}
+
+type bareAnchorSource struct{}
+
+func (bareAnchorSource) AttesterAnchors(context.Context, storage.RegisteredClient) ([]server.AttesterAnchor, error) {
+	return nil, nil
+}
+
+// unhardenedAnchorSource declares, but not LiveFetchHardened.
+type unhardenedAnchorSource struct{ bareAnchorSource }
+
+func (unhardenedAnchorSource) Capabilities() keys.KeySourceCapabilities {
+	return keys.KeySourceCapabilities{}
+}
+
+// TestProductionChecksAttesterTrustAnchors covers X5CAttesterChain's
+// trust-anchor source getting the same KeySourceAssurance check as
+// RegisteredAttesterKeys' key source, under each binding mode, by value
+// or pointer; the bundled static sources declare it.
+func TestProductionChecksAttesterTrustAnchors(t *testing.T) {
+	root := newTestCert(t, "attester CA", certOptions{isCA: true})
+	for name, tc := range map[string]struct {
+		trust server.AttesterTrust
+		want  string // "" accepts
+	}{
+		"static trust anchors": {server.X5CAttesterChain{
+			TrustAnchors: server.StaticAttesterTrustAnchors{Roots: poolOf(root)}, IssuerBinding: server.AttesterIssuerInCertificate,
+		}, ""},
+		"static bound anchors": {server.X5CAttesterChain{
+			Anchors: server.StaticAttesterAnchors{{Certificate: root.cert, Issuers: []string{testAttesterIssuer}}}, IssuerBinding: server.AttesterIssuerBoundToAnchor,
+		}, ""},
+		"undeclared trust anchors": {server.X5CAttesterChain{
+			TrustAnchors: bareTrustAnchors{}, IssuerBinding: server.AttesterIssuerInCertificate,
+		}, "attester_trust trust_anchors must implement keys.KeySourceAssurance"},
+		"undeclared trust anchors, by pointer": {&server.X5CAttesterChain{
+			TrustAnchors: bareTrustAnchors{}, IssuerBinding: server.AttesterIssuerByTrustAnchors,
+		}, "attester_trust trust_anchors must implement keys.KeySourceAssurance"},
+		"undeclared bound anchors": {server.X5CAttesterChain{
+			Anchors: bareAnchorSource{}, IssuerBinding: server.AttesterIssuerBoundToAnchor,
+		}, "attester_trust anchors must implement keys.KeySourceAssurance"},
+		"bound anchors not hardened": {server.X5CAttesterChain{
+			Anchors: unhardenedAnchorSource{}, IssuerBinding: server.AttesterIssuerBoundToAnchor,
+		}, "attester_trust anchors must declare LiveFetchHardened"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := validAttestationConfig(t)
+			cfg.Assurance = server.AssuranceProduction
+			cfg.Deployment = server.DeploymentSingleInstance
+			deps := validDependencies()
+			deps.Audit = &fakeAuditSink{}
+			deps.AttesterTrust = tc.trust
+			_, err := server.New(cfg, deps)
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("New: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("New error = %v, want it to contain %q", err, tc.want)
+			}
+		})
+	}
+
+	t.Run("development accepts an undeclared source", func(t *testing.T) {
+		cfg := validAttestationConfig(t)
+		deps := validDependencies()
+		deps.AttesterTrust = server.X5CAttesterChain{TrustAnchors: bareTrustAnchors{}, IssuerBinding: server.AttesterIssuerInCertificate}
+		if _, err := server.New(cfg, deps); err != nil {
+			t.Fatalf("New(development): %v", err)
+		}
+	})
 }

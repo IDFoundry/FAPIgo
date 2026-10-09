@@ -260,4 +260,20 @@ jobs:
       # for a fix that already shipped upstream — deliberately not
       # pinned to go.mod's own minimum via go-version-file, which
       # would work against that.
+      #
+      # "Latest" is read from go.dev rather than left to the action's
+      # "stable" alias: that alias resolves through GitHub's
+      # actions/go-versions manifest, which can lag a Go security
+      # release by a day or more, so the scan would keep reporting the
+      # very CVEs the new release fixes. An exact version not yet in the
+      # manifest is downloaded from go.dev instead.
+      - name: Latest stable Go
+        id: go
+        run: |
+          version="$(curl -fsSL --proto '=https' --tlsv1.2 'https://go.dev/dl/?mode=json' | jq -er '[.[] | select(.stable)][0].version | ltrimstr("go")')"
+          echo "Scanning under Go ${version}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
       - uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
+        with:
+          go-version-input: ${{ steps.go.outputs.version }}

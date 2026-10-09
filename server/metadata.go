@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
 	"slices"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -207,6 +209,27 @@ type MTLSEndpointAliases struct {
 	PushedAuthorizationRequestEndpoint *fapi.URL `json:"pushed_authorization_request_endpoint,omitempty"`
 	BackchannelAuthenticationEndpoint  *fapi.URL `json:"backchannel_authentication_endpoint,omitempty"`
 	RevocationEndpoint                 *fapi.URL `json:"revocation_endpoint,omitempty"`
+}
+
+// WriteJSON writes m as a discovery endpoint's 200 response, with
+// Content-Type application/json — alongside the WriteJSON methods of the
+// server's other responses. A client.Client finds it with client.Discover
+// at the issuer's OpenID Connect Discovery location: the issuer URL with
+// "/.well-known/openid-configuration" appended after any path it has.
+// Serve it there; RFC 8414's "/.well-known/oauth-authorization-server"
+// is optional. Like a JWKS it's meant to be cached, so it sets no
+// Cache-Control. To advertise fields Metadata doesn't carry, embed it in
+// your own struct and encode that instead. If m can't be encoded, the
+// response is a 500.
+func (m Metadata) WriteJSON(w http.ResponseWriter) {
+	body, err := json.Marshal(m)
+	if err != nil {
+		http.Error(w, "server_error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
 }
 
 // Metadata returns this server's metadata document.

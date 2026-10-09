@@ -44,6 +44,7 @@ func cibaConfigAndDeps(t *testing.T, assurance server.AssuranceLevel, notifier s
 	t.Helper()
 	cfg := validConfig(t)
 	cfg.Assurance = assurance
+	cfg.Deployment = server.DeploymentSingleInstance
 	backchannelEndpoint, err := fapi.ParseEndpointURL(testBackchannelAuthenticationEndpoint)
 	if err != nil {
 		t.Fatalf("ParseEndpointURL: %v", err)
@@ -112,6 +113,7 @@ func TestNewProductionRequiresHardenedBackchannelNotifier(t *testing.T) {
 	t.Run("production without CIBA ignores the notifier", func(t *testing.T) {
 		cfg := validConfig(t)
 		cfg.Assurance = server.AssuranceProduction
+		cfg.Deployment = server.DeploymentSingleInstance
 		deps := validDependencies()
 		deps.Audit = &fakeAuditSink{}
 		deps.BackchannelNotifier = undeclaredNotifier{}

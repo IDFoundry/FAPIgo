@@ -58,7 +58,9 @@ type ResolvedAccessToken struct {
 	// claim for JWTAccessTokens, an opaque token's own hash for
 	// OpaqueAccessTokens — passed to Dependencies.Revocation.IsRevoked
 	// exactly as returned; its shape is an implementation detail
-	// specific to each AccessTokenResolver.
+	// specific to each AccessTokenResolver. Required: Verify answers a
+	// resolved token with no Key as 500 server_error, since revocation
+	// couldn't apply to it.
 	Key string
 
 	// Issuer, Audience and IssuedAt are the token's "iss", "aud" and
@@ -118,10 +120,32 @@ type AccessTokenResolver interface {
 // every one of them is a JWT-specific concern with no other use in
 // this package.
 type JWTAccessTokens struct {
-	IssuerKeys       keys.IssuerKeySource
-	Issuer           fapi.URL
-	Audience         string
-	Algorithm        fapi.SignatureAlgorithm
+	// IssuerKeys resolves the authorization server's access-token
+	// verification keys. Required.
+	IssuerKeys keys.IssuerKeySource
+
+	// Issuer is the authorization server's issuer identifier; a token's
+	// "iss" must equal it. Required.
+	Issuer fapi.URL
+
+	// Audience is the value a token's "aud" must contain. Required. A
+	// FAPIgo authorization server sets "aud" to its own issuer
+	// identifier on every access token, so for one this is
+	// Issuer.String(). That audience names the authorization server,
+	// not a resource server: every resource server verifying its tokens
+	// accepts every one of them, so decide what a token may do here from
+	// its scope, authorization_details and claims. Audience-restricted
+	// tokens for one resource server (RFC 8707 resource indicators) are
+	// not implemented.
+	Audience string
+
+	// Algorithm is the one signature algorithm a token may use (RFC
+	// 8725 §3.1). Required.
+	Algorithm fapi.SignatureAlgorithm
+
+	// MaxTokenLifetime bounds how far ahead of now a token's "exp" may
+	// be: a token valid for longer is refused, whatever its own "iat"
+	// says. Required.
 	MaxTokenLifetime time.Duration
 
 	// MaxKeyCandidates bounds how many of IssuerKeys' returned candidate

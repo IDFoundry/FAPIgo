@@ -13,6 +13,7 @@ type accountHint struct {
 }
 
 var accountHintDef = extension.Definition[accountHint]{
+	Sensitivity:    extension.NotSensitive,
 	Name:           "x_account_hint",
 	Cardinality:    extension.Single,
 	AllowedSources: extension.SourcePlainParameter | extension.SourceRequestObject,
@@ -65,7 +66,8 @@ func TestSetRejectsValidatorFailure(t *testing.T) {
 
 func TestNewRegistryRejectsDuplicateName(t *testing.T) {
 	dup := extension.Definition[string]{
-		Name: "x_account_hint", Cardinality: extension.Single,
+		Sensitivity: extension.NotSensitive,
+		Name:        "x_account_hint", Cardinality: extension.Single,
 		AllowedSources: extension.SourcePlainParameter, MaxBytes: 64,
 	}
 	_, err := extension.NewRegistry(accountHintDef, dup)
@@ -76,7 +78,8 @@ func TestNewRegistryRejectsDuplicateName(t *testing.T) {
 
 func TestNewRegistryRejectsCardinalityMismatch(t *testing.T) {
 	bad := extension.Definition[accountHint]{
-		Name: "x_bad", Cardinality: extension.Multiple, // accountHint is not a slice
+		Sensitivity: extension.NotSensitive,
+		Name:        "x_bad", Cardinality: extension.Multiple, // accountHint is not a slice
 		AllowedSources: extension.SourcePlainParameter, MaxBytes: 64,
 	}
 	_, err := extension.NewRegistry(bad)
@@ -169,7 +172,8 @@ func TestRegistryParseSkipsCoreParameters(t *testing.T) {
 
 func TestRegistryParseRejectsDisallowedSource(t *testing.T) {
 	requestObjectOnly := extension.Definition[accountHint]{
-		Name: "x_sensitive", Cardinality: extension.Single,
+		Sensitivity: extension.NotSensitive,
+		Name:        "x_sensitive", Cardinality: extension.Single,
 		AllowedSources: extension.SourceRequestObject, MaxBytes: 256,
 	}
 	reg, err := extension.NewRegistry(requestObjectOnly)
@@ -200,12 +204,14 @@ func TestRegistryParseRejectsUnknownFields(t *testing.T) {
 
 func TestAsParametersFiltersByReturnInTokenClaims(t *testing.T) {
 	inClaims := extension.Definition[string]{
-		Name: "x_in_claims", Cardinality: extension.Single,
+		Sensitivity: extension.NotSensitive,
+		Name:        "x_in_claims", Cardinality: extension.Single,
 		AllowedSources: extension.SourcePlainParameter, MaxBytes: 64,
 		ReturnInTokenClaims: true,
 	}
 	notInClaims := extension.Definition[string]{
-		Name: "x_not_in_claims", Cardinality: extension.Single,
+		Sensitivity: extension.NotSensitive,
+		Name:        "x_not_in_claims", Cardinality: extension.Single,
 		AllowedSources: extension.SourcePlainParameter, MaxBytes: 64,
 	}
 	var values extension.Values
@@ -231,7 +237,8 @@ func TestAsParametersFiltersByReturnInTokenClaims(t *testing.T) {
 // direct test of its own in this package.
 func TestSnapshotReturnsRawValuesByWireName(t *testing.T) {
 	other := extension.Definition[string]{
-		Name: "x_other", Cardinality: extension.Single,
+		Sensitivity: extension.NotSensitive,
+		Name:        "x_other", Cardinality: extension.Single,
 		AllowedSources: extension.SourcePlainParameter, MaxBytes: 64,
 	}
 	var values extension.Values
@@ -259,7 +266,8 @@ func TestSnapshotReturnsRawValuesByWireName(t *testing.T) {
 // every registered Definition, but had no direct test of its own.
 func TestRegistryDefinitionsReturnsAllRegistered(t *testing.T) {
 	other := extension.Definition[string]{
-		Name: "x_other", Cardinality: extension.Single,
+		Sensitivity: extension.NotSensitive,
+		Name:        "x_other", Cardinality: extension.Single,
 		AllowedSources: extension.SourcePlainParameter, MaxBytes: 64,
 	}
 	reg, err := extension.NewRegistry(accountHintDef, other)
@@ -284,5 +292,29 @@ func TestRegistryDefinitionsReturnsAllRegistered(t *testing.T) {
 	}
 	if !names["x_account_hint"] || !names["x_other"] {
 		t.Errorf("Definitions() = %+v, want both x_account_hint and x_other", defs)
+	}
+}
+
+// TestNewRegistryRequiresSensitivity: Sensitivity has no valid zero
+// value, so a Definition can't be registered without saying whether its
+// value may be logged.
+func TestNewRegistryRequiresSensitivity(t *testing.T) {
+	base := extension.Definition[string]{
+		Name: "x_flag", Cardinality: extension.Single,
+		AllowedSources: extension.SourcePlainParameter, MaxBytes: 64,
+	}
+	for _, s := range []extension.Sensitivity{0, extension.Sensitive + 1} {
+		def := base
+		def.Sensitivity = s
+		if _, err := extension.NewRegistry(def); err == nil {
+			t.Fatalf("NewRegistry(sensitivity %d) = nil error, want it refused", s)
+		}
+	}
+	for _, s := range []extension.Sensitivity{extension.NotSensitive, extension.Sensitive} {
+		def := base
+		def.Sensitivity = s
+		if _, err := extension.NewRegistry(def); err != nil {
+			t.Fatalf("NewRegistry(sensitivity %d): %v", s, err)
+		}
 	}
 }

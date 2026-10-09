@@ -11,6 +11,7 @@ import (
 )
 
 var accountHintDef = extension.Definition[string]{
+	Sensitivity:    extension.NotSensitive,
 	Name:           "x_account_hint",
 	Cardinality:    extension.Single,
 	AllowedSources: extension.SourceRequestObject,
@@ -21,6 +22,7 @@ var accountHintDef = extension.Definition[string]{
 // to exercise the baseline (plain-parameter) profile's rejection of a
 // value shape a bare form parameter can't represent.
 var accountBalanceDef = extension.Definition[int]{
+	Sensitivity: extension.NotSensitive,
 	Name:        "x_account_balance",
 	Cardinality: extension.Single,
 	MaxBytes:    16,
@@ -76,7 +78,7 @@ func TestBeginAuthorizationRejectsExtensionCollidingWithCoreParameterUnderBaseli
 	c, _, _ := newTestClient(t, false) // baseline, plain-parameter profile
 	ctx := context.Background()
 
-	stateDef := extension.Definition[string]{Name: "state", Cardinality: extension.Single, MaxBytes: 64}
+	stateDef := extension.Definition[string]{Sensitivity: extension.NotSensitive, Name: "state", Cardinality: extension.Single, MaxBytes: 64}
 	var req client.BeginAuthorizationRequest
 	req.Scope = []string{"openid"}
 	if err := extension.Set(&req.Extensions, stateDef, "attacker-controlled"); err != nil {

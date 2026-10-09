@@ -103,7 +103,8 @@ func TestLookupBackchannelInteractionUnreadableExtension(t *testing.T) {
 	required := beginBackchannel(t, newHarnessWithBackchannelStore(t, store), standardBackchannelParams(t))
 
 	registry, err := extension.NewRegistry(extension.Definition[string]{
-		Name: "x_state", Cardinality: extension.Single, AllowedSources: extension.SourceRequestObject, MaxBytes: 8,
+		Sensitivity: extension.NotSensitive,
+		Name:        "x_state", Cardinality: extension.Single, AllowedSources: extension.SourceRequestObject, MaxBytes: 8,
 	})
 	if err != nil {
 		t.Fatal(err)

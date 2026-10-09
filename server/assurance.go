@@ -44,9 +44,9 @@ const (
 	// operations, none with anything to assert atomicity for). A store
 	// that doesn't implement StoreAssurance at all is rejected rather
 	// than assumed adequate — declaring capabilities is not optional
-	// under this assurance level. When Config.HorizontallyScaled is also
-	// true, every one of those same stores must additionally declare
-	// CrossInstanceConsistent. This does not verify any declaration; see
+	// under this assurance level. Config.Deployment is required: with
+	// DeploymentHorizontallyScaled, every one of those same stores must
+	// additionally declare CrossInstanceConsistent. This does not verify any declaration; see
 	// storage.StoreAssurance's doc comment for why a store should also
 	// run this package's contract test suite (storage.TestGrantStoreContract
 	// and friends) against itself. The same "declaring capabilities is
@@ -63,7 +63,7 @@ const (
 	// Likewise the keys this server signs with — Dependencies.Keys, and
 	// JWTAccessTokens.Keys when access tokens are JWTs — must implement
 	// keys.KeyCustodyAssurance and declare Durable (and
-	// CrossInstanceConsistent with HorizontallyScaled): keys/ephemeral's
+	// CrossInstanceConsistent with DeploymentHorizontallyScaled): keys/ephemeral's
 	// in-memory keys, regenerated on every restart, never qualify. An
 	// HSM or KMS is not required — durable keys a deployment loads from
 	// its own storage qualify too — only that the declaration is made.
@@ -91,10 +91,34 @@ const (
 	AssuranceProduction
 )
 
+// Deployment says whether one server instance, or a fleet of them, uses
+// the storage tier. It's required under AssuranceProduction, where it
+// decides whether every store and key custody AssuranceProduction
+// checks must also declare CrossInstanceConsistent: the zero value is
+// refused there, so a fleet can't forget to say so and be checked as a
+// single instance. Under AssuranceDevelopment it may be left zero, and
+// is ignored.
+type Deployment uint8
+
+const (
+	_ Deployment = iota
+
+	// DeploymentSingleInstance is one process using the storage tier,
+	// such as a local SQLite file: stores needn't be consistent across
+	// instances.
+	DeploymentSingleInstance
+
+	// DeploymentHorizontallyScaled is more than one process sharing the
+	// storage tier — a load-balanced fleet. Under AssuranceProduction,
+	// every store and key custody checked must also declare
+	// CrossInstanceConsistent.
+	DeploymentHorizontallyScaled
+)
+
 // checkStoreAssurance requires store to implement storage.StoreAssurance
 // and to assert Durable (always), AtomicConsume (when requireAtomicConsume
 // is true), and CrossInstanceConsistent (when requireCrossInstanceConsistent
-// is true — Config.HorizontallyScaled).
+// is true — Config.Deployment is DeploymentHorizontallyScaled).
 func checkStoreAssurance(name string, store any, requireAtomicConsume, requireCrossInstanceConsistent bool) error {
 	asserter, ok := store.(storage.StoreAssurance)
 	if !ok {
@@ -108,7 +132,7 @@ func checkStoreAssurance(name string, store any, requireAtomicConsume, requireCr
 		return fmt.Errorf("server: dependencies: %s must declare AtomicConsume capability under AssuranceProduction", name)
 	}
 	if requireCrossInstanceConsistent && !caps.CrossInstanceConsistent {
-		return fmt.Errorf("server: dependencies: %s must declare CrossInstanceConsistent capability under AssuranceProduction with HorizontallyScaled", name)
+		return fmt.Errorf("server: dependencies: %s must declare CrossInstanceConsistent capability under AssuranceProduction with DeploymentHorizontallyScaled", name)
 	}
 	return nil
 }
@@ -134,7 +158,7 @@ func checkKeyCustody(name string, manager any, requireCrossInstanceConsistent bo
 		return fmt.Errorf("server: dependencies: %s must declare Durable key custody under AssuranceProduction", name)
 	}
 	if requireCrossInstanceConsistent && !custody.CrossInstanceConsistent {
-		return fmt.Errorf("server: dependencies: %s must declare CrossInstanceConsistent key custody under AssuranceProduction with HorizontallyScaled", name)
+		return fmt.Errorf("server: dependencies: %s must declare CrossInstanceConsistent key custody under AssuranceProduction with DeploymentHorizontallyScaled", name)
 	}
 	return nil
 }
@@ -183,13 +207,13 @@ type AccessTokenAssurance struct {
 	// SigningKeys signs the access tokens, if they're signed. Under
 	// AssuranceProduction it must implement keys.KeyCustodyAssurance and
 	// declare Durable key custody (and CrossInstanceConsistent with
-	// HorizontallyScaled), as Dependencies.Keys must.
+	// DeploymentHorizontallyScaled), as Dependencies.Keys must.
 	SigningKeys keys.KeyManager
 
 	// Store keeps the access tokens, if they're kept (opaque tokens).
 	// Under AssuranceProduction it must implement storage.StoreAssurance
 	// and declare Durable (and CrossInstanceConsistent with
-	// HorizontallyScaled), as OpaqueAccessTokens.Store must.
+	// DeploymentHorizontallyScaled), as OpaqueAccessTokens.Store must.
 	Store any
 }
 

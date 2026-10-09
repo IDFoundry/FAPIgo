@@ -2,6 +2,8 @@ package server_test
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,7 +16,7 @@ import (
 // This file covers AssuranceProduction's own coverage of the three
 // stores it previously missed entirely (Dependencies.Nonces, the
 // opaque-token store nested inside Dependencies.AccessTokens, and
-// Dependencies.Revocation), plus Config.HorizontallyScaled's own
+// Dependencies.Revocation), plus Config.Deployment's own
 // CrossInstanceConsistent requirement — see checkStoreAssurance's own
 // doc comment. Mirrors the existing bareReplayStore/capReplayStore
 // pattern in server_test.go for each store type.
@@ -45,6 +47,7 @@ type bareBackchannelAuthenticationStore struct {
 func TestNewRejectsClientsStoreWithoutStoreAssuranceUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = server.AssuranceProduction
+	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
 	deps.Clients = bareClientRepository{}
@@ -57,6 +60,7 @@ func TestNewRejectsClientsStoreWithoutStoreAssuranceUnderProduction(t *testing.T
 func TestNewRejectsTransactionsStoreWithoutStoreAssuranceUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = server.AssuranceProduction
+	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
 	deps.Transactions = bareTransactionStore{}
@@ -69,6 +73,7 @@ func TestNewRejectsTransactionsStoreWithoutStoreAssuranceUnderProduction(t *test
 func TestNewRejectsGrantsStoreWithoutStoreAssuranceUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = server.AssuranceProduction
+	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
 	deps.Grants = bareGrantStore{}
@@ -81,6 +86,7 @@ func TestNewRejectsGrantsStoreWithoutStoreAssuranceUnderProduction(t *testing.T)
 func TestNewRejectsBackchannelStoreWithoutStoreAssuranceUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = server.AssuranceProduction
+	cfg.Deployment = server.DeploymentSingleInstance
 	backchannelEndpoint, err := fapi.ParseEndpointURL(testBackchannelAuthenticationEndpoint)
 	if err != nil {
 		t.Fatalf("ParseEndpointURL: %v", err)
@@ -117,6 +123,7 @@ func (s capNonceStore) Capabilities() storage.Capabilities { return s.caps }
 func TestNewRejectsNonceStoreWithoutStoreAssuranceUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = server.AssuranceProduction
+	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
 	deps.Nonces = bareNonceStore{}
@@ -130,6 +137,7 @@ func TestNewRejectsNonceStoreWithoutStoreAssuranceUnderProduction(t *testing.T) 
 func TestNewAcceptsAdequateNonceStoreUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = server.AssuranceProduction
+	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
 	deps.Nonces = capNonceStore{caps: storage.Capabilities{Durable: true, AtomicConsume: true}}
@@ -143,6 +151,7 @@ func TestNewAcceptsAdequateNonceStoreUnderProduction(t *testing.T) {
 func TestNewSkipsNonceCheckWhenNoncesNotConfigured(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = server.AssuranceProduction
+	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
 	deps.Nonces = nil // genuinely optional — DPoP nonce-challenge support disabled
@@ -171,6 +180,7 @@ func (s capAccessTokenStore) Capabilities() storage.Capabilities { return s.caps
 func TestNewRejectsOpaqueAccessTokenStoreWithoutStoreAssuranceUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = server.AssuranceProduction
+	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
 	deps.AccessTokens = server.OpaqueAccessTokens{Store: bareAccessTokenStore{}}
@@ -183,6 +193,7 @@ func TestNewRejectsOpaqueAccessTokenStoreWithoutStoreAssuranceUnderProduction(t 
 func TestNewAcceptsAdequateOpaqueAccessTokenStoreUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = server.AssuranceProduction
+	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
 	deps.AccessTokens = server.OpaqueAccessTokens{
@@ -197,6 +208,7 @@ func TestNewAcceptsAdequateOpaqueAccessTokenStoreUnderProduction(t *testing.T) {
 func TestNewSkipsAccessTokenCheckForJWTAccessTokens(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = server.AssuranceProduction
+	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies() // AccessTokens: server.JWTAccessTokens{...} by default — no separate store
 	deps.Audit = &fakeAuditSink{}
 
@@ -219,6 +231,7 @@ func (bareRevocationSink) Revoke(context.Context, string, time.Time) error { ret
 func TestNewRejectsRevocationWithoutStoreAssuranceUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = server.AssuranceProduction
+	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
 	deps.Revocation = bareRevocationSink{}
@@ -231,6 +244,7 @@ func TestNewRejectsRevocationWithoutStoreAssuranceUnderProduction(t *testing.T) 
 func TestNewAcceptsAdequateRevocationUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = server.AssuranceProduction
+	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
 	deps.Revocation = capRevocationSink{caps: storage.Capabilities{Durable: true}}
@@ -243,6 +257,7 @@ func TestNewAcceptsAdequateRevocationUnderProduction(t *testing.T) {
 func TestNewSkipsRevocationCheckWhenDeclined(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = server.AssuranceProduction
+	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies() // Revocation: server.NoRevocation{} by default
 	deps.Audit = &fakeAuditSink{}
 
@@ -254,7 +269,7 @@ func TestNewSkipsRevocationCheckWhenDeclined(t *testing.T) {
 func TestNewRequiresCrossInstanceConsistentWhenHorizontallyScaled(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = server.AssuranceProduction
-	cfg.HorizontallyScaled = true
+	cfg.Deployment = server.DeploymentHorizontallyScaled
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
 	deps.Replay = capReplayStore{caps: storage.Capabilities{Durable: true, AtomicConsume: true, CrossInstanceConsistent: false}}
@@ -267,7 +282,7 @@ func TestNewRequiresCrossInstanceConsistentWhenHorizontallyScaled(t *testing.T) 
 func TestNewAcceptsCrossInstanceConsistentStoreWhenHorizontallyScaled(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = server.AssuranceProduction
-	cfg.HorizontallyScaled = true
+	cfg.Deployment = server.DeploymentHorizontallyScaled
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
 	deps.Replay = capReplayStore{caps: storage.Capabilities{Durable: true, AtomicConsume: true, CrossInstanceConsistent: true}}
@@ -280,7 +295,7 @@ func TestNewAcceptsCrossInstanceConsistentStoreWhenHorizontallyScaled(t *testing
 func TestNewIgnoresCrossInstanceConsistentWhenNotHorizontallyScaled(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = server.AssuranceProduction
-	cfg.HorizontallyScaled = false
+	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
 	deps.Replay = capReplayStore{caps: storage.Capabilities{Durable: true, AtomicConsume: true, CrossInstanceConsistent: false}}
@@ -318,6 +333,7 @@ func (s capClientEncryptionKeySource) Capabilities() keys.KeySourceCapabilities 
 func TestNewRejectsClientKeysWithoutKeySourceAssuranceUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = server.AssuranceProduction
+	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
 	deps.ClientKeys = bareClientKeySource{}
@@ -330,6 +346,7 @@ func TestNewRejectsClientKeysWithoutKeySourceAssuranceUnderProduction(t *testing
 func TestNewRejectsClientKeysNotLiveFetchHardenedUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = server.AssuranceProduction
+	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
 	deps.ClientKeys = capClientKeySource{caps: keys.KeySourceCapabilities{LiveFetchHardened: false}}
@@ -342,6 +359,7 @@ func TestNewRejectsClientKeysNotLiveFetchHardenedUnderProduction(t *testing.T) {
 func TestNewAcceptsLiveFetchHardenedClientKeysUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = server.AssuranceProduction
+	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
 	deps.ClientKeys = capClientKeySource{caps: keys.KeySourceCapabilities{LiveFetchHardened: true}}
@@ -358,6 +376,7 @@ func TestNewAcceptsLiveFetchHardenedClientKeysUnderProduction(t *testing.T) {
 func TestNewSkipsClientEncryptionKeysAssuranceCheckWhenNotConfigured(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = server.AssuranceProduction
+	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
 
@@ -369,6 +388,7 @@ func TestNewSkipsClientEncryptionKeysAssuranceCheckWhenNotConfigured(t *testing.
 func TestNewRejectsClientEncryptionKeysWithoutKeySourceAssuranceUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = server.AssuranceProduction
+	cfg.Deployment = server.DeploymentSingleInstance
 	cfg.Algorithms.IDTokenEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.RSAOAEP256}
 	cfg.Algorithms.IDTokenEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{fapi.A256GCM}
 	deps := validDependencies()
@@ -383,6 +403,7 @@ func TestNewRejectsClientEncryptionKeysWithoutKeySourceAssuranceUnderProduction(
 func TestNewAcceptsLiveFetchHardenedClientEncryptionKeysUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = server.AssuranceProduction
+	cfg.Deployment = server.DeploymentSingleInstance
 	cfg.Algorithms.IDTokenEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.RSAOAEP256}
 	cfg.Algorithms.IDTokenEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{fapi.A256GCM}
 	deps := validDependencies()
@@ -391,5 +412,45 @@ func TestNewAcceptsLiveFetchHardenedClientEncryptionKeysUnderProduction(t *testi
 
 	if _, err := server.New(cfg, deps); err != nil {
 		t.Fatalf("New(production, LiveFetchHardened client encryption keys): %v", err)
+	}
+}
+
+// TestNewRequiresDeploymentUnderProduction: Deployment decides whether
+// stores must be consistent across instances, so production refuses the
+// zero value rather than checking a fleet as a single instance; it's
+// ignored, and may be zero, under development. A value outside the two
+// defined is refused under either level.
+func TestNewRequiresDeploymentUnderProduction(t *testing.T) {
+	t.Run("production refuses zero", func(t *testing.T) {
+		cfg := validConfig(t)
+		cfg.Assurance = server.AssuranceProduction
+		cfg.Deployment = 0
+		deps := validDependencies()
+		deps.Audit = &fakeAuditSink{}
+		_, err := server.New(cfg, deps)
+		if err == nil || !strings.Contains(err.Error(), "deployment is required under AssuranceProduction (DeploymentSingleInstance or DeploymentHorizontallyScaled)") {
+			t.Fatalf("New(production, zero deployment) = %v, want the deployment-required refusal", err)
+		}
+	})
+	t.Run("development accepts zero", func(t *testing.T) {
+		cfg := validConfig(t)
+		cfg.Assurance = server.AssuranceDevelopment
+		cfg.Deployment = 0
+		if _, err := server.New(cfg, validDependencies()); err != nil {
+			t.Fatalf("New(development, zero deployment): %v", err)
+		}
+	})
+	for _, level := range []server.AssuranceLevel{server.AssuranceDevelopment, server.AssuranceProduction} {
+		t.Run(fmt.Sprintf("level %d refuses out of range", level), func(t *testing.T) {
+			cfg := validConfig(t)
+			cfg.Assurance = level
+			cfg.Deployment = server.DeploymentHorizontallyScaled + 1
+			deps := validDependencies()
+			deps.Audit = &fakeAuditSink{}
+			_, err := server.New(cfg, deps)
+			if err == nil || !strings.Contains(err.Error(), "deployment is invalid") {
+				t.Fatalf("New(out-of-range deployment) = %v, want the invalid refusal", err)
+			}
+		})
 	}
 }

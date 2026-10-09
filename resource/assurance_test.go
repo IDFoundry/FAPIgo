@@ -87,12 +87,12 @@ func jwtResolver(t *testing.T, source keys.IssuerKeySource) resource.JWTAccessTo
 }
 
 // productionSetup is a configuration AssuranceProduction accepts, with
-// HorizontallyScaled, nonces and a revocation store, so each case below
+// DeploymentHorizontallyScaled, nonces and a revocation store, so each case below
 // breaks exactly one requirement.
 func productionSetup(t *testing.T) (resource.Config, resource.Dependencies) {
 	cfg := validConfig(t)
 	cfg.Assurance = resource.AssuranceProduction
-	cfg.HorizontallyScaled = true
+	cfg.Deployment = resource.DeploymentHorizontallyScaled
 	cfg.Limits.DPoPNonceLifetime = time.Minute
 	return cfg, resource.Dependencies{
 		AccessTokens: jwtResolver(t, &declaredKeys{hardened: true}),
@@ -125,7 +125,7 @@ func TestNewVerifierRequiresAssuranceLevel(t *testing.T) {
 func TestNewVerifierDevelopmentAcceptsUndeclared(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Limits.DPoPNonceLifetime = time.Minute
-	cfg.HorizontallyScaled = true
+	cfg.Deployment = resource.DeploymentHorizontallyScaled
 	if _, err := resource.NewVerifier(cfg, resource.Dependencies{
 		AccessTokens: resource.OpaqueAccessTokens{Store: memstore.NewAccessTokenStore()},
 		Replay:       &fakeReplayStore{},
@@ -151,7 +151,7 @@ func TestNewVerifierProductionAccepts(t *testing.T) {
 			d.Random = bytes.NewReader(nil)
 		}},
 		{"single instance without CrossInstanceConsistent", func(c *resource.Config, d *resource.Dependencies) {
-			c.HorizontallyScaled = false
+			c.Deployment = resource.DeploymentSingleInstance
 			caps := storage.Capabilities{Durable: true, AtomicConsume: true}
 			d.Replay = &declaredReplay{caps: caps}
 			d.Revocation = &declaredRevocation{caps: storage.Capabilities{Durable: true}}
@@ -311,5 +311,29 @@ func TestNewVerifierProductionRefusesLoopbackJWKSFetcher(t *testing.T) {
 				t.Fatalf("NewVerifier(production, JWKS source with %s): %v", name, err)
 			}
 		})
+	}
+}
+
+// TestNewVerifierRequiresDeploymentUnderProduction mirrors server.New's
+// rule: zero is refused under production and ignored under development;
+// a value outside the two defined is refused under either.
+func TestNewVerifierRequiresDeploymentUnderProduction(t *testing.T) {
+	cfg, deps := productionSetup(t)
+	cfg.Deployment = 0
+	if _, err := resource.NewVerifier(cfg, deps); err == nil || !strings.Contains(err.Error(), "deployment is required under AssuranceProduction") {
+		t.Fatalf("NewVerifier(production, zero deployment) = %v, want the deployment-required refusal", err)
+	}
+	cfg.Deployment = resource.DeploymentSingleInstance
+	if _, err := resource.NewVerifier(cfg, deps); err != nil {
+		t.Fatalf("NewVerifier(production, single instance): %v", err)
+	}
+	dev := validConfig(t)
+	dev.Deployment = 0
+	if _, err := resource.NewVerifier(dev, validDependencies(t)); err != nil {
+		t.Fatalf("NewVerifier(development, zero deployment): %v", err)
+	}
+	dev.Deployment = resource.DeploymentHorizontallyScaled + 1
+	if _, err := resource.NewVerifier(dev, validDependencies(t)); err == nil || !strings.Contains(err.Error(), "deployment is invalid") {
+		t.Fatalf("NewVerifier(out-of-range deployment) = %v, want the invalid refusal", err)
 	}
 }

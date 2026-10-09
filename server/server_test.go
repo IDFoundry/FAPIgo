@@ -365,6 +365,7 @@ func TestNewRequiresClientEncryptionKeysWhenUserInfoEncryptionConfigured(t *test
 func TestNewRequiresAuditUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = server.AssuranceProduction
+	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 
 	if _, err := server.New(cfg, deps); err == nil {
@@ -403,6 +404,7 @@ func TestNewRejectsLoopbackHTTPURLsUnderProduction(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			cfg := validConfig(t)
 			cfg.Assurance = server.AssuranceProduction
+			cfg.Deployment = server.DeploymentSingleInstance
 			mutate(&cfg)
 			deps := validDependencies()
 			deps.Audit = &fakeAuditSink{}
@@ -442,6 +444,7 @@ func (s capReplayStore) Capabilities() storage.Capabilities { return s.caps }
 func TestNewRejectsStoreWithoutStoreAssuranceUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = server.AssuranceProduction
+	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
 	deps.Replay = bareReplayStore{}
@@ -454,6 +457,7 @@ func TestNewRejectsStoreWithoutStoreAssuranceUnderProduction(t *testing.T) {
 func TestNewRejectsNonDurableStoreUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = server.AssuranceProduction
+	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
 	deps.Replay = capReplayStore{caps: storage.Capabilities{Durable: false, AtomicConsume: true}}
@@ -466,6 +470,7 @@ func TestNewRejectsNonDurableStoreUnderProduction(t *testing.T) {
 func TestNewRejectsStoreWithoutAtomicConsumeUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = server.AssuranceProduction
+	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
 	deps.Replay = capReplayStore{caps: storage.Capabilities{Durable: true, AtomicConsume: false}}
@@ -478,6 +483,7 @@ func TestNewRejectsStoreWithoutAtomicConsumeUnderProduction(t *testing.T) {
 func TestNewAcceptsAdequateStoreCapabilitiesUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = server.AssuranceProduction
+	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
 	deps.Replay = capReplayStore{caps: storage.Capabilities{Durable: true, AtomicConsume: true}}

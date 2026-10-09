@@ -223,6 +223,7 @@ func TestNewVerifierInheritsAssurance(t *testing.T) {
 	jwt := jwtAccessTokens(t)
 	production := serverConfig(t)
 	production.Assurance = server.AssuranceProduction
+	production.Deployment = server.DeploymentSingleInstance
 
 	t.Run("production refuses an undeclared replay store", func(t *testing.T) {
 		_, err := serverresource.NewVerifier(production, serverDependencies(t, jwt, now), serverresource.Options{})
@@ -247,15 +248,15 @@ func TestNewVerifierInheritsAssurance(t *testing.T) {
 			t.Fatalf("NewVerifier = %v, want accepted", err)
 		}
 	})
-	t.Run("production with HorizontallyScaled requires CrossInstanceConsistent", func(t *testing.T) {
+	t.Run("production with DeploymentHorizontallyScaled requires CrossInstanceConsistent", func(t *testing.T) {
 		scaled := production
-		scaled.HorizontallyScaled = true
+		scaled.Deployment = server.DeploymentHorizontallyScaled
 		deps := serverDependencies(t, jwt, now)
 		deps.Replay = declaredReplay{memstore.NewReplayStore()}
 		deps.Revocation = server.NoRevocation{}
 		_, err := serverresource.NewVerifier(scaled, deps, serverresource.Options{})
 		if err == nil || !strings.Contains(err.Error(), "replay must declare CrossInstanceConsistent") {
-			t.Fatalf("NewVerifier = %v, want the HorizontallyScaled check", err)
+			t.Fatalf("NewVerifier = %v, want the DeploymentHorizontallyScaled check", err)
 		}
 	})
 	t.Run("invalid server level", func(t *testing.T) {
@@ -266,4 +267,15 @@ func TestNewVerifierInheritsAssurance(t *testing.T) {
 			t.Fatalf("NewVerifier = %v, want the level refused", err)
 		}
 	})
+}
+
+// TestNewVerifierRefusesInvalidDeployment: a server Deployment outside
+// the two defined has no resource equivalent to map to.
+func TestNewVerifierRefusesInvalidDeployment(t *testing.T) {
+	cfg := serverConfig(t)
+	cfg.Deployment = server.DeploymentHorizontallyScaled + 1
+	deps := serverDependencies(t, jwtAccessTokens(t), time.Now())
+	if _, err := serverresource.NewVerifier(cfg, deps, serverresource.Options{}); err == nil || !strings.Contains(err.Error(), "deployment is invalid") {
+		t.Fatalf("NewVerifier(invalid deployment) = %v, want refusal", err)
+	}
 }

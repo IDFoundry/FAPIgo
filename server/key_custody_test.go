@@ -92,7 +92,7 @@ func TestNewProductionRequiresKeyCustody(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			cfg := validConfig(t)
 			cfg.Assurance = server.AssuranceProduction
-			cfg.HorizontallyScaled = tc.scaled
+			cfg.Deployment = map[bool]server.Deployment{false: server.DeploymentSingleInstance, true: server.DeploymentHorizontallyScaled}[tc.scaled]
 			deps := validDependencies()
 			deps.Audit = &fakeAuditSink{}
 			deps.Replay = capReplayStore{caps: storage.Capabilities{Durable: true, AtomicConsume: true, CrossInstanceConsistent: true}}

@@ -581,7 +581,8 @@ func newHarnessWithApplicationType(t *testing.T, profile server.Profile, allowRe
 			MaxDPoPProofAge:            time.Minute,
 			MaxClockSkew:               5 * time.Second,
 		},
-		Assurance: assurance,
+		Assurance:  assurance,
+		Deployment: server.DeploymentSingleInstance,
 	}
 	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
 	clients := &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}}
@@ -1651,7 +1652,8 @@ func TestPushAuthorizationRequestIgnoresMultipleUnregisteredExtensionParameters(
 // still rejected — for the invalid one, not the unrecognized one.
 func TestPushAuthorizationRequestRejectsInvalidRegisteredParameterAlongsideUnregisteredOne(t *testing.T) {
 	def := extension.Definition[string]{
-		Name: "x_custom", Cardinality: extension.Single,
+		Sensitivity: extension.NotSensitive,
+		Name:        "x_custom", Cardinality: extension.Single,
 		AllowedSources: extension.SourcePlainParameter, MaxBytes: 4,
 	}
 	registry, err := extension.NewRegistry(def)
@@ -1710,7 +1712,8 @@ func TestPushAuthorizationRequestAcceptsResponseModeParameter(t *testing.T) {
 
 func TestPushAuthorizationRequestAcceptsRegisteredExtensionParameter(t *testing.T) {
 	def := extension.Definition[string]{
-		Name: "x_custom", Cardinality: extension.Single,
+		Sensitivity: extension.NotSensitive,
+		Name:        "x_custom", Cardinality: extension.Single,
 		AllowedSources: extension.SourcePlainParameter, MaxBytes: 64,
 	}
 	registry, err := extension.NewRegistry(def)

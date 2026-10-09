@@ -468,11 +468,13 @@ consuming (`storage.StoreAssurance`), key sources with hardened live
 fetches (`keys.KeySourceAssurance`), signing keys and decryption keys
 held durably (`keys.KeyCustodyAssurance`; an HSM or KMS is not required,
 only that the keys survive a restart), each also cross-instance
-consistent under `HorizontallyScaled` — plus an audit sink,
+consistent under `DeploymentHorizontallyScaled` — plus an audit sink,
 `crypto/rand.Reader` itself as `Dependencies.Random` (an `io.Reader`
 can't declare that it is a CSPRNG) and, with CIBA, a ping notifier
 declaring hardened outbound sending (`server.BackchannelNotifierAssurance`),
-and rejects loopback `http` issuer and endpoint URLs. The assurance level is itself a
+and rejects loopback `http` issuer and endpoint URLs. Production
+also requires `Config.Deployment` — single instance or horizontally
+scaled — so a fleet can't be checked as one instance by omission. The assurance level is itself a
 required `Config.Assurance` choice with no default, so a caller can never
 end up on the development level by omission. `resource.NewVerifier`
 applies the same rule to the resource server's own key source and

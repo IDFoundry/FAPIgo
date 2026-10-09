@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"errors"
 	"math/big"
 	"net/url"
 	"testing"
@@ -279,4 +280,45 @@ func TestVerifyRefusesNoCertificateAgainstEmptyThumbprint(t *testing.T) {
 	}
 	_, err = v.Verify(context.Background(), resource.VerifyRequest{Method: "GET", URL: target, Authorization: "Bearer anything"})
 	wantInvalidToken401(t, err)
+}
+
+// emptyKeyResolver resolves an otherwise valid, correctly bound token
+// but leaves Key empty — a custom resolver's bug.
+type emptyKeyResolver struct {
+	now        time.Time
+	thumbprint string
+}
+
+func (r emptyKeyResolver) ResolveAccessToken(context.Context, resource.ResolveAccessTokenRequest) (resource.ResolvedAccessToken, error) {
+	return resource.ResolvedAccessToken{
+		Subject: "user-1", ClientID: "client-1", Thumbprint: r.thumbprint,
+		SenderConstrain: storage.SenderConstrainMTLS, ExpiresAt: r.now.Add(time.Minute),
+	}, nil
+}
+
+// TestVerifyRefusesResolvedTokenWithoutKey: a resolver that returns no
+// Key would have IsRevoked asked about "" — never revoked — so a revoked
+// token would be accepted. Verify refuses it as a resolver bug instead.
+func TestVerifyRefusesResolvedTokenWithoutKey(t *testing.T) {
+	now := time.Now()
+	target, err := url.Parse("https://rs.example.com/accounts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert := selfSignedTestClientCert(t, "client-1")
+	revocation := &fakeRevocationChecker{revoked: map[string]bool{"": false}}
+	v, err := resource.NewVerifier(validConfig(t), resource.Dependencies{
+		AccessTokens: emptyKeyResolver{now: now, thumbprint: mtls.Thumbprint(cert)},
+		Replay:       &fakeReplayStore{},
+		Revocation:   revocation,
+		Clock:        fixedClock{now: now},
+	})
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+	_, err = v.Verify(context.Background(), resource.VerifyRequest{Method: "GET", URL: target, Authorization: "Bearer anything", PeerCertificate: cert})
+	var rerr *resource.Error
+	if !errors.As(err, &rerr) || rerr.Code() != resource.ErrorServerError || rerr.HTTPStatus() != 500 {
+		t.Fatalf("Verify(resolver without Key) = %v, want 500 server_error", err)
+	}
 }

@@ -19,6 +19,7 @@ import (
 // token's claims, without server ever being told to do so a second
 // time.
 var accountHintDef = extension.Definition[string]{
+	Sensitivity:         extension.NotSensitive,
 	Name:                "x_account_hint",
 	Cardinality:         extension.Single,
 	AllowedSources:      extension.SourceRequestObject,

@@ -14,8 +14,9 @@ type Registry struct {
 }
 
 // NewRegistry validates and indexes defs. It fails if any Definition
-// has an empty wire name, if two Definitions share a wire name, or if
-// any Definition's declared Cardinality does not match its Go type.
+// has an empty wire name, if two Definitions share a wire name, if any
+// Definition's declared Cardinality does not match its Go type, or if
+// any Definition leaves Sensitivity unset.
 func NewRegistry(defs ...Registered) (*Registry, error) {
 	byName := make(map[string]Registered, len(defs))
 	for _, d := range defs {
@@ -24,6 +25,9 @@ func NewRegistry(defs ...Registered) (*Registry, error) {
 		}
 		if !d.cardinalityOK() {
 			return nil, fmt.Errorf("%w: %q", ErrCardinalityMismatch, d.name())
+		}
+		if !d.sensitivityOK() {
+			return nil, fmt.Errorf("extension: definition %q: sensitivity is required (NotSensitive or Sensitive)", d.name())
 		}
 		if _, exists := byName[d.name()]; exists {
 			return nil, fmt.Errorf("%w: %q", ErrDuplicateDefinition, d.name())

@@ -25,6 +25,10 @@ func TestEssentialACRValues(t *testing.T) {
 		{name: "entry not an object", claims: `{"id_token":{"acr":true}}`, wantErr: true},
 		{name: "essential not a bool", claims: `{"id_token":{"acr":{"essential":1}}}`, wantErr: true},
 		{name: "values with a non-string", claims: `{"id_token":{"acr":{"essential":true,"values":["a",2]}}}`, wantErr: true},
+		{name: "ID_TOKEN is not id_token", claims: `{"ID_TOKEN":{"acr":{"essential":true,"values":["gold"]}}}`},
+		{name: "Essential refused", claims: `{"id_token":{"acr":{"Essential":true,"values":["gold"]}}}`, wantErr: true},
+		{name: "VALUES refused", claims: `{"id_token":{"acr":{"essential":true,"VALUES":["gold"]}}}`, wantErr: true},
+		{name: "Value refused", claims: `{"id_token":{"acr":{"essential":true,"Value":"gold"}}}`, wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			params := map[string]json.RawMessage{}

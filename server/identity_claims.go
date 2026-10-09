@@ -53,26 +53,17 @@ type IdentityClaimsSource interface {
 // it and builds the response's claims from IdentityClaimsSource.
 const RequestedUserinfoClaimsKey = "requested_userinfo_claims"
 
-// requestedClaimsParameter is the OIDC Core §5.5 "claims" request
-// parameter's shape, trimmed to the one thing this package acts on:
-// which claim names were asked for, per delivery location. Everything
-// else about each entry (essential/value/values) is ignored here — OIDC
-// Core §5.5 permits a server to honor as much or as little of a claims
-// request as it wants, and this package's contract is "never return
-// what wasn't asked for". The one exception is an essential "acr"
-// request with values, which §5.5.1.1 makes a requirement: see
-// essentialACRValues.
-type requestedClaimsParameter struct {
-	UserInfo map[string]json.RawMessage `json:"userinfo"`
-	IDToken  map[string]json.RawMessage `json:"id_token"`
-}
-
 // parseRequestedClaimNames extracts the claim names requested for each
 // delivery location from raw (the "claims" parameter's raw JSON value,
-// or empty if absent). Malformed input yields no requested claims
-// rather than an error — "claims" is optional convenience data (OIDC
-// Core §5.5), never something that should block an otherwise-valid
-// authorization.
+// or empty if absent), reading members by their exact names through
+// claimsMembers. Only the names are kept: everything else about each
+// entry (essential/value/values) is ignored here, since OIDC Core §5.5
+// lets a server honor as much or as little of a claims request as it
+// wants, and this package's contract is "never return what wasn't asked
+// for". The one exception is an essential "acr" request with values,
+// which §5.5.1.1 makes a requirement: see essentialACRValues. Malformed
+// input yields no requested claims rather than an error here; requests
+// are refused earlier, by validateClaimsParameter.
 //
 // raw arrives in one of two shapes depending on how the authorization
 // request was made: a signed request object carries "claims" as a
@@ -83,21 +74,11 @@ type requestedClaimsParameter struct {
 // parameter arrives here as a JSON string *containing* the object, not
 // the object itself. Both are handled.
 func parseRequestedClaimNames(raw json.RawMessage) (idToken, userinfo []string) {
-	if len(raw) == 0 {
+	top, ok := claimsMembers(raw)
+	if !ok {
 		return nil, nil
 	}
-	var parsed requestedClaimsParameter
-	if err := json.Unmarshal(raw, &parsed); err == nil {
-		return claimNames(parsed.IDToken), claimNames(parsed.UserInfo)
-	}
-	var asString string
-	if err := json.Unmarshal(raw, &asString); err != nil {
-		return nil, nil
-	}
-	if err := json.Unmarshal([]byte(asString), &parsed); err != nil {
-		return nil, nil
-	}
-	return claimNames(parsed.IDToken), claimNames(parsed.UserInfo)
+	return claimNames(claimsLocation(top, "id_token")), claimNames(claimsLocation(top, "userinfo"))
 }
 
 func claimNames(m map[string]json.RawMessage) []string {

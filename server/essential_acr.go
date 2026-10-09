@@ -36,6 +36,9 @@ func essentialACRValues(params map[string]json.RawMessage) ([]string, error) {
 	if err := json.Unmarshal(raw, &entry); err != nil || entry == nil {
 		return nil, errors.New(`claims: the id_token "acr" entry must be a JSON object or null`)
 	}
+	if err := checkMemberCase(entry, `claims: the id_token "acr" entry's`, "essential", "value", "values"); err != nil {
+		return nil, err
+	}
 
 	essential := false
 	if v, ok := entry["essential"]; ok {
@@ -74,19 +77,12 @@ func essentialACRValues(params map[string]json.RawMessage) ([]string, error) {
 // member entries, accepting the parameter as a JSON object or as a JSON
 // string containing one. ok is false when there is no such object.
 func claimsIDTokenMembers(raw json.RawMessage) (map[string]json.RawMessage, bool) {
-	if len(raw) == 0 {
+	top, ok := claimsMembers(raw)
+	if !ok {
 		return nil, false
 	}
-	var claims struct {
-		IDToken map[string]json.RawMessage `json:"id_token"`
-	}
-	if err := json.Unmarshal(raw, &claims); err != nil {
-		var asString string
-		if json.Unmarshal(raw, &asString) != nil || json.Unmarshal([]byte(asString), &claims) != nil {
-			return nil, false
-		}
-	}
-	return claims.IDToken, claims.IDToken != nil
+	idToken := claimsLocation(top, "id_token")
+	return idToken, idToken != nil
 }
 
 // meetsEssentialACR reports whether acr satisfies required, the

@@ -574,7 +574,13 @@ with open(path, "w") as f:
     f.write("\n")
 ' "$subordinates" "$as_jwks"
 
-	(cd "$SERVER_DIR" && docker compose up -d --force-recreate conformance-federation-trust-anchor) >>"$WORKDIR/docker-compose-federation.log" 2>&1
+	# Restart rather than recreate: the subordinates file is bind-mounted
+	# and was just rewritten in place, so restarting the same container
+	# picks it up while keeping its IP address on the suite network.
+	# Recreating it would give it a new IP, which breaks anything that
+	# already resolved conformance-federation-trust-anchor (the suite
+	# caches resolved addresses), should the order here ever change.
+	(cd "$SERVER_DIR" && docker compose restart conformance-federation-trust-anchor) >>"$WORKDIR/docker-compose-federation.log" 2>&1
 	wait_federation_ready 18457 conformance-federation-trust-anchor
 
 	local ta_jwks

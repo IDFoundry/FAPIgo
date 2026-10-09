@@ -12,7 +12,7 @@
 * server.Config.HorizontallyScaled and resource.Config.HorizontallyScaled are replaced by a Deployment field (DeploymentSingleInstance or DeploymentHorizontallyScaled), and under AssuranceProduction server.New and resource.NewVerifier refuse a configuration that leaves it unset. See UPGRADING.md for v0.52.0.
 * **server:** server.New refuses an extension returning a grant_type or code_grant_id claim in tokens, and resource.Verifier refuses a token whose grant_type claim is anything other than client_credentials. A resource server serving both end-user and client credentials tokens should authorize by AuthorizationContext.SubjectKind as well as Subject. See UPGRADING.md for v0.52.0.
 * **federation:** federation.Resolver.VerifyTrustMark takes the subject's ResolvedEntity, as Resolve returned it, in place of its Entity Identifier, and refuses a Trust Mark whose issuer can't be trusted through the subject's own Trust Anchor. See UPGRADING.md for v0.52.0.
-* **server:** enforce an essential acr request ([#609](https://github.com/IDFoundry/FAPIgo/issues/609))
+* **server:** a request whose claims parameter asks for the ID token's acr as an Essential Claim with values now fails when the application completes it at another class: login_required for the redirect flow, access_denied at the CIBA poll. Authenticate at one of InteractionRequest.EssentialACRValues, or complete with AuthenticationFailed. A malformed id_token acr entry is refused as invalid_request. See UPGRADING.md for v0.52.0.
 
 ### Features
 
@@ -27,7 +27,6 @@
 ### Bug Fixes
 
 * bump Go toolchain to 1.26.9 for GO-2026-6617 ([6bec8b9](https://github.com/IDFoundry/FAPIgo/commit/6bec8b92fd0bd9f346b0995bddca245b902521bb))
-* **client:** bind a sealed CIBA session to its owner ([2e79e54](https://github.com/IDFoundry/FAPIgo/commit/2e79e54f2995f8dba49c00dfe74f6db8492cb1b4))
 * **client:** keep ResourceClient.Do off the caller's request ([31134b5](https://github.com/IDFoundry/FAPIgo/commit/31134b5ddcaef67faefaf05743730117d663f9cc))
 * **client:** seal stored CIBA sessions, bind token sets to their issuer, check the redirect URI at New ([26552a0](https://github.com/IDFoundry/FAPIgo/commit/26552a0f92604ae4901a25ec3b6ec2150aadc778))
 * **conformance:** require a bearer token for the trust-anchor admin endpoint ([c740cfb](https://github.com/IDFoundry/FAPIgo/commit/c740cfb14db7ae7a2b51cac18ffdff0ee2b1260d))
@@ -43,7 +42,6 @@
 * **server:** enforce an essential acr request ([#609](https://github.com/IDFoundry/FAPIgo/issues/609)) ([35a44b4](https://github.com/IDFoundry/FAPIgo/commit/35a44b4489abeb04e70071b112685320ebca835a))
 * **server:** honour dpop_jkt in a CIBA backchannel authentication request ([ac5429f](https://github.com/IDFoundry/FAPIgo/commit/ac5429f7f4cad259b63b463d12d20a83d20f18d0))
 * **server:** re-check the client's registration at the code exchange ([a4c0407](https://github.com/IDFoundry/FAPIgo/commit/a4c04075345f4d9ae208954d467097bb83473c2b))
-* **server:** read the claims parameter's members by their exact names ([21ed406](https://github.com/IDFoundry/FAPIgo/commit/21ed40680ba5fa9ad2dd0181d3bdc6ce9dd28a1e))
 * **server:** refuse a malformed claims parameter instead of ignoring it ([9c0b330](https://github.com/IDFoundry/FAPIgo/commit/9c0b33062dbf6e4afb890c2f023966c487cc3a44))
 * **server:** require a hardened attester trust-anchor source in production ([ac08345](https://github.com/IDFoundry/FAPIgo/commit/ac0834513cfb0950221c516a91524f4836238ac9))
 * **server:** require the CIBA identity hint to be a non-empty string ([93e4045](https://github.com/IDFoundry/FAPIgo/commit/93e404574a68e41f2d5109c00c139d632d4094d8))

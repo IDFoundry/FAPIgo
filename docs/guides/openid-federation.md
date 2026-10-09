@@ -59,7 +59,10 @@ beyond the authorization code flow is your grant, never its own metadata's:
 `AllowedScopes`, `AuthorizationDetailsTypes`, `AllowsClientCredentialsGrant`,
 `AllowsCIBA` and `AllowedClientAuthMethods`. A resolved registration is cached for at most
 `MaxCacheAge`, so a superior that stops vouching for a client takes
-effect within that time. A failed one is remembered for `FailureCacheAge`
+effect within that time. The cache is shared fairly: one superior's
+Relying Parties, or one branch of a Trust Anchor's, can hold only part of
+it, so an intermediate minting many Relying Parties only ever displaces
+its own (see `MaxCacheAge`). A failed one is remembered for `FailureCacheAge`
 (10 seconds by default), so requests repeating a client_id that doesn't
 resolve don't each repeat the outbound fetches. `OnResolutionFailure` tells
 your operator why a client was refused, once per resolution attempted; the

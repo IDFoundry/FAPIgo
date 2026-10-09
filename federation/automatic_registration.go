@@ -54,10 +54,16 @@ type AutomaticRegistrationConfig struct {
 	// for a given client is min(MaxCacheAge, its own Trust Chain's
 	// ResolvedEntity.ExpiresAt), never longer than the chain itself
 	// remains valid. Required — must be positive. At most 4096
-	// registrations are cached at once: once full, expired ones are
-	// dropped, and if none has expired a new registration is used but
-	// not cached (so it's resolved again on its next use) rather than
-	// evicting a registration that's still valid.
+	// registrations are cached at once, and no one federation member
+	// can fill that: the Relying Parties under any one immediate
+	// superior share at most 512 places (that superior's oldest is
+	// evicted for its newest), and those in any one branch of a Trust
+	// Anchor (everything under one of its subordinates) at most 2048.
+	// Relying Parties directly under a Trust Anchor count only against
+	// the 4096. Past a branch's or the whole cache's limit, expired
+	// registrations are dropped first; if none has expired a new
+	// registration is used but not cached (so it's resolved again on its
+	// next use) rather than evicting another superior's still-valid one.
 	MaxCacheAge time.Duration
 
 	// FailureCacheAge is how long a failed automatic registration is
@@ -161,6 +167,10 @@ type cachedClient struct {
 	client    storage.RegisteredClient
 	jwks      json.RawMessage
 	expiresAt time.Time
+	// superior and branch are where the Relying Party sits in its Trust
+	// Chain, which bounds how much of the cache it and its siblings may
+	// hold (see registrationCache and chainPosition).
+	superior, branch string
 }
 
 // DefaultFailureCacheAge is AutomaticRegistrationConfig.FailureCacheAge
@@ -176,16 +186,6 @@ const DefaultFailureCacheAge = 10 * time.Second
 // expired entries are dropped, and if none has expired a new failure
 // simply isn't remembered — the same as before failures were cached.
 const maxFailedResolutions = 4096
-
-// maxCachedRegistrations bounds how many successful registrations
-// AutomaticClientRepository caches at once. An entity that can have
-// subordinates registered under a trusted Trust Anchor can mint new
-// client_ids, each costing one resolution, so the cache must not grow
-// with them either. Once full, expired entries are dropped, and if none
-// has expired a new registration simply isn't cached: evicting a
-// still-valid one instead would let anyone able to register clients
-// push a busy client out of the cache for the price of one resolution.
-const maxCachedRegistrations = 4096
 
 // maxRememberedFailureBytes bounds the message a remembered failure
 // keeps. A failed Trust Chain resolution's error names every branch tried
@@ -274,7 +274,7 @@ type AutomaticClientRepository struct {
 	clock      Clock
 
 	mu    sync.Mutex
-	cache map[fapi.ClientID]cachedClient
+	cache *registrationCache
 	// failures holds recent registration failures (see
 	// AutomaticRegistrationConfig.FailureCacheAge), at most
 	// maxFailedResolutions of them.
@@ -342,7 +342,7 @@ func NewAutomaticClientRepository(underlying storage.ClientRepository, resolver 
 	}
 	return &AutomaticClientRepository{
 		underlying: underlying, resolver: resolver, fetcher: fetcher, cfg: cfg, clock: clock,
-		cache:    make(map[fapi.ClientID]cachedClient),
+		cache:    newRegistrationCache(),
 		failures: make(map[fapi.ClientID]failedResolution),
 		inflight: make(map[fapi.ClientID]*inflightResolution),
 	}, nil
@@ -400,12 +400,9 @@ func (a *AutomaticClientRepository) resolve(ctx context.Context, id fapi.ClientI
 	now := a.clock.Now()
 
 	a.mu.Lock()
-	if entry, ok := a.cache[id]; ok {
-		if now.Before(entry.expiresAt) {
-			a.mu.Unlock()
-			return entry, nil
-		}
-		delete(a.cache, id)
+	if entry, ok := a.cache.get(id, now); ok {
+		a.mu.Unlock()
+		return entry, nil
 	}
 	if failed, ok := a.failures[id]; ok && now.Before(failed.expiresAt) {
 		a.mu.Unlock()
@@ -464,21 +461,10 @@ func (a *AutomaticClientRepository) resolveUncached(ctx context.Context, id fapi
 	return entry, nil
 }
 
-// cacheRegistration caches entry as id's registration, within
-// maxCachedRegistrations (see its doc comment for the policy once full).
-// a.mu must be held.
+// cacheRegistration caches entry as id's registration, within the
+// limits registrationCache's doc comment sets out. a.mu must be held.
 func (a *AutomaticClientRepository) cacheRegistration(id fapi.ClientID, entry cachedClient, now time.Time) {
-	if _, ok := a.cache[id]; !ok && len(a.cache) >= maxCachedRegistrations {
-		for k, c := range a.cache {
-			if !now.Before(c.expiresAt) {
-				delete(a.cache, k)
-			}
-		}
-		if len(a.cache) >= maxCachedRegistrations {
-			return
-		}
-	}
-	a.cache[id] = entry
+	a.cache.put(id, entry, now)
 }
 
 // rememberFailure records err as id's registration failure until
@@ -525,7 +511,8 @@ func (a *AutomaticClientRepository) register(ctx context.Context, id fapi.Client
 	if maxAge := a.clock.Now().Add(a.cfg.MaxCacheAge); maxAge.Before(expiresAt) {
 		expiresAt = maxAge
 	}
-	return cachedClient{client: client, jwks: jwks, expiresAt: expiresAt}, nil
+	superior, branch := chainPosition(resolved.Chain)
+	return cachedClient{client: client, jwks: jwks, expiresAt: expiresAt, superior: superior, branch: branch}, nil
 }
 
 // fetchJWKS fetches and parses a client's remote jwks_uri, mirroring

@@ -72,11 +72,13 @@
 //
 // Trust marks (OpenID Federation 1.0 §7) an entity declares about
 // itself are surfaced, unverified, as ResolvedEntity.TrustMarks;
-// Resolver.VerifyTrustMark establishes trust in one, resolving the
-// mark's own issuer as a fresh Trust Chain against this Resolver's own
-// Trust Anchors before checking its signature and claims. Its required
+// Resolver.VerifyTrustMark establishes trust in one, taking the
+// subject's own ResolvedEntity and resolving the mark's issuer as a
+// fresh Trust Chain through the subject's Trust Anchor before checking
+// its signature and claims, so the federation the subject belongs to is
+// the one that vouches for the issuer. Its required
 // TrustMarkAccreditation argument decides whether the issuer must also
-// be accredited for the mark's type in the Trust Anchor's
+// be accredited for the mark's type in that Trust Anchor's
 // "trust_mark_issuers" claim (RequireFederationAccreditation) — without
 // it, any federation member, including the entity the mark is about,
 // can issue a mark of any type that verifies. And, when

@@ -171,7 +171,7 @@ func (rp *relyingParty) checkAssurance(ctx context.Context, idp *identityProvide
 		if mark.TrustMarkType != rp.w.loaHighType {
 			continue
 		}
-		claims, err := rp.resolver.VerifyTrustMark(ctx, idp.entity.id, mark, federation.RequireFederationAccreditation)
+		claims, err := rp.resolver.VerifyTrustMark(ctx, resolved, mark, federation.RequireFederationAccreditation)
 		if err != nil {
 			st.LoAProblem = err.Error()
 			continue

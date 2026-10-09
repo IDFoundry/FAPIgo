@@ -170,7 +170,7 @@ func TestResolveIssuerResponseIncludesVerifiedTrustMark(t *testing.T) {
 	if len(resolved.TrustMarks) != 1 {
 		t.Fatalf("TrustMarks = %v, want 1 entry", resolved.TrustMarks)
 	}
-	claims, err := r.VerifyTrustMark(context.Background(), f.leID, resolved.TrustMarks[0], federation.AcceptAnyFederationIssuer)
+	claims, err := r.VerifyTrustMark(context.Background(), resolved, resolved.TrustMarks[0], federation.AcceptAnyFederationIssuer)
 	if err != nil {
 		t.Fatalf("VerifyTrustMark: %v", err)
 	}

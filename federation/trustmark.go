@@ -16,30 +16,40 @@ import (
 	"github.com/idfoundry/fapigo/internal/jose"
 )
 
-// VerifyTrustMark establishes trust in one of subjectID's own declared
+// VerifyTrustMark establishes trust in one of subject's own declared
 // Trust Marks (see ResolvedEntity.TrustMarks) and returns its verified
-// claims. OpenID Federation 1.0 §7's own "the trust in the Trust Mark
-// Issuer comes before the trust in the trust mark" is implemented
-// literally: raw.TrustMark's own unverified "iss" claim is resolved as
-// a fresh Trust Chain against this Resolver's own Trust Anchors (the
-// same ones subjectID itself was resolved against) before the Trust
-// Mark's signature is ever checked, using the issuer's own
-// ResolvedEntity.JWKS — the key set its immediate superior vouches for,
-// not merely what the issuer claims about itself.
+// claims. subject is the subject's own Trust Chain, as Resolve returned
+// it from this Resolver: the Trust Mark is judged by the federation the
+// subject was trusted through, subject.TrustAnchor.
 //
-// If the Trust Anchor that vouched for the issuer names this Trust
-// Mark's own type in its own "trust_mark_owners" claim (§7.2), a
-// "delegation" claim proving the issuer was actually authorized by that
-// type's real owner is additionally required and checked — see
-// checkTrustMarkDelegation. VerifyTrustMark checks the mark and its
-// issuer only: it never queries the issuer's Trust Mark Status endpoint
-// (§8.4) to learn whether the mark is still active — call
-// CheckTrustMarkStatus for that. See the package doc for the Trust Mark
-// Status and Trust Marked Entities Listing (§8.5) support this package
-// has.
-func (r *Resolver) VerifyTrustMark(ctx context.Context, subjectID string, raw RawTrustMark, accreditation TrustMarkAccreditation) (TrustMarkClaims, error) {
-	if subjectID == "" {
+// OpenID Federation 1.0 §7.3's "the trust in the Trust Mark Issuer
+// comes before the trust in the trust mark" is implemented literally:
+// raw.TrustMark's own unverified "iss" claim is resolved as a fresh
+// Trust Chain before the Trust Mark's signature is ever checked, using
+// the issuer's own ResolvedEntity.JWKS — the key set its immediate
+// superior vouches for, not merely what the issuer claims about itself.
+// That chain must end at subject.TrustAnchor, the Trust Anchor §7.3 then
+// takes "trust_mark_issuers" and "trust_mark_owners" from: an issuer
+// trusted only through another of this Resolver's Trust Anchors is
+// refused, so a federation that accredits an issuer can't vouch for it
+// in another federation that doesn't.
+//
+// If subject.TrustAnchor names this Trust Mark's own type in its own
+// "trust_mark_owners" claim (§7.2), a "delegation" claim proving the
+// issuer was actually authorized by that type's real owner is
+// additionally required and checked — see checkTrustMarkDelegation.
+// VerifyTrustMark checks the mark and its issuer only: it never queries
+// the issuer's Trust Mark Status endpoint (§8.4) to learn whether the
+// mark is still active — call CheckTrustMarkStatus for that. See the
+// package doc for the Trust Mark Status and Trust Marked Entities
+// Listing (§8.5) support this package has.
+func (r *Resolver) VerifyTrustMark(ctx context.Context, subject ResolvedEntity, raw RawTrustMark, accreditation TrustMarkAccreditation) (TrustMarkClaims, error) {
+	if subject.EntityID == "" {
 		return TrustMarkClaims{}, fmt.Errorf("federation: subject entity ID is empty")
+	}
+	anchor, ok := r.trustAnchorsByID[subject.TrustAnchor]
+	if !ok {
+		return TrustMarkClaims{}, fmt.Errorf("federation: subject's trust anchor %q is not one of this resolver's trust anchors", subject.TrustAnchor)
 	}
 	if accreditation != RequireFederationAccreditation && accreditation != AcceptAnyFederationIssuer {
 		return TrustMarkClaims{}, fmt.Errorf("federation: trust mark accreditation policy is required (RequireFederationAccreditation or AcceptAnyFederationIssuer)")
@@ -54,17 +64,20 @@ func (r *Resolver) VerifyTrustMark(ctx context.Context, subjectID string, raw Ra
 		return TrustMarkClaims{}, fmt.Errorf("federation: trust mark has no kid header")
 	}
 
-	issuer, err := r.Resolve(ctx, tm.ClaimedIssuer())
+	// Resolved through subject's Trust Anchor alone, so the issuer's
+	// chain, and the accreditation read below, are that federation's.
+	within := r.withOnlyTrustAnchor(anchor)
+	issuer, err := within.Resolve(ctx, tm.ClaimedIssuer())
 	if err != nil {
-		return TrustMarkClaims{}, fmt.Errorf("federation: resolve trust mark issuer %q: %w", tm.ClaimedIssuer(), err)
+		return TrustMarkClaims{}, fmt.Errorf("federation: resolve trust mark issuer %q through trust anchor %q: %w", tm.ClaimedIssuer(), anchor.EntityID, err)
 	}
-	claims, err := r.verifyTrustMarkAgainstJWKS(tm, issuer.JWKS, subjectID, raw.TrustMarkType, tm.Algorithm(), r.deps.Clock.Now())
+	claims, err := r.verifyTrustMarkAgainstJWKS(tm, issuer.JWKS, subject.EntityID, raw.TrustMarkType, tm.Algorithm(), r.deps.Clock.Now())
 	if err != nil {
 		return TrustMarkClaims{}, fmt.Errorf("federation: trust mark: %w", err)
 	}
-	trustAnchor, err := r.Resolve(ctx, issuer.TrustAnchor)
+	trustAnchor, err := within.Resolve(ctx, anchor.EntityID)
 	if err != nil {
-		return TrustMarkClaims{}, fmt.Errorf("federation: resolve trust anchor %q: %w", issuer.TrustAnchor, err)
+		return TrustMarkClaims{}, fmt.Errorf("federation: resolve trust anchor %q: %w", anchor.EntityID, err)
 	}
 	if accreditation == RequireFederationAccreditation {
 		if err := checkTrustMarkAccreditation(trustAnchor, claims); err != nil {
@@ -75,6 +88,14 @@ func (r *Resolver) VerifyTrustMark(ctx context.Context, subjectID string, raw Ra
 		return TrustMarkClaims{}, fmt.Errorf("federation: trust mark: %w", err)
 	}
 	return claims, nil
+}
+
+// withOnlyTrustAnchor returns a copy of r that resolves through anchor
+// alone, so a Trust Chain it finds necessarily ends there.
+func (r *Resolver) withOnlyTrustAnchor(anchor TrustAnchor) *Resolver {
+	within := *r
+	within.trustAnchorsByID = map[string]TrustAnchor{anchor.EntityID: anchor}
+	return &within
 }
 
 // TrustMarkAccreditation is VerifyTrustMark's required choice of whether
@@ -91,7 +112,8 @@ const (
 	_ TrustMarkAccreditation = iota
 
 	// RequireFederationAccreditation accepts a Trust Mark only if the
-	// Trust Anchor used to trust its issuer lists the mark's
+	// subject's Trust Anchor, which its issuer must be trusted through
+	// too, lists the mark's
 	// trust_mark_type in its "trust_mark_issuers" claim, and either that
 	// type's list is empty (anyone may issue it) or it names the issuer.
 	RequireFederationAccreditation

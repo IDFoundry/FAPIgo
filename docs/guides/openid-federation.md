@@ -142,11 +142,15 @@ each hop, and applies:
 - **Strict JSON**: entity metadata and keys are decoded case-sensitively,
   so a member that differs only in case (`REDIRECT_URIS`) can't slip past
   a policy written for the real one.
-- **Trust Marks**, when you ask: `Resolver.VerifyTrustMark` checks a
-  mark's signature against its issuer's own resolved Trust Chain, and with
-  `federation.RequireFederationAccreditation` also requires the Trust
+- **Trust Marks**, when you ask: `Resolver.VerifyTrustMark` takes the
+  subject's own `ResolvedEntity`, resolves the mark's issuer through the
+  same Trust Anchor the subject was trusted through, and checks the
+  mark's signature against that chain. With
+  `federation.RequireFederationAccreditation` it also requires that Trust
   Anchor to list the issuer in its `trust_mark_issuers`. A
-  federation-member signature alone isn't accreditation.
+  federation-member signature alone isn't accreditation, and neither is
+  another federation's: with several Trust Anchors configured, an issuer
+  trusted only through one of them can't vouch for a subject of another.
 
 ## See it running
 

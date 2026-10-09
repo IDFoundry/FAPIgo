@@ -235,7 +235,7 @@ func (c *console) describeResolved(ctx context.Context, resolver *federation.Res
 	}
 	for _, mark := range resolved.TrustMarks {
 		mv := markView{Type: mark.TrustMarkType}
-		if claims, err := resolver.VerifyTrustMark(ctx, subject, mark, federation.RequireFederationAccreditation); err != nil {
+		if claims, err := resolver.VerifyTrustMark(ctx, resolved, mark, federation.RequireFederationAccreditation); err != nil {
 			mv.Status = err.Error()
 		} else {
 			mv.OK, mv.Issuer, mv.Status = true, c.w.displayName(claims.Issuer), "accredited by the Union"

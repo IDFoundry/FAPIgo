@@ -49,6 +49,39 @@ the user at one of those classes and pass it as the `acr` of
 `AuthenticationFailed` (or `InteractionNeeded` for `prompt=none`), as
 the relying party asked for an authentication you can't provide.
 
+### `Resolver.VerifyTrustMark` takes the subject's resolved Trust Chain (federation)
+
+**Affects:** callers of `federation.Resolver.VerifyTrustMark`.
+
+**Why:** a Trust Mark's accreditation (`trust_mark_issuers`) and
+delegation requirement (`trust_mark_owners`) were read from whichever
+Trust Anchor the mark's *issuer* happened to resolve through. With
+several Trust Anchors configured on one `Resolver`, an issuer accredited
+only by a lax federation then passed `RequireFederationAccreditation`
+for a subject of a strict federation that never accredited it. The
+issuer's chain must now end at the subject's own Trust Anchor, and the
+accreditation comes from there.
+
+**What to change:** pass the subject's `ResolvedEntity`, as `Resolve`
+returned it from the same `Resolver`, instead of its Entity Identifier:
+
+```go
+subject, err := resolver.Resolve(ctx, subjectID)
+// ...
+for _, mark := range subject.TrustMarks {
+	claims, err := resolver.VerifyTrustMark(ctx, subject, mark,
+		federation.RequireFederationAccreditation)
+	// ...
+}
+```
+
+A `ResolvedEntity` whose `TrustAnchor` isn't one of the `Resolver`'s is
+refused. A mark whose issuer is a member only of another federation
+configured on the same `Resolver` is now refused even under
+`AcceptAnyFederationIssuer`, since its issuer can't be trusted through
+the subject's Trust Anchor. With a single Trust Anchor nothing else
+changes.
+
 ## v0.50.0
 
 ### `ResolveViaEndpoint` names the resolver it trusts (federation)

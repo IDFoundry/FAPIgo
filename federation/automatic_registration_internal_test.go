@@ -721,3 +721,68 @@ func TestRememberFailureKeepsABoundedCopy(t *testing.T) {
 		t.Fatalf("remembered short message = %q, want %q", got, short.Error())
 	}
 }
+
+// TestCacheRegistrationStaysWithinItsCap: an entity able to have
+// subordinates registered can mint client_ids, so the success cache
+// never grows past maxCachedRegistrations — a full cache drops expired
+// registrations first, and otherwise leaves a new one uncached rather
+// than evicting one that's still valid.
+func TestCacheRegistrationStaysWithinItsCap(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	repo := &AutomaticClientRepository{cache: make(map[fapi.ClientID]cachedClient)}
+	entry := cachedClient{expiresAt: now.Add(time.Hour)}
+	for i := range maxCachedRegistrations {
+		repo.cacheRegistration(fapi.ClientID(fmt.Sprintf("https://rp%d.example", i)), entry, now)
+	}
+	if len(repo.cache) != maxCachedRegistrations {
+		t.Fatalf("cache = %d, want the cap %d", len(repo.cache), maxCachedRegistrations)
+	}
+
+	// Full, nothing expired: a new registration isn't cached, and no
+	// still-valid one is evicted for it.
+	repo.cacheRegistration("https://new.example", entry, now.Add(time.Second))
+	if _, ok := repo.cache["https://new.example"]; ok || len(repo.cache) != maxCachedRegistrations {
+		t.Fatalf("full cache with nothing expired cached a new registration (len %d)", len(repo.cache))
+	}
+	if _, ok := repo.cache["https://rp0.example"]; !ok {
+		t.Fatal("a still-valid registration was evicted")
+	}
+
+	// An already-cached client_id is still refreshed when full.
+	refreshed := cachedClient{expiresAt: now.Add(2 * time.Hour)}
+	repo.cacheRegistration("https://rp0.example", refreshed, now.Add(time.Second))
+	if got := repo.cache["https://rp0.example"].expiresAt; !got.Equal(refreshed.expiresAt) {
+		t.Fatalf("refreshed registration expires at %v, want %v", got, refreshed.expiresAt)
+	}
+
+	// Once registrations have expired, a new one takes their place.
+	later := now.Add(90 * time.Minute)
+	repo.cacheRegistration("https://new.example", cachedClient{expiresAt: later.Add(time.Hour)}, later)
+	if _, ok := repo.cache["https://new.example"]; !ok {
+		t.Fatal("registration not cached after expired entries could be dropped")
+	}
+	if len(repo.cache) != 2 {
+		t.Fatalf("cache after eviction = %d, want 2 (the refreshed rp0 and the new one)", len(repo.cache))
+	}
+}
+
+// TestResolveDropsAnExpiredRegistration: a lookup that finds its
+// client_id's registration expired removes it, rather than leaving it
+// to accumulate until the cache fills.
+func TestResolveDropsAnExpiredRegistration(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	id := fapi.ClientID("not-an-entity-id") // re-resolution fails before any fetch
+	repo := &AutomaticClientRepository{
+		clock:    fixedTestClock{now: now},
+		cfg:      AutomaticRegistrationConfig{FailureCacheAge: time.Minute},
+		cache:    map[fapi.ClientID]cachedClient{id: {expiresAt: now.Add(-time.Second)}},
+		failures: make(map[fapi.ClientID]failedResolution),
+		inflight: make(map[fapi.ClientID]*inflightResolution),
+	}
+	if _, err := repo.resolve(context.Background(), id); err == nil {
+		t.Fatal("resolve of an expired registration with an invalid entity ID = nil error, want error")
+	}
+	if _, ok := repo.cache[id]; ok {
+		t.Fatal("expired registration still cached after its lookup")
+	}
+}

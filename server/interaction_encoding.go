@@ -31,6 +31,9 @@ type encodedInteractionRequest struct {
 	RequiredSubject      string              `json:"required_subject,omitempty"`
 	MaxAgeSeconds        *int64              `json:"max_age,omitempty"`
 	Prompt               Prompt              `json:"prompt,omitempty"`
+	UILocales            []string            `json:"ui_locales,omitempty"`
+	ClaimsLocales        []string            `json:"claims_locales,omitempty"`
+	Display              Display             `json:"display,omitempty"`
 	ClientName           string              `json:"client_name,omitempty"`
 	LogoURI              string              `json:"logo_uri,omitempty"`
 	PolicyURI            string              `json:"policy_uri,omitempty"`
@@ -68,6 +71,7 @@ func (r InteractionRequest) MarshalText() ([]byte, error) {
 	raw, err := json.Marshal(encodedInteractionRequest{
 		ClientID: r.ClientID, Scope: r.Scope, LoginHint: r.Hints.LoginHint,
 		ACRValues: r.ACRValues, EssentialACRValues: r.EssentialACRValues, RequiredSubject: r.RequiredSubject, MaxAgeSeconds: maxAge, Prompt: r.Prompt,
+		UILocales: r.UILocales, ClaimsLocales: r.ClaimsLocales, Display: r.Display,
 		ClientName: r.ClientDisplay.Name, LogoURI: urlString(r.ClientDisplay.LogoURI),
 		PolicyURI: urlString(r.ClientDisplay.PolicyURI), TermsOfServiceURI: urlString(r.ClientDisplay.TermsOfServiceURI),
 		AuthorizationDetails: r.AuthorizationDetails,
@@ -136,6 +140,9 @@ func ParseInteractionRequest(text string) (InteractionRequest, error) {
 		EssentialACRValues: e.EssentialACRValues,
 		RequiredSubject:    e.RequiredSubject,
 		Prompt:             e.Prompt,
+		UILocales:          e.UILocales,
+		ClaimsLocales:      e.ClaimsLocales,
+		Display:            e.Display,
 		ClientDisplay:      display, AuthorizationDetails: e.AuthorizationDetails,
 		RequestedClaims: RequestedClaims{IDToken: e.IDTokenClaims, UserInfo: e.UserInfoClaims},
 		Extensions:      e.Extensions,

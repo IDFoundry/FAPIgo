@@ -242,8 +242,10 @@ case server.InteractionRequired:
 	// a.Interaction.RequiredSubject isn't empty, the client named the
 	// user (by id_token_hint or a "sub" claims value): authenticate
 	// that user, or CompleteAuthorization answers login_required.
-	// a.Handle must come back to CompleteAuthorization once the user
-	// is done.
+	// a.Interaction.UILocales, ClaimsLocales and Display are the
+	// client's presentation preferences: render the page in the first
+	// UILocales language you have. a.Handle must come back to
+	// CompleteAuthorization once the user is done.
 case server.RedirectResponse:
 	// no interaction needed — redirect the browser to a.Destination
 case server.LocalErrorResponse:

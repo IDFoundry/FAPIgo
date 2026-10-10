@@ -87,7 +87,9 @@
 //     the client or a "claims" sub value
 //     (InteractionRequest.RequiredSubject), is answered with
 //     login_required when someone else authenticates (OIDC Core
-//     §5.5.1).
+//     §5.5.1). The client's presentation preferences reach it too
+//     (InteractionRequest.UILocales, ClaimsLocales and Display), never
+//     failing a request: malformed values are dropped (OIDC Core §15.1).
 //   - AuthorizationAction (from BeginAuthorization) and AuthorizationResult
 //     (from CompleteAuthorization) are closed sum types, not structs with
 //     optional fields, so a caller can never mistake a local error for a

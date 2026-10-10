@@ -410,6 +410,56 @@ func TestRevokeTokenFailsClosed(t *testing.T) {
 			t.Fatalf("refresh after the partial revocation: %v, want invalid_grant", err)
 		}
 	})
+
+	t.Run("code grant revocation fails", func(t *testing.T) {
+		attesterKey := generateKey(t)
+		h := newRevocationHarness(t, attesterKey)
+		owner := &attestedInstance{t: t, h: h, attesterKey: attesterKey, instanceKey: generateKey(t)}
+		refreshToken := owner.issueRefreshToken()
+		h.revocation.fail = storeDown
+		if code := serverErrorCode(t, owner.revoke(formParam("token", refreshToken))); code != server.ErrorServerError {
+			t.Fatalf("RevokeToken = code %q, want server_error", code)
+		}
+		if last := lastAudit(t, h); last.Type != server.AuditEventRevokeToken || last.Outcome != server.AuditOutcomeFailure {
+			t.Errorf("last audit event = %+v, want a RevokeToken failure", last)
+		}
+		h.revocation.fail = nil
+		// The token outlives the failure, so a retry can finish the job.
+		if _, err := owner.refresh(refreshToken); err != nil {
+			t.Fatalf("refresh after the failed revocation: %v, want the token still usable", err)
+		}
+	})
+}
+
+// TestRevokeTokenWithoutARevocationReader covers a refresh token whose
+// code grant was named while the revocation store was readable, sent to
+// an instance whose store no longer is: its grant's revocation can't be
+// checked, so RevokeToken fails closed with server_error and deletes
+// nothing, leaving the token for an instance that can check it.
+func TestRevokeTokenWithoutARevocationReader(t *testing.T) {
+	attesterKey := generateKey(t)
+	h := newRevocationHarness(t, attesterKey)
+	owner := &attestedInstance{t: t, h: h, attesterKey: attesterKey, instanceKey: generateKey(t)}
+	refreshToken := owner.issueRefreshToken()
+
+	deps := h.deps
+	deps.Revocation = writeOnlyRevocationSink{}
+	writeOnly, err := server.New(h.cfg, deps)
+	if err != nil {
+		t.Fatalf("server.New(write-only revocation): %v", err)
+	}
+	other := *owner
+	other.h.server = writeOnly
+	if code := serverErrorCode(t, other.revoke(formParam("token", refreshToken))); code != server.ErrorServerError {
+		t.Fatalf("RevokeToken without a revocation reader = code %q, want server_error", code)
+	}
+	owner.pops = other.pops // the instance's PoPs must stay unique across both servers
+	if _, err := owner.refresh(refreshToken); err != nil {
+		t.Fatalf("refresh after the refused revocation: %v, want the token still usable", err)
+	}
+	if err := owner.revoke(formParam("token", refreshToken)); err != nil {
+		t.Fatalf("RevokeToken with the readable store: %v", err)
+	}
 }
 
 // TestRevokeTokenSearchesPastTheHint covers RFC 7009 §2.1's "the hint

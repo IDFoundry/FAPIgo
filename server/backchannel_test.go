@@ -928,7 +928,7 @@ func TestBeginBackchannelAuthenticationRequiresOpenIDScope(t *testing.T) {
 // characters, with RFC 6750 §2.1 Bearer credential syntax.
 func TestBeginBackchannelAuthenticationRefusesMalformedNotificationToken(t *testing.T) {
 	for name, tc := range map[string]struct {
-		token string
+		token any
 		ok    bool
 	}{
 		"b64token":        {"aZ09-._~+/==", true},
@@ -939,6 +939,7 @@ func TestBeginBackchannelAuthenticationRefusesMalformedNotificationToken(t *test
 		"space":           {"notify me", false},
 		"CRLF":            {"notify\r\nX-Injected: 1", false},
 		"inner padding":   {"ab=cd", false},
+		"not a string":    {42, false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h, _, _ := newHarnessWithBackchannelPing(t)
@@ -959,6 +960,9 @@ func TestBeginBackchannelAuthenticationRefusesMalformedNotificationToken(t *test
 			localErr, ok := action.(server.BackchannelAuthenticationLocalError)
 			if !ok || localErr.Error.Code() != server.ErrorInvalidRequest {
 				t.Fatalf("action = %+v, want invalid_request", action)
+			}
+			if _, isString := tc.token.(string); !isString && !strings.Contains(localErr.Error.PublicDescription(), "must be a string") {
+				t.Errorf("description = %q, want the token refused as not a string", localErr.Error.PublicDescription())
 			}
 		})
 	}

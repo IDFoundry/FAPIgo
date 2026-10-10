@@ -201,7 +201,7 @@ func newAttestationServer(t *testing.T, now time.Time, registeredKey *ecdsa.Priv
 	if err != nil {
 		return harness{}, err
 	}
-	return harness{server: srv, clients: clients, serverKey: serverKey, grants: grants, audit: audit, revocation: revocation, now: now}, nil
+	return harness{server: srv, clients: clients, serverKey: serverKey, grants: grants, audit: audit, revocation: revocation, now: now, cfg: cfg, deps: deps}, nil
 }
 
 // registeredAttesterTrust is RegisteredAttesterKeys trusting pub, with

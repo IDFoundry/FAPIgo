@@ -431,6 +431,26 @@ func TestNewRejectsKeyThatSignsWithAnotherKey(t *testing.T) {
 	}
 }
 
+// signFailingKeyManager publishes its key but can't sign with it: a
+// KMS whose signing permission is missing.
+type signFailingKeyManager struct{ fakeKeyManager }
+
+func (m *signFailingKeyManager) Sign(context.Context, keys.SigningRequest) (keys.Signature, error) {
+	return keys.Signature{}, errors.New("kms: access denied")
+}
+
+// TestNewRejectsKeyManagerThatCannotSign: New's probe signature fails,
+// so a key that can be published but not used fails at startup.
+func TestNewRejectsKeyManagerThatCannotSign(t *testing.T) {
+	deps := validDependencies()
+	deps.Keys = &signFailingKeyManager{fakeKeyManager{key: generateKey(t), keyID: "as-key-1"}}
+
+	_, err := server.New(validConfig(t), deps)
+	if err == nil || !strings.Contains(err.Error(), "keys can't sign with its id_token_signing key for ES256") || !strings.Contains(err.Error(), "access denied") {
+		t.Fatalf("New(signer that fails) = %v, want it refused naming id_token_signing, ES256 and the cause", err)
+	}
+}
+
 // rotatingKeyManager is a keys.RotatingKeyManager fake: Sign/PublicKey
 // always use the newest key (as a real rotation would — new signatures
 // never use an outgoing key), but PublicKeys publishes both, proving

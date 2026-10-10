@@ -50,6 +50,7 @@ func TestSignECDSARefusesInvalidSignerOutput(t *testing.T) {
 		"negative s":    mustDER(t, one, big.NewInt(-1)),
 		"zero r":        mustDER(t, big.NewInt(0), one),
 		"trailing data": append(append([]byte{}, valid...), 0),
+		"not DER":       {0x01, 0x02, 0x03},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := Sign(derSigner{pub: &key.PublicKey, der: der}, Header{Algorithm: fapi.ES256}, []byte("{}")); err == nil {

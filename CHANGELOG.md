@@ -6,8 +6,8 @@
 ### ⚠ BREAKING CHANGES
 
 * **server:** server.NewSubjectID refuses a value longer than 255 bytes or containing a byte outside printable ASCII (0x20 to 0x7E). Use a stable identifier of your own as the subject and return names and email addresses as claims. See UPGRADING.md for v0.53.0.
-* **server:** harden replay windows, CIBA requests, signing keys and production limits ([#629](https://github.com/IDFoundry/FAPIgo/issues/629))
-* **server:** enforce the subject a request names ([#628](https://github.com/IDFoundry/FAPIgo/issues/628))
+* **server:** CIBA requests without the openid scope are refused with invalid_scope, and server.New refuses Endpoints.BackchannelAuthentication together with OAuthOnly. A ping client_notification_token longer than 1024 characters or outside RFC 6750 Bearer syntax is invalid_request. Under production assurance, server.New refuses Limits outside the FAPI 2.0 numbers (authorization code lifetime over 60s, pushed request lifetime of 600s or more, MaxClockSkew outside 10s to 60s, request object lifetime over 60m). See UPGRADING.md for v0.53.0. ([#629](https://github.com/IDFoundry/FAPIgo/issues/629))
+* **server:** a request carrying id_token_hint or a claims sub value is now refused with invalid_request unless the hint is an ID token this server issued to the requesting client and the two agree, and a completion for a different user than the one named fails with login_required (access_denied for CIBA). See UPGRADING.md for v0.53.0. ([#628](https://github.com/IDFoundry/FAPIgo/issues/628))
 
 ### Features
 

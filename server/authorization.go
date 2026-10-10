@@ -190,6 +190,9 @@ func (s *Server) interactionRequestFrom(clientID fapi.ClientID, params map[strin
 		MaxAge:               maxAge,
 		HasMaxAge:            hasMaxAge,
 		Prompt:               prompt,
+		UILocales:            requestedLocales(params, "ui_locales"),
+		ClaimsLocales:        requestedLocales(params, "claims_locales"),
+		Display:              requestedDisplay(params),
 		AuthorizationDetails: rarValuesFromStoredParameters(s.cfg.RAR, params),
 		RequestedClaims:      requestedClaimsFrom(params),
 	}

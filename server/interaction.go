@@ -177,6 +177,25 @@ type InteractionRequest struct {
 	// Values another specification defines arrive as sent.
 	Prompt Prompt
 
+	// UILocales are the languages the client would like the
+	// authentication and consent pages in ("ui_locales", OIDC Core
+	// §3.1.2.1), as BCP 47 language tags, most preferred first. Use the
+	// first one you have; fall back to your default. A preference only:
+	// malformed tags are dropped rather than refused, so the list may
+	// be shorter than what was sent, or nil.
+	UILocales []string
+
+	// ClaimsLocales are the languages the client would like returned
+	// claims in ("claims_locales", OIDC Core §5.2), in the same form as
+	// UILocales: pick claim values in the first of these you have.
+	ClaimsLocales []string
+
+	// Display is how the client would like the pages shown ("display",
+	// OIDC Core §3.1.2.1): DisplayPage, DisplayPopup, DisplayTouch or
+	// DisplayWAP, or "" when it named none, or a value OIDC Core doesn't
+	// define. A preference only.
+	Display Display
+
 	// ClientDisplay is what the consent screen can show about the client
 	// (name, logo, policy and terms links) — from its registration, or,
 	// for a client registered automatically through OpenID Federation,

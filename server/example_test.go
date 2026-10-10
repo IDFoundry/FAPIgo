@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 
+	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/server"
 )
 
@@ -43,3 +44,28 @@ func ExampleMetadata_WriteJSON() {
 	// Output:
 	// 200 application/json
 }
+
+// Server.VerifyIDTokenHint reads an id_token_hint outside the
+// authorization flow — here, an RP-Initiated Logout endpoint ending the
+// hinted user's session. The hint may be expired, so the subject says
+// whose session to end, never that anyone is logged in.
+func ExampleServer_VerifyIDTokenHint() {
+	var srv *server.Server // from server.New
+	logout := func(w http.ResponseWriter, r *http.Request) {
+		clientID := fapi.ClientID(r.FormValue("client_id"))
+		if clientID == "" {
+			http.Error(w, "client_id is required", http.StatusBadRequest)
+			return
+		}
+		subject, err := srv.VerifyIDTokenHint(r.Context(), r.FormValue("id_token_hint"), clientID)
+		if err != nil {
+			server.WriteError(w, err)
+			return
+		}
+		endSessionsOf(subject) // the application's own session store
+		w.WriteHeader(http.StatusNoContent)
+	}
+	http.HandleFunc("/logout", logout)
+}
+
+func endSessionsOf(string) {}

@@ -44,6 +44,35 @@ func (s *Server) requiredSubject(ctx context.Context, params map[string]json.Raw
 	return subject, nil
 }
 
+// VerifyIDTokenHint returns the subject (its "sub") of hint, an ID token
+// this server issued to clientID: signed with one of its ID token keys,
+// current or previous, under Algorithms.IDToken, with this server's
+// issuer, clientID in its aud, and, when present, clientID as its azp.
+// It is for flows outside this package that take an ID token as a hint,
+// such as RP-Initiated Logout's id_token_hint: whose session to end,
+// and which client asked.
+//
+// Its expiry isn't checked: an ID token used as a hint is typically
+// expired, and OIDC Core §3.1.2.1 has servers accept it anyway. So the
+// result only says who the token was about, never that the user is
+// authenticated now; don't treat it as a login. An encrypted ID token
+// isn't accepted: the client decrypts it and sends the signed token
+// inside.
+//
+// A hint that isn't such an ID token is an *Error with
+// ErrorInvalidRequest; a failure to resolve this server's own keys is
+// ErrorServerError.
+func (s *Server) VerifyIDTokenHint(ctx context.Context, hint string, clientID fapi.ClientID) (string, error) {
+	if hint == "" {
+		return "", newError(ErrorInvalidRequest, 400, "id_token_hint must be a non-empty string", nil)
+	}
+	subject, err := s.verifyIDTokenHint(ctx, hint, clientID)
+	if err != nil {
+		return "", err
+	}
+	return subject, nil
+}
+
 // verifyIDTokenHint returns the subject of hint, an ID token this server
 // issued to clientID: signed with one of its ID-token keys, current or
 // previous, under Algorithms.IDToken, with this server's issuer and an

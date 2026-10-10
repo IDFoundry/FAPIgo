@@ -3,6 +3,7 @@ package server_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -393,6 +394,32 @@ func TestNewSubjectIDRejectsEmpty(t *testing.T) {
 func TestNewSubjectIDRejectsInvalidUTF8(t *testing.T) {
 	if _, err := server.NewSubjectID("user\xff"); err == nil {
 		t.Fatalf("NewSubjectID(invalid UTF-8) = nil error, want error")
+	}
+}
+
+// TestNewSubjectIDLimits: OIDC Core §2 limits "sub" to 255 ASCII
+// characters; control characters are refused as well.
+func TestNewSubjectIDLimits(t *testing.T) {
+	for name, tc := range map[string]struct {
+		value string
+		ok    bool
+	}{
+		"255 characters":  {strings.Repeat("a", 255), true},
+		"256 characters":  {strings.Repeat("a", 256), false},
+		"printable ASCII": {"user-1 @example.com ~!{}", true},
+		"space and tilde": {" ~", true},
+		"non-ASCII":       {"jos\u00e9", false},
+		"newline":         {"alice\nadmin", false},
+		"NUL":             {"alice\x00", false},
+		"DEL":             {"alice\x7f", false},
+		"tab":             {"alice\tbob", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := server.NewSubjectID(tc.value)
+			if (err == nil) != tc.ok {
+				t.Fatalf("NewSubjectID(%q) error = %v, want ok = %v", tc.value, err, tc.ok)
+			}
+		})
 	}
 }
 

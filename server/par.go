@@ -94,6 +94,13 @@ var coreAuthorizationParameters = map[string]struct{}{
 	// surfaced as InteractionRequest.MaxAge, and enforced by
 	// CompleteAuthorization.
 	"max_age": {},
+
+	// ui_locales, claims_locales (OIDC Core §3.1.2.1, §5.2) and display
+	// (§3.1.2.1) are preferences for how to present the interaction,
+	// surfaced as InteractionRequest.UILocales, ClaimsLocales and
+	// Display. Never validated: OIDC Core §15.1 has them never cause an
+	// error, so a malformed value is just dropped on the way there.
+	"ui_locales": {}, "claims_locales": {}, "display": {},
 }
 
 // FormParameter is one name/value pair from a form-encoded request body,

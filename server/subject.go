@@ -14,16 +14,30 @@ type SubjectID struct {
 	value string
 }
 
-// NewSubjectID validates and wraps value.
+// maxSubjectIDLength is OIDC Core §2's limit on "sub": it "MUST NOT
+// exceed 255 ASCII characters in length".
+const maxSubjectIDLength = 255
+
+// NewSubjectID validates and wraps value: 1 to 255 printable ASCII
+// characters (0x20 to 0x7E). OIDC Core §2 limits an ID token's "sub" to
+// 255 ASCII characters; control characters are refused too, since no
+// identifier needs them and they can forge lines in logs. A user's
+// display name or email address, which may be longer or non-ASCII, is
+// a claim, not the subject: map it to a stable identifier of your own.
+//
+// Grants stored before this check was added keep the subject they were
+// issued with: only new authentications are checked.
 func NewSubjectID(value string) (SubjectID, error) {
 	if value == "" {
 		return SubjectID{}, fmt.Errorf("server: subject ID is empty")
 	}
-	// A token's "sub" is a JSON string, which can't carry invalid UTF-8:
-	// encoding would silently replace the bad bytes, issuing tokens for
-	// a subject other than the one authenticated.
-	if !utf8.ValidString(value) {
-		return SubjectID{}, fmt.Errorf("server: subject ID is not valid UTF-8")
+	if len(value) > maxSubjectIDLength {
+		return SubjectID{}, fmt.Errorf("server: subject ID is %d bytes, more than OIDC Core's %d ASCII characters", len(value), maxSubjectIDLength)
+	}
+	for i := range len(value) {
+		if c := value[i]; c < 0x20 || c > 0x7e {
+			return SubjectID{}, fmt.Errorf("server: subject ID has a byte (0x%02x at %d) that isn't printable ASCII", c, i)
+		}
 	}
 	return SubjectID{value: value}, nil
 }

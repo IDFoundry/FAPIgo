@@ -242,8 +242,10 @@ case server.InteractionRequired:
 	// a.Interaction.RequiredSubject isn't empty, the client named the
 	// user (by id_token_hint or a "sub" claims value): authenticate
 	// that user, or CompleteAuthorization answers login_required.
-	// a.Handle must come back to CompleteAuthorization once the user
-	// is done.
+	// a.Interaction.UILocales, ClaimsLocales and Display are the
+	// client's presentation preferences: render the page in the first
+	// UILocales language you have. a.Handle must come back to
+	// CompleteAuthorization once the user is done.
 case server.RedirectResponse:
 	// no interaction needed — redirect the browser to a.Destination
 case server.LocalErrorResponse:
@@ -554,7 +556,9 @@ then advertises `revocation_endpoint`, and a `client.Client` revokes
 with `RevokeToken`, which `Discover` wires up. A client can only revoke
 its own refresh tokens (and, when authenticated by Client Attestation,
 only its own installation's); revoking one also revokes its grant by
-`GrantID`, so give each grant its own ID. The `TokenRevocationResult`
+`GrantID`, so give each grant its own ID, and, with a revocation store
+your resource servers read, every access token issued from the same
+authorization code. The `TokenRevocationResult`
 `RevokeToken` returns names that grant when a client ends it, so you can
 delete anything you kept for it at once; it's for you only, and the
 response stays the same empty 200. Access tokens can't be revoked: one
@@ -563,6 +567,13 @@ isn't one of the client's refresh tokens, gets `unsupported_token_type`
 (an opaque access token sent without a hint is answered like any other
 unknown token, with the same empty 200). They expire on their own, and
 `RevokeGrant` ends them early.
+
+**Reading an ID token hint elsewhere.** For a flow outside this package
+that takes an `id_token_hint`, such as an RP-Initiated Logout endpoint,
+`Server.VerifyIDTokenHint` checks that the hint is an ID token this
+server issued to the requesting client and returns its subject. It
+accepts an expired hint, as OpenID Connect requires, so the subject says
+whose session to act on, never that anyone is logged in now.
 
 ## 7. Wire the resource server: verifying access tokens
 

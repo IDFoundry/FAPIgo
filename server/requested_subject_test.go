@@ -426,3 +426,45 @@ func TestCIBARejectsUnusableIDTokenHint(t *testing.T) {
 		})
 	}
 }
+
+// TestVerifyIDTokenHint: the public wrapper returns the hint's subject
+// for an ID token this server issued to the client, expired or not, and
+// invalid_request for anything else.
+func TestVerifyIDTokenHint(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	ctx := context.Background()
+	sub, err := h.server.VerifyIDTokenHint(ctx, serverHint(t, h, nil), testClientID)
+	if err != nil || sub != "user-1" {
+		t.Fatalf("VerifyIDTokenHint(expired hint) = %q, %v; want user-1", sub, err)
+	}
+	for name, hint := range map[string]string{
+		"empty":          "",
+		"not a JWT":      "not-a-jwt",
+		"another client": serverHint(t, h, func(c map[string]any) { c["aud"] = "other-client" }),
+		"another issuer": serverHint(t, h, func(c map[string]any) { c["iss"] = "https://other.example.com" }),
+		"another azp":    serverHint(t, h, func(c map[string]any) { c["azp"] = "other-client" }),
+		"forged":         signHint(t, h.key, "as-key-1", hintClaims(h)),
+		"tampered":       tamperPayload(t, serverHint(t, h, nil)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			sub, err := h.server.VerifyIDTokenHint(ctx, hint, testClientID)
+			if sub != "" {
+				t.Errorf("subject = %q, want none", sub)
+			}
+			if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
+				t.Errorf("error code = %q, want invalid_request", code)
+			}
+		})
+	}
+}
+
+// tamperPayload swaps compact's payload for one naming another subject,
+// keeping its signature.
+func tamperPayload(t *testing.T, compact string) string {
+	t.Helper()
+	parts := strings.Split(compact, ".")
+	if len(parts) != 3 {
+		t.Fatalf("not a compact JWS: %q", compact)
+	}
+	return parts[0] + "." + "eyJzdWIiOiJtYWxsb3J5In0" + "." + parts[2]
+}

@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 )
 
@@ -94,14 +95,19 @@ func acrEntryValues(entry map[string]json.RawMessage) ([]string, error) {
 		}
 		values = append(values, list...)
 	}
+	if len(values) > maxEssentialACRValues {
+		return nil, fmt.Errorf(`claims: the id_token "acr" entry must not name more than %d values`, maxEssentialACRValues)
+	}
 	return values, nil
 }
 
 // dedupeStrings returns values without repeats, in first-seen order.
 func dedupeStrings(values []string) []string {
 	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
 	for _, v := range values {
-		if !slices.Contains(out, v) {
+		if _, dup := seen[v]; !dup {
+			seen[v] = struct{}{}
 			out = append(out, v)
 		}
 	}

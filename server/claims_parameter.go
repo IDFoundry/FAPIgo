@@ -16,12 +16,30 @@ import (
 // parseRequestedClaimNames reads a malformed value as no claims at all,
 // so without this a client that sent one would believe it requested
 // claims it never did.
+// Bounds on the "claims" parameter (OIDC Core §5.5), so parsing it stays
+// cheap whatever a client sends. maxClaimsParameterBytes matches
+// jose.DefaultMaxCompactBytes: a signed request object can't carry a
+// larger claims parameter than that, so a plain-form one gets the same
+// room. The counts are far above what any real request needs.
+const (
+	maxClaimsParameterBytes       = 16 << 10
+	maxRequestedClaimsPerLocation = 256
+	maxEssentialACRValues         = 32
+)
+
 func validateClaimsParameter(params map[string]json.RawMessage) error {
 	raw, ok := params["claims"]
 	if !ok {
 		return nil
 	}
-	top, ok := claimsMembers(raw)
+	object, ok := claimsObject(raw)
+	if !ok {
+		return errors.New("claims must be a JSON object")
+	}
+	if len(object) > maxClaimsParameterBytes {
+		return fmt.Errorf("claims must not exceed %d bytes", maxClaimsParameterBytes)
+	}
+	top, ok := claimsMembers(object)
 	if !ok {
 		return errors.New("claims must be a JSON object")
 	}
@@ -48,6 +66,9 @@ func validateClaimsLocationValue(member string, value json.RawMessage) error {
 	if trimmed := bytes.TrimSpace(value); len(trimmed) == 0 || trimmed[0] != '{' || json.Unmarshal(trimmed, &requests) != nil {
 		return fmt.Errorf("claims.%s must be a JSON object", member)
 	}
+	if len(requests) > maxRequestedClaimsPerLocation {
+		return fmt.Errorf("claims.%s must not request more than %d claims", member, maxRequestedClaimsPerLocation)
+	}
 	for name, request := range requests {
 		if trimmed := bytes.TrimSpace(request); !isJSONNull(trimmed) && (len(trimmed) == 0 || trimmed[0] != '{') {
 			return fmt.Errorf("claims.%s.%s must be null or a JSON object", member, name)
@@ -68,13 +89,9 @@ func isJSONNull(raw json.RawMessage) bool {
 // "ID_TOKEN" to "id_token" the way encoding/json folds case, while
 // validation, reading exact keys, wouldn't.
 func claimsMembers(raw json.RawMessage) (map[string]json.RawMessage, bool) {
-	object := bytes.TrimSpace(raw)
-	if len(object) > 0 && object[0] == '"' {
-		var s string
-		if err := json.Unmarshal(object, &s); err != nil {
-			return nil, false
-		}
-		object = bytes.TrimSpace([]byte(s))
+	object, ok := claimsObject(raw)
+	if !ok {
+		return nil, false
 	}
 	var top map[string]json.RawMessage
 	if len(object) == 0 || object[0] != '{' || json.Unmarshal(object, &top) != nil {
@@ -96,6 +113,20 @@ func claimsLocation(top map[string]json.RawMessage, location string) map[string]
 		return nil
 	}
 	return requests
+}
+
+// claimsObject returns the claims parameter's JSON text: raw itself, or
+// the string it holds when it arrived as a form value.
+func claimsObject(raw json.RawMessage) (json.RawMessage, bool) {
+	object := bytes.TrimSpace(raw)
+	if len(object) > 0 && object[0] == '"' {
+		var s string
+		if err := json.Unmarshal(object, &s); err != nil {
+			return nil, false
+		}
+		object = bytes.TrimSpace([]byte(s))
+	}
+	return object, true
 }
 
 // checkMemberCase refuses a member of members that equals one of names

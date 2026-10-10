@@ -397,6 +397,9 @@ func (s *Server) validateBackchannelAuthenticationParameters(verified verifiedBa
 	if validateErr := validateClientNotificationToken(params, client); validateErr != nil {
 		return verifiedBackchannelRequest{}, validateErr
 	}
+	if err := validateClaimsParameter(params); err != nil {
+		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, err.Error(), nil)
+	}
 	if _, err := essentialACRValues(params); err != nil {
 		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, err.Error(), nil)
 	}
@@ -409,9 +412,6 @@ func (s *Server) validateBackchannelAuthenticationParameters(verified verifiedBa
 		if !isAcceptableBindingMessage(bindingMessage) {
 			return verifiedBackchannelRequest{}, newError(ErrorInvalidBindingMessage, 400, "binding_message is not acceptable", nil)
 		}
-	}
-	if err := validateClaimsParameter(params); err != nil {
-		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, err.Error(), nil)
 	}
 
 	return verified, nil

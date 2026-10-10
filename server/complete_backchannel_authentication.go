@@ -85,6 +85,15 @@ func (s *Server) CompleteBackchannelAuthentication(ctx context.Context, req Comp
 			break
 		}
 
+		// OIDC Core §5.5.1: the user an id_token_hint or "sub" value
+		// named must be the one authenticated; anyone else is a failed
+		// authentication.
+		if !meetsRequiredSubject(request.RequiredSubject, result.subject) {
+			decision.Status = storage.BackchannelAuthenticationAuthenticationFailed
+			decision.Reason = "the authenticated user isn't the one the request named"
+			break
+		}
+
 		requestedScope, _ := jsonString(request.Parameters, "scope")
 		if scopeErr := validateGrantedScopeSubset(result.grant.Scope, requestedScope); scopeErr != nil {
 			wrapped := newError(ErrorInvalidRequest, 400, "granted scope exceeds requested scope", scopeErr)

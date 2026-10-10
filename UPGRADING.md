@@ -15,6 +15,50 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.53.0
+
+### A requested subject is enforced (server)
+
+**Affects:** a server whose clients send `id_token_hint`, or a `claims`
+parameter requesting a specific `sub` value, such as
+`{"id_token":{"sub":{"value":"248289761001"}}}`, to the pushed
+authorization request or the CIBA backchannel authentication endpoint.
+
+**Why:** OIDC Core §5.5.1 says that when a client requests a specific
+`sub`, the server MUST NOT reply with an ID token or access token for a
+different user, and `id_token_hint` (§3.1.2.1, CIBA Core §7.1) names
+the user the same way. The pushed authorization request dropped
+`id_token_hint` as an unregistered parameter, CIBA passed it to the
+application unverified, and a `sub` value was never read, so a request
+for one user could be answered for whoever logged in. Now:
+
+- **`id_token_hint` is verified** at both endpoints, in plain
+  parameters or a request object. It must be an ID token this server
+  issued: signed with one of its ID-token keys, current or `Previous`,
+  under `Algorithms.IDToken`, with this server's `iss`, and an `aud`
+  that includes the requesting client (and an `azp`, if present, equal
+  to it). Its expiry isn't checked, as OIDC Core allows an expired one.
+  An encrypted ID token isn't accepted: the client decrypts it and
+  sends the signed ID token inside. Anything else is `invalid_request`,
+  as is any hint under `Config.OAuthOnly`.
+- **A `sub` value** in the `claims` parameter (`id_token` or
+  `userinfo`) is read. One that isn't a non-empty string, a miscased
+  `value` member, and a hint and `sub` value (or two `sub` values) that
+  name different users are `invalid_request`.
+- **The user reaches your login page** as
+  `InteractionRequest.RequiredSubject` (kept by `MarshalText`) and
+  `BackchannelInteractionRequest.RequiredSubject`.
+- **A completion for anyone else is refused:** `CompleteAuthorization`
+  answers the client with `login_required` and no code, and
+  `CompleteBackchannelAuthentication` records a failed authentication,
+  so the client's poll gets `access_denied`. Requests made before
+  upgrading aren't checked.
+
+**What to change:** when `RequiredSubject` isn't empty, authenticate
+that user. If another user is logged in, ask them to log in as the
+required one, or complete with `AuthenticationFailed` (or
+`InteractionNeeded(NeedLogin, ...)` for `prompt=none`).
+
 ## v0.52.0
 
 ### An essential `acr` request is enforced (server)

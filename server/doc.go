@@ -82,7 +82,12 @@
 //     essential values requested through the "claims" parameter (OIDC
 //     Core §5.5.1.1). The "claims" parameter itself is bounded, at
 //     16 KiB, 256 claims per location and 32 essential acr values;
-//     beyond any of those the request is invalid_request.
+//     beyond any of those the request is invalid_request. A request
+//     naming its end user, by an id_token_hint this server issued to
+//     the client or a "claims" sub value
+//     (InteractionRequest.RequiredSubject), is answered with
+//     login_required when someone else authenticates (OIDC Core
+//     §5.5.1).
 //   - AuthorizationAction (from BeginAuthorization) and AuthorizationResult
 //     (from CompleteAuthorization) are closed sum types, not structs with
 //     optional fields, so a caller can never mistake a local error for a

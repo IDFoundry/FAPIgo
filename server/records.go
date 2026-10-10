@@ -66,6 +66,13 @@ type requestRecord struct {
 	// request made no such demand, and in a record written before this
 	// field existed; neither is checked.
 	EssentialACRValues []string `json:"essential_acr_values,omitempty"`
+
+	// RequiredSubject is the end user the request named, by a verified
+	// id_token_hint or a "claims" sub value (see Server.requiredSubject),
+	// so a completion for anyone else is refused (OIDC Core §5.5.1).
+	// Empty when the request named no one, and in a record written
+	// before this field existed; neither is checked.
+	RequiredSubject string `json:"required_subject,omitempty"`
 }
 
 // grantRecord is what an authorization code, refresh token or approved

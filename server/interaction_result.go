@@ -28,6 +28,11 @@ func (authorizeResult) interactionResult() {}
 // request's max_age (InteractionRequest.MaxAge), or, when the request's
 // prompt has PromptLogin, earlier than the request itself — both
 // allowing Limits.MaxClockSkew.
+//
+// subject must be the request's InteractionRequest.RequiredSubject when
+// it names one: CompleteAuthorization answers the client with
+// login_required for anyone else, and CompleteBackchannelAuthentication
+// records a failed authentication (OIDC Core §5.5.1).
 func Authorize(subject AuthenticatedSubject, auth AuthenticationContext, grant GrantedAuthorization) InteractionResult {
 	return authorizeResult{subject: subject, auth: auth, grant: grant}
 }

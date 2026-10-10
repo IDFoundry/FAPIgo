@@ -173,6 +173,11 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		return s.backchannelBeginFail(ctx, client.ID(), validateErr), nil
 	}
 
+	requiredSubject, subjectErr := s.requiredSubject(ctx, validated.params, client.ID())
+	if subjectErr != nil {
+		return s.backchannelBeginFail(ctx, client.ID(), subjectErr), nil
+	}
+
 	dpopJKT, dpopErr := s.reconcileBackchannelDPoPBinding(ctx, dpopProof, validated.params)
 	if dpopErr != nil {
 		return s.backchannelBeginFail(ctx, client.ID(), dpopErr), nil
@@ -182,6 +187,7 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	if err != nil {
 		return s.backchannelBeginFail(ctx, client.ID(), newError(ErrorServerError, 500, "validated extension parameters could not be read back", err)), nil
 	}
+	interaction.RequiredSubject = requiredSubject
 	if hintErr := s.checkBackchannelHints(ctx, client.ID(), interaction.Hints); hintErr != nil {
 		return s.backchannelBeginFail(ctx, client.ID(), hintErr), nil
 	}
@@ -220,7 +226,7 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	}
 
 	essentialACR, _ := essentialACRValues(validated.params)
-	request, err := encodeRequestRecord(requestRecord{Parameters: validated.params, TokenClaims: validated.tokenClaims, DPoPJKT: dpopJKT, ExpiresAt: &expiresAt, EssentialACRValues: essentialACR})
+	request, err := encodeRequestRecord(requestRecord{Parameters: validated.params, TokenClaims: validated.tokenClaims, DPoPJKT: dpopJKT, ExpiresAt: &expiresAt, EssentialACRValues: essentialACR, RequiredSubject: requiredSubject})
 	if err != nil {
 		return s.backchannelBeginFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to encode backchannel authentication request", err)), nil
 	}
@@ -647,5 +653,6 @@ func (s *Server) LookupBackchannelInteraction(ctx context.Context, handle Backch
 	if err != nil {
 		return BackchannelInteractionRequest{}, newError(ErrorServerError, 500, "the request's extension parameters could not be read back", err)
 	}
+	interaction.RequiredSubject = request.RequiredSubject
 	return interaction, nil
 }

@@ -28,6 +28,7 @@ type encodedInteractionRequest struct {
 	LoginHint            LoginHint           `json:"login_hint,omitempty"`
 	ACRValues            []string            `json:"acr_values,omitempty"`
 	EssentialACRValues   []string            `json:"essential_acr_values,omitempty"`
+	RequiredSubject      string              `json:"required_subject,omitempty"`
 	MaxAgeSeconds        *int64              `json:"max_age,omitempty"`
 	Prompt               Prompt              `json:"prompt,omitempty"`
 	ClientName           string              `json:"client_name,omitempty"`
@@ -66,7 +67,7 @@ func (r InteractionRequest) MarshalText() ([]byte, error) {
 	}
 	raw, err := json.Marshal(encodedInteractionRequest{
 		ClientID: r.ClientID, Scope: r.Scope, LoginHint: r.Hints.LoginHint,
-		ACRValues: r.ACRValues, EssentialACRValues: r.EssentialACRValues, MaxAgeSeconds: maxAge, Prompt: r.Prompt,
+		ACRValues: r.ACRValues, EssentialACRValues: r.EssentialACRValues, RequiredSubject: r.RequiredSubject, MaxAgeSeconds: maxAge, Prompt: r.Prompt,
 		ClientName: r.ClientDisplay.Name, LogoURI: urlString(r.ClientDisplay.LogoURI),
 		PolicyURI: urlString(r.ClientDisplay.PolicyURI), TermsOfServiceURI: urlString(r.ClientDisplay.TermsOfServiceURI),
 		AuthorizationDetails: r.AuthorizationDetails,
@@ -133,6 +134,7 @@ func ParseInteractionRequest(text string) (InteractionRequest, error) {
 		ClientID: e.ClientID, Scope: e.Scope, Hints: AuthenticationHints{LoginHint: e.LoginHint},
 		ACRValues:          e.ACRValues,
 		EssentialACRValues: e.EssentialACRValues,
+		RequiredSubject:    e.RequiredSubject,
 		Prompt:             e.Prompt,
 		ClientDisplay:      display, AuthorizationDetails: e.AuthorizationDetails,
 		RequestedClaims: RequestedClaims{IDToken: e.IDTokenClaims, UserInfo: e.UserInfoClaims},

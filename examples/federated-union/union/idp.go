@@ -395,7 +395,7 @@ func (p *identityProvider) decide(w http.ResponseWriter, r *http.Request) {
 	}
 	switch o := outcome.(type) {
 	case server.AuthorizationRedirect:
-		http.Redirect(w, r, o.Destination().String(), http.StatusFound)
+		http.Redirect(w, r, o.Destination().String(), http.StatusSeeOther) // after a form POST: never 307
 	case server.AuthorizationLocalError:
 		p.w.renderError(w, o.Error.HTTPStatus(), signInFailed, string(o.Error.Code())+": "+o.Error.PublicDescription())
 	}

@@ -178,7 +178,10 @@ func (e *Error) Nonce() string { return e.nonce }
 func (e *Error) HTTPStatus() int { return e.httpStatus }
 
 // Error implements the error interface. Its output includes the
-// internal cause and is meant for logs, not for an OAuth response body.
+// internal cause — a store's or key source's own error, say — and is
+// meant for logs only: never render it to a browser or a client, in a
+// response body or anywhere else. WriteJSON and WriteText write only
+// Code and PublicDescription.
 func (e *Error) Error() string {
 	return httperror.Message("server", string(e.code), e.description, e.cause)
 }
@@ -201,6 +204,27 @@ func (e *Error) Unwrap() error { return e.cause }
 // prior write has already sent the response's status line.
 func (e *Error) WriteJSON(w http.ResponseWriter) {
 	httperror.WriteJSON(w, e.nonce, "", string(e.code), e.description, e.httpStatus)
+}
+
+// WriteText writes e as a plain-text page for a browser: e's own
+// HTTPStatus and a body of Code and PublicDescription — never Error's
+// output or Unwrap's cause, which can carry internal detail. It's for
+// the cases that must be rendered locally rather than redirected
+// (LocalErrorResponse, AuthorizationLocalError), so a handler doesn't
+// reach for e.Error(). It marks the response no-store. A nil e writes
+// a 500 server_error.
+//
+// Like WriteJSON, it must be called before anything else writes to w.
+func (e *Error) WriteText(w http.ResponseWriter) {
+	if e == nil {
+		e = NewError(ErrorServerError, http.StatusInternalServerError, "")
+	}
+	body := string(e.code)
+	if e.description != "" {
+		body += ": " + e.description
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	http.Error(w, body, e.httpStatus)
 }
 
 // WriteError writes err to w: err's own WriteJSON if err is a *Error

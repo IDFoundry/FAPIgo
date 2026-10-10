@@ -122,16 +122,21 @@ func requestedClaimsFrom(params map[string]json.RawMessage) RequestedClaims {
 // that wasn't requested — the same rule a granted scope follows.
 func approvedClaimNames(params map[string]json.RawMessage, approved []string) (idToken, userinfo []string, err error) {
 	requested := requestedClaimsFrom(params)
-	all := requested.Names()
+	all := make(map[string]struct{}, len(requested.IDToken)+len(requested.UserInfo))
+	for _, name := range requested.Names() {
+		all[name] = struct{}{}
+	}
+	approvedSet := make(map[string]struct{}, len(approved))
 	for _, name := range approved {
-		if !slices.Contains(all, name) {
+		if _, ok := all[name]; !ok {
 			return nil, nil, fmt.Errorf("claim %q was not requested", name)
 		}
+		approvedSet[name] = struct{}{}
 	}
 	keep := func(names []string) []string {
 		var out []string
 		for _, n := range names {
-			if slices.Contains(approved, n) {
+			if _, ok := approvedSet[n]; ok {
 				out = append(out, n)
 			}
 		}

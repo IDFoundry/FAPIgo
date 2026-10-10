@@ -80,7 +80,9 @@
 //     reports is older than max_age allows, or, for prompt=login,
 //     earlier than the request, or when its acr isn't one of the
 //     essential values requested through the "claims" parameter (OIDC
-//     Core §5.5.1.1).
+//     Core §5.5.1.1). The "claims" parameter itself is bounded, at
+//     16 KiB, 256 claims per location and 32 essential acr values;
+//     beyond any of those the request is invalid_request.
 //   - AuthorizationAction (from BeginAuthorization) and AuthorizationResult
 //     (from CompleteAuthorization) are closed sum types, not structs with
 //     optional fields, so a caller can never mistake a local error for a

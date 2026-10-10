@@ -16,7 +16,7 @@ func sessionSealKey(b byte) []byte { return bytes.Repeat([]byte{b}, 32) }
 
 // sessionSealer is a BackchannelSessionSealer for a client of issuer
 // with keys.
-func sessionSealer(t *testing.T, issuer string, keys ...[]byte) *BackchannelSessionSealer {
+func sessionSealer(t testing.TB, issuer string, keys ...[]byte) *BackchannelSessionSealer {
 	t.Helper()
 	iss, err := fapi.ParseIssuerURL(issuer)
 	if err != nil {

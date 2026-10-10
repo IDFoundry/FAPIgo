@@ -334,3 +334,39 @@ func FuzzValidEntityID(f *testing.F) {
 		}
 	})
 }
+
+// FuzzEntityIDHostAgreement: for an Entity ID ValidEntityID accepts,
+// the host naming constraints compare (entityIDHost) is exactly the
+// host the entity configuration is fetched from, including after the
+// .well-known URL is serialized and parsed again, and it's ASCII.
+func FuzzEntityIDHostAgreement(f *testing.F) {
+	for _, s := range []string{"https://op.example", "https://OP.example:443/path/", "https://op.example./", "https://op%2Eexample", "https://[::1]:8443",
+		"https://op.example/a%2F..%2F", "https://op.example\\@evil.example", "https://op.example%00.evil", "https://xn--bcher-kva.example", "https://op.example/;x"} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, id string) {
+		if ValidEntityID(id) != nil {
+			return
+		}
+		host, err := entityIDHost(id)
+		if err != nil {
+			t.Fatalf("ValidEntityID accepted %q but entityIDHost failed: %v", id, err)
+		}
+		wk, err := wellKnownURL(id)
+		if err != nil {
+			t.Fatalf("ValidEntityID accepted %q but wellKnownURL failed: %v", id, err)
+		}
+		if wk.Hostname() != host {
+			t.Fatalf("%q: constraints see host %q, the fetch targets %q", id, host, wk.Hostname())
+		}
+		again, err := url.Parse(wk.String())
+		if err != nil || again.Hostname() != host || again.Scheme != "https" || again.User != nil {
+			t.Fatalf("%q: .well-known URL %q re-parses to host %q (err %v), not %q", id, wk.String(), again.Hostname(), err, host)
+		}
+		for i := 0; i < len(host); i++ {
+			if host[i] >= 0x80 {
+				t.Fatalf("%q: non-ASCII host %q accepted", id, host)
+			}
+		}
+	})
+}

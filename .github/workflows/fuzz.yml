@@ -145,6 +145,26 @@ jobs:
             name: FuzzGrantedIDTokenClaims
           - pkg: ./internal/authchallenge
             name: FuzzParse
+          - pkg: ./server
+            name: FuzzClaimsReadersAgree
+          - pkg: ./server
+            name: FuzzInteractionRequestRoundTrip
+          - pkg: ./server
+            name: FuzzRequestedPromptAndMaxAge
+          - pkg: ./internal/canonical
+            name: FuzzURIEquivalence
+          - pkg: ./internal/strictb64
+            name: FuzzStrictMatchesCanonical
+          - pkg: ./internal/strictjson
+            name: FuzzUnmarshalMatchesCaseSensitiveReading
+          - pkg: ./extension
+            name: FuzzExtensionValueReadersAgree
+          - pkg: ./internal/sealedcookie
+            name: FuzzJarOpen
+          - pkg: ./client
+            name: FuzzOpenBackchannelSession
+          - pkg: ./federation
+            name: FuzzEntityIDHostAgreement
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

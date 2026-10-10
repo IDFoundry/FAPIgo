@@ -1,6 +1,7 @@
 package fapihttp
 
 import (
+	"math/rand/v2"
 	"net"
 	"testing"
 )
@@ -70,10 +71,10 @@ func TestDisallowedIP(t *testing.T) {
 
 		// ISATAP (RFC 5214): identified by the 0000:5efe/0200:5efe
 		// interface-ID marker, not by prefix.
-		{"ISATAP 0000:5efe -> private", "2001:db8::5efe:c0a8:101", false, false, true},
+		{"ISATAP 0000:5efe -> private", "2606:4700::5efe:c0a8:101", false, false, true},
 		{"ISATAP already blocked via link-local, unaffected by the marker", "fe80::5efe:c0a8:101", false, false, true},
-		{"ISATAP 0200:5efe -> loopback", "2001:db8::200:5efe:7f00:1", false, false, true},
-		{"5efe present but not at the ISATAP interface-ID position, unaffected", "2001:db8:aaaa:bbbb:cccc:dddd:5efe:c0a8", false, false, false},
+		{"ISATAP 0200:5efe -> loopback", "2606:4700::200:5efe:7f00:1", false, false, true},
+		{"5efe present but not at the ISATAP interface-ID position, unaffected", "2606:4700:aaaa:bbbb:cccc:dddd:5efe:c0a8", false, false, false},
 
 		// Non-routable IPv4 ranges the plain checks don't cover.
 		{"0.0.0.0/8 non-zero (\"this network\")", "0.1.2.3", false, false, true},
@@ -179,5 +180,48 @@ func TestEmbeddedIPv4(t *testing.T) {
 				t.Errorf("embeddedIPv4(%s) = %v, want %s", tc.ip, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestDisallowedIPCoversSpecialPurposeRegistry samples addresses
+// from each IANA special-purpose range that is not globally reachable
+// (IPv4 and IPv6 Special-Purpose Address Registries) and reports any
+// disallowedIP lets through with no loopback or private exception.
+// The tunnelling prefixes (NAT64, 6to4, Teredo) are left out: whether
+// they're allowed depends on the IPv4 address they carry.
+func TestDisallowedIPCoversSpecialPurposeRegistry(t *testing.T) {
+	ranges := []struct{ cidr, what string }{
+		{"0.0.0.0/8", "this network"}, {"10.0.0.0/8", "private"}, {"100.64.0.0/10", "shared address space"},
+		{"127.0.0.0/8", "loopback"}, {"169.254.0.0/16", "link local"}, {"172.16.0.0/12", "private"},
+		{"192.0.0.0/24", "IETF protocol assignments"}, {"192.0.2.0/24", "TEST-NET-1"}, {"192.88.99.0/24", "deprecated 6to4 relay anycast"},
+		{"192.168.0.0/16", "private"}, {"198.18.0.0/15", "benchmarking"}, {"198.51.100.0/24", "TEST-NET-2"},
+		{"203.0.113.0/24", "TEST-NET-3"}, {"224.0.0.0/4", "multicast"}, {"240.0.0.0/4", "reserved"},
+		{"::/128", "unspecified"}, {"::1/128", "loopback"}, {"64:ff9b:1::/48", "local-use NAT64"},
+		{"100::/64", "discard-only"}, {"100:0:0:1::/64", "dummy prefix (RFC 9780)"}, {"2001:2::/48", "benchmarking"}, {"2001:10::/28", "ORCHID (deprecated)"},
+		{"2001:db8::/32", "documentation"}, {"3fff::/20", "documentation (RFC 9637)"}, {"5f00::/16", "SRv6 SIDs (RFC 9602)"},
+		{"fc00::/7", "unique local"}, {"fe80::/10", "link local"}, {"fec0::/10", "site local (deprecated)"}, {"ff00::/8", "multicast"},
+	}
+	r := rand.New(rand.NewPCG(1, 2))
+	for _, rg := range ranges {
+		_, n, err := net.ParseCIDR(rg.cidr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		missed := 0
+		var example net.IP
+		for i := 0; i < 64; i++ {
+			ip := make(net.IP, len(n.IP))
+			copy(ip, n.IP)
+			for j := range ip {
+				ip[j] |= byte(r.UintN(256)) &^ n.Mask[j]
+			}
+			if !disallowedIP(ip, false, false) {
+				missed++
+				example = ip
+			}
+		}
+		if missed > 0 {
+			t.Errorf("%s (%s): %d of 64 sampled addresses allowed, e.g. %s", rg.cidr, rg.what, missed, example)
+		}
 	}
 }

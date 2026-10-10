@@ -148,7 +148,9 @@ func safeDialContext(base *net.Dialer, loopback loopbackPolicy, allowedPrivateHo
 // IsLinkLocal*/IsUnspecified/IsMulticast checks don't cover, but which
 // are still not appropriate targets for a server-initiated fetch:
 // carrier-grade NAT, IETF protocol assignments, benchmarking space, the
-// reserved/broadcast range, "this network", and documentation ranges.
+// reserved/broadcast range, "this network", documentation ranges, and
+// the IPv4 and IPv6 Special-Purpose Address Registries' other blocks
+// that aren't globally reachable.
 // Parsed once at init from literals that cannot fail to parse.
 var extraBlockedCIDRs = func() []*net.IPNet {
 	cidrs := []string{
@@ -160,6 +162,7 @@ var extraBlockedCIDRs = func() []*net.IPNet {
 		"198.51.100.0/24", // RFC 5737 TEST-NET-2 documentation
 		"203.0.113.0/24",  // RFC 5737 TEST-NET-3 documentation
 		"240.0.0.0/4",     // NOSONAR: go:S1313 — see 100.64.0.0/10 above. RFC 1112 reserved (includes 255.255.255.255).
+		"192.88.99.0/24",  // NOSONAR: go:S1313 — see 100.64.0.0/10 above. RFC 7526 deprecated 6to4 relay anycast.
 		// RFC 8215 local-use NAT64 prefix. Unlike the well-known
 		// 64:ff9b::/96, an operator picks where inside it the IPv4
 		// address sits, so embeddedIPv4 can't decode it; and being
@@ -170,6 +173,18 @@ var extraBlockedCIDRs = func() []*net.IPNet {
 		// networks, and neither IsPrivate (fc00::/7) nor IsLinkLocal*
 		// covers it.
 		"fec0::/10",
+		// The IPv6 Special-Purpose Address Registry's other blocks that
+		// aren't globally reachable, the counterparts of the IPv4
+		// benchmarking and documentation ranges above. 2001::/23 as a
+		// whole isn't blocked: it holds globally reachable assignments
+		// (AMT, AS112, ORCHIDv2, DETs and anycast addresses).
+		"100::/64",       // RFC 6666 discard-only
+		"100:0:0:1::/64", // RFC 9780 dummy prefix
+		"2001:2::/48",    // RFC 5180 benchmarking
+		"2001:10::/28",   // RFC 4843 ORCHID, deprecated
+		"2001:db8::/32",  // RFC 3849 documentation
+		"3fff::/20",      // RFC 9637 documentation
+		"5f00::/16",      // RFC 9602 SRv6 segment identifiers
 	}
 	out := make([]*net.IPNet, 0, len(cidrs))
 	for _, c := range cidrs {

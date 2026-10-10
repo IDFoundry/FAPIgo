@@ -181,14 +181,12 @@ func (s *Server) revokeRefreshToken(ctx context.Context, clientID fapi.ClientID,
 // revokeCodeGrant revokes the authorization code grant codeGrantID
 // (grantRecord.CodeGrantID), as code reuse does, so every access token
 // issued from that code, or later from its refresh tokens, is refused
-// even when the application set no GrantID. Without a revocation store
-// resource servers can read there is nothing to revoke against, and
-// the refresh token's deletion alone has to do.
+// even when the application set no GrantID. A code grant ID is only
+// set with a revocation store resource servers can read, and a grant
+// carrying one never gets here without it: redeemRefreshGrant's
+// checkGrantNotRevoked fails closed first.
 func (s *Server) revokeCodeGrant(ctx context.Context, codeGrantID string) *Error {
 	if codeGrantID == "" {
-		return nil
-	}
-	if _, ok := s.grantRevocationReader(); !ok {
 		return nil
 	}
 	until := s.deps.Clock.Now().Add(s.grantRevocationHorizon())

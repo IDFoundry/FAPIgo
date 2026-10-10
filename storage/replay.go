@@ -35,6 +35,14 @@ type ReplayUse struct {
 // ExpiresAt) lets the same value be replayed. A store may drop entries
 // once ExpiresAt has passed.
 //
+// With a backend's own per-key TTL, set the TTL from the record's
+// expiry, never a fixed value: for Redis, SET key 1 NX PXAT with
+// ExpiresAt in Unix milliseconds, or PX with time.Until(ExpiresAt)
+// rounded up (and at least 1). A fixed TTL shorter than some ExpiresAt —
+// a lifetime limit raised later, say — forgets those records early, and
+// no contract test can tell: the record is gone only after the test has
+// finished checking it.
+//
 // UseOnce's error means the digest was already recorded, unless it
 // wraps ErrStoreUnavailable (the store couldn't answer at all), or
 // context.Canceled or context.DeadlineExceeded; a resource server

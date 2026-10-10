@@ -158,6 +158,16 @@ is what authenticates them. The binding message is free text the client
 wrote, so show it as such, beside what you describe from the request
 itself.
 
+FAPI-CIBA §5.2.2 makes one more thing yours: the user must be able to
+tell which request they're approving. Either each request carries a
+unique authorization context you show them (a payment's amount and
+payee in its authorization details, say), or you require a binding
+message, which the consumption device shows too. This package can't
+tell whether a request's details are unique to it, so it accepts a
+request without `binding_message`. If yours can't be told apart
+otherwise, complete one with an empty `a.Interaction.BindingMessage` as
+`server.AuthenticationFailed(...)` before asking the user anything.
+
 ## See it running
 
 [decoupled-checkout](../../examples/decoupled-checkout/README.md): a till

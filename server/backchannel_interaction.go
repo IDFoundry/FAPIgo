@@ -92,7 +92,7 @@ func generateAuthReqID(random io.Reader) (string, error) {
 type BackchannelAuthenticationHints struct {
 	LoginHint      LoginHint // "" if the request carried none
 	LoginHintToken string    // "" if the request carried none
-	IDTokenHint    string    // "" if the request carried none
+	IDTokenHint    string    // "" if the request carried none; verified, see BackchannelInteractionRequest.RequiredSubject
 }
 
 // BackchannelInteractionRequest is what the embedding application needs
@@ -110,6 +110,16 @@ type BackchannelInteractionRequest struct {
 	// isn't one of them as a failed authentication, so the client's
 	// poll gets the same answer as AuthenticationFailed and no tokens.
 	EssentialACRValues []string
+
+	// RequiredSubject mirrors InteractionRequest.RequiredSubject for the
+	// CIBA flow: the end user the request's id_token_hint, or a "claims"
+	// sub value, named. Authenticate that user; when the request carried
+	// an id_token_hint, this is who it identifies (Hints.IDTokenHint is
+	// the token itself, already verified). CompleteBackchannelAuthentication
+	// records an Authorize for anyone else as a failed authentication,
+	// so the client's poll gets access_denied and no tokens. "" when the
+	// request named no one.
+	RequiredSubject string
 
 	// BindingMessage is the client's binding_message (CIBA §7.1), empty
 	// when it sent none: show it to the user on the authentication

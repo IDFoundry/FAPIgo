@@ -153,6 +153,13 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 		return s.completeErrorRedirect(ctx, clientID, redirectURI, state, "login_required", "the user's authentication doesn't meet the requested essential acr", AuditOutcomeFailure)
 	}
 
+	// OIDC Core §5.5.1: a request naming its end user, by id_token_hint
+	// or a "sub" value, must not be answered for a different one; that
+	// user didn't authenticate, so it's login_required.
+	if !meetsRequiredSubject(request.RequiredSubject, result.subject) {
+		return s.completeErrorRedirect(ctx, clientID, redirectURI, state, "login_required", "the authenticated user isn't the one the request named", AuditOutcomeFailure)
+	}
+
 	requestedScope, _ := jsonString(request.Parameters, "scope")
 	if err := validateGrantedScopeSubset(result.grant.Scope, requestedScope); err != nil {
 		return s.completeLocalFail(ctx, clientID, newError(ErrorInvalidRequest, 400, "granted scope exceeds requested scope", err)), nil

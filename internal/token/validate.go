@@ -518,3 +518,52 @@ func computeATHash(accessToken string, alg fapi.SignatureAlgorithm) (string, err
 	}
 	return base64.RawURLEncoding.EncodeToString(sum[:len(sum)/2]), nil
 }
+
+// IDTokenHintPolicy is the set of checks VerifyHint enforces against an
+// ID token presented back to the server that issued it, as an
+// id_token_hint (OIDC Core §3.1.2.1, CIBA Core §7.1).
+type IDTokenHintPolicy struct {
+	// ExpectedIssuer is the server's own issuer identifier: the token's
+	// iss claim must equal it exactly.
+	ExpectedIssuer string
+
+	// Client is the client presenting the hint. The token's aud claim
+	// must contain it, and its azp claim, when present, must equal it,
+	// so a client can't present an ID token issued to another client.
+	Client string
+
+	// Algorithm is the algorithm the server signs ID tokens with. The
+	// token header's algorithm must equal it exactly.
+	Algorithm fapi.SignatureAlgorithm
+}
+
+// VerifyHint checks t's signature against pub and its iss, aud and azp
+// claims against policy, and returns its subject.
+//
+// Unlike Validate, it ignores exp and iat: OIDC Core §3.1.2.1 accepts an
+// ID token as a hint "whether or not it has expired", and CIBA Core
+// §7.1 one "previously issued". It also ignores nonce and at_hash, which
+// bind a token to the response that delivered it, not to who may
+// present it later.
+func (t IDToken) VerifyHint(pub crypto.PublicKey, policy IDTokenHintPolicy) (string, error) {
+	if policy.ExpectedIssuer == "" {
+		return "", fmt.Errorf("token: ExpectedIssuer is empty")
+	}
+	if policy.Client == "" {
+		return "", fmt.Errorf("token: Client is empty")
+	}
+	if err := t.compact.Verify(pub, policy.Algorithm); err != nil {
+		return "", fmt.Errorf("token: %w", err)
+	}
+	c := t.claims
+	if c.Issuer != policy.ExpectedIssuer {
+		return "", ErrIssuerMismatch
+	}
+	if !containsString(c.Audience, policy.Client) {
+		return "", ErrAudienceMismatch
+	}
+	if c.AZP != "" && c.AZP != policy.Client {
+		return "", ErrAuthorizedPartyMismatch
+	}
+	return c.Subject, nil
+}

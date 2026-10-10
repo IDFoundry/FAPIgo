@@ -30,6 +30,11 @@ var coreAuthorizationParameters = map[string]struct{}{
 	"state": {}, "nonce": {}, "code_challenge": {}, "code_challenge_method": {},
 	"login_hint": {},
 
+	// id_token_hint (OIDC Core §3.1.2.1) names the end user the request
+	// is for, as an ID token this server issued to the client; see
+	// Server.requiredSubject.
+	"id_token_hint": {},
+
 	// dpop_jkt (RFC 9449 §10) lets a client declare, at authorization
 	// time, which DPoP key it intends to bind the eventual tokens to —
 	// checked against the actual DPoP proof presented at the token
@@ -38,12 +43,12 @@ var coreAuthorizationParameters = map[string]struct{}{
 	"dpop_jkt": {},
 
 	// claims (OIDC Core §5.5) lets a client request specific identity
-	// claims for the id_token and/or userinfo. This package doesn't
-	// parse its structure or honor the per-location/essential detail —
-	// it only avoids rejecting the parameter as unregistered. Whatever
-	// identity claims a deployment actually returns comes from
+	// claims for the id_token and/or userinfo. Beyond the claim names
+	// it requests, this package honours only an essential "acr" (see
+	// essentialACRValues) and a "sub" value (see claimsSubValue).
+	// Whatever identity claims a deployment actually returns comes from
 	// Dependencies.IdentityClaimsSource, which is free to ignore this
-	// parameter's specifics entirely (permitted: OIDC Core §5.5 lets a
+	// parameter's other specifics (permitted: OIDC Core §5.5 lets a
 	// server return more, or fewer, claims than requested).
 	"claims": {},
 
@@ -227,6 +232,11 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 		return s.parFail(ctx, client.ID(), validateErr)
 	}
 
+	requiredSubject, subjectErr := s.requiredSubject(ctx, validated, client.ID())
+	if subjectErr != nil {
+		return s.parFail(ctx, client.ID(), subjectErr)
+	}
+
 	validated, dpopErr := s.reconcileParDPoPBinding(ctx, dpopProof, validated)
 	if dpopErr != nil {
 		return s.parFail(ctx, client.ID(), dpopErr)
@@ -246,7 +256,7 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 		source = extension.SourceRequestObject
 	}
 	essentialACR, _ := essentialACRValues(validated)
-	request, err := encodeRequestRecord(requestRecord{Parameters: validated, TokenClaims: tokenClaims, ExtensionSource: source, PushedAt: &now, EssentialACRValues: essentialACR})
+	request, err := encodeRequestRecord(requestRecord{Parameters: validated, TokenClaims: tokenClaims, ExtensionSource: source, PushedAt: &now, EssentialACRValues: essentialACR, RequiredSubject: requiredSubject})
 	if err != nil {
 		return s.parFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to encode pushed authorization request", err))
 	}

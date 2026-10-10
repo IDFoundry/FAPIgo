@@ -3,6 +3,7 @@ package interactioncookie_test
 import (
 	"bytes"
 	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -78,8 +79,10 @@ func TestRoundTrip(t *testing.T) {
 	if ck.Name != interactioncookie.DefaultName || ck.Path != "/" || !ck.HttpOnly || !ck.Secure || ck.SameSite != http.SameSiteLaxMode || ck.MaxAge != 600 {
 		t.Errorf("cookie = %+v, want __Host- name, Path /, HttpOnly, Secure, SameSite=Lax, Max-Age 600", ck)
 	}
-	// Encrypted, not just signed: nothing of the interaction shows.
-	if strings.Contains(ck.Value, "shop") || strings.Contains(ck.Value, "sam") {
+	// Encrypted, not just signed: nothing of the interaction shows, in
+	// the clear or base64url-encoded at any alignment. (Short strings
+	// like the client ID can turn up in random ciphertext by chance.)
+	if showsInClear(ck.Value, "sam@example.com") {
 		t.Error("the cookie value shows the interaction in the clear")
 	}
 
@@ -276,4 +279,21 @@ func TestCookieExpiresWithTheInteraction(t *testing.T) {
 			t.Errorf("Set(%s interaction) = nil error", name)
 		}
 	}
+}
+
+// showsInClear reports whether value contains secret, either as is or
+// base64url-encoded at any of the three byte alignments.
+func showsInClear(value, secret string) bool {
+	if strings.Contains(value, secret) {
+		return true
+	}
+	for pad := range 3 {
+		enc := base64.RawURLEncoding.EncodeToString(append(make([]byte, pad), secret...))
+		// Drop the characters the padding and the tail share with
+		// neighbouring bytes; the middle is fixed by secret alone.
+		if strings.Contains(value, enc[4:len(enc)-3]) {
+			return true
+		}
+	}
+	return false
 }

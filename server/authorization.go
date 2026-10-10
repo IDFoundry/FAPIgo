@@ -149,6 +149,7 @@ func (s *Server) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 		return s.beginFail(ctx, req.ClientID, newError(ErrorServerError, 500, "stored extension parameters no longer validate", err)), nil
 	}
 	interaction := s.interactionRequestFrom(req.ClientID, request.Parameters)
+	interaction.RequiredSubject = request.RequiredSubject
 	interaction.ClientDisplay = client.Display()
 	interaction.Extensions = extensions
 

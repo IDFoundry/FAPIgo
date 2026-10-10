@@ -238,8 +238,12 @@ case server.InteractionRequired:
 	// user again even if they have a session; for server.PromptNone,
 	// show nothing, and if you'd need to, complete with
 	// server.InteractionNeeded(server.NeedLogin, ...) (or NeedConsent,
-	// NeedAccountSelection, NeedInteraction). a.Handle must come back to
-	// CompleteAuthorization once the user is done.
+	// NeedAccountSelection, NeedInteraction). When
+	// a.Interaction.RequiredSubject isn't empty, the client named the
+	// user (by id_token_hint or a "sub" claims value): authenticate
+	// that user, or CompleteAuthorization answers login_required.
+	// a.Handle must come back to CompleteAuthorization once the user
+	// is done.
 case server.RedirectResponse:
 	// no interaction needed — redirect the browser to a.Destination
 case server.LocalErrorResponse:

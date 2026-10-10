@@ -127,6 +127,18 @@ type InteractionRequest struct {
 	// no such demand.
 	EssentialACRValues []string
 
+	// RequiredSubject is the end user the client named as the one this
+	// request is for: the subject of its id_token_hint, an ID token this
+	// server issued to the client (OIDC Core §3.1.2.1), or a "sub" value
+	// it requested through the "claims" parameter (§5.5.1). Unlike
+	// Hints.LoginHint it is a requirement: authenticate that user, or
+	// fail. If someone else is logged in, ask them to log in as this
+	// user, or return AuthenticationFailed. CompleteAuthorization
+	// enforces it: an Authorize for any other subject answers the
+	// client with login_required and issues no code. "" when the
+	// request named no one.
+	RequiredSubject string
+
 	// MaxAge is the client's "max_age" (OIDC Core §3.1.2.1), when
 	// HasMaxAge: the most time that may have passed since the user last
 	// actively authenticated. If the application's last authentication

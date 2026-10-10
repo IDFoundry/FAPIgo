@@ -111,6 +111,16 @@ type BackchannelInteractionRequest struct {
 	// poll gets the same answer as AuthenticationFailed and no tokens.
 	EssentialACRValues []string
 
+	// BindingMessage is the client's binding_message (CIBA §7.1), empty
+	// when it sent none: show it to the user on the authentication
+	// device, so they can tell the request they approve is the one the
+	// consumption device shows. FAPI-CIBA §5.2.2 requires the
+	// authorization server to ensure a unique authorization context
+	// exists in the request, or else require a binding_message: if
+	// your users can't tell two requests apart by what you show them
+	// (the scope or authorization details alone, say), answer one with
+	// an empty BindingMessage as a failed authentication rather than
+	// approving it.
 	BindingMessage string
 
 	// ClientDisplay mirrors InteractionRequest.ClientDisplay, for the

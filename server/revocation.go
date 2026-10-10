@@ -26,6 +26,10 @@ type RevocationSink interface {
 	// still existing. A backend without TTL support can ignore it —
 	// storage/memstore.RevocationStore, this module's own reference
 	// implementation, does exactly that; see its doc comment for why.
+	// A backend that does use a TTL must keep the record until at
+	// least expiresAt (a TTL of time.Until(expiresAt), rounded up),
+	// never a fixed TTL that could be shorter: see
+	// storage.RevocationStore.
 	//
 	// The same store also records revoked grants, under keys of their
 	// own: "grant:" and the grant ID (RevokeGrant), and "code-grant:"

@@ -418,7 +418,7 @@ func (b *bank) decide(w http.ResponseWriter, r *http.Request) {
 	}
 	switch o := outcome.(type) {
 	case server.AuthorizationRedirect:
-		http.Redirect(w, r, o.Destination().String(), http.StatusFound)
+		http.Redirect(w, r, o.Destination().String(), http.StatusSeeOther) // after a form POST: never 307
 	case server.AuthorizationLocalError:
 		b.w.renderError(w, bankHost, o.Error.HTTPStatus(), approvalFailed, string(o.Error.Code())+": "+o.Error.PublicDescription())
 	}

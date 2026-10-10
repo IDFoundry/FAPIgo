@@ -243,7 +243,7 @@ case server.InteractionRequired:
 case server.RedirectResponse:
 	// no interaction needed — redirect the browser to a.Destination
 case server.LocalErrorResponse:
-	// render a.Error locally
+	a.Error.WriteText(w) // render locally: code and public description only
 }
 ```
 
@@ -290,13 +290,22 @@ authResult, err := srv.CompleteAuthorization(ctx, server.CompleteAuthorizationRe
 	Result: result,
 })
 
-switch r := authResult.(type) {
+switch res := authResult.(type) {
 case server.AuthorizationRedirect:
-	// redirect the browser to r.Destination() — carries the code (or an error)
+	// carries the code (or an error); 303, never 307, after the form's POST
+	http.Redirect(w, r, res.Destination().String(), http.StatusSeeOther)
 case server.AuthorizationLocalError:
-	// render r.Error locally
+	res.Error.WriteText(w) // render locally: code and public description only
 }
 ```
+
+Redirect with **303 See Other** after the login or consent form's POST,
+so the browser follows with a GET (FAPI 2.0 Security Profile §5.3.2.2).
+A 307 would make it re-send the form, password included, to the
+client's redirect URI (RFC 9700 §4.12). And never render a
+`*server.Error`'s `Error()`: it carries internal causes, such as a
+store's own error, and is meant for logs. `WriteText` (or `WriteJSON`
+at a JSON endpoint) writes only its `Code` and `PublicDescription`.
 
 **Carry the interaction to the form's submission.** The consent form's
 submission needs two things from `/authorize`: the handle, bound to this
@@ -451,7 +460,7 @@ func routes(srv *server.Server, login func(http.ResponseWriter, *http.Request, s
 		case server.RedirectResponse:
 			http.Redirect(w, r, a.Destination.String(), http.StatusFound)
 		case server.LocalErrorResponse:
-			http.Error(w, a.Error.Error(), http.StatusBadRequest) // render locally; nothing here is safe to redirect to
+			a.Error.WriteText(w) // render locally; nothing here is safe to redirect to. Never a.Error.Error(): it carries internal causes
 		}
 	})
 
@@ -497,6 +506,23 @@ func routes(srv *server.Server, login func(http.ResponseWriter, *http.Request, s
 Add `POST /authorize/complete` (or wherever your login page posts) for
 `CompleteAuthorization` from step 5, and the CIBA, client credentials and
 revocation routes when you enable them.
+
+**What the HTTP layer owes FAPI 2.0.** These are yours, not the
+package's (FAPI 2.0 Security Profile §5.2):
+
+- **TLS everywhere**, version 1.2 or later with BCP 195's recommended
+  cipher suites. `&tls.Config{MinVersion: tls.VersionTLS12,
+  CipherSuites: server.FAPIRWTLSCipherSuites}` is what
+  `cmd/conformance-as` serves: a narrower list, the one the OpenID
+  conformance suite checks. Behind a proxy that terminates TLS, the
+  proxy must follow them instead.
+- **HSTS** on every endpoint a browser reaches: the authorization
+  endpoint and your login and consent pages
+  (`Strict-Transport-Security: max-age=31536000`, say).
+- **No CORS on the authorization endpoint** or the pages behind it.
+  They are navigations, never fetches, so send no
+  `Access-Control-Allow-Origin` there. (The token, PAR, JWKS and
+  discovery endpoints may allow CORS for browser-based clients.)
 
 **Serving a grant this package doesn't.** To serve another grant type
 at the same token endpoint — OpenID4VCI's `pre-authorized_code`, say —

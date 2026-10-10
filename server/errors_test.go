@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/idfoundry/fapigo/server"
@@ -131,5 +132,16 @@ func TestWriteErrorFallsBackForUnknownError(t *testing.T) {
 
 	if rec.Code != 500 {
 		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+}
+
+// TestErrorWriteTextNil covers WriteText on a nil *Error: a generic
+// 500, not a panic.
+func TestErrorWriteTextNil(t *testing.T) {
+	var err *server.Error
+	rec := httptest.NewRecorder()
+	err.WriteText(rec)
+	if rec.Code != 500 || strings.TrimSpace(rec.Body.String()) != "server_error" {
+		t.Fatalf("got %d %q, want 500 server_error", rec.Code, rec.Body.String())
 	}
 }

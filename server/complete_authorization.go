@@ -38,11 +38,20 @@ type AuthorizationRedirect struct {
 func (AuthorizationRedirect) authorizationResult() {}
 
 // Destination returns the complete, engine-assembled redirect target.
+//
+// CompleteAuthorization usually runs on the submission of a login or
+// consent form, a POST: redirect the browser with 303 See Other
+// (http.StatusSeeOther), so it follows with a GET (FAPI 2.0 Security
+// Profile §5.3.2.2). Never use 307 Temporary Redirect, which makes the
+// browser re-send the form, credentials included, to the client's
+// redirect URI (RFC 9700 §4.12).
 func (r AuthorizationRedirect) Destination() fapi.URL { return r.destination }
 
 // AuthorizationLocalError means the caller must render a local error
 // rather than redirect anywhere — the interaction handle could not be
-// validated well enough to trust the associated redirect_uri.
+// validated well enough to trust the associated redirect_uri. Render
+// it with Error.WriteText (or Code and PublicDescription in a page of
+// your own); never Error.Error(), which carries internal causes.
 type AuthorizationLocalError struct {
 	Error *Error
 }
@@ -67,6 +76,8 @@ type CompleteAuthorizationRequest struct {
 // requested, is an AuthorizationLocalError instead — never a redirect.
 // Every outcome is represented in the returned AuthorizationResult; the
 // error return is reserved for failures outside the request itself.
+// Redirect with 303 See Other after a form POST, never 307 (see
+// AuthorizationRedirect.Destination).
 func (s *Server) CompleteAuthorization(ctx context.Context, req CompleteAuthorizationRequest) (AuthorizationResult, error) {
 	completed, err := s.deps.Transactions.CompleteAuthorization(ctx, storage.CompleteAuthorizationTransaction{
 		Handle: req.Handle.String(),

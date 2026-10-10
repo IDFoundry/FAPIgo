@@ -609,8 +609,8 @@ func (h *smokeHarness) submitDecision(ctx context.Context, handle, decision stri
 		h.t.Fatalf("POST decision: %v", err)
 	}
 	defer res.Body.Close()
-	if res.StatusCode != http.StatusFound {
-		h.t.Fatalf("POST decision returned status %d, want %d", res.StatusCode, http.StatusFound)
+	if res.StatusCode != http.StatusSeeOther {
+		h.t.Fatalf("POST decision returned status %d, want %d", res.StatusCode, http.StatusSeeOther)
 	}
 	location := res.Header.Get("Location")
 	if location == "" {

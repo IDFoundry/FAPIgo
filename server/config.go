@@ -460,6 +460,12 @@ type Config struct {
 	// attestation's "x5c" certificate chain to trust anchors (HAIP 1.0
 	// §4.4.1 — X5CAttesterChain) or by keys registered for each
 	// attester (RegisteredAttesterKeys).
+	//
+	// Attestation-based client authentication is not a FAPI 2.0 client
+	// authentication method: FAPI 2.0 Security Profile §5.3.2.1 allows
+	// only private_key_jwt and mTLS. It's here for HAIP and OpenID4VCI
+	// wallets; don't register a client that must be FAPI 2.0 compliant
+	// for it.
 	AttestationBasedClientAuthentication bool
 
 	// OAuthOnly, if set, makes this server a pure OAuth 2.0 + FAPI 2.0

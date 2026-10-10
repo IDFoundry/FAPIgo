@@ -209,7 +209,7 @@ func (h *consentHandler) handleDecision(w http.ResponseWriter, r *http.Request) 
 
 	switch v := authResult.(type) {
 	case server.AuthorizationRedirect:
-		http.Redirect(w, r, v.Destination().String(), http.StatusFound)
+		http.Redirect(w, r, v.Destination().String(), http.StatusSeeOther) // after the consent form's POST: 303, so the browser follows with a GET, never 307 (RFC 9700 §4.12)
 	case server.AuthorizationLocalError:
 		writeLocalHTMLError(w, v.Error)
 	default:

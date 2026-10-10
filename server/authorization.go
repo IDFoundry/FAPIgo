@@ -57,7 +57,9 @@ func (RedirectResponse) authorizationAction() {}
 
 // LocalErrorResponse means the caller must render a local error rather
 // than redirect anywhere — the request could not be validated well
-// enough to trust any redirect destination.
+// enough to trust any redirect destination. Render it with
+// Error.WriteText (or Code and PublicDescription in a page of your
+// own); never Error.Error(), which carries internal causes.
 type LocalErrorResponse struct {
 	Error *Error
 }

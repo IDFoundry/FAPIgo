@@ -14,7 +14,7 @@ import (
 // the browser: it never panics, and never fails other than with
 // ErrNoInteraction.
 func FuzzRead(f *testing.F) {
-	key := make([]byte, 32)
+	key := []byte("interactioncookie-fuzz-test-key!")
 	c, err := interactioncookie.New([][]byte{key}, interactioncookie.Options{})
 	if err != nil {
 		f.Fatal(err)

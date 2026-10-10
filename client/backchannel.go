@@ -54,6 +54,14 @@ type BeginBackchannelAuthenticationRequest struct {
 	// Class Reference values (mirrors BeginAuthorizationRequest.ACRValues).
 	ACRValues []string
 
+	// EssentialACRValues, when not empty, requires the user to
+	// authenticate at one of these Authentication Context Class
+	// References, as an essential "acr" claim in the request's "claims"
+	// (mirrors BeginAuthorizationRequest.EssentialACRValues): an
+	// approval whose ID token's acr isn't one of them fails polling with
+	// ErrorInvalidResponse. It requires "openid" in Scope.
+	EssentialACRValues []string
+
 	// BindingMessage is a human-readable string displayed on both the
 	// consumption device (this client) and the authentication device,
 	// to let the end user confirm the two devices are talking about
@@ -96,6 +104,9 @@ type BackchannelAuthenticationSession struct {
 	// openID is whether the request's scope included "openid": an
 	// approval must then carry an ID token.
 	openID bool
+	// essentialACR is the request's essential "acr" values: an
+	// approval's ID token acr must be one of them.
+	essentialACR []string
 }
 
 // AuthReqID is the auth_req_id the authorization server issued.
@@ -145,6 +156,9 @@ func (c *Client) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	if c.cfg.Endpoints.BackchannelAuthentication.IsZero() {
 		return BackchannelAuthenticationSession{}, newError(ErrorInvalidRequest, "backchannel authentication is not configured", nil)
 	}
+	if len(req.EssentialACRValues) > 0 && !slices.Contains(req.Scope, "openid") {
+		return BackchannelAuthenticationSession{}, newError(ErrorInvalidRequest, `EssentialACRValues requires "openid" in Scope: only an ID token's acr can meet it`, nil)
+	}
 
 	objectParams := map[string]json.RawMessage{}
 	scope, _ := json.Marshal(strings.Join(req.Scope, " ")) // marshaling a string cannot fail
@@ -163,6 +177,14 @@ func (c *Client) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	if len(req.ACRValues) > 0 {
 		encoded, _ := json.Marshal(strings.Join(req.ACRValues, " "))
 		objectParams["acr_values"] = encoded
+	}
+	if len(req.EssentialACRValues) > 0 {
+		acr, err := essentialACRClaim(req.EssentialACRValues)
+		if err != nil {
+			return BackchannelAuthenticationSession{}, newError(ErrorInvalidRequest, "claims request is invalid", err)
+		}
+		encoded, _ := json.Marshal(map[string]map[string]json.RawMessage{"id_token": {"acr": acr}})
+		objectParams[claimsParameter] = encoded
 	}
 	if req.BindingMessage != "" {
 		encoded, _ := json.Marshal(req.BindingMessage)
@@ -253,6 +275,7 @@ func (c *Client) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		expiresAt:         c.deps.Clock.Now().Add(expiresInDuration(raw.ExpiresIn)),
 		notificationToken: notificationToken,
 		openID:            slices.Contains(req.Scope, "openid"),
+		essentialACR:      slices.Clone(req.EssentialACRValues),
 	}, nil
 }
 
@@ -463,6 +486,11 @@ func (c *Client) PollBackchannelAuthentication(ctx context.Context, session Back
 		}
 		if session.openID && !result.HasIDToken {
 			return nil, newError(ErrorInvalidResponse, "the token response has no ID token, which an openid request requires", nil)
+		}
+		if result.HasIDToken {
+			if acrErr := checkEssentialACR(result.IDTokenClaims.ACR, session.essentialACR); acrErr != nil {
+				return nil, acrErr
+			}
 		}
 		if raw.RefreshToken != "" {
 			result.RefreshToken = fapi.NewSecret(raw.RefreshToken)

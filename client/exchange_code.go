@@ -10,6 +10,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -106,7 +107,13 @@ type IDTokenClaims struct {
 	Subject string
 
 	// AuthTime is the zero time if the token carried no auth_time claim.
-	AuthTime   time.Time
+	AuthTime time.Time
+
+	// ACR is the token's "acr" claim, "" if absent. The server alone
+	// decides it: check it against what this login needs, or request it
+	// with BeginAuthorizationRequest.EssentialACRValues, which has
+	// ExchangeCode refuse a token at any other class. ACRValues alone
+	// is only a preference the server may ignore.
 	ACR        string
 	AMR        []string
 	Parameters map[string]json.RawMessage
@@ -199,7 +206,9 @@ func (c IDTokenClaims) AsMap() map[string]any {
 // §3.1.3.3). When it carried max_age (BeginAuthorizationRequest.HasMaxAge),
 // the ID token must carry auth_time, no older than max_age allows
 // (Limits.MaxClockSkew aside): otherwise it fails with
-// ErrorInvalidResponse.
+// ErrorInvalidResponse. When it carried EssentialACRValues, the ID
+// token's acr must be one of them, or it fails with
+// ErrorInvalidResponse too.
 func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationResponse) (TokenSet, error) {
 	assertionSigner, assertionKID, dpopSigner, err := c.resolveClientAuthAndDPoPSigners(ctx)
 	if err != nil {
@@ -239,6 +248,11 @@ func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationRe
 	if idErr := requireIDToken(result.HasIDToken, resp.openID, resp.hasMaxAge); idErr != nil {
 		return TokenSet{}, idErr
 	}
+	if result.HasIDToken {
+		if acrErr := checkEssentialACR(result.IDTokenClaims.ACR, resp.essentialACR); acrErr != nil {
+			return TokenSet{}, acrErr
+		}
+	}
 	if result.HasIDToken && resp.hasMaxAge {
 		if ageErr := checkAuthenticationAge(result.IDTokenClaims.AuthTime, resp.maxAge, c.deps.Clock.Now(), c.cfg.Limits.MaxClockSkew); ageErr != nil {
 			return TokenSet{}, ageErr
@@ -257,6 +271,17 @@ func requireIDToken(hasIDToken, openID, hasMaxAge bool) *Error {
 		return newError(ErrorInvalidResponse, "the token response has no ID token, which an openid request requires", nil)
 	}
 	return nil
+}
+
+// checkEssentialACR refuses an ID token whose acr isn't one of the
+// essential values the request required (OIDC Core §5.5.1.1): a server
+// that can't meet an essential acr must fail the authentication rather
+// than issue a token at another class. No values requires nothing.
+func checkEssentialACR(acr string, essential []string) *Error {
+	if len(essential) == 0 || slices.Contains(essential, acr) {
+		return nil
+	}
+	return newError(ErrorInvalidResponse, "the ID token's acr is not one of the essential acr values the request required", nil)
 }
 
 // checkAuthenticationAge applies OIDC Core §3.1.3.7 rule 13 to an ID

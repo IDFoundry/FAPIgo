@@ -54,6 +54,9 @@ type ValidatedAuthorizationResponse struct {
 	// openID is whether the request's scope included "openid": the
 	// token response must then carry an ID token.
 	openID bool
+	// essentialACR is the request's essential "acr" values: the ID
+	// token's acr must be one of them.
+	essentialACR []string
 }
 
 // CallbackResult is a closed sum type returned by
@@ -146,6 +149,7 @@ func (c *Client) HandleAuthorizationResponse(ctx context.Context, cb Authorizati
 		maxAge:       maxAge,
 		hasMaxAge:    hasMaxAge,
 		openID:       consumed.OpenID,
+		essentialACR: consumed.EssentialACR,
 	}}, nil
 }
 

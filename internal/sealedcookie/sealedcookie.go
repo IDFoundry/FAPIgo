@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/idfoundry/fapigo/internal/sealkeys"
 	"time"
 )
 
@@ -44,11 +46,11 @@ type key struct {
 }
 
 // New returns a Jar for the cookie name at path ("/" if empty), sealing
-// with keys[0] and opening with any of keys, each 32 bytes. pkg prefixes
-// its errors.
+// with keys[0] and opening with any of keys, each 32 bytes, as
+// sealkeys.Check requires. pkg prefixes its errors.
 func New(pkg string, keys [][]byte, name, path string) (*Jar, error) {
-	if len(keys) == 0 {
-		return nil, fmt.Errorf("%s: at least one key is required", pkg)
+	if err := sealkeys.Check(pkg, keys); err != nil {
+		return nil, err
 	}
 	if path == "" {
 		path = "/"
@@ -57,10 +59,7 @@ func New(pkg string, keys [][]byte, name, path string) (*Jar, error) {
 		return nil, fmt.Errorf("%s: a __Host- cookie must have Path /", pkg)
 	}
 	j := &Jar{pkg: pkg, name: name, path: path}
-	for i, k := range keys {
-		if len(k) != 32 {
-			return nil, fmt.Errorf("%s: key %d is %d bytes, want 32", pkg, i, len(k))
-		}
+	for _, k := range keys {
 		// A 32-byte key always makes an AES-256 block, and AES always
 		// makes a GCM.
 		block, _ := aes.NewCipher(k)

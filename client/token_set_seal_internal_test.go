@@ -1,7 +1,6 @@
 package client
 
 import (
-	"bytes"
 	"errors"
 	"testing"
 )
@@ -10,7 +9,7 @@ import (
 // but isn't a sealed TokenSet's JSON — only something holding the key
 // could make one: Open still refuses it as unreadable.
 func TestTokenSetSealerOpenRefusesNonJSON(t *testing.T) {
-	sealer, err := NewTokenSetSealer(&Client{}, [][]byte{bytes.Repeat([]byte{1}, 32)})
+	sealer, err := NewTokenSetSealer(&Client{}, [][]byte{[]byte("token-set-internal-test-seal-key")})
 	if err != nil {
 		t.Fatal(err)
 	}

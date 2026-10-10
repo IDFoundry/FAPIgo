@@ -468,10 +468,17 @@ func TestBeginBackchannelAuthenticationRejectsHTTPError(t *testing.T) {
 
 func newCIBAIDToken(t *testing.T, as *fakeCIBAAS) string {
 	t.Helper()
+	return newCIBAIDTokenWithACR(t, as, "")
+}
+
+// newCIBAIDTokenWithACR is newCIBAIDToken with acr as its "acr" claim
+// ("" for none).
+func newCIBAIDTokenWithACR(t *testing.T, as *fakeCIBAAS, acr string) string {
+	t.Helper()
 	idToken, err := token.IssueIDToken(token.IDTokenParams{
 		Signer: as.idTokenKey, Algorithm: fapi.ES256, KeyID: "as-id-kid",
 		Issuer: testIssuer, Subject: "end-user-1", Audience: testClientID,
-		Now: time.Now(), Lifetime: time.Minute,
+		Now: time.Now(), Lifetime: time.Minute, ACR: acr,
 	})
 	if err != nil {
 		t.Fatalf("issue id token: %v", err)

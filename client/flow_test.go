@@ -48,6 +48,8 @@ type fakeAS struct {
 
 	// idTokenAuthTime, if not zero, is the issued ID token's auth_time.
 	idTokenAuthTime time.Time
+	// idTokenACR, if not empty, is the issued ID token's acr.
+	idTokenACR string
 
 	lastPARForm        url.Values
 	lastPARDPoPProof   string
@@ -313,7 +315,7 @@ func (a *fakeAS) writeTokenIssued(w http.ResponseWriter) {
 		Signer: a.idTokenKey, Algorithm: fapi.ES256, KeyID: "as-id-kid",
 		Issuer: a.issuer, Subject: "end-user-1", Audience: testClientID,
 		Nonce: a.lastNonce, Now: time.Now(), Lifetime: time.Minute,
-		AuthTime: a.idTokenAuthTime,
+		AuthTime: a.idTokenAuthTime, ACR: a.idTokenACR,
 	})
 	if err != nil {
 		a.t.Fatalf("issue id token: %v", err)

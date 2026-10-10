@@ -12,7 +12,13 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 )
 
-func sessionSealKey(b byte) []byte { return bytes.Repeat([]byte{b}, 32) }
+func sessionSealKey(b byte) []byte {
+	k := make([]byte, 32)
+	for i := range k {
+		k[i] = b + byte(i) // distinct bytes: a single repeated byte is refused
+	}
+	return k
+}
 
 // sessionSealer is a BackchannelSessionSealer for a client of issuer
 // with keys.

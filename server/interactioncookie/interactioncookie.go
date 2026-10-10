@@ -86,6 +86,14 @@ type Cookie struct {
 
 // New returns a Cookie sealing with keys[0] and opening with any of keys,
 // each 32 random bytes (AES-256) shared by every instance of the server.
+//
+// Give the interaction cookie its own keys, distinct from any other
+// sealer's (sessioncookie, client.TokenSetSealer and the like), and
+// keep its name distinct too: sealed values under a shared key differ
+// only in their name binding, so a separate key keeps one sealer's
+// output from ever being offered to another. New refuses an all-zero
+// or single-repeated-byte key and the same key twice, which are never
+// random.
 func New(keys [][]byte, opts Options) (*Cookie, error) {
 	name := opts.Name
 	if name == "" {

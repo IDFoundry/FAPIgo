@@ -49,6 +49,10 @@ type sessionRecord struct {
 	// Core §3.1.3.3). A record written before this field existed reads
 	// as false.
 	OpenID bool `json:"openid,omitempty"`
+
+	// EssentialACR is the request's essential "acr" values, or nil for
+	// none: ExchangeCode requires the ID token's acr to be one of them.
+	EssentialACR []string `json:"essential_acr,omitempty"`
 }
 
 // maxAge is r's max_age, and whether the request carried one.

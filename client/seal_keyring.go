@@ -6,7 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
-	"fmt"
+	"github.com/idfoundry/fapigo/internal/sealkeys"
 )
 
 // sealKeyring is the AES-256-GCM key list TokenSetSealer and
@@ -22,17 +22,14 @@ type sealKey struct {
 	aead cipher.AEAD
 }
 
-// newSealKeyring builds a keyring from keys, each 32 bytes; what names
-// the keys in an error ("token set", say).
+// newSealKeyring builds a keyring from keys, as sealkeys.Check requires
+// them; what names the keys in an error ("token set", say).
 func newSealKeyring(what string, keys [][]byte) (sealKeyring, error) {
-	if len(keys) == 0 {
-		return sealKeyring{}, fmt.Errorf("client: a %s sealer needs at least one key", what)
+	if err := sealkeys.Check("client: "+what+" sealer", keys); err != nil {
+		return sealKeyring{}, err
 	}
 	var r sealKeyring
-	for i, k := range keys {
-		if len(k) != 32 {
-			return sealKeyring{}, fmt.Errorf("client: %s key %d is %d bytes, want 32", what, i, len(k))
-		}
+	for _, k := range keys {
 		// A 32-byte key always makes an AES-256 block, and AES always
 		// makes a GCM.
 		block, _ := aes.NewCipher(k)

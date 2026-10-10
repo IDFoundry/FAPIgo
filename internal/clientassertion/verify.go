@@ -161,10 +161,11 @@ func (a Assertion) Verify(ctx context.Context, pub crypto.PublicKey, policy Veri
 	}
 
 	if policy.Replay != nil {
-		// The TTL must cover the same skew the acceptance check above
-		// grants (line 138), or a replay in (exp, exp+skew] would still
-		// be accepted but no longer be in the replay store.
-		if err := policy.Replay.UseOnce(ctx, c.JTI, exp.Add(policy.MaxClockSkew)); err != nil {
+		// The TTL must cover the skew the acceptance check above grants
+		// (exp+skew) on any instance sharing the store, whose clock may
+		// run up to another MaxClockSkew behind this one's: 2×skew, or
+		// a replay there would be accepted after the record lapsed.
+		if err := policy.Replay.UseOnce(ctx, c.JTI, exp.Add(2*policy.MaxClockSkew)); err != nil {
 			return VerifiedAssertion{}, fmt.Errorf("clientassertion: replay check: %w", err)
 		}
 	}

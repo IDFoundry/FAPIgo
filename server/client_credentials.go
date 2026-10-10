@@ -70,9 +70,12 @@ func (s *Server) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, "", newError(ErrorUnsupportedGrantType, 400, "grant_type must be client_credentials", nil))
 	}
 
+	// A FAPI 2.0 grant: the issuer is the only client assertion
+	// audience, even for a client also registered for CIBA (nil
+	// endpoints — see acceptableClientAssertionAudiences).
 	client, dpopProof, _, authErr := s.authenticateRequest(ctx, params, requestCredentials{
 		PeerCertificate: req.PeerCertificate, DPoPProofs: req.DPoPProofs, ClientAttestations: req.ClientAttestations, ClientAttestationPoPs: req.ClientAttestationPoPs,
-	}, []fapi.URL{s.cfg.Endpoints.Token}, []fapi.URL{s.cfg.MTLSEndpoints.Token})
+	}, nil, nil)
 	if authErr != nil {
 		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, "", authErr)
 	}

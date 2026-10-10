@@ -22,7 +22,7 @@ func TestNewProductionRequiresCryptoRandReader(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			cfg := validConfig(t)
-			cfg.Assurance = server.AssuranceProduction
+			asProduction(&cfg)
 			cfg.Deployment = server.DeploymentSingleInstance
 			deps := validDependencies()
 			deps.Audit = &fakeAuditSink{}

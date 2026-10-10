@@ -156,6 +156,10 @@ func NewSigningRequest(purpose SigningPurpose, algorithm fapi.SignatureAlgorithm
 // RFC 8037 wants, with no equivalent DER-to-fixed-width conversion
 // needed.
 type Signature struct {
+	// KeyID is the kid of the key that signed. When set, it must be the
+	// kid PublicKey reports for the same purpose and algorithm, which
+	// the token's header names: the server and client refuse a
+	// signature from any other key rather than issue it mislabelled.
 	KeyID string
 	Value []byte
 }

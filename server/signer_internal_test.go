@@ -20,7 +20,35 @@ func (m *recordingKeyManager) Sign(_ context.Context, req keys.SigningRequest) (
 }
 
 func (m *recordingKeyManager) PublicKey(context.Context, keys.SigningPurpose, fapi.SignatureAlgorithm) (keys.PublicKeyInfo, error) {
-	return keys.PublicKeyInfo{}, nil
+	return keys.PublicKeyInfo{KeyID: "kid"}, nil
+}
+
+// rotatedKeyManager reports kid "old" from PublicKey but signs with
+// "new": a rotation between the two calls.
+type rotatedKeyManager struct{}
+
+func (*rotatedKeyManager) Sign(context.Context, keys.SigningRequest) (keys.Signature, error) {
+	return keys.Signature{KeyID: "new", Value: []byte("sig")}, nil
+}
+
+func (*rotatedKeyManager) PublicKey(context.Context, keys.SigningPurpose, fapi.SignatureAlgorithm) (keys.PublicKeyInfo, error) {
+	return keys.PublicKeyInfo{KeyID: "old"}, nil
+}
+
+// TestKeyManagerSignerRefusesAnotherKeysSignature: a signature made with
+// a key other than the one whose kid the token's header names is
+// refused, not issued mislabelled.
+func TestKeyManagerSignerRefusesAnotherKeysSignature(t *testing.T) {
+	signer, kid, err := newSignerFromKeys(context.Background(), &rotatedKeyManager{}, keys.IDTokenSigning, fapi.ES256)
+	if err != nil {
+		t.Fatalf("newSignerFromKeys: %v", err)
+	}
+	if kid != "old" {
+		t.Fatalf("kid = %q, want old", kid)
+	}
+	if _, err := signer.Sign(nil, []byte("digest"), crypto.SHA256); err == nil {
+		t.Fatal("Sign accepted a signature labelled with another key")
+	}
 }
 
 // TestNewSignerFromKeysRoutesEdDSAToSigningInput drives

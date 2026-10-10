@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
@@ -402,6 +403,51 @@ func TestNewRejectsEmptyKeyID(t *testing.T) {
 	_, err := server.New(validConfig(t), deps)
 	if err == nil || !strings.Contains(err.Error(), "keys has no usable id_token_signing key for ES256") || !strings.Contains(err.Error(), "empty kid") {
 		t.Fatalf("New(empty kid) = %v, want it refused naming id_token_signing and ES256", err)
+	}
+}
+
+// mismatchedKeyManager reports one key's public half but signs with
+// another: a KMS whose key alias points somewhere else.
+type mismatchedKeyManager struct {
+	fakeKeyManager
+	signingKey *ecdsa.PrivateKey
+}
+
+func (m *mismatchedKeyManager) Sign(ctx context.Context, req keys.SigningRequest) (keys.Signature, error) {
+	inner := fakeKeyManager{key: m.signingKey, keyID: m.keyID}
+	return inner.Sign(ctx, req)
+}
+
+// TestNewRejectsKeyThatSignsWithAnotherKey: New signs a probe with each
+// key and verifies it, so a manager whose signatures don't match the
+// public key it publishes fails at startup, not at every relying party.
+func TestNewRejectsKeyThatSignsWithAnotherKey(t *testing.T) {
+	deps := validDependencies()
+	deps.Keys = &mismatchedKeyManager{fakeKeyManager: fakeKeyManager{key: generateKey(t), keyID: "as-key-1"}, signingKey: generateKey(t)}
+
+	_, err := server.New(validConfig(t), deps)
+	if err == nil || !strings.Contains(err.Error(), "keys can't sign with its id_token_signing key for ES256") {
+		t.Fatalf("New(mismatched signer) = %v, want it refused naming id_token_signing and ES256", err)
+	}
+}
+
+// signFailingKeyManager publishes its key but can't sign with it: a
+// KMS whose signing permission is missing.
+type signFailingKeyManager struct{ fakeKeyManager }
+
+func (m *signFailingKeyManager) Sign(context.Context, keys.SigningRequest) (keys.Signature, error) {
+	return keys.Signature{}, errors.New("kms: access denied")
+}
+
+// TestNewRejectsKeyManagerThatCannotSign: New's probe signature fails,
+// so a key that can be published but not used fails at startup.
+func TestNewRejectsKeyManagerThatCannotSign(t *testing.T) {
+	deps := validDependencies()
+	deps.Keys = &signFailingKeyManager{fakeKeyManager{key: generateKey(t), keyID: "as-key-1"}}
+
+	_, err := server.New(validConfig(t), deps)
+	if err == nil || !strings.Contains(err.Error(), "keys can't sign with its id_token_signing key for ES256") || !strings.Contains(err.Error(), "access denied") {
+		t.Fatalf("New(signer that fails) = %v, want it refused naming id_token_signing, ES256 and the cause", err)
 	}
 }
 

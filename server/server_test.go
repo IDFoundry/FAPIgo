@@ -382,7 +382,7 @@ func TestNewRequiresClientEncryptionKeysWhenUserInfoEncryptionConfigured(t *test
 
 func TestNewRequiresAuditUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
-	cfg.Assurance = server.AssuranceProduction
+	asProduction(&cfg)
 	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 
@@ -421,7 +421,7 @@ func TestNewRejectsLoopbackHTTPURLsUnderProduction(t *testing.T) {
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
 			cfg := validConfig(t)
-			cfg.Assurance = server.AssuranceProduction
+			asProduction(&cfg)
 			cfg.Deployment = server.DeploymentSingleInstance
 			mutate(&cfg)
 			deps := validDependencies()
@@ -461,7 +461,7 @@ func (s capReplayStore) Capabilities() storage.Capabilities { return s.caps }
 
 func TestNewRejectsStoreWithoutStoreAssuranceUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
-	cfg.Assurance = server.AssuranceProduction
+	asProduction(&cfg)
 	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
@@ -474,7 +474,7 @@ func TestNewRejectsStoreWithoutStoreAssuranceUnderProduction(t *testing.T) {
 
 func TestNewRejectsNonDurableStoreUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
-	cfg.Assurance = server.AssuranceProduction
+	asProduction(&cfg)
 	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
@@ -487,7 +487,7 @@ func TestNewRejectsNonDurableStoreUnderProduction(t *testing.T) {
 
 func TestNewRejectsStoreWithoutAtomicConsumeUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
-	cfg.Assurance = server.AssuranceProduction
+	asProduction(&cfg)
 	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
@@ -500,7 +500,7 @@ func TestNewRejectsStoreWithoutAtomicConsumeUnderProduction(t *testing.T) {
 
 func TestNewAcceptsAdequateStoreCapabilitiesUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
-	cfg.Assurance = server.AssuranceProduction
+	asProduction(&cfg)
 	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
@@ -509,4 +509,12 @@ func TestNewAcceptsAdequateStoreCapabilitiesUnderProduction(t *testing.T) {
 	if _, err := server.New(cfg, deps); err != nil {
 		t.Fatalf("New(production, adequate replay store): %v", err)
 	}
+}
+
+// asProduction sets cfg to AssuranceProduction, with the FAPI 2.0
+// minimum MaxClockSkew it requires (validateFAPILimits): the test
+// configurations use 5s.
+func asProduction(cfg *server.Config) {
+	cfg.Assurance = server.AssuranceProduction
+	cfg.Limits.MaxClockSkew = 10 * time.Second
 }

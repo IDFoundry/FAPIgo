@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -380,6 +381,12 @@ func (s *Server) validateBackchannelAuthenticationParameters(verified verifiedBa
 	if err := s.validateScope(scope, client); err != nil {
 		return verifiedBackchannelRequest{}, newError(ErrorInvalidScope, 400, "scope is not valid for this client", err)
 	}
+	// CIBA is an OpenID Connect authentication flow: the request is for
+	// an ID token, so it has to ask for one (CIBA §7.1, "scope" — the
+	// openid scope value MUST be included).
+	if !slices.Contains(strings.Fields(scope), "openid") {
+		return verifiedBackchannelRequest{}, newError(ErrorInvalidScope, 400, "scope must include openid", nil)
+	}
 
 	hints := 0
 	for _, name := range [...]string{"login_hint", "login_hint_token", "id_token_hint"} {
@@ -439,11 +446,45 @@ func validateClientNotificationToken(params map[string]json.RawMessage, client s
 		if !hasNotificationToken {
 			return newError(ErrorInvalidRequest, 400, "client_notification_token is required for a client registered for ping delivery", nil)
 		}
-		if _, err := jsonStringValue(notificationTokenRaw); err != nil {
+		notificationToken, err := jsonStringValue(notificationTokenRaw)
+		if err != nil {
 			return newError(ErrorInvalidRequest, 400, "client_notification_token must be a string", err)
+		}
+		if !isClientNotificationToken(notificationToken) {
+			return newError(ErrorInvalidRequest, 400, "client_notification_token must be a bearer token of at most 1024 characters", nil)
 		}
 	}
 	return nil
+}
+
+// maxClientNotificationTokenLength is CIBA §7.1's limit on
+// client_notification_token.
+const maxClientNotificationTokenLength = 1024
+
+// isClientNotificationToken reports whether token is a
+// client_notification_token CIBA §7.1 allows: at most 1024 characters,
+// with the syntax of a Bearer credential (RFC 6750 §2.1, b64token:
+// 1*( ALPHA / DIGIT / "-" / "." / "_" / "~" / "+" / "/" ) *"="). The
+// server sends it back as an Authorization header at ping time, so a
+// token outside that syntax could inject into the notification request.
+func isClientNotificationToken(token string) bool {
+	if token == "" || len(token) > maxClientNotificationTokenLength {
+		return false
+	}
+	body := strings.TrimRight(token, "=")
+	if body == "" {
+		return false
+	}
+	for i := 0; i < len(body); i++ {
+		c := body[i]
+		switch {
+		case 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z', '0' <= c && c <= '9':
+		case strings.IndexByte("-._~+/", c) >= 0:
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // maxBindingMessageLength bounds a binding_message to something a real

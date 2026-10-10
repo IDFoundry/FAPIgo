@@ -155,14 +155,10 @@ func newHarnessWithBackchannelOptions(t *testing.T, backchannel storage.Backchan
 	return harness{server: srv, key: key, serverKey: serverKey, now: now}
 }
 
-// newHarnessWithBackchannelOAuthOnly mirrors newHarnessWithBackchannel
-// with Config.OAuthOnly set (Algorithms.IDToken/Limits.IDTokenLifetime
-// left zero, valid only because of it) — testClientID keeps "openid" in
-// its own AllowedScopes, same reasoning as par_test.go's own
-// newHarnessOAuthOnly: proving OAuthOnly overrides what the client is
-// otherwise registered for, not merely that an unregistered scope is
-// rejected the ordinary way.
-func newHarnessWithBackchannelOAuthOnly(t *testing.T) harness {
+// newBackchannelOAuthOnlyServer mirrors newHarnessWithBackchannel with
+// Config.OAuthOnly set (Algorithms.IDToken/Limits.IDTokenLifetime left
+// zero, valid only because of it), returning server.New's error.
+func newBackchannelOAuthOnlyServer(t *testing.T) error {
 	t.Helper()
 	now := time.Now()
 	key := generateKey(t)
@@ -235,11 +231,8 @@ func newHarnessWithBackchannelOAuthOnly(t *testing.T) harness {
 		Backchannel:            backchannel,
 		BackchannelNotifier:    server.NoBackchannelNotifications{},
 	}
-	srv, err := server.New(cfg, deps)
-	if err != nil {
-		t.Fatalf("server.New: %v", err)
-	}
-	return harness{server: srv, key: key, serverKey: serverKey, now: now}
+	_, err = server.New(cfg, deps)
+	return err
 }
 
 // newHarnessWithBackchannelMTLS mirrors newHarnessWithBackchannel
@@ -898,16 +891,23 @@ func TestBeginBackchannelAuthenticationRejectsInvalidScope(t *testing.T) {
 	}
 }
 
-// TestBeginBackchannelAuthenticationOAuthOnlyRejectsOpenIDScope is
-// CIBA's counterpart of par_test.go's own
-// TestPushAuthorizationRequestOAuthOnlyRejectsOpenIDScope — same
-// override, different grant.
-func TestBeginBackchannelAuthenticationOAuthOnlyRejectsOpenIDScope(t *testing.T) {
-	h := newHarnessWithBackchannelOAuthOnly(t)
-	requestObj := h.backchannelRequestObject(t, map[string]json.RawMessage{
-		"scope": jsonRaw(t, "openid accounts"), "login_hint": jsonRaw(t, "user-1"),
-	})
+// TestNewRefusesCIBAWithOAuthOnly: a CIBA request must include
+// "openid" (CIBA §7.1), which OAuthOnly refuses, so the two can't be
+// configured together.
+func TestNewRefusesCIBAWithOAuthOnly(t *testing.T) {
+	err := newBackchannelOAuthOnlyServer(t)
+	if err == nil || !strings.Contains(err.Error(), "oauth_only") {
+		t.Fatalf("server.New = %v, want CIBA with OAuthOnly refused", err)
+	}
+}
 
+// TestBeginBackchannelAuthenticationRequiresOpenIDScope covers CIBA
+// §7.1: an authentication request without the openid scope is refused.
+func TestBeginBackchannelAuthenticationRequiresOpenIDScope(t *testing.T) {
+	h, _ := newHarnessWithBackchannel(t)
+	requestObj := h.backchannelRequestObject(t, map[string]json.RawMessage{
+		"scope": jsonRaw(t, "accounts"), "login_hint": jsonRaw(t, "user-1"),
+	})
 	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
 		HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), requestObj)},
 	})
@@ -920,6 +920,51 @@ func TestBeginBackchannelAuthenticationOAuthOnlyRejectsOpenIDScope(t *testing.T)
 	}
 	if localErr.Error.Code() != server.ErrorInvalidScope {
 		t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorInvalidScope)
+	}
+}
+
+// TestBeginBackchannelAuthenticationRefusesMalformedNotificationToken
+// covers CIBA §7.1's client_notification_token rules: at most 1024
+// characters, with RFC 6750 §2.1 Bearer credential syntax.
+func TestBeginBackchannelAuthenticationRefusesMalformedNotificationToken(t *testing.T) {
+	for name, tc := range map[string]struct {
+		token any
+		ok    bool
+	}{
+		"b64token":        {"aZ09-._~+/==", true},
+		"1024 characters": {strings.Repeat("a", 1024), true},
+		"1025 characters": {strings.Repeat("a", 1025), false},
+		"empty":           {"", false},
+		"padding only":    {"==", false},
+		"space":           {"notify me", false},
+		"CRLF":            {"notify\r\nX-Injected: 1", false},
+		"inner padding":   {"ab=cd", false},
+		"not a string":    {42, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h, _, _ := newHarnessWithBackchannelPing(t)
+			params := standardBackchannelParams(t)
+			params["client_notification_token"] = jsonRaw(t, tc.token)
+			action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+				HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), h.backchannelRequestObject(t, params))},
+			})
+			if err != nil {
+				t.Fatalf("BeginBackchannelAuthentication: %v", err)
+			}
+			if tc.ok {
+				if _, ok := action.(server.BackchannelInteractionRequired); !ok {
+					t.Fatalf("action = %T (%+v), want server.BackchannelInteractionRequired", action, action)
+				}
+				return
+			}
+			localErr, ok := action.(server.BackchannelAuthenticationLocalError)
+			if !ok || localErr.Error.Code() != server.ErrorInvalidRequest {
+				t.Fatalf("action = %+v, want invalid_request", action)
+			}
+			if _, isString := tc.token.(string); !isString && !strings.Contains(localErr.Error.PublicDescription(), "must be a string") {
+				t.Errorf("description = %q, want the token refused as not a string", localErr.Error.PublicDescription())
+			}
+		})
 	}
 }
 
@@ -1646,6 +1691,43 @@ func TestExchangeBackchannelAuthenticationAcceptsTokenEndpointURLAsClientAsserti
 	})
 	if code := serverErrorCode(t, err); code != server.ErrorAuthorizationPending {
 		t.Fatalf("error code = %q, want %q (client authentication should have succeeded)", code, server.ErrorAuthorizationPending)
+	}
+}
+
+// TestExchangeAuthorizationCodeKeepsCIBAClientIssuerOnly: CIBA's widened
+// audiences are for the CIBA grant (and refresh). The authorization code
+// grant is FAPI 2.0's, so a CIBA-registered client's assertion there
+// must name the issuer (FAPI 2.0 Security Profile §5.3.2.1). Client
+// authentication runs before the code is looked up, so invalid_grant
+// for the made-up code proves it succeeded.
+func TestExchangeAuthorizationCodeKeepsCIBAClientIssuerOnly(t *testing.T) {
+	h, _ := newHarnessWithBackchannel(t)
+	for aud, want := range map[string]server.ErrorCode{
+		testTokenEndpoint: server.ErrorInvalidClient,
+		testIssuer:        server.ErrorInvalidGrant,
+	} {
+		assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
+			Signer: h.key, Algorithm: fapi.ES256,
+			ClientID: testClientID.String(), Audience: aud,
+			Now: h.now, Lifetime: 30 * time.Second,
+		})
+		if err != nil {
+			t.Fatalf("CreateAssertion: %v", err)
+		}
+		_, err = h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
+			HTTP: server.FormRequest{Parameters: []server.FormParameter{
+				formParam("client_assertion", assertion),
+				formParam("client_assertion_type", clientassertion.AssertionType),
+				formParam("grant_type", "authorization_code"),
+				formParam("code", "made-up-code"),
+				formParam("redirect_uri", testRedirectURI),
+				formParam("code_verifier", "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
+			}},
+			DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
+		})
+		if code := serverErrorCode(t, err); code != want {
+			t.Errorf("aud %s: error code = %q, want %q", aud, code, want)
+		}
 	}
 }
 

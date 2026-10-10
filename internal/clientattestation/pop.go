@@ -164,7 +164,9 @@ func (p PoP) Verify(ctx context.Context, confirmationJWK []byte, policy PoPVerif
 	}
 
 	if policy.Replay != nil {
-		if err := policy.Replay.UseOnce(ctx, c.JTI, iat.Add(policy.MaxAge)); err != nil {
+		// 2×MaxClockSkew past the acceptance window, for an instance
+		// whose clock runs behind this one's.
+		if err := policy.Replay.UseOnce(ctx, c.JTI, iat.Add(policy.MaxAge+2*policy.MaxClockSkew)); err != nil {
 			return VerifiedPoP{}, fmt.Errorf("clientattestation: replay check: %w", err)
 		}
 	}

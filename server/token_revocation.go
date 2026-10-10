@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/grantrevocation"
 )
 
 // TokenRevocationRequest is a request to this server's token revocation
@@ -66,15 +67,23 @@ type TokenRevocationResult struct {
 // client may: one issued to it and, for a client authenticated by Client
 // Attestation, bound to the same Client Instance Key (as
 // RefreshAccessToken requires — draft-ietf-oauth-attestation-based-client-auth-07
-// §10.3). Revoking a refresh token whose grant has a GrantID also
-// revokes the grant (RevokeGrant), so its access tokens stop working too
-// (RFC 7009 §2.1) — which is why a GrantID must name one grant only
-// (GrantedAuthorization.GrantID).
+// §10.3). Revoking a refresh token also revokes the authorization grant
+// it came from, so the access tokens issued under it stop working too
+// (RFC 7009 §2.1): the grant's GrantID if it has one (RevokeGrant) —
+// which is why a GrantID must name one grant only
+// (GrantedAuthorization.GrantID) — and, when Dependencies.Revocation
+// can be read, the authorization code it was issued from, as code reuse
+// revokes it.
 //
 // A token that is unknown, expired, already revoked, or another
 // client's or client instance's is answered 200 and left as it is: RFC
 // 7009 §2.2 answers an invalid token that way, and a response that told
 // these apart would confirm the token exists to whoever presented it.
+// For another client's token this deliberately departs from RFC 7009
+// §2.1, which has the server refuse a token not issued to the
+// requesting client with an error: that error too would tell the
+// requester the token is live. The audit record (below) still tells the
+// cases apart for the operator.
 //
 // Only refresh tokens can be revoked. A token in JWT form, or one sent
 // with token_type_hint "access_token" that isn't a refresh token this
@@ -160,10 +169,33 @@ func (s *Server) revokeRefreshToken(ctx context.Context, clientID fapi.ClientID,
 			return TokenRevocationResult{}, newError(ErrorServerError, 500, "failed to revoke the refresh token's grant", err)
 		}
 	}
+	if revokeErr := s.revokeCodeGrant(ctx, grant.CodeGrantID); revokeErr != nil {
+		return TokenRevocationResult{}, revokeErr
+	}
 	if err := s.deps.Grants.RevokeRefreshToken(ctx, sha256.Sum256([]byte(rawToken))); err != nil {
 		return TokenRevocationResult{}, newError(ErrorServerError, 500, "failed to revoke the refresh token", err)
 	}
 	return TokenRevocationResult{Revoked: true, GrantID: grant.GrantID}, nil
+}
+
+// revokeCodeGrant revokes the authorization code grant codeGrantID
+// (grantRecord.CodeGrantID), as code reuse does, so every access token
+// issued from that code, or later from its refresh tokens, is refused
+// even when the application set no GrantID. Without a revocation store
+// resource servers can read there is nothing to revoke against, and
+// the refresh token's deletion alone has to do.
+func (s *Server) revokeCodeGrant(ctx context.Context, codeGrantID string) *Error {
+	if codeGrantID == "" {
+		return nil
+	}
+	if _, ok := s.grantRevocationReader(); !ok {
+		return nil
+	}
+	until := s.deps.Clock.Now().Add(s.grantRevocationHorizon())
+	if err := s.deps.Revocation.Revoke(ctx, grantrevocation.CodeKey(codeGrantID), until); err != nil {
+		return newError(ErrorServerError, 500, "failed to revoke the refresh token's grant", err)
+	}
+	return nil
 }
 
 func (s *Server) revocationFail(ctx context.Context, clientID fapi.ClientID, err *Error) error {

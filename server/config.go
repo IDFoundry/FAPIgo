@@ -225,7 +225,8 @@ func (e MTLSEndpoints) IsZero() bool {
 type Limits struct {
 	// PushedRequestLifetime is how long a pushed authorization request's
 	// request_uri remains valid, and is reported to the client as
-	// expires_in.
+	// expires_in. Under AssuranceProduction it must be less than 600
+	// seconds (FAPI 2.0 Security Profile §5.3.2.2).
 	PushedRequestLifetime time.Duration
 
 	// MaxClientAssertionLifetime bounds how far in the future a client
@@ -234,6 +235,7 @@ type Limits struct {
 
 	// MaxRequestObjectLifetime bounds how far in the future a request
 	// object's exp claim may be, relative to the time it's verified.
+	// Under AssuranceProduction it must be at most 60 minutes.
 	MaxRequestObjectLifetime time.Duration
 
 	// InteractionLifetime bounds how long an InteractionHandle returned
@@ -241,7 +243,9 @@ type Limits struct {
 	InteractionLifetime time.Duration
 
 	// AuthorizationCodeLifetime bounds how long an authorization code
-	// issued by CompleteAuthorization remains redeemable.
+	// issued by CompleteAuthorization remains redeemable. Under
+	// AssuranceProduction it must be at most 60 seconds (FAPI 2.0
+	// Security Profile §5.3.2.1).
 	AuthorizationCodeLifetime time.Duration
 
 	// JARMResponseLifetime bounds how long a signed authorization
@@ -295,7 +299,15 @@ type Limits struct {
 
 	// MaxClockSkew bounds how far in the future an iat/nbf claim may be,
 	// and extends how long past exp an artifact is still accepted. Zero
-	// means no tolerance.
+	// means no tolerance. Under AssuranceProduction it must be from 10
+	// to 60 seconds (FAPI 2.0 Security Profile §5.3.2.1: accept up to 10
+	// seconds in the future, refuse more than 60).
+	//
+	// Replay records, and the access token revocation a reused
+	// authorization code records, are kept 2×MaxClockSkew past the
+	// window their artifact is accepted in, so an instance whose clock
+	// runs up to MaxClockSkew behind still finds them: a store may drop
+	// a record once its ExpiresAt has passed.
 	MaxClockSkew time.Duration
 
 	// DPoPNonceLifetime bounds how long an issued DPoP nonce remains
@@ -478,19 +490,20 @@ type Config struct {
 	// claims_parameter_supported) — even when Algorithms configures the
 	// ID token or UserInfo ones — regardless of what an
 	// individual RegisteredClient's own AllowedScopes says. "openid" is
-	// refused as a requested scope at PAR and CIBA (client_credentials
-	// and IssueRefreshToken refuse it whatever this says), and checked
-	// again when a refresh or the CIBA token exchange issues tokens from
-	// a stored grant, so a client can never end up with "openid" in a
-	// granted scope for the openid-gated branches (ID token issuance and
-	// friends) to act on; this is what lets Metadata's own claims and this
+	// refused as a requested scope at PAR (client_credentials and
+	// IssueRefreshToken refuse it whatever this says), and checked again
+	// when a refresh issues tokens from a stored grant, so a client can
+	// never end up with "openid" in a granted scope for the openid-gated
+	// branches (ID token issuance and friends) to act on; this is what lets Metadata's own claims and this
 	// server's actual behavior never diverge. False (the default)
 	// preserves this package's original behavior exactly: ID token
 	// issuance remains driven purely by whether a request's granted
 	// scope includes "openid", with no deployment-wide switch at all.
 	//
 	// Algorithms.IDToken and Limits.IDTokenLifetime are not required
-	// when this is true — see their own doc comments.
+	// when this is true — see their own doc comments. CIBA
+	// (Endpoints.BackchannelAuthentication) can't be enabled with it:
+	// every CIBA request must include "openid" (CIBA §7.1).
 	OAuthOnly bool
 
 	// Federation configures this server's OpenID Federation 1.0

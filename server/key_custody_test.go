@@ -88,7 +88,7 @@ func TestNewProductionRequiresKeyCustody(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			cfg := validConfig(t)
-			cfg.Assurance = server.AssuranceProduction
+			asProduction(&cfg)
 			cfg.Deployment = map[bool]server.Deployment{false: server.DeploymentSingleInstance, true: server.DeploymentHorizontallyScaled}[tc.scaled]
 			deps := validDependencies()
 			deps.Audit = &fakeAuditSink{}

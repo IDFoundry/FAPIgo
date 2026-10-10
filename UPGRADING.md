@@ -59,6 +59,55 @@ that user. If another user is logged in, ask them to log in as the
 required one, or complete with `AuthenticationFailed` (or
 `InteractionNeeded(NeedLogin, ...)` for `prompt=none`).
 
+### CIBA requests must include `openid` (server)
+
+**Affects:** a server with CIBA enabled (`Endpoints.BackchannelAuthentication`)
+whose clients send a backchannel authentication request without the
+`openid` scope, or that sets `Config.OAuthOnly` together with CIBA; and
+a ping-mode CIBA client whose `client_notification_token` is longer than
+1024 characters or isn't a Bearer token.
+
+**Why:** CIBA is an OpenID Connect authentication flow, and CIBA Core
+§7.1 requires the request's scope to include `openid`. A request without
+it is now refused with `invalid_scope`. `OAuthOnly` refuses `openid`, so
+a CIBA endpoint can no longer be configured with it, and `New` fails
+naming `oauth_only`. The same section limits `client_notification_token`
+to 1024 characters with RFC 6750 §2.1 Bearer syntax; a token outside
+that is now `invalid_request`. The server sends this token back in an
+`Authorization` header, so arbitrary characters there could reach the
+client's notification request.
+
+**What to change:** send `openid` in every CIBA request's `scope`.
+Remove `OAuthOnly` from a configuration that enables CIBA, or disable
+CIBA there. This library's `client` already generates valid
+notification tokens; if another client sends its own, keep it to
+`A-Z a-z 0-9 - . _ ~ + /`, optionally followed by `=` padding.
+
+### FAPI 2.0's fixed limits are enforced under production (server, *production only*)
+
+**Affects:** a server under `AssuranceProduction` whose `Config.Limits`
+go outside the FAPI 2.0 Security Profile's numbers.
+
+**Why:** FAPI 2.0 fixes a few numbers: authorization codes live at most
+60 seconds (§5.3.2.1), a `request_uri`'s `expires_in` is under 600
+seconds (§5.3.2.2), and JWTs with `iat`/`nbf` up to 10 seconds in the
+future are accepted but not more than 60 (§5.3.2.1). Out-of-range values
+used to be accepted silently, taking a production deployment out of the
+profile. `New` now refuses, under `AssuranceProduction`:
+
+- `AuthorizationCodeLifetime` over 60 seconds;
+- `PushedRequestLifetime` of 600 seconds or more;
+- `MaxClockSkew` under 10 or over 60 seconds;
+- `MaxRequestObjectLifetime` over 60 minutes.
+
+It reports every violation at once. `RecommendedLimits()` is within all
+of them. Development assurance is unchanged.
+
+**What to change:** start from `server.RecommendedLimits()`, or bring
+the named fields within range. The most likely one is `MaxClockSkew`:
+a value under 10 seconds (including zero) must now be at least 10
+seconds.
+
 ## v0.52.0
 
 ### An essential `acr` request is enforced (server)

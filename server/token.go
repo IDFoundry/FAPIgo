@@ -189,9 +189,12 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, "", newError(ErrorUnsupportedGrantType, 400, "grant_type must be authorization_code", nil))
 	}
 
+	// A FAPI 2.0 grant: the issuer is the only client assertion
+	// audience, even for a client also registered for CIBA (nil
+	// endpoints — see acceptableClientAssertionAudiences).
 	client, dpopProof, authn, authErr := s.authenticateRequest(ctx, params, requestCredentials{
 		PeerCertificate: req.PeerCertificate, DPoPProofs: req.DPoPProofs, ClientAttestations: req.ClientAttestations, ClientAttestationPoPs: req.ClientAttestationPoPs,
-	}, []fapi.URL{s.cfg.Endpoints.Token}, []fapi.URL{s.cfg.MTLSEndpoints.Token})
+	}, nil, nil)
 	if authErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, "", authErr)
 	}
@@ -358,7 +361,10 @@ func (s *Server) revokeTokensForReusedCode(ctx context.Context, err error, prese
 		return true
 	}
 	if alreadyRedeemed.IssuedAccessTokenKey != "" {
-		_ = s.deps.Revocation.Revoke(ctx, alreadyRedeemed.IssuedAccessTokenKey, s.deps.Clock.Now().Add(s.cfg.Limits.AccessTokenLifetime))
+		// Resource servers accept the token until exp+MaxClockSkew by
+		// their own clocks, which may lag this one's by another
+		// MaxClockSkew: the record must outlast both.
+		_ = s.deps.Revocation.Revoke(ctx, alreadyRedeemed.IssuedAccessTokenKey, s.deps.Clock.Now().Add(s.cfg.Limits.AccessTokenLifetime+2*s.cfg.Limits.MaxClockSkew))
 	}
 	if alreadyRedeemed.IssuedRefreshTokenHash != nil {
 		_ = s.deps.Grants.RevokeRefreshToken(ctx, *alreadyRedeemed.IssuedRefreshTokenHash)

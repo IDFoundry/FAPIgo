@@ -25,7 +25,13 @@ func sealingClient(t *testing.T, clientID fapi.ClientID) *client.Client {
 	return c
 }
 
-func sealKey(b byte) []byte { return bytes.Repeat([]byte{b}, 32) }
+func sealKey(b byte) []byte {
+	k := make([]byte, 32)
+	for i := range k {
+		k[i] = b + byte(i) // distinct bytes: a single repeated byte is refused
+	}
+	return k
+}
 
 // fullTokenSet is a TokenSet with every field set, as a code exchange
 // with an ID token and a refresh token would return it.

@@ -1,7 +1,6 @@
 package client_test
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"net/http"
@@ -75,7 +74,7 @@ func TestPollBackchannelAuthenticationRequiresIDTokenForOpenID(t *testing.T) {
 				t.Fatalf("BeginBackchannelAuthentication: %v", err)
 			}
 			// The session survives a restart with its requirement intact.
-			sealer, err := client.NewBackchannelSessionSealer(c, [][]byte{bytes.Repeat([]byte{7}, 32)})
+			sealer, err := client.NewBackchannelSessionSealer(c, [][]byte{[]byte("require-id-token-test-seal-key-1")})
 			if err != nil {
 				t.Fatal(err)
 			}

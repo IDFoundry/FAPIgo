@@ -61,6 +61,20 @@ type BeginAuthorizationRequest struct {
 	MaxAge    time.Duration
 	HasMaxAge bool
 
+	// EssentialACRValues, when not empty, requires the user to
+	// authenticate at one of these Authentication Context Class
+	// References: it's sent as an essential "acr" claim in the "claims"
+	// parameter (OIDC Core §5.5.1.1), which a server must meet or fail
+	// the authentication, unlike ACRValues, which is only a preference.
+	// ExchangeCode then refuses, with ErrorInvalidResponse, an ID token
+	// whose "acr" (ValidatedIDToken.ACR) isn't one of them, so a server
+	// that ignored the requirement can't hand back a weaker
+	// authentication unnoticed. It requires "openid" in Scope, since
+	// only an ID token's acr can meet it: BeginAuthorization refuses it
+	// otherwise, and always under Config.OAuthOnly. An "acr" entry in
+	// Claims.IDToken is replaced by this requirement.
+	EssentialACRValues []string
+
 	// Extensions carries any custom authorization parameters to attach
 	// to this request — set via extension.Set(&req.Extensions,
 	// Definition, value). A value whose encoded JSON shape is a bare
@@ -110,9 +124,10 @@ const claimsParameter = "claims"
 // maxAgeParameter is the OIDC Core §3.1.2.1 "max_age" parameter.
 const maxAgeParameter = "max_age"
 
-// encode returns r as the "claims" parameter's JSON object, or nil if it
-// names no claims.
-func (r RequestedClaims) encode() (json.RawMessage, error) {
+// encode returns r as the "claims" parameter's JSON object, with "acr"
+// in the ID token required to be one of essentialACR when that's not
+// empty, or nil if it names no claims.
+func (r RequestedClaims) encode(essentialACR []string) (json.RawMessage, error) {
 	location := func(names []string) (map[string]json.RawMessage, error) {
 		if len(names) == 0 {
 			return nil, nil
@@ -130,6 +145,15 @@ func (r RequestedClaims) encode() (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(essentialACR) > 0 {
+		if idToken == nil {
+			idToken = map[string]json.RawMessage{}
+		}
+		idToken["acr"], err = essentialACRClaim(essentialACR)
+		if err != nil {
+			return nil, err
+		}
+	}
 	userinfo, err := location(r.UserInfo)
 	if err != nil {
 		return nil, err
@@ -141,6 +165,20 @@ func (r RequestedClaims) encode() (json.RawMessage, error) {
 		IDToken  map[string]json.RawMessage `json:"id_token,omitempty"`
 		UserInfo map[string]json.RawMessage `json:"userinfo,omitempty"`
 	}{idToken, userinfo})
+}
+
+// essentialACRClaim is the "claims" parameter's ID token "acr" entry
+// requiring one of values (OIDC Core §5.5.1.1).
+func essentialACRClaim(values []string) (json.RawMessage, error) {
+	for _, v := range values {
+		if v == "" {
+			return nil, fmt.Errorf("essential acr value is empty")
+		}
+	}
+	return json.Marshal(struct {
+		Essential bool     `json:"essential"`
+		Values    []string `json:"values"`
+	}{true, values})
 }
 
 // responseModePlain and responseModeJARM record how this session expects
@@ -217,7 +255,7 @@ func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 		}
 		params[maxAgeParameter] = strconv.FormatInt(seconds, 10)
 	}
-	claims, err := req.Claims.encode()
+	claims, err := req.Claims.encode(req.EssentialACRValues)
 	if err != nil {
 		return AuthorizationSession{}, newError(ErrorInvalidRequest, "claims request is invalid", err)
 	}
@@ -577,6 +615,7 @@ func (c *Client) newSessionRecord(req BeginAuthorizationRequest, redirectURI, no
 		seconds := int64(req.MaxAge / time.Second) // as sent: whole seconds, rounded down
 		record.MaxAgeSeconds = &seconds
 	}
+	record.EssentialACR = slices.Clone(req.EssentialACRValues)
 	return record
 }
 
@@ -617,6 +656,9 @@ func (c *Client) checkBeginRequest(req BeginAuthorizationRequest) (string, *Erro
 	}
 	if req.HasMaxAge && !slices.Contains(req.Scope, "openid") {
 		return "", newError(ErrorInvalidRequest, `max_age requires "openid" in Scope: only an ID token's auth_time can meet it`, nil)
+	}
+	if len(req.EssentialACRValues) > 0 && !slices.Contains(req.Scope, "openid") {
+		return "", newError(ErrorInvalidRequest, `EssentialACRValues requires "openid" in Scope: only an ID token's acr can meet it`, nil)
 	}
 	if req.RedirectPort == 0 {
 		return c.cfg.RedirectURI, nil

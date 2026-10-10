@@ -32,6 +32,9 @@ type sealedBackchannelSession struct {
 	// OpenID: whether the request's scope included "openid", so an
 	// approval must carry an ID token.
 	OpenID bool `json:"o,omitempty"`
+	// EssentialACR: the request's essential "acr" values, which an
+	// approval's ID token acr must be one of.
+	EssentialACR []string `json:"r,omitempty"`
 }
 
 // BackchannelSessionSealer encrypts a BackchannelAuthenticationSession
@@ -47,7 +50,7 @@ type sealedBackchannelSession struct {
 // misrouted cookie or shared storage, doesn't open under another's.
 // Sealing matters: the session records whether the request
 // asked for "openid", which decides whether an approval without an ID
-// token is refused, and which of this client's requests to poll, so a
+// token is refused, the essential acr values the ID token must meet, and which of this client's requests to poll, so a
 // stored session that could be edited could turn that check off.
 //
 // It contains the client_notification_token: store it as you would a
@@ -88,7 +91,7 @@ func (s *BackchannelSessionSealer) Seal(session BackchannelAuthenticationSession
 	plaintext, err := json.Marshal(sealedBackchannelSession{
 		AuthReqID: session.authReqID, IntervalMillis: session.interval.Milliseconds(),
 		ExpiresAt: session.expiresAt.UTC(), NotificationToken: session.notificationToken,
-		OpenID: session.openID,
+		OpenID: session.openID, EssentialACR: session.essentialACR,
 	})
 	if err != nil {
 		return nil, newError(ErrorInternal, "failed to encode the backchannel authentication session", err)
@@ -118,7 +121,7 @@ func (s *BackchannelSessionSealer) Open(sealed []byte, owner string) (session Ba
 	return BackchannelAuthenticationSession{
 		authReqID: e.AuthReqID, interval: time.Duration(e.IntervalMillis) * time.Millisecond,
 		expiresAt: e.ExpiresAt, notificationToken: e.NotificationToken,
-		openID: e.OpenID,
+		openID: e.OpenID, essentialACR: e.EssentialACR,
 	}, keyIndex > 0, nil
 }
 

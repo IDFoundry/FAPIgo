@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.53.0](https://github.com/IDFoundry/FAPIgo/compare/v0.52.1...v0.53.0) (2026-10-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* **server:** server.NewSubjectID refuses a value longer than 255 bytes or containing a byte outside printable ASCII (0x20 to 0x7E). Use a stable identifier of your own as the subject and return names and email addresses as claims. See UPGRADING.md for v0.53.0.
+* **server:** harden replay windows, CIBA requests, signing keys and production limits ([#629](https://github.com/IDFoundry/FAPIgo/issues/629))
+* **server:** enforce the subject a request names ([#628](https://github.com/IDFoundry/FAPIgo/issues/628))
+
+### Features
+
+* **client:** require an essential acr, and refuse weak sealer keys ([575e257](https://github.com/IDFoundry/FAPIgo/commit/575e257a6b267cfbb916cdf2232fb9d85d3e1792))
+* **server:** add Server.VerifyIDTokenHint ([016ba9d](https://github.com/IDFoundry/FAPIgo/commit/016ba9d8a246babad33904502c002946397295ea))
+* **server:** Error.WriteText, plus embedder-duty docs and 303 redirects ([#626](https://github.com/IDFoundry/FAPIgo/issues/626)) ([e190d4a](https://github.com/IDFoundry/FAPIgo/commit/e190d4a3992f961ac4a04c230b5cdf2bd92462ec))
+* **server:** pass ui_locales, claims_locales and display to the interaction ([ae1b05f](https://github.com/IDFoundry/FAPIgo/commit/ae1b05f68ddbf692625ff9294b12e6e384fd0915))
+
+
+### Bug Fixes
+
+* **fapihttp:** block the remaining non-global special-purpose ranges ([9fe8f5f](https://github.com/IDFoundry/FAPIgo/commit/9fe8f5f2a3e249c25b33baad81c6b1b6ebb05fbb))
+* **server:** bound the cost of parsing the claims parameter ([#624](https://github.com/IDFoundry/FAPIgo/issues/624)) ([d006402](https://github.com/IDFoundry/FAPIgo/commit/d0064026aac605f50ef5fbb1fc47b1c79238e61b))
+* **server:** enforce the subject a request names ([#628](https://github.com/IDFoundry/FAPIgo/issues/628)) ([4a3255b](https://github.com/IDFoundry/FAPIgo/commit/4a3255b758e5dbacba68a6c9c871f9970e874c2f))
+* **server:** harden replay windows, CIBA requests, signing keys and production limits ([#629](https://github.com/IDFoundry/FAPIgo/issues/629)) ([d2bc7e7](https://github.com/IDFoundry/FAPIgo/commit/d2bc7e7fa3b6958e58d712119eb3bfc446b0c8a1))
+* **server:** limit a subject ID to 255 printable ASCII characters ([dc25fd9](https://github.com/IDFoundry/FAPIgo/commit/dc25fd99cfefdcc9b96e367f9b0774b599441252))
+
 ## [0.52.1](https://github.com/IDFoundry/FAPIgo/compare/v0.52.0...v0.52.1) (2026-10-09)
 
 

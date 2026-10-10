@@ -108,6 +108,23 @@ the named fields within range. The most likely one is `MaxClockSkew`:
 a value under 10 seconds (including zero) must now be at least 10
 seconds.
 
+### A subject ID is at most 255 printable ASCII characters (server)
+
+**Affects:** an application that passes `NewSubjectID` a value longer
+than 255 bytes, or one with non-ASCII or control characters: an email
+address with an internationalized local part, say, or a display name.
+
+**Why:** OIDC Core §2 says `sub` "MUST NOT exceed 255 ASCII characters
+in length". Longer or non-ASCII values were accepted and issued in ID
+tokens that relying parties may refuse. Control characters, never
+needed in an identifier, are refused too.
+
+**What to change:** use a stable identifier of your own (a database key
+or opaque ID) as the subject, and return names and email addresses as
+claims. `NewSubjectID` now returns an error for any other value. Grants
+issued before the upgrade keep their subject; only new authentications
+are checked.
+
 ## v0.52.0
 
 ### An essential `acr` request is enforced (server)

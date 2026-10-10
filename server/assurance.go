@@ -78,6 +78,11 @@ const (
 	// OutboundHardened (backchannelhttp.Notifier and
 	// NoBackchannelNotifications do), since it sends to client-supplied
 	// notification endpoints.
+	// Config.Limits must keep to the FAPI 2.0 Security Profile's fixed
+	// numbers (RecommendedLimits does): AuthorizationCodeLifetime at
+	// most 60 seconds, PushedRequestLifetime under 600 seconds,
+	// MaxClockSkew from 10 to 60 seconds, and MaxRequestObjectLifetime
+	// at most 60 minutes.
 	// Dependencies.Random must be crypto/rand.Reader itself: every
 	// request_uri, authorization code, refresh token, opaque access
 	// token, jti and DPoP nonce this server issues is only as

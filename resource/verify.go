@@ -405,7 +405,10 @@ func (v *Verifier) consumeDPoPProof(ctx context.Context, proof dpop.VerifiedProo
 			return challenge
 		}
 	}
-	if err := v.dpopReplayChecker().UseOnce(ctx, proof.Thumbprint, proof.JTI, proof.IssuedAt.Add(v.cfg.Limits.MaxDPoPProofAge)); err != nil {
+	// 2×MaxClockSkew past the proof's own acceptance window: another
+	// resource server sharing the replay store may accept it that much
+	// later by its own clock.
+	if err := v.dpopReplayChecker().UseOnce(ctx, proof.Thumbprint, proof.JTI, proof.IssuedAt.Add(v.cfg.Limits.MaxDPoPProofAge+2*v.cfg.Limits.MaxClockSkew)); err != nil {
 		if storeUnavailable(err) {
 			return newError(ErrorServerError, 500, "failed to check DPoP proof replay", err)
 		}

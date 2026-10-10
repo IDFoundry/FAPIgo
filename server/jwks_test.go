@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
@@ -402,6 +403,31 @@ func TestNewRejectsEmptyKeyID(t *testing.T) {
 	_, err := server.New(validConfig(t), deps)
 	if err == nil || !strings.Contains(err.Error(), "keys has no usable id_token_signing key for ES256") || !strings.Contains(err.Error(), "empty kid") {
 		t.Fatalf("New(empty kid) = %v, want it refused naming id_token_signing and ES256", err)
+	}
+}
+
+// mismatchedKeyManager reports one key's public half but signs with
+// another: a KMS whose key alias points somewhere else.
+type mismatchedKeyManager struct {
+	fakeKeyManager
+	signingKey *ecdsa.PrivateKey
+}
+
+func (m *mismatchedKeyManager) Sign(ctx context.Context, req keys.SigningRequest) (keys.Signature, error) {
+	inner := fakeKeyManager{key: m.signingKey, keyID: m.keyID}
+	return inner.Sign(ctx, req)
+}
+
+// TestNewRejectsKeyThatSignsWithAnotherKey: New signs a probe with each
+// key and verifies it, so a manager whose signatures don't match the
+// public key it publishes fails at startup, not at every relying party.
+func TestNewRejectsKeyThatSignsWithAnotherKey(t *testing.T) {
+	deps := validDependencies()
+	deps.Keys = &mismatchedKeyManager{fakeKeyManager: fakeKeyManager{key: generateKey(t), keyID: "as-key-1"}, signingKey: generateKey(t)}
+
+	_, err := server.New(validConfig(t), deps)
+	if err == nil || !strings.Contains(err.Error(), "keys can't sign with its id_token_signing key for ES256") {
+		t.Fatalf("New(mismatched signer) = %v, want it refused naming id_token_signing and ES256", err)
 	}
 }
 

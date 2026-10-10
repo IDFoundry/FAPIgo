@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"strings"
 	"testing"
+	"time"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/keys"
@@ -37,7 +38,7 @@ type embeddingIssuer struct{ server.JWTAccessTokens }
 func productionNew(t *testing.T, mutate func(*server.Dependencies)) error {
 	t.Helper()
 	cfg := validConfig(t)
-	cfg.Assurance = server.AssuranceProduction
+	asProduction(&cfg)
 	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
@@ -128,7 +129,7 @@ func TestProductionChecksAttesterKeySource(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := validAttestationConfig(t)
-			cfg.Assurance = server.AssuranceProduction
+			asProduction(&cfg)
 			cfg.Deployment = server.DeploymentSingleInstance
 			deps := validDependencies()
 			deps.Audit = &fakeAuditSink{}
@@ -206,7 +207,7 @@ func TestProductionChecksAttesterTrustAnchors(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := validAttestationConfig(t)
-			cfg.Assurance = server.AssuranceProduction
+			asProduction(&cfg)
 			cfg.Deployment = server.DeploymentSingleInstance
 			deps := validDependencies()
 			deps.Audit = &fakeAuditSink{}
@@ -232,4 +233,67 @@ func TestProductionChecksAttesterTrustAnchors(t *testing.T) {
 			t.Fatalf("New(development): %v", err)
 		}
 	})
+}
+
+// TestNewEnforcesFAPILimitsUnderProduction covers the FAPI 2.0 Security
+// Profile's fixed numbers: each out-of-range Limits field is refused
+// under AssuranceProduction, every violation reported at once, while
+// AssuranceDevelopment leaves them to the embedder.
+func TestNewEnforcesFAPILimitsUnderProduction(t *testing.T) {
+	cases := map[string]struct {
+		mutate func(*server.Limits)
+		want   string
+	}{
+		"code lifetime over 60s":       {func(l *server.Limits) { l.AuthorizationCodeLifetime = 61 * time.Second }, "limits.authorization_code_lifetime"},
+		"request_uri lifetime of 600s": {func(l *server.Limits) { l.PushedRequestLifetime = 600 * time.Second }, "limits.pushed_request_lifetime"},
+		"clock skew under 10s":         {func(l *server.Limits) { l.MaxClockSkew = 9 * time.Second }, "limits.max_clock_skew"},
+		"clock skew over 60s":          {func(l *server.Limits) { l.MaxClockSkew = 61 * time.Second }, "limits.max_clock_skew"},
+		"request object over 60m":      {func(l *server.Limits) { l.MaxRequestObjectLifetime = 61 * time.Minute }, "limits.max_request_object_lifetime"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg, deps := productionConfigAndDeps(t)
+			tc.mutate(&cfg.Limits)
+			if _, err := server.New(cfg, deps); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("New(production) = %v, want %s refused", err, tc.want)
+			}
+			cfg.Assurance = server.AssuranceDevelopment
+			if _, err := server.New(cfg, deps); err != nil {
+				t.Fatalf("New(development) = %v, want it accepted", err)
+			}
+		})
+	}
+	t.Run("RecommendedLimits accepted", func(t *testing.T) {
+		cfg, deps := productionConfigAndDeps(t)
+		cfg.Limits = server.RecommendedLimits()
+		if _, err := server.New(cfg, deps); err != nil {
+			t.Fatalf("New(production, RecommendedLimits) = %v", err)
+		}
+	})
+	t.Run("every violation reported", func(t *testing.T) {
+		cfg, deps := productionConfigAndDeps(t)
+		cfg.Limits.AuthorizationCodeLifetime = time.Hour
+		cfg.Limits.MaxClockSkew = 0
+		_, err := server.New(cfg, deps)
+		for _, want := range []string{"limits.authorization_code_lifetime", "limits.max_clock_skew"} {
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("New = %v, want it to report %s", err, want)
+			}
+		}
+	})
+}
+
+// productionConfigAndDeps is validConfig/validDependencies with every
+// AssuranceProduction requirement met.
+func productionConfigAndDeps(t *testing.T) (server.Config, server.Dependencies) {
+	t.Helper()
+	cfg := validConfig(t)
+	asProduction(&cfg)
+	cfg.Deployment = server.DeploymentSingleInstance
+	deps := validDependencies()
+	deps.Audit = &fakeAuditSink{}
+	if _, err := server.New(cfg, deps); err != nil {
+		t.Fatalf("New(production baseline): %v", err)
+	}
+	return cfg, deps
 }

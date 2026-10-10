@@ -799,9 +799,9 @@ func TestVerifyReplayTTLCoversClockSkew(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
-	want := verified.ExpiresAt.Add(policy.MaxClockSkew)
+	want := verified.ExpiresAt.Add(2 * policy.MaxClockSkew)
 	if !spy.expiresAt.Equal(want) {
-		t.Fatalf("replay TTL = %v, want %v (ExpiresAt + MaxClockSkew)", spy.expiresAt, want)
+		t.Fatalf("replay TTL = %v, want %v (ExpiresAt + 2×MaxClockSkew)", spy.expiresAt, want)
 	}
 }
 

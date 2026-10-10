@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/extension"
@@ -231,6 +232,11 @@ func validateCIBAAlgorithms(cfg Config, cibaEnabled bool) error {
 	if !cibaEnabled {
 		return nil
 	}
+	if cfg.OAuthOnly {
+		// CIBA authenticates the end user: a request must ask for
+		// "openid" (CIBA §7.1), which OAuthOnly refuses.
+		return fmt.Errorf("server: config: endpoints.backchannel_authentication can't be set with oauth_only: CIBA requests must include the openid scope")
+	}
 	if len(cfg.Algorithms.BackchannelAuthenticationRequest) == 0 {
 		return fmt.Errorf("server: config: algorithms.backchannel_authentication_request must not be empty when endpoints.backchannel_authentication is set")
 	}
@@ -353,6 +359,42 @@ func validateDeployment(cfg Config) error {
 	return fmt.Errorf("server: config: deployment is invalid")
 }
 
+// The FAPI 2.0 Security Profile's fixed numbers for Limits, enforced
+// under AssuranceProduction by validateFAPILimits.
+const (
+	// §5.3.2.1: authorization codes live at most 60 seconds.
+	fapiMaxAuthorizationCodeLifetime = 60 * time.Second
+	// §5.3.2.2: a request_uri's expires_in is less than 600 seconds.
+	fapiPushedRequestLifetimeBound = 600 * time.Second
+	// §5.3.2.1: JWTs with iat/nbf up to 10 seconds in the future are
+	// accepted, and more than 60 seconds in the future refused.
+	fapiMinClockSkew = 10 * time.Second
+	fapiMaxClockSkew = 60 * time.Second
+	// A request object lives at most 60 minutes.
+	fapiMaxRequestObjectLifetime = 60 * time.Minute
+)
+
+// validateFAPILimits refuses Limits outside the FAPI 2.0 Security
+// Profile's fixed numbers, reporting every one (errors.Join), so a
+// production deployment can't drift out of the profile by
+// configuration. RecommendedLimits is within all of them.
+func validateFAPILimits(l Limits) error {
+	var errs []error
+	if l.AuthorizationCodeLifetime > fapiMaxAuthorizationCodeLifetime {
+		errs = append(errs, fmt.Errorf("server: config: limits.authorization_code_lifetime must be at most %v under AssuranceProduction (FAPI 2.0 §5.3.2.1)", fapiMaxAuthorizationCodeLifetime))
+	}
+	if l.PushedRequestLifetime >= fapiPushedRequestLifetimeBound {
+		errs = append(errs, fmt.Errorf("server: config: limits.pushed_request_lifetime must be less than %v under AssuranceProduction (FAPI 2.0 §5.3.2.2)", fapiPushedRequestLifetimeBound))
+	}
+	if l.MaxClockSkew < fapiMinClockSkew || l.MaxClockSkew > fapiMaxClockSkew {
+		errs = append(errs, fmt.Errorf("server: config: limits.max_clock_skew must be between %v and %v under AssuranceProduction (FAPI 2.0 §5.3.2.1)", fapiMinClockSkew, fapiMaxClockSkew))
+	}
+	if l.MaxRequestObjectLifetime > fapiMaxRequestObjectLifetime {
+		errs = append(errs, fmt.Errorf("server: config: limits.max_request_object_lifetime must be at most %v under AssuranceProduction", fapiMaxRequestObjectLifetime))
+	}
+	return errors.Join(errs...)
+}
+
 func validateAssurance(cfg Config, cibaEnabled bool) error {
 	if cfg.Assurance != AssuranceDevelopment && cfg.Assurance != AssuranceProduction {
 		return fmt.Errorf("server: config: assurance level is invalid")
@@ -362,6 +404,9 @@ func validateAssurance(cfg Config, cibaEnabled bool) error {
 	}
 	if cfg.Assurance != AssuranceProduction {
 		return nil
+	}
+	if err := validateFAPILimits(cfg.Limits); err != nil {
+		return err
 	}
 	if err := rejectLoopbackURL("issuer", cfg.Issuer); err != nil {
 		return err

@@ -452,7 +452,11 @@ func (s *Server) authenticateClientViaAssertion(ctx context.Context, params map[
 // Issuer Identifier, Token Endpoint URL, or Backchannel Authentication
 // Endpoint URL as values that identify it as an intended audience", and
 // the OIDF FAPI-CIBA-ID1 suite signs every token-endpoint assertion —
-// including refresh — with the token endpoint URL. For such a client,
+// including refresh — with the token endpoint URL. Those endpoints are
+// the backchannel authentication endpoint, and the token endpoint for
+// the CIBA and refresh grants (and revocation); the authorization code
+// and client credentials grants are FAPI 2.0's, and pass nil, so a CIBA
+// client's assertion there must name the issuer like any other. For such a client,
 // the result also includes the URLs actually named in endpoints (those
 // appropriate for the endpoint authenticating this request) and, when
 // it is registered SenderConstrainMTLS, their RFC 8705 §5 mTLS aliases

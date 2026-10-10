@@ -584,6 +584,9 @@ func newHarnessWithApplicationType(t *testing.T, profile server.Profile, allowRe
 		Assurance:  assurance,
 		Deployment: server.DeploymentSingleInstance,
 	}
+	if assurance == server.AssuranceProduction {
+		asProduction(&cfg)
+	}
 	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
 	clients := &fakeClientRepository{clients: map[fapi.ClientID]storage.RegisteredClient{testClientID: client}}
 	deps := server.Dependencies{

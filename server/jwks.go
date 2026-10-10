@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/keys"
 )
 
@@ -100,9 +101,11 @@ const keyCheckTimeout = 10 * time.Second
 // purpose, holding a key that doesn't suit the configured algorithm, or
 // reporting an empty kid fails at startup, naming the purpose and
 // algorithm, instead of as a server_error at the first token request or
-// a failing /jwks. It then builds the whole published JWK Set once, so
-// a kid naming two different keys across purposes or managers is
-// refused too.
+// a failing /jwks. Each key also signs a throwaway payload that is
+// verified against its public key, so a signer that answers with the
+// wrong key or a malformed signature (a misconfigured KMS) fails here
+// too. It then builds the whole published JWK Set once, so a kid naming
+// two different keys across purposes or managers is refused too.
 func (s *Server) checkSigningKeys() error {
 	ctx, cancel := context.WithTimeout(context.Background(), keyCheckTimeout)
 	defer cancel()
@@ -115,9 +118,34 @@ func (s *Server) checkSigningKeys() error {
 		if _, err := keys.PublicJWKS(ctx, []keys.SigningKeyUse{use.SigningKeyUse}, nil); err != nil {
 			return fmt.Errorf("server: dependencies: %s has no usable %v key for %v: %w", use.field, use.Purpose, use.Algorithm, err)
 		}
+		if err := probeSigningKey(ctx, use.SigningKeyUse); err != nil {
+			return fmt.Errorf("server: dependencies: %s can't sign with its %v key for %v: %w", use.field, use.Purpose, use.Algorithm, err)
+		}
 	}
 	if _, err := s.PublicJWKS(ctx); err != nil {
 		return fmt.Errorf("server: dependencies: the JWK Set at endpoints.jwks can't be built: %w", err)
+	}
+	return nil
+}
+
+// probeSigningKey signs a throwaway payload with use's key, through the
+// same path tokens take, and verifies it against the public key the
+// manager reports. The result is discarded.
+func probeSigningKey(ctx context.Context, use keys.SigningKeyUse) error {
+	signer, kid, err := newSignerFromKeys(ctx, use.Manager, use.Purpose, use.Algorithm)
+	if err != nil {
+		return err
+	}
+	signed, err := jose.Sign(signer, jose.Header{Algorithm: use.Algorithm, KeyID: kid}, []byte(`{"fapigo_signing_key_check":true}`))
+	if err != nil {
+		return err
+	}
+	compact, err := jose.ParseCompact(signed)
+	if err != nil {
+		return err
+	}
+	if err := compact.Verify(signer.Public(), use.Algorithm); err != nil {
+		return fmt.Errorf("its signature doesn't verify with the public key it reports: %w", err)
 	}
 	return nil
 }

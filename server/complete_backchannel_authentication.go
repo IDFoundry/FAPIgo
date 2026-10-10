@@ -75,6 +75,14 @@ func (s *Server) CompleteBackchannelAuthentication(ctx context.Context, req Comp
 			s.audit(ctx, AuditEventCompleteBackchannelAuthentication, "", AuditOutcomeFailure, string(err.Code()))
 			return err
 		}
+		// A zero AuthenticationContext{} (one that bypassed
+		// NewAuthenticationContext) would leave the ID token without
+		// auth_time.
+		if result.auth.authTime.IsZero() {
+			err := newError(ErrorServerError, 500, "authorize result carries no authentication context (use NewAuthenticationContext)", nil)
+			s.audit(ctx, AuditEventCompleteBackchannelAuthentication, "", AuditOutcomeFailure, string(err.Code()))
+			return err
+		}
 
 		// OIDC Core §5.5.1.1: an essential "acr" request with values that
 		// the authentication doesn't meet is a failed authentication, so

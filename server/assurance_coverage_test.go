@@ -46,7 +46,7 @@ type bareBackchannelAuthenticationStore struct {
 
 func TestNewRejectsClientsStoreWithoutStoreAssuranceUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
-	cfg.Assurance = server.AssuranceProduction
+	asProduction(&cfg)
 	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
@@ -59,7 +59,7 @@ func TestNewRejectsClientsStoreWithoutStoreAssuranceUnderProduction(t *testing.T
 
 func TestNewRejectsTransactionsStoreWithoutStoreAssuranceUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
-	cfg.Assurance = server.AssuranceProduction
+	asProduction(&cfg)
 	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
@@ -72,7 +72,7 @@ func TestNewRejectsTransactionsStoreWithoutStoreAssuranceUnderProduction(t *test
 
 func TestNewRejectsGrantsStoreWithoutStoreAssuranceUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
-	cfg.Assurance = server.AssuranceProduction
+	asProduction(&cfg)
 	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
@@ -85,7 +85,7 @@ func TestNewRejectsGrantsStoreWithoutStoreAssuranceUnderProduction(t *testing.T)
 
 func TestNewRejectsBackchannelStoreWithoutStoreAssuranceUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
-	cfg.Assurance = server.AssuranceProduction
+	asProduction(&cfg)
 	cfg.Deployment = server.DeploymentSingleInstance
 	backchannelEndpoint, err := fapi.ParseEndpointURL(testBackchannelAuthenticationEndpoint)
 	if err != nil {
@@ -122,7 +122,7 @@ func (s capNonceStore) Capabilities() storage.Capabilities { return s.caps }
 
 func TestNewRejectsNonceStoreWithoutStoreAssuranceUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
-	cfg.Assurance = server.AssuranceProduction
+	asProduction(&cfg)
 	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
@@ -136,7 +136,7 @@ func TestNewRejectsNonceStoreWithoutStoreAssuranceUnderProduction(t *testing.T) 
 
 func TestNewAcceptsAdequateNonceStoreUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
-	cfg.Assurance = server.AssuranceProduction
+	asProduction(&cfg)
 	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
@@ -150,7 +150,7 @@ func TestNewAcceptsAdequateNonceStoreUnderProduction(t *testing.T) {
 
 func TestNewSkipsNonceCheckWhenNoncesNotConfigured(t *testing.T) {
 	cfg := validConfig(t)
-	cfg.Assurance = server.AssuranceProduction
+	asProduction(&cfg)
 	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
@@ -179,7 +179,7 @@ func (s capAccessTokenStore) Capabilities() storage.Capabilities { return s.caps
 
 func TestNewRejectsOpaqueAccessTokenStoreWithoutStoreAssuranceUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
-	cfg.Assurance = server.AssuranceProduction
+	asProduction(&cfg)
 	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
@@ -192,7 +192,7 @@ func TestNewRejectsOpaqueAccessTokenStoreWithoutStoreAssuranceUnderProduction(t 
 
 func TestNewAcceptsAdequateOpaqueAccessTokenStoreUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
-	cfg.Assurance = server.AssuranceProduction
+	asProduction(&cfg)
 	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
@@ -207,7 +207,7 @@ func TestNewAcceptsAdequateOpaqueAccessTokenStoreUnderProduction(t *testing.T) {
 
 func TestNewSkipsAccessTokenCheckForJWTAccessTokens(t *testing.T) {
 	cfg := validConfig(t)
-	cfg.Assurance = server.AssuranceProduction
+	asProduction(&cfg)
 	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies() // AccessTokens: server.JWTAccessTokens{...} by default — no separate store
 	deps.Audit = &fakeAuditSink{}
@@ -230,7 +230,7 @@ func (bareRevocationSink) Revoke(context.Context, string, time.Time) error { ret
 
 func TestNewRejectsRevocationWithoutStoreAssuranceUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
-	cfg.Assurance = server.AssuranceProduction
+	asProduction(&cfg)
 	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
@@ -243,7 +243,7 @@ func TestNewRejectsRevocationWithoutStoreAssuranceUnderProduction(t *testing.T) 
 
 func TestNewAcceptsAdequateRevocationUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
-	cfg.Assurance = server.AssuranceProduction
+	asProduction(&cfg)
 	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
@@ -256,7 +256,7 @@ func TestNewAcceptsAdequateRevocationUnderProduction(t *testing.T) {
 
 func TestNewSkipsRevocationCheckWhenDeclined(t *testing.T) {
 	cfg := validConfig(t)
-	cfg.Assurance = server.AssuranceProduction
+	asProduction(&cfg)
 	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies() // Revocation: server.NoRevocation{} by default
 	deps.Audit = &fakeAuditSink{}
@@ -268,7 +268,7 @@ func TestNewSkipsRevocationCheckWhenDeclined(t *testing.T) {
 
 func TestNewRequiresCrossInstanceConsistentWhenHorizontallyScaled(t *testing.T) {
 	cfg := validConfig(t)
-	cfg.Assurance = server.AssuranceProduction
+	asProduction(&cfg)
 	cfg.Deployment = server.DeploymentHorizontallyScaled
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
@@ -281,7 +281,7 @@ func TestNewRequiresCrossInstanceConsistentWhenHorizontallyScaled(t *testing.T) 
 
 func TestNewAcceptsCrossInstanceConsistentStoreWhenHorizontallyScaled(t *testing.T) {
 	cfg := validConfig(t)
-	cfg.Assurance = server.AssuranceProduction
+	asProduction(&cfg)
 	cfg.Deployment = server.DeploymentHorizontallyScaled
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
@@ -294,7 +294,7 @@ func TestNewAcceptsCrossInstanceConsistentStoreWhenHorizontallyScaled(t *testing
 
 func TestNewIgnoresCrossInstanceConsistentWhenNotHorizontallyScaled(t *testing.T) {
 	cfg := validConfig(t)
-	cfg.Assurance = server.AssuranceProduction
+	asProduction(&cfg)
 	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
@@ -332,7 +332,7 @@ func (s capClientEncryptionKeySource) Capabilities() keys.KeySourceCapabilities 
 
 func TestNewRejectsClientKeysWithoutKeySourceAssuranceUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
-	cfg.Assurance = server.AssuranceProduction
+	asProduction(&cfg)
 	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
@@ -345,7 +345,7 @@ func TestNewRejectsClientKeysWithoutKeySourceAssuranceUnderProduction(t *testing
 
 func TestNewRejectsClientKeysNotLiveFetchHardenedUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
-	cfg.Assurance = server.AssuranceProduction
+	asProduction(&cfg)
 	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
@@ -358,7 +358,7 @@ func TestNewRejectsClientKeysNotLiveFetchHardenedUnderProduction(t *testing.T) {
 
 func TestNewAcceptsLiveFetchHardenedClientKeysUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
-	cfg.Assurance = server.AssuranceProduction
+	asProduction(&cfg)
 	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
@@ -375,7 +375,7 @@ func TestNewAcceptsLiveFetchHardenedClientKeysUnderProduction(t *testing.T) {
 // algorithm is configured here, so New never requires it at all.
 func TestNewSkipsClientEncryptionKeysAssuranceCheckWhenNotConfigured(t *testing.T) {
 	cfg := validConfig(t)
-	cfg.Assurance = server.AssuranceProduction
+	asProduction(&cfg)
 	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = &fakeAuditSink{}
@@ -387,7 +387,7 @@ func TestNewSkipsClientEncryptionKeysAssuranceCheckWhenNotConfigured(t *testing.
 
 func TestNewRejectsClientEncryptionKeysWithoutKeySourceAssuranceUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
-	cfg.Assurance = server.AssuranceProduction
+	asProduction(&cfg)
 	cfg.Deployment = server.DeploymentSingleInstance
 	cfg.Algorithms.IDTokenEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.RSAOAEP256}
 	cfg.Algorithms.IDTokenEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{fapi.A256GCM}
@@ -402,7 +402,7 @@ func TestNewRejectsClientEncryptionKeysWithoutKeySourceAssuranceUnderProduction(
 
 func TestNewAcceptsLiveFetchHardenedClientEncryptionKeysUnderProduction(t *testing.T) {
 	cfg := validConfig(t)
-	cfg.Assurance = server.AssuranceProduction
+	asProduction(&cfg)
 	cfg.Deployment = server.DeploymentSingleInstance
 	cfg.Algorithms.IDTokenEncryptionKeyManagement = server.KeyManagementAlgorithmSet{fapi.RSAOAEP256}
 	cfg.Algorithms.IDTokenEncryptionContentEncryption = server.ContentEncryptionAlgorithmSet{fapi.A256GCM}
@@ -423,7 +423,7 @@ func TestNewAcceptsLiveFetchHardenedClientEncryptionKeysUnderProduction(t *testi
 func TestNewRequiresDeploymentUnderProduction(t *testing.T) {
 	t.Run("production refuses zero", func(t *testing.T) {
 		cfg := validConfig(t)
-		cfg.Assurance = server.AssuranceProduction
+		asProduction(&cfg)
 		cfg.Deployment = 0
 		deps := validDependencies()
 		deps.Audit = &fakeAuditSink{}
@@ -461,7 +461,7 @@ func TestNewRequiresDeploymentUnderProduction(t *testing.T) {
 // missing declaration.
 func TestNewReportsEveryProductionRefusal(t *testing.T) {
 	cfg := validConfig(t)
-	cfg.Assurance = server.AssuranceProduction
+	asProduction(&cfg)
 	cfg.Deployment = server.DeploymentSingleInstance
 	deps := validDependencies()
 	deps.Audit = nil

@@ -216,10 +216,12 @@ func (o Object) Verify(ctx context.Context, pub crypto.PublicKey, policy VerifyP
 		return VerifiedObject{}, ErrMissingJTI
 	}
 	if policy.Replay != nil && c.JTI != "" {
-		// The TTL must cover the same skew the acceptance check above
-		// grants (line 171), or a replay in (ExpiresAt, ExpiresAt+skew]
-		// would still be accepted but no longer be in the replay store.
-		if err := policy.Replay.UseOnce(ctx, c.JTI, c.ExpiresAt.Add(policy.MaxClockSkew)); err != nil {
+		// The TTL must cover the skew the acceptance check above grants
+		// (ExpiresAt+skew) on any instance sharing the store, whose
+		// clock may run up to another MaxClockSkew behind this one's:
+		// 2×skew, or a replay there would be accepted after the record
+		// lapsed.
+		if err := policy.Replay.UseOnce(ctx, c.JTI, c.ExpiresAt.Add(2*policy.MaxClockSkew)); err != nil {
 			return VerifiedObject{}, fmt.Errorf("requestobject: replay check: %w", err)
 		}
 	}

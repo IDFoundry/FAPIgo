@@ -29,6 +29,9 @@ type keyManagerSigner struct {
 	purpose   keys.SigningPurpose
 	algorithm fapi.SignatureAlgorithm
 	publicKey crypto.PublicKey
+	// keyID is the kid PublicKey reported for publicKey, which the
+	// token's header names.
+	keyID string
 }
 
 func (s keyManagerSigner) Public() crypto.PublicKey { return s.publicKey }
@@ -37,6 +40,12 @@ func (s keyManagerSigner) Sign(_ io.Reader, digestOrMessage []byte, _ crypto.Sig
 	sig, err := s.manager.Sign(s.ctx, keys.NewSigningRequest(s.purpose, s.algorithm, digestOrMessage))
 	if err != nil {
 		return nil, err
+	}
+	// A KeyManager that signed with a key other than the one PublicKey
+	// just reported (a rotation in between) would otherwise produce a
+	// token whose header names the wrong key.
+	if sig.KeyID != "" && sig.KeyID != s.keyID {
+		return nil, fmt.Errorf("client: key manager signed with key %q, not the current key %q it reported for %v", sig.KeyID, s.keyID, s.purpose)
 	}
 	return sig.Value, nil
 }
@@ -62,7 +71,7 @@ func (c *Client) newSigner(ctx context.Context, purpose keys.SigningPurpose, alg
 	}
 	signer := keyManagerSigner{
 		ctx: ctx, manager: c.deps.Keys, purpose: purpose,
-		algorithm: algorithm, publicKey: info.PublicKey,
+		algorithm: algorithm, publicKey: info.PublicKey, keyID: info.KeyID,
 	}
 	return signer, info.KeyID, nil
 }

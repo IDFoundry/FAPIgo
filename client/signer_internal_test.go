@@ -24,6 +24,18 @@ func (m *recordingKeyManager) PublicKey(context.Context, keys.SigningPurpose, fa
 	return keys.PublicKeyInfo{}, nil
 }
 
+// TestKeyManagerSignerRefusesAnotherKeysSignature: a signature made
+// with a key other than the one whose kid the header names is refused.
+func TestKeyManagerSignerRefusesAnotherKeysSignature(t *testing.T) {
+	signer := keyManagerSigner{
+		ctx: context.Background(), manager: &recordingKeyManager{},
+		purpose: keys.ClientAuthentication, algorithm: fapi.ES256, keyID: "old",
+	}
+	if _, err := signer.Sign(nil, []byte("digest"), crypto.SHA256); err == nil {
+		t.Fatal("Sign accepted a signature labelled with another key")
+	}
+}
+
 // TestKeyManagerSignerRoutesByAlgorithm confirms keyManagerSigner.Sign
 // puts crypto.Signer.Sign's incoming bytes into SigningInput for EdDSA
 // (RFC 8037 §3.1: pure EdDSA over the raw message, signaled by
@@ -43,7 +55,7 @@ func TestKeyManagerSignerRoutesByAlgorithm(t *testing.T) {
 			manager := &recordingKeyManager{}
 			signer := keyManagerSigner{
 				ctx: context.Background(), manager: manager,
-				purpose: keys.ClientAuthentication, algorithm: c.algorithm,
+				purpose: keys.ClientAuthentication, algorithm: c.algorithm, keyID: "kid",
 			}
 			input := []byte("input bytes")
 

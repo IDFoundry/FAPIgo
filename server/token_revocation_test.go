@@ -123,6 +123,31 @@ func TestRevokeTokenRevokesTheGrant(t *testing.T) {
 	}
 }
 
+// TestRevokeTokenRevokesTheCodeGrant covers a refresh token from the
+// authorization code flow with no GrantID: revoking it revokes the code
+// grant it came from, as code reuse does, so the access tokens issued
+// under it stop working too (RFC 7009 §2.1).
+func TestRevokeTokenRevokesTheCodeGrant(t *testing.T) {
+	attesterKey := generateKey(t)
+	h := newRevocationHarness(t, attesterKey)
+	owner := &attestedInstance{t: t, h: h, attesterKey: attesterKey, instanceKey: generateKey(t)}
+	refreshToken := owner.issueRefreshToken()
+	if err := owner.revoke(formParam("token", refreshToken)); err != nil {
+		t.Fatalf("RevokeToken: %v", err)
+	}
+	h.revocation.mu.Lock()
+	defer h.revocation.mu.Unlock()
+	var codeGrants int
+	for key := range h.revocation.until {
+		if strings.HasPrefix(key, "code-grant:") {
+			codeGrants++
+		}
+	}
+	if codeGrants != 1 {
+		t.Errorf("revoked %d code grants, want the refresh token's one", codeGrants)
+	}
+}
+
 // TestRevokeTokenRefusals covers every request RevokeToken answers with
 // an error rather than 200, each recorded as a failure.
 func TestRevokeTokenRefusals(t *testing.T) {

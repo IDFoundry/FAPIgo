@@ -172,7 +172,6 @@ func TestCompleteAuthorizationEnforcesPromptLogin(t *testing.T) {
 		{name: "existing session", prompt: "login", authAgo: time.Minute, wantError: "login_required"},
 		{name: "just past the skew", prompt: "login", authAgo: 6 * time.Second, wantError: "login_required"},
 		{name: "with consent too", prompt: "consent login", authAgo: time.Hour, wantError: "login_required"},
-		{name: "no authentication time", prompt: "login", zeroAuth: true, wantError: "login_required"},
 		{name: "record without push time", prompt: "login", authAgo: time.Hour, legacy: true},
 		{name: "prompt=consent", prompt: "consent", authAgo: time.Hour},
 		{name: "prompt=none", prompt: "none", authAgo: time.Hour},
@@ -189,7 +188,6 @@ type promptLoginCase struct {
 	prompt    string
 	authAgo   time.Duration
 	legacy    bool
-	zeroAuth  bool
 	wantError string
 }
 
@@ -206,11 +204,6 @@ func runPromptLoginCase(t *testing.T, tc promptLoginCase) {
 		forgetPushedAt(t, h)
 	}
 	result := authorizedAt(t, h.now.Add(-tc.authAgo))
-	if tc.zeroAuth {
-		subjectID, _ := server.NewSubjectID("user-1")
-		subject, _ := server.NewAuthenticatedSubject(subjectID)
-		result = server.Authorize(subject, server.AuthenticationContext{}, server.GrantedAuthorization{Scope: []string{"openid", "accounts"}})
-	}
 	completed, err := h.server.CompleteAuthorization(context.Background(), server.CompleteAuthorizationRequest{Handle: handle, Result: result})
 	if err != nil {
 		t.Fatalf("CompleteAuthorization: %v", err)

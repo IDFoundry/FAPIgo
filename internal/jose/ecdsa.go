@@ -29,8 +29,21 @@ func signECDSA(signer crypto.Signer, hash []byte) ([]byte, error) {
 		return nil, fmt.Errorf("jose: ecdsa sign: %w", err)
 	}
 	var parsed struct{ R, S *big.Int }
-	if _, err := asn1.Unmarshal(der, &parsed); err != nil {
+	rest, err := asn1.Unmarshal(der, &parsed)
+	if err != nil {
 		return nil, fmt.Errorf("jose: decode ecdsa signature: %w", err)
+	}
+	// The signer is the embedder's (a KMS, an HSM): refuse what no valid
+	// ECDSA signature can be, rather than panic in FillBytes on an
+	// oversized value or issue a token whose signature can't verify.
+	if len(rest) != 0 {
+		return nil, fmt.Errorf("jose: decode ecdsa signature: trailing data")
+	}
+	n := pub.Curve.Params().N
+	for _, v := range [...]*big.Int{parsed.R, parsed.S} {
+		if v == nil || v.Sign() <= 0 || v.Cmp(n) >= 0 {
+			return nil, fmt.Errorf("jose: ecdsa signer returned a signature value out of range")
+		}
 	}
 
 	out := make([]byte, 2*p256CoordinateSize)

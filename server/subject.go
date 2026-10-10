@@ -52,7 +52,10 @@ func NewAuthenticatedSubject(id SubjectID) (AuthenticatedSubject, error) {
 func (a AuthenticatedSubject) ID() SubjectID { return a.id }
 
 // AuthenticationContext describes how and when the resource owner
-// authenticated.
+// authenticated. Build it with NewAuthenticationContext: Authorize with
+// a zero AuthenticationContext{} is refused by CompleteAuthorization and
+// CompleteBackchannelAuthentication (server_error), since it says
+// nothing about when the user authenticated.
 type AuthenticationContext struct {
 	authTime time.Time
 	acr      string

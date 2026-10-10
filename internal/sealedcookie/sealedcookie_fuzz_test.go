@@ -1,7 +1,6 @@
 package sealedcookie
 
 import (
-	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -13,7 +12,11 @@ import (
 // worker seals afresh with its own nonce, so the cookie strings
 // themselves can't be compared.)
 func FuzzJarOpen(f *testing.F) {
-	jar, err := New("fuzz", [][]byte{bytes.Repeat([]byte{7}, 32)}, "__Host-fuzz", "/")
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i + 1)
+	}
+	jar, err := New("fuzz", [][]byte{key}, "__Host-fuzz", "/")
 	if err != nil {
 		f.Fatal(err)
 	}

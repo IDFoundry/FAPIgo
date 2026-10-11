@@ -135,7 +135,7 @@ func (w *World) newIdentityProvider(c country, ta *entity) (*identityProvider, e
 			// A refused service only sees invalid_client; the reason is
 			// for the identity provider's operator.
 			OnResolutionFailure: func(_ context.Context, clientID fapi.ClientID, err error) {
-				log.Printf("%s refused automatic registration of %s: %v", c.idpName, clientID, err)
+				log.Printf("%s refused automatic registration of %q: %q", c.idpName, clientID, err)
 			},
 		},
 	}

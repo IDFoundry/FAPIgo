@@ -177,7 +177,7 @@ var templates = func() map[string]*template.Template {
 func (w *World) render(rw http.ResponseWriter, name string, data any) {
 	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := templates[name].ExecuteTemplate(rw, name, data); err != nil {
-		log.Printf("render %s: %v", name, err)
+		log.Printf("render %s: %q", name, err)
 	}
 }
 
@@ -189,6 +189,6 @@ func (w *World) renderError(rw http.ResponseWriter, host string, status int, hea
 	rw.WriteHeader(status)
 	data := errorPage{Page: w.page("Something went wrong", host), Heading: heading, Detail: strings.TrimSpace(detail)}
 	if err := templates["error"].ExecuteTemplate(rw, "error", data); err != nil {
-		log.Printf("render error page: %v", err)
+		log.Printf("render error page: %q", err)
 	}
 }

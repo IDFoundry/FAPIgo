@@ -13,7 +13,8 @@ func TestBackchannelGrantIDIsDomainSeparated(t *testing.T) {
 	if BackchannelGrantID(hash) == CodeGrantID(hash) {
 		t.Fatal("BackchannelGrantID equals CodeGrantID for the same hash")
 	}
-	if BackchannelGrantID(hash) != BackchannelGrantID(hash) {
+	again := sha256.Sum256([]byte("same input"))
+	if BackchannelGrantID(hash) != BackchannelGrantID(again) {
 		t.Fatal("BackchannelGrantID isn't deterministic")
 	}
 	if BackchannelGrantID(hash) == BackchannelGrantID(sha256.Sum256([]byte("other input"))) {

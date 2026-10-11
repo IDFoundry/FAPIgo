@@ -139,8 +139,11 @@ func claimsSubValue(params map[string]json.RawMessage) (string, error) {
 	return subject, nil
 }
 
-// claimsLocationSubValue returns the "sub" entry's "value" among one
-// location's claim requests, "" when there is none.
+// claimsLocationSubValue returns the end user one location's "sub"
+// entry names, "" when it names none: its "value", or the single
+// member of its "values". A "values" naming several users is refused
+// rather than ignored: the request names its end user, so it must name
+// one, and answering it for whoever logs in would ignore it.
 func claimsLocationSubValue(requests map[string]json.RawMessage, location string) (string, error) {
 	raw, ok := requests["sub"]
 	if !ok || isJSONNull(raw) {
@@ -150,18 +153,52 @@ func claimsLocationSubValue(requests map[string]json.RawMessage, location string
 	if err := json.Unmarshal(raw, &entry); err != nil || entry == nil {
 		return "", errors.New(`claims: the ` + location + ` "sub" entry must be a JSON object or null`)
 	}
-	if err := checkMemberCase(entry, `claims: the `+location+` "sub" entry's`, "essential", "value", "values"); err != nil {
+	prefix := `claims: the ` + location + ` "sub" entry's`
+	if err := checkMemberCase(entry, prefix, "essential", "value", "values"); err != nil {
 		return "", err
 	}
+	value, err := subEntryValue(entry, prefix)
+	if err != nil {
+		return "", err
+	}
+	values, err := subEntryValues(entry, prefix)
+	if err != nil {
+		return "", err
+	}
+	if value != "" && values != "" && value != values {
+		return "", errors.New(prefix + ` "value" and "values" name different end users`)
+	}
+	if value != "" {
+		return value, nil
+	}
+	return values, nil
+}
+
+// subEntryValue returns a "sub" entry's "value", "" when it has none.
+func subEntryValue(entry map[string]json.RawMessage, prefix string) (string, error) {
 	v, ok := entry["value"]
 	if !ok {
 		return "", nil
 	}
 	var value string
 	if err := json.Unmarshal(v, &value); err != nil || value == "" {
-		return "", errors.New(`claims: the ` + location + ` "sub" entry's "value" must be a non-empty string`)
+		return "", errors.New(prefix + ` "value" must be a non-empty string`)
 	}
 	return value, nil
+}
+
+// subEntryValues returns the one end user a "sub" entry's "values"
+// names, "" when it has none.
+func subEntryValues(entry map[string]json.RawMessage, prefix string) (string, error) {
+	v, ok := entry["values"]
+	if !ok {
+		return "", nil
+	}
+	var values []string
+	if err := json.Unmarshal(v, &values); err != nil || len(values) != 1 || values[0] == "" {
+		return "", errors.New(prefix + ` "values" must be an array of exactly one non-empty string`)
+	}
+	return values[0], nil
 }
 
 // meetsRequiredSubject reports whether subject is the end user required

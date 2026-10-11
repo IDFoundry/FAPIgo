@@ -159,24 +159,31 @@ func TestCompleteAuthorizationEnforcesRequiredSubject(t *testing.T) {
 			if tc.legacy {
 				forgetRequiredSubject(t, h)
 			}
-			got := completeAs(t, h, required, tc.user)
-			if got["error"] != tc.wantError {
-				t.Errorf("error = %q (%s), want %q", got["error"], got["error_description"], tc.wantError)
-			}
-			if (got["code"] != "") != (tc.wantError == "") {
-				t.Errorf("code present = %v, want %v", got["code"] != "", tc.wantError == "")
-			}
-			if tc.wantError == "" {
-				return
-			}
-			if len(h.grants.all()) != 0 {
-				t.Error("a code was stored for a refused completion")
-			}
-			last := h.audit.events[len(h.audit.events)-1]
-			if last.Type != server.AuditEventCompleteAuthorization || last.Outcome != server.AuditOutcomeFailure {
-				t.Errorf("last audit = %v/%v, want a failed completion", last.Type, last.Outcome)
-			}
+			assertCompletionOutcome(t, h, completeAs(t, h, required, tc.user), tc.wantError)
 		})
+	}
+}
+
+// assertCompletionOutcome checks a completion's redirect parameters:
+// a code when wantError is empty, otherwise that error with no code,
+// no stored grant and a failed completion audited.
+func assertCompletionOutcome(t *testing.T, h harness, got map[string]string, wantError string) {
+	t.Helper()
+	if got["error"] != wantError {
+		t.Errorf("error = %q (%s), want %q", got["error"], got["error_description"], wantError)
+	}
+	if (got["code"] != "") != (wantError == "") {
+		t.Errorf("code present = %v, want %v", got["code"] != "", wantError == "")
+	}
+	if wantError == "" {
+		return
+	}
+	if len(h.grants.all()) != 0 {
+		t.Error("a code was stored for a refused completion")
+	}
+	last := h.audit.events[len(h.audit.events)-1]
+	if last.Type != server.AuditEventCompleteAuthorization || last.Outcome != server.AuditOutcomeFailure {
+		t.Errorf("last audit = %v/%v, want a failed completion", last.Type, last.Outcome)
 	}
 }
 
@@ -363,37 +370,59 @@ func TestCIBAEnforcesRequiredSubject(t *testing.T) {
 				params["claims"] = json.RawMessage(subClaims("id_token", "user-1"))
 			}
 			required := beginBackchannel(t, h, params)
-			if required.Interaction.RequiredSubject != "user-1" {
-				t.Errorf("RequiredSubject = %q, want user-1", required.Interaction.RequiredSubject)
-			}
-			looked, err := h.server.LookupBackchannelInteraction(context.Background(), required.Handle)
-			if err != nil || looked.RequiredSubject != "user-1" {
-				t.Errorf("LookupBackchannelInteraction = %q, %v; want user-1", looked.RequiredSubject, err)
-			}
+			assertBackchannelRequiredSubject(t, h, required, "user-1")
 			if err := h.server.CompleteBackchannelAuthentication(context.Background(), server.CompleteBackchannelAuthenticationRequest{
 				Handle: required.Handle, Result: authorizedAs(t, h, tc.user),
 			}); err != nil {
 				t.Fatalf("CompleteBackchannelAuthentication: %v", err)
 			}
-			result, err := h.server.ExchangeBackchannelAuthentication(context.Background(), server.BackchannelTokenExchangeRequest{
-				HTTP: server.FormRequest{Parameters: []server.FormParameter{
-					formParam("client_assertion", h.clientAssertion(t)),
-					formParam("client_assertion_type", clientassertion.AssertionType),
-					formParam("grant_type", server.CIBAGrantType),
-					formParam("auth_req_id", required.AuthReqID.String()),
-				}},
-				DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
-			})
-			if tc.wantErr {
-				if code := serverErrorCode(t, err); code != server.ErrorAccessDenied {
-					t.Fatalf("exchange error code = %q, want access_denied", code)
-				}
-				return
-			}
-			if err != nil || result.AccessToken.Reveal() == "" {
-				t.Fatalf("exchange = %v, want tokens", err)
-			}
+			result, err := exchangeCIBA(t, h, required.AuthReqID.String())
+			assertTokensOrAccessDenied(t, result, err, tc.wantErr)
 		})
+	}
+}
+
+// assertBackchannelRequiredSubject checks that both the interaction
+// BeginBackchannelAuthentication returned and a later lookup name want
+// as the required subject.
+func assertBackchannelRequiredSubject(t *testing.T, h harness, required server.BackchannelInteractionRequired, want string) {
+	t.Helper()
+	if required.Interaction.RequiredSubject != want {
+		t.Errorf("RequiredSubject = %q, want %q", required.Interaction.RequiredSubject, want)
+	}
+	looked, err := h.server.LookupBackchannelInteraction(context.Background(), required.Handle)
+	if err != nil || looked.RequiredSubject != want {
+		t.Errorf("LookupBackchannelInteraction = %q, %v; want %q", looked.RequiredSubject, err, want)
+	}
+}
+
+// exchangeCIBA polls the token endpoint for authReqID, as the harness's
+// client with a fresh DPoP key.
+func exchangeCIBA(t *testing.T, h harness, authReqID string) (server.TokenResult, error) {
+	t.Helper()
+	return h.server.ExchangeBackchannelAuthentication(context.Background(), server.BackchannelTokenExchangeRequest{
+		HTTP: server.FormRequest{Parameters: []server.FormParameter{
+			formParam("client_assertion", h.clientAssertion(t)),
+			formParam("client_assertion_type", clientassertion.AssertionType),
+			formParam("grant_type", server.CIBAGrantType),
+			formParam("auth_req_id", authReqID),
+		}},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
+	})
+}
+
+// assertTokensOrAccessDenied checks a CIBA poll: access_denied when
+// wantErr, tokens otherwise.
+func assertTokensOrAccessDenied(t *testing.T, result server.TokenResult, err error, wantErr bool) {
+	t.Helper()
+	if wantErr {
+		if code := serverErrorCode(t, err); code != server.ErrorAccessDenied {
+			t.Fatalf("exchange error code = %q, want access_denied", code)
+		}
+		return
+	}
+	if err != nil || result.AccessToken.Reveal() == "" {
+		t.Fatalf("exchange = %v, want tokens", err)
 	}
 }
 

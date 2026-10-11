@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 
+	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -70,95 +71,9 @@ func (s *Server) CompleteBackchannelAuthentication(ctx context.Context, req Comp
 
 	switch result := req.Result.(type) {
 	case authorizeResult:
-		if result.subject.id.value == "" {
-			err := newError(ErrorServerError, 500, "authorize result carries no authenticated subject", nil)
-			s.audit(ctx, AuditEventCompleteBackchannelAuthentication, "", AuditOutcomeFailure, string(err.Code()))
-			return err
+		if failErr := s.approveBackchannelAuthentication(ctx, pending.ClientID, request, result, &decision); failErr != nil {
+			return failErr
 		}
-		// A zero AuthenticationContext{} (one that bypassed
-		// NewAuthenticationContext) would leave the ID token without
-		// auth_time.
-		if result.auth.authTime.IsZero() {
-			err := newError(ErrorServerError, 500, "authorize result carries no authentication context (use NewAuthenticationContext)", nil)
-			s.audit(ctx, AuditEventCompleteBackchannelAuthentication, "", AuditOutcomeFailure, string(err.Code()))
-			return err
-		}
-
-		// OIDC Core §5.5.1.1: an essential "acr" request with values that
-		// the authentication doesn't meet is a failed authentication, so
-		// record it as one and issue nothing.
-		if !meetsEssentialACR(request.EssentialACRValues, result.auth.acr) {
-			decision.Status = storage.BackchannelAuthenticationAuthenticationFailed
-			decision.Reason = "the user's authentication doesn't meet the requested essential acr"
-			break
-		}
-
-		// OIDC Core §5.5.1: the user an id_token_hint or "sub" value
-		// named must be the one authenticated; anyone else is a failed
-		// authentication.
-		if !meetsRequiredSubject(request.RequiredSubject, result.subject) {
-			decision.Status = storage.BackchannelAuthenticationAuthenticationFailed
-			decision.Reason = "the authenticated user isn't the one the request named"
-			break
-		}
-
-		requestedScope, _ := jsonString(request.Parameters, "scope")
-		if scopeErr := validateGrantedScopeSubset(result.grant.Scope, requestedScope); scopeErr != nil {
-			wrapped := newError(ErrorInvalidRequest, 400, "granted scope exceeds requested scope", scopeErr)
-			s.audit(ctx, AuditEventCompleteBackchannelAuthentication, pending.ClientID, AuditOutcomeFailure, string(wrapped.Code()))
-			return wrapped
-		}
-
-		if claimsErr := validateGrantedIDTokenClaims(result.grant.IDTokenClaims, s.cfg.Limits.MaxIDTokenClaimsBytes); claimsErr != nil {
-			wrapped := newError(ErrorInvalidRequest, 400, "granted ID token claims are not valid", claimsErr)
-			s.audit(ctx, AuditEventCompleteBackchannelAuthentication, pending.ClientID, AuditOutcomeFailure, string(wrapped.Code()))
-			return wrapped
-		}
-		if idErr := s.validateGrantID(result.grant.GrantID); idErr != nil {
-			wrapped := newError(ErrorInvalidRequest, 400, "the grant ID is not valid", idErr)
-			s.audit(ctx, AuditEventCompleteBackchannelAuthentication, pending.ClientID, AuditOutcomeFailure, string(wrapped.Code()))
-			return wrapped
-		}
-
-		var grantedAuthorizationDetails json.RawMessage
-		if len(result.grant.AuthorizationDetails) > 0 {
-			granted, validateErr := s.validateGrantedAuthorizationDetails(request.Parameters[authorizationDetailsParameter], result.grant.AuthorizationDetails)
-			if validateErr != nil {
-				wrapped := newError(ErrorInvalidRequest, 400, "granted authorization_details exceeds what was requested", validateErr)
-				s.audit(ctx, AuditEventCompleteBackchannelAuthentication, pending.ClientID, AuditOutcomeFailure, string(wrapped.Code()))
-				return wrapped
-			}
-			grantedAuthorizationDetails = granted
-		}
-		idTokenClaims, userinfoClaims, claimsErr := approvedClaimNames(request.Parameters, result.grant.ApprovedIdentityClaims)
-		if claimsErr != nil {
-			wrapped := newError(ErrorInvalidRequest, 400, "approved identity claims exceed what was requested", claimsErr)
-			s.audit(ctx, AuditEventCompleteBackchannelAuthentication, pending.ClientID, AuditOutcomeFailure, string(wrapped.Code()))
-			return wrapped
-		}
-		decidedAt := s.deps.Clock.Now()
-		grant, encodeErr := encodeGrantRecord(grantRecord{
-			IssuedAt:                &decidedAt,
-			DPoPJKT:                 request.DPoPJKT,
-			Subject:                 result.subject.ID().String(),
-			Scope:                   result.grant.Scope,
-			AuthTime:                result.auth.authTime,
-			ACR:                     result.auth.acr,
-			AMR:                     result.auth.amr,
-			AuthorizationDetails:    grantedAuthorizationDetails,
-			TokenClaims:             request.TokenClaims,
-			RequestedIDTokenClaims:  idTokenClaims,
-			RequestedUserinfoClaims: userinfoClaims,
-			IDTokenClaims:           result.grant.IDTokenClaims,
-			GrantID:                 result.grant.GrantID,
-		})
-		if encodeErr != nil {
-			wrapped := newError(ErrorServerError, 500, "failed to encode backchannel authentication grant", encodeErr)
-			s.audit(ctx, AuditEventCompleteBackchannelAuthentication, pending.ClientID, AuditOutcomeFailure, string(wrapped.Code()))
-			return wrapped
-		}
-		decision.Status = storage.BackchannelAuthenticationApproved
-		decision.Grant = grant
 	case denyResult:
 		decision.Status = storage.BackchannelAuthenticationDenied
 		decision.Reason = result.reason
@@ -187,18 +102,123 @@ func (s *Server) CompleteBackchannelAuthentication(ctx context.Context, req Comp
 	// call
 	// (mirrors the existing _ = s.deps.Revocation.Revoke(...) precedent
 	// in server/token.go).
-	if decided.DeliveryMode == "ping" {
-		if regClient, resolveErr := s.deps.Clients.ResolveClient(ctx, decided.ClientID); resolveErr == nil {
-			if endpoint := regClient.BackchannelClientNotificationEndpoint(); !endpoint.IsZero() {
-				_ = s.deps.BackchannelNotifier.Notify(ctx, BackchannelNotification{
-					Endpoint:                endpoint,
-					ClientNotificationToken: decided.ClientNotificationToken,
-					AuthReqID:               decided.AuthReqID,
-				})
-			}
-		}
-	}
+	s.notifyBackchannelPing(ctx, decided)
 
 	s.audit(ctx, AuditEventCompleteBackchannelAuthentication, decided.ClientID, AuditOutcomeSuccess, "")
 	return nil
+}
+
+// approveBackchannelAuthentication records an Authorize for the pending
+// request in decision: approved, with its grant, or a failed
+// authentication when it doesn't meet the request's essential acr or
+// required subject. A result the request doesn't allow is an *Error,
+// already audited.
+func (s *Server) approveBackchannelAuthentication(ctx context.Context, clientID fapi.ClientID, request requestRecord, result authorizeResult, decision *storage.DecideBackchannelAuthentication) *Error {
+	if result.subject.id.value == "" {
+		err := newError(ErrorServerError, 500, "authorize result carries no authenticated subject", nil)
+		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, "", AuditOutcomeFailure, string(err.Code()))
+		return err
+	}
+	// A zero AuthenticationContext{} (one that bypassed
+	// NewAuthenticationContext) would leave the ID token without
+	// auth_time.
+	if result.auth.authTime.IsZero() {
+		err := newError(ErrorServerError, 500, "authorize result carries no authentication context (use NewAuthenticationContext)", nil)
+		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, "", AuditOutcomeFailure, string(err.Code()))
+		return err
+	}
+
+	// OIDC Core §5.5.1.1: an essential "acr" request with values that
+	// the authentication doesn't meet is a failed authentication, so
+	// record it as one and issue nothing.
+	if !meetsEssentialACR(request.EssentialACRValues, result.auth.acr) {
+		decision.Status = storage.BackchannelAuthenticationAuthenticationFailed
+		decision.Reason = "the user's authentication doesn't meet the requested essential acr"
+		return nil
+	}
+
+	// OIDC Core §5.5.1: the user an id_token_hint or "sub" value
+	// named must be the one authenticated; anyone else is a failed
+	// authentication.
+	if !meetsRequiredSubject(request.RequiredSubject, result.subject) {
+		decision.Status = storage.BackchannelAuthenticationAuthenticationFailed
+		decision.Reason = "the authenticated user isn't the one the request named"
+		return nil
+	}
+
+	requestedScope, _ := jsonString(request.Parameters, "scope")
+	if scopeErr := validateGrantedScopeSubset(result.grant.Scope, requestedScope); scopeErr != nil {
+		wrapped := newError(ErrorInvalidRequest, 400, "granted scope exceeds requested scope", scopeErr)
+		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, clientID, AuditOutcomeFailure, string(wrapped.Code()))
+		return wrapped
+	}
+
+	if claimsErr := validateGrantedIDTokenClaims(result.grant.IDTokenClaims, s.cfg.Limits.MaxIDTokenClaimsBytes); claimsErr != nil {
+		wrapped := newError(ErrorInvalidRequest, 400, "granted ID token claims are not valid", claimsErr)
+		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, clientID, AuditOutcomeFailure, string(wrapped.Code()))
+		return wrapped
+	}
+	if idErr := s.validateGrantID(result.grant.GrantID); idErr != nil {
+		wrapped := newError(ErrorInvalidRequest, 400, "the grant ID is not valid", idErr)
+		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, clientID, AuditOutcomeFailure, string(wrapped.Code()))
+		return wrapped
+	}
+
+	var grantedAuthorizationDetails json.RawMessage
+	if len(result.grant.AuthorizationDetails) > 0 {
+		granted, validateErr := s.validateGrantedAuthorizationDetails(request.Parameters[authorizationDetailsParameter], result.grant.AuthorizationDetails)
+		if validateErr != nil {
+			wrapped := newError(ErrorInvalidRequest, 400, "granted authorization_details exceeds what was requested", validateErr)
+			s.audit(ctx, AuditEventCompleteBackchannelAuthentication, clientID, AuditOutcomeFailure, string(wrapped.Code()))
+			return wrapped
+		}
+		grantedAuthorizationDetails = granted
+	}
+	idTokenClaims, userinfoClaims, claimsErr := approvedClaimNames(request.Parameters, result.grant.ApprovedIdentityClaims)
+	if claimsErr != nil {
+		wrapped := newError(ErrorInvalidRequest, 400, "approved identity claims exceed what was requested", claimsErr)
+		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, clientID, AuditOutcomeFailure, string(wrapped.Code()))
+		return wrapped
+	}
+	decidedAt := s.deps.Clock.Now()
+	grant, encodeErr := encodeGrantRecord(grantRecord{
+		IssuedAt:                &decidedAt,
+		DPoPJKT:                 request.DPoPJKT,
+		Subject:                 result.subject.ID().String(),
+		Scope:                   result.grant.Scope,
+		AuthTime:                result.auth.authTime,
+		ACR:                     result.auth.acr,
+		AMR:                     result.auth.amr,
+		AuthorizationDetails:    grantedAuthorizationDetails,
+		TokenClaims:             request.TokenClaims,
+		RequestedIDTokenClaims:  idTokenClaims,
+		RequestedUserinfoClaims: userinfoClaims,
+		IDTokenClaims:           result.grant.IDTokenClaims,
+		GrantID:                 result.grant.GrantID,
+	})
+	if encodeErr != nil {
+		wrapped := newError(ErrorServerError, 500, "failed to encode backchannel authentication grant", encodeErr)
+		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, clientID, AuditOutcomeFailure, string(wrapped.Code()))
+		return wrapped
+	}
+	decision.Status = storage.BackchannelAuthenticationApproved
+	decision.Grant = grant
+	return nil
+}
+
+// notifyBackchannelPing tells a ping client its request was decided,
+// whatever the outcome, best-effort: a ping client may also poll.
+func (s *Server) notifyBackchannelPing(ctx context.Context, decided storage.DecidedBackchannelAuthentication) {
+	if decided.DeliveryMode != "ping" {
+		return
+	}
+	if regClient, resolveErr := s.deps.Clients.ResolveClient(ctx, decided.ClientID); resolveErr == nil {
+		if endpoint := regClient.BackchannelClientNotificationEndpoint(); !endpoint.IsZero() {
+			_ = s.deps.BackchannelNotifier.Notify(ctx, BackchannelNotification{
+				Endpoint:                endpoint,
+				ClientNotificationToken: decided.ClientNotificationToken,
+				AuthReqID:               decided.AuthReqID,
+			})
+		}
+	}
 }

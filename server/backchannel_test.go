@@ -951,20 +951,28 @@ func TestBeginBackchannelAuthenticationRefusesMalformedNotificationToken(t *test
 			if err != nil {
 				t.Fatalf("BeginBackchannelAuthentication: %v", err)
 			}
-			if tc.ok {
-				if _, ok := action.(server.BackchannelInteractionRequired); !ok {
-					t.Fatalf("action = %T (%+v), want server.BackchannelInteractionRequired", action, action)
-				}
-				return
-			}
-			localErr, ok := action.(server.BackchannelAuthenticationLocalError)
-			if !ok || localErr.Error.Code() != server.ErrorInvalidRequest {
-				t.Fatalf("action = %+v, want invalid_request", action)
-			}
-			if _, isString := tc.token.(string); !isString && !strings.Contains(localErr.Error.PublicDescription(), "must be a string") {
-				t.Errorf("description = %q, want the token refused as not a string", localErr.Error.PublicDescription())
-			}
+			assertNotificationTokenOutcome(t, action, tc.token, tc.ok)
 		})
+	}
+}
+
+// assertNotificationTokenOutcome checks how a request carrying token as
+// its client_notification_token was answered: an interaction when ok,
+// otherwise invalid_request, saying so for a token that isn't a string.
+func assertNotificationTokenOutcome(t *testing.T, action server.BackchannelAuthenticationAction, token any, ok bool) {
+	t.Helper()
+	if ok {
+		if _, isInteraction := action.(server.BackchannelInteractionRequired); !isInteraction {
+			t.Fatalf("action = %T (%+v), want server.BackchannelInteractionRequired", action, action)
+		}
+		return
+	}
+	localErr, isLocal := action.(server.BackchannelAuthenticationLocalError)
+	if !isLocal || localErr.Error.Code() != server.ErrorInvalidRequest {
+		t.Fatalf("action = %+v, want invalid_request", action)
+	}
+	if _, isString := token.(string); !isString && !strings.Contains(localErr.Error.PublicDescription(), "must be a string") {
+		t.Errorf("description = %q, want the token refused as not a string", localErr.Error.PublicDescription())
 	}
 }
 

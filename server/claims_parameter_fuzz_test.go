@@ -40,58 +40,84 @@ func FuzzClaimsReadersAgree(f *testing.F) {
 		if !json.Valid([]byte(claims)) {
 			return
 		}
-		asObject := map[string]json.RawMessage{"claims": json.RawMessage(claims)}
-		wrapped, err := json.Marshal(claims)
-		if err != nil {
-			return
-		}
-		asString := map[string]json.RawMessage{"claims": json.RawMessage(wrapped)}
-
-		type result struct {
-			valid             bool
-			essential         []string
-			essentialErr      bool
-			idToken, userInfo []string
-		}
-		read := func(params map[string]json.RawMessage) result {
-			ess, essErr := essentialACRValues(params)
-			idt, ui := parseRequestedClaimNames(params["claims"])
-			return result{
-				valid:        validateClaimsParameter(params) == nil,
-				essential:    ess,
-				essentialErr: essErr != nil,
-				idToken:      idt,
-				userInfo:     ui,
-			}
-		}
-		obj := read(asObject)
-		// Only a JSON object (not a string) is a meaningful request
-		// object member; compare encodings only when the raw value is
-		// an object, since a raw string is already the form encoding.
-		var probe any
-		_ = json.Unmarshal([]byte(claims), &probe)
-		if _, isObject := probe.(map[string]any); isObject {
-			str := read(asString)
-			if obj.valid && str.valid && !reflect.DeepEqual(obj, str) {
-				t.Fatalf("object vs form-string encodings disagree for %q:\n object %+v\n string %+v", claims, obj, str)
-			}
-		}
-		for _, names := range [][]string{obj.idToken, obj.userInfo} {
-			if !slices.IsSorted(names) || len(slices.Compact(slices.Clone(names))) != len(names) {
-				t.Fatalf("requested names not sorted/unique: %q", names)
-			}
-		}
-		if obj.valid && !obj.essentialErr && len(obj.essential) > 0 {
-			if !slices.Contains(obj.idToken, "acr") {
-				t.Fatalf("essential acr %q enforced, but acr not among requested ID token claims %q (claims %q)", obj.essential, obj.idToken, claims)
-			}
-			seen := map[string]bool{}
-			for _, v := range obj.essential {
-				if v == "" || seen[v] {
-					t.Fatalf("essential acr values %q contain an empty or duplicate value", obj.essential)
-				}
-				seen[v] = true
-			}
-		}
+		obj := readClaims(map[string]json.RawMessage{"claims": json.RawMessage(claims)})
+		checkClaimsEncodingsAgree(t, claims, obj)
+		checkRequestedNamesSortedUnique(t, obj)
+		checkEssentialACRRequested(t, claims, obj)
 	})
+}
+
+// claimsReading is what the three "claims" readers make of one request.
+type claimsReading struct {
+	valid             bool
+	essential         []string
+	essentialErr      bool
+	idToken, userInfo []string
+}
+
+// readClaims runs validation, the essential-acr reader and the
+// requested-names reader over params.
+func readClaims(params map[string]json.RawMessage) claimsReading {
+	ess, essErr := essentialACRValues(params)
+	idt, ui := parseRequestedClaimNames(params["claims"])
+	return claimsReading{
+		valid:        validateClaimsParameter(params) == nil,
+		essential:    ess,
+		essentialErr: essErr != nil,
+		idToken:      idt,
+		userInfo:     ui,
+	}
+}
+
+// checkClaimsEncodingsAgree: when claims is a JSON object, reading it
+// wrapped as a form parameter's JSON string gives the same result as
+// obj, whenever validation accepts both. (Only a JSON object, not a
+// string, is a meaningful request object member: a raw string is
+// already the form encoding.)
+func checkClaimsEncodingsAgree(t *testing.T, claims string, obj claimsReading) {
+	t.Helper()
+	var probe any
+	_ = json.Unmarshal([]byte(claims), &probe)
+	if _, isObject := probe.(map[string]any); !isObject {
+		return
+	}
+	wrapped, err := json.Marshal(claims)
+	if err != nil {
+		return
+	}
+	str := readClaims(map[string]json.RawMessage{"claims": json.RawMessage(wrapped)})
+	if obj.valid && str.valid && !reflect.DeepEqual(obj, str) {
+		t.Fatalf("object vs form-string encodings disagree for %q:\n object %+v\n string %+v", claims, obj, str)
+	}
+}
+
+// checkRequestedNamesSortedUnique: requested claim names are sorted and
+// unique.
+func checkRequestedNamesSortedUnique(t *testing.T, obj claimsReading) {
+	t.Helper()
+	for _, names := range [][]string{obj.idToken, obj.userInfo} {
+		if !slices.IsSorted(names) || len(slices.Compact(slices.Clone(names))) != len(names) {
+			t.Fatalf("requested names not sorted/unique: %q", names)
+		}
+	}
+}
+
+// checkEssentialACRRequested: when validation and the essential-acr
+// reader both accept, every essential acr value is non-empty and
+// unique, and "acr" is among the ID token's requested claim names.
+func checkEssentialACRRequested(t *testing.T, claims string, obj claimsReading) {
+	t.Helper()
+	if !obj.valid || obj.essentialErr || len(obj.essential) == 0 {
+		return
+	}
+	if !slices.Contains(obj.idToken, "acr") {
+		t.Fatalf("essential acr %q enforced, but acr not among requested ID token claims %q (claims %q)", obj.essential, obj.idToken, claims)
+	}
+	seen := map[string]bool{}
+	for _, v := range obj.essential {
+		if v == "" || seen[v] {
+			t.Fatalf("essential acr values %q contain an empty or duplicate value", obj.essential)
+		}
+		seen[v] = true
+	}
 }

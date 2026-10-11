@@ -17,14 +17,14 @@ import (
 
 // internalError answers a request that failed on this side.
 func internalError(w http.ResponseWriter, err error) {
-	log.Printf("internal error: %v", err)
+	log.Printf("internal error: %q", err)
 	http.Error(w, "internal error", http.StatusInternalServerError)
 }
 
 // publicMessage is what a page may say about err: a server error's public
 // description, or fallback for anything else. The full error is logged.
 func publicMessage(err error, fallback string) string {
-	log.Printf("error shown as a page: %v", err)
+	log.Printf("error shown as a page: %q", err)
 	var se *server.Error
 	if errors.As(err, &se) && se.PublicDescription() != "" {
 		return se.PublicDescription()

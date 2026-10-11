@@ -365,27 +365,12 @@ func TestRevokeTokenReportsTheGrantItEnded(t *testing.T) {
 // already revoked, so the token is refused with it.
 func TestRevokeTokenFailsClosed(t *testing.T) {
 	storeDown := errors.New("store unavailable")
-	issue := func(t *testing.T) (harness, *attestedInstance, string) {
-		attesterKey := generateKey(t)
-		h := newRevocationHarness(t, attesterKey)
-		owner := &attestedInstance{t: t, h: h, attesterKey: attesterKey, instanceKey: generateKey(t)}
-		attested, binding := embedderTokenRequest(t, owner)
-		rt, err := h.server.IssueRefreshToken(context.Background(), server.IssueRefreshTokenRequest{
-			GrantType: preAuthorizedCodeGrant, Client: attested, Binding: binding,
-			Subject: mustSubjectID(t, "holder-1"), Scope: []string{"accounts"}, GrantID: "grant-1",
-		})
-		if err != nil {
-			t.Fatalf("IssueRefreshToken: %v", err)
-		}
-		return h, owner, rt.Reveal()
-	}
+	issue := issueGrantOneRefreshToken
 
 	t.Run("grant revocation fails", func(t *testing.T) {
 		h, owner, refreshToken := issue(t)
 		h.revocation.fail = storeDown
-		if code := serverErrorCode(t, owner.revoke(formParam("token", refreshToken))); code != server.ErrorServerError {
-			t.Fatalf("RevokeToken = code %q, want server_error", code)
-		}
+		assertRevokeServerError(t, owner, refreshToken)
 		h.revocation.fail = nil
 		result, err := owner.revokeResult(formParam("token", refreshToken))
 		if err != nil || !result.Revoked || result.GrantID != "grant-1" {
@@ -396,9 +381,7 @@ func TestRevokeTokenFailsClosed(t *testing.T) {
 	t.Run("token deletion fails", func(t *testing.T) {
 		h, owner, refreshToken := issue(t)
 		h.grants.failRevokeRefresh = storeDown
-		if code := serverErrorCode(t, owner.revoke(formParam("token", refreshToken))); code != server.ErrorServerError {
-			t.Fatalf("RevokeToken = code %q, want server_error", code)
-		}
+		assertRevokeServerError(t, owner, refreshToken)
 		h.grants.failRevokeRefresh = nil
 		h.revocation.mu.Lock()
 		_, revoked := h.revocation.until["grant:grant-1"]
@@ -417,9 +400,7 @@ func TestRevokeTokenFailsClosed(t *testing.T) {
 		owner := &attestedInstance{t: t, h: h, attesterKey: attesterKey, instanceKey: generateKey(t)}
 		refreshToken := owner.issueRefreshToken()
 		h.revocation.fail = storeDown
-		if code := serverErrorCode(t, owner.revoke(formParam("token", refreshToken))); code != server.ErrorServerError {
-			t.Fatalf("RevokeToken = code %q, want server_error", code)
-		}
+		assertRevokeServerError(t, owner, refreshToken)
 		if last := lastAudit(t, h); last.Type != server.AuditEventRevokeToken || last.Outcome != server.AuditOutcomeFailure {
 			t.Errorf("last audit event = %+v, want a RevokeToken failure", last)
 		}
@@ -429,6 +410,33 @@ func TestRevokeTokenFailsClosed(t *testing.T) {
 			t.Fatalf("refresh after the failed revocation: %v, want the token still usable", err)
 		}
 	})
+}
+
+// issueGrantOneRefreshToken issues an attested instance a refresh token
+// for grant-1 through IssueRefreshToken, on a fresh revocation harness.
+func issueGrantOneRefreshToken(t *testing.T) (harness, *attestedInstance, string) {
+	t.Helper()
+	attesterKey := generateKey(t)
+	h := newRevocationHarness(t, attesterKey)
+	owner := &attestedInstance{t: t, h: h, attesterKey: attesterKey, instanceKey: generateKey(t)}
+	attested, binding := embedderTokenRequest(t, owner)
+	rt, err := h.server.IssueRefreshToken(context.Background(), server.IssueRefreshTokenRequest{
+		GrantType: preAuthorizedCodeGrant, Client: attested, Binding: binding,
+		Subject: mustSubjectID(t, "holder-1"), Scope: []string{"accounts"}, GrantID: "grant-1",
+	})
+	if err != nil {
+		t.Fatalf("IssueRefreshToken: %v", err)
+	}
+	return h, owner, rt.Reveal()
+}
+
+// assertRevokeServerError checks that revoking refreshToken as owner
+// fails with server_error.
+func assertRevokeServerError(t *testing.T, owner *attestedInstance, refreshToken string) {
+	t.Helper()
+	if code := serverErrorCode(t, owner.revoke(formParam("token", refreshToken))); code != server.ErrorServerError {
+		t.Fatalf("RevokeToken = code %q, want server_error", code)
+	}
 }
 
 // TestRevokeTokenWithoutARevocationReader covers a refresh token whose

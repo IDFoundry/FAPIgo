@@ -69,7 +69,8 @@ func (a AuthenticatedSubject) ID() SubjectID { return a.id }
 // authenticated. Build it with NewAuthenticationContext: Authorize with
 // a zero AuthenticationContext{} is refused by CompleteAuthorization and
 // CompleteBackchannelAuthentication (server_error), since it says
-// nothing about when the user authenticated.
+// nothing about when the user authenticated, as is one whose
+// authentication time is later than now (beyond Limits.MaxClockSkew).
 type AuthenticationContext struct {
 	authTime time.Time
 	acr      string
@@ -78,10 +79,17 @@ type AuthenticationContext struct {
 
 // NewAuthenticationContext validates and wraps its arguments. acr and
 // amr are optional (pass "" / nil if the application doesn't track
-// them); authTime is required.
+// them); authTime is required: when the user authenticated, no earlier
+// than the Unix epoch. CompleteAuthorization and
+// CompleteBackchannelAuthentication also refuse an authTime later than
+// now (allowing Limits.MaxClockSkew), so pass the time the user
+// actually authenticated, never a session's expiry.
 func NewAuthenticationContext(authTime time.Time, acr string, amr []string) (AuthenticationContext, error) {
 	if authTime.IsZero() {
 		return AuthenticationContext{}, fmt.Errorf("server: authentication context requires a non-zero authTime")
+	}
+	if authTime.Before(unixEpoch) {
+		return AuthenticationContext{}, fmt.Errorf("server: authentication context authTime is before the Unix epoch")
 	}
 	// Same reason as NewSubjectID: acr and amr are JSON strings in the
 	// issued ID token.
@@ -96,6 +104,27 @@ func NewAuthenticationContext(authTime time.Time, acr string, amr []string) (Aut
 	amrCopy := make([]string, len(amr))
 	copy(amrCopy, amr)
 	return AuthenticationContext{authTime: authTime, acr: acr, amr: amrCopy}, nil
+}
+
+// unixEpoch is the earliest authTime an AuthenticationContext takes: an
+// ID token's auth_time is seconds since it (OIDC Core §2).
+var unixEpoch = time.Unix(0, 0)
+
+// authTimeProblem describes why a's authTime can't be the time the user
+// authenticated, at now with skew allowed, or returns "" when it can.
+// A zero AuthenticationContext{} (one that bypassed
+// NewAuthenticationContext) has no authTime, and one later than now
+// isn't an authentication that happened, but would pass max_age and
+// prompt=login as the most recent possible. (NewAuthenticationContext
+// refuses one before the Unix epoch, so only the zero value has one.)
+func (a AuthenticationContext) authTimeProblem(now time.Time, skew time.Duration) string {
+	switch {
+	case a.authTime.IsZero():
+		return "authorize result carries no authentication context (use NewAuthenticationContext)"
+	case a.authTime.After(now.Add(skew)):
+		return "authorize result's authentication time is in the future"
+	}
+	return ""
 }
 
 // GrantedAuthorization is what the embedding application decided to

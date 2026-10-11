@@ -119,11 +119,10 @@ func (s *Server) approveBackchannelAuthentication(ctx context.Context, clientID 
 		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, "", AuditOutcomeFailure, string(err.Code()))
 		return err
 	}
-	// A zero AuthenticationContext{} (one that bypassed
-	// NewAuthenticationContext) would leave the ID token without
-	// auth_time.
-	if result.auth.authTime.IsZero() {
-		err := newError(ErrorServerError, 500, "authorize result carries no authentication context (use NewAuthenticationContext)", nil)
+	// As for CompleteAuthorization: the authentication time must be
+	// one that happened, neither missing nor in the future.
+	if problem := result.auth.authTimeProblem(s.deps.Clock.Now(), s.cfg.Limits.MaxClockSkew); problem != "" {
+		err := newError(ErrorServerError, 500, problem, nil)
 		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, "", AuditOutcomeFailure, string(err.Code()))
 		return err
 	}

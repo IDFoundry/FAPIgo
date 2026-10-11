@@ -127,12 +127,7 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorServerError, 500, "failed to decode backchannel authentication grant", err))
 	}
-	if _, ok := s.grantRevocationReader(); ok {
-		// Named after the auth_req_id, as an authorization code's grant
-		// is after the code, so revoking a refresh token from this
-		// exchange (RevokeToken) ends every access token from the grant.
-		grant.CodeGrantID = grantrevocation.BackchannelGrantID(authReqIDHash)
-	}
+	grant.CodeGrantID = s.backchannelGrantID(authReqIDHash)
 	if usableErr := s.checkGrantUsable(ctx, client, grant); usableErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), usableErr)
 	}
@@ -226,4 +221,16 @@ func (s *Server) issueBackchannelOptionalTokens(ctx context.Context, client stor
 		result.HasRefreshToken = true
 	}
 	return nil
+}
+
+// backchannelGrantID names the grant a CIBA request (authReqIDHash) was
+// approved with, as an authorization code's grant is named after the
+// code, so revoking a refresh token from its exchange (RevokeToken)
+// ends every access token from the grant. "" when grants can't be
+// revoked: no revocation store resource servers can read.
+func (s *Server) backchannelGrantID(authReqIDHash [32]byte) string {
+	if _, ok := s.grantRevocationReader(); !ok {
+		return ""
+	}
+	return grantrevocation.BackchannelGrantID(authReqIDHash)
 }

@@ -45,7 +45,8 @@ type IssueAccessTokenRequest struct {
 	// GrantID, if set, names the grant, as IssueRefreshTokenRequest's
 	// GrantID does: the access token carries it, so RevokeGrant ends
 	// this token too, not only the ones a refresh issues later. Give a
-	// refresh token issued for the same grant the same GrantID.
+	// refresh token issued for the same grant the same GrantID. A
+	// GrantID already revoked is invalid_grant.
 	GrantID string
 }
 

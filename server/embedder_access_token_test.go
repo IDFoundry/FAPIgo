@@ -397,3 +397,32 @@ func TestEmbedderGrantRefusesExpiredAttestation(t *testing.T) {
 		t.Errorf("IssueRefreshToken past the attestation's exp = %v, want server_error", err)
 	}
 }
+
+// TestEmbedderGrantRefusesRevokedGrantID: a GrantID already revoked
+// issues nothing more, as a refresh of the grant wouldn't: invalid_grant,
+// recorded as a failure.
+func TestEmbedderGrantRefusesRevokedGrantID(t *testing.T) {
+	attesterKey := generateKey(t)
+	h := newRevocationHarness(t, attesterKey)
+	instance := &attestedInstance{t: t, h: h, attesterKey: attesterKey, instanceKey: generateKey(t)}
+	req := embedderAccessTokenRequest(t, instance, generateKey(t))
+	req.GrantID = "grant-revoked"
+	if err := h.server.RevokeGrant(context.Background(), req.GrantID); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := h.server.IssueAccessToken(context.Background(), req); serverErrorCode(t, err) != server.ErrorInvalidGrant {
+		t.Errorf("IssueAccessToken = %v, want invalid_grant", err)
+	}
+	if last := lastAudit(t, h); last.Type != server.AuditEventIssueAccessToken || last.Outcome != server.AuditOutcomeFailure {
+		t.Errorf("last audit event = %+v, want an IssueAccessToken failure", last)
+	}
+	if _, err := h.server.IssueRefreshToken(context.Background(), server.IssueRefreshTokenRequest(req)); serverErrorCode(t, err) != server.ErrorInvalidGrant {
+		t.Errorf("IssueRefreshToken = %v, want invalid_grant", err)
+	}
+
+	req.GrantID = "grant-live"
+	if _, err := h.server.IssueAccessToken(context.Background(), req); err != nil {
+		t.Errorf("IssueAccessToken for a grant not revoked: %v", err)
+	}
+}

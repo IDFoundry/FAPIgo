@@ -52,7 +52,7 @@ type IssueRefreshTokenRequest struct {
 	// GrantID, if set, names the grant so RevokeGrant can revoke it, as
 	// GrantedAuthorization.GrantID does — and, like it, must name this
 	// grant only. RevokeToken's TokenRevocationResult names it when the
-	// client ends the grant.
+	// client ends the grant. A GrantID already revoked is invalid_grant.
 	GrantID string
 }
 
@@ -134,12 +134,18 @@ func (s *Server) embedderGrant(ctx context.Context, req embedderGrantRequest) (g
 	if err := s.validateGrantID(req.GrantID); err != nil {
 		return grantRecord{}, newError(ErrorServerError, 500, "GrantID is invalid", err)
 	}
-	return grantRecord{
+	grant := grantRecord{
 		Subject:              req.Subject.String(),
 		Scope:                slices.Clone(req.Scope),
 		AuthorizationDetails: details,
 		GrantID:              req.GrantID,
-	}, nil
+	}
+	// A grant already revoked issues nothing more, as a refresh of it
+	// wouldn't: invalid_grant.
+	if revokedErr := s.checkGrantNotRevoked(ctx, grant); revokedErr != nil {
+		return grantRecord{}, revokedErr
+	}
+	return grant, nil
 }
 
 // embedderAuthorizationDetails validates req's authorization details

@@ -23,9 +23,9 @@ type IssueAccessTokenRequest struct {
 	Client AttestedClient
 
 	// Binding is the token request's sender-constraining credential,
-	// from VerifyTokenRequestBinding for Client. The access token is
-	// bound to it (its "cnf" claim), and it must name a credential of
-	// the client's registered kind.
+	// exactly as VerifyTokenRequestBinding returned it for Client: the
+	// access token is bound to it (its "cnf" claim), so one built by
+	// hand, or verified for another client, is refused.
 	Binding TokenBinding
 
 	// Subject is the access token's sub.
@@ -67,6 +67,9 @@ type IssueAccessTokenRequest struct {
 func (s *Server) IssueAccessToken(ctx context.Context, req IssueAccessTokenRequest) (TokenResult, error) {
 	client := req.Client.Client
 	grant, err := s.embedderGrant(embedderGrantRequest(req))
+	if err == nil && req.Binding.verifiedFor != client.ID() {
+		err = newError(ErrorServerError, 500, "Binding must be as VerifyTokenRequestBinding returned it for Client", nil)
+	}
 	if err != nil {
 		s.audit(ctx, AuditEventIssueAccessToken, client.ID(), AuditOutcomeFailure, string(err.Code()))
 		return TokenResult{}, err

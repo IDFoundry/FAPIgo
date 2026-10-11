@@ -28,7 +28,9 @@ type IssueRefreshTokenRequest struct {
 	// from VerifyTokenRequestBinding for Client. It must name a
 	// credential of the client's registered kind; its thumbprint is
 	// recorded with the grant for reference only, since a refresh binds
-	// its access token to whichever key that request presents.
+	// its access token to whichever key that request presents. (Unlike
+	// IssueAccessToken, which binds the token to it, this accepts a
+	// binding VerifyTokenRequestBinding didn't return.)
 	Binding TokenBinding
 
 	// Subject is the sub of every access token a refresh issues.

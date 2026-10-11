@@ -11,6 +11,7 @@ import (
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/mtls"
 	"github.com/idfoundry/fapigo/internal/token"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/resource"
@@ -246,10 +247,14 @@ func TestIssueAccessTokenMTLSBinding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AuthenticateAttestedClient: %v", err)
 	}
-	const thumbprint = "x5t-thumbprint"
+	cert := newTestCert(t, "client", certOptions{}).cert
+	binding, err := h.server.VerifyTokenRequestBinding(context.Background(), attested.Client, extensionTokenRequest(t, preAuthorizedForm(), header, cert))
+	if err != nil {
+		t.Fatalf("VerifyTokenRequestBinding: %v", err)
+	}
+	thumbprint := mtls.Thumbprint(cert)
 	result, err := h.server.IssueAccessToken(context.Background(), server.IssueAccessTokenRequest{
-		GrantType: preAuthorizedCodeGrant, Client: attested,
-		Binding: server.TokenBinding{Thumbprint: thumbprint, SenderConstrain: storage.SenderConstrainMTLS},
+		GrantType: preAuthorizedCodeGrant, Client: attested, Binding: binding,
 		Subject: mustSubjectID(t, "holder-1"), Scope: []string{"accounts"},
 	})
 	if err != nil {
@@ -279,15 +284,20 @@ func TestIssueAccessTokenRefusals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	otherClientBinding := bindingVerifiedFor(t, h, otherClient, generateKey(t))
 	cases := map[string]struct {
 		mutate func(*server.IssueAccessTokenRequest)
 		want   server.ErrorCode
 	}{
+		"hand-built binding": {func(r *server.IssueAccessTokenRequest) {
+			r.Binding = server.TokenBinding{Thumbprint: r.Binding.Thumbprint, SenderConstrain: r.Binding.SenderConstrain}
+		}, server.ErrorServerError},
+		"binding verified for another client": {func(r *server.IssueAccessTokenRequest) { r.Binding = otherClientBinding }, server.ErrorServerError},
 		"grant type not configured":           {func(r *server.IssueAccessTokenRequest) { r.GrantType = "authorization_code" }, server.ErrorServerError},
 		"client not authenticated":            {func(r *server.IssueAccessTokenRequest) { r.Client = server.AttestedClient{Client: r.Client.Client} }, server.ErrorServerError},
 		"client swapped after authentication": {func(r *server.IssueAccessTokenRequest) { r.Client.Client = otherClient }, server.ErrorServerError},
 		"no binding":                          {func(r *server.IssueAccessTokenRequest) { r.Binding = server.TokenBinding{} }, server.ErrorServerError},
-		"binding for another client":          {func(r *server.IssueAccessTokenRequest) { r.Binding.SenderConstrain = storage.SenderConstrainMTLS }, server.ErrorServerError},
+		"binding of another kind":             {func(r *server.IssueAccessTokenRequest) { r.Binding.SenderConstrain = storage.SenderConstrainMTLS }, server.ErrorServerError},
 		"no subject":                          {func(r *server.IssueAccessTokenRequest) { r.Subject = server.SubjectID{} }, server.ErrorServerError},
 		"nothing granted":                     {func(r *server.IssueAccessTokenRequest) { r.Scope = nil }, server.ErrorServerError},
 		"openid":                              {func(r *server.IssueAccessTokenRequest) { r.Scope = []string{"openid", "accounts"} }, server.ErrorInvalidScope},
@@ -313,6 +323,18 @@ func TestIssueAccessTokenRefusals(t *testing.T) {
 	if _, err := h.server.IssueAccessToken(context.Background(), base); err != nil {
 		t.Fatalf("valid request refused: %v", err)
 	}
+}
+
+// bindingVerifiedFor verifies a DPoP-bound token request's binding, signed
+// by dpopKey, for client.
+func bindingVerifiedFor(t *testing.T, h harness, client storage.RegisteredClient, dpopKey *ecdsa.PrivateKey) server.TokenBinding {
+	t.Helper()
+	req := extensionTokenRequest(t, preAuthorizedForm(), dpopHeader(dpopProofAt(t, dpopKey, testTokenEndpoint, "", h.now)), nil)
+	binding, err := h.server.VerifyTokenRequestBinding(context.Background(), client, req)
+	if err != nil {
+		t.Fatalf("VerifyTokenRequestBinding: %v", err)
+	}
+	return binding
 }
 
 // TestIssueAccessTokenIssuerFailure: an access token issuer that fails

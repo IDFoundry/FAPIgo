@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/grantrevocation"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -97,8 +98,9 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 	}
 
 	now := s.deps.Clock.Now()
+	authReqIDHash := sha256.Sum256([]byte(authReqID))
 	polled, err := s.deps.Backchannel.PollBackchannelAuthentication(ctx, storage.PollBackchannelAuthentication{
-		AuthReqIDHash: sha256.Sum256([]byte(authReqID)),
+		AuthReqIDHash: authReqIDHash,
 		Now:           now,
 		ClientID:      client.ID(),
 	})
@@ -124,6 +126,12 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 	grant, err := decodeGrantRecord(polled.Grant)
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorServerError, 500, "failed to decode backchannel authentication grant", err))
+	}
+	if _, ok := s.grantRevocationReader(); ok {
+		// Named after the auth_req_id, as an authorization code's grant
+		// is after the code, so revoking a refresh token from this
+		// exchange (RevokeToken) ends every access token from the grant.
+		grant.CodeGrantID = grantrevocation.BackchannelGrantID(authReqIDHash)
 	}
 	if usableErr := s.checkGrantUsable(ctx, client, grant); usableErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), usableErr)

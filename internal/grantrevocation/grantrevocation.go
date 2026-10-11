@@ -42,3 +42,17 @@ func CodeGrantID(codeHash [32]byte) string {
 	h.Write(codeHash[:])
 	return base64.RawURLEncoding.EncodeToString(h.Sum(nil))
 }
+
+// BackchannelGrantID names the grant a CIBA authentication request
+// (authReqIDHash, the SHA-256 of its auth_req_id) was approved with,
+// for the same use as CodeGrantID: carried in every access token from
+// the grant, refreshed ones included, under CodeClaim and revoked with
+// CodeKey, so revoking its refresh token (RFC 7009 §2.1) ends them all
+// without the store remembering the name. Its own domain separator
+// keeps it from ever equalling a CodeGrantID.
+func BackchannelGrantID(authReqIDHash [32]byte) string {
+	h := sha256.New()
+	h.Write([]byte("fapigo backchannel grant v1\x00"))
+	h.Write(authReqIDHash[:])
+	return base64.RawURLEncoding.EncodeToString(h.Sum(nil))
+}

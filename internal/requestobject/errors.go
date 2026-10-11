@@ -58,7 +58,8 @@ var (
 	ErrMissingJTI = errors.New("requestobject: jti claim is required")
 
 	// ErrLifetimeExceeded indicates the object's exp claim is further in
-	// the future than the configured maximum lifetime allows.
+	// the future than the configured maximum lifetime allows, or, when
+	// it has an nbf claim, further after nbf.
 	ErrLifetimeExceeded = errors.New("requestobject: exp exceeds maximum allowed lifetime")
 
 	// ErrNotBeforeTooOld indicates the object's nbf claim is further in

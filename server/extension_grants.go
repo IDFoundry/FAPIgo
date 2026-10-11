@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -33,6 +34,13 @@ func (t TokenEndpointRequest) AttestedClientAuthentication() AttestedClientAuthe
 
 // TokenBinding is what a token request's sender-constraining credential
 // binds an issued access token to (VerifyTokenRequestBinding).
+//
+// IssueAccessToken accepts only a TokenBinding VerifyTokenRequestBinding
+// returned, for the same client: the access token is bound to its
+// Thumbprint, so a hand-built one, or one verified for another client,
+// would bind it to a key that never proved possession at the token
+// endpoint. IssueRefreshToken records Thumbprint for reference only, so
+// it accepts any binding of the client's registered kind.
 type TokenBinding struct {
 	// Thumbprint is the credential's thumbprint, as
 	// AccessTokenParams.Thumbprint takes it: the DPoP key's RFC 7638
@@ -48,6 +56,11 @@ type TokenBinding struct {
 	// with the token response (RFC 9449 §8), as TokenResult.NextDPoPNonce
 	// is for this server's own grants.
 	NextDPoPNonce string
+
+	// verifiedFor is the client VerifyTokenRequestBinding verified the
+	// credential for. Unexported, so only a binding it returned carries
+	// one: see IssueAccessToken.
+	verifiedFor fapi.ClientID
 }
 
 // VerifyTokenRequestBinding verifies req's sender-constraining
@@ -95,7 +108,7 @@ func (s *Server) verifyExtensionGrantBinding(ctx context.Context, client storage
 	if err != nil {
 		return TokenBinding{}, err
 	}
-	return TokenBinding{Thumbprint: thumbprint, SenderConstrain: client.SenderConstrain(), NextDPoPNonce: nextNonce}, nil
+	return TokenBinding{Thumbprint: thumbprint, SenderConstrain: client.SenderConstrain(), NextDPoPNonce: nextNonce, verifiedFor: client.ID()}, nil
 }
 
 // ownGrantTypes are the grant types this package serves itself, and

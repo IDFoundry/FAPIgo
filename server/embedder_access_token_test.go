@@ -11,6 +11,7 @@ import (
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/mtls"
 	"github.com/idfoundry/fapigo/internal/token"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/resource"
@@ -246,10 +247,14 @@ func TestIssueAccessTokenMTLSBinding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AuthenticateAttestedClient: %v", err)
 	}
-	const thumbprint = "x5t-thumbprint"
+	cert := newTestCert(t, "client", certOptions{}).cert
+	binding, err := h.server.VerifyTokenRequestBinding(context.Background(), attested.Client, extensionTokenRequest(t, preAuthorizedForm(), header, cert))
+	if err != nil {
+		t.Fatalf("VerifyTokenRequestBinding: %v", err)
+	}
+	thumbprint := mtls.Thumbprint(cert)
 	result, err := h.server.IssueAccessToken(context.Background(), server.IssueAccessTokenRequest{
-		GrantType: preAuthorizedCodeGrant, Client: attested,
-		Binding: server.TokenBinding{Thumbprint: thumbprint, SenderConstrain: storage.SenderConstrainMTLS},
+		GrantType: preAuthorizedCodeGrant, Client: attested, Binding: binding,
 		Subject: mustSubjectID(t, "holder-1"), Scope: []string{"accounts"},
 	})
 	if err != nil {
@@ -279,15 +284,20 @@ func TestIssueAccessTokenRefusals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	otherClientBinding := bindingVerifiedFor(t, h, otherClient, generateKey(t))
 	cases := map[string]struct {
 		mutate func(*server.IssueAccessTokenRequest)
 		want   server.ErrorCode
 	}{
+		"hand-built binding": {func(r *server.IssueAccessTokenRequest) {
+			r.Binding = server.TokenBinding{Thumbprint: r.Binding.Thumbprint, SenderConstrain: r.Binding.SenderConstrain}
+		}, server.ErrorServerError},
+		"binding verified for another client": {func(r *server.IssueAccessTokenRequest) { r.Binding = otherClientBinding }, server.ErrorServerError},
 		"grant type not configured":           {func(r *server.IssueAccessTokenRequest) { r.GrantType = "authorization_code" }, server.ErrorServerError},
 		"client not authenticated":            {func(r *server.IssueAccessTokenRequest) { r.Client = server.AttestedClient{Client: r.Client.Client} }, server.ErrorServerError},
 		"client swapped after authentication": {func(r *server.IssueAccessTokenRequest) { r.Client.Client = otherClient }, server.ErrorServerError},
 		"no binding":                          {func(r *server.IssueAccessTokenRequest) { r.Binding = server.TokenBinding{} }, server.ErrorServerError},
-		"binding for another client":          {func(r *server.IssueAccessTokenRequest) { r.Binding.SenderConstrain = storage.SenderConstrainMTLS }, server.ErrorServerError},
+		"binding of another kind":             {func(r *server.IssueAccessTokenRequest) { r.Binding.SenderConstrain = storage.SenderConstrainMTLS }, server.ErrorServerError},
 		"no subject":                          {func(r *server.IssueAccessTokenRequest) { r.Subject = server.SubjectID{} }, server.ErrorServerError},
 		"nothing granted":                     {func(r *server.IssueAccessTokenRequest) { r.Scope = nil }, server.ErrorServerError},
 		"openid":                              {func(r *server.IssueAccessTokenRequest) { r.Scope = []string{"openid", "accounts"} }, server.ErrorInvalidScope},
@@ -313,6 +323,18 @@ func TestIssueAccessTokenRefusals(t *testing.T) {
 	if _, err := h.server.IssueAccessToken(context.Background(), base); err != nil {
 		t.Fatalf("valid request refused: %v", err)
 	}
+}
+
+// bindingVerifiedFor verifies a DPoP-bound token request's binding, signed
+// by dpopKey, for client.
+func bindingVerifiedFor(t *testing.T, h harness, client storage.RegisteredClient, dpopKey *ecdsa.PrivateKey) server.TokenBinding {
+	t.Helper()
+	req := extensionTokenRequest(t, preAuthorizedForm(), dpopHeader(dpopProofAt(t, dpopKey, testTokenEndpoint, "", h.now)), nil)
+	binding, err := h.server.VerifyTokenRequestBinding(context.Background(), client, req)
+	if err != nil {
+		t.Fatalf("VerifyTokenRequestBinding: %v", err)
+	}
+	return binding
 }
 
 // TestIssueAccessTokenIssuerFailure: an access token issuer that fails
@@ -341,4 +363,66 @@ type failingAccessTokenIssuer struct{}
 
 func (failingAccessTokenIssuer) IssueAccessToken(context.Context, server.AccessTokenParams) (string, string, error) {
 	return "", "", errors.New("issuer unavailable")
+}
+
+// TestEmbedderGrantRefusesExpiredAttestation: an AttestedClient whose
+// attestation expired more than MaxClockSkew ago was kept from an
+// earlier request rather than authenticated for this one, so neither
+// IssueAccessToken nor IssueRefreshToken issues for it.
+func TestEmbedderGrantRefusesExpiredAttestation(t *testing.T) {
+	attesterKey := generateKey(t)
+	h := newRevocationHarness(t, attesterKey)
+	instance := &attestedInstance{t: t, h: h, attesterKey: attesterKey, instanceKey: generateKey(t)}
+	req := embedderAccessTokenRequest(t, instance, generateKey(t))
+	expiry := req.Client.AttestationExpiresAt.Add(h.cfg.Limits.MaxClockSkew)
+	at := func(now time.Time) *server.Server {
+		deps := h.deps
+		deps.Clock = fixedClock{now: now}
+		srv, err := server.New(h.cfg, deps)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return srv
+	}
+
+	within := at(expiry)
+	if _, err := within.IssueAccessToken(context.Background(), req); err != nil {
+		t.Fatalf("IssueAccessToken at the attestation's exp plus skew: %v", err)
+	}
+	past := at(expiry.Add(time.Second))
+	if _, err := past.IssueAccessToken(context.Background(), req); serverErrorCode(t, err) != server.ErrorServerError {
+		t.Errorf("IssueAccessToken past the attestation's exp = %v, want server_error", err)
+	}
+	if _, err := past.IssueRefreshToken(context.Background(), server.IssueRefreshTokenRequest(req)); serverErrorCode(t, err) != server.ErrorServerError {
+		t.Errorf("IssueRefreshToken past the attestation's exp = %v, want server_error", err)
+	}
+}
+
+// TestEmbedderGrantRefusesRevokedGrantID: a GrantID already revoked
+// issues nothing more, as a refresh of the grant wouldn't: invalid_grant,
+// recorded as a failure.
+func TestEmbedderGrantRefusesRevokedGrantID(t *testing.T) {
+	attesterKey := generateKey(t)
+	h := newRevocationHarness(t, attesterKey)
+	instance := &attestedInstance{t: t, h: h, attesterKey: attesterKey, instanceKey: generateKey(t)}
+	req := embedderAccessTokenRequest(t, instance, generateKey(t))
+	req.GrantID = "grant-revoked"
+	if err := h.server.RevokeGrant(context.Background(), req.GrantID); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := h.server.IssueAccessToken(context.Background(), req); serverErrorCode(t, err) != server.ErrorInvalidGrant {
+		t.Errorf("IssueAccessToken = %v, want invalid_grant", err)
+	}
+	if last := lastAudit(t, h); last.Type != server.AuditEventIssueAccessToken || last.Outcome != server.AuditOutcomeFailure {
+		t.Errorf("last audit event = %+v, want an IssueAccessToken failure", last)
+	}
+	if _, err := h.server.IssueRefreshToken(context.Background(), server.IssueRefreshTokenRequest(req)); serverErrorCode(t, err) != server.ErrorInvalidGrant {
+		t.Errorf("IssueRefreshToken = %v, want invalid_grant", err)
+	}
+
+	req.GrantID = "grant-live"
+	if _, err := h.server.IssueAccessToken(context.Background(), req); err != nil {
+		t.Errorf("IssueAccessToken for a grant not revoked: %v", err)
+	}
 }

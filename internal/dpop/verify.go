@@ -10,6 +10,7 @@ import (
 
 	"github.com/idfoundry/fapigo/internal/canonical"
 	"github.com/idfoundry/fapigo/internal/jose"
+	"github.com/idfoundry/fapigo/internal/timeutil"
 )
 
 // ReplayChecker records that a DPoP proof's "jti" has been used by the
@@ -137,7 +138,7 @@ func Verify(ctx context.Context, req VerifyRequest) (VerifiedProof, error) {
 		// its own clock, which may run up to MaxClockSkew behind ours;
 		// keeping the record 2×MaxClockSkew longer covers that, so a
 		// store that drops records at ExpiresAt can't let it be replayed.
-		if err := req.Replay.UseOnce(ctx, thumbprint, c.JTI, iat.Add(req.MaxProofAge+2*req.MaxClockSkew)); err != nil {
+		if err := req.Replay.UseOnce(ctx, thumbprint, c.JTI, iat.Add(timeutil.SaturatingAdd(req.MaxProofAge, req.MaxClockSkew, req.MaxClockSkew))); err != nil {
 			return VerifiedProof{}, fmt.Errorf("dpop: replay check: %w", err)
 		}
 	}

@@ -10,6 +10,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/jose"
+	"github.com/idfoundry/fapigo/internal/timeutil"
 )
 
 // ReplayChecker records that a request object's "jti" has been used,
@@ -221,7 +222,7 @@ func (o Object) Verify(ctx context.Context, pub crypto.PublicKey, policy VerifyP
 		// clock may run up to another MaxClockSkew behind this one's:
 		// 2×skew, or a replay there would be accepted after the record
 		// lapsed.
-		if err := policy.Replay.UseOnce(ctx, c.JTI, c.ExpiresAt.Add(2*policy.MaxClockSkew)); err != nil {
+		if err := policy.Replay.UseOnce(ctx, c.JTI, c.ExpiresAt.Add(timeutil.SaturatingAdd(policy.MaxClockSkew, policy.MaxClockSkew))); err != nil {
 			return VerifiedObject{}, fmt.Errorf("requestobject: replay check: %w", err)
 		}
 	}
@@ -270,6 +271,13 @@ func checkLifetime(c Claims, policy VerifyPolicy) error {
 	}
 	if policy.Now.Sub(c.NotBefore) > policy.MaxLifetime {
 		return ErrNotBeforeTooOld
+	}
+	// FAPI 2.0 Message Signing §5.3.1: exp "no longer than 60 minutes
+	// after the nbf claim". The two checks above bound exp and nbf each
+	// against Now, which still lets the window between them reach twice
+	// MaxLifetime.
+	if c.ExpiresAt.Sub(c.NotBefore) > policy.MaxLifetime {
+		return ErrLifetimeExceeded
 	}
 	return nil
 }

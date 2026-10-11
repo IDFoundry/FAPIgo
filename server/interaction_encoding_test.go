@@ -179,3 +179,42 @@ func TestInteractionRequestFullRoundTrip(t *testing.T) {
 		t.Errorf("restored extension = %q, %v", got, ok)
 	}
 }
+
+// TestParseInteractionRequestFiltersPreferences: Display and the locale
+// lists come back only as BeginAuthorization could have produced them —
+// a known Display, BCP 47 shaped tags without repeats, at most 16 —
+// whatever an edited encoding carries.
+func TestParseInteractionRequestFiltersPreferences(t *testing.T) {
+	many := make([]string, 20)
+	for i := range many {
+		many[i] = "x" + string(rune('a'+i))
+	}
+	for _, tc := range []struct {
+		name          string
+		in            server.InteractionRequest
+		wantDisplay   server.Display
+		wantUI, wantC []string
+	}{
+		{name: "valid", in: server.InteractionRequest{Display: server.DisplayPopup, UILocales: []string{"en-GB", "fr"}, ClaimsLocales: []string{"de"}},
+			wantDisplay: server.DisplayPopup, wantUI: []string{"en-GB", "fr"}, wantC: []string{"de"}},
+		{name: "markup", in: server.InteractionRequest{Display: `"><script>alert(1)</script>`, UILocales: []string{`<b>`, "en"}, ClaimsLocales: []string{"de DE"}},
+			wantUI: []string{"en"}},
+		{name: "repeats and too many", in: server.InteractionRequest{UILocales: append([]string{"en", "EN"}, many...)},
+			wantUI: append([]string{"en"}, many[:15]...)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.in.ClientID = testClientID
+			text, err := tc.in.MarshalText()
+			if err != nil {
+				t.Fatalf("MarshalText: %v", err)
+			}
+			out, err := server.ParseInteractionRequest(string(text))
+			if err != nil {
+				t.Fatalf("ParseInteractionRequest: %v", err)
+			}
+			if out.Display != tc.wantDisplay || !reflect.DeepEqual(out.UILocales, tc.wantUI) || !reflect.DeepEqual(out.ClaimsLocales, tc.wantC) {
+				t.Errorf("got Display %q, UILocales %q, ClaimsLocales %q; want %q, %q, %q", out.Display, out.UILocales, out.ClaimsLocales, tc.wantDisplay, tc.wantUI, tc.wantC)
+			}
+		})
+	}
+}

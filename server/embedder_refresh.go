@@ -18,7 +18,9 @@ type IssueRefreshTokenRequest struct {
 
 	// Client is the client the token request authenticated as, exactly
 	// as AuthenticateAttestedClient returned it for this request: one
-	// whose Client was changed is refused. The refresh token is bound to its
+	// whose Client was changed is refused, and so is one whose
+	// attestation expired more than Limits.MaxClockSkew ago, kept from an
+	// earlier request. The refresh token is bound to its
 	// Client Instance Key (draft-ietf-oauth-attestation-based-client-auth-07
 	// §10.3): RefreshAccessToken redeems it only with an attestation for
 	// that same key.
@@ -28,7 +30,9 @@ type IssueRefreshTokenRequest struct {
 	// from VerifyTokenRequestBinding for Client. It must name a
 	// credential of the client's registered kind; its thumbprint is
 	// recorded with the grant for reference only, since a refresh binds
-	// its access token to whichever key that request presents.
+	// its access token to whichever key that request presents. (Unlike
+	// IssueAccessToken, which binds the token to it, this accepts a
+	// binding VerifyTokenRequestBinding didn't return.)
 	Binding TokenBinding
 
 	// Subject is the sub of every access token a refresh issues.
@@ -48,7 +52,7 @@ type IssueRefreshTokenRequest struct {
 	// GrantID, if set, names the grant so RevokeGrant can revoke it, as
 	// GrantedAuthorization.GrantID does — and, like it, must name this
 	// grant only. RevokeToken's TokenRevocationResult names it when the
-	// client ends the grant.
+	// client ends the grant. A GrantID already revoked is invalid_grant.
 	GrantID string
 }
 
@@ -66,7 +70,7 @@ type IssueRefreshTokenRequest struct {
 // endpoint. Every call records an AuditEventIssueRefreshToken.
 func (s *Server) IssueRefreshToken(ctx context.Context, req IssueRefreshTokenRequest) (fapi.Secret, error) {
 	client := req.Client.Client
-	grant, err := s.embedderGrant(embedderGrantRequest(req))
+	grant, err := s.embedderGrant(ctx, embedderGrantRequest(req))
 	if err != nil {
 		s.audit(ctx, AuditEventIssueRefreshToken, client.ID(), AuditOutcomeFailure, string(err.Code()))
 		return fapi.Secret{}, err
@@ -96,13 +100,18 @@ type embedderGrantRequest struct {
 // embedderGrant validates req and returns the grant tokens for it carry:
 // a refresh token's stored grant, and the claims of every access token
 // issued for it, the first one included.
-func (s *Server) embedderGrant(req embedderGrantRequest) (grantRecord, *Error) {
+func (s *Server) embedderGrant(ctx context.Context, req embedderGrantRequest) (grantRecord, *Error) {
 	client := req.Client.Client
 	switch {
 	case !slices.Contains(s.cfg.AdditionalGrantTypes, req.GrantType):
 		return grantRecord{}, newError(ErrorServerError, 500, "GrantType is not one of Config.AdditionalGrantTypes", nil)
 	case req.Client.instanceKey == "" || req.Client.authenticatedID != client.ID():
 		return grantRecord{}, newError(ErrorServerError, 500, "Client must be as AuthenticateAttestedClient returned it", nil)
+	case s.deps.Clock.Now().After(req.Client.AttestationExpiresAt.Add(s.cfg.Limits.MaxClockSkew)):
+		// AuthenticateAttestedClient accepted the attestation up to
+		// MaxClockSkew past its exp; past that, Client was kept from an
+		// earlier request rather than authenticated for this one.
+		return grantRecord{}, newError(ErrorServerError, 500, "Client's attestation has expired: authenticate the client for each request", nil)
 	case req.Binding.Thumbprint == "" || req.Binding.SenderConstrain != client.SenderConstrain():
 		return grantRecord{}, newError(ErrorServerError, 500, "Binding must name a credential of the client's registered sender constraint", nil)
 	case req.Subject.String() == "":
@@ -125,12 +134,18 @@ func (s *Server) embedderGrant(req embedderGrantRequest) (grantRecord, *Error) {
 	if err := s.validateGrantID(req.GrantID); err != nil {
 		return grantRecord{}, newError(ErrorServerError, 500, "GrantID is invalid", err)
 	}
-	return grantRecord{
+	grant := grantRecord{
 		Subject:              req.Subject.String(),
 		Scope:                slices.Clone(req.Scope),
 		AuthorizationDetails: details,
 		GrantID:              req.GrantID,
-	}, nil
+	}
+	// A grant already revoked issues nothing more, as a refresh of it
+	// wouldn't: invalid_grant.
+	if revokedErr := s.checkGrantNotRevoked(ctx, grant); revokedErr != nil {
+		return grantRecord{}, revokedErr
+	}
+	return grant, nil
 }
 
 // embedderAuthorizationDetails validates req's authorization details

@@ -212,7 +212,9 @@ func (e *Error) WriteJSON(w http.ResponseWriter) {
 // the cases that must be rendered locally rather than redirected
 // (LocalErrorResponse, AuthorizationLocalError), so a handler doesn't
 // reach for e.Error(). It marks the response no-store. A nil e writes
-// a 500 server_error.
+// a 500 server_error, and so does a zero Error: one with no code
+// writes server_error, and one whose status isn't an error status
+// writes 500.
 //
 // Like WriteJSON, it must be called before anything else writes to w.
 func (e *Error) WriteText(w http.ResponseWriter) {
@@ -220,11 +222,14 @@ func (e *Error) WriteText(w http.ResponseWriter) {
 		e = NewError(ErrorServerError, http.StatusInternalServerError, "")
 	}
 	body := string(e.code)
+	if body == "" {
+		body = string(ErrorServerError)
+	}
 	if e.description != "" {
 		body += ": " + e.description
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	http.Error(w, body, e.httpStatus)
+	http.Error(w, body, httperror.Status(e.httpStatus))
 }
 
 // WriteError writes err to w: err's own WriteJSON if err is a *Error

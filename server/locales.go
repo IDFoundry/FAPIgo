@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"iter"
 	"strings"
 )
 
@@ -39,7 +40,13 @@ func requestedDisplay(params map[string]json.RawMessage) Display {
 	if err != nil {
 		return ""
 	}
-	switch d := Display(v); d {
+	return knownDisplay(Display(v))
+}
+
+// knownDisplay returns d when it is one of the values OIDC Core
+// defines, "" otherwise.
+func knownDisplay(d Display) Display {
+	switch d {
 	case DisplayPage, DisplayPopup, DisplayTouch, DisplayWAP:
 		return d
 	}
@@ -61,8 +68,15 @@ func requestedLocales(params map[string]json.RawMessage, name string) []string {
 	if err != nil {
 		return nil
 	}
+	return languageTags(strings.FieldsSeq(v))
+}
+
+// languageTags returns the BCP 47 shaped tags among candidates, in
+// order, without repeats and at most maxLocaleTags of them. Nil when
+// none is left.
+func languageTags(candidates iter.Seq[string]) []string {
 	var tags []string
-	for field := range strings.FieldsSeq(v) {
+	for field := range candidates {
 		if len(tags) == maxLocaleTags {
 			break
 		}

@@ -142,6 +142,15 @@ func TestCompleteAuthorizationEnforcesRequiredSubject(t *testing.T) {
 		{name: "id_token sub value, same user", extra: func(harness) map[string]string { return map[string]string{"claims": subClaims("id_token", "user-1")} }, user: "user-1", wantSub: "user-1"},
 		{name: "id_token sub value, different user", extra: func(harness) map[string]string { return map[string]string{"claims": subClaims("id_token", "user-1")} }, user: "user-2", wantSub: "user-1", wantError: "login_required"},
 		{name: "userinfo sub value, different user", extra: func(harness) map[string]string { return map[string]string{"claims": subClaims("userinfo", "user-1")} }, user: "user-2", wantSub: "user-1", wantError: "login_required"},
+		{name: "sub values of one user, same user", extra: func(harness) map[string]string {
+			return map[string]string{"claims": `{"id_token":{"sub":{"essential":true,"values":["user-1"]}}}`}
+		}, user: "user-1", wantSub: "user-1"},
+		{name: "sub values of one user, different user", extra: func(harness) map[string]string {
+			return map[string]string{"claims": `{"id_token":{"sub":{"essential":true,"values":["user-1"]}}}`}
+		}, user: "user-2", wantSub: "user-1", wantError: "login_required"},
+		{name: "sub value and values agreeing", extra: func(harness) map[string]string {
+			return map[string]string{"claims": `{"userinfo":{"sub":{"value":"user-1","values":["user-1"]}}}`}
+		}, user: "user-2", wantSub: "user-1", wantError: "login_required"},
 		{name: "sub without a value", extra: func(harness) map[string]string {
 			return map[string]string{"claims": `{"id_token":{"sub":{"essential":true}}}`}
 		}, user: "user-2"},
@@ -262,6 +271,12 @@ func TestPushAuthorizationRequestRejectsUnusableRequiredSubject(t *testing.T) {
 		{"sub value not a string", fixed(map[string]string{"claims": `{"id_token":{"sub":{"value":1}}}`})},
 		{"empty sub value", fixed(map[string]string{"claims": subClaims("userinfo", "")})},
 		{"miscased value member", fixed(map[string]string{"claims": `{"id_token":{"sub":{"Value":"user-1"}}}`})},
+		{"sub values of several users", fixed(map[string]string{"claims": `{"id_token":{"sub":{"values":["user-1","user-2"]}}}`})},
+		{"empty sub values", fixed(map[string]string{"claims": `{"id_token":{"sub":{"values":[]}}}`})},
+		{"sub values not strings", fixed(map[string]string{"claims": `{"id_token":{"sub":{"values":[1]}}}`})},
+		{"sub values of an empty string", fixed(map[string]string{"claims": `{"id_token":{"sub":{"values":[""]}}}`})},
+		{"sub value and values disagree", fixed(map[string]string{"claims": `{"id_token":{"sub":{"value":"user-1","values":["user-2"]}}}`})},
+		{"sub values and another location's value disagree", fixed(map[string]string{"claims": `{"id_token":{"sub":{"values":["user-1"]}},"userinfo":{"sub":{"value":"user-2"}}}`})},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t, server.ProfileFAPISecurity, true)
@@ -352,13 +367,15 @@ func TestCIBAEnforcesRequiredSubject(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		hint    bool
+		claims  string
 		user    string
 		wantErr bool
 	}{
 		{name: "hint, same user", hint: true, user: "user-1"},
 		{name: "hint, different user", hint: true, user: "user-2", wantErr: true},
-		{name: "sub value, same user", user: "user-1"},
-		{name: "sub value, different user", user: "user-2", wantErr: true},
+		{name: "sub value, same user", claims: subClaims("id_token", "user-1"), user: "user-1"},
+		{name: "sub value, different user", claims: subClaims("id_token", "user-1"), user: "user-2", wantErr: true},
+		{name: "sub values of one user, different user", claims: `{"id_token":{"sub":{"values":["user-1"]}}}`, user: "user-2", wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h, _ := newHarnessWithBackchannel(t)
@@ -367,7 +384,7 @@ func TestCIBAEnforcesRequiredSubject(t *testing.T) {
 				delete(params, "login_hint")
 				params["id_token_hint"] = jsonRaw(t, serverHint(t, h, nil))
 			} else {
-				params["claims"] = json.RawMessage(subClaims("id_token", "user-1"))
+				params["claims"] = json.RawMessage(tc.claims)
 			}
 			required := beginBackchannel(t, h, params)
 			assertBackchannelRequiredSubject(t, h, required, "user-1")

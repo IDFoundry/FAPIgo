@@ -33,3 +33,21 @@ func TestErrorWriteTextOmitsCause(t *testing.T) {
 		t.Fatalf("Content-Type = %q, want text/plain", ct)
 	}
 }
+
+// TestErrorWriteTextZeroValue: a zero Error, which never went through
+// NewError, still writes a 500 server_error rather than panicking in
+// WriteHeader.
+func TestErrorWriteTextZeroValue(t *testing.T) {
+	for name, e := range map[string]*Error{"zero": {}, "description only": {description: "the store failed"}} {
+		t.Run(name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			e.WriteText(rec)
+			if rec.Code != 500 {
+				t.Fatalf("status = %d, want 500", rec.Code)
+			}
+			if body := strings.TrimSpace(rec.Body.String()); !strings.HasPrefix(body, "server_error") {
+				t.Fatalf("body = %q, want it to start with server_error", body)
+			}
+		})
+	}
+}

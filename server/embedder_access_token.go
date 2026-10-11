@@ -19,13 +19,15 @@ type IssueAccessTokenRequest struct {
 
 	// Client is the client the token request authenticated as, exactly
 	// as AuthenticateAttestedClient returned it for this request: one
-	// whose Client was changed is refused.
+	// whose Client was changed is refused, and so is one whose
+	// attestation expired more than Limits.MaxClockSkew ago, kept from an
+	// earlier request.
 	Client AttestedClient
 
 	// Binding is the token request's sender-constraining credential,
-	// from VerifyTokenRequestBinding for Client. The access token is
-	// bound to it (its "cnf" claim), and it must name a credential of
-	// the client's registered kind.
+	// exactly as VerifyTokenRequestBinding returned it for Client: the
+	// access token is bound to it (its "cnf" claim), so one built by
+	// hand, or verified for another client, is refused.
 	Binding TokenBinding
 
 	// Subject is the access token's sub.
@@ -43,7 +45,8 @@ type IssueAccessTokenRequest struct {
 	// GrantID, if set, names the grant, as IssueRefreshTokenRequest's
 	// GrantID does: the access token carries it, so RevokeGrant ends
 	// this token too, not only the ones a refresh issues later. Give a
-	// refresh token issued for the same grant the same GrantID.
+	// refresh token issued for the same grant the same GrantID. A
+	// GrantID already revoked is invalid_grant.
 	GrantID string
 }
 
@@ -66,7 +69,10 @@ type IssueAccessTokenRequest struct {
 // records an AuditEventIssueAccessToken.
 func (s *Server) IssueAccessToken(ctx context.Context, req IssueAccessTokenRequest) (TokenResult, error) {
 	client := req.Client.Client
-	grant, err := s.embedderGrant(embedderGrantRequest(req))
+	grant, err := s.embedderGrant(ctx, embedderGrantRequest(req))
+	if err == nil && req.Binding.verifiedFor != client.ID() {
+		err = newError(ErrorServerError, 500, "Binding must be as VerifyTokenRequestBinding returned it for Client", nil)
+	}
 	if err != nil {
 		s.audit(ctx, AuditEventIssueAccessToken, client.ID(), AuditOutcomeFailure, string(err.Code()))
 		return TokenResult{}, err

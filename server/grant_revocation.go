@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/idfoundry/fapigo/internal/grantrevocation"
+	"github.com/idfoundry/fapigo/internal/timeutil"
 )
 
 // maxGrantIDLength bounds GrantedAuthorization.GrantID.
@@ -161,15 +161,6 @@ func (s *Server) checkGrantNotRevoked(ctx context.Context, grant grantRecord) *E
 // them instead of one that has already expired.
 func (s *Server) grantRevocationHorizon() time.Duration {
 	l := s.cfg.Limits
-	return saturatingAdd(saturatingAdd(max(l.RefreshTokenLifetime, l.AuthorizationCodeLifetime, l.BackchannelAuthenticationRequestLifetime),
-		l.AccessTokenLifetime), l.MaxClockSkew)
-}
-
-// saturatingAdd is a+b for non-negative durations, capped at the largest
-// Duration instead of overflowing.
-func saturatingAdd(a, b time.Duration) time.Duration {
-	if b > 0 && a > math.MaxInt64-b {
-		return math.MaxInt64
-	}
-	return a + b
+	return timeutil.SaturatingAdd(max(l.RefreshTokenLifetime, l.AuthorizationCodeLifetime, l.BackchannelAuthenticationRequestLifetime),
+		l.AccessTokenLifetime, l.MaxClockSkew)
 }

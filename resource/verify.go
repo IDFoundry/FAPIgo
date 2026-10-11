@@ -14,6 +14,7 @@ import (
 	"github.com/idfoundry/fapigo/internal/dpop"
 	"github.com/idfoundry/fapigo/internal/grantrevocation"
 	"github.com/idfoundry/fapigo/internal/mtls"
+	"github.com/idfoundry/fapigo/internal/timeutil"
 	"github.com/idfoundry/fapigo/internal/token"
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -408,7 +409,7 @@ func (v *Verifier) consumeDPoPProof(ctx context.Context, proof dpop.VerifiedProo
 	// 2×MaxClockSkew past the proof's own acceptance window: another
 	// resource server sharing the replay store may accept it that much
 	// later by its own clock.
-	if err := v.dpopReplayChecker().UseOnce(ctx, proof.Thumbprint, proof.JTI, proof.IssuedAt.Add(v.cfg.Limits.MaxDPoPProofAge+2*v.cfg.Limits.MaxClockSkew)); err != nil {
+	if err := v.dpopReplayChecker().UseOnce(ctx, proof.Thumbprint, proof.JTI, proof.IssuedAt.Add(timeutil.SaturatingAdd(v.cfg.Limits.MaxDPoPProofAge, v.cfg.Limits.MaxClockSkew, v.cfg.Limits.MaxClockSkew))); err != nil {
 		if storeUnavailable(err) {
 			return newError(ErrorServerError, 500, "failed to check DPoP proof replay", err)
 		}

@@ -9,6 +9,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/jose"
+	"github.com/idfoundry/fapigo/internal/timeutil"
 )
 
 // ReplayChecker records that a client assertion's "jti" has been used,
@@ -165,7 +166,7 @@ func (a Assertion) Verify(ctx context.Context, pub crypto.PublicKey, policy Veri
 		// (exp+skew) on any instance sharing the store, whose clock may
 		// run up to another MaxClockSkew behind this one's: 2×skew, or
 		// a replay there would be accepted after the record lapsed.
-		if err := policy.Replay.UseOnce(ctx, c.JTI, exp.Add(2*policy.MaxClockSkew)); err != nil {
+		if err := policy.Replay.UseOnce(ctx, c.JTI, exp.Add(timeutil.SaturatingAdd(policy.MaxClockSkew, policy.MaxClockSkew))); err != nil {
 			return VerifiedAssertion{}, fmt.Errorf("clientassertion: replay check: %w", err)
 		}
 	}

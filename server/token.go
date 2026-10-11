@@ -17,6 +17,7 @@ import (
 	"github.com/idfoundry/fapigo/internal/grantrevocation"
 	"github.com/idfoundry/fapigo/internal/mtls"
 	"github.com/idfoundry/fapigo/internal/pkce"
+	"github.com/idfoundry/fapigo/internal/timeutil"
 	"github.com/idfoundry/fapigo/internal/token"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
@@ -364,7 +365,7 @@ func (s *Server) revokeTokensForReusedCode(ctx context.Context, err error, prese
 		// Resource servers accept the token until exp+MaxClockSkew by
 		// their own clocks, which may lag this one's by another
 		// MaxClockSkew: the record must outlast both.
-		_ = s.deps.Revocation.Revoke(ctx, alreadyRedeemed.IssuedAccessTokenKey, s.deps.Clock.Now().Add(s.cfg.Limits.AccessTokenLifetime+2*s.cfg.Limits.MaxClockSkew))
+		_ = s.deps.Revocation.Revoke(ctx, alreadyRedeemed.IssuedAccessTokenKey, s.deps.Clock.Now().Add(timeutil.SaturatingAdd(s.cfg.Limits.AccessTokenLifetime, s.cfg.Limits.MaxClockSkew, s.cfg.Limits.MaxClockSkew)))
 	}
 	if alreadyRedeemed.IssuedRefreshTokenHash != nil {
 		_ = s.deps.Grants.RevokeRefreshToken(ctx, *alreadyRedeemed.IssuedRefreshTokenHash)

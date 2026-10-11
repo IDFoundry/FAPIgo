@@ -47,6 +47,12 @@ type AccessTokenParams struct {
 // like every Dependencies field — JWTAccessTokens is the default,
 // exported, ship-in-the-box implementation; pass it, or
 // OpaqueAccessTokens, or your own.
+//
+// It is this server's to call: an embedder issuing an access token for
+// a grant it serves itself calls Server.IssueAccessToken, which sets the
+// claims that make the token revocable (a grant's ID) and its issuer,
+// audience, lifetime and binding, rather than calling the issuer
+// directly.
 type AccessTokenIssuer interface {
 	// IssueAccessToken returns the raw token plus a revocation-lookup
 	// key (a JWT's jti claim for JWTAccessTokens, an opaque token's

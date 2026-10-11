@@ -45,8 +45,16 @@ func newEmbedderRefreshHarness(t *testing.T, attesterKey *ecdsa.PrivateKey) harn
 // the grant does before issuing tokens.
 func embedderTokenRequest(t *testing.T, instance *attestedInstance) (server.AttestedClient, server.TokenBinding) {
 	t.Helper()
+	return embedderTokenRequestBoundTo(t, instance, generateKey(t))
+}
+
+// embedderTokenRequestBoundTo is embedderTokenRequest with its DPoP
+// proof signed by dpopKey, so tokens issued for it can be presented with
+// proofs from the same key.
+func embedderTokenRequestBoundTo(t *testing.T, instance *attestedInstance, dpopKey *ecdsa.PrivateKey) (server.AttestedClient, server.TokenBinding) {
+	t.Helper()
 	attestations, pops := instance.headers()
-	header := dpopHeader(dpopProofAt(t, generateKey(t), testTokenEndpoint, "", instance.h.now))
+	header := dpopHeader(dpopProofAt(t, dpopKey, testTokenEndpoint, "", instance.h.now))
 	header.Set("OAuth-Client-Attestation", attestations[0])
 	header.Set("OAuth-Client-Attestation-PoP", pops[0])
 	req := extensionTokenRequest(t, preAuthorizedForm(), header, nil)

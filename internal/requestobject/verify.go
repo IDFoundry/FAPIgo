@@ -271,5 +271,12 @@ func checkLifetime(c Claims, policy VerifyPolicy) error {
 	if policy.Now.Sub(c.NotBefore) > policy.MaxLifetime {
 		return ErrNotBeforeTooOld
 	}
+	// FAPI 2.0 Message Signing §5.3.1: exp "no longer than 60 minutes
+	// after the nbf claim". The two checks above bound exp and nbf each
+	// against Now, which still lets the window between them reach twice
+	// MaxLifetime.
+	if c.ExpiresAt.Sub(c.NotBefore) > policy.MaxLifetime {
+		return ErrLifetimeExceeded
+	}
 	return nil
 }

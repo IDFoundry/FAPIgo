@@ -870,3 +870,36 @@ func TestVerifySucceedsWithoutJTIWhenReplayConfigured(t *testing.T) {
 		t.Fatalf("Verify(no jti, replay configured) = %v, want nil error", err)
 	}
 }
+
+// TestVerifyBoundsExpAfterNotBefore: FAPI 2.0 Message Signing §5.3.1
+// bounds exp to MaxLifetime after nbf, not only after Now — an object
+// whose nbf sits nearly MaxLifetime in the past and whose exp sits
+// nearly MaxLifetime in the future is refused, though each alone is in
+// bounds; one whose window is exactly MaxLifetime is accepted.
+func TestVerifyBoundsExpAfterNotBefore(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now().Truncate(time.Second)
+	policy := basePolicy(now)
+	policy.MaxLifetime = time.Hour
+	policy.RequireNotBefore = true
+	for _, tc := range []struct {
+		name     string
+		nbf      time.Time
+		lifetime time.Duration
+		want     error
+	}{
+		{"window of twice the lifetime", now.Add(-59 * time.Minute), 118 * time.Minute, ErrLifetimeExceeded},
+		{"window a second over", now.Add(-time.Minute), time.Hour + time.Second, ErrLifetimeExceeded},
+		{"window of exactly the lifetime", now.Add(-time.Minute), time.Hour, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			obj, err := Parse(createTestObject(t, key, tc.nbf, tc.lifetime))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := obj.Verify(context.Background(), &key.PublicKey, policy); !errors.Is(err, tc.want) {
+				t.Fatalf("Verify = %v, want %v", err, tc.want)
+			}
+		})
+	}
+}

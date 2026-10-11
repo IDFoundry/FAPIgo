@@ -373,6 +373,13 @@ func (t IDToken) Validate(pub crypto.PublicKey, policy IDTokenValidatePolicy) (V
 	if policy.Now.Sub(c.IssuedAt) > policy.MaxLifetime {
 		return ValidatedIDToken{}, ErrIssuedAtTooOld
 	}
+	// auth_time is when the user authenticated, so one later than now
+	// (allowing the clock skew) didn't happen, and would pass a max_age
+	// check (OIDC Core §3.1.3.7 rule 13) as the freshest authentication
+	// possible. (A negative one is refused by ParseIDToken.)
+	if !c.AuthTime.IsZero() && c.AuthTime.After(policy.Now.Add(policy.MaxClockSkew)) {
+		return ValidatedIDToken{}, ErrAuthTimeInvalid
+	}
 	if policy.ExpectedNonce != "" {
 		if subtle.ConstantTimeCompare([]byte(c.Nonce), []byte(policy.ExpectedNonce)) != 1 {
 			return ValidatedIDToken{}, ErrNonceMismatch

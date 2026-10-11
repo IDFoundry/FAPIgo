@@ -13,13 +13,14 @@ import (
 
 // TestCompleteAuthorizationChecksAuthTimeAgainstMaxAge covers OIDC Core
 // §3.1.3.7 rule 13 on the client: with max_age requested, the ID token
-// must carry auth_time, no older than max_age allows.
+// must carry auth_time, no older than max_age allows, and never one in
+// the future.
 func TestCompleteAuthorizationChecksAuthTimeAgainstMaxAge(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		hasMaxAge bool
 		maxAge    time.Duration
-		authAgo   time.Duration // zero: no auth_time claim
+		authAgo   time.Duration // zero: no auth_time claim; negative: in the future
 		wantErr   bool
 	}{
 		{name: "within max_age", hasMaxAge: true, maxAge: 5 * time.Minute, authAgo: time.Minute},
@@ -28,6 +29,11 @@ func TestCompleteAuthorizationChecksAuthTimeAgainstMaxAge(t *testing.T) {
 		{name: "max_age=0, just authenticated", hasMaxAge: true, authAgo: time.Second},
 		{name: "no max_age, no auth_time", hasMaxAge: false},
 		{name: "no max_age, long ago", hasMaxAge: false, authAgo: 48 * time.Hour},
+		// A future auth_time isn't an authentication that happened: it
+		// would pass max_age=0 as the freshest one possible, and is
+		// refused whether or not max_age was requested.
+		{name: "max_age=0, auth_time a year ahead", hasMaxAge: true, authAgo: -365 * 24 * time.Hour, wantErr: true},
+		{name: "no max_age, auth_time a year ahead", hasMaxAge: false, authAgo: -365 * 24 * time.Hour, wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c, as, _ := newTestClient(t, false)

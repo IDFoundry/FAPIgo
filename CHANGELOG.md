@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.54.0](https://github.com/IDFoundry/FAPIgo/compare/v0.53.0...v0.54.0) (2026-10-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* **server:** CompleteBackchannelAuthentication refuses an Authorize whose granted scope drops openid from the request's scope, with invalid_request. Keep openid in GrantedAuthorization.Scope. See UPGRADING.md for v0.54.0.
+* **server:** under AssuranceProduction with a backchannel authentication endpoint, server.New refuses a Limits.MaxBackchannelAuthenticationRequestLifetime over 60 minutes. See UPGRADING.md for v0.54.0.
+* **client:** the client refuses an ID token whose auth_time is later than now plus Limits.MaxClockSkew, or negative, with invalid_response. See UPGRADING.md for v0.54.0.
+* **server:** CompleteAuthorization and CompleteBackchannelAuthentication refuse an Authorize whose authentication time is later than now plus Limits.MaxClockSkew, with server_error, and NewAuthenticationContext refuses an authTime before the Unix epoch. Pass the time the user authenticated. See UPGRADING.md for v0.54.0.
+
+### Features
+
+* **server:** add Server.IssueAccessToken for an embedder's own grant ([#633](https://github.com/IDFoundry/FAPIgo/issues/633)) ([a449c59](https://github.com/IDFoundry/FAPIgo/commit/a449c59871c8073851c0f57eb02b7d778c44e1f3))
+
+
+### Bug Fixes
+
+* **client:** refuse an ID token whose auth_time is in the future ([040cbc6](https://github.com/IDFoundry/FAPIgo/commit/040cbc62b8a3b660846655c69912f4ecd9d94368))
+* **requestobject:** bound a request object's exp to MaxLifetime after nbf ([0f41bfd](https://github.com/IDFoundry/FAPIgo/commit/0f41bfd838a873c1c0088af21ec0067c23432b5a))
+* saturate the replay and revocation record margins ([c1c6dc7](https://github.com/IDFoundry/FAPIgo/commit/c1c6dc741e16cb4d2208b5d9fd5d198c3d01b1ef))
+* **server:** accept only a verified TokenBinding in IssueAccessToken ([90437a8](https://github.com/IDFoundry/FAPIgo/commit/90437a890ddcbeb4d0c5d8ca270a4780ff7ee4a0))
+* **server:** cap the CIBA request lifetime under production ([76fb205](https://github.com/IDFoundry/FAPIgo/commit/76fb20591358046c49b5f736639d187c36eb86ed))
+* **server:** filter an InteractionRequest's preferences when parsing it ([1d655fc](https://github.com/IDFoundry/FAPIgo/commit/1d655fc7011e7431f22bed53a92a3e5d775e3d49))
+* **server:** honour a claims sub entry's values ([b6de8b5](https://github.com/IDFoundry/FAPIgo/commit/b6de8b57cecc124bfa1c8feccc5a818e3dadc94e))
+* **server:** keep openid in a CIBA approval's granted scope ([2eaf53a](https://github.com/IDFoundry/FAPIgo/commit/2eaf53a0edd5bb1233764a0c6369f394e7d18516))
+* **server:** refuse an AttestedClient whose attestation has expired ([59632bc](https://github.com/IDFoundry/FAPIgo/commit/59632bc792be20af50e07179d987d0d724215d01))
+* **server:** refuse an authentication time in the future ([277cf76](https://github.com/IDFoundry/FAPIgo/commit/277cf768fc4015d606c81ab11abdbaebf67069c1))
+* **server:** refuse to issue for a grant ID already revoked ([c98e4c5](https://github.com/IDFoundry/FAPIgo/commit/c98e4c525c1bf3a457e23b0d703f38f71a0d7fe5))
+* **server:** revoke a CIBA grant's access tokens with its refresh token ([0c886b7](https://github.com/IDFoundry/FAPIgo/commit/0c886b74882ce97d5b48952346cdc335ff38b4c5))
+* **server:** write a zero-value Error's text page as a 500 server_error ([25e1f7b](https://github.com/IDFoundry/FAPIgo/commit/25e1f7be3022bd783cc68271fcd64e05ffd4d015))
+
 ## [0.53.0](https://github.com/IDFoundry/FAPIgo/compare/v0.52.1...v0.53.0) (2026-10-10)
 
 

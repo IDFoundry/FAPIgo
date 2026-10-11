@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"strings"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/storage"
@@ -148,6 +149,15 @@ func (s *Server) approveBackchannelAuthentication(ctx context.Context, clientID 
 	requestedScope, _ := jsonString(request.Parameters, "scope")
 	if scopeErr := validateGrantedScopeSubset(result.grant.Scope, requestedScope); scopeErr != nil {
 		wrapped := newError(ErrorInvalidRequest, 400, "granted scope exceeds requested scope", scopeErr)
+		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, clientID, AuditOutcomeFailure, string(wrapped.Code()))
+		return wrapped
+	}
+	// A CIBA request carries "openid" (CIBA Core §7.1), and its token
+	// response must carry an ID token (§10.1.1), so an approval can't
+	// drop it. (A request stored before "openid" was required, without
+	// it, isn't held to this.)
+	if containsScope(strings.Fields(requestedScope), "openid") && !containsScope(result.grant.Scope, "openid") {
+		wrapped := newError(ErrorInvalidRequest, 400, `granted scope must keep "openid", which a CIBA token response's ID token requires`, nil)
 		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, clientID, AuditOutcomeFailure, string(wrapped.Code()))
 		return wrapped
 	}

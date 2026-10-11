@@ -124,12 +124,12 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 	if result.subject.id.value == "" {
 		return s.completeLocalFail(ctx, clientID, newError(ErrorServerError, 500, "authorize result carries no authenticated subject", nil)), nil
 	}
-	// A zero AuthenticationContext{} (one that bypassed
-	// NewAuthenticationContext) has no auth_time: it would pass max_age
-	// and prompt=login as an authentication at the zero time never
-	// could, and leave an ID token without the auth_time they require.
-	if result.auth.authTime.IsZero() {
-		return s.completeLocalFail(ctx, clientID, newError(ErrorServerError, 500, "authorize result carries no authentication context (use NewAuthenticationContext)", nil)), nil
+	// The authentication time must be one that happened: a zero
+	// AuthenticationContext{} would leave an ID token without the
+	// auth_time max_age and prompt=login require, and a future one
+	// would pass both as the most recent authentication possible.
+	if problem := result.auth.authTimeProblem(s.deps.Clock.Now(), s.cfg.Limits.MaxClockSkew); problem != "" {
+		return s.completeLocalFail(ctx, clientID, newError(ErrorServerError, 500, problem, nil)), nil
 	}
 
 	// OIDC Core §3.1.2.1: with max_age, an authentication older than

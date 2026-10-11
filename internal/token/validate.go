@@ -373,6 +373,9 @@ func (t IDToken) Validate(pub crypto.PublicKey, policy IDTokenValidatePolicy) (V
 	if policy.Now.Sub(c.IssuedAt) > policy.MaxLifetime {
 		return ValidatedIDToken{}, ErrIssuedAtTooOld
 	}
+	if err := checkAuthTime(c.AuthTime, policy); err != nil {
+		return ValidatedIDToken{}, err
+	}
 	if policy.ExpectedNonce != "" {
 		if subtle.ConstantTimeCompare([]byte(c.Nonce), []byte(policy.ExpectedNonce)) != 1 {
 			return ValidatedIDToken{}, ErrNonceMismatch
@@ -566,4 +569,16 @@ func (t IDToken) VerifyHint(pub crypto.PublicKey, policy IDTokenHintPolicy) (str
 		return "", ErrAuthorizedPartyMismatch
 	}
 	return c.Subject, nil
+}
+
+// checkAuthTime refuses an auth_time later than now, allowing the clock
+// skew: auth_time is when the user authenticated, so a future one didn't
+// happen, and would pass a max_age check (OIDC Core §3.1.3.7 rule 13) as
+// the freshest authentication possible. A zero authTime (no auth_time)
+// passes; ParseIDToken already refused a negative one.
+func checkAuthTime(authTime time.Time, policy IDTokenValidatePolicy) error {
+	if !authTime.IsZero() && authTime.After(policy.Now.Add(policy.MaxClockSkew)) {
+		return ErrAuthTimeInvalid
+	}
+	return nil
 }

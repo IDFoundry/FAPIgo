@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/grantrevocation"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -97,8 +98,9 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 	}
 
 	now := s.deps.Clock.Now()
+	authReqIDHash := sha256.Sum256([]byte(authReqID))
 	polled, err := s.deps.Backchannel.PollBackchannelAuthentication(ctx, storage.PollBackchannelAuthentication{
-		AuthReqIDHash: sha256.Sum256([]byte(authReqID)),
+		AuthReqIDHash: authReqIDHash,
 		Now:           now,
 		ClientID:      client.ID(),
 	})
@@ -125,6 +127,7 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorServerError, 500, "failed to decode backchannel authentication grant", err))
 	}
+	grant.CodeGrantID = s.backchannelGrantID(authReqIDHash)
 	if usableErr := s.checkGrantUsable(ctx, client, grant); usableErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), usableErr)
 	}
@@ -218,4 +221,16 @@ func (s *Server) issueBackchannelOptionalTokens(ctx context.Context, client stor
 		result.HasRefreshToken = true
 	}
 	return nil
+}
+
+// backchannelGrantID names the grant a CIBA request (authReqIDHash) was
+// approved with, as an authorization code's grant is named after the
+// code, so revoking a refresh token from its exchange (RevokeToken)
+// ends every access token from the grant. "" when grants can't be
+// revoked: no revocation store resource servers can read.
+func (s *Server) backchannelGrantID(authReqIDHash [32]byte) string {
+	if _, ok := s.grantRevocationReader(); !ok {
+		return ""
+	}
+	return grantrevocation.BackchannelGrantID(authReqIDHash)
 }

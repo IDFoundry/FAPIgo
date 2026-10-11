@@ -53,6 +53,11 @@ var (
 	// direction around Now.
 	ErrIssuedAtTooOld = errors.New("token: iat exceeds maximum allowed age")
 
+	// ErrAuthTimeInvalid indicates an ID token's auth_time is later than
+	// now, beyond the allowed clock skew: not a time the user can have
+	// authenticated.
+	ErrAuthTimeInvalid = errors.New("token: auth_time is in the future")
+
 	// ErrAccessTokenHashMismatch indicates an ID token's at_hash claim
 	// did not match the access token issued alongside it (OIDC Core
 	// §3.1.3.6) — either a different access token was substituted after

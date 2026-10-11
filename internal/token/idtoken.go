@@ -71,6 +71,12 @@ func parseIDTokenClaims(payload []byte) (IDTokenClaims, error) {
 	if err != nil {
 		return IDTokenClaims{}, err
 	}
+	// auth_time counts seconds from the epoch (OIDC Core §2). A negative
+	// one is no authentication time, and the most negative values
+	// decode to the zero time.Time, which reads as no auth_time at all.
+	if hasAuthTime && authTime < 0 {
+		return IDTokenClaims{}, fmt.Errorf("%w: auth_time is negative", ErrMalformedClaims)
+	}
 	acr, _, err := popString(raw, "acr", false)
 	if err != nil {
 		return IDTokenClaims{}, err

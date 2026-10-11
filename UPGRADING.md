@@ -15,6 +15,65 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.54.0
+
+### An authentication time can't be in the future (server, client)
+
+**Affects:** an application that passes `NewAuthenticationContext` an
+`authTime` later than now (a session's expiry instead of when the user
+logged in, say) or before the Unix epoch; and a relying party using
+this library's `client` against a server that issues such an
+`auth_time`.
+
+**Why:** `auth_time` is when the user authenticated. One later than now
+didn't happen, but passed `max_age=0` and `prompt=login`, which exist to
+force a fresh authentication, as the freshest one possible, and reached
+the ID token. Now:
+
+- **`CompleteAuthorization` and `CompleteBackchannelAuthentication`**
+  refuse an `Authorize` whose authentication time is later than now
+  plus `Limits.MaxClockSkew`, with `server_error`, as they already
+  refused a zero `AuthenticationContext{}`.
+- **`NewAuthenticationContext`** refuses an `authTime` before the Unix
+  epoch, which no `auth_time` can express.
+- **The client** refuses an ID token whose `auth_time` is later than
+  now plus its `Limits.MaxClockSkew`, or negative, with
+  `invalid_response`, on every flow.
+
+**What to change:** pass the time the user actually authenticated.
+
+### CIBA request objects live at most 60 minutes in production (server, *production only*)
+
+**Affects:** a server under `AssuranceProduction` with CIBA enabled
+(`Endpoints.BackchannelAuthentication`) whose
+`Limits.MaxBackchannelAuthenticationRequestLifetime` is over 60 minutes.
+
+**Why:** FAPI-CIBA §5.2.2 requires a signed authentication request's
+`nbf` and `exp` to "limit the lifetime of the request to no more than 60
+minutes". `New` now refuses a longer limit under production, reported
+with the other FAPI limits. Development assurance is unchanged.
+
+**What to change:** set `MaxBackchannelAuthenticationRequestLifetime` to
+60 minutes or less. A request object only needs to live long enough to
+reach the server, so a minute or two is plenty.
+
+### A CIBA approval keeps `openid` (server)
+
+**Affects:** an application whose CIBA approval grants a scope without
+`openid`, such as `GrantedAuthorization{Scope: []string{"accounts"}}`
+for a request asking for `openid accounts`.
+
+**Why:** a CIBA request carries `openid` (required since v0.53.0), and
+CIBA Core §10.1.1 requires an ID token in its token response. An
+approval that dropped `openid` produced a token response with an access
+token and no ID token: a CIBA login with no identity.
+`CompleteBackchannelAuthentication` now refuses it with
+`invalid_request`, as it refuses a scope beyond the request's, and the
+request stays pending for a corrected decision.
+
+**What to change:** keep `openid` in `GrantedAuthorization.Scope` when
+approving a CIBA request; narrow the other scopes as you like.
+
 ## v0.53.0
 
 ### A requested subject is enforced (server)

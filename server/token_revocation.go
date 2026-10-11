@@ -72,8 +72,9 @@ type TokenRevocationResult struct {
 // (RFC 7009 §2.1): the grant's GrantID if it has one (RevokeGrant) —
 // which is why a GrantID must name one grant only
 // (GrantedAuthorization.GrantID) — and, when Dependencies.Revocation
-// can be read, the authorization code it was issued from, as code reuse
-// revokes it.
+// can be read, the authorization code or CIBA request it was issued
+// from (as code reuse revokes a code's). A grant the embedder served
+// (IssueRefreshToken) is revoked only through its GrantID.
 //
 // A token that is unknown, expired, already revoked, or another
 // client's or client instance's is answered 200 and left as it is: RFC
@@ -178,10 +179,10 @@ func (s *Server) revokeRefreshToken(ctx context.Context, clientID fapi.ClientID,
 	return TokenRevocationResult{Revoked: true, GrantID: grant.GrantID}, nil
 }
 
-// revokeCodeGrant revokes the authorization code grant codeGrantID
+// revokeCodeGrant revokes the code or CIBA grant codeGrantID
 // (grantRecord.CodeGrantID), as code reuse does, so every access token
-// issued from that code, or later from its refresh tokens, is refused
-// even when the application set no GrantID. A code grant ID is only
+// issued from that code or CIBA request, or later from its refresh
+// tokens, is refused even when the application set no GrantID. A code grant ID is only
 // set with a revocation store resource servers can read, and a grant
 // carrying one never gets here without it: redeemRefreshGrant's
 // checkGrantNotRevoked fails closed first.

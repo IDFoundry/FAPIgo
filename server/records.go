@@ -131,12 +131,14 @@ type grantRecord struct {
 	// GrantID is GrantedAuthorization.GrantID: carried into every access
 	// token from the grant, and checked against RevokeGrant.
 	GrantID string `json:"grant_id,omitempty"`
-	// CodeGrantID is the grant's code grant ID
-	// (grantrevocation.CodeGrantID), set at the authorization code
-	// exchange when grants can be revoked: carried into every access
-	// token from the grant and its refresh token, so a reuse of the code
-	// revokes them all (RFC 6749 §4.1.2). Empty for grants that didn't
-	// come from a code, and for records written before it existed.
+	// CodeGrantID is the grant's code grant ID, set when grants can be
+	// revoked: grantrevocation.CodeGrantID at the authorization code
+	// exchange, or grantrevocation.BackchannelGrantID at the CIBA token
+	// exchange. It's carried into every access token from the grant and
+	// its refresh token, so a reuse of the code (RFC 6749 §4.1.2), or
+	// RevokeToken on the refresh token (RFC 7009 §2.1), revokes them
+	// all. Empty for grants the embedder served (IssueRefreshToken), and
+	// for records written before it existed.
 	CodeGrantID string `json:"code_grant_id,omitempty"`
 
 	// IssuedAt is when this record was issued: an authorization code,

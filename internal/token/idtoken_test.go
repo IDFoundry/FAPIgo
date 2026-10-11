@@ -689,3 +689,69 @@ func TestComputeATHashRejectsUnsupportedAlgorithm(t *testing.T) {
 		t.Fatalf("computeATHash(unsupported algorithm) = nil error, want error")
 	}
 }
+
+// TestIDTokenValidateChecksAuthTime: an auth_time later than now beyond
+// the clock skew isn't a time the user can have authenticated, and fails
+// validation, as a negative one fails parsing; one within the skew, the
+// epoch itself, and a token without auth_time pass.
+func TestIDTokenValidateChecksAuthTime(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now().Truncate(time.Second)
+	tests := map[string]struct {
+		authTime time.Time
+		wantErr  bool
+	}{
+		"absent":       {time.Time{}, false},
+		"now":          {now, false},
+		"within skew":  {now.Add(5 * time.Second), false},
+		"the epoch":    {time.Unix(0, 0), false},
+		"beyond skew":  {now.Add(11 * time.Second), true},
+		"a year ahead": {now.Add(365 * 24 * time.Hour), true},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			p := baseIDTokenParams(key, now, time.Minute)
+			p.AuthTime = tc.authTime
+			tok, err := IssueIDToken(p)
+			if err != nil {
+				t.Fatalf("IssueIDToken: %v", err)
+			}
+			parsed, err := ParseIDToken(tok)
+			if err != nil {
+				t.Fatalf("ParseIDToken: %v", err)
+			}
+			policy := baseIDTokenPolicy(now)
+			policy.MaxClockSkew = 10 * time.Second
+			_, err = parsed.Validate(&key.PublicKey, policy)
+			if tc.wantErr != errors.Is(err, ErrAuthTimeInvalid) {
+				t.Fatalf("Validate = %v, want ErrAuthTimeInvalid: %v", err, tc.wantErr)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("Validate: %v", err)
+			}
+		})
+	}
+}
+
+// TestParseIDTokenRefusesNegativeAuthTime: auth_time counts seconds from
+// the epoch, so a negative one is malformed — including the most
+// negative values, which would otherwise decode to the zero time.Time
+// and read as no auth_time at all.
+func TestParseIDTokenRefusesNegativeAuthTime(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	for name, authTime := range map[string]time.Time{
+		"one second before the epoch": time.Unix(-1, 0),
+		"near the zero time":          time.Time{}.Add(time.Nanosecond),
+	} {
+		p := baseIDTokenParams(key, now, time.Minute)
+		p.AuthTime = authTime
+		tok, err := IssueIDToken(p)
+		if err != nil {
+			t.Fatalf("%s: IssueIDToken: %v", name, err)
+		}
+		if _, err := ParseIDToken(tok); !errors.Is(err, ErrMalformedClaims) {
+			t.Fatalf("%s: ParseIDToken = %v, want ErrMalformedClaims", name, err)
+		}
+	}
+}

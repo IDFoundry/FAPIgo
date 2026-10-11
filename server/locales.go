@@ -84,15 +84,25 @@ func isLanguageTagShaped(tag string) bool {
 		return false
 	}
 	for i, subtag := range strings.Split(tag, "-") {
-		if subtag == "" || len(subtag) > 8 {
+		if !isSubtagShaped(subtag, i == 0) {
 			return false
 		}
-		for j := range len(subtag) {
-			c := subtag[j]
-			alpha := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
-			if !alpha && (i == 0 || c < '0' || c > '9') {
-				return false
-			}
+	}
+	return true
+}
+
+// isSubtagShaped reports whether subtag is 1 to 8 ASCII letters, or,
+// unless it is a tag's first subtag, letters and digits.
+func isSubtagShaped(subtag string, first bool) bool {
+	if subtag == "" || len(subtag) > 8 {
+		return false
+	}
+	for j := range len(subtag) {
+		c := subtag[j]
+		alpha := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+		digit := c >= '0' && c <= '9'
+		if !alpha && (first || !digit) {
+			return false
 		}
 	}
 	return true

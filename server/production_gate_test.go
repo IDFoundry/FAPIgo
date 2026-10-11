@@ -283,6 +283,33 @@ func TestNewEnforcesFAPILimitsUnderProduction(t *testing.T) {
 	})
 }
 
+// TestNewCapsCIBARequestLifetimeUnderProduction covers FAPI-CIBA
+// §5.2.2: a signed authentication request lives at most 60 minutes, so
+// a production server with CIBA enabled refuses a longer
+// MaxBackchannelAuthenticationRequestLifetime, while development leaves
+// it to the embedder.
+func TestNewCapsCIBARequestLifetimeUnderProduction(t *testing.T) {
+	for lifetime, wantRefused := range map[time.Duration]bool{
+		60 * time.Minute: false,
+		61 * time.Minute: true,
+		24 * time.Hour:   true,
+	} {
+		cfg, deps := cibaConfigAndDeps(t, server.AssuranceProduction, server.NoBackchannelNotifications{})
+		cfg.Limits.MaxBackchannelAuthenticationRequestLifetime = lifetime
+		_, err := server.New(cfg, deps)
+		if refused := err != nil && strings.Contains(err.Error(), "limits.max_backchannel_authentication_request_lifetime"); refused != wantRefused {
+			t.Errorf("New(production, %v) = %v, want refused: %v", lifetime, err, wantRefused)
+		}
+		if !wantRefused && err != nil {
+			t.Errorf("New(production, %v): %v", lifetime, err)
+		}
+		cfg.Assurance = server.AssuranceDevelopment
+		if _, err := server.New(cfg, deps); err != nil {
+			t.Errorf("New(development, %v) = %v, want it accepted", lifetime, err)
+		}
+	}
+}
+
 // productionConfigAndDeps is validConfig/validDependencies with every
 // AssuranceProduction requirement met.
 func productionConfigAndDeps(t *testing.T) (server.Config, server.Dependencies) {

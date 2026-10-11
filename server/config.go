@@ -326,7 +326,8 @@ type Limits struct {
 	// future a signed backchannel authentication request's own exp claim
 	// may be — mirrors MaxRequestObjectLifetime's role for PAR's request
 	// object. Required only when Endpoints.BackchannelAuthentication is
-	// set.
+	// set. Under AssuranceProduction it must be at most 60 minutes
+	// (FAPI-CIBA §5.2.2).
 	MaxBackchannelAuthenticationRequestLifetime time.Duration
 
 	// BackchannelAuthenticationPollInterval is the minimum time a client

@@ -372,13 +372,17 @@ const (
 	fapiMaxClockSkew = 60 * time.Second
 	// A request object lives at most 60 minutes.
 	fapiMaxRequestObjectLifetime = 60 * time.Minute
+	// FAPI-CIBA §5.2.2: a signed authentication request's nbf and exp
+	// "limit the lifetime of the request to no more than 60 minutes".
+	fapiMaxBackchannelAuthenticationRequestLifetime = 60 * time.Minute
 )
 
 // validateFAPILimits refuses Limits outside the FAPI 2.0 Security
-// Profile's fixed numbers, reporting every one (errors.Join), so a
-// production deployment can't drift out of the profile by
-// configuration. RecommendedLimits is within all of them.
-func validateFAPILimits(l Limits) error {
+// Profile's fixed numbers, and, with CIBA enabled, FAPI-CIBA's request
+// lifetime, reporting every one (errors.Join), so a production
+// deployment can't drift out of the profile by configuration.
+// RecommendedLimits is within all of them.
+func validateFAPILimits(l Limits, cibaEnabled bool) error {
 	var errs []error
 	if l.AuthorizationCodeLifetime > fapiMaxAuthorizationCodeLifetime {
 		errs = append(errs, fmt.Errorf("server: config: limits.authorization_code_lifetime must be at most %v under AssuranceProduction (FAPI 2.0 §5.3.2.1)", fapiMaxAuthorizationCodeLifetime))
@@ -391,6 +395,9 @@ func validateFAPILimits(l Limits) error {
 	}
 	if l.MaxRequestObjectLifetime > fapiMaxRequestObjectLifetime {
 		errs = append(errs, fmt.Errorf("server: config: limits.max_request_object_lifetime must be at most %v under AssuranceProduction", fapiMaxRequestObjectLifetime))
+	}
+	if cibaEnabled && l.MaxBackchannelAuthenticationRequestLifetime > fapiMaxBackchannelAuthenticationRequestLifetime {
+		errs = append(errs, fmt.Errorf("server: config: limits.max_backchannel_authentication_request_lifetime must be at most %v under AssuranceProduction (FAPI-CIBA §5.2.2)", fapiMaxBackchannelAuthenticationRequestLifetime))
 	}
 	return errors.Join(errs...)
 }
@@ -405,7 +412,7 @@ func validateAssurance(cfg Config, cibaEnabled bool) error {
 	if cfg.Assurance != AssuranceProduction {
 		return nil
 	}
-	if err := validateFAPILimits(cfg.Limits); err != nil {
+	if err := validateFAPILimits(cfg.Limits, cibaEnabled); err != nil {
 		return err
 	}
 	if err := rejectLoopbackURL("issuer", cfg.Issuer); err != nil {

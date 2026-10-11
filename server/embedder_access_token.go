@@ -19,7 +19,9 @@ type IssueAccessTokenRequest struct {
 
 	// Client is the client the token request authenticated as, exactly
 	// as AuthenticateAttestedClient returned it for this request: one
-	// whose Client was changed is refused.
+	// whose Client was changed is refused, and so is one whose
+	// attestation expired more than Limits.MaxClockSkew ago, kept from an
+	// earlier request.
 	Client AttestedClient
 
 	// Binding is the token request's sender-constraining credential,
@@ -66,7 +68,7 @@ type IssueAccessTokenRequest struct {
 // records an AuditEventIssueAccessToken.
 func (s *Server) IssueAccessToken(ctx context.Context, req IssueAccessTokenRequest) (TokenResult, error) {
 	client := req.Client.Client
-	grant, err := s.embedderGrant(embedderGrantRequest(req))
+	grant, err := s.embedderGrant(ctx, embedderGrantRequest(req))
 	if err == nil && req.Binding.verifiedFor != client.ID() {
 		err = newError(ErrorServerError, 500, "Binding must be as VerifyTokenRequestBinding returned it for Client", nil)
 	}

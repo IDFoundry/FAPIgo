@@ -364,3 +364,36 @@ type failingAccessTokenIssuer struct{}
 func (failingAccessTokenIssuer) IssueAccessToken(context.Context, server.AccessTokenParams) (string, string, error) {
 	return "", "", errors.New("issuer unavailable")
 }
+
+// TestEmbedderGrantRefusesExpiredAttestation: an AttestedClient whose
+// attestation expired more than MaxClockSkew ago was kept from an
+// earlier request rather than authenticated for this one, so neither
+// IssueAccessToken nor IssueRefreshToken issues for it.
+func TestEmbedderGrantRefusesExpiredAttestation(t *testing.T) {
+	attesterKey := generateKey(t)
+	h := newRevocationHarness(t, attesterKey)
+	instance := &attestedInstance{t: t, h: h, attesterKey: attesterKey, instanceKey: generateKey(t)}
+	req := embedderAccessTokenRequest(t, instance, generateKey(t))
+	expiry := req.Client.AttestationExpiresAt.Add(h.cfg.Limits.MaxClockSkew)
+	at := func(now time.Time) *server.Server {
+		deps := h.deps
+		deps.Clock = fixedClock{now: now}
+		srv, err := server.New(h.cfg, deps)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return srv
+	}
+
+	within := at(expiry)
+	if _, err := within.IssueAccessToken(context.Background(), req); err != nil {
+		t.Fatalf("IssueAccessToken at the attestation's exp plus skew: %v", err)
+	}
+	past := at(expiry.Add(time.Second))
+	if _, err := past.IssueAccessToken(context.Background(), req); serverErrorCode(t, err) != server.ErrorServerError {
+		t.Errorf("IssueAccessToken past the attestation's exp = %v, want server_error", err)
+	}
+	if _, err := past.IssueRefreshToken(context.Background(), server.IssueRefreshTokenRequest(req)); serverErrorCode(t, err) != server.ErrorServerError {
+		t.Errorf("IssueRefreshToken past the attestation's exp = %v, want server_error", err)
+	}
+}

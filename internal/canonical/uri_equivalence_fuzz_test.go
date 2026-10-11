@@ -41,28 +41,35 @@ func FuzzURIEquivalence(f *testing.F) {
 		f.Add(p[0], p[1])
 	}
 	f.Fuzz(func(t *testing.T, a, b string) {
-		ua, err := url.Parse(a)
-		if err != nil || !ua.IsAbs() || (ua.Scheme != "https" && ua.Scheme != "http") || ua.Host == "" {
-			return
-		}
-		ub, err := url.Parse(b)
-		if err != nil || !ub.IsAbs() || (ub.Scheme != "https" && ub.Scheme != "http") || ub.Host == "" {
-			return
-		}
-		if URI(ua) != URI(ub) {
+		ua, okA := parseHTTPURL(a)
+		ub, okB := parseHTTPURL(b)
+		if !okA || !okB || URI(ua) != URI(ub) {
 			return
 		}
 		as, ah, ap, apath := effective(ua)
 		bs, bh, bp, bpath := effective(ub)
-		// Compare IP literals by value.
-		if ia, ib := net.ParseIP(ah), net.ParseIP(bh); ia != nil && ib != nil {
-			if ia.Equal(ib) {
-				ah, bh = "", ""
-			}
+		if sameIPLiteral(ah, bh) {
+			ah, bh = "", ""
 		}
 		if as != bs || ah != bh || ap != bp || apath != bpath {
 			t.Fatalf("URI(%q) == URI(%q) == %q, but they address %q %q %q %q vs %q %q %q %q",
 				a, b, URI(ua), as, ah, ap, apath, bs, bh, bp, bpath)
 		}
 	})
+}
+
+// parseHTTPURL parses raw as an absolute http(s) URL with a host.
+func parseHTTPURL(raw string) (*url.URL, bool) {
+	u, err := url.Parse(raw)
+	if err != nil || !u.IsAbs() || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+		return nil, false
+	}
+	return u, true
+}
+
+// sameIPLiteral reports whether a and b are both IP literals with the
+// same value, so IP hosts compare by value rather than spelling.
+func sameIPLiteral(a, b string) bool {
+	ia, ib := net.ParseIP(a), net.ParseIP(b)
+	return ia != nil && ib != nil && ia.Equal(ib)
 }

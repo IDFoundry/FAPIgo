@@ -49,34 +49,42 @@ func TestBeginAuthorizationURLCarriesOnlyClientIDAndRequestURI(t *testing.T) {
 			if err != nil {
 				t.Fatalf("BeginAuthorization: %v", err)
 			}
-			u, err := url.Parse(session.URL().String())
-			if err != nil {
-				t.Fatalf("url.Parse(%q): %v", session.URL(), err)
-			}
-			if u.Fragment != "" {
-				t.Errorf("URL %q has a fragment", u)
-			}
-			query := u.Query()
-			names := make([]string, 0, len(query))
-			for name, values := range query {
-				names = append(names, name)
-				if len(values) != 1 {
-					t.Errorf("query parameter %q appears %d times, want once", name, len(values))
-				}
-			}
-			slices.Sort(names)
-			if !slices.Equal(names, []string{"client_id", "request_uri"}) {
-				t.Errorf("query parameters = %v, want exactly [client_id request_uri]", names)
-			}
-			if got := query.Get("request_uri"); got != "urn:ietf:params:oauth:request_uri:abc123" {
-				t.Errorf("request_uri = %q, want the one PAR returned", got)
-			}
-			if got := query.Get("client_id"); got != testClientID {
-				t.Errorf("client_id = %q, want %q", got, testClientID)
-			}
-			if got := u.Scheme + "://" + u.Host + u.Path; got != testIssuer+"/authorize" {
-				t.Errorf("URL = %q, want the authorization endpoint %q", got, testIssuer+"/authorize")
-			}
+			assertAuthorizationURLNamesOnlyPARResult(t, session.URL().String())
 		})
+	}
+}
+
+// assertAuthorizationURLNamesOnlyPARResult checks that raw is the
+// authorization endpoint with exactly the client_id and the
+// request_uri PAR returned, each once, and no fragment.
+func assertAuthorizationURLNamesOnlyPARResult(t *testing.T, raw string) {
+	t.Helper()
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatalf("url.Parse(%q): %v", raw, err)
+	}
+	if u.Fragment != "" {
+		t.Errorf("URL %q has a fragment", u)
+	}
+	query := u.Query()
+	names := make([]string, 0, len(query))
+	for name, values := range query {
+		names = append(names, name)
+		if len(values) != 1 {
+			t.Errorf("query parameter %q appears %d times, want once", name, len(values))
+		}
+	}
+	slices.Sort(names)
+	if !slices.Equal(names, []string{"client_id", "request_uri"}) {
+		t.Errorf("query parameters = %v, want exactly [client_id request_uri]", names)
+	}
+	if got := query.Get("request_uri"); got != "urn:ietf:params:oauth:request_uri:abc123" {
+		t.Errorf("request_uri = %q, want the one PAR returned", got)
+	}
+	if got := query.Get("client_id"); got != testClientID {
+		t.Errorf("client_id = %q, want %q", got, testClientID)
+	}
+	if got := u.Scheme + "://" + u.Host + u.Path; got != testIssuer+"/authorize" {
+		t.Errorf("URL = %q, want the authorization endpoint %q", got, testIssuer+"/authorize")
 	}
 }

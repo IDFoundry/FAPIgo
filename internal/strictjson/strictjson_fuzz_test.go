@@ -36,35 +36,43 @@ func FuzzUnmarshalMatchesCaseSensitiveReading(f *testing.F) {
 		if Unmarshal([]byte(doc), &h) != nil {
 			return
 		}
-		var members map[string]json.RawMessage
-		if json.Unmarshal([]byte(doc), &members) != nil {
+		want, ok := readHeaderCaseSensitively(doc)
+		if !ok {
 			return
-		}
-		exact := func(name string, into any) {
-			raw, ok := members[name]
-			if !ok {
-				return
-			}
-			_ = json.Unmarshal(raw, into)
-		}
-		var want fuzzHeader
-		exact("alg", &want.Alg)
-		exact("kid", &want.Kid)
-		exact("typ", &want.Typ)
-		exact("crit", &want.Crit)
-		if raw, ok := members["cnf"]; ok {
-			var cnf map[string]json.RawMessage
-			if json.Unmarshal(raw, &cnf) == nil && cnf != nil {
-				want.Cnf = &struct {
-					Jkt string `json:"jkt"`
-				}{}
-				if j, ok := cnf["jkt"]; ok {
-					_ = json.Unmarshal(j, &want.Cnf.Jkt)
-				}
-			}
 		}
 		if !reflect.DeepEqual(h, want) {
 			t.Fatalf("Unmarshal(%q) = %+v, case-sensitive reading = %+v", doc, h, want)
 		}
 	})
+}
+
+// readHeaderCaseSensitively reads doc into a fuzzHeader by exact member
+// names, one member at a time, as a case-sensitive reader would.
+func readHeaderCaseSensitively(doc string) (fuzzHeader, bool) {
+	var members map[string]json.RawMessage
+	if json.Unmarshal([]byte(doc), &members) != nil {
+		return fuzzHeader{}, false
+	}
+	var want fuzzHeader
+	readExact(members, "alg", &want.Alg)
+	readExact(members, "kid", &want.Kid)
+	readExact(members, "typ", &want.Typ)
+	readExact(members, "crit", &want.Crit)
+	if raw, ok := members["cnf"]; ok {
+		var cnf map[string]json.RawMessage
+		if json.Unmarshal(raw, &cnf) == nil && cnf != nil {
+			want.Cnf = &struct {
+				Jkt string `json:"jkt"`
+			}{}
+			readExact(cnf, "jkt", &want.Cnf.Jkt)
+		}
+	}
+	return want, true
+}
+
+// readExact decodes members[name], if present, into into.
+func readExact(members map[string]json.RawMessage, name string, into any) {
+	if raw, ok := members[name]; ok {
+		_ = json.Unmarshal(raw, into)
+	}
 }

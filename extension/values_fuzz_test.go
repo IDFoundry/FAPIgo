@@ -61,16 +61,23 @@ func FuzzExtensionValueReadersAgree(f *testing.F) {
 		}
 		first, _ := firstExactAmount([]byte(raw))
 		for name, v := range map[string]json.RawMessage{"last": last["amount"], "first": first} {
-			if v == nil {
-				if got.Amount != 0 {
-					t.Fatalf("accepted %q: Validate saw amount %d, a %s-wins exact reader sees none", raw, got.Amount, name)
-				}
-				continue
-			}
-			var n float64
-			if json.Unmarshal(v, &n) != nil || n != float64(got.Amount) {
-				t.Fatalf("accepted %q: Validate saw amount %d, a %s-wins exact reader sees %s", raw, got.Amount, name, v)
-			}
+			checkReaderSeesAmount(t, raw, name, v, got.Amount)
 		}
 	})
+}
+
+// checkReaderSeesAmount: the amount the name-wins reader saw in raw, v
+// (nil for none), is the amount Validate approved.
+func checkReaderSeesAmount(t *testing.T, raw, name string, v json.RawMessage, amount int) {
+	t.Helper()
+	if v == nil {
+		if amount != 0 {
+			t.Fatalf("accepted %q: Validate saw amount %d, a %s-wins exact reader sees none", raw, amount, name)
+		}
+		return
+	}
+	var n float64
+	if json.Unmarshal(v, &n) != nil || n != float64(amount) {
+		t.Fatalf("accepted %q: Validate saw amount %d, a %s-wins exact reader sees %s", raw, amount, name, v)
+	}
 }

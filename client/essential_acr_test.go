@@ -127,56 +127,14 @@ func TestBackchannelAuthenticationEssentialACR(t *testing.T) {
 			if err != nil {
 				t.Fatalf("BeginBackchannelAuthentication: %v", err)
 			}
-			obj, err := requestobject.Parse(as.lastBCForm.Get("request"))
-			if err != nil {
-				t.Fatalf("parse request object: %v", err)
-			}
-			raw, ok := obj.Parameter("claims")
-			if !ok {
-				t.Fatal("request object has no claims")
-			}
-			var claims struct {
-				IDToken struct {
-					ACR struct {
-						Essential bool     `json:"essential"`
-						Values    []string `json:"values"`
-					} `json:"acr"`
-				} `json:"id_token"`
-			}
-			if err := json.Unmarshal(raw, &claims); err != nil {
-				t.Fatalf("claims is not a JSON object: %s", raw)
-			}
-			if acr := claims.IDToken.ACR; !acr.Essential || len(acr.Values) != 2 || acr.Values[0] != gold || acr.Values[1] != silver {
-				t.Fatalf("claims = %s, want an essential acr of gold or silver", raw)
-			}
-
-			sealer, err := client.NewBackchannelSessionSealer(c, [][]byte{[]byte("essential-acr-test-seal-key-0001")})
-			if err != nil {
-				t.Fatal(err)
-			}
-			sealed, err := sealer.Seal(session, "user-1")
-			if err != nil {
-				t.Fatal(err)
-			}
-			restored, _, err := sealer.Open(sealed, "user-1")
-			if err != nil {
-				t.Fatal(err)
-			}
+			assertRequestObjectAsksEssentialGoldOrSilver(t, as.lastBCForm.Get("request"))
+			restored := resealBackchannelSession(t, c, session)
 			as.tokenResponses = []cibaTokenResponse{{status: http.StatusOK, body: map[string]any{
 				"access_token": "opaque-access-token", "token_type": "DPoP", "expires_in": 300, "scope": "openid accounts",
 				"id_token": newCIBAIDTokenWithACR(t, as, tc.acr),
 			}}}
 			result, err := c.PollBackchannelAuthentication(context.Background(), restored)
-			if tc.wantErr {
-				var cerr *client.Error
-				if !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidResponse {
-					t.Fatalf("PollBackchannelAuthentication = %v, %v; want invalid_response", result, err)
-				}
-				return
-			}
-			if _, ok := result.(client.BackchannelAuthenticationApproved); err != nil || !ok {
-				t.Fatalf("PollBackchannelAuthentication = %T, %v; want approved", result, err)
-			}
+			assertApprovedOrInvalidResponse(t, result, err, tc.wantErr)
 		})
 	}
 }
@@ -197,5 +155,68 @@ func TestBeginBackchannelAuthenticationRefusesEssentialACRWithoutOpenID(t *testi
 	}
 	if as.lastBCForm != nil {
 		t.Error("a request was sent anyway")
+	}
+}
+
+// assertRequestObjectAsksEssentialGoldOrSilver checks that the signed
+// request object's claims ask for an essential acr of gold or silver.
+func assertRequestObjectAsksEssentialGoldOrSilver(t *testing.T, request string) {
+	t.Helper()
+	obj, err := requestobject.Parse(request)
+	if err != nil {
+		t.Fatalf("parse request object: %v", err)
+	}
+	raw, ok := obj.Parameter("claims")
+	if !ok {
+		t.Fatal("request object has no claims")
+	}
+	var claims struct {
+		IDToken struct {
+			ACR struct {
+				Essential bool     `json:"essential"`
+				Values    []string `json:"values"`
+			} `json:"acr"`
+		} `json:"id_token"`
+	}
+	if err := json.Unmarshal(raw, &claims); err != nil {
+		t.Fatalf("claims is not a JSON object: %s", raw)
+	}
+	if acr := claims.IDToken.ACR; !acr.Essential || len(acr.Values) != 2 || acr.Values[0] != gold || acr.Values[1] != silver {
+		t.Fatalf("claims = %s, want an essential acr of gold or silver", raw)
+	}
+}
+
+// resealBackchannelSession seals session and opens it again, as a
+// caller storing it between polls would.
+func resealBackchannelSession(t *testing.T, c *client.Client, session client.BackchannelAuthenticationSession) client.BackchannelAuthenticationSession {
+	t.Helper()
+	sealer, err := client.NewBackchannelSessionSealer(c, [][]byte{[]byte("essential-acr-test-seal-key-0001")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := sealer.Seal(session, "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, _, err := sealer.Open(sealed, "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return restored
+}
+
+// assertApprovedOrInvalidResponse checks a poll's outcome: refused as
+// invalid_response when wantErr, approved otherwise.
+func assertApprovedOrInvalidResponse(t *testing.T, result client.BackchannelAuthenticationResult, err error, wantErr bool) {
+	t.Helper()
+	if wantErr {
+		var cerr *client.Error
+		if !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidResponse {
+			t.Fatalf("PollBackchannelAuthentication = %v, %v; want invalid_response", result, err)
+		}
+		return
+	}
+	if _, ok := result.(client.BackchannelAuthenticationApproved); err != nil || !ok {
+		t.Fatalf("PollBackchannelAuthentication = %T, %v; want approved", result, err)
 	}
 }

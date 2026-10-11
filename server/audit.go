@@ -64,6 +64,10 @@ const (
 
 	// AuditEventRevokeToken records the outcome of a RevokeToken call.
 	AuditEventRevokeToken
+
+	// AuditEventIssueAccessToken records the outcome of an
+	// IssueAccessToken call.
+	AuditEventIssueAccessToken
 )
 
 // AuditOutcome is a closed set of outcomes for an AuditEvent.

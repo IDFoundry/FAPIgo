@@ -542,11 +542,17 @@ client certificate with `VerifyTokenRequestBinding`: the same checks,
 and the same replay records, as this package's own grants. List the
 grant type in `Config.AdditionalGrantTypes` so `Metadata` advertises
 it. Whether the client may use the grant, and the grant itself, stay
-yours. To let the client refresh what it was granted, pass the
-authenticated client and the binding to `IssueRefreshToken` and return
-the token as `refresh_token`: `RefreshAccessToken` then redeems it like
-its own, bound to the client's instance key. Such a grant may not
-include `openid`, since no user authenticated.
+yours. Issue the access token by passing the authenticated client, the
+binding, the subject and what you granted to `IssueAccessToken`, which
+returns the token response to write with `WriteJSON`; don't call
+`Dependencies.AccessTokens` directly. To let the client refresh what it
+was granted, pass the same to `IssueRefreshToken`, and set the result
+as the response's `RefreshToken` (with `HasRefreshToken`) before
+writing it: `RefreshAccessToken` then redeems it
+like its own, bound to the client's instance key. Give both the same
+`GrantID`, so `RevokeGrant`, or the client revoking its refresh token,
+ends the first access token too, not only the refreshed ones. Such a
+grant may not include `openid`, since no user authenticated.
 
 **Letting clients revoke their refresh tokens.** Set
 `Config.Endpoints.Revocation` and serve it with `RevokeToken`, reading

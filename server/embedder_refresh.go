@@ -66,7 +66,7 @@ type IssueRefreshTokenRequest struct {
 // endpoint. Every call records an AuditEventIssueRefreshToken.
 func (s *Server) IssueRefreshToken(ctx context.Context, req IssueRefreshTokenRequest) (fapi.Secret, error) {
 	client := req.Client.Client
-	grant, err := s.embedderRefreshGrant(req)
+	grant, err := s.embedderGrant(embedderGrantRequest(req))
 	if err != nil {
 		s.audit(ctx, AuditEventIssueRefreshToken, client.ID(), AuditOutcomeFailure, string(err.Code()))
 		return fapi.Secret{}, err
@@ -81,9 +81,22 @@ func (s *Server) IssueRefreshToken(ctx context.Context, req IssueRefreshTokenReq
 	return fapi.NewSecret(raw), nil
 }
 
-// embedderRefreshGrant validates req and returns the grant a refresh
-// token for it carries.
-func (s *Server) embedderRefreshGrant(req IssueRefreshTokenRequest) (grantRecord, *Error) {
+// embedderGrantRequest is the grant an embedder served itself, as
+// IssueRefreshTokenRequest and IssueAccessTokenRequest both describe it.
+type embedderGrantRequest struct {
+	GrantType            string
+	Client               AttestedClient
+	Binding              TokenBinding
+	Subject              SubjectID
+	Scope                []string
+	AuthorizationDetails []json.RawMessage
+	GrantID              string
+}
+
+// embedderGrant validates req and returns the grant tokens for it carry:
+// a refresh token's stored grant, and the claims of every access token
+// issued for it, the first one included.
+func (s *Server) embedderGrant(req embedderGrantRequest) (grantRecord, *Error) {
 	client := req.Client.Client
 	switch {
 	case !slices.Contains(s.cfg.AdditionalGrantTypes, req.GrantType):
@@ -123,7 +136,7 @@ func (s *Server) embedderRefreshGrant(req IssueRefreshTokenRequest) (grantRecord
 // embedderAuthorizationDetails validates req's authorization details
 // under Config.RAR and the client's registered types, returning them as
 // one JSON array, or nil when there are none.
-func (s *Server) embedderAuthorizationDetails(req IssueRefreshTokenRequest) (json.RawMessage, *Error) {
+func (s *Server) embedderAuthorizationDetails(req embedderGrantRequest) (json.RawMessage, *Error) {
 	if len(req.AuthorizationDetails) == 0 {
 		return nil, nil
 	}

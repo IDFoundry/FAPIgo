@@ -124,8 +124,10 @@ storage; a browser-based client keeps the default binding.
 An issuer that serves its own grant, such as OpenID4VCI's
 pre-authorized code, at the token endpoint uses
 `AuthenticateAttestedClient` and `VerifyTokenRequestBinding` for the
-client and its DPoP proof, then `IssueRefreshToken` so the wallet can
-refresh, bound to the same instance key. See "Serving a grant this
+client and its DPoP proof, then `IssueAccessToken` for the access
+token and `IssueRefreshToken` so the wallet can refresh, bound to the
+same instance key; one `GrantID` on both lets revoking the grant end
+every token issued for it. See "Serving a grant this
 package doesn't" in
 [GETTING_STARTED §6](../../GETTING_STARTED.md#6-the-rest-of-the-http-surface).
 

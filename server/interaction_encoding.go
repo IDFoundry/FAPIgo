@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -97,7 +98,9 @@ func (r *InteractionRequest) UnmarshalText(text []byte) error {
 
 // ParseInteractionRequest restores an InteractionRequest
 // InteractionRequest.MarshalText encoded. A value that isn't such an
-// encoding is an error.
+// encoding is an error. Display, UILocales and ClaimsLocales are
+// filtered as BeginAuthorization filters them, so an edited encoding
+// can't carry a Display or language tag the request couldn't have.
 func ParseInteractionRequest(text string) (InteractionRequest, error) {
 	invalid := func(cause error) (InteractionRequest, error) {
 		return InteractionRequest{}, errors.Join(errors.New("server: not an encoded interaction request"), cause)
@@ -140,9 +143,9 @@ func ParseInteractionRequest(text string) (InteractionRequest, error) {
 		EssentialACRValues: e.EssentialACRValues,
 		RequiredSubject:    e.RequiredSubject,
 		Prompt:             e.Prompt,
-		UILocales:          e.UILocales,
-		ClaimsLocales:      e.ClaimsLocales,
-		Display:            e.Display,
+		UILocales:          languageTags(slices.Values(e.UILocales)),
+		ClaimsLocales:      languageTags(slices.Values(e.ClaimsLocales)),
+		Display:            knownDisplay(e.Display),
 		ClientDisplay:      display, AuthorizationDetails: e.AuthorizationDetails,
 		RequestedClaims: RequestedClaims{IDToken: e.IDTokenClaims, UserInfo: e.UserInfoClaims},
 		Extensions:      e.Extensions,

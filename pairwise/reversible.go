@@ -149,6 +149,12 @@ func (d reversibleDeriver) LookupInternalSubject(ctx context.Context, issuer, se
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
+	// No Input has an issuer or sector this long, so no body was derived
+	// under one; refusing it also keeps writeLengthPrefixed's 4-byte
+	// lengths exact.
+	if len(issuer) > MaxInputLength || len(sector) > MaxInputLength {
+		return "", fmt.Errorf("%w: issuer or sector longer than %d bytes", ErrSubjectNotFound, MaxInputLength)
+	}
 	sealed, ok := decodeReversibleBody(body)
 	if !ok {
 		return "", fmt.Errorf("%w: not a reversible body", ErrSubjectNotFound)

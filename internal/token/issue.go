@@ -304,3 +304,16 @@ const GrantTypeClaim = "grant_type"
 
 // ClientCredentialsGrantType is GrantTypeClaim's one value.
 const ClientCredentialsGrantType = "client_credentials"
+
+// PairwiseSectorClaim is the access token claim the server sets on a
+// token whose "sub" is a pairwise subject (OpenID Connect Core §8): the
+// sector the subject was derived for, which a resource server needs to
+// look the subject up (pairwise.Lookup). Tokens with a public subject
+// don't carry it.
+const PairwiseSectorClaim = "pairwise_sector"
+
+// ClientSubjectClaim is the claim a server-side access token record
+// (OpaqueAccessTokens) keeps the client's pairwise "sub" under, while
+// the record's own subject is the end user's internal one. It never
+// appears in a self-contained token, whose "sub" is the pairwise one.
+const ClientSubjectClaim = "client_sub"

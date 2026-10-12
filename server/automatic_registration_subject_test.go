@@ -10,22 +10,26 @@ import (
 	"github.com/idfoundry/fapigo/internal/clientassertion"
 	"github.com/idfoundry/fapigo/pairwise"
 	"github.com/idfoundry/fapigo/server"
+	"github.com/idfoundry/fapigo/storage/memstore"
 )
 
 // pairwiseAutomaticRegistrationServer is newAutomaticRegistrationTestServer
-// under subjects, with pairwise subjects derived by NewHMAC, and the
-// reason any automatic registration failed.
+// under subjects, with pairwise subjects derived by NewHMAC and opaque
+// access tokens, and the reason any automatic registration failed.
 func pairwiseAutomaticRegistrationServer(t *testing.T, f *automaticRegistrationFixture, subjects server.SubjectConfig) (*server.Server, *error) {
 	t.Helper()
 	failure := new(error)
 	cfg, deps := automaticRegistrationTestConfig(t, f, func(cfg *server.Config, deps *server.Dependencies) {
 		cfg.Subjects = subjects
 		deps.PairwiseSubjects = hmacDeriver(t)
+		// One-way pairwise subjects need opaque access tokens, which keep
+		// the internal subject in a server-side record.
+		deps.AccessTokens = server.OpaqueAccessTokens{Store: memstore.NewAccessTokenStore()}
 		cfg.AutomaticRegistration.OnResolutionFailure = func(_ context.Context, _ fapi.ClientID, err error) { *failure = err }
 	})
-	srv, err := server.NewIssuingPairwiseSubjects(cfg, deps)
+	srv, err := server.New(cfg, deps)
 	if err != nil {
-		t.Fatalf("NewIssuingPairwiseSubjects: %v", err)
+		t.Fatalf("New: %v", err)
 	}
 	return srv, failure
 }

@@ -156,6 +156,7 @@ var managedTokenClaims = []string{
 	"iss", "sub", "aud", "exp", "iat", "nbf", "jti", "client_id", "scope", "cnf",
 	"nonce", "auth_time", "acr", "amr", "azp", "at_hash", "c_hash", "s_hash",
 	authorizationDetailsParameter, RequestedUserinfoClaimsKey, grantrevocation.Claim, grantrevocation.CodeClaim, token.GrantTypeClaim,
+	token.PairwiseSectorClaim, token.ClientSubjectClaim,
 	"name", "given_name", "family_name", "middle_name", "nickname",
 	"preferred_username", "profile", "picture", "website", "email",
 	"email_verified", "gender", "birthdate", "zoneinfo", "locale",

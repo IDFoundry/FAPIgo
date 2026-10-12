@@ -132,6 +132,12 @@ func validateAssurance(cfg Config, deps Dependencies) error {
 	if !declinedRevocation(deps.Revocation) {
 		errs = append(errs, checkStoreAssurance("revocation", deps.Revocation, false, scaled))
 	}
+	if deps.PairwiseSubjects != nil {
+		errs = append(errs, checkKeyCustody("pairwise_subjects", deps.PairwiseSubjects, scaled))
+	}
+	if deps.SubjectResolver != nil {
+		errs = append(errs, checkKeyCustody("subject_resolver", deps.SubjectResolver, scaled))
+	}
 	return errors.Join(errs...)
 }
 
@@ -200,6 +206,26 @@ func checkStoreAssurance(name string, store any, requireAtomicConsume, requireCr
 	}
 	if requireCrossInstanceConsistent && !caps.CrossInstanceConsistent {
 		return fmt.Errorf("resource: dependencies: %s must declare CrossInstanceConsistent capability under AssuranceProduction with DeploymentHorizontallyScaled", name)
+	}
+	return nil
+}
+
+// checkKeyCustody requires a pairwise lookup to implement
+// keys.KeyCustodyAssurance and to declare Durable (always) and
+// CrossInstanceConsistent (when requireCrossInstanceConsistent):
+// every instance must map a pairwise sub back to the same end user, as
+// long as the tokens carrying it are valid.
+func checkKeyCustody(name string, lookup any, requireCrossInstanceConsistent bool) error {
+	asserter, ok := lookup.(keys.KeyCustodyAssurance)
+	if !ok {
+		return fmt.Errorf("resource: dependencies: %s must implement keys.KeyCustodyAssurance under AssuranceProduction", name)
+	}
+	custody := asserter.KeyCustody()
+	if !custody.Durable {
+		return fmt.Errorf("resource: dependencies: %s must declare Durable custody under AssuranceProduction", name)
+	}
+	if requireCrossInstanceConsistent && !custody.CrossInstanceConsistent {
+		return fmt.Errorf("resource: dependencies: %s must declare CrossInstanceConsistent custody under AssuranceProduction with DeploymentHorizontallyScaled", name)
 	}
 	return nil
 }

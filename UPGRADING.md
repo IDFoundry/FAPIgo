@@ -42,14 +42,41 @@ cfg := server.Config{
 
 An `OAuthOnly` server may leave `Subjects` zero, which means public.
 
-The rest of this release's subject settings (pairwise subjects,
-`Dependencies.PairwiseSubjects` with `pairwise.NewHMAC`, and a client's
-`SubjectType` and `Sector` on `storage.RegisteredClientConfig`) are
-additions: `New` refuses any configuration in which a client could be
-pairwise until pairwise subjects are issued. A client registered with
-`SubjectType: fapi.SubjectTypePairwise` must have a sector, set or
-derived from its redirect URIs, or `storage.NewRegisteredClient`
-refuses it.
+The rest of this release's subject settings are additions: pairwise
+subjects (a pairwise `Default`, or a client's `SubjectType` and
+`Sector` on `storage.RegisteredClientConfig`, with
+`Dependencies.PairwiseSubjects`; see GETTING_STARTED's "Pairwise
+subjects"). A client registered with `SubjectType:
+fapi.SubjectTypePairwise` must have a sector, set or derived from its
+redirect URIs, or `storage.NewRegisteredClient` refuses it.
+
+### Adopting pairwise subjects (server, resource)
+
+**Affects:** only a deployment that gives some client pairwise
+subjects. Nothing changes for one that keeps `PublicSubjects()`.
+
+- **Resource servers:** `resource.AuthorizationContext.Subject` stays
+  the user's internal subject; the new `ClientSubject` is the `sub` the
+  client was given. Compare user IDs a client sends (in a path, a body,
+  or an ID token) with `ClientSubject`: for a pairwise client they're
+  no longer `Subject`. A standalone resource server verifying JWT access
+  tokens from a `pairwise.Reversible` server sets
+  `resource.Dependencies.PairwiseSubjects` and `Config.PairwisePrefix`;
+  `serverresource.NewVerifier` wires both.
+- **`pairwise.OneWay`** requires `server.OpaqueAccessTokens`: a one-way
+  `sub` can't be mapped back, so the internal subject must stay in a
+  server-side token record. To issue JWT access tokens instead, keep
+  your own record of the subs you issue as a `pairwise.SubjectResolver`,
+  set it as `server.Dependencies.PairwiseSubjectResolver`, and give the
+  same one to every resource server
+  (`resource.Dependencies.SubjectResolver`).
+- **A custom `server.AccessTokenIssuer`** gets the pairwise `sub` as
+  `AccessTokenParams.Subject` and the internal subject as the new
+  `InternalSubject`. Never put `InternalSubject` in a token the client
+  can read; an issuer that keeps tokens server-side should record it,
+  as `OpaqueAccessTokens` does.
+- **Readable access tokens:** a JWT access token's other claims (a
+  `GrantID`, extension claims) must not identify the user either.
 
 ### A federation Relying Party's `subject_type` is honoured or refused (federation, server)
 

@@ -16,6 +16,7 @@ import (
 	"github.com/idfoundry/fapigo/internal/mtls"
 	"github.com/idfoundry/fapigo/internal/timeutil"
 	"github.com/idfoundry/fapigo/internal/token"
+	"github.com/idfoundry/fapigo/pairwise"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -102,16 +103,29 @@ type AuthorizationContext struct {
 	// with a client_id it chose (automatically through OpenID
 	// Federation, for one) could otherwise present a client credentials
 	// token whose Subject equals an end user's (RFC 9068 §5).
+	//
+	// For a client with pairwise subjects (OpenID Connect Core §8),
+	// Subject is the end user's internal subject, which the
+	// authorization server's own resource servers authorize by, while
+	// the client knows the user only by ClientSubject.
 	Subject string
 	// SubjectKind is what Subject names. A token from the client
 	// credentials grant carries a "grant_type" claim saying so
 	// (SubjectClient); any other is SubjectEndUser. Zero only in an
 	// AuthorizationContext built by hand.
 	SubjectKind SubjectKind
-	ClientID    string
-	Scopes      []string
-	Claims      map[string]json.RawMessage
-	ExpiresAt   time.Time
+
+	// ClientSubject is the sub the client was given for Subject: its
+	// pairwise subject when the client has pairwise subjects, otherwise
+	// Subject itself. Compare anything the client sends or receives
+	// with ClientSubject, never Subject: a user ID in a request path or
+	// body, the sub of an ID token the client holds, or the "sub" of a
+	// UserInfo response (serverresource.UserInfoClaims uses it).
+	ClientSubject string
+	ClientID      string
+	Scopes        []string
+	Claims        map[string]json.RawMessage
+	ExpiresAt     time.Time
 
 	// Key is the access token's revocation-lookup identifier (see
 	// ResolvedAccessToken.Key), exposed for a caller's own audit
@@ -204,6 +218,10 @@ func (v *Verifier) verify(ctx context.Context, req VerifyRequest) (Authorization
 	if verr != nil {
 		return AuthorizationContext{}, usedDPoP, verr
 	}
+	subject, clientSubject, verr := v.resolveSubjects(ctx, resolved)
+	if verr != nil {
+		return AuthorizationContext{}, usedDPoP, verr
+	}
 
 	if senderConstrain == storage.SenderConstrainDPoP {
 		if verr := v.consumeDPoPProof(ctx, verifiedProof, now); verr != nil {
@@ -221,8 +239,9 @@ func (v *Verifier) verify(ctx context.Context, req VerifyRequest) (Authorization
 	}
 
 	return AuthorizationContext{
-		Subject:       resolved.Subject,
+		Subject:       subject,
 		SubjectKind:   kind,
+		ClientSubject: clientSubject,
 		ClientID:      resolved.ClientID,
 		Scopes:        resolved.Scopes,
 		Claims:        resolved.Claims,
@@ -449,6 +468,77 @@ func (v *Verifier) checkGrantNotRevoked(ctx context.Context, claims map[string]j
 		}
 	}
 	return nil
+}
+
+// resolveSubjects returns the access token's Subject and ClientSubject
+// (AuthorizationContext). A server-side record (OpaqueAccessTokens)
+// keeps the internal subject as its own and the client's pairwise sub
+// under token.ClientSubjectClaim. A self-contained token's sub is the
+// client's; when it's pairwise (token.PairwiseSectorClaim), the internal
+// subject is looked up under the sector it was derived for, through
+// Dependencies.PairwiseSubjects or else Dependencies.SubjectResolver. A
+// public sub is both.
+func (v *Verifier) resolveSubjects(ctx context.Context, resolved ResolvedAccessToken) (subject, clientSubject string, verr *Error) {
+	if raw, ok := resolved.Claims[token.ClientSubjectClaim]; ok {
+		var sub string
+		if err := json.Unmarshal(raw, &sub); err != nil || sub == "" {
+			return "", "", newError(ErrorInvalidToken, 401, "access token's client subject is malformed", err)
+		}
+		return resolved.Subject, sub, nil
+	}
+	raw, ok := resolved.Claims[token.PairwiseSectorClaim]
+	if !ok {
+		return resolved.Subject, resolved.Subject, nil
+	}
+	var sector string
+	if err := json.Unmarshal(raw, &sector); err != nil || sector == "" {
+		return "", "", newError(ErrorInvalidToken, 401, "access token's pairwise sector is malformed", err)
+	}
+	if resolved.Issuer == "" {
+		return "", "", newError(ErrorServerError, 500, "access token's subject is pairwise, but its resolver reported no issuer to look it up under", nil)
+	}
+	var internal string
+	switch {
+	case v.deps.PairwiseSubjects != nil:
+		internal, verr = v.lookUpPairwiseSubject(ctx, resolved, sector)
+	case v.deps.SubjectResolver != nil:
+		internal, verr = pairwiseResult(v.deps.SubjectResolver.ResolveSubject(ctx, resolved.Issuer, sector, resolved.Subject))
+	default:
+		verr = newError(ErrorServerError, 500, "access token's subject is pairwise, but neither dependencies.pairwise_subjects nor dependencies.subject_resolver is set", nil)
+	}
+	if verr != nil {
+		return "", "", verr
+	}
+	return internal, resolved.Subject, nil
+}
+
+// lookUpPairwiseSubject maps resolved's pairwise sub, derived for
+// sector, back to the end user's internal subject through
+// Dependencies.PairwiseSubjects, after stripping Config.PairwisePrefix.
+// It fails closed: a pairwise sub is never given as the internal
+// subject.
+func (v *Verifier) lookUpPairwiseSubject(ctx context.Context, resolved ResolvedAccessToken, sector string) (string, *Error) {
+	body, ok := strings.CutPrefix(resolved.Subject, v.cfg.PairwisePrefix.String())
+	if !ok || pairwise.CheckBody(body) != nil {
+		return "", newError(ErrorInvalidToken, 401, "access token's pairwise subject isn't one this server issued", nil)
+	}
+	return pairwiseResult(v.deps.PairwiseSubjects.LookupInternalSubject(ctx, resolved.Issuer, sector, body))
+}
+
+// pairwiseResult turns what a pairwise lookup or resolver returned into
+// the internal subject, failing closed: a sub it doesn't know
+// (pairwise.ErrSubjectNotFound) is invalid_token, and any other failure,
+// or no subject, is server_error.
+func pairwiseResult(internal string, err error) (string, *Error) {
+	switch {
+	case errors.Is(err, pairwise.ErrSubjectNotFound):
+		return "", newError(ErrorInvalidToken, 401, "access token's pairwise subject isn't one this server issued", err)
+	case err != nil:
+		return "", newError(ErrorServerError, 500, "failed to look up the access token's pairwise subject", err)
+	case internal == "":
+		return "", newError(ErrorServerError, 500, "the pairwise subject lookup returned no subject", nil)
+	}
+	return internal, nil
 }
 
 // subjectKindOf reads what an access token's subject is from its

@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
+	"encoding/json"
 	"math/big"
 	"net/url"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/keys/ephemeral"
+	"github.com/idfoundry/fapigo/pairwise"
 	"github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/serverresource"
@@ -278,5 +280,147 @@ func TestNewVerifierRefusesInvalidDeployment(t *testing.T) {
 	deps := serverDependencies(t, jwtAccessTokens(t), time.Now())
 	if _, err := serverresource.NewVerifier(cfg, deps, serverresource.Options{}); err == nil || !strings.Contains(err.Error(), "deployment is invalid") {
 		t.Fatalf("NewVerifier(invalid deployment) = %v, want refusal", err)
+	}
+}
+
+// TestNewVerifierResolvesPairwiseSubjects: under pairwise.Reversible the
+// verifier looks a self-contained token's pairwise sub up through the
+// server's own deriver and prefix; under pairwise.OneWay the server's
+// opaque records already keep the internal subject.
+func TestNewVerifierResolvesPairwiseSubjects(t *testing.T) {
+	now := time.Now()
+	prefix, err := pairwise.NewPrefix("pw:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mapping, oneWay := testDerivers(t)
+	for name, tc := range map[string]struct {
+		derivation   pairwise.Derivation
+		deriver      pairwise.Deriver
+		accessTokens server.AccessTokenIssuer
+	}{
+		"reversible, jwt":    {pairwise.Reversible, mapping, jwtAccessTokens(t)},
+		"one-way, opaque":    {pairwise.OneWay, oneWay, server.OpaqueAccessTokens{Store: memstore.NewAccessTokenStore()}},
+		"reversible, opaque": {pairwise.Reversible, mapping, server.OpaqueAccessTokens{Store: memstore.NewAccessTokenStore()}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			cfg := serverConfig(t)
+			cfg.Subjects = server.SubjectConfig{Default: fapi.SubjectTypePairwise, Enforcement: server.SubjectTypesPerClient, Derivation: tc.derivation, Prefix: prefix}
+			deps := serverDependencies(t, tc.accessTokens, now)
+			deps.PairwiseSubjects = tc.deriver
+			verifier, err := serverresource.NewVerifier(cfg, deps, serverresource.Options{})
+			if err != nil {
+				t.Fatalf("NewVerifier: %v", err)
+			}
+
+			clientSub, token, cert := issuePairwiseToken(t, cfg, tc.accessTokens, tc.deriver, prefix)
+			authz, err := verifier.Verify(ctx, resource.VerifyRequest{
+				Method: "GET", URL: &url.URL{Scheme: "https", Host: "as.example.com", Path: "/userinfo"},
+				Authorization: "Bearer " + token, PeerCertificate: cert,
+			})
+			if err != nil {
+				t.Fatalf("Verify: %v", err)
+			}
+			if authz.Subject != "alice" || authz.ClientSubject != clientSub {
+				t.Errorf("Subject, ClientSubject = %q, %q; want alice, %q", authz.Subject, authz.ClientSubject, clientSub)
+			}
+		})
+	}
+}
+
+// testDerivers is a mapping (reversible) deriver and an HMAC (one-way)
+// one.
+func testDerivers(t *testing.T) (mapping, oneWay pairwise.Deriver) {
+	t.Helper()
+	mapping, err := pairwise.NewMapping(memstore.NewPairwiseSubjectStore())
+	if err != nil {
+		t.Fatal(err)
+	}
+	hmacKey := make([]byte, 32)
+	for i := range hmacKey {
+		hmacKey[i] = byte(i + 1)
+	}
+	oneWay, err = pairwise.NewHMAC(hmacKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return mapping, oneWay
+}
+
+// issuePairwiseToken issues, through accessTokens, a token for the user
+// alice at a client in the sector rp.example, as the server would: its
+// sub the pairwise one deriver and prefix give, its internal subject
+// alice. It returns that sub, the token, and the client certificate the
+// token is bound to.
+func issuePairwiseToken(t *testing.T, cfg server.Config, accessTokens server.AccessTokenIssuer, deriver pairwise.Deriver, prefix pairwise.Prefix) (string, string, *x509.Certificate) {
+	t.Helper()
+	ctx := context.Background()
+	in, err := pairwise.NewInput(cfg.Issuer.String(), "rp.example", "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := deriver.DerivePairwiseSubject(ctx, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientSub := prefix.String() + body
+	cert := clientCertificate(t)
+	thumbprint := sha256.Sum256(cert.Raw)
+	token, _, err := accessTokens.IssueAccessToken(ctx, server.AccessTokenParams{
+		ClientID: "client", Subject: clientSub, InternalSubject: "alice", Scope: []string{"openid"},
+		Claims:          map[string]json.RawMessage{"pairwise_sector": json.RawMessage(`"rp.example"`)},
+		Thumbprint:      base64.RawURLEncoding.EncodeToString(thumbprint[:]),
+		SenderConstrain: storage.SenderConstrainMTLS,
+		Issuer:          cfg.Issuer.String(), Audience: cfg.Issuer.String(),
+		Now: time.Now(), Lifetime: cfg.Limits.AccessTokenLifetime, Random: rand.Reader,
+	})
+	if err != nil {
+		t.Fatalf("IssueAccessToken: %v", err)
+	}
+	return clientSub, token, cert
+}
+
+// mapResolver resolves the one sub it holds to alice.
+type mapResolver struct{ sub string }
+
+func (r *mapResolver) ResolveSubject(_ context.Context, _, _, sub string) (string, error) {
+	if sub != r.sub {
+		return "", pairwise.ErrSubjectNotFound
+	}
+	return "alice", nil
+}
+
+// TestNewVerifierPassesTheServersSubjectResolver: under pairwise.OneWay
+// with JWT access tokens, the verifier resolves pairwise subs through
+// the resolver the server declares.
+func TestNewVerifierPassesTheServersSubjectResolver(t *testing.T) {
+	prefix, err := pairwise.NewPrefix("pw:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, oneWay := testDerivers(t)
+	cfg := serverConfig(t)
+	cfg.Subjects = server.SubjectConfig{Default: fapi.SubjectTypePairwise, Enforcement: server.SubjectTypesPerClient, Derivation: pairwise.OneWay, Prefix: prefix}
+	accessTokens := jwtAccessTokens(t)
+	deps := serverDependencies(t, accessTokens, time.Now())
+	deps.PairwiseSubjects = oneWay
+	resolver := &mapResolver{}
+	deps.PairwiseSubjectResolver = resolver
+	verifier, err := serverresource.NewVerifier(cfg, deps, serverresource.Options{})
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+	clientSub, token, cert := issuePairwiseToken(t, cfg, accessTokens, oneWay, prefix)
+	resolver.sub = clientSub
+	authz, err := verifier.Verify(context.Background(), resource.VerifyRequest{
+		Method: "GET", URL: &url.URL{Scheme: "https", Host: "as.example.com", Path: "/userinfo"},
+		Authorization: "Bearer " + token, PeerCertificate: cert,
+	})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if authz.Subject != "alice" || authz.ClientSubject != clientSub {
+		t.Errorf("Subject, ClientSubject = %q, %q; want alice, %q", authz.Subject, authz.ClientSubject, clientSub)
 	}
 }

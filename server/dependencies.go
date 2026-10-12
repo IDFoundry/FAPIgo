@@ -214,4 +214,18 @@ type Dependencies struct {
 	// CrossInstanceConsistent with DeploymentHorizontallyScaled, since
 	// every instance and restart must derive the same sub.
 	PairwiseSubjects pairwise.Deriver
+
+	// PairwiseSubjectResolver declares that every resource server
+	// verifying this server's access tokens maps a pairwise sub back to
+	// its end user through this resolver (resource.Dependencies.SubjectResolver),
+	// backed by the embedder's own mapping. It only matters under
+	// pairwise.OneWay, where a sub can't otherwise be mapped back: with
+	// it, New accepts self-contained (JWT) access tokens, which it
+	// otherwise refuses there. The server never calls it;
+	// serverresource.NewVerifier passes it to the verifier it builds,
+	// and a separate resource server must be given the same one.
+	// Under AssuranceProduction it must declare Durable custody
+	// (keys.KeyCustodyAssurance), and CrossInstanceConsistent with
+	// DeploymentHorizontallyScaled. Leave it nil otherwise.
+	PairwiseSubjectResolver pairwise.SubjectResolver
 }

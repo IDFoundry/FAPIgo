@@ -121,7 +121,7 @@ func (s *Server) CompleteAuthorization(ctx context.Context, req CompleteAuthoriz
 }
 
 func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, request requestRecord, redirectURI, state string, result authorizeResult) (AuthorizationResult, error) {
-	clientSub, authorizeErr := s.checkAuthorizeResult(ctx, clientID, result)
+	clientSub, sector, authorizeErr := s.checkAuthorizeResult(ctx, clientID, result)
 	if authorizeErr != nil {
 		return s.completeLocalFail(ctx, clientID, authorizeErr), nil
 	}
@@ -204,6 +204,7 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 		DPoPJKT:                 dpopJKT,
 		Subject:                 result.subject.ID().String(),
 		ClientSubject:           distinctClientSubject(clientSub, result.subject.ID().String()),
+		PairwiseSector:          sector,
 		Scope:                   result.grant.Scope,
 		AuthTime:                result.auth.authTime,
 		ACR:                     result.auth.acr,
@@ -353,18 +354,19 @@ func (s *Server) completeLocalFail(ctx context.Context, clientID fapi.ClientID, 
 }
 
 // checkAuthorizeResult checks what an Authorize result itself must carry
-// and returns the sub the client gets for its user, derived once here
-// and kept with the grant (see grantRecord.ClientSubject).
-func (s *Server) checkAuthorizeResult(ctx context.Context, clientID fapi.ClientID, result authorizeResult) (string, *Error) {
+// and returns the sub the client gets for its user and the sector it was
+// derived for, derived once here and kept with the grant (see
+// grantRecord.ClientSubject).
+func (s *Server) checkAuthorizeResult(ctx context.Context, clientID fapi.ClientID, result authorizeResult) (string, string, *Error) {
 	if result.subject.id.value == "" {
-		return "", newError(ErrorServerError, 500, "authorize result carries no authenticated subject", nil)
+		return "", "", newError(ErrorServerError, 500, "authorize result carries no authenticated subject", nil)
 	}
 	// The authentication time must be one that happened: a zero
 	// AuthenticationContext{} would leave an ID token without the
 	// auth_time max_age and prompt=login require, and a future one
 	// would pass both as the most recent authentication possible.
 	if problem := result.auth.authTimeProblem(s.deps.Clock.Now(), s.cfg.Limits.MaxClockSkew); problem != "" {
-		return "", newError(ErrorServerError, 500, problem, nil)
+		return "", "", newError(ErrorServerError, 500, problem, nil)
 	}
 	return s.subjectAtClient(ctx, clientID, result.subject.id.value)
 }

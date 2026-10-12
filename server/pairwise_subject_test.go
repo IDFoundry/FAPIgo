@@ -17,6 +17,7 @@ import (
 	"github.com/idfoundry/fapigo/pairwise"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
+	"github.com/idfoundry/fapigo/storage/memstore"
 )
 
 // testPairwisePrefix is the Prefix every pairwise test server puts in
@@ -127,9 +128,14 @@ func withPairwise(t *testing.T, h harness, client storage.RegisteredClientConfig
 		Derivation: derivation, Prefix: mustPrefix(t, testPairwisePrefix),
 	}
 	h.deps.PairwiseSubjects = deriver
-	srv, err := server.NewIssuingPairwiseSubjects(h.cfg, h.deps)
+	if derivation == pairwise.OneWay {
+		// A one-way pairwise sub can't be mapped back, so the internal
+		// subject stays in a server-side token record.
+		h.deps.AccessTokens = server.OpaqueAccessTokens{Store: memstore.NewAccessTokenStore()}
+	}
+	srv, err := server.New(h.cfg, h.deps)
 	if err != nil {
-		t.Fatalf("NewIssuingPairwiseSubjects: %v", err)
+		t.Fatalf("New: %v", err)
 	}
 	h.server = srv
 	return h
@@ -241,9 +247,9 @@ func TestPairwiseSubjectSurvivesConfigurationChange(t *testing.T) {
 	first, _ := exchangeForTokensWithOfflineAccess(t, h)
 
 	h.cfg.Subjects.Prefix = mustPrefix(t, "changed:")
-	srv, err := server.NewIssuingPairwiseSubjects(h.cfg, h.deps)
+	srv, err := server.New(h.cfg, h.deps)
 	if err != nil {
-		t.Fatalf("NewIssuingPairwiseSubjects: %v", err)
+		t.Fatalf("New: %v", err)
 	}
 	h.server = srv
 	after := clientSubjectOf(t, h, "user-1")
@@ -381,9 +387,14 @@ func TestPairwiseCIBA(t *testing.T) {
 		if err != nil {
 			t.Fatalf("exchange: %v", err)
 		}
-		if got, want := validateIDToken(t, h, result.IDToken.Reveal(), result.AccessToken.Reveal()).Subject, clientSubjectOf(t, h, "user-1"); got != want {
+		want := clientSubjectOf(t, h, "user-1")
+		if got := validateIDToken(t, h, result.IDToken.Reveal(), result.AccessToken.Reveal()).Subject; got != want {
 			t.Errorf("ID token sub = %q, want %q", got, want)
 		}
+		// The access token's server-side record keeps the internal
+		// subject, and the client's sub beside it.
+		store := h.deps.AccessTokens.(server.OpaqueAccessTokens).Store.(*memstore.AccessTokenStore)
+		assertOpaqueRecordSubjects(t, store, result.AccessToken.Reveal(), "user-1", want, "rp.example")
 	})
 	t.Run("one-way refuses id_token_hint", func(t *testing.T) {
 		h := cibaWithPairwise(t, pairwise.OneWay, hmacDeriver(t))
@@ -462,9 +473,10 @@ func TestPairwiseSubjectFailsClosed(t *testing.T) {
 			Derivation: pairwise.OneWay, Prefix: mustPrefix(t, testPairwisePrefix),
 		}
 		h.deps.PairwiseSubjects = hmacDeriver(t)
-		srv, err := server.NewIssuingPairwiseSubjects(h.cfg, h.deps)
+		h.deps.AccessTokens = server.OpaqueAccessTokens{Store: memstore.NewAccessTokenStore()}
+		srv, err := server.New(h.cfg, h.deps)
 		if err != nil {
-			t.Fatalf("NewIssuingPairwiseSubjects: %v", err)
+			t.Fatalf("New: %v", err)
 		}
 		h.server = srv
 		assertCompletionServerError(t, h)
@@ -557,13 +569,24 @@ func TestEmbedderGrantStoresPairwiseSubject(t *testing.T) {
 		Derivation: pairwise.OneWay, Prefix: mustPrefix(t, testPairwisePrefix),
 	}
 	h.deps.PairwiseSubjects = hmacDeriver(t)
-	srv, err := server.NewIssuingPairwiseSubjects(h.cfg, h.deps)
+	accessTokens := memstore.NewAccessTokenStore()
+	h.deps.AccessTokens = server.OpaqueAccessTokens{Store: accessTokens}
+	srv, err := server.New(h.cfg, h.deps)
 	if err != nil {
-		t.Fatalf("NewIssuingPairwiseSubjects: %v", err)
+		t.Fatalf("New: %v", err)
 	}
 	h.server = srv
 	if _, err := issue(h); err != nil {
 		t.Fatalf("IssueRefreshToken: %v", err)
+	}
+	instance := &attestedInstance{t: t, h: h, attesterKey: attesterKey, instanceKey: generateKey(t)}
+	attested, binding := embedderTokenRequest(t, instance)
+	issued, err := h.server.IssueAccessToken(context.Background(), server.IssueAccessTokenRequest{
+		GrantType: preAuthorizedCodeGrant, Client: attested, Binding: binding,
+		Subject: mustSubjectID(t, "holder-1"), Scope: []string{"accounts"},
+	})
+	if err != nil {
+		t.Fatalf("IssueAccessToken: %v", err)
 	}
 	var stored struct {
 		Subject       string `json:"sub"`
@@ -583,4 +606,7 @@ func TestEmbedderGrantStoresPairwiseSubject(t *testing.T) {
 	if stored.Subject != "holder-1" || stored.ClientSubject != want {
 		t.Errorf("stored sub, client_sub = %q, %q; want holder-1, %q", stored.Subject, stored.ClientSubject, want)
 	}
+	// The embedder's first access token carries the same client subject
+	// as the refresh grant, the internal one staying in the record.
+	assertOpaqueRecordSubjects(t, accessTokens, issued.AccessToken.Reveal(), "holder-1", want, "wallet.example")
 }

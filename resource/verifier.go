@@ -37,6 +37,9 @@ func validateConfig(cfg Config, deps Dependencies) error {
 	if deps.Nonces != nil && cfg.Limits.DPoPNonceLifetime <= 0 {
 		return fmt.Errorf("resource: config: limits.dpop_nonce_lifetime must be positive when dependencies.nonces is set")
 	}
+	if (deps.PairwiseSubjects != nil) != cfg.PairwisePrefix.IsSet() {
+		return fmt.Errorf("resource: config: pairwise_prefix is required with dependencies.pairwise_subjects, and must be left zero without it (pairwise.NewPrefix, which accepts \"\")")
+	}
 	return nil
 }
 

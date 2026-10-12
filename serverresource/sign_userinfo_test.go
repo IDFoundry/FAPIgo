@@ -151,6 +151,17 @@ func TestSignUserInfoResponseIsForTheTokensClient(t *testing.T) {
 		})
 	}
 
+	t.Run("pairwise client", func(t *testing.T) {
+		pairwiseAuthz := authz
+		pairwiseAuthz.ClientSubject = "pw:abc"
+		if _, err := serverresource.SignUserInfoResponse(context.Background(), srv, clients, pairwiseAuthz, map[string]json.RawMessage{"sub": json.RawMessage(`"pw:abc"`)}); err != nil {
+			t.Fatalf("SignUserInfoResponse(the client's sub) = %v", err)
+		}
+		if _, err := serverresource.SignUserInfoResponse(context.Background(), srv, clients, pairwiseAuthz, map[string]json.RawMessage{"sub": json.RawMessage(`"user-1"`)}); err == nil || !strings.Contains(err.Error(), "isn't the access token's subject") {
+			t.Fatalf("SignUserInfoResponse(the internal sub) = %v, want it refused", err)
+		}
+	})
+
 	t.Run("empty subject", func(t *testing.T) {
 		empty := authz
 		empty.Subject = ""

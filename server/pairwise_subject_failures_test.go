@@ -9,6 +9,7 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/pairwise"
 	"github.com/idfoundry/fapigo/server"
+	"github.com/idfoundry/fapigo/storage/memstore"
 )
 
 // unavailableLookup is a Reversible deriver whose lookup answers New's
@@ -68,9 +69,9 @@ func TestPairwiseRequiredSubjectPublicClientUnderPairwiseOnly(t *testing.T) {
 		Derivation: pairwise.Reversible, Prefix: mustPrefix(t, testPairwisePrefix),
 	}
 	h.deps.PairwiseSubjects = newMappingDeriver()
-	srv, err := server.NewIssuingPairwiseSubjects(h.cfg, h.deps)
+	srv, err := server.New(h.cfg, h.deps)
 	if err != nil {
-		t.Fatalf("NewIssuingPairwiseSubjects: %v", err)
+		t.Fatalf("New: %v", err)
 	}
 	h.server = srv
 	err = pushPAR(t, h, map[string]string{"claims": subClaims("id_token", "user-1")})
@@ -101,9 +102,10 @@ func TestBackchannelCompletionFailsClosedWithoutClientSubject(t *testing.T) {
 			Derivation: pairwise.OneWay, Prefix: mustPrefix(t, testPairwisePrefix),
 		}
 		h.deps.PairwiseSubjects = hmacDeriver(t)
-		srv, err := server.NewIssuingPairwiseSubjects(h.cfg, h.deps)
+		h.deps.AccessTokens = server.OpaqueAccessTokens{Store: memstore.NewAccessTokenStore()}
+		srv, err := server.New(h.cfg, h.deps)
 		if err != nil {
-			t.Fatalf("NewIssuingPairwiseSubjects: %v", err)
+			t.Fatalf("New: %v", err)
 		}
 		h.server = srv
 		required := beginBackchannel(t, h, standardBackchannelParams(t))

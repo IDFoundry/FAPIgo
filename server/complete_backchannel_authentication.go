@@ -129,7 +129,7 @@ func (s *Server) approveBackchannelAuthentication(ctx context.Context, clientID 
 	}
 	// The sub this client gets for the user, derived once here and kept
 	// with the grant (see grantRecord.ClientSubject).
-	clientSub, subErr := s.subjectAtClient(ctx, clientID, result.subject.id.value)
+	clientSub, sector, subErr := s.subjectAtClient(ctx, clientID, result.subject.id.value)
 	if subErr != nil {
 		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, clientID, AuditOutcomeFailure, string(subErr.Code()))
 		return subErr
@@ -202,6 +202,7 @@ func (s *Server) approveBackchannelAuthentication(ctx context.Context, clientID 
 		DPoPJKT:                 request.DPoPJKT,
 		Subject:                 result.subject.ID().String(),
 		ClientSubject:           distinctClientSubject(clientSub, result.subject.ID().String()),
+		PairwiseSector:          sector,
 		Scope:                   result.grant.Scope,
 		AuthTime:                result.auth.authTime,
 		ACR:                     result.auth.acr,

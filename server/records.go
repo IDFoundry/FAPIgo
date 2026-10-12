@@ -9,6 +9,7 @@ import (
 
 	"github.com/idfoundry/fapigo/extension"
 	"github.com/idfoundry/fapigo/internal/grantrevocation"
+	"github.com/idfoundry/fapigo/internal/token"
 )
 
 // recordVersion versions the JSON payloads this package hands storage
@@ -135,6 +136,13 @@ type grantRecord struct {
 	// existed; clientSubject reads both as Subject.
 	ClientSubject string `json:"client_sub,omitempty"`
 
+	// PairwiseSector is the sector ClientSubject was derived for, set
+	// with it. Access tokens from the grant carry it, so a resource
+	// server can look the pairwise sub up again (pairwise.Lookup) under
+	// the sector it was derived for, even after the client's sector
+	// changes. Empty for a public client.
+	PairwiseSector string `json:"pairwise_sector,omitempty"`
+
 	Scope                []string        `json:"scope,omitempty"`
 	AuthTime             time.Time       `json:"auth_time"`
 	ACR                  string          `json:"acr,omitempty"`
@@ -212,6 +220,16 @@ func (g grantRecord) clientSubject() string {
 	return g.Subject
 }
 
+// accessTokenSubjects returns the "sub" of an access token issued from
+// g, the sub the client was given, and the end user's internal subject
+// when it differs (AccessTokenParams.InternalSubject).
+func (g grantRecord) accessTokenSubjects() (sub, internal string) {
+	if g.ClientSubject == "" {
+		return g.Subject, ""
+	}
+	return g.ClientSubject, g.Subject
+}
+
 // issuedWithin reports whether a record issued at issuedAt is still
 // within lifetime at now. A record without IssuedAt (written before it
 // existed) is judged only by its stored expiry, so it passes here.
@@ -229,20 +247,25 @@ func (g grantRecord) accessTokenClaims() (map[string]json.RawMessage, error) {
 		return nil, err
 	}
 	claims = withAuthorizationDetails(g.AuthorizationDetails, claims)
-	if g.GrantID != "" {
-		// A string always marshals.
-		raw, _ := json.Marshal(g.GrantID)
-		withGrant := map[string]json.RawMessage{grantrevocation.Claim: raw}
-		maps.Copy(withGrant, claims) // grant_id is managed, so never among claims
-		claims = withGrant
-	}
-	if g.CodeGrantID != "" {
-		raw, _ := json.Marshal(g.CodeGrantID)
-		withCode := map[string]json.RawMessage{grantrevocation.CodeClaim: raw}
-		maps.Copy(withCode, claims) // code_grant_id is managed, so never among claims
-		claims = withCode
+	claims = withManagedClaim(claims, grantrevocation.Claim, g.GrantID)
+	claims = withManagedClaim(claims, grantrevocation.CodeClaim, g.CodeGrantID)
+	if g.ClientSubject != "" {
+		claims = withManagedClaim(claims, token.PairwiseSectorClaim, g.PairwiseSector)
 	}
 	return claims, nil
+}
+
+// withManagedClaim returns claims with name set to value, unless value
+// is empty. name is a managed claim (managedTokenClaims), so never
+// among claims already.
+func withManagedClaim(claims map[string]json.RawMessage, name, value string) map[string]json.RawMessage {
+	if value == "" {
+		return claims
+	}
+	raw, _ := json.Marshal(value) // a string always marshals
+	with := map[string]json.RawMessage{name: raw}
+	maps.Copy(with, claims)
+	return with
 }
 
 func encodeRequestRecord(r requestRecord) (json.RawMessage, error) {
@@ -266,7 +289,7 @@ func decodeRequestRecord(raw json.RawMessage) (requestRecord, error) {
 
 func encodeGrantRecord(g grantRecord) (json.RawMessage, error) {
 	g.Version = recordVersion
-	strs := []string{g.RedirectURI, g.CodeChallenge, g.Nonce, g.DPoPJKT, g.Thumbprint, g.Subject, g.ClientSubject, g.ACR}
+	strs := []string{g.RedirectURI, g.CodeChallenge, g.Nonce, g.DPoPJKT, g.Thumbprint, g.Subject, g.ClientSubject, g.PairwiseSector, g.ACR}
 	for _, list := range [][]string{g.Scope, g.AMR, g.RequestedIDTokenClaims, g.RequestedUserinfoClaims} {
 		strs = append(strs, list...)
 	}

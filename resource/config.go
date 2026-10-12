@@ -2,6 +2,8 @@ package resource
 
 import (
 	"time"
+
+	"github.com/idfoundry/fapigo/pairwise"
 )
 
 // Limits bounds the clock tolerances this verifier enforces for DPoP
@@ -46,4 +48,11 @@ type Config struct {
 	// storage.Capabilities.CrossInstanceConsistent. May be left zero
 	// under AssuranceDevelopment, where it's ignored.
 	Deployment Deployment
+
+	// PairwisePrefix is the authorization server's
+	// Config.Subjects.Prefix, which Verify strips from a pairwise sub
+	// before looking it up (Dependencies.PairwiseSubjects). Required
+	// with Dependencies.PairwiseSubjects, and must be left zero
+	// without it.
+	PairwisePrefix pairwise.Prefix
 }

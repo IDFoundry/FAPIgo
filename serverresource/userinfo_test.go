@@ -15,12 +15,14 @@ import (
 // claimsSource returns everything it has, whatever it's asked for, so
 // the tests see UserInfoClaims do the restricting.
 type claimsSource struct {
-	asked [][]string
-	err   error
+	asked    [][]string
+	subjects []string
+	err      error
 }
 
-func (s *claimsSource) ResolveIdentityClaims(_ context.Context, _ string, names []string) (map[string]json.RawMessage, error) {
+func (s *claimsSource) ResolveIdentityClaims(_ context.Context, subject string, names []string) (map[string]json.RawMessage, error) {
 	s.asked = append(s.asked, names)
+	s.subjects = append(s.subjects, subject)
 	return map[string]json.RawMessage{
 		"email": json.RawMessage(`"sam@example.com"`),
 		"name":  json.RawMessage(`"Sam Rivera"`),
@@ -79,5 +81,24 @@ func TestUserInfoClaimsRefuses(t *testing.T) {
 	failing := errors.New("directory unavailable")
 	if _, err := serverresource.UserInfoClaims(context.Background(), authzFor([]string{"openid"}, `["email"]`), &claimsSource{err: failing}); !errors.Is(err, failing) {
 		t.Errorf("UserInfoClaims(source fails) = %v, want it wrapped", err)
+	}
+}
+
+// TestUserInfoClaimsForAPairwiseClient: the source is asked about the
+// end user by the internal subject, and the response's sub is the one
+// the client was given.
+func TestUserInfoClaimsForAPairwiseClient(t *testing.T) {
+	source := &claimsSource{}
+	authz := authzFor([]string{"openid"}, `["email"]`)
+	authz.ClientSubject = "pw:abc"
+	claims, err := serverresource.UserInfoClaims(context.Background(), authz, source)
+	if err != nil {
+		t.Fatalf("UserInfoClaims: %v", err)
+	}
+	if string(claims["sub"]) != `"pw:abc"` {
+		t.Errorf("sub = %s, want the client's pairwise sub", claims["sub"])
+	}
+	if len(source.subjects) != 1 || source.subjects[0] != "user-1" {
+		t.Errorf("source asked about %v, want the internal subject", source.subjects)
 	}
 }

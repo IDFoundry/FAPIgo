@@ -94,9 +94,13 @@
 //     Server.VerifyIDTokenHint checks an id_token_hint the same way for
 //     flows outside this package, such as RP-Initiated Logout. Every
 //     grant records the sub its client gets for the user, derived once
-//     when the grant is issued and reused by every ID token from it,
-//     refreshes included, and Server.ClientSubject gives the same sub
-//     for comparing a user with one a client sent.
+//     when the grant is issued and reused by every ID token and access
+//     token from it, refreshes included, and Server.ClientSubject gives
+//     the same sub for comparing a user with one a client sent. A
+//     pairwise client's access tokens never carry the internal subject
+//     where the client can read it: OpaqueAccessTokens keeps it in the
+//     server-side record, and under pairwise.Reversible a resource
+//     server maps a JWT access token's pairwise sub back to it.
 //   - AuthorizationAction (from BeginAuthorization) and AuthorizationResult
 //     (from CompleteAuthorization) are closed sum types, not structs with
 //     optional fields, so a caller can never mistake a local error for a
@@ -113,7 +117,8 @@
 //     client-certificate trust, clock, randomness) is present, and
 //     unless every configured limit, endpoint and algorithm is valid,
 //     and Config.Subjects states the kind of sub each client sees
-//     (PublicSubjects keeps every sub as before).
+//     (PublicSubjects keeps every sub as before); under pairwise.OneWay
+//     the access-token issuer must be OpaqueAccessTokens.
 //     Config.Profile additionally requires a JARM algorithm under
 //     ProfileFAPISecurityWithMessageSigning. AssuranceProduction
 //     additionally requires an AuditSink, stores and key sources that

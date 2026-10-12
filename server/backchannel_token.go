@@ -135,8 +135,9 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorServerError, 500, "failed to encode requested userinfo claims", err))
 	}
+	sub, internal := grant.accessTokenSubjects()
 	accessToken, _, err := s.deps.AccessTokens.IssueAccessToken(ctx, AccessTokenParams{
-		ClientID: client.ID(), Subject: grant.Subject, Scope: grant.Scope,
+		ClientID: client.ID(), Subject: sub, InternalSubject: internal, Scope: grant.Scope,
 		Thumbprint: thumbprint, SenderConstrain: client.SenderConstrain(), Claims: accessTokenClaims,
 		Issuer: s.cfg.Issuer.String(), Audience: s.cfg.Issuer.String(),
 		Now: now, Lifetime: s.cfg.Limits.AccessTokenLifetime, Random: s.deps.Random,

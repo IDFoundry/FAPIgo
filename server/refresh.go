@@ -129,8 +129,9 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 	// there's no "reuse" event on this path to revoke an access token
 	// against; that tracking is specific to authorization-code reuse
 	// (see ExchangeAuthorizationCode).
+	sub, internal := grant.accessTokenSubjects()
 	accessToken, _, err := s.deps.AccessTokens.IssueAccessToken(ctx, AccessTokenParams{
-		ClientID: client.ID(), Subject: grant.Subject, Scope: scope,
+		ClientID: client.ID(), Subject: sub, InternalSubject: internal, Scope: scope,
 		Thumbprint: thumbprint, SenderConstrain: client.SenderConstrain(), Claims: accessTokenClaims,
 		Issuer: s.cfg.Issuer.String(), Audience: s.cfg.Issuer.String(),
 		Now: now, Lifetime: s.cfg.Limits.AccessTokenLifetime, Random: s.deps.Random,

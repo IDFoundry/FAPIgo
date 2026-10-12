@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"strings"
 	"time"
 
@@ -18,8 +19,23 @@ import (
 
 // AccessTokenParams is the input to AccessTokenIssuer.IssueAccessToken.
 type AccessTokenParams struct {
-	ClientID   fapi.ClientID
-	Subject    string
+	ClientID fapi.ClientID
+
+	// Subject is the token's "sub": the sub the client was given for the
+	// end user, which for a client with pairwise subjects (OpenID
+	// Connect Core §8) is the pairwise one, never the end user's internal
+	// subject. A token may safely carry it wherever the client can read
+	// it.
+	Subject string
+
+	// InternalSubject is the end user's internal subject when it differs
+	// from Subject (a pairwise client), and "" otherwise. Only an issuer
+	// that keeps its tokens server-side may record it, as
+	// OpaqueAccessTokens does so a resource server gets the internal
+	// subject without a lookup; a self-contained format must never
+	// embed it, since the client can read its own access token.
+	InternalSubject string
+
 	Scope      []string
 	Thumbprint string
 
@@ -143,14 +159,26 @@ func (o OpaqueAccessTokens) IssueAccessToken(ctx context.Context, p AccessTokenP
 		return "", "", err
 	}
 	hash := sha256.Sum256([]byte(raw))
+	subject, claims := p.Subject, p.Claims
+	if p.InternalSubject != "" {
+		// The record keeps the end user's internal subject, which only
+		// this server and its resource servers read, and the pairwise
+		// sub the client was given beside it.
+		subject = p.InternalSubject
+		claims = maps.Clone(claims)
+		if claims == nil {
+			claims = map[string]json.RawMessage{}
+		}
+		claims[token.ClientSubjectClaim], _ = json.Marshal(p.Subject) // a string always marshals
+	}
 	if err := o.Store.CreateAccessToken(ctx, storage.NewAccessToken{
 		TokenHash:       hash,
 		ClientID:        p.ClientID,
-		Subject:         p.Subject,
+		Subject:         subject,
 		Scope:           p.Scope,
 		Thumbprint:      p.Thumbprint,
 		SenderConstrain: p.SenderConstrain,
-		Claims:          p.Claims,
+		Claims:          claims,
 		ExpiresAt:       p.Now.Add(p.Lifetime),
 	}); err != nil {
 		return "", "", err

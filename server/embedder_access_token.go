@@ -83,8 +83,9 @@ func (s *Server) IssueAccessToken(ctx context.Context, req IssueAccessTokenReque
 		s.audit(ctx, AuditEventIssueAccessToken, client.ID(), AuditOutcomeFailure, string(err.Code()))
 		return TokenResult{}, err
 	}
+	sub, internal := grant.accessTokenSubjects()
 	accessToken, _, issueErr := s.deps.AccessTokens.IssueAccessToken(ctx, AccessTokenParams{
-		ClientID: client.ID(), Subject: grant.Subject, Scope: grant.Scope,
+		ClientID: client.ID(), Subject: sub, InternalSubject: internal, Scope: grant.Scope,
 		Thumbprint: req.Binding.Thumbprint, SenderConstrain: client.SenderConstrain(), Claims: claims,
 		Issuer: s.cfg.Issuer.String(), Audience: s.cfg.Issuer.String(),
 		Now: s.deps.Clock.Now(), Lifetime: s.cfg.Limits.AccessTokenLifetime, Random: s.deps.Random,

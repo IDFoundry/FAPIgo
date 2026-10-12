@@ -12,11 +12,15 @@ import (
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/pairwise"
 	"github.com/idfoundry/fapigo/server"
+	"github.com/idfoundry/fapigo/storage"
+	"github.com/idfoundry/fapigo/storage/memstore"
 )
 
-// notIssuedYet is the error New gives every configuration in which a
-// client could be pairwise, while pairwise subjects aren't issued.
-const notIssuedYet = "doesn't issue pairwise subjects yet"
+// opaqueAccessTokens is the access token issuer pairwise.OneWay
+// requires: the internal subject stays in its server-side records.
+func opaqueAccessTokens() server.OpaqueAccessTokens {
+	return server.OpaqueAccessTokens{Store: memstore.NewAccessTokenStore()}
+}
 
 var pairwiseTestKey = bytes.Repeat([]byte{0x11, 0x22}, 16)
 
@@ -151,10 +155,9 @@ func TestNewRefusesInvalidSubjects(t *testing.T) {
 	}
 }
 
-// TestNewRefusesPairwiseUntilIssued: a valid configuration in which a
-// client could be pairwise passes every check, then is refused, since
-// this release doesn't issue pairwise subjects.
-func TestNewRefusesPairwiseUntilIssued(t *testing.T) {
+// TestNewAcceptsPairwiseSubjects: a valid configuration in which a
+// client could be pairwise builds a server.
+func TestNewAcceptsPairwiseSubjects(t *testing.T) {
 	for name, mutate := range map[string]func(*server.SubjectConfig){
 		"pairwise default":          func(*server.SubjectConfig) {},
 		"pairwise only":             func(c *server.SubjectConfig) { c.Enforcement = server.SubjectTypesPairwiseOnly },
@@ -166,8 +169,9 @@ func TestNewRefusesPairwiseUntilIssued(t *testing.T) {
 			cfg.Subjects = pairwiseSubjects(t)
 			mutate(&cfg.Subjects)
 			deps.PairwiseSubjects = testHMACDeriver(t)
-			if err := newErr(t, cfg, deps); err == nil || !strings.Contains(err.Error(), notIssuedYet) {
-				t.Fatalf("New = %v, want %q", err, notIssuedYet)
+			deps.AccessTokens = opaqueAccessTokens()
+			if err := newErr(t, cfg, deps); err != nil {
+				t.Fatalf("New = %v, want a server", err)
 			}
 		})
 	}
@@ -200,8 +204,8 @@ func TestNewProbesThePairwiseDeriver(t *testing.T) {
 		"body with a space":  {probeDeriver{body: "a b"}, pairwise.OneWay, "derived an unusable subject"},
 		"lookup fails":       {probeDeriver{body: "abc", lookupErr: errors.New("store down")}, pairwise.Reversible, "can't look up the subject it derived: store down"},
 		"lookup is wrong":    {probeDeriver{body: "abc", looksUpTo: "someone-else"}, pairwise.Reversible, `can't look up the subject it derived: it returned "someone-else"`},
-		"reversible, sound":  {probeDeriver{body: "abc", looksUpTo: "fapigo-pairwise-probe"}, pairwise.Reversible, notIssuedYet},
-		"one-way, no lookup": {probeDeriver{body: "abc", lookupErr: errors.New("never called")}, pairwise.OneWay, notIssuedYet},
+		"reversible, sound":  {probeDeriver{body: "abc", looksUpTo: "fapigo-pairwise-probe"}, pairwise.Reversible, ""},
+		"one-way, no lookup": {probeDeriver{body: "abc", lookupErr: errors.New("never called")}, pairwise.OneWay, ""},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -209,9 +213,8 @@ func TestNewProbesThePairwiseDeriver(t *testing.T) {
 			cfg.Subjects = pairwiseSubjects(t)
 			cfg.Subjects.Derivation = tc.derivation
 			deps.PairwiseSubjects = tc.deriver
-			if err := newErr(t, cfg, deps); err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("New = %v, want an error containing %q", err, tc.want)
-			}
+			deps.AccessTokens = opaqueAccessTokens()
+			checkNewErr(t, newErr(t, cfg, deps), tc.want)
 		})
 	}
 }
@@ -227,7 +230,7 @@ func TestProductionRequiresPairwiseKeyCustody(t *testing.T) {
 			"pairwise_subjects must declare Durable"},
 		"scaled, not cross-instance": {server.DeploymentHorizontallyScaled, []keys.CustodyOption{keys.DeclareCustody(keys.KeyCustody{Durable: true})},
 			"pairwise_subjects must declare CrossInstanceConsistent"},
-		"durable": {server.DeploymentSingleInstance, []keys.CustodyOption{keys.DeclareCustody(keys.KeyCustody{Durable: true})}, notIssuedYet},
+		"durable": {server.DeploymentSingleInstance, []keys.CustodyOption{keys.DeclareCustody(keys.KeyCustody{Durable: true})}, ""},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -238,9 +241,8 @@ func TestProductionRequiresPairwiseKeyCustody(t *testing.T) {
 			cfg.Deployment = tc.deployment
 			cfg.Subjects = pairwiseSubjects(t)
 			deps.PairwiseSubjects = testHMACDeriver(t, tc.custody...)
-			if err := newErr(t, cfg, deps); err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("New = %v, want an error containing %q", err, tc.want)
-			}
+			deps.AccessTokens = server.OpaqueAccessTokens{Store: capAccessTokenStore{caps: storage.Capabilities{Durable: true, CrossInstanceConsistent: true}}}
+			checkNewErr(t, newErr(t, cfg, deps), tc.want)
 		})
 	}
 	t.Run("public needs no deriver", func(t *testing.T) {
@@ -260,4 +262,51 @@ func TestMetadataSubjectTypesSupported(t *testing.T) {
 	if got := srv.Metadata(context.Background()).SubjectTypesSupported; !slices.Equal(got, []string{"public"}) {
 		t.Errorf("subject_types_supported = %q, want [public]", got)
 	}
+}
+
+// checkNewErr fails t unless err contains want, or, for an empty want,
+// is nil.
+func checkNewErr(t *testing.T, err error, want string) {
+	t.Helper()
+	if want == "" {
+		if err != nil {
+			t.Fatalf("New = %v, want a server", err)
+		}
+		return
+	}
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("New = %v, want an error containing %q", err, want)
+	}
+}
+
+// TestNewRefusesSelfContainedAccessTokensForOneWayPairwise: under
+// pairwise.OneWay a pairwise sub can't be mapped back to its end user,
+// so a self-contained access token issuer is refused; under
+// pairwise.Reversible it's accepted, and a public-only server is
+// unaffected.
+func TestNewRefusesSelfContainedAccessTokensForOneWayPairwise(t *testing.T) {
+	t.Run("one-way, JWT", func(t *testing.T) {
+		cfg, deps := validConfig(t), validDependencies()
+		cfg.Subjects = pairwiseSubjects(t)
+		deps.PairwiseSubjects = testHMACDeriver(t)
+		checkNewErr(t, newErr(t, cfg, deps), "access_tokens must be OpaqueAccessTokens with pairwise.OneWay")
+	})
+	t.Run("one-way, opaque pointer", func(t *testing.T) {
+		cfg, deps := validConfig(t), validDependencies()
+		cfg.Subjects = pairwiseSubjects(t)
+		deps.PairwiseSubjects = testHMACDeriver(t)
+		opaque := opaqueAccessTokens()
+		deps.AccessTokens = &opaque
+		checkNewErr(t, newErr(t, cfg, deps), "")
+	})
+	t.Run("reversible, JWT", func(t *testing.T) {
+		cfg, deps := validConfig(t), validDependencies()
+		cfg.Subjects = pairwiseSubjects(t)
+		cfg.Subjects.Derivation = pairwise.Reversible
+		deps.PairwiseSubjects = probeDeriver{body: "abc", looksUpTo: "fapigo-pairwise-probe"}
+		checkNewErr(t, newErr(t, cfg, deps), "")
+	})
+	t.Run("public, JWT", func(t *testing.T) {
+		checkNewErr(t, newErr(t, validConfig(t), validDependencies()), "")
+	})
 }

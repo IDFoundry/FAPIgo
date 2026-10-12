@@ -28,7 +28,10 @@ import (
 //     claim source knows;
 //   - a claim source returns that wasn't requested is dropped, whatever
 //     source does;
-//   - "sub" is the token's subject.
+//   - "sub" is the sub the client was given for the user
+//     (resource.AuthorizationContext.ClientSubject): its pairwise
+//     subject for a client with pairwise subjects, while source is asked
+//     about the user by the internal subject (Subject).
 //
 // A requested-claims entry the token carries malformed is an error, not
 // an empty request. An error from source is returned wrapped. Sign the
@@ -57,8 +60,17 @@ func UserInfoClaims(ctx context.Context, authz resource.AuthorizationContext, so
 		}
 	}
 	// A string always encodes.
-	claims["sub"], _ = json.Marshal(authz.Subject)
+	claims["sub"], _ = json.Marshal(clientSubjectOf(authz))
 	return claims, nil
+}
+
+// clientSubjectOf is authz's ClientSubject, or, in an
+// AuthorizationContext built by hand without one, its Subject.
+func clientSubjectOf(authz resource.AuthorizationContext) string {
+	if authz.ClientSubject != "" {
+		return authz.ClientSubject
+	}
+	return authz.Subject
 }
 
 // SignUserInfoResponse signs claims (and encrypts them, if the client
@@ -67,7 +79,8 @@ func UserInfoClaims(ctx context.Context, authz resource.AuthorizationContext, so
 // key — resolved through clients, so the signed response can't be
 // addressed to any other client.
 //
-// claims must carry the token's subject as "sub" (OIDC Core §5.3.2),
+// claims must carry the sub the client was given for the token's user
+// as "sub" (OIDC Core §5.3.2; resource.AuthorizationContext.ClientSubject),
 // as UserInfoClaims' result does; a "sub" for anyone else, or none, is
 // refused, so the response can't vouch for another end user either. A
 // client clients can't resolve is a 401 invalid_token *resource.Error:
@@ -79,7 +92,7 @@ func UserInfoClaims(ctx context.Context, authz resource.AuthorizationContext, so
 // *server.Error.
 func SignUserInfoResponse(ctx context.Context, srv *server.Server, clients storage.ClientRepository, authz resource.AuthorizationContext, claims map[string]json.RawMessage) (string, error) {
 	var sub string
-	if raw, ok := claims["sub"]; !ok || json.Unmarshal(raw, &sub) != nil || sub != authz.Subject || sub == "" {
+	if raw, ok := claims["sub"]; !ok || json.Unmarshal(raw, &sub) != nil || sub != clientSubjectOf(authz) || sub == "" {
 		return "", errors.New("serverresource: the UserInfo claims' sub isn't the access token's subject")
 	}
 	client, err := clients.ResolveClient(ctx, fapi.ClientID(authz.ClientID))

@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/pairwise"
 	"github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
@@ -78,6 +79,13 @@ type Options struct {
 //     resource.Config.Assurance and Deployment: a production
 //     server gets a production verifier, which also checks
 //     Options.Nonces.
+//   - Pairwise subjects: under pairwise.Reversible, deps.PairwiseSubjects
+//     (a pairwise.Lookup) and cfg.Subjects.Prefix, as the verifier's
+//     Dependencies.PairwiseSubjects and Config.PairwisePrefix, so
+//     AuthorizationContext.Subject is the end user's internal subject
+//     and ClientSubject the client's pairwise one. Under
+//     pairwise.OneWay the server issues only OpaqueAccessTokens, whose
+//     records already keep the internal subject.
 //
 // Any other access-token issuer or revocation sink is an error rather
 // than a guess: build the resource.Verifier directly for those.
@@ -112,6 +120,10 @@ func NewVerifier(cfg server.Config, deps server.Dependencies, opts Options) (*re
 		Replay:       deps.Replay,
 		Revocation:   revocation,
 		Clock:        deps.Clock,
+	}
+	if lookup, ok := deps.PairwiseSubjects.(pairwise.Lookup); ok && cfg.Subjects.Derivation == pairwise.Reversible {
+		rdeps.PairwiseSubjects = lookup
+		rcfg.PairwisePrefix = cfg.Subjects.Prefix
 	}
 	if opts.Nonces != nil {
 		if sameValue(opts.Nonces, deps.Nonces) {

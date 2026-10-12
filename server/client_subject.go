@@ -29,7 +29,7 @@ func (s *Server) ClientSubject(ctx context.Context, clientID fapi.ClientID, subj
 	if err != nil {
 		return "", newError(ErrorInvalidClient, 401, "client is not registered", err)
 	}
-	sub, subErr := s.clientSubjectFor(ctx, client, subject.id.value)
+	sub, _, subErr := s.clientSubjectFor(ctx, client, subject.id.value)
 	if subErr != nil {
 		return "", subErr
 	}
@@ -40,10 +40,10 @@ func (s *Server) ClientSubject(ctx context.Context, clientID fapi.ClientID, subj
 // client is resolved even when the server's configuration has no
 // pairwise default or deriver: a client registered for pairwise subjects
 // must then fail closed, not get the internal subject.
-func (s *Server) subjectAtClient(ctx context.Context, clientID fapi.ClientID, internal string) (string, *Error) {
+func (s *Server) subjectAtClient(ctx context.Context, clientID fapi.ClientID, internal string) (string, string, *Error) {
 	client, err := s.deps.Clients.ResolveClient(ctx, clientID)
 	if err != nil {
-		return "", newError(ErrorServerError, 500, "failed to resolve the client for its subject type", err)
+		return "", "", newError(ErrorServerError, 500, "failed to resolve the client for its subject type", err)
 	}
 	return s.clientSubjectFor(ctx, client, internal)
 }
@@ -64,25 +64,27 @@ func (s *Server) subjectTypeFor(client storage.RegisteredClient) (fapi.SubjectTy
 	return subjectType, nil
 }
 
-// clientSubjectFor returns the sub the end user internal has at client:
-// internal itself for a public client, otherwise Config.Subjects' Prefix
-// followed by what Dependencies.PairwiseSubjects derives for the
-// client's sector. It fails closed: a pairwise client never falls back
-// to the internal subject.
-func (s *Server) clientSubjectFor(ctx context.Context, client storage.RegisteredClient, internal string) (string, *Error) {
+// clientSubjectFor returns the sub the end user internal has at client,
+// and the sector it was derived for: internal itself and "" for a public
+// client, otherwise Config.Subjects' Prefix followed by what
+// Dependencies.PairwiseSubjects derives for the client's sector, and
+// that sector. It fails closed: a pairwise client never falls back to
+// the internal subject.
+func (s *Server) clientSubjectFor(ctx context.Context, client storage.RegisteredClient, internal string) (string, string, *Error) {
 	subjectType, typeErr := s.subjectTypeFor(client)
 	if typeErr != nil {
-		return "", typeErr
+		return "", "", typeErr
 	}
 	if subjectType != fapi.SubjectTypePairwise {
-		return internal, nil
+		return internal, "", nil
 	}
 	if s.deps.PairwiseSubjects == nil {
-		return "", newError(ErrorServerError, 500, "the client is registered for pairwise subjects, but dependencies.pairwise_subjects is nil", nil)
+		return "", "", newError(ErrorServerError, 500, "the client is registered for pairwise subjects, but dependencies.pairwise_subjects is nil", nil)
 	}
-	in, err := pairwise.NewInput(s.cfg.Issuer.String(), client.Sector(), internal)
+	sector := client.Sector()
+	in, err := pairwise.NewInput(s.cfg.Issuer.String(), sector, internal)
 	if err != nil {
-		return "", newError(ErrorServerError, 500, "the client's pairwise subject can't be derived (does it have a sector?)", err)
+		return "", "", newError(ErrorServerError, 500, "the client's pairwise subject can't be derived (does it have a sector?)", err)
 	}
 	ctx, cancel := context.WithTimeout(ctx, keyCheckTimeout)
 	defer cancel()
@@ -91,13 +93,13 @@ func (s *Server) clientSubjectFor(ctx context.Context, client storage.Registered
 		err = pairwise.CheckBody(body)
 	}
 	if err != nil {
-		return "", newError(ErrorServerError, 500, "failed to derive the client's pairwise subject", err)
+		return "", "", newError(ErrorServerError, 500, "failed to derive the client's pairwise subject", err)
 	}
 	sub := effectiveSubjects(s.cfg).Prefix.String() + body
 	if _, err := NewSubjectID(sub); err != nil {
-		return "", newError(ErrorServerError, 500, "the derived pairwise subject isn't a usable sub", err)
+		return "", "", newError(ErrorServerError, 500, "the derived pairwise subject isn't a usable sub", err)
 	}
-	return sub, nil
+	return sub, sector, nil
 }
 
 // errNoSubjectLookup reports that the server can't map a client's

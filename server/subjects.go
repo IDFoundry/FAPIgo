@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -59,8 +58,11 @@ func (e SubjectTypeEnforcement) IsValid() bool {
 // the sub of every user at the affected clients for new grants: plan it
 // as an identity migration, not a configuration change.
 //
-// This release doesn't issue pairwise subjects yet: New refuses any
-// configuration in which a client could be pairwise.
+// Under pairwise.OneWay the server can't map a pairwise sub back to the
+// end user, so its access tokens must keep the internal subject
+// server-side: New refuses any Dependencies.AccessTokens but
+// OpaqueAccessTokens. Under pairwise.Reversible any issuer works, and a
+// resource server looks the sub up (resource.Config.PairwiseSubjects).
 type SubjectConfig struct {
 	Default     fapi.SubjectType
 	Enforcement SubjectTypeEnforcement
@@ -94,10 +96,6 @@ func pairwisePossible(subjects SubjectConfig, deriver pairwise.Deriver) bool {
 	return subjects.Default == fapi.SubjectTypePairwise || deriver != nil
 }
 
-// errPairwiseNotIssuedYet is New's answer to any configuration in which
-// a client could be pairwise, until the server issues pairwise subjects.
-var errPairwiseNotIssuedYet = errors.New("server: config: subjects: this release doesn't issue pairwise subjects yet; use PublicSubjects() and leave dependencies.pairwise_subjects nil")
-
 // validateSubjects checks Config.Subjects against itself and
 // Dependencies.PairwiseSubjects, and, when a client could be pairwise,
 // derives (and for pairwise.Reversible looks up) a fixed input once, so
@@ -116,18 +114,28 @@ func validateSubjects(cfg Config, deps Dependencies) error {
 	if err := validatePairwiseSubjects(subjects, deps.PairwiseSubjects); err != nil {
 		return err
 	}
+	if err := checkPairwiseAccessTokens(subjects, deps.AccessTokens); err != nil {
+		return err
+	}
 	return probePairwiseSubjects(cfg.Issuer.String(), subjects, deps.PairwiseSubjects)
 }
 
-// refusePairwiseUntilIssued is New's last check while this release
-// doesn't issue pairwise subjects: a configuration in which a client
-// could be pairwise is refused, after every other check has run, unless
-// issuing (only ever set by tests of what's built so far).
-func refusePairwiseUntilIssued(cfg Config, deps Dependencies, issuing bool) error {
-	if !issuing && pairwisePossible(effectiveSubjects(cfg), deps.PairwiseSubjects) {
-		return errPairwiseNotIssuedYet
+// checkPairwiseAccessTokens refuses, under pairwise.OneWay, an access
+// token issuer other than OpaqueAccessTokens. A pairwise access token's
+// "sub" is the pairwise one, and a one-way sub can't be mapped back to
+// the end user, so the internal subject a resource server authorizes by
+// must stay in the server-side record OpaqueAccessTokens keeps; a
+// self-contained token, readable by the client, must never carry it.
+// Under pairwise.Reversible a resource server looks the sub up instead.
+func checkPairwiseAccessTokens(subjects SubjectConfig, issuer AccessTokenIssuer) error {
+	if subjects.Derivation != pairwise.OneWay {
+		return nil
 	}
-	return nil
+	switch issuer.(type) {
+	case OpaqueAccessTokens, *OpaqueAccessTokens:
+		return nil
+	}
+	return fmt.Errorf("server: dependencies: access_tokens must be OpaqueAccessTokens with pairwise.OneWay subjects: a one-way pairwise sub can't be mapped back to its end user, so the internal subject must stay in a server-side token record (use pairwise.Reversible for self-contained access tokens)")
 }
 
 // validateSubjectTypes checks Default and Enforcement.

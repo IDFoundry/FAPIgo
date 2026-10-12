@@ -14,7 +14,10 @@ on:
   push:
     branches: [main]
 
-permissions: read-all
+# Read-only by default; the job below grants itself exactly what it
+# needs.
+permissions:
+  contents: read
 
 jobs:
   analysis:

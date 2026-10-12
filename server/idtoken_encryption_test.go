@@ -60,6 +60,7 @@ func newHarnessWithIDTokenEncryption(t *testing.T, serverKeyManagement server.Ke
 	}
 
 	cfg := server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: testEndpoints(t),
 		Profile:   server.ProfileFAPISecurity,

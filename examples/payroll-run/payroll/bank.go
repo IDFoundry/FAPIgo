@@ -126,7 +126,8 @@ func (w *World) newBank(certs certificates) (*bank, error) {
 
 	b := &bank{w: w}
 	b.cfg = server.Config{
-		Issuer: issuer, Endpoints: endpoints, MTLSEndpoints: aliases,
+		Subjects: server.PublicSubjects(),
+		Issuer:   issuer, Endpoints: endpoints, MTLSEndpoints: aliases,
 		Profile:    server.ProfileFAPISecurity,
 		Algorithms: server.RecommendedAlgorithms(), Limits: server.RecommendedLimits(),
 		Assurance: server.AssuranceDevelopment, RAR: registry,

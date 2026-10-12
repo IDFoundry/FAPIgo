@@ -50,6 +50,7 @@ func newHarnessWithUserInfo(t *testing.T, serverKeyManagement server.KeyManageme
 	}
 
 	cfg := server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: testEndpoints(t),
 		Profile:   server.ProfileFAPISecurity,

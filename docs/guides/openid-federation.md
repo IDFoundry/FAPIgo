@@ -17,7 +17,7 @@ takes its registration from the resolved metadata.
 
 ```go
 cfg := server.Config{
-	// Issuer, Endpoints, Profile, Algorithms, Limits ...
+	// Issuer, Endpoints, Profile, Algorithms, Limits, Subjects ...
 	Federation: server.FederationConfig{
 		EntityID:       "https://id.example.com",
 		AuthorityHints: []string{"https://federation.example.org"},

@@ -274,6 +274,7 @@ func New(t *testing.T, cfg Config) *Harness {
 	as := newAuthServer(t, clock, AutoApprove{Subject: Subject, ACR: "urn:mace:incommon:iap:silver", AMR: []string{"pwd"}, IDTokenClaims: cfg.IDTokenClaims, GrantID: cfg.GrantID}, tlsClientCert)
 
 	srvCfg := server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: loopbackEndpoints(as.ts.URL),
 		Profile:   cfg.Profile,

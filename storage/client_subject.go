@@ -1,0 +1,91 @@
+package storage
+
+import (
+	"fmt"
+	"net/url"
+	"strings"
+
+	fapi "github.com/idfoundry/fapigo"
+)
+
+// maxSectorLength bounds RegisteredClientConfig.Sector.
+const maxSectorLength = 255
+
+// SubjectType returns the kind of sub this client's end users get, as
+// registered (see RegisteredClientConfig.SubjectType): zero means the
+// server's default applies.
+func (c RegisteredClient) SubjectType() fapi.SubjectType { return c.subjectType }
+
+// Sector returns the sector this client's pairwise subjects are derived
+// for: RegisteredClientConfig.Sector when set, otherwise the single host
+// of a web client's https redirect URIs, otherwise "" (no sector, so
+// the client can't have pairwise subjects).
+func (c RegisteredClient) Sector() string { return c.sector }
+
+// checkApplicationTypeAndSector runs checkApplicationType, then
+// clientSector, whose sector derivation depends on the application type.
+func checkApplicationTypeAndSector(cfg RegisteredClientConfig) (string, error) {
+	if err := checkApplicationType(cfg); err != nil {
+		return "", err
+	}
+	return clientSector(cfg)
+}
+
+// clientSector validates cfg's SubjectType and Sector, and returns the
+// client's sector: the one set, or the one derived from its redirect
+// URIs, or "". A client registered as pairwise must end up with one.
+func clientSector(cfg RegisteredClientConfig) (string, error) {
+	if cfg.SubjectType != 0 && !cfg.SubjectType.IsValid() {
+		return "", fmt.Errorf("storage: client %q has an invalid subject type", cfg.ID)
+	}
+	sector := cfg.Sector
+	if sector != "" {
+		if err := checkSector(sector); err != nil {
+			return "", fmt.Errorf("storage: client %q: %w", cfg.ID, err)
+		}
+	} else {
+		sector = derivedSector(cfg)
+	}
+	if cfg.SubjectType == fapi.SubjectTypePairwise && sector == "" {
+		return "", fmt.Errorf("storage: client %q is pairwise but has no sector: set Sector (a native, CIBA-only or client-credentials-only client, or one whose redirect URIs span several hosts, has none to derive)", cfg.ID)
+	}
+	return sector, nil
+}
+
+// checkSector refuses a set Sector that is too long or holds a byte
+// outside printable ASCII without the space.
+func checkSector(sector string) error {
+	if len(sector) > maxSectorLength {
+		return fmt.Errorf("sector is %d bytes, more than %d", len(sector), maxSectorLength)
+	}
+	for i := range len(sector) {
+		if c := sector[i]; c < 0x21 || c > 0x7e {
+			return fmt.Errorf("sector has a byte (0x%02x at %d) that isn't printable ASCII", c, i)
+		}
+	}
+	return nil
+}
+
+// derivedSector returns the host every redirect URI of a web client
+// shares, when they're all https (OpenID Connect Core §8.1), or "": a
+// native client's loopback and private-use redirect URIs have no
+// meaningful host, http loopback URIs are for development, and URIs on
+// several hosts need an explicit Sector.
+func derivedSector(cfg RegisteredClientConfig) string {
+	if cfg.ApplicationType != ApplicationTypeWeb || len(cfg.RedirectURIs) == 0 {
+		return ""
+	}
+	host := ""
+	for _, raw := range cfg.RedirectURIs {
+		u, err := url.Parse(string(raw))
+		if err != nil || u.Scheme != "https" || u.Hostname() == "" {
+			return ""
+		}
+		h := strings.ToLower(u.Hostname())
+		if host != "" && h != host {
+			return ""
+		}
+		host = h
+	}
+	return host
+}

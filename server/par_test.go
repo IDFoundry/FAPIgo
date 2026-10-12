@@ -558,6 +558,7 @@ func newHarnessWithApplicationType(t *testing.T, profile server.Profile, allowRe
 	revocation := &fakeRevocationSink{}
 
 	cfg := server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: testEndpoints(t),
 		Profile:   profile,
@@ -651,6 +652,7 @@ func newHarnessOAuthOnly(t *testing.T) harness {
 	revocation := &fakeRevocationSink{}
 
 	cfg := server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: testEndpoints(t),
 		Profile:   server.ProfileFAPISecurity,
@@ -724,6 +726,7 @@ func newHarnessWithClientKeys(t *testing.T, clientKeys keys.ClientKeySource) har
 	}
 
 	cfg := server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: testEndpoints(t),
 		Profile:   server.ProfileFAPISecurity,
@@ -1517,6 +1520,7 @@ func newHarnessWithExtensions(t *testing.T, profile server.Profile, registry *ex
 	}
 
 	cfg := server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: testEndpoints(t),
 		Profile:   profile,

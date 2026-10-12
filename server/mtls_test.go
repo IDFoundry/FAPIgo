@@ -100,6 +100,7 @@ func newHarnessWithSenderConstrainMTLS(t *testing.T) harness {
 	revocation := &fakeRevocationSink{}
 
 	cfg := server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: testEndpoints(t),
 		Profile:   server.ProfileFAPISecurity,
@@ -184,6 +185,7 @@ func newHarnessWithSenderConstrainMTLSAndAliases(t *testing.T) (harness, string)
 	}
 
 	cfg := server.Config{
+		Subjects:      server.PublicSubjects(),
 		Issuer:        issuer,
 		Endpoints:     testEndpoints(t),
 		MTLSEndpoints: server.MTLSEndpoints{Token: mtlsToken},
@@ -475,6 +477,7 @@ func TestServerMetadataAdvertisesMTLSEndpointAliasesWhenConfigured(t *testing.T)
 	serverKey := generateKey(t)
 	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
 	srv, err := server.New(server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: testEndpoints(t),
 		Profile:   server.ProfileFAPISecurity,

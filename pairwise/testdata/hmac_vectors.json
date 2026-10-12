@@ -1,0 +1,61 @@
+{
+  "construction": "HMAC-SHA-256(key, u32be(len(f)) || f for f in [\"fapigo ppid h1\", issuer, sector, subject]), base64url without padding",
+  "vectors": [
+    {
+      "key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "issuer": "https://op.example",
+      "sector": "rp.example",
+      "subject": "user-1",
+      "body": "5a2N_fII7NbcGBQtdDFxNAlIw4U7kurlvXNx_VFEDHQ"
+    },
+    {
+      "key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "issuer": "https://op.example",
+      "sector": "rp.example",
+      "subject": "user-2",
+      "body": "fj1PKTrgVTxeUfS9-0NOfWtCd1VHm5Iup81Qatxx7oQ"
+    },
+    {
+      "key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "issuer": "https://op.example",
+      "sector": "other.example",
+      "subject": "user-1",
+      "body": "IwcamOJV3p-FgOxupy6Hk6coA3wVVP7roeYriberzbs"
+    },
+    {
+      "key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "issuer": "https://other-op.example",
+      "sector": "rp.example",
+      "subject": "user-1",
+      "body": "GOZDDRvNrs0e7fI0h6jyyIOaBkvezzAxc2WMx3cPnYI"
+    },
+    {
+      "key": "030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dc",
+      "issuer": "https://op.example",
+      "sector": "rp.example",
+      "subject": "user-1",
+      "body": "gKgLmR1bNxbCagVYotyYkhBAc8K5xtDLjDnQM_9JxyU"
+    },
+    {
+      "key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "issuer": "https://op.example/tenant/a",
+      "sector": "app.example.com",
+      "subject": "alice@example.com",
+      "body": "8syCtUY08zv25lo2JhpR86GC2gaoSGp3BgaMTczYOB8"
+    },
+    {
+      "key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "issuer": "https://op.example",
+      "sector": "rp.example",
+      "subject": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "body": "A3f2TUcuuiQay5GF_yX_AzSZdvgCi2kHcQ5uNkEzCJk"
+    },
+    {
+      "key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "issuer": "https://op.example",
+      "sector": "rp.example",
+      "subject": "a b ~!",
+      "body": "XgUT7-28Xt2xXS6DQ3dwog-O71EjaiIVt5T68hOXG-w"
+    }
+  ]
+}

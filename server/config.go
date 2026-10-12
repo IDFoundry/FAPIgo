@@ -383,6 +383,14 @@ type Config struct {
 	// it's ignored.
 	Deployment Deployment
 
+	// Subjects decides the kind of sub this server's end users get at
+	// each client: the same everywhere (public) or derived per sector
+	// (pairwise, OpenID Connect Core §8); see SubjectConfig. Required:
+	// there is no default, so an existing deployment states
+	// PublicSubjects() and keeps every sub it issues today. An OAuthOnly
+	// server may leave it zero, which means public.
+	Subjects SubjectConfig
+
 	// MTLSEndpoints are this server's mTLS-requiring alternate URLs, if
 	// any — see MTLSEndpoints' own doc comment. Optional; zero value
 	// omits mtls_endpoint_aliases from Metadata.

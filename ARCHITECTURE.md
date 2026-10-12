@@ -60,6 +60,7 @@ fapigo/                    // package fapi: shared value types only
 ├── federation/            // OpenID Federation 1.0 leaf-entity primitives — a shared
 │                           // subsystem package like keys/storage, not a fourth role
 ├── extension/             // shared custom-parameter & RAR definitions
+├── pairwise/              // pairwise subject (PPID) derivation, shared by server and resource servers
 ├── storage/                // role-specific storage contracts, shared replay primitive,
 │                           // StoreAssurance capability checks + reusable contract test suite
 │   └── memstore/           // in-memory reference implementation (dev/test only, never production)

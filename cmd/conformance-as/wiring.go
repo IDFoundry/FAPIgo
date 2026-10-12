@@ -224,6 +224,7 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 		return nil, err
 	}
 	srvCfg := server.Config{
+		Subjects:      server.PublicSubjects(),
 		Issuer:        resolved.Issuer,
 		Endpoints:     endpoints,
 		MTLSEndpoints: resolved.MTLSEndpoints,

@@ -36,6 +36,7 @@ func serverConfig(t *testing.T) server.Config {
 		t.Fatal(err)
 	}
 	return server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Limits:    server.Limits{AccessTokenLifetime: 5 * time.Minute, MaxDPoPProofAge: time.Minute, MaxClockSkew: 5 * time.Second},
 		Assurance: server.AssuranceDevelopment,

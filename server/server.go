@@ -36,6 +36,9 @@ func New(cfg Config, deps Dependencies) (*Server, error) {
 	if err := validateDependencies(cfg, deps); err != nil {
 		return nil, err
 	}
+	if err := refusePairwiseUntilIssued(cfg, deps); err != nil {
+		return nil, err
+	}
 	if cfg.Extensions == nil {
 		// No implicit permissive fallback: an unconfigured registry
 		// rejects every custom parameter, it does not accept anything —
@@ -605,7 +608,7 @@ func validateConditionalDependencies(cfg Config, deps Dependencies) error {
 	if len(cfg.AutomaticRegistration.TrustAnchors) > 0 && deps.FederationHTTP == nil {
 		return fmt.Errorf("server: dependencies: federation_http is required when automatic_registration.trust_anchors is set")
 	}
-	return nil
+	return validateSubjects(cfg, deps)
 }
 
 // validateEncryptionDependencies requires ClientEncryptionKeys when the
@@ -662,6 +665,7 @@ func validateProductionAssurance(cfg Config, deps Dependencies, cibaEnabled bool
 	errs = append(errs, checkProductionClientSources(deps, scaled, cfg.AttestationBasedClientAuthentication)...)
 	errs = append(errs, checkProductionStateStores(deps, scaled, cibaEnabled)...)
 	errs = append(errs, checkProductionTokenStores(deps, issuer, scaled)...)
+	errs = append(errs, checkProductionPairwiseSubjects(cfg, deps, scaled))
 	return errors.Join(errs...)
 }
 

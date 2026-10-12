@@ -31,6 +31,7 @@ func validConfig(t *testing.T) server.Config {
 		t.Fatalf("ParseIssuerURL: %v", err)
 	}
 	return server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: testEndpoints(t),
 		Profile:   server.ProfileFAPISecurity,

@@ -127,6 +127,7 @@ func newHarnessWithClientAuthTLSSubjectDNAndTrust(t *testing.T, expectedSubjectD
 	}
 
 	cfg := server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: testEndpoints(t),
 		Profile:   server.ProfileFAPISecurity,
@@ -211,6 +212,7 @@ func newHarnessWithClientAuthTLSSANAndCAs(t *testing.T, method storage.ClientAut
 	}
 
 	srvCfg := server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: testEndpoints(t),
 		Profile:   server.ProfileFAPISecurity,
@@ -374,6 +376,7 @@ func TestPushAuthorizationRequestSelfSignedTLSClientAuthUnaffectedByTrustedClien
 		t.Fatalf("ParseIssuerURL: %v", err)
 	}
 	cfg := server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: testEndpoints(t),
 		Profile:   server.ProfileFAPISecurity,

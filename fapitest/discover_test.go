@@ -55,6 +55,7 @@ func TestDiscoverEndToEnd(t *testing.T) {
 	}
 
 	srvCfg := server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: loopbackEndpoints(as.ts.URL),
 		Profile:   server.ProfileFAPISecurity,

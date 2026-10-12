@@ -82,9 +82,17 @@ cfg := server.Config{
 	Algorithms: server.RecommendedAlgorithms(),
 	Limits:     server.RecommendedLimits(),
 	Assurance:  server.AssuranceDevelopment, // AssuranceProduction once your real deps are ready
+	Subjects:   server.PublicSubjects(),     // every client sees the same sub for a user
 	// Deployment: server.DeploymentSingleInstance, // required under AssuranceProduction: or DeploymentHorizontallyScaled for a fleet
 }
 ```
+
+`Subjects` is required: it states what kind of `sub` (OpenID Connect
+Core §8) a user gets at each client. `server.PublicSubjects()` gives
+every client the same `sub`. Pairwise subjects, a different `sub` per
+sector of clients so they can't correlate a user, are configured here
+too, but aren't issued yet in this release. A pure OAuth server
+(`OAuthOnly`) may leave `Subjects` zero, which means public.
 
 Under `ProfileFAPISecurityWithMessageSigning`, `Algorithms.JARM` is
 required too.

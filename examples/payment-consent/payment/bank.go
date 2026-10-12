@@ -110,7 +110,8 @@ func (w *World) newBank(shop clientKeys) (*bank, error) {
 
 	b := &bank{w: w, interaction: interaction}
 	b.cfg = server.Config{
-		Issuer: issuer, Endpoints: endpoints,
+		Subjects: server.PublicSubjects(),
+		Issuer:   issuer, Endpoints: endpoints,
 		// Message Signing: the shop's request must be a signed request
 		// object, and the bank's response is signed too (JARM).
 		Profile:    server.ProfileFAPISecurityWithMessageSigning,

@@ -611,6 +611,7 @@ func newHarnessWithOpaqueAccessTokens(t *testing.T, profile server.Profile, allo
 	store := memstore.NewAccessTokenStore()
 
 	cfg := server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: testEndpoints(t),
 		Profile:   profile,

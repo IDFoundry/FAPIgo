@@ -91,6 +91,7 @@ func newHarnessWithRARTypes(t *testing.T, profile server.Profile, registry *exte
 	endpoints.BackchannelAuthentication = backchannelEndpoint
 
 	cfg := server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: endpoints,
 		Profile:   profile,

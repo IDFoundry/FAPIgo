@@ -5,6 +5,7 @@ import (
 
 	"github.com/idfoundry/fapigo/fapihttp"
 	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/pairwise"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -203,4 +204,14 @@ type Dependencies struct {
 	// RegisteredAttesterKeys{Keys: ...} to use keys registered for each
 	// attester, never ClientKeys. See both types' own doc comments.
 	AttesterTrust AttesterTrust
+
+	// PairwiseSubjects derives the body of each pairwise sub (see
+	// Config.Subjects and package pairwise): pairwise.NewHMAC, or a
+	// Deriver of the embedder's own. Required when Config.Subjects'
+	// Default is pairwise, and nil otherwise means no client can have
+	// pairwise subjects. Under AssuranceProduction it must declare
+	// Durable key custody (keys.KeyCustodyAssurance), and
+	// CrossInstanceConsistent with DeploymentHorizontallyScaled, since
+	// every instance and restart must derive the same sub.
+	PairwiseSubjects pairwise.Deriver
 }

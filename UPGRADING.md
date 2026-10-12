@@ -15,6 +15,42 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.55.0
+
+### `Config.Subjects` is required (server)
+
+**Affects:** every `server.Config` that isn't `OAuthOnly`.
+
+**Why:** a user's `sub` is an identifier relying parties store as the
+account key. The new `Config.Subjects` (`server.SubjectConfig`) states
+which kind it is (OpenID Connect Core §8): the same at every client
+(public), or derived per sector of clients so that clients in different
+sectors can't correlate the user (pairwise). It has no default, so
+choosing between them is never left to the library. `New` refuses a
+zero `Subjects` with `subjects.default is required`.
+
+**What to change:** set `Subjects: server.PublicSubjects()`. Every `sub`
+stays exactly as it is today, and nothing else is needed: no deriver,
+no key, no change to any client.
+
+```go
+cfg := server.Config{
+	// ...
+	Subjects: server.PublicSubjects(),
+}
+```
+
+An `OAuthOnly` server may leave `Subjects` zero, which means public.
+
+The rest of this release's subject settings (pairwise subjects,
+`Dependencies.PairwiseSubjects` with `pairwise.NewHMAC`, and a client's
+`SubjectType` and `Sector` on `storage.RegisteredClientConfig`) are
+additions: `New` refuses any configuration in which a client could be
+pairwise until pairwise subjects are issued. A client registered with
+`SubjectType: fapi.SubjectTypePairwise` must have a sector, set or
+derived from its redirect URIs, or `storage.NewRegisteredClient`
+refuses it.
+
 ## v0.54.0
 
 ### An authentication time can't be in the future (server, client)

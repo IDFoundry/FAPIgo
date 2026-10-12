@@ -113,6 +113,7 @@ func (w *World) newIdentityProvider(c country, ta *entity) (*identityProvider, e
 	}
 
 	cfg := server.Config{
+		Subjects:   server.PublicSubjects(),
 		Issuer:     issuer,
 		Endpoints:  server.Endpoints{Authorization: authz, Token: tokenURL, PushedAuthorizationRequest: parURL, JWKS: jwksURL},
 		Profile:    server.ProfileFAPISecurity,

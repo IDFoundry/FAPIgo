@@ -165,6 +165,14 @@ jobs:
             name: FuzzOpenBackchannelSession
           - pkg: ./federation
             name: FuzzEntityIDHostAgreement
+          - pkg: .
+            name: FuzzParseSubjectType
+          - pkg: ./pairwise
+            name: FuzzNewPrefix
+          - pkg: ./pairwise
+            name: FuzzHMACDeterministicAndInjective
+          - pkg: ./storage
+            name: FuzzDerivedSector
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

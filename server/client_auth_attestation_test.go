@@ -140,6 +140,7 @@ func newAttestationServer(t *testing.T, now time.Time, registeredKey *ecdsa.Priv
 	grants := &fakeGrantStore{}
 
 	cfg := server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: testEndpoints(t),
 		Profile:   server.ProfileFAPISecurity,
@@ -289,7 +290,8 @@ func TestRequestClientCredentialsToken_AttestationRejectsWhenDisabled(t *testing
 	serverKey := generateKey(t)
 	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
 	cfg := server.Config{
-		Issuer: issuer, Endpoints: testEndpoints(t), Profile: server.ProfileFAPISecurity,
+		Subjects: server.PublicSubjects(),
+		Issuer:   issuer, Endpoints: testEndpoints(t), Profile: server.ProfileFAPISecurity,
 		Algorithms: server.AlgorithmPolicy{ClientAssertion: server.AlgorithmSet{fapi.ES256}, RequestObject: server.AlgorithmSet{fapi.ES256}, JARM: fapi.ES256, IDToken: fapi.ES256},
 		Limits: server.Limits{
 			PushedRequestLifetime: 90 * time.Second, MaxClientAssertionLifetime: time.Minute, MaxRequestObjectLifetime: time.Minute,
@@ -607,7 +609,8 @@ func TestRequestClientCredentialsToken_AttestationRejectsClientNotRegisteredForI
 	now := time.Now()
 	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
 	cfg := server.Config{
-		Issuer: issuer, Endpoints: testEndpoints(t), Profile: server.ProfileFAPISecurity,
+		Subjects: server.PublicSubjects(),
+		Issuer:   issuer, Endpoints: testEndpoints(t), Profile: server.ProfileFAPISecurity,
 		Algorithms: server.AlgorithmPolicy{
 			ClientAssertion: server.AlgorithmSet{fapi.ES256}, RequestObject: server.AlgorithmSet{fapi.ES256},
 			JARM: fapi.ES256, IDToken: fapi.ES256,
@@ -680,7 +683,8 @@ func TestRequestClientCredentialsToken_AttestationRejectsDisallowedAttestationAl
 	now := time.Now()
 	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
 	cfg := server.Config{
-		Issuer: issuer, Endpoints: testEndpoints(t), Profile: server.ProfileFAPISecurity,
+		Subjects: server.PublicSubjects(),
+		Issuer:   issuer, Endpoints: testEndpoints(t), Profile: server.ProfileFAPISecurity,
 		Algorithms: server.AlgorithmPolicy{
 			ClientAssertion: server.AlgorithmSet{fapi.ES256}, RequestObject: server.AlgorithmSet{fapi.ES256},
 			JARM: fapi.ES256, IDToken: fapi.ES256,
@@ -778,7 +782,8 @@ func TestRequestClientCredentialsToken_AttestationRejectsNoAttesterKeyRegistered
 	now := time.Now()
 	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
 	cfg := server.Config{
-		Issuer: issuer, Endpoints: testEndpoints(t), Profile: server.ProfileFAPISecurity,
+		Subjects: server.PublicSubjects(),
+		Issuer:   issuer, Endpoints: testEndpoints(t), Profile: server.ProfileFAPISecurity,
 		Algorithms: server.AlgorithmPolicy{
 			ClientAssertion: server.AlgorithmSet{fapi.ES256}, RequestObject: server.AlgorithmSet{fapi.ES256},
 			JARM: fapi.ES256, IDToken: fapi.ES256,

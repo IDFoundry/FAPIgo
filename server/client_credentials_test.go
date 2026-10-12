@@ -56,6 +56,7 @@ func newHarnessWithClientCredentialsGrant(t *testing.T, senderConstrain storage.
 	revocation := &fakeRevocationSink{}
 
 	cfg := server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: testEndpoints(t),
 		Profile:   server.ProfileFAPISecurity,
@@ -192,6 +193,7 @@ func newHarnessWithClientCredentialsGrantAndRARTypes(t *testing.T, registry *ext
 	}
 
 	cfg := server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: testEndpoints(t),
 		Profile:   server.ProfileFAPISecurity,

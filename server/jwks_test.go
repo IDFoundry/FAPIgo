@@ -38,6 +38,7 @@ func newServerWithKeyManager(t *testing.T, profile server.Profile, km keys.KeyMa
 	}
 
 	cfg := server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: testEndpoints(t),
 		Profile:   profile,
@@ -228,6 +229,7 @@ func TestPublicJWKSOAuthOnlyOmitsIDTokenSigningKey(t *testing.T) {
 		t.Fatalf("ParseIssuerURL: %v", err)
 	}
 	cfg := server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: testEndpoints(t),
 		Profile:   server.ProfileFAPISecurity,
@@ -346,6 +348,7 @@ func newServerWithKeyManagerAndUserInfo(t *testing.T, profile server.Profile, km
 	}
 
 	cfg := server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: testEndpoints(t),
 		Profile:   profile,

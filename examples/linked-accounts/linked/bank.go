@@ -132,7 +132,8 @@ func (w *World) newBank(apps apps) (*bank, error) {
 
 	b := &bank{w: w, interaction: interaction, connections: map[string]*connection{}}
 	b.cfg = server.Config{
-		Issuer: issuer, Endpoints: endpoints, Profile: server.ProfileFAPISecurity,
+		Subjects: server.PublicSubjects(),
+		Issuer:   issuer, Endpoints: endpoints, Profile: server.ProfileFAPISecurity,
 		Algorithms: server.RecommendedAlgorithms(), Limits: limits,
 		Assurance: server.AssuranceDevelopment, RAR: registry,
 	}

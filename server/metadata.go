@@ -350,7 +350,7 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 // ones that only mean something with ID tokens or UserInfo, which an
 // OAuthOnly server leaves out (see Metadata).
 func (s *Server) addOIDCMetadata(md *Metadata) {
-	md.SubjectTypesSupported = []string{"public"}
+	md.SubjectTypesSupported = s.subjectTypesSupported()
 	md.IDTokenSigningAlgValuesSupported = []string{s.cfg.Algorithms.IDToken.String()}
 	md.ClaimsParameterSupported = s.deps.IdentityClaims != nil
 	if len(s.cfg.Algorithms.IDTokenEncryptionKeyManagement) > 0 {

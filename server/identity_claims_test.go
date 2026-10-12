@@ -140,6 +140,7 @@ func newHarnessWithIdentityClaims(t *testing.T, identityClaims server.IdentityCl
 	}
 
 	cfg := server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: testEndpoints(t),
 		Profile:   server.ProfileFAPISecurity,

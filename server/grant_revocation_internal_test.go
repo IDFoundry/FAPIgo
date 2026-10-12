@@ -68,7 +68,9 @@ func TestGrantRevocationHorizon(t *testing.T) {
 		"auth_req_id longest":   {Limits{RefreshTokenLifetime: time.Minute, AuthorizationCodeLifetime: time.Minute, BackchannelAuthenticationRequestLifetime: time.Hour, AccessTokenLifetime: 5 * time.Minute, MaxClockSkew: 10 * time.Second}, time.Hour + 5*time.Minute + 10*time.Second},
 		"code longest":          {Limits{AuthorizationCodeLifetime: 2 * time.Hour, AccessTokenLifetime: 5 * time.Minute}, 2*time.Hour + 5*time.Minute},
 	} {
-		s := &Server{cfg: Config{Limits: tc.limits}}
+		s := &Server{cfg: Config{
+			Subjects: PublicSubjects(),
+			Limits:   tc.limits}}
 		if got := s.grantRevocationHorizon(); got != tc.want {
 			t.Errorf("%s: grantRevocationHorizon() = %v, want %v", name, got, tc.want)
 		}

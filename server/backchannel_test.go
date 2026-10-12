@@ -91,6 +91,7 @@ func newHarnessWithBackchannelOptions(t *testing.T, backchannel storage.Backchan
 	endpoints.BackchannelAuthentication = backchannelEndpoint
 
 	cfg := server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: endpoints,
 		Profile:   server.ProfileFAPISecurity,
@@ -187,6 +188,7 @@ func newBackchannelOAuthOnlyServer(t *testing.T) error {
 	endpoints.BackchannelAuthentication = backchannelEndpoint
 
 	cfg := server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: endpoints,
 		Profile:   server.ProfileFAPISecurity,
@@ -275,6 +277,7 @@ func newHarnessWithBackchannelMTLS(t *testing.T) harness {
 	endpoints.BackchannelAuthentication = backchannelEndpoint
 
 	cfg := server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: endpoints,
 		Profile:   server.ProfileFAPISecurity,
@@ -401,6 +404,7 @@ func newHarnessWithBackchannelPing(t *testing.T) (harness, *memstore.Backchannel
 	endpoints.BackchannelAuthentication = backchannelEndpoint
 
 	cfg := server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: endpoints,
 		Profile:   server.ProfileFAPISecurity,

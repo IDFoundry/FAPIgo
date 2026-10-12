@@ -124,7 +124,8 @@ func (w *World) newBank(till, pocketwise clientKeys) (*bank, error) {
 
 	b := &bank{w: w, inbox: map[string]*pendingRequest{}}
 	b.cfg = server.Config{
-		Issuer: issuer, Endpoints: endpoints, Profile: server.ProfileFAPISecurity,
+		Subjects: server.PublicSubjects(),
+		Issuer:   issuer, Endpoints: endpoints, Profile: server.ProfileFAPISecurity,
 		Algorithms: algorithms, Limits: limits, Assurance: server.AssuranceDevelopment,
 		RAR: registry,
 	}

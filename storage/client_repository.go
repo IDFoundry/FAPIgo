@@ -222,6 +222,9 @@ type RegisteredClient struct {
 	allowsClientCredentialsGrant    bool
 	automaticFederationRegistration bool
 	display                         ClientDisplay
+
+	subjectType fapi.SubjectType
+	sector      string
 }
 
 // RegisteredClientConfig is the input to NewRegisteredClient.
@@ -438,6 +441,24 @@ type RegisteredClientConfig struct {
 	// Display is how a consent screen can present this client. Optional:
 	// the zero value means nothing beyond ClientID is known.
 	Display ClientDisplay
+
+	// SubjectType is the kind of sub this client's end users get:
+	// fapi.SubjectTypePublic or fapi.SubjectTypePairwise. The zero value
+	// inherits the server's default (server.Config.Subjects), within its
+	// enforcement. A pairwise client needs a Sector, set or derived.
+	SubjectType fapi.SubjectType
+
+	// Sector is the sector this client's pairwise subjects are derived
+	// for (OpenID Connect Core §8.1): clients sharing a sector see the
+	// same sub for a user. Optional: when empty, a web client whose
+	// redirect URIs are all https on one host gets that host. A native
+	// client, a client with redirect URIs on several hosts, and one with
+	// no redirect URIs (CIBA or client credentials only) have no derived
+	// sector, so a pairwise one must set it. Up to 255 printable ASCII
+	// characters, by convention a host name. Changing it (or the redirect
+	// URIs it's derived from) gives every user a new sub at this client
+	// for new grants, so set it before the client's first use.
+	Sector string
 }
 
 // MaxClientNameBytes bounds ClientDisplay.Name.
@@ -571,7 +592,8 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 		return RegisteredClient{}, err
 	}
 
-	if err := checkApplicationType(cfg); err != nil {
+	sector, err := checkApplicationTypeAndSector(cfg)
+	if err != nil {
 		return RegisteredClient{}, err
 	}
 	redirectURIs := make([]fapi.RegisteredRedirectURI, len(cfg.RedirectURIs))
@@ -607,6 +629,8 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 		allowsClientCredentialsGrant:              cfg.AllowsClientCredentialsGrant,
 		automaticFederationRegistration:           cfg.AutomaticFederationRegistration,
 		display:                                   cfg.Display,
+		subjectType:                               cfg.SubjectType,
+		sector:                                    sector,
 	}, nil
 }
 

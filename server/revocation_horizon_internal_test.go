@@ -11,11 +11,13 @@ import (
 // would write an already-expired revocation record.
 func TestGrantRevocationHorizonSaturates(t *testing.T) {
 	year := 365 * 24 * time.Hour
-	s := &Server{cfg: Config{Limits: Limits{
-		RefreshTokenLifetime: 200 * year,
-		AccessTokenLifetime:  100 * year,
-		MaxClockSkew:         time.Minute,
-	}}}
+	s := &Server{cfg: Config{
+		Subjects: PublicSubjects(),
+		Limits: Limits{
+			RefreshTokenLifetime: 200 * year,
+			AccessTokenLifetime:  100 * year,
+			MaxClockSkew:         time.Minute,
+		}}}
 	if got := s.grantRevocationHorizon(); got != math.MaxInt64 {
 		t.Fatalf("grantRevocationHorizon() = %v, want the largest Duration", got)
 	}

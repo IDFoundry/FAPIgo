@@ -53,6 +53,7 @@ func newHarnessWithClientAuthSelfSignedTLS(t *testing.T) (harness, *x509.Certifi
 	}
 
 	cfg := server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: testEndpoints(t),
 		Profile:   server.ProfileFAPISecurity,
@@ -139,6 +140,7 @@ func newHarnessWithClientAuthTLSSubjectDNValue(t *testing.T, cert *x509.Certific
 	}
 
 	cfg := server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: testEndpoints(t),
 		Profile:   server.ProfileFAPISecurity,
@@ -226,6 +228,7 @@ func newHarnessWithClientAuthTLSSAN(t *testing.T, method storage.ClientAuthMetho
 	}
 
 	srvCfg := server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: testEndpoints(t),
 		Profile:   server.ProfileFAPISecurity,
@@ -618,6 +621,7 @@ func TestBeginBackchannelAuthenticationCertClientAuthReachesPeerCertificate(t *t
 	endpoints.BackchannelAuthentication = backchannelEndpoint
 
 	cfg := server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: endpoints,
 		Profile:   server.ProfileFAPISecurity,
@@ -736,6 +740,7 @@ func newHarnessWithClientAuthMTLSAndDPoP(t *testing.T) (harness, *x509.Certifica
 	}
 
 	cfg := server.Config{
+		Subjects:      server.PublicSubjects(),
 		Issuer:        issuer,
 		Endpoints:     testEndpoints(t),
 		MTLSEndpoints: server.MTLSEndpoints{Token: mtlsToken, PushedAuthorizationRequest: mtlsPAR},

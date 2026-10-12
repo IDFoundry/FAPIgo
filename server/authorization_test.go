@@ -306,6 +306,7 @@ func TestBeginAuthorizationRejectsExpiredRequestURI(t *testing.T) {
 	serverKeyManager := &fakeKeyManager{key: generateKey(t), keyID: "as-key-1"}
 
 	srv, err := server.New(server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: testEndpoints(t),
 		Profile:   server.ProfileFAPISecurity,

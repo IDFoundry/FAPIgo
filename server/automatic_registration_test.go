@@ -243,6 +243,7 @@ func newAutomaticRegistrationTestServer(t *testing.T, f *automaticRegistrationFi
 		t.Fatalf("ParseIssuerURL: %v", err)
 	}
 	cfg := server.Config{
+		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
 		Endpoints: testEndpoints(t),
 		Profile:   server.ProfileFAPISecurity,

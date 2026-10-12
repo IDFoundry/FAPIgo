@@ -56,7 +56,7 @@ with mTLS, and signs nothing else, needs no `Dependencies.Keys`.
 
 ```go
 srv, err := server.New(server.Config{
-	// Issuer, Endpoints, Profile, Algorithms, Limits ...
+	// Issuer, Endpoints, Profile, Algorithms, Limits, Subjects ...
 	MTLSEndpoints: server.MTLSEndpoints{Token: mtlsTokenURL},
 }, server.Dependencies{
 	// RFC 8705 §2.1.1: verify the chain yourself, and check revocation.

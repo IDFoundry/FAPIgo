@@ -136,7 +136,8 @@ func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
 
 	b := &bank{w: w, clients: memstore.NewClientRepository(registered), interaction: interaction}
 	cfg := server.Config{
-		Issuer: issuer, Endpoints: endpoints, Profile: server.ProfileFAPISecurity,
+		Subjects: server.PublicSubjects(),
+		Issuer:   issuer, Endpoints: endpoints, Profile: server.ProfileFAPISecurity,
 		Algorithms: algs, Limits: server.RecommendedLimits(), Assurance: server.AssuranceDevelopment,
 	}
 	deps := server.Dependencies{

@@ -107,7 +107,9 @@
 //     store, grant store, replay store, client key resolution, this
 //     server's own signing key manager, access-token issuer, revocation,
 //     client-certificate trust, clock, randomness) is present, and
-//     unless every configured limit, endpoint and algorithm is valid.
+//     unless every configured limit, endpoint and algorithm is valid,
+//     and Config.Subjects states the kind of sub each client sees
+//     (PublicSubjects keeps every sub as before).
 //     Config.Profile additionally requires a JARM algorithm under
 //     ProfileFAPISecurityWithMessageSigning. AssuranceProduction
 //     additionally requires an AuditSink, stores and key sources that

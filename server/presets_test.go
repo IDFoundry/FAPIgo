@@ -24,6 +24,7 @@ func TestRecommendedPresetsProduceAWorkingServer(t *testing.T) {
 	}
 
 	cfg := server.Config{
+		Subjects:   server.PublicSubjects(),
 		Issuer:     issuer,
 		Endpoints:  testEndpoints(t),
 		Profile:    server.ProfileFAPISecurity,
@@ -80,6 +81,7 @@ func TestRecommendedAlgorithmsWorksUnderMessageSigning(t *testing.T) {
 	}
 
 	cfg := server.Config{
+		Subjects:   server.PublicSubjects(),
 		Issuer:     issuer,
 		Endpoints:  testEndpoints(t),
 		Profile:    server.ProfileFAPISecurityWithMessageSigning,

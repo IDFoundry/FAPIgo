@@ -58,11 +58,23 @@ type Dependencies struct {
 	// to the server's Config.Subjects.Prefix. serverresource.NewVerifier
 	// wires both from the server's configuration.
 	//
-	// Required to verify a self-contained access token whose sub is
-	// pairwise: Verify answers one with server_error rather than give
-	// the pairwise sub as Subject. A server-side token record
-	// (OpaqueAccessTokens) already keeps the internal subject and needs
-	// no lookup. Nil when the authorization server issues only public
-	// subjects, or only opaque access tokens.
+	// Required (or SubjectResolver) to verify a self-contained access
+	// token whose sub is pairwise: Verify answers one with server_error
+	// rather than give the pairwise sub as Subject. A server-side token
+	// record (OpaqueAccessTokens) already keeps the internal subject and
+	// needs no lookup. Nil when the authorization server issues only
+	// public subjects, or only opaque access tokens.
 	PairwiseSubjects pairwise.Lookup
+
+	// SubjectResolver maps a self-contained access token's pairwise sub
+	// back to the end user's internal subject when the authorization
+	// server derives subs one way (pairwise.OneWay), so PairwiseSubjects
+	// can't: the embedder's own mapping, the same resolver the server
+	// declares (server.Dependencies.PairwiseSubjectResolver). Verify uses
+	// PairwiseSubjects when set, otherwise SubjectResolver; a pairwise
+	// sub neither maps is never given as Subject. Under
+	// AssuranceProduction it must declare Durable custody
+	// (keys.KeyCustodyAssurance), and CrossInstanceConsistent with
+	// DeploymentHorizontallyScaled.
+	SubjectResolver pairwise.SubjectResolver
 }

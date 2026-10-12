@@ -310,3 +310,72 @@ func TestNewRefusesSelfContainedAccessTokensForOneWayPairwise(t *testing.T) {
 		checkNewErr(t, newErr(t, validConfig(t), validDependencies()), "")
 	})
 }
+
+// subResolver is an embedder's own mapping for pairwise.OneWay: the
+// subs it knows, by issuer, sector and sub.
+type subResolver struct {
+	subjects map[[3]string]string
+}
+
+func (r subResolver) ResolveSubject(_ context.Context, issuer, sector, sub string) (string, error) {
+	if internal, ok := r.subjects[[3]string{issuer, sector, sub}]; ok {
+		return internal, nil
+	}
+	return "", pairwise.ErrSubjectNotFound
+}
+
+// custodySubResolver is a subResolver declaring custody.
+type custodySubResolver struct {
+	subResolver
+	custody keys.KeyCustody
+}
+
+func (r custodySubResolver) KeyCustody() keys.KeyCustody { return r.custody }
+
+// TestNewAcceptsOneWayJWTWithAResolver: under pairwise.OneWay a declared
+// resolver lets the server issue JWT access tokens; a resolver is
+// refused where it would have no effect (pairwise.Reversible, or no
+// client can be pairwise).
+func TestNewAcceptsOneWayJWTWithAResolver(t *testing.T) {
+	t.Run("one-way, JWT, resolver", func(t *testing.T) {
+		cfg, deps := validConfig(t), validDependencies()
+		cfg.Subjects = pairwiseSubjects(t)
+		deps.PairwiseSubjects = testHMACDeriver(t)
+		deps.PairwiseSubjectResolver = subResolver{}
+		checkNewErr(t, newErr(t, cfg, deps), "")
+	})
+	t.Run("reversible, resolver", func(t *testing.T) {
+		cfg, deps := validConfig(t), validDependencies()
+		cfg.Subjects = pairwiseSubjects(t)
+		cfg.Subjects.Derivation = pairwise.Reversible
+		deps.PairwiseSubjects = probeDeriver{body: "abc", looksUpTo: "fapigo-pairwise-probe"}
+		deps.PairwiseSubjectResolver = subResolver{}
+		checkNewErr(t, newErr(t, cfg, deps), "pairwise_subject_resolver applies only to pairwise.OneWay")
+	})
+	t.Run("public, resolver", func(t *testing.T) {
+		cfg, deps := validConfig(t), validDependencies()
+		deps.PairwiseSubjectResolver = subResolver{}
+		checkNewErr(t, newErr(t, cfg, deps), "apply only when a client can be pairwise")
+	})
+}
+
+// TestProductionRequiresResolverCustody: under production the declared
+// resolver must be durable, like the deriver.
+func TestProductionRequiresResolverCustody(t *testing.T) {
+	for name, tc := range map[string]struct {
+		resolver pairwise.SubjectResolver
+		want     string
+	}{
+		"undeclared":  {subResolver{}, "pairwise_subject_resolver must implement keys.KeyCustodyAssurance"},
+		"not durable": {custodySubResolver{}, "pairwise_subject_resolver must declare Durable"},
+		"durable":     {custodySubResolver{custody: keys.KeyCustody{Durable: true}}, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg, deps := productionConfigAndDeps(t)
+			cfg.Subjects = pairwiseSubjects(t)
+			deps.PairwiseSubjects = testHMACDeriver(t, keys.DeclareCustody(keys.KeyCustody{Durable: true}))
+			deps.PairwiseSubjectResolver = tc.resolver
+			checkNewErr(t, newErr(t, cfg, deps), tc.want)
+		})
+	}
+}

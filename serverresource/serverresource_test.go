@@ -380,3 +380,47 @@ func issuePairwiseToken(t *testing.T, cfg server.Config, accessTokens server.Acc
 	}
 	return clientSub, token, cert
 }
+
+// mapResolver resolves the one sub it holds to alice.
+type mapResolver struct{ sub string }
+
+func (r *mapResolver) ResolveSubject(_ context.Context, _, _, sub string) (string, error) {
+	if sub != r.sub {
+		return "", pairwise.ErrSubjectNotFound
+	}
+	return "alice", nil
+}
+
+// TestNewVerifierPassesTheServersSubjectResolver: under pairwise.OneWay
+// with JWT access tokens, the verifier resolves pairwise subs through
+// the resolver the server declares.
+func TestNewVerifierPassesTheServersSubjectResolver(t *testing.T) {
+	prefix, err := pairwise.NewPrefix("pw:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, oneWay := testDerivers(t)
+	cfg := serverConfig(t)
+	cfg.Subjects = server.SubjectConfig{Default: fapi.SubjectTypePairwise, Enforcement: server.SubjectTypesPerClient, Derivation: pairwise.OneWay, Prefix: prefix}
+	accessTokens := jwtAccessTokens(t)
+	deps := serverDependencies(t, accessTokens, time.Now())
+	deps.PairwiseSubjects = oneWay
+	resolver := &mapResolver{}
+	deps.PairwiseSubjectResolver = resolver
+	verifier, err := serverresource.NewVerifier(cfg, deps, serverresource.Options{})
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+	clientSub, token, cert := issuePairwiseToken(t, cfg, accessTokens, oneWay, prefix)
+	resolver.sub = clientSub
+	authz, err := verifier.Verify(context.Background(), resource.VerifyRequest{
+		Method: "GET", URL: &url.URL{Scheme: "https", Host: "as.example.com", Path: "/userinfo"},
+		Authorization: "Bearer " + token, PeerCertificate: cert,
+	})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if authz.Subject != "alice" || authz.ClientSubject != clientSub {
+		t.Errorf("Subject, ClientSubject = %q, %q; want alice, %q", authz.Subject, authz.ClientSubject, clientSub)
+	}
+}

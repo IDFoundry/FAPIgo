@@ -33,6 +33,15 @@
 // AssuranceProduction requires every store and key source the verifier
 // relies on to declare its capabilities (see AssuranceProduction).
 //
+// For a client with pairwise subjects (OpenID Connect Core §8),
+// AuthorizationContext.Subject is the end user's internal subject and
+// ClientSubject the pairwise sub the client knows them by: compare
+// anything the client sends with ClientSubject. A self-contained access
+// token's pairwise sub is mapped back through Dependencies.PairwiseSubjects
+// (a pairwise.Reversible server's deriver) or Dependencies.SubjectResolver
+// (the embedder's own mapping, for a pairwise.OneWay server), and is
+// refused rather than given as Subject when neither can.
+//
 // A verifier for endpoints hosted in the authorization server's own
 // process can be built from that server's configuration with
 // serverresource.NewVerifier instead, so its access-token format and

@@ -244,3 +244,75 @@ func TestPublicAccessTokenClientSubject(t *testing.T) {
 		t.Errorf("Subject, ClientSubject = %q, %q; want user-1 for both", authz.Subject, authz.ClientSubject)
 	}
 }
+
+// TestPairwiseOneWayJWTAccessTokensWithAResolver: under pairwise.OneWay a
+// declared resolver lets JWT access tokens carry the pairwise sub, which
+// a resource server maps back through the embedder's own mapping — and
+// can't without it.
+func TestPairwiseOneWayJWTAccessTokensWithAResolver(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	register(t, h, pairwiseClient(false))
+	h.cfg.Subjects = server.SubjectConfig{
+		Default: fapi.SubjectTypePublic, Enforcement: server.SubjectTypesPerClient,
+		Derivation: pairwise.OneWay, Prefix: mustPrefix(t, testPairwisePrefix),
+	}
+	h.deps.PairwiseSubjects = hmacDeriver(t)
+	resolver := subResolver{subjects: map[[3]string]string{}}
+	h.deps.PairwiseSubjectResolver = resolver
+	srv, err := server.New(h.cfg, h.deps)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	h.server = srv
+	want := clientSubjectOf(t, h, "user-1")
+	// The embedder records the subs its clients are given.
+	resolver.subjects[[3]string{testIssuer, "rp.example", want}] = "user-1"
+
+	first, dpopKey := exchangeForTokensWithOfflineAccess(t, h)
+	refreshed, err := h.server.RefreshAccessToken(context.Background(), server.RefreshTokenRequest{
+		HTTP:       server.FormRequest{Parameters: refreshFormParams(h.clientAssertion(t), first.RefreshToken.Reveal(), "")},
+		DPoPProofs: []string{createDPoPProof(t, dpopKey, h.now)},
+	})
+	if err != nil {
+		t.Fatalf("RefreshAccessToken: %v", err)
+	}
+	for name, accessToken := range map[string]string{"exchange": first.AccessToken.Reveal(), "refresh": refreshed.AccessToken.Reveal()} {
+		t.Run(name, func(t *testing.T) {
+			assertPairwiseJWTClaims(t, accessToken, want)
+			assertResolvesTo(t, resolverResourceVerifier(t, h, resolver), dpopKey, accessToken, h.now, want)
+			_, err := verifyAuthorization(t, pairwiseResourceVerifier(t, h, nil), dpopKey, accessToken, h.now)
+			var rerr *resource.Error
+			if !errors.As(err, &rerr) || rerr.Code() != resource.ErrorServerError {
+				t.Errorf("Verify without a resolver = %v, want server_error", err)
+			}
+		})
+	}
+}
+
+// resolverResourceVerifier is a resource server for h's JWT access
+// tokens, resolving pairwise subs through resolver.
+func resolverResourceVerifier(t *testing.T, h harness, resolver pairwise.SubjectResolver) *resource.Verifier {
+	t.Helper()
+	issuerKeys, err := keys.NewLocalIssuerKeys(h.cfg.Issuer, h.deps.Keys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jwt, err := resource.NewJWTAccessTokens(issuerKeys, h.cfg.Issuer, testIssuer, fapi.ES256, 10*time.Minute, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier, err := resource.NewVerifier(resource.Config{
+		Limits:    resource.Limits{MaxDPoPProofAge: time.Minute, MaxClockSkew: 5 * time.Second},
+		Assurance: resource.AssuranceDevelopment,
+	}, resource.Dependencies{
+		AccessTokens:    jwt,
+		Replay:          memstore.NewReplayStore(),
+		Revocation:      resource.NoRevocation{},
+		Clock:           fixedClock{now: h.now},
+		SubjectResolver: resolver,
+	})
+	if err != nil {
+		t.Fatalf("resource.NewVerifier: %v", err)
+	}
+	return verifier
+}

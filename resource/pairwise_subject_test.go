@@ -232,3 +232,115 @@ func TestProductionRequiresPairwiseLookupCustody(t *testing.T) {
 		})
 	}
 }
+
+// fakeResolver is an embedder's own mapping: it maps the whole sub
+// "pw:abc", under one issuer and sector, to "user-1".
+type fakeResolver struct {
+	issuer, sector, sub string
+	err                 error
+}
+
+func (r fakeResolver) ResolveSubject(_ context.Context, issuer, sector, sub string) (string, error) {
+	if r.err != nil {
+		return "", r.err
+	}
+	if issuer != r.issuer || sector != r.sector || sub != r.sub {
+		return "", pairwise.ErrSubjectNotFound
+	}
+	return "user-1", nil
+}
+
+// TestVerifyResolvesOneWayPairwiseSubjects: without a pairwise.Lookup, a
+// self-contained token's pairwise sub is resolved through the embedder's
+// SubjectResolver, failing closed for a sub it doesn't know or can't
+// answer for; with both, the lookup is used.
+func TestVerifyResolvesOneWayPairwiseSubjects(t *testing.T) {
+	now := time.Now()
+	cert := selfSignedTestClientCert(t, "client-1")
+	target, err := url.Parse("https://rs.example.com/accounts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := fakeResolver{issuer: testPairwiseIssuer, sector: "client.example", sub: "pw:abc"}
+	sector := map[string]json.RawMessage{"pairwise_sector": stringClaim("client.example")}
+	for name, tc := range map[string]struct {
+		subject  string
+		resolver pairwise.SubjectResolver
+		lookup   pairwise.Lookup
+		wantErr  resource.ErrorCode
+	}{
+		"resolved":                    {subject: "pw:abc", resolver: resolver},
+		"unknown sub":                 {subject: "pw:abd", resolver: resolver, wantErr: resource.ErrorInvalidToken},
+		"resolver unavailable":        {subject: "pw:abc", resolver: fakeResolver{err: errors.New("mapping down")}, wantErr: resource.ErrorServerError},
+		"lookup preferred":            {subject: "pw:abc", resolver: fakeResolver{err: errors.New("never called")}, lookup: fakeLookup{issuer: testPairwiseIssuer, sector: "client.example", body: "abc"}},
+		"neither lookup nor resolver": {subject: "pw:abc", wantErr: resource.ErrorServerError},
+	} {
+		t.Run(name, func(t *testing.T) {
+			v := pairwiseVerifierWith(t, pairwiseResolver{subject: tc.subject, issuer: testPairwiseIssuer, claims: sector, thumbprint: mtls.Thumbprint(cert), now: now}, tc.lookup, tc.resolver, now)
+			authz, err := v.Verify(context.Background(), resource.VerifyRequest{Method: "GET", URL: target, Authorization: "Bearer token", PeerCertificate: cert})
+			checkSubjects(t, authz, err, "user-1", tc.subject, tc.wantErr)
+		})
+	}
+}
+
+// pairwiseVerifierWith is pairwiseVerifier, also given resolver.
+func pairwiseVerifierWith(t *testing.T, accessTokens resource.AccessTokenResolver, lookup pairwise.Lookup, resolver pairwise.SubjectResolver, now time.Time) *resource.Verifier {
+	t.Helper()
+	cfg := validConfig(t)
+	deps := resource.Dependencies{
+		AccessTokens:    accessTokens,
+		Replay:          &fakeReplayStore{},
+		Revocation:      &fakeRevocationChecker{},
+		Clock:           fixedClock{now: now},
+		SubjectResolver: resolver,
+	}
+	if lookup != nil {
+		deps.PairwiseSubjects = lookup
+		cfg.PairwisePrefix = mustPrefix(t, "pw:")
+	}
+	v, err := resource.NewVerifier(cfg, deps)
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+	return v
+}
+
+// custodyResolver is a fakeResolver declaring custody.
+type custodyResolver struct {
+	fakeResolver
+	custody keys.KeyCustody
+}
+
+func (r custodyResolver) KeyCustody() keys.KeyCustody { return r.custody }
+
+// TestProductionRequiresSubjectResolverCustody: under production the
+// embedder's resolver must be durable, and cross-instance consistent for
+// a fleet.
+func TestProductionRequiresSubjectResolverCustody(t *testing.T) {
+	for name, tc := range map[string]struct {
+		resolver   pairwise.SubjectResolver
+		deployment resource.Deployment
+		want       string
+	}{
+		"undeclared":                 {fakeResolver{}, resource.DeploymentSingleInstance, "subject_resolver must implement keys.KeyCustodyAssurance"},
+		"not durable":                {custodyResolver{}, resource.DeploymentSingleInstance, "subject_resolver must declare Durable"},
+		"scaled, not cross-instance": {custodyResolver{custody: keys.KeyCustody{Durable: true}}, resource.DeploymentHorizontallyScaled, "subject_resolver must declare CrossInstanceConsistent"},
+		"durable":                    {custodyResolver{custody: keys.KeyCustody{Durable: true}}, resource.DeploymentSingleInstance, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg, deps := productionSetup(t)
+			cfg.Deployment = tc.deployment
+			deps.SubjectResolver = tc.resolver
+			_, err := resource.NewVerifier(cfg, deps)
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("NewVerifier = %v, want a verifier", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("NewVerifier = %v, want an error containing %q", err, tc.want)
+			}
+		})
+	}
+}

@@ -130,10 +130,15 @@ see as new accounts.
   JWT access tokens work, and a client's `id_token_hint`, `login_hint`
   or `claims` `sub` value resolves to the user.
 - **`pairwise.OneWay`** (`pairwise.NewHMAC` over a 32-byte secret key):
-  nothing can map a `sub` back, which is the strongest unlinkability.
-  The internal subject then has to stay server-side, so `New` requires
-  `server.OpaqueAccessTokens`; and a pairwise hint can only be checked
-  against a known user (`Server.ClientSubject`), never resolved.
+  nothing in FAPIgo can map a `sub` back, which is the strongest
+  unlinkability. The internal subject then has to stay server-side, so
+  `New` requires `server.OpaqueAccessTokens`; and a pairwise hint can
+  only be checked against a known user (`Server.ClientSubject`), never
+  resolved. If you keep your own record of the `sub`s you issue, give
+  it as a `pairwise.SubjectResolver` in
+  `Dependencies.PairwiseSubjectResolver`, and the same resolver to every
+  resource server (`resource.Dependencies.SubjectResolver`): `New` then
+  accepts JWT access tokens too.
 
 Under `AssuranceProduction` the deriver must declare durable custody
 (`keys.DeclareCustody` for `NewHMAC`; a `storage.StoreAssurance` store
@@ -686,14 +691,16 @@ the user's internal subject, which your API authorizes by, and
 the `sub` of an ID token the client holds. For a public client both are
 the same.
 
-A JWT access token's `sub` is pairwise, so the verifier needs the
-server's deriver to map it back: `serverresource.NewVerifier` wires it;
-a separate resource server sets `Dependencies.PairwiseSubjects` (the
-same `pairwise.NewMapping` over the same store) and
-`Config.PairwisePrefix` (the server's prefix). Without them, a pairwise
-JWT access token is refused with `server_error` rather than given its
-pairwise `sub` as `Subject`. An opaque access token's record already
-keeps the internal subject.
+A JWT access token's `sub` is pairwise, so the verifier needs a way to
+map it back: `serverresource.NewVerifier` wires the server's own. A
+separate resource server sets either `Dependencies.PairwiseSubjects`
+(the server's `pairwise.Reversible` deriver, such as the same
+`pairwise.NewMapping` over the same store) with `Config.PairwisePrefix`
+(the server's prefix), or, for a `pairwise.OneWay` server,
+`Dependencies.SubjectResolver` (the same resolver the server declares).
+Without one, a pairwise JWT access token is refused with `server_error`
+rather than given its pairwise `sub` as `Subject`. An opaque access
+token's record already keeps the internal subject.
 
 A JWT access token is readable by the client, so nothing in it may
 identify the user beyond its pairwise `sub`: a `GrantID` or extension

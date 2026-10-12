@@ -475,8 +475,9 @@ func (v *Verifier) checkGrantNotRevoked(ctx context.Context, claims map[string]j
 // keeps the internal subject as its own and the client's pairwise sub
 // under token.ClientSubjectClaim. A self-contained token's sub is the
 // client's; when it's pairwise (token.PairwiseSectorClaim), the internal
-// subject is looked up under the sector it was derived for. A public
-// sub is both.
+// subject is looked up under the sector it was derived for, through
+// Dependencies.PairwiseSubjects or else Dependencies.SubjectResolver. A
+// public sub is both.
 func (v *Verifier) resolveSubjects(ctx context.Context, resolved ResolvedAccessToken) (subject, clientSubject string, verr *Error) {
 	if raw, ok := resolved.Claims[token.ClientSubjectClaim]; ok {
 		var sub string
@@ -493,7 +494,18 @@ func (v *Verifier) resolveSubjects(ctx context.Context, resolved ResolvedAccessT
 	if err := json.Unmarshal(raw, &sector); err != nil || sector == "" {
 		return "", "", newError(ErrorInvalidToken, 401, "access token's pairwise sector is malformed", err)
 	}
-	internal, verr := v.lookUpPairwiseSubject(ctx, resolved, sector)
+	if resolved.Issuer == "" {
+		return "", "", newError(ErrorServerError, 500, "access token's subject is pairwise, but its resolver reported no issuer to look it up under", nil)
+	}
+	var internal string
+	switch {
+	case v.deps.PairwiseSubjects != nil:
+		internal, verr = v.lookUpPairwiseSubject(ctx, resolved, sector)
+	case v.deps.SubjectResolver != nil:
+		internal, verr = pairwiseResult(v.deps.SubjectResolver.ResolveSubject(ctx, resolved.Issuer, sector, resolved.Subject))
+	default:
+		verr = newError(ErrorServerError, 500, "access token's subject is pairwise, but neither dependencies.pairwise_subjects nor dependencies.subject_resolver is set", nil)
+	}
 	if verr != nil {
 		return "", "", verr
 	}
@@ -502,20 +514,22 @@ func (v *Verifier) resolveSubjects(ctx context.Context, resolved ResolvedAccessT
 
 // lookUpPairwiseSubject maps resolved's pairwise sub, derived for
 // sector, back to the end user's internal subject through
-// Dependencies.PairwiseSubjects. It fails closed: a pairwise sub is never
-// given as the internal subject.
+// Dependencies.PairwiseSubjects, after stripping Config.PairwisePrefix.
+// It fails closed: a pairwise sub is never given as the internal
+// subject.
 func (v *Verifier) lookUpPairwiseSubject(ctx context.Context, resolved ResolvedAccessToken, sector string) (string, *Error) {
-	if v.deps.PairwiseSubjects == nil {
-		return "", newError(ErrorServerError, 500, "access token's subject is pairwise, but dependencies.pairwise_subjects is nil", nil)
-	}
-	if resolved.Issuer == "" {
-		return "", newError(ErrorServerError, 500, "access token's subject is pairwise, but its resolver reported no issuer to look it up under", nil)
-	}
 	body, ok := strings.CutPrefix(resolved.Subject, v.cfg.PairwisePrefix.String())
 	if !ok || pairwise.CheckBody(body) != nil {
 		return "", newError(ErrorInvalidToken, 401, "access token's pairwise subject isn't one this server issued", nil)
 	}
-	internal, err := v.deps.PairwiseSubjects.LookupInternalSubject(ctx, resolved.Issuer, sector, body)
+	return pairwiseResult(v.deps.PairwiseSubjects.LookupInternalSubject(ctx, resolved.Issuer, sector, body))
+}
+
+// pairwiseResult turns what a pairwise lookup or resolver returned into
+// the internal subject, failing closed: a sub it doesn't know
+// (pairwise.ErrSubjectNotFound) is invalid_token, and any other failure,
+// or no subject, is server_error.
+func pairwiseResult(internal string, err error) (string, *Error) {
 	switch {
 	case errors.Is(err, pairwise.ErrSubjectNotFound):
 		return "", newError(ErrorInvalidToken, 401, "access token's pairwise subject isn't one this server issued", err)

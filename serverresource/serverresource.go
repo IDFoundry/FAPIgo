@@ -84,8 +84,10 @@ type Options struct {
 //     Dependencies.PairwiseSubjects and Config.PairwisePrefix, so
 //     AuthorizationContext.Subject is the end user's internal subject
 //     and ClientSubject the client's pairwise one. Under
-//     pairwise.OneWay the server issues only OpaqueAccessTokens, whose
-//     records already keep the internal subject.
+//     pairwise.OneWay, deps.PairwiseSubjectResolver when set, as the
+//     verifier's Dependencies.SubjectResolver; without one the server
+//     issues only OpaqueAccessTokens, whose records already keep the
+//     internal subject.
 //
 // Any other access-token issuer or revocation sink is an error rather
 // than a guess: build the resource.Verifier directly for those.
@@ -125,6 +127,7 @@ func NewVerifier(cfg server.Config, deps server.Dependencies, opts Options) (*re
 		rdeps.PairwiseSubjects = lookup
 		rcfg.PairwisePrefix = cfg.Subjects.Prefix
 	}
+	rdeps.SubjectResolver = deps.PairwiseSubjectResolver
 	if opts.Nonces != nil {
 		if sameValue(opts.Nonces, deps.Nonces) {
 			return nil, errors.New("serverresource: Options.Nonces must not be the server's own Dependencies.Nonces")

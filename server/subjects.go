@@ -106,36 +106,41 @@ func validateSubjects(cfg Config, deps Dependencies) error {
 		return err
 	}
 	if !pairwisePossible(subjects, deps.PairwiseSubjects) {
-		if subjects.Derivation != 0 || subjects.Prefix.IsSet() {
-			return fmt.Errorf("server: config: subjects.derivation and subjects.prefix apply only when a client can be pairwise (a pairwise default, or dependencies.pairwise_subjects set)")
+		if subjects.Derivation != 0 || subjects.Prefix.IsSet() || deps.PairwiseSubjectResolver != nil {
+			return fmt.Errorf("server: config: subjects.derivation, subjects.prefix and dependencies.pairwise_subject_resolver apply only when a client can be pairwise (a pairwise default, or dependencies.pairwise_subjects set)")
 		}
 		return nil
 	}
 	if err := validatePairwiseSubjects(subjects, deps.PairwiseSubjects); err != nil {
 		return err
 	}
-	if err := checkPairwiseAccessTokens(subjects, deps.AccessTokens); err != nil {
+	if deps.PairwiseSubjectResolver != nil && subjects.Derivation != pairwise.OneWay {
+		return fmt.Errorf("server: dependencies: pairwise_subject_resolver applies only to pairwise.OneWay subjects (pairwise.Reversible maps subs back through pairwise_subjects itself)")
+	}
+	if err := checkPairwiseAccessTokens(subjects, deps.AccessTokens, deps.PairwiseSubjectResolver); err != nil {
 		return err
 	}
 	return probePairwiseSubjects(cfg.Issuer.String(), subjects, deps.PairwiseSubjects)
 }
 
 // checkPairwiseAccessTokens refuses, under pairwise.OneWay, an access
-// token issuer other than OpaqueAccessTokens. A pairwise access token's
-// "sub" is the pairwise one, and a one-way sub can't be mapped back to
-// the end user, so the internal subject a resource server authorizes by
-// must stay in the server-side record OpaqueAccessTokens keeps; a
-// self-contained token, readable by the client, must never carry it.
-// Under pairwise.Reversible a resource server looks the sub up instead.
-func checkPairwiseAccessTokens(subjects SubjectConfig, issuer AccessTokenIssuer) error {
-	if subjects.Derivation != pairwise.OneWay {
+// token issuer other than OpaqueAccessTokens unless the embedder's own
+// resolver (Dependencies.PairwiseSubjectResolver) maps subs back. A
+// pairwise access token's "sub" is the pairwise one, and a one-way sub
+// can't be mapped back to the end user, so without a resolver the
+// internal subject a resource server authorizes by must stay in the
+// server-side record OpaqueAccessTokens keeps; a self-contained token,
+// readable by the client, must never carry it. Under pairwise.Reversible
+// a resource server looks the sub up instead.
+func checkPairwiseAccessTokens(subjects SubjectConfig, issuer AccessTokenIssuer, resolver pairwise.SubjectResolver) error {
+	if subjects.Derivation != pairwise.OneWay || resolver != nil {
 		return nil
 	}
 	switch issuer.(type) {
 	case OpaqueAccessTokens, *OpaqueAccessTokens:
 		return nil
 	}
-	return fmt.Errorf("server: dependencies: access_tokens must be OpaqueAccessTokens with pairwise.OneWay subjects: a one-way pairwise sub can't be mapped back to its end user, so the internal subject must stay in a server-side token record (use pairwise.Reversible for self-contained access tokens)")
+	return fmt.Errorf("server: dependencies: access_tokens must be OpaqueAccessTokens with pairwise.OneWay subjects: a one-way pairwise sub can't be mapped back to its end user, so the internal subject must stay in a server-side token record (use pairwise.Reversible, or set dependencies.pairwise_subject_resolver, for self-contained access tokens)")
 }
 
 // validateSubjectTypes checks Default and Enforcement.
@@ -221,6 +226,11 @@ func lookupProblem(got string, err error) error {
 func checkProductionPairwiseSubjects(cfg Config, deps Dependencies, scaled bool) error {
 	if !pairwisePossible(effectiveSubjects(cfg), deps.PairwiseSubjects) {
 		return nil
+	}
+	if deps.PairwiseSubjectResolver != nil {
+		if err := checkKeyCustody("pairwise_subject_resolver", deps.PairwiseSubjectResolver, scaled); err != nil {
+			return err
+		}
 	}
 	return checkKeyCustody("pairwise_subjects", deps.PairwiseSubjects, scaled)
 }

@@ -158,6 +158,25 @@ type Lookup interface {
 	LookupInternalSubject(ctx context.Context, issuer, sector, body string) (string, error)
 }
 
+// SubjectResolver maps a pairwise sub a OneWay deployment issued back to
+// the internal subject, from a mapping the embedder keeps itself (a table
+// of the subs it issued, say), since a OneWay Deriver can't.
+// ResolveSubject returns the internal subject whose sub, under issuer and
+// sector, is sub (the whole sub, prefix included), or an error wrapping
+// ErrSubjectNotFound if there is none; any other error means the mapping
+// couldn't be read, and is never read as "no such subject".
+//
+// It's what lets a OneWay deployment issue self-contained (JWT) access
+// tokens: every resource server verifying them needs it
+// (resource.Dependencies.SubjectResolver), and the authorization server
+// is told one is in use (server.Dependencies.PairwiseSubjectResolver),
+// though the server itself never calls it. Under production assurance it
+// must implement keys.KeyCustodyAssurance, declaring Durable (and
+// CrossInstanceConsistent for a fleet).
+type SubjectResolver interface {
+	ResolveSubject(ctx context.Context, issuer, sector, sub string) (string, error)
+}
+
 // CheckBody refuses a body a Deriver must never return: empty, longer
 // than MaxBodyLength, or with a byte outside printable ASCII without the
 // space (0x21 to 0x7E).

@@ -65,7 +65,11 @@ subjects. Nothing changes for one that keeps `PublicSubjects()`.
   `serverresource.NewVerifier` wires both.
 - **`pairwise.OneWay`** requires `server.OpaqueAccessTokens`: a one-way
   `sub` can't be mapped back, so the internal subject must stay in a
-  server-side token record.
+  server-side token record. To issue JWT access tokens instead, keep
+  your own record of the subs you issue as a `pairwise.SubjectResolver`,
+  set it as `server.Dependencies.PairwiseSubjectResolver`, and give the
+  same one to every resource server
+  (`resource.Dependencies.SubjectResolver`).
 - **A custom `server.AccessTokenIssuer`** gets the pairwise `sub` as
   `AccessTokenParams.Subject` and the internal subject as the new
   `InternalSubject`. Never put `InternalSubject` in a token the client

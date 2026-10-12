@@ -51,6 +51,33 @@ pairwise until pairwise subjects are issued. A client registered with
 derived from its redirect URIs, or `storage.NewRegisteredClient`
 refuses it.
 
+### A federation Relying Party's `subject_type` is honoured or refused (federation, server)
+
+**Affects:** a server with `Config.AutomaticRegistration`, and code
+building `federation.AutomaticClientRepository` itself.
+
+**Why:** an automatically registered Relying Party's `subject_type`
+metadata (OpenID Connect Dynamic Client Registration 1.0 §2) used to be
+ignored, so one asking for pairwise subjects silently got public ones,
+the identifier it asked not to be given. Now the client gets the
+`subject_type` it names, or the server's default when it names none,
+and a Relying Party asking for a type the server doesn't issue isn't
+registered: it gets `invalid_client`, and
+`AutomaticRegistration.OnResolutionFailure` hears
+`subject_type pairwise is not one this OP issues`. A pairwise Relying
+Party must also have its redirect URIs on one https host, which is its
+sector, and must not publish `sector_identifier_uri`, which this
+release doesn't fetch.
+
+**What to change:** nothing, unless a Relying Party you federate with
+asks for `"subject_type": "pairwise"` while your server issues only
+public subjects: it now fails to register until the server can issue
+pairwise subjects. `server.New` sets the new
+`federation.AutomaticRegistrationConfig.SubjectTypes` and
+`DefaultSubjectType` from `Config.Subjects`; code building an
+`AutomaticClientRepository` directly can leave them zero, which means
+public only.
+
 ## v0.54.0
 
 ### An authentication time can't be in the future (server, client)

@@ -189,7 +189,7 @@ func TestNewReversibleCopiesTheKeys(t *testing.T) {
 	before := deriveReversible(t, d, in)
 	macKey[0] ^= 0xff
 	encKey[0] ^= 0xff
-	if after := deriveReversible(t, d, in); after != before {
+	if deriveReversible(t, d, in) != before {
 		t.Error("changing the caller's key slices changed the Deriver's output")
 	}
 }

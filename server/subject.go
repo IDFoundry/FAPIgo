@@ -27,6 +27,12 @@ const maxSubjectIDLength = 255
 //
 // Grants stored before this check was added keep the subject they were
 // issued with: only new authentications are checked.
+//
+// A deployment whose pairwise subjects come from pairwise.NewReversible
+// holds shorter internal subjects: at most
+// pairwise.MaxReversibleSubjectLength (151) bytes. A longer one is
+// accepted here, but completing an authorization for it at a pairwise
+// client fails with server_error, since its sub can't be derived.
 func NewSubjectID(value string) (SubjectID, error) {
 	if value == "" {
 		return SubjectID{}, fmt.Errorf("server: subject ID is empty")

@@ -40,14 +40,14 @@ import (
 const reversibleDomain = "fapigo ppid r1"
 
 const (
-	// ReversibleMaxSubjectLength is the longest internal subject
+	// MaxReversibleSubjectLength is the longest internal subject
 	// NewReversible's Deriver accepts, in bytes: its plaintext has room
 	// for a length byte and this many bytes of subject.
-	ReversibleMaxSubjectLength = 151
+	MaxReversibleSubjectLength = 151
 
 	// ReversiblePlaintextLength is the fixed size of the padded
 	// plaintext: a length byte, the internal subject, and zero padding.
-	ReversiblePlaintextLength = 1 + ReversibleMaxSubjectLength
+	ReversiblePlaintextLength = 1 + MaxReversibleSubjectLength
 
 	// reversibleIVLength is the synthetic IV's length: one AES block.
 	reversibleIVLength = aes.BlockSize
@@ -59,9 +59,9 @@ const (
 )
 
 // ErrSubjectTooLong is what NewReversible's Deriver returns for an
-// internal subject longer than ReversibleMaxSubjectLength, which its
+// internal subject longer than MaxReversibleSubjectLength, which its
 // fixed-size plaintext can't hold.
-var ErrSubjectTooLong = fmt.Errorf("pairwise: reversible derivation holds internal subjects of at most %d bytes", ReversibleMaxSubjectLength)
+var ErrSubjectTooLong = fmt.Errorf("pairwise: reversible derivation holds internal subjects of at most %d bytes", MaxReversibleSubjectLength)
 
 // NewReversible returns the built-in Reversible Deriver, which also
 // implements Lookup: the body is the internal subject, encrypted under
@@ -95,7 +95,7 @@ var ErrSubjectTooLong = fmt.Errorf("pairwise: reversible derivation holds intern
 // more than reversibility, use NewHMAC; where no key should be able to
 // reverse a sub, use NewMapping.
 //
-// Internal subjects longer than ReversibleMaxSubjectLength bytes are
+// Internal subjects longer than MaxReversibleSubjectLength bytes are
 // refused with ErrSubjectTooLong. opts declare the keys' custody, as
 // for NewHMAC: server.AssuranceProduction requires a Durable one (and
 // CrossInstanceConsistent for a horizontally scaled deployment).
@@ -195,11 +195,11 @@ func (d reversibleDeriver) ctr(iv, dst, src []byte) {
 // reversiblePlaintext lays subject out as the fixed-size plaintext: its
 // length in one byte, its bytes, and zero padding.
 func reversiblePlaintext(subject string) ([]byte, error) {
-	if len(subject) > ReversibleMaxSubjectLength {
+	if len(subject) > MaxReversibleSubjectLength {
 		return nil, ErrSubjectTooLong
 	}
 	plaintext := make([]byte, ReversiblePlaintextLength)
-	plaintext[0] = byte(len(subject)) // #nosec G115 -- at most ReversibleMaxSubjectLength
+	plaintext[0] = byte(len(subject)) // #nosec G115 -- at most MaxReversibleSubjectLength
 	copy(plaintext[1:], subject)
 	return plaintext, nil
 }
@@ -209,7 +209,7 @@ func reversiblePlaintext(subject string) ([]byte, error) {
 // that isn't all zero, or a subject NewInput wouldn't accept.
 func parseReversiblePlaintext(plaintext []byte) (string, bool) {
 	n := int(plaintext[0])
-	if n < 1 || n > ReversibleMaxSubjectLength {
+	if n < 1 || n > MaxReversibleSubjectLength {
 		return "", false
 	}
 	for _, b := range plaintext[1+n:] {

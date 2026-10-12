@@ -334,3 +334,30 @@ func resolverResourceVerifier(t *testing.T, h harness, resolver pairwise.Subject
 	}
 	return verifier
 }
+
+// TestReversiblePairwiseRefusesALongInternalSubject: an internal subject
+// NewSubjectID accepts but NewReversible can't hold fails the completion
+// closed, with no code, and the error names the limit rather than
+// reporting an opaque derivation failure.
+func TestReversiblePairwiseRefusesALongInternalSubject(t *testing.T) {
+	h := withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), pairwise.Reversible, reversiblePairwise(t))
+	long := strings.Repeat("u", pairwise.MaxReversibleSubjectLength+1)
+	required := interactionFor(t, h, nil)
+	completed, err := h.server.CompleteAuthorization(context.Background(), server.CompleteAuthorizationRequest{Handle: required.Handle, Result: authorizedAs(t, h, long)})
+	if err != nil {
+		t.Fatalf("CompleteAuthorization: %v", err)
+	}
+	local, ok := completed.(server.AuthorizationLocalError)
+	if !ok || local.Error.Code() != server.ErrorServerError {
+		t.Fatalf("result = %#v, want a server_error local error", completed)
+	}
+	if desc := local.Error.PublicDescription(); !strings.Contains(desc, "151-byte limit") {
+		t.Errorf("description = %q, want it to name the 151-byte limit", desc)
+	}
+	if n := len(h.grants.codes); n != 0 {
+		t.Errorf("%d authorization codes stored, want none", n)
+	}
+	if _, err := h.server.ClientSubject(context.Background(), testClientID, mustAuthenticated(t, strings.Repeat("u", pairwise.MaxReversibleSubjectLength))); err != nil {
+		t.Errorf("ClientSubject(151-byte subject) = %v, want it derived", err)
+	}
+}

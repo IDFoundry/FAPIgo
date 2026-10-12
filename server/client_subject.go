@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -91,6 +92,9 @@ func (s *Server) clientSubjectFor(ctx context.Context, client storage.Registered
 	body, err := s.deps.PairwiseSubjects.DerivePairwiseSubject(ctx, in)
 	if err == nil {
 		err = pairwise.CheckBody(body)
+	}
+	if errors.Is(err, pairwise.ErrSubjectTooLong) {
+		return "", "", newError(ErrorServerError, 500, fmt.Sprintf("the end user's internal subject is longer than the reversible pairwise deriver's %d-byte limit (pairwise.MaxReversibleSubjectLength)", pairwise.MaxReversibleSubjectLength), err)
 	}
 	if err != nil {
 		return "", "", newError(ErrorServerError, 500, "failed to derive the client's pairwise subject", err)

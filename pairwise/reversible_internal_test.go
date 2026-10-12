@@ -20,11 +20,11 @@ func TestParseReversiblePlaintext(t *testing.T) {
 	if got, ok := parseReversiblePlaintext(valid); !ok || got != "user-1" {
 		t.Fatalf("parse(valid) = %q, %v; want user-1", got, ok)
 	}
-	full, err := reversiblePlaintext(strings.Repeat("x", ReversibleMaxSubjectLength))
+	full, err := reversiblePlaintext(strings.Repeat("x", MaxReversibleSubjectLength))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, ok := parseReversiblePlaintext(full); !ok || len(got) != ReversibleMaxSubjectLength {
+	if got, ok := parseReversiblePlaintext(full); !ok || len(got) != MaxReversibleSubjectLength {
 		t.Fatalf("parse(full) = %d bytes, %v", len(got), ok)
 	}
 	mutate := func(f func(p []byte)) []byte {
@@ -35,7 +35,7 @@ func TestParseReversiblePlaintext(t *testing.T) {
 	for name, p := range map[string][]byte{
 		"zero length":        mutate(func(p []byte) { p[0] = 0 }),
 		"empty subject":      make([]byte, ReversiblePlaintextLength),
-		"length too long":    mutate(func(p []byte) { p[0] = ReversibleMaxSubjectLength + 1 }),
+		"length too long":    mutate(func(p []byte) { p[0] = MaxReversibleSubjectLength + 1 }),
 		"length 255":         mutate(func(p []byte) { p[0] = 0xff }),
 		"non-zero padding":   mutate(func(p []byte) { p[len(p)-1] = 1 }),
 		"padding after":      mutate(func(p []byte) { p[1+len("user-1")] = 'x' }),

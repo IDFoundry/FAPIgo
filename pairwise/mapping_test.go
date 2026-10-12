@@ -1,13 +1,9 @@
 package pairwise_test
 
 import (
-	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"errors"
 	"fmt"
-	"io"
 	"testing"
 
 	"github.com/idfoundry/fapigo/keys"
@@ -20,13 +16,13 @@ func TestMappingDeriverContract(t *testing.T) {
 	// Every instance shares one store, as every server instance would.
 	store := memstore.NewPairwiseSubjectStore()
 	pairwise.TestDeriverContract(t, func(t *testing.T) pairwise.Deriver {
-		return newMapping(t, store, rand.Reader)
+		return newMapping(t, store)
 	})
 }
 
-func newMapping(t *testing.T, store storage.PairwiseSubjectStore, random io.Reader) pairwise.Deriver {
+func newMapping(t *testing.T, store storage.PairwiseSubjectStore) pairwise.Deriver {
 	t.Helper()
-	d, err := pairwise.NewMapping(store, random)
+	d, err := pairwise.NewMapping(store)
 	if err != nil {
 		t.Fatalf("NewMapping: %v", err)
 	}
@@ -40,26 +36,6 @@ func mappingInput(t *testing.T, subject string) pairwise.Input {
 		t.Fatalf("NewInput: %v", err)
 	}
 	return in
-}
-
-func TestNewMappingRefusesNilDependencies(t *testing.T) {
-	if _, err := pairwise.NewMapping(nil, rand.Reader); err == nil {
-		t.Error("NewMapping(nil store) succeeded")
-	}
-	if _, err := pairwise.NewMapping(memstore.NewPairwiseSubjectStore(), nil); err == nil {
-		t.Error("NewMapping(nil random) succeeded")
-	}
-}
-
-func TestMappingBodyIsRandom256Bits(t *testing.T) {
-	random := bytes.NewReader(bytes.Repeat([]byte{0xff}, 32))
-	body, err := newMapping(t, memstore.NewPairwiseSubjectStore(), random).DerivePairwiseSubject(context.Background(), mappingInput(t, "user-1"))
-	if err != nil {
-		t.Fatalf("DerivePairwiseSubject: %v", err)
-	}
-	if want := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0xff}, 32)); body != want || len(body) != 43 {
-		t.Errorf("body = %q, want 32 bytes of 0xff base64url-encoded (%q)", body, want)
-	}
 }
 
 // collidingStore reports a collision for its first collisions calls,
@@ -82,7 +58,7 @@ func (s *collidingStore) GetOrCreate(ctx context.Context, key storage.PairwiseSu
 
 func TestMappingRetriesACollisionWithAFreshCandidate(t *testing.T) {
 	store := &collidingStore{PairwiseSubjectStore: memstore.NewPairwiseSubjectStore(), collisions: 2}
-	body, err := newMapping(t, store, rand.Reader).DerivePairwiseSubject(context.Background(), mappingInput(t, "user-1"))
+	body, err := newMapping(t, store).DerivePairwiseSubject(context.Background(), mappingInput(t, "user-1"))
 	if err != nil {
 		t.Fatalf("DerivePairwiseSubject: %v", err)
 	}
@@ -99,7 +75,7 @@ func TestMappingRetriesACollisionWithAFreshCandidate(t *testing.T) {
 
 func TestMappingGivesUpAfterRepeatedCollisions(t *testing.T) {
 	store := &collidingStore{PairwiseSubjectStore: memstore.NewPairwiseSubjectStore(), collisions: 100}
-	_, err := newMapping(t, store, rand.Reader).DerivePairwiseSubject(context.Background(), mappingInput(t, "user-1"))
+	_, err := newMapping(t, store).DerivePairwiseSubject(context.Background(), mappingInput(t, "user-1"))
 	if !errors.Is(err, storage.ErrPairwiseSubjectCollision) {
 		t.Fatalf("DerivePairwiseSubject = %v, want an error wrapping ErrPairwiseSubjectCollision", err)
 	}
@@ -123,7 +99,7 @@ func (s failingStore) Lookup(context.Context, string, string, string) (string, e
 }
 
 func TestMappingFailsClosedWhenTheStoreIsUnavailable(t *testing.T) {
-	d := newMapping(t, failingStore{err: fmt.Errorf("fake: %w", storage.ErrStoreUnavailable)}, rand.Reader)
+	d := newMapping(t, failingStore{err: fmt.Errorf("fake: %w", storage.ErrStoreUnavailable)})
 	ctx := context.Background()
 	if _, err := d.DerivePairwiseSubject(ctx, mappingInput(t, "user-1")); !errors.Is(err, storage.ErrStoreUnavailable) {
 		t.Errorf("DerivePairwiseSubject = %v, want an error wrapping ErrStoreUnavailable", err)
@@ -135,22 +111,14 @@ func TestMappingFailsClosedWhenTheStoreIsUnavailable(t *testing.T) {
 }
 
 func TestMappingRefusesAnInvalidStoredBody(t *testing.T) {
-	d := newMapping(t, failingStore{body: "has space"}, rand.Reader)
+	d := newMapping(t, failingStore{body: "has space"})
 	if body, err := d.DerivePairwiseSubject(context.Background(), mappingInput(t, "user-1")); err == nil {
 		t.Errorf("DerivePairwiseSubject = %q, want an error for a body that isn't printable ASCII", body)
 	}
 }
 
-func TestMappingFailsWhenRandomFails(t *testing.T) {
-	store := memstore.NewPairwiseSubjectStore()
-	d := newMapping(t, store, bytes.NewReader(make([]byte, 31)))
-	if body, err := d.DerivePairwiseSubject(context.Background(), mappingInput(t, "user-1")); err == nil {
-		t.Errorf("DerivePairwiseSubject = %q with a short random source, want an error", body)
-	}
-}
-
 func TestMappingLookupNotFound(t *testing.T) {
-	d := newMapping(t, memstore.NewPairwiseSubjectStore(), rand.Reader)
+	d := newMapping(t, memstore.NewPairwiseSubjectStore())
 	_, err := d.(pairwise.Lookup).LookupInternalSubject(context.Background(), "https://op.example", "rp.example", "never-issued")
 	if !errors.Is(err, pairwise.ErrSubjectNotFound) || !errors.Is(err, storage.ErrPairwiseSubjectNotFound) {
 		t.Errorf("LookupInternalSubject = %v, want ErrSubjectNotFound wrapping ErrPairwiseSubjectNotFound", err)
@@ -158,7 +126,7 @@ func TestMappingLookupNotFound(t *testing.T) {
 }
 
 func TestMappingHonoursCancellation(t *testing.T) {
-	d := newMapping(t, memstore.NewPairwiseSubjectStore(), rand.Reader)
+	d := newMapping(t, memstore.NewPairwiseSubjectStore())
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, err := d.DerivePairwiseSubject(ctx, mappingInput(t, "user-1")); !errors.Is(err, context.Canceled) {
@@ -178,7 +146,7 @@ type assuredStore struct {
 func (s assuredStore) Capabilities() storage.Capabilities { return s.caps }
 
 func TestMappingReportsTheStoresDeclarationAsCustody(t *testing.T) {
-	if _, ok := newMapping(t, memstore.NewPairwiseSubjectStore(), rand.Reader).(keys.KeyCustodyAssurance); ok {
+	if _, ok := newMapping(t, memstore.NewPairwiseSubjectStore()).(keys.KeyCustodyAssurance); ok {
 		t.Error("a mapping over memstore implements KeyCustodyAssurance; it must declare nothing")
 	}
 	for _, caps := range []storage.Capabilities{
@@ -186,7 +154,7 @@ func TestMappingReportsTheStoresDeclarationAsCustody(t *testing.T) {
 		{Durable: true},
 		{CrossInstanceConsistent: true},
 	} {
-		d := newMapping(t, assuredStore{PairwiseSubjectStore: memstore.NewPairwiseSubjectStore(), caps: caps}, rand.Reader)
+		d := newMapping(t, assuredStore{PairwiseSubjectStore: memstore.NewPairwiseSubjectStore(), caps: caps})
 		asserter, ok := d.(keys.KeyCustodyAssurance)
 		if !ok {
 			t.Fatalf("a mapping over a store declaring %+v doesn't implement KeyCustodyAssurance", caps)

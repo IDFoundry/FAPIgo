@@ -2,6 +2,7 @@ package pairwise
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -33,7 +34,7 @@ const mappingBodyBytes = 32
 // maps it back through Lookup: the mapping-table alternative to NewHMAC
 // and a reversible deriver. No key exists whose loss would let anyone
 // compute or reverse identifiers; the store is what must be protected
-// and kept. Its body is 43 characters: 256 bits from random, base64url.
+// and kept. Its body is 43 characters: 256 random bits, base64url.
 //
 // The first body stored for an input is its body from then on, on every
 // instance sharing store (PairwiseSubjectStore.GetOrCreate is atomic).
@@ -44,9 +45,15 @@ const mappingBodyBytes = 32
 // store implements storage.StoreAssurance, reporting its Durable and
 // CrossInstanceConsistent declarations, so a production server holds
 // the store to the same standard as a key: storage/memstore never
-// declares any, so it serves development and tests only. random is
-// normally crypto/rand.Reader.
-func NewMapping(store storage.PairwiseSubjectStore, random io.Reader) (Deriver, error) {
+// declares any, so it serves development and tests only. Bodies always
+// come from crypto/rand.Reader: a predictable source would make every
+// identifier guessable, so there is no option to replace it.
+func NewMapping(store storage.PairwiseSubjectStore) (Deriver, error) {
+	return newMapping(store, rand.Reader)
+}
+
+// newMapping is NewMapping with its random source, for tests.
+func newMapping(store storage.PairwiseSubjectStore, random io.Reader) (Deriver, error) {
 	if store == nil {
 		return nil, errors.New("pairwise: mapping store is nil")
 	}

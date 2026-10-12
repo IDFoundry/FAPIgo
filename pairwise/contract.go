@@ -119,11 +119,30 @@ func testDeriverLookup(t *testing.T, factory func(t *testing.T) Deriver) {
 		t.Errorf("LookupInternalSubject under another sector = %q, %v; want ErrSubjectNotFound", got, err)
 	}
 	unknown := contractDerive(t, d, contractInput(t, "https://op.example", "rp.example", "user-2"))
-	tampered := []byte(unknown)
-	tampered[len(tampered)/2] ^= 0x01
-	if got, err := lookup.LookupInternalSubject(ctx, in.Issuer(), in.Sector(), string(tampered)); !errors.Is(err, ErrSubjectNotFound) {
+	if got, err := lookup.LookupInternalSubject(ctx, in.Issuer(), in.Sector(), alterBody(unknown)); !errors.Is(err, ErrSubjectNotFound) {
 		t.Errorf("LookupInternalSubject of an altered body = %q, %v; want ErrSubjectNotFound", got, err)
 	}
+}
+
+// base64URLAlphabet is the alphabet of a base64url-encoded body.
+const base64URLAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+
+// alterBody returns body with its middle character changed to another
+// printable one. A base64url character becomes the next one in the
+// alphabet, so a body that decodes still decodes, and the change
+// reaches the Deriver's own check (authentication, or a lookup) rather
+// than only its decoding.
+func alterBody(body string) string {
+	altered := []byte(body)
+	i := len(altered) / 2
+	if j := strings.IndexByte(base64URLAlphabet, altered[i]); j >= 0 {
+		altered[i] = base64URLAlphabet[(j+1)%len(base64URLAlphabet)]
+	} else if altered[i] == '~' {
+		altered[i] = '!'
+	} else {
+		altered[i]++
+	}
+	return string(altered)
 }
 
 // longSubject is the longest internal subject every Deriver must

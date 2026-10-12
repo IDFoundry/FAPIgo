@@ -53,8 +53,8 @@ type Dependencies struct {
 	// PairwiseSubjects maps an access token's pairwise "sub" (OpenID
 	// Connect Core §8) back to the end user's internal subject, which
 	// AuthorizationContext.Subject then carries: the authorization
-	// server's own reversible or mapping deriver (pairwise.NewMapping),
-	// built over the same keys or store, with Config.PairwisePrefix set
+	// server's own Reversible deriver (pairwise.NewReversible over the
+	// same keys, or pairwise.NewMapping over the same store), with Config.PairwisePrefix set
 	// to the server's Config.Subjects.Prefix. serverresource.NewVerifier
 	// wires both from the server's configuration.
 	//

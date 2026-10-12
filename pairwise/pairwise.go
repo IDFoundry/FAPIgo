@@ -8,10 +8,14 @@
 // sees the user's sub. A Deriver that can also map a body back to the
 // internal subject implements Lookup.
 //
-// NewHMAC is the built-in one-way Deriver. NewMapping is a reversible
-// one that keeps a random body per user and sector in a
-// storage.PairwiseSubjectStore, so no key exists whose loss would let
-// anyone compute or reverse identifiers. The package imports neither
+// Three Derivers are built in. NewReversible, the recommended one,
+// encrypts the internal subject into the body under two keys (an SIV
+// construction), so the OP can map any sub back without storing
+// anything; anyone holding the keys can map them all. NewMapping keeps a
+// random body per user and sector in a storage.PairwiseSubjectStore, so
+// no key exists whose loss would let anyone compute or reverse
+// identifiers. NewHMAC is one-way: nothing can map its bodies back,
+// which is the strongest unlinkability. The package imports neither
 // server nor resource, so both can use the same deriver without one
 // importing the other.
 package pairwise
@@ -37,7 +41,7 @@ const (
 	OneWay
 
 	// Reversible derivation can be mapped back to the internal subject by
-	// the OP, through Lookup. NewMapping is Reversible.
+	// the OP, through Lookup. NewReversible and NewMapping are Reversible.
 	Reversible
 )
 
@@ -141,8 +145,9 @@ func (in Input) IsZero() bool { return in.subject == "" }
 // be deterministic (the same Input always gives the same body, on every
 // instance and after every restart), must give different Inputs
 // different bodies, and must not let anyone without their secret link a
-// body to its Input. The body must pass CheckBody. NewHMAC is the
-// built-in implementation; TestDeriverContract checks the observable
+// body to its Input. The body must pass CheckBody. NewReversible,
+// NewMapping and NewHMAC are the built-in implementations;
+// TestDeriverContract checks the observable
 // parts of this contract.
 type Deriver interface {
 	DerivePairwiseSubject(ctx context.Context, in Input) (string, error)

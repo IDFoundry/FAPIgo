@@ -101,9 +101,12 @@ pairwise client gets carries it: ID tokens, access tokens and UserInfo.
 The server's own records, audit events and your login page keep the
 user's internal subject.
 
+The recommended deriver is `pairwise.NewReversible`, over two
+independent 32-byte secret keys from your secret store:
+
 ```go
-store := memstore.NewPairwiseSubjectStore() // durable and shared in production
-pairwiseSubjects, err := pairwise.NewMapping(store)
+pairwiseSubjects, err := pairwise.NewReversible(macKey, encKey,
+	keys.DeclareCustody(keys.KeyCustody{Durable: true, CrossInstanceConsistent: true}))
 if err != nil {
 	log.Fatal(err)
 }
@@ -114,7 +117,7 @@ if err != nil {
 cfg.Subjects = server.SubjectConfig{
 	Default:     fapi.SubjectTypePairwise, // or Public, with pairwise clients by registration
 	Enforcement: server.SubjectTypesPerClient,
-	Derivation:  pairwise.Reversible, // the store maps a sub back to its user
+	Derivation:  pairwise.Reversible, // the keys map a sub back to its user
 	Prefix:      prefix,
 }
 deps.PairwiseSubjects = pairwiseSubjects
@@ -125,10 +128,18 @@ live: changing the deriver, its key or store, the prefix, or a client's
 sector gives users new `sub`s at those clients, which relying parties
 see as new accounts.
 
-- **`pairwise.Reversible`** (`pairwise.NewMapping`): the server and its
-  resource servers can map a `sub` back to the user, so self-contained
-  JWT access tokens work, and a client's `id_token_hint`, `login_hint`
-  or `claims` `sub` value resolves to the user.
+- **`pairwise.Reversible`**: the server and its resource servers can
+  map a `sub` back to the user, so self-contained JWT access tokens
+  work, and a client's `id_token_hint`, `login_hint` or `claims` `sub`
+  value resolves to the user. Two derivers do this:
+  - **`pairwise.NewReversible`** (recommended) encrypts the internal
+    subject into the `sub`, so it needs no storage. Anyone holding both
+    keys can map every pairwise `sub` ever issued back to its user, and
+    so can every resource server you give them to: guard and back them
+    up like signing keys. Internal subjects are limited to 151 bytes.
+  - **`pairwise.NewMapping`** keeps a random `sub` per user and sector
+    in a `storage.PairwiseSubjectStore`, so there's no key whose leak
+    reverses them all, at the cost of a durable, shared store.
 - **`pairwise.OneWay`** (`pairwise.NewHMAC` over a 32-byte secret key):
   nothing in FAPIgo can map a `sub` back, which is the strongest
   unlinkability. The internal subject then has to stay server-side, so
@@ -141,8 +152,8 @@ see as new accounts.
   accepts JWT access tokens too.
 
 Under `AssuranceProduction` the deriver must declare durable custody
-(`keys.DeclareCustody` for `NewHMAC`; a `storage.StoreAssurance` store
-for `NewMapping`), since every restart and every instance must give a
+(`keys.DeclareCustody` for `NewReversible` and `NewHMAC`; a
+`storage.StoreAssurance` store for `NewMapping`), since every restart and every instance must give a
 user the same `sub`.
 
 Under `ProfileFAPISecurityWithMessageSigning`, `Algorithms.JARM` is
@@ -694,8 +705,8 @@ the same.
 A JWT access token's `sub` is pairwise, so the verifier needs a way to
 map it back: `serverresource.NewVerifier` wires the server's own. A
 separate resource server sets either `Dependencies.PairwiseSubjects`
-(the server's `pairwise.Reversible` deriver, such as the same
-`pairwise.NewMapping` over the same store) with `Config.PairwisePrefix`
+(the server's `pairwise.Reversible` deriver: `pairwise.NewReversible`
+with the same keys, or `pairwise.NewMapping` over the same store) with `Config.PairwisePrefix`
 (the server's prefix), or, for a `pairwise.OneWay` server,
 `Dependencies.SubjectResolver` (the same resolver the server declares).
 Without one, a pairwise JWT access token is refused with `server_error`

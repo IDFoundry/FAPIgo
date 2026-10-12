@@ -32,21 +32,23 @@ def derive(mac_key, enc_key, issuer, sector, subject):
     return base64.urlsafe_b64encode(iv + c).rstrip(b"=").decode()
 
 WRAP_SUBJECT = "wrap-119032621"
+OP = "https://op.example"
+RP = "rp.example"
 
 mac_key = bytes(range(0, 32))
 enc_key = bytes(range(32, 64))
 other_mac = bytes(range(64, 96))
 other_enc = bytes(range(96, 128))
 cases = [
-    (mac_key, enc_key, "https://op.example", "rp.example", "user-1"),
-    (mac_key, enc_key, "https://op.example", "rp.example", "user-2"),
-    (mac_key, enc_key, "https://op.example", "other.example", "user-1"),
-    (mac_key, enc_key, "https://other-op.example", "rp.example", "user-1"),
-    (mac_key, enc_key, "https://op.example", "rp.example", "u"),
-    (mac_key, enc_key, "https://op.example", "rp.example", "user with spaces ~!"),
-    (mac_key, enc_key, "https://op.example", "rp.example", "x" * 151),
+    (mac_key, enc_key, OP, RP, "user-1"),
+    (mac_key, enc_key, OP, RP, "user-2"),
+    (mac_key, enc_key, OP, "other.example", "user-1"),
+    (mac_key, enc_key, "https://other-op.example", RP, "user-1"),
+    (mac_key, enc_key, OP, RP, "u"),
+    (mac_key, enc_key, OP, RP, "user with spaces ~!"),
+    (mac_key, enc_key, OP, RP, "x" * 151),
     (mac_key, enc_key, "https://op.example/tenant/7", "app.bank.example", "0123456789"),
-    (other_mac, other_enc, "https://op.example", "rp.example", "user-1"),
+    (other_mac, other_enc, OP, RP, "user-1"),
     # Non-ASCII issuer and sector: NewInput allows any UTF-8 without
     # control characters, and both are length-prefixed as UTF-8 bytes.
     (mac_key, enc_key, "https://op.example/\u00e9quipe", "\u9280\u884c.example", "user-1"),
@@ -54,14 +56,14 @@ cases = [
     # search over "wrap-<n>"): AES-CTR over the 10-block plaintext carries
     # out of the IV's low 32-bit word, so a port that increments only a
     # 32-bit counter fails this vector.
-    (mac_key, enc_key, "https://op.example", "rp.example", WRAP_SUBJECT),
+    (mac_key, enc_key, OP, RP, WRAP_SUBJECT),
 ]
 def low32(mac, issuer, sector, subject):
     a = lp(DOMAIN) + lp(issuer.encode()) + lp(sector.encode())
     iv = hmac.new(mac, a + plaintext(subject.encode()), hashlib.sha256).digest()[:16]
     return struct.unpack(">I", iv[12:16])[0]
 
-assert low32(mac_key, "https://op.example", "rp.example", WRAP_SUBJECT) >= 0xfffffff7, "wrap vector no longer wraps"
+assert low32(mac_key, OP, RP, WRAP_SUBJECT) >= 0xfffffff7, "wrap vector no longer wraps"
 
 vectors = [{"mac_key": m.hex(), "enc_key": e.hex(), "issuer": i, "sector": s, "subject": u,
             "body": derive(m, e, i, s, u)} for (m, e, i, s, u) in cases]

@@ -1,0 +1,12 @@
+# What the OIDF conformance suite's own scripts/requirements.txt
+# (gitlab.com/openid/conformance-suite, master) lists. The conformance
+# workflow installs the hash-pinned compilation of this file,
+# requirements-suite.txt, never the suite's unpinned list. To refresh
+# it, after checking the suite's list still matches this one:
+#
+#   pip install pip-tools
+#   pip-compile --generate-hashes --allow-unsafe --strip-extras \
+#     --no-emit-index-url --output-file conformance/requirements-suite.txt \
+#     conformance/requirements-suite.in
+httpx
+pyparsing

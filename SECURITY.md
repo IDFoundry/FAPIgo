@@ -9,7 +9,9 @@ impact), please report it privately rather than opening a public issue.
 ## Reporting a vulnerability
 
 Use GitHub's private vulnerability reporting: open the **Security**
-tab on this repository and select **Report a vulnerability**. This
+tab on this repository and select **Report a vulnerability**, or go
+straight to
+<https://github.com/IDFoundry/FAPIgo/security/advisories/new>. This
 creates a private advisory visible only to maintainers until a fix is
 ready, rather than a public issue.
 

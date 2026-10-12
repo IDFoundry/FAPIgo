@@ -65,15 +65,16 @@ jobs:
       - name: Clone OIDF conformance suite
         run: git clone --depth 1 https://gitlab.com/openid/conformance-suite.git /tmp/conformance-suite
 
-      # --only-binary :all: refuses to build from a source distribution
-      # (sdist), which can run arbitrary code (setup.py/build-backend)
-      # during install — this is a third-party repo's own
-      # requirements.txt (currently just httpx and pyparsing, both pure
-      # Python with universal wheels on PyPI), not ours to audit line
-      # by line. Verified this doesn't break anything: both deps
-      # install fine wheel-only.
+      # The suite's scripts need what its own scripts/requirements.txt
+      # lists (httpx and pyparsing). That list is unpinned, so this
+      # installs conformance/requirements-suite.txt instead: the same
+      # packages compiled with exact versions and hashes
+      # (--require-hashes), refreshed as conformance/requirements-suite.in
+      # describes. --only-binary :all: also refuses a source
+      # distribution, which could run arbitrary code while installing;
+      # every package here has a universal wheel.
       - name: Install suite script dependencies
-        run: "pip install --only-binary :all: -r /tmp/conformance-suite/scripts/requirements.txt"
+        run: "pip install --require-hashes --only-binary :all: -r conformance/requirements-suite.txt"
 
       # Prebuilt images — no Java/Maven build needed, mirrors this
       # repo's own conformance/server/scripts/README.md "Manual test

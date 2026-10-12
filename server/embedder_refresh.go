@@ -134,8 +134,16 @@ func (s *Server) embedderGrant(ctx context.Context, req embedderGrantRequest) (g
 	if err := s.validateGrantID(req.GrantID); err != nil {
 		return grantRecord{}, newError(ErrorServerError, 500, "GrantID is invalid", err)
 	}
+	// The client's sub for the user, derived as at this server's own
+	// completions, so the embedder's grant and its refreshes carry the
+	// same sub as the client's other grants for that user.
+	clientSub, subErr := s.clientSubjectFor(ctx, client, req.Subject.String())
+	if subErr != nil {
+		return grantRecord{}, subErr
+	}
 	grant := grantRecord{
 		Subject:              req.Subject.String(),
+		ClientSubject:        distinctClientSubject(clientSub, req.Subject.String()),
 		Scope:                slices.Clone(req.Scope),
 		AuthorizationDetails: details,
 		GrantID:              req.GrantID,

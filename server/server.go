@@ -30,13 +30,19 @@ type Server struct {
 // request. A KeyManager backed by a remote KMS is asked over the
 // network: New allows that 10 seconds.
 func New(cfg Config, deps Dependencies) (*Server, error) {
+	return newServer(cfg, deps, false)
+}
+
+// newServer is New. issuePairwise lifts refusePairwiseUntilIssued, for
+// tests of the pairwise subjects built so far: New itself never does.
+func newServer(cfg Config, deps Dependencies, issuePairwise bool) (*Server, error) {
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
 	}
 	if err := validateDependencies(cfg, deps); err != nil {
 		return nil, err
 	}
-	if err := refusePairwiseUntilIssued(cfg, deps); err != nil {
+	if err := refusePairwiseUntilIssued(cfg, deps, issuePairwise); err != nil {
 		return nil, err
 	}
 	if cfg.Extensions == nil {

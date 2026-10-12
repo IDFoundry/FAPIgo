@@ -151,8 +151,9 @@ type Deriver interface {
 // Lookup is the optional interface of a Deriver that can map a body back
 // to the internal subject it was derived from: LookupInternalSubject
 // returns the internal subject whose body under issuer and sector is
-// body, or an error if there is none. A Reversible deployment's Deriver
-// must implement it.
+// body, or an error wrapping ErrSubjectNotFound if there is none (any
+// other error means the lookup itself failed). A Reversible
+// deployment's Deriver must implement it.
 type Lookup interface {
 	LookupInternalSubject(ctx context.Context, issuer, sector, body string) (string, error)
 }

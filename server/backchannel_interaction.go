@@ -118,7 +118,11 @@ type BackchannelInteractionRequest struct {
 	// the token itself, already verified). CompleteBackchannelAuthentication
 	// records an Authorize for anyone else as a failed authentication,
 	// so the client's poll gets access_denied and no tokens. "" when the
-	// request named no one.
+	// request named no one. For a pairwise client it is the user's own
+	// subject when the server can map pairwise subs back, and otherwise
+	// the client's pairwise sub (see InteractionRequest.RequiredSubject);
+	// under pairwise.OneWay an id_token_hint from a pairwise client is
+	// refused with invalid_request, since it can't identify anyone.
 	RequiredSubject string
 
 	// BindingMessage is the client's binding_message (CIBA §7.1), empty

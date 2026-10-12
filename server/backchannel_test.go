@@ -153,7 +153,8 @@ func newHarnessWithBackchannelOptions(t *testing.T, backchannel storage.Backchan
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
-	return harness{server: srv, key: key, serverKey: serverKey, now: now}
+	clients, _ := deps.Clients.(*fakeClientRepository)
+	return harness{server: srv, clients: clients, key: key, serverKey: serverKey, now: now, cfg: cfg, deps: deps}
 }
 
 // newBackchannelOAuthOnlyServer mirrors newHarnessWithBackchannel with

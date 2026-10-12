@@ -243,6 +243,10 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 	if subjectErr != nil {
 		return s.parFail(ctx, client.ID(), subjectErr)
 	}
+	requiredInternal, _, mapErr := s.requiredInternalSubject(ctx, client, requiredSubject)
+	if mapErr != nil {
+		return s.parFail(ctx, client.ID(), mapErr)
+	}
 
 	validated, dpopErr := s.reconcileParDPoPBinding(ctx, dpopProof, validated)
 	if dpopErr != nil {
@@ -263,7 +267,7 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 		source = extension.SourceRequestObject
 	}
 	essentialACR, _ := essentialACRValues(validated)
-	request, err := encodeRequestRecord(requestRecord{Parameters: validated, TokenClaims: tokenClaims, ExtensionSource: source, PushedAt: &now, EssentialACRValues: essentialACR, RequiredSubject: requiredSubject})
+	request, err := encodeRequestRecord(requestRecord{Parameters: validated, TokenClaims: tokenClaims, ExtensionSource: source, PushedAt: &now, EssentialACRValues: essentialACR, RequiredSubject: requiredSubject, RequiredInternalSubject: requiredInternal})
 	if err != nil {
 		return s.parFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to encode pushed authorization request", err))
 	}

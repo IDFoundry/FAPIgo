@@ -12,13 +12,6 @@ import (
 	"github.com/idfoundry/fapigo/storage"
 )
 
-// ErrSubjectNotFound is the error a Lookup wraps when no internal
-// subject has the body under the issuer and sector: a body that was
-// never issued, or one issued under another issuer or sector. An error
-// wrapping storage.ErrStoreUnavailable instead means the store couldn't
-// answer, and is never "not found".
-var ErrSubjectNotFound = errors.New("pairwise: no internal subject has this body")
-
 // mappingAttempts bounds how many random bodies NewMapping's Deriver
 // tries for one input before giving up. Two 256-bit random values
 // colliding is vanishingly unlikely, so a collision that persists means

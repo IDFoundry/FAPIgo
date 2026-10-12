@@ -127,6 +127,13 @@ func (s *Server) approveBackchannelAuthentication(ctx context.Context, clientID 
 		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, "", AuditOutcomeFailure, string(err.Code()))
 		return err
 	}
+	// The sub this client gets for the user, derived once here and kept
+	// with the grant (see grantRecord.ClientSubject).
+	clientSub, subErr := s.subjectAtClient(ctx, clientID, result.subject.id.value)
+	if subErr != nil {
+		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, clientID, AuditOutcomeFailure, string(subErr.Code()))
+		return subErr
+	}
 
 	// OIDC Core §5.5.1.1: an essential "acr" request with values that
 	// the authentication doesn't meet is a failed authentication, so
@@ -140,7 +147,7 @@ func (s *Server) approveBackchannelAuthentication(ctx context.Context, clientID 
 	// OIDC Core §5.5.1: the user an id_token_hint or "sub" value
 	// named must be the one authenticated; anyone else is a failed
 	// authentication.
-	if !meetsRequiredSubject(request.RequiredSubject, result.subject) {
+	if !meetsRequiredSubject(request.RequiredSubject, clientSub) {
 		decision.Status = storage.BackchannelAuthenticationAuthenticationFailed
 		decision.Reason = "the authenticated user isn't the one the request named"
 		return nil
@@ -194,6 +201,7 @@ func (s *Server) approveBackchannelAuthentication(ctx context.Context, clientID 
 		IssuedAt:                &decidedAt,
 		DPoPJKT:                 request.DPoPJKT,
 		Subject:                 result.subject.ID().String(),
+		ClientSubject:           distinctClientSubject(clientSub, result.subject.ID().String()),
 		Scope:                   result.grant.Scope,
 		AuthTime:                result.auth.authTime,
 		ACR:                     result.auth.acr,

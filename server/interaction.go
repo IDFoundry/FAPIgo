@@ -86,7 +86,9 @@ func generateInteractionHandle(random io.Reader) (string, error) {
 // taken directly from the authorization request. It must never be
 // treated as, or converted into, a verified subject identifier — only
 // the application's own authentication result can establish who
-// actually authenticated.
+// actually authenticated. A client with pairwise subjects that sends a
+// sub it was given as its login_hint sends its pairwise sub, not the
+// user's own subject: compare it with Server.ClientSubject.
 type LoginHint string
 
 // AuthenticationHints are unauthenticated hints an interaction's login
@@ -137,6 +139,14 @@ type InteractionRequest struct {
 	// enforces it: an Authorize for any other subject answers the
 	// client with login_required and issues no code. "" when the
 	// request named no one.
+	//
+	// For a client with pairwise subjects (Config.Subjects) the request
+	// names the user by the pairwise sub that client was given. When the
+	// server can map pairwise subs back (pairwise.Reversible), this is
+	// the user's own subject, as for any other client. Under
+	// pairwise.OneWay it is the client's pairwise sub, which can't be
+	// mapped to a user: compare it with Server.ClientSubject for the
+	// user who logs in.
 	RequiredSubject string
 
 	// MaxAge is the client's "max_age" (OIDC Core §3.1.2.1), when

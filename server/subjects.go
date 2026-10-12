@@ -219,13 +219,24 @@ func checkProductionPairwiseSubjects(cfg Config, deps Dependencies, scaled bool)
 
 // subjectTypesSupported returns Metadata's subject_types_supported.
 func (s *Server) subjectTypesSupported() []string {
-	subjects := effectiveSubjects(s.cfg)
+	types := supportedSubjectTypes(effectiveSubjects(s.cfg), s.deps.PairwiseSubjects)
+	out := make([]string, len(types))
+	for i, t := range types {
+		out[i] = t.String()
+	}
+	return out
+}
+
+// supportedSubjectTypes is the subject types a server configured with
+// subjects and deriver gives clients: what discovery advertises, and
+// what an automatically registered client may ask for.
+func supportedSubjectTypes(subjects SubjectConfig, deriver pairwise.Deriver) []fapi.SubjectType {
 	switch {
 	case subjects.Enforcement == SubjectTypesPairwiseOnly:
-		return []string{"pairwise"}
-	case pairwisePossible(subjects, s.deps.PairwiseSubjects):
-		return []string{"public", "pairwise"}
+		return []fapi.SubjectType{fapi.SubjectTypePairwise}
+	case pairwisePossible(subjects, deriver):
+		return []fapi.SubjectType{fapi.SubjectTypePublic, fapi.SubjectTypePairwise}
 	default:
-		return []string{"public"}
+		return []fapi.SubjectType{fapi.SubjectTypePublic}
 	}
 }

@@ -139,6 +139,21 @@ type AutomaticRegistrationConfig struct {
 	// for private_key_jwt.
 	ClientAssertionAlgorithms []fapi.SignatureAlgorithm
 
+	// SubjectTypes is the kinds of sub this OP gives an automatically
+	// registered client's end users (OpenID Connect Core §8): the
+	// subject_types_supported it advertises. A Relying Party whose
+	// metadata asks for a subject_type outside it fails to register, as
+	// OpenID Connect Dynamic Client Registration 1.0 has an OP refuse
+	// metadata it can't honour, rather than being given another kind of
+	// sub than it asked for. Empty means public only. server.New sets
+	// it from server.Config.Subjects.
+	SubjectTypes []fapi.SubjectType
+
+	// DefaultSubjectType is the subject type a Relying Party gets when
+	// its metadata names none, one of SubjectTypes. Zero means public.
+	// server.New sets it from server.Config.Subjects.
+	DefaultSubjectType fapi.SubjectType
+
 	// OnResolutionFailure, if set, is called with the reason whenever a
 	// client_id that is a well-formed Entity Identifier, and not
 	// statically registered, fails automatic registration: its Trust
@@ -336,6 +351,9 @@ func NewAutomaticClientRepository(underlying storage.ClientRepository, resolver 
 		if !alg.IsValid() {
 			return nil, fmt.Errorf("federation: config: client_assertion_algorithms: invalid algorithm %v", alg)
 		}
+	}
+	if err := validateSubjectTypes(cfg.SubjectTypes, cfg.DefaultSubjectType); err != nil {
+		return nil, err
 	}
 	if clock == nil {
 		return nil, fmt.Errorf("federation: clock is required")
@@ -658,6 +676,12 @@ type relyingPartyMetadata struct {
 	TLSClientAuthSANIP     string `json:"tls_client_auth_san_ip"`
 	TLSClientAuthSANEmail  string `json:"tls_client_auth_san_email"`
 
+	// SubjectType and SectorIdentifierURI are OpenID Connect Dynamic
+	// Client Registration 1.0 §2's subject_type and
+	// sector_identifier_uri; see subjectTypeFromMetadata.
+	SubjectType         string `json:"subject_type"`
+	SectorIdentifierURI string `json:"sector_identifier_uri"`
+
 	ClientName string `json:"client_name"`
 	LogoURI    string `json:"logo_uri"`
 	PolicyURI  string `json:"policy_uri"`
@@ -733,7 +757,7 @@ func (a *AutomaticClientRepository) registeredClientConfigFromMetadata(ctx conte
 		AutomaticFederationRegistration: true,
 		AllowsClientCredentialsGrant:    a.cfg.AllowsClientCredentialsGrant,
 	}
-	if cfg.Display, err = clientDisplayFromMetadata(m); err != nil {
+	if err := a.applyDisplayAndSubjectType(&cfg, m); err != nil {
 		return storage.RegisteredClientConfig{}, nil, err
 	}
 
@@ -1068,4 +1092,82 @@ func certificateThumbprintFromJWKS(jwks json.RawMessage) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("jwks has no usable x5c certificate")
+}
+
+// applyDisplayAndSubjectType sets cfg's Display and SubjectType from m:
+// what a consent screen shows about the client, and the kind of sub its
+// end users get.
+func (a *AutomaticClientRepository) applyDisplayAndSubjectType(cfg *storage.RegisteredClientConfig, m relyingPartyMetadata) error {
+	display, err := clientDisplayFromMetadata(m)
+	if err != nil {
+		return err
+	}
+	subjectType, err := a.subjectTypeFromMetadata(m)
+	if err != nil {
+		return err
+	}
+	cfg.Display, cfg.SubjectType = display, subjectType
+	return nil
+}
+
+// validateSubjectTypes checks AutomaticRegistrationConfig's SubjectTypes
+// and DefaultSubjectType.
+func validateSubjectTypes(types []fapi.SubjectType, def fapi.SubjectType) error {
+	for i, t := range types {
+		if !t.IsValid() {
+			return fmt.Errorf("federation: config: subject_types: invalid subject type %v", t)
+		}
+		if slices.Contains(types[:i], t) {
+			return fmt.Errorf("federation: config: subject_types: %s is listed twice", t)
+		}
+	}
+	if def != 0 && !slices.Contains(effectiveSubjectTypes(types), def) {
+		return fmt.Errorf("federation: config: default_subject_type %v is not one of subject_types", def)
+	}
+	return nil
+}
+
+// effectiveSubjectTypes is types, or public alone when it is empty.
+func effectiveSubjectTypes(types []fapi.SubjectType) []fapi.SubjectType {
+	if len(types) == 0 {
+		return []fapi.SubjectType{fapi.SubjectTypePublic}
+	}
+	return types
+}
+
+// subjectTypeFromMetadata returns the subject type an automatically
+// registered client gets: its metadata's subject_type, or
+// DefaultSubjectType when it names none. It's recorded on the client
+// rather than left to the server's default, so the decision made here,
+// against this OP's SubjectTypes, is the one every grant uses.
+//
+// A subject_type this OP doesn't issue is refused. So is a pairwise one
+// with a sector_identifier_uri: that names the sector the Relying Party
+// expects its sub values to be shared across (OpenID Connect Core
+// §8.1), which this package doesn't fetch, and deriving from its
+// redirect URIs' host instead would give it different sub values than
+// it asked for, which a later release honouring the URI would then
+// change. A public client's sector_identifier_uri changes nothing, and
+// is ignored. The sector itself is then derived from the redirect URIs
+// by storage.NewRegisteredClient, which refuses a pairwise client whose
+// redirect URIs don't share one https host.
+func (a *AutomaticClientRepository) subjectTypeFromMetadata(m relyingPartyMetadata) (fapi.SubjectType, error) {
+	subjectType := a.cfg.DefaultSubjectType
+	if subjectType == 0 {
+		subjectType = fapi.SubjectTypePublic
+	}
+	if m.SubjectType != "" {
+		parsed, err := fapi.ParseSubjectType(m.SubjectType)
+		if err != nil {
+			return 0, fmt.Errorf("subject_type: %w", err)
+		}
+		subjectType = parsed
+	}
+	if !slices.Contains(effectiveSubjectTypes(a.cfg.SubjectTypes), subjectType) {
+		return 0, fmt.Errorf("subject_type %s is not one this OP issues", subjectType)
+	}
+	if subjectType == fapi.SubjectTypePairwise && m.SectorIdentifierURI != "" {
+		return 0, errors.New("sector_identifier_uri is not supported with pairwise subject identifiers")
+	}
+	return subjectType, nil
 }

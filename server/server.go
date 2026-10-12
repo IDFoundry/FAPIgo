@@ -91,6 +91,8 @@ func newServer(cfg Config, deps Dependencies, issuePairwise bool) (*Server, erro
 			AllowedClientAuthMethods:     cfg.AutomaticRegistration.AllowedClientAuthMethods,
 			OnResolutionFailure:          cfg.AutomaticRegistration.OnResolutionFailure,
 			ClientAssertionAlgorithms:    cfg.Algorithms.ClientAssertion,
+			SubjectTypes:                 supportedSubjectTypes(effectiveSubjects(cfg), deps.PairwiseSubjects),
+			DefaultSubjectType:           effectiveSubjects(cfg).Default,
 		}, deps.Clock)
 		if err != nil {
 			return nil, fmt.Errorf("server: config: automatic_registration: %w", err)

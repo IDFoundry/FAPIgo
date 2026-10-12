@@ -64,7 +64,10 @@ func fedJWKS(t *testing.T, kid string, key *ecdsa.PrivateKey) json.RawMessage {
 // federation.AutomaticClientRepository already extensively tests on its
 // own; this fixture exists only to prove server.New actually wires that
 // mechanism in, not to re-prove the mechanism itself.
-func setupAutomaticRegistrationFixture(t *testing.T, redirectURI string) *automaticRegistrationFixture {
+// setupAutomaticRegistrationFixture builds a Trust Anchor and an RP
+// whose openid_relying_party metadata registers redirectURI, plus any
+// extra members.
+func setupAutomaticRegistrationFixture(t *testing.T, redirectURI string, extra ...map[string]any) *automaticRegistrationFixture {
 	t.Helper()
 	now := time.Now()
 
@@ -103,7 +106,7 @@ func setupAutomaticRegistrationFixture(t *testing.T, redirectURI string) *automa
 		Signer: taKey, Algorithm: fapi.ES256, KeyID: "ta",
 		Issuer: taID, Subject: rpID, Now: now, Lifetime: time.Hour, JWKS: rpFedJWKS,
 	})
-	rpMetadataJSON, err := json.Marshal(map[string]any{
+	rpMetadata := map[string]any{
 		"redirect_uris":                                  []string{redirectURI},
 		"token_endpoint_auth_method":                     "private_key_jwt",
 		"token_endpoint_auth_signing_alg":                "ES256",
@@ -112,7 +115,13 @@ func setupAutomaticRegistrationFixture(t *testing.T, redirectURI string) *automa
 		"jwks":        json.RawMessage(fedJWKS(t, "rp-oidc", rpOIDCKey)),
 		"client_name": testFederatedClientName,
 		"logo_uri":    testFederatedClientLogo,
-	})
+	}
+	for _, members := range extra {
+		for k, v := range members {
+			rpMetadata[k] = v
+		}
+	}
+	rpMetadataJSON, err := json.Marshal(rpMetadata)
 	if err != nil {
 		t.Fatalf("marshal openid_relying_party metadata: %v", err)
 	}
@@ -238,6 +247,18 @@ func TestNewRejectsMalformedTrustAnchorEntry(t *testing.T) {
 // beyond this shared baseline.
 func newAutomaticRegistrationTestServer(t *testing.T, f *automaticRegistrationFixture, configure ...func(*server.Config, *server.Dependencies)) *server.Server {
 	t.Helper()
+	cfg, deps := automaticRegistrationTestConfig(t, f, configure...)
+	srv, err := server.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+	return srv
+}
+
+// automaticRegistrationTestConfig is newAutomaticRegistrationTestServer's
+// Config and Dependencies, for a test that builds the server itself.
+func automaticRegistrationTestConfig(t *testing.T, f *automaticRegistrationFixture, configure ...func(*server.Config, *server.Dependencies)) (server.Config, server.Dependencies) {
+	t.Helper()
 	issuer, err := fapi.ParseIssuerURL(testIssuer)
 	if err != nil {
 		t.Fatalf("ParseIssuerURL: %v", err)
@@ -290,12 +311,7 @@ func newAutomaticRegistrationTestServer(t *testing.T, f *automaticRegistrationFi
 	for _, c := range configure {
 		c(&cfg, &deps)
 	}
-
-	srv, err := server.New(cfg, deps)
-	if err != nil {
-		t.Fatalf("server.New: %v", err)
-	}
-	return srv
+	return cfg, deps
 }
 
 func TestNewWiresAutomaticRegistrationIntoPushAuthorizationRequest(t *testing.T) {

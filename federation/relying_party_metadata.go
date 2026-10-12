@@ -107,6 +107,15 @@ type OpenIDRelyingPartyMetadata struct {
 	IDTokenSignedResponseAlg string `json:"id_token_signed_response_alg,omitempty"`
 	RequestObjectSigningAlg  string `json:"request_object_signing_alg,omitempty"`
 
+	// SubjectType is the kind of sub this RP asks for (OpenID Connect
+	// Dynamic Client Registration 1.0 §2): "public" or "pairwise"
+	// (fapi.SubjectType's String). Optional: the OP's default otherwise.
+	// An AutomaticClientRepository OP refuses a subject_type outside its
+	// subject_types_supported, and doesn't support sector_identifier_uri
+	// with pairwise: a pairwise RP's redirect URIs must share one https
+	// host, which is its sector.
+	SubjectType string `json:"subject_type,omitempty"`
+
 	// ClientName, LogoURI, PolicyURI and TOSURI are what an OP's
 	// consent screen shows about this RP (storage.ClientDisplay). Keep
 	// ClientName to storage.MaxClientNameBytes with no control

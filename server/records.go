@@ -73,6 +73,23 @@ type requestRecord struct {
 	// Empty when the request named no one, and in a record written
 	// before this field existed; neither is checked.
 	RequiredSubject string `json:"required_subject,omitempty"`
+
+	// RequiredInternalSubject is RequiredSubject mapped back to the end
+	// user's internal subject, when the client is pairwise and the
+	// server can map its subs back (pairwise.Reversible): the subject
+	// the interaction shows the application. Empty otherwise, where
+	// RequiredSubject is already what the application gets.
+	RequiredInternalSubject string `json:"required_internal_subject,omitempty"`
+}
+
+// requiredSubjectForApplication is the RequiredSubject an interaction
+// shows the application: the internal subject when the server mapped
+// the client's view back, otherwise the client's view.
+func (r requestRecord) requiredSubjectForApplication() string {
+	if r.RequiredInternalSubject != "" {
+		return r.RequiredInternalSubject
+	}
+	return r.RequiredSubject
 }
 
 // grantRecord is what an authorization code, refresh token or approved
@@ -107,7 +124,17 @@ type grantRecord struct {
 	// for any other client authentication.
 	ClientInstanceKey string `json:"client_instance_jkt,omitempty"`
 
-	Subject              string          `json:"sub"`
+	Subject string `json:"sub"`
+
+	// ClientSubject is the sub the client was given for Subject when it
+	// differs: the pairwise subject for the client's sector (OpenID
+	// Connect Core §8), derived once when the grant was issued, so a
+	// later change of the client's sector, the subject configuration or
+	// the deriver's key never changes an existing grant's sub (§12.2).
+	// Empty for a public client, and in a record written before it
+	// existed; clientSubject reads both as Subject.
+	ClientSubject string `json:"client_sub,omitempty"`
+
 	Scope                []string        `json:"scope,omitempty"`
 	AuthTime             time.Time       `json:"auth_time"`
 	ACR                  string          `json:"acr,omitempty"`
@@ -175,6 +202,16 @@ func (g grantRecord) forRefreshToken(binding refreshBinding, issuedAt time.Time)
 	return g
 }
 
+// clientSubject returns the sub the client was given: ClientSubject, or
+// Subject for a public client and for a record written before
+// ClientSubject existed.
+func (g grantRecord) clientSubject() string {
+	if g.ClientSubject != "" {
+		return g.ClientSubject
+	}
+	return g.Subject
+}
+
 // issuedWithin reports whether a record issued at issuedAt is still
 // within lifetime at now. A record without IssuedAt (written before it
 // existed) is judged only by its stored expiry, so it passes here.
@@ -229,7 +266,7 @@ func decodeRequestRecord(raw json.RawMessage) (requestRecord, error) {
 
 func encodeGrantRecord(g grantRecord) (json.RawMessage, error) {
 	g.Version = recordVersion
-	strs := []string{g.RedirectURI, g.CodeChallenge, g.Nonce, g.DPoPJKT, g.Thumbprint, g.Subject, g.ACR}
+	strs := []string{g.RedirectURI, g.CodeChallenge, g.Nonce, g.DPoPJKT, g.Thumbprint, g.Subject, g.ClientSubject, g.ACR}
 	for _, list := range [][]string{g.Scope, g.AMR, g.RequestedIDTokenClaims, g.RequestedUserinfoClaims} {
 		strs = append(strs, list...)
 	}

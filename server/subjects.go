@@ -121,9 +121,10 @@ func validateSubjects(cfg Config, deps Dependencies) error {
 
 // refusePairwiseUntilIssued is New's last check while this release
 // doesn't issue pairwise subjects: a configuration in which a client
-// could be pairwise is refused, after every other check has run.
-func refusePairwiseUntilIssued(cfg Config, deps Dependencies) error {
-	if pairwisePossible(effectiveSubjects(cfg), deps.PairwiseSubjects) {
+// could be pairwise is refused, after every other check has run, unless
+// issuing (only ever set by tests of what's built so far).
+func refusePairwiseUntilIssued(cfg Config, deps Dependencies, issuing bool) error {
+	if !issuing && pairwisePossible(effectiveSubjects(cfg), deps.PairwiseSubjects) {
 		return errPairwiseNotIssuedYet
 	}
 	return nil

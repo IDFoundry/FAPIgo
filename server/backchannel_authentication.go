@@ -178,6 +178,10 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	if subjectErr != nil {
 		return s.backchannelBeginFail(ctx, client.ID(), subjectErr), nil
 	}
+	requiredInternal, mapErr := s.backchannelRequiredInternalSubject(ctx, client, validated.params, requiredSubject)
+	if mapErr != nil {
+		return s.backchannelBeginFail(ctx, client.ID(), mapErr), nil
+	}
 
 	dpopJKT, dpopErr := s.reconcileBackchannelDPoPBinding(ctx, dpopProof, validated.params)
 	if dpopErr != nil {
@@ -188,7 +192,7 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	if err != nil {
 		return s.backchannelBeginFail(ctx, client.ID(), newError(ErrorServerError, 500, "validated extension parameters could not be read back", err)), nil
 	}
-	interaction.RequiredSubject = requiredSubject
+	interaction.RequiredSubject = requestRecord{RequiredSubject: requiredSubject, RequiredInternalSubject: requiredInternal}.requiredSubjectForApplication()
 	if hintErr := s.checkBackchannelHints(ctx, client.ID(), interaction.Hints); hintErr != nil {
 		return s.backchannelBeginFail(ctx, client.ID(), hintErr), nil
 	}
@@ -227,7 +231,7 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	}
 
 	essentialACR, _ := essentialACRValues(validated.params)
-	request, err := encodeRequestRecord(requestRecord{Parameters: validated.params, TokenClaims: validated.tokenClaims, DPoPJKT: dpopJKT, ExpiresAt: &expiresAt, EssentialACRValues: essentialACR, RequiredSubject: requiredSubject})
+	request, err := encodeRequestRecord(requestRecord{Parameters: validated.params, TokenClaims: validated.tokenClaims, DPoPJKT: dpopJKT, ExpiresAt: &expiresAt, EssentialACRValues: essentialACR, RequiredSubject: requiredSubject, RequiredInternalSubject: requiredInternal})
 	if err != nil {
 		return s.backchannelBeginFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to encode backchannel authentication request", err)), nil
 	}
@@ -694,6 +698,6 @@ func (s *Server) LookupBackchannelInteraction(ctx context.Context, handle Backch
 	if err != nil {
 		return BackchannelInteractionRequest{}, newError(ErrorServerError, 500, "the request's extension parameters could not be read back", err)
 	}
-	interaction.RequiredSubject = request.RequiredSubject
+	interaction.RequiredSubject = request.requiredSubjectForApplication()
 	return interaction, nil
 }

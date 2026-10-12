@@ -2,6 +2,7 @@ package pairwise
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -19,7 +20,7 @@ import (
 // different bodies for different users, sectors and issuers, and the
 // zero Input refused. When the Deriver implements Lookup, it also checks
 // that every body it derives looks up to its internal subject, and that
-// an unknown body and a body under another sector don't. factory must
+// an altered body and a body under another sector are ErrSubjectNotFound. factory must
 // build each Deriver from the same configuration and secret.
 //
 // It can't check that a body is unlinkable without the secret; that is
@@ -114,14 +115,14 @@ func testDeriverLookup(t *testing.T, factory func(t *testing.T) Deriver) {
 	if got, err := factory(t).(Lookup).LookupInternalSubject(ctx, in.Issuer(), in.Sector(), body); err != nil || got != in.Subject() {
 		t.Errorf("another instance's LookupInternalSubject(%q) = %q, %v; want %q", body, got, err, in.Subject())
 	}
-	if got, err := lookup.LookupInternalSubject(ctx, in.Issuer(), "other.example", body); err == nil {
-		t.Errorf("LookupInternalSubject under another sector = %q, want an error", got)
+	if got, err := lookup.LookupInternalSubject(ctx, in.Issuer(), "other.example", body); !errors.Is(err, ErrSubjectNotFound) {
+		t.Errorf("LookupInternalSubject under another sector = %q, %v; want ErrSubjectNotFound", got, err)
 	}
 	unknown := contractDerive(t, d, contractInput(t, "https://op.example", "rp.example", "user-2"))
 	tampered := []byte(unknown)
 	tampered[len(tampered)/2] ^= 0x01
-	if got, err := lookup.LookupInternalSubject(ctx, in.Issuer(), in.Sector(), string(tampered)); err == nil && got == in.Subject() {
-		t.Errorf("an altered body looked up to %q", got)
+	if got, err := lookup.LookupInternalSubject(ctx, in.Issuer(), in.Sector(), string(tampered)); !errors.Is(err, ErrSubjectNotFound) {
+		t.Errorf("LookupInternalSubject of an altered body = %q, %v; want ErrSubjectNotFound", got, err)
 	}
 }
 

@@ -121,15 +121,9 @@ func (s *Server) CompleteAuthorization(ctx context.Context, req CompleteAuthoriz
 }
 
 func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, request requestRecord, redirectURI, state string, result authorizeResult) (AuthorizationResult, error) {
-	if result.subject.id.value == "" {
-		return s.completeLocalFail(ctx, clientID, newError(ErrorServerError, 500, "authorize result carries no authenticated subject", nil)), nil
-	}
-	// The authentication time must be one that happened: a zero
-	// AuthenticationContext{} would leave an ID token without the
-	// auth_time max_age and prompt=login require, and a future one
-	// would pass both as the most recent authentication possible.
-	if problem := result.auth.authTimeProblem(s.deps.Clock.Now(), s.cfg.Limits.MaxClockSkew); problem != "" {
-		return s.completeLocalFail(ctx, clientID, newError(ErrorServerError, 500, problem, nil)), nil
+	clientSub, authorizeErr := s.checkAuthorizeResult(ctx, clientID, result)
+	if authorizeErr != nil {
+		return s.completeLocalFail(ctx, clientID, authorizeErr), nil
 	}
 
 	// OIDC Core §3.1.2.1: with max_age, an authentication older than
@@ -163,7 +157,7 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 	// OIDC Core §5.5.1: a request naming its end user, by id_token_hint
 	// or a "sub" value, must not be answered for a different one; that
 	// user didn't authenticate, so it's login_required.
-	if !meetsRequiredSubject(request.RequiredSubject, result.subject) {
+	if !meetsRequiredSubject(request.RequiredSubject, clientSub) {
 		return s.completeErrorRedirect(ctx, clientID, redirectURI, state, "login_required", "the authenticated user isn't the one the request named", AuditOutcomeFailure)
 	}
 
@@ -209,6 +203,7 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 		Nonce:                   nonce,
 		DPoPJKT:                 dpopJKT,
 		Subject:                 result.subject.ID().String(),
+		ClientSubject:           distinctClientSubject(clientSub, result.subject.ID().String()),
 		Scope:                   result.grant.Scope,
 		AuthTime:                result.auth.authTime,
 		ACR:                     result.auth.acr,
@@ -355,4 +350,21 @@ func validateGrantedScopeSubset(granted []string, requestedSpaceDelimited string
 func (s *Server) completeLocalFail(ctx context.Context, clientID fapi.ClientID, err *Error) AuthorizationResult {
 	s.audit(ctx, AuditEventCompleteAuthorization, clientID, AuditOutcomeFailure, string(err.Code()))
 	return AuthorizationLocalError{Error: err}
+}
+
+// checkAuthorizeResult checks what an Authorize result itself must carry
+// and returns the sub the client gets for its user, derived once here
+// and kept with the grant (see grantRecord.ClientSubject).
+func (s *Server) checkAuthorizeResult(ctx context.Context, clientID fapi.ClientID, result authorizeResult) (string, *Error) {
+	if result.subject.id.value == "" {
+		return "", newError(ErrorServerError, 500, "authorize result carries no authenticated subject", nil)
+	}
+	// The authentication time must be one that happened: a zero
+	// AuthenticationContext{} would leave an ID token without the
+	// auth_time max_age and prompt=login require, and a future one
+	// would pass both as the most recent authentication possible.
+	if problem := result.auth.authTimeProblem(s.deps.Clock.Now(), s.cfg.Limits.MaxClockSkew); problem != "" {
+		return "", newError(ErrorServerError, 500, problem, nil)
+	}
+	return s.subjectAtClient(ctx, clientID, result.subject.id.value)
 }

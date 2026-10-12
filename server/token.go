@@ -657,7 +657,7 @@ func (s *Server) issueIDToken(ctx context.Context, client storage.RegisteredClie
 	}
 	signedJWT, err := token.IssueIDToken(token.IDTokenParams{
 		Signer: signer, Algorithm: s.cfg.Algorithms.IDToken, KeyID: kid,
-		Issuer: s.cfg.Issuer.String(), Subject: grant.Subject, Audience: client.ID().String(),
+		Issuer: s.cfg.Issuer.String(), Subject: grant.clientSubject(), Audience: client.ID().String(),
 		Nonce: nonce, AuthTime: grant.AuthTime, ACR: grant.ACR, AMR: grant.AMR,
 		AccessToken: accessToken,
 		Now:         s.deps.Clock.Now(), Lifetime: s.cfg.Limits.IDTokenLifetime,

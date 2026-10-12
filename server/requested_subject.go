@@ -8,6 +8,7 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/token"
 	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // requiredSubject returns the end user a request names as the one it
@@ -55,7 +56,10 @@ func (s *Server) requiredSubject(ctx context.Context, params map[string]json.Raw
 // Its expiry isn't checked: an ID token used as a hint is typically
 // expired, and OIDC Core §3.1.2.1 has servers accept it anyway. So the
 // result only says who the token was about, never that the user is
-// authenticated now; don't treat it as a login. An encrypted ID token
+// authenticated now; don't treat it as a login. It is the sub the client
+// was given: for a client with pairwise subjects, its pairwise sub, so
+// compare it with Server.ClientSubject for a user whose session you
+// know. An encrypted ID token
 // isn't accepted: the client decrypts it and sends the signed token
 // inside.
 //
@@ -201,8 +205,29 @@ func subEntryValues(entry map[string]json.RawMessage, prefix string) (string, er
 	return values[0], nil
 }
 
-// meetsRequiredSubject reports whether subject is the end user required
-// names (see requiredSubject): always, when it names none.
-func meetsRequiredSubject(required string, subject AuthenticatedSubject) bool {
-	return required == "" || subject.id.value == required
+// meetsRequiredSubject reports whether the authenticated end user, whose
+// sub at the client is clientSub, is the one required names (see
+// requiredSubject): always, when it names none. required is the client's
+// view of the user, as its id_token_hint or "sub" value named it, so it
+// is compared with the user's sub at that client, pairwise or public.
+func meetsRequiredSubject(required, clientSub string) bool {
+	return required == "" || clientSub == required
+}
+
+// backchannelRequiredInternalSubject is requiredInternalSubject for a
+// CIBA request. An id_token_hint is how a CIBA request identifies its
+// end user (CIBA Core §7.1), so the server must find the user from it:
+// from a pairwise client whose subs it can't map back
+// (pairwise.OneWay), the hint can't identify anyone, and is
+// invalid_request. Its login_hint and login_hint_token forms are
+// unaffected, and a "claims" sub value is still enforced at completion.
+func (s *Server) backchannelRequiredInternalSubject(ctx context.Context, client storage.RegisteredClient, params map[string]json.RawMessage, required string) (string, *Error) {
+	internal, unmappable, mapErr := s.requiredInternalSubject(ctx, client, required)
+	if mapErr != nil {
+		return "", mapErr
+	}
+	if _, hinted := params["id_token_hint"]; hinted && unmappable {
+		return "", newError(ErrorInvalidRequest, 400, "id_token_hint can't identify an end user of a pairwise client when pairwise subjects are derived one way; use login_hint or login_hint_token", nil)
+	}
+	return internal, nil
 }

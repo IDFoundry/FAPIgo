@@ -31,6 +31,8 @@ def derive(mac_key, enc_key, issuer, sector, subject):
     assert len(c) == PLAIN_LEN
     return base64.urlsafe_b64encode(iv + c).rstrip(b"=").decode()
 
+WRAP_SUBJECT = "wrap-119032621"
+
 mac_key = bytes(range(0, 32))
 enc_key = bytes(range(32, 64))
 other_mac = bytes(range(64, 96))
@@ -45,7 +47,22 @@ cases = [
     (mac_key, enc_key, "https://op.example", "rp.example", "x" * 151),
     (mac_key, enc_key, "https://op.example/tenant/7", "app.bank.example", "0123456789"),
     (other_mac, other_enc, "https://op.example", "rp.example", "user-1"),
+    # Non-ASCII issuer and sector: NewInput allows any UTF-8 without
+    # control characters, and both are length-prefixed as UTF-8 bytes.
+    (mac_key, enc_key, "https://op.example/\u00e9quipe", "\u9280\u884c.example", "user-1"),
+    # A subject whose synthetic IV ends in 0xfffffffd (found by an offline
+    # search over "wrap-<n>"): AES-CTR over the 10-block plaintext carries
+    # out of the IV's low 32-bit word, so a port that increments only a
+    # 32-bit counter fails this vector.
+    (mac_key, enc_key, "https://op.example", "rp.example", WRAP_SUBJECT),
 ]
+def low32(mac, issuer, sector, subject):
+    a = lp(DOMAIN) + lp(issuer.encode()) + lp(sector.encode())
+    iv = hmac.new(mac, a + plaintext(subject.encode()), hashlib.sha256).digest()[:16]
+    return struct.unpack(">I", iv[12:16])[0]
+
+assert low32(mac_key, "https://op.example", "rp.example", WRAP_SUBJECT) >= 0xfffffff7, "wrap vector no longer wraps"
+
 vectors = [{"mac_key": m.hex(), "enc_key": e.hex(), "issuer": i, "sector": s, "subject": u,
             "body": derive(m, e, i, s, u)} for (m, e, i, s, u) in cases]
 print(json.dumps({

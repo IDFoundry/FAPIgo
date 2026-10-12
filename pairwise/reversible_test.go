@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -96,6 +97,36 @@ func TestReversibleKnownAnswers(t *testing.T) {
 			t.Errorf("lookup(%.20q) = %q, %v; want %q", v.Body, got, err, v.Subject)
 		}
 	}
+}
+
+// TestReversibleVectorsCoverCounterCarry: one vector's synthetic IV ends
+// within the plaintext's block count of 0xffffffff, so its counter
+// carries out of the low 32-bit word, which a port incrementing only a
+// 32-bit counter would get wrong.
+func TestReversibleVectorsCoverCounterCarry(t *testing.T) {
+	raw, err := os.ReadFile("testdata/reversible_vectors.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var file struct {
+		Vectors []struct {
+			Body string `json:"body"`
+		} `json:"vectors"`
+	}
+	if err := json.Unmarshal(raw, &file); err != nil {
+		t.Fatal(err)
+	}
+	blocks := uint32((pairwise.ReversiblePlaintextLength + 15) / 16)
+	for _, v := range file.Vectors {
+		sealed, err := base64.RawURLEncoding.DecodeString(v.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if binary.BigEndian.Uint32(sealed[12:16]) > ^uint32(0)-(blocks-1) {
+			return
+		}
+	}
+	t.Error("no vector's IV carries out of the low 32-bit counter word")
 }
 
 func reversibleFromHex(t *testing.T, macHex, encHex string) pairwise.Deriver {

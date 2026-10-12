@@ -78,3 +78,45 @@ func TestReversibleAuthenticatesTheWholeIV(t *testing.T) {
 		}
 	}
 }
+
+// TestAlterBodyReachesAuthentication: the contract's altered body still
+// decodes, for every base64url character at the altered position, so
+// against NewReversible it fails authentication, not decoding.
+func TestAlterBodyReachesAuthentication(t *testing.T) {
+	d, err := NewReversible(bytes.Repeat([]byte{1, 2}, 16), bytes.Repeat([]byte{3, 4}, 16))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := d.(reversibleDeriver)
+	in, err := NewInput("https://op.example", "rp.example", "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := r.DerivePairwiseSubject(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []byte(base64URLAlphabet) {
+		b := []byte(body)
+		b[len(b)/2] = c
+		altered := alterBody(string(b))
+		if altered == string(b) {
+			t.Fatalf("alterBody left %q unchanged", c)
+		}
+		if altered == body {
+			continue // this character rotates back to the genuine body
+		}
+		if _, ok := decodeReversibleBody(altered); !ok {
+			t.Fatalf("alterBody turned %q into a body that doesn't decode", c)
+		}
+		_, err := r.LookupInternalSubject(context.Background(), in.Issuer(), in.Sector(), altered)
+		if !errors.Is(err, ErrSubjectNotFound) || !strings.Contains(err.Error(), "authenticate") {
+			t.Fatalf("altered %q: err = %v, want an authentication failure", c, err)
+		}
+	}
+	for _, c := range []byte("!~.") {
+		if altered := alterBody(string([]byte{'a', c, 'a'})); altered[1] == c || altered[1] < 0x21 || altered[1] > 0x7e {
+			t.Errorf("alterBody(%q) = %q, want another printable character", c, altered)
+		}
+	}
+}

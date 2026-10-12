@@ -297,7 +297,7 @@ func TestNewCapsCIBARequestLifetimeUnderProduction(t *testing.T) {
 		cfg, deps := cibaConfigAndDeps(t, server.AssuranceProduction, server.NoBackchannelNotifications{})
 		cfg.Limits.MaxBackchannelAuthenticationRequestLifetime = lifetime
 		_, err := server.New(cfg, deps)
-		if refused := err != nil && strings.Contains(err.Error(), "limits.max_backchannel_authentication_request_lifetime"); refused != wantRefused {
+		if (err != nil && strings.Contains(err.Error(), "limits.max_backchannel_authentication_request_lifetime")) != wantRefused {
 			t.Errorf("New(production, %v) = %v, want refused: %v", lifetime, err, wantRefused)
 		}
 		if !wantRefused && err != nil {

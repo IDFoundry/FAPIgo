@@ -171,6 +171,12 @@ jobs:
             name: FuzzNewPrefix
           - pkg: ./pairwise
             name: FuzzHMACDeterministicAndInjective
+          - pkg: ./pairwise
+            name: FuzzReversibleRoundTrip
+          - pkg: ./pairwise
+            name: FuzzReversibleTamper
+          - pkg: ./pairwise
+            name: FuzzReversibleLookupArbitrary
           - pkg: ./storage
             name: FuzzDerivedSector
     steps:

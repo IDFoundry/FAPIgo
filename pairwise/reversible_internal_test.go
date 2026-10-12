@@ -99,24 +99,32 @@ func TestAlterBodyReachesAuthentication(t *testing.T) {
 	for _, c := range []byte(base64URLAlphabet) {
 		b := []byte(body)
 		b[len(b)/2] = c
-		altered := alterBody(string(b))
-		if altered == string(b) {
-			t.Fatalf("alterBody left %q unchanged", c)
-		}
-		if altered == body {
-			continue // this character rotates back to the genuine body
-		}
-		if _, ok := decodeReversibleBody(altered); !ok {
-			t.Fatalf("alterBody turned %q into a body that doesn't decode", c)
-		}
-		_, err := r.LookupInternalSubject(context.Background(), in.Issuer(), in.Sector(), altered)
-		if !errors.Is(err, ErrSubjectNotFound) || !strings.Contains(err.Error(), "authenticate") {
-			t.Fatalf("altered %q: err = %v, want an authentication failure", c, err)
-		}
+		checkAlteredBodyAuthenticates(t, r, in, body, string(b))
 	}
 	for _, c := range []byte("!~.") {
 		if altered := alterBody(string([]byte{'a', c, 'a'})); altered[1] == c || altered[1] < 0x21 || altered[1] > 0x7e {
 			t.Errorf("alterBody(%q) = %q, want another printable character", c, altered)
 		}
+	}
+}
+
+// checkAlteredBodyAuthenticates checks alterBody(start) changes start,
+// still decodes, and (unless it rotated back to the genuine body) fails
+// authentication.
+func checkAlteredBodyAuthenticates(t *testing.T, r reversibleDeriver, in Input, genuine, start string) {
+	t.Helper()
+	altered := alterBody(start)
+	if altered == start {
+		t.Fatalf("alterBody left %q unchanged", start[len(start)/2])
+	}
+	if altered == genuine {
+		return // this character rotates back to the genuine body
+	}
+	if _, ok := decodeReversibleBody(altered); !ok {
+		t.Fatalf("alterBody turned %q into a body that doesn't decode", start[len(start)/2])
+	}
+	_, err := r.LookupInternalSubject(context.Background(), in.Issuer(), in.Sector(), altered)
+	if !errors.Is(err, ErrSubjectNotFound) || !strings.Contains(err.Error(), "authenticate") {
+		t.Fatalf("altered %q: err = %v, want an authentication failure", start[len(start)/2], err)
 	}
 }

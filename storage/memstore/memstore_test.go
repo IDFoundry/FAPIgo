@@ -200,3 +200,7 @@ func TestClientRepositoryContract(t *testing.T) {
 		return NewClientRepository(clients)
 	})
 }
+
+func TestPairwiseSubjectStoreContract(t *testing.T) {
+	storage.TestPairwiseSubjectStoreContract(t, func() storage.PairwiseSubjectStore { return NewPairwiseSubjectStore() })
+}

@@ -1549,3 +1549,158 @@ func TestClientRepositoryContract(t *testing.T, factory func(clients []Registere
 		}
 	})
 }
+
+// TestPairwiseSubjectStoreContract exercises factory()'s behavior
+// against the PairwiseSubjectStore contract: GetOrCreate stores a body
+// once and returns it ever after, exactly one candidate wins under
+// concurrency, a body already in use in the same issuer and sector is
+// refused as a collision without storing anything, and Lookup maps a
+// body back to its subject within exactly its issuer and sector.
+func TestPairwiseSubjectStoreContract(t *testing.T, factory func() PairwiseSubjectStore) {
+	t.Helper()
+	t.Run("GetOrCreateStoresTheCandidate", func(t *testing.T) { testPairwiseSubjectStoreGetOrCreate(t, factory) })
+	t.Run("GetOrCreateKeepsTheFirstBody", func(t *testing.T) { testPairwiseSubjectStoreKeepsFirstBody(t, factory) })
+	t.Run("ConcurrentGetOrCreateHasExactlyOneWinner", func(t *testing.T) { testPairwiseSubjectStoreConcurrentGetOrCreate(t, factory) })
+	t.Run("LookupUnknownBodyIsNotFound", func(t *testing.T) { testPairwiseSubjectStoreLookupUnknown(t, factory) })
+	t.Run("CollisionIsReportedAndStoresNothing", func(t *testing.T) { testPairwiseSubjectStoreCollision(t, factory) })
+	t.Run("IssuersAndSectorsAreSeparate", func(t *testing.T) { testPairwiseSubjectStoreIsolation(t, factory) })
+	t.Run("KeysAndBodiesAreExact", func(t *testing.T) { testPairwiseSubjectStoreExactness(t, factory) })
+}
+
+const (
+	contractPairwiseIssuer = "https://as.example"
+	contractPairwiseSector = "rp.example"
+)
+
+func contractPairwiseKey(subject string) PairwiseSubjectKey {
+	return PairwiseSubjectKey{Issuer: contractPairwiseIssuer, Sector: contractPairwiseSector, Subject: subject}
+}
+
+// mustGetOrCreate calls GetOrCreate and fails the test on an error or
+// a body other than want.
+func mustGetOrCreate(t *testing.T, s PairwiseSubjectStore, key PairwiseSubjectKey, candidate, want string) {
+	t.Helper()
+	body, err := s.GetOrCreate(context.Background(), key, candidate)
+	if err != nil || body != want {
+		t.Fatalf("GetOrCreate(%+v, %q) = %q, %v, want %q, nil", key, candidate, body, err, want)
+	}
+}
+
+// mustLookup calls Lookup and fails the test on an error or a subject
+// other than want.
+func mustLookup(t *testing.T, s PairwiseSubjectStore, issuer, sector, body, want string) {
+	t.Helper()
+	subject, err := s.Lookup(context.Background(), issuer, sector, body)
+	if err != nil || subject != want {
+		t.Fatalf("Lookup(%q, %q, %q) = %q, %v, want %q, nil", issuer, sector, body, subject, err, want)
+	}
+}
+
+// mustNotFind calls Lookup and fails the test unless it reports
+// ErrPairwiseSubjectNotFound, and not ErrStoreUnavailable.
+func mustNotFind(t *testing.T, s PairwiseSubjectStore, issuer, sector, body string) {
+	t.Helper()
+	subject, err := s.Lookup(context.Background(), issuer, sector, body)
+	if !errors.Is(err, ErrPairwiseSubjectNotFound) || errors.Is(err, ErrStoreUnavailable) {
+		t.Fatalf("Lookup(%q, %q, %q) = %q, %v, want ErrPairwiseSubjectNotFound", issuer, sector, body, subject, err)
+	}
+}
+
+func testPairwiseSubjectStoreGetOrCreate(t *testing.T, factory func() PairwiseSubjectStore) {
+	s := factory()
+	mustGetOrCreate(t, s, contractPairwiseKey("user-1"), "body-1", "body-1")
+	mustLookup(t, s, contractPairwiseIssuer, contractPairwiseSector, "body-1", "user-1")
+}
+
+func testPairwiseSubjectStoreKeepsFirstBody(t *testing.T, factory func() PairwiseSubjectStore) {
+	s := factory()
+	mustGetOrCreate(t, s, contractPairwiseKey("user-1"), "body-1", "body-1")
+	mustGetOrCreate(t, s, contractPairwiseKey("user-1"), "body-2", "body-1")
+	// A candidate already in use is ignored too once the key has a body.
+	mustGetOrCreate(t, s, contractPairwiseKey("user-2"), "body-3", "body-3")
+	mustGetOrCreate(t, s, contractPairwiseKey("user-1"), "body-3", "body-1")
+	mustNotFind(t, s, contractPairwiseIssuer, contractPairwiseSector, "body-2")
+	mustLookup(t, s, contractPairwiseIssuer, contractPairwiseSector, "body-1", "user-1")
+}
+
+func testPairwiseSubjectStoreConcurrentGetOrCreate(t *testing.T, factory func() PairwiseSubjectStore) {
+	s := factory()
+	var mu sync.Mutex
+	var next int
+	bodies := make(map[string]bool)
+	runConcurrently(contractConcurrentAttempts, func() bool {
+		mu.Lock()
+		candidate := fmt.Sprintf("candidate-%d", next)
+		next++
+		mu.Unlock()
+		body, err := s.GetOrCreate(context.Background(), contractPairwiseKey("user-1"), candidate)
+		if err != nil {
+			t.Errorf("GetOrCreate(%q): %v", candidate, err)
+			return false
+		}
+		mu.Lock()
+		bodies[body] = true
+		mu.Unlock()
+		return true
+	})
+	if len(bodies) != 1 {
+		t.Fatalf("concurrent GetOrCreate returned %d different bodies, want 1: %v", len(bodies), bodies)
+	}
+	for body := range bodies {
+		mustLookup(t, s, contractPairwiseIssuer, contractPairwiseSector, body, "user-1")
+	}
+	// Every losing candidate was stored for no one.
+	for i := 0; i < contractConcurrentAttempts; i++ {
+		if candidate := fmt.Sprintf("candidate-%d", i); !bodies[candidate] {
+			mustNotFind(t, s, contractPairwiseIssuer, contractPairwiseSector, candidate)
+		}
+	}
+}
+
+func testPairwiseSubjectStoreLookupUnknown(t *testing.T, factory func() PairwiseSubjectStore) {
+	mustNotFind(t, factory(), contractPairwiseIssuer, contractPairwiseSector, "never-stored")
+}
+
+func testPairwiseSubjectStoreCollision(t *testing.T, factory func() PairwiseSubjectStore) {
+	s := factory()
+	mustGetOrCreate(t, s, contractPairwiseKey("user-1"), "body-1", "body-1")
+	body, err := s.GetOrCreate(context.Background(), contractPairwiseKey("user-2"), "body-1")
+	if !errors.Is(err, ErrPairwiseSubjectCollision) {
+		t.Fatalf("GetOrCreate(another subject, a body in use) = %q, %v, want ErrPairwiseSubjectCollision", body, err)
+	}
+	mustLookup(t, s, contractPairwiseIssuer, contractPairwiseSector, "body-1", "user-1")
+	// Nothing was stored for user-2, so a fresh candidate succeeds.
+	mustGetOrCreate(t, s, contractPairwiseKey("user-2"), "body-2", "body-2")
+	mustLookup(t, s, contractPairwiseIssuer, contractPairwiseSector, "body-2", "user-2")
+}
+
+func testPairwiseSubjectStoreIsolation(t *testing.T, factory func() PairwiseSubjectStore) {
+	s := factory()
+	otherSector := PairwiseSubjectKey{Issuer: contractPairwiseIssuer, Sector: "other.example", Subject: "user-2"}
+	otherIssuer := PairwiseSubjectKey{Issuer: "https://other-as.example", Sector: contractPairwiseSector, Subject: "user-3"}
+	mustGetOrCreate(t, s, contractPairwiseKey("user-1"), "body-1", "body-1")
+	// The same body is free in another sector or issuer.
+	mustGetOrCreate(t, s, otherSector, "body-1", "body-1")
+	mustGetOrCreate(t, s, otherIssuer, "body-1", "body-1")
+	mustLookup(t, s, contractPairwiseIssuer, contractPairwiseSector, "body-1", "user-1")
+	mustLookup(t, s, contractPairwiseIssuer, "other.example", "body-1", "user-2")
+	mustLookup(t, s, "https://other-as.example", contractPairwiseSector, "body-1", "user-3")
+	// The same subject has a separate body per sector.
+	sameUserOtherSector := PairwiseSubjectKey{Issuer: contractPairwiseIssuer, Sector: "third.example", Subject: "user-1"}
+	mustGetOrCreate(t, s, sameUserOtherSector, "body-4", "body-4")
+	mustGetOrCreate(t, s, contractPairwiseKey("user-1"), "body-5", "body-1")
+	mustNotFind(t, s, contractPairwiseIssuer, contractPairwiseSector, "body-4")
+}
+
+func testPairwiseSubjectStoreExactness(t *testing.T, factory func() PairwiseSubjectStore) {
+	s := factory()
+	mustGetOrCreate(t, s, contractPairwiseKey("user-1"), "Body-1", "Body-1")
+	for _, body := range []string{"body-1", "BODY-1", "Body-1 ", " Body-1", "Body-", ""} {
+		mustNotFind(t, s, contractPairwiseIssuer, contractPairwiseSector, body)
+	}
+	mustNotFind(t, s, contractPairwiseIssuer+"/", contractPairwiseSector, "Body-1")
+	mustNotFind(t, s, contractPairwiseIssuer, "RP.example", "Body-1")
+	// A differently spelled subject is a different user.
+	mustGetOrCreate(t, s, contractPairwiseKey("User-1"), "body-2", "body-2")
+	mustLookup(t, s, contractPairwiseIssuer, contractPairwiseSector, "body-2", "User-1")
+}

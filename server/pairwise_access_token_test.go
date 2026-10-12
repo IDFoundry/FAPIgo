@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
@@ -136,13 +137,30 @@ func mappingPairwise(t *testing.T) pairwise.Deriver {
 	return d
 }
 
-// TestPairwiseJWTAccessTokens: under pairwise.Reversible a JWT access
-// token's sub is the client's pairwise sub, with the sector it was
-// derived for, and never the internal subject; a resource server looks
-// it up to the internal subject, and fails closed without a lookup. A
-// refresh issues the same.
+func reversiblePairwise(t *testing.T) pairwise.Deriver {
+	t.Helper()
+	d, err := pairwise.NewReversible(bytes.Repeat([]byte{1, 2}, 16), bytes.Repeat([]byte{3, 4}, 16))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+// TestPairwiseJWTAccessTokens: under pairwise.Reversible (both the
+// mapping and the encrypting deriver) a JWT access token's sub is the
+// client's pairwise sub, with the sector it was derived for, and never
+// the internal subject; a resource server looks it up to the internal
+// subject, and fails closed without a lookup. A refresh issues the same.
 func TestPairwiseJWTAccessTokens(t *testing.T) {
-	deriver := mappingPairwise(t)
+	for name, deriver := range map[string]func(*testing.T) pairwise.Deriver{
+		"mapping":    mappingPairwise,
+		"reversible": reversiblePairwise,
+	} {
+		t.Run(name, func(t *testing.T) { testPairwiseJWTAccessTokens(t, deriver(t)) })
+	}
+}
+
+func testPairwiseJWTAccessTokens(t *testing.T, deriver pairwise.Deriver) {
 	h := withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), pairwise.Reversible, deriver)
 	want := clientSubjectOf(t, h, "user-1")
 

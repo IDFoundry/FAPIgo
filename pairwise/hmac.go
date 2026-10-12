@@ -40,6 +40,15 @@ func NewHMAC(key []byte, opts ...keys.CustodyOption) (Deriver, error) {
 		return nil, err
 	}
 	d := hmacDeriver{key: append([]byte(nil), key...)}
+	if custody, declared := custodyFrom(opts); declared {
+		return custodyHMACDeriver{hmacDeriver: d, custody: custody}, nil
+	}
+	return d, nil
+}
+
+// custodyFrom applies opts to a KeyCustody, reporting whether any
+// (non-nil) option declared one.
+func custodyFrom(opts []keys.CustodyOption) (keys.KeyCustody, bool) {
 	var custody keys.KeyCustody
 	declared := false
 	for _, opt := range opts {
@@ -48,10 +57,7 @@ func NewHMAC(key []byte, opts ...keys.CustodyOption) (Deriver, error) {
 			declared = true
 		}
 	}
-	if declared {
-		return custodyHMACDeriver{hmacDeriver: d, custody: custody}, nil
-	}
-	return d, nil
+	return custody, declared
 }
 
 // hmacDeriver is NewHMAC's Deriver without a custody declaration.

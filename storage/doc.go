@@ -20,11 +20,13 @@
 // keyed by a namespaced identifier (e.g. "server:dpop", "resource:dpop")
 // so that different roles and subsystems can never collide on the same
 // use-once token. session.go defines the client's own SessionStore,
-// nonce.go the DPoP NonceStore, and backchannel.go the server's CIBA
-// BackchannelAuthenticationStore, on the same per-role pattern. No
+// nonce.go the DPoP NonceStore, backchannel.go the server's CIBA
+// BackchannelAuthenticationStore, and pairwise_subject.go the
+// PairwiseSubjectStore that keeps random pairwise subject identifiers,
+// on the same per-role pattern. No
 // interface here exposes GetX/UpdateX/DeleteX-style CRUD —
 // every method is a named operation (Create, Resolve, Lookup, Consume,
-// Redeem, Decide, Poll, Revoke, UseOnce), and redemption-style
+// Redeem, Decide, Poll, Revoke, UseOnce, GetOrCreate), and redemption-style
 // operations verify and consume state atomically in one call rather
 // than as separate check-then-act steps.
 // ReplayStore persists only a digest and expiry per use, never a
@@ -69,8 +71,8 @@
 // TestNonceStoreContract, TestAccessTokenStoreContract,
 // TestBackchannelAuthenticationStoreContract, TestRevocationStoreContract
 // (for the revocation store server.RevocationSink and
-// resource.RevocationChecker share — see RevocationStore) and
-// TestClientRepositoryContract. The suite runs one store instance in one
+// resource.RevocationChecker share — see RevocationStore),
+// TestClientRepositoryContract and TestPairwiseSubjectStoreContract. The suite runs one store instance in one
 // process against context.Background(); it deliberately does not
 // verify cross-instance/cross-connection atomicity, ExpiresAt-driven
 // eviction, context-cancellation, or that the store deep-copies

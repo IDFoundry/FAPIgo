@@ -3,7 +3,7 @@ package storage
 // StoreAssurance is a self-asserted declaration of a storage backend's
 // operational guarantees. A storage implementation (ClientRepository,
 // TransactionStore, GrantStore, ReplayStore, SessionStore, NonceStore,
-// AccessTokenStore, BackchannelAuthenticationStore) optionally
+// AccessTokenStore, BackchannelAuthenticationStore, PairwiseSubjectStore) optionally
 // implements it by exposing a Capabilities method; server, client and
 // resource each check the stores they're given under their production
 // assurance level rather than trusting that a store meant for a quick
@@ -16,7 +16,8 @@ package storage
 // TestTransactionStoreContract, TestReplayStoreContract,
 // TestSessionStoreContract, TestNonceStoreContract,
 // TestAccessTokenStoreContract, TestBackchannelAuthenticationStoreContract,
-// TestRevocationStoreContract, TestClientRepositoryContract)
+// TestRevocationStoreContract, TestClientRepositoryContract,
+// TestPairwiseSubjectStoreContract)
 // — against its own factory, rather than
 // relying on the capability declaration alone. The contract suite
 // verifies what's observable through the public interface (the

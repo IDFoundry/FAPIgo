@@ -30,7 +30,7 @@ func FuzzReversibleRoundTrip(f *testing.F) {
 	d, lookup := fuzzReversible(f)
 	f.Fuzz(func(t *testing.T, issuer, sector, subject, otherSector string) {
 		in, err := pairwise.NewInput(issuer, sector, subject)
-		if err != nil || len(subject) > pairwise.ReversibleMaxSubjectLength {
+		if err != nil || len(subject) > pairwise.MaxReversibleSubjectLength {
 			return
 		}
 		checkReversibleRoundTrip(t, d, lookup, in, otherSector)
@@ -69,7 +69,7 @@ func FuzzReversibleTamper(f *testing.F) {
 	d, lookup := fuzzReversible(f)
 	f.Fuzz(func(t *testing.T, subject string, at, xor uint8) {
 		in, err := pairwise.NewInput("https://op.example", "rp.example", subject)
-		if err != nil || len(subject) > pairwise.ReversibleMaxSubjectLength || xor == 0 {
+		if err != nil || len(subject) > pairwise.MaxReversibleSubjectLength || xor == 0 {
 			return
 		}
 		body, err := d.DerivePairwiseSubject(context.Background(), in)

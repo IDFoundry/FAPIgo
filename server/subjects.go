@@ -52,6 +52,9 @@ func (e SubjectTypeEnforcement) IsValid() bool {
 //     user (pairwise.Reversible, which requires a pairwise.Lookup) or
 //     not (pairwise.OneWay). Prefix is put in front of every pairwise
 //     sub, and may be empty, but must be built with pairwise.NewPrefix.
+//     With pairwise.NewReversible, internal subjects are limited to
+//     pairwise.MaxReversibleSubjectLength (151) bytes: a user with a
+//     longer one can't complete an authorization at a pairwise client.
 //
 // PublicSubjects is the configuration that keeps every sub as it was.
 // Changing Default, Enforcement or Prefix, or the deriver's key, changes

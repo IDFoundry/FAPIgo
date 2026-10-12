@@ -136,7 +136,10 @@ see as new accounts.
     subject into the `sub`, so it needs no storage. Anyone holding both
     keys can map every pairwise `sub` ever issued back to its user, and
     so can every resource server you give them to: guard and back them
-    up like signing keys. Internal subjects are limited to 151 bytes.
+    up like signing keys. Internal subjects are limited to 151 bytes
+    (`pairwise.MaxReversibleSubjectLength`); `server.NewSubjectID`
+    accepts up to 255, so a longer subject fails with `server_error`
+    when its user signs in to a pairwise client.
   - **`pairwise.NewMapping`** keeps a random `sub` per user and sector
     in a `storage.PairwiseSubjectStore`, so there's no key whose leak
     reverses them all, at the cost of a durable, shared store.

@@ -123,7 +123,7 @@ func TestReversibleBodyLength(t *testing.T) {
 		t.Errorf("a %d-character body with a %d-character prefix exceeds OIDC's 255-character sub", pairwise.ReversibleBodyLength, pairwise.MaxPrefixLength)
 	}
 	d := newReversible(t)
-	for _, subject := range []string{"u", "user-1", strings.Repeat("x", pairwise.ReversibleMaxSubjectLength)} {
+	for _, subject := range []string{"u", "user-1", strings.Repeat("x", pairwise.MaxReversibleSubjectLength)} {
 		body := deriveReversible(t, d, reversibleInput(t, "https://op.example", "rp.example", subject))
 		if len(body) != pairwise.ReversibleBodyLength {
 			t.Errorf("body for a %d-byte subject is %d characters, want %d", len(subject), len(body), pairwise.ReversibleBodyLength)
@@ -164,7 +164,7 @@ func TestNewReversibleCopiesTheKeys(t *testing.T) {
 }
 
 func TestReversibleRefusesALongSubject(t *testing.T) {
-	in := reversibleInput(t, "https://op.example", "rp.example", strings.Repeat("x", pairwise.ReversibleMaxSubjectLength+1))
+	in := reversibleInput(t, "https://op.example", "rp.example", strings.Repeat("x", pairwise.MaxReversibleSubjectLength+1))
 	if _, err := newReversible(t).DerivePairwiseSubject(context.Background(), in); !errors.Is(err, pairwise.ErrSubjectTooLong) {
 		t.Errorf("err = %v, want ErrSubjectTooLong", err)
 	}

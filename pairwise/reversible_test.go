@@ -265,3 +265,23 @@ func TestNewReversibleDeclaresCustodyOnlyWhenGiven(t *testing.T) {
 		t.Error("a reversible Deriver with custody declared doesn't implement pairwise.Lookup")
 	}
 }
+
+// TestReversibleLookupRefusesOverlongContext: an issuer or sector longer
+// than MaxInputLength, which no Input carries, is refused before
+// anything is computed over it.
+func TestReversibleLookupRefusesOverlongContext(t *testing.T) {
+	d := newReversible(t)
+	in := reversibleInput(t, "https://op.example", "rp.example", "user-1")
+	body := deriveReversible(t, d, in)
+	long := strings.Repeat("x", pairwise.MaxInputLength+1)
+	for name, args := range map[string][2]string{"issuer": {long, in.Sector()}, "sector": {in.Issuer(), long}} {
+		got, err := reversibleLookup(t, d).LookupInternalSubject(context.Background(), args[0], args[1], body)
+		if !errors.Is(err, pairwise.ErrSubjectNotFound) || !strings.Contains(err.Error(), "longer than") {
+			t.Errorf("%s too long: LookupInternalSubject = %q, %v; want ErrSubjectNotFound for its length", name, got, err)
+		}
+	}
+	atLimit := reversibleInput(t, strings.Repeat("i", pairwise.MaxInputLength), strings.Repeat("s", pairwise.MaxInputLength), "user-1")
+	if got, err := reversibleLookup(t, d).LookupInternalSubject(context.Background(), atLimit.Issuer(), atLimit.Sector(), deriveReversible(t, d, atLimit)); err != nil || got != "user-1" {
+		t.Errorf("lookup at MaxInputLength = %q, %v; want user-1", got, err)
+	}
+}

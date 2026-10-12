@@ -8,9 +8,12 @@
 // sees the user's sub. A Deriver that can also map a body back to the
 // internal subject implements Lookup.
 //
-// NewHMAC is the built-in one-way Deriver. The package is a leaf, so
-// both server and resource servers can use the same deriver without
-// one importing the other.
+// NewHMAC is the built-in one-way Deriver. NewMapping is a reversible
+// one that keeps a random body per user and sector in a
+// storage.PairwiseSubjectStore, so no key exists whose loss would let
+// anyone compute or reverse identifiers. The package imports neither
+// server nor resource, so both can use the same deriver without one
+// importing the other.
 package pairwise
 
 import (
@@ -34,7 +37,7 @@ const (
 	OneWay
 
 	// Reversible derivation can be mapped back to the internal subject by
-	// the OP, through Lookup.
+	// the OP, through Lookup. NewMapping is Reversible.
 	Reversible
 )
 

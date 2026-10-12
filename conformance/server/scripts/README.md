@@ -371,7 +371,7 @@ the federation legs above), expects exactly the files that command
 produces.
 
 ```
-pip install -r <suite-checkout>/scripts/requirements.txt   # one-time: httpx, pyparsing
+pip install --require-hashes -r /path/to/fapigo/conformance/requirements-suite.txt   # one-time: httpx, pyparsing, hash-pinned
 cd <suite-checkout>
 ./scripts/run-test-plan.py \
   'fapi2-security-profile-final-test-plan[client_auth_type=private_key_jwt][sender_constrain=dpop][fapi_profile=plain_fapi][openid=openid_connect]' \

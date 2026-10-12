@@ -18,3 +18,21 @@ updates:
     directory: /
     schedule:
       interval: weekly
+
+  # The conformance images' base images, pinned by digest
+  # (`image:tag@sha256:...`) so a moved tag can't change what's built;
+  # Dependabot updates the digest when the tag moves.
+  - package-ecosystem: docker
+    directories:
+      - /conformance/server
+      - /cmd/conformance-federation-trust-anchor
+    schedule:
+      interval: weekly
+
+  # The conformance suite scripts' Python packages
+  # (conformance/requirements-suite.in, compiled with hashes to
+  # requirements-suite.txt). Test tooling only: nothing here ships.
+  - package-ecosystem: pip
+    directory: /conformance
+    schedule:
+      interval: weekly

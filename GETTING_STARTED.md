@@ -289,6 +289,30 @@ Sources: [PKCS#11 v2.40 mechanisms (`CK_AES_CTR_PARAMS`)](https://docs.oasis-ope
 Vendors change what they offer: check your service's current
 documentation.
 
+#### Keeping the one-way key in an HSM or KMS
+
+`pairwise.NewHMACWith(ops)` is the one-way deriver over a
+`pairwise.HMACOps` you implement against your key service: one
+operation, HMAC-SHA-256 under a key the service never releases,
+returning the full 32-byte output. For the same key it derives exactly
+the `sub`s `NewHMAC` does. Unlike the reversible construction it needs
+no raw AES, so more services can hold its key:
+
+| Key service | Key non-extractable? | MAC | Caveats |
+|---|---|---|---|
+| **PKCS#11 HSMs** (including AWS CloudHSM) | Yes | `CKM_SHA256_HMAC` | Check that your HSM supports the mechanism with a 32-byte generic secret key. |
+| **AWS KMS** | Yes | An `HMAC_256` key with `GenerateMac`, algorithm `HMAC_SHA_256` | |
+| **Google Cloud KMS** | Yes | A `MAC` key with algorithm `HMAC_SHA256` (`MacSign`) | |
+| **Azure Key Vault Managed HSM** | Yes | An `oct-HSM` key, `HS256` | |
+| **HashiCorp Vault Transit** | Yes | The `hmac` endpoint with `sha2-256` | Its output is `vault:v1:`-prefixed base64: your `HMACOps` decodes it to the 32 bytes. The key is Vault's own, so moving to or from `NewHMAC` changes every `sub`. |
+
+Each derivation is one call, once per grant. A one-way deriver is never
+asked to look a `sub` up, so resource servers never call the key
+service: they read opaque access tokens' records (or your own
+`SubjectResolver`, if you declared one). Check an implementation
+against `pairwise/testdata/hmac_vectors.json` (generated independently
+by `hmac_vectors.py` beside it). Sources: as above.
+
 Under `ProfileFAPISecurityWithMessageSigning`, `Algorithms.JARM` is
 required too.
 

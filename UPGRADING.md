@@ -80,6 +80,12 @@ subjects. Nothing changes for one that keeps `PublicSubjects()`.
   as `OpaqueAccessTokens` does.
 - **Readable access tokens:** a JWT access token's other claims (a
   `GrantID`, extension claims) must not identify the user either.
+- **Switching to `SubjectTypesPairwiseOnly`** ends existing grants made
+  while their client got public subs: their next refresh (or code or
+  CIBA token exchange) fails with `invalid_grant`, and the client
+  authorizes again, now with a pairwise `sub`. A grant keeps the `sub`
+  it was issued with, so it can't move to a pairwise one in place.
+  Under `SubjectTypesPerClient`, existing grants keep their `sub`.
 
 ### A federation Relying Party's `subject_type` is honoured or refused (federation, server)
 

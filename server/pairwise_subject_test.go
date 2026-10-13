@@ -613,3 +613,52 @@ func TestEmbedderGrantStoresPairwiseSubject(t *testing.T) {
 	// as the refresh grant, the internal one staying in the record.
 	assertOpaqueRecordSubjects(t, accessTokens, issued.AccessToken.Reveal(), "holder-1", want, "wallet.example")
 }
+
+// TestPairwiseOnlyRefusesGrantsIssuedPublic: a server that switches to
+// SubjectTypesPairwiseOnly, which promises every client pairwise subs,
+// doesn't keep issuing the user's internal subject from grants made
+// while the client was public: their refresh tokens fail with
+// invalid_grant, and the client authorizes again. Under
+// SubjectTypesPerClient the grant keeps its public sub.
+func TestPairwiseOnlyRefusesGrantsIssuedPublic(t *testing.T) {
+	for name, tc := range map[string]struct {
+		enforcement server.SubjectTypeEnforcement
+		wantRefused bool
+	}{
+		"pairwise only": {server.SubjectTypesPairwiseOnly, true},
+		"per client":    {server.SubjectTypesPerClient, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, server.ProfileFAPISecurity, true)
+			client := pairwiseClient(false)
+			client.SubjectType = 0 // the server's default
+			register(t, h, client)
+			first, _ := exchangeForTokensWithOfflineAccess(t, h)
+
+			h.cfg.Subjects = server.SubjectConfig{
+				Default: fapi.SubjectTypePairwise, Enforcement: tc.enforcement,
+				Derivation: pairwise.Reversible, Prefix: mustPrefix(t, testPairwisePrefix),
+			}
+			h.deps.PairwiseSubjects = newMappingDeriver()
+			srv, err := server.New(h.cfg, h.deps)
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			h.server = srv
+
+			refreshed, err := refreshWith(t, h, first.RefreshToken.Reveal(), "")
+			if tc.wantRefused {
+				if code := serverErrorCode(t, err); code != server.ErrorInvalidGrant {
+					t.Fatalf("refresh error code = %q, want invalid_grant", code)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("refresh: %v", err)
+			}
+			if got := validateIDToken(t, h, refreshed.IDToken.Reveal(), refreshed.AccessToken.Reveal()).Subject; got != "user-1" {
+				t.Errorf("refreshed sub = %q, want the grant's public sub kept", got)
+			}
+		})
+	}
+}

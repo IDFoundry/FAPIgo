@@ -262,7 +262,7 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	if !client.AllowsAuthorizationCodeGrant() {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorUnauthorizedClient, 400, "the client is no longer registered for the authorization code grant", nil))
 	}
-	if allowedErr := s.checkGrantStillAllowed(client, grant.Scope, grant.AuthorizationDetails); allowedErr != nil {
+	if allowedErr := s.checkGrantStillAllowed(client, grant, grant.Scope); allowedErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), allowedErr)
 	}
 

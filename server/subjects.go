@@ -23,7 +23,12 @@ const (
 
 	// SubjectTypesPairwiseOnly gives every end user a pairwise sub at
 	// every client: a client registered as public is refused, so no
-	// client can opt out. It requires a pairwise Default.
+	// client can opt out. It requires a pairwise Default. A grant made
+	// while its client got public subs is refused at its next use
+	// (invalid_grant at refresh, at the code exchange and at the CIBA
+	// token exchange), since a grant keeps the sub it was issued with:
+	// switching to it ends those grants, and their clients authorize
+	// again.
 	SubjectTypesPairwiseOnly
 )
 

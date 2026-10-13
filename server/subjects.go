@@ -135,7 +135,7 @@ func validateSubjects(cfg Config, deps Dependencies) error {
 		}
 		return nil
 	}
-	if err := validatePairwiseSubjects(subjects, deps.PairwiseSubjects); err != nil {
+	if err := validatePairwiseSubjects(subjects, deps.PairwiseSubjects, deps.PairwiseSubjectResolver); err != nil {
 		return err
 	}
 	if deps.PairwiseSubjectResolver != nil && reversibleDeriver(deps.PairwiseSubjects) {
@@ -185,13 +185,19 @@ func validateSubjectTypes(subjects SubjectConfig) error {
 }
 
 // validatePairwiseSubjects checks the settings that apply once a client
-// can be pairwise.
-func validatePairwiseSubjects(subjects SubjectConfig, deriver pairwise.Deriver) error {
+// can be pairwise. An empty Prefix is refused for a one-way deriver with
+// no resolver: nothing could then tell a pairwise sub from a public one,
+// and the server's own checks (a signed UserInfo response's sub, say)
+// couldn't catch the internal subject passed where the pairwise one
+// belongs.
+func validatePairwiseSubjects(subjects SubjectConfig, deriver pairwise.Deriver, resolver pairwise.SubjectResolver) error {
 	switch {
 	case deriver == nil:
 		return fmt.Errorf("server: dependencies: pairwise_subjects is required with a pairwise subjects.default (pairwise.NewReversible, pairwise.NewReversibleWith, pairwise.NewMapping or pairwise.NewHMAC)")
 	case !subjects.Prefix.IsSet():
-		return fmt.Errorf("server: config: subjects.prefix is required when a client can be pairwise (pairwise.NewPrefix, which accepts \"\")")
+		return fmt.Errorf("server: config: subjects.prefix is required when a client can be pairwise (pairwise.NewPrefix, which accepts \"\" for a reversible deriver)")
+	case subjects.Prefix.String() == "" && !reversibleDeriver(deriver) && resolver == nil:
+		return fmt.Errorf("server: config: subjects.prefix must not be empty with a one-way pairwise_subjects (%T): set one, such as pairwise.NewPrefix(\"ppid:\"), so a pairwise sub can't be mistaken for an internal subject", deriver)
 	}
 	return nil
 }

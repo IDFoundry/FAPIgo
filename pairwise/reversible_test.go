@@ -145,7 +145,7 @@ func reversibleFromHex(t *testing.T, macHex, encHex string) pairwise.Deriver {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d, err := pairwise.NewReversible(macKey, encKey)
+	d, err := pairwise.NewReversibleForVectors(macKey, encKey)
 	if err != nil {
 		t.Fatalf("NewReversible: %v", err)
 	}

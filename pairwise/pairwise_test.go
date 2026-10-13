@@ -247,3 +247,31 @@ func FuzzHMACDeterministicAndInjective(f *testing.F) {
 		}
 	})
 }
+
+// TestDeriversRefuseTextKeys: a key made entirely of printable text (a
+// passphrase, or a hex or base64 key not yet decoded) is refused; one
+// non-text byte is enough to accept it.
+func TestDeriversRefuseTextKeys(t *testing.T) {
+	random := bytes.Repeat([]byte{0x01, 0xfe}, 16)
+	for name, key := range map[string][]byte{
+		"passphrase":      []byte("my-super-secret-pairwise-key-123"),
+		"hex, undecoded":  []byte("0123456789abcdef0123456789abcdef"),
+		"with whitespace": []byte("correct horse battery staple\n\tok"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := pairwise.NewHMAC(key[:32]); err == nil || !strings.Contains(err.Error(), "printable text") {
+				t.Errorf("NewHMAC(%q) = %v, want refused as text", key[:32], err)
+			}
+			if _, err := pairwise.NewReversible(random, key[:32]); err == nil || !strings.Contains(err.Error(), "printable text") {
+				t.Errorf("NewReversible(_, %q) = %v, want refused as text", key[:32], err)
+			}
+			if _, err := pairwise.NewReversible(key[:32], random); err == nil || !strings.Contains(err.Error(), "printable text") {
+				t.Errorf("NewReversible(%q, _) = %v, want refused as text", key[:32], err)
+			}
+		})
+	}
+	almost := []byte("my-super-secret-pairwise-key-12\x00")
+	if _, err := pairwise.NewHMAC(almost); err != nil {
+		t.Errorf("NewHMAC with one non-text byte = %v, want accepted", err)
+	}
+}

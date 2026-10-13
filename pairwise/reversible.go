@@ -119,9 +119,11 @@ type ReversibleOps interface {
 // independent implementation. Every body is ReversibleBodyLength
 // characters, whatever the internal subject's length.
 //
-// macKey and encKey must be two different sets of 32 random bytes,
-// used for nothing else. A key that is a single byte repeated (all
-// zeros, say), or two equal keys, are refused.
+// macKey and encKey must be two different sets of 32 random bytes from
+// crypto/rand, used for nothing else. A key that is a single byte
+// repeated (all zeros, say), two equal keys, and a key made entirely of
+// printable text (a passphrase, or a hex or base64 key not yet decoded)
+// are refused.
 //
 // Anyone holding both keys can map every pairwise sub this deployment
 // has ever issued, at every client, back to its end user: a leak of the
@@ -146,6 +148,17 @@ func NewReversible(macKey, encKey []byte, opts ...keys.CustodyOption) (*Reversib
 	if err := sealkeys.Check("pairwise: reversible", [][]byte{macKey, encKey}); err != nil {
 		return nil, err
 	}
+	for _, key := range [...][]byte{macKey, encKey} {
+		if err := checkNotText("pairwise: reversible", key); err != nil {
+			return nil, err
+		}
+	}
+	return newReversible(macKey, encKey, opts...)
+}
+
+// newReversible is NewReversible without its key-quality checks, for the
+// published test vectors, whose keys are sequential bytes.
+func newReversible(macKey, encKey []byte, opts ...keys.CustodyOption) (*ReversibleDeriver, error) {
 	block, err := aes.NewCipher(encKey)
 	if err != nil {
 		return nil, fmt.Errorf("pairwise: reversible: %w", err)

@@ -12,7 +12,7 @@ import (
 // TestSubjectTypesSupported covers discovery for configurations New
 // can't build yet (while pairwise subjects aren't issued).
 func TestSubjectTypesSupported(t *testing.T) {
-	deriver, err := pairwise.NewHMAC(bytes.Repeat([]byte{0x33, 0x44}, 16))
+	deriver, err := pairwise.NewHMAC(bytes.Repeat([]byte{0x33, 0x94}, 16))
 	if err != nil {
 		t.Fatal(err)
 	}

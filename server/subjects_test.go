@@ -141,7 +141,6 @@ func TestNewAcceptsPairwiseSubjects(t *testing.T) {
 		"pairwise default":          func(*server.SubjectConfig) {},
 		"pairwise only":             func(c *server.SubjectConfig) { c.Enforcement = server.SubjectTypesPairwiseOnly },
 		"public default, a deriver": func(c *server.SubjectConfig) { c.Default = fapi.SubjectTypePublic },
-		"empty prefix":              func(c *server.SubjectConfig) { c.Prefix = testPrefix(t, "") },
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg, deps := validConfig(t), validDependencies()
@@ -357,6 +356,32 @@ func TestProductionRequiresResolverCustody(t *testing.T) {
 			cfg.Subjects = pairwiseSubjects(t)
 			deps.PairwiseSubjects = testHMACDeriver(t, keys.DeclareCustody(keys.KeyCustody{Durable: true}))
 			deps.PairwiseSubjectResolver = tc.resolver
+			checkNewErr(t, newErr(t, cfg, deps), tc.want)
+		})
+	}
+}
+
+// TestNewEmptyPrefixNeedsAWayBack: an empty Prefix is refused with a
+// one-way deriver and no resolver, where nothing could tell a pairwise
+// sub from an internal one, and accepted where subs can be mapped back.
+func TestNewEmptyPrefixNeedsAWayBack(t *testing.T) {
+	tests := map[string]struct {
+		deriver  pairwise.Deriver
+		resolver pairwise.SubjectResolver
+		want     string
+	}{
+		"one-way":           {testHMACDeriver(t), nil, "subjects.prefix must not be empty with a one-way pairwise_subjects"},
+		"one-way, resolver": {testHMACDeriver(t), subResolver{}, ""},
+		"reversible":        {probeDeriver{body: "abc", looksUpTo: "fapigo-pairwise-probe"}, nil, ""},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			cfg, deps := validConfig(t), validDependencies()
+			cfg.Subjects = pairwiseSubjects(t)
+			cfg.Subjects.Prefix = testPrefix(t, "")
+			deps.PairwiseSubjects = tc.deriver
+			deps.PairwiseSubjectResolver = tc.resolver
+			deps.AccessTokens = opaqueAccessTokens()
 			checkNewErr(t, newErr(t, cfg, deps), tc.want)
 		})
 	}

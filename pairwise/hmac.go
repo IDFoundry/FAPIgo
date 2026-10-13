@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
+	"fmt"
 	"io"
 
 	"github.com/idfoundry/fapigo/internal/sealkeys"
@@ -27,8 +28,10 @@ const HMACBodyLength = 43
 // Nothing, the OP included, can map a body back to its user: the
 // returned HMACDeriver doesn't implement Lookup.
 //
-// key must be 32 random bytes, used for nothing else. A key that is a
-// single byte repeated (all zeros, say) is refused as a placeholder. The
+// key must be 32 random bytes from crypto/rand, used for nothing else.
+// A key that is a single byte repeated (all zeros, say) is refused as a
+// placeholder, and one made entirely of printable text as a passphrase
+// or a still-encoded key: decode a hex or base64 key first. The
 // key can't be rotated without giving every user a new sub at every
 // pairwise client, so keep it, and back it up, like a signing key.
 //
@@ -39,6 +42,9 @@ const HMACBodyLength = 43
 // reports none.
 func NewHMAC(key []byte, opts ...keys.CustodyOption) (*HMACDeriver, error) {
 	if err := sealkeys.Check("pairwise: HMAC", [][]byte{key}); err != nil {
+		return nil, err
+	}
+	if err := checkNotText("pairwise: HMAC", key); err != nil {
 		return nil, err
 	}
 	custody, _ := custodyFrom(opts)
@@ -93,4 +99,18 @@ func writeLengthPrefixed(w io.Writer, field string) {
 	binary.BigEndian.PutUint32(length[:], uint32(len(field))) // #nosec G115 -- fields are at most MaxInputLength bytes
 	_, _ = w.Write(length[:])
 	_, _ = w.Write([]byte(field))
+}
+
+// checkNotText refuses a key made entirely of printable ASCII (and
+// whitespace): a passphrase, or a hex or base64 encoding passed without
+// decoding, rather than random bytes. 32 random bytes are all in that
+// range with probability (98/256)^32, about 4e-14, so a real key is
+// never refused.
+func checkNotText(what string, key []byte) error {
+	for _, c := range key {
+		if (c < 0x20 || c > 0x7e) && c != '\t' && c != '\n' && c != '\r' {
+			return nil
+		}
+	}
+	return fmt.Errorf("%s: key is all printable text (a passphrase, or a hex or base64 key not yet decoded), not 32 random bytes: generate it with crypto/rand, and decode an encoded key before passing it", what)
 }

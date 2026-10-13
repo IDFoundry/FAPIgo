@@ -105,7 +105,10 @@ The server's own records, audit events and your login page keep the
 user's internal subject.
 
 The recommended deriver is `pairwise.NewReversible`, over two
-independent 32-byte secret keys from your secret store:
+independent 32-byte keys from your secret store. Generate each with
+`crypto/rand` (`openssl rand 32` will do), and decode a hex or base64
+copy back to its 32 bytes before passing it in: a key that is all
+printable text, a passphrase or a still-encoded key, is refused.
 
 ```go
 pairwiseSubjects, err := pairwise.NewReversible(macKey, encKey,
@@ -113,7 +116,7 @@ pairwiseSubjects, err := pairwise.NewReversible(macKey, encKey,
 if err != nil {
 	log.Fatal(err)
 }
-prefix, err := pairwise.NewPrefix("ppid:") // may be "", but must be set
+prefix, err := pairwise.NewPrefix("ppid:") // must be set; "" only with a reversible deriver
 if err != nil {
 	log.Fatal(err)
 }

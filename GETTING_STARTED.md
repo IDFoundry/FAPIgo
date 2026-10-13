@@ -131,6 +131,25 @@ live: changing the deriver, its key or store, the prefix, or a client's
 sector gives users new `sub`s at those clients, which relying parties
 see as new accounts.
 
+To keep public `sub`s for relying parties already integrated while
+giving every new one pairwise `sub`s, use a pairwise `Default` with
+`SubjectTypesPerClient` (as above), and register each legacy client
+with `SubjectType: fapi.SubjectTypePublic`; a client registered without
+a `SubjectType` gets the pairwise default. If relying parties also
+register automatically through OpenID Federation, offer them pairwise
+alone, so one can't ask for public `sub`s in its metadata:
+
+```go
+cfg.AutomaticRegistration.SubjectTypes = []fapi.SubjectType{fapi.SubjectTypePairwise}
+```
+
+A federation relying party asking for `public` is then refused
+registration, and one naming no `subject_type` gets pairwise.
+Discovery still advertises both types, since your legacy clients get
+public `sub`s; the `openid_provider` metadata in your Entity
+Configuration, which is what federation relying parties read, should
+advertise `Server.AutomaticRegistrationSubjectTypes()` instead.
+
 - **`pairwise.Reversible`**: the server and its resource servers can
   map a `sub` back to the user, so self-contained JWT access tokens
   work, and a client's `id_token_hint`, `login_hint` or `claims` `sub`
@@ -165,6 +184,42 @@ see as new accounts.
   `Dependencies.PairwiseSubjectResolver`, and the same resolver to every
   resource server (`resource.Dependencies.SubjectResolver`): `New` then
   accepts JWT access tokens too.
+
+**Choosing a deriver.** Each deriver trades privacy against
+operational convenience and cost:
+
+| | `NewReversible` (recommended) | `NewMapping` | `NewHMAC` (one-way) |
+|---|---|---|---|
+| Can the OP map a `sub` back to its user? | Yes, with the keys | Yes, through the store | No |
+| If its secret leaks | **Every pairwise `sub` ever issued is de-anonymised at once**, by anyone holding both keys | No key reverses them: an attacker needs the store itself | An attacker can test guesses of internal subjects (cheap if they're predictable, such as account numbers), but can't reverse a `sub` directly |
+| Who must hold the secret | The server and every resource server that resolves `sub`s | Every instance and resource server needs the shared store | The server only |
+| Storage | None | A durable, shared `storage.PairwiseSubjectStore`, one row per user and sector, kept forever | None |
+| Per-request cost at a resource server (JWT access tokens) | Local decryption, or two HSM/KMS calls with `NewReversibleWith` | A store lookup | n/a: opaque access tokens, a token-store lookup |
+| Losing the secret | Every user gets new `sub`s at every pairwise client; back the keys up like signing keys | Losing the store does the same; back it up | Losing the key does the same; back it up |
+| Rotation | Not possible without changing every `sub` | Not needed (no key) | Not possible without changing every `sub` |
+
+Whichever you choose, it's for good: changing deriver later changes
+every pairwise `sub`.
+
+What a one-way deriver gives up is the ability to map a `sub` back to
+its user, which several features rely on:
+
+| Needs a `sub` mapped back to its user | `NewReversible`, `NewMapping` | `NewHMAC` (one-way) |
+|---|---|---|
+| Self-contained (JWT) access tokens, verified by any resource server | Yes | Only with your own `SubjectResolver`; otherwise opaque access tokens, so every resource server reads your token store |
+| `id_token_hint` or a `claims` `sub` value at the authorization endpoint | Enforced; `InteractionRequest.RequiredSubject` is the internal subject, so your login page can check who signs in (never render or prefill it: the client chose it) | Enforced, but `RequiredSubject` is only the `sub`: check a candidate user with `Server.ClientSubject` |
+| CIBA `id_token_hint` | Yes | Refused, unless you declare a `SubjectResolver` (`login_hint` still works) |
+| A `login_hint` carrying a pairwise `sub` | `Server.ResolveClientSubject` | Your own mapping |
+| RP-initiated logout with no session to match (`Server.ResolveIDTokenHint`) | Yes | Fails with `server.ErrNoPairwiseSubjectLookup` |
+| A relying party naming *another* user by their `sub` in your APIs (account linking, consent dashboards) | `Server.ResolveClientSubject` | Your own mapping; a resource server only knows the `sub` of the token's own user |
+| Support, incident and data-subject requests that arrive with a relying party's `sub` | Map it back | Search your own records |
+
+So one-way derivation suits a single authorization server whose own
+resource servers can use opaque access tokens, where pairwise `sub`s
+only ever come back through a live sign-in, and where even the OP
+shouldn't be able to reverse a `sub` offline. Otherwise prefer
+`NewReversible` (no storage, but its keys reverse every `sub`) or
+`NewMapping` (no such key, but a durable shared store).
 
 Under `AssuranceProduction` the deriver must declare durable custody
 (`keys.DeclareCustody` for `NewReversible`, `NewReversibleWith` and

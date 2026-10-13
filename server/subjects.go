@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/pairwise"
@@ -111,6 +112,9 @@ func pairwisePossible(subjects SubjectConfig, deriver pairwise.Deriver) bool {
 func validateSubjects(cfg Config, deps Dependencies) error {
 	subjects := effectiveSubjects(cfg)
 	if err := validateSubjectTypes(subjects); err != nil {
+		return err
+	}
+	if _, _, err := automaticRegistrationSubjects(cfg, deps.PairwiseSubjects); err != nil {
 		return err
 	}
 	if !pairwisePossible(subjects, deps.PairwiseSubjects) {
@@ -245,12 +249,56 @@ func checkProductionPairwiseSubjects(cfg Config, deps Dependencies, scaled bool)
 
 // subjectTypesSupported returns Metadata's subject_types_supported.
 func (s *Server) subjectTypesSupported() []string {
-	types := supportedSubjectTypes(effectiveSubjects(s.cfg), s.deps.PairwiseSubjects)
+	return subjectTypeNames(supportedSubjectTypes(effectiveSubjects(s.cfg), s.deps.PairwiseSubjects))
+}
+
+// subjectTypeNames is types' wire names.
+func subjectTypeNames(types []fapi.SubjectType) []string {
 	out := make([]string, len(types))
 	for i, t := range types {
 		out[i] = t.String()
 	}
 	return out
+}
+
+// AutomaticRegistrationSubjectTypes is the subject_types_supported to
+// advertise to automatically registered Relying Parties, in the
+// openid_provider metadata of this server's Entity Configuration: what
+// they may ask for, Config.AutomaticRegistration.SubjectTypes when set,
+// otherwise everything the server issues (as Metadata advertises).
+func (s *Server) AutomaticRegistrationSubjectTypes() []string {
+	types, _, _ := automaticRegistrationSubjects(s.cfg, s.deps.PairwiseSubjects)
+	return subjectTypeNames(types)
+}
+
+// automaticRegistrationSubjects is the subject types automatically
+// registered clients are offered, and the one an RP naming none gets:
+// Config.AutomaticRegistration.SubjectTypes, which must be a subset of
+// what the server issues, or everything it issues; the default is
+// Config.Subjects.Default when offered, otherwise the subset's only type
+// (a subset of the at most two types a server issues that leaves out the
+// default has exactly one entry).
+func automaticRegistrationSubjects(cfg Config, deriver pairwise.Deriver) ([]fapi.SubjectType, fapi.SubjectType, error) {
+	subjects := effectiveSubjects(cfg)
+	issued := supportedSubjectTypes(subjects, deriver)
+	offered := cfg.AutomaticRegistration.SubjectTypes
+	if len(offered) == 0 {
+		return issued, subjects.Default, nil
+	}
+	for i, t := range offered {
+		switch {
+		case !t.IsValid():
+			return nil, 0, fmt.Errorf("server: config: automatic_registration.subject_types[%d] is not a valid subject type", i)
+		case !slices.Contains(issued, t):
+			return nil, 0, fmt.Errorf("server: config: automatic_registration.subject_types[%d] is %s, which config.subjects doesn't issue", i, t)
+		case slices.Contains(offered[:i], t):
+			return nil, 0, fmt.Errorf("server: config: automatic_registration.subject_types repeats %s", t)
+		}
+	}
+	if slices.Contains(offered, subjects.Default) {
+		return offered, subjects.Default, nil
+	}
+	return offered, offered[0], nil
 }
 
 // supportedSubjectTypes is the subject types a server configured with

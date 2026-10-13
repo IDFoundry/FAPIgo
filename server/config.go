@@ -610,6 +610,27 @@ type AutomaticRegistrationConfig struct {
 	// clients are unaffected.
 	AllowedClientAuthMethods []storage.ClientAuthMethod
 
+	// SubjectTypes, if set, narrows the kinds of sub automatically
+	// registered Relying Parties are offered to a subset of what
+	// Config.Subjects issues, without affecting statically registered
+	// clients. For example, with a pairwise Default,
+	// SubjectTypesPerClient, and legacy clients registered with
+	// fapi.SubjectTypePublic, []fapi.SubjectType{fapi.SubjectTypePairwise}
+	// gives every Relying Party registering through federation pairwise
+	// subs: one whose metadata asks for public is refused registration
+	// (OnResolutionFailure says why), and one asking for none gets
+	// pairwise. An RP naming no subject_type gets Config.Subjects.Default
+	// when it's in SubjectTypes, and otherwise SubjectTypes' only entry.
+	// New refuses an entry Config.Subjects can't issue, a repeated entry,
+	// or an invalid one. Empty (the default) offers everything
+	// Config.Subjects issues.
+	//
+	// Discovery (Server.Metadata) still advertises what the server issues
+	// to any client. An Entity Configuration's openid_provider metadata is
+	// what federation Relying Parties read: set its
+	// subject_types_supported from Server.AutomaticRegistrationSubjectTypes.
+	SubjectTypes []fapi.SubjectType
+
 	// OnResolutionFailure, if set, is told why a would-be
 	// automatically-registered client was refused — the client itself
 	// only sees invalid_client. See

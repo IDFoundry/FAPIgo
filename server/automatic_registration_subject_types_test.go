@@ -51,11 +51,24 @@ func narrowedAutomaticRegistrationServer(t *testing.T, f *automaticRegistrationF
 }
 
 // TestAutomaticRegistrationSubjectTypesNarrowFederationRPs: with
-// AutomaticRegistration.SubjectTypes set to pairwise alone, a Relying
-// Party registering through federation gets pairwise subs whether it
-// asks for them or names none, and one asking for public is refused,
-// while a statically registered legacy client keeps its public subs.
+// AutomaticRegistration.SubjectTypes set to pairwise alone, or left
+// unset under a pairwise default, a Relying Party registering through
+// federation gets pairwise subs whether it asks for them or names none,
+// and one asking for public is refused, while a statically registered
+// legacy client keeps its public subs.
 func TestAutomaticRegistrationSubjectTypesNarrowFederationRPs(t *testing.T) {
+	for name, offered := range map[string][]fapi.SubjectType{
+		"pairwise offered": {fapi.SubjectTypePairwise},
+		"unset":            nil,
+	} {
+		t.Run(name, func(t *testing.T) { checkFederationRPsGetPairwiseOnly(t, offered) })
+	}
+}
+
+// checkFederationRPsGetPairwiseOnly is
+// TestAutomaticRegistrationSubjectTypesNarrowFederationRPs for one
+// AutomaticRegistration.SubjectTypes.
+func checkFederationRPsGetPairwiseOnly(t *testing.T, offered []fapi.SubjectType) {
 	const user = "user-1"
 	authenticated := mustAuthenticated(t, user)
 	for name, tc := range map[string]struct {
@@ -72,7 +85,7 @@ func TestAutomaticRegistrationSubjectTypesNarrowFederationRPs(t *testing.T) {
 				extra = append(extra, map[string]any{"subject_type": tc.subjectType})
 			}
 			f := setupAutomaticRegistrationFixture(t, "", extra...)
-			srv, failure := narrowedAutomaticRegistrationServer(t, f, []fapi.SubjectType{fapi.SubjectTypePairwise})
+			srv, failure := narrowedAutomaticRegistrationServer(t, f, offered)
 
 			sub, err := srv.ClientSubject(context.Background(), fapi.ClientID(f.rpID), authenticated)
 			if tc.wantRefusal != "" {
@@ -100,7 +113,10 @@ func TestAutomaticRegistrationSubjectTypesAdvertised(t *testing.T) {
 		wantFederation []string
 	}{
 		"narrowed": {[]fapi.SubjectType{fapi.SubjectTypePairwise}, []string{"public", "pairwise"}, []string{"pairwise"}},
-		"unset":    {nil, []string{"public", "pairwise"}, []string{"public", "pairwise"}},
+		// A pairwise default isn't something a federation RP can opt
+		// out of unless public is listed.
+		"unset":   {nil, []string{"public", "pairwise"}, []string{"pairwise"}},
+		"widened": {[]fapi.SubjectType{fapi.SubjectTypePublic, fapi.SubjectTypePairwise}, []string{"public", "pairwise"}, []string{"public", "pairwise"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			srv, _ := narrowedAutomaticRegistrationServer(t, f, tc.offered)

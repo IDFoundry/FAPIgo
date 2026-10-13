@@ -137,16 +137,16 @@ To keep public `sub`s for relying parties already integrated while
 giving every new one pairwise `sub`s, use a pairwise `Default` with
 `SubjectTypesPerClient` (as above), and register each legacy client
 with `SubjectType: fapi.SubjectTypePublic`; a client registered without
-a `SubjectType` gets the pairwise default. If relying parties also
-register automatically through OpenID Federation, offer them pairwise
-alone, so one can't ask for public `sub`s in its metadata:
+a `SubjectType` gets the pairwise default. Relying parties registering
+automatically through OpenID Federation are offered pairwise alone
+under a pairwise default, so one can't opt out by asking for `public`
+in its metadata: it is refused registration, and one naming no
+`subject_type` gets pairwise. To let them choose public too, say so:
 
 ```go
-cfg.AutomaticRegistration.SubjectTypes = []fapi.SubjectType{fapi.SubjectTypePairwise}
+cfg.AutomaticRegistration.SubjectTypes = []fapi.SubjectType{fapi.SubjectTypePublic, fapi.SubjectTypePairwise}
 ```
 
-A federation relying party asking for `public` is then refused
-registration, and one naming no `subject_type` gets pairwise.
 Discovery still advertises both types, since your legacy clients get
 public `sub`s; the `openid_provider` metadata in your Entity
 Configuration, which is what federation relying parties read, should

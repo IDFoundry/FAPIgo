@@ -122,11 +122,13 @@ pairwise subjects. `server.New` sets the new
 `federation.AutomaticRegistrationConfig.SubjectTypes` and
 `DefaultSubjectType` from `Config.Subjects`; code building an
 `AutomaticClientRepository` directly can leave them zero, which means
-public only. To offer federation Relying Parties fewer subject types
-than statically registered clients (pairwise only, while legacy clients
-keep public subs, say), set `Config.AutomaticRegistration.SubjectTypes`,
-and advertise `Server.AutomaticRegistrationSubjectTypes()` in your
-Entity Configuration's `openid_provider` metadata.
+public only. Under a pairwise `Config.Subjects.Default`, federation
+Relying Parties are offered pairwise subjects only, so one can't opt
+out of the default by asking for public; list both in
+`Config.AutomaticRegistration.SubjectTypes` to offer public too. That
+setting also narrows what they're offered in other configurations.
+Advertise `Server.AutomaticRegistrationSubjectTypes()` in your Entity
+Configuration's `openid_provider` metadata.
 
 ## v0.54.0
 

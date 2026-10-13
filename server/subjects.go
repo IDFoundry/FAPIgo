@@ -295,6 +295,13 @@ func automaticRegistrationSubjects(cfg Config, deriver pairwise.Deriver) ([]fapi
 	issued := supportedSubjectTypes(subjects, deriver)
 	offered := cfg.AutomaticRegistration.SubjectTypes
 	if len(offered) == 0 {
+		// A pairwise default is the deployment's privacy choice: a
+		// Relying Party registering itself through federation doesn't get
+		// to opt out of it. Public subs for federation are offered only
+		// when SubjectTypes names them.
+		if subjects.Default == fapi.SubjectTypePairwise {
+			return []fapi.SubjectType{fapi.SubjectTypePairwise}, fapi.SubjectTypePairwise, nil
+		}
 		return issued, subjects.Default, nil
 	}
 	for i, t := range offered {

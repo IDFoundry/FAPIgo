@@ -622,7 +622,10 @@ type AutomaticRegistrationConfig struct {
 	// pairwise. An RP naming no subject_type gets Config.Subjects.Default
 	// when it's in SubjectTypes, and otherwise SubjectTypes' only entry.
 	// New refuses an entry Config.Subjects can't issue, a repeated entry,
-	// or an invalid one. Empty (the default) offers everything
+	// or an invalid one. Empty (the default) offers pairwise only when
+	// Config.Subjects.Default is pairwise, so a Relying Party registering
+	// itself can't opt out of the deployment's pairwise default (list
+	// fapi.SubjectTypePublic here to offer it), and otherwise everything
 	// Config.Subjects issues.
 	//
 	// Discovery (Server.Metadata) still advertises what the server issues

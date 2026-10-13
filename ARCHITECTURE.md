@@ -830,9 +830,10 @@ passing its suite is not evidence the other role conforms, even where
 both share internal JOSE code — protocol behaviour and negative-test
 expectations differ per role.
 
-**Current results.** `conformance/scripts/run-all.sh` runs 23 test
+**Current results.** `conformance/scripts/run-all.sh` runs 24 test
 configurations, and the daily `conformance.yml` run executes all of
-them. As of the 2026-10-05 run (v0.50.0), all 14 AS configurations (baseline,
+them. The 24th, AS pairwise (added for v0.55.0), runs the baseline plan
+against an AS that gives every client pairwise subject identifiers. As of the 2026-10-05 run (v0.50.0), all 14 AS configurations (baseline,
 message-signing, mtls, message-signing-mtls, client-auth-mtls,
 client-auth-mtls-and-mtls, four CIBA poll/ping variants, and four
 client-credentials variants) pass with 0 failures and 0 warnings; all 6

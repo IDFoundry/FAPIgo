@@ -1,0 +1,88 @@
+{
+  "clients": [
+    {
+      "allowed_scopes": [
+        "openid",
+        "accounts",
+        "offline_access"
+      ],
+      "client_assertion_algorithm": "ES256",
+      "id": "gofapi-conformance-pairwise-client-1",
+      "jwks": {
+        "keys": [
+          {
+            "kty": "EC",
+            "alg": "ES256",
+            "use": "sig",
+            "kid": "gofapi-conformance-pairwise-client1-key1",
+            "crv": "P-256",
+            "x": "09GTr9WSKqHZVUEIgDRyrySpwrL6bCi01lRteff8seA",
+            "y": "qxVgIqLu7X46lBBiDNi0556mTh4qK_DvDqEGGCNX_zo"
+          }
+        ]
+      },
+      "redirect_uris": [
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-pairwise/callback",
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-pairwise/callback?dummy1=lorem&dummy2=ipsum"
+      ],
+      "request_object_algorithm": "ES256"
+    },
+    {
+      "allowed_scopes": [
+        "openid",
+        "accounts",
+        "offline_access"
+      ],
+      "client_assertion_algorithm": "ES256",
+      "id": "gofapi-conformance-pairwise-client-2",
+      "jwks": {
+        "keys": [
+          {
+            "kty": "EC",
+            "alg": "ES256",
+            "use": "sig",
+            "kid": "gofapi-conformance-pairwise-client2-key1",
+            "crv": "P-256",
+            "x": "9Hc5-GuriqKSn08LShvLvd5PcnQRfE-iB_xe1cpkJsA",
+            "y": "v2t38GJRQXIbc-nkL3hmrG7aJMPc5b7YShM5YTjr52I"
+          }
+        ]
+      },
+      "redirect_uris": [
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-pairwise/callback",
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-pairwise/callback?dummy1=lorem&dummy2=ipsum"
+      ],
+      "request_object_algorithm": "ES256"
+    },
+    {
+      "allowed_scopes": [
+        "openid",
+        "accounts",
+        "offline_access"
+      ],
+      "client_assertion_algorithm": "PS256",
+      "id": "gofapi-conformance-pairwise-client1-rs256-client",
+      "jwks": {
+        "keys": [
+          {
+            "kty": "RSA",
+            "alg": "PS256",
+            "use": "sig",
+            "kid": "gofapi-conformance-pairwise-client1-rs256-key1",
+            "n": "tvDr_WlP9YXIYUZD-unZe5rLwo_Hbsi12abRTiKAdn7msnRu7EgY64Bbb0cH4-G4ufZ48y_GQ6-LPgjavUPQ8SSk1HPWajjyORe9Didi0i5z8-bpW-hbgRU1-z73q005WdBDdoKLUqnPFqa2VeKL2uytD4SevFbgmKGgSGmGqZIfTiHKq6pR3WLTsDEfd0R-TkZKaIEQQpcwQZ7PZlGFfWiOmZMSVpfBcYE-S5e69w2U_ykzM9F9SkL6Ey3gTsCzeCI0wqTwMVtpNq-z2QI60ZwfGY_dgYA0RvaSDjlP3YAGKoGYC7cV8vSQBdf-Rwmc72oXeG3MWuwkbNT_v5tU2Q",
+            "e": "AQAB"
+          }
+        ]
+      },
+      "redirect_uris": [
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-pairwise/callback",
+        "https://localhost.emobix.co.uk:8443/test/a/gofapi-pairwise/callback?dummy1=lorem&dummy2=ipsum"
+      ],
+      "request_object_algorithm": "PS256"
+    }
+  ],
+  "default_subject": "conformance-test-user",
+  "issuer": "https://conformance-as-pairwise:8443",
+  "listen_addr": "0.0.0.0:8443",
+  "profile": "fapi2-security"
+}

@@ -1,9 +1,10 @@
 name: FAPI Conformance
 
-# Runs all twenty-three FAPI2/FAPI-CIBA/OpenID-Federation test
+# Runs all twenty-four FAPI2/FAPI-CIBA/OpenID-Federation test
 # configurations this repo has driver support for — one underlying OIDF
-# conformance suite, exercised under twenty-three different plan/variant
-# combinations: including the CIBA/mTLS pair (AS ciba-mtls, RP
+# conformance suite, exercised under twenty-four different plan/variant
+# combinations: including AS pairwise (the baseline plan with pairwise
+# subject identifiers), the CIBA/mTLS pair (AS ciba-mtls, RP
 # ciba-mtls), AS ciba-ping, the client-auth-mtls pair (AS/RP), the
 # client-auth-mtls-and-mtls pair (AS/RP), the two ciba-*-client-auth-mtls
 # legs, the four *-client-credentials legs, each of which needs its own
@@ -95,14 +96,14 @@ jobs:
         run: ./conformance/server/scripts/generate-server-cert.sh
 
       # run-all.sh itself waits for the suite to become reachable, waits
-      # for the AS containers to come up, runs all twenty-three test
+      # for the AS containers to come up, runs all twenty-four test
       # configurations (including bringing up its own federation
       # containers and syncing their ephemeral keys — no separate step
       # needed here for that), retries the one known suite-internal
       # flake automatically, and writes report.md — nothing CI-specific
       # needed here beyond pointing it at the suite checkout and a
       # predictable results directory.
-      - name: Run all twenty-three conformance test configurations
+      - name: Run all twenty-four conformance test configurations
         env:
           CONFORMANCE_SUITE_CHECKOUT: /tmp/conformance-suite
           WORKDIR: ${{ runner.temp }}/conformance-results

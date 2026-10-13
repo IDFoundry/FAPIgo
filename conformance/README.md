@@ -47,11 +47,12 @@ behaviour and negative-test expectations differ. See
   run scripts.
 - `server/` — OpenID Foundation FAPI 2.0 AS conformance configuration and
   run scripts.
-- `scripts/run-all.sh` — runs all twenty-three test configurations this repo
-  has driver support for (AS baseline, AS message-signing, AS ciba-mtls, AS
-  ciba-ping, AS mtls, AS message-signing-mtls, AS client-auth-mtls, AS
-  client-auth-mtls-and-mtls, AS ciba-client-auth-mtls, AS
-  ciba-ping-client-auth-mtls, AS baseline/mtls/client-auth-mtls/
+- `scripts/run-all.sh` — runs all twenty-four test configurations this repo
+  has driver support for (AS baseline, AS pairwise, AS message-signing, AS
+  ciba-mtls, AS ciba-ping, AS mtls, AS message-signing-mtls, AS
+  client-auth-mtls, AS client-auth-mtls-and-mtls, AS
+  ciba-client-auth-mtls, AS ciba-ping-client-auth-mtls, AS
+  baseline/mtls/client-auth-mtls/
   client-auth-mtls-and-mtls-client-credentials, RP baseline, RP
   message-signing, RP ciba-mtls, RP client-auth-mtls, RP mtls, RP
   client-auth-mtls-and-mtls, RP federation-rp, Federation

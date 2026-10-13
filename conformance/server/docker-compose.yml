@@ -209,6 +209,28 @@ services:
       - -mtls
       - -client-credentials-grant
 
+  # baseline's plan again, against an AS that gives every client pairwise
+  # subject identifiers (-pairwise-subjects: pairwise.NewReversible, JWT
+  # access tokens) — the ID token, UserInfo and refresh all carry the
+  # client's pairwise sub. See oidf-config/README.md's pairwise section.
+  conformance-as-pairwise:
+    build:
+      context: ../..
+      dockerfile: conformance/server/Dockerfile
+    hostname: conformance-as-pairwise
+    networks: [suite]
+    ports:
+      - "18458:8443" # see conformance-as-baseline's port comment above
+    volumes:
+      - ./oidf-config/pairwise.config.json:/config.json:ro
+      - ./certs:/certs:ro
+    command:
+      - -config=/config.json
+      - -cert=/certs/server.crt
+      - -key=/certs/server.key
+      - -access-token-format=${ACCESS_TOKEN_FORMAT:-jwt}
+      - -pairwise-subjects
+
   # OpenID Federation 1.0 self-issuance/automatic-registration wiring —
   # see cmd/conformance-as/federation.go and oidf-config/federation.config.json.
   # authority_hints in that config points at conformance-federation-trust-anchor

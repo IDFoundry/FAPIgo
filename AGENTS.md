@@ -89,6 +89,11 @@ mirroring the OIDF certification matrix's own column names:
 - `{auth}` is `pkjwt` (`private_key_jwt`) or `mtls`
   (`self_signed_tls_client_auth`); `{sender-constrain}` is `dpop` or
   `mtls`.
+- A run against an AS issuing pairwise subject identifiers, which isn't
+  a column of the certification matrix, appends `-pairwise` to the
+  alias of the matrix cell it repeats, e.g. `fapigo-sp-pkjwt-dpop-pairwise`.
+  (The local runs' `gofapi-*` aliases follow the same idea:
+  `gofapi-pairwise` repeats `gofapi-baseline`.)
 
 Keeping new profiles consistent with this pattern matters more than
 any individual name choice — someone reading a list of registered

@@ -2,12 +2,12 @@
 // the AS-side conformance suites (conformance/scripts/run-all.sh's "AS
 // baseline", "AS message-signing", "AS ciba-mtls", "AS ciba-ping", "AS
 // mtls", "AS message-signing-mtls", "AS client-auth-mtls", "AS
-// client-auth-mtls-and-mtls", "AS ciba-client-auth-mtls", and "AS
-// ciba-ping-client-auth-mtls" legs) that isn't already committed to
+// client-auth-mtls-and-mtls", "AS ciba-client-auth-mtls", "AS
+// ciba-ping-client-auth-mtls" and "AS pairwise" legs) that isn't already committed to
 // this repo.
 //
 // Two files per profile can't be committed at all:
-// conformance/server/oidf-config/{baseline,message-signing,ciba,ciba-mtls,ciba-ping,mtls,message-signing-mtls,client-auth-mtls,client-auth-mtls-and-mtls,ciba-client-auth-mtls,ciba-ping-client-auth-mtls}-plan.json
+// conformance/server/oidf-config/{baseline,message-signing,ciba,ciba-mtls,ciba-ping,mtls,message-signing-mtls,client-auth-mtls,client-auth-mtls-and-mtls,ciba-client-auth-mtls,ciba-ping-client-auth-mtls,pairwise}-plan.json
 // (the OIDF conformance suite's own plan config) are gitignored because
 // they carry the test client's *private* JWKS keys or mTLS certificate
 // keys — see this repo's conformance/server/oidf-config/README.md and
@@ -112,6 +112,9 @@ var profiles = []profile{
 	{name: "message-signing", alias: "gofapi-msgsign", issuerHost: "conformance-as-message-signing", keyLabel1: "msgsign-client1", keyLabel2: "msgsign-client2"},
 	{name: "mtls", alias: "gofapi-mtls", issuerHost: "conformance-as-mtls", keyLabel1: "mtls-client1", keyLabel2: "mtls-client2", senderConstrainMTLS: true},
 	{name: "message-signing-mtls", alias: "gofapi-msgsign-mtls", issuerHost: "conformance-as-message-signing-mtls", keyLabel1: "msgsign-mtls-client1", keyLabel2: "msgsign-mtls-client2", senderConstrainMTLS: true},
+	// pairwise is baseline's plan against an AS run with
+	// -pairwise-subjects, so every flow gets pairwise subs.
+	{name: "pairwise", alias: "gofapi-pairwise", issuerHost: "conformance-as-pairwise", keyLabel1: "pairwise-client1", keyLabel2: "pairwise-client2"},
 }
 
 // conformanceKeyLabelPrefix prefixes every kid/key-label this tool
@@ -206,7 +209,7 @@ For each profile, under conformance/server/oidf-config/, it writes:
 
 Expect it to modify these committed files: baseline, ciba, ciba-mtls,
 client-auth-mtls, client-auth-mtls-and-mtls, message-signing,
-message-signing-mtls and mtls .config.json.
+message-signing-mtls, mtls and pairwise .config.json.
 
 It doesn't touch TLS certificates (conformance/server/certs/); run
 conformance/server/scripts/generate-server-cert.sh for those.

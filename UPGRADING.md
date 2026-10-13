@@ -58,6 +58,14 @@ CIBA client sets `Sector` itself.
 **Affects:** only a deployment that gives some client pairwise
 subjects. Nothing changes for one that keeps `PublicSubjects()`.
 
+> **Check every resource server before giving any client pairwise
+> subjects.** For a pairwise client,
+> `resource.AuthorizationContext.Subject` is now the user's *internal*
+> subject, the very identifier the client's pairwise `sub` hides. Code
+> that sends `Subject` back to the client (a `/me` endpoint, a response
+> body, a UserInfo `sub`, a log the client can read) leaks it. Send
+> `ClientSubject` instead, and authorize by `Subject`.
+
 - **Resource servers:** `resource.AuthorizationContext.Subject` stays
   the user's internal subject; the new `ClientSubject` is the `sub` the
   client was given. Compare user IDs a client sends (in a path, a body,

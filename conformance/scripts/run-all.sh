@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Runs all twenty-three FAPI2/FAPI-CIBA/OpenID-Federation test
+# Runs all twenty-four FAPI2/FAPI-CIBA/OpenID-Federation test
 # configurations this repo has driver support for — one underlying OIDF
-# conformance suite, exercised under twenty-three different plan/variant
-# combinations: AS baseline, AS message-signing, AS ciba-mtls, AS
-# ciba-ping, AS mtls, AS message-signing-mtls, AS client-auth-mtls, AS
-# client-auth-mtls-and-mtls, AS ciba-client-auth-mtls, AS
-# ciba-ping-client-auth-mtls, AS baseline-client-credentials, AS
+# conformance suite, exercised under twenty-four different plan/variant
+# combinations: AS baseline, AS pairwise, AS message-signing, AS
+# ciba-mtls, AS ciba-ping, AS mtls, AS message-signing-mtls, AS
+# client-auth-mtls, AS client-auth-mtls-and-mtls, AS
+# ciba-client-auth-mtls, AS ciba-ping-client-auth-mtls, AS
+# baseline-client-credentials, AS
 # mtls-client-credentials, AS client-auth-mtls-client-credentials, AS
 # client-auth-mtls-and-mtls-client-credentials, RP baseline, RP
 # message-signing, RP ciba-mtls, RP client-auth-mtls, RP mtls, RP
@@ -153,7 +154,7 @@
 #     (https://localhost.emobix.co.uk:8443 by default).
 #   - CONFORMANCE_SUITE_CHECKOUT set to that suite's own git checkout
 #     (this script runs its scripts/run-test-plan.py from there).
-#   - conformance/server/oidf-config/{baseline,message-signing,ciba-mtls,client-auth-mtls}-plan.json
+#   - conformance/server/oidf-config/{baseline,pairwise,message-signing,ciba-mtls,client-auth-mtls}-plan.json
 #     already filled in (gitignored — carries private keys; run
 #     `go run ./conformance/server/scripts/setup-config` to generate
 #     all four, or see that directory's README to do it by hand).
@@ -282,7 +283,7 @@ wait_as_ready() {
 	# the time anyone's looking at a failed CI run the containers are
 	# long gone (torn down by the workflow's own cleanup step).
 	(cd "$SERVER_DIR" && docker compose ps) >&2 || true
-	(cd "$SERVER_DIR" && docker compose logs --tail=100 conformance-as-baseline conformance-as-message-signing conformance-as-ciba-mtls conformance-as-mtls conformance-as-message-signing-mtls conformance-as-client-auth-mtls) >&2 || true
+	(cd "$SERVER_DIR" && docker compose logs --tail=100 conformance-as-baseline conformance-as-pairwise conformance-as-message-signing conformance-as-ciba-mtls conformance-as-mtls conformance-as-message-signing-mtls conformance-as-client-auth-mtls) >&2 || true
 	exit 1
 }
 
@@ -641,7 +642,7 @@ log "bringing up conformance-as containers"
 # build` layer even when the source changed. Not the default here
 # since it'd make every routine run take minutes even when nothing
 # changed.
-(cd "$SERVER_DIR" && docker compose up -d --build conformance-as-baseline conformance-as-message-signing conformance-as-ciba-mtls conformance-as-mtls conformance-as-message-signing-mtls conformance-as-client-auth-mtls conformance-as-client-auth-mtls-and-mtls) >"$WORKDIR/docker-compose.log" 2>&1
+(cd "$SERVER_DIR" && docker compose up -d --build conformance-as-baseline conformance-as-pairwise conformance-as-message-signing conformance-as-ciba-mtls conformance-as-mtls conformance-as-message-signing-mtls conformance-as-client-auth-mtls conformance-as-client-auth-mtls-and-mtls) >"$WORKDIR/docker-compose.log" 2>&1
 wait_as_ready 18443
 wait_as_ready 18444
 wait_as_ready 18446
@@ -654,12 +655,26 @@ wait_as_ready 18448
 wait_as_ready 18449
 wait_as_ready 18454
 wait_as_ready 18455
+wait_as_ready 18458
 
 run_as_plan "baseline" \
 	'fapi2-security-profile-final-test-plan[client_auth_type=private_key_jwt][sender_constrain=dpop][fapi_profile=plain_fapi][openid=openid_connect]' \
 	"$SERVER_DIR/oidf-config/baseline-plan.json" \
 	"$SERVER_DIR/expected-warnings-baseline.json" \
 	"$SERVER_DIR/expected-skips-baseline.json"
+
+# AS pairwise: the same plan and variant as AS baseline, against
+# conformance-as-pairwise (cmd/conformance-as -pairwise-subjects), which
+# gives every client a pairwise subject identifier (OpenID Connect Core
+# §8) derived by pairwise.NewReversible — so every ID token, UserInfo
+# response and refreshed ID token the suite checks carries the client's
+# pairwise sub, with JWT access tokens mapped back to the end user at
+# the resource side.
+run_as_plan "pairwise" \
+	'fapi2-security-profile-final-test-plan[client_auth_type=private_key_jwt][sender_constrain=dpop][fapi_profile=plain_fapi][openid=openid_connect]' \
+	"$SERVER_DIR/oidf-config/pairwise-plan.json" \
+	"$SERVER_DIR/expected-warnings-pairwise.json" \
+	"$SERVER_DIR/expected-skips-pairwise.json"
 
 run_as_plan "message-signing" \
 	'fapi2-message-signing-final-test-plan[client_auth_type=private_key_jwt][sender_constrain=dpop][fapi_profile=plain_fapi][openid=openid_connect][fapi_request_method=signed_non_repudiation][fapi_response_mode=jarm]' \

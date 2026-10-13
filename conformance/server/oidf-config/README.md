@@ -448,6 +448,35 @@ only — message-signing has none yet): `cmd/conformance-client
 -profile=baseline -mtls` — see `../client/scripts/README.md`'s own
 "Sender-constrain mTLS" section.
 
+## Pairwise subject identifiers (`pairwise.config.json`)
+
+AS pairwise runs exactly the AS baseline plan and variant
+(`private_key_jwt`, DPoP, plain FAPI, OpenID Connect), with alias
+`gofapi-pairwise`, against `conformance-as-pairwise`: `cmd/conformance-as`
+started with `-pairwise-subjects`. That flag sets `Config.Subjects` to
+pairwise for every client (`pairwise.Reversible`, prefix `ppid:`) and
+derives subs with `pairwise.NewReversible`, under two keys generated at
+startup and kept only in memory. So:
+
+- every ID token's `sub` is the client's pairwise sub, never the
+  internal `default_subject`;
+- `/userinfo` (`serverresource`) maps the JWT access token's pairwise
+  sub back to the end user for the identity claims and returns the same
+  pairwise `sub` the ID token carried, which the suite checks;
+- a refreshed ID token keeps the original `sub`, since the grant stores
+  it.
+
+The suite's clients all redirect to `localhost.emobix.co.uk`, so they
+share one sector and see the same sub for the same user; the plan
+doesn't exercise cross-sector behaviour, which the unit tests cover.
+Subs are stable for the life of the container: restarting it generates
+new keys, so a re-run gets new subs, which the suite never compares
+across runs.
+
+`setup-config` generates `pairwise-plan.json` and patches
+`pairwise.config.json` like baseline's. The expected warnings and skips
+start empty, as baseline's are.
+
 ## CIBA
 
 Two separate configs, two separate outcomes: `ciba.config.json` (DPoP)

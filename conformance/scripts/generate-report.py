@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Builds report.md from a completed conformance/scripts/run-all.sh run.
 
-run-all.sh calls this once, after all twenty test configurations have
+run-all.sh calls this once, after all its test configurations have
 finished and results.txt/the per-configuration log files already exist
 — it doesn't run any part of the suite itself, only reads what's
 already on disk:

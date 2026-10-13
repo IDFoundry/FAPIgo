@@ -15,6 +15,7 @@ import (
 	"github.com/idfoundry/fapigo/federation"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/keys/ephemeral"
+	"github.com/idfoundry/fapigo/pairwise"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/serverresource"
 	"github.com/idfoundry/fapigo/storage/memstore"
@@ -223,8 +224,12 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 	if err != nil {
 		return nil, err
 	}
+	subjects, pairwiseDeriver, err := pairwiseSubjects(resolved.PairwiseSubjects)
+	if err != nil {
+		return nil, err
+	}
 	srvCfg := server.Config{
-		Subjects:      server.PublicSubjects(),
+		Subjects:      subjects,
 		Issuer:        resolved.Issuer,
 		Endpoints:     endpoints,
 		MTLSEndpoints: resolved.MTLSEndpoints,
@@ -375,6 +380,8 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 		// separate fetcher from ephemeral.NewClientKeySource's own —
 		// see federationFetcher's own doc comment above for why.
 		FederationHTTP: federationFetcher,
+		// nil unless -pairwise-subjects; see pairwiseSubjects.
+		PairwiseSubjects: pairwiseDeriver,
 	}
 	if dynClients != nil {
 		srvDeps.Clients = dynClients
@@ -428,4 +435,48 @@ func newServerMux(resolved ResolvedConfig, allowLoopbackHTTP bool, dpopNonceChal
 	userinfoURLValue := userinfoURL.URL()
 	accountsURLValue := accountsURL.URL()
 	return newRouter(srv, consent, backchannel, resolved.AdvertisedScopes, resourceVerifier, &userinfoURLValue, mtlsUserinfoURL, &accountsURLValue, identityClaims, clientRepo, userinfoSigning, cibaApprovalUIToken, resolved.Federation != nil, dynClients, federationTrustAnchorAdminToken), nil
+}
+
+// pairwisePrefix is put in front of every pairwise sub this binary
+// issues under -pairwise-subjects, so a pairwise sub is recognisable in
+// the suite's logs.
+const pairwisePrefix = "ppid:"
+
+// pairwiseSubjects returns the server.SubjectConfig and
+// Dependencies.PairwiseSubjects for -pairwise-subjects: public subjects
+// when it's off; otherwise pairwise ones for every client, derived by
+// pairwise.NewReversible (the deriver the docs recommend), so JWT access
+// tokens keep working and the resource side (serverresource) maps a sub
+// back to its user. Every client's sector is the one host its redirect
+// URIs share, so the suite's clients all share one sector.
+//
+// The keys are generated at startup and kept only in memory: a sub is
+// stable for as long as this process runs, which is all one conformance
+// leg needs, and a restart gives every user new subs, which is fine for
+// a throwaway test server and never for a real deployment.
+func pairwiseSubjects(enabled bool) (server.SubjectConfig, pairwise.Deriver, error) {
+	if !enabled {
+		return server.PublicSubjects(), nil, nil
+	}
+	var macKey, encKey [32]byte
+	if _, err := rand.Read(macKey[:]); err != nil {
+		return server.SubjectConfig{}, nil, fmt.Errorf("pairwise subjects: %w", err)
+	}
+	if _, err := rand.Read(encKey[:]); err != nil {
+		return server.SubjectConfig{}, nil, fmt.Errorf("pairwise subjects: %w", err)
+	}
+	deriver, err := pairwise.NewReversible(macKey[:], encKey[:])
+	if err != nil {
+		return server.SubjectConfig{}, nil, fmt.Errorf("pairwise subjects: %w", err)
+	}
+	prefix, err := pairwise.NewPrefix(pairwisePrefix)
+	if err != nil {
+		return server.SubjectConfig{}, nil, fmt.Errorf("pairwise subjects: %w", err)
+	}
+	return server.SubjectConfig{
+		Default:     fapi.SubjectTypePairwise,
+		Enforcement: server.SubjectTypesPerClient,
+		Derivation:  pairwise.Reversible,
+		Prefix:      prefix,
+	}, deriver, nil
 }

@@ -213,6 +213,13 @@ type ResolvedConfig struct {
 	// Resolve returns, once it knows whether -mtls was passed.
 	MTLSEndpoints server.MTLSEndpoints
 
+	// PairwiseSubjects is not populated by Resolve either: main.go sets
+	// it from -pairwise-subjects. When true, every client gets pairwise
+	// subject identifiers (OpenID Connect Core §8), derived by
+	// pairwise.NewReversible under keys generated at startup — see
+	// pairwiseSubjects in wiring.go.
+	PairwiseSubjects bool
+
 	// Clients and ClientKeys are two parallel slices, joined by
 	// ClientID: Clients feeds memstore.NewClientRepository (is this
 	// client registered at all), ClientKeys feeds

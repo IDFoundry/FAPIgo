@@ -108,16 +108,18 @@ func (s *Server) clientSubjectFor(ctx context.Context, client storage.Registered
 
 // errNoSubjectLookup reports that the server can't map a client's
 // pairwise sub back to its end user: Config.Subjects' Derivation is
-// pairwise.OneWay.
-var errNoSubjectLookup = errors.New("pairwise subjects are derived one way (pairwise.OneWay), so a pairwise sub can't be mapped back to its end user")
+// pairwise.OneWay, and no Dependencies.PairwiseSubjectResolver is set.
+var errNoSubjectLookup = errors.New("pairwise subjects are derived one way (pairwise.OneWay) and no pairwise_subject_resolver is set, so a pairwise sub can't be mapped back to its end user")
 
 // internalSubjectFor maps sub, as the client client sees it, back to the
-// end user's internal subject: sub itself for a public client; through
-// Dependencies.PairwiseSubjects' pairwise.Lookup for a pairwise client
-// under pairwise.Reversible. It returns errNoSubjectLookup, unwrapped,
-// when the server can't map pairwise subs back (pairwise.OneWay), and
-// otherwise an invalid_request *Error for a sub that names no end user
-// of this server at this client.
+// end user's internal subject: sub itself for a public client; for a
+// pairwise client, through Dependencies.PairwiseSubjects' pairwise.Lookup
+// under pairwise.Reversible, or through Dependencies.PairwiseSubjectResolver
+// under pairwise.OneWay. It returns errNoSubjectLookup, unwrapped, when
+// the server can't map pairwise subs back, and otherwise an
+// invalid_request *Error for a sub that names no end user of this server
+// at this client, or a server_error *Error when the mapping couldn't be
+// read.
 func (s *Server) internalSubjectFor(ctx context.Context, client storage.RegisteredClient, sub string) (string, error) {
 	subjectType, typeErr := s.subjectTypeFor(client)
 	if typeErr != nil {
@@ -127,8 +129,10 @@ func (s *Server) internalSubjectFor(ctx context.Context, client storage.Register
 		return sub, nil
 	}
 	subjects := effectiveSubjects(s.cfg)
-	lookup, ok := s.deps.PairwiseSubjects.(pairwise.Lookup)
-	if subjects.Derivation != pairwise.Reversible || !ok {
+	lookup, canLookUp := s.deps.PairwiseSubjects.(pairwise.Lookup)
+	canLookUp = canLookUp && subjects.Derivation == pairwise.Reversible
+	resolver := s.deps.PairwiseSubjectResolver
+	if !canLookUp && resolver == nil {
 		return "", errNoSubjectLookup
 	}
 	body, hasPrefix := strings.CutPrefix(sub, subjects.Prefix.String())
@@ -137,7 +141,13 @@ func (s *Server) internalSubjectFor(ctx context.Context, client storage.Register
 	}
 	ctx, cancel := context.WithTimeout(ctx, keyCheckTimeout)
 	defer cancel()
-	internal, err := lookup.LookupInternalSubject(ctx, s.cfg.Issuer.String(), client.Sector(), body)
+	var internal string
+	var err error
+	if canLookUp {
+		internal, err = lookup.LookupInternalSubject(ctx, s.cfg.Issuer.String(), client.Sector(), body)
+	} else {
+		internal, err = resolver.ResolveSubject(ctx, s.cfg.Issuer.String(), client.Sector(), sub)
+	}
 	switch {
 	case errors.Is(err, pairwise.ErrSubjectNotFound):
 		return "", newError(ErrorInvalidRequest, 400, "the sub isn't a pairwise subject this server issued to the client", err)

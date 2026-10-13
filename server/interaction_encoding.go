@@ -52,8 +52,10 @@ type encodedInteractionRequest struct {
 // ParseInteractionRequest (or UnmarshalText).
 //
 // The encoding is opaque and versioned. It can carry personal data (the
-// login hint, authorization details), so store it as you would the rest
-// of a session. It carries no integrity protection and needs none for
+// login hint, authorization details, and RequiredSubject, which for a
+// pairwise client can be the user's internal subject), so store it as
+// you would the rest of a session, never where the client or the user
+// agent can read it. It carries no integrity protection and needs none for
 // the grant's sake: CompleteAuthorization checks the granted scope,
 // authorization details and identity claims against the request the
 // server stored itself, so a modified copy can make a consent screen

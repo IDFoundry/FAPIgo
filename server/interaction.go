@@ -147,6 +147,13 @@ type InteractionRequest struct {
 	// pairwise.OneWay it is the client's pairwise sub, which can't be
 	// mapped to a user: compare it with Server.ClientSubject for the
 	// user who logs in.
+	//
+	// Don't render it, or prefill a login form with it, for a pairwise
+	// client. Nobody has authenticated yet, and the client chose it: an
+	// RP holding only a user's pairwise sub can send it as a hint and
+	// open the login page itself, so showing the internal subject this
+	// maps to would give that RP exactly what pairwise subs hide. Use it
+	// only to check the user who does log in.
 	RequiredSubject string
 
 	// MaxAge is the client's "max_age" (OIDC Core §3.1.2.1), when

@@ -700,3 +700,29 @@ func TestSignUserInfoResponseRefusesInternalSubForPairwiseClient(t *testing.T) {
 		})
 	}
 }
+
+// TestPairwiseCIBAOneWayResolverResolvesIDTokenHint: under
+// pairwise.OneWay, an id_token_hint from a pairwise CIBA client is
+// refused only when nothing can map its sub back. With a declared
+// Dependencies.PairwiseSubjectResolver the hint resolves to its user,
+// and a sub the resolver doesn't know is still invalid_request.
+func TestPairwiseCIBAOneWayResolverResolvesIDTokenHint(t *testing.T) {
+	h, _ := newHarnessWithBackchannel(t)
+	resolver := subResolver{subjects: map[[3]string]string{}}
+	h.deps.PairwiseSubjectResolver = resolver
+	h = withPairwise(t, h, pairwiseClient(true), pairwise.OneWay, hmacDeriver(t))
+	sub := clientSubjectOf(t, h, "user-1")
+	// The embedder records the subs its clients are given.
+	resolver.subjects[[3]string{testIssuer, "rp.example", sub}] = "user-1"
+
+	params := standardBackchannelParams(t)
+	delete(params, "login_hint")
+	params["id_token_hint"] = jsonRaw(t, serverHint(t, h, func(c map[string]any) { c["sub"] = sub }))
+	required := beginBackchannel(t, h, params)
+	assertBackchannelRequiredSubject(t, h, required, "user-1")
+
+	unknown := standardBackchannelParams(t)
+	delete(unknown, "login_hint")
+	unknown["id_token_hint"] = jsonRaw(t, serverHint(t, h, func(c map[string]any) { c["sub"] = clientSubjectOf(t, h, "user-2") }))
+	assertBackchannelLocalError(t, h, unknown, server.ErrorInvalidRequest)
+}

@@ -171,3 +171,44 @@ func FuzzDerivedSector(f *testing.F) {
 		}
 	})
 }
+
+// TestAttestationClientDerivesNoSector: a client that may authenticate
+// by attestation gets tokens through an embedder's own grant, with no
+// redirect proving it controls its redirect URIs' host, so it derives no
+// sector from them, and a pairwise one must set Sector.
+func TestAttestationClientDerivesNoSector(t *testing.T) {
+	attested := func(cfg *RegisteredClientConfig) {
+		cfg.ClientAuthMethod = ClientAuthMethodAttestation
+		cfg.ExpectedAttesterIssuer = "https://attester.example"
+		cfg.ClientAttestationAlgorithm = fapi.ES256
+	}
+	for name, mutate := range map[string]func(*RegisteredClientConfig){
+		"attestation": attested,
+		"attestation in list": func(cfg *RegisteredClientConfig) {
+			attested(cfg)
+			cfg.ClientAuthMethod = ClientAuthMethodPrivateKeyJWT
+			cfg.ClientAuthMethods = []ClientAuthMethod{ClientAuthMethodPrivateKeyJWT, ClientAuthMethodAttestation}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, err := subjectClient(t, mutate)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := c.Sector(); got != "" {
+				t.Errorf("Sector() = %q, want none derived", got)
+			}
+			if _, err := subjectClient(t, func(cfg *RegisteredClientConfig) { mutate(cfg); cfg.SubjectType = fapi.SubjectTypePairwise }); err == nil || !strings.Contains(err.Error(), "authenticate by attestation") {
+				t.Errorf("pairwise without Sector = %v, want refused", err)
+			}
+			c, err = subjectClient(t, func(cfg *RegisteredClientConfig) {
+				mutate(cfg)
+				cfg.SubjectType = fapi.SubjectTypePairwise
+				cfg.Sector = "wallet.example"
+			})
+			if err != nil || c.Sector() != "wallet.example" {
+				t.Errorf("pairwise with Sector = %q, %v", c.Sector(), err)
+			}
+		})
+	}
+}

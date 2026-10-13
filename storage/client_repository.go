@@ -453,9 +453,10 @@ type RegisteredClientConfig struct {
 	// same sub for a user. Optional: when empty, a web client whose
 	// redirect URIs are all https on one host gets that host. A native
 	// client, a client with redirect URIs on several hosts, one with no
-	// redirect URIs, and one permitted CIBA (which receives tokens without
-	// a redirect proving it controls that host) have no derived sector,
-	// so a pairwise one must set it. A host name, as OpenID Connect
+	// redirect URIs, one permitted CIBA and one that may authenticate by
+	// attestation (both receive tokens without a redirect proving they
+	// control that host: CIBA, and an embedder's own grant) have no
+	// derived sector, so a pairwise one must set it. A host name, as OpenID Connect
 	// Core §8.1's sector is: up to 255 ASCII letters, digits, '-', '.'
 	// and '_', with no empty label (no scheme, port, path or user info),
 	// lowercased, so "RP.example" is the same sector as "rp.example".

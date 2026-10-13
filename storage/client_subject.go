@@ -19,8 +19,9 @@ func (c RegisteredClient) SubjectType() fapi.SubjectType { return c.subjectType 
 
 // Sector returns the sector this client's pairwise subjects are derived
 // for: RegisteredClientConfig.Sector when set, otherwise the single host
-// of the https redirect URIs of a web client not permitted CIBA,
-// otherwise "" (no sector, so the client can't have pairwise subjects).
+// of the https redirect URIs of a web client neither permitted CIBA nor
+// authenticating by attestation, otherwise "" (no sector, so the client
+// can't have pairwise subjects).
 func (c RegisteredClient) Sector() string { return c.sector }
 
 // checkApplicationTypeAndSector runs checkApplicationType, then
@@ -49,7 +50,7 @@ func clientSector(cfg RegisteredClientConfig) (string, error) {
 		sector = derivedSector(cfg)
 	}
 	if cfg.SubjectType == fapi.SubjectTypePairwise && sector == "" {
-		return "", fmt.Errorf("storage: client %q is pairwise but has no sector: set Sector (a native client, one permitted CIBA, one with no redirect URIs, or one whose redirect URIs span several hosts, has none to derive)", cfg.ID)
+		return "", fmt.Errorf("storage: client %q is pairwise but has no sector: set Sector (a native client, one permitted CIBA, one that may authenticate by attestation, one with no redirect URIs, or one whose redirect URIs span several hosts, has none to derive)", cfg.ID)
 	}
 	return sector, nil
 }
@@ -88,13 +89,16 @@ func isHostByte(c byte) bool {
 // meaningful host, http loopback URIs are for development, and URIs on
 // several hosts need an explicit Sector.
 //
-// A client permitted CIBA gets none either. The redirect-host sector is
-// only sound because the authorization code goes to that host, proving
-// the client is served there; CIBA delivers tokens without any redirect,
-// so a client could name another client's host in its redirect URIs and
-// receive that client's pairwise sub values.
+// A client permitted CIBA, or one that may authenticate by attestation
+// (whose tokens an embedder's own grant serves, through
+// server.Server.IssueAccessToken and IssueRefreshToken), gets none
+// either. The redirect-host sector is only sound because the
+// authorization code goes to that host, proving the client is served
+// there; CIBA and embedder grants deliver tokens without any redirect,
+// so such a client could name another client's host in its redirect URIs
+// and receive that client's pairwise sub values.
 func derivedSector(cfg RegisteredClientConfig) string {
-	if cfg.ApplicationType != ApplicationTypeWeb || len(cfg.RedirectURIs) == 0 || cfg.BackchannelAuthenticationRequestAlgorithm != 0 {
+	if cfg.ApplicationType != ApplicationTypeWeb || len(cfg.RedirectURIs) == 0 || cfg.BackchannelAuthenticationRequestAlgorithm != 0 || mayUseAttestation(cfg) {
 		return ""
 	}
 	host := ""
@@ -110,4 +114,14 @@ func derivedSector(cfg RegisteredClientConfig) string {
 		host = h
 	}
 	return host
+}
+
+// mayUseAttestation reports whether cfg's client may authenticate by
+// attestation (ClientAuthMethodAttestation): through ClientAuthMethods
+// when that is set, otherwise ClientAuthMethod.
+func mayUseAttestation(cfg RegisteredClientConfig) bool {
+	if len(cfg.ClientAuthMethods) > 0 {
+		return slices.Contains(cfg.ClientAuthMethods, ClientAuthMethodAttestation)
+	}
+	return cfg.ClientAuthMethod == ClientAuthMethodAttestation
 }

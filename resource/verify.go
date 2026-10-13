@@ -497,6 +497,8 @@ func (v *Verifier) resolveSubjects(ctx context.Context, resolved ResolvedAccessT
 	if resolved.Issuer == "" {
 		return "", "", newError(ErrorServerError, 500, "access token's subject is pairwise, but its resolver reported no issuer to look it up under", nil)
 	}
+	ctx, cancel := context.WithTimeout(ctx, pairwiseLookupTimeout)
+	defer cancel()
 	var internal string
 	switch {
 	case v.deps.PairwiseSubjects != nil:
@@ -511,6 +513,11 @@ func (v *Verifier) resolveSubjects(ctx context.Context, resolved ResolvedAccessT
 	}
 	return internal, resolved.Subject, nil
 }
+
+// pairwiseLookupTimeout bounds a pairwise lookup or resolver call, as
+// the server bounds its own: a store or key service that hangs fails the
+// request with server_error rather than holding it open.
+const pairwiseLookupTimeout = 10 * time.Second
 
 // lookUpPairwiseSubject maps resolved's pairwise sub, derived for
 // sector, back to the end user's internal subject through

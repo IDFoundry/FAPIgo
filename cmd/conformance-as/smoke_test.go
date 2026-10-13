@@ -153,7 +153,10 @@ func newSmokeHarnessWithNonceChallenge(t *testing.T, format AccessTokenFormat, d
 	return newSmokeHarnessWithOptions(t, format, dpopNonceChallenge, false, false, "")
 }
 
-func newSmokeHarnessWithOptions(t *testing.T, format AccessTokenFormat, dpopNonceChallenge bool, userinfoSigning bool, ciba bool, cibaApprovalUIToken string) *smokeHarness {
+// newSmokeHarnessWithOptions builds the harness; each of mutate, if
+// any, adjusts the ResolvedConfig before the server is built, for the
+// runtime flags main.go sets there itself (-pairwise-subjects, say).
+func newSmokeHarnessWithOptions(t *testing.T, format AccessTokenFormat, dpopNonceChallenge bool, userinfoSigning bool, ciba bool, cibaApprovalUIToken string, mutate ...func(*ResolvedConfig)) *smokeHarness {
 	t.Helper()
 
 	cert, pool := selfSignedCert(t)
@@ -267,6 +270,10 @@ func newSmokeHarnessWithOptions(t *testing.T, format AccessTokenFormat, dpopNonc
 		Clients:           []storage.RegisteredClient{registered},
 		ClientKeys:        []ephemeral.ClientKeySpec{{ClientID: testClientID, JWKS: inlineJWKS}},
 		AdvertisedScopes:  []string{"openid", "accounts", "offline_access"},
+	}
+
+	for _, m := range mutate {
+		m(&resolved)
 	}
 
 	mux, err := newServerMux(resolved, false, dpopNonceChallenge, userinfoSigning, ciba, false, cibaApprovalUIToken, "")

@@ -50,7 +50,7 @@ var userInfoReservedClaims = []string{"iss", "aud"}
 //
 // For a client that gets pairwise subs, claims' "sub" must be the one
 // the client was given (resource.AuthorizationContext.ClientSubject),
-// never the user's internal subject (AuthorizationContext.Subject): it
+// never the user's internal subject (AuthorizationContext.InternalSubject): it
 // must carry Config.Subjects' Prefix and a well-formed body. With an
 // empty Prefix, which can't tell the two apart, it must also be one
 // Dependencies.PairwiseSubjects (or the resolver) maps back under the

@@ -196,8 +196,9 @@ never promise more unlinkability than the deriver gives.
   resolved. If you keep your own record of the `sub`s you issue, give
   it as a `pairwise.SubjectResolver` in
   `Dependencies.PairwiseSubjectResolver`, and the same resolver to every
-  resource server (`resource.Dependencies.SubjectResolver`): `New` then
-  accepts JWT access tokens too.
+  one of your own resource servers
+  (`resource.Dependencies.PairwiseSubjectResolver`): `New` then accepts
+  JWT access tokens too.
 
 **Choosing a deriver.** Each deriver trades privacy against
 operational convenience and cost:
@@ -863,25 +864,59 @@ shares the stores, which then must also declare
 
 ### Pairwise subjects at a resource server
 
-For a client with pairwise subjects, `AuthorizationContext.Subject` is
-the user's internal subject, which your API authorizes by, and
-`ClientSubject` is the pairwise `sub` the client knows the user by.
-**Compare anything the client sends with `ClientSubject`, never
-`Subject`**: a user ID in a path (`/users/{id}/accounts`), in a body, or
-the `sub` of an ID token the client holds. For a public client both are
-the same.
+For a client with pairwise subjects, `AuthorizationContext` carries two
+subjects:
 
-A JWT access token's `sub` is pairwise, so the verifier needs a way to
-map it back: `serverresource.NewVerifier` wires the server's own. A
-separate resource server sets either `Dependencies.PairwiseSubjects`
-(the server's reversible deriver: `pairwise.NewReversible` with the
-same keys, or `pairwise.NewMapping` over the same store) with
-`Config.PairwisePrefix` (the server's prefix), or, for a server with a
-one-way deriver,
-`Dependencies.SubjectResolver` (the same resolver the server declares).
-Without one, a pairwise JWT access token is refused with `server_error`
-rather than given its pairwise `sub` as `Subject`. An opaque access
-token's record already keeps the internal subject.
+- **`InternalSubject`** is the user's internal subject, which your API
+  authorizes by. Never return it to a client: it's exactly what the
+  client's pairwise `sub` hides.
+- **`ClientSubject`** is the pairwise `sub` the client knows the user
+  by. **Compare and return anything client-facing with
+  `ClientSubject`**: a user ID in a path (`/users/{id}/accounts`) or a
+  body, the `sub` of an ID token the client holds, or a "me" response.
+
+For a public client both are the same. `InternalSubject` is left out of
+`AuthorizationContext`'s JSON encoding, so a debug dump can't leak it.
+
+A JWT access token's `sub` is pairwise, so mapping it back takes what
+reverses every pairwise `sub`: the server's keys, store or resolver.
+OpenID Connect Core §8.1 reserves that to the OpenID Provider, so it
+depends on whose resource server it is.
+
+**The OP's own resource server** (a separate service, run as part of
+the OP) is given the same means as the authorization server.
+`serverresource.NewVerifier` does this for endpoints in the server's
+own process; a separate one sets it up itself:
+
+```go
+// The OP's own resource server, with a reversible deriver: the same
+// two keys and prefix as the authorization server.
+deriver, err := pairwise.NewReversible(macKey, encKey,
+	keys.DeclareCustody(keys.KeyCustody{Durable: true, CrossInstanceConsistent: true}))
+if err != nil {
+	log.Fatal(err)
+}
+cfg.PairwisePrefix = prefix          // the server's Config.Subjects.Prefix
+deps.PairwiseSubjects = deriver // *pairwise.ReversibleDeriver implements pairwise.Lookup
+// Or pairwise.NewMapping over the server's store; or, with a one-way
+// deriver, deps.PairwiseSubjectResolver = the server's resolver.
+```
+
+**A resource server outside the OP** (a third party's API that accepts
+your access tokens) must never be given those. It accepts pairwise
+`sub`s as the client knows them instead:
+
+```go
+cfg.PairwiseResolution = resource.PairwiseClientSubjectsOnly
+// authz.InternalSubject is then "" for a pairwise sub: authorize by
+// authz.ClientSubject together with authz.ClientID.
+```
+
+A verifier with neither refuses a pairwise JWT access token with
+`server_error`, rather than give its pairwise `sub` as
+`InternalSubject`. An opaque access token's record already keeps the
+internal subject, which only the OP's own resource servers can read
+(under `PairwiseClientSubjectsOnly` it isn't reported either).
 
 A JWT access token is readable by the client, so nothing in it may
 identify the user beyond its pairwise `sub`: a `GrantID` or extension
@@ -965,8 +1000,9 @@ verifier, err := resource.NewVerifier(cfg, deps)
 authCtx, err := verifier.Verify(ctx, resource.VerifyRequestFromHTTP(r, protectedResourceURL))
 ```
 
-On success, `authCtx.Subject`/`ClientID`/`Scopes`/`Claims` are what your
-API handler needs to authorize the call. Call
+On success, `authCtx.InternalSubject`/`ClientID`/`Scopes`/`Claims` are
+what your API handler needs to authorize the call (return
+`authCtx.ClientSubject`, never `InternalSubject`, to the client). Call
 `authCtx.SetDPoPNonce(w.Header())` on the response, so a client's next
 call already carries a fresh DPoP nonce when you've enabled them. A
 UserInfo endpoint hosted with the authorization server builds its

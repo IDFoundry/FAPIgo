@@ -321,8 +321,8 @@ func TestNewVerifierResolvesPairwiseSubjects(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Verify: %v", err)
 			}
-			if authz.Subject != "alice" || authz.ClientSubject != clientSub {
-				t.Errorf("Subject, ClientSubject = %q, %q; want alice, %q", authz.Subject, authz.ClientSubject, clientSub)
+			if authz.InternalSubject != "alice" || authz.ClientSubject != clientSub {
+				t.Errorf("Subject, ClientSubject = %q, %q; want alice, %q", authz.InternalSubject, authz.ClientSubject, clientSub)
 			}
 		})
 	}
@@ -419,7 +419,7 @@ func TestNewVerifierPassesTheServersSubjectResolver(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
-	if authz.Subject != "alice" || authz.ClientSubject != clientSub {
-		t.Errorf("Subject, ClientSubject = %q, %q; want alice, %q", authz.Subject, authz.ClientSubject, clientSub)
+	if authz.InternalSubject != "alice" || authz.ClientSubject != clientSub {
+		t.Errorf("Subject, ClientSubject = %q, %q; want alice, %q", authz.InternalSubject, authz.ClientSubject, clientSub)
 	}
 }

@@ -39,7 +39,7 @@ func TestPairwiseLookupIsBounded(t *testing.T) {
 	}
 	for name, deps := range map[string]func(deadlineLookup) Dependencies{
 		"lookup":   func(d deadlineLookup) Dependencies { return Dependencies{PairwiseSubjects: d} },
-		"resolver": func(d deadlineLookup) Dependencies { return Dependencies{SubjectResolver: d} },
+		"resolver": func(d deadlineLookup) Dependencies { return Dependencies{PairwiseSubjectResolver: d} },
 	} {
 		t.Run(name, func(t *testing.T) {
 			var deadline time.Time

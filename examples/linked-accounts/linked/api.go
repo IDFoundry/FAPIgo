@@ -67,7 +67,7 @@ func (a *api) accounts(w http.ResponseWriter, r *http.Request) {
 		resource.NewInsufficientScopeError(authz, "the token grants no account access").WriteJSON(w)
 		return
 	}
-	c, _ := customerByName(authz.Subject)
+	c, _ := customerByName(authz.InternalSubject)
 	out := []accountView{}
 	for _, iban := range details[0].Fields.Accounts {
 		acct, ok := c.account(iban)

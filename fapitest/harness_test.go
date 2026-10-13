@@ -158,8 +158,8 @@ func verifyAccessToken(t *testing.T, h *fapitest.Harness, tokens client.TokenSet
 	if err != nil {
 		t.Fatalf("resource.Verify: %v", err)
 	}
-	if authz.Subject != fapitest.Subject {
-		t.Errorf("Subject = %q, want %q", authz.Subject, fapitest.Subject)
+	if authz.InternalSubject != fapitest.Subject {
+		t.Errorf("Subject = %q, want %q", authz.InternalSubject, fapitest.Subject)
 	}
 	if authz.ClientID != fapitest.ClientID.String() {
 		t.Errorf("ClientID = %q, want %q", authz.ClientID, fapitest.ClientID.String())

@@ -164,7 +164,7 @@ func TestSignUserInfoResponseIsForTheTokensClient(t *testing.T) {
 
 	t.Run("empty subject", func(t *testing.T) {
 		empty := authz
-		empty.Subject = ""
+		empty.InternalSubject = ""
 		if _, err := serverresource.SignUserInfoResponse(context.Background(), srv, clients, empty, map[string]json.RawMessage{"sub": json.RawMessage(`""`)}); err == nil {
 			t.Fatal("SignUserInfoResponse(empty subject) succeeded")
 		}
@@ -230,7 +230,7 @@ func TestSignUserInfoResponseReportsLookupAndSigningFailures(t *testing.T) {
 func signUserInfoFixture(t *testing.T) (*server.Server, storage.ClientRepository, resource.AuthorizationContext, map[string]json.RawMessage) {
 	t.Helper()
 	srv, clients := userInfoServer(t)
-	authz := resource.AuthorizationContext{Subject: "user-1", ClientID: "rp-2", Scopes: []string{"openid"}}
+	authz := resource.AuthorizationContext{InternalSubject: "user-1", ClientID: "rp-2", Scopes: []string{"openid"}}
 	claims := map[string]json.RawMessage{"sub": json.RawMessage(`"user-1"`), "email": json.RawMessage(`"sam@example.com"`)}
 	return srv, clients, authz, claims
 }

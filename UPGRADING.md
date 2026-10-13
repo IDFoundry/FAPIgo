@@ -54,6 +54,34 @@ none: its tokens arrive without a redirect proving the client is served
 on its redirect URIs' host, so such a pairwise client sets `Sector` (a
 host name, which you set; never take it from the client) itself.
 
+### `AuthorizationContext.Subject` is renamed `InternalSubject` (resource)
+
+**Affects:** every resource server, whether or not it uses pairwise
+subjects.
+
+`resource.AuthorizationContext.Subject` is now `InternalSubject`, and
+it's left out of the struct's JSON encoding. The value is unchanged:
+the token's subject as the authorization server knows it. The rename
+makes every resource server choose, at each use, between the two
+subjects a request now carries:
+
+- **`InternalSubject`**: for your own authorization decisions only.
+- **`ClientSubject`**: anything returned to, or compared with what
+  comes from, the client. For a public client it's the same value.
+
+```go
+// Before
+c := customerByID(authz.Subject)
+// After
+c := customerByID(authz.InternalSubject)
+```
+
+Then check every place the old `Subject` reached a client: a `/me`
+endpoint, a response body, a UserInfo `sub` built by hand, an error
+message or a log the client can read. Use `ClientSubject` there. For a
+client with pairwise subjects, `InternalSubject` is exactly what its
+`sub` hides.
+
 ### Adopting pairwise subjects (server, resource)
 
 **Affects:** only a deployment that gives some client pairwise
@@ -61,27 +89,34 @@ subjects. Nothing changes for one that keeps `PublicSubjects()`.
 
 > **Check every resource server before giving any client pairwise
 > subjects.** For a pairwise client,
-> `resource.AuthorizationContext.Subject` is now the user's *internal*
-> subject, the very identifier the client's pairwise `sub` hides. Code
-> that sends `Subject` back to the client (a `/me` endpoint, a response
-> body, a UserInfo `sub`, a log the client can read) leaks it. Send
-> `ClientSubject` instead, and authorize by `Subject`.
+> `resource.AuthorizationContext.InternalSubject` is the user's
+> *internal* subject, the very identifier the client's pairwise `sub`
+> hides. Code that sends it back to the client (a `/me` endpoint, a
+> response body, a UserInfo `sub`, a log the client can read) leaks it.
+> Send `ClientSubject` instead, and authorize by `InternalSubject`.
 
-- **Resource servers:** `resource.AuthorizationContext.Subject` stays
-  the user's internal subject; the new `ClientSubject` is the `sub` the
-  client was given. Compare user IDs a client sends (in a path, a body,
-  or an ID token) with `ClientSubject`: for a pairwise client they're
-  no longer `Subject`. A standalone resource server verifying JWT access
-  tokens from a server with a reversible deriver sets
-  `resource.Dependencies.PairwiseSubjects` and `Config.PairwisePrefix`;
-  `serverresource.NewVerifier` wires both.
-- **A one-way deriver** (`pairwise.NewHMAC`) requires `server.OpaqueAccessTokens`: a one-way
+- **Resource servers:** `resource.AuthorizationContext.InternalSubject`
+  is the user's internal subject; the new `ClientSubject` is the `sub`
+  the client was given. Compare user IDs a client sends (in a path, a
+  body, or an ID token) with `ClientSubject`: for a pairwise client
+  they're no longer `InternalSubject`. The OP's own standalone resource
+  server verifying JWT access tokens from a server with a reversible
+  deriver sets `resource.Dependencies.PairwiseSubjects` and
+  `Config.PairwisePrefix`; `serverresource.NewVerifier` wires both.
+- **A resource server outside the OP** (a third party accepting your
+  access tokens) must never get the keys, store or resolver that
+  reverse pairwise subs (OpenID Connect Core §8.1 reserves that to the
+  OP). It sets `resource.Config.PairwiseResolution` to
+  `resource.PairwiseClientSubjectsOnly` instead: `InternalSubject` is
+  then `""` for a pairwise sub, and it authorizes by `ClientSubject`
+  and `ClientID`.
+- **A one-way deriver** (`pairwise.NewHMAC`, `pairwise.NewHMACWith`) requires `server.OpaqueAccessTokens`: a one-way
   `sub` can't be mapped back, so the internal subject must stay in a
   server-side token record. To issue JWT access tokens instead, keep
   your own record of the subs you issue as a `pairwise.SubjectResolver`,
   set it as `server.Dependencies.PairwiseSubjectResolver`, and give the
-  same one to every resource server
-  (`resource.Dependencies.SubjectResolver`).
+  same one to every one of the OP's own resource servers
+  (`resource.Dependencies.PairwiseSubjectResolver`).
 - **A custom `server.AccessTokenIssuer`** gets the pairwise `sub` as
   `AccessTokenParams.Subject` and the internal subject as the new
   `InternalSubject`. Never put `InternalSubject` in a token the client

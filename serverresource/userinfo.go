@@ -31,7 +31,7 @@ import (
 //   - "sub" is the sub the client was given for the user
 //     (resource.AuthorizationContext.ClientSubject): its pairwise
 //     subject for a client with pairwise subjects, while source is asked
-//     about the user by the internal subject (Subject).
+//     about the user by the internal subject (InternalSubject).
 //
 // A requested-claims entry the token carries malformed is an error, not
 // an empty request. An error from source is returned wrapped. Sign the
@@ -49,7 +49,7 @@ func UserInfoClaims(ctx context.Context, authz resource.AuthorizationContext, so
 	}
 	claims := map[string]json.RawMessage{}
 	if len(names) > 0 {
-		resolved, err := source.ResolveIdentityClaims(ctx, authz.Subject, names)
+		resolved, err := source.ResolveIdentityClaims(ctx, authz.InternalSubject, names)
 		if err != nil {
 			return nil, fmt.Errorf("serverresource: resolving UserInfo claims: %w", err)
 		}
@@ -65,12 +65,12 @@ func UserInfoClaims(ctx context.Context, authz resource.AuthorizationContext, so
 }
 
 // clientSubjectOf is authz's ClientSubject, or, in an
-// AuthorizationContext built by hand without one, its Subject.
+// AuthorizationContext built by hand without one, its InternalSubject.
 func clientSubjectOf(authz resource.AuthorizationContext) string {
 	if authz.ClientSubject != "" {
 		return authz.ClientSubject
 	}
-	return authz.Subject
+	return authz.InternalSubject
 }
 
 // SignUserInfoResponse signs claims (and encrypts them, if the client

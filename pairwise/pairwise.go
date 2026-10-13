@@ -153,7 +153,8 @@ type Lookup interface {
 // authorization server calls it for hints and for
 // server.Server.ResolveClientSubject and ResolveIDTokenHint
 // (server.Dependencies.PairwiseSubjectResolver), and every resource
-// server verifying those access tokens needs the same one.
+// server verifying those access tokens needs the same one
+// (resource.Dependencies.PairwiseSubjectResolver).
 //
 // FAPIgo can't check a resolver against the subs it actually issued: it
 // trusts it. It must map exactly the subs this deployment issued (record

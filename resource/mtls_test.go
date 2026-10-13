@@ -129,8 +129,8 @@ func TestVerifyAcceptsMTLSBoundToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
-	if authz.Subject != "user-1" {
-		t.Errorf("Subject = %q, want user-1", authz.Subject)
+	if authz.InternalSubject != "user-1" {
+		t.Errorf("Subject = %q, want user-1", authz.InternalSubject)
 	}
 	if authz.ClientID != "client-1" {
 		t.Errorf("ClientID = %q, want client-1", authz.ClientID)

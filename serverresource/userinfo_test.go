@@ -32,7 +32,7 @@ func (s *claimsSource) ResolveIdentityClaims(_ context.Context, subject string, 
 }
 
 func authzFor(scopes []string, requested string) resource.AuthorizationContext {
-	a := resource.AuthorizationContext{Subject: "user-1", Scopes: scopes, Claims: map[string]json.RawMessage{}}
+	a := resource.AuthorizationContext{InternalSubject: "user-1", Scopes: scopes, Claims: map[string]json.RawMessage{}}
 	if requested != "" {
 		a.Claims[server.RequestedUserinfoClaimsKey] = json.RawMessage(requested)
 	}

@@ -306,7 +306,7 @@ func (a *authServer) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set(contentTypeHeader, contentTypeJSON)
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(map[string]any{"sub": authz.Subject}); err != nil {
+	if err := json.NewEncoder(w).Encode(map[string]any{"sub": authz.InternalSubject}); err != nil {
 		a.t.Fatalf("fapitest: encode userinfo response: %v", err)
 	}
 }

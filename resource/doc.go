@@ -34,13 +34,21 @@
 // relies on to declare its capabilities (see AssuranceProduction).
 //
 // For a client with pairwise subjects (OpenID Connect Core §8),
-// AuthorizationContext.Subject is the end user's internal subject and
-// ClientSubject the pairwise sub the client knows them by: compare
-// anything the client sends with ClientSubject. A self-contained access
-// token's pairwise sub is mapped back through Dependencies.PairwiseSubjects
-// (a pairwise.Reversible server's deriver) or Dependencies.SubjectResolver
-// (the embedder's own mapping, for a pairwise.OneWay server), and is
-// refused rather than given as Subject when neither can.
+// AuthorizationContext.InternalSubject is the end user's internal
+// subject and ClientSubject the pairwise sub the client knows them by:
+// authorize by InternalSubject, but compare and return anything
+// client-facing with ClientSubject. A self-contained access token's
+// pairwise sub is mapped back through Dependencies.PairwiseSubjects (the
+// authorization server's reversible deriver: pairwise.NewReversible,
+// NewReversibleWith or NewMapping) or Dependencies.PairwiseSubjectResolver
+// (the embedder's own mapping, for a server with a one-way deriver), and
+// is refused rather than given as InternalSubject when neither can.
+//
+// Only the OpenID Provider may map a pairwise sub back (Core §8.1): a
+// resource server given the keys, store or resolver that do is part of
+// the OP, and as trusted as it. A resource server outside the OP sets
+// Config.PairwiseResolution to PairwiseClientSubjectsOnly instead, and
+// knows each end user only by ClientSubject, as the client does.
 //
 // A verifier for endpoints hosted in the authorization server's own
 // process can be built from that server's configuration with

@@ -706,11 +706,10 @@ func switchToPairwise(t *testing.T, h harness, enforcement server.SubjectTypeEnf
 // public client's sub isn't checked.
 func TestSignUserInfoResponseRefusesInternalSubForPairwiseClient(t *testing.T) {
 	for name, tc := range map[string]struct {
-		reversible bool
-		deriver    pairwise.Deriver
+		deriver pairwise.Deriver
 	}{
-		"one-way":    {false, hmacDeriver(t)},
-		"reversible": {true, newMappingDeriver()},
+		"one-way":    {hmacDeriver(t)},
+		"reversible": {newMappingDeriver()},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t, server.ProfileFAPISecurity, true)
@@ -724,7 +723,10 @@ func TestSignUserInfoResponseRefusesInternalSubForPairwiseClient(t *testing.T) {
 			for sub, wantRefused := range map[string]bool{
 				clientSub: false,
 				"user-1":  true, // the internal subject
-				testPairwisePrefix + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA": tc.reversible, // well-formed, never issued
+				// Well-formed and prefixed, never issued: the prefix already
+				// shows it isn't an internal subject, which is all this
+				// backstop guards; it may be from the client's earlier sector.
+				testPairwisePrefix + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA": false,
 				"": true,
 			} {
 				raw, _ := json.Marshal(sub)
@@ -890,5 +892,57 @@ func TestPairwiseExplicitSectorMatchesDerived(t *testing.T) {
 	}
 	if derived := clientSubjectOf(t, h, "user-1"); explicit != derived {
 		t.Errorf("Sector RP.example gives %q, the derived rp.example %q; want the same sub", explicit, derived)
+	}
+}
+
+// TestSignUserInfoResponseWithAnEmptyPrefix: with an empty prefix
+// (allowed for a reversible deriver) nothing distinguishes a pairwise
+// sub from an internal subject but a lookup, so a sub that doesn't map
+// back under the client's sector, the internal subject included, is
+// refused.
+func TestSignUserInfoResponseWithAnEmptyPrefix(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	h.cfg.Algorithms.UserInfo = fapi.ES256
+	h = withPairwise(t, h, pairwiseClient(false), newMappingDeriver())
+	h.cfg.Subjects.Prefix = mustPrefix(t, "")
+	srv, err := server.New(h.cfg, h.deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.server = srv
+	client, err := h.clients.ResolveClient(context.Background(), testClientID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for sub, wantRefused := range map[string]bool{
+		clientSubjectOf(t, h, "user-1"): false,
+		"user-1":                        true,
+		"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA": true,
+	} {
+		raw, _ := json.Marshal(sub)
+		if _, serr := h.server.SignUserInfoResponse(context.Background(), client, map[string]json.RawMessage{"sub": raw}); (serr != nil) != wantRefused {
+			t.Errorf("sub %q: refused = %v (%v), want %v", sub, serr != nil, serr, wantRefused)
+		}
+	}
+}
+
+// TestSignUserInfoResponseAfterASectorChange: a grant keeps the sub it
+// was issued with when its client's sector changes, so a signed UserInfo
+// response for that grant still carries it.
+func TestSignUserInfoResponseAfterASectorChange(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	h.cfg.Algorithms.UserInfo = fapi.ES256
+	h = withPairwise(t, h, pairwiseClient(false), reversiblePairwise(t))
+	before := clientSubjectOf(t, h, "user-1")
+	moved := pairwiseClient(false)
+	moved.Sector = "moved.example"
+	register(t, h, moved)
+	client, err := h.clients.ResolveClient(context.Background(), testClientID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(before)
+	if _, serr := h.server.SignUserInfoResponse(context.Background(), client, map[string]json.RawMessage{"sub": raw}); serr != nil {
+		t.Errorf("SignUserInfoResponse with the grant's earlier-sector sub: %v", serr)
 	}
 }

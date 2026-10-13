@@ -51,9 +51,13 @@ var userInfoReservedClaims = []string{"iss", "aud"}
 // For a client that gets pairwise subs, claims' "sub" must be the one
 // the client was given (resource.AuthorizationContext.ClientSubject),
 // never the user's internal subject (AuthorizationContext.Subject): it
-// must carry Config.Subjects' Prefix and a well-formed body, and, when
-// Dependencies.PairwiseSubjects can map a sub back, one it issued to the
+// must carry Config.Subjects' Prefix and a well-formed body. With an
+// empty Prefix, which can't tell the two apart, it must also be one
+// Dependencies.PairwiseSubjects (or the resolver) maps back under the
 // client's current sector. Anything else fails with ErrorServerError.
+// This is a backstop: compare the sub with the access token's
+// ClientSubject before calling it, as serverresource.SignUserInfoResponse
+// does.
 func (s *Server) SignUserInfoResponse(ctx context.Context, client storage.RegisteredClient, claims map[string]json.RawMessage) (string, *Error) {
 	if !s.cfg.Algorithms.UserInfo.IsValid() {
 		return "", newError(ErrorServerError, 500, "userinfo signing is not configured", nil)
@@ -167,6 +171,15 @@ func (s *Server) checkUserInfoSubject(ctx context.Context, client storage.Regist
 	if err := pairwise.CheckBody(body); err != nil {
 		return notIssued(err)
 	}
+	if effectiveSubjects(s.cfg).Prefix.String() != "" {
+		// The prefix already tells a pairwise sub from an internal one. A
+		// grant's sub was derived for the sector its client had then, so
+		// it can't be required to resolve under the client's current one.
+		return nil
+	}
+	// With an empty prefix (allowed only when subs can be mapped back),
+	// only a lookup can tell; it uses the client's current sector, so
+	// after a sector change a grant's earlier sub fails here.
 	if _, err := s.internalSubjectFor(ctx, client, sub); err != nil && !errors.Is(err, ErrNoPairwiseSubjectLookup) {
 		return notIssued(err)
 	}

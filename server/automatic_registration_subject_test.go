@@ -82,7 +82,7 @@ func TestNewWiresSubjectTypesIntoAutomaticRegistration(t *testing.T) {
 			if tc.subjectType != "" {
 				extra = append(extra, map[string]any{"subject_type": tc.subjectType})
 			}
-			f := setupAutomaticRegistrationFixture(t, testRedirectURI, extra...)
+			f := setupAutomaticRegistrationFixture(t, "", extra...)
 			srv, failure := pairwiseAutomaticRegistrationServer(t, f, tc.subjects(t))
 			sub, err := srv.ClientSubject(context.Background(), fapi.ClientID(f.rpID), authenticated)
 			if tc.wantRefusal != "" {
@@ -126,7 +126,7 @@ func checkAutomaticRegistrationSubject(t *testing.T, sub string, err, failure er
 // for pairwise ones, rather than giving it public subs it didn't ask
 // for; the RP only sees invalid_client.
 func TestPublicServerRefusesAutomaticRegistrationAskingPairwise(t *testing.T) {
-	f := setupAutomaticRegistrationFixture(t, testRedirectURI, map[string]any{"subject_type": "pairwise"})
+	f := setupAutomaticRegistrationFixture(t, "", map[string]any{"subject_type": "pairwise"})
 	var failure error
 	srv := newAutomaticRegistrationTestServer(t, f, func(cfg *server.Config, _ *server.Dependencies) {
 		cfg.AutomaticRegistration.OnResolutionFailure = func(_ context.Context, _ fapi.ClientID, err error) { failure = err }

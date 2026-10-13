@@ -96,6 +96,7 @@ func TestBackchannelCompletionFailsClosedWithoutClientSubject(t *testing.T) {
 		noSector := pairwiseClient(true)
 		noSector.SubjectType = 0 // the server's default: pairwise
 		noSector.RedirectURIs = nil
+		noSector.Sector = ""
 		register(t, h, noSector)
 		h.cfg.Subjects = server.SubjectConfig{
 			Default: fapi.SubjectTypePairwise, Enforcement: server.SubjectTypesPerClient,

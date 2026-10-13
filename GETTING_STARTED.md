@@ -96,7 +96,10 @@ leave `Subjects` zero, which means public.
 
 A pairwise `sub` differs per sector of clients (the host of a client's
 redirect URIs, or its registered `Sector`), so clients in different
-sectors can't correlate a user by it. Every token and response a
+sectors can't correlate a user by it. A client permitted CIBA, a native
+client, and one whose redirect URIs span several hosts need an explicit
+`Sector`; an OpenID Federation Relying Party's is its Entity
+Identifier's host. Every token and response a
 pairwise client gets carries it: ID tokens, access tokens and UserInfo.
 The server's own records, audit events and your login page keep the
 user's internal subject.

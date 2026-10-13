@@ -48,7 +48,10 @@ subjects (a pairwise `Default`, or a client's `SubjectType` and
 `Dependencies.PairwiseSubjects`; see GETTING_STARTED's "Pairwise
 subjects"). A client registered with `SubjectType:
 fapi.SubjectTypePairwise` must have a sector, set or derived from its
-redirect URIs, or `storage.NewRegisteredClient` refuses it.
+redirect URIs, or `storage.NewRegisteredClient` refuses it. A client
+permitted CIBA derives none: CIBA delivers tokens without a redirect
+proving the client is served on its redirect URIs' host, so a pairwise
+CIBA client sets `Sector` itself.
 
 ### Adopting pairwise subjects (server, resource)
 
@@ -92,9 +95,11 @@ and a Relying Party asking for a type the server doesn't issue isn't
 registered: it gets `invalid_client`, and
 `AutomaticRegistration.OnResolutionFailure` hears
 `subject_type pairwise is not one this OP issues`. A pairwise Relying
-Party must also have its redirect URIs on one https host, which is its
-sector, and must not publish `sector_identifier_uri`, which this
-release doesn't fetch.
+Party's sector is its Entity Identifier's host, which the Trust Chain
+binds to it: its redirect URIs must all be https on that host (so it
+can't name another Relying Party's host and receive that Relying
+Party's sub values), and it must not publish `sector_identifier_uri`,
+which this release doesn't fetch.
 
 **What to change:** nothing, unless a Relying Party you federate with
 asks for `"subject_type": "pairwise"` while your server issues only

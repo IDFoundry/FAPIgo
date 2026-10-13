@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"encoding/json"
+	"maps"
 	"net/url"
 	"strings"
 	"testing"
@@ -103,8 +104,8 @@ func TestAutomaticRegistrationPolicyForcesPairwise(t *testing.T) {
 }
 
 // TestAutomaticRegistrationPairwiseSector: a pairwise client's sector is
-// the single https host its redirect URIs share; redirect URIs on
-// several hosts can't give one, and fail the registration. A public
+// its Entity Identifier's host, and its redirect URIs must all be https
+// on that host; redirect URIs elsewhere fail the registration. A public
 // client needs no sector.
 func TestAutomaticRegistrationPairwiseSector(t *testing.T) {
 	both := []fapi.SubjectType{fapi.SubjectTypePublic, fapi.SubjectTypePairwise}
@@ -121,8 +122,8 @@ func TestAutomaticRegistrationPairwiseSector(t *testing.T) {
 	t.Run("several hosts, pairwise", func(t *testing.T) {
 		f := setupAutomaticRegistrationFixture(t, multiHostMetadata(t, "pairwise"))
 		_, failure := resolveWith(t, f, subjectTypesConfig(fapi.SubjectTypePublic, both...))
-		if failure == nil || !strings.Contains(failure.Error(), "no sector") {
-			t.Fatalf("registration failure = %v, want a pairwise client without a sector refused", failure)
+		if failure == nil || !strings.Contains(failure.Error(), "Entity Identifier's host") {
+			t.Fatalf("registration failure = %v, want a pairwise client with a redirect URI off its own host refused", failure)
 		}
 	})
 	t.Run("several hosts, public", func(t *testing.T) {
@@ -191,4 +192,57 @@ func hostOf(t *testing.T, rawURL string) string {
 		t.Fatalf("parse %q: %v", rawURL, err)
 	}
 	return strings.ToLower(u.Hostname())
+}
+
+// TestAutomaticRegistrationPairwiseRefusesAnotherRPsHost: a Relying
+// Party can't take another Relying Party's sector, and with it that
+// Relying Party's pairwise sub values, by naming that Relying Party's
+// host in its own redirect_uris, whether or not it then uses CIBA, which
+// delivers tokens without the redirect that would otherwise prove it.
+func TestAutomaticRegistrationPairwiseRefusesAnotherRPsHost(t *testing.T) {
+	for name, extra := range map[string]map[string]any{
+		"code flow": {},
+		"CIBA": {
+			"backchannel_authentication_request_signing_alg": "ES256",
+			"backchannel_token_delivery_mode":                "poll",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fields := map[string]any{
+				"subject_type":  "pairwise",
+				"redirect_uris": []string{"https://victim-rp.example/cb"},
+			}
+			maps.Copy(fields, extra)
+			f := setupAutomaticRegistrationFixture(t, rpMetadataWith(t, fields))
+			cfg := subjectTypesConfig(fapi.SubjectTypePairwise, fapi.SubjectTypePublic, fapi.SubjectTypePairwise)
+			cfg.AllowsCIBA = true
+			_, failure := resolveWith(t, f, cfg)
+			if failure == nil || !strings.Contains(failure.Error(), "Entity Identifier's host") {
+				t.Fatalf("registration failure = %v, want the victim's host refused", failure)
+			}
+		})
+	}
+}
+
+// TestAutomaticRegistrationPairwiseCIBAUsesEntityHost: a pairwise
+// Relying Party permitted CIBA gets its Entity Identifier's host as its
+// sector, though a CIBA client derives none from its redirect URIs.
+func TestAutomaticRegistrationPairwiseCIBAUsesEntityHost(t *testing.T) {
+	f := setupAutomaticRegistrationFixture(t, rpMetadataWith(t, map[string]any{
+		"subject_type": "pairwise",
+		"backchannel_authentication_request_signing_alg": "ES256",
+		"backchannel_token_delivery_mode":                "poll",
+	}))
+	cfg := subjectTypesConfig(fapi.SubjectTypePairwise, fapi.SubjectTypePublic, fapi.SubjectTypePairwise)
+	cfg.AllowsCIBA = true
+	client, failure := resolveWith(t, f, cfg)
+	if failure != nil {
+		t.Fatalf("registration failed: %v", failure)
+	}
+	if _, ok := client.BackchannelAuthenticationRequestAlgorithm(); !ok {
+		t.Fatal("CIBA not permitted")
+	}
+	if want := hostOf(t, f.rpID); client.Sector() != want {
+		t.Errorf("Sector() = %q, want the Entity Identifier's host %q", client.Sector(), want)
+	}
 }

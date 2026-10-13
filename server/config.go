@@ -630,8 +630,9 @@ type AutomaticRegistrationConfig struct {
 	//
 	// Discovery (Server.Metadata) still advertises what the server issues
 	// to any client. An Entity Configuration's openid_provider metadata is
-	// what federation Relying Parties read: set its
-	// subject_types_supported from Server.AutomaticRegistrationSubjectTypes.
+	// what federation Relying Parties read: Server.EntityConfiguration
+	// sets its subject_types_supported to
+	// Server.AutomaticRegistrationSubjectTypes itself.
 	SubjectTypes []fapi.SubjectType
 
 	// OnResolutionFailure, if set, is told why a would-be

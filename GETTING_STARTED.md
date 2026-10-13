@@ -148,9 +148,10 @@ cfg.AutomaticRegistration.SubjectTypes = []fapi.SubjectType{fapi.SubjectTypePubl
 ```
 
 Discovery still advertises both types, since your legacy clients get
-public `sub`s; the `openid_provider` metadata in your Entity
-Configuration, which is what federation relying parties read, should
-advertise `Server.AutomaticRegistrationSubjectTypes()` instead.
+public `sub`s; `Server.EntityConfiguration` sets the `openid_provider`
+metadata's `subject_types_supported`, which is what federation relying
+parties read, to what they're offered
+(`Server.AutomaticRegistrationSubjectTypes()`).
 
 Whether your pairwise `sub`s can be mapped back to their users isn't a
 setting: it's whichever deriver you choose, so the configuration can

@@ -127,8 +127,9 @@ Relying Parties are offered pairwise subjects only, so one can't opt
 out of the default by asking for public; list both in
 `Config.AutomaticRegistration.SubjectTypes` to offer public too. That
 setting also narrows what they're offered in other configurations.
-Advertise `Server.AutomaticRegistrationSubjectTypes()` in your Entity
-Configuration's `openid_provider` metadata.
+`Server.EntityConfiguration` sets its `openid_provider` metadata's
+`subject_types_supported` to what federation Relying Parties are offered
+(`Server.AutomaticRegistrationSubjectTypes()`).
 
 ## v0.54.0
 

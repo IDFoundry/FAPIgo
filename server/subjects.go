@@ -330,8 +330,11 @@ func subjectTypeNames(types []fapi.SubjectType) []string {
 // AutomaticRegistrationSubjectTypes is the subject_types_supported to
 // advertise to automatically registered Relying Parties, in the
 // openid_provider metadata of this server's Entity Configuration: what
-// they may ask for, Config.AutomaticRegistration.SubjectTypes when set,
-// otherwise everything the server issues (as Metadata advertises).
+// they may ask for. That is Config.AutomaticRegistration.SubjectTypes
+// when set; otherwise pairwise alone under a pairwise
+// Config.Subjects.Default, and everything the server issues (as
+// Metadata advertises) under a public one. EntityConfiguration sets it
+// itself when automatic registration is configured.
 func (s *Server) AutomaticRegistrationSubjectTypes() []string {
 	types, _, _ := automaticRegistrationSubjects(s.cfg, s.deps.PairwiseSubjects)
 	return subjectTypeNames(types)

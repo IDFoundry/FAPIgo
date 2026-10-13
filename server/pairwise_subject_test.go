@@ -634,17 +634,7 @@ func TestPairwiseOnlyRefusesGrantsIssuedPublic(t *testing.T) {
 			client.SubjectType = 0 // the server's default
 			register(t, h, client)
 			first, _ := exchangeForTokensWithOfflineAccess(t, h)
-
-			h.cfg.Subjects = server.SubjectConfig{
-				Default: fapi.SubjectTypePairwise, Enforcement: tc.enforcement,
-				Derivation: pairwise.Reversible, Prefix: mustPrefix(t, testPairwisePrefix),
-			}
-			h.deps.PairwiseSubjects = newMappingDeriver()
-			srv, err := server.New(h.cfg, h.deps)
-			if err != nil {
-				t.Fatalf("New: %v", err)
-			}
-			h.server = srv
+			h = switchToPairwise(t, h, tc.enforcement)
 
 			refreshed, err := refreshWith(t, h, first.RefreshToken.Reveal(), "")
 			if tc.wantRefused {
@@ -661,6 +651,23 @@ func TestPairwiseOnlyRefusesGrantsIssuedPublic(t *testing.T) {
 			}
 		})
 	}
+}
+
+// switchToPairwise rebuilds h's server, over the same stores, with a
+// pairwise default under enforcement.
+func switchToPairwise(t *testing.T, h harness, enforcement server.SubjectTypeEnforcement) harness {
+	t.Helper()
+	h.cfg.Subjects = server.SubjectConfig{
+		Default: fapi.SubjectTypePairwise, Enforcement: enforcement,
+		Derivation: pairwise.Reversible, Prefix: mustPrefix(t, testPairwisePrefix),
+	}
+	h.deps.PairwiseSubjects = newMappingDeriver()
+	srv, err := server.New(h.cfg, h.deps)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	h.server = srv
+	return h
 }
 
 // TestSignUserInfoResponseRefusesInternalSubForPairwiseClient: a signed
@@ -732,41 +739,27 @@ func TestPairwiseCIBAOneWayResolverResolvesIDTokenHint(t *testing.T) {
 // (a public client, a lookup, a resolver), refuse a sub the client was
 // never given, and report ErrNoPairwiseSubjectLookup where nothing can.
 func TestResolveClientSubject(t *testing.T) {
-	type setup func(t *testing.T) harness
 	tests := map[string]struct {
-		setup    setup
+		setup    func(t *testing.T) harness
 		mappable bool
+		pairwise bool
 	}{
-		"public": {func(t *testing.T) harness { return newHarness(t, server.ProfileFAPISecurity, true) }, true},
+		"public": {func(t *testing.T) harness { return newHarness(t, server.ProfileFAPISecurity, true) }, true, false},
 		"reversible": {func(t *testing.T) harness {
 			return withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), pairwise.Reversible, newMappingDeriver())
-		}, true},
+		}, true, true},
 		"one-way": {func(t *testing.T) harness {
 			return withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), pairwise.OneWay, hmacDeriver(t))
-		}, false},
+		}, false, true},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			h := tc.setup(t)
 			sub := clientSubjectOf(t, h, "user-1")
-			hint := serverHint(t, h, func(c map[string]any) { c["sub"] = sub })
-			for what, resolve := range map[string]func() (string, error){
-				"sub":  func() (string, error) { return h.server.ResolveClientSubject(context.Background(), testClientID, sub) },
-				"hint": func() (string, error) { return h.server.ResolveIDTokenHint(context.Background(), hint, testClientID) },
-			} {
-				got, err := resolve()
-				if !tc.mappable {
-					if !errors.Is(err, server.ErrNoPairwiseSubjectLookup) {
-						t.Errorf("%s: %q, %v; want ErrNoPairwiseSubjectLookup", what, got, err)
-					}
-					continue
-				}
-				if err != nil || got != "user-1" {
-					t.Errorf("%s: %q, %v; want user-1", what, got, err)
-				}
-			}
-			if tc.mappable && name != "public" {
-				if _, err := h.server.ResolveClientSubject(context.Background(), testClientID, testPairwisePrefix+"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"); serverErrorCode(t, err) != server.ErrorInvalidRequest {
+			assertResolvesClientSubject(t, h, sub, tc.mappable)
+			if tc.mappable && tc.pairwise {
+				_, err := h.server.ResolveClientSubject(context.Background(), testClientID, testPairwisePrefix+"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+				if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
 					t.Errorf("a sub never given: %v, want invalid_request", err)
 				}
 			}
@@ -774,5 +767,26 @@ func TestResolveClientSubject(t *testing.T) {
 				t.Errorf("an unknown client: %v, want invalid_client", err)
 			}
 		})
+	}
+}
+
+// assertResolvesClientSubject checks that sub, user-1's sub at
+// testClientID, resolves to user-1 both directly and through an ID token
+// hint carrying it, when mappable, and otherwise reports
+// ErrNoPairwiseSubjectLookup.
+func assertResolvesClientSubject(t *testing.T, h harness, sub string, mappable bool) {
+	t.Helper()
+	hint := serverHint(t, h, func(c map[string]any) { c["sub"] = sub })
+	for what, resolve := range map[string]func() (string, error){
+		"sub":  func() (string, error) { return h.server.ResolveClientSubject(context.Background(), testClientID, sub) },
+		"hint": func() (string, error) { return h.server.ResolveIDTokenHint(context.Background(), hint, testClientID) },
+	} {
+		got, err := resolve()
+		switch {
+		case !mappable && !errors.Is(err, server.ErrNoPairwiseSubjectLookup):
+			t.Errorf("%s: %q, %v; want ErrNoPairwiseSubjectLookup", what, got, err)
+		case mappable && (err != nil || got != "user-1"):
+			t.Errorf("%s: %q, %v; want user-1", what, got, err)
+		}
 	}
 }

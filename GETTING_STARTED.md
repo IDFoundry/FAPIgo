@@ -131,6 +131,25 @@ live: changing the deriver, its key or store, the prefix, or a client's
 sector gives users new `sub`s at those clients, which relying parties
 see as new accounts.
 
+To keep public `sub`s for relying parties already integrated while
+giving every new one pairwise `sub`s, use a pairwise `Default` with
+`SubjectTypesPerClient` (as above), and register each legacy client
+with `SubjectType: fapi.SubjectTypePublic`; a client registered without
+a `SubjectType` gets the pairwise default. If relying parties also
+register automatically through OpenID Federation, offer them pairwise
+alone, so one can't ask for public `sub`s in its metadata:
+
+```go
+cfg.AutomaticRegistration.SubjectTypes = []fapi.SubjectType{fapi.SubjectTypePairwise}
+```
+
+A federation relying party asking for `public` is then refused
+registration, and one naming no `subject_type` gets pairwise.
+Discovery still advertises both types, since your legacy clients get
+public `sub`s; the `openid_provider` metadata in your Entity
+Configuration, which is what federation relying parties read, should
+advertise `Server.AutomaticRegistrationSubjectTypes()` instead.
+
 - **`pairwise.Reversible`**: the server and its resource servers can
   map a `sub` back to the user, so self-contained JWT access tokens
   work, and a client's `id_token_hint`, `login_hint` or `claims` `sub`

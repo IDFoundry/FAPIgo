@@ -72,6 +72,8 @@ func New(cfg Config, deps Dependencies) (*Server, error) {
 		if err != nil {
 			return nil, fmt.Errorf("server: config: automatic_registration: %w", err)
 		}
+		// Checked by validateDependencies (validateSubjects).
+		automaticSubjectTypes, automaticDefaultSubjectType, _ := automaticRegistrationSubjects(cfg, deps.PairwiseSubjects)
 		automaticClients, err := federation.NewAutomaticClientRepository(deps.Clients, resolver, deps.FederationHTTP, federation.AutomaticRegistrationConfig{
 			AllowedScopes:                cfg.AutomaticRegistration.AllowedScopes,
 			AuthorizationDetailsTypes:    cfg.AutomaticRegistration.AuthorizationDetailsTypes,
@@ -82,8 +84,8 @@ func New(cfg Config, deps Dependencies) (*Server, error) {
 			AllowedClientAuthMethods:     cfg.AutomaticRegistration.AllowedClientAuthMethods,
 			OnResolutionFailure:          cfg.AutomaticRegistration.OnResolutionFailure,
 			ClientAssertionAlgorithms:    cfg.Algorithms.ClientAssertion,
-			SubjectTypes:                 supportedSubjectTypes(effectiveSubjects(cfg), deps.PairwiseSubjects),
-			DefaultSubjectType:           effectiveSubjects(cfg).Default,
+			SubjectTypes:                 automaticSubjectTypes,
+			DefaultSubjectType:           automaticDefaultSubjectType,
 		}, deps.Clock)
 		if err != nil {
 			return nil, fmt.Errorf("server: config: automatic_registration: %w", err)

@@ -77,7 +77,8 @@ type requestRecord struct {
 
 	// RequiredInternalSubject is RequiredSubject mapped back to the end
 	// user's internal subject, when the client is pairwise and the
-	// server can map its subs back (pairwise.Reversible): the subject
+	// server can map its subs back (a reversible deriver, or a
+	// resolver): the subject
 	// the interaction shows the application. Empty otherwise, where
 	// RequiredSubject is already what the application gets.
 	RequiredInternalSubject string `json:"required_internal_subject,omitempty"`

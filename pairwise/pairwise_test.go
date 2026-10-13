@@ -106,19 +106,22 @@ func TestNewHMACCopiesTheKey(t *testing.T) {
 }
 
 func TestNewHMACDeclaresCustodyOnlyWhenGiven(t *testing.T) {
-	if _, ok := newHMAC(t).(keys.KeyCustodyAssurance); ok {
-		t.Error("an HMAC Deriver with no custody declared implements keys.KeyCustodyAssurance")
+	undeclared, err := pairwise.NewHMAC(testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := undeclared.KeyCustody(); got != (keys.KeyCustody{}) {
+		t.Errorf("an HMAC Deriver with no custody declared reports %+v, want none", got)
 	}
 	want := keys.KeyCustody{Durable: true, CrossInstanceConsistent: true}
 	d, err := pairwise.NewHMAC(testKey, keys.DeclareCustody(want))
 	if err != nil {
 		t.Fatal(err)
 	}
-	asserter, ok := d.(keys.KeyCustodyAssurance)
-	if !ok || asserter.KeyCustody() != want {
-		t.Errorf("custody = %+v (implements: %v), want %+v", asserter, ok, want)
+	if got := d.KeyCustody(); got != want {
+		t.Errorf("custody = %+v, want %+v", got, want)
 	}
-	if _, ok := d.(pairwise.Lookup); ok {
+	if _, ok := any(d).(pairwise.Lookup); ok {
 		t.Error("the HMAC Deriver implements Lookup")
 	}
 }
@@ -185,19 +188,6 @@ func TestCheckBody(t *testing.T) {
 	for _, bad := range []string{"", strings.Repeat("a", pairwise.MaxBodyLength+1), "a b", "a\n", "ä"} {
 		if err := pairwise.CheckBody(bad); err == nil {
 			t.Errorf("CheckBody(%.20q) succeeded", bad)
-		}
-	}
-}
-
-func TestDerivation(t *testing.T) {
-	for d, s := range map[pairwise.Derivation]string{pairwise.OneWay: "one-way", pairwise.Reversible: "reversible"} {
-		if !d.IsValid() || d.String() != s {
-			t.Errorf("%d: IsValid %v String %q", d, d.IsValid(), d.String())
-		}
-	}
-	for _, d := range []pairwise.Derivation{0, 3} {
-		if d.IsValid() || d.String() != "" {
-			t.Errorf("Derivation(%d) is valid", d)
 		}
 	}
 }

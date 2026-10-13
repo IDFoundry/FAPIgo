@@ -8,7 +8,6 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/clientassertion"
-	"github.com/idfoundry/fapigo/pairwise"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage/memstore"
 )
@@ -38,7 +37,7 @@ func fedPairwiseSubjects(t *testing.T, def fapi.SubjectType, enforcement server.
 	t.Helper()
 	return server.SubjectConfig{
 		Default: def, Enforcement: enforcement,
-		Derivation: pairwise.OneWay, Prefix: mustPrefix(t, testPairwisePrefix),
+		Prefix: mustPrefix(t, testPairwisePrefix),
 	}
 }
 

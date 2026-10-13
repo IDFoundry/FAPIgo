@@ -122,16 +122,16 @@ func register(t *testing.T, h harness, cfg storage.RegisteredClientConfig) {
 
 // withPairwise rebuilds h's server, over the same stores, with
 // testClientID registered as client and pairwise subjects derived by
-// deriver under derivation.
-func withPairwise(t *testing.T, h harness, client storage.RegisteredClientConfig, derivation pairwise.Derivation, deriver pairwise.Deriver) harness {
+// deriver.
+func withPairwise(t *testing.T, h harness, client storage.RegisteredClientConfig, deriver pairwise.Deriver) harness {
 	t.Helper()
 	register(t, h, client)
 	h.cfg.Subjects = server.SubjectConfig{
 		Default: fapi.SubjectTypePublic, Enforcement: server.SubjectTypesPerClient,
-		Derivation: derivation, Prefix: mustPrefix(t, testPairwisePrefix),
+		Prefix: mustPrefix(t, testPairwisePrefix),
 	}
 	h.deps.PairwiseSubjects = deriver
-	if derivation == pairwise.OneWay {
+	if _, reversible := deriver.(pairwise.Lookup); !reversible {
 		// A one-way pairwise sub can't be mapped back, so the internal
 		// subject stays in a server-side token record.
 		h.deps.AccessTokens = server.OpaqueAccessTokens{Store: memstore.NewAccessTokenStore()}
@@ -168,7 +168,7 @@ func mustAuthenticated(t *testing.T, user string) server.AuthenticatedSubject {
 // configured prefix and a derived body, never the internal subject), the
 // same one at every authorization, and the same one again on refresh.
 func TestPairwiseSubjectInIDTokens(t *testing.T) {
-	h := withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), pairwise.OneWay, hmacDeriver(t))
+	h := withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), hmacDeriver(t))
 	want := clientSubjectOf(t, h, "user-1")
 	if !strings.HasPrefix(want, testPairwisePrefix) || strings.Contains(want, "user-1") {
 		t.Fatalf("ClientSubject = %q, want the prefix and a derived body", want)
@@ -196,7 +196,7 @@ func TestPairwiseSubjectInIDTokens(t *testing.T) {
 func TestPublicClientKeepsItsSubject(t *testing.T) {
 	public := pairwiseClient(false)
 	public.SubjectType = fapi.SubjectTypePublic
-	h := withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), public, pairwise.OneWay, hmacDeriver(t))
+	h := withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), public, hmacDeriver(t))
 	if got := clientSubjectOf(t, h, "user-1"); got != "user-1" {
 		t.Errorf("ClientSubject = %q, want user-1", got)
 	}
@@ -210,7 +210,7 @@ func TestPublicClientKeepsItsSubject(t *testing.T) {
 // subs at clients of different sectors, the same one at clients of one
 // sector, and different users get different ones.
 func TestPairwiseSubjectBySector(t *testing.T) {
-	h := withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), pairwise.OneWay, hmacDeriver(t))
+	h := withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), hmacDeriver(t))
 	sameSector := pairwiseClient(false)
 	sameSector.ID = "same-sector-client"
 	sameSector.RedirectURIs = []fapi.RegisteredRedirectURI{"https://rp.example/other-callback"}
@@ -245,7 +245,7 @@ func TestPairwiseSubjectBySector(t *testing.T) {
 // tokens keep it too (OIDC Core §12.2); a new authorization gets the new
 // sub.
 func TestPairwiseSubjectSurvivesConfigurationChange(t *testing.T) {
-	h := withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), pairwise.OneWay, hmacDeriver(t))
+	h := withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), hmacDeriver(t))
 	before := clientSubjectOf(t, h, "user-1")
 	first, _ := exchangeForTokensWithOfflineAccess(t, h)
 
@@ -276,7 +276,7 @@ func TestPairwiseSubjectSurvivesConfigurationChange(t *testing.T) {
 // TestLegacyGrantKeepsItsSubject: a grant record written before
 // client_sub existed issues the internal subject, as it always did.
 func TestLegacyGrantKeepsItsSubject(t *testing.T) {
-	h := withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), pairwise.OneWay, hmacDeriver(t))
+	h := withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), hmacDeriver(t))
 	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
 	forgetClientSubject(t, h)
 	if got := exchangeForValidatedIDToken(t, h, code).Subject; got != "user-1" {
@@ -316,20 +316,20 @@ func forgetClientSubject(t *testing.T, h harness) {
 func TestPairwiseRequiredSubject(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
-		derivation pairwise.Derivation
+		reversible bool
 		deriver    func(t *testing.T) pairwise.Deriver
 		hint       bool
 		user       string
 		wantError  string
 	}{
-		{name: "one-way, hint, same user", derivation: pairwise.OneWay, deriver: hmacDeriver, hint: true, user: "user-1"},
-		{name: "one-way, hint, different user", derivation: pairwise.OneWay, deriver: hmacDeriver, hint: true, user: "user-2", wantError: "login_required"},
-		{name: "one-way, sub value, different user", derivation: pairwise.OneWay, deriver: hmacDeriver, user: "user-2", wantError: "login_required"},
-		{name: "reversible, hint, same user", derivation: pairwise.Reversible, deriver: func(*testing.T) pairwise.Deriver { return newMappingDeriver() }, hint: true, user: "user-1"},
-		{name: "reversible, sub value, different user", derivation: pairwise.Reversible, deriver: func(*testing.T) pairwise.Deriver { return newMappingDeriver() }, user: "user-2", wantError: "login_required"},
+		{name: "one-way, hint, same user", deriver: hmacDeriver, hint: true, user: "user-1"},
+		{name: "one-way, hint, different user", deriver: hmacDeriver, hint: true, user: "user-2", wantError: "login_required"},
+		{name: "one-way, sub value, different user", deriver: hmacDeriver, user: "user-2", wantError: "login_required"},
+		{name: "reversible, hint, same user", reversible: true, deriver: func(*testing.T) pairwise.Deriver { return newMappingDeriver() }, hint: true, user: "user-1"},
+		{name: "reversible, sub value, different user", reversible: true, deriver: func(*testing.T) pairwise.Deriver { return newMappingDeriver() }, user: "user-2", wantError: "login_required"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			h := withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), tc.derivation, tc.deriver(t))
+			h := withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), tc.deriver(t))
 			sub := clientSubjectOf(t, h, "user-1")
 			extra := map[string]string{"claims": subClaims("id_token", sub)}
 			if tc.hint {
@@ -337,7 +337,7 @@ func TestPairwiseRequiredSubject(t *testing.T) {
 			}
 			required := interactionFor(t, h, extra)
 			wantShown := sub
-			if tc.derivation == pairwise.Reversible {
+			if tc.reversible {
 				wantShown = "user-1"
 			}
 			if got := required.Interaction.RequiredSubject; got != wantShown {
@@ -358,7 +358,7 @@ func TestPairwiseRequiredSubjectUnknownToLookup(t *testing.T) {
 		"made up":          testPairwisePrefix + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
 	} {
 		t.Run(name, func(t *testing.T) {
-			h := withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), pairwise.Reversible, newMappingDeriver())
+			h := withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), newMappingDeriver())
 			err := pushPAR(t, h, map[string]string{"claims": subClaims("id_token", sub)})
 			if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
 				t.Fatalf("PushAuthorizationRequest error code = %q, want invalid_request", code)
@@ -383,7 +383,7 @@ func pushPAR(t *testing.T, h harness, extra map[string]string) error {
 // under pairwise.OneWay; a "claims" sub value is enforced either way.
 func TestPairwiseCIBA(t *testing.T) {
 	t.Run("ID token sub", func(t *testing.T) {
-		h := cibaWithPairwise(t, pairwise.OneWay, hmacDeriver(t))
+		h := cibaWithPairwise(t, hmacDeriver(t))
 		required := beginBackchannel(t, h, standardBackchannelParams(t))
 		approveBackchannelAs(t, h, required, "user-1")
 		result, err := exchangeCIBA(t, h, required.AuthReqID.String())
@@ -400,7 +400,7 @@ func TestPairwiseCIBA(t *testing.T) {
 		assertOpaqueRecordSubjects(t, store, result.AccessToken.Reveal(), "user-1", want, "rp.example")
 	})
 	t.Run("one-way refuses id_token_hint", func(t *testing.T) {
-		h := cibaWithPairwise(t, pairwise.OneWay, hmacDeriver(t))
+		h := cibaWithPairwise(t, hmacDeriver(t))
 		params := standardBackchannelParams(t)
 		delete(params, "login_hint")
 		params["id_token_hint"] = jsonRaw(t, serverHint(t, h, func(c map[string]any) { c["sub"] = clientSubjectOf(t, h, "user-1") }))
@@ -415,7 +415,7 @@ func TestPairwiseCIBA(t *testing.T) {
 		}
 	})
 	t.Run("one-way enforces a sub value", func(t *testing.T) {
-		h := cibaWithPairwise(t, pairwise.OneWay, hmacDeriver(t))
+		h := cibaWithPairwise(t, hmacDeriver(t))
 		params := standardBackchannelParams(t)
 		sub := clientSubjectOf(t, h, "user-1")
 		params["claims"] = json.RawMessage(subClaims("id_token", sub))
@@ -427,7 +427,7 @@ func TestPairwiseCIBA(t *testing.T) {
 	})
 	for _, user := range []string{"user-1", "user-2"} {
 		t.Run("reversible resolves id_token_hint, "+user, func(t *testing.T) {
-			h := cibaWithPairwise(t, pairwise.Reversible, newMappingDeriver())
+			h := cibaWithPairwise(t, newMappingDeriver())
 			params := standardBackchannelParams(t)
 			delete(params, "login_hint")
 			params["id_token_hint"] = jsonRaw(t, serverHint(t, h, func(c map[string]any) { c["sub"] = clientSubjectOf(t, h, "user-1") }))
@@ -441,10 +441,10 @@ func TestPairwiseCIBA(t *testing.T) {
 }
 
 // cibaWithPairwise is a CIBA harness whose client is pairwise.
-func cibaWithPairwise(t *testing.T, derivation pairwise.Derivation, deriver pairwise.Deriver) harness {
+func cibaWithPairwise(t *testing.T, deriver pairwise.Deriver) harness {
 	t.Helper()
 	h, _ := newHarnessWithBackchannel(t)
-	return withPairwise(t, h, pairwiseClient(true), derivation, deriver)
+	return withPairwise(t, h, pairwiseClient(true), deriver)
 }
 
 // approveBackchannelAs completes required as user.
@@ -463,7 +463,7 @@ func approveBackchannelAs(t *testing.T, h harness, required server.BackchannelIn
 // pairwise client of a server without a deriver.
 func TestPairwiseSubjectFailsClosed(t *testing.T) {
 	t.Run("deriver fails", func(t *testing.T) {
-		h := withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), pairwise.OneWay, failingDeriver{hmacDeriver(t)})
+		h := withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), failingDeriver{hmacDeriver(t)})
 		assertCompletionServerError(t, h)
 	})
 	t.Run("public client under pairwise only", func(t *testing.T) {
@@ -473,7 +473,7 @@ func TestPairwiseSubjectFailsClosed(t *testing.T) {
 		register(t, h, public)
 		h.cfg.Subjects = server.SubjectConfig{
 			Default: fapi.SubjectTypePairwise, Enforcement: server.SubjectTypesPairwiseOnly,
-			Derivation: pairwise.OneWay, Prefix: mustPrefix(t, testPairwisePrefix),
+			Prefix: mustPrefix(t, testPairwisePrefix),
 		}
 		h.deps.PairwiseSubjects = hmacDeriver(t)
 		h.deps.AccessTokens = server.OpaqueAccessTokens{Store: memstore.NewAccessTokenStore()}
@@ -528,7 +528,7 @@ func assertCompletionServerError(t *testing.T, h harness) {
 // TestClientSubjectRefusals: ClientSubject needs a registered client and
 // an authenticated subject.
 func TestClientSubjectRefusals(t *testing.T) {
-	h := withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), pairwise.OneWay, hmacDeriver(t))
+	h := withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), hmacDeriver(t))
 	if _, err := h.server.ClientSubject(context.Background(), "unknown-client", mustAuthenticated(t, "user-1")); serverErrorCode(t, err) != server.ErrorInvalidClient {
 		t.Errorf("ClientSubject(unknown client) = %v, want invalid_client", err)
 	}
@@ -569,7 +569,7 @@ func TestEmbedderGrantStoresPairwiseSubject(t *testing.T) {
 
 	h.cfg.Subjects = server.SubjectConfig{
 		Default: fapi.SubjectTypePublic, Enforcement: server.SubjectTypesPerClient,
-		Derivation: pairwise.OneWay, Prefix: mustPrefix(t, testPairwisePrefix),
+		Prefix: mustPrefix(t, testPairwisePrefix),
 	}
 	h.deps.PairwiseSubjects = hmacDeriver(t)
 	accessTokens := memstore.NewAccessTokenStore()
@@ -659,7 +659,7 @@ func switchToPairwise(t *testing.T, h harness, enforcement server.SubjectTypeEnf
 	t.Helper()
 	h.cfg.Subjects = server.SubjectConfig{
 		Default: fapi.SubjectTypePairwise, Enforcement: enforcement,
-		Derivation: pairwise.Reversible, Prefix: mustPrefix(t, testPairwisePrefix),
+		Prefix: mustPrefix(t, testPairwisePrefix),
 	}
 	h.deps.PairwiseSubjects = newMappingDeriver()
 	srv, err := server.New(h.cfg, h.deps)
@@ -677,16 +677,16 @@ func switchToPairwise(t *testing.T, h harness, enforcement server.SubjectTypeEnf
 // public client's sub isn't checked.
 func TestSignUserInfoResponseRefusesInternalSubForPairwiseClient(t *testing.T) {
 	for name, tc := range map[string]struct {
-		derivation pairwise.Derivation
+		reversible bool
 		deriver    pairwise.Deriver
 	}{
-		"one-way":    {pairwise.OneWay, hmacDeriver(t)},
-		"reversible": {pairwise.Reversible, newMappingDeriver()},
+		"one-way":    {false, hmacDeriver(t)},
+		"reversible": {true, newMappingDeriver()},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t, server.ProfileFAPISecurity, true)
 			h.cfg.Algorithms.UserInfo = fapi.ES256
-			h = withPairwise(t, h, pairwiseClient(false), tc.derivation, tc.deriver)
+			h = withPairwise(t, h, pairwiseClient(false), tc.deriver)
 			client, err := h.clients.ResolveClient(context.Background(), testClientID)
 			if err != nil {
 				t.Fatal(err)
@@ -695,7 +695,7 @@ func TestSignUserInfoResponseRefusesInternalSubForPairwiseClient(t *testing.T) {
 			for sub, wantRefused := range map[string]bool{
 				clientSub: false,
 				"user-1":  true, // the internal subject
-				testPairwisePrefix + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA": tc.derivation == pairwise.Reversible, // well-formed, never issued
+				testPairwisePrefix + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA": tc.reversible, // well-formed, never issued
 				"": true,
 			} {
 				raw, _ := json.Marshal(sub)
@@ -717,7 +717,7 @@ func TestPairwiseCIBAOneWayResolverResolvesIDTokenHint(t *testing.T) {
 	h, _ := newHarnessWithBackchannel(t)
 	resolver := subResolver{subjects: map[[3]string]string{}}
 	h.deps.PairwiseSubjectResolver = resolver
-	h = withPairwise(t, h, pairwiseClient(true), pairwise.OneWay, hmacDeriver(t))
+	h = withPairwise(t, h, pairwiseClient(true), hmacDeriver(t))
 	sub := clientSubjectOf(t, h, "user-1")
 	// The embedder records the subs its clients are given.
 	resolver.subjects[[3]string{testIssuer, "rp.example", sub}] = "user-1"
@@ -746,10 +746,10 @@ func TestResolveClientSubject(t *testing.T) {
 	}{
 		"public": {func(t *testing.T) harness { return newHarness(t, server.ProfileFAPISecurity, true) }, true, false},
 		"reversible": {func(t *testing.T) harness {
-			return withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), pairwise.Reversible, newMappingDeriver())
+			return withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), newMappingDeriver())
 		}, true, true},
 		"one-way": {func(t *testing.T) harness {
-			return withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), pairwise.OneWay, hmacDeriver(t))
+			return withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), hmacDeriver(t))
 		}, false, true},
 	}
 	for name, tc := range tests {
@@ -800,7 +800,7 @@ func TestResolveClientSubjectRefusesEmptyAndInvalidInput(t *testing.T) {
 	if got, err := public.server.ResolveClientSubject(context.Background(), testClientID, ""); serverErrorCode(t, err) != server.ErrorInvalidRequest {
 		t.Errorf("an empty sub at a public client: %q, %v; want invalid_request", got, err)
 	}
-	h := withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), pairwise.Reversible, newMappingDeriver())
+	h := withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), newMappingDeriver())
 	if _, err := h.server.ResolveClientSubject(context.Background(), testClientID, ""); serverErrorCode(t, err) != server.ErrorInvalidRequest {
 		t.Errorf("an empty sub: %v, want invalid_request", err)
 	}
@@ -816,7 +816,7 @@ func TestResolveClientSubjectRefusesEmptyAndInvalidInput(t *testing.T) {
 func TestSignUserInfoResponseChecksPairwiseSubShape(t *testing.T) {
 	h := newHarness(t, server.ProfileFAPISecurity, true)
 	h.cfg.Algorithms.UserInfo = fapi.ES256
-	h = withPairwise(t, h, pairwiseClient(false), pairwise.OneWay, hmacDeriver(t))
+	h = withPairwise(t, h, pairwiseClient(false), hmacDeriver(t))
 	client, err := h.clients.ResolveClient(context.Background(), testClientID)
 	if err != nil {
 		t.Fatal(err)

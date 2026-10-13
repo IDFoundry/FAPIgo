@@ -121,7 +121,7 @@ type BackchannelInteractionRequest struct {
 	// request named no one. For a pairwise client it is the user's own
 	// subject when the server can map pairwise subs back, and otherwise
 	// the client's pairwise sub (see InteractionRequest.RequiredSubject);
-	// under pairwise.OneWay without a Dependencies.PairwiseSubjectResolver
+	// with a one-way deriver and no Dependencies.PairwiseSubjectResolver
 	// an id_token_hint from a pairwise client is refused with
 	// invalid_request, since it can't identify anyone.
 	RequiredSubject string

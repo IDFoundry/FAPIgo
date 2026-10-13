@@ -8,14 +8,19 @@
 // sees the user's sub. A Deriver that can also map a body back to the
 // internal subject implements Lookup.
 //
-// Three Derivers are built in. NewReversible, the recommended one,
-// encrypts the internal subject into the body under two keys (an SIV
-// construction), so the OP can map any sub back without storing
-// anything; anyone holding the keys can map them all. NewMapping keeps a
-// random body per user and sector in a storage.PairwiseSubjectStore, so
-// no key exists whose loss would let anyone compute or reverse
-// identifiers. NewHMAC is one-way: nothing can map its bodies back,
-// which is the strongest unlinkability. The package imports neither
+// Three Derivers are built in. NewReversible (and NewReversibleWith,
+// over keys in an HSM or KMS), the recommended one, encrypts the
+// internal subject into the body under two keys (an SIV construction),
+// so the OP can map any sub back without storing anything; anyone
+// holding the keys can map them all. NewMapping keeps a random body per
+// user and sector in a storage.PairwiseSubjectStore, so no key exists
+// whose loss would let anyone compute or reverse identifiers. Both
+// implement Lookup, which is what makes a deployment's pairwise subs
+// reversible. NewHMAC (and NewHMACWith) is one-way: nothing can map its
+// bodies back, which is the strongest unlinkability. Whether subs can
+// be mapped back is never configured separately: it is whether the
+// Deriver implements Lookup, so the configuration can't claim more
+// unlinkability than the Deriver gives. The package imports neither
 // server nor resource, so both can use the same deriver without one
 // importing the other.
 package pairwise
@@ -25,41 +30,6 @@ import (
 	"fmt"
 	"unicode/utf8"
 )
-
-// Derivation is whether a deployment's pairwise subjects can be mapped
-// back to the internal subject by the OP. Its zero value is no
-// derivation at all, which a configuration that can issue pairwise
-// subjects refuses: the choice is stated, never defaulted.
-type Derivation uint8
-
-const (
-	_ Derivation = iota
-
-	// OneWay derivation can't be reversed, even by the OP: a leaked key
-	// only lets an attacker test guesses at internal subjects. NewHMAC
-	// is OneWay.
-	OneWay
-
-	// Reversible derivation can be mapped back to the internal subject by
-	// the OP, through Lookup. NewReversible and NewMapping are Reversible.
-	Reversible
-)
-
-// String returns "one-way" or "reversible", or "" if d is not a
-// recognized Derivation.
-func (d Derivation) String() string {
-	switch d {
-	case OneWay:
-		return "one-way"
-	case Reversible:
-		return "reversible"
-	default:
-		return ""
-	}
-}
-
-// IsValid reports whether d is OneWay or Reversible.
-func (d Derivation) IsValid() bool { return d == OneWay || d == Reversible }
 
 // MaxPrefixLength is the longest Prefix NewPrefix accepts, in bytes.
 const MaxPrefixLength = 16
@@ -157,27 +127,40 @@ type Deriver interface {
 // to the internal subject it was derived from: LookupInternalSubject
 // returns the internal subject whose body under issuer and sector is
 // body, or an error wrapping ErrSubjectNotFound if there is none (any
-// other error means the lookup itself failed). A Reversible
-// deployment's Deriver must implement it.
+// other error means the lookup itself failed). A Deriver that implements
+// it makes a deployment's pairwise subs reversible by the OP: self-
+// contained access tokens, and hints that name a user by their pairwise
+// sub, then work.
 type Lookup interface {
 	LookupInternalSubject(ctx context.Context, issuer, sector, body string) (string, error)
 }
 
-// SubjectResolver maps a pairwise sub a OneWay deployment issued back to
-// the internal subject, from a mapping the embedder keeps itself (a table
-// of the subs it issued, say), since a OneWay Deriver can't.
-// ResolveSubject returns the internal subject whose sub, under issuer and
-// sector, is sub (the whole sub, prefix included), or an error wrapping
-// ErrSubjectNotFound if there is none; any other error means the mapping
-// couldn't be read, and is never read as "no such subject".
+// SubjectResolver maps a pairwise sub back to the internal subject, from
+// a mapping the embedder keeps itself (a table of the subs it issued,
+// say), for a deployment whose Deriver is one-way (doesn't implement
+// Lookup). ResolveSubject returns the internal subject whose sub, under
+// issuer and sector, is sub (the whole sub, prefix included), or an
+// error wrapping ErrSubjectNotFound if there is none; any other error
+// means the mapping couldn't be read, and is never read as "no such
+// subject".
 //
-// It's what lets a OneWay deployment issue self-contained (JWT) access
-// tokens: every resource server verifying them needs it
-// (resource.Dependencies.SubjectResolver), and the authorization server
-// is told one is in use (server.Dependencies.PairwiseSubjectResolver),
-// though the server itself never calls it. Under production assurance it
-// must implement keys.KeyCustodyAssurance, declaring Durable (and
-// CrossInstanceConsistent for a fleet).
+// It's what lets a one-way deployment issue self-contained (JWT) access
+// tokens, and resolve hints that name a user by their pairwise sub: the
+// authorization server calls it for hints and for
+// server.Server.ResolveClientSubject and ResolveIDTokenHint
+// (server.Dependencies.PairwiseSubjectResolver), and every resource
+// server verifying those access tokens needs the same one.
+//
+// FAPIgo can't check a resolver against the subs it actually issued: it
+// trusts it. It must map exactly the subs this deployment issued (record
+// each one as Server.ClientSubject returns it), and fail rather than
+// guess. Every party holding it can reverse every pairwise sub, so it
+// belongs only to the OP and its own resource servers (OpenID Connect
+// Core §8.1: a pairwise identifier "MUST NOT be reversible by any party
+// other than the OpenID Provider"); pairwise.NewMapping is a
+// ready-made, store-backed alternative to keeping one yourself. Under
+// production assurance it must implement keys.KeyCustodyAssurance,
+// declaring Durable (and CrossInstanceConsistent for a fleet).
 type SubjectResolver interface {
 	ResolveSubject(ctx context.Context, issuer, sector, sub string) (string, error)
 }

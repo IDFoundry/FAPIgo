@@ -71,10 +71,10 @@ subjects. Nothing changes for one that keeps `PublicSubjects()`.
   client was given. Compare user IDs a client sends (in a path, a body,
   or an ID token) with `ClientSubject`: for a pairwise client they're
   no longer `Subject`. A standalone resource server verifying JWT access
-  tokens from a `pairwise.Reversible` server sets
+  tokens from a server with a reversible deriver sets
   `resource.Dependencies.PairwiseSubjects` and `Config.PairwisePrefix`;
   `serverresource.NewVerifier` wires both.
-- **`pairwise.OneWay`** requires `server.OpaqueAccessTokens`: a one-way
+- **A one-way deriver** (`pairwise.NewHMAC`) requires `server.OpaqueAccessTokens`: a one-way
   `sub` can't be mapped back, so the internal subject must stay in a
   server-side token record. To issue JWT access tokens instead, keep
   your own record of the subs you issue as a `pairwise.SubjectResolver`,

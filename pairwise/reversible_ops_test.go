@@ -222,18 +222,17 @@ func TestNewReversibleWithRefusesNilOps(t *testing.T) {
 func TestNewReversibleWithDeclaresCustody(t *testing.T) {
 	ops := newHSMOps(t, testMACKey, testEncKey)
 	plain := newReversibleWith(t, ops)
-	if _, ok := plain.(keys.KeyCustodyAssurance); ok {
-		t.Error("undeclared deriver implements KeyCustodyAssurance")
+	if got := plain.(keys.KeyCustodyAssurance).KeyCustody(); got != (keys.KeyCustody{}) {
+		t.Errorf("undeclared deriver reports custody %+v, want none", got)
 	}
 	d, err := pairwise.NewReversibleWith(ops, keys.DeclareCustody(keys.KeyCustody{Durable: true, CrossInstanceConsistent: true}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	assured, ok := d.(keys.KeyCustodyAssurance)
-	if !ok || !assured.KeyCustody().Durable || !assured.KeyCustody().CrossInstanceConsistent {
-		t.Errorf("declared deriver custody = %v, want Durable and CrossInstanceConsistent", d)
+	if got := d.KeyCustody(); !got.Durable || !got.CrossInstanceConsistent {
+		t.Errorf("declared deriver custody = %+v, want Durable and CrossInstanceConsistent", got)
 	}
-	if _, ok := d.(pairwise.Lookup); !ok {
+	if _, ok := any(d).(pairwise.Lookup); !ok {
 		t.Error("declared deriver doesn't implement Lookup")
 	}
 }

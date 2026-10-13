@@ -217,7 +217,7 @@ func meetsRequiredSubject(required, clientSub string) bool {
 // backchannelRequiredInternalSubject is requiredInternalSubject for a
 // CIBA request. An id_token_hint is how a CIBA request identifies its
 // end user (CIBA Core §7.1), so the server must find the user from it:
-// from a pairwise client whose subs it can't map back (pairwise.OneWay
+// from a pairwise client whose subs it can't map back (a one-way deriver
 // with no Dependencies.PairwiseSubjectResolver), the hint can't identify
 // anyone, and is invalid_request. Its login_hint and login_hint_token forms are
 // unaffected, and a "claims" sub value is still enforced at completion.

@@ -120,7 +120,6 @@ if err != nil {
 cfg.Subjects = server.SubjectConfig{
 	Default:     fapi.SubjectTypePairwise, // or Public, with pairwise clients by registration
 	Enforcement: server.SubjectTypesPerClient,
-	Derivation:  pairwise.Reversible, // the keys map a sub back to its user
 	Prefix:      prefix,
 }
 deps.PairwiseSubjects = pairwiseSubjects
@@ -150,10 +149,15 @@ public `sub`s; the `openid_provider` metadata in your Entity
 Configuration, which is what federation relying parties read, should
 advertise `Server.AutomaticRegistrationSubjectTypes()` instead.
 
-- **`pairwise.Reversible`**: the server and its resource servers can
-  map a `sub` back to the user, so self-contained JWT access tokens
-  work, and a client's `id_token_hint`, `login_hint` or `claims` `sub`
-  value resolves to the user. Two derivers do this:
+Whether your pairwise `sub`s can be mapped back to their users isn't a
+setting: it's whichever deriver you choose, so the configuration can
+never promise more unlinkability than the deriver gives.
+
+- **Reversible derivers** (they implement `pairwise.Lookup`): the
+  server and its resource servers can map a `sub` back to the user, so
+  self-contained JWT access tokens work, and a client's
+  `id_token_hint`, `login_hint` or `claims` `sub` value resolves to the
+  user. Two derivers do this:
   - **`pairwise.NewReversible`** (recommended) encrypts the internal
     subject into the `sub`, so it needs no storage. Anyone holding both
     keys can map every pairwise `sub` ever issued back to its user, and
@@ -174,7 +178,7 @@ advertise `Server.AutomaticRegistrationSubjectTypes()` instead.
   - **`pairwise.NewMapping`** keeps a random `sub` per user and sector
     in a `storage.PairwiseSubjectStore`, so there's no key whose leak
     reverses them all, at the cost of a durable, shared store.
-- **`pairwise.OneWay`** (`pairwise.NewHMAC` over a 32-byte secret key):
+- **A one-way deriver** (`pairwise.NewHMAC` over a 32-byte secret key):
   nothing in FAPIgo can map a `sub` back, which is the strongest
   unlinkability. The internal subject then has to stay server-side, so
   `New` requires `server.OpaqueAccessTokens`; and a pairwise hint can
@@ -836,9 +840,10 @@ the same.
 A JWT access token's `sub` is pairwise, so the verifier needs a way to
 map it back: `serverresource.NewVerifier` wires the server's own. A
 separate resource server sets either `Dependencies.PairwiseSubjects`
-(the server's `pairwise.Reversible` deriver: `pairwise.NewReversible`
-with the same keys, or `pairwise.NewMapping` over the same store) with `Config.PairwisePrefix`
-(the server's prefix), or, for a `pairwise.OneWay` server,
+(the server's reversible deriver: `pairwise.NewReversible` with the
+same keys, or `pairwise.NewMapping` over the same store) with
+`Config.PairwisePrefix` (the server's prefix), or, for a server with a
+one-way deriver,
 `Dependencies.SubjectResolver` (the same resolver the server declares).
 Without one, a pairwise JWT access token is refused with `server_error`
 rather than given its pairwise `sub` as `Subject`. An opaque access

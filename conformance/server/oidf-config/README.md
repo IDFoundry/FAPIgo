@@ -454,7 +454,7 @@ AS pairwise runs exactly the AS baseline plan and variant
 (`private_key_jwt`, DPoP, plain FAPI, OpenID Connect), with alias
 `gofapi-pairwise`, against `conformance-as-pairwise`: `cmd/conformance-as`
 started with `-pairwise-subjects`. That flag sets `Config.Subjects` to
-pairwise for every client (`pairwise.Reversible`, prefix `ppid:`) and
+pairwise for every client (prefix `ppid:`) and
 derives subs with `pairwise.NewReversible`, under two keys generated at
 startup and kept only in memory. So:
 

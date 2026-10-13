@@ -16,7 +16,7 @@ func fuzzReversible(f *testing.F) (pairwise.Deriver, pairwise.Lookup) {
 	if err != nil {
 		f.Fatal(err)
 	}
-	return d, d.(pairwise.Lookup)
+	return d, d
 }
 
 // FuzzReversibleRoundTrip: every Input NewInput accepts with a subject

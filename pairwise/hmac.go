@@ -20,10 +20,12 @@ const hmacDomain = "fapigo ppid h1"
 // an HMAC-SHA-256 output, base64url-encoded without padding.
 const HMACBodyLength = 43
 
-// NewHMAC returns the built-in OneWay Deriver: HMAC-SHA-256 under key,
+// NewHMAC returns the built-in one-way Deriver: HMAC-SHA-256 under key,
 // over a domain label and the Input's issuer, sector and internal
 // subject, each length-prefixed so no two Inputs share an encoding. The
 // body is the 43-character base64url encoding of the 32-byte output.
+// Nothing, the OP included, can map a body back to its user: the
+// returned HMACDeriver doesn't implement Lookup.
 //
 // key must be 32 random bytes, used for nothing else. A key that is a
 // single byte repeated (all zeros, say) is refused as a placeholder. The
@@ -31,19 +33,16 @@ const HMACBodyLength = 43
 // pairwise client, so keep it, and back it up, like a signing key.
 //
 // opts declare the key's custody, as for keys.NewKeyManagerFromSigners:
-// the returned Deriver implements keys.KeyCustodyAssurance only when one
-// is given, and server.AssuranceProduction requires a Durable one (and
+// server.AssuranceProduction requires a Durable one (and
 // CrossInstanceConsistent for a horizontally scaled deployment), since
-// every instance must derive the same sub.
-func NewHMAC(key []byte, opts ...keys.CustodyOption) (Deriver, error) {
+// every instance must derive the same sub; without one, KeyCustody
+// reports none.
+func NewHMAC(key []byte, opts ...keys.CustodyOption) (*HMACDeriver, error) {
 	if err := sealkeys.Check("pairwise: HMAC", [][]byte{key}); err != nil {
 		return nil, err
 	}
-	d := hmacDeriver{key: append([]byte(nil), key...)}
-	if custody, declared := custodyFrom(opts); declared {
-		return custodyHMACDeriver{hmacDeriver: d, custody: custody}, nil
-	}
-	return d, nil
+	custody, _ := custodyFrom(opts)
+	return &HMACDeriver{key: append([]byte(nil), key...), custody: custody}, nil
 }
 
 // custodyFrom applies opts to a KeyCustody, reporting whether any
@@ -60,13 +59,15 @@ func custodyFrom(opts []keys.CustodyOption) (keys.KeyCustody, bool) {
 	return custody, declared
 }
 
-// hmacDeriver is NewHMAC's Deriver without a custody declaration.
-type hmacDeriver struct {
-	key []byte
+// HMACDeriver is the built-in one-way Deriver NewHMAC returns. It
+// doesn't implement Lookup.
+type HMACDeriver struct {
+	key     []byte
+	custody keys.KeyCustody
 }
 
 // DerivePairwiseSubject implements Deriver.
-func (d hmacDeriver) DerivePairwiseSubject(ctx context.Context, in Input) (string, error) {
+func (d *HMACDeriver) DerivePairwiseSubject(ctx context.Context, in Input) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -80,15 +81,9 @@ func (d hmacDeriver) DerivePairwiseSubject(ctx context.Context, in Input) (strin
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
 }
 
-// custodyHMACDeriver is an hmacDeriver whose caller declared its key
-// custody.
-type custodyHMACDeriver struct {
-	hmacDeriver
-	custody keys.KeyCustody
-}
-
-// KeyCustody implements keys.KeyCustodyAssurance.
-func (d custodyHMACDeriver) KeyCustody() keys.KeyCustody { return d.custody }
+// KeyCustody implements keys.KeyCustodyAssurance: the custody NewHMAC's
+// options declared, or none.
+func (d *HMACDeriver) KeyCustody() keys.KeyCustody { return d.custody }
 
 // writeLengthPrefixed writes field to w (a hash, or a buffer that
 // can't fail) as its length, a 4-byte big endian integer, followed by

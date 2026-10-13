@@ -142,9 +142,10 @@ type InteractionRequest struct {
 	//
 	// For a client with pairwise subjects (Config.Subjects) the request
 	// names the user by the pairwise sub that client was given. When the
-	// server can map pairwise subs back (pairwise.Reversible), this is
-	// the user's own subject, as for any other client. Under
-	// pairwise.OneWay it is the client's pairwise sub, which can't be
+	// server can map pairwise subs back (Dependencies.PairwiseSubjects
+	// implements pairwise.Lookup, or a PairwiseSubjectResolver is set),
+	// this is the user's own subject, as for any other client. Otherwise
+	// it is the client's pairwise sub, which can't be
 	// mapped to a user: compare it with Server.ClientSubject for the
 	// user who logs in.
 	//

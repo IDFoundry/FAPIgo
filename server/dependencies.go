@@ -206,24 +206,31 @@ type Dependencies struct {
 	AttesterTrust AttesterTrust
 
 	// PairwiseSubjects derives the body of each pairwise sub (see
-	// Config.Subjects and package pairwise): pairwise.NewHMAC, or a
-	// Deriver of the embedder's own. Required when Config.Subjects'
-	// Default is pairwise, and nil otherwise means no client can have
-	// pairwise subjects. Under AssuranceProduction it must declare
+	// Config.Subjects and package pairwise): pairwise.NewReversible or
+	// pairwise.NewReversibleWith (recommended; reversible), pairwise.NewMapping
+	// (reversible, store-backed), pairwise.NewHMAC or pairwise.NewHMACWith
+	// (one-way), or a Deriver of the embedder's own (run
+	// pairwise.TestDeriverContract against it). Whether pairwise subs can
+	// be mapped back to their users is whether it implements
+	// pairwise.Lookup. Required when Config.Subjects' Default is pairwise,
+	// and nil otherwise means no client can have pairwise subjects. Under
+	// AssuranceProduction it must declare
 	// Durable key custody (keys.KeyCustodyAssurance), and
 	// CrossInstanceConsistent with DeploymentHorizontallyScaled, since
 	// every instance and restart must derive the same sub.
 	PairwiseSubjects pairwise.Deriver
 
-	// PairwiseSubjectResolver declares that every resource server
-	// verifying this server's access tokens maps a pairwise sub back to
-	// its end user through this resolver (resource.Dependencies.SubjectResolver),
-	// backed by the embedder's own mapping. It only matters under
-	// pairwise.OneWay, where a sub can't otherwise be mapped back: with
-	// it, New accepts self-contained (JWT) access tokens, which it
-	// otherwise refuses there. The server never calls it;
-	// serverresource.NewVerifier passes it to the verifier it builds,
-	// and a separate resource server must be given the same one.
+	// PairwiseSubjectResolver maps a pairwise sub back to its end user
+	// from the embedder's own mapping (see pairwise.SubjectResolver for
+	// what it must guarantee; FAPIgo trusts it). It only applies when
+	// PairwiseSubjects is one-way (doesn't implement pairwise.Lookup),
+	// where a sub can't otherwise be mapped back: with it, New accepts
+	// self-contained (JWT) access tokens, which it otherwise refuses
+	// there, and the server uses it to resolve hints that name a user by
+	// their pairwise sub (and in ResolveClientSubject and
+	// ResolveIDTokenHint). serverresource.NewVerifier passes it to the
+	// verifier it builds; a separate resource server must be given the
+	// same one, and must be the OP's own.
 	// Under AssuranceProduction it must declare Durable custody
 	// (keys.KeyCustodyAssurance), and CrossInstanceConsistent with
 	// DeploymentHorizontallyScaled. Leave it nil otherwise.

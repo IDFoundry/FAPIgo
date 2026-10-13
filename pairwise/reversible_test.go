@@ -286,19 +286,19 @@ func TestReversibleHonoursCancellation(t *testing.T) {
 }
 
 func TestNewReversibleDeclaresCustodyOnlyWhenGiven(t *testing.T) {
-	if _, ok := newReversible(t).(keys.KeyCustodyAssurance); ok {
-		t.Error("a reversible Deriver with no custody declared implements keys.KeyCustodyAssurance")
+	if got := newReversible(t).(keys.KeyCustodyAssurance).KeyCustody(); got != (keys.KeyCustody{}) {
+		t.Errorf("a reversible Deriver with no custody declared reports %+v, want none", got)
 	}
 	want := keys.KeyCustody{Durable: true, CrossInstanceConsistent: true}
 	d, err := pairwise.NewReversible(testMACKey, testEncKey, keys.DeclareCustody(want))
 	if err != nil {
 		t.Fatal(err)
 	}
-	asserter, ok := d.(keys.KeyCustodyAssurance)
+	asserter, ok := any(d).(keys.KeyCustodyAssurance)
 	if !ok || asserter.KeyCustody() != want {
 		t.Errorf("custody = %+v (implements: %v), want %+v", asserter, ok, want)
 	}
-	if _, ok := d.(pairwise.Lookup); !ok {
+	if _, ok := any(d).(pairwise.Lookup); !ok {
 		t.Error("a reversible Deriver with custody declared doesn't implement pairwise.Lookup")
 	}
 }

@@ -476,7 +476,6 @@ func pairwiseSubjects(enabled bool) (server.SubjectConfig, pairwise.Deriver, err
 	return server.SubjectConfig{
 		Default:     fapi.SubjectTypePairwise,
 		Enforcement: server.SubjectTypesPerClient,
-		Derivation:  pairwise.Reversible,
 		Prefix:      prefix,
 	}, deriver, nil
 }

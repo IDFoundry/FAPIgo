@@ -19,7 +19,7 @@ import (
 // Use it to compare a user the application knows with a sub a client
 // sent: a pairwise client's login_hint, the RequiredSubject of an
 // interaction when the server can't map a pairwise sub back to a user
-// (pairwise.OneWay), or the sub of an ID token VerifyIDTokenHint
+// (a one-way deriver, no resolver), or the sub of an ID token VerifyIDTokenHint
 // returned. Errors are *Error: an unknown client, a zero subject, or a
 // pairwise subject that couldn't be derived.
 func (s *Server) ClientSubject(ctx context.Context, clientID fapi.ClientID, subject AuthenticatedSubject) (string, error) {
@@ -40,9 +40,9 @@ func (s *Server) ClientSubject(ctx context.Context, clientID fapi.ClientID, subj
 // ResolveClientSubject maps sub, a sub the client clientID was given
 // (sent back as a login_hint, say), to its end user's internal subject:
 // sub itself for a client whose end users get public subjects; for a
-// pairwise client, through Dependencies.PairwiseSubjects' pairwise.Lookup
-// (pairwise.Reversible) or Dependencies.PairwiseSubjectResolver
-// (pairwise.OneWay). It only says whose sub it is, never that the user
+// pairwise client, through Dependencies.PairwiseSubjects when it
+// implements pairwise.Lookup, or otherwise
+// Dependencies.PairwiseSubjectResolver. It only says whose sub it is, never that the user
 // is authenticated now.
 //
 // It returns an error wrapping ErrNoPairwiseSubjectLookup for a pairwise
@@ -147,18 +147,19 @@ func (s *Server) clientSubjectFor(ctx context.Context, client storage.Registered
 }
 
 // ErrNoPairwiseSubjectLookup reports that this server can't map a
-// client's pairwise sub back to its end user: Config.Subjects' Derivation
-// is pairwise.OneWay, and no Dependencies.PairwiseSubjectResolver is set.
+// client's pairwise sub back to its end user: Dependencies.PairwiseSubjects
+// is one-way (doesn't implement pairwise.Lookup, as pairwise.NewHMAC's
+// doesn't), and no Dependencies.PairwiseSubjectResolver is set.
 // ResolveClientSubject and ResolveIDTokenHint return it for a pairwise
 // client then; check a user the application knows with ClientSubject
 // instead.
-var ErrNoPairwiseSubjectLookup = errors.New("pairwise subjects are derived one way (pairwise.OneWay) and no pairwise_subject_resolver is set, so a pairwise sub can't be mapped back to its end user")
+var ErrNoPairwiseSubjectLookup = errors.New("pairwise subjects are derived one way (pairwise_subjects doesn't implement pairwise.Lookup) and no pairwise_subject_resolver is set, so a pairwise sub can't be mapped back to its end user")
 
 // internalSubjectFor maps sub, as the client client sees it, back to the
 // end user's internal subject: sub itself for a public client; for a
-// pairwise client, through Dependencies.PairwiseSubjects' pairwise.Lookup
-// under pairwise.Reversible, or through Dependencies.PairwiseSubjectResolver
-// under pairwise.OneWay. It returns ErrNoPairwiseSubjectLookup, unwrapped, when
+// pairwise client, through Dependencies.PairwiseSubjects when it
+// implements pairwise.Lookup, or otherwise through
+// Dependencies.PairwiseSubjectResolver. It returns ErrNoPairwiseSubjectLookup, unwrapped, when
 // the server can't map pairwise subs back, and otherwise an
 // invalid_request *Error for a sub that names no end user of this server
 // at this client, or a server_error *Error when the mapping couldn't be
@@ -173,7 +174,6 @@ func (s *Server) internalSubjectFor(ctx context.Context, client storage.Register
 	}
 	subjects := effectiveSubjects(s.cfg)
 	lookup, canLookUp := s.deps.PairwiseSubjects.(pairwise.Lookup)
-	canLookUp = canLookUp && subjects.Derivation == pairwise.Reversible
 	resolver := s.deps.PairwiseSubjectResolver
 	if !canLookUp && resolver == nil {
 		return "", ErrNoPairwiseSubjectLookup
@@ -216,7 +216,7 @@ func distinctClientSubject(clientSub, internal string) string {
 // returns "" when there is nothing to map (no required subject, or a
 // public client, whose view is the internal subject), and unmappable
 // when the client is pairwise but the server can't map its subs back
-// (pairwise.OneWay): then the application gets the client's view, which
+// (a one-way deriver, no resolver): then the application gets the client's view, which
 // it can compare with ClientSubject. A pairwise sub this server never
 // issued to the client is invalid_request.
 func (s *Server) requiredInternalSubject(ctx context.Context, client storage.RegisteredClient, required string) (internal string, unmappable bool, mapErr *Error) {

@@ -283,9 +283,9 @@ func TestNewVerifierRefusesInvalidDeployment(t *testing.T) {
 	}
 }
 
-// TestNewVerifierResolvesPairwiseSubjects: under pairwise.Reversible the
+// TestNewVerifierResolvesPairwiseSubjects: with a reversible deriver the
 // verifier looks a self-contained token's pairwise sub up through the
-// server's own deriver and prefix; under pairwise.OneWay the server's
+// server's own deriver and prefix; with a one-way deriver the server's
 // opaque records already keep the internal subject.
 func TestNewVerifierResolvesPairwiseSubjects(t *testing.T) {
 	now := time.Now()
@@ -295,18 +295,17 @@ func TestNewVerifierResolvesPairwiseSubjects(t *testing.T) {
 	}
 	mapping, oneWay := testDerivers(t)
 	for name, tc := range map[string]struct {
-		derivation   pairwise.Derivation
 		deriver      pairwise.Deriver
 		accessTokens server.AccessTokenIssuer
 	}{
-		"reversible, jwt":    {pairwise.Reversible, mapping, jwtAccessTokens(t)},
-		"one-way, opaque":    {pairwise.OneWay, oneWay, server.OpaqueAccessTokens{Store: memstore.NewAccessTokenStore()}},
-		"reversible, opaque": {pairwise.Reversible, mapping, server.OpaqueAccessTokens{Store: memstore.NewAccessTokenStore()}},
+		"reversible, jwt":    {mapping, jwtAccessTokens(t)},
+		"one-way, opaque":    {oneWay, server.OpaqueAccessTokens{Store: memstore.NewAccessTokenStore()}},
+		"reversible, opaque": {mapping, server.OpaqueAccessTokens{Store: memstore.NewAccessTokenStore()}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
 			cfg := serverConfig(t)
-			cfg.Subjects = server.SubjectConfig{Default: fapi.SubjectTypePairwise, Enforcement: server.SubjectTypesPerClient, Derivation: tc.derivation, Prefix: prefix}
+			cfg.Subjects = server.SubjectConfig{Default: fapi.SubjectTypePairwise, Enforcement: server.SubjectTypesPerClient, Prefix: prefix}
 			deps := serverDependencies(t, tc.accessTokens, now)
 			deps.PairwiseSubjects = tc.deriver
 			verifier, err := serverresource.NewVerifier(cfg, deps, serverresource.Options{})
@@ -391,7 +390,7 @@ func (r *mapResolver) ResolveSubject(_ context.Context, _, _, sub string) (strin
 	return "alice", nil
 }
 
-// TestNewVerifierPassesTheServersSubjectResolver: under pairwise.OneWay
+// TestNewVerifierPassesTheServersSubjectResolver: with a one-way deriver
 // with JWT access tokens, the verifier resolves pairwise subs through
 // the resolver the server declares.
 func TestNewVerifierPassesTheServersSubjectResolver(t *testing.T) {
@@ -401,7 +400,7 @@ func TestNewVerifierPassesTheServersSubjectResolver(t *testing.T) {
 	}
 	_, oneWay := testDerivers(t)
 	cfg := serverConfig(t)
-	cfg.Subjects = server.SubjectConfig{Default: fapi.SubjectTypePairwise, Enforcement: server.SubjectTypesPerClient, Derivation: pairwise.OneWay, Prefix: prefix}
+	cfg.Subjects = server.SubjectConfig{Default: fapi.SubjectTypePairwise, Enforcement: server.SubjectTypesPerClient, Prefix: prefix}
 	accessTokens := jwtAccessTokens(t)
 	deps := serverDependencies(t, accessTokens, time.Now())
 	deps.PairwiseSubjects = oneWay

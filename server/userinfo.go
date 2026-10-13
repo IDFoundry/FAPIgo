@@ -54,7 +54,10 @@ var userInfoReservedClaims = []string{"iss", "aud"}
 // must carry Config.Subjects' Prefix and a well-formed body. With an
 // empty Prefix, which can't tell the two apart, it must also be one
 // Dependencies.PairwiseSubjects (or the resolver) maps back under the
-// client's current sector. Anything else fails with ErrorServerError.
+// client's current sector, so after a client's sector changes, signed
+// UserInfo for a grant issued under the old one fails closed until the
+// client authorizes again; a non-empty Prefix doesn't have this
+// limitation. Anything else fails with ErrorServerError.
 // This is a backstop: compare the sub with the access token's
 // ClientSubject before calling it, as serverresource.SignUserInfoResponse
 // does.

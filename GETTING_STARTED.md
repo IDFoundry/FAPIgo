@@ -119,7 +119,7 @@ pairwiseSubjects, err := pairwise.NewReversible(macKey, encKey,
 if err != nil {
 	log.Fatal(err)
 }
-prefix, err := pairwise.NewPrefix("ppid:") // must be set; "" only with a reversible deriver
+prefix, err := pairwise.NewPrefix("ppid:") // must be set; "" only with a reversible deriver or a declared resolver
 if err != nil {
 	log.Fatal(err)
 }
@@ -137,7 +137,12 @@ sector gives users new `sub`s at those clients, which relying parties
 see as new accounts. Existing grants keep the `sub` they were issued
 with, except that changing the prefix ends every pairwise grant at its
 next use (`invalid_grant`), since resource servers resolve `sub`s under
-the current prefix.
+the current prefix. One more case fails closed: with an empty prefix,
+`Server.SignUserInfoResponse` can only tell a pairwise `sub` from an
+internal subject by mapping it back under the client's current sector,
+so after a client's sector changes, signed UserInfo for its existing
+grants fails with `server_error` until they're reauthorized. A
+non-empty prefix avoids this.
 
 To keep public `sub`s for relying parties already integrated while
 giving every new one pairwise `sub`s, use a pairwise `Default` with

@@ -37,6 +37,46 @@ func (s *Server) ClientSubject(ctx context.Context, clientID fapi.ClientID, subj
 	return sub, nil
 }
 
+// ResolveClientSubject maps sub, a sub the client clientID was given
+// (sent back as a login_hint, say), to its end user's internal subject:
+// sub itself for a client whose end users get public subjects; for a
+// pairwise client, through Dependencies.PairwiseSubjects' pairwise.Lookup
+// (pairwise.Reversible) or Dependencies.PairwiseSubjectResolver
+// (pairwise.OneWay). It only says whose sub it is, never that the user
+// is authenticated now.
+//
+// It returns an error wrapping ErrNoPairwiseSubjectLookup for a pairwise
+// client when nothing can map a pairwise sub back; check a user the
+// application knows with ClientSubject instead. Other errors are *Error:
+// an unknown client (invalid_client), a sub this server never gave the
+// client (invalid_request), or a mapping that couldn't be read
+// (server_error).
+func (s *Server) ResolveClientSubject(ctx context.Context, clientID fapi.ClientID, sub string) (string, error) {
+	client, err := s.deps.Clients.ResolveClient(ctx, clientID)
+	if err != nil {
+		return "", newError(ErrorInvalidClient, 401, "client is not registered", err)
+	}
+	if sub == "" {
+		return "", newError(ErrorInvalidRequest, 400, "sub is empty", nil)
+	}
+	return s.internalSubjectFor(ctx, client, sub)
+}
+
+// ResolveIDTokenHint is VerifyIDTokenHint followed by
+// ResolveClientSubject: the internal subject of the end user hint, an ID
+// token this server issued to clientID, is about. As with
+// VerifyIDTokenHint, its expiry isn't checked, so the result only says
+// who the token was about, never that the user is authenticated now. For
+// RP-Initiated Logout with no session to match against, say. Errors are
+// VerifyIDTokenHint's and ResolveClientSubject's.
+func (s *Server) ResolveIDTokenHint(ctx context.Context, hint string, clientID fapi.ClientID) (string, error) {
+	sub, err := s.VerifyIDTokenHint(ctx, hint, clientID)
+	if err != nil {
+		return "", err
+	}
+	return s.ResolveClientSubject(ctx, clientID, sub)
+}
+
 // subjectAtClient is clientSubjectFor for the client clientID. The
 // client is resolved even when the server's configuration has no
 // pairwise default or deriver: a client registered for pairwise subjects
@@ -106,16 +146,19 @@ func (s *Server) clientSubjectFor(ctx context.Context, client storage.Registered
 	return sub, sector, nil
 }
 
-// errNoSubjectLookup reports that the server can't map a client's
-// pairwise sub back to its end user: Config.Subjects' Derivation is
-// pairwise.OneWay, and no Dependencies.PairwiseSubjectResolver is set.
-var errNoSubjectLookup = errors.New("pairwise subjects are derived one way (pairwise.OneWay) and no pairwise_subject_resolver is set, so a pairwise sub can't be mapped back to its end user")
+// ErrNoPairwiseSubjectLookup reports that this server can't map a
+// client's pairwise sub back to its end user: Config.Subjects' Derivation
+// is pairwise.OneWay, and no Dependencies.PairwiseSubjectResolver is set.
+// ResolveClientSubject and ResolveIDTokenHint return it for a pairwise
+// client then; check a user the application knows with ClientSubject
+// instead.
+var ErrNoPairwiseSubjectLookup = errors.New("pairwise subjects are derived one way (pairwise.OneWay) and no pairwise_subject_resolver is set, so a pairwise sub can't be mapped back to its end user")
 
 // internalSubjectFor maps sub, as the client client sees it, back to the
 // end user's internal subject: sub itself for a public client; for a
 // pairwise client, through Dependencies.PairwiseSubjects' pairwise.Lookup
 // under pairwise.Reversible, or through Dependencies.PairwiseSubjectResolver
-// under pairwise.OneWay. It returns errNoSubjectLookup, unwrapped, when
+// under pairwise.OneWay. It returns ErrNoPairwiseSubjectLookup, unwrapped, when
 // the server can't map pairwise subs back, and otherwise an
 // invalid_request *Error for a sub that names no end user of this server
 // at this client, or a server_error *Error when the mapping couldn't be
@@ -133,7 +176,7 @@ func (s *Server) internalSubjectFor(ctx context.Context, client storage.Register
 	canLookUp = canLookUp && subjects.Derivation == pairwise.Reversible
 	resolver := s.deps.PairwiseSubjectResolver
 	if !canLookUp && resolver == nil {
-		return "", errNoSubjectLookup
+		return "", ErrNoPairwiseSubjectLookup
 	}
 	body, hasPrefix := strings.CutPrefix(sub, subjects.Prefix.String())
 	if !hasPrefix || pairwise.CheckBody(body) != nil {
@@ -183,7 +226,7 @@ func (s *Server) requiredInternalSubject(ctx context.Context, client storage.Reg
 	mapped, err := s.internalSubjectFor(ctx, client, required)
 	var serverErr *Error
 	switch {
-	case errors.Is(err, errNoSubjectLookup):
+	case errors.Is(err, ErrNoPairwiseSubjectLookup):
 		return "", true, nil
 	case errors.As(err, &serverErr):
 		return "", false, serverErr

@@ -96,7 +96,9 @@
 //     grant records the sub its client gets for the user, derived once
 //     when the grant is issued and reused by every ID token and access
 //     token from it, refreshes included, and Server.ClientSubject gives
-//     the same sub for comparing a user with one a client sent. A
+//     the same sub for comparing a user with one a client sent;
+//     Server.ResolveClientSubject and ResolveIDTokenHint map a client's
+//     sub back to its user wherever pairwise subs can be mapped back. A
 //     pairwise client's access tokens never carry the internal subject
 //     where the client can read it: OpaqueAccessTokens keeps it in the
 //     server-side record, and under pairwise.Reversible a resource

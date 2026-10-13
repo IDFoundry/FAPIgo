@@ -96,16 +96,22 @@ leave `Subjects` zero, which means public.
 
 A pairwise `sub` differs per sector of clients (the host of a client's
 redirect URIs, or its registered `Sector`), so clients in different
-sectors can't correlate a user by it. A client permitted CIBA, a native
-client, and one whose redirect URIs span several hosts need an explicit
-`Sector`; an OpenID Federation Relying Party's is its Entity
-Identifier's host. Every token and response a
+sectors can't correlate a user by it. A client permitted CIBA, one that
+may authenticate by attestation, a native client, and one whose
+redirect URIs span several hosts need an explicit `Sector`, a host name
+you set at registration (never one the client supplies); an OpenID
+Federation Relying Party's is its Entity Identifier's host. A pairwise
+client without one is refused at its pushed authorization or
+backchannel authentication request, before its user signs in. Every token and response a
 pairwise client gets carries it: ID tokens, access tokens and UserInfo.
 The server's own records, audit events and your login page keep the
 user's internal subject.
 
 The recommended deriver is `pairwise.NewReversible`, over two
-independent 32-byte secret keys from your secret store:
+independent 32-byte keys from your secret store. Generate each with
+`crypto/rand` (`openssl rand 32` will do), and decode a hex or base64
+copy back to its 32 bytes before passing it in: a key that is all
+printable text, a passphrase or a still-encoded key, is refused.
 
 ```go
 pairwiseSubjects, err := pairwise.NewReversible(macKey, encKey,
@@ -113,14 +119,13 @@ pairwiseSubjects, err := pairwise.NewReversible(macKey, encKey,
 if err != nil {
 	log.Fatal(err)
 }
-prefix, err := pairwise.NewPrefix("ppid:") // may be "", but must be set
+prefix, err := pairwise.NewPrefix("ppid:") // must be set; "" only with a reversible deriver
 if err != nil {
 	log.Fatal(err)
 }
 cfg.Subjects = server.SubjectConfig{
-	Default:     fapi.SubjectTypePairwise, // or Public, with pairwise clients by registration
-	Enforcement: server.SubjectTypesPerClient,
-	Derivation:  pairwise.Reversible, // the keys map a sub back to its user
+	Default:     fapi.SubjectTypePairwise,
+	Enforcement: server.SubjectTypesPairwiseOnly, // every client, whatever it registered
 	Prefix:      prefix,
 }
 deps.PairwiseSubjects = pairwiseSubjects
@@ -129,31 +134,40 @@ deps.PairwiseSubjects = pairwiseSubjects
 Choose how a `sub` is derived before the first pairwise client goes
 live: changing the deriver, its key or store, the prefix, or a client's
 sector gives users new `sub`s at those clients, which relying parties
-see as new accounts.
+see as new accounts. Existing grants keep the `sub` they were issued
+with, except that changing the prefix ends every pairwise grant at its
+next use (`invalid_grant`), since resource servers resolve `sub`s under
+the current prefix.
 
 To keep public `sub`s for relying parties already integrated while
 giving every new one pairwise `sub`s, use a pairwise `Default` with
-`SubjectTypesPerClient` (as above), and register each legacy client
+`SubjectTypesPerClient` instead, and register each legacy client
 with `SubjectType: fapi.SubjectTypePublic`; a client registered without
-a `SubjectType` gets the pairwise default. If relying parties also
-register automatically through OpenID Federation, offer them pairwise
-alone, so one can't ask for public `sub`s in its metadata:
+a `SubjectType` gets the pairwise default. Relying parties registering
+automatically through OpenID Federation are offered pairwise alone
+under a pairwise default, so one can't opt out by asking for `public`
+in its metadata: it is refused registration, and one naming no
+`subject_type` gets pairwise. To let them choose public too, say so:
 
 ```go
-cfg.AutomaticRegistration.SubjectTypes = []fapi.SubjectType{fapi.SubjectTypePairwise}
+cfg.AutomaticRegistration.SubjectTypes = []fapi.SubjectType{fapi.SubjectTypePublic, fapi.SubjectTypePairwise}
 ```
 
-A federation relying party asking for `public` is then refused
-registration, and one naming no `subject_type` gets pairwise.
 Discovery still advertises both types, since your legacy clients get
-public `sub`s; the `openid_provider` metadata in your Entity
-Configuration, which is what federation relying parties read, should
-advertise `Server.AutomaticRegistrationSubjectTypes()` instead.
+public `sub`s; `Server.EntityConfiguration` sets the `openid_provider`
+metadata's `subject_types_supported`, which is what federation relying
+parties read, to what they're offered
+(`Server.AutomaticRegistrationSubjectTypes()`).
 
-- **`pairwise.Reversible`**: the server and its resource servers can
-  map a `sub` back to the user, so self-contained JWT access tokens
-  work, and a client's `id_token_hint`, `login_hint` or `claims` `sub`
-  value resolves to the user. Two derivers do this:
+Whether your pairwise `sub`s can be mapped back to their users isn't a
+setting: it's whichever deriver you choose, so the configuration can
+never promise more unlinkability than the deriver gives.
+
+- **Reversible derivers** (they implement `pairwise.Lookup`): the
+  server and its resource servers can map a `sub` back to the user, so
+  self-contained JWT access tokens work, and a client's
+  `id_token_hint`, `login_hint` or `claims` `sub` value resolves to the
+  user. Two derivers do this:
   - **`pairwise.NewReversible`** (recommended) encrypts the internal
     subject into the `sub`, so it needs no storage. Anyone holding both
     keys can map every pairwise `sub` ever issued back to its user, and
@@ -174,7 +188,7 @@ advertise `Server.AutomaticRegistrationSubjectTypes()` instead.
   - **`pairwise.NewMapping`** keeps a random `sub` per user and sector
     in a `storage.PairwiseSubjectStore`, so there's no key whose leak
     reverses them all, at the cost of a durable, shared store.
-- **`pairwise.OneWay`** (`pairwise.NewHMAC` over a 32-byte secret key):
+- **A one-way deriver** (`pairwise.NewHMAC` over a 32-byte secret key):
   nothing in FAPIgo can map a `sub` back, which is the strongest
   unlinkability. The internal subject then has to stay server-side, so
   `New` requires `server.OpaqueAccessTokens`; and a pairwise hint can
@@ -222,8 +236,8 @@ shouldn't be able to reverse a `sub` offline. Otherwise prefer
 `NewMapping` (no such key, but a durable shared store).
 
 Under `AssuranceProduction` the deriver must declare durable custody
-(`keys.DeclareCustody` for `NewReversible`, `NewReversibleWith` and
-`NewHMAC`; a `storage.StoreAssurance` store for `NewMapping`), since
+(`keys.DeclareCustody` for `NewReversible`, `NewReversibleWith`,
+`NewHMAC` and `NewHMACWith`; a `storage.StoreAssurance` store for `NewMapping`), since
 every restart and every instance must give a user the same `sub`.
 
 #### Keeping the reversible keys in an HSM or KMS
@@ -281,6 +295,30 @@ Sources: [PKCS#11 v2.40 mechanisms (`CK_AES_CTR_PARAMS`)](https://docs.oasis-ope
 [Vault Transit API](https://developer.hashicorp.com/vault/api-docs/secret/transit).
 Vendors change what they offer: check your service's current
 documentation.
+
+#### Keeping the one-way key in an HSM or KMS
+
+`pairwise.NewHMACWith(ops)` is the one-way deriver over a
+`pairwise.HMACOps` you implement against your key service: one
+operation, HMAC-SHA-256 under a key the service never releases,
+returning the full 32-byte output. For the same key it derives exactly
+the `sub`s `NewHMAC` does. Unlike the reversible construction it needs
+no raw AES, so more services can hold its key:
+
+| Key service | Key non-extractable? | MAC | Caveats |
+|---|---|---|---|
+| **PKCS#11 HSMs** (including AWS CloudHSM) | Yes | `CKM_SHA256_HMAC` | Check that your HSM supports the mechanism with a 32-byte generic secret key. |
+| **AWS KMS** | Yes | An `HMAC_256` key with `GenerateMac`, algorithm `HMAC_SHA_256` | |
+| **Google Cloud KMS** | Yes | A `MAC` key with algorithm `HMAC_SHA256` (`MacSign`) | |
+| **Azure Key Vault Managed HSM** | Yes | An `oct-HSM` key, `HS256` | |
+| **HashiCorp Vault Transit** | Yes | The `hmac` endpoint with `sha2-256` | Its output is `vault:v1:`-prefixed base64: your `HMACOps` decodes it to the 32 bytes. The key is Vault's own, so moving to or from `NewHMAC` changes every `sub`. |
+
+Each derivation is one call, once per grant. A one-way deriver is never
+asked to look a `sub` up, so resource servers never call the key
+service: they read opaque access tokens' records (or your own
+`SubjectResolver`, if you declared one). Check an implementation
+against `pairwise/testdata/hmac_vectors.json` (generated independently
+by `hmac_vectors.py` beside it). Sources: as above.
 
 Under `ProfileFAPISecurityWithMessageSigning`, `Algorithms.JARM` is
 required too.
@@ -836,9 +874,10 @@ the same.
 A JWT access token's `sub` is pairwise, so the verifier needs a way to
 map it back: `serverresource.NewVerifier` wires the server's own. A
 separate resource server sets either `Dependencies.PairwiseSubjects`
-(the server's `pairwise.Reversible` deriver: `pairwise.NewReversible`
-with the same keys, or `pairwise.NewMapping` over the same store) with `Config.PairwisePrefix`
-(the server's prefix), or, for a `pairwise.OneWay` server,
+(the server's reversible deriver: `pairwise.NewReversible` with the
+same keys, or `pairwise.NewMapping` over the same store) with
+`Config.PairwisePrefix` (the server's prefix), or, for a server with a
+one-way deriver,
 `Dependencies.SubjectResolver` (the same resolver the server declares).
 Without one, a pairwise JWT access token is refused with `server_error`
 rather than given its pairwise `sub` as `Subject`. An opaque access

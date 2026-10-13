@@ -3,8 +3,11 @@ package server_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -16,7 +19,7 @@ import (
 	"github.com/idfoundry/fapigo/storage/memstore"
 )
 
-// opaqueAccessTokens is the access token issuer pairwise.OneWay
+// opaqueAccessTokens is the access token issuer a one-way deriver
 // requires: the internal subject stays in its server-side records.
 func opaqueAccessTokens() server.OpaqueAccessTokens {
 	return server.OpaqueAccessTokens{Store: memstore.NewAccessTokenStore()}
@@ -48,7 +51,6 @@ func pairwiseSubjects(t *testing.T) server.SubjectConfig {
 	return server.SubjectConfig{
 		Default:     fapi.SubjectTypePairwise,
 		Enforcement: server.SubjectTypesPerClient,
-		Derivation:  pairwise.OneWay,
 		Prefix:      testPrefix(t, "ppid:"),
 	}
 }
@@ -61,7 +63,7 @@ func newErr(t *testing.T, cfg server.Config, deps server.Dependencies) error {
 
 func TestPublicSubjects(t *testing.T) {
 	got := server.PublicSubjects()
-	if got.Default != fapi.SubjectTypePublic || got.Enforcement != server.SubjectTypesPerClient || got.Derivation != 0 || got.Prefix.IsSet() {
+	if got.Default != fapi.SubjectTypePublic || got.Enforcement != server.SubjectTypesPerClient || got.Prefix.IsSet() {
 		t.Errorf("PublicSubjects() = %+v", got)
 	}
 	if got.IsZero() || !(server.SubjectConfig{}).IsZero() {
@@ -109,37 +111,17 @@ func TestNewRefusesInvalidSubjects(t *testing.T) {
 		"pairwise-only with a public default": {func(*testing.T) server.SubjectConfig {
 			return server.SubjectConfig{Default: fapi.SubjectTypePublic, Enforcement: server.SubjectTypesPairwiseOnly}
 		}, false, "requires a pairwise subjects.default"},
-		"derivation without pairwise": {func(*testing.T) server.SubjectConfig {
-			c := server.PublicSubjects()
-			c.Derivation = pairwise.OneWay
-			return c
-		}, false, "apply only when a client can be pairwise"},
 		"prefix without pairwise": {func(t *testing.T) server.SubjectConfig {
 			c := server.PublicSubjects()
 			c.Prefix = testPrefix(t, "")
 			return c
 		}, false, "apply only when a client can be pairwise"},
 		"pairwise default without a deriver": {pairwiseSubjects, false, "pairwise_subjects is required"},
-		"no derivation": {func(t *testing.T) server.SubjectConfig {
-			c := pairwiseSubjects(t)
-			c.Derivation = 0
-			return c
-		}, true, "subjects.derivation is required"},
-		"invalid derivation": {func(t *testing.T) server.SubjectConfig {
-			c := pairwiseSubjects(t)
-			c.Derivation = 9
-			return c
-		}, true, "subjects.derivation is invalid"},
 		"unset prefix": {func(t *testing.T) server.SubjectConfig {
 			c := pairwiseSubjects(t)
 			c.Prefix = pairwise.Prefix{}
 			return c
 		}, true, "subjects.prefix is required"},
-		"reversible with a one-way deriver": {func(t *testing.T) server.SubjectConfig {
-			c := pairwiseSubjects(t)
-			c.Derivation = pairwise.Reversible
-			return c
-		}, true, "requires dependencies.pairwise_subjects to implement pairwise.Lookup"},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -162,7 +144,6 @@ func TestNewAcceptsPairwiseSubjects(t *testing.T) {
 		"pairwise default":          func(*server.SubjectConfig) {},
 		"pairwise only":             func(c *server.SubjectConfig) { c.Enforcement = server.SubjectTypesPairwiseOnly },
 		"public default, a deriver": func(c *server.SubjectConfig) { c.Default = fapi.SubjectTypePublic },
-		"empty prefix":              func(c *server.SubjectConfig) { c.Prefix = testPrefix(t, "") },
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg, deps := validConfig(t), validDependencies()
@@ -178,40 +159,92 @@ func TestNewAcceptsPairwiseSubjects(t *testing.T) {
 }
 
 // probeDeriver is a Deriver (and Lookup) whose answers a test controls.
+// Its body is body when set, otherwise a sound one: a hash of the
+// sector and subject.
 type probeDeriver struct {
 	body      string
 	err       error
 	looksUpTo string
 	lookupErr error
+	derive    func(pairwise.Input) string // when set, overrides body
 }
 
-func (d probeDeriver) DerivePairwiseSubject(context.Context, pairwise.Input) (string, error) {
-	return d.body, d.err
+func (d probeDeriver) DerivePairwiseSubject(_ context.Context, in pairwise.Input) (string, error) {
+	switch {
+	case d.err != nil:
+		return "", d.err
+	case d.derive != nil:
+		return d.derive(in), nil
+	case d.body != "" || d.looksUpTo == "" && d.lookupErr == nil:
+		return d.body, nil
+	}
+	return soundProbeBody(in), nil
 }
 
 func (d probeDeriver) LookupInternalSubject(context.Context, string, string, string) (string, error) {
 	return d.looksUpTo, d.lookupErr
 }
 
+// soundProbeBody is a deterministic body that depends on in's sector and
+// subject.
+func soundProbeBody(in pairwise.Input) string { return hashed(in.Sector() + "\x00" + in.Subject()) }
+
+// hashed is s's SHA-256, hex-encoded.
+func hashed(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
+
+// sectorless is in under a fixed sector.
+func sectorless(in pairwise.Input) pairwise.Input {
+	out, err := pairwise.NewInput(in.Issuer(), "any.example", in.Subject())
+	if err != nil {
+		panic(err)
+	}
+	return out
+}
+
+// counter returns a body that changes on every call.
+func counter() func(pairwise.Input) string {
+	n := 0
+	return func(pairwise.Input) string {
+		n++
+		return hashed(strconv.Itoa(n))
+	}
+}
+
+// oneWayProbe is a probeDeriver without its Lookup: a one-way Deriver.
+type oneWayProbe struct{ d probeDeriver }
+
+func (o oneWayProbe) DerivePairwiseSubject(ctx context.Context, in pairwise.Input) (string, error) {
+	return o.d.DerivePairwiseSubject(ctx, in)
+}
+
 func TestNewProbesThePairwiseDeriver(t *testing.T) {
 	tests := map[string]struct {
-		deriver    probeDeriver
-		derivation pairwise.Derivation
-		want       string
+		deriver pairwise.Deriver
+		want    string
 	}{
-		"derivation fails":   {probeDeriver{err: errors.New("kms down")}, pairwise.OneWay, "can't derive a subject: kms down"},
-		"empty body":         {probeDeriver{body: ""}, pairwise.OneWay, "derived an unusable subject"},
-		"body with a space":  {probeDeriver{body: "a b"}, pairwise.OneWay, "derived an unusable subject"},
-		"lookup fails":       {probeDeriver{body: "abc", lookupErr: errors.New("store down")}, pairwise.Reversible, "can't look up the subject it derived: store down"},
-		"lookup is wrong":    {probeDeriver{body: "abc", looksUpTo: "someone-else"}, pairwise.Reversible, `can't look up the subject it derived: it returned "someone-else"`},
-		"reversible, sound":  {probeDeriver{body: "abc", looksUpTo: "fapigo-pairwise-probe"}, pairwise.Reversible, ""},
-		"one-way, no lookup": {probeDeriver{body: "abc", lookupErr: errors.New("never called")}, pairwise.OneWay, ""},
+		"derivation fails":         {oneWayProbe{probeDeriver{err: errors.New("kms down")}}, "can't derive a subject: kms down"},
+		"empty body":               {oneWayProbe{probeDeriver{body: ""}}, "derived an unusable subject"},
+		"body with a space":        {oneWayProbe{probeDeriver{body: "a b"}}, "derived an unusable subject"},
+		"lookup fails":             {probeDeriver{lookupErr: errors.New("store down")}, "can't look up the subject it derived: store down"},
+		"lookup is wrong":          {probeDeriver{looksUpTo: "someone-else"}, `can't look up the subject it derived: it returned "someone-else"`},
+		"reversible, sound":        {probeDeriver{looksUpTo: "fapigo-pairwise-probe"}, ""},
+		"one-way, no lookup":       {oneWayProbe{probeDeriver{derive: soundProbeBody}}, ""},
+		"one body for every input": {oneWayProbe{probeDeriver{body: "abc"}}, "same sub in two sectors"},
+		"the subject as its body": {oneWayProbe{probeDeriver{derive: func(in pairwise.Input) string { return in.Subject() }}},
+			"puts the internal subject in the pairwise sub"},
+		"ignores the sector": {oneWayProbe{probeDeriver{derive: func(in pairwise.Input) string { return soundProbeBody(sectorless(in)) }}},
+			"same sub in two sectors"},
+		"ignores the user": {oneWayProbe{probeDeriver{derive: func(in pairwise.Input) string { return hashed(in.Sector()) }}},
+			"two users the same sub"},
+		"not deterministic": {oneWayProbe{probeDeriver{derive: counter()}}, "isn't deterministic"},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			cfg, deps := validConfig(t), validDependencies()
 			cfg.Subjects = pairwiseSubjects(t)
-			cfg.Subjects.Derivation = tc.derivation
 			deps.PairwiseSubjects = tc.deriver
 			deps.AccessTokens = opaqueAccessTokens()
 			checkNewErr(t, newErr(t, cfg, deps), tc.want)
@@ -225,7 +258,7 @@ func TestProductionRequiresPairwiseKeyCustody(t *testing.T) {
 		custody    []keys.CustodyOption
 		want       string
 	}{
-		"none declared": {server.DeploymentSingleInstance, nil, "pairwise_subjects must implement keys.KeyCustodyAssurance"},
+		"none declared": {server.DeploymentSingleInstance, nil, "pairwise_subjects must declare Durable"},
 		"not durable": {server.DeploymentSingleInstance, []keys.CustodyOption{keys.DeclareCustody(keys.KeyCustody{})},
 			"pairwise_subjects must declare Durable"},
 		"scaled, not cross-instance": {server.DeploymentHorizontallyScaled, []keys.CustodyOption{keys.DeclareCustody(keys.KeyCustody{Durable: true})},
@@ -279,17 +312,17 @@ func checkNewErr(t *testing.T, err error, want string) {
 	}
 }
 
-// TestNewRefusesSelfContainedAccessTokensForOneWayPairwise: under
-// pairwise.OneWay a pairwise sub can't be mapped back to its end user,
-// so a self-contained access token issuer is refused; under
-// pairwise.Reversible it's accepted, and a public-only server is
+// TestNewRefusesSelfContainedAccessTokensForOneWayPairwise: with a
+// one-way deriver a pairwise sub can't be mapped back to its end user,
+// so a self-contained access token issuer is refused; with a reversible
+// one (a pairwise.Lookup) it's accepted, and a public-only server is
 // unaffected.
 func TestNewRefusesSelfContainedAccessTokensForOneWayPairwise(t *testing.T) {
 	t.Run("one-way, JWT", func(t *testing.T) {
 		cfg, deps := validConfig(t), validDependencies()
 		cfg.Subjects = pairwiseSubjects(t)
 		deps.PairwiseSubjects = testHMACDeriver(t)
-		checkNewErr(t, newErr(t, cfg, deps), "access_tokens must be OpaqueAccessTokens with pairwise.OneWay")
+		checkNewErr(t, newErr(t, cfg, deps), "access_tokens must be OpaqueAccessTokens with a one-way pairwise_subjects")
 	})
 	t.Run("one-way, opaque pointer", func(t *testing.T) {
 		cfg, deps := validConfig(t), validDependencies()
@@ -302,8 +335,7 @@ func TestNewRefusesSelfContainedAccessTokensForOneWayPairwise(t *testing.T) {
 	t.Run("reversible, JWT", func(t *testing.T) {
 		cfg, deps := validConfig(t), validDependencies()
 		cfg.Subjects = pairwiseSubjects(t)
-		cfg.Subjects.Derivation = pairwise.Reversible
-		deps.PairwiseSubjects = probeDeriver{body: "abc", looksUpTo: "fapigo-pairwise-probe"}
+		deps.PairwiseSubjects = probeDeriver{looksUpTo: "fapigo-pairwise-probe"}
 		checkNewErr(t, newErr(t, cfg, deps), "")
 	})
 	t.Run("public, JWT", func(t *testing.T) {
@@ -311,7 +343,7 @@ func TestNewRefusesSelfContainedAccessTokensForOneWayPairwise(t *testing.T) {
 	})
 }
 
-// subResolver is an embedder's own mapping for pairwise.OneWay: the
+// subResolver is an embedder's own mapping for a one-way deriver: the
 // subs it knows, by issuer, sector and sub.
 type subResolver struct {
 	subjects map[[3]string]string
@@ -332,9 +364,9 @@ type custodySubResolver struct {
 
 func (r custodySubResolver) KeyCustody() keys.KeyCustody { return r.custody }
 
-// TestNewAcceptsOneWayJWTWithAResolver: under pairwise.OneWay a declared
-// resolver lets the server issue JWT access tokens; a resolver is
-// refused where it would have no effect (pairwise.Reversible, or no
+// TestNewAcceptsOneWayJWTWithAResolver: with a one-way deriver a
+// declared resolver lets the server issue JWT access tokens; a resolver
+// is refused where it would have no effect (a reversible deriver, or no
 // client can be pairwise).
 func TestNewAcceptsOneWayJWTWithAResolver(t *testing.T) {
 	t.Run("one-way, JWT, resolver", func(t *testing.T) {
@@ -347,10 +379,9 @@ func TestNewAcceptsOneWayJWTWithAResolver(t *testing.T) {
 	t.Run("reversible, resolver", func(t *testing.T) {
 		cfg, deps := validConfig(t), validDependencies()
 		cfg.Subjects = pairwiseSubjects(t)
-		cfg.Subjects.Derivation = pairwise.Reversible
-		deps.PairwiseSubjects = probeDeriver{body: "abc", looksUpTo: "fapigo-pairwise-probe"}
+		deps.PairwiseSubjects = probeDeriver{looksUpTo: "fapigo-pairwise-probe"}
 		deps.PairwiseSubjectResolver = subResolver{}
-		checkNewErr(t, newErr(t, cfg, deps), "pairwise_subject_resolver applies only to pairwise.OneWay")
+		checkNewErr(t, newErr(t, cfg, deps), "pairwise_subject_resolver applies only to a one-way pairwise_subjects")
 	})
 	t.Run("public, resolver", func(t *testing.T) {
 		cfg, deps := validConfig(t), validDependencies()
@@ -375,6 +406,32 @@ func TestProductionRequiresResolverCustody(t *testing.T) {
 			cfg.Subjects = pairwiseSubjects(t)
 			deps.PairwiseSubjects = testHMACDeriver(t, keys.DeclareCustody(keys.KeyCustody{Durable: true}))
 			deps.PairwiseSubjectResolver = tc.resolver
+			checkNewErr(t, newErr(t, cfg, deps), tc.want)
+		})
+	}
+}
+
+// TestNewEmptyPrefixNeedsAWayBack: an empty Prefix is refused with a
+// one-way deriver and no resolver, where nothing could tell a pairwise
+// sub from an internal one, and accepted where subs can be mapped back.
+func TestNewEmptyPrefixNeedsAWayBack(t *testing.T) {
+	tests := map[string]struct {
+		deriver  pairwise.Deriver
+		resolver pairwise.SubjectResolver
+		want     string
+	}{
+		"one-way":           {testHMACDeriver(t), nil, "subjects.prefix must not be empty with a one-way pairwise_subjects"},
+		"one-way, resolver": {testHMACDeriver(t), subResolver{}, ""},
+		"reversible":        {probeDeriver{looksUpTo: "fapigo-pairwise-probe"}, nil, ""},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			cfg, deps := validConfig(t), validDependencies()
+			cfg.Subjects = pairwiseSubjects(t)
+			cfg.Subjects.Prefix = testPrefix(t, "")
+			deps.PairwiseSubjects = tc.deriver
+			deps.PairwiseSubjectResolver = tc.resolver
+			deps.AccessTokens = opaqueAccessTokens()
 			checkNewErr(t, newErr(t, cfg, deps), tc.want)
 		})
 	}

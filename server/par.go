@@ -228,6 +228,9 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 		var clientID fapi.ClientID
 		return s.parFail(ctx, clientID, authErr)
 	}
+	if subjectErr := s.checkClientSubjectIssuable(client); subjectErr != nil {
+		return s.parFail(ctx, client.ID(), subjectErr)
+	}
 
 	authParams, tokenClaims, resolveErr := s.resolveAuthorizationParameters(ctx, params, client)
 	if resolveErr != nil {

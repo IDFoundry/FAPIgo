@@ -60,7 +60,7 @@ func TestReversibleAuthenticatesTheWholeIV(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := d.(reversibleDeriver)
+	r := d
 	plaintext, err := reversiblePlaintext("user-1")
 	if err != nil {
 		t.Fatal(err)
@@ -93,7 +93,7 @@ func TestAlterBodyReachesAuthentication(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := d.(reversibleDeriver)
+	r := d
 	in, err := NewInput("https://op.example", "rp.example", "user-1")
 	if err != nil {
 		t.Fatal(err)
@@ -117,7 +117,7 @@ func TestAlterBodyReachesAuthentication(t *testing.T) {
 // checkAlteredBodyAuthenticates checks alterBody(start) changes start,
 // still decodes, and (unless it rotated back to the genuine body) fails
 // authentication.
-func checkAlteredBodyAuthenticates(t *testing.T, r reversibleDeriver, in Input, genuine, start string) {
+func checkAlteredBodyAuthenticates(t *testing.T, r *ReversibleDeriver, in Input, genuine, start string) {
 	t.Helper()
 	altered := alterBody(start)
 	if altered == start {

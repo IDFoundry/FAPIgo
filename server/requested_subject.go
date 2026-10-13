@@ -214,10 +214,30 @@ func meetsRequiredSubject(required, clientSub string) bool {
 	return required == "" || clientSub == required
 }
 
+// backchannelSubjects refuses a client whose sub couldn't be issued at
+// completion (checkClientSubjectIssuable), before its user is asked to
+// approve anything, and returns the sub the request requires (its
+// id_token_hint's or "claims" sub, "" for none) with its internal
+// subject (backchannelRequiredInternalSubject).
+func (s *Server) backchannelSubjects(ctx context.Context, client storage.RegisteredClient, params map[string]json.RawMessage) (string, string, *Error) {
+	if err := s.checkClientSubjectIssuable(client); err != nil {
+		return "", "", err
+	}
+	required, err := s.requiredSubject(ctx, params, client.ID())
+	if err != nil {
+		return "", "", err
+	}
+	internal, err := s.backchannelRequiredInternalSubject(ctx, client, params, required)
+	if err != nil {
+		return "", "", err
+	}
+	return required, internal, nil
+}
+
 // backchannelRequiredInternalSubject is requiredInternalSubject for a
 // CIBA request. An id_token_hint is how a CIBA request identifies its
 // end user (CIBA Core §7.1), so the server must find the user from it:
-// from a pairwise client whose subs it can't map back (pairwise.OneWay
+// from a pairwise client whose subs it can't map back (a one-way deriver
 // with no Dependencies.PairwiseSubjectResolver), the hint can't identify
 // anyone, and is invalid_request. Its login_hint and login_hint_token forms are
 // unaffected, and a "claims" sub value is still enforced at completion.

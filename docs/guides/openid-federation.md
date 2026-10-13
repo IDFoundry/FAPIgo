@@ -57,7 +57,12 @@ requires once trust anchors are set. Statically registered clients
 always take priority. What a client may do
 beyond the authorization code flow is your grant, never its own metadata's:
 `AllowedScopes`, `AuthorizationDetailsTypes`, `AllowsClientCredentialsGrant`,
-`AllowsCIBA` and `AllowedClientAuthMethods`. A resolved registration is cached for at most
+`AllowsCIBA` and `AllowedClientAuthMethods`. Its `subject_type` is
+honoured within `AutomaticRegistration.SubjectTypes` (pairwise alone by
+default when `Config.Subjects.Default` is pairwise), and
+`EntityConfiguration` advertises that list as the `openid_provider`
+metadata's `subject_types_supported`; a pairwise Relying Party's sector
+is its Entity Identifier's host. A resolved registration is cached for at most
 `MaxCacheAge`, so a superior that stops vouching for a client takes
 effect within that time. The cache is shared fairly: one superior's
 Relying Parties, or one branch of a Trust Anchor's, can hold only part of

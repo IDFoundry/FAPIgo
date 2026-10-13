@@ -116,13 +116,37 @@ func TestPairwiseClientNeedsASector(t *testing.T) {
 }
 
 func TestClientSectorValidation(t *testing.T) {
-	for _, bad := range []string{"has space", "tab\t", "ünicode", strings.Repeat("a", 256), "nul\x00"} {
+	for _, bad := range []string{
+		"has space", "tab\t", "ünicode", strings.Repeat("a", 256), "nul\x00",
+		"https://rp.example", "rp.example/cb", "rp.example:8443", "user@rp.example",
+		"rp.example?x", "rp.example#x", "[::1]", ".rp.example", "rp.example.", "rp..example", ".",
+	} {
 		if _, err := subjectClient(t, func(cfg *RegisteredClientConfig) { cfg.Sector = bad }); err == nil {
 			t.Errorf("Sector %.20q was accepted", bad)
 		}
 	}
 	if _, err := subjectClient(t, func(cfg *RegisteredClientConfig) { cfg.Sector = strings.Repeat("a", 255) }); err != nil {
 		t.Errorf("a 255-byte sector: %v", err)
+	}
+}
+
+// TestClientSectorIsLowercased: a set Sector names a host, so it is
+// lowercased like a derived one, and "RP.example" is the same sector as
+// the "rp.example" a client with redirect URIs there derives.
+func TestClientSectorIsLowercased(t *testing.T) {
+	for _, set := range []string{"RP.example", "rp.EXAMPLE", "Rp.Example"} {
+		c, err := subjectClient(t, func(cfg *RegisteredClientConfig) { cfg.Sector = set })
+		if err != nil {
+			t.Fatalf("Sector %q: %v", set, err)
+		}
+		if got := c.Sector(); got != "rp.example" {
+			t.Errorf("Sector %q gives sector %q, want rp.example", set, got)
+		}
+	}
+	for _, ok := range []string{"192.0.2.1", "my_rp.example", "xn--bcher-kva.example", "rp-1.example"} {
+		if _, err := subjectClient(t, func(cfg *RegisteredClientConfig) { cfg.Sector = ok }); err != nil {
+			t.Errorf("Sector %q: %v", ok, err)
+		}
 	}
 }
 
@@ -146,4 +170,45 @@ func FuzzDerivedSector(f *testing.F) {
 			t.Fatalf("sector %q isn't lower case", sector)
 		}
 	})
+}
+
+// TestAttestationClientDerivesNoSector: a client that may authenticate
+// by attestation gets tokens through an embedder's own grant, with no
+// redirect proving it controls its redirect URIs' host, so it derives no
+// sector from them, and a pairwise one must set Sector.
+func TestAttestationClientDerivesNoSector(t *testing.T) {
+	attested := func(cfg *RegisteredClientConfig) {
+		cfg.ClientAuthMethod = ClientAuthMethodAttestation
+		cfg.ExpectedAttesterIssuer = "https://attester.example"
+		cfg.ClientAttestationAlgorithm = fapi.ES256
+	}
+	for name, mutate := range map[string]func(*RegisteredClientConfig){
+		"attestation": attested,
+		"attestation in list": func(cfg *RegisteredClientConfig) {
+			attested(cfg)
+			cfg.ClientAuthMethod = ClientAuthMethodPrivateKeyJWT
+			cfg.ClientAuthMethods = []ClientAuthMethod{ClientAuthMethodPrivateKeyJWT, ClientAuthMethodAttestation}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, err := subjectClient(t, mutate)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := c.Sector(); got != "" {
+				t.Errorf("Sector() = %q, want none derived", got)
+			}
+			if _, err := subjectClient(t, func(cfg *RegisteredClientConfig) { mutate(cfg); cfg.SubjectType = fapi.SubjectTypePairwise }); err == nil || !strings.Contains(err.Error(), "authenticate by attestation") {
+				t.Errorf("pairwise without Sector = %v, want refused", err)
+			}
+			c, err = subjectClient(t, func(cfg *RegisteredClientConfig) {
+				mutate(cfg)
+				cfg.SubjectType = fapi.SubjectTypePairwise
+				cfg.Sector = "wallet.example"
+			})
+			if err != nil || c.Sector() != "wallet.example" {
+				t.Errorf("pairwise with Sector = %q, %v", c.Sector(), err)
+			}
+		})
+	}
 }

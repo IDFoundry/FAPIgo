@@ -123,7 +123,7 @@ func NewVerifier(cfg server.Config, deps server.Dependencies, opts Options) (*re
 		Revocation:   revocation,
 		Clock:        deps.Clock,
 	}
-	if lookup, ok := deps.PairwiseSubjects.(pairwise.Lookup); ok && cfg.Subjects.Derivation == pairwise.Reversible {
+	if lookup, ok := deps.PairwiseSubjects.(pairwise.Lookup); ok {
 		rdeps.PairwiseSubjects = lookup
 		rcfg.PairwisePrefix = cfg.Subjects.Prefix
 	}

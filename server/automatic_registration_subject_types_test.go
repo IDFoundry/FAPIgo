@@ -2,9 +2,12 @@ package server_test
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/server"
@@ -51,11 +54,24 @@ func narrowedAutomaticRegistrationServer(t *testing.T, f *automaticRegistrationF
 }
 
 // TestAutomaticRegistrationSubjectTypesNarrowFederationRPs: with
-// AutomaticRegistration.SubjectTypes set to pairwise alone, a Relying
-// Party registering through federation gets pairwise subs whether it
-// asks for them or names none, and one asking for public is refused,
-// while a statically registered legacy client keeps its public subs.
+// AutomaticRegistration.SubjectTypes set to pairwise alone, or left
+// unset under a pairwise default, a Relying Party registering through
+// federation gets pairwise subs whether it asks for them or names none,
+// and one asking for public is refused, while a statically registered
+// legacy client keeps its public subs.
 func TestAutomaticRegistrationSubjectTypesNarrowFederationRPs(t *testing.T) {
+	for name, offered := range map[string][]fapi.SubjectType{
+		"pairwise offered": {fapi.SubjectTypePairwise},
+		"unset":            nil,
+	} {
+		t.Run(name, func(t *testing.T) { checkFederationRPsGetPairwiseOnly(t, offered) })
+	}
+}
+
+// checkFederationRPsGetPairwiseOnly is
+// TestAutomaticRegistrationSubjectTypesNarrowFederationRPs for one
+// AutomaticRegistration.SubjectTypes.
+func checkFederationRPsGetPairwiseOnly(t *testing.T, offered []fapi.SubjectType) {
 	const user = "user-1"
 	authenticated := mustAuthenticated(t, user)
 	for name, tc := range map[string]struct {
@@ -72,7 +88,7 @@ func TestAutomaticRegistrationSubjectTypesNarrowFederationRPs(t *testing.T) {
 				extra = append(extra, map[string]any{"subject_type": tc.subjectType})
 			}
 			f := setupAutomaticRegistrationFixture(t, "", extra...)
-			srv, failure := narrowedAutomaticRegistrationServer(t, f, []fapi.SubjectType{fapi.SubjectTypePairwise})
+			srv, failure := narrowedAutomaticRegistrationServer(t, f, offered)
 
 			sub, err := srv.ClientSubject(context.Background(), fapi.ClientID(f.rpID), authenticated)
 			if tc.wantRefusal != "" {
@@ -100,7 +116,10 @@ func TestAutomaticRegistrationSubjectTypesAdvertised(t *testing.T) {
 		wantFederation []string
 	}{
 		"narrowed": {[]fapi.SubjectType{fapi.SubjectTypePairwise}, []string{"public", "pairwise"}, []string{"pairwise"}},
-		"unset":    {nil, []string{"public", "pairwise"}, []string{"public", "pairwise"}},
+		// A pairwise default isn't something a federation RP can opt
+		// out of unless public is listed.
+		"unset":   {nil, []string{"public", "pairwise"}, []string{"pairwise"}},
+		"widened": {[]fapi.SubjectType{fapi.SubjectTypePublic, fapi.SubjectTypePairwise}, []string{"public", "pairwise"}, []string{"public", "pairwise"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			srv, _ := narrowedAutomaticRegistrationServer(t, f, tc.offered)
@@ -165,4 +184,71 @@ func TestNewRefusesInvalidAutomaticRegistrationSubjectTypes(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestEntityConfigurationAdvertisesAutomaticRegistrationSubjectTypes:
+// with automatic registration configured, the Entity Configuration's
+// openid_provider metadata advertises what a federation Relying Party
+// may ask for (pairwise only, under a pairwise default), even when the
+// embedder built it from Metadata, which advertises public too; the
+// caller's map is left as it was.
+func TestEntityConfigurationAdvertisesAutomaticRegistrationSubjectTypes(t *testing.T) {
+	f := setupAutomaticRegistrationFixture(t, "")
+	cfg, deps := automaticRegistrationTestConfig(t, f, func(cfg *server.Config, deps *server.Dependencies) {
+		cfg.Subjects = fedPairwiseSubjects(t, fapi.SubjectTypePairwise, server.SubjectTypesPerClient)
+		cfg.Federation = server.FederationConfig{EntityID: testIssuer, Lifetime: time.Hour, Algorithm: fapi.ES256}
+		deps.PairwiseSubjects = hmacDeriver(t)
+		deps.AccessTokens = server.OpaqueAccessTokens{Store: memstore.NewAccessTokenStore()}
+	})
+	srv, err := server.New(cfg, deps)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	op, err := json.Marshal(srv.Metadata(context.Background()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata := map[string]json.RawMessage{"openid_provider": op}
+	statement, err := srv.EntityConfiguration(context.Background(), metadata)
+	if err != nil {
+		t.Fatalf("EntityConfiguration: %v", err)
+	}
+	if got := advertisedSubjectTypes(t, jwtPayloadMetadata(t, statement)["openid_provider"]); !slices.Equal(got, []string{"pairwise"}) {
+		t.Errorf("Entity Configuration subject_types_supported = %q, want [pairwise]", got)
+	}
+	if got := advertisedSubjectTypes(t, metadata["openid_provider"]); !slices.Equal(got, []string{"public", "pairwise"}) {
+		t.Errorf("the caller's metadata was changed to %q", got)
+	}
+}
+
+// jwtPayloadMetadata is the "metadata" claim of a compact JWT, unverified.
+func jwtPayloadMetadata(t *testing.T, compact string) map[string]json.RawMessage {
+	t.Helper()
+	parts := strings.Split(compact, ".")
+	if len(parts) != 3 {
+		t.Fatalf("not a compact JWT: %q", compact)
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var claims struct {
+		Metadata map[string]json.RawMessage `json:"metadata"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		t.Fatal(err)
+	}
+	return claims.Metadata
+}
+
+// advertisedSubjectTypes is op's subject_types_supported.
+func advertisedSubjectTypes(t *testing.T, op json.RawMessage) []string {
+	t.Helper()
+	var md struct {
+		SubjectTypesSupported []string `json:"subject_types_supported"`
+	}
+	if err := json.Unmarshal(op, &md); err != nil {
+		t.Fatal(err)
+	}
+	return md.SubjectTypesSupported
 }

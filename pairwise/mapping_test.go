@@ -146,8 +146,8 @@ type assuredStore struct {
 func (s assuredStore) Capabilities() storage.Capabilities { return s.caps }
 
 func TestMappingReportsTheStoresDeclarationAsCustody(t *testing.T) {
-	if _, ok := newMapping(t, memstore.NewPairwiseSubjectStore()).(keys.KeyCustodyAssurance); ok {
-		t.Error("a mapping over memstore implements KeyCustodyAssurance; it must declare nothing")
+	if got := newMapping(t, memstore.NewPairwiseSubjectStore()).(keys.KeyCustodyAssurance).KeyCustody(); got != (keys.KeyCustody{}) {
+		t.Errorf("a mapping over memstore reports %+v; it must declare nothing", got)
 	}
 	for _, caps := range []storage.Capabilities{
 		{Durable: true, CrossInstanceConsistent: true},

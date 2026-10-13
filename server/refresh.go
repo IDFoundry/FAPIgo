@@ -262,19 +262,39 @@ func (s *Server) checkGrantStillAllowed(client storage.RegisteredClient, grant g
 	return nil
 }
 
-// checkGrantSubjectStillIssued refuses a grant made while its client got
-// public subs, now that this server issues only pairwise ones
+// checkGrantSubjectStillIssued refuses a grant whose sub this server can
+// no longer stand behind. One made while its client got public subs,
+// now that this server issues only pairwise ones
 // (SubjectTypesPairwiseOnly, which promises every client pairwise subs):
 // its tokens would otherwise keep carrying the user's internal subject.
-// A grant keeps the sub it was issued with (OpenID Connect Core §12.2),
-// so such a grant can't be moved to a pairwise one; the client
-// authorizes again instead. Under SubjectTypesPerClient a grant keeps its
-// sub whatever the client's type has since become.
+// And one whose pairwise sub was issued under another Config.Subjects
+// Prefix: a resource server strips the current prefix to look a sub up,
+// so its tokens would no longer resolve. A grant keeps the sub it was
+// issued with (OpenID Connect Core §12.2), so neither can be moved to a
+// new sub; the client authorizes again instead. Under
+// SubjectTypesPerClient a grant otherwise keeps its sub whatever the
+// client's type or sector has since become.
 func (s *Server) checkGrantSubjectStillIssued(grant grantRecord) *Error {
-	if grant.ClientSubject != "" || effectiveSubjects(s.cfg).Enforcement != SubjectTypesPairwiseOnly {
+	subjects := effectiveSubjects(s.cfg)
+	if grant.ClientSubject == "" {
+		if subjects.Enforcement == SubjectTypesPairwiseOnly {
+			return newError(ErrorInvalidGrant, 400, "the grant was issued with a public sub, and this server now issues only pairwise subs", nil)
+		}
 		return nil
 	}
-	return newError(ErrorInvalidGrant, 400, "the grant was issued with a public sub, and this server now issues only pairwise subs", nil)
+	if subjects.Prefix.IsSet() && grant.PairwisePrefix != subjects.Prefix.String() {
+		return newError(ErrorInvalidGrant, 400, "the grant's pairwise sub was issued under another subjects.prefix, so its tokens would no longer resolve", nil)
+	}
+	return nil
+}
+
+// pairwisePrefixOf is the Prefix a grant whose pairwise sub was derived
+// for sector records: cfg's, or "" for a public client (no sector).
+func pairwisePrefixOf(cfg Config, sector string) string {
+	if sector == "" {
+		return ""
+	}
+	return effectiveSubjects(cfg).Prefix.String()
 }
 
 // checkGrantUsable is checkGrantNotRevoked and checkGrantStillAllowed

@@ -77,7 +77,8 @@ type requestRecord struct {
 
 	// RequiredInternalSubject is RequiredSubject mapped back to the end
 	// user's internal subject, when the client is pairwise and the
-	// server can map its subs back (pairwise.Reversible): the subject
+	// server can map its subs back (a reversible deriver, or a
+	// resolver): the subject
 	// the interaction shows the application. Empty otherwise, where
 	// RequiredSubject is already what the application gets.
 	RequiredInternalSubject string `json:"required_internal_subject,omitempty"`
@@ -142,6 +143,13 @@ type grantRecord struct {
 	// the sector it was derived for, even after the client's sector
 	// changes. Empty for a public client.
 	PairwiseSector string `json:"pairwise_sector,omitempty"`
+
+	// PairwisePrefix is the Config.Subjects Prefix ClientSubject was
+	// issued under, set with it ("" for an empty prefix as well as for a
+	// public client). A grant whose prefix the server no longer uses is
+	// refused at its next use (checkGrantSubjectStillIssued): its tokens'
+	// pairwise sub would no longer resolve at a resource server.
+	PairwisePrefix string `json:"pairwise_prefix,omitempty"`
 
 	Scope                []string        `json:"scope,omitempty"`
 	AuthTime             time.Time       `json:"auth_time"`

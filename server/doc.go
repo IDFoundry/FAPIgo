@@ -101,8 +101,9 @@
 //     sub back to its user wherever pairwise subs can be mapped back. A
 //     pairwise client's access tokens never carry the internal subject
 //     where the client can read it: OpaqueAccessTokens keeps it in the
-//     server-side record, and under pairwise.Reversible a resource
-//     server maps a JWT access token's pairwise sub back to it.
+//     server-side record, and with a reversible deriver (one that
+//     implements pairwise.Lookup) a resource server maps a JWT access
+//     token's pairwise sub back to it.
 //   - AuthorizationAction (from BeginAuthorization) and AuthorizationResult
 //     (from CompleteAuthorization) are closed sum types, not structs with
 //     optional fields, so a caller can never mistake a local error for a
@@ -119,8 +120,9 @@
 //     client-certificate trust, clock, randomness) is present, and
 //     unless every configured limit, endpoint and algorithm is valid,
 //     and Config.Subjects states the kind of sub each client sees
-//     (PublicSubjects keeps every sub as before); under pairwise.OneWay
-//     the access-token issuer must be OpaqueAccessTokens.
+//     (PublicSubjects keeps every sub as before); with a one-way
+//     deriver the access-token issuer must be OpaqueAccessTokens, unless
+//     Dependencies.PairwiseSubjectResolver maps subs back.
 //     Config.Profile additionally requires a JARM algorithm under
 //     ProfileFAPISecurityWithMessageSigning. AssuranceProduction
 //     additionally requires an AuditSink, stores and key sources that

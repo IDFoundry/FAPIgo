@@ -1123,7 +1123,14 @@ func (a *AutomaticClientRepository) applyDisplayAndSubjectType(cfg *storage.Regi
 // values wherever no redirect proves the claim (CIBA, say). So every
 // redirect URI must be https on that same host (OpenID Connect Core
 // §8.1's redirect-host sector, made one the Relying Party is known to
-// control), or the registration is refused.
+// control), or the registration is refused. This is stricter than §8.1,
+// never different: a sector §8.1 would compute from redirect URIs on
+// another host is refused rather than used. Relying Parties whose Entity
+// Identifiers share a host (path-scoped tenants of one platform, say)
+// share a sector, and with it every user's sub; give such tenants
+// distinct hosts if they mustn't be linkable. A sector_identifier_uri,
+// from the Relying Party or a superior's metadata policy, isn't
+// supported with pairwise yet.
 func entitySector(id fapi.ClientID, redirectURIs []string) (string, error) {
 	entity, err := url.Parse(id.String())
 	if err != nil || entity.Hostname() == "" {

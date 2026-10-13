@@ -19,7 +19,7 @@ func FuzzReversibleWithRoundTrip(f *testing.F) {
 	if err != nil {
 		f.Fatal(err)
 	}
-	lookup := withOps.(pairwise.Lookup)
+	lookup := withOps
 	f.Fuzz(func(t *testing.T, issuer, sector, subject, otherSector string) {
 		in, err := pairwise.NewInput(issuer, sector, subject)
 		if err != nil || len(subject) > pairwise.MaxReversibleSubjectLength {

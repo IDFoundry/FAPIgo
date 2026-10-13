@@ -174,13 +174,9 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		return s.backchannelBeginFail(ctx, client.ID(), validateErr), nil
 	}
 
-	requiredSubject, subjectErr := s.requiredSubject(ctx, validated.params, client.ID())
+	requiredSubject, requiredInternal, subjectErr := s.backchannelSubjects(ctx, client, validated.params)
 	if subjectErr != nil {
 		return s.backchannelBeginFail(ctx, client.ID(), subjectErr), nil
-	}
-	requiredInternal, mapErr := s.backchannelRequiredInternalSubject(ctx, client, validated.params, requiredSubject)
-	if mapErr != nil {
-		return s.backchannelBeginFail(ctx, client.ID(), mapErr), nil
 	}
 
 	dpopJKT, dpopErr := s.reconcileBackchannelDPoPBinding(ctx, dpopProof, validated.params)

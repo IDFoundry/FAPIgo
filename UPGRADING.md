@@ -49,9 +49,10 @@ subjects (a pairwise `Default`, or a client's `SubjectType` and
 subjects"). A client registered with `SubjectType:
 fapi.SubjectTypePairwise` must have a sector, set or derived from its
 redirect URIs, or `storage.NewRegisteredClient` refuses it. A client
-permitted CIBA derives none: CIBA delivers tokens without a redirect
-proving the client is served on its redirect URIs' host, so a pairwise
-CIBA client sets `Sector` itself.
+permitted CIBA, or one that may authenticate by attestation, derives
+none: its tokens arrive without a redirect proving the client is served
+on its redirect URIs' host, so such a pairwise client sets `Sector` (a
+host name, which you set; never take it from the client) itself.
 
 ### Adopting pairwise subjects (server, resource)
 
@@ -71,10 +72,10 @@ subjects. Nothing changes for one that keeps `PublicSubjects()`.
   client was given. Compare user IDs a client sends (in a path, a body,
   or an ID token) with `ClientSubject`: for a pairwise client they're
   no longer `Subject`. A standalone resource server verifying JWT access
-  tokens from a `pairwise.Reversible` server sets
+  tokens from a server with a reversible deriver sets
   `resource.Dependencies.PairwiseSubjects` and `Config.PairwisePrefix`;
   `serverresource.NewVerifier` wires both.
-- **`pairwise.OneWay`** requires `server.OpaqueAccessTokens`: a one-way
+- **A one-way deriver** (`pairwise.NewHMAC`) requires `server.OpaqueAccessTokens`: a one-way
   `sub` can't be mapped back, so the internal subject must stay in a
   server-side token record. To issue JWT access tokens instead, keep
   your own record of the subs you issue as a `pairwise.SubjectResolver`,
@@ -94,6 +95,9 @@ subjects. Nothing changes for one that keeps `PublicSubjects()`.
   authorizes again, now with a pairwise `sub`. A grant keeps the `sub`
   it was issued with, so it can't move to a pairwise one in place.
   Under `SubjectTypesPerClient`, existing grants keep their `sub`.
+- **Changing `Config.Subjects.Prefix`** later ends every pairwise grant
+  the same way, since resource servers resolve a `sub` under the
+  current prefix. Choose it once.
 
 ### A federation Relying Party's `subject_type` is honoured or refused (federation, server)
 
@@ -113,7 +117,9 @@ Party's sector is its Entity Identifier's host, which the Trust Chain
 binds to it: its redirect URIs must all be https on that host (so it
 can't name another Relying Party's host and receive that Relying
 Party's sub values), and it must not publish `sector_identifier_uri`,
-which this release doesn't fetch.
+which this release doesn't fetch (nor may a superior's metadata policy
+add one). Relying Parties whose Entity Identifiers share a host share a
+sector, and so each user's `sub`.
 
 **What to change:** nothing, unless a Relying Party you federate with
 asks for `"subject_type": "pairwise"` while your server issues only
@@ -122,11 +128,14 @@ pairwise subjects. `server.New` sets the new
 `federation.AutomaticRegistrationConfig.SubjectTypes` and
 `DefaultSubjectType` from `Config.Subjects`; code building an
 `AutomaticClientRepository` directly can leave them zero, which means
-public only. To offer federation Relying Parties fewer subject types
-than statically registered clients (pairwise only, while legacy clients
-keep public subs, say), set `Config.AutomaticRegistration.SubjectTypes`,
-and advertise `Server.AutomaticRegistrationSubjectTypes()` in your
-Entity Configuration's `openid_provider` metadata.
+public only. Under a pairwise `Config.Subjects.Default`, federation
+Relying Parties are offered pairwise subjects only, so one can't opt
+out of the default by asking for public; list both in
+`Config.AutomaticRegistration.SubjectTypes` to offer public too. That
+setting also narrows what they're offered in other configurations.
+`Server.EntityConfiguration` sets its `openid_provider` metadata's
+`subject_types_supported` to what federation Relying Parties are offered
+(`Server.AutomaticRegistrationSubjectTypes()`).
 
 ## v0.54.0
 

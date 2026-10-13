@@ -1,6 +1,7 @@
 package pairwise_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
@@ -221,18 +222,17 @@ func TestNewReversibleWithRefusesNilOps(t *testing.T) {
 func TestNewReversibleWithDeclaresCustody(t *testing.T) {
 	ops := newHSMOps(t, testMACKey, testEncKey)
 	plain := newReversibleWith(t, ops)
-	if _, ok := plain.(keys.KeyCustodyAssurance); ok {
-		t.Error("undeclared deriver implements KeyCustodyAssurance")
+	if got := plain.(keys.KeyCustodyAssurance).KeyCustody(); got != (keys.KeyCustody{}) {
+		t.Errorf("undeclared deriver reports custody %+v, want none", got)
 	}
 	d, err := pairwise.NewReversibleWith(ops, keys.DeclareCustody(keys.KeyCustody{Durable: true, CrossInstanceConsistent: true}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	assured, ok := d.(keys.KeyCustodyAssurance)
-	if !ok || !assured.KeyCustody().Durable || !assured.KeyCustody().CrossInstanceConsistent {
-		t.Errorf("declared deriver custody = %v, want Durable and CrossInstanceConsistent", d)
+	if got := d.KeyCustody(); !got.Durable || !got.CrossInstanceConsistent {
+		t.Errorf("declared deriver custody = %+v, want Durable and CrossInstanceConsistent", got)
 	}
-	if _, ok := d.(pairwise.Lookup); !ok {
+	if _, ok := any(d).(pairwise.Lookup); !ok {
 		t.Error("declared deriver doesn't implement Lookup")
 	}
 }
@@ -244,4 +244,79 @@ func mustHex(t *testing.T, s string) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+// sharedBufferOps is a correct ReversibleOps over in-memory keys, except
+// that EncryptCTR returns one buffer it reuses across calls, as a pooled
+// HSM or KMS client might. onMAC runs once, inside the next MAC call: a
+// concurrent request's EncryptCTR landing between a lookup's MAC and its
+// parse.
+type sharedBufferOps struct {
+	macKey []byte
+	block  cipher.Block
+	buf    []byte
+	onMAC  func()
+}
+
+func (o *sharedBufferOps) MAC(_ context.Context, data []byte) ([]byte, error) {
+	m := hmac.New(sha256.New, o.macKey)
+	m.Write(data)
+	sum := m.Sum(nil)
+	if f := o.onMAC; f != nil {
+		o.onMAC = nil
+		f()
+	}
+	return sum, nil
+}
+
+func (o *sharedBufferOps) EncryptCTR(_ context.Context, iv, data []byte) ([]byte, error) {
+	if cap(o.buf) < len(data) {
+		o.buf = make([]byte, len(data))
+	}
+	out := o.buf[:len(data)]
+	cipher.NewCTR(o.block, iv).XORKeyStream(out, data)
+	return out, nil
+}
+
+// TestReversibleWithCopiesOpsOutput: a lookup parses the plaintext it
+// authenticated, even when ops reuses its output buffer and another
+// lookup overwrites it in between, so one user's body never resolves to
+// another user.
+func TestReversibleWithCopiesOpsOutput(t *testing.T) {
+	block, err := aes.NewCipher(bytes.Repeat([]byte{3, 4}, 16))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ops := &sharedBufferOps{macKey: bytes.Repeat([]byte{1, 2}, 16), block: block}
+	d, err := pairwise.NewReversibleWith(ops)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	const issuer, sector = "https://op.example", "rp.example"
+	derive := func(subject string) string {
+		in, err := pairwise.NewInput(issuer, sector, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := d.DerivePairwiseSubject(ctx, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return body
+	}
+	alice, bob := derive("alice"), derive("bob")
+	lookup, ok := any(d).(pairwise.Lookup)
+	if !ok {
+		t.Fatal("NewReversibleWith's Deriver doesn't implement Lookup")
+	}
+	ops.onMAC = func() {
+		if _, err := lookup.LookupInternalSubject(ctx, issuer, sector, bob); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := lookup.LookupInternalSubject(ctx, issuer, sector, alice)
+	if err != nil || got != "alice" {
+		t.Fatalf("alice's body resolved to %q, %v; want alice", got, err)
+	}
 }

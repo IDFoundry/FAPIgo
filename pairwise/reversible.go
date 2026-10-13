@@ -74,7 +74,12 @@ var errReversibleOps = errors.New("pairwise: reversible key operation failed")
 // never releases them. NewReversibleWith builds the Deriver on them, and
 // produces exactly the bodies NewReversible would from the same two
 // keys. Both are called once per derivation and once per lookup, with
-// the context of the request that needs them.
+// the context of the request that needs them, and may be called
+// concurrently.
+//
+// Neither may retain or modify the slices it is passed. The deriver
+// copies what each returns before using it, so an implementation may
+// reuse its own output buffer once the call has returned.
 type ReversibleOps interface {
 	// MAC returns HMAC-SHA-256 of data under the MAC key: the full
 	// 32-byte output, which the construction truncates itself. PKCS#11:
@@ -95,7 +100,7 @@ type ReversibleOps interface {
 	EncryptCTR(ctx context.Context, iv, data []byte) ([]byte, error)
 }
 
-// NewReversible returns the built-in Reversible Deriver, which also
+// NewReversible returns the built-in reversible Deriver, which also
 // implements Lookup: the body is the internal subject, encrypted under
 // encKey and authenticated under macKey together with the issuer and
 // sector, so the OP can map any body it issued back to its end user
@@ -114,14 +119,19 @@ type ReversibleOps interface {
 // independent implementation. Every body is ReversibleBodyLength
 // characters, whatever the internal subject's length.
 //
-// macKey and encKey must be two different sets of 32 random bytes,
-// used for nothing else. A key that is a single byte repeated (all
-// zeros, say), or two equal keys, are refused.
+// macKey and encKey must be two different sets of 32 random bytes from
+// crypto/rand, used for nothing else. A key that is a single byte
+// repeated (all zeros, say), two equal keys, and a key made entirely of
+// printable text (a passphrase, or a hex or base64 key not yet decoded)
+// are refused.
 //
 // Anyone holding both keys can map every pairwise sub this deployment
 // has ever issued, at every client, back to its end user: a leak of the
 // keys de-anonymises them all at once, and every resource server given
-// the keys to resolve subs shares that risk. The keys can't be rotated
+// the keys to resolve subs shares that risk. Give them only to the OP's
+// own resource servers: OpenID Connect Core §8.1 requires that a
+// pairwise identifier "MUST NOT be reversible by any party other than
+// the OpenID Provider". The keys can't be rotated
 // without giving every user a new sub at every pairwise client. Keep
 // them, and back them up, like signing keys. Where unlinkability matters
 // more than reversibility, use NewHMAC; where no key should be able to
@@ -137,10 +147,21 @@ type ReversibleOps interface {
 // refused with ErrSubjectTooLong. opts declare the keys' custody, as
 // for NewHMAC: server.AssuranceProduction requires a Durable one (and
 // CrossInstanceConsistent for a horizontally scaled deployment).
-func NewReversible(macKey, encKey []byte, opts ...keys.CustodyOption) (Deriver, error) {
+func NewReversible(macKey, encKey []byte, opts ...keys.CustodyOption) (*ReversibleDeriver, error) {
 	if err := sealkeys.Check("pairwise: reversible", [][]byte{macKey, encKey}); err != nil {
 		return nil, err
 	}
+	for _, key := range [...][]byte{macKey, encKey} {
+		if err := checkNotText("pairwise: reversible", key); err != nil {
+			return nil, err
+		}
+	}
+	return newReversible(macKey, encKey, opts...)
+}
+
+// newReversible is NewReversible without its key-quality checks, for the
+// published test vectors, whose keys are sequential bytes.
+func newReversible(macKey, encKey []byte, opts ...keys.CustodyOption) (*ReversibleDeriver, error) {
 	block, err := aes.NewCipher(encKey)
 	if err != nil {
 		return nil, fmt.Errorf("pairwise: reversible: %w", err)
@@ -152,7 +173,8 @@ func NewReversible(macKey, encKey []byte, opts ...keys.CustodyOption) (Deriver, 
 // over ops, for a MAC key and an encryption key that never leave an HSM
 // or KMS. For the same two keys it derives exactly the bodies
 // NewReversible does, so a deployment can move between them without
-// changing any sub. The returned Deriver also implements Lookup.
+// changing any sub. The returned ReversibleDeriver also implements
+// Lookup.
 //
 // The keys' service must offer HMAC-SHA-256 and raw AES-256-CTR with a
 // caller-supplied IV and a full 128-bit counter: PKCS#11 HSMs
@@ -180,15 +202,12 @@ func NewReversible(macKey, encKey []byte, opts ...keys.CustodyOption) (Deriver, 
 // from ops (or a wrong-sized result) means the derivation or lookup
 // couldn't be answered, never ErrSubjectNotFound. opts declare the keys'
 // custody, as for NewReversible.
-func NewReversibleWith(ops ReversibleOps, opts ...keys.CustodyOption) (Deriver, error) {
+func NewReversibleWith(ops ReversibleOps, opts ...keys.CustodyOption) (*ReversibleDeriver, error) {
 	if ops == nil {
 		return nil, errors.New("pairwise: reversible: ops is nil")
 	}
-	d := reversibleDeriver{ops: ops}
-	if custody, declared := custodyFrom(opts); declared {
-		return custodyReversibleDeriver{reversibleDeriver: d, custody: custody}, nil
-	}
-	return d, nil
+	custody, _ := custodyFrom(opts)
+	return &ReversibleDeriver{ops: ops, custody: custody}, nil
 }
 
 // memoryReversibleOps is NewReversible's ReversibleOps, over keys held
@@ -212,14 +231,20 @@ func (o memoryReversibleOps) EncryptCTR(_ context.Context, iv, data []byte) ([]b
 	return out, nil
 }
 
-// reversibleDeriver is the reversible Deriver without a custody
-// declaration.
-type reversibleDeriver struct {
-	ops ReversibleOps
+// ReversibleDeriver is the reversible Deriver NewReversible and
+// NewReversibleWith return. It also implements Lookup, so a deployment
+// using it has reversible pairwise subs.
+type ReversibleDeriver struct {
+	ops     ReversibleOps
+	custody keys.KeyCustody
 }
 
+// KeyCustody implements keys.KeyCustodyAssurance: the custody the
+// constructor's options declared, or none.
+func (d *ReversibleDeriver) KeyCustody() keys.KeyCustody { return d.custody }
+
 // DerivePairwiseSubject implements Deriver.
-func (d reversibleDeriver) DerivePairwiseSubject(ctx context.Context, in Input) (string, error) {
+func (d *ReversibleDeriver) DerivePairwiseSubject(ctx context.Context, in Input) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -246,7 +271,7 @@ func (d reversibleDeriver) DerivePairwiseSubject(ctx context.Context, in Input) 
 // isn't one this Deriver derived under exactly that issuer and sector
 // (altered, truncated, from another deployment, or for another sector)
 // fails authentication and is ErrSubjectNotFound.
-func (d reversibleDeriver) LookupInternalSubject(ctx context.Context, issuer, sector, body string) (string, error) {
+func (d *ReversibleDeriver) LookupInternalSubject(ctx context.Context, issuer, sector, body string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -288,7 +313,7 @@ func (d reversibleDeriver) LookupInternalSubject(ctx context.Context, issuer, se
 // syntheticIV is HMAC-SHA-256 under the MAC key over the associated data
 // (domain, issuer, sector, each length-prefixed) followed by the
 // fixed-size plaintext, truncated to one AES block.
-func (d reversibleDeriver) syntheticIV(ctx context.Context, issuer, sector string, plaintext []byte) ([]byte, error) {
+func (d *ReversibleDeriver) syntheticIV(ctx context.Context, issuer, sector string, plaintext []byte) ([]byte, error) {
 	var data bytes.Buffer
 	for _, field := range [...]string{reversibleDomain, issuer, sector} {
 		writeLengthPrefixed(&data, field)
@@ -308,7 +333,7 @@ func (d reversibleDeriver) syntheticIV(ctx context.Context, issuer, sector strin
 // key, starting from iv as the initial counter block (the whole block
 // incremented as a 128-bit big-endian integer). Encryption and
 // decryption are the same operation.
-func (d reversibleDeriver) ctr(ctx context.Context, iv, src []byte) ([]byte, error) {
+func (d *ReversibleDeriver) ctr(ctx context.Context, iv, src []byte) ([]byte, error) {
 	out, err := d.ops.EncryptCTR(ctx, iv, src)
 	if err != nil {
 		return nil, fmt.Errorf("%w: AES-CTR: %w", errReversibleOps, err)
@@ -316,7 +341,9 @@ func (d reversibleDeriver) ctr(ctx context.Context, iv, src []byte) ([]byte, err
 	if len(out) != len(src) {
 		return nil, fmt.Errorf("%w: AES-CTR returned %d bytes, want %d", errReversibleOps, len(out), len(src))
 	}
-	return out, nil
+	// A copy, so the plaintext a lookup authenticates is the one it then
+	// parses, even if ops reuses its output buffer for another call.
+	return bytes.Clone(out), nil
 }
 
 // reversiblePlaintext lays subject out as the fixed-size plaintext: its
@@ -366,13 +393,3 @@ func decodeReversibleBody(body string) ([]byte, bool) {
 	}
 	return sealed, true
 }
-
-// custodyReversibleDeriver is a reversibleDeriver whose caller declared
-// its keys' custody.
-type custodyReversibleDeriver struct {
-	reversibleDeriver
-	custody keys.KeyCustody
-}
-
-// KeyCustody implements keys.KeyCustodyAssurance.
-func (d custodyReversibleDeriver) KeyCustody() keys.KeyCustody { return d.custody }

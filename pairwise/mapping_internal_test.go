@@ -33,17 +33,8 @@ func TestNewMappingDrawsFromCryptoRand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewMapping: %v", err)
 	}
-	var random any
-	switch m := d.(type) {
-	case mappingDeriver:
-		random = m.random
-	case assuredMappingDeriver:
-		random = m.random
-	default:
-		t.Fatalf("NewMapping returned %T", d)
-	}
-	if random != rand.Reader {
-		t.Errorf("NewMapping's random source is %T, want crypto/rand.Reader", random)
+	if d.random != rand.Reader {
+		t.Errorf("NewMapping's random source is %T, want crypto/rand.Reader", d.random)
 	}
 }
 

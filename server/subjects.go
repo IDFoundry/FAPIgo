@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/pairwise"
@@ -51,31 +52,40 @@ func (e SubjectTypeEnforcement) IsValid() bool {
 //   - Enforcement is whether a client's registered subject type may
 //     override Default (SubjectTypesPerClient), or every client is
 //     pairwise (SubjectTypesPairwiseOnly).
-//   - Derivation and Prefix apply whenever a client can be pairwise,
-//     that is, when Default is pairwise or Dependencies.PairwiseSubjects
-//     is set; otherwise they must be left zero. Derivation states
-//     whether Dependencies.PairwiseSubjects can map a sub back to the
-//     user (pairwise.Reversible, which requires a pairwise.Lookup) or
-//     not (pairwise.OneWay). Prefix is put in front of every pairwise
-//     sub, and may be empty, but must be built with pairwise.NewPrefix.
+//   - Prefix applies whenever a client can be pairwise, that is, when
+//     Default is pairwise or Dependencies.PairwiseSubjects is set;
+//     otherwise it must be left zero. It is put in front of every
+//     pairwise sub, and must be built with pairwise.NewPrefix. It may be
+//     empty when the deriver is reversible, but not when it is one-way.
 //     With pairwise.NewReversible, internal subjects are limited to
 //     pairwise.MaxReversibleSubjectLength (151) bytes: a user with a
 //     longer one can't complete an authorization at a pairwise client.
 //
+// Whether this server's pairwise subs can be mapped back to their users
+// isn't configured: it is whether Dependencies.PairwiseSubjects
+// implements pairwise.Lookup (pairwise.NewReversible,
+// pairwise.NewReversibleWith and pairwise.NewMapping do; pairwise.NewHMAC
+// doesn't, and is one-way), so the configuration can't claim more
+// unlinkability than the deriver gives.
+//
 // PublicSubjects is the configuration that keeps every sub as it was.
 // Changing Default, Enforcement or Prefix, or the deriver's key, changes
 // the sub of every user at the affected clients for new grants: plan it
-// as an identity migration, not a configuration change.
+// as an identity migration, not a configuration change. Existing grants
+// keep the sub they were issued with, except that changing Prefix ends
+// every pairwise grant at its next use (invalid_grant), since resource
+// servers resolve pairwise subs under the current prefix, and switching
+// to SubjectTypesPairwiseOnly ends grants issued with public subs.
 //
-// Under pairwise.OneWay the server can't map a pairwise sub back to the
+// With a one-way deriver the server can't map a pairwise sub back to the
 // end user, so its access tokens must keep the internal subject
 // server-side: New refuses any Dependencies.AccessTokens but
-// OpaqueAccessTokens. Under pairwise.Reversible any issuer works, and a
-// resource server looks the sub up (resource.Config.PairwiseSubjects).
+// OpaqueAccessTokens, unless Dependencies.PairwiseSubjectResolver maps
+// subs back. With a reversible deriver any issuer works, and a resource
+// server looks the sub up.
 type SubjectConfig struct {
 	Default     fapi.SubjectType
 	Enforcement SubjectTypeEnforcement
-	Derivation  pairwise.Derivation
 	Prefix      pairwise.Prefix
 }
 
@@ -99,6 +109,13 @@ func effectiveSubjects(cfg Config) SubjectConfig {
 	return cfg.Subjects
 }
 
+// reversibleDeriver reports whether deriver can map a body back to its
+// internal subject: whether it implements pairwise.Lookup.
+func reversibleDeriver(deriver pairwise.Deriver) bool {
+	_, ok := deriver.(pairwise.Lookup)
+	return ok
+}
+
 // pairwisePossible reports whether some client of a server configured
 // with subjects and deriver could be pairwise.
 func pairwisePossible(subjects SubjectConfig, deriver pairwise.Deriver) bool {
@@ -107,7 +124,7 @@ func pairwisePossible(subjects SubjectConfig, deriver pairwise.Deriver) bool {
 
 // validateSubjects checks Config.Subjects against itself and
 // Dependencies.PairwiseSubjects, and, when a client could be pairwise,
-// derives (and for pairwise.Reversible looks up) a fixed input once, so
+// derives (and for a reversible deriver looks up) a fixed input once, so
 // a broken deriver fails New instead of an authorization.
 func validateSubjects(cfg Config, deps Dependencies) error {
 	subjects := effectiveSubjects(cfg)
@@ -118,41 +135,41 @@ func validateSubjects(cfg Config, deps Dependencies) error {
 		return err
 	}
 	if !pairwisePossible(subjects, deps.PairwiseSubjects) {
-		if subjects.Derivation != 0 || subjects.Prefix.IsSet() || deps.PairwiseSubjectResolver != nil {
-			return fmt.Errorf("server: config: subjects.derivation, subjects.prefix and dependencies.pairwise_subject_resolver apply only when a client can be pairwise (a pairwise default, or dependencies.pairwise_subjects set)")
+		if subjects.Prefix.IsSet() || deps.PairwiseSubjectResolver != nil {
+			return fmt.Errorf("server: config: subjects.prefix and dependencies.pairwise_subject_resolver apply only when a client can be pairwise (a pairwise default, or dependencies.pairwise_subjects set)")
 		}
 		return nil
 	}
-	if err := validatePairwiseSubjects(subjects, deps.PairwiseSubjects); err != nil {
+	if err := validatePairwiseSubjects(subjects, deps.PairwiseSubjects, deps.PairwiseSubjectResolver); err != nil {
 		return err
 	}
-	if deps.PairwiseSubjectResolver != nil && subjects.Derivation != pairwise.OneWay {
-		return fmt.Errorf("server: dependencies: pairwise_subject_resolver applies only to pairwise.OneWay subjects (pairwise.Reversible maps subs back through pairwise_subjects itself)")
+	if deps.PairwiseSubjectResolver != nil && reversibleDeriver(deps.PairwiseSubjects) {
+		return fmt.Errorf("server: dependencies: pairwise_subject_resolver applies only to a one-way pairwise_subjects (one that doesn't implement pairwise.Lookup); %T maps subs back itself", deps.PairwiseSubjects)
 	}
-	if err := checkPairwiseAccessTokens(subjects, deps.AccessTokens, deps.PairwiseSubjectResolver); err != nil {
+	if err := checkPairwiseAccessTokens(deps.PairwiseSubjects, deps.AccessTokens, deps.PairwiseSubjectResolver); err != nil {
 		return err
 	}
-	return probePairwiseSubjects(cfg.Issuer.String(), subjects, deps.PairwiseSubjects)
+	return probePairwiseSubjects(cfg.Issuer.String(), deps.PairwiseSubjects)
 }
 
-// checkPairwiseAccessTokens refuses, under pairwise.OneWay, an access
+// checkPairwiseAccessTokens refuses, with a one-way deriver, an access
 // token issuer other than OpaqueAccessTokens unless the embedder's own
 // resolver (Dependencies.PairwiseSubjectResolver) maps subs back. A
 // pairwise access token's "sub" is the pairwise one, and a one-way sub
 // can't be mapped back to the end user, so without a resolver the
 // internal subject a resource server authorizes by must stay in the
 // server-side record OpaqueAccessTokens keeps; a self-contained token,
-// readable by the client, must never carry it. Under pairwise.Reversible
-// a resource server looks the sub up instead.
-func checkPairwiseAccessTokens(subjects SubjectConfig, issuer AccessTokenIssuer, resolver pairwise.SubjectResolver) error {
-	if subjects.Derivation != pairwise.OneWay || resolver != nil {
+// readable by the client, must never carry it. With a reversible
+// deriver a resource server looks the sub up instead.
+func checkPairwiseAccessTokens(deriver pairwise.Deriver, issuer AccessTokenIssuer, resolver pairwise.SubjectResolver) error {
+	if reversibleDeriver(deriver) || resolver != nil {
 		return nil
 	}
 	switch issuer.(type) {
 	case OpaqueAccessTokens, *OpaqueAccessTokens:
 		return nil
 	}
-	return fmt.Errorf("server: dependencies: access_tokens must be OpaqueAccessTokens with pairwise.OneWay subjects: a one-way pairwise sub can't be mapped back to its end user, so the internal subject must stay in a server-side token record (use pairwise.Reversible, or set dependencies.pairwise_subject_resolver, for self-contained access tokens)")
+	return fmt.Errorf("server: dependencies: access_tokens must be OpaqueAccessTokens with a one-way pairwise_subjects (%T): a one-way pairwise sub can't be mapped back to its end user, so the internal subject must stay in a server-side token record (use a reversible deriver, pairwise.NewReversible or pairwise.NewMapping, or set dependencies.pairwise_subject_resolver, for self-contained access tokens)", deriver)
 }
 
 // validateSubjectTypes checks Default and Enforcement.
@@ -173,53 +190,102 @@ func validateSubjectTypes(subjects SubjectConfig) error {
 }
 
 // validatePairwiseSubjects checks the settings that apply once a client
-// can be pairwise.
-func validatePairwiseSubjects(subjects SubjectConfig, deriver pairwise.Deriver) error {
+// can be pairwise. An empty Prefix is refused for a one-way deriver with
+// no resolver: nothing could then tell a pairwise sub from a public one,
+// and the server's own checks (a signed UserInfo response's sub, say)
+// couldn't catch the internal subject passed where the pairwise one
+// belongs.
+func validatePairwiseSubjects(subjects SubjectConfig, deriver pairwise.Deriver, resolver pairwise.SubjectResolver) error {
 	switch {
 	case deriver == nil:
-		return fmt.Errorf("server: dependencies: pairwise_subjects is required with a pairwise subjects.default")
-	case subjects.Derivation == 0:
-		return fmt.Errorf("server: config: subjects.derivation is required when a client can be pairwise (pairwise.OneWay or pairwise.Reversible)")
-	case !subjects.Derivation.IsValid():
-		return fmt.Errorf("server: config: subjects.derivation is invalid")
+		return fmt.Errorf("server: dependencies: pairwise_subjects is required with a pairwise subjects.default (pairwise.NewReversible, pairwise.NewReversibleWith, pairwise.NewMapping or pairwise.NewHMAC)")
 	case !subjects.Prefix.IsSet():
-		return fmt.Errorf("server: config: subjects.prefix is required when a client can be pairwise (pairwise.NewPrefix, which accepts \"\")")
-	}
-	if _, ok := deriver.(pairwise.Lookup); subjects.Derivation == pairwise.Reversible && !ok {
-		return fmt.Errorf("server: config: subjects.derivation pairwise.Reversible requires dependencies.pairwise_subjects to implement pairwise.Lookup")
+		return fmt.Errorf("server: config: subjects.prefix is required when a client can be pairwise (pairwise.NewPrefix, which accepts \"\" for a reversible deriver)")
+	case subjects.Prefix.String() == "" && !reversibleDeriver(deriver) && resolver == nil:
+		return fmt.Errorf("server: config: subjects.prefix must not be empty with a one-way pairwise_subjects (%T): set one, such as pairwise.NewPrefix(\"ppid:\"), so a pairwise sub can't be mistaken for an internal subject", deriver)
 	}
 	return nil
 }
 
-// Fixed input for probePairwiseSubjects.
+// Fixed inputs for probePairwiseSubjects: two sectors and two users.
 const (
-	pairwiseProbeSector  = "fapigo.pairwise.probe"
-	pairwiseProbeSubject = "fapigo-pairwise-probe"
+	pairwiseProbeSector      = "fapigo.pairwise.probe"
+	pairwiseProbeOtherSector = "other.fapigo.pairwise.probe"
+	pairwiseProbeSubject     = "fapigo-pairwise-probe"
+	pairwiseProbeOtherUser   = "fapigo-pairwise-probe-2"
 )
 
-// probePairwiseSubjects derives a fixed input through deriver, checks
-// the body, and for pairwise.Reversible looks it up again, under the
-// same time bound as the signing-key check.
-func probePairwiseSubjects(issuer string, subjects SubjectConfig, deriver pairwise.Deriver) error {
+// probePairwiseSubjects derives fixed inputs through deriver, under the
+// same time bound as the signing-key check, and refuses a deriver that
+// can't give pairwise subs their meaning: one that fails, returns an
+// unusable body, isn't deterministic, puts the internal subject in the
+// body, or gives one user the same body in two sectors, or two users
+// the same body in one. A reversible deriver must also look its body up
+// again. It can't prove a custom deriver unlinkable (run
+// pairwise.TestDeriverContract for more), but it catches one that
+// ignores its input.
+func probePairwiseSubjects(issuer string, deriver pairwise.Deriver) error {
 	ctx, cancel := context.WithTimeout(context.Background(), keyCheckTimeout)
 	defer cancel()
-	in, err := pairwise.NewInput(issuer, pairwiseProbeSector, pairwiseProbeSubject)
+	derive := func(sector, subject string) (string, error) {
+		in, err := pairwise.NewInput(issuer, sector, subject)
+		if err != nil {
+			return "", fmt.Errorf("server: config: subjects: the issuer can't be a pairwise input: %w", err)
+		}
+		body, err := deriver.DerivePairwiseSubject(ctx, in)
+		if err != nil {
+			return "", fmt.Errorf("server: dependencies: pairwise_subjects can't derive a subject: %w", err)
+		}
+		if err := pairwise.CheckBody(body); err != nil {
+			return "", fmt.Errorf("server: dependencies: pairwise_subjects derived an unusable subject: %w", err)
+		}
+		return body, nil
+	}
+	body, err := derive(pairwiseProbeSector, pairwiseProbeSubject)
 	if err != nil {
-		return fmt.Errorf("server: config: subjects: the issuer can't be a pairwise input: %w", err)
+		return err
 	}
-	body, err := deriver.DerivePairwiseSubject(ctx, in)
-	if err != nil {
-		return fmt.Errorf("server: dependencies: pairwise_subjects can't derive a subject: %w", err)
+	if err := probeBodies(body, derive); err != nil {
+		return err
 	}
-	if err := pairwise.CheckBody(body); err != nil {
-		return fmt.Errorf("server: dependencies: pairwise_subjects derived an unusable subject: %w", err)
-	}
-	if subjects.Derivation != pairwise.Reversible {
+	lookup, ok := deriver.(pairwise.Lookup)
+	if !ok {
 		return nil
 	}
-	got, err := deriver.(pairwise.Lookup).LookupInternalSubject(ctx, issuer, pairwiseProbeSector, body)
+	got, err := lookup.LookupInternalSubject(ctx, issuer, pairwiseProbeSector, body)
 	if err != nil || got != pairwiseProbeSubject {
 		return fmt.Errorf("server: dependencies: pairwise_subjects can't look up the subject it derived: %v", lookupProblem(got, err))
+	}
+	return nil
+}
+
+// probeBodies checks body, the probe user's body in the probe sector,
+// against the bodies derive gives the same input again, the same user
+// in another sector, and another user in the same sector.
+func probeBodies(body string, derive func(sector, subject string) (string, error)) error {
+	if strings.Contains(strings.ToLower(body), pairwiseProbeSubject) {
+		return fmt.Errorf("server: dependencies: pairwise_subjects puts the internal subject in the pairwise sub (%q), which would hand it to the client", body)
+	}
+	again, err := derive(pairwiseProbeSector, pairwiseProbeSubject)
+	if err != nil {
+		return err
+	}
+	if again != body {
+		return fmt.Errorf("server: dependencies: pairwise_subjects isn't deterministic: the same input gave %q and %q", body, again)
+	}
+	otherSector, err := derive(pairwiseProbeOtherSector, pairwiseProbeSubject)
+	if err != nil {
+		return err
+	}
+	if otherSector == body {
+		return fmt.Errorf("server: dependencies: pairwise_subjects gives a user the same sub in two sectors, so their subs could be linked across relying parties")
+	}
+	otherUser, err := derive(pairwiseProbeSector, pairwiseProbeOtherUser)
+	if err != nil {
+		return err
+	}
+	if otherUser == body {
+		return fmt.Errorf("server: dependencies: pairwise_subjects gives two users the same sub")
 	}
 	return nil
 }
@@ -264,8 +330,11 @@ func subjectTypeNames(types []fapi.SubjectType) []string {
 // AutomaticRegistrationSubjectTypes is the subject_types_supported to
 // advertise to automatically registered Relying Parties, in the
 // openid_provider metadata of this server's Entity Configuration: what
-// they may ask for, Config.AutomaticRegistration.SubjectTypes when set,
-// otherwise everything the server issues (as Metadata advertises).
+// they may ask for. That is Config.AutomaticRegistration.SubjectTypes
+// when set; otherwise pairwise alone under a pairwise
+// Config.Subjects.Default, and everything the server issues (as
+// Metadata advertises) under a public one. EntityConfiguration sets it
+// itself when automatic registration is configured.
 func (s *Server) AutomaticRegistrationSubjectTypes() []string {
 	types, _, _ := automaticRegistrationSubjects(s.cfg, s.deps.PairwiseSubjects)
 	return subjectTypeNames(types)
@@ -283,6 +352,13 @@ func automaticRegistrationSubjects(cfg Config, deriver pairwise.Deriver) ([]fapi
 	issued := supportedSubjectTypes(subjects, deriver)
 	offered := cfg.AutomaticRegistration.SubjectTypes
 	if len(offered) == 0 {
+		// A pairwise default is the deployment's privacy choice: a
+		// Relying Party registering itself through federation doesn't get
+		// to opt out of it. Public subs for federation are offered only
+		// when SubjectTypes names them.
+		if subjects.Default == fapi.SubjectTypePairwise {
+			return []fapi.SubjectType{fapi.SubjectTypePairwise}, fapi.SubjectTypePairwise, nil
+		}
 		return issued, subjects.Default, nil
 	}
 	for i, t := range offered {

@@ -106,19 +106,22 @@ func TestNewHMACCopiesTheKey(t *testing.T) {
 }
 
 func TestNewHMACDeclaresCustodyOnlyWhenGiven(t *testing.T) {
-	if _, ok := newHMAC(t).(keys.KeyCustodyAssurance); ok {
-		t.Error("an HMAC Deriver with no custody declared implements keys.KeyCustodyAssurance")
+	undeclared, err := pairwise.NewHMAC(testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := undeclared.KeyCustody(); got != (keys.KeyCustody{}) {
+		t.Errorf("an HMAC Deriver with no custody declared reports %+v, want none", got)
 	}
 	want := keys.KeyCustody{Durable: true, CrossInstanceConsistent: true}
 	d, err := pairwise.NewHMAC(testKey, keys.DeclareCustody(want))
 	if err != nil {
 		t.Fatal(err)
 	}
-	asserter, ok := d.(keys.KeyCustodyAssurance)
-	if !ok || asserter.KeyCustody() != want {
-		t.Errorf("custody = %+v (implements: %v), want %+v", asserter, ok, want)
+	if got := d.KeyCustody(); got != want {
+		t.Errorf("custody = %+v, want %+v", got, want)
 	}
-	if _, ok := d.(pairwise.Lookup); ok {
+	if _, ok := any(d).(pairwise.Lookup); ok {
 		t.Error("the HMAC Deriver implements Lookup")
 	}
 }
@@ -189,19 +192,6 @@ func TestCheckBody(t *testing.T) {
 	}
 }
 
-func TestDerivation(t *testing.T) {
-	for d, s := range map[pairwise.Derivation]string{pairwise.OneWay: "one-way", pairwise.Reversible: "reversible"} {
-		if !d.IsValid() || d.String() != s {
-			t.Errorf("%d: IsValid %v String %q", d, d.IsValid(), d.String())
-		}
-	}
-	for _, d := range []pairwise.Derivation{0, 3} {
-		if d.IsValid() || d.String() != "" {
-			t.Errorf("Derivation(%d) is valid", d)
-		}
-	}
-}
-
 func FuzzNewPrefix(f *testing.F) {
 	for _, seed := range []string{"", "ppid:", strings.Repeat("a", 17), "a b"} {
 		f.Add(seed)
@@ -256,4 +246,32 @@ func FuzzHMACDeterministicAndInjective(f *testing.F) {
 			t.Fatalf("(%q, %q) and (%q, %q) both derived %q", sector, subject, sector2, subject2, body)
 		}
 	})
+}
+
+// TestDeriversRefuseTextKeys: a key made entirely of printable text (a
+// passphrase, or a hex or base64 key not yet decoded) is refused; one
+// non-text byte is enough to accept it.
+func TestDeriversRefuseTextKeys(t *testing.T) {
+	random := bytes.Repeat([]byte{0x01, 0xfe}, 16)
+	for name, key := range map[string][]byte{
+		"passphrase":      []byte("my-super-secret-pairwise-key-123"),
+		"hex, undecoded":  []byte("0123456789abcdef0123456789abcdef"),
+		"with whitespace": []byte("correct horse battery staple\n\tok"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := pairwise.NewHMAC(key[:32]); err == nil || !strings.Contains(err.Error(), "printable text") {
+				t.Errorf("NewHMAC(%q) = %v, want refused as text", key[:32], err)
+			}
+			if _, err := pairwise.NewReversible(random, key[:32]); err == nil || !strings.Contains(err.Error(), "printable text") {
+				t.Errorf("NewReversible(_, %q) = %v, want refused as text", key[:32], err)
+			}
+			if _, err := pairwise.NewReversible(key[:32], random); err == nil || !strings.Contains(err.Error(), "printable text") {
+				t.Errorf("NewReversible(%q, _) = %v, want refused as text", key[:32], err)
+			}
+		})
+	}
+	almost := []byte("my-super-secret-pairwise-key-12\x00")
+	if _, err := pairwise.NewHMAC(almost); err != nil {
+		t.Errorf("NewHMAC with one non-text byte = %v, want accepted", err)
+	}
 }

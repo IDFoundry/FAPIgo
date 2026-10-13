@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 
 	"github.com/idfoundry/fapigo/federation"
 	"github.com/idfoundry/fapigo/keys"
@@ -14,9 +15,14 @@ import (
 // EntityConfiguration), carrying metadata as its own "metadata" claim —
 // build it yourself, typically a federation_entity object plus an
 // openid_provider object mirroring this server's own Metadata, and pass
-// it here; this method only resolves this server's own federation
-// signing key and signs — it never derives metadata from Config on its
-// own. Serve the result verbatim, with Content-Type
+// it here; this method resolves this server's own federation signing
+// key and signs, and derives only one metadata value from Config: when
+// automatic registration is configured (Config.AutomaticRegistration has
+// TrustAnchors), it sets the openid_provider object's
+// subject_types_supported to AutomaticRegistrationSubjectTypes, what a
+// Relying Party registering through federation may ask for, which can be
+// fewer types than Metadata advertises to statically registered
+// clients. The caller's map is left unchanged. Serve the result verbatim, with Content-Type
 // federation.EntityStatementContentType, at
 // Config.Federation.EntityID+federation.WellKnownPath — this package
 // still doesn't own HTTP transport itself.
@@ -54,5 +60,41 @@ func (s *Server) EntityConfiguration(ctx context.Context, metadata map[string]js
 	if err != nil {
 		return "", fmt.Errorf("server: %w", err)
 	}
+	metadata, err = s.withAutomaticRegistrationSubjectTypes(metadata)
+	if err != nil {
+		return "", err
+	}
 	return issuer.EntityConfiguration(metadata, trustMarks...)
 }
+
+// withAutomaticRegistrationSubjectTypes returns metadata with its
+// openid_provider object's subject_types_supported set to
+// AutomaticRegistrationSubjectTypes, when automatic registration is
+// configured and metadata has an openid_provider object; otherwise
+// metadata itself. It copies rather than changing the caller's map.
+func (s *Server) withAutomaticRegistrationSubjectTypes(metadata map[string]json.RawMessage) (map[string]json.RawMessage, error) {
+	raw, ok := metadata[openIDProviderEntityType]
+	if !ok || len(s.cfg.AutomaticRegistration.TrustAnchors) == 0 {
+		return metadata, nil
+	}
+	var op map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &op); err != nil || op == nil {
+		return nil, fmt.Errorf("server: entity configuration: %s metadata must be a JSON object", openIDProviderEntityType)
+	}
+	types, err := json.Marshal(s.AutomaticRegistrationSubjectTypes())
+	if err != nil {
+		return nil, fmt.Errorf("server: entity configuration: %w", err)
+	}
+	op["subject_types_supported"] = types
+	rewritten, err := json.Marshal(op)
+	if err != nil {
+		return nil, fmt.Errorf("server: entity configuration: %w", err)
+	}
+	out := maps.Clone(metadata)
+	out[openIDProviderEntityType] = rewritten
+	return out, nil
+}
+
+// openIDProviderEntityType is the Entity Type identifier an OpenID
+// Provider's metadata is published under (OpenID Federation 1.0 §5.1.3).
+const openIDProviderEntityType = "openid_provider"

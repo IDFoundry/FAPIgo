@@ -453,12 +453,25 @@ type RegisteredClientConfig struct {
 	// same sub for a user. Optional: when empty, a web client whose
 	// redirect URIs are all https on one host gets that host. A native
 	// client, a client with redirect URIs on several hosts, one with no
-	// redirect URIs, and one permitted CIBA (which receives tokens without
-	// a redirect proving it controls that host) have no derived sector,
-	// so a pairwise one must set it. Up to 255 printable ASCII
-	// characters, by convention a host name. Changing it (or the redirect
-	// URIs it's derived from) gives every user a new sub at this client
-	// for new grants, so set it before the client's first use.
+	// redirect URIs, one permitted CIBA and one that may authenticate by
+	// attestation (both receive tokens without a redirect proving they
+	// control that host: CIBA, and an embedder's own grant) have no
+	// derived sector, so a pairwise one must set it. A host name, as OpenID Connect
+	// Core §8.1's sector is: up to 255 ASCII letters, digits, '-', '.'
+	// and '_', with no empty label (no scheme, port, path or user info),
+	// lowercased, so "RP.example" is the same sector as "rp.example".
+	// Changing it (or the redirect URIs it's derived from) gives every
+	// user a new sub at this client for new grants, so set it before the
+	// client's first use.
+	//
+	// The operator sets it, never the client: two clients with the same
+	// Sector get the same sub for every user, which is how §8.1 lets one
+	// relying party's clients share one, and also how a client given
+	// another relying party's sector would link users across them. Take
+	// it from your own registration records, never from a client's
+	// self-service registration or metadata (OpenID Connect gates a
+	// client-supplied sector behind a verified sector_identifier_uri,
+	// which FAPIgo doesn't support yet).
 	Sector string
 }
 

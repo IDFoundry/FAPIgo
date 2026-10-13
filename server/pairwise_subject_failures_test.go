@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	fapi "github.com/idfoundry/fapigo"
-	"github.com/idfoundry/fapigo/pairwise"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage/memstore"
 )
@@ -27,7 +26,7 @@ func (u unavailableLookup) LookupInternalSubject(ctx context.Context, issuer, se
 // TestClientSubjectFailsClosed: ClientSubject reports a derivation it
 // can't complete as server_error, never the internal subject.
 func TestClientSubjectFailsClosed(t *testing.T) {
-	h := withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), pairwise.OneWay, failingDeriver{hmacDeriver(t)})
+	h := withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), failingDeriver{hmacDeriver(t)})
 	sub, err := h.server.ClientSubject(context.Background(), testClientID, mustAuthenticated(t, "user-1"))
 	if code := serverErrorCode(t, err); code != server.ErrorServerError || sub != "" {
 		t.Fatalf("ClientSubject = %q, %v; want no sub and server_error", sub, err)
@@ -42,14 +41,14 @@ func TestClientSubjectFailsClosed(t *testing.T) {
 func TestPairwiseRequiredSubjectLookupUnavailable(t *testing.T) {
 	sub := testPairwisePrefix + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 	t.Run("PAR", func(t *testing.T) {
-		h := withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), pairwise.Reversible, unavailableLookup{newMappingDeriver()})
+		h := withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), unavailableLookup{newMappingDeriver()})
 		err := pushPAR(t, h, map[string]string{"claims": subClaims("id_token", sub)})
 		if code := serverErrorCode(t, err); code != server.ErrorServerError {
 			t.Fatalf("PushAuthorizationRequest error code = %q, want server_error", code)
 		}
 	})
 	t.Run("CIBA", func(t *testing.T) {
-		h := cibaWithPairwise(t, pairwise.Reversible, unavailableLookup{newMappingDeriver()})
+		h := cibaWithPairwise(t, unavailableLookup{newMappingDeriver()})
 		params := standardBackchannelParams(t)
 		params["claims"] = json.RawMessage(subClaims("id_token", sub))
 		assertBackchannelLocalError(t, h, params, server.ErrorServerError)
@@ -66,7 +65,7 @@ func TestPairwiseRequiredSubjectPublicClientUnderPairwiseOnly(t *testing.T) {
 	register(t, h, public)
 	h.cfg.Subjects = server.SubjectConfig{
 		Default: fapi.SubjectTypePairwise, Enforcement: server.SubjectTypesPairwiseOnly,
-		Derivation: pairwise.Reversible, Prefix: mustPrefix(t, testPairwisePrefix),
+		Prefix: mustPrefix(t, testPairwisePrefix),
 	}
 	h.deps.PairwiseSubjects = newMappingDeriver()
 	srv, err := server.New(h.cfg, h.deps)
@@ -81,12 +80,13 @@ func TestPairwiseRequiredSubjectPublicClientUnderPairwiseOnly(t *testing.T) {
 }
 
 // TestBackchannelCompletionFailsClosedWithoutClientSubject: a CIBA
-// approval whose client sub can't be worked out (the client is gone, or
-// is pairwise by default with no sector to derive under) is refused with
-// server_error, and the poll gets no tokens.
+// approval whose client sub can't be worked out is refused with
+// server_error, and the poll gets no tokens: the client is gone by
+// completion; or it's pairwise by default with no sector to derive under,
+// which the backchannel authentication endpoint refuses up front.
 func TestBackchannelCompletionFailsClosedWithoutClientSubject(t *testing.T) {
 	t.Run("client no longer registered", func(t *testing.T) {
-		h := cibaWithPairwise(t, pairwise.OneWay, hmacDeriver(t))
+		h := cibaWithPairwise(t, hmacDeriver(t))
 		required := beginBackchannel(t, h, standardBackchannelParams(t))
 		delete(h.clients.clients, testClientID)
 		assertBackchannelCompletionServerError(t, h, required)
@@ -100,7 +100,7 @@ func TestBackchannelCompletionFailsClosedWithoutClientSubject(t *testing.T) {
 		register(t, h, noSector)
 		h.cfg.Subjects = server.SubjectConfig{
 			Default: fapi.SubjectTypePairwise, Enforcement: server.SubjectTypesPerClient,
-			Derivation: pairwise.OneWay, Prefix: mustPrefix(t, testPairwisePrefix),
+			Prefix: mustPrefix(t, testPairwisePrefix),
 		}
 		h.deps.PairwiseSubjects = hmacDeriver(t)
 		h.deps.AccessTokens = server.OpaqueAccessTokens{Store: memstore.NewAccessTokenStore()}
@@ -109,8 +109,8 @@ func TestBackchannelCompletionFailsClosedWithoutClientSubject(t *testing.T) {
 			t.Fatalf("New: %v", err)
 		}
 		h.server = srv
-		required := beginBackchannel(t, h, standardBackchannelParams(t))
-		assertBackchannelCompletionServerError(t, h, required)
+		// Refused before the user is asked to approve anything.
+		assertBackchannelLocalError(t, h, standardBackchannelParams(t), server.ErrorServerError)
 	})
 }
 

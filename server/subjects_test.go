@@ -3,8 +3,11 @@ package server_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -156,19 +159,58 @@ func TestNewAcceptsPairwiseSubjects(t *testing.T) {
 }
 
 // probeDeriver is a Deriver (and Lookup) whose answers a test controls.
+// Its body is body when set, otherwise a sound one: a hash of the
+// sector and subject.
 type probeDeriver struct {
 	body      string
 	err       error
 	looksUpTo string
 	lookupErr error
+	derive    func(pairwise.Input) string // when set, overrides body
 }
 
-func (d probeDeriver) DerivePairwiseSubject(context.Context, pairwise.Input) (string, error) {
-	return d.body, d.err
+func (d probeDeriver) DerivePairwiseSubject(_ context.Context, in pairwise.Input) (string, error) {
+	switch {
+	case d.err != nil:
+		return "", d.err
+	case d.derive != nil:
+		return d.derive(in), nil
+	case d.body != "" || d.looksUpTo == "" && d.lookupErr == nil:
+		return d.body, nil
+	}
+	return soundProbeBody(in), nil
 }
 
 func (d probeDeriver) LookupInternalSubject(context.Context, string, string, string) (string, error) {
 	return d.looksUpTo, d.lookupErr
+}
+
+// soundProbeBody is a deterministic body that depends on in's sector and
+// subject.
+func soundProbeBody(in pairwise.Input) string { return hashed(in.Sector() + "\x00" + in.Subject()) }
+
+// hashed is s's SHA-256, hex-encoded.
+func hashed(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
+
+// sectorless is in under a fixed sector.
+func sectorless(in pairwise.Input) pairwise.Input {
+	out, err := pairwise.NewInput(in.Issuer(), "any.example", in.Subject())
+	if err != nil {
+		panic(err)
+	}
+	return out
+}
+
+// counter returns a body that changes on every call.
+func counter() func(pairwise.Input) string {
+	n := 0
+	return func(pairwise.Input) string {
+		n++
+		return hashed(strconv.Itoa(n))
+	}
 }
 
 // oneWayProbe is a probeDeriver without its Lookup: a one-way Deriver.
@@ -183,13 +225,21 @@ func TestNewProbesThePairwiseDeriver(t *testing.T) {
 		deriver pairwise.Deriver
 		want    string
 	}{
-		"derivation fails":   {oneWayProbe{probeDeriver{err: errors.New("kms down")}}, "can't derive a subject: kms down"},
-		"empty body":         {oneWayProbe{probeDeriver{body: ""}}, "derived an unusable subject"},
-		"body with a space":  {oneWayProbe{probeDeriver{body: "a b"}}, "derived an unusable subject"},
-		"lookup fails":       {probeDeriver{body: "abc", lookupErr: errors.New("store down")}, "can't look up the subject it derived: store down"},
-		"lookup is wrong":    {probeDeriver{body: "abc", looksUpTo: "someone-else"}, `can't look up the subject it derived: it returned "someone-else"`},
-		"reversible, sound":  {probeDeriver{body: "abc", looksUpTo: "fapigo-pairwise-probe"}, ""},
-		"one-way, no lookup": {oneWayProbe{probeDeriver{body: "abc"}}, ""},
+		"derivation fails":         {oneWayProbe{probeDeriver{err: errors.New("kms down")}}, "can't derive a subject: kms down"},
+		"empty body":               {oneWayProbe{probeDeriver{body: ""}}, "derived an unusable subject"},
+		"body with a space":        {oneWayProbe{probeDeriver{body: "a b"}}, "derived an unusable subject"},
+		"lookup fails":             {probeDeriver{lookupErr: errors.New("store down")}, "can't look up the subject it derived: store down"},
+		"lookup is wrong":          {probeDeriver{looksUpTo: "someone-else"}, `can't look up the subject it derived: it returned "someone-else"`},
+		"reversible, sound":        {probeDeriver{looksUpTo: "fapigo-pairwise-probe"}, ""},
+		"one-way, no lookup":       {oneWayProbe{probeDeriver{derive: soundProbeBody}}, ""},
+		"one body for every input": {oneWayProbe{probeDeriver{body: "abc"}}, "same sub in two sectors"},
+		"the subject as its body": {oneWayProbe{probeDeriver{derive: func(in pairwise.Input) string { return in.Subject() }}},
+			"puts the internal subject in the pairwise sub"},
+		"ignores the sector": {oneWayProbe{probeDeriver{derive: func(in pairwise.Input) string { return soundProbeBody(sectorless(in)) }}},
+			"same sub in two sectors"},
+		"ignores the user": {oneWayProbe{probeDeriver{derive: func(in pairwise.Input) string { return hashed(in.Sector()) }}},
+			"two users the same sub"},
+		"not deterministic": {oneWayProbe{probeDeriver{derive: counter()}}, "isn't deterministic"},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -285,7 +335,7 @@ func TestNewRefusesSelfContainedAccessTokensForOneWayPairwise(t *testing.T) {
 	t.Run("reversible, JWT", func(t *testing.T) {
 		cfg, deps := validConfig(t), validDependencies()
 		cfg.Subjects = pairwiseSubjects(t)
-		deps.PairwiseSubjects = probeDeriver{body: "abc", looksUpTo: "fapigo-pairwise-probe"}
+		deps.PairwiseSubjects = probeDeriver{looksUpTo: "fapigo-pairwise-probe"}
 		checkNewErr(t, newErr(t, cfg, deps), "")
 	})
 	t.Run("public, JWT", func(t *testing.T) {
@@ -329,7 +379,7 @@ func TestNewAcceptsOneWayJWTWithAResolver(t *testing.T) {
 	t.Run("reversible, resolver", func(t *testing.T) {
 		cfg, deps := validConfig(t), validDependencies()
 		cfg.Subjects = pairwiseSubjects(t)
-		deps.PairwiseSubjects = probeDeriver{body: "abc", looksUpTo: "fapigo-pairwise-probe"}
+		deps.PairwiseSubjects = probeDeriver{looksUpTo: "fapigo-pairwise-probe"}
 		deps.PairwiseSubjectResolver = subResolver{}
 		checkNewErr(t, newErr(t, cfg, deps), "pairwise_subject_resolver applies only to a one-way pairwise_subjects")
 	})
@@ -372,7 +422,7 @@ func TestNewEmptyPrefixNeedsAWayBack(t *testing.T) {
 	}{
 		"one-way":           {testHMACDeriver(t), nil, "subjects.prefix must not be empty with a one-way pairwise_subjects"},
 		"one-way, resolver": {testHMACDeriver(t), subResolver{}, ""},
-		"reversible":        {probeDeriver{body: "abc", looksUpTo: "fapigo-pairwise-probe"}, nil, ""},
+		"reversible":        {probeDeriver{looksUpTo: "fapigo-pairwise-probe"}, nil, ""},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {

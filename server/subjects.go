@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/pairwise"
@@ -202,28 +203,46 @@ func validatePairwiseSubjects(subjects SubjectConfig, deriver pairwise.Deriver, 
 	return nil
 }
 
-// Fixed input for probePairwiseSubjects.
+// Fixed inputs for probePairwiseSubjects: two sectors and two users.
 const (
-	pairwiseProbeSector  = "fapigo.pairwise.probe"
-	pairwiseProbeSubject = "fapigo-pairwise-probe"
+	pairwiseProbeSector      = "fapigo.pairwise.probe"
+	pairwiseProbeOtherSector = "other.fapigo.pairwise.probe"
+	pairwiseProbeSubject     = "fapigo-pairwise-probe"
+	pairwiseProbeOtherUser   = "fapigo-pairwise-probe-2"
 )
 
-// probePairwiseSubjects derives a fixed input through deriver, checks
-// the body, and for a reversible deriver looks it up again, under the
-// same time bound as the signing-key check.
+// probePairwiseSubjects derives fixed inputs through deriver, under the
+// same time bound as the signing-key check, and refuses a deriver that
+// can't give pairwise subs their meaning: one that fails, returns an
+// unusable body, isn't deterministic, puts the internal subject in the
+// body, or gives one user the same body in two sectors, or two users
+// the same body in one. A reversible deriver must also look its body up
+// again. It can't prove a custom deriver unlinkable (run
+// pairwise.TestDeriverContract for more), but it catches one that
+// ignores its input.
 func probePairwiseSubjects(issuer string, deriver pairwise.Deriver) error {
 	ctx, cancel := context.WithTimeout(context.Background(), keyCheckTimeout)
 	defer cancel()
-	in, err := pairwise.NewInput(issuer, pairwiseProbeSector, pairwiseProbeSubject)
-	if err != nil {
-		return fmt.Errorf("server: config: subjects: the issuer can't be a pairwise input: %w", err)
+	derive := func(sector, subject string) (string, error) {
+		in, err := pairwise.NewInput(issuer, sector, subject)
+		if err != nil {
+			return "", fmt.Errorf("server: config: subjects: the issuer can't be a pairwise input: %w", err)
+		}
+		body, err := deriver.DerivePairwiseSubject(ctx, in)
+		if err != nil {
+			return "", fmt.Errorf("server: dependencies: pairwise_subjects can't derive a subject: %w", err)
+		}
+		if err := pairwise.CheckBody(body); err != nil {
+			return "", fmt.Errorf("server: dependencies: pairwise_subjects derived an unusable subject: %w", err)
+		}
+		return body, nil
 	}
-	body, err := deriver.DerivePairwiseSubject(ctx, in)
+	body, err := derive(pairwiseProbeSector, pairwiseProbeSubject)
 	if err != nil {
-		return fmt.Errorf("server: dependencies: pairwise_subjects can't derive a subject: %w", err)
+		return err
 	}
-	if err := pairwise.CheckBody(body); err != nil {
-		return fmt.Errorf("server: dependencies: pairwise_subjects derived an unusable subject: %w", err)
+	if err := probeBodies(body, derive); err != nil {
+		return err
 	}
 	lookup, ok := deriver.(pairwise.Lookup)
 	if !ok {
@@ -232,6 +251,37 @@ func probePairwiseSubjects(issuer string, deriver pairwise.Deriver) error {
 	got, err := lookup.LookupInternalSubject(ctx, issuer, pairwiseProbeSector, body)
 	if err != nil || got != pairwiseProbeSubject {
 		return fmt.Errorf("server: dependencies: pairwise_subjects can't look up the subject it derived: %v", lookupProblem(got, err))
+	}
+	return nil
+}
+
+// probeBodies checks body, the probe user's body in the probe sector,
+// against the bodies derive gives the same input again, the same user
+// in another sector, and another user in the same sector.
+func probeBodies(body string, derive func(sector, subject string) (string, error)) error {
+	if strings.Contains(strings.ToLower(body), pairwiseProbeSubject) {
+		return fmt.Errorf("server: dependencies: pairwise_subjects puts the internal subject in the pairwise sub (%q), which would hand it to the client", body)
+	}
+	again, err := derive(pairwiseProbeSector, pairwiseProbeSubject)
+	if err != nil {
+		return err
+	}
+	if again != body {
+		return fmt.Errorf("server: dependencies: pairwise_subjects isn't deterministic: the same input gave %q and %q", body, again)
+	}
+	otherSector, err := derive(pairwiseProbeOtherSector, pairwiseProbeSubject)
+	if err != nil {
+		return err
+	}
+	if otherSector == body {
+		return fmt.Errorf("server: dependencies: pairwise_subjects gives a user the same sub in two sectors, so their subs could be linked across relying parties")
+	}
+	otherUser, err := derive(pairwiseProbeSector, pairwiseProbeOtherUser)
+	if err != nil {
+		return err
+	}
+	if otherUser == body {
+		return fmt.Errorf("server: dependencies: pairwise_subjects gives two users the same sub")
 	}
 	return nil
 }

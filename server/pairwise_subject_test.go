@@ -501,7 +501,7 @@ func TestPairwiseSubjectFailsClosed(t *testing.T) {
 type failingDeriver struct{ pairwise.Deriver }
 
 func (f failingDeriver) DerivePairwiseSubject(ctx context.Context, in pairwise.Input) (string, error) {
-	if in.Subject() == "fapigo-pairwise-probe" {
+	if strings.HasPrefix(in.Subject(), "fapigo-pairwise-probe") { // New's startup probe
 		return f.Deriver.DerivePairwiseSubject(ctx, in)
 	}
 	return "", errors.New("deriver unavailable")

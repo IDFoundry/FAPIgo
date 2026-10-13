@@ -548,8 +548,8 @@ specific DCR plan) has no DCR module at all. If it is added:
 ### 8. Resource server verifies in HTTP context, not in isolation
 
 `Verifier.Verify(ctx, VerifyRequest{Method, URL, Authorization,
-DPoPProofs, PeerCertificate})` → `AuthorizationContext{Subject,
-ClientID, Scopes, Claims}`, with the request usually built by
+DPoPProofs, PeerCertificate})` → `AuthorizationContext{InternalSubject,
+ClientSubject, ClientID, Scopes, Claims}`, with the request usually built by
 `resource.VerifyRequestFromHTTP(r, target)` — `target` being the
 endpoint's own fixed external URL, never one built from the `Host`
 header. Token
@@ -863,6 +863,15 @@ sees:
   `id_token_hint`, which must identify the user, is refused). A `login_hint`
   is the application's to interpret, with `Server.ResolveClientSubject`
   and `Server.ClientSubject` for one carrying a `sub`.
+- **Resource servers.** `resource.AuthorizationContext` carries both:
+  `InternalSubject`, which the API authorizes by and never returns, and
+  `ClientSubject`, which anything client-facing uses. An opaque access
+  token's record holds the internal subject; a JWT access token's
+  pairwise `sub` is mapped back under its `pairwise_sector` by the
+  OP's own resource servers (`Dependencies.PairwiseSubjects` or
+  `PairwiseSubjectResolver`). A resource server outside the OP sets
+  `Config.PairwiseResolution` to `PairwiseClientSubjectsOnly`, gets an
+  empty `InternalSubject`, and authorizes by `ClientSubject`.
 
 Whatever maps a `sub` back (the reversible deriver's keys, the mapping
 store, a resolver) belongs only to the OP and its own resource servers:

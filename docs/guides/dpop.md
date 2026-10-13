@@ -72,7 +72,7 @@ func pay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	authz.SetDPoPNonce(w.Header()) // when the verifier issues nonces
-	// authz.Subject, authz.Scopes, authz.Claims ...
+	// authz.InternalSubject, authz.Scopes, authz.Claims ...
 }
 ```
 

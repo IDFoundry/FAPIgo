@@ -135,8 +135,8 @@ func validateAssurance(cfg Config, deps Dependencies) error {
 	if deps.PairwiseSubjects != nil {
 		errs = append(errs, checkKeyCustody("pairwise_subjects", deps.PairwiseSubjects, scaled))
 	}
-	if deps.SubjectResolver != nil {
-		errs = append(errs, checkKeyCustody("subject_resolver", deps.SubjectResolver, scaled))
+	if deps.PairwiseSubjectResolver != nil {
+		errs = append(errs, checkKeyCustody("subject_resolver", deps.PairwiseSubjectResolver, scaled))
 	}
 	return errors.Join(errs...)
 }

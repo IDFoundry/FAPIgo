@@ -57,8 +57,8 @@ func TestClientCredentialsFlow(t *testing.T) {
 	// RFC 9068 §2.2: client_credentials has no end user, so the client
 	// is its own subject — see server.RequestClientCredentialsToken's
 	// own doc comment.
-	if authz.Subject != fapitest.ClientID.String() {
-		t.Errorf("Subject = %q, want %q (the client's own ID)", authz.Subject, fapitest.ClientID.String())
+	if authz.InternalSubject != fapitest.ClientID.String() {
+		t.Errorf("Subject = %q, want %q (the client's own ID)", authz.InternalSubject, fapitest.ClientID.String())
 	}
 	if authz.ClientID != fapitest.ClientID.String() {
 		t.Errorf("ClientID = %q, want %q", authz.ClientID, fapitest.ClientID.String())

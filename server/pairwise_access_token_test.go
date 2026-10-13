@@ -211,8 +211,8 @@ func assertResolvesTo(t *testing.T, verifier *resource.Verifier, key *ecdsa.Priv
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
-	if authz.Subject != "user-1" || authz.ClientSubject != want {
-		t.Errorf("Subject, ClientSubject = %q, %q; want user-1, %q", authz.Subject, authz.ClientSubject, want)
+	if authz.InternalSubject != "user-1" || authz.ClientSubject != want {
+		t.Errorf("Subject, ClientSubject = %q, %q; want user-1, %q", authz.InternalSubject, authz.ClientSubject, want)
 	}
 }
 
@@ -258,8 +258,8 @@ func TestPublicAccessTokenClientSubject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
-	if authz.Subject != "user-1" || authz.ClientSubject != "user-1" {
-		t.Errorf("Subject, ClientSubject = %q, %q; want user-1 for both", authz.Subject, authz.ClientSubject)
+	if authz.InternalSubject != "user-1" || authz.ClientSubject != "user-1" {
+		t.Errorf("Subject, ClientSubject = %q, %q; want user-1 for both", authz.InternalSubject, authz.ClientSubject)
 	}
 }
 
@@ -323,11 +323,11 @@ func resolverResourceVerifier(t *testing.T, h harness, resolver pairwise.Subject
 		Limits:    resource.Limits{MaxDPoPProofAge: time.Minute, MaxClockSkew: 5 * time.Second},
 		Assurance: resource.AssuranceDevelopment,
 	}, resource.Dependencies{
-		AccessTokens:    jwt,
-		Replay:          memstore.NewReplayStore(),
-		Revocation:      resource.NoRevocation{},
-		Clock:           fixedClock{now: h.now},
-		SubjectResolver: resolver,
+		AccessTokens:            jwt,
+		Replay:                  memstore.NewReplayStore(),
+		Revocation:              resource.NoRevocation{},
+		Clock:                   fixedClock{now: h.now},
+		PairwiseSubjectResolver: resolver,
 	})
 	if err != nil {
 		t.Fatalf("resource.NewVerifier: %v", err)

@@ -140,7 +140,7 @@ func (a *api) pay(w http.ResponseWriter, r *http.Request) {
 		forbidden(w, authz, "this approval was for one payment, and it has been made")
 		return
 	}
-	c, _ := customerByHint(authz.Subject)
+	c, _ := customerByHint(authz.InternalSubject)
 	writeJSON(w, paymentResult{
 		Status: "executed", Amount: "€" + order.InstructedAmount.Amount,
 		Payee: payees[order.CreditorAccount.IBAN], From: describeAccount(c.accounts[0]),
@@ -180,7 +180,7 @@ func (a *api) readAccount(w http.ResponseWriter, r *http.Request) {
 		forbidden(w, authz, fmt.Sprintf("the customer didn't approve %s for %s", actionLabels[action], iban))
 		return
 	}
-	c, _ := customerByHint(authz.Subject)
+	c, _ := customerByHint(authz.InternalSubject)
 	acct, ok := c.account(iban)
 	if !ok {
 		http.NotFound(w, r)

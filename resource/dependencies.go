@@ -52,29 +52,35 @@ type Dependencies struct {
 
 	// PairwiseSubjects maps an access token's pairwise "sub" (OpenID
 	// Connect Core §8) back to the end user's internal subject, which
-	// AuthorizationContext.Subject then carries: the authorization
+	// AuthorizationContext.InternalSubject then carries: the authorization
 	// server's own Reversible deriver (pairwise.NewReversible over the
 	// same keys, or pairwise.NewMapping over the same store), with Config.PairwisePrefix set
 	// to the server's Config.Subjects.Prefix. serverresource.NewVerifier
 	// wires both from the server's configuration.
 	//
-	// Required (or SubjectResolver) to verify a self-contained access
+	// Required (or PairwiseSubjectResolver) to verify a self-contained access
 	// token whose sub is pairwise: Verify answers one with server_error
-	// rather than give the pairwise sub as Subject. A server-side token
+	// rather than give the pairwise sub as InternalSubject. A server-side token
 	// record (OpaqueAccessTokens) already keeps the internal subject and
 	// needs no lookup. Nil when the authorization server issues only
 	// public subjects, or only opaque access tokens.
+	//
+	// It maps every pairwise sub back to its end user, which OpenID
+	// Connect Core §8.1 reserves to the OpenID Provider: set it only on
+	// the OP's own resource servers. One outside the OP sets
+	// Config.PairwiseResolution to PairwiseClientSubjectsOnly instead.
 	PairwiseSubjects pairwise.Lookup
 
-	// SubjectResolver maps a self-contained access token's pairwise sub
+	// PairwiseSubjectResolver maps a self-contained access token's pairwise sub
 	// back to the end user's internal subject when the authorization
-	// server derives subs one way (pairwise.OneWay), so PairwiseSubjects
+	// server derives subs one way (pairwise.NewHMAC or NewHMACWith), so PairwiseSubjects
 	// can't: the embedder's own mapping, the same resolver the server
 	// declares (server.Dependencies.PairwiseSubjectResolver). Verify uses
-	// PairwiseSubjects when set, otherwise SubjectResolver; a pairwise
-	// sub neither maps is never given as Subject. Under
+	// PairwiseSubjects when set, otherwise PairwiseSubjectResolver; a pairwise
+	// sub neither maps is never given as InternalSubject. Under
 	// AssuranceProduction it must declare Durable custody
 	// (keys.KeyCustodyAssurance), and CrossInstanceConsistent with
-	// DeploymentHorizontallyScaled.
-	SubjectResolver pairwise.SubjectResolver
+	// DeploymentHorizontallyScaled. Like PairwiseSubjects, it reverses
+	// pairwise subs, so only the OP's own resource servers get one.
+	PairwiseSubjectResolver pairwise.SubjectResolver
 }

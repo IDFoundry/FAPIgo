@@ -83,44 +83,49 @@ type SubjectKind int
 
 const (
 	// SubjectEndUser: the token was issued for an end user (an
-	// authorization code, refresh or CIBA grant); Subject is that user's
-	// identifier.
+	// authorization code, refresh or CIBA grant); InternalSubject is that
+	// user's identifier.
 	SubjectEndUser SubjectKind = iota + 1
 	// SubjectClient: the token was issued by the client credentials
-	// grant, for the client acting on its own behalf; Subject is the
-	// client's own client_id and there is no end user.
+	// grant, for the client acting on its own behalf; InternalSubject is
+	// the client's own client_id and there is no end user.
 	SubjectClient
 )
 
 // AuthorizationContext is what Verify returns for a successfully
-// verified request: who is acting (Subject, and SubjectKind for what it
-// is), on behalf of which client (ClientID), with what granted scope,
-// and any additional claims the access token carried.
+// verified request: who is acting (InternalSubject and ClientSubject, and
+// SubjectKind for what it is), on behalf of which client (ClientID),
+// with what granted scope, and any additional claims the access token
+// carried.
 type AuthorizationContext struct {
-	// Subject is the token's subject: an end user's identifier, or, for
-	// a client credentials token, the client's own client_id. Check
-	// SubjectKind before authorizing by Subject: a client registered
-	// with a client_id it chose (automatically through OpenID
-	// Federation, for one) could otherwise present a client credentials
-	// token whose Subject equals an end user's (RFC 9068 §5).
+	// InternalSubject is the token's subject as the OpenID Provider knows
+	// it: an end user's internal identifier, or, for a client credentials
+	// token, the client's own client_id. It is for this resource
+	// server's own authorization decisions, never for anything returned
+	// to a client: for a client with pairwise subjects (OpenID Connect
+	// Core §8) it's exactly what the client's pairwise sub hides. It is
+	// left out of this struct's JSON encoding for the same reason.
 	//
-	// For a client with pairwise subjects (OpenID Connect Core §8),
-	// Subject is the end user's internal subject, which the
-	// authorization server's own resource servers authorize by, while
-	// the client knows the user only by ClientSubject.
-	Subject string
-	// SubjectKind is what Subject names. A token from the client
+	// Check SubjectKind before authorizing by InternalSubject: a client
+	// registered with a client_id it chose (automatically through OpenID
+	// Federation, for one) could otherwise present a client credentials
+	// token whose subject equals an end user's (RFC 9068 §5). Under
+	// Config.PairwiseResolution PairwiseClientSubjectsOnly it is "" for a
+	// pairwise sub, which the verifier then doesn't map back.
+	InternalSubject string `json:"-"`
+	// SubjectKind is what InternalSubject names. A token from the client
 	// credentials grant carries a "grant_type" claim saying so
 	// (SubjectClient); any other is SubjectEndUser. Zero only in an
 	// AuthorizationContext built by hand.
 	SubjectKind SubjectKind
 
-	// ClientSubject is the sub the client was given for Subject: its
-	// pairwise subject when the client has pairwise subjects, otherwise
-	// Subject itself. Compare anything the client sends or receives
-	// with ClientSubject, never Subject: a user ID in a request path or
-	// body, the sub of an ID token the client holds, or the "sub" of a
-	// UserInfo response (serverresource.UserInfoClaims uses it).
+	// ClientSubject is the sub the client was given for the end user:
+	// its pairwise subject when the client has pairwise subjects,
+	// otherwise the same as InternalSubject. Compare and return anything
+	// client-facing with ClientSubject, never InternalSubject: a user ID
+	// in a request path or body, the sub of an ID token the client
+	// holds, a "me" response, or the "sub" of a UserInfo response
+	// (serverresource.UserInfoClaims uses it).
 	ClientSubject string
 	ClientID      string
 	Scopes        []string
@@ -239,19 +244,19 @@ func (v *Verifier) verify(ctx context.Context, req VerifyRequest) (Authorization
 	}
 
 	return AuthorizationContext{
-		Subject:       subject,
-		SubjectKind:   kind,
-		ClientSubject: clientSubject,
-		ClientID:      resolved.ClientID,
-		Scopes:        resolved.Scopes,
-		Claims:        resolved.Claims,
-		ExpiresAt:     resolved.ExpiresAt,
-		Key:           resolved.Key,
-		Issuer:        resolved.Issuer,
-		Audience:      resolved.Audience,
-		IssuedAt:      resolved.IssuedAt,
-		NextDPoPNonce: nextNonce,
-		usedDPoP:      usedDPoP,
+		InternalSubject: subject,
+		SubjectKind:     kind,
+		ClientSubject:   clientSubject,
+		ClientID:        resolved.ClientID,
+		Scopes:          resolved.Scopes,
+		Claims:          resolved.Claims,
+		ExpiresAt:       resolved.ExpiresAt,
+		Key:             resolved.Key,
+		Issuer:          resolved.Issuer,
+		Audience:        resolved.Audience,
+		IssuedAt:        resolved.IssuedAt,
+		NextDPoPNonce:   nextNonce,
+		usedDPoP:        usedDPoP,
 	}, usedDPoP, nil
 }
 
@@ -470,19 +475,24 @@ func (v *Verifier) checkGrantNotRevoked(ctx context.Context, claims map[string]j
 	return nil
 }
 
-// resolveSubjects returns the access token's Subject and ClientSubject
-// (AuthorizationContext). A server-side record (OpaqueAccessTokens)
-// keeps the internal subject as its own and the client's pairwise sub
-// under token.ClientSubjectClaim. A self-contained token's sub is the
-// client's; when it's pairwise (token.PairwiseSectorClaim), the internal
-// subject is looked up under the sector it was derived for, through
-// Dependencies.PairwiseSubjects or else Dependencies.SubjectResolver. A
-// public sub is both.
-func (v *Verifier) resolveSubjects(ctx context.Context, resolved ResolvedAccessToken) (subject, clientSubject string, verr *Error) {
+// resolveSubjects returns the access token's InternalSubject and
+// ClientSubject (AuthorizationContext). A server-side record
+// (OpaqueAccessTokens) keeps the internal subject as its own and the
+// client's pairwise sub under token.ClientSubjectClaim. A self-contained
+// token's sub is the client's; when it's pairwise
+// (token.PairwiseSectorClaim), the internal subject is looked up under
+// the sector it was derived for (mapPairwiseSubject). A public sub is
+// both. Under PairwiseClientSubjectsOnly a pairwise sub is never mapped
+// back, whatever the token's format, and InternalSubject is "".
+func (v *Verifier) resolveSubjects(ctx context.Context, resolved ResolvedAccessToken) (internal, clientSubject string, verr *Error) {
+	clientOnly := v.cfg.PairwiseResolution == PairwiseClientSubjectsOnly
 	if raw, ok := resolved.Claims[token.ClientSubjectClaim]; ok {
 		var sub string
 		if err := json.Unmarshal(raw, &sub); err != nil || sub == "" {
 			return "", "", newError(ErrorInvalidToken, 401, "access token's client subject is malformed", err)
+		}
+		if clientOnly {
+			return "", sub, nil
 		}
 		return resolved.Subject, sub, nil
 	}
@@ -494,24 +504,35 @@ func (v *Verifier) resolveSubjects(ctx context.Context, resolved ResolvedAccessT
 	if err := json.Unmarshal(raw, &sector); err != nil || sector == "" {
 		return "", "", newError(ErrorInvalidToken, 401, "access token's pairwise sector is malformed", err)
 	}
-	if resolved.Issuer == "" {
-		return "", "", newError(ErrorServerError, 500, "access token's subject is pairwise, but its resolver reported no issuer to look it up under", nil)
+	if clientOnly {
+		return "", resolved.Subject, nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, pairwiseLookupTimeout)
-	defer cancel()
-	var internal string
-	switch {
-	case v.deps.PairwiseSubjects != nil:
-		internal, verr = v.lookUpPairwiseSubject(ctx, resolved, sector)
-	case v.deps.SubjectResolver != nil:
-		internal, verr = pairwiseResult(v.deps.SubjectResolver.ResolveSubject(ctx, resolved.Issuer, sector, resolved.Subject))
-	default:
-		verr = newError(ErrorServerError, 500, "access token's subject is pairwise, but neither dependencies.pairwise_subjects nor dependencies.subject_resolver is set", nil)
-	}
+	internal, verr = v.mapPairwiseSubject(ctx, resolved, sector)
 	if verr != nil {
 		return "", "", verr
 	}
 	return internal, resolved.Subject, nil
+}
+
+// mapPairwiseSubject maps a self-contained access token's pairwise sub,
+// derived for sector, back to the end user's internal subject, through
+// Dependencies.PairwiseSubjects or else
+// Dependencies.PairwiseSubjectResolver. It fails closed: without either,
+// or when they can't map it, the request is refused rather than given a
+// pairwise sub as its internal subject.
+func (v *Verifier) mapPairwiseSubject(ctx context.Context, resolved ResolvedAccessToken, sector string) (string, *Error) {
+	if resolved.Issuer == "" {
+		return "", newError(ErrorServerError, 500, "access token's subject is pairwise, but its resolver reported no issuer to look it up under", nil)
+	}
+	ctx, cancel := context.WithTimeout(ctx, pairwiseLookupTimeout)
+	defer cancel()
+	switch {
+	case v.deps.PairwiseSubjects != nil:
+		return v.lookUpPairwiseSubject(ctx, resolved, sector)
+	case v.deps.PairwiseSubjectResolver != nil:
+		return pairwiseResult(v.deps.PairwiseSubjectResolver.ResolveSubject(ctx, resolved.Issuer, sector, resolved.Subject))
+	}
+	return "", newError(ErrorServerError, 500, "access token's subject is pairwise, but this verifier can't map it back: set dependencies.pairwise_subjects (the OP's reversible deriver) or dependencies.pairwise_subject_resolver (the mapping of an OP with a one-way deriver) on the OP's own resource servers, or config.pairwise_resolution PairwiseClientSubjectsOnly on a resource server outside the OP", nil)
 }
 
 // pairwiseLookupTimeout bounds a pairwise lookup or resolver call, as

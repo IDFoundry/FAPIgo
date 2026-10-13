@@ -64,7 +64,7 @@ func stringClaim(s string) json.RawMessage {
 	return raw
 }
 
-// TestVerifyResolvesPairwiseSubjects: Subject is the end user's
+// TestVerifyResolvesPairwiseSubjects: InternalSubject is the end user's
 // internal subject and ClientSubject the sub the client was given —
 // from a server-side record's client_sub, from a lookup of a
 // self-contained token's pairwise sub, or both the token's sub when it's
@@ -156,8 +156,8 @@ func checkSubjects(t *testing.T, authz resource.AuthorizationContext, err error,
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
-	if authz.Subject != wantSubject || authz.ClientSubject != wantClient {
-		t.Fatalf("Subject, ClientSubject = %q, %q; want %q, %q", authz.Subject, authz.ClientSubject, wantSubject, wantClient)
+	if authz.InternalSubject != wantSubject || authz.ClientSubject != wantClient {
+		t.Fatalf("InternalSubject, ClientSubject = %q, %q; want %q, %q", authz.InternalSubject, authz.ClientSubject, wantSubject, wantClient)
 	}
 }
 
@@ -288,11 +288,11 @@ func pairwiseVerifierWith(t *testing.T, accessTokens resource.AccessTokenResolve
 	t.Helper()
 	cfg := validConfig(t)
 	deps := resource.Dependencies{
-		AccessTokens:    accessTokens,
-		Replay:          &fakeReplayStore{},
-		Revocation:      &fakeRevocationChecker{},
-		Clock:           fixedClock{now: now},
-		SubjectResolver: resolver,
+		AccessTokens:            accessTokens,
+		Replay:                  &fakeReplayStore{},
+		Revocation:              &fakeRevocationChecker{},
+		Clock:                   fixedClock{now: now},
+		PairwiseSubjectResolver: resolver,
 	}
 	if lookup != nil {
 		deps.PairwiseSubjects = lookup
@@ -330,7 +330,7 @@ func TestProductionRequiresSubjectResolverCustody(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			cfg, deps := productionSetup(t)
 			cfg.Deployment = tc.deployment
-			deps.SubjectResolver = tc.resolver
+			deps.PairwiseSubjectResolver = tc.resolver
 			_, err := resource.NewVerifier(cfg, deps)
 			if tc.want == "" {
 				if err != nil {

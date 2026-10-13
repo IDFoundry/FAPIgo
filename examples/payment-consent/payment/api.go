@@ -100,7 +100,7 @@ func (a *api) pay(w http.ResponseWriter, r *http.Request) {
 		resource.NewInsufficientScopeError(authz, "this approval was for one payment, and it has been made").WriteJSON(w)
 		return
 	}
-	c, _ := customerByName(authz.Subject)
+	c, _ := customerByName(authz.InternalSubject)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(paymentResult{
 		Status: "executed", Amount: "€" + order.InstructedAmount.Amount,

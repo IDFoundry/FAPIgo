@@ -739,7 +739,7 @@ func switchToPairwise(t *testing.T, h harness, enforcement server.SubjectTypeEnf
 // TestSignUserInfoResponseRefusesInternalSubForPairwiseClient: a signed
 // UserInfo response for a pairwise client must carry the sub the client
 // was given, not the user's internal subject, which an embedder still
-// copying AuthorizationContext.Subject would otherwise hand over. A
+// copying AuthorizationContext.InternalSubject would otherwise hand over. A
 // public client's sub isn't checked.
 func TestSignUserInfoResponseRefusesInternalSubForPairwiseClient(t *testing.T) {
 	for name, tc := range map[string]struct {

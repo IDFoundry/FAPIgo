@@ -40,6 +40,20 @@ func validateConfig(cfg Config, deps Dependencies) error {
 	if (deps.PairwiseSubjects != nil) != cfg.PairwisePrefix.IsSet() {
 		return fmt.Errorf("resource: config: pairwise_prefix is required with dependencies.pairwise_subjects, and must be left zero without it (pairwise.NewPrefix, which accepts \"\")")
 	}
+	return validatePairwiseResolution(cfg, deps)
+}
+
+// validatePairwiseResolution refuses an unknown Config.PairwiseResolution,
+// and PairwiseClientSubjectsOnly together with anything that maps a
+// pairwise sub back: a verifier either resolves pairwise subs or doesn't.
+func validatePairwiseResolution(cfg Config, deps Dependencies) error {
+	switch {
+	case !cfg.PairwiseResolution.IsValid():
+		return fmt.Errorf("resource: config: pairwise_resolution is invalid")
+	case cfg.PairwiseResolution == PairwiseClientSubjectsOnly &&
+		(deps.PairwiseSubjects != nil || deps.PairwiseSubjectResolver != nil || cfg.PairwisePrefix.IsSet()):
+		return fmt.Errorf("resource: config: pairwise_resolution PairwiseClientSubjectsOnly can't be combined with dependencies.pairwise_subjects, dependencies.pairwise_subject_resolver or pairwise_prefix: a resource server either maps pairwise subs back or doesn't")
+	}
 	return nil
 }
 

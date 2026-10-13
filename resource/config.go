@@ -55,4 +55,13 @@ type Config struct {
 	// with Dependencies.PairwiseSubjects, and must be left zero
 	// without it.
 	PairwisePrefix pairwise.Prefix
+
+	// PairwiseResolution is what Verify does with a pairwise sub; see
+	// PairwiseResolution. The zero value maps it back to the end user
+	// through Dependencies.PairwiseSubjects or
+	// Dependencies.PairwiseSubjectResolver, as the OpenID Provider's own
+	// resource servers do; PairwiseClientSubjectsOnly is for a resource
+	// server outside the OP, which must never hold what reverses a
+	// pairwise sub.
+	PairwiseResolution PairwiseResolution
 }

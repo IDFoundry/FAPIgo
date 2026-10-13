@@ -662,3 +662,41 @@ func TestPairwiseOnlyRefusesGrantsIssuedPublic(t *testing.T) {
 		})
 	}
 }
+
+// TestSignUserInfoResponseRefusesInternalSubForPairwiseClient: a signed
+// UserInfo response for a pairwise client must carry the sub the client
+// was given, not the user's internal subject, which an embedder still
+// copying AuthorizationContext.Subject would otherwise hand over. A
+// public client's sub isn't checked.
+func TestSignUserInfoResponseRefusesInternalSubForPairwiseClient(t *testing.T) {
+	for name, tc := range map[string]struct {
+		derivation pairwise.Derivation
+		deriver    pairwise.Deriver
+	}{
+		"one-way":    {pairwise.OneWay, hmacDeriver(t)},
+		"reversible": {pairwise.Reversible, newMappingDeriver()},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, server.ProfileFAPISecurity, true)
+			h.cfg.Algorithms.UserInfo = fapi.ES256
+			h = withPairwise(t, h, pairwiseClient(false), tc.derivation, tc.deriver)
+			client, err := h.clients.ResolveClient(context.Background(), testClientID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			clientSub := clientSubjectOf(t, h, "user-1")
+			for sub, wantRefused := range map[string]bool{
+				clientSub: false,
+				"user-1":  true, // the internal subject
+				testPairwisePrefix + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA": tc.derivation == pairwise.Reversible, // well-formed, never issued
+				"": true,
+			} {
+				raw, _ := json.Marshal(sub)
+				_, serr := h.server.SignUserInfoResponse(context.Background(), client, map[string]json.RawMessage{"sub": raw})
+				if refused := serr != nil; refused != wantRefused {
+					t.Errorf("sub %q: refused = %v (%v), want %v", sub, refused, serr, wantRefused)
+				}
+			}
+		})
+	}
+}

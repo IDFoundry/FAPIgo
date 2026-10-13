@@ -1,6 +1,7 @@
 package pairwise
 
 import (
+	"bytes"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
@@ -8,6 +9,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"errors"
 	"fmt"
 
 	"github.com/idfoundry/fapigo/internal/sealkeys"
@@ -63,6 +65,36 @@ const (
 // fixed-size plaintext can't hold.
 var ErrSubjectTooLong = fmt.Errorf("pairwise: reversible derivation holds internal subjects of at most %d bytes", MaxReversibleSubjectLength)
 
+// errReversibleOps wraps a ReversibleOps failure: the derivation or
+// lookup couldn't be answered, which is never ErrSubjectNotFound.
+var errReversibleOps = errors.New("pairwise: reversible key operation failed")
+
+// ReversibleOps are the two keyed operations the reversible construction
+// needs, for keys kept outside this process: in an HSM or a KMS that
+// never releases them. NewReversibleWith builds the Deriver on them, and
+// produces exactly the bodies NewReversible would from the same two
+// keys. Both are called once per derivation and once per lookup, with
+// the context of the request that needs them.
+type ReversibleOps interface {
+	// MAC returns HMAC-SHA-256 of data under the MAC key: the full
+	// 32-byte output, which the construction truncates itself. PKCS#11:
+	// CKM_SHA256_HMAC.
+	MAC(ctx context.Context, data []byte) ([]byte, error)
+
+	// EncryptCTR returns data XORed with the AES-256-CTR keystream under
+	// the encryption key, starting from iv (16 bytes) as the whole
+	// initial counter block, which is incremented as one 128-bit
+	// big-endian integer, as Go's cipher.NewCTR does. The result is as
+	// long as data. Decryption is the same operation. PKCS#11:
+	// CKM_AES_CTR with ulCounterBits = 128.
+	//
+	// A counter of only the block's last 32 bits (as GCM uses, and some
+	// CTR implementations default to) gives different output once those
+	// bits carry; the published test vector whose IV ends in 0xfffffffd
+	// catches it.
+	EncryptCTR(ctx context.Context, iv, data []byte) ([]byte, error)
+}
+
 // NewReversible returns the built-in Reversible Deriver, which also
 // implements Lookup: the body is the internal subject, encrypted under
 // encKey and authenticated under macKey together with the issuer and
@@ -113,18 +145,77 @@ func NewReversible(macKey, encKey []byte, opts ...keys.CustodyOption) (Deriver, 
 	if err != nil {
 		return nil, fmt.Errorf("pairwise: reversible: %w", err)
 	}
-	d := reversibleDeriver{macKey: append([]byte(nil), macKey...), block: block}
+	return NewReversibleWith(memoryReversibleOps{macKey: append([]byte(nil), macKey...), block: block}, opts...)
+}
+
+// NewReversibleWith returns the reversible Deriver (see NewReversible)
+// over ops, for a MAC key and an encryption key that never leave an HSM
+// or KMS. For the same two keys it derives exactly the bodies
+// NewReversible does, so a deployment can move between them without
+// changing any sub. The returned Deriver also implements Lookup.
+//
+// The keys' service must offer HMAC-SHA-256 and raw AES-256-CTR with a
+// caller-supplied IV and a full 128-bit counter: PKCS#11 HSMs
+// (CKM_SHA256_HMAC, and CKM_AES_CTR with ulCounterBits 128) and Google
+// Cloud KMS (HMAC_SHA256 and AES_256_CTR raw encryption) can; AWS KMS,
+// Azure Key Vault Managed HSM and HashiCorp Vault Transit can't (they
+// offer no raw AES-CTR). GETTING_STARTED.md's "Keeping the reversible
+// keys in an HSM or KMS" has the per-service details, caveats and
+// sources. Check an implementation against
+// pairwise/testdata/reversible_vectors.json, whose vector with an IV
+// ending in 0xfffffffd catches a counter narrower than 128 bits.
+//
+// The server and every resource server that resolves subs need the same
+// pair of keys. Each derivation and each lookup is one MAC call and one
+// CTR call; derivation happens once per grant, but with self-contained
+// (JWT) access tokens a resource server looks the sub up on every
+// request it verifies, so each API call costs two key operations.
+// Opaque access tokens avoid that (their record holds the internal
+// subject), or an application can put a bounded cache in front of its
+// ReversibleOps. Where the keys may be held in memory, NewReversible
+// over keys a KMS unwraps once at startup is the simpler choice.
+//
+// Every value ops returns is checked: a MAC that isn't 32 bytes, or a
+// CTR result that isn't as long as its input, fails the call. An error
+// from ops (or a wrong-sized result) means the derivation or lookup
+// couldn't be answered, never ErrSubjectNotFound. opts declare the keys'
+// custody, as for NewReversible.
+func NewReversibleWith(ops ReversibleOps, opts ...keys.CustodyOption) (Deriver, error) {
+	if ops == nil {
+		return nil, errors.New("pairwise: reversible: ops is nil")
+	}
+	d := reversibleDeriver{ops: ops}
 	if custody, declared := custodyFrom(opts); declared {
 		return custodyReversibleDeriver{reversibleDeriver: d, custody: custody}, nil
 	}
 	return d, nil
 }
 
-// reversibleDeriver is NewReversible's Deriver without a custody
-// declaration.
-type reversibleDeriver struct {
+// memoryReversibleOps is NewReversible's ReversibleOps, over keys held
+// in this process.
+type memoryReversibleOps struct {
 	macKey []byte
 	block  cipher.Block
+}
+
+// MAC implements ReversibleOps.
+func (o memoryReversibleOps) MAC(_ context.Context, data []byte) ([]byte, error) {
+	mac := hmac.New(sha256.New, o.macKey)
+	mac.Write(data)
+	return mac.Sum(nil), nil
+}
+
+// EncryptCTR implements ReversibleOps.
+func (o memoryReversibleOps) EncryptCTR(_ context.Context, iv, data []byte) ([]byte, error) {
+	out := make([]byte, len(data))
+	cipher.NewCTR(o.block, iv).XORKeyStream(out, data)
+	return out, nil
+}
+
+// reversibleDeriver is the reversible Deriver without a custody
+// declaration.
+type reversibleDeriver struct {
+	ops ReversibleOps
 }
 
 // DerivePairwiseSubject implements Deriver.
@@ -139,11 +230,15 @@ func (d reversibleDeriver) DerivePairwiseSubject(ctx context.Context, in Input) 
 	if err != nil {
 		return "", err
 	}
-	iv := d.syntheticIV(in.issuer, in.sector, plaintext)
-	sealed := make([]byte, reversibleIVLength+ReversiblePlaintextLength)
-	copy(sealed, iv)
-	d.ctr(iv, sealed[reversibleIVLength:], plaintext)
-	return base64.RawURLEncoding.EncodeToString(sealed), nil
+	iv, err := d.syntheticIV(ctx, in.issuer, in.sector, plaintext)
+	if err != nil {
+		return "", err
+	}
+	ciphertext, err := d.ctr(ctx, iv, plaintext)
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(append(iv, ciphertext...)), nil
 }
 
 // LookupInternalSubject implements Lookup: it opens body under issuer
@@ -166,13 +261,19 @@ func (d reversibleDeriver) LookupInternalSubject(ctx context.Context, issuer, se
 		return "", fmt.Errorf("%w: not a reversible body", ErrSubjectNotFound)
 	}
 	iv, ciphertext := sealed[:reversibleIVLength], sealed[reversibleIVLength:]
-	plaintext := make([]byte, ReversiblePlaintextLength)
-	d.ctr(iv, plaintext, ciphertext)
+	plaintext, err := d.ctr(ctx, iv, ciphertext)
+	if err != nil {
+		return "", err
+	}
 	// Authenticate before reading anything from the plaintext: the IV is
 	// recomputed over the associated data and the decrypted plaintext,
 	// and only an exact match (compared in constant time) proves the body
 	// was derived by these keys for this issuer and sector.
-	if subtle.ConstantTimeCompare(iv, d.syntheticIV(issuer, sector, plaintext)) != 1 {
+	expected, err := d.syntheticIV(ctx, issuer, sector, plaintext)
+	if err != nil {
+		return "", err
+	}
+	if subtle.ConstantTimeCompare(iv, expected) != 1 {
 		return "", fmt.Errorf("%w: the body doesn't authenticate under this issuer and sector", ErrSubjectNotFound)
 	}
 	subject, ok := parseReversiblePlaintext(plaintext)
@@ -187,21 +288,35 @@ func (d reversibleDeriver) LookupInternalSubject(ctx context.Context, issuer, se
 // syntheticIV is HMAC-SHA-256 under the MAC key over the associated data
 // (domain, issuer, sector, each length-prefixed) followed by the
 // fixed-size plaintext, truncated to one AES block.
-func (d reversibleDeriver) syntheticIV(issuer, sector string, plaintext []byte) []byte {
-	mac := hmac.New(sha256.New, d.macKey)
+func (d reversibleDeriver) syntheticIV(ctx context.Context, issuer, sector string, plaintext []byte) ([]byte, error) {
+	var data bytes.Buffer
 	for _, field := range [...]string{reversibleDomain, issuer, sector} {
-		writeLengthPrefixed(mac, field)
+		writeLengthPrefixed(&data, field)
 	}
-	mac.Write(plaintext)
-	return mac.Sum(nil)[:reversibleIVLength]
+	data.Write(plaintext)
+	sum, err := d.ops.MAC(ctx, data.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("%w: MAC: %w", errReversibleOps, err)
+	}
+	if len(sum) != sha256.Size {
+		return nil, fmt.Errorf("%w: MAC returned %d bytes, want %d", errReversibleOps, len(sum), sha256.Size)
+	}
+	return append([]byte(nil), sum[:reversibleIVLength]...), nil
 }
 
-// ctr XORs src into dst with AES-256-CTR under the encryption key,
-// starting from iv as the initial counter block (the whole block
+// ctr is src XORed with the AES-256-CTR keystream under the encryption
+// key, starting from iv as the initial counter block (the whole block
 // incremented as a 128-bit big-endian integer). Encryption and
 // decryption are the same operation.
-func (d reversibleDeriver) ctr(iv, dst, src []byte) {
-	cipher.NewCTR(d.block, iv).XORKeyStream(dst, src)
+func (d reversibleDeriver) ctr(ctx context.Context, iv, src []byte) ([]byte, error) {
+	out, err := d.ops.EncryptCTR(ctx, iv, src)
+	if err != nil {
+		return nil, fmt.Errorf("%w: AES-CTR: %w", errReversibleOps, err)
+	}
+	if len(out) != len(src) {
+		return nil, fmt.Errorf("%w: AES-CTR returned %d bytes, want %d", errReversibleOps, len(out), len(src))
+	}
+	return out, nil
 }
 
 // reversiblePlaintext lays subject out as the fixed-size plaintext: its

@@ -66,27 +66,7 @@ func TestReversibleDeriverContract(t *testing.T) {
 // Python's hmac/hashlib for the synthetic IV, the OpenSSL command-line
 // tool for AES-256-CTR), in both directions.
 func TestReversibleKnownAnswers(t *testing.T) {
-	raw, err := os.ReadFile("testdata/reversible_vectors.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var file struct {
-		Vectors []struct {
-			MACKey  string `json:"mac_key"`
-			EncKey  string `json:"enc_key"`
-			Issuer  string `json:"issuer"`
-			Sector  string `json:"sector"`
-			Subject string `json:"subject"`
-			Body    string `json:"body"`
-		} `json:"vectors"`
-	}
-	if err := json.Unmarshal(raw, &file); err != nil {
-		t.Fatal(err)
-	}
-	if len(file.Vectors) == 0 {
-		t.Fatal("no vectors")
-	}
-	for _, v := range file.Vectors {
+	for _, v := range reversibleVectors(t) {
 		d := reversibleFromHex(t, v.MACKey, v.EncKey)
 		in := reversibleInput(t, v.Issuer, v.Sector, v.Subject)
 		if body := deriveReversible(t, d, in); body != v.Body {
@@ -99,34 +79,60 @@ func TestReversibleKnownAnswers(t *testing.T) {
 	}
 }
 
-// TestReversibleVectorsCoverCounterCarry: one vector's synthetic IV ends
-// within the plaintext's block count of 0xffffffff, so its counter
-// carries out of the low 32-bit word, which a port incrementing only a
-// 32-bit counter would get wrong.
-func TestReversibleVectorsCoverCounterCarry(t *testing.T) {
+// reversibleVector is one of testdata/reversible_vectors.json's vectors.
+type reversibleVector struct {
+	MACKey  string `json:"mac_key"`
+	EncKey  string `json:"enc_key"`
+	Issuer  string `json:"issuer"`
+	Sector  string `json:"sector"`
+	Subject string `json:"subject"`
+	Body    string `json:"body"`
+}
+
+// reversibleVectors reads the published vectors.
+func reversibleVectors(t *testing.T) []reversibleVector {
+	t.Helper()
 	raw, err := os.ReadFile("testdata/reversible_vectors.json")
 	if err != nil {
 		t.Fatal(err)
 	}
 	var file struct {
-		Vectors []struct {
-			Body string `json:"body"`
-		} `json:"vectors"`
+		Vectors []reversibleVector `json:"vectors"`
 	}
 	if err := json.Unmarshal(raw, &file); err != nil {
 		t.Fatal(err)
 	}
+	if len(file.Vectors) == 0 {
+		t.Fatal("no vectors")
+	}
+	return file.Vectors
+}
+
+// carryVector is the vector whose synthetic IV ends within the
+// plaintext's block count of 0xffffffff, so its counter carries out of
+// the low 32-bit word, which a port incrementing only a 32-bit counter
+// gets wrong.
+func carryVector(t *testing.T) reversibleVector {
+	t.Helper()
 	blocks := uint32((pairwise.ReversiblePlaintextLength + 15) / 16)
-	for _, v := range file.Vectors {
+	for _, v := range reversibleVectors(t) {
 		sealed, err := base64.RawURLEncoding.DecodeString(v.Body)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if binary.BigEndian.Uint32(sealed[12:16]) > ^uint32(0)-(blocks-1) {
-			return
+			return v
 		}
 	}
-	t.Error("no vector's IV carries out of the low 32-bit counter word")
+	t.Fatal("no vector's IV carries out of the low 32-bit counter word")
+	return reversibleVector{}
+}
+
+// TestReversibleVectorsCoverCounterCarry: the published vectors include
+// one whose counter carries out of the low 32-bit word (see
+// carryVector).
+func TestReversibleVectorsCoverCounterCarry(t *testing.T) {
+	carryVector(t)
 }
 
 func reversibleFromHex(t *testing.T, macHex, encHex string) pairwise.Deriver {

@@ -3,12 +3,15 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/internal/jwe"
 	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/pairwise"
 	"github.com/idfoundry/fapigo/storage"
 )
 
@@ -44,6 +47,13 @@ var userInfoReservedClaims = []string{"iss", "aud"}
 // caller mistake, not a silent fall-through to plain JSON, since the
 // embedder specifically opted into calling it. It also fails if claims
 // itself sets "iss" or "aud" — see userInfoReservedClaims.
+//
+// For a client that gets pairwise subs, claims' "sub" must be the one
+// the client was given (resource.AuthorizationContext.ClientSubject),
+// never the user's internal subject (AuthorizationContext.Subject): it
+// must carry Config.Subjects' Prefix and a well-formed body, and, when
+// Dependencies.PairwiseSubjects can map a sub back, one it issued to the
+// client's current sector. Anything else fails with ErrorServerError.
 func (s *Server) SignUserInfoResponse(ctx context.Context, client storage.RegisteredClient, claims map[string]json.RawMessage) (string, *Error) {
 	if !s.cfg.Algorithms.UserInfo.IsValid() {
 		return "", newError(ErrorServerError, 500, "userinfo signing is not configured", nil)
@@ -52,6 +62,9 @@ func (s *Server) SignUserInfoResponse(ctx context.Context, client storage.Regist
 		if _, ok := claims[reserved]; ok {
 			return "", newError(ErrorServerError, 500, fmt.Sprintf("userinfo claims must not set reserved claim %q", reserved), nil)
 		}
+	}
+	if subErr := s.checkUserInfoSubject(ctx, client, claims["sub"]); subErr != nil {
+		return "", subErr
 	}
 
 	signer, kid, err := s.newSigner(ctx, keys.UserInfoSigning, s.cfg.Algorithms.UserInfo)
@@ -125,4 +138,37 @@ func (s *Server) encryptUserInfoResponse(ctx context.Context, clientID fapi.Clie
 		return "", fmt.Errorf("encrypt userinfo response: %w", err)
 	}
 	return compact, nil
+}
+
+// checkUserInfoSubject refuses a UserInfo "sub" (raw, nil when absent)
+// that isn't a pairwise sub this server issued to client, when client
+// gets pairwise subs: signing the user's internal subject to a pairwise
+// client would give away exactly what its pairwise sub hides. A public
+// client's sub isn't checked.
+func (s *Server) checkUserInfoSubject(ctx context.Context, client storage.RegisteredClient, raw json.RawMessage) *Error {
+	subjectType, typeErr := s.subjectTypeFor(client)
+	if typeErr != nil {
+		return typeErr
+	}
+	if subjectType != fapi.SubjectTypePairwise {
+		return nil
+	}
+	notIssued := func(cause error) *Error {
+		return newError(ErrorServerError, 500, "userinfo sub must be the client's pairwise sub (resource.AuthorizationContext.ClientSubject), not the user's internal subject", cause)
+	}
+	var sub string
+	if err := json.Unmarshal(raw, &sub); err != nil || sub == "" {
+		return notIssued(err)
+	}
+	body, hasPrefix := strings.CutPrefix(sub, effectiveSubjects(s.cfg).Prefix.String())
+	if !hasPrefix {
+		return notIssued(nil)
+	}
+	if err := pairwise.CheckBody(body); err != nil {
+		return notIssued(err)
+	}
+	if _, err := s.internalSubjectFor(ctx, client, sub); err != nil && !errors.Is(err, errNoSubjectLookup) {
+		return notIssued(err)
+	}
+	return nil
 }

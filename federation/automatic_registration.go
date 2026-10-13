@@ -757,7 +757,7 @@ func (a *AutomaticClientRepository) registeredClientConfigFromMetadata(ctx conte
 		AutomaticFederationRegistration: true,
 		AllowsClientCredentialsGrant:    a.cfg.AllowsClientCredentialsGrant,
 	}
-	if err := a.applyDisplayAndSubjectType(&cfg, m); err != nil {
+	if err := a.applyDisplayAndSubjectType(&cfg, id, m); err != nil {
 		return storage.RegisteredClientConfig{}, nil, err
 	}
 
@@ -1097,7 +1097,7 @@ func certificateThumbprintFromJWKS(jwks json.RawMessage) (string, error) {
 // applyDisplayAndSubjectType sets cfg's Display and SubjectType from m:
 // what a consent screen shows about the client, and the kind of sub its
 // end users get.
-func (a *AutomaticClientRepository) applyDisplayAndSubjectType(cfg *storage.RegisteredClientConfig, m relyingPartyMetadata) error {
+func (a *AutomaticClientRepository) applyDisplayAndSubjectType(cfg *storage.RegisteredClientConfig, id fapi.ClientID, m relyingPartyMetadata) error {
 	display, err := clientDisplayFromMetadata(m)
 	if err != nil {
 		return err
@@ -1107,7 +1107,36 @@ func (a *AutomaticClientRepository) applyDisplayAndSubjectType(cfg *storage.Regi
 		return err
 	}
 	cfg.Display, cfg.SubjectType = display, subjectType
+	if subjectType == fapi.SubjectTypePairwise {
+		if cfg.Sector, err = entitySector(id, m.RedirectURIs); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// entitySector returns the sector a pairwise automatically registered
+// client's subjects are derived for: its Entity Identifier's host, which
+// the Trust Chain binds to it. A Relying Party's redirect_uris are its
+// own claim, so a sector derived from them alone would let it name
+// another Relying Party's host and receive that Relying Party's sub
+// values wherever no redirect proves the claim (CIBA, say). So every
+// redirect URI must be https on that same host (OpenID Connect Core
+// §8.1's redirect-host sector, made one the Relying Party is known to
+// control), or the registration is refused.
+func entitySector(id fapi.ClientID, redirectURIs []string) (string, error) {
+	entity, err := url.Parse(id.String())
+	if err != nil || entity.Hostname() == "" {
+		return "", fmt.Errorf("pairwise subject_type: the Entity Identifier %q has no host", id)
+	}
+	host := strings.ToLower(entity.Hostname())
+	for _, raw := range redirectURIs {
+		u, err := url.Parse(raw)
+		if err != nil || u.Scheme != "https" || !strings.EqualFold(u.Hostname(), host) {
+			return "", fmt.Errorf("pairwise subject_type: redirect_uris must all be https on the Entity Identifier's host %q", host)
+		}
+	}
+	return host, nil
 }
 
 // validateSubjectTypes checks AutomaticRegistrationConfig's SubjectTypes
@@ -1148,9 +1177,8 @@ func effectiveSubjectTypes(types []fapi.SubjectType) []fapi.SubjectType {
 // redirect URIs' host instead would give it different sub values than
 // it asked for, which a later release honouring the URI would then
 // change. A public client's sector_identifier_uri changes nothing, and
-// is ignored. The sector itself is then derived from the redirect URIs
-// by storage.NewRegisteredClient, which refuses a pairwise client whose
-// redirect URIs don't share one https host.
+// is ignored. A pairwise client's sector is its Entity Identifier's host
+// (see entitySector).
 func (a *AutomaticClientRepository) subjectTypeFromMetadata(m relyingPartyMetadata) (fapi.SubjectType, error) {
 	subjectType := a.cfg.DefaultSubjectType
 	if subjectType == 0 {

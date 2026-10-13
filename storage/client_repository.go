@@ -452,9 +452,10 @@ type RegisteredClientConfig struct {
 	// for (OpenID Connect Core §8.1): clients sharing a sector see the
 	// same sub for a user. Optional: when empty, a web client whose
 	// redirect URIs are all https on one host gets that host. A native
-	// client, a client with redirect URIs on several hosts, and one with
-	// no redirect URIs (CIBA or client credentials only) have no derived
-	// sector, so a pairwise one must set it. Up to 255 printable ASCII
+	// client, a client with redirect URIs on several hosts, one with no
+	// redirect URIs, and one permitted CIBA (which receives tokens without
+	// a redirect proving it controls that host) have no derived sector,
+	// so a pairwise one must set it. Up to 255 printable ASCII
 	// characters, by convention a host name. Changing it (or the redirect
 	// URIs it's derived from) gives every user a new sub at this client
 	// for new grants, so set it before the client's first use.

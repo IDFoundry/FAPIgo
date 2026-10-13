@@ -59,6 +59,11 @@ func TestClientSectorDerivation(t *testing.T) {
 			cfg.RedirectURIs = nil
 			cfg.AllowsClientCredentialsGrant = true
 		}, ""},
+		// A client permitted CIBA receives tokens with no redirect proving
+		// it's served on its redirect URIs' host, so it derives none.
+		"permitted CIBA": {func(cfg *RegisteredClientConfig) {
+			cfg.BackchannelAuthenticationRequestAlgorithm = fapi.ES256
+		}, ""},
 		"explicit wins": {func(cfg *RegisteredClientConfig) { cfg.Sector = "bank-group" }, "bank-group"},
 	}
 	for name, tc := range tests {
@@ -80,6 +85,10 @@ func TestPairwiseClientNeedsASector(t *testing.T) {
 		"native": func(cfg *RegisteredClientConfig) {
 			cfg.ApplicationType = ApplicationTypeNative
 			cfg.RedirectURIs = []fapi.RegisteredRedirectURI{"org.example.app:/cb"}
+		},
+		"CIBA with redirect URIs on another client's host": func(cfg *RegisteredClientConfig) {
+			cfg.RedirectURIs = []fapi.RegisteredRedirectURI{"https://victim-rp.example/cb"}
+			cfg.BackchannelAuthenticationRequestAlgorithm = fapi.ES256
 		},
 		"CIBA only": func(cfg *RegisteredClientConfig) {
 			cfg.RedirectURIs = nil

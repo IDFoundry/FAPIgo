@@ -101,6 +101,9 @@ func pairwiseClient(ciba bool) storage.RegisteredClientConfig {
 	}
 	if ciba {
 		cfg.BackchannelAuthenticationRequestAlgorithm = fapi.ES256
+		// A client permitted CIBA derives no sector from its redirect
+		// URIs, so it names the one they're on.
+		cfg.Sector = "rp.example"
 	} else {
 		cfg.RequestObjectAlgorithm = fapi.ES256
 	}

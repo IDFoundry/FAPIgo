@@ -65,8 +65,9 @@ func fedJWKS(t *testing.T, kid string, key *ecdsa.PrivateKey) json.RawMessage {
 // own; this fixture exists only to prove server.New actually wires that
 // mechanism in, not to re-prove the mechanism itself.
 // setupAutomaticRegistrationFixture builds a Trust Anchor and an RP
-// whose openid_relying_party metadata registers redirectURI, plus any
-// extra members.
+// whose openid_relying_party metadata registers redirectURI (or, when
+// it's "", one on the RP's own Entity Identifier host, as a pairwise RP
+// needs), plus any extra members.
 func setupAutomaticRegistrationFixture(t *testing.T, redirectURI string, extra ...map[string]any) *automaticRegistrationFixture {
 	t.Helper()
 	now := time.Now()
@@ -82,6 +83,9 @@ func setupAutomaticRegistrationFixture(t *testing.T, redirectURI string, extra .
 	t.Cleanup(rpServer.Close)
 
 	taID, rpID := taServer.URL, rpServer.URL
+	if redirectURI == "" {
+		redirectURI = rpID + "/callback"
+	}
 
 	sign := func(p intfed.CreateParams) string {
 		t.Helper()

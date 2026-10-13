@@ -118,9 +118,21 @@ func testDeriverLookup(t *testing.T, factory func(t *testing.T) Deriver) {
 	if got, err := lookup.LookupInternalSubject(ctx, in.Issuer(), "other.example", body); !errors.Is(err, ErrSubjectNotFound) {
 		t.Errorf("LookupInternalSubject under another sector = %q, %v; want ErrSubjectNotFound", got, err)
 	}
-	unknown := contractDerive(t, d, contractInput(t, "https://op.example", "rp.example", "user-2"))
-	if got, err := lookup.LookupInternalSubject(ctx, in.Issuer(), in.Sector(), alterBody(unknown)); !errors.Is(err, ErrSubjectNotFound) {
+	if got, err := lookup.LookupInternalSubject(ctx, "https://other-op.example", in.Sector(), body); !errors.Is(err, ErrSubjectNotFound) {
+		t.Errorf("LookupInternalSubject under another issuer = %q, %v; want ErrSubjectNotFound", got, err)
+	}
+	other := contractInput(t, "https://op.example", "rp.example", "user-2")
+	otherBody := contractDerive(t, d, other)
+	if got, err := lookup.LookupInternalSubject(ctx, other.Issuer(), other.Sector(), otherBody); err != nil || got != other.Subject() {
+		t.Errorf("LookupInternalSubject(%q) = %q, %v; want %q", otherBody, got, err, other.Subject())
+	}
+	if got, err := lookup.LookupInternalSubject(ctx, in.Issuer(), in.Sector(), alterBody(otherBody)); !errors.Is(err, ErrSubjectNotFound) {
 		t.Errorf("LookupInternalSubject of an altered body = %q, %v; want ErrSubjectNotFound", got, err)
+	}
+	// A well-formed body of the Deriver's own length that it never gave.
+	never := strings.Repeat("A", len(body))
+	if got, err := lookup.LookupInternalSubject(ctx, in.Issuer(), in.Sector(), never); !errors.Is(err, ErrSubjectNotFound) {
+		t.Errorf("LookupInternalSubject of a body never derived = %q, %v; want ErrSubjectNotFound", got, err)
 	}
 }
 

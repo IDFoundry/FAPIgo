@@ -144,6 +144,13 @@ type grantRecord struct {
 	// changes. Empty for a public client.
 	PairwiseSector string `json:"pairwise_sector,omitempty"`
 
+	// PairwisePrefix is the Config.Subjects Prefix ClientSubject was
+	// issued under, set with it ("" for an empty prefix as well as for a
+	// public client). A grant whose prefix the server no longer uses is
+	// refused at its next use (checkGrantSubjectStillIssued): its tokens'
+	// pairwise sub would no longer resolve at a resource server.
+	PairwisePrefix string `json:"pairwise_prefix,omitempty"`
+
 	Scope                []string        `json:"scope,omitempty"`
 	AuthTime             time.Time       `json:"auth_time"`
 	ACR                  string          `json:"acr,omitempty"`

@@ -71,7 +71,11 @@ func (e SubjectTypeEnforcement) IsValid() bool {
 // PublicSubjects is the configuration that keeps every sub as it was.
 // Changing Default, Enforcement or Prefix, or the deriver's key, changes
 // the sub of every user at the affected clients for new grants: plan it
-// as an identity migration, not a configuration change.
+// as an identity migration, not a configuration change. Existing grants
+// keep the sub they were issued with, except that changing Prefix ends
+// every pairwise grant at its next use (invalid_grant), since resource
+// servers resolve pairwise subs under the current prefix, and switching
+// to SubjectTypesPairwiseOnly ends grants issued with public subs.
 //
 // With a one-way deriver the server can't map a pairwise sub back to the
 // end user, so its access tokens must keep the internal subject

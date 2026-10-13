@@ -240,24 +240,20 @@ func TestPairwiseSubjectBySector(t *testing.T) {
 }
 
 // TestPairwiseSubjectSurvivesConfigurationChange covers grant continuity:
-// a grant keeps the sub it was issued with when the subject
-// configuration later changes (here the prefix), so its refreshed ID
-// tokens keep it too (OIDC Core §12.2); a new authorization gets the new
-// sub.
+// a grant keeps the sub it was issued with when the client's sector
+// later changes, so its refreshed ID tokens keep it too (OIDC Core
+// §12.2); a new authorization gets the new sector's sub.
 func TestPairwiseSubjectSurvivesConfigurationChange(t *testing.T) {
 	h := withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), hmacDeriver(t))
 	before := clientSubjectOf(t, h, "user-1")
 	first, _ := exchangeForTokensWithOfflineAccess(t, h)
 
-	h.cfg.Subjects.Prefix = mustPrefix(t, "changed:")
-	srv, err := server.New(h.cfg, h.deps)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	h.server = srv
+	moved := pairwiseClient(false)
+	moved.Sector = "moved.example"
+	register(t, h, moved)
 	after := clientSubjectOf(t, h, "user-1")
 	if after == before {
-		t.Fatalf("ClientSubject is %q under both prefixes", after)
+		t.Fatalf("ClientSubject is %q in both sectors", after)
 	}
 
 	refreshed, err := refreshWith(t, h, first.RefreshToken.Reveal(), "")
@@ -270,6 +266,39 @@ func TestPairwiseSubjectSurvivesConfigurationChange(t *testing.T) {
 	again, _ := exchangeForTokensWithOfflineAccess(t, h)
 	if got := validateIDToken(t, h, again.IDToken.Reveal(), again.AccessToken.Reveal()).Subject; got != after {
 		t.Errorf("new authorization's ID token sub = %q, want %q", got, after)
+	}
+}
+
+// TestPairwisePrefixChangeEndsGrants: a resource server strips the
+// current prefix to look a pairwise sub up, so a grant whose sub was
+// issued under another prefix is refused at its next use, rather than
+// issuing tokens no resource server could resolve. New authorizations
+// get subs under the new prefix.
+func TestPairwisePrefixChangeEndsGrants(t *testing.T) {
+	h := withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), reversiblePairwise(t))
+	first, _ := exchangeForTokensWithOfflineAccess(t, h)
+	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
+
+	h.cfg.Subjects.Prefix = mustPrefix(t, "changed:")
+	srv, err := server.New(h.cfg, h.deps)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	h.server = srv
+
+	if _, err := refreshWith(t, h, first.RefreshToken.Reveal(), ""); serverErrorCode(t, err) != server.ErrorInvalidGrant {
+		t.Errorf("refresh of a grant issued under the old prefix = %v, want invalid_grant", err)
+	}
+	_, err = h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, testCodeVerifier)},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
+	})
+	if serverErrorCode(t, err) != server.ErrorInvalidGrant {
+		t.Errorf("exchange of a code issued under the old prefix = %v, want invalid_grant", err)
+	}
+	again, _ := exchangeForTokensWithOfflineAccess(t, h)
+	if got := validateIDToken(t, h, again.IDToken.Reveal(), again.AccessToken.Reveal()).Subject; !strings.HasPrefix(got, "changed:") {
+		t.Errorf("new authorization's ID token sub = %q, want the new prefix", got)
 	}
 }
 

@@ -145,6 +145,7 @@ func (s *Server) embedderGrant(ctx context.Context, req embedderGrantRequest) (g
 		Subject:              req.Subject.String(),
 		ClientSubject:        distinctClientSubject(clientSub, req.Subject.String()),
 		PairwiseSector:       sector,
+		PairwisePrefix:       pairwisePrefixOf(s.cfg, sector),
 		Scope:                slices.Clone(req.Scope),
 		AuthorizationDetails: details,
 		GrantID:              req.GrantID,

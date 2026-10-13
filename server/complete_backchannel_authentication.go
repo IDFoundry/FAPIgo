@@ -203,6 +203,7 @@ func (s *Server) approveBackchannelAuthentication(ctx context.Context, clientID 
 		Subject:                 result.subject.ID().String(),
 		ClientSubject:           distinctClientSubject(clientSub, result.subject.ID().String()),
 		PairwiseSector:          sector,
+		PairwisePrefix:          pairwisePrefixOf(s.cfg, sector),
 		Scope:                   result.grant.Scope,
 		AuthTime:                result.auth.authTime,
 		ACR:                     result.auth.acr,

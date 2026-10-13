@@ -1,5 +1,54 @@
 # Changelog
 
+## [0.55.0](https://github.com/IDFoundry/FAPIgo/compare/v0.54.0...v0.55.0) (2026-10-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* **resource:** resource.AuthorizationContext's Subject field is renamed InternalSubject. Its value is unchanged. Rename the uses, then make sure anything returned to a client uses ClientSubject. See UPGRADING.md for v0.55.0.
+* **federation:** an automatically registered Relying Party whose metadata asks for a subject_type the server doesn't issue (pairwise, while the server issues only public subjects) is no longer registered, rather than given public subjects. A pairwise one must have redirect URIs on one https host and no sector_identifier_uri. See UPGRADING.md for v0.55.0.
+* server.New refuses a Config whose Subjects is zero, unless OAuthOnly is set. Set Config.Subjects to server.PublicSubjects() to keep every sub as before; no deriver, key or client change is needed. See UPGRADING.md for v0.55.0.
+
+### Features
+
+* **federation:** honour or refuse an automatically registered RP's subject_type ([790f123](https://github.com/IDFoundry/FAPIgo/commit/790f12327cf00ceab3a44631fc9009c63784f9f5))
+* **pairwise:** add NewMapping, a reversible deriver over a PairwiseSubjectStore ([f797667](https://github.com/IDFoundry/FAPIgo/commit/f797667cd4f843268f0c7c56e4e53c4621676e0f))
+* **pairwise:** add NewReversible, a reversible pairwise deriver ([795b742](https://github.com/IDFoundry/FAPIgo/commit/795b74291768148aaaaf223f813d76a302ec223f))
+* **pairwise:** always draw mapping bodies from crypto/rand ([3f5dce7](https://github.com/IDFoundry/FAPIgo/commit/3f5dce7b2bbaccd8c5c9e71a479979bad32141d9))
+* **pairwise:** let the one-way deriver's key stay in an HSM or KMS ([ba2d13d](https://github.com/IDFoundry/FAPIgo/commit/ba2d13d6de3331ef67b0d70fb4f7cb0436f24ecc))
+* **pairwise:** let the reversible deriver's keys stay in an HSM or KMS ([df85eed](https://github.com/IDFoundry/FAPIgo/commit/df85eeda3f2ae93a2914cf36ec4bd88b6a98ba78))
+* require Config.Subjects and add the pairwise package ([bb04e22](https://github.com/IDFoundry/FAPIgo/commit/bb04e228cfe6bcb53ee47d91975e369878171248))
+* **resource:** let one-way pairwise deployments resolve subjects through their own mapping ([f103e16](https://github.com/IDFoundry/FAPIgo/commit/f103e16da4edcea508521854029e5ba443acefc0))
+* **resource:** rename AuthorizationContext.Subject to InternalSubject and let outside resource servers skip pairwise lookups ([5d6d222](https://github.com/IDFoundry/FAPIgo/commit/5d6d222a47e4dbb6a9d008e54ccbd7256e952d09))
+* **server:** derive and keep each grant's client subject ([2662661](https://github.com/IDFoundry/FAPIgo/commit/26626617eea71c4ba56c3e6fbfc60bd007c6e05a))
+* **server:** issue pairwise subjects in access tokens and at resource servers ([4cc9db0](https://github.com/IDFoundry/FAPIgo/commit/4cc9db048ca782459e1c80978f0e16bcd2598d3d))
+* **server:** let automatic registration offer federation RPs fewer subject types ([1a20b5b](https://github.com/IDFoundry/FAPIgo/commit/1a20b5b785c30131470e213df2246b79b1356435))
+* **server:** map a client's pairwise sub back to its user ([80df6ec](https://github.com/IDFoundry/FAPIgo/commit/80df6ecabb7984812215474e02375df181191184))
+* **storage:** add PairwiseSubjectStore for mapped pairwise subject identifiers ([1d0c7d5](https://github.com/IDFoundry/FAPIgo/commit/1d0c7d568bec336e5e21f1357eb6b2f86e61b066))
+
+
+### Bug Fixes
+
+* bind a pairwise client's sector to a host it's known to control ([710673e](https://github.com/IDFoundry/FAPIgo/commit/710673e54f5e43481fa863655cfb1571bd71d40d))
+* **pairwise:** check lookups across issuers in the Deriver contract ([1828c90](https://github.com/IDFoundry/FAPIgo/commit/1828c903ef9affdb148f490b6ab5d29a39c1b53c))
+* **pairwise:** copy ReversibleOps output before authenticating it ([b34e263](https://github.com/IDFoundry/FAPIgo/commit/b34e263e0f709d34b73ebbe1de2477e95e174470))
+* **pairwise:** refuse an over-long issuer or sector at reversible lookup ([cfdcdd8](https://github.com/IDFoundry/FAPIgo/commit/cfdcdd851e7a4d68a6aa76e4c63a64ec54f8f753))
+* **pairwise:** refuse text keys, and an empty prefix for one-way subs ([a614e74](https://github.com/IDFoundry/FAPIgo/commit/a614e7459527325f9faf06173b69fb4443def534))
+* **resource:** bound pairwise subject lookups with a timeout ([11845a7](https://github.com/IDFoundry/FAPIgo/commit/11845a7473136d34de5c7bf45a320d758609d9a5))
+* **server:** advertise federation subject types in the Entity Configuration ([82b1a43](https://github.com/IDFoundry/FAPIgo/commit/82b1a43dc377bc458092160311d07e868ad1ee7a))
+* **server:** end pairwise grants issued under another subjects prefix ([044e364](https://github.com/IDFoundry/FAPIgo/commit/044e364dee5719b8541a0e3c74478386c83bc6e4))
+* **server:** end public grants at a server that issues only pairwise subs ([57238ae](https://github.com/IDFoundry/FAPIgo/commit/57238ae04988eb018503de8ed85b177af208bc7b))
+* **server:** infer pairwise reversibility from the deriver ([b000555](https://github.com/IDFoundry/FAPIgo/commit/b000555019326d58f60976a425105456316519c3))
+* **server:** keep a grant's signed UserInfo working after a sector change ([658f72b](https://github.com/IDFoundry/FAPIgo/commit/658f72be842cfc3466e225a05d85bca5a8d36f60))
+* **server:** name the reversible deriver's subject limit when it refuses one ([df1e197](https://github.com/IDFoundry/FAPIgo/commit/df1e197676874aff315747376d213ed42263737a))
+* **server:** offer federation RPs only pairwise subs under a pairwise default ([548104d](https://github.com/IDFoundry/FAPIgo/commit/548104d42931d380c3d70e6d8a623a845a3d481a))
+* **server:** probe the pairwise deriver across sectors and users at New ([c03bae0](https://github.com/IDFoundry/FAPIgo/commit/c03bae0596ad327c283b1cd83f757f0e077c2f47))
+* **server:** refuse an internal sub in a pairwise client's signed UserInfo ([f2aa82b](https://github.com/IDFoundry/FAPIgo/commit/f2aa82b54bfd35f279fe9355462fd0d113fddc5a))
+* **server:** refuse an unissuable pairwise client before the user logs in ([56ee841](https://github.com/IDFoundry/FAPIgo/commit/56ee841c5a33ccfb0fe05b75dc0b5fc40d36aed0))
+* **server:** resolve a one-way pairwise hint through the declared resolver ([7524644](https://github.com/IDFoundry/FAPIgo/commit/752464475cecbaa63cf76a8bfcdbf3afc561e1a2))
+* **storage:** derive no sector for a client that authenticates by attestation ([228bf08](https://github.com/IDFoundry/FAPIgo/commit/228bf08e1fc6b3a345c245307876a238fb4c61ef))
+* **storage:** normalise an explicit Sector to a host name ([e80a806](https://github.com/IDFoundry/FAPIgo/commit/e80a806d5810d138194c6754d59df266919244a5))
+
 ## [0.54.0](https://github.com/IDFoundry/FAPIgo/compare/v0.53.0...v0.54.0) (2026-10-11)
 
 

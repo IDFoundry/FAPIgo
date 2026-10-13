@@ -790,3 +790,57 @@ func assertResolvesClientSubject(t *testing.T, h harness, sub string, mappable b
 		}
 	}
 }
+
+// TestResolveClientSubjectRefusesEmptyAndInvalidInput: an empty sub is
+// refused even for a public client, whose sub would otherwise come back
+// unchanged as an empty "user", and a hint that isn't an ID token this
+// server issued is refused before any lookup.
+func TestResolveClientSubjectRefusesEmptyAndInvalidInput(t *testing.T) {
+	public := newHarness(t, server.ProfileFAPISecurity, true)
+	if got, err := public.server.ResolveClientSubject(context.Background(), testClientID, ""); serverErrorCode(t, err) != server.ErrorInvalidRequest {
+		t.Errorf("an empty sub at a public client: %q, %v; want invalid_request", got, err)
+	}
+	h := withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), pairwise.Reversible, newMappingDeriver())
+	if _, err := h.server.ResolveClientSubject(context.Background(), testClientID, ""); serverErrorCode(t, err) != server.ErrorInvalidRequest {
+		t.Errorf("an empty sub: %v, want invalid_request", err)
+	}
+	if _, err := h.server.ResolveIDTokenHint(context.Background(), "not-an-id-token", testClientID); serverErrorCode(t, err) != server.ErrorInvalidRequest {
+		t.Errorf("an invalid hint: %v, want invalid_request", err)
+	}
+}
+
+// TestSignUserInfoResponseChecksPairwiseSubShape: for a pairwise client,
+// a sub with the prefix but a malformed body is refused; and under
+// SubjectTypesPairwiseOnly, a client still registered as public is
+// refused outright rather than signed for.
+func TestSignUserInfoResponseChecksPairwiseSubShape(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	h.cfg.Algorithms.UserInfo = fapi.ES256
+	h = withPairwise(t, h, pairwiseClient(false), pairwise.OneWay, hmacDeriver(t))
+	client, err := h.clients.ResolveClient(context.Background(), testClientID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(testPairwisePrefix + "not a body!")
+	if _, err := h.server.SignUserInfoResponse(context.Background(), client, map[string]json.RawMessage{"sub": raw}); err == nil {
+		t.Error("a malformed pairwise body was signed, want it refused")
+	}
+
+	public := pairwiseClient(false)
+	public.SubjectType = fapi.SubjectTypePublic
+	register(t, h, public)
+	h.cfg.Subjects.Default = fapi.SubjectTypePairwise
+	h.cfg.Subjects.Enforcement = server.SubjectTypesPairwiseOnly
+	srv, err := server.New(h.cfg, h.deps)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	client, err = h.clients.ResolveClient(context.Background(), testClientID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = json.Marshal("user-1")
+	if _, err := srv.SignUserInfoResponse(context.Background(), client, map[string]json.RawMessage{"sub": raw}); err == nil {
+		t.Error("a public client under SubjectTypesPairwiseOnly was signed for, want it refused")
+	}
+}

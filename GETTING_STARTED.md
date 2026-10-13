@@ -144,13 +144,14 @@ see as new accounts.
     accepts up to 255, so a longer subject fails with `server_error`
     when its user signs in to a pairwise client.
 
-    The keys are used in process memory, so keep them wrapped by your
-    KMS or HSM (envelope encryption): store only their ciphertext, and
-    have the KMS decrypt them once at startup, on the server and on
-    every resource server that resolves `sub`s. They can't stay inside
-    a KMS: not every KMS offers the raw AES-CTR the construction uses,
-    and a resource server would otherwise need a KMS call for every API
-    request it verifies.
+    `NewReversible` uses the keys in process memory, so keep them
+    wrapped by your KMS or HSM (envelope encryption): store only their
+    ciphertext, and have the KMS decrypt them once at startup, on the
+    server and on every resource server that resolves `sub`s. To keep
+    them inside an HSM or KMS instead, use
+    `pairwise.NewReversibleWith`, which needs a key service offering
+    both of the construction's operations: see [Keeping the
+    reversible keys in an HSM or KMS](#keeping-the-reversible-keys-in-an-hsm-or-kms).
   - **`pairwise.NewMapping`** keeps a random `sub` per user and sector
     in a `storage.PairwiseSubjectStore`, so there's no key whose leak
     reverses them all, at the cost of a durable, shared store.
@@ -166,9 +167,65 @@ see as new accounts.
   accepts JWT access tokens too.
 
 Under `AssuranceProduction` the deriver must declare durable custody
-(`keys.DeclareCustody` for `NewReversible` and `NewHMAC`; a
-`storage.StoreAssurance` store for `NewMapping`), since every restart and every instance must give a
-user the same `sub`.
+(`keys.DeclareCustody` for `NewReversible`, `NewReversibleWith` and
+`NewHMAC`; a `storage.StoreAssurance` store for `NewMapping`), since
+every restart and every instance must give a user the same `sub`.
+
+#### Keeping the reversible keys in an HSM or KMS
+
+`pairwise.NewReversibleWith(ops)` is the reversible deriver over a
+`pairwise.ReversibleOps` you implement against your key service, so
+neither key is ever in your process. For the same two keys it derives
+exactly the `sub`s `NewReversible` does. The service has to perform
+both of the construction's operations with keys it never releases:
+
+- **MAC:** HMAC-SHA-256, returning the full 32-byte output.
+- **Encryption:** raw AES-256-CTR with a caller-supplied 16-byte IV
+  used as the whole initial counter block, incremented as one 128-bit
+  big-endian integer. A service that generates its own IV, or uses an
+  authenticated mode with its own envelope (AES-GCM), can't produce
+  these `sub`s.
+
+| Key service | Both keys non-extractable? | MAC | AES-256-CTR | Caveats |
+|---|---|---|---|---|
+| **PKCS#11 HSMs** (Thales Luna, Entrust nShield, YubiHSM 2 and others) | Yes, if your HSM supports both mechanisms | `CKM_SHA256_HMAC` | `CKM_AES_CTR`, with `CK_AES_CTR_PARAMS.ulCounterBits = 128` | Check that your HSM and firmware support both mechanisms and a 128-bit counter. PKCS#11 lets `ulCounterBits` be smaller, which increments only the low bits and gives different output once they carry: run `NewReversibleWith` against the published test vectors, including the one whose IV ends in `0xfffffffd`. |
+| **AWS CloudHSM** (PKCS#11) | Yes | `CKM_SHA256_HMAC` | `CKM_AES_CTR` | Both mechanisms are listed in its PKCS#11 library; set `ulCounterBits` to 128 and check against the test vectors, as above. |
+| **Google Cloud KMS** | Yes | A `MAC` key with algorithm `HMAC_SHA256` (`MacSign`) | A `RAW_ENCRYPT_DECRYPT` key with algorithm `AES_256_CTR` (`RawEncrypt` with `initialization_vector`) | AES-CTR keys need the `roles/cloudkms.expertRawAesCtr` role. Google doesn't document the counter width: check against the test vectors, including the `0xfffffffd` one. |
+| **AWS KMS** | No | HMAC keys: `GenerateMac` with `HMAC_SHA_256` | Not offered: symmetric keys are AES-256-GCM with a KMS-chosen IV and KMS's own ciphertext format | Use envelope-wrapped keys with `NewReversible` (KMS decrypts them at startup), or AWS CloudHSM. |
+| **Azure Key Vault Managed HSM** | No | `HS256` | Not offered: AES keys support only AES-KW, AES-GCM and AES-CBC | Use envelope-wrapped keys with `NewReversible`. |
+| **Azure Cloud HSM** | Possibly | HMAC-SHA2-256 is listed | AES-CTR is listed | Not verified here which interface exposes AES-CTR with a caller IV and a 128-bit counter: check, then test against the vectors. |
+| **HashiCorp Vault Transit** | No | `hmac` endpoint (output is `vault:v1:`-prefixed base64, which your `ReversibleOps` would decode) | Not offered: AES-GCM, ChaCha20-Poly1305 and (Enterprise) AES-CBC only | Use envelope-wrapped keys with `NewReversible`. |
+
+**Choosing between them.** Both produce identical `sub`s from the same
+keys, so a deployment can move between envelope-wrapped keys
+(`NewReversible`) and HSM- or KMS-resident ones (`NewReversibleWith`)
+without changing any user's `sub`.
+
+- **Envelope-wrapped keys** cost one KMS call per process start, and
+  derivation and lookup run in memory. The keys are in the memory of
+  the server and of every resource server that resolves `sub`s.
+- **HSM- or KMS-resident keys** never leave the key service, but every
+  derivation and every lookup is two calls to it. Derivation happens
+  once per grant; with self-contained (JWT) access tokens, though, a
+  resource server looks the `sub` up on every request it verifies, so
+  every API call costs two key operations, in latency and, on a cloud
+  KMS, in price. Opaque access tokens avoid the lookup (their record
+  holds the internal subject), or put a bounded cache in front of your
+  `ReversibleOps`. Every resource server that resolves `sub`s needs
+  access to the same two keys.
+
+Sources: [PKCS#11 v2.40 mechanisms (`CK_AES_CTR_PARAMS`)](https://docs.oasis-open.org/pkcs11/pkcs11-curr/v2.40/pkcs11-curr-v2.40.html),
+[AWS CloudHSM PKCS#11 mechanisms](https://docs.aws.amazon.com/cloudhsm/latest/userguide/pkcs11-mechanisms.html),
+[Cloud KMS algorithms](https://docs.cloud.google.com/kms/docs/algorithms),
+[Cloud KMS raw encryption](https://docs.cloud.google.com/kms/docs/raw-encryption) and
+[`RawEncryptRequest`](https://github.com/googleapis/googleapis/blob/master/google/cloud/kms/v1/service.proto),
+[AWS KMS `GenerateMac`](https://docs.aws.amazon.com/kms/latest/APIReference/API_GenerateMac.html) and
+[key specs](https://docs.aws.amazon.com/kms/latest/developerguide/symm-asymm-choose-key-spec.html),
+[Managed HSM key types and algorithms](https://learn.microsoft.com/en-us/azure/key-vault/managed-hsm/about-keys-details),
+[Azure Cloud HSM algorithms](https://learn.microsoft.com/en-us/azure/cloud-hsm/supported-algorithms),
+[Vault Transit API](https://developer.hashicorp.com/vault/api-docs/secret/transit).
+Vendors change what they offer: check your service's current
+documentation.
 
 Under `ProfileFAPISecurityWithMessageSigning`, `Algorithms.JARM` is
 required too.

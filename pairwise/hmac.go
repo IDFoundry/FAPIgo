@@ -6,7 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
-	"hash"
+	"io"
 
 	"github.com/idfoundry/fapigo/internal/sealkeys"
 	"github.com/idfoundry/fapigo/keys"
@@ -90,11 +90,12 @@ type custodyHMACDeriver struct {
 // KeyCustody implements keys.KeyCustodyAssurance.
 func (d custodyHMACDeriver) KeyCustody() keys.KeyCustody { return d.custody }
 
-// writeLengthPrefixed writes field to h as its length, a 4-byte big
-// endian integer, followed by its bytes.
-func writeLengthPrefixed(h hash.Hash, field string) {
+// writeLengthPrefixed writes field to w (a hash, or a buffer that
+// can't fail) as its length, a 4-byte big endian integer, followed by
+// its bytes.
+func writeLengthPrefixed(w io.Writer, field string) {
 	var length [4]byte
 	binary.BigEndian.PutUint32(length[:], uint32(len(field))) // #nosec G115 -- fields are at most MaxInputLength bytes
-	h.Write(length[:])
-	h.Write([]byte(field))
+	_, _ = w.Write(length[:])
+	_, _ = w.Write([]byte(field))
 }

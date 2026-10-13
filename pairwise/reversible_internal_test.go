@@ -65,14 +65,20 @@ func TestReversibleAuthenticatesTheWholeIV(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	iv := r.syntheticIV("https://op.example", "rp.example", plaintext)
+	ctx := context.Background()
+	iv, err := r.syntheticIV(ctx, "https://op.example", "rp.example", plaintext)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for i := range reversibleIVLength {
 		forged := append([]byte(nil), iv...)
 		forged[i] ^= 0x01
-		sealed := make([]byte, reversibleIVLength+ReversiblePlaintextLength)
-		copy(sealed, forged)
-		r.ctr(forged, sealed[reversibleIVLength:], plaintext)
-		got, err := r.LookupInternalSubject(context.Background(), "https://op.example", "rp.example", base64.RawURLEncoding.EncodeToString(sealed))
+		ciphertext, err := r.ctr(ctx, forged, plaintext)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sealed := append(append([]byte(nil), forged...), ciphertext...)
+		got, err := r.LookupInternalSubject(ctx, "https://op.example", "rp.example", base64.RawURLEncoding.EncodeToString(sealed))
 		if !errors.Is(err, ErrSubjectNotFound) {
 			t.Fatalf("IV byte %d altered: lookup = %q, %v; want ErrSubjectNotFound", i, got, err)
 		}

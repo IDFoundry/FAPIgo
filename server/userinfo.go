@@ -167,7 +167,7 @@ func (s *Server) checkUserInfoSubject(ctx context.Context, client storage.Regist
 	if err := pairwise.CheckBody(body); err != nil {
 		return notIssued(err)
 	}
-	if _, err := s.internalSubjectFor(ctx, client, sub); err != nil && !errors.Is(err, errNoSubjectLookup) {
+	if _, err := s.internalSubjectFor(ctx, client, sub); err != nil && !errors.Is(err, ErrNoPairwiseSubjectLookup) {
 		return notIssued(err)
 	}
 	return nil

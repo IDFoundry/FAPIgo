@@ -59,7 +59,7 @@ func (s *Server) requiredSubject(ctx context.Context, params map[string]json.Raw
 // authenticated now; don't treat it as a login. It is the sub the client
 // was given: for a client with pairwise subjects, its pairwise sub, so
 // compare it with Server.ClientSubject for a user whose session you
-// know. An encrypted ID token
+// know, or map it to the user with ResolveIDTokenHint. An encrypted ID token
 // isn't accepted: the client decrypts it and sends the signed token
 // inside.
 //

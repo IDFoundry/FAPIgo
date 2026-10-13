@@ -726,3 +726,53 @@ func TestPairwiseCIBAOneWayResolverResolvesIDTokenHint(t *testing.T) {
 	unknown["id_token_hint"] = jsonRaw(t, serverHint(t, h, func(c map[string]any) { c["sub"] = clientSubjectOf(t, h, "user-2") }))
 	assertBackchannelLocalError(t, h, unknown, server.ErrorInvalidRequest)
 }
+
+// TestResolveClientSubject: ResolveClientSubject and ResolveIDTokenHint
+// map a sub a client was given back to its user wherever the server can
+// (a public client, a lookup, a resolver), refuse a sub the client was
+// never given, and report ErrNoPairwiseSubjectLookup where nothing can.
+func TestResolveClientSubject(t *testing.T) {
+	type setup func(t *testing.T) harness
+	tests := map[string]struct {
+		setup    setup
+		mappable bool
+	}{
+		"public": {func(t *testing.T) harness { return newHarness(t, server.ProfileFAPISecurity, true) }, true},
+		"reversible": {func(t *testing.T) harness {
+			return withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), pairwise.Reversible, newMappingDeriver())
+		}, true},
+		"one-way": {func(t *testing.T) harness {
+			return withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), pairwise.OneWay, hmacDeriver(t))
+		}, false},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			h := tc.setup(t)
+			sub := clientSubjectOf(t, h, "user-1")
+			hint := serverHint(t, h, func(c map[string]any) { c["sub"] = sub })
+			for what, resolve := range map[string]func() (string, error){
+				"sub":  func() (string, error) { return h.server.ResolveClientSubject(context.Background(), testClientID, sub) },
+				"hint": func() (string, error) { return h.server.ResolveIDTokenHint(context.Background(), hint, testClientID) },
+			} {
+				got, err := resolve()
+				if !tc.mappable {
+					if !errors.Is(err, server.ErrNoPairwiseSubjectLookup) {
+						t.Errorf("%s: %q, %v; want ErrNoPairwiseSubjectLookup", what, got, err)
+					}
+					continue
+				}
+				if err != nil || got != "user-1" {
+					t.Errorf("%s: %q, %v; want user-1", what, got, err)
+				}
+			}
+			if tc.mappable && name != "public" {
+				if _, err := h.server.ResolveClientSubject(context.Background(), testClientID, testPairwisePrefix+"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"); serverErrorCode(t, err) != server.ErrorInvalidRequest {
+					t.Errorf("a sub never given: %v, want invalid_request", err)
+				}
+			}
+			if _, err := h.server.ResolveClientSubject(context.Background(), "unknown-client", sub); serverErrorCode(t, err) != server.ErrorInvalidClient {
+				t.Errorf("an unknown client: %v, want invalid_client", err)
+			}
+		})
+	}
+}

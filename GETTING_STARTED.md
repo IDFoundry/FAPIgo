@@ -663,7 +663,12 @@ that takes an `id_token_hint`, such as an RP-Initiated Logout endpoint,
 `Server.VerifyIDTokenHint` checks that the hint is an ID token this
 server issued to the requesting client and returns its subject. It
 accepts an expired hint, as OpenID Connect requires, so the subject says
-whose session to act on, never that anyone is logged in now.
+whose session to act on, never that anyone is logged in now. For a
+pairwise client that subject is the client's pairwise `sub`:
+`Server.ResolveIDTokenHint` maps it to the user's internal subject (and
+`Server.ResolveClientSubject` does the same for a `sub` sent any other
+way, such as a `login_hint`), wherever the server can map pairwise subs
+back; otherwise compare a user you know with `Server.ClientSubject`.
 
 ## 7. Wire the resource server: verifying access tokens
 

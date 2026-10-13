@@ -74,7 +74,12 @@ var errReversibleOps = errors.New("pairwise: reversible key operation failed")
 // never releases them. NewReversibleWith builds the Deriver on them, and
 // produces exactly the bodies NewReversible would from the same two
 // keys. Both are called once per derivation and once per lookup, with
-// the context of the request that needs them.
+// the context of the request that needs them, and may be called
+// concurrently.
+//
+// Neither may retain or modify the slices it is passed. The deriver
+// copies what each returns before using it, so an implementation may
+// reuse its own output buffer once the call has returned.
 type ReversibleOps interface {
 	// MAC returns HMAC-SHA-256 of data under the MAC key: the full
 	// 32-byte output, which the construction truncates itself. PKCS#11:
@@ -316,7 +321,9 @@ func (d reversibleDeriver) ctr(ctx context.Context, iv, src []byte) ([]byte, err
 	if len(out) != len(src) {
 		return nil, fmt.Errorf("%w: AES-CTR returned %d bytes, want %d", errReversibleOps, len(out), len(src))
 	}
-	return out, nil
+	// A copy, so the plaintext a lookup authenticates is the one it then
+	// parses, even if ops reuses its output buffer for another call.
+	return bytes.Clone(out), nil
 }
 
 // reversiblePlaintext lays subject out as the fixed-size plaintext: its

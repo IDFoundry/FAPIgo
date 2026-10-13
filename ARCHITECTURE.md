@@ -851,7 +851,10 @@ sees:
   refreshes and CIBA polls reuse it rather than re-deriving, so a later
   sector change doesn't change an existing grant's `sub`. A prefix
   change does end the grant (`invalid_grant`), since resource servers
-  resolve a `sub` under the current prefix.
+  resolve a `sub` under the current prefix. With an empty prefix,
+  signed UserInfo checks a pairwise `sub` by mapping it back under the
+  client's current sector, so it fails closed for grants issued before
+  a sector change.
 - **Outbound.** ID tokens, access tokens (with the sector in
   `pairwise_sector`) and signed UserInfo carry the client's `sub`. Records, audit events and the application's own
   interaction APIs keep the internal subject.
@@ -893,10 +896,12 @@ expectations differ per role.
 **Current results.** `conformance/scripts/run-all.sh` runs 24 test
 configurations, and the daily `conformance.yml` run executes all of
 them. The 24th, AS pairwise (added for v0.55.0), runs the baseline plan
-against an AS that gives every client pairwise subject identifiers. As of the 2026-10-05 run (v0.50.0), all 14 AS configurations (baseline,
+against an AS that gives every client pairwise subject identifiers. As
+of the 2026-10-13 run (v0.55.0), all 15 AS configurations (baseline,
 message-signing, mtls, message-signing-mtls, client-auth-mtls,
-client-auth-mtls-and-mtls, four CIBA poll/ping variants, and four
-client-credentials variants) pass with 0 failures and 0 warnings; all 6
+client-auth-mtls-and-mtls, four CIBA poll/ping variants, four
+client-credentials variants, and pairwise) pass with 0 failures and 0
+warnings; all 6
 FAPI RP configurations pass every module; the federation RP plan passes
 6/10, exactly matching its list of known suite-side failures; and the
 federation deployed-entity plan passes 5/5 against both the

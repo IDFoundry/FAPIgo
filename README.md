@@ -47,6 +47,7 @@ variants and OAuth 2.0 attestation-based client authentication.
 - JAR / JARM · RAR (RFC 9396) · CIBA (poll & ping delivery)
 - Refresh tokens (not rotated, per FAPI 2.0), whole-grant revocation, and refresh-token revocation (RFC 7009)
 - OpenID Connect: the `claims` parameter with per-claim consent, `acr_values`, enforced `max_age` and `prompt` (`none` answered without UI, `login` enforced), signed and encrypted ID tokens and UserInfo
+- Pairwise subject identifiers (OpenID Connect Core §8): per client or server-wide, from a reversible deriver (keys in memory, or in an HSM or KMS), a mapping store or a one-way HMAC; resource servers inside the OpenID Provider map them back, and ones outside it never need to
 - Native apps (RFC 8252): private-use URI scheme and any-port loopback redirect URIs, for clients registered as native
 - Grants you serve yourself at the token endpoint (OpenID4VCI's `pre-authorized_code`, say), with the server's own attestation-based client authentication and DPoP/mTLS checks
 - OpenID Federation 1.0 (trust chains, automatic client registration, trust marks)

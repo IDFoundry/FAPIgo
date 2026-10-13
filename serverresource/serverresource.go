@@ -12,6 +12,12 @@
 // store, the clock and the DPoP limits from the server's own, so they
 // always match.
 //
+// For a server issuing pairwise subjects, NewVerifier also takes the
+// server's means of mapping a pairwise sub back (a reversible deriver
+// with the server's prefix, or a declared resolver), so the verifier's
+// AuthorizationContext.InternalSubject is the user's internal subject
+// and ClientSubject the sub the client knows.
+//
 // It is only for a verifier sharing the server's process and stores. A
 // resource server deployed separately builds its resource.Verifier
 // directly, against backends shared with the authorization server.

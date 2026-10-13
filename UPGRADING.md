@@ -82,6 +82,44 @@ message or a log the client can read. Use `ClientSubject` there. For a
 client with pairwise subjects, `InternalSubject` is exactly what its
 `sub` hides.
 
+### A federation Relying Party's `subject_type` is honoured or refused (federation, server)
+
+**Affects:** a server with `Config.AutomaticRegistration`, and code
+building `federation.AutomaticClientRepository` itself.
+
+**Why:** an automatically registered Relying Party's `subject_type`
+metadata (OpenID Connect Dynamic Client Registration 1.0 §2) used to be
+ignored, so one asking for pairwise subjects silently got public ones,
+the identifier it asked not to be given. Now the client gets the
+`subject_type` it names, or the server's default when it names none,
+and a Relying Party asking for a type the server doesn't issue isn't
+registered: it gets `invalid_client`, and
+`AutomaticRegistration.OnResolutionFailure` hears
+`subject_type pairwise is not one this OP issues`. A pairwise Relying
+Party's sector is its Entity Identifier's host, which the Trust Chain
+binds to it: its redirect URIs must all be https on that host (so it
+can't name another Relying Party's host and receive that Relying
+Party's sub values), and it must not publish `sector_identifier_uri`,
+which this release doesn't fetch (nor may a superior's metadata policy
+add one). Relying Parties whose Entity Identifiers share a host share a
+sector, and so each user's `sub`.
+
+**What to change:** nothing, unless a Relying Party you federate with
+asks for `"subject_type": "pairwise"` while your server issues only
+public subjects: it now fails to register until the server can issue
+pairwise subjects. `server.New` sets the new
+`federation.AutomaticRegistrationConfig.SubjectTypes` and
+`DefaultSubjectType` from `Config.Subjects`; code building an
+`AutomaticClientRepository` directly can leave them zero, which means
+public only. Under a pairwise `Config.Subjects.Default`, federation
+Relying Parties are offered pairwise subjects only, so one can't opt
+out of the default by asking for public; list both in
+`Config.AutomaticRegistration.SubjectTypes` to offer public too. That
+setting also narrows what they're offered in other configurations.
+`Server.EntityConfiguration` sets its `openid_provider` metadata's
+`subject_types_supported` to what federation Relying Parties are offered
+(`Server.AutomaticRegistrationSubjectTypes()`).
+
 ### Adopting pairwise subjects (server, resource)
 
 **Affects:** only a deployment that gives some client pairwise
@@ -133,44 +171,13 @@ subjects. Nothing changes for one that keeps `PublicSubjects()`.
 - **Changing `Config.Subjects.Prefix`** later ends every pairwise grant
   the same way, since resource servers resolve a `sub` under the
   current prefix. Choose it once.
-
-### A federation Relying Party's `subject_type` is honoured or refused (federation, server)
-
-**Affects:** a server with `Config.AutomaticRegistration`, and code
-building `federation.AutomaticClientRepository` itself.
-
-**Why:** an automatically registered Relying Party's `subject_type`
-metadata (OpenID Connect Dynamic Client Registration 1.0 §2) used to be
-ignored, so one asking for pairwise subjects silently got public ones,
-the identifier it asked not to be given. Now the client gets the
-`subject_type` it names, or the server's default when it names none,
-and a Relying Party asking for a type the server doesn't issue isn't
-registered: it gets `invalid_client`, and
-`AutomaticRegistration.OnResolutionFailure` hears
-`subject_type pairwise is not one this OP issues`. A pairwise Relying
-Party's sector is its Entity Identifier's host, which the Trust Chain
-binds to it: its redirect URIs must all be https on that host (so it
-can't name another Relying Party's host and receive that Relying
-Party's sub values), and it must not publish `sector_identifier_uri`,
-which this release doesn't fetch (nor may a superior's metadata policy
-add one). Relying Parties whose Entity Identifiers share a host share a
-sector, and so each user's `sub`.
-
-**What to change:** nothing, unless a Relying Party you federate with
-asks for `"subject_type": "pairwise"` while your server issues only
-public subjects: it now fails to register until the server can issue
-pairwise subjects. `server.New` sets the new
-`federation.AutomaticRegistrationConfig.SubjectTypes` and
-`DefaultSubjectType` from `Config.Subjects`; code building an
-`AutomaticClientRepository` directly can leave them zero, which means
-public only. Under a pairwise `Config.Subjects.Default`, federation
-Relying Parties are offered pairwise subjects only, so one can't opt
-out of the default by asking for public; list both in
-`Config.AutomaticRegistration.SubjectTypes` to offer public too. That
-setting also narrows what they're offered in other configurations.
-`Server.EntityConfiguration` sets its `openid_provider` metadata's
-`subject_types_supported` to what federation Relying Parties are offered
-(`Server.AutomaticRegistrationSubjectTypes()`).
+- **Changing a client's sector** (its `Sector`, or the redirect host it
+  derives one from) gives its users new `sub`s at their next
+  authorization; existing grants keep theirs. With an empty prefix,
+  though, `Server.SignUserInfoResponse` checks a pairwise `sub` by
+  mapping it back under the client's current sector, so signed UserInfo
+  for those existing grants fails with `server_error` until they're
+  reauthorized. Deployments with a prefix aren't affected.
 
 ## v0.54.0
 

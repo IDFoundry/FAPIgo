@@ -186,6 +186,16 @@
 // AutomaticRegistrationConfig.FailureCacheAge (DefaultFailureCacheAge
 // when unset), so a repeating unresolvable client_id doesn't cost a full
 // resolution on every request.
+//
+// An automatically registered Relying Party gets the subject_type its
+// resolved metadata names (OpenID Connect Core §8), or
+// AutomaticRegistrationConfig.DefaultSubjectType when it names none; one
+// asking for a type outside AutomaticRegistrationConfig.SubjectTypes
+// isn't registered. A pairwise Relying Party's sector is its Entity
+// Identifier's host, which the Trust Chain binds to it: its redirect
+// URIs must all be https on that host, and sector_identifier_uri isn't
+// supported.
+//
 // §12.1.1's own aud/sub/jti Request Object rules are enforced by the
 // server package via storage.RegisteredClientConfig's own
 // AutomaticFederationRegistration field, not by this package — a

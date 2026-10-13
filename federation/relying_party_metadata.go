@@ -112,8 +112,13 @@ type OpenIDRelyingPartyMetadata struct {
 	// (fapi.SubjectType's String). Optional: the OP's default otherwise.
 	// An AutomaticClientRepository OP refuses a subject_type outside its
 	// subject_types_supported, and doesn't support sector_identifier_uri
-	// with pairwise: a pairwise RP's redirect URIs must share one https
-	// host, which is its sector.
+	// with pairwise (whether the RP or a superior's metadata policy sets
+	// it): a pairwise RP's sector is its Entity Identifier's host, and
+	// every one of its redirect URIs must be https on that host.
+	// Relying Parties whose Entity Identifiers share a host (path-scoped
+	// tenants of one platform, say) share a sector, and so see the same
+	// sub for a user, as OpenID Connect Core §8.1 has clients on one host
+	// do.
 	SubjectType string `json:"subject_type,omitempty"`
 
 	// ClientName, LogoURI, PolicyURI and TOSURI are what an OP's

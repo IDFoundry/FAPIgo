@@ -182,6 +182,12 @@ type GrantedAuthorization struct {
 	// overrides it: this is the application's own decision at login,
 	// the most specific source of the three. The claims are ignored if
 	// no ID token is issued ("openid" not granted).
+	//
+	// For a client that gets pairwise subs, nothing here may identify the
+	// user beyond the sub the server sets: an account number or the
+	// user's internal subject in a claim would link them across relying
+	// parties as surely as a public sub. ("sub" itself is managed, and
+	// refused.)
 	IDTokenClaims map[string]json.RawMessage
 
 	// GrantID, if set, names this grant so the application can revoke it
@@ -198,7 +204,10 @@ type GrantedAuthorization struct {
 	// this ID, so the application can delete what it kept for the grant
 	// at once. The ID is
 	// carried in every access token from the grant (as "grant_id"),
-	// so it mustn't be personal data. 1 to 128 characters from A-Z,
+	// readable by the client in a self-contained one, so it mustn't be
+	// personal data, or derived from the user's internal subject: for a
+	// pairwise client that would undo its pairwise sub. Use a random
+	// value. 1 to 128 characters from A-Z,
 	// a-z, 0-9, '.', '_', '~' and '-'. Empty leaves the grant revocable
 	// only token by token.
 	//

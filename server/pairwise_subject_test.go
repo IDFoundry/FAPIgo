@@ -340,7 +340,7 @@ func forgetClientSubject(t *testing.T, h harness) {
 // TestPairwiseRequiredSubject covers OIDC Core §5.5.1 for a pairwise
 // client: its id_token_hint or "sub" value names the user by the
 // pairwise sub it was given, and only that user may complete. Under
-// pairwise.OneWay the interaction shows that sub (compare it with
+// a one-way deriver the interaction shows that sub (compare it with
 // ClientSubject); with a lookup, the user's own subject.
 func TestPairwiseRequiredSubject(t *testing.T) {
 	for _, tc := range []struct {
@@ -409,7 +409,7 @@ func pushPAR(t *testing.T, h harness, extra map[string]string) error {
 // TestPairwiseCIBA covers the CIBA flow for a pairwise client: the ID
 // token carries the pairwise sub; an id_token_hint can identify the user
 // only when the server can map pairwise subs back, and is invalid_request
-// under pairwise.OneWay; a "claims" sub value is enforced either way.
+// with a one-way deriver; a "claims" sub value is enforced either way.
 func TestPairwiseCIBA(t *testing.T) {
 	t.Run("ID token sub", func(t *testing.T) {
 		h := cibaWithPairwise(t, hmacDeriver(t))
@@ -776,8 +776,8 @@ func TestSignUserInfoResponseRefusesInternalSubForPairwiseClient(t *testing.T) {
 	}
 }
 
-// TestPairwiseCIBAOneWayResolverResolvesIDTokenHint: under
-// pairwise.OneWay, an id_token_hint from a pairwise CIBA client is
+// TestPairwiseCIBAOneWayResolverResolvesIDTokenHint: with
+// a one-way deriver, an id_token_hint from a pairwise CIBA client is
 // refused only when nothing can map its sub back. With a declared
 // Dependencies.PairwiseSubjectResolver the hint resolves to its user,
 // and a sub the resolver doesn't know is still invalid_request.

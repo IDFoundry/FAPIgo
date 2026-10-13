@@ -19,7 +19,7 @@ import (
 	"github.com/idfoundry/fapigo/storage/memstore"
 )
 
-// opaqueAccessTokens is the access token issuer pairwise.OneWay
+// opaqueAccessTokens is the access token issuer a one-way deriver
 // requires: the internal subject stays in its server-side records.
 func opaqueAccessTokens() server.OpaqueAccessTokens {
 	return server.OpaqueAccessTokens{Store: memstore.NewAccessTokenStore()}

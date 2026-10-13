@@ -97,6 +97,14 @@ func isHostByte(c byte) bool {
 // there; CIBA and embedder grants deliver tokens without any redirect,
 // so such a client could name another client's host in its redirect URIs
 // and receive that client's pairwise sub values.
+//
+// This departs from CIBA Core 1.0's "Poll and Ping Modes with Pairwise
+// Identifiers", which has the OP take a CIBA client's sector from the
+// host of its jwks_uri (or a sector_identifier_uri listing it), proven
+// by the client's key. Clients here are registered by the operator, not
+// dynamically, so the operator states the sector instead: set Sector to
+// that host for a client whose sub must match what a spec-following OP
+// would give it.
 func derivedSector(cfg RegisteredClientConfig) string {
 	if cfg.ApplicationType != ApplicationTypeWeb || len(cfg.RedirectURIs) == 0 || cfg.BackchannelAuthenticationRequestAlgorithm != 0 || mayUseAttestation(cfg) {
 		return ""

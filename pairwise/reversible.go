@@ -128,7 +128,10 @@ type ReversibleOps interface {
 // Anyone holding both keys can map every pairwise sub this deployment
 // has ever issued, at every client, back to its end user: a leak of the
 // keys de-anonymises them all at once, and every resource server given
-// the keys to resolve subs shares that risk. The keys can't be rotated
+// the keys to resolve subs shares that risk. Give them only to the OP's
+// own resource servers: OpenID Connect Core §8.1 requires that a
+// pairwise identifier "MUST NOT be reversible by any party other than
+// the OpenID Provider". The keys can't be rotated
 // without giving every user a new sub at every pairwise client. Keep
 // them, and back them up, like signing keys. Where unlinkability matters
 // more than reversibility, use NewHMAC; where no key should be able to

@@ -146,7 +146,7 @@ func reversiblePairwise(t *testing.T) pairwise.Deriver {
 	return d
 }
 
-// TestPairwiseJWTAccessTokens: under pairwise.Reversible (both the
+// TestPairwiseJWTAccessTokens: with a reversible deriver (both the
 // mapping and the encrypting deriver) a JWT access token's sub is the
 // client's pairwise sub, with the sector it was derived for, and never
 // the internal subject; a resource server looks it up to the internal
@@ -216,7 +216,7 @@ func assertResolvesTo(t *testing.T, verifier *resource.Verifier, key *ecdsa.Priv
 	}
 }
 
-// TestPairwiseOpaqueAccessTokens: under pairwise.OneWay the access token
+// TestPairwiseOpaqueAccessTokens: with a one-way deriver the access token
 // is a server-side record keeping the internal subject, with the
 // client's pairwise sub beside it, and a resource server gets both
 // without a lookup. A refresh issues the same.
@@ -263,7 +263,7 @@ func TestPublicAccessTokenClientSubject(t *testing.T) {
 	}
 }
 
-// TestPairwiseOneWayJWTAccessTokensWithAResolver: under pairwise.OneWay a
+// TestPairwiseOneWayJWTAccessTokensWithAResolver: with a one-way deriver a
 // declared resolver lets JWT access tokens carry the pairwise sub, which
 // a resource server maps back through the embedder's own mapping — and
 // can't without it.

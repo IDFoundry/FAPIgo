@@ -96,10 +96,13 @@ leave `Subjects` zero, which means public.
 
 A pairwise `sub` differs per sector of clients (the host of a client's
 redirect URIs, or its registered `Sector`), so clients in different
-sectors can't correlate a user by it. A client permitted CIBA, a native
-client, and one whose redirect URIs span several hosts need an explicit
-`Sector`; an OpenID Federation Relying Party's is its Entity
-Identifier's host. Every token and response a
+sectors can't correlate a user by it. A client permitted CIBA, one that
+may authenticate by attestation, a native client, and one whose
+redirect URIs span several hosts need an explicit `Sector`, a host name
+you set at registration (never one the client supplies); an OpenID
+Federation Relying Party's is its Entity Identifier's host. A pairwise
+client without one is refused at its pushed authorization or
+backchannel authentication request, before its user signs in. Every token and response a
 pairwise client gets carries it: ID tokens, access tokens and UserInfo.
 The server's own records, audit events and your login page keep the
 user's internal subject.
@@ -121,8 +124,8 @@ if err != nil {
 	log.Fatal(err)
 }
 cfg.Subjects = server.SubjectConfig{
-	Default:     fapi.SubjectTypePairwise, // or Public, with pairwise clients by registration
-	Enforcement: server.SubjectTypesPerClient,
+	Default:     fapi.SubjectTypePairwise,
+	Enforcement: server.SubjectTypesPairwiseOnly, // every client, whatever it registered
 	Prefix:      prefix,
 }
 deps.PairwiseSubjects = pairwiseSubjects
@@ -131,11 +134,14 @@ deps.PairwiseSubjects = pairwiseSubjects
 Choose how a `sub` is derived before the first pairwise client goes
 live: changing the deriver, its key or store, the prefix, or a client's
 sector gives users new `sub`s at those clients, which relying parties
-see as new accounts.
+see as new accounts. Existing grants keep the `sub` they were issued
+with, except that changing the prefix ends every pairwise grant at its
+next use (`invalid_grant`), since resource servers resolve `sub`s under
+the current prefix.
 
 To keep public `sub`s for relying parties already integrated while
 giving every new one pairwise `sub`s, use a pairwise `Default` with
-`SubjectTypesPerClient` (as above), and register each legacy client
+`SubjectTypesPerClient` instead, and register each legacy client
 with `SubjectType: fapi.SubjectTypePublic`; a client registered without
 a `SubjectType` gets the pairwise default. Relying parties registering
 automatically through OpenID Federation are offered pairwise alone
@@ -230,8 +236,8 @@ shouldn't be able to reverse a `sub` offline. Otherwise prefer
 `NewMapping` (no such key, but a durable shared store).
 
 Under `AssuranceProduction` the deriver must declare durable custody
-(`keys.DeclareCustody` for `NewReversible`, `NewReversibleWith` and
-`NewHMAC`; a `storage.StoreAssurance` store for `NewMapping`), since
+(`keys.DeclareCustody` for `NewReversible`, `NewReversibleWith`,
+`NewHMAC` and `NewHMACWith`; a `storage.StoreAssurance` store for `NewMapping`), since
 every restart and every instance must give a user the same `sub`.
 
 #### Keeping the reversible keys in an HSM or KMS

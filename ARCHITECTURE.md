@@ -818,6 +818,57 @@ method to call. Before this, an adapter had to reach into
 itself, one more manual step rule 16 exists specifically to avoid
 leaving to the embedding application.
 
+### 17. One internal subject in, one sub per client out
+
+The application authenticates a user and hands the server their
+internal subject (`server.SubjectID`); it never computes a client's
+`sub` itself. The server decides, per client, which `sub` that client
+sees:
+
+- **Type.** `Config.Subjects` (`Default`, `Enforcement`) and the
+  client's registered `SubjectType` give public or pairwise
+  (`Server.subjectTypeFor`). An automatically registered federation
+  Relying Party is offered what `Config.AutomaticRegistration.SubjectTypes`
+  allows, pairwise alone under a pairwise default, and
+  `Server.EntityConfiguration` advertises that.
+- **Sector.** A pairwise client's sector is its operator-set
+  `Sector`, or the single https host of a web client's redirect URIs.
+  None is derived for a client permitted CIBA or attestation, whose
+  tokens arrive without a redirect proving that host is theirs; a
+  federation Relying Party's is its Entity Identifier's host. A
+  pairwise client with no sector is refused at PAR and the backchannel
+  authentication endpoint, before its user signs in.
+- **Derivation.** `pairwise.Deriver` turns (issuer, sector, internal
+  subject) into an opaque body, and the server prepends
+  `Config.Subjects.Prefix`. Whether a body can be mapped back is
+  whether the deriver implements `pairwise.Lookup`, never a separate
+  setting, so configuration can't claim more unlinkability than the
+  deriver gives. `server.New` probes the deriver (deterministic, varies
+  by sector and by user, no internal subject in the body) and refuses
+  one that fails.
+- **Continuity.** The grant stores the `sub` it was issued with
+  (`ClientSubject`), with the sector and prefix it was derived under;
+  refreshes and CIBA polls reuse it rather than re-deriving, so a later
+  sector change doesn't change an existing grant's `sub`. A prefix
+  change does end the grant (`invalid_grant`), since resource servers
+  resolve a `sub` under the current prefix.
+- **Outbound.** ID tokens, access tokens (with the sector in
+  `pairwise_sector`) and signed UserInfo carry the client's `sub`. Records, audit events and the application's own
+  interaction APIs keep the internal subject.
+- **Inbound.** A client's `id_token_hint` or `claims` `sub` is mapped
+  back to the internal subject through `Lookup` (or a declared
+  `PairwiseSubjectResolver`) under that client's sector; with nothing
+  to map it, the interaction carries the client's `sub` for the
+  application to compare with `Server.ClientSubject` (a CIBA
+  `id_token_hint`, which must identify the user, is refused). A `login_hint`
+  is the application's to interpret, with `Server.ResolveClientSubject`
+  and `Server.ClientSubject` for one carrying a `sub`.
+
+Whatever maps a `sub` back (the reversible deriver's keys, the mapping
+store, a resolver) belongs only to the OP and its own resource servers:
+OpenID Connect Core §8.1 forbids a pairwise identifier being reversible
+by anyone else.
+
 ### Conformance strategy
 
 Certification is tracked separately per role under `conformance/`. The

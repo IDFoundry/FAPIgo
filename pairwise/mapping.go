@@ -27,7 +27,9 @@ const mappingBodyBytes = 32
 // maps it back through Lookup: the mapping-table alternative to NewHMAC
 // and a reversible deriver. No key exists whose loss would let anyone
 // compute or reverse identifiers; the store is what must be protected
-// and kept. Its body is 43 characters: 256 random bits, base64url.
+// and kept, and only the OP and its own resource servers may read it
+// (OpenID Connect Core §8.1: a pairwise identifier "MUST NOT be
+// reversible by any party other than the OpenID Provider"). Its body is 43 characters: 256 random bits, base64url.
 //
 // The first body stored for an input is its body from then on, on every
 // instance sharing store (PairwiseSubjectStore.GetOrCreate is atomic).

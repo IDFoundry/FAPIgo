@@ -49,9 +49,10 @@ subjects (a pairwise `Default`, or a client's `SubjectType` and
 subjects"). A client registered with `SubjectType:
 fapi.SubjectTypePairwise` must have a sector, set or derived from its
 redirect URIs, or `storage.NewRegisteredClient` refuses it. A client
-permitted CIBA derives none: CIBA delivers tokens without a redirect
-proving the client is served on its redirect URIs' host, so a pairwise
-CIBA client sets `Sector` itself.
+permitted CIBA, or one that may authenticate by attestation, derives
+none: its tokens arrive without a redirect proving the client is served
+on its redirect URIs' host, so such a pairwise client sets `Sector` (a
+host name, which you set; never take it from the client) itself.
 
 ### Adopting pairwise subjects (server, resource)
 
@@ -94,6 +95,9 @@ subjects. Nothing changes for one that keeps `PublicSubjects()`.
   authorizes again, now with a pairwise `sub`. A grant keeps the `sub`
   it was issued with, so it can't move to a pairwise one in place.
   Under `SubjectTypesPerClient`, existing grants keep their `sub`.
+- **Changing `Config.Subjects.Prefix`** later ends every pairwise grant
+  the same way, since resource servers resolve a `sub` under the
+  current prefix. Choose it once.
 
 ### A federation Relying Party's `subject_type` is honoured or refused (federation, server)
 
@@ -113,7 +117,9 @@ Party's sector is its Entity Identifier's host, which the Trust Chain
 binds to it: its redirect URIs must all be https on that host (so it
 can't name another Relying Party's host and receive that Relying
 Party's sub values), and it must not publish `sector_identifier_uri`,
-which this release doesn't fetch.
+which this release doesn't fetch (nor may a superior's metadata policy
+add one). Relying Parties whose Entity Identifiers share a host share a
+sector, and so each user's `sub`.
 
 **What to change:** nothing, unless a Relying Party you federate with
 asks for `"subject_type": "pairwise"` while your server issues only

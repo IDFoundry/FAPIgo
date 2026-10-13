@@ -20,7 +20,11 @@
 // bodies back, which is the strongest unlinkability. Whether subs can
 // be mapped back is never configured separately: it is whether the
 // Deriver implements Lookup, so the configuration can't claim more
-// unlinkability than the Deriver gives. The package imports neither
+// unlinkability than the Deriver gives. Whatever reverses a sub (the
+// reversible keys, the mapping store, a SubjectResolver) belongs only to
+// the OP and its own resource servers: OpenID Connect Core §8.1 requires
+// that a pairwise identifier not be reversible by any other party. The
+// package imports neither
 // server nor resource, so both can use the same deriver without one
 // importing the other.
 package pairwise

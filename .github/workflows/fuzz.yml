@@ -177,6 +177,8 @@ jobs:
             name: FuzzReversibleTamper
           - pkg: ./pairwise
             name: FuzzReversibleLookupArbitrary
+          - pkg: ./pairwise
+            name: FuzzReversibleWithRoundTrip
           - pkg: ./storage
             name: FuzzDerivedSector
     steps:

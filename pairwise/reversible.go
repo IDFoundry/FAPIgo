@@ -95,6 +95,12 @@ var ErrSubjectTooLong = fmt.Errorf("pairwise: reversible derivation holds intern
 // more than reversibility, use NewHMAC; where no key should be able to
 // reverse a sub, use NewMapping.
 //
+// The keys are used in this process's memory: the construction needs
+// raw AES-CTR, which not every KMS offers, and a resource server resolves
+// a sub on every request it verifies. Keep them wrapped by a KMS or HSM
+// (envelope encryption): store only their ciphertext and have the KMS
+// decrypt them once at startup, wherever NewReversible is called.
+//
 // Internal subjects longer than MaxReversibleSubjectLength bytes are
 // refused with ErrSubjectTooLong. opts declare the keys' custody, as
 // for NewHMAC: server.AssuranceProduction requires a Durable one (and

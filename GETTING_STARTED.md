@@ -140,6 +140,14 @@ see as new accounts.
     (`pairwise.MaxReversibleSubjectLength`); `server.NewSubjectID`
     accepts up to 255, so a longer subject fails with `server_error`
     when its user signs in to a pairwise client.
+
+    The keys are used in process memory, so keep them wrapped by your
+    KMS or HSM (envelope encryption): store only their ciphertext, and
+    have the KMS decrypt them once at startup, on the server and on
+    every resource server that resolves `sub`s. They can't stay inside
+    a KMS: not every KMS offers the raw AES-CTR the construction uses,
+    and a resource server would otherwise need a KMS call for every API
+    request it verifies.
   - **`pairwise.NewMapping`** keeps a random `sub` per user and sector
     in a `storage.PairwiseSubjectStore`, so there's no key whose leak
     reverses them all, at the cost of a durable, shared store.

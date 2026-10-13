@@ -844,3 +844,22 @@ func TestSignUserInfoResponseChecksPairwiseSubShape(t *testing.T) {
 		t.Error("a public client under SubjectTypesPairwiseOnly was signed for, want it refused")
 	}
 }
+
+// TestPairwiseExplicitSectorMatchesDerived: a Sector set as "RP.example"
+// names the same host a client with redirect URIs at rp.example derives,
+// so both clients' users get the same pairwise sub, as OpenID Connect
+// Core §8.1 makes one sector one sub.
+func TestPairwiseExplicitSectorMatchesDerived(t *testing.T) {
+	h := withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), hmacDeriver(t))
+	upper := pairwiseClient(false)
+	upper.ID = "upper-sector-client"
+	upper.Sector = "RP.example"
+	register(t, h, upper)
+	explicit, err := h.server.ClientSubject(context.Background(), upper.ID, mustAuthenticated(t, "user-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if derived := clientSubjectOf(t, h, "user-1"); explicit != derived {
+		t.Errorf("Sector RP.example gives %q, the derived rp.example %q; want the same sub", explicit, derived)
+	}
+}

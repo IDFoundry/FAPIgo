@@ -116,13 +116,37 @@ func TestPairwiseClientNeedsASector(t *testing.T) {
 }
 
 func TestClientSectorValidation(t *testing.T) {
-	for _, bad := range []string{"has space", "tab\t", "ünicode", strings.Repeat("a", 256), "nul\x00"} {
+	for _, bad := range []string{
+		"has space", "tab\t", "ünicode", strings.Repeat("a", 256), "nul\x00",
+		"https://rp.example", "rp.example/cb", "rp.example:8443", "user@rp.example",
+		"rp.example?x", "rp.example#x", "[::1]", ".rp.example", "rp.example.", "rp..example", ".",
+	} {
 		if _, err := subjectClient(t, func(cfg *RegisteredClientConfig) { cfg.Sector = bad }); err == nil {
 			t.Errorf("Sector %.20q was accepted", bad)
 		}
 	}
 	if _, err := subjectClient(t, func(cfg *RegisteredClientConfig) { cfg.Sector = strings.Repeat("a", 255) }); err != nil {
 		t.Errorf("a 255-byte sector: %v", err)
+	}
+}
+
+// TestClientSectorIsLowercased: a set Sector names a host, so it is
+// lowercased like a derived one, and "RP.example" is the same sector as
+// the "rp.example" a client with redirect URIs there derives.
+func TestClientSectorIsLowercased(t *testing.T) {
+	for _, set := range []string{"RP.example", "rp.EXAMPLE", "Rp.Example"} {
+		c, err := subjectClient(t, func(cfg *RegisteredClientConfig) { cfg.Sector = set })
+		if err != nil {
+			t.Fatalf("Sector %q: %v", set, err)
+		}
+		if got := c.Sector(); got != "rp.example" {
+			t.Errorf("Sector %q gives sector %q, want rp.example", set, got)
+		}
+	}
+	for _, ok := range []string{"192.0.2.1", "my_rp.example", "xn--bcher-kva.example", "rp-1.example"} {
+		if _, err := subjectClient(t, func(cfg *RegisteredClientConfig) { cfg.Sector = ok }); err != nil {
+			t.Errorf("Sector %q: %v", ok, err)
+		}
 	}
 }
 

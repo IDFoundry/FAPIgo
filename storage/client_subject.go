@@ -3,6 +3,7 @@ package storage
 import (
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -43,6 +44,7 @@ func clientSector(cfg RegisteredClientConfig) (string, error) {
 		if err := checkSector(sector); err != nil {
 			return "", fmt.Errorf("storage: client %q: %w", cfg.ID, err)
 		}
+		sector = strings.ToLower(sector)
 	} else {
 		sector = derivedSector(cfg)
 	}
@@ -52,18 +54,32 @@ func clientSector(cfg RegisteredClientConfig) (string, error) {
 	return sector, nil
 }
 
-// checkSector refuses a set Sector that is too long or holds a byte
-// outside printable ASCII without the space.
+// checkSector refuses a set Sector that isn't a host name, as OpenID
+// Connect Core §8.1's sector is ("the host component"): too long, or
+// with a byte other than an ASCII letter, digit, '-', '.' or '_' (so no
+// scheme, port, path, user info, query or fragment, which would make
+// "https://rp.example/x" a different sector from "rp.example"), or with
+// an empty label. clientSector then lowercases it, as a derived sector
+// is, so "RP.example" and "rp.example" are one sector.
 func checkSector(sector string) error {
 	if len(sector) > maxSectorLength {
 		return fmt.Errorf("sector is %d bytes, more than %d", len(sector), maxSectorLength)
 	}
 	for i := range len(sector) {
-		if c := sector[i]; c < 0x21 || c > 0x7e {
-			return fmt.Errorf("sector has a byte (0x%02x at %d) that isn't printable ASCII", c, i)
+		if c := sector[i]; !isHostByte(c) {
+			return fmt.Errorf("sector has a byte (%q at %d) that can't be in a host name: set the host alone, such as \"rp.example\"", c, i)
 		}
 	}
+	if slices.Contains(strings.Split(sector, "."), "") {
+		return fmt.Errorf("sector %q has an empty label: set a host name, such as \"rp.example\"", sector)
+	}
 	return nil
+}
+
+// isHostByte reports whether c can appear in a host name a Sector names:
+// an ASCII letter, digit, '-', '.' or '_'.
+func isHostByte(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '.' || c == '_'
 }
 
 // derivedSector returns the host every redirect URI of a web client

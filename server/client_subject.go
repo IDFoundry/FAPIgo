@@ -146,6 +146,30 @@ func (s *Server) clientSubjectFor(ctx context.Context, client storage.Registered
 	return sub, sector, nil
 }
 
+// checkClientSubjectIssuable refuses, before any user interaction (at
+// PAR and at the backchannel authentication endpoint), a client this
+// server couldn't give a sub at completion: one registered as public at a
+// server that issues only pairwise subs, or one that gets pairwise subs
+// with no sector to derive them for (a native client, one permitted
+// CIBA or attestation, or one with redirect URIs on several hosts, that
+// inherits a pairwise default without setting Sector). Otherwise its
+// user would log in and consent, only for completion to fail.
+func (s *Server) checkClientSubjectIssuable(client storage.RegisteredClient) *Error {
+	subjectType, typeErr := s.subjectTypeFor(client)
+	if typeErr != nil {
+		return typeErr
+	}
+	switch {
+	case subjectType != fapi.SubjectTypePairwise:
+		return nil
+	case s.deps.PairwiseSubjects == nil:
+		return newError(ErrorServerError, 500, "the client is registered for pairwise subjects, but dependencies.pairwise_subjects is nil", nil)
+	case client.Sector() == "":
+		return newError(ErrorServerError, 500, "the client gets pairwise subjects but has no sector to derive them for (set its Sector)", nil)
+	}
+	return nil
+}
+
 // ErrNoPairwiseSubjectLookup reports that this server can't map a
 // client's pairwise sub back to its end user: Dependencies.PairwiseSubjects
 // is one-way (doesn't implement pairwise.Lookup, as pairwise.NewHMAC's

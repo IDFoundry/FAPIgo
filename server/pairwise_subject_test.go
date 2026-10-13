@@ -487,31 +487,36 @@ func approveBackchannelAs(t *testing.T, h harness, required server.BackchannelIn
 }
 
 // TestPairwiseSubjectFailsClosed: a pairwise client whose sub can't be
-// derived gets no code, never one for the internal subject: a deriver
-// failing, a pairwise-only server with a client registered public, and a
-// pairwise client of a server without a deriver.
+// derived gets no code, never one for the internal subject. A
+// pairwise-only server with a client registered public, and a pairwise
+// client of a server without a deriver, are refused at PAR, before the
+// user logs in; a deriver failing, or a client changed after its
+// request was pushed, fails at completion.
 func TestPairwiseSubjectFailsClosed(t *testing.T) {
 	t.Run("deriver fails", func(t *testing.T) {
 		h := withPairwise(t, newHarness(t, server.ProfileFAPISecurity, true), pairwiseClient(false), failingDeriver{hmacDeriver(t)})
 		assertCompletionServerError(t, h)
 	})
 	t.Run("public client under pairwise only", func(t *testing.T) {
-		h := newHarness(t, server.ProfileFAPISecurity, true)
+		h := pairwiseOnlyHarness(t)
 		public := pairwiseClient(false)
 		public.SubjectType = fapi.SubjectTypePublic
 		register(t, h, public)
-		h.cfg.Subjects = server.SubjectConfig{
-			Default: fapi.SubjectTypePairwise, Enforcement: server.SubjectTypesPairwiseOnly,
-			Prefix: mustPrefix(t, testPairwisePrefix),
-		}
-		h.deps.PairwiseSubjects = hmacDeriver(t)
-		h.deps.AccessTokens = server.OpaqueAccessTokens{Store: memstore.NewAccessTokenStore()}
-		srv, err := server.New(h.cfg, h.deps)
+		assertPARServerError(t, h)
+	})
+	t.Run("client turned public after its request", func(t *testing.T) {
+		h := pairwiseOnlyHarness(t)
+		required := interactionFor(t, h, nil)
+		public := pairwiseClient(false)
+		public.SubjectType = fapi.SubjectTypePublic
+		register(t, h, public)
+		completed, err := h.server.CompleteAuthorization(context.Background(), server.CompleteAuthorizationRequest{Handle: required.Handle, Result: authorizedAs(t, h, "user-1")})
 		if err != nil {
-			t.Fatalf("New: %v", err)
+			t.Fatalf("CompleteAuthorization: %v", err)
 		}
-		h.server = srv
-		assertCompletionServerError(t, h)
+		if local, ok := completed.(server.AuthorizationLocalError); !ok || local.Error.Code() != server.ErrorServerError {
+			t.Fatalf("result = %#v, want a server_error local error", completed)
+		}
 	})
 	t.Run("no deriver", func(t *testing.T) {
 		h := newHarness(t, server.ProfileFAPISecurity, true)
@@ -521,8 +526,40 @@ func TestPairwiseSubjectFailsClosed(t *testing.T) {
 			t.Fatalf("server.New: %v", err)
 		}
 		h.server = srv
-		assertCompletionServerError(t, h)
+		assertPARServerError(t, h)
 	})
+}
+
+// pairwiseOnlyHarness is a harness whose server issues only pairwise
+// subs, with testClientID registered pairwise.
+func pairwiseOnlyHarness(t *testing.T) harness {
+	t.Helper()
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	register(t, h, pairwiseClient(false))
+	h.cfg.Subjects = server.SubjectConfig{
+		Default: fapi.SubjectTypePairwise, Enforcement: server.SubjectTypesPairwiseOnly,
+		Prefix: mustPrefix(t, testPairwisePrefix),
+	}
+	h.deps.PairwiseSubjects = hmacDeriver(t)
+	h.deps.AccessTokens = server.OpaqueAccessTokens{Store: memstore.NewAccessTokenStore()}
+	srv, err := server.New(h.cfg, h.deps)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	h.server = srv
+	return h
+}
+
+// assertPARServerError pushes an authorization request for testClientID
+// and checks it's refused with server_error, before any interaction.
+func assertPARServerError(t *testing.T, h harness) {
+	t.Helper()
+	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: plainFormParameters(t, h.clientAssertion(t), nil)},
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorServerError {
+		t.Fatalf("PushAuthorizationRequest = %v, want server_error", err)
+	}
 }
 
 // failingDeriver derives the fixed input New probes with, and fails for

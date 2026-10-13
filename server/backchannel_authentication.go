@@ -163,6 +163,9 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	if authErr != nil {
 		return s.backchannelBeginFail(ctx, "", authErr), nil
 	}
+	if subjectErr := s.checkClientSubjectIssuable(client); subjectErr != nil {
+		return s.backchannelBeginFail(ctx, client.ID(), subjectErr), nil
+	}
 
 	verified, resolveErr := s.resolveBackchannelAuthenticationParameters(ctx, params, client)
 	if resolveErr != nil {

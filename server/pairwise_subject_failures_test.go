@@ -80,9 +80,10 @@ func TestPairwiseRequiredSubjectPublicClientUnderPairwiseOnly(t *testing.T) {
 }
 
 // TestBackchannelCompletionFailsClosedWithoutClientSubject: a CIBA
-// approval whose client sub can't be worked out (the client is gone, or
-// is pairwise by default with no sector to derive under) is refused with
-// server_error, and the poll gets no tokens.
+// approval whose client sub can't be worked out is refused with
+// server_error, and the poll gets no tokens: the client is gone by
+// completion; or it's pairwise by default with no sector to derive under,
+// which the backchannel authentication endpoint refuses up front.
 func TestBackchannelCompletionFailsClosedWithoutClientSubject(t *testing.T) {
 	t.Run("client no longer registered", func(t *testing.T) {
 		h := cibaWithPairwise(t, hmacDeriver(t))
@@ -108,8 +109,8 @@ func TestBackchannelCompletionFailsClosedWithoutClientSubject(t *testing.T) {
 			t.Fatalf("New: %v", err)
 		}
 		h.server = srv
-		required := beginBackchannel(t, h, standardBackchannelParams(t))
-		assertBackchannelCompletionServerError(t, h, required)
+		// Refused before the user is asked to approve anything.
+		assertBackchannelLocalError(t, h, standardBackchannelParams(t), server.ErrorServerError)
 	})
 }
 

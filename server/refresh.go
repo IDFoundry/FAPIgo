@@ -116,7 +116,7 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 	if scopeErr != nil {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), scopeErr)
 	}
-	if allowedErr := s.checkGrantStillAllowed(client, scope, grant.AuthorizationDetails); allowedErr != nil {
+	if allowedErr := s.checkGrantStillAllowed(client, grant, scope); allowedErr != nil {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), allowedErr)
 	}
 
@@ -227,8 +227,15 @@ func (s *Server) redeemRefreshGrant(ctx context.Context, clientID fapi.ClientID,
 // invalid_scope, and the client can still refresh by asking for a
 // narrower scope that leaves it out. Authorization details have no
 // refresh-time narrowing, so a type the client may no longer request
-// fails with invalid_grant, and the client must authorize again.
-func (s *Server) checkGrantStillAllowed(client storage.RegisteredClient, scope []string, authorizationDetails json.RawMessage) *Error {
+// fails with invalid_grant, and the client must authorize again. So
+// does a grant issued with a public sub at a server that now issues only
+// pairwise ones (see checkGrantSubjectStillIssued). scope is what the
+// request asks for: the grant's own, or a narrower one at refresh.
+func (s *Server) checkGrantStillAllowed(client storage.RegisteredClient, grant grantRecord, scope []string) *Error {
+	if subjectErr := s.checkGrantSubjectStillIssued(grant); subjectErr != nil {
+		return subjectErr
+	}
+	authorizationDetails := grant.AuthorizationDetails
 	for _, sc := range scope {
 		if !s.clientAllowsScope(client, sc) {
 			return newError(ErrorInvalidScope, 400, "the grant includes a scope this client may no longer use", nil)
@@ -255,6 +262,21 @@ func (s *Server) checkGrantStillAllowed(client storage.RegisteredClient, scope [
 	return nil
 }
 
+// checkGrantSubjectStillIssued refuses a grant made while its client got
+// public subs, now that this server issues only pairwise ones
+// (SubjectTypesPairwiseOnly, which promises every client pairwise subs):
+// its tokens would otherwise keep carrying the user's internal subject.
+// A grant keeps the sub it was issued with (OpenID Connect Core §12.2),
+// so such a grant can't be moved to a pairwise one; the client
+// authorizes again instead. Under SubjectTypesPerClient a grant keeps its
+// sub whatever the client's type has since become.
+func (s *Server) checkGrantSubjectStillIssued(grant grantRecord) *Error {
+	if grant.ClientSubject != "" || effectiveSubjects(s.cfg).Enforcement != SubjectTypesPairwiseOnly {
+		return nil
+	}
+	return newError(ErrorInvalidGrant, 400, "the grant was issued with a public sub, and this server now issues only pairwise subs", nil)
+}
+
 // checkGrantUsable is checkGrantNotRevoked and checkGrantStillAllowed
 // together, for a grant issued in full (the CIBA token exchange), after
 // refusing a decision older than the current
@@ -267,7 +289,7 @@ func (s *Server) checkGrantUsable(ctx context.Context, client storage.Registered
 	if revErr := s.checkGrantNotRevoked(ctx, grant); revErr != nil {
 		return revErr
 	}
-	return s.checkGrantStillAllowed(client, grant.Scope, grant.AuthorizationDetails)
+	return s.checkGrantStillAllowed(client, grant, grant.Scope)
 }
 
 // refreshScope is the scope a refresh request asks for: the grant's,

@@ -9,6 +9,9 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"strings"
 	"testing"
 	"time"
 )
@@ -199,4 +202,116 @@ func TestNewClientTLSSettingsApplyToHandshakes(t *testing.T) {
 	if _, ok := HardeningOf(c); !ok {
 		t.Error("HardeningOf = false after a request")
 	}
+}
+
+// foreignRoundTripper is a RoundTripper registered for a scheme to send
+// requests around the dialer; it records whether it ever ran.
+type foreignRoundTripper struct{ used *bool }
+
+func (f foreignRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	*f.used = true
+	return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
+}
+
+// assertSchemesReserved checks that registering a RoundTripper for
+// "https" or "http" on c's transport panics, so nothing can send its
+// requests around the address-validating dialer.
+func assertSchemesReserved(t *testing.T, c *http.Client) {
+	t.Helper()
+	for _, scheme := range []string{"https", "http"} {
+		used := false
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("RegisterProtocol(%q) didn't panic on a NewClient transport", scheme)
+				}
+			}()
+			c.Transport.(*http.Transport).RegisterProtocol(scheme, foreignRoundTripper{&used})
+		}()
+		if used {
+			t.Errorf("a RoundTripper registered for %q ran", scheme)
+		}
+	}
+}
+
+// TestNewClientReservesSchemes: a fresh NewClient transport, used or
+// not, refuses another RoundTripper for "https" or "http", which would
+// otherwise reach any address while HardeningOf still reported it
+// hardened.
+func TestNewClientReservesSchemes(t *testing.T) {
+	c, err := NewClient(RecommendedTransportConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSchemesReserved(t, c)
+	if _, ok := HardeningOf(c); !ok {
+		t.Error("HardeningOf = false for an untouched NewClient transport")
+	}
+}
+
+// TestNewClientStillSpeaksHTTP2: reserving the schemes leaves net/http's
+// own HTTP/2 support in place.
+func TestNewClientStillSpeaksHTTP2(t *testing.T) {
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	srv.EnableHTTP2 = true
+	srv.StartTLS()
+	defer srv.Close()
+	cfg := RecommendedTransportConfig()
+	cfg.AllowLoopbackHosts = true
+	cfg.RootCAs = srv.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs
+	c, err := NewClient(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := c.Get(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.ProtoMajor != 2 {
+		t.Errorf("response protocol = %s, want HTTP/2", res.Proto)
+	}
+}
+
+// TestNewClientReservesSchemesWithoutHTTP2 runs
+// TestNewClientWithoutHTTP2Child with GODEBUG=http2client=0, where
+// net/http registers nothing for "https" itself, so reserveSchemes'
+// own registration is what refuses another RoundTripper.
+func TestNewClientReservesSchemesWithoutHTTP2(t *testing.T) {
+	if os.Getenv("FAPIHTTP_HTTP2_OFF_CHILD") == "1" {
+		t.Skip("running as the child")
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestNewClientWithoutHTTP2Child$", "-test.v")
+	cmd.Env = append(os.Environ(), "FAPIHTTP_HTTP2_OFF_CHILD=1", "GODEBUG=http2client=0")
+	out, err := cmd.CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "--- PASS: TestNewClientWithoutHTTP2Child") {
+		t.Fatalf("child with GODEBUG=http2client=0: %v\n%s", err, out)
+	}
+}
+
+// TestNewClientWithoutHTTP2Child is TestNewClientReservesSchemesWithoutHTTP2's
+// child: with HTTP/2 off, the schemes are still reserved, and requests
+// still go out over HTTP/1.1 through the transport itself.
+func TestNewClientWithoutHTTP2Child(t *testing.T) {
+	if os.Getenv("FAPIHTTP_HTTP2_OFF_CHILD") != "1" {
+		t.Skip("only runs as TestNewClientReservesSchemesWithoutHTTP2's child")
+	}
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	defer srv.Close()
+	cfg := RecommendedTransportConfig()
+	cfg.AllowLoopbackHosts = true
+	cfg.RootCAs = srv.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs
+	c, err := NewClient(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := c.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("request over HTTP/1.1: %v", err)
+	}
+	res.Body.Close()
+	if res.ProtoMajor != 1 {
+		t.Errorf("response protocol = %s, want HTTP/1.1 with HTTP/2 off", res.Proto)
+	}
+	assertSchemesReserved(t, c)
 }

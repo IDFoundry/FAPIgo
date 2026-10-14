@@ -137,6 +137,7 @@ func NewClient(cfg TransportConfig) (*http.Client, error) {
 		},
 		ForceAttemptHTTP2: true,
 	}
+	reserveSchemes(transport)
 	registerHardened(transport, cfg, dialer, verifier)
 	return &http.Client{
 		Transport: transport,
@@ -144,6 +145,40 @@ func NewClient(cfg TransportConfig) (*http.Client, error) {
 			return http.ErrUseLastResponse
 		},
 	}, nil
+}
+
+// reserveSchemes stops anything from registering its own RoundTripper
+// for "https" or "http" on t (Transport.RegisterProtocol), which would
+// send those requests around the address-validating dialer. It has
+// net/http set up its HTTP/2 support for "https" now rather than on
+// first use, so a later RegisterProtocol("https", …) panics as for any
+// scheme already registered, and registers skipAltProtocol for any of
+// the two schemes still free: with HTTP/2 off (GODEBUG=http2client=0)
+// that's "https" too. skipAltProtocol hands every request back to the
+// transport, so requests are made exactly as before.
+func reserveSchemes(t *http.Transport) {
+	// First: on Go 1.26 net/http's HTTP/2 support claims "https" through
+	// RegisterProtocol on the transport's first use, which panics, and
+	// leaves HTTP/2 off, if skipAltProtocol already holds it.
+	t.CloseIdleConnections()
+	for _, scheme := range []string{"https", "http"} {
+		registerIfFree(t, scheme)
+	}
+}
+
+// registerIfFree registers skipAltProtocol for scheme on t, unless
+// something (net/http's HTTP/2 support) already has it.
+func registerIfFree(t *http.Transport, scheme string) {
+	defer func() { _ = recover() }() // RegisterProtocol panics when scheme is taken
+	t.RegisterProtocol(scheme, skipAltProtocol{})
+}
+
+// skipAltProtocol is a registered protocol that never handles a request
+// itself: http.ErrSkipAltProtocol has the transport make it as usual.
+type skipAltProtocol struct{}
+
+func (skipAltProtocol) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, http.ErrSkipAltProtocol
 }
 
 // safeDialContext returns the address-validating dialer for one

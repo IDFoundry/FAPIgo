@@ -72,3 +72,22 @@ func TestNewProductionRequiresHardenedHTTP(t *testing.T) {
 		})
 	}
 }
+
+// TestNewProductionRefusesAnotherTransportsDialer: a strict NewClient
+// transport given the dialer of one built with a loopback exception
+// would reach loopback while reporting none, so production refuses it.
+func TestNewProductionRefusesAnotherTransportsDialer(t *testing.T) {
+	strict := hardenedHTTPClient(t, fapihttp.RecommendedTransportConfig())
+	looseCfg := fapihttp.RecommendedTransportConfig()
+	looseCfg.AllowLoopbackHosts = true
+	loose := hardenedHTTPClient(t, looseCfg)
+	strict.Transport.(*http.Transport).DialContext = loose.Transport.(*http.Transport).DialContext
+
+	cfg := validConfig(t)
+	cfg.Assurance = client.AssuranceProduction
+	deps := productionDeps(t)
+	deps.HTTP = strict
+	if _, err := client.New(cfg, deps); err == nil {
+		t.Fatal("client.New(production) accepted a transport using another transport's dialer")
+	}
+}

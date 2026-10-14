@@ -319,7 +319,10 @@ type inflightResolution struct {
 // "jwks_uri", when its openid_relying_party metadata declares one
 // instead of publishing its keys inline — typically the same
 // *fapihttp.Client already passed as resolver's own
-// Dependencies.HTTP.
+// Dependencies.HTTP. In production both must be fapihttp.New over
+// fapihttp.NewClient's client (HardenedForProduction): built by hand,
+// this repository can't check, while server.New checks the ones it
+// builds from server.Dependencies.FederationHTTP.
 func NewAutomaticClientRepository(underlying storage.ClientRepository, resolver *Resolver, fetcher *fapihttp.Client, cfg AutomaticRegistrationConfig, clock Clock) (*AutomaticClientRepository, error) {
 	if underlying == nil {
 		return nil, fmt.Errorf("federation: underlying client repository is required")

@@ -33,10 +33,14 @@ link-local addresses when it dials. The docs always said to use it;
 - a `Dependencies.HTTP` that isn't an `*http.Client`, or one
   `fapihttp.NewClient` didn't build (`http.DefaultClient`, your own);
 - `NewClient`'s client after its transport was changed in a way that
-  affects where it connects or how it verifies the server (a `Proxy`,
-  another `DialContext`, `Dial`, `DialTLS` or `DialTLSContext`,
-  `InsecureSkipVerify`, a TLS version below 1.2), cloned
-  (`Transport.Clone`) or wrapped in another `RoundTripper`;
+  affects where it connects or how it verifies the server, cloned
+  (`Transport.Clone`) or wrapped in another `RoundTripper`. That's:
+  - a `Proxy`, a `DialContext` other than its own (including another
+    `NewClient` transport's), `Dial`, `DialTLS` or `DialTLSContext`;
+  - in `TLSClientConfig`: `InsecureSkipVerify`, a TLS version below 1.2,
+    `RootCAs` or `VerifyConnection` other than the ones it was built
+    with, or any `VerifyPeerCertificate`, `ServerName`, `Time`,
+    `KeyLogWriter` or insecure cipher suite;
 - one built with a loopback exception (`AllowLoopbackHosts`,
   `AllowLoopbackHTTP` or `AllowedLoopbackHosts`).
 
@@ -49,8 +53,16 @@ unchanged.
 added a client certificate for mutual TLS by changing the transport's
 `TLSClientConfig`, set `fapihttp.TransportConfig.Certificates` (or
 `GetClientCertificate`) instead; setting `TLSClientConfig.Certificates`
-afterwards also still passes. An instrumented, wrapped transport is
-refused in production.
+afterwards also still passes. Likewise set a private CA's roots with
+`TransportConfig.RootCAs`, and certificate pinning with
+`TransportConfig.VerifyConnection`, not on the transport afterwards. An
+instrumented, wrapped transport is refused in production.
+
+`NewClient`'s transport also already has `"https"` and `"http"`
+registered, so `Transport.RegisterProtocol` for either panics, in every
+assurance level: a `RoundTripper` registered for them would send
+requests around the address-validating dialer. Requests themselves are
+made as before, over HTTP/2 or HTTP/1.1.
 
 ### Fetchers must wrap `fapihttp.NewClient`'s client too (keys, server, *production only*)
 

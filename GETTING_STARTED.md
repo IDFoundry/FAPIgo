@@ -1239,11 +1239,14 @@ another dialer or weaker TLS settings swapped into its transport, a
 cloned or wrapped transport, or one allowing loopback addresses, is
 refused. For mutual TLS (`storage.SenderConstrainMTLS`, or
 certificate-based client authentication), give the client certificate
-when you build it:
+when you build it, and likewise a private CA's roots or a certificate
+pin, rather than changing the transport afterwards:
 
 ```go
 cfg := fapihttp.RecommendedTransportConfig()
 cfg.Certificates = []tls.Certificate{clientCert} // or cfg.GetClientCertificate
+// cfg.RootCAs = privateRoots           // only for a server under a private CA
+// cfg.VerifyConnection = pinServerKey  // optional pinning
 transport, err := fapihttp.NewClient(cfg)
 ```
 

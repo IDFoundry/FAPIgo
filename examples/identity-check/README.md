@@ -126,7 +126,7 @@ you approved, so asking again gets nothing more.
 | Use the access token from another device | The token is DPoP-bound to Fernway's key |
 | Name you with Brightline's ID token (`id_token_hint`) | A genuine ID token from the bank, but issued to Brightline: the bank accepts an `id_token_hint` only from the client it issued that ID token to (OIDC Core §3.1.2.1) |
 | Brightline asks for you by Fernway's `sub` | A `claims` request for a specific `sub` (OIDC Core §5.5.1), but the `sub` Fernway knows you by isn't one the bank issued for Brightline's sector: the bank refuses the request (`invalid_request`) |
-| Change the access token's `sub` to Brightline's | The changed token no longer matches the DPoP proof bound to it (`invalid_dpop_proof`); the bank's signature covers the `sub` too |
+| Change the access token's `sub` to Brightline's | The bank signed the token with its `sub`, so a changed `sub` breaks the signature, and Fernway can't sign a new one. The bank refuses it first as `invalid_dpop_proof`, only because Fernway's DPoP proof was made over the original token: Fernway holds its own DPoP key and could make a proof that matches, but not the bank's signature |
 
 **5. Compare Brightline Rentals.** It asks only for your name, date of
 birth, address and email, accepts any sign-in, and gets its ID token

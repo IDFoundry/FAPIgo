@@ -128,11 +128,10 @@ func TestHardeningOfRefusesTamperedTransports(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			c := hardenedClient(t, fapihttp.RecommendedTransportConfig())
 			tamper(c.Transport.(*http.Transport))
-			_, ok := fapihttp.HardeningOf(c)
-			// Another NewClient transport's dialer validates addresses
-			// just the same, and the check can't tell them apart.
-			if want := name == "another hardened dial"; ok != want {
-				t.Errorf("HardeningOf = %v, want %v", ok, want)
+			// Another NewClient transport's dialer may grant different
+			// exceptions, so it doesn't count either.
+			if _, ok := fapihttp.HardeningOf(c); ok {
+				t.Error("HardeningOf = true, want false")
 			}
 		})
 	}

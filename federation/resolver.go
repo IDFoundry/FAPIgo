@@ -109,6 +109,17 @@ type Dependencies struct {
 	// HTTP performs every outbound Entity Configuration and Subordinate
 	// Statement fetch, through fapihttp's own hardened protections
 	// (ARCHITECTURE.md design rule 6) — never a bare *http.Client.
+	//
+	// In production it must be fapihttp.New over fapihttp.NewClient's
+	// client (HTTP.HardenedForProduction()). NewResolver takes no
+	// assurance level, so it can't check; server.New does for the
+	// resolver it builds from server.Dependencies.FederationHTTP. Over
+	// any other client, Fetch still validates each URL and the
+	// addresses its host resolves to, but not the address the transport
+	// then dials, which a DNS answer that changes in between (DNS
+	// rebinding) can point at an internal host: and the entities a
+	// resolver fetches are named by the Trust Chain it's resolving, so
+	// by whoever controls the subject.
 	HTTP *fapihttp.Client
 
 	Clock Clock

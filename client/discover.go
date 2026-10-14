@@ -276,6 +276,15 @@ func (d DiscoveredMetadata) IssuerKeySource(fetcher *fapihttp.Client, cacheTTL t
 // fetcher is a *fapihttp.Client from fapihttp.New — usually wrapping
 // fapihttp.NewClient's transport — not the *http.Client that
 // Dependencies.HTTP takes.
+//
+// In production, fetcher must be fapihttp.New over fapihttp.NewClient's
+// client (fetcher.HardenedForProduction() reports it). Discover takes no
+// assurance level, so it can't check: over any other client, Fetch still
+// validates each URL and the addresses its host resolves to, but not the
+// address the transport then dials, which a DNS answer that changes in
+// between (DNS rebinding) can point at an internal host. The keys and
+// endpoints Discover returns are checked again where they're used
+// (IssuerKeySource, New); the fetch itself isn't.
 func Discover(ctx context.Context, fetcher *fapihttp.Client, issuer fapi.URL, opts ...fapi.URLOption) (DiscoveredMetadata, error) {
 	if fetcher == nil {
 		return DiscoveredMetadata{}, fmt.Errorf("client: discover: fetcher is required")

@@ -3,9 +3,11 @@ package fapihttp
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net"
 	"net/http"
+	"slices"
 	"time"
 )
 
@@ -46,6 +48,13 @@ type TransportConfig struct {
 	// ConnectionState.VerifiedChains; it can't loosen verification.
 	VerifyConnection func(tls.ConnectionState) error
 
+	// RootCAs, if set, becomes the TLS configuration's RootCAs: the
+	// certificate authorities server certificates must chain to, in
+	// place of the system's (a private CA's servers, say). Set it here:
+	// HardeningOf refuses a transport whose RootCAs was changed after
+	// NewClient built it.
+	RootCAs *x509.CertPool
+
 	// Certificates and GetClientCertificate present a client
 	// certificate (mutual TLS: RFC 8705 client authentication or
 	// certificate-bound tokens), exactly as the tls.Config fields of the
@@ -84,7 +93,12 @@ func (c TransportConfig) AllowsLoopback() bool {
 //
 // HardeningOf recognises the result, and any copy of it, for as long as
 // its transport stays as NewClient built it, so a production check can
-// refuse any other *http.Client.
+// refuse any other *http.Client. Set what the transport needs through
+// cfg (RootCAs, VerifyConnection, Certificates) rather than on the
+// Transport afterwards. Its Transport already has "https" and "http"
+// registered (see Transport.RegisterProtocol), so registering another
+// RoundTripper for either panics: one would send requests around the
+// dialer.
 //
 // NewClient returns the transport: the *http.Client that
 // client.Dependencies.HTTP takes directly, and that New wraps into a
@@ -99,22 +113,37 @@ func NewClient(cfg TransportConfig) (*http.Client, error) {
 		return nil, fmt.Errorf("fapihttp: transport config: tls handshake timeout must be positive")
 	}
 
+	// The dialer keeps its own copy of the host lists, so a caller that
+	// later changes the slices it passed in can't change what the
+	// transport allows, or make it allow more than HardeningOf reports.
+	cfg.AllowedLoopbackHosts = slices.Clone(cfg.AllowedLoopbackHosts)
+	cfg.AllowedPrivateHosts = slices.Clone(cfg.AllowedPrivateHosts)
+
 	base := &net.Dialer{Timeout: cfg.DialTimeout}
+	dialer := new(identityMarker)
+	var verifier *identityMarker
+	verifyConnection := cfg.VerifyConnection
+	if verifyConnection != nil {
+		verifier = new(identityMarker)
+		verifyConnection = verifyConnectionWith(verifier, verifyConnection)
+	}
 	transport := &http.Transport{
 		DialContext: safeDialContext(base, loopbackPolicy{
 			literalHosts: cfg.AllowLoopbackHosts || cfg.AllowLoopbackHTTP,
 			named:        cfg.AllowedLoopbackHosts,
-		}, cfg.AllowedPrivateHosts),
+		}, cfg.AllowedPrivateHosts, dialer),
 		TLSHandshakeTimeout: cfg.TLSHandshakeTimeout,
 		TLSClientConfig: &tls.Config{
 			MinVersion:           tls.VersionTLS12,
-			VerifyConnection:     cfg.VerifyConnection,
+			VerifyConnection:     verifyConnection,
+			RootCAs:              cfg.RootCAs,
 			Certificates:         cfg.Certificates,
 			GetClientCertificate: cfg.GetClientCertificate,
 		},
 		ForceAttemptHTTP2: true,
 	}
-	registerHardened(transport, cfg)
+	reserveSchemes(transport)
+	registerHardened(transport, cfg, dialer, verifier)
 	return &http.Client{
 		Transport: transport,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
@@ -123,46 +152,109 @@ func NewClient(cfg TransportConfig) (*http.Client, error) {
 	}, nil
 }
 
-// safeDialContext resolves addr's host itself (or accepts it directly if
-// it's already an IP literal), validates every candidate address, and
-// dials the first one that passes — so the address actually connected to
-// is always one this function itself checked, never a name resolved a
-// second time by the caller's dialer.
-func safeDialContext(base *net.Dialer, loopback loopbackPolicy, allowedPrivateHosts []string) func(context.Context, string, string) (net.Conn, error) {
-	return func(ctx context.Context, network, addr string) (net.Conn, error) {
-		host, port, err := net.SplitHostPort(addr)
-		if err != nil {
-			return nil, err
-		}
-		allowPrivate := hostListed(host, allowedPrivateHosts)
-		allowLoopback := loopback.permits(host)
-
-		var candidates []net.IP
-		if ip := net.ParseIP(host); ip != nil {
-			candidates = []net.IP{ip}
-		} else {
-			resolved, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-			if err != nil {
-				return nil, err
-			}
-			for _, a := range resolved {
-				candidates = append(candidates, a.IP)
-			}
-		}
-
-		var lastErr = ErrSSRFBlocked
-		for _, ip := range candidates {
-			if disallowedIP(ip, allowLoopback, allowPrivate) {
-				continue
-			}
-			conn, dialErr := base.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
-			if dialErr == nil {
-				return conn, nil
-			}
-			lastErr = dialErr
-		}
-		return nil, lastErr
+// reserveSchemes stops anything from registering its own RoundTripper
+// for "https" or "http" on t (Transport.RegisterProtocol), which would
+// send those requests around the address-validating dialer. It has
+// net/http set up its HTTP/2 support for "https" now rather than on
+// first use, so a later RegisterProtocol("https", …) panics as for any
+// scheme already registered, and registers skipAltProtocol for any of
+// the two schemes still free: with HTTP/2 off (GODEBUG=http2client=0)
+// that's "https" too. skipAltProtocol hands every request back to the
+// transport, so requests are made exactly as before.
+func reserveSchemes(t *http.Transport) {
+	// First: on Go 1.26 net/http's HTTP/2 support claims "https" through
+	// RegisterProtocol on the transport's first use, which panics, and
+	// leaves HTTP/2 off, if skipAltProtocol already holds it.
+	t.CloseIdleConnections()
+	for _, scheme := range []string{"https", "http"} {
+		registerIfFree(t, scheme)
 	}
+}
+
+// registerIfFree registers skipAltProtocol for scheme on t, unless
+// something (net/http's HTTP/2 support) already has it.
+func registerIfFree(t *http.Transport, scheme string) {
+	defer func() { _ = recover() }() // RegisterProtocol panics when scheme is taken
+	t.RegisterProtocol(scheme, skipAltProtocol{})
+}
+
+// skipAltProtocol is a registered protocol that never handles a request
+// itself: http.ErrSkipAltProtocol has the transport make it as usual.
+type skipAltProtocol struct{}
+
+func (skipAltProtocol) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, http.ErrSkipAltProtocol
+}
+
+// safeDialContext returns the address-validating dialer for one
+// transport: safeDialer.dial over base and the transport's exceptions.
+// It answers HardeningOf's identity probe with marker, which tells this
+// transport's dialer apart from another NewClient transport's.
+func safeDialContext(base *net.Dialer, loopback loopbackPolicy, allowedPrivateHosts []string, marker *identityMarker) func(context.Context, string, string) (net.Conn, error) {
+	d := safeDialer{base: base, loopback: loopback, allowedPrivateHosts: allowedPrivateHosts}
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if network == identityProbeNetwork {
+			return nil, identityProbe{marker: marker}
+		}
+		return d.dial(ctx, network, addr)
+	}
+}
+
+// safeDialer dials only addresses it has validated itself.
+type safeDialer struct {
+	base                *net.Dialer
+	loopback            loopbackPolicy
+	allowedPrivateHosts []string
+}
+
+// dial resolves addr's host itself (or accepts it directly if it's
+// already an IP literal), validates every candidate address, and dials
+// the first one that passes — so the address actually connected to is
+// always one this function itself checked, never a name resolved a
+// second time by the caller's dialer.
+func (d safeDialer) dial(ctx context.Context, network, addr string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	candidates, err := candidateIPs(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	allowPrivate := hostListed(host, d.allowedPrivateHosts)
+	allowLoopback := d.loopback.permits(host)
+	var lastErr = ErrSSRFBlocked
+	for _, ip := range candidates {
+		if disallowedIP(ip, allowLoopback, allowPrivate) {
+			continue
+		}
+		conn, dialErr := d.base.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+		if dialErr == nil {
+			return conn, nil
+		}
+		lastErr = dialErr
+	}
+	return nil, lastErr
+}
+
+// lookupIPAddr resolves a host name for candidateIPs; tests replace it.
+var lookupIPAddr = net.DefaultResolver.LookupIPAddr
+
+// candidateIPs is host itself when it's an IP literal, and otherwise
+// every address it resolves to.
+func candidateIPs(ctx context.Context, host string) ([]net.IP, error) {
+	if ip := net.ParseIP(host); ip != nil {
+		return []net.IP{ip}, nil
+	}
+	resolved, err := lookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	candidates := make([]net.IP, 0, len(resolved))
+	for _, a := range resolved {
+		candidates = append(candidates, a.IP)
+	}
+	return candidates, nil
 }
 
 // extraBlockedCIDRs are address ranges net.IP's own IsPrivate/

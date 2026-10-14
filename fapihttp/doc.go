@@ -26,5 +26,6 @@
 // must be hardened can be checked rather than only documented:
 // client.New refuses any other Dependencies.HTTP under
 // AssuranceProduction. TransportConfig.Certificates presents a client
-// certificate for mutual TLS without touching the transport afterwards.
+// certificate for mutual TLS, and RootCAs and VerifyConnection set the
+// roots and any pinning, without touching the transport afterwards.
 package fapihttp

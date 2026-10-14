@@ -5,11 +5,13 @@ import (
 	"crypto/rand"
 	"github.com/idfoundry/fapigo/keys/ephemeral"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/client"
+	"github.com/idfoundry/fapigo/fapihttp"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
 	"github.com/idfoundry/fapigo/storage/memstore"
@@ -109,6 +111,7 @@ func TestNewAcceptsProductionAssuranceWithFullyDeclaredSessionStore(t *testing.T
 	cfg := validConfig(t)
 	cfg.Assurance = client.AssuranceProduction
 	deps := validDependencies(t)
+	deps.HTTP = hardenedHTTPClient(t, fapihttp.RecommendedTransportConfig())
 	deps.Sessions = assuringSessionStore{
 		fakeSessionStore: newFakeSessionStore(),
 		caps:             storage.Capabilities{Durable: true, AtomicConsume: true},
@@ -149,6 +152,7 @@ func TestNewSkipsSessionAssuranceCheckWhenSessionsNotConfigured(t *testing.T) {
 	cfg.RedirectURI = ""
 
 	deps := validDependencies(t)
+	deps.HTTP = hardenedHTTPClient(t, fapihttp.RecommendedTransportConfig())
 	deps.Sessions = nil
 
 	if _, err := client.New(cfg, deps); err != nil {
@@ -230,6 +234,7 @@ func TestNewAcceptsProductionAssuranceWithLiveFetchHardenedIssuerKeySource(t *te
 	cfg := validConfig(t)
 	cfg.Assurance = client.AssuranceProduction
 	deps := validDependencies(t)
+	deps.HTTP = hardenedHTTPClient(t, fapihttp.RecommendedTransportConfig())
 	deps.IssuerKeys = assuringIssuerKeySource{
 		fakeIssuerKeySource: deps.IssuerKeys.(*fakeIssuerKeySource),
 		caps:                keys.KeySourceCapabilities{LiveFetchHardened: true},
@@ -260,7 +265,19 @@ func productionDeps(t *testing.T) client.Dependencies {
 		fakeSessionStore: newFakeSessionStore(),
 		caps:             storage.Capabilities{Durable: true, AtomicConsume: true},
 	}
+	deps.HTTP = hardenedHTTPClient(t, fapihttp.RecommendedTransportConfig())
 	return deps
+}
+
+// hardenedHTTPClient is fapihttp.NewClient's client for cfg, the only
+// kind AssuranceProduction accepts as Dependencies.HTTP.
+func hardenedHTTPClient(t *testing.T, cfg fapihttp.TransportConfig) *http.Client {
+	t.Helper()
+	c, err := fapihttp.NewClient(cfg)
+	if err != nil {
+		t.Fatalf("fapihttp.NewClient: %v", err)
+	}
+	return c
 }
 
 // undeclaredClientKeys has the fake key manager's methods but not its

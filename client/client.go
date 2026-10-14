@@ -466,8 +466,8 @@ func validateDependencies(cfg Config, deps Dependencies) error {
 
 // validateProductionDependencies applies AssuranceProduction's checks to
 // deps: the sessions store's capabilities, crypto/rand as the random
-// source, the custody of the keys deps.Keys and deps.Decryption hold, and
-// the issuer key source's hardening. It reports every one that falls
+// source, the custody of the keys deps.Keys and deps.Decryption hold, the
+// issuer key source's hardening, and deps.HTTP's. It reports every one that falls
 // short, joined (errors.Join), rather than only the first, so a
 // deployment moving to production sees the whole list in one restart.
 func validateProductionDependencies(deps Dependencies) error {
@@ -485,6 +485,7 @@ func validateProductionDependencies(deps Dependencies) error {
 	if deps.IssuerKeys != nil {
 		errs = append(errs, checkKeySourceAssurance("issuer_keys", deps.IssuerKeys))
 	}
+	errs = append(errs, checkHTTPHardening(deps.HTTP))
 	return errors.Join(errs...)
 }
 

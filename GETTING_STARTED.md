@@ -1227,7 +1227,23 @@ if err != nil {
 
 `NewFromDiscovery` fills in the issuer and endpoints from the discovered
 metadata and checks them against your `Config`; `New` takes them
-explicitly instead. Then, in your handlers:
+explicitly instead.
+
+Under `AssuranceProduction`, `New` refuses any `Dependencies.HTTP` but
+`fapihttp.NewClient`'s client (or a copy of it): one with a proxy,
+another dialer or weaker TLS settings swapped into its transport, a
+cloned or wrapped transport, or one allowing loopback addresses, is
+refused. For mutual TLS (`storage.SenderConstrainMTLS`, or
+certificate-based client authentication), give the client certificate
+when you build it:
+
+```go
+cfg := fapihttp.RecommendedTransportConfig()
+cfg.Certificates = []tls.Certificate{clientCert} // or cfg.GetClientCertificate
+transport, err := fapihttp.NewClient(cfg)
+```
+
+Then, in your handlers:
 
 ```go
 // 1. Start: push the request, remember the session, send the browser on.

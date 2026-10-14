@@ -15,6 +15,43 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.56.0
+
+### A production client's HTTP client must be `fapihttp.NewClient`'s (client, *production only*)
+
+**Affects:** a `client.Config` with `Assurance: client.AssuranceProduction`
+whose `Dependencies.HTTP` isn't the `*http.Client` `fapihttp.NewClient`
+returned.
+
+**Why:** the endpoints a client calls can come from fetched metadata
+(`NewFromDiscovery`, `DiscoverViaFederation`), and only
+`fapihttp.NewClient`'s transport refuses private, loopback and
+link-local addresses when it dials. The docs always said to use it;
+`New` now checks, with `fapihttp.HardeningOf`.
+
+**What fails:** `New` refuses, under production only:
+- a `Dependencies.HTTP` that isn't an `*http.Client`, or one
+  `fapihttp.NewClient` didn't build (`http.DefaultClient`, your own);
+- `NewClient`'s client after its transport was changed in a way that
+  affects where it connects or how it verifies the server (a `Proxy`,
+  another `DialContext`, `Dial`, `DialTLS` or `DialTLSContext`,
+  `InsecureSkipVerify`, a TLS version below 1.2), cloned
+  (`Transport.Clone`) or wrapped in another `RoundTripper`;
+- one built with a loopback exception (`AllowLoopbackHosts`,
+  `AllowLoopbackHTTP` or `AllowedLoopbackHosts`).
+
+A copy of `NewClient`'s client (`c2 := *c` with its own `Timeout`, say)
+and `AllowedPrivateHosts` are accepted. Development assurance is
+unchanged.
+
+**What to change:** build `Dependencies.HTTP` with
+`fapihttp.NewClient(fapihttp.RecommendedTransportConfig())`. If you
+added a client certificate for mutual TLS by changing the transport's
+`TLSClientConfig`, set `fapihttp.TransportConfig.Certificates` (or
+`GetClientCertificate`) instead; setting `TLSClientConfig.Certificates`
+afterwards also still passes. An instrumented, wrapped transport is
+refused in production.
+
 ## v0.55.0
 
 ### `Config.Subjects` is required (server)

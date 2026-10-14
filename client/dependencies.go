@@ -70,6 +70,13 @@ type Dependencies struct {
 	// hosts. A plain http.Client has no such guard.
 	// This is the transport NewClient returns, not the *fapihttp.Client
 	// fetcher fapihttp.New builds (which Discover takes).
+	//
+	// Under AssuranceProduction New checks it: it must be an
+	// *http.Client fapihttp.HardeningOf recognises (NewClient's, or a
+	// copy, with its transport unchanged: no proxy, other dialer or
+	// weaker TLS) that allows no loopback address. For mutual TLS, give
+	// the client certificate as fapihttp.TransportConfig.Certificates
+	// rather than replacing the transport.
 	HTTP fapihttp.HTTPClient
 
 	// Clock supplies the current time.

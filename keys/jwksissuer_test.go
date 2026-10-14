@@ -77,27 +77,34 @@ func TestJWKSIssuerKeySourceResolvesKeyByAlgorithm(t *testing.T) {
 // TestJWKSIssuerKeySourceDeclaresLiveFetchHardened covers
 // JWKSIssuerKeySource's own keys.KeySourceAssurance implementation:
 // every live fetch goes through its *fapihttp.Client, so it declares
-// LiveFetchHardened — unless that client grants a loopback exception,
-// which is for local development only. AllowedPrivateHosts names an
-// operator's own hosts and doesn't count.
+// LiveFetchHardened when that fetcher is over NewClient's client and
+// grants no loopback exception, which is for local development only. A
+// fetcher over a plain http.Client isn't hardened. AllowedPrivateHosts
+// names an operator's own hosts and doesn't count.
 func TestJWKSIssuerKeySourceDeclaresLiveFetchHardened(t *testing.T) {
 	jwksURI, err := fapi.ParseEndpointURL("https://issuer.example.com/jwks")
 	if err != nil {
 		t.Fatalf("ParseEndpointURL: %v", err)
 	}
+	hardened, err := fapihttp.NewClient(fapihttp.RecommendedTransportConfig())
+	if err != nil {
+		t.Fatalf("fapihttp.NewClient: %v", err)
+	}
 	for name, tc := range map[string]struct {
-		cfg  fapihttp.Config
-		want bool
+		transport fapihttp.HTTPClient
+		cfg       fapihttp.Config
+		want      bool
 	}{
-		"no exceptions":          {fapihttp.Config{}, true},
-		"allowed private hosts":  {fapihttp.Config{AllowedPrivateHosts: []string{"keys.internal"}}, true},
-		"allow loopback hosts":   {fapihttp.Config{AllowLoopbackHosts: true}, false},
-		"allow loopback http":    {fapihttp.Config{AllowLoopbackHTTP: true}, false},
-		"allowed loopback hosts": {fapihttp.Config{AllowedLoopbackHosts: []string{"suite.example.com"}}, false},
+		"no exceptions":          {hardened, fapihttp.Config{}, true},
+		"allowed private hosts":  {hardened, fapihttp.Config{AllowedPrivateHosts: []string{"keys.internal"}}, true},
+		"allow loopback hosts":   {hardened, fapihttp.Config{AllowLoopbackHosts: true}, false},
+		"allow loopback http":    {hardened, fapihttp.Config{AllowLoopbackHTTP: true}, false},
+		"allowed loopback hosts": {hardened, fapihttp.Config{AllowedLoopbackHosts: []string{"suite.example.com"}}, false},
+		"plain http.Client":      {&http.Client{}, fapihttp.Config{}, false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			tc.cfg.MaxResponseBytes, tc.cfg.RequestTimeout = 1<<16, time.Second
-			fetcher, err := fapihttp.New(&http.Client{}, tc.cfg)
+			fetcher, err := fapihttp.New(tc.transport, tc.cfg)
 			if err != nil {
 				t.Fatalf("fapihttp.New: %v", err)
 			}

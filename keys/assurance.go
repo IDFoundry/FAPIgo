@@ -14,10 +14,12 @@ package keys
 type KeySourceCapabilities struct {
 	// LiveFetchHardened is true iff every live network fetch this key
 	// source performs goes through fapihttp's own SSRF/size-limit/
-	// redirect protections (ARCHITECTURE.md design rule 6) with no
-	// loopback exception granted (fapihttp.Config.AllowsLoopback false),
-	// or the implementation performs no live fetch at all
-	// (administratively pre-resolved or cached keys only).
+	// redirect protections (ARCHITECTURE.md design rule 6) over a
+	// fetcher that is fapihttp.Client.HardenedForProduction (NewClient's
+	// intact transport, which validates the address it dials, with no
+	// loopback exception granted), or the implementation performs no
+	// live fetch at all (administratively pre-resolved or cached keys
+	// only).
 	LiveFetchHardened bool
 }
 
@@ -30,8 +32,8 @@ type KeySourceCapabilities struct {
 // own doc comment. JWKSIssuerKeySource (this package) and
 // keys/ephemeral.ClientKeySource are this module's own two bundled
 // live-fetch implementations; only JWKSIssuerKeySource declares
-// LiveFetchHardened — true unless its fapihttp.Client grants a loopback
-// exception — and LocalIssuerKeys and StaticAttesterKeys, which fetch
+// LiveFetchHardened — true only when its fapihttp.Client is
+// HardenedForProduction — and LocalIssuerKeys and StaticAttesterKeys, which fetch
 // nothing, declare it too. keys/ephemeral is explicitly "local development
 // and testing only, never production" (see that package's own doc
 // comment), so it deliberately does not implement this interface,

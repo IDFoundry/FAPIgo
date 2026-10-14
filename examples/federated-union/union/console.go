@@ -88,7 +88,7 @@ func (c *console) sceneRows() []sceneRow {
 func (c *console) home(w http.ResponseWriter, _ *http.Request) {
 	c.w.render(w, "console", consolePage{
 		Page: c.w.page("Meridian Union console", country{}), Entities: c.rows(), Tour: c.tour(),
-		Log: c.w.net.Log().Recent(40),
+		Log: c.w.net.Log().Recent(40), Issued: c.w.issued.list(),
 	})
 }
 

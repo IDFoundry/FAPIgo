@@ -21,6 +21,8 @@ func (w *World) sceneList() []scene {
 			description: "The Union stops vouching for Eastmark's authority. Cross-border sign-ins with EastID fail; Eastmark's own services, which also trust their national authority directly, keep working."},
 		{key: "compromise", title: "Eastmark's authority is compromised", flag: &s.CompromiseEastmark,
 			description: "Eastmark's authority vouches for an impostor at bank.northland.localhost. The Union's naming constraints confine Eastmark to *.eastmark.localhost, so the impostor fails to resolve through the Union — but not for anyone who trusts Eastmark's authority directly, like EastID: naming constraints protect only those who rely on the Union."},
+		{key: "sector", title: "Eastmark Telecom claims the bank's sector", flag: &s.ClaimBankSector,
+			description: "Eastmark Telecom publishes the bank's redirect URI as its own, hoping to be given the same pairwise subs as the bank and link its customers to the bank's. Identity providers give a federation service the sector of its own Entity Identifier's host, and refuse to register one whose redirect URIs are on another host, so sign-ins at the telco fail."},
 	}
 }
 
@@ -79,6 +81,13 @@ func (c *console) tour() []tourStep {
 			Links: []tourLink{{"Bank's trust chain", resolve("bank.southport.localhost", "union")}},
 		},
 		{
+			Title: "One citizen, a different sub at each service",
+			Do:    "Sign in with EastID as the same citizen at the bank and at Eastmark Telecom, then look at Pairwise subjects below.",
+			Notice: "EastID gave each service its own sub for that citizen, so the two can't link them by sub. Each service asked for pairwise subs in its metadata; " +
+				"its sector is its own Entity Identifier's host. The two services can still link the citizen by any claim they both receive, such as their name.",
+			Links: []tourLink{openBank, {"Open the telecom", telco}},
+		},
+		{
 			Title:  "Check an assurance mark",
 			Do:     "Open EastID's Trust Chain.",
 			Notice: "Its level-of-assurance Trust Mark was issued by Eastmark's Accreditation Office — an issuer the Union lists as accredited — so services accept EastID.",
@@ -107,6 +116,13 @@ func (c *console) tour() []tourStep {
 				{"Impostor, trusting Eastmark", resolve(impostorHost, "eastmark")},
 			},
 			Scene: scenes["compromise"],
+		},
+		{
+			Title:  "Claim another service's sector",
+			Do:     "Turn the scene on, then sign in with EastID at Eastmark Telecom.",
+			Notice: "The telecom now publishes the bank's redirect URI, hoping to be given the bank's pairwise subs. EastID refuses to register it: a federation service's redirect URIs must be on its own Entity Identifier's host, which is its sector.",
+			Links:  []tourLink{{"Open the telecom", telco}},
+			Scene:  scenes["sector"],
 		},
 	}
 }

@@ -11,7 +11,10 @@ Everything runs in one process, on your machine, each entity at its own
 `*.localhost` host.
 
 > This is a demo. Every store is in memory, every key is generated at
-> startup, and the countries, schemes and people are made up.
+> startup, and the countries, schemes and people are made up. That
+> includes the identity providers' pairwise subject keys, so a citizen's
+> subs change each run; a real provider keeps them wrapped by a KMS,
+> since changing them changes every sub.
 
 This is a separate Go module. It builds against this checkout of the
 library (`replace` in `go.mod`), and release-please ignores it.
@@ -115,6 +118,17 @@ nationality and address. On EastID's consent page, untick the address:
 only what's ticked leaves EastID, and the bank's page shows the address
 as not shared.
 
+**5. A different sub at each service.** Sign in with EastID as the same
+citizen at the bank and then at Eastmark Telecom. Each service asks for
+pairwise subs in its metadata (`subject_type: pairwise`), so EastID
+gives each its own sub for that citizen ([OpenID Connect Core
+§8.1](https://openid.net/specs/openid-connect-core-1_0.html#PairwiseAlg)):
+the two services can't link the citizen by sub. The console's
+**Pairwise subjects** panel shows both side by side. A federation
+service's sector is its own Entity Identifier's host, which its Trust
+Chain vouches for. Pairwise subs hide only the sub: two services that
+are both given the citizen's name can still link them by it.
+
 Then the console's scenes:
 
 | Scene | What happens | What stops it |
@@ -122,6 +136,7 @@ Then the console's scenes:
 | **EastID forges its assurance mark** | EastID publishes a level-of-assurance mark it signed itself | The signature verifies — EastID is a federation member — but the Union doesn't accredit EastID to issue that mark, so services refuse EastID |
 | **Suspend Eastmark** | The Union stops vouching for Eastmark's authority | Cross-border sign-ins with EastID fail; Eastmark Telecom, which also trusts Eastmark's authority directly, keeps working |
 | **Eastmark's authority is compromised** | Eastmark's authority vouches for an impostor claiming a Northland host | The Union's naming constraints confine Eastmark to `*.eastmark.localhost`: the impostor resolves through Eastmark alone, but not through the Union. That protects only parties relying on the Union: EastID, which trusts Eastmark's authority directly, would still accept the impostor |
+| **Eastmark Telecom claims the bank's sector** | The telecom publishes the bank's redirect URI as its own, hoping to be given the bank's pairwise subs and link its customers to the bank's | Identity providers refuse to register a pairwise federation service whose redirect URIs aren't all on its own Entity Identifier's host; sign-ins at the telecom fail with `invalid_client` |
 
 Identity providers cache a service's registration for 10 seconds, and
 remember a registration that failed for 10 seconds too (FAPIgo's
@@ -145,14 +160,14 @@ Everything here uses FAPIgo's public API only.
 |---|---|
 | Union and national authorities | `federation.SelfIssuer` (with `TrustMarkIssuers`), `federation.SubordinateIssuer` with `MetadataPolicy` and `Constraints` |
 | Accreditation offices | `federation.TrustMarkIssuer` |
-| Identity providers | `server.Server` with `Config.AutomaticRegistration` and `Config.Federation`; `Server.EntityConfiguration` publishing the Trust Mark; `GrantedAuthorization.ApprovedIdentityClaims` from the consent page; the pending sign-in kept in an encrypted cookie (`server/interactioncookie`) rather than in the process, as a provider running several instances would |
-| Services | `client.DiscoverViaFederation`, `client.NewFromDiscovery`, `BeginAuthorizationRequest.Claims`, `Resolver.VerifyTrustMark` with `RequireFederationAccreditation` |
+| Identity providers | `server.Server` with `Config.AutomaticRegistration` and `Config.Federation`; pairwise subs by default (`Config.Subjects`, `pairwise.NewReversible`), which also offers federation services pairwise subs alone; `Server.EntityConfiguration` publishing the Trust Mark and the subject types federation services are offered; `GrantedAuthorization.ApprovedIdentityClaims` from the consent page; the pending sign-in kept in an encrypted cookie (`server/interactioncookie`) rather than in the process, as a provider running several instances would |
+| Services | `federation.OpenIDRelyingPartyMetadata.SubjectType` asking for pairwise subs, `client.DiscoverViaFederation`, `client.NewFromDiscovery`, `BeginAuthorizationRequest.Claims`, `Resolver.VerifyTrustMark` with `RequireFederationAccreditation` |
 | Sign-in | PAR with a signed request object, PKCE, DPoP-bound tokens, and the session cookie binding (`client/sessioncookie`, carrying the identity provider too) |
 
 The code:
 
 - [`union/world.go`](union/world.go) — the countries, the Union and its policy, the scenes.
-- [`union/idp.go`](union/idp.go) — the identity providers, whose pending sign-ins travel in an `interactioncookie.Cookie`.
+- [`union/idp.go`](union/idp.go) — the identity providers, whose pending sign-ins travel in an `interactioncookie.Cookie`, and their pairwise subs.
 - [`union/rp.go`](union/rp.go) — the services.
 - [`union/console.go`](union/console.go) — the console.
 - [`../internal/demokit`](../internal/demokit/net.go) — one listener serving every host, the certificate, and the Chrome window; shared with the other example demos.

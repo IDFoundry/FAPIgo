@@ -104,12 +104,21 @@ func (w *World) newRelyingParty(s serviceSpec) (*relyingParty, error) {
 
 // metadata is the service's openid_relying_party metadata. It declares
 // more grant types than the Union allows, so the console can show the
-// Union's policy narrowing them.
+// Union's policy narrowing them, and asks for pairwise subs.
 func (rp *relyingParty) metadata(context.Context) (map[string]json.RawMessage, error) {
+	redirect := rp.redirect
+	if rp.entity.host == telcoHost && rp.w.scenes.ClaimBankSector.Load() {
+		// The bank's redirect URI, hoping for the bank's sector.
+		redirect = rp.w.entityID(bankHost) + "/callback"
+	}
 	md, err := json.Marshal(federation.OpenIDRelyingPartyMetadata{ //nolint:gosec // "private_key_jwt" names an auth method, not a secret
-		ClientRegistrationTypes:     []string{"automatic"},
-		ResponseTypes:               []string{"code"},
-		RedirectURIs:                []string{rp.redirect},
+		ClientRegistrationTypes: []string{"automatic"},
+		ResponseTypes:           []string{"code"},
+		RedirectURIs:            []string{redirect},
+		// Its own sub for each citizen, which no other service shares
+		// (OpenID Connect Core §8.1); the sector is this service's own
+		// host.
+		SubjectType:                 "pairwise",
 		TokenEndpointAuthMethod:     "private_key_jwt",
 		TokenEndpointAuthSigningAlg: fapi.ES256.String(),
 		RequestObjectSigningAlg:     fapi.ES256.String(),

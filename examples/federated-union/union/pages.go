@@ -30,6 +30,7 @@ type consolePage struct {
 	Entities []entityRow
 	Tour     []tourStep
 	Log      []demokit.FetchEntry
+	Issued   []issuedSub
 }
 
 type entityPage struct {
@@ -143,6 +144,12 @@ var pageTemplates = map[string]string{
 <td><a href="/entity?id={{.ID}}">statements</a> · <a href="/resolve?subject={{.ID}}&via=union">trust chain</a>{{if .Page}} · <a href="{{.Page}}">open</a>{{end}}</td></tr>{{end}}
 </table></div>
 
+<h2>Pairwise subjects</h2>
+<div class="card"><p class="muted">Each identity provider gives each service its own sub for a citizen, so two services can't link a citizen by sub. Each service sees only its own row; this panel sees them all.</p>
+<table><tr><th>Citizen</th><th>Identity provider</th><th>Service</th><th>Sub the service was given</th></tr>
+{{range .Issued}}<tr><td>{{.Citizen}} <span class="muted">({{.CitizenSub}})</span></td><td>{{.Provider}}</td><td>{{.Service}}</td><td><code>{{.Sub}}</code></td></tr>{{else}}<tr><td colspan="4" class="muted">Nothing yet — sign in to a service.</td></tr>{{end}}
+</table></div>
+
 <h2>Recent federation traffic</h2>
 <div class="card"><p class="muted">Every request one entity made to another: Entity Configurations, Subordinate Statements, keys. Newest first.</p>
 <table><tr><th>When</th><th>From</th><th>Request</th><th>Result</th></tr>
@@ -206,6 +213,7 @@ var pageTemplates = map[string]string{
 <div class="card">
 <p><span class="pill ok">signed in</span> {{if .CrossBorder}}<span class="pill ok">cross-border</span>{{end}}</p>
 <p>Signed in with <strong>{{.Provider}}</strong> ({{.ProviderCountry}}) as <code>{{.Subject}}</code>.</p>
+<p class="muted">That sub is pairwise: this service's own, for this citizen. Another service is given a different one.</p>
 <table><tr><th>Asked for</th><th>Received</th></tr>
 {{range .Claims}}<tr><td>{{.Label}}</td><td>{{if .Shared}}{{.Value}}{{else}}<span class="muted">not shared</span>{{end}}</td></tr>{{end}}</table>
 <p class="muted">From an ID token issued by <code>{{.Issuer}}</code>, over PAR, a signed request object, PKCE and a DPoP-bound access token.</p>

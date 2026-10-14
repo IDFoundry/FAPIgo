@@ -3,10 +3,12 @@ package union_test
 import (
 	"crypto/tls"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -149,6 +151,70 @@ func TestDomesticSignIn(t *testing.T) {
 	mustContain(t, body, "signed in", "Ilse")
 }
 
+// signedInSub is the sub a service's welcome page says it was given.
+func signedInSub(t *testing.T, body string) string {
+	t.Helper()
+	m := regexp.MustCompile(`as <code>([^<]+)</code>`).FindStringSubmatch(body)
+	if m == nil {
+		t.Fatalf("no sub on the welcome page:\n%s", body)
+	}
+	return m[1]
+}
+
+func TestServicesGetDifferentPairwiseSubs(t *testing.T) {
+	w, n := startUnion(t)
+	b := newBrowser(t, n)
+
+	subAt := func(service string) string {
+		t.Helper()
+		status, body := signIn(t, w, b, service, "id.eastmark.localhost", "em-3306", "given_name")
+		if status != http.StatusOK {
+			t.Fatalf("sign-in at %s = %d:\n%s", service, status, body)
+		}
+		return signedInSub(t, body)
+	}
+	bank, telco := subAt("bank.southport.localhost"), subAt("telco.eastmark.localhost")
+	if bank == telco {
+		t.Fatalf("the bank and the telecom were given the same sub %q", bank)
+	}
+	for _, sub := range []string{bank, telco} {
+		if !strings.HasPrefix(sub, "ppid:") || strings.Contains(sub, "em-3306") {
+			t.Fatalf("sub %q isn't a pairwise sub", sub)
+		}
+	}
+	if again := subAt("bank.southport.localhost"); again != bank {
+		t.Fatalf("the bank's sub changed between sign-ins: %q, then %q", bank, again)
+	}
+
+	_, body, _ := b.get(w.URL("console.localhost", "/"))
+	mustContain(t, body, "Pairwise subjects", "Tomas Novak", bank, telco)
+}
+
+func TestServiceCantClaimAnothersSector(t *testing.T) {
+	// The reason a registration is refused reaches only the identity
+	// provider's log: capture it, to check the refusal is the sector rule's.
+	var logged strings.Builder
+	log.SetOutput(&logged)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	w, n := startUnion(t)
+	w.Scenes().ClaimBankSector.Store(true)
+
+	status, body := signIn(t, w, newBrowser(t, n), "telco.eastmark.localhost", "id.eastmark.localhost", "em-3306", "given_name")
+	if status == http.StatusOK {
+		t.Fatalf("the telecom signed in with the bank's redirect URI:\n%s", body)
+	}
+	mustContain(t, body, "invalid_client")
+	if !strings.Contains(logged.String(), "redirect_uris must all be https on the Entity Identifier's host") {
+		t.Fatalf("the telecom wasn't refused for its sector; log:\n%s", logged.String())
+	}
+	// The bank itself is unaffected.
+	status, body = signIn(t, w, newBrowser(t, n), "bank.southport.localhost", "id.eastmark.localhost", "em-3306", "given_name")
+	if status != http.StatusOK {
+		t.Fatalf("bank sign-in = %d:\n%s", status, body)
+	}
+}
+
 func TestForgedAssuranceMarkIsRejected(t *testing.T) {
 	w, n := startUnion(t)
 	w.Scenes().ForgeEastmarkMark.Store(true)
@@ -231,7 +297,7 @@ func TestTourAndSceneReset(t *testing.T) {
 		t.Fatalf("reset = %d:\n%s", status, body)
 	}
 	s := w.Scenes()
-	if s.ForgeEastmarkMark.Load() || s.SuspendEastmark.Load() || s.CompromiseEastmark.Load() {
+	if s.ForgeEastmarkMark.Load() || s.SuspendEastmark.Load() || s.CompromiseEastmark.Load() || s.ClaimBankSector.Load() {
 		t.Fatal("reset left a scene on")
 	}
 	_, body, _ = b.get(w.URL("bank.southport.localhost", "/"))

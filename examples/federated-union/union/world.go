@@ -52,8 +52,8 @@ type serviceSpec struct {
 }
 
 var services = []serviceSpec{
-	{host: "bank.southport.localhost", name: "Southport Savings Bank", country: "southport"},
-	{host: "telco.eastmark.localhost", name: "Eastmark Telecom", country: "eastmark"},
+	{host: bankHost, name: "Southport Savings Bank", country: "southport"},
+	{host: telcoHost, name: "Eastmark Telecom", country: "eastmark"},
 }
 
 // localhost is the suffix every demo host shares.
@@ -66,6 +66,8 @@ const (
 	unionHost    = "union.localhost"
 	consoleHost  = "console.localhost"
 	impostorHost = "bank.northland.localhost"
+	bankHost     = "bank.southport.localhost"
+	telcoHost    = "telco.eastmark.localhost"
 )
 
 // Scenes are the switches the console flips.
@@ -79,6 +81,9 @@ type Scenes struct {
 	// CompromiseEastmark: Eastmark's national authority starts vouching
 	// for an impostor claiming a Northland host.
 	CompromiseEastmark atomic.Bool
+	// ClaimBankSector: Eastmark Telecom publishes the bank's redirect URI
+	// as its own, to be given the bank's pairwise subs.
+	ClaimBankSector atomic.Bool
 }
 
 // World is the whole running federation.
@@ -97,6 +102,7 @@ type World struct {
 	loaHighType  string
 	router       demokit.HostRouter
 	consoleState *console
+	issued       issuedLog // the pairwise subs identity providers issued, for the console
 }
 
 // Hosts is every host name the demo serves, for its TLS certificate.

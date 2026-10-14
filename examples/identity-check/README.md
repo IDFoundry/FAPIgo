@@ -18,9 +18,18 @@ bank, **Alder Bank**, acting as an [OpenID Provider](https://openid.net/specs/op
   read the claims.
 
 A second relying party, **Brightline Rentals**, asks for less and gets
-its ID token signed but not encrypted. An **attack lab** tries to get
-around each protection, and every check shows a protocol trace of what
-crossed the wire.
+its ID token signed but not encrypted.
+
+Neither relying party learns Sam's username at the bank. Each gets a
+**pairwise subject identifier** (OIDC Core §8): a `sub` the bank
+derives for Sam and that relying party's sector, so Fernway and
+Brightline know Sam by different, unrelated `sub`s and can't link
+their records by it. The console compares what each one knows, and
+shows the honest limit: a claim Sam released to both, such as an email
+address, links them anyway.
+
+An **attack lab** tries to get around each protection, and every check
+shows a protocol trace of what crossed the wire.
 
 Everything runs in one process, on your machine, each party at its own
 `*.localhost` host.
@@ -115,10 +124,29 @@ you approved, so asking again gets nothing more.
 | Swap in Alex's UserInfo response | Genuine and encrypted to Fernway, but its `sub` isn't the ID token's (OIDC Core §5.3.2) |
 | Tamper with the UserInfo response | It no longer decrypts |
 | Use the access token from another device | The token is DPoP-bound to Fernway's key |
+| Name you with Brightline's ID token (`id_token_hint`) | A genuine ID token from the bank, but issued to Brightline: the bank accepts an `id_token_hint` only from the client it issued that ID token to (OIDC Core §3.1.2.1) |
+| Brightline asks for you by Fernway's `sub` | A `claims` request for a specific `sub` (OIDC Core §5.5.1), but the `sub` Fernway knows you by isn't one the bank issued for Brightline's sector: the bank refuses the request (`invalid_request`) |
+| Change the access token's `sub` to Brightline's | The changed token no longer matches the DPoP proof bound to it (`invalid_dpop_proof`); the bank's signature covers the `sub` too |
 
 **5. Compare Brightline Rentals.** It asks only for your name, date of
-birth and address, accepts any sign-in, and gets its ID token signed
-but not encrypted. You still decide what's released.
+birth, address and email, accepts any sign-in, and gets its ID token
+signed but not encrypted. You still decide what's released. Its check
+page shows the `sub` the bank gave it for you: not the one Fernway got.
+
+**6. Compare what they know.** With a check at both, the console's
+**What each relying party knows** panel lists each one's customers by
+its own `sub`, and **If they compare notes** joins their records:
+
+| Join on | Result |
+|---|---|
+| `sub` | No customer in common: Alder Bank gave each relying party a different `sub` for Sam |
+| email | Linked, if Sam released their email address to both: pairwise `sub`s hide only the `sub`, not the claims a customer shares |
+
+To see the email join fail too, start the demo again and untick your
+email address at one of them. The console's **What Alder Bank's
+UserInfo endpoint saw** panel shows each UserInfo request's `sub` and
+the customer the bank mapped it back to: the username stays at the
+bank, and the response carries only that relying party's `sub`.
 
 ## How it's built
 
@@ -126,9 +154,9 @@ Everything here uses FAPIgo's public API only.
 
 | Piece | FAPIgo |
 |---|---|
-| Alder Bank | `server.Server` with `Dependencies.IdentityClaims` (its customers' verified claims), `Dependencies.ClientKeys` and `Dependencies.ClientEncryptionKeys` both set to an `ephemeral.ClientKeySource` holding each client's registered JWK Set (its client-assertion key and the keys to encrypt to it), and `Algorithms.UserInfo` and the ID token and UserInfo encryption algorithms; clients registered for encrypted ID tokens and UserInfo responses; the consent page reading `InteractionRequest.RequestedClaims`, `ACRValues` and `MaxAge`, and answering with `GrantedAuthorization.ApprovedIdentityClaims` and `NewAuthenticationContext`'s `acr` and authentication time; discovery from `server.Metadata` plus `userinfo_endpoint` and `claims_supported` |
-| The UserInfo endpoint | `serverresource.NewVerifier`; the approved claim names from the access token's `server.RequestedUserinfoClaimsKey`; `serverresource.SignUserInfoResponse`, which signs for the access token's own client and, if it registered for it, encrypts |
-| Fernway, Brightline | `client.NewFromDiscovery`; `BeginAuthorization` with `Claims`, `ACRValues` and `MaxAge`; `ExchangeCode`, with `Dependencies.Decryption` for the encrypted ID token; `TokenSet.IDTokenClaims` (`ACR`, `AuthTime`, the claims); `FetchUserInfo` |
+| Alder Bank | `server.Server` with `Config.Subjects` set to pairwise by default (`server.SubjectConfig`, a `pairwise.NewPrefix`) and `Dependencies.PairwiseSubjects` a `pairwise.NewReversible` deriver, so each client gets its own `sub` for each customer and the bank can map one back; `Dependencies.IdentityClaims` (its customers' verified claims), `Dependencies.ClientKeys` and `Dependencies.ClientEncryptionKeys` both set to an `ephemeral.ClientKeySource` holding each client's registered JWK Set (its client-assertion key and the keys to encrypt to it), and `Algorithms.UserInfo` and the ID token and UserInfo encryption algorithms; clients registered for encrypted ID tokens and UserInfo responses; the consent page reading `InteractionRequest.RequestedClaims`, `ACRValues` and `MaxAge`, and answering with `GrantedAuthorization.ApprovedIdentityClaims` and `NewAuthenticationContext`'s `acr` and authentication time; discovery from `server.Metadata` plus `userinfo_endpoint` and `claims_supported` |
+| The UserInfo endpoint | `serverresource.NewVerifier`, which wires in the bank's pairwise deriver, so `resource.AuthorizationContext` carries both `InternalSubject` (the customer, for the bank's own lookup) and `ClientSubject` (the client's `sub`, for the response); the approved claim names from the access token's `server.RequestedUserinfoClaimsKey`; `serverresource.SignUserInfoResponse`, which signs for the access token's own client and, if it registered for it, encrypts |
+| Fernway, Brightline | `client.NewFromDiscovery`; `BeginAuthorization` with `Claims`, `ACRValues` and `MaxAge` (and, in the attack lab, `Extensions` carrying an `id_token_hint` or a `claims` `sub` value); `ExchangeCode`, with `Dependencies.Decryption` for the encrypted ID token; `TokenSet.IDTokenClaims` (`ACR`, `AuthTime`, the claims); `FetchUserInfo` |
 
 The code:
 
@@ -139,6 +167,18 @@ The code:
 - [`identity/e2e_test.go`](identity/e2e_test.go) — the checks, the refusals and every attack, driven end to end.
 
 ## What's simplified
+
+- The bank's two pairwise keys are generated at startup, so every
+  `sub` changes when the demo restarts. A real deployment generates
+  them once and keeps them wrapped by its KMS, or in an HSM
+  (`pairwise.NewReversibleWith`): losing or changing them gives every
+  customer a new `sub` at every relying party. [Choosing a
+  deriver](../../GETTING_STARTED.md#pairwise-subjects) compares the
+  reversible deriver with the one-way and mapping ones.
+- Both relying parties get pairwise `sub`s. A bank moving existing
+  relying parties over would keep those on public `sub`s (their
+  registration's `SubjectType`) and give pairwise ones to new relying
+  parties only: the same section shows that setup.
 
 - Sign-in is a username and a PIN; "approve in the app" is a radio
   button. A real bank would run its own strong authentication.

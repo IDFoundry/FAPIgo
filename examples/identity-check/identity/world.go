@@ -6,8 +6,9 @@
 // The customer sees each claim with the bank's value and can withhold
 // any of them. The ID token and the UserInfo response come back signed
 // by the bank and encrypted to Fernway. A second relying party,
-// Brightline Rentals, asks for less. An attack lab tries to get around
-// each protection.
+// Brightline Rentals, asks for less. Each knows the customer by its own
+// pairwise sub (OIDC Core §8), so the two can't link their records by
+// it. An attack lab tries to get around each protection.
 //
 // Everything runs in one process behind a demokit.HostRouter, each party
 // at its own *.localhost host.

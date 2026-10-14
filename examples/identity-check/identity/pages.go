@@ -50,6 +50,9 @@ type consolePage struct {
 	Fernway, Brightline string
 	Tour                []tourStep
 	Log                 []demokit.FetchEntry
+	Known               []rpKnowledge
+	Comparison          comparison
+	UserInfoCalls       []userInfoCall
 }
 
 type errorPage struct {
@@ -98,10 +101,27 @@ code { font-size: 12px; word-break: break-all; }
 
 var pageTemplates = map[string]string{
 	"console": `{{template "top" .}}
-<p class="muted">Fernway, a fintech, opens a savings account for an Alder Bank customer and has to verify who they are. Instead of a photo-ID upload, the customer signs in at Alder Bank, acting as an OpenID Provider. Fernway asks for exactly the identity claims it needs and for a strong, recent sign-in; the customer sees each claim and can withhold any of them; the ID token and UserInfo response come back signed by the bank and encrypted to Fernway. Brightline Rentals, a letting agent, asks for less. The attack lab tries to get around each protection. Everything runs in this one process, each party at its own host. Sign in at the bank as <strong>sam</strong>, PIN <strong>2468</strong>.</p>
+<p class="muted">Fernway, a fintech, opens a savings account for an Alder Bank customer and has to verify who they are. Instead of a photo-ID upload, the customer signs in at Alder Bank, acting as an OpenID Provider. Fernway asks for exactly the identity claims it needs and for a strong, recent sign-in; the customer sees each claim and can withhold any of them; the ID token and UserInfo response come back signed by the bank and encrypted to Fernway. Brightline Rentals, a letting agent, asks for less. Each one knows the customer by its own pairwise sub, so the two can't link them by it. The attack lab tries to get around each protection. Everything runs in this one process, each party at its own host. Sign in at the bank as <strong>sam</strong>, PIN <strong>2468</strong>.</p>
 <p class="actions"><a class="button" href="{{.Fernway}}">Open Fernway</a> <a class="button secondary" href="{{.Brightline}}">Open Brightline Rentals</a></p>
 <h2>Start here</h2>
 <ol class="tour">{{range .Tour}}<li class="card"><strong>{{.Title}}</strong><p>{{.Do}}</p><p class="muted">{{.Notice}}</p></li>{{end}}</ol>
+<h2>What each relying party knows</h2>
+<div class="card"><p class="muted">Each relying party's verified customers, by the sub Alder Bank gave it, and the claims it was given. The sub is pairwise (OpenID Connect Core §8): the bank derives one per customer for each relying party, so the same person has a different sub at each. <a href="/">Refresh</a></p>
+{{range .Known}}<p><strong>{{.Name}}</strong></p>
+<table><tr><th>sub</th><th>Name</th><th>Email</th><th>Sign-ins</th></tr>
+{{range .Customers}}<tr><td><code>{{.Sub}}</code></td><td>{{.Name}}</td><td>{{if .Email}}{{.Email}}{{else}}<span class="muted">not released</span>{{end}}</td><td>{{.SignIns}}</td></tr>{{else}}<tr><td colspan="4" class="muted">No verified customers yet.</td></tr>{{end}}
+</table>{{end}}
+<h2>If they compare notes</h2>
+{{with .Comparison}}{{if .Ready}}
+<p>{{if .SameSub}}<span class="pill bad">linked</span> Joined on sub: {{range .SameSub}}<code>{{.}}</code> {{end}}{{else}}<span class="pill ok">no link</span> Joined on sub: no customer in common. Alder Bank gave each a different sub for the same person.{{end}}</p>
+<p>{{range .SameEmail}}<span class="pill bad">linked</span> Joined on email: <strong>{{.Email}}</strong> is Fernway's <code>{{.FernwaySub}}</code> and Brightline's <code>{{.BrightlineSub}}</code>.<br>{{else}}<span class="pill ok">no link</span> Joined on email: nothing, because no email address was released to both.{{end}}</p>
+<p class="muted">Pairwise subs hide only the sub. Any claim released to both, such as an email address or a phone number, links the customer just as well, so what each relying party may see stays your choice on the bank's consent page.</p>
+{{else}}<p class="muted">Verify at both Fernway and Brightline Rentals to compare them.</p>{{end}}{{end}}</div>
+<h2>What Alder Bank's UserInfo endpoint saw</h2>
+<div class="card"><p class="muted">Each UserInfo request reaches the bank with the sub that relying party knows the customer by. The bank maps it back to the customer (InternalSubject) to look up their claims; what it sends back carries only the relying party's own sub (ClientSubject).</p>
+<table><tr><th>When</th><th>Client</th><th>sub the client knows</th><th>Customer, at the bank</th></tr>
+{{range .UserInfoCalls}}<tr><td class="muted">{{.At.Format "15:04:05"}}</td><td>{{.Client}}</td><td><code>{{.ClientSub}}</code></td><td>{{.Person}}</td></tr>{{else}}<tr><td colspan="4" class="muted">No UserInfo requests yet.</td></tr>{{end}}
+</table></div>
 <h2>Traffic between the parties</h2>
 <div class="card"><p class="muted">Every request one party made to another, newest first. <a href="/">Refresh</a></p>
 <table><tr><th>When</th><th>From</th><th>Request</th><th>Result</th></tr>
@@ -119,7 +139,8 @@ var pageTemplates = map[string]string{
 {{with .Check}}
 {{if eq .Status "verified"}}<div class="card"><p><span class="pill ok">verified</span> Alder Bank confirmed who you are.</p>
 <table><tr><th>Claim</th><th>Value</th><th>From</th></tr>{{range .Claims}}<tr><td>{{.Label}}</td><td>{{.Value}}</td><td class="muted">{{.Source}}</td></tr>{{end}}</table>
-<p class="muted">Signed in at {{.AuthTime}} · acr {{.ACR}}</p></div>
+<p class="muted">Signed in at {{.AuthTime}} · acr {{.ACR}}</p>
+<p class="muted">Alder Bank knows you here as <code>{{.Sub}}</code>: a pairwise sub, this relying party's alone. Another relying party gets a different one for you.</p></div>
 {{if $.AttackLab}}<div class="card" id="attempts"><h2>Attack lab</h2>
 <form method="post" action="/attack" class="actions"><input type="hidden" name="id" value="{{.ID}}">
 <button class="attack" name="kind" value="withheld">Ask UserInfo again for withheld claims</button>
@@ -128,7 +149,10 @@ var pageTemplates = map[string]string{
 <button class="attack" name="kind" value="swap-brightline">Swap in Brightline's ID token</button>
 <button class="attack" name="kind" value="other-userinfo">Swap in Alex's UserInfo response</button>
 <button class="attack" name="kind" value="tamper-userinfo">Tamper with the UserInfo response</button>
-<button class="attack" name="kind" value="stolen">Use the access token from another device</button></form>
+<button class="attack" name="kind" value="stolen">Use the access token from another device</button>
+<button class="attack" name="kind" value="hint-other-rp">Name you with Brightline's ID token (id_token_hint)</button>
+<button class="attack" name="kind" value="sub-from-other-rp">Brightline asks for you by Fernway's sub</button>
+<button class="attack" name="kind" value="forge-sub">Change the access token's sub to Brightline's</button></form>
 {{range .Attempts}}<p>{{if .Refused}}<span class="pill ok">refused</span>{{else}}<span class="pill bad">allowed</span>{{end}} {{.Title}}</p><pre>{{.Result}}</pre>{{end}}
 </div>{{end}}{{end}}
 {{if eq .Status "redirected"}}<div class="card"><p>Waiting for Alder Bank.</p></div>{{end}}

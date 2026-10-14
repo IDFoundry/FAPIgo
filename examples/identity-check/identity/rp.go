@@ -53,9 +53,9 @@ var fernwaySetup = rpSetup{
 
 var brightlineSetup = rpSetup{
 	name: "Brightline Rentals", host: brightlineHost, clientID: "brightline-rentals",
-	purpose:        "Apply to rent a flat. Brightline checks your name and that you're over 18, and asks for your current address.",
+	purpose:        "Apply to rent a flat. Brightline checks your name and that you're over 18, and asks for your current address and an email address to send the lease to.",
 	idTokenClaims:  []string{"given_name", "family_name", "birthdate"},
-	userInfoClaims: []string{"address"},
+	userInfoClaims: []string{"address", "email"},
 }
 
 // relyingParty is Fernway or Brightline Rentals: a client of Alder Bank's
@@ -86,16 +86,23 @@ type check struct {
 	ID, Scenario string
 	Status       string // redirected, verified, refused
 	Problem      string
-	Username     string // whose identity the bank asserted, when verified
-	trace        *trace
-	wire         *wireArtifacts
-	swapIDToken  string
-	session      client.SessionHandle
-	tokens       client.TokenSet
-	Claims       []claimRow
-	ACR          string
-	AuthTime     string
-	Attempts     []attempt
+	// Sub is the sub Alder Bank gave this relying party for the customer,
+	// when verified: a pairwise sub, so another relying party gets a
+	// different one for the same customer. Name and Email are the claims
+	// of those the customer released, for the console's comparison.
+	Sub, Name, Email string
+	// lab is a sign-in the attack lab scripted, not one made in the
+	// browser.
+	lab         bool
+	trace       *trace
+	wire        *wireArtifacts
+	swapIDToken string
+	session     client.SessionHandle
+	tokens      client.TokenSet
+	Claims      []claimRow
+	ACR         string
+	AuthTime    string
+	Attempts    []attempt
 }
 
 // claimRow is one verified claim as the relying party's page shows it.
@@ -378,7 +385,9 @@ func (rp *relyingParty) complete(ctx context.Context, ck *check, handle client.S
 	}
 	rp.mu.Lock()
 	defer rp.mu.Unlock()
-	ck.tokens, ck.Username, ck.Status = tokens, tokens.Subject, "verified"
+	ck.tokens, ck.Sub, ck.Status = tokens, tokens.Subject, "verified"
+	ck.Name = strings.TrimSpace(claimString(idClaims.Parameters, "given_name") + " " + claimString(idClaims.Parameters, "family_name"))
+	ck.Email = claimString(info.Parameters, "email")
 	ck.ACR, ck.AuthTime = idClaims.ACR, idClaims.AuthTime.Format("15:04:05")
 	ck.Claims = claimRows(idClaims.Parameters, "ID token")
 	ck.Claims = append(ck.Claims, claimRows(info.Parameters, "UserInfo")...)
@@ -395,6 +404,15 @@ func claimRows(params map[string]json.RawMessage, source string) []claimRow {
 		rows = append(rows, claimRow{Label: claimLabels[name], Value: claimText(raw), Source: source})
 	}
 	return rows
+}
+
+// claimString is the string claim name among params, or "".
+func claimString(params map[string]json.RawMessage, name string) string {
+	var s string
+	if raw, ok := params[name]; ok && json.Unmarshal(raw, &s) == nil {
+		return s
+	}
+	return ""
 }
 
 // claimText is a claim's value for a page: a string as itself, an

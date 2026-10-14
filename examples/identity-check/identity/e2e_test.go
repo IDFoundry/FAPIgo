@@ -177,13 +177,28 @@ func TestAttacks(t *testing.T) {
 	if id == nil {
 		t.Fatalf("no check ID:\n%s", page)
 	}
-	kinds := []string{"eavesdrop", "swap-alex", "swap-brightline", "other-userinfo", "tamper-userinfo", "stolen"}
+	kinds := []string{"eavesdrop", "swap-alex", "swap-brightline", "other-userinfo", "tamper-userinfo", "stolen", "hint-other-rp", "sub-from-other-rp", "forge-sub"}
 	for _, kind := range kinds {
 		d.post("fernway.localhost", "/attack", url.Values{"id": {id[1]}, "kind": {kind}})
 	}
 	page = d.get("fernway.localhost", "/check?id="+id[1])
 	if refused, allowed := strings.Count(page, `pill ok">refused`), strings.Count(page, `pill bad">allowed`); refused != len(kinds) || allowed != 0 {
 		t.Errorf("attacks: %d refused, %d allowed; want all %d refused\n%s", refused, allowed, len(kinds), page)
+	}
+	// Refused for the reason each attack is about, not because the lab
+	// couldn't set it up.
+	mustContain(t, "the attack lab", page,
+		"encrypted (JWE, 5 parts)",
+		"nonce does not match",
+		"ID token is not encrypted",
+		"UserInfo response sub does not match the ID token&#39;s sub",
+		"decryption failed",
+		"invalid_token: access token is not bound to the presented credential",
+		"id_token_hint is not an ID token this server issued to the client",
+		"a pairwise subject this server issued to the client",
+		"invalid_dpop_proof")
+	if strings.Contains(page, "replayed sign-in") || strings.Contains(page, "didn&#39;t reach") {
+		t.Errorf("an attack failed to set up:\n%s", page)
 	}
 	t.Log(page[strings.Index(page, `id="attempts"`):strings.Index(page, "Protocol trace")])
 }
@@ -195,4 +210,54 @@ func TestVerifyWithBrightline(t *testing.T) {
 	if strings.Contains(page, "Quay Street") {
 		t.Error("Brightline shows the address Sam withheld")
 	}
+}
+
+// subOn is the pairwise sub a verified check page shows.
+var subOn = regexp.MustCompile(`knows you here as <code>(ppid:[^<]+)</code>`)
+
+func (d *demo) sub(where, page string) string {
+	d.t.Helper()
+	m := subOn.FindStringSubmatch(page)
+	if m == nil {
+		d.t.Fatalf("%s shows no pairwise sub:\n%s", where, page)
+	}
+	return m[1]
+}
+
+func TestPairwiseSubjectsPerRelyingParty(t *testing.T) {
+	d := start(t)
+	page, _ := d.verify("fernway.localhost", "app", allClaims)
+	fernway := d.sub("Fernway's check", page)
+	page, _ = d.verify("fernway.localhost", "app", allClaims)
+	if again := d.sub("Fernway's second check", page); again != fernway {
+		t.Errorf("Fernway's sub changed between sign-ins: %s, then %s", fernway, again)
+	}
+	page, _ = d.verify("brightline.localhost", "pin", []string{"given_name", "family_name", "birthdate", "email"})
+	brightline := d.sub("Brightline's check", page)
+	if brightline == fernway {
+		t.Fatalf("Fernway and Brightline got the same sub, %s", fernway)
+	}
+	if strings.Contains(fernway, "sam") || strings.Contains(brightline, "sam") {
+		t.Errorf("a pairwise sub shows the username: %s, %s", fernway, brightline)
+	}
+
+	console := d.get("console.localhost", "/")
+	mustContain(t, "the console", console,
+		"<code>"+fernway+"</code>", "<code>"+brightline+"</code>",
+		"Joined on sub: no customer in common",
+		"Joined on email: <strong>sam.rivera@example.com</strong>",
+		// The UserInfo endpoint: each relying party's sub, mapped back to sam.
+		"<td>fernway</td><td><code>"+fernway+"</code></td><td>sam</td>",
+		"<td>brightline-rentals</td><td><code>"+brightline+"</code></td><td>sam</td>")
+	if !strings.Contains(console, "<td>2</td>") {
+		t.Errorf("the console doesn't count Fernway's two sign-ins under one sub")
+	}
+}
+
+func TestPairwiseSubjectsDontLinkWithoutASharedClaim(t *testing.T) {
+	d := start(t)
+	d.verify("fernway.localhost", "app", []string{"given_name", "family_name", "birthdate", "address", "phone_number"})
+	d.verify("brightline.localhost", "pin", []string{"given_name", "family_name", "birthdate", "email"})
+	console := d.get("console.localhost", "/")
+	mustContain(t, "the console", console, "Joined on sub: no customer in common", "Joined on email: nothing")
 }

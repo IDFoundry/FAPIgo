@@ -107,11 +107,12 @@ func NewClient(cfg TransportConfig) (*http.Client, error) {
 	cfg.AllowedPrivateHosts = slices.Clone(cfg.AllowedPrivateHosts)
 
 	base := &net.Dialer{Timeout: cfg.DialTimeout}
+	dialer := new(identityMarker)
 	transport := &http.Transport{
 		DialContext: safeDialContext(base, loopbackPolicy{
 			literalHosts: cfg.AllowLoopbackHosts || cfg.AllowLoopbackHTTP,
 			named:        cfg.AllowedLoopbackHosts,
-		}, cfg.AllowedPrivateHosts),
+		}, cfg.AllowedPrivateHosts, dialer),
 		TLSHandshakeTimeout: cfg.TLSHandshakeTimeout,
 		TLSClientConfig: &tls.Config{
 			MinVersion:           tls.VersionTLS12,
@@ -121,7 +122,7 @@ func NewClient(cfg TransportConfig) (*http.Client, error) {
 		},
 		ForceAttemptHTTP2: true,
 	}
-	registerHardened(transport, cfg)
+	registerHardened(transport, cfg, dialer)
 	return &http.Client{
 		Transport: transport,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
@@ -134,9 +135,14 @@ func NewClient(cfg TransportConfig) (*http.Client, error) {
 // it's already an IP literal), validates every candidate address, and
 // dials the first one that passes — so the address actually connected to
 // is always one this function itself checked, never a name resolved a
-// second time by the caller's dialer.
-func safeDialContext(base *net.Dialer, loopback loopbackPolicy, allowedPrivateHosts []string) func(context.Context, string, string) (net.Conn, error) {
+// second time by the caller's dialer. It answers HardeningOf's identity
+// probe with marker, which tells this transport's dialer apart from
+// another NewClient transport's.
+func safeDialContext(base *net.Dialer, loopback loopbackPolicy, allowedPrivateHosts []string, marker *identityMarker) func(context.Context, string, string) (net.Conn, error) {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if network == identityProbeNetwork {
+			return nil, identityProbe{marker: marker}
+		}
 		host, port, err := net.SplitHostPort(addr)
 		if err != nil {
 			return nil, err

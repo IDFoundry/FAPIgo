@@ -1,7 +1,10 @@
 package fapihttp
 
 import (
+	"context"
 	"crypto/tls"
+	"errors"
+	"net"
 	"net/http"
 	"reflect"
 	"runtime"
@@ -38,19 +41,40 @@ var hardenedTransports sync.Map // weak.Pointer[http.Transport] -> hardenedRecor
 
 // hardenedRecord is what NewClient built a transport with.
 type hardenedRecord struct {
-	hardening Hardening
-	dialer    uintptr // the code pointer of its safeDialContext dialer
+	hardening  Hardening
+	dialerCode uintptr         // the code pointer of the safeDialContext closure
+	dialer     *identityMarker // the marker this transport's dialer answers with
 }
 
-// registerHardened records t, built by NewClient from cfg.
-func registerHardened(t *http.Transport, cfg TransportConfig) {
+// identityMarker is a value only one closure NewClient builds holds, so
+// HardeningOf can tell which transport's closure it's looking at: Go
+// func values can't be compared, and every closure from one function
+// literal shares its code. It isn't zero-sized, so distinct markers
+// never share an address.
+type identityMarker struct{ _ byte }
+
+// identityProbe is the error a closure NewClient built answers an
+// identity probe with, carrying its marker.
+type identityProbe struct{ marker *identityMarker }
+
+func (identityProbe) Error() string { return "fapihttp: identity probe" }
+
+// identityProbeNetwork is the network HardeningOf dials to probe a
+// dialer's identity: one net/http never passes, so the dialer can't
+// mistake a real dial for it.
+const identityProbeNetwork = "fapihttp-identity-probe"
+
+// registerHardened records t, built by NewClient from cfg, whose dialer
+// answers the identity probe with dialer.
+func registerHardened(t *http.Transport, cfg TransportConfig, dialer *identityMarker) {
 	key := weak.Make(t)
 	hardenedTransports.Store(key, hardenedRecord{
 		hardening: Hardening{
 			allowsLoopback:      cfg.AllowsLoopback(),
 			allowedPrivateHosts: slices.Clone(cfg.AllowedPrivateHosts),
 		},
-		dialer: reflect.ValueOf(t.DialContext).Pointer(),
+		dialerCode: reflect.ValueOf(t.DialContext).Pointer(),
+		dialer:     dialer,
 	})
 	runtime.AddCleanup(t, func(k weak.Pointer[http.Transport]) { hardenedTransports.Delete(k) }, key)
 }
@@ -74,10 +98,9 @@ func registerHardened(t *http.Transport, cfg TransportConfig) {
 // validation never looked), and TLSClientConfig still requires TLS 1.2
 // or later and doesn't skip verification. Adding a client certificate
 // (TransportConfig.Certificates, or setting TLSClientConfig.Certificates
-// afterwards) changes none of that. The dialer check compares code, not
-// closures: it can't tell this transport's dialer from another
-// NewClient transport's, which validates addresses just the same but
-// may grant different exceptions.
+// afterwards) changes none of that. The dialer must be this transport's
+// own: another NewClient transport's dialer, which may grant different
+// exceptions, doesn't count.
 func HardeningOf(c *http.Client) (Hardening, bool) {
 	if c == nil {
 		return Hardening{}, false
@@ -97,7 +120,7 @@ func HardeningOfTransport(rt http.RoundTripper) (Hardening, bool) {
 		return Hardening{}, false
 	}
 	record := v.(hardenedRecord)
-	if !transportIntact(t, record.dialer) {
+	if !transportIntact(t, record) {
 		return Hardening{}, false
 	}
 	return Hardening{
@@ -106,17 +129,29 @@ func HardeningOfTransport(rt http.RoundTripper) (Hardening, bool) {
 	}, true
 }
 
-// transportIntact reports whether t still dials only through its
-// address-validating dialer (whose code pointer is dialer) and still
-// verifies servers over TLS 1.2 or later.
-func transportIntact(t *http.Transport, dialer uintptr) bool {
-	if t.DialContext == nil || reflect.ValueOf(t.DialContext).Pointer() != dialer {
+// transportIntact reports whether t still dials only through its own
+// address-validating dialer, as record describes, and still verifies
+// servers over TLS 1.2 or later.
+func transportIntact(t *http.Transport, record hardenedRecord) bool {
+	if !isOwnDialer(t.DialContext, record) {
 		return false
 	}
 	if t.Proxy != nil || t.Dial != nil || t.DialTLS != nil || t.DialTLSContext != nil { //nolint:staticcheck // Dial and DialTLS are deprecated, but a caller can still set them
 		return false
 	}
 	return tlsIntact(t.TLSClientConfig)
+}
+
+// isOwnDialer reports whether dial is the address-validating closure
+// NewClient built for record's transport. Only a closure with that code
+// is probed, so no other function is ever called.
+func isOwnDialer(dial func(context.Context, string, string) (net.Conn, error), record hardenedRecord) bool {
+	if dial == nil || reflect.ValueOf(dial).Pointer() != record.dialerCode {
+		return false
+	}
+	_, err := dial(context.Background(), identityProbeNetwork, "")
+	var probe identityProbe
+	return errors.As(err, &probe) && probe.marker == record.dialer
 }
 
 // tlsIntact reports whether cfg still requires TLS 1.2 or later and

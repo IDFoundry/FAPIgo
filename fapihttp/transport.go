@@ -3,6 +3,7 @@ package fapihttp
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net"
 	"net/http"
@@ -46,6 +47,13 @@ type TransportConfig struct {
 	// handshake. It adds checks, such as certificate pinning over
 	// ConnectionState.VerifiedChains; it can't loosen verification.
 	VerifyConnection func(tls.ConnectionState) error
+
+	// RootCAs, if set, becomes the TLS configuration's RootCAs: the
+	// certificate authorities server certificates must chain to, in
+	// place of the system's (a private CA's servers, say). Set it here:
+	// HardeningOf refuses a transport whose RootCAs was changed after
+	// NewClient built it.
+	RootCAs *x509.CertPool
 
 	// Certificates and GetClientCertificate present a client
 	// certificate (mutual TLS: RFC 8705 client authentication or
@@ -108,6 +116,12 @@ func NewClient(cfg TransportConfig) (*http.Client, error) {
 
 	base := &net.Dialer{Timeout: cfg.DialTimeout}
 	dialer := new(identityMarker)
+	var verifier *identityMarker
+	verifyConnection := cfg.VerifyConnection
+	if verifyConnection != nil {
+		verifier = new(identityMarker)
+		verifyConnection = verifyConnectionWith(verifier, verifyConnection)
+	}
 	transport := &http.Transport{
 		DialContext: safeDialContext(base, loopbackPolicy{
 			literalHosts: cfg.AllowLoopbackHosts || cfg.AllowLoopbackHTTP,
@@ -116,13 +130,14 @@ func NewClient(cfg TransportConfig) (*http.Client, error) {
 		TLSHandshakeTimeout: cfg.TLSHandshakeTimeout,
 		TLSClientConfig: &tls.Config{
 			MinVersion:           tls.VersionTLS12,
-			VerifyConnection:     cfg.VerifyConnection,
+			VerifyConnection:     verifyConnection,
+			RootCAs:              cfg.RootCAs,
 			Certificates:         cfg.Certificates,
 			GetClientCertificate: cfg.GetClientCertificate,
 		},
 		ForceAttemptHTTP2: true,
 	}
-	registerHardened(transport, cfg, dialer)
+	registerHardened(transport, cfg, dialer, verifier)
 	return &http.Client{
 		Transport: transport,
 		CheckRedirect: func(*http.Request, []*http.Request) error {

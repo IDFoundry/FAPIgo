@@ -2,9 +2,13 @@ package fapihttp
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
+	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -90,5 +94,109 @@ func TestHardeningOfNeverCallsAForeignDialer(t *testing.T) {
 	}
 	if called {
 		t.Fatal("HardeningOf called a dialer NewClient didn't build")
+	}
+}
+
+// TestHardeningOfRefusesTLSWeakenings: each change below weakens or
+// reveals what the handshake checks, so a transport with it no longer
+// counts as hardened.
+func TestHardeningOfRefusesTLSWeakenings(t *testing.T) {
+	for name, tamper := range map[string]func(*tls.Config){
+		"key log":               func(c *tls.Config) { c.KeyLogWriter = io.Discard },
+		"fixed clock":           func(c *tls.Config) { c.Time = func() time.Time { return time.Unix(0, 0) } },
+		"fixed server name":     func(c *tls.Config) { c.ServerName = "example.com" },
+		"insecure cipher suite": func(c *tls.Config) { c.CipherSuites = []uint16{tls.InsecureCipherSuites()[0].ID} },
+		"verify peer certificate": func(c *tls.Config) {
+			c.VerifyPeerCertificate = func([][]byte, [][]*x509.Certificate) error { return nil }
+		},
+		"replaced roots":          func(c *tls.Config) { c.RootCAs = x509.NewCertPool() },
+		"added verify connection": func(c *tls.Config) { c.VerifyConnection = func(tls.ConnectionState) error { return nil } },
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, err := NewClient(RecommendedTransportConfig())
+			if err != nil {
+				t.Fatal(err)
+			}
+			tamper(c.Transport.(*http.Transport).TLSClientConfig)
+			if _, ok := HardeningOf(c); ok {
+				t.Error("HardeningOf = true, want false")
+			}
+		})
+	}
+}
+
+// TestHardeningOfChecksConstructionTLSSettings: RootCAs and
+// VerifyConnection set through TransportConfig count as hardened, and
+// replacing or removing them afterwards doesn't; neither does another
+// NewClient transport's VerifyConnection, and a foreign one is never
+// called by the check.
+func TestHardeningOfChecksConstructionTLSSettings(t *testing.T) {
+	build := func(t *testing.T) *http.Client {
+		cfg := RecommendedTransportConfig()
+		cfg.RootCAs = x509.NewCertPool()
+		cfg.VerifyConnection = func(tls.ConnectionState) error { return nil }
+		c, err := NewClient(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	if _, ok := HardeningOf(build(t)); !ok {
+		t.Fatal("HardeningOf = false for RootCAs and VerifyConnection set through TransportConfig")
+	}
+	other := build(t)
+	called := false
+	for name, tamper := range map[string]func(*tls.Config){
+		"roots replaced":            func(c *tls.Config) { c.RootCAs = x509.NewCertPool() },
+		"roots removed":             func(c *tls.Config) { c.RootCAs = nil },
+		"verify connection removed": func(c *tls.Config) { c.VerifyConnection = nil },
+		"another transport's verify": func(c *tls.Config) {
+			c.VerifyConnection = other.Transport.(*http.Transport).TLSClientConfig.VerifyConnection
+		},
+		"foreign verify connection": func(c *tls.Config) {
+			c.VerifyConnection = func(tls.ConnectionState) error { called = true; return nil }
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := build(t)
+			tamper(c.Transport.(*http.Transport).TLSClientConfig)
+			if _, ok := HardeningOf(c); ok {
+				t.Error("HardeningOf = true, want false")
+			}
+		})
+	}
+	if called {
+		t.Error("HardeningOf called a VerifyConnection NewClient didn't build")
+	}
+}
+
+// TestNewClientTLSSettingsApplyToHandshakes: RootCAs set through
+// TransportConfig is what server certificates are verified against, and
+// TransportConfig.VerifyConnection still runs on every handshake.
+func TestNewClientTLSSettingsApplyToHandshakes(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	defer srv.Close()
+	cfg := RecommendedTransportConfig()
+	cfg.AllowLoopbackHosts = true
+	cfg.RootCAs = srv.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs
+	verified := false
+	cfg.VerifyConnection = func(cs tls.ConnectionState) error {
+		verified = len(cs.VerifiedChains) > 0
+		return nil
+	}
+	c, err := NewClient(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := c.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("request with the server's CA as RootCAs: %v", err)
+	}
+	res.Body.Close()
+	if !verified {
+		t.Error("TransportConfig.VerifyConnection didn't run on the handshake")
+	}
+	if _, ok := HardeningOf(c); !ok {
+		t.Error("HardeningOf = false after a request")
 	}
 }

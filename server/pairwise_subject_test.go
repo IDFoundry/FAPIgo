@@ -557,7 +557,7 @@ func assertPARServerError(t *testing.T, h harness) {
 	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
 		HTTP: server.FormRequest{Parameters: plainFormParameters(t, h.clientAssertion(t), nil)},
 	})
-	if code := serverErrorCode(t, err); code != server.ErrorServerError {
+	if serverErrorCode(t, err) != server.ErrorServerError {
 		t.Fatalf("PushAuthorizationRequest = %v, want server_error", err)
 	}
 }
@@ -827,7 +827,7 @@ func TestResolveClientSubject(t *testing.T) {
 			assertResolvesClientSubject(t, h, sub, tc.mappable)
 			if tc.mappable && tc.pairwise {
 				_, err := h.server.ResolveClientSubject(context.Background(), testClientID, testPairwisePrefix+"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
-				if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
+				if serverErrorCode(t, err) != server.ErrorInvalidRequest {
 					t.Errorf("a sub never given: %v, want invalid_request", err)
 				}
 			}

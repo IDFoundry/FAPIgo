@@ -2,13 +2,21 @@ package identity
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
+
+	"github.com/idfoundry/fapigo/client"
+	"github.com/idfoundry/fapigo/extension"
+	"github.com/idfoundry/fapigo/server/interactioncookie"
 )
 
 // captures is what the attack lab captured from other sign-ins, as it
@@ -65,6 +73,9 @@ func (w *World) capture(ctx context.Context) error {
 	return nil
 }
 
+// interactionTag finds the consent form's interactioncookie tag.
+var interactionTag = regexp.MustCompile(`name="` + interactioncookie.FormField + `" value="([^"]*)"`)
+
 // signInOptions is how a scripted browser goes through an identity
 // check.
 type signInOptions struct {
@@ -92,10 +103,21 @@ func (w *World) signIn(ctx context.Context, rp *relyingParty, opts signInOptions
 	if err != nil {
 		return nil, err
 	}
+	// The bank's consent page: its form carries the tag that ties the
+	// submission to this browser's interaction cookie.
+	consent, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
 	_ = res.Body.Close()
+	if err != nil {
+		return nil, err
+	}
+	tag := interactionTag.FindSubmatch(consent)
+	if tag == nil {
+		return nil, fmt.Errorf("the sign-in didn't reach the bank's consent page (%s)", res.Request.URL)
+	}
 	claims := append(append([]string{}, rp.setup.idTokenClaims...), rp.setup.userInfoClaims...)
 	res, err = post(w.URL(bankHost, authorizePath), url.Values{
-		"decision": {"approve"}, "username": {opts.username}, "pin": {opts.pin}, "method": {opts.method}, "claim": claims,
+		interactioncookie.FormField: {string(tag[1])},
+		"decision":                  {"approve"}, "username": {opts.username}, "pin": {opts.pin}, "method": {opts.method}, "claim": claims,
 	})
 	if err != nil {
 		return nil, err
@@ -106,6 +128,9 @@ func (w *World) signIn(ctx context.Context, rp *relyingParty, opts signInOptions
 	if !ok {
 		return nil, fmt.Errorf("the sign-in ended at %s, not on an identity check", res.Request.URL)
 	}
+	rp.mu.Lock()
+	ck.lab = true
+	rp.mu.Unlock()
 	return ck, nil
 }
 
@@ -145,6 +170,16 @@ func (rp *relyingParty) attack(w http.ResponseWriter, r *http.Request) {
 		})
 	case "stolen":
 		a = rp.userInfoAttempt(ctx, "Use the access token from another device", rp.thief, ck, nil)
+	case "hint-other-rp":
+		a = rp.hintFromOtherRP(ctx)
+	case "sub-from-other-rp":
+		a = rp.subFromOtherRP(ctx, ck)
+	case "forge-sub":
+		a = rp.userInfoAttempt(ctx, "Change the access token's sub to the one Brightline knows you by", rp.client, ck, func(o *traceOptions) error {
+			sub, err := rp.w.brightlineSub(ctx)
+			o.accessTokenSub = sub
+			return err
+		})
 	default:
 		rp.w.renderError(w, rp.setup.host, http.StatusBadRequest, "Unknown attack", r.FormValue("kind"))
 		return
@@ -158,7 +193,7 @@ func (rp *relyingParty) attack(w http.ResponseWriter, r *http.Request) {
 // askAgain calls UserInfo again with the check's own token: the bank
 // still returns only what the customer approved.
 func (rp *relyingParty) askAgain(ctx context.Context, ck *check) attempt {
-	a := attempt{Title: "Ask UserInfo again for the claims " + strings.ToUpper(ck.Username[:1]) + ck.Username[1:] + " withheld"}
+	a := attempt{Title: "Ask UserInfo again for the claims you withheld"}
 	c, err := rp.client.get(ctx)
 	if err != nil {
 		return attempt{Title: a.Title, Result: err.Error(), Refused: true}
@@ -214,7 +249,7 @@ func (rp *relyingParty) replay(ctx context.Context, title, scenario string) atte
 	rp.mu.Lock()
 	defer rp.mu.Unlock()
 	if ck.Status == "verified" {
-		return attempt{Title: title, Result: "accepted: verified as " + ck.Username}
+		return attempt{Title: title, Result: "accepted: verified as " + ck.Sub}
 	}
 	return attempt{Title: title, Result: ck.Problem, Refused: true}
 }
@@ -234,7 +269,113 @@ func (rp *relyingParty) userInfoAttempt(ctx context.Context, title string, lc *l
 	}
 	info, err := c.FetchUserInfo(withTrace(ctx, opts), ck.tokens)
 	if err != nil {
-		return attempt{Title: title, Result: describeError(err), Refused: true}
+		return attempt{Title: title, Result: describeError(err) + bankAnswer(opts.trace), Refused: true}
 	}
 	return attempt{Title: title, Result: "accepted: UserInfo for " + info.Subject}
+}
+
+// errorMember finds an OAuth error response's members in a trace step.
+var errorMember = regexp.MustCompile(`"(error|error_description)": "([^"]*)"`)
+
+// bankAnswer is the OAuth error Alder Bank answered the last request in
+// t with, when there is one: what a bare HTTP status doesn't say.
+func bankAnswer(t *trace) string {
+	steps := t.Steps()
+	if len(steps) == 0 {
+		return ""
+	}
+	members := map[string]string{}
+	for _, m := range errorMember.FindAllStringSubmatch(steps[len(steps)-1].Detail, -1) {
+		members[m[1]] = m[2]
+	}
+	if members["error"] == "" {
+		return ""
+	}
+	return "\nAlder Bank answered " + members["error"] + ": " + members["error_description"]
+}
+
+// Authorization parameters the attack lab sends as they are, through the
+// FAPIgo client's Extensions: a well-behaved relying party would ask for
+// these through the bank's own flow, not with someone else's values.
+var (
+	idTokenHintParam = extension.Definition[string]{
+		Name: "id_token_hint", Cardinality: extension.Single, AllowedSources: extension.SourcePlainParameter,
+		MaxBytes: 8 << 10, Sensitivity: extension.NotSensitive,
+	}
+	claimsParam = extension.Definition[string]{
+		Name: "claims", Cardinality: extension.Single, AllowedSources: extension.SourcePlainParameter,
+		MaxBytes: 1 << 10, Sensitivity: extension.NotSensitive,
+	}
+)
+
+// hintFromOtherRP has Fernway name the customer to sign in with the ID
+// token Alder Bank gave Brightline for Sam, as an id_token_hint (OIDC
+// Core §3.1.2.1). Relying parties comparing notes could pass one to
+// another; the bank accepts a hint only from the client it was issued
+// to.
+func (rp *relyingParty) hintFromOtherRP(ctx context.Context) attempt {
+	const title = "Name you with the ID token Brightline got for you (id_token_hint)"
+	if err := rp.w.capture(ctx); err != nil {
+		return attempt{Title: title, Result: err.Error(), Refused: true}
+	}
+	rp.w.captured.mu.Lock()
+	hint := rp.w.captured.brightlineIDToken
+	rp.w.captured.mu.Unlock()
+	req := client.BeginAuthorizationRequest{Scope: []string{"openid"}}
+	return rp.beginWith(ctx, title, rp.client, req, idTokenHintParam, hint)
+}
+
+// subFromOtherRP has Brightline ask the bank to sign in the customer
+// Fernway knows by sub: a "claims" request for that sub value (OIDC Core
+// §5.5.1). Under pairwise subs, that sub means nothing at Brightline.
+func (rp *relyingParty) subFromOtherRP(ctx context.Context, ck *check) attempt {
+	const title = "Brightline asks the bank for the customer Fernway knows by your sub"
+	claims, err := json.Marshal(map[string]any{"id_token": map[string]any{"sub": map[string]string{"value": ck.Sub}}})
+	if err != nil {
+		return attempt{Title: title, Result: err.Error(), Refused: true}
+	}
+	req := client.BeginAuthorizationRequest{Scope: []string{"openid"}}
+	return rp.beginWith(ctx, title, rp.w.brightline.client, req, claimsParam, string(claims))
+}
+
+// beginWith pushes req, with param set to value, through lc's client,
+// and reports whether the bank accepted it.
+func (rp *relyingParty) beginWith(ctx context.Context, title string, lc *lazyClient, req client.BeginAuthorizationRequest, param extension.Definition[string], value string) attempt {
+	c, err := lc.get(ctx)
+	if err == nil {
+		err = extension.Set(&req.Extensions, param, value)
+	}
+	if err != nil {
+		return attempt{Title: title, Result: err.Error(), Refused: true}
+	}
+	if _, err := c.BeginAuthorization(withTrace(ctx, traceOptions{trace: &trace{}}), req); err != nil {
+		return attempt{Title: title, Result: "Alder Bank refused the pushed authorization request: " + describeError(err), Refused: true}
+	}
+	return attempt{Title: title, Result: "accepted: the bank took the request"}
+}
+
+// brightlineSub is the sub Alder Bank gave Brightline for Sam, read from
+// the ID token the lab captured from Sam's sign-in there.
+func (w *World) brightlineSub(ctx context.Context) (string, error) {
+	if err := w.capture(ctx); err != nil {
+		return "", err
+	}
+	w.captured.mu.Lock()
+	idToken := w.captured.brightlineIDToken
+	w.captured.mu.Unlock()
+	parts := strings.Split(idToken, ".")
+	if len(parts) != 3 {
+		return "", errors.New("the captured Brightline ID token isn't a signed JWT")
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return "", err
+	}
+	var claims struct {
+		Sub string `json:"sub"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil || claims.Sub == "" {
+		return "", errors.New("the captured Brightline ID token has no sub")
+	}
+	return claims.Sub, nil
 }

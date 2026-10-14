@@ -58,6 +58,9 @@ type traceOptions struct {
 	userInfo []byte
 	// tamperUserInfo flips a byte of the UserInfo response, in flight.
 	tamperUserInfo bool
+	// accessTokenSub replaces the sub in the access token a UserInfo
+	// request carries, in flight, leaving its signature as it was.
+	accessTokenSub string
 }
 
 // wireArtifacts are an identity check's ID token and UserInfo response,
@@ -95,6 +98,9 @@ func (c tracingClient) Do(req *http.Request) (*http.Response, error) {
 		reqBody, _ = io.ReadAll(req.Body)
 		_ = req.Body.Close()
 		req.Body = io.NopCloser(bytes.NewReader(reqBody))
+	}
+	if opts.accessTokenSub != "" && strings.HasSuffix(req.URL.Path, userinfoPath) {
+		replaceAccessTokenSub(req, opts.accessTokenSub)
 	}
 	title, detail := describeRequest(req, reqBody)
 	res, err := c.next.Do(req) //nolint:gosec // G704: see tracingClient
@@ -151,6 +157,32 @@ func (o traceOptions) rewriteUserInfo(body []byte, detail string) ([]byte, strin
 		return tampered, detail + "\n(one character of the response is changed in flight)"
 	}
 	return body, detail
+}
+
+// replaceAccessTokenSub rewrites the sub in req's access token (a signed
+// JWT) to sub, keeping its header and signature: what someone would
+// have to do to pass off one customer's token as another's.
+func replaceAccessTokenSub(req *http.Request, sub string) {
+	scheme, token, ok := strings.Cut(req.Header.Get("Authorization"), " ")
+	parts := strings.Split(token, ".")
+	if !ok || len(parts) != 3 {
+		return
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return
+	}
+	var claims map[string]any
+	if json.Unmarshal(payload, &claims) != nil {
+		return
+	}
+	claims["sub"] = sub
+	payload, err = json.Marshal(claims)
+	if err != nil {
+		return
+	}
+	parts[1] = base64.RawURLEncoding.EncodeToString(payload)
+	req.Header.Set("Authorization", scheme+" "+strings.Join(parts, "."))
 }
 
 // tamper changes one base64url character in the middle of a compact

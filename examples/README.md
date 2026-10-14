@@ -31,6 +31,7 @@ break what it shows.
 | The OIDC `claims` parameter, with per-claim consent | [OIDC Core §5.5](https://openid.net/specs/openid-connect-core-1_0.html#ClaimsParameter) | ● | | | | ● | |
 | `acr_values` and `max_age` (step-up authentication) | [OIDC Core §3.1.2.1](https://openid.net/specs/openid-connect-core-1_0.html#AuthRequest) | | | | | ● | |
 | Signed and encrypted ID tokens and UserInfo | [OIDC Core §5.3](https://openid.net/specs/openid-connect-core-1_0.html#UserInfo) | | | | | ● | |
+| Pairwise subject identifiers (PPIDs): a different `sub` for the same user at each relying party | [OIDC Core §8](https://openid.net/specs/openid-connect-core-1_0.html#SubjectIDTypes) | | | | | ● | |
 | Refresh tokens kept sealed between syncs, and DPoP key rotation | [RFC 6749 §6](https://www.rfc-editor.org/rfc/rfc6749#section-6) | | | | | | ● |
 | Revoking a whole grant ("connected apps") | — | | | | | | ● |
 | OpenID Federation: trust chains, metadata policy, automatic registration, Trust Marks | [OpenID Federation 1.0](https://openid.net/specs/openid-federation-1_0.html) | ● | | | | | |

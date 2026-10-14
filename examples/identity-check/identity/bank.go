@@ -7,17 +7,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/idfoundry/fapigo/server/interactioncookie"
 	"net/http"
 	"net/url"
 	"slices"
+	"sync"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/keys/ephemeral"
+	"github.com/idfoundry/fapigo/pairwise"
 	"github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/server"
+	"github.com/idfoundry/fapigo/server/interactioncookie"
 	"github.com/idfoundry/fapigo/serverresource"
 	"github.com/idfoundry/fapigo/storage"
 	"github.com/idfoundry/fapigo/storage/memstore"
@@ -41,6 +43,10 @@ const (
 // rememberedSignIn is how long ago the demo's "earlier sign-in" happened.
 const rememberedSignIn = 3 * time.Hour
 
+// subPrefix starts every pairwise sub Alder Bank issues, so its own
+// staff can tell one from a customer's username at a glance.
+const subPrefix = "ppid:"
+
 // bank is Alder Bank's OpenID Provider: its authorization server, its
 // own sign-in and consent page, and its UserInfo endpoint.
 type bank struct {
@@ -51,6 +57,17 @@ type bank struct {
 	// interaction carries the consent page's state in an encrypted
 	// cookie: every instance would share its key.
 	interaction *interactioncookie.Cookie
+
+	mu sync.Mutex
+	// userInfoCalls is what the UserInfo endpoint saw, newest first: the
+	// sub each client presented, and the customer the bank resolved it to.
+	userInfoCalls []userInfoCall
+}
+
+// userInfoCall is one UserInfo request as the bank saw it.
+type userInfoCall struct {
+	At                        time.Time
+	Client, ClientSub, Person string
 }
 
 func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
@@ -126,6 +143,14 @@ func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
 	if err != nil {
 		return nil, err
 	}
+	pairwiseSubjects, err := newPairwiseSubjects()
+	if err != nil {
+		return nil, err
+	}
+	prefix, err := pairwise.NewPrefix(subPrefix)
+	if err != nil {
+		return nil, err
+	}
 
 	algs := server.RecommendedAlgorithms()
 	algs.UserInfo = fapi.ES256
@@ -136,7 +161,12 @@ func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
 
 	b := &bank{w: w, clients: memstore.NewClientRepository(registered), interaction: interaction}
 	cfg := server.Config{
-		Subjects: server.PublicSubjects(),
+		// Every client gets its own sub for each customer (OIDC Core §8):
+		// a pairwise sub, derived from the customer's username and the
+		// client's sector, the host of its redirect URI. A client
+		// registered with SubjectType public would still get usernames;
+		// none here is.
+		Subjects: server.SubjectConfig{Default: fapi.SubjectTypePairwise, Enforcement: server.SubjectTypesPerClient, Prefix: prefix},
 		Issuer:   issuer, Endpoints: endpoints, Profile: server.ProfileFAPISecurity,
 		Algorithms: algs, Limits: server.RecommendedLimits(), Assurance: server.AssuranceDevelopment,
 	}
@@ -159,6 +189,11 @@ func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
 		// The bank's own records of who its customers are. It releases a
 		// claim only when the customer approved it on the consent page.
 		IdentityClaims: customerClaims{},
+		// Reversible, so the bank can map a pairwise sub back to the
+		// customer: the UserInfo endpoint, given a self-contained access
+		// token carrying one, and a client naming a customer by the sub it
+		// knows them by.
+		PairwiseSubjects: pairwiseSubjects,
 	}
 	if b.srv, err = server.New(cfg, deps); err != nil {
 		return nil, err
@@ -182,6 +217,35 @@ func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
 	mux.HandleFunc("GET "+userinfoPath, b.userinfo)
 	w.router[bankHost] = mux
 	return b, nil
+}
+
+// newPairwiseSubjects is Alder Bank's pairwise sub deriver: the
+// reversible one, under two keys generated at startup. A real bank keeps
+// the keys wrapped by its KMS and decrypts them at startup, or in an HSM
+// (pairwise.NewReversibleWith); losing them would give every customer a
+// new sub at every client.
+func newPairwiseSubjects() (*pairwise.ReversibleDeriver, error) {
+	macKey, encKey := make([]byte, 32), make([]byte, 32)
+	_, _ = rand.Read(macKey) // never fails: it crashes the program instead (Go 1.24+)
+	_, _ = rand.Read(encKey)
+	return pairwise.NewReversible(macKey, encKey)
+}
+
+func (b *bank) recordUserInfoCall(authz resource.AuthorizationContext) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	call := userInfoCall{At: time.Now(), Client: authz.ClientID, ClientSub: authz.ClientSubject, Person: authz.InternalSubject}
+	b.userInfoCalls = append([]userInfoCall{call}, b.userInfoCalls...)
+	if len(b.userInfoCalls) > 12 {
+		b.userInfoCalls = b.userInfoCalls[:12]
+	}
+}
+
+// recentUserInfoCalls is a copy of what the UserInfo endpoint saw.
+func (b *bank) recentUserInfoCalls() []userInfoCall {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]userInfoCall(nil), b.userInfoCalls...)
 }
 
 // customerClaims is Alder Bank's IdentityClaimsSource: its customers'
@@ -279,6 +343,10 @@ func (b *bank) userinfo(w http.ResponseWriter, r *http.Request) {
 		resource.WriteError(w, err)
 		return
 	}
+	// What the endpoint knows about the request: the sub the client was
+	// given, and the customer it is. The customer's username stays here;
+	// everything sent back uses the client's sub.
+	b.recordUserInfoCall(authz)
 	// Only the claims the client requested and the customer approved,
 	// which the access token carries: a UserInfo call has no other link
 	// back to the authorization.

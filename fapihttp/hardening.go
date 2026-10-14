@@ -119,15 +119,23 @@ func registerHardened(t *http.Transport, cfg TransportConfig, dialer, verifier *
 //
 // A recognised transport counts as intact only while nothing that
 // decides where it connects, or how it checks the server, has been
-// changed since NewClient built it: its DialContext is still the
-// address-validating dialer, Proxy, Dial, DialTLS and DialTLSContext are
-// still unset (a proxy, or another dialer, would connect where the
-// validation never looked), and TLSClientConfig still requires TLS 1.2
-// or later and doesn't skip verification. Adding a client certificate
-// (TransportConfig.Certificates, or setting TLSClientConfig.Certificates
-// afterwards) changes none of that. The dialer must be this transport's
-// own: another NewClient transport's dialer, which may grant different
-// exceptions, doesn't count.
+// changed since NewClient built it:
+//   - its DialContext is still its own address-validating dialer
+//     (another NewClient transport's dialer, which may grant different
+//     exceptions, doesn't count), and Proxy, Dial, DialTLS and
+//     DialTLSContext are still unset: a proxy, or another dialer, would
+//     connect where the validation never looked;
+//   - TLSClientConfig still requires TLS 1.2 or later, verifies the
+//     server against the RootCAs it was built with
+//     (TransportConfig.RootCAs, or the system's), with the
+//     VerifyConnection it was built with (or none), and has no
+//     VerifyPeerCertificate, ServerName, Time, KeyLogWriter or insecure
+//     cipher suite set.
+//
+// Adding a client certificate (TransportConfig.Certificates, or setting
+// TLSClientConfig.Certificates afterwards) changes none of that. Nor can
+// Transport.RegisterProtocol route "https" or "http" requests anywhere
+// else: NewClient has both taken, so registering either panics.
 func HardeningOf(c *http.Client) (Hardening, bool) {
 	if c == nil {
 		return Hardening{}, false

@@ -93,7 +93,12 @@ func (c TransportConfig) AllowsLoopback() bool {
 //
 // HardeningOf recognises the result, and any copy of it, for as long as
 // its transport stays as NewClient built it, so a production check can
-// refuse any other *http.Client.
+// refuse any other *http.Client. Set what the transport needs through
+// cfg (RootCAs, VerifyConnection, Certificates) rather than on the
+// Transport afterwards. Its Transport already has "https" and "http"
+// registered (see Transport.RegisterProtocol), so registering another
+// RoundTripper for either panics: one would send requests around the
+// dialer.
 //
 // NewClient returns the transport: the *http.Client that
 // client.Dependencies.HTTP takes directly, and that New wraps into a

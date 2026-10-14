@@ -98,6 +98,16 @@ func (c *Client) EntityConfiguration(ctx context.Context, metadata map[string]js
 // federation signing key, used to sign Entity/Subordinate Statements —
 // see federation/doc.go), never the operational key it signs ID tokens
 // or JARM responses with.
+//
+// In production, resolver's Dependencies.HTTP must be fapihttp.New over
+// fapihttp.NewClient's client (HardenedForProduction): neither this nor
+// federation.NewResolver takes an assurance level, so neither can check.
+// This matters most when issuer comes from the user (a relying party
+// letting them choose their OP): Resolve then fetches that entity's
+// Entity Configuration and every superior its authority_hints name, all
+// chosen by whoever controls that entity, and only NewClient's
+// transport stops a DNS answer that changes after validation (DNS
+// rebinding) from aiming those fetches at an internal host.
 func DiscoverViaFederation(ctx context.Context, resolver *federation.Resolver, issuer string, opts ...fapi.URLOption) (DiscoveredMetadata, error) {
 	if resolver == nil {
 		return DiscoveredMetadata{}, fmt.Errorf("client: discover via federation: resolver is required")

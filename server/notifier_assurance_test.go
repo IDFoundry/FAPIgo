@@ -129,8 +129,10 @@ func TestNewProductionRequiresHardenedBackchannelNotifier(t *testing.T) {
 // TestNewProductionRefusesLoopbackOutboundExceptions: a loopback
 // exception in fapihttp's config is for local development only, so a
 // backchannelhttp.Notifier, or the federation fetcher, built with one
-// isn't hardened enough for AssuranceProduction. AllowedPrivateHosts
-// names the operator's own hosts and stays acceptable.
+// isn't hardened enough for AssuranceProduction, and neither is a
+// federation fetcher over a plain http.Client rather than
+// fapihttp.NewClient's. AllowedPrivateHosts names the operator's own
+// hosts and stays acceptable.
 func TestNewProductionRefusesLoopbackOutboundExceptions(t *testing.T) {
 	exceptions := map[string]fapihttp.TransportConfig{
 		"allow loopback hosts":   {AllowLoopbackHosts: true},
@@ -148,7 +150,12 @@ func TestNewProductionRefusesLoopbackOutboundExceptions(t *testing.T) {
 	}
 	fetcherWith := func(t *testing.T, transport fapihttp.TransportConfig) *fapihttp.Client {
 		t.Helper()
-		c, err := fapihttp.New(&http.Client{}, fapihttp.Config{
+		transport.DialTimeout, transport.TLSHandshakeTimeout = time.Second, time.Second
+		hardened, err := fapihttp.NewClient(transport)
+		if err != nil {
+			t.Fatalf("fapihttp.NewClient: %v", err)
+		}
+		c, err := fapihttp.New(hardened, fapihttp.Config{
 			MaxResponseBytes: 1 << 16, RequestTimeout: time.Second,
 			AllowLoopbackHosts: transport.AllowLoopbackHosts, AllowLoopbackHTTP: transport.AllowLoopbackHTTP,
 			AllowedLoopbackHosts: transport.AllowedLoopbackHosts, AllowedPrivateHosts: transport.AllowedPrivateHosts,
@@ -168,7 +175,7 @@ func TestNewProductionRefusesLoopbackOutboundExceptions(t *testing.T) {
 		t.Run("federation http, "+name, func(t *testing.T) {
 			cfg, deps := cibaConfigAndDeps(t, server.AssuranceProduction, server.NoBackchannelNotifications{})
 			deps.FederationHTTP = fetcherWith(t, transport)
-			if _, err := server.New(cfg, deps); err == nil || !strings.Contains(err.Error(), "federation_http must not grant a loopback exception") {
+			if _, err := server.New(cfg, deps); err == nil || !strings.Contains(err.Error(), "federation_http must be fapihttp.New over fapihttp.NewClient's client") {
 				t.Fatalf("New(production, federation fetcher with %s) error = %v, want it refused", name, err)
 			}
 		})
@@ -180,6 +187,17 @@ func TestNewProductionRefusesLoopbackOutboundExceptions(t *testing.T) {
 			}
 		})
 	}
+	t.Run("federation http over a plain http.Client", func(t *testing.T) {
+		cfg, deps := cibaConfigAndDeps(t, server.AssuranceProduction, server.NoBackchannelNotifications{})
+		fetcher, err := fapihttp.New(&http.Client{}, fapihttp.RecommendedConfig())
+		if err != nil {
+			t.Fatalf("fapihttp.New: %v", err)
+		}
+		deps.FederationHTTP = fetcher
+		if _, err := server.New(cfg, deps); err == nil || !strings.Contains(err.Error(), "federation_http must be fapihttp.New over fapihttp.NewClient's client") {
+			t.Fatalf("New(production, federation fetcher over a plain client) error = %v, want it refused", err)
+		}
+	})
 	t.Run("allowed private hosts stay hardened", func(t *testing.T) {
 		private := fapihttp.TransportConfig{AllowedPrivateHosts: []string{"notify.internal"}}
 		cfg, deps := cibaConfigAndDeps(t, server.AssuranceProduction, notifierWith(t, private))

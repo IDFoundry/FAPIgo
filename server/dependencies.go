@@ -178,6 +178,14 @@ type Dependencies struct {
 	// like ClientEncryptionKeys/Backchannel, an opt-in dependency this
 	// server never touches unless the corresponding Config capability
 	// is enabled.
+	//
+	// Build it with fapihttp.New over fapihttp.NewClient's client: the
+	// Entity Identifiers it fetches come from Relying Parties, and only
+	// that transport checks the address it actually dials, which is what
+	// holds under DNS rebinding. Under AssuranceProduction, New refuses a
+	// fetcher that isn't fapihttp.Client.HardenedForProduction (one over
+	// any other HTTPClient, a transport changed since NewClient built it,
+	// or a loopback exception on either).
 	FederationHTTP *fapihttp.Client
 
 	// ClientCertificateTrust decides how chain-of-trust for a client

@@ -53,7 +53,10 @@ With `AutomaticRegistration.TrustAnchors` set, an unknown `client_id`
 that is an `https` Entity Identifier is resolved through its Trust Chain,
 and its `openid_relying_party` metadata becomes its registration.
 Outbound fetches go through `Dependencies.FederationHTTP`, which `New`
-requires once trust anchors are set. Statically registered clients
+requires once trust anchors are set: build it with `fapihttp.New` over
+`fapihttp.NewClient`'s client, since the Entity Identifiers it fetches
+come from Relying Parties. Under `AssuranceProduction` `New` refuses one
+that isn't `HardenedForProduction`. Statically registered clients
 always take priority. What a client may do
 beyond the authorization code flow is your grant, never its own metadata's:
 `AllowedScopes`, `AuthorizationDetailsTypes`, `AllowsClientCredentialsGrant`,

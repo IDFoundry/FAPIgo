@@ -31,7 +31,8 @@ const (
 	//     A JWTAccessTokens' IssuerKeys must implement
 	//     keys.KeySourceAssurance and declare LiveFetchHardened (as
 	//     keys.LocalIssuerKeys does, and keys.JWKSIssuerKeySource does
-	//     when its fapihttp client grants no loopback exception;
+	//     when its fapihttp client is HardenedForProduction: over
+	//     fapihttp.NewClient's client, with no loopback exception;
 	//     keys/ephemeral never does). An OpaqueAccessTokens' Store must
 	//     implement storage.StoreAssurance and declare Durable.
 	//   - Dependencies.Replay, and Dependencies.Nonces when set, must

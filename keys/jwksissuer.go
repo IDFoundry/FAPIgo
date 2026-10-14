@@ -129,11 +129,15 @@ func NewJWKSIssuerKeySource(fetcher *fapihttp.Client, jwksURI fapi.URL, cacheTTL
 
 // Capabilities implements KeySourceAssurance. fetcher is required and
 // non-nil (enforced by NewJWKSIssuerKeySource), so every live fetch
-// goes through fapihttp's checks; it declares LiveFetchHardened unless
-// fetcher was built with a loopback exception (fapihttp.Config's
-// AllowsLoopback), which is for local development only.
+// goes through fapihttp's checks. It declares LiveFetchHardened only when
+// fetcher is fapihttp.Client.HardenedForProduction: built over
+// fapihttp.NewClient's client, with that transport still intact, and
+// with no loopback exception on either. A fetcher over any other
+// HTTPClient, http.DefaultClient included, keeps Fetch's pre-dial
+// checks but isn't protected against DNS rebinding, so it isn't
+// declared hardened and AssuranceProduction refuses the source.
 func (s *JWKSIssuerKeySource) Capabilities() KeySourceCapabilities {
-	return KeySourceCapabilities{LiveFetchHardened: !s.fetcher.AllowsLoopback()}
+	return KeySourceCapabilities{LiveFetchHardened: s.fetcher.HardenedForProduction()}
 }
 
 // ResolveIssuerKeys returns every cached key matching req.Algorithm

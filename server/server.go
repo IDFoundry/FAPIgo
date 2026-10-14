@@ -696,8 +696,8 @@ func checkProductionClientSources(deps Dependencies, scaled, attestation bool) [
 			errs = append(errs, checkKeySourceAssurance(source.name, source.source))
 		}
 	}
-	if deps.FederationHTTP != nil && deps.FederationHTTP.AllowsLoopback() {
-		errs = append(errs, fmt.Errorf("server: dependencies: federation_http must not grant a loopback exception under AssuranceProduction"))
+	if deps.FederationHTTP != nil && !deps.FederationHTTP.HardenedForProduction() {
+		errs = append(errs, fmt.Errorf("server: dependencies: federation_http must be fapihttp.New over fapihttp.NewClient's client, with that transport unchanged and no loopback exception, under AssuranceProduction"))
 	}
 	return errs
 }

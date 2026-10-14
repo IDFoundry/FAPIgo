@@ -277,19 +277,26 @@ func TestNewVerifierProductionRefuses(t *testing.T) {
 
 // TestNewVerifierProductionRefusesLoopbackJWKSFetcher: a
 // keys.JWKSIssuerKeySource fetching through a fapihttp client with a
-// loopback exception doesn't declare LiveFetchHardened, so production
-// refuses it; the same source without one passes.
+// loopback exception, or over a plain http.Client, doesn't declare
+// LiveFetchHardened, so production refuses it; one over
+// fapihttp.NewClient's client without an exception passes.
 func TestNewVerifierProductionRefusesLoopbackJWKSFetcher(t *testing.T) {
+	hardened, err := fapihttp.NewClient(fapihttp.RecommendedTransportConfig())
+	if err != nil {
+		t.Fatalf("fapihttp.NewClient: %v", err)
+	}
 	for name, tc := range map[string]struct {
-		cfg     fapihttp.Config
-		refused bool
+		transport fapihttp.HTTPClient
+		cfg       fapihttp.Config
+		refused   bool
 	}{
-		"no exceptions":       {fapihttp.Config{}, false},
-		"allow loopback http": {fapihttp.Config{AllowLoopbackHTTP: true}, true},
+		"no exceptions":       {hardened, fapihttp.Config{}, false},
+		"allow loopback http": {hardened, fapihttp.Config{AllowLoopbackHTTP: true}, true},
+		"plain http.Client":   {&http.Client{}, fapihttp.Config{}, true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			tc.cfg.MaxResponseBytes, tc.cfg.RequestTimeout = 1<<16, time.Second
-			fetcher, err := fapihttp.New(&http.Client{}, tc.cfg)
+			fetcher, err := fapihttp.New(tc.transport, tc.cfg)
 			if err != nil {
 				t.Fatalf("fapihttp.New: %v", err)
 			}

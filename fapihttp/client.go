@@ -148,6 +148,11 @@ type Client struct {
 // client.Discover, keys.NewJWKSIssuerKeySource and the federation
 // package take the fetcher; client.Dependencies.HTTP takes the
 // transport.
+//
+// New accepts any HTTPClient, but only a Client over NewClient's client
+// is HardenedForProduction: production checks on a fetching dependency
+// (keys.JWKSIssuerKeySource's LiveFetchHardened declaration,
+// server.Dependencies.FederationHTTP) refuse any other.
 func New(http HTTPClient, cfg Config) (*Client, error) {
 	if http == nil {
 		return nil, fmt.Errorf("fapihttp: http client is required")
@@ -419,6 +424,36 @@ func (c *Client) resolveRedirect(ctx context.Context, current *url.URL, location
 // in its Config (see Config.AllowsLoopback).
 func (c *Client) AllowsLoopback() bool {
 	return c.cfg.AllowsLoopback()
+}
+
+// Hardening reports whether c fetches through a transport NewClient
+// built that is still intact (HardeningOf on the *http.Client New was
+// given), and if so how that transport was built. It checks at every
+// call, not once at New, so a transport weakened after New (a Proxy set,
+// its DialContext replaced, verification skipped) is reported as not
+// hardened from then on. A Client over any other HTTPClient, including
+// http.DefaultClient or a wrapper, isn't hardened: its fetches still get
+// Fetch's pre-dial URL and address checks, but nothing checks the address
+// its transport actually dials, so DNS rebinding isn't covered.
+func (c *Client) Hardening() (Hardening, bool) {
+	hc, ok := c.http.(*http.Client)
+	if !ok {
+		return Hardening{}, false
+	}
+	return HardeningOf(hc)
+}
+
+// HardenedForProduction reports whether every fetch c makes is protected
+// the way production requires: its transport is one NewClient built and
+// still intact (Hardening), and neither that transport nor c's own Config
+// grants a loopback exception. AllowedPrivateHosts, on either, doesn't
+// count against it: it names an operator's own fixed hosts and keeps
+// every other address check. Production checks on fetching dependencies
+// (keys.JWKSIssuerKeySource's LiveFetchHardened declaration,
+// server.Dependencies.FederationHTTP) use this.
+func (c *Client) HardenedForProduction() bool {
+	hardening, ok := c.Hardening()
+	return ok && !hardening.AllowsLoopback() && !c.AllowsLoopback()
 }
 
 // validateFetchURL checks u's scheme/host shape and makes a best-effort

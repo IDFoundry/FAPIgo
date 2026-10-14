@@ -22,6 +22,12 @@ on:
 permissions:
   contents: read
 
+# One run at a time: two pushes in quick succession would otherwise race
+# to update the same release PR.
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
 jobs:
   release-please:
     runs-on: ubuntu-latest
@@ -29,7 +35,23 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+      # GitHub's API occasionally fails a request outright (a 5xx, or a
+      # GraphQL error with no message), which fails the action with
+      # "release-please failed: Server Error" or an empty message and
+      # leaves the release PR stale until the next push. release-please
+      # recomputes everything from the history each run, so one retry
+      # after a pause is safe; a second failure fails the job.
+      - id: attempt
+        continue-on-error: true
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+      - if: steps.attempt.outcome == 'failure'
+        run: sleep 30
+      - if: steps.attempt.outcome == 'failure'
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           config-file: release-please-config.json

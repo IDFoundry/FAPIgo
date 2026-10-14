@@ -15,6 +15,7 @@ import (
 	"github.com/idfoundry/fapigo/federation"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/keys/ephemeral"
+	"github.com/idfoundry/fapigo/pairwise"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage/memstore"
 )
@@ -112,8 +113,24 @@ func (w *World) newIdentityProvider(c country, ta *entity) (*identityProvider, e
 		return nil, err
 	}
 
+	// Each service gets its own sub for a citizen (OpenID Connect Core
+	// §8.1): services can't link a citizen across one another by sub.
+	// The two keys are generated each run here; a real provider keeps
+	// them wrapped by a KMS, since changing them changes every sub.
+	pairwiseSubjects, err := newPairwiseSubjects()
+	if err != nil {
+		return nil, err
+	}
+	prefix, err := pairwise.NewPrefix("ppid:")
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := server.Config{
-		Subjects:   server.PublicSubjects(),
+		// Pairwise by default, which also offers federation services
+		// pairwise subs alone: one asking for public is refused
+		// registration.
+		Subjects:   server.SubjectConfig{Default: fapi.SubjectTypePairwise, Enforcement: server.SubjectTypesPerClient, Prefix: prefix},
 		Issuer:     issuer,
 		Endpoints:  server.Endpoints{Authorization: authz, Token: tokenURL, PushedAuthorizationRequest: parURL, JWKS: jwksURL},
 		Profile:    server.ProfileFAPISecurity,
@@ -163,6 +180,7 @@ func (w *World) newIdentityProvider(c country, ta *entity) (*identityProvider, e
 		Random:                 rand.Reader,
 		IdentityClaims:         idp,
 		FederationHTTP:         fetcher,
+		PairwiseSubjects:       pairwiseSubjects,
 	}
 	idp.srv, err = server.New(cfg, deps)
 	if err != nil {
@@ -354,14 +372,18 @@ func (p *identityProvider) decide(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var result server.InteractionResult
+	var approvedSubject server.AuthenticatedSubject
+	var approvedCitizen citizen
 	if r.PostForm.Get("decision") != "approve" {
 		result = server.Deny("the citizen declined")
 	} else {
 		sub := r.PostForm.Get("citizen")
-		if !slices.ContainsFunc(p.country.citizens, func(c citizen) bool { return c.sub == sub }) {
+		i := slices.IndexFunc(p.country.citizens, func(c citizen) bool { return c.sub == sub })
+		if i < 0 {
 			p.w.renderError(w, http.StatusBadRequest, "No citizen chosen", "Choose one of "+p.country.idpName+"'s citizens.")
 			return
 		}
+		approvedCitizen = p.country.citizens[i]
 		subjectID, err := server.NewSubjectID(sub)
 		if err != nil {
 			p.w.renderError(w, http.StatusBadRequest, "No citizen chosen", publicMessage(err, tryAgain))
@@ -386,6 +408,7 @@ func (p *identityProvider) decide(w http.ResponseWriter, r *http.Request) {
 		result = server.Authorize(subject, authCtx, server.GrantedAuthorization{
 			Scope: interaction.Scope, ApprovedIdentityClaims: approved,
 		})
+		approvedSubject = subject
 	}
 
 	p.interaction.Clear(w)
@@ -396,6 +419,9 @@ func (p *identityProvider) decide(w http.ResponseWriter, r *http.Request) {
 	}
 	switch o := outcome.(type) {
 	case server.AuthorizationRedirect:
+		if approvedCitizen.sub != "" {
+			p.recordIssued(r.Context(), interaction, approvedCitizen, approvedSubject)
+		}
 		http.Redirect(w, r, o.Destination().String(), http.StatusSeeOther) // after a form POST: never 307
 	case server.AuthorizationLocalError:
 		p.w.renderError(w, o.Error.HTTPStatus(), signInFailed, string(o.Error.Code())+": "+o.Error.PublicDescription())
@@ -431,4 +457,27 @@ func claimRows(requested server.RequestedClaims) []claimRow {
 		rows = append(rows, claimRow{Name: name, Label: label})
 	}
 	return rows
+}
+
+// newPairwiseSubjects is the reversible pairwise deriver over two fresh
+// random keys.
+func newPairwiseSubjects() (*pairwise.ReversibleDeriver, error) {
+	macKey, encKey := make([]byte, 32), make([]byte, 32)
+	_, _ = rand.Read(macKey) // never fails: it crashes the program instead (Go 1.24+)
+	_, _ = rand.Read(encKey)
+	return pairwise.NewReversible(macKey, encKey)
+}
+
+// recordIssued notes, for the console, the sub the service behind
+// interaction was given for citizen. Only the console sees both sides.
+func (p *identityProvider) recordIssued(ctx context.Context, interaction server.InteractionRequest, c citizen, subject server.AuthenticatedSubject) {
+	sub, err := p.srv.ClientSubject(ctx, interaction.ClientID, subject)
+	if err != nil {
+		log.Printf("%s: the sub issued to %q: %q", p.country.idpName, interaction.ClientID, err)
+		return
+	}
+	p.w.issued.record(issuedSub{
+		Citizen: c.given + " " + c.family, CitizenSub: c.sub, Provider: p.country.idpName,
+		Service: clientName(interaction), Sub: sub,
+	})
 }

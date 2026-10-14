@@ -434,7 +434,11 @@ are fetched live via `JWKSURI` rather than supplied inline; pass `nil`
 if every client uses inline `JWKS`. Build one with
 `fapihttp.New(transport, fapihttp.RecommendedConfig())`, where
 `transport` comes from
-`fapihttp.NewClient(fapihttp.RecommendedTransportConfig())`.)
+`fapihttp.NewClient(fapihttp.RecommendedTransportConfig())`. Under
+`AssuranceProduction` it must be: a fetcher over any other HTTP client
+isn't `HardenedForProduction`, so a JWKS key source fetching through it
+doesn't declare `LiveFetchHardened` and `New` refuses it, as it does a
+`Dependencies.FederationHTTP` fetcher.)
 
 **Whichever access-token format you pick here, the resource server that
 verifies these tokens must be wired to match** — `resource.JWTAccessTokens`

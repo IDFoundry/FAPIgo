@@ -52,6 +52,43 @@ added a client certificate for mutual TLS by changing the transport's
 afterwards also still passes. An instrumented, wrapped transport is
 refused in production.
 
+### Fetchers must wrap `fapihttp.NewClient`'s client too (keys, server, *production only*)
+
+**Affects:** under `AssuranceProduction`:
+- a `keys.JWKSIssuerKeySource` (from `keys.NewJWKSIssuerKeySource` or
+  `client.DiscoveredMetadata.IssuerKeySource`) used as a production
+  dependency: `client.Dependencies.IssuerKeys`, a resource server's JWT
+  issuer keys, or a server key source;
+- `server.Dependencies.FederationHTTP`;
+
+whenever its `*fapihttp.Client` fetcher was built by `fapihttp.New` over
+anything other than the `*http.Client` `fapihttp.NewClient` returned.
+
+**Why:** `fapihttp.New` accepts any HTTP client, and a fetcher over
+`http.DefaultClient` still checks each URL and the addresses its host
+resolves to before fetching. But only `NewClient`'s transport checks the
+address it actually dials, which is what holds when DNS changes between
+the two (DNS rebinding). `fapihttp.Client` now reports this:
+`Hardening` (checked at each call) and `HardenedForProduction`, which
+also refuses a loopback exception on the transport or the fetcher.
+
+**What fails:**
+- A `JWKSIssuerKeySource` over such a fetcher no longer declares
+  `LiveFetchHardened`, so every production check that requires it
+  refuses the source (it previously required only that the fetcher
+  grant no loopback exception).
+- `server.New` refuses such a `FederationHTTP`.
+
+Development assurance is unchanged, and `AllowedPrivateHosts` is still
+accepted.
+
+**What to change:** build every fetcher from one transport:
+
+```go
+transport, err := fapihttp.NewClient(fapihttp.RecommendedTransportConfig())
+fetcher, err := fapihttp.New(transport, fapihttp.RecommendedConfig())
+```
+
 ## v0.55.0
 
 ### `Config.Subjects` is required (server)

@@ -34,7 +34,7 @@ var tour = []tourStep{
 		Do:    "On a verified check, try each attack.",
 		Notice: "Someone else's ID token, even one the bank issued, doesn't belong to this sign-in: Alex's carries another nonce, and Brightline's wasn't encrypted to Fernway, as Fernway registered for. Alex's UserInfo response is genuine but names another subject. " +
 			"A tampered response no longer decrypts. A stolen access token is bound to Fernway's DPoP key. " +
-			"Your sub at one relying party is no use at another: the bank accepts an id_token_hint only from the client it issued that ID token to, a sub Fernway knows means nothing when Brightline asks for it, and an access token whose sub is changed no longer matches the DPoP proof bound to it.",
+			"Your sub at one relying party is no use at another: the bank accepts an id_token_hint only from the client it issued that ID token to, a sub Fernway knows means nothing when Brightline asks for it, and an access token whose sub is changed no longer carries the bank's signature, which Fernway can't make (the bank refuses it first because Fernway's DPoP proof was made over the original token, but Fernway could make a matching proof with its own key: the signature is what it can't forge).",
 	},
 	{
 		Title: "Compare Brightline Rentals",

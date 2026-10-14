@@ -45,6 +45,17 @@ type TransportConfig struct {
 	// handshake. It adds checks, such as certificate pinning over
 	// ConnectionState.VerifiedChains; it can't loosen verification.
 	VerifyConnection func(tls.ConnectionState) error
+
+	// Certificates and GetClientCertificate present a client
+	// certificate (mutual TLS: RFC 8705 client authentication or
+	// certificate-bound tokens), exactly as the tls.Config fields of the
+	// same names do: Certificates is the certificate chain to present,
+	// or GetClientCertificate picks one per handshake (it takes
+	// precedence when set). Set them here rather than on the returned
+	// client's Transport afterwards; both work, and neither affects
+	// HardeningOf.
+	Certificates         []tls.Certificate
+	GetClientCertificate func(*tls.CertificateRequestInfo) (*tls.Certificate, error)
 }
 
 // AllowsLoopback reports whether c grants any of its loopback
@@ -71,6 +82,10 @@ func (c TransportConfig) AllowsLoopback() bool {
 // only an address it already validated — never re-resolving the
 // hostname at connect time.
 //
+// HardeningOf recognises the result, and any copy of it, for as long as
+// its transport stays as NewClient built it, so a production check can
+// refuse any other *http.Client.
+//
 // NewClient returns the transport: the *http.Client that
 // client.Dependencies.HTTP takes directly, and that New wraps into a
 // *Client, the fetcher client.Discover, keys.NewJWKSIssuerKeySource and
@@ -91,9 +106,15 @@ func NewClient(cfg TransportConfig) (*http.Client, error) {
 			named:        cfg.AllowedLoopbackHosts,
 		}, cfg.AllowedPrivateHosts),
 		TLSHandshakeTimeout: cfg.TLSHandshakeTimeout,
-		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12, VerifyConnection: cfg.VerifyConnection},
-		ForceAttemptHTTP2:   true,
+		TLSClientConfig: &tls.Config{
+			MinVersion:           tls.VersionTLS12,
+			VerifyConnection:     cfg.VerifyConnection,
+			Certificates:         cfg.Certificates,
+			GetClientCertificate: cfg.GetClientCertificate,
+		},
+		ForceAttemptHTTP2: true,
 	}
+	registerHardened(transport, cfg)
 	return &http.Client{
 		Transport: transport,
 		CheckRedirect: func(*http.Request, []*http.Request) error {

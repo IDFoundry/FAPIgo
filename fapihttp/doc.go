@@ -20,4 +20,11 @@
 // Client.Fetch for why a Fetch-level URL/origin check on its own cannot
 // substitute for that, and why fapihttp owns bounded redirect handling
 // itself instead of delegating it to the underlying HTTP client.
+//
+// HardeningOf recognises NewClient's *http.Client, and any copy of it,
+// while its transport stays as NewClient built it, so a dependency that
+// must be hardened can be checked rather than only documented:
+// client.New refuses any other Dependencies.HTTP under
+// AssuranceProduction. TransportConfig.Certificates presents a client
+// certificate for mutual TLS without touching the transport afterwards.
 package fapihttp

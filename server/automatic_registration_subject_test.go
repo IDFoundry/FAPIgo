@@ -112,7 +112,7 @@ func checkAutomaticRegistrationSubject(t *testing.T, sub string, err, failure er
 	if err != nil {
 		t.Fatalf("ClientSubject: %v (registration failure: %v)", err, failure)
 	}
-	if public := sub == user; public != wantPublic {
+	if (sub == user) != wantPublic {
 		t.Errorf("ClientSubject = %q, want public %v", sub, wantPublic)
 	}
 	if !wantPublic && !strings.HasPrefix(sub, testPairwisePrefix) {

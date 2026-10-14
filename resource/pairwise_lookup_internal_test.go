@@ -19,9 +19,8 @@ func (d deadlineLookup) LookupInternalSubject(ctx context.Context, _, _, _ strin
 	return "alice", nil
 }
 
-func (d deadlineLookup) ResolveSubject(ctx context.Context, _, _, _ string) (string, error) {
-	*d.deadline, _ = ctx.Deadline()
-	return "alice", nil
+func (d deadlineLookup) ResolveSubject(ctx context.Context, issuer, sector, sub string) (string, error) {
+	return d.LookupInternalSubject(ctx, issuer, sector, sub)
 }
 
 // TestPairwiseLookupIsBounded: a resource server's pairwise lookup and

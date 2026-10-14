@@ -133,7 +133,7 @@ func TestReversibleOpsWith32BitCounterFailCarryVector(t *testing.T) {
 	carry := carryVector(t)
 	d := newReversibleWith(t, counter32Ops{newHSMOps(t, mustHex(t, carry.MACKey), mustHex(t, carry.EncKey))})
 	in := reversibleInput(t, carry.Issuer, carry.Sector, carry.Subject)
-	if body := deriveReversible(t, d, in); body == carry.Body {
+	if deriveReversible(t, d, in) == carry.Body {
 		t.Error("a 32-bit counter derived the carry vector's body, want a different one")
 	}
 	if _, err := reversibleLookup(t, d).LookupInternalSubject(context.Background(), carry.Issuer, carry.Sector, carry.Body); !errors.Is(err, pairwise.ErrSubjectNotFound) {

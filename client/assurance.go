@@ -4,7 +4,9 @@ import (
 	"crypto/rand"
 	"fmt"
 	"io"
+	"net/http"
 
+	"github.com/idfoundry/fapigo/fapihttp"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -109,6 +111,28 @@ func checkKeySourceAssurance(name string, source any) error {
 	}
 	if !asserter.Capabilities().LiveFetchHardened {
 		return fmt.Errorf("client: dependencies: %s must declare LiveFetchHardened capability under AssuranceProduction", name)
+	}
+	return nil
+}
+
+// checkHTTPHardening requires httpClient to be an *http.Client
+// fapihttp.HardeningOf recognises (one from fapihttp.NewClient, or a
+// copy of it, with its transport as NewClient built it) that allows no
+// loopback address: the endpoints this client calls can come from
+// fetched metadata, and only that transport keeps them off internal
+// hosts. Its allowed private hosts are an explicit allow-list, and are
+// permitted.
+func checkHTTPHardening(httpClient fapihttp.HTTPClient) error {
+	c, ok := httpClient.(*http.Client)
+	if !ok {
+		return fmt.Errorf("client: dependencies: http must be an *http.Client from fapihttp.NewClient under AssuranceProduction, not %T (for mutual TLS, set fapihttp.TransportConfig.Certificates)", httpClient)
+	}
+	hardening, ok := fapihttp.HardeningOf(c)
+	if !ok {
+		return fmt.Errorf("client: dependencies: http must be an *http.Client from fapihttp.NewClient under AssuranceProduction, with its transport as NewClient built it: no proxy, dialer or TLS verification change, and not cloned or wrapped (for mutual TLS, set fapihttp.TransportConfig.Certificates)")
+	}
+	if hardening.AllowsLoopback() {
+		return fmt.Errorf("client: dependencies: http's transport allows loopback addresses (fapihttp.TransportConfig's loopback fields), which is not permitted under AssuranceProduction")
 	}
 	return nil
 }

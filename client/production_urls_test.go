@@ -114,7 +114,11 @@ func doLoopbackResourceRequest(t *testing.T, assurance client.AssuranceLevel) (i
 		deps = productionDeps(t)
 	}
 	var calls int
-	deps.HTTP = countingHTTP{calls: &calls}
+	if assurance != client.AssuranceProduction {
+		// Production only accepts fapihttp.NewClient's client, which
+		// can't count; its refusal comes before any request is built.
+		deps.HTTP = countingHTTP{calls: &calls}
+	}
 	c, err := client.New(cfg, deps)
 	if err != nil {
 		t.Fatalf("New: %v", err)

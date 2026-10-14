@@ -237,13 +237,16 @@ func (d safeDialer) dial(ctx context.Context, network, addr string) (net.Conn, e
 	return nil, lastErr
 }
 
+// lookupIPAddr resolves a host name for candidateIPs; tests replace it.
+var lookupIPAddr = net.DefaultResolver.LookupIPAddr
+
 // candidateIPs is host itself when it's an IP literal, and otherwise
 // every address it resolves to.
 func candidateIPs(ctx context.Context, host string) ([]net.IP, error) {
 	if ip := net.ParseIP(host); ip != nil {
 		return []net.IP{ip}, nil
 	}
-	resolved, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	resolved, err := lookupIPAddr(ctx, host)
 	if err != nil {
 		return nil, err
 	}

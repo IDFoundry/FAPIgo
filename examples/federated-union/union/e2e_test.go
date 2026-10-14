@@ -226,17 +226,21 @@ func TestForgedAssuranceMarkIsRejected(t *testing.T) {
 	if status != http.StatusForbidden {
 		t.Fatalf("sign-in with a forged mark = %d, want 403:\n%s", status, body)
 	}
+	// Refused for its mark, not because EastID can't be reached.
+	mustContain(t, body, "EastID is not accredited at a high level of assurance")
 }
 
 func TestSuspensionCutsOffCrossBorderOnly(t *testing.T) {
 	w, n := startUnion(t)
 	w.Scenes().SuspendEastmark.Store(true)
 
-	status, _ := signIn(t, w, newBrowser(t, n), "bank.southport.localhost", "id.eastmark.localhost", "em-3306", "given_name")
+	status, body := signIn(t, w, newBrowser(t, n), "bank.southport.localhost", "id.eastmark.localhost", "em-3306", "given_name")
 	if status != http.StatusForbidden {
 		t.Fatalf("cross-border sign-in while suspended = %d, want 403", status)
 	}
-	status, body := signIn(t, w, newBrowser(t, n), "telco.eastmark.localhost", "id.eastmark.localhost", "em-3306", "given_name")
+	// Refused because the Union no longer vouches for Eastmark, not for EastID's mark.
+	mustContain(t, body, "EastID is not trusted")
+	status, body = signIn(t, w, newBrowser(t, n), "telco.eastmark.localhost", "id.eastmark.localhost", "em-3306", "given_name")
 	if status != http.StatusOK {
 		t.Fatalf("domestic sign-in while suspended = %d:\n%s", status, body)
 	}

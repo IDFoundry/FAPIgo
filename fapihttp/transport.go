@@ -146,51 +146,72 @@ func NewClient(cfg TransportConfig) (*http.Client, error) {
 	}, nil
 }
 
-// safeDialContext resolves addr's host itself (or accepts it directly if
-// it's already an IP literal), validates every candidate address, and
-// dials the first one that passes — so the address actually connected to
-// is always one this function itself checked, never a name resolved a
-// second time by the caller's dialer. It answers HardeningOf's identity
-// probe with marker, which tells this transport's dialer apart from
-// another NewClient transport's.
+// safeDialContext returns the address-validating dialer for one
+// transport: safeDialer.dial over base and the transport's exceptions.
+// It answers HardeningOf's identity probe with marker, which tells this
+// transport's dialer apart from another NewClient transport's.
 func safeDialContext(base *net.Dialer, loopback loopbackPolicy, allowedPrivateHosts []string, marker *identityMarker) func(context.Context, string, string) (net.Conn, error) {
+	d := safeDialer{base: base, loopback: loopback, allowedPrivateHosts: allowedPrivateHosts}
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		if network == identityProbeNetwork {
 			return nil, identityProbe{marker: marker}
 		}
-		host, port, err := net.SplitHostPort(addr)
-		if err != nil {
-			return nil, err
-		}
-		allowPrivate := hostListed(host, allowedPrivateHosts)
-		allowLoopback := loopback.permits(host)
-
-		var candidates []net.IP
-		if ip := net.ParseIP(host); ip != nil {
-			candidates = []net.IP{ip}
-		} else {
-			resolved, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-			if err != nil {
-				return nil, err
-			}
-			for _, a := range resolved {
-				candidates = append(candidates, a.IP)
-			}
-		}
-
-		var lastErr = ErrSSRFBlocked
-		for _, ip := range candidates {
-			if disallowedIP(ip, allowLoopback, allowPrivate) {
-				continue
-			}
-			conn, dialErr := base.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
-			if dialErr == nil {
-				return conn, nil
-			}
-			lastErr = dialErr
-		}
-		return nil, lastErr
+		return d.dial(ctx, network, addr)
 	}
+}
+
+// safeDialer dials only addresses it has validated itself.
+type safeDialer struct {
+	base                *net.Dialer
+	loopback            loopbackPolicy
+	allowedPrivateHosts []string
+}
+
+// dial resolves addr's host itself (or accepts it directly if it's
+// already an IP literal), validates every candidate address, and dials
+// the first one that passes — so the address actually connected to is
+// always one this function itself checked, never a name resolved a
+// second time by the caller's dialer.
+func (d safeDialer) dial(ctx context.Context, network, addr string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	candidates, err := candidateIPs(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	allowPrivate := hostListed(host, d.allowedPrivateHosts)
+	allowLoopback := d.loopback.permits(host)
+	var lastErr = ErrSSRFBlocked
+	for _, ip := range candidates {
+		if disallowedIP(ip, allowLoopback, allowPrivate) {
+			continue
+		}
+		conn, dialErr := d.base.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+		if dialErr == nil {
+			return conn, nil
+		}
+		lastErr = dialErr
+	}
+	return nil, lastErr
+}
+
+// candidateIPs is host itself when it's an IP literal, and otherwise
+// every address it resolves to.
+func candidateIPs(ctx context.Context, host string) ([]net.IP, error) {
+	if ip := net.ParseIP(host); ip != nil {
+		return []net.IP{ip}, nil
+	}
+	resolved, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	candidates := make([]net.IP, 0, len(resolved))
+	for _, a := range resolved {
+		candidates = append(candidates, a.IP)
+	}
+	return candidates, nil
 }
 
 // extraBlockedCIDRs are address ranges net.IP's own IsPrivate/

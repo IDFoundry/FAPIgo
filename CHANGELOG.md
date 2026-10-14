@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.56.0](https://github.com/IDFoundry/FAPIgo/compare/v0.55.0...v0.56.0) (2026-10-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **server:** under server.AssuranceProduction, server.New refuses a Dependencies.FederationHTTP fetcher built over anything other than the *http.Client fapihttp.NewClient returned (or a copy of it) with its transport unchanged. Build it with fapihttp.New over fapihttp.NewClient's client. See UPGRADING.md for v0.56.0.
+* **keys:** keys.JWKSIssuerKeySource no longer declares LiveFetchHardened when its fapihttp.Client wraps anything other than the *http.Client fapihttp.NewClient returned (or a copy of it) with its transport unchanged, so AssuranceProduction refuses such a source wherever it requires LiveFetchHardened (client.Dependencies.IssuerKeys, resource JWT issuer keys, and the server's key sources). Build the fetcher with fapihttp.New over fapihttp.NewClient's client. See UPGRADING.md for v0.56.0.
+* **client:** under client.AssuranceProduction, client.New refuses a Dependencies.HTTP that isn't the *http.Client fapihttp.NewClient returned (or a copy of it) with its transport unchanged, and one built with a loopback exception. Build it with fapihttp.NewClient, and give a mutual TLS client certificate as fapihttp.TransportConfig.Certificates. See UPGRADING.md for v0.56.0.
+
+### Features
+
+* **client:** require fapihttp.NewClient's hardened client in production ([73347df](https://github.com/IDFoundry/FAPIgo/commit/73347df5dedaad2cbf25721c7a1cfa0058c65e12))
+* **fapihttp:** recognise NewClient's hardened client, and set client certificates at construction ([0092c97](https://github.com/IDFoundry/FAPIgo/commit/0092c970fdc00217ab88b3bae36ef669117bfc70))
+* **fapihttp:** report whether a fetcher's transport is hardened ([f577808](https://github.com/IDFoundry/FAPIgo/commit/f577808ad75a240d4bb21fa07ffafe1f72b815ff))
+* **keys:** declare a JWKS source hardened only over NewClient's transport ([e642572](https://github.com/IDFoundry/FAPIgo/commit/e6425727cd3b2848af7fbca7cf79d2404e1267fd))
+* **server:** require a hardened federation fetcher in production ([927de65](https://github.com/IDFoundry/FAPIgo/commit/927de65a32382e65cd660a582068d99bb838234d))
+
+
+### Bug Fixes
+
+* **fapihttp:** copy the host lists NewClient and New are given ([41fb6ba](https://github.com/IDFoundry/FAPIgo/commit/41fb6bae49aae0f04312b5d0d179ac032670e77c))
+* **fapihttp:** refuse another RoundTripper for https or http on NewClient's transport ([0bd6c4d](https://github.com/IDFoundry/FAPIgo/commit/0bd6c4d67ae6bd6891cf29eca9810efd51ef691a))
+* **fapihttp:** refuse more TLS weakenings, and add TransportConfig.RootCAs ([7094e32](https://github.com/IDFoundry/FAPIgo/commit/7094e320216ce4c5c9f1366953da3839af59ca64))
+* **fapihttp:** tell one NewClient transport's dialer from another's ([5b51e96](https://github.com/IDFoundry/FAPIgo/commit/5b51e96373dc936f14bc8a4bbe5382a3b392ef75))
+
 ## [0.55.0](https://github.com/IDFoundry/FAPIgo/compare/v0.54.0...v0.55.0) (2026-10-13)
 
 

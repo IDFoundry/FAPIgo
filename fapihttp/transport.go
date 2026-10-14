@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"slices"
 	"time"
 )
 
@@ -98,6 +99,12 @@ func NewClient(cfg TransportConfig) (*http.Client, error) {
 	if cfg.TLSHandshakeTimeout <= 0 {
 		return nil, fmt.Errorf("fapihttp: transport config: tls handshake timeout must be positive")
 	}
+
+	// The dialer keeps its own copy of the host lists, so a caller that
+	// later changes the slices it passed in can't change what the
+	// transport allows, or make it allow more than HardeningOf reports.
+	cfg.AllowedLoopbackHosts = slices.Clone(cfg.AllowedLoopbackHosts)
+	cfg.AllowedPrivateHosts = slices.Clone(cfg.AllowedPrivateHosts)
 
 	base := &net.Dialer{Timeout: cfg.DialTimeout}
 	transport := &http.Transport{

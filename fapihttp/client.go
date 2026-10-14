@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -166,6 +167,10 @@ func New(http HTTPClient, cfg Config) (*Client, error) {
 	if cfg.MaxRedirects < 0 {
 		return nil, fmt.Errorf("fapihttp: config: max redirects must not be negative")
 	}
+	// Its own copy of the host lists: a caller changing the slices it
+	// passed in afterwards can't change what Fetch allows.
+	cfg.AllowedLoopbackHosts = slices.Clone(cfg.AllowedLoopbackHosts)
+	cfg.AllowedPrivateHosts = slices.Clone(cfg.AllowedPrivateHosts)
 	return &Client{http: nofollow.Client(http), cfg: cfg, resolveIPs: defaultResolveIPs}, nil
 }
 

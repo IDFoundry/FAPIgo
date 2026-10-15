@@ -313,7 +313,7 @@ func TestNewVerifierResolvesPairwiseSubjects(t *testing.T) {
 				t.Fatalf("NewVerifier: %v", err)
 			}
 
-			clientSub, token, cert := issuePairwiseToken(t, cfg, tc.accessTokens, tc.deriver, prefix)
+			clientSub, token, cert := issuePairwiseToken(t, cfg, tc.accessTokens, tc.deriver, prefix, now)
 			authz, err := verifier.Verify(ctx, resource.VerifyRequest{
 				Method: "GET", URL: &url.URL{Scheme: "https", Host: "as.example.com", Path: "/userinfo"},
 				Authorization: "Bearer " + token, PeerCertificate: cert,
@@ -352,7 +352,10 @@ func testDerivers(t *testing.T) (mapping, oneWay pairwise.Deriver) {
 // sub the pairwise one deriver and prefix give, its internal subject
 // alice. It returns that sub, the token, and the client certificate the
 // token is bound to.
-func issuePairwiseToken(t *testing.T, cfg server.Config, accessTokens server.AccessTokenIssuer, deriver pairwise.Deriver, prefix pairwise.Prefix) (string, string, *x509.Certificate) {
+// issuePairwiseToken issues at now, the verifier's own fixed time, so the
+// token's lifetime is measured from the same instant the verifier checks it
+// against.
+func issuePairwiseToken(t *testing.T, cfg server.Config, accessTokens server.AccessTokenIssuer, deriver pairwise.Deriver, prefix pairwise.Prefix, now time.Time) (string, string, *x509.Certificate) {
 	t.Helper()
 	ctx := context.Background()
 	in, err := pairwise.NewInput(cfg.Issuer.String(), "rp.example", "alice")
@@ -372,7 +375,7 @@ func issuePairwiseToken(t *testing.T, cfg server.Config, accessTokens server.Acc
 		Thumbprint:      base64.RawURLEncoding.EncodeToString(thumbprint[:]),
 		SenderConstrain: storage.SenderConstrainMTLS,
 		Issuer:          cfg.Issuer.String(), Audience: cfg.Issuer.String(),
-		Now: time.Now(), Lifetime: cfg.Limits.AccessTokenLifetime, Random: rand.Reader,
+		Now: now, Lifetime: cfg.Limits.AccessTokenLifetime, Random: rand.Reader,
 	})
 	if err != nil {
 		t.Fatalf("IssueAccessToken: %v", err)
@@ -402,7 +405,8 @@ func TestNewVerifierPassesTheServersSubjectResolver(t *testing.T) {
 	cfg := serverConfig(t)
 	cfg.Subjects = server.SubjectConfig{Default: fapi.SubjectTypePairwise, Enforcement: server.SubjectTypesPerClient, Prefix: prefix}
 	accessTokens := jwtAccessTokens(t)
-	deps := serverDependencies(t, accessTokens, time.Now())
+	now := time.Now()
+	deps := serverDependencies(t, accessTokens, now)
 	deps.PairwiseSubjects = oneWay
 	resolver := &mapResolver{}
 	deps.PairwiseSubjectResolver = resolver
@@ -410,7 +414,7 @@ func TestNewVerifierPassesTheServersSubjectResolver(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewVerifier: %v", err)
 	}
-	clientSub, token, cert := issuePairwiseToken(t, cfg, accessTokens, oneWay, prefix)
+	clientSub, token, cert := issuePairwiseToken(t, cfg, accessTokens, oneWay, prefix, now)
 	resolver.sub = clientSub
 	authz, err := verifier.Verify(context.Background(), resource.VerifyRequest{
 		Method: "GET", URL: &url.URL{Scheme: "https", Host: "as.example.com", Path: "/userinfo"},

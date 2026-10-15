@@ -28,7 +28,9 @@ name: FAPI Conformance
 #
 # Tracks the OIDF suite's latest master/prebuilt images on every run (no
 # version pin) — simplest, and consistent with how the suite is used
-# locally today.
+# locally today. Each run records the suite commit and image digests it
+# tested in its job summary ("Record OIDF suite version" below), so a
+# new failure can be checked against the last green run's suite.
 
 on:
   schedule:
@@ -85,6 +87,36 @@ jobs:
       - name: Bring up OIDF conformance suite
         working-directory: /tmp/conformance-suite
         run: docker compose -f docker-compose-prebuilt.yml -f "$GITHUB_WORKSPACE/conformance/scripts/suite-host-gateway.override.yml" up -d
+
+      # Records exactly which suite this run tested: the cloned commit
+      # and the digest of each prebuilt image, which are built from
+      # master separately and can lag the commit. Since every run tracks
+      # the suite's latest (see the top of this file), comparing this
+      # with the last green run's shows straight away whether a new
+      # failure came with a suite change. Written to the job summary and
+      # to the uploaded results; runs even if bringing the suite up
+      # failed, so an image that couldn't be pulled shows as such. Each
+      # docker call is time-limited, so a stalled daemon can't hold the
+      # job until its timeout.
+      - name: Record OIDF suite version
+        if: always()
+        working-directory: /tmp/conformance-suite
+        env:
+          RESULTS: ${{ runner.temp }}/conformance-results
+        run: |
+          mkdir -p "$RESULTS"
+          {
+            echo "### OIDF conformance suite under test"
+            echo
+            echo "- Commit: \`$(git rev-parse HEAD)\` ($(git log -1 --format='%cI %s'))"
+            images=$(timeout 30 docker compose -f docker-compose-prebuilt.yml config --images || true)
+            [ -n "$images" ] || echo "- Images: couldn't be listed"
+            for image in $images; do
+              digest=$(timeout 30 docker image inspect --format '{{index .RepoDigests 0}}' "$image" 2>/dev/null || echo "not pulled")
+              echo "- Image \`$image\`: \`$digest\`"
+            done
+            echo
+          } | tee "$RESULTS/suite-version.md" >> "$GITHUB_STEP_SUMMARY"
 
       # Generates the gitignored plan configs (private test-client keys)
       # plus registers matching public keys with this AS — exactly the

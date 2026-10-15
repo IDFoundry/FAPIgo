@@ -171,6 +171,20 @@ type Config struct {
 	// GrantID, if set, names every grant the harness approves
 	// (server.GrantedAuthorization.GrantID), for Harness.RevokeGrant.
 	GrantID string
+
+	// Resources and ResourcePolicy, if set, are the harness's server
+	// Config.Resources and Dependencies.ResourcePolicy, enabling RFC
+	// 8707 resource indicators; AllowedResources is its registered
+	// client's storage.RegisteredClientConfig.AllowedResources. Build a
+	// resource.Verifier for one of them with Harness.NewResourceVerifier.
+	Resources        []string
+	ResourcePolicy   server.ResourcePolicy
+	AllowedResources []string
+
+	// OpaqueAccessTokens, if set, makes the harness's server issue
+	// server.OpaqueAccessTokens backed by an in-memory store instead of
+	// JWT access tokens; the harness's verifiers look them up there.
+	OpaqueAccessTokens bool
 }
 
 // Harness wires a real client.Client, server.Server and resource.Verifier
@@ -202,6 +216,11 @@ type Harness struct {
 	// on-device storage.
 	clientConfig client.Config
 	clientDeps   client.Dependencies
+
+	// serverConfig and serverDeps built the server, for
+	// NewResourceVerifier.
+	serverConfig server.Config
+	serverDeps   server.Dependencies
 }
 
 // New builds a Harness: an in-memory-backed server.Server exposed over a
@@ -302,13 +321,10 @@ func New(t *testing.T, cfg Config) *Harness {
 		Extensions:             cfg.Extensions,
 		ClientCredentialsGrant: cfg.ClientCredentialsGrant,
 		OAuthOnly:              cfg.OAuthOnly,
+		Resources:              cfg.Resources,
 	}
 	applyServerIDTokenOptions(&srvCfg, cfg, contentEncryption)
 	revocation := memstore.NewRevocationStore()
-	jwtAccessTokens, err := server.NewJWTAccessTokens(asKeys, sigAlg)
-	if err != nil {
-		t.Fatalf("fapitest: server.NewJWTAccessTokens: %v", err)
-	}
 	srvDeps := server.Dependencies{
 		Clients:                &memClientRepository{client: registeredClient},
 		Transactions:           memstore.NewTransactionStore(),
@@ -316,13 +332,14 @@ func New(t *testing.T, cfg Config) *Harness {
 		Replay:                 replay,
 		ClientKeys:             &memClientKeySource{clientID: ClientID, manager: clientKeys},
 		Keys:                   asKeys,
-		AccessTokens:           jwtAccessTokens,
+		AccessTokens:           newAccessTokenIssuer(t, cfg, asKeys, sigAlg),
 		Revocation:             revocation,
 		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
 		Clock:                  clock,
 		Random:                 rand.Reader,
 	}
 	srvDeps.IdentityClaims = cfg.IdentityClaims
+	srvDeps.ResourcePolicy = cfg.ResourcePolicy
 	if cfg.EncryptIDTokens {
 		srvDeps.ClientEncryptionKeys = &memClientEncryptionKeySource{clientID: ClientID, decrypter: clientDecryption}
 	}
@@ -421,7 +438,36 @@ func New(t *testing.T, cfg Config) *Harness {
 		t: t, Client: c, Resource: rs, Clock: clock, authServer: as, httpClient: httpClient,
 		clientKeys: clientKeys, signatureAlgorithm: sigAlg, MTLSCertificate: mtlsCert,
 		clientConfig: clientCfg, clientDeps: clientDeps,
+		serverConfig: srvCfg, serverDeps: srvDeps,
 	}
+}
+
+// newAccessTokenIssuer returns the harness server's access-token
+// issuer: server.OpaqueAccessTokens under Config.OpaqueAccessTokens,
+// JWT access tokens signed with asKeys otherwise.
+func newAccessTokenIssuer(t *testing.T, cfg Config, asKeys keys.KeyManager, sigAlg fapi.SignatureAlgorithm) server.AccessTokenIssuer {
+	t.Helper()
+	if cfg.OpaqueAccessTokens {
+		opaque, err := server.NewOpaqueAccessTokens(memstore.NewAccessTokenStore())
+		if err != nil {
+			t.Fatalf("fapitest: server.NewOpaqueAccessTokens: %v", err)
+		}
+		return opaque
+	}
+	jwtAccessTokens, err := server.NewJWTAccessTokens(asKeys, sigAlg)
+	if err != nil {
+		t.Fatalf("fapitest: server.NewJWTAccessTokens: %v", err)
+	}
+	return jwtAccessTokens
+}
+
+// NewResourceVerifier builds a resource.Verifier for the access tokens
+// the harness's server issues, as serverresource.NewVerifier does with
+// opts — Options.Resource set, say, for a resource server that accepts
+// only tokens issued for it (RFC 8707). Harness.Resource is the one
+// built with no options, accepting tokens addressed to the issuer.
+func (h *Harness) NewResourceVerifier(opts serverresource.Options) (*resource.Verifier, error) {
+	return serverresource.NewVerifier(h.serverConfig, h.serverDeps, opts)
 }
 
 // validateConfig rejects a Config whose enum fields hold values the
@@ -561,6 +607,7 @@ func registeredClientConfig(cfg Config, sigAlg fapi.SignatureAlgorithm, contentE
 		ClientAuthMethod:             cfg.ClientAuthMethod,
 		AllowedScopes:                []string{"openid", "accounts", "offline_access"},
 		AllowsClientCredentialsGrant: cfg.ClientCredentialsGrant,
+		AllowedResources:             cfg.AllowedResources,
 	}
 	switch cfg.ClientAuthMethod {
 	case storage.ClientAuthMethodSelfSignedTLSClientAuth:

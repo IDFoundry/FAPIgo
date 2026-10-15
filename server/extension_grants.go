@@ -14,25 +14,28 @@ import (
 // serving a grant_type this package doesn't at the same endpoint (see
 // Config.AdditionalGrantTypes). It applies the rules this package's own
 // grants apply: a repeated parameter, or too many or too large ones, is
-// refused with an invalid_request *Error. The one exception is
-// "resource", which RFC 8707 §2 lets a client repeat: the map holds its
-// first value, and Resources returns them all.
+// refused with an invalid_request *Error. The one exception is RFC
+// 8707's "resource", which a client may repeat: it isn't in the map at
+// all, so it can't be read as one value when the client sent several.
+// Read it with Resources.
 func (t TokenEndpointRequest) Parameters() (map[string]string, error) {
-	rest, resources := splitResourceParameters(t.parts.HTTP.Parameters)
+	rest, _ := splitResourceParameters(t.parts.HTTP.Parameters)
 	params, err := formParametersToMap(rest)
 	if err != nil {
 		return nil, newError(ErrorInvalidRequest, 400, "the request's parameters are duplicated, too many, or too large", err)
-	}
-	if len(resources) > 0 {
-		params[resourceParameter] = resources[0]
 	}
 	return params, nil
 }
 
 // Resources returns the request's RFC 8707 "resource" parameters, in
-// order, for IssueAccessTokenRequest.Resources and
-// IssueRefreshTokenRequest.Resources. Nil when there are none, or when
-// the request has more parameters than Parameters accepts.
+// order: every one the client sent, which is what a check of the
+// resources an embedder's grant may be used for has to look at. Pass
+// them as IssueAccessTokenRequest.Resources and
+// IssueRefreshTokenRequest.Resources, which refuse any the client or
+// this server doesn't allow — every one, with resource indicators
+// turned off (neither Config.Resources nor a ResourcePolicy). Nil when
+// there are none, or when the request has more parameters than
+// Parameters accepts.
 func (t TokenEndpointRequest) Resources() []string {
 	_, resources := splitResourceParameters(t.parts.HTTP.Parameters)
 	return resources

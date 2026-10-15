@@ -74,9 +74,11 @@ type Options struct {
 	// appears in the server's Config.Resources, or is accepted by its
 	// ResourcePolicy). A token is then accepted only when it was issued
 	// for it, so a token issued for another resource server can't be
-	// replayed here. Empty, the verifier accepts tokens addressed to the
-	// server's issuer identifier: those issued without a resource
-	// indicator, as for a UserInfo endpoint.
+	// replayed here. One issued for several resources, this among them,
+	// is accepted here too (see the resource package's doc). Empty, the
+	// verifier accepts tokens addressed to the server's issuer
+	// identifier: those issued without a resource indicator, as for a
+	// UserInfo endpoint.
 	Resource string
 
 	// AcceptIssuerAudience, with Resource set, also accepts tokens

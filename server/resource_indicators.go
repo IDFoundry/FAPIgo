@@ -29,6 +29,22 @@ const resourceParameter = "resource"
 // store or network failure), which is server_error: never read as a
 // refusal, so a client isn't told its request is wrong when the policy
 // couldn't answer.
+//
+// It's asked at every access token a grant issues, not only when the
+// grant is made: at the authorization code exchange, at each refresh and
+// at each CIBA token request, for the resources that token would be
+// restricted to, so a resource it no longer allows stops being issued
+// for. Keep it cheap — cache what it looks up. A client chooses what
+// it's asked about, up to 16 resources a request, each up to 2048
+// bytes, so don't fetch from a resource indicator without first
+// checking it's one you might serve.
+//
+// Resources are compared exactly, as strings, here and at the resource
+// server: a policy that accepts a resource by normalizing it (host case,
+// a trailing slash, a default port) still gets a token addressed to the
+// client's own spelling, which a resource server expecting another
+// spelling refuses. Accept only the spelling your resource servers
+// verify with.
 type ResourcePolicy interface {
 	AllowResources(ctx context.Context, client storage.RegisteredClient, resources []string) error
 }
@@ -174,11 +190,11 @@ func narrowResources(granted, requested []string) ([]string, *Error) {
 // allowedGrantAudience is checkGrantStillAllowed for a token request
 // from grant asking for scope, followed by narrowedAudience for the
 // resources it requested.
-func (s *Server) allowedGrantAudience(client storage.RegisteredClient, grant grantRecord, scope, requested []string) (string, []string, *Error) {
+func (s *Server) allowedGrantAudience(ctx context.Context, client storage.RegisteredClient, grant grantRecord, scope, requested []string) (string, []string, *Error) {
 	if err := s.checkGrantStillAllowed(client, grant, scope); err != nil {
 		return "", nil, err
 	}
-	return s.narrowedAudience(grant.Resources, requested)
+	return s.narrowedAudience(ctx, client, grant.Resources, requested)
 }
 
 // usableGrantAudience is allowedGrantAudience for the CIBA token
@@ -187,14 +203,29 @@ func (s *Server) usableGrantAudience(ctx context.Context, client storage.Registe
 	if err := s.checkGrantUsable(ctx, client, grant); err != nil {
 		return "", nil, err
 	}
-	return s.narrowedAudience(grant.Resources, requested)
+	return s.narrowedAudience(ctx, client, grant.Resources, requested)
 }
 
 // narrowedAudience is the audience of an access token from a grant for
 // granted resources, narrowed to requested (see narrowResources).
-func (s *Server) narrowedAudience(granted, requested []string) (string, []string, *Error) {
+//
+// The resources the token would be restricted to are then checked again
+// as a request naming them would be (checkRequestedResources), as
+// checkGrantStillAllowed checks the grant's scopes: a grant was checked
+// when it was made, but a resource may since have been removed from the
+// client's AllowedResources or from Config.Resources, or be refused by
+// the ResourcePolicy, or resource indicators turned off altogether. It
+// refuses rather than narrowing silently, with invalid_target, and the
+// client can still get a token by naming only resources it may still
+// use. When none is — resource indicators turned off, say — it must
+// authorize again. The refresh token keeps all of the grant's
+// resources, so one allowed again later can be named again.
+func (s *Server) narrowedAudience(ctx context.Context, client storage.RegisteredClient, granted, requested []string) (string, []string, *Error) {
 	resources, err := narrowResources(granted, requested)
 	if err != nil {
+		return "", nil, err
+	}
+	if _, err := s.checkRequestedResources(ctx, client, resources); err != nil {
 		return "", nil, err
 	}
 	audience, audiences := s.accessTokenAudience(resources)

@@ -1061,7 +1061,25 @@ its audience, and with neither `Config.Resources` nor `ResourcePolicy`
 set, `resource` is ignored as it always was. For a grant you serve
 yourself (`Config.AdditionalGrantTypes`), pass
 `TokenEndpointRequest.Resources()` as `IssueAccessTokenRequest.Resources`
-and `IssueRefreshTokenRequest.Resources`.
+and `IssueRefreshTokenRequest.Resources`, and check the resources your
+grant may be used for against `Resources()` too: `Parameters()` leaves
+`resource` out, since the client may have sent several.
+
+A grant's resources are checked again at every access token it issues
+— the code exchange, the CIBA poll, each refresh — as its scopes are:
+once a resource is removed from the client's `AllowedResources` or from
+`Config.Resources`, or the `ResourcePolicy` refuses it, a token request
+whose token would still name it gets `invalid_target`. The client can
+narrow to the resources it may still use; with none left (resource
+indicators turned off, say) it must authorize again. So
+`ResourcePolicy` is asked on every refresh, not only when the grant is
+made: keep it cheap, caching what it looks up, and don't fetch from a
+resource indicator — a client chooses up to 16 a request — before
+checking it's one you might serve. Resources are compared exactly, as
+strings, both here and at the resource server; a policy that accepts a
+resource by normalizing it (host case, a trailing slash, a default
+port) still gets a token addressed to the client's own spelling, so
+accept only the spelling your resource servers verify with.
 
 Each resource server then verifies with its own identifier as the
 audience. A Credential Endpoint in the AS's own process passes it to
@@ -1079,6 +1097,18 @@ A token issued for the diploma issuer is then refused at the PID
 issuer. Opaque access tokens carry no `aud` on the wire; the AS records
 their audience with the token, and `OpaqueAccessTokens` checks it when
 its `Audience` is set.
+
+A token issued for several resources is accepted at each of them, as
+RFC 8707 intends: any of those resource servers that receives it could
+present it to another. Every FAPIgo access token is sender-constrained
+(DPoP or mTLS), so it's useless without the client's key, but a client
+that doesn't want its resource servers to share a token narrows each
+token request to the one resource it's for.
+
+The consent screen isn't told which resources a request names
+(`InteractionRequest` doesn't carry them), so it can neither show them
+to the user nor narrow them: they're the client's to choose and the
+server's to allow.
 
 While clients move to sending `resource`, a resource server can also
 accept tokens issued without one: `AcceptIssuerAudience: true` in

@@ -17,6 +17,26 @@ and `keys/ephemeral` needs only the steps not marked *production only*.
 
 ## v0.57.0
 
+### Read `resource` with `Resources()`, not `Parameters()` (server)
+
+**Affects:** an embedder serving its own token-endpoint grant type
+(`TokenEndpointRequest`, such as an OpenID4VCI pre-authorized code)
+that reads `Parameters()["resource"]`.
+
+**Why:** a client may send `resource` more than once (RFC 8707 §2).
+`Parameters()` could hold only one value while `Resources()` returns
+them all, so a grant that checked one and issued for the other could be
+widened by repeating the parameter.
+
+**What fails:** `Parameters()` no longer includes `resource`, so
+`Parameters()["resource"]` is `""` even when the client sent one.
+Nothing errors.
+
+**What to change:** read `TokenEndpointRequest.Resources()`, and pass
+what you accept to `IssueAccessTokenRequest.Resources` (and
+`IssueRefreshTokenRequest.Resources`), which checks each against your
+resource configuration.
+
 ### RFC 8707 resource indicators (server, resource; opt-in)
 
 Nothing to change: resource indicators are off until you set
@@ -33,12 +53,21 @@ shows how to turn them on. Three things change whether or not you do:
   change.
 - `serverresource.NewVerifier` now checks an opaque token's recorded
   audience, as it always checked a JWT's `aud`. A token recorded before
-  this release has none and is still accepted.
+  this release has none and is still accepted, so for up to one access
+  token lifetime after the upgrade an opaque token is accepted without
+  an audience check; no token issued by this release lacks one.
 - A custom `server.AccessTokenIssuer` keeps working: it gets the first
   resource in `AccessTokenParams.Audience`, so its tokens are still
   restricted to a resource the client named, and every resource in the
   new `Audiences` field. Issue `Audiences` as the token's audience to
   restrict it to all of them.
+
+Once on, a grant's resources are checked against the current
+configuration at every access token it issues, so removing a resource
+from a client's `AllowedResources` or from `Config.Resources`, or
+refusing it in the `ResourcePolicy`, takes effect at the client's next
+refresh; turning resource indicators off again makes the grants that
+named resources unusable until their clients authorize again.
 
 Once a resource server verifies with its own identifier
 (`serverresource.Options.Resource`, or `JWTAccessTokens.Audience` /

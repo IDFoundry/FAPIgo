@@ -715,11 +715,17 @@ func TestTokenEndpointRequestResources(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parameters: %v", err)
 	}
-	if params["resource"] != resourceA || params["pre-authorized_code"] != "x" {
+	// "resource" isn't in the map, so a check of params["resource"]
+	// can't see one value while Resources hands over several.
+	if _, ok := params["resource"]; ok || params["pre-authorized_code"] != "x" {
 		t.Fatalf("Parameters = %v", params)
 	}
 	if got := req.Resources(); !reflect.DeepEqual(got, []string{resourceA, resourceB}) {
 		t.Fatalf("Resources = %v", got)
+	}
+	single, err := httptestTokenRequest(t, "grant_type=x&resource="+resourceA).Parameters()
+	if _, ok := single["resource"]; err != nil || ok {
+		t.Fatalf("Parameters = %v, %v; want no resource", single, err)
 	}
 
 	// Any other repeated parameter is still refused.

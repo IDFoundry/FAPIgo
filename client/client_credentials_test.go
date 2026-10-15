@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 
@@ -237,5 +238,67 @@ func TestRequestClientCredentialsTokenPropagatesServerError(t *testing.T) {
 
 	if _, err := c.RequestClientCredentialsToken(context.Background(), client.ClientCredentialsTokenRequest{Scope: []string{"accounts"}}); err == nil {
 		t.Fatalf("RequestClientCredentialsToken(server error) = nil error, want error")
+	}
+}
+
+// TestRequestClientCredentialsTokenSendsResources confirms Resource is
+// sent as one "resource" parameter per entry (RFC 8707 §2), in order,
+// and that no "resource" parameter is sent without one.
+func TestRequestClientCredentialsTokenSendsResources(t *testing.T) {
+	for name, resources := range map[string][]string{
+		"none":    nil,
+		"one":     {"https://rs1.example.com"},
+		"several": {"https://rs1.example.com", "https://rs2.example.com/api", "urn:example:rs3"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, as := newTestClientForClientCredentials(t, nil)
+			if _, err := c.RequestClientCredentialsToken(context.Background(), client.ClientCredentialsTokenRequest{
+				Scope:    []string{"accounts"},
+				Resource: resources,
+			}); err != nil {
+				t.Fatalf("RequestClientCredentialsToken: %v", err)
+			}
+			got, sent := as.lastForm["resource"]
+			if len(resources) == 0 {
+				if sent {
+					t.Fatalf("resource = %q, want no resource parameter", got)
+				}
+				return
+			}
+			if !slices.Equal(got, resources) {
+				t.Errorf("resource = %q, want %q", got, resources)
+			}
+			if as.lastForm.Get("scope") != "accounts" {
+				t.Errorf("scope = %q, want accounts", as.lastForm.Get("scope"))
+			}
+		})
+	}
+}
+
+// TestRequestClientCredentialsTokenRefusesInvalidResources confirms each
+// resource is checked as BeginAuthorizationRequest.Resource is, before
+// anything is sent.
+func TestRequestClientCredentialsTokenRefusesInvalidResources(t *testing.T) {
+	for name, resources := range map[string][]string{
+		"empty":     {""},
+		"relative":  {"/api"},
+		"fragment":  {"https://rs.example.com#x"},
+		"repeated":  {"https://rs.example.com", "https://rs.example.com"},
+		"separator": {"https://rs.example.com\nhttps://other.example.com"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, as := newTestClientForClientCredentials(t, nil)
+			_, err := c.RequestClientCredentialsToken(context.Background(), client.ClientCredentialsTokenRequest{
+				Scope:    []string{"accounts"},
+				Resource: resources,
+			})
+			var cerr *client.Error
+			if !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidRequest {
+				t.Fatalf("err = %v, want a *client.Error with %q", err, client.ErrorInvalidRequest)
+			}
+			if as.lastForm != nil {
+				t.Errorf("a token request was sent: %v", as.lastForm)
+			}
+		})
 	}
 }

@@ -1457,5 +1457,6 @@ An authorization server that doesn't support resource indicators
 ignores them, so setting `Resource` is safe either way. A server that
 does may issue a token only that resource server accepts, and refuse
 (`invalid_target`) one it doesn't serve. `BeginBackchannelAuthenticationRequest`
-has the same field for CIBA. Use `Resource` rather than an `Extensions`
+has the same field for CIBA, and `ClientCredentialsTokenRequest` for a
+client credentials token. Use `Resource` rather than an `Extensions`
 value named `resource`: `BeginAuthorization` refuses a request with both.

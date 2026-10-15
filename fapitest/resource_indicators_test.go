@@ -359,3 +359,75 @@ func wantServerError(t *testing.T, what string, err error, code string) {
 		t.Errorf("%s server error = %+v (from server %v), want %s", what, resp, ok, code)
 	}
 }
+
+// TestResourceIndicatorsClientCredentials names resources on a client
+// credentials token request, end to end: the access token is issued for
+// exactly them and accepted only at their resource servers, and a
+// resource the server doesn't serve or the client may not name is
+// refused with invalid_target.
+func TestResourceIndicatorsClientCredentials(t *testing.T) {
+	for _, format := range []struct {
+		name   string
+		opaque bool
+	}{{"JWT", false}, {"opaque", true}} {
+		t.Run(format.name, func(t *testing.T) {
+			h := fapitest.New(t, fapitest.Config{
+				Profile: server.ProfileFAPISecurity, ClientCredentialsGrant: true, OpaqueAccessTokens: format.opaque,
+				Resources: servedResources, AllowedResources: []string{payments, accounts, unlisted},
+			})
+			ctx := context.Background()
+			request := func(resources []string) (client.TokenSet, error) {
+				result, err := h.Client.RequestClientCredentialsToken(ctx, client.ClientCredentialsTokenRequest{Scope: []string{"accounts"}, Resource: resources})
+				return client.TokenSet{AccessToken: result.AccessToken}, err
+			}
+
+			t.Run("several resources", func(t *testing.T) {
+				tokens, err := request([]string{payments, accounts})
+				if err != nil {
+					t.Fatalf("RequestClientCredentialsToken: %v", err)
+				}
+				if !format.opaque {
+					checkJWTAudience(t, tokens, `["`+payments+`","`+accounts+`"]`)
+				}
+				checkVerifierAudience(t, h, tokens, payments, []string{payments, accounts})
+				checkVerifierAudience(t, h, tokens, accounts, []string{payments, accounts})
+				refuseAtResource(t, h, tokens, serverresource.Options{Resource: credentials})
+				refuseAt(t, h, h.Resource, tokens)
+			})
+
+			t.Run("one resource", func(t *testing.T) {
+				tokens, err := request([]string{accounts})
+				if err != nil {
+					t.Fatalf("RequestClientCredentialsToken: %v", err)
+				}
+				if !format.opaque {
+					checkJWTAudience(t, tokens, `"`+accounts+`"`)
+				}
+				checkVerifierAudience(t, h, tokens, accounts, []string{accounts})
+				refuseAtResource(t, h, tokens, serverresource.Options{Resource: payments})
+			})
+
+			t.Run("no resource", func(t *testing.T) {
+				tokens, err := request(nil)
+				if err != nil {
+					t.Fatalf("RequestClientCredentialsToken: %v", err)
+				}
+				verifyAt(t, h, h.Resource, tokens)
+				refuseAtResource(t, h, tokens, serverresource.Options{Resource: accounts})
+			})
+
+			for _, tc := range []struct {
+				name      string
+				resources []string
+			}{
+				{"not served", []string{payments, unlisted}},
+				{"not allowed for the client", []string{credentials}},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					_, err := request(tc.resources)
+					wantServerError(t, "RequestClientCredentialsToken", err, "invalid_target")
+				})
+			}
+		})
+	}
+}

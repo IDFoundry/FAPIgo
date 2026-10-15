@@ -9,7 +9,6 @@ import (
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
-	"github.com/idfoundry/fapigo/internal/par"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
 )
@@ -33,6 +32,15 @@ type ClientCredentialsTokenRequest struct {
 	// authorization request: this grant has no signed-request-object
 	// concept for Config.Profile to matter to.
 	AuthorizationDetails []json.RawMessage
+
+	// Resource, when not empty, names the resource servers the access
+	// token is for (RFC 8707 resource indicators), each an absolute URI
+	// without a fragment, as BeginAuthorizationRequest.Resource does. It's
+	// sent as one "resource" parameter per entry. An authorization server
+	// that supports resource indicators issues an access token for just
+	// those resource servers, and refuses one it doesn't serve with
+	// invalid_target; one that doesn't ignores them.
+	Resource []string
 }
 
 // ClientCredentialsTokenResult is returned by a successful
@@ -67,8 +75,8 @@ type ClientCredentialsTokenResult struct {
 // self-contained call with no prior BeginAuthorization/
 // BeginBackchannelAuthentication step to complete.
 func (c *Client) RequestClientCredentialsToken(ctx context.Context, req ClientCredentialsTokenRequest) (ClientCredentialsTokenResult, error) {
-	if len(req.Scope) == 0 {
-		return ClientCredentialsTokenResult{}, newError(ErrorInvalidRequest, "scope is required", nil)
+	if reqErr := checkClientCredentialsTokenRequest(req); reqErr != nil {
+		return ClientCredentialsTokenResult{}, reqErr
 	}
 
 	var authorizationDetailsJSON string
@@ -119,11 +127,12 @@ func (c *Client) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 		if authorizationDetailsJSON != "" {
 			form[authorizationDetailsParameter] = authorizationDetailsJSON
 		}
+		setResources(form, req.Resource)
 		headers, err := c.addClientAuthentication(ctx, form, assertionSigner, assertionKID)
 		if err != nil {
 			return nil, nil, err
 		}
-		return par.EncodeForm(form), headers, nil
+		return encodeForm(form), headers, nil
 	}
 
 	form, headers, err := buildForm()
@@ -155,4 +164,14 @@ func (c *Client) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 		result.HasExpiresIn = true
 	}
 	return result, nil
+}
+
+// checkClientCredentialsTokenRequest refuses a request
+// RequestClientCredentialsToken can't send: one without a scope, or with
+// a resource RFC 8707 §2 doesn't allow (see checkResources).
+func checkClientCredentialsTokenRequest(req ClientCredentialsTokenRequest) *Error {
+	if len(req.Scope) == 0 {
+		return newError(ErrorInvalidRequest, "scope is required", nil)
+	}
+	return checkResources(req.Resource)
 }

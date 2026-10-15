@@ -11,7 +11,10 @@
 // fetches (e.g. the server does not fetch client JWKS the way the client
 // fetches AS discovery documents) through Client.Fetch's FetchRequest
 // fields, such as ExpectedContentType, rather than through separate
-// per-role types.
+// per-role types. FetchRequest.Accept (and PostRequest.Accept) is the one
+// request header a caller can set, for a resource with more than one
+// representation, such as OpenID4VCI's signed Credential Issuer
+// Metadata (Accept: application/jwt).
 //
 // NewClient additionally builds an *http.Client with a hardened
 // *http.Transport (SSRF-resistant dialing that validates a resolved

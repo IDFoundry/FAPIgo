@@ -53,6 +53,10 @@ type sessionRecord struct {
 	// EssentialACR is the request's essential "acr" values, or nil for
 	// none: ExchangeCode requires the ID token's acr to be one of them.
 	EssentialACR []string `json:"essential_acr,omitempty"`
+
+	// Resource is the request's resource indicators (RFC 8707), or nil
+	// for none: ExchangeCode sends them again on its token request.
+	Resource []string `json:"resource,omitempty"`
 }
 
 // maxAge is r's max_age, and whether the request carried one.
@@ -89,6 +93,9 @@ func decodeSessionRecord(raw json.RawMessage) (sessionRecord, error) {
 	}
 	if r.MaxAgeSeconds != nil && (*r.MaxAgeSeconds < 0 || *r.MaxAgeSeconds > maxSessionMaxAgeSeconds) {
 		return sessionRecord{}, fmt.Errorf("session record max_age %d is out of range", *r.MaxAgeSeconds)
+	}
+	if resourceErr := checkResources(r.Resource); resourceErr != nil {
+		return sessionRecord{}, fmt.Errorf("session record resource: %w", resourceErr)
 	}
 	return r, nil
 }

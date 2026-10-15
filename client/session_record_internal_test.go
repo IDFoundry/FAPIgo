@@ -2,6 +2,7 @@ package client
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 	"time"
 )
@@ -10,7 +11,7 @@ func TestSessionRecordRoundTrip(t *testing.T) {
 	seconds := int64(300)
 	raw, err := encodeSessionRecord(sessionRecord{
 		Nonce: "n", PKCEVerifier: "v", Issuer: "https://as.example", RedirectURI: "https://rp.example/cb",
-		ResponseMode: responseModePlain, MaxAgeSeconds: &seconds,
+		ResponseMode: responseModePlain, MaxAgeSeconds: &seconds, Resource: []string{"https://r.example", "urn:example:r"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -19,7 +20,8 @@ func TestSessionRecordRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decodeSessionRecord: %v", err)
 	}
-	if maxAge, ok := got.maxAge(); !ok || maxAge != 5*time.Minute || got.Nonce != "n" || got.RedirectURI != "https://rp.example/cb" {
+	if maxAge, ok := got.maxAge(); !ok || maxAge != 5*time.Minute || got.Nonce != "n" || got.RedirectURI != "https://rp.example/cb" ||
+		!slices.Equal(got.Resource, []string{"https://r.example", "urn:example:r"}) {
 		t.Errorf("round trip = %+v (max_age %v, %v)", got, maxAge, ok)
 	}
 	// A field a later version adds is ignored, for rolling deploys.
@@ -38,6 +40,8 @@ func TestDecodeSessionRecordRefuses(t *testing.T) {
 		"no response mode":       `{"v":1,"pkce_verifier":"v","issuer":"i"}`,
 		"negative max_age":       `{"v":1,"pkce_verifier":"v","issuer":"i","response_mode":"plain","max_age":-1}`,
 		"max_age over 100 years": `{"v":1,"pkce_verifier":"v","issuer":"i","response_mode":"plain","max_age":9223372036}`,
+		"relative resource":      `{"v":1,"pkce_verifier":"v","issuer":"i","response_mode":"plain","resource":["/x"]}`,
+		"repeated resource":      `{"v":1,"pkce_verifier":"v","issuer":"i","response_mode":"plain","resource":["https://r.example","https://r.example"]}`,
 	} {
 		if _, err := decodeSessionRecord(json.RawMessage(raw)); err == nil {
 			t.Errorf("decodeSessionRecord(%s) = nil error, want refusal", name)
@@ -59,8 +63,8 @@ func TestCheckAuthenticationAge(t *testing.T) {
 // openid field existed: it decodes, and doesn't require an ID token.
 func TestSessionRecordWithoutOpenIDField(t *testing.T) {
 	r, err := decodeSessionRecord([]byte(`{"v":1,"pkce_verifier":"v","issuer":"https://as.example","redirect_uri":"https://rp.example/cb","response_mode":"plain"}`))
-	if err != nil || r.OpenID {
-		t.Fatalf("decodeSessionRecord(old) = %+v, %v; want OpenID false", r, err)
+	if err != nil || r.OpenID || r.Resource != nil {
+		t.Fatalf("decodeSessionRecord(old) = %+v, %v; want OpenID false and no resources", r, err)
 	}
 }
 

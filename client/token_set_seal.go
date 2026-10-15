@@ -70,6 +70,9 @@ func (s *TokenSetSealer) Seal(t TokenSet, owner string) ([]byte, error) {
 	if t.HasIDToken && t.IDTokenClaims.Issuer != "" && t.IDTokenClaims.Issuer != s.client.cfg.Issuer.String() {
 		return nil, newError(ErrorInvalidRequest, "the token set's ID token was issued by a different issuer than this client's", nil)
 	}
+	if resourceErr := checkResources(t.Resource); resourceErr != nil {
+		return nil, resourceErr
+	}
 	plaintext, err := json.Marshal(sealedTokenSetOf(t)) //nolint:gosec // G117: the tokens are what is sealed; this plaintext is encrypted below and never leaves
 	if err != nil {
 		return nil, newError(ErrorInternal, "failed to encode the token set", err)
@@ -121,6 +124,9 @@ type sealedTokenSet struct {
 	Subject              string          `json:"sub,omitempty"`
 	IDTokenClaims        *sealedClaims   `json:"id_token_claims,omitempty"`
 	RefreshToken         *string         `json:"refresh_token,omitempty"`
+	// Resource is TokenSet.Resource; a set sealed before it existed has
+	// none.
+	Resource []string `json:"resource,omitempty"`
 }
 
 type sealedClaims struct {
@@ -141,6 +147,7 @@ func sealedTokenSetOf(t TokenSet) sealedTokenSet {
 	s := sealedTokenSet{
 		AccessToken: t.AccessToken.Reveal(), TokenType: t.TokenType, Scope: t.Scope,
 		AuthorizationDetails: t.AuthorizationDetails, ObtainedAt: t.ObtainedAt, Subject: t.Subject,
+		Resource: t.Resource,
 	}
 	if t.HasExpiresIn {
 		s.ExpiresIn = &t.ExpiresIn
@@ -164,6 +171,7 @@ func (s sealedTokenSet) tokenSet() TokenSet {
 	t := TokenSet{
 		AccessToken: fapi.NewSecret(s.AccessToken), TokenType: s.TokenType, Scope: s.Scope,
 		AuthorizationDetails: s.AuthorizationDetails, ObtainedAt: s.ObtainedAt, Subject: s.Subject,
+		Resource: s.Resource,
 	}
 	if s.ExpiresIn != nil {
 		t.ExpiresIn, t.HasExpiresIn = *s.ExpiresIn, true

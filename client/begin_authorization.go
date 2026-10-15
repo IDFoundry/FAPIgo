@@ -107,6 +107,19 @@ type BeginAuthorizationRequest struct {
 	// decides what it actually releases: a FAPIgo server releases only
 	// those the resource owner approves.
 	Claims RequestedClaims
+
+	// Resource, when not empty, names the resource servers the access
+	// token is for (RFC 8707 resource indicators): each an absolute URI
+	// without a fragment, such as an OpenID4VCI Credential Issuer's
+	// identifier. It's sent as one "resource" parameter per entry (in a
+	// request object, a string for one and an array for several), sent
+	// again on ExchangeCode's token request (RFC 8707 §2.2), and kept as
+	// TokenSet.Resource, so RefreshTokens sends it too. An authorization
+	// server that supports resource indicators issues an access token
+	// for just those resource servers; one that doesn't ignores them.
+	// Set it here rather than as an Extensions value named "resource",
+	// which BeginAuthorization refuses alongside it.
+	Resource []string
 }
 
 // RequestedClaims names identity claims to request with the OIDC
@@ -265,6 +278,7 @@ func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 		// signPushedRequestForm).
 		params[claimsParameter] = string(claims)
 	}
+	setResources(params, req.Resource)
 
 	var (
 		body   []byte
@@ -340,7 +354,7 @@ func (c *Client) pushAuthorizationRequestPlain(ctx context.Context, params map[s
 	if buildErr != nil {
 		return nil, buildErr
 	}
-	body, status, header, err := c.postForm(ctx, c.cfg.Endpoints.PushedAuthorizationRequest.String(), par.EncodeForm(formParams), headers)
+	body, status, header, err := c.postForm(ctx, c.cfg.Endpoints.PushedAuthorizationRequest.String(), encodeForm(formParams), headers)
 	if err != nil {
 		return nil, newError(ErrorInternal, errPushedAuthorizationRequestFailed, err)
 	}
@@ -367,7 +381,7 @@ func (c *Client) pushAuthorizationRequestWithJKT(ctx context.Context, params map
 	if buildErr != nil {
 		return nil, buildErr
 	}
-	body, status, header, err := c.postForm(ctx, c.cfg.Endpoints.PushedAuthorizationRequest.String(), par.EncodeForm(formParams), headers)
+	body, status, header, err := c.postForm(ctx, c.cfg.Endpoints.PushedAuthorizationRequest.String(), encodeForm(formParams), headers)
 	if err != nil {
 		return nil, newError(ErrorInternal, errPushedAuthorizationRequestFailed, err)
 	}
@@ -400,7 +414,7 @@ func (c *Client) pushAuthorizationRequestWithDPoPProof(ctx context.Context, para
 		if buildErr != nil {
 			return nil, nil, buildErr
 		}
-		return par.EncodeForm(formParams), headers, nil
+		return encodeForm(formParams), headers, nil
 	}
 	form, headers, buildErr := buildParForm()
 	if buildErr != nil {
@@ -580,6 +594,9 @@ func (c *Client) signPushedRequestForm(ctx context.Context, now time.Time, form,
 	if claims, ok := params[claimsParameter]; ok {
 		objectParams[claimsParameter] = json.RawMessage(claims)
 	}
+	if resources, ok := params[resourceParameter]; ok {
+		objectParams[resourceParameter] = resourceObjectParameter(resources)
+	}
 
 	objectSigner, objectKID, err := c.newSigner(ctx, keys.RequestObjectSigning, c.cfg.Algorithms.RequestObject)
 	if err != nil {
@@ -616,6 +633,7 @@ func (c *Client) newSessionRecord(req BeginAuthorizationRequest, redirectURI, no
 		record.MaxAgeSeconds = &seconds
 	}
 	record.EssentialACR = slices.Clone(req.EssentialACRValues)
+	record.Resource = slices.Clone(req.Resource)
 	return record
 }
 
@@ -659,6 +677,12 @@ func (c *Client) checkBeginRequest(req BeginAuthorizationRequest) (string, *Erro
 	}
 	if len(req.EssentialACRValues) > 0 && !slices.Contains(req.Scope, "openid") {
 		return "", newError(ErrorInvalidRequest, `EssentialACRValues requires "openid" in Scope: only an ID token's acr can meet it`, nil)
+	}
+	if resourceErr := checkResources(req.Resource); resourceErr != nil {
+		return "", resourceErr
+	}
+	if _, ok := extension.Snapshot(req.Extensions)[resourceParameter]; ok && len(req.Resource) > 0 {
+		return "", newError(ErrorInvalidRequest, `"resource" is set both as Resource and as an Extensions value: set it only as Resource`, nil)
 	}
 	if req.RedirectPort == 0 {
 		return c.cfg.RedirectURI, nil

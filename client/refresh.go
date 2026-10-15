@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"math"
+	"slices"
 	"strings"
 	"time"
 )
@@ -19,6 +20,13 @@ type RefreshTokenRequest struct {
 	// 6749 §6). It can't widen the original grant: the server refuses
 	// a scope it didn't grant.
 	Scope []string
+
+	// Resource, if set, narrows the new access token to these resource
+	// servers (RFC 8707 §2.2), each one of Tokens.Resource: anything
+	// else is refused before a request is sent. Left empty, the refresh
+	// names all of Tokens.Resource again. The result's Resource is the
+	// resources this refresh named.
+	Resource []string
 }
 
 // RefreshTokens redeems req.Tokens' refresh token (RFC 6749 §6) for a
@@ -63,12 +71,9 @@ func (c *Client) RefreshTokens(ctx context.Context, req RefreshTokenRequest) (To
 	}
 	tokenURL := c.cfg.Endpoints.Token.URL()
 
-	params := map[string]string{
-		"grant_type":    "refresh_token",
-		"refresh_token": req.Tokens.RefreshToken.Reveal(),
-	}
-	if len(req.Scope) > 0 {
-		params["scope"] = strings.Join(req.Scope, " ")
+	params, resources, paramsErr := refreshParameters(req)
+	if paramsErr != nil {
+		return TokenSet{}, paramsErr
 	}
 	buildTokenForm := c.tokenFormBuilder(ctx, params, assertionSigner, assertionKID)
 	form, headers, err := buildTokenForm()
@@ -84,6 +89,7 @@ func (c *Client) RefreshTokens(ctx context.Context, req RefreshTokenRequest) (To
 	if idErr != nil {
 		return TokenSet{}, idErr
 	}
+	result.Resource = slices.Clone(resources)
 	if !result.HasRefreshToken {
 		result.RefreshToken, result.HasRefreshToken = req.Tokens.RefreshToken, true
 	}
@@ -96,6 +102,32 @@ func (c *Client) RefreshTokens(ctx context.Context, req RefreshTokenRequest) (To
 		return TokenSet{}, idErr
 	}
 	return result, nil
+}
+
+// refreshParameters is the token request parameters for req, before
+// client authentication, and the resource indicators among them (RFC
+// 8707 §2.2): req.Resource when it narrows, req.Tokens.Resource
+// otherwise.
+func refreshParameters(req RefreshTokenRequest) (map[string]string, []string, *Error) {
+	params := map[string]string{
+		"grant_type":    "refresh_token",
+		"refresh_token": req.Tokens.RefreshToken.Reveal(),
+	}
+	if len(req.Scope) > 0 {
+		params["scope"] = strings.Join(req.Scope, " ")
+	}
+	if resourceErr := checkResources(req.Tokens.Resource); resourceErr != nil {
+		return nil, nil, resourceErr
+	}
+	resources := req.Tokens.Resource
+	if len(req.Resource) > 0 {
+		if subsetErr := checkResourceSubset(req.Resource, req.Tokens.Resource); subsetErr != nil {
+			return nil, nil, subsetErr
+		}
+		resources = req.Resource
+	}
+	setResources(params, resources)
+	return params, resources, nil
 }
 
 // checkRefreshedIDToken applies OIDC Core §12.2's comparisons of a

@@ -1310,3 +1310,33 @@ redeeming the code; its result is a `CallbackSuccess` or a
 [native wallet guide](docs/guides/native-wallet.md); for CIBA, the
 [CIBA guide](docs/guides/ciba.md), whose stored sessions are sealed with
 `client.NewBackchannelSessionSealer`.
+
+### Asking for a token for a particular resource server
+
+When one authorization server issues tokens for several resource
+servers, set `Resource` to name the one, or ones, the token is for (RFC
+8707 resource indicators). Each is an absolute URI without a fragment.
+The client sends them on the pushed request (in the request object,
+under a profile that signs one), sends them again when it exchanges
+the code, and keeps them in `TokenSet.Resource`. A refresh sends them
+again too, unless `RefreshTokenRequest.Resource` narrows it to some of
+them. An OpenID4VCI wallet whose Credential Issuer names a separate
+authorization server (`authorization_servers` in its metadata) names
+the issuer itself (OpenID4VCI §5.1.2):
+
+```go
+session, err := c.BeginAuthorization(ctx, client.BeginAuthorizationRequest{
+	Scope:    []string{"eu.europa.ec.eudi.pid.1"},
+	Resource: []string{credentialIssuerMetadata.CredentialIssuer}, // e.g. "https://issuer.example.com"
+})
+
+// Later, a refresh repeats it: the new access token is for the same issuer.
+tokens, err = c.RefreshTokens(ctx, client.RefreshTokenRequest{Tokens: tokens})
+```
+
+An authorization server that doesn't support resource indicators
+ignores them, so setting `Resource` is safe either way. A server that
+does may issue a token only that resource server accepts, and refuse
+(`invalid_target`) one it doesn't serve. `BeginBackchannelAuthenticationRequest`
+has the same field for CIBA. Use `Resource` rather than an `Extensions`
+value named `resource`: `BeginAuthorization` refuses a request with both.

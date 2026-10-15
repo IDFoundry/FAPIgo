@@ -13,8 +13,10 @@ import (
 const backchannelSessionSealVersion byte = 2
 
 // maxSealedBackchannelSession bounds what BackchannelSessionSealer.Open
-// reads: an auth_req_id and a notification token, with room to spare.
-const maxSealedBackchannelSession = 4096
+// reads: an auth_req_id, a notification token, essential acr values and
+// resource indicators, with room to spare. Seal refuses a session that
+// would seal larger.
+const maxSealedBackchannelSession = 16384
 
 // ErrUnreadableBackchannelSession is the cause, for errors.Is, of a
 // BackchannelSessionSealer.Open failure on a session that doesn't open:
@@ -35,6 +37,9 @@ type sealedBackchannelSession struct {
 	// EssentialACR: the request's essential "acr" values, which an
 	// approval's ID token acr must be one of.
 	EssentialACR []string `json:"r,omitempty"`
+	// Resource: the request's resource indicators (RFC 8707), sent
+	// again on each poll.
+	Resource []string `json:"s,omitempty"`
 }
 
 // BackchannelSessionSealer encrypts a BackchannelAuthenticationSession
@@ -91,12 +96,16 @@ func (s *BackchannelSessionSealer) Seal(session BackchannelAuthenticationSession
 	plaintext, err := json.Marshal(sealedBackchannelSession{
 		AuthReqID: session.authReqID, IntervalMillis: session.interval.Milliseconds(),
 		ExpiresAt: session.expiresAt.UTC(), NotificationToken: session.notificationToken,
-		OpenID: session.openID, EssentialACR: session.essentialACR,
+		OpenID: session.openID, EssentialACR: session.essentialACR, Resource: session.resource,
 	})
 	if err != nil {
 		return nil, newError(ErrorInternal, "failed to encode the backchannel authentication session", err)
 	}
-	return s.keys.seal(backchannelSessionSealVersion, plaintext, s.additionalData(owner)), nil
+	sealed := s.keys.seal(backchannelSessionSealVersion, plaintext, s.additionalData(owner))
+	if len(sealed) > maxSealedBackchannelSession {
+		return nil, newError(ErrorInvalidRequest, "the backchannel authentication session is too large to seal", nil)
+	}
+	return sealed, nil
 }
 
 // Open decrypts a session Seal sealed for owner, for PollBackchannelAuthentication
@@ -115,13 +124,13 @@ func (s *BackchannelSessionSealer) Open(sealed []byte, owner string) (session Ba
 	dec := json.NewDecoder(bytes.NewReader(plaintext))
 	dec.DisallowUnknownFields()
 	var e sealedBackchannelSession
-	if err := dec.Decode(&e); err != nil || e.AuthReqID == "" || e.IntervalMillis <= 0 || e.ExpiresAt.IsZero() {
+	if err := dec.Decode(&e); err != nil || e.AuthReqID == "" || e.IntervalMillis <= 0 || e.ExpiresAt.IsZero() || checkResources(e.Resource) != nil {
 		return BackchannelAuthenticationSession{}, false, errUnreadableBackchannelSession()
 	}
 	return BackchannelAuthenticationSession{
 		authReqID: e.AuthReqID, interval: time.Duration(e.IntervalMillis) * time.Millisecond,
 		expiresAt: e.ExpiresAt, notificationToken: e.NotificationToken,
-		openID: e.OpenID, essentialACR: e.EssentialACR,
+		openID: e.OpenID, essentialACR: e.EssentialACR, resource: e.Resource,
 	}, keyIndex > 0, nil
 }
 

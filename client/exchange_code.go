@@ -88,6 +88,13 @@ type TokenSet struct {
 	// hand must set it; one without it falls back to its ID token's
 	// verified iss, and is refused if it has no ID token either.
 	Issuer string
+
+	// Resource is the resource indicators (RFC 8707) these tokens were
+	// requested for — BeginAuthorizationRequest.Resource, or
+	// BeginBackchannelAuthenticationRequest.Resource — or nil for none.
+	// RefreshTokens sends them again (or RefreshTokenRequest.Resource,
+	// some of them), and TokenSetSealer keeps them.
+	Resource []string
 }
 
 // IDTokenClaims is the validated set of standard ID token claims beyond
@@ -227,12 +234,15 @@ func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationRe
 	// RFC 8705 mTLS client authentication method, no assertion is built
 	// at all — client_id is sent instead, and the TLS certificate
 	// Dependencies.HTTP's own transport presents is the credential.
-	buildTokenForm := c.tokenFormBuilder(ctx, map[string]string{
+	params := map[string]string{
 		"grant_type":    "authorization_code",
 		"code":          resp.code,
 		"redirect_uri":  resp.redirectURI,
 		"code_verifier": resp.pkceVerifier,
-	}, assertionSigner, assertionKID)
+	}
+	// RFC 8707 §2.2: the token request names the resources again.
+	setResources(params, resp.resource)
+	buildTokenForm := c.tokenFormBuilder(ctx, params, assertionSigner, assertionKID)
 	form, headers, err := buildTokenForm()
 	if err != nil {
 		return TokenSet{}, newError(ErrorInternal, "failed to build client assertion", err)
@@ -258,6 +268,7 @@ func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationRe
 			return TokenSet{}, ageErr
 		}
 	}
+	result.Resource = slices.Clone(resp.resource)
 	return result, nil
 }
 
@@ -310,7 +321,7 @@ func (c *Client) tokenFormBuilder(ctx context.Context, params map[string]string,
 		if err != nil {
 			return nil, nil, err
 		}
-		return par.EncodeForm(form), headers, nil
+		return encodeForm(form), headers, nil
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -137,6 +138,7 @@ func TestBackchannelSessionSealerRefuses(t *testing.T) {
 		"no auth_req_id": sealPlain(map[string]any{"i": 1000, "e": "2026-10-01T00:00:00Z"}),
 		"no interval":    sealPlain(map[string]any{"a": "x", "e": "2026-10-01T00:00:00Z"}),
 		"no expiry":      sealPlain(map[string]any{"a": "x", "i": 1000}),
+		"bad resource":   sealPlain(map[string]any{"a": "x", "i": 1000, "e": "2026-10-01T00:00:00Z", "s": []string{"/relative"}}),
 	} {
 		_, _, err := s.Open(sealed, "user-1")
 		var ce *Error
@@ -196,5 +198,35 @@ func TestBackchannelSessionSealerBindsOwner(t *testing.T) {
 	}
 	if _, err := s.Seal(session, ""); err == nil {
 		t.Error("Seal(no owner) = nil error, want error")
+	}
+}
+
+// TestBackchannelSessionSealerResources covers a session's resource
+// indicators: kept through sealing, a session sealed before they existed
+// opening with none, and a session too large to open again refused by
+// Seal rather than sealed unreadable.
+func TestBackchannelSessionSealerResources(t *testing.T) {
+	s := sessionSealer(t, "https://as.example.com", sessionSealKey(1))
+	expires := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	session := BackchannelAuthenticationSession{authReqID: "req-1", interval: time.Second, expiresAt: expires,
+		resource: []string{"https://issuer-a.example", "https://issuer-b.example"}}
+	sealed, err := s.Seal(session, "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := s.Open(sealed, "user-1")
+	if err != nil || !slices.Equal(got.resource, session.resource) {
+		t.Errorf("Open = %q, %v; want %q", got.resource, err, session.resource)
+	}
+
+	legacy, _ := json.Marshal(map[string]any{"a": "req-1", "i": 1000, "e": expires})
+	got, _, err = s.Open(s.keys.seal(backchannelSessionSealVersion, legacy, s.additionalData("user-1")), "user-1")
+	if err != nil || got.resource != nil {
+		t.Errorf("Open(no resource member) = %q, %v; want none", got.resource, err)
+	}
+
+	session.resource = []string{"https://issuer-a.example/" + strings.Repeat("a", maxSealedBackchannelSession)}
+	if _, err := s.Seal(session, "user-1"); err == nil {
+		t.Error("Seal sealed a session too large to open")
 	}
 }

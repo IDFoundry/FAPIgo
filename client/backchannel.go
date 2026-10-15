@@ -81,6 +81,14 @@ type BeginBackchannelAuthenticationRequest struct {
 	// always signs a request object, so this is embedded as native JSON
 	// unconditionally, with no plain-parameter path to consider.
 	AuthorizationDetails []json.RawMessage
+
+	// Resource, when not empty, names the resource servers the access
+	// token is for (RFC 8707 resource indicators), mirroring
+	// BeginAuthorizationRequest.Resource: sent in the signed request
+	// object (a string for one, an array for several) and again on each
+	// PollBackchannelAuthentication token request, and kept as the
+	// approved TokenSet's Resource.
+	Resource []string
 }
 
 // BackchannelAuthenticationSession is returned by a successful
@@ -107,6 +115,9 @@ type BackchannelAuthenticationSession struct {
 	// essentialACR is the request's essential "acr" values: an
 	// approval's ID token acr must be one of them.
 	essentialACR []string
+	// resource is the request's resource indicators (RFC 8707), sent
+	// again on each poll.
+	resource []string
 }
 
 // AuthReqID is the auth_req_id the authorization server issued.
@@ -219,6 +230,7 @@ func (c *Client) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		notificationToken: notificationToken,
 		openID:            slices.Contains(req.Scope, "openid"),
 		essentialACR:      slices.Clone(req.EssentialACRValues),
+		resource:          slices.Clone(req.Resource),
 	}, nil
 }
 
@@ -238,6 +250,9 @@ func (c *Client) checkBackchannelAuthenticationRequest(req BeginBackchannelAuthe
 	}
 	if len(req.EssentialACRValues) > 0 && !slices.Contains(req.Scope, "openid") {
 		return newError(ErrorInvalidRequest, `EssentialACRValues requires "openid" in Scope: only an ID token's acr can meet it`, nil)
+	}
+	if resourceErr := checkResources(req.Resource); resourceErr != nil {
+		return resourceErr
 	}
 	return nil
 }
@@ -297,6 +312,7 @@ func backchannelRequestParameters(req BeginBackchannelAuthenticationRequest) (ma
 		}
 		objectParams[authorizationDetailsParameter] = encoded
 	}
+	addResourceObjectParameter(objectParams, req.Resource)
 	return objectParams, nil
 }
 
@@ -461,11 +477,12 @@ func (c *Client) PollBackchannelAuthentication(ctx context.Context, session Back
 			"grant_type":  cibaGrantType,
 			"auth_req_id": session.authReqID,
 		}
+		setResources(form, session.resource)
 		headers, err := c.addClientAuthentication(ctx, form, assertionSigner, assertionKID)
 		if err != nil {
 			return nil, nil, err
 		}
-		return par.EncodeForm(form), headers, nil
+		return encodeForm(form), headers, nil
 	}
 
 	form, headers, buildErr := buildPollForm()
@@ -503,6 +520,7 @@ func (c *Client) backchannelApprovedTokens(ctx context.Context, session Backchan
 		AuthorizationDetails: raw.AuthorizationDetails,
 		ObtainedAt:           c.deps.Clock.Now(),
 		Issuer:               c.cfg.Issuer.String(),
+		Resource:             slices.Clone(session.resource),
 	}
 	if raw.ExpiresIn > 0 {
 		result.ExpiresIn = expiresInDuration(raw.ExpiresIn)

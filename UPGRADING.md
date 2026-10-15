@@ -15,6 +15,37 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.57.0
+
+### Send resource indicators with `Resource`, not an extension (client)
+
+Not a breaking change: nothing stops working. It's here because a
+client already sending `resource` as an `Extensions` value only sends
+it on the pushed request.
+
+**Affects:** a `client` caller that sends RFC 8707's `resource`
+parameter as an `Extensions` value on `BeginAuthorizationRequest`, such
+as an OpenID4VCI wallet naming its Credential Issuer.
+
+**Why:** RFC 8707 §2.2 has the token request name the resource again,
+and the extension can't reach the code exchange or a refresh.
+`BeginAuthorizationRequest.Resource` does: the client sends it on the
+pushed request, the code exchange and each refresh (`TokenSet.Resource`
+carries it, sealed sets included). `BeginBackchannelAuthenticationRequest.Resource`
+does the same for CIBA.
+
+**What fails:** `BeginAuthorization` refuses a request that sets both
+`Resource` and an `Extensions` value named `resource`. `Resource` is
+also checked before anything is sent: each must be an absolute URI
+without a fragment, and none empty or repeated.
+
+**What to change:** move the value from `Extensions` to `Resource`.
+Before rolling it out over several instances, finish deploying v0.57.0
+to all of them first if you seal CIBA sessions
+(`BackchannelSessionSealer`): an older instance can't open a session
+sealed with resource indicators. Sealed token sets are read in both
+directions.
+
 ## v0.56.0
 
 ### A production client's HTTP client must be `fapihttp.NewClient`'s (client, *production only*)

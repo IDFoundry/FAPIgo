@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -48,7 +49,8 @@ func fullTokenSet() client.TokenSet {
 			ExpiresAt:  at.Add(time.Hour), IssuedAt: at, Issuer: testIssuer, Audience: []string{"client-1"}, Nonce: "n-1", AZP: "client-1",
 		},
 		RefreshToken: fapi.NewSecret("rt-1"), HasRefreshToken: true,
-		Issuer: testIssuer,
+		Issuer:   testIssuer,
+		Resource: []string{"https://issuer-a.example", "https://issuer-b.example/credentials"},
 	}
 }
 
@@ -59,6 +61,7 @@ func revealed(t client.TokenSet) map[string]any {
 		"expiresIn": t.ExpiresIn, "hasExpiresIn": t.HasExpiresIn, "obtainedAt": t.ObtainedAt.UTC(),
 		"id": t.IDToken.Reveal(), "hasID": t.HasIDToken, "sub": t.Subject, "claims": claimsWithUTC(t.IDTokenClaims),
 		"refresh": t.RefreshToken.Reveal(), "hasRefresh": t.HasRefreshToken, "issuer": t.Issuer,
+		"resource": fmt.Sprint(t.Resource),
 	}
 }
 
@@ -206,7 +209,7 @@ func TestTokenSetRecordsWhenItWasObtained(t *testing.T) {
 // restores it.)
 func TestTokenSetSealerKnowsEveryField(t *testing.T) {
 	for typ, want := range map[reflect.Type]int{
-		reflect.TypeFor[client.TokenSet]():      14,
+		reflect.TypeFor[client.TokenSet]():      15,
 		reflect.TypeFor[client.IDTokenClaims](): 11,
 	} {
 		if got := typ.NumField(); got != want {

@@ -57,6 +57,9 @@ type ValidatedAuthorizationResponse struct {
 	// essentialACR is the request's essential "acr" values: the ID
 	// token's acr must be one of them.
 	essentialACR []string
+	// resource is the request's resource indicators (RFC 8707), sent
+	// again on the token request.
+	resource []string
 }
 
 // CallbackResult is a closed sum type returned by
@@ -150,6 +153,7 @@ func (c *Client) HandleAuthorizationResponse(ctx context.Context, cb Authorizati
 		hasMaxAge:    hasMaxAge,
 		openID:       consumed.OpenID,
 		essentialACR: consumed.EssentialACR,
+		resource:     consumed.Resource,
 	}}, nil
 }
 

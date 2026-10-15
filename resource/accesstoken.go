@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -68,11 +70,13 @@ type ResolvedAccessToken struct {
 	// required-present (iat) by internal/token.AccessToken.Validate;
 	// exposed for a caller's own telemetry or audit logging, not for
 	// re-validation. OpaqueAccessTokens has no wire-level claims to
-	// report these from — storage.LookedUpAccessToken carries no
-	// issuer/audience/issued-at of its own, since an opaque token is
-	// only ever redeemed against the single store this resolver already
-	// trusts implicitly — so these are always their zero values
-	// ("", nil, and the zero time) for an opaque token.
+	// report these from: an opaque token is only ever redeemed against
+	// the single store this resolver already trusts implicitly. Its
+	// Issuer and IssuedAt are always zero, and its Audience is the
+	// audience a FAPIgo server recorded with it (the resources an RFC
+	// 8707 resource indicator restricted it to, or the issuer), already
+	// checked when OpaqueAccessTokens.Audience is set; nil for a record
+	// without one.
 	Issuer   string
 	Audience []string
 	IssuedAt time.Time
@@ -128,16 +132,28 @@ type JWTAccessTokens struct {
 	// "iss" must equal it. Required.
 	Issuer fapi.URL
 
-	// Audience is the value a token's "aud" must contain. Required. A
-	// FAPIgo authorization server sets "aud" to its own issuer
-	// identifier on every access token, so for one this is
-	// Issuer.String(). That audience names the authorization server,
-	// not a resource server: every resource server verifying its tokens
-	// accepts every one of them, so decide what a token may do here from
-	// its scope, authorization_details and claims. Audience-restricted
-	// tokens for one resource server (RFC 8707 resource indicators) are
-	// not implemented.
+	// Audience is the value a token's "aud" must contain. Required.
+	//
+	// A FAPIgo authorization server sets "aud" to the RFC 8707 resource
+	// indicators the client named (server.Config.Resources), and to its
+	// own issuer identifier when it named none. A resource server with
+	// its own resource identifier sets Audience to it, and so refuses a
+	// token issued for another resource server: one that received the
+	// token can't replay it here. One without (every token is addressed
+	// to the authorization server) sets it to Issuer.String(), and must
+	// then decide what a token may do here from its scope,
+	// authorization_details and claims, since every resource server
+	// accepting the issuer audience accepts every such token.
 	Audience string
+
+	// AdditionalAudiences are further values a token's "aud" may
+	// contain instead of Audience. Optional. While moving a resource
+	// server to resource indicators, set Audience to its own identifier
+	// and AdditionalAudiences to {Issuer.String()}, so tokens from
+	// clients that don't send "resource" yet keep working; remove it
+	// once they all do, since until then a token for no particular
+	// resource server is accepted here too.
+	AdditionalAudiences []string
 
 	// Algorithm is the one signature algorithm a token may use (RFC
 	// 8725 §3.1). Required.
@@ -190,6 +206,8 @@ func (j JWTAccessTokens) validate() error {
 		return errors.New("issuer is required")
 	case j.Audience == "":
 		return errors.New("audience is required")
+	case slices.Contains(j.AdditionalAudiences, ""):
+		return errors.New("additional audiences must not be empty")
 	case !j.Algorithm.IsValid():
 		return errors.New("algorithm is invalid")
 	case j.MaxTokenLifetime <= 0:
@@ -221,11 +239,12 @@ func (j JWTAccessTokens) ResolveAccessToken(ctx context.Context, req ResolveAcce
 	}
 
 	policy := token.AccessTokenValidatePolicy{
-		ExpectedIssuer:   j.Issuer.String(),
-		ExpectedAudience: j.Audience,
-		Algorithm:        j.Algorithm,
-		Now:              req.Now,
-		MaxLifetime:      j.MaxTokenLifetime,
+		ExpectedIssuer:      j.Issuer.String(),
+		ExpectedAudience:    j.Audience,
+		AdditionalAudiences: j.AdditionalAudiences,
+		Algorithm:           j.Algorithm,
+		Now:                 req.Now,
+		MaxLifetime:         j.MaxTokenLifetime,
 	}
 
 	var (
@@ -290,6 +309,22 @@ func (j JWTAccessTokens) ResolveAccessToken(ctx context.Context, req ResolveAcce
 // looked-up thumbprint/expiry verbatim for Verify() to check.
 type OpaqueAccessTokens struct {
 	Store storage.AccessTokenStore
+
+	// Audience, if set, is the audience a token's record must name: a
+	// FAPIgo server records the RFC 8707 resource indicators a token was
+	// restricted to, or its issuer identifier, and a token recorded for
+	// neither Audience nor one of AdditionalAudiences is refused,
+	// exactly as JWTAccessTokens refuses one whose "aud" names neither.
+	// Set it to this resource server's own identifier, or to the
+	// issuer's when it has none. A record with no audience at all,
+	// written before FAPIgo recorded one, is accepted. Empty, no
+	// audience is checked, as before.
+	Audience string
+
+	// AdditionalAudiences are further audiences accepted besides
+	// Audience, for the same migration JWTAccessTokens'
+	// AdditionalAudiences serves. Ignored without Audience.
+	AdditionalAudiences []string
 }
 
 // NewOpaqueAccessTokens validates store is non-nil and returns an
@@ -306,8 +341,13 @@ func NewOpaqueAccessTokens(store storage.AccessTokenStore) (OpaqueAccessTokens, 
 // which refuses an OpaqueAccessTokens{} literal that would panic on
 // every request.
 func (o OpaqueAccessTokens) validate() error {
-	if o.Store == nil {
+	switch {
+	case o.Store == nil:
 		return errors.New("store is required")
+	case o.Audience == "" && len(o.AdditionalAudiences) > 0:
+		return errors.New("additional audiences require an audience")
+	case slices.Contains(o.AdditionalAudiences, ""):
+		return errors.New("additional audiences must not be empty")
 	}
 	return nil
 }
@@ -319,16 +359,57 @@ func (o OpaqueAccessTokens) ResolveAccessToken(ctx context.Context, req ResolveA
 	if err != nil {
 		return ResolvedAccessToken{}, lookupError(err)
 	}
+	claims, audience, audErr := recordedAudience(looked.Claims)
+	if audErr != nil {
+		return ResolvedAccessToken{}, newError(ErrorServerError, 500, "access token record is malformed", audErr)
+	}
+	if !o.acceptsAudience(audience) {
+		return ResolvedAccessToken{}, newError(ErrorInvalidToken, 401, "access token is invalid", errors.New("audience mismatch"))
+	}
 	return ResolvedAccessToken{
 		Subject:         looked.Subject,
 		ClientID:        looked.ClientID.String(),
 		Scopes:          looked.Scope,
-		Claims:          looked.Claims,
+		Claims:          claims,
+		Audience:        audience,
 		ExpiresAt:       looked.ExpiresAt,
 		Thumbprint:      looked.Thumbprint,
 		SenderConstrain: looked.SenderConstrain,
 		Key:             hex.EncodeToString(hash[:]),
 	}, nil
+}
+
+// recordedAudience separates the audience a FAPIgo server recorded
+// with an opaque token (token.AudienceRecordClaim) from its other
+// claims: the audience isn't one of the token's claims to the
+// application. Nil when the record has none.
+func recordedAudience(claims map[string]json.RawMessage) (map[string]json.RawMessage, []string, error) {
+	raw, ok := claims[token.AudienceRecordClaim]
+	if !ok {
+		return claims, nil, nil
+	}
+	var audience []string
+	if err := json.Unmarshal(raw, &audience); err != nil || len(audience) == 0 {
+		return nil, nil, errors.New("recorded audience is not a non-empty array of strings")
+	}
+	rest := maps.Clone(claims)
+	delete(rest, token.AudienceRecordClaim)
+	if len(rest) == 0 {
+		rest = nil
+	}
+	return rest, audience, nil
+}
+
+// acceptsAudience reports whether a token recorded for audience may be
+// used here: always without Audience, and for a record without one;
+// otherwise only when it names Audience or one of AdditionalAudiences.
+func (o OpaqueAccessTokens) acceptsAudience(audience []string) bool {
+	if o.Audience == "" || audience == nil {
+		return true
+	}
+	return slices.Contains(audience, o.Audience) || slices.ContainsFunc(o.AdditionalAudiences, func(a string) bool {
+		return slices.Contains(audience, a)
+	})
 }
 
 // lookupError classifies an error resolving an access token. A store

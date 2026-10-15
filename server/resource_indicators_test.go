@@ -12,9 +12,12 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/clientassertion"
+	"github.com/idfoundry/fapigo/keys"
+	"github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
 	"github.com/idfoundry/fapigo/storage/memstore"
@@ -746,6 +749,86 @@ func httptestTokenRequest(t *testing.T, body string) server.TokenEndpointRequest
 		t.Fatalf("TokenEndpointRequestFromHTTP: %v", err)
 	}
 	return req
+}
+
+// TestResourceIndicatorsResourceServerRefusesAnotherResourcesToken is
+// the replay RFC 8707 prevents: a token issued for resource server A
+// (which could be malicious) is refused at resource server B, for both
+// access token formats, while A — and B for its own token — accept.
+func TestResourceIndicatorsResourceServerRefusesAnotherResourcesToken(t *testing.T) {
+	for _, opaque := range []bool{false, true} {
+		t.Run(fmt.Sprintf("opaque=%v", opaque), func(t *testing.T) {
+			h, instance := newResourceEmbedderHarness(t)
+			var store *memstore.AccessTokenStore
+			if opaque {
+				h, store = withOpaqueAccessTokens(t, h)
+				instance.h = h
+			}
+			dpopKey := generateKey(t)
+			req := embedderAccessTokenRequest(t, instance, dpopKey)
+			req.Resources = []string{resourceA}
+			forA, err := h.server.IssueAccessToken(context.Background(), req)
+			if err != nil {
+				t.Fatalf("IssueAccessToken: %v", err)
+			}
+			req = embedderAccessTokenRequest(t, instance, dpopKey)
+			forIssuer, err := h.server.IssueAccessToken(context.Background(), req)
+			if err != nil {
+				t.Fatalf("IssueAccessToken (no resource): %v", err)
+			}
+
+			atA := audienceVerifier(t, h, store, resourceA)
+			atB := audienceVerifier(t, h, store, resourceB)
+			atIssuer := audienceVerifier(t, h, store, testIssuer)
+			migrating := audienceVerifier(t, h, store, resourceB, testIssuer)
+
+			if err := verifyWithDPoP(t, atA, dpopKey, forA.AccessToken.Reveal(), h.now); err != nil {
+				t.Fatalf("A refused its own token: %v", err)
+			}
+			requireInvalidToken(t, verifyWithDPoP(t, atB, dpopKey, forA.AccessToken.Reveal(), h.now), "A's token at B")
+			requireInvalidToken(t, verifyWithDPoP(t, atIssuer, dpopKey, forA.AccessToken.Reveal(), h.now), "A's token at the issuer audience")
+			requireInvalidToken(t, verifyWithDPoP(t, migrating, dpopKey, forA.AccessToken.Reveal(), h.now), "A's token at migrating B")
+			requireInvalidToken(t, verifyWithDPoP(t, atB, dpopKey, forIssuer.AccessToken.Reveal(), h.now), "an issuer token at B")
+			if err := verifyWithDPoP(t, migrating, dpopKey, forIssuer.AccessToken.Reveal(), h.now); err != nil {
+				t.Fatalf("migrating B refused an issuer token: %v", err)
+			}
+			if err := verifyWithDPoP(t, atIssuer, dpopKey, forIssuer.AccessToken.Reveal(), h.now); err != nil {
+				t.Fatalf("the issuer audience refused an issuer token: %v", err)
+			}
+		})
+	}
+}
+
+// audienceVerifier is a resource server for h's tokens (opaque with
+// store) accepting audience, and additional besides it.
+func audienceVerifier(t *testing.T, h harness, store *memstore.AccessTokenStore, audience string, additional ...string) *resource.Verifier {
+	t.Helper()
+	var resolver resource.AccessTokenResolver = resource.OpaqueAccessTokens{Store: store, Audience: audience, AdditionalAudiences: additional}
+	if store == nil {
+		issuerKeys, err := keys.NewLocalIssuerKeys(h.cfg.Issuer, h.deps.Keys)
+		if err != nil {
+			t.Fatal(err)
+		}
+		jwt, err := resource.NewJWTAccessTokens(issuerKeys, h.cfg.Issuer, audience, fapi.ES256, 10*time.Minute, 4)
+		if err != nil {
+			t.Fatal(err)
+		}
+		jwt.AdditionalAudiences = additional
+		resolver = jwt
+	}
+	verifier, err := resource.NewVerifier(resource.Config{
+		Limits:    resource.Limits{MaxDPoPProofAge: time.Minute, MaxClockSkew: 5 * time.Second},
+		Assurance: resource.AssuranceDevelopment,
+	}, resource.Dependencies{
+		AccessTokens: resolver,
+		Replay:       memstore.NewReplayStore(),
+		Revocation:   revocationCheckerFromSink{sink: h.revocation},
+		Clock:        fixedClock{now: h.now},
+	})
+	if err != nil {
+		t.Fatalf("resource.NewVerifier: %v", err)
+	}
+	return verifier
 }
 
 // TestResourceIndicatorsOverHTTP sends several resources as repeated

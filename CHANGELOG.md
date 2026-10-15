@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.57.0](https://github.com/IDFoundry/FAPIgo/compare/v0.56.0...v0.57.0) (2026-10-15)
+
+
+### ⚠ BREAKING CHANGES
+
+* **server:** TokenEndpointRequest.Parameters() no longer includes resource, even when the client sent a single one; read it with TokenEndpointRequest.Resources() instead.
+
+### Features
+
+* **client:** send RFC 8707 resource indicators ([a236898](https://github.com/IDFoundry/FAPIgo/commit/a236898a18c49a4389ffb16cbd8e1ce22683e405))
+* **client:** send RFC 8707 resource indicators on a client credentials token request ([634a837](https://github.com/IDFoundry/FAPIgo/commit/634a8378ad6ace3918586589010635319ac1ffc0))
+* **fapihttp:** let a fetch or post set its Accept header ([0615989](https://github.com/IDFoundry/FAPIgo/commit/0615989b270b3452f7d7d536c6b6698ff5bf3dad))
+* **resource:** refuse access tokens issued for another resource server ([1fbde15](https://github.com/IDFoundry/FAPIgo/commit/1fbde1547b1b124c6deb055519b9aebd17d5461d))
+* **server:** issue audience-restricted access tokens for RFC 8707 resource indicators ([0eb1e1e](https://github.com/IDFoundry/FAPIgo/commit/0eb1e1e7b6531af6ee57c33298d560d6e0f20de6))
+
+
+### Bug Fixes
+
+* **server:** re-check a grant's resource indicators at every token it issues ([bc95972](https://github.com/IDFoundry/FAPIgo/commit/bc95972cf91b517d344e80a40c943db838a5cf4d))
+
 ## [0.56.0](https://github.com/IDFoundry/FAPIgo/compare/v0.55.0...v0.56.0) (2026-10-14)
 
 

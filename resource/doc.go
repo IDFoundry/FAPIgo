@@ -28,7 +28,13 @@
 // (or OpaqueAccessTokens.Audience), and so refuses a token issued for
 // another resource server, which could otherwise replay one it received;
 // AdditionalAudiences keeps accepting issuer-addressed tokens while
-// clients move to sending "resource". A token addressed to the issuer is
+// clients move to sending "resource". A token issued for several
+// resources ("aud" an array) is accepted by each of them, as RFC 8707
+// intends, so one of them that receives it could present it to another;
+// FAPIgo tokens are sender-constrained (DPoP or mTLS), which keeps it
+// useless without the client's key, and a client that wants each
+// resource server's token to be its own narrows each token request to
+// one resource. A token addressed to the issuer is
 // accepted by every resource server verifying with that audience:
 // decide what such a token may do at an endpoint from its scope,
 // authorization_details and claims, never from its validity alone.

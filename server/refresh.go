@@ -119,7 +119,7 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 	}
 	// The refresh token stays bound to all of the grant's resources,
 	// whatever this access token is narrowed to (RFC 8707 §2.2).
-	audience, audiences, allowedErr := s.allowedGrantAudience(client, grant, scope, requestedResources)
+	audience, audiences, allowedErr := s.allowedGrantAudience(ctx, client, grant, scope, requestedResources)
 	if allowedErr != nil {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), allowedErr)
 	}
@@ -234,7 +234,9 @@ func (s *Server) redeemRefreshGrant(ctx context.Context, clientID fapi.ClientID,
 // fails with invalid_grant, and the client must authorize again. So
 // does a grant issued with a public sub at a server that now issues only
 // pairwise ones (see checkGrantSubjectStillIssued). scope is what the
-// request asks for: the grant's own, or a narrower one at refresh.
+// request asks for: the grant's own, or a narrower one at refresh. A
+// grant's RFC 8707 resources are checked the same way scopes are, once
+// the request has narrowed them (see narrowedAudience).
 func (s *Server) checkGrantStillAllowed(client storage.RegisteredClient, grant grantRecord, scope []string) *Error {
 	if subjectErr := s.checkGrantSubjectStillIssued(grant); subjectErr != nil {
 		return subjectErr

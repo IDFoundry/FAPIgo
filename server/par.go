@@ -214,7 +214,8 @@ func (r PushAuthorizationResult) WriteJSON(w http.ResponseWriter) {
 // Config.Profile), validates them against the client's registration, and
 // stores them for later retrieval at the authorization endpoint.
 func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthorizationRequest) (PushAuthorizationResult, error) {
-	params, err := formParametersToMap(req.HTTP.Parameters)
+	formParams, formResources := s.takeResourceParameters(req.HTTP.Parameters)
+	params, err := formParametersToMap(formParams)
 	if err != nil {
 		return s.parFail(ctx, "", newError(ErrorInvalidRequest, 400, "the request's parameters are duplicated, too many, or too large", err))
 	}
@@ -232,12 +233,12 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 		return s.parFail(ctx, client.ID(), subjectErr)
 	}
 
-	authParams, tokenClaims, resolveErr := s.resolveAuthorizationParameters(ctx, params, client)
+	authParams, tokenClaims, requestedResources, resolveErr := s.resolveAuthorizationParameters(ctx, params, formResources, client)
 	if resolveErr != nil {
 		return s.parFail(ctx, client.ID(), resolveErr)
 	}
 
-	validated, validateErr := s.validateAuthorizationParameters(authParams, client)
+	validated, resources, validateErr := s.validateAuthorizationRequest(ctx, authParams, requestedResources, client)
 	if validateErr != nil {
 		return s.parFail(ctx, client.ID(), validateErr)
 	}
@@ -270,7 +271,7 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 		source = extension.SourceRequestObject
 	}
 	essentialACR, _ := essentialACRValues(validated)
-	request, err := encodeRequestRecord(requestRecord{Parameters: validated, TokenClaims: tokenClaims, ExtensionSource: source, PushedAt: &now, EssentialACRValues: essentialACR, RequiredSubject: requiredSubject, RequiredInternalSubject: requiredInternal})
+	request, err := encodeRequestRecord(requestRecord{Parameters: validated, TokenClaims: tokenClaims, ExtensionSource: source, PushedAt: &now, EssentialACRValues: essentialACR, RequiredSubject: requiredSubject, RequiredInternalSubject: requiredInternal, Resources: resources})
 	if err != nil {
 		return s.parFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to encode pushed authorization request", err))
 	}
@@ -297,6 +298,21 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 		ExpiresIn:     s.cfg.Limits.PushedRequestLifetime,
 		NextDPoPNonce: nextNonce,
 	}, nil
+}
+
+// validateAuthorizationRequest is validateAuthorizationParameters, then
+// checkRequestedResources for the resource indicators the request
+// named.
+func (s *Server) validateAuthorizationRequest(ctx context.Context, params map[string]json.RawMessage, requestedResources []string, client storage.RegisteredClient) (map[string]json.RawMessage, []string, *Error) {
+	validated, err := s.validateAuthorizationParameters(params, client)
+	if err != nil {
+		return nil, nil, err
+	}
+	resources, err := s.checkRequestedResources(ctx, client, requestedResources)
+	if err != nil {
+		return nil, nil, err
+	}
+	return validated, resources, nil
 }
 
 // authenticateClient authenticates the request's client — via a Client
@@ -506,8 +522,12 @@ func (s *Server) acceptableClientAssertionAudiences(client storage.RegisteredCli
 // "request" parameter) or, when Config.Profile permits it, by taking
 // them directly from the plain form parameters — plus the subset of
 // those parameters (extension.Definition.ReturnInTokenClaims) that
-// should be copied into any token this authorization eventually issues.
-func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[string]string, client storage.RegisteredClient) (map[string]json.RawMessage, map[string]json.RawMessage, *Error) {
+// should be copied into any token this authorization eventually issues,
+// and the RFC 8707 resource indicators it names: formResources (the
+// plain form's "resource" parameters) without a request object, and the
+// request object's own "resource" member with one, where every other
+// form parameter is ignored too.
+func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[string]string, formResources []string, client storage.RegisteredClient) (map[string]json.RawMessage, map[string]json.RawMessage, []string, *Error) {
 	// RFC 9101 §5 / PAR-2.1: "request_uri" is never a meaningful *input*
 	// here, whether or not "request" is also present — PAR generates its
 	// own request_uri as this call's *result*, and a client is never
@@ -517,39 +537,39 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 	// check when "request" was also present, so a request_uri sent
 	// *alone* fell through to plainParamsToJSON unrejected.
 	if _, hasRequestURI := params["request_uri"]; hasRequestURI {
-		return nil, nil, newError(ErrorInvalidRequest, 400, "request_uri must not be present", nil)
+		return nil, nil, nil, newError(ErrorInvalidRequest, 400, "request_uri must not be present", nil)
 	}
 
 	requestParam, hasRequestParam := params["request"]
 
 	if !hasRequestParam {
 		if s.cfg.Profile == ProfileFAPISecurityWithMessageSigning {
-			return nil, nil, newError(ErrorInvalidRequest, 400, "a signed request object is required", nil)
+			return nil, nil, nil, newError(ErrorInvalidRequest, 400, "a signed request object is required", nil)
 		}
 		plain := plainParamsToJSON(params)
 		tokenClaims, err := s.checkExtensions(ctx, client, plain, extension.SourcePlainParameter)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
-		return plain, tokenClaims, nil
+		return plain, tokenClaims, formResources, nil
 	}
 
 	alg, permitted := client.RequestObjectAlgorithm()
 	if !permitted {
-		return nil, nil, newError(ErrorInvalidRequestObject, 400, "client is not permitted to submit request objects", nil)
+		return nil, nil, nil, newError(ErrorInvalidRequestObject, 400, "client is not permitted to submit request objects", nil)
 	}
 	if !s.cfg.Algorithms.RequestObject.Contains(alg) {
-		return nil, nil, newError(ErrorInvalidRequestObject, 400, "request object algorithm is not permitted", nil)
+		return nil, nil, nil, newError(ErrorInvalidRequestObject, 400, "request object algorithm is not permitted", nil)
 	}
 
 	obj, err := requestobject.Parse(requestParam)
 	if err != nil {
-		return nil, nil, newError(ErrorInvalidRequestObject, 400, "malformed request object", err)
+		return nil, nil, nil, newError(ErrorInvalidRequestObject, 400, "malformed request object", err)
 	}
 
 	pub, err := s.resolveClientKey(ctx, client.ID(), keys.RequestObjectVerification, alg, obj.KeyID())
 	if err != nil {
-		return nil, nil, newError(ErrorInvalidRequestObject, 400, "no matching client key", err)
+		return nil, nil, nil, newError(ErrorInvalidRequestObject, 400, "no matching client key", err)
 	}
 
 	verified, err := obj.Verify(ctx, pub, requestobject.VerifyPolicy{
@@ -572,7 +592,7 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 		AutomaticFederationRegistration: client.AutomaticFederationRegistration(),
 	})
 	if err != nil {
-		return nil, nil, newError(ErrorInvalidRequestObject, 400, "request object verification failed", err)
+		return nil, nil, nil, newError(ErrorInvalidRequestObject, 400, "request object verification failed", err)
 	}
 	// Same RFC 9101 §5 / PAR-2.1 prohibition as the sibling-parameter
 	// check above, but for "request_uri" claimed *inside* the signed
@@ -584,13 +604,17 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 	// object would be silently dropped and the request would succeed —
 	// exactly what PAR-2.1 forbids.
 	if _, hasRequestURI := verified.Parameters["request_uri"]; hasRequestURI {
-		return nil, nil, newError(ErrorInvalidRequestObject, 400, "request object must not contain request_uri", nil)
+		return nil, nil, nil, newError(ErrorInvalidRequestObject, 400, "request object must not contain request_uri", nil)
+	}
+	resources, resourceErr := s.resourcesFromParameters(verified.Parameters)
+	if resourceErr != nil {
+		return nil, nil, nil, resourceErr
 	}
 	tokenClaims, checkErr := s.checkExtensions(ctx, client, verified.Parameters, extension.SourceRequestObject)
 	if checkErr != nil {
-		return nil, nil, checkErr
+		return nil, nil, nil, checkErr
 	}
-	return verified.Parameters, tokenClaims, nil
+	return verified.Parameters, tokenClaims, resources, nil
 }
 
 // checkExtensions validates every non-core parameter in params against

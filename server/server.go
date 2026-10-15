@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
@@ -36,6 +37,8 @@ func New(cfg Config, deps Dependencies) (*Server, error) {
 	if err := validateDependencies(cfg, deps); err != nil {
 		return nil, err
 	}
+	// Copied, so a caller changing its slice later changes nothing here.
+	cfg.Resources = slices.Clone(cfg.Resources)
 	if cfg.Extensions == nil {
 		// No implicit permissive fallback: an unconfigured registry
 		// rejects every custom parameter, it does not accept anything —
@@ -123,6 +126,9 @@ func validateConfig(cfg Config) error {
 		return err
 	}
 	if err := validateAttestationAlgorithms(cfg); err != nil {
+		return err
+	}
+	if err := validateResources(cfg.Resources); err != nil {
 		return err
 	}
 	if err := validateLimits(cfg, cibaEnabled); err != nil {

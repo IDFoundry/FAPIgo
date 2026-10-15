@@ -1,0 +1,227 @@
+package server
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"slices"
+
+	"github.com/idfoundry/fapigo/internal/resourceindicator"
+	"github.com/idfoundry/fapigo/storage"
+)
+
+// resourceParameter is RFC 8707's "resource" parameter: a resource
+// indicator, repeatable.
+const resourceParameter = "resource"
+
+// ResourcePolicy decides RFC 8707 resource indicators beyond
+// Config.Resources, for a deployment whose resources aren't a fixed
+// list — an authorization server shared by OpenID4VCI Credential
+// Issuers that admits each issuer naming it in its metadata, say. It is
+// asked only about resources Config.Resources doesn't list, and only
+// once they've passed the client's own
+// storage.RegisteredClientConfig.AllowedResources.
+//
+// AllowResources returns nil to accept every resource in resources for
+// client, an error wrapping ErrResourceNotAllowed to refuse the request
+// with invalid_target, and any other error when it couldn't decide (a
+// store or network failure), which is server_error: never read as a
+// refusal, so a client isn't told its request is wrong when the policy
+// couldn't answer.
+type ResourcePolicy interface {
+	AllowResources(ctx context.Context, client storage.RegisteredClient, resources []string) error
+}
+
+// ErrResourceNotAllowed is what a ResourcePolicy's error wraps to refuse
+// a resource: invalid_target.
+var ErrResourceNotAllowed = errors.New("server: resource not allowed")
+
+// resourceIndicatorsEnabled reports whether this server accepts RFC
+// 8707 resource indicators: when Config.Resources or a ResourcePolicy is
+// configured. Otherwise the "resource" parameter is ignored entirely, as
+// any unregistered parameter is, and every access token's audience is
+// the issuer.
+func (s *Server) resourceIndicatorsEnabled() bool {
+	return len(s.cfg.Resources) > 0 || s.deps.ResourcePolicy != nil
+}
+
+// takeResourceParameters splits a form request's "resource" parameters
+// (RFC 8707 §2: repeatable) from the rest, which then go through the
+// usual duplicate-refusing parsing. With resource indicators disabled
+// it returns params unchanged, so "resource" stays an ordinary,
+// ignored parameter.
+func (s *Server) takeResourceParameters(params []FormParameter) ([]FormParameter, []string) {
+	if !s.resourceIndicatorsEnabled() {
+		return params, nil
+	}
+	return splitResourceParameters(params)
+}
+
+// splitResourceParameters separates params' "resource" parameters from
+// the rest. Too many parameters are returned unsplit, for
+// formParametersToMap to refuse, so the resources don't escape its
+// bound.
+func splitResourceParameters(params []FormParameter) ([]FormParameter, []string) {
+	if len(params) > maxFormParameters {
+		return params, nil
+	}
+	rest := make([]FormParameter, 0, len(params))
+	var resources []string
+	for _, p := range params {
+		if p.Name == resourceParameter {
+			resources = append(resources, p.Value)
+			continue
+		}
+		rest = append(rest, p)
+	}
+	return rest, resources
+}
+
+// resourcesFromParameters reads a request object's (or CIBA request's)
+// "resource" member: a JSON string, or an array of strings for several
+// (RFC 8707 §2.1). Nil when absent or when resource indicators are
+// disabled. The member itself is left for the extension check, which
+// drops it as an unregistered parameter, so it isn't stored with the
+// others.
+func (s *Server) resourcesFromParameters(params map[string]json.RawMessage) ([]string, *Error) {
+	if !s.resourceIndicatorsEnabled() {
+		return nil, nil
+	}
+	raw, ok := params[resourceParameter]
+	if !ok {
+		return nil, nil
+	}
+	var one string
+	if err := json.Unmarshal(raw, &one); err == nil {
+		return []string{one}, nil
+	}
+	var many []string
+	if err := json.Unmarshal(raw, &many); err != nil || len(many) == 0 {
+		return nil, newError(ErrorInvalidTarget, 400, "resource must be a string or a non-empty array of strings", err)
+	}
+	return many, nil
+}
+
+// checkRequestedResources validates the resource indicators client
+// named: each an absolute URI without a fragment (RFC 8707 §2), within
+// the client's AllowedResources, and listed in Config.Resources or
+// accepted by the ResourcePolicy. It returns them de-duplicated in the
+// order given. Nil in, nil out.
+func (s *Server) checkRequestedResources(ctx context.Context, client storage.RegisteredClient, requested []string) ([]string, *Error) {
+	if len(requested) == 0 {
+		return nil, nil
+	}
+	if len(requested) > resourceindicator.MaxPerRequest {
+		return nil, newError(ErrorInvalidTarget, 400, fmt.Sprintf("at most %d resource indicators may be requested", resourceindicator.MaxPerRequest), nil)
+	}
+	resources := make([]string, 0, len(requested))
+	var unlisted []string
+	for _, r := range requested {
+		if err := resourceindicator.Check(r); err != nil {
+			return nil, newError(ErrorInvalidTarget, 400, "resource must be an absolute URI without a fragment", err)
+		}
+		if slices.Contains(resources, r) {
+			continue
+		}
+		if !client.AllowsResource(r) {
+			return nil, newError(ErrorInvalidTarget, 400, "resource is not one this client may request", nil)
+		}
+		resources = append(resources, r)
+		if !slices.Contains(s.cfg.Resources, r) {
+			unlisted = append(unlisted, r)
+		}
+	}
+	if len(unlisted) == 0 {
+		return resources, nil
+	}
+	if s.deps.ResourcePolicy == nil {
+		return nil, newError(ErrorInvalidTarget, 400, "resource is not one this server serves", nil)
+	}
+	switch err := s.deps.ResourcePolicy.AllowResources(ctx, client, slices.Clone(unlisted)); {
+	case err == nil:
+		return resources, nil
+	case errors.Is(err, ErrResourceNotAllowed):
+		return nil, newError(ErrorInvalidTarget, 400, "resource is not one this server serves", err)
+	default:
+		return nil, newError(ErrorServerError, 500, "failed to decide the requested resources", err)
+	}
+}
+
+// narrowResources returns the resources a token request may have its
+// access token restricted to: requested, when it named any, which must
+// all be among granted (RFC 8707 §2.2: a token request may narrow the
+// grant's resources, never widen them), and otherwise granted.
+func narrowResources(granted, requested []string) ([]string, *Error) {
+	if len(requested) == 0 {
+		return granted, nil
+	}
+	if len(requested) > resourceindicator.MaxPerRequest {
+		return nil, newError(ErrorInvalidTarget, 400, fmt.Sprintf("at most %d resource indicators may be requested", resourceindicator.MaxPerRequest), nil)
+	}
+	narrowed := make([]string, 0, len(requested))
+	for _, r := range requested {
+		if !slices.Contains(granted, r) {
+			return nil, newError(ErrorInvalidTarget, 400, "resource was not granted", nil)
+		}
+		if !slices.Contains(narrowed, r) {
+			narrowed = append(narrowed, r)
+		}
+	}
+	return narrowed, nil
+}
+
+// allowedGrantAudience is checkGrantStillAllowed for a token request
+// from grant asking for scope, followed by narrowedAudience for the
+// resources it requested.
+func (s *Server) allowedGrantAudience(client storage.RegisteredClient, grant grantRecord, scope, requested []string) (string, []string, *Error) {
+	if err := s.checkGrantStillAllowed(client, grant, scope); err != nil {
+		return "", nil, err
+	}
+	return s.narrowedAudience(grant.Resources, requested)
+}
+
+// usableGrantAudience is allowedGrantAudience for the CIBA token
+// exchange, whose grant checkGrantUsable checks.
+func (s *Server) usableGrantAudience(ctx context.Context, client storage.RegisteredClient, grant grantRecord, requested []string) (string, []string, *Error) {
+	if err := s.checkGrantUsable(ctx, client, grant); err != nil {
+		return "", nil, err
+	}
+	return s.narrowedAudience(grant.Resources, requested)
+}
+
+// narrowedAudience is the audience of an access token from a grant for
+// granted resources, narrowed to requested (see narrowResources).
+func (s *Server) narrowedAudience(granted, requested []string) (string, []string, *Error) {
+	resources, err := narrowResources(granted, requested)
+	if err != nil {
+		return "", nil, err
+	}
+	audience, audiences := s.accessTokenAudience(resources)
+	return audience, audiences, nil
+}
+
+// accessTokenAudience returns an access token's audience: the resources
+// it's restricted to, or, without any, this server's issuer identifier.
+// audience is AccessTokenParams.Audience — the first resource, or the
+// issuer — and audiences AccessTokenParams.Audiences.
+func (s *Server) accessTokenAudience(resources []string) (audience string, audiences []string) {
+	if len(resources) == 0 {
+		return s.cfg.Issuer.String(), nil
+	}
+	return resources[0], slices.Clone(resources)
+}
+
+// validateResources checks Config.Resources at New: each a resource
+// indicator RFC 8707 §2 allows, none repeated.
+func validateResources(resources []string) error {
+	for i, r := range resources {
+		if err := resourceindicator.Check(r); err != nil {
+			return fmt.Errorf("server: config: resources[%d]: %w", i, err)
+		}
+		if slices.Contains(resources[:i], r) {
+			return fmt.Errorf("server: config: resources[%d]: %q is repeated", i, r)
+		}
+	}
+	return nil
+}

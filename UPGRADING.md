@@ -17,6 +17,36 @@ and `keys/ephemeral` needs only the steps not marked *production only*.
 
 ## v0.57.0
 
+### RFC 8707 resource indicators (server, resource; opt-in)
+
+Nothing to change: resource indicators are off until you set
+`server.Config.Resources` or `server.Dependencies.ResourcePolicy`, and a
+request naming no resource still gets an access token addressed to the
+issuer. [GETTING_STARTED.md](GETTING_STARTED.md#audience-restricted-tokens-rfc-8707-resource-indicators)
+shows how to turn them on. Three things change whether or not you do:
+
+- `server.OpaqueAccessTokens` now records each token's audience with it,
+  under the claim name `aud` in `storage.NewAccessToken.Claims`, and
+  `resource.OpaqueAccessTokens` returns it as
+  `ResolvedAccessToken.Audience` (and `AuthorizationContext.Audience`)
+  rather than among the claims. A store that keeps `Claims` needs no
+  change.
+- `serverresource.NewVerifier` now checks an opaque token's recorded
+  audience, as it always checked a JWT's `aud`. A token recorded before
+  this release has none and is still accepted.
+- A custom `server.AccessTokenIssuer` keeps working: it gets the first
+  resource in `AccessTokenParams.Audience`, so its tokens are still
+  restricted to a resource the client named, and every resource in the
+  new `Audiences` field. Issue `Audiences` as the token's audience to
+  restrict it to all of them.
+
+Once a resource server verifies with its own identifier
+(`serverresource.Options.Resource`, or `JWTAccessTokens.Audience` /
+`OpaqueAccessTokens.Audience`), tokens from clients that don't send
+`resource` yet are refused there. Accept them while clients move with
+`serverresource.Options.AcceptIssuerAudience`, or the issuer in
+`AdditionalAudiences`, and drop it once they all send it.
+
 ### Send resource indicators with `Resource`, not an extension (client)
 
 Not a breaking change: nothing stops working. It's here because a

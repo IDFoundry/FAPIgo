@@ -120,6 +120,11 @@ const (
 	// endpoint, and PAR is this server's own pushed variant of the
 	// latter.
 	ErrorInvalidAuthorizationDetails ErrorCode = "invalid_authorization_details"
+
+	// ErrorInvalidTarget is RFC 8707 §2's error for a "resource"
+	// parameter that's malformed, unknown, or not one the client may
+	// request, at PAR, the CIBA endpoint and the token endpoint.
+	ErrorInvalidTarget ErrorCode = "invalid_target"
 )
 
 // Error is the error type every public Server method returns. Code and

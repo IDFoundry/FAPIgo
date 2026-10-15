@@ -42,6 +42,12 @@ type IssueAccessTokenRequest struct {
 	Scope                []string
 	AuthorizationDetails []json.RawMessage
 
+	// Resources are the RFC 8707 resource indicators the access token is
+	// restricted to, checked as IssueRefreshTokenRequest.Resources are:
+	// its "aud" is them instead of the issuer. Give a refresh token
+	// issued for the same grant the same Resources.
+	Resources []string
+
 	// GrantID, if set, names the grant, as IssueRefreshTokenRequest's
 	// GrantID does: the access token carries it, so RevokeGrant ends
 	// this token too, not only the ones a refresh issues later. Give a
@@ -53,7 +59,8 @@ type IssueAccessTokenRequest struct {
 // IssueAccessToken issues an access token for a grant the embedder
 // served itself (Config.AdditionalGrantTypes), as this server's own
 // token endpoint would: through Dependencies.AccessTokens, with this
-// server's issuer, audience and Limits.AccessTokenLifetime, bound to
+// server's issuer, its audience (req.Resources, or the issuer) and
+// Limits.AccessTokenLifetime, bound to
 // req.Binding, and carrying the same claims as the access tokens a
 // refresh token for the grant (IssueRefreshToken) later issues. Use it
 // rather than calling Dependencies.AccessTokens directly: the claims
@@ -84,10 +91,11 @@ func (s *Server) IssueAccessToken(ctx context.Context, req IssueAccessTokenReque
 		return TokenResult{}, err
 	}
 	sub, internal := grant.accessTokenSubjects()
+	audience, audiences := s.accessTokenAudience(grant.Resources)
 	accessToken, _, issueErr := s.deps.AccessTokens.IssueAccessToken(ctx, AccessTokenParams{
 		ClientID: client.ID(), Subject: sub, InternalSubject: internal, Scope: grant.Scope,
 		Thumbprint: req.Binding.Thumbprint, SenderConstrain: client.SenderConstrain(), Claims: claims,
-		Issuer: s.cfg.Issuer.String(), Audience: s.cfg.Issuer.String(),
+		Issuer: s.cfg.Issuer.String(), Audience: audience, Audiences: audiences,
 		Now: s.deps.Clock.Now(), Lifetime: s.cfg.Limits.AccessTokenLifetime, Random: s.deps.Random,
 	})
 	if issueErr != nil {

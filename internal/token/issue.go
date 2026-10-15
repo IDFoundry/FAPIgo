@@ -28,8 +28,12 @@ type AccessTokenParams struct {
 	Issuer   string
 	Subject  string
 	Audience string
-	ClientID string
-	Scope    string // "" to omit
+	// Audiences, when set, is the token's "aud" instead of Audience: a
+	// JSON string for one, an array for several (RFC 7519 §4.1.3) — the
+	// resources an RFC 8707 resource indicator restricted it to.
+	Audiences []string
+	ClientID  string
+	Scope     string // "" to omit
 
 	// Confirmation binds the token to a DPoP key or an mTLS client
 	// certificate by thumbprint (exactly one of Confirmation.JKT/X5TS256
@@ -69,8 +73,13 @@ func validateAccessTokenParams(p AccessTokenParams) error {
 	if p.Subject == "" {
 		return fmt.Errorf("token: subject is empty")
 	}
-	if p.Audience == "" {
+	if p.Audience == "" && len(p.Audiences) == 0 {
 		return fmt.Errorf("token: audience is empty")
+	}
+	for _, a := range p.Audiences {
+		if a == "" {
+			return fmt.Errorf("token: an audience is empty")
+		}
 	}
 	if p.ClientID == "" {
 		return fmt.Errorf("token: client ID is empty")
@@ -114,7 +123,7 @@ func IssueAccessToken(p AccessTokenParams) (token string, jti string, err error)
 	standard := map[string]any{
 		"iss":       p.Issuer,
 		"sub":       p.Subject,
-		"aud":       p.Audience,
+		"aud":       accessTokenAudience(p),
 		"client_id": p.ClientID,
 		"exp":       p.Now.Add(p.Lifetime).Unix(),
 		"iat":       p.Now.Unix(),
@@ -317,3 +326,23 @@ const PairwiseSectorClaim = "pairwise_sector"
 // the record's own subject is the end user's internal one. It never
 // appears in a self-contained token, whose "sub" is the pairwise one.
 const ClientSubjectClaim = "client_sub"
+
+// AudienceRecordClaim is the claim a server-side access token record
+// (OpaqueAccessTokens) keeps the token's audiences under, as a JSON
+// array: the resources an RFC 8707 resource indicator restricted it to,
+// or the issuer. A resource server reads it back as the token's
+// audience, never as one of its claims.
+const AudienceRecordClaim = "aud"
+
+// accessTokenAudience is p's "aud" value: Audiences when set (a string
+// for one, an array for several), and otherwise Audience.
+func accessTokenAudience(p AccessTokenParams) any {
+	switch len(p.Audiences) {
+	case 0:
+		return p.Audience
+	case 1:
+		return p.Audiences[0]
+	default:
+		return p.Audiences
+	}
+}

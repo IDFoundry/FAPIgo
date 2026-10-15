@@ -963,7 +963,7 @@ the reason this section exists at all. Pick the side matching your AS:
 // keyManager), which reads the AS's key manager directly).
 issuerKeys, err := keys.NewJWKSIssuerKeySource(fetcher, asJWKSURL, 10*time.Minute)
 accessTokens, err := resource.NewJWTAccessTokens(
-	issuerKeys, asIssuer, asIssuer.String(), // audience: matches server/accesstoken.go's own self-addressed aud claim
+	issuerKeys, asIssuer, asIssuer.String(), // audience: the AS's issuer, unless clients name this resource server (see below)
 	fapi.ES256, 5*time.Minute, // must be >= the AS's own Limits.AccessTokenLifetime
 	8, // max candidate keys tried per token — size to your AS's own key-rotation overlap, not a library default
 )
@@ -1000,6 +1000,95 @@ deps := resource.Dependencies{
 
 verifier, err := resource.NewVerifier(cfg, deps)
 ```
+
+### Audience-restricted tokens (RFC 8707 resource indicators)
+
+By default an access token's `aud` is the authorization server's issuer
+identifier, so every resource server verifying with that audience
+accepts every token the AS issues. When one AS serves several resource
+servers that don't trust each other — an AS shared by several
+OpenID4VCI Credential Issuers, say — a resource server that receives a
+token could replay it at another. RFC 8707 resource indicators close
+that: the client names the resource server in a `resource` parameter,
+the AS restricts the token's `aud` to it, and every other resource
+server refuses the token.
+
+On the authorization server, list the resource servers it issues
+tokens for in `Config.Resources`, or decide them at request time with
+`Dependencies.ResourcePolicy`, or both:
+
+```go
+cfg.Resources = []string{
+	"https://pid-issuer.example.com",
+	"https://diploma-issuer.example.com",
+}
+
+// Optional: admit resources the list doesn't name, such as each
+// Credential Issuer whose metadata lists this AS in
+// authorization_servers (OpenID4VCI §12.2.4).
+deps.ResourcePolicy = credentialIssuerPolicy{}
+
+type credentialIssuerPolicy struct{ /* your issuer registry */ }
+
+func (p credentialIssuerPolicy) AllowResources(ctx context.Context, client storage.RegisteredClient, resources []string) error {
+	for _, r := range resources {
+		known, err := p.lookUpIssuer(ctx, r)
+		if err != nil {
+			return err // couldn't decide: server_error, never read as a refusal
+		}
+		if !known {
+			return fmt.Errorf("%s: %w", r, server.ErrResourceNotAllowed) // invalid_target
+		}
+	}
+	return nil
+}
+```
+
+A resource is checked against, in order: the client's own
+`storage.RegisteredClientConfig.AllowedResources`, if it registered any
+(a client registered automatically through OpenID Federation has none,
+so it may name any resource the server accepts); then
+`Config.Resources`; then, only for those the list doesn't name,
+`ResourcePolicy`. Anything refused is `invalid_target`. The client
+names resources at PAR — repeated `resource` form parameters, or a
+string or array in the request object — or in the CIBA request object,
+and may repeat a subset of them at the token endpoint to narrow one
+access token (RFC 8707 §2.2), on the code exchange, the CIBA poll or a
+refresh; a refresh token always keeps the grant's whole set. The access
+token's `aud` is then the resource (a JSON string), or, for several,
+an array of them. A request naming no resource still gets the issuer as
+its audience, and with neither `Config.Resources` nor `ResourcePolicy`
+set, `resource` is ignored as it always was. For a grant you serve
+yourself (`Config.AdditionalGrantTypes`), pass
+`TokenEndpointRequest.Resources()` as `IssueAccessTokenRequest.Resources`
+and `IssueRefreshTokenRequest.Resources`.
+
+Each resource server then verifies with its own identifier as the
+audience. A Credential Endpoint in the AS's own process passes it to
+`serverresource.NewVerifier`:
+
+```go
+verifier, err := serverresource.NewVerifier(cfg, deps, serverresource.Options{
+	Resource: "https://pid-issuer.example.com",
+})
+```
+
+and one deployed on its own sets `JWTAccessTokens.Audience` (or
+`OpaqueAccessTokens.Audience`) to it in place of `asIssuer.String()`.
+A token issued for the diploma issuer is then refused at the PID
+issuer. Opaque access tokens carry no `aud` on the wire; the AS records
+their audience with the token, and `OpaqueAccessTokens` checks it when
+its `Audience` is set.
+
+While clients move to sending `resource`, a resource server can also
+accept tokens issued without one: `AcceptIssuerAudience: true` in
+`serverresource.Options`, or the issuer in `AdditionalAudiences`. Turn it
+off once they all do, since until then such a token, which any resource
+server verifying the issuer audience accepts, works here too. A UserInfo
+endpoint keeps the default (no `Resource`): it accepts only tokens
+issued without a resource, so a client that also calls UserInfo names
+the AS's issuer as one of its resources (list it in `Config.Resources`)
+and narrows each token request to the resource it's for.
 
 ### Verify a request
 

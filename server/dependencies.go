@@ -243,4 +243,10 @@ type Dependencies struct {
 	// (keys.KeyCustodyAssurance), and CrossInstanceConsistent with
 	// DeploymentHorizontallyScaled. Leave it nil otherwise.
 	PairwiseSubjectResolver pairwise.SubjectResolver
+
+	// ResourcePolicy decides RFC 8707 resource indicators
+	// Config.Resources doesn't list (see ResourcePolicy). Optional:
+	// leave it nil to accept exactly Config.Resources. Setting it alone,
+	// with Config.Resources empty, also enables resource indicators.
+	ResourcePolicy ResourcePolicy
 }

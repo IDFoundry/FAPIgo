@@ -105,7 +105,7 @@ func newHarnessWithClientCredentialsGrant(t *testing.T, senderConstrain storage.
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
-	return harness{server: srv, clients: clients, key: key, serverKey: serverKey, transactions: transactions, grants: grants, audit: audit, revocation: revocation, now: now}
+	return harness{server: srv, clients: clients, key: key, serverKey: serverKey, transactions: transactions, grants: grants, audit: audit, revocation: revocation, now: now, cfg: cfg, deps: deps}
 }
 
 func clientCredentialsFormParams(assertion, scope string) []server.FormParameter {

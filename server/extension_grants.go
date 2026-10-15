@@ -14,13 +14,28 @@ import (
 // serving a grant_type this package doesn't at the same endpoint (see
 // Config.AdditionalGrantTypes). It applies the rules this package's own
 // grants apply: a repeated parameter, or too many or too large ones, is
-// refused with an invalid_request *Error.
+// refused with an invalid_request *Error. The one exception is
+// "resource", which RFC 8707 §2 lets a client repeat: the map holds its
+// first value, and Resources returns them all.
 func (t TokenEndpointRequest) Parameters() (map[string]string, error) {
-	params, err := formParametersToMap(t.parts.HTTP.Parameters)
+	rest, resources := splitResourceParameters(t.parts.HTTP.Parameters)
+	params, err := formParametersToMap(rest)
 	if err != nil {
 		return nil, newError(ErrorInvalidRequest, 400, "the request's parameters are duplicated, too many, or too large", err)
 	}
+	if len(resources) > 0 {
+		params[resourceParameter] = resources[0]
+	}
 	return params, nil
+}
+
+// Resources returns the request's RFC 8707 "resource" parameters, in
+// order, for IssueAccessTokenRequest.Resources and
+// IssueRefreshTokenRequest.Resources. Nil when there are none, or when
+// the request has more parameters than Parameters accepts.
+func (t TokenEndpointRequest) Resources() []string {
+	_, resources := splitResourceParameters(t.parts.HTTP.Parameters)
+	return resources
 }
 
 // AttestedClientAuthentication is the request's attestation headers,

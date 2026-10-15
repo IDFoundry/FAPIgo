@@ -82,6 +82,11 @@ type requestRecord struct {
 	// the interaction shows the application. Empty otherwise, where
 	// RequiredSubject is already what the application gets.
 	RequiredInternalSubject string `json:"required_internal_subject,omitempty"`
+
+	// Resources are the RFC 8707 resource indicators the request named,
+	// already validated (checkRequestedResources), which the grant
+	// carries into Grant.Resources. Empty when it named none.
+	Resources []string `json:"resources,omitempty"`
 }
 
 // requiredSubjectForApplication is the RequiredSubject an interaction
@@ -156,6 +161,14 @@ type grantRecord struct {
 	ACR                  string          `json:"acr,omitempty"`
 	AMR                  []string        `json:"amr,omitempty"`
 	AuthorizationDetails json.RawMessage `json:"authorization_details,omitempty"`
+
+	// Resources are the RFC 8707 resource indicators the grant was
+	// issued for: every access token from it is restricted to them, or
+	// to the subset a token request names (RFC 8707 §2.2). A refresh
+	// token keeps them all, whatever subset an access token was narrowed
+	// to. Empty when none were requested: the token audience is then
+	// the issuer.
+	Resources []string `json:"resources,omitempty"`
 
 	// TokenClaims are the extension claims (ReturnInTokenClaims) for
 	// both the access and ID tokens.

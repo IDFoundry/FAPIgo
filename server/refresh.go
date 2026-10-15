@@ -76,7 +76,8 @@ type RefreshTokenRequest struct {
 // type the client or Config.RAR no longer allows are refused with
 // invalid_grant, and the client must authorize again.
 func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest) (TokenResult, error) {
-	params, err := formParametersToMap(req.HTTP.Parameters)
+	formParams, requestedResources := s.takeResourceParameters(req.HTTP.Parameters)
+	params, err := formParametersToMap(formParams)
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, "", newError(ErrorInvalidRequest, 400, "the request's parameters are duplicated, too many, or too large", err))
 	}
@@ -116,7 +117,10 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 	if scopeErr != nil {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), scopeErr)
 	}
-	if allowedErr := s.checkGrantStillAllowed(client, grant, scope); allowedErr != nil {
+	// The refresh token stays bound to all of the grant's resources,
+	// whatever this access token is narrowed to (RFC 8707 §2.2).
+	audience, audiences, allowedErr := s.allowedGrantAudience(client, grant, scope, requestedResources)
+	if allowedErr != nil {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), allowedErr)
 	}
 
@@ -133,7 +137,7 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 	accessToken, _, err := s.deps.AccessTokens.IssueAccessToken(ctx, AccessTokenParams{
 		ClientID: client.ID(), Subject: sub, InternalSubject: internal, Scope: scope,
 		Thumbprint: thumbprint, SenderConstrain: client.SenderConstrain(), Claims: accessTokenClaims,
-		Issuer: s.cfg.Issuer.String(), Audience: s.cfg.Issuer.String(),
+		Issuer: s.cfg.Issuer.String(), Audience: audience, Audiences: audiences,
 		Now: now, Lifetime: s.cfg.Limits.AccessTokenLifetime, Random: s.deps.Random,
 	})
 	if err != nil {

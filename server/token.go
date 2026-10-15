@@ -182,7 +182,8 @@ func validateRedeemedAuthorizationCode(redeemed storage.RedeemedAuthorizationCod
 // scope included "openid" and a refresh token when it included
 // "offline_access".
 func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req AuthorizationCodeExchangeRequest) (TokenResult, error) {
-	params, err := formParametersToMap(req.HTTP.Parameters)
+	formParams, requestedResources := s.takeResourceParameters(req.HTTP.Parameters)
+	params, err := formParametersToMap(formParams)
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, "", newError(ErrorInvalidRequest, 400, "the request's parameters are duplicated, too many, or too large", err))
 	}
@@ -262,7 +263,8 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	if !client.AllowsAuthorizationCodeGrant() {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorUnauthorizedClient, 400, "the client is no longer registered for the authorization code grant", nil))
 	}
-	if allowedErr := s.checkGrantStillAllowed(client, grant, grant.Scope); allowedErr != nil {
+	audience, audiences, allowedErr := s.allowedGrantAudience(client, grant, grant.Scope, requestedResources)
+	if allowedErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), allowedErr)
 	}
 
@@ -274,7 +276,7 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	accessToken, accessKey, err := s.deps.AccessTokens.IssueAccessToken(ctx, AccessTokenParams{
 		ClientID: client.ID(), Subject: sub, InternalSubject: internal, Scope: grant.Scope,
 		Thumbprint: thumbprint, SenderConstrain: client.SenderConstrain(), Claims: accessTokenClaims,
-		Issuer: s.cfg.Issuer.String(), Audience: s.cfg.Issuer.String(),
+		Issuer: s.cfg.Issuer.String(), Audience: audience, Audiences: audiences,
 		Now: now, Lifetime: s.cfg.Limits.AccessTokenLifetime, Random: s.deps.Random,
 	})
 	if err != nil {

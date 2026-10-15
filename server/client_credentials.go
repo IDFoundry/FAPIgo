@@ -8,6 +8,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/token"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // ClientCredentialsTokenRequest is the input to
@@ -62,7 +63,8 @@ func (s *Server) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, "", newError(ErrorUnsupportedGrantType, 400, "the client_credentials grant is not enabled on this server", nil))
 	}
 
-	params, err := formParametersToMap(req.HTTP.Parameters)
+	formParams, requestedResources := s.takeResourceParameters(req.HTTP.Parameters)
+	params, err := formParametersToMap(formParams)
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, "", newError(ErrorInvalidRequest, 400, "the request's parameters are duplicated, too many, or too large", err))
 	}
@@ -101,22 +103,9 @@ func (s *Server) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 		}
 	}
 
-	// RFC 9396 §6: for client_credentials, "the AS checks whether ...
-	// the client's policy ... allows the issuance of an access token
-	// with the requested authorization details." Structural validation
-	// (registered type, bounds, shape) happens first, exactly like
-	// PAR/CIBA's own parseRequestedAuthorizationDetails call; the actual
-	// entitlement decision then comes from
-	// Dependencies.ClientCredentialsRARPolicy, since this grant has no
-	// resource owner to make it interactively the way PAR/CIBA's own
-	// validateGrantedAuthorizationDetails step does.
-	authorizationDetailsRequested, err := s.parseRequestedAuthorizationDetails(plainParamsToJSON(params))
-	if err != nil {
-		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), newError(ErrorInvalidAuthorizationDetails, 400, "authorization_details is invalid", err))
-	}
-	authorizationDetails, err := s.applyRARPolicy(ctx, client, s.deps.ClientCredentialsRARPolicy, authorizationDetailsRequested)
-	if err != nil {
-		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), newError(ErrorInvalidAuthorizationDetails, 400, "authorization_details is not permitted for this client", err))
+	authorizationDetails, audience, audiences, grantErr := s.clientCredentialsGrant(ctx, client, params, requestedResources)
+	if grantErr != nil {
+		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), grantErr)
 	}
 
 	thumbprint, bindingErr := s.verifyTokenRequestBinding(ctx, client, dpopProof, req.PeerCertificate)
@@ -148,7 +137,7 @@ func (s *Server) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 	accessToken, _, err := s.deps.AccessTokens.IssueAccessToken(ctx, AccessTokenParams{
 		ClientID: client.ID(), Subject: client.ID().String(), Scope: scopeTokens,
 		Thumbprint: thumbprint, SenderConstrain: client.SenderConstrain(), Claims: accessTokenClaims,
-		Issuer: s.cfg.Issuer.String(), Audience: s.cfg.Issuer.String(),
+		Issuer: s.cfg.Issuer.String(), Audience: audience, Audiences: audiences,
 		Now: now, Lifetime: s.cfg.Limits.AccessTokenLifetime, Random: s.deps.Random,
 	})
 	if err != nil {
@@ -169,4 +158,35 @@ func (s *Server) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 
 	s.audit(ctx, AuditEventRequestClientCredentialsToken, client.ID(), AuditOutcomeSuccess, "")
 	return result, nil
+}
+
+// clientCredentialsGrant decides what a client_credentials request
+// gets beyond its scope: the authorization_details its RARPolicy allows,
+// and the access token's audience for the resources it named.
+//
+// RFC 9396 §6: for client_credentials, "the AS checks whether ... the
+// client's policy ... allows the issuance of an access token with the
+// requested authorization details." Structural validation (registered
+// type, bounds, shape) happens first, exactly like PAR/CIBA's own
+// parseRequestedAuthorizationDetails call; the actual entitlement
+// decision then comes from Dependencies.ClientCredentialsRARPolicy,
+// since this grant has no resource owner to make it interactively the
+// way PAR/CIBA's own validateGrantedAuthorizationDetails step does. No
+// grant precedes the request, so its resources are checked as a pushed
+// authorization request's are.
+func (s *Server) clientCredentialsGrant(ctx context.Context, client storage.RegisteredClient, params map[string]string, requestedResources []string) (json.RawMessage, string, []string, *Error) {
+	requested, err := s.parseRequestedAuthorizationDetails(plainParamsToJSON(params))
+	if err != nil {
+		return nil, "", nil, newError(ErrorInvalidAuthorizationDetails, 400, "authorization_details is invalid", err)
+	}
+	authorizationDetails, err := s.applyRARPolicy(ctx, client, s.deps.ClientCredentialsRARPolicy, requested)
+	if err != nil {
+		return nil, "", nil, newError(ErrorInvalidAuthorizationDetails, 400, "authorization_details is not permitted for this client", err)
+	}
+	resources, resourceErr := s.checkRequestedResources(ctx, client, requestedResources)
+	if resourceErr != nil {
+		return nil, "", nil, resourceErr
+	}
+	audience, audiences := s.accessTokenAudience(resources)
+	return authorizationDetails, audience, audiences, nil
 }

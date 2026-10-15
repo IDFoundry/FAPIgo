@@ -38,6 +38,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/idfoundry/fapigo/internal/resourceindicator"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/pairwise"
 	"github.com/idfoundry/fapigo/resource"
@@ -66,16 +67,36 @@ type Options struct {
 	// NonceLifetime bounds how long an issued nonce remains valid.
 	// Required when Nonces is set.
 	NonceLifetime time.Duration
+
+	// Resource is the RFC 8707 resource indicator identifying the
+	// protected endpoints this verifier guards — a Credential Issuer's
+	// identifier, say — as clients name it in "resource" (and as it
+	// appears in the server's Config.Resources, or is accepted by its
+	// ResourcePolicy). A token is then accepted only when it was issued
+	// for it, so a token issued for another resource server can't be
+	// replayed here. Empty, the verifier accepts tokens addressed to the
+	// server's issuer identifier: those issued without a resource
+	// indicator, as for a UserInfo endpoint.
+	Resource string
+
+	// AcceptIssuerAudience, with Resource set, also accepts tokens
+	// addressed to the server's issuer identifier: those whose client
+	// named no resource. Use it while clients move to sending
+	// "resource", then turn it off — until then any token issued without
+	// a resource indicator is accepted here too.
+	AcceptIssuerAudience bool
 }
 
 // NewVerifier returns a resource.Verifier accepting the access tokens a
 // server built from cfg and deps issues, and rejecting those it revokes:
 //
 //   - server.JWTAccessTokens: verified against the server's own signing
-//     keys (keys.LocalIssuerKeys) and algorithm, with cfg.Issuer as both
-//     issuer and audience, and cfg.Limits.AccessTokenLifetime as the
-//     longest lifetime accepted.
-//   - server.OpaqueAccessTokens: looked up in the same Store.
+//     keys (keys.LocalIssuerKeys) and algorithm, with cfg.Issuer as
+//     issuer, Options.Resource (or cfg.Issuer without one) as audience,
+//     and cfg.Limits.AccessTokenLifetime as the longest lifetime
+//     accepted.
+//   - server.OpaqueAccessTokens: looked up in the same Store, with the
+//     same audience checked against the one the server recorded.
 //   - Revocation: deps.Revocation, which must also implement
 //     resource.RevocationChecker (as memstore.RevocationStore does);
 //     server.NoRevocation becomes resource.NoRevocation.
@@ -98,7 +119,11 @@ type Options struct {
 // Any other access-token issuer or revocation sink is an error rather
 // than a guess: build the resource.Verifier directly for those.
 func NewVerifier(cfg server.Config, deps server.Dependencies, opts Options) (*resource.Verifier, error) {
-	accessTokens, err := accessTokenResolver(cfg, deps.AccessTokens)
+	audience, err := verifierAudience(cfg, opts)
+	if err != nil {
+		return nil, err
+	}
+	accessTokens, err := accessTokenResolver(cfg, deps.AccessTokens, audience)
 	if err != nil {
 		return nil, err
 	}
@@ -161,43 +186,70 @@ func resourceAssurance(level server.AssuranceLevel) (resource.AssuranceLevel, er
 	return 0, errors.New("serverresource: the server's assurance level is invalid")
 }
 
-func accessTokenResolver(cfg server.Config, issuer server.AccessTokenIssuer) (resource.AccessTokenResolver, error) {
+// audience is the access-token audience a verifier accepts: its own
+// identifier, and any further ones it also accepts.
+type audience struct {
+	primary    string
+	additional []string
+}
+
+// verifierAudience is the audience opts give a verifier for a server
+// built from cfg: Options.Resource (with the issuer too under
+// AcceptIssuerAudience), or the issuer without one.
+func verifierAudience(cfg server.Config, opts Options) (audience, error) {
+	issuer := cfg.Issuer.String()
+	switch {
+	case opts.Resource == "":
+		if opts.AcceptIssuerAudience {
+			return audience{}, errors.New("serverresource: Options.AcceptIssuerAudience requires Options.Resource")
+		}
+		return audience{primary: issuer}, nil
+	case resourceindicator.Check(opts.Resource) != nil:
+		return audience{}, fmt.Errorf("serverresource: Options.Resource: %w", resourceindicator.Check(opts.Resource))
+	case opts.AcceptIssuerAudience:
+		return audience{primary: opts.Resource, additional: []string{issuer}}, nil
+	}
+	return audience{primary: opts.Resource}, nil
+}
+
+func accessTokenResolver(cfg server.Config, issuer server.AccessTokenIssuer, aud audience) (resource.AccessTokenResolver, error) {
 	switch t := issuer.(type) {
 	case server.JWTAccessTokens:
-		return jwtAccessTokens(cfg, t)
+		return jwtAccessTokens(cfg, t, aud)
 	case *server.JWTAccessTokens:
 		if t != nil {
-			return jwtAccessTokens(cfg, *t)
+			return jwtAccessTokens(cfg, *t, aud)
 		}
 	case server.OpaqueAccessTokens:
-		return opaqueAccessTokens(t)
+		return opaqueAccessTokens(t, aud)
 	case *server.OpaqueAccessTokens:
 		if t != nil {
-			return opaqueAccessTokens(*t)
+			return opaqueAccessTokens(*t, aud)
 		}
 	}
 	return nil, fmt.Errorf("serverresource: access token issuer %T is not server.JWTAccessTokens or server.OpaqueAccessTokens", issuer)
 }
 
-func jwtAccessTokens(cfg server.Config, t server.JWTAccessTokens) (resource.AccessTokenResolver, error) {
+func jwtAccessTokens(cfg server.Config, t server.JWTAccessTokens, aud audience) (resource.AccessTokenResolver, error) {
 	issuerKeys, err := keys.NewLocalIssuerKeys(cfg.Issuer, t.Keys)
 	if err != nil {
 		return nil, fmt.Errorf("serverresource: %w", err)
 	}
-	// The audience is the issuer: every grant issues access tokens with
-	// aud set to cfg.Issuer.
-	resolver, err := resource.NewJWTAccessTokens(issuerKeys, cfg.Issuer, cfg.Issuer.String(), t.Algorithm, cfg.Limits.AccessTokenLifetime, maxKeyCandidates)
+	resolver, err := resource.NewJWTAccessTokens(issuerKeys, cfg.Issuer, aud.primary, t.Algorithm, cfg.Limits.AccessTokenLifetime, maxKeyCandidates)
 	if err != nil {
 		return nil, fmt.Errorf("serverresource: %w", err)
 	}
+	resolver.AdditionalAudiences = aud.additional
 	return resolver, nil
 }
 
-func opaqueAccessTokens(t server.OpaqueAccessTokens) (resource.AccessTokenResolver, error) {
+func opaqueAccessTokens(t server.OpaqueAccessTokens, aud audience) (resource.AccessTokenResolver, error) {
 	resolver, err := resource.NewOpaqueAccessTokens(t.Store)
 	if err != nil {
 		return nil, fmt.Errorf("serverresource: %w", err)
 	}
+	resolver.Audience = aud.primary
+	resolver.AdditionalAudiences = aud.additional
 	return resolver, nil
 }
 

@@ -64,7 +64,8 @@ type BackchannelTokenExchangeRequest struct {
 // RefreshAccessToken does: a scope or authorization_details type the
 // client may no longer use is refused (invalid_scope, invalid_grant).
 func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req BackchannelTokenExchangeRequest) (TokenResult, error) {
-	params, err := formParametersToMap(req.HTTP.Parameters)
+	formParams, requestedResources := s.takeResourceParameters(req.HTTP.Parameters)
+	params, err := formParametersToMap(formParams)
 	if err != nil {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, "", newError(ErrorInvalidRequest, 400, "the request's parameters are duplicated, too many, or too large", err))
 	}
@@ -128,7 +129,8 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorServerError, 500, "failed to decode backchannel authentication grant", err))
 	}
 	grant.CodeGrantID = s.backchannelGrantID(authReqIDHash)
-	if usableErr := s.checkGrantUsable(ctx, client, grant); usableErr != nil {
+	audience, audiences, usableErr := s.usableGrantAudience(ctx, client, grant, requestedResources)
+	if usableErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), usableErr)
 	}
 	accessTokenClaims, err := grant.accessTokenClaims()
@@ -139,7 +141,7 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 	accessToken, _, err := s.deps.AccessTokens.IssueAccessToken(ctx, AccessTokenParams{
 		ClientID: client.ID(), Subject: sub, InternalSubject: internal, Scope: grant.Scope,
 		Thumbprint: thumbprint, SenderConstrain: client.SenderConstrain(), Claims: accessTokenClaims,
-		Issuer: s.cfg.Issuer.String(), Audience: s.cfg.Issuer.String(),
+		Issuer: s.cfg.Issuer.String(), Audience: audience, Audiences: audiences,
 		Now: now, Lifetime: s.cfg.Limits.AccessTokenLifetime, Random: s.deps.Random,
 	})
 	if err != nil {

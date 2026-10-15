@@ -361,9 +361,9 @@ type Limits struct {
 // mutating a Config after passing it to New has no effect.
 type Config struct {
 	// Issuer is this server's issuer identifier — the audience client
-	// assertions and request objects must be addressed to, and the token
-	// audience used until per-resource-server audiences (RFC 8707
-	// resource indicators) are supported.
+	// assertions and request objects must be addressed to, and every
+	// access token's audience unless the client named resources (RFC
+	// 8707 resource indicators; see Resources).
 	Issuer fapi.URL
 
 	Endpoints  Endpoints
@@ -458,6 +458,26 @@ type Config struct {
 	// VerifyTokenRequestBinding for serving one, and IssueRefreshToken
 	// for a refresh token RefreshAccessToken redeems.
 	AdditionalGrantTypes []string
+
+	// Resources are the resource servers this server issues
+	// audience-restricted access tokens for (RFC 8707 resource
+	// indicators): each the identifier a client names in a "resource"
+	// parameter, an absolute URI without a fragment, compared exactly.
+	// A client may name one or more at PAR (or in a CIBA request), and
+	// narrow them at the token endpoint (RFC 8707 §2.2); every access
+	// token from the grant then carries them as its "aud" instead of
+	// Issuer, so a resource server whose identifier isn't among them
+	// refuses the token (resource.JWTAccessTokens.Audience).
+	//
+	// Resources is checked first, after the client's own
+	// storage.RegisteredClientConfig.AllowedResources;
+	// Dependencies.ResourcePolicy, if set, decides any resource it
+	// doesn't list. A resource neither admits is invalid_target. With
+	// neither set, the "resource" parameter is ignored, as any
+	// unregistered parameter is, and every access token's audience is
+	// Issuer. A request naming no resource also gets Issuer as its
+	// audience.
+	Resources []string
 
 	// AttestationBasedClientAuthentication enables
 	// storage.ClientAuthMethodAttestation (OAuth 2.0 Attestation-Based

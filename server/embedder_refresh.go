@@ -49,6 +49,16 @@ type IssueRefreshTokenRequest struct {
 	Scope                []string
 	AuthorizationDetails []json.RawMessage
 
+	// Resources are the RFC 8707 resource indicators the grant is for,
+	// checked as at PAR (absolute URIs without a fragment, within the
+	// client's AllowedResources, and accepted by Config.Resources or
+	// Dependencies.ResourcePolicy; otherwise invalid_target): every
+	// access token a refresh issues is restricted to them, or to the
+	// subset the refresh request names. Typically the "resource"
+	// parameters of the token request the embedder served (see
+	// TokenEndpointRequest.Resources). Empty, the audience is the issuer.
+	Resources []string
+
 	// GrantID, if set, names the grant so RevokeGrant can revoke it, as
 	// GrantedAuthorization.GrantID does — and, like it, must name this
 	// grant only. RevokeToken's TokenRevocationResult names it when the
@@ -94,6 +104,7 @@ type embedderGrantRequest struct {
 	Subject              SubjectID
 	Scope                []string
 	AuthorizationDetails []json.RawMessage
+	Resources            []string
 	GrantID              string
 }
 
@@ -131,6 +142,10 @@ func (s *Server) embedderGrant(ctx context.Context, req embedderGrantRequest) (g
 	if detailsErr != nil {
 		return grantRecord{}, detailsErr
 	}
+	resources, resourceErr := s.checkRequestedResources(ctx, client, req.Resources)
+	if resourceErr != nil {
+		return grantRecord{}, resourceErr
+	}
 	if err := s.validateGrantID(req.GrantID); err != nil {
 		return grantRecord{}, newError(ErrorServerError, 500, "GrantID is invalid", err)
 	}
@@ -148,6 +163,7 @@ func (s *Server) embedderGrant(ctx context.Context, req embedderGrantRequest) (g
 		PairwisePrefix:       pairwisePrefixOf(s.cfg, sector),
 		Scope:                slices.Clone(req.Scope),
 		AuthorizationDetails: details,
+		Resources:            resources,
 		GrantID:              req.GrantID,
 	}
 	// A grant already revoked issues nothing more, as a refresh of it

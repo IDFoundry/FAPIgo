@@ -671,3 +671,30 @@ func TestNewRegisteredClientAuthorizationDetailsTypes(t *testing.T) {
 		t.Error("NewRegisteredClient accepted an empty authorization details type")
 	}
 }
+
+func TestNewRegisteredClientAllowedResources(t *testing.T) {
+	base := RegisteredClientConfig{
+		ID: "c", RedirectURIs: []fapi.RegisteredRedirectURI{"https://rp.example/cb"}, ClientAssertionAlgorithm: fapi.ES256,
+	}
+	unrestricted, err := NewRegisteredClient(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !unrestricted.AllowsResource("https://rs.example") {
+		t.Error("a client registered with no AllowedResources refuses a resource")
+	}
+	base.AllowedResources = []string{"https://rs.example", "urn:example:rs"}
+	some, err := NewRegisteredClient(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !some.AllowsResource("urn:example:rs") || some.AllowsResource("https://other.example") || some.AllowsResource("https://rs.example/") {
+		t.Error("AllowsResource doesn't follow the registered list exactly")
+	}
+	for _, bad := range []string{"", "/relative", "https://rs.example#frag"} {
+		base.AllowedResources = []string{"https://rs.example", bad}
+		if _, err := NewRegisteredClient(base); err == nil {
+			t.Errorf("NewRegisteredClient accepted allowed resource %q", bad)
+		}
+	}
+}

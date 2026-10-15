@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/resourceindicator"
 )
 
 // SenderConstrain is the closed set of mechanisms a registered
@@ -208,6 +209,7 @@ type RegisteredClient struct {
 	clientAttestationAlgorithm    fapi.SignatureAlgorithm
 	allowedScopes                 map[string]struct{}
 	authorizationDetailsTypes     map[string]struct{}
+	allowedResources              map[string]struct{}
 
 	idTokenEncryptionKeyManagement     fapi.KeyManagementAlgorithm
 	idTokenEncryptionContentEncryption fapi.ContentEncryptionAlgorithm
@@ -415,6 +417,15 @@ type RegisteredClientConfig struct {
 	// every type it uses.
 	AuthorizationDetailsTypes []string
 
+	// AllowedResources narrows the RFC 8707 resource indicators this
+	// client may name, among those the server accepts
+	// (server.Config.Resources and its ResourcePolicy): set, a resource
+	// outside it is invalid_target whatever the server would otherwise
+	// accept. Empty, the client may name any resource the server
+	// accepts. Each is an absolute URI without a fragment (RFC 8707
+	// §2), compared exactly.
+	AllowedResources []string
+
 	// AllowsClientCredentialsGrant permits this client to use the RFC
 	// 6749 §4.4 client_credentials grant at the token endpoint —
 	// false (the zero value/default) means it cannot, the same
@@ -597,11 +608,7 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 		return RegisteredClient{}, err
 	}
 
-	scopes, err := stringSet(cfg.ID, "allowed scope", cfg.AllowedScopes)
-	if err != nil {
-		return RegisteredClient{}, err
-	}
-	rarTypes, err := stringSet(cfg.ID, "authorization details type", cfg.AuthorizationDetailsTypes)
+	scopes, rarTypes, resources, err := allowedSets(cfg)
 	if err != nil {
 		return RegisteredClient{}, err
 	}
@@ -633,6 +640,7 @@ func NewRegisteredClient(cfg RegisteredClientConfig) (RegisteredClient, error) {
 		clientAttestationAlgorithm:                cfg.ClientAttestationAlgorithm,
 		allowedScopes:                             scopes,
 		authorizationDetailsTypes:                 rarTypes,
+		allowedResources:                          resources,
 		idTokenEncryptionKeyManagement:            cfg.IDTokenEncryptionKeyManagement,
 		idTokenEncryptionContentEncryption:        cfg.IDTokenEncryptionContentEncryption,
 		userInfoEncryptionKeyManagement:           cfg.UserInfoEncryptionKeyManagement,
@@ -1116,6 +1124,18 @@ func (c RegisteredClient) AllowsScope(scope string) bool {
 	return ok
 }
 
+// AllowsResource reports whether this client may name resource as an
+// RFC 8707 resource indicator: always when it registered no
+// AllowedResources (the server's own acceptance then decides), and
+// otherwise only for one of them.
+func (c RegisteredClient) AllowsResource(resource string) bool {
+	if len(c.allowedResources) == 0 {
+		return true
+	}
+	_, ok := c.allowedResources[resource]
+	return ok
+}
+
 // AllowsAuthorizationDetailsType reports whether typ is one of the Rich
 // Authorization Request types this client is registered for — see
 // RegisteredClientConfig.AuthorizationDetailsTypes.
@@ -1143,6 +1163,33 @@ func stringSet(id fapi.ClientID, what string, values []string) (map[string]struc
 	for _, v := range values {
 		if v == "" {
 			return nil, fmt.Errorf("storage: client %q has an empty %s", id, what)
+		}
+		set[v] = struct{}{}
+	}
+	return set, nil
+}
+
+// allowedSets validates and collects cfg's AllowedScopes,
+// AuthorizationDetailsTypes and AllowedResources.
+func allowedSets(cfg RegisteredClientConfig) (scopes, rarTypes, resources map[string]struct{}, err error) {
+	if scopes, err = stringSet(cfg.ID, "allowed scope", cfg.AllowedScopes); err != nil {
+		return nil, nil, nil, err
+	}
+	if rarTypes, err = stringSet(cfg.ID, "authorization details type", cfg.AuthorizationDetailsTypes); err != nil {
+		return nil, nil, nil, err
+	}
+	if resources, err = resourceSet(cfg.ID, cfg.AllowedResources); err != nil {
+		return nil, nil, nil, err
+	}
+	return scopes, rarTypes, resources, nil
+}
+
+// resourceSet validates and collects a client's AllowedResources.
+func resourceSet(id fapi.ClientID, values []string) (map[string]struct{}, error) {
+	set := make(map[string]struct{}, len(values))
+	for _, v := range values {
+		if err := resourceindicator.Check(v); err != nil {
+			return nil, fmt.Errorf("storage: client %q allowed resource %q: %w", id, v, err)
 		}
 		set[v] = struct{}{}
 	}

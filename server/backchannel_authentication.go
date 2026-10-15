@@ -145,7 +145,10 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		return s.backchannelBeginFail(ctx, "", newError(ErrorServerError, 500, "backchannel authentication is not configured", nil)), nil
 	}
 
-	params, err := formParametersToMap(req.HTTP.Parameters)
+	// A "resource" outside the signed request is ignored, as every
+	// other parameter there is; only the request object's own counts.
+	formParams, _ := s.takeResourceParameters(req.HTTP.Parameters)
+	params, err := formParametersToMap(formParams)
 	if err != nil {
 		return s.backchannelBeginFail(ctx, "", newError(ErrorInvalidRequest, 400, "the request's parameters are duplicated, too many, or too large", err)), nil
 	}
@@ -169,7 +172,7 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		return s.backchannelBeginFail(ctx, client.ID(), resolveErr), nil
 	}
 
-	validated, validateErr := s.validateBackchannelAuthenticationParameters(verified, client)
+	validated, validateErr := s.validateBackchannelAuthenticationRequest(ctx, verified, client)
 	if validateErr != nil {
 		return s.backchannelBeginFail(ctx, client.ID(), validateErr), nil
 	}
@@ -227,7 +230,7 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	}
 
 	essentialACR, _ := essentialACRValues(validated.params)
-	request, err := encodeRequestRecord(requestRecord{Parameters: validated.params, TokenClaims: validated.tokenClaims, DPoPJKT: dpopJKT, ExpiresAt: &expiresAt, EssentialACRValues: essentialACR, RequiredSubject: requiredSubject, RequiredInternalSubject: requiredInternal})
+	request, err := encodeRequestRecord(requestRecord{Parameters: validated.params, TokenClaims: validated.tokenClaims, DPoPJKT: dpopJKT, ExpiresAt: &expiresAt, EssentialACRValues: essentialACR, RequiredSubject: requiredSubject, RequiredInternalSubject: requiredInternal, Resources: validated.resources})
 	if err != nil {
 		return s.backchannelBeginFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to encode backchannel authentication request", err)), nil
 	}
@@ -263,6 +266,11 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 type verifiedBackchannelRequest struct {
 	params      map[string]json.RawMessage
 	tokenClaims map[string]json.RawMessage
+	// resources are the request object's RFC 8707 resource indicators:
+	// as named by resolveBackchannelAuthenticationParameters, and
+	// checked (checkRequestedResources) once
+	// validateBackchannelAuthenticationRequest returns them.
+	resources []string
 }
 
 // resolveBackchannelAuthenticationParameters verifies the request's
@@ -332,11 +340,15 @@ func (s *Server) resolveBackchannelAuthenticationParameters(ctx context.Context,
 	if err != nil {
 		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "backchannel authentication request verification failed", err)
 	}
+	resources, resourceErr := s.resourcesFromParameters(verified.Parameters)
+	if resourceErr != nil {
+		return verifiedBackchannelRequest{}, resourceErr
+	}
 	tokenClaims, checkErr := s.checkBackchannelExtensions(ctx, client, verified.Parameters)
 	if checkErr != nil {
 		return verifiedBackchannelRequest{}, checkErr
 	}
-	return verifiedBackchannelRequest{params: verified.Parameters, tokenClaims: tokenClaims}, nil
+	return verifiedBackchannelRequest{params: verified.Parameters, tokenClaims: tokenClaims, resources: resources}, nil
 }
 
 // checkBackchannelExtensions is checkExtensions' CIBA counterpart —
@@ -361,6 +373,22 @@ func (s *Server) checkBackchannelExtensions(ctx context.Context, client storage.
 		params[authorizationDetailsParameter] = granted
 	}
 	return extension.AsParameters(values, s.cfg.Extensions.Definitions()...), nil
+}
+
+// validateBackchannelAuthenticationRequest is
+// validateBackchannelAuthenticationParameters, then
+// checkRequestedResources for the resource indicators the request
+// object named, which it returns checked.
+func (s *Server) validateBackchannelAuthenticationRequest(ctx context.Context, verified verifiedBackchannelRequest, client storage.RegisteredClient) (verifiedBackchannelRequest, *Error) {
+	validated, err := s.validateBackchannelAuthenticationParameters(verified, client)
+	if err != nil {
+		return verifiedBackchannelRequest{}, err
+	}
+	validated.resources, err = s.checkRequestedResources(ctx, client, verified.resources)
+	if err != nil {
+		return verifiedBackchannelRequest{}, err
+	}
+	return validated, nil
 }
 
 // validateBackchannelAuthenticationParameters checks the CIBA-mandated

@@ -68,8 +68,13 @@ type AccessTokenValidatePolicy struct {
 	ExpectedIssuer string
 
 	// ExpectedAudience is the resource the caller expects this token to
-	// be scoped to. The token's aud claim must equal it exactly.
+	// be scoped to. The token's aud claim must contain it, or one of
+	// AdditionalAudiences.
 	ExpectedAudience string
+
+	// AdditionalAudiences are further audiences accepted besides
+	// ExpectedAudience.
+	AdditionalAudiences []string
 
 	// Algorithm is the algorithm this authorization server is
 	// registered (or discovered) to sign access tokens with. The token
@@ -165,7 +170,7 @@ func (t AccessToken) Validate(pub crypto.PublicKey, policy AccessTokenValidatePo
 	// ExpectedAudience/TrustedAudiences), RFC 9068 states no equivalent
 	// "reject if it names an audience you don't trust" rule, so no
 	// trust-list is needed here.
-	if !containsString(c.Audience, policy.ExpectedAudience) {
+	if !containsString(c.Audience, policy.ExpectedAudience) && !containsAny(c.Audience, policy.AdditionalAudiences) {
 		return ValidatedAccessToken{}, ErrAudienceMismatch
 	}
 	// Ordinary "is it expired as of now" is deliberately NOT checked
@@ -581,4 +586,14 @@ func checkAuthTime(authTime time.Time, policy IDTokenValidatePolicy) error {
 		return ErrAuthTimeInvalid
 	}
 	return nil
+}
+
+// containsAny reports whether values holds any of wants.
+func containsAny(values, wants []string) bool {
+	for _, w := range wants {
+		if containsString(values, w) {
+			return true
+		}
+	}
+	return false
 }

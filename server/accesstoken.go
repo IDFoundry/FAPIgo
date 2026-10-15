@@ -47,12 +47,22 @@ type AccessTokenParams struct {
 
 	Claims map[string]json.RawMessage
 
-	// Issuer and Audience are only meaningful to a self-contained
-	// format (JWTAccessTokens uses them as the iss/aud claims) — an
-	// opaque token has no self-contained claims, so OpaqueAccessTokens
-	// ignores both.
-	Issuer   string
-	Audience string
+	// Issuer is the token's "iss": only meaningful to a self-contained
+	// format (JWTAccessTokens), so OpaqueAccessTokens ignores it.
+	Issuer string
+
+	// Audience is the token's audience: the server's issuer identifier,
+	// or, when the client named RFC 8707 resource indicators, the first
+	// of them — so an issuer reading only Audience still restricts the
+	// token to a resource the client asked for. Audiences, when set,
+	// lists every resource the token is restricted to (Audience is its
+	// first element); it's nil when the client named none. An issuer
+	// supporting several audiences issues Audiences in place of
+	// Audience: JWTAccessTokens as "aud" (a string for one, an array
+	// for several), OpaqueAccessTokens in the token's record, where a
+	// resource.OpaqueAccessTokens with an Audience checks it.
+	Audience  string
+	Audiences []string
 
 	Now      time.Time
 	Lifetime time.Duration
@@ -112,7 +122,7 @@ func (j JWTAccessTokens) IssueAccessToken(ctx context.Context, p AccessTokenPara
 	}
 	return token.IssueAccessToken(token.AccessTokenParams{
 		Signer: signer, Algorithm: j.Algorithm, KeyID: kid,
-		Issuer: p.Issuer, Subject: p.Subject, Audience: p.Audience,
+		Issuer: p.Issuer, Subject: p.Subject, Audience: p.Audience, Audiences: p.Audiences,
 		ClientID:     p.ClientID.String(),
 		Scope:        strings.Join(p.Scope, " "),
 		Confirmation: confirmationFor(p.SenderConstrain, p.Thumbprint),
@@ -159,17 +169,29 @@ func (o OpaqueAccessTokens) IssueAccessToken(ctx context.Context, p AccessTokenP
 		return "", "", err
 	}
 	hash := sha256.Sum256([]byte(raw))
-	subject, claims := p.Subject, p.Claims
+	subject := p.Subject
+	claims := maps.Clone(p.Claims)
+	if claims == nil {
+		claims = map[string]json.RawMessage{}
+	}
 	if p.InternalSubject != "" {
 		// The record keeps the end user's internal subject, which only
 		// this server and its resource servers read, and the pairwise
 		// sub the client was given beside it.
 		subject = p.InternalSubject
-		claims = maps.Clone(claims)
-		if claims == nil {
-			claims = map[string]json.RawMessage{}
-		}
 		claims[token.ClientSubjectClaim], _ = json.Marshal(p.Subject) // a string always marshals
+	}
+	// The record keeps the token's audiences, so a resource server can
+	// refuse a token restricted to another resource (RFC 8707).
+	audiences := p.Audiences
+	if len(audiences) == 0 && p.Audience != "" {
+		audiences = []string{p.Audience}
+	}
+	if len(audiences) > 0 {
+		claims[token.AudienceRecordClaim], _ = json.Marshal(audiences) // a []string always marshals
+	}
+	if len(claims) == 0 {
+		claims = nil
 	}
 	if err := o.Store.CreateAccessToken(ctx, storage.NewAccessToken{
 		TokenHash:       hash,

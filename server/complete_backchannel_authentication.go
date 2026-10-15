@@ -209,6 +209,7 @@ func (s *Server) approveBackchannelAuthentication(ctx context.Context, clientID 
 		ACR:                     result.auth.acr,
 		AMR:                     result.auth.amr,
 		AuthorizationDetails:    grantedAuthorizationDetails,
+		Resources:               request.Resources,
 		TokenClaims:             request.TokenClaims,
 		RequestedIDTokenClaims:  idTokenClaims,
 		RequestedUserinfoClaims: userinfoClaims,

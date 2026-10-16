@@ -64,20 +64,7 @@ func (w *World) newIdentityProvider(c country, ta *entity) (*identityProvider, e
 	if err != nil {
 		return nil, err
 	}
-	endpoint := func(path string) (fapi.URL, error) { return fapi.ParseEndpointURL(id + path) }
-	authz, err := endpoint(authorizePath)
-	if err != nil {
-		return nil, err
-	}
-	tokenURL, err := endpoint("/token")
-	if err != nil {
-		return nil, err
-	}
-	parURL, err := endpoint("/par")
-	if err != nil {
-		return nil, err
-	}
-	jwksURL, err := endpoint("/jwks")
+	endpoints, err := identityProviderEndpoints(id)
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +119,7 @@ func (w *World) newIdentityProvider(c country, ta *entity) (*identityProvider, e
 		// registration.
 		Subjects:   server.SubjectConfig{Default: fapi.SubjectTypePairwise, Enforcement: server.SubjectTypesPerClient, Prefix: prefix},
 		Issuer:     issuer,
-		Endpoints:  server.Endpoints{Authorization: authz, Token: tokenURL, PushedAuthorizationRequest: parURL, JWKS: jwksURL},
+		Endpoints:  endpoints,
 		Profile:    server.ProfileFAPISecurity,
 		Algorithms: server.RecommendedAlgorithms(),
 		Limits:     server.RecommendedLimits(),
@@ -211,6 +198,29 @@ func (w *World) newIdentityProvider(c country, ta *entity) (*identityProvider, e
 	mux.Handle("POST "+authorizePath, http.NewCrossOriginProtection().Handler(http.HandlerFunc(idp.decide)))
 	mux.HandleFunc("POST /token", idp.token)
 	return idp, nil
+}
+
+// identityProviderEndpoints is the authorization server endpoints of the
+// identity provider whose entity ID is id.
+func identityProviderEndpoints(id string) (server.Endpoints, error) {
+	endpoint := func(path string) (fapi.URL, error) { return fapi.ParseEndpointURL(id + path) }
+	authz, err := endpoint(authorizePath)
+	if err != nil {
+		return server.Endpoints{}, err
+	}
+	tokenURL, err := endpoint("/token")
+	if err != nil {
+		return server.Endpoints{}, err
+	}
+	parURL, err := endpoint("/par")
+	if err != nil {
+		return server.Endpoints{}, err
+	}
+	jwksURL, err := endpoint("/jwks")
+	if err != nil {
+		return server.Endpoints{}, err
+	}
+	return server.Endpoints{Authorization: authz, Token: tokenURL, PushedAuthorizationRequest: parURL, JWKS: jwksURL}, nil
 }
 
 // trustMark is the level-of-assurance mark this provider publishes: its

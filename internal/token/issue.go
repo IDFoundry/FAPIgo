@@ -73,13 +73,8 @@ func validateAccessTokenParams(p AccessTokenParams) error {
 	if p.Subject == "" {
 		return fmt.Errorf("token: subject is empty")
 	}
-	if p.Audience == "" && len(p.Audiences) == 0 {
-		return fmt.Errorf("token: audience is empty")
-	}
-	for _, a := range p.Audiences {
-		if a == "" {
-			return fmt.Errorf("token: an audience is empty")
-		}
+	if err := validateAccessTokenAudiences(p); err != nil {
+		return err
 	}
 	if p.ClientID == "" {
 		return fmt.Errorf("token: client ID is empty")
@@ -97,6 +92,20 @@ func validateAccessTokenParams(p AccessTokenParams) error {
 	}
 	if p.Confirmation != nil && (p.Confirmation.JKT == "") == (p.Confirmation.X5TS256 == "") {
 		return fmt.Errorf("token: confirmation must set exactly one of jkt or x5t#S256")
+	}
+	return nil
+}
+
+// validateAccessTokenAudiences checks p names an audience, in Audience
+// or Audiences, and that none of Audiences is empty.
+func validateAccessTokenAudiences(p AccessTokenParams) error {
+	if p.Audience == "" && len(p.Audiences) == 0 {
+		return fmt.Errorf("token: audience is empty")
+	}
+	for _, a := range p.Audiences {
+		if a == "" {
+			return fmt.Errorf("token: an audience is empty")
+		}
 	}
 	return nil
 }

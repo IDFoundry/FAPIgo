@@ -70,11 +70,8 @@ type userInfoCall struct {
 	Client, ClientSub, Person string
 }
 
-func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
-	issuer, err := fapi.ParseIssuerURL(w.URL(bankHost, ""))
-	if err != nil {
-		return nil, err
-	}
+// bankEndpoints is the bank's authorization server endpoints.
+func (w *World) bankEndpoints() (server.Endpoints, error) {
 	var endpoints server.Endpoints
 	for _, e := range []struct {
 		dst  *fapi.URL
@@ -83,9 +80,47 @@ func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
 		{&endpoints.Authorization, authorizePath}, {&endpoints.PushedAuthorizationRequest, "/par"},
 		{&endpoints.Token, "/token"}, {&endpoints.JWKS, "/jwks"},
 	} {
+		var err error
 		if *e.dst, err = fapi.ParseEndpointURL(w.URL(bankHost, e.path)); err != nil {
-			return nil, err
+			return server.Endpoints{}, err
 		}
+	}
+	return endpoints, nil
+}
+
+// registerBankClient is rp's registration at the bank.
+func (w *World) registerBankClient(rp *relyingParty) (storage.RegisteredClient, error) {
+	cfg := storage.RegisteredClientConfig{
+		ID:                       rp.setup.clientID,
+		RedirectURIs:             []fapi.RegisteredRedirectURI{fapi.RegisteredRedirectURI(w.URL(rp.setup.host, callbackPath))},
+		ClientAuthMethod:         storage.ClientAuthMethodPrivateKeyJWT,
+		ClientAssertionAlgorithm: fapi.ES256,
+		SenderConstrain:          storage.SenderConstrainDPoP,
+		AllowedScopes:            []string{"openid"},
+		Display:                  storage.ClientDisplay{Name: rp.setup.name},
+	}
+	if rp.setup.encrypt {
+		// The client's registration asks for its ID tokens and UserInfo
+		// responses encrypted to it (OIDC Dynamic Client Registration
+		// §2's id_token_encrypted_response_alg/enc and userinfo_…).
+		cfg.IDTokenEncryptionKeyManagement, cfg.IDTokenEncryptionContentEncryption = fapi.RSAOAEP256, fapi.A256GCM
+		cfg.UserInfoEncryptionKeyManagement, cfg.UserInfoEncryptionContentEncryption = fapi.ECDHESA256KW, fapi.A256GCM
+	}
+	client, err := storage.NewRegisteredClient(cfg)
+	if err != nil {
+		return storage.RegisteredClient{}, fmt.Errorf("register %s: %w", rp.setup.name, err)
+	}
+	return client, nil
+}
+
+func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
+	issuer, err := fapi.ParseIssuerURL(w.URL(bankHost, ""))
+	if err != nil {
+		return nil, err
+	}
+	endpoints, err := w.bankEndpoints()
+	if err != nil {
+		return nil, err
 	}
 	signer, err := ephemeral.GenerateSigner(fapi.ES256)
 	if err != nil {
@@ -108,25 +143,9 @@ func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
 	var registered []storage.RegisteredClient
 	var keySpecs []ephemeral.ClientKeySpec
 	for _, rp := range rps {
-		cfg := storage.RegisteredClientConfig{
-			ID:                       rp.setup.clientID,
-			RedirectURIs:             []fapi.RegisteredRedirectURI{fapi.RegisteredRedirectURI(w.URL(rp.setup.host, callbackPath))},
-			ClientAuthMethod:         storage.ClientAuthMethodPrivateKeyJWT,
-			ClientAssertionAlgorithm: fapi.ES256,
-			SenderConstrain:          storage.SenderConstrainDPoP,
-			AllowedScopes:            []string{"openid"},
-			Display:                  storage.ClientDisplay{Name: rp.setup.name},
-		}
-		if rp.setup.encrypt {
-			// The client's registration asks for its ID tokens and UserInfo
-			// responses encrypted to it (OIDC Dynamic Client Registration
-			// §2's id_token_encrypted_response_alg/enc and userinfo_…).
-			cfg.IDTokenEncryptionKeyManagement, cfg.IDTokenEncryptionContentEncryption = fapi.RSAOAEP256, fapi.A256GCM
-			cfg.UserInfoEncryptionKeyManagement, cfg.UserInfoEncryptionContentEncryption = fapi.ECDHESA256KW, fapi.A256GCM
-		}
-		client, err := storage.NewRegisteredClient(cfg)
+		client, err := w.registerBankClient(rp)
 		if err != nil {
-			return nil, fmt.Errorf("register %s: %w", rp.setup.name, err)
+			return nil, err
 		}
 		registered = append(registered, client)
 		keySpecs = append(keySpecs, ephemeral.ClientKeySpec{ClientID: rp.setup.clientID, JWKS: rp.jwks})

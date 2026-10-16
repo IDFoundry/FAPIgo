@@ -544,16 +544,7 @@ func TestResourceIndicatorsCIBA(t *testing.T) {
 			h := newHarnessWithBackchannelConfig(t, memstore.NewBackchannelAuthenticationStore(), func(cfg *server.Config) {
 				cfg.Resources = []string{resourceA, resourceB}
 			})
-			params := standardBackchannelParams(t)
-			if tc.resource != nil {
-				params["resource"] = jsonRaw(t, tc.resource)
-			}
-			action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
-				HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), h.backchannelRequestObject(t, params))},
-			})
-			if err != nil {
-				t.Fatalf("BeginBackchannelAuthentication: %v", err)
-			}
+			action := beginResourceCIBA(t, h, tc.resource)
 			if tc.wantBegin != "" {
 				local, ok := action.(server.BackchannelAuthenticationLocalError)
 				if !ok || local.Error.Code() != tc.wantBegin {
@@ -565,24 +556,7 @@ func TestResourceIndicatorsCIBA(t *testing.T) {
 			if !ok {
 				t.Fatalf("action = %T, want server.BackchannelInteractionRequired", action)
 			}
-			if err := h.server.CompleteBackchannelAuthentication(context.Background(), server.CompleteBackchannelAuthenticationRequest{
-				Handle: required.Handle, Result: authorizedAs(t, h, "user-1"),
-			}); err != nil {
-				t.Fatalf("CompleteBackchannelAuthentication: %v", err)
-			}
-			form := []server.FormParameter{
-				formParam("client_assertion", h.clientAssertion(t)),
-				formParam("client_assertion_type", clientassertion.AssertionType),
-				formParam("grant_type", server.CIBAGrantType),
-				formParam("auth_req_id", required.AuthReqID.String()),
-			}
-			for _, r := range tc.requested {
-				form = append(form, formParam("resource", r))
-			}
-			result, err := h.server.ExchangeBackchannelAuthentication(context.Background(), server.BackchannelTokenExchangeRequest{
-				HTTP:       server.FormRequest{Parameters: form},
-				DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
-			})
+			result, err := approveAndPollResourceCIBA(t, h, required, tc.requested)
 			if tc.wantToken != "" {
 				wantErrorCode(t, err, tc.wantToken)
 				return
@@ -593,6 +567,47 @@ func TestResourceIndicatorsCIBA(t *testing.T) {
 			wantAudience(t, result, tc.want)
 		})
 	}
+}
+
+// beginResourceCIBA starts a backchannel authentication whose signed
+// request names resource ("resource" left out when it's nil).
+func beginResourceCIBA(t *testing.T, h harness, resource any) server.BackchannelAuthenticationAction {
+	t.Helper()
+	params := standardBackchannelParams(t)
+	if resource != nil {
+		params["resource"] = jsonRaw(t, resource)
+	}
+	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+		HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), h.backchannelRequestObject(t, params))},
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+	return action
+}
+
+// approveAndPollResourceCIBA approves required as user-1, then polls the
+// token endpoint naming requested as resources.
+func approveAndPollResourceCIBA(t *testing.T, h harness, required server.BackchannelInteractionRequired, requested []string) (server.TokenResult, error) {
+	t.Helper()
+	if err := h.server.CompleteBackchannelAuthentication(context.Background(), server.CompleteBackchannelAuthenticationRequest{
+		Handle: required.Handle, Result: authorizedAs(t, h, "user-1"),
+	}); err != nil {
+		t.Fatalf("CompleteBackchannelAuthentication: %v", err)
+	}
+	form := []server.FormParameter{
+		formParam("client_assertion", h.clientAssertion(t)),
+		formParam("client_assertion_type", clientassertion.AssertionType),
+		formParam("grant_type", server.CIBAGrantType),
+		formParam("auth_req_id", required.AuthReqID.String()),
+	}
+	for _, r := range requested {
+		form = append(form, formParam("resource", r))
+	}
+	return h.server.ExchangeBackchannelAuthentication(context.Background(), server.BackchannelTokenExchangeRequest{
+		HTTP:       server.FormRequest{Parameters: form},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
+	})
 }
 
 func TestResourceIndicatorsClientCredentials(t *testing.T) {

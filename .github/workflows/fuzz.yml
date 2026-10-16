@@ -115,6 +115,8 @@ jobs:
             name: FuzzParseIDToken
           - pkg: ./extension
             name: FuzzRARRegistryParse
+          - pkg: ./extension
+            name: FuzzParseGrantedRAR
           - pkg: ./internal/par
             name: FuzzDecodeResult
           - pkg: ./internal/par
@@ -135,6 +137,8 @@ jobs:
             name: FuzzDecodeBackchannelAuthenticationResponse
           - pkg: .
             name: FuzzParseEndpointURL
+          - pkg: .
+            name: FuzzParseRedirectURL
           - pkg: ./server
             name: FuzzParseRequestedClaimNames
           - pkg: ./server
@@ -161,8 +165,12 @@ jobs:
             name: FuzzExtensionValueReadersAgree
           - pkg: ./internal/sealedcookie
             name: FuzzJarOpen
+          - pkg: ./server/interactioncookie
+            name: FuzzRead
           - pkg: ./client
             name: FuzzOpenBackchannelSession
+          - pkg: ./client
+            name: FuzzOpenTokenSet
           - pkg: ./federation
             name: FuzzEntityIDHostAgreement
           - pkg: .

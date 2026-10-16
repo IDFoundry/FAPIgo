@@ -51,58 +51,64 @@ func TestResourceIndicators(t *testing.T) {
 		}{{"JWT", false}, {"opaque", true}} {
 			t.Run(profile.name+"/"+format.name, func(t *testing.T) {
 				h := fapitest.New(t, fapitest.Config{Profile: profile.profile, Resources: servedResources, OpaqueAccessTokens: format.opaque})
-				ctx := context.Background()
-
-				t.Run("several resources", func(t *testing.T) {
-					tokens := runResourceFlow(t, h, []string{payments, accounts})
-					if !slices.Equal(tokens.Resource, []string{payments, accounts}) {
-						t.Errorf("TokenSet.Resource = %q, want both requested resources", tokens.Resource)
-					}
-					if !format.opaque {
-						checkJWTAudience(t, tokens, `["`+payments+`","`+accounts+`"]`)
-					}
-					checkVerifierAudience(t, h, tokens, payments, []string{payments, accounts})
-					checkVerifierAudience(t, h, tokens, accounts, []string{payments, accounts})
-					refuseAtResource(t, h, tokens, serverresource.Options{Resource: credentials})
-					refuseAtResource(t, h, tokens, serverresource.Options{Resource: unlisted})
-					refuseAtResource(t, h, tokens, serverresource.Options{Resource: credentials, AcceptIssuerAudience: true})
-					// The issuer's own resource server (UserInfo, say)
-					// isn't one of them either.
-					refuseAt(t, h, h.Resource, tokens)
-				})
-
-				t.Run("one resource", func(t *testing.T) {
-					tokens := runResourceFlow(t, h, []string{credentials})
-					if !format.opaque {
-						checkJWTAudience(t, tokens, `"`+credentials+`"`)
-					}
-					checkVerifierAudience(t, h, tokens, credentials, []string{credentials})
-					refuseAtResource(t, h, tokens, serverresource.Options{Resource: payments})
-				})
-
-				t.Run("no resource", func(t *testing.T) {
-					tokens, err := h.RunAuthorizationCodeFlow(ctx, offlineScope)
-					if err != nil {
-						t.Fatalf("RunAuthorizationCodeFlow: %v", err)
-					}
-					if !format.opaque {
-						checkJWTAudience(t, tokens, `"`+fapitest.Issuer+`"`)
-					}
-					// Addressed to the issuer: accepted there, refused by a
-					// resource server that requires its own identifier,
-					// and accepted by one migrating with
-					// AcceptIssuerAudience.
-					verifyAt(t, h, h.Resource, tokens)
-					refuseAtResource(t, h, tokens, serverresource.Options{Resource: payments})
-					v, err := h.NewResourceVerifier(serverresource.Options{Resource: payments, AcceptIssuerAudience: true})
-					if err != nil {
-						t.Fatalf("NewResourceVerifier(AcceptIssuerAudience): %v", err)
-					}
-					verifyAt(t, h, v, tokens)
-				})
+				t.Run("several resources", func(t *testing.T) { checkSeveralResources(t, h, format.opaque) })
+				t.Run("one resource", func(t *testing.T) { checkOneResource(t, h, format.opaque) })
+				t.Run("no resource", func(t *testing.T) { checkNoResource(t, h, format.opaque) })
 			})
 		}
 	}
+}
+
+// checkSeveralResources: a token for two resources names both, and is
+// accepted at each and refused everywhere else.
+func checkSeveralResources(t *testing.T, h *fapitest.Harness, opaque bool) {
+	tokens := runResourceFlow(t, h, []string{payments, accounts})
+	if !slices.Equal(tokens.Resource, []string{payments, accounts}) {
+		t.Errorf("TokenSet.Resource = %q, want both requested resources", tokens.Resource)
+	}
+	if !opaque {
+		checkJWTAudience(t, tokens, `["`+payments+`","`+accounts+`"]`)
+	}
+	checkVerifierAudience(t, h, tokens, payments, []string{payments, accounts})
+	checkVerifierAudience(t, h, tokens, accounts, []string{payments, accounts})
+	refuseAtResource(t, h, tokens, serverresource.Options{Resource: credentials})
+	refuseAtResource(t, h, tokens, serverresource.Options{Resource: unlisted})
+	refuseAtResource(t, h, tokens, serverresource.Options{Resource: credentials, AcceptIssuerAudience: true})
+	// The issuer's own resource server (UserInfo, say)
+	// isn't one of them either.
+	refuseAt(t, h, h.Resource, tokens)
+}
+
+// checkOneResource: a token for one resource names it as a string.
+func checkOneResource(t *testing.T, h *fapitest.Harness, opaque bool) {
+	tokens := runResourceFlow(t, h, []string{credentials})
+	if !opaque {
+		checkJWTAudience(t, tokens, `"`+credentials+`"`)
+	}
+	checkVerifierAudience(t, h, tokens, credentials, []string{credentials})
+	refuseAtResource(t, h, tokens, serverresource.Options{Resource: payments})
+}
+
+// checkNoResource: a token for no resource is addressed to the issuer.
+func checkNoResource(t *testing.T, h *fapitest.Harness, opaque bool) {
+	tokens, err := h.RunAuthorizationCodeFlow(context.Background(), offlineScope)
+	if err != nil {
+		t.Fatalf("RunAuthorizationCodeFlow: %v", err)
+	}
+	if !opaque {
+		checkJWTAudience(t, tokens, `"`+fapitest.Issuer+`"`)
+	}
+	// Addressed to the issuer: accepted there, refused by a
+	// resource server that requires its own identifier,
+	// and accepted by one migrating with
+	// AcceptIssuerAudience.
+	verifyAt(t, h, h.Resource, tokens)
+	refuseAtResource(t, h, tokens, serverresource.Options{Resource: payments})
+	v, err := h.NewResourceVerifier(serverresource.Options{Resource: payments, AcceptIssuerAudience: true})
+	if err != nil {
+		t.Fatalf("NewResourceVerifier(AcceptIssuerAudience): %v", err)
+	}
+	verifyAt(t, h, v, tokens)
 }
 
 // TestResourceIndicatorsRefresh narrows a refresh to some of the
@@ -145,25 +151,34 @@ func TestResourceIndicatorsRefresh(t *testing.T) {
 				t.Errorf("RefreshTokens(the other original resource): %v", err)
 			}
 
-			// Widening: the client refuses a resource the tokens weren't
-			// issued for, without asking the server...
-			_, err = h.Client.RefreshTokens(ctx, client.RefreshTokenRequest{Tokens: first, Resource: []string{payments, credentials}})
-			var cerr *client.Error
-			if !errors.As(err, &cerr) {
-				t.Fatalf("RefreshTokens(widened) = %v, want a *client.Error", err)
-			}
-			if _, fromServer := cerr.ServerResponse(); fromServer {
-				t.Errorf("RefreshTokens(widened) was refused by the server, want the client to refuse it before sending")
-			}
-
-			// ...and the server refuses one sent anyway, from a token
-			// set edited to claim a resource the grant never had.
-			edited := first
-			edited.Resource = []string{payments, accounts, credentials}
-			_, err = h.Client.RefreshTokens(ctx, client.RefreshTokenRequest{Tokens: edited})
-			wantServerError(t, "RefreshTokens(edited token set)", err, "invalid_target")
+			checkRefreshCantWiden(t, h, first)
 		})
 	}
+}
+
+// checkRefreshCantWiden shows a refresh of first, issued for payments
+// and accounts, can't add a resource.
+func checkRefreshCantWiden(t *testing.T, h *fapitest.Harness, first client.TokenSet) {
+	t.Helper()
+	ctx := context.Background()
+
+	// Widening: the client refuses a resource the tokens weren't
+	// issued for, without asking the server...
+	_, err := h.Client.RefreshTokens(ctx, client.RefreshTokenRequest{Tokens: first, Resource: []string{payments, credentials}})
+	var cerr *client.Error
+	if !errors.As(err, &cerr) {
+		t.Fatalf("RefreshTokens(widened) = %v, want a *client.Error", err)
+	}
+	if _, fromServer := cerr.ServerResponse(); fromServer {
+		t.Errorf("RefreshTokens(widened) was refused by the server, want the client to refuse it before sending")
+	}
+
+	// ...and the server refuses one sent anyway, from a token
+	// set edited to claim a resource the grant never had.
+	edited := first
+	edited.Resource = []string{payments, accounts, credentials}
+	_, err = h.Client.RefreshTokens(ctx, client.RefreshTokenRequest{Tokens: edited})
+	wantServerError(t, "RefreshTokens(edited token set)", err, "invalid_target")
 }
 
 // TestResourceIndicatorsRefused surfaces the server's invalid_target

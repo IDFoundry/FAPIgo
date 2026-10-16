@@ -19,6 +19,12 @@ import (
 	"github.com/idfoundry/fapigo/storage"
 )
 
+// accessTokenInvalidDescription is the error_description of an
+// invalid_token for a token this server won't accept: a bad signature or
+// claims, an opaque token it doesn't know, or an audience other than
+// this server's.
+const accessTokenInvalidDescription = "access token is invalid"
+
 // ResolveAccessTokenRequest is the input to
 // AccessTokenResolver.ResolveAccessToken.
 type ResolveAccessTokenRequest struct {
@@ -268,7 +274,7 @@ func (j JWTAccessTokens) ResolveAccessToken(ctx context.Context, req ResolveAcce
 		}
 	}
 	if validErr != nil {
-		return ResolvedAccessToken{}, newError(ErrorInvalidToken, 401, "access token is invalid", validErr)
+		return ResolvedAccessToken{}, newError(ErrorInvalidToken, 401, accessTokenInvalidDescription, validErr)
 	}
 
 	var scopes []string
@@ -364,7 +370,7 @@ func (o OpaqueAccessTokens) ResolveAccessToken(ctx context.Context, req ResolveA
 		return ResolvedAccessToken{}, newError(ErrorServerError, 500, "access token record is malformed", audErr)
 	}
 	if !o.acceptsAudience(audience) {
-		return ResolvedAccessToken{}, newError(ErrorInvalidToken, 401, "access token is invalid", errors.New("audience mismatch"))
+		return ResolvedAccessToken{}, newError(ErrorInvalidToken, 401, accessTokenInvalidDescription, errors.New("audience mismatch"))
 	}
 	return ResolvedAccessToken{
 		Subject:         looked.Subject,
@@ -421,7 +427,7 @@ func lookupError(err error) *Error {
 	if storeUnavailable(err) {
 		return newError(ErrorServerError, 500, "failed to look up the access token", err)
 	}
-	return newError(ErrorInvalidToken, 401, "access token is invalid", err)
+	return newError(ErrorInvalidToken, 401, accessTokenInvalidDescription, err)
 }
 
 // storeUnavailable reports whether err is a store failing to answer

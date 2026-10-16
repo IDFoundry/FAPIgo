@@ -71,16 +71,23 @@ func TestOpaqueAccessTokensAudience(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ResolveAccessToken: %v", err)
 			}
-			if !reflect.DeepEqual(resolved.Audience, tc.wantAud) {
-				t.Errorf("Audience = %v, want %v", resolved.Audience, tc.wantAud)
-			}
-			if _, ok := resolved.Claims["aud"]; ok {
-				t.Error(`Claims has "aud", want it only as Audience`)
-			}
-			if string(resolved.Claims["custom"]) != `"x"` {
-				t.Errorf("Claims = %v, want custom kept", resolved.Claims)
-			}
+			checkResolvedOpaqueAudience(t, resolved, tc.wantAud)
 		})
+	}
+}
+
+// checkResolvedOpaqueAudience checks resolved has wantAud as its
+// Audience, kept out of its claims, and the record's other claim kept.
+func checkResolvedOpaqueAudience(t *testing.T, resolved resource.ResolvedAccessToken, wantAud []string) {
+	t.Helper()
+	if !reflect.DeepEqual(resolved.Audience, wantAud) {
+		t.Errorf("Audience = %v, want %v", resolved.Audience, wantAud)
+	}
+	if _, ok := resolved.Claims["aud"]; ok {
+		t.Error(`Claims has "aud", want it only as Audience`)
+	}
+	if string(resolved.Claims["custom"]) != `"x"` {
+		t.Errorf("Claims = %v, want custom kept", resolved.Claims)
 	}
 }
 

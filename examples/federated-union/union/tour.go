@@ -59,6 +59,7 @@ func (c *console) tour() []tourStep {
 		scenes[row.Key] = &row
 	}
 	openBank := tourLink{"Open the bank", bank}
+	openTelecom := tourLink{"Open the telecom", telco}
 	return []tourStep{
 		{
 			Title: "Sign in across a border",
@@ -85,7 +86,7 @@ func (c *console) tour() []tourStep {
 			Do:    "Sign in with EastID as the same citizen at the bank and at Eastmark Telecom, then look at Pairwise subjects below.",
 			Notice: "EastID gave each service its own sub for that citizen, so the two can't link them by sub. Each service asked for pairwise subs in its metadata; " +
 				"its sector is its own Entity Identifier's host. The two services can still link the citizen by any claim they both receive, such as their name.",
-			Links: []tourLink{openBank, {"Open the telecom", telco}},
+			Links: []tourLink{openBank, openTelecom},
 		},
 		{
 			Title:  "Check an assurance mark",
@@ -104,7 +105,7 @@ func (c *console) tour() []tourStep {
 			Title:  "Suspend a country",
 			Do:     "Turn off the forgery, turn this scene on, then sign in with EastID at the bank and at Eastmark Telecom.",
 			Notice: "The bank can no longer reach EastID through the Union. Eastmark Telecom still can: it also trusts Eastmark's own authority directly.",
-			Links:  []tourLink{openBank, {"Open the telecom", telco}},
+			Links:  []tourLink{openBank, openTelecom},
 			Scene:  scenes["suspend"],
 		},
 		{
@@ -121,7 +122,7 @@ func (c *console) tour() []tourStep {
 			Title:  "Claim another service's sector",
 			Do:     "Turn the scene on, then sign in with EastID at Eastmark Telecom.",
 			Notice: "The telecom now publishes the bank's redirect URI, hoping to be given the bank's pairwise subs. EastID refuses to register it: a federation service's redirect URIs must be on its own Entity Identifier's host, which is its sector.",
-			Links:  []tourLink{{"Open the telecom", telco}},
+			Links:  []tourLink{openTelecom},
 			Scene:  scenes["sector"],
 		},
 	}

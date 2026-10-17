@@ -2,9 +2,12 @@ package client
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"slices"
 	"strings"
+
+	"github.com/idfoundry/fapigo/internal/resourceindicator"
 )
 
 // resourceParameter is RFC 8707's "resource" parameter: the resource
@@ -17,24 +20,24 @@ const resourceParameter = "resource"
 // again. checkResources refuses a resource containing it.
 const resourceSeparator = "\n"
 
-// checkResources refuses resources that RFC 8707 §2 doesn't allow as
-// resource indicators: each must be an absolute URI without a fragment,
-// none may be empty or repeated, and none may contain whitespace or
-// control characters (which no valid URI has).
+// checkResources refuses resources the server would: more than
+// resourceindicator.MaxPerRequest of them, an empty or repeated one, or
+// one resourceindicator.Check refuses, which the server applies too: an
+// absolute URI (RFC 8707 §2) without a fragment, valid UTF-8, at most
+// resourceindicator.MaxLength bytes, and without whitespace or control
+// characters (resourceSeparator among them). Invalid UTF-8 in particular
+// wouldn't survive the request object's JSON, which replaces it with
+// U+FFFD, so the server would read a different resource.
 func checkResources(resources []string) *Error {
+	if len(resources) > resourceindicator.MaxPerRequest {
+		return newError(ErrorInvalidRequest, fmt.Sprintf("at most %d resource indicators may be sent", resourceindicator.MaxPerRequest), nil)
+	}
 	for i, r := range resources {
 		if r == "" {
 			return newError(ErrorInvalidRequest, "a resource indicator is empty", nil)
 		}
-		if strings.ContainsFunc(r, func(c rune) bool { return c <= ' ' || c == 0x7f }) {
-			return newError(ErrorInvalidRequest, "a resource indicator contains whitespace or a control character", nil)
-		}
-		u, err := url.Parse(r)
-		if err != nil || !u.IsAbs() {
-			return newError(ErrorInvalidRequest, "a resource indicator isn't an absolute URI (RFC 8707 §2)", err)
-		}
-		if strings.Contains(r, "#") {
-			return newError(ErrorInvalidRequest, "a resource indicator has a fragment, which RFC 8707 §2 forbids", nil)
+		if err := resourceindicator.Check(r); err != nil {
+			return newError(ErrorInvalidRequest, "a resource indicator isn't one RFC 8707 §2 allows", err)
 		}
 		if slices.Contains(resources[:i], r) {
 			return newError(ErrorInvalidRequest, "a resource indicator is repeated", nil)

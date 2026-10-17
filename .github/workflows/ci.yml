@@ -192,6 +192,12 @@ jobs:
           check-latest: true
           cache-dependency-path: go.mod
 
+      # fuzz.yml lists its targets by hand, and a target missing there
+      # still passes here (go test runs its seeds) without ever being
+      # fuzzed, so a mismatch fails this job instead.
+      - name: Check fuzz.yml lists every fuzz target
+        run: .github/scripts/check-fuzz-matrix.sh
+
       # Config lives in .golangci.yml — gosec (security), bodyclose,
       # plus golangci-lint's own "standard" set (errcheck, staticcheck,
       # govet, ineffassign, unused, gosimple). gofmt is enforced

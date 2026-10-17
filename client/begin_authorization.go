@@ -118,7 +118,10 @@ type BeginAuthorizationRequest struct {
 	// server that supports resource indicators issues an access token
 	// for just those resource servers; one that doesn't ignores them.
 	// Set it here rather than as an Extensions value named "resource",
-	// which BeginAuthorization refuses alongside it.
+	// which BeginAuthorization refuses alongside it. It's checked before
+	// anything is sent, as a FAPIgo server checks it: at most 16 entries,
+	// none empty or repeated, each valid UTF-8 of at most 2048 bytes,
+	// with no whitespace or control characters.
 	Resource []string
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -275,6 +276,16 @@ func TestRequestClientCredentialsTokenSendsResources(t *testing.T) {
 	}
 }
 
+// seventeenResources returns one more distinct resource than a request
+// may name.
+func seventeenResources() []string {
+	resources := make([]string, 17)
+	for i := range resources {
+		resources[i] = fmt.Sprintf("https://rs%d.example.com", i)
+	}
+	return resources
+}
+
 // TestRequestClientCredentialsTokenRefusesInvalidResources confirms each
 // resource is checked as BeginAuthorizationRequest.Resource is, before
 // anything is sent.
@@ -285,6 +296,10 @@ func TestRequestClientCredentialsTokenRefusesInvalidResources(t *testing.T) {
 		"fragment":  {"https://rs.example.com#x"},
 		"repeated":  {"https://rs.example.com", "https://rs.example.com"},
 		"separator": {"https://rs.example.com\nhttps://other.example.com"},
+		// What the server refuses too (resourceindicator.Check).
+		"invalid UTF-8": {"https://rs.example.com/\xff"},
+		"too long":      {"https://rs.example.com/" + strings.Repeat("a", 2048)},
+		"too many":      seventeenResources(),
 	} {
 		t.Run(name, func(t *testing.T) {
 			c, as := newTestClientForClientCredentials(t, nil)

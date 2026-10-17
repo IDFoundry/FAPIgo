@@ -26,6 +26,14 @@ name: Fuzz
 # regardless keeps that harness quirk from discarding a night's
 # progress.
 #
+# That quirk alone doesn't fail the job either:
+# .github/scripts/fuzz-target.sh reports it as a warning when go test
+# failed, said "context deadline exceeded", panicked nowhere and wrote no
+# new input under testdata/fuzz/. Every other failure still fails, and a
+# real finding always writes its input there, so it can't pass as the
+# quirk. Before this, the quirk turned roughly one nightly run in four
+# red, which made a real red run easy to dismiss.
+#
 # Informational only: nothing in branch protection depends on this
 # workflow, since it never runs against a PR. A found failure fails the
 # job and uploads the failing input as a build artifact (go test -fuzz
@@ -115,6 +123,8 @@ jobs:
             name: FuzzParseIDToken
           - pkg: ./extension
             name: FuzzRARRegistryParse
+          - pkg: ./extension
+            name: FuzzParseGrantedRAR
           - pkg: ./internal/par
             name: FuzzDecodeResult
           - pkg: ./internal/par
@@ -135,6 +145,8 @@ jobs:
             name: FuzzDecodeBackchannelAuthenticationResponse
           - pkg: .
             name: FuzzParseEndpointURL
+          - pkg: .
+            name: FuzzParseRedirectURL
           - pkg: ./server
             name: FuzzParseRequestedClaimNames
           - pkg: ./server
@@ -161,8 +173,12 @@ jobs:
             name: FuzzExtensionValueReadersAgree
           - pkg: ./internal/sealedcookie
             name: FuzzJarOpen
+          - pkg: ./server/interactioncookie
+            name: FuzzRead
           - pkg: ./client
             name: FuzzOpenBackchannelSession
+          - pkg: ./client
+            name: FuzzOpenTokenSet
           - pkg: ./federation
             name: FuzzEntityIDHostAgreement
           - pkg: .
@@ -181,6 +197,12 @@ jobs:
             name: FuzzReversibleWithRoundTrip
           - pkg: ./storage
             name: FuzzDerivedSector
+          - pkg: ./client
+            name: FuzzResourceIndicatorAgreement
+          - pkg: ./server
+            name: FuzzResourcesFromParameters
+          - pkg: ./server
+            name: FuzzSplitResourceParameters
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -205,8 +227,11 @@ jobs:
           restore-keys: |
             fuzz-corpus-${{ matrix.target.pkg }}-${{ matrix.target.name }}-
 
+      # go test -fuzz, through a wrapper that passes (with a warning) only
+      # the known "context deadline exceeded" harness quirk: a failure
+      # with no failing input written, no panic and nothing else wrong.
       - name: go test -fuzz=${{ matrix.target.name }}
-        run: go test ${{ matrix.target.pkg }} -run='^$' -fuzz='^${{ matrix.target.name }}$' -fuzztime=5m
+        run: .github/scripts/fuzz-target.sh '${{ matrix.target.pkg }}' '${{ matrix.target.name }}' 5m
 
       - name: Save fuzz corpus
         if: always()

@@ -461,7 +461,6 @@ func TestRevokeTokenWithoutARevocationReader(t *testing.T) {
 	if code := serverErrorCode(t, other.revoke(formParam("token", refreshToken))); code != server.ErrorServerError {
 		t.Fatalf("RevokeToken without a revocation reader = code %q, want server_error", code)
 	}
-	owner.pops = other.pops // the instance's PoPs must stay unique across both servers
 	if _, err := owner.refresh(refreshToken); err != nil {
 		t.Fatalf("refresh after the refused revocation: %v, want the token still usable", err)
 	}

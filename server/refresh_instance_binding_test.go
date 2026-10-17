@@ -3,9 +3,9 @@ package server_test
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"testing"
 	"time"
 
@@ -22,13 +22,15 @@ type attestedInstance struct {
 	h           harness
 	attesterKey *ecdsa.PrivateKey
 	instanceKey *ecdsa.PrivateKey
-	pops        int
 }
 
 // headers returns a fresh attestation and PoP for this instance.
 func (i *attestedInstance) headers() (attestations, pops []string) {
-	i.pops++
-	jti := fmt.Sprintf("jti-%p-%d", i.instanceKey, i.pops)
+	// A random jti, unique across every instance in a test: one derived
+	// from the instance key's address could repeat once the garbage
+	// collector reused that address for a new instance's key, and the
+	// shared replay store would then rightly refuse the second PoP.
+	jti := "jti-" + rand.Text()
 	return []string{createAttestationHeader(i.t, i.attesterKey, testClientID.String(), &i.instanceKey.PublicKey, i.h.now, time.Hour)},
 		[]string{createAttestationPoPHeader(i.t, i.instanceKey, testClientID.String(), testIssuer, jti, i.h.now)}
 }

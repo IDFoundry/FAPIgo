@@ -18,9 +18,10 @@ fuzztime=$3
 corpus="$pkg/testdata/fuzz/$target"
 
 list_inputs() {
-	if [ -d "$corpus" ]; then
+	if [[ -d "$corpus" ]]; then
 		find "$corpus" -type f | sort
 	fi
+	return 0
 }
 
 log=$(mktemp)
@@ -31,11 +32,11 @@ go test "$pkg" -run='^$' -fuzz="^${target}\$" -fuzztime="$fuzztime" 2>&1 | tee "
 status=${PIPESTATUS[0]}
 after=$(list_inputs)
 
-if [ "$status" -eq 0 ]; then
+if [[ "$status" -eq 0 ]]; then
 	exit 0
 fi
 
-if [ "$before" = "$after" ] &&
+if [[ "$before" = "$after" ]] &&
 	grep -q 'context deadline exceeded' "$log" &&
 	! grep -qE 'Failing input written|^panic:|fatal error:' "$log"; then
 	echo "::warning title=$target::go test -fuzz stopped with \"context deadline exceeded\" at -fuzztime and wrote no failing input: the known go test -fuzz harness quirk, not a finding."

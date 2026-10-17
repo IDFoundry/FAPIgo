@@ -34,24 +34,24 @@ extra=$(comm -13 "$code" "$matrix")
 dupes=$(awk '{print $2}' "$code" | sort | uniq -d)
 
 status=0
-if [ -n "$missing" ]; then
+if [[ -n "$missing" ]]; then
 	echo "Fuzz targets missing from $workflow's matrix (pkg name):"
 	echo "$missing" | sed 's/^/  /'
 	status=1
 fi
-if [ -n "$extra" ]; then
+if [[ -n "$extra" ]]; then
 	echo "Matrix entries in $workflow with no matching fuzz target (pkg name):"
 	echo "$extra" | sed 's/^/  /'
 	status=1
 fi
-if [ -n "$dupes" ]; then
+if [[ -n "$dupes" ]]; then
 	# go test -fuzz='^Name$' runs per package, but a name shared across
 	# packages makes the cache keys and artifact names ambiguous.
 	echo "Fuzz target names defined in more than one package:"
 	echo "$dupes" | sed 's/^/  /'
 	status=1
 fi
-if [ "$status" -eq 0 ]; then
+if [[ "$status" -eq 0 ]]; then
 	echo "fuzz.yml's matrix matches all $(wc -l <"$code" | tr -d ' ') fuzz targets."
 fi
 exit "$status"

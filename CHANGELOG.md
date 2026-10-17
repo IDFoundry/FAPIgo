@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.57.1](https://github.com/IDFoundry/FAPIgo/compare/v0.57.0...v0.57.1) (2026-10-17)
+
+
+### Bug Fixes
+
+* **client:** check resource indicators as the server does ([11dfb70](https://github.com/IDFoundry/FAPIgo/commit/11dfb70dd3f2053034a9b171d029e18e1b355253))
+* **server:** refuse a resource indicator that JSON decoding would alter ([aa03999](https://github.com/IDFoundry/FAPIgo/commit/aa0399963dd4b229e712ba10bd10a7c5916b91f9))
+
 ## [0.57.0](https://github.com/IDFoundry/FAPIgo/compare/v0.56.0...v0.57.0) (2026-10-15)
 
 

@@ -77,6 +77,10 @@ func New(cfg Config, deps Dependencies) (*Server, error) {
 		}
 		// Checked by validateDependencies (validateSubjects).
 		automaticSubjectTypes, automaticDefaultSubjectType, _ := automaticRegistrationSubjects(cfg, deps.PairwiseSubjects)
+		automaticAuthMethods, err := automaticClientAuthMethods(cfg.AutomaticRegistration.AllowedClientAuthMethods, deps.ClientCertificateTrust)
+		if err != nil {
+			return nil, fmt.Errorf("server: config: automatic_registration: %w", err)
+		}
 		automaticClients, err := federation.NewAutomaticClientRepository(deps.Clients, resolver, deps.FederationHTTP, federation.AutomaticRegistrationConfig{
 			AllowedScopes:                cfg.AutomaticRegistration.AllowedScopes,
 			AuthorizationDetailsTypes:    cfg.AutomaticRegistration.AuthorizationDetailsTypes,
@@ -84,7 +88,7 @@ func New(cfg Config, deps Dependencies) (*Server, error) {
 			FailureCacheAge:              cfg.AutomaticRegistration.FailureCacheAge,
 			AllowsClientCredentialsGrant: cfg.AutomaticRegistration.AllowsClientCredentialsGrant,
 			AllowsCIBA:                   cfg.AutomaticRegistration.AllowsCIBA,
-			AllowedClientAuthMethods:     cfg.AutomaticRegistration.AllowedClientAuthMethods,
+			AllowedClientAuthMethods:     automaticAuthMethods,
 			OnResolutionFailure:          cfg.AutomaticRegistration.OnResolutionFailure,
 			ClientAssertionAlgorithms:    cfg.Algorithms.ClientAssertion,
 			SubjectTypes:                 automaticSubjectTypes,
@@ -582,7 +586,7 @@ func validateRequiredDependencies(deps Dependencies) error {
 		return fmt.Errorf("server: dependencies: revocation is required (pass NoRevocation{} to explicitly decline)")
 	}
 	if deps.ClientCertificateTrust == nil {
-		return fmt.Errorf("server: dependencies: client certificate trust is required (pass TrustedClientCAs{...} or NoClientCertificateChainTrust{} to explicitly decline this package's own chain check)")
+		return fmt.Errorf("server: dependencies: client certificate trust is required (pass NoPKIClientAuthentication{} when no client uses tls_client_auth, TrustedClientCAs{...}, or NoClientCertificateChainTrust{} to explicitly decline this package's own chain check)")
 	}
 	if err := deps.ClientCertificateTrust.validate(); err != nil {
 		return fmt.Errorf("server: dependencies: client certificate trust: %w", err)

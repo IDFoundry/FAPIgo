@@ -193,10 +193,12 @@ type Dependencies struct {
 	// ClientAuthMethodTLSClientAuth/SAN* field-match check (subject DN,
 	// SAN DNS/URI/IP/email — see their own doc comments in
 	// storage.ClientAuthMethod). There is no default: pass
-	// TrustedClientCAs{Roots: ..., Revocation: ...} to have this
-	// package verify the chain and check it for revocation itself, or
-	// NoClientCertificateChainTrust{} to explicitly decline — see both
-	// types' own doc comments.
+	// NoPKIClientAuthentication{} when no client uses those methods
+	// (they're then refused), TrustedClientCAs{Roots: ..., Revocation:
+	// ...} to have this package verify the chain and check it for
+	// revocation itself, or NoClientCertificateChainTrust{} to explicitly
+	// decline the check because the deployment's own TLS termination
+	// verifies the chain — see each type's own doc comment.
 	// ClientAuthMethodSelfSignedTLSClientAuth is unaffected either way:
 	// its thumbprint match already cryptographically binds the exact
 	// certificate, so it needs no chain trust to begin with.

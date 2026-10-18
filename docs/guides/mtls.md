@@ -80,8 +80,14 @@ srv, err := server.New(server.Config{
   `Revocation` (CRLs, your own OCSP check, or an explicit
   `NoClientCertificateRevocationCheck{}`), and
   `NoClientCertificateChainTrust{}` declares that something before
-  FAPIgo already verified the chain (your TLS listener's `ClientCAs`, or
-  a gateway). A missing or stale CRL fails closed.
+  FAPIgo already verified the chain (your TLS listener's `ClientCAs` with
+  `RequireAndVerifyClientCert`, or a gateway). A missing or stale CRL
+  fails closed. A server whose clients use only
+  `self_signed_tls_client_auth`, or no certificate at all, passes
+  `NoPKIClientAuthentication{}`, which refuses `tls_client_auth`
+  outright: with `NoClientCertificateChainTrust{}` and no real chain
+  check, anyone could present a self-signed certificate naming a
+  client's subject.
 - **The certificate.** The `…FromHTTP` request constructors read it from
   the request's own TLS connection (`PeerCertificateFromHTTP`). Behind a
   proxy that terminates TLS, set it yourself, with

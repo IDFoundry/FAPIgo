@@ -154,15 +154,17 @@ func (w *World) newIdentityProvider(c country, ta *entity) (*identityProvider, e
 	}
 	idp := &identityProvider{country: c, fedKey: fedKey, w: w, interaction: interaction}
 	deps := server.Dependencies{
-		Clients:                memstore.NewClientRepository(nil),
-		Transactions:           memstore.NewTransactionStore(),
-		Grants:                 memstore.NewGrantStore(),
-		Replay:                 memstore.NewReplayStore(),
-		ClientKeys:             clientKeys,
-		Keys:                   manager,
-		AccessTokens:           accessTokens,
-		Revocation:             memstore.NewRevocationStore(),
-		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		Clients:      memstore.NewClientRepository(nil),
+		Transactions: memstore.NewTransactionStore(),
+		Grants:       memstore.NewGrantStore(),
+		Replay:       memstore.NewReplayStore(),
+		ClientKeys:   clientKeys,
+		Keys:         manager,
+		AccessTokens: accessTokens,
+		Revocation:   memstore.NewRevocationStore(),
+		// No client authenticates with a CA-issued certificate
+		// (tls_client_auth), so refuse that method outright.
+		ClientCertificateTrust: server.NoPKIClientAuthentication{},
 		Clock:                  server.SystemClock{},
 		Random:                 rand.Reader,
 		IdentityClaims:         idp,

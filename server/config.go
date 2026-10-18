@@ -627,8 +627,14 @@ type AutomaticRegistrationConfig struct {
 	// AllowedClientAuthMethods restricts which token_endpoint_auth_method
 	// an automatically-registered client may declare — see
 	// federation.AutomaticRegistrationConfig.AllowedClientAuthMethods.
-	// Empty (the default) permits every method. Statically registered
-	// clients are unaffected.
+	// Empty (the default) permits every method, except that under
+	// Dependencies.ClientCertificateTrust NoPKIClientAuthentication{}
+	// the CA-issued certificate methods (tls_client_auth and its SAN*
+	// siblings) are never registered, and naming one here is refused.
+	// Under NoClientCertificateChainTrust{} they are registered from an
+	// RP's metadata, whose subject or SAN is public, so they're safe only
+	// when the deployment's TLS termination verifies the chain.
+	// Statically registered clients are unaffected.
 	AllowedClientAuthMethods []storage.ClientAuthMethod
 
 	// SubjectTypes, if set, narrows the kinds of sub automatically

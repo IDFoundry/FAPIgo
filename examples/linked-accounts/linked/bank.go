@@ -147,8 +147,10 @@ func (w *World) newBank(apps apps) (*bank, error) {
 		AccessTokens: accessTokens,
 		// The revocation store the bank and its API share: RevokeGrant
 		// writes to it, and both read it.
-		Revocation:             memstore.NewRevocationStore(),
-		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		Revocation: memstore.NewRevocationStore(),
+		// No client authenticates with a CA-issued certificate
+		// (tls_client_auth), so refuse that method outright.
+		ClientCertificateTrust: server.NoPKIClientAuthentication{},
 		Clock:                  w.clock,
 		Random:                 rand.Reader,
 		// Each client's types are its registration's; no further rule.

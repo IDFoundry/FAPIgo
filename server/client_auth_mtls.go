@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	"fmt"
 	"net"
 	"slices"
 
@@ -159,6 +160,38 @@ func isCertificateAuthMethod(method storage.ClientAuthMethod) bool {
 		return true
 	}
 	return false
+}
+
+// isPKICertificateAuthMethod reports whether method authenticates with a
+// CA-issued certificate (RFC 8705 §2.1), whose chain
+// Dependencies.ClientCertificateTrust decides how to trust.
+func isPKICertificateAuthMethod(method storage.ClientAuthMethod) bool {
+	return isCertificateAuthMethod(method) && method != storage.ClientAuthMethodSelfSignedTLSClientAuth
+}
+
+// automaticClientAuthMethods is the client authentication methods
+// automatic registration may register: allowed as configured, or, under
+// NoPKIClientAuthentication, without the CA-issued certificate methods
+// it refuses. An empty allowed list (every method) becomes every
+// method but those; one naming such a method contradicts the trust
+// and is refused.
+func automaticClientAuthMethods(allowed []storage.ClientAuthMethod, trust ClientCertificateTrust) ([]storage.ClientAuthMethod, error) {
+	if _, noPKI := trust.(NoPKIClientAuthentication); !noPKI {
+		return allowed, nil
+	}
+	if len(allowed) == 0 {
+		return []storage.ClientAuthMethod{
+			storage.ClientAuthMethodPrivateKeyJWT,
+			storage.ClientAuthMethodSelfSignedTLSClientAuth,
+			storage.ClientAuthMethodAttestation,
+		}, nil
+	}
+	for _, method := range allowed {
+		if isPKICertificateAuthMethod(method) {
+			return nil, fmt.Errorf("allowed_client_auth_methods names %v, which Dependencies.ClientCertificateTrust NoPKIClientAuthentication{} refuses", method)
+		}
+	}
+	return allowed, nil
 }
 
 // authenticateClientViaCertificate authenticates a client identified by a

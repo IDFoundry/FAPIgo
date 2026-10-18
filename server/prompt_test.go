@@ -3,10 +3,13 @@ package server_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/idfoundry/fapigo/internal/clientassertion"
 	"github.com/idfoundry/fapigo/server"
 )
 
@@ -69,6 +72,69 @@ func TestPushAuthorizationRequestRejectsPromptNoneWithAnotherValue(t *testing.T)
 				HTTP: server.FormRequest{Parameters: plainFormParameters(t, h.clientAssertion(t), map[string]string{"prompt": value})},
 			}); err != nil {
 				t.Fatalf("prompt=%q: %v", value, err)
+			}
+		})
+	}
+}
+
+// TestPushAuthorizationRequestBoundsPrompt covers the bound on "prompt":
+// a pushed request carrying more than 16 distinct values, or more than
+// 256 bytes, is refused, in a plain form or a request object, so a
+// stored request can't make every later GET of the authorization
+// endpoint parse an arbitrarily long list. Repeats of one value within
+// the byte bound are still accepted.
+func TestPushAuthorizationRequestBoundsPrompt(t *testing.T) {
+	distinct := func(n int) string {
+		values := make([]string, n)
+		for i := range values {
+			values[i] = fmt.Sprintf("v%d", i)
+		}
+		return strings.Join(values, " ")
+	}
+	push := func(t *testing.T, h harness, prompt string, requestObject bool) error {
+		t.Helper()
+		if !requestObject {
+			_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+				HTTP: server.FormRequest{Parameters: plainFormParameters(t, h.clientAssertion(t), map[string]string{"prompt": prompt})},
+			})
+			return err
+		}
+		params := standardAuthParams(t)
+		params["prompt"] = jsonRaw(t, prompt)
+		_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+			HTTP: server.FormRequest{Parameters: []server.FormParameter{
+				formParam("client_assertion", h.clientAssertion(t)),
+				formParam("client_assertion_type", clientassertion.AssertionType),
+				formParam("request", h.requestObject(t, params)),
+			}},
+		})
+		return err
+	}
+	for _, requestObject := range []bool{false, true} {
+		t.Run(fmt.Sprintf("request object %v", requestObject), func(t *testing.T) {
+			h := newHarness(t, server.ProfileFAPISecurity, true)
+			for name, prompt := range map[string]string{
+				"17 distinct values": distinct(17),
+				"257 bytes":          strings.Repeat("a", 257),
+				"20000 values":       distinct(20000),
+			} {
+				// A request object that long is already refused by its
+				// own size bound, as invalid_request_object.
+				want := server.ErrorInvalidRequest
+				if requestObject && len(prompt) > 4096 {
+					want = server.ErrorInvalidRequestObject
+				}
+				if code := serverErrorCode(t, push(t, h, prompt, requestObject)); code != want {
+					t.Errorf("%s: error code %q, want %q", name, code, want)
+				}
+			}
+			for name, prompt := range map[string]string{
+				"16 distinct values":       distinct(16),
+				"repeats within 256 bytes": strings.TrimSpace(strings.Repeat("login ", 42)),
+			} {
+				if err := push(t, h, prompt, requestObject); err != nil {
+					t.Errorf("%s: %v, want accepted", name, err)
+				}
 			}
 		})
 	}

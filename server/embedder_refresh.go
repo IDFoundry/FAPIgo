@@ -21,7 +21,7 @@ type IssueRefreshTokenRequest struct {
 	// whose Client was changed is refused, and so is one whose
 	// attestation expired more than Limits.MaxClockSkew ago, kept from an
 	// earlier request. The refresh token is bound to its
-	// Client Instance Key (draft-ietf-oauth-attestation-based-client-auth-07
+	// Client Instance Key (draft-ietf-oauth-attestation-based-client-auth-12
 	// §10.3): RefreshAccessToken redeems it only with an attestation for
 	// that same key.
 	Client AttestedClient

@@ -18,7 +18,7 @@ import (
 const jtiSize = 16
 
 // PoPCreateRequest describes one Client Attestation PoP JWT to create
-// (draft-07 §5.2). The accompanying Client Attestation JWT itself is
+// (draft-12 §5.1). The accompanying Client Attestation JWT itself is
 // never built by this package — it's an opaque, pre-issued, reusable
 // credential obtained out of band from an Attester (§10.2); only the
 // PoP is freshly built and signed per request.
@@ -34,11 +34,15 @@ type PoPCreateRequest struct {
 	Algorithm fapi.SignatureAlgorithm
 
 	// ClientID is the "iss" claim — must equal the accompanying Client
-	// Attestation JWT's own "sub" claim (draft-07 §9 rule 13).
+	// Attestation JWT's own "sub" claim (draft-07 §5.2 rule 4).
+	// Draft-08 removed iss from the PoP, but a server following it
+	// ignores claims it doesn't understand (draft-12 §5.1 rule 1), so
+	// it is still sent: the same PoP then suits a server following
+	// either draft.
 	ClientID fapi.ClientID
 
 	// Audience is the "aud" claim — the authorization server's own RFC
-	// 8414 issuer identifier. draft-07 grants this JWT no endpoint-URL
+	// 8414 issuer identifier. The draft grants this JWT no endpoint-URL
 	// carve-out the way RFC 7523 grants a client assertion (see
 	// PoPVerifyPolicy.ExpectedAudience's own doc comment).
 	Audience string
@@ -53,12 +57,13 @@ type PoPCreateRequest struct {
 	// crypto/rand.Reader is used.
 	Random io.Reader
 
-	// Challenge, if non-empty, is the PoP's "challenge" claim (draft-07
-	// §8) — an Attestation Challenge previously fetched from the
-	// authorization server's own challenge_endpoint. Leave empty for an
-	// authorization server that doesn't issue challenges and relies on
-	// iat freshness alone (see PoPVerifyPolicy.ExpectedChallenge's own
-	// doc comment for the verifying side of this same claim).
+	// Challenge, if non-empty, is the PoP's "challenge" claim (draft-12
+	// §6) — a Challenge the authorization server provided: from its
+	// challenge_endpoint, or in an OAuth-Client-Attestation-Challenge
+	// response header. Leave empty for an authorization server that
+	// doesn't issue challenges and relies on iat freshness alone (see
+	// PoPVerifyPolicy.ExpectedChallenge's own doc comment for the
+	// verifying side of this same claim).
 	Challenge string
 }
 
@@ -87,7 +92,7 @@ func CreatePoP(req PoPCreateRequest) (string, error) {
 
 	c := popClaims{
 		Issuer:    string(req.ClientID),
-		Audience:  req.Audience,
+		Audience:  popAudience(req.Audience),
 		JTI:       jti,
 		IssuedAt:  req.Now.Unix(),
 		Challenge: req.Challenge,

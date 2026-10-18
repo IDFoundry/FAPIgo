@@ -43,8 +43,9 @@ type AuthorizationCodeExchangeRequest struct {
 	// value the request carried, in receipt order — pass net/http's own
 	// Header.Values(...) directly, not Header.Get, for the same
 	// "preserve duplicates for this package to reject" reason
-	// DPoPProofs does (draft-ietf-oauth-attestation-based-client-auth-07
-	// §9 rule 1: exactly one of each is required). Both empty is a
+	// DPoPProofs does (draft-ietf-oauth-attestation-based-client-auth-12
+	// §7.1 rule 1, §7.2 rule 1: exactly one of each is required). Both
+	// empty is a
 	// valid "didn't authenticate via ClientAuthMethodAttestation" —
 	// meaningless unless Config.AttestationBasedClientAuthentication is
 	// enabled, in which case a client actually registered with that

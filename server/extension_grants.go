@@ -42,12 +42,22 @@ func (t TokenEndpointRequest) Resources() []string {
 }
 
 // AttestedClientAuthentication is the request's attestation headers,
-// for AuthenticateAttestedClient.
+// and its client_id parameter if it has one, for
+// AuthenticateAttestedClient — which refuses a client_id naming another
+// client than the attestation does. A repeated client_id gives the
+// first; Parameters refuses the repetition.
 func (t TokenEndpointRequest) AttestedClientAuthentication() AttestedClientAuthenticationRequest {
-	return AttestedClientAuthenticationRequest{
+	req := AttestedClientAuthenticationRequest{
 		ClientAttestations:    t.parts.ClientAttestations,
 		ClientAttestationPoPs: t.parts.ClientAttestationPoPs,
 	}
+	for _, p := range t.parts.HTTP.Parameters {
+		if p.Name == "client_id" {
+			req.ClientID = p.Value
+			break
+		}
+	}
+	return req
 }
 
 // TokenBinding is what a token request's sender-constraining credential

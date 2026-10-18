@@ -87,6 +87,7 @@ func TestAuthenticateAttestedClientRefusals(t *testing.T) {
 	cases := map[string]struct {
 		tweak                func(*server.Config, *storage.RegisteredClientConfig)
 		attestations, popHdr []string
+		wantCode             server.ErrorCode // invalid_client when empty
 	}{
 		"feature disabled": {
 			tweak: func(cfg *server.Config, _ *storage.RegisteredClientConfig) {
@@ -125,6 +126,7 @@ func TestAuthenticateAttestedClientRefusals(t *testing.T) {
 		"expired attestation": {
 			attestations: []string{createAttestationHeader(t, attesterKey, testClientID.String(), &instanceKey.PublicKey, now.Add(-2*time.Hour), time.Hour)},
 			popHdr:       []string{pop},
+			wantCode:     server.ErrorUseFreshAttestation,
 		},
 		"pop signed by another key": {
 			attestations: []string{attestation},
@@ -154,8 +156,12 @@ func TestAuthenticateAttestedClientRefusals(t *testing.T) {
 			_, err := h.server.AuthenticateAttestedClient(context.Background(), server.AttestedClientAuthenticationRequest{
 				ClientAttestations: tc.attestations, ClientAttestationPoPs: tc.popHdr,
 			})
-			if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
-				t.Fatalf("error code = %q, want %q (err %v)", code, server.ErrorInvalidClient, err)
+			want := server.ErrorInvalidClient
+			if tc.wantCode != "" {
+				want = tc.wantCode
+			}
+			if code := serverErrorCode(t, err); code != want {
+				t.Fatalf("error code = %q, want %q (err %v)", code, want, err)
 			}
 			events := h.audit.all()
 			if len(events) != 1 || events[0].Type != server.AuditEventAuthenticateAttestedClient || events[0].Outcome != server.AuditOutcomeFailure {

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/clientassertion"
@@ -12,14 +13,14 @@ import (
 // resolveAttestationHeaders reduces attestations/pops — a request's own
 // ClientAttestations/ClientAttestationPoPs fields — down to the single
 // pair of values this package's attestation verification expects, per
-// draft-ietf-oauth-attestation-based-client-auth-07 §9 rule 1 ("The
-// HTTP request contains exactly one field OAuth-Client-Attestation and
-// one field OAuth-Client-Attestation-PoP"). Mirrors resolveDPoPProof's
-// own "reject more than one, regardless of whether any individual value
-// would otherwise have verified" stance. Returns ("", "", nil) when
-// neither header was sent at all — a caller uses that to fall through
-// to another client authentication mechanism, the same way an absent
-// client_assertion does.
+// draft-ietf-oauth-attestation-based-client-auth-12 §7.1 rule 1 and §7.2
+// rule 1 ("There is precisely one OAuth-Client-Attestation HTTP request
+// header field", and one OAuth-Client-Attestation-PoP). Mirrors
+// resolveDPoPProof's own "reject more than one, regardless of whether
+// any individual value would otherwise have verified" stance. Returns
+// ("", "", nil) when neither header was sent at all — a caller uses that
+// to fall through to another client authentication mechanism, the same
+// way an absent client_assertion does.
 func resolveAttestationHeaders(attestations, pops []string) (attestation, pop string, err *Error) {
 	if len(attestations) == 0 && len(pops) == 0 {
 		return "", "", nil
@@ -34,9 +35,12 @@ func resolveAttestationHeaders(attestations, pops []string) (attestation, pop st
 }
 
 // authenticateClientViaAttestation verifies attestation/pop (OAuth 2.0
-// Attestation-Based Client Authentication draft-07) and resolves the
-// registered client the Client Attestation's sub claim names.
-func (s *Server) authenticateClientViaAttestation(ctx context.Context, attestation, pop string) (storage.RegisteredClient, clientassertion.VerifiedAssertion, *Error) {
+// Attestation-Based Client Authentication, draft-12, also accepting
+// draft-07's shape) and resolves the registered client the Client
+// Attestation's sub claim names. formClientID is the request's own
+// client_id parameter, if any: it must name that same client (§7.1 rule
+// 7, §7.5), as a client_assertion's must.
+func (s *Server) authenticateClientViaAttestation(ctx context.Context, formClientID, attestation, pop string) (storage.RegisteredClient, clientassertion.VerifiedAssertion, *Error) {
 	if !s.cfg.AttestationBasedClientAuthentication {
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
 			newError(ErrorInvalidClient, 401, "attestation-based client authentication is not enabled", nil)
@@ -52,6 +56,10 @@ func (s *Server) authenticateClientViaAttestation(ctx context.Context, attestati
 		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
 			newError(ErrorInvalidClient, 401, "malformed client attestation pop", err)
 	}
+	if formClientID != "" && formClientID != parsedAttestation.ClaimedSubject() {
+		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
+			newError(ErrorInvalidClient, 401, "client_id does not match the client attestation's subject", nil)
+	}
 
 	client, err := s.deps.Clients.ResolveClient(ctx, fapi.ClientID(parsedAttestation.ClaimedSubject()))
 	if err != nil {
@@ -62,28 +70,9 @@ func (s *Server) authenticateClientViaAttestation(ctx context.Context, attestati
 			newError(ErrorInvalidClient, 401, "client is not registered for attestation-based client authentication", nil)
 	}
 
-	if !s.cfg.Algorithms.ClientAttestation.Contains(client.ClientAttestationAlgorithm()) {
-		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
-			newError(ErrorInvalidClient, 401, "client attestation algorithm is not permitted", nil)
-	}
-
-	attesterPub, err := s.deps.AttesterTrust.attesterKey(ctx, s, client, parsedAttestation)
-	if err != nil {
-		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
-			newError(ErrorInvalidClient, 401, "no matching attester key", err)
-	}
-
-	verifiedAttestation, err := parsedAttestation.Verify(attesterPub, clientattestation.VerifyPolicy{
-		ExpectedIssuer:  client.ExpectedAttesterIssuer(),
-		ExpectedSubject: client.ID().String(),
-		Algorithm:       client.ClientAttestationAlgorithm(),
-		Now:             s.deps.Clock.Now(),
-		MaxLifetime:     s.cfg.Limits.MaxClientAttestationLifetime,
-		MaxClockSkew:    s.cfg.Limits.MaxClockSkew,
-	})
-	if err != nil {
-		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{},
-			newError(ErrorInvalidClient, 401, "client attestation verification failed", err)
+	verifiedAttestation, attErr := s.verifyClientAttestation(ctx, client, parsedAttestation)
+	if attErr != nil {
+		return storage.RegisteredClient{}, clientassertion.VerifiedAssertion{}, attErr
 	}
 
 	if !s.cfg.Algorithms.ClientAttestationPoP.Contains(parsedPoP.Algorithm()) {
@@ -92,7 +81,7 @@ func (s *Server) authenticateClientViaAttestation(ctx context.Context, attestati
 	}
 
 	verifiedPoP, err := parsedPoP.Verify(ctx, verifiedAttestation.ConfirmationJWK, clientattestation.PoPVerifyPolicy{
-		ExpectedIssuer:   client.ID().String(),
+		ClientID:         client.ID().String(),
 		ExpectedAudience: s.cfg.Issuer.String(),
 		Now:              s.deps.Clock.Now(),
 		MaxAge:           s.cfg.Limits.MaxClientAttestationPoPAge,
@@ -109,4 +98,35 @@ func (s *Server) authenticateClientViaAttestation(ctx context.Context, attestati
 		ExpiresAt:   verifiedAttestation.ExpiresAt,
 		InstanceKey: verifiedPoP.InstanceKey.String(),
 	}, nil
+}
+
+// verifyClientAttestation verifies a client's Client Attestation with
+// the key Dependencies.AttesterTrust establishes for the client's
+// registered attester. An attestation whose signature verifies but that
+// has expired is ErrorUseFreshAttestation (draft-12 §7.4: it "MUST be
+// used when the Client Attestation JWT is deemed to be not fresh
+// enough"); every other failure is invalid_client.
+func (s *Server) verifyClientAttestation(ctx context.Context, client storage.RegisteredClient, attestation clientattestation.Attestation) (clientattestation.VerifiedAttestation, *Error) {
+	if !s.cfg.Algorithms.ClientAttestation.Contains(client.ClientAttestationAlgorithm()) {
+		return clientattestation.VerifiedAttestation{}, newError(ErrorInvalidClient, 401, "client attestation algorithm is not permitted", nil)
+	}
+	attesterPub, err := s.deps.AttesterTrust.attesterKey(ctx, s, client, attestation)
+	if err != nil {
+		return clientattestation.VerifiedAttestation{}, newError(ErrorInvalidClient, 401, "no matching attester key", err)
+	}
+	verified, err := attestation.Verify(attesterPub, clientattestation.VerifyPolicy{
+		ExpectedIssuer:  client.ExpectedAttesterIssuer(),
+		ExpectedSubject: client.ID().String(),
+		Algorithm:       client.ClientAttestationAlgorithm(),
+		Now:             s.deps.Clock.Now(),
+		MaxLifetime:     s.cfg.Limits.MaxClientAttestationLifetime,
+		MaxClockSkew:    s.cfg.Limits.MaxClockSkew,
+	})
+	switch {
+	case errors.Is(err, clientattestation.ErrExpired):
+		return clientattestation.VerifiedAttestation{}, newError(ErrorUseFreshAttestation, 400, "client attestation has expired", err)
+	case err != nil:
+		return clientattestation.VerifiedAttestation{}, newError(ErrorInvalidClient, 401, "client attestation verification failed", err)
+	}
+	return verified, nil
 }

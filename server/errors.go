@@ -125,6 +125,16 @@ const (
 	// parameter that's malformed, unknown, or not one the client may
 	// request, at PAR, the CIBA endpoint and the token endpoint.
 	ErrorInvalidTarget ErrorCode = "invalid_target"
+
+	// ErrorUseFreshAttestation is OAuth 2.0 Attestation-Based Client
+	// Authentication's error (draft-ietf-oauth-attestation-based-client-auth-12
+	// §7.4) for a Client Attestation that has expired, returned with
+	// HTTP 400 as §7.4 says it SHOULD be: the client is otherwise who it
+	// claims, and should get a new attestation from its Attester and
+	// retry, rather than treat itself as unknown. It's returned only
+	// once the attestation's signature has verified, wherever a client
+	// authenticates by attestation, AuthenticateAttestedClient included.
+	ErrorUseFreshAttestation ErrorCode = "use_fresh_attestation"
 )
 
 // Error is the error type every public Server method returns. Code and

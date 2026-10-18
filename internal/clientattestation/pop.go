@@ -11,18 +11,22 @@ import (
 )
 
 // PoPTypHeader is the required JOSE "typ" header of a Client
-// Attestation PoP JWT (draft-07 §5.2).
+// Attestation PoP JWT (draft-12 §5.1).
 const PoPTypHeader = "oauth-client-attestation-pop+jwt"
 
 // ReplayChecker records that a Client Attestation PoP's "jti" has been
-// used, failing if it has been seen before. draft-07 recommends replay
-// detection for the PoP specifically (§10.6, §12.1) — unlike the Client
+// used by the Client Instance holding instanceKey, failing if that
+// instance has used it before. The draft recommends replay detection
+// for the PoP specifically (draft-12 §10.7, §12.1) — unlike the Client
 // Attestation JWT itself, which is deliberately reusable across
-// requests (§10.2), each PoP is meant to be single-use. Mirrors
-// clientassertion.ReplayChecker and dpop.ReplayChecker's own shape
-// exactly.
+// requests (§10.2), each PoP is meant to be single-use. The record is
+// scoped to the instance, as dpop.ReplayChecker's is to the proof's
+// key: every installation of a client shares its client_id, so scoping
+// by client alone would let one installation use up a jti another will
+// send. A replayed PoP is signed by the same instance key, so it is
+// still caught.
 type ReplayChecker interface {
-	UseOnce(ctx context.Context, jti string, expiresAt time.Time) error
+	UseOnce(ctx context.Context, instanceKey jose.Thumbprint, jti string, expiresAt time.Time) error
 }
 
 // PoP is a parsed, but not yet signature-verified, Client Attestation
@@ -49,44 +53,44 @@ func ParsePoP(pop string) (PoP, error) {
 // Algorithm returns the algorithm the header claims to use.
 func (p PoP) Algorithm() fapi.SignatureAlgorithm { return p.compact.Header.Algorithm }
 
-// ClaimedIssuer returns the unverified "iss" claim — the OAuth
-// client_id — for use as a lookup value only.
-func (p PoP) ClaimedIssuer() string { return p.claims.Issuer }
-
 // PoPVerifyPolicy is the set of checks PoP.Verify enforces.
 type PoPVerifyPolicy struct {
-	// ExpectedIssuer is the client_id being authenticated — draft-07 §9
-	// rule 13: the PoP's iss must equal the accompanying Attestation's
-	// own sub.
-	ExpectedIssuer string
+	// ClientID is the client being authenticated: the accompanying
+	// Attestation's sub. A PoP's iss claim, if it has one (draft-07
+	// required it, §5.2 rule 4; draft-08 removed it), must equal it.
+	// Required.
+	ClientID string
 
 	// ExpectedAudience is this authorization server's own RFC 8414
-	// issuer identifier (draft-07 §5.2, §9 rule 10) — a single value,
-	// unlike clientassertion.VerifyPolicy.ExpectedAudiences, since
-	// draft-07 grants this JWT no endpoint-URL carve-out the way RFC
-	// 7523 grants a client assertion.
+	// issuer identifier (draft-12 §5.1, §7.2 rule 7) — a single value,
+	// unlike clientassertion.VerifyPolicy.ExpectedAudiences, since the
+	// draft grants this JWT no endpoint-URL carve-out the way RFC 7523
+	// grants a client assertion. An aud array holding just this value
+	// is accepted too; one naming more is not (see popAudience).
 	ExpectedAudience string
 
 	// ExpectedChallenge, if non-empty, must equal the PoP's challenge
-	// claim (draft-07 §8, §9 rule 8). Leave empty if this server
-	// doesn't issue challenges and relies on iat freshness alone (§9
-	// rule 9's other option).
+	// claim (draft-12 §6, §7.2 rule 5). Leave empty if this server
+	// doesn't issue challenges and relies on iat freshness alone (§7.2
+	// rule 6's other option); a challenge the PoP carries anyway is
+	// then ignored.
 	ExpectedChallenge string
 
-	// Now is the time to validate iat/nbf against.
+	// Now is the time to validate iat/exp/nbf against.
 	Now time.Time
 
 	// MaxAge bounds how old (relative to Now) the PoP's iat claim may
-	// be — draft-07 §9 rule 9's freshness window. Required.
+	// be — draft-12 §7.2 rule 6's freshness window. Required.
 	MaxAge time.Duration
 
 	// MaxClockSkew bounds how far in the future an iat/nbf claim may
-	// be. Zero means no tolerance.
+	// be, and extends how long past an exp claim a PoP is still
+	// accepted. Zero means no tolerance.
 	MaxClockSkew time.Duration
 
 	// Replay, if non-nil, is used to detect PoP replay by jti. A nil
 	// Replay skips replay detection; server authentication should
-	// always supply one (draft-07 §10.6, §12.1).
+	// always supply one (draft-12 §10.7, §12.1).
 	Replay ReplayChecker
 }
 
@@ -97,7 +101,7 @@ type VerifiedPoP struct {
 	IssuedAt time.Time
 	// InstanceKey is the RFC 7638 thumbprint of the Client Instance Key
 	// the PoP verified under: what a refresh token issued to this
-	// instance is bound to (draft-07 §10.3).
+	// instance is bound to (draft-12 §10.3).
 	InstanceKey jose.Thumbprint
 }
 
@@ -114,8 +118,8 @@ type VerifiedPoP struct {
 // Attester public key the caller resolved out of band), not because
 // the PoP's header is trusted on its own.
 func (p PoP) Verify(ctx context.Context, confirmationJWK []byte, policy PoPVerifyPolicy) (VerifiedPoP, error) {
-	if policy.ExpectedIssuer == "" {
-		return VerifiedPoP{}, fmt.Errorf("clientattestation: ExpectedIssuer is empty")
+	if policy.ClientID == "" {
+		return VerifiedPoP{}, fmt.Errorf("clientattestation: ClientID is empty")
 	}
 	if policy.ExpectedAudience == "" {
 		return VerifiedPoP{}, fmt.Errorf("clientattestation: ExpectedAudience is empty")
@@ -140,41 +144,55 @@ func (p PoP) Verify(ctx context.Context, confirmationJWK []byte, policy PoPVerif
 	}
 	c := p.claims
 
-	if c.Issuer != policy.ExpectedIssuer {
+	if c.Issuer != "" && c.Issuer != policy.ClientID {
 		return VerifiedPoP{}, ErrIssuerMismatch
 	}
-	if c.Audience != policy.ExpectedAudience {
+	if string(c.Audience) != policy.ExpectedAudience {
 		return VerifiedPoP{}, ErrAudienceMismatch
 	}
 	if policy.ExpectedChallenge != "" && c.Challenge != policy.ExpectedChallenge {
 		return VerifiedPoP{}, ErrChallengeMismatch
 	}
-
+	// iat is checked before the replay record (draft-12 §10.7: "MUST
+	// first evaluate the iat ... and reject any Client Attestation PoP
+	// whose iat falls outside this time window"), so the record's
+	// lifetime bounds every PoP it must remember.
 	iat := time.Unix(c.IssuedAt, 0)
-	if iat.After(policy.Now.Add(policy.MaxClockSkew)) {
-		return VerifiedPoP{}, ErrNotYetValid
-	}
-	if policy.Now.Sub(iat) > policy.MaxAge {
-		return VerifiedPoP{}, ErrExpired
-	}
-	if c.NotBefore != 0 {
-		nbf := time.Unix(c.NotBefore, 0)
-		if policy.Now.Before(nbf.Add(-policy.MaxClockSkew)) {
-			return VerifiedPoP{}, ErrNotYetValid
-		}
-	}
-
-	if policy.Replay != nil {
-		// 2×MaxClockSkew past the acceptance window, for an instance
-		// whose clock runs behind this one's.
-		if err := policy.Replay.UseOnce(ctx, c.JTI, iat.Add(timeutil.SaturatingAdd(policy.MaxAge, policy.MaxClockSkew, policy.MaxClockSkew))); err != nil {
-			return VerifiedPoP{}, fmt.Errorf("clientattestation: replay check: %w", err)
-		}
+	if err := checkPoPTimes(c, iat, policy); err != nil {
+		return VerifiedPoP{}, err
 	}
 
 	instanceKey, err := jwk.Thumbprint()
 	if err != nil {
 		return VerifiedPoP{}, fmt.Errorf("clientattestation: confirmation key thumbprint: %w", err)
 	}
-	return VerifiedPoP{ClientID: c.Issuer, IssuedAt: iat, InstanceKey: instanceKey}, nil
+	if policy.Replay != nil {
+		// 2×MaxClockSkew past the acceptance window, for an instance
+		// whose clock runs behind this one's.
+		if err := policy.Replay.UseOnce(ctx, instanceKey, c.JTI, iat.Add(timeutil.SaturatingAdd(policy.MaxAge, policy.MaxClockSkew, policy.MaxClockSkew))); err != nil {
+			return VerifiedPoP{}, fmt.Errorf("clientattestation: replay check: %w", err)
+		}
+	}
+	return VerifiedPoP{ClientID: policy.ClientID, IssuedAt: iat, InstanceKey: instanceKey}, nil
+}
+
+// checkPoPTimes checks a PoP's iat against the freshness window
+// (draft-12 §7.2 rule 6) — no further in the future than MaxClockSkew,
+// no older than MaxAge — and, when it has them, its exp (RFC 7519
+// §4.1.4, with MaxClockSkew's allowance) and nbf.
+func checkPoPTimes(c popClaims, iat time.Time, policy PoPVerifyPolicy) error {
+	latest := policy.Now.Add(policy.MaxClockSkew)
+	if iat.After(latest) {
+		return ErrNotYetValid
+	}
+	if policy.Now.Sub(iat) > policy.MaxAge {
+		return ErrExpired
+	}
+	if c.ExpiresAt != 0 && policy.Now.After(time.Unix(c.ExpiresAt, 0).Add(policy.MaxClockSkew)) {
+		return ErrExpired
+	}
+	if c.NotBefore != 0 && time.Unix(c.NotBefore, 0).After(latest) {
+		return ErrNotYetValid
+	}
+	return nil
 }

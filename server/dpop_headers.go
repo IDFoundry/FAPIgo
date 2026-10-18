@@ -21,8 +21,9 @@ func DPoPProofsFromHTTP(r *http.Request) []string {
 // ClientAttestationHeadersFromHTTP returns every
 // "OAuth-Client-Attestation" and "OAuth-Client-Attestation-PoP" header
 // value r carried, in receipt order, for the same reason
-// DPoPProofsFromHTTP exists: draft-ietf-oauth-attestation-based-client-auth-07
-// §9 rule 1 requires exactly one of each, a check ClientAttestations/
+// DPoPProofsFromHTTP exists: draft-ietf-oauth-attestation-based-client-auth-12
+// §7.1 rule 1 and §7.2 rule 1 require exactly one of each, a check
+// ClientAttestations/
 // ClientAttestationPoPs (AuthorizationCodeExchangeRequest and its
 // siblings) only gets right if the caller preserved duplicates via
 // r.Header.Values(...) rather than collapsing them via r.Header.Get(...).

@@ -317,7 +317,7 @@ func (s *Server) validateAuthorizationRequest(ctx context.Context, params map[st
 
 // authenticateClient authenticates the request's client — via a Client
 // Attestation/PoP header pair (OAuth 2.0 Attestation-Based Client
-// Authentication draft-07, for a client registered under
+// Authentication draft-12, for a client registered under
 // ClientAuthMethodAttestation), a signed client_assertion (RFC 7523),
 // or, for a client registered under
 // ClientAuthMethodSelfSignedTLSClientAuth/ClientAuthMethodTLSClientAuth,
@@ -341,7 +341,7 @@ func (s *Server) validateAuthorizationRequest(ctx context.Context, params map[st
 func (s *Server) authenticateClient(ctx context.Context, params map[string]string, peerCert *x509.Certificate, attestation, attestationPoP string, endpoints, mtlsEndpoints []fapi.URL) (storage.RegisteredClient, clientassertion.VerifiedAssertion, *Error) {
 	switch {
 	case attestation != "" || attestationPoP != "":
-		return s.authenticateClientViaAttestation(ctx, attestation, attestationPoP)
+		return s.authenticateClientViaAttestation(ctx, params["client_id"], attestation, attestationPoP)
 	case params["client_assertion"] != "":
 		return s.authenticateClientViaAssertion(ctx, params, endpoints, mtlsEndpoints)
 	case params["client_id"] != "":

@@ -36,7 +36,7 @@ type RefreshTokenRequest struct {
 
 	// ClientAttestations/ClientAttestationPoPs mirror
 	// AuthorizationCodeExchangeRequest's own fields — see its doc
-	// comment. draft-ietf-oauth-attestation-based-client-auth-07 §10.3
+	// comment. draft-ietf-oauth-attestation-based-client-auth-12 §10.3
 	// binds a refresh token issued to a client authenticated this way
 	// to its Client Instance Key: a refresh must present an attestation
 	// whose cnf key is the one presented when the token was issued, or
@@ -184,10 +184,8 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 // grant was revoked. It also returns the time it judged expiry at.
 //
 // instanceKey is the presenting client's Client Instance Key thumbprint
-// (empty unless it authenticated by Client Attestation). A grant bound
-// to an instance key is redeemed only with that key (draft-07 §10.3):
-// every installation of a wallet app shares one client_id, so client_id
-// alone would let one installation use another's refresh token.
+// (empty unless it authenticated by Client Attestation); see
+// checkRefreshInstance for how it must match the grant's.
 func (s *Server) redeemRefreshGrant(ctx context.Context, clientID fapi.ClientID, instanceKey, rawToken string) (grantRecord, time.Time, *Error) {
 	redeemed, err := s.deps.Grants.RedeemRefreshToken(ctx, storage.RefreshTokenRedemption{
 		TokenHash: sha256.Sum256([]byte(rawToken)),
@@ -210,13 +208,39 @@ func (s *Server) redeemRefreshGrant(ctx context.Context, clientID fapi.ClientID,
 	if !issuedWithin(grant.IssuedAt, s.cfg.Limits.RefreshTokenLifetime, now) {
 		return grantRecord{}, time.Time{}, newError(ErrorInvalidGrant, 400, "refresh_token has expired", nil)
 	}
-	if grant.ClientInstanceKey != "" && grant.ClientInstanceKey != instanceKey {
-		return grantRecord{}, time.Time{}, newError(ErrorInvalidGrant, 400, "refresh_token was issued to another client instance", nil)
+	if instanceErr := checkRefreshInstance(grant, instanceKey); instanceErr != nil {
+		return grantRecord{}, time.Time{}, instanceErr
 	}
 	if revErr := s.checkGrantNotRevoked(ctx, grant); revErr != nil {
 		return grantRecord{}, time.Time{}, revErr
 	}
 	return grant, now, nil
+}
+
+// checkRefreshInstance refuses a refresh token presented by a Client
+// Instance other than the one it was issued to. A grant bound to an
+// instance key is redeemed only with that key (draft-12 §10.3): every
+// installation of a wallet app shares one client_id, so client_id alone
+// would let one installation use another's refresh token.
+//
+// The binding holds the other way too. A client registered for several
+// authentication methods — a backend using private_key_jwt beside its
+// app's installations using Client Attestation — has refresh tokens
+// issued under its other methods with no instance key, and an attested
+// installation mustn't redeem those: a backend's refresh token, if it
+// leaked, would otherwise work for any genuine installation. Such a
+// grant is told apart from one written before instance keys were
+// recorded (v0.47.0), which stays redeemable, by its IssuedAt: recorded
+// since v0.50.0, so a grant that has it but no instance key was issued
+// under another method.
+func checkRefreshInstance(grant grantRecord, instanceKey string) *Error {
+	switch {
+	case grant.ClientInstanceKey != "" && grant.ClientInstanceKey != instanceKey:
+		return newError(ErrorInvalidGrant, 400, "refresh_token was issued to another client instance", nil)
+	case grant.ClientInstanceKey == "" && instanceKey != "" && grant.IssuedAt != nil:
+		return newError(ErrorInvalidGrant, 400, "refresh_token was not issued to a client instance", nil)
+	}
+	return nil
 }
 
 // checkGrantStillAllowed refuses to issue tokens for scope and

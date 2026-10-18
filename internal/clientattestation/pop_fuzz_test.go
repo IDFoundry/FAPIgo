@@ -8,6 +8,7 @@ import (
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/jose"
 )
 
 // FuzzParsePoP exercises ParsePoP against arbitrary strings — a Client
@@ -41,6 +42,18 @@ func FuzzParsePoP(f *testing.F) {
 
 	f.Add(withoutChallenge)
 	f.Add(withChallenge)
+	// draft-12's shape — no iss — with aud as a string and as an array,
+	// and with exp, which neither draft defines for a PoP.
+	sign := func(payload string) string {
+		compact, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: PoPTypHeader}, []byte(payload))
+		if err != nil {
+			f.Fatalf("sign: %v", err)
+		}
+		return compact
+	}
+	f.Add(sign(`{"aud":"https://as.example","jti":"j","iat":1767225600}`))
+	f.Add(sign(`{"aud":["https://as.example"],"jti":"j","iat":1767225600,"exp":1767225660}`))
+	f.Add(sign(`{"aud":["https://as.example","https://other.example"],"jti":"j","iat":1767225600}`))
 	f.Add("")
 	f.Add(".")
 	f.Add("a.b.c")

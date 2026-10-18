@@ -26,7 +26,7 @@ func (c ClientAuthMethod) String() string {
 	case ClientAuthMethodTLSClientAuthSANEmail:
 		return "tls_client_auth_san_email"
 	case ClientAuthMethodAttestation:
-		// draft-ietf-oauth-attestation-based-client-auth-07 §13.4's own
+		// draft-ietf-oauth-attestation-based-client-auth-12 §15.6's own
 		// IANA "OAuth Token Endpoint Authentication Methods" registration.
 		return "attest_jwt_client_auth"
 	default:

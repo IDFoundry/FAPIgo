@@ -49,9 +49,11 @@ type attestationClaimsInput struct {
 func createTestAttestation(t *testing.T, signer *ecdsa.PrivateKey, in attestationClaimsInput) string {
 	t.Helper()
 	payload := map[string]any{
-		"iss": in.Issuer,
 		"sub": in.Subject,
 		"exp": in.ExpiresAt,
+	}
+	if in.Issuer != "" {
+		payload["iss"] = in.Issuer
 	}
 	if in.IssuedAt != 0 {
 		payload["iat"] = in.IssuedAt
@@ -78,6 +80,7 @@ type popClaimsInput struct {
 	Audience  string
 	JTI       string
 	IssuedAt  int64
+	ExpiresAt int64
 	Challenge string
 	NotBefore int64
 }
@@ -85,10 +88,15 @@ type popClaimsInput struct {
 func createTestPoP(t *testing.T, signer *ecdsa.PrivateKey, in popClaimsInput) string {
 	t.Helper()
 	payload := map[string]any{
-		"iss": in.Issuer,
 		"aud": in.Audience,
 		"jti": in.JTI,
 		"iat": in.IssuedAt,
+	}
+	if in.Issuer != "" {
+		payload["iss"] = in.Issuer
+	}
+	if in.ExpiresAt != 0 {
+		payload["exp"] = in.ExpiresAt
 	}
 	if in.Challenge != "" {
 		payload["challenge"] = in.Challenge
@@ -126,9 +134,6 @@ func TestParseAttestation_Draft07Example(t *testing.T) {
 	parsed, err := Parse(attestation)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
-	}
-	if parsed.ClaimedIssuer() != "https://attester.example.com" {
-		t.Errorf("ClaimedIssuer = %q", parsed.ClaimedIssuer())
 	}
 	if parsed.ClaimedSubject() != "https://client.example.com" {
 		t.Errorf("ClaimedSubject = %q", parsed.ClaimedSubject())
@@ -173,9 +178,6 @@ func TestPoP_Accessors(t *testing.T) {
 	}
 	if parsed.Algorithm() != fapi.ES256 {
 		t.Errorf("Algorithm() = %v, want ES256", parsed.Algorithm())
-	}
-	if parsed.ClaimedIssuer() != "https://client.example.com" {
-		t.Errorf("ClaimedIssuer() = %q, want %q", parsed.ClaimedIssuer(), "https://client.example.com")
 	}
 }
 
@@ -405,7 +407,7 @@ func TestAttestation_Verify_RejectsTypMismatch(t *testing.T) {
 
 func basePoPPolicy(now time.Time) PoPVerifyPolicy {
 	return PoPVerifyPolicy{
-		ExpectedIssuer:   "https://client.example.com",
+		ClientID:         "https://client.example.com",
 		ExpectedAudience: "https://as.example.com",
 		Now:              now,
 		MaxAge:           2 * time.Minute,
@@ -457,7 +459,7 @@ func TestPoP_Verify_RejectsIncompletePolicy(t *testing.T) {
 		name   string
 		mutate func(PoPVerifyPolicy) PoPVerifyPolicy
 	}{
-		{"empty ExpectedIssuer", func(p PoPVerifyPolicy) PoPVerifyPolicy { p.ExpectedIssuer = ""; return p }},
+		{"empty ClientID", func(p PoPVerifyPolicy) PoPVerifyPolicy { p.ClientID = ""; return p }},
 		{"empty ExpectedAudience", func(p PoPVerifyPolicy) PoPVerifyPolicy { p.ExpectedAudience = ""; return p }},
 		{"zero Now", func(p PoPVerifyPolicy) PoPVerifyPolicy { p.Now = time.Time{}; return p }},
 		{"zero MaxAge", func(p PoPVerifyPolicy) PoPVerifyPolicy { p.MaxAge = 0; return p }},
@@ -705,11 +707,12 @@ func newMemoryReplayChecker() *memoryReplayChecker {
 	return &memoryReplayChecker{seen: make(map[string]bool)}
 }
 
-func (m *memoryReplayChecker) UseOnce(_ context.Context, jti string, _ time.Time) error {
-	if m.seen[jti] {
+func (m *memoryReplayChecker) UseOnce(_ context.Context, instanceKey jose.Thumbprint, jti string, _ time.Time) error {
+	key := instanceKey.String() + jti
+	if m.seen[key] {
 		return errReplayed
 	}
-	m.seen[jti] = true
+	m.seen[key] = true
 	return nil
 }
 

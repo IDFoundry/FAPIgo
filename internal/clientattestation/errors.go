@@ -4,9 +4,9 @@ import "errors"
 
 var (
 	// ErrMalformedClaims indicates a JWT's claims payload was missing a
-	// required claim, had an aud claim (PoP) that was not a single
-	// string, or otherwise didn't parse into this package's expected
-	// shape.
+	// required claim, had an aud claim (PoP) naming other than exactly
+	// one audience, or otherwise didn't parse into this package's
+	// expected shape.
 	ErrMalformedClaims = errors.New("clientattestation: malformed claims")
 
 	// ErrTypMismatch indicates a JWT's "typ" header did not equal
@@ -31,12 +31,12 @@ var (
 	ErrChallengeMismatch = errors.New("clientattestation: challenge does not match expected value")
 
 	// ErrExpired indicates an Attestation's exp claim, or a PoP's iat
-	// claim, is outside the acceptable window as of the verification
-	// time.
+	// (or exp) claim, is outside the acceptable window as of the
+	// verification time.
 	ErrExpired = errors.New("clientattestation: expired")
 
-	// ErrNotYetValid indicates a nbf claim (or, for a PoP, iat) is in
-	// the future beyond the configured clock-skew tolerance.
+	// ErrNotYetValid indicates a nbf or iat claim is in the future
+	// beyond the configured clock-skew tolerance.
 	ErrNotYetValid = errors.New("clientattestation: not yet valid")
 
 	// ErrLifetimeExceeded indicates an Attestation's exp claim is

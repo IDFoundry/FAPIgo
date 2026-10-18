@@ -170,13 +170,19 @@ func isPKICertificateAuthMethod(method storage.ClientAuthMethod) bool {
 }
 
 // automaticClientAuthMethods is the client authentication methods
-// automatic registration may register: allowed as configured, or, under
-// NoPKIClientAuthentication, without the CA-issued certificate methods
-// it refuses. An empty allowed list (every method) becomes every
-// method but those; one naming such a method contradicts the trust
-// and is refused.
+// automatic registration may register. Under TrustedClientCAs, which
+// verifies every certificate's chain, it's allowed as configured, empty
+// meaning every method. Otherwise nothing in this package verifies a
+// CA-issued certificate's chain (tls_client_auth and its SAN* siblings),
+// and a Relying Party's subject or SAN is public in its metadata, so an
+// empty allowed list means every method but those. Under
+// NoClientCertificateChainTrust naming one explicitly is the opt-in for
+// a deployment whose TLS termination verifies the chain; under
+// NoPKIClientAuthentication, which refuses them, it's a contradiction,
+// refused.
 func automaticClientAuthMethods(allowed []storage.ClientAuthMethod, trust ClientCertificateTrust) ([]storage.ClientAuthMethod, error) {
-	if _, noPKI := trust.(NoPKIClientAuthentication); !noPKI {
+	switch trust.(type) {
+	case TrustedClientCAs, *TrustedClientCAs:
 		return allowed, nil
 	}
 	if len(allowed) == 0 {
@@ -185,6 +191,9 @@ func automaticClientAuthMethods(allowed []storage.ClientAuthMethod, trust Client
 			storage.ClientAuthMethodSelfSignedTLSClientAuth,
 			storage.ClientAuthMethodAttestation,
 		}, nil
+	}
+	if _, noPKI := trust.(NoPKIClientAuthentication); !noPKI {
+		return allowed, nil
 	}
 	for _, method := range allowed {
 		if isPKICertificateAuthMethod(method) {

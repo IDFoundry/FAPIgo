@@ -139,11 +139,12 @@ func (NoPKIClientAuthentication) validate() error { return nil }
 // no CA trust store of its own. Passing this when neither is actually
 // true is a security-relevant mistake this package cannot detect: any
 // self-signed certificate whose subject/SAN an attacker chose to match
-// a registered value is accepted. That includes a Relying Party
-// registered automatically through OpenID Federation that lists
-// tls_client_auth in its metadata, whose subject or SAN is public;
-// AutomaticRegistrationConfig.AllowedClientAuthMethods can leave those
-// methods out. Exists so that mistake requires a conscious, visible
+// a registered value is accepted. Automatic registration (OpenID
+// Federation) registers those methods under it only when
+// AutomaticRegistrationConfig.AllowedClientAuthMethods names them, since
+// a Relying Party's subject or SAN is public in its metadata: naming one
+// says your TLS termination verifies the chain. Exists so that mistake
+// requires a conscious, visible
 // line of code, the same reason NoRevocation exists. Whoever
 // establishes chain trust in case (1) also owns checking revocation.
 type NoClientCertificateChainTrust struct{}

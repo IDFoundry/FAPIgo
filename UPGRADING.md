@@ -17,6 +17,32 @@ and `keys/ephemeral` needs only the steps not marked *production only*.
 
 ## v0.58.0
 
+### Automatic registration skips `tls_client_auth` unless chains are verified (server)
+
+**Affects:** a server with OpenID Federation automatic registration
+whose `ClientCertificateTrust` isn't `TrustedClientCAs`, where a Relying
+Party authenticates with `tls_client_auth` (or a SAN variant) and
+`AutomaticRegistration.AllowedClientAuthMethods` is empty.
+
+**Why:** a Relying Party's `tls_client_auth_subject_dn` (or SAN) is
+public in its metadata. With nothing verifying the certificate's chain,
+anyone could present a self-signed certificate naming it and
+authenticate as that RP: get client credentials tokens, redeem a leaked
+refresh token, or revoke its tokens.
+
+**What fails:** with an empty `AllowedClientAuthMethods`, automatic
+registration no longer registers `tls_client_auth` or its SAN variants
+unless `ClientCertificateTrust` is `TrustedClientCAs`. An RP that lists
+another method too is registered for that one; an RP offering only
+`tls_client_auth` isn't registered, and its requests fail with
+`invalid_client` (`OnResolutionFailure` is told why).
+
+**What to change:** if your TLS termination verifies client certificate
+chains, keep `NoClientCertificateChainTrust{}` and list the methods you
+accept in `AutomaticRegistration.AllowedClientAuthMethods`, including
+`storage.ClientAuthMethodTLSClientAuth`. Otherwise use `TrustedClientCAs`,
+or leave those RPs on another method.
+
 ### Attestation-based client authentication follows draft-12 (server, client)
 
 Not a breaking change: clients built to draft-07 keep working, and so
@@ -69,9 +95,8 @@ certificates at all).
 (or SAN-variant) client's certificate without verifying its chain. If
 nothing in front of the server verifies it either, anyone can present a
 self-signed certificate naming a registered subject or SAN and
-authenticate as that client. Under OpenID Federation automatic
-registration that includes any Relying Party that lists
-`tls_client_auth` in its metadata, whose subject DN is public.
+authenticate as that client. (Automatic registration no longer
+registers such methods by default; see above.)
 
 **What to change:** if no client authenticates with a CA-issued
 certificate, pass `server.NoPKIClientAuthentication{}`. It refuses

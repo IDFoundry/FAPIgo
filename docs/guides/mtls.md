@@ -87,7 +87,10 @@ srv, err := server.New(server.Config{
   `NoPKIClientAuthentication{}`, which refuses `tls_client_auth`
   outright: with `NoClientCertificateChainTrust{}` and no real chain
   check, anyone could present a self-signed certificate naming a
-  client's subject.
+  client's subject. Federation automatic registration registers
+  `tls_client_auth` only under `TrustedClientCAs`, or under
+  `NoClientCertificateChainTrust{}` when
+  `AutomaticRegistration.AllowedClientAuthMethods` names it.
 - **The certificate.** The `…FromHTTP` request constructors read it from
   the request's own TLS connection (`PeerCertificateFromHTTP`). Behind a
   proxy that terminates TLS, set it yourself, with

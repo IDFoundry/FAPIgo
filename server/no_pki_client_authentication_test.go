@@ -172,3 +172,86 @@ func TestNoPKIClientAuthenticationSkipsTLSClientAuthAtRegistration(t *testing.T)
 		t.Fatal("OnResolutionFailure wasn't called: the RP was registered for tls_client_auth")
 	}
 }
+
+// TestAutomaticRegistrationRegistersPKIMethodsOnlyWhenVerifiedOrNamed
+// covers which ClientCertificateTrust lets automatic registration
+// register tls_client_auth for a Relying Party that lists it, with its
+// public subject DN: TrustedClientCAs, which verifies the chain, does by
+// default; NoClientCertificateChainTrust does only when
+// AllowedClientAuthMethods names it (the opt-in for a deployment whose
+// TLS termination verifies the chain); otherwise a self-signed
+// certificate naming that DN would authenticate as the RP.
+func TestAutomaticRegistrationRegistersPKIMethodsOnlyWhenVerifiedOrNamed(t *testing.T) {
+	for name, tc := range map[string]struct {
+		trust      func(t *testing.T, cert *x509.Certificate) server.ClientCertificateTrust
+		allowed    []storage.ClientAuthMethod
+		registered bool
+	}{
+		"chain trust declined, default methods": {
+			trust: func(*testing.T, *x509.Certificate) server.ClientCertificateTrust {
+				return server.NoClientCertificateChainTrust{}
+			},
+		},
+		"chain trust declined, tls_client_auth named": {
+			trust: func(*testing.T, *x509.Certificate) server.ClientCertificateTrust {
+				return server.NoClientCertificateChainTrust{}
+			},
+			allowed:    []storage.ClientAuthMethod{storage.ClientAuthMethodPrivateKeyJWT, storage.ClientAuthMethodTLSClientAuth},
+			registered: true,
+		},
+		"trusted CAs, default methods": {
+			trust: func(_ *testing.T, cert *x509.Certificate) server.ClientCertificateTrust {
+				roots := x509.NewCertPool()
+				roots.AddCert(cert)
+				return server.TrustedClientCAs{Roots: roots, Revocation: server.NoClientCertificateRevocationCheck{}}
+			},
+			registered: true,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := setupAutomaticRegistrationFixture(t, testRedirectURI, map[string]any{
+				"token_endpoint_auth_methods_supported": []string{"private_key_jwt", "tls_client_auth"},
+				"tls_client_auth_subject_dn":            "CN=victim-rp",
+			})
+			cert := selfSignedTestClientCertWithSAN(t, func(c *x509.Certificate) {
+				c.Subject = pkix.Name{CommonName: "victim-rp"}
+				c.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}
+			})
+			srv := newAutomaticRegistrationTestServer(t, f, func(cfg *server.Config, deps *server.Dependencies) {
+				cfg.ClientCredentialsGrant = true
+				cfg.AutomaticRegistration.AllowsClientCredentialsGrant = true
+				cfg.AutomaticRegistration.AllowedClientAuthMethods = tc.allowed
+				deps.ClientCertificateTrust = tc.trust(t, cert)
+			})
+			_, err := srv.RequestClientCredentialsToken(context.Background(), server.ClientCredentialsTokenRequest{
+				HTTP: server.FormRequest{Parameters: []server.FormParameter{
+					formParam("grant_type", "client_credentials"),
+					formParam("client_id", f.rpID),
+					formParam("scope", "accounts"),
+				}},
+				DPoPProofs:      []string{createDPoPProof(t, generateKey(t), f.now)},
+				PeerCertificate: cert,
+			})
+			if tc.registered {
+				if err != nil {
+					t.Fatalf("tls_client_auth with the RP's DN: %v, want a token", err)
+				}
+				return
+			}
+			if code := serverErrorCode(t, err); code != server.ErrorInvalidClient {
+				t.Fatalf("tls_client_auth with the RP's DN: error code %q, want %q", code, server.ErrorInvalidClient)
+			}
+			if _, err := srv.RequestClientCredentialsToken(context.Background(), server.ClientCredentialsTokenRequest{
+				HTTP: server.FormRequest{Parameters: []server.FormParameter{
+					formParam("grant_type", "client_credentials"),
+					formParam("client_assertion", automaticRegistrationAssertion(t, f)),
+					formParam("client_assertion_type", clientassertion.AssertionType),
+					formParam("scope", "accounts"),
+				}},
+				DPoPProofs: []string{createDPoPProof(t, generateKey(t), f.now)},
+			}); err != nil {
+				t.Fatalf("the RP's own private_key_jwt: %v, want a token", err)
+			}
+		})
+	}
+}

@@ -52,6 +52,55 @@ attestation as `invalid_client` only: handle `use_fresh_attestation` by
 getting a new attestation. A FAPIgo client follows the server's
 attestation challenges by itself.
 
+### Pass `NoPKIClientAuthentication{}` when no client uses `tls_client_auth` (server)
+
+Not a breaking change: nothing stops working. It's here because the
+quick start and the demos used to pass
+`ClientCertificateTrust: server.NoClientCertificateChainTrust{}` for a
+server with no mTLS clients, and that setting isn't safe for one.
+
+**Affects:** a `server.Dependencies` with
+`ClientCertificateTrust: server.NoClientCertificateChainTrust{}` whose
+TLS termination doesn't verify client certificate chains
+(`tls.RequestClientCert`, `RequireAnyClientCert`, or no client
+certificates at all).
+
+**Why:** `NoClientCertificateChainTrust{}` accepts a `tls_client_auth`
+(or SAN-variant) client's certificate without verifying its chain. If
+nothing in front of the server verifies it either, anyone can present a
+self-signed certificate naming a registered subject or SAN and
+authenticate as that client. Under OpenID Federation automatic
+registration that includes any Relying Party that lists
+`tls_client_auth` in its metadata, whose subject DN is public.
+
+**What to change:** if no client authenticates with a CA-issued
+certificate, pass `server.NoPKIClientAuthentication{}`. It refuses
+`tls_client_auth` and its SAN variants with `invalid_client`, keeps
+automatic registration from registering them, and leaves
+`self_signed_tls_client_auth` working. `server.New` refuses it together
+with an `AutomaticRegistration.AllowedClientAuthMethods` that names one
+of those methods. Keep `NoClientCertificateChainTrust{}` only where your
+TLS termination verifies the chain (`RequireAndVerifyClientCert` with
+`ClientCAs`, or a gateway that does), or use `TrustedClientCAs`.
+
+### Records now carry their issuer; stores are per issuer (server)
+
+Not a breaking change for a store: the records are the opaque JSON the
+server already owns. A pushed request, authorization code, refresh token
+or CIBA request written by a server with a different issuer is now
+treated as unknown, so two tenants sharing one database can no longer
+redeem each other's codes or refresh tokens. A record written before
+this release carries no issuer and is accepted until it expires. Keep
+each issuer's records apart anyway: see the `storage` package
+documentation.
+
+### `prompt` is bounded (server)
+
+A pushed authorization request whose `prompt` is longer than 256 bytes,
+or carries more than 16 distinct values, is refused with
+`invalid_request`. OpenID Connect defines four values, so no real
+request is affected.
+
 ## v0.57.0
 
 ### Read `resource` with `Resources()`, not `Parameters()` (server)

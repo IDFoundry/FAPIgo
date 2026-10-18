@@ -91,9 +91,9 @@ func (s *Server) CompleteAuthorization(ctx context.Context, req CompleteAuthoriz
 		return s.completeLocalFail(ctx, completed.ClientID, newError(ErrorInvalidRequest, 400, "interaction handle has expired", nil)), nil
 	}
 
-	request, err := decodeRequestRecord(completed.Request)
+	request, err := s.decodeOwnRequestRecord(completed.Request)
 	if err != nil {
-		return s.completeLocalFail(ctx, completed.ClientID, newError(ErrorServerError, 500, "failed to decode pushed authorization request", err)), nil
+		return s.completeLocalFail(ctx, completed.ClientID, recordFailure(err, newError(ErrorInvalidRequest, 400, "interaction handle is invalid, expired, or already used", nil), "pushed authorization request")), nil
 	}
 
 	redirectURI, err := jsonString(request.Parameters, "redirect_uri")
@@ -196,7 +196,7 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 	dpopJKT, _ := jsonString(request.Parameters, "dpop_jkt") // optional, RFC 9449 §10
 
 	now := s.deps.Clock.Now()
-	grant, err := encodeGrantRecord(grantRecord{
+	grant, err := s.encodeGrantRecord(grantRecord{
 		IssuedAt:                &now,
 		RedirectURI:             redirectURI,
 		CodeChallenge:           codeChallenge,

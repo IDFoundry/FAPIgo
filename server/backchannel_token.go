@@ -112,9 +112,9 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 	if polled.ClientID != client.ID() {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorInvalidGrant, 400, "auth_req_id was not issued to this client", nil))
 	}
-	request, err := decodeRequestRecord(polled.Request)
+	request, err := s.decodeOwnRequestRecord(polled.Request)
 	if err != nil {
-		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorServerError, 500, "failed to decode backchannel authentication request", err))
+		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), recordFailure(err, newError(ErrorInvalidGrant, 400, "auth_req_id is invalid or unknown", nil), "backchannel authentication request"))
 	}
 	if request.DPoPJKT != "" && request.DPoPJKT != thumbprint {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorInvalidGrant, 400, "DPoP proof key does not match the dpop_jkt bound to this backchannel authentication request", nil))

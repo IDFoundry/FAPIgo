@@ -237,9 +237,9 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), invalidErr)
 	}
 
-	grant, err := decodeGrantRecord(redeemed.Grant)
+	grant, err := s.decodeOwnGrantRecord(redeemed.Grant)
 	if err != nil {
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to decode authorization code grant", err))
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), recordFailure(err, newError(ErrorInvalidGrant, 400, "code is invalid, expired, or already used", nil), "authorization code grant"))
 	}
 	if _, ok := s.grantRevocationReader(); ok {
 		// Named after the code, so a reuse of it can revoke whatever this
@@ -691,7 +691,7 @@ func (s *Server) issueRefreshToken(ctx context.Context, clientID fapi.ClientID, 
 		return "", err
 	}
 	now := s.deps.Clock.Now()
-	encoded, err := encodeGrantRecord(grant.forRefreshToken(binding, now))
+	encoded, err := s.encodeGrantRecord(grant.forRefreshToken(binding, now))
 	if err != nil {
 		return "", err
 	}

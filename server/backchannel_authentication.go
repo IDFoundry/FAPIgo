@@ -230,7 +230,7 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	}
 
 	essentialACR, _ := essentialACRValues(validated.params)
-	request, err := encodeRequestRecord(requestRecord{Parameters: validated.params, TokenClaims: validated.tokenClaims, DPoPJKT: dpopJKT, ExpiresAt: &expiresAt, EssentialACRValues: essentialACR, RequiredSubject: requiredSubject, RequiredInternalSubject: requiredInternal, Resources: validated.resources})
+	request, err := s.encodeRequestRecord(requestRecord{Parameters: validated.params, TokenClaims: validated.tokenClaims, DPoPJKT: dpopJKT, ExpiresAt: &expiresAt, EssentialACRValues: essentialACR, RequiredSubject: requiredSubject, RequiredInternalSubject: requiredInternal, Resources: validated.resources})
 	if err != nil {
 		return s.backchannelBeginFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to encode backchannel authentication request", err)), nil
 	}
@@ -710,9 +710,9 @@ func (s *Server) LookupBackchannelInteraction(ctx context.Context, handle Backch
 	if err != nil {
 		return BackchannelInteractionRequest{}, newError(ErrorInvalidRequest, 400, "backchannel authentication handle is unknown", err)
 	}
-	request, err := decodeRequestRecord(pending.Request)
+	request, err := s.decodeOwnRequestRecord(pending.Request)
 	if err != nil {
-		return BackchannelInteractionRequest{}, newError(ErrorServerError, 500, "failed to decode backchannel authentication request", err)
+		return BackchannelInteractionRequest{}, recordFailure(err, newError(ErrorInvalidRequest, 400, "backchannel authentication handle is unknown", nil), "backchannel authentication request")
 	}
 	client, err := s.deps.Clients.ResolveClient(ctx, pending.ClientID)
 	if err != nil {

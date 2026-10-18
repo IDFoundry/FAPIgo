@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	fapi "github.com/idfoundry/fapigo"
 )
 
 func TestGrantRecordRoundTrips(t *testing.T) {
@@ -137,5 +139,46 @@ func TestIssuedWithin(t *testing.T) {
 		if got := issuedWithin(tc.issuedAt, 10*time.Minute, tc.now); got != tc.want {
 			t.Errorf("%s: issuedWithin = %v, want %v", name, got, tc.want)
 		}
+	}
+}
+
+// TestOwnsRecord covers which records a server treats as its own: one
+// stamped with its issuer, and one written before records carried an
+// issuer (accepted for the rest of its lifetime), but never one another
+// issuer's server wrote.
+func TestOwnsRecord(t *testing.T) {
+	issuer, err := fapi.ParseIssuerURL("https://as.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{cfg: Config{Issuer: issuer}}
+	for recorded, want := range map[string]bool{
+		"https://as.example.com":       true,
+		"":                             true,
+		"https://tenant-b.example.com": false,
+		"https://as.example.com/":      false,
+	} {
+		if got := s.ownsRecord(recorded); got != want {
+			t.Errorf("ownsRecord(%q) = %v, want %v", recorded, got, want)
+		}
+	}
+
+	stamped, err := s.encodeGrantRecord(grantRecord{Subject: "user-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g, err := decodeGrantRecord(stamped); err != nil || g.Issuer != issuer.String() {
+		t.Errorf("encodeGrantRecord stamped issuer %q (err %v), want %q", g.Issuer, err, issuer.String())
+	}
+	request, err := s.encodeRequestRecord(requestRecord{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r, err := decodeRequestRecord(request); err != nil || r.Issuer != issuer.String() {
+		t.Errorf("encodeRequestRecord stamped issuer %q (err %v), want %q", r.Issuer, err, issuer.String())
+	}
+	legacy, err := decodeGrantRecord([]byte(`{"v":1,"sub":"user-1","auth_time":"2026-01-01T00:00:00Z"}`))
+	if err != nil || legacy.Issuer != "" || !s.ownsRecord(legacy.Issuer) {
+		t.Errorf("a record without an issuer: Issuer %q, err %v; want accepted", legacy.Issuer, err)
 	}
 }

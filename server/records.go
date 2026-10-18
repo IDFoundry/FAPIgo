@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"time"
@@ -25,6 +26,10 @@ const recordVersion = 1
 // of which a store ever interprets.
 type requestRecord struct {
 	Version int `json:"v"`
+
+	// Issuer is the issuer of the server that wrote the record (see
+	// Server.ownsRecord). Empty in a record written before it existed.
+	Issuer string `json:"iss,omitempty"`
 
 	// Parameters are the request's validated parameters.
 	Parameters map[string]json.RawMessage `json:"parameters"`
@@ -106,6 +111,10 @@ func (r requestRecord) requiredSubjectForApplication() string {
 // storage record type — and never requires a store change.
 type grantRecord struct {
 	Version int `json:"v"`
+
+	// Issuer is the issuer of the server that wrote the record (see
+	// Server.ownsRecord). Empty in a record written before it existed.
+	Issuer string `json:"iss,omitempty"`
 
 	// RedirectURI, CodeChallenge and Nonce apply to an authorization
 	// code only (the code exchange checks the first two; the first ID
@@ -289,6 +298,65 @@ func withManagedClaim(claims map[string]json.RawMessage, name, value string) map
 	with := map[string]json.RawMessage{name: raw}
 	maps.Copy(with, claims)
 	return with
+}
+
+// encodeRequestRecord and encodeGrantRecord stamp a record with this
+// server's issuer before encoding it; see ownsRecord.
+func (s *Server) encodeRequestRecord(r requestRecord) (json.RawMessage, error) {
+	r.Issuer = s.cfg.Issuer.String()
+	return encodeRequestRecord(r)
+}
+
+func (s *Server) encodeGrantRecord(g grantRecord) (json.RawMessage, error) {
+	g.Issuer = s.cfg.Issuer.String()
+	return encodeGrantRecord(g)
+}
+
+// ownsRecord reports whether a decoded record's issuer is this
+// server's. Stores may be shared by every instance of one issuer, never
+// by servers with different issuers (a multi-tenant deployment on one
+// database, say): there one tenant's authorization code, request_uri,
+// refresh token or auth_req_id would otherwise be redeemed by another,
+// which would issue its own tokens for a user it never authenticated.
+// A record written by another issuer is treated as unknown. One written
+// before records carried an issuer has none and is accepted, so an
+// upgrade doesn't fail requests in flight; such a record expires
+// within its own lifetime.
+func (s *Server) ownsRecord(issuer string) bool {
+	return issuer == "" || issuer == s.cfg.Issuer.String()
+}
+
+// errForeignRecord is decodeOwnRequestRecord's and decodeOwnGrantRecord's
+// error for a record another issuer's server wrote; see ownsRecord.
+var errForeignRecord = errors.New("record was written by a server with another issuer")
+
+// decodeOwnRequestRecord and decodeOwnGrantRecord decode a record, and
+// refuse one this server doesn't own (ownsRecord) with errForeignRecord.
+func (s *Server) decodeOwnRequestRecord(raw json.RawMessage) (requestRecord, error) {
+	r, err := decodeRequestRecord(raw)
+	if err == nil && !s.ownsRecord(r.Issuer) {
+		return requestRecord{}, errForeignRecord
+	}
+	return r, err
+}
+
+func (s *Server) decodeOwnGrantRecord(raw json.RawMessage) (grantRecord, error) {
+	g, err := decodeGrantRecord(raw)
+	if err == nil && !s.ownsRecord(g.Issuer) {
+		return grantRecord{}, errForeignRecord
+	}
+	return g, err
+}
+
+// recordFailure is the error for a record decodeOwnRequestRecord or
+// decodeOwnGrantRecord refused: unknown, the one the endpoint gives a
+// record it never wrote, when another issuer wrote it, and a
+// server_error saying what couldn't be decoded otherwise.
+func recordFailure(err error, unknown *Error, what string) *Error {
+	if errors.Is(err, errForeignRecord) {
+		return unknown
+	}
+	return newError(ErrorServerError, 500, "failed to decode "+what, err)
 }
 
 func encodeRequestRecord(r requestRecord) (json.RawMessage, error) {

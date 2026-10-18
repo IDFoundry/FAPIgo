@@ -201,9 +201,9 @@ func (s *Server) redeemRefreshGrant(ctx context.Context, clientID fapi.ClientID,
 	if redeemed.ClientID != clientID {
 		return grantRecord{}, time.Time{}, newError(ErrorInvalidGrant, 400, "refresh_token was not issued to this client", nil)
 	}
-	grant, err := decodeGrantRecord(redeemed.Grant)
+	grant, err := s.decodeOwnGrantRecord(redeemed.Grant)
 	if err != nil {
-		return grantRecord{}, time.Time{}, newError(ErrorServerError, 500, "failed to decode refresh token grant", err)
+		return grantRecord{}, time.Time{}, recordFailure(err, newError(ErrorInvalidGrant, 400, "refresh_token is invalid, expired, or already used", nil), "refresh token grant")
 	}
 	if !issuedWithin(grant.IssuedAt, s.cfg.Limits.RefreshTokenLifetime, now) {
 		return grantRecord{}, time.Time{}, newError(ErrorInvalidGrant, 400, "refresh_token has expired", nil)

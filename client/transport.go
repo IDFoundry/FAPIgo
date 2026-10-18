@@ -94,6 +94,7 @@ func (c *Client) postForm(ctx context.Context, url string, body []byte, extraHea
 	if req.URL.Scheme == "https" && res.TLS == nil {
 		return nil, 0, nil, fapihttp.ErrMissingTLS
 	}
+	c.recordAttestationChallenge(res.Header)
 
 	data, err := io.ReadAll(io.LimitReader(res.Body, c.cfg.Limits.MaxHTTPResponseBytes+1))
 	if err != nil {

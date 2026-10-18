@@ -353,11 +353,26 @@ func (c *Client) dpopKeyThumbprint(ctx context.Context) (string, error) {
 // connection Dependencies.HTTP's own configured transport establishes,
 // not from a signed application-layer proof.
 func (c *Client) pushAuthorizationRequestPlain(ctx context.Context, params map[string]string, extensions extension.Values, authorizationDetails []json.RawMessage) ([]byte, *Error) {
+	return c.postPushedRequestWithoutProof(ctx, params, extensions, authorizationDetails)
+}
+
+// postPushedRequestWithoutProof builds and posts a pushed authorization
+// request that carries no DPoP proof, building and posting it once more
+// if the response is an attestation challenge (see
+// postFormWithAttestationChallenge).
+func (c *Client) postPushedRequestWithoutProof(ctx context.Context, params map[string]string, extensions extension.Values, authorizationDetails []json.RawMessage) ([]byte, *Error) {
 	formParams, headers, buildErr := c.buildPushedRequestForm(ctx, c.deps.Clock.Now(), params, extensions, authorizationDetails)
 	if buildErr != nil {
 		return nil, buildErr
 	}
-	body, status, header, err := c.postForm(ctx, c.cfg.Endpoints.PushedAuthorizationRequest.String(), encodeForm(formParams), headers)
+	rebuild := func() ([]byte, map[string]string, error) {
+		retryParams, retryHeaders, retryErr := c.buildPushedRequestForm(ctx, c.deps.Clock.Now(), params, extensions, authorizationDetails)
+		if retryErr != nil {
+			return nil, nil, retryErr
+		}
+		return encodeForm(retryParams), retryHeaders, nil
+	}
+	body, status, header, err := c.postFormWithAttestationChallenge(ctx, c.cfg.Endpoints.PushedAuthorizationRequest.String(), encodeForm(formParams), headers, rebuild)
 	if err != nil {
 		return nil, newError(ErrorInternal, errPushedAuthorizationRequestFailed, err)
 	}
@@ -379,26 +394,14 @@ func (c *Client) pushAuthorizationRequestWithJKT(ctx context.Context, params map
 		return nil, newError(ErrorInternal, "failed to compute DPoP key thumbprint", err)
 	}
 	params["dpop_jkt"] = dpopThumbprint
-
-	formParams, headers, buildErr := c.buildPushedRequestForm(ctx, c.deps.Clock.Now(), params, extensions, authorizationDetails)
-	if buildErr != nil {
-		return nil, buildErr
-	}
-	body, status, header, err := c.postForm(ctx, c.cfg.Endpoints.PushedAuthorizationRequest.String(), encodeForm(formParams), headers)
-	if err != nil {
-		return nil, newError(ErrorInternal, errPushedAuthorizationRequestFailed, err)
-	}
-	if status != http.StatusCreated && status != http.StatusOK {
-		return nil, parErrorFromResponse(status, header, body)
-	}
-	return body, nil
+	return c.postPushedRequestWithoutProof(ctx, params, extensions, authorizationDetails)
 }
 
 // pushAuthorizationRequestWithDPoPProof implements PARDPoPBindingProof
 // (the default): binds the authorization code to this client's DPoP key
 // by presenting an actual proof at PAR — RFC 9449 §10.1's recommended
 // mechanism — instead of the plain dpop_jkt parameter, retrying once on
-// a use_dpop_nonce challenge. This mirrors sendTokenRequest's identical
+// a use_dpop_nonce or attestation challenge (see challengeRetry). This mirrors sendTokenRequest's identical
 // mechanic for the token endpoint: an authorization server that
 // nonce-challenges DPoP proofs it verifies can now challenge this one
 // too, since PAR is presenting one for the first time. A client
@@ -424,24 +427,25 @@ func (c *Client) pushAuthorizationRequestWithDPoPProof(ctx context.Context, para
 		return nil, newError(ErrorInternal, "failed to build pushed authorization request", buildErr)
 	}
 
-	body, status, header, err := c.postParRequestWithDPoP(ctx, dpopSigner, &parURL, form, c.cachedDPoPNonce(ctx, c.asNonceScope()), headers)
+	nonce := c.cachedDPoPNonce(ctx, c.asNonceScope())
+	body, status, header, err := c.postParRequestWithDPoP(ctx, dpopSigner, &parURL, form, nonce, headers)
 	if err != nil {
 		return nil, newError(ErrorInternal, errPushedAuthorizationRequestFailed, err)
 	}
-	nextNonce := header.Get(dpopNonceHeader)
-	c.cacheDPoPNonce(ctx, c.asNonceScope(), nextNonce)
+	c.cacheDPoPNonce(ctx, c.asNonceScope(), header.Get(dpopNonceHeader))
 	if status == http.StatusCreated || status == http.StatusOK {
 		return body, nil
 	}
 
-	if nextNonce == "" || !isDPoPNonceError(body) {
+	retryNonce, retry := challengeRetry(header, body, nonce)
+	if !retry {
 		return nil, parErrorFromResponse(status, header, body)
 	}
 	retryForm, retryHeaders, buildErr := buildParForm()
 	if buildErr != nil {
 		return nil, newError(ErrorInternal, "failed to build pushed authorization request", buildErr)
 	}
-	body, status, header, err = c.postParRequestWithDPoP(ctx, dpopSigner, &parURL, retryForm, nextNonce, retryHeaders)
+	body, status, header, err = c.postParRequestWithDPoP(ctx, dpopSigner, &parURL, retryForm, retryNonce, retryHeaders)
 	if err != nil {
 		return nil, newError(ErrorInternal, errPushedAuthorizationRequestFailed, err)
 	}

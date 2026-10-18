@@ -15,6 +15,43 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.58.0
+
+### Attestation-based client authentication follows draft-12 (server, client)
+
+Not a breaking change: clients built to draft-07 keep working, and so
+does a FAPIgo client against a draft-07 server. It's here because a
+server now answers a few requests differently.
+
+**Affects:** a server with `Config.AttestationBasedClientAuthentication`,
+and clients of it.
+
+**What changes:**
+
+- A Client Attestation or PoP without `iss` is accepted
+  (draft-ietf-oauth-attestation-based-client-auth-08 removed it); one
+  that has it is still checked. The attester is still established by
+  the key that verifies the attestation, never by `iss`.
+- An expired attestation is refused with `use_fresh_attestation` (HTTP
+  400, §7.4), not `invalid_client` (401), once its signature verifies.
+- A `client_id` parameter naming a different client than the
+  attestation's `sub` is refused with `invalid_client`, at every
+  endpoint and in `AuthenticateAttestedClient` (through
+  `TokenEndpointRequest.AttestedClientAuthentication`, or the new
+  `AttestedClientAuthenticationRequest.ClientID`).
+- For a client registered for attestation and another method, an
+  attested installation can no longer redeem or revoke a refresh token
+  issued under the other method. Refresh tokens issued before v0.50.0
+  aren't affected.
+- PoP replay records are now kept per client instance, so a PoP first
+  used within `Limits.MaxClientAttestationPoPAge` before the upgrade
+  could be accepted once more after it.
+
+**What to change:** nothing, unless an embedder treats a refused
+attestation as `invalid_client` only: handle `use_fresh_attestation` by
+getting a new attestation. A FAPIgo client follows the server's
+attestation challenges by itself.
+
 ## v0.57.0
 
 ### Read `resource` with `Resources()`, not `Parameters()` (server)

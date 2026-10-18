@@ -168,7 +168,7 @@ type Algorithms struct {
 
 	// ClientAttestationPoP is the algorithm this client signs its
 	// Client Attestation PoP JWTs with
-	// (draft-ietf-oauth-attestation-based-client-auth-07 §5.2) — must
+	// (draft-ietf-oauth-attestation-based-client-auth-12 §5.1) — must
 	// match the Client Instance Key Dependencies.Keys holds under
 	// keys.ClientAttestationPoPSigning. Required only when
 	// ClientAuthMethod is storage.ClientAuthMethodAttestation. Unlike

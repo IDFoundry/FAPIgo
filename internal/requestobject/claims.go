@@ -31,8 +31,11 @@ const jwtType = "oauth-authz-req+jwt"
 // omit that prefix). The OIDF conformance suite deliberately sends a
 // randomized-case "typ" for exactly this reason (JAR-4) — a naive exact
 // comparison rejects a spec-compliant request object.
+//
+// The generic "JWT" (RFC 7519 §5.1) is accepted too: it says no more
+// than an absent "typ" does, which §10.8 has a server keep accepting.
 func isRequestObjectType(typ string) bool {
-	return jose.TypeIs(typ, jwtType)
+	return jose.TypeIs(typ, jwtType) || jose.TypeIs(typ, "JWT")
 }
 
 // Claims is a parsed request object payload. iss, aud and exp are the

@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"strings"
@@ -30,7 +31,10 @@ const maxFormRequestBytes = 1 << 20
 // *FromHTTP constructors built on it (PushAuthorizationRequestFromHTTP,
 // TokenEndpointRequestFromHTTP, BeginBackchannelAuthenticationRequestFromHTTP).
 func FormRequestFromHTTP(r *http.Request) (FormRequest, error) {
-	if ct := r.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/x-www-form-urlencoded") {
+	// RFC 9110 §8.3.1: the media type is case-insensitive, and may carry
+	// parameters ("; charset=UTF-8"); "application/x-www-form-urlencodedx"
+	// is another type, not this one with a suffix.
+	if ct := r.Header.Get("Content-Type"); !isFormContentType(ct) {
 		return FormRequest{}, newError(ErrorInvalidRequest, http.StatusBadRequest, "the request body must be application/x-www-form-urlencoded", fmt.Errorf("content type %q", ct))
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxFormRequestBytes+1))
@@ -58,4 +62,12 @@ func FormRequestFromHTTP(r *http.Request) (FormRequest, error) {
 		params = append(params, FormParameter{Name: decodedName, Value: decodedValue})
 	}
 	return FormRequest{Parameters: params}, nil
+}
+
+// isFormContentType reports whether a Content-Type header names
+// application/x-www-form-urlencoded, in any case, with or without
+// parameters.
+func isFormContentType(contentType string) bool {
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	return err == nil && strings.EqualFold(mediaType, "application/x-www-form-urlencoded")
 }

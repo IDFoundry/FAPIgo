@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -12,6 +13,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/clientassertion"
+	"github.com/idfoundry/fapigo/internal/dpop"
 	"github.com/idfoundry/fapigo/internal/mtls"
 	"github.com/idfoundry/fapigo/internal/requestobject"
 	"github.com/idfoundry/fapigo/internal/token"
@@ -1046,11 +1048,12 @@ func TestBeginBackchannelAuthenticationRejectsNoHints(t *testing.T) {
 	}
 }
 
-// TestBeginBackchannelAuthenticationRejectsNotificationTokenForPollClient
+// TestBeginBackchannelAuthenticationIgnoresNotificationTokenForPollClient
 // covers a poll-mode client (newHarnessWithBackchannel's own default
-// registration) sending client_notification_token anyway — CIBA §7.1
-// only makes the parameter meaningful for ping/push.
-func TestBeginBackchannelAuthenticationRejectsNotificationTokenForPollClient(t *testing.T) {
+// registration) sending client_notification_token anyway: CIBA §7.1
+// requires it only for ping and push and doesn't forbid it for poll,
+// so it's ignored, as an unused parameter is.
+func TestBeginBackchannelAuthenticationIgnoresNotificationTokenForPollClient(t *testing.T) {
 	h, _ := newHarnessWithBackchannel(t)
 	params := standardBackchannelParams(t)
 	params["client_notification_token"] = jsonRaw(t, "notify-me")
@@ -1062,12 +1065,8 @@ func TestBeginBackchannelAuthenticationRejectsNotificationTokenForPollClient(t *
 	if err != nil {
 		t.Fatalf("BeginBackchannelAuthentication: %v", err)
 	}
-	localErr, ok := action.(server.BackchannelAuthenticationLocalError)
-	if !ok {
-		t.Fatalf("action = %T, want server.BackchannelAuthenticationLocalError", action)
-	}
-	if localErr.Error.Code() != server.ErrorInvalidRequest {
-		t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequest)
+	if _, ok := action.(server.BackchannelInteractionRequired); !ok {
+		t.Fatalf("action = %T, want server.BackchannelInteractionRequired", action)
 	}
 }
 
@@ -1910,4 +1909,59 @@ func TestBeginBackchannelAuthenticationRequiresStringHint(t *testing.T) {
 			t.Fatalf("Hints.LoginHint = %q, want user-1", required.Interaction.Hints.LoginHint)
 		}
 	})
+}
+
+// TestBeginBackchannelAuthenticationAcceptsDPoPProofForTheMTLSAlias: a
+// client that calls the backchannel authentication endpoint's mTLS
+// alias (RFC 8705 §5) names that URL in its DPoP proof's htu, which is
+// accepted as at PAR and the token endpoint; any other URL isn't.
+func TestBeginBackchannelAuthenticationAcceptsDPoPProofForTheMTLSAlias(t *testing.T) {
+	const alias = "https://mtls.as.example/backchannel-authenticate"
+	h := newHarnessWithBackchannelConfig(t, memstore.NewBackchannelAuthenticationStore(), func(cfg *server.Config) {
+		u, err := fapi.ParseEndpointURL(alias)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg.MTLSEndpoints.BackchannelAuthentication = u
+	})
+	for htu, wantOK := range map[string]bool{alias: true, testBackchannelAuthenticationEndpoint: true, "https://other.example/backchannel-authenticate": false} {
+		target, err := url.Parse(htu)
+		if err != nil {
+			t.Fatal(err)
+		}
+		proof, err := dpop.CreateProof(dpop.ProofRequest{Signer: generateKey(t), Algorithm: fapi.ES256, Method: "POST", URL: target, Now: h.now})
+		if err != nil {
+			t.Fatal(err)
+		}
+		action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+			HTTP:       server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), h.backchannelRequestObject(t, standardBackchannelParams(t)))},
+			DPoPProofs: []string{proof},
+		})
+		if err != nil {
+			t.Fatalf("htu %q: BeginBackchannelAuthentication: %v", htu, err)
+		}
+		_, ok := action.(server.BackchannelInteractionRequired)
+		if ok != wantOK {
+			t.Errorf("htu %q: action = %T, want accepted %v", htu, action, wantOK)
+		}
+	}
+}
+
+// TestBeginBackchannelAuthenticationRefusesMalformedAuthorizationDetails:
+// RFC 9396 §5 answers malformed authorization_details, or any on a
+// server without RAR, with invalid_authorization_details.
+func TestBeginBackchannelAuthenticationRefusesMalformedAuthorizationDetails(t *testing.T) {
+	h, _ := newHarnessWithBackchannel(t)
+	params := standardBackchannelParams(t)
+	params["authorization_details"] = json.RawMessage(`{"type":"payment"}`)
+	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+		HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), h.backchannelRequestObject(t, params))},
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+	localErr, ok := action.(server.BackchannelAuthenticationLocalError)
+	if !ok || localErr.Error.Code() != server.ErrorInvalidAuthorizationDetails {
+		t.Fatalf("action = %#v, want invalid_authorization_details", action)
+	}
 }

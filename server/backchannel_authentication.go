@@ -82,6 +82,9 @@ func (BackchannelInteractionRequired) backchannelAuthenticationAction() {}
 // http.ResponseWriter header/status call, it has no effect once a
 // prior write has already sent the response's status line.
 func (a BackchannelInteractionRequired) WriteJSON(w http.ResponseWriter) {
+	// auth_req_id redeems the tokens: RFC 6749 §5.1's caching rule for
+	// "credentials, or other sensitive information".
+	setNoStore(w)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	// Encoding a string and two ints cannot fail.
@@ -363,7 +366,8 @@ func (s *Server) checkBackchannelExtensions(ctx context.Context, client storage.
 	}
 	requestedAuthorizationDetails, err := s.parseRequestedAuthorizationDetails(params)
 	if err != nil {
-		return nil, newError(ErrorInvalidRequest, 400, "authorization_details is invalid", err)
+		// RFC 9396 §5.
+		return nil, newError(ErrorInvalidAuthorizationDetails, 400, "authorization_details is invalid", err)
 	}
 	if len(requestedAuthorizationDetails) > 0 {
 		granted, policyErr := s.applyRARPolicy(ctx, client, s.deps.CIBARARPolicy, requestedAuthorizationDetails)
@@ -461,15 +465,17 @@ func (s *Server) validateBackchannelAuthenticationParameters(verified verifiedBa
 // validateClientNotificationToken checks client_notification_token's
 // presence against exactly what client's own registered
 // BackchannelTokenDeliveryMode requires (CIBA §7.1: required for
-// ping/push, meaningless for poll) — push itself is never supported,
+// ping/push, meaningless for poll, so ignored and dropped there) — push
+// itself is never supported,
 // since storage.BackchannelTokenDeliveryMode has no value for it.
 func validateClientNotificationToken(params map[string]json.RawMessage, client storage.RegisteredClient) *Error {
 	notificationTokenRaw, hasNotificationToken := params["client_notification_token"]
 	switch client.BackchannelTokenDeliveryMode() {
 	case storage.BackchannelTokenDeliveryModePoll:
-		if hasNotificationToken {
-			return newError(ErrorInvalidRequest, 400, "client_notification_token is not permitted for a client registered for poll delivery", nil)
-		}
+		// CIBA Core §7.1 requires it only for ping and push, and nothing
+		// forbids it for poll, where nothing uses it: it's dropped, so a
+		// bearer credential that will never be presented isn't stored.
+		delete(params, "client_notification_token")
 	case storage.BackchannelTokenDeliveryModePing:
 		if !hasNotificationToken {
 			return newError(ErrorInvalidRequest, 400, "client_notification_token is required for a client registered for ping delivery", nil)
@@ -567,16 +573,17 @@ func (s *Server) reconcileBackchannelDPoPBinding(ctx context.Context, proof stri
 	if proof == "" {
 		return declared, nil
 	}
-	endpoint := s.cfg.Endpoints.BackchannelAuthentication.URL()
-	verified, err := dpop.Verify(ctx, dpop.VerifyRequest{
+	// A client authenticating with its certificate calls the mTLS alias
+	// (RFC 8705 §5), and its proof names that URL, as at PAR and the
+	// token endpoint.
+	verified, err := verifyDPoPAtEitherEndpoint(ctx, dpop.VerifyRequest{
 		Proof:        proof,
 		Method:       "POST",
-		URL:          &endpoint,
 		Now:          s.deps.Clock.Now(),
 		MaxProofAge:  s.cfg.Limits.MaxDPoPProofAge,
 		MaxClockSkew: s.cfg.Limits.MaxClockSkew,
 		Replay:       s.dpopReplayChecker(),
-	})
+	}, s.cfg.Endpoints.BackchannelAuthentication, s.cfg.MTLSEndpoints.BackchannelAuthentication)
 	if err != nil {
 		return "", newError(ErrorInvalidDPoPProof, 400, "DPoP proof verification failed", err)
 	}

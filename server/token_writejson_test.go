@@ -102,3 +102,36 @@ func TestTokenResultWriteJSONIncludesOptionalMembers(t *testing.T) {
 		t.Fatalf("authorization_details = %s, want %s", got.AuthorizationDetails, `[{"type":"payment"}]`)
 	}
 }
+
+// TestSensitiveResponsesAreUncacheable: RFC 6749 §5.1 has a response
+// carrying tokens, credentials or other sensitive information sent with
+// Cache-Control: no-store and Pragma: no-cache: the token response, an
+// error, a PAR response (its request_uri) and a CIBA acknowledgement
+// (its auth_req_id) alike. A token response with no scope leaves the
+// member out rather than sending "".
+func TestSensitiveResponsesAreUncacheable(t *testing.T) {
+	for name, write := range map[string]func(*httptest.ResponseRecorder){
+		"token": func(w *httptest.ResponseRecorder) {
+			server.TokenResult{AccessToken: fapi.NewSecret("at"), TokenType: "DPoP"}.WriteJSON(w)
+		},
+		"error": func(w *httptest.ResponseRecorder) { server.NewError(server.ErrorInvalidGrant, 400, "").WriteJSON(w) },
+		"text":  func(w *httptest.ResponseRecorder) { server.NewError(server.ErrorInvalidRequest, 400, "").WriteText(w) },
+		"ciba":  func(w *httptest.ResponseRecorder) { server.BackchannelInteractionRequired{}.WriteJSON(w) },
+	} {
+		rec := httptest.NewRecorder()
+		write(rec)
+		if rec.Header().Get("Cache-Control") != "no-store" || rec.Header().Get("Pragma") != "no-cache" {
+			t.Errorf("%s: Cache-Control %q, Pragma %q; want no-store, no-cache", name, rec.Header().Get("Cache-Control"), rec.Header().Get("Pragma"))
+		}
+	}
+
+	rec := httptest.NewRecorder()
+	server.TokenResult{AccessToken: fapi.NewSecret("at"), TokenType: "DPoP"}.WriteJSON(rec)
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := body["scope"]; ok {
+		t.Errorf("body = %s, want no scope member when Scope is empty", rec.Body.Bytes())
+	}
+}

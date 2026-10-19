@@ -64,6 +64,11 @@ type BackchannelTokenExchangeRequest struct {
 // RefreshAccessToken does: a scope or authorization_details type the
 // client may no longer use is refused (invalid_scope, invalid_grant).
 func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req BackchannelTokenExchangeRequest) (TokenResult, error) {
+	if s.deps.Backchannel == nil {
+		// RFC 6749 §5.2: a server that doesn't do CIBA doesn't support
+		// its grant type.
+		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, "", newError(ErrorUnsupportedGrantType, 400, "backchannel authentication is not configured", nil))
+	}
 	formParams, requestedResources := s.takeResourceParameters(req.HTTP.Parameters)
 	params, err := formParametersToMap(formParams)
 	if err != nil {

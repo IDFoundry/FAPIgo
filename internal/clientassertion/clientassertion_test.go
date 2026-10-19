@@ -318,15 +318,21 @@ func TestParseRejectsAudienceArray(t *testing.T) {
 	}
 }
 
-func TestParseRejectsUnknownClaim(t *testing.T) {
+// TestParseIgnoresUnknownClaim: RFC 7523 §3 item 8 lets the JWT
+// "contain other claims", and RFC 7519 §4 has one that isn't understood
+// ignored. A known claim in another case is still refused, so it can't
+// slip a second value past the one read.
+func TestParseIgnoresUnknownClaim(t *testing.T) {
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256"}`))
-	payload := base64.RawURLEncoding.EncodeToString([]byte(
-		`{"iss":"client-123","sub":"client-123","aud":"https://as.example/token","jti":"abc","exp":9999999999,"unexpected":"x"}`,
-	))
-	token := header + "." + payload + "." + base64.RawURLEncoding.EncodeToString(make([]byte, 64))
-
-	if _, err := Parse(token); !errors.Is(err, ErrMalformedClaims) {
-		t.Fatalf("Parse(unknown claim) = %v, want ErrMalformedClaims", err)
+	signature := base64.RawURLEncoding.EncodeToString(make([]byte, 64))
+	for payload, wantErr := range map[string]bool{
+		`{"iss":"client-123","sub":"client-123","aud":"https://as.example/token","jti":"abc","exp":9999999999,"unexpected":"x"}`: false,
+		`{"iss":"client-123","sub":"client-123","aud":"https://as.example/token","jti":"abc","exp":9999999999,"Sub":"other"}`:    true,
+	} {
+		_, err := Parse(header + "." + base64.RawURLEncoding.EncodeToString([]byte(payload)) + "." + signature)
+		if errors.Is(err, ErrMalformedClaims) != wantErr {
+			t.Errorf("Parse(%s) = %v, want ErrMalformedClaims %v", payload, err, wantErr)
+		}
 	}
 }
 

@@ -107,9 +107,10 @@ type TokenResult struct {
 
 // WriteJSON writes t as a complete RFC 6749 §5.1 token response to w:
 // the DPoP-Nonce header when NextDPoPNonce is non-empty (RFC 9449 §8),
-// the Cache-Control: no-store header §5.1 itself requires on every
-// token response, the "application/json" Content-Type, and a body of
-// access_token/token_type/expires_in/scope plus id_token,
+// the Cache-Control: no-store and Pragma: no-cache headers §5.1 itself
+// requires on every token response, the "application/json"
+// Content-Type, and a body of
+// access_token/token_type/expires_in plus scope (when not empty), id_token,
 // refresh_token and authorization_details wherever HasIDToken,
 // HasRefreshToken or AuthorizationDetails say to include them.
 //
@@ -121,7 +122,7 @@ func (t TokenResult) WriteJSON(w http.ResponseWriter) {
 		AccessToken          string          `json:"access_token"`
 		TokenType            string          `json:"token_type"`
 		ExpiresIn            int64           `json:"expires_in"`
-		Scope                string          `json:"scope"`
+		Scope                string          `json:"scope,omitempty"`
 		IDToken              string          `json:"id_token,omitempty"`
 		RefreshToken         string          `json:"refresh_token,omitempty"`
 		AuthorizationDetails json.RawMessage `json:"authorization_details,omitempty"`
@@ -144,7 +145,7 @@ func (t TokenResult) WriteJSON(w http.ResponseWriter) {
 	if t.NextDPoPNonce != "" {
 		w.Header().Set("DPoP-Nonce", t.NextDPoPNonce)
 	}
-	w.Header().Set("Cache-Control", "no-store")
+	setNoStore(w)
 	w.Header().Set("Content-Type", "application/json")
 	// Encoding this shape cannot fail: every field is a plain string,
 	// int64, or the already-valid json.RawMessage AuthorizationDetails

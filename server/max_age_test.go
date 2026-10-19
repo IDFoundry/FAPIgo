@@ -95,7 +95,7 @@ func TestRequestObjectMaxAgeIsANumber(t *testing.T) {
 func TestPushAuthorizationRequestRejectsMalformedMaxAge(t *testing.T) {
 	// 3162240001 is one second over the 100-year cap; 9223372036, just
 	// under the old limit, once overflowed the skew subtraction.
-	for _, value := range []string{"-1", "1.5", "five", "", "99999999999999999999", "3162240001", "9223372036"} {
+	for _, value := range []string{"-1", "1.5", "five", "99999999999999999999", "3162240001", "9223372036"} {
 		t.Run(value, func(t *testing.T) {
 			h := newHarness(t, server.ProfileFAPISecurity, true)
 			_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
@@ -170,5 +170,29 @@ func TestCompleteAuthorizationEnforcesMaxAge(t *testing.T) {
 				t.Errorf("code present = %v, want %v", q.Get("code") != "", tc.wantError == "")
 			}
 		})
+	}
+}
+
+// TestPushAuthorizationRequestTreatsEmptyParametersAsOmitted: RFC 6749
+// §3.1 has a parameter "sent without a value" treated "as if it were
+// omitted": an empty max_age is no max_age, and an empty optional
+// parameter alongside a real one isn't a duplicate.
+func TestPushAuthorizationRequestTreatsEmptyParametersAsOmitted(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	params := append(plainFormParameters(t, h.clientAssertion(t), map[string]string{"max_age": ""}), formParam("nonce", ""))
+	pushResult, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+		HTTP: server.FormRequest{Parameters: params},
+	})
+	if err != nil {
+		t.Fatalf("PushAuthorizationRequest(empty max_age and nonce) = %v", err)
+	}
+	action, err := h.server.BeginAuthorization(context.Background(), server.BeginAuthorizationRequest{
+		RequestURI: pushResult.RequestURI.String(), ClientID: testClientID,
+	})
+	if err != nil {
+		t.Fatalf("BeginAuthorization: %v", err)
+	}
+	if in := action.(server.InteractionRequired).Interaction; in.HasMaxAge {
+		t.Errorf("HasMaxAge = true for an empty max_age, want it treated as omitted")
 	}
 }

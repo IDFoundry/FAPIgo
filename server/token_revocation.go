@@ -9,6 +9,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/grantrevocation"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // TokenRevocationRequest is a request to this server's token revocation
@@ -130,7 +131,7 @@ func (s *Server) RevokeToken(ctx context.Context, req TokenRevocationRequest) (T
 	// token sent as "access_token" is still revoked above. One that
 	// isn't a refresh token this client may revoke is answered as the
 	// access token it was said to be, which this server can't revoke.
-	if !result.Revoked && params["token_type_hint"] == "access_token" {
+	if !result.Revoked && (params["token_type_hint"] == "access_token" || s.isOwnOpaqueAccessToken(ctx, client.ID(), token)) {
 		return TokenRevocationResult{}, s.revocationFail(ctx, client.ID(), unsupported)
 	}
 	// The client gets the same 200 either way; the audit record says
@@ -142,6 +143,29 @@ func (s *Server) RevokeToken(ctx context.Context, req TokenRevocationRequest) (T
 	}
 	s.audit(ctx, AuditEventRevokeToken, client.ID(), AuditOutcomeSuccess, description)
 	return result, nil
+}
+
+// isOwnOpaqueAccessToken reports whether rawToken is an opaque access
+// token this server issued to clientID. RFC 7009 §2.2.1 has a server
+// that can't revoke a token's type answer unsupported_token_type, rather
+// than the 200 that says it was revoked. Only the client's own tokens
+// are reported, so the answer reveals nothing about another's; a store
+// that can't answer counts as no.
+func (s *Server) isOwnOpaqueAccessToken(ctx context.Context, clientID fapi.ClientID, rawToken string) bool {
+	var store storage.AccessTokenStore
+	switch t := s.deps.AccessTokens.(type) {
+	case OpaqueAccessTokens:
+		store = t.Store
+	case *OpaqueAccessTokens:
+		if t != nil {
+			store = t.Store
+		}
+	}
+	if store == nil {
+		return false
+	}
+	looked, err := store.LookupAccessToken(ctx, storage.AccessTokenLookup{TokenHash: sha256.Sum256([]byte(rawToken))})
+	return err == nil && looked.ClientID == clientID
 }
 
 // revokeRefreshToken revokes rawToken if it is a live refresh token

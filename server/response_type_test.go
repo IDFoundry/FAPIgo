@@ -10,8 +10,9 @@ import (
 // TestPushAuthorizationRequestRefusesResponseTypesOtherThanCode: FAPI 2.0
 // Security Profile §5.3.2.2 allows only the authorization code flow, so
 // a pushed request whose response_type is anything but exactly "code"
-// (an implicit or hybrid type, a miscased or empty value, or none at
-// all) is refused as invalid_request.
+// is refused: as unsupported_response_type for an implicit or hybrid
+// type, or a miscased one (RFC 6749 §4.1.2.1), and as invalid_request
+// when it's empty or missing.
 func TestPushAuthorizationRequestRefusesResponseTypesOtherThanCode(t *testing.T) {
 	missing := "\x00missing"
 	for name, responseType := range map[string]string{
@@ -38,8 +39,12 @@ func TestPushAuthorizationRequestRefusesResponseTypesOtherThanCode(t *testing.T)
 			_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
 				HTTP: server.FormRequest{Parameters: params},
 			})
-			if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
-				t.Fatalf("PushAuthorizationRequest error code = %q, want invalid_request", code)
+			want := server.ErrorUnsupportedResponseType
+			if responseType == "" || responseType == missing {
+				want = server.ErrorInvalidRequest
+			}
+			if code := serverErrorCode(t, err); code != want {
+				t.Fatalf("PushAuthorizationRequest error code = %q, want %q", code, want)
 			}
 		})
 	}

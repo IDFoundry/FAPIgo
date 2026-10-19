@@ -28,6 +28,9 @@ func TestPushAuthorizationResultWriteJSON(t *testing.T) {
 	if rec.Code != 201 {
 		t.Fatalf("status = %d, want 201", rec.Code)
 	}
+	if rec.Header().Get("Cache-Control") != "no-store" || rec.Header().Get("Pragma") != "no-cache" {
+		t.Errorf("Cache-Control %q, Pragma %q; want no-store, no-cache", rec.Header().Get("Cache-Control"), rec.Header().Get("Pragma"))
+	}
 	if got := rec.Header().Get("Content-Type"); got != "application/json" {
 		t.Fatalf("Content-Type = %q, want %q", got, "application/json")
 	}

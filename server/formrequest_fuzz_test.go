@@ -3,6 +3,7 @@ package server_test
 import (
 	"bytes"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -67,4 +68,26 @@ func FuzzFormRequestFromHTTPQueryUnescape(f *testing.F) {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		_, _ = server.FormRequestFromHTTP(req)
 	})
+}
+
+// TestFormRequestFromHTTPContentType: the media type is matched
+// case-insensitively, with any parameters (RFC 9110 §8.3.1), and as a
+// whole: a longer type that merely starts with it is another type.
+func TestFormRequestFromHTTPContentType(t *testing.T) {
+	for contentType, want := range map[string]bool{
+		"application/x-www-form-urlencoded":                true,
+		"Application/X-WWW-Form-URLEncoded":                true,
+		"application/x-www-form-urlencoded; charset=UTF-8": true,
+		"application/x-www-form-urlencodedx":               false,
+		"application/x-www-form-urlencoded-not; charset=x": false,
+		"application/json":                                 false,
+		"":                                                 false,
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader("a=b"))
+		req.Header.Set("Content-Type", contentType)
+		_, err := server.FormRequestFromHTTP(req)
+		if (err == nil) != want {
+			t.Errorf("Content-Type %q: err = %v, want accepted %v", contentType, err, want)
+		}
+	}
 }

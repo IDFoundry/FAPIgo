@@ -8,6 +8,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/jose"
+	"github.com/idfoundry/fapigo/internal/numericdate"
 )
 
 // historicalKeysJWTType is the JWS "typ" header value every Federation
@@ -201,12 +202,12 @@ func (r HistoricalKeysResponse) Verify(pub crypto.PublicKey, policy HistoricalKe
 // single-entry set instead, reusing that package's own algorithm
 // detection and shape validation rather than duplicating it.
 type rawHistoricalKey struct {
-	IAT     *int64 `json:"iat"`
-	EXP     *int64 `json:"exp"`
-	NBF     *int64 `json:"nbf"`
+	IAT     *numericdate.Value `json:"iat"`
+	EXP     *numericdate.Value `json:"exp"`
+	NBF     *numericdate.Value `json:"nbf"`
 	Revoked *struct {
-		RevokedAt int64  `json:"revoked_at"`
-		Reason    string `json:"reason"`
+		RevokedAt numericdate.Value `json:"revoked_at"`
+		Reason    string            `json:"reason"`
 	} `json:"revoked"`
 }
 
@@ -270,17 +271,17 @@ func parseHistoricalKeyEntry(entry json.RawMessage) (HistoricalKey, bool) {
 
 	key := HistoricalKey{
 		KeyID: parsed[0].KeyID, Algorithm: parsed[0].Algorithm, PublicKey: parsed[0].PublicKey,
-		ExpiresAt: time.Unix(*extra.EXP, 0),
+		ExpiresAt: extra.EXP.Time(),
 	}
 	if extra.IAT != nil {
-		key.IssuedAt = time.Unix(*extra.IAT, 0)
+		key.IssuedAt = extra.IAT.Time()
 	}
 	if extra.NBF != nil {
-		key.NotBefore = time.Unix(*extra.NBF, 0)
+		key.NotBefore = extra.NBF.Time()
 	}
 	if extra.Revoked != nil {
 		key.Revoked = &KeyRevocation{
-			RevokedAt: time.Unix(extra.Revoked.RevokedAt, 0),
+			RevokedAt: extra.Revoked.RevokedAt.Time(),
 			Reason:    KeyRevocationReason(extra.Revoked.Reason),
 		}
 	}

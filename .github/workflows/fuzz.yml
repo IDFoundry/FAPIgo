@@ -165,6 +165,8 @@ jobs:
             name: FuzzRequestedPromptAndMaxAge
           - pkg: ./internal/canonical
             name: FuzzURIEquivalence
+          - pkg: ./internal/numericdate
+            name: FuzzNumericDateParse
           - pkg: ./internal/strictb64
             name: FuzzStrictMatchesCanonical
           - pkg: ./internal/strictjson

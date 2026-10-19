@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/idfoundry/fapigo/internal/jwe"
+	"github.com/idfoundry/fapigo/internal/numericdate"
 	"github.com/idfoundry/fapigo/keys"
 )
 
@@ -257,8 +258,8 @@ func (c *Client) checkUserInfoJWTClaims(claims map[string]json.RawMessage) *Erro
 	}
 
 	if expRaw, ok := claims["exp"]; ok {
-		var expUnix int64
-		if err := json.Unmarshal(expRaw, &expUnix); err != nil {
+		expUnix, err := numericdate.Parse(expRaw)
+		if err != nil {
 			return newError(ErrorInvalidResponse, "signed UserInfo response exp is malformed", err)
 		}
 		if c.deps.Clock.Now().After(time.Unix(expUnix, 0).Add(c.cfg.Limits.MaxClockSkew)) {

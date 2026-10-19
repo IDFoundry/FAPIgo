@@ -157,7 +157,7 @@ func (p PoP) Verify(ctx context.Context, confirmationJWK []byte, policy PoPVerif
 	// first evaluate the iat ... and reject any Client Attestation PoP
 	// whose iat falls outside this time window"), so the record's
 	// lifetime bounds every PoP it must remember.
-	iat := time.Unix(c.IssuedAt, 0)
+	iat := c.IssuedAt.Time()
 	if err := checkPoPTimes(c, iat, policy); err != nil {
 		return VerifiedPoP{}, err
 	}
@@ -188,10 +188,10 @@ func checkPoPTimes(c popClaims, iat time.Time, policy PoPVerifyPolicy) error {
 	if policy.Now.Sub(iat) > policy.MaxAge {
 		return ErrExpired
 	}
-	if c.ExpiresAt != 0 && policy.Now.After(time.Unix(c.ExpiresAt, 0).Add(policy.MaxClockSkew)) {
+	if c.ExpiresAt != 0 && policy.Now.After(c.ExpiresAt.Time().Add(policy.MaxClockSkew)) {
 		return ErrExpired
 	}
-	if c.NotBefore != 0 && time.Unix(c.NotBefore, 0).After(latest) {
+	if c.NotBefore != 0 && c.NotBefore.Time().After(latest) {
 		return ErrNotYetValid
 	}
 	return nil

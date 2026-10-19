@@ -37,6 +37,11 @@ type ResolveAccessTokenRequest struct {
 	// does uniformly for every implementation. See AccessTokenResolver's
 	// own doc comment.
 	Now time.Time
+
+	// MaxClockSkew is the Verifier's Limits.MaxClockSkew: how far the
+	// issuer's clock may run ahead of Now, for the same sanity checks
+	// (a JWT's iat and nbf may be up to this far in the future).
+	MaxClockSkew time.Duration
 }
 
 // ResolvedAccessToken is what a successful ResolveAccessToken returns.
@@ -251,6 +256,7 @@ func (j JWTAccessTokens) ResolveAccessToken(ctx context.Context, req ResolveAcce
 		Algorithm:           j.Algorithm,
 		Now:                 req.Now,
 		MaxLifetime:         j.MaxTokenLifetime,
+		MaxClockSkew:        req.MaxClockSkew,
 	}
 
 	var (

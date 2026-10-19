@@ -39,9 +39,12 @@ func RecommendedLimits() Limits {
 		// /authorize), short enough to keep the replay window small.
 		PushedRequestLifetime: 90 * time.Second,
 
-		// Not directly spec-numbered — §5.3.2.1 item 15 governs iat/nbf
+		// Not directly spec-numbered — §5.3.2.1 item 13 governs iat/nbf
 		// clock-skew tolerance for these same artifact types (mapped to
 		// MaxClockSkew below), not how far exp may sit in the future.
+		// The check allows exp up to this plus MaxClockSkew away, so a
+		// client whose clock runs ahead by no more than MaxClockSkew
+		// can still use the full lifetime.
 		// 60s applies the same short-lived-artifact principle the spec
 		// uses elsewhere (see AuthorizationCodeLifetime), for
 		// consistency, not because the spec numbers this field
@@ -59,7 +62,7 @@ func RecommendedLimits() Limits {
 		// own login flow's actual expected duration.
 		InteractionLifetime: 5 * time.Minute,
 
-		// Spec: FAPI 2.0 Security Profile Final §5.3.2.1 item 13 —
+		// Spec: FAPI 2.0 Security Profile Final §5.3.2.1 item 11 —
 		// "shall issue authorization codes with a maximum lifetime of
 		// 60 seconds." This is the spec's own ceiling, used directly:
 		// a code is exchanged immediately after redirect in a normal
@@ -106,15 +109,18 @@ func RecommendedLimits() Limits {
 		// guidance, not a value RFC 9449 itself specifies.
 		MaxDPoPProofAge: 60 * time.Second,
 
-		// Spec: FAPI 2.0 Security Profile Final §5.3.2.1 item 15 —
+		// Spec: FAPI 2.0 Security Profile Final §5.3.2.1 item 13 —
 		// "to accommodate clock offsets, shall accept JWTs with an
 		// iat or nbf timestamp between 0 and 10 seconds in the
-		// future" (client assertions and request objects). This is
-		// the spec's own recommended tighter value, used directly —
-		// the same requirement's Note 3 explicitly permits up to 60
-		// seconds "to greatly increase interoperability" if 10s
-		// proves too tight against a real deployment's clock drift;
-		// widen it if you hit that in practice, but start tight.
+		// future but shall reject JWTs with an iat or nbf timestamp
+		// greater than 60 seconds in the future" (every JWT a client
+		// sends: client assertions, request objects, DPoP proofs,
+		// attestations). 10s is the spec's own value, which its Note 3
+		// says "does not affect security while greatly increasing
+		// interoperability"; the same note lets implementers accept
+		// up to 60s, and reports some ecosystems need 30s. Widen it
+		// if a real deployment's clock drift needs it, but never past
+		// 60s.
 		MaxClockSkew: 10 * time.Second,
 	}
 }

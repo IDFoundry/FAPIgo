@@ -31,8 +31,9 @@ func RecommendedLimits() Limits {
 		// Not spec-mandated — mirrors server.RecommendedLimits'
 		// MaxClientAssertionLifetime (what a FAPIgo server accepts),
 		// so a FAPIgo client signing against a FAPIgo server needs no
-		// adjustment; short enough that a leaked assertion has little
-		// value.
+		// adjustment, even with its clock up to the server's
+		// MaxClockSkew ahead; short enough that a leaked assertion has
+		// little value.
 		ClientAssertionLifetime: 60 * time.Second,
 
 		// Not spec-mandated — mirrors server.RecommendedLimits'

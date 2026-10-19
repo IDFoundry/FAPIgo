@@ -298,7 +298,7 @@ func parseAuthorization(req VerifyRequest) (dpopProof, raw string, usedDPoP bool
 
 // resolveAccessToken resolves raw through Dependencies.AccessTokens.
 func (v *Verifier) resolveAccessToken(ctx context.Context, raw string, now time.Time) (ResolvedAccessToken, *Error) {
-	resolved, err := v.deps.AccessTokens.ResolveAccessToken(ctx, ResolveAccessTokenRequest{Raw: raw, Now: now})
+	resolved, err := v.deps.AccessTokens.ResolveAccessToken(ctx, ResolveAccessTokenRequest{Raw: raw, Now: now, MaxClockSkew: v.cfg.Limits.MaxClockSkew})
 	if err != nil {
 		// A *Error, returned as is or wrapped, carries its own exposure
 		// (see AccessTokenResolver's own doc comment on why that's the

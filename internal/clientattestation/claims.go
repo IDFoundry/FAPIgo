@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/idfoundry/fapigo/internal/numericdate"
 	"github.com/idfoundry/fapigo/internal/strictjson"
 )
 
@@ -25,9 +26,9 @@ import (
 type attestationClaims struct {
 	Issuer       string             `json:"iss,omitempty"`
 	Subject      string             `json:"sub"`
-	ExpiresAt    int64              `json:"exp"`
-	IssuedAt     int64              `json:"iat,omitempty"`
-	NotBefore    int64              `json:"nbf,omitempty"`
+	ExpiresAt    numericdate.Value  `json:"exp"`
+	IssuedAt     numericdate.Value  `json:"iat,omitempty"`
+	NotBefore    numericdate.Value  `json:"nbf,omitempty"`
 	Confirmation confirmationClaims `json:"cnf"`
 }
 
@@ -59,13 +60,13 @@ func parseAttestationClaims(payload []byte) (attestationClaims, error) {
 // "MUST reject a JWT that is not valid in all other respects per" RFC
 // 7519).
 type popClaims struct {
-	Issuer    string      `json:"iss,omitempty"`
-	Audience  popAudience `json:"aud"`
-	JTI       string      `json:"jti"`
-	IssuedAt  int64       `json:"iat"`
-	ExpiresAt int64       `json:"exp,omitempty"`
-	Challenge string      `json:"challenge,omitempty"`
-	NotBefore int64       `json:"nbf,omitempty"`
+	Issuer    string            `json:"iss,omitempty"`
+	Audience  popAudience       `json:"aud"`
+	JTI       string            `json:"jti"`
+	IssuedAt  numericdate.Value `json:"iat"`
+	ExpiresAt numericdate.Value `json:"exp,omitempty"`
+	Challenge string            `json:"challenge,omitempty"`
+	NotBefore numericdate.Value `json:"nbf,omitempty"`
 }
 
 // popAudience is a PoP's aud claim: one audience, as a JSON string or as

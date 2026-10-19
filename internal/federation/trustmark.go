@@ -8,6 +8,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/jose"
+	"github.com/idfoundry/fapigo/internal/numericdate"
 )
 
 // trustMarkJWTType is the JWS "typ" header value every Trust Mark JWT
@@ -199,9 +200,9 @@ func parseTrustMarkClaims(payload []byte) (TrustMarkClaims, error) {
 		IssuedAt: time.Unix(iat, 0),
 	}
 	if expRaw, ok := raw["exp"]; ok {
-		var exp int64
-		if err := json.Unmarshal(expRaw, &exp); err != nil {
-			return TrustMarkClaims{}, fmt.Errorf("%w: %q must be an integer", ErrMalformedClaims, "exp")
+		exp, err := numericdate.Parse(expRaw)
+		if err != nil {
+			return TrustMarkClaims{}, fmt.Errorf("%w: %q must be a NumericDate (a JSON number)", ErrMalformedClaims, "exp")
 		}
 		c.ExpiresAt = time.Unix(exp, 0)
 	}
@@ -510,9 +511,9 @@ func parseTrustMarkDelegationClaims(payload []byte) (TrustMarkDelegationClaims, 
 		IssuedAt: time.Unix(iat, 0),
 	}
 	if expRaw, ok := raw["exp"]; ok {
-		var exp int64
-		if err := json.Unmarshal(expRaw, &exp); err != nil {
-			return TrustMarkDelegationClaims{}, fmt.Errorf("%w: %q must be an integer", ErrMalformedClaims, "exp")
+		exp, err := numericdate.Parse(expRaw)
+		if err != nil {
+			return TrustMarkDelegationClaims{}, fmt.Errorf("%w: %q must be a NumericDate (a JSON number)", ErrMalformedClaims, "exp")
 		}
 		c.ExpiresAt = time.Unix(exp, 0)
 	}

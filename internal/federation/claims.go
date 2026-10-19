@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/idfoundry/fapigo/internal/numericdate"
 	"github.com/idfoundry/fapigo/internal/strictjson"
 )
 
@@ -372,9 +373,9 @@ func popRequiredInt64(m map[string]json.RawMessage, key string) (int64, error) {
 		return 0, fmt.Errorf("%w: missing %q", ErrMalformedClaims, key)
 	}
 	delete(m, key)
-	var n int64
-	if err := json.Unmarshal(raw, &n); err != nil {
-		return 0, fmt.Errorf("%w: %q must be an integer", ErrMalformedClaims, key)
+	n, err := numericdate.Parse(raw)
+	if err != nil {
+		return 0, fmt.Errorf("%w: %q must be a NumericDate (a JSON number)", ErrMalformedClaims, key)
 	}
 	return n, nil
 }

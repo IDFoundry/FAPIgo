@@ -147,18 +147,12 @@ func (a Assertion) Verify(ctx context.Context, pub crypto.PublicKey, policy Veri
 		return VerifiedAssertion{}, ErrAudienceMismatch
 	}
 
-	exp := time.Unix(c.ExpiresAt, 0)
+	exp := c.ExpiresAt.Time()
 	if policy.Now.After(exp.Add(policy.MaxClockSkew)) {
 		return VerifiedAssertion{}, ErrExpired
 	}
-	if exp.Sub(policy.Now) > policy.MaxLifetime {
-		return VerifiedAssertion{}, ErrLifetimeExceeded
-	}
-	if c.NotBefore != 0 {
-		nbf := time.Unix(c.NotBefore, 0)
-		if policy.Now.Before(nbf.Add(-policy.MaxClockSkew)) {
-			return VerifiedAssertion{}, ErrNotYetValid
-		}
+	if err := checkTimes(c, policy, exp); err != nil {
+		return VerifiedAssertion{}, err
 	}
 
 	if policy.Replay != nil {
@@ -172,4 +166,25 @@ func (a Assertion) Verify(ctx context.Context, pub crypto.PublicKey, policy Veri
 	}
 
 	return VerifiedAssertion{ClientID: c.Subject, ExpiresAt: exp}, nil
+}
+
+// checkTimes bounds the assertion's exp, iat and nbf against policy.
+// exp may sit up to MaxLifetime away, plus MaxClockSkew: the client's
+// clock may run that far ahead, and an assertion it issued with the
+// longest lifetime still fits. iat and nbf may be no further in the
+// future than MaxClockSkew (FAPI 2.0 Security Profile §5.3.2.1 item 13:
+// "shall reject JWTs with an iat or nbf timestamp greater than 60
+// seconds in the future"; RFC 7519 §4.1.5).
+func checkTimes(c claims, policy VerifyPolicy, exp time.Time) error {
+	if exp.Sub(policy.Now) > timeutil.SaturatingAdd(policy.MaxLifetime, policy.MaxClockSkew) {
+		return ErrLifetimeExceeded
+	}
+	latest := policy.Now.Add(policy.MaxClockSkew)
+	if c.IssuedAt != 0 && c.IssuedAt.Time().After(latest) {
+		return ErrIssuedInFuture
+	}
+	if c.NotBefore != 0 && c.NotBefore.Time().After(latest) {
+		return ErrNotYetValid
+	}
+	return nil
 }

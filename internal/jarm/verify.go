@@ -8,6 +8,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/jose"
+	"github.com/idfoundry/fapigo/internal/timeutil"
 )
 
 // Response is a parsed, but not yet signature-verified, JARM response.
@@ -134,7 +135,7 @@ func (r Response) Verify(pub crypto.PublicKey, policy VerifyPolicy) (VerifiedRes
 	if policy.Now.After(c.ExpiresAt.Add(policy.MaxClockSkew)) {
 		return VerifiedResponse{}, ErrExpired
 	}
-	if c.ExpiresAt.Sub(policy.Now) > policy.MaxLifetime {
+	if c.ExpiresAt.Sub(policy.Now) > timeutil.SaturatingAdd(policy.MaxLifetime, policy.MaxClockSkew) {
 		return VerifiedResponse{}, ErrLifetimeExceeded
 	}
 	if !c.NotBefore.IsZero() && policy.Now.Before(c.NotBefore.Add(-policy.MaxClockSkew)) {

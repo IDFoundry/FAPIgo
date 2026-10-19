@@ -126,6 +126,27 @@ or carries more than 16 distinct values, is refused with
 `invalid_request`. OpenID Connect defines four values, so no real
 request is affected.
 
+### JWT timestamps: future `iat`/`nbf` refused, `exp` allows clock skew (server, resource, client)
+
+Not a breaking change for a client with a working clock. Every JWT the
+server or a resource server verifies now follows FAPI 2.0 Security
+Profile §5.3.2.1 item 13:
+
+- **Refused:** an `iat` or `nbf` further in the future than
+  `Limits.MaxClockSkew`, in client assertions, request objects, CIBA
+  requests, DPoP proofs and JWT access tokens. Attestations already
+  were. A DPoP proof or access token that carries `nbf` or `exp` is now
+  held to it, as RFC 7519 requires of any JWT.
+- **Accepted that wasn't:** a JWT whose `exp` is up to the maximum
+  lifetime *plus* `MaxClockSkew` away. A client or issuer whose clock
+  runs ahead by no more than the skew can now use the full lifetime;
+  before, the default 60s limits refused one even 1s fast. The client
+  checks ID tokens, JARM responses and federation statements the same
+  way.
+- **Accepted that wasn't:** a non-integer NumericDate (`"exp":
+  1800000000.5`), which RFC 7519 §2 allows; it's rounded down to the
+  second.
+
 ## v0.57.0
 
 ### Read `resource` with `Resources()`, not `Parameters()` (server)

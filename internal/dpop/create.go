@@ -15,6 +15,7 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/canonical"
 	"github.com/idfoundry/fapigo/internal/jose"
+	"github.com/idfoundry/fapigo/internal/numericdate"
 )
 
 // jtiSize is the byte length of the random value used to build a proof's
@@ -87,7 +88,7 @@ func CreateProof(req ProofRequest) (string, error) {
 		JTI: jti,
 		HTM: strings.ToUpper(req.Method),
 		HTU: canonical.URI(req.URL),
-		IAT: req.Now.Unix(),
+		IAT: numericdate.Value(req.Now.Unix()),
 	}
 	if req.AccessToken != "" {
 		c.ATH = accessTokenHash(req.AccessToken)

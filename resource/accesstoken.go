@@ -329,8 +329,10 @@ type OpaqueAccessTokens struct {
 	// exactly as JWTAccessTokens refuses one whose "aud" names neither.
 	// Set it to this resource server's own identifier, or to the
 	// issuer's when it has none. A record with no audience at all,
-	// written before FAPIgo recorded one, is accepted. Empty, no
-	// audience is checked, as before.
+	// written before FAPIgo recorded one, is accepted. Required under
+	// AssuranceProduction (RFC 9700 §2.3: a resource server "MUST
+	// refuse" a token issued for another). Empty, which only
+	// AssuranceDevelopment accepts, no audience is checked.
 	Audience string
 
 	// AdditionalAudiences are further audiences accepted besides

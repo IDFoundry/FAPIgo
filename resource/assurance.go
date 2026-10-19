@@ -34,7 +34,10 @@ const (
 	//     when its fapihttp client is HardenedForProduction: over
 	//     fapihttp.NewClient's client, with no loopback exception;
 	//     keys/ephemeral never does). An OpaqueAccessTokens' Store must
-	//     implement storage.StoreAssurance and declare Durable.
+	//     implement storage.StoreAssurance and declare Durable, and its
+	//     Audience must be set: a resource server "MUST refuse" a token
+	//     issued for another (RFC 9700 §2.3), and without Audience it
+	//     can't tell. JWTAccessTokens always requires one.
 	//   - Dependencies.Replay, and Dependencies.Nonces when set, must
 	//     implement storage.StoreAssurance and declare Durable and
 	//     AtomicConsume: a DPoP proof or nonce used twice is only
@@ -150,6 +153,9 @@ func checkProductionAccessTokens(resolver AccessTokenResolver, scaled bool) []er
 		return []error{err}
 	}
 	var errs []error
+	if opaqueWithoutAudience(resolver) {
+		errs = append(errs, fmt.Errorf("resource: dependencies: access_tokens' OpaqueAccessTokens.Audience is required under AssuranceProduction (RFC 9700 §2.3): set it to this resource server's identifier, or to the issuer's when it has none"))
+	}
 	if declared.IssuerKeys != nil {
 		errs = append(errs, checkKeySourceAssurance("access_tokens issuer keys", declared.IssuerKeys))
 	}
@@ -157,6 +163,18 @@ func checkProductionAccessTokens(resolver AccessTokenResolver, scaled bool) []er
 		errs = append(errs, checkStoreAssurance("access_tokens", declared.Store, false, scaled))
 	}
 	return errs
+}
+
+// opaqueWithoutAudience reports whether resolver is an
+// OpaqueAccessTokens, by value or pointer, that checks no audience.
+func opaqueWithoutAudience(resolver AccessTokenResolver) bool {
+	switch t := resolver.(type) {
+	case OpaqueAccessTokens:
+		return t.Audience == ""
+	case *OpaqueAccessTokens:
+		return t != nil && t.Audience == ""
+	}
+	return false
 }
 
 // productionAccessTokenAssurance returns what resolver relies on:

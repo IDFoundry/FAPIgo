@@ -43,6 +43,28 @@ accept in `AutomaticRegistration.AllowedClientAuthMethods`, including
 `storage.ClientAuthMethodTLSClientAuth`. Otherwise use `TrustedClientCAs`,
 or leave those RPs on another method.
 
+### `OpaqueAccessTokens.Audience` is required (resource, *production only*)
+
+**Affects:** a `resource.Verifier` under `AssuranceProduction` whose
+`Dependencies.AccessTokens` is a `resource.OpaqueAccessTokens` with no
+`Audience`. `serverresource.NewVerifier` always sets one, so a verifier
+built through it is unaffected.
+
+**Why:** without `Audience`, the verifier accepted an opaque token
+issued for any resource server, so restricting a token with RFC 8707
+resource indicators had no effect there. RFC 9700 §2.3 says a resource
+server "MUST refuse" a token issued for another. `JWTAccessTokens`
+already required an audience.
+
+**What fails:** `NewVerifier` returns an error naming
+`OpaqueAccessTokens.Audience`.
+
+**What to change:** set `Audience` to this resource server's own
+identifier, the resource indicator clients name for it. If clients
+don't name one, use the authorization server's issuer, which a FAPIgo
+server records as the audience then. During a move from one to the
+other, list the old audience in `AdditionalAudiences`.
+
 ### Attestation-based client authentication follows draft-12 (server, client)
 
 Not a breaking change: clients built to draft-07 keep working, and so

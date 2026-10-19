@@ -788,3 +788,34 @@ func TestResolveDropsAnExpiredRegistration(t *testing.T) {
 		t.Fatal("expired registration still cached after its lookup")
 	}
 }
+
+// TestRegisteredClientConfigFromMetadataRejectsEmptyEncryptionAlgorithms:
+// a present but empty encryption algorithm would read as "no encryption"
+// while counting as present, so a superior's essential policy on it
+// would be met by a value that turns it off. It's refused; null, which
+// states nothing, is no encryption, as an absent one is.
+func TestRegisteredClientConfigFromMetadataRejectsEmptyEncryptionAlgorithms(t *testing.T) {
+	repo := newTestAutomaticClientRepository(AutomaticRegistrationConfig{AllowedScopes: []string{"openid"}})
+	metadata := func(fields string) string {
+		return `{
+			"redirect_uris": ["https://rp.example.org/cb"],
+			"token_endpoint_auth_method": "private_key_jwt",
+			"token_endpoint_auth_signing_alg": "ES256",
+			` + fields + `
+			"jwks": ` + testRPJWKS + `
+		}`
+	}
+	for _, fields := range []string{
+		`"id_token_encrypted_response_alg": "", "id_token_encrypted_response_enc": "",`,
+		`"id_token_encrypted_response_alg": "", "id_token_encrypted_response_enc": "A256GCM",`,
+		`"userinfo_encrypted_response_alg": "ECDH-ES+A256KW", "userinfo_encrypted_response_enc": "",`,
+	} {
+		if _, _, err := call(t, repo, metadata(fields)); err == nil || !strings.Contains(err.Error(), "must not be empty") {
+			t.Errorf("registeredClientConfigFromMetadata(%s) = %v, want an empty-value error", fields, err)
+		}
+	}
+	cfg, _, err := call(t, repo, metadata(`"id_token_encrypted_response_alg": null, "id_token_encrypted_response_enc": null,`))
+	if err != nil || cfg.IDTokenEncryptionKeyManagement != 0 {
+		t.Errorf("registeredClientConfigFromMetadata(null) = %v, %v; want no encryption", cfg.IDTokenEncryptionKeyManagement, err)
+	}
+}

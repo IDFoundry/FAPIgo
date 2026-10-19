@@ -7,6 +7,7 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -237,7 +238,7 @@ func TestPairwiseSubjectsPerRelyingParty(t *testing.T) {
 	if brightline == fernway {
 		t.Fatalf("Fernway and Brightline got the same sub, %s", fernway)
 	}
-	if strings.Contains(fernway, "sam") || strings.Contains(brightline, "sam") {
+	if showsUsername(fernway, "sam") || showsUsername(brightline, "sam") {
 		t.Errorf("a pairwise sub shows the username: %s, %s", fernway, brightline)
 	}
 
@@ -260,4 +261,12 @@ func TestPairwiseSubjectsDontLinkWithoutASharedClaim(t *testing.T) {
 	d.verify("brightline.localhost", "pin", []string{"given_name", "family_name", "birthdate", "email"})
 	console := d.get("console.localhost", "/")
 	mustContain(t, "the console", console, "Joined on sub: no customer in common", "Joined on email: nothing")
+}
+
+// showsUsername reports whether sub is username, or names it as one of
+// its ":"-separated parts. A substring search would be the wrong test: a
+// pairwise sub is random-looking text, which contains any short string
+// now and then by chance.
+func showsUsername(sub, username string) bool {
+	return slices.Contains(strings.Split(sub, ":"), username)
 }

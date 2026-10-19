@@ -30,6 +30,12 @@ const (
 	// storage.RegisteredClient.AllowsClientCredentialsGrant() is false.
 	ErrorUnauthorizedClient ErrorCode = "unauthorized_client"
 
+	// ErrorUnsupportedResponseType is RFC 6749 §4.1.2.1's error code for
+	// an authorization request whose response_type this server doesn't
+	// support: anything but "code". A request with no response_type at
+	// all is ErrorInvalidRequest.
+	ErrorUnsupportedResponseType ErrorCode = "unsupported_response_type"
+
 	// ErrorUnsupportedTokenType is RFC 7009 §2.2.1's error code for a
 	// token RevokeToken can't revoke: an access token.
 	ErrorUnsupportedTokenType ErrorCode = "unsupported_token_type"

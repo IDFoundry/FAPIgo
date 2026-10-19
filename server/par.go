@@ -717,8 +717,12 @@ func (s *Server) validateAuthorizationParameters(params map[string]json.RawMessa
 		return nil, newError(ErrorUnauthorizedClient, 400, "the client is not registered for the authorization code grant", nil)
 	}
 	responseType, err := jsonString(params, "response_type")
-	if err != nil || responseType != "code" {
-		return nil, newError(ErrorInvalidRequest, 400, `response_type must be "code"`, err)
+	if err != nil || responseType == "" {
+		return nil, newError(ErrorInvalidRequest, 400, "response_type is required", err)
+	}
+	if responseType != "code" {
+		// RFC 6749 §4.1.2.1.
+		return nil, newError(ErrorUnsupportedResponseType, 400, `response_type must be "code"`, nil)
 	}
 
 	redirectURI, err := jsonString(params, "redirect_uri")

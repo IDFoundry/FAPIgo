@@ -1305,8 +1305,8 @@ func TestPushAuthorizationRequestResponseTypeMustBeCode(t *testing.T) {
 	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
 		HTTP: server.FormRequest{Parameters: params},
 	})
-	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
-		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequest)
+	if code := serverErrorCode(t, err); code != server.ErrorUnsupportedResponseType {
+		t.Fatalf("error code = %q, want %q", code, server.ErrorUnsupportedResponseType)
 	}
 }
 

@@ -1046,11 +1046,12 @@ func TestBeginBackchannelAuthenticationRejectsNoHints(t *testing.T) {
 	}
 }
 
-// TestBeginBackchannelAuthenticationRejectsNotificationTokenForPollClient
+// TestBeginBackchannelAuthenticationIgnoresNotificationTokenForPollClient
 // covers a poll-mode client (newHarnessWithBackchannel's own default
-// registration) sending client_notification_token anyway — CIBA §7.1
-// only makes the parameter meaningful for ping/push.
-func TestBeginBackchannelAuthenticationRejectsNotificationTokenForPollClient(t *testing.T) {
+// registration) sending client_notification_token anyway: CIBA §7.1
+// requires it only for ping and push and doesn't forbid it for poll,
+// so it's ignored, as an unused parameter is.
+func TestBeginBackchannelAuthenticationIgnoresNotificationTokenForPollClient(t *testing.T) {
 	h, _ := newHarnessWithBackchannel(t)
 	params := standardBackchannelParams(t)
 	params["client_notification_token"] = jsonRaw(t, "notify-me")
@@ -1062,12 +1063,8 @@ func TestBeginBackchannelAuthenticationRejectsNotificationTokenForPollClient(t *
 	if err != nil {
 		t.Fatalf("BeginBackchannelAuthentication: %v", err)
 	}
-	localErr, ok := action.(server.BackchannelAuthenticationLocalError)
-	if !ok {
-		t.Fatalf("action = %T, want server.BackchannelAuthenticationLocalError", action)
-	}
-	if localErr.Error.Code() != server.ErrorInvalidRequest {
-		t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequest)
+	if _, ok := action.(server.BackchannelInteractionRequired); !ok {
+		t.Fatalf("action = %T, want server.BackchannelInteractionRequired", action)
 	}
 }
 

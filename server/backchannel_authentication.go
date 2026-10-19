@@ -465,15 +465,17 @@ func (s *Server) validateBackchannelAuthenticationParameters(verified verifiedBa
 // validateClientNotificationToken checks client_notification_token's
 // presence against exactly what client's own registered
 // BackchannelTokenDeliveryMode requires (CIBA §7.1: required for
-// ping/push, meaningless for poll) — push itself is never supported,
+// ping/push, meaningless for poll, so ignored and dropped there) — push
+// itself is never supported,
 // since storage.BackchannelTokenDeliveryMode has no value for it.
 func validateClientNotificationToken(params map[string]json.RawMessage, client storage.RegisteredClient) *Error {
 	notificationTokenRaw, hasNotificationToken := params["client_notification_token"]
 	switch client.BackchannelTokenDeliveryMode() {
 	case storage.BackchannelTokenDeliveryModePoll:
-		if hasNotificationToken {
-			return newError(ErrorInvalidRequest, 400, "client_notification_token is not permitted for a client registered for poll delivery", nil)
-		}
+		// CIBA Core §7.1 requires it only for ping and push, and nothing
+		// forbids it for poll, where nothing uses it: it's dropped, so a
+		// bearer credential that will never be presented isn't stored.
+		delete(params, "client_notification_token")
 	case storage.BackchannelTokenDeliveryModePing:
 		if !hasNotificationToken {
 			return newError(ErrorInvalidRequest, 400, "client_notification_token is required for a client registered for ping delivery", nil)

@@ -438,6 +438,12 @@ func parseMTLSEndpointAliases(raw *metadata.MTLSEndpointAliases, opts ...fapi.UR
 			return nil, fmt.Errorf("client: discover: mtls_endpoint_aliases.revocation_endpoint: %w", err)
 		}
 	}
+	if raw.UserinfoEndpoint != "" {
+		out.UserInfo, err = fapi.ParseEndpointURL(raw.UserinfoEndpoint, opts...)
+		if err != nil {
+			return nil, fmt.Errorf("client: discover: mtls_endpoint_aliases.userinfo_endpoint: %w", err)
+		}
+	}
 	return &out, nil
 }
 

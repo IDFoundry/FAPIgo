@@ -104,6 +104,7 @@ type MTLSEndpointAliases struct {
 	PushedAuthorizationRequestEndpoint string `json:"pushed_authorization_request_endpoint,omitempty"`
 	BackchannelAuthenticationEndpoint  string `json:"backchannel_authentication_endpoint,omitempty"`
 	RevocationEndpoint                 string `json:"revocation_endpoint,omitempty"`
+	UserinfoEndpoint                   string `json:"userinfo_endpoint,omitempty"`
 }
 
 // ParseAndValidate parses body as a Document and checks it against

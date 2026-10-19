@@ -66,10 +66,12 @@ func New(cfg Config, deps Dependencies) (*Client, error) {
 //     without the authorization and pushed authorization request
 //     endpoints when cfg.RedirectURI is empty, since a client with no
 //     redirect URI (one using only CIBA or client credentials) never
-//     uses the redirect-based flow. Set it yourself instead when you
-//     need to adjust it first — e.g.
-//     discovered.MTLSEndpointAliases.ApplyForSenderConstrain/
-//     ApplyForClientAuth for an mTLS client — and it's left as given.
+//     uses the redirect-based flow. A client that does mutual TLS gets
+//     the server's mtls_endpoint_aliases (RFC 8705 §5) where it does:
+//     discovered.MTLSEndpointAliases.ApplyForClientAuth when it
+//     authenticates with its certificate, ApplyForSenderConstrain when
+//     its tokens are only bound to it. Set Endpoints yourself instead
+//     when you need to adjust it first, and it's left as given.
 //  3. It checks that the issuer advertises support for every algorithm
 //     cfg declares (discovered.SupportsAlgorithms), turning a
 //     declared-but-unadvertised algorithm into a startup error rather
@@ -97,6 +99,15 @@ func NewFromDiscovery(discovered DiscoveredMetadata, cfg Config, deps Dependenci
 		cfg.Endpoints = discovered.Endpoints
 		if cfg.RedirectURI == "" {
 			cfg.Endpoints.Authorization, cfg.Endpoints.PushedAuthorizationRequest = fapi.URL{}, fapi.URL{}
+		}
+		switch {
+		case authenticatesWithCertificate(cfg.ClientAuthMethod):
+			discovered.MTLSEndpointAliases.ApplyForClientAuth(&cfg.Endpoints)
+		case cfg.SenderConstrain == storage.SenderConstrainMTLS:
+			discovered.MTLSEndpointAliases.ApplyForSenderConstrain(&cfg.Endpoints)
+		}
+		if cfg.RedirectURI == "" {
+			cfg.Endpoints.PushedAuthorizationRequest = fapi.URL{}
 		}
 	}
 	if err := discovered.SupportsAlgorithms(cfg.Algorithms); err != nil {
@@ -588,6 +599,18 @@ func (c *Client) checkScope(scope []string) *Error {
 		}
 	}
 	return nil
+}
+
+// authenticatesWithCertificate reports whether method is RFC 8705 §2's
+// mutual-TLS client authentication, PKI or self-signed.
+func authenticatesWithCertificate(method storage.ClientAuthMethod) bool {
+	switch method {
+	case storage.ClientAuthMethodSelfSignedTLSClientAuth, storage.ClientAuthMethodTLSClientAuth,
+		storage.ClientAuthMethodTLSClientAuthSANDNS, storage.ClientAuthMethodTLSClientAuthSANURI,
+		storage.ClientAuthMethodTLSClientAuthSANIP, storage.ClientAuthMethodTLSClientAuthSANEmail:
+		return true
+	}
+	return false
 }
 
 // checkDeviceLocalSessions refuses CallbackBindingDeviceLocalStore over a

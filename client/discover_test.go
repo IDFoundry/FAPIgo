@@ -67,6 +67,7 @@ type discoveryMTLSEndpointAliases struct {
 	PushedAuthorizationRequestEndpoint string `json:"pushed_authorization_request_endpoint,omitempty"`
 	BackchannelAuthenticationEndpoint  string `json:"backchannel_authentication_endpoint,omitempty"`
 	RevocationEndpoint                 string `json:"revocation_endpoint,omitempty"`
+	UserinfoEndpoint                   string `json:"userinfo_endpoint,omitempty"`
 }
 
 func TestDiscoverAcceptsValidDocumentAtRoot(t *testing.T) {
@@ -393,6 +394,7 @@ func TestDiscoverPopulatesMTLSEndpointAliases(t *testing.T) {
 				PushedAuthorizationRequestEndpoint: ts.URL + "/mtls/par",
 				BackchannelAuthenticationEndpoint:  ts.URL + "/mtls/backchannel-authenticate",
 				RevocationEndpoint:                 ts.URL + "/mtls/revoke",
+				UserinfoEndpoint:                   ts.URL + "/mtls/userinfo",
 			},
 		})
 	}))
@@ -420,6 +422,9 @@ func TestDiscoverPopulatesMTLSEndpointAliases(t *testing.T) {
 	}
 	if md.MTLSEndpointAliases.Revocation.String() != ts.URL+"/mtls/revoke" {
 		t.Errorf("MTLSEndpointAliases.Revocation = %q", md.MTLSEndpointAliases.Revocation.String())
+	}
+	if md.MTLSEndpointAliases.UserInfo.String() != ts.URL+"/mtls/userinfo" {
+		t.Errorf("MTLSEndpointAliases.UserInfo = %q", md.MTLSEndpointAliases.UserInfo.String())
 	}
 }
 

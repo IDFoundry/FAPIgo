@@ -39,6 +39,7 @@ func TestMTLSEndpointsApplyAliasesPerRequest(t *testing.T) {
 				PushedAuthorizationRequest: mustEndpointURL(t, "https://mtls.example.com/par"),
 				BackchannelAuthentication:  mustEndpointURL(t, "https://mtls.example.com/backchannel"),
 				Revocation:                 mustEndpointURL(t, "https://mtls.example.com/revoke"),
+				UserInfo:                   mustEndpointURL(t, "https://mtls.example.com/userinfo"),
 			}
 			endpoints := client.Endpoints{
 				Authorization:              mustEndpointURL(t, "https://as.example.com/authorize"),
@@ -46,6 +47,7 @@ func TestMTLSEndpointsApplyAliasesPerRequest(t *testing.T) {
 				PushedAuthorizationRequest: mustEndpointURL(t, "https://as.example.com/par"),
 				BackchannelAuthentication:  mustEndpointURL(t, "https://as.example.com/backchannel"),
 				Revocation:                 mustEndpointURL(t, "https://as.example.com/revoke"),
+				UserInfo:                   mustEndpointURL(t, "https://as.example.com/userinfo"),
 			}
 			if !tc.apply(aliases, &endpoints) {
 				t.Fatalf("%s() = false, want true", name)
@@ -58,6 +60,7 @@ func TestMTLSEndpointsApplyAliasesPerRequest(t *testing.T) {
 				"Token":                      {endpoints.Token.String(), aliases.Token.String()},
 				"BackchannelAuthentication":  {endpoints.BackchannelAuthentication.String(), aliases.BackchannelAuthentication.String()},
 				"Revocation":                 {endpoints.Revocation.String(), aliases.Revocation.String()},
+				"UserInfo":                   {endpoints.UserInfo.String(), aliases.UserInfo.String()},
 				"PushedAuthorizationRequest": {endpoints.PushedAuthorizationRequest.String(), wantPAR},
 				"Authorization":              {endpoints.Authorization.String(), "https://as.example.com/authorize"},
 			} {

@@ -227,12 +227,15 @@ type MTLSEndpoints struct {
 	PushedAuthorizationRequest fapi.URL
 	BackchannelAuthentication  fapi.URL
 	Revocation                 fapi.URL
+	// UserInfo is where FetchUserInfo presents a certificate-bound
+	// access token over mutual TLS.
+	UserInfo fapi.URL
 }
 
 // ApplyForSenderConstrain overrides endpoints' Token,
-// BackchannelAuthentication and Revocation fields with m's own advertised
-// aliases, wherever m advertises one, for a Config.SenderConstrain ==
-// SenderConstrainMTLS client (RFC 8705 §5).
+// BackchannelAuthentication, Revocation and UserInfo fields with m's own
+// advertised aliases, wherever m advertises one, for a
+// Config.SenderConstrain == SenderConstrainMTLS client (RFC 8705 §5).
 //
 // An alias applies to a request that itself does mutual TLS: here, the
 // requests that bind or use a certificate-bound token. PAR is left at
@@ -259,7 +262,8 @@ func (m *MTLSEndpoints) ApplyForSenderConstrain(endpoints *Endpoints) bool {
 // §2). Such a client does mutual TLS at every request that
 // authenticates it, so ApplyForClientAuth overrides Token,
 // PushedAuthorizationRequest, BackchannelAuthentication (where CIBA Core
-// §7.1 requires the client to authenticate) and Revocation, wherever m
+// §7.1 requires the client to authenticate), Revocation and UserInfo,
+// wherever m
 // advertises an alias. It covers every endpoint ApplyForSenderConstrain
 // does, so a client doing both needs only this call. A nil m leaves
 // endpoints untouched and reports false.
@@ -280,6 +284,7 @@ func (m *MTLSEndpoints) apply(endpoints *Endpoints, par bool) bool {
 		{m.Token, &endpoints.Token},
 		{m.BackchannelAuthentication, &endpoints.BackchannelAuthentication},
 		{m.Revocation, &endpoints.Revocation},
+		{m.UserInfo, &endpoints.UserInfo},
 	}
 	if par {
 		aliases = append(aliases, struct {

@@ -40,6 +40,10 @@ type sealedBackchannelSession struct {
 	// Resource: the request's resource indicators (RFC 8707), sent
 	// again on each poll.
 	Resource []string `json:"s,omitempty"`
+	// Scope: the request's scope, which a token response omitting
+	// "scope" was granted. A session sealed before this field existed
+	// opens with none.
+	Scope []string `json:"c,omitempty"`
 }
 
 // BackchannelSessionSealer encrypts a BackchannelAuthenticationSession
@@ -97,6 +101,7 @@ func (s *BackchannelSessionSealer) Seal(session BackchannelAuthenticationSession
 		AuthReqID: session.authReqID, IntervalMillis: session.interval.Milliseconds(),
 		ExpiresAt: session.expiresAt.UTC(), NotificationToken: session.notificationToken,
 		OpenID: session.openID, EssentialACR: session.essentialACR, Resource: session.resource,
+		Scope: session.scope,
 	})
 	if err != nil {
 		return nil, newError(ErrorInternal, "failed to encode the backchannel authentication session", err)
@@ -131,6 +136,7 @@ func (s *BackchannelSessionSealer) Open(sealed []byte, owner string) (session Ba
 		authReqID: e.AuthReqID, interval: time.Duration(e.IntervalMillis) * time.Millisecond,
 		expiresAt: e.ExpiresAt, notificationToken: e.NotificationToken,
 		openID: e.OpenID, essentialACR: e.EssentialACR, resource: e.Resource,
+		scope: e.Scope,
 	}, keyIndex > 0, nil
 }
 

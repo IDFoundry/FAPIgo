@@ -88,6 +88,8 @@ type fakeAS struct {
 	// to test that a client tolerates its absence (RFC 6749 §5.1:
 	// RECOMMENDED, not REQUIRED).
 	omitExpiresIn bool
+	// omitScope leaves "scope" out of the token response.
+	omitScope bool
 
 	// rejectTokenRequestPlain, if true, makes handleToken respond to
 	// every token request with an ordinary (non-DPoP-nonce) error —
@@ -347,6 +349,9 @@ func (a *fakeAS) writeTokenIssued(w http.ResponseWriter) {
 	if a.omitIDToken {
 		delete(resp, "id_token")
 		resp["scope"] = "accounts"
+	}
+	if a.omitScope {
+		delete(resp, "scope")
 	}
 
 	if a.nextDPoPNonce != "" {

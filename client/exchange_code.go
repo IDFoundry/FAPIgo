@@ -255,6 +255,7 @@ func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationRe
 	if idErr != nil {
 		return TokenSet{}, idErr
 	}
+	result.Scope = grantedScope(result.Scope, resp.scope)
 	if idErr := requireIDToken(result.HasIDToken, resp.openID, resp.hasMaxAge); idErr != nil {
 		return TokenSet{}, idErr
 	}

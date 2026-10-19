@@ -118,6 +118,9 @@ type BackchannelAuthenticationSession struct {
 	// resource is the request's resource indicators (RFC 8707), sent
 	// again on each poll.
 	resource []string
+	// scope is the request's scope, which a token response omitting
+	// "scope" was granted (RFC 6749 §5.1).
+	scope []string
 }
 
 // AuthReqID is the auth_req_id the authorization server issued.
@@ -236,6 +239,7 @@ func (c *Client) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		expiresAt:         c.deps.Clock.Now().Add(expiresIn),
 		notificationToken: notificationToken,
 		openID:            slices.Contains(req.Scope, "openid"),
+		scope:             slices.Clone(req.Scope),
 		essentialACR:      slices.Clone(req.EssentialACRValues),
 		resource:          slices.Clone(req.Resource),
 	}, nil
@@ -525,7 +529,7 @@ func (c *Client) backchannelApprovedTokens(ctx context.Context, session Backchan
 	result := TokenSet{
 		AccessToken:          fapi.NewSecret(raw.AccessToken),
 		TokenType:            wantTokenType,
-		Scope:                raw.Scope,
+		Scope:                grantedScope(raw.Scope, session.scope),
 		AuthorizationDetails: raw.AuthorizationDetails,
 		ObtainedAt:           c.deps.Clock.Now(),
 		Issuer:               c.cfg.Issuer.String(),

@@ -57,6 +57,11 @@ type sessionRecord struct {
 	// Resource is the request's resource indicators (RFC 8707), or nil
 	// for none: ExchangeCode sends them again on its token request.
 	Resource []string `json:"resource,omitempty"`
+
+	// Scope is the request's scope: a token response that omits
+	// "scope" was granted exactly it (RFC 6749 §5.1). A record written
+	// before this field existed reads as none.
+	Scope []string `json:"scope,omitempty"`
 }
 
 // maxAge is r's max_age, and whether the request carried one.

@@ -55,6 +55,7 @@ type fakeClientCredentialsAS struct {
 	malformedResponse bool
 	tokenTypeOverride string
 	omitExpiresIn     bool
+	omitScope         bool
 }
 
 func (a *fakeClientCredentialsAS) handler() http.Handler {
@@ -95,6 +96,9 @@ func (a *fakeClientCredentialsAS) handleToken(w http.ResponseWriter, r *http.Req
 		"access_token": "opaque-client-credentials-token",
 		"token_type":   tokenType,
 		"scope":        r.PostForm.Get("scope"),
+	}
+	if a.omitScope {
+		delete(resp, "scope")
 	}
 	if !a.omitExpiresIn {
 		resp["expires_in"] = 300

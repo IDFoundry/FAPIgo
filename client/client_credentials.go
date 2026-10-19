@@ -156,7 +156,7 @@ func (c *Client) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 	result := ClientCredentialsTokenResult{
 		AccessToken:          fapi.NewSecret(raw.AccessToken),
 		TokenType:            wantTokenType,
-		Scope:                raw.Scope,
+		Scope:                grantedScope(raw.Scope, req.Scope),
 		AuthorizationDetails: raw.AuthorizationDetails,
 	}
 	if raw.ExpiresIn > 0 {

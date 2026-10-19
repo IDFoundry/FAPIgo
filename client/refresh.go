@@ -84,6 +84,13 @@ func (c *Client) RefreshTokens(ctx context.Context, req RefreshTokenRequest) (To
 		return TokenSet{}, idErr
 	}
 	result.Resource = slices.Clone(resources)
+	// RFC 6749 §6: a refresh request without scope asks for the
+	// original grant's.
+	if len(req.Scope) > 0 {
+		result.Scope = grantedScope(result.Scope, req.Scope)
+	} else if result.Scope == "" {
+		result.Scope = req.Tokens.Scope
+	}
 	if !result.HasRefreshToken {
 		result.RefreshToken, result.HasRefreshToken = req.Tokens.RefreshToken, true
 	}
@@ -151,6 +158,16 @@ func checkRefreshedIDToken(original TokenSet, refreshed IDTokenClaims) *Error {
 // tokenSetIssuer is the issuer t came from: its Issuer, or, for a set
 // that doesn't record one (built by hand, or kept from before the field
 // existed), its ID token's verified iss; "" when it has neither.
+// grantedScope is a token response's scope: as it says, or, when it
+// omits "scope", the scope requested (RFC 6749 §5.1: scope is
+// "OPTIONAL, if identical to the scope requested by the client").
+func grantedScope(responseScope string, requested []string) string {
+	if responseScope != "" {
+		return responseScope
+	}
+	return strings.Join(requested, " ")
+}
+
 // checkTokenSetIssuer refuses a token set this client's authorization
 // server didn't issue: one whose Issuer (or, without it, its ID token's
 // verified iss) isn't Config.Issuer, or whose ID token another issuer

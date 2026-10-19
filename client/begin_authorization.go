@@ -662,6 +662,7 @@ func (c *Client) newSessionRecord(req BeginAuthorizationRequest, redirectURI, no
 	}
 	record.EssentialACR = slices.Clone(req.EssentialACRValues)
 	record.Resource = slices.Clone(req.Resource)
+	record.Scope = slices.Clone(req.Scope)
 	return record
 }
 

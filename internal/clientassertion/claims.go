@@ -19,8 +19,10 @@ const AssertionType = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
 // missing or generic typ, while another kind's explicit typ isn't.
 const clientAuthenticationJWTType = "client-authentication+jwt"
 
-// claims is a client assertion payload (RFC 7523 §3). Fields beyond the
-// ones defined here are rejected on parse. aud is required to be a
+// claims is a client assertion payload (RFC 7523 §3). Claims beyond the
+// ones defined here are ignored: RFC 7523 §3 item 8 says the JWT "MAY
+// contain other claims", and RFC 7519 §4 has a claim that isn't
+// understood ignored. aud is required to be a
 // single JSON string; this package does not accept a JSON array for aud,
 // which removes any ambiguity about which of several audiences a token
 // was actually intended for.
@@ -36,7 +38,6 @@ type claims struct {
 
 func parseClaims(payload []byte) (claims, error) {
 	dec := json.NewDecoder(bytes.NewReader(payload))
-	dec.DisallowUnknownFields()
 	var c claims
 	if err := strictjson.CheckFieldCase(payload, &c); err != nil {
 		return claims{}, fmt.Errorf("%w: %v", ErrMalformedClaims, err)

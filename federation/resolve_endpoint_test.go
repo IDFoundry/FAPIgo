@@ -273,3 +273,17 @@ func TestResolveViaEndpointRefusesAnotherIssuer(t *testing.T) {
 		t.Fatalf("ResolveViaEndpoint(response from another issuer) = %v, want refusal before resolving that issuer", err)
 	}
 }
+
+// TestResolveViaEndpointRefusesAnUnconfiguredTrustAnchor: a Trust Anchor
+// this Resolver doesn't trust is refused before anything is fetched,
+// so the caller can't take a response as resolved under one it trusts.
+func TestResolveViaEndpointRefusesAnUnconfiguredTrustAnchor(t *testing.T) {
+	metadata := map[string]json.RawMessage{"openid_provider": json.RawMessage(`{}`)}
+	entityID, resolveEndpoint, resolver, _ := selfAnchoredResolveEndpoint(t, "https://op.example.org", metadata)
+	_, err := resolver.ResolveViaEndpoint(context.Background(), federation.ResolveRequest{
+		Endpoint: resolveEndpoint, Subject: "https://op.example.org", TrustAnchor: "https://other-ta.example.org", ExpectedIssuer: entityID,
+	})
+	if err == nil || !strings.Contains(err.Error(), "not one of this Resolver's Config.TrustAnchors") {
+		t.Fatalf("ResolveViaEndpoint(unconfigured trust anchor) = %v, want refused", err)
+	}
+}

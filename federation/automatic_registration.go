@@ -432,25 +432,30 @@ func (a *AutomaticClientRepository) resolve(ctx context.Context, id fapi.ClientI
 		a.mu.Unlock()
 		return cachedClient{}, failed.err
 	}
-	if call, ok := a.inflight[id]; ok {
-		a.mu.Unlock()
-		select {
-		case <-call.done:
-			return call.entry, call.err
-		case <-ctx.Done():
-			return cachedClient{}, ctx.Err()
-		}
+	call, ok := a.inflight[id]
+	if !ok {
+		call = &inflightResolution{done: make(chan struct{})}
+		a.inflight[id] = call
+		// The resolution is shared by every caller for id, so it runs
+		// detached from this one's cancellation: one caller giving up
+		// (or an attacker cancelling its own request on purpose) must
+		// not fail the others. It keeps ctx's values, and the fetcher's
+		// own limits bound how long it can take.
+		go func() {
+			call.entry, call.err = a.resolveUncached(context.WithoutCancel(ctx), id)
+			a.mu.Lock()
+			delete(a.inflight, id)
+			a.mu.Unlock()
+			close(call.done)
+		}()
 	}
-	call := &inflightResolution{done: make(chan struct{})}
-	a.inflight[id] = call
 	a.mu.Unlock()
-
-	call.entry, call.err = a.resolveUncached(ctx, id)
-	a.mu.Lock()
-	delete(a.inflight, id)
-	a.mu.Unlock()
-	close(call.done)
-	return call.entry, call.err
+	select {
+	case <-call.done:
+		return call.entry, call.err
+	case <-ctx.Done():
+		return cachedClient{}, ctx.Err()
+	}
 }
 
 // resolveUncached resolves id's Trust Chain and builds its registration,
@@ -654,10 +659,10 @@ type relyingPartyMetadata struct {
 	JWKS                                       json.RawMessage `json:"jwks"`
 	JWKSURI                                    string          `json:"jwks_uri"`
 	TLSClientCertificateBoundAccessTokens      bool            `json:"tls_client_certificate_bound_access_tokens"`
-	IDTokenEncryptedResponseAlg                string          `json:"id_token_encrypted_response_alg"`
-	IDTokenEncryptedResponseEnc                string          `json:"id_token_encrypted_response_enc"`
-	UserinfoEncryptedResponseAlg               string          `json:"userinfo_encrypted_response_alg"`
-	UserinfoEncryptedResponseEnc               string          `json:"userinfo_encrypted_response_enc"`
+	IDTokenEncryptedResponseAlg                *string         `json:"id_token_encrypted_response_alg"`
+	IDTokenEncryptedResponseEnc                *string         `json:"id_token_encrypted_response_enc"`
+	UserinfoEncryptedResponseAlg               *string         `json:"userinfo_encrypted_response_alg"`
+	UserinfoEncryptedResponseEnc               *string         `json:"userinfo_encrypted_response_enc"`
 
 	// BackchannelAuthenticationRequestSigningAlg/BackchannelTokenDeliveryMode/
 	// BackchannelClientNotificationEndpoint are read only when
@@ -1053,20 +1058,29 @@ func (a *AutomaticClientRepository) applyBackchannelAuthenticationFields(cfg *st
 // encLabel name the two metadata fields, for error messages. Shared by
 // registeredClientConfigFromMetadata's id_token and userinfo encryption
 // handling, which are otherwise identical.
-func parseEncryptionAlgorithmPair(algValue, encValue, algLabel, encLabel string) (fapi.KeyManagementAlgorithm, fapi.ContentEncryptionAlgorithm, error) {
-	algSet := algValue != ""
-	encSet := encValue != ""
-	if algSet != encSet {
+//
+// Each is nil when the metadata leaves it out; one that is present must
+// name an algorithm. An empty string would otherwise read as "no
+// encryption" while counting as present, so a superior's "essential"
+// policy on the parameter would be met by a value that disables it.
+func parseEncryptionAlgorithmPair(algValue, encValue *string, algLabel, encLabel string) (fapi.KeyManagementAlgorithm, fapi.ContentEncryptionAlgorithm, error) {
+	if algValue != nil && *algValue == "" {
+		return 0, 0, fmt.Errorf("%s must not be empty", algLabel)
+	}
+	if encValue != nil && *encValue == "" {
+		return 0, 0, fmt.Errorf("%s must not be empty", encLabel)
+	}
+	if (algValue != nil) != (encValue != nil) {
 		return 0, 0, fmt.Errorf("%s and %s must both be set, or neither", algLabel, encLabel)
 	}
-	if !algSet {
+	if algValue == nil {
 		return 0, 0, nil
 	}
-	alg, err := fapi.ParseKeyManagementAlgorithm(algValue)
+	alg, err := fapi.ParseKeyManagementAlgorithm(*algValue)
 	if err != nil {
 		return 0, 0, fmt.Errorf("%s: %w", algLabel, err)
 	}
-	enc, err := fapi.ParseContentEncryptionAlgorithm(encValue)
+	enc, err := fapi.ParseContentEncryptionAlgorithm(*encValue)
 	if err != nil {
 		return 0, 0, fmt.Errorf("%s: %w", encLabel, err)
 	}

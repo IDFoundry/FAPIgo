@@ -449,6 +449,12 @@ func applyEntityTypePolicy(params map[string]PolicyOperators, crit critSet, curr
 	resolved := make(map[string]json.RawMessage, len(claims))
 	for claim := range claims {
 		value, present := current[claim]
+		if present && isJSONNull(value) {
+			// A parameter whose value is null states nothing: it is
+			// treated as absent, so it can't stand in for one an
+			// "essential" operator requires, and is left out.
+			value, present = nil, false
+		}
 		value, present, err := applyClaimPolicy(params[claim], crit, value, present)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", claim, err)

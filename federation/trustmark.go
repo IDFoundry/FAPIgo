@@ -147,10 +147,16 @@ func checkTrustMarkAccreditation(trustAnchor ResolvedEntity, claims TrustMarkCla
 
 // checkTrustMarkDelegation requires and validates a "delegation" claim
 // when trustAnchor names the mark's type in its "trust_mark_owners"
-// claim (OpenID Federation 1.0 §7.3 steps 8-9).
+// claim (OpenID Federation 1.0 §7.3 step 8), and validates one the mark
+// carries anyway (step 9): one whose type has no owner there can't be
+// validated, since the owner's keys come from that claim (§7.2.2 step
+// 9), so the mark is refused rather than its delegation ignored.
 func (r *Resolver) checkTrustMarkDelegation(trustAnchor ResolvedEntity, tm intfed.TrustMark, claims TrustMarkClaims) error {
 	owner, required := trustAnchor.TrustMarkOwners[claims.TrustMarkType]
 	if !required {
+		if tm.ClaimedDelegation() != "" {
+			return fmt.Errorf("the trust mark carries a delegation claim, but trust_mark_type %q has no owner in the trust anchor's trust_mark_owners claim to validate it against", claims.TrustMarkType)
+		}
 		return nil
 	}
 	if tm.ClaimedDelegation() == "" {

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -436,12 +437,13 @@ func TestVerifyTrustMarkRejectsMalformedDelegationJWT(t *testing.T) {
 	}
 }
 
-func TestVerifyTrustMarkIgnoresDelegationWhenTypeNotOwned(t *testing.T) {
-	// TA's own trust_mark_owners is nil (no type named at all), so no
-	// delegation is required and none is present — the existing
-	// TestVerifyTrustMarkSucceeds already covers this baseline; this
-	// test instead confirms a PRESENT delegation is simply not checked
-	// when the type isn't owned, even a broken one.
+// TestVerifyTrustMarkRefusesDelegationWhenTypeNotOwned: OpenID
+// Federation 1.0 §7.3 step 9 has a validator validate any delegation
+// claim a mark carries, and §7.2.2 step 9 takes the owner's keys from
+// the Trust Anchor's trust_mark_owners. A type with no owner there
+// leaves nothing to validate it against, so the mark is refused rather
+// than its delegation ignored.
+func TestVerifyTrustMarkRefusesDelegationWhenTypeNotOwned(t *testing.T) {
 	f := setupTrustMarkFederation(t, func(taID, leID string) map[string]any {
 		return map[string]any{"delegation": "not-a-jwt"}
 	}, nil)
@@ -451,8 +453,8 @@ func TestVerifyTrustMarkIgnoresDelegationWhenTypeNotOwned(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if _, err := r.VerifyTrustMark(context.Background(), resolved, resolved.TrustMarks[0], federation.AcceptAnyFederationIssuer); err != nil {
-		t.Fatalf("VerifyTrustMark(broken delegation, type not owned, federation.AcceptAnyFederationIssuer): %v, want nil error", err)
+	if _, err := r.VerifyTrustMark(context.Background(), resolved, resolved.TrustMarks[0], federation.AcceptAnyFederationIssuer); err == nil || !strings.Contains(err.Error(), "has no owner") {
+		t.Fatalf("VerifyTrustMark(delegation, type not owned) = %v, want refused", err)
 	}
 }
 

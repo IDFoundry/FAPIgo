@@ -62,7 +62,7 @@ func TestServerEntityConfiguration(t *testing.T) {
 	cfg := federationConfiguredConfig(t)
 	cfg.Federation.AuthorityHints = []string{"https://ta.example.org"}
 	deps := validDependencies()
-	deps.Keys = &fakeKeyManager{key: generateKey(t), keyID: "as-fed-kid"}
+	deps.Keys = &fakeKeyManager{key: generateKey(t), keyID: "as-fed-kid", federationKey: generateKey(t)}
 
 	srv, err := server.New(cfg, deps)
 	if err != nil {
@@ -167,7 +167,7 @@ func TestServerEntityConfigurationRejectsEmptyKeyID(t *testing.T) {
 func TestServerEntityConfigurationPublishesTrustMarks(t *testing.T) {
 	key := generateKey(t)
 	deps := validDependencies()
-	deps.Keys = &fakeKeyManager{key: key, keyID: "as-fed-kid"}
+	deps.Keys = &fakeKeyManager{key: generateKey(t), keyID: "as-fed-kid", federationKey: key}
 	srv, err := server.New(federationConfiguredConfig(t), deps)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -210,5 +210,35 @@ func TestNewRejectsMissingFederationSigningKey(t *testing.T) {
 	deps.Keys = km
 	if _, err := server.New(cfg, deps); err == nil || !strings.Contains(err.Error(), "federation_entity_signing") {
 		t.Fatalf("New(no federation signing key) = %v, want it refused naming federation_entity_signing", err)
+	}
+}
+
+// TestNewRefusesFederationKeyReusedAsProtocolKey: the federation entity
+// key vouches for the whole Entity Configuration, so it is never also a
+// protocol signing key; New refuses one that is.
+func TestNewRefusesFederationKeyReusedAsProtocolKey(t *testing.T) {
+	deps := validDependencies()
+	deps.Keys = &fakeKeyManager{key: generateKey(t), keyID: "as-kid"}
+	if _, err := server.New(federationConfiguredConfig(t), deps); err == nil || !strings.Contains(err.Error(), "never reused as a protocol key") {
+		t.Fatalf("New(federation key = protocol key) = %v, want refused", err)
+	}
+	deps.Keys = &fakeKeyManager{key: generateKey(t), keyID: "as-kid", federationKey: generateKey(t)}
+	if _, err := server.New(federationConfiguredConfig(t), deps); err != nil {
+		t.Fatalf("New(distinct federation key) = %v", err)
+	}
+}
+
+// TestNewRefusesFederationKeyReusedDuringARotation: with a rotating key
+// manager, every key it still publishes for a protocol purpose counts,
+// the outgoing one included.
+func TestNewRefusesFederationKeyReusedDuringARotation(t *testing.T) {
+	entityKey := generateKey(t)
+	deps := validDependencies()
+	deps.Keys = &rotatingKeyManager{
+		outgoing: &fakeKeyManager{key: entityKey, keyID: "old"},
+		newest:   &fakeKeyManager{key: generateKey(t), keyID: "new", federationKey: entityKey},
+	}
+	if _, err := server.New(federationConfiguredConfig(t), deps); err == nil || !strings.Contains(err.Error(), "never reused as a protocol key") {
+		t.Fatalf("New(outgoing protocol key = federation key) = %v, want refused", err)
 	}
 }

@@ -555,3 +555,21 @@ func TestApplyPolicyRefusesNonObjectMetadata(t *testing.T) {
 		t.Fatalf("ApplyPolicy(non-object metadata) = %v, want a refusal naming the entity type", err)
 	}
 }
+
+// TestApplyPolicyTreatsNullAsAbsent: a metadata parameter whose value
+// is null states nothing, so it doesn't meet an essential operator, and
+// without a policy it's left out of the resolved metadata.
+func TestApplyPolicyTreatsNullAsAbsent(t *testing.T) {
+	metadata := map[string]json.RawMessage{"openid_relying_party": json.RawMessage(`{"id_token_encrypted_response_alg": null, "client_name": null}`)}
+	policy := MetadataPolicy{"openid_relying_party": {"id_token_encrypted_response_alg": {opEssential: json.RawMessage(`true`)}}}
+	if _, err := ApplyPolicy(policy, nil, metadata); err == nil {
+		t.Fatal("ApplyPolicy(essential parameter null) = nil error, want refused")
+	}
+	resolved, err := ApplyPolicy(MetadataPolicy{}, nil, metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(resolved["openid_relying_party"]) != `{}` {
+		t.Errorf("resolved = %s, want the null parameters left out", resolved["openid_relying_party"])
+	}
+}

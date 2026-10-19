@@ -197,6 +197,7 @@ func TestEntityConfigurationAdvertisesAutomaticRegistrationSubjectTypes(t *testi
 	cfg, deps := automaticRegistrationTestConfig(t, f, func(cfg *server.Config, deps *server.Dependencies) {
 		cfg.Subjects = fedPairwiseSubjects(t, fapi.SubjectTypePairwise, server.SubjectTypesPerClient)
 		cfg.Federation = server.FederationConfig{EntityID: testIssuer, Lifetime: time.Hour, Algorithm: fapi.ES256}
+		deps.Keys.(*fakeKeyManager).federationKey = generateKey(t)
 		deps.PairwiseSubjects = hmacDeriver(t)
 		deps.AccessTokens = server.OpaqueAccessTokens{Store: memstore.NewAccessTokenStore()}
 	})

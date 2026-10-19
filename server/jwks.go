@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto"
 	"fmt"
 	"time"
 
@@ -125,7 +126,54 @@ func (s *Server) checkSigningKeys() error {
 	if _, err := s.PublicJWKS(ctx); err != nil {
 		return fmt.Errorf("server: dependencies: the JWK Set at endpoints.jwks can't be built: %w", err)
 	}
+	if s.cfg.Federation.EntityID != "" {
+		return checkFederationKeyDistinct(ctx, uses[len(published)], published)
+	}
 	return nil
+}
+
+// checkFederationKeyDistinct refuses a federation entity signing key that
+// is also one of the server's protocol signing keys. The entity key
+// vouches for this server's whole Entity Configuration, its protocol
+// keys included; one of those keys reused for it would let anything
+// that key signs (an ID token, a JARM response) be presented as a
+// statement of the entity itself, which is why Config.Federation says
+// it is never reused.
+func checkFederationKeyDistinct(ctx context.Context, federation namedSigningKeyUse, published []namedSigningKeyUse) error {
+	entityKeys := signingPublicKeys(ctx, federation.SigningKeyUse)
+	for _, use := range published {
+		for _, protocolKey := range signingPublicKeys(ctx, use.SigningKeyUse) {
+			for _, entityKey := range entityKeys {
+				if equal, ok := entityKey.(interface{ Equal(crypto.PublicKey) bool }); ok && equal.Equal(protocolKey) {
+					return fmt.Errorf("server: dependencies: the %v key is also the %s %v key: a federation entity key is never reused as a protocol key", keys.FederationEntitySigning, use.field, use.Purpose)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// signingPublicKeys returns every public key use's manager currently
+// holds for it: each one a keys.RotatingKeyManager reports, or the one
+// PublicKey returns. checkSigningKeys has resolved each use already, so
+// a key that can't be read now is simply left out.
+func signingPublicKeys(ctx context.Context, use keys.SigningKeyUse) []crypto.PublicKey {
+	if rotating, ok := use.Manager.(keys.RotatingKeyManager); ok {
+		set, err := rotating.PublicKeys(ctx, use.Purpose, use.Algorithm)
+		if err != nil {
+			return nil
+		}
+		out := make([]crypto.PublicKey, 0, len(set.Keys))
+		for _, info := range set.Keys {
+			out = append(out, info.PublicKey)
+		}
+		return out
+	}
+	info, err := use.Manager.PublicKey(ctx, use.Purpose, use.Algorithm)
+	if err != nil {
+		return nil
+	}
+	return []crypto.PublicKey{info.PublicKey}
 }
 
 // probeSigningKey signs a throwaway payload with use's key, through the

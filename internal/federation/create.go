@@ -138,6 +138,17 @@ func validateCreateParams(p CreateParams) error {
 	if err := validateKeyIDs(p.JWKS); err != nil {
 		return err
 	}
+	if err := refusePrivateKeyMembers(p.JWKS); err != nil {
+		return err
+	}
+	for trustMarkType, owner := range p.TrustMarkOwners {
+		if len(owner.JWKS) == 0 {
+			continue
+		}
+		if err := refusePrivateKeyMembers(owner.JWKS); err != nil {
+			return fmt.Errorf("trust_mark_owners %q: %w", trustMarkType, err)
+		}
+	}
 	return validateClaimMixing(p)
 }
 

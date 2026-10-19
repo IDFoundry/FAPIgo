@@ -201,6 +201,9 @@ func parseClaims(payload []byte) (Claims, error) {
 	if err != nil {
 		return Claims{}, err
 	}
+	if err := checkParsedClaimPlacement(raw, iss == sub); err != nil {
+		return Claims{}, err
+	}
 	jwks, hasJWKS := raw["jwks"]
 	if !hasJWKS {
 		return Claims{}, fmt.Errorf("%w: missing \"jwks\"", ErrMalformedClaims)
@@ -276,6 +279,33 @@ func parseClaims(payload []byte) (Claims, error) {
 	}
 
 	return c, nil
+}
+
+// subordinateOnlyClaims and entityConfigurationOnlyClaims are the
+// claims OpenID Federation 1.0 §3.2 (steps 14 to 23) allows in only one
+// kind of Entity Statement.
+var (
+	subordinateOnlyClaims         = []string{"metadata_policy", "metadata_policy_crit", "constraints", "source_endpoint"}
+	entityConfigurationOnlyClaims = []string{"authority_hints", "trust_marks", "trust_mark_issuers", "trust_mark_owners"}
+)
+
+// checkParsedClaimPlacement refuses a statement carrying a claim its
+// kind may not: §3.2's validation steps 14 to 23, e.g. "If the
+// metadata_policy Claim is present, the Entity Statement MUST be a
+// Subordinate Statement". selfSigned is iss == sub, an Entity
+// Configuration. Create checks the same when building one
+// (validateClaimMixing).
+func checkParsedClaimPlacement(raw map[string]json.RawMessage, selfSigned bool) error {
+	forbidden, kind := subordinateOnlyClaims, "an Entity Configuration"
+	if !selfSigned {
+		forbidden, kind = entityConfigurationOnlyClaims, "a Subordinate Statement"
+	}
+	for _, claim := range forbidden {
+		if _, ok := raw[claim]; ok {
+			return fmt.Errorf("%w: %q may not appear in %s (OpenID Federation 1.0 §3.2)", ErrMalformedClaims, claim, kind)
+		}
+	}
+	return nil
 }
 
 // parseTrustMarks parses raw's "trust_marks" claim into c, if present —
@@ -401,6 +431,31 @@ func validateKeyIDs(jwks json.RawMessage) error {
 			return fmt.Errorf("%w: kid %q appears more than once", ErrMalformedJWKS, *key.KeyID)
 		}
 		seen[*key.KeyID] = true
+	}
+	return nil
+}
+
+// privateKeyMembers are the JWK members that carry private or secret key
+// material (RFC 7518 §6.2.2, §6.3.2, §6.4.1; RFC 8037 §2): never part of
+// a published key.
+var privateKeyMembers = []string{"d", "p", "q", "dp", "dq", "qi", "oth", "k"}
+
+// refusePrivateKeyMembers refuses a JWK Set any of whose keys carries
+// private or secret key material, so a statement this package signs
+// never publishes a key handed to it as a private JWK.
+func refusePrivateKeyMembers(jwks json.RawMessage) error {
+	var set struct {
+		Keys []map[string]json.RawMessage `json:"keys"`
+	}
+	if err := json.Unmarshal(jwks, &set); err != nil {
+		return fmt.Errorf("%w: %v", ErrMalformedJWKS, err)
+	}
+	for i, key := range set.Keys {
+		for _, member := range privateKeyMembers {
+			if _, ok := key[member]; ok {
+				return fmt.Errorf("%w: key %d has the private member %q: publish only public keys", ErrMalformedJWKS, i, member)
+			}
+		}
 	}
 	return nil
 }

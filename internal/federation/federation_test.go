@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -906,5 +907,69 @@ func TestStatementClaimedConstraintsAbsent(t *testing.T) {
 	}
 	if constraints := stmt.ClaimedConstraints(); constraints != nil {
 		t.Errorf("ClaimedConstraints() = %+v, want nil", constraints)
+	}
+}
+
+// TestCreateRefusesPrivateKeyMembers: a statement publishes its jwks
+// (and a trust mark owner's) as given, so one handed a private JWK would
+// publish the private key. Create refuses any key carrying private or
+// secret key material.
+func TestCreateRefusesPrivateKeyMembers(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	private := json.RawMessage(`{"keys":[{"kty":"EC","crv":"P-256","kid":"k","x":"AAAA","y":"AAAA","d":"secret"}]}`)
+
+	params := entityConfigParams(t, key, "https://rp.example.org", now)
+	params.JWKS = private
+	if _, err := Create(params); !errors.Is(err, ErrMalformedJWKS) {
+		t.Errorf("Create(jwks with d) = %v, want ErrMalformedJWKS", err)
+	}
+
+	params = entityConfigParams(t, key, "https://ta.example.org", now)
+	params.AuthorityHints = nil
+	params.TrustMarkOwners = map[string]TrustMarkOwner{"https://marks.example.org/x": {Subject: "https://owner.example.org", JWKS: json.RawMessage(`{"keys":[{"kty":"oct","kid":"o","k":"c2VjcmV0"}]}`)}}
+	if _, err := Create(params); !errors.Is(err, ErrMalformedJWKS) {
+		t.Errorf("Create(trust mark owner jwks with k) = %v, want ErrMalformedJWKS", err)
+	}
+
+	params.TrustMarkOwners = map[string]TrustMarkOwner{"https://marks.example.org/x": {Subject: "https://owner.example.org", JWKS: json.RawMessage(`not json`)}}
+	if _, err := Create(params); !errors.Is(err, ErrMalformedJWKS) {
+		t.Errorf("Create(malformed trust mark owner jwks) = %v, want ErrMalformedJWKS", err)
+	}
+	params.TrustMarkOwners = map[string]TrustMarkOwner{"https://marks.example.org/x": {Subject: "https://owner.example.org"}}
+	if _, err := Create(params); errors.Is(err, ErrMalformedJWKS) {
+		t.Errorf("Create(trust mark owner without jwks) = %v, want no jwks error", err)
+	}
+}
+
+// TestParseRefusesMisplacedClaims: OpenID Federation 1.0 §3.2 (steps 14
+// to 23) has a validator refuse a claim the statement's kind may not
+// carry, as Create refuses to build one: a Subordinate Statement claim
+// in an Entity Configuration, or the reverse.
+func TestParseRefusesMisplacedClaims(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now().Unix()
+	jwks := string(testJWKS(t, key))
+	for name, tc := range map[string]struct {
+		sub, extra string
+		wantErr    bool
+	}{
+		"metadata_policy in an Entity Configuration":   {"https://a.example.org", `"metadata_policy":{}`, true},
+		"constraints in an Entity Configuration":       {"https://a.example.org", `"constraints":{}`, true},
+		"source_endpoint in an Entity Configuration":   {"https://a.example.org", `"source_endpoint":"https://a.example.org/fetch"`, true},
+		"authority_hints in a Subordinate Statement":   {"https://b.example.org", `"authority_hints":["https://ta.example.org"]`, true},
+		"trust_mark_owners in a Subordinate Statement": {"https://b.example.org", `"trust_mark_owners":{}`, true},
+		"authority_hints in an Entity Configuration":   {"https://a.example.org", `"authority_hints":["https://ta.example.org"]`, false},
+		"metadata_policy in a Subordinate Statement":   {"https://b.example.org", `"metadata_policy":{}`, false},
+	} {
+		payload := fmt.Sprintf(`{"iss":"https://a.example.org","sub":%q,"iat":%d,"exp":%d,"jwks":%s,%s}`, tc.sub, now, now+60, jwks, tc.extra)
+		token, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: jwtType, KeyID: "test-kid"}, []byte(payload))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = Parse(token)
+		if gotErr := errors.Is(err, ErrMalformedClaims); gotErr != tc.wantErr {
+			t.Errorf("%s: Parse = %v, want ErrMalformedClaims %v", name, err, tc.wantErr)
+		}
 	}
 }

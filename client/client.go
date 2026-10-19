@@ -368,6 +368,9 @@ func validateUserInfoConfig(cfg Config) error {
 	// checks the declared-vs-configured direction rather than
 	// endpoint-vs-required, since Algorithms.UserInfo has no other
 	// field whose presence already implies it.
+	if cfg.RequireSignedUserInfo && cfg.Algorithms.UserInfo == 0 {
+		return fmt.Errorf("client: config: algorithms.userinfo is required when require_signed_userinfo is set")
+	}
 	if (cfg.Algorithms.UserInfo != 0 || userInfoKeyManagementSet) && cfg.Endpoints.UserInfo.IsZero() {
 		return fmt.Errorf("client: config: endpoints.userinfo is required when algorithms.userinfo or algorithms.userinfo_key_management is set")
 	}

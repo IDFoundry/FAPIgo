@@ -553,6 +553,17 @@ type Config struct {
 	// response carries one, and requires one for a request that asked
 	// for "openid" (see the package doc).
 	OAuthOnly bool
+
+	// RequireSignedUserInfo has FetchUserInfo refuse a plain JSON
+	// UserInfo response: only a signed one (or a signed-then-encrypted
+	// one, under Algorithms.UserInfoKeyManagement) is accepted. Set it
+	// when this client registered userinfo_signed_response_alg (OIDC
+	// Dynamic Client Registration §2: the response is then "JWT
+	// serialized, and signed using JWS"), so a response that arrives
+	// unsigned, which anyone able to answer for the endpoint can
+	// produce, isn't taken as the server's. Requires Algorithms.UserInfo.
+	// False (the default) accepts plain JSON or a signed response.
+	RequireSignedUserInfo bool
 }
 
 // FederationConfig configures this client's OpenID Federation 1.0

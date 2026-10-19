@@ -110,6 +110,7 @@ func (c *Client) FetchUserInfo(ctx context.Context, tokens TokenSet) (UserInfo, 
 // shape is acceptable is a caller policy decision, never inferred from
 // what a given response happens to look like — Config.Algorithms.UserInfoKeyManagement
 // being set means an encrypted response is the only acceptable shape,
+// and Config.RequireSignedUserInfo a signed one,
 // mirroring validateIDToken's own anti-downgrade discipline exactly.
 func (c *Client) decodeUserInfoResponse(ctx context.Context, contentType string, body []byte) (map[string]json.RawMessage, *Error) {
 	expectEncrypted := c.cfg.Algorithms.UserInfoKeyManagement != 0
@@ -122,6 +123,9 @@ func (c *Client) decodeUserInfoResponse(ctx context.Context, contentType string,
 	case strings.EqualFold(mediaType, "application/json"):
 		if expectEncrypted {
 			return nil, newError(ErrorInvalidResponse, "UserInfo response is plain JSON, but this client is configured to require an encrypted UserInfo response", nil)
+		}
+		if c.cfg.RequireSignedUserInfo {
+			return nil, newError(ErrorInvalidResponse, "UserInfo response is plain JSON, but this client is configured to require a signed UserInfo response", nil)
 		}
 		return decodeUserInfoJSON(body)
 	case strings.EqualFold(mediaType, "application/jwt"):

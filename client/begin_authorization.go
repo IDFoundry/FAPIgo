@@ -313,7 +313,11 @@ func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 		return AuthorizationSession{}, sessionErr
 	}
 
-	q := url.Values{}
+	// RFC 6749 §3.1: the endpoint URI's own query "MUST be retained when
+	// adding additional query parameters". Ours replace any of the same
+	// name, since a parameter may appear only once.
+	endpoint := c.cfg.Endpoints.Authorization.URL()
+	q := endpoint.Query()
 	q.Set("client_id", c.cfg.ClientID.String())
 	q.Set("request_uri", result.RequestURI)
 	browserURL := c.cfg.Endpoints.Authorization.WithQuery(q)

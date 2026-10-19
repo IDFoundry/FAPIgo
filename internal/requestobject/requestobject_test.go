@@ -211,14 +211,16 @@ func TestCreateRejectsInconsistentClientID(t *testing.T) {
 }
 
 func TestParseRejectsWrongType(t *testing.T) {
-	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256","typ":"JWT"}`))
 	payload := base64.RawURLEncoding.EncodeToString([]byte(
 		`{"iss":"client-123","aud":"https://as.example","exp":9999999999}`,
 	))
-	token := header + "." + payload + "." + base64.RawURLEncoding.EncodeToString(make([]byte, 64))
-
-	if _, err := Parse(token); !errors.Is(err, ErrWrongType) {
-		t.Fatalf("Parse(wrong typ) = %v, want ErrWrongType", err)
+	signature := base64.RawURLEncoding.EncodeToString(make([]byte, 64))
+	for typ, wantWrong := range map[string]bool{"dpop+jwt": true, "at+jwt": true, "JWT": false, "jwt": false, "oauth-authz-req+jwt": false} {
+		header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256","typ":"` + typ + `"}`))
+		_, err := Parse(header + "." + payload + "." + signature)
+		if errors.Is(err, ErrWrongType) != wantWrong {
+			t.Errorf("Parse(typ %q) = %v, want ErrWrongType %v", typ, err, wantWrong)
+		}
 	}
 }
 

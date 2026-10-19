@@ -6,8 +6,8 @@ var (
 	// ErrWrongType indicates the object's "typ" header was present but
 	// did not identify a request object (RFC 9101 §10.8) even after the
 	// case-insensitive, "application/"-prefix-tolerant comparison
-	// isRequestObjectType applies. An absent "typ" header is not an
-	// error — see jwtType's doc comment.
+	// isRequestObjectType applies. An absent "typ" header, or the
+	// generic "JWT", is not an error — see jwtType's doc comment.
 	ErrWrongType = errors.New("requestobject: header typ is not oauth-authz-req+jwt")
 
 	// ErrMalformedClaims indicates the payload was not a JSON object, or

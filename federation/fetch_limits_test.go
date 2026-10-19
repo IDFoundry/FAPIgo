@@ -2,6 +2,7 @@ package federation_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -133,5 +134,62 @@ func TestAutomaticRegistrationSharesConcurrentResolution(t *testing.T) {
 	}
 	if n := fetches.Load(); n != 1 {
 		t.Fatalf("entity configuration fetched %d times, want 1", n)
+	}
+}
+
+// TestAutomaticRegistrationSharedResolutionOutlivesTheFirstCaller: the
+// first caller for a client_id starts the resolution every other caller
+// waits on. Cancelling that first request returns context.Canceled to
+// it alone; the others get the resolution's own result, so one client
+// can't fail everyone's requests naming an RP by cancelling its own.
+func TestAutomaticRegistrationSharedResolutionOutlivesTheFirstCaller(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		once.Do(func() { close(started) })
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+		http.NotFound(w, nil)
+	}))
+	t.Cleanup(ts.Close)
+
+	resolver, err := federation.NewResolver(federation.Config{
+		TrustAnchors: []federation.TrustAnchor{{EntityID: "https://ta.example.org", JWKS: jwksFor(t, "a", generateKey(t))}},
+		Limits:       federation.Limits{MaxPathLength: 5, MaxAuthorityHints: 5, MaxStatementLifetime: 2 * time.Hour, MaxClockSkew: 5 * time.Second},
+	}, federation.Dependencies{HTTP: fetcherFor(t, ts), Clock: federation.SystemClock{}})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	repo, err := federation.NewAutomaticClientRepository(memstore.NewClientRepository(nil), resolver, fetcherFor(t, ts),
+		federation.AutomaticRegistrationConfig{AllowedScopes: []string{"openid"}, MaxCacheAge: time.Minute}, federation.SystemClock{})
+	if err != nil {
+		t.Fatalf("NewAutomaticClientRepository: %v", err)
+	}
+
+	id := fapi.ClientID(ts.URL)
+	firstCtx, cancelFirst := context.WithCancel(context.Background())
+	first := make(chan error, 1)
+	go func() {
+		_, err := repo.ResolveClient(firstCtx, id)
+		first <- err
+	}()
+	<-started
+	second := make(chan error, 1)
+	go func() {
+		_, err := repo.ResolveClient(context.Background(), id)
+		second <- err
+	}()
+	time.Sleep(100 * time.Millisecond) // let the second caller join the in-flight resolution
+	cancelFirst()
+	if err := <-first; !errors.Is(err, context.Canceled) {
+		t.Fatalf("first ResolveClient = %v, want context.Canceled", err)
+	}
+	close(release)
+	err = <-second
+	if err == nil || errors.Is(err, context.Canceled) {
+		t.Fatalf("second ResolveClient = %v, want the fetch failure, not the first caller's cancellation", err)
 	}
 }

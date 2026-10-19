@@ -432,25 +432,30 @@ func (a *AutomaticClientRepository) resolve(ctx context.Context, id fapi.ClientI
 		a.mu.Unlock()
 		return cachedClient{}, failed.err
 	}
-	if call, ok := a.inflight[id]; ok {
-		a.mu.Unlock()
-		select {
-		case <-call.done:
-			return call.entry, call.err
-		case <-ctx.Done():
-			return cachedClient{}, ctx.Err()
-		}
+	call, ok := a.inflight[id]
+	if !ok {
+		call = &inflightResolution{done: make(chan struct{})}
+		a.inflight[id] = call
+		// The resolution is shared by every caller for id, so it runs
+		// detached from this one's cancellation: one caller giving up
+		// (or an attacker cancelling its own request on purpose) must
+		// not fail the others. It keeps ctx's values, and the fetcher's
+		// own limits bound how long it can take.
+		go func() {
+			call.entry, call.err = a.resolveUncached(context.WithoutCancel(ctx), id)
+			a.mu.Lock()
+			delete(a.inflight, id)
+			a.mu.Unlock()
+			close(call.done)
+		}()
 	}
-	call := &inflightResolution{done: make(chan struct{})}
-	a.inflight[id] = call
 	a.mu.Unlock()
-
-	call.entry, call.err = a.resolveUncached(ctx, id)
-	a.mu.Lock()
-	delete(a.inflight, id)
-	a.mu.Unlock()
-	close(call.done)
-	return call.entry, call.err
+	select {
+	case <-call.done:
+		return call.entry, call.err
+	case <-ctx.Done():
+		return cachedClient{}, ctx.Err()
+	}
 }
 
 // resolveUncached resolves id's Trust Chain and builds its registration,

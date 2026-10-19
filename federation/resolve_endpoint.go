@@ -5,6 +5,7 @@ import (
 	"crypto"
 	"fmt"
 	"net/url"
+	"slices"
 
 	"github.com/idfoundry/fapigo/fapihttp"
 	intfed "github.com/idfoundry/fapigo/internal/federation"
@@ -93,6 +94,12 @@ func (r *Resolver) ResolveViaEndpoint(ctx context.Context, req ResolveRequest) (
 	}
 	if req.TrustAnchor == "" {
 		return ResolveResponseClaims{}, fmt.Errorf("federation: trust anchor is empty")
+	}
+	if !slices.ContainsFunc(r.cfg.TrustAnchors, func(ta TrustAnchor) bool { return ta.EntityID == req.TrustAnchor }) {
+		// The resolver would answer for a Trust Anchor this Resolver
+		// doesn't trust, and the caller would take the metadata as
+		// resolved under one it does.
+		return ResolveResponseClaims{}, fmt.Errorf("federation: trust anchor %q is not one of this Resolver's Config.TrustAnchors", req.TrustAnchor)
 	}
 	if err := ValidEntityID(req.ExpectedIssuer); err != nil {
 		return ResolveResponseClaims{}, fmt.Errorf("federation: expected resolver issuer: %w", err)

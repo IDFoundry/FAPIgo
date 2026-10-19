@@ -54,3 +54,27 @@ func TestURI(t *testing.T) {
 		})
 	}
 }
+
+func TestRemoveDotSegments(t *testing.T) {
+	for in, want := range map[string]string{
+		// RFC 3986 §5.2.4's own examples.
+		"/a/b/c/./../../g":   "/a/g",
+		"mid/content=5/../6": "mid/6",
+		// Each step of the algorithm.
+		"../a":   "a",
+		"./a":    "a",
+		"/./a":   "/a",
+		"/a/.":   "/a/",
+		"/a/../": "/",
+		"/a/..":  "/",
+		"/..":    "/",
+		".":      "",
+		"..":     "",
+		"/a/b":   "/a/b",
+		"":       "",
+	} {
+		if got := removeDotSegments(in); got != want {
+			t.Errorf("removeDotSegments(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

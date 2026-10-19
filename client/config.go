@@ -607,7 +607,9 @@ const (
 	// still pending in the store can be completed this way, not only the
 	// latest, so keep Limits.SessionLifetime short. Never set it for a
 	// store a server shares between users: it would bring login CSRF
-	// back.
+	// back. AssuranceProduction refuses it over a Dependencies.Sessions
+	// that declares CrossInstanceConsistent, which only a shared store
+	// needs.
 	CallbackBindingDeviceLocalStore
 )
 

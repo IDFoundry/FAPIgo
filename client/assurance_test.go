@@ -368,3 +368,34 @@ func TestNewReportsEveryProductionRefusal(t *testing.T) {
 		}
 	}
 }
+
+// TestNewProductionRefusesDeviceLocalBindingOverASharedStore:
+// CallbackBindingDeviceLocalStore finds a session by the callback's
+// state alone, which is safe only in a native app's own store. A
+// sessions store declaring CrossInstanceConsistent is shared between
+// server instances, so production refuses the two together.
+func TestNewProductionRefusesDeviceLocalBindingOverASharedStore(t *testing.T) {
+	shared := storage.Capabilities{Durable: true, AtomicConsume: true, CrossInstanceConsistent: true}
+	for _, tc := range []struct {
+		name    string
+		binding client.CallbackBinding
+		caps    storage.Capabilities
+		refused bool
+	}{
+		{"device-local over a device store", client.CallbackBindingDeviceLocalStore, storage.Capabilities{Durable: true, AtomicConsume: true}, false},
+		{"device-local over a shared store", client.CallbackBindingDeviceLocalStore, shared, true},
+		{"session handle over a shared store", client.CallbackBindingSessionHandle, shared, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validConfig(t)
+			cfg.Assurance = client.AssuranceProduction
+			cfg.CallbackBinding = tc.binding
+			deps := productionDeps(t)
+			deps.Sessions = assuringSessionStore{fakeSessionStore: newFakeSessionStore(), caps: tc.caps}
+			_, err := client.New(cfg, deps)
+			if refused := err != nil && strings.Contains(err.Error(), "CallbackBindingDeviceLocalStore"); refused != tc.refused || (err != nil && !refused) {
+				t.Fatalf("New = %v, want refused %v", err, tc.refused)
+			}
+		})
+	}
+}

@@ -463,21 +463,23 @@ func validateDependencies(cfg Config, deps Dependencies) error {
 		return err
 	}
 	if cfg.Assurance == AssuranceProduction {
-		return validateProductionDependencies(deps)
+		return validateProductionDependencies(cfg, deps)
 	}
 	return nil
 }
 
 // validateProductionDependencies applies AssuranceProduction's checks to
-// deps: the sessions store's capabilities, crypto/rand as the random
+// deps: the sessions store's capabilities (and, under
+// CallbackBindingDeviceLocalStore, that it isn't shared), crypto/rand as the random
 // source, the custody of the keys deps.Keys and deps.Decryption hold, the
 // issuer key source's hardening, and deps.HTTP's. It reports every one that falls
 // short, joined (errors.Join), rather than only the first, so a
 // deployment moving to production sees the whole list in one restart.
-func validateProductionDependencies(deps Dependencies) error {
+func validateProductionDependencies(cfg Config, deps Dependencies) error {
 	var errs []error
 	if deps.Sessions != nil {
 		errs = append(errs, checkStoreAssurance("sessions", deps.Sessions))
+		errs = append(errs, checkDeviceLocalSessions(cfg.CallbackBinding, deps.Sessions))
 	}
 	errs = append(errs, checkRandom(deps.Random))
 	if deps.Keys != nil {
@@ -572,6 +574,22 @@ func (c *Client) checkScope(scope []string) *Error {
 		if s == "openid" {
 			return newError(ErrorInvalidRequest, `"openid" cannot be requested by an oauth_only client`, nil)
 		}
+	}
+	return nil
+}
+
+// checkDeviceLocalSessions refuses CallbackBindingDeviceLocalStore over a
+// sessions store that declares CrossInstanceConsistent: one several
+// server instances share is a server-side store holding many user
+// agents' sessions, where finding a session by the callback's state
+// alone brings login CSRF back (RFC 9700 §4.7). A native app's own
+// on-device store has no other instance to be consistent with.
+func checkDeviceLocalSessions(binding CallbackBinding, sessions any) error {
+	if binding != CallbackBindingDeviceLocalStore {
+		return nil
+	}
+	if asserter, ok := sessions.(storage.StoreAssurance); ok && asserter.Capabilities().CrossInstanceConsistent {
+		return fmt.Errorf("client: config: callback binding CallbackBindingDeviceLocalStore is for a native app's own on-device sessions store, but sessions declares CrossInstanceConsistent, which only a store shared between instances needs: use CallbackBindingSessionHandle")
 	}
 	return nil
 }

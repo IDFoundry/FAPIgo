@@ -85,6 +85,25 @@ character), is refused with `invalid_request` before anything is sent.
 **What to change:** pass each scope as its own element:
 `[]string{"openid", "profile"}`.
 
+### `CallbackBindingDeviceLocalStore` needs an unshared sessions store (client, *production only*)
+
+**Affects:** a client under `AssuranceProduction` with
+`Config.CallbackBinding = CallbackBindingDeviceLocalStore` whose
+`Dependencies.Sessions` declares `CrossInstanceConsistent`.
+
+**Why:** that binding finds a session by the callback's `state` alone,
+which is safe only in a native app's own on-device store. A store
+shared between server instances holds many user agents' sessions, and
+there it brings login CSRF back (RFC 9700 §4.7).
+
+**What fails:** `client.New` returns an error naming
+`CallbackBindingDeviceLocalStore`.
+
+**What to change:** a web client uses `CallbackBindingSessionHandle`, the
+default, and passes `AuthorizationCallback.Session`. A native app's
+store has no other instance to be consistent with, so it shouldn't
+declare `CrossInstanceConsistent`.
+
 ### Attestation-based client authentication follows draft-12 (server, client)
 
 Not a breaking change: clients built to draft-07 keep working, and so

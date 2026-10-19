@@ -75,7 +75,7 @@ type RefreshTokenRequest struct {
 // requesting a narrower scope without it; authorization_details of a
 // type the client or Config.RAR no longer allows are refused with
 // invalid_grant, and the client must authorize again.
-func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest) (TokenResult, error) {
+func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest) (_ TokenResult, retErr error) {
 	formParams, requestedResources := s.takeResourceParameters(req.HTTP.Parameters)
 	params, err := formParametersToMap(formParams)
 	if err != nil {
@@ -101,10 +101,13 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 	if bindingErr != nil {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), bindingErr)
 	}
+	// The proof's nonce, if any, is spent from here: see
+	// attachNextDPoPNonceOnFailure.
+	defer s.attachNextDPoPNonceOnFailure(ctx, client, &retErr)
 
 	grant, now, grantErr := s.redeemRefreshGrant(ctx, client.ID(), authn.InstanceKey, rawToken)
 	if grantErr != nil {
-		return s.tokenFailAfterBinding(ctx, AuditEventRefreshAccessToken, client, grantErr)
+		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), grantErr)
 	}
 	// No DPoP-key match check against grant.Thumbprint here — see
 	// RefreshTokenRequest.DPoPProofs' doc comment. client.ID() above is
@@ -115,18 +118,18 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 
 	scope, scopeErr := refreshScope(params, grant)
 	if scopeErr != nil {
-		return s.tokenFailAfterBinding(ctx, AuditEventRefreshAccessToken, client, scopeErr)
+		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), scopeErr)
 	}
 	// The refresh token stays bound to all of the grant's resources,
 	// whatever this access token is narrowed to (RFC 8707 §2.2).
 	audience, audiences, allowedErr := s.allowedGrantAudience(ctx, client, grant, scope, requestedResources)
 	if allowedErr != nil {
-		return s.tokenFailAfterBinding(ctx, AuditEventRefreshAccessToken, client, allowedErr)
+		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), allowedErr)
 	}
 
 	accessTokenClaims, err := grant.accessTokenClaims()
 	if err != nil {
-		return s.tokenFailAfterBinding(ctx, AuditEventRefreshAccessToken, client, newError(ErrorServerError, 500, "failed to encode requested userinfo claims", err))
+		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorServerError, 500, "failed to encode requested userinfo claims", err))
 	}
 	// Revocation-lookup key discarded — refresh-token redemption is
 	// deliberately not single-use (FAPI2-SP-FINAL 5.3.2.1-11), so
@@ -141,7 +144,7 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 		Now: now, Lifetime: s.cfg.Limits.AccessTokenLifetime, Random: s.deps.Random,
 	})
 	if err != nil {
-		return s.tokenFailAfterBinding(ctx, AuditEventRefreshAccessToken, client, newError(ErrorServerError, 500, "failed to issue access token", err))
+		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorServerError, 500, "failed to issue access token", err))
 	}
 
 	result := TokenResult{
@@ -158,7 +161,7 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 		// requested it, not to every subsequent refresh.
 		idToken, idErr := s.issueIDTokenForGrant(ctx, client, grant, "", accessToken)
 		if idErr != nil {
-			return s.tokenFailAfterBinding(ctx, AuditEventRefreshAccessToken, client, idErr)
+			return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), idErr)
 		}
 		result.IDToken = fapi.NewSecret(idToken)
 		result.HasIDToken = true

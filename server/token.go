@@ -183,7 +183,7 @@ func validateRedeemedAuthorizationCode(redeemed storage.RedeemedAuthorizationCod
 // registered SenderConstrain), plus an ID token when the granted
 // scope included "openid" and a refresh token when it included
 // "offline_access".
-func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req AuthorizationCodeExchangeRequest) (TokenResult, error) {
+func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req AuthorizationCodeExchangeRequest) (_ TokenResult, retErr error) {
 	formParams, requestedResources := s.takeResourceParameters(req.HTTP.Parameters)
 	params, err := formParametersToMap(formParams)
 	if err != nil {
@@ -212,6 +212,9 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	if bindingErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), bindingErr)
 	}
+	// The proof's nonce, if any, is spent from here: see
+	// attachNextDPoPNonceOnFailure.
+	defer s.attachNextDPoPNonceOnFailure(ctx, client, &retErr)
 
 	codeHash := sha256.Sum256([]byte(code))
 	redeemed, err := s.deps.Grants.RedeemAuthorizationCode(ctx, storage.AuthorizationCodeRedemption{
@@ -233,15 +236,14 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		invalidErr := newError(ErrorInvalidGrant, 400, "code is invalid, expired, or already used", err)
 		if s.revokeTokensForReusedCode(ctx, err, client.ID(), codeHash) {
 			s.audit(ctx, AuditEventExchangeAuthorizationCode, client.ID(), AuditOutcomeFailure, "code reused by another client")
-			s.attachNextDPoPNonce(ctx, client, invalidErr)
 			return TokenResult{}, invalidErr
 		}
-		return s.tokenFailAfterBinding(ctx, AuditEventExchangeAuthorizationCode, client, invalidErr)
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), invalidErr)
 	}
 
 	grant, err := s.decodeOwnGrantRecord(redeemed.Grant)
 	if err != nil {
-		return s.tokenFailAfterBinding(ctx, AuditEventExchangeAuthorizationCode, client, recordFailure(err, newError(ErrorInvalidGrant, 400, "code is invalid, expired, or already used", nil), "authorization code grant"))
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), recordFailure(err, newError(ErrorInvalidGrant, 400, "code is invalid, expired, or already used", nil), "authorization code grant"))
 	}
 	if _, ok := s.grantRevocationReader(); ok {
 		// Named after the code, so a reuse of it can revoke whatever this
@@ -252,28 +254,28 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 
 	now := s.deps.Clock.Now()
 	if !issuedWithin(grant.IssuedAt, s.cfg.Limits.AuthorizationCodeLifetime, now) {
-		return s.tokenFailAfterBinding(ctx, AuditEventExchangeAuthorizationCode, client, newError(ErrorInvalidGrant, 400, "code has expired", nil))
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorInvalidGrant, 400, "code has expired", nil))
 	}
 	if valErr := validateRedeemedAuthorizationCode(redeemed, grant, client.ID(), redirectURI, thumbprint, codeVerifier, now); valErr != nil {
-		return s.tokenFailAfterBinding(ctx, AuditEventExchangeAuthorizationCode, client, valErr)
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), valErr)
 	}
 	if revErr := s.checkGrantNotRevoked(ctx, grant); revErr != nil {
-		return s.tokenFailAfterBinding(ctx, AuditEventExchangeAuthorizationCode, client, revErr)
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), revErr)
 	}
 	// The registration may have changed since the code was issued (a
 	// scope or RAR type removed, Config.OAuthOnly turned on, the client's
 	// redirect URIs removed), as at refresh and the CIBA token exchange.
 	if !client.AllowsAuthorizationCodeGrant() {
-		return s.tokenFailAfterBinding(ctx, AuditEventExchangeAuthorizationCode, client, newError(ErrorUnauthorizedClient, 400, "the client is no longer registered for the authorization code grant", nil))
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorUnauthorizedClient, 400, "the client is no longer registered for the authorization code grant", nil))
 	}
 	audience, audiences, allowedErr := s.allowedGrantAudience(ctx, client, grant, grant.Scope, requestedResources)
 	if allowedErr != nil {
-		return s.tokenFailAfterBinding(ctx, AuditEventExchangeAuthorizationCode, client, allowedErr)
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), allowedErr)
 	}
 
 	accessTokenClaims, err := grant.accessTokenClaims()
 	if err != nil {
-		return s.tokenFailAfterBinding(ctx, AuditEventExchangeAuthorizationCode, client, newError(ErrorServerError, 500, "failed to encode requested userinfo claims", err))
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to encode requested userinfo claims", err))
 	}
 	sub, internal := grant.accessTokenSubjects()
 	accessToken, accessKey, err := s.deps.AccessTokens.IssueAccessToken(ctx, AccessTokenParams{
@@ -283,7 +285,7 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		Now: now, Lifetime: s.cfg.Limits.AccessTokenLifetime, Random: s.deps.Random,
 	})
 	if err != nil {
-		return s.tokenFailAfterBinding(ctx, AuditEventExchangeAuthorizationCode, client, newError(ErrorServerError, 500, "failed to issue access token", err))
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to issue access token", err))
 	}
 	// Best-effort, discarded like every other side-record here (see
 	// s.audit's own "_ = ..." pattern) — Grants is already a mandatory
@@ -301,11 +303,11 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	}
 
 	if idErr := s.issueOptionalIDToken(ctx, client, grant, accessToken, &result); idErr != nil {
-		return s.tokenFailAfterBinding(ctx, AuditEventExchangeAuthorizationCode, client, idErr)
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), idErr)
 	}
 
 	if refreshErr := s.issueOptionalRefreshToken(ctx, client, grant, refreshBinding{Thumbprint: thumbprint, InstanceKey: authn.InstanceKey}, codeHash, now, &result); refreshErr != nil {
-		return s.tokenFailAfterBinding(ctx, AuditEventExchangeAuthorizationCode, client, refreshErr)
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), refreshErr)
 	}
 
 	if nonceErr := s.addNextDPoPNonce(ctx, client, now, &result); nonceErr != nil {
@@ -717,15 +719,18 @@ func containsScope(scopes []string, target string) bool {
 	return false
 }
 
-// tokenFailAfterBinding is tokenFail for a request that got past
-// verifyTokenRequestBinding, whose DPoP nonce, when Dependencies.Nonces
-// is set, is now spent: the error carries a fresh one (RFC 9449 §8), so
-// the client's next request isn't challenged first. Only an
-// authenticated client with a verified proof gets here, so this writes
-// no nonce record for an unauthenticated caller.
-func (s *Server) tokenFailAfterBinding(ctx context.Context, eventType AuditEventType, client storage.RegisteredClient, err *Error) (TokenResult, error) {
-	s.attachNextDPoPNonce(ctx, client, err)
-	return s.tokenFail(ctx, eventType, client.ID(), err)
+// attachNextDPoPNonceOnFailure gives *retErr, when it's an *Error, a
+// fresh DPoP nonce (see attachNextDPoPNonce). A grant defers it once its
+// request is past verifyTokenRequestBinding, whose DPoP nonce, when
+// Dependencies.Nonces is set, is then spent: the error carries the next
+// one (RFC 9449 §8), so the client's next request isn't challenged
+// first. Only an authenticated client with a verified proof gets that
+// far, so this writes no nonce record for an unauthenticated caller.
+func (s *Server) attachNextDPoPNonceOnFailure(ctx context.Context, client storage.RegisteredClient, retErr *error) {
+	var e *Error
+	if *retErr != nil && errors.As(*retErr, &e) {
+		s.attachNextDPoPNonce(ctx, client, e)
+	}
 }
 
 // attachNextDPoPNonce gives err a fresh DPoP nonce for a DPoP-bound

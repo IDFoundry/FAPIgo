@@ -58,7 +58,7 @@ type ClientCredentialsTokenRequest struct {
 // owner of its own to make that decision interactively the way PAR/CIBA
 // do. See RARPolicy's own doc comment for the exact contract, including
 // what an unconfigured policy means.
-func (s *Server) RequestClientCredentialsToken(ctx context.Context, req ClientCredentialsTokenRequest) (TokenResult, error) {
+func (s *Server) RequestClientCredentialsToken(ctx context.Context, req ClientCredentialsTokenRequest) (_ TokenResult, retErr error) {
 	if !s.cfg.ClientCredentialsGrant {
 		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, "", newError(ErrorUnsupportedGrantType, 400, "the client_credentials grant is not enabled on this server", nil))
 	}
@@ -112,6 +112,9 @@ func (s *Server) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 	if bindingErr != nil {
 		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), bindingErr)
 	}
+	// The proof's nonce, if any, is spent from here: see
+	// attachNextDPoPNonceOnFailure.
+	defer s.attachNextDPoPNonceOnFailure(ctx, client, &retErr)
 
 	now := s.deps.Clock.Now()
 	// The client is its own subject: RFC 9068 §2.2 requires a "sub"
@@ -141,7 +144,7 @@ func (s *Server) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 		Now: now, Lifetime: s.cfg.Limits.AccessTokenLifetime, Random: s.deps.Random,
 	})
 	if err != nil {
-		return s.tokenFailAfterBinding(ctx, AuditEventRequestClientCredentialsToken, client, newError(ErrorServerError, 500, "failed to issue access token", err))
+		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), newError(ErrorServerError, 500, "failed to issue access token", err))
 	}
 
 	result := TokenResult{

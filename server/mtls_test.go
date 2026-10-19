@@ -586,7 +586,7 @@ func TestServerMetadataAdvertisesMutualTLSAtEndpoints(t *testing.T) {
 			if !containsString(md.TokenEndpointAuthMethodsSupported, "self_signed_tls_client_auth") {
 				t.Errorf("TokenEndpointAuthMethodsSupported = %v, want self_signed_tls_client_auth", md.TokenEndpointAuthMethodsSupported)
 			}
-			if got := containsString(md.TokenEndpointAuthMethodsSupported, "tls_client_auth"); got != tc.wantTLSClient {
+			if containsString(md.TokenEndpointAuthMethodsSupported, "tls_client_auth") != tc.wantTLSClient {
 				t.Errorf("TokenEndpointAuthMethodsSupported = %v, want tls_client_auth %v", md.TokenEndpointAuthMethodsSupported, tc.wantTLSClient)
 			}
 		})

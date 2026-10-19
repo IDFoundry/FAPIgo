@@ -573,16 +573,17 @@ func (s *Server) reconcileBackchannelDPoPBinding(ctx context.Context, proof stri
 	if proof == "" {
 		return declared, nil
 	}
-	endpoint := s.cfg.Endpoints.BackchannelAuthentication.URL()
-	verified, err := dpop.Verify(ctx, dpop.VerifyRequest{
+	// A client authenticating with its certificate calls the mTLS alias
+	// (RFC 8705 §5), and its proof names that URL, as at PAR and the
+	// token endpoint.
+	verified, err := verifyDPoPAtEitherEndpoint(ctx, dpop.VerifyRequest{
 		Proof:        proof,
 		Method:       "POST",
-		URL:          &endpoint,
 		Now:          s.deps.Clock.Now(),
 		MaxProofAge:  s.cfg.Limits.MaxDPoPProofAge,
 		MaxClockSkew: s.cfg.Limits.MaxClockSkew,
 		Replay:       s.dpopReplayChecker(),
-	})
+	}, s.cfg.Endpoints.BackchannelAuthentication, s.cfg.MTLSEndpoints.BackchannelAuthentication)
 	if err != nil {
 		return "", newError(ErrorInvalidDPoPProof, 400, "DPoP proof verification failed", err)
 	}

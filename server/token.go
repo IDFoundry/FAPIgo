@@ -183,7 +183,7 @@ func validateRedeemedAuthorizationCode(redeemed storage.RedeemedAuthorizationCod
 // registered SenderConstrain), plus an ID token when the granted
 // scope included "openid" and a refresh token when it included
 // "offline_access".
-func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req AuthorizationCodeExchangeRequest) (TokenResult, error) {
+func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req AuthorizationCodeExchangeRequest) (_ TokenResult, retErr error) {
 	formParams, requestedResources := s.takeResourceParameters(req.HTTP.Parameters)
 	params, err := formParametersToMap(formParams)
 	if err != nil {
@@ -212,6 +212,9 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	if bindingErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), bindingErr)
 	}
+	// The proof's nonce, if any, is spent from here: see
+	// attachNextDPoPNonceOnFailure.
+	defer s.attachNextDPoPNonceOnFailure(ctx, client, &retErr)
 
 	codeHash := sha256.Sum256([]byte(code))
 	redeemed, err := s.deps.Grants.RedeemAuthorizationCode(ctx, storage.AuthorizationCodeRedemption{
@@ -714,6 +717,33 @@ func containsScope(scopes []string, target string) bool {
 		}
 	}
 	return false
+}
+
+// attachNextDPoPNonceOnFailure gives *retErr, when it's an *Error, a
+// fresh DPoP nonce (see attachNextDPoPNonce). A grant defers it once its
+// request is past verifyTokenRequestBinding, whose DPoP nonce, when
+// Dependencies.Nonces is set, is then spent: the error carries the next
+// one (RFC 9449 §8), so the client's next request isn't challenged
+// first. Only an authenticated client with a verified proof gets that
+// far, so this writes no nonce record for an unauthenticated caller.
+func (s *Server) attachNextDPoPNonceOnFailure(ctx context.Context, client storage.RegisteredClient, retErr *error) {
+	var e *Error
+	if *retErr != nil && errors.As(*retErr, &e) {
+		s.attachNextDPoPNonce(ctx, client, e)
+	}
+}
+
+// attachNextDPoPNonce gives err a fresh DPoP nonce for a DPoP-bound
+// client when Dependencies.Nonces is set and err has none. A nonce that
+// can't be issued is left out: the client is then challenged on its
+// next request, as before.
+func (s *Server) attachNextDPoPNonce(ctx context.Context, client storage.RegisteredClient, err *Error) {
+	if err.nonce != "" {
+		return
+	}
+	if nonce, nonceErr := s.nextDPoPNonce(ctx, client, s.deps.Clock.Now()); nonceErr == nil {
+		err.nonce = nonce
+	}
 }
 
 func (s *Server) tokenFail(ctx context.Context, eventType AuditEventType, clientID fapi.ClientID, err *Error) (TokenResult, error) {

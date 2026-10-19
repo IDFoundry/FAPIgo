@@ -188,10 +188,11 @@ func (e *Error) Code() ErrorCode { return e.code }
 // PublicDescription returns a short, safe-to-expose description.
 func (e *Error) PublicDescription() string { return e.description }
 
-// Nonce returns the nonce a caller should present on retry, alongside
-// this error's own DPoP challenge — non-empty only when Code is
-// ErrorUseDPoPNonce, in which case it belongs in the response's own
-// DPoP-Nonce header (RFC 9449 §8).
+// Nonce returns the DPoP nonce the client should present next, which
+// belongs in the response's own DPoP-Nonce header (RFC 9449 §8):
+// always set when Code is ErrorUseDPoPNonce, and on a token endpoint
+// error after the request's own nonce was spent, so the client's next
+// request isn't challenged first. WriteJSON sends it.
 func (e *Error) Nonce() string { return e.nonce }
 
 // HTTPStatus returns the HTTP status code an adapter should respond

@@ -63,7 +63,7 @@ type BackchannelTokenExchangeRequest struct {
 // against the client's current registration first, as
 // RefreshAccessToken does: a scope or authorization_details type the
 // client may no longer use is refused (invalid_scope, invalid_grant).
-func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req BackchannelTokenExchangeRequest) (TokenResult, error) {
+func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req BackchannelTokenExchangeRequest) (_ TokenResult, retErr error) {
 	if s.deps.Backchannel == nil {
 		// RFC 6749 §5.2: a server that doesn't do CIBA doesn't support
 		// its grant type.
@@ -102,6 +102,9 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 	if bindingErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), bindingErr)
 	}
+	// The proof's nonce, if any, is spent from here: see
+	// attachNextDPoPNonceOnFailure.
+	defer s.attachNextDPoPNonceOnFailure(ctx, client, &retErr)
 
 	now := s.deps.Clock.Now()
 	authReqIDHash := sha256.Sum256([]byte(authReqID))

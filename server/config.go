@@ -396,6 +396,17 @@ type Config struct {
 	// omits mtls_endpoint_aliases from Metadata.
 	MTLSEndpoints MTLSEndpoints
 
+	// MutualTLSAtEndpoints declares that the listener serving Endpoints
+	// itself asks for a client certificate, so a client can do mutual
+	// TLS (RFC 8705) there without MTLSEndpoints, which §5 makes
+	// optional. Metadata then advertises
+	// tls_client_certificate_bound_access_tokens and the certificate
+	// client authentication methods, as it does with MTLSEndpoints set.
+	// It doesn't make the listener ask: that's the deployment's TLS
+	// configuration. False (the default) advertises mutual TLS only with
+	// MTLSEndpoints.
+	MutualTLSAtEndpoints bool
+
 	// Extensions registers every custom authorization parameter this
 	// server accepts, beyond the standard OAuth/OIDC/PKCE parameters it
 	// already understands (response_type, client_id, redirect_uri,

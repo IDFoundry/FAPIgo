@@ -75,7 +75,7 @@ type RefreshTokenRequest struct {
 // requesting a narrower scope without it; authorization_details of a
 // type the client or Config.RAR no longer allows are refused with
 // invalid_grant, and the client must authorize again.
-func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest) (TokenResult, error) {
+func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest) (_ TokenResult, retErr error) {
 	formParams, requestedResources := s.takeResourceParameters(req.HTTP.Parameters)
 	params, err := formParametersToMap(formParams)
 	if err != nil {
@@ -101,6 +101,9 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 	if bindingErr != nil {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), bindingErr)
 	}
+	// The proof's nonce, if any, is spent from here: see
+	// attachNextDPoPNonceOnFailure.
+	defer s.attachNextDPoPNonceOnFailure(ctx, client, &retErr)
 
 	grant, now, grantErr := s.redeemRefreshGrant(ctx, client.ID(), authn.InstanceKey, rawToken)
 	if grantErr != nil {

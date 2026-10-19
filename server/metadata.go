@@ -134,11 +134,10 @@ type Metadata struct {
 	MTLSEndpointAliases *MTLSEndpointAliases `json:"mtls_endpoint_aliases,omitempty"`
 
 	// TLSClientCertificateBoundAccessTokens (RFC 8705 §3.3) is true
-	// under the same condition as MTLSEndpointAliases: this server can
-	// only ever issue a cnf.x5t#S256-bound token for a client actually
-	// registered SenderConstrainMTLS, which in turn only makes sense
-	// once an mTLS-requiring listener exists at all (Config.MTLSEndpoints
-	// non-zero) for that client's tokens to be redeemed against.
+	// when a client can do mutual TLS at all: Config.MTLSEndpoints is
+	// set, or Config.MutualTLSAtEndpoints says Endpoints' own listener
+	// asks for a client certificate. A cnf.x5t#S256-bound token needs
+	// such a listener to be redeemed against.
 	TLSClientCertificateBoundAccessTokens bool `json:"tls_client_certificate_bound_access_tokens,omitempty"`
 
 	// RequirePushedAuthorizationRequests is always true: BeginAuthorization
@@ -293,17 +292,23 @@ func (s *Server) Metadata(_ context.Context) Metadata {
 			BackchannelAuthenticationEndpoint:  urlOrNil(s.cfg.MTLSEndpoints.BackchannelAuthentication),
 			RevocationEndpoint:                 urlOrNil(s.cfg.MTLSEndpoints.Revocation),
 		}
+	}
+	if !s.cfg.MTLSEndpoints.IsZero() || s.cfg.MutualTLSAtEndpoints {
 		md.TLSClientCertificateBoundAccessTokens = true
-		// The two RFC 8705 §2 client-authentication methods
-		// (storage.ClientAuthMethodSelfSignedTLSClientAuth/TLSClientAuth)
-		// both require a client certificate to be presented on the
-		// connection — impossible without an mTLS-requesting listener,
-		// the same precondition MTLSEndpointAliases itself is gated on
-		// above. Advertised alongside "private_key_jwt", not in place of
-		// it: a client can be registered for either mechanism, and this
-		// server never requires every client use the same one.
+		// The RFC 8705 §2 client-authentication methods both require a
+		// client certificate on the connection, which needs an
+		// mTLS-requesting listener: MTLSEndpoints, or Endpoints' own
+		// (Config.MutualTLSAtEndpoints). Advertised alongside
+		// "private_key_jwt", not in place of it: a client can be
+		// registered for either mechanism, and this server never
+		// requires every client use the same one. tls_client_auth is
+		// left out under NoPKIClientAuthentication, which refuses it.
 		md.TokenEndpointAuthMethodsSupported = append(md.TokenEndpointAuthMethodsSupported,
-			storage.ClientAuthMethodSelfSignedTLSClientAuth.String(), storage.ClientAuthMethodTLSClientAuth.String())
+			storage.ClientAuthMethodSelfSignedTLSClientAuth.String())
+		if _, noPKI := s.deps.ClientCertificateTrust.(NoPKIClientAuthentication); !noPKI {
+			md.TokenEndpointAuthMethodsSupported = append(md.TokenEndpointAuthMethodsSupported,
+				storage.ClientAuthMethodTLSClientAuth.String())
+		}
 	}
 
 	if !s.cfg.Endpoints.BackchannelAuthentication.IsZero() {

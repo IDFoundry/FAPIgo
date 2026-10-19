@@ -466,60 +466,9 @@ func TestServerMetadataAdvertisesMTLSEndpointAliasesWhenConfigured(t *testing.T)
 		t.Fatalf("ParseEndpointURL: %v", err)
 	}
 
-	// No newHarness* variant exposes its own Config for mutation, and
-	// the only field under test (Config.MTLSEndpoints) doesn't depend
-	// on anything else a harness sets up — so this test builds a
-	// server directly instead.
-	issuer, err := fapi.ParseIssuerURL(testIssuer)
-	if err != nil {
-		t.Fatalf("ParseIssuerURL: %v", err)
-	}
-	serverKey := generateKey(t)
-	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
-	srv, err := server.New(server.Config{
-		Subjects:  server.PublicSubjects(),
-		Issuer:    issuer,
-		Endpoints: testEndpoints(t),
-		Profile:   server.ProfileFAPISecurity,
-		MTLSEndpoints: server.MTLSEndpoints{
-			Token:                      mtlsToken,
-			PushedAuthorizationRequest: mtlsPAR,
-		},
-		Algorithms: server.AlgorithmPolicy{
-			ClientAssertion: server.AlgorithmSet{fapi.ES256},
-			RequestObject:   server.AlgorithmSet{fapi.ES256},
-			IDToken:         fapi.ES256,
-		},
-		Limits: server.Limits{
-			PushedRequestLifetime:      90 * time.Second,
-			MaxClientAssertionLifetime: time.Minute,
-			MaxRequestObjectLifetime:   time.Minute,
-			InteractionLifetime:        5 * time.Minute,
-			AuthorizationCodeLifetime:  time.Minute,
-			AccessTokenLifetime:        5 * time.Minute,
-			IDTokenLifetime:            5 * time.Minute,
-			MaxIDTokenClaimsBytes:      4096,
-			RefreshTokenLifetime:       5 * time.Minute,
-			MaxDPoPProofAge:            time.Minute,
-			MaxClockSkew:               5 * time.Second,
-		},
-		Assurance: server.AssuranceDevelopment,
-	}, server.Dependencies{
-		Clients:                &fakeClientRepository{},
-		Transactions:           &fakeTransactionStore{},
-		Grants:                 &fakeGrantStore{},
-		Replay:                 &fakeReplayStore{},
-		ClientKeys:             &fakeClientKeySource{},
-		Keys:                   serverKeyManager,
-		AccessTokens:           server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
-		Revocation:             &fakeRevocationSink{},
-		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
-		Clock:                  fixedClock{now: time.Now()},
-		Random:                 rand.Reader,
+	srv := newMetadataTestServer(t, server.NoClientCertificateChainTrust{}, func(cfg *server.Config) {
+		cfg.MTLSEndpoints = server.MTLSEndpoints{Token: mtlsToken, PushedAuthorizationRequest: mtlsPAR}
 	})
-	if err != nil {
-		t.Fatalf("server.New: %v", err)
-	}
 
 	md := srv.Metadata(context.Background())
 	if md.MTLSEndpointAliases == nil {
@@ -550,5 +499,96 @@ func TestServerMetadataAdvertisesMTLSEndpointAliasesWhenConfigured(t *testing.T)
 	}
 	if !containsString(md.TokenEndpointAuthMethodsSupported, "tls_client_auth") {
 		t.Errorf("TokenEndpointAuthMethodsSupported = %v, want to contain tls_client_auth", md.TokenEndpointAuthMethodsSupported)
+	}
+}
+
+// newMetadataTestServer builds a server for a Metadata test with trust
+// and mutate applied to its Config. No newHarness* variant exposes its
+// own Config for mutation, and the fields these tests change don't
+// depend on anything else a harness sets up.
+func newMetadataTestServer(t *testing.T, trust server.ClientCertificateTrust, mutate func(*server.Config)) *server.Server {
+	t.Helper()
+	issuer, err := fapi.ParseIssuerURL(testIssuer)
+	if err != nil {
+		t.Fatalf("ParseIssuerURL: %v", err)
+	}
+	serverKey := generateKey(t)
+	serverKeyManager := &fakeKeyManager{key: serverKey, keyID: "as-key-1"}
+	cfg := server.Config{
+		Subjects:  server.PublicSubjects(),
+		Issuer:    issuer,
+		Endpoints: testEndpoints(t),
+		Profile:   server.ProfileFAPISecurity,
+		Algorithms: server.AlgorithmPolicy{
+			ClientAssertion: server.AlgorithmSet{fapi.ES256},
+			RequestObject:   server.AlgorithmSet{fapi.ES256},
+			IDToken:         fapi.ES256,
+		},
+		Limits: server.Limits{
+			PushedRequestLifetime:      90 * time.Second,
+			MaxClientAssertionLifetime: time.Minute,
+			MaxRequestObjectLifetime:   time.Minute,
+			InteractionLifetime:        5 * time.Minute,
+			AuthorizationCodeLifetime:  time.Minute,
+			AccessTokenLifetime:        5 * time.Minute,
+			IDTokenLifetime:            5 * time.Minute,
+			MaxIDTokenClaimsBytes:      4096,
+			RefreshTokenLifetime:       5 * time.Minute,
+			MaxDPoPProofAge:            time.Minute,
+			MaxClockSkew:               5 * time.Second,
+		},
+		Assurance: server.AssuranceDevelopment,
+	}
+	mutate(&cfg)
+	srv, err := server.New(cfg, server.Dependencies{
+		Clients:                &fakeClientRepository{},
+		Transactions:           &fakeTransactionStore{},
+		Grants:                 &fakeGrantStore{},
+		Replay:                 &fakeReplayStore{},
+		ClientKeys:             &fakeClientKeySource{},
+		Keys:                   serverKeyManager,
+		AccessTokens:           server.JWTAccessTokens{Keys: serverKeyManager, Algorithm: fapi.ES256},
+		Revocation:             &fakeRevocationSink{},
+		ClientCertificateTrust: trust,
+		Clock:                  fixedClock{now: time.Now()},
+		Random:                 rand.Reader,
+	})
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+	return srv
+}
+
+// TestServerMetadataAdvertisesMutualTLSAtEndpoints: with
+// Config.MutualTLSAtEndpoints, a server without mTLS aliases (RFC 8705
+// §5 makes them optional) still advertises certificate-bound tokens and
+// the certificate client authentication methods, but no aliases;
+// tls_client_auth is left out under NoPKIClientAuthentication, which
+// refuses it.
+func TestServerMetadataAdvertisesMutualTLSAtEndpoints(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		trust         server.ClientCertificateTrust
+		wantTLSClient bool
+	}{
+		{"chain verified upstream", server.NoClientCertificateChainTrust{}, true},
+		{"no PKI client authentication", server.NoPKIClientAuthentication{}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newMetadataTestServer(t, tc.trust, func(cfg *server.Config) { cfg.MutualTLSAtEndpoints = true })
+			md := srv.Metadata(context.Background())
+			if md.MTLSEndpointAliases != nil {
+				t.Errorf("MTLSEndpointAliases = %+v, want none", md.MTLSEndpointAliases)
+			}
+			if !md.TLSClientCertificateBoundAccessTokens {
+				t.Error("TLSClientCertificateBoundAccessTokens = false, want true")
+			}
+			if !containsString(md.TokenEndpointAuthMethodsSupported, "self_signed_tls_client_auth") {
+				t.Errorf("TokenEndpointAuthMethodsSupported = %v, want self_signed_tls_client_auth", md.TokenEndpointAuthMethodsSupported)
+			}
+			if containsString(md.TokenEndpointAuthMethodsSupported, "tls_client_auth") != tc.wantTLSClient {
+				t.Errorf("TokenEndpointAuthMethodsSupported = %v, want tls_client_auth %v", md.TokenEndpointAuthMethodsSupported, tc.wantTLSClient)
+			}
+		})
 	}
 }

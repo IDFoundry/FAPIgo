@@ -503,3 +503,39 @@ func TestNonceIssuedAtPARIsValidAtTokenEndpoint(t *testing.T) {
 		t.Fatalf("ExchangeAuthorizationCode(nonce issued by PAR): %v", err)
 	}
 }
+
+// TestTokenErrorAfterTheNonceIsSpentCarriesTheNext: a token request
+// that presented a valid nonce and then failed (here, a wrong
+// code_verifier) has spent it, so the error carries a fresh one (RFC
+// 9449 §8) for the client's next request, which then isn't challenged.
+func TestTokenErrorAfterTheNonceIsSpentCarriesTheNext(t *testing.T) {
+	h, _ := newHarnessWithNonces(t)
+	dpopKey := generateKey(t)
+	_, err := exchangeWithDPoPNonce(t, h, dpopKey, "")
+	serr, ok := err.(*server.Error)
+	if !ok {
+		t.Fatalf("error type = %T, want *server.Error", err)
+	}
+
+	code := completeSuccessfulAuthorization(t, h, []string{"openid", "accounts"})
+	tokenURL, _ := url.Parse(testTokenEndpoint)
+	proof, err := dpop.CreateProof(dpop.ProofRequest{Signer: dpopKey, Algorithm: fapi.ES256, Method: "POST", URL: tokenURL, Now: h.now, Nonce: serr.Nonce()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = h.server.ExchangeAuthorizationCode(context.Background(), server.AuthorizationCodeExchangeRequest{
+		HTTP:       server.FormRequest{Parameters: exchangeFormParams(h.clientAssertion(t), code, testRedirectURI, "wrong-verifier-wrong-verifier-wrong-verifier-0")},
+		DPoPProofs: []string{proof},
+	})
+	failed, ok := err.(*server.Error)
+	if !ok || failed.Code() != server.ErrorInvalidGrant {
+		t.Fatalf("ExchangeAuthorizationCode(wrong verifier) = %v, want invalid_grant", err)
+	}
+	next := failed.Nonce()
+	if next == "" || next == serr.Nonce() {
+		t.Fatalf("Nonce() = %q, want a fresh nonce", next)
+	}
+	if _, err := exchangeWithDPoPNonce(t, h, dpopKey, next); err != nil {
+		t.Fatalf("ExchangeAuthorizationCode(with the nonce from the error) = %v", err)
+	}
+}

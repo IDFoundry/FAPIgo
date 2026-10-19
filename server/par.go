@@ -489,7 +489,15 @@ func (s *Server) authenticateClientViaAssertion(ctx context.Context, params map[
 // the backchannel authentication endpoint, and the token endpoint for
 // the CIBA and refresh grants (and revocation); the authorization code
 // and client credentials grants are FAPI 2.0's, and pass nil, so a CIBA
-// client's assertion there must name the issuer like any other. For such a client,
+// client's assertion there must name the issuer like any other.
+//
+// The refresh grant and revocation can't tell a CIBA grant from an
+// authorization code one before the client is authenticated, so a CIBA
+// client may name the token or revocation endpoint URL there whichever
+// flow issued the grant. That is deliberate: the URL names only this
+// server, so an assertion carrying it can't be replayed at another, and
+// telling the flows apart would mean recording the flow in every grant
+// for no security gain. For such a client,
 // the result also includes the URLs actually named in endpoints (those
 // appropriate for the endpoint authenticating this request) and, when
 // it is registered SenderConstrainMTLS, their RFC 8705 §5 mTLS aliases

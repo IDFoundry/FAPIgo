@@ -931,6 +931,15 @@ func TestCreateRefusesPrivateKeyMembers(t *testing.T) {
 	if _, err := Create(params); !errors.Is(err, ErrMalformedJWKS) {
 		t.Errorf("Create(trust mark owner jwks with k) = %v, want ErrMalformedJWKS", err)
 	}
+
+	params.TrustMarkOwners = map[string]TrustMarkOwner{"https://marks.example.org/x": {Subject: "https://owner.example.org", JWKS: json.RawMessage(`not json`)}}
+	if _, err := Create(params); !errors.Is(err, ErrMalformedJWKS) {
+		t.Errorf("Create(malformed trust mark owner jwks) = %v, want ErrMalformedJWKS", err)
+	}
+	params.TrustMarkOwners = map[string]TrustMarkOwner{"https://marks.example.org/x": {Subject: "https://owner.example.org"}}
+	if _, err := Create(params); errors.Is(err, ErrMalformedJWKS) {
+		t.Errorf("Create(trust mark owner without jwks) = %v, want no jwks error", err)
+	}
 }
 
 // TestParseRefusesMisplacedClaims: OpenID Federation 1.0 §3.2 (steps 14

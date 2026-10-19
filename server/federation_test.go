@@ -227,3 +227,18 @@ func TestNewRefusesFederationKeyReusedAsProtocolKey(t *testing.T) {
 		t.Fatalf("New(distinct federation key) = %v", err)
 	}
 }
+
+// TestNewRefusesFederationKeyReusedDuringARotation: with a rotating key
+// manager, every key it still publishes for a protocol purpose counts,
+// the outgoing one included.
+func TestNewRefusesFederationKeyReusedDuringARotation(t *testing.T) {
+	entityKey := generateKey(t)
+	deps := validDependencies()
+	deps.Keys = &rotatingKeyManager{
+		outgoing: &fakeKeyManager{key: entityKey, keyID: "old"},
+		newest:   &fakeKeyManager{key: generateKey(t), keyID: "new", federationKey: entityKey},
+	}
+	if _, err := server.New(federationConfiguredConfig(t), deps); err == nil || !strings.Contains(err.Error(), "never reused as a protocol key") {
+		t.Fatalf("New(outgoing protocol key = federation key) = %v, want refused", err)
+	}
+}

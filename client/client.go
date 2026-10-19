@@ -558,15 +558,39 @@ func issuerKeysNeeded(cfg Config) bool {
 	return !cfg.OAuthOnly || cfg.Profile == ProfileFAPISecurityWithMessageSigning || cfg.Algorithms.UserInfo != 0
 }
 
-// checkOAuthOnlyScope refuses "openid" in an OAuthOnly client's
-// requested scope — see Config.OAuthOnly.
-func (c *Client) checkOAuthOnlyScope(scope []string) *Error {
+// checkScope refuses a Scope element that isn't one scope-token
+// (checkScopeTokens), and "openid" in an OAuthOnly client's requested
+// scope — see Config.OAuthOnly.
+func (c *Client) checkScope(scope []string) *Error {
+	if err := checkScopeTokens(scope); err != nil {
+		return err
+	}
 	if !c.cfg.OAuthOnly {
 		return nil
 	}
 	for _, s := range scope {
 		if s == "openid" {
 			return newError(ErrorInvalidRequest, `"openid" cannot be requested by an oauth_only client`, nil)
+		}
+	}
+	return nil
+}
+
+// checkScopeTokens refuses a Scope element that isn't one scope-token
+// (RFC 6749 §3.3: 1*( %x21 / %x23-5B / %x5D-7E )). Elements are joined
+// with spaces on the wire, so one holding a space would send scopes
+// this client never sees in Scope: "profile openid" asks for openid
+// while every check for "openid" in Scope finds none, and the ID token
+// it then requires goes unrequired.
+func checkScopeTokens(scope []string) *Error {
+	for _, s := range scope {
+		if s == "" {
+			return newError(ErrorInvalidRequest, "a Scope element is empty", nil)
+		}
+		for i := 0; i < len(s); i++ {
+			if c := s[i]; c < 0x21 || c > 0x7e || c == '"' || c == '\\' {
+				return newError(ErrorInvalidRequest, fmt.Sprintf("Scope element %q isn't one scope-token (RFC 6749 §3.3): pass each scope as its own element", s), nil)
+			}
 		}
 	}
 	return nil

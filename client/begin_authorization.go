@@ -676,7 +676,7 @@ func maxAgeSeconds(maxAge time.Duration) (int64, *Error) {
 // anything, and returns the redirect URI this authorization goes out
 // with: Config.RedirectURI, or that with req.RedirectPort.
 func (c *Client) checkBeginRequest(req BeginAuthorizationRequest) (string, *Error) {
-	if scopeErr := c.checkOAuthOnlyScope(req.Scope); scopeErr != nil {
+	if scopeErr := c.checkScope(req.Scope); scopeErr != nil {
 		return "", scopeErr
 	}
 	if req.HasMaxAge && !slices.Contains(req.Scope, "openid") {

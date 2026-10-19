@@ -167,11 +167,15 @@ func (c *Client) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 }
 
 // checkClientCredentialsTokenRequest refuses a request
-// RequestClientCredentialsToken can't send: one without a scope, or with
-// a resource RFC 8707 §2 doesn't allow (see checkResources).
+// RequestClientCredentialsToken can't send: one without a scope, with a
+// Scope element that isn't one scope-token, or with a resource RFC 8707
+// §2 doesn't allow (see checkResources).
 func checkClientCredentialsTokenRequest(req ClientCredentialsTokenRequest) *Error {
 	if len(req.Scope) == 0 {
 		return newError(ErrorInvalidRequest, "scope is required", nil)
+	}
+	if err := checkScopeTokens(req.Scope); err != nil {
+		return err
 	}
 	return checkResources(req.Resource)
 }

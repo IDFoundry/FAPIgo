@@ -65,6 +65,26 @@ don't name one, use the authorization server's issuer, which a FAPIgo
 server records as the audience then. During a move from one to the
 other, list the old audience in `AdditionalAudiences`.
 
+### Each `Scope` element must be one scope (client)
+
+**Affects:** a client passing more than one scope in a single `Scope`
+element, such as `Scope: []string{"openid profile"}`, to
+`BeginAuthorization`, `BeginBackchannelAuthentication`,
+`RequestClientCredentialsToken` or `RefreshTokens`.
+
+**Why:** the elements are joined with spaces on the wire, so the server
+saw every scope while the client's own checks saw one element.
+`[]string{"profile openid"}` asked for `openid`, but the client didn't
+then require the ID token, so an authorization server could leave it
+out unnoticed.
+
+**What fails:** an element that is empty, or isn't one RFC 6749 §3.3
+scope-token (a space, a control character, `"`, `\` or a non-ASCII
+character), is refused with `invalid_request` before anything is sent.
+
+**What to change:** pass each scope as its own element:
+`[]string{"openid", "profile"}`.
+
 ### Attestation-based client authentication follows draft-12 (server, client)
 
 Not a breaking change: clients built to draft-07 keep working, and so

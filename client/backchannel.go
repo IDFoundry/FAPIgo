@@ -239,7 +239,7 @@ func (c *Client) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 // other than exactly one hint, no backchannel endpoint, or essential
 // acr values without "openid".
 func (c *Client) checkBackchannelAuthenticationRequest(req BeginBackchannelAuthenticationRequest) error {
-	if scopeErr := c.checkOAuthOnlyScope(req.Scope); scopeErr != nil {
+	if scopeErr := c.checkScope(req.Scope); scopeErr != nil {
 		return scopeErr
 	}
 	if countNonEmpty(req.LoginHint, req.LoginHintToken, req.IDTokenHint) != 1 {

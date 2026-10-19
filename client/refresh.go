@@ -114,6 +114,9 @@ func refreshParameters(req RefreshTokenRequest) (map[string]string, []string, *E
 		"refresh_token": req.Tokens.RefreshToken.Reveal(),
 	}
 	if len(req.Scope) > 0 {
+		if err := checkScopeTokens(req.Scope); err != nil {
+			return nil, nil, err
+		}
 		params["scope"] = strings.Join(req.Scope, " ")
 	}
 	if resourceErr := checkResources(req.Tokens.Resource); resourceErr != nil {

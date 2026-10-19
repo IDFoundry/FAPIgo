@@ -75,12 +75,12 @@ var coreAuthorizationParameters = map[string]struct{}{
 	"authorization_details": {},
 
 	// response_mode (OAuth Multiple Response Type Encoding Practices;
-	// mandatory as "jwt" for a JARM/message-signing client) is not read
-	// or validated by this package — whether a response is JARM-encoded
-	// is entirely Config.Profile-driven (ProfileFAPISecurityWithMessageSigning
-	// always uses it; ProfileFAPISecurity never does), never decided by
-	// what a request asks for. It only needs to not be rejected as an
-	// unregistered parameter.
+	// mandatory as "jwt" for a JARM/message-signing client) never decides
+	// how a response is encoded — that is entirely Config.Profile-driven
+	// (ProfileFAPISecurityWithMessageSigning always uses JARM;
+	// ProfileFAPISecurity never does) — but a value that names another
+	// encoding is refused (see checkResponseMode), so a client isn't
+	// left waiting for a response that won't come the way it asked.
 	"response_mode": {},
 
 	// acr_values (OIDC Core §3.1.2.1) lets a client request one or more
@@ -714,6 +714,9 @@ func (s *Server) validateAuthorizationParameters(params map[string]json.RawMessa
 	if !client.AllowsAuthorizationCodeGrant() {
 		return nil, newError(ErrorUnauthorizedClient, 400, "the client is not registered for the authorization code grant", nil)
 	}
+	if err := s.checkResponseMode(params); err != nil {
+		return nil, err
+	}
 	responseType, err := jsonString(params, "response_type")
 	if err != nil || responseType == "" {
 		return nil, newError(ErrorInvalidRequest, 400, "response_type is required", err)
@@ -866,6 +869,33 @@ const (
 	maxFormParameters     = 100
 	maxFormParameterBytes = maxFormRequestBytes
 )
+
+// checkResponseMode refuses a response_mode this server won't answer
+// in: under ProfileFAPISecurityWithMessageSigning, anything but "jwt" or
+// "query.jwt" (JARM §2.3.4; the code flow's "jwt" default is
+// "query.jwt"); otherwise anything but "query", the code flow's default
+// (OAuth 2.0 Multiple Response Type Encoding Practices §2.1). These
+// are what Metadata advertises. A request without one gets the
+// profile's own.
+func (s *Server) checkResponseMode(params map[string]json.RawMessage) *Error {
+	if _, ok := params["response_mode"]; !ok {
+		return nil
+	}
+	mode, err := jsonString(params, "response_mode")
+	if err != nil {
+		return newError(ErrorInvalidRequest, 400, "response_mode must be a string", err)
+	}
+	if s.cfg.Profile == ProfileFAPISecurityWithMessageSigning {
+		if mode == "jwt" || mode == "query.jwt" {
+			return nil
+		}
+		return newError(ErrorInvalidRequest, 400, `response_mode must be "jwt"`, nil)
+	}
+	if mode == "query" {
+		return nil
+	}
+	return newError(ErrorInvalidRequest, 400, `response_mode must be "query"`, nil)
+}
 
 func formParametersToMap(params []FormParameter) (map[string]string, error) {
 	if len(params) > maxFormParameters {

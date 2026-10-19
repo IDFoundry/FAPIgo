@@ -1699,21 +1699,24 @@ func TestPushAuthorizationRequestAcceptsPromptParameter(t *testing.T) {
 	}
 }
 
-// response_mode=jwt is mandatory for a JARM/message-signing client
-// (OAuth Multiple Response Type Encoding Practices) but this package
-// never reads it — JARM-or-not is entirely Config.Profile-driven. A
-// conformance-suite regression once had it rejected outright as an
-// unregistered parameter, failing PAR before the authorization flow
-// could even begin under ProfileFAPISecurityWithMessageSigning.
-func TestPushAuthorizationRequestAcceptsResponseModeParameter(t *testing.T) {
-	h := newHarness(t, server.ProfileFAPISecurity, false)
-	params := plainFormParameters(t, h.clientAssertion(t), map[string]string{"response_mode": "jwt"})
-
-	_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
-		HTTP: server.FormRequest{Parameters: params},
-	})
-	if err != nil {
-		t.Fatalf("PushAuthorizationRequest: %v", err)
+// TestPushAuthorizationRequestChecksResponseMode: response_mode never
+// decides the encoding, which is Config.Profile's, but one naming
+// another encoding than the profile answers in is refused, so a client
+// isn't left waiting for a response in a mode it won't get. A
+// conformance-suite regression once had response_mode rejected as an
+// unregistered parameter, so the profile's own mode must pass.
+func TestPushAuthorizationRequestChecksResponseMode(t *testing.T) {
+	for mode, wantOK := range map[string]bool{"query": true, "jwt": false, "form_post": false, "fragment": false} {
+		h := newHarness(t, server.ProfileFAPISecurity, false)
+		_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+			HTTP: server.FormRequest{Parameters: plainFormParameters(t, h.clientAssertion(t), map[string]string{"response_mode": mode})},
+		})
+		if wantOK && err != nil {
+			t.Errorf("response_mode=%q: %v, want accepted", mode, err)
+		}
+		if !wantOK && serverErrorCode(t, err) != server.ErrorInvalidRequest {
+			t.Errorf("response_mode=%q: %v, want invalid_request", mode, err)
+		}
 	}
 }
 

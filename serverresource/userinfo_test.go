@@ -102,3 +102,39 @@ func TestUserInfoClaimsForAPairwiseClient(t *testing.T) {
 		t.Errorf("source asked about %v, want the internal subject", source.subjects)
 	}
 }
+
+// TestUserInfoClaimsNeverAsksAboutAnEmptySubject: under
+// resource.PairwiseClientSubjectsOnly a pairwise sub isn't mapped back,
+// so InternalSubject is empty and the source mustn't be asked about "".
+func TestUserInfoClaimsNeverAsksAboutAnEmptySubject(t *testing.T) {
+	source := &claimsSource{}
+	authz := authzFor([]string{"openid"}, `["email"]`)
+	authz.InternalSubject, authz.ClientSubject = "", "pw:abc"
+	if _, err := serverresource.UserInfoClaims(context.Background(), authz, source); err == nil {
+		t.Fatal("UserInfoClaims(no internal subject) = nil error")
+	}
+	if len(source.subjects) != 0 {
+		t.Errorf("source asked about %q, want not at all", source.subjects)
+	}
+
+	// With nothing to resolve, sub alone needs no internal subject.
+	authz = authzFor([]string{"openid"}, "")
+	authz.InternalSubject, authz.ClientSubject = "", "pw:abc"
+	if claims, err := serverresource.UserInfoClaims(context.Background(), authz, source); err != nil || string(claims["sub"]) != `"pw:abc"` {
+		t.Errorf("UserInfoClaims(nothing requested) = %s, %v; want sub alone", claims, err)
+	}
+}
+
+func TestUserInfoClaimsRefusesClientCredentialsToken(t *testing.T) {
+	source := &claimsSource{}
+	authz := authzFor([]string{"openid"}, `["email"]`)
+	authz.SubjectKind = resource.SubjectClient
+	_, err := serverresource.UserInfoClaims(context.Background(), authz, source)
+	var rerr *resource.Error
+	if !errors.As(err, &rerr) || rerr.Code() != resource.ErrorInsufficientScope {
+		t.Errorf("UserInfoClaims(client credentials token) = %v, want 403 insufficient_scope", err)
+	}
+	if len(source.subjects) != 0 {
+		t.Errorf("source asked about %q, want not at all", source.subjects)
+	}
+}

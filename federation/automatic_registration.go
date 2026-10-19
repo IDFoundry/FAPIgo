@@ -126,6 +126,9 @@ type AutomaticRegistrationConfig struct {
 	// statically registered clients (e.g. only
 	// storage.ClientAuthMethodPrivateKeyJWT, even though some static
 	// clients use mTLS). Every entry must be a valid ClientAuthMethod.
+	// server.New narrows an empty list to leave out tls_client_auth and
+	// its SAN* siblings unless its ClientCertificateTrust verifies
+	// certificate chains (see server.AutomaticRegistrationConfig).
 	AllowedClientAuthMethods []storage.ClientAuthMethod
 
 	// ClientAssertionAlgorithms is what an automatically registered

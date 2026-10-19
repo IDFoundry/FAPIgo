@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 )
@@ -38,10 +39,22 @@ type Prompt []PromptValue
 // Has reports whether the request's prompt included v.
 func (p Prompt) Has(v PromptValue) bool { return slices.Contains(p, v) }
 
+// maxPromptBytes and maxPromptValues bound an authorization request's
+// "prompt". OIDC Core §3.1.2.1 defines four values and other
+// specifications a handful more, so a real request is a few dozen
+// bytes; the bound keeps a pushed request from carrying an arbitrarily
+// long list that every later step (each GET of the authorization
+// endpoint, completion) would parse again.
+const (
+	maxPromptBytes  = 256
+	maxPromptValues = 16
+)
+
 // requestedPrompt is the authorization request's "prompt" (OIDC Core
 // §3.1.2.1), each value once. It refuses a prompt that isn't a string,
-// and "none" combined with any other value, which §3.1.2.1 says is an
-// error.
+// one longer than maxPromptBytes or with more than maxPromptValues
+// distinct values, and "none" combined with any other value, which
+// §3.1.2.1 says is an error.
 func requestedPrompt(params map[string]json.RawMessage) (Prompt, error) {
 	raw, ok := params["prompt"]
 	if !ok {
@@ -51,11 +64,21 @@ func requestedPrompt(params map[string]json.RawMessage) (Prompt, error) {
 	if err != nil {
 		return nil, errors.New("prompt must be a string")
 	}
+	if len(v) > maxPromptBytes {
+		return nil, fmt.Errorf("prompt must not be longer than %d bytes", maxPromptBytes)
+	}
 	var p Prompt
+	seen := make(map[PromptValue]struct{})
 	for _, field := range strings.Fields(v) {
-		if !p.Has(PromptValue(field)) {
-			p = append(p, PromptValue(field))
+		value := PromptValue(field)
+		if _, dup := seen[value]; dup {
+			continue
 		}
+		if len(p) == maxPromptValues {
+			return nil, fmt.Errorf("prompt must not carry more than %d values", maxPromptValues)
+		}
+		seen[value] = struct{}{}
+		p = append(p, value)
 	}
 	if p.Has(PromptNone) && len(p) > 1 {
 		return nil, errors.New(`prompt "none" must not be combined with another value`)

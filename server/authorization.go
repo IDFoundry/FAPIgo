@@ -139,9 +139,9 @@ func (s *Server) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 		return s.beginFail(ctx, req.ClientID, newError(ErrorUnauthorizedClient, 400, "client is no longer registered", err)), nil
 	}
 
-	request, err := decodeRequestRecord(pushed.Request)
+	request, err := s.decodeOwnRequestRecord(pushed.Request)
 	if err != nil {
-		return s.beginFail(ctx, req.ClientID, newError(ErrorServerError, 500, "failed to decode pushed authorization request", err)), nil
+		return s.beginFail(ctx, req.ClientID, recordFailure(err, newError(ErrorInvalidRequestURI, 400, "request_uri is invalid, expired, or already used", nil), "pushed authorization request")), nil
 	}
 
 	extensions, err := s.interactionExtensions(request.Parameters, coreAuthorizationParameters, request.ExtensionSource)

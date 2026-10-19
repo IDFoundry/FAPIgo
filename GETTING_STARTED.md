@@ -415,13 +415,17 @@ deps := server.Dependencies{
 	// decline — see its doc comment for why declining must be a
 	// conscious choice, not a silent default; RevokeGrant then refuses.
 	Revocation: memstore.NewRevocationStore(),
-	// Whether this package re-verifies an mTLS client certificate's
-	// chain itself. NoClientCertificateChainTrust{} declines — right when
-	// no client uses mTLS, or when your TLS termination already verifies
-	// the chain; server.TrustedClientCAs{Roots: pool, Revocation: ...}
-	// has this package check it against pool, and whether it has been
-	// revoked (server.ClientCertificateCRLs, for example), instead.
-	ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+	// How a client authenticating with a CA-issued certificate
+	// (tls_client_auth) is trusted. NoPKIClientAuthentication{} refuses
+	// that method: right when no client uses it.
+	// server.TrustedClientCAs{Roots: pool, Revocation: ...} has this
+	// package check a certificate's chain against pool, and whether it
+	// has been revoked (server.ClientCertificateCRLs, for example).
+	// NoClientCertificateChainTrust{} accepts the certificate unverified,
+	// for when your TLS termination already verifies its chain
+	// (RequireAndVerifyClientCert), never otherwise: anyone could then
+	// present a self-signed certificate naming a client's subject.
+	ClientCertificateTrust: server.NoPKIClientAuthentication{},
 	Clock:                  server.SystemClock{},
 	Random:                 rand.Reader, // crypto/rand; production assurance requires exactly this reader
 }

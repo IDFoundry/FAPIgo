@@ -404,9 +404,13 @@ independently re-verify the presented certificate before any subject/SAN
 field-match, for deployments that can't rely on their own TLS
 termination alone — e.g. mTLS terminated by a gateway in front of this
 process that forwards the presented certificate without having verified
-its chain itself; `server.NoClientCertificateChainTrust{}` explicitly
-declines, the same "conscious, visible choice, not a silent default"
-pattern `NoRevocation{}` uses for `Dependencies.Revocation`.
+its chain itself; `server.NoPKIClientAuthentication{}` refuses
+`tls_client_auth` and its SAN siblings outright (and keeps automatic
+registration from registering them), for a server with no such client;
+`server.NoClientCertificateChainTrust{}` explicitly declines the check
+while still accepting them, for a deployment whose own TLS termination
+verifies the chain, the same "conscious, visible choice, not a silent
+default" pattern `NoRevocation{}` uses for `Dependencies.Revocation`.
 `TrustedClientCAs` verifies at `Dependencies.Clock`'s time and then
 asks its required `Revocation` whether the verified chain has been
 revoked: `server.ClientCertificateCRLs{...}` checks it against

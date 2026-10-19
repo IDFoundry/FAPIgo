@@ -20,8 +20,10 @@ import (
 // binds the exact certificate, so it needs no chain trust to begin
 // with.
 //
-// Its implementations are TrustedClientCAs and
-// NoClientCertificateChainTrust.
+// Its implementations are TrustedClientCAs, NoPKIClientAuthentication
+// and NoClientCertificateChainTrust. A server with no client using
+// ClientAuthMethodTLSClientAuth or a SAN* sibling passes
+// NoPKIClientAuthentication{}.
 type ClientCertificateTrust interface {
 	verifyChain(ctx context.Context, cert *x509.Certificate, now time.Time) *Error
 	validate() error
@@ -98,23 +100,53 @@ func (t TrustedClientCAs) validate() error {
 	return nil
 }
 
+// NoPKIClientAuthentication declares that no client authenticates with a
+// CA-issued certificate: ClientAuthMethodTLSClientAuth and its SAN*
+// siblings (RFC 8705 §2.1) are refused with invalid_client, whatever a
+// client's registration says, and automatic registration (OpenID
+// Federation) never registers them, even for a Relying Party that lists
+// them in its metadata. ClientAuthMethodSelfSignedTLSClientAuth still
+// works: its thumbprint binds the exact certificate, needing no chain
+// trust.
+//
+// It's the right choice for a server with no PKI-authenticated client.
+// NoClientCertificateChainTrust would accept such a client's
+// certificate unverified: anyone could then present a self-signed
+// certificate naming a registered subject or SAN — for an
+// automatically registered Relying Party, the one its public metadata
+// publishes — and authenticate as that client.
+type NoPKIClientAuthentication struct{}
+
+func (NoPKIClientAuthentication) verifyChain(context.Context, *x509.Certificate, time.Time) *Error {
+	return newError(ErrorInvalidClient, 401, "this server accepts no CA-issued client certificate (tls_client_auth)", nil)
+}
+
+func (NoPKIClientAuthentication) validate() error { return nil }
+
 // NoClientCertificateChainTrust explicitly declines this package's own
-// chain-of-trust check for a presented client certificate. There are
-// two legitimate reasons to pass it, and this type intentionally
-// doesn't distinguish between them: (1) chain trust is already
-// established before this package ever sees the certificate — the
-// deployment's own TLS termination (tls.Config.ClientCAs and
-// ClientAuth: RequireAndVerifyClientCert/VerifyClientCertIfGiven), or
+// chain-of-trust check for a presented client certificate, while still
+// accepting ClientAuthMethodTLSClientAuth and its SAN* siblings. A
+// server with no such client passes NoPKIClientAuthentication{}
+// instead. There are two legitimate reasons to pass this, and this
+// type intentionally doesn't distinguish between them: (1) chain trust
+// is already established before this package ever sees the certificate
+// — the deployment's own TLS termination (tls.Config.ClientCAs and
+// ClientAuth: RequireAndVerifyClientCert/VerifyClientCertIfGiven, never
+// RequestClientCert or RequireAnyClientCert, which don't verify), or
 // mTLS terminated by a gateway that independently verified the chain;
 // or (2) the deployment has deliberately accepted the risk of running
 // without chain trust — e.g. a conformance or development binary with
 // no CA trust store of its own. Passing this when neither is actually
 // true is a security-relevant mistake this package cannot detect: any
 // self-signed certificate whose subject/SAN an attacker chose to match
-// a registered value is accepted. Exists so that mistake requires a
-// conscious, visible line of code, the same reason NoRevocation
-// exists. Whoever establishes chain trust in case (1) also owns
-// checking revocation.
+// a registered value is accepted. Automatic registration (OpenID
+// Federation) registers those methods under it only when
+// AutomaticRegistrationConfig.AllowedClientAuthMethods names them, since
+// a Relying Party's subject or SAN is public in its metadata: naming one
+// says your TLS termination verifies the chain. Exists so that mistake
+// requires a conscious, visible
+// line of code, the same reason NoRevocation exists. Whoever
+// establishes chain trust in case (1) also owns checking revocation.
 type NoClientCertificateChainTrust struct{}
 
 func (NoClientCertificateChainTrust) verifyChain(context.Context, *x509.Certificate, time.Time) *Error {

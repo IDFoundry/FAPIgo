@@ -102,7 +102,8 @@ const (
 	// comparing subject/SAN fields, for every
 	// ClientAuthMethodTLSClientAuth*/SAN* method (not
 	// ClientAuthMethodSelfSignedTLSClientAuth, which needs no chain
-	// trust); server.NoClientCertificateChainTrust{} instead relies
+	// trust); server.NoPKIClientAuthentication{} refuses these methods
+	// outright; server.NoClientCertificateChainTrust{} instead relies
 	// entirely on the deployment's own TLS termination to have already
 	// required and verified the chain (tls.Config.ClientAuth:
 	// RequireAndVerifyClientCert or VerifyClientCertIfGiven, with

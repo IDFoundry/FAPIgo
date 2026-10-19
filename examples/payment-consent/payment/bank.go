@@ -119,15 +119,17 @@ func (w *World) newBank(shop clientKeys) (*bank, error) {
 		Assurance: server.AssuranceDevelopment, RAR: registry,
 	}
 	b.deps = server.Dependencies{
-		Clients:                memstore.NewClientRepository([]storage.RegisteredClient{shopClient}),
-		Transactions:           memstore.NewTransactionStore(),
-		Grants:                 memstore.NewGrantStore(),
-		Replay:                 memstore.NewReplayStore(),
-		ClientKeys:             clientKeySource,
-		Keys:                   manager,
-		AccessTokens:           accessTokens,
-		Revocation:             memstore.NewRevocationStore(),
-		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		Clients:      memstore.NewClientRepository([]storage.RegisteredClient{shopClient}),
+		Transactions: memstore.NewTransactionStore(),
+		Grants:       memstore.NewGrantStore(),
+		Replay:       memstore.NewReplayStore(),
+		ClientKeys:   clientKeySource,
+		Keys:         manager,
+		AccessTokens: accessTokens,
+		Revocation:   memstore.NewRevocationStore(),
+		// No client authenticates with a CA-issued certificate
+		// (tls_client_auth), so refuse that method outright.
+		ClientCertificateTrust: server.NoPKIClientAuthentication{},
 		Clock:                  server.SystemClock{},
 		Random:                 rand.Reader,
 		// Each client's types are its registration's; no further rule.

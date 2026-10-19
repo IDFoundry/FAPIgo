@@ -33,6 +33,18 @@
 // complete client assertion or DPoP proof, and must keep each until at
 // least that expiry: one forgotten sooner can be replayed.
 //
+// A server's stores (TransactionStore, GrantStore,
+// BackchannelAuthenticationStore and the others) may be shared by every
+// instance of one authorization server, but never by servers with
+// different issuers, such as the tenants of one multi-tenant deployment
+// on one database: keep each issuer's records apart (a separate table,
+// schema or key prefix). The server stamps its issuer in the opaque
+// records it writes and treats one another issuer wrote as unknown, so
+// a tenant can't redeem another's authorization code, request_uri,
+// refresh token or auth_req_id; that is a backstop, not a reason to
+// share. A record written before v0.58.0 carries no issuer and is
+// accepted until it expires.
+//
 // An error from a store means what its method's contract says (unknown,
 // already used, refused). A store that couldn't answer at all — its
 // backend unreachable, a timeout — may wrap ErrStoreUnavailable to say

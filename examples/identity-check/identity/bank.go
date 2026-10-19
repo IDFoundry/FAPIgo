@@ -197,12 +197,14 @@ func (w *World) newBank(rps ...*relyingParty) (*bank, error) {
 		// Each client's registered JWK Set: the keys that verify its
 		// client assertions, and the keys to encrypt its ID tokens and
 		// UserInfo responses to.
-		ClientKeys:             clientKeys,
-		ClientEncryptionKeys:   clientKeys,
-		Keys:                   manager,
-		AccessTokens:           accessTokens,
-		Revocation:             memstore.NewRevocationStore(),
-		ClientCertificateTrust: server.NoClientCertificateChainTrust{},
+		ClientKeys:           clientKeys,
+		ClientEncryptionKeys: clientKeys,
+		Keys:                 manager,
+		AccessTokens:         accessTokens,
+		Revocation:           memstore.NewRevocationStore(),
+		// No client authenticates with a CA-issued certificate
+		// (tls_client_auth), so refuse that method outright.
+		ClientCertificateTrust: server.NoPKIClientAuthentication{},
 		Clock:                  server.SystemClock{},
 		Random:                 rand.Reader,
 		// The bank's own records of who its customers are. It releases a

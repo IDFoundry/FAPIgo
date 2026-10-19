@@ -58,9 +58,9 @@ func (s *Server) CompleteBackchannelAuthentication(ctx context.Context, req Comp
 		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, "", AuditOutcomeFailure, string(wrapped.Code()))
 		return wrapped
 	}
-	request, decodeErr := decodeRequestRecord(pending.Request)
+	request, decodeErr := s.decodeOwnRequestRecord(pending.Request)
 	if decodeErr != nil {
-		wrapped := newError(ErrorServerError, 500, "failed to decode backchannel authentication request", decodeErr)
+		wrapped := recordFailure(decodeErr, newError(ErrorInvalidRequest, 400, "backchannel authentication handle is invalid, expired, or already decided", nil), "backchannel authentication request")
 		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, pending.ClientID, AuditOutcomeFailure, string(wrapped.Code()))
 		return wrapped
 	}
@@ -197,7 +197,7 @@ func (s *Server) approveBackchannelAuthentication(ctx context.Context, clientID 
 		return wrapped
 	}
 	decidedAt := s.deps.Clock.Now()
-	grant, encodeErr := encodeGrantRecord(grantRecord{
+	grant, encodeErr := s.encodeGrantRecord(grantRecord{
 		IssuedAt:                &decidedAt,
 		DPoPJKT:                 request.DPoPJKT,
 		Subject:                 result.subject.ID().String(),

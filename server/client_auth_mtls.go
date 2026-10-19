@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	"fmt"
 	"net"
 	"slices"
 
@@ -159,6 +160,47 @@ func isCertificateAuthMethod(method storage.ClientAuthMethod) bool {
 		return true
 	}
 	return false
+}
+
+// isPKICertificateAuthMethod reports whether method authenticates with a
+// CA-issued certificate (RFC 8705 §2.1), whose chain
+// Dependencies.ClientCertificateTrust decides how to trust.
+func isPKICertificateAuthMethod(method storage.ClientAuthMethod) bool {
+	return isCertificateAuthMethod(method) && method != storage.ClientAuthMethodSelfSignedTLSClientAuth
+}
+
+// automaticClientAuthMethods is the client authentication methods
+// automatic registration may register. Under TrustedClientCAs, which
+// verifies every certificate's chain, it's allowed as configured, empty
+// meaning every method. Otherwise nothing in this package verifies a
+// CA-issued certificate's chain (tls_client_auth and its SAN* siblings),
+// and a Relying Party's subject or SAN is public in its metadata, so an
+// empty allowed list means every method but those. Under
+// NoClientCertificateChainTrust naming one explicitly is the opt-in for
+// a deployment whose TLS termination verifies the chain; under
+// NoPKIClientAuthentication, which refuses them, it's a contradiction,
+// refused.
+func automaticClientAuthMethods(allowed []storage.ClientAuthMethod, trust ClientCertificateTrust) ([]storage.ClientAuthMethod, error) {
+	switch trust.(type) {
+	case TrustedClientCAs, *TrustedClientCAs:
+		return allowed, nil
+	}
+	if len(allowed) == 0 {
+		return []storage.ClientAuthMethod{
+			storage.ClientAuthMethodPrivateKeyJWT,
+			storage.ClientAuthMethodSelfSignedTLSClientAuth,
+			storage.ClientAuthMethodAttestation,
+		}, nil
+	}
+	if _, noPKI := trust.(NoPKIClientAuthentication); !noPKI {
+		return allowed, nil
+	}
+	for _, method := range allowed {
+		if isPKICertificateAuthMethod(method) {
+			return nil, fmt.Errorf("allowed_client_auth_methods names %v, which Dependencies.ClientCertificateTrust NoPKIClientAuthentication{} refuses", method)
+		}
+	}
+	return allowed, nil
 }
 
 // authenticateClientViaCertificate authenticates a client identified by a

@@ -17,6 +17,32 @@ and `keys/ephemeral` needs only the steps not marked *production only*.
 
 ## v0.58.0
 
+### Automatic registration skips `tls_client_auth` unless chains are verified (server)
+
+**Affects:** a server with OpenID Federation automatic registration
+whose `ClientCertificateTrust` isn't `TrustedClientCAs`, where a Relying
+Party authenticates with `tls_client_auth` (or a SAN variant) and
+`AutomaticRegistration.AllowedClientAuthMethods` is empty.
+
+**Why:** a Relying Party's `tls_client_auth_subject_dn` (or SAN) is
+public in its metadata. With nothing verifying the certificate's chain,
+anyone could present a self-signed certificate naming it and
+authenticate as that RP: get client credentials tokens, redeem a leaked
+refresh token, or revoke its tokens.
+
+**What fails:** with an empty `AllowedClientAuthMethods`, automatic
+registration no longer registers `tls_client_auth` or its SAN variants
+unless `ClientCertificateTrust` is `TrustedClientCAs`. An RP that lists
+another method too is registered for that one; an RP offering only
+`tls_client_auth` isn't registered, and its requests fail with
+`invalid_client` (`OnResolutionFailure` is told why).
+
+**What to change:** if your TLS termination verifies client certificate
+chains, keep `NoClientCertificateChainTrust{}` and list the methods you
+accept in `AutomaticRegistration.AllowedClientAuthMethods`, including
+`storage.ClientAuthMethodTLSClientAuth`. Otherwise use `TrustedClientCAs`,
+or leave those RPs on another method.
+
 ### Attestation-based client authentication follows draft-12 (server, client)
 
 Not a breaking change: clients built to draft-07 keep working, and so
@@ -51,6 +77,54 @@ and clients of it.
 attestation as `invalid_client` only: handle `use_fresh_attestation` by
 getting a new attestation. A FAPIgo client follows the server's
 attestation challenges by itself.
+
+### Pass `NoPKIClientAuthentication{}` when no client uses `tls_client_auth` (server)
+
+Not a breaking change: nothing stops working. It's here because the
+quick start and the demos used to pass
+`ClientCertificateTrust: server.NoClientCertificateChainTrust{}` for a
+server with no mTLS clients, and that setting isn't safe for one.
+
+**Affects:** a `server.Dependencies` with
+`ClientCertificateTrust: server.NoClientCertificateChainTrust{}` whose
+TLS termination doesn't verify client certificate chains
+(`tls.RequestClientCert`, `RequireAnyClientCert`, or no client
+certificates at all).
+
+**Why:** `NoClientCertificateChainTrust{}` accepts a `tls_client_auth`
+(or SAN-variant) client's certificate without verifying its chain. If
+nothing in front of the server verifies it either, anyone can present a
+self-signed certificate naming a registered subject or SAN and
+authenticate as that client. (Automatic registration no longer
+registers such methods by default; see above.)
+
+**What to change:** if no client authenticates with a CA-issued
+certificate, pass `server.NoPKIClientAuthentication{}`. It refuses
+`tls_client_auth` and its SAN variants with `invalid_client`, keeps
+automatic registration from registering them, and leaves
+`self_signed_tls_client_auth` working. `server.New` refuses it together
+with an `AutomaticRegistration.AllowedClientAuthMethods` that names one
+of those methods. Keep `NoClientCertificateChainTrust{}` only where your
+TLS termination verifies the chain (`RequireAndVerifyClientCert` with
+`ClientCAs`, or a gateway that does), or use `TrustedClientCAs`.
+
+### Records now carry their issuer; stores are per issuer (server)
+
+Not a breaking change for a store: the records are the opaque JSON the
+server already owns. A pushed request, authorization code, refresh token
+or CIBA request written by a server with a different issuer is now
+treated as unknown, so two tenants sharing one database can no longer
+redeem each other's codes or refresh tokens. A record written before
+this release carries no issuer and is accepted until it expires. Keep
+each issuer's records apart anyway: see the `storage` package
+documentation.
+
+### `prompt` is bounded (server)
+
+A pushed authorization request whose `prompt` is longer than 256 bytes,
+or carries more than 16 distinct values, is refused with
+`invalid_request`. OpenID Connect defines four values, so no real
+request is affected.
 
 ## v0.57.0
 

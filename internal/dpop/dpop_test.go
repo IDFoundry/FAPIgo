@@ -200,6 +200,40 @@ func TestVerifyToleratesHTUQueryFragmentAndCase(t *testing.T) {
 	}
 }
 
+// RFC 9449 §4.3 has a server apply RFC 3986's syntax-based and
+// scheme-based normalization (§6.2.2, §6.2.3) before comparing htu: a
+// proof whose htu differs only in those respects verifies, and one
+// naming another path still doesn't.
+func TestVerifyNormalizesHTUPath(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	jwk, err := jose.NewJWK(&key.PublicKey, fapi.ES256)
+	if err != nil {
+		t.Fatalf("NewJWK: %v", err)
+	}
+	for htu, want := range map[string]bool{
+		"https://as.example/api/./v1/../token": true,
+		"https://as.example/api/%74oken":       true,
+		"https://as.example:443/api/token":     true,
+		"https://as.example/api/token/":        false,
+		"https://as.example/api%2Ftoken":       false,
+		"https://as.example/token":             false,
+	} {
+		payload := fmt.Sprintf(`{"jti":"x","htm":"POST","htu":%q,"iat":%d}`, htu, now.Unix())
+		proof, err := jose.Sign(key, jose.Header{Algorithm: fapi.ES256, Type: "dpop+jwt", JWK: &jwk}, []byte(payload))
+		if err != nil {
+			t.Fatalf("jose.Sign: %v", err)
+		}
+		_, err = Verify(context.Background(), VerifyRequest{
+			Proof: proof, Method: "POST", URL: mustURL(t, "https://as.example/api/token"), Now: now, MaxProofAge: time.Minute,
+			Replay: newMemoryReplayChecker(),
+		})
+		if (err == nil) != want {
+			t.Errorf("Verify(htu %q) = %v, want accepted %v", htu, err, want)
+		}
+	}
+}
+
 func TestVerifyRejectsExpiredProof(t *testing.T) {
 	key := generateKey(t)
 	now := time.Now()

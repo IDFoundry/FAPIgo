@@ -22,7 +22,44 @@ func effective(u *url.URL) (scheme, host, port, path string) {
 			port = "80"
 		}
 	}
-	return scheme, host, port, u.EscapedPath()
+	return scheme, host, port, referencePath(u.EscapedPath())
+}
+
+// referencePath is an independent reading of which path an escaped path
+// addresses, coarser than RFC 3986 §6.2.2 so it never tells apart two
+// paths URI equates: split on "/" before decoding, so an encoded "/"
+// stays inside its segment; decode each segment whole; resolve "." and
+// ".." segments; make an empty path "/" (§6.2.3).
+func referencePath(escaped string) string {
+	var segments []string
+	parts := strings.Split(escaped, "/")
+	for i, part := range parts {
+		decoded, err := url.PathUnescape(part)
+		if err != nil {
+			decoded = part
+		}
+		last := i == len(parts)-1
+		switch decoded {
+		case ".":
+			if last {
+				segments = append(segments, "")
+			}
+		case "..":
+			if len(segments) > 1 {
+				segments = segments[:len(segments)-1]
+			}
+			if last {
+				segments = append(segments, "")
+			}
+		default:
+			segments = append(segments, decoded)
+		}
+	}
+	joined := strings.Join(segments, "\x00")
+	if joined == "" || joined == "\x00" {
+		return "/"
+	}
+	return joined
 }
 
 // FuzzURIEquivalence: two absolute http(s) URLs that canonicalize to

@@ -17,7 +17,15 @@ func TestURI(t *testing.T) {
 		{"drops default http port", "http://as.example:80/token", "http://as.example/token"},
 		{"keeps non-default port", "https://as.example:8443/token", "https://as.example:8443/token"},
 		{"strips userinfo", "https://user:pass@as.example/token", "https://as.example/token"},
-		{"preserves path exactly", "https://as.example/a/b/../c", "https://as.example/a/b/../c"},
+		// RFC 3986 §6.2.2 and §6.2.3, as RFC 9449 §4.3 asks of htu.
+		{"removes dot segments", "https://as.example/a/b/../c/./d", "https://as.example/a/c/d"},
+		{"removes dot segments above the root", "https://as.example/../../a", "https://as.example/a"},
+		{"decodes percent-encoded unreserved characters", "https://as.example/%7Euser/%61%2D%5F%2E", "https://as.example/~user/a-_."},
+		{"uppercases other percent-encodings", "https://as.example/a%2fb%c3%a9", "https://as.example/a%2Fb%C3%A9"},
+		{"keeps an encoded slash encoded", "https://as.example/a%2F..%2Fb", "https://as.example/a%2F..%2Fb"},
+		{"removes percent-encoded dot segments", "https://as.example/a/%2E%2E/b", "https://as.example/b"},
+		{"makes an empty path /", "https://as.example", "https://as.example/"},
+		{"keeps a trailing slash", "https://as.example/a/", "https://as.example/a/"},
 		{"drops default port on an IPv6 host", "https://[::1]:443/token", "https://[::1]/token"},
 		{"keeps non-default port on an IPv6 host", "https://[::1]:8443/token", "https://[::1]:8443/token"},
 		// The two cases below were found by FuzzURI, not written by

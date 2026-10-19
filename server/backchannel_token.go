@@ -111,36 +111,36 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 		ClientID:      client.ID(),
 	})
 	if err != nil {
-		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), backchannelPollError(err))
+		return s.tokenFailAfterBinding(ctx, AuditEventExchangeBackchannelAuthentication, client, backchannelPollError(err))
 	}
 
 	if polled.ClientID != client.ID() {
-		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorInvalidGrant, 400, "auth_req_id was not issued to this client", nil))
+		return s.tokenFailAfterBinding(ctx, AuditEventExchangeBackchannelAuthentication, client, newError(ErrorInvalidGrant, 400, "auth_req_id was not issued to this client", nil))
 	}
 	request, err := s.decodeOwnRequestRecord(polled.Request)
 	if err != nil {
-		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), recordFailure(err, newError(ErrorInvalidGrant, 400, "auth_req_id is invalid or unknown", nil), "backchannel authentication request"))
+		return s.tokenFailAfterBinding(ctx, AuditEventExchangeBackchannelAuthentication, client, recordFailure(err, newError(ErrorInvalidGrant, 400, "auth_req_id is invalid or unknown", nil), "backchannel authentication request"))
 	}
 	if request.DPoPJKT != "" && request.DPoPJKT != thumbprint {
-		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorInvalidGrant, 400, "DPoP proof key does not match the dpop_jkt bound to this backchannel authentication request", nil))
+		return s.tokenFailAfterBinding(ctx, AuditEventExchangeBackchannelAuthentication, client, newError(ErrorInvalidGrant, 400, "DPoP proof key does not match the dpop_jkt bound to this backchannel authentication request", nil))
 	}
 
 	if statusErr := backchannelStatusError(polled.Status); statusErr != nil {
-		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), statusErr)
+		return s.tokenFailAfterBinding(ctx, AuditEventExchangeBackchannelAuthentication, client, statusErr)
 	}
 
 	grant, err := decodeGrantRecord(polled.Grant)
 	if err != nil {
-		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorServerError, 500, "failed to decode backchannel authentication grant", err))
+		return s.tokenFailAfterBinding(ctx, AuditEventExchangeBackchannelAuthentication, client, newError(ErrorServerError, 500, "failed to decode backchannel authentication grant", err))
 	}
 	grant.CodeGrantID = s.backchannelGrantID(authReqIDHash)
 	audience, audiences, usableErr := s.usableGrantAudience(ctx, client, grant, requestedResources)
 	if usableErr != nil {
-		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), usableErr)
+		return s.tokenFailAfterBinding(ctx, AuditEventExchangeBackchannelAuthentication, client, usableErr)
 	}
 	accessTokenClaims, err := grant.accessTokenClaims()
 	if err != nil {
-		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorServerError, 500, "failed to encode requested userinfo claims", err))
+		return s.tokenFailAfterBinding(ctx, AuditEventExchangeBackchannelAuthentication, client, newError(ErrorServerError, 500, "failed to encode requested userinfo claims", err))
 	}
 	sub, internal := grant.accessTokenSubjects()
 	accessToken, _, err := s.deps.AccessTokens.IssueAccessToken(ctx, AccessTokenParams{
@@ -150,7 +150,7 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 		Now: now, Lifetime: s.cfg.Limits.AccessTokenLifetime, Random: s.deps.Random,
 	})
 	if err != nil {
-		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorServerError, 500, "failed to issue access token", err))
+		return s.tokenFailAfterBinding(ctx, AuditEventExchangeBackchannelAuthentication, client, newError(ErrorServerError, 500, "failed to issue access token", err))
 	}
 
 	result := TokenResult{
@@ -162,7 +162,7 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 	}
 
 	if issueErr := s.issueBackchannelOptionalTokens(ctx, client, grant, accessToken, refreshBinding{Thumbprint: thumbprint, InstanceKey: authn.InstanceKey}, &result); issueErr != nil {
-		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), issueErr)
+		return s.tokenFailAfterBinding(ctx, AuditEventExchangeBackchannelAuthentication, client, issueErr)
 	}
 
 	if nonceErr := s.addNextDPoPNonce(ctx, client, now, &result); nonceErr != nil {

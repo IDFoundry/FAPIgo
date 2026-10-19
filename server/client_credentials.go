@@ -141,7 +141,7 @@ func (s *Server) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 		Now: now, Lifetime: s.cfg.Limits.AccessTokenLifetime, Random: s.deps.Random,
 	})
 	if err != nil {
-		return s.tokenFail(ctx, AuditEventRequestClientCredentialsToken, client.ID(), newError(ErrorServerError, 500, "failed to issue access token", err))
+		return s.tokenFailAfterBinding(ctx, AuditEventRequestClientCredentialsToken, client, newError(ErrorServerError, 500, "failed to issue access token", err))
 	}
 
 	result := TokenResult{

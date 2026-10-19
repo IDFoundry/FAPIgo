@@ -104,7 +104,7 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 
 	grant, now, grantErr := s.redeemRefreshGrant(ctx, client.ID(), authn.InstanceKey, rawToken)
 	if grantErr != nil {
-		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), grantErr)
+		return s.tokenFailAfterBinding(ctx, AuditEventRefreshAccessToken, client, grantErr)
 	}
 	// No DPoP-key match check against grant.Thumbprint here — see
 	// RefreshTokenRequest.DPoPProofs' doc comment. client.ID() above is
@@ -115,18 +115,18 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 
 	scope, scopeErr := refreshScope(params, grant)
 	if scopeErr != nil {
-		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), scopeErr)
+		return s.tokenFailAfterBinding(ctx, AuditEventRefreshAccessToken, client, scopeErr)
 	}
 	// The refresh token stays bound to all of the grant's resources,
 	// whatever this access token is narrowed to (RFC 8707 §2.2).
 	audience, audiences, allowedErr := s.allowedGrantAudience(ctx, client, grant, scope, requestedResources)
 	if allowedErr != nil {
-		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), allowedErr)
+		return s.tokenFailAfterBinding(ctx, AuditEventRefreshAccessToken, client, allowedErr)
 	}
 
 	accessTokenClaims, err := grant.accessTokenClaims()
 	if err != nil {
-		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorServerError, 500, "failed to encode requested userinfo claims", err))
+		return s.tokenFailAfterBinding(ctx, AuditEventRefreshAccessToken, client, newError(ErrorServerError, 500, "failed to encode requested userinfo claims", err))
 	}
 	// Revocation-lookup key discarded — refresh-token redemption is
 	// deliberately not single-use (FAPI2-SP-FINAL 5.3.2.1-11), so
@@ -141,7 +141,7 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 		Now: now, Lifetime: s.cfg.Limits.AccessTokenLifetime, Random: s.deps.Random,
 	})
 	if err != nil {
-		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), newError(ErrorServerError, 500, "failed to issue access token", err))
+		return s.tokenFailAfterBinding(ctx, AuditEventRefreshAccessToken, client, newError(ErrorServerError, 500, "failed to issue access token", err))
 	}
 
 	result := TokenResult{
@@ -158,7 +158,7 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 		// requested it, not to every subsequent refresh.
 		idToken, idErr := s.issueIDTokenForGrant(ctx, client, grant, "", accessToken)
 		if idErr != nil {
-			return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), idErr)
+			return s.tokenFailAfterBinding(ctx, AuditEventRefreshAccessToken, client, idErr)
 		}
 		result.IDToken = fapi.NewSecret(idToken)
 		result.HasIDToken = true

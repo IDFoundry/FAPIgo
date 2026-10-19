@@ -233,14 +233,15 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		invalidErr := newError(ErrorInvalidGrant, 400, "code is invalid, expired, or already used", err)
 		if s.revokeTokensForReusedCode(ctx, err, client.ID(), codeHash) {
 			s.audit(ctx, AuditEventExchangeAuthorizationCode, client.ID(), AuditOutcomeFailure, "code reused by another client")
+			s.attachNextDPoPNonce(ctx, client, invalidErr)
 			return TokenResult{}, invalidErr
 		}
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), invalidErr)
+		return s.tokenFailAfterBinding(ctx, AuditEventExchangeAuthorizationCode, client, invalidErr)
 	}
 
 	grant, err := s.decodeOwnGrantRecord(redeemed.Grant)
 	if err != nil {
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), recordFailure(err, newError(ErrorInvalidGrant, 400, "code is invalid, expired, or already used", nil), "authorization code grant"))
+		return s.tokenFailAfterBinding(ctx, AuditEventExchangeAuthorizationCode, client, recordFailure(err, newError(ErrorInvalidGrant, 400, "code is invalid, expired, or already used", nil), "authorization code grant"))
 	}
 	if _, ok := s.grantRevocationReader(); ok {
 		// Named after the code, so a reuse of it can revoke whatever this
@@ -251,28 +252,28 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 
 	now := s.deps.Clock.Now()
 	if !issuedWithin(grant.IssuedAt, s.cfg.Limits.AuthorizationCodeLifetime, now) {
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorInvalidGrant, 400, "code has expired", nil))
+		return s.tokenFailAfterBinding(ctx, AuditEventExchangeAuthorizationCode, client, newError(ErrorInvalidGrant, 400, "code has expired", nil))
 	}
 	if valErr := validateRedeemedAuthorizationCode(redeemed, grant, client.ID(), redirectURI, thumbprint, codeVerifier, now); valErr != nil {
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), valErr)
+		return s.tokenFailAfterBinding(ctx, AuditEventExchangeAuthorizationCode, client, valErr)
 	}
 	if revErr := s.checkGrantNotRevoked(ctx, grant); revErr != nil {
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), revErr)
+		return s.tokenFailAfterBinding(ctx, AuditEventExchangeAuthorizationCode, client, revErr)
 	}
 	// The registration may have changed since the code was issued (a
 	// scope or RAR type removed, Config.OAuthOnly turned on, the client's
 	// redirect URIs removed), as at refresh and the CIBA token exchange.
 	if !client.AllowsAuthorizationCodeGrant() {
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorUnauthorizedClient, 400, "the client is no longer registered for the authorization code grant", nil))
+		return s.tokenFailAfterBinding(ctx, AuditEventExchangeAuthorizationCode, client, newError(ErrorUnauthorizedClient, 400, "the client is no longer registered for the authorization code grant", nil))
 	}
 	audience, audiences, allowedErr := s.allowedGrantAudience(ctx, client, grant, grant.Scope, requestedResources)
 	if allowedErr != nil {
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), allowedErr)
+		return s.tokenFailAfterBinding(ctx, AuditEventExchangeAuthorizationCode, client, allowedErr)
 	}
 
 	accessTokenClaims, err := grant.accessTokenClaims()
 	if err != nil {
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to encode requested userinfo claims", err))
+		return s.tokenFailAfterBinding(ctx, AuditEventExchangeAuthorizationCode, client, newError(ErrorServerError, 500, "failed to encode requested userinfo claims", err))
 	}
 	sub, internal := grant.accessTokenSubjects()
 	accessToken, accessKey, err := s.deps.AccessTokens.IssueAccessToken(ctx, AccessTokenParams{
@@ -282,7 +283,7 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		Now: now, Lifetime: s.cfg.Limits.AccessTokenLifetime, Random: s.deps.Random,
 	})
 	if err != nil {
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorServerError, 500, "failed to issue access token", err))
+		return s.tokenFailAfterBinding(ctx, AuditEventExchangeAuthorizationCode, client, newError(ErrorServerError, 500, "failed to issue access token", err))
 	}
 	// Best-effort, discarded like every other side-record here (see
 	// s.audit's own "_ = ..." pattern) — Grants is already a mandatory
@@ -300,11 +301,11 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	}
 
 	if idErr := s.issueOptionalIDToken(ctx, client, grant, accessToken, &result); idErr != nil {
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), idErr)
+		return s.tokenFailAfterBinding(ctx, AuditEventExchangeAuthorizationCode, client, idErr)
 	}
 
 	if refreshErr := s.issueOptionalRefreshToken(ctx, client, grant, refreshBinding{Thumbprint: thumbprint, InstanceKey: authn.InstanceKey}, codeHash, now, &result); refreshErr != nil {
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), refreshErr)
+		return s.tokenFailAfterBinding(ctx, AuditEventExchangeAuthorizationCode, client, refreshErr)
 	}
 
 	if nonceErr := s.addNextDPoPNonce(ctx, client, now, &result); nonceErr != nil {
@@ -714,6 +715,30 @@ func containsScope(scopes []string, target string) bool {
 		}
 	}
 	return false
+}
+
+// tokenFailAfterBinding is tokenFail for a request that got past
+// verifyTokenRequestBinding, whose DPoP nonce, when Dependencies.Nonces
+// is set, is now spent: the error carries a fresh one (RFC 9449 §8), so
+// the client's next request isn't challenged first. Only an
+// authenticated client with a verified proof gets here, so this writes
+// no nonce record for an unauthenticated caller.
+func (s *Server) tokenFailAfterBinding(ctx context.Context, eventType AuditEventType, client storage.RegisteredClient, err *Error) (TokenResult, error) {
+	s.attachNextDPoPNonce(ctx, client, err)
+	return s.tokenFail(ctx, eventType, client.ID(), err)
+}
+
+// attachNextDPoPNonce gives err a fresh DPoP nonce for a DPoP-bound
+// client when Dependencies.Nonces is set and err has none. A nonce that
+// can't be issued is left out: the client is then challenged on its
+// next request, as before.
+func (s *Server) attachNextDPoPNonce(ctx context.Context, client storage.RegisteredClient, err *Error) {
+	if err.nonce != "" {
+		return
+	}
+	if nonce, nonceErr := s.nextDPoPNonce(ctx, client, s.deps.Clock.Now()); nonceErr == nil {
+		err.nonce = nonce
+	}
 }
 
 func (s *Server) tokenFail(ctx context.Context, eventType AuditEventType, clientID fapi.ClientID, err *Error) (TokenResult, error) {

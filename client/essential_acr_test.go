@@ -190,7 +190,7 @@ func assertRequestObjectAsksEssentialGoldOrSilver(t *testing.T, request string) 
 // caller storing it between polls would.
 func resealBackchannelSession(t *testing.T, c *client.Client, session client.BackchannelAuthenticationSession) client.BackchannelAuthenticationSession {
 	t.Helper()
-	sealer, err := client.NewBackchannelSessionSealer(c, [][]byte{[]byte("essential-acr-test-seal-key-0001")})
+	sealer, err := client.NewBackchannelSessionSealer(c, [][]byte{[]byte("essential-acr-test-seal-key-000\x01")})
 	if err != nil {
 		t.Fatal(err)
 	}

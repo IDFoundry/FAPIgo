@@ -159,6 +159,25 @@ entity key is also a protocol key.
 **What to change:** give `keys.FederationEntitySigning` its own key in
 your key manager.
 
+### Sealing keys must not be text (client, server)
+
+**Affects:** a key passed to `client.NewTokenSetSealer`,
+`client.NewBackchannelSessionSealer`, `client/sessioncookie` or
+`server/interactioncookie` that is made entirely of printable text: a
+passphrase, or a hex or base64 key passed without decoding it. Pairwise
+keys already refused these.
+
+**Why:** such a key has far less entropy than 32 random bytes, so
+everything sealed under it (token sets, CIBA sessions, session and
+interaction cookies) is open to anyone who guesses it.
+
+**What fails:** the constructor returns an error saying the key is all
+printable text.
+
+**What to change:** generate the key with `crypto/rand`, and decode an
+encoded key before passing it. A random key is refused with probability
+about 4×10⁻¹⁴.
+
 ### Attestation-based client authentication follows draft-12 (server, client)
 
 Not a breaking change: clients built to draft-07 keep working, and so

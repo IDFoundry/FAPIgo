@@ -46,9 +46,6 @@ func NewHMAC(key []byte, opts ...keys.CustodyOption) (*HMACDeriver, error) {
 	if err := sealkeys.Check("pairwise: HMAC", [][]byte{key}); err != nil {
 		return nil, err
 	}
-	if err := checkNotText("pairwise: HMAC", key); err != nil {
-		return nil, err
-	}
 	return NewHMACWith(memoryHMACOps{key: append([]byte(nil), key...)}, opts...)
 }
 
@@ -158,18 +155,4 @@ func writeLengthPrefixed(w io.Writer, field string) {
 	binary.BigEndian.PutUint32(length[:], uint32(len(field))) // #nosec G115 -- fields are at most MaxInputLength bytes
 	_, _ = w.Write(length[:])
 	_, _ = w.Write([]byte(field))
-}
-
-// checkNotText refuses a key made entirely of printable ASCII (and
-// whitespace): a passphrase, or a hex or base64 encoding passed without
-// decoding, rather than random bytes. 32 random bytes are all in that
-// range with probability (98/256)^32, about 4e-14, so a real key is
-// never refused.
-func checkNotText(what string, key []byte) error {
-	for _, c := range key {
-		if (c < 0x20 || c > 0x7e) && c != '\t' && c != '\n' && c != '\r' {
-			return nil
-		}
-	}
-	return fmt.Errorf("%s: key is all printable text (a passphrase, or a hex or base64 key not yet decoded), not 32 random bytes: generate it with crypto/rand, and decode an encoded key before passing it", what)
 }

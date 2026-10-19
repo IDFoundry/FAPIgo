@@ -204,6 +204,9 @@ func (r PushAuthorizationResult) WriteJSON(w http.ResponseWriter) {
 	if r.NextDPoPNonce != "" {
 		w.Header().Set("DPoP-Nonce", r.NextDPoPNonce)
 	}
+	// request_uri is a credential for the pushed request: RFC 6749 §5.1's
+	// caching rule for "credentials, or other sensitive information".
+	setNoStore(w)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_, _ = w.Write(body)

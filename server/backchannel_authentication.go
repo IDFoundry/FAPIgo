@@ -82,6 +82,9 @@ func (BackchannelInteractionRequired) backchannelAuthenticationAction() {}
 // http.ResponseWriter header/status call, it has no effect once a
 // prior write has already sent the response's status line.
 func (a BackchannelInteractionRequired) WriteJSON(w http.ResponseWriter) {
+	// auth_req_id redeems the tokens: RFC 6749 §5.1's caching rule for
+	// "credentials, or other sensitive information".
+	setNoStore(w)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	// Encoding a string and two ints cannot fail.

@@ -218,6 +218,7 @@ func (e *Error) Unwrap() error { return e.cause }
 // http.ResponseWriter header/status call, it has no effect once a
 // prior write has already sent the response's status line.
 func (e *Error) WriteJSON(w http.ResponseWriter) {
+	setNoStore(w)
 	httperror.WriteJSON(w, e.nonce, "", string(e.code), e.description, e.httpStatus)
 }
 
@@ -243,8 +244,17 @@ func (e *Error) WriteText(w http.ResponseWriter) {
 	if e.description != "" {
 		body += ": " + e.description
 	}
-	w.Header().Set("Cache-Control", "no-store")
+	setNoStore(w)
 	http.Error(w, body, httperror.Status(e.httpStatus))
+}
+
+// setNoStore marks a response that carries tokens, credentials or other
+// sensitive information as uncacheable, as RFC 6749 §5.1 has an
+// authorization server do: Cache-Control: no-store, and Pragma:
+// no-cache for HTTP/1.0 caches.
+func setNoStore(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
 }
 
 // WriteError writes err to w: err's own WriteJSON if err is a *Error

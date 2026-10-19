@@ -443,17 +443,19 @@ func TestNewWiresAutomaticRegistrationRequestObjectFederationRules(t *testing.T)
 	f := setupAutomaticRegistrationFixture(t, testRedirectURI)
 	srv := newAutomaticRegistrationTestServer(t, f)
 
-	assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
-		Signer: f.rpOIDCKey, Algorithm: fapi.ES256, KeyID: "rp-oidc",
-		ClientID: f.rpID, Audience: testIssuer,
-		Now: f.now, Lifetime: 30 * time.Second,
-	})
-	if err != nil {
-		t.Fatalf("CreateAssertion: %v", err)
-	}
-
 	push := func(t *testing.T, params map[string]json.RawMessage) error {
 		t.Helper()
+		// A fresh assertion each call: one is single-use, so a reused
+		// one would be refused as a replay before the request object
+		// is looked at.
+		assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
+			Signer: f.rpOIDCKey, Algorithm: fapi.ES256, KeyID: "rp-oidc",
+			ClientID: f.rpID, Audience: testIssuer,
+			Now: f.now, Lifetime: 30 * time.Second,
+		})
+		if err != nil {
+			t.Fatalf("CreateAssertion: %v", err)
+		}
 		requestObj, err := requestobject.Create(requestobject.CreateParams{
 			Signer: f.rpOIDCKey, Algorithm: fapi.ES256, KeyID: "rp-oidc",
 			ClientID: f.rpID, Audience: testIssuer,
@@ -487,16 +489,16 @@ func TestNewWiresAutomaticRegistrationRequestObjectFederationRules(t *testing.T)
 	})
 
 	t.Run("rejects a request object without client_id", func(t *testing.T) {
-		if err := push(t, standardAuthParams(t)); err == nil {
-			t.Fatalf("PushAuthorizationRequest (no client_id) = nil error, want error")
+		if err := push(t, standardAuthParams(t)); err == nil || !strings.Contains(err.Error(), "client_id") {
+			t.Fatalf("PushAuthorizationRequest (no client_id) = %v, want a client_id error", err)
 		}
 	})
 
 	t.Run("rejects a sub claim", func(t *testing.T) {
 		params := compliant(t)
 		params["sub"] = jsonRaw(t, f.rpID)
-		if err := push(t, params); err == nil {
-			t.Fatalf("PushAuthorizationRequest (sub present) = nil error, want error")
+		if err := push(t, params); err == nil || !strings.Contains(err.Error(), "invalid_request_object") {
+			t.Fatalf("PushAuthorizationRequest (sub present) = %v, want invalid_request_object", err)
 		}
 	})
 }

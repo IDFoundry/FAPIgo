@@ -1946,3 +1946,22 @@ func TestBeginBackchannelAuthenticationAcceptsDPoPProofForTheMTLSAlias(t *testin
 		}
 	}
 }
+
+// TestBeginBackchannelAuthenticationRefusesMalformedAuthorizationDetails:
+// RFC 9396 §5 answers malformed authorization_details, or any on a
+// server without RAR, with invalid_authorization_details.
+func TestBeginBackchannelAuthenticationRefusesMalformedAuthorizationDetails(t *testing.T) {
+	h, _ := newHarnessWithBackchannel(t)
+	params := standardBackchannelParams(t)
+	params["authorization_details"] = json.RawMessage(`{"type":"payment"}`)
+	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+		HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), h.backchannelRequestObject(t, params))},
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+	localErr, ok := action.(server.BackchannelAuthenticationLocalError)
+	if !ok || localErr.Error.Code() != server.ErrorInvalidAuthorizationDetails {
+		t.Fatalf("action = %#v, want invalid_authorization_details", action)
+	}
+}

@@ -38,6 +38,10 @@ func TestIsOwnOpaqueAccessToken(t *testing.T) {
 			t.Errorf("isOwnOpaqueAccessToken(%s, %q) = %v, want %v", tc.client, tc.token, got, tc.want)
 		}
 	}
+	pointer := &Server{deps: Dependencies{AccessTokens: &OpaqueAccessTokens{Store: store}}}
+	if !pointer.isOwnOpaqueAccessToken(context.Background(), "client-1", "opaque-at") {
+		t.Error("isOwnOpaqueAccessToken under *OpaqueAccessTokens = false, want true")
+	}
 	jwt := &Server{deps: Dependencies{AccessTokens: JWTAccessTokens{}}}
 	if jwt.isOwnOpaqueAccessToken(context.Background(), "client-1", "opaque-at") {
 		t.Error("isOwnOpaqueAccessToken under JWT access tokens = true, want false")

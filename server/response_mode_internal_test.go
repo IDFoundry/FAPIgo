@@ -21,4 +21,7 @@ func TestCheckResponseModeUnderMessageSigning(t *testing.T) {
 	if err := s.checkResponseMode(map[string]json.RawMessage{}); err != nil {
 		t.Errorf("no response_mode: %v", err)
 	}
+	if err := s.checkResponseMode(map[string]json.RawMessage{"response_mode": json.RawMessage(`["jwt"]`)}); err == nil {
+		t.Error("response_mode that isn't a string = nil error, want refused")
+	}
 }

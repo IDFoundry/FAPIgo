@@ -60,6 +60,9 @@ type ValidatedAuthorizationResponse struct {
 	// resource is the request's resource indicators (RFC 8707), sent
 	// again on the token request.
 	resource []string
+	// scope is the request's scope, which a token response omitting
+	// "scope" was granted (RFC 6749 §5.1).
+	scope []string
 }
 
 // CallbackResult is a closed sum type returned by
@@ -154,6 +157,7 @@ func (c *Client) HandleAuthorizationResponse(ctx context.Context, cb Authorizati
 		openID:       consumed.OpenID,
 		essentialACR: consumed.EssentialACR,
 		resource:     consumed.Resource,
+		scope:        consumed.Scope,
 	}}, nil
 }
 

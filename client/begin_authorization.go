@@ -313,7 +313,11 @@ func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 		return AuthorizationSession{}, sessionErr
 	}
 
-	q := url.Values{}
+	// RFC 6749 §3.1: the endpoint URI's own query "MUST be retained when
+	// adding additional query parameters". Ours replace any of the same
+	// name, since a parameter may appear only once.
+	endpoint := c.cfg.Endpoints.Authorization.URL()
+	q := endpoint.Query()
 	q.Set("client_id", c.cfg.ClientID.String())
 	q.Set("request_uri", result.RequestURI)
 	browserURL := c.cfg.Endpoints.Authorization.WithQuery(q)
@@ -529,6 +533,19 @@ func (c *Client) signsRequestObject() bool {
 		c.cfg.PushedRequestEncoding == PushedRequestEncodingRequestObject
 }
 
+// reservedExtensionNames are parameters this package sets itself, or
+// that a pushed request must not carry, which an Extensions value may
+// never name, whether or not this request sets them: "request" and
+// "request_uri" (RFC 9126 §2.1 refuses request_uri at PAR, and RFC 9101
+// §4 a request object containing either), "authorization_details",
+// which only AuthorizationDetails sets, the client authentication
+// parameters, and "dpop_jkt", which Config.PARDPoPBinding decides.
+var reservedExtensionNames = map[string]bool{
+	"request": true, "request_uri": true, authorizationDetailsParameter: true,
+	"client_id": true, "client_assertion": true, "client_assertion_type": true,
+	"dpop_jkt": true,
+}
+
 // populatePlainPushedRequestForm fills form with params and snapshot for
 // a plain (non-message-signing) PAR request — split out of
 // buildPushedRequestForm purely to keep that function's own cognitive
@@ -544,7 +561,11 @@ func populatePlainPushedRequestForm(form, params map[string]string, snapshot map
 		form[k] = v
 	}
 	for name, raw := range snapshot {
-		if _, reserved := params[name]; reserved {
+		// form already holds params and the client authentication
+		// parameters, which an extension must not replace either: an
+		// Extensions value named "client_assertion" would otherwise
+		// overwrite the signed one.
+		if _, reserved := form[name]; reserved || reservedExtensionNames[name] {
 			return newError(ErrorInvalidRequest, fmt.Sprintf("extension parameter %q collides with a core parameter name", name), nil)
 		}
 		// A plain top-level parameter has no way to represent
@@ -585,7 +606,7 @@ func (c *Client) signPushedRequestForm(ctx context.Context, now time.Time, form,
 	}
 
 	for name, raw := range snapshot {
-		if _, reserved := objectParams[name]; reserved {
+		if _, reserved := objectParams[name]; reserved || reservedExtensionNames[name] {
 			return newError(ErrorInvalidRequest, fmt.Sprintf("extension parameter %q collides with a core parameter name", name), nil)
 		}
 		objectParams[name] = raw
@@ -641,6 +662,7 @@ func (c *Client) newSessionRecord(req BeginAuthorizationRequest, redirectURI, no
 	}
 	record.EssentialACR = slices.Clone(req.EssentialACRValues)
 	record.Resource = slices.Clone(req.Resource)
+	record.Scope = slices.Clone(req.Scope)
 	return record
 }
 
@@ -676,7 +698,7 @@ func maxAgeSeconds(maxAge time.Duration) (int64, *Error) {
 // anything, and returns the redirect URI this authorization goes out
 // with: Config.RedirectURI, or that with req.RedirectPort.
 func (c *Client) checkBeginRequest(req BeginAuthorizationRequest) (string, *Error) {
-	if scopeErr := c.checkOAuthOnlyScope(req.Scope); scopeErr != nil {
+	if scopeErr := c.checkScope(req.Scope); scopeErr != nil {
 		return "", scopeErr
 	}
 	if req.HasMaxAge && !slices.Contains(req.Scope, "openid") {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"time"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/federation"
@@ -46,6 +47,11 @@ func New(cfg Config, deps Dependencies) (*Client, error) {
 		return nil, err
 	}
 	deps.HTTP = nofollow.Client(deps.HTTP)
+	if deps.DPoPNonceCache == nil {
+		// RFC 9449 §8.2: the client "MUST use the new nonce value
+		// supplied for the next token request".
+		deps.DPoPNonceCache = NewInMemoryDPoPNonceCache()
+	}
 	return &Client{cfg: cfg, deps: deps, challenge: &latestChallenge{}}, nil
 }
 
@@ -61,10 +67,12 @@ func New(cfg Config, deps Dependencies) (*Client, error) {
 //     without the authorization and pushed authorization request
 //     endpoints when cfg.RedirectURI is empty, since a client with no
 //     redirect URI (one using only CIBA or client credentials) never
-//     uses the redirect-based flow. Set it yourself instead when you
-//     need to adjust it first — e.g.
-//     discovered.MTLSEndpointAliases.ApplyForSenderConstrain/
-//     ApplyForClientAuth for an mTLS client — and it's left as given.
+//     uses the redirect-based flow. A client that does mutual TLS gets
+//     the server's mtls_endpoint_aliases (RFC 8705 §5) where it does:
+//     discovered.MTLSEndpointAliases.ApplyForClientAuth when it
+//     authenticates with its certificate, ApplyForSenderConstrain when
+//     its tokens are only bound to it. Set Endpoints yourself instead
+//     when you need to adjust it first, and it's left as given.
 //  3. It checks that the issuer advertises support for every algorithm
 //     cfg declares (discovered.SupportsAlgorithms), turning a
 //     declared-but-unadvertised algorithm into a startup error rather
@@ -92,6 +100,15 @@ func NewFromDiscovery(discovered DiscoveredMetadata, cfg Config, deps Dependenci
 		cfg.Endpoints = discovered.Endpoints
 		if cfg.RedirectURI == "" {
 			cfg.Endpoints.Authorization, cfg.Endpoints.PushedAuthorizationRequest = fapi.URL{}, fapi.URL{}
+		}
+		switch {
+		case authenticatesWithCertificate(cfg.ClientAuthMethod):
+			discovered.MTLSEndpointAliases.ApplyForClientAuth(&cfg.Endpoints)
+		case cfg.SenderConstrain == storage.SenderConstrainMTLS:
+			discovered.MTLSEndpointAliases.ApplyForSenderConstrain(&cfg.Endpoints)
+		}
+		if cfg.RedirectURI == "" {
+			cfg.Endpoints.PushedAuthorizationRequest = fapi.URL{}
 		}
 	}
 	if err := discovered.SupportsAlgorithms(cfg.Algorithms); err != nil {
@@ -241,6 +258,13 @@ func validateEnumFields(cfg Config) error {
 	if cfg.AuthorizationResponseIssPolicy != RequireAuthorizationResponseIss && cfg.AuthorizationResponseIssPolicy != TolerateAbsentAuthorizationResponseIss {
 		return fmt.Errorf("client: config: authorization_response_iss_policy is required (RequireAuthorizationResponseIss or TolerateAbsentAuthorizationResponseIss)")
 	}
+	if cfg.Assurance == AssuranceProduction && cfg.AuthorizationResponseIssPolicy == TolerateAbsentAuthorizationResponseIss {
+		// FAPI 2.0 Security Profile §5.3.2.2 item 7 has the
+		// authorization server send iss (RFC 9207), and §5.3.3.2 item 5
+		// has the client check it: its absence is the mix-up attack's
+		// signature, not a server quirk to tolerate.
+		return fmt.Errorf("client: config: authorization_response_iss_policy TolerateAbsentAuthorizationResponseIss is refused under AssuranceProduction: FAPI 2.0 requires iss in the authorization response (RFC 9207)")
+	}
 	if cfg.SenderConstrain != storage.SenderConstrainDPoP && cfg.SenderConstrain != storage.SenderConstrainMTLS {
 		return fmt.Errorf("client: config: sender_constrain is invalid")
 	}
@@ -344,6 +368,9 @@ func validateUserInfoConfig(cfg Config) error {
 	// checks the declared-vs-configured direction rather than
 	// endpoint-vs-required, since Algorithms.UserInfo has no other
 	// field whose presence already implies it.
+	if cfg.RequireSignedUserInfo && cfg.Algorithms.UserInfo == 0 {
+		return fmt.Errorf("client: config: algorithms.userinfo is required when require_signed_userinfo is set")
+	}
 	if (cfg.Algorithms.UserInfo != 0 || userInfoKeyManagementSet) && cfg.Endpoints.UserInfo.IsZero() {
 		return fmt.Errorf("client: config: endpoints.userinfo is required when algorithms.userinfo or algorithms.userinfo_key_management is set")
 	}
@@ -388,11 +415,20 @@ func validateMessageSigningProfile(cfg Config) error {
 	if cfg.Limits.RequestObjectLifetime <= 0 {
 		return fmt.Errorf("client: config: limits.request_object_lifetime must be positive under ProfileFAPISecurityWithMessageSigning")
 	}
+	if cfg.Limits.RequestObjectLifetime > maxRequestObjectLifetime {
+		return fmt.Errorf("client: config: limits.request_object_lifetime must be at most 60 minutes (FAPI 2.0 Message Signing §5.3.2 item 4)")
+	}
 	if cfg.Limits.MaxJARMResponseLifetime <= 0 {
 		return fmt.Errorf("client: config: limits.max_jarm_response_lifetime must be positive under ProfileFAPISecurityWithMessageSigning")
 	}
 	return nil
 }
+
+// maxRequestObjectLifetime is FAPI 2.0 Message Signing §5.3.2 item 4's
+// bound: a client "shall send an exp claim in the request object that
+// has a lifetime of no longer than 60 minutes". A server following
+// §5.3.1 item 4 refuses a longer one.
+const maxRequestObjectLifetime = 60 * time.Minute
 
 // validateRequestObjectEncoding checks the fields
 // PushedRequestEncodingRequestObject needs under ProfileFAPISecurity —
@@ -407,6 +443,9 @@ func validateRequestObjectEncoding(cfg Config) error {
 	}
 	if cfg.Limits.RequestObjectLifetime <= 0 {
 		return fmt.Errorf("client: config: limits.request_object_lifetime must be positive under PushedRequestEncodingRequestObject")
+	}
+	if cfg.Limits.RequestObjectLifetime > maxRequestObjectLifetime {
+		return fmt.Errorf("client: config: limits.request_object_lifetime must be at most 60 minutes (FAPI 2.0 Message Signing §5.3.2 item 4)")
 	}
 	return nil
 }
@@ -463,21 +502,23 @@ func validateDependencies(cfg Config, deps Dependencies) error {
 		return err
 	}
 	if cfg.Assurance == AssuranceProduction {
-		return validateProductionDependencies(deps)
+		return validateProductionDependencies(cfg, deps)
 	}
 	return nil
 }
 
 // validateProductionDependencies applies AssuranceProduction's checks to
-// deps: the sessions store's capabilities, crypto/rand as the random
+// deps: the sessions store's capabilities (and, under
+// CallbackBindingDeviceLocalStore, that it isn't shared), crypto/rand as the random
 // source, the custody of the keys deps.Keys and deps.Decryption hold, the
 // issuer key source's hardening, and deps.HTTP's. It reports every one that falls
 // short, joined (errors.Join), rather than only the first, so a
 // deployment moving to production sees the whole list in one restart.
-func validateProductionDependencies(deps Dependencies) error {
+func validateProductionDependencies(cfg Config, deps Dependencies) error {
 	var errs []error
 	if deps.Sessions != nil {
 		errs = append(errs, checkStoreAssurance("sessions", deps.Sessions))
+		errs = append(errs, checkDeviceLocalSessions(cfg.CallbackBinding, deps.Sessions))
 	}
 	errs = append(errs, checkRandom(deps.Random))
 	if deps.Keys != nil {
@@ -558,15 +599,67 @@ func issuerKeysNeeded(cfg Config) bool {
 	return !cfg.OAuthOnly || cfg.Profile == ProfileFAPISecurityWithMessageSigning || cfg.Algorithms.UserInfo != 0
 }
 
-// checkOAuthOnlyScope refuses "openid" in an OAuthOnly client's
-// requested scope — see Config.OAuthOnly.
-func (c *Client) checkOAuthOnlyScope(scope []string) *Error {
+// checkScope refuses a Scope element that isn't one scope-token
+// (checkScopeTokens), and "openid" in an OAuthOnly client's requested
+// scope — see Config.OAuthOnly.
+func (c *Client) checkScope(scope []string) *Error {
+	if err := checkScopeTokens(scope); err != nil {
+		return err
+	}
 	if !c.cfg.OAuthOnly {
 		return nil
 	}
 	for _, s := range scope {
 		if s == "openid" {
 			return newError(ErrorInvalidRequest, `"openid" cannot be requested by an oauth_only client`, nil)
+		}
+	}
+	return nil
+}
+
+// authenticatesWithCertificate reports whether method is RFC 8705 §2's
+// mutual-TLS client authentication, PKI or self-signed.
+func authenticatesWithCertificate(method storage.ClientAuthMethod) bool {
+	switch method {
+	case storage.ClientAuthMethodSelfSignedTLSClientAuth, storage.ClientAuthMethodTLSClientAuth,
+		storage.ClientAuthMethodTLSClientAuthSANDNS, storage.ClientAuthMethodTLSClientAuthSANURI,
+		storage.ClientAuthMethodTLSClientAuthSANIP, storage.ClientAuthMethodTLSClientAuthSANEmail:
+		return true
+	}
+	return false
+}
+
+// checkDeviceLocalSessions refuses CallbackBindingDeviceLocalStore over a
+// sessions store that declares CrossInstanceConsistent: one several
+// server instances share is a server-side store holding many user
+// agents' sessions, where finding a session by the callback's state
+// alone brings login CSRF back (RFC 9700 §4.7). A native app's own
+// on-device store has no other instance to be consistent with.
+func checkDeviceLocalSessions(binding CallbackBinding, sessions any) error {
+	if binding != CallbackBindingDeviceLocalStore {
+		return nil
+	}
+	if asserter, ok := sessions.(storage.StoreAssurance); ok && asserter.Capabilities().CrossInstanceConsistent {
+		return fmt.Errorf("client: config: callback binding CallbackBindingDeviceLocalStore is for a native app's own on-device sessions store, but sessions declares CrossInstanceConsistent, which only a store shared between instances needs: use CallbackBindingSessionHandle")
+	}
+	return nil
+}
+
+// checkScopeTokens refuses a Scope element that isn't one scope-token
+// (RFC 6749 §3.3: 1*( %x21 / %x23-5B / %x5D-7E )). Elements are joined
+// with spaces on the wire, so one holding a space would send scopes
+// this client never sees in Scope: "profile openid" asks for openid
+// while every check for "openid" in Scope finds none, and the ID token
+// it then requires goes unrequired.
+func checkScopeTokens(scope []string) *Error {
+	for _, s := range scope {
+		if s == "" {
+			return newError(ErrorInvalidRequest, "a Scope element is empty", nil)
+		}
+		for i := 0; i < len(s); i++ {
+			if c := s[i]; c < 0x21 || c > 0x7e || c == '"' || c == '\\' {
+				return newError(ErrorInvalidRequest, fmt.Sprintf("Scope element %q isn't one scope-token (RFC 6749 §3.3): pass each scope as its own element", s), nil)
+			}
 		}
 	}
 	return nil

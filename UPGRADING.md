@@ -65,6 +65,81 @@ don't name one, use the authorization server's issuer, which a FAPIgo
 server records as the audience then. During a move from one to the
 other, list the old audience in `AdditionalAudiences`.
 
+### Each `Scope` element must be one scope (client)
+
+**Affects:** a client passing more than one scope in a single `Scope`
+element, such as `Scope: []string{"openid profile"}`, to
+`BeginAuthorization`, `BeginBackchannelAuthentication`,
+`RequestClientCredentialsToken` or `RefreshTokens`.
+
+**Why:** the elements are joined with spaces on the wire, so the server
+saw every scope while the client's own checks saw one element.
+`[]string{"profile openid"}` asked for `openid`, but the client didn't
+then require the ID token, so an authorization server could leave it
+out unnoticed.
+
+**What fails:** an element that is empty, or isn't one RFC 6749 §3.3
+scope-token (a space, a control character, `"`, `\` or a non-ASCII
+character), is refused with `invalid_request` before anything is sent.
+
+**What to change:** pass each scope as its own element:
+`[]string{"openid", "profile"}`.
+
+### `CallbackBindingDeviceLocalStore` needs an unshared sessions store (client, *production only*)
+
+**Affects:** a client under `AssuranceProduction` with
+`Config.CallbackBinding = CallbackBindingDeviceLocalStore` whose
+`Dependencies.Sessions` declares `CrossInstanceConsistent`.
+
+**Why:** that binding finds a session by the callback's `state` alone,
+which is safe only in a native app's own on-device store. A store
+shared between server instances holds many user agents' sessions, and
+there it brings login CSRF back (RFC 9700 §4.7).
+
+**What fails:** `client.New` returns an error naming
+`CallbackBindingDeviceLocalStore`.
+
+**What to change:** a web client uses `CallbackBindingSessionHandle`, the
+default, and passes `AuthorizationCallback.Session`. A native app's
+store has no other instance to be consistent with, so it shouldn't
+declare `CrossInstanceConsistent`.
+
+### Production clients require `iss` in the authorization response (client, *production only*)
+
+**Affects:** a client under `AssuranceProduction` with
+`Config.AuthorizationResponseIssPolicy =
+TolerateAbsentAuthorizationResponseIss`.
+
+**Why:** FAPI 2.0 Security Profile §5.3.2.2 item 7 has the authorization
+server return `iss` in the authorization response (RFC 9207), and
+§5.3.3.2 item 5 has the client check it, against mix-up attacks. A
+production FAPI client facing a server that leaves it out isn't facing
+a FAPI server.
+
+**What fails:** `client.New` returns an error naming
+`TolerateAbsentAuthorizationResponseIss`.
+
+**What to change:** set `RequireAuthorizationResponseIss`.
+`NewFromDiscovery` already raises the policy to it when the server's
+metadata says it supports `iss`.
+
+### `Limits.RequestObjectLifetime` is at most 60 minutes (client)
+
+**Affects:** a client that signs request objects
+(`ProfileFAPISecurityWithMessageSigning` or
+`PushedRequestEncodingRequestObject`) with
+`Limits.RequestObjectLifetime` over 60 minutes.
+
+**Why:** FAPI 2.0 Message Signing §5.3.2 item 4 has a client send a
+request object whose `exp` is at most 60 minutes away, and a server
+following §5.3.1 item 4 refuses a longer one.
+
+**What fails:** `client.New` returns an error naming
+`request_object_lifetime`.
+
+**What to change:** set it to 60 minutes or less.
+`RecommendedLimits` uses 60 seconds.
+
 ### Attestation-based client authentication follows draft-12 (server, client)
 
 Not a breaking change: clients built to draft-07 keep working, and so

@@ -11,6 +11,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/client"
+	"github.com/idfoundry/fapigo/storage"
 )
 
 // discoverWithIssParameterSupport spins up a minimal discovery document
@@ -333,5 +334,70 @@ func TestNewFromDiscoveryAcceptsOAuthOnlyClient(t *testing.T) {
 				t.Fatalf("NewFromDiscovery(OAuthOnly): %v", err)
 			}
 		})
+	}
+}
+
+// TestNewFromDiscoveryUsesMTLSAliasesForAnMTLSClient: a client whose
+// tokens are bound to its certificate does mutual TLS at UserInfo, so
+// with discovered endpoints it gets the server's mtls_endpoint_aliases
+// there (RFC 8705 §5), as ApplyForSenderConstrain gives; a DPoP client
+// keeps the ordinary endpoint.
+func TestNewFromDiscoveryUsesMTLSAliasesForAnMTLSClient(t *testing.T) {
+	for _, tc := range []struct {
+		constrain storage.SenderConstrain
+		wantPath  string
+	}{
+		{storage.SenderConstrainMTLS, "/mtls/userinfo"},
+		{storage.SenderConstrainDPoP, "/userinfo"},
+	} {
+		var ts *httptest.Server
+		var gotPath string
+		ts = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if strings.HasSuffix(r.URL.Path, "/userinfo") {
+				gotPath = r.URL.Path
+				json.NewEncoder(w).Encode(map[string]string{"sub": userInfoTestSubject}) //nolint:errcheck
+				return
+			}
+			json.NewEncoder(w).Encode(discoveryDoc{ //nolint:errcheck
+				Issuer:                             ts.URL,
+				AuthorizationEndpoint:              ts.URL + "/authorize",
+				TokenEndpoint:                      ts.URL + "/token",
+				PushedAuthorizationRequestEndpoint: ts.URL + "/par",
+				JWKSURI:                            ts.URL + "/jwks",
+				UserinfoEndpoint:                   ts.URL + "/userinfo",
+				IDTokenSigningAlgValuesSupported:   []string{"ES256"},
+				MTLSEndpointAliases:                &discoveryMTLSEndpointAliases{UserinfoEndpoint: ts.URL + "/mtls/userinfo"},
+			})
+		}))
+		t.Cleanup(ts.Close)
+		issuer, err := fapi.ParseIssuerURL(ts.URL, fapi.AllowLoopbackHTTP())
+		if err != nil {
+			t.Fatalf("ParseIssuerURL: %v", err)
+		}
+		discovered, err := client.Discover(context.Background(), newDiscoveryFetcher(t, ts), issuer, fapi.AllowLoopbackHTTP())
+		if err != nil {
+			t.Fatalf("Discover: %v", err)
+		}
+
+		cfg := validConfig(t)
+		cfg.Issuer, cfg.Endpoints, cfg.SenderConstrain = fapi.URL{}, client.Endpoints{}, tc.constrain
+		cfg.Algorithms.IDToken = fapi.ES256
+		deps := validDependencies(t)
+		deps.HTTP = ts.Client()
+		c, err := client.NewFromDiscovery(discovered, cfg, deps)
+		if err != nil {
+			t.Fatalf("%v: NewFromDiscovery: %v", tc.constrain, err)
+		}
+		tokens := client.TokenSet{
+			AccessToken: fapi.NewSecret("at"), Issuer: ts.URL, HasIDToken: true,
+			IDTokenClaims: client.IDTokenClaims{Subject: userInfoTestSubject, Issuer: ts.URL},
+		}
+		if _, err := c.FetchUserInfo(context.Background(), tokens); err != nil {
+			t.Fatalf("%v: FetchUserInfo: %v", tc.constrain, err)
+		}
+		if gotPath != tc.wantPath {
+			t.Errorf("%v: UserInfo went to %q, want %q", tc.constrain, gotPath, tc.wantPath)
+		}
 	}
 }

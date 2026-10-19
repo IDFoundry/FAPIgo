@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -55,6 +56,9 @@ type fakeCIBAAS struct {
 	// answer, once past any DPoP-nonce challenge, with a body that
 	// isn't an OAuth error, under this Content-Type: a proxy's page.
 	bcNonOAuthContentType string
+	// bcInterval, if non-zero, replaces the "interval" (5) in the
+	// backchannel authentication response.
+	bcInterval int64
 
 	// tokenResponses is a queue of canned responses handleToken pops
 	// from, in order — lets a test script a sequence of polls (e.g.
@@ -133,12 +137,16 @@ func (a *fakeCIBAAS) handleBackchannelAuth(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	interval := int64(5)
+	if a.bcInterval != 0 {
+		interval = a.bcInterval
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]any{
 		"auth_req_id": a.authReqID,
 		"expires_in":  120,
-		"interval":    5,
+		"interval":    interval,
 	})
 }
 
@@ -758,5 +766,25 @@ func TestPollBackchannelAuthenticationNamesNonOAuthMediaType(t *testing.T) {
 				t.Errorf("%d queued responses unused", len(as.tokenResponses))
 			}
 		})
+	}
+}
+
+// TestBeginBackchannelAuthenticationCapsInterval: an interval too large
+// for a time.Duration once wrapped to a short one, and the client then
+// polled as fast as it could. It's capped at the request's lifetime,
+// since waiting longer only waits for its expiry.
+func TestBeginBackchannelAuthenticationCapsInterval(t *testing.T) {
+	for _, interval := range []int64{9223372037, math.MaxInt64, 600} {
+		c, as, _ := newTestClientWithCIBA(t)
+		as.bcInterval = interval
+		session, err := c.BeginBackchannelAuthentication(context.Background(), client.BeginBackchannelAuthenticationRequest{
+			Scope: []string{"openid"}, LoginHint: "user@example.com",
+		})
+		if err != nil {
+			t.Fatalf("interval %d: BeginBackchannelAuthentication: %v", interval, err)
+		}
+		if session.Interval() != 120*time.Second {
+			t.Errorf("interval %d: Interval() = %v, want the 120s expires_in", interval, session.Interval())
+		}
 	}
 }

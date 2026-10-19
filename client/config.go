@@ -227,12 +227,15 @@ type MTLSEndpoints struct {
 	PushedAuthorizationRequest fapi.URL
 	BackchannelAuthentication  fapi.URL
 	Revocation                 fapi.URL
+	// UserInfo is where FetchUserInfo presents a certificate-bound
+	// access token over mutual TLS.
+	UserInfo fapi.URL
 }
 
 // ApplyForSenderConstrain overrides endpoints' Token,
-// BackchannelAuthentication and Revocation fields with m's own advertised
-// aliases, wherever m advertises one, for a Config.SenderConstrain ==
-// SenderConstrainMTLS client (RFC 8705 §5).
+// BackchannelAuthentication, Revocation and UserInfo fields with m's own
+// advertised aliases, wherever m advertises one, for a
+// Config.SenderConstrain == SenderConstrainMTLS client (RFC 8705 §5).
 //
 // An alias applies to a request that itself does mutual TLS: here, the
 // requests that bind or use a certificate-bound token. PAR is left at
@@ -259,7 +262,8 @@ func (m *MTLSEndpoints) ApplyForSenderConstrain(endpoints *Endpoints) bool {
 // §2). Such a client does mutual TLS at every request that
 // authenticates it, so ApplyForClientAuth overrides Token,
 // PushedAuthorizationRequest, BackchannelAuthentication (where CIBA Core
-// §7.1 requires the client to authenticate) and Revocation, wherever m
+// §7.1 requires the client to authenticate), Revocation and UserInfo,
+// wherever m
 // advertises an alias. It covers every endpoint ApplyForSenderConstrain
 // does, so a client doing both needs only this call. A nil m leaves
 // endpoints untouched and reports false.
@@ -280,6 +284,7 @@ func (m *MTLSEndpoints) apply(endpoints *Endpoints, par bool) bool {
 		{m.Token, &endpoints.Token},
 		{m.BackchannelAuthentication, &endpoints.BackchannelAuthentication},
 		{m.Revocation, &endpoints.Revocation},
+		{m.UserInfo, &endpoints.UserInfo},
 	}
 	if par {
 		aliases = append(aliases, struct {
@@ -310,7 +315,8 @@ type Limits struct {
 	// RequestObjectLifetime is how long a signed request object this
 	// client produces remains valid for. Required only when Profile is
 	// ProfileFAPISecurityWithMessageSigning or PushedRequestEncoding is
-	// PushedRequestEncodingRequestObject.
+	// PushedRequestEncodingRequestObject, and then at most 60 minutes
+	// (FAPI 2.0 Message Signing §5.3.2 item 4).
 	RequestObjectLifetime time.Duration
 
 	// SessionLifetime bounds how long between BeginAuthorization and a
@@ -393,7 +399,9 @@ const (
 	// TolerateAbsentAuthorizationResponseIss accepts a plain-mode
 	// callback missing "iss" — the weaker, pre-RFC-9207 posture. An
 	// explicit opt-out for a server known not to support the parameter,
-	// not a fallback for "haven't checked yet".
+	// not a fallback for "haven't checked yet". AssuranceProduction
+	// refuses it: FAPI 2.0 Security Profile §5.3.2.2 item 7 requires the
+	// server to send iss.
 	TolerateAbsentAuthorizationResponseIss
 )
 
@@ -545,6 +553,17 @@ type Config struct {
 	// response carries one, and requires one for a request that asked
 	// for "openid" (see the package doc).
 	OAuthOnly bool
+
+	// RequireSignedUserInfo has FetchUserInfo refuse a plain JSON
+	// UserInfo response: only a signed one (or a signed-then-encrypted
+	// one, under Algorithms.UserInfoKeyManagement) is accepted. Set it
+	// when this client registered userinfo_signed_response_alg (OIDC
+	// Dynamic Client Registration §2: the response is then "JWT
+	// serialized, and signed using JWS"), so a response that arrives
+	// unsigned, which anyone able to answer for the endpoint can
+	// produce, isn't taken as the server's. Requires Algorithms.UserInfo.
+	// False (the default) accepts plain JSON or a signed response.
+	RequireSignedUserInfo bool
 }
 
 // FederationConfig configures this client's OpenID Federation 1.0
@@ -607,7 +626,9 @@ const (
 	// still pending in the store can be completed this way, not only the
 	// latest, so keep Limits.SessionLifetime short. Never set it for a
 	// store a server shares between users: it would bring login CSRF
-	// back.
+	// back. AssuranceProduction refuses it over a Dependencies.Sessions
+	// that declares CrossInstanceConsistent, which only a shared store
+	// needs.
 	CallbackBindingDeviceLocalStore
 )
 

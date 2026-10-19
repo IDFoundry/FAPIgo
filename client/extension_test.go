@@ -155,3 +155,28 @@ func TestBeginAuthorizationEmbedsExtensionsInSignedRequestObject(t *testing.T) {
 		t.Errorf("x_account_hint = %q, want acc-2", got)
 	}
 }
+
+// TestBeginAuthorizationRejectsExtensionNamingAReservedParameter: an
+// extension named for a parameter this package sets itself, or one a
+// pushed request must not carry, is refused before anything is sent,
+// on the plain path and in a signed request object alike. On the plain
+// path "client_assertion" used to overwrite the signed assertion, and
+// "request_uri" went to PAR, which RFC 9126 §2.1 refuses.
+func TestBeginAuthorizationRejectsExtensionNamingAReservedParameter(t *testing.T) {
+	for _, signed := range []bool{false, true} {
+		for _, name := range []string{"client_assertion", "client_assertion_type", "client_id", "request", "request_uri", "authorization_details", "dpop_jkt"} {
+			c, as, _ := newTestClient(t, signed)
+			def := extension.Definition[string]{Sensitivity: extension.NotSensitive, Name: name, Cardinality: extension.Single, MaxBytes: 64}
+			req := client.BeginAuthorizationRequest{Scope: []string{"openid"}}
+			if err := extension.Set(&req.Extensions, def, "attacker-controlled"); err != nil {
+				t.Fatalf("extension.Set(%q): %v", name, err)
+			}
+			if _, err := c.BeginAuthorization(context.Background(), req); err == nil {
+				t.Errorf("signed %v: BeginAuthorization(extension %q) = nil error, want refused", signed, name)
+			}
+			if as.lastPARForm != nil {
+				t.Errorf("signed %v: extension %q: a PAR request was sent", signed, name)
+			}
+		}
+	}
+}

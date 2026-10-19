@@ -217,8 +217,9 @@ func (u URL) IsZero() bool {
 }
 
 // WithQuery returns a copy of u with its query string replaced by
-// query — for appending caller-supplied parameters (e.g. request_uri,
-// client_id) to an already-validated endpoint URL. It does not
+// query: any query u already had is dropped, so to add parameters to
+// an endpoint's own query (which RFC 6749 §3.1 has a client retain),
+// start query from u.URL().Query(). It does not
 // re-validate scheme, credentials or fragment, since replacing only the
 // query string cannot reintroduce a problem ParseEndpointURL already
 // ruled out on u; this is what lets a caller build on an endpoint URL

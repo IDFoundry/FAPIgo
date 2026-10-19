@@ -45,6 +45,9 @@ const errProtectedResourceRequestFailed = "protected resource request failed"
 type ResourceClient struct {
 	client *Client
 	token  string
+	// err, when set, is returned by every Do: ProtectedResource was
+	// given a token set another issuer issued.
+	err *Error
 }
 
 // ProtectedResource returns a ResourceClient bound to tokens' access
@@ -56,7 +59,19 @@ type ResourceClient struct {
 // caller. Under SenderConstrainMTLS, no key is involved at all — the
 // resource server derives binding purely from Dependencies.HTTP's own
 // configured TLS transport.
+//
+// A token set that records another issuer than this client's (see
+// TokenSet.Issuer, or its ID token's iss) gives a ResourceClient whose
+// every Do fails with ErrorInvalidRequest, sending nothing, so a
+// multi-issuer application can't present one issuer's token through
+// another's client. A set built by hand that records no issuer at all
+// is used as given.
 func (c *Client) ProtectedResource(tokens TokenSet) *ResourceClient {
+	if tokenSetIssuer(tokens) != "" {
+		if issuerErr := c.checkTokenSetIssuer(tokens); issuerErr != nil {
+			return &ResourceClient{client: c, err: issuerErr}
+		}
+	}
 	return &ResourceClient{client: c, token: tokens.AccessToken.Reveal()}
 }
 
@@ -109,6 +124,9 @@ func (c *Client) ClientCredentialsResource(result ClientCredentialsTokenResult) 
 // it accepts (e.g. *bytes.Reader, *strings.Reader). req's own context
 // is replaced with one bounded by Config.Limits.HTTPTimeout.
 func (rc *ResourceClient) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
+	if rc.err != nil {
+		return nil, rc.err
+	}
 	if req == nil {
 		return nil, newError(ErrorInvalidRequest, "request is nil", nil)
 	}

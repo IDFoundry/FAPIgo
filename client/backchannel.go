@@ -118,6 +118,9 @@ type BackchannelAuthenticationSession struct {
 	// resource is the request's resource indicators (RFC 8707), sent
 	// again on each poll.
 	resource []string
+	// scope is the request's scope, which a token response omitting
+	// "scope" was granted (RFC 6749 §5.1).
+	scope []string
 }
 
 // AuthReqID is the auth_req_id the authorization server issued.
@@ -219,16 +222,24 @@ func (c *Client) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		return BackchannelAuthenticationSession{}, newError(ErrorInvalidResponse, "malformed backchannel authentication response", err)
 	}
 
-	interval := time.Duration(raw.Interval) * time.Second
+	// Both clamp rather than overflow: an interval of more than
+	// math.MaxInt64 nanoseconds once wrapped to a short or negative one,
+	// and the client then polled as fast as it could. A wait longer than
+	// the request lives is waiting for its expiry, so it's capped there,
+	// which also keeps a sealed session's interval in range.
+	expiresIn := expiresInDuration(raw.ExpiresIn)
+	interval := expiresInDuration(raw.Interval)
 	if interval <= 0 {
 		interval = defaultBackchannelAuthenticationPollInterval
 	}
+	interval = min(interval, expiresIn)
 	return BackchannelAuthenticationSession{
 		authReqID:         raw.AuthReqID,
 		interval:          interval,
-		expiresAt:         c.deps.Clock.Now().Add(expiresInDuration(raw.ExpiresIn)),
+		expiresAt:         c.deps.Clock.Now().Add(expiresIn),
 		notificationToken: notificationToken,
 		openID:            slices.Contains(req.Scope, "openid"),
+		scope:             slices.Clone(req.Scope),
 		essentialACR:      slices.Clone(req.EssentialACRValues),
 		resource:          slices.Clone(req.Resource),
 	}, nil
@@ -239,7 +250,7 @@ func (c *Client) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 // other than exactly one hint, no backchannel endpoint, or essential
 // acr values without "openid".
 func (c *Client) checkBackchannelAuthenticationRequest(req BeginBackchannelAuthenticationRequest) error {
-	if scopeErr := c.checkOAuthOnlyScope(req.Scope); scopeErr != nil {
+	if scopeErr := c.checkScope(req.Scope); scopeErr != nil {
 		return scopeErr
 	}
 	if countNonEmpty(req.LoginHint, req.LoginHintToken, req.IDTokenHint) != 1 {
@@ -518,7 +529,7 @@ func (c *Client) backchannelApprovedTokens(ctx context.Context, session Backchan
 	result := TokenSet{
 		AccessToken:          fapi.NewSecret(raw.AccessToken),
 		TokenType:            wantTokenType,
-		Scope:                raw.Scope,
+		Scope:                grantedScope(raw.Scope, session.scope),
 		AuthorizationDetails: raw.AuthorizationDetails,
 		ObtainedAt:           c.deps.Clock.Now(),
 		Issuer:               c.cfg.Issuer.String(),

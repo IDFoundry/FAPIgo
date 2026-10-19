@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,8 +27,9 @@ const userInfoTestSubject = "end-user-1"
 func userInfoTestTokens() client.TokenSet {
 	return client.TokenSet{
 		AccessToken:   fapi.NewSecret("test-access-token"),
+		Issuer:        testIssuer,
 		HasIDToken:    true,
-		IDTokenClaims: client.IDTokenClaims{Subject: userInfoTestSubject},
+		IDTokenClaims: client.IDTokenClaims{Subject: userInfoTestSubject, Issuer: testIssuer},
 	}
 }
 
@@ -666,5 +668,45 @@ func TestFetchUserInfoRejectsEncryptedWhenNotExpected(t *testing.T) {
 	c := newUserInfoTestClient(t, ts, &userInfoKey.PublicKey, nil, nil)
 	if _, err := c.FetchUserInfo(context.Background(), userInfoTestTokens()); err == nil {
 		t.Fatalf("FetchUserInfo(encrypted, not expected) = nil error, want error")
+	}
+}
+
+// TestFetchUserInfoRequireSignedUserInfo: a client that registered
+// userinfo_signed_response_alg refuses a plain JSON response, which
+// anyone able to answer for the endpoint can produce, and accepts a
+// signed one.
+func TestFetchUserInfoRequireSignedUserInfo(t *testing.T) {
+	userInfoKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate userinfo key: %v", err)
+	}
+	signed := true
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if !signed {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"sub": userInfoTestSubject})
+			return
+		}
+		w.Header().Set("Content-Type", "application/jwt")
+		_, _ = w.Write([]byte(signUserInfoJWS(t, userInfoKey, map[string]any{
+			"sub": userInfoTestSubject, "iss": testIssuer, "aud": testClientID,
+		})))
+	}))
+	defer ts.Close()
+	c := newUserInfoTestClient(t, ts, &userInfoKey.PublicKey, func(cfg *client.Config) { cfg.RequireSignedUserInfo = true }, nil)
+
+	if _, err := c.FetchUserInfo(context.Background(), userInfoTestTokens()); err != nil {
+		t.Fatalf("FetchUserInfo(signed) = %v", err)
+	}
+	signed = false
+	var cerr *client.Error
+	if _, err := c.FetchUserInfo(context.Background(), userInfoTestTokens()); !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidResponse {
+		t.Fatalf("FetchUserInfo(plain JSON) = %v, want invalid_response", err)
+	}
+
+	cfg := validConfig(t)
+	cfg.RequireSignedUserInfo = true
+	if _, err := client.New(cfg, validDependencies(t)); err == nil || !strings.Contains(err.Error(), "require_signed_userinfo") {
+		t.Fatalf("New(RequireSignedUserInfo without algorithms.userinfo) = %v, want refused", err)
 	}
 }

@@ -62,6 +62,7 @@ func TestNewAcceptsDevelopmentAssuranceWithPlainSessionStore(t *testing.T) {
 func TestNewRejectsProductionAssuranceWithoutStoreAssuranceDeclaration(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = client.AssuranceProduction
+	cfg.AuthorizationResponseIssPolicy = client.RequireAuthorizationResponseIss
 	deps := validDependencies(t)
 	deps.Sessions = newFakeSessionStore()
 
@@ -75,6 +76,7 @@ func TestNewRejectsProductionAssuranceWithoutStoreAssuranceDeclaration(t *testin
 func TestNewRejectsProductionAssuranceWhenSessionStoreNotDurable(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = client.AssuranceProduction
+	cfg.AuthorizationResponseIssPolicy = client.RequireAuthorizationResponseIss
 	deps := validDependencies(t)
 	deps.Sessions = assuringSessionStore{
 		fakeSessionStore: newFakeSessionStore(),
@@ -93,6 +95,7 @@ func TestNewRejectsProductionAssuranceWhenSessionStoreNotDurable(t *testing.T) {
 func TestNewRejectsProductionAssuranceWhenSessionStoreNotAtomicConsume(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = client.AssuranceProduction
+	cfg.AuthorizationResponseIssPolicy = client.RequireAuthorizationResponseIss
 	deps := validDependencies(t)
 	deps.Sessions = assuringSessionStore{
 		fakeSessionStore: newFakeSessionStore(),
@@ -110,6 +113,7 @@ func TestNewRejectsProductionAssuranceWhenSessionStoreNotAtomicConsume(t *testin
 func TestNewAcceptsProductionAssuranceWithFullyDeclaredSessionStore(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = client.AssuranceProduction
+	cfg.AuthorizationResponseIssPolicy = client.RequireAuthorizationResponseIss
 	deps := validDependencies(t)
 	deps.HTTP = hardenedHTTPClient(t, fapihttp.RecommendedTransportConfig())
 	deps.Sessions = assuringSessionStore{
@@ -131,6 +135,7 @@ func TestNewAcceptsProductionAssuranceWithFullyDeclaredSessionStore(t *testing.T
 func TestNewRejectsMemstoreSessionStoreUnderProductionAssurance(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = client.AssuranceProduction
+	cfg.AuthorizationResponseIssPolicy = client.RequireAuthorizationResponseIss
 	deps := validDependencies(t)
 	deps.Sessions = memstore.NewSessionStore()
 
@@ -147,6 +152,7 @@ func TestNewRejectsMemstoreSessionStoreUnderProductionAssurance(t *testing.T) {
 func TestNewSkipsSessionAssuranceCheckWhenSessionsNotConfigured(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = client.AssuranceProduction
+	cfg.AuthorizationResponseIssPolicy = client.RequireAuthorizationResponseIss
 	cfg.Endpoints.Authorization = fapi.URL{}
 	cfg.Endpoints.PushedAuthorizationRequest = fapi.URL{}
 	cfg.RedirectURI = ""
@@ -183,6 +189,7 @@ func TestNewAcceptsDevelopmentAssuranceWithPlainIssuerKeySource(t *testing.T) {
 func TestNewRejectsProductionAssuranceWithoutKeySourceAssuranceDeclaration(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = client.AssuranceProduction
+	cfg.AuthorizationResponseIssPolicy = client.RequireAuthorizationResponseIss
 	deps := validDependencies(t)
 	deps.IssuerKeys = emptyIssuerKeySource{}
 	// Sessions has its own, independent AssuranceProduction gate — satisfy
@@ -208,6 +215,7 @@ func TestNewRejectsProductionAssuranceWithoutKeySourceAssuranceDeclaration(t *te
 func TestNewRejectsProductionAssuranceWhenIssuerKeySourceNotLiveFetchHardened(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = client.AssuranceProduction
+	cfg.AuthorizationResponseIssPolicy = client.RequireAuthorizationResponseIss
 	deps := validDependencies(t)
 	deps.IssuerKeys = assuringIssuerKeySource{
 		fakeIssuerKeySource: deps.IssuerKeys.(*fakeIssuerKeySource),
@@ -233,6 +241,7 @@ func TestNewRejectsProductionAssuranceWhenIssuerKeySourceNotLiveFetchHardened(t 
 func TestNewAcceptsProductionAssuranceWithLiveFetchHardenedIssuerKeySource(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = client.AssuranceProduction
+	cfg.AuthorizationResponseIssPolicy = client.RequireAuthorizationResponseIss
 	deps := validDependencies(t)
 	deps.HTTP = hardenedHTTPClient(t, fapihttp.RecommendedTransportConfig())
 	deps.IssuerKeys = assuringIssuerKeySource{
@@ -287,6 +296,7 @@ type undeclaredClientKeys struct{ keys.KeyManager }
 func TestNewProductionRequiresClientKeyCustody(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = client.AssuranceProduction
+	cfg.AuthorizationResponseIssPolicy = client.RequireAuthorizationResponseIss
 
 	deps := productionDeps(t)
 	if _, err := client.New(cfg, deps); err != nil {
@@ -313,6 +323,7 @@ func TestNewProductionRequiresClientKeyCustody(t *testing.T) {
 func TestNewProductionRequiresDecryptionKeyCustody(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = client.AssuranceProduction
+	cfg.AuthorizationResponseIssPolicy = client.RequireAuthorizationResponseIss
 	cfg.Algorithms.IDTokenKeyManagement = fapi.ECDHESA256KW
 	cfg.Algorithms.IDTokenContentEncryption = fapi.A256GCM
 
@@ -350,6 +361,7 @@ func TestNewProductionRequiresDecryptionKeyCustody(t *testing.T) {
 func TestNewReportsEveryProductionRefusal(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Assurance = client.AssuranceProduction
+	cfg.AuthorizationResponseIssPolicy = client.RequireAuthorizationResponseIss
 	deps := validDependencies(t) // an undeclared sessions store
 	deps.Keys = undeclaredClientKeys{deps.Keys}
 	deps.Random = io.MultiReader(rand.Reader) // a wrapper, not crypto/rand.Reader itself
@@ -366,5 +378,58 @@ func TestNewReportsEveryProductionRefusal(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("New error = %q, want it to contain %q", err, want)
 		}
+	}
+}
+
+// TestNewProductionRefusesDeviceLocalBindingOverASharedStore:
+// CallbackBindingDeviceLocalStore finds a session by the callback's
+// state alone, which is safe only in a native app's own store. A
+// sessions store declaring CrossInstanceConsistent is shared between
+// server instances, so production refuses the two together.
+func TestNewProductionRefusesDeviceLocalBindingOverASharedStore(t *testing.T) {
+	shared := storage.Capabilities{Durable: true, AtomicConsume: true, CrossInstanceConsistent: true}
+	for _, tc := range []struct {
+		name    string
+		binding client.CallbackBinding
+		caps    storage.Capabilities
+		refused bool
+	}{
+		{"device-local over a device store", client.CallbackBindingDeviceLocalStore, storage.Capabilities{Durable: true, AtomicConsume: true}, false},
+		{"device-local over a shared store", client.CallbackBindingDeviceLocalStore, shared, true},
+		{"session handle over a shared store", client.CallbackBindingSessionHandle, shared, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validConfig(t)
+			cfg.Assurance = client.AssuranceProduction
+			cfg.AuthorizationResponseIssPolicy = client.RequireAuthorizationResponseIss
+			cfg.CallbackBinding = tc.binding
+			deps := productionDeps(t)
+			deps.Sessions = assuringSessionStore{fakeSessionStore: newFakeSessionStore(), caps: tc.caps}
+			_, err := client.New(cfg, deps)
+			if refused := err != nil && strings.Contains(err.Error(), "CallbackBindingDeviceLocalStore"); refused != tc.refused || (err != nil && !refused) {
+				t.Fatalf("New = %v, want refused %v", err, tc.refused)
+			}
+		})
+	}
+}
+
+// TestNewProductionRequiresAuthorizationResponseIss: FAPI 2.0 has the
+// authorization server send iss (RFC 9207) and the client check it, so
+// production refuses the tolerant policy; development still allows it.
+func TestNewProductionRequiresAuthorizationResponseIss(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Assurance = client.AssuranceProduction
+	cfg.AuthorizationResponseIssPolicy = client.TolerateAbsentAuthorizationResponseIss
+	if _, err := client.New(cfg, productionDeps(t)); err == nil || !strings.Contains(err.Error(), "TolerateAbsentAuthorizationResponseIss") {
+		t.Fatalf("New(production, tolerate absent iss) = %v, want refused", err)
+	}
+	cfg.AuthorizationResponseIssPolicy = client.RequireAuthorizationResponseIss
+	if _, err := client.New(cfg, productionDeps(t)); err != nil {
+		t.Fatalf("New(production, require iss) = %v", err)
+	}
+	cfg = validConfig(t)
+	cfg.AuthorizationResponseIssPolicy = client.TolerateAbsentAuthorizationResponseIss
+	if _, err := client.New(cfg, validDependencies(t)); err != nil {
+		t.Fatalf("New(development, tolerate absent iss) = %v", err)
 	}
 }

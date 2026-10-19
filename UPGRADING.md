@@ -178,6 +178,23 @@ printable text.
 encoded key before passing it. A random key is refused with probability
 about 4×10⁻¹⁴.
 
+### Outbound TLS 1.2 uses only ECDHE AES-GCM suites (fapihttp)
+
+**Affects:** a `fapihttp.NewClient` client connecting to a server that
+offers, under TLS 1.2, only cipher suites outside the four ECDHE AES-GCM
+ones (CBC suites, say). TLS 1.3 servers are unaffected. So is a client
+built some other way.
+
+**Why:** FAPI-CIBA §7.9 (as FAPI 1.0 Part 2 §8.5) permits only those
+suites under TLS 1.2.
+
+**What fails:** the TLS handshake with such a server. `HardeningOf` also
+no longer counts a transport as hardened if its TLS 1.2 suites were
+changed to include any other suite, or cleared back to Go's defaults.
+
+**What to change:** nothing on your side; the server needs a TLS 1.2
+ECDHE AES-GCM suite, or TLS 1.3.
+
 ### Attestation-based client authentication follows draft-12 (server, client)
 
 Not a breaking change: clients built to draft-07 keep working, and so

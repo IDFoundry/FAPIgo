@@ -128,9 +128,10 @@ func registerHardened(t *http.Transport, cfg TransportConfig, dialer, verifier *
 //   - TLSClientConfig still requires TLS 1.2 or later, verifies the
 //     server against the RootCAs it was built with
 //     (TransportConfig.RootCAs, or the system's), with the
-//     VerifyConnection it was built with (or none), and has no
-//     VerifyPeerCertificate, ServerName, Time, KeyLogWriter or insecure
-//     cipher suite set.
+//     VerifyConnection it was built with (or none), has no
+//     VerifyPeerCertificate, ServerName, Time or KeyLogWriter set, and
+//     offers under TLS 1.2 only the ECDHE AES-GCM cipher suites
+//     NewClient set (FAPI-CIBA §7.9), or some of them.
 //
 // Adding a client certificate (TransportConfig.Certificates, or setting
 // TLSClientConfig.Certificates afterwards) changes none of that. Nor can
@@ -206,7 +207,7 @@ func tlsIntact(cfg *tls.Config, record hardenedRecord) bool {
 	if cfg.VerifyPeerCertificate != nil || cfg.ServerName != "" || cfg.Time != nil || cfg.KeyLogWriter != nil {
 		return false
 	}
-	if cfg.RootCAs != record.rootCAs || hasInsecureCipherSuite(cfg.CipherSuites) {
+	if cfg.RootCAs != record.rootCAs || !onlyPermittedCipherSuites(cfg.CipherSuites) {
 		return false
 	}
 	return isOwnVerifier(cfg.VerifyConnection, record)
@@ -227,13 +228,17 @@ func isOwnVerifier(verify func(tls.ConnectionState) error, record hardenedRecord
 	return errors.As(verify(tls.ConnectionState{ServerName: identityProbeServerName}), &probe) && probe.marker == record.verifier
 }
 
-// hasInsecureCipherSuite reports whether suites names any of
-// tls.InsecureCipherSuites.
-func hasInsecureCipherSuite(suites []uint16) bool {
-	for _, insecure := range tls.InsecureCipherSuites() {
-		if slices.Contains(suites, insecure.ID) {
-			return true
+// onlyPermittedCipherSuites reports whether suites names at least one
+// TLS 1.2 cipher suite and only ones in tls12CipherSuites. An empty list
+// is Go's default, which offers CBC suites too.
+func onlyPermittedCipherSuites(suites []uint16) bool {
+	if len(suites) == 0 {
+		return false
+	}
+	for _, suite := range suites {
+		if !slices.Contains(tls12CipherSuites, suite) {
+			return false
 		}
 	}
-	return false
+	return true
 }

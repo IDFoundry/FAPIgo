@@ -48,6 +48,7 @@ func TestNewProductionRefusesLoopbackJWKSIssuerKeys(t *testing.T) {
 			}
 			cfg := validConfig(t)
 			cfg.Assurance = client.AssuranceProduction
+			cfg.AuthorizationResponseIssPolicy = client.RequireAuthorizationResponseIss
 			deps := productionDeps(t)
 			deps.IssuerKeys = source
 			_, err = client.New(cfg, deps)

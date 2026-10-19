@@ -53,6 +53,7 @@ func TestNewProductionRequiresHardenedHTTP(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			cfg := validConfig(t)
 			cfg.Assurance = client.AssuranceProduction
+			cfg.AuthorizationResponseIssPolicy = client.RequireAuthorizationResponseIss
 			deps := productionDeps(t)
 			deps.HTTP = tc.http(t)
 			_, err := client.New(cfg, deps)
@@ -85,6 +86,7 @@ func TestNewProductionRefusesAnotherTransportsDialer(t *testing.T) {
 
 	cfg := validConfig(t)
 	cfg.Assurance = client.AssuranceProduction
+	cfg.AuthorizationResponseIssPolicy = client.RequireAuthorizationResponseIss
 	deps := productionDeps(t)
 	deps.HTTP = strict
 	if _, err := client.New(cfg, deps); err == nil {

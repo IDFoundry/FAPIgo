@@ -104,6 +104,25 @@ default, and passes `AuthorizationCallback.Session`. A native app's
 store has no other instance to be consistent with, so it shouldn't
 declare `CrossInstanceConsistent`.
 
+### Production clients require `iss` in the authorization response (client, *production only*)
+
+**Affects:** a client under `AssuranceProduction` with
+`Config.AuthorizationResponseIssPolicy =
+TolerateAbsentAuthorizationResponseIss`.
+
+**Why:** FAPI 2.0 Security Profile §5.3.2.2 item 7 has the authorization
+server return `iss` in the authorization response (RFC 9207), and
+§5.3.3.2 item 5 has the client check it, against mix-up attacks. A
+production FAPI client facing a server that leaves it out isn't facing
+a FAPI server.
+
+**What fails:** `client.New` returns an error naming
+`TolerateAbsentAuthorizationResponseIss`.
+
+**What to change:** set `RequireAuthorizationResponseIss`.
+`NewFromDiscovery` already raises the policy to it when the server's
+metadata says it supports `iss`.
+
 ### Attestation-based client authentication follows draft-12 (server, client)
 
 Not a breaking change: clients built to draft-07 keep working, and so

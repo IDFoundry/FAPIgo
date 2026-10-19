@@ -241,6 +241,13 @@ func validateEnumFields(cfg Config) error {
 	if cfg.AuthorizationResponseIssPolicy != RequireAuthorizationResponseIss && cfg.AuthorizationResponseIssPolicy != TolerateAbsentAuthorizationResponseIss {
 		return fmt.Errorf("client: config: authorization_response_iss_policy is required (RequireAuthorizationResponseIss or TolerateAbsentAuthorizationResponseIss)")
 	}
+	if cfg.Assurance == AssuranceProduction && cfg.AuthorizationResponseIssPolicy == TolerateAbsentAuthorizationResponseIss {
+		// FAPI 2.0 Security Profile §5.3.2.2 item 7 has the
+		// authorization server send iss (RFC 9207), and §5.3.3.2 item 5
+		// has the client check it: its absence is the mix-up attack's
+		// signature, not a server quirk to tolerate.
+		return fmt.Errorf("client: config: authorization_response_iss_policy TolerateAbsentAuthorizationResponseIss is refused under AssuranceProduction: FAPI 2.0 requires iss in the authorization response (RFC 9207)")
+	}
 	if cfg.SenderConstrain != storage.SenderConstrainDPoP && cfg.SenderConstrain != storage.SenderConstrainMTLS {
 		return fmt.Errorf("client: config: sender_constrain is invalid")
 	}

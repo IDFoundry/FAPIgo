@@ -393,7 +393,9 @@ const (
 	// TolerateAbsentAuthorizationResponseIss accepts a plain-mode
 	// callback missing "iss" — the weaker, pre-RFC-9207 posture. An
 	// explicit opt-out for a server known not to support the parameter,
-	// not a fallback for "haven't checked yet".
+	// not a fallback for "haven't checked yet". AssuranceProduction
+	// refuses it: FAPI 2.0 Security Profile §5.3.2.2 item 7 requires the
+	// server to send iss.
 	TolerateAbsentAuthorizationResponseIss
 )
 

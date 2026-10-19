@@ -23,6 +23,7 @@ func TestNewProductionRequiresCryptoRandReader(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			cfg := validConfig(t)
 			cfg.Assurance = client.AssuranceProduction
+			cfg.AuthorizationResponseIssPolicy = client.RequireAuthorizationResponseIss
 			deps := productionDeps(t)
 			deps.Random = tc.random
 			_, err := client.New(cfg, deps)

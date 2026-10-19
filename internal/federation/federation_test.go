@@ -908,3 +908,26 @@ func TestStatementClaimedConstraintsAbsent(t *testing.T) {
 		t.Errorf("ClaimedConstraints() = %+v, want nil", constraints)
 	}
 }
+
+// TestCreateRefusesPrivateKeyMembers: a statement publishes its jwks
+// (and a trust mark owner's) as given, so one handed a private JWK would
+// publish the private key. Create refuses any key carrying private or
+// secret key material.
+func TestCreateRefusesPrivateKeyMembers(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+	private := json.RawMessage(`{"keys":[{"kty":"EC","crv":"P-256","kid":"k","x":"AAAA","y":"AAAA","d":"secret"}]}`)
+
+	params := entityConfigParams(t, key, "https://rp.example.org", now)
+	params.JWKS = private
+	if _, err := Create(params); !errors.Is(err, ErrMalformedJWKS) {
+		t.Errorf("Create(jwks with d) = %v, want ErrMalformedJWKS", err)
+	}
+
+	params = entityConfigParams(t, key, "https://ta.example.org", now)
+	params.AuthorityHints = nil
+	params.TrustMarkOwners = map[string]TrustMarkOwner{"https://marks.example.org/x": {Subject: "https://owner.example.org", JWKS: json.RawMessage(`{"keys":[{"kty":"oct","kid":"o","k":"c2VjcmV0"}]}`)}}
+	if _, err := Create(params); !errors.Is(err, ErrMalformedJWKS) {
+		t.Errorf("Create(trust mark owner jwks with k) = %v, want ErrMalformedJWKS", err)
+	}
+}

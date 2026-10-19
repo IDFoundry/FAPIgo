@@ -405,6 +405,31 @@ func validateKeyIDs(jwks json.RawMessage) error {
 	return nil
 }
 
+// privateKeyMembers are the JWK members that carry private or secret key
+// material (RFC 7518 §6.2.2, §6.3.2, §6.4.1; RFC 8037 §2): never part of
+// a published key.
+var privateKeyMembers = []string{"d", "p", "q", "dp", "dq", "qi", "oth", "k"}
+
+// refusePrivateKeyMembers refuses a JWK Set any of whose keys carries
+// private or secret key material, so a statement this package signs
+// never publishes a key handed to it as a private JWK.
+func refusePrivateKeyMembers(jwks json.RawMessage) error {
+	var set struct {
+		Keys []map[string]json.RawMessage `json:"keys"`
+	}
+	if err := json.Unmarshal(jwks, &set); err != nil {
+		return fmt.Errorf("%w: %v", ErrMalformedJWKS, err)
+	}
+	for i, key := range set.Keys {
+		for _, member := range privateKeyMembers {
+			if _, ok := key[member]; ok {
+				return fmt.Errorf("%w: key %d has the private member %q: publish only public keys", ErrMalformedJWKS, i, member)
+			}
+		}
+	}
+	return nil
+}
+
 // rejectCriticalClaims rejects a statement whose "crit" claim names any
 // claim: OpenID Federation 1.0 §3.2 step 13 requires each named extension
 // claim to be understood and processed, and this package implements

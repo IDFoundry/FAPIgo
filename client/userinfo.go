@@ -71,6 +71,9 @@ func (c *Client) FetchUserInfo(ctx context.Context, tokens TokenSet) (UserInfo, 
 	if !tokens.HasIDToken {
 		return UserInfo{}, newError(ErrorInvalidRequest, "tokens has no validated ID token to check the UserInfo response's subject against", nil)
 	}
+	if issuerErr := c.checkTokenSetIssuer(tokens); issuerErr != nil {
+		return UserInfo{}, issuerErr
+	}
 
 	endpoint := c.cfg.Endpoints.UserInfo.URL()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)

@@ -56,14 +56,8 @@ func (c *Client) RefreshTokens(ctx context.Context, req RefreshTokenRequest) (To
 	if !req.Tokens.HasRefreshToken || req.Tokens.RefreshToken.Reveal() == "" {
 		return TokenSet{}, newError(ErrorInvalidRequest, "the token set has no refresh token", nil)
 	}
-	if iss := tokenSetIssuer(req.Tokens); iss != c.cfg.Issuer.String() {
-		if iss == "" {
-			return TokenSet{}, newError(ErrorInvalidRequest, "the token set doesn't record its issuer (TokenSet.Issuer)", nil)
-		}
-		return TokenSet{}, newError(ErrorInvalidRequest, "the token set was issued by a different issuer than this client's", nil)
-	}
-	if req.Tokens.HasIDToken && req.Tokens.IDTokenClaims.Issuer != c.cfg.Issuer.String() {
-		return TokenSet{}, newError(ErrorInvalidRequest, "the token set's ID token was issued by a different issuer than this client's", nil)
+	if issuerErr := c.checkTokenSetIssuer(req.Tokens); issuerErr != nil {
+		return TokenSet{}, issuerErr
 	}
 	assertionSigner, assertionKID, dpopSigner, err := c.resolveClientAuthAndDPoPSigners(ctx)
 	if err != nil {
@@ -157,6 +151,25 @@ func checkRefreshedIDToken(original TokenSet, refreshed IDTokenClaims) *Error {
 // tokenSetIssuer is the issuer t came from: its Issuer, or, for a set
 // that doesn't record one (built by hand, or kept from before the field
 // existed), its ID token's verified iss; "" when it has neither.
+// checkTokenSetIssuer refuses a token set this client's authorization
+// server didn't issue: one whose Issuer (or, without it, its ID token's
+// verified iss) isn't Config.Issuer, or whose ID token another issuer
+// signed. A multi-issuer application holds sets from several, and one
+// issuer's tokens must never reach another's endpoints, nor another's
+// claims be taken as this one's.
+func (c *Client) checkTokenSetIssuer(t TokenSet) *Error {
+	if iss := tokenSetIssuer(t); iss != c.cfg.Issuer.String() {
+		if iss == "" {
+			return newError(ErrorInvalidRequest, "the token set doesn't record its issuer (TokenSet.Issuer)", nil)
+		}
+		return newError(ErrorInvalidRequest, "the token set was issued by a different issuer than this client's", nil)
+	}
+	if t.HasIDToken && t.IDTokenClaims.Issuer != c.cfg.Issuer.String() {
+		return newError(ErrorInvalidRequest, "the token set's ID token was issued by a different issuer than this client's", nil)
+	}
+	return nil
+}
+
 func tokenSetIssuer(t TokenSet) string {
 	if t.Issuer != "" {
 		return t.Issuer

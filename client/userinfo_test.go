@@ -26,8 +26,9 @@ const userInfoTestSubject = "end-user-1"
 func userInfoTestTokens() client.TokenSet {
 	return client.TokenSet{
 		AccessToken:   fapi.NewSecret("test-access-token"),
+		Issuer:        testIssuer,
 		HasIDToken:    true,
-		IDTokenClaims: client.IDTokenClaims{Subject: userInfoTestSubject},
+		IDTokenClaims: client.IDTokenClaims{Subject: userInfoTestSubject, Issuer: testIssuer},
 	}
 }
 

@@ -45,6 +45,12 @@ var (
 	// beyond the configured clock-skew tolerance.
 	ErrNotYetValid = errors.New("requestobject: object is not yet valid")
 
+	// ErrIssuedInFuture indicates the object's iat claim is further in
+	// the future than the allowed clock skew (FAPI 2.0 Security Profile
+	// §5.3.2.1 item 13: "shall reject JWTs with an iat or nbf timestamp
+	// greater than 60 seconds in the future").
+	ErrIssuedInFuture = errors.New("requestobject: iat is in the future")
+
 	// ErrMissingNotBefore indicates VerifyPolicy.RequireNotBefore was set
 	// but the object carries no nbf claim at all.
 	ErrMissingNotBefore = errors.New("requestobject: nbf claim is required")

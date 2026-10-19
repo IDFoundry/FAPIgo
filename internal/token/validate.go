@@ -12,6 +12,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/jose"
+	"github.com/idfoundry/fapigo/internal/timeutil"
 )
 
 // AccessToken is a parsed, but not yet signature-verified, JWT access
@@ -85,6 +86,12 @@ type AccessTokenValidatePolicy struct {
 
 	Now         time.Time
 	MaxLifetime time.Duration
+
+	// MaxClockSkew is how far the issuer's clock may run ahead of Now:
+	// the token's iat or nbf may be up to this far in the future (RFC
+	// 7519 §4.1.5; FAPI 2.0 Security Profile §5.3.2.1 item 13), and its
+	// exp up to MaxLifetime plus this far away.
+	MaxClockSkew time.Duration
 }
 
 // ValidatedAccessToken is what remains once an access token has been
@@ -180,8 +187,8 @@ func (t AccessToken) Validate(pub crypto.PublicKey, policy AccessTokenValidatePo
 	// binding). MaxLifetime is a different, JWT-specific defense — an
 	// opaque token has no signed exp claim an attacker could forge, so
 	// it has no equivalent here.
-	if c.ExpiresAt.Sub(policy.Now) > policy.MaxLifetime {
-		return ValidatedAccessToken{}, ErrLifetimeExceeded
+	if err := checkAccessTokenTimes(c, policy); err != nil {
+		return ValidatedAccessToken{}, err
 	}
 
 	var jkt, x5ts256 string
@@ -203,6 +210,25 @@ func (t AccessToken) Validate(pub crypto.PublicKey, policy AccessTokenValidatePo
 		Audience:   c.Audience,
 		IssuedAt:   c.IssuedAt,
 	}, nil
+}
+
+// checkAccessTokenTimes bounds an access token's exp, iat and nbf
+// against policy: exp no further away than MaxLifetime, with the issuer's
+// clock allowed to run MaxClockSkew ahead, and iat and nbf no further in
+// the future than MaxClockSkew (RFC 7519 §4.1.5; FAPI 2.0 Security
+// Profile §5.3.2.1 item 13).
+func checkAccessTokenTimes(c AccessTokenClaims, policy AccessTokenValidatePolicy) error {
+	if c.ExpiresAt.Sub(policy.Now) > timeutil.SaturatingAdd(policy.MaxLifetime, policy.MaxClockSkew) {
+		return ErrLifetimeExceeded
+	}
+	latest := policy.Now.Add(policy.MaxClockSkew)
+	if c.IssuedAt.After(latest) {
+		return ErrIssuedInFuture
+	}
+	if c.NotBefore.After(latest) {
+		return ErrNotYetValid
+	}
+	return nil
 }
 
 // IDToken is a parsed, but not yet signature-verified, ID token. As with
@@ -366,7 +392,7 @@ func (t IDToken) Validate(pub crypto.PublicKey, policy IDTokenValidatePolicy) (V
 	if policy.Now.After(c.ExpiresAt.Add(policy.MaxClockSkew)) {
 		return ValidatedIDToken{}, ErrExpired
 	}
-	if c.ExpiresAt.Sub(policy.Now) > policy.MaxLifetime {
+	if c.ExpiresAt.Sub(policy.Now) > timeutil.SaturatingAdd(policy.MaxLifetime, policy.MaxClockSkew) {
 		return ValidatedIDToken{}, ErrLifetimeExceeded
 	}
 	// OIDC Core §3.1.3.7 step 10: iat "can be used to reject tokens that

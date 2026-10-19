@@ -3,6 +3,8 @@ package token
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/idfoundry/fapigo/internal/numericdate"
 )
 
 // popString extracts and deletes key from m, decoding it as a JSON
@@ -24,9 +26,9 @@ func popString(m map[string]json.RawMessage, key string, required bool) (value s
 	return s, true, nil
 }
 
-// popInt64 extracts and deletes key from m, decoding it as a JSON
-// number. If required and the key is absent, it returns
-// ErrMalformedClaims.
+// popInt64 extracts and deletes key from m, decoding it as an RFC 7519
+// §2 NumericDate in whole seconds (a fractional one floored). If
+// required and the key is absent, it returns ErrMalformedClaims.
 func popInt64(m map[string]json.RawMessage, key string, required bool) (value int64, present bool, err error) {
 	raw, ok := m[key]
 	if !ok {
@@ -36,9 +38,9 @@ func popInt64(m map[string]json.RawMessage, key string, required bool) (value in
 		return 0, false, nil
 	}
 	delete(m, key)
-	var n int64
-	if err := json.Unmarshal(raw, &n); err != nil {
-		return 0, false, fmt.Errorf("%w: %q must be an integer", ErrMalformedClaims, key)
+	n, err := numericdate.Parse(raw)
+	if err != nil {
+		return 0, false, fmt.Errorf("%w: %q must be a NumericDate (a JSON number)", ErrMalformedClaims, key)
 	}
 	return n, true, nil
 }

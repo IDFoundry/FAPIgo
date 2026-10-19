@@ -11,6 +11,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/jose"
+	"github.com/idfoundry/fapigo/internal/numericdate"
 )
 
 // jtiSize is the byte length of the random value used to build a PoP's
@@ -94,7 +95,7 @@ func CreatePoP(req PoPCreateRequest) (string, error) {
 		Issuer:    string(req.ClientID),
 		Audience:  popAudience(req.Audience),
 		JTI:       jti,
-		IssuedAt:  req.Now.Unix(),
+		IssuedAt:  numericdate.Value(req.Now.Unix()),
 		Challenge: req.Challenge,
 	}
 	payload, err := json.Marshal(c)

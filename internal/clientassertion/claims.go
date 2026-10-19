@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/idfoundry/fapigo/internal/numericdate"
 	"github.com/idfoundry/fapigo/internal/strictjson"
 )
 
@@ -24,13 +25,13 @@ const clientAuthenticationJWTType = "client-authentication+jwt"
 // which removes any ambiguity about which of several audiences a token
 // was actually intended for.
 type claims struct {
-	Issuer    string `json:"iss"`
-	Subject   string `json:"sub"`
-	Audience  string `json:"aud"`
-	JTI       string `json:"jti"`
-	ExpiresAt int64  `json:"exp"`
-	IssuedAt  int64  `json:"iat,omitempty"`
-	NotBefore int64  `json:"nbf,omitempty"`
+	Issuer    string            `json:"iss"`
+	Subject   string            `json:"sub"`
+	Audience  string            `json:"aud"`
+	JTI       string            `json:"jti"`
+	ExpiresAt numericdate.Value `json:"exp"`
+	IssuedAt  numericdate.Value `json:"iat,omitempty"`
+	NotBefore numericdate.Value `json:"nbf,omitempty"`
 }
 
 func parseClaims(payload []byte) (claims, error) {

@@ -205,8 +205,8 @@ func (o Object) Verify(ctx context.Context, pub crypto.PublicKey, policy VerifyP
 	if err := checkAudienceAndSubject(c, policy); err != nil {
 		return VerifiedObject{}, err
 	}
-	if c.IssuedAt.IsZero() && policy.RequireIssuedAt {
-		return VerifiedObject{}, ErrMissingIssuedAt
+	if err := checkIssuedAt(c, policy); err != nil {
+		return VerifiedObject{}, err
 	}
 
 	if err := checkLifetime(c, policy); err != nil {
@@ -250,6 +250,23 @@ func checkAudienceAndSubject(c Claims, policy VerifyPolicy) error {
 	return nil
 }
 
+// checkIssuedAt requires an iat when policy does, and refuses one
+// further in the future than MaxClockSkew (FAPI 2.0 Security Profile
+// §5.3.2.1 item 13: "shall reject JWTs with an iat or nbf timestamp
+// greater than 60 seconds in the future").
+func checkIssuedAt(c Claims, policy VerifyPolicy) error {
+	if c.IssuedAt.IsZero() {
+		if policy.RequireIssuedAt {
+			return ErrMissingIssuedAt
+		}
+		return nil
+	}
+	if c.IssuedAt.After(policy.Now.Add(policy.MaxClockSkew)) {
+		return ErrIssuedInFuture
+	}
+	return nil
+}
+
 // checkLifetime enforces exp/nbf against policy's clock-skew and
 // max-lifetime bounds — split out of Verify for the same reason
 // checkAudienceAndSubject is.
@@ -257,7 +274,11 @@ func checkLifetime(c Claims, policy VerifyPolicy) error {
 	if policy.Now.After(c.ExpiresAt.Add(policy.MaxClockSkew)) {
 		return ErrExpired
 	}
-	if c.ExpiresAt.Sub(policy.Now) > policy.MaxLifetime {
+	// The sender's clock may run up to MaxClockSkew ahead of Now, so an
+	// object issued with the longest lifetime MaxLifetime allows still
+	// fits (FAPI 2.0 Security Profile §5.3.2.1 item 13 has the server
+	// accept iat and nbf up to 10 seconds in the future).
+	if c.ExpiresAt.Sub(policy.Now) > timeutil.SaturatingAdd(policy.MaxLifetime, policy.MaxClockSkew) {
 		return ErrLifetimeExceeded
 	}
 	if c.NotBefore.IsZero() {

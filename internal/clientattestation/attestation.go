@@ -9,6 +9,7 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/internal/strictb64"
+	"github.com/idfoundry/fapigo/internal/timeutil"
 )
 
 // TypHeader is the required JOSE "typ" header of a Client Attestation
@@ -192,7 +193,7 @@ func (a Attestation) Verify(pub crypto.PublicKey, policy VerifyPolicy) (Verified
 
 	return VerifiedAttestation{
 		ClientID:        c.Subject,
-		ExpiresAt:       time.Unix(c.ExpiresAt, 0),
+		ExpiresAt:       c.ExpiresAt.Time(),
 		ConfirmationJWK: []byte(c.Confirmation.JWK),
 	}, nil
 }
@@ -204,18 +205,18 @@ func (a Attestation) Verify(pub crypto.PublicKey, policy VerifyPolicy) (Verified
 // (RFC 7519 §4.1.5; an attestation issued in the future is not one this
 // server's clock can vouch for).
 func checkAttestationTimes(c attestationClaims, policy VerifyPolicy) error {
-	exp := time.Unix(c.ExpiresAt, 0)
+	exp := c.ExpiresAt.Time()
 	if policy.Now.After(exp.Add(policy.MaxClockSkew)) {
 		return ErrExpired
 	}
-	if exp.Sub(policy.Now) > policy.MaxLifetime {
+	if exp.Sub(policy.Now) > timeutil.SaturatingAdd(policy.MaxLifetime, policy.MaxClockSkew) {
 		return ErrLifetimeExceeded
 	}
 	latest := policy.Now.Add(policy.MaxClockSkew)
-	if c.NotBefore != 0 && time.Unix(c.NotBefore, 0).After(latest) {
+	if c.NotBefore != 0 && c.NotBefore.Time().After(latest) {
 		return ErrNotYetValid
 	}
-	if c.IssuedAt != 0 && time.Unix(c.IssuedAt, 0).After(latest) {
+	if c.IssuedAt != 0 && c.IssuedAt.Time().After(latest) {
 		return ErrNotYetValid
 	}
 	return nil

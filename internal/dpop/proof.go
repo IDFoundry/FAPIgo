@@ -2,6 +2,8 @@ package dpop
 
 import (
 	"fmt"
+
+	"github.com/idfoundry/fapigo/internal/numericdate"
 	"github.com/idfoundry/fapigo/internal/strictjson"
 )
 
@@ -12,15 +14,19 @@ const jwtType = "dpop+jwt"
 // claims is the DPoP proof payload (RFC 9449 §4.2). Unrecognized fields
 // are tolerated, not rejected: a DPoP proof is a JWT, and general JWT
 // claim extensibility (RFC 7519 §4) permits a sender to include
-// additional claims (registered, e.g. nbf/exp, or private) that this
-// verifier has no opinion on. Verify relies on Iat for freshness.
+// additional claims (registered or private) that this verifier has no
+// opinion on. Verify relies on Iat for freshness; nbf and exp, which RFC
+// 9449 doesn't define but RFC 7519 §4.1.4-§4.1.5 holds every JWT to, are
+// checked when present.
 type claims struct {
-	JTI   string `json:"jti"`
-	HTM   string `json:"htm"`
-	HTU   string `json:"htu"`
-	IAT   int64  `json:"iat"`
-	ATH   string `json:"ath,omitempty"`
-	Nonce string `json:"nonce,omitempty"`
+	JTI   string            `json:"jti"`
+	HTM   string            `json:"htm"`
+	HTU   string            `json:"htu"`
+	IAT   numericdate.Value `json:"iat"`
+	NBF   numericdate.Value `json:"nbf,omitempty"`
+	EXP   numericdate.Value `json:"exp,omitempty"`
+	ATH   string            `json:"ath,omitempty"`
+	Nonce string            `json:"nonce,omitempty"`
 }
 
 func parseClaims(payload []byte) (claims, error) {

@@ -53,6 +53,14 @@ var (
 	// direction around Now.
 	ErrIssuedAtTooOld = errors.New("token: iat exceeds maximum allowed age")
 
+	// ErrIssuedInFuture indicates a token's iat is later than now, beyond
+	// the allowed clock skew (FAPI 2.0 Security Profile §5.3.2.1 item 13).
+	ErrIssuedInFuture = errors.New("token: iat is in the future")
+
+	// ErrNotYetValid indicates a token's nbf is later than now, beyond the
+	// allowed clock skew (RFC 7519 §4.1.5).
+	ErrNotYetValid = errors.New("token: token is not yet valid")
+
 	// ErrAuthTimeInvalid indicates an ID token's auth_time is later than
 	// now, beyond the allowed clock skew: not a time the user can have
 	// authenticated.

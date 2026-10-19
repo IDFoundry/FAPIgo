@@ -11,6 +11,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/jose"
+	"github.com/idfoundry/fapigo/internal/numericdate"
 )
 
 // jtiSize is the byte length of the random value used to build an
@@ -84,8 +85,8 @@ func CreateAssertion(req AssertionRequest) (string, error) {
 		Subject:   req.ClientID,
 		Audience:  req.Audience,
 		JTI:       jti,
-		IssuedAt:  req.Now.Unix(),
-		ExpiresAt: req.Now.Add(req.Lifetime).Unix(),
+		IssuedAt:  numericdate.Value(req.Now.Unix()),
+		ExpiresAt: numericdate.Value(req.Now.Add(req.Lifetime).Unix()),
 	}
 	payload, err := json.Marshal(c)
 	if err != nil {

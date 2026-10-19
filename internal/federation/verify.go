@@ -8,6 +8,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/jose"
+	"github.com/idfoundry/fapigo/internal/timeutil"
 )
 
 // Statement is a parsed, but not yet signature-verified, Entity
@@ -190,7 +191,7 @@ func (s Statement) Verify(pub crypto.PublicKey, policy VerifyPolicy) (Claims, er
 	if policy.Now.After(c.ExpiresAt.Add(policy.MaxClockSkew)) {
 		return Claims{}, ErrExpired
 	}
-	if c.ExpiresAt.Sub(policy.Now) > policy.MaxLifetime {
+	if c.ExpiresAt.Sub(policy.Now) > timeutil.SaturatingAdd(policy.MaxLifetime, policy.MaxClockSkew) {
 		return Claims{}, ErrLifetimeExceeded
 	}
 	if policy.Now.Before(c.IssuedAt.Add(-policy.MaxClockSkew)) {

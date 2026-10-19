@@ -21,6 +21,11 @@ var (
 	// the future than the configured clock-skew tolerance allows.
 	ErrIssuedInFuture = errors.New("dpop: iat is in the future")
 
+	// ErrNotYetValid indicates the proof's "nbf" claim is further in the
+	// future than the allowed clock skew (RFC 7519 §4.1.5; FAPI 2.0
+	// Security Profile §5.3.2.1 item 13).
+	ErrNotYetValid = errors.New("dpop: nbf is in the future")
+
 	// ErrExpired indicates the proof's "iat" claim is older than the
 	// configured maximum proof age.
 	ErrExpired = errors.New("dpop: proof has expired")

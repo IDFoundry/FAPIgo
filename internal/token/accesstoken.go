@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/idfoundry/fapigo/internal/numericdate"
 	"github.com/idfoundry/fapigo/internal/strictjson"
 )
 
@@ -41,6 +42,7 @@ type AccessTokenClaims struct {
 	Scope        string // space-delimited; "" if absent
 	ExpiresAt    time.Time
 	IssuedAt     time.Time
+	NotBefore    time.Time // zero if the token has no "nbf"
 	JTI          string
 	Confirmation *Confirmation // nil if the token is not sender-constrained
 	Parameters   map[string]json.RawMessage
@@ -73,11 +75,7 @@ func parseAccessTokenClaims(payload []byte) (AccessTokenClaims, error) {
 	if err != nil {
 		return AccessTokenClaims{}, err
 	}
-	exp, _, err := popInt64(raw, "exp", true)
-	if err != nil {
-		return AccessTokenClaims{}, err
-	}
-	iat, _, err := popInt64(raw, "iat", true)
+	times, err := popAccessTokenTimes(raw)
 	if err != nil {
 		return AccessTokenClaims{}, err
 	}
@@ -113,10 +111,51 @@ func parseAccessTokenClaims(payload []byte) (AccessTokenClaims, error) {
 		Audience:     aud,
 		ClientID:     clientID,
 		Scope:        scope,
-		ExpiresAt:    time.Unix(exp, 0),
-		IssuedAt:     time.Unix(iat, 0),
+		ExpiresAt:    times.ExpiresAt,
+		IssuedAt:     times.IssuedAt,
+		NotBefore:    times.NotBefore,
 		JTI:          jti,
 		Confirmation: confirmation,
 		Parameters:   raw,
 	}, nil
+}
+
+// accessTokenTimes is an access token's exp, iat and (zero if absent)
+// nbf.
+type accessTokenTimes struct {
+	ExpiresAt, IssuedAt, NotBefore time.Time
+}
+
+// popAccessTokenTimes takes the required exp and iat out of raw, and
+// reads any nbf (see peekNotBefore).
+func popAccessTokenTimes(raw map[string]json.RawMessage) (accessTokenTimes, error) {
+	exp, _, err := popInt64(raw, "exp", true)
+	if err != nil {
+		return accessTokenTimes{}, err
+	}
+	iat, _, err := popInt64(raw, "iat", true)
+	if err != nil {
+		return accessTokenTimes{}, err
+	}
+	nbf, err := peekNotBefore(raw)
+	if err != nil {
+		return accessTokenTimes{}, err
+	}
+	return accessTokenTimes{ExpiresAt: time.Unix(exp, 0), IssuedAt: time.Unix(iat, 0), NotBefore: nbf}, nil
+}
+
+// peekNotBefore reads an "nbf" claim, if the token has one, without
+// removing it: Parameters has always carried it, and an embedder may
+// read it there. RFC 9068 doesn't define nbf, but RFC 7519 §4.1.5 holds
+// every JWT to it.
+func peekNotBefore(raw map[string]json.RawMessage) (time.Time, error) {
+	nbfRaw, ok := raw["nbf"]
+	if !ok {
+		return time.Time{}, nil
+	}
+	nbf, err := numericdate.Parse(nbfRaw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%w: %q must be a NumericDate (a JSON number)", ErrMalformedClaims, "nbf")
+	}
+	return time.Unix(nbf, 0), nil
 }

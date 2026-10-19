@@ -123,7 +123,7 @@ func Verify(ctx context.Context, req VerifyRequest) (VerifiedProof, error) {
 		return VerifiedProof{}, err
 	}
 
-	iat := time.Unix(c.IAT, 0)
+	iat := c.IAT.Time()
 	if err := verifyProofClaims(c, req, iat); err != nil {
 		return VerifiedProof{}, err
 	}
@@ -143,6 +143,29 @@ func Verify(ctx context.Context, req VerifyRequest) (VerifiedProof, error) {
 		}
 	}
 	return VerifiedProof{Thumbprint: thumbprint, IssuedAt: iat, Nonce: c.Nonce, JTI: c.JTI}, nil
+}
+
+// checkProofTimes holds the proof to its iat: no further in the future
+// than MaxClockSkew and no older than MaxProofAge. An nbf or exp the
+// proof carries counts too (RFC 7519 §4.1.4-§4.1.5): FAPI 2.0 Security
+// Profile §5.3.2.1 item 13 has a server "reject JWTs with an iat or nbf
+// timestamp greater than 60 seconds in the future", MaxClockSkew being
+// that window.
+func checkProofTimes(c claims, req VerifyRequest, iat time.Time) error {
+	latest := req.Now.Add(req.MaxClockSkew)
+	if iat.After(latest) {
+		return ErrIssuedInFuture
+	}
+	if c.NBF != 0 && c.NBF.Time().After(latest) {
+		return ErrNotYetValid
+	}
+	if req.Now.Sub(iat) > req.MaxProofAge {
+		return ErrExpired
+	}
+	if c.EXP != 0 && req.Now.After(c.EXP.Time().Add(req.MaxClockSkew)) {
+		return ErrExpired
+	}
+	return nil
 }
 
 // verifyProofClaims checks c's htm/htu/iat/ath/nonce claims against
@@ -165,11 +188,8 @@ func verifyProofClaims(c claims, req VerifyRequest, iat time.Time) error {
 		return ErrURIMismatch
 	}
 
-	if iat.After(req.Now.Add(req.MaxClockSkew)) {
-		return ErrIssuedInFuture
-	}
-	if req.Now.Sub(iat) > req.MaxProofAge {
-		return ErrExpired
+	if err := checkProofTimes(c, req, iat); err != nil {
+		return err
 	}
 
 	if req.AccessToken != "" {

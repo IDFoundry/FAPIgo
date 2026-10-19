@@ -27,6 +27,11 @@ var (
 	// future beyond the configured clock-skew tolerance.
 	ErrNotYetValid = errors.New("clientassertion: assertion is not yet valid")
 
+	// ErrIssuedInFuture indicates the assertion's iat claim is further in
+	// the future than the allowed clock skew (FAPI 2.0 Security Profile
+	// §5.3.2.1 item 13).
+	ErrIssuedInFuture = errors.New("clientassertion: iat is in the future")
+
 	// ErrLifetimeExceeded indicates the assertion's exp claim is further
 	// in the future than the configured maximum lifetime allows.
 	ErrLifetimeExceeded = errors.New("clientassertion: exp exceeds maximum allowed lifetime")

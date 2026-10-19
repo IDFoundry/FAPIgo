@@ -46,6 +46,11 @@ func New(cfg Config, deps Dependencies) (*Client, error) {
 		return nil, err
 	}
 	deps.HTTP = nofollow.Client(deps.HTTP)
+	if deps.DPoPNonceCache == nil {
+		// RFC 9449 §8.2: the client "MUST use the new nonce value
+		// supplied for the next token request".
+		deps.DPoPNonceCache = NewInMemoryDPoPNonceCache()
+	}
 	return &Client{cfg: cfg, deps: deps, challenge: &latestChallenge{}}, nil
 }
 

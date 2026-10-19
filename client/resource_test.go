@@ -168,6 +168,19 @@ func TestProtectedResourceDoRetriesOnNonceChallenge(t *testing.T) {
 // first call's own successful response caches a nonce
 // (resourceNonceScope, keyed by scheme+host).
 func TestProtectedResourceDoReusesCachedNonceOnSecondCall(t *testing.T) {
+	testProtectedResourceReusesNonce(t, client.NewInMemoryDPoPNonceCache())
+}
+
+// TestProtectedResourceDoReusesNonceWithoutAConfiguredCache: RFC 9449
+// §8.2 has the client use the nonce a server supplied on its next
+// request, so a client with no DPoPNonceCache configured gets one of
+// its own and reuses it too.
+func TestProtectedResourceDoReusesNonceWithoutAConfiguredCache(t *testing.T) {
+	testProtectedResourceReusesNonce(t, nil)
+}
+
+func testProtectedResourceReusesNonce(t *testing.T, cache client.DPoPNonceCache) {
+	t.Helper()
 	const serverNonce = "server-nonce-1"
 	var mu sync.Mutex
 	var calls int
@@ -194,7 +207,7 @@ func TestProtectedResourceDoReusesCachedNonceOnSecondCall(t *testing.T) {
 	cfg := validConfig(t)
 	deps := validDependencies(t)
 	deps.HTTP = ts.Client()
-	deps.DPoPNonceCache = client.NewInMemoryDPoPNonceCache()
+	deps.DPoPNonceCache = cache
 	c, err := client.New(cfg, deps)
 	if err != nil {
 		t.Fatalf("client.New: %v", err)

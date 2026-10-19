@@ -97,12 +97,13 @@ type Dependencies struct {
 	// embedder has to wire up.
 	Decryption keys.Decrypter
 
-	// DPoPNonceCache lets this client proactively reuse a DPoP nonce a
-	// server already handed it, instead of always paying the challenge
-	// round trip RFC 9449 §8/§9 otherwise requires on every call — see
-	// its own doc comment. Nil (the zero value) disables the
-	// optimization entirely; pass NewInMemoryDPoPNonceCache() to enable
-	// it, the same deliberate opt-in Clock: SystemClock{} already is.
+	// DPoPNonceCache keeps the DPoP nonce each server last handed this
+	// client, so its next request presents it, as RFC 9449 §8.2 has a
+	// client do ("MUST use the new nonce value supplied for the next
+	// token request"), rather than being challenged again — see its own
+	// doc comment. Nil gets a NewInMemoryDPoPNonceCache() of this
+	// client's own. Pass one to share nonces between clients, or to keep
+	// them elsewhere.
 	DPoPNonceCache DPoPNonceCache
 
 	// Attestation supplies the pre-issued Client Attestation JWT this

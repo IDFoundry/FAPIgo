@@ -36,8 +36,8 @@ func resourceNonceScope(u *url.URL) string {
 // losing it, or a stale/wrong value, only costs one extra
 // challenge/retry round trip on the next call, recovered by the
 // existing retry logic exactly as if this cache didn't exist at all.
-// Dependencies.DPoPNonceCache being nil disables the optimization
-// entirely — every call behaves exactly as it always has.
+// New installs a NewInMemoryDPoPNonceCache when
+// Dependencies.DPoPNonceCache is nil.
 type DPoPNonceCache interface {
 	// Get returns the nonce last cached for scope, and whether one was
 	// found at all.
@@ -51,9 +51,8 @@ type DPoPNonceCache interface {
 }
 
 // InMemoryDPoPNonceCache is a DPoPNonceCache backed by a plain map, safe
-// for concurrent use. It is a ready-made implementation a caller can
-// wire in explicitly — supplying it is as deliberate a choice as
-// Clock: SystemClock{} is; New never installs one on its own.
+// for concurrent use. New installs one when Dependencies.DPoPNonceCache
+// is nil.
 type InMemoryDPoPNonceCache struct {
 	mu     sync.Mutex
 	nonces map[string]string

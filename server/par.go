@@ -609,6 +609,13 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 	if _, hasRequestURI := verified.Parameters["request_uri"]; hasRequestURI {
 		return nil, nil, nil, newError(ErrorInvalidRequestObject, 400, "request object must not contain request_uri", nil)
 	}
+	// OpenID Federation 1.0 §12.1.1.1 requires client_id in the request
+	// object of a client registered automatically, which is how it names
+	// its Entity Identifier there. requestobject.Parse already checked
+	// that one present equals iss.
+	if _, hasClientID := verified.Parameters["client_id"]; !hasClientID && client.AutomaticFederationRegistration() {
+		return nil, nil, nil, newError(ErrorInvalidRequestObject, 400, "request object must contain client_id", nil)
+	}
 	resources, resourceErr := s.resourcesFromParameters(verified.Parameters)
 	if resourceErr != nil {
 		return nil, nil, nil, resourceErr

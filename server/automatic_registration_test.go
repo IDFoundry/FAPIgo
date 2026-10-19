@@ -472,14 +472,28 @@ func TestNewWiresAutomaticRegistrationRequestObjectFederationRules(t *testing.T)
 		return err
 	}
 
+	// OpenID Federation 1.0 §12.1.1.1: the request object carries
+	// client_id.
+	compliant := func(t *testing.T) map[string]json.RawMessage {
+		params := standardAuthParams(t)
+		params["client_id"] = jsonRaw(t, f.rpID)
+		return params
+	}
+
 	t.Run("compliant request object succeeds", func(t *testing.T) {
-		if err := push(t, standardAuthParams(t)); err != nil {
+		if err := push(t, compliant(t)); err != nil {
 			t.Fatalf("PushAuthorizationRequest (compliant) = %v, want nil error", err)
 		}
 	})
 
+	t.Run("rejects a request object without client_id", func(t *testing.T) {
+		if err := push(t, standardAuthParams(t)); err == nil {
+			t.Fatalf("PushAuthorizationRequest (no client_id) = nil error, want error")
+		}
+	})
+
 	t.Run("rejects a sub claim", func(t *testing.T) {
-		params := standardAuthParams(t)
+		params := compliant(t)
 		params["sub"] = jsonRaw(t, f.rpID)
 		if err := push(t, params); err == nil {
 			t.Fatalf("PushAuthorizationRequest (sub present) = nil error, want error")

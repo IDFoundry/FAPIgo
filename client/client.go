@@ -16,6 +16,10 @@ import (
 type Client struct {
 	cfg  Config
 	deps Dependencies
+
+	// challenge is the most recent attestation Challenge the
+	// authorization server provided (see ChallengeSource).
+	challenge *latestChallenge
 }
 
 // New validates cfg and deps and returns a Client. Construction fails
@@ -42,7 +46,7 @@ func New(cfg Config, deps Dependencies) (*Client, error) {
 		return nil, err
 	}
 	deps.HTTP = nofollow.Client(deps.HTTP)
-	return &Client{cfg: cfg, deps: deps}, nil
+	return &Client{cfg: cfg, deps: deps, challenge: &latestChallenge{}}, nil
 }
 
 // NewFromDiscovery is New, with cfg completed and cross-checked from

@@ -82,8 +82,9 @@ func TestCreatePoPRoundTripsWithVerify(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParsePoP: %v", err)
 	}
-	if parsed.ClaimedIssuer() != string(clientID) {
-		t.Errorf("ClaimedIssuer() = %q, want %q", parsed.ClaimedIssuer(), clientID)
+	// iss is still sent, for servers following draft-07, which require it.
+	if parsed.claims.Issuer != string(clientID) {
+		t.Errorf("iss = %q, want %q", parsed.claims.Issuer, clientID)
 	}
 	if parsed.Algorithm() != fapi.ES256 {
 		t.Errorf("Algorithm() = %v, want %v", parsed.Algorithm(), fapi.ES256)
@@ -91,7 +92,7 @@ func TestCreatePoPRoundTripsWithVerify(t *testing.T) {
 
 	confirmationJWK := confirmationJWK(t, &instanceKey.PublicKey)
 	verified, err := parsed.Verify(context.Background(), confirmationJWK, PoPVerifyPolicy{
-		ExpectedIssuer: string(clientID), ExpectedAudience: audience,
+		ClientID: string(clientID), ExpectedAudience: audience,
 		Now: now, MaxAge: time.Minute,
 	})
 	if err != nil {
@@ -134,7 +135,7 @@ func TestCreatePoPRoundTripsWithChallenge(t *testing.T) {
 
 	confirmationJWK := confirmationJWK(t, &instanceKey.PublicKey)
 	if _, err := parsed.Verify(context.Background(), confirmationJWK, PoPVerifyPolicy{
-		ExpectedIssuer: string(clientID), ExpectedAudience: audience,
+		ClientID: string(clientID), ExpectedAudience: audience,
 		ExpectedChallenge: challenge,
 		Now:               now, MaxAge: time.Minute,
 	}); err != nil {
@@ -168,7 +169,7 @@ func TestCreatePoPRoundTrip_RejectsMismatchedChallenge(t *testing.T) {
 
 	confirmationJWK := confirmationJWK(t, &instanceKey.PublicKey)
 	if _, err := parsed.Verify(context.Background(), confirmationJWK, PoPVerifyPolicy{
-		ExpectedIssuer: string(clientID), ExpectedAudience: audience,
+		ClientID: string(clientID), ExpectedAudience: audience,
 		ExpectedChallenge: "a-different-challenge-the-server-expects",
 		Now:               now, MaxAge: time.Minute,
 	}); err == nil {
@@ -203,7 +204,7 @@ func TestCreatePoPRoundTrip_RejectsWrongInstanceKey(t *testing.T) {
 
 	confirmationJWK := confirmationJWK(t, &instanceKey.PublicKey)
 	if _, err := parsed.Verify(context.Background(), confirmationJWK, PoPVerifyPolicy{
-		ExpectedIssuer: string(clientID), ExpectedAudience: audience,
+		ClientID: string(clientID), ExpectedAudience: audience,
 		Now: now, MaxAge: time.Minute,
 	}); err == nil {
 		t.Fatal("Verify accepted a PoP signed by the wrong instance key")

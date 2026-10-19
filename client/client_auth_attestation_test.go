@@ -140,7 +140,7 @@ func (a *fakeAttestationAuthAS) checkAttestationAuthShape(t *testing.T, form url
 		t.Fatalf("%s: ParsePoP: %v", label, err)
 	}
 	verified, err := pop.Verify(context.Background(), a.confirmationJWK, clientattestation.PoPVerifyPolicy{
-		ExpectedIssuer: testClientID, ExpectedAudience: testIssuer,
+		ClientID: testClientID, ExpectedAudience: testIssuer,
 		Now: time.Now(), MaxAge: time.Minute,
 	})
 	if err != nil {
@@ -347,7 +347,7 @@ func TestRequestClientCredentialsTokenAttestationSendsChallengeInPoP(t *testing.
 		t.Fatalf("ParsePoP: %v", err)
 	}
 	if _, err := pop.Verify(context.Background(), as.confirmationJWK, clientattestation.PoPVerifyPolicy{
-		ExpectedIssuer: testClientID, ExpectedAudience: testIssuer,
+		ClientID: testClientID, ExpectedAudience: testIssuer,
 		ExpectedChallenge: wantChallenge,
 		Now:               time.Now(), MaxAge: time.Minute,
 	}); err != nil {
@@ -598,7 +598,7 @@ func TestClientAttestationHeaders(t *testing.T) {
 		// The replay check refuses a jti it has seen: a fresh PoP each
 		// call passes it both times.
 		if _, err := pop.Verify(context.Background(), as.confirmationJWK, clientattestation.PoPVerifyPolicy{
-			ExpectedIssuer: testClientID, ExpectedAudience: testIssuer, ExpectedChallenge: wantChallenge,
+			ClientID: testClientID, ExpectedAudience: testIssuer, ExpectedChallenge: wantChallenge,
 			Now: time.Now(), MaxAge: time.Minute, Replay: replay,
 		}); err != nil {
 			t.Fatalf("Verify: %v", err)
@@ -609,11 +609,12 @@ func TestClientAttestationHeaders(t *testing.T) {
 // recordingPoPReplay refuses a PoP jti it has already seen.
 type recordingPoPReplay struct{ seen map[string]bool }
 
-func (r *recordingPoPReplay) UseOnce(_ context.Context, jti string, _ time.Time) error {
-	if r.seen[jti] {
+func (r *recordingPoPReplay) UseOnce(_ context.Context, instanceKey jose.Thumbprint, jti string, _ time.Time) error {
+	key := instanceKey.String() + jti
+	if r.seen[key] {
 		return errors.New("jti reused")
 	}
-	r.seen[jti] = true
+	r.seen[key] = true
 	return nil
 }
 

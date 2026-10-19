@@ -127,8 +127,10 @@ type grantRecord struct {
 	// Instance Key a client authenticated by Client Attestation used
 	// when its refresh token was issued; RefreshAccessToken redeems the
 	// token only with an attestation for that same key
-	// (draft-ietf-oauth-attestation-based-client-auth-07 §10.3). Empty
-	// for any other client authentication.
+	// (draft-ietf-oauth-attestation-based-client-auth-12 §10.3). Empty
+	// for any other client authentication — and, since IssuedAt was
+	// recorded, a grant with it but without this key is refused to an
+	// attested client instance (see checkRefreshInstance).
 	ClientInstanceKey string `json:"client_instance_jkt,omitempty"`
 
 	Subject string `json:"sub"`

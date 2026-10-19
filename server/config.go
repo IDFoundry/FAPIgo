@@ -145,7 +145,7 @@ type AlgorithmPolicy struct {
 
 	// ClientAttestation is the server-wide allow-list for a Client
 	// Attestation JWT's signing algorithm (OAuth 2.0 Attestation-Based
-	// Client Authentication draft-07 §5.1) — checked in addition to
+	// Client Authentication draft-12 §4) — checked in addition to
 	// each client's own registered ClientAttestationAlgorithm, the same
 	// operator-override relationship ClientAssertion has with
 	// storage.RegisteredClient.ClientAssertionAlgorithm(). Required
@@ -154,7 +154,7 @@ type AlgorithmPolicy struct {
 	ClientAttestation AlgorithmSet
 
 	// ClientAttestationPoP is the server-wide allow-list for a Client
-	// Attestation PoP JWT's signing algorithm (draft-07 §5.2). Unlike
+	// Attestation PoP JWT's signing algorithm (draft-12 §5.1). Unlike
 	// ClientAttestation, there is no per-client registered algorithm to
 	// intersect with — a PoP is verified against the Client Instance
 	// Key the already-verified Client Attestation names, not a
@@ -340,16 +340,16 @@ type Limits struct {
 	// MaxClientAttestationLifetime bounds how far in the future a
 	// Client Attestation JWT's exp claim may be, relative to the time
 	// it's verified (OAuth 2.0 Attestation-Based Client Authentication
-	// draft-07 §5.1). Unlike MaxClientAssertionLifetime, a Client
+	// draft-12 §4). Unlike MaxClientAssertionLifetime, a Client
 	// Attestation is deliberately meant to be reused across many
-	// requests (draft-07 §10.2), so this is ordinarily configured much
+	// requests (draft-12 §10.2), so this is ordinarily configured much
 	// longer than a client assertion's own lifetime bound. Required
 	// only when Config.AttestationBasedClientAuthentication is true.
 	MaxClientAttestationLifetime time.Duration
 
 	// MaxClientAttestationPoPAge bounds how old (relative to
 	// verification time) a Client Attestation PoP JWT's iat claim may
-	// be (draft-07 §9 rule 9) — mirrors MaxDPoPProofAge's role for a
+	// be (draft-12 §7.2 rule 6) — mirrors MaxDPoPProofAge's role for a
 	// DPoP proof, since a PoP JWT has no exp claim of its own and is
 	// meant to be freshly created per request (§10.2 contrasts this
 	// explicitly with the reusable Client Attestation). Required only
@@ -481,7 +481,8 @@ type Config struct {
 
 	// AttestationBasedClientAuthentication enables
 	// storage.ClientAuthMethodAttestation (OAuth 2.0 Attestation-Based
-	// Client Authentication draft-07) — false (the zero value/default)
+	// Client Authentication draft-12, also accepting draft-07's shape) —
+	// false (the zero value/default)
 	// disables it entirely: authenticateClient never inspects the
 	// OAuth-Client-Attestation/OAuth-Client-Attestation-PoP headers, no
 	// client may be registered with ClientAuthMethodAttestation

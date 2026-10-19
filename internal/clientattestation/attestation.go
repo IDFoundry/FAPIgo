@@ -12,7 +12,7 @@ import (
 )
 
 // TypHeader is the required JOSE "typ" header of a Client Attestation
-// JWT (draft-07 §5.1).
+// JWT (draft-12 §4).
 const TypHeader = "oauth-client-attestation+jwt"
 
 // Attestation is a parsed, but not yet signature-verified, Client
@@ -93,10 +93,6 @@ func (a Attestation) CertificateChain() (ders [][]byte, present bool, err error)
 	return ders, true, nil
 }
 
-// ClaimedIssuer returns the unverified "iss" claim — the Attester — for
-// use as a key-lookup value only.
-func (a Attestation) ClaimedIssuer() string { return a.claims.Issuer }
-
 // ClaimedSubject returns the unverified "sub" claim — the OAuth
 // client_id — for use as a client-lookup key only.
 func (a Attestation) ClaimedSubject() string { return a.claims.Subject }
@@ -105,8 +101,9 @@ func (a Attestation) ClaimedSubject() string { return a.claims.Subject }
 // Attestation.
 type VerifyPolicy struct {
 	// ExpectedIssuer is the Attester this client is registered to
-	// trust (storage.RegisteredClient.ExpectedAttesterIssuer). The
-	// attestation's iss claim must equal it exactly.
+	// trust (storage.RegisteredClient.ExpectedAttesterIssuer). An
+	// attestation's iss claim, if it has one (draft-07 required it;
+	// draft-08 removed it), must equal it exactly. Required.
 	ExpectedIssuer string
 
 	// ExpectedSubject is the client_id being authenticated. The
@@ -128,9 +125,9 @@ type VerifyPolicy struct {
 	// default.
 	MaxLifetime time.Duration
 
-	// MaxClockSkew bounds how far in the future an nbf claim may be,
-	// and extends how long past exp an attestation is still accepted.
-	// Zero means no tolerance.
+	// MaxClockSkew bounds how far in the future an nbf or iat claim may
+	// be, and extends how long past exp an attestation is still
+	// accepted. Zero means no tolerance.
 	MaxClockSkew time.Duration
 }
 
@@ -143,14 +140,14 @@ type VerifiedAttestation struct {
 	// ConfirmationJWK is the raw JSON of the attestation's cnf.jwk
 	// member — the Client Instance Key the accompanying PoP JWT
 	// (PoP.Verify's confirmationJWK parameter) must be verified
-	// against. Deliberately left unparsed here: draft-07 doesn't
+	// against. Deliberately left unparsed here: the draft doesn't
 	// require cnf.jwk to declare its own algorithm, and it's the PoP
 	// JWT's own header alg that determines how to interpret it — see
-	// pop.go's own doc comment. jose.ParseJWK only ever extracts public
-	// key material (there is no private-key field in its parsed
-	// shape), which is what satisfies draft-07 §9 rule 6 ("the key
-	// contained in the cnf claim... is not a private key") — by
-	// construction, not by an explicit check here.
+	// pop.go's own doc comment. PoP.Verify parses it with
+	// jose.ParseJWK, which refuses a JWK carrying private key members
+	// (jose.ErrPrivateKeyMaterial): that is what satisfies draft-12
+	// §7.1 rule 5 ("The key contained in the cnf claim ... is not a
+	// private key").
 	ConfirmationJWK []byte
 }
 
@@ -178,30 +175,48 @@ func (a Attestation) Verify(pub crypto.PublicKey, policy VerifyPolicy) (Verified
 	}
 	c := a.claims
 
-	if c.Issuer != policy.ExpectedIssuer {
+	// draft-08 removed iss; one that's present must still name the
+	// client's Attester. Its absence weakens nothing: the Attester is
+	// established by the key that verified the signature, which the
+	// caller resolved from the client's registration (or, for an "x5c"
+	// chain, bound to it), never from iss.
+	if c.Issuer != "" && c.Issuer != policy.ExpectedIssuer {
 		return VerifiedAttestation{}, ErrIssuerMismatch
 	}
 	if c.Subject != policy.ExpectedSubject {
 		return VerifiedAttestation{}, ErrSubjectMismatch
 	}
-
-	exp := time.Unix(c.ExpiresAt, 0)
-	if policy.Now.After(exp.Add(policy.MaxClockSkew)) {
-		return VerifiedAttestation{}, ErrExpired
-	}
-	if exp.Sub(policy.Now) > policy.MaxLifetime {
-		return VerifiedAttestation{}, ErrLifetimeExceeded
-	}
-	if c.NotBefore != 0 {
-		nbf := time.Unix(c.NotBefore, 0)
-		if policy.Now.Before(nbf.Add(-policy.MaxClockSkew)) {
-			return VerifiedAttestation{}, ErrNotYetValid
-		}
+	if err := checkAttestationTimes(c, policy); err != nil {
+		return VerifiedAttestation{}, err
 	}
 
 	return VerifiedAttestation{
 		ClientID:        c.Subject,
-		ExpiresAt:       exp,
+		ExpiresAt:       time.Unix(c.ExpiresAt, 0),
 		ConfirmationJWK: []byte(c.Confirmation.JWK),
 	}, nil
+}
+
+// checkAttestationTimes checks c's exp (draft-12 §4: "MUST reject any
+// JWT with an expiration time that has passed, subject to allowable
+// clock skew"), its distance from now against MaxLifetime, and any nbf
+// or iat: neither may be further in the future than MaxClockSkew allows
+// (RFC 7519 §4.1.5; an attestation issued in the future is not one this
+// server's clock can vouch for).
+func checkAttestationTimes(c attestationClaims, policy VerifyPolicy) error {
+	exp := time.Unix(c.ExpiresAt, 0)
+	if policy.Now.After(exp.Add(policy.MaxClockSkew)) {
+		return ErrExpired
+	}
+	if exp.Sub(policy.Now) > policy.MaxLifetime {
+		return ErrLifetimeExceeded
+	}
+	latest := policy.Now.Add(policy.MaxClockSkew)
+	if c.NotBefore != 0 && time.Unix(c.NotBefore, 0).After(latest) {
+		return ErrNotYetValid
+	}
+	if c.IssuedAt != 0 && time.Unix(c.IssuedAt, 0).After(latest) {
+		return ErrNotYetValid
+	}
+	return nil
 }

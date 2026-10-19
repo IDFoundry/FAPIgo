@@ -335,13 +335,14 @@ func (c *Client) postBackchannelAuthenticationRequestWithDPoP(ctx context.Contex
 // sendBackchannelAuthenticationRequest posts form to the backchannel
 // authentication endpoint. Under SenderConstrainDPoP (the default), it
 // presents a DPoP-proofed request, retrying once on a use_dpop_nonce
-// challenge exactly like pushAuthorizationRequestWithDPoPProof does for
-// PAR. Under SenderConstrainMTLS, dpopSigner is unused (pass nil) — a
-// single plain call, no proof, no nonce retry, mirroring
+// or attestation challenge exactly like
+// pushAuthorizationRequestWithDPoPProof does for PAR. Under
+// SenderConstrainMTLS, dpopSigner is unused (pass nil) — a plain call,
+// no proof, retried only for an attestation challenge, mirroring
 // pushAuthorizationRequestPlain's own reasoning.
 func (c *Client) sendBackchannelAuthenticationRequest(ctx context.Context, dpopSigner crypto.Signer, endpointURL *url.URL, buildForm func() ([]byte, map[string]string, error), form []byte, headers map[string]string) ([]byte, *Error) {
 	if c.cfg.SenderConstrain == storage.SenderConstrainMTLS {
-		body, status, header, err := c.postForm(ctx, endpointURL.String(), form, headers)
+		body, status, header, err := c.postFormWithAttestationChallenge(ctx, endpointURL.String(), form, headers, buildForm)
 		if err != nil {
 			return nil, newError(ErrorInternal, errBackchannelAuthenticationRequestFailed, err)
 		}
@@ -350,23 +351,24 @@ func (c *Client) sendBackchannelAuthenticationRequest(ctx context.Context, dpopS
 		}
 		return body, nil
 	}
-	body, status, header, err := c.postBackchannelAuthenticationRequestWithDPoP(ctx, dpopSigner, endpointURL, form, c.cachedDPoPNonce(ctx, c.asNonceScope()), headers)
+	nonce := c.cachedDPoPNonce(ctx, c.asNonceScope())
+	body, status, header, err := c.postBackchannelAuthenticationRequestWithDPoP(ctx, dpopSigner, endpointURL, form, nonce, headers)
 	if err != nil {
 		return nil, newError(ErrorInternal, errBackchannelAuthenticationRequestFailed, err)
 	}
-	nextNonce := header.Get(dpopNonceHeader)
-	c.cacheDPoPNonce(ctx, c.asNonceScope(), nextNonce)
+	c.cacheDPoPNonce(ctx, c.asNonceScope(), header.Get(dpopNonceHeader))
 	if status == http.StatusOK {
 		return body, nil
 	}
-	if nextNonce == "" || !isDPoPNonceError(body) {
+	retryNonce, retry := challengeRetry(header, body, nonce)
+	if !retry {
 		return nil, parErrorFromResponse(status, header, body)
 	}
 	retryForm, retryHeaders, buildErr := buildForm()
 	if buildErr != nil {
 		return nil, newError(ErrorInternal, "failed to build backchannel authentication request", buildErr)
 	}
-	body, status, header, err = c.postBackchannelAuthenticationRequestWithDPoP(ctx, dpopSigner, endpointURL, retryForm, nextNonce, retryHeaders)
+	body, status, header, err = c.postBackchannelAuthenticationRequestWithDPoP(ctx, dpopSigner, endpointURL, retryForm, retryNonce, retryHeaders)
 	if err != nil {
 		return nil, newError(ErrorInternal, errBackchannelAuthenticationRequestFailed, err)
 	}
@@ -579,29 +581,31 @@ func backchannelPollOutcome(status int, header http.Header, body []byte) (Backch
 // slow_down, access_denied, expired_token are expected polling
 // outcomes, not failures), to branch on before anything becomes an
 // *Error. Under SenderConstrainMTLS, dpopSigner is unused (pass
-// nil) — a single plain call, no proof, no nonce retry.
+// nil) — a plain call, no proof, retried only for an attestation
+// challenge.
 func (c *Client) pollBackchannelAuthenticationOnce(ctx context.Context, dpopSigner crypto.Signer, tokenURL *url.URL, buildForm func() ([]byte, map[string]string, error), form []byte, headers map[string]string) ([]byte, int, http.Header, *Error) {
 	if c.cfg.SenderConstrain == storage.SenderConstrainMTLS {
-		body, status, header, err := c.postForm(ctx, tokenURL.String(), form, headers)
+		body, status, header, err := c.postFormWithAttestationChallenge(ctx, tokenURL.String(), form, headers, buildForm)
 		if err != nil {
 			return nil, 0, nil, newError(ErrorInternal, errTokenRequestFailed, err)
 		}
 		return body, status, header, nil
 	}
-	body, status, header, err := c.postTokenRequestWithDPoP(ctx, dpopSigner, tokenURL, form, c.cachedDPoPNonce(ctx, c.asNonceScope()), headers)
+	nonce := c.cachedDPoPNonce(ctx, c.asNonceScope())
+	body, status, header, err := c.postTokenRequestWithDPoP(ctx, dpopSigner, tokenURL, form, nonce, headers)
 	if err != nil {
 		return nil, 0, nil, newError(ErrorInternal, errTokenRequestFailed, err)
 	}
-	nextNonce := header.Get(dpopNonceHeader)
-	c.cacheDPoPNonce(ctx, c.asNonceScope(), nextNonce)
-	if status == http.StatusOK || nextNonce == "" || !isDPoPNonceError(body) {
+	c.cacheDPoPNonce(ctx, c.asNonceScope(), header.Get(dpopNonceHeader))
+	retryNonce, retry := challengeRetry(header, body, nonce)
+	if status == http.StatusOK || !retry {
 		return body, status, header, nil
 	}
 	retryForm, retryHeaders, buildErr := buildForm()
 	if buildErr != nil {
 		return nil, 0, nil, newError(ErrorInternal, "failed to build client assertion", buildErr)
 	}
-	body, status, header, err = c.postTokenRequestWithDPoP(ctx, dpopSigner, tokenURL, retryForm, nextNonce, retryHeaders)
+	body, status, header, err = c.postTokenRequestWithDPoP(ctx, dpopSigner, tokenURL, retryForm, retryNonce, retryHeaders)
 	if err != nil {
 		return nil, 0, nil, newError(ErrorInternal, errTokenRequestFailed, err)
 	}

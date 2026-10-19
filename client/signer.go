@@ -86,8 +86,8 @@ func (c *Client) newSigner(ctx context.Context, purpose keys.SigningPurpose, alg
 //     why reusing one across a retry gets rejected as jti replay),
 //     added to form. No headers.
 //   - ClientAuthMethodAttestation: the two Attestation-Based Client
-//     Authentication headers (draft-ietf-oauth-attestation-based-client-auth-07
-//     §5) — see attestationHeaders' own doc comment. form is left
+//     Authentication headers (draft-ietf-oauth-attestation-based-client-auth-12
+//     §4, §5.1) — see attestationHeaders' own doc comment. form is left
 //     untouched: no client_id or client_assertion* field is sent
 //     alongside attestation headers.
 //   - any other (RFC 8705 §2 mTLS) method: a plain client_id in form,

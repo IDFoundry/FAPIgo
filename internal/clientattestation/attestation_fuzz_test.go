@@ -83,5 +83,7 @@ func clientAttestationSeeds(f *testing.F) []string {
 		sign("attestation missing cnf", header, claims+`}`),
 		"", ".", "a.b.c",
 		sign("attestation with x5c", withX5C, claims+cnf+`}`),
+		// draft-12's shape: no iss, iat required.
+		sign("draft-12 attestation", header, `{"sub":"https://client.example","iat":1767225600,"exp":4102444800`+cnf+`}`),
 	}
 }

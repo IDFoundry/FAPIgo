@@ -43,14 +43,17 @@ type Metadata struct {
 	RequestObjectSigningAlgValuesSupported     []string `json:"request_object_signing_alg_values_supported,omitempty"`
 
 	// ClientAttestationSigningAlgValuesSupported/ClientAttestationPoPSigningAlgValuesSupported
-	// are draft-ietf-oauth-attestation-based-client-auth-07 §10.1's own
+	// are draft-ietf-oauth-attestation-based-client-auth-12 §8's own
 	// metadata extension (no RFC 8414/OIDC Discovery counterpart) — set
 	// only when Config.AttestationBasedClientAuthentication is true,
 	// alongside "attest_jwt_client_auth" in
-	// TokenEndpointAuthMethodsSupported. §10.1: "The Authorization
-	// Server MUST include [these two fields] in its published metadata
-	// if the token_endpoint_auth_methods_supported includes
-	// attest_jwt_client_auth."
+	// TokenEndpointAuthMethodsSupported. §8: "The Authorization Server
+	// or Resource Server MUST include
+	// client_attestation_signing_alg_values_supported and
+	// client_attestation_pop_signing_alg_values_supported in its
+	// published metadata if the Client Attestation PoP JWT mechanism is
+	// used." No challenge_endpoint is published: this server issues no
+	// Challenges (§6 makes them optional).
 	ClientAttestationSigningAlgValuesSupported    []string `json:"client_attestation_signing_alg_values_supported,omitempty"`
 	ClientAttestationPoPSigningAlgValuesSupported []string `json:"client_attestation_pop_signing_alg_values_supported,omitempty"`
 

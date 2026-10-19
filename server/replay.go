@@ -74,6 +74,28 @@ func (s *Server) backchannelAuthenticationRequestReplayChecker(client fapi.Clien
 	return replayChecker{store: s.deps.Replay, namespace: backchannelAuthenticationRequestReplayNamespace, client: client}
 }
 
-func (s *Server) clientAttestationPoPReplayChecker(client fapi.ClientID) replayChecker {
-	return replayChecker{store: s.deps.Replay, namespace: clientAttestationPoPReplayNamespace, client: client}
+// clientAttestationPoPReplayChecker adapts storage.ReplayStore to
+// internal/clientattestation's ReplayChecker, recording a Client
+// Attestation PoP's jti scoped to the client and to the Client Instance
+// whose key signed it: every installation of a client shares one
+// client_id, so a record scoped to the client alone would let one
+// installation use up a jti another will send. A replayed PoP carries
+// the same instance key, so it is still refused. The thumbprint's
+// encoding has a fixed length, so prefixing it to the jti can't make two
+// different (key, jti) pairs collide.
+type clientAttestationPoPReplayChecker struct {
+	store  storage.ReplayStore
+	client fapi.ClientID
+}
+
+func (r clientAttestationPoPReplayChecker) UseOnce(ctx context.Context, instanceKey jose.Thumbprint, jti string, expiresAt time.Time) error {
+	return r.store.UseOnce(ctx, storage.ReplayUse{
+		Namespace: clientAttestationPoPReplayNamespace,
+		Digest:    replaykey.Digest(string(r.client), instanceKey.String()+jti),
+		ExpiresAt: expiresAt,
+	})
+}
+
+func (s *Server) clientAttestationPoPReplayChecker(client fapi.ClientID) clientAttestationPoPReplayChecker {
+	return clientAttestationPoPReplayChecker{store: s.deps.Replay, client: client}
 }

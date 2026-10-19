@@ -66,8 +66,8 @@ type TokenRevocationResult struct {
 // token endpoint does, then revokes the refresh token in "token" if this
 // client may: one issued to it and, for a client authenticated by Client
 // Attestation, bound to the same Client Instance Key (as
-// RefreshAccessToken requires — draft-ietf-oauth-attestation-based-client-auth-07
-// §10.3). Revoking a refresh token also revokes the authorization grant
+// RefreshAccessToken requires — draft-ietf-oauth-attestation-based-client-auth-12
+// §10.3; see checkRefreshInstance). Revoking a refresh token also revokes the authorization grant
 // it came from, so the access tokens issued under it stop working too
 // (RFC 7009 §2.1): the grant's GrantID if it has one (RevokeGrant) —
 // which is why a GrantID must name one grant only

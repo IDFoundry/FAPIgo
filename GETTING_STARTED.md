@@ -779,7 +779,9 @@ at the same token endpoint — OpenID4VCI's `pre-authorized_code`, say —
 read the request once with `server.TokenEndpointRequestFromHTTP` and
 switch on `GrantType()`. For your own grant, take its form with
 `Parameters()`, authenticate the client with `AuthenticateAttestedClient`
-(`req.AttestedClientAuthentication()`) — the only client authentication
+(`req.AttestedClientAuthentication()`, which also passes the request's
+`client_id`, refused if it names another client than the attestation)
+— the only client authentication
 offered for a grant you serve, so its clients register for
 attestation-based client authentication — and check its DPoP proof or
 client certificate with `VerifyTokenRequestBinding`: the same checks,

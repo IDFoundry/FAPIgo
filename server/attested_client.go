@@ -17,10 +17,18 @@ type AttestedClientAuthenticationRequest struct {
 	// OAuth-Client-Attestation and OAuth-Client-Attestation-PoP header
 	// values, every one of each: ClientAttestationHeadersFromHTTP reads
 	// them from an *http.Request. AuthenticateAttestedClient requires
-	// exactly one of each (draft-ietf-oauth-attestation-based-client-auth-07
-	// §9 rule 1), so pass them all rather than picking one.
+	// exactly one of each (draft-ietf-oauth-attestation-based-client-auth-12
+	// §7.1 rule 1, §7.2 rule 1), so pass them all rather than picking
+	// one.
 	ClientAttestations    []string
 	ClientAttestationPoPs []string
+
+	// ClientID is the request's own client_id parameter, if it has one.
+	// AuthenticateAttestedClient refuses a request whose client_id names
+	// a different client from the attestation's sub (draft-12 §7.1 rule
+	// 7, §7.5). Optional: a request without a client_id parameter leaves
+	// it empty.
+	ClientID string
 }
 
 // AttestedClient is the client AuthenticateAttestedClient authenticated.
@@ -45,18 +53,20 @@ type AttestedClient struct {
 // AuthenticateAttestedClient authenticates a client with a Client
 // Attestation and its Client Attestation PoP (OAuth 2.0
 // Attestation-Based Client Authentication,
-// draft-ietf-oauth-attestation-based-client-auth-07), exactly as this
-// server's own endpoints do, for a token endpoint grant this server
-// doesn't serve — such as OpenID4VCI's pre-authorized_code grant, which
-// HAIP 1.0 §4.4.1 requires client authentication for.
+// draft-ietf-oauth-attestation-based-client-auth-12, also accepting
+// draft-07's shape), exactly as this server's own endpoints do, for a
+// token endpoint grant this server doesn't serve — such as OpenID4VCI's
+// pre-authorized_code grant, which HAIP 1.0 §4.4.1 requires client
+// authentication for.
 //
 // It requires Config.AttestationBasedClientAuthentication, and a client
 // registered for storage.ClientAuthMethodAttestation. The attestation
 // must verify under Dependencies.AttesterTrust, with the algorithms in
 // Config.Algorithms and within Limits.MaxClientAttestationLifetime; the
-// PoP must verify against the attestation's cnf key, name the client as
-// its iss and Config.Issuer as its aud, be within
-// Limits.MaxClientAttestationPoPAge, and not have been used before. The
+// PoP must verify against the attestation's cnf key, name Config.Issuer
+// as its aud (and the client as its iss, if it has one), be within
+// Limits.MaxClientAttestationPoPAge, and not have been used before by
+// the same Client Instance. The
 // PoP's audience being the issuer means the grant belongs at this
 // server's own token endpoint URL — authorization server metadata has
 // only the one — with the embedder routing it by grant_type. PoPs share
@@ -66,13 +76,14 @@ type AttestedClient struct {
 // It only authenticates the client. Whether that client may use the
 // grant, the grant itself, and any DPoP proof are the caller's to check.
 // The client is the one the attestation names: use AttestedClient.Client
-// for the grant, and refuse a request whose own client_id parameter, if
-// it has one, names a different client.
+// for the grant, and pass the request's own client_id parameter, if it
+// has one, as ClientID: a request naming a different client is refused.
 // A request with no attestation headers at all is refused, like one with
 // more than one of either. Errors are *Error with ErrorInvalidClient
-// (401), as at a token endpoint; that includes a PoP whose use couldn't
-// be recorded, so an unavailable replay store fails closed. Every call
-// records an AuditEventAuthenticateAttestedClient.
+// (401), as at a token endpoint — that includes a PoP whose use couldn't
+// be recorded, so an unavailable replay store fails closed — except for
+// an attestation that has expired, which is ErrorUseFreshAttestation
+// (400). Every call records an AuditEventAuthenticateAttestedClient.
 func (s *Server) AuthenticateAttestedClient(ctx context.Context, req AttestedClientAuthenticationRequest) (AttestedClient, error) {
 	attestation, pop, err := resolveAttestationHeaders(req.ClientAttestations, req.ClientAttestationPoPs)
 	if err == nil && attestation == "" {
@@ -82,7 +93,7 @@ func (s *Server) AuthenticateAttestedClient(ctx context.Context, req AttestedCli
 		s.audit(ctx, AuditEventAuthenticateAttestedClient, "", AuditOutcomeFailure, string(err.Code()))
 		return AttestedClient{}, err
 	}
-	client, verified, err := s.authenticateClientViaAttestation(ctx, attestation, pop)
+	client, verified, err := s.authenticateClientViaAttestation(ctx, req.ClientID, attestation, pop)
 	if err != nil {
 		s.audit(ctx, AuditEventAuthenticateAttestedClient, "", AuditOutcomeFailure, string(err.Code()))
 		return AttestedClient{}, err

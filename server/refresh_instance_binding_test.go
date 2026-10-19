@@ -246,9 +246,12 @@ func TestCIBARefreshTokenBoundToClientInstanceKey(t *testing.T) {
 
 // TestRefreshTokenIssuedBeforeInstanceBindingStillRedeems covers a
 // refresh token issued to an attestation client before refresh tokens
-// recorded the Client Instance Key: there is no key to compare, so it
-// stays redeemable rather than failing every existing installation on
-// upgrade.
+// recorded the Client Instance Key (v0.47.0): there is no key to
+// compare, so it stays redeemable rather than failing every existing
+// installation on upgrade. Such a record predates issued_at too
+// (v0.50.0), which is what tells it apart from a grant issued under
+// another client authentication method (see
+// TestRefreshTokenFromAnotherAuthMethodRefusedToInstance).
 func TestRefreshTokenIssuedBeforeInstanceBindingStillRedeems(t *testing.T) {
 	attesterKey := generateKey(t)
 	h := newInstanceBindingHarness(t, attesterKey)
@@ -265,6 +268,7 @@ func TestRefreshTokenIssuedBeforeInstanceBindingStillRedeems(t *testing.T) {
 			t.Fatalf("stored grant has no client_instance_jkt: %s", stored.Grant)
 		}
 		delete(record, "client_instance_jkt")
+		delete(record, "issued_at")
 		stored.Grant, _ = json.Marshal(record)
 		h.grants.refreshByHash[hash] = stored
 	}

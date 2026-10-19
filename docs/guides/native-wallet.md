@@ -75,6 +75,14 @@ c, err := client.New(client.Config{
   Client Attestation from `Dependencies.Attestation` and a fresh PoP
   signed with the instance key. `client.StaticAttestation(jwt)` serves a
   fixed one; implement `AttestationSource` to renew it before it expires.
+  An authorization server refusing an expired one answers
+  `use_fresh_attestation` (in the error's `ServerResponse`): get a new
+  attestation and retry. Challenges an authorization server sends in
+  `OAuth-Client-Attestation-Challenge` are followed for you: the latest
+  goes in every PoP, and a `use_attestation_challenge` error is retried
+  once. For a request you send yourself with
+  `ClientAttestationHeaders`, pass its response headers to
+  `ObserveAttestationChallenge`.
 - **Keys.** The Secure Enclave signs ES256 only. Keep each key until the
   tokens bound to it are discarded.
 - **Loopback.** A desktop app on a port the OS picks per flow sets
@@ -110,7 +118,9 @@ storage; a browser-based client keeps the default binding.
 - **Refresh** with `RefreshTokens`. When the client authenticates with a
   Client Attestation, the refresh token is bound to the instance key
   (attestation-based client authentication §10.3): only this
-  installation can redeem it.
+  installation can redeem it. A FAPIgo authorization server also refuses
+  an installation a refresh token issued to the same client_id under
+  another method, such as your backend's `private_key_jwt`.
 - **Revoke** with `RevokeToken` when the app no longer needs a refresh
   token, before deleting the key it's bound to. `ErrorRevocationNotSupported`
   means the server offers no revocation endpoint, and the token can only

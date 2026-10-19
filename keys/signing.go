@@ -52,7 +52,7 @@ const (
 	BackchannelAuthenticationRequestSigning
 
 	// ClientAttestationPoPSigning signs a Client Attestation PoP JWT
-	// (OAuth 2.0 Attestation-Based Client Authentication draft-07 §5.2)
+	// (OAuth 2.0 Attestation-Based Client Authentication draft-12 §5.1)
 	// with the Client Instance Key — the key an already-issued Client
 	// Attestation JWT names in its own "cnf.jwk" claim, not a
 	// pre-registered long-lived key the way ClientAuthentication's key

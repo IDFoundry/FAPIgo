@@ -34,15 +34,19 @@ func (c *Client) RevokeToken(ctx context.Context, refreshToken fapi.Secret) erro
 	if err != nil {
 		return newError(ErrorInternal, "failed to resolve signing keys", err)
 	}
-	form := map[string]string{
-		"token":           refreshToken.Reveal(),
-		"token_type_hint": "refresh_token",
+	build := func() ([]byte, map[string]string, error) {
+		form := map[string]string{
+			"token":           refreshToken.Reveal(),
+			"token_type_hint": "refresh_token",
+		}
+		headers, buildErr := c.addClientAuthentication(ctx, form, assertionSigner, assertionKID)
+		return par.EncodeForm(form), headers, buildErr
 	}
-	headers, err := c.addClientAuthentication(ctx, form, assertionSigner, assertionKID)
+	form, headers, err := build()
 	if err != nil {
 		return newError(ErrorInternal, "failed to authenticate the revocation request", err)
 	}
-	body, status, header, err := c.postForm(ctx, c.cfg.Endpoints.Revocation.String(), par.EncodeForm(form), headers)
+	body, status, header, err := c.postFormWithAttestationChallenge(ctx, c.cfg.Endpoints.Revocation.String(), form, headers, build)
 	if err != nil {
 		return newError(ErrorInternal, "token revocation request failed", err)
 	}

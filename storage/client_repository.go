@@ -147,7 +147,7 @@ const (
 	// and vouching for this client, plus a Client Attestation PoP signed
 	// by the Client Instance Key the Attestation names in its "cnf"
 	// claim — per OAuth 2.0 Attestation-Based Client Authentication
-	// (draft-ietf-oauth-attestation-based-client-auth-07). Unlike every
+	// (draft-ietf-oauth-attestation-based-client-auth-12). Unlike every
 	// other ClientAuthMethod, the credential proving this client's
 	// identity is issued by a third party (the Attester), not held
 	// directly by the client or pre-registered with this server; only
@@ -319,21 +319,24 @@ type RegisteredClientConfig struct {
 	ExpectedSANURI   string
 	ExpectedSANEmail string
 
-	// ExpectedAttesterIssuer is the "iss" value this client's Client
-	// Attestation JWT must carry (OAuth 2.0 Attestation-Based Client
-	// Authentication draft-07 §5.1) — the trusted Attester vouching for
-	// this Client Instance. Required only when ClientAuthMethod is
-	// ClientAuthMethodAttestation. Compared by exact string match, the
-	// same way ExpectedSubjectDN/ExpectedSAN* are.
+	// ExpectedAttesterIssuer identifies the trusted Attester vouching
+	// for this client's instances (OAuth 2.0 Attestation-Based Client
+	// Authentication): the attester whose keys server.RegisteredAttesterKeys
+	// verifies its Client Attestations with, or whose identifier
+	// server.X5CAttesterChain requires in the signing certificate. A
+	// Client Attestation's "iss" claim, which draft-07 required and
+	// draft-08 removed, must equal it when present. Required only when
+	// ClientAuthMethod is ClientAuthMethodAttestation. Compared by exact
+	// string match, the same way ExpectedSubjectDN/ExpectedSAN* are.
 	ExpectedAttesterIssuer string
 
 	// ClientAttestationAlgorithm is the only algorithm this client's
-	// Client Attestation JWTs are accepted under (draft-07 §5.1) —
+	// Client Attestation JWTs are accepted under (draft-12 §4) —
 	// never inferred from the Attestation's own header, the same
 	// algorithm-confusion protection ClientAssertionAlgorithm provides
 	// for private_key_jwt. Required only when ClientAuthMethod is
 	// ClientAuthMethodAttestation. The accompanying Client Attestation
-	// PoP JWT (draft-07 §5.2) needs no algorithm registered here: its
+	// PoP JWT (draft-12 §5.1) needs no algorithm registered here: its
 	// signing key is the Client Instance Key the already-verified
 	// Attestation names in its own "cnf" claim, not a pre-registered
 	// one — see internal/clientattestation's package doc comment.

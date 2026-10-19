@@ -50,10 +50,10 @@ func userinfoHandler(srv *server.Server, verifier *fapires.Verifier, userinfoURL
 		// Set before anything else, and unconditionally, on every
 		// response this request produces — success or error alike
 		// (FAPI 1.0 Part 1 §6.2.1). Must come before any WriteHeader
-		// call below, including every writeResourceError(Raw) path.
+		// call below, including every writeResourceError and writeServerError path.
 		interactionID, err := fapires.ResolveInteractionID(r.Header.Get(fapires.InteractionIDHeader), nil)
 		if err != nil {
-			writeResourceErrorRaw(w, http.StatusInternalServerError, "server_error", "failed to resolve x-fapi-interaction-id")
+			writeServerError(w, "failed to resolve x-fapi-interaction-id")
 			return
 		}
 		w.Header().Set(fapires.InteractionIDHeader, interactionID)
@@ -81,7 +81,7 @@ func userinfoHandler(srv *server.Server, verifier *fapires.Verifier, userinfoURL
 		if userinfoSigning {
 			signed, err := serverresource.SignUserInfoResponse(r.Context(), srv, clients, authCtx, body)
 			if err != nil {
-				writeResourceErrorRaw(w, http.StatusInternalServerError, "server_error", "failed to sign userinfo response")
+				writeServerError(w, "failed to sign userinfo response")
 				return
 			}
 			w.Header().Set(contentTypeHeader, "application/jwt")
@@ -112,7 +112,7 @@ func accountsHandler(verifier *fapires.Verifier, accountsURL *url.URL) http.Hand
 		// opening comment explains — set before any WriteHeader call.
 		interactionID, err := fapires.ResolveInteractionID(r.Header.Get(fapires.InteractionIDHeader), nil)
 		if err != nil {
-			writeResourceErrorRaw(w, http.StatusInternalServerError, "server_error", "failed to resolve x-fapi-interaction-id")
+			writeServerError(w, "failed to resolve x-fapi-interaction-id")
 			return
 		}
 		w.Header().Set(fapires.InteractionIDHeader, interactionID)
@@ -128,32 +128,22 @@ func accountsHandler(verifier *fapires.Verifier, accountsURL *url.URL) http.Hand
 	}
 }
 
+// writeResourceError writes err as the resource package's own
+// challenge response (resource.WriteError): the scheme the request
+// presented its token with, algs on a DPoP challenge, no error
+// attributes when no credentials were presented (RFC 6750 §3.1), and
+// the DPoP-Nonce header when err carries a nonce.
 func writeResourceError(w http.ResponseWriter, err error) {
-	resErr, ok := err.(*fapires.Error)
-	if !ok {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	// Set before writeResourceErrorRaw's own WriteHeader call — a
-	// header can't be added after that. Only ErrorUseDPoPNonce ever
-	// carries a nonce (Error.Nonce's own doc comment), so this is a
-	// no-op for every other rejection.
-	if resErr.Nonce() != "" {
-		w.Header().Set("DPoP-Nonce", resErr.Nonce())
-	}
-	writeResourceErrorRaw(w, resErr.HTTPStatus(), string(resErr.Code()), resErr.PublicDescription())
+	fapires.WriteError(w, err)
 }
 
-// writeResourceErrorRaw writes a resource-endpoint error response
-// directly, for failures detected before a *fapires.Error exists (e.g.
-// multiple DPoP headers, rejected before ever calling into the
-// verifier).
-func writeResourceErrorRaw(w http.ResponseWriter, status int, code, description string) {
-	w.Header().Set("WWW-Authenticate", `DPoP error="`+code+`"`)
+// writeServerError writes a 500 for a failure that isn't about the
+// request's credentials, so it carries no WWW-Authenticate challenge.
+func writeServerError(w http.ResponseWriter, description string) {
 	w.Header().Set(contentTypeHeader, "application/json")
-	w.WriteHeader(status)
+	w.WriteHeader(http.StatusInternalServerError)
 	_ = json.NewEncoder(w).Encode(map[string]string{
-		"error":             code,
+		"error":             "server_error",
 		"error_description": description,
 	})
 }

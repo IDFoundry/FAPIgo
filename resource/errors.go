@@ -116,11 +116,14 @@ func NewError(code ErrorCode, httpStatus int, description string) *Error {
 // (RFC 6750 §3.1) for a request Verify accepted as authz but whose
 // token doesn't cover what it asks for. Its challenge uses the scheme
 // the request presented the token with, as RFC 9449 §7.1 asks: DPoP for
-// a DPoP-bound token, Bearer otherwise. description follows NewError's
-// rules.
+// a DPoP-bound token, Bearer otherwise. It carries authz.NextDPoPNonce,
+// which WriteJSON sends as DPoP-Nonce: Verify consumed the request's
+// nonce, so without it the client's next request would be challenged.
+// description follows NewError's rules.
 func NewInsufficientScopeError(authz AuthorizationContext, description string) *Error {
 	e := NewError(ErrorInsufficientScope, http.StatusForbidden, description)
 	e.dpopChallenge = authz.usedDPoP
+	e.nonce = authz.NextDPoPNonce
 	return e
 }
 
@@ -132,10 +135,10 @@ func (e *Error) Code() ErrorCode { return e.code }
 // PublicDescription returns a short, safe-to-expose description.
 func (e *Error) PublicDescription() string { return e.description }
 
-// Nonce returns the nonce a caller should present on retry, alongside
-// this error's own DPoP challenge — non-empty only when Code is
-// ErrorUseDPoPNonce, in which case it belongs in the response's own
-// DPoP-Nonce header (RFC 9449 §8).
+// Nonce returns the nonce a caller should present next, which belongs
+// in the response's own DPoP-Nonce header (RFC 9449 §8, §9). It's
+// non-empty when Code is ErrorUseDPoPNonce, and on a
+// NewInsufficientScopeError error when Verify issued a next nonce.
 func (e *Error) Nonce() string { return e.nonce }
 
 // HTTPStatus returns the HTTP status code an adapter should respond

@@ -159,10 +159,10 @@ func TestNewVerifierProductionAccepts(t *testing.T) {
 			d.Nonces = declaredNonces{NonceStore: memstore.NewNonceStore(), caps: caps}
 		}},
 		{"opaque", func(_ *resource.Config, d *resource.Dependencies) {
-			d.AccessTokens = resource.OpaqueAccessTokens{Store: declaredAccessTokens{AccessTokenStore: memstore.NewAccessTokenStore(), caps: fullCaps}}
+			d.AccessTokens = resource.OpaqueAccessTokens{Store: declaredAccessTokens{AccessTokenStore: memstore.NewAccessTokenStore(), caps: fullCaps}, Audience: "https://rs.example.com"}
 		}},
 		{"opaque pointer", func(_ *resource.Config, d *resource.Dependencies) {
-			d.AccessTokens = &resource.OpaqueAccessTokens{Store: declaredAccessTokens{AccessTokenStore: memstore.NewAccessTokenStore(), caps: fullCaps}}
+			d.AccessTokens = &resource.OpaqueAccessTokens{Store: declaredAccessTokens{AccessTokenStore: memstore.NewAccessTokenStore(), caps: fullCaps}, Audience: "https://rs.example.com"}
 		}},
 		{"jwt pointer", func(_ *resource.Config, d *resource.Dependencies) {
 			r := jwtResolver(t, &declaredKeys{hardened: true})
@@ -209,6 +209,12 @@ func TestNewVerifierProductionRefuses(t *testing.T) {
 		{"opaque store not shared", func(_ *resource.Config, d *resource.Dependencies) {
 			d.AccessTokens = resource.OpaqueAccessTokens{Store: declaredAccessTokens{AccessTokenStore: memstore.NewAccessTokenStore(), caps: notShared}}
 		}, "access_tokens must declare CrossInstanceConsistent"},
+		{"opaque without an audience", func(_ *resource.Config, d *resource.Dependencies) {
+			d.AccessTokens = resource.OpaqueAccessTokens{Store: declaredAccessTokens{AccessTokenStore: memstore.NewAccessTokenStore(), caps: fullCaps}}
+		}, "OpaqueAccessTokens.Audience is required"},
+		{"opaque pointer without an audience", func(_ *resource.Config, d *resource.Dependencies) {
+			d.AccessTokens = &resource.OpaqueAccessTokens{Store: declaredAccessTokens{AccessTokenStore: memstore.NewAccessTokenStore(), caps: fullCaps}}
+		}, "OpaqueAccessTokens.Audience is required"},
 		{"nil jwt pointer", func(_ *resource.Config, d *resource.Dependencies) {
 			d.AccessTokens = (*resource.JWTAccessTokens)(nil)
 		}, "nil *JWTAccessTokens"},

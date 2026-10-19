@@ -979,6 +979,7 @@ accessTokens, err := resource.NewJWTAccessTokens(
 // if this resource server shares that storage backend with the AS
 // (co-located, or a real shared database).
 // accessTokens, err := resource.NewOpaqueAccessTokens(sameAccessTokenStore)
+// accessTokens.Audience = asIssuer.String() // required under AssuranceProduction, as for JWTs
 ```
 
 `asIssuer`/`asJWKSURL` are the authorization server's own issuer/JWKS

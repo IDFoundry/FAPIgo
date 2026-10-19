@@ -31,7 +31,12 @@ import (
 //   - "sub" is the sub the client was given for the user
 //     (resource.AuthorizationContext.ClientSubject): its pairwise
 //     subject for a client with pairwise subjects, while source is asked
-//     about the user by the internal subject (InternalSubject).
+//     about the user by the internal subject (InternalSubject). With
+//     claims to resolve and no InternalSubject (a verifier with
+//     resource.PairwiseClientSubjectsOnly, which doesn't map a pairwise
+//     sub back), it's an error: source is never asked about "";
+//   - a client credentials token (resource.SubjectClient) is refused as
+//     a 403 insufficient_scope: it names no end user.
 //
 // A requested-claims entry the token carries malformed is an error, not
 // an empty request. An error from source is returned wrapped. Sign the
@@ -41,6 +46,9 @@ func UserInfoClaims(ctx context.Context, authz resource.AuthorizationContext, so
 	if !slices.Contains(authz.Scopes, "openid") {
 		return nil, resource.NewInsufficientScopeError(authz, "the access token wasn't granted the openid scope")
 	}
+	if authz.SubjectKind == resource.SubjectClient {
+		return nil, resource.NewInsufficientScopeError(authz, "the access token wasn't issued for an end user")
+	}
 	var names []string
 	if raw, ok := authz.Claims[server.RequestedUserinfoClaimsKey]; ok {
 		if err := json.Unmarshal(raw, &names); err != nil {
@@ -49,6 +57,12 @@ func UserInfoClaims(ctx context.Context, authz resource.AuthorizationContext, so
 	}
 	claims := map[string]json.RawMessage{}
 	if len(names) > 0 {
+		if authz.InternalSubject == "" {
+			// Under resource.PairwiseClientSubjectsOnly a pairwise sub
+			// isn't mapped back to the end user, so there is no one to
+			// ask the source about.
+			return nil, errors.New("serverresource: the access token's subject isn't mapped to an end user: a UserInfo endpoint can't use resource.PairwiseClientSubjectsOnly")
+		}
 		resolved, err := source.ResolveIdentityClaims(ctx, authz.InternalSubject, names)
 		if err != nil {
 			return nil, fmt.Errorf("serverresource: resolving UserInfo claims: %w", err)

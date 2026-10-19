@@ -10,9 +10,12 @@ import (
 // any other context that needs to compare URLs by origin-plus-path:
 // scheme and host are lowercased, a default port for the scheme is
 // dropped, and any userinfo, query and fragment are stripped. The path
-// is left exactly as supplied — this function does not perform
-// path-segment normalization (".", "..", percent-decoding), since that
-// would change which resource the URL identifies.
+// gets RFC 3986's syntax-based and scheme-based normalization (§6.2.2,
+// §6.2.3), which RFC 9449 §4.3 has a server apply before comparing htu:
+// percent-encodings are uppercased, those of unreserved characters
+// decoded, "." and ".." segments removed, and an http(s) URI's empty
+// path made "/". Each keeps the resource the URI identifies, so two
+// URIs that differ only in them name the same one.
 func URI(u *url.URL) string {
 	out := *u
 	out.Scheme = strings.ToLower(out.Scheme)
@@ -21,6 +24,19 @@ func URI(u *url.URL) string {
 	out.RawQuery = ""
 	out.Fragment = ""
 	out.RawFragment = ""
+	path := normalizePath(u.EscapedPath())
+	if path == "" && out.Host != "" && (out.Scheme == "https" || out.Scheme == "http") {
+		path = "/" // RFC 3986 §6.2.3
+	}
+	if path == "%2A" {
+		// net/url writes a Path of exactly "*" unescaped whatever its
+		// RawPath, so this is the one form String can't keep.
+		path = "*"
+	}
+	// path's percent-encodings are all valid: normalizePath only keeps
+	// those of EscapedPath, which are.
+	out.Path, _ = url.PathUnescape(path)
+	out.RawPath = path
 	// A path starting with "//", once Scheme, Host and User have all
 	// come out empty, is genuinely ambiguous once serialized: RFC 3986
 	// §3.3 always reads a leading "//" as introducing an authority
@@ -89,4 +105,88 @@ func isDefaultPort(scheme, port string) bool {
 	default:
 		return false
 	}
+}
+
+// normalizePath applies RFC 3986 §6.2.2's syntax-based normalization to
+// an escaped path: percent-encodings uppercased (§6.2.2.1), those of
+// unreserved characters decoded (§6.2.2.2), then dot segments removed
+// (§6.2.2.3, by §5.2.4's algorithm). A "%" not followed by two hex
+// digits is kept as it is.
+func normalizePath(escaped string) string {
+	var b strings.Builder
+	b.Grow(len(escaped))
+	for i := 0; i < len(escaped); i++ {
+		c := escaped[i]
+		if c != '%' || i+2 >= len(escaped) || !isHex(escaped[i+1]) || !isHex(escaped[i+2]) {
+			b.WriteByte(c)
+			continue
+		}
+		decoded := unhex(escaped[i+1])<<4 | unhex(escaped[i+2])
+		if isUnreserved(decoded) {
+			b.WriteByte(decoded)
+		} else {
+			b.WriteByte('%')
+			b.WriteString(strings.ToUpper(escaped[i+1 : i+3]))
+		}
+		i += 2
+	}
+	return removeDotSegments(b.String())
+}
+
+// removeDotSegments is RFC 3986 §5.2.4's algorithm.
+func removeDotSegments(in string) string {
+	var out []string // output segments, each with its leading "/" if any
+	for in != "" {
+		switch {
+		case strings.HasPrefix(in, "../"):
+			in = in[3:]
+		case strings.HasPrefix(in, "./"):
+			in = in[2:]
+		case strings.HasPrefix(in, "/./"):
+			in = in[2:]
+		case in == "/.":
+			in = "/"
+		case strings.HasPrefix(in, "/../"):
+			in = in[3:]
+			if len(out) > 0 {
+				out = out[:len(out)-1]
+			}
+		case in == "/..":
+			in = "/"
+			if len(out) > 0 {
+				out = out[:len(out)-1]
+			}
+		case in == "." || in == "..":
+			in = ""
+		default:
+			// Move the first segment, with its leading "/" if any, up
+			// to the next "/".
+			end := strings.IndexByte(in[1:], '/') + 1
+			if end == 0 {
+				end = len(in)
+			}
+			out = append(out, in[:end])
+			in = in[end:]
+		}
+	}
+	return strings.Join(out, "")
+}
+
+func isUnreserved(c byte) bool {
+	return 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' ||
+		c == '-' || c == '.' || c == '_' || c == '~'
+}
+
+func isHex(c byte) bool {
+	return '0' <= c && c <= '9' || 'a' <= c && c <= 'f' || 'A' <= c && c <= 'F'
+}
+
+func unhex(c byte) byte {
+	switch {
+	case '0' <= c && c <= '9':
+		return c - '0'
+	case 'a' <= c && c <= 'f':
+		return c - 'a' + 10
+	}
+	return c - 'A' + 10
 }

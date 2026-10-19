@@ -326,9 +326,24 @@ func TestVerifyRejectsMethodMismatch(t *testing.T) {
 	}
 }
 
+// TestVerifyAcceptsSeveralSpacesAfterScheme: RFC 9110 §11.4's
+// credentials = auth-scheme [ 1*SP ( token68 / #auth-param ) ] allows
+// more than one space between the scheme and the token.
+func TestVerifyAcceptsSeveralSpacesAfterScheme(t *testing.T) {
+	f := newFixture(t)
+	if _, err := f.verifier.Verify(context.Background(), resource.VerifyRequest{
+		Method:        "GET",
+		URL:           f.target,
+		Authorization: "DPoP   " + f.accessToken,
+		DPoPProofs:    []string{f.dpopProof},
+	}); err != nil {
+		t.Fatalf("Verify(three spaces after the scheme): %v", err)
+	}
+}
+
 func TestVerifyRejectsMalformedAuthorizationHeader(t *testing.T) {
 	f := newFixture(t)
-	cases := []string{"", "DPoP", "not-a-scheme-with-no-space-and-token"}
+	cases := []string{"", "DPoP", "DPoP   ", "not-a-scheme-with-no-space-and-token"}
 	for _, authz := range cases {
 		_, err := f.verifier.Verify(context.Background(), resource.VerifyRequest{
 			Method: "GET", URL: f.target,

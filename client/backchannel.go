@@ -219,14 +219,21 @@ func (c *Client) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		return BackchannelAuthenticationSession{}, newError(ErrorInvalidResponse, "malformed backchannel authentication response", err)
 	}
 
-	interval := time.Duration(raw.Interval) * time.Second
+	// Both clamp rather than overflow: an interval of more than
+	// math.MaxInt64 nanoseconds once wrapped to a short or negative one,
+	// and the client then polled as fast as it could. A wait longer than
+	// the request lives is waiting for its expiry, so it's capped there,
+	// which also keeps a sealed session's interval in range.
+	expiresIn := expiresInDuration(raw.ExpiresIn)
+	interval := expiresInDuration(raw.Interval)
 	if interval <= 0 {
 		interval = defaultBackchannelAuthenticationPollInterval
 	}
+	interval = min(interval, expiresIn)
 	return BackchannelAuthenticationSession{
 		authReqID:         raw.AuthReqID,
 		interval:          interval,
-		expiresAt:         c.deps.Clock.Now().Add(expiresInDuration(raw.ExpiresIn)),
+		expiresAt:         c.deps.Clock.Now().Add(expiresIn),
 		notificationToken: notificationToken,
 		openID:            slices.Contains(req.Scope, "openid"),
 		essentialACR:      slices.Clone(req.EssentialACRValues),

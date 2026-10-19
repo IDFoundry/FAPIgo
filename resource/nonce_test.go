@@ -241,3 +241,32 @@ func TestVerifyAcceptsValidNonceAndIssuesNext(t *testing.T) {
 		t.Fatalf("Verify(reused nonce) = nil error, want error")
 	}
 }
+
+// TestInsufficientScopeCarriesNextNonce: Verify consumed the request's
+// nonce, so a 403 for a token that doesn't cover the request must still
+// hand the client the next one, or its next request is challenged.
+func TestInsufficientScopeCarriesNextNonce(t *testing.T) {
+	first := newNonceFixture(t, "", nil)
+	_, err := first.verify(t)
+	rerr, ok := err.(*resource.Error)
+	if !ok {
+		t.Fatalf("error type = %T, want *resource.Error", err)
+	}
+	authz, err := newNonceFixture(t, rerr.Nonce(), first.nonces).verify(t)
+	if err != nil {
+		t.Fatalf("Verify(valid nonce): %v", err)
+	}
+
+	e := resource.NewInsufficientScopeError(authz, "payments need the payments scope")
+	if e.Nonce() != authz.NextDPoPNonce || e.Nonce() == "" {
+		t.Fatalf("Nonce() = %q, want NextDPoPNonce %q", e.Nonce(), authz.NextDPoPNonce)
+	}
+	rec := httptest.NewRecorder()
+	e.WriteJSON(rec)
+	if got := rec.Header().Get("DPoP-Nonce"); got != authz.NextDPoPNonce {
+		t.Fatalf("DPoP-Nonce = %q, want %q", got, authz.NextDPoPNonce)
+	}
+	if rec.Code != 403 {
+		t.Fatalf("status = %d, want 403", rec.Code)
+	}
+}

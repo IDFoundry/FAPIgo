@@ -882,6 +882,11 @@ func formParametersToMap(params []FormParameter) (map[string]string, error) {
 	}
 	out := make(map[string]string, len(params))
 	for _, p := range params {
+		if p.Value == "" {
+			// RFC 6749 §3.1: "Parameters sent without a value MUST be
+			// treated as if they were omitted from the request."
+			continue
+		}
 		if _, exists := out[p.Name]; exists {
 			return nil, fmt.Errorf("duplicate parameter %q", p.Name)
 		}

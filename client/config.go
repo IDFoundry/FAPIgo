@@ -315,7 +315,8 @@ type Limits struct {
 	// RequestObjectLifetime is how long a signed request object this
 	// client produces remains valid for. Required only when Profile is
 	// ProfileFAPISecurityWithMessageSigning or PushedRequestEncoding is
-	// PushedRequestEncodingRequestObject.
+	// PushedRequestEncodingRequestObject, and then at most 60 minutes
+	// (FAPI 2.0 Message Signing §5.3.2 item 4).
 	RequestObjectLifetime time.Duration
 
 	// SessionLifetime bounds how long between BeginAuthorization and a

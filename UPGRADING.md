@@ -123,6 +123,23 @@ a FAPI server.
 `NewFromDiscovery` already raises the policy to it when the server's
 metadata says it supports `iss`.
 
+### `Limits.RequestObjectLifetime` is at most 60 minutes (client)
+
+**Affects:** a client that signs request objects
+(`ProfileFAPISecurityWithMessageSigning` or
+`PushedRequestEncodingRequestObject`) with
+`Limits.RequestObjectLifetime` over 60 minutes.
+
+**Why:** FAPI 2.0 Message Signing §5.3.2 item 4 has a client send a
+request object whose `exp` is at most 60 minutes away, and a server
+following §5.3.1 item 4 refuses a longer one.
+
+**What fails:** `client.New` returns an error naming
+`request_object_lifetime`.
+
+**What to change:** set it to 60 minutes or less.
+`RecommendedLimits` uses 60 seconds.
+
 ### Attestation-based client authentication follows draft-12 (server, client)
 
 Not a breaking change: clients built to draft-07 keep working, and so

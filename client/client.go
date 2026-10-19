@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"time"
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/federation"
@@ -411,11 +412,20 @@ func validateMessageSigningProfile(cfg Config) error {
 	if cfg.Limits.RequestObjectLifetime <= 0 {
 		return fmt.Errorf("client: config: limits.request_object_lifetime must be positive under ProfileFAPISecurityWithMessageSigning")
 	}
+	if cfg.Limits.RequestObjectLifetime > maxRequestObjectLifetime {
+		return fmt.Errorf("client: config: limits.request_object_lifetime must be at most 60 minutes (FAPI 2.0 Message Signing §5.3.2 item 4)")
+	}
 	if cfg.Limits.MaxJARMResponseLifetime <= 0 {
 		return fmt.Errorf("client: config: limits.max_jarm_response_lifetime must be positive under ProfileFAPISecurityWithMessageSigning")
 	}
 	return nil
 }
+
+// maxRequestObjectLifetime is FAPI 2.0 Message Signing §5.3.2 item 4's
+// bound: a client "shall send an exp claim in the request object that
+// has a lifetime of no longer than 60 minutes". A server following
+// §5.3.1 item 4 refuses a longer one.
+const maxRequestObjectLifetime = 60 * time.Minute
 
 // validateRequestObjectEncoding checks the fields
 // PushedRequestEncodingRequestObject needs under ProfileFAPISecurity —
@@ -430,6 +440,9 @@ func validateRequestObjectEncoding(cfg Config) error {
 	}
 	if cfg.Limits.RequestObjectLifetime <= 0 {
 		return fmt.Errorf("client: config: limits.request_object_lifetime must be positive under PushedRequestEncodingRequestObject")
+	}
+	if cfg.Limits.RequestObjectLifetime > maxRequestObjectLifetime {
+		return fmt.Errorf("client: config: limits.request_object_lifetime must be at most 60 minutes (FAPI 2.0 Message Signing §5.3.2 item 4)")
 	}
 	return nil
 }

@@ -285,7 +285,10 @@ func parseAuthorization(req VerifyRequest) (dpopProof, raw string, usedDPoP bool
 	if strings.TrimSpace(req.Authorization) == "" {
 		return "", "", false, noCredentials("no Authorization header")
 	}
+	// RFC 9110 §11.4: credentials = auth-scheme [ 1*SP ( token68 /
+	// #auth-param ) ], so any number of spaces may follow the scheme.
 	scheme, raw, _ := strings.Cut(req.Authorization, " ")
+	raw = strings.TrimLeft(raw, " ")
 	usedDPoP = strings.EqualFold(scheme, "DPoP")
 	if !usedDPoP && !strings.EqualFold(scheme, "Bearer") {
 		return "", "", false, noCredentials("authorization scheme is neither DPoP nor Bearer")

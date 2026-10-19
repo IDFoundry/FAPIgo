@@ -335,17 +335,30 @@ func (f *fakeGrantStore) Capabilities() storage.Capabilities {
 type fakeKeyManager struct {
 	key   *ecdsa.PrivateKey
 	keyID string
+	// federationKey, when set, is the keys.FederationEntitySigning key,
+	// under the kid "fed-" + keyID: New refuses a federation entity key
+	// that is also a protocol key.
+	federationKey *ecdsa.PrivateKey
+}
+
+// keyFor is the key f holds for purpose.
+func (f *fakeKeyManager) keyFor(purpose keys.SigningPurpose) (*ecdsa.PrivateKey, string) {
+	if purpose == keys.FederationEntitySigning && f.federationKey != nil {
+		return f.federationKey, "fed-" + f.keyID
+	}
+	return f.key, f.keyID
 }
 
 func (f *fakeKeyManager) Sign(_ context.Context, req keys.SigningRequest) (keys.Signature, error) {
+	key, keyID := f.keyFor(req.Purpose)
 	// keys.Signature.Value must match crypto.Signer's contract for the
 	// key type — ASN.1 DER for ECDSA, exactly what *ecdsa.PrivateKey.Sign
 	// would produce — not the fixed-width R||S JWS uses on the wire.
-	der, err := ecdsa.SignASN1(rand.Reader, f.key, req.Digest)
+	der, err := ecdsa.SignASN1(rand.Reader, key, req.Digest)
 	if err != nil {
 		return keys.Signature{}, err
 	}
-	return keys.Signature{KeyID: f.keyID, Value: der}, nil
+	return keys.Signature{KeyID: keyID, Value: der}, nil
 }
 
 // KeyCustody is a test-only assertion — see fakeClientRepository.Capabilities.
@@ -353,8 +366,9 @@ func (f *fakeKeyManager) KeyCustody() keys.KeyCustody {
 	return keys.KeyCustody{Durable: true, CrossInstanceConsistent: true}
 }
 
-func (f *fakeKeyManager) PublicKey(_ context.Context, _ keys.SigningPurpose, _ fapi.SignatureAlgorithm) (keys.PublicKeyInfo, error) {
-	return keys.PublicKeyInfo{KeyID: f.keyID, PublicKey: &f.key.PublicKey}, nil
+func (f *fakeKeyManager) PublicKey(_ context.Context, purpose keys.SigningPurpose, _ fapi.SignatureAlgorithm) (keys.PublicKeyInfo, error) {
+	key, keyID := f.keyFor(purpose)
+	return keys.PublicKeyInfo{KeyID: keyID, PublicKey: &key.PublicKey}, nil
 }
 
 type fakeAuditSink struct {

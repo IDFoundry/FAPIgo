@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"crypto"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -125,7 +127,59 @@ func (s *Server) checkSigningKeys() error {
 	if _, err := s.PublicJWKS(ctx); err != nil {
 		return fmt.Errorf("server: dependencies: the JWK Set at endpoints.jwks can't be built: %w", err)
 	}
+	if s.cfg.Federation.EntityID != "" {
+		return checkFederationKeyDistinct(ctx, uses[len(published)], published)
+	}
 	return nil
+}
+
+// checkFederationKeyDistinct refuses a federation entity signing key that
+// is also one of the server's protocol signing keys. The entity key
+// vouches for this server's whole Entity Configuration, its protocol
+// keys included; one of those keys reused for it would let anything
+// that key signs (an ID token, a JARM response) be presented as a
+// statement of the entity itself, which is why Config.Federation says
+// it is never reused.
+func checkFederationKeyDistinct(ctx context.Context, federation namedSigningKeyUse, published []namedSigningKeyUse) error {
+	entityKeys, err := signingPublicKeys(ctx, federation)
+	if err != nil {
+		return err
+	}
+	for _, use := range published {
+		protocolKeys, err := signingPublicKeys(ctx, use)
+		if err != nil {
+			return err
+		}
+		for _, entityKey := range entityKeys {
+			for _, protocolKey := range protocolKeys {
+				if equal, ok := entityKey.(interface{ Equal(crypto.PublicKey) bool }); ok && equal.Equal(protocolKey) {
+					return fmt.Errorf("server: dependencies: the %v key is also the %s %v key: a federation entity key is never reused as a protocol key", keys.FederationEntitySigning, use.field, use.Purpose)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// signingPublicKeys returns every public key use currently publishes.
+func signingPublicKeys(ctx context.Context, use namedSigningKeyUse) ([]crypto.PublicKey, error) {
+	set, err := keys.PublicJWKS(ctx, []keys.SigningKeyUse{use.SigningKeyUse}, nil)
+	if err != nil {
+		return nil, fmt.Errorf("server: dependencies: %s has no usable %v key for %v: %w", use.field, use.Purpose, use.Algorithm, err)
+	}
+	encoded, err := json.Marshal(set)
+	if err != nil {
+		return nil, fmt.Errorf("server: dependencies: encode the %v keys: %w", use.Purpose, err)
+	}
+	parsed, err := jose.ParseJWKSet(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("server: dependencies: read back the %v keys: %w", use.Purpose, err)
+	}
+	out := make([]crypto.PublicKey, 0, len(parsed))
+	for _, k := range parsed {
+		out = append(out, k.PublicKey)
+	}
+	return out, nil
 }
 
 // probeSigningKey signs a throwaway payload with use's key, through the

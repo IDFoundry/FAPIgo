@@ -140,6 +140,25 @@ following §5.3.1 item 4 refuses a longer one.
 **What to change:** set it to 60 minutes or less.
 `RecommendedLimits` uses 60 seconds.
 
+### The federation entity key must not be a protocol key (server)
+
+**Affects:** a server with `Config.Federation.EntityID` set whose
+`Dependencies.Keys` returns the same key for
+`keys.FederationEntitySigning` as for any protocol signing purpose (ID
+tokens, JARM, UserInfo, or access tokens).
+
+**Why:** the entity key signs this server's Entity Configuration, which
+vouches for its protocol keys. Reusing one of those for it lets anything
+that key signs be presented as a statement of the entity itself.
+`Config.Federation` already said the key is never reused; now `New`
+checks.
+
+**What fails:** `server.New` returns an error saying the federation
+entity key is also a protocol key.
+
+**What to change:** give `keys.FederationEntitySigning` its own key in
+your key manager.
+
 ### Attestation-based client authentication follows draft-12 (server, client)
 
 Not a breaking change: clients built to draft-07 keep working, and so

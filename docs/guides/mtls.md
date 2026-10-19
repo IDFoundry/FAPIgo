@@ -24,18 +24,16 @@ FAPIgo never holds the certificate's private key. It's configured on
 the `*http.Client` you pass as `Dependencies.HTTP`:
 
 ```go
-endpoints := discovered.Endpoints
 // RFC 8705 §5: requests that do mutual TLS go to the server's mTLS
-// aliases. Certificate client authentication does it at every request
-// that authenticates the client (PAR, token, CIBA, revocation);
-// certificate-bound tokens alone don't need it at PAR.
-discovered.MTLSEndpointAliases.ApplyForClientAuth(&endpoints)
-// A private_key_jwt client with certificate-bound tokens calls
-// ApplyForSenderConstrain instead.
-
+// aliases. With Endpoints left zero, NewFromDiscovery applies them:
+// at every request that authenticates the client (PAR, token, CIBA,
+// revocation) for certificate client authentication, and at the
+// token-using ones (not PAR) for certificate-bound tokens alone. Set
+// Endpoints yourself only to adjust them first, with
+// discovered.MTLSEndpointAliases.ApplyForClientAuth or
+// ApplyForSenderConstrain.
 c, err := client.NewFromDiscovery(discovered, client.Config{
 	// ClientID, Profile, Limits ...
-	Endpoints:        endpoints,
 	ClientAuthMethod: storage.ClientAuthMethodTLSClientAuth,
 	SenderConstrain:  storage.SenderConstrainMTLS,
 }, client.Dependencies{
@@ -101,9 +99,14 @@ srv, err := server.New(server.Config{
   one is in the client's registered JWKS); only the TLS handshake proves
   the client holds its key, so a header a client can set lets anyone
   authenticate as any mTLS client.
-- **Metadata** advertises `mtls_endpoint_aliases`,
-  `tls_client_certificate_bound_access_tokens`, and the mTLS
-  authentication methods, once `MTLSEndpoints` is set.
+- **Metadata** advertises `mtls_endpoint_aliases` once
+  `MTLSEndpoints` is set, and `tls_client_certificate_bound_access_tokens`
+  and the mTLS authentication methods once a client can do mutual TLS
+  anywhere: with `MTLSEndpoints`, or with `Config.MutualTLSAtEndpoints`
+  when the listener serving the ordinary endpoints asks for a client
+  certificate itself (RFC 8705 §5 makes aliases optional).
+  `tls_client_auth` isn't advertised under
+  `NoPKIClientAuthentication{}`, which refuses it.
 
 ## Resource server: the token follows the certificate
 

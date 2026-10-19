@@ -366,7 +366,8 @@ func (s *Server) checkBackchannelExtensions(ctx context.Context, client storage.
 	}
 	requestedAuthorizationDetails, err := s.parseRequestedAuthorizationDetails(params)
 	if err != nil {
-		return nil, newError(ErrorInvalidRequest, 400, "authorization_details is invalid", err)
+		// RFC 9396 §5.
+		return nil, newError(ErrorInvalidAuthorizationDetails, 400, "authorization_details is invalid", err)
 	}
 	if len(requestedAuthorizationDetails) > 0 {
 		granted, policyErr := s.applyRARPolicy(ctx, client, s.deps.CIBARARPolicy, requestedAuthorizationDetails)

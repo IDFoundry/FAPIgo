@@ -320,6 +320,8 @@ func TestCompleteAuthorizationRejectsUnrequestedAuthorizationDetails(t *testing.
 	}
 }
 
+// RFC 9396 §5: a server that doesn't support authorization details
+// answers them with invalid_authorization_details.
 func TestPushAuthorizationRequestRejectsAuthorizationDetailsWithoutRARConfigured(t *testing.T) {
 	h := newHarness(t, server.ProfileFAPISecurity, true)
 
@@ -331,8 +333,8 @@ func TestPushAuthorizationRequestRejectsAuthorizationDetailsWithoutRARConfigured
 	if err == nil {
 		t.Fatalf("PushAuthorizationRequest = nil error, want error (Config.RAR is not configured)")
 	}
-	if serverErrorCode(t, err) != server.ErrorInvalidRequest {
-		t.Fatalf("error code = %v, want %v", serverErrorCode(t, err), server.ErrorInvalidRequest)
+	if serverErrorCode(t, err) != server.ErrorInvalidAuthorizationDetails {
+		t.Fatalf("error code = %v, want %v", serverErrorCode(t, err), server.ErrorInvalidAuthorizationDetails)
 	}
 }
 
@@ -412,8 +414,8 @@ func TestPushAuthorizationRequestRejectsMalformedAuthorizationDetails(t *testing
 	if err == nil {
 		t.Fatalf("PushAuthorizationRequest = nil error, want error (authorization_details must be a JSON array)")
 	}
-	if serverErrorCode(t, err) != server.ErrorInvalidRequest {
-		t.Fatalf("error code = %v, want %v", serverErrorCode(t, err), server.ErrorInvalidRequest)
+	if serverErrorCode(t, err) != server.ErrorInvalidAuthorizationDetails {
+		t.Fatalf("error code = %v, want %v", serverErrorCode(t, err), server.ErrorInvalidAuthorizationDetails)
 	}
 }
 

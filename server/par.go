@@ -662,11 +662,9 @@ func (s *Server) checkExtensions(ctx context.Context, client storage.RegisteredC
 	}
 	requestedAuthorizationDetails, err := s.parseRequestedAuthorizationDetails(params)
 	if err != nil {
-		code := ErrorInvalidRequest
-		if source == extension.SourceRequestObject {
-			code = ErrorInvalidRequestObject
-		}
-		return nil, newError(code, 400, "authorization_details is invalid", err)
+		// RFC 9396 §5: a malformed authorization_details, or one of a
+		// type this server doesn't support, is invalid_authorization_details.
+		return nil, newError(ErrorInvalidAuthorizationDetails, 400, "authorization_details is invalid", err)
 	}
 	if len(requestedAuthorizationDetails) > 0 {
 		granted, policyErr := s.applyRARPolicy(ctx, client, s.deps.AuthorizationCodeRARPolicy, requestedAuthorizationDetails)

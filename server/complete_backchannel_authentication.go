@@ -43,6 +43,9 @@ type CompleteBackchannelAuthenticationRequest struct {
 // package's usual errors.As(err, &serverErr) pattern), never a bare
 // error from a dependency.
 func (s *Server) CompleteBackchannelAuthentication(ctx context.Context, req CompleteBackchannelAuthenticationRequest) error {
+	if s.deps.Backchannel == nil {
+		return newError(ErrorServerError, 500, "backchannel authentication is not configured", nil)
+	}
 	handleHash := backchannelHandleHash(req.Handle)
 	decision := storage.DecideBackchannelAuthentication{
 		HandleHash: handleHash,

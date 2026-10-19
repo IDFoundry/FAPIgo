@@ -117,3 +117,25 @@ func TestLookupBackchannelInteractionUnreadableExtension(t *testing.T) {
 		t.Errorf("LookupBackchannelInteraction = %v, want server_error", err)
 	}
 }
+
+// TestBackchannelCallsWithoutCIBA: with CIBA not configured,
+// CompleteBackchannelAuthentication and ExchangeBackchannelAuthentication
+// return an error instead of panicking on the absent store; a CIBA
+// token request is unsupported_grant_type (RFC 6749 §5.2).
+func TestBackchannelCallsWithoutCIBA(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	ctx := context.Background()
+	var serverErr *server.Error
+	if err := h.server.CompleteBackchannelAuthentication(ctx, server.CompleteBackchannelAuthenticationRequest{}); !errors.As(err, &serverErr) {
+		t.Errorf("CompleteBackchannelAuthentication without CIBA = %v, want a *server.Error", err)
+	}
+	_, err := h.server.ExchangeBackchannelAuthentication(ctx, server.BackchannelTokenExchangeRequest{
+		HTTP: server.FormRequest{Parameters: []server.FormParameter{
+			formParam("grant_type", server.CIBAGrantType),
+			formParam("auth_req_id", "anything"),
+		}},
+	})
+	if !errors.As(err, &serverErr) || serverErr.Code() != server.ErrorUnsupportedGrantType {
+		t.Errorf("ExchangeBackchannelAuthentication without CIBA = %v, want unsupported_grant_type", err)
+	}
+}

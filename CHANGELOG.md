@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.60.0](https://github.com/IDFoundry/FAPIgo/compare/v0.59.0...v0.60.0) (2026-10-20)
+
+
+### Features
+
+* **resource:** add Verifier.IssueDPoPNonce ([10ebbdc](https://github.com/IDFoundry/FAPIgo/commit/10ebbdc0774c0d03b650a5b2a4b834e6becbb641))
+
 ## [0.59.0](https://github.com/IDFoundry/FAPIgo/compare/v0.58.0...v0.59.0) (2026-10-20)
 
 

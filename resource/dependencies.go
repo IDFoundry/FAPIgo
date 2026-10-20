@@ -42,6 +42,13 @@ type Dependencies struct {
 	// Random, and Config.Limits.DPoPNonceLifetime) to have Verify
 	// challenge a request whose proof carries no valid nonce, and
 	// proactively reissue a fresh one on every successful call.
+	//
+	// Never pass an authorization server's own Dependencies.Nonces: a
+	// nonce store is keyed by the nonce alone, so a nonce one role issued
+	// could be consumed by the other, while RFC 9449 keeps the
+	// authorization server's nonces (§8) apart from a resource server's
+	// (§9). serverresource.NewVerifier refuses that for its
+	// Options.Nonces; a Verifier built here can't tell.
 	Nonces storage.NonceStore
 
 	// Random is the source of randomness for DPoP nonce generation.

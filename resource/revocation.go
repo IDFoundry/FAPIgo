@@ -31,6 +31,13 @@ type RevocationChecker interface {
 // that has decided not to check access-token revocation — see
 // server.NoRevocation's doc comment for the same "declining must be
 // visible, not silently defaulted" rationale.
+//
+// With it, a token the authorization server revoked (a reused
+// authorization code, server.Server.RevokeGrant, a revoked refresh
+// token's grant) stays usable here until it expires. That falls short of
+// what a FAPI deployment expects of a resource server, so use it only
+// where access tokens live too briefly for that to matter, or where
+// revocation is checked some other way.
 type NoRevocation struct{}
 
 // IsRevoked implements RevocationChecker by never reporting a token as

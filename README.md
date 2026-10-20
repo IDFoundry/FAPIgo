@@ -40,7 +40,7 @@ implemented. `server` only ever accepts `response_type=code`, and
 `ClientAuthMethod` is a closed enum of `private_key_jwt`, the mTLS
 variants and OAuth 2.0 attestation-based client authentication.
 
-- FAPI 2.0 Security Profile Final + Message Signing Final
+- FAPI 2.0 Security Profile Final + Message Signing Final (signed requests with JAR, signed responses with JARM; signed introspection responses aren't implemented)
 - PAR (RFC 9126) · DPoP (RFC 9449) · mTLS client auth & cert-bound tokens (RFC 8705), with CRL revocation checking
 - private_key_jwt client authentication
 - OAuth 2.0 Attestation-Based Client Authentication, including HAIP 1.0 x5c attester certificate chains, optionally binding each trust anchor to the attesters it may vouch for

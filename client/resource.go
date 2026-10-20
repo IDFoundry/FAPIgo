@@ -82,6 +82,23 @@ func (c *Client) ClientCredentialsResource(result ClientCredentialsTokenResult) 
 	return &ResourceClient{client: c, token: result.AccessToken.Reveal()}
 }
 
+// UseDPoPNonce has the next Do to resource's origin present nonce in its
+// DPoP proof, for a nonce the resource server handed out some other way
+// than on a response to Do: OpenID4VCI 1.0 §7.2's Nonce Response may
+// carry one in its DPoP-Nonce header, for the Wallet to use "when
+// presenting an access token at the Credential Endpoint" (read it from
+// fapihttp.FetchResponse.Header). It saves the first request's
+// use_dpop_nonce challenge. A nonce is a hint, not a credential: a wrong
+// or stale one costs only the challenge and retry Do already handles.
+// It does nothing under SenderConstrainMTLS, for an empty nonce, or for
+// a ResourceClient whose every Do fails (see ProtectedResource).
+func (rc *ResourceClient) UseDPoPNonce(ctx context.Context, resource *url.URL, nonce string) {
+	if rc.err != nil || resource == nil || rc.client.cfg.SenderConstrain != storage.SenderConstrainDPoP {
+		return
+	}
+	rc.client.cacheDPoPNonce(ctx, resourceNonceScope(resource), nonce)
+}
+
 // Do performs req as a sender-constrained request, bounded by
 // Config.Limits.HTTPTimeout and Config.Limits.MaxHTTPResponseBytes —
 // the same protections this client applies to its own PAR and

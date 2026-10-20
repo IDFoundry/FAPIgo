@@ -27,6 +27,24 @@ func generateDPoPNonce(random io.Reader) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
+// IssueDPoPNonce issues a fresh DPoP nonce this Verifier will accept, for
+// a resource server to hand out ahead of a request rather than in answer
+// to one: an OpenID4VCI 1.0 §7.2 Nonce Response's DPoP-Nonce header,
+// say, which the Wallet then uses at the Credential Endpoint this
+// Verifier guards. It returns "" and no error when Dependencies.Nonces is
+// nil: the Verifier doesn't use DPoP nonces, so there is none to give.
+//
+// Each call stores a nonce until Config.Limits.DPoPNonceLifetime has
+// passed. Called from an endpoint anyone may call (§7.1's Nonce Endpoint
+// is), it lets anyone add records, as that endpoint's own c_nonce does:
+// rate-limit it the same way.
+func (v *Verifier) IssueDPoPNonce(ctx context.Context) (string, error) {
+	if v.deps.Nonces == nil {
+		return "", nil
+	}
+	return v.issueDPoPNonce(ctx, v.deps.Clock.Now())
+}
+
 // issueDPoPNonce generates and persists a fresh nonce, valid from now
 // for v.cfg.Limits.DPoPNonceLifetime. Only ever called once v.deps.Nonces
 // is known to be non-nil.

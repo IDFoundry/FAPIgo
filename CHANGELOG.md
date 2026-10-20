@@ -1,5 +1,76 @@
 # Changelog
 
+## [0.58.0](https://github.com/IDFoundry/FAPIgo/compare/v0.57.1...v0.58.0) (2026-10-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* **fapihttp:** a fapihttp.NewClient client no longer connects to a server that offers, under TLS 1.2, only cipher suites other than the four ECDHE AES-GCM ones.
+* client.NewTokenSetSealer, client.NewBackchannelSessionSealer, client/sessioncookie and server/interactioncookie refuse a key made entirely of printable text. Generate keys with crypto/rand and decode an encoded key before passing it.
+* **server:** with Config.Federation.EntityID set, server.New refuses a Dependencies.Keys whose federation entity signing key is also one of the server's protocol signing keys. Give keys.FederationEntitySigning its own key.
+* **client:** client.New refuses Limits.RequestObjectLifetime over 60 minutes for a client that signs request objects.
+* **client:** under AssuranceProduction, client.New refuses Config.AuthorizationResponseIssPolicy TolerateAbsentAuthorizationResponseIss. Set RequireAuthorizationResponseIss.
+* **client:** under AssuranceProduction, client.New refuses Config.CallbackBinding CallbackBindingDeviceLocalStore when Dependencies.Sessions declares CrossInstanceConsistent. A web client uses CallbackBindingSessionHandle.
+* **client:** a Scope element holding more than one scope, such as "openid profile", is now refused with invalid_request. Pass each scope as its own element.
+* **resource:** under AssuranceProduction, resource.NewVerifier refuses an OpaqueAccessTokens with no Audience. Set it to this resource server's identifier, or to the authorization server's issuer when clients name no resource indicator.
+* **server:** under NoClientCertificateChainTrust, automatic registration no longer registers tls_client_auth or its SAN variants unless AutomaticRegistration.AllowedClientAuthMethods names them, so an RP offering only those methods is no longer registered. A deployment whose TLS termination verifies client certificate chains lists the methods it accepts there.
+
+### Features
+
+* **client:** add Config.RequireSignedUserInfo ([4caef6f](https://github.com/IDFoundry/FAPIgo/commit/4caef6f42110ba1392a7ea6779f317e5909c385c))
+* **client:** follow the authorization server's attestation challenges ([091fc13](https://github.com/IDFoundry/FAPIgo/commit/091fc13a661b1ad7aa27869c2aa2efab4f380e24))
+* **server:** accept draft-12 client attestations and enforce its client_id, freshness and binding rules ([c7e764f](https://github.com/IDFoundry/FAPIgo/commit/c7e764f09d79cfe618d480d37cdb8575b59507b4))
+* **server:** add Config.MutualTLSAtEndpoints, and don't advertise tls_client_auth under NoPKIClientAuthentication ([14d432f](https://github.com/IDFoundry/FAPIgo/commit/14d432f65240cd7aeac20eaf59c5134fe9704cdf))
+
+
+### Bug Fixes
+
+* **client:** cap a CIBA interval instead of letting it overflow ([386434a](https://github.com/IDFoundry/FAPIgo/commit/386434a6dfb41c0636c547127f9ad31cdc0f28df))
+* **client:** keep the authorization endpoint's own query in the authorization URL ([7ca5773](https://github.com/IDFoundry/FAPIgo/commit/7ca5773cfae77c7fac24be8ad7dad714d19f91df))
+* **client:** record the requested scope when a token response omits it ([984009f](https://github.com/IDFoundry/FAPIgo/commit/984009f02cc566611d3bb042b959a8bf1b519ab8))
+* **client:** refuse a request object lifetime over 60 minutes ([075f3eb](https://github.com/IDFoundry/FAPIgo/commit/075f3ebabff62af827b763ad8cb43d4edd42a545))
+* **client:** refuse a Scope element that isn't one scope-token ([fab4b93](https://github.com/IDFoundry/FAPIgo/commit/fab4b93df77976b0b08379772f2a162cc0a957cf))
+* **client:** refuse an authorization extension named for a reserved parameter ([65e2ac7](https://github.com/IDFoundry/FAPIgo/commit/65e2ac7991f84dde59596a159180dca37c753f58))
+* **client:** refuse another issuer's token set at UserInfo and protected resources ([0ec01d9](https://github.com/IDFoundry/FAPIgo/commit/0ec01d9b43f6966f1cc988f18d44064c88d7fa2c))
+* **client:** refuse CallbackBindingDeviceLocalStore over a shared sessions store in production ([658e04f](https://github.com/IDFoundry/FAPIgo/commit/658e04f0011c8400b5eed272299eb5001b3d5054))
+* **client:** refuse TolerateAbsentAuthorizationResponseIss under production assurance ([7aec52f](https://github.com/IDFoundry/FAPIgo/commit/7aec52fa08e13d86cb8519d90f0f822f825bf3af))
+* **client:** reuse a server's DPoP nonce by default ([d05045d](https://github.com/IDFoundry/FAPIgo/commit/d05045dcf22020cc4af5b59604f942c67f9d302e))
+* **client:** use the userinfo mTLS alias, and apply aliases in NewFromDiscovery ([a9a8dc5](https://github.com/IDFoundry/FAPIgo/commit/a9a8dc5439da05b9270ec2b929be3f9123eb9264))
+* **conformance:** write resource errors with the resource package's own challenge ([52bd48c](https://github.com/IDFoundry/FAPIgo/commit/52bd48cab5b6b70d7f66a67fe93883df7ff58d44))
+* **fapihttp:** offer only the ECDHE AES-GCM cipher suites under TLS 1.2 ([8660a92](https://github.com/IDFoundry/FAPIgo/commit/8660a92e47ffc128f5762b48ff5bf7debc60b7fa))
+* **federation:** don't let null or empty RP metadata meet an essential policy ([cf067f6](https://github.com/IDFoundry/FAPIgo/commit/cf067f68f85b6e51484c3394cfe0bff6821c919d))
+* **federation:** don't let the first caller's cancellation fail a shared automatic registration ([557ed49](https://github.com/IDFoundry/FAPIgo/commit/557ed49a786e175b5c8e7f37b39cc5fe720f3188))
+* **federation:** refuse a parsed statement carrying a claim its kind may not ([aae9a6a](https://github.com/IDFoundry/FAPIgo/commit/aae9a6a1549f2a4a32a63a0c4a6a0314b23c6ff5))
+* **federation:** refuse a resolve request naming a Trust Anchor the Resolver doesn't trust ([f19be8f](https://github.com/IDFoundry/FAPIgo/commit/f19be8f0d33a3247c4876df6ef7fb658d16187c1))
+* **federation:** refuse a trust mark whose delegation has no owner to validate it against ([91e89fb](https://github.com/IDFoundry/FAPIgo/commit/91e89fb76d24ef4dc570c719e24972338f0817e3))
+* **federation:** refuse to publish private key material in a statement's jwks ([4d36510](https://github.com/IDFoundry/FAPIgo/commit/4d36510cf9ac2e0217c96baca83dfbedc5368a99))
+* normalise a DPoP proof's htu path before comparing it ([c202414](https://github.com/IDFoundry/FAPIgo/commit/c202414711b9fa6a5fe8fa3fac18d060ac13517a))
+* refuse a sealing key made entirely of printable text ([39fc891](https://github.com/IDFoundry/FAPIgo/commit/39fc8915a700e3a563559507ffedc81cab695382))
+* refuse JWTs dated in the future and allow clock skew on their lifetime ([63df91e](https://github.com/IDFoundry/FAPIgo/commit/63df91e765648e3c1f3ac3861559bbda927c77d7))
+* **resource:** accept more than one space after the Authorization scheme ([b6e038c](https://github.com/IDFoundry/FAPIgo/commit/b6e038cd0eb3c9d72cc6b91f89cff171398dae7a))
+* **resource:** require OpaqueAccessTokens.Audience under production assurance ([ee72139](https://github.com/IDFoundry/FAPIgo/commit/ee7213969f0606efc7c817ada383f29d1d108c79))
+* **resource:** send the next DPoP nonce with an insufficient_scope error ([913a647](https://github.com/IDFoundry/FAPIgo/commit/913a647389d681e545b5b5773a5fbec1d801cf2a))
+* **server:** accept a CIBA request's DPoP proof naming the endpoint's mTLS alias ([e29ba9b](https://github.com/IDFoundry/FAPIgo/commit/e29ba9b24b23a1d2acc0df5c918c24161eabbdd1))
+* **server:** accept a request object typed "JWT" ([1a4262b](https://github.com/IDFoundry/FAPIgo/commit/1a4262bf8d568eb08cbb59e910e52aafb15aa6ab))
+* **server:** add NoPKIClientAuthentication and use it where no client uses tls_client_auth ([7a4b7fd](https://github.com/IDFoundry/FAPIgo/commit/7a4b7fd723a08c59da993005fd38a5e67af21832))
+* **server:** answer malformed or unsupported authorization_details with invalid_authorization_details ([30f8a45](https://github.com/IDFoundry/FAPIgo/commit/30f8a451a9be5ed79def1ff7112b60c38b67fcd5))
+* **server:** answer revocation of an opaque access token with unsupported_token_type ([8f4fda2](https://github.com/IDFoundry/FAPIgo/commit/8f4fda2224585599ca049b3572bb292aeff083c1))
+* **server:** bound and linearise the authorization request's prompt ([4cdd0a3](https://github.com/IDFoundry/FAPIgo/commit/4cdd0a347ea72c7ea5962b8284f792b55ab1625c))
+* **server:** don't panic in CIBA calls when CIBA isn't configured ([f280c13](https://github.com/IDFoundry/FAPIgo/commit/f280c138e710d40c091306c67983428b23576af6))
+* **server:** ignore claims a client assertion carries beyond the ones it reads ([4abe326](https://github.com/IDFoundry/FAPIgo/commit/4abe3265e5d634d39c3902739840bc3d8b8937ca))
+* **server:** ignore client_notification_token from a poll-mode CIBA client ([6e91878](https://github.com/IDFoundry/FAPIgo/commit/6e9187848aa1815b39ece864d806167af0ab3658))
+* **server:** mark PAR, CIBA and error responses uncacheable, and omit an empty scope ([ec5f073](https://github.com/IDFoundry/FAPIgo/commit/ec5f07324fed59be3966b07ca516c970ae25cdb2))
+* **server:** match a form request's media type case-insensitively and whole ([716327a](https://github.com/IDFoundry/FAPIgo/commit/716327af210496fde9676eb47df1df974a30c589))
+* **server:** record the issuer in stored requests and grants, and refuse another issuer's ([202d008](https://github.com/IDFoundry/FAPIgo/commit/202d0085ee1cfb77bf31bdfa6c1068665b924b5a))
+* **server:** refuse a federation entity key that is also a protocol key ([114fb8a](https://github.com/IDFoundry/FAPIgo/commit/114fb8a01ad7e75c269f9c5d3753840ed5347240))
+* **server:** refuse a response_mode the server won't answer in ([01781de](https://github.com/IDFoundry/FAPIgo/commit/01781de499ee912db5494bfc499a8a5e45b307c2))
+* **server:** refuse a response_type other than code as unsupported_response_type ([ab86aec](https://github.com/IDFoundry/FAPIgo/commit/ab86aec67e2efd67a6b4c2be8edc282de3cb9a90))
+* **server:** register tls_client_auth automatically only when its chain is verified ([4a91d2a](https://github.com/IDFoundry/FAPIgo/commit/4a91d2a6f897f84b40ff24cdce4b8cceab106550))
+* **server:** require client_id in an automatically registered client's request object ([76c61e4](https://github.com/IDFoundry/FAPIgo/commit/76c61e43777d9f7d7b7d1e10e93d565b4b533421))
+* **serverresource:** never ask the claims source about an empty subject at UserInfo ([ed50c72](https://github.com/IDFoundry/FAPIgo/commit/ed50c72a2176ff72744085a7217f88f92756a5ac))
+* **server:** send a fresh DPoP nonce with a token error once the request's nonce is spent ([2839202](https://github.com/IDFoundry/FAPIgo/commit/28392023f1c256c352cc5d0848ace74d4324a5e4))
+* **server:** treat a form parameter sent without a value as omitted ([a8d115e](https://github.com/IDFoundry/FAPIgo/commit/a8d115ec1b63dfd8d0a5c25d496847308a322cd3))
+
 ## [0.57.1](https://github.com/IDFoundry/FAPIgo/compare/v0.57.0...v0.57.1) (2026-10-17)
 
 

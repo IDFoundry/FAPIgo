@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.59.0](https://github.com/IDFoundry/FAPIgo/compare/v0.58.0...v0.59.0) (2026-10-20)
+
+
+### Features
+
+* **client:** add ResourceClient.UseDPoPNonce ([c53ed48](https://github.com/IDFoundry/FAPIgo/commit/c53ed48f473bd309f35fca9cf777338f47723107))
+* **fapihttp:** return a fetch's response headers, and send Accept-Language ([5d544b9](https://github.com/IDFoundry/FAPIgo/commit/5d544b90ba786c073700c5453f8bdab65837c7ba))
+
 ## [0.58.0](https://github.com/IDFoundry/FAPIgo/compare/v0.57.1...v0.58.0) (2026-10-20)
 
 

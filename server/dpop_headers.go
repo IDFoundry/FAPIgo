@@ -4,7 +4,7 @@ import "net/http"
 
 // DPoPProofsFromHTTP returns every "DPoP" header value r carried, in
 // receipt order — net/http's own r.Header.Values("DPoP"), which
-// preserves duplicates deliberately: RFC 9449 §7.1 requires rejecting
+// preserves duplicates deliberately: RFC 9449 §4.3 check 1 requires rejecting
 // a request that carries more than one, a check every DPoPProofs field
 // in this package (AuthorizationCodeExchangeRequest and its siblings)
 // only gets right if the caller extracted headers this way. The more

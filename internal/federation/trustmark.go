@@ -230,7 +230,7 @@ type CreateTrustMarkParams struct {
 	Algorithm fapi.SignatureAlgorithm
 
 	// KeyID is recorded in the Trust Mark's "kid" header. Required —
-	// OpenID Federation 1.0 §7.1: "Trust Mark JWTs MUST include the kid
+	// OpenID Federation 1.0 §7: "Trust Mark JWTs MUST include the kid
 	// header parameter," unlike an Entity Statement's own KeyID
 	// (CreateParams' own field, optional there).
 	KeyID string
@@ -268,7 +268,7 @@ func CreateTrustMark(p CreateTrustMarkParams) (string, error) {
 		Issuer: p.Issuer, Subject: p.Subject, TrustMarkType: p.TrustMarkType,
 		Now: p.Now, Lifetime: p.Lifetime, Delegation: p.Delegation,
 		typ:            trustMarkJWTType,
-		kidRequirement: `OpenID Federation 1.0 §7.1: "Trust Mark JWTs MUST include the kid header parameter"`,
+		kidRequirement: `OpenID Federation 1.0 §7: "Trust Mark JWTs MUST include the kid header parameter"`,
 	})
 }
 
@@ -333,7 +333,7 @@ func createTrustMarkLikeJWT(p trustMarkLikeParams) (string, error) {
 }
 
 // trustMarkDelegationJWTType is the JWS "typ" header value every Trust
-// Mark Delegation JWT MUST carry (OpenID Federation 1.0 §7.2: "MUST be
+// Mark Delegation JWT MUST carry (OpenID Federation 1.0 §7.2.1: "MUST be
 // explicitly typed, by setting the typ header parameter to
 // trust-mark-delegation+jwt... Trust Mark delegation JWTs without a typ
 // header parameter or with a different typ value MUST be rejected").
@@ -349,7 +349,7 @@ type TrustMarkDelegationClaims struct {
 	TrustMarkType string
 	IssuedAt      time.Time
 
-	// ExpiresAt is zero if the "exp" claim was absent — per §7.2, "If
+	// ExpiresAt is zero if the "exp" claim was absent — per §7.2.1, "If
 	// not present, it means that the delegation does not expire."
 	ExpiresAt time.Time
 }
@@ -412,19 +412,19 @@ type TrustMarkDelegationVerifyPolicy struct {
 	// ExpectedIssuer is the Trust Mark type's real owner, as named by
 	// the Trust Anchor's own "trust_mark_owners" claim — the
 	// delegation's iss claim must equal it exactly (OpenID Federation
-	// 1.0 §7.2's own validation step 5: "The Entity Identifier of the
+	// 1.0 §7.2.2's validation step 5: "The Entity Identifier of the
 	// Trust Mark Owner MUST match the value of iss in the delegation").
 	ExpectedIssuer string
 
 	// ExpectedSubject is the Trust Mark Issuer being delegated to — the
-	// delegation's sub claim must equal it exactly (§7.2's own step 4:
+	// delegation's sub claim must equal it exactly (§7.2.2 step 4:
 	// "The Entity Identifier of the Trust Mark Issuer MUST match the
 	// value of sub in the delegation").
 	ExpectedSubject string
 
 	// ExpectedTrustMarkType is the Trust Mark's own trust_mark_type —
 	// the delegation's trust_mark_type claim must equal it exactly
-	// (§7.2's own step 7).
+	// (§7.2.2 step 8).
 	ExpectedTrustMarkType string
 
 	// Algorithm is the algorithm the Trust Mark Owner is registered or
@@ -531,7 +531,7 @@ type CreateTrustMarkDelegationParams struct {
 	Algorithm fapi.SignatureAlgorithm
 
 	// KeyID is recorded in the delegation's "kid" header. Required —
-	// OpenID Federation 1.0 §7.2: "Trust Mark delegation JWTs MUST
+	// OpenID Federation 1.0 §7.2.1: "Trust Mark delegation JWTs MUST
 	// include the kid header parameter."
 	KeyID string
 
@@ -564,6 +564,6 @@ func CreateTrustMarkDelegation(p CreateTrustMarkDelegationParams) (string, error
 		Issuer: p.Issuer, Subject: p.Subject, TrustMarkType: p.TrustMarkType,
 		Now: p.Now, Lifetime: p.Lifetime,
 		typ:            trustMarkDelegationJWTType,
-		kidRequirement: `OpenID Federation 1.0 §7.2: "Trust Mark delegation JWTs MUST include the kid header parameter"`,
+		kidRequirement: `OpenID Federation 1.0 §7.2.1: "Trust Mark delegation JWTs MUST include the kid header parameter"`,
 	})
 }

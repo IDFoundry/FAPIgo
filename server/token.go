@@ -32,7 +32,7 @@ type AuthorizationCodeExchangeRequest struct {
 	// receipt order — pass net/http's own Header.Values("DPoP")
 	// directly, not Header.Get, which silently discards every value but
 	// the first instead of preserving them for this package to reject
-	// (RFC 9449 §7.1: a request must never carry more than one). Empty
+	// (RFC 9449 §4.3 check 1: a request must never carry more than one). Empty
 	// is a valid "no proof presented" when the authenticated client's
 	// storage.RegisteredClient.SenderConstrain() isn't SenderConstrainDPoP
 	// (the default); a required proof is otherwise exactly one value.
@@ -455,7 +455,7 @@ func (s *Server) nextDPoPNonce(ctx context.Context, client storage.RegisteredCli
 // down to the single proof value the rest of this package's DPoP
 // verification expects, via internal/dpop.ResolveHeaderValues; see that
 // function's own doc comment for why more than one is always rejected
-// (RFC 9449 §7.1) regardless of whether any individual value would
+// (RFC 9449 §4.3 check 1) regardless of whether any individual value would
 // otherwise have verified. Every public method whose request type
 // carries a DPoPProofs field calls this first, before doing anything
 // else with the request — the same "check malformed structural things

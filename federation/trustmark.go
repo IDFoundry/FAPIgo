@@ -235,7 +235,9 @@ func (r *Resolver) verifyTrustMarkDelegationAgainstJWKS(d intfed.TrustMarkDelega
 
 // CheckTrustMarkStatus queries trustMarkToken's own issuer for its
 // current status (OpenID Federation 1.0 §8.4) and returns the verified
-// response claims. §8.4: "The query MUST be sent to the Trust Mark
+// response claims. It says only whether the issuer still considers the
+// mark active, not that the mark is valid: call it after VerifyTrustMark
+// has accepted the mark, never instead of it. §8.4: "The query MUST be sent to the Trust Mark
 // Issuer" — trustMarkToken's own unverified "iss" claim names it, and
 // that issuer is resolved as a fresh Trust Chain (the same way
 // VerifyTrustMark already establishes trust in a Trust Mark's issuer)

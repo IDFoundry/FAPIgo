@@ -84,7 +84,7 @@ const (
 	// the CBC-HMAC family requires.
 	A256GCM
 
-	// A256CBCHS512 is AES_256_CBC_HMAC_SHA_512 (RFC 7518 §5.2.3): a
+	// A256CBCHS512 is AES_256_CBC_HMAC_SHA_512 (RFC 7518 §5.2.5): a
 	// 64-octet CEK split into a 32-octet HMAC-SHA-512 key and a
 	// 32-octet AES-256 key, PKCS #7-padded CBC encryption under a
 	// 128-bit IV, and an authentication tag computed as HMAC-SHA-512

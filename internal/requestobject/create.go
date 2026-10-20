@@ -30,7 +30,7 @@ type CreateParams struct {
 	// registered JWKS without trial and error.
 	KeyID string
 
-	// ClientID is the "iss" claim (RFC 9101 §5.3). If Parameters
+	// ClientID is the "iss" claim. If Parameters
 	// contains a "client_id" entry, it must equal ClientID exactly.
 	ClientID string
 

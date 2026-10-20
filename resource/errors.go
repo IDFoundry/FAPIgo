@@ -21,7 +21,7 @@ const (
 
 	// ErrorUseDPoPNonce indicates the presented DPoP proof was otherwise
 	// valid but carried no nonce, or one this verifier didn't just issue
-	// (unknown, already consumed, or expired) — RFC 9449 §8's own error
+	// (unknown, already consumed, or expired) — RFC 9449 §7.1 and §9's error
 	// value, distinct from ErrorInvalidToken (the token itself is fine;
 	// the caller just needs to retry with the nonce this error's own
 	// Nonce method returns). Only ever returned when
@@ -156,7 +156,7 @@ func (e *Error) Unwrap() error { return e.cause }
 
 // WriteJSON writes e as a complete RFC 6750 §3.1 challenge response to
 // w: a WWW-Authenticate header, the DPoP-Nonce header when Nonce is
-// non-empty (RFC 9449 §8 — see Nonce's own doc comment for when that
+// non-empty (RFC 9449 §9 — see Nonce's own doc comment for when that
 // is), the "application/json" Content-Type, e's own HTTPStatus, and a
 // {"error": ..., "error_description": ...} body built from Code and
 // PublicDescription — never Unwrap's cause. Every *Error this

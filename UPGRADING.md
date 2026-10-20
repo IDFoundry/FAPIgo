@@ -707,9 +707,9 @@ parameter requesting a specific `sub` value, such as
 `{"id_token":{"sub":{"value":"248289761001"}}}`, to the pushed
 authorization request or the CIBA backchannel authentication endpoint.
 
-**Why:** OIDC Core §5.5.1 says that when a client requests a specific
-`sub`, the server MUST NOT reply with an ID token or access token for a
-different user, and `id_token_hint` (§3.1.2.1, CIBA Core §7.1) names
+**Why:** OIDC Core §3.1.2.2 says the server MUST NOT reply with an ID
+token or access token for a different user than a requested `sub`
+names (§5.5.1), and `id_token_hint` (§3.1.2.1, CIBA Core §7.1) names
 the user the same way. The pushed authorization request dropped
 `id_token_hint` as an unregistered parameter, CIBA passed it to the
 application unverified, and a `sub` value was never read, so a request

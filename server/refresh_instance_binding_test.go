@@ -125,7 +125,7 @@ func (i *attestedInstance) refresh(refreshToken string) (server.TokenResult, err
 }
 
 // TestRefreshTokenBoundToClientInstanceKey covers
-// draft-ietf-oauth-attestation-based-client-auth-07 §10.3: a refresh
+// draft-ietf-oauth-attestation-based-client-auth-12 §10.3: a refresh
 // token issued to a client authenticated by Client Attestation is
 // redeemed only with an attestation for the same Client Instance Key.
 // Every installation of a wallet app shares the client_id and a valid

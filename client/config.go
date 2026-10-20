@@ -33,10 +33,10 @@ const (
 // both PAR and DPoP must accept either). Unlike Profile/Algorithms/
 // Limits, whose zero value is deliberately invalid because there's no
 // universally-preferable choice, this type's zero value is a real,
-// meaningful default: RFC 9449 §10.1 itself recommends
-// PARDPoPBindingProof over PARDPoPBindingJKT, so a Config that never
-// mentions this field gets the recommended behavior for free rather
-// than a validation error.
+// meaningful default: of the two mechanisms RFC 9449 §10.1 has a server
+// support, the DPoP header "provides a stronger binding", so a Config
+// that never mentions this field gets PARDPoPBindingProof rather than a
+// validation error.
 type PARDPoPBinding uint8
 
 const (
@@ -44,7 +44,8 @@ const (
 	// proof — not just its key's thumbprint — as this pushed
 	// authorization request's own "DPoP" header, binding the eventual
 	// authorization code to whichever key demonstrated possession here.
-	// RFC 9449 §10.1 recommends this over PARDPoPBindingJKT: it reuses
+	// RFC 9449 §10.1 notes it "provides a stronger binding" than
+	// PARDPoPBindingJKT's dpop_jkt, and it reuses
 	// the same proof-building this client already does at the token and
 	// resource endpoints (no separate thumbprint computation or
 	// parameter), and unlike a bare dpop_jkt claim, it's actual proof of
@@ -457,8 +458,8 @@ type Config struct {
 
 	// PARDPoPBinding selects how BeginAuthorization commits this
 	// client's DPoP key at PAR time — see PARDPoPBinding's own doc
-	// comment. Defaults to PARDPoPBindingProof, RFC 9449 §10.1's own
-	// recommended mechanism. Only meaningful when SenderConstrain is
+	// comment. Defaults to PARDPoPBindingProof, the stronger binding of
+	// RFC 9449 §10.1's two. Only meaningful when SenderConstrain is
 	// SenderConstrainDPoP; ignored entirely under SenderConstrainMTLS,
 	// which has no PAR-time pre-commitment concept of its own (RFC 8705
 	// binding is derived purely from whichever certificate authenticates

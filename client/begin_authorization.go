@@ -223,6 +223,14 @@ const errPushedAuthorizationRequestFailed = "pushed authorization request failed
 // authenticates to and calls the
 // pushed-authorization-request endpoint (RFC 9126), and persists
 // correlation state for the eventual callback.
+//
+// Call it only from a request the user made on purpose and that is
+// protected against cross-site request forgery: a POST guarded by a
+// SameSite cookie or a CSRF token, not a plain GET any page can trigger.
+// An endpoint that starts an authorization on any cross-site request
+// lets another site begin flows in the user's browser, and a user
+// already signed in at the authorization server (who may have consented
+// before) can then end up granting access without meaning to.
 func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationRequest) (AuthorizationSession, error) {
 	redirectURI, reqErr := c.checkBeginRequest(req)
 	if reqErr != nil {
@@ -403,8 +411,8 @@ func (c *Client) pushAuthorizationRequestWithJKT(ctx context.Context, params map
 
 // pushAuthorizationRequestWithDPoPProof implements PARDPoPBindingProof
 // (the default): binds the authorization code to this client's DPoP key
-// by presenting an actual proof at PAR — RFC 9449 §10.1's recommended
-// mechanism — instead of the plain dpop_jkt parameter, retrying once on
+// by presenting an actual proof at PAR — the stronger binding of RFC
+// 9449 §10.1's two mechanisms — instead of the plain dpop_jkt parameter, retrying once on
 // a use_dpop_nonce or attestation challenge (see challengeRetry). This mirrors sendTokenRequest's identical
 // mechanic for the token endpoint: an authorization server that
 // nonce-challenges DPoP proofs it verifies can now challenge this one

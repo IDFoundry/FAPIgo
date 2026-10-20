@@ -270,3 +270,25 @@ func TestInsufficientScopeCarriesNextNonce(t *testing.T) {
 		t.Fatalf("status = %d, want 403", rec.Code)
 	}
 }
+
+// TestIssueDPoPNonce: a nonce IssueDPoPNonce hands out ahead of a
+// request (as an OpenID4VCI Nonce Response does) is accepted by Verify,
+// once; a Verifier without Dependencies.Nonces has none to give.
+func TestIssueDPoPNonce(t *testing.T) {
+	ctx := context.Background()
+	first := newNonceFixture(t, "", nil)
+	issued, err := first.verifier.IssueDPoPNonce(ctx)
+	if err != nil || issued == "" {
+		t.Fatalf("IssueDPoPNonce = %q, %v; want a nonce", issued, err)
+	}
+	if _, err := newNonceFixture(t, issued, first.nonces).verify(t); err != nil {
+		t.Fatalf("Verify(issued nonce) = %v, want accepted", err)
+	}
+	if _, err := newNonceFixture(t, issued, first.nonces).verify(t); err == nil {
+		t.Fatal("Verify(issued nonce again) = nil error, want it refused as spent")
+	}
+
+	if nonce, err := newFixture(t).verifier.IssueDPoPNonce(ctx); nonce != "" || err != nil {
+		t.Errorf("IssueDPoPNonce without Nonces = %q, %v; want none and no error", nonce, err)
+	}
+}

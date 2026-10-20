@@ -241,24 +241,53 @@ type FetchRequest struct {
 	// content types are accepted: ExpectedContentType and
 	// AlternateContentTypes still decide that.
 	Accept string
+
+	// AcceptLanguage, if set, is sent as the request's Accept-Language
+	// header (RFC 9110 §12.5.4), for a response in the user's language:
+	// OpenID4VCI 1.0 §12.2.2 recommends a Wallet send it when fetching
+	// Credential Issuer Metadata, say. It follows Accept's rules. No
+	// other request header can be set: the ones this package sends, and
+	// the absence of the rest (cookies, credentials), are part of what
+	// it hardens.
+	AcceptLanguage string
 }
 
-// maxAcceptLength bounds FetchRequest.Accept and PostRequest.Accept.
+// maxAcceptLength bounds FetchRequest.Accept and AcceptLanguage, and
+// PostRequest's.
 const maxAcceptLength = 1024
 
 // checkAccept refuses an Accept header value that isn't printable ASCII,
 // or is longer than maxAcceptLength, so a caller can't smuggle another
 // header or a line break into the request.
 func checkAccept(accept string) error {
-	if len(accept) > maxAcceptLength {
-		return fmt.Errorf("fapihttp: accept is %d bytes, more than %d", len(accept), maxAcceptLength)
+	return checkHeaderValue("accept", accept)
+}
+
+// checkHeaderValue applies checkAccept's rules to the value of the
+// header name names.
+func checkHeaderValue(name, value string) error {
+	if len(value) > maxAcceptLength {
+		return fmt.Errorf("fapihttp: %s is %d bytes, more than %d", name, len(value), maxAcceptLength)
 	}
-	for i := 0; i < len(accept); i++ {
-		if c := accept[i]; c < 0x20 || c > 0x7e {
-			return fmt.Errorf("fapihttp: accept has a byte (0x%02x at %d) that isn't printable ASCII", c, i)
+	for i := 0; i < len(value); i++ {
+		if c := value[i]; c < 0x20 || c > 0x7e {
+			return fmt.Errorf("fapihttp: %s has a byte (0x%02x at %d) that isn't printable ASCII", name, c, i)
 		}
 	}
 	return nil
+}
+
+// requestHeaders are the headers a caller may set on a request.
+type requestHeaders struct {
+	accept, acceptLanguage string
+}
+
+// check applies checkHeaderValue to each.
+func (h requestHeaders) check() error {
+	if err := checkAccept(h.accept); err != nil {
+		return err
+	}
+	return checkHeaderValue("accept-language", h.acceptLanguage)
 }
 
 // FetchResponse is a successfully fetched, size- and content-type-
@@ -266,6 +295,11 @@ func checkAccept(accept string) error {
 type FetchResponse struct {
 	Body       []byte
 	StatusCode int
+	// Header is the response's header fields, the final response's
+	// after any redirects: a DPoP-Nonce a server sends with its answer
+	// (RFC 9449 §8, and OpenID4VCI 1.0 §7.2's Nonce Response), say. A
+	// copy: changing it changes nothing else.
+	Header http.Header
 }
 
 // Fetch performs req, following at most c.cfg.MaxRedirects same-origin
@@ -278,7 +312,8 @@ func (c *Client) Fetch(ctx context.Context, req FetchRequest) (FetchResponse, er
 	if req.ExpectedContentType == "" {
 		return FetchResponse{}, fmt.Errorf("fapihttp: expected content type is required")
 	}
-	if err := checkAccept(req.Accept); err != nil {
+	headers := requestHeaders{accept: req.Accept, acceptLanguage: req.AcceptLanguage}
+	if err := headers.check(); err != nil {
 		return FetchResponse{}, err
 	}
 
@@ -293,7 +328,7 @@ func (c *Client) Fetch(ctx context.Context, req FetchRequest) (FetchResponse, er
 	target := req.URL
 
 	for hop := 0; ; hop++ {
-		res, err := c.roundTrip(ctx, target, req.Accept)
+		res, err := c.roundTrip(ctx, target, headers)
 		if err != nil {
 			return FetchResponse{}, err
 		}
@@ -331,15 +366,15 @@ func (c *Client) readResponse(res *http.Response, maxBytes int64, expectedConten
 	if err := checkContentType(res.Header.Get(contentTypeHeader), expectedContentType, alternateContentTypes); err != nil {
 		return FetchResponse{}, err
 	}
-	return FetchResponse{Body: body, StatusCode: res.StatusCode}, nil
+	return FetchResponse{Body: body, StatusCode: res.StatusCode, Header: res.Header.Clone()}, nil
 }
 
 // PostRequest describes one outbound POST — the counterpart to
 // FetchRequest for a caller that needs to submit a body rather than
 // merely retrieve a resource (e.g. OpenID Federation 1.0 §8's Trust
 // Mark Status endpoint, POST-only per spec). Like FetchRequest, it is
-// narrow and single-purpose: beyond Accept, there is no way to add
-// headers or otherwise build an unconstrained request.
+// narrow and single-purpose: beyond Accept and AcceptLanguage, there is
+// no way to add headers or otherwise build an unconstrained request.
 type PostRequest struct {
 	// URL is the endpoint to POST to. Validated exactly like
 	// FetchRequest.URL — see its own doc comment for what that does and
@@ -361,6 +396,10 @@ type PostRequest struct {
 	// Accept, if set, is sent as the request's Accept header, exactly
 	// like FetchRequest.Accept, under the same rules.
 	Accept string
+
+	// AcceptLanguage, if set, is sent as the request's Accept-Language
+	// header, exactly like FetchRequest.AcceptLanguage.
+	AcceptLanguage string
 }
 
 // Post performs req and returns the response, enforcing every
@@ -384,7 +423,8 @@ func (c *Client) Post(ctx context.Context, req PostRequest) (FetchResponse, erro
 	if req.ExpectedContentType == "" {
 		return FetchResponse{}, fmt.Errorf("fapihttp: expected content type is required")
 	}
-	if err := checkAccept(req.Accept); err != nil {
+	headers := requestHeaders{accept: req.Accept, acceptLanguage: req.AcceptLanguage}
+	if err := headers.check(); err != nil {
 		return FetchResponse{}, err
 	}
 
@@ -395,22 +435,22 @@ func (c *Client) Post(ctx context.Context, req PostRequest) (FetchResponse, erro
 		return FetchResponse{}, err
 	}
 
-	res, err := c.doRoundTrip(ctx, http.MethodPost, req.URL, req.Body, req.ContentType, req.Accept)
+	res, err := c.doRoundTrip(ctx, http.MethodPost, req.URL, req.Body, req.ContentType, headers)
 	if err != nil {
 		return FetchResponse{}, err
 	}
 	return c.readResponse(res, c.cfg.MaxResponseBytes, req.ExpectedContentType, req.AlternateContentTypes)
 }
 
-func (c *Client) roundTrip(ctx context.Context, target *url.URL, accept string) (*http.Response, error) {
-	return c.doRoundTrip(ctx, http.MethodGet, target, nil, "", accept)
+func (c *Client) roundTrip(ctx context.Context, target *url.URL, headers requestHeaders) (*http.Response, error) {
+	return c.doRoundTrip(ctx, http.MethodGet, target, nil, "", headers)
 }
 
 // doRoundTrip is roundTrip generalized over method/body/contentType —
-// accept, when set, becomes the Accept header —
+// headers, when set, become the Accept and Accept-Language headers —
 // Fetch's own behavior (GET, no body) is unchanged; Post is the only
 // other caller.
-func (c *Client) doRoundTrip(ctx context.Context, method string, target *url.URL, body []byte, contentType, accept string) (*http.Response, error) {
+func (c *Client) doRoundTrip(ctx context.Context, method string, target *url.URL, body []byte, contentType string, headers requestHeaders) (*http.Response, error) {
 	var bodyReader io.Reader
 	if body != nil {
 		bodyReader = bytes.NewReader(body)
@@ -422,8 +462,11 @@ func (c *Client) doRoundTrip(ctx context.Context, method string, target *url.URL
 	if contentType != "" {
 		httpReq.Header.Set(contentTypeHeader, contentType)
 	}
-	if accept != "" {
-		httpReq.Header.Set("Accept", accept)
+	if headers.accept != "" {
+		httpReq.Header.Set("Accept", headers.accept)
+	}
+	if headers.acceptLanguage != "" {
+		httpReq.Header.Set("Accept-Language", headers.acceptLanguage)
 	}
 	// Post's body is sent once, to the target validated above: never
 	// resent to a 307/308 redirect target by an HTTPClient that would

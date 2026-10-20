@@ -30,6 +30,8 @@ func TestCheck(t *testing.T) {
 		"all zero":            {[][]byte{make([]byte, Size)}, "key 0 is one byte repeated"},
 		"repeated byte later": {[][]byte{key(1), bytes.Repeat([]byte{0xab}, Size)}, "key 1 is one byte repeated"},
 		"duplicate":           {[][]byte{key(1), key(2), key(1)}, "key 2 repeats key 0"},
+		"passphrase":          {[][]byte{[]byte("correct horse battery staple!!!!")}, "key 0 is all printable text"},
+		"undecoded hex":       {[][]byte{key(1), []byte("00112233445566778899aabbccddeeff")}, "key 1 is all printable text"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := Check("test", tc.keys)

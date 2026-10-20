@@ -151,11 +151,6 @@ func NewReversible(macKey, encKey []byte, opts ...keys.CustodyOption) (*Reversib
 	if err := sealkeys.Check("pairwise: reversible", [][]byte{macKey, encKey}); err != nil {
 		return nil, err
 	}
-	for _, key := range [...][]byte{macKey, encKey} {
-		if err := checkNotText("pairwise: reversible", key); err != nil {
-			return nil, err
-		}
-	}
 	return newReversible(macKey, encKey, opts...)
 }
 

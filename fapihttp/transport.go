@@ -135,6 +135,7 @@ func NewClient(cfg TransportConfig) (*http.Client, error) {
 		TLSHandshakeTimeout: cfg.TLSHandshakeTimeout,
 		TLSClientConfig: &tls.Config{
 			MinVersion:           tls.VersionTLS12,
+			CipherSuites:         slices.Clone(tls12CipherSuites),
 			VerifyConnection:     verifyConnection,
 			RootCAs:              cfg.RootCAs,
 			Certificates:         cfg.Certificates,
@@ -403,4 +404,16 @@ func isZero(b []byte) bool {
 		}
 	}
 	return true
+}
+
+// tls12CipherSuites are the only TLS 1.2 cipher suites NewClient's
+// transport offers: the ECDHE AES-GCM ones FAPI-CIBA §7.9 (as FAPI 1.0
+// Part 2 §8.5) permits under TLS 1.2. Go has no DHE suites, the other
+// two that list names. TLS 1.3, whose suites Go doesn't let a
+// configuration choose, is unaffected.
+var tls12CipherSuites = []uint16{
+	tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+	tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+	tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+	tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
 }

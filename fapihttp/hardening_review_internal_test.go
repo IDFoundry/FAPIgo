@@ -109,6 +109,10 @@ func TestHardeningOfRefusesTLSWeakenings(t *testing.T) {
 		"fixed clock":           func(c *tls.Config) { c.Time = func() time.Time { return time.Unix(0, 0) } },
 		"fixed server name":     func(c *tls.Config) { c.ServerName = "example.com" },
 		"insecure cipher suite": func(c *tls.Config) { c.CipherSuites = []uint16{tls.InsecureCipherSuites()[0].ID} },
+		"CBC cipher suite added": func(c *tls.Config) {
+			c.CipherSuites = append(c.CipherSuites, tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA)
+		},
+		"default cipher suites": func(c *tls.Config) { c.CipherSuites = nil },
 		"verify peer certificate": func(c *tls.Config) {
 			c.VerifyPeerCertificate = func([][]byte, [][]*x509.Certificate) error { return nil }
 		},
@@ -314,4 +318,44 @@ func TestNewClientWithoutHTTP2Child(t *testing.T) {
 		t.Errorf("response protocol = %s, want HTTP/1.1 with HTTP/2 off", res.Proto)
 	}
 	assertSchemesReserved(t, c)
+}
+
+// TestNewClientOffersOnlyECDHEGCMUnderTLS12: FAPI-CIBA §7.9 permits only
+// the ECDHE AES-GCM cipher suites under TLS 1.2, so a server that
+// offers nothing else is reached and one offering only a CBC suite
+// isn't. A subset of the permitted suites still counts as hardened.
+func TestNewClientOffersOnlyECDHEGCMUnderTLS12(t *testing.T) {
+	for suite, wantOK := range map[uint16]bool{
+		tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256: true,
+		tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA:    false,
+	} {
+		ts := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+		ts.TLS = &tls.Config{MaxVersion: tls.VersionTLS12, CipherSuites: []uint16{suite}}
+		ts.StartTLS()
+		cfg := RecommendedTransportConfig()
+		cfg.AllowLoopbackHosts = true
+		cfg.RootCAs = x509.NewCertPool()
+		cfg.RootCAs.AddCert(ts.Certificate())
+		c, err := NewClient(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := c.Get(ts.URL)
+		if err == nil {
+			_ = res.Body.Close()
+		}
+		if (err == nil) != wantOK {
+			t.Errorf("%s: Get = %v, want reached %v", tls.CipherSuiteName(suite), err, wantOK)
+		}
+		ts.Close()
+	}
+
+	c, err := NewClient(RecommendedTransportConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Transport.(*http.Transport).TLSClientConfig.CipherSuites = []uint16{tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384}
+	if _, ok := HardeningOf(c); !ok {
+		t.Error("HardeningOf(a subset of the permitted suites) = false, want true")
+	}
 }

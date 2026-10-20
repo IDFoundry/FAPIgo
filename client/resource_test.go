@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -470,5 +471,67 @@ func TestProtectedResourceDoPropagatesHTTPFailureOnRetry(t *testing.T) {
 	}
 	if _, err := c.ProtectedResource(client.TokenSet{AccessToken: fapi.NewSecret("test-access-token")}).Do(context.Background(), req); err == nil {
 		t.Fatalf("Do(transport failure on retry) = nil error, want error")
+	}
+}
+
+// TestProtectedResourceUseDPoPNonce: a nonce handed to UseDPoPNonce (as
+// an OpenID4VCI Nonce Response's DPoP-Nonce header carries one) is
+// presented by the next Do to that origin, which then needs no
+// use_dpop_nonce challenge; a stale one costs only the usual retry.
+func TestProtectedResourceUseDPoPNonce(t *testing.T) {
+	const current = "nonce-from-the-nonce-endpoint"
+	var mu sync.Mutex
+	var calls int
+	var firstNonce string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls++
+		nonce, _ := dpopProofClaims(t, r.Header.Get("DPoP"))["nonce"].(string)
+		if calls == 1 {
+			firstNonce = nonce
+		}
+		mu.Unlock()
+		if nonce != current {
+			w.Header().Set("WWW-Authenticate", `DPoP error="use_dpop_nonce"`)
+			w.Header().Set("DPoP-Nonce", current)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+	deps := validDependencies(t)
+	deps.HTTP = ts.Client()
+	c, err := client.New(validConfig(t), deps)
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	ctx := context.Background()
+	do := func(rc *client.ResourceClient) {
+		t.Helper()
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/credential", nil)
+		res, err := rc.Do(ctx, req)
+		if err != nil {
+			t.Fatalf("Do: %v", err)
+		}
+		_ = res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want 200", res.StatusCode)
+		}
+	}
+	rc := c.ProtectedResource(client.TokenSet{AccessToken: fapi.NewSecret("at")})
+	nonceEndpoint, _ := url.Parse(ts.URL + "/nonce")
+	rc.UseDPoPNonce(ctx, nonceEndpoint, current)
+	do(rc)
+	if calls != 1 || firstNonce != current {
+		t.Fatalf("calls = %d, first proof nonce %q; want 1 call presenting %q", calls, firstNonce, current)
+	}
+
+	stale := c.ProtectedResource(client.TokenSet{AccessToken: fapi.NewSecret("at")})
+	stale.UseDPoPNonce(ctx, nonceEndpoint, "stale")
+	calls = 0
+	do(stale)
+	if calls != 2 {
+		t.Fatalf("calls with a stale nonce = %d, want 2 (challenge, then retry)", calls)
 	}
 }

@@ -5,7 +5,7 @@
 // content-encryption algorithm fapi.ContentEncryptionAlgorithm
 // supports: A256GCM (a single AEAD primitive) or A256CBC-HS512
 // (encrypt-then-MAC — AES-256-CBC plus a separate HMAC-SHA-512 tag,
-// RFC 7518 §5.2.3).
+// RFC 7518 §5.2.5).
 //
 // Like internal/jose, this package is intentionally low-level and
 // generic: it knows nothing about ID tokens, nested JWTs, or any other

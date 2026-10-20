@@ -15,7 +15,9 @@ var (
 	ErrMalformedClaims = errors.New("requestobject: malformed claims")
 
 	// ErrClientIDIssuerMismatch indicates the payload's "client_id"
-	// parameter (RFC 9101 §5.3) did not equal its "iss" claim.
+	// parameter did not equal its "iss" claim, which names the client
+	// that signed it (RFC 9101 §6.3 has the request's and the request
+	// object's client_id be identical).
 	ErrClientIDIssuerMismatch = errors.New("requestobject: client_id parameter does not match iss")
 
 	// ErrIssuerMismatch indicates the object's iss claim did not equal

@@ -368,7 +368,7 @@ The same reasoning applies to the DPoP header specifically:
 request carried, not a single already-resolved string — a caller
 passes `http.Header.Values("DPoP")` directly, never `Header.Get`, which
 silently returns only the first of several values instead of letting
-the request be rejected. RFC 9449 §7.1 requires a request carry at
+the request be rejected. RFC 9449 §4.3 (check 1) requires a request carry at
 most one DPoP header; `internal/dpop.ResolveHeaderValues` (used by both
 `server` and `resource`) enforces that itself, rejecting more than one
 value regardless of whether any individual value would otherwise have
@@ -536,7 +536,7 @@ specific DCR plan) has no DCR module at all. If it is added:
 - `RegisterClient`/`ReadClient`/`UpdateClient`/`DeleteClient` follow
   the same typed-request → typed-result/typed-error shape every other
   method here does — no generic `HandleRequest` for this either.
-- Registration access tokens (RFC 7592 §1.1) are a new storage
+- Registration access tokens (RFC 7592 §1.2) are a new storage
   primitive, not a repurposed `GrantStore` refresh token: they
   authenticate the management endpoint itself, not a resource, and
   their rotate-on-read/update semantics (RFC 7592 §5, a MAY, never a

@@ -40,7 +40,7 @@ const (
 	// token RevokeToken can't revoke: an access token.
 	ErrorUnsupportedTokenType ErrorCode = "unsupported_token_type"
 
-	// ErrorInvalidRequestURI is RFC 9126 §2.3's dedicated error code for
+	// ErrorInvalidRequestURI is RFC 9101 §7's error code for
 	// a request_uri the authorization endpoint cannot use — unknown,
 	// already consumed by a completed interaction, expired, or pushed
 	// by a different client than the one now presenting it — as

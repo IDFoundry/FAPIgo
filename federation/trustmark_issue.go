@@ -166,7 +166,7 @@ type DelegationParams struct {
 	TrustMarkType string
 
 	// Lifetime bounds how long the delegation is valid for. Zero omits
-	// the "exp" claim entirely — OpenID Federation 1.0 §7.2: "If not
+	// the "exp" claim entirely — OpenID Federation 1.0 §7.2.1: "If not
 	// present, it means that the delegation does not expire."
 	Lifetime time.Duration
 }

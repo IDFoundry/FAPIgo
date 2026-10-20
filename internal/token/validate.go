@@ -412,13 +412,14 @@ func (t IDToken) Validate(pub crypto.PublicKey, policy IDTokenValidatePolicy) (V
 			return ValidatedIDToken{}, ErrNonceMismatch
 		}
 	}
-	// OIDC Core §3.1.3.6: at_hash, when present, binds this ID token to
-	// one specific access token — "the Client MUST validate the access
-	// token by calculating its hash... and comparing it to the value of
-	// the at_hash Claim." A token with no at_hash at all is not itself
-	// rejected here: OIDC Core marks it REQUIRED only "except when the
-	// ID Token is issued from the Authorization Endpoint" — this
-	// package has no way to know from the claims alone whether an
+	// OIDC Core §3.1.3.8: at_hash, when present, binds this ID token to
+	// one specific access token, which the client "MAY use ... to
+	// validate", as §3.2.2.9 describes ("The value of at_hash in the ID
+	// Token MUST match the value produced in the previous step"). A token
+	// with no at_hash at all is not itself rejected here: for the code
+	// flow §3.1.3.6 makes it OPTIONAL, REQUIRED only when an access token
+	// is issued from the Authorization Endpoint (§3.2.2.10, §3.3.2.11) —
+	// this package has no way to know from the claims alone whether an
 	// issuer that omitted it did so because it doesn't implement this
 	// check, and rejecting every such token would make this a stricter
 	// contract than what was actually reported missing (see this
@@ -485,13 +486,14 @@ func checkIDTokenAudience(c IDTokenClaims, policy IDTokenValidatePolicy) error {
 	return nil
 }
 
-// checkATHash enforces OIDC Core §3.1.3.6: at_hash, when present, binds
-// this ID token to one specific access token — "the Client MUST
-// validate the access token by calculating its hash... and comparing
-// it to the value of the at_hash Claim." A token with no at_hash at
-// all is not itself rejected here: OIDC Core marks it REQUIRED only
-// "except when the ID Token is issued from the Authorization Endpoint"
-// — this package has no way to know from the claims alone whether an
+// checkATHash checks at_hash, which, when present, binds this ID token
+// to one specific access token (OIDC Core §3.1.3.8, validated as
+// §3.2.2.9 describes: "The value of at_hash in the ID Token MUST match
+// the value produced in the previous step"). A token with no at_hash at
+// all is not itself rejected here: for the code flow §3.1.3.6 makes it
+// OPTIONAL, REQUIRED only when an access token is issued from the
+// Authorization Endpoint (§3.2.2.10, §3.3.2.11) — this package has no
+// way to know from the claims alone whether an
 // issuer that omitted it did so because it doesn't implement this
 // check, and rejecting every such token would make this a stricter
 // contract than what was actually reported missing (see

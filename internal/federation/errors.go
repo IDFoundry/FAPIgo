@@ -82,7 +82,7 @@ var (
 
 	// ErrTrustMarkDelegationWrongType indicates a Trust Mark Delegation
 	// JWT's "typ" header was not "trust-mark-delegation+jwt" (OpenID
-	// Federation 1.0 §7.2's own "Trust Mark delegation JWTs without a
+	// Federation 1.0 §7.2.1's "Trust Mark delegation JWTs without a
 	// typ header parameter or with a different typ value MUST be
 	// rejected").
 	ErrTrustMarkDelegationWrongType = errors.New("federation: trust mark delegation header typ is not trust-mark-delegation+jwt")

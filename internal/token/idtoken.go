@@ -14,10 +14,11 @@ import (
 // just the one-element case) — unlike internal/clientassertion's own
 // Audience, which stays a single string because a client assertion is
 // always addressed to exactly one token endpoint, never several
-// audiences at once. §3.1.3.7 step 9 additionally says a client "SHOULD
-// verify that an azp Claim is present" when there's more than one
-// audience, and step 10 that it "SHOULD verify" azp equals the client's
-// own ID when present — IDTokenValidatePolicy.Validate enforces both.
+// audiences at once. IDTokenValidatePolicy.Validate requires an azp
+// claim when there's more than one audience, which earlier editions of
+// OIDC Core §3.1.3.7 had a client check and the current one leaves to
+// it, and checks that azp, when present, equals the client's own ID
+// (§3.1.3.7 step 5: the client "SHOULD validate the azp value").
 //
 // Everything beyond the claims this struct names is left in Parameters
 // as raw JSON.

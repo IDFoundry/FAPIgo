@@ -539,7 +539,7 @@ func (s *Server) acceptableClientAssertionAudiences(client storage.RegisteredCli
 // request object's own "resource" member with one, where every other
 // form parameter is ignored too.
 func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[string]string, formResources []string, client storage.RegisteredClient) (map[string]json.RawMessage, map[string]json.RawMessage, []string, *Error) {
-	// RFC 9101 §5 / PAR-2.1: "request_uri" is never a meaningful *input*
+	// RFC 9126 §2.1 / PAR-2.1: "request_uri" is never a meaningful *input*
 	// here, whether or not "request" is also present — PAR generates its
 	// own request_uri as this call's *result*, and a client is never
 	// meant to redeem one request_uri by presenting another. Checked
@@ -605,9 +605,9 @@ func (s *Server) resolveAuthorizationParameters(ctx context.Context, params map[
 	if err != nil {
 		return nil, nil, nil, newError(ErrorInvalidRequestObject, 400, "request object verification failed", err)
 	}
-	// Same RFC 9101 §5 / PAR-2.1 prohibition as the sibling-parameter
-	// check above, but for "request_uri" claimed *inside* the signed
-	// request object instead of alongside it. This can no longer rely on
+	// RFC 9101 §4 ("request and request_uri parameters MUST NOT be
+	// included in Request Objects"): the counterpart, inside the signed
+	// request object, of the sibling-parameter check above. This can no longer rely on
 	// checkExtensions'/Registry.Parse's own unregistered-parameter
 	// handling to catch it: that now ignores (and strips) an unrecognized
 	// name rather than rejecting the request over it (RFC 6749 §3.1), so

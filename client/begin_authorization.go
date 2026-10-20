@@ -411,8 +411,8 @@ func (c *Client) pushAuthorizationRequestWithJKT(ctx context.Context, params map
 
 // pushAuthorizationRequestWithDPoPProof implements PARDPoPBindingProof
 // (the default): binds the authorization code to this client's DPoP key
-// by presenting an actual proof at PAR — RFC 9449 §10.1's recommended
-// mechanism — instead of the plain dpop_jkt parameter, retrying once on
+// by presenting an actual proof at PAR — the stronger binding of RFC
+// 9449 §10.1's two mechanisms — instead of the plain dpop_jkt parameter, retrying once on
 // a use_dpop_nonce or attestation challenge (see challengeRetry). This mirrors sendTokenRequest's identical
 // mechanic for the token endpoint: an authorization server that
 // nonce-challenges DPoP proofs it verifies can now challenge this one

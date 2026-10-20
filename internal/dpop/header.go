@@ -2,8 +2,8 @@ package dpop
 
 // ResolveHeaderValues reduces values — every "DPoP" HTTP header value a
 // request carried, in receipt order — to the single proof value this
-// package's own verification expects, enforcing RFC 9449 §7.1 itself
-// ("the client... MUST NOT send this header field multiple times")
+// package's own verification expects, enforcing RFC 9449 §4.3 check 1
+// itself ("There is not more than one DPoP HTTP request header field")
 // rather than leaving that check to whichever HTTP adapter a caller
 // happens to use. net/http's own Header.Get silently returns only the
 // first of several values instead of rejecting the request, so a

@@ -36,13 +36,15 @@ var (
 	ErrNonceMismatch = errors.New("token: nonce does not match expected value")
 
 	// ErrMissingAuthorizedParty indicates an ID token's aud claim named
-	// more than one audience but carried no azp claim (OIDC Core
-	// §3.1.3.7 step 9) — needed to disambiguate which of those
-	// audiences the token was actually authorized for.
+	// more than one audience but carried no azp claim, needed to
+	// disambiguate which of those audiences the token was actually
+	// authorized for (see OIDC Core §2 on azp, and §3.1.3.7 steps 4-5).
+	// The current text of Core no longer has the client require it;
+	// this package still does.
 	ErrMissingAuthorizedParty = errors.New("token: aud has multiple audiences but azp is missing")
 
 	// ErrAuthorizedPartyMismatch indicates an ID token's azp claim did
-	// not equal the caller's own client ID (OIDC Core §3.1.3.7 step 10).
+	// not equal the caller's own client ID (OIDC Core §3.1.3.7 step 5).
 	ErrAuthorizedPartyMismatch = errors.New("token: azp does not match expected audience")
 
 	// ErrIssuedAtTooOld indicates an ID token's iat claim is further in

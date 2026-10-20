@@ -172,7 +172,7 @@ type BackchannelTokenDeliveryMode uint8
 
 const (
 	// BackchannelTokenDeliveryModePoll means the client itself polls
-	// the token endpoint on a schedule (CIBA §10.3) — the zero value,
+	// the token endpoint on a schedule (CIBA §10.1) — the zero value,
 	// so every registered client that predates this field keeps
 	// behaving exactly as it did before.
 	BackchannelTokenDeliveryModePoll BackchannelTokenDeliveryMode = iota
@@ -181,7 +181,7 @@ const (
 	// notifies the client's own BackchannelClientNotificationEndpoint
 	// once a decision is reached (CIBA §10.2), so the client can poll
 	// immediately instead of on a fixed schedule. The client's backup
-	// polling (CIBA §10.3) remains valid regardless — a missed or
+	// polling (CIBA §10.1) remains valid regardless — a missed or
 	// failed notification is never itself an error condition.
 	BackchannelTokenDeliveryModePing
 )

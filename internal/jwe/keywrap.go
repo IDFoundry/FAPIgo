@@ -14,7 +14,7 @@ var aesKeyWrapIV = [8]byte{0xA6, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6}
 // aesKeyWrap wraps plaintext (which must be a multiple of 8 bytes, at
 // least 16) under kek using AES Key Wrap (RFC 3394), returning
 // ciphertext 8 bytes longer than plaintext. This exists because JOSE's
-// ECDH-ES+A256KW key management (RFC 7518 §4.7) wraps the CEK this way,
+// ECDH-ES+A256KW key management (RFC 7518 §4.6) wraps the CEK this way,
 // and Go's standard library has no AES Key Wrap implementation — only
 // the underlying AES block cipher this function builds on
 // (crypto/aes.NewCipher).

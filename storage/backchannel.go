@@ -178,7 +178,7 @@ type PolledBackchannelAuthentication struct {
 // BackchannelAuthenticationAlreadyRedeemedError mirrors
 // AuthorizationCodeAlreadyRedeemedError exactly: returned when a poll
 // observes an already-consumed Approved record — a CIBA auth_req_id
-// issues tokens exactly once (CIBA §10.3).
+// issues tokens exactly once (CIBA §10.1.1).
 type BackchannelAuthenticationAlreadyRedeemedError struct {
 	IssuedAccessTokenKey   string
 	IssuedRefreshTokenHash *[32]byte
@@ -261,7 +261,7 @@ type BackchannelAuthenticationStore interface {
 	//     the record redeemed and returns it; every subsequent poll for
 	//     the same AuthReqIDHash returns
 	//     *BackchannelAuthenticationAlreadyRedeemedError — an approved
-	//     auth_req_id issues tokens exactly once (CIBA §10.3), the same
+	//     auth_req_id issues tokens exactly once (CIBA §10.1.1), the same
 	//     single-use guarantee RedeemAuthorizationCode has.
 	// It returns a plain error if AuthReqIDHash is unknown, and, before
 	// any of the above, a plain error that leaves the record unchanged

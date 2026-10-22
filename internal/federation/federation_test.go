@@ -968,7 +968,7 @@ func TestParseRefusesMisplacedClaims(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, err = Parse(token)
-		if gotErr := errors.Is(err, ErrMalformedClaims); gotErr != tc.wantErr {
+		if errors.Is(err, ErrMalformedClaims) != tc.wantErr {
 			t.Errorf("%s: Parse = %v, want ErrMalformedClaims %v", name, err, tc.wantErr)
 		}
 	}

@@ -28,24 +28,32 @@ func FuzzNumericDateParse(f *testing.F) {
 			}
 			return
 		}
-		if err != nil {
-			return
-		}
-		var v any
-		if json.Unmarshal(raw, &v) != nil {
-			t.Fatalf("Parse accepted %q, which isn't JSON", raw)
-		}
-		switch n := v.(type) {
-		case nil:
-			if got != 0 {
-				t.Fatalf("Parse(null) = %d, want 0", got)
-			}
-		case float64:
-			if d := n - float64(got); d < 0 || d >= 1 && !(math.Abs(n) >= 1<<53) {
-				t.Fatalf("Parse(%q) = %d, not the floor of %v", raw, got, n)
-			}
-		default:
-			t.Fatalf("Parse accepted %q, a JSON %T", raw, v)
+		if err == nil {
+			checkAccepted(t, raw, got)
 		}
 	})
+}
+
+// checkAccepted checks a value Parse accepted that isn't an int64: it's
+// null, as 0, or a JSON number, floored to within a second of its
+// float64 value. JSON has no NaN, so the comparison with 1<<53 is
+// always defined.
+func checkAccepted(t *testing.T, raw []byte, got int64) {
+	t.Helper()
+	var v any
+	if json.Unmarshal(raw, &v) != nil {
+		t.Fatalf("Parse accepted %q, which isn't JSON", raw)
+	}
+	switch n := v.(type) {
+	case nil:
+		if got != 0 {
+			t.Fatalf("Parse(null) = %d, want 0", got)
+		}
+	case float64:
+		if d := n - float64(got); d < 0 || d >= 1 && math.Abs(n) < 1<<53 {
+			t.Fatalf("Parse(%q) = %d, not the floor of %v", raw, got, n)
+		}
+	default:
+		t.Fatalf("Parse accepted %q, a JSON %T", raw, v)
+	}
 }

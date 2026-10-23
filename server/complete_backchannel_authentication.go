@@ -10,6 +10,10 @@ import (
 	"github.com/idfoundry/fapigo/storage"
 )
 
+// invalidBackchannelHandleMessage is the one description given for a
+// handle that can't be completed, whatever the reason.
+const invalidBackchannelHandleMessage = "backchannel authentication handle is invalid, expired, or already decided"
+
 // backchannelHandleHash is the SHA-256 digest of handle's raw wire
 // value — matching storage.NewBackchannelAuthentication.HandleHash's
 // digest-only discipline.
@@ -57,13 +61,13 @@ func (s *Server) CompleteBackchannelAuthentication(ctx context.Context, req Comp
 	// decision of any kind is recorded once the request has expired.
 	pending, lookupErr := s.deps.Backchannel.LookupBackchannelAuthentication(ctx, handleHash)
 	if lookupErr != nil {
-		wrapped := newError(ErrorInvalidRequest, 400, "backchannel authentication handle is invalid, expired, or already decided", lookupErr)
+		wrapped := newError(ErrorInvalidRequest, 400, invalidBackchannelHandleMessage, lookupErr)
 		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, "", AuditOutcomeFailure, string(wrapped.Code()))
 		return wrapped
 	}
 	request, decodeErr := s.decodeOwnRequestRecord(pending.Request)
 	if decodeErr != nil {
-		wrapped := recordFailure(decodeErr, newError(ErrorInvalidRequest, 400, "backchannel authentication handle is invalid, expired, or already decided", nil), "backchannel authentication request")
+		wrapped := recordFailure(decodeErr, newError(ErrorInvalidRequest, 400, invalidBackchannelHandleMessage, nil), "backchannel authentication request")
 		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, pending.ClientID, AuditOutcomeFailure, string(wrapped.Code()))
 		return wrapped
 	}
@@ -92,7 +96,7 @@ func (s *Server) CompleteBackchannelAuthentication(ctx context.Context, req Comp
 
 	decided, err := s.deps.Backchannel.DecideBackchannelAuthentication(ctx, decision)
 	if err != nil {
-		wrapped := newError(ErrorInvalidRequest, 400, "backchannel authentication handle is invalid, expired, or already decided", err)
+		wrapped := newError(ErrorInvalidRequest, 400, invalidBackchannelHandleMessage, err)
 		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, "", AuditOutcomeFailure, string(wrapped.Code()))
 		return wrapped
 	}

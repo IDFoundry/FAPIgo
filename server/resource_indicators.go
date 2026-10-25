@@ -190,10 +190,15 @@ func hexRune(raw []byte, i int) (rune, bool) {
 // named: each an absolute URI without a fragment (RFC 8707 §2), within
 // the client's AllowedResources, and listed in Config.Resources or
 // accepted by the ResourcePolicy. It returns them de-duplicated in the
-// order given. Nil in, nil out.
+// order given. A request naming none is first given the client's
+// default (defaultResources), which is then checked the same way; nil
+// when there is none.
 func (s *Server) checkRequestedResources(ctx context.Context, client storage.RegisteredClient, requested []string) ([]string, *Error) {
 	if len(requested) == 0 {
-		return nil, nil
+		var err *Error
+		if requested, err = s.defaultResources(client); err != nil || len(requested) == 0 {
+			return nil, err
+		}
 	}
 	if len(requested) > resourceindicator.MaxPerRequest {
 		return nil, newError(ErrorInvalidTarget, 400, fmt.Sprintf("at most %d resource indicators may be requested", resourceindicator.MaxPerRequest), nil)
@@ -229,6 +234,26 @@ func (s *Server) checkRequestedResources(ctx context.Context, client storage.Reg
 	default:
 		return nil, newError(ErrorServerError, 500, "failed to decide the requested resources", err)
 	}
+}
+
+// defaultResources is what a request from client naming no resource is
+// for. A client without AllowedResources gets none, so its tokens are
+// addressed to the issuer. A client confined by AllowedResources can't
+// be given an issuer-audience token, which every resource server that
+// accepts the issuer as an audience would take, whatever the list says:
+// with one entry, the request is for that one; with more, it must name
+// which, so it's invalid_target. With resource indicators disabled,
+// there is never a default: the "resource" parameter is ignored, and
+// every token is addressed to the issuer.
+func (s *Server) defaultResources(client storage.RegisteredClient) ([]string, *Error) {
+	if !s.resourceIndicatorsEnabled() {
+		return nil, nil
+	}
+	allowed := client.AllowedResources()
+	if len(allowed) > 1 {
+		return nil, newError(ErrorInvalidTarget, 400, "a resource is required: this client may request more than one, so must name which", nil)
+	}
+	return allowed, nil
 }
 
 // narrowResources returns the resources a token request may have its
@@ -287,12 +312,17 @@ func (s *Server) usableGrantAudience(ctx context.Context, client storage.Registe
 // use. When none is — resource indicators turned off, say — it must
 // authorize again. The refresh token keeps all of the grant's
 // resources, so one allowed again later can be named again.
+//
+// A grant without resources, made before the client was confined by
+// AllowedResources, gets the client's default as a request naming none
+// would (defaultResources): its single allowed resource, or
+// invalid_target when it has several, so it must authorize again.
 func (s *Server) narrowedAudience(ctx context.Context, client storage.RegisteredClient, granted, requested []string) (string, []string, *Error) {
 	resources, err := narrowResources(granted, requested)
 	if err != nil {
 		return "", nil, err
 	}
-	if _, err := s.checkRequestedResources(ctx, client, resources); err != nil {
+	if resources, err = s.checkRequestedResources(ctx, client, resources); err != nil {
 		return "", nil, err
 	}
 	audience, audiences := s.accessTokenAudience(resources)

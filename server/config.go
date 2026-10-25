@@ -362,7 +362,7 @@ type Limits struct {
 type Config struct {
 	// Issuer is this server's issuer identifier — the audience client
 	// assertions and request objects must be addressed to, and every
-	// access token's audience unless the client named resources (RFC
+	// access token's audience unless the token is for resources (RFC
 	// 8707 resource indicators; see Resources).
 	Issuer fapi.URL
 
@@ -487,7 +487,9 @@ type Config struct {
 	// neither set, the "resource" parameter is ignored, as any
 	// unregistered parameter is, and every access token's audience is
 	// Issuer. A request naming no resource also gets Issuer as its
-	// audience.
+	// audience — unless its client is confined by AllowedResources,
+	// whose single entry it is then for, or which, listing several,
+	// make naming one required (invalid_target otherwise).
 	Resources []string
 
 	// AttestationBasedClientAuthentication enables

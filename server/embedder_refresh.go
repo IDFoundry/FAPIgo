@@ -56,7 +56,11 @@ type IssueRefreshTokenRequest struct {
 	// access token a refresh issues is restricted to them, or to the
 	// subset the refresh request names. Typically the "resource"
 	// parameters of the token request the embedder served (see
-	// TokenEndpointRequest.Resources). Empty, the audience is the issuer.
+	// TokenEndpointRequest.Resources). Empty, the audience is the
+	// issuer, unless the client is confined by AllowedResources: then
+	// it's the client's single allowed resource, or, when it has
+	// several, invalid_target (see
+	// storage.RegisteredClientConfig.AllowedResources).
 	Resources []string
 
 	// GrantID, if set, names the grant so RevokeGrant can revoke it, as

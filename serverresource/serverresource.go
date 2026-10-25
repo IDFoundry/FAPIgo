@@ -85,7 +85,9 @@ type Options struct {
 	// addressed to the server's issuer identifier: those whose client
 	// named no resource. Use it while clients move to sending
 	// "resource", then turn it off — until then any token issued without
-	// a resource indicator is accepted here too.
+	// a resource indicator is accepted here too. (A client confined by
+	// storage.RegisteredClientConfig.AllowedResources is never issued
+	// one, so it can't reach this resource server that way.)
 	AcceptIssuerAudience bool
 }
 

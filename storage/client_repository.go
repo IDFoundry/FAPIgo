@@ -426,8 +426,28 @@ type RegisteredClientConfig struct {
 	// (server.Config.Resources and its ResourcePolicy): set, a resource
 	// outside it is invalid_target whatever the server would otherwise
 	// accept. Empty, the client may name any resource the server
-	// accepts. Each is an absolute URI without a fragment (RFC 8707
-	// §2), compared exactly.
+	// accepts, and a request naming none gets access tokens addressed
+	// to the issuer. Each is an absolute URI without a fragment (RFC
+	// 8707 §2), compared exactly.
+	//
+	// Set, it also confines the requests that name no resource, since a
+	// token addressed to the issuer is accepted by every resource server
+	// that accepts the issuer as an audience, whatever this list says.
+	// With exactly one entry, such a request is treated as naming that
+	// one: the grant records it, and its access tokens are addressed to
+	// it. With more than one, the request must name which it is for, or
+	// it's invalid_target. This holds wherever a resource can be named —
+	// at PAR, a CIBA request, client_credentials and the embedder's
+	// IssueAccessToken and IssueRefreshToken — and for a grant made
+	// without resources before the list was set, at its code exchange,
+	// refresh or CIBA token request. So a client confined here gets no
+	// issuer-audience access token at all: one that also calls the
+	// UserInfo endpoint, which accepts only those, must list the issuer
+	// identifier here too (and the server must accept it as a resource,
+	// in server.Config.Resources, say), and then, having more than one
+	// entry, name a resource in every request. The list has no effect while the
+	// server accepts no resource indicators (neither
+	// server.Config.Resources nor a ResourcePolicy).
 	AllowedResources []string
 
 	// AllowsClientCredentialsGrant permits this client to use the RFC
@@ -1138,6 +1158,21 @@ func (c RegisteredClient) AllowsResource(resource string) bool {
 	}
 	_, ok := c.allowedResources[resource]
 	return ok
+}
+
+// AllowedResources returns the RFC 8707 resource indicators this client
+// is confined to, sorted, or nil when it registered none — see
+// RegisteredClientConfig.AllowedResources.
+func (c RegisteredClient) AllowedResources() []string {
+	if len(c.allowedResources) == 0 {
+		return nil
+	}
+	resources := make([]string, 0, len(c.allowedResources))
+	for r := range c.allowedResources {
+		resources = append(resources, r)
+	}
+	slices.Sort(resources)
+	return resources
 }
 
 // AllowsAuthorizationDetailsType reports whether typ is one of the Rich

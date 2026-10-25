@@ -690,28 +690,11 @@ func TestAutomaticClientKeySourceStaticClientUsesUnderlyingOnly(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := setupAutomaticRegistrationFixture(t, rpMetadataBuilder(t))
-			staticClient, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
-				ID: fapi.ClientID(f.rpID), RedirectURIs: []fapi.RegisteredRedirectURI{fapi.RegisteredRedirectURI(f.rpID + "/static-cb")},
-				ClientAuthMethod: storage.ClientAuthMethodPrivateKeyJWT, ClientAssertionAlgorithm: fapi.ES256,
-				SenderConstrain: storage.SenderConstrainDPoP, AllowedScopes: []string{"openid"},
-			})
-			if err != nil {
-				t.Fatalf("storage.NewRegisteredClient: %v", err)
-			}
-			repo, err := federation.NewAutomaticClientRepository(
-				staticRepository{id: fapi.ClientID(f.rpID), client: staticClient}, f.newResolver(t), f.fetcher,
-				validAutomaticRegistrationConfig(), fixedClock{now: f.now})
-			if err != nil {
-				t.Fatalf("NewAutomaticClientRepository: %v", err)
-			}
 			underlying := tc.underlying
 			if underlying == nil {
 				underlying = staticKeySource{id: fapi.ClientID(f.rpID), keySet: staticKeys}
 			}
-			src, err := federation.NewAutomaticClientKeySource(underlying, repo)
-			if err != nil {
-				t.Fatalf("NewAutomaticClientKeySource: %v", err)
-			}
+			src := newStaticClientKeySource(t, f, underlying)
 
 			set, err := src.ResolveVerificationKeys(context.Background(), keys.ClientKeyRequest{
 				ClientID: fapi.ClientID(f.rpID), Purpose: keys.ClientAssertionVerification, Algorithm: fapi.ES256, KeyID: tc.kid,
@@ -719,20 +702,53 @@ func TestAutomaticClientKeySourceStaticClientUsesUnderlyingOnly(t *testing.T) {
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("ResolveVerificationKeys error = %v, want error %v", err, tc.wantErr)
 			}
-			// staticKeySource returns its whole set; what matters is that no
-			// federation-published key is ever in it.
-			for _, k := range set.Keys {
-				if k.KeyID != "static-kid" {
-					t.Errorf("ResolveVerificationKeys returned key %q, want only the static client's own keys", k.KeyID)
-				}
-			}
-			if tc.wantKID != "" && (len(set.Keys) == 0 || set.Keys[0].KeyID != tc.wantKID) {
-				t.Errorf("ResolveVerificationKeys = %+v, want %q", set, tc.wantKID)
-			}
+			checkOnlyStaticKeys(t, set, tc.wantKID)
 			if n := atomic.LoadInt32(f.rpConfigCalls); n != 0 {
 				t.Errorf("RP's own well-known endpoint was fetched %d times, want 0 for a statically registered client", n)
 			}
 		})
+	}
+}
+
+// newStaticClientKeySource returns an AutomaticClientKeySource over
+// underlying, whose client repository registers the fixture RP's
+// Entity Identifier statically.
+func newStaticClientKeySource(t *testing.T, f *automaticRegistrationFixture, underlying keys.ClientKeySource) *federation.AutomaticClientKeySource {
+	t.Helper()
+	staticClient, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
+		ID: fapi.ClientID(f.rpID), RedirectURIs: []fapi.RegisteredRedirectURI{fapi.RegisteredRedirectURI(f.rpID + "/static-cb")},
+		ClientAuthMethod: storage.ClientAuthMethodPrivateKeyJWT, ClientAssertionAlgorithm: fapi.ES256,
+		SenderConstrain: storage.SenderConstrainDPoP, AllowedScopes: []string{"openid"},
+	})
+	if err != nil {
+		t.Fatalf("storage.NewRegisteredClient: %v", err)
+	}
+	repo, err := federation.NewAutomaticClientRepository(
+		staticRepository{id: fapi.ClientID(f.rpID), client: staticClient}, f.newResolver(t), f.fetcher,
+		validAutomaticRegistrationConfig(), fixedClock{now: f.now})
+	if err != nil {
+		t.Fatalf("NewAutomaticClientRepository: %v", err)
+	}
+	src, err := federation.NewAutomaticClientKeySource(underlying, repo)
+	if err != nil {
+		t.Fatalf("NewAutomaticClientKeySource: %v", err)
+	}
+	return src
+}
+
+// checkOnlyStaticKeys fails t if set holds any key but the static
+// client's own ("static-kid"), or, when wantKID is set, doesn't start
+// with that key. staticKeySource returns its whole set whatever kid is
+// asked for; what matters is that no federation-published key is in it.
+func checkOnlyStaticKeys(t *testing.T, set keys.VerificationKeySet, wantKID string) {
+	t.Helper()
+	for _, k := range set.Keys {
+		if k.KeyID != "static-kid" {
+			t.Errorf("ResolveVerificationKeys returned key %q, want only the static client's own keys", k.KeyID)
+		}
+	}
+	if wantKID != "" && (len(set.Keys) == 0 || set.Keys[0].KeyID != wantKID) {
+		t.Errorf("ResolveVerificationKeys = %+v, want %q", set, wantKID)
 	}
 }
 

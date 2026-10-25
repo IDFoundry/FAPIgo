@@ -587,7 +587,7 @@ func validateRequiredDependencies(deps Dependencies) error {
 		return fmt.Errorf("server: dependencies: revocation is required (pass NoRevocation{} to explicitly decline)")
 	}
 	if deps.ClientCertificateTrust == nil {
-		return fmt.Errorf("server: dependencies: client certificate trust is required (pass NoPKIClientAuthentication{} when no client uses tls_client_auth, TrustedClientCAs{...}, or NoClientCertificateChainTrust{} to explicitly decline this package's own chain check)")
+		return fmt.Errorf("server: dependencies: client certificate trust is required (pass NoPKIClientAuthentication{} when no client uses tls_client_auth, TrustedClientCAs{...}, ClientCertificateChainVerifiedUpstream{} when your TLS termination verifies the chain, or NoClientCertificateChainTrust{} to explicitly decline chain trust outside production)")
 	}
 	if err := deps.ClientCertificateTrust.validate(); err != nil {
 		return fmt.Errorf("server: dependencies: client certificate trust: %w", err)
@@ -692,8 +692,10 @@ func checkProductionKeyCustody(deps Dependencies, issuer AccessTokenAssurance, s
 }
 
 // checkProductionClientSources checks the client registry, the sources
-// of clients' verification and encryption keys, and, when attestation
-// is enabled, the attester trust's key or trust-anchor source.
+// of clients' verification and encryption keys, when attestation is
+// enabled the attester trust's key or trust-anchor source, and that
+// client certificates' chains are trusted somehow
+// (checkProductionClientCertificateTrust).
 func checkProductionClientSources(deps Dependencies, scaled, attestation bool) []error {
 	errs := []error{
 		checkStoreAssurance("clients", deps.Clients, false, scaled),
@@ -710,6 +712,7 @@ func checkProductionClientSources(deps Dependencies, scaled, attestation bool) [
 	if deps.FederationHTTP != nil && !deps.FederationHTTP.HardenedForProduction() {
 		errs = append(errs, fmt.Errorf("server: dependencies: federation_http must be fapihttp.New over fapihttp.NewClient's client, with that transport unchanged and no loopback exception, under AssuranceProduction"))
 	}
+	errs = append(errs, checkProductionClientCertificateTrust(deps.ClientCertificateTrust))
 	return errs
 }
 

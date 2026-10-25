@@ -658,7 +658,8 @@ type AutomaticRegistrationConfig struct {
 	// (tls_client_auth and its SAN* siblings): an RP's subject or SAN is
 	// public in its metadata, so with no chain check anyone could present
 	// a self-signed certificate naming it. Under
-	// NoClientCertificateChainTrust{}, naming one of those methods here
+	// ClientCertificateChainVerifiedUpstream{} (or, outside production,
+	// NoClientCertificateChainTrust{}), naming one of those methods here
 	// registers it: do that only when your TLS termination verifies the
 	// chain. Under NoPKIClientAuthentication{}, naming one is refused.
 	// Statically registered clients are unaffected.

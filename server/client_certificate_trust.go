@@ -20,10 +20,12 @@ import (
 // binds the exact certificate, so it needs no chain trust to begin
 // with.
 //
-// Its implementations are TrustedClientCAs, NoPKIClientAuthentication
-// and NoClientCertificateChainTrust. A server with no client using
+// Its implementations are TrustedClientCAs,
+// ClientCertificateChainVerifiedUpstream, NoPKIClientAuthentication and
+// NoClientCertificateChainTrust. A server with no client using
 // ClientAuthMethodTLSClientAuth or a SAN* sibling passes
-// NoPKIClientAuthentication{}.
+// NoPKIClientAuthentication{}. Under AssuranceProduction, New refuses
+// NoClientCertificateChainTrust.
 type ClientCertificateTrust interface {
 	verifyChain(ctx context.Context, cert *x509.Certificate, now time.Time) *Error
 	validate() error
@@ -123,30 +125,55 @@ func (NoPKIClientAuthentication) verifyChain(context.Context, *x509.Certificate,
 
 func (NoPKIClientAuthentication) validate() error { return nil }
 
-// NoClientCertificateChainTrust explicitly declines this package's own
-// chain-of-trust check for a presented client certificate, while still
-// accepting ClientAuthMethodTLSClientAuth and its SAN* siblings. A
-// server with no such client passes NoPKIClientAuthentication{}
-// instead. There are two legitimate reasons to pass this, and this
-// type intentionally doesn't distinguish between them: (1) chain trust
-// is already established before this package ever sees the certificate
-// — the deployment's own TLS termination (tls.Config.ClientCAs and
-// ClientAuth: RequireAndVerifyClientCert/VerifyClientCertIfGiven, never
-// RequestClientCert or RequireAnyClientCert, which don't verify), or
-// mTLS terminated by a gateway that independently verified the chain;
-// or (2) the deployment has deliberately accepted the risk of running
-// without chain trust — e.g. a conformance or development binary with
-// no CA trust store of its own. Passing this when neither is actually
-// true is a security-relevant mistake this package cannot detect: any
-// self-signed certificate whose subject/SAN an attacker chose to match
-// a registered value is accepted. Automatic registration (OpenID
-// Federation) registers those methods under it only when
-// AutomaticRegistrationConfig.AllowedClientAuthMethods names them, since
-// a Relying Party's subject or SAN is public in its metadata: naming one
-// says your TLS termination verifies the chain. Exists so that mistake
-// requires a conscious, visible
-// line of code, the same reason NoRevocation exists. Whoever
-// establishes chain trust in case (1) also owns checking revocation.
+// ClientCertificateChainVerifiedUpstream declares that every client
+// certificate this server is handed has already had its chain verified
+// before this package sees it, so this package's own chain-of-trust
+// check is skipped while ClientAuthMethodTLSClientAuth and its SAN*
+// siblings are still accepted. That holds only when every request
+// carrying a client certificate — at the token, PAR, CIBA and every
+// other client-authenticating endpoint, and their MTLSEndpoints aliases
+// — arrives over a connection whose TLS termination required a
+// certificate chaining to the CAs trusted to issue client certificates
+// (Go's tls.Config.ClientCAs with ClientAuth RequireAndVerifyClientCert
+// or VerifyClientCertIfGiven — never RequestClientCert or
+// RequireAnyClientCert, which don't verify), or through a gateway that
+// verified it the same way and passes on only certificates it verified.
+// Whoever verifies the chain also owns checking revocation.
+//
+// Declaring it when it isn't true is a mistake this package cannot
+// detect: any self-signed certificate whose subject or SAN an attacker
+// chose to match a registered client's is accepted as that client. If
+// this server can verify the chain itself, pass TrustedClientCAs{...}
+// instead; it doesn't depend on how the deployment terminates TLS.
+//
+// Automatic registration (OpenID Federation) registers those methods
+// under it only when AutomaticRegistrationConfig.AllowedClientAuthMethods
+// names them, since a Relying Party's subject or SAN is public in its
+// metadata.
+type ClientCertificateChainVerifiedUpstream struct{}
+
+func (ClientCertificateChainVerifiedUpstream) verifyChain(context.Context, *x509.Certificate, time.Time) *Error {
+	return nil
+}
+
+func (ClientCertificateChainVerifiedUpstream) validate() error { return nil }
+
+// NoClientCertificateChainTrust accepts ClientAuthMethodTLSClientAuth and
+// its SAN* siblings with no chain-of-trust check at all, here or
+// upstream: any self-signed certificate whose subject or SAN matches a
+// registered client's authenticates as that client. It's for a
+// conformance or development deployment with no CA trust store of its
+// own, which has deliberately accepted that risk, and New refuses it
+// under AssuranceProduction. A server whose TLS termination verifies
+// client certificate chains passes ClientCertificateChainVerifiedUpstream{};
+// one that can verify them itself, TrustedClientCAs{...}; one with no
+// such client, NoPKIClientAuthentication{}.
+//
+// Automatic registration (OpenID Federation) registers those methods
+// under it only when AutomaticRegistrationConfig.AllowedClientAuthMethods
+// names them, as under ClientCertificateChainVerifiedUpstream. Exists so
+// declining chain trust requires a conscious, visible line of code, the
+// same reason NoRevocation exists.
 type NoClientCertificateChainTrust struct{}
 
 func (NoClientCertificateChainTrust) verifyChain(context.Context, *x509.Certificate, time.Time) *Error {
@@ -154,6 +181,16 @@ func (NoClientCertificateChainTrust) verifyChain(context.Context, *x509.Certific
 }
 
 func (NoClientCertificateChainTrust) validate() error { return nil }
+
+// checkProductionClientCertificateTrust refuses NoClientCertificateChainTrust,
+// by value or pointer, under AssuranceProduction.
+func checkProductionClientCertificateTrust(trust ClientCertificateTrust) error {
+	switch trust.(type) {
+	case NoClientCertificateChainTrust, *NoClientCertificateChainTrust:
+		return errors.New("server: dependencies: client_certificate_trust NoClientCertificateChainTrust{} is not permitted under AssuranceProduction: pass ClientCertificateChainVerifiedUpstream{} when your TLS termination verifies client certificate chains, TrustedClientCAs{...} to verify them here, or NoPKIClientAuthentication{} when no client uses tls_client_auth")
+	}
+	return nil
+}
 
 // ClientCertificateRevocation decides whether a client certificate that
 // TrustedClientCAs has already verified the chain of has been revoked.

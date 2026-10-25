@@ -176,8 +176,9 @@ func isPKICertificateAuthMethod(method storage.ClientAuthMethod) bool {
 // CA-issued certificate's chain (tls_client_auth and its SAN* siblings),
 // and a Relying Party's subject or SAN is public in its metadata, so an
 // empty allowed list means every method but those. Under
-// NoClientCertificateChainTrust naming one explicitly is the opt-in for
-// a deployment whose TLS termination verifies the chain; under
+// ClientCertificateChainVerifiedUpstream (or NoClientCertificateChainTrust)
+// naming one explicitly is the opt-in for a deployment whose TLS
+// termination verifies the chain; under
 // NoPKIClientAuthentication, which refuses them, it's a contradiction,
 // refused.
 func automaticClientAuthMethods(allowed []storage.ClientAuthMethod, trust ClientCertificateTrust) ([]storage.ClientAuthMethod, error) {

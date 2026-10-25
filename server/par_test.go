@@ -630,6 +630,9 @@ func newHarnessWithApplicationType(t *testing.T, profile server.Profile, allowRe
 		Clock:                  fixedClock{now: now},
 		Random:                 rand.Reader,
 	}
+	if assurance == server.AssuranceProduction {
+		deps.ClientCertificateTrust = server.ClientCertificateChainVerifiedUpstream{}
+	}
 
 	srv, err := server.New(cfg, deps)
 	if err != nil {

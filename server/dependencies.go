@@ -201,9 +201,11 @@ type Dependencies struct {
 	// NoPKIClientAuthentication{} when no client uses those methods
 	// (they're then refused), TrustedClientCAs{Roots: ..., Revocation:
 	// ...} to have this package verify the chain and check it for
-	// revocation itself, or NoClientCertificateChainTrust{} to explicitly
-	// decline the check because the deployment's own TLS termination
-	// verifies the chain — see each type's own doc comment.
+	// revocation itself, ClientCertificateChainVerifiedUpstream{} to skip
+	// the check because the deployment's own TLS termination verifies
+	// the chain, or, outside AssuranceProduction,
+	// NoClientCertificateChainTrust{} to accept these methods with no
+	// chain trust at all — see each type's own doc comment.
 	// ClientAuthMethodSelfSignedTLSClientAuth is unaffected either way:
 	// its thumbprint match already cryptographically binds the exact
 	// certificate, so it needs no chain trust to begin with.

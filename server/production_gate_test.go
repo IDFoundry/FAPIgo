@@ -107,6 +107,39 @@ func TestProductionAcceptsPointerNoRevocation(t *testing.T) {
 	}
 }
 
+// TestProductionRefusesNoClientCertificateChainTrust covers
+// NoClientCertificateChainTrust, which accepts a tls_client_auth
+// client's certificate with no chain trust anywhere: refused under
+// AssuranceProduction, by value or pointer, while
+// ClientCertificateChainVerifiedUpstream, declaring the deployment's TLS
+// termination verifies the chain, is accepted. Development assurance
+// still accepts NoClientCertificateChainTrust.
+func TestProductionRefusesNoClientCertificateChainTrust(t *testing.T) {
+	for name, trust := range map[string]server.ClientCertificateTrust{
+		"value":   server.NoClientCertificateChainTrust{},
+		"pointer": &server.NoClientCertificateChainTrust{},
+	} {
+		err := productionNew(t, func(d *server.Dependencies) { d.ClientCertificateTrust = trust })
+		if err == nil || !strings.Contains(err.Error(), "client_certificate_trust") {
+			t.Errorf("%s: New(production) = %v, want a client_certificate_trust refusal", name, err)
+		}
+	}
+	for name, trust := range map[string]server.ClientCertificateTrust{
+		"verified upstream":         server.ClientCertificateChainVerifiedUpstream{},
+		"verified upstream pointer": &server.ClientCertificateChainVerifiedUpstream{},
+		"no PKI":                    server.NoPKIClientAuthentication{},
+	} {
+		if err := productionNew(t, func(d *server.Dependencies) { d.ClientCertificateTrust = trust }); err != nil {
+			t.Errorf("%s: New(production): %v", name, err)
+		}
+	}
+	deps := validDependencies()
+	deps.ClientCertificateTrust = server.NoClientCertificateChainTrust{}
+	if _, err := server.New(validConfig(t), deps); err != nil {
+		t.Errorf("New(development, NoClientCertificateChainTrust): %v", err)
+	}
+}
+
 // bareAttesterKeys is an AttesterKeySource declaring no
 // KeySourceAssurance.
 type bareAttesterKeys struct{}

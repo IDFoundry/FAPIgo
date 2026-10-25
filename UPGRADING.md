@@ -17,6 +17,37 @@ and `keys/ephemeral` needs only the steps not marked *production only*.
 
 ## v0.61.0
 
+### `NoClientCertificateChainTrust{}` is refused in production (server, *production only*)
+
+**Affects:** a server under `AssuranceProduction` whose
+`Dependencies.ClientCertificateTrust` is
+`server.NoClientCertificateChainTrust{}`.
+
+**Why:** `NoClientCertificateChainTrust{}` accepts a `tls_client_auth`
+(or SAN-variant) client's certificate without verifying its chain, and
+the same value served two different deployments: one whose TLS
+termination verifies client certificate chains, and one that verifies
+nothing at all. In the second, anyone can present a self-signed
+certificate naming a statically registered client's subject or SAN and
+authenticate as it. `server.New` can't tell the two apart, and can't
+list a repository's static clients to see whether any uses
+`tls_client_auth`, so the safe one now has a name of its own.
+
+**What fails:** `server.New` returns an error naming
+`client_certificate_trust` under `AssuranceProduction`. Development
+assurance still accepts `NoClientCertificateChainTrust{}`.
+
+**What to change:** if your TLS termination (or a gateway in front of
+the server) verifies every client certificate's chain — Go's
+`tls.Config.ClientCAs` with `RequireAndVerifyClientCert` or
+`VerifyClientCertIfGiven`, on every listener that serves a
+client-authenticating endpoint — pass
+`server.ClientCertificateChainVerifiedUpstream{}`. It behaves exactly as
+`NoClientCertificateChainTrust{}` did, automatic registration included.
+Otherwise pass `server.TrustedClientCAs{...}` to verify chains in this
+package, or `server.NoPKIClientAuthentication{}` when no client uses
+`tls_client_auth`.
+
 ### Authorization codes are bound to the attested client instance (server)
 
 Not a breaking change for a store or an API: it's here because of what

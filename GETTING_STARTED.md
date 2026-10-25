@@ -421,10 +421,12 @@ deps := server.Dependencies{
 	// server.TrustedClientCAs{Roots: pool, Revocation: ...} has this
 	// package check a certificate's chain against pool, and whether it
 	// has been revoked (server.ClientCertificateCRLs, for example).
-	// NoClientCertificateChainTrust{} accepts the certificate unverified,
-	// for when your TLS termination already verifies its chain
-	// (RequireAndVerifyClientCert), never otherwise: anyone could then
-	// present a self-signed certificate naming a client's subject.
+	// ClientCertificateChainVerifiedUpstream{} skips that check, for when
+	// your TLS termination already verifies every client certificate's
+	// chain (RequireAndVerifyClientCert), never otherwise: anyone could
+	// then present a self-signed certificate naming a client's subject.
+	// NoClientCertificateChainTrust{} accepts the certificate with no
+	// chain trust at all, outside production only.
 	ClientCertificateTrust: server.NoPKIClientAuthentication{},
 	Clock:                  server.SystemClock{},
 	Random:                 rand.Reader, // crypto/rand; production assurance requires exactly this reader

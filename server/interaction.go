@@ -230,6 +230,16 @@ type InteractionRequest struct {
 	// of Tax Return TX-12345") instead of a bare scope string.
 	AuthorizationDetails extension.RARValues
 
+	// Resources are the RFC 8707 resource indicators the access tokens
+	// from this authorization would be restricted to — the resource
+	// servers they can be used at: those the request named, or, for a
+	// client confined by storage.RegisteredClientConfig.AllowedResources
+	// that named none, its single allowed one. Nil when the tokens would
+	// be addressed to the issuer. Already validated; show them where
+	// the resource servers are several, so the user can tell which a
+	// token is for, and narrow them with GrantedAuthorization.Resources.
+	Resources []string
+
 	// RequestedClaims is the identity claims the client asked for with
 	// the "claims" parameter. None is released unless the application
 	// approves it in GrantedAuthorization.ApprovedIdentityClaims.

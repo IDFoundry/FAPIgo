@@ -279,6 +279,18 @@ func narrowResources(granted, requested []string) ([]string, *Error) {
 	return narrowed, nil
 }
 
+// grantedResources is the resources an approval grants of requested, a
+// pending request's: all of them when granted, the application's
+// GrantedAuthorization.Resources, names none, and otherwise granted,
+// de-duplicated, which must all be among requested.
+func grantedResources(requested, granted []string) ([]string, *Error) {
+	resources, err := narrowResources(requested, granted)
+	if err != nil {
+		return nil, newError(ErrorInvalidRequest, 400, "granted resources exceed what was requested", err)
+	}
+	return resources, nil
+}
+
 // allowedGrantAudience is checkGrantStillAllowed for a token request
 // from grant asking for scope, followed by narrowedAudience for the
 // resources it requested.

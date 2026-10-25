@@ -161,6 +161,9 @@ func TestResourceIndicatorsAllowedResourcesDefaultCIBA(t *testing.T) {
 			if !ok {
 				t.Fatalf("action = %T, want server.BackchannelInteractionRequired", action)
 			}
+			if !reflect.DeepEqual(required.Interaction.Resources, []string{resourceA}) {
+				t.Errorf("Interaction.Resources = %q, want the default", required.Interaction.Resources)
+			}
 			result, err := approveAndPollResourceCIBA(t, h, required, nil)
 			if err != nil {
 				t.Fatalf("ExchangeBackchannelAuthentication: %v", err)

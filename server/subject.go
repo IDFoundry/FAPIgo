@@ -165,6 +165,17 @@ type GrantedAuthorization struct {
 	// same way a scope not present in the original request is rejected.
 	AuthorizationDetails []json.RawMessage
 
+	// Resources narrows the RFC 8707 resource indicators the grant's
+	// access tokens are restricted to, to those the resource owner
+	// approved, from the request's own (InteractionRequest.Resources,
+	// or BackchannelInteractionRequest's). Nil or empty grants all of
+	// them, so an application that doesn't show resources grants what
+	// was requested. CompleteAuthorization/
+	// CompleteBackchannelAuthentication reject one that wasn't
+	// requested, the same way they reject a scope that wasn't — so a
+	// request that named none can't be granted any.
+	Resources []string
+
 	// IDTokenClaims are additional claims the application wants in the
 	// ID token issued for this authorization — e.g. provider-specific
 	// claims describing the authenticated subject or who it is acting

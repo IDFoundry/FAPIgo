@@ -84,6 +84,7 @@ func New(cfg Config, deps Dependencies) (*Server, error) {
 		automaticClients, err := federation.NewAutomaticClientRepository(deps.Clients, resolver, deps.FederationHTTP, federation.AutomaticRegistrationConfig{
 			AllowedScopes:                cfg.AutomaticRegistration.AllowedScopes,
 			AuthorizationDetailsTypes:    cfg.AutomaticRegistration.AuthorizationDetailsTypes,
+			AllowedResources:             cfg.AutomaticRegistration.AllowedResources,
 			MaxCacheAge:                  cfg.AutomaticRegistration.MaxCacheAge,
 			FailureCacheAge:              cfg.AutomaticRegistration.FailureCacheAge,
 			AllowsClientCredentialsGrant: cfg.AutomaticRegistration.AllowsClientCredentialsGrant,

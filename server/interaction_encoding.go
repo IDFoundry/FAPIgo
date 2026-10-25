@@ -40,6 +40,7 @@ type encodedInteractionRequest struct {
 	PolicyURI            string              `json:"policy_uri,omitempty"`
 	TermsOfServiceURI    string              `json:"tos_uri,omitempty"`
 	AuthorizationDetails extension.RARValues `json:"authorization_details"`
+	Resources            []string            `json:"resources,omitempty"`
 	IDTokenClaims        []string            `json:"id_token_claims,omitempty"`
 	UserInfoClaims       []string            `json:"userinfo_claims,omitempty"`
 	Extensions           extension.Values    `json:"extensions"`
@@ -57,10 +58,10 @@ type encodedInteractionRequest struct {
 // you would the rest of a session, never where the client or the user
 // agent can read it. It carries no integrity protection and needs none for
 // the grant's sake: CompleteAuthorization checks the granted scope,
-// authorization details and identity claims against the request the
-// server stored itself, so a modified copy can make a consent screen
-// show less than was asked, and the grant built from it smaller, but
-// never larger. Store it where only the application can write it all the
+// authorization details, resources and identity claims against the
+// request the server stored itself, so a modified copy can make a
+// consent screen show less than was asked, and the grant built from it
+// smaller, but never larger. Store it where only the application can write it all the
 // same, so what the end user sees is what was asked.
 func (r InteractionRequest) MarshalText() ([]byte, error) {
 	if r.ClientID == "" {
@@ -77,8 +78,8 @@ func (r InteractionRequest) MarshalText() ([]byte, error) {
 		UILocales: r.UILocales, ClaimsLocales: r.ClaimsLocales, Display: r.Display,
 		ClientName: r.ClientDisplay.Name, LogoURI: urlString(r.ClientDisplay.LogoURI),
 		PolicyURI: urlString(r.ClientDisplay.PolicyURI), TermsOfServiceURI: urlString(r.ClientDisplay.TermsOfServiceURI),
-		AuthorizationDetails: r.AuthorizationDetails,
-		IDTokenClaims:        r.RequestedClaims.IDToken, UserInfoClaims: r.RequestedClaims.UserInfo,
+		AuthorizationDetails: r.AuthorizationDetails, Resources: r.Resources,
+		IDTokenClaims: r.RequestedClaims.IDToken, UserInfoClaims: r.RequestedClaims.UserInfo,
 		Extensions: r.Extensions,
 	})
 	if err != nil {
@@ -149,6 +150,7 @@ func ParseInteractionRequest(text string) (InteractionRequest, error) {
 		ClaimsLocales:      languageTags(slices.Values(e.ClaimsLocales)),
 		Display:            knownDisplay(e.Display),
 		ClientDisplay:      display, AuthorizationDetails: e.AuthorizationDetails,
+		Resources:       e.Resources,
 		RequestedClaims: RequestedClaims{IDToken: e.IDTokenClaims, UserInfo: e.UserInfoClaims},
 		Extensions:      e.Extensions,
 	}

@@ -292,6 +292,16 @@ func TestNewAutomaticClientRepositoryRejectsInvalidConfig(t *testing.T) {
 			cfg.FailureCacheAge = -time.Second
 			return alwaysFailsRepository{}, resolver, f.fetcher, cfg, fixedClock{now: f.now}
 		},
+		"relative allowed resource": func() (storage.ClientRepository, *federation.Resolver, *fapihttp.Client, federation.AutomaticRegistrationConfig, federation.Clock) {
+			cfg := validAutomaticRegistrationConfig()
+			cfg.AllowedResources = []string{"/api"}
+			return alwaysFailsRepository{}, resolver, f.fetcher, cfg, fixedClock{now: f.now}
+		},
+		"repeated allowed resource": func() (storage.ClientRepository, *federation.Resolver, *fapihttp.Client, federation.AutomaticRegistrationConfig, federation.Clock) {
+			cfg := validAutomaticRegistrationConfig()
+			cfg.AllowedResources = []string{"https://rs.example", "https://rs.example"}
+			return alwaysFailsRepository{}, resolver, f.fetcher, cfg, fixedClock{now: f.now}
+		},
 		"invalid allowed client auth method": func() (storage.ClientRepository, *federation.Resolver, *fapihttp.Client, federation.AutomaticRegistrationConfig, federation.Clock) {
 			cfg := validAutomaticRegistrationConfig()
 			cfg.AllowedClientAuthMethods = []storage.ClientAuthMethod{storage.ClientAuthMethod(255)}
@@ -377,6 +387,9 @@ func TestAutomaticClientRepositoryResolveClientFallsBackToFederation(t *testing.
 	if got.AllowsAuthorizationDetailsType("payment") {
 		t.Error("AllowsAuthorizationDetailsType(payment) = true with no AutomaticRegistrationConfig.AuthorizationDetailsTypes")
 	}
+	if got.AllowedResources() != nil {
+		t.Errorf("AllowedResources() = %q with no AutomaticRegistrationConfig.AllowedResources", got.AllowedResources())
+	}
 }
 
 // unavailableRepository is a storage.ClientRepository whose backend
@@ -425,6 +438,31 @@ func TestAutomaticClientRepositoryAuthorizationDetailsTypesComeFromConfig(t *tes
 	}
 	if !got.AllowsAuthorizationDetailsType("payment") {
 		t.Error("AllowsAuthorizationDetailsType(payment) = false, want true from the config")
+	}
+}
+
+// TestAutomaticClientRepositoryAllowedResourcesComeFromConfig covers an
+// automatically registered client being confined to the operator's
+// resources, never ones from the RP's own metadata, and the config's
+// slice being copied.
+func TestAutomaticClientRepositoryAllowedResourcesComeFromConfig(t *testing.T) {
+	f := setupAutomaticRegistrationFixture(t, rpMetadataBuilder(t))
+	cfg := validAutomaticRegistrationConfig()
+	cfg.AllowedResources = []string{"https://rs.example", "https://other.example"}
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, f.newResolver(t), f.fetcher, cfg, fixedClock{now: f.now})
+	if err != nil {
+		t.Fatalf("NewAutomaticClientRepository: %v", err)
+	}
+	cfg.AllowedResources[0] = "https://changed.example"
+	got, err := repo.ResolveClient(context.Background(), fapi.ClientID(f.rpID))
+	if err != nil {
+		t.Fatalf("ResolveClient: %v", err)
+	}
+	if want := []string{"https://other.example", "https://rs.example"}; !slices.Equal(got.AllowedResources(), want) {
+		t.Errorf("AllowedResources() = %q, want %q", got.AllowedResources(), want)
+	}
+	if got.AllowsResource("https://changed.example") {
+		t.Error("a change to the config's slice after construction reached the client")
 	}
 }
 

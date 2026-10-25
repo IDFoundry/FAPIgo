@@ -388,6 +388,48 @@ func TestNewWiresAutomaticRegistrationAllowedClientAuthMethods(t *testing.T) {
 	}
 }
 
+// TestNewWiresAutomaticRegistrationAllowedResources proves server.New
+// passes AutomaticRegistrationConfig.AllowedResources through: the RP
+// may name only those, and, confined to several, must name one.
+func TestNewWiresAutomaticRegistrationAllowedResources(t *testing.T) {
+	f := setupAutomaticRegistrationFixture(t, testRedirectURI)
+	srv := newAutomaticRegistrationTestServer(t, f, func(cfg *server.Config, deps *server.Dependencies) {
+		cfg.Resources = []string{resourceA, resourceB, resourceC}
+		cfg.AutomaticRegistration.AllowedResources = []string{resourceA, resourceB}
+	})
+	for name, tc := range map[string]struct {
+		extra map[string]string
+		want  server.ErrorCode
+	}{
+		"allowed":     {extra: map[string]string{"resource": resourceB}},
+		"not allowed": {extra: map[string]string{"resource": resourceC}, want: server.ErrorInvalidTarget},
+		"none named":  {want: server.ErrorInvalidTarget},
+	} {
+		t.Run(name, func(t *testing.T) {
+			assertion, err := clientassertion.CreateAssertion(clientassertion.AssertionRequest{
+				Signer: f.rpOIDCKey, Algorithm: fapi.ES256, KeyID: "rp-oidc",
+				ClientID: f.rpID, Audience: testIssuer,
+				Now: f.now, Lifetime: 30 * time.Second,
+			})
+			if err != nil {
+				t.Fatalf("CreateAssertion: %v", err)
+			}
+			_, err = srv.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+				HTTP: server.FormRequest{Parameters: plainFormParameters(t, assertion, tc.extra)},
+			})
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("PushAuthorizationRequest: %v", err)
+				}
+				return
+			}
+			if code := serverErrorCode(t, err); code != tc.want {
+				t.Fatalf("error code = %q, want %q", code, tc.want)
+			}
+		})
+	}
+}
+
 // TestNewWiresAutomaticRegistrationOnResolutionFailure proves server.New
 // passes AutomaticRegistrationConfig.OnResolutionFailure through: the
 // operator's hook hears why the RP was refused, while the RP itself

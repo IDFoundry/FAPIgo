@@ -171,6 +171,11 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 		return s.completeLocalFail(ctx, clientID, newError(ErrorInvalidRequest, 400, "granted authorization_details exceeds what was requested", err)), nil
 	}
 
+	resources, resourcesErr := grantedResources(request.Resources, result.grant.Resources)
+	if resourcesErr != nil {
+		return s.completeLocalFail(ctx, clientID, resourcesErr), nil
+	}
+
 	if err := validateGrantedIDTokenClaims(result.grant.IDTokenClaims, s.cfg.Limits.MaxIDTokenClaimsBytes); err != nil {
 		return s.completeLocalFail(ctx, clientID, newError(ErrorInvalidRequest, 400, "granted ID token claims are not valid", err)), nil
 	}
@@ -211,7 +216,7 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 		ACR:                     result.auth.acr,
 		AMR:                     result.auth.amr,
 		AuthorizationDetails:    grantedAuthorizationDetails,
-		Resources:               request.Resources,
+		Resources:               resources,
 		TokenClaims:             request.TokenClaims,
 		RequestedIDTokenClaims:  idTokenClaims,
 		RequestedUserinfoClaims: userinfoClaims,

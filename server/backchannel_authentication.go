@@ -190,7 +190,7 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		return s.backchannelBeginFail(ctx, client.ID(), dpopErr), nil
 	}
 
-	interaction, err := s.backchannelInteraction(client, validated.params)
+	interaction, err := s.backchannelInteraction(client, validated.params, validated.resources)
 	if err != nil {
 		return s.backchannelBeginFail(ctx, client.ID(), newError(ErrorServerError, 500, "validated extension parameters could not be read back", err)), nil
 	}
@@ -684,11 +684,13 @@ func (s *Server) backchannelBeginFail(ctx context.Context, clientID fapi.ClientI
 }
 
 // backchannelInteraction is the BackchannelInteractionRequest for a
-// request from client with params, as BeginBackchannelAuthentication and
-// LookupBackchannelInteraction return it.
-func (s *Server) backchannelInteraction(client storage.RegisteredClient, params map[string]json.RawMessage) (BackchannelInteractionRequest, error) {
+// request from client with params, for resources, as
+// BeginBackchannelAuthentication and LookupBackchannelInteraction return
+// it.
+func (s *Server) backchannelInteraction(client storage.RegisteredClient, params map[string]json.RawMessage, resources []string) (BackchannelInteractionRequest, error) {
 	interaction := s.backchannelInteractionRequestFrom(client.ID(), params)
 	interaction.ClientDisplay = client.Display()
+	interaction.Resources = slices.Clone(resources)
 	extensions, err := s.interactionExtensions(params, coreBackchannelAuthenticationParameters, extension.SourceRequestObject)
 	if err != nil {
 		return BackchannelInteractionRequest{}, err
@@ -725,7 +727,7 @@ func (s *Server) LookupBackchannelInteraction(ctx context.Context, handle Backch
 	if err != nil {
 		return BackchannelInteractionRequest{}, newError(ErrorServerError, 500, "the request's client could not be resolved", err)
 	}
-	interaction, err := s.backchannelInteraction(client, request.Parameters)
+	interaction, err := s.backchannelInteraction(client, request.Parameters, request.Resources)
 	if err != nil {
 		return BackchannelInteractionRequest{}, newError(ErrorServerError, 500, "the request's extension parameters could not be read back", err)
 	}

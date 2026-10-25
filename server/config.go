@@ -602,6 +602,17 @@ type AutomaticRegistrationConfig struct {
 	// refuses one that isn't.
 	AuthorizationDetailsTypes []string
 
+	// AllowedResources confines every automatically-registered client to
+	// these RFC 8707 resource indicators, as
+	// storage.RegisteredClientConfig.AllowedResources confines a
+	// statically registered one — see
+	// federation.AutomaticRegistrationConfig.AllowedResources for why
+	// this never comes from an RP's own metadata. Each an absolute URI
+	// without a fragment, none repeated. Empty (the default) leaves them
+	// unconfined: any resource Config.Resources or the ResourcePolicy
+	// accepts, and the issuer as audience when they name none.
+	AllowedResources []string
+
 	// MaxPathLength/MaxAuthorityHints/MaxStatementLifetime/MaxClockSkew
 	// bound Trust Chain resolution itself — see federation.Limits, which these configure
 	// directly. All required when TrustAnchors is set.

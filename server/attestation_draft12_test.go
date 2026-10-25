@@ -577,12 +577,7 @@ func TestExtensionGrantClientIDReadOnce(t *testing.T) {
 			params, paramsErr := req.Parameters()
 			attested, err := h.server.AuthenticateAttestedClient(context.Background(), req.AttestedClientAuthentication())
 			if len(values) == 1 {
-				if paramsErr != nil || err != nil {
-					t.Fatalf("Parameters: %v, AuthenticateAttestedClient: %v", paramsErr, err)
-				}
-				if got, ok := params["client_id"]; ok || attested.Client.ID() != testClientID {
-					t.Fatalf("client_id %q (present %v), authenticated %q", got, ok, attested.Client.ID())
-				}
+				requireNoClientIDRead(t, params, paramsErr, attested, err)
 				return
 			}
 			if paramsErr == nil {
@@ -592,5 +587,17 @@ func TestExtensionGrantClientIDReadOnce(t *testing.T) {
 				t.Fatalf("AuthenticateAttestedClient code %q, want invalid_request", code)
 			}
 		})
+	}
+}
+
+// requireNoClientIDRead checks a request with a single empty client_id
+// was accepted by both readers, as no client_id at all.
+func requireNoClientIDRead(t *testing.T, params map[string]string, paramsErr error, attested server.AttestedClient, err error) {
+	t.Helper()
+	if paramsErr != nil || err != nil {
+		t.Fatalf("Parameters: %v, AuthenticateAttestedClient: %v", paramsErr, err)
+	}
+	if got, ok := params["client_id"]; ok || attested.Client.ID() != testClientID {
+		t.Fatalf("client_id %q (present %v), authenticated %q", got, ok, attested.Client.ID())
 	}
 }

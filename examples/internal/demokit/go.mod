@@ -1,3 +1,3 @@
 module github.com/idfoundry/fapigo/examples/internal/demokit
 
-go 1.26.9
+go 1.26.10

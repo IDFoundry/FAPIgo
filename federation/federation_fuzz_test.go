@@ -60,7 +60,7 @@ func FuzzRegisteredClientConfigFromMetadata(f *testing.F) {
 		cfg := fuzzAutomaticRegistrationConfig(flags)
 		repo := &AutomaticClientRepository{cfg: cfg}
 
-		got, jwks, err := repo.registeredClientConfigFromMetadata(context.Background(), id, json.RawMessage(raw))
+		got, jwks, err := repo.registeredClientConfigFromMetadata(context.Background(), id, json.RawMessage(raw), choiceLimits{})
 
 		if err == nil {
 			checkNoCaseVariantMember(t, members, names)

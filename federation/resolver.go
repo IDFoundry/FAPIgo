@@ -257,6 +257,14 @@ type ResolvedEntity struct {
 	// (OpenID Federation 1.0 §8.3.2); most callers have no reason to
 	// read this directly.
 	Tokens []string
+
+	// policy is the metadata policy Metadata was resolved with: every
+	// superior's, merged (§6.1.4.1). Automatic registration reads it to
+	// hold the values it takes from a parameter's RP Metadata Choices
+	// sibling to the policy on the parameter itself (see
+	// intfed.PermittedStrings). Nil for a Trust Anchor resolved as
+	// itself, whose metadata no policy applies to.
+	policy MetadataPolicy
 }
 
 // chainWalkState is Resolve's own mutable state as it walks upward from
@@ -733,7 +741,7 @@ func (r *Resolver) finalizeTrustChain(st *chainWalkState, hop int, sup hopSuperi
 		return ResolvedEntity{}, fmt.Errorf("federation: metadata %q's Immediate Superior sets for it: %w", st.subjectID, err)
 	}
 	leafMetadata := filterAllowedEntityTypes(st.subordinateConstraints, declared)
-	resolvedMetadata, err := r.resolveMetadata(st.subordinatePolicies, leafMetadata)
+	resolvedMetadata, policy, err := r.resolveMetadata(st.subordinatePolicies, leafMetadata)
 	if err != nil {
 		return ResolvedEntity{}, err
 	}
@@ -745,6 +753,7 @@ func (r *Resolver) finalizeTrustChain(st *chainWalkState, hop int, sup hopSuperi
 		JWKS: st.subjectJWKS, TrustMarks: st.leafClaims.TrustMarks, TrustMarkOwners: st.leafClaims.TrustMarkOwners,
 		TrustMarkIssuers: st.leafClaims.TrustMarkIssuers,
 		Tokens:           append(st.tokens, sup.token),
+		policy:           policy,
 	}, nil
 }
 
@@ -881,16 +890,18 @@ func mergeCrit(a, b []string) []string {
 	return out
 }
 
-func (r *Resolver) resolveMetadata(policies []subordinatePolicy, leafMetadata map[string]json.RawMessage) (map[string]json.RawMessage, error) {
+// resolveMetadata merges policies and applies the result to
+// leafMetadata, returning the Resolved Metadata and the merged policy.
+func (r *Resolver) resolveMetadata(policies []subordinatePolicy, leafMetadata map[string]json.RawMessage) (map[string]json.RawMessage, MetadataPolicy, error) {
 	merged, crit, err := resolveMetadataPolicies(policies)
 	if err != nil {
-		return nil, fmt.Errorf("federation: resolve metadata policy: %w", err)
+		return nil, nil, fmt.Errorf("federation: resolve metadata policy: %w", err)
 	}
 	resolved, err := intfed.ApplyPolicy(merged, crit, leafMetadata)
 	if err != nil {
-		return nil, fmt.Errorf("federation: apply metadata policy: %w", err)
+		return nil, nil, fmt.Errorf("federation: apply metadata policy: %w", err)
 	}
-	return resolved, nil
+	return resolved, merged, nil
 }
 
 // verifySelfSigned verifies stmt (expected to be entityID's own Entity

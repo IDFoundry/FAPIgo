@@ -664,37 +664,133 @@ func TestAutomaticClientRepositoryResolveClientFailsOnJWKSURIFetchError(t *testi
 	}
 }
 
-func TestAutomaticClientKeySourcePrefersUnderlying(t *testing.T) {
+// TestAutomaticClientKeySourceStaticClientUsesUnderlyingOnly: a client
+// the underlying repository registers statically gets its keys from the
+// underlying key source alone, even when its client_id is also an Entity
+// Identifier resolving under a configured Trust Anchor. An empty set or
+// an error from the underlying source is the answer, not a cue to try
+// the key its federation metadata publishes (rp-oidc), which a superior
+// in its Trust Chain can set; and federation isn't consulted at all.
+func TestAutomaticClientKeySourceStaticClientUsesUnderlyingOnly(t *testing.T) {
+	staticKey := generateKey(t)
+	staticKeys := keys.VerificationKeySet{Keys: []keys.VerificationKey{
+		{KeyID: "static-kid", Algorithm: fapi.ES256, PublicKey: &staticKey.PublicKey},
+	}}
+	for _, tc := range []struct {
+		name       string
+		underlying keys.ClientKeySource
+		kid        string
+		wantKID    string
+		wantErr    bool
+	}{
+		{name: "static key", kid: "static-kid", wantKID: "static-kid"},
+		{name: "any key", wantKID: "static-kid"},
+		{name: "federation-published key", kid: "rp-oidc"},
+		{name: "underlying error", underlying: alwaysFailsKeySource{}, kid: "rp-oidc", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := setupAutomaticRegistrationFixture(t, rpMetadataBuilder(t))
+			staticClient, err := storage.NewRegisteredClient(storage.RegisteredClientConfig{
+				ID: fapi.ClientID(f.rpID), RedirectURIs: []fapi.RegisteredRedirectURI{fapi.RegisteredRedirectURI(f.rpID + "/static-cb")},
+				ClientAuthMethod: storage.ClientAuthMethodPrivateKeyJWT, ClientAssertionAlgorithm: fapi.ES256,
+				SenderConstrain: storage.SenderConstrainDPoP, AllowedScopes: []string{"openid"},
+			})
+			if err != nil {
+				t.Fatalf("storage.NewRegisteredClient: %v", err)
+			}
+			repo, err := federation.NewAutomaticClientRepository(
+				staticRepository{id: fapi.ClientID(f.rpID), client: staticClient}, f.newResolver(t), f.fetcher,
+				validAutomaticRegistrationConfig(), fixedClock{now: f.now})
+			if err != nil {
+				t.Fatalf("NewAutomaticClientRepository: %v", err)
+			}
+			underlying := tc.underlying
+			if underlying == nil {
+				underlying = staticKeySource{id: fapi.ClientID(f.rpID), keySet: staticKeys}
+			}
+			src, err := federation.NewAutomaticClientKeySource(underlying, repo)
+			if err != nil {
+				t.Fatalf("NewAutomaticClientKeySource: %v", err)
+			}
+
+			set, err := src.ResolveVerificationKeys(context.Background(), keys.ClientKeyRequest{
+				ClientID: fapi.ClientID(f.rpID), Purpose: keys.ClientAssertionVerification, Algorithm: fapi.ES256, KeyID: tc.kid,
+			})
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("ResolveVerificationKeys error = %v, want error %v", err, tc.wantErr)
+			}
+			// staticKeySource returns its whole set; what matters is that no
+			// federation-published key is ever in it.
+			for _, k := range set.Keys {
+				if k.KeyID != "static-kid" {
+					t.Errorf("ResolveVerificationKeys returned key %q, want only the static client's own keys", k.KeyID)
+				}
+			}
+			if tc.wantKID != "" && (len(set.Keys) == 0 || set.Keys[0].KeyID != tc.wantKID) {
+				t.Errorf("ResolveVerificationKeys = %+v, want %q", set, tc.wantKID)
+			}
+			if n := atomic.LoadInt32(f.rpConfigCalls); n != 0 {
+				t.Errorf("RP's own well-known endpoint was fetched %d times, want 0 for a statically registered client", n)
+			}
+		})
+	}
+}
+
+// TestAutomaticClientKeySourceFederationClientUsesFederationKeysOnly: a
+// client the underlying repository doesn't register is an automatically
+// registered one, and its keys come from its federation metadata — not
+// from the underlying key source, even one that answers for its
+// client_id.
+func TestAutomaticClientKeySourceFederationClientUsesFederationKeysOnly(t *testing.T) {
 	f := setupAutomaticRegistrationFixture(t, rpMetadataBuilder(t))
-	resolver := f.newResolver(t)
-	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, resolver, f.fetcher, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
+	repo, err := federation.NewAutomaticClientRepository(alwaysFailsRepository{}, f.newResolver(t), f.fetcher, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
 	if err != nil {
 		t.Fatalf("NewAutomaticClientRepository: %v", err)
 	}
-
-	underlyingKey := generateKey(t)
+	otherKey := generateKey(t)
 	underlying := staticKeySource{
 		id: fapi.ClientID(f.rpID),
 		keySet: keys.VerificationKeySet{Keys: []keys.VerificationKey{
-			{KeyID: "static-kid", Algorithm: fapi.ES256, PublicKey: &underlyingKey.PublicKey},
+			{KeyID: "static-kid", Algorithm: fapi.ES256, PublicKey: &otherKey.PublicKey},
 		}},
 	}
 	src, err := federation.NewAutomaticClientKeySource(underlying, repo)
 	if err != nil {
 		t.Fatalf("NewAutomaticClientKeySource: %v", err)
 	}
-
 	set, err := src.ResolveVerificationKeys(context.Background(), keys.ClientKeyRequest{
 		ClientID: fapi.ClientID(f.rpID), Purpose: keys.ClientAssertionVerification, Algorithm: fapi.ES256,
 	})
 	if err != nil {
 		t.Fatalf("ResolveVerificationKeys: %v", err)
 	}
-	if len(set.Keys) != 1 || set.Keys[0].KeyID != "static-kid" {
-		t.Errorf("ResolveVerificationKeys = %+v, want the underlying static key, unshadowed by federation resolution", set)
+	if len(set.Keys) != 1 || set.Keys[0].KeyID != "rp-oidc" {
+		t.Errorf("ResolveVerificationKeys = %+v, want only the federation-published rp-oidc key", set)
 	}
-	if atomic.LoadInt32(f.rpConfigCalls) != 0 {
-		t.Errorf("RP's own well-known endpoint was fetched, want underlying to have short-circuited federation resolution entirely")
+}
+
+// TestAutomaticClientKeySourceDoesNotMaskAnUnavailableStore: when the
+// client repository can't answer, whether the client is statically
+// registered is unknown, so its error is returned rather than either
+// source's keys.
+func TestAutomaticClientKeySourceDoesNotMaskAnUnavailableStore(t *testing.T) {
+	f := setupAutomaticRegistrationFixture(t, rpMetadataBuilder(t))
+	repo, err := federation.NewAutomaticClientRepository(unavailableRepository{}, f.newResolver(t), f.fetcher, validAutomaticRegistrationConfig(), fixedClock{now: f.now})
+	if err != nil {
+		t.Fatalf("NewAutomaticClientRepository: %v", err)
+	}
+	src, err := federation.NewAutomaticClientKeySource(alwaysFailsKeySource{}, repo)
+	if err != nil {
+		t.Fatalf("NewAutomaticClientKeySource: %v", err)
+	}
+	_, err = src.ResolveVerificationKeys(context.Background(), keys.ClientKeyRequest{
+		ClientID: fapi.ClientID(f.rpID), Purpose: keys.ClientAssertionVerification, Algorithm: fapi.ES256,
+	})
+	if !errors.Is(err, storage.ErrStoreUnavailable) {
+		t.Errorf("ResolveVerificationKeys error = %v, want storage.ErrStoreUnavailable", err)
+	}
+	if n := atomic.LoadInt32(f.rpConfigCalls); n != 0 {
+		t.Errorf("RP's own well-known endpoint was fetched %d times, want 0", n)
 	}
 }
 

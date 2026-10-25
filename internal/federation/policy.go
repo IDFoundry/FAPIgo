@@ -364,6 +364,48 @@ func isJSONNull(raw json.RawMessage) bool {
 	return json.Unmarshal(raw, &v) == nil && v == nil
 }
 
+// PermittedStrings is the set of string values ops — the merged policy
+// for one single-valued metadata parameter — lets that parameter take:
+// the value operator's own value when it sets one, else the one_of
+// operator's values. constrained is false when ops has neither (value
+// null removes the parameter rather than restricting it), so the
+// parameter may take any value; an operand that isn't a string permits
+// no string at all. ops must already have passed ValidatePolicy (as a
+// policy ApplyPolicy accepted has).
+//
+// Policy operators act on one parameter only (§6.1.3.1), so a value
+// can reach a Relying Party's registration through a parameter the
+// policy never names: its OpenID Connect RP Metadata Choices 1.0 §2
+// plural sibling (token_endpoint_auth_signing_alg_values_supported for
+// token_endpoint_auth_signing_alg). A caller choosing the effective
+// value from that sibling uses this to keep its choice within what the
+// policy permits for the singular parameter.
+func PermittedStrings(ops PolicyOperators) (permitted []string, constrained bool, err error) {
+	if raw, ok := ops[opValue]; ok && !isJSONNull(raw) {
+		var v string
+		if json.Unmarshal(raw, &v) != nil {
+			return nil, true, nil
+		}
+		return []string{v}, true, nil
+	}
+	raw, ok := ops[opOneOf]
+	if !ok {
+		return nil, false, nil
+	}
+	options, err := decodeArray(raw)
+	if err != nil {
+		return nil, false, err
+	}
+	permitted = []string{}
+	for _, option := range options {
+		var v string
+		if json.Unmarshal(option, &v) == nil {
+			permitted = append(permitted, v)
+		}
+	}
+	return permitted, true, nil
+}
+
 // ValidatePolicy checks every metadata parameter policy in policy with
 // validateCombination.
 func ValidatePolicy(policy MetadataPolicy, crit []string) error {

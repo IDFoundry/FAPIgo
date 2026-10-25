@@ -53,7 +53,7 @@ func newTestAutomaticClientRepositoryWithFetcher(t *testing.T, automaticCfg Auto
 
 func call(t *testing.T, repo *AutomaticClientRepository, raw string) (storage.RegisteredClientConfig, json.RawMessage, error) {
 	t.Helper()
-	return repo.registeredClientConfigFromMetadata(context.Background(), "https://rp.example.org", json.RawMessage(raw))
+	return repo.registeredClientConfigFromMetadata(context.Background(), "https://rp.example.org", json.RawMessage(raw), choiceLimits{})
 }
 
 // testSelfSignedCert generates a fresh, real self-signed X.509

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
@@ -161,31 +162,9 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 		return s.completeErrorRedirect(ctx, clientID, redirectURI, state, "login_required", "the authenticated user isn't the one the request named", AuditOutcomeFailure)
 	}
 
-	requestedScope, _ := jsonString(request.Parameters, "scope")
-	if err := validateGrantedScopeSubset(result.grant.Scope, requestedScope); err != nil {
-		return s.completeLocalFail(ctx, clientID, newError(ErrorInvalidRequest, 400, "granted scope exceeds requested scope", err)), nil
-	}
-
-	grantedAuthorizationDetails, err := s.validateGrantedAuthorizationDetails(request.Parameters[authorizationDetailsParameter], result.grant.AuthorizationDetails)
-	if err != nil {
-		return s.completeLocalFail(ctx, clientID, newError(ErrorInvalidRequest, 400, "granted authorization_details exceeds what was requested", err)), nil
-	}
-
-	resources, resourcesErr := grantedResources(request.Resources, result.grant.Resources)
-	if resourcesErr != nil {
-		return s.completeLocalFail(ctx, clientID, resourcesErr), nil
-	}
-
-	if err := validateGrantedIDTokenClaims(result.grant.IDTokenClaims, s.cfg.Limits.MaxIDTokenClaimsBytes); err != nil {
-		return s.completeLocalFail(ctx, clientID, newError(ErrorInvalidRequest, 400, "granted ID token claims are not valid", err)), nil
-	}
-	if err := s.validateGrantID(result.grant.GrantID); err != nil {
-		return s.completeLocalFail(ctx, clientID, newError(ErrorInvalidRequest, 400, "the grant ID is not valid", err)), nil
-	}
-
-	idTokenClaims, userinfoClaims, err := approvedClaimNames(request.Parameters, result.grant.ApprovedIdentityClaims)
-	if err != nil {
-		return s.completeLocalFail(ctx, clientID, newError(ErrorInvalidRequest, 400, "approved identity claims exceed what was requested", err)), nil
+	approved, approvedErr := s.checkApprovedGrant(request, result.grant)
+	if approvedErr != nil {
+		return s.completeLocalFail(ctx, clientID, approvedErr), nil
 	}
 
 	codeChallenge, err := jsonString(request.Parameters, "code_challenge")
@@ -215,11 +194,11 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 		AuthTime:                result.auth.authTime,
 		ACR:                     result.auth.acr,
 		AMR:                     result.auth.amr,
-		AuthorizationDetails:    grantedAuthorizationDetails,
-		Resources:               resources,
+		AuthorizationDetails:    approved.authorizationDetails,
+		Resources:               approved.resources,
 		TokenClaims:             request.TokenClaims,
-		RequestedIDTokenClaims:  idTokenClaims,
-		RequestedUserinfoClaims: userinfoClaims,
+		RequestedIDTokenClaims:  approved.idTokenClaims,
+		RequestedUserinfoClaims: approved.userinfoClaims,
 		IDTokenClaims:           result.grant.IDTokenClaims,
 		GrantID:                 result.grant.GrantID,
 	})
@@ -245,6 +224,44 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 
 	s.audit(ctx, AuditEventCompleteAuthorization, clientID, AuditOutcomeSuccess, "")
 	return AuthorizationRedirect{destination: destination}, nil
+}
+
+// approvedGrant is what an application's GrantedAuthorization approves
+// of a pending authorization request, checked against it.
+type approvedGrant struct {
+	authorizationDetails          json.RawMessage
+	resources                     []string
+	idTokenClaims, userinfoClaims []string
+}
+
+// checkApprovedGrant checks grant against request, what the client
+// asked for: its scope, authorization details, resources and identity
+// claims may only narrow the request's, and its ID token claims and
+// grant ID must be valid. Any other grant is invalid_request.
+func (s *Server) checkApprovedGrant(request requestRecord, grant GrantedAuthorization) (approvedGrant, *Error) {
+	requestedScope, _ := jsonString(request.Parameters, "scope")
+	if err := validateGrantedScopeSubset(grant.Scope, requestedScope); err != nil {
+		return approvedGrant{}, newError(ErrorInvalidRequest, 400, "granted scope exceeds requested scope", err)
+	}
+	details, err := s.validateGrantedAuthorizationDetails(request.Parameters[authorizationDetailsParameter], grant.AuthorizationDetails)
+	if err != nil {
+		return approvedGrant{}, newError(ErrorInvalidRequest, 400, "granted authorization_details exceeds what was requested", err)
+	}
+	resources, resourcesErr := grantedResources(request.Resources, grant.Resources)
+	if resourcesErr != nil {
+		return approvedGrant{}, resourcesErr
+	}
+	if err := validateGrantedIDTokenClaims(grant.IDTokenClaims, s.cfg.Limits.MaxIDTokenClaimsBytes); err != nil {
+		return approvedGrant{}, newError(ErrorInvalidRequest, 400, "granted ID token claims are not valid", err)
+	}
+	if err := s.validateGrantID(grant.GrantID); err != nil {
+		return approvedGrant{}, newError(ErrorInvalidRequest, 400, "the grant ID is not valid", err)
+	}
+	idTokenClaims, userinfoClaims, err := approvedClaimNames(request.Parameters, grant.ApprovedIdentityClaims)
+	if err != nil {
+		return approvedGrant{}, newError(ErrorInvalidRequest, 400, "approved identity claims exceed what was requested", err)
+	}
+	return approvedGrant{authorizationDetails: details, resources: resources, idTokenClaims: idTokenClaims, userinfoClaims: userinfoClaims}, nil
 }
 
 func (s *Server) completeErrorRedirect(ctx context.Context, clientID fapi.ClientID, redirectURI, state, errorCode, description string, outcome AuditOutcome) (AuthorizationResult, error) {

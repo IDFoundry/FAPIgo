@@ -241,32 +241,10 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), invalidErr)
 	}
 
-	grant, err := s.decodeOwnGrantRecord(redeemed.Grant)
-	if err != nil {
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), recordFailure(err, newError(ErrorInvalidGrant, 400, "code is invalid, expired, or already used", nil), "authorization code grant"))
-	}
-	if _, ok := s.grantRevocationReader(); ok {
-		// Named after the code, so a reuse of it can revoke whatever this
-		// exchange issues — refresh tokens included, which carry the
-		// grant forward — without the store remembering the name.
-		grant.CodeGrantID = grantrevocation.CodeGrantID(codeHash)
-	}
-
 	now := s.deps.Clock.Now()
-	if !issuedWithin(grant.IssuedAt, s.cfg.Limits.AuthorizationCodeLifetime, now) {
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorInvalidGrant, 400, "code has expired", nil))
-	}
-	if valErr := validateRedeemedAuthorizationCode(redeemed, grant, client.ID(), redirectURI, thumbprint, codeVerifier, now); valErr != nil {
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), valErr)
-	}
-	if revErr := s.checkGrantNotRevoked(ctx, grant); revErr != nil {
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), revErr)
-	}
-	// The registration may have changed since the code was issued (a
-	// scope or RAR type removed, Config.OAuthOnly turned on, the client's
-	// redirect URIs removed), as at refresh and the CIBA token exchange.
-	if !client.AllowsAuthorizationCodeGrant() {
-		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), newError(ErrorUnauthorizedClient, 400, "the client is no longer registered for the authorization code grant", nil))
+	grant, grantErr := s.redeemedCodeGrant(ctx, client, redeemed, codeHash, codeExchange{redirectURI: redirectURI, thumbprint: thumbprint, codeVerifier: codeVerifier}, now)
+	if grantErr != nil {
+		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), grantErr)
 	}
 	audience, audiences, allowedErr := s.allowedGrantAudience(ctx, client, grant, grant.Scope, requestedResources)
 	if allowedErr != nil {
@@ -316,6 +294,46 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 
 	s.audit(ctx, AuditEventExchangeAuthorizationCode, client.ID(), AuditOutcomeSuccess, "")
 	return result, nil
+}
+
+// codeExchange is what the token request presented with an
+// authorization code, for redeemedCodeGrant to check it against.
+type codeExchange struct {
+	redirectURI, thumbprint, codeVerifier string
+}
+
+// redeemedCodeGrant decodes the grant of redeemed, the authorization
+// code hashing to codeHash, and checks it may still be exchanged as
+// presented: written by this server (ownsRecord), unexpired, matching
+// the request's redirect_uri, binding and PKCE verifier, not revoked,
+// and for a client still registered for the authorization code grant.
+func (s *Server) redeemedCodeGrant(ctx context.Context, client storage.RegisteredClient, redeemed storage.RedeemedAuthorizationCode, codeHash [32]byte, presented codeExchange, now time.Time) (grantRecord, *Error) {
+	grant, err := s.decodeOwnGrantRecord(redeemed.Grant)
+	if err != nil {
+		return grantRecord{}, recordFailure(err, newError(ErrorInvalidGrant, 400, "code is invalid, expired, or already used", nil), "authorization code grant")
+	}
+	if _, ok := s.grantRevocationReader(); ok {
+		// Named after the code, so a reuse of it can revoke whatever this
+		// exchange issues — refresh tokens included, which carry the
+		// grant forward — without the store remembering the name.
+		grant.CodeGrantID = grantrevocation.CodeGrantID(codeHash)
+	}
+	if !issuedWithin(grant.IssuedAt, s.cfg.Limits.AuthorizationCodeLifetime, now) {
+		return grantRecord{}, newError(ErrorInvalidGrant, 400, "code has expired", nil)
+	}
+	if valErr := validateRedeemedAuthorizationCode(redeemed, grant, client.ID(), presented.redirectURI, presented.thumbprint, presented.codeVerifier, now); valErr != nil {
+		return grantRecord{}, valErr
+	}
+	if revErr := s.checkGrantNotRevoked(ctx, grant); revErr != nil {
+		return grantRecord{}, revErr
+	}
+	// The registration may have changed since the code was issued (a
+	// scope or RAR type removed, Config.OAuthOnly turned on, the client's
+	// redirect URIs removed), as at refresh and the CIBA token exchange.
+	if !client.AllowsAuthorizationCodeGrant() {
+		return grantRecord{}, newError(ErrorUnauthorizedClient, 400, "the client is no longer registered for the authorization code grant", nil)
+	}
+	return grant, nil
 }
 
 // codeExchangeParameters returns the code, redirect_uri and

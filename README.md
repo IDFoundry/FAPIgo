@@ -68,7 +68,7 @@ variants and OAuth 2.0 attestation-based client authentication.
 
 > **⚠ Work in progress.** FAPIgo is under active development. APIs, package structure, and behavior may change without notice. We recommend waiting for the v1.0 release before considering it for production use.
 
-Requires Go 1.26.9+ (per `go.mod`'s `go` directive).
+Requires Go 1.26.10+ (per `go.mod`'s `go` directive).
 
 ```
 go get github.com/idfoundry/fapigo

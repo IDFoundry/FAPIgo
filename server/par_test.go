@@ -1421,6 +1421,26 @@ func TestPushAuthorizationRequestRejectsDuplicateParameter(t *testing.T) {
 	}
 }
 
+// TestPushAuthorizationRequestRejectsRepeatedEmptyParameter covers RFC
+// 6749 §3.1's "MUST NOT be included more than once" for a repetition
+// with an empty value: "state=&state=x" is refused, not read as "x".
+func TestPushAuthorizationRequestRejectsRepeatedEmptyParameter(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	for _, extra := range [][]server.FormParameter{
+		{formParam("nonce", ""), formParam("nonce", "n-1")},
+		{formParam("nonce", "n-1"), formParam("nonce", "")},
+		{formParam("nonce", ""), formParam("nonce", "")},
+	} {
+		params := append(plainFormParameters(t, h.clientAssertion(t), nil), extra...)
+		_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+			HTTP: server.FormRequest{Parameters: params},
+		})
+		if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
+			t.Fatalf("%v: error code = %q, want %q", extra, code, server.ErrorInvalidRequest)
+		}
+	}
+}
+
 // TestPushAuthorizationRequestRejectsMultipleDPoPProofs mirrors
 // TestExchangeAuthorizationCodeRejectsMultipleDPoPProofs (see its own
 // doc comment) for PAR, where a DPoP proof is optional (RFC 9449 §10)

@@ -550,3 +550,47 @@ func TestExtensionGrantClientIDMustMatchAttestation(t *testing.T) {
 		})
 	}
 }
+
+// TestExtensionGrantClientIDReadOnce covers client_id read the same way
+// by TokenEndpointRequest.Parameters and AttestedClientAuthentication: a
+// repeated client_id, an empty one among them, is refused by both, and
+// never read as the attestation's client by one and as another client by
+// the other. A single empty client_id is no client_id to either (RFC
+// 6749 §3.1).
+func TestExtensionGrantClientIDReadOnce(t *testing.T) {
+	attesterKey := generateKey(t)
+	h := newHarnessWithAttestationClientCredentials(t, attesterKey)
+	for name, values := range map[string][]string{
+		"empty then another client": {"", "some-other-client"},
+		"another client then empty": {"some-other-client", ""},
+		"repeated":                  {testClientID.String(), testClientID.String()},
+		"empty":                     {""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			instance := generateKey(t)
+			header := dpopHeader(dpopProofAt(t, generateKey(t), testTokenEndpoint, "", h.now))
+			header.Set("OAuth-Client-Attestation", draft12Attestation(t, attesterKey, nil, &instance.PublicKey, h.now, time.Hour))
+			header.Set("OAuth-Client-Attestation-PoP", draft12PoP(t, instance, testIssuer, h.now, nil))
+			form := preAuthorizedForm()
+			form["client_id"] = values
+			req := extensionTokenRequest(t, form, header, nil)
+			params, paramsErr := req.Parameters()
+			attested, err := h.server.AuthenticateAttestedClient(context.Background(), req.AttestedClientAuthentication())
+			if len(values) == 1 {
+				if paramsErr != nil || err != nil {
+					t.Fatalf("Parameters: %v, AuthenticateAttestedClient: %v", paramsErr, err)
+				}
+				if got, ok := params["client_id"]; ok || attested.Client.ID() != testClientID {
+					t.Fatalf("client_id %q (present %v), authenticated %q", got, ok, attested.Client.ID())
+				}
+				return
+			}
+			if paramsErr == nil {
+				t.Fatalf("Parameters = %v, want a refusal", params)
+			}
+			if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
+				t.Fatalf("AuthenticateAttestedClient code %q, want invalid_request", code)
+			}
+		})
+	}
+}

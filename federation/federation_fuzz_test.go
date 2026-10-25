@@ -60,7 +60,7 @@ func FuzzRegisteredClientConfigFromMetadata(f *testing.F) {
 		cfg := fuzzAutomaticRegistrationConfig(flags)
 		repo := &AutomaticClientRepository{cfg: cfg}
 
-		got, jwks, err := repo.registeredClientConfigFromMetadata(context.Background(), id, json.RawMessage(raw))
+		got, jwks, err := repo.registeredClientConfigFromMetadata(context.Background(), id, json.RawMessage(raw), choiceLimits{})
 
 		if err == nil {
 			checkNoCaseVariantMember(t, members, names)
@@ -359,14 +359,22 @@ func FuzzEntityIDHostAgreement(f *testing.F) {
 		if wk.Hostname() != host {
 			t.Fatalf("%q: constraints see host %q, the fetch targets %q", id, host, wk.Hostname())
 		}
-		again, err := url.Parse(wk.String())
-		if err != nil || again.Hostname() != host || again.Scheme != "https" || again.User != nil {
-			t.Fatalf("%q: .well-known URL %q re-parses to host %q (err %v), not %q", id, wk.String(), again.Hostname(), err, host)
-		}
-		for i := 0; i < len(host); i++ {
-			if host[i] >= 0x80 {
-				t.Fatalf("%q: non-ASCII host %q accepted", id, host)
-			}
-		}
+		checkWellKnownReparse(t, id, wk, host)
 	})
+}
+
+// checkWellKnownReparse fails t unless the serialized .well-known URL wk
+// for id parses again to the same https host, with no userinfo, and that
+// host is ASCII.
+func checkWellKnownReparse(t *testing.T, id string, wk *url.URL, host string) {
+	t.Helper()
+	again, err := url.Parse(wk.String())
+	if err != nil || again.Hostname() != host || again.Scheme != "https" || again.User != nil {
+		t.Fatalf("%q: .well-known URL %q re-parses to host %q (err %v), not %q", id, wk.String(), again.Hostname(), err, host)
+	}
+	for i := 0; i < len(host); i++ {
+		if host[i] >= 0x80 {
+			t.Fatalf("%q: non-ASCII host %q accepted", id, host)
+		}
+	}
 }

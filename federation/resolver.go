@@ -120,6 +120,16 @@ type Dependencies struct {
 	// rebinding) can point at an internal host: and the entities a
 	// resolver fetches are named by the Trust Chain it's resolving, so
 	// by whoever controls the subject.
+	//
+	// Those fetches happen before anything is trusted: Resolve fetches
+	// each authority hint's Entity Configuration, and then the
+	// Subordinate Statement from the federation_fetch_endpoint that
+	// configuration names, before any signature on the path has been
+	// checked against a Trust Anchor (see Resolve). So whoever controls
+	// the subject chooses those URLs — host, port, path and query, with
+	// only "sub" added — and HTTP gets a GET to each, whatever the chain
+	// later turns out to be. Every host HTTP may reach, including any in
+	// fapihttp.Config.AllowedPrivateHosts, is reachable that way.
 	HTTP *fapihttp.Client
 
 	Clock Clock
@@ -247,6 +257,14 @@ type ResolvedEntity struct {
 	// (OpenID Federation 1.0 §8.3.2); most callers have no reason to
 	// read this directly.
 	Tokens []string
+
+	// policy is the metadata policy Metadata was resolved with: every
+	// superior's, merged (§6.1.4.1). Automatic registration reads it to
+	// hold the values it takes from a parameter's RP Metadata Choices
+	// sibling to the policy on the parameter itself (see
+	// intfed.PermittedStrings). Nil for a Trust Anchor resolved as
+	// itself, whose metadata no policy applies to.
+	policy MetadataPolicy
 }
 
 // chainWalkState is Resolve's own mutable state as it walks upward from
@@ -343,6 +361,18 @@ func newChainWalkState(subjectID string, leafStmt intfed.Statement, leafToken st
 // for VerifyTrustMark; issuing statements and serving federation
 // endpoints is SelfIssuer's and SubordinateIssuer's job, not a
 // Resolver's. See doc.go for the package's scope.
+//
+// Trust is established from the top down, but the chain is discovered
+// from the bottom up: the subject's Entity Configuration names its
+// authority hints, each hint's own Entity Configuration names its
+// federation_fetch_endpoint, and the Subordinate Statement fetched from
+// there names the next keys — all fetched before the Trust Anchor's key
+// verifies any of them. Until then they are claims of whoever controls
+// the subject, so the URLs Resolve fetches, up to Limits.MaxPathLength ×
+// Limits.MaxAuthorityHints superiors' worth, are that party's choice
+// (see Dependencies.HTTP), and a caller that resolves an Entity
+// Identifier an unauthenticated party names (as automatic registration
+// does with a client_id) lets that party send them.
 func (r *Resolver) Resolve(ctx context.Context, subjectID string) (ResolvedEntity, error) {
 	if subjectID == "" {
 		return ResolvedEntity{}, fmt.Errorf("federation: subject entity ID is empty")
@@ -711,7 +741,7 @@ func (r *Resolver) finalizeTrustChain(st *chainWalkState, hop int, sup hopSuperi
 		return ResolvedEntity{}, fmt.Errorf("federation: metadata %q's Immediate Superior sets for it: %w", st.subjectID, err)
 	}
 	leafMetadata := filterAllowedEntityTypes(st.subordinateConstraints, declared)
-	resolvedMetadata, err := r.resolveMetadata(st.subordinatePolicies, leafMetadata)
+	resolvedMetadata, policy, err := r.resolveMetadata(st.subordinatePolicies, leafMetadata)
 	if err != nil {
 		return ResolvedEntity{}, err
 	}
@@ -723,6 +753,7 @@ func (r *Resolver) finalizeTrustChain(st *chainWalkState, hop int, sup hopSuperi
 		JWKS: st.subjectJWKS, TrustMarks: st.leafClaims.TrustMarks, TrustMarkOwners: st.leafClaims.TrustMarkOwners,
 		TrustMarkIssuers: st.leafClaims.TrustMarkIssuers,
 		Tokens:           append(st.tokens, sup.token),
+		policy:           policy,
 	}, nil
 }
 
@@ -859,16 +890,18 @@ func mergeCrit(a, b []string) []string {
 	return out
 }
 
-func (r *Resolver) resolveMetadata(policies []subordinatePolicy, leafMetadata map[string]json.RawMessage) (map[string]json.RawMessage, error) {
+// resolveMetadata merges policies and applies the result to
+// leafMetadata, returning the Resolved Metadata and the merged policy.
+func (r *Resolver) resolveMetadata(policies []subordinatePolicy, leafMetadata map[string]json.RawMessage) (map[string]json.RawMessage, MetadataPolicy, error) {
 	merged, crit, err := resolveMetadataPolicies(policies)
 	if err != nil {
-		return nil, fmt.Errorf("federation: resolve metadata policy: %w", err)
+		return nil, nil, fmt.Errorf("federation: resolve metadata policy: %w", err)
 	}
 	resolved, err := intfed.ApplyPolicy(merged, crit, leafMetadata)
 	if err != nil {
-		return nil, fmt.Errorf("federation: apply metadata policy: %w", err)
+		return nil, nil, fmt.Errorf("federation: apply metadata policy: %w", err)
 	}
-	return resolved, nil
+	return resolved, merged, nil
 }
 
 // verifySelfSigned verifies stmt (expected to be entityID's own Entity

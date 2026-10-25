@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -15,6 +16,7 @@ import (
 
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/fapihttp"
+	intfed "github.com/idfoundry/fapigo/internal/federation"
 	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/internal/mtls"
 	"github.com/idfoundry/fapigo/internal/strictjson"
@@ -139,7 +141,9 @@ type AutomaticRegistrationConfig struct {
 	// any algorithm supported by the OP and the RP MAY be used". Typically
 	// the server's own allowed client assertion algorithms (server.New
 	// sets it so). Empty means an RP must name its algorithm to register
-	// for private_key_jwt.
+	// for private_key_jwt. A superior's metadata policy restricting
+	// token_endpoint_auth_signing_alg (one_of or value) restricts these
+	// defaults too, as it does token_endpoint_auth_signing_alg_values_supported.
 	ClientAssertionAlgorithms []fapi.SignatureAlgorithm
 
 	// SubjectTypes is the kinds of sub this OP gives an automatically
@@ -253,13 +257,21 @@ func newRememberedFailure(err error) error {
 // Static registration always wins: Underlying is tried first, and its
 // result returned as-is when it succeeds — federation resolution is
 // only attempted when Underlying fails to resolve id AND id is itself
-// a well-formed https Entity Identifier (ValidEntityID). Underlying's
-// own interface has no way to distinguish "no such client" from a real
-// backing-store failure (storage.ClientRepository's own contract), so
-// a transient Underlying failure for an id that happens to look like
-// an Entity Identifier is indistinguishable from "not statically
-// registered" here — an inherent limitation of that interface, not
-// something this type can work around.
+// a well-formed https Entity Identifier (ValidEntityID). An Underlying
+// failure wrapping storage.ErrStoreUnavailable is returned as it is;
+// any other is read as "not statically registered". The same split
+// decides where AutomaticClientKeySource takes a client's keys from, so
+// a statically registered client is authenticated with its static keys
+// only, never with ones its federation metadata publishes.
+//
+// A client_id is resolved before its client is authenticated — that is
+// how automatic registration finds the keys to authenticate it with —
+// so any caller can name one, and Resolver.Resolve then fetches the URLs
+// that Entity Identifier's statements name, before any of them is
+// trusted (see Resolver.Resolve and Dependencies.HTTP). The fetcher
+// bounds which hosts that can reach; a host listed in its
+// fapihttp.Config.AllowedPrivateHosts is reachable by unauthenticated
+// callers this way.
 //
 // The client_credentials grant and CIBA are each gated by their own
 // config-level switch (AutomaticRegistrationConfig.AllowsClientCredentialsGrant/
@@ -389,6 +401,21 @@ func (a *AutomaticClientRepository) ResolveClient(ctx context.Context, id fapi.C
 		return storage.RegisteredClient{}, err
 	}
 	return entry.client, nil
+}
+
+// staticallyRegistered reports whether Underlying resolves id — the
+// same test ResolveClient uses to decide that a client is statically
+// registered rather than resolved through federation. An unavailable
+// store is an error, not a "no".
+func (a *AutomaticClientRepository) staticallyRegistered(ctx context.Context, id fapi.ClientID) (bool, error) {
+	_, err := a.underlying.ResolveClient(ctx, id)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, storage.ErrStoreUnavailable) {
+		return false, err
+	}
+	return false, nil
 }
 
 // resolveVerificationKeys resolves id's own client authentication keys
@@ -527,7 +554,11 @@ func (a *AutomaticClientRepository) register(ctx context.Context, id fapi.Client
 	if !ok {
 		return cachedClient{}, fmt.Errorf("federation: %q has no %s metadata", id, relyingPartyEntityType)
 	}
-	clientCfg, jwks, err := a.registeredClientConfigFromMetadata(ctx, id, raw)
+	limits, err := choiceLimitsFromPolicy(resolved.policy[relyingPartyEntityType])
+	if err != nil {
+		return cachedClient{}, fmt.Errorf("federation: %q: %w", id, err)
+	}
+	clientCfg, jwks, err := a.registeredClientConfigFromMetadata(ctx, id, raw, limits)
 	if err != nil {
 		return cachedClient{}, fmt.Errorf("federation: %q: %w", id, err)
 	}
@@ -578,24 +609,26 @@ func (a *AutomaticClientRepository) fetchJWKS(ctx context.Context, uri string) (
 // Entity Configuration's own top-level federation signing key — a
 // different key, for a different purpose (federation/doc.go).
 //
-// Underlying is tried first, exactly mirroring
-// AutomaticClientRepository's own "static registration always wins"
-// precedence — a statically registered client's real keys must never
-// be shadowed by a federation lookup. Unlike ResolveClient's own
-// single-value result, a keys.ClientKeySource legitimately returns an
-// empty, error-free VerificationKeySet to mean "no matching key" (e.g.
-// a real client mid-rotation, or simply a kid Underlying doesn't
-// recognize) — so an empty result from Underlying falls through to
-// federation resolution exactly like an error would, on the
-// expectation that an Underlying implementation unaware of a given
-// client ID at all is at least as likely to signal that with an empty
-// result as with an error (keys.ClientKeySource's own interface
-// documents no requirement either way). This mirrors
-// AutomaticClientRepository's own documented "Underlying's interface
-// has no way to distinguish these cases" limitation — a statically
-// registered client legitimately missing a requested key triggers one
-// wasted federation resolution attempt (which then also fails), not a
-// silent wrong answer.
+// Keys come from the same source as the registration they authenticate.
+// A client that repo's own underlying client repository (the one passed
+// to NewAutomaticClientRepository) resolves is statically registered,
+// and its keys come from Underlying (this type's key source) alone:
+// whatever Underlying returns, an error or an empty set included, is
+// the answer, exactly as it would be without automatic registration.
+// Only a client that repository doesn't have is resolved through its
+// Trust Chain, and its keys then come from its openid_relying_party
+// metadata alone. A
+// statically registered client whose client_id is also an Entity
+// Identifier resolving under one of the configured Trust Anchors is
+// therefore never authenticated with a key its federation metadata
+// publishes (which any superior in its Trust Chain can set): that would
+// let a federation key act as the static client, with the static
+// registration's privileges. An error from that repository other than
+// "not registered" — storage.ErrStoreUnavailable — is returned too,
+// rather than read as "not statically registered", for the same reason
+// ResolveClient does. Each call asks the client repository first, so a
+// key resolution costs one more lookup there than it would without
+// automatic registration.
 type AutomaticClientKeySource struct {
 	underlying keys.ClientKeySource
 	repo       *AutomaticClientRepository
@@ -621,10 +654,10 @@ func NewAutomaticClientKeySource(underlying keys.ClientKeySource, repo *Automati
 // federation-derived resolution path is always hardened (it goes
 // through AutomaticClientRepository's Resolver, which requires a real
 // fapihttp.Client), but that alone doesn't make the whole type safe to
-// declare LiveFetchHardened unconditionally: Underlying is tried first
-// (see this type's own doc comment), so an Underlying that isn't itself
-// hardened — or doesn't declare — must not be silently papered over by
-// this type's other, safe path.
+// declare LiveFetchHardened unconditionally: Underlying answers for every
+// statically registered client (see this type's own doc comment), so an
+// Underlying that isn't itself hardened — or doesn't declare — must not
+// be silently papered over by this type's other, safe path.
 func (s *AutomaticClientKeySource) Capabilities() keys.KeySourceCapabilities {
 	if asserter, ok := s.underlying.(keys.KeySourceAssurance); ok {
 		return asserter.Capabilities()
@@ -634,8 +667,12 @@ func (s *AutomaticClientKeySource) Capabilities() keys.KeySourceCapabilities {
 
 // ResolveVerificationKeys implements keys.ClientKeySource.
 func (s *AutomaticClientKeySource) ResolveVerificationKeys(ctx context.Context, req keys.ClientKeyRequest) (keys.VerificationKeySet, error) {
-	if set, err := s.underlying.ResolveVerificationKeys(ctx, req); err == nil && len(set.Keys) > 0 {
-		return set, nil
+	static, err := s.repo.staticallyRegistered(ctx, req.ClientID)
+	if err != nil {
+		return keys.VerificationKeySet{}, err
+	}
+	if static {
+		return s.underlying.ResolveVerificationKeys(ctx, req)
 	}
 	return s.repo.resolveVerificationKeys(ctx, req)
 }
@@ -712,15 +749,23 @@ type relyingPartyMetadata struct {
 // can even validate the resulting config, so there is no later point at
 // which deferring the fetch would still work for every auth method.
 //
+// limits holds the choices taken from token_endpoint_auth_methods_supported
+// and token_endpoint_auth_signing_alg_values_supported to what the Trust
+// Chain's metadata policy permits for their singular parameters (see
+// choiceLimits).
+//
 // a.cfg supplies the operator-level capability grants (AllowedScopes,
 // AllowsClientCredentialsGrant, AllowsCIBA) that must never be inferred
 // from raw itself, plus the AllowedClientAuthMethods restriction raw's
 // own token_endpoint_auth_method is checked against — see AutomaticRegistrationConfig's own doc comments
 // for why.
-func (a *AutomaticClientRepository) registeredClientConfigFromMetadata(ctx context.Context, id fapi.ClientID, raw json.RawMessage) (storage.RegisteredClientConfig, json.RawMessage, error) {
+func (a *AutomaticClientRepository) registeredClientConfigFromMetadata(ctx context.Context, id fapi.ClientID, raw json.RawMessage, limits choiceLimits) (storage.RegisteredClientConfig, json.RawMessage, error) {
 	var m relyingPartyMetadata
 	if err := strictjson.Unmarshal(raw, &m); err != nil {
 		return storage.RegisteredClientConfig{}, nil, fmt.Errorf("parse %s metadata: %w", relyingPartyEntityType, err)
+	}
+	if err := refuseEmptyStrings(raw); err != nil {
+		return storage.RegisteredClientConfig{}, nil, err
 	}
 	if len(m.RedirectURIs) == 0 {
 		return storage.RegisteredClientConfig{}, nil, fmt.Errorf("%s metadata has no redirect_uris", relyingPartyEntityType)
@@ -729,7 +774,7 @@ func (a *AutomaticClientRepository) registeredClientConfigFromMetadata(ctx conte
 		return storage.RegisteredClientConfig{}, nil, fmt.Errorf("%s metadata must declare exactly one of jwks or jwks_uri", relyingPartyEntityType)
 	}
 
-	declared, err := a.declaredClientAuthMethods(m)
+	declared, err := a.declaredClientAuthMethods(m, limits.authMethods)
 	if err != nil {
 		return storage.RegisteredClientConfig{}, nil, err
 	}
@@ -778,7 +823,7 @@ func (a *AutomaticClientRepository) registeredClientConfigFromMetadata(ctx conte
 	// client's own published certificate (via jwks/jwks_uri's "x5c") for
 	// self_signed_tls_client_auth, and a plain metadata string for
 	// tls_client_auth and its four SAN-typed siblings.
-	if err := a.applyClientAuthMethods(&cfg, declared, m, jwks); err != nil {
+	if err := a.applyClientAuthMethods(&cfg, declared, m, jwks, limits.signingAlgs); err != nil {
 		return storage.RegisteredClientConfig{}, nil, err
 	}
 
@@ -836,10 +881,10 @@ func clientDisplayFromMetadata(m relyingPartyMetadata) (storage.ClientDisplay, e
 // applyClientAuthMethodFields sets cfg's authMethod-specific field from
 // m/jwks — split out of registeredClientConfigFromMetadata purely to
 // keep that method's own cognitive complexity manageable.
-func applyClientAuthMethodFields(cfg *storage.RegisteredClientConfig, authMethod storage.ClientAuthMethod, m relyingPartyMetadata, jwks json.RawMessage, defaultAlgs []fapi.SignatureAlgorithm) error {
+func applyClientAuthMethodFields(cfg *storage.RegisteredClientConfig, authMethod storage.ClientAuthMethod, m relyingPartyMetadata, jwks json.RawMessage, defaultAlgs []fapi.SignatureAlgorithm, permittedAlgs *permittedValues) error {
 	switch authMethod {
 	case storage.ClientAuthMethodPrivateKeyJWT:
-		algs, err := assertionAlgorithms(m, defaultAlgs)
+		algs, err := assertionAlgorithms(m, defaultAlgs, permittedAlgs)
 		if err != nil {
 			return err
 		}
@@ -903,13 +948,23 @@ type declaredMethod struct {
 // package infers no other. Listed methods it doesn't implement are
 // skipped; a token_endpoint_auth_method it doesn't implement, or one
 // AllowedClientAuthMethods refuses, fails the registration.
-func (a *AutomaticClientRepository) declaredClientAuthMethods(m relyingPartyMetadata) ([]declaredMethod, error) {
+//
+// Every method that remains is registered, not only the
+// token_endpoint_auth_method: §12.1.4 has the OP accept "any client
+// authentication method that is mutually supported", since automatic
+// registration never tells it which one the RP will use. permitted, when
+// set, is what the metadata policy allows token_endpoint_auth_method to
+// be, and listed methods outside it are skipped as well: the policy
+// names the singular parameter only, and a superior restricting how its
+// subordinates authenticate means the methods they register, whichever
+// parameter declares them.
+func (a *AutomaticClientRepository) declaredClientAuthMethods(m relyingPartyMetadata, permitted *permittedValues) ([]declaredMethod, error) {
 	single := m.TokenEndpointAuthMethod
 	list := m.TokenEndpointAuthMethodsSupported
 	if single == "" && len(list) == 0 {
 		return nil, fmt.Errorf("%s metadata declares no client authentication method (token_endpoint_auth_method or token_endpoint_auth_methods_supported)", relyingPartyEntityType)
 	}
-	if single != "" && len(list) > 0 && !slices.Contains(list, single) {
+	if single != "" && list != nil && !slices.Contains(list, single) {
 		return nil, fmt.Errorf("token_endpoint_auth_method %q is not among token_endpoint_auth_methods_supported", single)
 	}
 	var declared []declaredMethod
@@ -925,13 +980,13 @@ func (a *AutomaticClientRepository) declaredClientAuthMethods(m relyingPartyMeta
 	}
 	for _, name := range list {
 		method, err := storage.ParseClientAuthMethod(name)
-		if err != nil || !a.allowsClientAuthMethod(method) || slices.ContainsFunc(declared, func(d declaredMethod) bool { return d.method == method }) {
+		if err != nil || !a.allowsClientAuthMethod(method) || !permitted.allows(name) || slices.ContainsFunc(declared, func(d declaredMethod) bool { return d.method == method }) {
 			continue
 		}
 		declared = append(declared, declaredMethod{method: method})
 	}
 	if len(declared) == 0 {
-		return nil, fmt.Errorf("none of token_endpoint_auth_methods_supported %v is supported and permitted by allowed_client_auth_methods", list)
+		return nil, fmt.Errorf("none of token_endpoint_auth_methods_supported %v is supported and permitted by allowed_client_auth_methods and the metadata policy", list)
 	}
 	return declared, nil
 }
@@ -942,10 +997,10 @@ func (a *AutomaticClientRepository) declaredClientAuthMethods(m relyingPartyMeta
 // tls_client_auth_subject_dn) is dropped; the explicitly requested
 // token_endpoint_auth_method must be usable. At least one method must
 // remain.
-func (a *AutomaticClientRepository) applyClientAuthMethods(cfg *storage.RegisteredClientConfig, declared []declaredMethod, m relyingPartyMetadata, jwks json.RawMessage) error {
+func (a *AutomaticClientRepository) applyClientAuthMethods(cfg *storage.RegisteredClientConfig, declared []declaredMethod, m relyingPartyMetadata, jwks json.RawMessage, permittedAlgs *permittedValues) error {
 	var lastErr error
 	for _, d := range declared {
-		if err := applyClientAuthMethodFields(cfg, d.method, m, jwks, a.cfg.ClientAssertionAlgorithms); err != nil {
+		if err := applyClientAuthMethodFields(cfg, d.method, m, jwks, a.cfg.ClientAssertionAlgorithms, permittedAlgs); err != nil {
 			if d.explicit {
 				return err
 			}
@@ -967,19 +1022,34 @@ func (a *AutomaticClientRepository) applyClientAuthMethods(cfg *storage.Register
 // token_endpoint_auth_signing_alg_values_supported (skipping algorithms
 // this package doesn't implement), else defaultAlgs — "any algorithm
 // supported by the OP and the RP".
-func assertionAlgorithms(m relyingPartyMetadata, defaultAlgs []fapi.SignatureAlgorithm) ([]fapi.SignatureAlgorithm, error) {
+//
+// permitted, when set, is what the metadata policy allows
+// token_endpoint_auth_signing_alg to be. The policy already holds a
+// declared token_endpoint_auth_signing_alg to it, but not the other two
+// sources, so algorithms outside it are left out of those, and an RP left
+// with none is refused (RP Metadata Choices 1.0 §4: use a choice that is
+// supported, or reject the registration when none is). A superior's
+// one_of on token_endpoint_auth_signing_alg then means the algorithms
+// the RP registers, however it declares them.
+func assertionAlgorithms(m relyingPartyMetadata, defaultAlgs []fapi.SignatureAlgorithm, permitted *permittedValues) ([]fapi.SignatureAlgorithm, error) {
 	single := m.TokenEndpointAuthSigningAlg
 	list := m.TokenEndpointAuthSigningAlgValuesSupported
 	if single != "" {
 		return declaredAssertionAlgorithm(single, list)
 	}
-	if len(list) > 0 {
-		return supportedAssertionAlgorithms(list)
+	if list != nil {
+		return supportedAssertionAlgorithms(list, permitted)
 	}
-	if len(defaultAlgs) == 0 {
-		return nil, fmt.Errorf("token_endpoint_auth_signing_alg is required for private_key_jwt: no default algorithms are configured")
+	var algs []fapi.SignatureAlgorithm
+	for _, alg := range defaultAlgs {
+		if permitted.allows(alg.String()) {
+			algs = append(algs, alg)
+		}
 	}
-	return slices.Clone(defaultAlgs), nil
+	if len(algs) == 0 {
+		return nil, fmt.Errorf("token_endpoint_auth_signing_alg is required for private_key_jwt: no default algorithm is configured that the metadata policy permits")
+	}
+	return algs, nil
 }
 
 // declaredAssertionAlgorithm is assertionAlgorithms' answer when the RP
@@ -987,7 +1057,7 @@ func assertionAlgorithms(m relyingPartyMetadata, defaultAlgs []fapi.SignatureAlg
 // must be among list, its declared supported algorithms, when it
 // declared any.
 func declaredAssertionAlgorithm(single string, list []string) ([]fapi.SignatureAlgorithm, error) {
-	if len(list) > 0 && !slices.Contains(list, single) {
+	if list != nil && !slices.Contains(list, single) {
 		return nil, fmt.Errorf("token_endpoint_auth_signing_alg %q is not among token_endpoint_auth_signing_alg_values_supported", single)
 	}
 	alg, err := fapi.ParseSignatureAlgorithm(single)
@@ -998,19 +1068,112 @@ func declaredAssertionAlgorithm(single string, list []string) ([]fapi.SignatureA
 }
 
 // supportedAssertionAlgorithms is list's algorithms this package
-// implements, once each, in list's order.
-func supportedAssertionAlgorithms(list []string) ([]fapi.SignatureAlgorithm, error) {
+// implements and permitted allows, once each, in list's order. An empty
+// list (which a superior's subset_of can leave) declares no algorithm,
+// so it is refused like one with none usable, never read as absent.
+func supportedAssertionAlgorithms(list []string, permitted *permittedValues) ([]fapi.SignatureAlgorithm, error) {
 	var algs []fapi.SignatureAlgorithm
 	for _, name := range list {
+		if !permitted.allows(name) {
+			continue
+		}
 		if alg, err := fapi.ParseSignatureAlgorithm(name); err == nil && !slices.Contains(algs, alg) {
 			algs = append(algs, alg)
 		}
 	}
 	if len(algs) == 0 {
-		return nil, fmt.Errorf("none of token_endpoint_auth_signing_alg_values_supported %v is supported", list)
+		return nil, fmt.Errorf("none of token_endpoint_auth_signing_alg_values_supported %v is supported and permitted by the metadata policy", list)
 	}
 	return algs, nil
 }
+
+// choiceLimits is what a Trust Chain's metadata policy permits for the
+// singular parameters automatic registration also reads an OpenID
+// Connect RP Metadata Choices 1.0 §2 plural sibling of. Policy
+// operators act on the parameter they name only (OpenID Federation 1.0
+// §6.1.3.1), and one_of checks a value only "if the metadata parameter
+// is present" (§6.1.3.1.4); so an RP leaving out
+// token_endpoint_auth_signing_alg under a one_of on it, and declaring
+// token_endpoint_auth_signing_alg_values_supported instead, would
+// otherwise register a value the policy forbids. Each nil field means
+// no policy restricts that parameter.
+type choiceLimits struct {
+	authMethods *permittedValues // token_endpoint_auth_method
+	signingAlgs *permittedValues // token_endpoint_auth_signing_alg
+}
+
+// permittedValues is the set of values a metadata policy allows a
+// singular parameter; a nil *permittedValues allows any value.
+type permittedValues struct{ values []string }
+
+// allows reports whether p permits v.
+func (p *permittedValues) allows(v string) bool {
+	return p == nil || slices.Contains(p.values, v)
+}
+
+// choiceLimitsFromPolicy reads choiceLimits from policy, the merged
+// openid_relying_party metadata policy (nil when none applies).
+func choiceLimitsFromPolicy(policy map[string]intfed.PolicyOperators) (choiceLimits, error) {
+	var limits choiceLimits
+	for _, field := range []struct {
+		param string
+		dst   **permittedValues
+	}{
+		{"token_endpoint_auth_method", &limits.authMethods},
+		{"token_endpoint_auth_signing_alg", &limits.signingAlgs},
+	} {
+		permitted, constrained, err := intfed.PermittedStrings(policy[field.param])
+		if err != nil {
+			return choiceLimits{}, fmt.Errorf("metadata policy for %s: %w", field.param, err)
+		}
+		if constrained {
+			*field.dst = &permittedValues{values: permitted}
+		}
+	}
+	return limits, nil
+}
+
+// refuseEmptyStrings refuses raw, an openid_relying_party metadata
+// object, when a string parameter this package reads from it is the
+// empty string. None of them has "" among its values, and each would
+// otherwise read as left out while counting as present to a metadata
+// policy (OpenID Federation 1.0 §6.1.3.1.7: essential requires only that
+// the parameter "MUST be present"), so a superior's essential policy
+// would be met by a value that registers the OP's default instead.
+func refuseEmptyStrings(raw json.RawMessage) error {
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &members); err != nil {
+		return fmt.Errorf("parse %s metadata: %w", relyingPartyEntityType, err)
+	}
+	for _, name := range relyingPartyStringParameters {
+		// Unmarshalling null into a string leaves it "" too, so only a
+		// JSON string counts: null states nothing, and reads as left out.
+		var value string
+		if v, ok := members[name]; ok && len(v) > 0 && v[0] == '"' && json.Unmarshal(v, &value) == nil && value == "" {
+			return fmt.Errorf("%s must not be empty", name)
+		}
+	}
+	return nil
+}
+
+// relyingPartyStringParameters is the name of every string parameter
+// relyingPartyMetadata reads, from its json tags, so a parameter added
+// there is covered by refuseEmptyStrings without being listed twice.
+var relyingPartyStringParameters = func() []string {
+	var names []string
+	t := reflect.TypeFor[relyingPartyMetadata]()
+	for i := range t.NumField() {
+		f := t.Field(i)
+		kind := f.Type.Kind()
+		if kind == reflect.Pointer {
+			kind = f.Type.Elem().Kind()
+		}
+		if kind == reflect.String {
+			names = append(names, strings.Split(f.Tag.Get("json"), ",")[0])
+		}
+	}
+	return names
+}()
 
 // allowsClientAuthMethod reports whether method is permitted by
 // AutomaticRegistrationConfig.AllowedClientAuthMethods — every method

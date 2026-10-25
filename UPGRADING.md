@@ -15,6 +15,90 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.61.0
+
+### A statically registered client authenticates with its static keys only (federation, server)
+
+**Affects:** a server with OpenID Federation automatic registration (or
+a `federation.AutomaticClientKeySource` built by hand) where a client in
+`Dependencies.Clients` has a `client_id` that is also an Entity
+Identifier resolving under one of `AutomaticRegistration.TrustAnchors`,
+and that client signs with a key `Dependencies.ClientKeys` doesn't
+return for it. Also a client `Dependencies.Clients` doesn't have, for
+which `Dependencies.ClientKeys` does return keys.
+
+**Why:** when `Dependencies.ClientKeys` had no matching key for a client,
+its keys were looked up in its federation metadata instead, even for a
+statically registered client. Any superior in a Trust Chain can set that
+metadata's `jwks`, so a key it published authenticated as the static
+client, with the static registration's scopes and grants.
+
+**What fails:** a statically registered client's keys now come from
+`Dependencies.ClientKeys` alone; an assertion or request object signed
+with a key only its federation metadata publishes fails with
+`invalid_client`. A client resolved through federation gets its keys from
+its federation metadata alone, never from `Dependencies.ClientKeys`.
+Whether a client is statically registered is decided as `ResolveClient`
+decides it: `Dependencies.Clients` resolves it. If that store fails with
+`storage.ErrStoreUnavailable`, key resolution now fails with that error
+too.
+
+**What to change:** give each statically registered client's keys to
+`Dependencies.ClientKeys`, or remove its static registration so that it
+registers automatically (with automatic registration's scopes and
+grants).
+
+### Automatic registration holds RP Metadata Choices to the policy on the singular parameter (federation)
+
+**Affects:** a Relying Party registered automatically under a Trust
+Anchor or Intermediate whose `metadata_policy` sets `one_of` or `value` on
+`token_endpoint_auth_signing_alg` or `token_endpoint_auth_method`, and
+which declares algorithms or methods outside it in
+`token_endpoint_auth_signing_alg_values_supported` or
+`token_endpoint_auth_methods_supported`, or names no algorithm at all.
+Also a Relying Party whose `token_endpoint_auth_signing_alg_values_supported`
+or `token_endpoint_auth_methods_supported` is an empty array.
+
+**Why:** a policy operator applies only to the parameter it names, and
+`one_of` only when that parameter is present (OpenID Federation 1.0
+§6.1.3.1.4). A Relying Party could leave out
+`token_endpoint_auth_signing_alg` and list a forbidden algorithm in its
+RP Metadata Choices sibling, or name none and get the server's defaults,
+and register an algorithm or method the policy rules out. An empty array
+(which a superior's `subset_of` can leave) was read as not declared, so
+the defaults applied there too.
+
+**What fails:** algorithms and methods outside the policy on the singular
+parameter are no longer registered, from either parameter or from
+`AutomaticRegistrationConfig.ClientAssertionAlgorithms`. A Relying Party
+left with none, or declaring an empty array, isn't registered, and its
+requests fail with `invalid_client` (`OnResolutionFailure` is told why).
+A Relying Party whose `token_endpoint_auth_method` or
+`token_endpoint_auth_signing_alg` isn't in its own empty array is refused
+too, as RP Metadata Choices requires it to be in the list.
+
+**What to change:** nothing on the OP. A refused Relying Party lists an
+algorithm or method its superiors' policy permits.
+
+### Automatic registration refuses empty-string metadata (federation)
+
+**Affects:** a Relying Party registered automatically whose
+`openid_relying_party` metadata gives `""` for a string parameter
+automatic registration reads, such as `subject_type`, `client_name`,
+`logo_uri` or `request_object_signing_alg`. v0.58.0 already refused it
+for the ID token and UserInfo encryption parameters.
+
+**Why:** a metadata policy counts `""` as present, so it met an
+`essential` policy (OpenID Federation 1.0 §6.1.3.1.7), while automatic
+registration read it as left out and applied the OP's default instead,
+such as its default `subject_type`.
+
+**What fails:** the Relying Party isn't registered, and its requests fail
+with `invalid_client` (`OnResolutionFailure` names the parameter).
+
+**What to change:** nothing on the OP. A refused Relying Party leaves the
+parameter out, or gives it a value.
+
 ## v0.58.0
 
 ### Automatic registration skips `tls_client_auth` unless chains are verified (server)

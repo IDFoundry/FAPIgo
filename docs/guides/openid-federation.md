@@ -149,7 +149,12 @@ each hop, and applies:
 - **Bounded fetching**: `Limits.MaxPathLength` and
   `Limits.MaxAuthorityHints` cap one resolution at a fixed number of
   outbound fetches, since automatic registration resolves a `client_id`
-  chosen by an unauthenticated caller.
+  chosen by an unauthenticated caller. What isn't bounded is where they
+  go: a chain is fetched before it can be verified, so the
+  `federation_fetch_endpoint` URLs of its not-yet-trusted superiors
+  (host, port, path and query) are the caller's choice. The fetcher's
+  address checks are what limit them; a host you list in
+  `fapihttp.Config.AllowedPrivateHosts` is reachable by anyone this way.
 - **Strict JSON**: entity metadata and keys are decoded case-sensitively,
   so a member that differs only in case (`REDIRECT_URIS`) can't slip past
   a policy written for the real one.

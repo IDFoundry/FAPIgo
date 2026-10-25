@@ -146,6 +146,11 @@ type BackchannelInteractionRequest struct {
 	// exactly, for the CIBA flow.
 	AuthorizationDetails extension.RARValues
 
+	// Resources mirrors InteractionRequest.Resources for the CIBA flow:
+	// the resource servers the tokens would be for, which
+	// GrantedAuthorization.Resources can narrow.
+	Resources []string
+
 	// RequestedClaims is the identity claims the client asked for with
 	// the "claims" parameter — see InteractionRequest.RequestedClaims.
 	RequestedClaims RequestedClaims

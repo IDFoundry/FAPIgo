@@ -19,6 +19,7 @@ import (
 	intfed "github.com/idfoundry/fapigo/internal/federation"
 	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/internal/mtls"
+	"github.com/idfoundry/fapigo/internal/resourceindicator"
 	"github.com/idfoundry/fapigo/internal/strictjson"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
@@ -50,6 +51,19 @@ type AutomaticRegistrationConfig struct {
 	// the same reason as AllowedScopes, never an RP's own
 	// self-published authorization_details_types. Empty means none.
 	AuthorizationDetailsTypes []string
+
+	// AllowedResources confines every automatically-registered client to
+	// these RFC 8707 resource indicators
+	// (storage.RegisteredClientConfig.AllowedResources) — for the same
+	// reason as AllowedScopes, never anything an RP publishes about
+	// itself: which resource servers a client may get tokens for is the
+	// operator's decision. Each an absolute URI without a fragment, none
+	// repeated. Empty means unconfined: an RP may name any resource the
+	// server accepts, and one naming none gets tokens addressed to the
+	// issuer. Set, a request naming none is for its single entry, or,
+	// with several, invalid_target (see
+	// storage.RegisteredClientConfig.AllowedResources).
+	AllowedResources []string
 
 	// MaxCacheAge bounds how long a resolved client's Trust Chain is
 	// reused before it is resolved again — the actual cache lifetime
@@ -373,6 +387,10 @@ func NewAutomaticClientRepository(underlying storage.ClientRepository, resolver 
 	if err := validateSubjectTypes(cfg.SubjectTypes, cfg.DefaultSubjectType); err != nil {
 		return nil, err
 	}
+	if err := validateAllowedResources(cfg.AllowedResources); err != nil {
+		return nil, err
+	}
+	cfg.AllowedResources = slices.Clone(cfg.AllowedResources)
 	if clock == nil {
 		return nil, fmt.Errorf("federation: clock is required")
 	}
@@ -382,6 +400,20 @@ func NewAutomaticClientRepository(underlying storage.ClientRepository, resolver 
 		failures: make(map[fapi.ClientID]failedResolution),
 		inflight: make(map[fapi.ClientID]*inflightResolution),
 	}, nil
+}
+
+// validateAllowedResources checks AutomaticRegistrationConfig.AllowedResources:
+// each a resource indicator RFC 8707 §2 allows, none repeated.
+func validateAllowedResources(resources []string) error {
+	for i, r := range resources {
+		if err := resourceindicator.Check(r); err != nil {
+			return fmt.Errorf("federation: config: allowed_resources[%d]: %w", i, err)
+		}
+		if slices.Contains(resources[:i], r) {
+			return fmt.Errorf("federation: config: allowed_resources[%d]: %q is repeated", i, r)
+		}
+	}
+	return nil
 }
 
 // ResolveClient implements storage.ClientRepository.
@@ -755,7 +787,7 @@ type relyingPartyMetadata struct {
 // choiceLimits).
 //
 // a.cfg supplies the operator-level capability grants (AllowedScopes,
-// AllowsClientCredentialsGrant, AllowsCIBA) that must never be inferred
+// AllowedResources, AllowsClientCredentialsGrant, AllowsCIBA) that must never be inferred
 // from raw itself, plus the AllowedClientAuthMethods restriction raw's
 // own token_endpoint_auth_method is checked against — see AutomaticRegistrationConfig's own doc comments
 // for why.
@@ -810,6 +842,7 @@ func (a *AutomaticClientRepository) registeredClientConfigFromMetadata(ctx conte
 		SenderConstrain:                 senderConstrain,
 		AllowedScopes:                   a.cfg.AllowedScopes,
 		AuthorizationDetailsTypes:       a.cfg.AuthorizationDetailsTypes,
+		AllowedResources:                a.cfg.AllowedResources,
 		AutomaticFederationRegistration: true,
 		AllowsClientCredentialsGrant:    a.cfg.AllowsClientCredentialsGrant,
 	}

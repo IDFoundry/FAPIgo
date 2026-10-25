@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
@@ -126,61 +127,13 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 		return s.completeLocalFail(ctx, clientID, authorizeErr), nil
 	}
 
-	// OIDC Core §3.1.2.1: with max_age, an authentication older than
-	// max_age must be repeated, and if it isn't, the client gets an
-	// error, "typically login_required" (§3.1.2.1, prompt=login).
-	if maxAge, ok, _ := requestedMaxAge(request.Parameters); ok {
-		oldest := s.deps.Clock.Now().Add(-maxAge - s.cfg.Limits.MaxClockSkew)
-		if result.auth.authTime.Before(oldest) {
-			return s.completeErrorRedirect(ctx, clientID, redirectURI, state, "login_required", "the user's authentication is older than the requested max_age", AuditOutcomeFailure)
-		}
+	if problem := s.loginRequiredProblem(request, result.auth, clientSub); problem != "" {
+		return s.completeErrorRedirect(ctx, clientID, redirectURI, state, "login_required", problem, AuditOutcomeFailure)
 	}
 
-	// OIDC Core §3.1.2.1: prompt=login asks the OP to "reauthenticate the
-	// End-User even if the End-User is already authenticated", and if it
-	// can't, to return login_required. An authentication from before the
-	// request was pushed, allowing the same clock skew as max_age, didn't
-	// happen for this request. A record without PushedAt (written before
-	// it existed) isn't checked.
-	if prompt, _ := requestedPrompt(request.Parameters); prompt.Has(PromptLogin) && request.PushedAt != nil {
-		if result.auth.authTime.Before(request.PushedAt.Add(-s.cfg.Limits.MaxClockSkew)) {
-			return s.completeErrorRedirect(ctx, clientID, redirectURI, state, "login_required", "the user didn't authenticate again for prompt=login", AuditOutcomeFailure)
-		}
-	}
-
-	// OIDC Core §5.5.1.1: an essential "acr" request with values must be
-	// met, or the outcome treated as a failed authentication.
-	if !meetsEssentialACR(request.EssentialACRValues, result.auth.acr) {
-		return s.completeErrorRedirect(ctx, clientID, redirectURI, state, "login_required", "the user's authentication doesn't meet the requested essential acr", AuditOutcomeFailure)
-	}
-
-	// OIDC Core §5.5.1: a request naming its end user, by id_token_hint
-	// or a "sub" value, must not be answered for a different one; that
-	// user didn't authenticate, so it's login_required.
-	if !meetsRequiredSubject(request.RequiredSubject, clientSub) {
-		return s.completeErrorRedirect(ctx, clientID, redirectURI, state, "login_required", "the authenticated user isn't the one the request named", AuditOutcomeFailure)
-	}
-
-	requestedScope, _ := jsonString(request.Parameters, "scope")
-	if err := validateGrantedScopeSubset(result.grant.Scope, requestedScope); err != nil {
-		return s.completeLocalFail(ctx, clientID, newError(ErrorInvalidRequest, 400, "granted scope exceeds requested scope", err)), nil
-	}
-
-	grantedAuthorizationDetails, err := s.validateGrantedAuthorizationDetails(request.Parameters[authorizationDetailsParameter], result.grant.AuthorizationDetails)
-	if err != nil {
-		return s.completeLocalFail(ctx, clientID, newError(ErrorInvalidRequest, 400, "granted authorization_details exceeds what was requested", err)), nil
-	}
-
-	if err := validateGrantedIDTokenClaims(result.grant.IDTokenClaims, s.cfg.Limits.MaxIDTokenClaimsBytes); err != nil {
-		return s.completeLocalFail(ctx, clientID, newError(ErrorInvalidRequest, 400, "granted ID token claims are not valid", err)), nil
-	}
-	if err := s.validateGrantID(result.grant.GrantID); err != nil {
-		return s.completeLocalFail(ctx, clientID, newError(ErrorInvalidRequest, 400, "the grant ID is not valid", err)), nil
-	}
-
-	idTokenClaims, userinfoClaims, err := approvedClaimNames(request.Parameters, result.grant.ApprovedIdentityClaims)
-	if err != nil {
-		return s.completeLocalFail(ctx, clientID, newError(ErrorInvalidRequest, 400, "approved identity claims exceed what was requested", err)), nil
+	approved, approvedErr := s.checkApprovedGrant(request, result.grant)
+	if approvedErr != nil {
+		return s.completeLocalFail(ctx, clientID, approvedErr), nil
 	}
 
 	codeChallenge, err := jsonString(request.Parameters, "code_challenge")
@@ -210,11 +163,11 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 		AuthTime:                result.auth.authTime,
 		ACR:                     result.auth.acr,
 		AMR:                     result.auth.amr,
-		AuthorizationDetails:    grantedAuthorizationDetails,
-		Resources:               request.Resources,
+		AuthorizationDetails:    approved.authorizationDetails,
+		Resources:               approved.resources,
 		TokenClaims:             request.TokenClaims,
-		RequestedIDTokenClaims:  idTokenClaims,
-		RequestedUserinfoClaims: userinfoClaims,
+		RequestedIDTokenClaims:  approved.idTokenClaims,
+		RequestedUserinfoClaims: approved.userinfoClaims,
 		IDTokenClaims:           result.grant.IDTokenClaims,
 		GrantID:                 result.grant.GrantID,
 	})
@@ -240,6 +193,85 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 
 	s.audit(ctx, AuditEventCompleteAuthorization, clientID, AuditOutcomeSuccess, "")
 	return AuthorizationRedirect{destination: destination}, nil
+}
+
+// loginRequiredProblem describes why auth, the authentication of the
+// user whose sub at the client is clientSub, doesn't meet request, so
+// the client gets login_required, or returns "" when it does.
+func (s *Server) loginRequiredProblem(request requestRecord, auth AuthenticationContext, clientSub string) string {
+	// OIDC Core §3.1.2.1: with max_age, an authentication older than
+	// max_age must be repeated, and if it isn't, the client gets an
+	// error, "typically login_required" (§3.1.2.1, prompt=login).
+	if maxAge, ok, _ := requestedMaxAge(request.Parameters); ok {
+		oldest := s.deps.Clock.Now().Add(-maxAge - s.cfg.Limits.MaxClockSkew)
+		if auth.authTime.Before(oldest) {
+			return "the user's authentication is older than the requested max_age"
+		}
+	}
+
+	// OIDC Core §3.1.2.1: prompt=login asks the OP to "reauthenticate the
+	// End-User even if the End-User is already authenticated", and if it
+	// can't, to return login_required. An authentication from before the
+	// request was pushed, allowing the same clock skew as max_age, didn't
+	// happen for this request. A record without PushedAt (written before
+	// it existed) isn't checked.
+	if prompt, _ := requestedPrompt(request.Parameters); prompt.Has(PromptLogin) && request.PushedAt != nil {
+		if auth.authTime.Before(request.PushedAt.Add(-s.cfg.Limits.MaxClockSkew)) {
+			return "the user didn't authenticate again for prompt=login"
+		}
+	}
+
+	// OIDC Core §5.5.1.1: an essential "acr" request with values must be
+	// met, or the outcome treated as a failed authentication.
+	if !meetsEssentialACR(request.EssentialACRValues, auth.acr) {
+		return "the user's authentication doesn't meet the requested essential acr"
+	}
+
+	// OIDC Core §5.5.1: a request naming its end user, by id_token_hint
+	// or a "sub" value, must not be answered for a different one; that
+	// user didn't authenticate, so it's login_required.
+	if !meetsRequiredSubject(request.RequiredSubject, clientSub) {
+		return "the authenticated user isn't the one the request named"
+	}
+	return ""
+}
+
+// approvedGrant is what an application's GrantedAuthorization approves
+// of a pending authorization request, checked against it.
+type approvedGrant struct {
+	authorizationDetails          json.RawMessage
+	resources                     []string
+	idTokenClaims, userinfoClaims []string
+}
+
+// checkApprovedGrant checks grant against request, what the client
+// asked for: its scope, authorization details, resources and identity
+// claims may only narrow the request's, and its ID token claims and
+// grant ID must be valid. Any other grant is invalid_request.
+func (s *Server) checkApprovedGrant(request requestRecord, grant GrantedAuthorization) (approvedGrant, *Error) {
+	requestedScope, _ := jsonString(request.Parameters, "scope")
+	if err := validateGrantedScopeSubset(grant.Scope, requestedScope); err != nil {
+		return approvedGrant{}, newError(ErrorInvalidRequest, 400, "granted scope exceeds requested scope", err)
+	}
+	details, err := s.validateGrantedAuthorizationDetails(request.Parameters[authorizationDetailsParameter], grant.AuthorizationDetails)
+	if err != nil {
+		return approvedGrant{}, newError(ErrorInvalidRequest, 400, "granted authorization_details exceeds what was requested", err)
+	}
+	resources, resourcesErr := grantedResources(request.Resources, grant.Resources)
+	if resourcesErr != nil {
+		return approvedGrant{}, resourcesErr
+	}
+	if err := validateGrantedIDTokenClaims(grant.IDTokenClaims, s.cfg.Limits.MaxIDTokenClaimsBytes); err != nil {
+		return approvedGrant{}, newError(ErrorInvalidRequest, 400, "granted ID token claims are not valid", err)
+	}
+	if err := s.validateGrantID(grant.GrantID); err != nil {
+		return approvedGrant{}, newError(ErrorInvalidRequest, 400, "the grant ID is not valid", err)
+	}
+	idTokenClaims, userinfoClaims, err := approvedClaimNames(request.Parameters, grant.ApprovedIdentityClaims)
+	if err != nil {
+		return approvedGrant{}, newError(ErrorInvalidRequest, 400, "approved identity claims exceed what was requested", err)
+	}
+	return approvedGrant{authorizationDetails: details, resources: resources, idTokenClaims: idTokenClaims, userinfoClaims: userinfoClaims}, nil
 }
 
 func (s *Server) completeErrorRedirect(ctx context.Context, clientID fapi.ClientID, redirectURI, state, errorCode, description string, outcome AuditOutcome) (AuthorizationResult, error) {

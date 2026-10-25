@@ -176,6 +176,12 @@ func (s *Server) approveBackchannelAuthentication(ctx context.Context, clientID 
 		return wrapped
 	}
 
+	resources, resourcesErr := grantedResources(request.Resources, result.grant.Resources)
+	if resourcesErr != nil {
+		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, clientID, AuditOutcomeFailure, string(resourcesErr.Code()))
+		return resourcesErr
+	}
+
 	if claimsErr := validateGrantedIDTokenClaims(result.grant.IDTokenClaims, s.cfg.Limits.MaxIDTokenClaimsBytes); claimsErr != nil {
 		wrapped := newError(ErrorInvalidRequest, 400, "granted ID token claims are not valid", claimsErr)
 		s.audit(ctx, AuditEventCompleteBackchannelAuthentication, clientID, AuditOutcomeFailure, string(wrapped.Code()))
@@ -216,7 +222,7 @@ func (s *Server) approveBackchannelAuthentication(ctx context.Context, clientID 
 		ACR:                     result.auth.acr,
 		AMR:                     result.auth.amr,
 		AuthorizationDetails:    grantedAuthorizationDetails,
-		Resources:               request.Resources,
+		Resources:               resources,
 		TokenClaims:             request.TokenClaims,
 		RequestedIDTokenClaims:  idTokenClaims,
 		RequestedUserinfoClaims: userinfoClaims,

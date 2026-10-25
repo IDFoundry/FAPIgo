@@ -422,13 +422,12 @@ func TestResourceIndicatorsClientCredentials(t *testing.T) {
 				refuseAtResource(t, h, tokens, serverresource.Options{Resource: payments})
 			})
 
+			// Confined to several resources, the client must name
+			// which: a token addressed to the issuer would be accepted
+			// wherever the issuer is.
 			t.Run("no resource", func(t *testing.T) {
-				tokens, err := request(nil)
-				if err != nil {
-					t.Fatalf("RequestClientCredentialsToken: %v", err)
-				}
-				verifyAt(t, h, h.Resource, tokens)
-				refuseAtResource(t, h, tokens, serverresource.Options{Resource: accounts})
+				_, err := request(nil)
+				wantServerError(t, "RequestClientCredentialsToken", err, "invalid_target")
 			})
 
 			for _, tc := range []struct {

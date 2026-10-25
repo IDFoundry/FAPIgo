@@ -683,6 +683,9 @@ func TestNewRegisteredClientAllowedResources(t *testing.T) {
 	if !unrestricted.AllowsResource("https://rs.example") {
 		t.Error("a client registered with no AllowedResources refuses a resource")
 	}
+	if unrestricted.AllowedResources() != nil {
+		t.Errorf("AllowedResources() = %q, want nil", unrestricted.AllowedResources())
+	}
 	base.AllowedResources = []string{"https://rs.example", "urn:example:rs"}
 	some, err := NewRegisteredClient(base)
 	if err != nil {
@@ -690,6 +693,9 @@ func TestNewRegisteredClientAllowedResources(t *testing.T) {
 	}
 	if !some.AllowsResource("urn:example:rs") || some.AllowsResource("https://other.example") || some.AllowsResource("https://rs.example/") {
 		t.Error("AllowsResource doesn't follow the registered list exactly")
+	}
+	if got, want := some.AllowedResources(), []string{"https://rs.example", "urn:example:rs"}; !slices.Equal(got, want) {
+		t.Errorf("AllowedResources() = %q, want %q", got, want)
 	}
 	for _, bad := range []string{"", "/relative", "https://rs.example#frag"} {
 		base.AllowedResources = []string{"https://rs.example", bad}

@@ -190,7 +190,7 @@ func (s *Server) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 		return s.backchannelBeginFail(ctx, client.ID(), dpopErr), nil
 	}
 
-	interaction, err := s.backchannelInteraction(client, validated.params)
+	interaction, err := s.backchannelInteraction(client, validated.params, validated.resources)
 	if err != nil {
 		return s.backchannelBeginFail(ctx, client.ID(), newError(ErrorServerError, 500, "validated extension parameters could not be read back", err)), nil
 	}
@@ -420,23 +420,8 @@ func (s *Server) validateBackchannelAuthenticationParameters(verified verifiedBa
 		return verifiedBackchannelRequest{}, newError(ErrorInvalidScope, 400, "scope must include openid", nil)
 	}
 
-	hints := 0
-	for _, name := range [...]string{"login_hint", "login_hint_token", "id_token_hint"} {
-		raw, ok := params[name]
-		if !ok {
-			continue
-		}
-		// The hint must be a non-empty string: one that isn't (a number,
-		// an object, "") would otherwise count as the one hint here but
-		// reach the application as no hint at all
-		// (backchannelInteractionRequestFrom keeps only string values).
-		if v, err := jsonStringValue(raw); err != nil || v == "" {
-			return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, name+" must be a non-empty string", err)
-		}
-		hints++
-	}
-	if hints != 1 {
-		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "exactly one of login_hint, login_hint_token, or id_token_hint is required", nil)
+	if hintErr := validateBackchannelHints(params); hintErr != nil {
+		return verifiedBackchannelRequest{}, hintErr
 	}
 
 	if validateErr := validateClientNotificationToken(params, client); validateErr != nil {
@@ -449,17 +434,52 @@ func (s *Server) validateBackchannelAuthenticationParameters(verified verifiedBa
 		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, err.Error(), nil)
 	}
 
-	if raw, ok := params["binding_message"]; ok {
-		bindingMessage, err := jsonStringValue(raw)
-		if err != nil {
-			return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "binding_message must be a string", err)
-		}
-		if !isAcceptableBindingMessage(bindingMessage) {
-			return verifiedBackchannelRequest{}, newError(ErrorInvalidBindingMessage, 400, "binding_message is not acceptable", nil)
-		}
+	if bindingErr := validateBindingMessage(params); bindingErr != nil {
+		return verifiedBackchannelRequest{}, bindingErr
 	}
 
 	return verified, nil
+}
+
+// validateBackchannelHints checks params carries exactly one identity
+// hint (CIBA §7.1): login_hint, login_hint_token or id_token_hint.
+func validateBackchannelHints(params map[string]json.RawMessage) *Error {
+	hints := 0
+	for _, name := range [...]string{"login_hint", "login_hint_token", "id_token_hint"} {
+		raw, ok := params[name]
+		if !ok {
+			continue
+		}
+		// The hint must be a non-empty string: one that isn't (a number,
+		// an object, "") would otherwise count as the one hint here but
+		// reach the application as no hint at all
+		// (backchannelInteractionRequestFrom keeps only string values).
+		if v, err := jsonStringValue(raw); err != nil || v == "" {
+			return newError(ErrorInvalidRequest, 400, name+" must be a non-empty string", err)
+		}
+		hints++
+	}
+	if hints != 1 {
+		return newError(ErrorInvalidRequest, 400, "exactly one of login_hint, login_hint_token, or id_token_hint is required", nil)
+	}
+	return nil
+}
+
+// validateBindingMessage checks params' binding_message, if any, is a
+// string the authentication device can show (CIBA §7.1).
+func validateBindingMessage(params map[string]json.RawMessage) *Error {
+	raw, ok := params["binding_message"]
+	if !ok {
+		return nil
+	}
+	bindingMessage, err := jsonStringValue(raw)
+	if err != nil {
+		return newError(ErrorInvalidRequest, 400, "binding_message must be a string", err)
+	}
+	if !isAcceptableBindingMessage(bindingMessage) {
+		return newError(ErrorInvalidBindingMessage, 400, "binding_message is not acceptable", nil)
+	}
+	return nil
 }
 
 // validateClientNotificationToken checks client_notification_token's
@@ -684,11 +704,13 @@ func (s *Server) backchannelBeginFail(ctx context.Context, clientID fapi.ClientI
 }
 
 // backchannelInteraction is the BackchannelInteractionRequest for a
-// request from client with params, as BeginBackchannelAuthentication and
-// LookupBackchannelInteraction return it.
-func (s *Server) backchannelInteraction(client storage.RegisteredClient, params map[string]json.RawMessage) (BackchannelInteractionRequest, error) {
+// request from client with params, for resources, as
+// BeginBackchannelAuthentication and LookupBackchannelInteraction return
+// it.
+func (s *Server) backchannelInteraction(client storage.RegisteredClient, params map[string]json.RawMessage, resources []string) (BackchannelInteractionRequest, error) {
 	interaction := s.backchannelInteractionRequestFrom(client.ID(), params)
 	interaction.ClientDisplay = client.Display()
+	interaction.Resources = slices.Clone(resources)
 	extensions, err := s.interactionExtensions(params, coreBackchannelAuthenticationParameters, extension.SourceRequestObject)
 	if err != nil {
 		return BackchannelInteractionRequest{}, err
@@ -725,7 +747,7 @@ func (s *Server) LookupBackchannelInteraction(ctx context.Context, handle Backch
 	if err != nil {
 		return BackchannelInteractionRequest{}, newError(ErrorServerError, 500, "the request's client could not be resolved", err)
 	}
-	interaction, err := s.backchannelInteraction(client, request.Parameters)
+	interaction, err := s.backchannelInteraction(client, request.Parameters, request.Resources)
 	if err != nil {
 		return BackchannelInteractionRequest{}, newError(ErrorServerError, 500, "the request's extension parameters could not be read back", err)
 	}

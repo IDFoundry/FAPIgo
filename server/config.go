@@ -362,7 +362,7 @@ type Limits struct {
 type Config struct {
 	// Issuer is this server's issuer identifier — the audience client
 	// assertions and request objects must be addressed to, and every
-	// access token's audience unless the client named resources (RFC
+	// access token's audience unless the token is for resources (RFC
 	// 8707 resource indicators; see Resources).
 	Issuer fapi.URL
 
@@ -487,7 +487,9 @@ type Config struct {
 	// neither set, the "resource" parameter is ignored, as any
 	// unregistered parameter is, and every access token's audience is
 	// Issuer. A request naming no resource also gets Issuer as its
-	// audience.
+	// audience — unless its client is confined by AllowedResources,
+	// whose single entry it is then for, or which, listing several,
+	// make naming one required (invalid_target otherwise).
 	Resources []string
 
 	// AttestationBasedClientAuthentication enables
@@ -599,6 +601,17 @@ type AutomaticRegistrationConfig struct {
 	// Empty means none. Each must be registered in Config.RAR: New
 	// refuses one that isn't.
 	AuthorizationDetailsTypes []string
+
+	// AllowedResources confines every automatically-registered client to
+	// these RFC 8707 resource indicators, as
+	// storage.RegisteredClientConfig.AllowedResources confines a
+	// statically registered one — see
+	// federation.AutomaticRegistrationConfig.AllowedResources for why
+	// this never comes from an RP's own metadata. Each an absolute URI
+	// without a fragment, none repeated. Empty (the default) leaves them
+	// unconfined: any resource Config.Resources or the ResourcePolicy
+	// accepts, and the issuer as audience when they name none.
+	AllowedResources []string
 
 	// MaxPathLength/MaxAuthorityHints/MaxStatementLifetime/MaxClockSkew
 	// bound Trust Chain resolution itself — see federation.Limits, which these configure

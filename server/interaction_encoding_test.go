@@ -159,6 +159,7 @@ func TestInteractionRequestFullRoundTrip(t *testing.T) {
 		Prompt:          server.Prompt{server.PromptLogin, server.PromptConsent},
 		ClientDisplay:   storage.ClientDisplay{Name: "RP", LogoURI: logo, PolicyURI: policy, TermsOfServiceURI: tos},
 		RequestedClaims: server.RequestedClaims{IDToken: []string{"email"}, UserInfo: []string{"name"}},
+		Resources:       []string{"https://rs-a.example", "https://rs-b.example/v1"},
 		Extensions:      extensions,
 	}
 	type session struct {

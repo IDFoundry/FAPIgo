@@ -43,9 +43,10 @@ type IssueAccessTokenRequest struct {
 	AuthorizationDetails []json.RawMessage
 
 	// Resources are the RFC 8707 resource indicators the access token is
-	// restricted to, checked as IssueRefreshTokenRequest.Resources are:
-	// its "aud" is them instead of the issuer. Give a refresh token
-	// issued for the same grant the same Resources.
+	// restricted to, checked, and defaulted when empty, as
+	// IssueRefreshTokenRequest.Resources are: its "aud" is them instead
+	// of the issuer. Give a refresh token issued for the same grant the
+	// same Resources.
 	Resources []string
 
 	// GrantID, if set, names the grant, as IssueRefreshTokenRequest's
@@ -59,7 +60,7 @@ type IssueAccessTokenRequest struct {
 // IssueAccessToken issues an access token for a grant the embedder
 // served itself (Config.AdditionalGrantTypes), as this server's own
 // token endpoint would: through Dependencies.AccessTokens, with this
-// server's issuer, its audience (req.Resources, or the issuer) and
+// server's issuer, its audience (req.Resources, or their default) and
 // Limits.AccessTokenLifetime, bound to
 // req.Binding, and carrying the same claims as the access tokens a
 // refresh token for the grant (IssueRefreshToken) later issues. Use it

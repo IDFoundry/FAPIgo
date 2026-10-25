@@ -1331,6 +1331,27 @@ func TestBeginBackchannelAuthenticationRejectsBindingMessageWithControlCharacter
 	}
 }
 
+func TestBeginBackchannelAuthenticationRejectsNonStringBindingMessage(t *testing.T) {
+	h, _ := newHarnessWithBackchannel(t)
+	params := standardBackchannelParams(t)
+	params["binding_message"] = jsonRaw(t, 1234)
+	requestObj := h.backchannelRequestObject(t, params)
+
+	action, err := h.server.BeginBackchannelAuthentication(context.Background(), server.BeginBackchannelAuthenticationRequest{
+		HTTP: server.FormRequest{Parameters: backchannelFormParams(h.clientAssertion(t), requestObj)},
+	})
+	if err != nil {
+		t.Fatalf("BeginBackchannelAuthentication: %v", err)
+	}
+	localErr, ok := action.(server.BackchannelAuthenticationLocalError)
+	if !ok {
+		t.Fatalf("action = %T, want server.BackchannelAuthenticationLocalError", action)
+	}
+	if localErr.Error.Code() != server.ErrorInvalidRequest {
+		t.Fatalf("Code = %q, want %q", localErr.Error.Code(), server.ErrorInvalidRequest)
+	}
+}
+
 func TestBeginBackchannelAuthenticationRejectsWhenCIBADisabled(t *testing.T) {
 	h := newHarness(t, server.ProfileFAPISecurity, true) // CIBA not configured
 

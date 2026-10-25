@@ -17,6 +17,44 @@ and `keys/ephemeral` needs only the steps not marked *production only*.
 
 ## v0.61.0
 
+### A client confined by `AllowedResources` no longer gets issuer-audience tokens (server, storage)
+
+**Affects:** a server with resource indicators enabled (`Config.Resources`
+or `Dependencies.ResourcePolicy`) where a client registered with
+`storage.RegisteredClientConfig.AllowedResources` makes a request that
+names no resource: at PAR, in a CIBA request, for client credentials, or
+through `IssueAccessToken`/`IssueRefreshToken`. Also such a client's
+grants made without resources, at their next code exchange, refresh or
+CIBA token request.
+
+**Why:** a request naming no resource got an access token addressed to
+the issuer, which `AllowedResources` was never checked against. Every
+resource server accepting the issuer as an audience took it — one
+migrating with `serverresource.Options.AcceptIssuerAudience` or the
+issuer in `AdditionalAudiences`, and the UserInfo endpoint — so a client
+refused a resource could get a token it accepts simply by naming none.
+
+**What fails:** for a client with exactly one `AllowedResources` entry, a
+request naming no resource is now for that resource: the grant records
+it, and its access tokens are addressed to it, not the issuer. It's
+checked against `Config.Resources` and the `ResourcePolicy` as a named
+one is, so if the server doesn't accept it the request fails with
+`invalid_target`. For a client with several entries, a request naming
+none fails with `invalid_target` ("a resource is required"). A grant made
+without resources before the client was confined gets the same: its
+single resource, or `invalid_target`, so the client must authorize
+again. Nothing changes for clients without `AllowedResources`, or while
+resource indicators are disabled.
+
+**What to change:** a confined client that also calls the UserInfo
+endpoint, which accepts only issuer-audience tokens, lists the issuer
+identifier in its `AllowedResources` (and the server accepts it, in
+`Config.Resources`, say); having more than one entry, it then names a
+resource in every request. A confined client with several entries names
+the resource it wants on every request. To confine clients registered
+through OpenID Federation too, set the new
+`AutomaticRegistrationConfig.AllowedResources`.
+
 ### A statically registered client authenticates with its static keys only (federation, server)
 
 **Affects:** a server with OpenID Federation automatic registration (or

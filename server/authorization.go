@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"time"
 
@@ -152,6 +153,7 @@ func (s *Server) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 	interaction.RequiredSubject = request.requiredSubjectForApplication()
 	interaction.ClientDisplay = client.Display()
 	interaction.Extensions = extensions
+	interaction.Resources = slices.Clone(request.Resources)
 
 	action := InteractionRequired{
 		Handle:      InteractionHandle{value: handle},

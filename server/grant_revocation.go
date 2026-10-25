@@ -70,8 +70,10 @@ func (s *Server) grantRevocationReader() (revocationReader, bool) {
 // ID must name one grant only. Grants without that grant ID are
 // unaffected.
 //
-// It records grantID as revoked in Dependencies.Revocation, which every
-// check reads: ExchangeAuthorizationCode, RefreshAccessToken and the
+// It records grantID as revoked in Dependencies.Revocation, under a key
+// namespaced by this server's issuer, so revoking a grant ID can't
+// revoke another issuer's grant of the same ID where servers with
+// different issuers share the store. Every check reads it: ExchangeAuthorizationCode, RefreshAccessToken and the
 // CIBA token request answer invalid_grant, and resource.Verifier
 // answers invalid_token for an access token carrying the grant ID — so
 // a resource server must read the same revocation store the
@@ -113,7 +115,7 @@ func (s *Server) RevokeGrant(ctx context.Context, grantID string) error {
 		return errors.New("server: revoke grant: Dependencies.Revocation can't revoke grants (it's NoRevocation, or doesn't implement IsRevoked)")
 	}
 	until := s.deps.Clock.Now().Add(s.grantRevocationHorizon())
-	if err := s.deps.Revocation.Revoke(ctx, grantrevocation.Key(grantID), until); err != nil {
+	if err := s.deps.Revocation.Revoke(ctx, grantrevocation.Key(s.cfg.Issuer.String(), grantID), until); err != nil {
 		return fmt.Errorf("server: revoke grant: %w", err)
 	}
 	return nil
@@ -121,15 +123,18 @@ func (s *Server) RevokeGrant(ctx context.Context, grantID string) error {
 
 // checkGrantNotRevoked refuses a grant that has been revoked with
 // RevokeGrant: invalid_grant, as for any other authorization grant that
-// is no longer valid (RFC 6749 §5.2).
+// is no longer valid (RFC 6749 §5.2). It also reads the un-namespaced
+// key a server before v0.61.0 wrote (grantrevocation.Keys), so a grant
+// revoked before an upgrade stays revoked.
 func (s *Server) checkGrantNotRevoked(ctx context.Context, grant grantRecord) *Error {
+	issuer := s.cfg.Issuer.String()
 	var keys []string
 	if grant.GrantID != "" {
-		keys = append(keys, grantrevocation.Key(grant.GrantID))
+		keys = append(keys, grantrevocation.Keys(issuer, grant.GrantID)...)
 	}
 	if grant.CodeGrantID != "" {
 		// Revoked when the code it came from was reused.
-		keys = append(keys, grantrevocation.CodeKey(grant.CodeGrantID))
+		keys = append(keys, grantrevocation.CodeKeys(issuer, grant.CodeGrantID)...)
 	}
 	if len(keys) == 0 {
 		return nil

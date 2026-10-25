@@ -137,6 +137,97 @@ with `invalid_client` (`OnResolutionFailure` names the parameter).
 **What to change:** nothing on the OP. A refused Relying Party leaves the
 parameter out, or gives it a value.
 
+### Opaque access tokens record their issuer, and resource servers check it (resource, server)
+
+**Affects:** a resource server using `resource.OpaqueAccessTokens`
+(directly or through `resource.NewOpaqueAccessTokens`; not one built by
+`serverresource.NewVerifier`, which sets everything itself), and code
+that calls `server.OpaqueAccessTokens.IssueAccessToken` directly rather
+than through the server.
+
+**Why:** an opaque access token's record kept no issuer, and
+`resource.OpaqueAccessTokens` checked only its audience. Where two
+issuers' servers shared an `AccessTokenStore` (forbidden, see the
+`storage` package documentation, but the issuer stamp is there as a
+backstop for exactly that mistake) and named the same resource, one
+tenant's token was accepted by the other's resource server and acted for
+that tenant's user with the same internal subject. A JWT access token's
+`iss` already prevented this.
+
+**What fails:** `resource.NewOpaqueAccessTokens` now takes the issuer as
+a second argument, and `NewVerifier` refuses a `resource.OpaqueAccessTokens`
+without `Issuer`. A token whose record names another issuer, or none, is
+refused with `invalid_token`. Every opaque access token issued before
+this release has no recorded issuer, so it stops working on upgrade:
+these are short-lived (`Limits.AccessTokenLifetime`), and a client
+holding one gets a new one with its refresh token or by authorizing
+again. With `Audience` set, a record with no audience is now refused
+too, where it was accepted; every FAPIgo server since v0.57.0 records
+one. `server.OpaqueAccessTokens.IssueAccessToken` fails without
+`AccessTokenParams.Issuer`, which the server always sets. The record's
+issuer is kept in its `Claims`, as its audience already was, so a store
+that persists `Claims` needs no change. `ResolvedAccessToken.Issuer`
+(and `AuthorizationContext.Issuer`) is now the recorded issuer for an
+opaque token, where it was always empty.
+
+**What to change:** pass the authorization server's issuer to
+`resource.NewOpaqueAccessTokens(store, issuer)`, or set
+`OpaqueAccessTokens.Issuer` on a literal.
+
+### Records written before v0.58.0 are refused (server)
+
+**Affects:** a server holding records written by a version before
+v0.58.0 (released 2026-10-20): in practice only refresh tokens, since
+pushed requests, authorization codes and CIBA requests from then have
+long expired.
+
+**Why:** v0.58.0 began stamping the server's issuer into every request,
+grant and CIBA record, and refusing one another issuer wrote, but still
+accepted a record without one so an upgrade didn't fail requests in
+flight. Such a record can't be told apart from another issuer's, and a
+refresh token isn't rotated and can live for months, so the gap in the
+backstop stayed open for as long as `Limits.RefreshTokenLifetime`.
+
+**What fails:** a record without an issuer is now treated as unknown
+everywhere it's read: a code exchange, refresh, token revocation and
+CIBA token request answer `invalid_grant` (revocation answers as for an
+unknown token, revoking nothing), `BeginAuthorization` an invalid
+`request_uri`, and completing an interaction or a CIBA decision
+`invalid_request`. A user whose client holds a refresh token issued
+before v0.58.0 must authorize again.
+
+**What to change:** nothing in code. Expect clients holding refresh
+tokens from before 2026-10-20 to send their users through authorization
+again.
+
+### Grant revocation keys name their issuer (server, resource, storage)
+
+**Affects:** a resource server with its own `resource.AccessTokenResolver`
+whose tokens carry a `grant_id` or `code_grant_id` claim; a
+`RevocationStore` that restricts the keys it accepts; and anything
+reading the revocation store's keys directly.
+
+**Why:** `RevokeGrant` recorded a grant ID as revoked under
+`grant:<grant ID>`, and the application chooses grant IDs. Where two
+issuers shared a revocation store, revoking one tenant's grant `g1`
+revoked every other tenant's grant `g1` too.
+
+**What fails:** a revoked grant is now recorded under `grant:`, the
+grant ID, `@` and the server's issuer (`code-grant:` likewise, for a
+reused authorization code's grant), so keys are longer and contain the
+issuer URL. The server and `resource.Verifier` still also check the old
+key, so a grant revoked before the upgrade stays revoked; those records
+expire with the grant, and a later release may stop reading them.
+`resource.Verifier` needs the token's issuer to build the key: a token
+carrying either claim whose `ResolvedAccessToken.Issuer` is empty is
+refused with 500 `server_error`. `JWTAccessTokens` and
+`OpaqueAccessTokens` always report it.
+
+**What to change:** a custom `AccessTokenResolver` sets
+`ResolvedAccessToken.Issuer` to the issuer that issued the token. A
+`RevocationStore` with a key length or character limit allows for the
+issuer URL; `storage.TestRevocationStoreContract` covers such keys.
+
 ## v0.58.0
 
 ### Automatic registration skips `tls_client_auth` unless chains are verified (server)

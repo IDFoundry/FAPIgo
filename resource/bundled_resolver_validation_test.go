@@ -55,8 +55,8 @@ func TestNewVerifierRefusesIncompleteBundledResolvers(t *testing.T) {
 		for name, resolver := range map[string]resource.AccessTokenResolver{
 			"JWTAccessTokens":     valid,
 			"*JWTAccessTokens":    &valid,
-			"OpaqueAccessTokens":  resource.OpaqueAccessTokens{Store: memstore.NewAccessTokenStore()},
-			"*OpaqueAccessTokens": &resource.OpaqueAccessTokens{Store: memstore.NewAccessTokenStore()},
+			"OpaqueAccessTokens":  resource.OpaqueAccessTokens{Issuer: testIssuerURL, Store: memstore.NewAccessTokenStore()},
+			"*OpaqueAccessTokens": &resource.OpaqueAccessTokens{Issuer: testIssuerURL, Store: memstore.NewAccessTokenStore()},
 		} {
 			deps := validDependencies(t)
 			deps.AccessTokens = resolver

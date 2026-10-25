@@ -146,7 +146,8 @@ func (s *Server) RevokeToken(ctx context.Context, req TokenRevocationRequest) (T
 }
 
 // isOwnOpaqueAccessToken reports whether rawToken is an opaque access
-// token this server issued to clientID. RFC 7009 §2.2.1 has a server
+// token this server (not another issuer sharing its store; see
+// ownsRecord) issued to clientID. RFC 7009 §2.2.1 has a server
 // that can't revoke a token's type answer unsupported_token_type, rather
 // than the 200 that says it was revoked. Only the client's own tokens
 // are reported, so the answer reveals nothing about another's; a store
@@ -165,7 +166,7 @@ func (s *Server) isOwnOpaqueAccessToken(ctx context.Context, clientID fapi.Clien
 		return false
 	}
 	looked, err := store.LookupAccessToken(ctx, storage.AccessTokenLookup{TokenHash: sha256.Sum256([]byte(rawToken))})
-	return err == nil && looked.ClientID == clientID
+	return err == nil && looked.ClientID == clientID && s.ownsAccessTokenRecord(looked.Claims)
 }
 
 // revokeRefreshToken revokes rawToken if it is a live refresh token
@@ -215,7 +216,7 @@ func (s *Server) revokeCodeGrant(ctx context.Context, codeGrantID string) *Error
 		return nil
 	}
 	until := s.deps.Clock.Now().Add(s.grantRevocationHorizon())
-	if err := s.deps.Revocation.Revoke(ctx, grantrevocation.CodeKey(codeGrantID), until); err != nil {
+	if err := s.deps.Revocation.Revoke(ctx, grantrevocation.CodeKey(s.cfg.Issuer.String(), codeGrantID), until); err != nil {
 		return newError(ErrorServerError, 500, "failed to revoke the refresh token's grant", err)
 	}
 	return nil

@@ -117,24 +117,9 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), backchannelPollError(err))
 	}
 
-	if polled.ClientID != client.ID() {
-		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorInvalidGrant, 400, "auth_req_id was not issued to this client", nil))
-	}
-	request, err := s.decodeOwnRequestRecord(polled.Request)
-	if err != nil {
-		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), recordFailure(err, newError(ErrorInvalidGrant, 400, "auth_req_id is invalid or unknown", nil), "backchannel authentication request"))
-	}
-	if request.DPoPJKT != "" && request.DPoPJKT != thumbprint {
-		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorInvalidGrant, 400, "DPoP proof key does not match the dpop_jkt bound to this backchannel authentication request", nil))
-	}
-
-	if statusErr := backchannelStatusError(polled.Status); statusErr != nil {
-		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), statusErr)
-	}
-
-	grant, err := decodeGrantRecord(polled.Grant)
-	if err != nil {
-		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorServerError, 500, "failed to decode backchannel authentication grant", err))
+	grant, grantErr := s.approvedBackchannelGrant(polled, client.ID(), thumbprint)
+	if grantErr != nil {
+		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), grantErr)
 	}
 	grant.CodeGrantID = s.backchannelGrantID(authReqIDHash)
 	audience, audiences, usableErr := s.usableGrantAudience(ctx, client, grant, requestedResources)
@@ -176,6 +161,36 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 	return result, nil
 }
 
+// approvedBackchannelGrant returns the grant polled holds for clientID,
+// whose DPoP or mTLS binding is thumbprint, once it is approved: the
+// auth_req_id must have been issued to clientID, by this server
+// (ownsRecord), to the dpop_jkt it was bound to, if any.
+func (s *Server) approvedBackchannelGrant(polled storage.PolledBackchannelAuthentication, clientID fapi.ClientID, thumbprint string) (grantRecord, *Error) {
+	if polled.ClientID != clientID {
+		return grantRecord{}, newError(ErrorInvalidGrant, 400, "auth_req_id was not issued to this client", nil)
+	}
+	request, err := s.decodeOwnRequestRecord(polled.Request)
+	if err != nil {
+		return grantRecord{}, recordFailure(err, newError(ErrorInvalidGrant, 400, authReqIDUnknownDescription, nil), "backchannel authentication request")
+	}
+	if request.DPoPJKT != "" && request.DPoPJKT != thumbprint {
+		return grantRecord{}, newError(ErrorInvalidGrant, 400, "DPoP proof key does not match the dpop_jkt bound to this backchannel authentication request", nil)
+	}
+	if statusErr := backchannelStatusError(polled.Status); statusErr != nil {
+		return grantRecord{}, statusErr
+	}
+	grant, err := s.decodeOwnGrantRecord(polled.Grant)
+	if err != nil {
+		return grantRecord{}, recordFailure(err, newError(ErrorInvalidGrant, 400, authReqIDUnknownDescription, nil), "backchannel authentication grant")
+	}
+	return grant, nil
+}
+
+// authReqIDUnknownDescription is the error_description of the
+// invalid_grant for an auth_req_id this server doesn't know, or doesn't
+// own (Server.ownsRecord).
+const authReqIDUnknownDescription = "auth_req_id is invalid or unknown"
+
 // backchannelPollError is the token endpoint's answer when polling the
 // backchannel authentication request fails with err.
 func backchannelPollError(err error) *Error {
@@ -191,7 +206,7 @@ func backchannelPollError(err error) *Error {
 	if errors.As(err, &alreadyRedeemed) {
 		return newError(ErrorInvalidGrant, 400, "auth_req_id has already been used", err)
 	}
-	return newError(ErrorInvalidGrant, 400, "auth_req_id is invalid or unknown", err)
+	return newError(ErrorInvalidGrant, 400, authReqIDUnknownDescription, err)
 }
 
 // backchannelStatusError is the token endpoint's answer for a polled

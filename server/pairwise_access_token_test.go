@@ -31,7 +31,7 @@ func pairwiseResourceVerifier(t *testing.T, h harness, lookup pairwise.Lookup) *
 	t.Helper()
 	var resolver resource.AccessTokenResolver
 	if opaque, ok := h.deps.AccessTokens.(server.OpaqueAccessTokens); ok {
-		resolver = resource.OpaqueAccessTokens{Store: opaque.Store}
+		resolver = resource.OpaqueAccessTokens{Issuer: testIssuerURL, Store: opaque.Store}
 	} else {
 		issuerKeys, err := keys.NewLocalIssuerKeys(h.cfg.Issuer, h.deps.Keys)
 		if err != nil {

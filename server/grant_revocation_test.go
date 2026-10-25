@@ -41,11 +41,12 @@ func authorizeWithGrantID(t *testing.T, now time.Time, grantID string, scope ...
 
 func TestCompleteAuthorizationRejectsInvalidGrantID(t *testing.T) {
 	for name, id := range map[string]string{
-		"a space":   "grant 1",
-		"a slash":   "grant/1",
-		"non-ASCII": "grünt",
-		"too long":  strings.Repeat("g", 129),
-		"a colon":   "grant:1",
+		"a space":    "grant 1",
+		"a slash":    "grant/1",
+		"non-ASCII":  "grünt",
+		"too long":   strings.Repeat("g", 129),
+		"a colon":    "grant:1",
+		"an at sign": "grant@1",
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t, server.ProfileFAPISecurity, true)
@@ -108,7 +109,7 @@ func TestRevokeGrantRecordsUntilEverythingFromTheGrantExpires(t *testing.T) {
 	// The harness's RefreshTokenLifetime and AccessTokenLifetime are 5
 	// minutes each (longer than its code lifetime), and its
 	// MaxClockSkew 5 seconds.
-	if got, want := h.revocation.until["grant:grant-1"], h.now.Add(10*time.Minute+5*time.Second); !got.Equal(want) {
+	if got, want := h.revocation.until["grant:grant-1@"+testIssuer], h.now.Add(10*time.Minute+5*time.Second); !got.Equal(want) {
 		t.Errorf("revoked until %v, want %v", got, want)
 	}
 }
@@ -141,4 +142,56 @@ func TestCIBARevokedGrant(t *testing.T) {
 	if code := serverErrorCode(t, err); code != server.ErrorInvalidGrant {
 		t.Fatalf("ExchangeBackchannelAuthentication(revoked grant) code = %q, want %q", code, server.ErrorInvalidGrant)
 	}
+}
+
+// TestGrantRevocationIsPerIssuer covers servers with different issuers
+// sharing one revocation store: one revoking a grant ID doesn't revoke
+// another's grant of the same ID, while a grant revoked under the
+// un-namespaced key servers before v0.61.0 wrote stays revoked.
+func TestGrantRevocationIsPerIssuer(t *testing.T) {
+	ctx := context.Background()
+	exchange := func(t *testing.T, sink server.RevocationSink) error {
+		t.Helper()
+		h := newHarnessWithBackchannelOptions(t, memstore.NewBackchannelAuthenticationStore(), nil, func(d *server.Dependencies) { d.Revocation = sink })
+		required := beginBackchannel(t, h, standardBackchannelParams(t))
+		if err := h.server.CompleteBackchannelAuthentication(ctx, server.CompleteBackchannelAuthenticationRequest{
+			Handle: required.Handle, Result: authorizeWithGrantID(t, h.now, "grant-1"),
+		}); err != nil {
+			t.Fatalf("CompleteBackchannelAuthentication: %v", err)
+		}
+		tenantB, _ := otherTenant(t, h)
+		if err := tenantB.RevokeGrant(ctx, "grant-1"); err != nil {
+			t.Fatalf("tenant B RevokeGrant: %v", err)
+		}
+		_, err := h.server.ExchangeBackchannelAuthentication(ctx, server.BackchannelTokenExchangeRequest{
+			HTTP: server.FormRequest{Parameters: []server.FormParameter{
+				formParam("client_assertion", h.clientAssertion(t)),
+				formParam("client_assertion_type", clientassertion.AssertionType),
+				formParam("grant_type", server.CIBAGrantType),
+				formParam("auth_req_id", required.AuthReqID.String()),
+			}},
+			DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
+		})
+		return err
+	}
+
+	t.Run("another issuer's revocation", func(t *testing.T) {
+		store := memstore.NewRevocationStore()
+		if err := exchange(t, store); err != nil {
+			t.Fatalf("redeeming a grant another issuer revoked the same ID of: %v", err)
+		}
+		if revoked, _ := store.IsRevoked(ctx, "grant:grant-1@"+otherTenantIssuer); !revoked {
+			t.Error("tenant B's revocation wasn't recorded under its own issuer")
+		}
+	})
+
+	t.Run("revoked before v0.61.0", func(t *testing.T) {
+		store := memstore.NewRevocationStore()
+		if err := store.Revoke(ctx, "grant:grant-1", time.Now().Add(time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		if code := serverErrorCode(t, exchange(t, store)); code != server.ErrorInvalidGrant {
+			t.Fatalf("redeeming a grant revoked under the legacy key: error code %q, want %q", code, server.ErrorInvalidGrant)
+		}
+	})
 }

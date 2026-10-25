@@ -317,6 +317,10 @@ func checkVerifierAudience(t *testing.T, h *fapitest.Harness, tokens client.Toke
 	if !slices.Equal(authz.Audience, want) {
 		t.Errorf("resource server %s: Audience = %q, want %q", resourceID, authz.Audience, want)
 	}
+	// Opaque tokens too: their record keeps the issuer.
+	if authz.Issuer != fapitest.Issuer {
+		t.Errorf("resource server %s: Issuer = %q, want %q", resourceID, authz.Issuer, fapitest.Issuer)
+	}
 }
 
 // refuseAtResource checks the resource server built with opts refuses

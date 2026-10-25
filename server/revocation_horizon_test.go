@@ -133,7 +133,7 @@ func TestRevokedGrantStaysRevokedAfterRefreshLifetimeShortened(t *testing.T) {
 	// current 10m lifetime ago: refused as expired, not resurrected.
 	clock.set(start.Add(26 * time.Minute))
 	h = rebuild(t, h, shortened, deps)
-	if revoked, _ := store.IsRevoked(context.Background(), "grant:grant-1"); revoked {
+	if revoked, _ := store.IsRevoked(context.Background(), "grant:grant-1@"+testIssuer); revoked {
 		t.Fatal("test setup: the revocation record should have lapsed by now")
 	}
 	if _, err := refreshWith(t, h, refreshToken, ""); serverErrorCode(t, err) != server.ErrorInvalidGrant {

@@ -52,7 +52,7 @@ func withOpaqueAccessTokens(t *testing.T, h harness) (harness, *memstore.AccessT
 // tokens, JWT or (with store) opaque, and refusing revoked grants.
 func embedderResourceVerifier(t *testing.T, h harness, store *memstore.AccessTokenStore) *resource.Verifier {
 	t.Helper()
-	var resolver resource.AccessTokenResolver = resource.OpaqueAccessTokens{Store: store}
+	var resolver resource.AccessTokenResolver = resource.OpaqueAccessTokens{Issuer: testIssuerURL, Store: store}
 	if store == nil {
 		issuerKeys, err := keys.NewLocalIssuerKeys(h.cfg.Issuer, h.deps.Keys)
 		if err != nil {

@@ -19,6 +19,16 @@ import (
 
 const testIssuer = "https://as.example.com"
 
+// testIssuerURL is testIssuer parsed, for the resolvers taking a
+// fapi.URL.
+var testIssuerURL = func() fapi.URL {
+	u, err := fapi.ParseIssuerURL(testIssuer)
+	if err != nil {
+		panic(err)
+	}
+	return u
+}()
+
 type fixedClock struct{ now time.Time }
 
 func (c fixedClock) Now() time.Time { return c.now }
@@ -303,8 +313,11 @@ func TestResolveAccessTokenAcceptsKeyWithinMaxCandidates(t *testing.T) {
 // constructor entirely, so its one check (reject a nil store) had
 // never actually run.
 func TestNewOpaqueAccessTokensRejectsInvalid(t *testing.T) {
-	if _, err := resource.NewOpaqueAccessTokens(nil); err == nil {
+	if _, err := resource.NewOpaqueAccessTokens(nil, testIssuerURL); err == nil {
 		t.Fatalf("NewOpaqueAccessTokens(nil store) = nil error, want error")
+	}
+	if _, err := resource.NewOpaqueAccessTokens(memstore.NewAccessTokenStore(), fapi.URL{}); err == nil {
+		t.Fatalf("NewOpaqueAccessTokens(no issuer) = nil error, want error")
 	}
 }
 

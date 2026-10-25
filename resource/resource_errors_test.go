@@ -151,7 +151,7 @@ func TestAccessTokenLookupFailureClassification(t *testing.T) {
 		{"store unavailable", fmt.Errorf("db: %w", storage.ErrStoreUnavailable), resource.ErrorServerError, 500},
 	} {
 		t.Run("opaque "+tc.name, func(t *testing.T) {
-			_, err := resource.OpaqueAccessTokens{Store: failingAccessTokenStore{err: tc.err}}.ResolveAccessToken(context.Background(), resource.ResolveAccessTokenRequest{Raw: "tok"})
+			_, err := resource.OpaqueAccessTokens{Issuer: testIssuerURL, Store: failingAccessTokenStore{err: tc.err}}.ResolveAccessToken(context.Background(), resource.ResolveAccessTokenRequest{Raw: "tok"})
 			assertResourceError(t, err, tc.wantCode, tc.wantStatus, tc.err)
 		})
 		t.Run("bare resolver "+tc.name, func(t *testing.T) {

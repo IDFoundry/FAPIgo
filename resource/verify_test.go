@@ -6,6 +6,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -398,13 +399,14 @@ func newOpaqueFixture(t *testing.T, lifetime time.Duration) opaqueFixture {
 	if err := store.CreateAccessToken(context.Background(), storage.NewAccessToken{
 		TokenHash: hash, ClientID: "client-1", Subject: "user-1",
 		Scope: []string{"read", "write"}, Thumbprint: thumbprint.String(),
+		Claims:    map[string]json.RawMessage{"iss": json.RawMessage(`"` + testIssuer + `"`)},
 		ExpiresAt: now.Add(lifetime),
 	}); err != nil {
 		t.Fatalf("CreateAccessToken: %v", err)
 	}
 
 	v, err := resource.NewVerifier(validConfig(t), resource.Dependencies{
-		AccessTokens: resource.OpaqueAccessTokens{Store: store},
+		AccessTokens: resource.OpaqueAccessTokens{Issuer: testIssuerURL, Store: store},
 		Replay:       &fakeReplayStore{},
 		Revocation:   &fakeRevocationChecker{},
 		Clock:        fixedClock{now: now},
@@ -464,14 +466,14 @@ func TestVerifyAcceptsOpaqueAccessToken(t *testing.T) {
 	if len(authz.Scopes) != 2 || authz.Scopes[0] != "read" || authz.Scopes[1] != "write" {
 		t.Errorf("Scopes = %v, want [read write]", authz.Scopes)
 	}
-	// An opaque access token has no wire-level iss/aud/iat to report —
-	// see ResolvedAccessToken's own doc comment — so these stay zero
-	// even on an otherwise-successful Verify.
-	if authz.Issuer != "" {
-		t.Errorf("Issuer = %q, want empty for an opaque access token", authz.Issuer)
+	// An opaque access token reports the issuer and audience its record
+	// holds (here no audience) and, with no wire-level iat, a zero
+	// IssuedAt — see ResolvedAccessToken's own doc comment.
+	if authz.Issuer != testIssuer {
+		t.Errorf("Issuer = %q, want %q", authz.Issuer, testIssuer)
 	}
 	if authz.Audience != nil {
-		t.Errorf("Audience = %v, want nil for an opaque access token", authz.Audience)
+		t.Errorf("Audience = %v, want nil for a record without one", authz.Audience)
 	}
 	if !authz.IssuedAt.IsZero() {
 		t.Errorf("IssuedAt = %v, want zero for an opaque access token", authz.IssuedAt)

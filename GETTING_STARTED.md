@@ -446,8 +446,8 @@ doesn't declare `LiveFetchHardened` and `New` refuses it, as it does a
 
 **Whichever access-token format you pick here, the resource server that
 verifies these tokens must be wired to match** — `resource.JWTAccessTokens`
-for `server.JWTAccessTokens`, `resource.OpaqueAccessTokens{Store: ...}`
-(the same `Store` instance, if co-located) for
+for `server.JWTAccessTokens`, `resource.OpaqueAccessTokens{Store: ..., Issuer: ...}`
+(the same `Store` instance, if co-located, and this AS's issuer) for
 `server.OpaqueAccessTokens` — see step 7. The two sides agreeing on
 format isn't checked for you: nothing stops you from constructing an AS
 that issues opaque tokens and a resource server that only knows how to
@@ -978,7 +978,7 @@ accessTokens, err := resource.NewJWTAccessTokens(
 // storage.AccessTokenStore instance the AS writes to — only realistic
 // if this resource server shares that storage backend with the AS
 // (co-located, or a real shared database).
-// accessTokens, err := resource.NewOpaqueAccessTokens(sameAccessTokenStore)
+// accessTokens, err := resource.NewOpaqueAccessTokens(sameAccessTokenStore, asIssuer) // a token another issuer recorded is refused
 // accessTokens.Audience = asIssuer.String() // required under AssuranceProduction, as for JWTs
 ```
 

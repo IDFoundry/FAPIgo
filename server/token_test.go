@@ -730,7 +730,7 @@ func TestExchangeAuthorizationCodeReuseRevokesOpaqueAccessToken(t *testing.T) {
 		Limits:    resource.Limits{MaxDPoPProofAge: time.Minute, MaxClockSkew: 5 * time.Second},
 		Assurance: resource.AssuranceDevelopment,
 	}, resource.Dependencies{
-		AccessTokens: resource.OpaqueAccessTokens{Store: store},
+		AccessTokens: resource.OpaqueAccessTokens{Issuer: testIssuerURL, Store: store},
 		Replay:       memstore.NewReplayStore(),
 		Revocation:   revocationCheckerFromSink{sink: h.revocation},
 		Clock:        fixedClock{now: h.now},
@@ -923,7 +923,7 @@ func TestJWTAccessTokensRoundTripsThroughResourceVerifier(t *testing.T) {
 func TestOpaqueAccessTokensRoundTripsThroughResourceVerifier(t *testing.T) {
 	store := memstore.NewAccessTokenStore()
 	issuer := server.OpaqueAccessTokens{Store: store}
-	verifier := resource.OpaqueAccessTokens{Store: store}
+	verifier := resource.OpaqueAccessTokens{Issuer: testIssuerURL, Store: store}
 
 	now := time.Now()
 	dpopKey := generateKey(t)
@@ -934,8 +934,8 @@ func TestOpaqueAccessTokensRoundTripsThroughResourceVerifier(t *testing.T) {
 
 	raw, issueKey, err := issuer.IssueAccessToken(context.Background(), server.AccessTokenParams{
 		ClientID: testClientID, Subject: "user-1", Scope: []string{"openid", "accounts"},
-		Thumbprint: dpopThumbprint.String(),
-		Now:        now, Lifetime: 5 * time.Minute, Random: rand.Reader,
+		Thumbprint: dpopThumbprint.String(), Issuer: testIssuer,
+		Now: now, Lifetime: 5 * time.Minute, Random: rand.Reader,
 	})
 	if err != nil {
 		t.Fatalf("IssueAccessToken: %v", err)
@@ -966,6 +966,9 @@ func TestOpaqueAccessTokensRoundTripsThroughResourceVerifier(t *testing.T) {
 	}
 	if resolved.Key != issueKey {
 		t.Fatalf("Key = %q, want %q", resolved.Key, issueKey)
+	}
+	if resolved.Issuer != testIssuer {
+		t.Fatalf("Issuer = %q, want %q", resolved.Issuer, testIssuer)
 	}
 
 	// Unknown token must be rejected. (Binding/expiry rejection is no

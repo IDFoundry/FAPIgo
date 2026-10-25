@@ -446,6 +446,16 @@ func (c fixedClock) Now() time.Time { return c.now }
 
 const testClientID = fapi.ClientID("client-123")
 const testIssuer = "https://as.example"
+
+// testIssuerURL is testIssuer parsed, for resource.OpaqueAccessTokens.
+var testIssuerURL = func() fapi.URL {
+	u, err := fapi.ParseIssuerURL(testIssuer)
+	if err != nil {
+		panic(err)
+	}
+	return u
+}()
+
 const testRedirectURI = "https://rp.example/callback"
 const testTokenEndpoint = "https://as.example/token"
 const testAuthorizationEndpoint = "https://as.example/authorize"

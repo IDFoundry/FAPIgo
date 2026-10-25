@@ -824,7 +824,7 @@ func TestResourceIndicatorsResourceServerRefusesAnotherResourcesToken(t *testing
 // store) accepting audience, and additional besides it.
 func audienceVerifier(t *testing.T, h harness, store *memstore.AccessTokenStore, audience string, additional ...string) *resource.Verifier {
 	t.Helper()
-	var resolver resource.AccessTokenResolver = resource.OpaqueAccessTokens{Store: store, Audience: audience, AdditionalAudiences: additional}
+	var resolver resource.AccessTokenResolver = resource.OpaqueAccessTokens{Issuer: testIssuerURL, Store: store, Audience: audience, AdditionalAudiences: additional}
 	if store == nil {
 		issuerKeys, err := keys.NewLocalIssuerKeys(h.cfg.Issuer, h.deps.Keys)
 		if err != nil {

@@ -1053,8 +1053,9 @@ func (p credentialIssuerPolicy) AllowResources(ctx context.Context, client stora
 
 A resource is checked against, in order: the client's own
 `storage.RegisteredClientConfig.AllowedResources`, if it registered any
-(a client registered automatically through OpenID Federation has none,
-so it may name any resource the server accepts); then
+(a client registered automatically through OpenID Federation gets
+`AutomaticRegistrationConfig.AllowedResources`, the same for all of
+them, and without that may name any resource the server accepts); then
 `Config.Resources`; then, only for those the list doesn't name,
 `ResourcePolicy`. Anything refused is `invalid_target`. The client
 names resources at PAR — repeated `resource` form parameters, or a
@@ -1065,7 +1066,18 @@ refresh; a refresh token always keeps the grant's whole set. The access
 token's `aud` is then the resource (a JSON string), or, for several,
 an array of them. A request naming no resource still gets the issuer as
 its audience, and with neither `Config.Resources` nor `ResourcePolicy`
-set, `resource` is ignored as it always was. For a grant you serve
+set, `resource` is ignored as it always was.
+
+A client confined by `AllowedResources` never gets an issuer-audience
+token, though: every resource server accepting the issuer as an
+audience would take it, whatever the list says. If it lists exactly one
+resource, a request naming none — at PAR, in a CIBA request, for
+client credentials, or to `IssueAccessToken`/`IssueRefreshToken` — is
+for that one, recorded with the grant as if the client had named it and
+checked against `Config.Resources` and `ResourcePolicy` the same way;
+if it lists several, the request must name one, or it's
+`invalid_target`. A grant made without resources before the client was
+confined gets the same treatment at its next token request. For a grant you serve
 yourself (`Config.AdditionalGrantTypes`), pass
 `TokenEndpointRequest.Resources()` as `IssueAccessTokenRequest.Resources`
 and `IssueRefreshTokenRequest.Resources`, and check the resources your
@@ -1112,10 +1124,14 @@ present it to another. Every FAPIgo access token is sender-constrained
 that doesn't want its resource servers to share a token narrows each
 token request to the one resource it's for.
 
-The consent screen isn't told which resources a request names
-(`InteractionRequest` doesn't carry them), so it can neither show them
-to the user nor narrow them: they're the client's to choose and the
-server's to allow.
+The consent screen is told which resources the tokens would be for —
+`InteractionRequest.Resources` (and `BackchannelInteractionRequest`'s
+for CIBA), the client's default included — so where several resource
+servers share the AS, show them: the user can then tell which one a
+token is for. Approving, `GrantedAuthorization.Resources` can narrow
+them to a subset of those; leaving it nil grants all of them, and one
+that wasn't requested makes the completion fail, as an unrequested
+scope does.
 
 While clients move to sending `resource`, a resource server can also
 accept tokens issued without one: `AcceptIssuerAudience: true` in
@@ -1125,7 +1141,10 @@ server verifying the issuer audience accepts, works here too. A UserInfo
 endpoint keeps the default (no `Resource`): it accepts only tokens
 issued without a resource, so a client that also calls UserInfo names
 the AS's issuer as one of its resources (list it in `Config.Resources`)
-and narrows each token request to the resource it's for.
+and narrows each token request to the resource it's for. A client
+confined by `AllowedResources` must list the issuer there too to call
+UserInfo at all, and then, listing more than one, name a resource in
+every request.
 
 ### Verify a request
 

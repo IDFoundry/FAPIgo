@@ -127,39 +127,8 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 		return s.completeLocalFail(ctx, clientID, authorizeErr), nil
 	}
 
-	// OIDC Core §3.1.2.1: with max_age, an authentication older than
-	// max_age must be repeated, and if it isn't, the client gets an
-	// error, "typically login_required" (§3.1.2.1, prompt=login).
-	if maxAge, ok, _ := requestedMaxAge(request.Parameters); ok {
-		oldest := s.deps.Clock.Now().Add(-maxAge - s.cfg.Limits.MaxClockSkew)
-		if result.auth.authTime.Before(oldest) {
-			return s.completeErrorRedirect(ctx, clientID, redirectURI, state, "login_required", "the user's authentication is older than the requested max_age", AuditOutcomeFailure)
-		}
-	}
-
-	// OIDC Core §3.1.2.1: prompt=login asks the OP to "reauthenticate the
-	// End-User even if the End-User is already authenticated", and if it
-	// can't, to return login_required. An authentication from before the
-	// request was pushed, allowing the same clock skew as max_age, didn't
-	// happen for this request. A record without PushedAt (written before
-	// it existed) isn't checked.
-	if prompt, _ := requestedPrompt(request.Parameters); prompt.Has(PromptLogin) && request.PushedAt != nil {
-		if result.auth.authTime.Before(request.PushedAt.Add(-s.cfg.Limits.MaxClockSkew)) {
-			return s.completeErrorRedirect(ctx, clientID, redirectURI, state, "login_required", "the user didn't authenticate again for prompt=login", AuditOutcomeFailure)
-		}
-	}
-
-	// OIDC Core §5.5.1.1: an essential "acr" request with values must be
-	// met, or the outcome treated as a failed authentication.
-	if !meetsEssentialACR(request.EssentialACRValues, result.auth.acr) {
-		return s.completeErrorRedirect(ctx, clientID, redirectURI, state, "login_required", "the user's authentication doesn't meet the requested essential acr", AuditOutcomeFailure)
-	}
-
-	// OIDC Core §5.5.1: a request naming its end user, by id_token_hint
-	// or a "sub" value, must not be answered for a different one; that
-	// user didn't authenticate, so it's login_required.
-	if !meetsRequiredSubject(request.RequiredSubject, clientSub) {
-		return s.completeErrorRedirect(ctx, clientID, redirectURI, state, "login_required", "the authenticated user isn't the one the request named", AuditOutcomeFailure)
+	if problem := s.loginRequiredProblem(request, result.auth, clientSub); problem != "" {
+		return s.completeErrorRedirect(ctx, clientID, redirectURI, state, "login_required", problem, AuditOutcomeFailure)
 	}
 
 	approved, approvedErr := s.checkApprovedGrant(request, result.grant)
@@ -224,6 +193,47 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 
 	s.audit(ctx, AuditEventCompleteAuthorization, clientID, AuditOutcomeSuccess, "")
 	return AuthorizationRedirect{destination: destination}, nil
+}
+
+// loginRequiredProblem describes why auth, the authentication of the
+// user whose sub at the client is clientSub, doesn't meet request, so
+// the client gets login_required, or returns "" when it does.
+func (s *Server) loginRequiredProblem(request requestRecord, auth AuthenticationContext, clientSub string) string {
+	// OIDC Core §3.1.2.1: with max_age, an authentication older than
+	// max_age must be repeated, and if it isn't, the client gets an
+	// error, "typically login_required" (§3.1.2.1, prompt=login).
+	if maxAge, ok, _ := requestedMaxAge(request.Parameters); ok {
+		oldest := s.deps.Clock.Now().Add(-maxAge - s.cfg.Limits.MaxClockSkew)
+		if auth.authTime.Before(oldest) {
+			return "the user's authentication is older than the requested max_age"
+		}
+	}
+
+	// OIDC Core §3.1.2.1: prompt=login asks the OP to "reauthenticate the
+	// End-User even if the End-User is already authenticated", and if it
+	// can't, to return login_required. An authentication from before the
+	// request was pushed, allowing the same clock skew as max_age, didn't
+	// happen for this request. A record without PushedAt (written before
+	// it existed) isn't checked.
+	if prompt, _ := requestedPrompt(request.Parameters); prompt.Has(PromptLogin) && request.PushedAt != nil {
+		if auth.authTime.Before(request.PushedAt.Add(-s.cfg.Limits.MaxClockSkew)) {
+			return "the user didn't authenticate again for prompt=login"
+		}
+	}
+
+	// OIDC Core §5.5.1.1: an essential "acr" request with values must be
+	// met, or the outcome treated as a failed authentication.
+	if !meetsEssentialACR(request.EssentialACRValues, auth.acr) {
+		return "the user's authentication doesn't meet the requested essential acr"
+	}
+
+	// OIDC Core §5.5.1: a request naming its end user, by id_token_hint
+	// or a "sub" value, must not be answered for a different one; that
+	// user didn't authenticate, so it's login_required.
+	if !meetsRequiredSubject(request.RequiredSubject, clientSub) {
+		return "the authenticated user isn't the one the request named"
+	}
+	return ""
 }
 
 // approvedGrant is what an application's GrantedAuthorization approves

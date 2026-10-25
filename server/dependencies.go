@@ -185,7 +185,12 @@ type Dependencies struct {
 	// holds under DNS rebinding. Under AssuranceProduction, New refuses a
 	// fetcher that isn't fapihttp.Client.HardenedForProduction (one over
 	// any other HTTPClient, a transport changed since NewClient built it,
-	// or a loopback exception on either).
+	// or a loopback exception on either). Resolution runs for a client_id
+	// before the client is authenticated, and fetches URLs the named
+	// Entity Identifier's statements choose before any is trusted (see
+	// federation.Resolver.Resolve), so every host this fetcher can reach,
+	// any in its fapihttp.Config.AllowedPrivateHosts included, can be
+	// sent a GET by an unauthenticated caller.
 	FederationHTTP *fapihttp.Client
 
 	// ClientCertificateTrust decides how chain-of-trust for a client

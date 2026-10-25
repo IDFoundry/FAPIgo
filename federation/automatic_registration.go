@@ -261,6 +261,15 @@ func newRememberedFailure(err error) error {
 // registered" here — an inherent limitation of that interface, not
 // something this type can work around.
 //
+// A client_id is resolved before its client is authenticated — that is
+// how automatic registration finds the keys to authenticate it with —
+// so any caller can name one, and Resolver.Resolve then fetches the URLs
+// that Entity Identifier's statements name, before any of them is
+// trusted (see Resolver.Resolve and Dependencies.HTTP). The fetcher
+// bounds which hosts that can reach; a host listed in its
+// fapihttp.Config.AllowedPrivateHosts is reachable by unauthenticated
+// callers this way.
+//
 // The client_credentials grant and CIBA are each gated by their own
 // config-level switch (AutomaticRegistrationConfig.AllowsClientCredentialsGrant/
 // AllowsCIBA) — off by default, since whether an automatically-resolved

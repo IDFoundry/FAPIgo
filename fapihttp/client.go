@@ -108,6 +108,16 @@ type Config struct {
 	// wouldn't work — never for arbitrary or end-user-supplied input.
 	// Nil/empty (the zero value) exempts nothing, matching every other
 	// optional field here.
+	//
+	// The exemption holds for every URL the Client is given, not only
+	// the ones an operator configured. A Client that fetches URLs other
+	// parties choose — an OpenID Federation resolver following a Trust
+	// Chain, whose federation_fetch_endpoint URLs are fetched before the
+	// chain is trusted, and so, through automatic registration, for any
+	// client_id an unauthenticated caller names — lets them send a GET
+	// to any path and query on an allowed host. List a host here only if
+	// it is safe for anyone to reach that way, or give such fetches a
+	// Client without it.
 	AllowedPrivateHosts []string
 }
 

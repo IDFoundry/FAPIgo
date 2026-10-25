@@ -55,11 +55,14 @@ decision, not something a commit message alone should trigger.
 
 - `gofmt -l .`, `go vet ./...`, `go build ./...`, `go test -race ./...`,
   `golangci-lint run ./...` (config in `.golangci.yml`), and
-  `govulncheck ./...` all need to be clean — this is what `ci.yml`
-  enforces on every PR. This module has no third-party dependencies, so
-  a `govulncheck` finding is almost always a standard-library CVE fixed
-  in a newer Go patch release, not something to fix in this repo's own
-  code — bump the toolchain instead.
+  `govulncheck ./...` all need to be clean — this is what `ci.yml` and
+  `govulncheck.yml` enforce on every PR. Run `govulncheck` under the Go
+  version in `go.mod` (`GOTOOLCHAIN=go<version from go.mod> govulncheck
+  ./...`), as CI does: that's the oldest Go this module may be built
+  with. This module has no third-party dependencies, so a finding is
+  almost always a standard-library CVE fixed in a newer Go patch
+  release, not something to fix in this repo's own code — raise the
+  `go` directive in `go.mod` and every `examples/*/go.mod` instead.
 - CI runs the tests under the minimum Go version in `go.mod` and again
   under the latest stable release, and the standard library can behave
   differently between them. If your local toolchain is newer than

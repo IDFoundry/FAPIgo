@@ -1,0 +1,42 @@
+name: govulncheck
+
+# Scans this module for known vulnerabilities under the Go version its
+# go.mod declares: the oldest Go anyone using it may build with, so the
+# version every finding matters for. This module has no third-party
+# dependencies (see go.mod), so a finding is a standard-library CVE, and
+# the fix is raising go.mod's go directive (here and in every
+# examples/*/go.mod) to a release that has it. That a newer Go is
+# already fixed says nothing about what this module lets its users build
+# with, so this deliberately doesn't scan under the latest release.
+#
+# Runs on every pull request and push to main (as the required
+# "govulncheck" check), and daily, because an advisory is often
+# published while nothing changes here: the scheduled run is what turns
+# red first.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '0 5 * * *' # daily, 5am UTC — before conformance.yml's 6am run
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Exactly go.mod's version, not the newest patch release that
+      # satisfies it: check-latest stays off. go-version-input defaults
+      # to "stable", which setup-go would prefer over go-version-file,
+      # so it's cleared.
+      - uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
+        with:
+          go-version-input: ''
+          go-version-file: go.mod
+          check-latest: false

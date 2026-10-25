@@ -225,7 +225,7 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 	// PAR accepts no endpoint-URL audience at all — only the issuer
 	// identifier — see acceptableClientAssertionAudiences's own doc
 	// comment for why.
-	client, dpopProof, _, authErr := s.authenticateRequest(ctx, params, requestCredentials{
+	client, dpopProof, authn, authErr := s.authenticateRequest(ctx, params, requestCredentials{
 		PeerCertificate: req.PeerCertificate, DPoPProofs: req.DPoPProofs, ClientAttestations: req.ClientAttestations, ClientAttestationPoPs: req.ClientAttestationPoPs,
 	}, nil, nil)
 	if authErr != nil {
@@ -274,7 +274,7 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 		source = extension.SourceRequestObject
 	}
 	essentialACR, _ := essentialACRValues(validated)
-	request, err := s.encodeRequestRecord(requestRecord{Parameters: validated, TokenClaims: tokenClaims, ExtensionSource: source, PushedAt: &now, EssentialACRValues: essentialACR, RequiredSubject: requiredSubject, RequiredInternalSubject: requiredInternal, Resources: resources})
+	request, err := s.encodeRequestRecord(requestRecord{Parameters: validated, TokenClaims: tokenClaims, ExtensionSource: source, PushedAt: &now, EssentialACRValues: essentialACR, RequiredSubject: requiredSubject, RequiredInternalSubject: requiredInternal, Resources: resources, ClientInstanceKey: authn.InstanceKey})
 	if err != nil {
 		return s.parFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to encode pushed authorization request", err))
 	}

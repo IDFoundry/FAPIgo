@@ -74,7 +74,10 @@ type RefreshTokenRequest struct {
 // refused with invalid_scope, and the client can still refresh by
 // requesting a narrower scope without it; authorization_details of a
 // type the client or Config.RAR no longer allows are refused with
-// invalid_grant, and the client must authorize again.
+// invalid_grant, and the client must authorize again. A client no
+// longer registered for the grant the refresh token came from — the
+// authorization code grant, or CIBA — is refused with
+// ErrorUnauthorizedClient.
 func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest) (_ TokenResult, retErr error) {
 	formParams, requestedResources := s.takeResourceParameters(req.HTTP.Parameters)
 	params, err := formParametersToMap(formParams)
@@ -105,7 +108,7 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 	// attachNextDPoPNonceOnFailure.
 	defer s.attachNextDPoPNonceOnFailure(ctx, client, &retErr)
 
-	grant, now, grantErr := s.redeemRefreshGrant(ctx, client.ID(), authn.InstanceKey, rawToken)
+	grant, now, grantErr := s.redeemRefreshGrantFor(ctx, client, authn.InstanceKey, rawToken)
 	if grantErr != nil {
 		return s.tokenFail(ctx, AuditEventRefreshAccessToken, client.ID(), grantErr)
 	}
@@ -179,6 +182,42 @@ func (s *Server) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest
 
 	s.audit(ctx, AuditEventRefreshAccessToken, client.ID(), AuditOutcomeSuccess, "")
 	return result, nil
+}
+
+// redeemRefreshGrantFor is redeemRefreshGrant for a refresh, which also
+// refuses a grant from a grant type client is no longer registered for
+// (checkGrantTypeStillAllowed). RevokeToken redeems without it: a client
+// may still revoke what it can no longer refresh.
+func (s *Server) redeemRefreshGrantFor(ctx context.Context, client storage.RegisteredClient, instanceKey, rawToken string) (grantRecord, time.Time, *Error) {
+	grant, now, err := s.redeemRefreshGrant(ctx, client.ID(), instanceKey, rawToken)
+	if err != nil {
+		return grantRecord{}, time.Time{}, err
+	}
+	if typeErr := checkGrantTypeStillAllowed(client, grant); typeErr != nil {
+		return grantRecord{}, time.Time{}, typeErr
+	}
+	return grant, now, nil
+}
+
+// checkGrantTypeStillAllowed refuses a refresh of a grant made under a
+// grant type the client's current registration no longer allows: an
+// authorization code grant once the client has no redirect URI, or a
+// CIBA grant once it may no longer use CIBA — the same checks the
+// authorization code exchange and the CIBA token exchange make. A grant
+// without GrantType (the embedder's, or one recorded before it existed)
+// isn't checked.
+func checkGrantTypeStillAllowed(client storage.RegisteredClient, grant grantRecord) *Error {
+	switch grant.GrantType {
+	case "authorization_code":
+		if !client.AllowsAuthorizationCodeGrant() {
+			return newError(ErrorUnauthorizedClient, 400, "the client is no longer registered for the authorization code grant", nil)
+		}
+	case CIBAGrantType:
+		if _, permitted := client.BackchannelAuthenticationRequestAlgorithm(); !permitted {
+			return newError(ErrorUnauthorizedClient, 400, "the client is no longer registered for CIBA", nil)
+		}
+	}
+	return nil
 }
 
 // redeemRefreshGrant looks up the grant rawToken, a refresh token

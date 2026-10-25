@@ -62,7 +62,9 @@ type BackchannelTokenExchangeRequest struct {
 // it without spending the approval. An approved grant is checked
 // against the client's current registration first, as
 // RefreshAccessToken does: a scope or authorization_details type the
-// client may no longer use is refused (invalid_scope, invalid_grant).
+// client may no longer use is refused (invalid_scope, invalid_grant),
+// and a client no longer registered for CIBA at all is refused with
+// ErrorUnauthorizedClient before the request is polled.
 func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req BackchannelTokenExchangeRequest) (_ TokenResult, retErr error) {
 	if s.deps.Backchannel == nil {
 		// RFC 6749 §5.2: a server that doesn't do CIBA doesn't support
@@ -93,9 +95,9 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, "", authErr)
 	}
 
-	authReqID := params["auth_req_id"]
-	if authReqID == "" {
-		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), newError(ErrorInvalidRequest, 400, "auth_req_id is required", nil))
+	authReqID, paramErr := backchannelTokenParameters(client, params)
+	if paramErr != nil {
+		return s.tokenFail(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), paramErr)
 	}
 
 	thumbprint, bindingErr := s.verifyTokenRequestBinding(ctx, client, dpopProof, req.PeerCertificate)
@@ -159,6 +161,22 @@ func (s *Server) ExchangeBackchannelAuthentication(ctx context.Context, req Back
 
 	s.audit(ctx, AuditEventExchangeBackchannelAuthentication, client.ID(), AuditOutcomeSuccess, "")
 	return result, nil
+}
+
+// backchannelTokenParameters returns the auth_req_id a CIBA token
+// request must carry, once client is still registered for CIBA: the
+// registration may have changed since the request was made, as at the
+// authorization code exchange and refresh. Checked before polling, so an
+// approval refused this way isn't spent.
+func backchannelTokenParameters(client storage.RegisteredClient, params map[string]string) (string, *Error) {
+	if _, permitted := client.BackchannelAuthenticationRequestAlgorithm(); !permitted {
+		return "", newError(ErrorUnauthorizedClient, 400, "the client is no longer registered for CIBA", nil)
+	}
+	authReqID := params["auth_req_id"]
+	if authReqID == "" {
+		return "", newError(ErrorInvalidRequest, 400, "auth_req_id is required", nil)
+	}
+	return authReqID, nil
 }
 
 // approvedBackchannelGrant returns the grant polled holds for clientID,

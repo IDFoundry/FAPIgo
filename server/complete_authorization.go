@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -170,13 +169,15 @@ func (s *Server) completeAuthorize(ctx context.Context, clientID fapi.ClientID, 
 		RequestedUserinfoClaims: approved.userinfoClaims,
 		IDTokenClaims:           result.grant.IDTokenClaims,
 		GrantID:                 result.grant.GrantID,
+		ClientInstanceKey:       request.ClientInstanceKey,
+		GrantType:               "authorization_code",
 	})
 	if err != nil {
 		return s.completeLocalFail(ctx, clientID, newError(ErrorServerError, 500, "failed to encode authorization code grant", err)), nil
 	}
 
 	if err := s.deps.Grants.CreateAuthorizationCode(ctx, storage.NewAuthorizationCode{
-		CodeHash:  sha256.Sum256([]byte(code)),
+		CodeHash:  authorizationCodeHash(code, request.ClientInstanceKey),
 		ClientID:  clientID,
 		Grant:     grant,
 		ExpiresAt: now.Add(s.cfg.Limits.AuthorizationCodeLifetime),

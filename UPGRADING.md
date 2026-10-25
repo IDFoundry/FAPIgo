@@ -17,6 +17,30 @@ and `keys/ephemeral` needs only the steps not marked *production only*.
 
 ## v0.61.0
 
+### Authorization codes are bound to the attested client instance (server)
+
+Not a breaking change for a store or an API: it's here because of what
+happens during the upgrade itself.
+
+**Affects:** a server with `Config.AttestationBasedClientAuthentication`
+whose clients authenticate by Client Attestation (wallet apps, say).
+
+**Why:** every installation of an app shares one `client_id`, and an
+authorization code was bound only to that. Another installation holding
+an intercepted code could present it with a wrong PKCE verifier: the
+code was spent before PKCE was checked, so the user's own exchange
+failed, or, once redeemed, the presentation counted as a reuse and
+revoked the tokens issued from it. A code is now stored under a digest
+that includes the Client Instance Key that pushed its authorization
+request, so to any other installation it's unknown: neither spent nor
+reused. Refresh tokens were already bound this way.
+
+**What fails:** an attested authorization pushed before the upgrade and
+exchanged after it fails with `invalid_grant`, and the app authorizes
+again. That only affects flows in progress while the upgrade rolls out.
+
+**What to change:** nothing.
+
 ### A client confined by `AllowedResources` no longer gets issuer-audience tokens (server, storage)
 
 **Affects:** a server with resource indicators enabled (`Config.Resources`

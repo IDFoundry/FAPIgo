@@ -14,9 +14,9 @@ import (
 // Revoke records key as revoked until at least expiresAt; IsRevoked
 // reports true for it until then. Keys are opaque and compared exactly:
 // an access token's key (a JWT's jti, an opaque token's hash), a revoked
-// grant's ("grant:" and the grant ID), and a reused code's grant
-// ("code-grant:" and its ID) share the store, and each must answer only
-// for itself. Revoking a key again is not an error and leaves it revoked
+// grant's ("grant:", the grant ID, "@" and the issuer), and a reused
+// code's grant ("code-grant:", its ID, "@" and the issuer) share the
+// store, and each must answer only for itself. Revoking a key again is not an error and leaves it revoked
 // at least until the later expiresAt. A store may forget a key once its
 // expiresAt has passed.
 //

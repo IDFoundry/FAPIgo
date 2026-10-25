@@ -128,7 +128,7 @@ func TestNewVerifierDevelopmentAcceptsUndeclared(t *testing.T) {
 	cfg.Limits.DPoPNonceLifetime = time.Minute
 	cfg.Deployment = resource.DeploymentHorizontallyScaled
 	if _, err := resource.NewVerifier(cfg, resource.Dependencies{
-		AccessTokens: resource.OpaqueAccessTokens{Store: memstore.NewAccessTokenStore()},
+		AccessTokens: resource.OpaqueAccessTokens{Issuer: testIssuerURL, Store: memstore.NewAccessTokenStore()},
 		Replay:       &fakeReplayStore{},
 		Revocation:   &fakeRevocationChecker{},
 		Clock:        fixedClock{now: time.Now()},
@@ -159,10 +159,10 @@ func TestNewVerifierProductionAccepts(t *testing.T) {
 			d.Nonces = declaredNonces{NonceStore: memstore.NewNonceStore(), caps: caps}
 		}},
 		{"opaque", func(_ *resource.Config, d *resource.Dependencies) {
-			d.AccessTokens = resource.OpaqueAccessTokens{Store: declaredAccessTokens{AccessTokenStore: memstore.NewAccessTokenStore(), caps: fullCaps}, Audience: "https://rs.example.com"}
+			d.AccessTokens = resource.OpaqueAccessTokens{Issuer: testIssuerURL, Store: declaredAccessTokens{AccessTokenStore: memstore.NewAccessTokenStore(), caps: fullCaps}, Audience: "https://rs.example.com"}
 		}},
 		{"opaque pointer", func(_ *resource.Config, d *resource.Dependencies) {
-			d.AccessTokens = &resource.OpaqueAccessTokens{Store: declaredAccessTokens{AccessTokenStore: memstore.NewAccessTokenStore(), caps: fullCaps}, Audience: "https://rs.example.com"}
+			d.AccessTokens = &resource.OpaqueAccessTokens{Issuer: testIssuerURL, Store: declaredAccessTokens{AccessTokenStore: memstore.NewAccessTokenStore(), caps: fullCaps}, Audience: "https://rs.example.com"}
 		}},
 		{"jwt pointer", func(_ *resource.Config, d *resource.Dependencies) {
 			r := jwtResolver(t, &declaredKeys{hardened: true})
@@ -201,19 +201,19 @@ func TestNewVerifierProductionRefuses(t *testing.T) {
 			d.AccessTokens = jwtResolver(t, &declaredKeys{hardened: false})
 		}, "access_tokens issuer keys must declare LiveFetchHardened"},
 		{"opaque store undeclared", func(_ *resource.Config, d *resource.Dependencies) {
-			d.AccessTokens = resource.OpaqueAccessTokens{Store: memstore.NewAccessTokenStore()}
+			d.AccessTokens = resource.OpaqueAccessTokens{Issuer: testIssuerURL, Store: memstore.NewAccessTokenStore()}
 		}, "access_tokens must implement storage.StoreAssurance"},
 		{"opaque store not durable", func(_ *resource.Config, d *resource.Dependencies) {
-			d.AccessTokens = resource.OpaqueAccessTokens{Store: declaredAccessTokens{AccessTokenStore: memstore.NewAccessTokenStore(), caps: notDurable}}
+			d.AccessTokens = resource.OpaqueAccessTokens{Issuer: testIssuerURL, Store: declaredAccessTokens{AccessTokenStore: memstore.NewAccessTokenStore(), caps: notDurable}}
 		}, "access_tokens must declare Durable"},
 		{"opaque store not shared", func(_ *resource.Config, d *resource.Dependencies) {
-			d.AccessTokens = resource.OpaqueAccessTokens{Store: declaredAccessTokens{AccessTokenStore: memstore.NewAccessTokenStore(), caps: notShared}}
+			d.AccessTokens = resource.OpaqueAccessTokens{Issuer: testIssuerURL, Store: declaredAccessTokens{AccessTokenStore: memstore.NewAccessTokenStore(), caps: notShared}}
 		}, "access_tokens must declare CrossInstanceConsistent"},
 		{"opaque without an audience", func(_ *resource.Config, d *resource.Dependencies) {
-			d.AccessTokens = resource.OpaqueAccessTokens{Store: declaredAccessTokens{AccessTokenStore: memstore.NewAccessTokenStore(), caps: fullCaps}}
+			d.AccessTokens = resource.OpaqueAccessTokens{Issuer: testIssuerURL, Store: declaredAccessTokens{AccessTokenStore: memstore.NewAccessTokenStore(), caps: fullCaps}}
 		}, "OpaqueAccessTokens.Audience is required"},
 		{"opaque pointer without an audience", func(_ *resource.Config, d *resource.Dependencies) {
-			d.AccessTokens = &resource.OpaqueAccessTokens{Store: declaredAccessTokens{AccessTokenStore: memstore.NewAccessTokenStore(), caps: fullCaps}}
+			d.AccessTokens = &resource.OpaqueAccessTokens{Issuer: testIssuerURL, Store: declaredAccessTokens{AccessTokenStore: memstore.NewAccessTokenStore(), caps: fullCaps}}
 		}, "OpaqueAccessTokens.Audience is required"},
 		{"nil jwt pointer", func(_ *resource.Config, d *resource.Dependencies) {
 			d.AccessTokens = (*resource.JWTAccessTokens)(nil)

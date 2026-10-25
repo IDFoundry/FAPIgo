@@ -109,7 +109,7 @@ func TestLookupBackchannelInteractionUnreadableExtension(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	record := json.RawMessage(`{"v":1,"parameters":{"scope":"openid","login_hint":"user-1","x_state":"far longer than eight bytes"}}`)
+	record := json.RawMessage(`{"v":1,"iss":"` + testIssuer + `","parameters":{"scope":"openid","login_hint":"user-1","x_state":"far longer than eight bytes"}}`)
 	h := newHarnessWithBackchannelConfig(t, fixedRecordStore{store, record}, func(c *server.Config) { c.Extensions = registry })
 	_, err = h.server.LookupBackchannelInteraction(context.Background(), required.Handle)
 	var serverErr *server.Error

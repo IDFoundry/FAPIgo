@@ -1434,7 +1434,8 @@ func jsonEquivalent(a, b json.RawMessage) bool {
 // of a RevocationStore implementation: a revoked key reads as revoked,
 // keys are compared exactly (an access token's key, a grant's "grant:"
 // key and a reused code's "code-grant:" key never answer for each
-// other), revoking again is harmless, and concurrent revocations all
+// other, and neither does one issuer's grant key for another's),
+// revoking again is harmless, and concurrent revocations all
 // land. A store failing any of these lets a revoked token or grant keep
 // working.
 func TestRevocationStoreContract(t *testing.T, factory func() RevocationStore) {
@@ -1459,12 +1460,16 @@ func TestRevocationStoreContract(t *testing.T, factory func() RevocationStore) {
 	})
 	t.Run("KeysAreExact", func(t *testing.T) {
 		s := factory()
-		for _, key := range []string{"grant:g1", "abc"} {
+		for _, key := range []string{"grant:g1", "grant:g2@https://as.example.com", "abc"} {
 			if err := s.Revoke(ctx, key, later); err != nil {
 				t.Fatalf("Revoke(%q): %v", key, err)
 			}
 		}
-		for _, key := range []string{"g1", "code-grant:g1", "grant:g", "grant:g1 ", "GRANT:g1", "ABC", "abc ", "grant:abc", ""} {
+		for _, key := range []string{
+			"g1", "code-grant:g1", "grant:g", "grant:g1 ", "GRANT:g1", "ABC", "abc ", "grant:abc", "",
+			"grant:g2", "grant:g1@https://as.example.com", "grant:g2@https://as.example.com/",
+			"grant:g2@https://AS.example.com", "grant:g2@https://tenant-b.example.com", "code-grant:g2@https://as.example.com",
+		} {
 			if revoked, err := s.IsRevoked(ctx, key); err != nil || revoked {
 				t.Fatalf("IsRevoked(%q) = %v, %v, want false, nil: only exactly the revoked keys are revoked", key, revoked, err)
 			}

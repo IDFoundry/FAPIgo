@@ -140,7 +140,7 @@ type AuthorizationContext struct {
 
 	// Issuer, Audience and IssuedAt mirror ResolvedAccessToken's own
 	// fields of the same name — see that type's doc comment, including
-	// why they're always zero for an opaque access token.
+	// why IssuedAt is always zero for an opaque access token.
 	Issuer   string
 	Audience []string
 	IssuedAt time.Time
@@ -373,7 +373,7 @@ func (v *Verifier) checkNotRevoked(ctx context.Context, resolved ResolvedAccessT
 	if revoked {
 		return newError(ErrorInvalidToken, 401, "access token has been revoked", nil)
 	}
-	return v.checkGrantNotRevoked(ctx, resolved.Claims)
+	return v.checkGrantNotRevoked(ctx, resolved.Issuer, resolved.Claims)
 }
 
 // resolveCredential verifies whichever sender-constraining credential
@@ -450,14 +450,17 @@ func (v *Verifier) consumeDPoPProof(ctx context.Context, proof dpop.VerifiedProo
 // revoked (server.RevokeGrant), or a code_grant_id claim it records as
 // revoked (the server revokes it when the authorization code the grant
 // came from is reused). A token without either is unaffected — its
-// grant has no ID to revoke it by.
-func (v *Verifier) checkGrantNotRevoked(ctx context.Context, claims map[string]json.RawMessage) *Error {
+// grant has no ID to revoke it by. The server records a revoked grant
+// under a key namespaced by its issuer, so the token's issuer must be
+// known: a resolver that reports none for a token carrying either claim
+// is a 500, since the revocation couldn't be checked.
+func (v *Verifier) checkGrantNotRevoked(ctx context.Context, issuer string, claims map[string]json.RawMessage) *Error {
 	for _, c := range []struct {
 		claim string
-		key   func(string) string
+		keys  func(issuer, id string) []string
 	}{
-		{grantrevocation.Claim, grantrevocation.Key},
-		{grantrevocation.CodeClaim, grantrevocation.CodeKey},
+		{grantrevocation.Claim, grantrevocation.Keys},
+		{grantrevocation.CodeClaim, grantrevocation.CodeKeys},
 	} {
 		raw, ok := claims[c.claim]
 		if !ok {
@@ -467,7 +470,21 @@ func (v *Verifier) checkGrantNotRevoked(ctx context.Context, claims map[string]j
 		if err := json.Unmarshal(raw, &id); err != nil || id == "" {
 			return newError(ErrorInvalidToken, 401, "access token's "+c.claim+" is malformed", err)
 		}
-		revoked, err := v.deps.Revocation.IsRevoked(ctx, c.key(id))
+		if issuer == "" {
+			return newError(ErrorServerError, 500, "failed to check grant revocation", errors.New("the access token resolver reported no issuer"))
+		}
+		if verr := v.checkKeysNotRevoked(ctx, c.keys(issuer, id)); verr != nil {
+			return verr
+		}
+	}
+	return nil
+}
+
+// checkKeysNotRevoked refuses a token when any of keys, one grant's
+// revocation keys, is revoked.
+func (v *Verifier) checkKeysNotRevoked(ctx context.Context, keys []string) *Error {
+	for _, key := range keys {
+		revoked, err := v.deps.Revocation.IsRevoked(ctx, key)
 		if err != nil {
 			return newError(ErrorServerError, 500, "failed to check grant revocation", err)
 		}

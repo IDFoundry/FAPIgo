@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -143,9 +144,8 @@ func TestIssuedWithin(t *testing.T) {
 }
 
 // TestOwnsRecord covers which records a server treats as its own: one
-// stamped with its issuer, and one written before records carried an
-// issuer (accepted for the rest of its lifetime), but never one another
-// issuer's server wrote.
+// stamped with its issuer, never one another issuer's server wrote or
+// one written before records carried an issuer.
 func TestOwnsRecord(t *testing.T) {
 	issuer, err := fapi.ParseIssuerURL("https://as.example.com")
 	if err != nil {
@@ -154,7 +154,7 @@ func TestOwnsRecord(t *testing.T) {
 	s := &Server{cfg: Config{Issuer: issuer}}
 	for recorded, want := range map[string]bool{
 		"https://as.example.com":       true,
-		"":                             true,
+		"":                             false,
 		"https://tenant-b.example.com": false,
 		"https://as.example.com/":      false,
 	} {
@@ -178,7 +178,13 @@ func TestOwnsRecord(t *testing.T) {
 		t.Errorf("encodeRequestRecord stamped issuer %q (err %v), want %q", r.Issuer, err, issuer.String())
 	}
 	legacy, err := decodeGrantRecord([]byte(`{"v":1,"sub":"user-1","auth_time":"2026-01-01T00:00:00Z"}`))
-	if err != nil || legacy.Issuer != "" || !s.ownsRecord(legacy.Issuer) {
-		t.Errorf("a record without an issuer: Issuer %q, err %v; want accepted", legacy.Issuer, err)
+	if err != nil || legacy.Issuer != "" || s.ownsRecord(legacy.Issuer) {
+		t.Errorf("a record without an issuer: Issuer %q, err %v; want refused", legacy.Issuer, err)
+	}
+	if _, err := s.decodeOwnGrantRecord([]byte(`{"v":1,"sub":"user-1","auth_time":"2026-01-01T00:00:00Z"}`)); !errors.Is(err, errForeignRecord) {
+		t.Errorf("decodeOwnGrantRecord(no issuer) = %v, want errForeignRecord", err)
+	}
+	if _, err := s.decodeOwnRequestRecord([]byte(`{"v":1,"parameters":{}}`)); !errors.Is(err, errForeignRecord) {
+		t.Errorf("decodeOwnRequestRecord(no issuer) = %v, want errForeignRecord", err)
 	}
 }

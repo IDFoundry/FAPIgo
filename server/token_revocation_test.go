@@ -116,7 +116,7 @@ func TestRevokeTokenRevokesTheGrant(t *testing.T) {
 		t.Fatalf("RevokeToken: %v", err)
 	}
 	h.revocation.mu.Lock()
-	_, revoked := h.revocation.until["grant:grant-1"]
+	_, revoked := h.revocation.until["grant:grant-1@"+testIssuer]
 	h.revocation.mu.Unlock()
 	if !revoked {
 		t.Error("the refresh token's grant wasn't revoked")
@@ -384,7 +384,7 @@ func TestRevokeTokenFailsClosed(t *testing.T) {
 		assertRevokeServerError(t, owner, refreshToken)
 		h.grants.failRevokeRefresh = nil
 		h.revocation.mu.Lock()
-		_, revoked := h.revocation.until["grant:grant-1"]
+		_, revoked := h.revocation.until["grant:grant-1@"+testIssuer]
 		h.revocation.mu.Unlock()
 		if !revoked {
 			t.Fatal("the grant wasn't revoked before the token deletion failed")

@@ -36,7 +36,15 @@ func TestOpaqueAccessTokensAudience(t *testing.T) {
 	)
 	recorded := func(aud ...string) map[string]json.RawMessage {
 		raw, _ := json.Marshal(aud)
-		return map[string]json.RawMessage{"aud": raw, "custom": json.RawMessage(`"x"`)}
+		return map[string]json.RawMessage{"iss": json.RawMessage(`"` + testIssuer + `"`), "aud": raw, "custom": json.RawMessage(`"x"`)}
+	}
+	without := func(claims map[string]json.RawMessage, name string) map[string]json.RawMessage {
+		delete(claims, name)
+		return claims
+	}
+	withIssuer := func(claims map[string]json.RawMessage, iss string) map[string]json.RawMessage {
+		claims["iss"] = json.RawMessage(iss)
+		return claims
 	}
 	for name, tc := range map[string]struct {
 		claims     map[string]json.RawMessage
@@ -52,14 +60,21 @@ func TestOpaqueAccessTokensAudience(t *testing.T) {
 		"issuer token":               {claims: recorded(issuer), audience: rsB, wantCode: resource.ErrorInvalidToken},
 		"issuer token while moving":  {claims: recorded(issuer), audience: rsB, additional: []string{issuer}, wantAud: []string{issuer}},
 		"another's while moving":     {claims: recorded(rsA), audience: rsB, additional: []string{issuer}, wantCode: resource.ErrorInvalidToken},
-		"record without an audience": {claims: map[string]json.RawMessage{"custom": json.RawMessage(`"x"`)}, audience: rsB},
-		"malformed record":           {claims: map[string]json.RawMessage{"aud": json.RawMessage(`"` + rsB + `"`)}, audience: rsB, wantCode: resource.ErrorServerError},
-		"empty record":               {claims: map[string]json.RawMessage{"aud": json.RawMessage(`[]`)}, wantCode: resource.ErrorServerError},
+		"record without an audience": {claims: without(recorded(), "aud"), audience: rsB, wantCode: resource.ErrorInvalidToken},
+		"no audience, no check":      {claims: without(recorded(), "aud")},
+		"malformed record":           {claims: withIssuer(map[string]json.RawMessage{"aud": json.RawMessage(`"` + rsB + `"`)}, `"`+testIssuer+`"`), audience: rsB, wantCode: resource.ErrorServerError},
+		"empty record":               {claims: withIssuer(map[string]json.RawMessage{"aud": json.RawMessage(`[]`)}, `"`+testIssuer+`"`), wantCode: resource.ErrorServerError},
+		"another issuer's":           {claims: withIssuer(recorded(rsA), `"https://other.example.com"`), audience: rsA, wantCode: resource.ErrorInvalidToken},
+		"another issuer's, no check": {claims: withIssuer(recorded(rsA), `"https://other.example.com"`), wantCode: resource.ErrorInvalidToken},
+		"record without an issuer":   {claims: without(recorded(rsA), "iss"), audience: rsA, wantCode: resource.ErrorInvalidToken},
+		"record without any":         {claims: map[string]json.RawMessage{"custom": json.RawMessage(`"x"`)}, wantCode: resource.ErrorInvalidToken},
+		"malformed issuer":           {claims: withIssuer(recorded(rsA), `42`), audience: rsA, wantCode: resource.ErrorServerError},
+		"empty issuer":               {claims: withIssuer(recorded(rsA), `""`), audience: rsA, wantCode: resource.ErrorServerError},
 	} {
 		t.Run(name, func(t *testing.T) {
 			store := memstore.NewAccessTokenStore()
 			raw := opaqueTokenRecordedFor(t, store, tc.claims)
-			resolver := resource.OpaqueAccessTokens{Store: store, Audience: tc.audience, AdditionalAudiences: tc.additional}
+			resolver := resource.OpaqueAccessTokens{Issuer: testIssuerURL, Store: store, Audience: tc.audience, AdditionalAudiences: tc.additional}
 			resolved, err := resolver.ResolveAccessToken(context.Background(), resource.ResolveAccessTokenRequest{Raw: raw, Now: time.Now()})
 			if tc.wantCode != "" {
 				var rerr *resource.Error
@@ -76,15 +91,21 @@ func TestOpaqueAccessTokensAudience(t *testing.T) {
 	}
 }
 
-// checkResolvedOpaqueAudience checks resolved has wantAud as its
-// Audience, kept out of its claims, and the record's other claim kept.
+// checkResolvedOpaqueAudience checks resolved has testIssuer as its
+// Issuer and wantAud as its Audience, both kept out of its claims, and
+// the record's other claim kept.
 func checkResolvedOpaqueAudience(t *testing.T, resolved resource.ResolvedAccessToken, wantAud []string) {
 	t.Helper()
+	if resolved.Issuer != testIssuer {
+		t.Errorf("Issuer = %q, want %q", resolved.Issuer, testIssuer)
+	}
 	if !reflect.DeepEqual(resolved.Audience, wantAud) {
 		t.Errorf("Audience = %v, want %v", resolved.Audience, wantAud)
 	}
-	if _, ok := resolved.Claims["aud"]; ok {
-		t.Error(`Claims has "aud", want it only as Audience`)
+	for _, name := range []string{"iss", "aud"} {
+		if _, ok := resolved.Claims[name]; ok {
+			t.Errorf("Claims has %q, want it only as Issuer or Audience", name)
+		}
 	}
 	if string(resolved.Claims["custom"]) != `"x"` {
 		t.Errorf("Claims = %v, want custom kept", resolved.Claims)
@@ -93,8 +114,8 @@ func checkResolvedOpaqueAudience(t *testing.T, resolved resource.ResolvedAccessT
 
 func TestOpaqueAccessTokensAudienceOnlyClaimLeavesNoClaims(t *testing.T) {
 	store := memstore.NewAccessTokenStore()
-	raw := opaqueTokenRecordedFor(t, store, map[string]json.RawMessage{"aud": json.RawMessage(`["https://a.example.com"]`)})
-	resolved, err := resource.OpaqueAccessTokens{Store: store}.ResolveAccessToken(context.Background(), resource.ResolveAccessTokenRequest{Raw: raw, Now: time.Now()})
+	raw := opaqueTokenRecordedFor(t, store, map[string]json.RawMessage{"iss": json.RawMessage(`"` + testIssuer + `"`), "aud": json.RawMessage(`["https://a.example.com"]`)})
+	resolved, err := resource.OpaqueAccessTokens{Issuer: testIssuerURL, Store: store}.ResolveAccessToken(context.Background(), resource.ResolveAccessTokenRequest{Raw: raw, Now: time.Now()})
 	if err != nil {
 		t.Fatalf("ResolveAccessToken: %v", err)
 	}
@@ -106,8 +127,9 @@ func TestOpaqueAccessTokensAudienceOnlyClaimLeavesNoClaims(t *testing.T) {
 func TestOpaqueAccessTokensAudienceValidation(t *testing.T) {
 	store := memstore.NewAccessTokenStore()
 	for name, o := range map[string]resource.OpaqueAccessTokens{
-		"additional without audience": {Store: store, AdditionalAudiences: []string{"https://as.example.com"}},
-		"empty additional":            {Store: store, Audience: "https://a.example.com", AdditionalAudiences: []string{""}},
+		"no issuer":                   {Store: store},
+		"additional without audience": {Issuer: testIssuerURL, Store: store, AdditionalAudiences: []string{"https://as.example.com"}},
+		"empty additional":            {Issuer: testIssuerURL, Store: store, Audience: "https://a.example.com", AdditionalAudiences: []string{""}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			deps := validDependencies(t)

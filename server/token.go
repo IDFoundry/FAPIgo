@@ -380,7 +380,7 @@ func (s *Server) revokeTokensForReusedCode(ctx context.Context, err error, prese
 	}
 	if _, ok := s.grantRevocationReader(); ok {
 		until := s.deps.Clock.Now().Add(s.grantRevocationHorizon())
-		_ = s.deps.Revocation.Revoke(ctx, grantrevocation.CodeKey(grantrevocation.CodeGrantID(codeHash)), until)
+		_ = s.deps.Revocation.Revoke(ctx, grantrevocation.CodeKey(s.cfg.Issuer.String(), grantrevocation.CodeGrantID(codeHash)), until)
 	}
 	return false
 }

@@ -75,10 +75,12 @@ func TestVerifyChecksTheCodeGrantRevocation(t *testing.T) {
 		revoked map[string]bool
 		want    resource.ErrorCode
 	}{
-		"not revoked":       {json.RawMessage(`"cg-1"`), nil, ""},
-		"revoked":           {json.RawMessage(`"cg-1"`), map[string]bool{"code-grant:cg-1": true}, resource.ErrorInvalidToken},
-		"grant key differs": {json.RawMessage(`"cg-1"`), map[string]bool{"grant:cg-1": true}, ""},
-		"malformed":         {json.RawMessage(`42`), nil, resource.ErrorInvalidToken},
+		"not revoked":            {json.RawMessage(`"cg-1"`), nil, ""},
+		"revoked":                {json.RawMessage(`"cg-1"`), map[string]bool{"code-grant:cg-1@" + testIssuer: true}, resource.ErrorInvalidToken},
+		"revoked before v0.61.0": {json.RawMessage(`"cg-1"`), map[string]bool{"code-grant:cg-1": true}, resource.ErrorInvalidToken},
+		"another issuer's":       {json.RawMessage(`"cg-1"`), map[string]bool{"code-grant:cg-1@https://other.example.com": true}, ""},
+		"grant key differs":      {json.RawMessage(`"cg-1"`), map[string]bool{"grant:cg-1@" + testIssuer: true}, ""},
+		"malformed":              {json.RawMessage(`42`), nil, resource.ErrorInvalidToken},
 	} {
 		t.Run(name, func(t *testing.T) {
 			v, err := resource.NewVerifier(validConfig(t), resource.Dependencies{

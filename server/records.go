@@ -28,7 +28,8 @@ type requestRecord struct {
 	Version int `json:"v"`
 
 	// Issuer is the issuer of the server that wrote the record (see
-	// Server.ownsRecord). Empty in a record written before it existed.
+	// Server.ownsRecord). Empty in a record written before v0.58.0, which
+	// no server accepts.
 	Issuer string `json:"iss,omitempty"`
 
 	// Parameters are the request's validated parameters.
@@ -113,7 +114,8 @@ type grantRecord struct {
 	Version int `json:"v"`
 
 	// Issuer is the issuer of the server that wrote the record (see
-	// Server.ownsRecord). Empty in a record written before it existed.
+	// Server.ownsRecord). Empty in a record written before v0.58.0, which
+	// no server accepts.
 	Issuer string `json:"iss,omitempty"`
 
 	// RedirectURI, CodeChallenge and Nonce apply to an authorization
@@ -318,17 +320,23 @@ func (s *Server) encodeGrantRecord(g grantRecord) (json.RawMessage, error) {
 // database, say): there one tenant's authorization code, request_uri,
 // refresh token or auth_req_id would otherwise be redeemed by another,
 // which would issue its own tokens for a user it never authenticated.
-// A record written by another issuer is treated as unknown. One written
-// before records carried an issuer has none and is accepted, so an
-// upgrade doesn't fail requests in flight; such a record expires
-// within its own lifetime.
+// A record written by another issuer is treated as unknown, and so is
+// one written before v0.58.0, when records began carrying an issuer:
+// it has none, so it can't be told apart from another issuer's.
 func (s *Server) ownsRecord(issuer string) bool {
-	return issuer == "" || issuer == s.cfg.Issuer.String()
+	return issuer != "" && issuer == s.cfg.Issuer.String()
+}
+
+// ownsAccessTokenRecord is ownsRecord for an opaque access token's
+// record, which keeps its issuer under token.IssuerRecordClaim.
+func (s *Server) ownsAccessTokenRecord(claims map[string]json.RawMessage) bool {
+	var issuer string
+	return json.Unmarshal(claims[token.IssuerRecordClaim], &issuer) == nil && s.ownsRecord(issuer)
 }
 
 // errForeignRecord is decodeOwnRequestRecord's and decodeOwnGrantRecord's
-// error for a record another issuer's server wrote; see ownsRecord.
-var errForeignRecord = errors.New("record was written by a server with another issuer")
+// error for a record this server doesn't own; see ownsRecord.
+var errForeignRecord = errors.New("record was written by a server with another issuer, or before records carried one")
 
 // decodeOwnRequestRecord and decodeOwnGrantRecord decode a record, and
 // refuse one this server doesn't own (ownsRecord) with errForeignRecord.

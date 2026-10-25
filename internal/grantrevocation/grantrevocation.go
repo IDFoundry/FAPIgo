@@ -13,10 +13,25 @@ import (
 // concept.
 const Claim = "grant_id"
 
-// Key is the revocation-store key recording grantID as revoked. The
-// prefix keeps it apart from the access token keys (a JWT's jti, an
-// opaque token's hash) the same store holds.
-func Key(grantID string) string { return "grant:" + grantID }
+// Key is the revocation-store key recording grantID, a grant issuer
+// issued, as revoked. The prefix keeps it apart from the access token
+// keys (a JWT's jti, an opaque token's hash) the same store holds, and
+// the issuer keeps one issuer's grant IDs apart from another's when
+// servers with different issuers share the store: the application
+// chooses grant IDs, so two tenants can both have a grant "g1". A grant
+// ID never contains "@" (see server.GrantedAuthorization.GrantID), and
+// a code grant ID never does either, so the issuer can't be mistaken for
+// part of the ID, and no key here equals a legacy one.
+func Key(issuer, grantID string) string { return "grant:" + grantID + "@" + issuer }
+
+// Keys are the keys IsRevoked checks for grantID: Key, the only one
+// written, and the key servers before v0.61.0 wrote, not namespaced by
+// issuer, so a grant revoked before an upgrade stays revoked. Such a
+// record expires once nothing issued from the grant can still be used,
+// so the legacy key stops matching anything by itself.
+func Keys(issuer, grantID string) []string {
+	return []string{Key(issuer, grantID), "grant:" + grantID}
+}
 
 // CodeClaim is the access token claim carrying the code grant ID: the
 // identifier the server derives, with CodeGrantID, for every grant that
@@ -25,10 +40,16 @@ func Key(grantID string) string { return "grant:" + grantID }
 // application named the grant itself (Claim).
 const CodeClaim = "code_grant_id"
 
-// CodeKey is the revocation-store key recording a code grant ID as
-// revoked, kept apart from Key's and from access token keys by its
-// prefix.
-func CodeKey(codeGrantID string) string { return "code-grant:" + codeGrantID }
+// CodeKey is the revocation-store key recording a code grant ID issuer
+// issued as revoked, kept apart from Key's and from access token keys by
+// its prefix, and namespaced by issuer as Key is.
+func CodeKey(issuer, codeGrantID string) string { return "code-grant:" + codeGrantID + "@" + issuer }
+
+// CodeKeys are the keys IsRevoked checks for codeGrantID: CodeKey and
+// its legacy form, as Keys.
+func CodeKeys(issuer, codeGrantID string) []string {
+	return []string{CodeKey(issuer, codeGrantID), "code-grant:" + codeGrantID}
+}
 
 // CodeGrantID derives the code grant ID from an authorization code's
 // SHA-256 hash: the same at the first exchange, which records it in the

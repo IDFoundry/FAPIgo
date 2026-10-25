@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -47,8 +48,10 @@ type AccessTokenParams struct {
 
 	Claims map[string]json.RawMessage
 
-	// Issuer is the token's "iss": only meaningful to a self-contained
-	// format (JWTAccessTokens), so OpaqueAccessTokens ignores it.
+	// Issuer is the token's "iss": JWTAccessTokens signs it into the
+	// token, and OpaqueAccessTokens keeps it in the token's record,
+	// where resource.OpaqueAccessTokens refuses a token another issuer
+	// wrote. Required by OpaqueAccessTokens.
 	Issuer string
 
 	// Audience is the token's audience: the server's issuer identifier,
@@ -147,7 +150,11 @@ func confirmationFor(senderConstrain storage.SenderConstrain, thumbprint string)
 // OpaqueAccessTokens issues opaque, storage-backed access tokens: a
 // random value with nothing embedded in it, backed by Store for later
 // lookup — the same shape refresh tokens already use (see
-// issueRefreshToken), just for access tokens too.
+// issueRefreshToken), just for access tokens too. Each record keeps
+// the issuer and audiences the token was issued with in its Claims, so
+// a resource server (resource.OpaqueAccessTokens) can refuse one
+// another issuer or resource's token: a store that persists Claims
+// persists them too.
 type OpaqueAccessTokens struct {
 	Store storage.AccessTokenStore
 }
@@ -164,6 +171,10 @@ func NewOpaqueAccessTokens(store storage.AccessTokenStore) (OpaqueAccessTokens, 
 
 // IssueAccessToken implements AccessTokenIssuer.
 func (o OpaqueAccessTokens) IssueAccessToken(ctx context.Context, p AccessTokenParams) (string, string, error) {
+	if p.Issuer == "" {
+		// resource.OpaqueAccessTokens refuses a record without one.
+		return "", "", errors.New("server: OpaqueAccessTokens: issuer is required")
+	}
 	raw, err := generateOpaqueAccessToken(p.Random)
 	if err != nil {
 		return "", "", err
@@ -181,6 +192,9 @@ func (o OpaqueAccessTokens) IssueAccessToken(ctx context.Context, p AccessTokenP
 		subject = p.InternalSubject
 		claims[token.ClientSubjectClaim], _ = json.Marshal(p.Subject) // a string always marshals
 	}
+	// The record keeps the token's issuer, so a resource server can
+	// refuse a token another issuer wrote to a shared store.
+	claims[token.IssuerRecordClaim], _ = json.Marshal(p.Issuer) // a string always marshals
 	// The record keeps the token's audiences, so a resource server can
 	// refuse a token restricted to another resource (RFC 8707).
 	audiences := p.Audiences
@@ -189,9 +203,6 @@ func (o OpaqueAccessTokens) IssueAccessToken(ctx context.Context, p AccessTokenP
 	}
 	if len(audiences) > 0 {
 		claims[token.AudienceRecordClaim], _ = json.Marshal(audiences) // a []string always marshals
-	}
-	if len(claims) == 0 {
-		claims = nil
 	}
 	if err := o.Store.CreateAccessToken(ctx, storage.NewAccessToken{
 		TokenHash:       hash,

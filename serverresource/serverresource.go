@@ -99,8 +99,9 @@ type Options struct {
 //     issuer, Options.Resource (or cfg.Issuer without one) as audience,
 //     and cfg.Limits.AccessTokenLifetime as the longest lifetime
 //     accepted.
-//   - server.OpaqueAccessTokens: looked up in the same Store, with the
-//     same audience checked against the one the server recorded.
+//   - server.OpaqueAccessTokens: looked up in the same Store, with
+//     cfg.Issuer and the same audience checked against the ones the
+//     server recorded.
 //   - Revocation: deps.Revocation, which must also implement
 //     resource.RevocationChecker (as memstore.RevocationStore does);
 //     server.NoRevocation becomes resource.NoRevocation.
@@ -225,10 +226,10 @@ func accessTokenResolver(cfg server.Config, issuer server.AccessTokenIssuer, aud
 			return jwtAccessTokens(cfg, *t, aud)
 		}
 	case server.OpaqueAccessTokens:
-		return opaqueAccessTokens(t, aud)
+		return opaqueAccessTokens(cfg, t, aud)
 	case *server.OpaqueAccessTokens:
 		if t != nil {
-			return opaqueAccessTokens(*t, aud)
+			return opaqueAccessTokens(cfg, *t, aud)
 		}
 	}
 	return nil, fmt.Errorf("serverresource: access token issuer %T is not server.JWTAccessTokens or server.OpaqueAccessTokens", issuer)
@@ -247,8 +248,8 @@ func jwtAccessTokens(cfg server.Config, t server.JWTAccessTokens, aud audience) 
 	return resolver, nil
 }
 
-func opaqueAccessTokens(t server.OpaqueAccessTokens, aud audience) (resource.AccessTokenResolver, error) {
-	resolver, err := resource.NewOpaqueAccessTokens(t.Store)
+func opaqueAccessTokens(cfg server.Config, t server.OpaqueAccessTokens, aud audience) (resource.AccessTokenResolver, error) {
+	resolver, err := resource.NewOpaqueAccessTokens(t.Store, cfg.Issuer)
 	if err != nil {
 		return nil, fmt.Errorf("serverresource: %w", err)
 	}

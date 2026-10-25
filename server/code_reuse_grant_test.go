@@ -47,7 +47,7 @@ func TestCodeReuseRevokesAccessTokensFromItsRefreshToken(t *testing.T) {
 		Limits:    resource.Limits{MaxDPoPProofAge: time.Minute, MaxClockSkew: 5 * time.Second},
 		Assurance: resource.AssuranceDevelopment,
 	}, resource.Dependencies{
-		AccessTokens: resource.OpaqueAccessTokens{Store: store},
+		AccessTokens: resource.OpaqueAccessTokens{Issuer: testIssuerURL, Store: store},
 		Replay:       memstore.NewReplayStore(),
 		Revocation:   revocationCheckerFromSink{sink: h.revocation},
 		Clock:        fixedClock{now: h.now},
@@ -126,7 +126,7 @@ func TestRefreshRefusesARevokedCodeGrant(t *testing.T) {
 		t.Fatalf("RefreshAccessToken before revocation: %v", err)
 	}
 	codeHash := sha256.Sum256([]byte(code))
-	if err := h.revocation.Revoke(context.Background(), grantrevocation.CodeKey(grantrevocation.CodeGrantID(codeHash)), h.now.Add(time.Hour)); err != nil {
+	if err := h.revocation.Revoke(context.Background(), grantrevocation.CodeKey(testIssuer, grantrevocation.CodeGrantID(codeHash)), h.now.Add(time.Hour)); err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}
 	if err := refresh(); err == nil {

@@ -81,13 +81,16 @@ type ResolvedAccessToken struct {
 	// required-present (iat) by internal/token.AccessToken.Validate;
 	// exposed for a caller's own telemetry or audit logging, not for
 	// re-validation. OpaqueAccessTokens has no wire-level claims to
-	// report these from: an opaque token is only ever redeemed against
-	// the single store this resolver already trusts implicitly. Its
-	// Issuer and IssuedAt are always zero, and its Audience is the
-	// audience a FAPIgo server recorded with it (the resources an RFC
-	// 8707 resource indicator restricted it to, or the issuer), already
-	// checked when OpaqueAccessTokens.Audience is set; nil for a record
-	// without one.
+	// report these from: its Issuer and Audience are the ones a FAPIgo
+	// server recorded with the token (the audience being the resources
+	// an RFC 8707 resource indicator restricted it to, or the issuer),
+	// both already checked, and its IssuedAt is always zero.
+	//
+	// Verify namespaces the token's grant revocation keys by Issuer (see
+	// server.RevokeGrant), so a resolver whose tokens carry a grant_id
+	// or code_grant_id claim must report it: Verify refuses such a token
+	// with 500 server_error when Issuer is empty, since its grant's
+	// revocation couldn't be checked.
 	Issuer   string
 	Audience []string
 	IssuedAt time.Time
@@ -318,18 +321,29 @@ func (j JWTAccessTokens) ResolveAccessToken(ctx context.Context, req ResolveAcce
 // hash the presented token and look it up — there is no signature to
 // verify, and (see AccessTokenResolver's own doc comment) no DPoP
 // binding or expiry check to perform here either; it returns the
-// looked-up thumbprint/expiry verbatim for Verify() to check.
+// looked-up thumbprint/expiry verbatim for Verify() to check. It does
+// check the issuer and audience server.OpaqueAccessTokens recorded with
+// the token, as JWTAccessTokens checks a JWT's "iss" and "aud".
 type OpaqueAccessTokens struct {
 	Store storage.AccessTokenStore
+
+	// Issuer is the authorization server's issuer identifier: a token
+	// whose record names another issuer, or none (one written before
+	// v0.61.0, when records began carrying it), is refused. Stores must
+	// never be shared by servers with different issuers (see package
+	// storage), and this is the backstop when they are: without it, a
+	// token one tenant issued would be accepted by another's resource
+	// server and act for that tenant's user with the same subject.
+	// Required.
+	Issuer fapi.URL
 
 	// Audience, if set, is the audience a token's record must name: a
 	// FAPIgo server records the RFC 8707 resource indicators a token was
 	// restricted to, or its issuer identifier, and a token recorded for
-	// neither Audience nor one of AdditionalAudiences is refused,
-	// exactly as JWTAccessTokens refuses one whose "aud" names neither.
-	// Set it to this resource server's own identifier, or to the
-	// issuer's when it has none. A record with no audience at all,
-	// written before FAPIgo recorded one, is accepted. Required under
+	// neither Audience nor one of AdditionalAudiences, or for no
+	// audience at all, is refused, exactly as JWTAccessTokens refuses
+	// one whose "aud" names neither. Set it to this resource server's
+	// own identifier, or to the issuer's when it has none. Required under
 	// AssuranceProduction (RFC 9700 §2.3: a resource server "MUST
 	// refuse" a token issued for another). Empty, which only
 	// AssuranceDevelopment accepts, no audience is checked.
@@ -341,23 +355,26 @@ type OpaqueAccessTokens struct {
 	AdditionalAudiences []string
 }
 
-// NewOpaqueAccessTokens validates store is non-nil and returns an
-// OpaqueAccessTokens.
-func NewOpaqueAccessTokens(store storage.AccessTokenStore) (OpaqueAccessTokens, error) {
-	o := OpaqueAccessTokens{Store: store}
+// NewOpaqueAccessTokens validates store and issuer and returns an
+// OpaqueAccessTokens. Set Audience on the result (required under
+// AssuranceProduction).
+func NewOpaqueAccessTokens(store storage.AccessTokenStore, issuer fapi.URL) (OpaqueAccessTokens, error) {
+	o := OpaqueAccessTokens{Store: store, Issuer: issuer}
 	if err := o.validate(); err != nil {
 		return OpaqueAccessTokens{}, fmt.Errorf("resource: OpaqueAccessTokens: %w", err)
 	}
 	return o, nil
 }
 
-// validate checks Store, for NewOpaqueAccessTokens and for NewVerifier,
-// which refuses an OpaqueAccessTokens{} literal that would panic on
-// every request.
+// validate checks Store and Issuer, for NewOpaqueAccessTokens and for
+// NewVerifier, which refuses an OpaqueAccessTokens{} literal that would
+// panic, or refuse every token, on every request.
 func (o OpaqueAccessTokens) validate() error {
 	switch {
 	case o.Store == nil:
 		return errors.New("store is required")
+	case o.Issuer.IsZero():
+		return errors.New("issuer is required")
 	case o.Audience == "" && len(o.AdditionalAudiences) > 0:
 		return errors.New("additional audiences require an audience")
 	case slices.Contains(o.AdditionalAudiences, ""):
@@ -373,9 +390,14 @@ func (o OpaqueAccessTokens) ResolveAccessToken(ctx context.Context, req ResolveA
 	if err != nil {
 		return ResolvedAccessToken{}, lookupError(err)
 	}
-	claims, audience, audErr := recordedAudience(looked.Claims)
-	if audErr != nil {
-		return ResolvedAccessToken{}, newError(ErrorServerError, 500, "access token record is malformed", audErr)
+	claims, issuer, audience, recordErr := recordedIssuerAndAudience(looked.Claims)
+	if recordErr != nil {
+		return ResolvedAccessToken{}, newError(ErrorServerError, 500, "access token record is malformed", recordErr)
+	}
+	if issuer != o.Issuer.String() {
+		// Another issuer's token in a shared store, or one recorded
+		// before records carried an issuer: unknown here either way.
+		return ResolvedAccessToken{}, newError(ErrorInvalidToken, 401, accessTokenInvalidDescription, errors.New("issuer mismatch"))
 	}
 	if !o.acceptsAudience(audience) {
 		return ResolvedAccessToken{}, newError(ErrorInvalidToken, 401, accessTokenInvalidDescription, errors.New("audience mismatch"))
@@ -385,6 +407,7 @@ func (o OpaqueAccessTokens) ResolveAccessToken(ctx context.Context, req ResolveA
 		ClientID:        looked.ClientID.String(),
 		Scopes:          looked.Scope,
 		Claims:          claims,
+		Issuer:          issuer,
 		Audience:        audience,
 		ExpiresAt:       looked.ExpiresAt,
 		Thumbprint:      looked.Thumbprint,
@@ -393,32 +416,42 @@ func (o OpaqueAccessTokens) ResolveAccessToken(ctx context.Context, req ResolveA
 	}, nil
 }
 
-// recordedAudience separates the audience a FAPIgo server recorded
-// with an opaque token (token.AudienceRecordClaim) from its other
-// claims: the audience isn't one of the token's claims to the
-// application. Nil when the record has none.
-func recordedAudience(claims map[string]json.RawMessage) (map[string]json.RawMessage, []string, error) {
-	raw, ok := claims[token.AudienceRecordClaim]
-	if !ok {
-		return claims, nil, nil
+// recordedIssuerAndAudience separates the issuer and audience a
+// FAPIgo server recorded with an opaque token (token.IssuerRecordClaim,
+// token.AudienceRecordClaim) from its other claims: neither is one of
+// the token's claims to the application. Each is empty when the record
+// has none; a malformed one is an error.
+func recordedIssuerAndAudience(claims map[string]json.RawMessage) (rest map[string]json.RawMessage, issuer string, audience []string, err error) {
+	rawIss, hasIss := claims[token.IssuerRecordClaim]
+	rawAud, hasAud := claims[token.AudienceRecordClaim]
+	if !hasIss && !hasAud {
+		return claims, "", nil, nil
 	}
-	var audience []string
-	if err := json.Unmarshal(raw, &audience); err != nil || len(audience) == 0 {
-		return nil, nil, errors.New("recorded audience is not a non-empty array of strings")
+	if hasIss {
+		if err := json.Unmarshal(rawIss, &issuer); err != nil || issuer == "" {
+			return nil, "", nil, errors.New("recorded issuer is not a non-empty string")
+		}
 	}
-	rest := maps.Clone(claims)
+	if hasAud {
+		if err := json.Unmarshal(rawAud, &audience); err != nil || len(audience) == 0 {
+			return nil, "", nil, errors.New("recorded audience is not a non-empty array of strings")
+		}
+	}
+	rest = maps.Clone(claims)
+	delete(rest, token.IssuerRecordClaim)
 	delete(rest, token.AudienceRecordClaim)
 	if len(rest) == 0 {
 		rest = nil
 	}
-	return rest, audience, nil
+	return rest, issuer, audience, nil
 }
 
 // acceptsAudience reports whether a token recorded for audience may be
-// used here: always without Audience, and for a record without one;
-// otherwise only when it names Audience or one of AdditionalAudiences.
+// used here: always without Audience; otherwise only when it names
+// Audience or one of AdditionalAudiences, never when the record names
+// none.
 func (o OpaqueAccessTokens) acceptsAudience(audience []string) bool {
-	if o.Audience == "" || audience == nil {
+	if o.Audience == "" {
 		return true
 	}
 	return slices.Contains(audience, o.Audience) || slices.ContainsFunc(o.AdditionalAudiences, func(a string) bool {

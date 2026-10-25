@@ -343,6 +343,13 @@ const ClientSubjectClaim = "client_sub"
 // audience, never as one of its claims.
 const AudienceRecordClaim = "aud"
 
+// IssuerRecordClaim is the claim a server-side access token record
+// (OpaqueAccessTokens) keeps the issuer identifier of the server that
+// issued it under, as a JSON string. A resource server refuses a record
+// another issuer wrote, or one with none, and reads it back as the
+// token's issuer, never as one of its claims.
+const IssuerRecordClaim = "iss"
+
 // accessTokenAudience is p's "aud" value: Audiences when set (a string
 // for one, an array for several), and otherwise Audience.
 func accessTokenAudience(p AccessTokenParams) any {

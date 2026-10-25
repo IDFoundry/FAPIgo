@@ -41,9 +41,14 @@
 // schema or key prefix). The server stamps its issuer in the opaque
 // records it writes and treats one another issuer wrote as unknown, so
 // a tenant can't redeem another's authorization code, request_uri,
-// refresh token or auth_req_id; that is a backstop, not a reason to
-// share. A record written before v0.58.0 carries no issuer and is
-// accepted until it expires.
+// refresh token or auth_req_id; server.OpaqueAccessTokens records the
+// issuer with each access token too, and resource.OpaqueAccessTokens
+// refuses another issuer's; and a revoked grant's key in the revocation
+// store names its issuer, so one tenant revoking a grant ID can't revoke
+// another's. That is a backstop, not a reason to share. A record written
+// before records carried an issuer (v0.58.0 for request, grant and CIBA
+// records, v0.61.0 for opaque access tokens) can't be told apart from
+// another issuer's, and is refused.
 //
 // An error from a store means what its method's contract says (unknown,
 // already used, refused). A store that couldn't answer at all — its

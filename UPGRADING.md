@@ -368,6 +368,28 @@ assurance is unchanged.
 default, and passes the `SessionHandle` it kept with the browser
 (`client/sessioncookie`) as `AuthorizationCallback.Session`.
 
+### `resource.Limits.MaxClockSkew` is 10 to 60 seconds (resource, *production only*)
+
+**Affects:** a `resource.Verifier` under `AssuranceProduction` whose
+`Config.Limits.MaxClockSkew` is under 10 seconds or over 60.
+`serverresource.NewVerifier` takes the server's own `MaxClockSkew`,
+which `server.New` already holds to that range, so a verifier built
+from it is unaffected.
+
+**Why:** `server.New` enforced FAPI 2.0 Security Profile §5.3.2.1's
+bounds (accept a JWT whose `iat` is up to 10 seconds in the future,
+refuse one more than 60 seconds ahead), but a directly built verifier
+accepted any skew, and the skew also extends how long past its `exp` a
+token is still accepted: an hour's skew accepted an expired token for
+an hour.
+
+**What fails:** `resource.NewVerifier` returns an error naming
+`limits.max_clock_skew`. Development assurance accepts any non-negative
+skew, as before.
+
+**What to change:** set `MaxClockSkew` between 10 and 60 seconds; 10
+seconds is the usual choice.
+
 ### DPoP requests need a URL path in normal form (client)
 
 Not a breaking change to an API: it's here because a request that used

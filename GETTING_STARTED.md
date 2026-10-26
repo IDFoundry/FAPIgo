@@ -855,8 +855,8 @@ OIDF suite's AS test plan needs a protected-resource endpoint to call
 ```go
 cfg := resource.Config{
 	Limits: resource.Limits{
-		MaxDPoPProofAge: time.Minute,     // how old a DPoP proof's iat may be
-		MaxClockSkew:    5 * time.Second, // tolerance either direction
+		MaxDPoPProofAge: time.Minute,      // how old a DPoP proof's iat may be
+		MaxClockSkew:    10 * time.Second, // tolerance either direction: 10 to 60 seconds in production
 	},
 	Assurance: resource.AssuranceDevelopment, // AssuranceProduction once your real deps are ready
 	// Deployment: resource.DeploymentSingleInstance, // required under AssuranceProduction: or DeploymentHorizontallyScaled for a fleet
@@ -873,7 +873,11 @@ does `keys.JWKSIssuerKeySource` on a `fapihttp` client without a loopback
 exception), the opaque-token, replay, nonce and
 revocation stores to declare `storage.StoreAssurance` (unless revocation
 is `resource.NoRevocation{}`), and `crypto/rand.Reader` when DPoP
-nonces are on. It also requires `Deployment`:
+nonces are on, and a `MaxClockSkew` between 10 and 60 seconds, as
+`server.New` does: FAPI 2.0 Security Profile §5.3.2.1 has a JWT whose
+`iat` is up to 10 seconds in the future accepted and one more than 60
+seconds ahead refused, and here the skew also extends how long past its
+`exp` a token is still accepted. It also requires `Deployment`:
 `resource.DeploymentSingleInstance`, or
 `resource.DeploymentHorizontallyScaled` when more than one instance
 shares the stores, which then must also declare

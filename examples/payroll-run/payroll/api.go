@@ -155,6 +155,12 @@ const usedApprovalNamespace storage.ReplayNamespace = "example:payroll-run:batch
 // atomic step, so two instances racing on the same approval can't both
 // proceed, and a store it can't reach refuses rather than allows. The
 // record lasts as long as the token can still be presented.
+//
+// Keying by the access token (authz.Key) is right here only because a
+// client credentials token is its own grant: it's never refreshed, and
+// each token request is a new mandate. Where a grant can be refreshed,
+// each refresh issues a new Key carrying the same approval, so key by
+// authz.CodeGrantID instead, as payment-consent does.
 func (a *api) useOnce(ctx context.Context, authz resource.AuthorizationContext) bool {
 	return a.replay.UseOnce(ctx, storage.ReplayUse{
 		Namespace: usedApprovalNamespace,

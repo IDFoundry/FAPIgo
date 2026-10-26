@@ -50,6 +50,16 @@ type RevocationSink interface {
 // visible line of code (Revocation: server.NoRevocation{}) instead of
 // an easily-forgotten omission — the whole point of making this field
 // required rather than silently skippable.
+//
+// Without revocation, nothing ends an access token before it expires:
+// a reused authorization code no longer revokes what it issued,
+// RevokeGrant refuses, and RevokeToken removes the refresh token but
+// leaves the access tokens issued from it working. A leaked access
+// token stays usable for its whole lifetime. AssuranceProduction
+// accepts NoRevocation and doesn't cap Limits.AccessTokenLifetime or
+// Limits.RefreshTokenLifetime (nor how long a client assertion or
+// attestation may live), so with it keep those short:
+// RecommendedLimits' values are a ceiling to stay under, not a floor.
 type NoRevocation struct{}
 
 // Revoke implements RevocationSink by doing nothing.

@@ -87,6 +87,17 @@ cfg := server.Config{
 }
 ```
 
+`AssuranceProduction` holds the limits FAPI 2.0 fixes (authorization
+code and pushed request lifetimes, clock skew, request object and CIBA
+request lifetimes) to the profile's numbers, but not the ones it leaves
+to you: `AccessTokenLifetime`, `RefreshTokenLifetime`, and how long a
+client assertion or attestation may live. Those are what bound a leaked
+token when nothing else does, so keep them short, and shorter still with
+`Dependencies.Revocation: server.NoRevocation{}`: then a reused
+authorization code no longer revokes what it issued, `RevokeGrant`
+refuses, `RevokeToken` removes a refresh token but not the access tokens
+issued from it, and a stolen access token works until it expires.
+
 `Subjects` is required: it states what kind of `sub` (OpenID Connect
 Core §8) a user gets at each client. `server.PublicSubjects()` gives
 every client the same `sub`. A pure OAuth server (`OAuthOnly`) may

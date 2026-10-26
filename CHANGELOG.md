@@ -1,5 +1,43 @@
 # Changelog
 
+## [0.61.0](https://github.com/IDFoundry/FAPIgo/compare/v0.60.0...v0.61.0) (2026-10-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* **resource:** resource.NewVerifier under AssuranceProduction refuses a Limits.MaxClockSkew under 10 seconds or over 60 seconds. Development assurance is unchanged, and serverresource.NewVerifier inherits the server's already-bounded value.
+* **client:** RevokeToken takes a client.TokenSet instead of a fapi.Secret and refuses a set from another issuer or with no recorded issuer. TokenSetSealer.Seal refuses a set with no recorded issuer. ExchangeCode refuses a response another Client validated. Under AssuranceProduction, client.New refuses CallbackBindingDeviceLocalStore unless the redirect URI is loopback http to 127.0.0.1 or [::1] or a private-use URI scheme. See UPGRADING.md.
+* **server:** under AssuranceProduction, server.New now refuses a ClientCertificateTrust of NoClientCertificateChainTrust, by value or pointer. A deployment whose TLS termination verifies client certificate chains passes ClientCertificateChainVerifiedUpstream instead, which behaves the same; otherwise pass TrustedClientCAs, or NoPKIClientAuthentication when no client uses tls_client_auth. See UPGRADING.md.
+* resource.NewOpaqueAccessTokens takes the issuer as a second argument and NewVerifier refuses an OpaqueAccessTokens without an Issuer. Opaque access tokens issued before this release, and records written before v0.58.0 (in practice refresh tokens issued before 2026-10-20), are refused, so their users must authorize again. With an Audience set, an opaque token record without an audience is refused. server.OpaqueAccessTokens refuses to issue without an issuer. A custom resource.AccessTokenResolver must report the issuer of any token carrying a grant_id or code_grant_id claim, or Verify answers 500. Revocation store keys for grants now contain the issuer URL. See UPGRADING.md.
+* **server:** a client registered with AllowedResources no longer gets issuer-audience access tokens when resource indicators are enabled. With a single entry, a request naming no resource is for that resource; with several, it fails with invalid_target. Such a client that calls the UserInfo endpoint must list the issuer identifier in its AllowedResources (and the server must accept it as a resource), then name a resource in every request. See UPGRADING.md.
+* **federation:** a statically registered client is authenticated only with keys from Dependencies.ClientKeys, never with ones its federation metadata publishes, and a federation client only with its federation keys. Automatic registration no longer registers a client authentication method or assertion algorithm outside a superior's policy on token_endpoint_auth_method or token_endpoint_auth_signing_alg, refuses an empty token_endpoint_auth_methods_supported or token_endpoint_auth_signing_alg_values_supported, and refuses an empty string for any string parameter it reads. See UPGRADING.md.
+
+### Features
+
+* **keys:** bind a JWKSIssuerKeySource to its issuer ([476bfd4](https://github.com/IDFoundry/FAPIgo/commit/476bfd4c67650885c70de7b1e600abc74a26099e))
+* **resource:** add AuthorizationContext.GrantID and CodeGrantID ([d3c3eef](https://github.com/IDFoundry/FAPIgo/commit/d3c3eef8849c7e07df76bf8459571c5545303d6f))
+* **server:** show and narrow resources at consent; confine federation clients' resources ([593801c](https://github.com/IDFoundry/FAPIgo/commit/593801c20f76293e7e8885896751bde4f0d9c80c))
+
+
+### Bug Fixes
+
+* bump Go toolchain to 1.26.10 for GO-2026-6809 ([a685dc5](https://github.com/IDFoundry/FAPIgo/commit/a685dc569511f0492df6c9bf8729f2d5c958d303))
+* **client:** bind CIBA sessions to the client that began them ([b58eb5d](https://github.com/IDFoundry/FAPIgo/commit/b58eb5d345471123f0db210e1c60558b70bde086))
+* **client:** bind code exchange, revocation and sealing to the issuer ([d83df91](https://github.com/IDFoundry/FAPIgo/commit/d83df9114bef9d484f5b7b8f89dc2471e2f3f5a7))
+* **client:** bound cached DPoP nonces and forget one a request was refused for ([58b99ea](https://github.com/IDFoundry/FAPIgo/commit/58b99ea44e3543a2e2b18e877411d2f4beb759e8))
+* **client:** refuse a DPoP request whose path its htu would normalize ([452fcab](https://github.com/IDFoundry/FAPIgo/commit/452fcabc7724e81e12de60960245d73370c428ec))
+* complete the per-issuer store backstop for access tokens, old records and grant revocation ([dd9c3c1](https://github.com/IDFoundry/FAPIgo/commit/dd9c3c15ce5b833ff92f1ef4b40d49ee6f3c383d))
+* **extension:** refuse authorization_details with a second top-level value ([eceefde](https://github.com/IDFoundry/FAPIgo/commit/eceefde9d26371d8cb41cd5bd6c2cacf2a8bab26))
+* **federation:** keep static client keys, RP choices and empty values within policy ([15606f7](https://github.com/IDFoundry/FAPIgo/commit/15606f702d2b845c613ad82de811537269e9cf50))
+* refuse JOSE and metadata JSON with a second top-level value ([8d41a12](https://github.com/IDFoundry/FAPIgo/commit/8d41a12262f527b6dc47733a583c1ae5e9504bad))
+* **resource:** describe a credential-binding failure as an invalid token ([144564b](https://github.com/IDFoundry/FAPIgo/commit/144564b846eeb9b0d7e822f0fb0ac9957fae9778))
+* **resource:** hold MaxClockSkew to 10-60 seconds under production ([d63e6ec](https://github.com/IDFoundry/FAPIgo/commit/d63e6ec20af6491979b8385f5452ffdad4aded45))
+* **server:** bind attested authorization codes to the client instance; re-check grant types ([d6bcaad](https://github.com/IDFoundry/FAPIgo/commit/d6bcaad796e9778126f31acb880e35bb4ea2be96))
+* **server:** confine requests naming no resource to the client's AllowedResources ([b289a81](https://github.com/IDFoundry/FAPIgo/commit/b289a81b8c73a8ee0f007ccdf680684d253dff90))
+* **server:** read client_id one way for an embedder's attested client ([54c160c](https://github.com/IDFoundry/FAPIgo/commit/54c160c009c7cf46c917416e0de49ac50131357e))
+* **server:** refuse NoClientCertificateChainTrust under production assurance ([cb9e739](https://github.com/IDFoundry/FAPIgo/commit/cb9e739304c28dfbceaafb7348e0608d4d7df9f6))
+* tighten iat, JWE zip, private-member and UserInfo typ checks ([d379bfa](https://github.com/IDFoundry/FAPIgo/commit/d379bfa98ad72a7b1426b19727d4e384760d6103))
+
 ## [0.60.0](https://github.com/IDFoundry/FAPIgo/compare/v0.59.0...v0.60.0) (2026-10-20)
 
 

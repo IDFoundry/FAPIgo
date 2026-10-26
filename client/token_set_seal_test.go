@@ -230,17 +230,28 @@ func TestTokenSetSealerRefusesUnencodableDetails(t *testing.T) {
 }
 
 // TestTokenSetSealerBindsTheIssuer: Open restores the sealer's issuer
-// as Issuer, even for a set that didn't record one, and Seal refuses a
-// set from another issuer rather than relabelling it.
+// as Issuer, and Seal refuses a set from another issuer, or one that
+// records none, rather than relabelling it: an issuer-less set (from
+// storage that predates TokenSet.Issuer, say) could have come from any
+// issuer, and Open would otherwise stamp this one's on it for
+// RefreshTokens to send its refresh token here.
 func TestTokenSetSealerBindsTheIssuer(t *testing.T) {
 	s := sealer(t, testClientID, sealKey(1))
-	sealed, err := s.Seal(client.TokenSet{AccessToken: fapi.NewSecret("at-1"), TokenType: "DPoP"}, "user-1")
+	sealed, err := s.Seal(client.TokenSet{AccessToken: fapi.NewSecret("at-1"), TokenType: "DPoP", Issuer: testIssuer}, "user-1")
 	if err != nil {
-		t.Fatalf("Seal(no issuer): %v", err)
+		t.Fatalf("Seal: %v", err)
 	}
 	opened, _, err := s.Open(sealed, "user-1")
 	if err != nil || opened.Issuer != testIssuer {
 		t.Fatalf("Open = Issuer %q, %v; want %q", opened.Issuer, err, testIssuer)
+	}
+	issuerless := client.TokenSet{
+		AccessToken: fapi.NewSecret("at-1"), TokenType: "DPoP",
+		RefreshToken: fapi.NewSecret("rt-1"), HasRefreshToken: true,
+	}
+	var cerr *client.Error
+	if _, err := s.Seal(issuerless, "user-1"); !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidRequest {
+		t.Errorf("Seal(no issuer) = %v, want invalid_request", err)
 	}
 	for name, mutate := range map[string]func(*client.TokenSet){
 		"another Issuer":       func(t *client.TokenSet) { t.Issuer = "https://other.example.com" },

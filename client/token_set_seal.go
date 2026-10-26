@@ -58,17 +58,16 @@ func NewTokenSetSealer(c *Client, keys [][]byte) (*TokenSetSealer, error) {
 // for owner: whatever names whose tokens these are, such as a user or
 // connection ID, and must be given to Open again. owner is required.
 // The sealed set is bound to this client's issuer, which Open restores
-// as TokenSet.Issuer, so a set from another issuer (by its Issuer, or
-// its ID token's iss) is refused rather than relabelled.
+// as TokenSet.Issuer, so t must have come from it, as RefreshTokens
+// requires: a set from another issuer (by its Issuer, or its ID token's
+// iss), or one recording no issuer at all, is refused rather than
+// relabelled.
 func (s *TokenSetSealer) Seal(t TokenSet, owner string) ([]byte, error) {
 	if owner == "" {
 		return nil, newError(ErrorInvalidRequest, "a token set is sealed for an owner", nil)
 	}
-	if iss := tokenSetIssuer(t); iss != "" && iss != s.client.cfg.Issuer.String() {
-		return nil, newError(ErrorInvalidRequest, "the token set was issued by a different issuer than this client's", nil)
-	}
-	if t.HasIDToken && t.IDTokenClaims.Issuer != "" && t.IDTokenClaims.Issuer != s.client.cfg.Issuer.String() {
-		return nil, newError(ErrorInvalidRequest, "the token set's ID token was issued by a different issuer than this client's", nil)
+	if issuerErr := s.client.checkTokenSetIssuer(t); issuerErr != nil {
+		return nil, issuerErr
 	}
 	if resourceErr := checkResources(t.Resource); resourceErr != nil {
 		return nil, resourceErr

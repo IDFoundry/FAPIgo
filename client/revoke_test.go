@@ -17,7 +17,7 @@ import (
 // headers (checked by the fixture), and no DPoP proof.
 func TestRevokeTokenAttestationRequest(t *testing.T) {
 	c, as := newTestClientWithAttestationAuth(t)
-	if err := c.RevokeToken(context.Background(), fapi.NewSecret("rt-1")); err != nil {
+	if err := c.RevokeToken(context.Background(), refreshTokenSet("rt-1")); err != nil {
 		t.Fatalf("RevokeToken: %v", err)
 	}
 	if as.lastRevokeForm.Get("token") != "rt-1" || as.lastRevokeForm.Get("token_type_hint") != "refresh_token" {
@@ -33,7 +33,7 @@ func TestRevokeTokenNotSupported(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = c.RevokeToken(context.Background(), fapi.NewSecret("rt-1"))
+	err = c.RevokeToken(context.Background(), refreshTokenSet("rt-1"))
 	var cerr *client.Error
 	if !errors.As(err, &cerr) || cerr.Code() != client.ErrorRevocationNotSupported {
 		t.Fatalf("RevokeToken without Endpoints.Revocation = %v, want ErrorRevocationNotSupported", err)
@@ -43,7 +43,7 @@ func TestRevokeTokenNotSupported(t *testing.T) {
 func TestRevokeTokenRefusesEmptyToken(t *testing.T) {
 	c, _ := newTestClientWithAttestationAuth(t)
 	var cerr *client.Error
-	if err := c.RevokeToken(context.Background(), fapi.Secret{}); !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidRequest {
+	if err := c.RevokeToken(context.Background(), client.TokenSet{Issuer: testIssuer}); !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidRequest {
 		t.Fatalf("RevokeToken(empty) = %v, want ErrorInvalidRequest", err)
 	}
 }
@@ -69,7 +69,7 @@ func TestRevokeTokenServerError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = c.RevokeToken(context.Background(), fapi.NewSecret("rt-1"))
+	err = c.RevokeToken(context.Background(), refreshTokenSet("rt-1"))
 	var cerr *client.Error
 	if !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidResponse {
 		t.Fatalf("RevokeToken = %v, want ErrorInvalidResponse", err)
@@ -107,7 +107,33 @@ func TestRevokeTokenTransportFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	var cerr *client.Error
-	if err := c.RevokeToken(context.Background(), fapi.NewSecret("rt-1")); !errors.As(err, &cerr) || cerr.Code() != client.ErrorInternal {
+	if err := c.RevokeToken(context.Background(), refreshTokenSet("rt-1")); !errors.As(err, &cerr) || cerr.Code() != client.ErrorInternal {
 		t.Fatalf("RevokeToken = %v, want ErrorInternal", err)
+	}
+}
+
+// refreshTokenSet is a TokenSet holding only refreshToken, from this
+// package's test issuer.
+func refreshTokenSet(refreshToken string) client.TokenSet {
+	return client.TokenSet{RefreshToken: fapi.NewSecret(refreshToken), HasRefreshToken: true, Issuer: testIssuer}
+}
+
+// TestRevokeTokenRefusesAnotherIssuersTokens covers RevokeToken's issuer
+// check: a token set from another issuer, or recording none, is refused
+// before anything reaches the revocation endpoint.
+func TestRevokeTokenRefusesAnotherIssuersTokens(t *testing.T) {
+	c, as := newTestClientWithAttestationAuth(t)
+	other := refreshTokenSet("rt-1")
+	other.Issuer = "https://other-as.example"
+	issuerless := refreshTokenSet("rt-1")
+	issuerless.Issuer = ""
+	for name, tokens := range map[string]client.TokenSet{"another issuer": other, "no issuer": issuerless} {
+		var cerr *client.Error
+		if err := c.RevokeToken(context.Background(), tokens); !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidRequest {
+			t.Errorf("%s: RevokeToken = %v, want ErrorInvalidRequest", name, err)
+		}
+	}
+	if as.lastRevokeForm != nil {
+		t.Errorf("the revocation endpoint received %v", as.lastRevokeForm)
 	}
 }

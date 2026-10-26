@@ -283,6 +283,91 @@ refused with 500 `server_error`. `JWTAccessTokens` and
 `RevocationStore` with a key length or character limit allows for the
 issuer URL; `storage.TestRevocationStoreContract` covers such keys.
 
+### `RevokeToken` takes the `TokenSet` (client)
+
+**Affects:** every caller of `client.Client.RevokeToken`.
+
+**Why:** `RevokeToken` took a bare refresh token, so nothing tied it to
+the issuer it came from. In an application with one `Client` per
+issuer, one issuer's refresh token passed to another issuer's client was
+posted to that other issuer's revocation endpoint, where
+`RefreshTokens` would have refused the same token set.
+
+**What fails:** `RevokeToken(ctx, refreshToken)` no longer compiles. It
+is now `RevokeToken(ctx, tokens)` with a `client.TokenSet`, and it
+refuses, with `ErrorInvalidRequest` and before sending anything, a set
+with no refresh token, one from another issuer, or one that records no
+issuer (`TokenSet.Issuer`, or its ID token's `iss`), exactly as
+`RefreshTokens` does.
+
+**What to change:** pass the `TokenSet` the refresh token came in, as
+`ExchangeCode`, `RefreshTokens` or `TokenSetSealer.Open` returned it. If
+you kept only the refresh token, build
+`client.TokenSet{RefreshToken: rt, HasRefreshToken: true, Issuer: iss}`
+with the issuer you got it from.
+
+### `TokenSetSealer.Seal` refuses a set that records no issuer (client)
+
+**Affects:** a client sealing a `TokenSet` built by hand, or kept from
+before `TokenSet.Issuer` existed, with neither `Issuer` nor an ID token
+carrying `iss`.
+
+**Why:** `Open` sets `Issuer` to the sealing client's issuer, so sealing
+an issuer-less set relabelled it: `RefreshTokens`, which refuses a set
+that records no issuer, then sent its refresh token to the sealing
+client's issuer, whichever issuer the token came from.
+
+**What fails:** `Seal` returns `ErrorInvalidRequest` for such a set, as
+it already did for one from another issuer. Sets sealed before the
+upgrade still open.
+
+**What to change:** set `TokenSet.Issuer` to the issuer the tokens came
+from before sealing. Sets from `ExchangeCode`, `RefreshTokens`, CIBA
+and `Open` already record it.
+
+### `ExchangeCode` redeems only its own client's responses (client)
+
+**Affects:** an application with more than one `Client` (one per
+issuer, or two registrations at one issuer) that exchanges a
+`ValidatedAuthorizationResponse` on a different `Client` from the one
+whose `HandleAuthorizationResponse` returned it, and anything calling
+`ExchangeCode` with the zero value.
+
+**Why:** the authorization code, PKCE verifier and redirect URI went to
+whichever client's token endpoint `ExchangeCode` was called on, so a
+routing mistake handed one issuer's code and verifier to another.
+
+**What fails:** `ExchangeCode` returns `ErrorInvalidRequest`, sending
+nothing, for a response another issuer's or client ID's `Client`
+validated, and for the zero value.
+
+**What to change:** exchange on the `Client` that handled the callback,
+or use `CompleteAuthorization`, which does both on one.
+
+### `CallbackBindingDeviceLocalStore` is for native apps only (client, *production only*)
+
+**Affects:** a client under `AssuranceProduction` with
+`Config.CallbackBinding = CallbackBindingDeviceLocalStore` whose
+`Config.RedirectURI` is https: a web client, typically a single
+instance with a durable sessions store that doesn't declare
+`CrossInstanceConsistent`.
+
+**Why:** that binding finds a session by the callback's `state` alone.
+v0.58.0 refused it only over a store declaring `CrossInstanceConsistent`,
+but a single-instance web client's store also holds every browser's
+sessions, so a callback for an attacker's own flow, delivered to a
+victim's browser, completed there: login CSRF (RFC 9700 §4.7).
+
+**What fails:** `client.New` returns an error naming
+`CallbackBindingDeviceLocalStore` unless `RedirectURI` is a native app's:
+loopback http to `127.0.0.1` or `[::1]`, or a private-use URI scheme.
+The `CrossInstanceConsistent` refusal still applies. Development
+assurance is unchanged.
+
+**What to change:** a web client uses `CallbackBindingSessionHandle`, the
+default, and passes the `SessionHandle` it kept with the browser
+(`client/sessioncookie`) as `AuthorizationCallback.Session`.
+
 ## v0.58.0
 
 ### Automatic registration skips `tls_client_auth` unless chains are verified (server)

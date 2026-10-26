@@ -4,12 +4,11 @@ import (
 	"context"
 	"net/http"
 
-	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/par"
 )
 
-// RevokeToken asks the authorization server to revoke refreshToken
-// (RFC 7009) at Config.Endpoints.Revocation, authenticating as the token
+// RevokeToken asks the authorization server to revoke tokens' refresh
+// token (RFC 7009) at Config.Endpoints.Revocation, authenticating as the token
 // request does: client assertion, Client Attestation, or TLS client
 // certificate. No DPoP proof is sent: revocation isn't
 // sender-constrained.
@@ -22,14 +21,24 @@ import (
 // carrying it as ServerResponse.
 //
 // Only refresh tokens are sent; access tokens are short-lived and expire
-// on their own.
-func (c *Client) RevokeToken(ctx context.Context, refreshToken fapi.Secret) error {
+// on their own. tokens must have a refresh token, and must have come
+// from this client's issuer, as RefreshTokens requires: a set from
+// another issuer, or one recording no issuer at all (TokenSet.Issuer,
+// or its ID token's iss), is refused before anything is sent, so one
+// issuer's refresh token is never presented to another. An application
+// that kept only the refresh token builds a TokenSet with it,
+// HasRefreshToken and the Issuer it came from.
+func (c *Client) RevokeToken(ctx context.Context, tokens TokenSet) error {
 	if c.cfg.Endpoints.Revocation.IsZero() {
 		return newError(ErrorRevocationNotSupported, "the authorization server has no revocation endpoint", nil)
 	}
-	if refreshToken.Reveal() == "" {
-		return newError(ErrorInvalidRequest, "refreshToken is empty", nil)
+	if !tokens.HasRefreshToken || tokens.RefreshToken.Reveal() == "" {
+		return newError(ErrorInvalidRequest, "the token set has no refresh token", nil)
 	}
+	if issuerErr := c.checkTokenSetIssuer(tokens); issuerErr != nil {
+		return issuerErr
+	}
+	refreshToken := tokens.RefreshToken
 	assertionSigner, assertionKID, _, err := c.resolveClientAuthAndDPoPSigners(ctx)
 	if err != nil {
 		return newError(ErrorInternal, "failed to resolve signing keys", err)

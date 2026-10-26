@@ -77,8 +77,14 @@ func (c *Client) ProtectedResource(tokens TokenSet) *ResourceClient {
 
 // ClientCredentialsResource is ProtectedResource for an access token
 // from RequestClientCredentialsToken: a ResourceClient bound to
-// result's access token, sender-constrained the same way.
+// result's access token, sender-constrained the same way. A result whose
+// Issuer is another issuer than this client's gives a ResourceClient
+// whose every Do fails with ErrorInvalidRequest, as ProtectedResource's
+// does; one built by hand without an Issuer is used as given.
 func (c *Client) ClientCredentialsResource(result ClientCredentialsTokenResult) *ResourceClient {
+	if result.Issuer != "" && result.Issuer != c.cfg.Issuer.String() {
+		return &ResourceClient{client: c, err: newError(ErrorInvalidRequest, "the token was issued by a different issuer than this client's", nil)}
+	}
 	return &ResourceClient{client: c, token: result.AccessToken.Reveal()}
 }
 

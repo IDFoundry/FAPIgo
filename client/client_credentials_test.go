@@ -167,6 +167,9 @@ func TestRequestClientCredentialsTokenDPoPSuccess(t *testing.T) {
 	if string(result.AuthorizationDetails) == "" {
 		t.Errorf("AuthorizationDetails is empty, want the echoed detail object")
 	}
+	if result.Issuer != testIssuer {
+		t.Errorf("Issuer = %q, want %q", result.Issuer, testIssuer)
+	}
 
 	if as.lastForm.Get("grant_type") != "client_credentials" {
 		t.Errorf("grant_type = %q, want client_credentials", as.lastForm.Get("grant_type"))

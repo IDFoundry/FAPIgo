@@ -94,6 +94,10 @@ c, err := client.New(client.Config{
   `IssuerKeys`, `Random` to be `crypto/rand.Reader`, and an https issuer
   and endpoints. A loopback redirect URI is still fine; a plain-http
   loopback authorization server, as in local testing, is not.
+  `CallbackBindingDeviceLocalStore` is accepted only with a native app's
+  redirect URI — a private-use scheme, or loopback http to `127.0.0.1`
+  or `[::1]` — and a session store that doesn't declare
+  `CrossInstanceConsistent`.
 
 ## Completing after a relaunch
 
@@ -109,7 +113,8 @@ result, err := c.CompleteAuthorization(ctx, client.AuthorizationCallback{
 
 Build the client from the same config, keys and session store first. The
 binding is safe only because the session store is the app's own on-device
-storage; a browser-based client keeps the default binding.
+storage; a browser-based client keeps the default binding, and
+`AssuranceProduction` refuses it for an https redirect URI.
 
 ## Tokens over the app's lifetime
 
@@ -121,8 +126,9 @@ storage; a browser-based client keeps the default binding.
   installation can redeem it. A FAPIgo authorization server also refuses
   an installation a refresh token issued to the same client_id under
   another method, such as your backend's `private_key_jwt`.
-- **Revoke** with `RevokeToken` when the app no longer needs a refresh
-  token, before deleting the key it's bound to. `ErrorRevocationNotSupported`
+- **Revoke** with `RevokeToken(ctx, tokens)` when the app no longer needs
+  a refresh token, before deleting the key it's bound to. It takes the
+  `TokenSet`, and refuses one from another issuer. `ErrorRevocationNotSupported`
   means the server offers no revocation endpoint, and the token can only
   be forgotten.
 - **Errors** may include text the server wrote. Before an error crosses

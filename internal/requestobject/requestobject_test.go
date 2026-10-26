@@ -923,7 +923,7 @@ func TestParseClaimsNullOrNonPositiveIssuedAt(t *testing.T) {
 	if err := checkIssuedAt(c, VerifyPolicy{RequireIssuedAt: true, Now: time.Now()}); !errors.Is(err, ErrMissingIssuedAt) {
 		t.Fatalf("checkIssuedAt(iat null, required) = %v, want ErrMissingIssuedAt", err)
 	}
-	for _, iat := range []string{"0", "-1", "-0.5"} {
+	for _, iat := range []string{"0", "-1", "-0.5", `"1"`} {
 		if _, err := parseClaims([]byte(base + iat + `}`)); !errors.Is(err, ErrMalformedClaims) {
 			t.Errorf("parseClaims(iat %s) = %v, want ErrMalformedClaims", iat, err)
 		}

@@ -283,6 +283,142 @@ refused with 500 `server_error`. `JWTAccessTokens` and
 `RevocationStore` with a key length or character limit allows for the
 issuer URL; `storage.TestRevocationStoreContract` covers such keys.
 
+### `RevokeToken` takes the `TokenSet` (client)
+
+**Affects:** every caller of `client.Client.RevokeToken`.
+
+**Why:** `RevokeToken` took a bare refresh token, so nothing tied it to
+the issuer it came from. In an application with one `Client` per
+issuer, one issuer's refresh token passed to another issuer's client was
+posted to that other issuer's revocation endpoint, where
+`RefreshTokens` would have refused the same token set.
+
+**What fails:** `RevokeToken(ctx, refreshToken)` no longer compiles. It
+is now `RevokeToken(ctx, tokens)` with a `client.TokenSet`, and it
+refuses, with `ErrorInvalidRequest` and before sending anything, a set
+with no refresh token, one from another issuer, or one that records no
+issuer (`TokenSet.Issuer`, or its ID token's `iss`), exactly as
+`RefreshTokens` does.
+
+**What to change:** pass the `TokenSet` the refresh token came in, as
+`ExchangeCode`, `RefreshTokens` or `TokenSetSealer.Open` returned it. If
+you kept only the refresh token, build
+`client.TokenSet{RefreshToken: rt, HasRefreshToken: true, Issuer: iss}`
+with the issuer you got it from.
+
+### `TokenSetSealer.Seal` refuses a set that records no issuer (client)
+
+**Affects:** a client sealing a `TokenSet` built by hand, or kept from
+before `TokenSet.Issuer` existed, with neither `Issuer` nor an ID token
+carrying `iss`.
+
+**Why:** `Open` sets `Issuer` to the sealing client's issuer, so sealing
+an issuer-less set relabelled it: `RefreshTokens`, which refuses a set
+that records no issuer, then sent its refresh token to the sealing
+client's issuer, whichever issuer the token came from.
+
+**What fails:** `Seal` returns `ErrorInvalidRequest` for such a set, as
+it already did for one from another issuer. Sets sealed before the
+upgrade still open.
+
+**What to change:** set `TokenSet.Issuer` to the issuer the tokens came
+from before sealing. Sets from `ExchangeCode`, `RefreshTokens`, CIBA
+and `Open` already record it.
+
+### `ExchangeCode` redeems only its own client's responses (client)
+
+**Affects:** an application with more than one `Client` (one per
+issuer, or two registrations at one issuer) that exchanges a
+`ValidatedAuthorizationResponse` on a different `Client` from the one
+whose `HandleAuthorizationResponse` returned it, and anything calling
+`ExchangeCode` with the zero value.
+
+**Why:** the authorization code, PKCE verifier and redirect URI went to
+whichever client's token endpoint `ExchangeCode` was called on, so a
+routing mistake handed one issuer's code and verifier to another.
+
+**What fails:** `ExchangeCode` returns `ErrorInvalidRequest`, sending
+nothing, for a response another issuer's or client ID's `Client`
+validated, and for the zero value.
+
+**What to change:** exchange on the `Client` that handled the callback,
+or use `CompleteAuthorization`, which does both on one.
+
+### `CallbackBindingDeviceLocalStore` is for native apps only (client, *production only*)
+
+**Affects:** a client under `AssuranceProduction` with
+`Config.CallbackBinding = CallbackBindingDeviceLocalStore` whose
+`Config.RedirectURI` is https: a web client, typically a single
+instance with a durable sessions store that doesn't declare
+`CrossInstanceConsistent`.
+
+**Why:** that binding finds a session by the callback's `state` alone.
+v0.58.0 refused it only over a store declaring `CrossInstanceConsistent`,
+but a single-instance web client's store also holds every browser's
+sessions, so a callback for an attacker's own flow, delivered to a
+victim's browser, completed there: login CSRF (RFC 9700 §4.7).
+
+**What fails:** `client.New` returns an error naming
+`CallbackBindingDeviceLocalStore` unless `RedirectURI` is a native app's:
+loopback http to `127.0.0.1` or `[::1]`, or a private-use URI scheme.
+The `CrossInstanceConsistent` refusal still applies. Development
+assurance is unchanged.
+
+**What to change:** a web client uses `CallbackBindingSessionHandle`, the
+default, and passes the `SessionHandle` it kept with the browser
+(`client/sessioncookie`) as `AuthorizationCallback.Session`.
+
+### DPoP requests need a URL path in normal form (client)
+
+Not a breaking change to an API: it's here because a request that used
+to go out now fails.
+
+**Affects:** a client under `SenderConstrainDPoP` that sends
+`ResourceClient.Do` a URL whose path has `.` or `..` segments, or
+percent-encodes an unreserved character (`%2e`, `%41`, `%7E`).
+
+**Why:** a DPoP proof's `htu` names the path with those normalized away
+(RFC 9449 §4.2), but the request goes out with the path as written. A
+front end that routes by the raw path delivers `/rs-a/%2e%2e/rs-b/x` to
+the resource server at `/rs-a/`, carrying a token and proof the one at
+`/rs-b/` accepts: the first can replay them at the second.
+
+**What fails:** `Do` returns `ErrorInvalidRequest` before sending
+anything. A token, PAR or CIBA endpoint with such a path fails the same
+way, as an internal error. Percent-encoded reserved characters (`%2F`),
+trailing slashes and query strings are unaffected, as is
+`SenderConstrainMTLS`.
+
+**What to change:** resolve the path before sending (for a link a
+server returned, `url.URL.ResolveReference` removes dot segments), and
+don't percent-encode unreserved characters.
+
+### DPoP nonces are bounded, and forgotten after a refused request (client, fapihttp)
+
+Not a breaking change to an API: it's here for a custom
+`DPoPNonceCache`, and for a server sending very large headers.
+
+**Affects:** a `client.Dependencies.DPoPNonceCache` of your own, and a
+`fapihttp.NewClient` transport talking to a server whose response
+headers exceed 256 KiB.
+
+**Why:** the client cached any `DPoP-Nonce` header, of any size, from
+any response, per origin, and presented it on every later request there.
+Another resource on the same origin could hand out a nonce large enough
+that the honest resource server refused every request as too large
+(431), never answering with the challenge that would replace it.
+
+**What fails:** nothing that worked before. The client now caches a
+nonce only from a successful response or a `use_dpop_nonce` challenge,
+and only one of RFC 9449's syntax (`1*NQCHAR`) of at most 1024 bytes;
+after any other 4xx it calls `DPoPNonceCache.Set` with an empty nonce to
+forget the origin's. `fapihttp.NewClient`'s transport refuses a response
+whose headers exceed 256 KiB (net/http's default is 10 MiB).
+
+**What to change:** a custom `DPoPNonceCache` treats `Set` with `""` as
+forgetting the scope's nonce (storing `""` works too: the client ignores
+an empty or malformed cached value).
+
 ## v0.58.0
 
 ### Automatic registration skips `tls_client_auth` unless chains are verified (server)

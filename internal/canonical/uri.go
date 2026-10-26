@@ -67,6 +67,43 @@ func URI(u *url.URL) string {
 	return out.String()
 }
 
+// HasNormalPath reports whether the request-target net/http sends for u
+// names the same path URI puts in an htu: u is not opaque, and its
+// escaped path has no "." or ".." segments and no percent-encoded
+// unreserved characters, which URI's normalization would change. (A
+// lowercase percent-encoding counts as normal: URI only uppercases it,
+// and it names the same octet to anything that decodes the path.) A
+// proof whose htu names another path than the request's own could be
+// routed, by a front end that doesn't normalize, to a resource server
+// other than the one its htu names, and replayed there.
+func HasNormalPath(u *url.URL) bool {
+	if u.Opaque != "" {
+		return false
+	}
+	escaped := u.EscapedPath()
+	return normalizePath(escaped) == upperPercentEncodings(escaped)
+}
+
+// upperPercentEncodings uppercases the hex digits of each well-formed
+// percent-encoding in escaped, leaving everything else as it is.
+func upperPercentEncodings(escaped string) string {
+	b := []byte(escaped)
+	for i := 0; i+2 < len(b); i++ {
+		if b[i] == '%' && isHex(b[i+1]) && isHex(b[i+2]) {
+			b[i+1], b[i+2] = upperHex(b[i+1]), upperHex(b[i+2])
+			i += 2
+		}
+	}
+	return string(b)
+}
+
+func upperHex(c byte) byte {
+	if 'a' <= c && c <= 'f' {
+		return c - 'a' + 'A'
+	}
+	return c
+}
+
 func canonicalHost(host, scheme string) string {
 	h, port, err := net.SplitHostPort(host)
 	// A successful split strips an IPv6 literal's own brackets (e.g.

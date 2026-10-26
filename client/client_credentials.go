@@ -65,6 +65,12 @@ type ClientCredentialsTokenResult struct {
 	// Requests detail array (RFC 9396 §7), nil if the request carried
 	// none or the server granted none of it.
 	AuthorizationDetails json.RawMessage
+
+	// Issuer is the authorization server the token came from: this
+	// client's Config.Issuer. ClientCredentialsResource refuses a result
+	// whose Issuer isn't its client's, as ProtectedResource does a
+	// TokenSet's.
+	Issuer string
 }
 
 // RequestClientCredentialsToken implements the RFC 6749 §4.4
@@ -158,6 +164,7 @@ func (c *Client) RequestClientCredentialsToken(ctx context.Context, req ClientCr
 		TokenType:            wantTokenType,
 		Scope:                grantedScope(raw.Scope, req.Scope),
 		AuthorizationDetails: raw.AuthorizationDetails,
+		Issuer:               c.cfg.Issuer.String(),
 	}
 	if raw.ExpiresIn > 0 {
 		result.ExpiresIn = expiresInDuration(raw.ExpiresIn)

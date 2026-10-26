@@ -165,8 +165,9 @@ cannot skip callback validation before exchanging a code; then
 `RevokeToken` to tell the server it's no longer needed (RFC 7009). CIBA
 (`BeginBackchannelAuthentication` → `PollBackchannelAuthentication`)
 and `RequestClientCredentialsToken` are the other two flows. The
-intermediate `ValidatedAuthorizationResponse` is opaque and can only be
-constructed by `HandleAuthorizationResponse`.
+intermediate `ValidatedAuthorizationResponse` is opaque, can only be
+constructed by `HandleAuthorizationResponse`, and is redeemed only by the
+client that validated it.
 
 `BeginAuthorization` internally: generates `state`/`nonce`/PKCE, builds
 and signs the request object when required, authenticates to and calls

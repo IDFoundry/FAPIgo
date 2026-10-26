@@ -41,8 +41,15 @@ type AuthorizationCallback struct {
 // constructed by HandleAuthorizationResponse — the only way to obtain
 // one is to have already passed every check HandleAuthorizationResponse
 // performs, so ExchangeCode can never be called with an
-// unvalidated code.
+// unvalidated code. It is bound to the Client that validated it:
+// ExchangeCode on a Client for another issuer or client ID, or with the
+// zero value, fails without sending anything.
 type ValidatedAuthorizationResponse struct {
+	// issuer and clientID are the validating Client's Config.Issuer and
+	// Config.ClientID: the code, PKCE verifier and redirect URI go only
+	// to that issuer's token endpoint.
+	issuer       string
+	clientID     string
 	code         string
 	redirectURI  string
 	pkceVerifier string
@@ -148,6 +155,8 @@ func (c *Client) HandleAuthorizationResponse(ctx context.Context, cb Authorizati
 
 	maxAge, hasMaxAge := consumed.maxAge()
 	return CallbackSuccess{Response: ValidatedAuthorizationResponse{
+		issuer:       c.cfg.Issuer.String(),
+		clientID:     c.cfg.ClientID.String(),
 		code:         code,
 		redirectURI:  consumed.RedirectURI,
 		pkceVerifier: consumed.PKCEVerifier,
@@ -213,7 +222,12 @@ func (c *Client) consumeCallbackSession(ctx context.Context, cb AuthorizationCal
 	// running one client per issuer over a shared SessionStore routes
 	// each callback to a client itself; a callback routed to the wrong
 	// one must not complete another issuer's flow with that flow's PKCE
-	// verifier and nonce.
+	// verifier and nonce. A misrouted callback is normally refused
+	// before Consume, leaving the session for the right client: its
+	// "iss" (or JARM response's signed iss) names the other issuer. Only
+	// one without "iss", under TolerateAbsentAuthorizationResponseIss,
+	// gets this far, and spends the session: SessionStore has no read
+	// that doesn't consume, so the user signs in again.
 	record, decodeErr := decodeSessionRecord(consumed.Record)
 	if decodeErr != nil {
 		return sessionRecord{}, newError(ErrorInternal, "session record is missing or unreadable", decodeErr)

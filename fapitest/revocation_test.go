@@ -5,7 +5,6 @@ import (
 	"errors"
 	"testing"
 
-	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/client"
 	"github.com/idfoundry/fapigo/fapitest"
 	"github.com/idfoundry/fapigo/server"
@@ -30,13 +29,13 @@ func TestRevokeTokenEndToEnd(t *testing.T) {
 			if err != nil {
 				t.Fatalf("RunAuthorizationCodeFlow: %v", err)
 			}
-			if err := h.Client.RevokeToken(ctx, tokens.RefreshToken); err != nil {
+			if err := h.Client.RevokeToken(ctx, tokens); err != nil {
 				t.Fatalf("RevokeToken: %v", err)
 			}
 			if _, err := h.Client.RefreshTokens(ctx, client.RefreshTokenRequest{Tokens: tokens}); err == nil {
 				t.Fatal("RefreshTokens with a revoked refresh token succeeded")
 			}
-			if err := h.Client.RevokeToken(ctx, tokens.RefreshToken); err != nil {
+			if err := h.Client.RevokeToken(ctx, tokens); err != nil {
 				t.Fatalf("revoking it again: %v, want success", err)
 			}
 		})
@@ -53,7 +52,10 @@ func TestRevokeTokenAccessTokenUnsupported(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunAuthorizationCodeFlow: %v", err)
 	}
-	err = h.Client.RevokeToken(ctx, fapi.NewSecret(tokens.AccessToken.Reveal()))
+	// The access token, sent where the refresh token goes.
+	accessAsRefresh := tokens
+	accessAsRefresh.RefreshToken = tokens.AccessToken
+	err = h.Client.RevokeToken(ctx, accessAsRefresh)
 	var cerr *client.Error
 	if !errors.As(err, &cerr) {
 		t.Fatalf("RevokeToken(access token) = %v, want a *client.Error", err)

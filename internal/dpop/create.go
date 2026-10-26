@@ -36,7 +36,11 @@ type ProofRequest struct {
 
 	// URL is the target URI of the request this proof is bound to. It is
 	// canonicalized into the "htu" claim; query and fragment are
-	// stripped per RFC 9449 §4.2.
+	// stripped per RFC 9449 §4.2. Its path must already be in normal
+	// form (canonical.HasNormalPath), or CreateProof fails with
+	// ErrURLNotNormal: the request goes out with the path as written, and
+	// an htu naming another path could be replayed at the resource it
+	// names.
 	URL *url.URL
 
 	// AccessToken, if non-empty, is hashed into the proof's "ath" claim
@@ -69,6 +73,9 @@ func CreateProof(req ProofRequest) (string, error) {
 	}
 	if req.URL == nil {
 		return "", fmt.Errorf("dpop: url is nil")
+	}
+	if !canonical.HasNormalPath(req.URL) {
+		return "", ErrURLNotNormal
 	}
 	if req.Now.IsZero() {
 		return "", fmt.Errorf("dpop: now is zero")

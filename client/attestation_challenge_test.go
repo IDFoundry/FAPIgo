@@ -274,7 +274,7 @@ func TestAttestationChallengeAtEveryEndpoint(t *testing.T) {
 			return err
 		}},
 		"revocation": {nil, func(c *client.Client) error {
-			return c.RevokeToken(context.Background(), fapi.NewSecret("refresh-token"))
+			return c.RevokeToken(context.Background(), refreshTokenSet("refresh-token"))
 		}},
 		"mTLS token request": {func(cfg *client.Config) { cfg.SenderConstrain = storage.SenderConstrainMTLS }, requestToken},
 		"CIBA request":       {nil, beginBackchannel},

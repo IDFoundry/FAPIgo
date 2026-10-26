@@ -383,26 +383,43 @@ func TestNewReportsEveryProductionRefusal(t *testing.T) {
 
 // TestNewProductionRefusesDeviceLocalBindingOverASharedStore:
 // CallbackBindingDeviceLocalStore finds a session by the callback's
-// state alone, which is safe only in a native app's own store. A
-// sessions store declaring CrossInstanceConsistent is shared between
-// server instances, so production refuses the two together.
+// state alone, which is safe only in a native app's own store. Production
+// accepts it only for a native app's redirect URI (loopback http to an
+// IP literal, or a private-use scheme) over a store that doesn't declare
+// CrossInstanceConsistent: a web client's https redirect means a
+// server-side store, single-instance or not, where it brings login CSRF
+// back.
 func TestNewProductionRefusesDeviceLocalBindingOverASharedStore(t *testing.T) {
 	shared := storage.Capabilities{Durable: true, AtomicConsume: true, CrossInstanceConsistent: true}
+	device := storage.Capabilities{Durable: true, AtomicConsume: true}
+	const (
+		web        = "https://client.example/callback"
+		loopback   = "http://127.0.0.1/callback"
+		loopback6  = "http://[::1]:8080/callback"
+		privateUse = "com.example.wallet:/callback"
+	)
 	for _, tc := range []struct {
-		name    string
-		binding client.CallbackBinding
-		caps    storage.Capabilities
-		refused bool
+		name     string
+		binding  client.CallbackBinding
+		redirect string
+		caps     storage.Capabilities
+		refused  bool
 	}{
-		{"device-local over a device store", client.CallbackBindingDeviceLocalStore, storage.Capabilities{Durable: true, AtomicConsume: true}, false},
-		{"device-local over a shared store", client.CallbackBindingDeviceLocalStore, shared, true},
-		{"session handle over a shared store", client.CallbackBindingSessionHandle, shared, false},
+		{"device-local, loopback, device store", client.CallbackBindingDeviceLocalStore, loopback, device, false},
+		{"device-local, IPv6 loopback, device store", client.CallbackBindingDeviceLocalStore, loopback6, device, false},
+		{"device-local, private-use scheme, device store", client.CallbackBindingDeviceLocalStore, privateUse, device, false},
+		{"device-local, web redirect, single-instance store", client.CallbackBindingDeviceLocalStore, web, device, true},
+		{"device-local, private-use scheme, shared store", client.CallbackBindingDeviceLocalStore, privateUse, shared, true},
+		{"device-local, web redirect, shared store", client.CallbackBindingDeviceLocalStore, web, shared, true},
+		{"session handle, web redirect, shared store", client.CallbackBindingSessionHandle, web, shared, false},
+		{"session handle, web redirect, single-instance store", client.CallbackBindingSessionHandle, web, device, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := validConfig(t)
 			cfg.Assurance = client.AssuranceProduction
 			cfg.AuthorizationResponseIssPolicy = client.RequireAuthorizationResponseIss
 			cfg.CallbackBinding = tc.binding
+			cfg.RedirectURI = tc.redirect
 			deps := productionDeps(t)
 			deps.Sessions = assuringSessionStore{fakeSessionStore: newFakeSessionStore(), caps: tc.caps}
 			_, err := client.New(cfg, deps)

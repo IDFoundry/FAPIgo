@@ -155,9 +155,6 @@ func checkRefreshedIDToken(original TokenSet, refreshed IDTokenClaims) *Error {
 	return nil
 }
 
-// tokenSetIssuer is the issuer t came from: its Issuer, or, for a set
-// that doesn't record one (built by hand, or kept from before the field
-// existed), its ID token's verified iss; "" when it has neither.
 // grantedScope is a token response's scope: as it says, or, when it
 // omits "scope", the scope requested (RFC 6749 §5.1: scope is
 // "OPTIONAL, if identical to the scope requested by the client").
@@ -187,6 +184,9 @@ func (c *Client) checkTokenSetIssuer(t TokenSet) *Error {
 	return nil
 }
 
+// tokenSetIssuer is the issuer t came from: its Issuer, or, for a set
+// that doesn't record one (built by hand, or kept from before the field
+// existed), its ID token's verified iss; "" when it has neither.
 func tokenSetIssuer(t TokenSet) string {
 	if t.Issuer != "" {
 		return t.Issuer

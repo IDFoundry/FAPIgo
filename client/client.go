@@ -509,7 +509,8 @@ func validateDependencies(cfg Config, deps Dependencies) error {
 
 // validateProductionDependencies applies AssuranceProduction's checks to
 // deps: the sessions store's capabilities (and, under
-// CallbackBindingDeviceLocalStore, that it isn't shared), crypto/rand as the random
+// CallbackBindingDeviceLocalStore, that the client is a native app and
+// the store isn't shared), crypto/rand as the random
 // source, the custody of the keys deps.Keys and deps.Decryption hold, the
 // issuer key source's hardening, and deps.HTTP's. It reports every one that falls
 // short, joined (errors.Join), rather than only the first, so a
@@ -518,7 +519,7 @@ func validateProductionDependencies(cfg Config, deps Dependencies) error {
 	var errs []error
 	if deps.Sessions != nil {
 		errs = append(errs, checkStoreAssurance("sessions", deps.Sessions))
-		errs = append(errs, checkDeviceLocalSessions(cfg.CallbackBinding, deps.Sessions))
+		errs = append(errs, checkDeviceLocalSessions(cfg, deps.Sessions))
 	}
 	errs = append(errs, checkRandom(deps.Random))
 	if deps.Keys != nil {
@@ -629,20 +630,44 @@ func authenticatesWithCertificate(method storage.ClientAuthMethod) bool {
 	return false
 }
 
-// checkDeviceLocalSessions refuses CallbackBindingDeviceLocalStore over a
-// sessions store that declares CrossInstanceConsistent: one several
-// server instances share is a server-side store holding many user
-// agents' sessions, where finding a session by the callback's state
-// alone brings login CSRF back (RFC 9700 §4.7). A native app's own
-// on-device store has no other instance to be consistent with.
-func checkDeviceLocalSessions(binding CallbackBinding, sessions any) error {
-	if binding != CallbackBindingDeviceLocalStore {
+// checkDeviceLocalSessions refuses CallbackBindingDeviceLocalStore
+// anywhere but a native app: one whose Config.RedirectURI is loopback
+// http to an IP literal (RFC 8252 §7.3) or a private-use URI scheme
+// (§7.1), and whose sessions store doesn't declare
+// CrossInstanceConsistent, which only a store shared between instances
+// needs. A web client's https redirect means a server-side store holding
+// many user agents' sessions, single-instance or not, where finding a
+// session by the callback's state alone brings login CSRF back (RFC 9700
+// §4.7).
+func checkDeviceLocalSessions(cfg Config, sessions any) error {
+	if cfg.CallbackBinding != CallbackBindingDeviceLocalStore {
 		return nil
+	}
+	if !isNativeAppRedirectURI(cfg.RedirectURI) {
+		return fmt.Errorf("client: config: callback binding CallbackBindingDeviceLocalStore is for a native app, whose redirect URI is loopback http (http://127.0.0.1/… or http://[::1]/…) or a private-use URI scheme, but redirect_uri is neither: a web client binds each callback to its browser with CallbackBindingSessionHandle (client/sessioncookie)")
 	}
 	if asserter, ok := sessions.(storage.StoreAssurance); ok && asserter.Capabilities().CrossInstanceConsistent {
 		return fmt.Errorf("client: config: callback binding CallbackBindingDeviceLocalStore is for a native app's own on-device sessions store, but sessions declares CrossInstanceConsistent, which only a store shared between instances needs: use CallbackBindingSessionHandle")
 	}
 	return nil
+}
+
+// isNativeAppRedirectURI reports whether redirectURI is one only a native
+// app receives: loopback http to the IP literal 127.0.0.1 or [::1] (RFC
+// 8252 §7.3), or a private-use URI scheme (§7.1) — neither http nor
+// https. validateRedirectURI has already parsed it.
+func isNativeAppRedirectURI(redirectURI string) bool {
+	u, err := url.Parse(redirectURI)
+	if err != nil || redirectURI == "" {
+		return false
+	}
+	switch u.Scheme {
+	case "https":
+		return false
+	case "http":
+		return u.Hostname() == "127.0.0.1" || u.Hostname() == "::1"
+	}
+	return true
 }
 
 // checkScopeTokens refuses a Scope element that isn't one scope-token

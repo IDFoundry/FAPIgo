@@ -138,9 +138,10 @@
 //     pass it back.
 //   - Tokens. Keep them between launches sealed, with a TokenSetSealer.
 //     When the app no longer needs a refresh token, call RevokeToken
-//     before deleting the key it is bound to, so the server ends the
-//     grant too; ErrorRevocationNotSupported means the server offers no
-//     revocation endpoint, and the token can only be forgotten.
+//     with its TokenSet before deleting the key it is bound to, so the
+//     server ends the grant too; ErrorRevocationNotSupported means the
+//     server offers no revocation endpoint, and the token can only be
+//     forgotten.
 //   - Errors. Error() may include text the authorization server wrote.
 //     An app that hands errors to platform code — gomobile turns a Go
 //     error into an NSError with Error() as its message — should map an

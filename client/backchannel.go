@@ -367,7 +367,7 @@ func (c *Client) sendBackchannelAuthenticationRequest(ctx context.Context, dpopS
 	if err != nil {
 		return nil, newError(ErrorInternal, errBackchannelAuthenticationRequestFailed, err)
 	}
-	c.cacheDPoPNonce(ctx, c.asNonceScope(), header.Get(dpopNonceHeader))
+	c.recordASDPoPNonce(ctx, status, header, body)
 	if status == http.StatusOK {
 		return body, nil
 	}
@@ -383,7 +383,7 @@ func (c *Client) sendBackchannelAuthenticationRequest(ctx context.Context, dpopS
 	if err != nil {
 		return nil, newError(ErrorInternal, errBackchannelAuthenticationRequestFailed, err)
 	}
-	c.cacheDPoPNonce(ctx, c.asNonceScope(), header.Get(dpopNonceHeader))
+	c.recordASDPoPNonce(ctx, status, header, body)
 	if status != http.StatusOK {
 		return nil, parErrorFromResponse(status, header, body)
 	}
@@ -607,7 +607,7 @@ func (c *Client) pollBackchannelAuthenticationOnce(ctx context.Context, dpopSign
 	if err != nil {
 		return nil, 0, nil, newError(ErrorInternal, errTokenRequestFailed, err)
 	}
-	c.cacheDPoPNonce(ctx, c.asNonceScope(), header.Get(dpopNonceHeader))
+	c.recordASDPoPNonce(ctx, status, header, body)
 	retryNonce, retry := challengeRetry(header, body, nonce)
 	if status == http.StatusOK || !retry {
 		return body, status, header, nil
@@ -620,7 +620,7 @@ func (c *Client) pollBackchannelAuthenticationOnce(ctx context.Context, dpopSign
 	if err != nil {
 		return nil, 0, nil, newError(ErrorInternal, errTokenRequestFailed, err)
 	}
-	c.cacheDPoPNonce(ctx, c.asNonceScope(), header.Get(dpopNonceHeader))
+	c.recordASDPoPNonce(ctx, status, header, body)
 	return body, status, header, nil
 }
 

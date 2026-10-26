@@ -82,11 +82,12 @@ type TokenSet struct {
 
 	// Issuer is the authorization server these tokens came from: this
 	// client's Config.Issuer when it obtained them, and the issuer
-	// TokenSetSealer.Open binds a sealed set to. RefreshTokens refuses
-	// a set whose Issuer isn't this client's, so one issuer's refresh
-	// token is never sent to another's token endpoint. A set built by
-	// hand must set it; one without it falls back to its ID token's
-	// verified iss, and is refused if it has no ID token either.
+	// TokenSetSealer.Open binds a sealed set to. RefreshTokens and
+	// RevokeToken refuse a set whose Issuer isn't this client's, so one
+	// issuer's refresh token is never sent to another's endpoints. A
+	// set built by hand must set it; one without it falls back to its ID
+	// token's verified iss, and is refused if it has no ID token either
+	// (TokenSetSealer.Seal refuses it too).
 	Issuer string
 
 	// Resource is the resource indicators (RFC 8707) these tokens were
@@ -216,7 +217,16 @@ func (c IDTokenClaims) AsMap() map[string]any {
 // ErrorInvalidResponse. When it carried EssentialACRValues, the ID
 // token's acr must be one of them, or it fails with
 // ErrorInvalidResponse too.
+//
+// resp must come from this Client's own HandleAuthorizationResponse: one
+// another Client validated (an application with one Client per issuer
+// that routes a callback's exchange to the wrong one), or the zero value,
+// fails with ErrorInvalidRequest, so another issuer's code and PKCE
+// verifier never reach this issuer's token endpoint.
 func (c *Client) ExchangeCode(ctx context.Context, resp ValidatedAuthorizationResponse) (TokenSet, error) {
+	if resp.issuer != c.cfg.Issuer.String() || resp.clientID != c.cfg.ClientID.String() {
+		return TokenSet{}, newError(ErrorInvalidRequest, "the authorization response was validated by a client for a different issuer or client ID", nil)
+	}
 	assertionSigner, assertionKID, dpopSigner, err := c.resolveClientAuthAndDPoPSigners(ctx)
 	if err != nil {
 		return TokenSet{}, newError(ErrorInternal, "failed to resolve signing keys", err)
@@ -396,7 +406,7 @@ func (c *Client) sendTokenRequest(ctx context.Context, dpopSigner crypto.Signer,
 	if err != nil {
 		return nil, newError(ErrorInternal, errTokenRequestFailed, err)
 	}
-	c.cacheDPoPNonce(ctx, c.asNonceScope(), header.Get(dpopNonceHeader))
+	c.recordASDPoPNonce(ctx, status, header, body)
 	if status == http.StatusOK {
 		return body, nil
 	}
@@ -413,7 +423,7 @@ func (c *Client) sendTokenRequest(ctx context.Context, dpopSigner crypto.Signer,
 	if err != nil {
 		return nil, newError(ErrorInternal, errTokenRequestFailed, err)
 	}
-	c.cacheDPoPNonce(ctx, c.asNonceScope(), header.Get(dpopNonceHeader))
+	c.recordASDPoPNonce(ctx, status, header, body)
 	if status != http.StatusOK {
 		return nil, parErrorFromResponse(status, header, body)
 	}

@@ -136,6 +136,13 @@ type AuthorizationContext struct {
 	// ResolvedAccessToken.Key), exposed for a caller's own audit
 	// logging — it's already available at this point (see
 	// Dependencies.Revocation), so surfacing it costs nothing.
+	//
+	// It identifies one access token, not the grant behind it: every
+	// refresh issues a new access token, with a new Key, carrying the
+	// same scope and authorization_details. Something the user approved
+	// once — one payment, say — is spent per grant, by CodeGrantID (or
+	// GrantID), never by Key, or a client allowed to refresh spends it
+	// once per refresh.
 	Key string
 
 	// Issuer, Audience and IssuedAt mirror ResolvedAccessToken's own
@@ -157,6 +164,50 @@ type AuthorizationContext struct {
 	// usedDPoP records that the request presented its token with the
 	// DPoP scheme, so NewInsufficientScopeError can answer in kind.
 	usedDPoP bool
+}
+
+// GrantID is the grant ID the authorization server's application named
+// when it authorized the grant (server.GrantedAuthorization.GrantID),
+// from the token's "grant_id" claim: the same for every access token
+// issued from the grant, refreshed ones included. It is "" when the
+// application named none. The application chooses it, so it is unique
+// only among one issuer's grants, and only as unique as the application
+// makes it.
+func (a AuthorizationContext) GrantID() string {
+	return stringClaim(a.Claims, grantrevocation.Claim)
+}
+
+// CodeGrantID identifies the one authorization the access token was
+// issued from — an authorization code's exchange, or an approved CIBA
+// request — from the token's "code_grant_id" claim: the same for every
+// access token issued from it, refreshed ones included, and different
+// for every authorization, even of the same request by the same user.
+// That makes it the key for "one approval, one use": record it as used
+// (a storage.ReplayStore's UseOnce, with Issuer in the digest when this
+// verifier accepts more than one issuer's tokens) for as long as the
+// grant can still issue tokens — the server's RefreshTokenLifetime plus
+// AccessTokenLifetime and MaxClockSkew, not just this token's
+// ExpiresAt.
+//
+// It is "" for a token from a grant that has none: a client credentials
+// token, a token from a grant the embedder issued itself
+// (Server.IssueAccessToken, Server.IssueRefreshToken), and any token
+// from a server whose Dependencies.Revocation is server.NoRevocation,
+// which derives none. Refuse a single-use operation then, rather than
+// falling back to Key.
+func (a AuthorizationContext) CodeGrantID() string {
+	return stringClaim(a.Claims, grantrevocation.CodeClaim)
+}
+
+// stringClaim is claims[name] as a string, or "" when it is absent or
+// not a string. Verify has already refused a malformed grant_id or
+// code_grant_id.
+func stringClaim(claims map[string]json.RawMessage, name string) string {
+	var v string
+	if raw, ok := claims[name]; !ok || json.Unmarshal(raw, &v) != nil {
+		return ""
+	}
+	return v
 }
 
 // Verify checks req's Authorization header and its sender-constraining

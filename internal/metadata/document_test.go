@@ -270,6 +270,14 @@ func TestParseAndValidateRejectsEmptyExpectedIssuer(t *testing.T) {
 	}
 }
 
+func TestParseAndValidateRejectsTrailingData(t *testing.T) {
+	body := append(validDocumentJSON(t, "https://as.example.com"), []byte(` {}`)...)
+	_, err := metadata.ParseAndValidate(body, "https://as.example.com")
+	if !errors.Is(err, metadata.ErrMalformed) || !strings.Contains(err.Error(), "after the top-level") {
+		t.Fatalf("err = %v, want ErrMalformed trailing-data rejection", err)
+	}
+}
+
 func TestParseAndValidateRejectsCaseVariantMemberNames(t *testing.T) {
 	body := []byte(strings.Replace(string(validDocumentJSON(t, "https://as.example.com")), `"issuer"`, `"Issuer"`, 1))
 	_, err := metadata.ParseAndValidate(body, "https://as.example.com")

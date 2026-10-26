@@ -11,12 +11,19 @@
 // before delegating to encoding/json. Exact names, and members matching
 // no field at all, are left to encoding/json's own rules (and a
 // Decoder's DisallowUnknownFields, where a caller uses one).
+//
+// The checks also reject a second top-level value after the first: a
+// json.Decoder stops after one value, so without that a caller decoding
+// with one would read {"ALG":"none"} {} case-insensitively once the
+// check had skipped what json.Unmarshal can't parse.
 package strictjson
 
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"strings"
 	"unicode"
@@ -32,13 +39,16 @@ func Unmarshal(data []byte, v any) error {
 
 // CheckFieldCase reports an error if data contains, at any depth, an
 // object member whose name matches a field of v's type (its json tag, or
-// its Go name when untagged) only case-insensitively. It does not
-// otherwise validate data; malformed JSON is left for the decode that
-// follows to reject.
+// its Go name when untagged) only case-insensitively, or anything but
+// whitespace after its first JSON value. It does not otherwise validate
+// data; malformed JSON is left for the decode that follows to reject.
 func CheckFieldCase(data []byte, v any) error {
 	t := reflect.TypeOf(v)
 	if t == nil {
 		return nil
+	}
+	if err := checkSingleValue(data); err != nil {
+		return err
 	}
 	return check(data, t, false)
 }
@@ -53,7 +63,28 @@ func CheckTaggedFieldCase(data []byte, v any) error {
 	if t == nil {
 		return nil
 	}
+	if err := checkSingleValue(data); err != nil {
+		return err
+	}
 	return check(data, t, true)
+}
+
+// errTrailingData reports data after the first top-level JSON value.
+var errTrailingData = errors.New("strictjson: data after the top-level JSON value")
+
+// checkSingleValue reports errTrailingData if anything but whitespace
+// follows data's first JSON value. A first value that doesn't parse is
+// left for the decode that follows to reject.
+func checkSingleValue(data []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	var first json.RawMessage
+	if dec.Decode(&first) != nil {
+		return nil
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return errTrailingData
+	}
+	return nil
 }
 
 // FoldKey maps name to one spelling shared by every name it equals under

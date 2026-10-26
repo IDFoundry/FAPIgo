@@ -3,6 +3,7 @@ package strictjson
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -42,6 +43,36 @@ func FuzzUnmarshalMatchesCaseSensitiveReading(f *testing.F) {
 		}
 		if !reflect.DeepEqual(h, want) {
 			t.Fatalf("Unmarshal(%q) = %+v, case-sensitive reading = %+v", doc, h, want)
+		}
+	})
+}
+
+// FuzzCheckFieldCaseThenDecode is FuzzUnmarshalMatchesCaseSensitiveReading
+// for the callers that check with CheckFieldCase and then decode with a
+// json.Decoder, which, unlike json.Unmarshal, stops after the first
+// value: whatever the two accept is one JSON value, read as a
+// case-sensitive reader reads it.
+func FuzzCheckFieldCaseThenDecode(f *testing.F) {
+	for _, s := range []string{
+		`{"alg":"ES256","kid":"a"}`, `{"ALG":"none"} {}`, `{"alg":"PS256","kid":"a","ALG":"ES256","KID":"b"}"x"`,
+		`{"alg":"ES256"} 1`, `{"cnf":{"JKT":"x"}} []`, `{"alg":"ES256"}}`,
+	} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, doc string) {
+		var h fuzzHeader
+		if CheckFieldCase([]byte(doc), &h) != nil {
+			return
+		}
+		if json.NewDecoder(strings.NewReader(doc)).Decode(&h) != nil {
+			return
+		}
+		want, ok := readHeaderCaseSensitively(doc)
+		if !ok {
+			t.Fatalf("CheckFieldCase and Decode accepted %q, which isn't one JSON object", doc)
+		}
+		if !reflect.DeepEqual(h, want) {
+			t.Fatalf("Decode(%q) = %+v, case-sensitive reading = %+v", doc, h, want)
 		}
 	})
 }

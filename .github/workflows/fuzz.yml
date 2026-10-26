@@ -171,6 +171,8 @@ jobs:
             name: FuzzStrictMatchesCanonical
           - pkg: ./internal/strictjson
             name: FuzzUnmarshalMatchesCaseSensitiveReading
+          - pkg: ./internal/strictjson
+            name: FuzzCheckFieldCaseThenDecode
           - pkg: ./extension
             name: FuzzExtensionValueReadersAgree
           - pkg: ./internal/sealedcookie

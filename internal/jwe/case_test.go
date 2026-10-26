@@ -11,3 +11,10 @@ func TestParseHeaderRejectsCaseVariantMemberNames(t *testing.T) {
 		t.Fatalf("err = %v, want case-sensitivity rejection", err)
 	}
 }
+
+func TestParseHeaderRejectsTrailingData(t *testing.T) {
+	_, err := parseHeader([]byte(`{"alg":"RSA-OAEP-256","ENC":"A256GCM"} {}`))
+	if err == nil || !strings.Contains(err.Error(), "after the top-level") {
+		t.Fatalf("err = %v, want trailing-data rejection", err)
+	}
+}

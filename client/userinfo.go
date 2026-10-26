@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/internal/jwe"
 	"github.com/idfoundry/fapigo/internal/numericdate"
 	"github.com/idfoundry/fapigo/keys"
@@ -195,14 +196,20 @@ func (c *Client) decryptUserInfoJWE(ctx context.Context, raw string) (string, *E
 }
 
 func (c *Client) verifyUserInfoJWS(ctx context.Context, raw string) (map[string]json.RawMessage, *Error) {
-	payload, err := c.VerifyIssuerJWS(ctx, raw)
+	parsed, err := c.verifyIssuerJWS(ctx, raw)
 	if err != nil {
 		if cerr, ok := err.(*Error); ok {
 			return nil, cerr
 		}
 		return nil, newError(ErrorInvalidResponse, "UserInfo response verification failed", err)
 	}
-	claims, decErr := decodeUserInfoJSON(payload)
+	// A UserInfo response's typ is optional, but one that says it is
+	// another kind of JWT — an access token signed with the same key,
+	// say — isn't taken for one (RFC 8725 §3.11).
+	if err := jose.RefuseOtherExplicitType(parsed.Header.Type); err != nil {
+		return nil, newError(ErrorInvalidResponse, "UserInfo response is another kind of JWT", err)
+	}
+	claims, decErr := decodeUserInfoJSON(parsed.Payload)
 	if decErr != nil {
 		return nil, decErr
 	}

@@ -1,6 +1,7 @@
 package requestobject
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -89,7 +90,7 @@ func parseClaims(payload []byte) (Claims, error) {
 	if err != nil {
 		return Claims{}, err
 	}
-	iat, hasIat, err := popInt64(raw, "iat", false)
+	iat, hasIat, err := popIssuedAt(raw)
 	if err != nil {
 		return Claims{}, err
 	}
@@ -196,4 +197,23 @@ func popInt64(m map[string]json.RawMessage, key string, required bool) (value in
 		return 0, false, fmt.Errorf("%w: %q must be a NumericDate (a JSON number)", ErrMalformedClaims, key)
 	}
 	return n, true, nil
+}
+
+// popIssuedAt is popInt64 for "iat", where presence matters
+// (VerifyPolicy.RequireIssuedAt): null counts as absent rather than as
+// the epoch, and a value at or before the epoch is refused, so neither
+// can stand in for a real issue time.
+func popIssuedAt(m map[string]json.RawMessage) (value int64, present bool, err error) {
+	if raw, ok := m["iat"]; ok && string(bytes.Trim(raw, " \t\n\r")) == "null" {
+		delete(m, "iat")
+		return 0, false, nil
+	}
+	iat, present, err := popInt64(m, "iat", false)
+	if err != nil {
+		return 0, false, err
+	}
+	if present && iat <= 0 {
+		return 0, false, fmt.Errorf("%w: \"iat\" must be after the epoch", ErrMalformedClaims)
+	}
+	return iat, present, nil
 }

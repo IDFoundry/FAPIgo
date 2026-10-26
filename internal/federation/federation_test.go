@@ -924,6 +924,12 @@ func TestCreateRefusesPrivateKeyMembers(t *testing.T) {
 	if _, err := Create(params); !errors.Is(err, ErrMalformedJWKS) {
 		t.Errorf("Create(jwks with d) = %v, want ErrMalformedJWKS", err)
 	}
+	for _, member := range []string{"D", "Qi", "DP"} {
+		params.JWKS = json.RawMessage(`{"keys":[{"kty":"EC","crv":"P-256","kid":"k","x":"AAAA","y":"AAAA","` + member + `":"secret"}]}`)
+		if _, err := Create(params); !errors.Is(err, ErrMalformedJWKS) {
+			t.Errorf("Create(jwks with %s) = %v, want ErrMalformedJWKS", member, err)
+		}
+	}
 
 	params = entityConfigParams(t, key, "https://ta.example.org", now)
 	params.AuthorityHints = nil

@@ -133,6 +133,48 @@ func TestFetchUserInfoVerifiesSignedJWTResponse(t *testing.T) {
 	}
 }
 
+// A signed UserInfo response whose typ names another explicitly typed
+// kind of JWT — a JWT access token signed with the same key — is
+// refused; a generic "JWT" isn't. VerifyIssuerJWS, which verifies any
+// kind of issuer-signed JWS, doesn't look at typ.
+func TestFetchUserInfoRefusesOtherExplicitType(t *testing.T) {
+	userInfoKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate userinfo key: %v", err)
+	}
+	payload, err := json.Marshal(map[string]any{"sub": userInfoTestSubject, "iss": testIssuer, "aud": testClientID})
+	if err != nil {
+		t.Fatalf("marshal claims: %v", err)
+	}
+	var typ string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		compact, err := jose.Sign(userInfoKey, jose.Header{Algorithm: fapi.ES256, KeyID: "userinfo-kid", Type: typ}, payload)
+		if err != nil {
+			t.Errorf("jose.Sign: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/jwt")
+		_, _ = w.Write([]byte(compact))
+	}))
+	defer ts.Close()
+	c := newUserInfoTestClient(t, ts, &userInfoKey.PublicKey, nil, nil)
+
+	typ = "at+jwt"
+	if _, err := c.FetchUserInfo(context.Background(), userInfoTestTokens()); err == nil {
+		t.Fatal("FetchUserInfo(typ at+jwt) = nil error, want refusal")
+	}
+	compact, err := jose.Sign(userInfoKey, jose.Header{Algorithm: fapi.ES256, KeyID: "userinfo-kid", Type: typ}, payload)
+	if err != nil {
+		t.Fatalf("jose.Sign: %v", err)
+	}
+	if _, err := c.VerifyIssuerJWS(context.Background(), compact); err != nil {
+		t.Fatalf("VerifyIssuerJWS(typ at+jwt): %v", err)
+	}
+	typ = "JWT"
+	if _, err := c.FetchUserInfo(context.Background(), userInfoTestTokens()); err != nil {
+		t.Fatalf("FetchUserInfo(typ JWT): %v", err)
+	}
+}
+
 // newSignedUserInfoTestClient starts a test server that always returns
 // the given claims as a signed UserInfo JWT, and a client configured
 // to verify it — a shared setup for the checkUserInfoJWTClaims defense-

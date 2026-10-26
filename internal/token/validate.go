@@ -404,6 +404,11 @@ func (t IDToken) Validate(pub crypto.PublicKey, policy IDTokenValidatePolicy) (V
 	if policy.Now.Sub(c.IssuedAt) > policy.MaxLifetime {
 		return ValidatedIDToken{}, ErrIssuedAtTooOld
 	}
+	// ...and how far it may sit in the future: no further than the
+	// issuer's clock may run ahead, as for an access token's iat.
+	if c.IssuedAt.After(policy.Now.Add(policy.MaxClockSkew)) {
+		return ValidatedIDToken{}, ErrIssuedInFuture
+	}
 	if err := checkAuthTime(c.AuthTime, policy); err != nil {
 		return ValidatedIDToken{}, err
 	}

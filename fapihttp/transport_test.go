@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -181,5 +182,43 @@ func TestNewClientVerifyConnection(t *testing.T) {
 				t.Errorf("hook ran %d times with %d verified chains, want once with some", calls, chains)
 			}
 		})
+	}
+}
+
+// TestNewClientBoundsResponseHeaders: a response whose headers exceed
+// 256 KiB fails rather than being read into memory whole; one just under
+// it is read.
+func TestNewClientBoundsResponseHeaders(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		size := 300 << 10
+		if r.URL.Path == "/small" {
+			size = 200 << 10
+		}
+		w.Header().Set("X-Large", strings.Repeat("a", size))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+	cfg := validTransportConfig()
+	cfg.AllowLoopbackHTTP = true
+	client, err := fapihttp.NewClient(cfg)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	get := func(path string) error {
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, ts.URL+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := client.Do(req)
+		if err == nil {
+			_ = res.Body.Close()
+		}
+		return err
+	}
+	if err := get("/small"); err != nil {
+		t.Errorf("200 KiB of headers: %v", err)
+	}
+	if err := get("/large"); err == nil {
+		t.Error("300 KiB of headers: nil error, want the response refused")
 	}
 }

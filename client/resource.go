@@ -97,8 +97,9 @@ func (c *Client) ClientCredentialsResource(result ClientCredentialsTokenResult) 
 // fapihttp.FetchResponse.Header). It saves the first request's
 // use_dpop_nonce challenge. A nonce is a hint, not a credential: a wrong
 // or stale one costs only the challenge and retry Do already handles.
-// It does nothing under SenderConstrainMTLS, for an empty nonce, or for
-// a ResourceClient whose every Do fails (see ProtectedResource).
+// It does nothing under SenderConstrainMTLS, for a nonce that isn't RFC
+// 9449 §8.1's 1*NQCHAR or is over 1024 bytes, or for a ResourceClient
+// whose every Do fails (see ProtectedResource).
 func (rc *ResourceClient) UseDPoPNonce(ctx context.Context, resource *url.URL, nonce string) {
 	if rc.err != nil || resource == nil || rc.client.cfg.SenderConstrain != storage.SenderConstrainDPoP {
 		return
@@ -195,7 +196,7 @@ func (rc *ResourceClient) Do(ctx context.Context, req *http.Request) (*http.Resp
 				return nil, newError(ErrorInternal, errProtectedResourceRequestFailed, err)
 			}
 		}
-		c.cacheDPoPNonce(ctx, scope, res.Header.Get(dpopNonceHeader))
+		c.recordDPoPNonce(ctx, scope, res.StatusCode, res.Header, isResourceDPoPNonceChallenge(res.StatusCode, res.Header))
 	}
 
 	bounded, err := boundResponseBody(res, c.cfg.Limits.MaxHTTPResponseBytes)
@@ -303,7 +304,7 @@ func checkResourceURL(assurance AssuranceLevel, u *url.URL) error {
 // isResourceDPoPNonceChallenge reports whether status/header is a
 // protected resource's RFC 9449 §9 nonce challenge.
 func isResourceDPoPNonceChallenge(status int, header http.Header) bool {
-	if status != http.StatusUnauthorized || header.Get(dpopNonceHeader) == "" {
+	if status != http.StatusUnauthorized || !validDPoPNonce(header.Get(dpopNonceHeader)) {
 		return false
 	}
 	challenge, ok, err := authchallenge.Find(header.Values("WWW-Authenticate"), "DPoP")

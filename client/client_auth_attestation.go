@@ -166,17 +166,16 @@ func isAttestationChallengeError(header http.Header, body []byte) bool {
 // for an attestation challenge, the server's newest or else nonce, the
 // one the failed request carried.
 func challengeRetry(header http.Header, body []byte, nonce string) (string, bool) {
-	next := header.Get(dpopNonceHeader)
-	if next != "" && isDPoPNonceError(body) {
-		return next, true
+	if isASDPoPNonceChallenge(header, body) {
+		return header.Get(dpopNonceHeader), true
 	}
 	if !isAttestationChallengeError(header, body) {
 		return "", false
 	}
-	if next == "" {
-		next = nonce
+	if next := header.Get(dpopNonceHeader); validDPoPNonce(next) {
+		return next, true
 	}
-	return next, true
+	return nonce, true
 }
 
 // postFormWithAttestationChallenge posts form, and once more as rebuild

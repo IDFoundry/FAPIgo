@@ -393,6 +393,32 @@ trailing slashes and query strings are unaffected, as is
 server returned, `url.URL.ResolveReference` removes dot segments), and
 don't percent-encode unreserved characters.
 
+### DPoP nonces are bounded, and forgotten after a refused request (client, fapihttp)
+
+Not a breaking change to an API: it's here for a custom
+`DPoPNonceCache`, and for a server sending very large headers.
+
+**Affects:** a `client.Dependencies.DPoPNonceCache` of your own, and a
+`fapihttp.NewClient` transport talking to a server whose response
+headers exceed 256 KiB.
+
+**Why:** the client cached any `DPoP-Nonce` header, of any size, from
+any response, per origin, and presented it on every later request there.
+Another resource on the same origin could hand out a nonce large enough
+that the honest resource server refused every request as too large
+(431), never answering with the challenge that would replace it.
+
+**What fails:** nothing that worked before. The client now caches a
+nonce only from a successful response or a `use_dpop_nonce` challenge,
+and only one of RFC 9449's syntax (`1*NQCHAR`) of at most 1024 bytes;
+after any other 4xx it calls `DPoPNonceCache.Set` with an empty nonce to
+forget the origin's. `fapihttp.NewClient`'s transport refuses a response
+whose headers exceed 256 KiB (net/http's default is 10 MiB).
+
+**What to change:** a custom `DPoPNonceCache` treats `Set` with `""` as
+forgetting the scope's nonce (storing `""` works too: the client ignores
+an empty or malformed cached value).
+
 ## v0.58.0
 
 ### Automatic registration skips `tls_client_auth` unless chains are verified (server)

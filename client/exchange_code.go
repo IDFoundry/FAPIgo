@@ -406,7 +406,7 @@ func (c *Client) sendTokenRequest(ctx context.Context, dpopSigner crypto.Signer,
 	if err != nil {
 		return nil, newError(ErrorInternal, errTokenRequestFailed, err)
 	}
-	c.cacheDPoPNonce(ctx, c.asNonceScope(), header.Get(dpopNonceHeader))
+	c.recordASDPoPNonce(ctx, status, header, body)
 	if status == http.StatusOK {
 		return body, nil
 	}
@@ -423,7 +423,7 @@ func (c *Client) sendTokenRequest(ctx context.Context, dpopSigner crypto.Signer,
 	if err != nil {
 		return nil, newError(ErrorInternal, errTokenRequestFailed, err)
 	}
-	c.cacheDPoPNonce(ctx, c.asNonceScope(), header.Get(dpopNonceHeader))
+	c.recordASDPoPNonce(ctx, status, header, body)
 	if status != http.StatusOK {
 		return nil, parErrorFromResponse(status, header, body)
 	}

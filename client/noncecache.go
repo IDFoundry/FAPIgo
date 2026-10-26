@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"net/http"
 	"net/url"
 	"sync"
 )
@@ -43,10 +44,15 @@ type DPoPNonceCache interface {
 	// found at all.
 	Get(ctx context.Context, scope string) (nonce string, ok bool)
 
-	// Set replaces the cached nonce for scope. Called with whatever a
-	// response's own "DPoP-Nonce" header carried, regardless of that
-	// response's status — a server may send one on an unrelated error,
-	// or on success, purely to pre-seed the caller's next request.
+	// Set replaces the cached nonce for scope, or, given "", forgets
+	// it. It's called with the "DPoP-Nonce" header of a successful
+	// response, which a server may send to pre-seed the caller's next
+	// request, or of a use_dpop_nonce challenge, and with a nonce passed
+	// to ResourceClient.UseDPoPNonce: only ever one of RFC 9449 §8.1's
+	// syntax (1*NQCHAR), at most 1024 bytes. It's called with "" after
+	// an error response that wasn't a challenge, so a nonce the server
+	// refused, or one that made the request too large to accept, isn't
+	// presented again.
 	Set(ctx context.Context, scope string, nonce string)
 }
 
@@ -75,30 +81,93 @@ func (c *InMemoryDPoPNonceCache) Get(_ context.Context, scope string) (string, b
 func (c *InMemoryDPoPNonceCache) Set(_ context.Context, scope string, nonce string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if nonce == "" {
+		delete(c.nonces, scope)
+		return
+	}
 	c.nonces[scope] = nonce
+}
+
+// maxDPoPNonceLength bounds a DPoP nonce this client caches or presents.
+// RFC 9449 sets no limit; package server issues 43 characters (32 random bytes,
+// base64url), and anything near this bound is already an unusual
+// header. Without one, a server could hand out a nonce large enough that
+// every later request to its origin is refused as too large (431),
+// never answered with the challenge that would replace it.
+const maxDPoPNonceLength = 1024
+
+// validDPoPNonce reports whether nonce has RFC 9449 §8.1's syntax,
+// 1*NQCHAR (NQCHAR = %x21 / %x23-5B / %x5D-7E), and is at most
+// maxDPoPNonceLength bytes.
+func validDPoPNonce(nonce string) bool {
+	if nonce == "" || len(nonce) > maxDPoPNonceLength {
+		return false
+	}
+	for i := 0; i < len(nonce); i++ {
+		if c := nonce[i]; c < 0x21 || c > 0x7e || c == '"' || c == '\\' {
+			return false
+		}
+	}
+	return true
 }
 
 // cachedDPoPNonce returns the nonce cached for scope, or "" if
 // Dependencies.DPoPNonceCache is nil or has none — the same value every
 // nonce-aware call site used unconditionally before this cache existed.
+// A cached value that isn't a valid nonce (validDPoPNonce), from a cache
+// other clients write too, counts as none.
 func (c *Client) cachedDPoPNonce(ctx context.Context, scope string) string {
 	if c.deps.DPoPNonceCache == nil {
 		return ""
 	}
 	nonce, ok := c.deps.DPoPNonceCache.Get(ctx, scope)
-	if !ok {
+	if !ok || !validDPoPNonce(nonce) {
 		return ""
 	}
 	return nonce
 }
 
-// cacheDPoPNonce records nonce for scope, if both a cache is configured
-// and nonce is non-empty — a response with no "DPoP-Nonce" header
-// leaves whatever was cached before untouched, rather than overwriting
-// it with an empty value.
+// cacheDPoPNonce records nonce for scope, if a cache is configured and
+// nonce is a valid one (validDPoPNonce): an empty or malformed value
+// leaves whatever was cached before untouched.
 func (c *Client) cacheDPoPNonce(ctx context.Context, scope, nonce string) {
-	if c.deps.DPoPNonceCache == nil || nonce == "" {
+	if c.deps.DPoPNonceCache == nil || !validDPoPNonce(nonce) {
 		return
 	}
 	c.deps.DPoPNonceCache.Set(ctx, scope, nonce)
+}
+
+// recordDPoPNonce updates scope's cached nonce from a response: it
+// caches the response's nonce when the response succeeded (2xx) or is a
+// use_dpop_nonce challenge, and forgets scope's nonce after any other
+// 4xx, so a nonce that got a request refused — too large (431), or one
+// the server no longer accepts — isn't presented again. Any other
+// response, a challenge-less error from another path on the same origin
+// included, can't plant a nonce.
+func (c *Client) recordDPoPNonce(ctx context.Context, scope string, status int, header http.Header, challenge bool) {
+	if c.deps.DPoPNonceCache == nil {
+		return
+	}
+	switch {
+	case challenge || (status >= 200 && status < 300):
+		c.cacheDPoPNonce(ctx, scope, header.Get(dpopNonceHeader))
+	case status >= 400 && status < 500:
+		c.deps.DPoPNonceCache.Set(ctx, scope, "")
+	}
+}
+
+// recordASDPoPNonce is recordDPoPNonce for a response from the
+// authorization server's token, PAR or backchannel authentication
+// endpoint, whose nonce challenge is a use_dpop_nonce error (RFC 9449
+// §8).
+func (c *Client) recordASDPoPNonce(ctx context.Context, status int, header http.Header, body []byte) {
+	c.recordDPoPNonce(ctx, c.asNonceScope(), status, header, isASDPoPNonceChallenge(header, body))
+}
+
+// isASDPoPNonceChallenge reports whether an authorization server's
+// response is a nonce challenge: a use_dpop_nonce error with a valid
+// DPoP-Nonce header (RFC 9449 §8). The header alone isn't one: a server
+// may send it on any response.
+func isASDPoPNonceChallenge(header http.Header, body []byte) bool {
+	return validDPoPNonce(header.Get(dpopNonceHeader)) && isDPoPNonceError(body)
 }

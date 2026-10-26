@@ -74,6 +74,10 @@ func (c TransportConfig) AllowsLoopback() bool {
 	return c.AllowLoopbackHosts || c.AllowLoopbackHTTP || len(c.AllowedLoopbackHosts) > 0
 }
 
+// maxResponseHeaderBytes bounds a response's headers on NewClient's
+// transport (http.Transport.MaxResponseHeaderBytes).
+const maxResponseHeaderBytes = 256 << 10
+
 // NewClient builds an *http.Client whose Transport resolves each host
 // itself and validates every candidate address before dialing it —
 // rejecting loopback (unless the loopback fields permit the host), private, link-local,
@@ -99,6 +103,11 @@ func (c TransportConfig) AllowsLoopback() bool {
 // registered (see Transport.RegisterProtocol), so registering another
 // RoundTripper for either panics: one would send requests around the
 // dialer.
+//
+// A response whose headers exceed 256 KiB fails, where net/http's
+// default allows 10 MiB: a server's headers are read into memory whole,
+// and an authorization server, resource server or JWKS endpoint has no
+// need for more.
 //
 // NewClient returns the transport: the *http.Client that
 // client.Dependencies.HTTP takes directly, and that New wraps into a
@@ -141,7 +150,8 @@ func NewClient(cfg TransportConfig) (*http.Client, error) {
 			Certificates:         cfg.Certificates,
 			GetClientCertificate: cfg.GetClientCertificate,
 		},
-		ForceAttemptHTTP2: true,
+		ForceAttemptHTTP2:      true,
+		MaxResponseHeaderBytes: maxResponseHeaderBytes,
 	}
 	reserveSchemes(transport)
 	registerHardened(transport, cfg, dialer, verifier)

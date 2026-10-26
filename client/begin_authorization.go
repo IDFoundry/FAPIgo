@@ -444,7 +444,7 @@ func (c *Client) pushAuthorizationRequestWithDPoPProof(ctx context.Context, para
 	if err != nil {
 		return nil, newError(ErrorInternal, errPushedAuthorizationRequestFailed, err)
 	}
-	c.cacheDPoPNonce(ctx, c.asNonceScope(), header.Get(dpopNonceHeader))
+	c.recordASDPoPNonce(ctx, status, header, body)
 	if status == http.StatusCreated || status == http.StatusOK {
 		return body, nil
 	}
@@ -461,7 +461,7 @@ func (c *Client) pushAuthorizationRequestWithDPoPProof(ctx context.Context, para
 	if err != nil {
 		return nil, newError(ErrorInternal, errPushedAuthorizationRequestFailed, err)
 	}
-	c.cacheDPoPNonce(ctx, c.asNonceScope(), header.Get(dpopNonceHeader))
+	c.recordASDPoPNonce(ctx, status, header, body)
 	if status != http.StatusCreated && status != http.StatusOK {
 		return nil, parErrorFromResponse(status, header, body)
 	}

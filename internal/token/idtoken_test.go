@@ -60,8 +60,37 @@ func TestIDTokenRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
+	checkRoundTripIdentity(t, validated)
+	checkRoundTripAuthentication(t, validated, now)
+	if _, ok := validated.Parameters["custom_claim"]; !ok {
+		t.Fatalf("Parameters missing custom_claim")
+	}
+}
+
+// checkRoundTripIdentity checks the claims TestIDTokenRoundTrip's token
+// names its issuer, subject and audience with.
+func checkRoundTripIdentity(t *testing.T, validated ValidatedIDToken) {
+	t.Helper()
+	if validated.Issuer != "https://as.example" {
+		t.Fatalf("Issuer = %q, want %q", validated.Issuer, "https://as.example")
+	}
 	if validated.Subject != "user-1" {
 		t.Fatalf("Subject = %q, want %q", validated.Subject, "user-1")
+	}
+	if len(validated.Audience) != 1 || validated.Audience[0] != "client-123" {
+		t.Fatalf("Audience = %v, want [client-123]", validated.Audience)
+	}
+	if validated.AZP != "" {
+		t.Fatalf("AZP = %q, want empty (single-audience token)", validated.AZP)
+	}
+}
+
+// checkRoundTripAuthentication checks the claims TestIDTokenRoundTrip's
+// token describes the authentication with.
+func checkRoundTripAuthentication(t *testing.T, validated ValidatedIDToken, now time.Time) {
+	t.Helper()
+	if validated.Nonce != "opaque-nonce" {
+		t.Fatalf("Nonce = %q, want %q", validated.Nonce, "opaque-nonce")
 	}
 	if validated.ACR != "urn:mace:incommon:iap:silver" {
 		t.Fatalf("ACR = %q, want %q", validated.ACR, "urn:mace:incommon:iap:silver")
@@ -74,21 +103,6 @@ func TestIDTokenRoundTrip(t *testing.T) {
 	}
 	if validated.IssuedAt.Unix() != now.Unix() {
 		t.Fatalf("IssuedAt = %v, want %v", validated.IssuedAt, now)
-	}
-	if _, ok := validated.Parameters["custom_claim"]; !ok {
-		t.Fatalf("Parameters missing custom_claim")
-	}
-	if validated.Issuer != "https://as.example" {
-		t.Fatalf("Issuer = %q, want %q", validated.Issuer, "https://as.example")
-	}
-	if len(validated.Audience) != 1 || validated.Audience[0] != "client-123" {
-		t.Fatalf("Audience = %v, want [client-123]", validated.Audience)
-	}
-	if validated.Nonce != "opaque-nonce" {
-		t.Fatalf("Nonce = %q, want %q", validated.Nonce, "opaque-nonce")
-	}
-	if validated.AZP != "" {
-		t.Fatalf("AZP = %q, want empty (single-audience token)", validated.AZP)
 	}
 }
 

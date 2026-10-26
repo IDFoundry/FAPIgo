@@ -580,3 +580,24 @@ func TestParseClaimsToleratesArbitraryUnrecognizedMember(t *testing.T) {
 		t.Fatalf("Verify(unrecognized private claim) = %v, want nil", err)
 	}
 }
+
+// TestCreateProofRefusesAPathItWouldNormalize: the request goes out with
+// its path as written, so a proof for /rs-a/%2e%2e/rs-b/x, whose htu
+// names /rs-b/x, could reach RS-A through a front end routing by raw
+// path and be replayed at RS-B. CreateProof refuses to make one.
+func TestCreateProofRefusesAPathItWouldNormalize(t *testing.T) {
+	key := generateKey(t)
+	for _, raw := range []string{
+		"https://api.example/rs-a/%2e%2e/rs-b/payments",
+		"https://api.example/rs-a/../rs-b/payments",
+		"https://api.example/rs-b/%70ayments",
+	} {
+		_, err := CreateProof(ProofRequest{Signer: key, Algorithm: fapi.ES256, Method: "GET", URL: mustURL(t, raw), Now: time.Now()})
+		if !errors.Is(err, ErrURLNotNormal) {
+			t.Errorf("CreateProof(%q) = %v, want ErrURLNotNormal", raw, err)
+		}
+	}
+	if _, err := CreateProof(ProofRequest{Signer: key, Algorithm: fapi.ES256, Method: "GET", URL: mustURL(t, "https://api.example/rs-b/a%2Fb/?q=../x"), Now: time.Now()}); err != nil {
+		t.Errorf("CreateProof(normal path) = %v", err)
+	}
+}

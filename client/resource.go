@@ -12,6 +12,7 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/fapihttp"
 	"github.com/idfoundry/fapigo/internal/authchallenge"
+	"github.com/idfoundry/fapigo/internal/canonical"
 	"github.com/idfoundry/fapigo/internal/dpop"
 	"github.com/idfoundry/fapigo/internal/nofollow"
 	"github.com/idfoundry/fapigo/keys"
@@ -141,20 +142,24 @@ func (rc *ResourceClient) UseDPoPNonce(ctx context.Context, resource *url.URL, n
 // with fapihttp.ErrRedirectFollowed, and a request body is never sent
 // to the redirect's target.
 //
+// Under SenderConstrainDPoP, req's URL path must also be in normal form:
+// no "." or ".." segments and no percent-encoded unreserved characters
+// (such as %2e or %41), or Do fails with ErrorInvalidRequest, sending
+// nothing. The proof's htu names the normalized path (RFC 9449 §4.2) but
+// the request goes out with the path as written, so a front end that
+// routes by the raw path could deliver /rs-a/%2e%2e/rs-b/x to one
+// resource server with a proof another, /rs-b/x, would accept.
+// Percent-encoded reserved characters (%2F, say), a trailing slash and
+// a query string are all fine.
+//
 // req's body, if any, must be replayable — Do may send it twice under
 // SenderConstrainDPoP's own nonce retry — so req.GetBody must be set;
 // http.NewRequestWithContext sets it automatically for the body types
 // it accepts (e.g. *bytes.Reader, *strings.Reader). req's own context
 // is replaced with one bounded by Config.Limits.HTTPTimeout.
 func (rc *ResourceClient) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
-	if rc.err != nil {
-		return nil, rc.err
-	}
-	if req == nil {
-		return nil, newError(ErrorInvalidRequest, "request is nil", nil)
-	}
-	if err := checkResourceURL(rc.client.cfg.Assurance, req.URL); err != nil {
-		return nil, newError(ErrorInvalidRequest, "protected resource URL is not allowed", err)
+	if reqErr := rc.checkRequest(req); reqErr != nil {
+		return nil, reqErr
 	}
 	c := rc.client
 
@@ -198,6 +203,26 @@ func (rc *ResourceClient) Do(ctx context.Context, req *http.Request) (*http.Resp
 		return nil, newError(ErrorInvalidResponse, "protected resource response too large", err)
 	}
 	return bounded, nil
+}
+
+// checkRequest refuses what Do can before sending anything: a
+// ResourceClient whose every Do fails, a nil request, a URL
+// checkResourceURL refuses, and, under SenderConstrainDPoP, a URL path a
+// proof's htu would name differently (canonical.HasNormalPath).
+func (rc *ResourceClient) checkRequest(req *http.Request) *Error {
+	if rc.err != nil {
+		return rc.err
+	}
+	if req == nil {
+		return newError(ErrorInvalidRequest, "request is nil", nil)
+	}
+	if err := checkResourceURL(rc.client.cfg.Assurance, req.URL); err != nil {
+		return newError(ErrorInvalidRequest, "protected resource URL is not allowed", err)
+	}
+	if rc.client.cfg.SenderConstrain == storage.SenderConstrainDPoP && !canonical.HasNormalPath(req.URL) {
+		return newError(ErrorInvalidRequest, "protected resource URL path has dot segments or percent-encoded unreserved characters, which a DPoP proof's htu would name differently", nil)
+	}
+	return nil
 }
 
 // sendBearer performs req as a plain Bearer-scheme request under

@@ -368,6 +368,31 @@ assurance is unchanged.
 default, and passes the `SessionHandle` it kept with the browser
 (`client/sessioncookie`) as `AuthorizationCallback.Session`.
 
+### DPoP requests need a URL path in normal form (client)
+
+Not a breaking change to an API: it's here because a request that used
+to go out now fails.
+
+**Affects:** a client under `SenderConstrainDPoP` that sends
+`ResourceClient.Do` a URL whose path has `.` or `..` segments, or
+percent-encodes an unreserved character (`%2e`, `%41`, `%7E`).
+
+**Why:** a DPoP proof's `htu` names the path with those normalized away
+(RFC 9449 §4.2), but the request goes out with the path as written. A
+front end that routes by the raw path delivers `/rs-a/%2e%2e/rs-b/x` to
+the resource server at `/rs-a/`, carrying a token and proof the one at
+`/rs-b/` accepts: the first can replay them at the second.
+
+**What fails:** `Do` returns `ErrorInvalidRequest` before sending
+anything. A token, PAR or CIBA endpoint with such a path fails the same
+way, as an internal error. Percent-encoded reserved characters (`%2F`),
+trailing slashes and query strings are unaffected, as is
+`SenderConstrainMTLS`.
+
+**What to change:** resolve the path before sending (for a link a
+server returned, `url.URL.ResolveReference` removes dot segments), and
+don't percent-encode unreserved characters.
+
 ## v0.58.0
 
 ### Automatic registration skips `tls_client_auth` unless chains are verified (server)

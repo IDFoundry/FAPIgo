@@ -78,3 +78,41 @@ func TestRemoveDotSegments(t *testing.T) {
 		}
 	}
 }
+
+// TestHasNormalPath: a path URI would change (other than in the case of
+// a percent-encoding's hex digits) isn't normal, since a request sent
+// with it addresses a different path than its DPoP proof's htu names.
+func TestHasNormalPath(t *testing.T) {
+	for raw, want := range map[string]bool{
+		"https://rs.example/rs-b/payments":      true,
+		"https://rs.example":                    true,
+		"https://rs.example/":                   true,
+		"https://rs.example/a/":                 true,
+		"https://rs.example/a?x=../b&y=%2e":     true,
+		"https://rs.example/a%2Fb":              true,
+		"https://rs.example/a%2fb":              true,
+		"https://rs.example/caf%C3%A9":          true,
+		"https://rs.example/a/...":              true,
+		"https://rs.example/.well-known/x":      true,
+		"https://rs.example//double":            true,
+		"https://rs.example/rs-a/%2e%2e/rs-b/x": false,
+		"https://rs.example/rs-a/%2E%2E/rs-b/x": false,
+		"https://rs.example/rs-a/../rs-b/x":     false,
+		"https://rs.example/rs-a/./x":           false,
+		"https://rs.example/rs-a/..":            false,
+		"https://rs.example/%7Euser":            false,
+		"https://rs.example/%61":                false,
+		"https://rs.example/a/%2e":              false,
+	} {
+		u, err := url.Parse(raw)
+		if err != nil {
+			t.Fatalf("url.Parse(%q): %v", raw, err)
+		}
+		if got := HasNormalPath(u); got != want {
+			t.Errorf("HasNormalPath(%q) = %v, want %v", raw, got, want)
+		}
+	}
+	if HasNormalPath(&url.URL{Scheme: "https", Opaque: "//rs.example/a/../b"}) {
+		t.Error("HasNormalPath(opaque URL) = true, want false")
+	}
+}

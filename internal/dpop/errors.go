@@ -17,6 +17,12 @@ var (
 	// canonicalized target URI of the request it was presented with.
 	ErrURIMismatch = errors.New("dpop: htu does not match request URI")
 
+	// ErrURLNotNormal indicates CreateProof was asked for a proof for a
+	// URL whose path has dot segments or percent-encoded unreserved
+	// characters (see canonical.HasNormalPath): its htu would name
+	// another path than the one the request is sent to.
+	ErrURLNotNormal = errors.New("dpop: url path has dot segments or percent-encoded unreserved characters")
+
 	// ErrIssuedInFuture indicates the proof's "iat" claim is further in
 	// the future than the configured clock-skew tolerance allows.
 	ErrIssuedInFuture = errors.New("dpop: iat is in the future")

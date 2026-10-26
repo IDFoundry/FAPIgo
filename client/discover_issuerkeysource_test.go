@@ -81,6 +81,14 @@ func TestDiscoveredMetadataIssuerKeySourceResolvesRealKey(t *testing.T) {
 	if !ok || !pub.Equal(&priv.PublicKey) {
 		t.Fatalf("resolved public key does not match the issuer's own key")
 	}
+
+	// The source is bound to the discovered issuer: a client of another
+	// issuer sharing it is refused this issuer's keys.
+	if _, err := src.ResolveIssuerKeys(context.Background(), keys.IssuerKeyRequest{
+		Issuer: "https://other.example.com", Purpose: keys.IDTokenVerification, Algorithm: fapi.ES256,
+	}); err == nil {
+		t.Fatal("ResolveIssuerKeys(other issuer) = nil error, want refusal")
+	}
 }
 
 func TestDiscoveredMetadataIssuerKeySourceRejectsNilFetcher(t *testing.T) {

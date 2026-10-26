@@ -41,6 +41,7 @@ type JWKSIssuerKeySource struct {
 	cacheTTL           time.Duration
 	minRefreshInterval time.Duration
 	refreshBackoff     time.Duration
+	issuer             string // "" when no WithIssuer
 	now                func() time.Time
 
 	mu               sync.Mutex
@@ -93,6 +94,17 @@ func WithMinRefreshInterval(d time.Duration) JWKSOption {
 // unknown-kid forced-refresh path.
 func WithRefreshBackoff(d time.Duration) JWKSOption {
 	return func(s *JWKSIssuerKeySource) { s.refreshBackoff = d }
+}
+
+// WithIssuer binds the source to the issuer whose JWKS it fetches:
+// ResolveIssuerKeys then refuses a request naming any other issuer,
+// before fetching, as LocalIssuerKeys does, so one source shared by
+// mistake between clients (or verifiers) of different issuers can't
+// hand one issuer's keys to a check of another's. Without it the source
+// can't tell, and serves whatever its JWKS URI holds for any issuer.
+// DiscoveredMetadata.IssuerKeySource in package client sets it.
+func WithIssuer(issuer fapi.URL) JWKSOption {
+	return func(s *JWKSIssuerKeySource) { s.issuer = issuer.String() }
 }
 
 // NewJWKSIssuerKeySource returns a JWKSIssuerKeySource fetching from
@@ -149,8 +161,12 @@ func (s *JWKSIssuerKeySource) Capabilities() KeySourceCapabilities {
 // minRefreshInterval and single-flighted, so an unauthenticated caller
 // cannot force unbounded concurrent upstream fetches by sending
 // requests with unknown kids (req.KeyID is taken from the unverified
-// token header, so it is attacker-controlled).
+// token header, so it is attacker-controlled). With WithIssuer, a
+// request for another issuer is refused.
 func (s *JWKSIssuerKeySource) ResolveIssuerKeys(ctx context.Context, req IssuerKeyRequest) (IssuerKeySet, error) {
+	if s.issuer != "" && req.Issuer != s.issuer {
+		return IssuerKeySet{}, fmt.Errorf("keys: JWKSIssuerKeySource for %q cannot resolve keys for issuer %q", s.issuer, req.Issuer)
+	}
 	current, err := s.currentKeys(ctx)
 	if err != nil {
 		return IssuerKeySet{}, err

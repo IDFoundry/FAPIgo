@@ -74,6 +74,48 @@ func TestJWKSIssuerKeySourceResolvesKeyByAlgorithm(t *testing.T) {
 	}
 }
 
+// TestJWKSIssuerKeySourceWithIssuerRefusesOtherIssuer: a source bound
+// to its issuer refuses, without fetching, a request naming another, as
+// LocalIssuerKeys does.
+func TestJWKSIssuerKeySourceWithIssuerRefusesOtherIssuer(t *testing.T) {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	var fetches int
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fetches++
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"keys":[%s]}`, p256JWKJSON(t, &priv.PublicKey, "kid-1", "ES256"))
+	}))
+	defer ts.Close()
+
+	jwksURI, err := fapi.ParseEndpointURL(ts.URL + "/jwks")
+	if err != nil {
+		t.Fatalf("ParseEndpointURL: %v", err)
+	}
+	issuer, err := fapi.ParseEndpointURL("https://as.example.com")
+	if err != nil {
+		t.Fatalf("ParseEndpointURL: %v", err)
+	}
+	src, err := keys.NewJWKSIssuerKeySource(newTestFetcherTLS(t, ts), jwksURI, time.Minute, keys.WithIssuer(issuer))
+	if err != nil {
+		t.Fatalf("NewJWKSIssuerKeySource: %v", err)
+	}
+	req := keys.IssuerKeyRequest{Issuer: "https://other.example.com", Purpose: keys.IDTokenVerification, Algorithm: fapi.ES256}
+	if _, err := src.ResolveIssuerKeys(context.Background(), req); err == nil {
+		t.Fatal("ResolveIssuerKeys(other issuer) = nil error, want refusal")
+	}
+	if fetches != 0 {
+		t.Fatalf("fetched %d times for another issuer, want 0", fetches)
+	}
+	req.Issuer = issuer.String()
+	set, err := src.ResolveIssuerKeys(context.Background(), req)
+	if err != nil || len(set.Keys) != 1 {
+		t.Fatalf("ResolveIssuerKeys(own issuer) = %+v, %v", set.Keys, err)
+	}
+}
+
 // TestJWKSIssuerKeySourceDeclaresLiveFetchHardened covers
 // JWKSIssuerKeySource's own keys.KeySourceAssurance implementation:
 // every live fetch goes through its *fapihttp.Client, so it declares

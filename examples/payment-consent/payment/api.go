@@ -28,8 +28,10 @@ type api struct {
 	// bank and its APIs: an approval is recorded there as used, so a
 	// second instance refuses it too.
 	replay storage.ReplayStore
-	// skew is the verifier's clock-skew allowance on token expiry.
-	skew time.Duration
+	// grantLifetime is how long tokens from one grant can still be
+	// presented: its refresh token's lifetime (refreshing doesn't extend
+	// it), the last access token's, and the verifier's clock skew.
+	grantLifetime time.Duration
 }
 
 const paymentsPath = "/payments"
@@ -42,7 +44,9 @@ func (w *World) newAPI() (*api, error) {
 	if err != nil {
 		return nil, err
 	}
-	a := &api{w: w, verifier: verifier, replay: w.bank.deps.Replay, skew: w.bank.cfg.Limits.MaxClockSkew}
+	limits := w.bank.cfg.Limits
+	a := &api{w: w, verifier: verifier, replay: w.bank.deps.Replay,
+		grantLifetime: limits.RefreshTokenLifetime + limits.AccessTokenLifetime + limits.MaxClockSkew}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST "+paymentsPath, a.pay)
 	w.router[apiHost] = mux
@@ -113,15 +117,23 @@ func (a *api) pay(w http.ResponseWriter, r *http.Request) {
 const usedApprovalNamespace storage.ReplayNamespace = "example:payment-consent:approval"
 
 // useOnce records authz's approval as used, reporting whether this is
-// its first use. The shared store does the check and the record in one
-// atomic step, so two instances racing on the same approval can't both
-// proceed, and a store it can't reach refuses rather than allows. The
-// record lasts as long as the token can still be presented.
+// its first use. The approval is the grant, named by CodeGrantID, not
+// the access token (authz.Key): a refresh issues a new access token
+// carrying the same approval, which must not pay again. The shared store
+// does the check and the record in one atomic step, so two instances
+// racing on the same approval can't both proceed, and a store it can't
+// reach refuses rather than allows. The record lasts as long as any
+// token from the grant can still be presented. A token naming no grant
+// is refused.
 func (a *api) useOnce(ctx context.Context, authz resource.AuthorizationContext) bool {
+	grant := authz.CodeGrantID()
+	if grant == "" {
+		return false
+	}
 	return a.replay.UseOnce(ctx, storage.ReplayUse{
 		Namespace: usedApprovalNamespace,
-		Digest:    sha256.Sum256([]byte(authz.Key)),
-		ExpiresAt: authz.ExpiresAt.Add(a.skew),
+		Digest:    sha256.Sum256([]byte(grant)),
+		ExpiresAt: time.Now().Add(a.grantLifetime),
 	}) == nil
 }
 

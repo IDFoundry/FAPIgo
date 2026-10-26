@@ -146,3 +146,45 @@ func TestRevokeGrantLeavesOtherGrantsAlone(t *testing.T) {
 		t.Errorf("resource.Verify after revoking another grant: %v", err)
 	}
 }
+
+// TestAuthorizationContextGrantIdentity: an access token's Key is its
+// own, so a refresh issues a new one; GrantID and CodeGrantID name the
+// grant, and stay the same across refreshes. Keying "one approval, one
+// use" on Key let a client with a refresh token use the approval once
+// per refresh; keyed on CodeGrantID it is used once. A second
+// authorization of the same request is a new grant.
+func TestAuthorizationContextGrantIdentity(t *testing.T) {
+	ctx := context.Background()
+	h := fapitest.New(t, fapitest.Config{Profile: server.ProfileFAPISecurity, GrantID: "consent-1"})
+	tokens, err := h.RunAuthorizationCodeFlow(ctx, offlineScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := verifyAt(t, h, h.Resource, tokens)
+	if first.CodeGrantID() == "" || first.GrantID() != "consent-1" {
+		t.Fatalf("CodeGrantID = %q, GrantID = %q; want a code grant ID and consent-1", first.CodeGrantID(), first.GrantID())
+	}
+	used := map[string]bool{first.CodeGrantID(): true}
+	keys := map[string]bool{first.Key: true}
+	for range 2 {
+		if tokens, err = h.Client.RefreshTokens(ctx, client.RefreshTokenRequest{Tokens: tokens}); err != nil {
+			t.Fatal(err)
+		}
+		authz := verifyAt(t, h, h.Resource, tokens)
+		if keys[authz.Key] {
+			t.Fatalf("a refreshed access token has a Key already seen")
+		}
+		keys[authz.Key] = true
+		if !used[authz.CodeGrantID()] || authz.GrantID() != "consent-1" {
+			t.Fatalf("refreshed token: CodeGrantID = %q, GrantID = %q; want the first token's", authz.CodeGrantID(), authz.GrantID())
+		}
+	}
+
+	again, err := h.RunAuthorizationCodeFlow(ctx, offlineScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id := verifyAt(t, h, h.Resource, again).CodeGrantID(); id == "" || used[id] {
+		t.Fatalf("a second authorization's CodeGrantID = %q, want a new one", id)
+	}
+}

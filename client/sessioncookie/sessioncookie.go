@@ -75,8 +75,13 @@ type Cookie struct {
 // sealer's (interactioncookie, client.TokenSetSealer and the like), and
 // keep its name distinct too: sealed values under a shared key differ
 // only in their name binding, so a separate key keeps one sealer's
-// output from ever being offered to another. New refuses an all-zero
-// or single-repeated-byte key and the same key twice, which are never
+// output from ever being offered to another. The same goes for two
+// Cookies of this kind serving clients for different issuers, client
+// registrations or tenants: give each its own keys, or at least its
+// own name. A sealed value binds only the cookie's name and format,
+// not which client set it, so one Cookie opens a cookie another
+// sealed under the same name and key. New refuses an all-zero or
+// single-repeated-byte key and the same key twice, which are never
 // random.
 func New(keys [][]byte, opts Options) (*Cookie, error) {
 	name := opts.Name

@@ -905,3 +905,30 @@ func TestVerifyBoundsExpAfterNotBefore(t *testing.T) {
 		})
 	}
 }
+
+// An iat of null is no issue time at all, and one at or before the
+// epoch isn't a real one: neither satisfies RequireIssuedAt.
+func TestParseClaimsNullOrNonPositiveIssuedAt(t *testing.T) {
+	base := `{"iss":"client-123","aud":"https://as.example","exp":4102444800,"iat":`
+	c, err := parseClaims([]byte(base + `null}`))
+	if err != nil {
+		t.Fatalf("parseClaims(iat null): %v", err)
+	}
+	if !c.IssuedAt.IsZero() {
+		t.Fatalf("iat null: IssuedAt = %v, want absent", c.IssuedAt)
+	}
+	if _, ok := c.Parameters["iat"]; ok {
+		t.Fatal("iat null left in Parameters")
+	}
+	if err := checkIssuedAt(c, VerifyPolicy{RequireIssuedAt: true, Now: time.Now()}); !errors.Is(err, ErrMissingIssuedAt) {
+		t.Fatalf("checkIssuedAt(iat null, required) = %v, want ErrMissingIssuedAt", err)
+	}
+	for _, iat := range []string{"0", "-1", "-0.5", `"1"`} {
+		if _, err := parseClaims([]byte(base + iat + `}`)); !errors.Is(err, ErrMalformedClaims) {
+			t.Errorf("parseClaims(iat %s) = %v, want ErrMalformedClaims", iat, err)
+		}
+	}
+	if c, err := parseClaims([]byte(base + `1}`)); err != nil || c.IssuedAt.Unix() != 1 {
+		t.Fatalf("parseClaims(iat 1) = %v, %v", c.IssuedAt, err)
+	}
+}

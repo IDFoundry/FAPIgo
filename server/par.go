@@ -963,7 +963,8 @@ func plainParamsToJSON(params map[string]string) map[string]json.RawMessage {
 			// "authorization_details" claim decodes to, so
 			// parseRequestedAuthorizationDetails/RARRegistry.Parse never
 			// need to know which path a request arrived by. Malformed
-			// JSON here is caught by RARRegistry.Parse, not here.
+			// JSON here, a second value after the array included, is
+			// caught by RARRegistry.Parse, not here.
 			out[k] = json.RawMessage(v)
 			continue
 		}

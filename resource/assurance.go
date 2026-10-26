@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/storage"
@@ -48,6 +49,8 @@ const (
 	//   - Dependencies.Random, when Nonces is set, must be
 	//     crypto/rand.Reader itself: every DPoP nonce this verifier
 	//     issues is only as unguessable as that reader.
+	//   - Limits.MaxClockSkew must be between 10 and 60 seconds, as
+	//     server.New requires (FAPI 2.0 Security Profile §5.3.2.1).
 	//
 	// Config.Deployment is required: with DeploymentHorizontallyScaled,
 	// every store checked above must also declare CrossInstanceConsistent. As with server.New, a store
@@ -106,6 +109,15 @@ type AccessTokenAssurance struct {
 	Store any
 }
 
+// The clock skew AssuranceProduction allows, as server.New does: FAPI
+// 2.0 Security Profile §5.3.2.1 has iat and nbf up to 10 seconds in the
+// future accepted and more than 60 seconds refused, and here the skew
+// also bounds how long past exp a token is still accepted.
+const (
+	fapiMinClockSkew = 10 * time.Second
+	fapiMaxClockSkew = 60 * time.Second
+)
+
 // validateAssurance checks the assurance level is one of the two
 // defined, and applies AssuranceProduction's checks — reporting every
 // dependency that falls short, joined (errors.Join), rather than only
@@ -129,6 +141,9 @@ func validateAssurance(cfg Config, deps Dependencies) error {
 	}
 	scaled := cfg.Deployment == DeploymentHorizontallyScaled
 	errs := checkProductionAccessTokens(deps.AccessTokens, scaled)
+	if cfg.Limits.MaxClockSkew < fapiMinClockSkew || cfg.Limits.MaxClockSkew > fapiMaxClockSkew {
+		errs = append(errs, fmt.Errorf("resource: config: limits.max_clock_skew must be between %v and %v under AssuranceProduction (FAPI 2.0 §5.3.2.1)", fapiMinClockSkew, fapiMaxClockSkew))
+	}
 	errs = append(errs, checkStoreAssurance("replay", deps.Replay, true, scaled))
 	if deps.Nonces != nil {
 		errs = append(errs, checkStoreAssurance("nonces", deps.Nonces, true, scaled), checkRandom(deps.Random))

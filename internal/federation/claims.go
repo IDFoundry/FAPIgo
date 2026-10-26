@@ -442,17 +442,23 @@ var privateKeyMembers = []string{"d", "p", "q", "dp", "dq", "qi", "oth", "k"}
 
 // refusePrivateKeyMembers refuses a JWK Set any of whose keys carries
 // private or secret key material, so a statement this package signs
-// never publishes a key handed to it as a private JWK.
+// never publishes a key handed to it as a private JWK. Member names
+// match case-insensitively, as encoding/json matches them: a consumer
+// built on it reads "D" as "d".
 func refusePrivateKeyMembers(jwks json.RawMessage) error {
 	var set struct {
 		Keys []map[string]json.RawMessage `json:"keys"`
 	}
-	if err := json.Unmarshal(jwks, &set); err != nil {
+	if err := strictjson.Unmarshal(jwks, &set); err != nil {
 		return fmt.Errorf("%w: %v", ErrMalformedJWKS, err)
 	}
+	private := make(map[string]bool, len(privateKeyMembers))
+	for _, member := range privateKeyMembers {
+		private[strictjson.FoldKey(member)] = true
+	}
 	for i, key := range set.Keys {
-		for _, member := range privateKeyMembers {
-			if _, ok := key[member]; ok {
+		for member := range key {
+			if private[strictjson.FoldKey(member)] {
 				return fmt.Errorf("%w: key %d has the private member %q: publish only public keys", ErrMalformedJWKS, i, member)
 			}
 		}

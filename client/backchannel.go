@@ -104,7 +104,17 @@ type BeginBackchannelAuthenticationRequest struct {
 // so another instance can poll for it, or authenticate its ping
 // callback; the sealing keeps a stored session from being edited, and
 // binds it to the owner it was sealed for.
+//
+// A session is bound to the Client that began it:
+// PollBackchannelAuthentication on a Client for another issuer or
+// client ID, or with the zero value, fails without sending anything, and
+// a BackchannelSessionSealer for another Client refuses to seal it.
 type BackchannelAuthenticationSession struct {
+	// issuer and clientID are the beginning Client's Config.Issuer and
+	// Config.ClientID: the auth_req_id, and the client authentication
+	// polling it sends, go only to that issuer's token endpoint.
+	issuer            string
+	clientID          string
 	authReqID         string
 	interval          time.Duration
 	expiresAt         time.Time
@@ -234,6 +244,8 @@ func (c *Client) BeginBackchannelAuthentication(ctx context.Context, req BeginBa
 	}
 	interval = min(interval, expiresIn)
 	return BackchannelAuthenticationSession{
+		issuer:            c.cfg.Issuer.String(),
+		clientID:          c.cfg.ClientID.String(),
 		authReqID:         raw.AuthReqID,
 		interval:          interval,
 		expiresAt:         c.deps.Clock.Now().Add(expiresIn),
@@ -478,7 +490,17 @@ func (BackchannelAuthenticationApproved) backchannelAuthenticationResult() {}
 // *Error. When the request asked for "openid", an approval whose token
 // response has no ID token fails with ErrorInvalidResponse (OIDC Core
 // §3.1.3.3), as ExchangeCode does.
+//
+// session must come from this Client's own BeginBackchannelAuthentication,
+// or from a BackchannelSessionSealer for it: one another Client began (an
+// application with one Client per issuer that routes a poll to the wrong
+// one), or the zero value, fails with ErrorInvalidRequest, so the
+// auth_req_id and this client's authentication never reach another
+// issuer's token endpoint.
 func (c *Client) PollBackchannelAuthentication(ctx context.Context, session BackchannelAuthenticationSession) (BackchannelAuthenticationResult, error) {
+	if !c.ownsBackchannelSession(session) {
+		return nil, newError(ErrorInvalidRequest, "the backchannel authentication session was begun by a client for a different issuer or client ID", nil)
+	}
 	assertionSigner, assertionKID, dpopSigner, err := c.resolveClientAuthAndDPoPSigners(ctx)
 	if err != nil {
 		return nil, newError(ErrorInternal, "failed to resolve signing keys", err)
@@ -511,6 +533,12 @@ func (c *Client) PollBackchannelAuthentication(ctx context.Context, session Back
 		return c.backchannelApprovedTokens(ctx, session, body)
 	}
 	return backchannelPollOutcome(status, header, body)
+}
+
+// ownsBackchannelSession reports whether session was begun by a Client
+// with this one's issuer and client ID.
+func (c *Client) ownsBackchannelSession(session BackchannelAuthenticationSession) bool {
+	return session.issuer == c.cfg.Issuer.String() && session.clientID == c.cfg.ClientID.String()
 }
 
 // backchannelApprovedTokens reads a 200 poll response as the approved

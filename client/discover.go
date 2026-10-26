@@ -246,8 +246,14 @@ func (d DiscoveredMetadata) checkUserInfoEncryptionSupport(algs Algorithms) erro
 // keys.NewJWKSIssuerKeySource: there's no other JWKS URI a caller would
 // sensibly use for this issuer's own verification keys, so this removes
 // a line every caller of Discover otherwise writes identically, not a
-// new decision the caller has to make.
+// new decision the caller has to make. For metadata Discover or
+// DiscoverViaFederation verified, the source is bound to Issuer
+// (keys.WithIssuer), so a client of any other issuer sharing it is
+// refused its keys.
 func (d DiscoveredMetadata) IssuerKeySource(fetcher *fapihttp.Client, cacheTTL time.Duration, opts ...keys.JWKSOption) (*keys.JWKSIssuerKeySource, error) {
+	if !d.issuer.IsZero() {
+		opts = append([]keys.JWKSOption{keys.WithIssuer(d.issuer)}, opts...)
+	}
 	return keys.NewJWKSIssuerKeySource(fetcher, d.JWKSURI, cacheTTL, opts...)
 }
 

@@ -78,8 +78,10 @@ func ParseJWKSet(body []byte) ([]ParsedJWK, error) {
 
 	var out []ParsedJWK
 	for _, raw := range set.Keys {
+		// Strictly, like ParseJWK: rawJWK doesn't model "x5c", so a
+		// case variant ("X5C") would otherwise reach Certificates.
 		var hint jwkSetAlgHint
-		if err := json.Unmarshal(raw, &hint); err != nil {
+		if err := strictjson.Unmarshal(raw, &hint); err != nil {
 			continue
 		}
 		// RFC 7517 §4.2: a key for encryption isn't one to verify

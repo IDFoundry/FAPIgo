@@ -167,7 +167,8 @@ cannot skip callback validation before exchanging a code; then
 and `RequestClientCredentialsToken` are the other two flows. The
 intermediate `ValidatedAuthorizationResponse` is opaque, can only be
 constructed by `HandleAuthorizationResponse`, and is redeemed only by the
-client that validated it.
+client that validated it; a `BackchannelAuthenticationSession` is polled
+only by the client that began it.
 
 `BeginAuthorization` internally: generates `state`/`nonce`/PKCE, builds
 and signs the request object when required, authenticates to and calls

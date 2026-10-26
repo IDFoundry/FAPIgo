@@ -92,6 +92,24 @@ func TestUnmarshalLeavesMalformedJSONToDecoder(t *testing.T) {
 	}
 }
 
+// TestCheckFieldCaseRejectsTrailingData covers a document followed by
+// a second value: json.Unmarshal can't parse it, and a json.Decoder
+// reads only the first value, case-insensitively.
+func TestCheckFieldCaseRejectsTrailingData(t *testing.T) {
+	var v target
+	for _, doc := range []string{`{"ALG":"none"} {}`, `{"alg":"ES256"}"x"`, `{"alg":"ES256"} 1`, `{"alg":"ES256"}}`, `{} x`} {
+		if err := CheckFieldCase([]byte(doc), &v); err == nil || !strings.Contains(err.Error(), "after the top-level") {
+			t.Errorf("CheckFieldCase(%q) = %v, want trailing-data rejection", doc, err)
+		}
+		if err := CheckTaggedFieldCase([]byte(doc), &v); err == nil {
+			t.Errorf("CheckTaggedFieldCase(%q) accepted trailing data", doc)
+		}
+	}
+	if err := CheckFieldCase([]byte(" {\"alg\":\"ES256\"} \n\t"), &v); err != nil {
+		t.Fatalf("surrounding whitespace: %v", err)
+	}
+}
+
 // TestCheckFieldCaseFoldsAsEncodingJSONDoes covers a member that only
 // Unicode case folding makes equal to a field — "ſ" (long s) for "s" —
 // which encoding/json matches and a lowercase comparison misses.

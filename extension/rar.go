@@ -3,6 +3,7 @@ package extension
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"reflect"
@@ -254,7 +255,7 @@ type rarObjectHead struct {
 
 // Parse validates raw — the authorization_details parameter's raw JSON
 // array — against the registry: total size and nesting depth bounds,
-// then per object: a registered type, no duplicate top-level JSON
+// a single JSON array, then per object: a registered type, no duplicate top-level JSON
 // members, its own size and per-type object-count bounds, and strict
 // decoding against its RARDefinition's type.
 func (r *RARRegistry) Parse(raw json.RawMessage) (RARValues, error) {
@@ -270,6 +271,11 @@ func (r *RARRegistry) Parse(raw json.RawMessage) (RARValues, error) {
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&objects); err != nil {
 		return RARValues{}, fmt.Errorf("extension: authorization_details must be a JSON array: %w", err)
+	}
+	// Decode stops after the first value: of "[A] [B]" it reads A while
+	// the stored parameter carries B too.
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return RARValues{}, errors.New("extension: authorization_details must be a single JSON array")
 	}
 
 	values := RARValues{byType: make(map[string][]json.RawMessage)}

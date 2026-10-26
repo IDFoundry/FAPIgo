@@ -20,7 +20,9 @@ type Limits struct {
 
 	// MaxClockSkew bounds how far in the future an iat claim may be, and
 	// extends how long past a token's own expiry it's still accepted.
-	// Zero means no tolerance.
+	// Zero means no tolerance. AssuranceProduction requires 10 to 60
+	// seconds, as server.New does: FAPI 2.0 Security Profile §5.3.2.1
+	// has a JWT with iat up to 10 seconds in the future accepted.
 	MaxClockSkew time.Duration
 
 	// DPoPNonceLifetime bounds how long an issued DPoP nonce remains

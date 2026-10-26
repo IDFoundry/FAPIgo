@@ -5,6 +5,7 @@ import (
 	"crypto/ecdh"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 
@@ -50,6 +51,11 @@ type rawHeader struct {
 	Kid  string          `json:"kid,omitempty"`
 	Epk  *rawEPK         `json:"epk,omitempty"`
 	Crit json.RawMessage `json:"crit,omitempty"`
+
+	// Zip is modeled only to be refused: this package never compresses
+	// or decompresses (RFC 7516 §4.1.3's "zip"), so a header naming a
+	// compression algorithm describes a plaintext it can't produce.
+	Zip json.RawMessage `json:"zip,omitempty"`
 }
 
 // understoodExtensionParams is every extension Header Parameter this
@@ -94,6 +100,9 @@ func parseHeader(data []byte) (Header, error) {
 	}
 	if err := critical.Check(raw.Crit, understoodExtensionParams); err != nil {
 		return Header{}, fmt.Errorf("jwe: parse header: %w", err)
+	}
+	if raw.Zip != nil {
+		return Header{}, errors.New("jwe: parse header: compressed content (\"zip\") is not supported")
 	}
 	alg, err := fapi.ParseKeyManagementAlgorithm(raw.Alg)
 	if err != nil {

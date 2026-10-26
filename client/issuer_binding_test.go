@@ -257,3 +257,52 @@ func TestMisroutedCallbackLeavesTheSession(t *testing.T) {
 		t.Fatalf("the right client, after the misrouted callback: %v", err)
 	}
 }
+
+// TestPollBackchannelAuthenticationRefusesAnotherClientsSession: a
+// BackchannelAuthenticationSession is bound to the Client that began it.
+// Polled through another issuer's Client, its auth_req_id and that
+// client's authentication would reach the other issuer's token endpoint;
+// it is refused before anything is sent. So is the zero value, and
+// sealing it with another Client's sealer.
+func TestPollBackchannelAuthenticationRefusesAnotherClientsSession(t *testing.T) {
+	ctx := context.Background()
+	clientA, asA, _ := newTestClientWithCIBA(t)
+	clientB, recorder := newOtherIssuerClient(t)
+	session := beginTestBackchannelSession(t, clientA)
+
+	var cerr *client.Error
+	if _, err := clientB.PollBackchannelAuthentication(ctx, session); !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidRequest {
+		t.Fatalf("PollBackchannelAuthentication(A's session) via B = %v, want ErrorInvalidRequest", err)
+	}
+	if _, err := clientA.PollBackchannelAuthentication(ctx, client.BackchannelAuthenticationSession{}); !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidRequest {
+		t.Fatalf("PollBackchannelAuthentication(zero session) = %v, want ErrorInvalidRequest", err)
+	}
+	sealerB, err := client.NewBackchannelSessionSealer(clientB, [][]byte{sealKey(1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sealerB.Seal(session, "user-1"); !errors.As(err, &cerr) || cerr.Code() != client.ErrorInvalidRequest {
+		t.Fatalf("Seal(A's session) with B's sealer = %v, want ErrorInvalidRequest", err)
+	}
+	if n := recorder.requests(); n != 0 {
+		t.Fatalf("the other issuer received %d requests: %v", n, recorder.token)
+	}
+
+	// Through A, and through A's sealer, it polls as before.
+	sealerA, err := client.NewBackchannelSessionSealer(clientA, [][]byte{sealKey(1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := sealerA.Seal(session, "user-1")
+	if err != nil {
+		t.Fatalf("Seal with A's sealer: %v", err)
+	}
+	opened, _, err := sealerA.Open(sealed, "user-1")
+	if err != nil {
+		t.Fatalf("Open with A's sealer: %v", err)
+	}
+	asA.tokenResponses = []cibaTokenResponse{{status: http.StatusBadRequest, body: map[string]any{"error": "authorization_pending"}}}
+	if _, err := clientA.PollBackchannelAuthentication(ctx, opened); err != nil {
+		t.Fatalf("PollBackchannelAuthentication(opened session) via A: %v", err)
+	}
+}

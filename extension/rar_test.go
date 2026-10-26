@@ -169,6 +169,27 @@ func TestRARRegistryParseRejectsNonArrayTopLevel(t *testing.T) {
 	}
 }
 
+// A json.Decoder stops after the first value, so "[A] [B]" must not
+// pass as A while the stored parameter carries B too.
+func TestRARRegistryParseRejectsTrailingValue(t *testing.T) {
+	reg, err := extension.NewRARRegistry(4096, 4, paymentDef)
+	if err != nil {
+		t.Fatalf("NewRARRegistry: %v", err)
+	}
+	for _, raw := range []string{
+		`[{"type":"payment_initiation","instructed_amount":"1.00"}] [{"type":"payment_initiation","instructed_amount":"999.00"}]`,
+		`[{"type":"payment_initiation","instructed_amount":"1.00"}]]`,
+		`[] x`,
+	} {
+		if _, err := reg.Parse(json.RawMessage(raw)); err == nil {
+			t.Errorf("Parse(%s) = nil error, want trailing-value rejection", raw)
+		}
+	}
+	if _, err := reg.Parse(json.RawMessage(" [] \n")); err != nil {
+		t.Fatalf("Parse(surrounding whitespace): %v", err)
+	}
+}
+
 func TestRARRegistryParseRejectsMultipleTypesIndependently(t *testing.T) {
 	accountDef := extension.RARDefinition[struct {
 		Type string `json:"type"`

@@ -40,7 +40,7 @@ func serverConfig(t *testing.T) server.Config {
 	return server.Config{
 		Subjects:  server.PublicSubjects(),
 		Issuer:    issuer,
-		Limits:    server.Limits{AccessTokenLifetime: 5 * time.Minute, MaxDPoPProofAge: time.Minute, MaxClockSkew: 5 * time.Second},
+		Limits:    server.Limits{AccessTokenLifetime: 5 * time.Minute, MaxDPoPProofAge: time.Minute, MaxClockSkew: 10 * time.Second},
 		Assurance: server.AssuranceDevelopment,
 	}
 }

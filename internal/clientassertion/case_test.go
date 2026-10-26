@@ -11,3 +11,10 @@ func TestParseClaimsRejectsCaseVariantMemberNames(t *testing.T) {
 		t.Fatalf("err = %v, want case-sensitivity rejection", err)
 	}
 }
+
+func TestParseClaimsRejectsTrailingData(t *testing.T) {
+	_, err := parseClaims([]byte(`{"ISS":"c","sub":"c","aud":"https://as.example.com","exp":2,"iat":1,"jti":"j"} {}`))
+	if err == nil || !strings.Contains(err.Error(), "after the top-level") {
+		t.Fatalf("err = %v, want trailing-data rejection", err)
+	}
+}

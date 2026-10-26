@@ -457,6 +457,31 @@ func TestIDTokenValidateRejectsIssuedAtTooOld(t *testing.T) {
 	}
 }
 
+// An iat further in the future than the issuer's clock may run ahead
+// is refused, as it is for an access token.
+func TestIDTokenValidateRejectsIssuedInFuture(t *testing.T) {
+	key := generateKey(t)
+	now := time.Now()
+
+	tok, err := IssueIDToken(baseIDTokenParams(key, now.Add(30*time.Second), time.Minute))
+	if err != nil {
+		t.Fatalf("IssueIDToken: %v", err)
+	}
+	parsed, err := ParseIDToken(tok)
+	if err != nil {
+		t.Fatalf("ParseIDToken: %v", err)
+	}
+	policy := baseIDTokenPolicy(now)
+	policy.MaxClockSkew = 10 * time.Second
+	if _, err := parsed.Validate(&key.PublicKey, policy); !errors.Is(err, ErrIssuedInFuture) {
+		t.Fatalf("Validate(iat 30s ahead, 10s skew) = %v, want ErrIssuedInFuture", err)
+	}
+	policy.MaxClockSkew = 30 * time.Second
+	if _, err := parsed.Validate(&key.PublicKey, policy); err != nil {
+		t.Fatalf("Validate(iat 30s ahead, 30s skew) = %v", err)
+	}
+}
+
 func TestParseIDTokenRejectsMissingRequiredClaims(t *testing.T) {
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256"}`))
 	cases := []string{

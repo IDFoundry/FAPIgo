@@ -95,6 +95,7 @@ func productionSetup(t *testing.T) (resource.Config, resource.Dependencies) {
 	cfg.Assurance = resource.AssuranceProduction
 	cfg.Deployment = resource.DeploymentHorizontallyScaled
 	cfg.Limits.DPoPNonceLifetime = time.Minute
+	cfg.Limits.MaxClockSkew = 10 * time.Second
 	return cfg, resource.Dependencies{
 		AccessTokens: jwtResolver(t, &declaredKeys{hardened: true}),
 		Replay:       &declaredReplay{caps: fullCaps},
@@ -325,6 +326,29 @@ func TestNewVerifierProductionRefusesLoopbackJWKSFetcher(t *testing.T) {
 				t.Fatalf("NewVerifier(production, JWKS source with %s): %v", name, err)
 			}
 		})
+	}
+}
+
+// TestNewVerifierBoundsClockSkewUnderProduction: production holds
+// MaxClockSkew to the 10 to 60 seconds server.New does (FAPI 2.0
+// Security Profile §5.3.2.1); development accepts any non-negative one.
+func TestNewVerifierBoundsClockSkewUnderProduction(t *testing.T) {
+	for skew, ok := range map[time.Duration]bool{
+		0: false, 5 * time.Second: false, 10 * time.Second: true, time.Minute: true, 61 * time.Second: false, time.Hour: false,
+	} {
+		cfg, deps := productionSetup(t)
+		cfg.Limits.MaxClockSkew = skew
+		_, err := resource.NewVerifier(cfg, deps)
+		if ok && err != nil {
+			t.Errorf("NewVerifier(production, skew %v): %v", skew, err)
+		}
+		if !ok && (err == nil || !strings.Contains(err.Error(), "limits.max_clock_skew must be between")) {
+			t.Errorf("NewVerifier(production, skew %v) = %v, want the clock skew refusal", skew, err)
+		}
+		cfg.Assurance = resource.AssuranceDevelopment
+		if _, err := resource.NewVerifier(cfg, deps); err != nil {
+			t.Errorf("NewVerifier(development, skew %v): %v", skew, err)
+		}
 	}
 }
 

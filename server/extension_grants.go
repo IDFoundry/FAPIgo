@@ -44,19 +44,23 @@ func (t TokenEndpointRequest) Resources() []string {
 // AttestedClientAuthentication is the request's attestation headers,
 // and its client_id parameter if it has one, for
 // AuthenticateAttestedClient — which refuses a client_id naming another
-// client than the attestation does. A repeated client_id gives the
-// first; Parameters refuses the repetition.
+// client than the attestation does. client_id is read exactly as
+// Parameters reads it, so the two never disagree: an empty value is no
+// client_id at all (RFC 6749 §3.1), and when Parameters refuses the
+// request — a repeated parameter, an empty client_id repeated included,
+// or too many or too large ones — AuthenticateAttestedClient refuses it
+// too, with the same invalid_request.
 func (t TokenEndpointRequest) AttestedClientAuthentication() AttestedClientAuthenticationRequest {
 	req := AttestedClientAuthenticationRequest{
 		ClientAttestations:    t.parts.ClientAttestations,
 		ClientAttestationPoPs: t.parts.ClientAttestationPoPs,
 	}
-	for _, p := range t.parts.HTTP.Parameters {
-		if p.Name == "client_id" {
-			req.ClientID = p.Value
-			break
-		}
+	params, err := t.Parameters()
+	if err != nil {
+		req.malformed = true
+		return req
 	}
+	req.ClientID = params["client_id"]
 	return req
 }
 

@@ -225,7 +225,7 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 	// PAR accepts no endpoint-URL audience at all — only the issuer
 	// identifier — see acceptableClientAssertionAudiences's own doc
 	// comment for why.
-	client, dpopProof, _, authErr := s.authenticateRequest(ctx, params, requestCredentials{
+	client, dpopProof, authn, authErr := s.authenticateRequest(ctx, params, requestCredentials{
 		PeerCertificate: req.PeerCertificate, DPoPProofs: req.DPoPProofs, ClientAttestations: req.ClientAttestations, ClientAttestationPoPs: req.ClientAttestationPoPs,
 	}, nil, nil)
 	if authErr != nil {
@@ -274,7 +274,7 @@ func (s *Server) PushAuthorizationRequest(ctx context.Context, req PushAuthoriza
 		source = extension.SourceRequestObject
 	}
 	essentialACR, _ := essentialACRValues(validated)
-	request, err := s.encodeRequestRecord(requestRecord{Parameters: validated, TokenClaims: tokenClaims, ExtensionSource: source, PushedAt: &now, EssentialACRValues: essentialACR, RequiredSubject: requiredSubject, RequiredInternalSubject: requiredInternal, Resources: resources})
+	request, err := s.encodeRequestRecord(requestRecord{Parameters: validated, TokenClaims: tokenClaims, ExtensionSource: source, PushedAt: &now, EssentialACRValues: essentialACR, RequiredSubject: requiredSubject, RequiredInternalSubject: requiredInternal, Resources: resources, ClientInstanceKey: authn.InstanceKey})
 	if err != nil {
 		return s.parFail(ctx, client.ID(), newError(ErrorServerError, 500, "failed to encode pushed authorization request", err))
 	}
@@ -924,14 +924,20 @@ func formParametersToMap(params []FormParameter) (map[string]string, error) {
 		return nil, fmt.Errorf("parameters total %d bytes, more than %d", size, maxFormParameterBytes)
 	}
 	out := make(map[string]string, len(params))
+	seen := make(map[string]struct{}, len(params))
 	for _, p := range params {
+		// RFC 6749 §3.1: "Request and response parameters MUST NOT be
+		// included more than once" — an empty value included too, so
+		// "client_id=&client_id=x" is refused rather than read as "x" by
+		// one reader and as "" by another that takes the first value.
+		if _, exists := seen[p.Name]; exists {
+			return nil, fmt.Errorf("duplicate parameter %q", p.Name)
+		}
+		seen[p.Name] = struct{}{}
 		if p.Value == "" {
 			// RFC 6749 §3.1: "Parameters sent without a value MUST be
 			// treated as if they were omitted from the request."
 			continue
-		}
-		if _, exists := out[p.Name]; exists {
-			return nil, fmt.Errorf("duplicate parameter %q", p.Name)
 		}
 		out[p.Name] = p.Value
 	}

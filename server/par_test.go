@@ -630,6 +630,9 @@ func newHarnessWithApplicationType(t *testing.T, profile server.Profile, allowRe
 		Clock:                  fixedClock{now: now},
 		Random:                 rand.Reader,
 	}
+	if assurance == server.AssuranceProduction {
+		deps.ClientCertificateTrust = server.ClientCertificateChainVerifiedUpstream{}
+	}
 
 	srv, err := server.New(cfg, deps)
 	if err != nil {
@@ -1418,6 +1421,26 @@ func TestPushAuthorizationRequestRejectsDuplicateParameter(t *testing.T) {
 	})
 	if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
 		t.Fatalf("error code = %q, want %q", code, server.ErrorInvalidRequest)
+	}
+}
+
+// TestPushAuthorizationRequestRejectsRepeatedEmptyParameter covers RFC
+// 6749 §3.1's "MUST NOT be included more than once" for a repetition
+// with an empty value: "state=&state=x" is refused, not read as "x".
+func TestPushAuthorizationRequestRejectsRepeatedEmptyParameter(t *testing.T) {
+	h := newHarness(t, server.ProfileFAPISecurity, true)
+	for _, extra := range [][]server.FormParameter{
+		{formParam("nonce", ""), formParam("nonce", "n-1")},
+		{formParam("nonce", "n-1"), formParam("nonce", "")},
+		{formParam("nonce", ""), formParam("nonce", "")},
+	} {
+		params := append(plainFormParameters(t, h.clientAssertion(t), nil), extra...)
+		_, err := h.server.PushAuthorizationRequest(context.Background(), server.PushAuthorizationRequest{
+			HTTP: server.FormRequest{Parameters: params},
+		})
+		if code := serverErrorCode(t, err); code != server.ErrorInvalidRequest {
+			t.Fatalf("%v: error code = %q, want %q", extra, code, server.ErrorInvalidRequest)
+		}
 	}
 }
 

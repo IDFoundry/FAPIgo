@@ -103,13 +103,15 @@ const (
 	// ClientAuthMethodTLSClientAuth*/SAN* method (not
 	// ClientAuthMethodSelfSignedTLSClientAuth, which needs no chain
 	// trust); server.NoPKIClientAuthentication{} refuses these methods
-	// outright; server.NoClientCertificateChainTrust{} instead relies
-	// entirely on the deployment's own TLS termination to have already
-	// required and verified the chain (tls.Config.ClientAuth:
+	// outright; server.ClientCertificateChainVerifiedUpstream{} instead
+	// relies entirely on the deployment's own TLS termination to have
+	// already required and verified the chain (tls.Config.ClientAuth:
 	// RequireAndVerifyClientCert or VerifyClientCertIfGiven, with
 	// ClientCAs set) before this server ever sees the request — get that
 	// wrong, on either side, and any self-signed certificate with a
-	// matching subject/SAN is accepted as this client.
+	// matching subject/SAN is accepted as this client. Outside
+	// production, server.NoClientCertificateChainTrust{} accepts these
+	// methods with no chain trust at all.
 	ClientAuthMethodTLSClientAuth
 
 	// ClientAuthMethodTLSClientAuthSANDNS authenticates by exact match

@@ -182,7 +182,10 @@ func validateRedeemedAuthorizationCode(redeemed storage.RedeemedAuthorizationCod
 // access token bound to the client's DPoP key or mTLS certificate (its
 // registered SenderConstrain), plus an ID token when the granted
 // scope included "openid" and a refresh token when it included
-// "offline_access".
+// "offline_access". A client authenticated by Client Attestation
+// redeems a code only from the client instance (Client Instance Key)
+// that pushed its authorization request: to any other instance of the
+// client the code is unknown, neither spent nor treated as reused.
 func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req AuthorizationCodeExchangeRequest) (_ TokenResult, retErr error) {
 	formParams, requestedResources := s.takeResourceParameters(req.HTTP.Parameters)
 	params, err := formParametersToMap(formParams)
@@ -216,7 +219,10 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	// attachNextDPoPNonceOnFailure.
 	defer s.attachNextDPoPNonceOnFailure(ctx, client, &retErr)
 
-	codeHash := sha256.Sum256([]byte(code))
+	// Keyed by the presenting client instance too, for a client
+	// authenticated by Client Attestation: another instance's code is
+	// unknown here, so it's neither spent nor treated as reused.
+	codeHash := authorizationCodeHash(code, authn.InstanceKey)
 	redeemed, err := s.deps.Grants.RedeemAuthorizationCode(ctx, storage.AuthorizationCodeRedemption{
 		CodeHash: codeHash,
 		ClientID: client.ID(),
@@ -232,7 +238,9 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		// original redemption — see AuthorizationCodeAlreadyRedeemedError's
 		// own doc comment for when that's the case. Only the client the
 		// code was issued to triggers the revocation: another client
-		// holding a leaked code must not be able to end its tokens.
+		// holding a leaked code must not be able to end its tokens —
+		// nor, for an attested client, another instance of it, which
+		// never finds the code (authorizationCodeHash).
 		invalidErr := newError(ErrorInvalidGrant, 400, "code is invalid, expired, or already used", err)
 		if s.revokeTokensForReusedCode(ctx, err, client.ID(), codeHash) {
 			s.audit(ctx, AuditEventExchangeAuthorizationCode, client.ID(), AuditOutcomeFailure, "code reused by another client")
@@ -242,7 +250,7 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	}
 
 	now := s.deps.Clock.Now()
-	grant, grantErr := s.redeemedCodeGrant(ctx, client, redeemed, codeHash, codeExchange{redirectURI: redirectURI, thumbprint: thumbprint, codeVerifier: codeVerifier}, now)
+	grant, grantErr := s.redeemedCodeGrant(ctx, client, redeemed, codeHash, codeExchange{redirectURI: redirectURI, thumbprint: thumbprint, codeVerifier: codeVerifier, instanceKey: authn.InstanceKey}, now)
 	if grantErr != nil {
 		return s.tokenFail(ctx, AuditEventExchangeAuthorizationCode, client.ID(), grantErr)
 	}
@@ -298,15 +306,46 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 
 // codeExchange is what the token request presented with an
 // authorization code, for redeemedCodeGrant to check it against.
+// instanceKey is the presenting client's Client Instance Key thumbprint,
+// empty unless it authenticated by Client Attestation.
 type codeExchange struct {
-	redirectURI, thumbprint, codeVerifier string
+	redirectURI, thumbprint, codeVerifier, instanceKey string
+}
+
+// attestedCodeHashPrefix separates the digest an attested client
+// instance's authorization code is stored under from any plain SHA-256
+// of a code.
+const attestedCodeHashPrefix = "fapigo attested authorization code\x00"
+
+// authorizationCodeHash is the digest an authorization code is stored
+// and redeemed under (storage.NewAuthorizationCode.CodeHash): the code's
+// SHA-256, or, for a code issued to a client authenticated by Client
+// Attestation, the SHA-256 of the code bound to the thumbprint of the
+// Client Instance Key that pushed its authorization request.
+//
+// Every installation of a wallet app shares one client_id, so client_id
+// alone can't keep one installation from presenting a code another's
+// user authorized — and the store spends a code, or reports it reused,
+// before the exchange can check its PKCE verifier. Keyed by the
+// instance, a code presented by another instance is simply unknown to
+// the store: it isn't consumed, so the user's own exchange still
+// succeeds, and isn't treated as reused, so the tokens already issued
+// from it aren't revoked. Only the instance it was issued to can do
+// either. instanceKey is a base64url thumbprint and code a base64url
+// value, neither containing the NUL that separates them.
+func authorizationCodeHash(code, instanceKey string) [32]byte {
+	if instanceKey == "" {
+		return sha256.Sum256([]byte(code))
+	}
+	return sha256.Sum256([]byte(attestedCodeHashPrefix + instanceKey + "\x00" + code))
 }
 
 // redeemedCodeGrant decodes the grant of redeemed, the authorization
 // code hashing to codeHash, and checks it may still be exchanged as
 // presented: written by this server (ownsRecord), unexpired, matching
-// the request's redirect_uri, binding and PKCE verifier, not revoked,
-// and for a client still registered for the authorization code grant.
+// the request's redirect_uri, binding, PKCE verifier and client
+// instance, not revoked, and for a client still registered for the
+// authorization code grant.
 func (s *Server) redeemedCodeGrant(ctx context.Context, client storage.RegisteredClient, redeemed storage.RedeemedAuthorizationCode, codeHash [32]byte, presented codeExchange, now time.Time) (grantRecord, *Error) {
 	grant, err := s.decodeOwnGrantRecord(redeemed.Grant)
 	if err != nil {
@@ -324,6 +363,9 @@ func (s *Server) redeemedCodeGrant(ctx context.Context, client storage.Registere
 	if valErr := validateRedeemedAuthorizationCode(redeemed, grant, client.ID(), presented.redirectURI, presented.thumbprint, presented.codeVerifier, now); valErr != nil {
 		return grantRecord{}, valErr
 	}
+	if instanceErr := checkCodeInstance(grant, presented.instanceKey); instanceErr != nil {
+		return grantRecord{}, instanceErr
+	}
 	if revErr := s.checkGrantNotRevoked(ctx, grant); revErr != nil {
 		return grantRecord{}, revErr
 	}
@@ -334,6 +376,19 @@ func (s *Server) redeemedCodeGrant(ctx context.Context, client storage.Registere
 		return grantRecord{}, newError(ErrorUnauthorizedClient, 400, "the client is no longer registered for the authorization code grant", nil)
 	}
 	return grant, nil
+}
+
+// checkCodeInstance refuses an authorization code grant presented by a
+// client instance other than the one whose authorization request it was
+// issued for (grantRecord.ClientInstanceKey; instanceKey is empty unless
+// the presenter authenticated by Client Attestation).
+// authorizationCodeHash already keeps another instance from finding the
+// code at all; the record says the same.
+func checkCodeInstance(grant grantRecord, instanceKey string) *Error {
+	if grant.ClientInstanceKey != instanceKey {
+		return newError(ErrorInvalidGrant, 400, "code was issued to another client instance", nil)
+	}
+	return nil
 }
 
 // codeExchangeParameters returns the code, redirect_uri and

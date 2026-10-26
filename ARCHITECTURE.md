@@ -407,10 +407,13 @@ process that forwards the presented certificate without having verified
 its chain itself; `server.NoPKIClientAuthentication{}` refuses
 `tls_client_auth` and its SAN siblings outright (and keeps automatic
 registration from registering them), for a server with no such client;
-`server.NoClientCertificateChainTrust{}` explicitly declines the check
-while still accepting them, for a deployment whose own TLS termination
-verifies the chain, the same "conscious, visible choice, not a silent
-default" pattern `NoRevocation{}` uses for `Dependencies.Revocation`.
+`server.ClientCertificateChainVerifiedUpstream{}` skips the check while
+still accepting them, declaring that the deployment's own TLS
+termination verifies the chain; and `server.NoClientCertificateChainTrust{}`
+accepts them with no chain trust anywhere, which `server.New` refuses
+under `AssuranceProduction` — the same "conscious, visible choice, not
+a silent default" pattern `NoRevocation{}` uses for
+`Dependencies.Revocation`.
 `TrustedClientCAs` verifies at `Dependencies.Clock`'s time and then
 asks its required `Revocation` whether the verified chain has been
 revoked: `server.ClientCertificateCRLs{...}` checks it against
@@ -427,9 +430,10 @@ has no equivalent field; a protected-resource deployment still depends
 entirely on its own TLS termination for chain trust. `cmd/conformance-as`
 makes the unconfigured case concrete: its listener sets
 `tls.RequestClientCert` with no `ClientCAs`, and its wiring passes
-`server.NoClientCertificateChainTrust{}`, so that reference binary
-performs zero chain verification — a production deployment must
-configure one or the other in its own adapter.
+`server.NoClientCertificateChainTrust{}` under development assurance,
+so that reference binary performs zero chain verification — a
+production deployment must configure one or the other in its own
+adapter.
 
 **Opaque identifiers.** `PushAuthorizationResult.RequestURI` and the
 `InteractionHandle` handed to the embedding application's login UI have

@@ -17,6 +17,61 @@ and `keys/ephemeral` needs only the steps not marked *production only*.
 
 ## v0.61.0
 
+### `NoClientCertificateChainTrust{}` is refused in production (server, *production only*)
+
+**Affects:** a server under `AssuranceProduction` whose
+`Dependencies.ClientCertificateTrust` is
+`server.NoClientCertificateChainTrust{}`.
+
+**Why:** `NoClientCertificateChainTrust{}` accepts a `tls_client_auth`
+(or SAN-variant) client's certificate without verifying its chain, and
+the same value served two different deployments: one whose TLS
+termination verifies client certificate chains, and one that verifies
+nothing at all. In the second, anyone can present a self-signed
+certificate naming a statically registered client's subject or SAN and
+authenticate as it. `server.New` can't tell the two apart, and can't
+list a repository's static clients to see whether any uses
+`tls_client_auth`, so the safe one now has a name of its own.
+
+**What fails:** `server.New` returns an error naming
+`client_certificate_trust` under `AssuranceProduction`. Development
+assurance still accepts `NoClientCertificateChainTrust{}`.
+
+**What to change:** if your TLS termination (or a gateway in front of
+the server) verifies every client certificate's chain — Go's
+`tls.Config.ClientCAs` with `RequireAndVerifyClientCert` or
+`VerifyClientCertIfGiven`, on every listener that serves a
+client-authenticating endpoint — pass
+`server.ClientCertificateChainVerifiedUpstream{}`. It behaves exactly as
+`NoClientCertificateChainTrust{}` did, automatic registration included.
+Otherwise pass `server.TrustedClientCAs{...}` to verify chains in this
+package, or `server.NoPKIClientAuthentication{}` when no client uses
+`tls_client_auth`.
+
+### Authorization codes are bound to the attested client instance (server)
+
+Not a breaking change for a store or an API: it's here because of what
+happens during the upgrade itself.
+
+**Affects:** a server with `Config.AttestationBasedClientAuthentication`
+whose clients authenticate by Client Attestation (wallet apps, say).
+
+**Why:** every installation of an app shares one `client_id`, and an
+authorization code was bound only to that. Another installation holding
+an intercepted code could present it with a wrong PKCE verifier: the
+code was spent before PKCE was checked, so the user's own exchange
+failed, or, once redeemed, the presentation counted as a reuse and
+revoked the tokens issued from it. A code is now stored under a digest
+that includes the Client Instance Key that pushed its authorization
+request, so to any other installation it's unknown: neither spent nor
+reused. Refresh tokens were already bound this way.
+
+**What fails:** an attested authorization pushed before the upgrade and
+exchanged after it fails with `invalid_grant`, and the app authorizes
+again. That only affects flows in progress while the upgrade rolls out.
+
+**What to change:** nothing.
+
 ### A client confined by `AllowedResources` no longer gets issuer-audience tokens (server, storage)
 
 **Affects:** a server with resource indicators enabled (`Config.Resources`

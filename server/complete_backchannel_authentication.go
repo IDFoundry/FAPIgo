@@ -228,6 +228,7 @@ func (s *Server) approveBackchannelAuthentication(ctx context.Context, clientID 
 		RequestedUserinfoClaims: userinfoClaims,
 		IDTokenClaims:           result.grant.IDTokenClaims,
 		GrantID:                 result.grant.GrantID,
+		GrantType:               CIBAGrantType,
 	})
 	if encodeErr != nil {
 		wrapped := newError(ErrorServerError, 500, "failed to encode backchannel authentication grant", encodeErr)

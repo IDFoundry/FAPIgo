@@ -177,9 +177,10 @@ func TestNoPKIClientAuthenticationSkipsTLSClientAuthAtRegistration(t *testing.T)
 // covers which ClientCertificateTrust lets automatic registration
 // register tls_client_auth for a Relying Party that lists it, with its
 // public subject DN: TrustedClientCAs, which verifies the chain, does by
-// default; NoClientCertificateChainTrust does only when
-// AllowedClientAuthMethods names it (the opt-in for a deployment whose
-// TLS termination verifies the chain); otherwise a self-signed
+// default; ClientCertificateChainVerifiedUpstream and
+// NoClientCertificateChainTrust do only when AllowedClientAuthMethods
+// names it (the opt-in for a deployment whose TLS termination verifies
+// the chain); otherwise a self-signed
 // certificate naming that DN would authenticate as the RP.
 func TestAutomaticRegistrationRegistersPKIMethodsOnlyWhenVerifiedOrNamed(t *testing.T) {
 	for name, tc := range map[string]struct {
@@ -195,6 +196,18 @@ func TestAutomaticRegistrationRegistersPKIMethodsOnlyWhenVerifiedOrNamed(t *test
 		"chain trust declined, tls_client_auth named": {
 			trust: func(*testing.T, *x509.Certificate) server.ClientCertificateTrust {
 				return server.NoClientCertificateChainTrust{}
+			},
+			allowed:    []storage.ClientAuthMethod{storage.ClientAuthMethodPrivateKeyJWT, storage.ClientAuthMethodTLSClientAuth},
+			registered: true,
+		},
+		"verified upstream, default methods": {
+			trust: func(*testing.T, *x509.Certificate) server.ClientCertificateTrust {
+				return server.ClientCertificateChainVerifiedUpstream{}
+			},
+		},
+		"verified upstream, tls_client_auth named": {
+			trust: func(*testing.T, *x509.Certificate) server.ClientCertificateTrust {
+				return server.ClientCertificateChainVerifiedUpstream{}
 			},
 			allowed:    []storage.ClientAuthMethod{storage.ClientAuthMethodPrivateKeyJWT, storage.ClientAuthMethodTLSClientAuth},
 			registered: true,

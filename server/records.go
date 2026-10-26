@@ -93,6 +93,14 @@ type requestRecord struct {
 	// already validated (checkRequestedResources), which the grant
 	// carries into Grant.Resources. Empty when it named none.
 	Resources []string `json:"resources,omitempty"`
+
+	// ClientInstanceKey is the RFC 7638 thumbprint of the Client
+	// Instance Key a client authenticated by Client Attestation pushed
+	// the authorization request with: the authorization code issued for
+	// it is bound to that instance (see authorizationCodeHash). Empty for
+	// any other client authentication, for a CIBA request, and in a
+	// record written before this field existed.
+	ClientInstanceKey string `json:"client_instance_jkt,omitempty"`
 }
 
 // requiredSubjectForApplication is the RequiredSubject an interaction
@@ -141,7 +149,10 @@ type grantRecord struct {
 	// (draft-ietf-oauth-attestation-based-client-auth-12 §10.3). Empty
 	// for any other client authentication — and, since IssuedAt was
 	// recorded, a grant with it but without this key is refused to an
-	// attested client instance (see checkRefreshInstance).
+	// attested client instance (see checkRefreshInstance). For an
+	// authorization code, it is the key of the instance that pushed the
+	// authorization request (requestRecord.ClientInstanceKey), the only
+	// one the code exchange accepts.
 	ClientInstanceKey string `json:"client_instance_jkt,omitempty"`
 
 	Subject string `json:"sub"`
@@ -209,6 +220,15 @@ type grantRecord struct {
 	// all. Empty for grants the embedder served (IssueRefreshToken), and
 	// for records written before it existed.
 	CodeGrantID string `json:"code_grant_id,omitempty"`
+
+	// GrantType is the grant the authorization was made under:
+	// "authorization_code", or CIBAGrantType for an approved CIBA
+	// request. A refresh token keeps it, so a refresh is refused once the
+	// client is no longer registered for that grant (see
+	// checkGrantTypeStillAllowed). Empty for grants the embedder served
+	// (IssueRefreshToken), and in records written before it existed;
+	// neither is checked.
+	GrantType string `json:"grant_type,omitempty"`
 
 	// IssuedAt is when this record was issued: an authorization code,
 	// a decided CIBA request, or a refresh token (forRefreshToken resets
@@ -369,7 +389,7 @@ func recordFailure(err error, unknown *Error, what string) *Error {
 
 func encodeRequestRecord(r requestRecord) (json.RawMessage, error) {
 	r.Version = recordVersion
-	if err := requireUTF8(r.DPoPJKT); err != nil {
+	if err := requireUTF8(r.DPoPJKT, r.ClientInstanceKey); err != nil {
 		return nil, err
 	}
 	if err := requireUTF8Keys(r.Parameters, r.TokenClaims); err != nil {

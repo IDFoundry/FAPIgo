@@ -29,6 +29,11 @@ type AttestedClientAuthenticationRequest struct {
 	// 7, §7.5). Optional: a request without a client_id parameter leaves
 	// it empty.
 	ClientID string
+
+	// malformed is set by TokenEndpointRequest.AttestedClientAuthentication
+	// for a request whose parameters Parameters refuses, so its client_id
+	// can't be read one way here and another way there.
+	malformed bool
 }
 
 // AttestedClient is the client AuthenticateAttestedClient authenticated.
@@ -83,10 +88,14 @@ type AttestedClient struct {
 // (401), as at a token endpoint — that includes a PoP whose use couldn't
 // be recorded, so an unavailable replay store fails closed — except for
 // an attestation that has expired, which is ErrorUseFreshAttestation
-// (400). Every call records an AuditEventAuthenticateAttestedClient.
+// (400), and a request from TokenEndpointRequest.AttestedClientAuthentication
+// whose parameters TokenEndpointRequest.Parameters refuses, which is
+// ErrorInvalidRequest (400). Every call records an AuditEventAuthenticateAttestedClient.
 func (s *Server) AuthenticateAttestedClient(ctx context.Context, req AttestedClientAuthenticationRequest) (AttestedClient, error) {
 	attestation, pop, err := resolveAttestationHeaders(req.ClientAttestations, req.ClientAttestationPoPs)
-	if err == nil && attestation == "" {
+	if req.malformed {
+		err = newError(ErrorInvalidRequest, 400, "the request's parameters are duplicated, too many, or too large", nil)
+	} else if err == nil && attestation == "" {
 		err = newError(ErrorInvalidClient, 401, "client authentication is required", nil)
 	}
 	if err != nil {

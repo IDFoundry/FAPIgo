@@ -47,10 +47,14 @@ func (e *AuthorizationCodeAlreadyRedeemedError) Error() string {
 }
 
 // NewAuthorizationCode is what CreateAuthorizationCode persists for one
-// issued authorization code. CodeHash is the SHA-256 digest of the raw
+// issued authorization code. CodeHash is a SHA-256 digest of the raw
 // code value — matching ReplayStore's digest-only philosophy — never
 // the code itself; the raw value exists only long enough to be hashed
-// here and returned to the client in the redirect response.
+// here and returned to the client in the redirect response. For a code
+// issued to a client authenticated by Client Attestation, the digest
+// also covers the client instance it was issued to, so another
+// instance of the same client presenting the code finds none; a store
+// just keys the record by it either way.
 type NewAuthorizationCode struct {
 	CodeHash [32]byte
 
@@ -67,8 +71,9 @@ type NewAuthorizationCode struct {
 // AuthorizationCodeRedemption is the input to
 // GrantStore.RedeemAuthorizationCode.
 type AuthorizationCodeRedemption struct {
-	// CodeHash is the SHA-256 digest of the presented code value — the
-	// same digest CreateAuthorizationCode stored it under.
+	// CodeHash is the digest of the presented code value — computed the
+	// same way as the one CreateAuthorizationCode stored it under (see
+	// NewAuthorizationCode).
 	CodeHash [32]byte
 
 	// ClientID is the authenticated client presenting the code. When it

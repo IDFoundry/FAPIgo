@@ -89,13 +89,18 @@ func NewBackchannelSessionSealer(c *Client, keys [][]byte) (*BackchannelSessionS
 
 // Seal encrypts session for storage, for owner: whatever names whose
 // request this is, such as a user or connection ID, and must be given to
-// Open again. owner is required.
+// Open again. owner is required, and session must have been begun by a
+// Client with the sealer's issuer and client ID: Open binds what it
+// opens to those.
 func (s *BackchannelSessionSealer) Seal(session BackchannelAuthenticationSession, owner string) ([]byte, error) {
 	if owner == "" {
 		return nil, newError(ErrorInvalidRequest, "a backchannel authentication session is sealed for an owner", nil)
 	}
 	if session.authReqID == "" {
 		return nil, newError(ErrorInvalidRequest, "a backchannel authentication session without an auth_req_id can't be sealed", nil)
+	}
+	if !s.client.ownsBackchannelSession(session) {
+		return nil, newError(ErrorInvalidRequest, "the backchannel authentication session was begun by a client for a different issuer or client ID", nil)
 	}
 	plaintext, err := json.Marshal(sealedBackchannelSession{
 		AuthReqID: session.authReqID, IntervalMillis: session.interval.Milliseconds(),
@@ -132,7 +137,10 @@ func (s *BackchannelSessionSealer) Open(sealed []byte, owner string) (session Ba
 	if err := dec.Decode(&e); err != nil || e.AuthReqID == "" || e.IntervalMillis <= 0 || e.ExpiresAt.IsZero() || checkResources(e.Resource) != nil {
 		return BackchannelAuthenticationSession{}, false, errUnreadableBackchannelSession()
 	}
+	// The additional data bound the sealed session to this client's
+	// issuer and client ID.
 	return BackchannelAuthenticationSession{
+		issuer: s.client.cfg.Issuer.String(), clientID: s.client.cfg.ClientID.String(),
 		authReqID: e.AuthReqID, interval: time.Duration(e.IntervalMillis) * time.Millisecond,
 		expiresAt: e.ExpiresAt, notificationToken: e.NotificationToken,
 		openID: e.OpenID, essentialACR: e.EssentialACR, resource: e.Resource,

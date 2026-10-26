@@ -10,7 +10,7 @@ import (
 // sealed here.
 func FuzzOpenBackchannelSession(f *testing.F) {
 	s := sessionSealer(f, "https://as.example", sessionSealKey(1))
-	begun := BackchannelAuthenticationSession{authReqID: "req-1", interval: time.Second, expiresAt: time.Unix(1_900_000_000, 0), notificationToken: "nt"}
+	begun := BackchannelAuthenticationSession{issuer: "https://as.example", clientID: "client-1", authReqID: "req-1", interval: time.Second, expiresAt: time.Unix(1_900_000_000, 0), notificationToken: "nt"}
 	sealed, err := s.Seal(begun, "user-1")
 	if err != nil {
 		f.Fatal(err)

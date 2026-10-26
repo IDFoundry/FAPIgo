@@ -380,8 +380,14 @@ func (v *Verifier) checkBinding(resolved ResolvedAccessToken, senderConstrain st
 	// thumbprint mismatch, since a DPoP JKT and an mTLS x5t#S256 live in
 	// unrelated value spaces and a caller shouldn't have to reason about
 	// whether they could ever collide.
+	//
+	// Both refusals say only that the token is invalid, as a token this
+	// server doesn't know does (accessTokenInvalidDescription), with the
+	// reason left in the cause for logs: "not bound to the presented
+	// credential" would tell whoever presents a stolen token that it is
+	// genuine, and an opaque one that it is still on record.
 	if resolved.SenderConstrain != senderConstrain {
-		return newError(ErrorInvalidToken, 401, "access token is not bound via the presented credential's mechanism", nil)
+		return newError(ErrorInvalidToken, 401, accessTokenInvalidDescription, errors.New("access token is not bound via the presented credential's mechanism"))
 	}
 
 	// Sender-constraint binding and ordinary expiry are enforced here,
@@ -400,7 +406,7 @@ func (v *Verifier) checkBinding(resolved ResolvedAccessToken, senderConstrain st
 		presented = verifiedProof.Thumbprint.String()
 	}
 	if presented == "" || subtle.ConstantTimeCompare([]byte(resolved.Thumbprint), []byte(presented)) != 1 {
-		return newError(ErrorInvalidToken, 401, "access token is not bound to the presented credential", nil)
+		return newError(ErrorInvalidToken, 401, accessTokenInvalidDescription, errors.New("access token is not bound to the presented credential"))
 	}
 	if now.After(resolved.ExpiresAt.Add(v.cfg.Limits.MaxClockSkew)) {
 		return newError(ErrorInvalidToken, 401, "access token has expired", nil)

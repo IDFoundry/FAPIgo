@@ -194,7 +194,7 @@ func TestAttacks(t *testing.T) {
 		"ID token is not encrypted",
 		"UserInfo response sub does not match the ID token&#39;s sub",
 		"decryption failed",
-		"invalid_token: access token is not bound to the presented credential",
+		"invalid_token: access token is invalid",
 		"id_token_hint is not an ID token this server issued to the client",
 		"a pairwise subject this server issued to the client",
 		"invalid_dpop_proof")

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"math/big"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -154,6 +155,15 @@ func TestVerifyRejectsMTLSBoundTokenWithWrongCertificate(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatalf("Verify(wrong certificate) = nil error, want error")
+	}
+	// The public description doesn't confirm to whoever presented it
+	// that the token is genuine; the cause, for logs, says why.
+	var rerr *resource.Error
+	if !errors.As(err, &rerr) || rerr.Code() != resource.ErrorInvalidToken || rerr.PublicDescription() != "access token is invalid" {
+		t.Fatalf("Verify(wrong certificate) = %v, want invalid_token \"access token is invalid\"", err)
+	}
+	if !strings.Contains(err.Error(), "not bound to the presented credential") {
+		t.Errorf("Error() = %q, want the binding failure in the cause", err.Error())
 	}
 }
 

@@ -277,27 +277,9 @@ func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 		// profile the parameter travels inside the signed request object.
 		params[responseModeParameter] = "jwt"
 	}
-	if len(req.ACRValues) > 0 {
-		params["acr_values"] = strings.Join(req.ACRValues, " ")
+	if paramErr := setRequestedParameters(params, req); paramErr != nil {
+		return AuthorizationSession{}, paramErr
 	}
-	if req.HasMaxAge {
-		seconds, err := maxAgeSeconds(req.MaxAge)
-		if err != nil {
-			return AuthorizationSession{}, err
-		}
-		params[maxAgeParameter] = strconv.FormatInt(seconds, 10)
-	}
-	claims, err := req.Claims.encode(req.EssentialACRValues)
-	if err != nil {
-		return AuthorizationSession{}, newError(ErrorInvalidRequest, "claims request is invalid", err)
-	}
-	if claims != nil {
-		// JSON object text: sent as-is as a plain PAR parameter, and
-		// embedded as a native object in a request object (see
-		// signPushedRequestForm).
-		params[claimsParameter] = string(claims)
-	}
-	setResources(params, req.Resource)
 
 	var (
 		body   []byte
@@ -539,6 +521,34 @@ func (c *Client) buildPushedRequestForm(ctx context.Context, now time.Time, para
 		return nil, nil, idErr
 	}
 	return form, headers, nil
+}
+
+// setRequestedParameters adds the optional authorization parameters req
+// asks for (acr_values, max_age, claims and resource) to params — split
+// out of BeginAuthorization to keep its cognitive complexity manageable.
+func setRequestedParameters(params map[string]string, req BeginAuthorizationRequest) *Error {
+	if len(req.ACRValues) > 0 {
+		params["acr_values"] = strings.Join(req.ACRValues, " ")
+	}
+	if req.HasMaxAge {
+		seconds, err := maxAgeSeconds(req.MaxAge)
+		if err != nil {
+			return err
+		}
+		params[maxAgeParameter] = strconv.FormatInt(seconds, 10)
+	}
+	claims, err := req.Claims.encode(req.EssentialACRValues)
+	if err != nil {
+		return newError(ErrorInvalidRequest, "claims request is invalid", err)
+	}
+	if claims != nil {
+		// JSON object text: sent as-is as a plain PAR parameter, and
+		// embedded as a native object in a request object (see
+		// signPushedRequestForm).
+		params[claimsParameter] = string(claims)
+	}
+	setResources(params, req.Resource)
+	return nil
 }
 
 // signsRequestObject reports whether pushed authorization requests carry

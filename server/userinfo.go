@@ -8,18 +8,13 @@ import (
 	"strings"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/claimnames"
 	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/internal/jwe"
 	"github.com/idfoundry/fapigo/keys"
 	"github.com/idfoundry/fapigo/pairwise"
 	"github.com/idfoundry/fapigo/storage"
 )
-
-// userInfoReservedClaims are the claim names SignUserInfoResponse
-// manages itself — a caller's claims must not set them, the same
-// reserved-claim discipline IssueIDToken/IssueAccessToken already
-// apply to their own standard claims.
-var userInfoReservedClaims = []string{"iss", "aud"}
 
 // SignUserInfoResponse signs claims as a JWS (OIDC Core §5.3.2), and —
 // if client registered for encrypted UserInfo responses — wraps it in a
@@ -46,7 +41,13 @@ var userInfoReservedClaims = []string{"iss", "aud"}
 // — calling this without configuring a UserInfo signing algorithm is a
 // caller mistake, not a silent fall-through to plain JSON, since the
 // embedder specifically opted into calling it. It also fails if claims
-// itself sets "iss" or "aud" — see userInfoReservedClaims.
+// uses a name reserved for a signed UserInfo response (internal/claimnames,
+// the same policy ID tokens and access tokens follow): "iss" and "aud",
+// which it sets itself; _claim_names, _claim_sources, sub_jwk and
+// events, which change how a relying party processes the response;
+// azp, nonce, at_hash, c_hash and s_hash, which belong to an ID token;
+// and code, state and error, by whose presence a relying party tells a
+// JARM response from another JWT of the same issuer and audience.
 //
 // For a client that gets pairwise subs, claims' "sub" must be the one
 // the client was given (resource.AuthorizationContext.ClientSubject),
@@ -65,9 +66,9 @@ func (s *Server) SignUserInfoResponse(ctx context.Context, client storage.Regist
 	if !s.cfg.Algorithms.UserInfo.IsValid() {
 		return "", newError(ErrorServerError, 500, "userinfo signing is not configured", nil)
 	}
-	for _, reserved := range userInfoReservedClaims {
-		if _, ok := claims[reserved]; ok {
-			return "", newError(ErrorServerError, 500, fmt.Sprintf("userinfo claims must not set reserved claim %q", reserved), nil)
+	for name := range claims {
+		if claimnames.Reserved(claimnames.UserInfo, claimnames.Embedder, name) {
+			return "", newError(ErrorServerError, 500, fmt.Sprintf("userinfo claims must not set reserved claim %q", name), nil)
 		}
 	}
 	if subErr := s.checkUserInfoSubject(ctx, client, claims["sub"]); subErr != nil {

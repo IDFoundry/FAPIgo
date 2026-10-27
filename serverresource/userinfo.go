@@ -9,6 +9,7 @@ import (
 	"slices"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/claimnames"
 	"github.com/idfoundry/fapigo/internal/resourceerr"
 	"github.com/idfoundry/fapigo/resource"
 	"github.com/idfoundry/fapigo/server"
@@ -27,7 +28,9 @@ import (
 //     source, which isn't asked at all when none were — never every
 //     claim source knows;
 //   - a claim source returns that wasn't requested is dropped, whatever
-//     source does;
+//     source does, and so is one a signed UserInfo response may never
+//     carry, which server.Server.SignUserInfoResponse would refuse
+//     ("iss", "aud", "events", "code" and the like);
 //   - "sub" is the sub the client was given for the user
 //     (resource.AuthorizationContext.ClientSubject): its pairwise
 //     subject for a client with pairwise subjects, while source is asked
@@ -68,7 +71,7 @@ func UserInfoClaims(ctx context.Context, authz resource.AuthorizationContext, so
 			return nil, fmt.Errorf("serverresource: resolving UserInfo claims: %w", err)
 		}
 		for name, value := range resolved {
-			if slices.Contains(names, name) {
+			if slices.Contains(names, name) && !claimnames.Reserved(claimnames.UserInfo, claimnames.Embedder, name) {
 				claims[name] = value
 			}
 		}

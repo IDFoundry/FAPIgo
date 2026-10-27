@@ -42,6 +42,23 @@ type Definition[T any] struct {
 	// copied into the token claims an authorization server issues
 	// (AccessTokenParams.Parameters / IDTokenParams.Parameters) — a
 	// caller's decision, not something this package does on its own.
+	//
+	// The value is the client's choice, so NewRegistry refuses
+	// ReturnInTokenClaims under a name whose meaning a token's recipient
+	// takes from the authorization server, the resource owner or the
+	// token's own structure (ErrReservedTokenClaim): the claims an
+	// authorization server sets itself (iss, sub, aud, exp, iat, nbf,
+	// jti, client_id, scope, cnf, nonce, auth_time, acr, amr, azp and
+	// the hashes); the RFC 9068 §2.2.3.1 authorization attributes roles,
+	// groups and entitlements; the RFC 8693 delegation claims act and
+	// may_act; authorization_details; the OIDC Core §5.1 standard
+	// claims; _claim_names, _claim_sources, sub_jwk and events, which
+	// change how a recipient processes a token; and code, state and
+	// error, which would make an ID token look like a JARM response. An
+	// authorization server that grants roles or delegation sets them
+	// itself — server.GrantedAuthorization.IDTokenClaims for an ID
+	// token, or its own server.AccessTokenIssuer for an access token —
+	// never from a client's parameter.
 	ReturnInTokenClaims bool
 
 	// Validate, if non-nil, applies extra semantic checks beyond T's JSON

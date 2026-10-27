@@ -55,3 +55,25 @@ func TestRefuseOtherExplicitType(t *testing.T) {
 		}
 	}
 }
+
+func TestRequireGenericType(t *testing.T) {
+	for typ, refused := range map[string]bool{
+		"":                  false,
+		"JWT":               false,
+		"jwt":               false,
+		"application/jwt":   false,
+		"Application/JWT":   false,
+		"something-new+jwt": true,
+		"at+jwt":            true,
+		"at+jwt; charset=x": true,
+		"dc+sd-jwt":         true,
+		"statuslist+jwt":    true,
+		"text/jwt":          true,
+		"JWT ":              true,
+	} {
+		err := RequireGenericType(typ)
+		if errors.Is(err, ErrUnexpectedType) != refused {
+			t.Errorf("RequireGenericType(%q) = %v, want refused = %v", typ, err, refused)
+		}
+	}
+}

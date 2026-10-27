@@ -216,6 +216,35 @@ func TestIssueAccessTokenRejectsReservedClaimName(t *testing.T) {
 	}
 }
 
+// TestIssueAccessTokenRejectsProcessingClaims: an access token never
+// carries a claim that changes how a recipient processes it.
+func TestIssueAccessTokenRejectsProcessingClaims(t *testing.T) {
+	key := generateKey(t)
+	for _, name := range []string{"events", "_claim_names", "_claim_sources", "sub_jwk"} {
+		p := baseAccessTokenParams(key, time.Now(), time.Minute)
+		p.Parameters = map[string]json.RawMessage{name: jsonRaw(t, "x")}
+		if _, _, err := IssueAccessToken(p); err == nil {
+			t.Errorf("IssueAccessToken(parameter %q) = nil error, want error", name)
+		}
+	}
+}
+
+// TestIssueAccessTokenAllowsAuthorizationAttributes: RFC 9068
+// §2.2.3.1's roles, groups and entitlements are the issuer's to set, so
+// an AccessTokenIssuer may pass them; only a client-supplied value
+// under those names is refused (extension.ErrReservedTokenClaim).
+func TestIssueAccessTokenAllowsAuthorizationAttributes(t *testing.T) {
+	key := generateKey(t)
+	p := baseAccessTokenParams(key, time.Now(), time.Minute)
+	p.Parameters = map[string]json.RawMessage{
+		"roles": jsonRaw(t, []string{"admin"}), "groups": jsonRaw(t, []string{"staff"}),
+		"entitlements": jsonRaw(t, []string{"e"}), "act": jsonRaw(t, map[string]string{"sub": "delegate"}),
+	}
+	if _, _, err := IssueAccessToken(p); err != nil {
+		t.Fatalf("IssueAccessToken(roles, groups, entitlements, act) = %v", err)
+	}
+}
+
 func TestAccessTokenValidateRejectsWrongKey(t *testing.T) {
 	key := generateKey(t)
 	other := generateKey(t)

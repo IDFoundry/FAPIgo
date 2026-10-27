@@ -14,11 +14,13 @@ import (
 )
 
 // testGrantedIDTokenClaims stands in for provider-specific claims an
-// application adds at login: a claim describing the subject, and one
-// describing who is acting on its behalf.
+// application adds at login: a claim describing the subject, one
+// describing who is acting on its behalf, and the subject's roles —
+// the latter two the application's to decide, never a client's.
 var testGrantedIDTokenClaims = map[string]json.RawMessage{
 	"sub_type": json.RawMessage(`"user"`),
 	"act":      json.RawMessage(`{"sub":"delegate-1"}`),
+	"roles":    json.RawMessage(`["admin"]`),
 }
 
 func authorizeWithIDTokenClaims(t *testing.T, now time.Time, scope []string, claims map[string]json.RawMessage) server.InteractionResult {
@@ -160,6 +162,9 @@ func invalidGrantedIDTokenClaims() map[string]map[string]json.RawMessage {
 		"_claim_sources":     {"_claim_sources": json.RawMessage(`{"src1":{"endpoint":"https://evil.example"}}`)},
 		"sub_jwk":            {"sub_jwk": json.RawMessage(`{"kty":"EC"}`)},
 		"events":             {"events": json.RawMessage(`{"http://schemas.openid.net/event/backchannel-logout":{}}`)},
+		"code":               {"code": json.RawMessage(`"c"`)},
+		"state":              {"state": json.RawMessage(`"s"`)},
+		"error":              {"error": json.RawMessage(`"access_denied"`)},
 		"empty name":         {"": json.RawMessage(`"x"`)},
 		"invalid UTF-8 name": {"name\xff": json.RawMessage(`"x"`)},
 		// newHarness sets Limits.MaxIDTokenClaimsBytes to 4096.

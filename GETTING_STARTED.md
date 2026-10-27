@@ -722,11 +722,22 @@ decides and where the claim lands, so pick by what you need:
 
 `IDTokenClaims` values are JSON-encoded, and server-managed names
 (`iss`, `sub`, `aud`, `exp`, `iat`, `nonce`, `auth_time`, `acr`, `amr`,
-`at_hash`, `azp`, `c_hash`, `s_hash`, `jti`, `nbf`, `cnf`), along with
-names that change how a relying party processes the token
-(`_claim_names`, `_claim_sources`, `sub_jwk`, `events`), are rejected.
-Identity claims only ever add the names the client requested and the
-user approved, never a server-managed one. On a name
+`at_hash`, `azp`, `c_hash`, `s_hash`, `jti`, `nbf`, `cnf`), names
+that change how a relying party processes the token (`_claim_names`,
+`_claim_sources`, `sub_jwk`, `events`), and the authorization response
+parameters `code`, `state` and `error`, which would make an ID token
+look like a JARM response, are rejected. Identity claims only ever add
+the names the client requested and the user approved, never a
+server-managed one.
+
+An extension's value is the client's own, so `extension.NewRegistry`
+also refuses `ReturnInTokenClaims` under a name whose meaning a token's
+recipient takes from the authorization server or the resource owner:
+the RFC 9068 authorization attributes `roles`, `groups` and
+`entitlements`, the RFC 8693 delegation claims `act` and `may_act`,
+`authorization_details`, and the OIDC standard claims (`email`,
+`name`, ...). Set roles or delegation yourself, in `IDTokenClaims` or
+your own `AccessTokenIssuer`, from your own policy. On a name
 collision the more specific source wins: `IDTokenClaims` over identity
 claims over extension claims. All three are carried forward to ID
 tokens re-issued on refresh, with no storage change on your side.

@@ -24,20 +24,31 @@ func typHeader(typ string) string {
 	return fmt.Sprintf(`{"alg":"ES256","typ":%q}`, typ)
 }
 
-func TestParseIDTokenRefusesOtherExplicitTypes(t *testing.T) {
+// TestParseIDTokenAcceptsOnlyGenericTypes: an ID token has no media
+// type of its own, so its typ is absent or "JWT" — what the OpenID
+// Foundation conformance suite sends — and anything else is refused,
+// including kinds no list of known types would name and known types
+// with media type parameters.
+func TestParseIDTokenAcceptsOnlyGenericTypes(t *testing.T) {
 	payload := `{"iss":"https://op.example.com","sub":"user","aud":"rp","exp":2000000000,"iat":1000000000}`
 	for typ, refused := range map[string]bool{
 		"":                    false,
 		"JWT":                 false,
+		"jwt":                 false,
 		"application/jwt":     false,
 		"at+jwt":              true,
 		"application/AT+JWT":  true,
+		"at+jwt; charset=x":   true,
 		"logout+jwt":          true,
 		"oauth-authz-req+jwt": true,
+		"dc+sd-jwt":           true,
+		"vc+sd-jwt":           true,
+		"statuslist+jwt":      true,
+		"JWT; charset=utf-8":  true,
 	} {
 		t.Run(typ, func(t *testing.T) {
 			_, err := ParseIDToken(unsignedCompact(typHeader(typ), payload))
-			if errors.Is(err, jose.ErrOtherExplicitType) != refused {
+			if errors.Is(err, jose.ErrUnexpectedType) != refused {
 				t.Fatalf("ParseIDToken(typ %q) error = %v, want refused = %v", typ, err, refused)
 			}
 			if !refused && err != nil {

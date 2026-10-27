@@ -39,4 +39,11 @@ var (
 	// response instead of relying on a media type third-party
 	// authorization servers aren't required to set.
 	ErrNotAuthorizationResponse = errors.New("jarm: response carries neither a code nor an error parameter")
+
+	// ErrIDTokenClaims indicates a response carrying a claim only an ID
+	// token carries — sub, nonce, auth_time, acr, amr, azp or one of the
+	// hashes — which no authorization response parameter is (JARM §2.1).
+	// It is an ID token offered as a JARM response, even if it carries a
+	// "code" claim too.
+	ErrIDTokenClaims = errors.New("jarm: response carries an ID token claim")
 )

@@ -185,10 +185,17 @@ type GrantedAuthorization struct {
 	// or a CIBA poll). Nil if the application adds none.
 	//
 	// CompleteAuthorization/CompleteBackchannelAuthentication reject a
-	// claim name the server manages itself (see reservedIDTokenClaims),
-	// a name that isn't valid UTF-8, a value that isn't valid JSON, and
-	// claims whose total size exceeds Limits.MaxIDTokenClaimsBytes —
-	// a budget identity and extension claims share at issuance. A name that collides with an
+	// claim name the server manages itself — the claims it sets in an ID
+	// token; azp, jti, nbf, cnf and the hashes; _claim_names,
+	// _claim_sources, sub_jwk and events, which change how a relying
+	// party processes the token; and code, state and error, which would
+	// make it look like a JARM response — a name that isn't valid UTF-8,
+	// a value that isn't valid JSON, and claims whose total size exceeds
+	// Limits.MaxIDTokenClaimsBytes, a budget identity and extension
+	// claims share at issuance. Authorization attributes (RFC 9068
+	// roles, groups, entitlements) and delegation claims (RFC 8693 act,
+	// may_act) are the application's to set here; a client can never
+	// set them (see extension.Definition.ReturnInTokenClaims). A name that collides with an
 	// IdentityClaimsSource or extension (ReturnInTokenClaims) claim
 	// overrides it: this is the application's own decision at login,
 	// the most specific source of the three. The claims are ignored if

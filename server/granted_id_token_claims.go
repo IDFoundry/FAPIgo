@@ -3,40 +3,25 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"slices"
 	"unicode/utf8"
 
-	"github.com/idfoundry/fapigo/internal/token"
+	"github.com/idfoundry/fapigo/internal/claimnames"
 )
 
-// reservedIDTokenClaims are claim names GrantedAuthorization.IDTokenClaims
-// must not set beyond those token.IsIDTokenReservedClaim already covers:
-//   - ones a relying party validates against its own expectations: azp
-//     (OIDC Core §3.1.3.7), and c_hash/s_hash, the hybrid-flow hashes of
-//     the code and state (§3.3.2.11, FAPI 1.0 Advanced §5.2.2.1), which
-//     this server never issues but a relying party supporting that flow
-//     would check;
-//   - ones that describe the token itself (jti, nbf, cnf) rather than
-//     the authenticated subject;
-//   - ones that change how a relying party processes the token: the
-//     aggregated and distributed claims references _claim_names and
-//     _claim_sources (§5.6.2), which send a relying party to fetch or
-//     trust claims from elsewhere, and sub_jwk, the key a self-issued ID
-//     token is verified with (§7.4);
-//   - events, the claim that marks a Security Event Token (RFC 8417),
-//     such as a Back-Channel Logout token (OpenID Connect Back-Channel
-//     Logout 1.0 §2.4): an ID token re-issued without a nonce that
-//     carried it would look like a logout token to a relying party
-//     that doesn't check the token type.
-var reservedIDTokenClaims = []string{
-	"azp", "c_hash", "s_hash", "jti", "nbf", "cnf",
-	"_claim_names", "_claim_sources", "sub_jwk", "events",
-}
-
 // isServerManagedIDTokenClaim reports whether name is a claim the server
-// sets in an ID token itself or never lets anything else set there.
+// sets in an ID token itself or never lets an embedder-supplied value
+// set there — GrantedAuthorization.IDTokenClaims or an
+// IdentityClaimsSource's. The policy is internal/claimnames'
+// (claimnames.Reserved for an ID token and claimnames.Embedder): the
+// claims the server sets; the ones a relying party checks against its
+// own expectations (azp, nonce, the hashes); the ones describing the
+// token itself (jti, nbf, cnf); the ones that change how a relying
+// party processes it (_claim_names, _claim_sources, sub_jwk, events);
+// and the authorization response parameters code, state and error, by
+// whose presence a relying party tells a JARM response from an ID
+// token.
 func isServerManagedIDTokenClaim(name string) bool {
-	return token.IsIDTokenReservedClaim(name) || slices.Contains(reservedIDTokenClaims, name)
+	return claimnames.Reserved(claimnames.IDToken, claimnames.Embedder, name)
 }
 
 // validateGrantedIDTokenClaims checks GrantedAuthorization.IDTokenClaims

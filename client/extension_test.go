@@ -160,11 +160,13 @@ func TestBeginAuthorizationEmbedsExtensionsInSignedRequestObject(t *testing.T) {
 // extension named for a parameter this package sets itself, or one a
 // pushed request must not carry, is refused before anything is sent,
 // on the plain path and in a signed request object alike. On the plain
-// path "client_assertion" used to overwrite the signed assertion, and
-// "request_uri" went to PAR, which RFC 9126 §2.1 refuses.
+// path "client_assertion" used to overwrite the signed assertion,
+// "request_uri" went to PAR, which RFC 9126 §2.1 refuses, and
+// "response_mode" could ask for a response mode other than the one the
+// session expects.
 func TestBeginAuthorizationRejectsExtensionNamingAReservedParameter(t *testing.T) {
 	for _, signed := range []bool{false, true} {
-		for _, name := range []string{"client_assertion", "client_assertion_type", "client_id", "request", "request_uri", "authorization_details", "dpop_jkt"} {
+		for _, name := range []string{"client_assertion", "client_assertion_type", "client_id", "request", "request_uri", "authorization_details", "dpop_jkt", "response_mode"} {
 			c, as, _ := newTestClient(t, signed)
 			def := extension.Definition[string]{Sensitivity: extension.NotSensitive, Name: name, Cardinality: extension.Single, MaxBytes: 64}
 			req := client.BeginAuthorizationRequest{Scope: []string{"openid"}}

@@ -798,6 +798,49 @@ func TestCompleteAuthorizationHappyPathMessageSigning(t *testing.T) {
 	if success.Tokens.Subject != "end-user-1" {
 		t.Errorf("Subject = %q, want end-user-1", success.Tokens.Subject)
 	}
+	assertRequestObjectResponseMode(t, as.lastPARForm, `"jwt"`)
+}
+
+// assertRequestObjectResponseMode checks the response_mode a PAR request
+// carried: want is its JSON value inside the signed request object, or
+// "" for none. A plain response_mode alongside the request object is
+// never expected.
+func assertRequestObjectResponseMode(t *testing.T, form url.Values, want string) {
+	t.Helper()
+	if _, present := form["response_mode"]; present {
+		t.Errorf("PAR form carries a plain response_mode %q", form.Get("response_mode"))
+	}
+	obj, err := requestobject.Parse(form.Get("request"))
+	if err != nil {
+		t.Fatalf("parse request object: %v", err)
+	}
+	raw, ok := obj.Parameter("response_mode")
+	switch {
+	case want == "" && ok:
+		t.Errorf("request object response_mode = %s, want none", raw)
+	case want != "" && string(raw) != want:
+		t.Errorf("request object response_mode = %s (present %v), want %s", raw, ok, want)
+	}
+}
+
+// FAPI 2.0 Message Signing §5.4.2: only a client that expects a JARM
+// response sets response_mode; the baseline profile's plain query
+// response is the code flow's default, so it sends none, whether its
+// PAR carries plain parameters or a request object.
+func TestBeginAuthorizationSendsResponseModeOnlyUnderMessageSigning(t *testing.T) {
+	c, as, _ := newTestClient(t, false)
+	if _, err := c.BeginAuthorization(context.Background(), client.BeginAuthorizationRequest{Scope: []string{"openid"}}); err != nil {
+		t.Fatalf("BeginAuthorization (baseline): %v", err)
+	}
+	if _, present := as.lastPARForm["response_mode"]; present {
+		t.Errorf("baseline PAR form response_mode = %q, want none", as.lastPARForm.Get("response_mode"))
+	}
+
+	ro, roAS := newTestClientWithRequestObjectEncoding(t)
+	if _, err := ro.BeginAuthorization(context.Background(), client.BeginAuthorizationRequest{Scope: []string{"openid"}}); err != nil {
+		t.Fatalf("BeginAuthorization (request object encoding): %v", err)
+	}
+	assertRequestObjectResponseMode(t, roAS.lastPARForm, "")
 }
 
 // PushedRequestEncodingRequestObject under the baseline profile: PAR

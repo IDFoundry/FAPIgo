@@ -269,6 +269,14 @@ func (c *Client) BeginAuthorization(ctx context.Context, req BeginAuthorizationR
 		"code_challenge":        challenge,
 		"code_challenge_method": "S256",
 	}
+	if c.expectsJARMResponse() {
+		// FAPI 2.0 Message Signing §5.4.2: a client expecting a signed
+		// authorization response "shall set the response_mode to jwt in
+		// the authorization request" (JARM §2.3.4), rather than rely on
+		// the authorization server choosing JARM for it. Under this
+		// profile the parameter travels inside the signed request object.
+		params[responseModeParameter] = "jwt"
+	}
 	if len(req.ACRValues) > 0 {
 		params["acr_values"] = strings.Join(req.ACRValues, " ")
 	}
@@ -547,11 +555,24 @@ func (c *Client) signsRequestObject() bool {
 // "request_uri" (RFC 9126 §2.1 refuses request_uri at PAR, and RFC 9101
 // §4 a request object containing either), "authorization_details",
 // which only AuthorizationDetails sets, the client authentication
-// parameters, and "dpop_jkt", which Config.PARDPoPBinding decides.
+// parameters, "dpop_jkt", which Config.PARDPoPBinding decides, and
+// "response_mode", which Config.Profile decides (the session expects the
+// response in exactly that mode).
 var reservedExtensionNames = map[string]bool{
 	"request": true, "request_uri": true, authorizationDetailsParameter: true,
 	"client_id": true, "client_assertion": true, "client_assertion_type": true,
-	"dpop_jkt": true,
+	"dpop_jkt": true, responseModeParameter: true,
+}
+
+// responseModeParameter is the authorization request's response_mode
+// (OAuth 2.0 Multiple Response Type Encoding Practices §2.1).
+const responseModeParameter = "response_mode"
+
+// expectsJARMResponse reports whether this client's authorization
+// responses must arrive as signed JARM responses — FAPI 2.0 Message
+// Signing's authorization response signing.
+func (c *Client) expectsJARMResponse() bool {
+	return c.cfg.Profile == ProfileFAPISecurityWithMessageSigning
 }
 
 // populatePlainPushedRequestForm fills form with params and snapshot for
@@ -656,7 +677,7 @@ func (c *Client) signPushedRequestForm(ctx context.Context, now time.Time, form,
 // response must arrive as a signed JARM response.
 func (c *Client) newSessionRecord(req BeginAuthorizationRequest, redirectURI, nonce, verifier string) sessionRecord {
 	responseMode := responseModePlain
-	if c.cfg.Profile == ProfileFAPISecurityWithMessageSigning {
+	if c.expectsJARMResponse() {
 		responseMode = responseModeJARM
 	}
 	record := sessionRecord{

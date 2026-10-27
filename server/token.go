@@ -312,16 +312,27 @@ type codeExchange struct {
 	redirectURI, thumbprint, codeVerifier, instanceKey string
 }
 
-// attestedCodeHashPrefix separates the digest an attested client
-// instance's authorization code is stored under from any plain SHA-256
-// of a code.
-const attestedCodeHashPrefix = "fapigo attested authorization code\x00"
+// codeHashPrefix and attestedCodeHashPrefix separate the digest an
+// authorization code is stored under from the plain SHA-256 a refresh
+// token is (issueRefreshToken), and an attested client instance's code
+// from any other.
+const (
+	codeHashPrefix         = "fapigo authorization code\x00"
+	attestedCodeHashPrefix = "fapigo attested authorization code\x00"
+)
 
 // authorizationCodeHash is the digest an authorization code is stored
-// and redeemed under (storage.NewAuthorizationCode.CodeHash): the code's
-// SHA-256, or, for a code issued to a client authenticated by Client
-// Attestation, the SHA-256 of the code bound to the thumbprint of the
-// Client Instance Key that pushed its authorization request.
+// and redeemed under (storage.NewAuthorizationCode.CodeHash): the
+// SHA-256 of the code after codeHashPrefix, or, for a code issued to a
+// client authenticated by Client Attestation, the SHA-256 of the code
+// bound to the thumbprint of the Client Instance Key that pushed its
+// authorization request.
+//
+// Neither is ever a refresh token's digest (the plain SHA-256 of the
+// token, unprefixed so the refresh tokens already stored stay valid),
+// whatever the two values, so a store keeping codes and refresh tokens
+// in one table keyed by digest can't return one for the other; the
+// record's own grantRecord.Kind refuses it as well.
 //
 // Every installation of a wallet app shares one client_id, so client_id
 // alone can't keep one installation from presenting a code another's
@@ -335,7 +346,7 @@ const attestedCodeHashPrefix = "fapigo attested authorization code\x00"
 // value, neither containing the NUL that separates them.
 func authorizationCodeHash(code, instanceKey string) [32]byte {
 	if instanceKey == "" {
-		return sha256.Sum256([]byte(code))
+		return sha256.Sum256([]byte(codeHashPrefix + code))
 	}
 	return sha256.Sum256([]byte(attestedCodeHashPrefix + instanceKey + "\x00" + code))
 }
@@ -350,6 +361,11 @@ func (s *Server) redeemedCodeGrant(ctx context.Context, client storage.Registere
 	grant, err := s.decodeOwnGrantRecord(redeemed.Grant)
 	if err != nil {
 		return grantRecord{}, recordFailure(err, newError(ErrorInvalidGrant, 400, "code is invalid, expired, or already used", nil), "authorization code grant")
+	}
+	if !grant.isKind(grantKindAuthorizationCode) {
+		// Another artefact's record — a refresh token's, from a store
+		// keeping both in one table — is as unknown as no record.
+		return grantRecord{}, newError(ErrorInvalidGrant, 400, "code is invalid, expired, or already used", nil)
 	}
 	if _, ok := s.grantRevocationReader(); ok {
 		// Named after the code, so a reuse of it can revoke whatever this

@@ -247,6 +247,11 @@ func (s *Server) redeemRefreshGrant(ctx context.Context, clientID fapi.ClientID,
 	if err != nil {
 		return grantRecord{}, time.Time{}, recordFailure(err, newError(ErrorInvalidGrant, 400, "refresh_token is invalid, expired, or already used", nil), "refresh token grant")
 	}
+	if !grant.isKind(grantKindRefreshToken) {
+		// Another artefact's record — an authorization code's, from a
+		// store keeping both in one table — is as unknown as no record.
+		return grantRecord{}, time.Time{}, newError(ErrorInvalidGrant, 400, "refresh_token is invalid, expired, or already used", nil)
+	}
 	if !issuedWithin(grant.IssuedAt, s.cfg.Limits.RefreshTokenLifetime, now) {
 		return grantRecord{}, time.Time{}, newError(ErrorInvalidGrant, 400, "refresh_token has expired", nil)
 	}

@@ -96,11 +96,46 @@ func TestGrantRecordForRefreshTokenDropsCodeOnlyFields(t *testing.T) {
 	if got.RedirectURI != "" || got.CodeChallenge != "" || got.Nonce != "" {
 		t.Fatalf("forRefreshToken kept code-only fields: %+v", got)
 	}
+	if got.Kind != grantKindRefreshToken {
+		t.Fatalf("forRefreshToken Kind = %q, want %q", got.Kind, grantKindRefreshToken)
+	}
 	if got.IssuedAt == nil || !got.IssuedAt.Equal(issued) {
 		t.Fatalf("forRefreshToken IssuedAt = %v, want %v", got.IssuedAt, issued)
 	}
 	if got.Thumbprint != "thumb-1" || got.ClientInstanceKey != "instance-1" || got.Subject != "user-1" || got.DPoPJKT != "jkt" || len(got.Scope) != 2 {
 		t.Fatalf("forRefreshToken = %+v, want grant carried forward with thumbprint and instance key", got)
+	}
+}
+
+// TestGrantRecordIsKind covers which redemption accepts which record: a
+// record's own kind only, and, for a record written before records
+// carried a kind, a refresh token or CIBA grant only when it has none
+// of an authorization code's fields, and an authorization code never.
+func TestGrantRecordIsKind(t *testing.T) {
+	legacyCode := grantRecord{RedirectURI: "https://rp.example/cb", CodeChallenge: "challenge", Nonce: "n"}
+	tests := []struct {
+		name   string
+		record grantRecord
+		accept map[grantKind]bool
+	}{
+		{"authorization code", grantRecord{Kind: grantKindAuthorizationCode}, map[grantKind]bool{grantKindAuthorizationCode: true}},
+		{"refresh token", grantRecord{Kind: grantKindRefreshToken}, map[grantKind]bool{grantKindRefreshToken: true}},
+		{"CIBA grant", grantRecord{Kind: grantKindBackchannel}, map[grantKind]bool{grantKindBackchannel: true}},
+		{"unknown kind", grantRecord{Kind: "other"}, map[grantKind]bool{}},
+		{"kind-less refresh token or CIBA grant", grantRecord{Subject: "user-1"}, map[grantKind]bool{grantKindRefreshToken: true, grantKindBackchannel: true}},
+		{"kind-less authorization code", legacyCode, map[grantKind]bool{}},
+		{"kind-less record with only a redirect_uri", grantRecord{RedirectURI: "https://rp.example/cb"}, map[grantKind]bool{}},
+		{"kind-less record with only a PKCE challenge", grantRecord{CodeChallenge: "challenge"}, map[grantKind]bool{}},
+		{"kind-less record with only a nonce", grantRecord{Nonce: "n"}, map[grantKind]bool{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, kind := range []grantKind{grantKindAuthorizationCode, grantKindRefreshToken, grantKindBackchannel} {
+				if got := tt.record.isKind(kind); got != tt.accept[kind] {
+					t.Errorf("isKind(%q) = %v, want %v", kind, got, tt.accept[kind])
+				}
+			}
+		})
 	}
 }
 

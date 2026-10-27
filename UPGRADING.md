@@ -120,6 +120,65 @@ issuer, err := fapi.ParseIssuerURL("https://" + host)
 ASCII hosts in any letter case are unaffected: `https://AS.Example` is
 still accepted, as `https://as.example`.
 
+### Authorization codes are stored under a new digest, and `GrantStore` keeps codes and refresh tokens apart (server, storage)
+
+**Affects:** every server, once, at deploy; and a custom
+`storage.GrantStore` that keeps authorization codes and refresh tokens
+in one table keyed by digest alone. `memstore` needs no change.
+
+**Why:** a non-attested authorization code and a refresh token were
+both stored under the plain SHA-256 of their value, and the grant
+record didn't say which it was. A store with one table for both — which
+passed every `storage.TestGrantStoreContract` subtest — answered
+`RedeemRefreshToken` with a code's record, so a client presenting its
+code as `refresh_token` got tokens without PKCE, without its
+`redirect_uri`, under any DPoP key, as often as it liked, and without
+spending the code. Two independent changes close that:
+
+- A code's digest (`NewAuthorizationCode.CodeHash`) is now the SHA-256
+  of the code behind a fixed domain-separation prefix, so it never
+  equals a refresh token's digest of the same value. A refresh token's
+  digest is unchanged: codes live `Limits.AuthorizationCodeLifetime`
+  (a minute at most), so moving them costs only the codes in flight at
+  deploy, while moving refresh tokens would have orphaned every live
+  one. An attested client instance's code digest is unchanged.
+- Each grant record now carries its kind (authorization code, refresh
+  token, decided CIBA request), and each redemption refuses a record of
+  another kind with `invalid_grant`, as if it were unknown. A record
+  written before this release has no kind: a refresh token or CIBA
+  grant without one is still accepted when it has none of a code's
+  fields (`redirect_uri`, PKCE challenge, `nonce`), which every code
+  has and a refresh token never does; a code is never accepted without
+  one.
+
+**What fails:**
+
+- An authorization code issued before the deploy and exchanged after it
+  is unknown (`invalid_grant`), as is the reuse of such a code: the
+  client starts the authorization again. Refresh tokens and CIBA
+  requests carry over.
+- `storage.TestGrantStoreContract` has two new subtests,
+  `RedeemRefreshTokenDoesNotReturnAuthorizationCode` and
+  `RedeemAuthorizationCodeDoesNotReturnRefreshToken`, which a store
+  keyed by digest alone across both kinds fails. The server refuses the
+  crossed record either way; the subtests hold the store to the same
+  separation.
+- Anything outside the server that computed a code's digest itself as
+  `sha256.Sum256([]byte(code))` no longer matches what the store holds.
+
+**What to change:** nothing for a store with separate code and refresh
+token tables. A single-table store adds the kind to its key or filter:
+
+```go
+// One "grants" table: key by (kind, digest), not digest alone.
+func (s *Store) RedeemRefreshToken(ctx context.Context, r storage.RefreshTokenRedemption) (storage.RedeemedRefreshToken, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT client_id, grant_record, expires_at FROM grants
+		 WHERE kind = 'refresh_token' AND hash = $1 AND NOT revoked`, r.TokenHash[:])
+	// ...
+}
+```
+
 ## v0.62.0
 
 ### `X5CAttesterChain.Revocation` is required (server)

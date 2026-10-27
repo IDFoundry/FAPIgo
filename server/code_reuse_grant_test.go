@@ -125,7 +125,8 @@ func TestRefreshRefusesARevokedCodeGrant(t *testing.T) {
 	if err := refresh(); err != nil {
 		t.Fatalf("RefreshAccessToken before revocation: %v", err)
 	}
-	codeHash := sha256.Sum256([]byte(code))
+	// The digest the server stores a code under (authorizationCodeHash).
+	codeHash := sha256.Sum256([]byte("fapigo authorization code\x00" + code))
 	if err := h.revocation.Revoke(context.Background(), grantrevocation.CodeKey(testIssuer, grantrevocation.CodeGrantID(codeHash)), h.now.Add(time.Hour)); err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}

@@ -48,8 +48,9 @@ func (e *AuthorizationCodeAlreadyRedeemedError) Error() string {
 
 // NewAuthorizationCode is what CreateAuthorizationCode persists for one
 // issued authorization code. CodeHash is a SHA-256 digest of the raw
-// code value — matching ReplayStore's digest-only philosophy — never
-// the code itself; the raw value exists only long enough to be hashed
+// code value, domain-separated so it never equals a refresh token's
+// digest (NewRefreshToken.TokenHash) of the same value — matching
+// ReplayStore's digest-only philosophy — never the code itself; the raw value exists only long enough to be hashed
 // here and returned to the client in the redirect response. For a code
 // issued to a client authenticated by Client Attestation, the digest
 // also covers the client instance it was issued to, so another
@@ -131,6 +132,15 @@ type RedeemedRefreshToken struct {
 }
 
 // GrantStore persists issued authorization codes and refresh tokens.
+//
+// The two are separate kinds of record: RedeemRefreshToken returns only
+// a refresh token, and RedeemAuthorizationCode only an authorization
+// code, whatever digest each is given. A store keeping both in one
+// table keyed by digest must also key or filter by kind. The server
+// never stores both under one digest, and each record's opaque Grant
+// says which kind it is, so a record of the wrong kind is refused
+// rather than redeemed; TestGrantStoreContract still checks that a
+// store keeps them apart.
 type GrantStore interface {
 	// CreateAuthorizationCode persists code under its CodeHash until at
 	// least its ExpiresAt, unredeemed. An error fails the authorization

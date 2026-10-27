@@ -15,7 +15,7 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
-## Unreleased
+## v0.62.0
 
 ### `X5CAttesterChain.Revocation` is required (server)
 

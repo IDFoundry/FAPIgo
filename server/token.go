@@ -241,7 +241,7 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 		// holding a leaked code must not be able to end its tokens —
 		// nor, for an attested client, another instance of it, which
 		// never finds the code (authorizationCodeHash).
-		invalidErr := newError(ErrorInvalidGrant, 400, "code is invalid, expired, or already used", err)
+		invalidErr := newError(ErrorInvalidGrant, 400, codeUnknownDescription, err)
 		if s.revokeTokensForReusedCode(ctx, err, client.ID(), codeHash) {
 			s.audit(ctx, AuditEventExchangeAuthorizationCode, client.ID(), AuditOutcomeFailure, "code reused by another client")
 			return TokenResult{}, invalidErr
@@ -304,6 +304,11 @@ func (s *Server) ExchangeAuthorizationCode(ctx context.Context, req Authorizatio
 	return result, nil
 }
 
+// codeUnknownDescription is the error_description of the invalid_grant
+// for an authorization code this server doesn't know, doesn't own
+// (Server.ownsRecord), or whose record isn't a code's.
+const codeUnknownDescription = "code is invalid, expired, or already used"
+
 // codeExchange is what the token request presented with an
 // authorization code, for redeemedCodeGrant to check it against.
 // instanceKey is the presenting client's Client Instance Key thumbprint,
@@ -360,12 +365,12 @@ func authorizationCodeHash(code, instanceKey string) [32]byte {
 func (s *Server) redeemedCodeGrant(ctx context.Context, client storage.RegisteredClient, redeemed storage.RedeemedAuthorizationCode, codeHash [32]byte, presented codeExchange, now time.Time) (grantRecord, *Error) {
 	grant, err := s.decodeOwnGrantRecord(redeemed.Grant)
 	if err != nil {
-		return grantRecord{}, recordFailure(err, newError(ErrorInvalidGrant, 400, "code is invalid, expired, or already used", nil), "authorization code grant")
+		return grantRecord{}, recordFailure(err, newError(ErrorInvalidGrant, 400, codeUnknownDescription, nil), "authorization code grant")
 	}
 	if !grant.isKind(grantKindAuthorizationCode) {
 		// Another artefact's record — a refresh token's, from a store
 		// keeping both in one table — is as unknown as no record.
-		return grantRecord{}, newError(ErrorInvalidGrant, 400, "code is invalid, expired, or already used", nil)
+		return grantRecord{}, newError(ErrorInvalidGrant, 400, codeUnknownDescription, nil)
 	}
 	if _, ok := s.grantRevocationReader(); ok {
 		// Named after the code, so a reuse of it can revoke whatever this

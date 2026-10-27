@@ -2,14 +2,17 @@ package server_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
 	"time"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/clientassertion"
 	"github.com/idfoundry/fapigo/server"
 	"github.com/idfoundry/fapigo/storage"
+	"github.com/idfoundry/fapigo/storage/memstore"
 )
 
 // unifiedGrantRow is one row of unifiedGrantStore's single table.
@@ -197,5 +200,51 @@ func TestRefreshTokenRefusedAtCodeExchange(t *testing.T) {
 				t.Fatalf("refresh after the refused code exchange: %v", err)
 			}
 		})
+	}
+}
+
+// relabelledBackchannelStore answers every poll with the approved grant
+// relabelled as a refresh token's record, as a store mixing record
+// kinds might.
+type relabelledBackchannelStore struct {
+	*memstore.BackchannelAuthenticationStore
+	t *testing.T
+}
+
+func (s relabelledBackchannelStore) PollBackchannelAuthentication(ctx context.Context, poll storage.PollBackchannelAuthentication) (storage.PolledBackchannelAuthentication, error) {
+	polled, err := s.BackchannelAuthenticationStore.PollBackchannelAuthentication(ctx, poll)
+	if err == nil && polled.Grant != nil {
+		var fields map[string]json.RawMessage
+		if unmarshalErr := json.Unmarshal(polled.Grant, &fields); unmarshalErr != nil {
+			s.t.Fatal(unmarshalErr)
+		}
+		fields["kind"] = json.RawMessage(`"refresh_token"`)
+		relabelled, marshalErr := json.Marshal(fields)
+		if marshalErr != nil {
+			s.t.Fatal(marshalErr)
+		}
+		polled.Grant = relabelled
+	}
+	return polled, err
+}
+
+// TestBackchannelGrantOfAnotherKindIsUnknown covers the CIBA token
+// exchange refusing a grant record of another kind as an unknown
+// auth_req_id.
+func TestBackchannelGrantOfAnotherKindIsUnknown(t *testing.T) {
+	h := newHarnessWithBackchannelStore(t, relabelledBackchannelStore{memstore.NewBackchannelAuthenticationStore(), t})
+	required := beginBackchannel(t, h, standardBackchannelParams(t))
+	approveBackchannel(t, h, required.Handle)
+	_, err := h.server.ExchangeBackchannelAuthentication(context.Background(), server.BackchannelTokenExchangeRequest{
+		HTTP: server.FormRequest{Parameters: []server.FormParameter{
+			formParam("client_assertion", h.clientAssertion(t)),
+			formParam("client_assertion_type", clientassertion.AssertionType),
+			formParam("grant_type", server.CIBAGrantType),
+			formParam("auth_req_id", required.AuthReqID.String()),
+		}},
+		DPoPProofs: []string{createDPoPProof(t, generateKey(t), h.now)},
+	})
+	if code := serverErrorCode(t, err); code != server.ErrorInvalidGrant {
+		t.Fatalf("redeeming a backchannel grant recorded as a refresh token: error code %q, want %q", code, server.ErrorInvalidGrant)
 	}
 }

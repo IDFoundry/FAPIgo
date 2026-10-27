@@ -33,10 +33,10 @@ var (
 	// other value alongside it).
 	ErrAudienceMismatch = errors.New("requestobject: aud does not match expected audience")
 
-	// ErrUnexpectedSubject indicates VerifyPolicy.AutomaticFederationRegistration
-	// was set but the object carries a "sub" claim — OpenID Federation
-	// 1.0 §12.1.1 requires it be absent, specifically to stop such a
-	// request object being reused as a private_key_jwt client assertion.
+	// ErrUnexpectedSubject indicates the object carries a "sub" claim,
+	// which would let it be reused as the client's private_key_jwt client
+	// assertion (RFC 9101 §10.8, RFC 8725 §3.12; OpenID Federation 1.0
+	// §12.1.1 requires it be absent for the same reason).
 	ErrUnexpectedSubject = errors.New("requestobject: sub claim must not be present")
 
 	// ErrExpired indicates the object's exp claim is not after the

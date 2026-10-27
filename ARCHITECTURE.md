@@ -744,9 +744,12 @@ feature that changes what a grant carries never changes a store.
 ExpiresAt}`) — never a complete client assertion, DPoP proof or other
 sensitive payload — and must keep each until at least that expiry (one
 forgotten sooner can be replayed); callers must assign it a namespaced identifier
-per role/subsystem (`server:client-assertion`, `server:request-object`,
-`server:dpop`, `resource:dpop`, ...) so different subsystems can never
-collide on the same use-once token.
+per role/subsystem (`server:client-signed-jwt`, `server:dpop`,
+`resource:dpop`, ...) so different subsystems can never collide on the
+same use-once token. Every JWT a client signs with its own keys (client
+assertions, request objects, CIBA requests) shares the one
+`server:client-signed-jwt` namespace, so a jti is spent whichever kind
+first carries it.
 
 Because a storage backend's atomicity/durability guarantees are
 self-asserted, `storage` also defines a `StoreAssurance.Capabilities`

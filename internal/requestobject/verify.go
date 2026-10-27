@@ -157,16 +157,14 @@ type VerifyPolicy struct {
 	// §12.1.1's stricter Request Object rules, for a request object from
 	// a client resolved via §12.1 Automatic Registration
 	// (storage.RegisteredClient.AutomaticFederationRegistration)
-	// rather than statically configured. It replaces the generic RFC
-	// 9101 checks with three federation-specific ones: aud MUST equal
+	// rather than statically configured: aud MUST equal
 	// ExpectedAudience exactly, with no other values present (where the
 	// generic rule only requires ExpectedAudience be one of possibly
-	// several); a "sub" claim MUST NOT be present at all (this is what
-	// stops the same object being replayed as a private_key_jwt client
-	// assertion, which is keyed on iss+sub); and jti becomes required,
-	// exactly as RequireJTI would (set independently here rather than
-	// requiring the caller to also set RequireJTI, since both are always
-	// implied together by this one policy).
+	// several); and jti becomes required, exactly as RequireJTI would
+	// (set independently here rather than requiring the caller to also
+	// set RequireJTI, since both are always implied together by this
+	// one policy). §12.1.1's third rule, no "sub" claim, Verify applies
+	// to every request object — see ErrUnexpectedSubject.
 	AutomaticFederationRegistration bool
 }
 
@@ -230,17 +228,27 @@ func (o Object) Verify(ctx context.Context, pub crypto.PublicKey, policy VerifyP
 	return VerifiedObject{ClientID: c.Issuer, Parameters: c.Parameters, ExpiresAt: c.ExpiresAt}, nil
 }
 
-// checkAudienceAndSubject enforces the "aud"/"sub" claim rules — either
-// AutomaticFederationRegistration's stricter Federation 1.0 §12.1.1
-// rules, or the generic RFC 9101 one — split out of Verify purely to
-// keep that method's own cognitive complexity manageable.
+// checkAudienceAndSubject enforces the "aud"/"sub" claim rules — the
+// "aud" rule either AutomaticFederationRegistration's stricter
+// Federation 1.0 §12.1.1 one or the generic RFC 9101 one — split out of
+// Verify purely to keep that method's own cognitive complexity
+// manageable.
+//
+// A "sub" claim is refused from every client. A client signs its
+// request objects, CIBA requests and client assertions with one key
+// set, and "sub" is the claim a client assertion authenticates by
+// (RFC 7523 §3): with it, a typ-less request object carries every claim
+// an assertion needs, and whoever reads one could present it as the
+// client's assertion. RFC 9101 §10.8 and RFC 8725 §3.12 have such JWT
+// kinds kept apart; Federation 1.0 §12.1.1 forbids "sub" for the same
+// reason. Nothing in a request object's processing reads it.
 func checkAudienceAndSubject(c Claims, policy VerifyPolicy) error {
+	if c.HasSubject {
+		return ErrUnexpectedSubject
+	}
 	if policy.AutomaticFederationRegistration {
 		if len(c.Audience) != 1 || c.Audience[0] != policy.ExpectedAudience {
 			return ErrAudienceMismatch
-		}
-		if c.HasSubject {
-			return ErrUnexpectedSubject
 		}
 		return nil
 	}

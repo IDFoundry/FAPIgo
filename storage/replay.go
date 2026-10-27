@@ -8,8 +8,8 @@ import (
 // ReplayNamespace scopes a replayed-use digest to the subsystem that
 // recorded it, so different roles and subsystems can never collide on
 // the same use-once token even if they happen to hash to the same
-// digest (e.g. "server:client-assertion", "server:request-object",
-// "server:dpop", "resource:dpop").
+// digest (e.g. "server:client-signed-jwt", "server:dpop",
+// "resource:dpop").
 type ReplayNamespace string
 
 // ReplayUse is one use-once check: has Digest, scoped to Namespace, been

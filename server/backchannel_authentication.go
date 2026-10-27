@@ -328,7 +328,7 @@ func (s *Server) resolveBackchannelAuthenticationParameters(ctx context.Context,
 		Now:              s.deps.Clock.Now(),
 		MaxLifetime:      s.cfg.Limits.MaxBackchannelAuthenticationRequestLifetime,
 		MaxClockSkew:     s.cfg.Limits.MaxClockSkew,
-		Replay:           s.backchannelAuthenticationRequestReplayChecker(client.ID()),
+		Replay:           s.clientSignedJWTReplayChecker(client.ID()),
 		// Unlike PAR's request object (single-use via its own
 		// request_uri wrapper — see requestobject.VerifyPolicy.Replay's
 		// own doc comment for why nbf/jti are optional there), a CIBA
@@ -342,6 +342,11 @@ func (s *Server) resolveBackchannelAuthenticationParameters(ctx context.Context,
 	})
 	if err != nil {
 		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, "backchannel authentication request verification failed", err)
+	}
+	// CIBA Core §13 has no invalid_request_object: a malformed member of
+	// the signed request is invalid_request, as everywhere on this path.
+	if err := checkParameterTypes(verified.Parameters, backchannelParameterTypes); err != nil {
+		return verifiedBackchannelRequest{}, newError(ErrorInvalidRequest, 400, err.Error(), nil)
 	}
 	resources, resourceErr := s.resourcesFromParameters(verified.Parameters)
 	if resourceErr != nil {
@@ -580,16 +585,11 @@ func isAcceptableBindingMessage(msg string) bool {
 // bound to, which the token exchange then requires its DPoP proof's key
 // to match: the proof's key, or an explicit dpop_jkt parameter (RFC 9449
 // §10, applied here as at PAR) when there's no proof. A dpop_jkt that
-// isn't a string, or doesn't match a proof sent with it, is refused.
+// doesn't match a proof sent with it is refused.
 func (s *Server) reconcileBackchannelDPoPBinding(ctx context.Context, proof string, params map[string]json.RawMessage) (string, *Error) {
-	var declared string
-	if _, ok := params["dpop_jkt"]; ok {
-		v, err := jsonString(params, "dpop_jkt")
-		if err != nil {
-			return "", newError(ErrorInvalidRequest, 400, "dpop_jkt must be a string", err)
-		}
-		declared = v
-	}
+	// A dpop_jkt that isn't a non-empty string was refused with the
+	// request's other parameters (backchannelParameterTypes).
+	declared, _ := jsonString(params, "dpop_jkt")
 	if proof == "" {
 		return declared, nil
 	}

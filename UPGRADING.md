@@ -278,6 +278,115 @@ or refresh token response, and `FetchUserInfo` return
 **What to change:** nothing for a conforming authorization server. If
 yours sets another `typ` on these JWTs, have it send `JWT` or no `typ`.
 
+### A request object or CIBA request carrying `sub` is refused (server)
+
+**Affects:** clients whose request objects (PAR) or signed CIBA
+authentication requests carry a `sub` claim. Until now only a client
+registered through OpenID Federation automatic registration was refused
+one. FAPIgo's own `client` package never sets `sub`.
+
+**Why:** a client signs its request objects, CIBA requests and
+`private_key_jwt` client assertions with one key set. A typ-less request
+object carrying `sub` = `client_id` has every claim a client assertion
+needs, so whoever read one — from an audit log or a debugging proxy —
+could present it once as the client's `client_assertion`, for example
+to get a client-credentials token bound to their own DPoP key. RFC 9101
+§10.8 and RFC 8725 §3.12 have such JWT kinds kept apart, and nothing in
+a request object's processing reads `sub`.
+
+**What fails:** PAR answers `invalid_request_object`, and the
+backchannel authentication endpoint `invalid_request`.
+
+**What to change:** have the client leave `sub` out of request objects
+and CIBA requests:
+
+```go
+claims := map[string]any{
+	"iss": clientID, "aud": issuer, "client_id": clientID,
+	"exp": exp, "nbf": now, "iat": now, "jti": jti,
+	// no "sub"
+	"response_type": "code", /* ... */
+}
+```
+
+### A client assertion carrying request claims is refused (server)
+
+**Affects:** clients whose `private_key_jwt` client assertions carry a
+claim an authorization or CIBA request carries: `response_type`,
+`redirect_uri`, `scope`, `state`, `nonce`, `code_challenge`, `request`,
+`request_uri`, `claims`, `authorization_details`, `login_hint`,
+`login_hint_token`, `id_token_hint`, `binding_message` or
+`client_notification_token`. FAPIgo's own `client` package sets none.
+
+**Why:** a JWT carrying them is a signed request, not an assertion; it
+was accepted as one because an assertion's other claims were ignored.
+See the previous section.
+
+**What fails:** client authentication answers `invalid_client` at every
+endpoint that authenticates a client.
+
+**What to change:** send only the assertion's own claims (`iss`, `sub`,
+`aud`, `jti`, `exp`, and optionally `iat` and `nbf`, RFC 7523 §3).
+
+### One replay namespace for every JWT a client signs (server)
+
+**Affects:** clients that reuse a `jti` across a client assertion, a
+request object and a CIBA request; and anyone reading a
+`storage.ReplayStore` by namespace.
+
+**Why:** each kind kept its own replay records, so a JWT verified as one
+kind could be used once more as another under the same `jti`. Client
+assertions, request objects and CIBA requests now share the namespace
+`server:client-signed-jwt`, still scoped to the client, so a `jti` is
+spent whichever kind first carries it. Each record lasts until the
+JWT's own `exp` plus twice `Limits.MaxClockSkew`, as before. The
+namespaces `server:client-assertion`, `server:request-object` and
+`server:backchannel-authentication-request` are no longer written;
+records already in them simply expire, so a store needs no migration.
+DPoP proofs and Client Attestation PoPs keep their own namespaces.
+
+**What fails:** a JWT whose `jti` the same client already used in
+another kind is refused as a replay: `invalid_client` for an assertion,
+`invalid_request_object` for a request object, `invalid_request` for a
+CIBA request.
+
+**What to change:** give every signed JWT a fresh, unique `jti`, as RFC
+7519 §4.1.7 asks. A store needs no change.
+
+### Request-object parameters of the wrong JSON type are refused (server)
+
+**Affects:** clients whose request objects or CIBA requests carry a core
+parameter as a JSON number, object, array, boolean or null where a
+string is defined, or an empty `dpop_jkt`. Plain form parameters are
+always strings and aren't affected.
+
+**Why:** such a parameter was accepted at PAR, then read as absent: a
+`dpop_jkt` array left the authorization code unbound to any key, a
+numeric `nonce` gave an ID token with no `nonce`, an object `state`
+was left out of the authorization response. The binding, replay or CSRF
+protection the client asked for silently disappeared. One check now
+types every core parameter as it is defined: `response_type`,
+`redirect_uri`, `scope`, `state`, `nonce`, `code_challenge`,
+`code_challenge_method`, `response_mode`, `prompt`, `acr_values`,
+`login_hint`, `id_token_hint` and `dpop_jkt` (non-empty) are strings;
+`max_age` a number or a numeric string; `claims` an object or a string
+holding one. For CIBA, `scope`, `login_hint`, `login_hint_token`,
+`id_token_hint`, `acr_values`, `binding_message`,
+`client_notification_token` and `dpop_jkt` (non-empty) are strings and
+`requested_expiry` a number or a numeric string. `authorization_details`
+keeps its own check, with `invalid_authorization_details`, and
+`ui_locales`, `claims_locales` and `display` are still never refused.
+
+**What fails:** PAR answers `invalid_request_object` (some of these
+were refused before with `invalid_request`); the backchannel
+authentication endpoint answers `invalid_request`.
+
+**What to change:** send each parameter with its defined type:
+
+```json
+{"state": "af0ifjsldkj", "nonce": "n-0S6_WzA2Mj", "dpop_jkt": "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs", "max_age": 300}
+```
+
 ## v0.62.0
 
 ### `X5CAttesterChain.Revocation` is required (server)

@@ -9,6 +9,11 @@ var (
 	// not recognize.
 	ErrMalformedClaims = errors.New("clientassertion: malformed claims")
 
+	// ErrRequestClaim indicates the assertion carries a claim only an
+	// authorization or CIBA request carries (see requestClaims): it is
+	// a signed request presented as a client assertion.
+	ErrRequestClaim = errors.New("clientassertion: assertion carries an authorization request claim")
+
 	// ErrIssuerSubjectMismatch indicates the assertion's iss and/or sub
 	// claim did not equal the client ID the caller expected to
 	// authenticate.

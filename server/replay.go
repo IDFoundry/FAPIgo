@@ -10,15 +10,24 @@ import (
 	"github.com/idfoundry/fapigo/storage"
 )
 
-// clientAssertionReplayNamespace, requestObjectReplayNamespace and
-// dpopReplayNamespace keep replayed jtis from different subsystems from
-// ever colliding on the same digest.
+// The replay namespaces keep replayed jtis from different subsystems
+// from ever colliding on the same digest.
+//
+// clientSignedJWTReplayNamespace is shared by every JWT the AS verifies
+// against a client's own keys — client assertions, request objects at
+// PAR and CIBA signed authentication requests. A client signs all three
+// with one key set, so a JWT of one kind could otherwise be presented,
+// once, as another kind under a jti its namespace hadn't seen (RFC 8725
+// §3.11-3.12): sharing the namespace spends a jti however the JWT
+// carrying it is first used. Each record lasts until the JWT's own exp
+// plus twice Limits.MaxClockSkew, the same for every kind, so it lasts
+// as long as the JWT could be accepted as any of them. A Client
+// Attestation PoP keeps its own namespace: it is signed with the Client
+// Instance's key, not the client's.
 const (
-	clientAssertionReplayNamespace                  storage.ReplayNamespace = "server:client-assertion"
-	requestObjectReplayNamespace                    storage.ReplayNamespace = "server:request-object"
-	dpopReplayNamespace                             storage.ReplayNamespace = "server:dpop"
-	backchannelAuthenticationRequestReplayNamespace storage.ReplayNamespace = "server:backchannel-authentication-request"
-	clientAttestationPoPReplayNamespace             storage.ReplayNamespace = "server:client-attestation-pop"
+	clientSignedJWTReplayNamespace      storage.ReplayNamespace = "server:client-signed-jwt"
+	dpopReplayNamespace                 storage.ReplayNamespace = "server:dpop"
+	clientAttestationPoPReplayNamespace storage.ReplayNamespace = "server:client-attestation-pop"
 )
 
 // replayChecker adapts storage.ReplayStore — which is keyed by a
@@ -58,20 +67,15 @@ func (r dpopReplayChecker) UseOnce(ctx context.Context, key jose.Thumbprint, jti
 	})
 }
 
-func (s *Server) clientAssertionReplayChecker(client fapi.ClientID) replayChecker {
-	return replayChecker{store: s.deps.Replay, namespace: clientAssertionReplayNamespace, client: client}
-}
-
-func (s *Server) requestObjectReplayChecker(client fapi.ClientID) replayChecker {
-	return replayChecker{store: s.deps.Replay, namespace: requestObjectReplayNamespace, client: client}
+// clientSignedJWTReplayChecker is the replay checker for a client
+// assertion, request object or CIBA request from client — see
+// clientSignedJWTReplayNamespace.
+func (s *Server) clientSignedJWTReplayChecker(client fapi.ClientID) replayChecker {
+	return replayChecker{store: s.deps.Replay, namespace: clientSignedJWTReplayNamespace, client: client}
 }
 
 func (s *Server) dpopReplayChecker() dpopReplayChecker {
 	return dpopReplayChecker{store: s.deps.Replay}
-}
-
-func (s *Server) backchannelAuthenticationRequestReplayChecker(client fapi.ClientID) replayChecker {
-	return replayChecker{store: s.deps.Replay, namespace: backchannelAuthenticationRequestReplayNamespace, client: client}
 }
 
 // clientAttestationPoPReplayChecker adapts storage.ReplayStore to

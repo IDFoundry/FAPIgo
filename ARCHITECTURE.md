@@ -422,7 +422,11 @@ revoked: `server.ClientCertificateCRLs{...}` checks it against
 Certificate Revocation Lists, a custom
 `server.ClientCertificateRevocation` can use OCSP or anything else,
 and `server.NoClientCertificateRevocationCheck{}` declines the same
-explicit way. A CA in `Roots` is a trust anchor and is never itself checked
+explicit way. Only an error wrapping `server.ErrCertificateRevoked` is
+`invalid_client`; any other error — a missing or stale CRL, an
+unreachable OCSP responder — is a check that couldn't decide, and
+refuses the request with `server_error` instead, so a server-side
+revocation outage isn't reported to clients as their fault. A CA in `Roots` is a trust anchor and is never itself checked
 for revocation. An issuing intermediate goes in
 `TrustedClientCAs.Intermediates` instead, so its own revocation is
 checked too. Revocation is checked when a client authenticates, so an

@@ -51,7 +51,10 @@ the attesters it's bound to.
 `X5CAttesterChain` also needs a `Revocation` for the attesters'
 signing certificates: `server.ClientCertificateCRLs{...}`, your own
 `server.ClientCertificateRevocation`, or
-`server.NoClientCertificateRevocationCheck{}` to decline. That covers a
+`server.NoClientCertificateRevocationCheck{}` to decline. A revoked
+certificate is `invalid_client` (your own checker wraps
+`server.ErrCertificateRevoked` for it); a check that couldn't decide,
+such as a stale CRL, is `server_error`. That covers a
 Wallet Provider's key, not one wallet instance: every installation
 shares the attestation's `sub`, so a Wallet Provider withdraws a single
 compromised instance through the attestation's `status` claim (a Token

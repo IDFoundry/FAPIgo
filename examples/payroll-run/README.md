@@ -179,7 +179,8 @@ The code:
   reads their revocation lists directly. A real deployment fetches
   and caches the CA's published CRL, refreshing it before its
   `nextUpdate` — `ClientCertificateCRLs` refuses a certificate whose
-  issuer has no current list.
+  issuer has no current list, with `server_error` rather than
+  `invalid_client`.
 - Revocation is checked when a client authenticates. A token already
   issued to a certificate that's revoked later keeps working at the API
   until it expires, so keep access tokens short-lived.

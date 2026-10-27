@@ -172,8 +172,10 @@ type X5CAttesterChain struct {
 	// compromised attester key before it expires. It's checked, with the
 	// verified chain (leaf first, ending at the trust anchor) and
 	// Dependencies.Clock's time, on every attestation-authenticated
-	// request once the attestation and its PoP have verified; any error
-	// rejects the client with invalid_client. Tokens already issued to
+	// request once the attestation and its PoP have verified. An error
+	// wrapping ErrCertificateRevoked rejects the client with
+	// invalid_client; any other error, a check that couldn't decide,
+	// refuses the request with server_error. Tokens already issued to
 	// the client stay usable until they expire.
 	Revocation ClientCertificateRevocation
 }

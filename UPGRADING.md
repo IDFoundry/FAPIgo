@@ -32,7 +32,9 @@ implementation `TrustedClientCAs.Revocation` uses for client
 certificates — about the verified chain, leaf first and ending at the
 trust anchor, at the server's `Clock` time. It runs on every
 attestation-authenticated request, once the attestation and its PoP
-have verified; any error is `invalid_client`.
+have verified. An error wrapping `server.ErrCertificateRevoked` is
+`invalid_client`; any other error, a check that couldn't decide, is
+`server_error` — see the next section.
 
 **What fails:** `server.New` returns an error naming
 `X5CAttesterChain.Revocation`.
@@ -56,7 +58,55 @@ deps.AttesterTrust = server.X5CAttesterChain{
 
 `ClientCertificateCRLs` needs a current CRL from every CA that issues a
 certificate in the chain, the intermediates' issuers included, and
-fails closed without one.
+fails closed without one, with `server_error`.
+
+### A `ClientCertificateRevocation` reports a revoked certificate with `ErrCertificateRevoked` (server)
+
+**Affects:** a custom `server.ClientCertificateRevocation` (OCSP, a
+revocation service of your own) used as `TrustedClientCAs.Revocation`
+or `X5CAttesterChain.Revocation`. `server.ClientCertificateCRLs` and
+`server.NoClientCertificateRevocationCheck{}` need no change.
+
+**Why:** every error a revocation check returned refused the client
+with `invalid_client` (401), so a check that couldn't decide — a CRL
+gone stale because its refresh failed, an OCSP responder that didn't
+answer — told every mTLS or attested client that its credentials were
+bad. A wallet may then discard its attestation or re-register, and
+operators see a server-side outage as a wave of client faults. A
+revocation check now tells the two apart, as
+`ClientAttestationStatusChecker` does with
+`ErrClientAttestationRevoked`: an error wrapping the new
+`server.ErrCertificateRevoked` is `invalid_client` (401), with the
+description "client certificate is revoked" or "attester certificate is
+revoked"; any other error is `server_error` (500). Both still refuse the
+request: a check that can't decide fails closed. `ClientCertificateCRLs`
+wraps `ErrCertificateRevoked` only when a current CRL names a
+certificate in the chain; a CA with no current CRL, or a `Lists` that
+fails, is now `server_error` instead of `invalid_client`.
+
+**What fails:** nothing at startup. A custom checker that returns a
+plain error for a revoked certificate still refuses it, but with
+`server_error` (500) instead of `invalid_client` (401).
+
+**What to change:** wrap `server.ErrCertificateRevoked` in the error
+your checker returns for a revoked certificate, and leave other errors
+as they are:
+
+```go
+func (o ocspChecker) CheckRevocation(ctx context.Context, check server.ClientCertificateRevocationCheck) error {
+	status, err := o.status(ctx, check.Chain)
+	if err != nil {
+		return err // undecided: server_error
+	}
+	if status == ocsp.Revoked {
+		return fmt.Errorf("%w: OCSP says revoked", server.ErrCertificateRevoked)
+	}
+	return nil
+}
+```
+
+Anything alerting on `invalid_client` from certificate-authenticated
+clients to spot a stale CRL should watch for `server_error` instead.
 
 ### Attestation-based client authentication needs `Dependencies.ClientAttestationStatus` (server, *production only*)
 

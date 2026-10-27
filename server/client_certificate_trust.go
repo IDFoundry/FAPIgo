@@ -81,10 +81,22 @@ func (t TrustedClientCAs) verifyChain(ctx context.Context, cert *x509.Certificat
 		return newError(ErrorInvalidClient, 401, "client certificate does not chain to a trusted root", err)
 	}
 	check := ClientCertificateRevocationCheck{Chain: chains[0], Now: now}
-	if err := t.Revocation.CheckRevocation(ctx, check); err != nil {
-		return newError(ErrorInvalidClient, 401, "client certificate is revoked or its revocation status is unknown", err)
+	return revocationError(t.Revocation.CheckRevocation(ctx, check), "client certificate")
+}
+
+// revocationError maps a ClientCertificateRevocation's error for the
+// certificate subject names: nil for nil, invalid_client (401) for one
+// wrapping ErrCertificateRevoked, and server_error (500) for any other —
+// a check that couldn't decide.
+func revocationError(err error, subject string) *Error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, ErrCertificateRevoked):
+		return newError(ErrorInvalidClient, 401, subject+" is revoked", err)
+	default:
+		return newError(ErrorServerError, 500, "failed to check the "+subject+"'s revocation status", err)
 	}
-	return nil
 }
 
 func (t TrustedClientCAs) validate() error {
@@ -200,15 +212,27 @@ func checkProductionClientCertificateTrust(trust ClientCertificateTrust) error {
 // your own); ClientCertificateCRLs covers Certificate Revocation Lists.
 type ClientCertificateRevocation interface {
 	// CheckRevocation returns nil when no certificate in check.Chain
-	// below its trust anchor has been revoked. Any error rejects the
-	// client with invalid_client: this package fails closed, so an
-	// implementation that would rather accept a certificate whose
-	// status it can't currently determine (soft-fail) returns nil
-	// itself. It runs on every certificate-authenticated request (for
+	// below its trust anchor has been revoked, and an error wrapping
+	// ErrCertificateRevoked when one has — the request is refused with
+	// invalid_client (401). Any other error means it couldn't decide (no
+	// current CRL, an unreachable revocation source, an OCSP responder
+	// that didn't answer), and refuses the request with server_error
+	// (500): this package fails closed, without telling the client its
+	// certificate is revoked when nobody knows. An implementation that
+	// would rather accept a certificate whose status it can't currently
+	// determine (soft-fail) returns nil itself. It runs on every certificate-authenticated request (for
 	// X5CAttesterChain, every attestation-authenticated one), so cache
 	// whatever it fetches.
 	CheckRevocation(ctx context.Context, check ClientCertificateRevocationCheck) error
 }
+
+// ErrCertificateRevoked is what a ClientCertificateRevocation's error
+// wraps when a certificate in the chain has been revoked: the request is
+// refused with invalid_client (401). Any other error means the status
+// couldn't be decided (no current CRL, an unreachable revocation source,
+// an OCSP responder that didn't answer) and refuses the request with
+// server_error (500) instead of invalid_client.
+var ErrCertificateRevoked = errors.New("server: the certificate is revoked")
 
 // ClientCertificateRevocationCheck is what ClientCertificateRevocation
 // checks.

@@ -9,6 +9,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/asn1"
 	"errors"
+	"fmt"
 	"math/big"
 	"strings"
 	"testing"
@@ -175,10 +176,21 @@ func TestTLSClientAuthConsultsRevocation(t *testing.T) {
 			t.Fatalf("CheckRevocation Now = %v, want the server clock's %v", check.Now, now)
 		}
 	})
-	t.Run("revoked", func(t *testing.T) {
-		rev := &recordingRevocation{err: errors.New("revoked")}
-		wantInvalidClient(t, pushWithCertificate(t, cert, server.TrustedClientCAs{Roots: ca.pool, Revocation: rev}, now))
-	})
+	for name, tc := range map[string]struct {
+		err    error
+		code   server.ErrorCode
+		status int
+	}{
+		"revoked":        {fmt.Errorf("%w: OCSP says revoked", server.ErrCertificateRevoked), server.ErrorInvalidClient, 401},
+		"undecided":      {errors.New("OCSP responder unreachable"), server.ErrorServerError, 500},
+		"revoked, bare":  {server.ErrCertificateRevoked, server.ErrorInvalidClient, 401},
+		"undecided, CRL": {errors.New("no current CRL"), server.ErrorServerError, 500},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rev := &recordingRevocation{err: tc.err}
+			requireErrorStatus(t, pushWithCertificate(t, cert, server.TrustedClientCAs{Roots: ca.pool, Revocation: rev}, now), tc.code, tc.status)
+		})
+	}
 	t.Run("not consulted for an untrusted chain", func(t *testing.T) {
 		rev := &recordingRevocation{}
 		wantInvalidClient(t, pushWithCertificate(t, selfSignedTestClientCert(t), server.TrustedClientCAs{Roots: ca.pool, Revocation: rev}, now))
@@ -200,7 +212,23 @@ func TestTLSClientAuthWithClientCertificateCRLs(t *testing.T) {
 	if err := pushWithCertificate(t, cert, trust(ca.crl(t, now.Add(-time.Minute), now.Add(time.Hour), nil, other)), now); err != nil {
 		t.Fatalf("PushAuthorizationRequest(another certificate revoked): %v", err)
 	}
-	wantInvalidClient(t, pushWithCertificate(t, cert, trust(ca.crl(t, now.Add(-time.Minute), now.Add(time.Hour), nil, cert)), now))
+	t.Run("revoked", func(t *testing.T) {
+		requireErrorStatus(t, pushWithCertificate(t, cert, trust(ca.crl(t, now.Add(-time.Minute), now.Add(time.Hour), nil, cert)), now), server.ErrorInvalidClient, 401)
+	})
+	// A revocation status nobody can decide is the server's fault, not
+	// the client's: server_error, still refused.
+	t.Run("stale CRL", func(t *testing.T) {
+		requireErrorStatus(t, pushWithCertificate(t, cert, trust(ca.crl(t, now.Add(-2*time.Hour), now.Add(-time.Hour), nil)), now), server.ErrorServerError, 500)
+	})
+	t.Run("no CRL", func(t *testing.T) {
+		requireErrorStatus(t, pushWithCertificate(t, cert, trust(), now), server.ErrorServerError, 500)
+	})
+	t.Run("lists error", func(t *testing.T) {
+		failing := server.TrustedClientCAs{Roots: ca.pool, Revocation: server.ClientCertificateCRLs{Lists: func(context.Context) ([]*x509.RevocationList, error) {
+			return nil, errors.New("CRL cache empty")
+		}}}
+		requireErrorStatus(t, pushWithCertificate(t, cert, failing, now), server.ErrorServerError, 500)
+	})
 }
 
 func TestClientCertificateCRLs(t *testing.T) {
@@ -216,13 +244,14 @@ func TestClientCertificateCRLs(t *testing.T) {
 	deltaIndicator := []pkix.Extension{{Id: asn1.ObjectIdentifier{2, 5, 29, 27}, Critical: true, Value: []byte{0x02, 0x01, 0x01}}}
 
 	cases := []struct {
-		name    string
-		lists   []*x509.RevocationList
-		wantErr string
+		name        string
+		lists       []*x509.RevocationList
+		wantErr     string
+		wantRevoked bool
 	}{
 		{name: "not revoked", lists: []*x509.RevocationList{current(nil)}},
-		{name: "revoked", lists: []*x509.RevocationList{current(nil, cert)}, wantErr: "is revoked"},
-		{name: "revoked in one of several current lists", lists: []*x509.RevocationList{current(nil), current(nil, cert)}, wantErr: "is revoked"},
+		{name: "revoked", lists: []*x509.RevocationList{current(nil, cert)}, wantErr: "is revoked", wantRevoked: true},
+		{name: "revoked in one of several current lists", lists: []*x509.RevocationList{current(nil), current(nil, cert)}, wantErr: "is revoked", wantRevoked: true},
 		{name: "no list", wantErr: "no current CRL"},
 		{name: "stale", lists: []*x509.RevocationList{ca.crl(t, now.Add(-2*time.Hour), now.Add(-time.Hour), nil)}, wantErr: "no current CRL"},
 		{name: "not yet valid", lists: []*x509.RevocationList{ca.crl(t, now.Add(time.Minute), now.Add(time.Hour), nil)}, wantErr: "no current CRL"},
@@ -242,6 +271,9 @@ func TestClientCertificateCRLs(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("CheckRevocation = %v, want an error containing %q", err, tc.wantErr)
 			}
+			if got := errors.Is(err, server.ErrCertificateRevoked); got != tc.wantRevoked {
+				t.Fatalf("errors.Is(%v, ErrCertificateRevoked) = %v, want %v", err, got, tc.wantRevoked)
+			}
 		})
 	}
 
@@ -249,8 +281,12 @@ func TestClientCertificateCRLs(t *testing.T) {
 		crls := server.ClientCertificateCRLs{Lists: func(context.Context) ([]*x509.RevocationList, error) {
 			return nil, errors.New("CRL cache empty")
 		}}
-		if err := crls.CheckRevocation(context.Background(), server.ClientCertificateRevocationCheck{Chain: chain, Now: now}); err == nil {
+		err := crls.CheckRevocation(context.Background(), server.ClientCertificateRevocationCheck{Chain: chain, Now: now})
+		if err == nil {
 			t.Fatal("CheckRevocation = nil error, want the Lists error")
+		}
+		if errors.Is(err, server.ErrCertificateRevoked) {
+			t.Fatalf("CheckRevocation = %v, wrapping ErrCertificateRevoked for an undecided check", err)
 		}
 	})
 }
@@ -323,13 +359,13 @@ func TestTLSClientAuthChecksIntermediateRevocation(t *testing.T) {
 		t.Fatalf("PushAuthorizationRequest(nothing revoked): %v", err)
 	}
 	t.Run("intermediate revoked by the root", func(t *testing.T) {
-		wantInvalidClient(t, pushWithCertificate(t, cert, trust(window(root, intermediate.cert), window(intermediate)), now))
+		requireErrorStatus(t, pushWithCertificate(t, cert, trust(window(root, intermediate.cert), window(intermediate)), now), server.ErrorInvalidClient, 401)
 	})
 	t.Run("leaf revoked by the intermediate", func(t *testing.T) {
-		wantInvalidClient(t, pushWithCertificate(t, cert, trust(window(root), window(intermediate, cert)), now))
+		requireErrorStatus(t, pushWithCertificate(t, cert, trust(window(root), window(intermediate, cert)), now), server.ErrorInvalidClient, 401)
 	})
 	t.Run("no CRL from the root", func(t *testing.T) {
-		wantInvalidClient(t, pushWithCertificate(t, cert, trust(window(intermediate)), now))
+		requireErrorStatus(t, pushWithCertificate(t, cert, trust(window(intermediate)), now), server.ErrorServerError, 500)
 	})
 	t.Run("intermediate not configured", func(t *testing.T) {
 		noIntermediates := server.TrustedClientCAs{Roots: root.pool, Revocation: staticCRLs(window(root), window(intermediate))}

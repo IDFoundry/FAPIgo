@@ -819,3 +819,24 @@ func TestRegisteredClientConfigFromMetadataRejectsEmptyEncryptionAlgorithms(t *t
 		t.Errorf("registeredClientConfigFromMetadata(null) = %v, %v; want no encryption", cfg.IDTokenEncryptionKeyManagement, err)
 	}
 }
+
+// TestEntitySectorComparesHostsInASCIIOnly: a pairwise Relying Party's
+// redirect URIs must be on its Entity Identifier's host in ASCII case
+// alone. A non-ASCII host that Unicode case folding matches to it
+// (the Kelvin sign to "k", "İ" to "i") is dialed through IDNA as
+// another DNS name, so it is refused.
+func TestEntitySectorComparesHostsInASCIIOnly(t *testing.T) {
+	for _, c := range []struct{ id, redirect string }{
+		{"https://key.example", "https://\u212Aey.example/cb"},   // Kelvin sign
+		{"https://ikey.example", "https://\u0130key.example/cb"}, // dotted capital I
+		{"https://key.example", "https://\uFF2Bey.example/cb"},   // fullwidth K
+	} {
+		if got, err := entitySector(fapi.ClientID(c.id), []string{c.redirect}); err == nil {
+			t.Errorf("entitySector(%q, %q) = %q, want an error", c.id, c.redirect, got)
+		}
+	}
+	got, err := entitySector("https://Key.EXAMPLE/rp", []string{"https://KEY.example/cb", "https://key.Example/other"})
+	if err != nil || got != "key.example" {
+		t.Fatalf("entitySector(mixed-case ASCII) = %q, %v, want key.example", got, err)
+	}
+}

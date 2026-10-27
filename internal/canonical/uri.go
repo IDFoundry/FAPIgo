@@ -8,7 +8,8 @@ import (
 
 // URI canonicalizes u for use as a DPoP "htu" claim (RFC 9449 §4.2) or
 // any other context that needs to compare URLs by origin-plus-path:
-// scheme and host are lowercased, a default port for the scheme is
+// scheme and host have their ASCII letters lowercased (and nothing
+// else: see LowerASCII), a default port for the scheme is
 // dropped, and any userinfo, query and fragment are stripped. The path
 // gets RFC 3986's syntax-based and scheme-based normalization (§6.2.2,
 // §6.2.3), which RFC 9449 §4.3 has a server apply before comparing htu:
@@ -18,7 +19,7 @@ import (
 // URIs that differ only in them name the same one.
 func URI(u *url.URL) string {
 	out := *u
-	out.Scheme = strings.ToLower(out.Scheme)
+	out.Scheme = LowerASCII(out.Scheme)
 	out.Host = canonicalHost(out.Host, out.Scheme)
 	out.User = nil
 	out.RawQuery = ""
@@ -114,7 +115,7 @@ func canonicalHost(host, scheme string) string {
 		h = host
 		port = ""
 	}
-	h = strings.ToLower(h)
+	h = LowerASCII(h)
 	if port == "" || isDefaultPort(scheme, port) {
 		// Without re-adding what a successful split stripped, a bare
 		// return of h here would hand back an address containing

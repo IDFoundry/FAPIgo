@@ -8,11 +8,12 @@ import (
 )
 
 // effective returns what a URL actually addresses for DPoP htu purposes
-// (RFC 9449 §4.3): scheme, host (lowercased, unbracketed), effective
-// port and escaped path. Query, fragment and userinfo don't count.
+// (RFC 9449 §4.3): scheme, host (ASCII-lowercased, unbracketed),
+// effective port and escaped path. Query, fragment and userinfo don't
+// count.
 func effective(u *url.URL) (scheme, host, port, path string) {
-	scheme = strings.ToLower(u.Scheme)
-	host = strings.ToLower(u.Hostname())
+	scheme = referenceLower(u.Scheme)
+	host = referenceLower(u.Hostname())
 	port = u.Port()
 	if port == "" {
 		switch scheme {
@@ -23,6 +24,22 @@ func effective(u *url.URL) (scheme, host, port, path string) {
 		}
 	}
 	return scheme, host, port, referencePath(u.EscapedPath())
+}
+
+// referenceLower lowercases s's ASCII letters only, byte by byte, as
+// host names and schemes are compared (RFC 3986 §3.1, §3.2.2). It is
+// deliberately not strings.ToLower, whose Unicode case mapping folds
+// "İ" (U+0130) to "i" and the Kelvin sign (U+212A) to "k": a non-ASCII
+// host is dialed through IDNA as another DNS name altogether, so an
+// oracle sharing that fold could never catch URI equating the two.
+func referenceLower(s string) string {
+	b := []byte(s)
+	for i, c := range b {
+		if c >= 'A' && c <= 'Z' {
+			b[i] = c | 0x20
+		}
+	}
+	return string(b)
 }
 
 // referencePath is an independent reading of which path an escaped path
@@ -74,6 +91,11 @@ func FuzzURIEquivalence(f *testing.F) {
 		{"https://[::1]/t", "https://[0:0::1]/t"},
 		{"https://a.example/t", "https://user@a.example/t?q#f"},
 		{"https://a.example/%2E%2E/t", "https://a.example/../t"},
+		{"https://\u0130bank.example/t", "https://ibank.example/t"},
+		{"https://\u212Aey.example/t", "https://key.example/t"},
+		{"https://ba\u017Fe.example/t", "https://base.example/t"},
+		{"https://\uFF22ank.example/t", "https://\uFF42ank.example/t"},
+		{"https://%C4%B0bank.example/t", "https://ibank.example/t"},
 	} {
 		f.Add(p[0], p[1])
 	}

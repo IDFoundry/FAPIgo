@@ -82,6 +82,9 @@ func TestProtectedResourceDoRefusesURL(t *testing.T) {
 		"http to a non-loopback host": "http://resource.example.com/accounts",
 		"embedded credentials":        "https://user:pass@resource.example.com/accounts",
 		"other scheme":                "ftp://resource.example.com/accounts",
+		// Dialed as xn--ibank-7fd.example, which no lowercasing of the
+		// host would name.
+		"non-ASCII host": "https://\u0130bank.example/accounts",
 	} {
 		t.Run(name, func(t *testing.T) {
 			req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, raw, nil)

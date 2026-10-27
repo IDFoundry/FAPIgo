@@ -180,8 +180,16 @@ func verifyProofClaims(c claims, req VerifyRequest, iat time.Time) error {
 	// string — a proof's own htu claim may legitimately differ from
 	// req.URL in case or in carrying a query/fragment the sender didn't
 	// bother to strip.
+	//
+	// A host that isn't ASCII, in either the htu or the request's own
+	// URL, never matches: hosts compare case-insensitively in ASCII only
+	// (canonical.LowerASCII), and a non-ASCII one names, through IDNA,
+	// a different DNS name than any spelling of it this comparison
+	// could equate ("İbank.example" is "xn--ibank-7fd.example", not
+	// "ibank.example"). An internationalized host is given as its xn--
+	// A-label on both sides.
 	htu, err := url.Parse(c.HTU)
-	if err != nil {
+	if err != nil || !canonical.IsASCII(htu.Host) || !canonical.IsASCII(req.URL.Host) {
 		return ErrURIMismatch
 	}
 	if canonical.URI(htu) != canonical.URI(req.URL) {

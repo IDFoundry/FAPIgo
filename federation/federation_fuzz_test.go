@@ -128,7 +128,7 @@ func checkOperatorGrants(t *testing.T, cfg AutomaticRegistrationConfig, got stor
 
 // FuzzDomainNameConstraintMatches checks naming-constraint matching
 // (OpenID Federation 1.0 §6.2.2, RFC 5280 §4.2.1.10 syntax) against a
-// plain reference for ASCII names, and for any input that a "."
+// plain reference that folds ASCII case alone, and for any input that a "."
 // constraint never matches the bare domain, and that exclusion always
 // wins over permission.
 func FuzzDomainNameConstraintMatches(f *testing.F) {
@@ -138,14 +138,15 @@ func FuzzDomainNameConstraintMatches(f *testing.F) {
 	f.Add(".com", "a.b.com")
 	f.Add(".", "a.")
 	f.Add("", "")
+	f.Add("key.example", "\u212Aey.example")
+	f.Add(".bank.example", "x.\u0130bank.example")
+	f.Add(".ba\u017Fe.example", "x.base.example")
 
 	f.Fuzz(func(t *testing.T, constraint, host string) {
 		got := domainNameConstraintMatches(constraint, host)
 
-		if isASCII(constraint) && isASCII(host) {
-			if want := referenceDomainMatch(constraint, host); got != want {
-				t.Fatalf("domainNameConstraintMatches(%q, %q) = %v, want %v", constraint, host, got, want)
-			}
+		if want := referenceDomainMatch(constraint, host); got != want {
+			t.Fatalf("domainNameConstraintMatches(%q, %q) = %v, want %v", constraint, host, got, want)
 		}
 		if strings.HasPrefix(constraint, ".") && domainNameConstraintMatches(constraint, constraint[1:]) {
 			t.Fatalf("subtree constraint %q matches its bare domain", constraint)
@@ -179,21 +180,27 @@ func checkNamingConstraintAgrees(t *testing.T, constraint, host string, got bool
 // referenceDomainMatch is domainNameConstraintMatches' plain reference
 // for ASCII names: a "." constraint matches strict subdomains, any other
 // the name itself, case-insensitively.
+// referenceDomainMatch lowercases ASCII letters alone, byte by byte,
+// as domain names compare (RFC 4343) — not strings.ToLower, whose
+// Unicode case mapping folds the Kelvin sign (U+212A) to "k" and "İ"
+// (U+0130) to "i", though IDNA makes a host with either another DNS
+// name than its ASCII look-alike.
 func referenceDomainMatch(constraint, host string) bool {
-	c, h := strings.ToLower(constraint), strings.ToLower(host)
+	c, h := referenceLowerASCII(constraint), referenceLowerASCII(host)
 	if strings.HasPrefix(c, ".") {
 		return len(h) > len(c) && strings.HasSuffix(h, c)
 	}
 	return c == h
 }
 
-func isASCII(s string) bool {
-	for i := range len(s) {
-		if s[i] >= 0x80 {
-			return false
+func referenceLowerASCII(s string) string {
+	b := []byte(s)
+	for i, c := range b {
+		if c >= 'A' && c <= 'Z' {
+			b[i] = c | 0x20
 		}
 	}
-	return true
+	return string(b)
 }
 
 // FuzzApplySuperiorMetadata exercises applying a superior's metadata to

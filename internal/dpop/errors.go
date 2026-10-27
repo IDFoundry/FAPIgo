@@ -23,6 +23,14 @@ var (
 	// another path than the one the request is sent to.
 	ErrURLNotNormal = errors.New("dpop: url path has dot segments or percent-encoded unreserved characters")
 
+	// ErrURLHostNotASCII indicates CreateProof was asked for a proof for
+	// a URL whose host isn't ASCII. net/http dials such a host through
+	// IDNA as its A-label ("İbank.example" is "xn--ibank-7fd.example"),
+	// which no htu written from the host as given would name: an
+	// internationalized domain name must be given in its xn-- A-label
+	// form.
+	ErrURLHostNotASCII = errors.New("dpop: url host is not ASCII (give an internationalized domain name in its xn-- A-label form)")
+
 	// ErrIssuedInFuture indicates the proof's "iat" claim is further in
 	// the future than the configured clock-skew tolerance allows.
 	ErrIssuedInFuture = errors.New("dpop: iat is in the future")

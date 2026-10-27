@@ -254,3 +254,19 @@ func TestFetchLoopbackRules(t *testing.T) {
 		})
 	}
 }
+
+// TestRequestOriginFoldsASCIIOnly: a redirect keeps its origin only if
+// the host matches in ASCII case alone. "İbank.example" lowercases to
+// "ibank.example" under Unicode case mapping, but is dialed as
+// xn--ibank-7fd.example.
+func TestRequestOriginFoldsASCIIOnly(t *testing.T) {
+	origin := requestOrigin(&url.URL{Scheme: "https", Host: "ibank.example"})
+	if got := requestOrigin(&url.URL{Scheme: "HTTPS", Host: "IBank.Example"}); got != origin {
+		t.Errorf("requestOrigin(mixed-case ASCII) = %q, want %q", got, origin)
+	}
+	for _, host := range []string{"\u0130bank.example", "\u0130BANK.example"} {
+		if got := requestOrigin(&url.URL{Scheme: "https", Host: host}); got == origin {
+			t.Errorf("requestOrigin(%q) = %q, the same origin as ibank.example", host, got)
+		}
+	}
+}

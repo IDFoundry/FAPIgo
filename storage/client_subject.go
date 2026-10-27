@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	fapi "github.com/idfoundry/fapigo"
+	"github.com/idfoundry/fapigo/internal/canonical"
 )
 
 // maxSectorLength bounds RegisteredClientConfig.Sector.
@@ -45,7 +46,7 @@ func clientSector(cfg RegisteredClientConfig) (string, error) {
 		if err := checkSector(sector); err != nil {
 			return "", fmt.Errorf("storage: client %q: %w", cfg.ID, err)
 		}
-		sector = strings.ToLower(sector)
+		sector = canonical.LowerASCII(sector)
 	} else {
 		sector = derivedSector(cfg)
 	}
@@ -115,7 +116,13 @@ func derivedSector(cfg RegisteredClientConfig) string {
 		if err != nil || u.Scheme != "https" || u.Hostname() == "" {
 			return ""
 		}
-		h := strings.ToLower(u.Hostname())
+		h := canonical.LowerASCII(u.Hostname())
+		if !canonical.IsASCII(h) {
+			// A non-ASCII host is dialed through IDNA as its xn--
+			// A-label, a name this one isn't; and no Sector a
+			// client could set (checkSector) would match it.
+			return ""
+		}
 		if host != "" && h != host {
 			return ""
 		}

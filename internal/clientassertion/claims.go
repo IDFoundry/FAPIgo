@@ -68,13 +68,13 @@ func parseClaims(payload []byte) (claims, error) {
 	return c, nil
 }
 
-// refuseRequestClaims returns ErrRequestClaim when payload, a JSON
-// object, carries any of requestClaims.
+// refuseRequestClaims returns ErrRequestClaim when payload carries any
+// of requestClaims. parseClaims has already decoded payload as a JSON
+// object (or null, which has no members and fails its own checks), so
+// decoding it again as one can't fail.
 func refuseRequestClaims(payload []byte) error {
 	var members map[string]json.RawMessage
-	if err := json.Unmarshal(payload, &members); err != nil {
-		return fmt.Errorf("%w: %v", ErrMalformedClaims, err)
-	}
+	_ = json.Unmarshal(payload, &members)
 	for _, name := range requestClaims {
 		if _, ok := members[name]; ok {
 			return fmt.Errorf("%w: %q", ErrRequestClaim, name)

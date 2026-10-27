@@ -111,15 +111,12 @@ func (pt parameterType) check(raw json.RawMessage) error {
 // false for a type no core parameter takes (an array, a boolean, null).
 func jsonKindOf(raw json.RawMessage) (jsonKinds, bool) {
 	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 {
-		return 0, false
-	}
-	switch c := trimmed[0]; {
-	case c == '"':
+	switch {
+	case bytes.HasPrefix(trimmed, []byte(`"`)):
 		return jsonStringKind, true
-	case c == '{':
+	case bytes.HasPrefix(trimmed, []byte(`{`)):
 		return jsonObjectKind, true
-	case c == '-' || ('0' <= c && c <= '9'):
+	case len(trimmed) > 0 && bytes.IndexByte([]byte("-0123456789"), trimmed[0]) >= 0:
 		return jsonNumberKind, true
 	}
 	return 0, false
@@ -127,12 +124,11 @@ func jsonKindOf(raw json.RawMessage) (jsonKinds, bool) {
 
 func (k jsonKinds) String() string {
 	switch k {
-	case jsonStringKind:
-		return "a string"
 	case jsonStringKind | jsonNumberKind:
 		return "a number or a string"
 	case jsonStringKind | jsonObjectKind:
 		return "a JSON object or a string"
+	default:
+		return "a string"
 	}
-	return "of another type"
 }

@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -119,4 +120,57 @@ func parameterOf(name string) string {
 func jsonRawString(s string) json.RawMessage {
 	b, _ := json.Marshal(s) // marshaling a string cannot fail
 	return b
+}
+
+// TestCompleteAuthorizationRefusesMalformedStoredParameters: a stored
+// request whose state, nonce or dpop_jkt isn't a string — one pushed
+// before PAR checked their types — fails closed at completion rather
+// than being read as absent.
+func TestCompleteAuthorizationRefusesMalformedStoredParameters(t *testing.T) {
+	for _, name := range []string{"state", "nonce", "dpop_jkt"} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, server.ProfileFAPISecurity, true)
+			ctx := context.Background()
+			push, err := h.server.PushAuthorizationRequest(ctx, server.PushAuthorizationRequest{
+				HTTP: server.FormRequest{Parameters: plainFormParameters(t, h.clientAssertion(t), nil)},
+			})
+			if err != nil {
+				t.Fatalf("PAR: %v", err)
+			}
+			setStoredParameter(t, h, name, json.RawMessage(`12345`))
+			action, err := h.server.BeginAuthorization(ctx, server.BeginAuthorizationRequest{RequestURI: push.RequestURI.String(), ClientID: testClientID})
+			if err != nil {
+				t.Fatalf("BeginAuthorization: %v", err)
+			}
+			result, err := h.server.CompleteAuthorization(ctx, server.CompleteAuthorizationRequest{
+				Handle: action.(server.InteractionRequired).Handle, Result: authorizedAt(t, h.now),
+			})
+			if err != nil {
+				t.Fatalf("CompleteAuthorization: %v", err)
+			}
+			local, ok := result.(server.AuthorizationLocalError)
+			if !ok || local.Error.Code() != server.ErrorServerError {
+				t.Fatalf("CompleteAuthorization = %T, want a server_error AuthorizationLocalError", result)
+			}
+		})
+	}
+}
+
+// setStoredParameter rewrites h's one stored pushed request so its
+// parameter name holds value.
+func setStoredParameter(t *testing.T, h harness, name string, value json.RawMessage) {
+	t.Helper()
+	h.transactions.mu.Lock()
+	defer h.transactions.mu.Unlock()
+	for ref, record := range h.transactions.byReference {
+		var request map[string]json.RawMessage
+		if err := json.Unmarshal(record.Request, &request); err != nil {
+			t.Fatalf("decode stored request: %v", err)
+		}
+		params := storedParameters(t, record)
+		params[name] = value
+		request["parameters"] = jsonRaw(t, params)
+		record.Request = jsonRaw(t, request)
+		h.transactions.byReference[ref] = record
+	}
 }

@@ -16,7 +16,40 @@ import (
 // legitimate key would ever need to. 8192 bits is already twice the
 // largest modulus any mainstream CA or HSM issues for TLS/JOSE use
 // today, so no real deployment should ever hit this ceiling.
+//
+// It is the ceiling for a key the operator chose to trust: its own
+// signing keys, and the keys ParseTrustedJWKSet returns for an
+// authorization server it configured. A key a caller supplies is held
+// to the lower maxCallerRSAModulusBits instead.
 const maxRSAModulusBits = 8192
+
+// maxCallerRSAModulusBits caps an RSA key a caller supplies, which this
+// module then spends an RSA operation on before (or without) knowing
+// who the caller is: a DPoP proof's "jwk" header, an attestation's
+// cnf.jwk, a client's JWK Set (a registered client's, or one published
+// through federation automatic registration), and a federation entity's
+// keys. An 8192-bit key costs about five times a 4096-bit one per
+// verification, so letting any caller pick the larger size lets it make
+// this server do that work for every request it sends. 4096 bits is the
+// largest size mainstream key generators, HSMs and KMSs issue for
+// JOSE use, so no legitimate caller key needs more.
+const maxCallerRSAModulusBits = 4096
+
+// rsaPublicExponent is the only RSA public exponent a parsed JWK may
+// carry — see decodeExponent.
+const rsaPublicExponent = 65537
+
+// checkRSAModulusCeiling refuses pub when it is an RSA key whose modulus
+// is longer than maxBits, and accepts any other key unchanged: the
+// algorithm-specific checks (validateKeyForAlgorithm and its
+// key-management counterpart) still apply after it.
+func checkRSAModulusCeiling(pub crypto.PublicKey, maxBits int) error {
+	key, ok := pub.(*rsa.PublicKey)
+	if !ok || key.N.BitLen() <= maxBits {
+		return nil
+	}
+	return fmt.Errorf("%w: %d bits, at most %d accepted", ErrRSAKeyTooLarge, key.N.BitLen(), maxBits)
+}
 
 func pssOptions() *rsa.PSSOptions {
 	return &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthEqualsHash, Hash: crypto.SHA256}

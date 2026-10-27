@@ -15,6 +15,59 @@ Most production-assurance changes only affect `Config.Assurance =
 AssuranceProduction`. A development-assurance setup built on `memstore`
 and `keys/ephemeral` needs only the steps not marked *production only*.
 
+## v0.63.0
+
+### RSA keys a caller supplies are limited to 4096 bits, and every parsed RSA JWK to exponent 65537
+
+**Affects:** a client, wallet, attester or federation entity presenting
+an RSA key with a modulus over 4096 bits, or any RSA JWK with a public
+exponent other than 65537 (`"e":"AQAB"`). Keys with a 2048-, 3072- or
+4096-bit modulus and exponent 65537 — what every mainstream key
+generator, HSM and KMS produces — need no change.
+
+**Why:** a DPoP proof carries its own key, and the proof is checked
+before the access token (resource server) or alongside client
+authentication (authorization server), so anyone could send a proof
+with an 8192-bit RSA key and exponent 2^31−1 and make the server spend
+about 30 times the CPU of an ordinary proof on a signature that was
+never going to verify. The same choice of key was open to anyone
+publishing a client JWK Set, an attestation `cnf.jwk` or a federation
+entity's keys. FAPI 2.0 Security Profile §5.4.1 and RFC 7518 set only a
+2048-bit minimum. The library now:
+
+- accepts only exponent 65537 in any RSA JWK it parses. Large
+  exponents multiply the cost of every verification, and small ones
+  are the classic source of forgery bugs in lax verifiers.
+- limits RSA keys a caller supplies to a 4096-bit modulus: a DPoP
+  proof's `jwk` (authorization server and resource server), an
+  attestation PoP's `cnf.jwk`, a client's JWK Set (a
+  `keys/ephemeral` client key source and federation automatic
+  registration, signing and encryption keys alike), and every
+  federation entity's keys, a Trust Anchor's configured `JWKS`
+  included.
+- keeps 8192 bits for keys the operator chose: its own signing and
+  encryption keys, and an authorization server's issuer keys fetched by
+  `keys.JWKSIssuerKeySource` (`client.DiscoveredMetadata.IssuerKeySource`).
+
+Both checks run while the key is parsed, before any RSA operation uses
+it. A key returned by your own `keys.ClientKeySource` implementation is
+used as you return it, so your registration process sets its limits.
+
+**What fails:** nothing at startup. A DPoP proof or attestation PoP
+with such a key is refused (`invalid_dpop_proof` or `invalid_client`).
+A JWK Set entry with such a key is skipped as unusable, so a client
+whose only key is one of them fails authentication with
+`invalid_client`, and a federation entity whose only key is one of them
+fails trust-chain resolution.
+
+**What to change:** re-key any such client, attester or federation
+entity with a 2048-, 3072- or 4096-bit RSA key and exponent 65537, or
+with an EC P-256 or Ed25519 key:
+
+```sh
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out client.pem
+```
+
 ## v0.62.0
 
 ### `X5CAttesterChain.Revocation` is required (server)

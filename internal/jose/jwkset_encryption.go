@@ -30,7 +30,9 @@ type ParsedEncryptionJWK struct {
 // keys ECDHESA256KW. An entry with "use":"sig", a signature "alg", no
 // "alg" and no "use", or key material that doesn't fit its algorithm is
 // skipped, as ParseJWKSet skips entries it can't use: one unusable entry
-// doesn't invalidate the rest of the set.
+// doesn't invalidate the rest of the set. As with ParseJWKSet, the keys
+// are treated as caller-supplied (a client's own), so an RSA entry over
+// 4096 bits is skipped too.
 func ParseEncryptionJWKSet(body []byte) ([]ParsedEncryptionJWK, error) {
 	dec := json.NewDecoder(bytes.NewReader(body))
 	var set rawJWKSet
@@ -81,7 +83,8 @@ func parseEncryptionEntry(data []byte) (ParsedEncryptionJWK, bool) {
 	default:
 		return ParsedEncryptionJWK{}, false
 	}
-	if err != nil || validateKeyForKeyManagementAlgorithm(pub, alg) != nil {
+	if err != nil || checkRSAModulusCeiling(pub, maxCallerRSAModulusBits) != nil ||
+		validateKeyForKeyManagementAlgorithm(pub, alg) != nil {
 		return ParsedEncryptionJWK{}, false
 	}
 	return ParsedEncryptionJWK{KeyID: raw.Kid, Algorithm: alg, PublicKey: pub}, true

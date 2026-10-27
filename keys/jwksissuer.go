@@ -340,12 +340,15 @@ func (s *JWKSIssuerKeySource) doFetch(ctx context.Context) ([]IssuerKey, error) 
 }
 
 // parseJWKSDocument parses a JWK Set (RFC 7517 §5) via the shared
-// internal/jose.ParseJWKSet (an authorization server may publish keys
-// for algorithms other clients use; that helper already skips any entry
-// this module doesn't support or that doesn't parse) and maps the
-// result into this package's own IssuerKey type.
+// internal/jose.ParseTrustedJWKSet (an authorization server may publish
+// keys for algorithms other clients use; that helper already skips any
+// entry this module doesn't support or that doesn't parse) and maps the
+// result into this package's own IssuerKey type. The trusted variant is
+// used because the operator chose this authorization server, so its RSA
+// keys may be up to 8192 bits rather than the 4096 a caller-supplied
+// key is held to.
 func parseJWKSDocument(body []byte) ([]IssuerKey, error) {
-	parsed, err := jose.ParseJWKSet(body)
+	parsed, err := jose.ParseTrustedJWKSet(body)
 	if err != nil {
 		return nil, err
 	}

@@ -32,7 +32,12 @@ type TrustAnchor struct {
 	EntityID string
 
 	// JWKS is EntityID's own federation signing keys, as a JWK Set (RFC
-	// 7517 §5) JSON object.
+	// 7517 §5) JSON object. Like every federation entity's keys, an RSA
+	// entry is used only with exponent 65537 and a modulus of at most
+	// 4096 bits: the Trust Anchor's own Entity Configuration, fetched
+	// during resolution, is held to the same limit, and resolution can
+	// be started by an unauthenticated request (automatic registration),
+	// so a larger key here is skipped rather than relied on.
 	JWKS json.RawMessage
 }
 

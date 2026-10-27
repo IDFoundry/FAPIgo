@@ -88,9 +88,12 @@ type AttestedClient struct {
 // (401), as at a token endpoint — that includes a PoP whose use couldn't
 // be recorded, so an unavailable replay store fails closed — except for
 // an attestation that has expired, which is ErrorUseFreshAttestation
-// (400), and a request from TokenEndpointRequest.AttestedClientAuthentication
+// (400), a request from TokenEndpointRequest.AttestedClientAuthentication
 // whose parameters TokenEndpointRequest.Parameters refuses, which is
-// ErrorInvalidRequest (400). Every call records an AuditEventAuthenticateAttestedClient.
+// ErrorInvalidRequest (400), and a Dependencies.ClientAttestationStatus
+// (or client store) that couldn't decide, which is ErrorServerError
+// (500); an attestation that checker reports revoked is
+// ErrorInvalidClient. Every call records an AuditEventAuthenticateAttestedClient.
 func (s *Server) AuthenticateAttestedClient(ctx context.Context, req AttestedClientAuthenticationRequest) (AttestedClient, error) {
 	attestation, pop, err := resolveAttestationHeaders(req.ClientAttestations, req.ClientAttestationPoPs)
 	if req.malformed {

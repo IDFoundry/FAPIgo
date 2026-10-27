@@ -200,11 +200,11 @@ func TestAttestationWithoutIssCannotImpersonateAnotherAttester(t *testing.T) {
 		wantOK bool
 	}{
 		"issuer in certificate: the client's attester": {
-			server.X5CAttesterChain{TrustAnchors: server.StaticAttesterTrustAnchors{Roots: poolOf(sharedRoot)}, IssuerBinding: server.AttesterIssuerInCertificate},
+			server.X5CAttesterChain{Revocation: server.NoClientCertificateRevocationCheck{}, TrustAnchors: server.StaticAttesterTrustAnchors{Roots: poolOf(sharedRoot)}, IssuerBinding: server.AttesterIssuerInCertificate},
 			newTestCert(t, "client's attester", certOptions{parent: &sharedRoot, uris: []string{testAttesterIssuer}}), true,
 		},
 		"issuer in certificate: another attester under the same anchor": {
-			server.X5CAttesterChain{TrustAnchors: server.StaticAttesterTrustAnchors{Roots: poolOf(sharedRoot)}, IssuerBinding: server.AttesterIssuerInCertificate},
+			server.X5CAttesterChain{Revocation: server.NoClientCertificateRevocationCheck{}, TrustAnchors: server.StaticAttesterTrustAnchors{Roots: poolOf(sharedRoot)}, IssuerBinding: server.AttesterIssuerInCertificate},
 			newTestCert(t, "attester B", certOptions{parent: &sharedRoot, uris: []string{"https://attester-b.example.com"}}), false,
 		},
 		"bound to anchor: another attester's CA naming the client's attester": {

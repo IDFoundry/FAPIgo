@@ -613,7 +613,7 @@ func validateConditionalDependencies(cfg Config, deps Dependencies) error {
 		return fmt.Errorf("server: dependencies: backchannel notifier is required when endpoints.backchannel_authentication is set")
 	}
 	if cfg.AttestationBasedClientAuthentication {
-		if err := validateAttesterTrust(deps.AttesterTrust); err != nil {
+		if err := validateAttestationDependencies(deps); err != nil {
 			return err
 		}
 	}
@@ -635,6 +635,17 @@ func validateEncryptionDependencies(cfg Config, deps Dependencies) error {
 		return fmt.Errorf("server: dependencies: client encryption keys is required when algorithms.user_info_encryption_key_management/content_encryption are configured")
 	}
 	return nil
+}
+
+// validateAttestationDependencies checks the dependencies
+// attestation-based client authentication uses: AttesterTrust, and
+// ClientAttestationStatus when it's set (AssuranceProduction's
+// requirement of it is checkProductionClientSources').
+func validateAttestationDependencies(deps Dependencies) error {
+	if err := validateAttesterTrust(deps.AttesterTrust); err != nil {
+		return err
+	}
+	return validateClientAttestationStatus(deps.ClientAttestationStatus)
 }
 
 // validateAttesterTrust checks the AttesterTrust attestation-based
@@ -693,7 +704,8 @@ func checkProductionKeyCustody(deps Dependencies, issuer AccessTokenAssurance, s
 
 // checkProductionClientSources checks the client registry, the sources
 // of clients' verification and encryption keys, when attestation is
-// enabled the attester trust's key or trust-anchor source, and that
+// enabled the attester trust's key or trust-anchor source and the
+// attestation status checker's presence, and that
 // client certificates' chains are trusted somehow
 // (checkProductionClientCertificateTrust).
 func checkProductionClientSources(deps Dependencies, scaled, attestation bool) []error {
@@ -708,6 +720,7 @@ func checkProductionClientSources(deps Dependencies, scaled, attestation bool) [
 		for _, source := range attesterTrustSources(deps.AttesterTrust) {
 			errs = append(errs, checkKeySourceAssurance(source.name, source.source))
 		}
+		errs = append(errs, checkProductionClientAttestationStatus(deps.ClientAttestationStatus))
 	}
 	if deps.FederationHTTP != nil && !deps.FederationHTTP.HardenedForProduction() {
 		errs = append(errs, fmt.Errorf("server: dependencies: federation_http must be fapihttp.New over fapihttp.NewClient's client, with that transport unchanged and no loopback exception, under AssuranceProduction"))

@@ -9,6 +9,7 @@ import (
 	fapi "github.com/idfoundry/fapigo"
 	"github.com/idfoundry/fapigo/internal/jose"
 	"github.com/idfoundry/fapigo/internal/strictb64"
+	"github.com/idfoundry/fapigo/internal/strictjson"
 	"github.com/idfoundry/fapigo/internal/timeutil"
 )
 
@@ -138,6 +139,18 @@ type VerifiedAttestation struct {
 	ClientID  string
 	ExpiresAt time.Time
 
+	// IssuedAt is the attestation's iat, or the zero time when it has
+	// none (draft-07 attestations may omit it).
+	IssuedAt time.Time
+
+	// Claims is every claim of the attestation's payload, each as its
+	// raw JSON — including the ones this package doesn't interpret, such
+	// as a status claim (draft-ietf-oauth-status-list) — for a caller
+	// deciding on what the attester asserted beyond authentication. It
+	// is decoded only once the signature has verified, and is a fresh
+	// map for every Verify.
+	Claims map[string]json.RawMessage
+
 	// ConfirmationJWK is the raw JSON of the attestation's cnf.jwk
 	// member — the Client Instance Key the accompanying PoP JWT
 	// (PoP.Verify's confirmationJWK parameter) must be verified
@@ -190,12 +203,21 @@ func (a Attestation) Verify(pub crypto.PublicKey, policy VerifyPolicy) (Verified
 	if err := checkAttestationTimes(c, policy); err != nil {
 		return VerifiedAttestation{}, err
 	}
+	var all map[string]json.RawMessage
+	if err := strictjson.Unmarshal(a.compact.Payload, &all); err != nil {
+		return VerifiedAttestation{}, fmt.Errorf("%w: %v", ErrMalformedClaims, err)
+	}
 
-	return VerifiedAttestation{
+	verified := VerifiedAttestation{
 		ClientID:        c.Subject,
 		ExpiresAt:       c.ExpiresAt.Time(),
+		Claims:          all,
 		ConfirmationJWK: []byte(c.Confirmation.JWK),
-	}, nil
+	}
+	if c.IssuedAt != 0 {
+		verified.IssuedAt = c.IssuedAt.Time()
+	}
+	return verified, nil
 }
 
 // checkAttestationTimes checks c's exp (draft-12 §4: "MUST reject any

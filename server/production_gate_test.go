@@ -167,6 +167,7 @@ func TestProductionChecksAttesterKeySource(t *testing.T) {
 			deps := validDependencies()
 			deps.Audit = &fakeAuditSink{}
 			deps.AttesterTrust = tc.trust
+			deps.ClientAttestationStatus = server.NoClientAttestationStatusCheck{}
 			_, err := server.New(cfg, deps)
 			if !tc.wantErr {
 				if err != nil {
@@ -220,22 +221,28 @@ func TestProductionChecksAttesterTrustAnchors(t *testing.T) {
 		want  string // "" accepts
 	}{
 		"static trust anchors": {server.X5CAttesterChain{
+			Revocation:   server.NoClientCertificateRevocationCheck{},
 			TrustAnchors: server.StaticAttesterTrustAnchors{Roots: poolOf(root)}, IssuerBinding: server.AttesterIssuerInCertificate,
 		}, ""},
 		"static bound anchors": {server.X5CAttesterChain{
-			Anchors: server.StaticAttesterAnchors{{Certificate: root.cert, Issuers: []string{testAttesterIssuer}}}, IssuerBinding: server.AttesterIssuerBoundToAnchor,
+			Revocation: server.NoClientCertificateRevocationCheck{},
+			Anchors:    server.StaticAttesterAnchors{{Certificate: root.cert, Issuers: []string{testAttesterIssuer}}}, IssuerBinding: server.AttesterIssuerBoundToAnchor,
 		}, ""},
 		"undeclared trust anchors": {server.X5CAttesterChain{
+			Revocation:   server.NoClientCertificateRevocationCheck{},
 			TrustAnchors: bareTrustAnchors{}, IssuerBinding: server.AttesterIssuerInCertificate,
 		}, "attester_trust trust_anchors must implement keys.KeySourceAssurance"},
 		"undeclared trust anchors, by pointer": {&server.X5CAttesterChain{
+			Revocation:   server.NoClientCertificateRevocationCheck{},
 			TrustAnchors: bareTrustAnchors{}, IssuerBinding: server.AttesterIssuerByTrustAnchors,
 		}, "attester_trust trust_anchors must implement keys.KeySourceAssurance"},
 		"undeclared bound anchors": {server.X5CAttesterChain{
-			Anchors: bareAnchorSource{}, IssuerBinding: server.AttesterIssuerBoundToAnchor,
+			Revocation: server.NoClientCertificateRevocationCheck{},
+			Anchors:    bareAnchorSource{}, IssuerBinding: server.AttesterIssuerBoundToAnchor,
 		}, "attester_trust anchors must implement keys.KeySourceAssurance"},
 		"bound anchors not hardened": {server.X5CAttesterChain{
-			Anchors: unhardenedAnchorSource{}, IssuerBinding: server.AttesterIssuerBoundToAnchor,
+			Revocation: server.NoClientCertificateRevocationCheck{},
+			Anchors:    unhardenedAnchorSource{}, IssuerBinding: server.AttesterIssuerBoundToAnchor,
 		}, "attester_trust anchors must declare LiveFetchHardened"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -245,6 +252,7 @@ func TestProductionChecksAttesterTrustAnchors(t *testing.T) {
 			deps := validDependencies()
 			deps.Audit = &fakeAuditSink{}
 			deps.AttesterTrust = tc.trust
+			deps.ClientAttestationStatus = server.NoClientAttestationStatusCheck{}
 			_, err := server.New(cfg, deps)
 			if tc.want == "" {
 				if err != nil {
@@ -261,7 +269,7 @@ func TestProductionChecksAttesterTrustAnchors(t *testing.T) {
 	t.Run("development accepts an undeclared source", func(t *testing.T) {
 		cfg := validAttestationConfig(t)
 		deps := validDependencies()
-		deps.AttesterTrust = server.X5CAttesterChain{TrustAnchors: bareTrustAnchors{}, IssuerBinding: server.AttesterIssuerInCertificate}
+		deps.AttesterTrust = server.X5CAttesterChain{Revocation: server.NoClientCertificateRevocationCheck{}, TrustAnchors: bareTrustAnchors{}, IssuerBinding: server.AttesterIssuerInCertificate}
 		if _, err := server.New(cfg, deps); err != nil {
 			t.Fatalf("New(development): %v", err)
 		}

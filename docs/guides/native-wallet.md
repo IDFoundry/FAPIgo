@@ -46,6 +46,27 @@ a trust list shared by several attesters, use its
 `AttesterIssuerBoundToAnchor` binding, so each anchor vouches only for
 the attesters it's bound to.
 
+### Checking Wallet Attestation status
+
+`X5CAttesterChain` also needs a `Revocation` for the attesters'
+signing certificates: `server.ClientCertificateCRLs{...}`, your own
+`server.ClientCertificateRevocation`, or
+`server.NoClientCertificateRevocationCheck{}` to decline. That covers a
+Wallet Provider's key, not one wallet instance: every installation
+shares the attestation's `sub`, so a Wallet Provider withdraws a single
+compromised instance through the attestation's `status` claim (a Token
+Status List). Pass a `server.ClientAttestationStatusChecker` as
+`Dependencies.ClientAttestationStatus` to act on it: it's given every
+claim of each verified attestation, along with the attester's key and
+certificate chain to check a Status List Token's signer against, and
+refuses a withdrawn attestation by returning an error wrapping
+`server.ErrClientAttestationRevoked` (`invalid_client`). Fetch lists
+through a `fapihttp.Client`, and cache them. Under
+`AssuranceProduction` the dependency is required;
+`server.NoClientAttestationStatusCheck{}` declines when your attesters
+publish no status. [GETTING_STARTED.md](../../GETTING_STARTED.md#wallet-attestation-status)
+sketches a checker.
+
 ## Client: keys from the platform, attestation, and the redirect
 
 ```go

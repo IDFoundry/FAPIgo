@@ -192,19 +192,21 @@ func checkProductionClientCertificateTrust(trust ClientCertificateTrust) error {
 	return nil
 }
 
-// ClientCertificateRevocation decides whether a client certificate that
-// TrustedClientCAs has already verified the chain of has been revoked.
-// Implement it for a revocation source this package doesn't bundle
-// (OCSP, a revocation service of your own); ClientCertificateCRLs
-// covers Certificate Revocation Lists.
+// ClientCertificateRevocation decides whether a certificate whose chain
+// this package has already verified has been revoked: a client
+// certificate, for TrustedClientCAs, or an attester's signing
+// certificate, for X5CAttesterChain. Implement it for a revocation
+// source this package doesn't bundle (OCSP, a revocation service of
+// your own); ClientCertificateCRLs covers Certificate Revocation Lists.
 type ClientCertificateRevocation interface {
 	// CheckRevocation returns nil when no certificate in check.Chain
 	// below its trust anchor has been revoked. Any error rejects the
 	// client with invalid_client: this package fails closed, so an
 	// implementation that would rather accept a certificate whose
 	// status it can't currently determine (soft-fail) returns nil
-	// itself. It runs on every certificate-authenticated request, so
-	// cache whatever it fetches.
+	// itself. It runs on every certificate-authenticated request (for
+	// X5CAttesterChain, every attestation-authenticated one), so cache
+	// whatever it fetches.
 	CheckRevocation(ctx context.Context, check ClientCertificateRevocationCheck) error
 }
 
@@ -215,7 +217,10 @@ type ClientCertificateRevocationCheck struct {
 	// of TrustedClientCAs.Intermediates, and ending at the trust anchor
 	// from TrustedClientCAs.Roots, so Chain[i+1] issued Chain[i]. When
 	// more than one chain verifies, it is the first one crypto/x509
-	// returns.
+	// returns. Under X5CAttesterChain it is the attester's signing
+	// certificate, through the attestation's other "x5c" certificates,
+	// to the trust anchor — under AttesterIssuerBoundToAnchor, the first
+	// chain ending at an anchor bound to the client's attester.
 	Chain []*x509.Certificate
 	// Now is Dependencies.Clock's current time, the time the chain was
 	// verified at.
@@ -223,8 +228,9 @@ type ClientCertificateRevocationCheck struct {
 }
 
 // NoClientCertificateRevocationCheck explicitly declines checking
-// whether a client certificate has been revoked: a certificate stays
-// accepted until it expires, even if its key is compromised. Right for
+// whether a client certificate (or, for X5CAttesterChain, an attester
+// certificate) has been revoked: a certificate stays accepted until it
+// expires, even if its key is compromised. Right for
 // a development or test deployment, or a PKI whose certificates are so
 // short-lived that expiry stands in for revocation. Exists so declining
 // is a conscious, visible line of code, the same reason

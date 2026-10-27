@@ -468,6 +468,66 @@ verify JWTs, and every verification will fail with no compile-time
 signal that they were ever mismatched. `cmd/conformance-as/wiring.go`
 shows both sides wired consistently, switched on one runtime flag.
 
+### Wallet attestation status
+
+A server with `Config.AttestationBasedClientAuthentication` (wallet
+apps, under HAIP or OpenID4VCI) also needs a
+`Dependencies.AttesterTrust` and, under `AssuranceProduction`, a
+`Dependencies.ClientAttestationStatus`. With
+`server.X5CAttesterChain`, set its `Revocation` as for
+`TrustedClientCAs`: `server.ClientCertificateCRLs{...}` with the CRLs of
+the CAs issuing attester certificates, or
+`server.NoClientCertificateRevocationCheck{}` to decline.
+
+`ClientAttestationStatus` decides whether an attestation that verified
+has since been withdrawn by its attester. Every instance of a wallet
+shares the attestation's `sub`, so a Wallet Provider revokes one
+compromised instance through the attestation's `status` claim, a
+Token Status List (draft-ietf-oauth-status-list). This package doesn't
+fetch status lists; a checker does, along these lines:
+
+```go
+type walletStatus struct {
+	lists *statusLists // yours: fetches through a *fapihttp.Client, caches by ttl/exp
+}
+
+func (w walletStatus) CheckClientAttestationStatus(ctx context.Context, a server.VerifiedClientAttestation) error {
+	raw, ok := a.Claims["status"]
+	if !ok {
+		return nil // or refuse, if your attesters always set one
+	}
+	var status struct {
+		StatusList struct {
+			Index int    `json:"idx"`
+			URI   string `json:"uri"`
+		} `json:"status_list"`
+	}
+	if err := json.Unmarshal(raw, &status); err != nil {
+		return fmt.Errorf("%w: unreadable status claim", server.ErrClientAttestationRevoked)
+	}
+	// A Status List Token for status.StatusList.URI, verified as signed by
+	// this attester: a.SignerKey, or a certificate of the same Wallet
+	// Provider as a.SignerCertificates[0] — not merely one chaining to a
+	// shared trust list.
+	list, err := w.lists.Get(ctx, status.StatusList.URI, a.SignerKey, a.SignerCertificates)
+	if err != nil {
+		return err // server_error: nobody knows, so nothing is accepted
+	}
+	if list.Status(status.StatusList.Index) != 0 { // 0x00 is VALID
+		return fmt.Errorf("%w: wallet instance withdrawn", server.ErrClientAttestationRevoked)
+	}
+	return nil
+}
+```
+
+An error wrapping `server.ErrClientAttestationRevoked` refuses the
+request with `invalid_client`; any other error with `server_error`. The
+checker runs on every attestation-authenticated request, after the PoP
+has verified, so cache the lists you fetch. When the attesters you
+trust publish no status, pass `server.NoClientAttestationStatusCheck{}`
+instead. [The native wallet guide](docs/guides/native-wallet.md) covers
+the rest of a wallet's setup, on both sides.
+
 ## 5. The one piece that's genuinely yours: the login flow
 
 Everything above is config and plumbing. This is the actual decision

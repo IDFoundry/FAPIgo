@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.62.0](https://github.com/IDFoundry/FAPIgo/compare/v0.61.0...v0.62.0) (2026-10-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* **server:** a ClientCertificateRevocation now wraps ErrCertificateRevoked for a revoked certificate; any other error answers server_error (500) instead of invalid_client (401). ClientCertificateCRLs does this already, so only custom implementations change, and a missing or stale CRL now answers server_error. See UPGRADING.md.
+* **server:** X5CAttesterChain needs a Revocation; pass NoClientCertificateRevocationCheck{} to keep the previous behavior. Under AssuranceProduction, attestation-based client authentication needs Dependencies.ClientAttestationStatus, or NoClientAttestationStatusCheck{} to decline. See UPGRADING.md.
+
+### Features
+
+* **server:** check client attestation status and attester certificate revocation ([50b85bc](https://github.com/IDFoundry/FAPIgo/commit/50b85bcf7849c42ebc1bb6a9c53c4d30d82fed42))
+
+
+### Bug Fixes
+
+* **server:** tell a revoked certificate from an undecided revocation check ([b645991](https://github.com/IDFoundry/FAPIgo/commit/b645991b07294d6e7dd1b1a26f3b91c99bbe7848))
+
 ## [0.61.0](https://github.com/IDFoundry/FAPIgo/compare/v0.60.0...v0.61.0) (2026-10-26)
 
 

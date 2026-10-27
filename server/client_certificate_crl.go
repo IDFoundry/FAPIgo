@@ -20,10 +20,14 @@ import (
 //
 // A list is used for an issuer only when its issuer name matches, its
 // signature verifies against that issuer's key, and the check's Now
-// falls between its thisUpdate and nextUpdate. A certificate is
-// rejected when a usable list names its serial number, and also when
-// its issuer has no usable list at all — a missing or stale CRL fails
-// closed rather than letting a revoked certificate through. Only
+// falls between its thisUpdate and nextUpdate. A certificate a usable
+// list names by serial number is revoked: the error wraps
+// ErrCertificateRevoked, refusing the client with invalid_client. A
+// certificate whose issuer has no usable list at all, or a Lists that
+// fails, can't be decided: that error doesn't wrap it, and refuses the
+// request with server_error (500) — a missing or stale CRL fails closed
+// rather than letting a revoked certificate through, without telling
+// the client its certificate is revoked when nobody knows. Only
 // complete, direct CRLs are used: a delta CRL, or one whose issuing
 // distribution point extension limits its scope, is never treated as
 // complete and is skipped.
@@ -58,8 +62,9 @@ func (c ClientCertificateCRLs) CheckRevocation(ctx context.Context, check Client
 	return nil
 }
 
-// checkAgainstCRLs reports an error when cert is revoked according to a
-// usable CRL from issuer, or when issuer has no usable CRL.
+// checkAgainstCRLs reports an error wrapping ErrCertificateRevoked when
+// cert is revoked according to a usable CRL from issuer, and a plain
+// error when issuer has no usable CRL.
 func checkAgainstCRLs(cert, issuer *x509.Certificate, lists []*x509.RevocationList, check ClientCertificateRevocationCheck) error {
 	usable := false
 	for _, list := range lists {
@@ -69,7 +74,7 @@ func checkAgainstCRLs(cert, issuer *x509.Certificate, lists []*x509.RevocationLi
 		usable = true
 		for _, entry := range list.RevokedCertificateEntries {
 			if entry.SerialNumber != nil && entry.SerialNumber.Cmp(cert.SerialNumber) == 0 {
-				return fmt.Errorf("client certificate CRLs: certificate %q (serial %s) is revoked", cert.Subject, cert.SerialNumber)
+				return fmt.Errorf("client certificate CRLs: certificate %q (serial %s): %w", cert.Subject, cert.SerialNumber, ErrCertificateRevoked)
 			}
 		}
 	}

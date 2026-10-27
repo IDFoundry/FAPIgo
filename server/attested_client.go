@@ -90,10 +90,11 @@ type AttestedClient struct {
 // an attestation that has expired, which is ErrorUseFreshAttestation
 // (400), a request from TokenEndpointRequest.AttestedClientAuthentication
 // whose parameters TokenEndpointRequest.Parameters refuses, which is
-// ErrorInvalidRequest (400), and a Dependencies.ClientAttestationStatus
-// (or client store) that couldn't decide, which is ErrorServerError
-// (500); an attestation that checker reports revoked is
-// ErrorInvalidClient. Every call records an AuditEventAuthenticateAttestedClient.
+// ErrorInvalidRequest (400), and a Dependencies.ClientAttestationStatus,
+// X5CAttesterChain.Revocation (or client store) that couldn't decide,
+// which is ErrorServerError (500); an attestation that checker reports
+// revoked, or an attester certificate that Revocation reports revoked
+// (wrapping ErrCertificateRevoked), is ErrorInvalidClient. Every call records an AuditEventAuthenticateAttestedClient.
 func (s *Server) AuthenticateAttestedClient(ctx context.Context, req AttestedClientAuthenticationRequest) (AttestedClient, error) {
 	attestation, pop, err := resolveAttestationHeaders(req.ClientAttestations, req.ClientAttestationPoPs)
 	if req.malformed {

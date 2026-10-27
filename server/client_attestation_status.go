@@ -152,8 +152,8 @@ func checkProductionClientAttestationStatus(checker ClientAttestationStatusCheck
 func (s *Server) checkAttestationStillValid(ctx context.Context, client storage.RegisteredClient, verified clientattestation.VerifiedAttestation, signer attesterSigner, instanceKey string) *Error {
 	if signer.revocation != nil {
 		check := ClientCertificateRevocationCheck{Chain: slices.Clone(signer.chain), Now: s.deps.Clock.Now()}
-		if err := signer.revocation.CheckRevocation(ctx, check); err != nil {
-			return newError(ErrorInvalidClient, 401, "attester certificate is revoked or its revocation status is unknown", err)
+		if err := revocationError(signer.revocation.CheckRevocation(ctx, check), "attester certificate"); err != nil {
+			return err
 		}
 	}
 	if s.deps.ClientAttestationStatus == nil {

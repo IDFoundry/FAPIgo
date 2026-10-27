@@ -387,8 +387,9 @@ func TestClientAttestationStatusReceivesX5CChain(t *testing.T) {
 
 // TestX5CAttesterChainRevocation covers X5CAttesterChain.Revocation:
 // asked with the verified chain, leaf to anchor, at the server's Clock
-// time, once the attestation and PoP have verified; any error refuses
-// the client with invalid_client.
+// time, once the attestation and PoP have verified; an error wrapping
+// ErrCertificateRevoked refuses the client with invalid_client, and any
+// other error, a check that couldn't decide, with server_error.
 func TestX5CAttesterChainRevocation(t *testing.T) {
 	serverNow := time.Now().Add(-10 * time.Minute).Truncate(time.Second)
 	root := newTestCert(t, "root", certOptions{isCA: true, keyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign})
@@ -421,28 +422,42 @@ func TestX5CAttesterChainRevocation(t *testing.T) {
 		}
 		requireChain(t, recorder.checks[0].Chain, leaf, intermediate, root)
 	})
-	t.Run("an error refuses the client", func(t *testing.T) {
-		requireErrorStatus(t, run(t, &recordingRevocation{err: errors.New("no current CRL")}), server.ErrorInvalidClient, 401)
+	t.Run("a revoked certificate refuses the client", func(t *testing.T) {
+		err := run(t, &recordingRevocation{err: fmt.Errorf("%w: OCSP says revoked", server.ErrCertificateRevoked)})
+		requireErrorStatus(t, err, server.ErrorInvalidClient, 401)
+	})
+	t.Run("an undecided check is a server error", func(t *testing.T) {
+		requireErrorStatus(t, run(t, &recordingRevocation{err: errors.New("OCSP responder unreachable")}), server.ErrorServerError, 500)
+	})
+	t.Run("CRLs, lists error", func(t *testing.T) {
+		failing := server.ClientCertificateCRLs{Lists: func(context.Context) ([]*x509.RevocationList, error) {
+			return nil, errors.New("CRL cache empty")
+		}}
+		requireErrorStatus(t, run(t, failing), server.ErrorServerError, 500)
 	})
 	thisUpdate, nextUpdate := serverNow.Add(-time.Hour), serverNow.Add(time.Hour)
+	rootCRL := testCertCRL(t, root, thisUpdate, nextUpdate)
 	for name, tc := range map[string]struct {
-		lists   []*x509.RevocationList
-		revoked bool
+		lists  []*x509.RevocationList
+		code   server.ErrorCode // "" accepts
+		status int
 	}{
-		"nothing revoked":            {[]*x509.RevocationList{testCertCRL(t, root, thisUpdate, nextUpdate), testCertCRL(t, intermediate, thisUpdate, nextUpdate, other)}, false},
-		"leaf revoked":               {[]*x509.RevocationList{testCertCRL(t, root, thisUpdate, nextUpdate), testCertCRL(t, intermediate, thisUpdate, nextUpdate, leaf)}, true},
-		"intermediate revoked":       {[]*x509.RevocationList{testCertCRL(t, root, thisUpdate, nextUpdate, intermediate), testCertCRL(t, intermediate, thisUpdate, nextUpdate)}, true},
-		"intermediate's CRL missing": {[]*x509.RevocationList{testCertCRL(t, root, thisUpdate, nextUpdate)}, true},
+		"nothing revoked":            {[]*x509.RevocationList{rootCRL, testCertCRL(t, intermediate, thisUpdate, nextUpdate, other)}, "", 0},
+		"leaf revoked":               {[]*x509.RevocationList{rootCRL, testCertCRL(t, intermediate, thisUpdate, nextUpdate, leaf)}, server.ErrorInvalidClient, 401},
+		"intermediate revoked":       {[]*x509.RevocationList{testCertCRL(t, root, thisUpdate, nextUpdate, intermediate), testCertCRL(t, intermediate, thisUpdate, nextUpdate)}, server.ErrorInvalidClient, 401},
+		"intermediate's CRL missing": {[]*x509.RevocationList{rootCRL}, server.ErrorServerError, 500},
+		"intermediate's CRL expired": {[]*x509.RevocationList{rootCRL, testCertCRL(t, intermediate, serverNow.Add(-2*time.Hour), serverNow.Add(-time.Hour))}, server.ErrorServerError, 500},
+		"no CRLs at all":             {nil, server.ErrorServerError, 500},
 	} {
 		t.Run("CRLs, "+name, func(t *testing.T) {
 			err := run(t, staticCRLs(tc.lists...))
-			if !tc.revoked {
+			if tc.code == "" {
 				if err != nil {
 					t.Fatalf("RequestClientCredentialsToken: %v", err)
 				}
 				return
 			}
-			requireErrorStatus(t, err, server.ErrorInvalidClient, 401)
+			requireErrorStatus(t, err, tc.code, tc.status)
 		})
 	}
 }
